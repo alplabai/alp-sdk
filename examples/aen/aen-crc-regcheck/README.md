@@ -94,7 +94,7 @@ west build -p always -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
     "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>"
 ```
 
-The board overlay `boards/alp_e1m_aen801_m55_he.overlay` auto-applies for
+The board overlay `boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay` auto-applies for
 the matching board target (Zephyr's per-board overlay convention) -- it
 `okay`s `crc0` and retargets `zephyr,flash = &itcm` for the RAM-run.
 

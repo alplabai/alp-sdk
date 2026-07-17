@@ -14,7 +14,7 @@
 # carves the source/destination buffers into SRAM0 (the PL330 AXI master cannot
 # reach the M55's DTCM).
 #
-# The board overlay boards/alp_e1m_aen801_m55_he.overlay auto-applies for the
+# The board overlay boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay auto-applies for the
 # fully-qualified board (alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he).  Build:
 #   ZEPHYR_BASE=<zephyr-base> west build \
 #     -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <this-dir> -- \

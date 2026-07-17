@@ -51,7 +51,7 @@ and the server NIC RX counter moved off 0 — the SOM is discoverable on the wir
 > locally-administered `02:01:56:xx:xx:xx`, so two boards never collide), and
 > this example inherits it — expect a different MAC in the dnsmasq lease each
 > boot. Per-unit provisioning pins a fixed MAC by deleting the random flag in
-> the overlay (see `boards/alp_e1m_aen801_m55_he.overlay`).
+> the overlay (see `boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay`).
 
 ### Three independent things had to be right
 

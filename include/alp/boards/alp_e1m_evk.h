@@ -285,12 +285,12 @@ typedef enum {
 /* extra entries (indices 42..N) and the macros below map a name to  */
 /* that overlay-defined index.                                        */
 /*                                                                    */
-/* The actual integer values are populated by the EVK's overlay (in  */
-/* `alplabai/alp-zephyr-modules`); for studio-codegen consumers the  */
-/* studio's pin allocator handles it.  Until that overlay lands, the */
-/* macros below resolve to `EVK_PIN_OVERLAY_BASE + offset` and a */
-/* hand-written-firmware author needs to verify the overlay declares */
-/* matching extra entries.                                            */
+/* The actual integer values are populated by the EVK's overlay,      */
+/* in-tree under `zephyr/boards/alp/<board>/` (or an example's        */
+/* `boards/<board>.overlay`); for studio-codegen consumers the studio */
+/* pin allocator handles it.  The macros below resolve to             */
+/* `EVK_PIN_OVERLAY_BASE + offset` and a hand-written-firmware author  */
+/* needs to verify the overlay declares matching extra entries.       */
 /* ================================================================== */
 
 /** Base index for EVK overlay-extended `alp,pin-array` entries.  Sits

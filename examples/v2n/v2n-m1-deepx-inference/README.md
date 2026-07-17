@@ -63,7 +63,7 @@ host-emulated path; the example reports the failure cleanly):
 git clone https://github.com/DEEPX-AI/dx_rt modules/dx_rt
 git clone https://github.com/DEEPX-AI/dx_rt_npu_linux_driver modules/dx_rt_driver
 
-west alp-build -b alp_e1m_evk_v2n_m1 examples/v2n/v2n-m1-deepx-inference
+west alp-build -b alp_e1m_v2m101_m33_sm/r9a09g056n48gbg/cm33 examples/v2n/v2n-m1-deepx-inference
 west flash
 ```
 
@@ -74,10 +74,11 @@ a `.dxnn` file from an ONNX source) before flashing.
 ## Verification
 
 HiL only -- the DEEPX NPU is not available under any
-Zephyr-side emulator.  Once `alplabai/alp-zephyr-modules`
-publishes a V2N-M1 board file (`alp_e1m_evk_v2n_m1`) and a
-test rig hosts a real V2N-M1 EVK, this example flips from
-`build_only: true` to a positive-path Twister scenario.
+Zephyr-side emulator.  The V2N-M1 board file
+(`alp_e1m_v2m101_m33_sm`, `zephyr/boards/alp/e1m_v2m101_m33_sm/`)
+ships in-tree; once a test rig hosts a real V2N-M1 EVK, this
+example flips from `build_only: true` to a positive-path Twister
+scenario.
 
 ## Reference
 

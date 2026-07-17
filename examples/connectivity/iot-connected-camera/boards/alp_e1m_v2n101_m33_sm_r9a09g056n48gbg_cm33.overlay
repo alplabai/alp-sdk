@@ -2,52 +2,49 @@
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * Overlay for running the Alp SDK peripheral ztest on the
- * E1M EVK (UG-E1M-001) populated with an E1M-AEN family SoM.
+ * IoT connected-camera -- overlay for the E1M EVK populated with an
+ * E1M-V2N101 / E1M-V2N102 SoM.  Re-aliases what the board file
+ * exposes: alp_i2c0 (SSD1306 status pane), alp_uart0 (console), and
+ * the standard POSITIONAL alp,pin-array.
  *
- * Wires the studio-resolved peripheral aliases to the EVK
- * connectors: I2C0 to the on-board sensor bus, SPI0 to the M.2
- * Key M slot, UART0 to the JTAG/SWD header's serial side, and the
- * alp,pin-array to the rotary encoder + RGB LED + IO-expander
- * control pins.
- *
- * The alp,pin-array is POSITIONAL: alp_z_gpio_resolve(pin_id)
- * indexes it by the E1M GPIO index, so entry N is E1M pad N in the
+ * The alp,pin-array is POSITIONAL: alp_z_gpio_resolve(pin_id) indexes
+ * it by the E1M GPIO index, so entry N is E1M pad N in the
  * e1m_pinout.h canonical order (IO0..IO25 = 0..25, PWM0..PWM7 =
- * 26..33, ...).  The EVK's RGB LED sits on PWM pads, so it is
- * driven through the pads' GPIO-secondary indices (ALP_E1M_GPIO_PWM*);
- * this overlay covers indices 0..29.
+ * 26..33, ...).  The EVK's RGB LED sits on PWM pads, so the status
+ * LED is driven through a pad's GPIO-secondary index (ALP_E1M_GPIO_PWM3).
+ * This overlay covers indices 0..29 -- the capture trigger is at [4]
+ * and the RGB-red status LED at [29].  The EVK is shared between the
+ * AEN and V2N families; only the silicon behind each pad changes.
  *
- * The alp_e1m_evk_aen board file itself lives in
- * alplabai/alp-zephyr-modules; this overlay only re-aliases what
- * that board exposes.
+ * The authoritative alp_e1m_v2n101_m33_sm board file ships in-tree at
+ * zephyr/boards/alp/e1m_v2n101_m33_sm/; the HW-in-loop scenario stays
+ * parked pending twister CI wiring (see testcase.yaml).
  */
 
 #include <zephyr/dt-bindings/gpio/gpio.h>
 
 / {
     aliases {
-        alp-i2c0  = &i2c0;       /* sensor bus on the EVK (ICM-42670-P, BMI323, BMP581, TCAL9538) */
-        alp-spi0  = &spi0;       /* routed to the M.2 Key M slot for off-board flash */
-        alp-uart0 = &uart0;      /* console / JTAG-side debug uart */
+        alp-i2c0  = &i2c0;       /* EVK sensor bus (SSD1306 status pane) */
+        alp-uart0 = &uart0;      /* console / JTAG-side debug UART */
     };
 
     /* Positional alp,pin-array (e1m_pinout.h canonical order).  Only
-     * the indices the EVK routes carry a meaningful net; the rest are
-     * placeholders so the positional index stays stable.  The gpio
-     * bank/pin numbers are PLACEHOLDERS (see NOTE below).  */
+     * the indices this demo routes carry a meaningful net; the rest
+     * are placeholders so the positional index stays stable.  The gpio
+     * bank/pin numbers are PLACEHOLDERS (see NOTE below). */
     alp_pins: alp-pins {
         compatible = "alp,pin-array";
         gpios = <&gpio0  0 GPIO_ACTIVE_HIGH>,                            /* [ 0] ALP_E1M_GPIO_IO0  (unrouted placeholder) */
                 <&gpio0  1 GPIO_ACTIVE_HIGH>,                            /* [ 1] ALP_E1M_GPIO_IO1  (unrouted placeholder) */
                 <&gpio0  2 GPIO_ACTIVE_HIGH>,                            /* [ 2] ALP_E1M_GPIO_IO2  (unrouted placeholder) */
                 <&gpio0  3 GPIO_ACTIVE_HIGH>,                            /* [ 3] ALP_E1M_GPIO_IO3  (unrouted placeholder) */
-                <&gpio1  0 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>,           /* [ 4] ALP_E1M_GPIO_IO4  -- EVK_PIN_ENCODER_SW */
+                <&gpio1  0 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>,           /* [ 4] ALP_E1M_GPIO_IO4  -- capture trigger (encoder switch) */
                 <&gpio0  5 GPIO_ACTIVE_HIGH>,                            /* [ 5] ALP_E1M_GPIO_IO5  (unrouted placeholder) */
                 <&gpio0  6 GPIO_ACTIVE_HIGH>,                            /* [ 6] ALP_E1M_GPIO_IO6  (unrouted placeholder) */
-                <&gpio1  1 GPIO_ACTIVE_HIGH>,                            /* [ 7] ALP_E1M_GPIO_IO7  -- EVK_PIN_PCIE_IOEXP_INT */
+                <&gpio0  7 GPIO_ACTIVE_HIGH>,                            /* [ 7] ALP_E1M_GPIO_IO7  (unrouted placeholder) */
                 <&gpio0  8 GPIO_ACTIVE_HIGH>,                            /* [ 8] ALP_E1M_GPIO_IO8  (unrouted placeholder) */
-                <&gpio1  2 GPIO_ACTIVE_HIGH>,                            /* [ 9] ALP_E1M_GPIO_IO9  -- EVK_PIN_PCIE_IOEXP_RST */
+                <&gpio0  9 GPIO_ACTIVE_HIGH>,                            /* [ 9] ALP_E1M_GPIO_IO9  (unrouted placeholder) */
                 <&gpio0 10 GPIO_ACTIVE_HIGH>,                            /* [10] ALP_E1M_GPIO_IO10 (unrouted placeholder) */
                 <&gpio0 11 GPIO_ACTIVE_HIGH>,                            /* [11] ALP_E1M_GPIO_IO11 (unrouted placeholder) */
                 <&gpio0 12 GPIO_ACTIVE_HIGH>,                            /* [12] ALP_E1M_GPIO_IO12 (unrouted placeholder) */
@@ -64,19 +61,19 @@
                 <&gpio0 23 GPIO_ACTIVE_HIGH>,                            /* [23] ALP_E1M_GPIO_IO23 (unrouted placeholder) */
                 <&gpio0 24 GPIO_ACTIVE_HIGH>,                            /* [24] ALP_E1M_GPIO_IO24 (unrouted placeholder) */
                 <&gpio0 25 GPIO_ACTIVE_HIGH>,                            /* [25] ALP_E1M_GPIO_IO25 (unrouted placeholder) */
-                <&gpio0 26 GPIO_ACTIVE_HIGH>,                            /* [26] ALP_E1M_GPIO_PWM0 -- EVK_PWM_LED_GREEN as GPIO */
-                <&gpio0 27 GPIO_ACTIVE_HIGH>,                            /* [27] ALP_E1M_GPIO_PWM1 -- EVK_PWM_LED_BLUE as GPIO */
+                <&gpio0 26 GPIO_ACTIVE_HIGH>,                            /* [26] ALP_E1M_GPIO_PWM0 -- RGB LED green pad as GPIO */
+                <&gpio0 27 GPIO_ACTIVE_HIGH>,                            /* [27] ALP_E1M_GPIO_PWM1 -- RGB LED blue pad as GPIO */
                 <&gpio0 28 GPIO_ACTIVE_HIGH>,                            /* [28] ALP_E1M_GPIO_PWM2 (unrouted placeholder) */
-                <&gpio0 29 GPIO_ACTIVE_HIGH>;                            /* [29] ALP_E1M_GPIO_PWM3 -- EVK_PWM_LED_RED as GPIO */
+                <&gpio1  1 GPIO_ACTIVE_HIGH>;                            /* [29] ALP_E1M_GPIO_PWM3 -- status LED (RGB-red pad as GPIO) */
     };
 };
 
 /*
- * NOTE — gpio bank/pin numbers in the gpios property above are
- * PLACEHOLDERS.  The authoritative mapping lands when
- * alplabai/alp-zephyr-modules publishes the alp_e1m_evk_aen board
- * file with a pinctrl group naming the exact gpio bank/index for each
- * EVK net (RGB LED on the PWM pads, encoder switch, IO_EXP.INT/RST).
- * The POSITIONAL INDEX (the [NN] in each comment) is the stable ABI;
- * only the <&gpioX Y> columns are TBD.
+ * NOTE -- gpio bank/pin numbers in the gpios property above are
+ * PLACEHOLDERS.  The authoritative mapping lands when the
+ * alp_e1m_v2n101_m33_sm board file (zephyr/boards/alp/e1m_v2n101_m33_sm/)
+ * grows a pinctrl group naming the exact gpio bank/index for each
+ * EVK net (RGB LED on the PWM pads, encoder switch).  The POSITIONAL
+ * INDEX (the [NN] in each comment) is the stable ABI; only the
+ * <&gpioX Y> columns are TBD.
  */

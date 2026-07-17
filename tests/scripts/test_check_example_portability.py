@@ -261,6 +261,143 @@ def test_chip_include_declared_in_board_yaml_is_not_flagged(
     assert errors == []
 
 
+def test_load_board_qualified_names_finds_aen801_qualified_sibling() -> None:
+    qualified = portability.load_board_qualified_names()
+    assert qualified["alp_e1m_aen801_m55_he"] == {
+        "alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he",
+    }
+    assert qualified["alp_e1m_v2n101_m33_sm"] == {
+        "alp_e1m_v2n101_m33_sm_r9a09g056n48gbg_cm33",
+    }
+
+
+def test_overlay_bare_name_with_qualified_sibling_is_hard_error(
+    tmp_path: Path,
+) -> None:
+    """ANY example's overlay naming the bare board id, when a
+    fully-qualified sibling exists, silently drops on `west build -b
+    <bare>/<soc>/<core>` -- flag it, board.yaml or not."""
+    example = tmp_path / "examples" / "example"
+    (example / "boards").mkdir(parents=True)
+    (example / "boards" / "alp_e1m_aen801_m55_he.overlay").write_text(
+        "", encoding="utf-8")
+
+    errors = portability.check_overlay_qualified(
+        {
+            "alp_e1m_aen801_m55_he": {
+                "alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he",
+            },
+        },
+        bases=[tmp_path / "examples", tmp_path / "tests"],
+    )
+
+    assert errors == [
+        f"{(example / 'boards' / 'alp_e1m_aen801_m55_he.overlay').as_posix()}: "
+        "overlay names bare board 'alp_e1m_aen801_m55_he' but a "
+        "fully-qualified sibling exists -- Zephyr only auto-applies "
+        "the fully-qualified overlay on `west build -b "
+        "alp_e1m_aen801_m55_he/<soc>/<core>`; rename to one of "
+        "['alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he']"
+    ]
+
+
+def test_overlay_bare_name_with_no_qualified_sibling_is_ok(
+    tmp_path: Path,
+) -> None:
+    """A board with no fully-qualified sibling (single SoC/core) keeps
+    its bare-name overlay valid."""
+    example = tmp_path / "examples" / "example"
+    (example / "boards").mkdir(parents=True)
+    (example / "boards" / "alp_e1m_aen801_m55_he.overlay").write_text(
+        "", encoding="utf-8")
+
+    errors = portability.check_overlay_qualified(
+        {}, bases=[tmp_path / "examples", tmp_path / "tests"])
+
+    assert errors == []
+
+
+def test_conf_bare_name_with_qualified_sibling_is_hard_error(
+    tmp_path: Path,
+) -> None:
+    """A board-scoped `boards/<bare-board>.conf` auto-applies by the same
+    fully-qualified-board match as `.overlay` -- a bare-name `.conf`
+    silently drops its Kconfig defaults too."""
+    example = tmp_path / "examples" / "example"
+    (example / "boards").mkdir(parents=True)
+    (example / "boards" / "alp_e1m_aen801_m55_he.conf").write_text(
+        "", encoding="utf-8")
+
+    errors = portability.check_overlay_qualified(
+        {
+            "alp_e1m_aen801_m55_he": {
+                "alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he",
+            },
+        },
+        bases=[tmp_path / "examples", tmp_path / "tests"],
+    )
+
+    assert errors == [
+        f"{(example / 'boards' / 'alp_e1m_aen801_m55_he.conf').as_posix()}: "
+        "board Kconfig .conf names bare board 'alp_e1m_aen801_m55_he' but "
+        "a fully-qualified sibling exists -- Zephyr only auto-applies "
+        "the fully-qualified board Kconfig .conf on `west build -b "
+        "alp_e1m_aen801_m55_he/<soc>/<core>`; rename to one of "
+        "['alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he']"
+    ]
+
+
+def test_bench_example_with_no_board_yaml_is_also_checked(
+    tmp_path: Path,
+) -> None:
+    """Internal bench/regcheck dirs (no board.yaml) are IN SCOPE too --
+    scripts/bench/aen/build.sh no longer force-applies the bare-name
+    overlay itself (post-cbfe836f it builds the fully-qualified
+    $AEN_BOARD target and relies on Zephyr's own name-match auto-apply),
+    so a bare-name overlay in a board.yaml-less example would silently
+    drop exactly like it would in a customer-facing one."""
+    example = tmp_path / "examples" / "aen-some-regcheck"
+    (example / "boards").mkdir(parents=True)
+    (example / "boards" / "alp_e1m_aen801_m55_he.overlay").write_text(
+        "", encoding="utf-8")
+
+    errors = portability.check_overlay_qualified(
+        {
+            "alp_e1m_aen801_m55_he": {
+                "alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he",
+            },
+        },
+        bases=[tmp_path / "examples", tmp_path / "tests"],
+    )
+
+    assert len(errors) == 1
+    assert "aen-some-regcheck" in errors[0]
+
+
+def test_non_bare_board_stem_is_not_flagged(
+    tmp_path: Path,
+) -> None:
+    """A `.conf`/`.overlay` whose stem isn't an exact bare board id --
+    e.g. a `_firewall_probe` variant -- has no entry in
+    board_qualified_names and must not be flagged, even though the
+    prefix looks like a bare board name."""
+    example = tmp_path / "examples" / "example"
+    (example / "boards").mkdir(parents=True)
+    (example / "boards" / "alp_e1m_aen801_m55_he_firewall_probe.conf"
+     ).write_text("", encoding="utf-8")
+
+    errors = portability.check_overlay_qualified(
+        {
+            "alp_e1m_aen801_m55_he": {
+                "alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he",
+            },
+        },
+        bases=[tmp_path / "examples", tmp_path / "tests"],
+    )
+
+    assert errors == []
+
+
 def test_yaml_comment_does_not_satisfy_supported_board_variant(
     tmp_path: Path,
 ) -> None:

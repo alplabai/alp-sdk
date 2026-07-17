@@ -90,7 +90,7 @@ via the bench PSU CH2.
 
 ## Bench-unverified notes
 
-`boards/alp_e1m_aen801_m55_he.overlay` is a **bench artifact**, like the rest
+`boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay` is a **bench artifact**, like the rest
 of the alp-sdk Alif peripheral layer. Resolved against
 `zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h`:
 

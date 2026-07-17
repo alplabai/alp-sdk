@@ -348,12 +348,20 @@ the full list and how to add one.
 
 ## 7. Targeting real silicon
 
-When `alplabai/alp-zephyr-modules` publishes the EVK board
-files (`alp_e1m_evk_aen` for the AEN family, `alp_e1m_evk_v2n`
-for V2N), build with that as the `-b` target:
+Real board files ship in-tree under [`zephyr/boards/alp/`](../zephyr/boards/alp/)
+(exposed via `zephyr/module.yml`'s `board_root: zephyr` — no external
+repo to wait on).  Build with the qualified board target for your SoM
+as the `-b` argument, e.g. E1M-AEN801 (Alif Ensemble E8, M55-HE):
 
 ```bash
-west build -b alp_e1m_evk_aen alp-sdk/examples/peripheral-io/gpio-button-led
+west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he alp-sdk/examples/peripheral-io/gpio-button-led
+west flash
+```
+
+or E1M-V2N101 (Renesas RZ/V2N, Cortex-M33 system manager):
+
+```bash
+west build -b alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33 alp-sdk/examples/peripheral-io/gpio-button-led
 west flash
 ```
 
@@ -370,8 +378,10 @@ board.
 
 For SoMs without an EVK board file yet, write your own:
 
-1. Create a board file under `alp-zephyr-modules` (or a private
-   board layer).
+1. Create a board file in-tree under
+   [`zephyr/boards/alp/`](../zephyr/boards/alp/) (or a private
+   board layer) — `zephyr/module.yml`'s `board_root: zephyr`
+   exposes it to Zephyr's board scanner without any external repo.
 2. Define the `alp,pin-array` node + `alp-i2cN` / `alp-spiN` /
    `alp-pwmN` / etc. aliases in your board's DTS.
 3. Add a `boards/<your_board>.overlay` to the example with any
@@ -432,7 +442,7 @@ default `west update` skips it.
 |----------|----------------------------------------------------|---------------------------------------------------------------------------------------------------------|
 | **Renesas (RZ/V)** | `hal_renesas` (in Zephyr's own west.yml)   | Nothing extra.  Our `name-allowlist` lets Zephyr import it; `drivers/rz/fsp/src/rzv/bsp/mcu/rzv2n/` is what the V2N + V2N-M1 paths consume. |
 | **NXP (i.MX 9x)**  | `hal_nxp` (in Zephyr's own west.yml)       | Nothing extra.  `mcux/mcux-sdk-ng/devices/i.MX/i.MX93/` covers MIMX9301..9352 (E1M-NX9101 = MIMX9352).   |
-| **Alif (Ensemble)** | `hal_alif` (in our west.yml, from Alif's own GitHub) + upstream Zephyr `boards/alif/` | **Simpler than v3.7.**  HAL drivers come from `alifsemi/hal_alif v2.2.0` (Apache-2.0) which we pin as a top-level project — fetched on every `west update`.  Upstream Zephyr v4.4 also ships the stock Alif Ensemble board files under `boards/alif/` (`ensemble_e8_dk`, `ensemble_e1c_dk`, `balletto_b1_dk`).  Customers wanting AEN-specific boards still need their own board overlay (write one under `alplabai/alp-zephyr-modules`) -- the upstream files target Alif's own EVKs, not the E1M board.  Two Alif drivers (`alif_dave2d-driver`, `alif_image-processing-lib`) are vendor-licensed and sit in the `vendor-sdks` opt-in group; enable when you need DAVE2D / Helium image kernels.  See `docs/vendor-partnerships.md` §Alif for the migration history. |
+| **Alif (Ensemble)** | `hal_alif` (in our west.yml, from Alif's own GitHub) + upstream Zephyr `boards/alif/` | **Simpler than v3.7.**  HAL drivers come from `alifsemi/hal_alif v2.2.0` (Apache-2.0) which we pin as a top-level project — fetched on every `west update`.  Upstream Zephyr v4.4 also ships the stock Alif Ensemble board files under `boards/alif/` (`ensemble_e8_dk`, `ensemble_e1c_dk`, `balletto_b1_dk`) -- those target Alif's own EVKs, not the E1M board.  The AEN-specific board files (`alp_e1m_aen801_m55_he`, `alp_e1m_aen801_m55_hp`, `alp_e1m_aen401_m55_hp`, `alp_e1m_aen601_m55_hp`) ship in-tree at [`zephyr/boards/alp/`](../zephyr/boards/alp/) -- no separate overlay or repo needed.  Two Alif drivers (`alif_dave2d-driver`, `alif_image-processing-lib`) are vendor-licensed and sit in the `vendor-sdks` opt-in group; enable when you need DAVE2D / Helium image kernels.  See `docs/vendor-partnerships.md` §Alif for the migration history. |
 | **DEEPX (DX-M1)**  | Out of Zephyr scope (Linux-side runtime).  | The on-device NPU runs from a Linux PCIe driver, not a Zephyr backend.  `chips/deepx_dxm1/` is the **host-side** Zephyr code that brings up the M1 from the Renesas A55 cluster; `dx_rt` itself rides on Linux/Yocto.  See `examples/v2n/v2n-m1-deepx-inference/` and the customer-side integration notes in `docs/vendor-partnerships.md` §DEEPX. |
 
 ### Bare-metal / non-Zephyr customers
@@ -511,14 +521,20 @@ boards, libraries; inline diagnostics from `validate_board_yaml.py`
 in the Problems panel), a GUI configurator panel with dropdowns
 for supported SoM presets + boards, west wrappers (build / flash /
 run native_sim), per-OS dependency bootstrap, and a one-keypress
-*Alp: Generate all* command for the six loader emit modes.  Build
-+ install locally:
+*Alp: Generate all* command for the four emit modes (`zephyr-conf`,
+`dts-overlay`, `cmake-args`, `yocto-conf`).  Install from the
+[VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=alplabai.alp-sdk)
+for normal use.  To build from source instead (a separate repo --
+there is no `vscode/` directory in alp-sdk itself):
 
 ```bash
-cd vscode
-npm install && npm run package
+git clone https://github.com/alplabai/alp-sdk-vscode && cd alp-sdk-vscode
+pnpm install && pnpm run package
 code --install-extension alp-sdk-*.vsix
 ```
+
+Note: this is a **pnpm workspace, not npm** -- don't run `npm install` /
+`npm run package` against it.
 
 Key tasks (Command Palette → **Tasks: Run Task**):
 

@@ -6,7 +6,7 @@
 # (§7 Phase 5 + §11 acceptance), this workflow verifies:
 #
 #   1. The orchestrator fans out per-core slices for every supported
-#      SoM (E1M-V2N101, E1M-AEN701, E1M-NX9101).
+#      SoM (E1M-V2N101, E1M-AEN701, E1M-AEN801, E1M-NX9101).
 #   2. `build/system-manifest.yaml` lands with per-slice entries
 #      (per §5.2 fan-out + §6.1 carve-out resolution).
 #   3. The manifest is *byte-stable* across rebuilds -- the spec's
@@ -63,6 +63,7 @@ jobs:
         som:
           - E1M-V2N101
           - E1M-AEN701
+          - E1M-AEN801
           - E1M-NX9101
         scenario:
           - heterogeneous-default
@@ -127,6 +128,7 @@ jobs:
           case "${som}" in
             E1M-V2N101)  som_short="v2n"  ;;
             E1M-AEN701)  som_short="aen"  ;;
+            E1M-AEN801)  som_short="aen"  ;;
             E1M-NX9101)  som_short="imx93" ;;
             *)           som_short="unknown" ;;
           esac

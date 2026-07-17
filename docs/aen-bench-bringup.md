@@ -155,6 +155,8 @@ J-Link> go                                    # core is already at our reset han
 
 > **Reset caveat:** a J-Link reset asserts **SYSRESETREQ**, which reboots the
 > **SES** (not just the M55). Prefer `loadbin`/`go`; don't `reset` mid-loop.
+> **FIXME:** this contradicts the SYSRESETREQ scope claimed below (§Flow D,
+> "only resets the M55, not the SE") — unresolved, needs a silicon check.
 
 ### Flow D — J-Link MRAM flash (built-in Alif loader, no SE-UART)
 
@@ -217,6 +219,8 @@ reads work while the CPU runs; register reads error out harmlessly).
 **Why `RSetType 2` (nRESET pin) is mandatory.** It re-runs the **SE boot ROM**
 (full-chip), which is what loads/verifies/boots the app from MRAM. A plain J-Link reset
 (`AIRCR.SYSRESETREQ`) only resets the M55, not the SE, so the new image wouldn't boot.
+**FIXME:** this contradicts the reset caveat above (Flow C, "reboots the SES, not just
+the M55") — unresolved, needs a silicon check.
 The pin reset also re-enumerates the FT232R SE-UART (shared reset domain) — which is why
 you can't hold `app-write-mram` open across a reset, and why flow D sidesteps the SE-UART
 ISP-window race entirely.

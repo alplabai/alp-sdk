@@ -144,7 +144,6 @@ embargoed-disclosure workflow.
 This doc covers the **SDK** repo (`alp-sdk`).  It does NOT cover:
 
 - `alp-studio` (separate repo, separate SemVer track).
-- `alp-zephyr-modules` (board files; coordinates with Zephyr LTS).
 - `alp-sdk-internal` (private; not SemVer'd — schema changes
   coordinate with this repo's MAJOR bumps).
 - `e1m-spec` (the hardware standard; tracked separately as v1.0 /

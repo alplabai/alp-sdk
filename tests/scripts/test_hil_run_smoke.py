@@ -34,7 +34,7 @@ import run_smoke  # noqa: E402
 
 _MIN_RUNNER = """
 schema_version: 1
-board: alp_e1m_evk_aen
+board: alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
 serial_port: /dev/ttyACM0
 flash_method: westflash
 defaults:
@@ -82,7 +82,7 @@ def test_parse_spec_with_runner_defaults(tmp_path: Path) -> None:
     d = _make_spec_dir(tmp_path)
     spec = run_smoke.parse_spec(d / "smoke.yaml")
     assert spec.name == "smoke"
-    assert spec.board == "alp_e1m_evk_aen"
+    assert spec.board == "alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he"
     assert spec.serial_port == "/dev/ttyACM0"
     assert spec.flash_method == "westflash"
     assert spec.serial.duration_s == 10
@@ -198,7 +198,7 @@ def test_build_command_shape(tmp_path: Path) -> None:
     spec = run_smoke.parse_spec(d / "smoke.yaml")
     cmd = run_smoke.build_command(spec)
     assert cmd[:5] == ["west", "build", "-p", "always", "-b"]
-    assert "alp_e1m_evk_aen" in cmd
+    assert "alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he" in cmd
     assert str(spec.example) in cmd
 
 
@@ -214,7 +214,7 @@ def test_flash_command_pyocd(tmp_path: Path) -> None:
     spec = run_smoke.parse_spec(d / "smoke.yaml")
     cmd = run_smoke.flash_command(spec)
     assert cmd[:2] == ["pyocd", "flash"]
-    assert "alp_e1m_evk_aen" in cmd
+    assert "alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he" in cmd
 
 
 def test_flash_command_unknown_method_raises(tmp_path: Path) -> None:
@@ -435,7 +435,7 @@ def test_parse_spec_with_explicit_runner_path(tmp_path: Path) -> None:
         common / "smoke.yaml",
         runner_path=board / "_runner.yaml",
     )
-    assert spec.board == "alp_e1m_evk_aen"   # from the board runner
+    assert spec.board == "alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he"   # from the board runner
 
 
 # ---------------------------------------------------------------------

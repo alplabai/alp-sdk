@@ -26,16 +26,24 @@ So "flashing" an Ensemble is not `west flash` to an address — it's:
    (`app-gen-toc`) and write it to MRAM (`app-write-mram`).
 3. On the next boot the SES validates the ATOC and launches your M55 image.
 
-Two host paths put an ATOC into MRAM (both go through the SES boot ROM ISP):
+Two host paths put an ATOC into MRAM (both go through the SES boot ROM ISP,
+and both require SETOOLS' `app-gen-toc` to **sign** the ATOC first — Flow D
+runs `app-gen-toc` locally, with no SE-UART involved in that step):
 
 - **Flow A — SETOOLS over the SE-UART** (the original path, detailed below).
-- **Flow D — J-Link DIRECT MRAM flash over SWD** (now the default burn path on
-  the bench). J-Link's built-in Alif MRAM loader activates when you select the
-  **part-number device profile** (`AE822FA0E5597LS0_M55_HE`), *not* the generic
-  `Cortex-M55`. It burns the signed ATOC over SWD in ~0.16 s, verifies, then
-  re-runs the SE boot ROM (reset via the nRESET pin) so the app boots from
-  MRAM. Helper: `bench-builds/flash-jlink.sh`. Needs the J-Link V9.46+ DLL
-  (bench has V9.50) and a probe on matched J-Link V13 firmware (May 2026).
+  This is also what plain `west flash` runs: the board's default flash
+  runner is `alif_flash` (`scripts/west_commands/runners/alif_flash.py`),
+  which drives `app-gen-toc` + `app-write-mram` over the **SE-UART** — `west
+  flash` does **not** go over SWD.
+- **Flow D — J-Link DIRECT MRAM flash over SWD** (the bench's SWD
+  alternative to Flow A; not what `west flash` uses by default). J-Link's
+  built-in Alif MRAM loader activates when you select the **part-number
+  device profile** (`AE822FA0E5597LS0_M55_HE`), *not* the generic
+  `Cortex-M55`. It burns the same SETOOLS-signed ATOC over SWD in ~0.16 s,
+  verifies, then re-runs the SE boot ROM (reset via the nRESET pin) so the
+  app boots from MRAM — it also persists to MRAM, same as Flow A. Helper:
+  `scripts/bench/aen/flash-jlink.sh`. Needs the J-Link V9.46+ DLL (bench has
+  V9.50) and a probe on matched J-Link V13 firmware (May 2026).
 
 > The earlier blanket claim that *J-Link cannot write MRAM on this part* was
 > only ever true for the **generic** `Cortex-M55` profile — with the part
@@ -56,14 +64,17 @@ in lifecycle state **DM** (development — debug open, fully re-provisionable).
 So out of the box your module:
 
 - **boots on its own** (the self-test runs — proves the unit at our QA), and
-- the M55 core is **already released**, so **`west flash` / SWD just work**.
+- the M55 core is **already released**, so both `west flash` and SWD attach
+  just work.
 
-That means your day-1 path is the normal Zephyr one — no SETOOLS, no SE-UART:
+That means your day-1 path is the normal Zephyr one — no hand-run SETOOLS,
+no SE-UART wiring of your own:
 
 ```bash
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <your-app> \
     --sysbuild -- -DSB_CONF_FILE=<abs-alp-sdk>/zephyr/sysbuild/aen/sysbuild.conf
-west flash    # writes your MCUboot-signed image into slot0 over SWD
+west flash    # alif_flash runner: signs + writes your MCUboot-signed image
+              # into slot0 via SETOOLS over the SE-UART (not SWD)
 ```
 
 You only need the SES/SE-UART flow in this guide if you are:
