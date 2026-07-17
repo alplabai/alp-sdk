@@ -63,9 +63,10 @@ the freeze gate unnoticed.
 Usage:
 
     python3 scripts/abi_snapshot.py                       # prints to stdout
-    python3 scripts/abi_snapshot.py --version v0.1 \\
-        --output docs/abi/v0.1-snapshot.json
-    python3 scripts/abi_snapshot.py --diff docs/abi/v0.1-snapshot.json
+    VERSION=$(python3 scripts/abi_snapshot.py --print-current-version)
+    python3 scripts/abi_snapshot.py --version "$VERSION" \\
+        --output "docs/abi/${VERSION}-snapshot.json"
+    python3 scripts/abi_snapshot.py --diff "docs/abi/${VERSION}-snapshot.json"
 """
 
 from __future__ import annotations
@@ -673,17 +674,43 @@ def main() -> int:
         default="dev",
         help="Snapshot version label (e.g. 'v0.1').",
     )
-    parser.add_argument(
+    # Mutually exclusive: --print-current-version exits before any
+    # snapshot is built, so a combination with --output/--diff would
+    # otherwise silently ignore whichever of those the early return
+    # skips past -- argparse rejects the combination instead.
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "--output",
         type=Path,
         help="Write snapshot JSON to this path; default stdout.",
     )
-    parser.add_argument(
+    mode.add_argument(
         "--diff",
         type=Path,
         help="Compare against a prior snapshot file and print a per-symbol diff.",
     )
+    mode.add_argument(
+        "--print-current-version",
+        action="store_true",
+        help="Print the 'vMAJOR.MINOR' label metadata/sdk_version.yaml declares "
+        "as current -- the version the CURRENT snapshot must carry -- and exit.",
+    )
     args = parser.parse_args()
+
+    if args.print_current_version:
+        # Exists so a caller that needs the label (a CI step naming the
+        # snapshot path, a release script) reads it from the same
+        # function the write guard below enforces against, rather than
+        # re-implementing the parse and drifting from it.
+        current = current_snapshot_version()
+        if current is None:
+            print(
+                f"error: cannot resolve the current version from {SDK_VERSION_YAML}",
+                file=sys.stderr,
+            )
+            return 2
+        print(current)
+        return 0
 
     if args.output is not None:
         # Refuse to WRITE a snapshot labelled anything other than the
@@ -719,7 +746,24 @@ def main() -> int:
         return 2
 
     if args.diff is not None:
-        prior = json.loads(args.diff.read_text(encoding="utf-8"))
+        try:
+            prior_text = args.diff.read_text(encoding="utf-8")
+            prior = json.loads(prior_text)
+        except OSError as exc:
+            # A missing baseline is a real, expected case (a release cut
+            # before its snapshot lands) -- fail with a one-line message,
+            # not a raw traceback, so any caller (a CI step, a hand-run
+            # command) gets something actionable instead of a stack dump.
+            print(f"error: cannot read {args.diff}: {exc.strerror}", file=sys.stderr)
+            return 2
+        except json.JSONDecodeError as exc:
+            # A corrupt/truncated snapshot is a different failure than
+            # "ABI changed" (exit 1) -- collapsing the two would make a
+            # bad file on disk read as a phantom ABI regression at
+            # release-tag time (a bare `abi_snapshot.py --diff` caller,
+            # e.g. release.yml, has no `tee`/grep step to tell them apart).
+            print(f"error: cannot parse {args.diff}: {exc}", file=sys.stderr)
+            return 2
         msgs = diff(prior, snapshot)
         if not msgs:
             print(f"ABI unchanged vs {args.diff}.")

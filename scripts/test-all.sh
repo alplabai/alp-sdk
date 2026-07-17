@@ -492,22 +492,22 @@ EOF
 # this gate to keep regenerating a FROZEN historical snapshot against
 # today's headers (issue #803): the path always tracks whatever
 # metadata/sdk_version.yaml declares as current, this run and every
-# run after the next release.  Prints nothing and returns nonzero if
-# sdk_version.yaml is missing/unparsable; callers treat that as
-# "prerequisite not available" (stage SKIP), same as a missing tool.
+# run after the next release.  Shells out to abi_snapshot.py's own
+# `--print-current-version` rather than re-parsing sdk_version.yaml
+# here, so this and `pr-generated-files.yml` derive the label from ONE
+# parse, not two that could drift (issue #826).  Prints nothing and
+# returns nonzero if sdk_version.yaml is missing/unparsable.
+# stage_abi_strict treats that as "prerequisite not available" (stage
+# SKIP, same as a missing tool) -- but stage_generated_files must NOT:
+# that stage's whole job is "regenerate + assert nothing drifted", and
+# a snapshot it silently skips regenerating is a snapshot it can't
+# check drift against either, which is exactly the false-PASS #795 was
+# about.
 abi_current_snapshot() {
     command -v python3 >/dev/null 2>&1 || return 1
-    python3 - <<'PY'
-import pathlib
-import re
-import sys
-
-text = pathlib.Path("metadata/sdk_version.yaml").read_text(encoding="utf-8")
-m = re.search(r"^version:\s*(\d+)\.(\d+)\.(\d+)\s*$", text, re.MULTILINE)
-if not m:
-    sys.exit(1)
-print(f"docs/abi/v{m.group(1)}.{m.group(2)}-snapshot.json")
-PY
+    local version
+    version=$(python3 scripts/abi_snapshot.py --print-current-version 2>/dev/null) || return 1
+    printf 'docs/abi/%s-snapshot.json\n' "${version}"
 }
 
 # Main-only strict ABI gate (pr-abi-snapshot.yml triggers on main +
@@ -548,11 +548,28 @@ stage_generated_files() {
     # metadata/sdk_version.yaml (older snapshots are frozen).
     if [ -f scripts/abi_snapshot.py ]; then
         local abi_snap abi_ver
-        abi_snap=$(abi_current_snapshot) || abi_snap=""
-        if [ -n "${abi_snap}" ]; then
-            abi_ver=$(basename "${abi_snap}" -snapshot.json)
-            python3 scripts/abi_snapshot.py --version "${abi_ver}" \
-                --output "${abi_snap}" >/dev/null 2>&1 || true
+        if ! abi_snap=$(abi_current_snapshot); then
+            # Unlike stage_abi_strict, this is NOT a skip: this stage's
+            # job is to regenerate the snapshot and prove it matches
+            # what's committed, and it can't do either without knowing
+            # which snapshot is current.  Passing anyway would be the
+            # same silent "regen didn't happen, gate still went green"
+            # defect as the `|| true` this stage no longer has (#795).
+            echo "abi_current_snapshot failed -- cannot determine the current ABI snapshot (check metadata/sdk_version.yaml)"
+            return 1
+        fi
+        abi_ver=$(basename "${abi_snap}" -snapshot.json)
+        # No `|| true` here: this regen is the only thing that makes
+        # the diff below able to see ABI drift, so swallowing its exit
+        # code turns "the snapshot could not be regenerated" into a
+        # PASS -- the local gate goes green and the PR goes red on the
+        # exact drift this stage exists to catch (issue #795).  The
+        # write guard in abi_snapshot.py exits 2 when the label is not
+        # current, which is precisely a failure worth surfacing.
+        if ! python3 scripts/abi_snapshot.py --version "${abi_ver}" \
+                --output "${abi_snap}" >/dev/null; then
+            echo "scripts/abi_snapshot.py failed to regenerate ${abi_snap}"
+            return 1
         fi
     fi
     # Ignore only the snapshot's "generated" date line, like the CI gate.

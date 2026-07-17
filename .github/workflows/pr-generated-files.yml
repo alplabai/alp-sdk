@@ -35,6 +35,7 @@ on:
       - 'metadata/**'
       - 'include/alp/**'
       - 'docs/diagnostics/**'
+      - 'docs/abi/**'
       - 'examples/**'
       - 'src/cap.c'
       - 'src/status_strings.c'
@@ -63,7 +64,10 @@ on:
       - 'src/cap.c'
       - 'src/status_strings.c'
       - 'docs/diagnostics/**'
+      - 'docs/abi/**'
       - 'examples/**'
+      - 'scripts/abi_snapshot.py'
+      - '.github/workflows/pr-generated-files.yml'
   workflow_dispatch:
 
 concurrency:
@@ -168,28 +172,63 @@ jobs:
       - name: Regenerate error catalog from headers + diagnostic docs
         run: python3 scripts/gen_error_catalog.py
 
-      - name: Regenerate ABI snapshot (current = v0.11)
-        # The committed v0.11 snapshot is the CURRENT working snapshot
-        # (v0.1 + v0.3 + v0.5 + v0.6 + v0.7 + v0.8 + v0.9 + v0.10 are FROZEN historical
-        # records --
-        # the in-tree convention per docs/abi-markers.md).  Regenerate
-        # v0.11 from the current headers and compare.
-        #
+      # Single source: metadata/sdk_version.yaml declares MAJOR.MINOR.PATCH
+      # and the CURRENT snapshot is docs/abi/vMAJOR.MINOR-snapshot.json
+      # (docs/abi/README.md).  EVERY other docs/abi/v*-snapshot.json is a
+      # FROZEN historical record -- restored from its release tag, never
+      # regenerated against today's headers (docs/abi-markers.md).
+      #
+      # Deriving the version HERE, rather than naming it in a literal each
+      # release has to remember to repoint, is what keeps this gate honest.
+      # A stale literal fails in the worst way available: the step keeps
+      # regenerating the PREVIOUS release's snapshot and diffing it against
+      # its own committed copy, so the gate stays green while testing
+      # nothing about the current snapshot at all (issue #826).  This is the
+      # same derivation scripts/test-all.sh runs locally.
+      - name: Resolve the current ABI snapshot from metadata/sdk_version.yaml
+        id: abi
+        run: |
+          version=$(python3 scripts/abi_snapshot.py --print-current-version)
+          snapshot="docs/abi/${version}-snapshot.json"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "snapshot=${snapshot}" >> "$GITHUB_OUTPUT"
+          echo "Current ABI snapshot: ${snapshot}"
+          # A version bump that forgot to add the new snapshot has to fail
+          # HERE, because nothing downstream would catch it: the regen step
+          # CREATES the missing file, and `git diff` does not report an
+          # untracked file, so the in-sync gate would pass and the miss
+          # would surface only at tag time in release.yml.
+          if [ ! -f "${snapshot}" ]; then
+            echo "::error::metadata/sdk_version.yaml declares ${version}, but ${snapshot} is not committed."
+            echo "::error::Run: python3 scripts/abi_snapshot.py --version ${version} --output ${snapshot}"
+            echo "::error::and commit it (see docs/abi/README.md)."
+            exit 1
+          fi
+
+      - name: Regenerate ABI snapshot (current minor)
         # The snapshot's `generated` field is a date stamp; re-running
         # on the same headers always changes that one line, so the
         # diff below masks it with --ignore-matching-lines.
+        #
+        # Reaches the shell as env, not spliced into the script text via ${{ }}.
+        env:
+          ABI_VERSION: ${{ steps.abi.outputs.version }}
+          ABI_SNAPSHOT: ${{ steps.abi.outputs.snapshot }}
         run: |
           python3 scripts/abi_snapshot.py \
-              --version v0.11 \
-              --output docs/abi/v0.11-snapshot.json
+              --version "$ABI_VERSION" \
+              --output "$ABI_SNAPSHOT"
 
       - name: Fail if generated files differ from committed copies
+        env:
+          ABI_VERSION: ${{ steps.abi.outputs.version }}
+          ABI_SNAPSHOT: ${{ steps.abi.outputs.snapshot }}
         run: |
           # Allow the snapshot's "generated" date to differ; everything
           # else must match.
           if ! git diff --exit-code \
                   --ignore-matching-lines='"generated":' \
-                  -- include/alp/soc_caps.h docs/abi/v0.11-snapshot.json \
+                  -- include/alp/soc_caps.h "$ABI_SNAPSHOT" \
                      include/alp/cap.h \
                      src/cap.c \
                      src/status_strings.c \
@@ -208,7 +247,7 @@ jobs:
             echo "::error::  python3 scripts/gen_portability_matrix.py"
             echo "::error::  python3 scripts/gen_catalog.py"
             echo "::error::  python3 scripts/gen_error_catalog.py"
-            echo "::error::  python3 scripts/abi_snapshot.py --version v0.11 --output docs/abi/v0.11-snapshot.json"
+            echo "::error::  python3 scripts/abi_snapshot.py --version $ABI_VERSION --output $ABI_SNAPSHOT"
             echo "::error::and commit the result."
             exit 1
           fi
