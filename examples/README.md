@@ -224,9 +224,22 @@ SoM EEPROM manifest).
 These live under `examples/aen/` and target the E1M-AEN (Alif
 Ensemble) family on the E1M-EVK board (lead part: E8).
 
+`examples/aen/` has ~59 directories total; the 7 below are the
+customer-facing catalog (the ones carrying a `board.yaml`).  The
+remaining ~52 are internal bring-up/regression apps (per-driver
+regcheck, bench smoke tests, dual-core internal validation) --
+`board.yaml` presence is the reliable way to tell them apart, not
+their filename (some of those internal dirs don't follow a
+`*-regcheck`/`*-bench`/`*-smoke` naming pattern).
+
 | Directory                       | What it shows                                                            |
 |---------------------------------|--------------------------------------------------------------------------|
-| `aen/edgeai-vision-aen`         | Flagship EdgeAI vision pipeline -- CSI camera -> VeriSilicon ISP Pico (vsi,isp-pico) -> Ethos-U55 -> OLED. |
+| `aen/edgeai-vision-aen`         | EdgeAI vision pipeline -- CSI camera -> VeriSilicon ISP Pico (vsi,isp-pico) -> Ethos-U55 -> OLED. **v0.1 skeleton: camera + Ethos-U inference are stubbed today** (see its README's Status table). |
+| `aen/aen-analog-validate`       | DAC0 -> ADC loopback on-silicon analog validation via `<alp/dac.h>` + `<alp/adc.h>`, driven through the bench RAM-run + RAM-console flow. |
+| `aen/aen-cc3501e-bringup`       | Host (M55-HE) bring-up of the on-module TI CC3501E Wi-Fi 6 + BLE 5.4 coprocessor -- power, reset, `PING`/`GET_VERSION`/`GET_DIAG_INFO`. |
+| `aen/aen-cc3501e-companion-tour` | Capstone full-surface tour of the CC3501E coprocessor: the portable wireless checkpoint plus every companion surface `aen-cc3501e-bringup` doesn't exercise. |
+| `aen/aen-cc3501e-gpio`          | CC3501E GPIO proxy + camera-enable demo over the inter-chip SPI bridge. |
+| `aen/aen-eeprom-manifest`       | Read + decode the 128-byte Alp hardware-info manifest from the on-module 24C128 EEPROM over the portable `<alp/*>` API. |
 | `aen/aen-secure-element-sign`   | OPTIGA Trust M I2C_STATE probe over BRD_I2C (M55-HE); product-info/raw-APDU return `ALP_ERR_NOSUPPORT`. |
 
 ## Anatomy of a single-OS example
