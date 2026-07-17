@@ -2,10 +2,9 @@
 
 How to attach a debugger to an E1M-AEN801 module, the traps that catch
 people the first time, and what J-Link is (and is not) for on this part.
-This doc is about **attaching and reading state**, which is fully settled
-below — for bench bring-up walk-through see
-[`bring-up-aen.md`](bring-up-aen.md). Writing your own application image
-into MRAM is a separate question this doc does not settle (§3).
+This doc covers **attaching/reading state** (§1–§2, §4) and **flashing
+your own application image** (§3) — for bench bring-up walk-through see
+[`bring-up-aen.md`](bring-up-aen.md).
 
 ## 1. Attach a debugger: `west debug`
 
@@ -23,16 +22,25 @@ west debug        # or: west attach   (attach without resetting first)
 itself, so you don't need to pick a device manually. This needs no MRAM
 write and does not go through SETOOLS.
 
-## 2. Why does a manual J-Link connect fail when I select the Alif part number?
+Prefer `west attach` over `west debug` on a board that's already running:
+a J-Link reset asserts `AIRCR.SYSRESETREQ`, which reboots the Secure
+Enclave (SES), not just the M55 — `west debug` resets before attaching,
+so it takes that reboot; `west attach` does not.
+
+## 2. The Alif part-number device vs. the generic device
 
 If you drive J-Link Commander (`JLinkExe`) yourself instead of `west
 debug`, and pick the Alif part-number device (`AE822FA0E5597LS0_M55_HE`)
-for the connect, it can fail — `Could not connect to the target device` —
-even though the board is fine. That is exactly why `west debug` on this
-board is wired to the **generic** device instead: the AE822's Secure
-Enclave gates the part-specific access port, so only the generic
-`Cortex-M55` device reliably reaches the released core for attach/debug.
-Manual equivalent of what `west debug` runs:
+for the connect, it can fail on an **older J-Link DLL** —
+`Could not connect to the target device` — even though the board is
+fine. The fix is to update J-Link (DLL V9.46+, confirmed working through
+V9.50), not to avoid the part-number device: on a current DLL it connects
+fine, and it is in fact *required* to unlock the part's built-in MRAM
+flash loader (§3). `west debug` is wired to the **generic** `Cortex-M55`
+device regardless, because it needs no MRAM loader for attach/debug —
+that's just the simpler, purpose-matched device for this job, not a
+workaround for a broken part profile. Manual equivalent of what `west
+debug` runs:
 
 ```sh
 JLinkExe -device Cortex-M55 -if SWD -speed 4000
@@ -42,26 +50,52 @@ A correct attach reports SW-DP IDR `0x4C013477` and CPUID `0x411FD220`
 (Cortex-M55 r1p0). Any other IDR means you're on the wrong target or the
 SWD wiring is reversed.
 
-(With a recent-enough J-Link DLL, the part-number device profile *can*
-also connect — but that's for a different purpose, see next section, not
-an alternative attach device. For attach/debug, always use the generic
-device, which is what `west debug` already does.)
+With a J-Link DLL V9.46+, the part-number device profile also connects
+fine — but reserve it for the Flow D MRAM loader (§3), since it has no
+attach/debug advantage over the generic device and the generic device is
+what `west debug` already drives.
 
-## 3. Flashing your application — not yet documented here
+## 3. Flashing your application
 
-This doc deliberately stops at attach/debug. What the actual customer
-flashing path looks like for E1M-AEN801 — whether J-Link alone can write
-your application to MRAM, or whether the Alif SETOOLS toolchain is
-required — is still being pinned down against real silicon as of this
-writing, and earlier drafts of this section stated both answers at
-different points. Rather than publish an unverified claim, this section
-is left as a **known gap**: see [`aen-provisioning.md`](aen-provisioning.md)
-and [`aen-bench-bringup.md`](aen-bench-bringup.md) for the current state
-of that flow, and check back here once it's settled.
+Replacing the resident slot0 application on E1M-AEN801 has two proven
+paths, both of which persist across a cold power-cycle (a bare
+`loadbin` with no signed ATOC does **not** persist — see below):
 
-What IS verified, independent of that open question: attaching a debugger
-(§1–§2, generic `Cortex-M55` device) never writes MRAM and needs none of
-the flashing tooling discussed in those other docs.
+- **J-Link, two-blob MRAM loader.** With a J-Link DLL V9.46+ and the
+  part-number device (`AE822FA0E5597LS0_M55_HE`, §2), J-Link's built-in
+  Alif MRAM loader writes the application blob to its slot0 address plus
+  a separately-staged, signed `AppTocPackage.bin` to its package address.
+  Both blobs must land — writing the application alone, without the
+  signed ATOC (e.g. the output of a plain `west flash -r jlink`), is
+  read back correctly by `verifybin` but does **not** commit and reverts
+  on the next cold power-cycle.
+- **Alif SETOOLS over the SE-UART.** `app-gen-toc` + `app-write-mram`
+  drive the same commit through the Secure Enclave's maintenance
+  channel; this is what `west flash` (the `alif_flash` runner) wires by
+  default on this board.
+
+**Both paths need SETOOLS to sign the ATOC** (`app-gen-toc`) before
+either write — the J-Link *write* itself is SETOOLS-free, but producing
+a valid, signed `AppTocPackage.bin` is not. There is no "stock J-Link,
+no SETOOLS" flashing path.
+
+**Known gap:** there is no serial/DFU recovery path (no mcumgr / MCUmgr
+image-management / serial-recovery Kconfig is enabled on any E1M-AEN801
+example or board default today). A SETOOLS-free field-update path is a
+plausible future addition, not a shipped one.
+
+**Recovery caveat:** if your own resident application gates the debug
+port by idling (§4), a J-Link reflash is blocked until you either catch
+the boot window (§4) or fall back to the SE-UART SETOOLS path, which is
+gated by the same idle window but recovers the same way.
+
+See [`aen-provisioning.md`](aen-provisioning.md) and
+[`aen-bench-bringup.md`](aen-bench-bringup.md) for the full flashing
+recipes and bench detail.
+
+What IS verified, independent of which flashing path you pick: attaching
+a debugger (§1–§2, generic `Cortex-M55` device) never writes MRAM and
+needs none of the flashing tooling discussed in those other docs.
 
 ## 4. My board looks dead — J-Link won't attach at all
 
@@ -70,17 +104,35 @@ Symptom: some time after boot, J-Link reports `Failed to power up DAP`
 otherwise enumerates fine.
 
 Cause: once the resident application returns from `main()` and enters an
-idle / low-power wait, the Secure Enclave gates the debug power domain
-off (and, separately, the SE-UART maintenance channel goes to sleep too).
-**The board is not bricked** — it's simply not attachable while the
-resident app is idling.
+idle / low-power wait, one mechanism gates both channels — the Secure
+Enclave gates the debug power domain off AND the SE-UART maintenance
+channel stops responding, at the same time. **The board is not
+bricked** — it's simply not attachable while the resident app is idling.
 
-Fix: catch it in the boot window. Power-cycle or reset the board and
-attach within the first couple of seconds after reset/power-on, before
-the resident application reaches its idle loop — the debug port (and the
-SE-UART) are reachable in that window. If you need the debug port to stay
-reachable indefinitely, flash a build that stays busy and never idles
-(never calls `WFI`); once it's running, the DAP stays powered.
+Fix: catch it in the boot window — but a *fresh* `JLinkExe` reliably
+misses it. The window is short (roughly 0.8–2.6 s after reset/power-on)
+and a fresh `JLinkExe` invocation spends part of that budget on its own
+probe-init, so "power-cycle and attach within a couple of seconds"
+starting a new `JLinkExe` each time is not reliable. The technique that
+actually lands the window:
+
+1. Start **one** `JLinkExe` session *before* powering the board on, with
+   auto-connect disabled (`-AutoConnect 0`) so its own probe-init
+   finishes while there's nothing to connect to yet.
+2. Power the board on, then immediately (in that same pre-warmed
+   session) issue `connect` repeatedly — no new `JLinkExe` process — until
+   it reports the core identified (e.g. `Cortex-M55 identified`). Because
+   probe-init is already done, this lands inside the window.
+3. Once connected, halt and hold the core there — a halted core can't
+   reach its idle loop, so the DAP stays powered for the rest of the
+   session.
+4. To fix it permanently rather than re-catching the window every time,
+   flash a build that stays busy and never idles (never calls `WFI`);
+   once that image is resident, the DAP stays powered across boots.
+
+The same pre-idle-window logic applies to the SE-UART/SETOOLS
+maintenance channel: forcing a fresh boot and catching the SETOOLS
+handshake in that same early window recovers it the same way.
 
 ## 5. How do I see program output?
 
