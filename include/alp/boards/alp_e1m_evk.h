@@ -287,7 +287,7 @@ typedef enum {
 /*                                                                    */
 /* The actual integer values are populated by the EVK's overlay,      */
 /* in-tree under `zephyr/boards/alp/<board>/` (or an example's        */
-/* `boards/*.overlay`); for studio-codegen consumers the studio's     */
+/* `boards/<board>.overlay`); for studio-codegen consumers the studio */
 /* pin allocator handles it.  The macros below resolve to             */
 /* `EVK_PIN_OVERLAY_BASE + offset` and a hand-written-firmware author  */
 /* needs to verify the overlay declares matching extra entries.       */
