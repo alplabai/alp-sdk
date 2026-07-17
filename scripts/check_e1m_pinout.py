@@ -128,7 +128,7 @@ def check_lock(snapshots: dict[str, dict], errors: list[str]) -> None:
         _fail(errors, "[lock] source.sha is missing")
     by_snapshot = {entry.get("snapshot"): entry for entry in lock.get("files", [])}
     for form, doc in snapshots.items():
-        rel = str(SNAPSHOTS[form].relative_to(REPO))
+        rel = SNAPSHOTS[form].relative_to(REPO).as_posix()
         entry = by_snapshot.get(rel)
         if entry is None:
             _fail(errors, f"[lock] no files[] entry for {rel}")
