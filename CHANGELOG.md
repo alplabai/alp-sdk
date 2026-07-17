@@ -7,6 +7,19 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.11.0 candidate
 
+### Fixed — chip config APIs reject undeclared enum values (#790)
+
+- `bmi323_set_accel`/`_set_gyro`, `icm42670_set_accel`/`_set_gyro`,
+  `lsm6dso_set_accel`/`_set_gyro` and `lis2dw12_set_accel` masked their ODR and
+  full-scale arguments straight into the register field. Where an enum's
+  declared members did not fill that field, an undeclared value was written as a
+  reserved hardware encoding and the call still returned `ALP_OK`. These
+  boundaries now validate the argument before any bus write and return
+  `ALP_ERR_INVAL`. `icm42670_odr_t` is sparse (it declares `0x0`, `0x4..0x8`,
+  `0xA..0xF`), so it is checked by explicit member test rather than a range.
+- Enums whose declared values already fill their register field
+  (`icm42670`/`lsm6dso`/`lis2dw12` full-scale, `tmp112_rate_t`) are unchanged,
+  as are `a4988`/`drv8825`/`lis2dw12_mode_t`, which already validated.
 ### Fixed — `packagegroup-alp-display` allarch/libdrm RDEPENDS error
 
 - A full `alp-image-edge` bake for `e1m-v2n101-a55` now completes

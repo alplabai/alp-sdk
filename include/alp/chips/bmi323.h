@@ -114,10 +114,18 @@ alp_status_t bmi323_init(bmi323_t *dev, alp_i2c_t *bus, uint8_t i2c_addr);
 /** Read CHIP_ID for liveness checks. */
 alp_status_t bmi323_read_id(bmi323_t *dev, uint8_t *id_out);
 
-/** Configure accelerometer ODR + full-scale range. */
+/**
+ * @brief Configure accelerometer ODR + full-scale range.
+ * @return ALP_OK / ALP_ERR_NOT_READY (uninitialised) / ALP_ERR_INVAL
+ *   (`odr` or `fs` is not a declared enum member).
+ */
 alp_status_t bmi323_set_accel(bmi323_t *dev, bmi323_odr_t odr, bmi323_accel_fs_t fs);
 
-/** Configure gyroscope ODR + full-scale range. */
+/**
+ * @brief Configure gyroscope ODR + full-scale range.
+ * @return ALP_OK / ALP_ERR_NOT_READY (uninitialised) / ALP_ERR_INVAL
+ *   (`odr` or `fs` is not a declared enum member).
+ */
 alp_status_t bmi323_set_gyro(bmi323_t *dev, bmi323_odr_t odr, bmi323_gyro_fs_t fs);
 
 /** Read the current accelerometer sample (raw int16 counts). */

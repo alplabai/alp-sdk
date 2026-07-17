@@ -103,10 +103,18 @@ alp_status_t lsm6dso_init(lsm6dso_t *dev, alp_i2c_t *bus, uint8_t i2c_addr);
 /** Read the WHO_AM_I register. Useful for liveness checks post-init. */
 alp_status_t lsm6dso_read_id(lsm6dso_t *dev, uint8_t *id_out);
 
-/** Configure accelerometer ODR + full-scale range. */
+/**
+ * @brief Configure accelerometer ODR + full-scale range.
+ * @return ALP_OK / ALP_ERR_NOT_READY (uninitialised) / ALP_ERR_INVAL
+ *   (`odr` is not a declared enum member).
+ */
 alp_status_t lsm6dso_set_accel(lsm6dso_t *dev, lsm6dso_odr_t odr, lsm6dso_accel_fs_t fs);
 
-/** Configure gyroscope ODR + full-scale range. */
+/**
+ * @brief Configure gyroscope ODR + full-scale range.
+ * @return ALP_OK / ALP_ERR_NOT_READY (uninitialised) / ALP_ERR_INVAL
+ *   (`odr` is not a declared enum member).
+ */
 alp_status_t lsm6dso_set_gyro(lsm6dso_t *dev, lsm6dso_odr_t odr, lsm6dso_gyro_fs_t fs);
 
 /** Read the current accelerometer sample (raw int16 counts). */
