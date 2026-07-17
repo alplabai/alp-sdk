@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "alp-sdk-cli"
-version = "0.11.0"
+version = "0.11.1"
 description = "Command-line front-end for the Alp SDK"
 requires-python = ">=3.10"
 dependencies = [

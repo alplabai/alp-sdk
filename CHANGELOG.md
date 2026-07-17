@@ -7,6 +7,8 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.12.0 candidate
 
+## [v0.11.1] - 2026-07-17
+
 ### Fixed — three gates passed on CI but false-failed on a Windows checkout (#829)
 
 - **`alp.lock`'s digest was host-dependent.** `alp_lock._dir_digest` ordered
