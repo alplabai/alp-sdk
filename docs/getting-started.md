@@ -511,12 +511,17 @@ boards, libraries; inline diagnostics from `validate_board_yaml.py`
 in the Problems panel), a GUI configurator panel with dropdowns
 for supported SoM presets + boards, west wrappers (build / flash /
 run native_sim), per-OS dependency bootstrap, and a one-keypress
-*Alp: Generate all* command for the six loader emit modes.  Build
-+ install locally:
+*Alp: Generate all* command for the four loader emit modes
+(`zephyr-conf`, `dts-overlay`, `cmake-args`, `yocto-conf`).
+
+Install it from the VS Code Marketplace (search **Alp IDE**, publisher
+`AlpLabAI`).  To build from source, the extension lives in its own
+repository (a `pnpm` workspace, not part of this repo):
 
 ```bash
-cd vscode
-npm install && npm run package
+git clone https://github.com/alplabai/alp-sdk-vscode
+cd alp-sdk-vscode
+pnpm install && pnpm run package
 code --install-extension alp-sdk-*.vsix
 ```
 
