@@ -8,17 +8,22 @@
 # on the E8 bench (see docs/aen-bench-bringup.md):
 #
 #   alif_flash  (DEFAULT flasher) -- Alif Secure Toolkit (SETOOLS).
-#       The Secure Enclave (SES) is the ONLY agent that writes MRAM on
-#       this part: J-Link cannot program MRAM.  `west flash` therefore
-#       drives SETOOLS' app-gen-toc + app-write-mram over the SE-UART
-#       to author and burn the application/MCUboot ATOC.  This is the
-#       SES->MCUboot->slot0 provisioning path.
+#       `west flash` drives SETOOLS' app-gen-toc + app-write-mram over
+#       the SE-UART to author and burn the application/MCUboot ATOC.
+#       This is the SES->MCUboot->slot0 provisioning path and remains
+#       the default: it is the authoritative MRAM commit, proven to
+#       persist across a cold power-cycle.  J-Link CAN also program and
+#       persist MRAM (the two-blob Flow D loader, part-number device
+#       profile below, J-Link DLL V9.46+) -- this is not the only path,
+#       just not the default `west flash` wires.
 #
 #   jlink  (debug / attach) -- generic Cortex-M55 over SWD.
-#       Used for ITCM RAM-run bring-up and live RAM_CONSOLE reads.  The
-#       Alif part-number J-Link device profile FAILS to connect on a
-#       fresh E8 -- the GENERIC `Cortex-M55` device must be used (the
-#       SES gates the part-specific AP).  See the runbook.
+#       Used for ITCM RAM-run bring-up and live RAM_CONSOLE reads.  This
+#       is the right DEBUG default: the Alif part-number device profile
+#       also connects fine on a J-Link DLL V9.46+ (an older DLL can fail
+#       to connect with it), but it is reserved for the Flow D MRAM
+#       loader below -- the generic profile has no MRAM loader, so it
+#       stays the debug/attach device.  See the runbook.
 #
 # NOTE on the alif_flash runner itself:
 #   The runner class is shipped IN-TREE by alp-sdk at
@@ -41,7 +46,8 @@
 # global-cfg.db Part# ("AE822...").  The runner compares only [:5].
 board_runner_args(alif_flash "--device=AE822FA0E5597LS0_HE")
 
-# jlink: generic Cortex-M55 -- the Alif part profile will not connect.
+# jlink: generic Cortex-M55 -- the debug/attach default (Flow D's MRAM
+# loader needs the part-number device instead; see the header comment).
 board_runner_args(jlink "--device=Cortex-M55" "--speed=4000")
 
 board_set_flasher_ifnset(alif_flash)
