@@ -56,15 +56,6 @@ alp run
 
 `bash scripts/bootstrap.sh` is what actually gets `west` (and everything else `alp build`/`alp run` shell out to) onto `PATH` — skipping it is the #1 way this Quickstart fails on a fresh clone; see [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md) for the per-OS manual equivalent. `alp init` walks you through SoM SKU + board preset + starter peripherals interactively, or accepts `--som`, `--preset`, `--peripherals` flags for CI. `alp run` builds for `native_sim` by default and prints the app's stdout straight through; pass `--board <name>` for a real-hardware build (`--flash` to chain flash).
 
-**Flashing E1M-AEN hardware needs a vendor tool you must obtain yourself.**
-`west flash` on an E1M-AEN target (the default flasher wired for those
-boards) drives the **Alif Security Toolkit (SETOOLS)** to author + burn
-the signed image; SETOOLS is license-gated by Alif and is **not
-redistributed by alp-sdk**.  Before `--flash` on AEN hardware: get
-SETOOLS from Alif, `pip install fdt`, and export `SETOOLS_DIR` +
-`SE_UART` (or pass `--setools-dir`/`--se-uart`) — see
-[`docs/bring-up-aen.md`](docs/bring-up-aen.md).
-
 `alp validate board.yaml` runs the diagnostic-rich validator standalone — try it on a fixture under `tests/fixtures/board_yaml_bad/` to see the format.  `alp doctor` triages the host environment (PASS/WARN/FAIL with fix hints) whenever a build machine misbehaves.  The full verb set — `build` / `flash` / `emit` / `size` / `image` / `clean` / `renode` / `monitor` / `new-som` / `model` and friends — is documented in [`docs/cli.md`](docs/cli.md).
 
 ## Two consumer paths
