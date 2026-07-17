@@ -39,7 +39,7 @@ iot-connected-camera/
 ├── prj.conf                      # SDK + chips + IoT + camera + GUI toggles
 ├── testcase.yaml                 # twister: compile + smoke under native_sim
 ├── boards/
-│   ├── alp_e1m_evk_v2n.overlay   # V2N EVK pinout (PARKED — board file pending)
+│   ├── alp_e1m_v2n101_m33_sm_r9a09g056n48gbg_cm33.overlay   # V2N EVK pinout (HIL scenario parked)
 │   └── native_sim_native_64.overlay
 ├── src/
 │   └── main.c                    # skeleton with v0.1 init + v0.2/v0.3 stubs
@@ -64,12 +64,12 @@ real backends land).
 
 ## Build (v0.3, on the V2N EVK)
 
-Pending publication of the `alp_e1m_evk_v2n` board file in
-[`alplabai/alp-zephyr-modules`](https://github.com/alplabai/alp-zephyr-modules).
-Once that lands, plus v0.3 of the SDK:
+The board file ships in-tree at
+[`zephyr/boards/alp/e1m_v2n101_m33_sm/`](../../../zephyr/boards/alp/e1m_v2n101_m33_sm/).
+Once v0.3 of the SDK lands:
 
 ```bash
-west build -b alp_e1m_evk_v2n .
+west build -b alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33 .
 west flash
 ```
 

@@ -9,7 +9,11 @@
 schema_version: 1
 
 # Zephyr board target -- AEN701's M55-HP per the SoM preset's
-# topology.m55_hp.board field.  Ships in alplabai/alp-zephyr-modules.
+# topology.m55_hp.board field.  No in-tree board dir exists yet
+# under zephyr/boards/alp/ (unlike AEN401/AEN601/AEN801, which do)
+# -- this target is not buildable until one is added.
+# alp-zephyr-modules is an empty scaffold today, not a real source
+# for it; treat this as a placeholder pending a real board port.
 # Override per-spec with `board:` for tests that need M55-HE
 # (alp_e1m_aen701_m55_he) or the A32 cluster.
 board: alp_e1m_aen701_m55_hp

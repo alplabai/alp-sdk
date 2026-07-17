@@ -16,8 +16,13 @@ Three independent checks:
         * Kconfig config symbols   zephyr/Kconfig[.alp-libraries],
                                  zephyr/kconfigs/*.kconfig
         * generated identifiers    scripts/alp_project.py + scripts/gen_*.py
-          (board target names like alp_e1m_evk_*, the alp_hw_info_build
-           CMake helper, ALP_HW_BUILD_* / ALP_SOC_* macros)
+          (the alp_hw_info_build CMake helper, ALP_HW_BUILD_* / ALP_SOC_*
+           macros)
+        * real board targets       zephyr/boards/alp/<dir>/board.yml's
+          `board: name:` field (e.g. alp_e1m_aen801_m55_he) -- EXISTENCE,
+          not naming shape, is what makes a board name real; a token
+          that merely looks like alp_e1m_<shape> but has no board.yml
+          on disk is dead (see collect_real_board_names())
       A token that appears in the docs but in NONE of these is "dead" --
       almost always a rename the docs missed (e.g. the DEEPX_DX ->
       DEEPX_DXM1 / .alpmodel migration left ALP_..._DEEPX_DX behind).
@@ -91,17 +96,26 @@ _ALLOWLIST: set[str] = {
     # Real identifier; *.dtsi is deliberately outside the harvested surfaces
     # (harvest scans meta-alp-sdk *.conf/*.bb/*.bbappend/*.inc only).
     "ALP_CA55_1P8GHZ",
+    # docs/porting-new-som.md's worked example walks through porting a
+    # HYPOTHETICAL 7th AEN-family SKU, E1M-AEN901 (see its Sec 3) -- these
+    # Zephyr board targets are deliberately illustrative and never land in
+    # zephyr/boards/alp/, so collect_real_board_names() will never find them.
+    "alp_e1m_aen901_m55_he",
+    "alp_e1m_aen901_m55_hp",
 }
 
 # Identifier shapes we treat as SDK symbols.
 _SYMBOL_RE = re.compile(r"\b(ALP_[A-Z0-9_]+|alp_[a-z0-9_]+)\b")
 
-# Generated Zephyr board target names (alp_e1m_*, alp_e1m_x_*).  These are
-# derived from SoM SKUs by scripts/alp_project.py at build time, so no
-# static list exists to harvest -- match the naming convention instead.
-# Lowercase alp_e1m_* is exclusively board names (the C-API uses the
-# unprefixed E1M_* / ALP_E1M_* macro families), so this is unambiguous.
-_BOARD_NAME_RE = re.compile(r"alp_e1m_[a-z0-9_]+$")
+# Real Zephyr board target names are harvested from the `board: name:`
+# field of each in-tree zephyr/boards/alp/<dir>/board.yml (see
+# collect_real_board_names()) -- board EXISTENCE, not naming shape.  A
+# board name that merely matches the alp_e1m_[a-z0-9_]+ shape (e.g. a
+# renamed-before-landing or never-shipped target) is dead; only a real
+# board.yml makes it known.  Matches the first `name:` line in the file,
+# which is always `board: name:` -- it precedes the `socs:` list's own
+# `- name:` entries.
+_BOARD_YML_NAME_RE = re.compile(r"^\s*name:\s*(\S+)", re.MULTILINE)
 
 # docs/ subdirectories scanned recursively for dead symbols.
 _DOC_SUBDIRS = ("tutorials", "soms", "boards")
@@ -231,6 +245,30 @@ def collect_known_symbols(root: pathlib.Path) -> set[str]:
     return symbols
 
 
+def collect_real_board_names(root: pathlib.Path) -> set[str]:
+    """Return every real Zephyr board target name shipped in-tree, read
+    from each zephyr/boards/alp/<dir>/board.yml's `board: name:` field.
+
+    This is the ground-truth check the naming-shape regex it replaced
+    was not: a board name that never landed (or was renamed before it
+    did) matches the alp_e1m_[a-z0-9_]+ shape just as well as a real
+    one -- only an actual board.yml on disk proves the board exists.
+    """
+    names: set[str] = set()
+    boards_dir = root / "zephyr" / "boards" / "alp"
+    if not boards_dir.is_dir():
+        return names
+    for board_yml in boards_dir.glob("*/board.yml"):
+        try:
+            text = board_yml.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        m = _BOARD_YML_NAME_RE.search(text)
+        if m:
+            names.add(m.group(1))
+    return names
+
+
 def doc_files_for_symbol_scan(root: pathlib.Path) -> list[pathlib.Path]:
     """Customer-facing docs scanned for dead symbols (spec scope)."""
     out: list[pathlib.Path] = []
@@ -249,13 +287,12 @@ def doc_files_for_symbol_scan(root: pathlib.Path) -> list[pathlib.Path]:
 
 
 def _is_known(tok: str, known: set[str], allow: set[str]) -> bool:
-    """A token is real if it is a known symbol, allowlisted, a generated
-    board target name (alp_e1m_*), or -- for trailing-underscore
-    family/wildcard references like `ALP_E1M_*` (token captured as
-    `ALP_E1M_`) -- a prefix of some real symbol."""
+    """A token is real if it is a known symbol (which includes real,
+    in-tree board target names -- see collect_real_board_names()),
+    allowlisted, or -- for trailing-underscore family/wildcard
+    references like `ALP_E1M_*` (token captured as `ALP_E1M_`) -- a
+    prefix of some real symbol."""
     if tok in known or tok in allow:
-        return True
-    if _BOARD_NAME_RE.match(tok):
         return True
     if tok.endswith("_"):
         return any(s.startswith(tok) for s in known)
@@ -369,7 +406,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     root = pathlib.Path(args.root).resolve()
     allow = _ALLOWLIST | set(args.allow)
 
-    known = collect_known_symbols(root)
+    known = collect_known_symbols(root) | collect_real_board_names(root)
     dead = find_dead_symbols(root, known, allow)
     gaps = find_index_gaps(root)
     stale_cc3501e = find_cc3501e_bridge_stale_claims(root)

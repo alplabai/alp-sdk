@@ -7,9 +7,12 @@
 # and scripts/bench/aen/README.md.
 #
 # Pristine-build an AEN bench app for the E8 M55-HE target.
-# Auto-detects the app's overlay (boards/<board>.overlay or app.overlay)
-# and passes it explicitly (the boards/<board>.overlay does NOT
-# auto-apply for this qualified board target). Prints errors + the
+# Overlays auto-apply: this builds the fully-qualified $AEN_BOARD target
+# (alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he), so Zephyr picks up
+# boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay and
+# app.overlay by name automatically -- no explicit -DEXTRA_DTC_OVERLAY_FILE
+# force needed (the examples ship fully-qualified overlay names, not the
+# bare board name that would silently drop). Prints errors + the
 # memory-region summary only.
 set -e
 
@@ -35,15 +38,9 @@ else
 	APP_DIR="$ALP_SDK_DIR/$APP"
 fi
 
-OVL=""
-[ -f "$APP_DIR/boards/alp_e1m_aen801_m55_he.overlay" ] && OVL="$APP_DIR/boards/alp_e1m_aen801_m55_he.overlay"
-[ -z "$OVL" ] && [ -f "$APP_DIR/app.overlay" ] && OVL="$APP_DIR/app.overlay"
-
 cd "$ALP_SDK_DIR"
-EXTRA=()
-[ -n "$OVL" ] && EXTRA+=("-DEXTRA_DTC_OVERLAY_FILE=$OVL")
-echo ">>> build $NAME  (overlay: ${OVL:-<none/auto>})" >&2
+echo ">>> build $NAME  (overlay: auto-applied by FQ board name)" >&2
 west build -p always -b "$BOARD" "$APP_DIR" -d "$BD" -- \
-	"-DEXTRA_ZEPHYR_MODULES=$ALP_SDK_DIR;$HAL_ALIF_DIR" "${EXTRA[@]}" "$@" 2>&1 |
+	"-DEXTRA_ZEPHYR_MODULES=$ALP_SDK_DIR;$HAL_ALIF_DIR" "$@" 2>&1 |
 	grep -iE "error:|warning: .*(undeclared|implicit|conflict)|FATAL|overflow|Memory region|FLASH:|ITCM:|DTCM:|SRAM:|Linking C executable zephyr/zephyr.elf" || true
 [ -f "$BD/zephyr/zephyr.bin" ] && echo "BIN OK: $BD/zephyr/zephyr.bin ($(stat -c%s "$BD/zephyr/zephyr.bin") B)" || echo "BUILD FAILED: no zephyr.bin"

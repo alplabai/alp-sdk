@@ -7,13 +7,11 @@
 ## Why this doc exists
 
 Pillar 9 ("ecosystem") of the v1.0 readiness plan depends
-on three external relationships landing:
+on two external relationships landing:
 
 1. SoC-vendor SDK / HAL pack confirmations (Renesas FSP,
    Alif Ensemble HAL, NXP MCUXpresso).
-2. `alplabai/alp-zephyr-modules` repo public release with the
-   board-file definitions for every E1M-* SoM in the matrix.
-3. OpenEmbedded layerindex registration for `meta-alp-sdk`.
+2. OpenEmbedded layerindex registration for `meta-alp-sdk`.
 
 None of these are SDK source-tree changes; they're meta-work
 that gates the customer onramp.  This doc tracks the open
@@ -136,8 +134,9 @@ Building for an Alif Ensemble EVK?
 │           gives you the HAL drivers.  west build -b <name>/<qualifier>.
 ├── Board-specific design (E1M-X SoM + custom board)
 │         → keep the default workspace; ship your own board file
-│           under alplabai/alp-zephyr-modules with the alp,pin-array
-│           slot defines.  hal_alif via west update is sufficient.
+│           in-tree under zephyr/boards/alp/ (or a private board
+│           layer) with the alp,pin-array slot defines.  hal_alif
+│           via west update is sufficient.
 └── Older Alif EVK variant not in upstream (alif_e7_dk_rtss_he etc.)
           → enable vendor-sdks + use sdk-alif as workspace topdir
             for the full 8-board set from Alif's zephyr_alif fork.
@@ -209,12 +208,11 @@ DAVE2D + Ethos-U + CSI driver repos are **already public**
 - [x] **Alif-licence acknowledgement in v1.0 docs.**  Section 8
   of `docs/getting-started.md` now carries a per-vendor licence
   table covering Alif / Renesas / NXP / DEEPX (landed §C.36).
-- 📋 **Dual-image build flow upstreaming.**  The §C.30
-  HE-side peer image needs sysbuild glue that builds both
-  HP + HE halves in one invocation.  This sits in
-  `alplabai/alp-zephyr-modules` (not this repo); the
-  upstream pattern from `sdk-alif` v2.x sysbuild can be
-  the model.
+- 📋 **Dual-image build flow.**  The §C.30 HE-side peer image
+  needs sysbuild glue that builds both HP + HE halves in one
+  invocation.  This is an in-tree v0.4 gap (under
+  `zephyr/sysbuild/aen/`), not an external repo; the upstream
+  pattern from `sdk-alif` v2.x sysbuild can be the model.
 
 **Next action**: Sync `metadata/socs/alif/ensemble/*.json`
 to the v2.3.0-rc1 `sdk-alif` Zephyr-board manifests; ping
@@ -356,29 +354,37 @@ ships through `meta-imx` -- a separate release cycle.
 **Next action**: 2026-Q3 sync after the v26.06.00 MCUXpresso
 release stabilises + meta-imx mickledore ships.
 
-## alp-zephyr-modules repo
+## alp-zephyr-modules repo (empty scaffold, not in use)
 
-**Surface impact**: Customer board-file consumption.
-Without this repo public, customers can't build for any
-E1M-* SoM out of the box.
+**Surface impact**: none today.  Customer board-file
+consumption is already solved in-tree: the Alp E1M Zephyr board
+files ship at [`zephyr/boards/alp/`](../zephyr/boards/alp/)
+(`alp_e1m_aen801_m55_he`, `alp_e1m_aen801_m55_hp`,
+`alp_e1m_aen401_m55_hp`, `alp_e1m_aen601_m55_hp`,
+`alp_e1m_v2n101_m33_sm`, `alp_e1m_v2m101_m33_sm`), and
+`zephyr/module.yml`'s `board_root: zephyr` exposes them to
+Zephyr's board scanner as part of the public, in-tree `alp-sdk`
+repo -- no external repo, no gate.  `alplabai/alp-zephyr-modules`
+exists as an empty scaffold repo and is not where board files
+live; nothing depends on it.
 
 **Open items**:
 
-- 📋 **Public release.**  The repo exists private; the
-  public release ships after `alp-sdk` v1.0 cuts so the
-  two version contracts line up.
 - 📋 **v0.4 dual-image build flow.**  The `mproc-mailbox`
   HE-side peer (§C.30) builds via single-target invocation
-  today; the dual-image sysbuild glue is in
-  `alplabai/alp-zephyr-modules` waiting on the public
-  release.
+  today; the dual-image sysbuild glue (under
+  `zephyr/sysbuild/aen/`) is an in-tree v0.4 gap, not gated
+  on any external repo.
 - 📋 **Per-SoM HW baselines.**  Pillar 5 wants per-(SoM, OS)
   bench baselines under `tests/bench/baselines/`.  Those
-  files have to be captured against real silicon, which
-  needs the Zephyr board files this repo publishes.
+  files have to be captured against real silicon, using the
+  in-tree Zephyr board files above.
+- 📋 **Retire the scaffold.**  `alplabai/alp-zephyr-modules`
+  itself should be deleted or archived since it holds no
+  content and nothing references it as a source of truth.
 
-**Next action**: Coordinate public release with the v1.0
-SDK tag.
+**Next action**: file the scaffold-repo retirement as a
+follow-up; no v1.0 gate depends on it.
 
 ## OpenEmbedded layerindex (meta-alp-sdk)
 

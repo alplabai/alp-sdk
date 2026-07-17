@@ -370,7 +370,7 @@ macOS only — there is no native-Windows `native_sim` target.  On
 Windows, run `native_sim/native/64` inside WSL2 (Ubuntu); see
 [`docs/local-ci.md`](local-ci.md) "Path A — WSL2".
 
-Cross-compiled real-silicon builds (`west build -b alp_e1m_evk_aen
+Cross-compiled real-silicon builds (`west build -b alp_e1m_aen801_m55_he/...
 ...`) run fine in native PowerShell — only the host-side
 `native_sim` simulator target requires WSL2.
 

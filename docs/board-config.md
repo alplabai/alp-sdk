@@ -141,9 +141,10 @@ The loader's `--emit dts-overlay` mode parses
 POSITIONAL `alp,pin-array` whose entry N is E1M pad N in the
 canonical `e1m_pinout.h` order (52 slots: IO0..25 = 0..25, PWM0..7 =
 26..33, ENC0_X..ENC3_Y = 34..41, ADC0..7 = 42..49, DAC0..1 = 50..51).
-Per-pad GPIO bank/index columns remain TBD until the upstream SoM
-board files land in `alplabai/alp-zephyr-modules`; the customer
-fills those in place without renumbering.
+Per-pad GPIO bank/index columns remain TBD for SoMs without an
+in-tree Zephyr board file yet under
+[`zephyr/boards/alp/`](../zephyr/boards/alp/); the customer fills
+those in place without renumbering.
 
 For v0.3, consumers writing apps from scratch should still use
 `board.yaml` as the canonical config and treat the per-test

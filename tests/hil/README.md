@@ -38,10 +38,13 @@ HiL spec under this tree passes against the matching board.
 | **Power**     | 12 V barrel jack OR USB-C from the runner host              |
 | **Toolchain** | Zephyr workspace at `$ZEPHYR_BASE` + the per-SoM board file |
 
-The per-SoM Zephyr board target (e.g. `alp_e1m_aen801_m55_hp` for AEN801)
-ships in [`alplabai/alp-zephyr-modules`](https://github.com/alplabai/alp-zephyr-modules)
-once published.  Until that lands, point the runner at your own DT
-overlay via `--board` and `--west-args` (the runner is target-agnostic).
+The per-SoM Zephyr board target for SoMs that already have an in-tree
+board dir (e.g. `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he` for
+AEN801) lives at [`zephyr/boards/alp/`](../../zephyr/boards/alp/) --
+no external module needed.  SoMs marked "pending" in the table below
+have no board dir yet; point the runner at your own DT overlay via
+`--board` and `--west-args` in the meantime (the runner is
+target-agnostic).
 
 ---
 
@@ -78,25 +81,27 @@ invocation error (missing spec dir, malformed YAML, etc.).
 
 ## Currently supported boards
 
-Each entry below ships a `_runner.yaml` with a board target.  The
-Zephyr board target itself lives in [`alplabai/alp-zephyr-modules`](https://github.com/alplabai/alp-zephyr-modules)
-(per the SoM preset's `topology.<core>.board` field).  Until that
-module publishes, override per-invocation with `--board` or by
-editing the dir's `_runner.yaml`.
+Each entry below ships a `_runner.yaml` with a board target.  Six of
+these already have a real Zephyr board dir in-tree at
+[`zephyr/boards/alp/`](../../zephyr/boards/alp/) (per the SoM
+preset's `topology.<core>.board` field) -- their qualified target
+(`<board>/<soc>/<core>`) is usable today.  The rest have no board
+dir yet ("pending" below); override per-invocation with `--board`
+or by editing the dir's `_runner.yaml` once a target exists.
 
-| Board dir              | SoM          | Board       | Board target                  |
-|------------------------|--------------|---------------|-------------------------------|
-| `aen301-evk/`          | E1M-AEN301   | E1M-EVK       | `alp_e1m_aen301_m55_hp`       |
-| `aen401-evk/`          | E1M-AEN401   | E1M-EVK       | `alp_e1m_aen401_m55_hp`       |
-| `aen501-evk/`          | E1M-AEN501   | E1M-EVK       | `alp_e1m_aen501_m55_hp`       |
-| `aen601-evk/`          | E1M-AEN601   | E1M-EVK       | `alp_e1m_aen601_m55_hp`       |
-| `aen701-evk/`          | E1M-AEN701   | E1M-EVK       | `alp_e1m_aen701_m55_hp`       |
-| `aen801-evk/`          | E1M-AEN801   | E1M-EVK       | `alp_e1m_aen801_m55_hp`       |
-| `v2n101-x-evk/`        | E1M-V2N101   | E1M-X-EVK     | `alp_e1m_v2n101_m33_sm`       |
-| `v2n102-x-evk/`        | E1M-V2N102   | E1M-X-EVK     | `alp_e1m_v2n102_m33_sm`       |
-| `v2m101-x-evk/`        | E1M-V2M101   | E1M-X-EVK     | `alp_e1m_v2m101_m33_sm`       |
-| `v2m102-x-evk/`        | E1M-V2M102   | E1M-X-EVK     | `alp_e1m_v2m102_m33_sm`       |
-| `nx9101-evk/`          | E1M-NX9101   | E1M-EVK       | `alp_e1m_nx9101_m33`          |
+| Board dir              | SoM          | Board       | In-tree | Board target                                          |
+|------------------------|--------------|---------------|---------|--------------------------------------------------------|
+| `aen301-evk/`          | E1M-AEN301   | E1M-EVK       | pending | `alp_e1m_aen301_m55_hp` (unqualified placeholder)     |
+| `aen401-evk/`          | E1M-AEN401   | E1M-EVK       | yes     | `alp_e1m_aen401_m55_hp/ae402fa0e5597le0/rtss_hp`      |
+| `aen501-evk/`          | E1M-AEN501   | E1M-EVK       | pending | `alp_e1m_aen501_m55_hp` (unqualified placeholder)     |
+| `aen601-evk/`          | E1M-AEN601   | E1M-EVK       | yes     | `alp_e1m_aen601_m55_hp/ae612fa0e5597ls0/rtss_hp`      |
+| `aen701-evk/`          | E1M-AEN701   | E1M-EVK       | pending | `alp_e1m_aen701_m55_hp` (unqualified placeholder)     |
+| `aen801-evk/`          | E1M-AEN801   | E1M-EVK       | yes     | `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he` (HE), `alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp` (HP) |
+| `v2n101-x-evk/`        | E1M-V2N101   | E1M-X-EVK     | yes     | `alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33`          |
+| `v2n102-x-evk/`        | E1M-V2N102   | E1M-X-EVK     | pending | `alp_e1m_v2n102_m33_sm` (unqualified placeholder)     |
+| `v2m101-x-evk/`        | E1M-V2M101   | E1M-X-EVK     | yes     | `alp_e1m_v2m101_m33_sm/r9a09g056n48gbg/cm33`          |
+| `v2m102-x-evk/`        | E1M-V2M102   | E1M-X-EVK     | pending | `alp_e1m_v2m102_m33_sm` (unqualified placeholder)     |
+| `nx9101-evk/`          | E1M-NX9101   | E1M-EVK       | pending | `alp_e1m_nx9101_m33` (unqualified placeholder)        |
 
 ---
 
@@ -115,7 +120,7 @@ example: examples/peripheral-io/gpio-button-led
 
 # Zephyr board target.  When omitted, defaults to the per-directory
 # default declared in <dir>/_runner.yaml.
-board: alp_e1m_evk_aen
+board: alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
 
 # Serial assertion: capture `duration_s` seconds of output after flash;
 # the test passes iff every `expect_contains` string is present (case-
@@ -138,7 +143,7 @@ Per-directory defaults live in `<sku>-<board>/_runner.yaml`:
 
 ```yaml
 schema_version: 1
-board:    alp_e1m_evk_aen
+board:    alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
 serial_port:  /dev/ttyACM0
 flash_method: westflash         # or pyocd-flash
 defaults:

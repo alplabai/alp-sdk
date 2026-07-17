@@ -8,7 +8,9 @@
 # derives the CONFIG_* set (CONFIG_ADC, CONFIG_ALP_SOC_ALIF_ENSEMBLE_E8, ...)
 # from board.yaml and layers it over prj.conf via OVERLAY_CONFIG.  The
 # device-only DT wiring (dac0 + adc12_0 + the alp-dac0/alp-adc0 aliases) lives in
-# boards/alp_e1m_aen801_m55_he.overlay, which Zephyr auto-applies by board name.
+# boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay, which Zephyr
+# auto-applies by the FULLY-QUALIFIED board name (bare-name overlays are
+# silently dropped by `west build -b alp_e1m_aen801_m55_he/.../rtss_he`).
 
 cmake_minimum_required(VERSION 3.20)
 

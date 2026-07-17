@@ -95,7 +95,7 @@ west build -p always -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
 ```
 
 The overlay is named for the fully-qualified board
-(`boards/alp_e1m_aen801_m55_he.overlay`), so it auto-applies.
+(`boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay`), so it auto-applies.
 
 ## Bench run (human-operated; not done by the SDK)
 

@@ -99,22 +99,23 @@ v0.1 ships first-class support for the **E1M Development Board**
 - `docs/boards/e1m-evk.md` — SDK-side cheat sheet for the EVK:
   power tree, I²C bus map, sensor addresses, IO-expander
   assignment, JTAG/SWD header, BOOT/reset/module-enable.
-- `tests/zephyr/peripheral/boards/alp_e1m_evk_aen.overlay` — DT
+- `tests/zephyr/peripheral/boards/alp_e1m_aen801_m55_he.overlay` — DT
   overlay that wires the SDK's `alp_i2c0` / `alp_spi0` / `alp_uart0`
   aliases and the `alp,pin-array` (rotary encoder + RGB LED + IO
   expander) to the EVK connectors.
-- `testcase.yaml` defines an `alp_sdk.peripheral.evk_aen` build-only
-  scenario tagged `alp-evk` so the nightly HW-in-loop CI on a real
-  EVK selects it explicitly.
+- `testcase.yaml` carries a parked `alp_sdk.peripheral.evk_aen`
+  build-only scenario (commented out, targeting
+  `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he`) pending
+  HW-in-loop CI wiring.
 
-The Zephyr **board file** for `alp_e1m_evk_aen` itself does not live
-in this repo — it lands in
-[`alplabai/alp-zephyr-modules`](https://github.com/alplabai/alp-zephyr-modules)
-per the architectural split.  The overlay above re-aliases what
-that board file exposes.
+The Zephyr **board file** for `alp_e1m_aen801_m55_he` /
+`alp_e1m_aen801_m55_hp` ships in-tree, under
+[`zephyr/boards/alp/`](../zephyr/boards/alp/) — there is no separate
+board-file repo.  The overlay above re-aliases what that board file
+exposes.
 
-EVK support for V2N-family SoMs (`alp_e1m_evk_v2n`) lands in v0.2;
-V2N+M1 in v0.3.
+EVK support for V2N-family SoMs (`alp_e1m_v2n101_m33_sm`) lands in
+v0.2; V2N+M1 (`alp_e1m_v2m101_m33_sm`) in v0.3.
 
 ### Multi-Processor BSP foundation (AEN)
 
@@ -408,9 +409,10 @@ target verification still parked behind the `hil-yocto` runner.
   `swap-using-scratch`.  Dev-key generator at
   `keys/generate_dev_key.sh` (idempotent; `chmod 600`).  Full
   chain-of-trust + key lifecycle in `docs/secure-boot.md`.
-  Live compile-verification gates on the authoritative
-  `alp_e1m_evk_aen` board file landing at
-  `alplabai/alp-zephyr-modules`.
+  Compile-verification gates on the in-tree `alp_e1m_aen801_m55_he`
+  board file (`zephyr/boards/alp/e1m_aen801_m55_he/`); full HIL
+  secure-boot verification is still bench-pending (see
+  `docs/test-plan.md`).
 - **Mender OTA opt-in on meta-alp.**
   `meta-alp-sdk/conf/distro/include/mender.inc` configures
   Mender's `mender-full` class with A/B rootfs + storage layout +
@@ -431,8 +433,10 @@ target verification still parked behind the `hil-yocto` runner.
   glue); HTTP/HTTPS client; time-series buffering helpers.
 - **Camera:** `alp_camera_v4l2` wrapper, GStreamer pipeline helpers.
 - **Signal:** ARM Compute Library bindings.
-- **Secure boot:** authoritative `alp_e1m_evk_aen` board file
-  (separate repo) + production OPTIGA Trust M provisioning flow.
+- **Secure boot:** HIL verification of the secure-boot chain on the
+  in-tree `alp_e1m_aen801_m55_he` board file (signed boot, tamper
+  rollback, mid-swap power loss) + production OPTIGA Trust M
+  provisioning flow.
 - **Secure OTA on AEN-Zephyr:** Mender Zephyr client vs Hawkbit
   decision; image-write hook onto MCUboot secondary slot.
 - **Device identity:** OPTIGA Trust M pre-provisioned ECC key pair

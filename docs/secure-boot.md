@@ -6,11 +6,14 @@ signing key lifecycle that makes it work.
 
 > **Status: v0.4-prep.**  Scaffolding lands in this revision --
 > the sysbuild config, dev-key generation script, and this
-> document.  Live compile-verification gates on the
-> authoritative [`alp_e1m_evk_aen`](https://github.com/alplabai/alp-zephyr-modules)
-> board file landing in the external Zephyr-modules repo.  Until
-> then this doc is the contract downstream consumers build
-> against.
+> document.  Compile-verification gates on the real in-tree board
+> file (`alp_e1m_aen801_m55_he` / `alp_e1m_aen801_m55_hp`, under
+> [`zephyr/boards/alp/`](../zephyr/boards/alp/)).  Full HIL
+> secure-boot verification (signed boot, tampered-image rollback,
+> mid-swap power loss recovery) is still bench-pending — see the
+> MCUboot rows in [`docs/test-plan.md`](test-plan.md) — so treat this
+> doc as the contract downstream consumers build against, not a
+> silicon-proven claim.
 
 ## Chain of trust
 
@@ -80,7 +83,7 @@ explicit.
    `keys/mcuboot_dev_ecdsa_p256.pem` (gitignored).
 3. Build with sysbuild:
    ```bash
-   west build -b alp_e1m_evk_aen \
+   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
        path/to/app \
        --sysbuild \
        -- -DSB_CONF_FILE=<abs-alp-sdk>/zephyr/sysbuild/aen/sysbuild.conf

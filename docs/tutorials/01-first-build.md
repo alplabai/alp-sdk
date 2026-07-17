@@ -1,21 +1,18 @@
-<!-- Last verified: 2026-07-02 (board repo still unpublished; native_sim path only). -->
+<!-- Last verified: 2026-07-17 (real board target, in-tree). -->
 
 # 01 -- First build: GPIO + LED
 
-> **Status:** the `alp_e1m_evk_aen` board definition this tutorial
-> builds against ships via the
-> [`alplabai/alp-zephyr-modules`](https://github.com/alplabai/alp-zephyr-modules)
-> repo, which is **not yet published**.  Until it lands, the
-> real-hardware steps below (Step 3's `-b alp_e1m_evk_aen`, Step 4's
-> flash) cannot be reproduced -- follow along on
-> `native_sim/native/64` instead, and watch
-> [`docs/getting-started.md` §7](../getting-started.md#7-targeting-real-silicon),
-> which tracks the board-file publication.
+> **Status:** the board target this tutorial builds against,
+> `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he`, ships in-tree
+> under [`zephyr/boards/alp/`](../../zephyr/boards/alp/) (no external
+> repo). If you don't have an E1M-AEN801 SoM on hand, follow along on
+> `native_sim/native/64` instead — see
+> [`docs/getting-started.md` §7](../getting-started.md#7-targeting-real-silicon).
 
 The canonical "your first Alp SDK build."  This tutorial walks
 through compiling `examples/peripheral-io/gpio-button-led/` against the
-`alp_e1m_evk_aen` board, flashing it, and watching a button toggle
-an LED.  Time budget: 20 minutes.
+`alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he` board, flashing it,
+and watching a button toggle an LED.  Time budget: 20 minutes.
 
 ## Prerequisites
 
@@ -86,7 +83,7 @@ Key contract every Alp peripheral call follows:
 ## Step 3 -- Build
 
 ```bash
-west alp-build -b alp_e1m_evk_aen examples/peripheral-io/gpio-button-led
+west alp-build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/peripheral-io/gpio-button-led
 ```
 
 If your west workspace doesn't recognise `alp-build`, that's the
@@ -97,7 +94,7 @@ python3 alp-sdk/scripts/alp_project.py \
     --input examples/peripheral-io/gpio-button-led/board.yaml \
     --emit zephyr-conf > /tmp/alp.conf
 
-west build -b alp_e1m_evk_aen examples/peripheral-io/gpio-button-led -- \
+west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/peripheral-io/gpio-button-led -- \
     -DOVERLAY_CONFIG=/tmp/alp.conf \
     -DEXTRA_ZEPHYR_MODULES=alp-sdk
 ```

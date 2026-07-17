@@ -49,10 +49,10 @@ canonical two-controller split a full 52-slot board file uses.
 
 ## Build (on the EVK)
 
-Pending the `alp_e1m_evk_aen` board file in
-[`alplabai/alp-zephyr-modules`](https://github.com/alplabai/alp-zephyr-modules):
+The board file ships in-tree at
+[`zephyr/boards/alp/e1m_aen801_m55_he/`](../../../zephyr/boards/alp/e1m_aen801_m55_he/):
 
 ```bash
-west build -b alp_e1m_evk_aen examples/peripheral-io/vendor-ext-composability
+west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/peripheral-io/vendor-ext-composability
 west flash
 ```

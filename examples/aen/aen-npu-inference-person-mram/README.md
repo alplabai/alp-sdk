@@ -44,7 +44,7 @@ west build -p always \
   examples/aen/aen-npu-inference-person-mram \
   -- \
   -DEXTRA_ZEPHYR_MODULES="<alp-sdk>;<hal_alif>;<hal/ethos_u>;<lib/tflite-micro>" \
-  -DEXTRA_DTC_OVERLAY_FILE=examples/aen/aen-npu-inference-person-mram/boards/alp_e1m_aen801_m55_he.overlay \
+  -DEXTRA_DTC_OVERLAY_FILE=examples/aen/aen-npu-inference-person-mram/boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay \
   -DAEN_NPU_VELA=<venv>/bin/vela \
   -DAEN_NPU_VELA_CONFIG=<alp-sdk-internal>/.../ensemble_vela.ini
 ```

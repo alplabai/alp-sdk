@@ -10,7 +10,10 @@
 
 board_runner_args(alif_flash "--device=AE402FA0E5597LE0_HP")
 
-# jlink: generic Cortex-M55 -- the Alif part profile will not connect.
+# jlink: generic Cortex-M55 -- the debug/attach default (the Alif
+# part-number device profile also connects fine on a J-Link DLL
+# V9.46+ -- only old DLLs failed -- but it's reserved for the Flow D
+# MRAM loader; the generic profile has no MRAM loader).
 board_runner_args(jlink "--device=Cortex-M55" "--speed=4000")
 
 board_set_flasher_ifnset(alif_flash)
