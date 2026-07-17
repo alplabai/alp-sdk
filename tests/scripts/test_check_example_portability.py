@@ -261,6 +261,107 @@ def test_chip_include_declared_in_board_yaml_is_not_flagged(
     assert errors == []
 
 
+def test_load_board_qualified_names_finds_aen801_qualified_sibling() -> None:
+    qualified = portability.load_board_qualified_names()
+    assert qualified["alp_e1m_aen801_m55_he"] == {
+        "alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he",
+    }
+    assert qualified["alp_e1m_v2n101_m33_sm"] == {
+        "alp_e1m_v2n101_m33_sm_r9a09g056n48gbg_cm33",
+    }
+
+
+def test_customer_overlay_bare_name_with_qualified_sibling_is_hard_error(
+    tmp_path: Path,
+) -> None:
+    """A board.yaml-bearing (customer-facing) example whose overlay
+    names the bare board id, when a fully-qualified sibling exists,
+    silently drops on `west build -b <bare>/<soc>/<core>` -- flag it."""
+    example = _write_example(
+        tmp_path,
+        """
+        som:
+          sku: E1M-AEN801
+        preset: e1m-evk
+        cores:
+          m55_he:
+            app: ./src
+        """,
+    )
+    (example / "boards").mkdir()
+    (example / "boards" / "alp_e1m_aen801_m55_he.overlay").write_text(
+        "", encoding="utf-8")
+
+    _, errors, _ = portability.check_example(
+        example, {}, {}, board_qualified_names={
+            "alp_e1m_aen801_m55_he": {
+                "alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he",
+            },
+        })
+
+    assert errors == [
+        f"{(example / 'boards' / 'alp_e1m_aen801_m55_he.overlay').as_posix()}: "
+        "overlay names bare board 'alp_e1m_aen801_m55_he' but this example "
+        "has a board.yaml (customer-facing) -- Zephyr only auto-applies "
+        "the fully-qualified overlay on `west build -b "
+        "alp_e1m_aen801_m55_he/<soc>/<core>`; rename to one of "
+        "['alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he']"
+    ]
+
+
+def test_customer_overlay_bare_name_with_no_qualified_sibling_is_ok(
+    tmp_path: Path,
+) -> None:
+    """A board with no fully-qualified sibling (single SoC/core) keeps
+    its bare-name overlay valid."""
+    example = _write_example(
+        tmp_path,
+        """
+        som:
+          sku: E1M-AEN801
+        preset: e1m-evk
+        cores:
+          m55_he:
+            app: ./src
+        """,
+    )
+    (example / "boards").mkdir()
+    (example / "boards" / "alp_e1m_aen801_m55_he.overlay").write_text(
+        "", encoding="utf-8")
+
+    _, errors, _ = portability.check_example(
+        example, {}, {}, board_qualified_names={})
+
+    assert errors == []
+
+
+def test_bench_example_with_no_board_yaml_is_out_of_scope(
+    tmp_path: Path,
+) -> None:
+    """Internal bench/regcheck dirs (no board.yaml) are unaffected --
+    scripts/bench/aen/build.sh force-applies the bare-name overlay
+    itself, and check_example() never reaches the overlay check for a
+    dir with no board.yaml at all (main()'s example walk only enters
+    check_example() for board.yaml-bearing dirs; this proves the
+    no-board.yaml short circuit inside check_example() itself)."""
+    example = tmp_path / "aen-some-regcheck"
+    example.mkdir()
+    (example / "boards").mkdir()
+    (example / "boards" / "alp_e1m_aen801_m55_he.overlay").write_text(
+        "", encoding="utf-8")
+
+    ring, errors, notes = portability.check_example(
+        example, {}, {}, board_qualified_names={
+            "alp_e1m_aen801_m55_he": {
+                "alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he",
+            },
+        })
+
+    assert ring == "no-board-yaml"
+    assert errors == []
+    assert notes == []
+
+
 def test_yaml_comment_does_not_satisfy_supported_board_variant(
     tmp_path: Path,
 ) -> None:

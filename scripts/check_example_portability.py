@@ -87,6 +87,20 @@ The lint enforces two invariants:
       it is not scoped to `board.yaml`-bearing examples, so it also
       catches a dead overlay in a bare-Zephyr regcheck/test dir.
 
+  (g) HARD ERROR: a customer-facing (`board.yaml`-bearing) example's
+      `boards/<name>.overlay` must NOT name a bare board that has a
+      fully-qualified sibling under `zephyr/boards/alp/<dir>/` (e.g.
+      `alp_e1m_aen801_m55_he.overlay` when
+      `alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.yaml` exists next
+      to that board's `board.yml`).  Zephyr only auto-applies the
+      overlay named after the FULLY-QUALIFIED board id on the customer
+      build (`west build -b <bare>/<soc>/<core>`); a bare-name overlay
+      builds "clean" and silently drops its devicetree edits.  Unlike
+      (f), this check is scoped to `board.yaml`-bearing examples only
+      -- an internal bench/regcheck dir with no `board.yaml` legitimately
+      ships a bare-name overlay because `scripts/bench/aen/build.sh`
+      force-applies it via `-DEXTRA_DTC_OVERLAY_FILE`.
+
 Run from the alp-sdk repo root:
 
     python3 scripts/check_example_portability.py
@@ -389,6 +403,75 @@ def overlay_board_name_error(overlay: pathlib.Path,
     )
 
 
+def load_board_qualified_names() -> dict[str, set[str]]:
+    """Map each board.yml's bare `name:` to the fully-qualified Zephyr
+    board id(s) (`<board>_<soc>_<core>`) that ship next to it.
+
+    Every `zephyr/boards/alp/<dir>/` carries exactly one twister board
+    descriptor per SoC/core combo, named `<bare-name>_<soc>_<core>.yaml`
+    alongside `board.yml`.  Scraping those sibling filenames (rather
+    than hardcoding a naming scheme) is what lets this generalise past
+    AEN801 to any current or future SoM whose board splits bare/
+    qualified the same way.  A board with no such sibling (single SoC/
+    core, no split) maps to an empty set -- its bare overlay name stays
+    valid.
+    """
+    out: dict[str, set[str]] = {}
+    boards_dir = ROOT / "zephyr" / "boards" / "alp"
+    if not boards_dir.is_dir():
+        return out
+    for board_dir in sorted(p for p in boards_dir.iterdir() if p.is_dir()):
+        board_yml = board_dir / "board.yml"
+        if not board_yml.is_file():
+            continue
+        with board_yml.open(encoding="utf-8") as f:
+            doc = yaml.safe_load(f) or {}
+        bare_name = (doc.get("board") or {}).get("name")
+        if not isinstance(bare_name, str):
+            continue
+        out[bare_name] = {p.stem for p in board_dir.glob(f"{bare_name}_*.yaml")}
+    return out
+
+
+def check_customer_overlay_qualified(
+        example_dir: pathlib.Path,
+        board_qualified_names: dict[str, set[str]]) -> list[str]:
+    """HARD ERROR: a customer-facing (board.yaml-bearing) example's
+    `boards/*.overlay` must not name a bare board that has a fully-
+    qualified sibling -- Zephyr only auto-applies the overlay named
+    after the FULLY-QUALIFIED board id on `west build -b
+    <bare>/<soc>/<core>` (the customer invocation for a catalog
+    example); a `boards/<bare-name>.overlay` silently drops with no
+    build error.  4 customer AEN examples hit exactly this before being
+    renamed to the qualified form.
+
+    Internal bench/regcheck examples carry no board.yaml and are out of
+    scope here -- scripts/bench/aen/build.sh force-applies the
+    bare-name overlay itself via -DEXTRA_DTC_OVERLAY_FILE and is
+    unaffected by Zephyr's board-target auto-apply rule.
+    """
+    boards_dir = example_dir / "boards"
+    if not boards_dir.is_dir():
+        return []
+    errors: list[str] = []
+    for overlay in sorted(boards_dir.glob("*.overlay")):
+        qualified = board_qualified_names.get(overlay.stem)
+        if not qualified:
+            continue
+        try:
+            rel = overlay.relative_to(ROOT).as_posix()
+        except ValueError:
+            rel = overlay.as_posix()
+        errors.append(
+            f"{rel}: overlay names bare board '{overlay.stem}' but this "
+            "example has a board.yaml (customer-facing) -- Zephyr only "
+            "auto-applies the fully-qualified overlay on `west build -b "
+            f"{overlay.stem}/<soc>/<core>`; rename to one of "
+            f"{sorted(qualified)}"
+        )
+    return errors
+
+
 def check_dead_board_overlays(real_boards: set[str]) -> list[str]:
     """Return hard errors for every examples/**/boards/*.overlay and
     tests/**/boards/*.overlay naming a board that doesn't exist.
@@ -597,11 +680,14 @@ def classify(chip_families: dict[str, list[str]],
 def check_example(example_dir: pathlib.Path,
                   chip_families: dict[str, list[str]],
                   som_optional: dict[str, set[str]],
-                  board_host_families: Optional[dict[str, set[str]]] = None
+                  board_host_families: Optional[dict[str, set[str]]] = None,
+                  board_qualified_names: Optional[dict[str, set[str]]] = None
                   ) -> tuple[str, list[str], list[str]]:
     """Return (classification, hard-error list, info-level note list)."""
     if board_host_families is None:
         board_host_families = load_board_host_families()
+    if board_qualified_names is None:
+        board_qualified_names = load_board_qualified_names()
     board_yaml = example_dir / "board.yaml"
     if not board_yaml.exists():
         return "no-board-yaml", [], []
@@ -678,6 +764,8 @@ def check_example(example_dir: pathlib.Path,
         # raising.
         example_key = example_dir.name
     errors.extend(check_no_zephyr_driver_includes(example_dir, example_key))
+    errors.extend(check_customer_overlay_qualified(example_dir,
+                                                   board_qualified_names))
 
     ring = classify(chip_families, chips, family,
                     doc.get("supported_boards"), board_host_families)
@@ -696,6 +784,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     chip_families = load_chip_families()
     som_optional  = load_som_optional_chips()
     board_host_families = load_board_host_families()
+    board_qualified_names = load_board_qualified_names()
 
     examples_dir = ROOT / "examples"
     # Walk one OR two levels deep: cross-family examples live directly
@@ -722,7 +811,8 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     for ex in examples:
         ring, errors, notes = check_example(ex, chip_families, som_optional,
-                                            board_host_families)
+                                            board_host_families,
+                                            board_qualified_names)
         classification.setdefault(ring, []).append(ex.name)
         for e in errors:
             print(f"FAIL  {ex.name}: {e}", file=sys.stderr)
