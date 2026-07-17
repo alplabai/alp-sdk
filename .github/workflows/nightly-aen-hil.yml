@@ -63,16 +63,12 @@ jobs:
           ZEPHYR_BASE: ${{ env.HOME }}/zephyrproject/zephyr
           EXTRA_ZEPHYR_MODULES: ${{ github.workspace }}/alp-sdk
         run: |
-          # alp_e1m_evk_aen lives in alplabai/alp-zephyr-modules.
-          # Until that lands the build target is parked — the
-          # workflow logs and exits 0 instead of failing the
-          # nightly run on an absent dependency.
-          if ! ls $HOME/zephyrproject/modules 2>/dev/null | grep -q alp-zephyr-modules; then
-            echo "::warning::alp_e1m_evk_aen board file not yet published; skipping HIL flash"
-            exit 0
-          fi
+          # alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he ships
+          # in-tree at zephyr/boards/alp/e1m_aen801_m55_he/ -- no
+          # external module needed, so there is no absent-dependency
+          # case to park on.  A build failure now fails this job.
           cd $HOME/zephyrproject
-          west build -p always -b alp_e1m_evk_aen \
+          west build -p always -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
               ${{ github.workspace }}/alp-sdk/tests/zephyr/peripheral
 
       - name: Flash + capture serial
@@ -103,18 +99,13 @@ jobs:
       #   diagnostics_modules.yaml  -> board.yaml `diagnostics.modules:`
       #
       # The runner exits 0 if every spec asserts cleanly, 1 if any fail,
-      # 2 on invocation error.  Skipped when the board-target module
-      # isn't published yet (same gate as the ztest build above).
+      # 2 on invocation error.
       - name: HiL smoke -- _common + AEN801 board specs
         if: success()
         env:
           ZEPHYR_BASE: ${{ env.HOME }}/zephyrproject/zephyr
           EXTRA_ZEPHYR_MODULES: ${{ github.workspace }}/alp-sdk
         run: |
-          if ! ls $HOME/zephyrproject/modules 2>/dev/null | grep -q alp-zephyr-modules; then
-            echo "::warning::alp_e1m_evk_aen board file not yet published; skipping HiL smoke matrix"
-            exit 0
-          fi
           cd ${{ github.workspace }}/alp-sdk
           python3 tests/hil/run_smoke.py --validate tests/hil/aen801-evk/
           python3 tests/hil/run_smoke.py tests/hil/aen801-evk/
