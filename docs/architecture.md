@@ -688,14 +688,21 @@ for the full rationale and edge-case guidance.
   repo.  alp-studio's pin allocator now reads these YAMLs directly.
 - AI accelerator runtimes (Ethos-U `vela`, Renesas DRP-AI translator) —
   separate vendor repos.
-- Zephyr board files for Alp modules — `alplabai/alp-zephyr-modules`
-  (TBD).
+- Zephyr board files for Alp E1M modules — in-tree, under
+  [`zephyr/boards/alp/`](../zephyr/boards/alp/); `zephyr/module.yml`'s
+  `board_root: zephyr` exposes them to Zephyr's board scanner.  An
+  earlier draft of this doc planned a separate `alp-zephyr-modules`
+  repo; that plan was dropped so board files stay next to the
+  metadata that generates them.
 
 ## Non-goals
 
 - **Not a HAL.** Vendor HALs are wrapped, not replaced.
-- **Not a board-file collection.** Zephyr boards live in
-  `alp-zephyr-modules`.
+- **Not a board-file collection... except the Alp E1M ones.** Zephyr
+  board files for Alp E1M modules live in-tree at `zephyr/boards/alp/`
+  (see above) — they're generated from this repo's own
+  `metadata/e1m_modules/*.yaml` + SoC JSON, so there is no separate
+  board-file repo.
 - **Not the studio.** Chat, allocator, the model-training pipeline, and
   fab routing stay in alp-studio.  (The SDK *does* own the on-device
   `.alpmodel` compile/package/load pipeline — `alp model build` +

@@ -348,12 +348,20 @@ the full list and how to add one.
 
 ## 7. Targeting real silicon
 
-When `alplabai/alp-zephyr-modules` publishes the EVK board
-files (`alp_e1m_evk_aen` for the AEN family, `alp_e1m_evk_v2n`
-for V2N), build with that as the `-b` target:
+Real board files ship in-tree under [`zephyr/boards/alp/`](../zephyr/boards/alp/)
+(exposed via `zephyr/module.yml`'s `board_root: zephyr` — no external
+repo to wait on).  Build with the qualified board target for your SoM
+as the `-b` argument, e.g. E1M-AEN801 (Alif Ensemble E8, M55-HE):
 
 ```bash
-west build -b alp_e1m_evk_aen alp-sdk/examples/peripheral-io/gpio-button-led
+west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he alp-sdk/examples/peripheral-io/gpio-button-led
+west flash
+```
+
+or E1M-V2N101 (Renesas RZ/V2N, Cortex-M33 system manager):
+
+```bash
+west build -b alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33 alp-sdk/examples/peripheral-io/gpio-button-led
 west flash
 ```
 

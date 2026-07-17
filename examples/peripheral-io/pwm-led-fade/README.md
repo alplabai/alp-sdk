@@ -23,11 +23,12 @@ west build -t run
 ## Build (on real silicon, EVK with E1M-AEN)
 
 The example's overlay points the `alp-pwm0` alias at the EVK's
-user LED.  Once `alplabai/alp-zephyr-modules` ships the EVK board
-file, build with:
+user LED.  The EVK board file ships in-tree at
+[`zephyr/boards/alp/e1m_aen801_m55_he/`](../../../zephyr/boards/alp/e1m_aen801_m55_he/);
+build with:
 
 ```bash
-west build -b alp_e1m_evk_aen examples/peripheral-io/pwm-led-fade \
+west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/peripheral-io/pwm-led-fade \
     -- -DEXTRA_ZEPHYR_MODULES=$(pwd)
 west flash
 ```

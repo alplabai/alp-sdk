@@ -19,7 +19,7 @@ tests:
   alp_sdk.examples.v2n_m1_deepx_inference.native_sim:
     platform_allow: native_sim/native/64
   alp_sdk.examples.v2n_m1_deepx_inference.v2n_m1:
-    # Build-only until a V2N-M1 board file lands in
-    # alplabai/alp-zephyr-modules + the customer-side dx_rt
-    # integration ships.
+    # Build-only until the customer-side dx_rt integration ships.
+    # The V2N-M1 board file (alp_e1m_v2m101_m33_sm) already ships
+    # in-tree under zephyr/boards/alp/e1m_v2m101_m33_sm/.
     build_only: true

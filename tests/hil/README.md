@@ -79,10 +79,12 @@ invocation error (missing spec dir, malformed YAML, etc.).
 ## Currently supported boards
 
 Each entry below ships a `_runner.yaml` with a board target.  The
-Zephyr board target itself lives in [`alplabai/alp-zephyr-modules`](https://github.com/alplabai/alp-zephyr-modules)
-(per the SoM preset's `topology.<core>.board` field).  Until that
-module publishes, override per-invocation with `--board` or by
-editing the dir's `_runner.yaml`.
+Zephyr board files for shipped SoM presets live in-tree at
+[`zephyr/boards/alp/`](../../zephyr/boards/alp/) (per the SoM
+preset's `topology.<core>.board` field); presets without an in-tree
+board file yet still need one before HIL can select their target.
+Override per-invocation with `--board` or by editing the dir's
+`_runner.yaml`.
 
 | Board dir              | SoM          | Board       | Board target                  |
 |------------------------|--------------|---------------|-------------------------------|
@@ -115,7 +117,7 @@ example: examples/peripheral-io/gpio-button-led
 
 # Zephyr board target.  When omitted, defaults to the per-directory
 # default declared in <dir>/_runner.yaml.
-board: alp_e1m_evk_aen
+board: alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
 
 # Serial assertion: capture `duration_s` seconds of output after flash;
 # the test passes iff every `expect_contains` string is present (case-
@@ -138,7 +140,7 @@ Per-directory defaults live in `<sku>-<board>/_runner.yaml`:
 
 ```yaml
 schema_version: 1
-board:    alp_e1m_evk_aen
+board:    alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
 serial_port:  /dev/ttyACM0
 flash_method: westflash         # or pyocd-flash
 defaults:

@@ -198,8 +198,8 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
 - v0.1 ships an **EVK overlay** under `tests/zephyr/peripheral/boards/`
   that wires the `alp-i2c0` alias, the `alp,pin-array` (rotary encoder,
   RGB LED, IO_EXP.INT), and the `alp-uart0` alias to EVK pins via the
-  SoM's pinmux.  It targets `alp_e1m_evk_aen` (AEN-family build); V2N
-  builds add their own overlay in v0.2.
+  SoM's pinmux.  It targets `alp_e1m_aen801_m55_he` (AEN-family build);
+  V2N builds add their own overlay in v0.2.
 - v0.1 does **not** ship full board-level sensor drivers.  The
   ICM-42670-P / BMI323 / BMP581 / TCAL9538 drivers land as part of
   the v0.2 "Chips" library expansion (`chips/icm42670p/`, etc.) per
