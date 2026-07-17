@@ -584,7 +584,7 @@ def build_snapshot(version: str, include_root: Path) -> dict[str, Any]:
     }
 
 
-def current_snapshot_version(sdk_version_yaml: Path = SDK_VERSION_YAML) -> str | None:
+def current_snapshot_version(sdk_version_yaml: Path | None = None) -> str | None:
     """
     Return the "vMAJOR.MINOR" label the CURRENT snapshot must carry,
     derived from `metadata/sdk_version.yaml` (the single source for
@@ -595,7 +595,18 @@ def current_snapshot_version(sdk_version_yaml: Path = SDK_VERSION_YAML) -> str |
     Returns None if sdk_version.yaml is missing or unparsable (e.g. a
     caller running the script outside a full checkout) -- callers
     treat that as "can't verify, don't block".
+
+    NB: the default resolves SDK_VERSION_YAML at CALL time, not at def
+    time.  Binding it as a default argument value (`= SDK_VERSION_YAML`)
+    captures the module-level Path when this function is defined, so a
+    test that rebinds `abi_snapshot.SDK_VERSION_YAML` is silently
+    ignored and the guard reads the real repo file instead.  That made
+    the freeze-gate tests assert against whatever version the checkout
+    happened to declare, so they passed at 0.10.x and failed the moment
+    a release bumped the minor.
     """
+    if sdk_version_yaml is None:
+        sdk_version_yaml = SDK_VERSION_YAML
     try:
         text = sdk_version_yaml.read_text(encoding="utf-8")
     except OSError:
