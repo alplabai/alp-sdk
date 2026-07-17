@@ -88,18 +88,22 @@ The lint enforces two invariants:
       catches a dead overlay in a bare-Zephyr regcheck/test dir.
 
   (g) HARD ERROR: a customer-facing (`board.yaml`-bearing) example's
-      `boards/<name>.overlay` must NOT name a bare board that has a
-      fully-qualified sibling under `zephyr/boards/alp/<dir>/` (e.g.
-      `alp_e1m_aen801_m55_he.overlay` when
+      `boards/<name>.overlay` OR `boards/<name>.conf` must NOT name a
+      bare board that has a fully-qualified sibling under
+      `zephyr/boards/alp/<dir>/` (e.g. `alp_e1m_aen801_m55_he.overlay`
+      or `.conf` when
       `alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.yaml` exists next
       to that board's `board.yml`).  Zephyr only auto-applies the
-      overlay named after the FULLY-QUALIFIED board id on the customer
-      build (`west build -b <bare>/<soc>/<core>`); a bare-name overlay
-      builds "clean" and silently drops its devicetree edits.  Unlike
-      (f), this check is scoped to `board.yaml`-bearing examples only
-      -- an internal bench/regcheck dir with no `board.yaml` legitimately
-      ships a bare-name overlay because `scripts/bench/aen/build.sh`
-      force-applies it via `-DEXTRA_DTC_OVERLAY_FILE`.
+      overlay/`.conf` named after the FULLY-QUALIFIED board id on the
+      customer build (`west build -b <bare>/<soc>/<core>`); a bare-name
+      overlay or `.conf` builds "clean" and silently drops its
+      devicetree edits or Kconfig defaults.  Unlike (f), this check is
+      scoped to `board.yaml`-bearing examples only -- an internal
+      bench/regcheck dir with no `board.yaml` legitimately ships a
+      bare-name overlay/`.conf` because `scripts/bench/aen/build.sh`
+      force-applies it via `-DEXTRA_DTC_OVERLAY_FILE` (and the
+      matching `.conf` is picked up by `build.sh`'s own board-name
+      match, not Zephyr's fully-qualified auto-apply).
 
 Run from the alp-sdk repo root:
 
@@ -437,38 +441,42 @@ def check_customer_overlay_qualified(
         example_dir: pathlib.Path,
         board_qualified_names: dict[str, set[str]]) -> list[str]:
     """HARD ERROR: a customer-facing (board.yaml-bearing) example's
-    `boards/*.overlay` must not name a bare board that has a fully-
-    qualified sibling -- Zephyr only auto-applies the overlay named
-    after the FULLY-QUALIFIED board id on `west build -b
-    <bare>/<soc>/<core>` (the customer invocation for a catalog
-    example); a `boards/<bare-name>.overlay` silently drops with no
-    build error.  4 customer AEN examples hit exactly this before being
-    renamed to the qualified form.
+    `boards/*.overlay` or `boards/*.conf` must not name a bare board
+    that has a fully-qualified sibling -- Zephyr only auto-applies the
+    overlay/`.conf` named after the FULLY-QUALIFIED board id on `west
+    build -b <bare>/<soc>/<core>` (the customer invocation for a
+    catalog example); a `boards/<bare-name>.overlay` or `.conf`
+    silently drops with no build error.  4 customer AEN examples hit
+    exactly this before being renamed to the qualified form (both the
+    overlay and, separately, a board-scoped `.conf` carry the same
+    bare/qualified match rule).
 
     Internal bench/regcheck examples carry no board.yaml and are out of
     scope here -- scripts/bench/aen/build.sh force-applies the
-    bare-name overlay itself via -DEXTRA_DTC_OVERLAY_FILE and is
-    unaffected by Zephyr's board-target auto-apply rule.
+    bare-name overlay/.conf itself via -DEXTRA_DTC_OVERLAY_FILE (and
+    its own board-name match for the .conf) and is unaffected by
+    Zephyr's board-target auto-apply rule.
     """
     boards_dir = example_dir / "boards"
     if not boards_dir.is_dir():
         return []
     errors: list[str] = []
-    for overlay in sorted(boards_dir.glob("*.overlay")):
-        qualified = board_qualified_names.get(overlay.stem)
-        if not qualified:
-            continue
-        try:
-            rel = overlay.relative_to(ROOT).as_posix()
-        except ValueError:
-            rel = overlay.as_posix()
-        errors.append(
-            f"{rel}: overlay names bare board '{overlay.stem}' but this "
-            "example has a board.yaml (customer-facing) -- Zephyr only "
-            "auto-applies the fully-qualified overlay on `west build -b "
-            f"{overlay.stem}/<soc>/<core>`; rename to one of "
-            f"{sorted(qualified)}"
-        )
+    for pattern, kind in (("*.overlay", "overlay"), ("*.conf", "board Kconfig .conf")):
+        for path in sorted(boards_dir.glob(pattern)):
+            qualified = board_qualified_names.get(path.stem)
+            if not qualified:
+                continue
+            try:
+                rel = path.relative_to(ROOT).as_posix()
+            except ValueError:
+                rel = path.as_posix()
+            errors.append(
+                f"{rel}: {kind} names bare board '{path.stem}' but this "
+                "example has a board.yaml (customer-facing) -- Zephyr only "
+                f"auto-applies the fully-qualified {kind} on `west build -b "
+                f"{path.stem}/<soc>/<core>`; rename to one of "
+                f"{sorted(qualified)}"
+            )
     return errors
 
 

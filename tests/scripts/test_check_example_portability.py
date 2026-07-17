@@ -335,6 +335,44 @@ def test_customer_overlay_bare_name_with_no_qualified_sibling_is_ok(
     assert errors == []
 
 
+def test_customer_conf_bare_name_with_qualified_sibling_is_hard_error(
+    tmp_path: Path,
+) -> None:
+    """A board-scoped `boards/<bare-board>.conf` auto-applies by the same
+    fully-qualified-board match as `.overlay` -- a bare-name `.conf` in a
+    customer-facing example silently drops its Kconfig defaults too."""
+    example = _write_example(
+        tmp_path,
+        """
+        som:
+          sku: E1M-AEN801
+        preset: e1m-evk
+        cores:
+          m55_he:
+            app: ./src
+        """,
+    )
+    (example / "boards").mkdir()
+    (example / "boards" / "alp_e1m_aen801_m55_he.conf").write_text(
+        "", encoding="utf-8")
+
+    _, errors, _ = portability.check_example(
+        example, {}, {}, board_qualified_names={
+            "alp_e1m_aen801_m55_he": {
+                "alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he",
+            },
+        })
+
+    assert errors == [
+        f"{(example / 'boards' / 'alp_e1m_aen801_m55_he.conf').as_posix()}: "
+        "board Kconfig .conf names bare board 'alp_e1m_aen801_m55_he' but "
+        "this example has a board.yaml (customer-facing) -- Zephyr only "
+        "auto-applies the fully-qualified board Kconfig .conf on `west "
+        "build -b alp_e1m_aen801_m55_he/<soc>/<core>`; rename to one of "
+        "['alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he']"
+    ]
+
+
 def test_bench_example_with_no_board_yaml_is_out_of_scope(
     tmp_path: Path,
 ) -> None:
