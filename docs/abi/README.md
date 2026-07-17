@@ -10,8 +10,8 @@ changes between releases without diffing every header by hand.
 ## Exactly one snapshot is CURRENT; every other one is FROZEN
 
 At any time exactly one file in this directory -- the one named for
-the release `metadata/sdk_version.yaml` currently declares (`0.10.1`
--> `v0.10-snapshot.json`) -- is the *working* snapshot: it tracks
+the release `metadata/sdk_version.yaml` currently declares (`0.11.0`
+-> `v0.11-snapshot.json`) -- is the *working* snapshot: it tracks
 `HEAD` and gets regenerated (`generated` date bumps, symbols change)
 as the SDK's public headers evolve between releases.
 
@@ -28,40 +28,72 @@ release for exactly this reason: a baseline that keeps tracking
 against that release **invisible**, because the baseline moves with
 the change that broke it (issue #803).
 
-`scripts/test-all.sh` derives "the current snapshot" from
-`metadata/sdk_version.yaml` at run time (`pr-abi-snapshot.yml`'s
-main-only strict diff instead auto-selects the highest-numbered file
-present) rather than a version hardcoded at the time the gate was
-written -- the hardcoding is exactly what let a past release cut
-leave the gate silently regenerating an already-frozen snapshot
-against `HEAD` (issue #803). `.github/workflows/pr-generated-files.yml`
-still names the current version literally and needs a manual bump
-each release; the write-guard above is what turns a missed bump
-there into a loud CI failure instead of a repeat of the same silent
-corruption.
+`scripts/test-all.sh`, `.github/workflows/pr-generated-files.yml`, and
+`.github/workflows/pr-abi-snapshot.yml` all derive "the current
+snapshot" at run time from `metadata/sdk_version.yaml`, via
+`scripts/abi_snapshot.py --print-current-version` (prints the bare
+`vMAJOR.MINOR` label; every caller composes
+`docs/abi/<label>-snapshot.json` from it) -- rather than a version
+hardcoded at the time the gate was written, which is exactly what let
+a past release cut leave the gate silently regenerating an
+already-frozen snapshot against `HEAD` (issue #803), and then let the
+next release cut leave the hardcoded literal pointing at the
+now-frozen PREVIOUS snapshot (issue #826). None of the three ever
+falls back to `ls docs/abi/v*-snapshot.json | sort -V | tail -1` --
+that selector only ever agreed with the derived path by coincidence of
+version-sort ordering, and isn't protected by the write guard the way
+the derivation is.
+
+`pr-generated-files.yml` also fails loudly, before it would otherwise
+regenerate anything, if the version `metadata/sdk_version.yaml`
+declares has no committed `docs/abi/v<N>-snapshot.json` yet -- a
+release that bumped the version without adding the new snapshot would
+otherwise pass silently, because the regen step just creates the
+missing file and `git diff` never reports on an untracked one. That
+missing-snapshot gate, together with the write-guard above (which
+rejects `--output` for any label other than the current release), is
+what turns a missed snapshot bump into a loud CI failure instead of a
+repeat of the same silent corruption.
 
 ## How a snapshot is generated
 
 ```
+VERSION=$(python3 scripts/abi_snapshot.py --print-current-version)
 python3 scripts/abi_snapshot.py \
-    --version v0.1 \
-    --output docs/abi/v0.1-snapshot.json
+    --version "$VERSION" \
+    --output "docs/abi/${VERSION}-snapshot.json"
 ```
 
 The script (see `scripts/abi_snapshot.py`) walks every header,
 extracts function declarations, typedefs, and `#define`s, and emits
 a JSON document with a SHA-256 short fingerprint per symbol.
+`--output` refuses to write a snapshot labelled anything other than
+the current release `metadata/sdk_version.yaml` declares -- e.g.
+`--version v0.1` now exits 2, because `v0.1` is a FROZEN historical
+label, not today's current snapshot (see above).
 
 ## How a PR uses a snapshot
 
+The three callers above (`test-all.sh`, `pr-generated-files.yml`,
+`pr-abi-snapshot.yml`) all diff against the DERIVED current snapshot:
+
 ```
-python3 scripts/abi_snapshot.py --diff docs/abi/v0.1-snapshot.json
+VERSION=$(python3 scripts/abi_snapshot.py --print-current-version)
+python3 scripts/abi_snapshot.py --diff "docs/abi/${VERSION}-snapshot.json"
 ```
 
 Pre-1.0 the diff is informational — additive changes are allowed
 between minor releases (per `docs/contribution.md`'s ABI policy).
 The diff still highlights surprises (an unintentional rename, a
 silent macro change) so they get caught at review time.
+
+A separate, unrelated check -- the v0.1 ABI-floor gate
+(`pr-generated-files.yml`'s "ABI freeze gate vs tagged v0.1" step) --
+diffs against the frozen `v0.1` baseline specifically, not the current
+snapshot: `python3 scripts/abi_snapshot.py --version v0.1 --diff
+.abi-baseline/v0.1-snapshot.json`. That gate asserts the public surface
+never regresses below the v0.1 floor; it is not "a PR uses a snapshot"
+in the sense above.
 
 Post-1.0 a per-release CI workflow (`pr-abi-snapshot.yml`, ships
 in v1.0) gates on the diff: any `REMOVED` or `CHANGED` entry
@@ -91,7 +123,8 @@ requires a major-version bump.  `ADDED` entries always pass.
 | [`v0.7-snapshot.json`](v0.7-snapshot.json)         | v0.7.0          | 2026-06-12 | frozen                    |
 | [`v0.8-snapshot.json`](v0.8-snapshot.json)         | v0.8.0 / v0.8.1 | 2026-06-24 | frozen                    |
 | [`v0.9-snapshot.json`](v0.9-snapshot.json)         | v0.9.0          | 2026-07-06 | frozen                    |
-| [`v0.10-snapshot.json`](v0.10-snapshot.json)       | v0.10.0/v0.10.1 | tracks HEAD | **CURRENT** (regenerated by CI/`test-all.sh` until the next release) |
+| [`v0.10-snapshot.json`](v0.10-snapshot.json)       | v0.10.0/v0.10.1 | 2026-07-14 | frozen                    |
+| [`v0.11-snapshot.json`](v0.11-snapshot.json)       | v0.11.0         | tracks HEAD | **CURRENT** (regenerated by CI/`test-all.sh` until the next release) |
 
 (†) `v0.1`/`v0.3`/`v0.5` predate `scripts/bump_version.py` and the
 `vX.Y.Z` release-tag convention (no `v0.1.0`/`v0.3.0`/`v0.5.0` git tag

@@ -8,8 +8,13 @@
 #
 #   1. Regenerate the ABI snapshot from the working tree's
 #      include/alp/*.h headers.
-#   2. Diff against the most recent committed
-#      docs/abi/v<N>-snapshot.json.
+#   2. Diff against docs/abi/v<N>-snapshot.json, where <N> is the
+#      version `metadata/sdk_version.yaml` currently declares (same
+#      derivation `pr-generated-files.yml` and `test-all.sh` use, see
+#      docs/abi/README.md).  If that snapshot isn't committed yet (a
+#      release cut in flight bumped the version before its snapshot
+#      landed), the diff step skips with a notice rather than failing
+#      the job -- this workflow stays informational pre-1.0.
 #   3. Classify each diff entry by [ABI-STABLE] vs
 #      [ABI-EXPERIMENTAL] marker presence in the header comment:
 #      - ADDED [ABI-STABLE]              -> minor bump required, PASS
@@ -53,20 +58,51 @@ jobs:
         with:
           python-version-file: .python-version
 
-      - name: Locate latest snapshot
+      - name: Locate the current snapshot
         id: snap
         run: |
-          # The latest committed snapshot for the active version
-          # line.  Pre-1.0 this is v0.5; the v1.0 tag generates
-          # v1.0-snapshot.json and this step starts picking that up.
-          LATEST=$(ls -1 docs/abi/v*-snapshot.json | sort -V | tail -1)
+          # Derived from metadata/sdk_version.yaml (docs/abi/README.md),
+          # same as pr-generated-files.yml and test-all.sh -- not `ls |
+          # sort -V | tail -1`, which only ever agreed with this by
+          # coincidence of version-sort ordering and isn't protected by
+          # the write guard the way this derivation is.
+          VERSION=$(python3 scripts/abi_snapshot.py --print-current-version)
+          LATEST="docs/abi/${VERSION}-snapshot.json"
           echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
-          echo "Latest snapshot: $LATEST"
+          echo "Current snapshot: $LATEST"
 
       - name: Run snapshot diff
         id: diff
         run: |
-          python3 scripts/abi_snapshot.py --diff "${{ steps.snap.outputs.latest }}" | tee abi_diff.txt
+          SNAPSHOT="${{ steps.snap.outputs.latest }}"
+          # A release cut bumps metadata/sdk_version.yaml before its
+          # docs/abi/v<N>-snapshot.json is generated + committed (that
+          # commit lands in the same PR, sometimes a follow-up). Without
+          # the guard below, a missing baseline doesn't redden this job
+          # -- it can't: `abi_snapshot.py --diff` raises, but this step
+          # pipes its output through `tee` with no pipefail, so the
+          # step's exit code is `tee`'s (0) regardless of what python
+          # did, and the job stays green with a raw traceback sitting in
+          # an otherwise-clean log. The guard is a clarity fix, not a
+          # red->green one: it swaps that traceback for a clean
+          # `::notice::` skip.
+          if [ ! -f "${SNAPSHOT}" ]; then
+            echo "::notice::No committed snapshot at ${SNAPSHOT} yet (release cut in progress) -- skipping the ABI diff for this run."
+            echo "ABI diff skipped: ${SNAPSHOT} is not committed yet." > abi_diff.txt
+            echo "has_breaking=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python3 scripts/abi_snapshot.py --diff "${SNAPSHOT}" | tee abi_diff.txt
+          # PIPESTATUS[0], not the pipeline's own exit code (that's
+          # `tee`'s) -- otherwise a real abi_snapshot.py failure (exit
+          # >=2: a corrupt snapshot, a parse error) leaves abi_diff.txt
+          # empty, `grep` below finds nothing, and has_breaking=false
+          # reports "no ABI change" for a check that never actually ran.
+          diff_rc=${PIPESTATUS[0]}
+          if [ "${diff_rc}" -ge 2 ]; then
+            echo "::error::abi_snapshot.py --diff failed (exit ${diff_rc}); see the log above."
+            exit "${diff_rc}"
+          fi
           if grep -q "REMOVED\|CHANGED" abi_diff.txt; then
             echo "has_breaking=true" >> "$GITHUB_OUTPUT"
           else

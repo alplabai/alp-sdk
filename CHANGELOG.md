@@ -32,6 +32,54 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 - **`alp-lock --check` named the mismatch but not the remedy** — it now prints
   the `west alp-lock` regenerate command.
 
+### Fixed — the ABI snapshot gates still named a version literal, and #795's `|| true` residue (#826, #795)
+
+- **`.github/workflows/pr-generated-files.yml`'s ABI step had the snapshot
+  version literal hardcoded** (`v0.11`), left behind by the release cut that
+  minted it -- the exact bug class #826 is about: nothing bumps that literal
+  when the next release ships, so it silently points at a now-frozen
+  snapshot. `scripts/test-all.sh`'s `stage_abi_strict` and
+  `stage_generated_files` already shared one derivation
+  (`abi_current_snapshot()`, itself an inline-Python re-parse of
+  `metadata/sdk_version.yaml`); that inline parse is now a shell-out to
+  `scripts/abi_snapshot.py --print-current-version` instead, so the repo has
+  ONE parser for this label, not two (`abi_snapshot.py` and `test-all.sh`)
+  that could drift. `.github/workflows/pr-generated-files.yml`'s hardcoded
+  literal is replaced by the same derivation. `.github/workflows/pr-abi-
+  snapshot.yml` (which used to fall back to
+  `ls docs/abi/v*-snapshot.json | sort -V | tail -1` -- a selector that only
+  ever agreed with the derived path by coincidence of version-sort ordering,
+  and wasn't protected by the write guard the way the derivation is) now
+  derives the same way as the other two.
+- **`pr-generated-files.yml` fails loudly, before regenerating anything, if
+  the version `metadata/sdk_version.yaml` declares has no committed
+  `docs/abi/v<N>-snapshot.json` yet** -- a release that bumped the version
+  without adding the new snapshot used to pass silently, because the regen
+  step just creates the missing file and `git diff` never reports on an
+  untracked one. Added `tests/scripts/test_abi_snapshot_freeze_gate.py`
+  coverage that runs this gate's own `run:` script against a fake root with
+  no committed snapshot and asserts it fails with `::error::`, not silently
+  -- mutation-proven against both neutering the guard (`if false`) and
+  deleting the block outright.
+- **`pr-abi-snapshot.yml`'s diff step traded a selector that always resolved
+  to an existing file for one that can name a snapshot that isn't committed
+  yet** (the release-cut window). This never actually reddened the job --
+  the step pipes through `tee` with no `pipefail`, so a `FileNotFoundError`
+  from `abi_snapshot.py --diff` printed a traceback but the step still
+  exited 0 (`tee`'s status) and the workflow stayed green having checked
+  nothing. The step now degrades to a clean `::notice::` skip instead of
+  that traceback-in-a-green-log, and separately now checks
+  `PIPESTATUS[0]` so a real `abi_snapshot.py` failure (not just a missing
+  snapshot) fails the step instead of silently reporting "no ABI change".
+  `scripts/abi_snapshot.py --diff <missing path>` also now fails with a
+  one-line `error:` message instead of a raw traceback, for every other
+  caller of that flag; and `--diff <corrupt JSON>` now returns 2
+  (malformed input) instead of 1 (the "ABI changed" code a bare caller
+  like `release.yml` would otherwise read as a real regression).
+- `docs/abi/README.md` updated to describe the three-caller derivation (not
+  two) and to drop the stale `ls | sort -V | tail -1` / `--version v0.1
+  --output` examples the write guard now rejects.
+
 ## [v0.11.0] - 2026-07-16
 
 ### Fixed — the ABI freeze gate's own tests broke on every release bump (#826)

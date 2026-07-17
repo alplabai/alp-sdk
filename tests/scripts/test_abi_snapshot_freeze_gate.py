@@ -32,12 +32,15 @@ asserting agreement with the new implementation's own text.
 
 from __future__ import annotations
 
+import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 REPO = Path(__file__).resolve().parents[2]
 TEST_ALL = REPO / "scripts" / "test-all.sh"
@@ -74,10 +77,14 @@ def _extract_bash_function(script_text: str, name: str) -> str:
 
 @pytest.fixture
 def sdk_repo_with_version(tmp_path):
-    """A minimal fake repo root: just metadata/sdk_version.yaml plus
-    the extracted `abi_current_snapshot` function, so the test proves
-    the function's OWN derivation logic rather than anything about the
-    real repo's current version."""
+    """A minimal fake repo root: metadata/sdk_version.yaml, a real copy
+    of scripts/abi_snapshot.py (abi_current_snapshot() now shells out
+    to it for the single parse, issue #826), plus the extracted
+    `abi_current_snapshot` function -- so the test proves the
+    function's OWN derivation logic rather than anything about the
+    real repo's current version.  abi_snapshot.py resolves its own
+    REPO from `__file__`, so this copy reads ITS OWN sibling
+    metadata/sdk_version.yaml, not the real repo's."""
 
     def make(version: str) -> Path:
         root = tmp_path / f"repo-{version}"
@@ -85,6 +92,8 @@ def sdk_repo_with_version(tmp_path):
         (root / "metadata" / "sdk_version.yaml").write_text(
             f"version: {version}\nstatus: development\n", encoding="utf-8"
         )
+        (root / "scripts").mkdir(parents=True)
+        shutil.copy(REPO / "scripts" / "abi_snapshot.py", root / "scripts" / "abi_snapshot.py")
         func = _extract_bash_function(TEST_ALL.read_text(encoding="utf-8"), "abi_current_snapshot")
         (root / "func.sh").write_text(func, encoding="utf-8")
         return root
@@ -130,9 +139,9 @@ def test_abi_current_snapshot_tracks_sdk_version_yaml(sdk_repo_with_version, ver
 @pytestmark_bash
 def test_abi_current_snapshot_matches_the_real_repos_declared_version():
     """Integration check against the REAL repo: the derived path must
-    equal what metadata/sdk_version.yaml declares here and now (today:
-    0.10.1 -> docs/abi/v0.10-snapshot.json) -- proving the function is
-    wired to the actual single-source file, not a copy."""
+    equal what metadata/sdk_version.yaml declares here and now --
+    proving the function is wired to the actual single-source file,
+    not a copy."""
     m = re.search(
         r"^version:\s*(\d+)\.(\d+)\.(\d+)\s*$",
         SDK_VERSION_YAML.read_text(encoding="utf-8"),
@@ -245,6 +254,205 @@ def test_main_diff_mode_is_unaffected_by_the_write_guard(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["abi_snapshot.py", "--diff", str(prior)])
     rc = abi.main()
     assert rc == 0
+
+
+def test_main_diff_corrupt_json_returns_2_not_1(tmp_path, monkeypatch, capsys):
+    """A truncated/corrupt snapshot must not collide with exit code 1
+    ("ABI changed") -- a bare caller (e.g. `release.yml`'s
+    `abi_snapshot.py --diff`, no `tee`/grep to tell the codes apart)
+    would otherwise read a corrupt file on disk as a real ABI
+    regression at tag time."""
+    sdk_yaml = tmp_path / "sdk_version.yaml"
+    sdk_yaml.write_text("version: 0.10.1\nstatus: released\n", encoding="utf-8")
+    monkeypatch.setattr(abi, "SDK_VERSION_YAML", sdk_yaml)
+
+    prior = tmp_path / "corrupt.json"
+    prior.write_text('{"head', encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["abi_snapshot.py", "--diff", str(prior)])
+    rc = abi.main()
+    assert rc == 2
+    assert "cannot parse" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------
+# 3. `--print-current-version`: the label CI names the snapshot with
+# ---------------------------------------------------------------------
+
+
+def test_print_current_version_emits_the_label_ci_builds_the_path_from(
+    tmp_path, monkeypatch, capsys
+):
+    """`.github/workflows/pr-generated-files.yml` composes the snapshot
+    path from this output, so it must print the bare `vMAJOR.MINOR`
+    label and nothing else -- a trailing note or a `0.11.0` here would
+    send the regen at `docs/abi/<junk>-snapshot.json`."""
+    sdk_yaml = tmp_path / "sdk_version.yaml"
+    sdk_yaml.write_text("version: 0.11.0\nstatus: released\n", encoding="utf-8")
+    monkeypatch.setattr(abi, "SDK_VERSION_YAML", sdk_yaml)
+    monkeypatch.setattr(sys, "argv", ["abi_snapshot.py", "--print-current-version"])
+
+    rc = abi.main()
+
+    assert rc == 0
+    assert capsys.readouterr().out == "v0.11\n"
+
+
+def test_print_current_version_fails_loudly_when_unresolvable(tmp_path, monkeypatch):
+    """A silent empty string would make CI compose
+    `docs/abi/-snapshot.json`, miss it, and fail somewhere far from the
+    cause.  Exit nonzero instead so the step stops there."""
+    monkeypatch.setattr(abi, "SDK_VERSION_YAML", tmp_path / "does-not-exist.yaml")
+    monkeypatch.setattr(sys, "argv", ["abi_snapshot.py", "--print-current-version"])
+
+    assert abi.main() != 0
+
+
+# ---------------------------------------------------------------------
+# 4. issue #826: the CI gate derives the version, never names it
+# ---------------------------------------------------------------------
+
+GENERATED_FILES_WORKFLOW = REPO / ".github" / "workflows" / "pr-generated-files.yml"
+ABI_SNAPSHOT_WORKFLOW = REPO / ".github" / "workflows" / "pr-abi-snapshot.yml"
+
+
+@pytest.mark.parametrize("workflow", [GENERATED_FILES_WORKFLOW, ABI_SNAPSHOT_WORKFLOW])
+def test_ci_gate_contains_no_abi_version_literal(workflow):
+    """The class fix for #826.  A hardcoded `v0.11` in either workflow
+    fails silently at the next release: the steps keep regenerating the
+    PREVIOUS (frozen) snapshot and diffing it against its own committed
+    copy, so the gate stays green while testing nothing about the
+    current snapshot.  No literal can be left for a release cut to
+    forget -- the version has to be derived at run time.  Parametrized
+    over both workflows: `pr-abi-snapshot.yml` derives the same way as
+    `pr-generated-files.yml` and carries no literal-guard of its own, so
+    a regression there would go unnoticed if only one workflow were
+    checked.
+
+    Scoped to the executable body: the `v0.1` freeze-baseline gate is a
+    deliberate fixed reference (the ABI floor, not the current
+    snapshot), and prose in comments is not what runs.
+    """
+    text = workflow.read_text(encoding="utf-8")
+    body = "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
+    )
+
+    offenders = [
+        m.group(0)
+        for m in re.finditer(r"v\d+\.\d+-snapshot\.json", body)
+        if m.group(0) != "v0.1-snapshot.json"
+    ]
+    assert not offenders, (
+        f"{workflow.name} names snapshot file(s) {offenders} "
+        f"literally; derive from metadata/sdk_version.yaml instead (#826)"
+    )
+    assert "--print-current-version" in body, (
+        "the workflow must resolve the current version from the single source"
+    )
+
+
+def _extract_workflow_run_step(workflow_path: Path, job: str, step_id: str) -> str:
+    """Return the `run:` script body of the `jobs.<job>.steps` entry
+    with the given `id`, parsed out of the workflow YAML -- so a test
+    can execute the WORKFLOW'S OWN text instead of a hand-typed copy
+    of it (a copy can drift from the workflow and still pass)."""
+    doc = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    for step in doc["jobs"][job]["steps"]:
+        if step.get("id") == step_id:
+            return step["run"]
+    raise AssertionError(f"no step id={step_id!r} in {job!r} of {workflow_path}")
+
+
+@pytestmark_bash
+def test_ci_gate_and_test_all_sh_resolve_the_same_snapshot(tmp_path):
+    """Runs the WORKFLOW'S OWN `run:` script -- extracted from the YAML
+    by `_extract_workflow_run_step`, not re-typed here -- and proves it
+    lands on the same snapshot path `abi_current_snapshot` does.  The
+    two gates must agree, or a green local run means nothing about the
+    PR gate: that divergence WAS the bug in #795 (test-all.sh checked
+    v0.9 while CI checked v0.10).  Mutation-proven: point the workflow's
+    path composition at a different suffix and this goes red, because
+    it runs that composition rather than a copy of it."""
+    run_script = _extract_workflow_run_step(GENERATED_FILES_WORKFLOW, "check", "abi")
+    github_output = tmp_path / "github_output"
+    github_output.write_text("", encoding="utf-8")
+    proc = subprocess.run(
+        ["bash", "-c", run_script],
+        cwd=str(REPO),
+        env={**os.environ, "GITHUB_OUTPUT": str(github_output)},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    outputs = dict(
+        line.split("=", 1) for line in github_output.read_text(encoding="utf-8").splitlines()
+    )
+    ci_snapshot = outputs["snapshot"]
+    assert (REPO / ci_snapshot).is_file(), (
+        f"{ci_snapshot} is what the CI step resolves to but is not committed"
+    )
+
+    func = _extract_bash_function(TEST_ALL.read_text(encoding="utf-8"), "abi_current_snapshot")
+    local = subprocess.run(
+        ["bash", "-c", f"{func}\nabi_current_snapshot"],
+        cwd=str(REPO),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert local.returncode == 0, local.stdout + local.stderr
+    assert local.stdout.strip() == ci_snapshot
+
+
+@pytestmark_bash
+def test_ci_gate_fails_cleanly_when_snapshot_not_committed(sdk_repo_with_version):
+    """Mutation-disproven gap: `test_ci_gate_and_test_all_sh_resolve_the_same_snapshot`
+    above only ever runs against a repo where the snapshot exists, so
+    neither replacing this guard's `if [ ! -f "${snapshot}" ]; then`
+    with `if false; then`, nor deleting the whole block through its
+    trailing `fi`, turned that test red.  Run the WORKFLOW'S OWN
+    `id: abi` step -- extracted, not retyped -- against a fake root
+    whose sdk_version.yaml declares a version with NO committed
+    snapshot (the exact release-cut window this guard exists for) and
+    assert it fails loudly instead of silently letting the untracked
+    regen slip past `git diff`."""
+    root = sdk_repo_with_version("9.9.9")
+    run_script = _extract_workflow_run_step(GENERATED_FILES_WORKFLOW, "check", "abi")
+    github_output = root / "github_output"
+    github_output.write_text("", encoding="utf-8")
+    proc = subprocess.run(
+        ["bash", "-c", run_script],
+        cwd=str(root),
+        env={**os.environ, "GITHUB_OUTPUT": str(github_output)},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert proc.returncode != 0, proc.stdout + proc.stderr
+    assert "::error::" in proc.stdout
+    assert "v9.9" in proc.stdout
+    assert not (root / "docs" / "abi" / "v9.9-snapshot.json").exists()
+
+
+def test_generated_files_stage_does_not_swallow_a_failed_regen():
+    """#795's residue: the regen carried `|| true`, so a snapshot that
+    could not be regenerated (e.g. the write guard rejecting a stale
+    label, exit 2) left the stage green while the diff below it checked
+    a stale file -- the local run passes, the PR gate fails."""
+    body = _extract_bash_function(
+        TEST_ALL.read_text(encoding="utf-8"), "stage_generated_files"
+    )
+    # Join continuations first: the pre-fix code carried `|| true` on the
+    # `--output ... || true` continuation LINE, not on the line naming
+    # abi_snapshot.py, so a per-line scan reads clean while the bug is
+    # right there.  Match the statement the shell actually executes.
+    statements = re.sub(r"\\\n\s*", " ", body).splitlines()
+    abi_statements = [s for s in statements if "abi_snapshot.py" in s]
+    assert abi_statements, "stage_generated_files no longer regenerates the ABI snapshot"
+    assert not any("|| true" in s for s in abi_statements), (
+        "a failed ABI regen must fail the stage, not pass silently (#795)"
+    )
 
 
 if __name__ == "__main__":
