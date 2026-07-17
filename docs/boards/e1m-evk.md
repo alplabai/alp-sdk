@@ -14,10 +14,12 @@ same board and the same SDK build runs.
 This file is the **SDK-side cheat sheet** for the EVK: bus map,
 sensor I²C addresses, button/LED assignments, IO-expander, and the
 bring-up checklist most relevant to firmware writers.  The Zephyr
-board file (`boards/<vendor>/alp_e1m_evk*`) lives in
-[`alplabai/alp-zephyr-modules`](https://github.com/alplabai/alp-zephyr-modules)
-(per [`docs/architecture.md`](../architecture.md), board files are
-not in this repo).
+board files for the AEN family SoMs on this EVK
+(`alp_e1m_aen801_m55_he`, `alp_e1m_aen801_m55_hp`,
+`alp_e1m_aen401_m55_hp`, `alp_e1m_aen601_m55_hp`) ship in-tree at
+[`zephyr/boards/alp/`](../../zephyr/boards/alp/) (per
+[`docs/architecture.md`](../architecture.md); there is no separate
+board-file repo).
 
 ## SoM compatibility
 

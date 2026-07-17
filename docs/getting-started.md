@@ -378,8 +378,10 @@ board.
 
 For SoMs without an EVK board file yet, write your own:
 
-1. Create a board file under `alp-zephyr-modules` (or a private
-   board layer).
+1. Create a board file in-tree under
+   [`zephyr/boards/alp/`](../zephyr/boards/alp/) (or a private
+   board layer) — `zephyr/module.yml`'s `board_root: zephyr`
+   exposes it to Zephyr's board scanner without any external repo.
 2. Define the `alp,pin-array` node + `alp-i2cN` / `alp-spiN` /
    `alp-pwmN` / etc. aliases in your board's DTS.
 3. Add a `boards/<your_board>.overlay` to the example with any
@@ -440,7 +442,7 @@ default `west update` skips it.
 |----------|----------------------------------------------------|---------------------------------------------------------------------------------------------------------|
 | **Renesas (RZ/V)** | `hal_renesas` (in Zephyr's own west.yml)   | Nothing extra.  Our `name-allowlist` lets Zephyr import it; `drivers/rz/fsp/src/rzv/bsp/mcu/rzv2n/` is what the V2N + V2N-M1 paths consume. |
 | **NXP (i.MX 9x)**  | `hal_nxp` (in Zephyr's own west.yml)       | Nothing extra.  `mcux/mcux-sdk-ng/devices/i.MX/i.MX93/` covers MIMX9301..9352 (E1M-NX9101 = MIMX9352).   |
-| **Alif (Ensemble)** | `hal_alif` (in our west.yml, from Alif's own GitHub) + upstream Zephyr `boards/alif/` | **Simpler than v3.7.**  HAL drivers come from `alifsemi/hal_alif v2.2.0` (Apache-2.0) which we pin as a top-level project — fetched on every `west update`.  Upstream Zephyr v4.4 also ships the stock Alif Ensemble board files under `boards/alif/` (`ensemble_e8_dk`, `ensemble_e1c_dk`, `balletto_b1_dk`).  Customers wanting AEN-specific boards still need their own board overlay (write one under `alplabai/alp-zephyr-modules`) -- the upstream files target Alif's own EVKs, not the E1M board.  Two Alif drivers (`alif_dave2d-driver`, `alif_image-processing-lib`) are vendor-licensed and sit in the `vendor-sdks` opt-in group; enable when you need DAVE2D / Helium image kernels.  See `docs/vendor-partnerships.md` §Alif for the migration history. |
+| **Alif (Ensemble)** | `hal_alif` (in our west.yml, from Alif's own GitHub) + upstream Zephyr `boards/alif/` | **Simpler than v3.7.**  HAL drivers come from `alifsemi/hal_alif v2.2.0` (Apache-2.0) which we pin as a top-level project — fetched on every `west update`.  Upstream Zephyr v4.4 also ships the stock Alif Ensemble board files under `boards/alif/` (`ensemble_e8_dk`, `ensemble_e1c_dk`, `balletto_b1_dk`) -- those target Alif's own EVKs, not the E1M board.  The AEN-specific board files (`alp_e1m_aen801_m55_he`, `alp_e1m_aen801_m55_hp`, `alp_e1m_aen401_m55_hp`, `alp_e1m_aen601_m55_hp`) ship in-tree at [`zephyr/boards/alp/`](../zephyr/boards/alp/) -- no separate overlay or repo needed.  Two Alif drivers (`alif_dave2d-driver`, `alif_image-processing-lib`) are vendor-licensed and sit in the `vendor-sdks` opt-in group; enable when you need DAVE2D / Helium image kernels.  See `docs/vendor-partnerships.md` §Alif for the migration history. |
 | **DEEPX (DX-M1)**  | Out of Zephyr scope (Linux-side runtime).  | The on-device NPU runs from a Linux PCIe driver, not a Zephyr backend.  `chips/deepx_dxm1/` is the **host-side** Zephyr code that brings up the M1 from the Renesas A55 cluster; `dx_rt` itself rides on Linux/Yocto.  See `examples/v2n/v2n-m1-deepx-inference/` and the customer-side integration notes in `docs/vendor-partnerships.md` §DEEPX. |
 
 ### Bare-metal / non-Zephyr customers

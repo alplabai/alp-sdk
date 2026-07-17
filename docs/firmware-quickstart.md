@@ -278,10 +278,12 @@ west alp-build -b <alif_ensemble_board> alp-sdk/examples/peripheral-io/gpio-butt
 west build -d build -t flash
 ```
 
-The exact `<board>` argument depends on whether you're using the
-upstream Zephyr board file or the `alplabai/alp-zephyr-modules`
-overlay.  See [`docs/architecture.md`](architecture.md) for the
-split.
+The exact `<board>` argument depends on whether you're using an
+upstream Zephyr board file (e.g. `ensemble_e8_dk`) or one of the
+in-tree Alp E1M board files under
+[`zephyr/boards/alp/`](../zephyr/boards/alp/) (e.g.
+`alp_e1m_aen801_m55_he`, `alp_e1m_v2n101_m33_sm`).  See
+[`docs/architecture.md`](architecture.md) for the split.
 
 The `alp` CLI covers the same flow in fewer keystrokes:
 `alp build && alp flash` programs every slice + helper MCU in

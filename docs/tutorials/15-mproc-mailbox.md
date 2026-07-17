@@ -24,9 +24,11 @@ peer firmware is built).
 
 > Companion example:
 > [`examples/multicore/mproc-mailbox/`](../../examples/multicore/mproc-mailbox/) --
-> the HP-side firmware this tutorial walks through.  The peer-
-> side (HE) firmware lands alongside the v0.4 dual-image build
-> flow in `alplabai/alp-zephyr-modules`.
+> the HP-side firmware this tutorial walks through.  The peer-side
+> (HE) firmware at `peer/main.c` builds single-target today; building
+> both halves in one invocation needs the v0.4 dual-image sysbuild
+> glue, an in-tree gap (see [`zephyr/sysbuild/aen/`](../../zephyr/sysbuild/aen/)),
+> not an external repo.
 
 ---
 
