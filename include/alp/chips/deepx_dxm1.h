@@ -109,7 +109,12 @@ alp_status_t deepx_dxm1_init(deepx_dxm1_t       *ctx,
                              pi3dbs12212_t      *pcie_mux,
                              pi3dbs12212_state_t deepx_path);
 
-/** @brief Override the assumed reset-line polarity.  Default is active-high. */
+/** @brief Override the assumed reset-line polarity.
+ *
+ *  The default is **active-LOW**: `deepx_dxm1_init()` sets
+ *  @ref DEEPX_DXM1_RESET_ACTIVE_LOW, matching the V2N-M1 schematic
+ *  (host drives `M1_RESET` low to hold reset, high to release).  Only
+ *  call this on a board whose DEEPX revision inverts the line. */
 alp_status_t deepx_dxm1_set_reset_polarity(deepx_dxm1_t *ctx, deepx_dxm1_reset_polarity_t p);
 
 /**

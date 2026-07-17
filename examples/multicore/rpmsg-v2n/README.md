@@ -1,13 +1,32 @@
 # rpmsg-v2n
 
-> `[UNTESTED]` -- v0.6 paper-correct.  Both halves declared in one
-> `board.yaml` v2; the orchestrator fans out Yocto + Zephyr in
-> parallel.  HiL bring-up on V2N + Yocto gates on v0.8.
+> **Status: the raw A55↔M33 transport is bench-proven; this example's
+> own two halves are not a matched pair.**
+>
+> - **Proven (#697), on E1M-X V2N-M1 silicon:** the raw OpenAMP
+>   transport that `m33_sm/src/main.c` implements -- resource table,
+>   vrings, MHU mailbox doorbell, rpmsg endpoint -- against real
+>   RZ/V2N devicetree.  Attach + echo round-trip (1/4/16/64 B) and
+>   the GHSA-xhm8 concurrent-close case all pass end-to-end, with
+>   Renesas's `rpmsg_sample_client` over UIO as the Linux peer.
+> - **Not proven:** the `linux/` + `m33_sm/` pairing *in this
+>   directory*.  `linux/src/main.c` subscribes to a `temperature`
+>   method that the M33 echo responder never publishes, so the two
+>   slices as shipped do not talk to each other.  `m33_sm` is
+>   `build_only: true` in CI (no native_sim: it needs real V2N
+>   devicetree + the Renesas MHU/FSP/OpenAMP modules).
+> - **By design:** the M33 slice **deliberately bypasses
+>   `<alp/rpc.h>`** and uses raw OpenAMP (alp-sdk #683 "Path B,
+>   Phase 1").  Its verified peer is Renesas's licence-gated
+>   Multi-OS Package sample, which dials a resource table shaped
+>   exactly like `resource_table.c` -- not whatever Zephyr's
+>   `ipc_service` would generate.  See `m33_sm/src/main.c`'s file
+>   header.  A v2n-specific `<alp/rpc.h>` backend is follow-up work.
 
 Heterogeneous-compute flagship: **Yocto Linux on the V2N's Cortex-A55
 cluster, Zephyr RTOS on the same V2N's Cortex-M33 system-manager**,
-talking over a framed RPMsg channel.  One SoM, real-time plus Linux,
-one declarative source of truth.
+talking over RPMsg.  One SoM, real-time plus Linux, one declarative
+source of truth.
 
 ```
 examples/multicore/rpmsg-v2n/
@@ -19,7 +38,7 @@ examples/multicore/rpmsg-v2n/
 └── m33_sm/             (m33_sm's Zephyr slice)
     ├── CMakeLists.txt
     ├── prj.conf
-    └── src/main.c      (producer using <alp/rpc.h>)
+    └── src/main.c      (raw OpenAMP echo slave; NOT <alp/rpc.h>)
 ```
 
 ## What changed vs v0.5
@@ -34,16 +53,21 @@ that the image-bundle + flash + OTA tooling consume.
 
 ## What it shows
 
-- The **M33-SM / Zephyr producer** (`m33_sm/src/main.c`) reads a
-  sensor via the portable `<alp/peripheral.h>` and publishes one
-  `temperature` event per second through `<alp/rpc.h>`.
-- The **A55 / Yocto consumer** (`linux/src/main.c`) opens the
-  matching RPC channel, subscribes to `temperature`, and prints
-  every sample to stdout.
-- The **same C API** -- both binaries `#include <alp/rpc.h>` and
-  `<alp/system_ipc.h>`.  The header is auto-emitted by the
-  orchestrator from the project's `ipc:` block; both slices share
-  identical endpoint ids and the carve-out address.
+- The **M33-SM / Zephyr slice** (`m33_sm/src/main.c`) stands up the
+  raw OpenAMP rpmsg slave endpoint and **echoes** whatever bytes it
+  receives -- the behaviour Renesas's `rpmsg_sample_client` verifies
+  from Linux.  It drives no sensor and publishes no `temperature`
+  event; it is the transport proof, adapted near-verbatim from the
+  vendor sample.
+- The **A55 / Yocto consumer** (`linux/src/main.c`) shows the
+  intended portable shape: `alp_rpc_open()` then
+  `alp_rpc_subscribe(ch, "temperature", ...)`.  Read it as the
+  target API surface -- **not** as a client of the echo slave above,
+  which never publishes that method.
+- The **orchestrator's IPC contract** -- `<alp/system_ipc.h>` is
+  auto-emitted from the project's `ipc:` block, so the carve-out
+  address and endpoint ids are declared once rather than
+  hand-written on either side.
 
 ## Memory map
 
@@ -74,8 +98,9 @@ system manifest.  In summary:
    `/lib/firmware/alp/E1M-V2N101/m33_sm.elf` into the M33-SM core
    and starts it.
 4. Both sides run the `alp_default_rpmsg` name-service handshake
-   over OpenAMP; `alp_rpc_open()` returns on the A55 side first,
-   then on the M33.
+   over OpenAMP.  The M33 slice does this through raw OpenAMP
+   (`rpmsg_create_ept()`), not `alp_rpc_open()` -- see the status
+   note at the top.
 
 The M33 firmware lands in the rootfs via the orchestrator's bbappend
 to `meta-alp-sdk` (spec §6.5).

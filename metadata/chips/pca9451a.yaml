@@ -79,7 +79,11 @@ families:
 verification:
   hil_silicon:    untested         # E1M-NX9101 doesn't exist on the bench yet;
                                    # paper-correct + host-unit-tested only.
-  smoke_tests:    null_arg_guard + rail_table_bounds + int1_status_decode
+  # Exactly the pca9451a ZTESTs that exist in tests/zephyr/chips/src/test_power.c.
+  # These are argument-validation contract tests only -- no simulated I2C, no
+  # register-level behavioural test.  (An `int1_status_decode` entry used to be
+  # listed here; no such test was ever written.)
+  smoke_tests:    null_arg_guard + uninitialised_context_guard + rail_table_bounds
 
 physical:
   # Pins per NXP PCA9451A datasheet Rev 2.1 (20 Aug 2025), section 6

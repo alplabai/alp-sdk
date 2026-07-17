@@ -34,9 +34,11 @@ that's off by one bit.
 
 ## Wiring
 
-The E1M-EVK routes `ALP_E1M_SPI1` to the Arduino UNO header SPI; the
-SoM bridges the bus internally, so app code just opens the E1M
-instance and never sees the physical termination.
+The example opens `BOARD_SPI_ARDUINO`, the portable `<alp/board.h>`
+alias for the Arduino UNO header SPI: it resolves to `ALP_E1M_SPI1`
+on the E1M EVK and `ALP_E1M_X_SPI1` on the E1M-X EVK.  The SoM
+bridges the bus internally, so app code just opens the alias and
+never sees the physical termination.
 For this example:
 
 * No external slave required (you can verify by jumpering MOSI
@@ -66,7 +68,7 @@ west flash
 native_sim (no slave registered):
 
 ```
-[spi-master] open ALP_E1M_SPI1 @ 1 MHz mode 0
+[spi-master] open BOARD_SPI_ARDUINO @ 1 MHz mode 0
 [spi-master] write -> 0
 [spi-master] transceive -> 0  rx={00 00 00 00}
 [spi-master] read -> 0  rx={00 00 00 00}
@@ -76,7 +78,7 @@ native_sim (no slave registered):
 Real hardware with MOSI -> MISO loopback jumper:
 
 ```
-[spi-master] open ALP_E1M_SPI1 @ 1 MHz mode 0
+[spi-master] open BOARD_SPI_ARDUINO @ 1 MHz mode 0
 [spi-master] write -> 0
 [spi-master] transceive -> 0  rx={aa 55 de ad}
 [spi-master] read -> 0  rx={ff ff ff ff}
@@ -86,7 +88,7 @@ Real hardware with MOSI -> MISO loopback jumper:
 Real hardware with a register-mapped slave at 0x10:
 
 ```
-[spi-master] open ALP_E1M_SPI1 @ 1 MHz mode 0
+[spi-master] open BOARD_SPI_ARDUINO @ 1 MHz mode 0
 [spi-master] write -> 0
 [spi-master] transceive -> 0  rx={00 7a 5c 12}   <- slave's register echo
 [spi-master] read -> 0  rx={5c 12 ab cd}         <- streaming data
@@ -110,4 +112,4 @@ Real hardware with a register-mapped slave at 0x10:
 
 - [`<alp/peripheral.h>`](../../../include/alp/peripheral.h) SPI surface.
 - [`examples/peripheral-io/spi-loopback/`](../spi-loopback/) -- single-chip self-test.
-- [`examples/peripheral-io/spi-slave/`](../spi-slave/) -- slave-mode companion (API gap; see notes).
+- [`examples/peripheral-io/spi-slave/`](../spi-slave/) -- slave-mode companion, built on the `alp_spi_target_*` surface.

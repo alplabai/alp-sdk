@@ -3,11 +3,11 @@
 sample:
   name: power-managed-sensor
   description: |
-    Low-power sensor node demonstrating the v0.6
-    `cores.<id>.power:` declarative block.  M55-HE high-efficiency
-    core sleeps between wakeups; RTC ticks every 60 s for a
-    periodic sample, GPIO IRQ wakes on motion / user interrupt,
-    UART wakes on diagnostic console input.
+    Reference for the v0.6 `cores.<id>.power:` declarative block on
+    the AEN301 M55-HE core: sleep_mode plus the rtc / gpio_int /
+    uart wakeup_sources set.  Framing demo -- it narrates the duty
+    cycle via printf and does not drive a sensor or enter a real
+    sleep state.
 
 tests:
   alp_sdk.example.power_managed_sensor:

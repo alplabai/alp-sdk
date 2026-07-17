@@ -5,10 +5,10 @@
  * Sensor-loop implementations for drone-hud.  Three discrete
  * jobs:
  *   1. Bring up each chip via its `<alp/chips/X.h>` driver.
- *   2. Run a 100 Hz IMU sample + attitude-integrate loop.  NOTE:
- *      update_attitude() is a placeholder gyro Euler integrator
- *      (it discards the accelerometer and drifts), NOT the real
- *      Madgwick fusion -- see its comment and the main.c header.
+ *   2. Run a 100 Hz IMU sample + attitude loop.  Attitude comes
+ *      from the `<alp/ahrs.h>` Madgwick filter, which fuses gyro
+ *      and accelerometer into a quaternion; the app never
+ *      hand-rolls fusion.
  *   3. Run a 5 Hz GPS + battery telemetry loop.
  *
  * All bus access goes through the portable `<alp/...>` surfaces;

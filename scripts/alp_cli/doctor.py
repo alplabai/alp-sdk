@@ -395,6 +395,35 @@ def _check_zephyr_version() -> CheckResult:
     )
 
 
+def _manifest_dir(topdir: Path) -> Path | None:
+    """Resolve the workspace's manifest-repo directory from `.west/config`.
+
+    Read directly rather than shelling out to `west config`: doctor must work
+    even when the workspace is broken enough that west itself misbehaves.
+    """
+    cfg = topdir / ".west" / "config"
+    try:
+        text = cfg.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    # The [manifest] section's `path` is relative to topdir.
+    in_manifest = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_manifest = stripped[1:-1].strip() == "manifest"
+            continue
+        if not in_manifest:
+            continue
+        m = re.match(r"^path\s*=\s*(.+?)\s*$", stripped)
+        if m:
+            try:
+                return (topdir / m.group(1)).resolve()
+            except OSError:
+                return None
+    return None
+
+
 def _check_west_workspace() -> CheckResult:
     base = _zephyr_base()
     if base is None:
@@ -402,12 +431,39 @@ def _check_west_workspace() -> CheckResult:
             "west-workspace", WARN, "cannot check .west (ZEPHYR_BASE unset)",
             "Set ZEPHYR_BASE, then ensure <workspace>/.west exists (west init).",
         )
-    if (base.parent / ".west").is_dir():
-        return CheckResult("west-workspace", PASS, f"west workspace at {base.parent}")
+    topdir = base.parent
+    if not (topdir / ".west").is_dir():
+        return CheckResult(
+            "west-workspace", FAIL,
+            f"no .west directory beside ZEPHYR_BASE ({topdir})",
+            "Initialise the workspace: run scripts/bootstrap.sh (or west init).",
+        )
+    # A .west directory is necessary but NOT sufficient: if the workspace's
+    # manifest repo isn't alp-sdk, west never discovers alp-sdk's
+    # `self.west-commands`, so `west alp-build` (and alp-flash/-image/-clean/
+    # -lock/-migrate/-quality/-renode/-emit/-size) stay "unknown command"
+    # (issue #769).  Checking only for `.west` reports a healthy workspace on
+    # exactly the layout #769 was filed about.
+    manifest = _manifest_dir(topdir)
+    repo = _repo_root().resolve()
+    if manifest is None:
+        return CheckResult(
+            "west-workspace", WARN,
+            f"west workspace at {topdir}, but its manifest path could not be read",
+            f"Check '{topdir / '.west' / 'config'}' has a [manifest] path entry.",
+        )
+    if manifest != repo:
+        return CheckResult(
+            "west-workspace", FAIL,
+            f"west workspace at {topdir} has manifest '{manifest}', not alp-sdk ({repo}) "
+            "-- 'west alp-build' will be an unknown command (#769)",
+            "Re-bootstrap so alp-sdk is the manifest repo: scripts/bootstrap.sh "
+            "(or scripts/bootstrap.ps1 on native Windows), which runs "
+            "'west init -l <alp-sdk>'. An existing plain-Zephyr workspace is not reused.",
+        )
     return CheckResult(
-        "west-workspace", FAIL,
-        f"no .west directory beside ZEPHYR_BASE ({base.parent})",
-        "Initialise the workspace: run scripts/bootstrap.sh (or west init).",
+        "west-workspace", PASS,
+        f"west workspace at {topdir} (manifest: alp-sdk -- alp-* commands register)",
     )
 
 

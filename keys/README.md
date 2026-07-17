@@ -41,11 +41,17 @@ artefact never lives on disk longer than the workflow run.
 
 ## Production key lifecycle
 
-The production private key is generated inside OPTIGA Trust M's
-hardware key generator at SoM provisioning time and never leaves
-the secure NVM.  The public half is exported, signed by the ALP
-Lab manufacturing CA, and committed to git as
-`mcuboot_prod_ecdsa_p256.pub.pem`.  See
+The production private key is generated and held on an air-gapped
+signing workstation; images are signed there with stock `imgtool`
+and carried back across the air gap.  The public half is signed by
+the Alp Lab manufacturing CA and committed to git as
+`mcuboot_prod_ecdsa_p256.pub.pem`.
+
+In-chip custody -- the key generated inside OPTIGA Trust M's
+hardware key generator, never leaving the secure NVM -- is the
+**intended end state**, not today's flow: the SDK's OPTIGA Trust M
+driver is probe-only, and its keygen / export / sign entry points
+return `ALP_ERR_NOSUPPORT` (issue #481).  See
 [`docs/secure-boot.md`](../docs/secure-boot.md) for the full
 provisioning + handover flow.
 

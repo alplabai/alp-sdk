@@ -33,8 +33,10 @@ signing key lifecycle that makes it work.
 │     acceleration is transparent.                            │
 ├─────────────────────────────────────────────────────────────┤
 │ Application image                                           │
-│   - Signed by the production private key held in OPTIGA     │
-│     Trust M's secure NVM (provisioning time).               │
+│   - Signed by the production private key held on the        │
+│     air-gapped signing workstation.  (In-chip custody in    │
+│     OPTIGA Trust M is the intended end state -- the driver  │
+│     is probe-only today; see "Signing key lifecycle".)      │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -98,44 +100,70 @@ who's ever cloned the repo".  Never use it in a fielded device.
 
 ### Production
 
+> **The OPTIGA Trust M signing path described below is NOT
+> implemented.**  The SDK's OPTIGA Trust M driver is
+> **probe-only**: `optiga_trust_m_init` reads the I2C_STATE
+> register to confirm the part ACKs, and every other entry point
+> -- product info, raw APDU transport, `CalcSign`, `GenKeyPair`,
+> ECDH -- returns `ALP_ERR_NOSUPPORT` after argument validation
+> (`chips/optiga_trust_m/optiga_trust_m.c`; the contract is pinned
+> by `tests/scripts/test_optiga_probe_only_contract.py`).  There is
+> no key generation, no key export, and no signing through the
+> secure element today.  **Do not architect a product's key
+> management around it** until the Infineon host-library transport
+> is integrated (issue #481).
+>
+> Use the air-gapped workstation flow below.  The OPTIGA design is
+> retained here as the intended end state, clearly marked.
+
 Provisioning happens at SoM manufacturing time -- *before* the
-device ships:
+device ships.
 
-1. **Generate the private key inside OPTIGA Trust M.**  Use the
-   OPTIGA Trust M host library's key-generation command.  The
-   private half is generated *inside* the chip and never
-   leaves the secure NVM.  Slot 0xE0F0 is the convention for
-   the MCUboot signing key.
-2. **Export the public half.**  OPTIGA Trust M exposes the
-   matching public key over its I²C interface.  Read it out
-   and commit it to git as
-   `keys/mcuboot_prod_ecdsa_p256.pub.pem`.  The
-   manufacturing CA signs it (so downstream tooling can
-   verify provenance).
-3. **Compile the bootloader against the production public
-   key.**  Override `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE` to
-   point at `keys/mcuboot_prod_ecdsa_p256.pub.pem` when
-   building MCUboot for production firmware.
-4. **Sign release images via OPTIGA Trust M.**  The release
-   pipeline talks to a dedicated signing host that has
-   physical access to an OPTIGA Trust M provisioned with the
-   production key.  `imgtool` supports custom signing
-   backends via `--public-key-format hash` + an external
-   ECDSA signer; the OPTIGA driver plugs in there.
+#### What to do today: air-gapped signing workstation
 
-The private key never exists outside the OPTIGA Trust M's
-secure NVM.  Compromise of the dev key, the build host, or
-the signing host does not yield the production signing power
-on its own -- only physical access to the provisioned OPTIGA
-does.
+1. **Generate the production key on an air-gapped workstation.**
+   A machine that never touches the network, holding the ECDSA-P256
+   private key on encrypted storage (ideally a smartcard or HSM you
+   already trust).  This machine is the key store.
+2. **Publish the public half.**  Commit it as
+   `keys/mcuboot_prod_ecdsa_p256.pub.pem`; the manufacturing CA
+   signs it so downstream tooling can verify provenance.  Only the
+   public half ever enters git.
+3. **Compile the bootloader against the production public key.**
+   Override `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE` to point at
+   `keys/mcuboot_prod_ecdsa_p256.pub.pem` when building MCUboot for
+   production firmware.
+4. **Sign release images across the air gap.**  Carry the unsigned
+   image to the workstation, sign it there with stock `imgtool`, and
+   carry `zephyr.signed.bin` back.  The release pipeline never holds
+   signing power.
+
+The security property this gives you: the private key never touches
+a networked machine.  Compromise of the dev key, the build host, or
+CI does not yield production signing power -- physical access to the
+air-gapped workstation does.  That is a weaker guarantee than
+in-chip key custody (an operator with access can copy the key), so
+treat workstation access control as the control that matters.
+
+#### Intended end state (pending #481)
+
+Once the OPTIGA Trust M host-library transport lands, the private
+key is generated *inside* the chip (slot 0xE0F0 is the convention
+for the MCUboot signing key) and never leaves its secure NVM; the
+public half is read out over I²C, and the release pipeline signs
+through a dedicated host with physical access to a provisioned part
+(`imgtool` supports external ECDSA signers via
+`--public-key-format hash`).  That removes the copy-the-key risk
+above.  None of it works yet.
 
 ### Key rotation
 
-MCUboot supports compiling against multiple public keys.  The
-SDK's rotation playbook:
+MCUboot supports compiling against multiple public keys, so rotation
+does not depend on the secure element:
 
-1. Provision a new OPTIGA Trust M slot (e.g. 0xE0F1) with the
-   next-generation key.
+1. Generate the next-generation key on the air-gapped workstation.
+   (End state, pending #481: provision a new OPTIGA Trust M slot,
+   e.g. 0xE0F1.)
 2. Compile the bootloader with both `*_pub.pem` files committed
    under `keys/`.  Signed images from either key are accepted.
 3. Roll the new key out to fielded devices via OTA (signed by

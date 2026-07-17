@@ -11,9 +11,15 @@
  * Pairs with src/ota.c (the application-side OTA state machine that writes
  * the inactive slot + commits the metadata).
  *
- * HIL-REQUIRED: the boot/validate/jump path is NOT validated on silicon.
- * A bug here bricks the GD32 (no host-driven SWD reflash this HW rev —
- * recover via a bench SWD probe). Bring up incrementally.
+ * SILICON-VALIDATED 2026-06-04 (bench, protocol v0.6): boot/validate/jump,
+ * slot relocation, dual-bank FMC-from-RAM, and the full stream → verify →
+ * commit → boot-new-slot → rollback cycle were proven end-to-end over the
+ * 25 MHz link, including two GD32 self-reboots through this bootloader.
+ * See src/bootloader/DESIGN.md for the bench evidence.
+ *
+ * STILL HANDLE WITH CARE: a bug here bricks the GD32 (no host-driven SWD
+ * reflash this HW rev — recover via a bench SWD probe), so change this path
+ * incrementally and re-run the bench cycle rather than trusting the gate.
  */
 
 #include <stdbool.h>

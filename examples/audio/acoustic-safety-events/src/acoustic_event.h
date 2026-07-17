@@ -3,8 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * acoustic_event -- pure-C per-frame DSP feature extraction for the acoustic
- * safety-event classifier.  Arch-neutral (stdint/math only): builds for
- * native_sim and the Cortex-M55 alike; host-unit-tested.
+ * safety-event classifier.  Arch-neutral: the spectral and window-statistics
+ * maths go through the portable <alp/dsp.h> surface rather than CMSIS arm_*
+ * directly, so the same source builds for native_sim and the Cortex-M55
+ * alike; host-unit-tested.
  *
  * DESIGN OVERVIEW
  * ---------------
@@ -15,7 +17,7 @@
  *                ▼
  *   ase_feat_extract()
  *    ├─ DC removal + time-domain: RMS, crest factor, zero-crossing rate
- *    ├─ Radix-2 FFT → single-sided magnitude spectrum
+ *    ├─ <alp/dsp.h> FFT chain → single-sided magnitude spectrum
  *    ├─ Spectral centroid, flatness, rolloff
  *    └─ Log-spaced band energies (ASE_N_BANDS bands, normalised to sum 1)
  *                ▼
@@ -47,7 +49,7 @@ extern "C" {
  * ASE_FRAME_N     512 samples at 16 kHz = 32 ms per frame.  A 32 ms window
  *                 gives ~31 Hz per FFT bin (16000/512), which is enough to
  *                 separate a 3150 Hz smoke-detector beep from adjacent noise.
- *                 Must be a power of two for the radix-2 FFT.
+ *                 Must be a power of two for the FFT stage.
  *
  * ASE_SR_HZ       Expected input sample rate.  Passed explicitly to
  *                 ase_feat_extract() so unit tests can use any rate.
