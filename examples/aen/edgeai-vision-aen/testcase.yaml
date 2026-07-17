@@ -30,5 +30,7 @@ tests:
   # target, alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he, ships
   # in-tree under zephyr/boards/alp/ -- this scenario stays parked
   # pending HW-in-loop CI wiring, not a missing board file. The
-  # overlay at boards/alp_e1m_aen801_m55_he.overlay is already in
-  # place.
+  # overlay at
+  # boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay
+  # (the fully-qualified board id -- required for Zephyr's
+  # auto-apply-by-board-name to pick it up) is already in place.

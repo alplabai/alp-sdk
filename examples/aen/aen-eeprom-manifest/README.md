@@ -21,8 +21,18 @@ west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-ee
 west flash
 ```
 
-The board overlay (`boards/alp_e1m_aen801_m55_he.overlay`) enables `i2c2`,
-supplies `pinctrl_i2c2` (P5_6/P5_7), and aliases `alp-i2c0 → &i2c2`.
+The board overlay
+(`boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay`) enables
+`i2c2`, supplies `pinctrl_i2c2` (P5_6/P5_7), and aliases `alp-i2c0 → &i2c2`.
+Zephyr only auto-applies a `boards/<name>.overlay` when `<name>` matches the
+build's fully-qualified board id, so the overlay filename must be the FQ form
+above -- a bare `alp_e1m_aen801_m55_he.overlay` is silently dropped by the
+`west build` command above.
+
+This app links at the HE MRAM app partition (`CONFIG_FLASH_LOAD_OFFSET=0x10000`
+in `prj.conf`, reset vector `0x8001xxxx`) and boots as a normal SES/slot0
+flash target, the same mechanism the `aen-cc3501e-*` examples use -- it is
+not an ITCM RAM-run.
 
 ## What it shows
 

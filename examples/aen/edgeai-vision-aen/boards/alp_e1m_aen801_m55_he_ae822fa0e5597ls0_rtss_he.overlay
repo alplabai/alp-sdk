@@ -7,8 +7,29 @@
  *
  *   alp_i2c0  -> on-EVK shared sensor bus (LSM6DSO / SSD1306 via the
  *               level shifter on the display side).
- *   alp_uart0 -> console / JTAG-side debug UART.
  *   alp_pins  -> the POSITIONAL alp,pin-array (see below).
+ *
+ * alp-i2c0 -> &i2c2, NOT the SoC's own i2c0 block.  The E1M edge "I2C0"
+ * signal (ALP_E1M_I2C0, EVK_I2C_BUS_SENSORS) is wired on this module to
+ * the Alif I2C2 DesignWare master (P5_6 SCL_C / P5_7 SDA_C) --
+ * metadata/e1m_modules/aen/from-alif.tsv rows AD2/AE2 ("I2C0_SDA" ->
+ * I2C2_SDA_C -> P5_7, "I2C0_SCL" -> I2C2_SCL_C -> P5_6), the same
+ * physical bus + pinctrl group aen-eeprom-manifest's overlay uses for
+ * the on-module EEPROM ("Map portable bus 0 (alp-i2c0) -> &i2c2").  The
+ * SoC's own i2c0 (0x49010000) has no edge routing on this module, so
+ * pointing the alias at it would compile (once enabled) but never
+ * reach anything on the EVK's sensor header.
+ *
+ * No alp-uart0 alias: src/main.c never calls alp_uart_open() (console
+ * output goes through printf/Zephyr's own console), and the E1M edge
+ * "UART0" signal is wired to Alif UART5 (see
+ * alp_e1m_aen801_m55_he-pinctrl.dtsi's pinctrl_uart5), not the SoC's
+ * own uart0 block -- there is no pinctrl group for uart0 on this
+ * carrier.  Enabling it would need status="okay" to satisfy
+ * DEVICE_DT_GET (src/backends/uart/zephyr_drv.c resolves every
+ * alp-uartN alias unconditionally at compile time), but with no real
+ * pins behind it that device would never be usable -- dropping the
+ * alias is the correct fix, not a fictitious enable.
  *
  * The alp,pin-array is POSITIONAL: alp_z_gpio_resolve(pin_id) indexes
  * it by the E1M GPIO index, so entry N is E1M pad N in the
@@ -16,7 +37,11 @@
  * 26..33, ...).  The EVK's RGB LED sits on PWM pads, so the status
  * LED is driven through a pad's GPIO-secondary index (ALP_E1M_GPIO_PWM3).
  * This overlay covers indices 0..29 -- enough for the two pads this
- * demo touches (encoder switch at [4], RGB-red LED at [29]).
+ * demo touches (encoder switch at [4], RGB-red LED at [29]).  gpio0/
+ * gpio1 are disabled by default in the SoC dtsi; GPIO_DT_SPEC_GET_BY_IDX
+ * (src/backends/gpio/zephyr_drv.c) resolves every entry in this array
+ * unconditionally at compile time, so both controllers are enabled
+ * below or the build fails the same way i2c0/uart0 did.
  *
  * The authoritative alp_e1m_aen801_m55_he board file ships in-tree at
  * zephyr/boards/alp/e1m_aen801_m55_he/; this overlay only re-aliases
@@ -25,11 +50,42 @@
  */
 
 #include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+#include <zephyr/dt-bindings/i2c/i2c.h>
+
+&pinctrl {
+    pinctrl_i2c2: pinctrl_i2c2 {
+        group0 {
+            pinmux = <PIN_P5_6__I2C2_SCL_C>, <PIN_P5_7__I2C2_SDA_C>;
+            /* Same pad config as aen-eeprom-manifest's pinctrl_i2c2 --
+             * BENCH-VALIDATED there (2026-06-15) and matching Alif's own
+             * reference i2c pinctrl.  See that overlay for the full
+             * input-enable / bias-pull-down rationale; do not "correct"
+             * bias-pull-down to bias-pull-up. */
+            input-enable;
+            bias-pull-down;
+        };
+    };
+};
+
+&i2c2 {
+    status = "okay";
+    pinctrl-0 = <&pinctrl_i2c2>;
+    pinctrl-names = "default";
+    clock-frequency = <I2C_BITRATE_STANDARD>;
+};
+
+&gpio0 {
+    status = "okay";
+};
+
+&gpio1 {
+    status = "okay";
+};
 
 / {
     aliases {
-        alp-i2c0  = &i2c0;       /* EVK sensor bus (LSM6DSO, SSD1306, ...) */
-        alp-uart0 = &uart0;      /* console / JTAG-side debug UART */
+        alp-i2c0 = &i2c2;        /* EVK sensor bus (LSM6DSO, SSD1306, ...) */
     };
 
     /* Positional alp,pin-array (e1m_pinout.h canonical order).  Only

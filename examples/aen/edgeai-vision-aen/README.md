@@ -57,7 +57,11 @@ edgeai-vision-aen/
 ├── prj.conf                      # SDK + chips + camera + math toggles
 ├── testcase.yaml                 # twister: compile under native_sim
 ├── boards/
-│   ├── alp_e1m_aen801_m55_he.overlay   # EVK pinout + camera/display routing
+│   ├── alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay
+│   │                                    # EVK pinout + camera/display routing
+│   │                                    # (fully-qualified board id -- Zephyr
+│   │                                    # only auto-applies a boards/<name>
+│   │                                    # overlay when <name> matches it)
 │   └── native_sim_native_64.overlay
 ├── src/
 │   └── main.c                    # skeleton with v0.1 init + v0.2 stubs
@@ -87,6 +91,14 @@ The board file ships in-tree at
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he .
 west flash
 ```
+
+The board overlay's `alp-i2c0` alias resolves to `&i2c2` (the SoC's
+DesignWare I2C2, `P5_6 SCL_C` / `P5_7 SDA_C`) -- the E1M edge `I2C0`
+signal this app opens via `EVK_I2C_BUS_SENSORS` is wired to that
+controller on the E1M-AEN801, not the SoC's own `i2c0` block (which has
+no edge routing on this module). Same physical bus + pinctrl group
+[`aen-eeprom-manifest`](../aen-eeprom-manifest) uses for the on-module
+EEPROM.
 
 ## SDK surfaces this example exercises
 
