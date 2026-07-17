@@ -20,6 +20,53 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 - Enums whose declared values already fill their register field
   (`icm42670`/`lsm6dso`/`lis2dw12` full-scale, `tmp112_rate_t`) are unchanged,
   as are `a4988`/`drv8825`/`lis2dw12_mode_t`, which already validated.
+### Fixed — `packagegroup-alp-display` allarch/libdrm RDEPENDS error
+
+- A full `alp-image-edge` bake for `e1m-v2n101-a55` now completes
+  (11168/11168 tasks, all succeeded — the pseudo/openat2 and lvgl fixes
+  landed as #817/#818), but the cooker log carried one non-fatal ERROR:
+  `packagegroup-alp-display-1.0-r0 do_package_write_rpm: An allarch
+  packagegroup shouldn't depend on packages which are dynamically renamed
+  (libdrm to libdrm2)`. `inherit packagegroup` makes the group allarch, and
+  `libdrm` is dynamically renamed per-arch to `libdrm2`
+  (`debian.bbclass`) — an allarch package RDEPENDing on an arch-renamed name
+  is invalid. Pre-existing since `a290b9f3` (#435); unrelated to #818's
+  libdrm *link* in the lvgl example's CMakeLists.
+- Dropped the explicit `libdrm` line from
+  `packagegroup-alp-display`'s `RDEPENDS`. Verified via
+  `weston_13.0.1.bb` and the built `pkgdata` that this is redundant, not a
+  behaviour change: `weston` RDEPENDS on `libweston-13`, and
+  `libweston-13`'s `drm-backend.so` / `libweston-13.so.0.0.1` link
+  `libdrm.so.2` directly, so BitBake's shlibs mechanism already emits an
+  automatic `RDEPENDS:libweston-13: ... libdrm (>= 2.4.120) ...` — the
+  packagegroup's explicit line was a redundant, and now illegal, restatement
+  of a dependency weston already carries transitively.
+- Verified against a real rebuild of the failing task (isolated build dir,
+  `EXTERNALSRC` pointed at the fix branch): `bitbake -c package_write_rpm
+  packagegroup-alp-display -f` — `do_package_write_rpm: Succeeded`, the
+  allarch/libdrm ERROR is gone (only the expected "tainted from a forced
+  run" WARNING remains), and `tmp/pkgdata/.../runtime/libweston-13` still
+  shows `libdrm (>= 2.4.120)` in its (arch-specific, legal) `RDEPENDS`, so
+  `libdrm2` still reaches any image that installs `packagegroup-alp-display`.
+
+### Fixed — `pr-bitbake` never triggered on the example source its recipes compile
+
+- `pr-bitbake.yml` filtered `examples/**/board.yaml` but not example **source**,
+  so a Yocto-breaking edit to a file a recipe actually compiles landed with **no
+  bake at all**. Found the hard way: #818 fixed `alp-lvgl-dashboard`'s
+  `do_compile`, and merging it triggered nothing — `lvgl-dashboard-x-evk/CMakeLists.txt`,
+  the exact file the recipe builds, matched none of the filters. The gap was never
+  lvgl-specific: **all three** Yocto-compiled examples were uncovered
+  (`edgeai-vision-aen`, `lvgl-dashboard-x-evk`, `v2n-m1-ros-perception`).
+- Added those three source trees to the `paths:` filters, for `pull_request` and
+  `push` both. Deliberately NOT a blanket `examples/**`: a bake is hours long and
+  runs on the bench host, so a Zephyr-only example edit must not trigger one.
+- That precision is exactly what rots, and silently — so
+  `tests/scripts/test_bitbake_paths_cover_recipe_sources.py` derives the truth from
+  the **recipes** (every `S = ${WORKDIR}/git/examples/...` in `meta-alp-sdk/**.bb`)
+  and fails if any is unmatched, in either filter, or if the two lists drift apart.
+  The oracle is the recipe set, never a hand-typed list. Verified sensitive: it
+  fails on the pre-fix workflow, naming all three examples.
 
 ### Fixed — `alp-lvgl-dashboard` recipe `do_compile`: `lv_conf.h` not found + missing libdrm link
 

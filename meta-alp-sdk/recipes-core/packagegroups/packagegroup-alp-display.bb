@@ -12,8 +12,14 @@ SUMMARY = "Wayland/Weston display stack (Mali/Wayland)"
 
 inherit packagegroup
 
+# No explicit libdrm RDEPENDS: `inherit packagegroup` makes this group
+# allarch, and an allarch package must not RDEPEND on a package that gets
+# arch-renamed (libdrm -> libdrm2 via debian.bbclass) -- BitBake flags that
+# as an error at do_package_write_rpm. weston's kms/drm PACKAGECONFIG links
+# libweston's drm-backend.so against libdrm.so.2, so the shlibs mechanism
+# already adds the (arch-specific) libdrm2 runtime dependency automatically
+# once weston is installed; no explicit line is needed here.
 RDEPENDS:${PN} = " \
     weston \
     weston-init \
-    libdrm \
 "
