@@ -56,7 +56,7 @@ never hangs.
   `CONFIG_ALP_SDK_SOC_INFO_ALIF_SE` default on and register the E8
   backends at `silicon_ref="alif:ensemble:e8"` -- the dispatcher
   picks them over the wildcard NOSUPPORT stubs.
-- `boards/alp_e1m_aen801_m55_he.overlay` enables the RTSS-HE
+- `boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay` enables the RTSS-HE
   <-> SE MHUv2 mailbox pair (`seservice0r` @ 0x40040000,
   `seservice0s` @ 0x40050000) + the `se_service` root node, and
   retargets ROM to ITCM for the bench RAM-run.

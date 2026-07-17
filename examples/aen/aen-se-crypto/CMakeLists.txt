@@ -23,7 +23,7 @@ cmake_minimum_required(VERSION 3.20)
 # (alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he), not the bare board
 # name, so point at the file directly -- this builds cleanly with a plain
 # `west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he`.
-set(DTC_OVERLAY_FILE "${CMAKE_CURRENT_SOURCE_DIR}/boards/alp_e1m_aen801_m55_he.overlay")
+set(DTC_OVERLAY_FILE "${CMAKE_CURRENT_SOURCE_DIR}/boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay")
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(aen_se_crypto LANGUAGES C)

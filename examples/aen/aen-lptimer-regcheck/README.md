@@ -75,7 +75,7 @@ export ZEPHYR_BASE=<zephyr-base>
 west build -p always -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
     examples/aen/aen-lptimer-regcheck -d build/aen-lptimer-regcheck -- \
     "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>" \
-    -DEXTRA_DTC_OVERLAY_FILE=examples/aen/aen-lptimer-regcheck/boards/alp_e1m_aen801_m55_he.overlay
+    -DEXTRA_DTC_OVERLAY_FILE=examples/aen/aen-lptimer-regcheck/boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay
 ```
 
 ## Bench run (human-operated; not done by the SDK)

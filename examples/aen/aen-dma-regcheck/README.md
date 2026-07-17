@@ -83,7 +83,7 @@ transcribe the relevant `*_PERIPH_REQ` from that file.
 ## Build (bench, serial-driven by the maintainer)
 
 RAM-run for the RTSS-HE core; the board overlay
-`boards/alp_e1m_aen801_m55_he.overlay` auto-applies for the fully-qualified
+`boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay` auto-applies for the fully-qualified
 board:
 
 ```

@@ -44,7 +44,7 @@ executing, not a stale value left by a prior image.
 ZEPHYR_BASE=<zephyr> west build \
   -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/aen/aen-hp-core-smoke -- \
   "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>" \
-  -DEXTRA_DTC_OVERLAY_FILE=examples/aen/aen-hp-core-smoke/boards/alp_e1m_aen801_m55_hp.overlay
+  -DEXTRA_DTC_OVERLAY_FILE=examples/aen/aen-hp-core-smoke/boards/alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay
 
 # Flash as an M55_HP ATOC + read the beacon (SETOOLS license-gated; export SETOOLS_DIR):
 scripts/bench/aen/flash-jlink-hp.sh build/aen-hp-core-smoke

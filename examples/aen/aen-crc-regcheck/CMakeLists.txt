@@ -7,7 +7,7 @@
 # A RAM console carries the PASS/FAIL line; the human can ALSO read the CRC_OUT
 # register over J-Link to confirm the hardware result independently of printk.
 #
-# The board overlay boards/alp_e1m_aen801_m55_he.overlay auto-applies for the
+# The board overlay boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay auto-applies for the
 # matching board target (Zephyr's per-board overlay convention).
 #
 # Standalone Zephyr app (no alp_project.py board.yaml flow): build with

@@ -98,7 +98,7 @@ west build -p always -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
     "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>"
 ```
 
-The board overlay (`boards/alp_e1m_aen801_m55_he.overlay`) auto-applies
+The board overlay (`boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay`) auto-applies
 by the fully-qualified board name -- no `DTC_OVERLAY_FILE` needed.
 
 ## Bench run (human-operated; not done by the SDK)
