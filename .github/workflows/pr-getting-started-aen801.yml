@@ -140,4 +140,12 @@ jobs:
           ZEPHYR_TOOLCHAIN_VARIANT: zephyr
         run: |
           source .venv/bin/activate
-          west build -b "${AEN801_BOARD_TARGET}" "${AEN801_EXAMPLE_PATH}"
+          # The runner's setup-python step exports Python3_ROOT_DIR, which
+          # CMake's find_package(Python3) honours OVER the activated venv --
+          # so alp_project.py (invoked by CMakeLists) would run under the
+          # hosted-tool python and miss the venv's PyYAML.  A real customer's
+          # activated venv has no Python3_ROOT_DIR, so this is a CI artefact;
+          # pin CMake to the venv interpreter to mirror the customer env.
+          unset Python3_ROOT_DIR Python3_INCLUDE_DIR Python3_LIBRARY pythonLocation
+          west build -b "${AEN801_BOARD_TARGET}" "${AEN801_EXAMPLE_PATH}" \
+              -- -DPython3_EXECUTABLE="$(command -v python)"
