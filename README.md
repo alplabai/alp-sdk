@@ -278,8 +278,8 @@ by upstream `bitbake` / OE-core constraint.  Codified in
   Gatekeeper, serial device naming).
 - `.gitattributes` pins line endings to LF so a Windows checkout
   and a Linux pull see identical bytes.
-- See [*Using with VS Code*](#using-with-vs-code) above for the
-  in-repo `.vscode/` config and the separate VS Code extension.
+- See the *Using with VS Code* section above for the in-repo
+  `.vscode/` config and the separate VS Code extension.
 - `scripts/check_cross_platform.py` lints docs + scripts for
   Linux-only idioms; CI matrix scaffolding at
   `.github/workflows/cross-platform-zephyr.yml` runs the Python +

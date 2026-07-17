@@ -26,7 +26,7 @@ The board overlay
 `i2c2`, supplies `pinctrl_i2c2` (P5_6/P5_7), and aliases `alp-i2c0 → &i2c2`.
 Zephyr only auto-applies a `boards/<name>.overlay` when `<name>` matches the
 build's fully-qualified board id, so the overlay filename must be the FQ form
-above -- a bare `alp_e1m_aen801_m55_he.overlay` is silently dropped by the
+above -- a bare `alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay` is silently dropped by the
 `west build` command above.
 
 This app links at the HE MRAM app partition (`CONFIG_FLASH_LOAD_OFFSET=0x10000`
