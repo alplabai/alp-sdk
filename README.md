@@ -39,8 +39,14 @@ issues at
 ## Quickstart
 
 ```bash
-# Install the CLI (once per clone)
-pip install -e .
+# One-time per clone: stand up the west/Zephyr workspace + install the
+# CLI into it (scripts/bootstrap.ps1 on native Windows)
+bash scripts/bootstrap.sh
+source ../.venv/bin/activate
+export ZEPHYR_BASE="$PWD/../zephyr"
+
+# Sanity-check the host -- catches a missing toolchain/HAL before it bites later
+alp doctor
 
 # Scaffold + run a hello-world on native_sim — no hardware needed
 alp init my-app
@@ -48,7 +54,16 @@ cd my-app
 alp run
 ```
 
-`alp init` walks you through SoM SKU + board preset + starter peripherals interactively, or accepts `--som`, `--preset`, `--peripherals` flags for CI. `alp run` builds for `native_sim` by default and prints the app's stdout straight through; pass `--board <name>` for a real-hardware build (`--flash` to chain flash).
+`bash scripts/bootstrap.sh` is what actually gets `west` (and everything else `alp build`/`alp run` shell out to) onto `PATH` — skipping it is the #1 way this Quickstart fails on a fresh clone; see [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md) for the per-OS manual equivalent. `alp init` walks you through SoM SKU + board preset + starter peripherals interactively, or accepts `--som`, `--preset`, `--peripherals` flags for CI. `alp run` builds for `native_sim` by default and prints the app's stdout straight through; pass `--board <name>` for a real-hardware build (`--flash` to chain flash).
+
+**Flashing E1M-AEN hardware needs a vendor tool you must obtain yourself.**
+`west flash` on an E1M-AEN target (the default flasher wired for those
+boards) drives the **Alif Security Toolkit (SETOOLS)** to author + burn
+the signed image; SETOOLS is license-gated by Alif and is **not
+redistributed by alp-sdk**.  Before `--flash` on AEN hardware: get
+SETOOLS from Alif, `pip install fdt`, and export `SETOOLS_DIR` +
+`SE_UART` (or pass `--setools-dir`/`--se-uart`) — see
+[`docs/bring-up-aen.md`](docs/bring-up-aen.md).
 
 `alp validate board.yaml` runs the diagnostic-rich validator standalone — try it on a fixture under `tests/fixtures/board_yaml_bad/` to see the format.  `alp doctor` triages the host environment (PASS/WARN/FAIL with fix hints) whenever a build machine misbehaves.  The full verb set — `build` / `flash` / `emit` / `size` / `image` / `clean` / `renode` / `monitor` / `new-som` / `model` and friends — is documented in [`docs/cli.md`](docs/cli.md).
 
@@ -118,7 +133,7 @@ Pick your SoM and start with its one-pager:
 
 | SoM family       | One-pager                                                   | Bring-up doc                                                | Reference examples                              |
 |------------------|-------------------------------------------------------------|-------------------------------------------------------------|-------------------------------------------------|
-| E1M-AEN          | [`docs/soms/aen.md`](docs/soms/aen.md)                      | [`docs/getting-started.md`](docs/getting-started.md) §4..5  | `examples/peripheral-io/gpio-button-led`, `i2c-scanner`, `rtc-clock`, `hello-world` |
+| E1M-AEN          | [`docs/soms/aen.md`](docs/soms/aen.md)                      | [`docs/bring-up-aen.md`](docs/bring-up-aen.md)              | `examples/peripheral-io/gpio-button-led`, `i2c-scanner`, `rtc-clock`, `hello-world` |
 | E1M-X V2N        | [`docs/soms/v2n.md`](docs/soms/v2n.md)                      | [`docs/bring-up-v2n.md`](docs/bring-up-v2n.md)              | `examples/v2n/v2n-gd32-bridge-ping`, `v2n-board-id-readout`, `v2n-ethernet-dual`, `dac-waveform` |
 | E1M-X V2N-M1     | [`docs/soms/v2n-m1.md`](docs/soms/v2n-m1.md)                | [`docs/bring-up-v2n-m1.md`](docs/bring-up-v2n-m1.md)        | DEEPX bring-up delta on top of V2N             |
 | E1M-N93 (i.MX93) | [`docs/soms/imx93.md`](docs/soms/imx93.md)                  | [`docs/getting-started.md`](docs/getting-started.md) §4..5  | same cross-family examples as AEN              |
@@ -240,10 +255,23 @@ for every heterogeneous SoM — the per-core OS defaults come from
 the SoM preset's `topology:` block.  Customers override on a
 per-core basis via the project's `cores:` block.
 
-Want a GUI?  Install the [VS Code extension](https://github.com/alplabai/alp-sdk-vscode) — schema-aware
-editing, a configurator panel with dropdowns for supported SoM
-presets and boards, one-keypress "Generate all" for the four emit
-modes, inline validator diagnostics in the Problems panel, west wrappers.
+## Using with VS Code
+
+Two complementary surfaces:
+
+- **The SDK's `.vscode/` config** (ships in this repo's `.vscode/` —
+  `extensions.json`, `settings.json`, `tasks.json`,
+  `c_cpp_properties.json`) is pre-wired for Zephyr-module + plain-CMake
+  development: clone, open the folder, accept the recommended
+  extensions.
+- **The [`alplabai/alp-sdk-vscode`](https://github.com/alplabai/alp-sdk-vscode)
+  extension** (a separate repo — there is no `vscode/` directory in
+  alp-sdk itself) adds schema-aware `board.yaml` editing (autocomplete
+  on SKUs/boards/libraries, inline validator diagnostics in the Problems
+  panel), a GUI configurator panel with dropdowns for supported SoM
+  presets and boards, west wrappers (build / flash / run native_sim),
+  per-OS dependency bootstrap, and a one-keypress "Generate all" for the
+  emit modes.
 
 ## Development hosts
 
@@ -259,9 +287,8 @@ by upstream `bitbake` / OE-core constraint.  Codified in
   Gatekeeper, serial device naming).
 - `.gitattributes` pins line endings to LF so a Windows checkout
   and a Linux pull see identical bytes.
-- VS Code config ships in `.vscode/`; install the
-  [`alplabai/alp-sdk-vscode`](https://github.com/alplabai/alp-sdk-vscode)
-  extension for schema-aware `board.yaml` editing.
+- See [*Using with VS Code*](#using-with-vs-code) above for the
+  in-repo `.vscode/` config and the separate VS Code extension.
 - `scripts/check_cross_platform.py` lints docs + scripts for
   Linux-only idioms; CI matrix scaffolding at
   `.github/workflows/cross-platform-zephyr.yml` runs the Python +
@@ -323,7 +350,7 @@ v0.6 lands heterogeneous OS orchestration — see ADR 0010 + [`docs/heterogeneou
 git clone https://github.com/alplabai/alp-sdk
 cd alp-sdk
 bash scripts/bootstrap.sh                    # west workspace + Python + apt hints
-export ZEPHYR_BASE="$PWD/../zephyrproject/zephyr"
+export ZEPHYR_BASE="$PWD/../zephyr"
 bash scripts/test-all.sh                     # Yocto ctest + twister + format + Doxygen
 ```
 
