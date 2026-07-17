@@ -34,11 +34,12 @@ from . import _e1m_gpio_canonical
 # alp,pin-array with one entry per EVK_PIN_* macro, each annotated
 # with a comment naming the macro and the ALP_E1M_GPIO_IO<N> it
 # resolves to.  Customers fill the gpio bank / index columns with
-# their SoM's actual DT controller phandles once the upstream board
-# files land in alplabai/alp-zephyr-modules.
+# their SoM's actual DT controller phandles by cross-referencing the
+# in-tree board file (zephyr/boards/alp/<board>/*.dts, wired in via
+# zephyr/module.yml's `board_root: zephyr`).
 #
 # Bus phandle naming convention matches the manually-written EVK
-# overlays at tests/zephyr/peripheral/boards/alp_e1m_evk_aen.overlay:
+# overlays at tests/zephyr/peripheral/boards/alp_e1m_aen801_m55_he.overlay:
 # &i2c<N>, &spi<N>, &uart<N>, &pwm<N>.  Per-SoC vendor DT may use
 # alternate names (e.g. &lpi2c0 on some Alif boards); the customer
 # fixes the phandle if their board file diverges -- the loader's
@@ -325,8 +326,8 @@ def _emit_dts_overlay(
     lines.append(" * Regenerate after changes to board.yaml or "
                  "include/alp/boards/<board>.h.")
     lines.append(" *")
-    lines.append(" * Per-pad GPIO bank/index values are TBD pending the upstream")
-    lines.append(" * alp_<board>_<som>.dts board file (alplabai/alp-zephyr-modules).")
+    lines.append(" * Per-pad GPIO bank/index values are TBD; cross-reference the in-tree")
+    lines.append(" * board file at zephyr/boards/alp/<board>/*.dts (zephyr/module.yml board_root).")
     lines.append(" * The alp,pin-array below is the full 52-entry positional map in")
     lines.append(" * e1m_pinout.h canonical order; fill the <&gpioX Y FLAGS> columns")
     lines.append(" * in place without renumbering (the positional index is the ABI).")
