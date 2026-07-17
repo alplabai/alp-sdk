@@ -111,6 +111,15 @@ alp_status_t bmi323_read_id(bmi323_t *dev, uint8_t *id_out)
 alp_status_t bmi323_set_accel(bmi323_t *dev, bmi323_odr_t odr, bmi323_accel_fs_t fs)
 {
 	if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
+	/* The ODR field is 4 bits and the FS field 3, but bmi323_odr_t only
+     * declares 0x1..0xE and bmi323_accel_fs_t only 0x0..0x3.  Masking
+     * alone would write a reserved encoding and still report success. */
+	if ((int)odr < (int)BMI323_ODR_0_78125_HZ || (int)odr > (int)BMI323_ODR_6400_HZ) {
+		return ALP_ERR_INVAL;
+	}
+	if ((int)fs < (int)BMI323_ACCEL_FS_2G || (int)fs > (int)BMI323_ACCEL_FS_16G) {
+		return ALP_ERR_INVAL;
+	}
 	/* ACC_CONF[6:4] = FS, [3:0] = ODR.  Bosch reset value enables
      * normal mode bandwidth + averaging which is fine for v0.2. */
 	uint16_t v = (uint16_t)((((uint16_t)fs & 0x07u) << 4) | ((uint16_t)odr & 0x0Fu));
@@ -124,6 +133,14 @@ alp_status_t bmi323_set_accel(bmi323_t *dev, bmi323_odr_t odr, bmi323_accel_fs_t
 alp_status_t bmi323_set_gyro(bmi323_t *dev, bmi323_odr_t odr, bmi323_gyro_fs_t fs)
 {
 	if (dev == NULL || !dev->initialised) return ALP_ERR_NOT_READY;
+	/* Same reserved-encoding trap as bmi323_set_accel; bmi323_gyro_fs_t
+     * declares 0x0..0x4 against a 3-bit field. */
+	if ((int)odr < (int)BMI323_ODR_0_78125_HZ || (int)odr > (int)BMI323_ODR_6400_HZ) {
+		return ALP_ERR_INVAL;
+	}
+	if ((int)fs < (int)BMI323_GYRO_FS_125_DPS || (int)fs > (int)BMI323_GYRO_FS_2000_DPS) {
+		return ALP_ERR_INVAL;
+	}
 	uint16_t v = (uint16_t)((((uint16_t)fs & 0x07u) << 4) | ((uint16_t)odr & 0x0Fu));
 	v |= (1u << 12);
 	alp_status_t s = reg_write(dev, REG_GYR_CONF, v);

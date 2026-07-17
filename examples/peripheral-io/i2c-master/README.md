@@ -10,7 +10,9 @@ what's behind them; this example *reads* a known sensor.
 
 ## What this shows
 
-* `alp_i2c_open()` -- open `ALP_E1M_I2C0` at 400 kHz Fast-mode.
+* `alp_i2c_open()` -- open `BOARD_I2C_SENSORS` at 400 kHz Fast-mode.
+  The `<alp/board.h>` alias resolves to `ALP_E1M_I2C0` on the E1M
+  EVK and `ALP_E1M_X_I2C0` on the E1M-X EVK.
 * `tmp112_init()` -- chip-driver probe + configure.
 * `tmp112_set_rate()` -- tune the conversion cadence.
 * `tmp112_read_temp_milli_c()` -- one register read per second.
@@ -58,7 +60,7 @@ west flash
 Real hardware (TMP112 populated, room temperature):
 
 ```
-[i2c-master] open ALP_E1M_I2C0 @ 400 kHz
+[i2c-master] open BOARD_I2C_SENSORS @ 400 kHz
 [i2c-master] tmp112_init @ 0x48 -> 0 (OK)
 [i2c-master] sample 0: 23.625 degC
 [i2c-master] sample 1: 23.687 degC
@@ -71,7 +73,7 @@ Real hardware (TMP112 populated, room temperature):
 native_sim (emul I2C, no TMP112 registered):
 
 ```
-[i2c-master] open ALP_E1M_I2C0 @ 400 kHz
+[i2c-master] open BOARD_I2C_SENSORS @ 400 kHz
 [i2c-master] tmp112_init @ 0x48 -> -5 (populated? right address?)
 [i2c-master] done
 ```
@@ -94,5 +96,5 @@ native_sim (emul I2C, no TMP112 registered):
 - [`<alp/peripheral.h>`](../../../include/alp/peripheral.h) I2C surface.
 - [`<alp/chips/tmp112.h>`](../../../include/alp/chips/tmp112.h) -- driver API.
 - [`examples/peripheral-io/i2c-scanner/`](../i2c-scanner/) -- discovery companion.
-- [`examples/peripheral-io/i2c-slave/`](../i2c-slave/) -- slave-mode companion (API gap; see notes).
+- [`examples/peripheral-io/i2c-slave/`](../i2c-slave/) -- slave-mode companion, built on the `alp_i2c_target_*` surface.
 - TMP112 datasheet (TI SBOS473K).

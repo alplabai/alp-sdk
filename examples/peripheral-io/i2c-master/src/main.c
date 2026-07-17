@@ -13,7 +13,8 @@
  * Hardware: the TMP112 +/-0.5 C temperature sensor sits on the
  * BRD_I2C management bus on every E1M-AEN, E1M-V2N, and E1M-V2N-M1
  * SoM per metadata/chips/tmp112.yaml.  7-bit address depends on
- * the ADD0 strap; the SoM presets pick 0x48 (AEN) or 0x40 (V2N).
+ * the ADD0 strap, which selects one of 0x48..0x4B; every current
+ * SoM family straps ADD0 = GND, so the address is 0x48 throughout.
  * On a brand-new bring-up you may want to run examples/peripheral-io/i2c-scanner
  * first to confirm which address ACKs.
  *

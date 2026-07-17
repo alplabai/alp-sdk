@@ -100,7 +100,11 @@ alp_status_t lis2dw12_init(lis2dw12_t *dev, alp_i2c_t *bus, uint8_t i2c_addr);
 /** Read WHO_AM_I for liveness checks. */
 alp_status_t lis2dw12_read_id(lis2dw12_t *dev, uint8_t *id_out);
 
-/** Configure ODR + full-scale + power mode in a single call. */
+/**
+ * @brief Configure ODR + full-scale + power mode in a single call.
+ * @return ALP_OK / ALP_ERR_NOT_READY (uninitialised) / ALP_ERR_INVAL
+ *   (`odr` or `mode` is not a declared enum member).
+ */
 alp_status_t
 lis2dw12_set_accel(lis2dw12_t *dev, lis2dw12_odr_t odr, lis2dw12_fs_t fs, lis2dw12_mode_t mode);
 

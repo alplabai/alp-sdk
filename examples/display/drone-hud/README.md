@@ -14,14 +14,13 @@ on-board sensor chips.
   INA236 battery monitor, ST7789 TFT) through the portable
   `<alp/*>` surfaces.  Zero vendor-specific symbols in the app
   code.
-- Attitude is a **placeholder**, not real fusion.  `board.yaml`
-  declares the **`madgwick_ahrs`** library, but `update_attitude()`
-  in `sensors.c` is currently a bare gyro Euler integrator: it
-  discards the accelerometer and so **drifts** without a gravity
-  reference.  It only exists to animate the HUD.  Wiring the real
-  Madgwick fuse (into a stable quaternion, with the loader-emitted
-  `CONFIG_ALP_MADGWICK_FPU=y` on AEN / the `tmu_cordic` path on V2N)
-  is the v0.6 work.
+- Attitude is **real Madgwick fusion**.  `board.yaml` declares the
+  **`madgwick-ahrs`** library and `sensors.c` drives it through
+  `<alp/ahrs.h>`: gyro rates and the accelerometer fuse into a
+  quaternion, so roll/pitch stay referenced to gravity rather than
+  drifting.  `alp_ahrs_update_imu()` owns the filter state and
+  `alp_ahrs_euler()` hands back roll/pitch/yaw -- no fusion maths in
+  the app itself.
 - **LVGL** composes the attitude indicator, GPS readout, battery
   telemetry, and flight mode into a coherent HUD layout, bound to
   the panel via `<alp/display.h>` + `alp_gui_lvgl_attach()`

@@ -17,13 +17,12 @@
  * HUD that wouldn't look out of place on a commercial flight
  * controller.
  *
- * Attitude is a PLACEHOLDER, not real fusion.  board.yaml declares
- * the `madgwick_ahrs` library, but update_attitude() in sensors.c is
- * a bare gyro Euler integrator: it discards the accelerometer and
- * therefore DRIFTS without bound (no gravity reference to correct
- * against).  It exists only to give the HUD something to animate.
- * The real Madgwick AHRS fuse into a stable quaternion is the v0.6
- * port -- do not present this as working attitude estimation.
+ * Attitude is real Madgwick fusion.  board.yaml declares the
+ * `madgwick-ahrs` library and sensors.c drives it through the
+ * `<alp/ahrs.h>` surface: gyro rates plus the accelerometer fuse
+ * into a quaternion, so roll/pitch stay pinned to gravity instead
+ * of drifting.  The filter owns the quaternion state and the Euler
+ * conversion -- the app contributes no fusion maths of its own.
  *
  *
  * ── Thread architecture ────────────────────────────────────────

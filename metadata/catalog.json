@@ -403,7 +403,7 @@
         "name": "rpmsg-v2n",
         "path": "examples/multicore/rpmsg-v2n",
         "som": "E1M-V2N101",
-        "summary": "> `[UNTESTED]` -- v0.6 paper-correct. Both halves declared in one > `board.yaml` v2; the orchestrator fans out Yocto + Zephyr in > parallel. HiL bring-up on V2N + Yocto gates on v0.8."
+        "summary": "> **Status: the raw A55↔M33 transport is bench-proven; this example's > own two halves are not a matched pair.** > > - **Proven (#697), on E1M-X V2N-M1 silicon:** the raw OpenAMP > transport that `m33_sm/src/main.c` implements -- resource table, > vrings, MHU mailbox doorbell, rpmsg endpoint -- against real > RZ/V2N devicetree. Attach + echo round-trip (1/4/16/64 B) and > the GHSA-xhm8 concurrent-close case all pass end-to-end, with > Renesas's `rpmsg_sample_client` over UIO as the Linux peer. > - **Not proven:** the `linux/` + `m33_sm/` pairing *in this > directory*. `linux/src/main.c` subscribes to a `temperature` > method that the M33 echo responder never publishes, so the two > slices as shipped do not talk to each other. `m33_sm` is > `build_only: true` in CI (no native_sim: it needs real V2N > devicetree + the Renesas MHU/FSP/OpenAMP modules). > - **By design:** the M33 slice **deliberately bypasses > `<alp/rpc.h>`** and uses raw OpenAMP (alp-sdk #683 \"Path B, > Phase 1\"). Its verified peer is Renesas's licence-gated > Multi-OS Package sample, which dials a resource table shaped > exactly like `resource_table.c` -- not whatever Zephyr's > `ipc_service` would generate. See `m33_sm/src/main.c`'s file > header. A v2n-specific `<alp/rpc.h>` backend is follow-up work."
       }
     ],
     "peripheral-io": [
@@ -661,7 +661,7 @@
         "name": "power-managed-sensor",
         "path": "examples/power-timing/power-managed-sensor",
         "som": "E1M-AEN301",
-        "summary": "Low-power BME280 + IMU sensor node on the AEN301 M55-HE (high-efficiency) core. The SDK's reference for the v0.6 `cores.<id>.power:` declarative block: a worked example of sleep-mode selection + multi-source wakeup."
+        "summary": "The SDK's reference for the v0.6 `cores.<id>.power:` declarative block, on the AEN301 M55-HE (high-efficiency) core: a worked example of sleep-mode selection + multi-source wakeup."
       },
       {
         "board": "e1m-evk",

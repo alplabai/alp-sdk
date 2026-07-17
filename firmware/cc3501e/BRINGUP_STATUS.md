@@ -24,8 +24,8 @@ event delivery remains future work.
 | **BLE** (enable / advertise / scan / connect + GATT scaffolding) | PASS for enable + real scan | NimBLE enable and `ble_gap_disc` scan validated with real advertisers; full runtime GATT/event parity remains v1.0 work. |
 | **CAM enables** | PASS | `which` 0 -> GPIO_1 (LDO0), 1 -> GPIO_0 (LDO1); mapping fixed from U4 pins 54/55. |
 | **GPIO proxy** + camera enables | PASS | Firmware HAL, host API, portable proxy, ztests, and warm-boot GPIO example are validated. |
-| **Cold-boot** | Host-workable | Puya 64 Mbit flash workaround is host hard-reset after every power-cycle. Correctly activated production units still need cold swap-boot validation. |
-| **OTA over SPI** | Stage/install PASS; final cold swap-boot gated | BEGIN -> WRITE(RAM-stage) -> FINISH(one flash burst -> `psa_fwu_install` -> STAGED) is silicon-validated; final swap needs a correctly activated, cold-bootable unit. |
+| **Cold-boot** | Host-workable | Puya 64 Mbit flash workaround is host hard-reset after every power-cycle. |
+| **OTA over SPI** | PASS - full cycle | BEGIN -> WRITE(RAM-stage) -> FINISH(one flash burst -> `psa_fwu_install` -> STAGED) -> swap is silicon-validated. **#493 criterion 1 CLOSED 2026-07-10**: the full cold-swap cycle is proven on E8 (see §5). Forward-version candidates only - the CC35 refuses a version rollback. |
 
 ## 1. Inter-chip link
 
@@ -293,9 +293,11 @@ GPIO example has bench coverage.
 
 OTA over the bridge is RAM-staged by design: each WRITE copies into RAM, and
 FINISH performs one flash burst plus `psa_fwu_install`. This avoids repeatedly
-tearing down the bridge DMA during a long image stream. Stage/install is
-bench-validated; the final cold swap-boot remains gated on a correctly
-activated, cold-bootable unit.
+tearing down the bridge DMA during a long image stream. Stage/install *and*
+the final swap are silicon-validated: **#493 criterion 1 closed 2026-07-10**
+with the full cold-swap cycle proven on E8 (§5 records the run). Candidates
+must be forward-versioned — the CC35's FWU service refuses a version
+rollback, which earlier bench runs misread as a dead secure element.
 
 ## 8. Open items / next
 

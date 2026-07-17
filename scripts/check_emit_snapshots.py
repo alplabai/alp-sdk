@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -99,6 +100,22 @@ def _normalize_path(text: str, path: str, token: str) -> str:
     return text
 
 
+# A tokenised path's *tail* keeps the host separator: replacing the checkout
+# root turns ``C:\...\alp-sdk\firmware\x`` into ``<SDK_ROOT>\\firmware\\x``
+# (backslashes doubled by the JSON encoder) while the goldens -- written on
+# Linux -- carry ``<SDK_ROOT>/firmware/x``.  Rewrite the separators that follow
+# a token so the two hosts agree.  Only a token-led run is touched, so JSON
+# escapes elsewhere in the payload are left alone; on POSIX the run contains no
+# backslashes and the substitution is a no-op.
+_TOKEN_TAIL_RE = re.compile(r"(<SDK_ROOT>|<PYTHON_EXECUTABLE>)((?:\\{1,2}[^\\\"\s,]+)+)")
+
+
+def _normalize_token_tails(text: str) -> str:
+    """Force forward slashes inside paths already reduced to a token."""
+    return _TOKEN_TAIL_RE.sub(
+        lambda m: m.group(1) + re.sub(r"\\{1,2}", "/", m.group(2)), text)
+
+
 def _normalize_host_paths(text: str, repo: str, python: str) -> str:
     """Replace host-specific SDK and Python paths with stable tokens.
 
@@ -113,7 +130,8 @@ def _normalize_host_paths(text: str, repo: str, python: str) -> str:
     their raw paths, so the Linux output is unchanged apart from tokenisation.
     """
     text = _normalize_path(text, repo, "<SDK_ROOT>")
-    return _normalize_path(text, python, "<PYTHON_EXECUTABLE>")
+    text = _normalize_path(text, python, "<PYTHON_EXECUTABLE>")
+    return _normalize_token_tails(text)
 
 
 def _emit(tool: Path, board: str, mode: str) -> str:

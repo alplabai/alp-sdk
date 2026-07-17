@@ -910,3 +910,242 @@ ZTEST(alp_chips, test_fake_bme280_compensate_matches_datasheet_example)
 }
 
 #endif /* DT_NODE_EXISTS(DT_NODELABEL(fake_lsm6dso)) — fake-emul block */
+
+/* ------------------------------------------------------------------ */
+/* Invalid-enum rejection sweep (#790, split from #736)                */
+/* ------------------------------------------------------------------ */
+/* A rejected config call must not reach the bus, so these tests build
+ * the device context directly with a NULL bus instead of going through
+ * <chip>_init -- no fake i2c target required.
+ *
+ * The NULL bus is also what makes each test discriminate.  An
+ * unvalidated driver masks the undeclared value into the register and
+ * calls alp_i2c_write(NULL, ...), which returns ALP_ERR_NOT_READY.  A
+ * validating driver returns ALP_ERR_INVAL before any write.  The two
+ * codes differ, so a passing test proves the check is really there.
+ *
+ * Each chip also gets an "accepts declared" control.  Those pass both
+ * before and after the fix by design -- they are not evidence of the
+ * fix, they pin the opposite failure mode: an over-tightened check that
+ * rejects declared values (the regression #739 hit on a real board).
+ */
+
+ZTEST(alp_chips, test_bmi323_set_accel_rejects_undeclared_odr)
+{
+	bmi323_t dev    = { 0 };
+	dev.initialised = true;
+
+	/* bmi323_odr_t declares 0x1..0xE; the register field is 4 bits. */
+	static const uint8_t bad[] = { 0x0, 0xF };
+
+	for (size_t i = 0; i < ARRAY_SIZE(bad); i++) {
+		zassert_equal(bmi323_set_accel(&dev, (bmi323_odr_t)bad[i], BMI323_ACCEL_FS_2G),
+		              ALP_ERR_INVAL,
+		              "accel odr 0x%x is undeclared and must be rejected, not masked",
+		              bad[i]);
+	}
+}
+
+ZTEST(alp_chips, test_bmi323_set_accel_rejects_undeclared_fs)
+{
+	bmi323_t dev    = { 0 };
+	dev.initialised = true;
+
+	/* bmi323_accel_fs_t declares 0x0..0x3; the field is 3 bits. */
+	static const uint8_t bad[] = { 0x4, 0x5, 0x6, 0x7 };
+
+	for (size_t i = 0; i < ARRAY_SIZE(bad); i++) {
+		zassert_equal(bmi323_set_accel(&dev, BMI323_ODR_100_HZ, (bmi323_accel_fs_t)bad[i]),
+		              ALP_ERR_INVAL,
+		              "accel fs 0x%x is undeclared and must be rejected, not masked",
+		              bad[i]);
+	}
+}
+
+ZTEST(alp_chips, test_bmi323_set_gyro_rejects_undeclared_odr)
+{
+	bmi323_t dev    = { 0 };
+	dev.initialised = true;
+
+	static const uint8_t bad[] = { 0x0, 0xF };
+
+	for (size_t i = 0; i < ARRAY_SIZE(bad); i++) {
+		zassert_equal(bmi323_set_gyro(&dev, (bmi323_odr_t)bad[i], BMI323_GYRO_FS_125_DPS),
+		              ALP_ERR_INVAL,
+		              "gyro odr 0x%x is undeclared and must be rejected, not masked",
+		              bad[i]);
+	}
+}
+
+ZTEST(alp_chips, test_bmi323_set_gyro_rejects_undeclared_fs)
+{
+	bmi323_t dev    = { 0 };
+	dev.initialised = true;
+
+	/* bmi323_gyro_fs_t declares 0x0..0x4; the field is 3 bits. */
+	static const uint8_t bad[] = { 0x5, 0x6, 0x7 };
+
+	for (size_t i = 0; i < ARRAY_SIZE(bad); i++) {
+		zassert_equal(bmi323_set_gyro(&dev, BMI323_ODR_100_HZ, (bmi323_gyro_fs_t)bad[i]),
+		              ALP_ERR_INVAL,
+		              "gyro fs 0x%x is undeclared and must be rejected, not masked",
+		              bad[i]);
+	}
+}
+
+ZTEST(alp_chips, test_bmi323_set_accel_gyro_accept_declared_bounds)
+{
+	/* Control -- see the block comment above. */
+	bmi323_t dev    = { 0 };
+	dev.initialised = true;
+
+	zassert_equal(bmi323_set_accel(&dev, BMI323_ODR_0_78125_HZ, BMI323_ACCEL_FS_2G),
+	              ALP_ERR_NOT_READY,
+	              "declared low bound must reach the bus, not be rejected");
+	zassert_equal(bmi323_set_accel(&dev, BMI323_ODR_6400_HZ, BMI323_ACCEL_FS_16G),
+	              ALP_ERR_NOT_READY,
+	              "declared high bound must reach the bus, not be rejected");
+	zassert_equal(bmi323_set_gyro(&dev, BMI323_ODR_6400_HZ, BMI323_GYRO_FS_2000_DPS),
+	              ALP_ERR_NOT_READY,
+	              "declared gyro high bound must reach the bus, not be rejected");
+}
+
+ZTEST(alp_chips, test_icm42670_set_accel_rejects_undeclared_odr)
+{
+	icm42670_t dev  = { 0 };
+	dev.initialised = true;
+
+	/* icm42670_odr_t is genuinely sparse: it declares 0x0, 0x4..0x8 and
+     * 0xA..0xF.  0x1/0x2/0x3/0x9 sit inside the 4-bit field but are not
+     * declared members, so a bitmask alone cannot reject them. */
+	static const uint8_t bad[] = { 0x1, 0x2, 0x3, 0x9 };
+
+	for (size_t i = 0; i < ARRAY_SIZE(bad); i++) {
+		zassert_equal(icm42670_set_accel(&dev, (icm42670_odr_t)bad[i], ICM42670_ACCEL_FS_2G),
+		              ALP_ERR_INVAL,
+		              "accel odr 0x%x is a reserved encoding and must be rejected",
+		              bad[i]);
+	}
+}
+
+ZTEST(alp_chips, test_icm42670_set_gyro_rejects_undeclared_odr)
+{
+	icm42670_t dev  = { 0 };
+	dev.initialised = true;
+
+	static const uint8_t bad[] = { 0x1, 0x2, 0x3, 0x9 };
+
+	for (size_t i = 0; i < ARRAY_SIZE(bad); i++) {
+		zassert_equal(icm42670_set_gyro(&dev, (icm42670_odr_t)bad[i], ICM42670_GYRO_FS_250_DPS),
+		              ALP_ERR_INVAL,
+		              "gyro odr 0x%x is a reserved encoding and must be rejected",
+		              bad[i]);
+	}
+}
+
+ZTEST(alp_chips, test_icm42670_set_accel_gyro_accept_declared_odr)
+{
+	/* Control -- every declared member must survive, including the ones
+     * either side of each sparse gap. */
+	icm42670_t dev  = { 0 };
+	dev.initialised = true;
+
+	static const icm42670_odr_t good[] = {
+		ICM42670_ODR_OFF,     ICM42670_ODR_1600_HZ, ICM42670_ODR_800_HZ,   ICM42670_ODR_400_HZ,
+		ICM42670_ODR_200_HZ,  ICM42670_ODR_100_HZ,  ICM42670_ODR_50_HZ,    ICM42670_ODR_25_HZ,
+		ICM42670_ODR_12_5_HZ, ICM42670_ODR_6_25_HZ, ICM42670_ODR_3_125_HZ, ICM42670_ODR_1_5625_HZ
+	};
+
+	for (size_t i = 0; i < ARRAY_SIZE(good); i++) {
+		zassert_equal(icm42670_set_accel(&dev, good[i], ICM42670_ACCEL_FS_2G),
+		              ALP_ERR_NOT_READY,
+		              "declared accel odr 0x%x must reach the bus, not be rejected",
+		              (unsigned)good[i]);
+		zassert_equal(icm42670_set_gyro(&dev, good[i], ICM42670_GYRO_FS_250_DPS),
+		              ALP_ERR_NOT_READY,
+		              "declared gyro odr 0x%x must reach the bus, not be rejected",
+		              (unsigned)good[i]);
+	}
+}
+
+ZTEST(alp_chips, test_lsm6dso_set_accel_rejects_undeclared_odr)
+{
+	lsm6dso_t dev   = { 0 };
+	dev.initialised = true;
+
+	/* lsm6dso_odr_t declares 0x0..0xA; the field is 4 bits. */
+	static const uint8_t bad[] = { 0xB, 0xC, 0xD, 0xE, 0xF };
+
+	for (size_t i = 0; i < ARRAY_SIZE(bad); i++) {
+		zassert_equal(lsm6dso_set_accel(&dev, (lsm6dso_odr_t)bad[i], LSM6DSO_ACCEL_FS_2G),
+		              ALP_ERR_INVAL,
+		              "accel odr 0x%x is undeclared and must be rejected, not masked",
+		              bad[i]);
+	}
+}
+
+ZTEST(alp_chips, test_lsm6dso_set_gyro_rejects_undeclared_odr)
+{
+	lsm6dso_t dev   = { 0 };
+	dev.initialised = true;
+
+	static const uint8_t bad[] = { 0xB, 0xC, 0xD, 0xE, 0xF };
+
+	for (size_t i = 0; i < ARRAY_SIZE(bad); i++) {
+		zassert_equal(lsm6dso_set_gyro(&dev, (lsm6dso_odr_t)bad[i], LSM6DSO_GYRO_FS_250_DPS),
+		              ALP_ERR_INVAL,
+		              "gyro odr 0x%x is undeclared and must be rejected, not masked",
+		              bad[i]);
+	}
+}
+
+ZTEST(alp_chips, test_lsm6dso_set_accel_gyro_accept_declared_bounds)
+{
+	/* Control -- see the block comment above. */
+	lsm6dso_t dev   = { 0 };
+	dev.initialised = true;
+
+	zassert_equal(lsm6dso_set_accel(&dev, LSM6DSO_ODR_OFF, LSM6DSO_ACCEL_FS_2G),
+	              ALP_ERR_NOT_READY,
+	              "declared low bound must reach the bus, not be rejected");
+	zassert_equal(lsm6dso_set_accel(&dev, LSM6DSO_ODR_6660_HZ, LSM6DSO_ACCEL_FS_8G),
+	              ALP_ERR_NOT_READY,
+	              "declared high bound must reach the bus, not be rejected");
+	zassert_equal(lsm6dso_set_gyro(&dev, LSM6DSO_ODR_6660_HZ, LSM6DSO_GYRO_FS_2000_DPS),
+	              ALP_ERR_NOT_READY,
+	              "declared gyro high bound must reach the bus, not be rejected");
+}
+
+ZTEST(alp_chips, test_lis2dw12_set_accel_rejects_undeclared_odr)
+{
+	lis2dw12_t dev  = { 0 };
+	dev.initialised = true;
+
+	/* lis2dw12_odr_t declares 0x0..0x9; the field is 4 bits. */
+	static const uint8_t bad[] = { 0xA, 0xB, 0xC, 0xD, 0xE, 0xF };
+
+	for (size_t i = 0; i < ARRAY_SIZE(bad); i++) {
+		zassert_equal(
+		    lis2dw12_set_accel(
+		        &dev, (lis2dw12_odr_t)bad[i], LIS2DW12_FS_2G, LIS2DW12_MODE_HIGH_PERF_14BIT),
+		    ALP_ERR_INVAL,
+		    "odr 0x%x is undeclared and must be rejected, not masked",
+		    bad[i]);
+	}
+}
+
+ZTEST(alp_chips, test_lis2dw12_set_accel_accepts_declared_bounds)
+{
+	/* Control -- see the block comment above. */
+	lis2dw12_t dev  = { 0 };
+	dev.initialised = true;
+
+	zassert_equal(
+	    lis2dw12_set_accel(&dev, LIS2DW12_ODR_OFF, LIS2DW12_FS_2G, LIS2DW12_MODE_LOW_POWER_12BIT),
+	    ALP_ERR_NOT_READY,
+	    "declared low bound must reach the bus, not be rejected");
+	zassert_equal(
+	    lis2dw12_set_accel(&dev, LIS2DW12_ODR_1600_HZ, LIS2DW12_FS_16G, LIS2DW12_MODE_SINGLE_SHOT),
+	    ALP_ERR_NOT_READY,
+	    "declared high bound must reach the bus, not be rejected");
+}

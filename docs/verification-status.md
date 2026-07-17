@@ -27,7 +27,7 @@ verified in the Alp SDK as of today".  It complements:
 | Layer | Status | What "passes" today |
 |---|---|---|
 | Public API (`<alp/*.h>`) | `[ABI-EXPERIMENTAL]` | Doxygen-clean, ABI snapshot tracked, builds on every supported target |
-| GD32 supervisor bridge (`firmware/gd32-bridge/` + `chips/gd32g553/`) | `[VERIFIED]` on V2N silicon | fw v0.2.9 / protocol v0.7: functional suite 26/26, 20-row HIL soak 253/253, A/B OTA e2e, Tier-B loopback 5/6 (qenc = carrier wiring, issue #85) |
+| GD32 supervisor bridge (`firmware/gd32-bridge/` + `chips/gd32g553/`) | `[VERIFIED]` on V2N silicon **at the evidence vintage below** | **Evidence vintage: fw v0.2.9 / protocol v0.7** — functional suite 26/26, 20-row HIL soak 253/253, A/B OTA e2e, Tier-B loopback 5/6 (qenc = carrier wiring, issue #85). The bridge has since moved to **fw v0.2.11 / protocol v0.9** (ADC oversample + resolution, PWM center-align, ADC DSP dispatch, OTA Path-A hardening); **that delta has not been re-soaked**. Boot-select, dual-bank erase and the background-erase path are separately silicon-validated — see `firmware/gd32-bridge/src/bootloader/DESIGN.md`. |
 | CM33↔GD32 SCI7 SPI link (interrupt path) | `[VERIFIED]` on V2N silicon | Sustained bidirectional soak, zero CRC errors (DMA fast path stays default-off — issue #84) |
 | Chip drivers (`chips/<name>/`, all others) | `[UNTESTED]` | Build + NULL-arg-guard ZTEST on `native_sim/native/64` |
 | Library bindings (`metadata/library-profiles/<name>/`) | `[UNTESTED]` | Schema validated; emission unit-tested in `tests/scripts/test_project_emit_zephyr.py`; build-time linkable for Zephyr-native libs |

@@ -1,9 +1,21 @@
 # power-managed-sensor
 
-Low-power BME280 + IMU sensor node on the AEN301 M55-HE
-(high-efficiency) core. The SDK's reference for the v0.6
-`cores.<id>.power:` declarative block: a worked example of
-sleep-mode selection + multi-source wakeup.
+The SDK's reference for the v0.6 `cores.<id>.power:` declarative
+block, on the AEN301 M55-HE (high-efficiency) core: a worked
+example of sleep-mode selection + multi-source wakeup.
+
+> **Scope: this example is a `board.yaml` reference, not a working
+> sensor node.** `src/main.c` opens no sensor, no I2C, and no
+> counter, and it never enters a sleep state -- `board.yaml`
+> declares no `chips:` block at all. The "sample acquired" and
+> "re-entering deep sleep" lines below are literal `printf` string
+> constants that frame where a real node's `alp_*` calls would go.
+> What is real and worth copying is the **declarative half**: the
+> `power:` block and the `CONFIG_PM_*` set the orchestrator emits
+> from it. Despite the example's name, no BME280 or IMU is driven
+> here (the SDK does ship a BME280 driver -- see
+> [`<alp/chips/bme280.h>`](../../../include/alp/chips/bme280.h) --
+> this example simply does not use it).
 
 ## What this shows
 
@@ -13,6 +25,9 @@ microamps is the difference between weeks and years of battery
 life -- which means the sleep state, the wake sources, and the
 sample cadence all need to be first-class declarative facts, not
 hand-tuned `CONFIG_PM_*` knobs scattered across `prj.conf`.
+
+That declarative path is what this example demonstrates
+end-to-end; the duty cycle itself is narrated, not executed.
 
 The relevant fragment of `board.yaml`:
 
@@ -83,13 +98,15 @@ ever runs).
 
 ## Memory tuning
 
-The sensor task is short-lived per wake (sample + push, then
-back to sleep). 4 KiB of main-thread stack covers the
-sensor_value vector + the I2C transfer buffer with headroom;
-16 KiB of heap covers the Zephyr sensor subsystem's per-channel
-state. Both numbers are declarative -- a low-power profile
-doesn't want the Zephyr default 8 KiB / 1 KiB layout (heap
-truncated, stack underused).
+The `memory:` block is sized for the production node this example
+frames, not for the printf body it actually ships. The reasoning:
+a sensor task is short-lived per wake (sample + push, then back to
+sleep), so 4 KiB of main-thread stack covers the sensor_value
+vector + the I2C transfer buffer with headroom, and 16 KiB of heap
+covers the Zephyr sensor subsystem's per-channel state. Both
+numbers are declarative -- a low-power profile doesn't want the
+Zephyr default 8 KiB / 1 KiB layout (heap truncated, stack
+underused).
 
 ## Build
 
@@ -125,11 +142,14 @@ west alp-build -b alp_e1m_aen301_m55_he examples/power-timing/power-managed-sens
 west flash
 ```
 
-On HiL the loop runs forever; the device sits at the SoM's
-deep-sleep current draw between events. Confirm with a current
-probe across the SoM's `VDD` rail: the average should be
-dominated by the active-window energy * (active_ms / 60_000),
-not by static leakage.
+This builds and boots on AEN301, and the generated `alp.conf`
+carries the `CONFIG_PM_*` set above -- so you can verify the
+declarative path lands on real silicon. The runtime behaviour is
+the same three printf stages as native_sim: the example does not
+sleep, so a current probe will show the active draw throughout,
+not a duty-cycled average. Measuring real deep-sleep current
+requires replacing the printf bodies with actual sensor + PM
+calls, as described under "Customising the cadence" below.
 
 ## Customising the cadence
 
