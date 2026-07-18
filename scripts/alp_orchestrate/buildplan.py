@@ -205,7 +205,14 @@ def _sdk_version() -> Optional[str]:
     carries no `__init__.py`).
     """
     sdk_version_yaml = REPO / "metadata" / "sdk_version.yaml"
-    for line in sdk_version_yaml.read_text(encoding="utf-8").splitlines():
+    try:
+        text = sdk_version_yaml.read_text(encoding="utf-8")
+    except OSError:
+        # No adjacent metadata/ tree (e.g. packaged as a wheel) -- provenance
+        # is best-effort, never a reason to fail the emit.  Mirrors the
+        # OSError guard in `alp_cli._version` and `_sdk_commit` below.
+        return None
+    for line in text.splitlines():
         stripped = line.strip()
         if stripped.startswith("version:"):
             return stripped.split(":", 1)[1].split("#", 1)[0].strip()

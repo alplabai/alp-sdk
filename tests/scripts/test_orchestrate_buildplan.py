@@ -167,6 +167,21 @@ def test_sdk_commit_degrades_to_none_when_git_unavailable(monkeypatch) -> None:
     assert _sdk_commit() is None
 
 
+def test_sdk_version_degrades_to_none_when_metadata_missing(monkeypatch) -> None:
+    """`_sdk_version` never raises -- an unreadable/absent
+    `metadata/sdk_version.yaml` (e.g. packaged as a wheel with no adjacent
+    metadata tree) degrades to `None`, matching `alp_cli._version`'s OSError
+    guard, so provenance is best-effort and the emit never fails on it."""
+    from pathlib import Path as _Path
+    from alp_orchestrate.buildplan import _sdk_version
+
+    def _raise(self, *a, **kw):
+        raise FileNotFoundError("metadata/sdk_version.yaml")
+
+    monkeypatch.setattr(_Path, "read_text", _raise)
+    assert _sdk_version() is None
+
+
 def test_emit_build_plan_stock_shim_resolves_to_sdk_app(tmp_path: Path) -> None:
     """A core left on the stock M-core shim (app: alp-stock-shim) gets a
     normal west command pointed at the SDK-owned shim app."""
