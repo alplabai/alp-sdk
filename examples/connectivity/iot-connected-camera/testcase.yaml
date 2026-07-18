@@ -26,7 +26,7 @@ tests:
           - "\\[iotcam\\] done"
 
   # alp_sdk.example.iot_connected_camera.evk_v2n — HW-in-loop
-  # variant for the E1M EVK populated with an E1M-V2N family SoM.
-  # Currently parked because the alp_e1m_evk_v2n Zephyr board file
-  # lives in alplabai/alp-zephyr-modules (not yet published).
-  # Re-enable when that board file lands.
+  # variant for the E1M-X EVK populated with an E1M-V2N101 SoM. The
+  # real board target, alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33,
+  # ships in-tree under zephyr/boards/alp/ -- this scenario stays
+  # parked pending HW-in-loop CI wiring, not a missing board file.

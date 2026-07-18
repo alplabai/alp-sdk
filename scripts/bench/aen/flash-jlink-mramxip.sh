@@ -41,8 +41,12 @@ JLINK="$(bench_jlink_exe)" || exit $?
 DEV="$JLINK_DEVICE_FLASH"
 # Select the AEN J-Link by serial: the bench has TWO J-Links (AEN + the CC3501E
 # XDS110/V2N), so without SelectEmuBySN JLinkExe picks arbitrarily and "Cannot
-# connect to the probe".  Set JLINK_SN (default = the AEN probe) to disambiguate.
-JLINK_SN="${JLINK_SN:-603000869}"
+# connect to the probe". NO hardcoded serial default here: a bench-wide serial
+# (e.g. 603000869) is SHARED by two probes that differ only by USB path, and a
+# silent default can pick the WRONG board (the V2N-M1 GD32, not the AEN E8).
+# Export JLINK_SN yourself if you need to disambiguate by serial -- either way,
+# the DPIDR gate below (step 0b), not the serial, is what stops a write to the
+# wrong target.
 SEL="${JLINK_SN:+SelectEmuBySN $JLINK_SN}"
 NAME=$(basename "$BD")
 BIN="$BD/zephyr/zephyr.bin"
@@ -62,6 +66,38 @@ case "$RV" in
      echo "   Drop any &itcm overlay; let the board default link into MRAM slot0."
      exit 3 ;;
 esac
+
+# 0b. SAFETY GATE -- confirm we are talking to the AEN E8, not some other probe
+# on the bench, BEFORE any MRAM write. The AEN E8 SW-DP IDR is 0x4C013477
+# (BENCH-VERIFIED, see docs/bring-up-aen.md); the V2N-M1 GD32 probe reads
+# 0x0BE12477. Flashing the wrong board is the one unrecoverable bench mistake,
+# so this is a hard ABORT, not a warning -- read-only connect first, no writes
+# happen until the ID is confirmed.
+AEN_DPIDR="4C013477"
+GD32_DPIDR="0BE12477"
+cat > /tmp/flowd-mramxip-preflight.jlink <<EOF
+$SEL
+si SWD
+speed $JLINK_SPEED
+device $JLINK_DEVICE_READ
+connect
+exit
+EOF
+$JLINK -nogui 1 -CommanderScript /tmp/flowd-mramxip-preflight.jlink \
+  > /tmp/flowd-mramxip-preflight.out 2>&1 || true
+if grep -qi "$GD32_DPIDR" /tmp/flowd-mramxip-preflight.out; then
+  echo "!! ABORT: probe reports SW-DP IDR 0x$GD32_DPIDR -- that is the V2N-M1" >&2
+  echo "   GD32, NOT the AEN E8. Wrong probe selected (JLINK_SN='$JLINK_SN')." >&2
+  echo "   Refusing to write MRAM. See /tmp/flowd-mramxip-preflight.out." >&2
+  exit 4
+fi
+if ! grep -qi "$AEN_DPIDR" /tmp/flowd-mramxip-preflight.out; then
+  echo "!! ABORT: expected AEN E8 SW-DP IDR 0x$AEN_DPIDR not seen on connect." >&2
+  echo "   Refusing to write MRAM -- check JLINK_SN / wiring / probe selection." >&2
+  cat /tmp/flowd-mramxip-preflight.out >&2
+  exit 4
+fi
+echo ">>> DPIDR gate OK: probe confirmed AEN E8 (0x$AEN_DPIDR)" >&2
 
 # 1. stage the app + write the slot0 (mramAddress) signed-ATOC config.
 cp -f "$BIN" "$SET/build/images/$NAME.bin"

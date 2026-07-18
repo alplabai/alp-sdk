@@ -43,6 +43,66 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   alp-studio doesn't parse the tooling index), so this ships as a
   pre-release correction rather than a `schemaVersion` bump.
 
+## [v0.11.1] - 2026-07-17
+
+### Fixed — E1M-AEN801 customer path: build, flash, run, and VS Code all traced to stale docs describing an abandoned direction (#834)
+
+A customer on the lead part (E1M-AEN801, Alif Ensemble E8) could not build,
+flash, run examples, or set up VS Code. All four failures traced to
+documentation describing a direction the codebase had already abandoned, not to
+missing content:
+
+- **Phantom board retired.** `alp_e1m_evk_aen` / `alp_e1m_evk_v2n` named a board
+  target that exists nowhere in the tree, and the docs sent customers to an empty
+  `alp-zephyr-modules` scaffold to find it. The real boards ship in-tree at
+  `zephyr/boards/alp/` via `zephyr/module.yml`'s `board_root`. Retired the
+  phantom across ~50 files (docs, examples, headers, tests); the customer path
+  now names only board targets that resolve.
+- **Every documented example silently dropped its board overlay.** The
+  quickstart's `west build -b <fully-qualified-board>` auto-applies
+  `boards/<name>.overlay` **only** when `<name>` is the fully-qualified board id
+  (`alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he`); a bare-name overlay
+  (`alp_e1m_aen801_m55_he.overlay`) is silently ignored, so the Ethos-U node,
+  ITCM retarget, and pin routing never landed and the image mis-linked. Renamed
+  39 overlay/conf files across ~35 examples to the fully-qualified form.
+- **The flash story on the board was wrong.** `board.cmake` claimed "J-Link
+  cannot program MRAM" (false — the two-blob Flow D
+  `scripts/bench/aen/flash-jlink-mramxip.sh` programs and persists MRAM,
+  bench-proven on real E8 silicon) and that the part profile "will not connect"
+  (stale — resolved on J-Link DLL V9.46+). Corrected all four AEN `board.cmake`
+  files.
+- **VS Code onboarding (SDK-repo half of alplabai/alp-sdk-vscode#128).**
+  `docs/getting-started.md` §10's dead `cd vscode` step is replaced with the
+  Marketplace install plus the separate-repo `pnpm` clone; the stale "six emit
+  modes" is corrected to the actual four (`zephyr-conf`, `dts-overlay`,
+  `cmake-args`, `yocto-conf`).
+
+### Changed — the bench build path now equals the customer build path (#834)
+
+`scripts/bench/aen/build.sh` no longer force-applies a bare-name overlay; it
+builds the fully-qualified board target so overlays auto-apply exactly as they do
+on the customer's documented command. The bench can no longer pass with an
+overlay wiring the customer's path silently drops.
+
+### Added — customer-facing debug guide, onboarding fixture, and anti-rot gates so this class cannot recur (#834)
+
+- **`docs/debugging-aen.md`** — a customer-facing J-Link debug walkthrough for
+  the AEN board (the customer also did not know how to attach a debugger).
+- **`.github/workflows/pr-getting-started-aen801.yml`** — runs the doc's literal
+  onboarding build (`scripts/bootstrap.sh` + the §7 AEN801 `west build`) as a CI
+  fixture, so a future change that breaks the quickstart goes red instead of a
+  new customer hitting a dead path. `pr-alp-build.yml`'s matrix gains
+  E1M-AEN801, which was absent despite being the lead part;
+  `nightly-aen-hil.yml`'s exit-0-on-missing-dependency escape hatch is removed
+  (it now fails loud).
+- **`scripts/check_doc_drift.py`** now treats a board name as alive **iff**
+  `zephyr/boards/alp/<name>/board.yml` exists (previously a naming-shape regex —
+  which is exactly why the phantom board name survived every prior check).
+- **`scripts/check_example_portability.py`** now flags any example (not only
+  those with a `board.yaml`) that carries a bare-name board overlay/conf while a
+  fully-qualified sibling exists, as a hard error. Mutation-proven with real exit
+  codes.
+
 ### Fixed — three gates passed on CI but false-failed on a Windows checkout (#829)
 
 - **`alp.lock`'s digest was host-dependent.** `alp_lock._dir_digest` ordered

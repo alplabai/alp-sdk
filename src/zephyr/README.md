@@ -18,7 +18,8 @@ integer ids into Zephyr `struct device *` via **devicetree aliases**:
 | `alp_uart_open({.port_id=N})`   | `&alp_uartN` (N = 0..7)         |
 | `alp_gpio_open(N)`              | index N of the `alp,pin-array` node's `gpios` property |
 
-Boards in `alplabai/alp-zephyr-modules` provide these aliases by
+Boards in-tree under `zephyr/boards/alp/<board>/` (plus per-example
+overlays under `examples/**/boards/`) provide these aliases by
 overlaying the SoC devicetree.  Example overlay snippet:
 
 ```dts

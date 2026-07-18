@@ -75,7 +75,7 @@ as (same TSV):
 > `alp-adc0` alias to **`adc12_0`, channel 0** (a plausible pick:
 > `ANA_S0` = `A15` = `P0_0`, the lowest-numbered sense pad). If the
 > jumper/TRM map says otherwise, repoint **both** in
-> `boards/alp_e1m_aen801_m55_he.overlay`:
+> `boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay`:
 > - the `analog_loopback` node's `io-channels = <&adc12_0 0>` (the
 >   controller + channel the `alp-adc0` alias resolves to), and
 > - the `channel@0` child `reg` if the channel index differs.
@@ -105,7 +105,8 @@ channels via the `alp-dac0` / `alp-adc0` devicetree aliases:
 - The Alif Ensemble DT node-labels diverge from the convention default
   (`adc12_0` not `adc0`), and the portable ADC backend wants an
   **io-channels consumer** node (`ADC_DT_SPEC_GET`), so the per-example
-  `boards/alp_e1m_aen801_m55_he.overlay` repoints the aliases:
+  `boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay` repoints the
+  aliases:
   `alp-dac0 = &dac0` and `alp-adc0 = &analog_loopback` (a consumer with
   `compatible = "alp,adc-input"`, `io-channels = <&adc12_0 0>` and a
   `channel@0` config child carrying `zephyr,vref-mv = <1800>`). The

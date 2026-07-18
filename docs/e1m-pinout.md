@@ -171,8 +171,10 @@ If you're adding support for a new SoM or board:
    in this repo.
 3. The vendor wrapper (HAL bindings) goes into
    [`vendors/<som-slug>/`](../vendors/) here.
-4. The Zephyr board file goes into
-   [`alplabai/alp-zephyr-modules`](https://github.com/alplabai/alp-zephyr-modules) — not here.
+4. The Zephyr board file goes in-tree, under
+   [`zephyr/boards/alp/`](../zephyr/boards/alp/) — `zephyr/module.yml`'s
+   `board_root: zephyr` exposes it to Zephyr's board scanner, no
+   separate repo needed.
 
 The SDK code never reads pad IDs.  If you find yourself wanting to
 write `if (pad == "AF2")` somewhere in `src/`, stop — that
