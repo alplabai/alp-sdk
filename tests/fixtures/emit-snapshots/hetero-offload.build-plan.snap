@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "generatedBy": "scripts/alp_orchestrate.py",
-  "sdkVersion": "0.11.0",
+  "sdkVersion": "0.11.1",
   "sdkCommit": "<SDK_COMMIT>",
   "boardYaml": "examples/multicore/heterogeneous-offload/board.yaml",
   "sku": "E1M-V2N101",
