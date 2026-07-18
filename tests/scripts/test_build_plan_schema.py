@@ -298,9 +298,9 @@ def test_pinned_snapshot_slices_carry_toolchain_artifacts_debug():
     objects (schema `required`, so a validating plan already proves
     their presence -- this pins concrete derived *values*, not just
     shape). The AEN example's `m55_hp` Zephyr slice is the ground-truth
-    case: `toolchain.target_triple`/`toolchain.compiler` are the real
+    case: `toolchain.targetTriple`/`toolchain.compiler` are the real
     Zephyr SDK arm-zephyr-eabi triple (SoM preset `topology.m55_hp.
-    toolchain`), `artifacts.elf`/`.map`/`.bin`/`.compile_commands`
+    toolchain`), `artifacts.elf`/`.map`/`.bin`/`.compileCommands`
     follow Zephyr's own CMake output layout, and `debug.probe` is the
     same `openocd` runner `system-manifest.yaml`'s `flash_method`
     resolves to for a Zephyr slice."""
@@ -312,29 +312,29 @@ def test_pinned_snapshot_slices_carry_toolchain_artifacts_debug():
     by_id = {s["coreId"]: s for s in plan["slices"]}
     m55_hp = by_id["m55_hp"]
     assert m55_hp["toolchain"] == {
-        "target_triple": "arm-zephyr-eabi",
-        "compiler":      "arm-zephyr-eabi-gcc",
-        "sysroot":       None,
-        "id":            "arm-zephyr-eabi",
+        "targetTriple": "arm-zephyr-eabi",
+        "compiler":     "arm-zephyr-eabi-gcc",
+        "sysroot":      None,
+        "id":           "arm-zephyr-eabi",
     }
     assert m55_hp["artifacts"] == {
-        "elf":              "build/m55_hp-zephyr/zephyr/zephyr.elf",
-        "map":              "build/m55_hp-zephyr/zephyr/zephyr.map",
-        "bin":              "build/m55_hp-zephyr/zephyr/zephyr.bin",
-        "size_report":      "build/m55_hp-zephyr/zephyr/zephyr.stat",
-        "symbols":          "build/m55_hp-zephyr/zephyr/zephyr.symbols",
-        "compile_commands": "build/m55_hp-zephyr/compile_commands.json",
+        "elf":             "build/m55_hp-zephyr/zephyr/zephyr.elf",
+        "map":             "build/m55_hp-zephyr/zephyr/zephyr.map",
+        "bin":             "build/m55_hp-zephyr/zephyr/zephyr.bin",
+        "sizeReport":      "build/m55_hp-zephyr/zephyr/zephyr.stat",
+        "symbols":         "build/m55_hp-zephyr/zephyr/zephyr.symbols",
+        "compileCommands": "build/m55_hp-zephyr/compile_commands.json",
     }
     assert m55_hp["debug"] == {"console": "uart", "probe": "openocd"}
 
-    # The A-class Yocto slice: no single predictable ELF/compile_commands
+    # The A-class Yocto slice: no single predictable ELF/compileCommands
     # output under buildDir (real output lives in the Yocto build tree's
     # own deploy dir) -- artifacts stay honestly null; toolchain.id is
     # still the real SoM preset toolchain tag (`poky-glibc`); debug.probe
     # is null (a Yocto image-flash recipe doesn't name a debug probe).
     a32 = by_id["a32_cluster"]
     assert a32["toolchain"]["id"] == "poky-glibc"
-    assert a32["toolchain"]["target_triple"] is None
+    assert a32["toolchain"]["targetTriple"] is None
     assert all(v is None for v in a32["artifacts"].values())
     assert a32["debug"] == {"console": "linux", "probe": None}
 
@@ -344,16 +344,16 @@ def test_pinned_snapshot_slices_carry_toolchain_artifacts_debug():
             proj, board_yaml=REPO / board_rel, build_root=Path("build")))
         for sl in pl["slices"]:
             assert set(sl["toolchain"]) == {
-                "target_triple", "compiler", "sysroot", "id"}
+                "targetTriple", "compiler", "sysroot", "id"}
             assert set(sl["artifacts"]) == {
-                "elf", "map", "bin", "size_report", "symbols",
-                "compile_commands"}
+                "elf", "map", "bin", "sizeReport", "symbols",
+                "compileCommands"}
             assert set(sl["debug"]) == {"console", "probe"}
 
 
 def test_baremetal_slice_toolchain_artifacts_debug_are_null(tmp_path: Path):
     """A `baremetal` slice's `artifacts` + `debug` fields are all null,
-    and `toolchain.target_triple`/`.compiler` stay null too -- there is
+    and `toolchain.targetTriple`/`.compiler` stay null too -- there is
     no SDK-wide vendor bare-toolchain / executable-name / debug-probe
     convention this emitter can predict without guessing (the app's own
     CMakeLists.txt picks its own executable name and cross toolchain
@@ -373,7 +373,7 @@ def test_baremetal_slice_toolchain_artifacts_debug_are_null(tmp_path: Path):
     by_id = {s["coreId"]: s for s in plan["slices"]}
     baremetal = by_id["m55_hp"]
     assert baremetal["toolchain"] == {
-        "target_triple": None, "compiler": None, "sysroot": None,
+        "targetTriple": None, "compiler": None, "sysroot": None,
         "id": "arm-zephyr-eabi",
     }
     assert all(v is None for v in baremetal["artifacts"].values())
@@ -397,15 +397,15 @@ def test_missing_required_field_rejected():
             "appDir": None,
             "configArtefacts": [],
             "toolchain": {
-                "target_triple": "arm-zephyr-eabi",
+                "targetTriple": "arm-zephyr-eabi",
                 "compiler": "arm-zephyr-eabi-gcc",
                 "sysroot": None,
                 "id": "arm-zephyr-eabi",
             },
             "artifacts": {
                 "elf": None, "map": None, "bin": None,
-                "size_report": None, "symbols": None,
-                "compile_commands": None,
+                "sizeReport": None, "symbols": None,
+                "compileCommands": None,
             },
             "debug": {"console": "uart", "probe": "openocd"},
             "command": None,

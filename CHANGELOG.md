@@ -7,6 +7,42 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.12.0 candidate
 
+### Added — build-plan envelope provenance (`sdkVersion`/`sdkCommit`, ADR 0014)
+
+- `--emit build-plan`'s top-level envelope now carries `sdkVersion` (the
+  `version:` field from `metadata/sdk_version.yaml` at emit time) and
+  `sdkCommit` (short git commit of the emitting checkout; `null` when git or
+  the `.git` directory isn't available — the emit never fails on this), so a
+  cached or materialised plan can be traced back to the exact planner
+  revision that produced it. Additive per ADR 0014's additive-change rule —
+  no `schemaVersion` bump.
+
+### Documented — #610 §4 per-slice tooling index (`toolchain`/`artifacts`/`debug`)
+
+- The per-slice `toolchain`, `artifacts`, and `debug` objects (#610 §4)
+  shipped in an earlier release with no CHANGELOG entry describing their
+  shape. Documenting now: `toolchain` is the slice's compiler identity
+  (`targetTriple`, `compiler`, `sysroot`, `id` — grounded in the SoM
+  preset's `topology.<core>.toolchain`, never invented); `artifacts` is the
+  slice's deterministic OUTPUT paths under `buildDir` (`elf`, `map`, `bin`,
+  `sizeReport`, `symbols`, `compileCommands` — the WHERE, not a promise the
+  files exist until the slice is built); `debug` is the headless
+  console/probe selectors (`console`, `probe`) derived from
+  `diagnostics.console:` and the resolved flash recipe. A field genuinely
+  not derivable for a runtime (e.g. a Yocto slice's exact GCC triple) is
+  `null`, never guessed. See `metadata/schemas/build-plan-v1.schema.json`.
+
+### Fixed — build-plan tooling-index sub-keys were accidentally snake_case
+
+- `toolchain.target_triple` and `artifacts.size_report` /
+  `artifacts.compile_commands` had landed in snake_case inside the
+  otherwise camelCase-locked build-plan contract (ADR 0014). Renamed to
+  `toolchain.targetTriple` / `artifacts.sizeReport` /
+  `artifacts.compileCommands`. No known consumer parses these sub-keys yet
+  (alp-sdk-vscode's cli-rs deliberately models only the core slice;
+  alp-studio doesn't parse the tooling index), so this ships as a
+  pre-release correction rather than a `schemaVersion` bump.
+
 ### Fixed — three gates passed on CI but false-failed on a Windows checkout (#829)
 
 - **`alp.lock`'s digest was host-dependent.** `alp_lock._dir_digest` ordered

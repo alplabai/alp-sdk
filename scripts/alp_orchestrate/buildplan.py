@@ -15,6 +15,7 @@ lazy-imported from the package (they stay inline until orchestrator.py).
 from __future__ import annotations
 
 import json
+import subprocess
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Optional
@@ -92,19 +93,19 @@ def _shared_artefacts(
 
 
 def _slice_toolchain(slice_: Slice) -> dict[str, Optional[str]]:
-    """This slice's compiler identity: `{target_triple, compiler, sysroot, id}`
+    """This slice's compiler identity: `{targetTriple, compiler, sysroot, id}`
     (#610 §4 per-slice tooling index).
 
     Grounded in the SoM preset's `topology.<core>.toolchain` -- the same
     field `Slice.to_manifest_entry` already surfaces in
     `system-manifest.yaml` -- never invented.  For a Zephyr slice this
     value (e.g. `arm-zephyr-eabi`) IS the real Zephyr SDK toolchain
-    directory name AND its GCC target triple, so `target_triple` /
+    directory name AND its GCC target triple, so `targetTriple` /
     `compiler` derive straight from it.  A Yocto slice's toolchain tag
     (`poky-glibc`) is a *category* (C-library flavour), not a literal
     GCC triple -- the real triple depends on the Yocto build's own
     TUNE_FEATURES/TCLIBC (outside board.yaml / SoM metadata), so
-    `target_triple` / `compiler` / `sysroot` stay null rather than
+    `targetTriple` / `compiler` / `sysroot` stay null rather than
     guess an ABI suffix (e.g. `gnueabi` vs `gnueabihf`).  Zephyr has no
     conventional cross-compile sysroot either (the SDK bundles its own
     libc per architecture) -- `sysroot` is null for every runtime today.
@@ -115,10 +116,10 @@ def _slice_toolchain(slice_: Slice) -> dict[str, Optional[str]]:
         target_triple = slice_.toolchain
         compiler = f"{slice_.toolchain}-gcc"
     return {
-        "target_triple": target_triple,
-        "compiler":      compiler,
-        "sysroot":       None,
-        "id":            slice_.toolchain,
+        "targetTriple": target_triple,
+        "compiler":     compiler,
+        "sysroot":      None,
+        "id":           slice_.toolchain,
     }
 
 
@@ -147,20 +148,20 @@ def _slice_artifacts(build_dir: Path, slice_: Slice) -> dict[str, Optional[str]]
     if slice_.os == "zephyr":
         zdir = build_dir / "zephyr"
         return {
-            "elf":              (zdir / "zephyr.elf").as_posix(),
-            "map":              (zdir / "zephyr.map").as_posix(),
-            "bin":              (zdir / "zephyr.bin").as_posix(),
-            "size_report":      (zdir / "zephyr.stat").as_posix(),
-            "symbols":          (zdir / "zephyr.symbols").as_posix(),
-            "compile_commands": (build_dir / "compile_commands.json").as_posix(),
+            "elf":             (zdir / "zephyr.elf").as_posix(),
+            "map":             (zdir / "zephyr.map").as_posix(),
+            "bin":             (zdir / "zephyr.bin").as_posix(),
+            "sizeReport":      (zdir / "zephyr.stat").as_posix(),
+            "symbols":         (zdir / "zephyr.symbols").as_posix(),
+            "compileCommands": (build_dir / "compile_commands.json").as_posix(),
         }
     return {
-        "elf":              None,
-        "map":              None,
-        "bin":              None,
-        "size_report":      None,
-        "symbols":          None,
-        "compile_commands": None,
+        "elf":             None,
+        "map":             None,
+        "bin":             None,
+        "sizeReport":      None,
+        "symbols":         None,
+        "compileCommands": None,
     }
 
 
@@ -192,6 +193,43 @@ def _slice_debug(
     if flash_method == "zephyr_west_flash":
         probe = (flash_args or {}).get("runner")
     return {"console": console, "probe": probe}
+
+
+def _sdk_version() -> Optional[str]:
+    """The `version:` field out of `metadata/sdk_version.yaml` -- the single
+    source `scripts/bump_version.py` bumps and `check_version_doc_sync.py`
+    pins every other copy against.  Same read-and-strip idiom as
+    `alp_cli._version` / `check_version_doc_sync.declared_version`, kept
+    inline here rather than imported: neither of those lives on an import
+    path this package can reach without a sys.path hack (`scripts/` itself
+    carries no `__init__.py`).
+    """
+    sdk_version_yaml = REPO / "metadata" / "sdk_version.yaml"
+    for line in sdk_version_yaml.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("version:"):
+            return stripped.split(":", 1)[1].split("#", 1)[0].strip()
+    return None
+
+
+def _sdk_commit() -> Optional[str]:
+    """Short git commit of this checkout (`git rev-parse --short HEAD`), or
+    `None` when git -- or a `.git` dir -- isn't available.  Mirrors the
+    robustness of `scripts/build_receipt.py::_git_rev` (try/except over both
+    `CalledProcessError` and a missing `git` binary) rather than importing
+    it: that module isn't reachable from this package without the same
+    sys.path workaround noted on `_sdk_version` above, and receipt's variant
+    also resolves the FULL rev plus a dirty-tree flag this envelope doesn't
+    need.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(REPO), "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, check=True)
+    except (subprocess.CalledProcessError, OSError):
+        return None
+    commit = result.stdout.strip()
+    return commit or None
 
 
 def emit_build_plan(
@@ -231,12 +269,21 @@ def emit_build_plan(
       * Per-slice tooling index (#610 §4, additive to schemaVersion 1 --
         never renamed/removed, see `metadata/schemas/build-plan-v1.
         schema.json`): `toolchain` (compiler identity --
-        `_slice_toolchain`), `artifacts` (deterministic OUTPUT paths
-        under `buildDir`, not a promise they exist yet -- `_slice_
-        artifacts`), and `debug` (headless console/probe selectors --
-        `_slice_debug`).  A field genuinely not derivable for a
-        runtime (e.g. a Yocto slice's exact GCC triple) is null, never
-        guessed.
+        `_slice_toolchain`, keys `targetTriple`/`compiler`/`sysroot`/`id`),
+        `artifacts` (deterministic OUTPUT paths under `buildDir`, not a
+        promise they exist yet -- `_slice_artifacts`, keys `elf`/`map`/
+        `bin`/`sizeReport`/`symbols`/`compileCommands`), and `debug`
+        (headless console/probe selectors -- `_slice_debug`).  A field
+        genuinely not derivable for a runtime (e.g. a Yocto slice's exact
+        GCC triple) is null, never guessed.  (These three sub-objects'
+        keys were corrected from an accidental snake_case to camelCase
+        to match the rest of this contract -- see the CHANGELOG.)
+      * Envelope provenance, additive to schemaVersion 1: `sdkVersion`
+        (`metadata/sdk_version.yaml`'s `version:`, via `_sdk_version`)
+        and `sdkCommit` (`git rev-parse --short HEAD` of this checkout,
+        via `_sdk_commit`; `null` when git/`.git` isn't available -- never
+        raises) so a cached/materialised plan can be traced back to the
+        planner that produced it.
     """
     # Orchestrator-side (stay inline until orchestrator.py); lazy to avoid
     # a buildplan<->package import cycle.
@@ -333,6 +380,12 @@ def emit_build_plan(
     plan: dict[str, Any] = {
         "schemaVersion":   1,
         "generatedBy":     "scripts/alp_orchestrate.py",
+        # Additive provenance (ADR 0014's additive rule -- no schemaVersion
+        # bump): traces a cached/materialised plan back to the planner that
+        # produced it. `sdkCommit` is null, never a crash, when git/`.git`
+        # isn't available (e.g. a wheel-installed CLI with no checkout).
+        "sdkVersion":      _sdk_version(),
+        "sdkCommit":       _sdk_commit(),
         "boardYaml":       Path(board_yaml).as_posix(),
         "sku":             project.sku,
         "buildRoot":       build_root.as_posix(),
