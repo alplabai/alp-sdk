@@ -13,6 +13,7 @@
 #include <stddef.h>
 
 #include "alp/chips/bme280.h"
+#include "bme280_internal.h"
 
 /* ------------------------------------------------------------------ */
 /* Register map (BST-BME280-DS002 v1.6 §5)                             */
@@ -64,6 +65,16 @@ static int16_t sign_extend12(uint16_t bits12)
 	return (int16_t)(bits12 >= 0x0800u ? (int32_t)bits12 - 0x1000 : (int32_t)bits12);
 }
 
+void bme280_unpack_h4_h5(const uint8_t bytes[3], int16_t *h4, int16_t *h5)
+{
+	/* bytes[0..2] = calibration registers E4/E5/E6 (BST-BME280-DS002
+	 * v1.6 §5.4 Table 20).  E5's two nibbles are shared between H4 and
+	 * H5 -- H4: [E4][7:0] << 4 | [E5][3:0]; H5: [E6][7:0] << 4 |
+	 * [E5][7:4].  Both are 12-bit signed. */
+	*h4 = sign_extend12((uint16_t)(((uint16_t)bytes[0] << 4) | (bytes[1] & 0x0Fu)));
+	*h5 = sign_extend12((uint16_t)(((uint16_t)bytes[2] << 4) | ((bytes[1] >> 4) & 0x0Fu)));
+}
+
 static alp_status_t load_calibration(bme280_t *dev)
 {
 	uint8_t      blk1[26] = { 0 };
@@ -94,13 +105,7 @@ static alp_status_t load_calibration(bme280_t *dev)
 	c->H1             = h1;
 	c->H2             = le16s(&blk2[0]);
 	c->H3             = blk2[2];
-	/* H4: [E4][7:0] << 4 | [E5][3:0]   — 12-bit signed.  Assemble as an
-     * unsigned 12-bit field first (blk2[] bytes are unsigned, so the
-     * shift below never touches a negative operand), then explicitly
-     * sign-extend -- avoids left-shifting the signed byte directly. */
-	c->H4 = sign_extend12((uint16_t)(((uint16_t)blk2[3] << 4) | (blk2[4] & 0x0Fu)));
-	/* H5: [E6][7:0] << 4 | [E5][7:4]   — 12-bit signed. */
-	c->H5 = sign_extend12((uint16_t)(((uint16_t)blk2[5] << 4) | ((blk2[4] >> 4) & 0x0Fu)));
+	bme280_unpack_h4_h5(&blk2[3], &c->H4, &c->H5);
 	c->H6 = (int8_t)blk2[6];
 	return ALP_OK;
 }

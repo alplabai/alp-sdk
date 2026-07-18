@@ -62,7 +62,7 @@
 
 #if defined(CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_OWNER)
 #define HE_LOAD_ADDR 0x58000000U
-void alp_update_log_aen_m55_owner_run(void);
+void update_log_aen_m55_owner_run(void);
 #endif
 
 #if !defined(CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_OWNER)
@@ -235,7 +235,7 @@ int main(void)
 	/* This call normally does not return. It opens the local MRAM/NVS log and
 	 * serves HE append/verify/count/get requests; if MHU access never becomes
 	 * ready, it records that failure in the HP beacon and returns. */
-	alp_update_log_aen_m55_owner_run();
+	update_log_aen_m55_owner_run();
 	return 0;
 #else
 #if defined(CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROBE)
