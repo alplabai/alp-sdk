@@ -107,7 +107,7 @@ def test_emit_build_plan_happy(tmp_path: Path) -> None:
     assert m33["command"]["tool"] == "west"
     assert m33["command"]["args"][:2] == ["build", "-b"]
     assert m33["command"]["args"][-2:] == [
-        "--", f"-DPython3_EXECUTABLE={sys.executable}",
+        "--", f"-DPython3_EXECUTABLE={sys.executable.replace(chr(92), '/')}",
     ]
     assert m33["command"]["cwd"] == m33["buildDir"]
     assert m33["env"]["ALP_SDK_ROOT"]
@@ -130,6 +130,33 @@ def test_emit_build_plan_happy(tmp_path: Path) -> None:
     assert "build/generated/dts-partitions.dtsi" in shared
     for contents in shared.values():
         assert contents.strip()
+
+
+def test_emit_build_plan_python_executable_uses_forward_slashes(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """The Zephyr slice bakes `-DPython3_EXECUTABLE=<sys.executable>`. On
+    Windows that is a backslash path (`C:\\Users\\...`), which CMake rejects
+    with `Invalid character escape '\\U'` when Zephyr expands it into a
+    custom-target command. Emit must forward-slash it (a no-op on posix,
+    where sys.executable has no backslashes). Found via the tan<->alp-sdk
+    e2e build."""
+    import sys as _sys
+    import json as _json
+    from alp_orchestrate import emit_build_plan
+
+    monkeypatch.setattr(_sys, "executable",
+                        r"C:\Users\x\.venv\Scripts\python.exe")
+    path = _write_board(tmp_path, V2N_HAPPY)
+    project = load_board_yaml(path)
+    plan = _json.loads(emit_build_plan(
+        project, board_yaml=path, build_root=Path("build")))
+
+    m33 = next(s for s in plan["slices"] if s["backend"] == "zephyr")
+    pyexe = next(a for a in m33["command"]["args"]
+                 if a.startswith("-DPython3_EXECUTABLE="))
+    assert "\\" not in pyexe
+    assert pyexe == "-DPython3_EXECUTABLE=C:/Users/x/.venv/Scripts/python.exe"
 
 
 def test_emit_build_plan_carries_sdk_provenance(tmp_path: Path) -> None:
@@ -368,7 +395,7 @@ def test_zephyr_slice_command_wires_sysbuild_overlay(tmp_path: Path) -> None:
     sb_conf = (Path("build") / "alp_sysbuild.conf").resolve()
     assert args[-3:] == [
         "--",
-        f"-DPython3_EXECUTABLE={sys.executable}",
+        f"-DPython3_EXECUTABLE={sys.executable.replace(chr(92), '/')}",
         f"-DSB_CONF_FILE={sb_conf}",
     ]
     # The overlay define is a CMake define, never a west flag: it has to
@@ -386,7 +413,7 @@ def test_zephyr_slice_command_wires_sysbuild_overlay(tmp_path: Path) -> None:
     assert not any(a.startswith("-DSB_CONF_FILE=")
                    for a in z2["command"]["args"])
     assert z2["command"]["args"][-2:] == [
-        "--", f"-DPython3_EXECUTABLE={sys.executable}",
+        "--", f"-DPython3_EXECUTABLE={sys.executable.replace(chr(92), '/')}",
     ]
 
 
