@@ -198,6 +198,38 @@ two-`alp` name collision makes PATH ambiguity a real execution-hijack surface.
 `fan_out` is only ever extended, never removed, so the SDK never loses its
 ability to build itself or to serve as the in-repo oracle.
 
+## Reversibility, and the CLI-side ADR
+
+A is chosen over B for one decisive reason beyond the merits above: **A→B is a
+door that stays open; B→A is not.** A retains every prerequisite B needs — the
+`--emit build-plan` contract, `fan_out` as executor + oracle, and Phase 1's
+`emit ↔ fan_out` parity gate. Promoting to B later is a forward step (finish the
+plan contract — item 3, needed under A regardless; make the CLI the sole
+executor; retire `fan_out`). B first is irreversible: it deletes the SDK
+executor, so returning to A means rebuilding it. When the endgame is genuinely
+undecided — which it is — the reversible option is the correct one.
+
+This is also how A reconciles with the **CLI-side ADR** (native CLI = the single
+executing surface over the SDK-emitted plan). A does **not** contradict "the CLI
+is the surface the user invokes" — under A the `alp` manager is still that
+surface; it dispatches `build`/`flash`/`run` to `python -m alp_orchestrate` and
+renders the result. What A defers is only *where the execution code lives* (SDK,
+under A; CLI, under B). The proposal: adopt A now as the safe intermediate, keep
+the plan contract the CLI-side ADR already depends on, and decide the
+sole-executor question (retire `fan_out` → B, or keep it + dispatch → A) **with
+data** — once item 3 has proven the plan contract complete and we can see whether
+the release-train coupling actually bites — rather than up front. Nothing in A
+forecloses the CLI-executes endgame; it refuses to take the irreversible step
+before the contract that makes it safe exists.
+
+A also satisfies the three properties the CLI side asked any 0020 to preserve:
+build execution reachable without a west workspace (`python -m alp_orchestrate`,
+not `west alp-*` discovery); per-slice machine-readable results + a stable
+exit-code contract (the JSONL event stream + exit codes 0–5); and — the one real
+cost — execution bugfixes ride SDK release tags (narrowed: only build behavior
+rides tags, manager UX ships on the extension's cadence, and it is itself undone
+by a later move to B).
+
 ## Open questions for Hakan
 
 1. **Is there a hard IDE requirement Python's process model can't meet**
