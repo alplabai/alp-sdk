@@ -18,6 +18,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _orchestrate_support import REPO, V2N_HAPPY, _write_board  # noqa: E402
@@ -268,7 +270,7 @@ def test_emit_build_plan_matches_materialiser(
     # Materialise via the real fan_out (dispatch skipped: no tools).
     monkeypatch.setattr(alp_orchestrate.orchestrator.shutil, "which",
                         lambda name: None)
-    orch = Orchestrator(load_board_yaml(path), build_root)
+    orch = Orchestrator(load_board_yaml(path), build_root, board_yaml=path)
     orch.fan_out(parallel=False)
 
     artefacts = list(plan["sharedArtefacts"])
@@ -334,7 +336,7 @@ def test_emit_build_plan_carries_boot_sysbuild_conf(
 
     monkeypatch.setattr(alp_orchestrate.orchestrator.shutil, "which",
                         lambda name: None)
-    orch = Orchestrator(load_board_yaml(path), build_root)
+    orch = Orchestrator(load_board_yaml(path), build_root, board_yaml=path)
     orch.fan_out(parallel=False)
     assert (build_root / "alp_sysbuild.conf").read_text(
         encoding="utf-8") == shared[sysbuild_path]
@@ -542,6 +544,21 @@ def test_orchestrator_dispatch_anchors_on_board_yaml_not_cwd(
     assert orch.base_dir == project_dir.resolve()
 
 
+def test_orchestrator_requires_board_yaml(tmp_path: Path) -> None:
+    """ADR-0020 Phase 1: `board_yaml` is a required argument -- the old
+    `Path.cwd()` fallback (dropped when this test was written) was a
+    live "same board.yaml, two answers" divergence between callers that
+    passed it and ones that didn't.  Every real in-repo caller already
+    has the path (`cli.py` always passes it), so omitting it is a bug,
+    not a legitimate use case, and now raises at construction time."""
+    path = _write_board(tmp_path, V2N_HAPPY)
+    project = load_board_yaml(path)
+    build_root = tmp_path / "build"
+
+    with pytest.raises(TypeError):
+        Orchestrator(project, build_root)  # type: ignore[call-arg]
+
+
 # ---------------------------------------------------------------------
 # Issue #597 -- Yocto app-only slices need a valid bitbake target
 # ---------------------------------------------------------------------
@@ -674,3 +691,206 @@ def test_yocto_stock_image_app_token_still_resolves_without_recipe(
     }
     # Stock image token isn't a source path -- nothing to report.
     assert a55["appDir"] is None
+
+
+# ---------------------------------------------------------------------
+# ADR-0020 Phase 1 -- emit_build_plan() <-> Orchestrator.fan_out() must
+# enumerate the SAME slice set in the SAME order.  Before
+# `iter_buildable_slices()`, emit_build_plan sorted by core_id while
+# fan_out walked `project.cores.items()` (dict/insertion order); for a
+# project whose cores don't already land in sorted order (as this
+# fixture's SoC spec deliberately does not), the plan and the real
+# build silently disagreed on slice order.
+# ---------------------------------------------------------------------
+
+# `project.cores` dict order tracks `soc_spec["cores"]` list order (see
+# `loader._validate_topology_cores`), NOT board.yaml's own `cores:`
+# mapping order -- so the divergence is manufactured here at the SoC-spec
+# level: `zulu_yocto` sorts last but is declared first, `delta_off` (an
+# `os: off` core) sits between the two zephyr cores, and the two zephyr
+# cores (`alpha_zephyr`, `bravo_zephyr`) are declared in an order that
+# happens to already match sorted order by themselves -- only the full
+# 3-core buildable set's dict order (`zulu_yocto, alpha_zephyr,
+# bravo_zephyr`) diverges from its sorted order (`alpha_zephyr,
+# bravo_zephyr, zulu_yocto`).
+_MULTICORE_SOC_SPEC = {
+    "cores": [
+        {"id": "zulu_yocto", "type": "cortex-a55", "count": 1},
+        {"id": "delta_off", "type": "cortex-m33", "count": 1},
+        {"id": "alpha_zephyr", "type": "cortex-m33", "count": 1},
+        {"id": "bravo_zephyr", "type": "cortex-m33", "count": 1},
+    ],
+    "npus": [],
+    "peripherals": {},
+}
+
+_MULTICORE_SOM_PRESET = """\
+schema_version: 1
+sku: E1M-TST002
+family: test-multicore
+silicon: test:multicore:x1
+topology:
+  zulu_yocto:
+    app: ./linux
+    image: alp-image-edge
+    machine: e1m-tst002-yocto
+    toolchain: poky-glibc
+  delta_off:
+    os: 'off'
+  alpha_zephyr:
+    app: ./m33a
+    board: alp_e1m_tst002_alpha
+    toolchain: arm-zephyr-eabi
+  bravo_zephyr:
+    app: ./m33b
+    board: alp_e1m_tst002_bravo
+    toolchain: arm-zephyr-eabi
+default_hw_rev: r1
+default_board: E1M-EVK
+"""
+
+_MULTICORE_BOARD = """\
+som:
+  sku: E1M-TST002
+  hw_rev: r1
+cores:
+  delta_off:
+    os: 'off'
+"""
+
+
+def _write_multicore_fixture(tmp_path: Path) -> tuple[Path, Path]:
+    """Synthetic 4-core SoM/SoC project: 3 buildable cores (mixed
+    zephyr + yocto backends) whose dict-insertion order is NOT sorted
+    by core_id, plus one `os: off` core.  Returns `(board_yaml,
+    metadata_root)`.
+
+    The SoM preset / SoC spec are never schema-validated by
+    `load_board_yaml` (only board.yaml is) -- see `loader._resolve_board`
+    -- so both are hand-authored minimal dicts carrying only the fields
+    the loader/emitters actually read, same pattern as
+    `test_orchestrate_slices._make_som_only_project`.
+    """
+    import json as _json
+    meta = tmp_path / "metadata"
+    e1m = meta / "e1m_modules"
+    schemas = meta / "schemas"
+    socs = meta / "socs" / "test" / "multicore"
+    for d in (e1m, schemas, socs):
+        d.mkdir(parents=True)
+
+    bc_schema = _json.loads((REPO / "metadata" / "schemas"
+                            / "board.schema.json").read_text(encoding="utf-8"))
+    bc_schema["properties"]["som"]["properties"]["sku"]["pattern"] = (
+        r"^E1M-(AEN[3-8]01|V2N10[12]|V2M10[12]|NX9[0-9]{3}|TST[0-9]{3})$"
+    )
+    (schemas / "board.schema.json").write_text(
+        _json.dumps(bc_schema), encoding="utf-8")
+
+    (socs / "x1.json").write_text(
+        _json.dumps(_MULTICORE_SOC_SPEC), encoding="utf-8")
+    (e1m / "E1M-TST002.yaml").write_text(
+        _MULTICORE_SOM_PRESET, encoding="utf-8")
+
+    board_path = tmp_path / "board.yaml"
+    board_path.write_text(_MULTICORE_BOARD, encoding="utf-8")
+    return board_path, meta
+
+
+def test_emit_build_plan_slice_order_matches_iter_buildable_slices(
+    tmp_path: Path,
+) -> None:
+    """The ordered `coreId` list `emit_build_plan` produces must equal
+    `iter_buildable_slices(project)`'s order exactly, and both must
+    exclude the `os: off` core.  Pre-`iter_buildable_slices` this failed
+    on a project whose cores aren't already declared in sorted order:
+    `emit_build_plan` sorted; `fan_out` (and, transitively, anything
+    that trusted dict order) did not."""
+    import json as _json
+    from alp_orchestrate import emit_build_plan, iter_buildable_slices
+
+    path, meta = _write_multicore_fixture(tmp_path)
+    project = load_board_yaml(path, metadata_root=meta)
+
+    plan = _json.loads(emit_build_plan(
+        project, board_yaml=path, build_root=Path("build")))
+    plan_core_ids = [s["coreId"] for s in plan["slices"]]
+
+    iter_core_ids = [s.core_id for s in iter_buildable_slices(project)]
+
+    assert plan_core_ids == iter_core_ids
+    assert plan_core_ids == ["alpha_zephyr", "bravo_zephyr", "zulu_yocto"]
+    assert "delta_off" not in plan_core_ids
+    assert "delta_off" not in iter_core_ids
+
+
+def test_emit_build_plan_command_and_build_dir_match_orchestrator(
+    tmp_path: Path,
+) -> None:
+    """Per matching core, the plan's `command` (tool + args) and
+    `buildDir` must equal what the orchestrator itself would resolve for
+    that slice -- locks command/buildDir parity against future
+    divergence between the two enumeration sites."""
+    import json as _json
+    from dataclasses import replace
+    from alp_orchestrate import Orchestrator, emit_build_plan
+    from alp_orchestrate.buildplan import _slice_build_dir
+    from alp_orchestrate.orchestrator import _slice_command
+
+    path, meta = _write_multicore_fixture(tmp_path)
+    build_root = Path("build")
+    project = load_board_yaml(path, metadata_root=meta)
+
+    plan = _json.loads(emit_build_plan(
+        project, board_yaml=path, build_root=build_root))
+
+    orch = Orchestrator(load_board_yaml(path, metadata_root=meta),
+                        build_root, board_yaml=path)
+
+    for entry in plan["slices"]:
+        slice_ = orch.project.cores[entry["coreId"]]
+        want_build_dir = _slice_build_dir(build_root, slice_)
+        want_cmd = _slice_command(
+            orch.project, replace(slice_, build_dir=want_build_dir),
+            base_dir=orch.base_dir)
+
+        assert entry["buildDir"] == want_build_dir.as_posix()
+        if want_cmd is None:
+            assert entry["command"] is None
+        else:
+            assert entry["command"] == {
+                "tool": want_cmd[0],
+                "args": want_cmd[1:],
+                "cwd":  want_build_dir.as_posix(),
+            }
+
+
+@pytest.mark.xfail(
+    reason="ADR-0020 item 3: emit env-append contract not yet closed",
+    strict=True,
+)
+def test_emit_build_plan_env_matches_real_build_env(tmp_path: Path) -> None:
+    """KNOWN GAP (ADR-0020 item 3, out of scope for Phase 1): a slice's
+    real build subprocess environment is `os.environ` plus
+    `ALP_SDK_ROOT` (`Orchestrator._dispatch_slice`) -- which, for a
+    Zephyr slice, a properly-configured west workspace additionally
+    needs `EXTRA_ZEPHYR_MODULES` / `PYTHONPATH` on (the
+    `_alp_common.env_with_sdk` / `_workspace.subprocess_env` append the
+    real build path relies on).  `emit_build_plan`'s per-slice `env`
+    carries only `{"ALP_SDK_ROOT": ...}` (buildplan.py) -- a consumer
+    that materialises and runs the plan's command with ONLY that env
+    is missing the module/path append a real `west build` needs.  This
+    asserts the DESIRED end state (env carries the append keys too) so
+    it fails now and flips green the day item 3 closes the gap -- it is
+    not a description of current behaviour."""
+    import json as _json
+    from alp_orchestrate import emit_build_plan
+
+    path, meta = _write_multicore_fixture(tmp_path)
+    project = load_board_yaml(path, metadata_root=meta)
+    plan = _json.loads(emit_build_plan(
+        project, board_yaml=path, build_root=Path("build")))
+
+    zephyr_slice = next(s for s in plan["slices"] if s["backend"] == "zephyr")
+    assert "EXTRA_ZEPHYR_MODULES" in zephyr_slice["env"]
+    assert "PYTHONPATH" in zephyr_slice["env"]

@@ -120,6 +120,25 @@ _TOOL_FOR_OS: dict[str, str] = {
 }
 
 
+def iter_buildable_slices(project: BoardProject):
+    """Yield every non-`off` core's `Slice`, sorted by `core_id`.
+
+    ADR-0020 Phase 1: the SINGLE source of WHICH cores build and in WHAT
+    ORDER, so `emit_build_plan()` (the plan the `alp` CLI reads) and
+    `Orchestrator.fan_out()` (the real build) can never disagree.  Before
+    this seam, `emit_build_plan` iterated `sorted(project.cores.values())`
+    while `fan_out` iterated `project.cores.items()` (dict/insertion
+    order) -- for a project whose cores don't happen to already be
+    declared in sorted order, the plan's slice order and the real build's
+    dispatch order silently diverged.
+    """
+    for core_id in sorted(project.cores):
+        slice_ = project.cores[core_id]
+        if slice_.os == "off":
+            continue
+        yield slice_
+
+
 class Orchestrator:
     """Fans out one build sub-process per non-off slice.
 
@@ -132,18 +151,19 @@ class Orchestrator:
         self,
         project: BoardProject,
         build_root: Path,
-        board_yaml: Optional[Path] = None,
+        board_yaml: Path,
     ) -> None:
         self.project = project
         self.build_root = Path(build_root)
         # `board_yaml` anchors every slice's relative `app:` path (issue
         # #596) -- pass the project's actual board.yaml so build commands
-        # resolve identically regardless of the caller's CWD.  Callers that
-        # omit it (legacy in-repo call sites, tests that don't care about
-        # app-path resolution) fall back to CWD, matching the historical
-        # behaviour.
-        self.base_dir = (Path(board_yaml).resolve().parent
-                          if board_yaml is not None else Path.cwd())
+        # resolve identically regardless of the caller's CWD.  Required
+        # (ADR-0020 Phase 1): the old `Path.cwd()` fallback was a live
+        # "same board.yaml, two answers" divergence between callers that
+        # passed it and callers that didn't -- every real caller (cli.py)
+        # already has the path, so there is no legitimate caller left to
+        # fall back for.
+        self.base_dir = Path(board_yaml).resolve().parent
         self.state_path = self.build_root / ".alp-build-state.json"
         self._state: dict[str, Any] = self._load_state()
 
@@ -360,21 +380,32 @@ class Orchestrator:
         # 1. Shared artefacts.
         self._materialise_shared()
 
-        # 2. Per-slice config materialisation.
-        targets: list[Slice] = []
+        # 2. Off-core / `--core`-filtered status bookkeeping.  Runs over
+        #    EVERY core (not just the buildable ones) because the
+        #    manifest (step 6) reports every core, including the ones
+        #    this run never touches.  Order doesn't matter here -- only
+        #    which slices get a status, not what order they build in.
         for cid, slice_ in self.project.cores.items():
             if slice_.os == "off":
                 slice_.status = "skipped"
                 slice_.reason = "os: off"
-                continue
-            if only_core is not None and cid != only_core:
+            elif only_core is not None and cid != only_core:
                 slice_.status = "skipped"
                 slice_.reason = f"--core {only_core} selected; this slice not in scope"
+
+        # 3. Per-slice config materialisation.  Build targets is drawn
+        #    from `iter_buildable_slices` -- the SAME enumeration
+        #    `emit_build_plan` reads -- so the plan and the real build
+        #    can never disagree on which cores build or in what order
+        #    (ADR-0020 Phase 1).
+        targets: list[Slice] = []
+        for slice_ in iter_buildable_slices(self.project):
+            if only_core is not None and slice_.core_id != only_core:
                 continue
             self._materialise_slice_config(slice_)
             targets.append(slice_)
 
-        # 3. Caching: skip slices whose inputs hash matches the last
+        # 4. Caching: skip slices whose inputs hash matches the last
         #    successful run AND whose build actually produced evidence
         #    of running (its build.log).  `slice_.build_dir` is created
         #    unconditionally by `_materialise_slice_config` just above
@@ -400,7 +431,7 @@ class Orchestrator:
 
         runnable = [s for s in targets if s.core_id not in skip_targets]
 
-        # 4. Dispatch.  Use ProcessPoolExecutor for parallel, but the
+        # 5. Dispatch.  Use ProcessPoolExecutor for parallel, but the
         # cheap reality on Phase 2 is most slices skip (missing tool)
         # so the sequential path is fine when parallel=False.
         if parallel and len(runnable) > 1:
@@ -430,7 +461,7 @@ class Orchestrator:
             for slice_ in runnable:
                 self._dispatch_slice(slice_)
 
-        # 5. Persist cache state.
+        # 6. Persist cache state.
         for slice_ in self.project.cores.values():
             if slice_.status == "ok":
                 self._state[slice_.core_id] = {
@@ -440,7 +471,7 @@ class Orchestrator:
                 }
         self._save_state()
 
-        # 6. Manifest.
+        # 7. Manifest.
         ordered = sorted(self.project.cores.values(),
                          key=lambda s: s.core_id)
         manifest = SystemManifest(
