@@ -1,4 +1,4 @@
-# 0020. The SDK owns build execution — the `alp` CLI is a thin surface over one engine
+# 0020. The SDK owns build execution — a thin manager above the SDK dispatches to one engine inside it (rustup/cargo split)
 
 Status: Proposed
 Date: 2026-07-18
@@ -102,6 +102,34 @@ prices that work explicitly (see Decision → *The engine↔surface contract* an
 Consequences → *costs*); it is the single largest work item and it is **not**
 a flag.
 
+### The manager role: a tool above the SDK must upgrade it (Hakan's objection)
+
+A tool that lives *entirely inside* the SDK cannot bootstrap or upgrade the
+SDK it lives in — the VS Code extension needs something that can run *before*
+any SDK is installed and can *replace* the active one (`alp sdk install`,
+`alp sdk switch`). That "something" cannot be inside the thing it swaps.
+
+This is the manager/managed split, and the canonical model is **`rustup` /
+`cargo`**:
+
+- **`rustup`** lives *outside* every toolchain, is installed globally and
+  standalone, manages + upgrades toolchains, and **dispatches** to the active
+  one. The `cargo` on PATH is a rustup **proxy** that forwards to the active
+  toolchain's real `cargo`.
+- **`cargo`** ships *inside* each toolchain, versioned with it. rustup never
+  re-implements cargo — it *forwards*.
+
+So the objection is correct and it corrects an earlier framing of this ADR
+that treated "the CLI" as one thing. There are **two roles**: a **manager**
+(above the SDK, standalone, ships independently — `sdk install/switch`, `init`,
+dispatch) and an **engine** (inside the SDK, versioned with it — plan +
+execute). The key property is that the manager **dispatches to** the engine;
+it does **not** re-implement it. That keeps *both* invariants: a tool above the
+SDK can upgrade it (Hakan), *and* build execution has a single implementation
+with no drift (RFC #843). Today's Rust `alp` already carries the manager role
+(`sdk list/install/current/switch` exist in it); it merely *also* grew an
+executor, which is the part this ADR deletes.
+
 ### Industry precedent
 
 Every comparable embedded vendor keeps the build orchestrator in the
@@ -126,43 +154,55 @@ the *executor*.
 
 ## Decision
 
-**Collapse to two tiers. The SDK owns plan + execute + progress; the `alp`
-CLI is a thin surface; the IDE extension shells that CLI.**
+**Split the CLI into two *roles* — a manager above the SDK and an engine
+inside it — modelled on `rustup` / `cargo`. The manager owns lifecycle +
+dispatch and re-implements nothing; the engine owns plan + execute + progress,
+as one implementation.** (This replaces the earlier two-tier framing of this
+ADR after Hakan's bootstrap objection — see Context → *The manager role*.)
 
-1. **Tier 1 — alp-sdk (Python), the one engine.** `alp_orchestrate` owns the
-   full build: board.yaml → per-core backend routing → materialise → execute
-   → **structured progress stream** → manifest. Skip-vs-fail, env derivation,
-   venv/toolchain resolution, scheduling, and incremental cache **all live
-   here** — one machine-readable source, matching the SDK's core principle.
+1. **Manager `alp` — above the SDK, standalone, independently shipped**
+   (the current Rust `alp` in alp-sdk-vscode *is* this role, kept). Owns:
+   SDK **lifecycle** (`sdk install / switch / current`), `init`, pre-SDK
+   `doctor`, the genuinely-offline verbs (`validate --offline`, `explain`,
+   `diff`, `presets`), and — for every in-workspace verb (`build / flash /
+   run`) — **dispatch**: resolve the *active* SDK's venv interpreter and
+   exec-forward to the engine by **explicit path**, rendering its progress
+   stream, mapping exit codes 0–5. It contains **no planner and no executor
+   logic**. `alp sdk switch <ver>` is the manager upgrading the SDK from
+   *outside* — the tool that replaces the SDK is never inside it (rustup).
 
-2. **Tier 2 — the `alp` / `tan` CLI is thin.** It is the **existing Python
-   `alp_cli`** — arg parsing, JSON envelope, exit codes 0–5, rendering the
-   engine's progress stream, and the genuinely-offline conveniences
-   (`validate --offline`, `explain`, `diff`, `presets`). It **decides nothing**
-   about builds; it drives the engine via
-   `python -m alp_orchestrate <verb> --format jsonl`.
+2. **Engine — inside the SDK (Python), one implementation.**
+   `alp_orchestrate` (fronted by the SDK-internal thin `alp_cli` verbs) owns
+   the full build: board.yaml → per-core backend routing → materialise →
+   execute → **structured progress stream** → manifest, plus skip-vs-fail,
+   env derivation, venv/toolchain resolution, scheduling, and incremental
+   cache. Single machine-readable source, matching the SDK's core principle.
+   Reached only as `python -m alp_orchestrate <verb> --format jsonl` (via the
+   manager's dispatch) — **never as a second binary named `alp` on PATH**.
 
-3. **Tier 3 — the IDE extension** (alp-sdk-vscode, TypeScript) shells the
-   workspace-venv Python `alp` **by explicit interpreter path** (see
-   *Security*), the same subprocess model it already uses. It never re-derives
-   build outcomes.
+3. **IDE extension** (alp-sdk-vscode, TypeScript) shells the **manager `alp`**
+   via subprocess (its existing model). The manager owns interpreter
+   resolution, so the extension needs no venv knowledge — it asks the manager
+   to `build`, the manager forwards to the active SDK's engine.
 
-4. **The Rust `alp` binary is demoted** to, at most, an install-time bootstrap
-   + genuinely-offline-verbs shim that **exec-forwards** every engine-touching
-   verb to the workspace-venv Python `alp` — or is retired entirely. Its
-   executor (`execute_slices`, `materialise_plan`, `zephyr_env_overrides`, the
-   hand-ported skip-vs-fail) is **deleted**. Its venv/interpreter **resolution**
-   (`find_workspace_venv`, `resolve_python_binary`) is **kept** — a spawner
-   still has to locate the Python it spawns.
+4. **The Rust binary keeps the manager role, loses the executor role.**
+   Deleted: `execute_slices`, `materialise_plan`, `zephyr_env_overrides`, the
+   hand-ported skip-vs-fail. **Kept and now first-class:** SDK lifecycle
+   commands, offline verbs, and venv/interpreter **resolution**
+   (`find_workspace_venv`, `resolve_python_binary`) — a dispatcher must locate
+   the Python it forwards to. Rust is justified *here*: the manager bootstraps
+   **before** any SDK (hence before a guaranteed Python) is installed, so a
+   standalone binary for the outer tool is warranted — this is the Rust
+   rationale Hakan's objection supplies, which the "no-Python-prize-is-small"
+   reasoning (true for the *engine*) never covered.
 
 5. **`--emit build-plan` is retained** (0014's planner contract stands) for its
    remaining consumers — materialise-only tooling, CI, alp-studio — but its
-   role as an *executor* input is retired. The plan describes; it is no longer
-   independently executed by a foreign re-implementation.
+   role as an *independently-executed* input is retired. The plan describes; it
+   is no longer re-executed by a foreign re-implementation.
 
-6. **Name-collision resolved in the same stroke:** exactly one binary keeps
-   the name `alp` (the Python surface). The Rust shim, if kept, takes a
-   distinct name or is invoked only by the extension by explicit path.
+6. **Name collision resolved:** exactly one `alp` is on PATH — the **manager**.
+   The engine is an SDK-internal module, not a competing PATH binary.
 
 ### The engine↔surface contract (replaces 0014's materialise/execute/schedule split)
 
@@ -234,10 +274,14 @@ build. That asymmetry is the core argument for the collapse.
 
 **Bad / costs:**
 
-- **Release-train re-coupling.** This is the real price and the thing Hakan
-  gave away deliberately in 0014: every progress-UX or cancellation
-  improvement now ships in an **SDK release tag**, not on the CLI's own
-  cadence. The extension's interactivity becomes a function of `fan_out`.
+- **Release-train re-coupling — but narrower than 0014 feared.** Only actual
+  **build behavior** (the engine: schedule, cancel, progress *events*) now
+  ships in an SDK release tag — which is correct, since a build must match the
+  SDK that plans it. The **manager** (lifecycle, offline verbs, UX *rendering*,
+  dispatch) still ships on the extension's own cadence, independently. So the
+  extension's non-build interactivity is **not** hostage to SDK releases; only
+  the executor is. This substantially softens the coupling 0014 optimised
+  against — the manager/engine split is what buys that back.
 - **No consumer-side hotfix path.** Once the CLI is a dumb spawner, an executor
   bug ships only via an SDK tag — there is no Rust-side patch. Accepted cost of
   "one implementation"; named here so it is chosen, not discovered.
@@ -272,8 +316,10 @@ Phased, each phase independently shippable and green:
    `--format jsonl` on `alp_orchestrate` / `alp build`. Ship in an SDK tag.
 3. **Extension cutover:** point the extension at the workspace-venv Python
    `alp` by explicit path; render the JSONL stream.
-4. **Rust demotion:** gut `execute_slices` etc.; keep resolution + offline
-   verbs, or retire the binary. (alp-sdk-vscode PR, coordinated.)
+4. **Split the Rust roles:** delete the executor (`execute_slices`,
+   `materialise_plan`, `zephyr_env_overrides`, hand-ported skip-vs-fail);
+   keep + formalise the manager (lifecycle, dispatch-by-explicit-path,
+   resolution, offline verbs). (alp-sdk-vscode PR, coordinated.)
 5. **Docs + name:** `west alp-build` documented as the Zephyr-workspace-native
    alias; one binary keeps `alp`; on acceptance, mark 0014
    "Superseded by 0020 (mechanism clause)".
@@ -283,10 +329,11 @@ Phased, each phase independently shippable and green:
 1. **Release-train coupling — acceptable?** This is the crux you decided the
    other way in 0014. Is the extension's UX cadence riding SDK tags a price
    worth the structural no-drift + single implementation?
-2. **Rust binary: demote-to-shim, or retire?** What, beyond `npm i -g` /
-   VSIX install and the offline verbs, does the native binary still buy once
-   its executor is gone? Is a future napi/WASM embedding of `alp-core` still on
-   the roadmap (it would change this answer)?
+2. **Manager scope.** The Rust binary keeps the manager role (lifecycle +
+   dispatch + offline verbs) — resolved. Remaining question: does the manager
+   need any *other* native logic, and is a future napi/WASM embedding of
+   `alp-core` in the extension still on the roadmap (it would let the extension
+   call some manager logic in-process instead of by subprocess)?
 3. **JSONL event schema** — does the draft above cover what the extension's
    progress/cancel UX needs (per-slice granularity, interleaved parallel
    output, structured error surfaces)?
