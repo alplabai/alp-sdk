@@ -46,17 +46,17 @@ source ../.venv/bin/activate
 export ZEPHYR_BASE="$PWD/../zephyr"
 
 # Sanity-check the host -- catches a missing toolchain/HAL before it bites later
-alp doctor
+tan doctor
 
 # Scaffold + run a hello-world on native_sim — no hardware needed
-alp init my-app
+tan init my-app
 cd my-app
-alp run
+tan build --native
 ```
 
-`bash scripts/bootstrap.sh` is what actually gets `west` (and everything else `alp build`/`alp run` shell out to) onto `PATH` — skipping it is the #1 way this Quickstart fails on a fresh clone; see [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md) for the per-OS manual equivalent. `alp init` walks you through SoM SKU + board preset + starter peripherals interactively, or accepts `--som`, `--preset`, `--peripherals` flags for CI. `alp run` builds for `native_sim` by default and prints the app's stdout straight through; pass `--board <name>` for a real-hardware build (`--flash` to chain flash).
+`bash scripts/bootstrap.sh` is what actually gets `west` (and everything else `tan build` shells out to) onto `PATH` — skipping it is the #1 way this Quickstart fails on a fresh clone; see [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md) for the per-OS manual equivalent. `tan init` walks you through SoM SKU + board preset + starter peripherals interactively, or accepts `--som`, `--preset`, `--peripherals` flags for CI. `tan build --native` builds for `native_sim` by default and prints the app's stdout straight through; pass `--board <name>` for a real-hardware build (`--flash` to chain flash).
 
-`alp validate board.yaml` runs the diagnostic-rich validator standalone — try it on a fixture under `tests/fixtures/board_yaml_bad/` to see the format.  `alp doctor` triages the host environment (PASS/WARN/FAIL with fix hints) whenever a build machine misbehaves.  The full verb set — `build` / `flash` / `emit` / `size` / `image` / `clean` / `renode` / `monitor` / `new-som` / `model` and friends — is documented in [`docs/cli.md`](docs/cli.md).
+`tan validate board.yaml` runs the diagnostic-rich validator standalone — try it on a fixture under `tests/fixtures/board_yaml_bad/` to see the format.  `tan doctor` triages the host environment (PASS/WARN/FAIL with fix hints) whenever a build machine misbehaves.  The full verb set — `build` / `flash` / `generate` / `size` / `image` / `clean` / `renode` and friends — is documented in [`docs/cli.md`](docs/cli.md).
 
 ## Two consumer paths
 
@@ -417,7 +417,7 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference bo
           │
   ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────┐
   │ Dev Tooling   │ ─► │  board.yaml · alp_project.py (per-core emit) · alp_orchestrate/        │
-  │               │    │  west alp-build / alp-image / alp-flash / alp-clean                    │
+  │               │    │  tan build / image / flash / clean                                     │
   │               │    │  validate_board_yaml.py · program_eeprom.py · VS Code extension        │
   │               │    │  alp model build  →  .alpmodel   (the model-compile front-end)         │
   └───────────────┘    └────────────────────────────────────────────────────────────────────────┘
@@ -581,7 +581,7 @@ ctest --test-dir build --output-on-failure
 # Zephyr (heterogeneous slice)
 west init -m https://github.com/alplabai/alp-sdk --mr main alp-ws
 cd alp-ws && west update
-west alp-build examples/multicore/rpmsg-v2n
+tan build examples/multicore/rpmsg-v2n
 ```
 
 ## Repository layout

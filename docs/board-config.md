@@ -20,7 +20,7 @@ field-by-field detail lives in four focused reference pages:
   `preset:` mode, `pins:`, pin direction, the EVK-as-reference-design
   workflow, stock presets, and the `libraries:` block (ADR 0018).
 - [`board-config-emit.md`](board-config-emit.md) -- how the loader
-  compiles the file: `west alp-build`, the Zephyr `alp.conf` overlay,
+  compiles the file: `tan build`, the Zephyr `alp.conf` overlay,
   plain CMake, Yocto `local.conf`, `west.yml` auto-pin, the
   `hw-info-h` header, and the DTS overlay.
 - [`board-config-hardware.md`](board-config-hardware.md) -- hardware

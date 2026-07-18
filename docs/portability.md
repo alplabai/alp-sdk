@@ -186,7 +186,7 @@ west build -b alp_e1m_aen801_m55_hp examples/peripheral-io/i2c-scanner
 **Flash:** the `west flash` step is unchanged from any other AEN
 target — the per-SoM bring-up doc (see
 [`docs/bring-up-aen.md`](bring-up-aen.md)) explains the JLink
-incantation, USB-DFU fallback, and the `west alp-flash` wrapper
+incantation, USB-DFU fallback, and the `tan flash` wrapper
 for multi-image SoMs.
 
 That is the swap test.  No source change.  The `main.c` from

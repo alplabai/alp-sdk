@@ -42,7 +42,7 @@ the OS".
 | **Zephyr-on-M (`native_sim`)** — examples, ztests, day-to-day iteration | yes | yes | no (use WSL2) | yes (via WSL) |
 | **Zephyr-on-M (real silicon)** — `west build` + `west flash` against EVK | yes | yes | yes | yes (via WSL) |
 | **Yocto-on-A (`bitbake`)** — full Linux userland image build | yes | no | no | yes |
-| **Heterogeneous orchestrator (`west alp-build` fanning out across cores)** | yes | yes (Zephyr halves only) | yes (Zephyr halves only) | yes |
+| **Heterogeneous orchestrator (`tan build` fanning out across cores)** | yes | yes (Zephyr halves only) | yes (Zephyr halves only) | yes |
 
 Read: a Mac user can do everything on the host **except** build
 the Yocto half (use a Linux VM for that).  A Windows user runs the
@@ -65,14 +65,15 @@ are deliberately different:
 
 - **Support floor: 3.10.**  `pyproject.toml` declares
   `requires-python = ">=3.10"` — the SDK's Python tooling
-  (validators, `alp` CLI, orchestrator) runs on any 3.10+.
+  (validators, orchestrator) runs on any 3.10+.  The `tan` CLI
+  itself is a standalone binary and isn't bound by this floor.
 - **Dev/CI pin: 3.12.**  The repo-root `.python-version` file is
   the single source; every CI workflow's `actions/setup-python`
   reads it via `python-version-file`, so CI always runs exactly
   the pinned version.
 
 To reproduce CI byte-for-byte, match the pin locally — `pyenv`
-and `uv` pick `.python-version` up automatically.  `alp doctor`
+and `uv` pick `.python-version` up automatically.  `tan doctor`
 WARNs (never FAILs) when the running interpreter differs from
 the pin; anything >= 3.10 remains supported.
 
@@ -276,7 +277,8 @@ PowerShell as Administrator for the first-time install steps; the
 day-to-day workflow runs as a normal user.
 
 > **Shortcut:** `pwsh scripts\bootstrap.ps1` automates §4.2 + §4.5
-> (venv + Python deps + west workspace + the editable `alp` CLI install) once the
+> (venv + Python deps + west workspace; `tan` itself is a standalone
+> binary set up via `tan bootstrap`) once the
 > §4.1 base toolchain is present — it prints the matching `winget`
 > one-liner for anything missing and is idempotent.  The Arm GNU
 > Toolchain (§4.3) and Zephyr SDK stay manual (GUI installers).  The
@@ -524,7 +526,7 @@ This is the cross-platform end-to-end smoke test.
 # Linux / macOS / WSL2 (native_sim is Linux/macOS only; on Windows
 # run this inside WSL2 — there is no native-Windows native_sim target):
 cd ../alp-workspace
-west alp-build -b native_sim/native/64 alp-sdk/examples/peripheral-io/gpio-button-led
+tan build -b native_sim/native/64 alp-sdk/examples/peripheral-io/gpio-button-led
 west build -d build -t run
 ```
 

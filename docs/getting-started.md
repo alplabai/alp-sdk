@@ -11,25 +11,25 @@ hand-written firmware as a first-class consumer.
 > it with cross-version navigation + search.  Stuck on something?
 > Ask on [**community.alplab.ai**](https://community.alplab.ai/).
 
-> **Two front ends: `alp` CLI vs `west`.**  The SDK ships two
+> **Two front ends: `tan` CLI vs `west`.**  The SDK ships two
 > equivalent entry points, and both consume the same `board.yaml`:
 >
-> - **`alp` CLI** — the single-image quick path.  `pip install -e .`
->   once per clone, then `alp init` scaffolds a project and `alp run`
->   builds it for `native_sim` and prints its stdout straight
->   through.  This is the headline
+> - **`tan` CLI** — the single-image quick path.  `tan bootstrap`
+>   once per clone, then `tan init` scaffolds a project and
+>   `tan build --native` builds it for `native_sim` and prints its
+>   stdout straight through.  This is the headline
 >   [README Quickstart](../README.md#quickstart) — if you just want
 >   a hello-world running in two minutes, start there.  The full
->   verb reference (`build` / `flash` / `emit` / `doctor` /
+>   verb reference (`build` / `flash` / `generate` / `doctor` /
 >   `monitor` / `new-som` / …) lives in [`docs/cli.md`](cli.md).
-> - **`west alp-build`** — the multi-core / heterogeneous path this
+> - **`tan build`** — the multi-core / heterogeneous path this
 >   walkthrough uses.  It fans a `board.yaml` out into per-core
 >   build slices, runs the full pre-flight (schema validation, SoC
 >   caps, hw_info header) and delegates to `west build`.
 >
-> Nothing is lost switching between them: `alp run` uses the same
-> loader and validator under the hood.  Pick `alp` for a first
-> taste, `west alp-build` once your project spans more than one
+> Nothing is lost switching between them: `tan build --native` uses
+> the same loader and validator under the hood.  Pick `tan` for a
+> first taste, `tan build` once your project spans more than one
 > core or OS.
 
 If you'd rather skim, the fastest path is:
@@ -39,7 +39,7 @@ git clone https://github.com/alplabai/alp-sdk
 cd alp-sdk
 bash scripts/bootstrap.sh                            # one-time: west + Python + apt hints
 export ZEPHYR_BASE="$PWD/../zephyr"
-west alp-build -b native_sim/native/64 examples/peripheral-io/gpio-button-led
+tan build -b native_sim/native/64 examples/peripheral-io/gpio-button-led
 west build -d build -t run
 # expect: [gpio] init button=EVK_PIN_ENCODER_SW, led=EVK_PIN_LED_RED
 #          ...
@@ -55,7 +55,7 @@ Yocto-side backends need.  Windows-native users run the PowerShell
 twin, `scripts/bootstrap.ps1`, instead (see
 [`docs/cross-platform-setup.md`](cross-platform-setup.md) §4).
 
-`west alp-build` validates the example's `board.yaml`, generates
+`tan build` validates the example's `board.yaml`, generates
 the build-time config from it, and delegates to `west build`.
 The rest of this document explains *why* each step is what it is
 so you can adapt it to your own project.
@@ -100,7 +100,7 @@ you install them.
 | Tool        | Version          | Notes                                                    |
 |-------------|------------------|----------------------------------------------------------|
 | Zephyr      | v4.4.0 (stable)  | Pinned by `west.yml`; see [`docs/zephyr-version-policy.md`](zephyr-version-policy.md). |
-| Python      | 3.10+ (dev/CI pin: 3.12) | 3.10 is the support **floor** (`pyproject.toml` `requires-python`); dev/CI standardise on the **pin** in the repo-root `.python-version` file. Match the pin to reproduce CI exactly -- `alp doctor` warns on a mismatch. |
+| Python      | 3.10+ (dev/CI pin: 3.12) | 3.10 is the support **floor** (`pyproject.toml` `requires-python`); dev/CI standardise on the **pin** in the repo-root `.python-version` file. Match the pin to reproduce CI exactly -- `tan doctor` warns on a mismatch. |
 | Python deps | `pyyaml`, `jsonschema`, `imgtool` | All installed by `scripts/bootstrap.sh`; manual install: `pip install pyyaml jsonschema imgtool`. |
 | CMake       | 3.20+            | `find_package(Zephyr)` minimum.                          |
 | C compiler  | GCC 11+ / Clang 14+ | `native_sim` builds; cross-toolchain for real silicon. |
@@ -133,9 +133,9 @@ pin, the `.west` workspace and the workspace venv) and prints a
 `[PASS]`/`[WARN]`/`[FAIL]` line with a fix hint for each:
 
 ```bash
-alp doctor              # human-readable report; exit 1 on any FAIL
-alp doctor --strict     # also fail on WARN (handy in CI)
-alp doctor --json       # machine-readable (used by the VS Code extension)
+tan doctor              # human-readable report; exit 1 on any FAIL
+tan doctor --strict     # also fail on WARN (handy in CI)
+tan doctor --json       # machine-readable (used by the VS Code extension)
 ```
 
 It is HW-free (no build, no board, no flash), so it is safe to run
@@ -207,22 +207,24 @@ west-extension commands — `west alp-build`
 (`scripts/west_commands/alp_build.py`) plus its siblings
 `alp-image` / `alp-flash` / `alp-clean` / `alp-emit` / `alp-size` /
 `alp-renode`, all registered via `scripts/west-commands.yml` — that
-the rest of this walkthrough uses.  Every one of them is equally
-reachable through the `alp` CLI (`alp build`, `alp flash`, `alp size`,
-…) documented in [`docs/cli.md`](cli.md); the two front doors drive
-the same pipeline.
+the rest of this walkthrough uses.  Most of them are equally
+reachable through the `tan` CLI (`tan build`, `tan image`,
+`tan flash`, `tan clean`, `tan generate`, `tan renode`; `alp-size`
+has no `tan` equivalent yet and still runs via the `west alp-*`
+extension) documented in [`docs/cli.md`](cli.md); the two front
+doors drive the same pipeline.
 
 ## 4. First build: the GPIO example
 
 Every example in `examples/` carries a **`board.yaml`** — the
 single declarative file the loader compiles into Kconfig
 fragments, DTS overlays, and the build-time hw_info header.  The
-`west alp-build` wrapper does the pre-flight + delegates to
+`tan build` wrapper does the pre-flight + delegates to
 `west build`:
 
 ```bash
 cd alp-workspace
-west alp-build -b native_sim/native/64 alp-sdk/examples/peripheral-io/gpio-button-led
+tan build -b native_sim/native/64 alp-sdk/examples/peripheral-io/gpio-button-led
 ```
 
 What the flags mean:
@@ -238,7 +240,7 @@ What the flags mean:
   configure time.  See [`docs/board-config-schema.md`](board-config-schema.md)
   for the schema.
 
-`west alp-build` walks four steps under the hood:
+`tan build` walks four steps under the hood:
 
 1. **Validates** the app's `board.yaml` via `validate_board_yaml.py`
    (schema + SoM SKU preset + board preset + `hw_rev` /
@@ -338,7 +340,7 @@ can't run, naming the failing constraint.  Check what's selected and
 whether it's compatible:
 
 ```bash
-alp doctor            # a "libraries" line reports tier + licence + fit
+tan doctor            # a "libraries" line reports tier + licence + fit
 ```
 
 The curated set today: `lvgl`, `cmsis-dsp`, `cmsis-nn`, `nanopb`,
@@ -365,11 +367,11 @@ west build -b alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33 alp-sdk/examples/periph
 west flash
 ```
 
-The `alp` CLI equivalents are `alp build --board <name>` and
-`alp flash`; once the board is running, `alp monitor --port <port>`
-opens its serial console (run it portless to list the host's serial
-ports; `--baud` overrides the 115200 default).  See
-[`docs/cli.md`](cli.md).
+The `tan` CLI equivalents are `tan build --board <name>` and
+`tan flash`; once the board is running, `alp monitor --port <port>`
+(no `tan` equivalent yet) opens its serial console (run it portless
+to list the host's serial ports; `--baud` overrides the 115200
+default).  See [`docs/cli.md`](cli.md).
 
 Each example's `boards/` directory has an overlay that maps
 the example's `alp,pin-array` slots to specific EVK pins.  The
@@ -498,7 +500,7 @@ resolves the MPN to the silicon ref (`alif:ensemble:e8` for
 hand.  The validator also cross-checks every entry in
 `peripherals:` against the SoC's `metadata/socs/<vendor>/<family>/<part>.json`
 caps -- a board.yaml asking for `i2s` on a SoC that doesn't route
-I²S fails at `west alp-build` time with exit code 3, before any
+I²S fails at `tan build` time with exit code 3, before any
 compile work.
 
 At runtime, the documented caps drive the per-`*_open` validation:

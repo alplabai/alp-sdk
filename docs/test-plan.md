@@ -200,7 +200,7 @@ matching CHANGELOG `[v0.6.0]` entries.
 The 2026-07 CX batch (PRs #319..#335): `<alp/version.h>`, the SE-backed
 SoC-identity / power-profile / core-boot surfaces, I²C/SPI target
 (slave) mode + `alp_init`/`alp_deinit`, DAC capabilities + the analog/WDT
-API-consistency renames, the `alp` CLI front door, and the portable-API
+API-consistency renames, the `tan` CLI front door, and the portable-API
 conformance suite.  native_sim coverage lands with the code; every
 silicon-facing row is bench-gated as usual.
 

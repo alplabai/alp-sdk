@@ -1,73 +1,85 @@
-# The `alp` CLI
+# The `tan` CLI
 
-`alp` is the Alp SDK's single command-line front door: scaffold a
+`tan` is the Alp SDK's single command-line front door: scaffold a
 project, build it (multi-core aware), run it on the simulator or in
-Renode, check its footprint against the SoM memory budget, flash it,
-bundle it for OTA, clean it, inspect the generated configuration,
-validate `board.yaml`, compile AI models, sanity-check the host
-environment, open a serial console, and scaffold the metadata for
-porting a new SoM -- all from one verb set.
+Renode, flash it, bundle it for OTA, clean it, inspect the generated
+configuration, validate `board.yaml`, sanity-check the host
+environment, and more -- all from one verb set.
 
-It is installed automatically by the bootstrap scripts
-(`scripts/bootstrap.sh` on Linux/macOS/WSL2, `scripts/bootstrap.ps1`
-on native Windows) as an editable install into the workspace venv, so
-a `git pull` in the alp-sdk checkout updates the CLI in place.
-Without an install it also runs straight from a checkout:
+`tan` is a standalone binary (the `tan-cli` project); it is not a
+Python package. Under [ADR-0020](adr/0020-sdk-owns-build-execution.md)
+the SDK is a **plans-only backend** -- it emits a build-plan and the
+build libraries -- and `tan` is the **whole user-facing command
+surface** that consumes that plan and drives the build. Point `tan` at
+an SDK checkout with `--sdk-root <path>` (or `ALP_SDK_ROOT`), then set
+up the toolchain once:
 
 ```bash
-# From the alp-sdk repo root (or with <sdk>/scripts on PYTHONPATH):
-PYTHONPATH=scripts python3 -m alp_cli --help
+tan bootstrap        # west + Zephyr workspace + Python deps for the active SDK
+tan sdk list         # manage local SDK installs (install / current / switch)
 ```
 
-Every verb is a **thin wrapper**: the actual logic lives in the same
-scripts and packages the `west alp-*` extension commands drive
+Every build verb is a **thin wrapper**: the actual logic lives in the
+same scripts and packages the `west alp-*` extension commands drive
 (`scripts/alp_orchestrate/`, `scripts/alp_project.py`,
-`scripts/validate_board_yaml.py`, `scripts/flash_backends/`).  The CLI
-adds discoverability and sane defaults; it never forks the behaviour.
+`scripts/validate_board_yaml.py`, `scripts/flash_backends/`). `tan`
+consumes the SDK's emitted build-plan and adds discoverability, sane
+defaults, and a machine-readable JSON envelope; it never forks the
+behaviour.
 
-## `alp` vs `west alp-*` -- which one do I use?
+> **Coverage note.** `tan` wraps the full `west alp-*` extension surface
+> (`build` / `flash` / `image` / `clean` / `renode` / `size` / `migrate` /
+> `lock` / `quality`). A few operations are **not yet** in `tan` and still
+> run through an SDK script: **`new-som`** (SoM porting), **`model`**
+> (AI-model compile), **`monitor`** (serial console), and
+> **`faultdecode`**. Their sections below are flagged; use the shown SDK
+> form until `tan` grows the verb.
+
+## `tan` vs `west alp-*` -- which one do I use?
 
 Both front doors drive the **same underlying pipeline**; pick by
 ergonomics, not capability:
 
 | You are... | Use |
 |---|---|
-| In an app directory, want the shortest command | `alp build` / `alp run` / `alp flash` (they find `board.yaml` by walking up from the cwd) |
+| In an app directory, want the shortest command | `tan build` / `tan build --native` / `tan flash` (they find `board.yaml` by walking up from the cwd) |
 | Scripting CI or a west-centric workflow | `west alp-build <app>` / `west alp-flash <app>` (explicit app path, no cwd magic) |
-| Outside any west workspace (validate, emit, doctor, model, monitor) | `alp ...` -- these verbs don't need a workspace |
-| Building Zephyr for one named board target directly | either `alp build --board <target>` or plain `west build -b <target>` |
+| Outside any west workspace (validate, generate, doctor) | `tan ...` -- these verbs don't need a workspace |
+| Building Zephyr for one named board target directly | either `tan build --board <target>` or plain `west build -b <target>` |
 
 Rules of thumb:
 
-* `alp build` == `west alp-build`: both pre-flight `board.yaml`
+* `tan build` == `west alp-build`: both pre-flight `board.yaml`
   through `scripts/validate_board_yaml.py`, then fan out every
   non-`off` core via `python -m alp_orchestrate` (per-core build
-  slices + `build/system-manifest.yaml`).  See
+  slices + `build/system-manifest.yaml`). `tan build --plan` consumes
+  the SDK's emitted `--emit build-plan` instead of re-deriving it. See
   [heterogeneous-builds.md](heterogeneous-builds.md).
-* `alp flash` == `west alp-flash`: both walk
+* `tan flash` == `west alp-flash`: both walk
   `build/system-manifest.yaml` and hand every slice + helper MCU to
   its registered backend in `scripts/flash_backends/`, honouring the
   manifest's `boot_order:`.
-* `alp emit` is a SUPERSET of `west alp-emit`: every artefact either
-  front door can generate is reachable from `alp emit` (one catalog,
-  listed in the `alp emit` verb reference below).  `west alp-emit`
-  remains for west-centric scripting and
-  exposes the orchestrator's ADR-0014 subset.  Same emitters
-  underneath either way -- the two can never produce different output
-  for the same mode.
-* `alp size` / `alp clean` / `alp image` / `alp renode` ==
-  `west alp-size` / `west alp-clean` / `west alp-image` /
-  `west alp-renode`: same implementation, same flags; the `alp` form
-  finds the app by walking up from the cwd, the west form takes the
-  app path explicitly.
+* `tan generate` fronts the SDK's artefact emitters (`alp.conf`,
+  DTS overlay, CMake args, Yocto conf) -- the same emitters
+  `scripts/alp_project.py --emit` and `west alp-emit` own; the
+  build-plan itself is emitted by the SDK
+  (`alp_orchestrate.py --emit build-plan`) and consumed by
+  `tan build --plan`.
+* `tan clean` / `tan image` / `tan renode` ==
+  `west alp-clean` / `west alp-image` / `west alp-renode`: same
+  implementation, same flags; the `tan` form finds the app by walking
+  up from the cwd, the west form takes the app path explicitly.
+* `tan size` / `tan migrate` / `tan lock` / `tan quality` likewise wrap
+  `west alp-size` / `west alp-migrate` / `west alp-lock` /
+  `west alp-quality`.
 
 ## Verb reference
 
-### `alp init` -- scaffold a new project
+### `tan init` -- scaffold a new project
 
 ```bash
-alp init my-app --som E1M-AEN801 --preset e1m-evk --peripherals uart,gpio
-alp init my-app          # interactive: pick SoM / preset / peripherals
+tan init my-app --som E1M-AEN801 --preset e1m-evk --peripherals uart,gpio
+tan init my-app          # interactive: pick SoM / preset / peripherals
 ```
 
 Copies the hello-world template, rewrites `board.yaml` for the chosen
@@ -82,6 +94,10 @@ list.  Omit any flag to be prompted interactively.
 | `--peripherals` | Comma-separated starter peripherals (`uart,gpio,i2c,spi,pwm`) |
 
 ### `alp new-som` -- scaffold metadata for a new SoM port
+
+> **Not yet in `tan`.** SoM porting is a maintainer task run from the
+> SDK checkout; the verb below is the SDK's porting scaffolder, pending
+> a `tan` wrapper.
 
 ```bash
 alp new-som --sku E1M-NX9555 --soc-ref nxp:imx9:imx95 --family nxp-imx9
@@ -135,60 +151,64 @@ Omit `--sku` / `--soc-ref` / `--family` to be prompted interactively
 (requires a terminal; in a pipe or CI the command fails fast naming
 the missing flags).
 
-### `alp build` -- build the project (multi-core aware)
+### `tan build` -- build the project (multi-core aware)
 
 ```bash
-alp build                      # nearest board.yaml upward from the cwd
-alp build path/to/app          # explicit app directory
-alp build --core m33_sm        # iterate on one slice only
-alp build --no-parallel        # sequential slice dispatch
-alp build --board native_sim   # single-image fallback: plain `west build`
+tan build                      # nearest board.yaml upward from the cwd
+tan build path/to/app          # explicit app directory
+tan build --core m33_sm        # iterate on one slice only
+tan build --no-parallel        # sequential slice dispatch
+tan build --board native_sim   # single-image fallback: plain `west build`
+tan build --plan               # consume the SDK's emitted build-plan
 ```
 
 Default path: validate `board.yaml`, then fan out every non-`off`
 core via the orchestrator -- exactly what `west alp-build` does.
 Outputs land under `<app>/build/`: per-slice build directories plus
-`system-manifest.yaml` (the single source of truth that `alp flash`,
-`west alp-image`, and OTA consume).
+`system-manifest.yaml` (the single source of truth that `tan flash`,
+`tan image`, and OTA consume).
 
 `--board <zephyr-board>` skips the orchestrator and performs a plain
 single-image `west build -b <board>` into `build/<board>/` -- the
 right tool for a one-core Zephyr app when you want to name the board
-target directly.
+target directly. `--plan` (or `--plan-file <json>`) consumes the SDK's
+`--emit build-plan` rather than invoking the SDK to re-derive it.
 
 | Option | Meaning |
 |---|---|
 | `APP_PATH` (argument, optional) | App directory (default: walk up from cwd) |
 | `--core` | Limit the fan-out to one core ID |
+| `--native` | Build + run the native_sim image (the old `alp run`) |
 | `--no-parallel` | Force sequential slice dispatch |
 | `--no-validate` | Skip the `board.yaml` pre-flight validation |
 | `--build-root` | Override the build root (default: `<app>/build`) |
 | `--board` | Single-image fallback: `west build -b <board>` |
+| `--plan` / `--plan-file` | Consume the SDK's emitted build-plan JSON |
 
-### `alp run` -- build + run on the simulator
+### `tan build --native` -- build + run on the simulator
 
 ```bash
-alp run                        # build for native_sim and execute it
-alp run --board <target>       # real-hardware build instead
-alp run --board <target> --flash   # ...then west flash
+tan build --native             # build for native_sim and execute it
+tan build --board <target>     # real-hardware build instead
+tan build --board <target> --flash   # ...then flash
 ```
 
-Builds through the same single-image path as `alp build --board` and
+Builds through the same single-image path as `tan build --board` and
 then executes the produced `zephyr.exe` (native_sim).  For
-heterogeneous multi-core projects use `alp build` + `alp flash`
+heterogeneous multi-core projects use `tan build` + `tan flash`
 instead -- native_sim is a single-image target.
 
-### `alp flash` -- program the built project
+### `tan flash` -- program the built project
 
 ```bash
-alp build && alp flash                     # the whole system, one-liner
-alp flash --core m33_sm                    # one slice only
-alp flash --helper gd32_bridge             # one helper MCU only
-alp flash --dry-run                        # print commands, touch nothing
-alp flash --skip-missing-tools             # warn+skip when a tool is absent
+tan build && tan flash                     # the whole system, one-liner
+tan flash --core m33_sm                    # one slice only
+tan flash --helper gd32_bridge             # one helper MCU only
+tan flash --dry-run                        # print commands, touch nothing
+tan flash --skip-missing-tools             # warn+skip when a tool is absent
 ```
 
-Walks `build/system-manifest.yaml` (produced by `alp build` /
+Walks `build/system-manifest.yaml` (produced by `tan build` /
 `west alp-build`) and programs every slice + helper MCU via the
 registered flash backends, in `boot_order:`.  Identical to
 `west alp-flash`; the west form takes the app path explicitly:
@@ -206,18 +226,18 @@ west alp-build examples/multicore/rpmsg-v2n && west alp-flash examples/multicore
 | `--build-root` | Override the build root |
 | `--skip-missing-tools` | Warn + skip slices whose flash tool is missing |
 
-### `alp size` -- footprint vs the SoM memory budget
+### `tan size` -- footprint vs the SoM memory budget
 
 ```bash
-alp build && alp size            # does each image fit the silicon?
-alp size --fail-over-budget      # CI gate: non-zero exit when over
-alp size --json                  # machine-readable (VS Code extension)
+tan build && tan size            # does each image fit the silicon?
+tan size --fail-over-budget      # CI gate: non-zero exit when over
+tan size --json                  # machine-readable (VS Code extension)
 ```
 
-Walks `build/system-manifest.yaml` (produced by `alp build` /
+Walks `build/system-manifest.yaml` (produced by `tan build` /
 `west alp-build`), measures every Zephyr slice's `zephyr.elf`, and
 compares FLASH and RAM usage against the budget resolved from the
-SoM's SoC metadata -- BEFORE you flash.  Identical to `west alp-size`.
+SoM's SoC metadata -- BEFORE you flash.
 Slices that aren't built are reported as `not built`, Yocto/baremetal
 slices as `n/a`, and an unresolvable budget shows `unknown` (never a
 guessed number; `--fail-over-budget` skips such slices and says so).
@@ -230,10 +250,10 @@ guessed number; `--fail-over-budget` skips such slices and says so).
 | `--json` | Machine-readable report instead of the human table |
 | `--fail-over-budget` | Exit non-zero if any slice exceeds its budget |
 
-### `alp image` -- assemble a flashable bundle
+### `tan image` -- assemble a flashable bundle
 
 ```bash
-alp build && alp image           # produces build/image-bundle/
+tan build && tan image           # produces build/image-bundle/
 ```
 
 Reads `build/system-manifest.yaml` and assembles a single flashable
@@ -246,11 +266,11 @@ SHA-256s.  Identical to `west alp-image`.
 | `APP_PATH` (argument, optional) | App directory (default: walk up from cwd) |
 | `--build-root` | Override the build root (default: `<app>/build`) |
 
-### `alp clean` -- remove build outputs
+### `tan clean` -- remove build outputs
 
 ```bash
-alp clean                        # rm -rf <app>/build + orchestrator cache
-alp clean --dry-run              # list what would go, delete nothing
+tan clean                        # rm -rf <app>/build + orchestrator cache
+tan clean --dry-run              # list what would go, delete nothing
 ```
 
 Removes the per-project build directory and the orchestrator's
@@ -264,13 +284,13 @@ so no Zephyr/Yocto-specific cleaners are needed.  Identical to
 | `--build-root` | Override the build root (default: `<app>/build`) |
 | `--dry-run` | List paths that would be removed, don't delete |
 
-### `alp renode` -- boot the build in Renode (no hardware)
+### `tan renode` -- boot the build in Renode (no hardware)
 
 ```bash
-alp build && alp renode                      # headless smoke boot
-alp renode --expect "[hello] done"           # exit 0 when seen, 1 if not
-alp renode --log out.log --timeout 60
-alp renode --sim-mode --board E1M-V2N101 \   # studio hardware simulator
+tan build && tan renode                      # headless smoke boot
+tan renode --expect "[hello] done"           # exit 0 when seen, 1 if not
+tan renode --log out.log --timeout 60
+tan renode --sim-mode --board E1M-V2N101 \   # studio hardware simulator
     --image-bundle ./bundle                  #   (issue #674)
 ```
 
@@ -323,23 +343,24 @@ at `0x0` and stubs the Alif CGU/EXPMST clock registers.
 | `--image-bundle` | Directory of pre-built artefacts; the firmware ELF source for `--sim-mode` |
 | `--sim-mode` | Studio hardware-simulator mode: emit `sim-descriptor.json` + serve the UART/control sockets |
 
-### `alp emit` -- print one generated artefact (no build)
+### `tan generate` -- generate a build artefact (no build)
 
 ```bash
-alp emit zephyr-conf                   # the per-core Zephyr fragment
-alp emit system-manifest               # the full-system manifest
-alp emit hw-info-h --output hw_info.h  # write instead of stdout
-alp emit zephyr-conf --core m55_he     # scope per-core modes to one core
-alp emit build-plan                    # the orchestrator's build plan (JSON)
+tan generate --target zephyr-conf              # the per-core Zephyr fragment
+tan generate --target dts-overlay              # board DTS overlay
+tan generate --target cmake-args               # per-core -D CMake args
+tan generate --target yocto-conf               # per-core local.conf fragment
 ```
 
 Read-only: shows exactly what a consuming tool (CMake, Yocto, the
-IDE) would see.  This is the ONE catalog of every generated artefact
--- `alp emit` reaches everything `scripts/alp_project.py --emit` and
-`west alp-emit` can produce, delegating each mode to the single
-implementation that owns it (never a fork):
+IDE) would see. `tan generate` fronts the SDK's `board.yaml` emitters
+(the same ones `scripts/alp_project.py --emit` and `west alp-emit`
+own), delegating each target to the single implementation that owns it
+(never a fork). The full-system plan is a separate concern: the SDK
+emits it with `alp_orchestrate.py --emit build-plan` and `tan build
+--plan` consumes it.
 
-| Mode | Artefact | Emitted by |
+| Target | Artefact | Emitted by |
 |---|---|---|
 | `zephyr-conf` | Per-core Zephyr `alp.conf` Kconfig fragment | `alp_project.py` |
 | `cmake-args` | Per-core `-D` CMake argument list | `alp_project.py` |
@@ -371,13 +392,13 @@ implementation that owns it (never a fork):
 `dts-partitions`, `storage-mounts-c`, `tfm-sysbuild-conf`,
 `build-plan`) for west-centric scripting.
 
-### `alp validate` -- check a board.yaml
+### `tan validate` -- check a board.yaml
 
 ```bash
-alp validate                             # ./board.yaml, human output
-alp validate path/to/board.yaml
-alp validate --format json path/to/board.yaml    # IDE/LSP/CI-facing
-alp validate --format sarif path/to/board.yaml   # SARIF 2.1.0 (code scanning)
+tan validate                             # ./board.yaml, human output
+tan validate path/to/board.yaml
+tan validate --format json path/to/board.yaml    # IDE/LSP/CI-facing
+tan validate --format sarif path/to/board.yaml   # SARIF 2.1.0 (code scanning)
 ```
 
 Runs the rich diagnostic validator (JSON-Schema pass, SoM/preset
@@ -389,7 +410,7 @@ return 0.  Hard schema/xref/consistency errors return 1.
 `--format` selects the rendering:
 
 - `human` (default) -- the Rust-style block with an `ALP-Bxxx` code
-  -- decode any code with `alp explain ALP-B001`.
+  -- decode any code with `tan explain ALP-B001`.
 - `json` -- the versioned machine document
   (`metadata/schemas/diagnostic-v1.schema.json`): `schemaVersion` is
   a version/capability handshake a consumer must check before
@@ -404,11 +425,14 @@ return 0.  Hard schema/xref/consistency errors return 1.
 interleaved human prose.
 
 `scripts/validate_board_yaml.py` is a compatibility wrapper around
-the same rich validator plus consistency pass, so `alp validate`,
+the same rich validator plus consistency pass, so `tan validate`,
 the script entry point, and build preflight reject the same
 board.yaml contracts.
 
 ### `alp model` -- compile + package AI models
+
+> **Not yet in `tan`.** The model-compile front-end still runs through
+> the SDK; a `tan model` wrapper is pending.
 
 ```bash
 alp model build                          # compile board.yaml `models:` entries
@@ -420,12 +444,12 @@ Compiles every `models:` entry declared in `board.yaml` into a
 Ethos-U, DRP-AI for RZ/V2N, ...).  See the model-pipeline docs under
 `docs/tutorials/` for the end-to-end inference flow.
 
-### `alp doctor` -- host environment preflight
+### `tan doctor` -- host environment preflight
 
 ```bash
-alp doctor                     # human-readable PASS/WARN/FAIL report
-alp doctor --json              # machine-readable
-alp doctor --strict            # WARNs also fail the exit code
+tan doctor                     # human-readable PASS/WARN/FAIL report
+tan doctor --json              # machine-readable
+tan doctor --strict            # WARNs also fail the exit code
 ```
 
 Strictly hardware-free: checks Python / west / CMake / Ninja / dtc /
@@ -437,6 +461,9 @@ with a remediation hint.  Run it first whenever a build machine
 misbehaves.
 
 ### `alp monitor` -- serial console
+
+> **Not yet in `tan`.** The serial console still runs through the SDK's
+> `alp monitor`; a `tan monitor` wrapper is pending.
 
 <!-- cross-platform-lint:ignore -->
 ```bash
@@ -452,16 +479,19 @@ Opens pyserial's miniterm (Ctrl+] to quit).  Baud defaults to 115200
 doesn't exist, it lists every serial port on the host and exits
 non-zero instead of hanging on a wrong device.
 
-### `alp explain` -- decode a diagnostic code
+### `tan explain` -- decode a diagnostic code
 
 ```bash
-alp explain ALP-B001
+tan explain ALP-B001
 ```
 
 Prints the cause, fix, and doc link for any `ALP-Bxxx` validator
-diagnostic (the codes `alp validate` emits).
+diagnostic (the codes `tan validate` emits).
 
 ### `alp faultdecode` -- decode a Cortex-M fault dump
+
+> **Not yet in `tan`.** Fault decoding still runs through the SDK's
+> `alp faultdecode`; a `tan faultdecode` wrapper is pending.
 
 ```bash
 alp faultdecode fault.txt
@@ -476,8 +506,8 @@ human-readable cause chain.
 # AEN (E1M-AEN801 M55): build every slice + flash over SWD, one line.
 west alp-build examples/peripheral-io/gpio-button-led && west alp-flash examples/peripheral-io/gpio-button-led
 
-# The same, from inside the app directory, via the alp CLI:
-cd examples/peripheral-io/gpio-button-led && alp build && alp flash
+# The same, from inside the app directory, via the tan CLI:
+cd examples/peripheral-io/gpio-button-led && tan build && tan flash
 
 # V2N helper MCU only (GD32 bridge), preview first:
 west alp-flash examples/v2n/v2n-gd32-bridge-ping --helper gd32_bridge --dry-run
@@ -491,21 +521,21 @@ west alp-flash examples/multicore/rpmsg-v2n --core m33_sm
 
 | Variable | Effect |
 |---|---|
-| `ALP_SDK_ROOT` | Explicit path to the alp-sdk checkout; otherwise the CLI locates the repo it was installed (editable) from |
-| `ZEPHYR_BASE` | The Zephyr tree used by single-image builds + checked by `alp doctor` |
+| `ALP_SDK_ROOT` | Explicit path to the alp-sdk checkout (equivalent to `--sdk-root`); otherwise `tan` resolves the SDK from the project tree / workspace venv |
+| `ZEPHYR_BASE` | The Zephyr tree used by single-image builds + checked by `tan doctor` |
 
-The delegating verbs (build, flash, emit, size, image, clean, renode)
+The delegating verbs (build, flash, generate, image, clean, renode)
 export `ALP_SDK_ROOT`, append the SDK to `EXTRA_ZEPHYR_MODULES`, and
 put `<sdk>/scripts` on `PYTHONPATH` for their sub-processes -- the
-same wiring the `west alp-*` wrappers use, so a CLI-invoked
+same wiring the `west alp-*` wrappers use, so a `tan`-invoked
 orchestrator run behaves identically to a west one.
 
 ## See also
 
 - [getting-started.md](getting-started.md) -- install + first build.
 - [heterogeneous-builds.md](heterogeneous-builds.md) -- the
-  orchestrated multi-core pipeline `alp build` fronts.
+  orchestrated multi-core pipeline `tan build` fronts.
 - [board-config-schema.md](board-config-schema.md) -- the `board.yaml`
-  field reference `alp validate` enforces.
-- [troubleshooting.md](troubleshooting.md) -- when `alp doctor`
+  field reference `tan validate` enforces.
+- [troubleshooting.md](troubleshooting.md) -- when `tan doctor`
   isn't enough.

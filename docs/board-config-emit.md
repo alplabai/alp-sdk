@@ -1,7 +1,7 @@
 # `board.yaml` build-artefact emission
 
 How `scripts/alp_project.py` compiles a resolved `board.yaml` into
-the per-backend native config: the `west alp-build` entry point, the
+the per-backend native config: the `tan build` entry point, the
 Zephyr `alp.conf` overlay, plain-CMake `-D` args, the Yocto
 `local.conf` snippet, `west.yml` library auto-pinning, the
 build-time `hw-info-h` identifier header, and the DTS overlay for
@@ -22,15 +22,15 @@ The SDK ships first-class west extension commands via
 usual application build entry point is:
 
 ```bash
-west alp-build -b <board> <app-dir>
+tan build -b <board> <app-dir>
 ```
 
-`west alp-build` validates `<app-dir>/board.yaml`, emits the generated
+`tan build` validates `<app-dir>/board.yaml`, emits the generated
 per-slice configuration and system manifest, then dispatches the
 underlying Zephyr / Yocto / baremetal build steps for the enabled
-cores.  Companion commands (`west alp-image`, `west alp-flash`,
-`west alp-clean`, `west alp-emit`, `west alp-size`, and
-`west alp-renode`) consume the same build state for bundle, flash,
+cores.  Companion commands (`tan image`, `tan flash`,
+`tan clean`, `tan generate`, `west alp-size`, and
+`tan renode`) consume the same build state for bundle, flash,
 inspection, sizing, and simulation workflows.
 
 ### Zephyr -- generated `alp.conf` appended to `prj.conf`

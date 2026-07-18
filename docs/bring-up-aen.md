@@ -163,7 +163,7 @@ against the SKU's `som.yaml` preset.
    `boot_order:`; see [cli.md](cli.md)):
 
    ```bash
-   west alp-build examples/peripheral-io/gpio-button-led && west alp-flash examples/peripheral-io/gpio-button-led
+   tan build examples/peripheral-io/gpio-button-led && tan flash examples/peripheral-io/gpio-button-led
    ```
 
    Expected output on the UART: the
@@ -288,7 +288,7 @@ top of the per-subsystem checks.
 > leads.)
 >
 > Per-core builds use plain `west build -b <target> <app>`.
-> (`west alp-build <app>` is the multi-core *orchestrator*: it fans a
+> (`tan build <app>` is the multi-core *orchestrator*: it fans a
 > board.yaml out into per-core slices using the SoM-preset board string,
 > which resolves to the `alp_e1m_aen801_m55_{he,hp}` carrier board --
 > **prefer it** once the carrier board boots, as it builds both M55

@@ -120,7 +120,7 @@ alp-sdk/
 │   ├── gen_board_header.py        # board YAML → include/alp/boards/<board>_routes.h
 │   ├── validate_board_yaml.py       # board.yaml schema check
 │   ├── validate_metadata.py         # SoC / SoM / board preset schema check
-│   └── west_commands/               # `west alp-image`, `west alp-flash`
+│   └── west_commands/               # `tan image`, `tan flash`
 ├── west.yml                         # Zephyr-side manifest
 ├── zephyr/
 │   ├── module.yml                   # makes the repo importable as a Zephyr module

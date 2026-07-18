@@ -322,10 +322,10 @@ V2N modules.  Owns peripherals that don't fit on the main SoC's
 pinmux.  See [`docs/gd32-bridge.md`](gd32-bridge.md).
 
 **System manifest** -- `build/system-manifest.yaml`, the generated
-artefact produced by `west alp-build` that captures every slice's
+artefact produced by `tan build` that captures every slice's
 output binary, every IPC carve-out's resolved address, the boot
 order, and pointers to helper-MCU firmware.  The single source of
-truth consumed by `west alp-image`, `west alp-flash`, the OTA
+truth consumed by `tan image`, `tan flash`, the OTA
 bundler, and (eventually) alp-studio.
 
 **Target mode** -- Operating an I²C or SPI controller as the bus
@@ -346,7 +346,7 @@ version-pinned, built in alp-sdk CI for at least one board per
 supported family, ships a teaching example -- breakage blocks
 release.  **Tier B (recipe-only):** wiring + compatibility metadata
 are maintained and emitted, but the library is not built in alp-sdk
-CI; `alp doctor` labels it.  Promotion B → A requires a dedicated
+CI; `tan doctor` labels it.  Promotion B → A requires a dedicated
 owner and a CI build lane.  (Distinct from the driver/library
 integration ladder in
 [ADR 0017](adr/0017-alp-sdk-over-the-vendor-sdk.md).)
@@ -364,8 +364,8 @@ SKUs `E1M-V2M101` / `E1M-V2M102`.  See
 [`docs/soms/v2n-m1.md`](soms/v2n-m1.md).
 
 **west** -- Zephyr's meta-tool for workspace management +
-sub-commands.  The SDK ships an extension command `west alp-build`
-that pre-flights `board.yaml` validation before delegating to
+sub-commands.  The SDK's `tan` CLI wraps it; `tan build`
+pre-flights `board.yaml` validation before delegating to
 `west build`.
 
 **Wi-Fi 6** -- 802.11ax.  AEN's CC3501E + V2N's Murata module

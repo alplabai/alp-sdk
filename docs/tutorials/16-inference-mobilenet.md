@@ -191,7 +191,7 @@ an explicit value).
 ## 5. Build + flash
 
 ```bash
-west alp-build -b alif_e7_dk_rtss_he examples/aen/edgeai-vision-aen
+tan build -b alif_e7_dk_rtss_he examples/aen/edgeai-vision-aen
 west flash
 ```
 

@@ -57,7 +57,7 @@ firmware → both sides discover `alp_default_rpmsg`.
 ## Build
 
 ```bash
-west alp-build alp-sdk/examples/multicore/heterogeneous-offload
+tan build alp-sdk/examples/multicore/heterogeneous-offload
 ```
 
 Fan-out:
@@ -68,7 +68,7 @@ Fan-out:
 Iterate on the M-side worker only:
 
 ```bash
-west alp-build alp-sdk/examples/multicore/heterogeneous-offload --core m33_sm
+tan build alp-sdk/examples/multicore/heterogeneous-offload --core m33_sm
 ```
 
 ## What you'll see

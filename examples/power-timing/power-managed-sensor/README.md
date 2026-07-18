@@ -138,7 +138,7 @@ Expected output:
 ### Real silicon (AEN301)
 
 ```bash
-west alp-build -b alp_e1m_aen301_m55_he examples/power-timing/power-managed-sensor
+tan build -b alp_e1m_aen301_m55_he examples/power-timing/power-managed-sensor
 west flash
 ```
 

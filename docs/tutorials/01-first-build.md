@@ -83,11 +83,11 @@ Key contract every Alp peripheral call follows:
 ## Step 3 -- Build
 
 ```bash
-west alp-build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/peripheral-io/gpio-button-led
+tan build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/peripheral-io/gpio-button-led
 ```
 
-If your west workspace doesn't recognise `alp-build`, that's the
-SDK's pre-flight wrapper.  Fallback:
+If you don't have the `tan` CLI installed, fall back to the SDK's
+lower-level build path directly:
 
 ```bash
 python3 alp-sdk/scripts/alp_project.py \
