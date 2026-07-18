@@ -123,14 +123,23 @@ does). Phase 1 makes them single-source and tests it.
    yocto + baremetal + one `os: off` + one no-command core): assert the emitted
    plan's per-slice `command`/`env`/`buildDir` and slice set equal what the
    `Orchestrator` itself assigns. Toolchain-free.
-3. **Close the emit contract leak additively** (for `--emit` consumers): carry
-   the full per-slice env (env-append semantics via a new sibling key, not a
-   verbatim string), an explicit skip-vs-fail `executionPolicy`, and the
-   west-topdir/`ZEPHYR_BASE` fact — so `--emit` consumers stop hand-porting.
+3. **Close the emit env leak additively** (for `--emit` consumers, via
+   ADR-0014's schema procedure): add the **SDK-owned** per-slice env keys the
+   plan omits — `EXTRA_ZEPHYR_MODULES` and `PYTHONPATH` (append semantics via a
+   new sibling key, not a verbatim string) — plus an explicit skip-vs-fail
+   `executionPolicy`. **`ZEPHYR_BASE` and venv/west resolution stay consumer
+   mechanism** (ADR-0014: the CLI owns the mechanism) and are deliberately
+   **not** carried in the plan — the consumer resolves them. Publish a *key
+   contract* ("plan wins / CLI fills gaps"), not just keys, so a shipped
+   consumer that fills those keys itself doesn't silently switch to
+   SDK-resolved values when emit starts pinning them.
 4. **Fix the live cwd bug:** make `Orchestrator`'s `board_yaml` **required**,
    delete the `Path.cwd()` fallback (`orchestrator.py:145-146`) — a
    "same board.yaml, two answers" divergence used only by tests today
    (`cli.py:80` already passes it).
+5. **Fail-fast on `--core` + `--emit`.** `emit_build_plan` has no core-scoping,
+   so `alp_orchestrate --core X --emit build-plan` silently emits every non-`off`
+   core. Reject the combination — the #603 pattern already applied to `fan_out`.
 
 Phase 1 fixes the real drift, keeps everything working, and commits to no
 endgame. Ship in an SDK tag.
