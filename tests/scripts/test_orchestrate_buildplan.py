@@ -818,10 +818,53 @@ def test_emit_build_plan_slice_order_matches_iter_buildable_slices(
 
     iter_core_ids = [s.core_id for s in iter_buildable_slices(project)]
 
+    # `plan_core_ids == iter_core_ids` only proves emit routes through the
+    # shared helper; the hard-coded list below is the independent ground
+    # truth that actually falsifies a sort regression against the
+    # deliberately-unsorted fixture insertion order.
     assert plan_core_ids == iter_core_ids
     assert plan_core_ids == ["alpha_zephyr", "bravo_zephyr", "zulu_yocto"]
     assert "delta_off" not in plan_core_ids
     assert "delta_off" not in iter_core_ids
+
+
+def test_fan_out_dispatches_in_iter_buildable_slices_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`fan_out` must dispatch buildable slices in `iter_buildable_slices`
+    order, NOT `project.cores` dict/insertion order -- the fan_out-side
+    half of the parity `test_emit_build_plan_slice_order_...` asserts for
+    emit.  The sorted manifest (step 7) and cache-persist (`.values()`)
+    would BOTH hide a dict-order dispatch regression, so this asserts the
+    dispatch sequence directly: the fixture's dict order (`zulu_yocto,
+    alpha_zephyr, bravo_zephyr`) differs from sorted order, so a regression
+    to `self.project.cores.items()` fails here."""
+    import alp_orchestrate
+    from alp_orchestrate import Orchestrator, iter_buildable_slices
+
+    # Tools absent -> every dispatch is a no-op skip, but fan_out still
+    # walks the full enumerate/materialise/dispatch/manifest path and
+    # calls `_dispatch_slice` once per buildable slice, in target order.
+    monkeypatch.setattr(alp_orchestrate.orchestrator.shutil, "which",
+                        lambda name: None)
+
+    path, meta = _write_multicore_fixture(tmp_path)
+    project = load_board_yaml(path, metadata_root=meta)
+    orch = Orchestrator(project, tmp_path / "build", board_yaml=path)
+
+    dispatched: list[str] = []
+    orig = orch._dispatch_slice
+
+    def _record(slice_):
+        dispatched.append(slice_.core_id)
+        return orig(slice_)
+
+    monkeypatch.setattr(orch, "_dispatch_slice", _record)
+
+    orch.fan_out(parallel=False)
+
+    assert dispatched == [s.core_id for s in iter_buildable_slices(project)]
+    assert dispatched == ["alpha_zephyr", "bravo_zephyr", "zulu_yocto"]
 
 
 def test_emit_build_plan_command_and_build_dir_match_orchestrator(
