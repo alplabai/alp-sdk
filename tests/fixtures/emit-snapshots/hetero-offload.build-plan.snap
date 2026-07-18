@@ -6,6 +6,11 @@
   "boardYaml": "examples/multicore/heterogeneous-offload/board.yaml",
   "sku": "E1M-V2N101",
   "buildRoot": "build",
+  "executionPolicy": {
+    "unknownBackend": "fail",
+    "missingTool": "skip",
+    "nullCommand": "skip"
+  },
   "slices": [
     {
       "coreId": "a55_cluster",

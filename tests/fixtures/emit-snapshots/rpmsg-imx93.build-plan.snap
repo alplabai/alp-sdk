@@ -6,6 +6,11 @@
   "boardYaml": "examples/multicore/rpmsg-imx93/board.yaml",
   "sku": "E1M-NX9101",
   "buildRoot": "build",
+  "executionPolicy": {
+    "unknownBackend": "fail",
+    "missingTool": "skip",
+    "nullCommand": "skip"
+  },
   "slices": [
     {
       "coreId": "a55_cluster",

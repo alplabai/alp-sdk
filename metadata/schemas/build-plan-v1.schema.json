@@ -5,7 +5,7 @@
   "description": "The machine-readable build plan `scripts/alp_orchestrate/buildplan.py::emit_build_plan` renders for a resolved board.yaml project (the `alp` CLI / alp-sdk-vscode 'Wave C' consumer contract, settled 2026-06-04). One entry per non-`off` core slice, each carrying its build command, config artefact contents, and app source dir, plus the shared (cross-slice) generated artefacts and any non-fatal planning warnings. Every artefact carries its full `contents` so the consumer's materialise step stays pure IO -- the plan and the Orchestrator's own on-disk materialise step are written from the same `_shared_artefacts`/`_slice_config_artefact` helpers and MUST agree byte-for-byte. camelCase keys (this is a CLI-consumer contract, not an in-repo YAML). Stability: schemaVersion 1 is locked with the alp-sdk-vscode consumer -- bump schemaVersion and record the change in the CHANGELOG before altering this shape; do not add breaking changes silently.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "generatedBy", "boardYaml", "sku", "buildRoot", "slices", "sharedArtefacts", "warnings"],
+  "required": ["schemaVersion", "generatedBy", "boardYaml", "sku", "buildRoot", "executionPolicy", "slices", "sharedArtefacts", "warnings"],
   "properties": {
     "schemaVersion": {
       "const": 1,
@@ -34,6 +34,17 @@
     "buildRoot": {
       "type": "string",
       "description": "POSIX-style path to the root build directory every slice's buildDir and the shared artefacts are nested under."
+    },
+    "executionPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unknownBackend", "missingTool", "nullCommand"],
+      "description": "SDK-owned skip-vs-fail policy the executor MUST apply when dispatching a slice's `command` -- the same rules `Orchestrator._dispatch_slice` itself applies -- so a plan consumer stops hand-porting that logic. Additive, schemaVersion 1.",
+      "properties": {
+        "unknownBackend": { "type": "string", "enum": ["skip", "fail"], "description": "Outcome when a slice's `backend` has no known tool mapping. Currently always 'fail'." },
+        "missingTool":     { "type": "string", "enum": ["skip", "fail"], "description": "Outcome when `command.tool` isn't found on the executor's PATH. Currently always 'skip' (normal on a dev host missing one toolchain)." },
+        "nullCommand":     { "type": "string", "enum": ["skip", "fail"], "description": "Outcome when a slice's `command` is null (this emitter had no valid command to produce -- see `slices[].command`). Currently always 'skip'." }
+      }
     },
     "slices": {
       "type": "array",
@@ -131,7 +142,7 @@
           },
           "envAppendPath": {
             "type": "object",
-            "description": "SDK-owned env values the consumer must APPEND (os.pathsep) to the slice subprocess env, distinct from `env` (set-verbatim). Plan wins / CLI fills gaps: a consumer that computes these itself should prefer the plan's values. Additive under schemaVersion 1; a new key so consumers pinned to an older shape safely ignore it.",
+            "description": "SDK-owned env values the consumer must APPEND (os.pathsep), skipping any value already present (de-dup first, matching `_alp_common.env_with_sdk` / `_workspace.subprocess_env`), to the slice subprocess env, distinct from `env` (set-verbatim). Plan wins / CLI fills gaps: a consumer that computes these itself should prefer the plan's values. Additive under schemaVersion 1; a new key so consumers pinned to an older shape safely ignore it.",
             "additionalProperties": {
               "type": "array",
               "items": { "type": "string" }

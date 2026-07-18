@@ -7,6 +7,14 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.12.0 candidate
 
+### Added — build-plan envelope `executionPolicy`
+
+- `--emit build-plan`'s top-level envelope now carries `executionPolicy`
+  (`{"unknownBackend": "fail", "missingTool": "skip", "nullCommand": "skip"}`)
+  — the skip-vs-fail rules `Orchestrator._dispatch_slice` itself applies,
+  published so a plan consumer stops hand-porting that logic. Additive per
+  ADR 0014's additive-change rule — no `schemaVersion` bump.
+
 ### Added — build-plan per-slice `envAppendPath` (ADR-0020 item 3)
 
 - `--emit build-plan`'s per-slice object now carries `envAppendPath`, a map

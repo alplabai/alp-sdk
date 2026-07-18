@@ -951,3 +951,23 @@ def test_emit_build_plan_env_append_carries_pythonpath(
     assert zephyr_slice["env"] == {"ALP_SDK_ROOT": str(REPO)}
     assert str(REPO / "scripts") in \
         zephyr_slice["envAppendPath"]["PYTHONPATH"]
+
+
+def test_emit_build_plan_publishes_execution_policy(tmp_path: Path) -> None:
+    """The envelope's `executionPolicy` publishes the skip-vs-fail rules
+    `Orchestrator._dispatch_slice` actually applies (unknown os -> fail,
+    tool missing from PATH -> skip, command: null -> skip), so a plan
+    consumer stops hand-porting that policy. Additive, schemaVersion 1."""
+    import json as _json
+    from alp_orchestrate import emit_build_plan
+
+    path = _write_board(tmp_path, V2N_HAPPY)
+    project = load_board_yaml(path)
+    plan = _json.loads(emit_build_plan(
+        project, board_yaml=path, build_root=Path("build")))
+
+    assert plan["executionPolicy"] == {
+        "unknownBackend": "fail",
+        "missingTool":    "skip",
+        "nullCommand":    "skip",
+    }
