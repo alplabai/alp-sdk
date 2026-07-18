@@ -9,7 +9,7 @@
  *   path to old entries; it can only ask the owner to append or verify.
  *
  * HP/owner side:
- *   alp_update_log_aen_m55_owner_run() opens the local update-log store
+ *   update_log_aen_m55_owner_run() opens the local update-log store
  *   (normally MRAM NVS through the software tier) and services requests from
  *   the application core over the non-secure RTSS MHU-1 doorbell plus a small
  *   shared-SRAM mailbox.
@@ -331,7 +331,7 @@ static void owner_reply(uint32_t                      seq,
 	aen_mhu_ring();
 }
 
-void alp_update_log_aen_m55_owner_run(void)
+void update_log_aen_m55_owner_run(void)
 {
 	alp_status_t ready_rc = aen_mhu_sender_ready();
 	if (ready_rc != ALP_OK) {

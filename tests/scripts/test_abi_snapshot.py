@@ -340,8 +340,41 @@ def test_mutation_alp_i2c_config_bitrate_hz_type_change_is_reported_changed():
 
 
 # ---------------------------------------------------------------------
-# Whole-repo regression guards
+# #794: line-continued `#define` values must not fingerprint the name
+# alone (the freeze gate would then be blind to a value-only change).
 # ---------------------------------------------------------------------
+
+
+def test_line_continued_macro_value_is_captured_not_empty(tmp_path):
+    src = (
+        "#define ALP_CTRL_DEFAULT \\\n"
+        "\t(ALP_CTRL_A | ALP_CTRL_B | \\\n"
+        "\t ALP_CTRL_C)\n"
+    )
+    result = _extract_src(tmp_path, src)
+    rec = result["macros"]["ALP_CTRL_DEFAULT"]
+    assert rec["value"] == "(ALP_CTRL_A | ALP_CTRL_B | ALP_CTRL_C)"
+
+
+def test_line_continued_macro_value_change_changes_the_hash(tmp_path):
+    prev = _snap(
+        tmp_path,
+        "#define ALP_CTRL_DEFAULT \\\n\t(ALP_CTRL_A | ALP_CTRL_B)\n",
+    )
+    curr_extract = _extract_src(
+        tmp_path,
+        "#define ALP_CTRL_DEFAULT \\\n\t(ALP_CTRL_A | ALP_CTRL_C)\n",
+        "fixture2.h",
+    )
+    curr = {"headers": {"fixture.h": curr_extract}}
+    msgs = abi.diff(prev, curr)
+    assert any(m == "CHANGED macro fixture.h::ALP_CTRL_DEFAULT" for m in msgs)
+
+
+def test_line_continued_macro_with_trailing_comment_strips_comment(tmp_path):
+    src = "#define ALP_ADDR \\\n\t0x48u /**< some rail. */\n"
+    result = _extract_src(tmp_path, src)
+    assert result["macros"]["ALP_ADDR"]["value"] == "0x48u"
 
 
 def test_real_headers_all_parse_without_error():
@@ -380,3 +413,23 @@ def test_previously_broken_public_structs_now_captured_with_fields():
         assert rec is not None, f"{name} missing from {header}"
         assert rec["kind"] == "struct"
         assert rec["fields"], f"{name} captured with no fields"
+
+
+def test_real_line_continued_macros_now_captured_with_real_values():
+    """#794: these three public macros' values live on a continuation
+    line; the pre-fix parser recorded "" for every one of them."""
+    snapshot = abi.build_snapshot("test", abi.INCLUDE_ROOT)
+    expected = {
+        ("alp/boards/alp_e1m_x_evk.h", "XEVK_I2C_ADDR_INA236_VCAM2"): "0x48u",
+        ("alp/boards/alp_e1m_x_evk.h", "XEVK_I2C_ADDR_INA236_VCAM3"): "0x49u",
+        ("alp/chips/tps628640.h", "TPS628640_CTRL_DEFAULT"): (
+            "(TPS628640_CTRL_FPWM_DURING_VID_CHANGE | "
+            "TPS628640_CTRL_SOFTWARE_ENABLE | "
+            "TPS628640_CTRL_OUTPUT_DISCHARGE | TPS628640_CTRL_HICCUP | "
+            "TPS628640_CTRL_RAMP_SPEED_MASK)"
+        ),
+    }
+    for (header, name), value in expected.items():
+        rec = snapshot["headers"][header]["macros"].get(name)
+        assert rec is not None, f"{name} missing from {header}"
+        assert rec["value"] == value, f"{name}: {rec['value']!r} != {value!r}"

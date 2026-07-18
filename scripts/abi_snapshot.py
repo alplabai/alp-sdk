@@ -125,6 +125,27 @@ _DEFINE_RE = re.compile(
     re.MULTILINE,
 )
 
+# A `\`-continued physical line: backslash, the newline it escapes, and
+# the next line's leading indentation.  `_DEFINE_RE.finditer` runs with
+# re.MULTILINE, so its `(?P<value>.*)` stops at the FIRST newline -- a
+# value that continues onto further physical lines (e.g.
+# `TPS628640_CTRL_DEFAULT`, `XEVK_I2C_ADDR_INA236_VCAM2`) is captured as
+# just the trailing `\` on the `#define` line itself, which the
+# continuation-strip below then reduces to "".  The macro's hash then
+# fingerprints the NAME ALONE, so a real value change on a continued
+# line is invisible to `--diff` (#794).  Splicing continuations into one
+# logical line BEFORE `_DEFINE_RE` runs -- the way the C preprocessor
+# does, collapsing the join to a single space -- fixes that at the
+# source instead of trying to patch the regex to span lines.
+_LINE_CONTINUATION_RE = re.compile(r"\\[ \t]*\r?\n[ \t]*")
+
+
+def _join_line_continuations(src: str) -> str:
+    """Collapse every `\\`-continued physical line into its logical
+    line, replacing the backslash/newline/leading-indent with a single
+    space (mirrors how a C preprocessor joins continuation lines)."""
+    return _LINE_CONTINUATION_RE.sub(" ", src)
+
 
 def _strip_preprocessor(src: str) -> str:
     """
@@ -485,12 +506,20 @@ def extract(header_path: Path) -> dict[str, dict[str, Any]]:
     text = header_path.read_text(encoding="utf-8")
 
     macros: dict[str, dict[str, str]] = {}
-    for m in _DEFINE_RE.finditer(text):
+    for m in _DEFINE_RE.finditer(_join_line_continuations(text)):
         name = m["name"]
         value = (m["value"] or "").strip()
-        # Strip trailing line continuations / inline comments.
+        # Strip a trailing inline comment / stray continuation backslash
+        # (defensive -- _join_line_continuations already removed every
+        # real continuation, so this is only for a dangling `\` with no
+        # following line, e.g. truncated input).
         value = re.sub(r"\s*/\*.*$", "", value).strip()
         value = re.sub(r"\\\s*$", "", value).strip()
+        # normalise() so a multi-line join and an already-single-line
+        # value collapse to the SAME canonical whitespace -- the stored
+        # "value" then matches exactly what the hash fingerprints,
+        # keeping both stable across reflows that don't change meaning.
+        value = normalise(value)
         if name.endswith("_H"):
             continue  # include guard sentinel
         macros[name] = {"value": value, "hash": fingerprint(name + " " + value)}
