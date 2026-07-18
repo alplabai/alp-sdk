@@ -116,6 +116,21 @@ def _normalize_token_tails(text: str) -> str:
         lambda m: m.group(1) + re.sub(r"\\{1,2}", "/", m.group(2)), text)
 
 
+# `sdkCommit` is the emitting checkout's short git commit (build-plan
+# provenance) -- it moves every commit, and a host without git emits `null`
+# instead of a hash, so the value can never be byte-stable across the two
+# hosts that write vs. check the goldens.  Reduce any value (hash or `null`)
+# to a token.  `sdkVersion` is deliberately left real: it comes from
+# metadata/sdk_version.yaml and only moves on a release bump, so it stays a
+# meaningful, stable part of the golden.
+_SDK_COMMIT_RE = re.compile(r'("sdkCommit":\s*)("[0-9a-f]+"|null)')
+
+
+def _normalize_provenance(text: str) -> str:
+    """Replace the volatile per-commit ``sdkCommit`` value with a stable token."""
+    return _SDK_COMMIT_RE.sub(r'\1"<SDK_COMMIT>"', text)
+
+
 def _normalize_host_paths(text: str, repo: str, python: str) -> str:
     """Replace host-specific SDK and Python paths with stable tokens.
 
@@ -128,9 +143,12 @@ def _normalize_host_paths(text: str, repo: str, python: str) -> str:
     well as the raw path. The Python executable added to Zephyr commands by
     issue #787 needs the same treatment. On POSIX the variants collapse to
     their raw paths, so the Linux output is unchanged apart from tokenisation.
+    The per-commit ``sdkCommit`` provenance value is tokenised too so the
+    goldens don't churn on every commit.
     """
     text = _normalize_path(text, repo, "<SDK_ROOT>")
     text = _normalize_path(text, python, "<PYTHON_EXECUTABLE>")
+    text = _normalize_provenance(text)
     return _normalize_token_tails(text)
 
 

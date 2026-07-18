@@ -1,0 +1,20 @@
+# Fixture: exercises alp_migrate schema-version negotiation (epic #610 WS6-b).
+# Carries `schemaVersion: 2` -- one version ahead of this SDK's current
+# `alp_migrate.LATEST` (1) -- so tests/scripts/test_schema_version_negotiation.py
+# can prove the camelCase `schemaVersion` key is actually read (not silently
+# defaulted to 1) and that `plan()` correctly refuses to auto-migrate a doc
+# newer than LATEST, instead of a real v1->v2 migration only surfacing this the
+# first time it ships. Named `board_schema_version_2.yaml`, not `board.yaml`,
+# so `check_board_schema_version.py`'s repo-wide `rglob("board.yaml")` drift
+# scan never picks it up. Otherwise a schema-valid shape: `som:` + `cores:`,
+# no top-level `os:`.
+schemaVersion: 2
+som:
+  sku: E1M-AEN801
+preset: e1m-evk
+cores:
+  m55_hp:
+    app: ./src
+    peripherals: []
+diagnostics:
+  log_level: info

@@ -130,6 +130,58 @@ def test_emit_build_plan_happy(tmp_path: Path) -> None:
         assert contents.strip()
 
 
+def test_emit_build_plan_carries_sdk_provenance(tmp_path: Path) -> None:
+    """The envelope's `sdkVersion`/`sdkCommit` (additive, ADR 0014 -- no
+    schemaVersion bump) trace a plan back to the planner that produced it:
+    `sdkVersion` matches metadata/sdk_version.yaml's `version:` verbatim,
+    and `sdkCommit` is either a short git commit or null (never a crash)
+    when git is unavailable."""
+    import json as _json
+    import re
+    from alp_orchestrate import emit_build_plan
+
+    path = _write_board(tmp_path, V2N_HAPPY)
+    project = load_board_yaml(path)
+    plan = _json.loads(emit_build_plan(
+        project, board_yaml=path, build_root=Path("build")))
+
+    sdk_version_yaml = (REPO / "metadata" / "sdk_version.yaml").read_text(
+        encoding="utf-8")
+    want_version = re.search(
+        r"^version:\s*(\S+)", sdk_version_yaml, re.MULTILINE).group(1)
+    assert plan["sdkVersion"] == want_version
+    assert plan["sdkCommit"] is None or isinstance(plan["sdkCommit"], str)
+
+
+def test_sdk_commit_degrades_to_none_when_git_unavailable(monkeypatch) -> None:
+    """`_sdk_commit` never raises -- a missing `git` binary (or any
+    subprocess failure) degrades to `None`, matching `build_receipt.
+    _git_rev`'s robustness."""
+    import subprocess
+    from alp_orchestrate.buildplan import _sdk_commit
+
+    def _raise(*a, **kw):
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(subprocess, "run", _raise)
+    assert _sdk_commit() is None
+
+
+def test_sdk_version_degrades_to_none_when_metadata_missing(monkeypatch) -> None:
+    """`_sdk_version` never raises -- an unreadable/absent
+    `metadata/sdk_version.yaml` (e.g. packaged as a wheel with no adjacent
+    metadata tree) degrades to `None`, matching `alp_cli._version`'s OSError
+    guard, so provenance is best-effort and the emit never fails on it."""
+    from pathlib import Path as _Path
+    from alp_orchestrate.buildplan import _sdk_version
+
+    def _raise(self, *a, **kw):
+        raise FileNotFoundError("metadata/sdk_version.yaml")
+
+    monkeypatch.setattr(_Path, "read_text", _raise)
+    assert _sdk_version() is None
+
+
 def test_emit_build_plan_stock_shim_resolves_to_sdk_app(tmp_path: Path) -> None:
     """A core left on the stock M-core shim (app: alp-stock-shim) gets a
     normal west command pointed at the SDK-owned shim app."""

@@ -15,6 +15,14 @@
       "type": "string",
       "description": "Identifies the emitting tool (currently the literal 'scripts/alp_orchestrate.py'). Informational only -- not part of the locked consumer contract."
     },
+    "sdkVersion": {
+      "type": ["string", "null"],
+      "description": "The `version:` field from metadata/sdk_version.yaml at emit time -- the single source of truth for the SDK release version. Additive, schemaVersion 1 (no bump). Informational provenance, not part of the locked consumer contract."
+    },
+    "sdkCommit": {
+      "type": ["string", "null"],
+      "description": "Short git commit (`git rev-parse --short HEAD`) of the alp-sdk checkout that produced this plan. null when git or the .git directory isn't available (e.g. a wheel-installed CLI with no checkout) -- never fails the emit. Additive, schemaVersion 1 (no bump). Informational provenance, not part of the locked consumer contract."
+    },
     "boardYaml": {
       "type": "string",
       "description": "POSIX-style path to the board.yaml this plan was resolved from, as passed to emit_build_plan (issue #596: every relative path elsewhere in the plan is anchored on this file's own directory, never the emitting process's CWD)."
@@ -68,10 +76,10 @@
           "toolchain": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["target_triple", "compiler", "sysroot", "id"],
+            "required": ["targetTriple", "compiler", "sysroot", "id"],
             "description": "This slice's compiler identity (#610 §4 per-slice tooling index), grounded in the SoM preset's `topology.<core>.toolchain` -- never invented. A field genuinely not derivable for this slice's runtime is null rather than guessed (e.g. a Yocto slice's exact GCC triple depends on the Yocto build's own TUNE_FEATURES/TCLIBC, outside board.yaml/SoM metadata).",
             "properties": {
-              "target_triple": { "type": ["string", "null"], "description": "GCC target triple for this slice's compiler (e.g. `arm-zephyr-eabi` for a Zephyr Cortex-M slice, which is both the Zephyr SDK toolchain directory name and its real GCC triple). null when not derivable (e.g. Yocto -- the triple depends on the Yocto build's own TCLIBC/TUNE_FEATURES)." },
+              "targetTriple": { "type": ["string", "null"], "description": "GCC target triple for this slice's compiler (e.g. `arm-zephyr-eabi` for a Zephyr Cortex-M slice, which is both the Zephyr SDK toolchain directory name and its real GCC triple). null when not derivable (e.g. Yocto -- the triple depends on the Yocto build's own TCLIBC/TUNE_FEATURES)." },
               "compiler": { "type": ["string", "null"], "description": "Compiler executable name for this slice (e.g. `arm-zephyr-eabi-gcc`). null when not derivable." },
               "sysroot": { "type": ["string", "null"], "description": "Cross-compile sysroot path for this slice, when the runtime has one. Always null today -- Zephyr bundles its own libc per architecture inside the Zephyr SDK (no conventional sysroot), and Yocto's sysroot lives inside the Yocto build tree, not in board.yaml/SoM metadata." },
               "id": { "type": ["string", "null"], "description": "Stable toolchain identifier, taken verbatim from the SoM preset's `topology.<core>.toolchain` (e.g. `arm-zephyr-eabi`, `poky-glibc`) -- the same field `system-manifest.yaml`'s `slices[].toolchain` already surfaces. null when the SoM preset doesn't declare one for this core." }
@@ -80,15 +88,15 @@
           "artifacts": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["elf", "map", "bin", "size_report", "symbols", "compile_commands"],
+            "required": ["elf", "map", "bin", "sizeReport", "symbols", "compileCommands"],
             "description": "Deterministic OUTPUT paths under `buildDir` for this slice (#610 §4) -- the WHERE, not a promise the files exist yet (they don't until the slice is actually built). Zephyr's own CMake layout fixes these paths (cmake/modules/kernel.cmake + the top-level CMakeLists.txt); a Yocto slice's real output lands under the Yocto build tree's own deploy dir (outside this slice's buildDir), and a baremetal slice's executable name is the app's own CMakeLists.txt to pick -- both stay null rather than guess a path this emitter can't predict.",
             "properties": {
               "elf": { "type": ["string", "null"], "description": "POSIX-style path to the slice's ELF output (Zephyr: `<buildDir>/zephyr/zephyr.elf`). null when this runtime has no single predictable ELF output (yocto, baremetal)." },
               "map": { "type": ["string", "null"], "description": "POSIX-style path to the linker map file (Zephyr: `<buildDir>/zephyr/zephyr.map`). null when not derivable." },
               "bin": { "type": ["string", "null"], "description": "POSIX-style path to the flat binary image (Zephyr: `<buildDir>/zephyr/zephyr.bin`). null when not derivable." },
-              "size_report": { "type": ["string", "null"], "description": "POSIX-style path to the readelf-headers size/stat report (Zephyr: `<buildDir>/zephyr/zephyr.stat`, written only when `CONFIG_OUTPUT_STAT=y` -- same 'doesn't exist until built/enabled' caveat as every other artifact path here). null when not derivable." },
+              "sizeReport": { "type": ["string", "null"], "description": "POSIX-style path to the readelf-headers size/stat report (Zephyr: `<buildDir>/zephyr/zephyr.stat`, written only when `CONFIG_OUTPUT_STAT=y` -- same 'doesn't exist until built/enabled' caveat as every other artifact path here). null when not derivable." },
               "symbols": { "type": ["string", "null"], "description": "POSIX-style path to the symbol-table dump (Zephyr: `<buildDir>/zephyr/zephyr.symbols`, written only when `CONFIG_OUTPUT_SYMBOLS=y`). null when not derivable." },
-              "compile_commands": { "type": ["string", "null"], "description": "POSIX-style path to `compile_commands.json` (Zephyr: `<buildDir>/compile_commands.json` -- the top-level Zephyr CMakeLists.txt forces `CMAKE_EXPORT_COMPILE_COMMANDS` unconditionally). null when the slice's runtime doesn't produce one at a predictable path." }
+              "compileCommands": { "type": ["string", "null"], "description": "POSIX-style path to `compile_commands.json` (Zephyr: `<buildDir>/compile_commands.json` -- the top-level Zephyr CMakeLists.txt forces `CMAKE_EXPORT_COMPILE_COMMANDS` unconditionally). null when the slice's runtime doesn't produce one at a predictable path." }
             }
           },
           "debug": {

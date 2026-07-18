@@ -1,6 +1,8 @@
 {
   "schemaVersion": 1,
   "generatedBy": "scripts/alp_orchestrate.py",
+  "sdkVersion": "0.11.1",
+  "sdkCommit": "<SDK_COMMIT>",
   "boardYaml": "examples/multicore/rpmsg-aen/board.yaml",
   "sku": "E1M-AEN801",
   "buildRoot": "build",
@@ -17,7 +19,7 @@
         }
       ],
       "toolchain": {
-        "target_triple": null,
+        "targetTriple": null,
         "compiler": null,
         "sysroot": null,
         "id": "poky-glibc"
@@ -26,9 +28,9 @@
         "elf": null,
         "map": null,
         "bin": null,
-        "size_report": null,
+        "sizeReport": null,
         "symbols": null,
-        "compile_commands": null
+        "compileCommands": null
       },
       "debug": {
         "console": "linux",
@@ -57,7 +59,7 @@
         }
       ],
       "toolchain": {
-        "target_triple": "arm-zephyr-eabi",
+        "targetTriple": "arm-zephyr-eabi",
         "compiler": "arm-zephyr-eabi-gcc",
         "sysroot": null,
         "id": "arm-zephyr-eabi"
@@ -66,9 +68,9 @@
         "elf": "build/m55_he-zephyr/zephyr/zephyr.elf",
         "map": "build/m55_he-zephyr/zephyr/zephyr.map",
         "bin": "build/m55_he-zephyr/zephyr/zephyr.bin",
-        "size_report": "build/m55_he-zephyr/zephyr/zephyr.stat",
+        "sizeReport": "build/m55_he-zephyr/zephyr/zephyr.stat",
         "symbols": "build/m55_he-zephyr/zephyr/zephyr.symbols",
-        "compile_commands": "build/m55_he-zephyr/compile_commands.json"
+        "compileCommands": "build/m55_he-zephyr/compile_commands.json"
       },
       "debug": {
         "console": "uart",
@@ -102,7 +104,7 @@
         }
       ],
       "toolchain": {
-        "target_triple": "arm-zephyr-eabi",
+        "targetTriple": "arm-zephyr-eabi",
         "compiler": "arm-zephyr-eabi-gcc",
         "sysroot": null,
         "id": "arm-zephyr-eabi"
@@ -111,9 +113,9 @@
         "elf": "build/m55_hp-zephyr/zephyr/zephyr.elf",
         "map": "build/m55_hp-zephyr/zephyr/zephyr.map",
         "bin": "build/m55_hp-zephyr/zephyr/zephyr.bin",
-        "size_report": "build/m55_hp-zephyr/zephyr/zephyr.stat",
+        "sizeReport": "build/m55_hp-zephyr/zephyr/zephyr.stat",
         "symbols": "build/m55_hp-zephyr/zephyr/zephyr.symbols",
-        "compile_commands": "build/m55_hp-zephyr/compile_commands.json"
+        "compileCommands": "build/m55_hp-zephyr/compile_commands.json"
       },
       "debug": {
         "console": "uart",
