@@ -16,6 +16,7 @@ Public API:
     emit_dts_reservations(project) -> str
     emit_ipc_contract_h(project)   -> str
     emit_build_plan(project, board_yaml=..., build_root=...) -> str
+    iter_buildable_slices(project) -> Iterator[Slice]
 
     BoardProject, Slice, ResolvedCarveOut, SystemManifest, Orchestrator,
     OrchestratorError
@@ -130,7 +131,11 @@ from .buildplan import emit_build_plan  # noqa: E402,F401  (re-export: cli + tes
 # The Orchestrator class + the slice-command / flash-recipe cluster now live in
 # orchestrator.py (the #285 orchestrator seam -- the finale). Re-export
 # Orchestrator (cli + tests) and _slice_command (test).
-from .orchestrator import Orchestrator, _slice_command  # noqa: E402,F401
+from .orchestrator import (  # noqa: E402,F401
+    Orchestrator,
+    _slice_command,
+    iter_buildable_slices,  # noqa: F401  (re-export: ADR-0020 Phase 1 -- tests + buildplan.py)
+)
 
 
 # ---------------------------------------------------------------------

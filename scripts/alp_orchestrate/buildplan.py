@@ -299,6 +299,7 @@ def emit_build_plan(
         _resolve_app_path,
         _slice_command,
         _slice_flash_recipe,
+        iter_buildable_slices,
     )
     build_root = Path(build_root)
     # Anchor every slice's relative `app:` on the board.yaml's own
@@ -309,10 +310,7 @@ def emit_build_plan(
     slices_out: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
 
-    for slice_ in sorted(project.cores.values(),
-                         key=lambda s: s.core_id):
-        if slice_.os == "off":
-            continue
+    for slice_ in iter_buildable_slices(project):
         build_dir = _slice_build_dir(build_root, slice_)
         # `replace` keeps this emit side-effect free: _slice_command
         # reads `build_dir` off the slice (baremetal -B), and the

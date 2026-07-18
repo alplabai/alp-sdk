@@ -275,7 +275,7 @@ def test_security_psa_materialise_writes_tfm_conf(tmp_path: Path) -> None:
     path = _write_board(tmp_path, _AEN301_SECURITY_HAPPY)
     project = load_board_yaml(path)
     build_root = tmp_path / "build"
-    orch = Orchestrator(project, build_root)
+    orch = Orchestrator(project, build_root, board_yaml=path)
     orch._materialise_shared()
 
     tfm_conf = build_root / "sysbuild" / "tfm" / "tfm.conf"
@@ -290,7 +290,7 @@ def test_security_psa_materialise_skips_when_absent(tmp_path: Path) -> None:
     path = _write_board(tmp_path, V2N_HAPPY)
     project = load_board_yaml(path)
     build_root = tmp_path / "build"
-    orch = Orchestrator(project, build_root)
+    orch = Orchestrator(project, build_root, board_yaml=path)
     orch._materialise_shared()
 
     assert not (build_root / "sysbuild" / "tfm").exists()

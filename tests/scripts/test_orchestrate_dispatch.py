@@ -50,7 +50,7 @@ def test_orchestrator_fan_out_skips_when_tools_absent(
     project = load_board_yaml(path)
 
     build_root = tmp_path / "build"
-    orch = Orchestrator(project, build_root)
+    orch = Orchestrator(project, build_root, board_yaml=path)
     manifest = orch.fan_out(parallel=False)
 
     # Manifest reflects two slices, both skipped (tools missing).
@@ -91,7 +91,7 @@ def test_fan_out_rejects_unknown_only_core(tmp_path: Path) -> None:
     project = load_board_yaml(path)
 
     build_root = tmp_path / "build"
-    orch = Orchestrator(project, build_root)
+    orch = Orchestrator(project, build_root, board_yaml=path)
     with pytest.raises(OrchestratorError) as excinfo:
         orch.fan_out(only_core="m99_garbage", parallel=False)
     msg = str(excinfo.value)
