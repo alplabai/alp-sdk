@@ -128,6 +128,14 @@
             "properties": {
               "ALP_SDK_ROOT": { "type": "string", "description": "Absolute host path to the alp-sdk checkout the plan was generated from." }
             }
+          },
+          "envAppendPath": {
+            "type": "object",
+            "description": "SDK-owned env values the consumer must APPEND (os.pathsep) to the slice subprocess env, distinct from `env` (set-verbatim). Plan wins / CLI fills gaps: a consumer that computes these itself should prefer the plan's values. Additive under schemaVersion 1; a new key so consumers pinned to an older shape safely ignore it.",
+            "additionalProperties": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
           }
         }
       }

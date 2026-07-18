@@ -908,26 +908,18 @@ def test_emit_build_plan_command_and_build_dir_match_orchestrator(
             }
 
 
-@pytest.mark.xfail(
-    reason="ADR-0020 item 3: emit env-append contract not yet closed",
-    strict=True,
-)
-def test_emit_build_plan_env_matches_real_build_env(tmp_path: Path) -> None:
-    """KNOWN GAP (ADR-0020 item 3, out of scope for Phase 1): a slice's
-    real build subprocess environment is `os.environ` plus
-    `ALP_SDK_ROOT` (`Orchestrator._dispatch_slice`) -- which, for a
-    Zephyr slice, a properly-configured west workspace additionally
-    needs `EXTRA_ZEPHYR_MODULES` / `PYTHONPATH` on (the
-    `_alp_common.env_with_sdk` / `_workspace.subprocess_env` append the
-    real build path relies on).  `emit_build_plan`'s per-slice `env`
-    carries only `{"ALP_SDK_ROOT": ...}` (buildplan.py) -- a consumer
-    that materialises and runs the plan's command with ONLY that env
-    is missing the module/path append a real `west build` needs.  This
-    asserts the DESIRED end state (env carries the append keys too) so
-    it fails now and flips green the day item 3 closes the gap -- it is
-    not a description of current behaviour."""
+def test_emit_build_plan_env_append_carries_extra_zephyr_modules(
+        tmp_path: Path) -> None:
+    """ADR-0020 item 3: a zephyr slice's new `envAppendPath` key carries
+    the SDK-module path a real `west build` appends to
+    `EXTRA_ZEPHYR_MODULES` (`_alp_common.env_with_sdk` /
+    `_workspace.subprocess_env`) -- so a plan consumer stops hand-porting
+    that append. `env` itself stays exactly `{"ALP_SDK_ROOT": ...}`
+    (set-verbatim, unchanged) -- the append keys live only in the new
+    additive `envAppendPath` map, never in `env`."""
     import json as _json
     from alp_orchestrate import emit_build_plan
+    from alp_orchestrate.buildplan import REPO
 
     path, meta = _write_multicore_fixture(tmp_path)
     project = load_board_yaml(path, metadata_root=meta)
@@ -935,5 +927,27 @@ def test_emit_build_plan_env_matches_real_build_env(tmp_path: Path) -> None:
         project, board_yaml=path, build_root=Path("build")))
 
     zephyr_slice = next(s for s in plan["slices"] if s["backend"] == "zephyr")
-    assert "EXTRA_ZEPHYR_MODULES" in zephyr_slice["env"]
-    assert "PYTHONPATH" in zephyr_slice["env"]
+    assert zephyr_slice["env"] == {"ALP_SDK_ROOT": str(REPO)}
+    assert str(REPO) in zephyr_slice["envAppendPath"]["EXTRA_ZEPHYR_MODULES"]
+
+
+def test_emit_build_plan_env_append_carries_pythonpath(
+        tmp_path: Path) -> None:
+    """ADR-0020 item 3: a zephyr slice's `envAppendPath["PYTHONPATH"]`
+    carries `<sdk>/scripts`, the append a real `west build` needs to
+    resolve `python -m alp_orchestrate` (mirrors
+    `_alp_common.env_with_sdk` / `_workspace.subprocess_env`). `env`
+    stays exactly `{"ALP_SDK_ROOT": ...}` -- unchanged by this key."""
+    import json as _json
+    from alp_orchestrate import emit_build_plan
+    from alp_orchestrate.buildplan import REPO
+
+    path, meta = _write_multicore_fixture(tmp_path)
+    project = load_board_yaml(path, metadata_root=meta)
+    plan = _json.loads(emit_build_plan(
+        project, board_yaml=path, build_root=Path("build")))
+
+    zephyr_slice = next(s for s in plan["slices"] if s["backend"] == "zephyr")
+    assert zephyr_slice["env"] == {"ALP_SDK_ROOT": str(REPO)}
+    assert str(REPO / "scripts") in \
+        zephyr_slice["envAppendPath"]["PYTHONPATH"]

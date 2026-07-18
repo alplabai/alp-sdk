@@ -45,6 +45,14 @@
       },
       "env": {
         "ALP_SDK_ROOT": "<SDK_ROOT>"
+      },
+      "envAppendPath": {
+        "EXTRA_ZEPHYR_MODULES": [
+          "<SDK_ROOT>"
+        ],
+        "PYTHONPATH": [
+          "<SDK_ROOT>/scripts"
+        ]
       }
     },
     {
@@ -90,6 +98,14 @@
       },
       "env": {
         "ALP_SDK_ROOT": "<SDK_ROOT>"
+      },
+      "envAppendPath": {
+        "EXTRA_ZEPHYR_MODULES": [
+          "<SDK_ROOT>"
+        ],
+        "PYTHONPATH": [
+          "<SDK_ROOT>/scripts"
+        ]
       }
     },
     {
@@ -135,6 +151,14 @@
       },
       "env": {
         "ALP_SDK_ROOT": "<SDK_ROOT>"
+      },
+      "envAppendPath": {
+        "EXTRA_ZEPHYR_MODULES": [
+          "<SDK_ROOT>"
+        ],
+        "PYTHONPATH": [
+          "<SDK_ROOT>/scripts"
+        ]
       }
     }
   ],

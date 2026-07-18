@@ -380,6 +380,14 @@ def emit_build_plan(
             # Native host-path form: the value is handed to the slice
             # subprocess environment verbatim.
             "env": {"ALP_SDK_ROOT": str(REPO)},
+            # SDK-owned values the consumer APPENDS (os.pathsep) to its own
+            # env, distinct from `env` above (set-verbatim). Mirrors the
+            # append `_alp_common.env_with_sdk` / `_workspace.subprocess_env`
+            # do for a real `west build` (ADR-0020 item 3).
+            "envAppendPath": {
+                "EXTRA_ZEPHYR_MODULES": [str(REPO)],
+                "PYTHONPATH":           [str(REPO / "scripts")],
+            },
         })
 
     plan: dict[str, Any] = {
