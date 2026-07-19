@@ -26,6 +26,14 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   `--emit` env leak — a plan consumer no longer has to hand-port the
   SDK-module/PYTHONPATH append. Additive per ADR 0014's additive-change
   rule — no `schemaVersion` bump.
+### Fixed — Windows: forward-slash the emitted `-DPython3_EXECUTABLE`
+
+- The Zephyr slice command baked `-DPython3_EXECUTABLE=<sys.executable>`
+  verbatim; on Windows that is a backslash path (`C:\Users\...`), which CMake
+  rejects with `Invalid character escape '\U'` when Zephyr expands it into a
+  custom-target command, failing the build at configure. Now forward-slashed
+  (valid on every host, a no-op on posix). Per-slice command-shape change (ADR
+  0014); found via the tan↔alp-sdk e2e build.
 
 ### Added — build-plan envelope provenance (`sdkVersion`/`sdkCommit`, ADR 0014)
 
