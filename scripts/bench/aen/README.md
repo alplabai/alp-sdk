@@ -106,9 +106,11 @@ chain, alp-sdk also wires Flow A into **standard `west flash`** via the
 The AEN801 M55-HE/HP board files
 (`zephyr/boards/alp/e1m_aen801_m55_*/board.cmake`) wire it as the default
 flasher, so `west flash` runs the **same** `app-gen-toc` + `app-write-mram`
-recipe as `flash-run.sh` (it stages the identical signed-ATOC config,
-`loadAddress 0x58000000` for the M55-HE), and `jlink` stays the
-debug/attach runner.
+recipe as `flash-run.sh`. The runner auto-detects the ATOC shape from the
+build's own reset vector: an ITCM-linked app stages the `loadAddress
+0x58000000` (M55-HE) config `flash-run.sh` uses; a slot0-XIP app (below)
+stages a standalone `mramAddress 0x80010000` config instead. `jlink` stays
+the debug/attach runner.
 
 ```sh
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <your-app> --sysbuild
@@ -119,9 +121,12 @@ west flash                                        # -> alif_flash -> SETOOLS
 
 The runner reads `SETOOLS_DIR` / `SE_UART` (the same env vars these helpers
 use), or takes `--setools-dir` / `--se-uart`. A slot0-linked app that overflows
-ITCM (mramAddress `0x80010000`) is NOT provisionable through this SE-UART-only
-runner (it would leave slot0 stale); `--mram-xip` fails fast and points you at
-the two-blob `scripts/bench/aen/flash-jlink-mramxip.sh` (Flow D) helper.
+ITCM (mramAddress `0x80010000`) provisions the same way — bench-proven
+2026-07-19, a single `app-write-mram -p` run over the SE-UART burns both the
+standalone app blob at `0x80010000` and the signed ATOC in one pass. The
+two-blob `scripts/bench/aen/flash-jlink-mramxip.sh` (Flow D) helper remains
+available as a faster SWD-only alternative that skips the SE-UART reset
+race, not a requirement.
 
 **One-off setup.** `alif_flash` is **not** in upstream Zephyr's `runners`
 package — alp-sdk ships it and surfaces it through `zephyr/module.yml`'s
