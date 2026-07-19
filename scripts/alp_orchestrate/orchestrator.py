@@ -574,7 +574,14 @@ def _slice_command(
         # hand-off and can select a host Python without the west package.
         # The orchestrator itself runs under the intended workspace Python,
         # so pin it as an explicit CMake cache override (issue #787).
-        defines = [f"-DPython3_EXECUTABLE={sys.executable}"]
+        # Forward slashes: on Windows sys.executable is a backslash path
+        # (C:\Users\...), and CMake parses `\U`/`\N` etc. in the resulting
+        # cache-override string as invalid character escapes ("Invalid
+        # character escape '\U'") when Zephyr expands it into a custom-target
+        # command. Posix slashes are valid on every host and a no-op on
+        # non-Windows (found via the tan<->alp-sdk e2e build).
+        py_exe = sys.executable.replace("\\", "/")
+        defines = [f"-DPython3_EXECUTABLE={py_exe}"]
         if emit_sysbuild_conf(project) or emit_tfm_sysbuild_conf(project):
             cmd.append("--sysbuild")
             if emit_sysbuild_conf(project):
