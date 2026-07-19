@@ -42,7 +42,8 @@ from . import FlashBackend, FlashContext, FlashResult, register
 
 
 class ZephyrWestFlash:
-    """`west flash --runner <runner> --build-dir <dir>` wrapper."""
+    """`west flash --build-dir <dir> [--runner <runner>]` wrapper (runner
+    optional — omitted defers to the board.cmake default)."""
 
     name: str = "zephyr_west_flash"
     requires: list[str] = ["west"]
