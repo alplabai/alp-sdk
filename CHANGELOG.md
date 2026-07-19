@@ -7,6 +7,19 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.12.0 candidate
 
+### Added — Kconfig `.config-missing-deps.json` (prj.conf LSP support)
+
+- The Zephyr `scripts/kconfig/kconfig.py` west patch now writes
+  `.config-missing-deps.json` next to `.config-trace.json`, a
+  `{"CONFIG_X": ["DEP (=n)", ...]}` map of the unmet direct dependencies that
+  blocked each ignored `prj.conf` assignment. It reuses Zephyr v4.4.0's own
+  `missing_deps()` (Burelli/Arduino SA, `zephyrproject-rtos/zephyr#95808`),
+  gated on `--handwritten-input-configs` to match
+  `check_assigned_sym_values()`'s own stderr warning (empty `{}` otherwise).
+  The alp-sdk-vscode prj.conf language server consumes it to name the blocking
+  dependency instead of a "no prompt, or unmet deps" disjunction. Upstreamable
+  — propose to Zephyr, then drop the carry.
+
 ### Added — build-plan envelope `executionPolicy`
 
 - `--emit build-plan`'s top-level envelope now carries `executionPolicy`
