@@ -432,7 +432,7 @@ top of the per-subsystem checks.
       `som.sku`):
 
       ```bash
-      alp model build --board board.yaml   # emits build/models/<name>.alpmodel
+      tan model build --board board.yaml   # emits build/models/<name>.alpmodel
       ```
 
    2. Bundle the `.alpmodel` with the app image, flash, and run

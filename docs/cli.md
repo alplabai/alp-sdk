@@ -93,15 +93,11 @@ list.  Omit any flag to be prompted interactively.
 | `--preset` | Board preset from `metadata/boards/`, e.g. `e1m-evk` |
 | `--peripherals` | Comma-separated starter peripherals (`uart,gpio,i2c,spi,pwm`) |
 
-### `alp new-som` -- scaffold metadata for a new SoM port
-
-> **Not yet in `tan`.** SoM porting is a maintainer task run from the
-> SDK checkout; the verb below is the SDK's porting scaffolder, pending
-> a `tan` wrapper.
+### `tan new-som` -- scaffold metadata for a new SoM port
 
 ```bash
-alp new-som --sku E1M-NX9555 --soc-ref nxp:imx9:imx95 --family nxp-imx9
-alp new-som               # interactive: prompts for every field
+tan new-som --sku E1M-NX9555 --soc-ref nxp:imx9:imx95 --family nxp-imx9
+tan new-som               # interactive: prompts for every field
 ```
 
 The vendor-N+1 porting kit.  Generates the two metadata skeletons a
@@ -429,14 +425,11 @@ the same rich validator plus consistency pass, so `tan validate`,
 the script entry point, and build preflight reject the same
 board.yaml contracts.
 
-### `alp model` -- compile + package AI models
-
-> **Not yet in `tan`.** The model-compile front-end still runs through
-> the SDK; a `tan model` wrapper is pending.
+### `tan model` -- compile + package AI models
 
 ```bash
-alp model build                          # compile board.yaml `models:` entries
-alp model build --board path/to/board.yaml --out build/models
+tan model build                          # compile board.yaml `models:` entries
+tan model build --board path/to/board.yaml --out build/models
 ```
 
 Compiles every `models:` entry declared in `board.yaml` into a
@@ -460,17 +453,14 @@ long-path support).  Exit 0 = ready to build; every FAIL/WARN comes
 with a remediation hint.  Run it first whenever a build machine
 misbehaves.
 
-### `alp monitor` -- serial console
-
-> **Not yet in `tan`.** The serial console still runs through the SDK's
-> `alp monitor`; a `tan monitor` wrapper is pending.
+### `tan monitor` -- serial console
 
 <!-- cross-platform-lint:ignore -->
 ```bash
-alp monitor --port COM7                       # Windows
-alp monitor --port /dev/ttyUSB0               # Linux
-alp monitor --port /dev/cu.usbserial-1420     # macOS
-alp monitor                                    # lists available ports if none given
+tan monitor --port COM7                       # Windows
+tan monitor --port /dev/ttyUSB0               # Linux
+tan monitor --port /dev/cu.usbserial-1420     # macOS
+tan monitor                                    # lists available ports if none given
 ```
 <!-- cross-platform-lint:resume -->
 
@@ -488,17 +478,17 @@ tan explain ALP-B001
 Prints the cause, fix, and doc link for any `ALP-Bxxx` validator
 diagnostic (the codes `tan validate` emits).
 
-### `alp faultdecode` -- decode a Cortex-M fault dump
-
-> **Not yet in `tan`.** Fault decoding still runs through the SDK's
-> `alp faultdecode`; a `tan faultdecode` wrapper is pending.
+### `tan faultdecode` -- decode a Cortex-M fault dump
 
 ```bash
-alp faultdecode fault.txt
+tan faultdecode --file fault.txt              # grep registers out of a pasted dump
+tan faultdecode --cfsr 0x00008200 --hfsr 0x40000000
+cat fault.txt | tan faultdecode              # or pipe a dump on stdin
 ```
 
 Decodes an ARMv8-M (M33/M55) fault-register dump into a
-human-readable cause chain.
+human-readable cause chain.  `--elf <app.elf>` symbolicates `--pc`/`--lr`
+best-effort; `--format json` emits the machine report.
 
 ## One-liner flash examples
 

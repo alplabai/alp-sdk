@@ -287,7 +287,7 @@ in-tree Alp E1M board files under
 
 The `tan` CLI covers most of the same flow in fewer keystrokes:
 `tan build && tan flash` programs every slice + helper MCU in
-`boot_order:`, and `alp monitor --port <port>` (via the `west
+`boot_order:`, and `tan monitor --port <port>` (via the `west
 alp-*` extension) opens the board's serial console afterwards
 (portless it lists the host's serial ports).  If a build machine
 misbehaves, `tan doctor` is the hardware-free environment triage.

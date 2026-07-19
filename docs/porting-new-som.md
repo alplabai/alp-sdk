@@ -10,7 +10,7 @@
 
 ## 1. Introduction
 
-> **Scaffold first:** `alp new-som` generates both metadata skeletons
+> **Scaffold first:** `tan new-som` generates both metadata skeletons
 > this guide walks through (the SoM YAML + the SoC JSON) with
 > schema-legal `TBD` placeholders, and prints the porting checklist --
 > run it, then use the sections below to fill in the facts.  See the
@@ -24,7 +24,7 @@
 > accepts `tbd` *only* on preliminary presets, so the port cannot
 > graduate (clear `status.preliminary`) until the real silicon
 > backend replaces the placeholder.  Preview a scaffold without
-> writing anything via `alp new-som ... --dry-run`.
+> writing anything via `tan new-som ... --dry-run`.
 
 "Porting a new SoM" in the Alp SDK means *adding one row of
 machine-readable metadata*.  It is **not**:
