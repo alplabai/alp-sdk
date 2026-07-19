@@ -13,9 +13,11 @@ ADR [0020](adr/0020-sdk-owns-build-execution.md), alp-sdk is
 **`tan` CLI** ([`alplabai/tan-cli`](https://github.com/alplabai/tan-cli)),
 the SDK's sole build executor: it consumes
 `alp_orchestrate --emit build-plan` / `--emit system-manifest` and
-runs `west` / `bitbake` / `cmake` per slice.  Install `tan` separately;
-see its own repo for `tan build` / `tan flash` / `tan size` / `tan
-image` / `tan clean` / `tan renode`.
+runs `west` / `bitbake` / `cmake` per slice.  Install `tan` separately
+(needs a Rust toolchain / rustup): `cargo install --git
+https://github.com/alplabai/tan-cli --bin tan`; see its own repo for
+`tan build` / `tan flash` / `tan size` / `tan image` / `tan clean` /
+`tan renode`.
 
 `alp` is installed automatically by the bootstrap scripts
 (`scripts/bootstrap.sh` on Linux/macOS/WSL2, `scripts/bootstrap.ps1`

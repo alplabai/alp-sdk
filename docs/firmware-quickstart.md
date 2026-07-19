@@ -50,6 +50,14 @@ If you haven't already, follow the workspace bootstrap in
 you a `alp-workspace/` with `alp-sdk/`, `zephyr/`, and the standard
 modules.
 
+You'll also need `tan`, the standalone build executor -- a separate
+public repo, not installed by `bootstrap.sh`. Needs a Rust toolchain
+(`rustup`/`cargo`) on `PATH`:
+
+```bash
+cargo install --git https://github.com/alplabai/tan-cli --bin tan
+```
+
 For the rest of this doc, all paths are relative to `alp-workspace/`.
 
 ## 3. Your first `board.yaml`

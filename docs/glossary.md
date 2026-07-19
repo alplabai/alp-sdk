@@ -364,9 +364,15 @@ SKUs `E1M-V2M101` / `E1M-V2M102`.  See
 [`docs/soms/v2n-m1.md`](soms/v2n-m1.md).
 
 **west** -- Zephyr's meta-tool for workspace management +
-sub-commands.  The SDK ships an extension command `west alp-build`
-that pre-flights `board.yaml` validation before delegating to
-`west build`.
+sub-commands.  alp-sdk is plans-only (ADR
+[0020](adr/0020-sdk-owns-build-execution.md)) and no longer ships a
+build-executing west extension; building goes through the standalone
+`tan` CLI (`tan build`), which pre-flights `board.yaml` validation
+before delegating to `west build`.  The SDK still ships the
+non-build west extension commands `west alp-migrate` (board.yaml
+schema migration), `west alp-lock` (dependency lockfile), `west
+alp-quality` (quality-task registry), and `west alp-emit` (artefact
+inspector).
 
 **Wi-Fi 6** -- 802.11ax.  AEN's CC3501E + V2N's Murata module
 both support it.

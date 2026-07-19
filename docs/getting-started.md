@@ -27,7 +27,9 @@ hand-written firmware as a first-class consumer.
 >   per-core build slices (via alp-sdk's `alp_orchestrate --emit
 >   build-plan`), runs the full pre-flight (schema validation, SoC
 >   caps, hw_info header) and delegates to `west build`.  Install
->   `tan` separately from its own repo.
+>   `tan` separately from its own repo (needs a Rust toolchain /
+>   rustup): `cargo install --git https://github.com/alplabai/tan-cli
+>   --bin tan`.
 > - **`alp` CLI** — everything that isn't a build: `alp init`
 >   scaffolds a project, `alp validate` checks a `board.yaml`, `alp
 >   emit` inspects any generated artefact (including the build plan
@@ -48,6 +50,7 @@ git clone https://github.com/alplabai/alp-sdk
 cd alp-sdk
 bash scripts/bootstrap.sh                            # one-time: west + Python + apt hints
 export ZEPHYR_BASE="$PWD/../zephyr"
+cargo install --git https://github.com/alplabai/tan-cli --bin tan  # one-time: install tan (needs rustup/cargo)
 tan build --native examples/peripheral-io/gpio-button-led
 # expect: [gpio] init button=EVK_PIN_ENCODER_SW, led=EVK_PIN_LED_RED
 #          ...
