@@ -191,10 +191,13 @@ def _slice_debug(
     headless consumer can act on -- so it maps to null here.  `probe`
     reuses `_slice_flash_recipe`'s already-resolved runner (the same
     fact `west alp-flash` dispatches on, computed once per slice by the
-    caller and passed in): only the Zephyr `zephyr_west_flash` recipe
-    names an actual debug-probe runner (`openocd`); the Yocto image-
-    flash recipe and the baremetal cmake recipe don't identify a live
-    debug probe, so `probe` stays null there.
+    caller and passed in): `_slice_flash_recipe` no longer forces a
+    runner for `zephyr_west_flash` slices (not every in-tree board
+    registers `openocd`), so `probe` is the explicitly-configured
+    runner when one is set, else null -- meaning "board.cmake default,
+    not independently knowable here".  The Yocto image-flash recipe and
+    the baremetal cmake recipe don't identify a live debug probe
+    either, so `probe` stays null there too.
     """
     console_sel = _resolve_console(
         project.diagnostics.get("console"), slice_.os, slice_.hw_console)

@@ -117,7 +117,7 @@
             "description": "Headless monitor/debug selectors for this slice (#610 §4): the console device selector + debug-probe selector a headless consumer needs, derived from board.yaml `diagnostics.console:` and the same flash-recipe fact `system-manifest.yaml`'s `slices[].flash_method`/`flash_args` already carry. null when unknown.",
             "properties": {
               "console": { "type": ["string", "null"], "description": "Resolved console backend selector: `uart` (Zephyr UART console), `ram` (Zephyr RAM console, read over SWD), or `linux` (Yocto/Ubuntu stdio/tty console). null when the slice inherits an unspecified board default (`diagnostics.console: none`/unset with no OS-derived default, e.g. a baremetal slice)." },
-              "probe": { "type": ["string", "null"], "description": "Debug-probe runner selector for this slice (currently `openocd` for a Zephyr slice's `zephyr_west_flash` recipe). null when this slice's runtime/flash recipe doesn't identify a live debug probe (Yocto image-flash, baremetal cmake-flash)." }
+              "probe": { "type": ["string", "null"], "description": "Debug-probe runner selector for this slice: the explicitly-configured runner for a Zephyr slice's `zephyr_west_flash` recipe, else null -- meaning either the board.cmake default runner applies, or (Yocto image-flash, baremetal cmake-flash) this slice's runtime/flash recipe doesn't identify a live debug probe at all." }
             }
           },
           "command": {

@@ -301,9 +301,11 @@ def test_pinned_snapshot_slices_carry_toolchain_artifacts_debug():
     case: `toolchain.targetTriple`/`toolchain.compiler` are the real
     Zephyr SDK arm-zephyr-eabi triple (SoM preset `topology.m55_hp.
     toolchain`), `artifacts.elf`/`.map`/`.bin`/`.compileCommands`
-    follow Zephyr's own CMake output layout, and `debug.probe` is the
-    same `openocd` runner `system-manifest.yaml`'s `flash_method`
-    resolves to for a Zephyr slice."""
+    follow Zephyr's own CMake output layout, and `debug.probe` is null
+    for a Zephyr slice -- `system-manifest.yaml`'s `flash_method` no
+    longer forces a runner (not every in-tree board registers
+    `openocd`), so the resolved runner defers to the board.cmake
+    default and `probe` stays null unless a runner is explicitly set."""
     board_yaml = REPO / "examples/multicore/rpmsg-aen/board.yaml"
     project = load_board_yaml(board_yaml)
     plan = json.loads(emit_build_plan(
@@ -325,7 +327,7 @@ def test_pinned_snapshot_slices_carry_toolchain_artifacts_debug():
         "symbols":         "build/m55_hp-zephyr/zephyr/zephyr.symbols",
         "compileCommands": "build/m55_hp-zephyr/compile_commands.json",
     }
-    assert m55_hp["debug"] == {"console": "uart", "probe": "openocd"}
+    assert m55_hp["debug"] == {"console": "uart", "probe": None}
 
     # The A-class Yocto slice: no single predictable ELF/compileCommands
     # output under buildDir (real output lives in the Yocto build tree's
@@ -407,7 +409,7 @@ def test_missing_required_field_rejected():
                 "sizeReport": None, "symbols": None,
                 "compileCommands": None,
             },
-            "debug": {"console": "uart", "probe": "openocd"},
+            "debug": {"console": "uart", "probe": None},
             "command": None,
             # "env" deliberately omitted -- required by the schema.
         }],

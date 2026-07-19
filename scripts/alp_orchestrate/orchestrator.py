@@ -63,11 +63,14 @@ def _slice_flash_recipe(
         return ("yocto_wic_to_sd_or_emmc",
                 {"target": slice_.machine or ""})
     if slice_.os == "zephyr":
-        # OpenOCD is the canonical Zephyr runner for the SoCs we
-        # ship; vendor-specific runners (jlink for AEN, segger for
-        # NX) are picked up via the slice's toolchain when set.
-        runner = "openocd"
-        return ("zephyr_west_flash", {"runner": runner})
+        # No runner is forced here: not every in-tree board registers
+        # an openocd runner (e.g. AEN's board.cmake sets
+        # flash-runner: alif_flash), so `west flash --runner openocd`
+        # FATAL-errors on those boards. Emit no runner and let `west
+        # flash` fall back to the board.cmake default; an explicit
+        # runner can still be set on flash_args downstream when one is
+        # actually known.
+        return ("zephyr_west_flash", {})
     if slice_.os == "baremetal":
         return ("baremetal_cmake_flash", {})
     return (None, None)

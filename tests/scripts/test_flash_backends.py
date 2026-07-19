@@ -369,15 +369,17 @@ def test_zephyr_west_flash_missing_tool() -> None:
     assert "west" in result.message.lower()
 
 
-def test_zephyr_west_flash_requires_runner() -> None:
+def test_zephyr_west_flash_no_runner_defers_to_board_default() -> None:
     backend = ZephyrWestFlash()
     with patch("flash_backends.zephyr_west_flash.shutil.which",
                return_value="/usr/bin/west"), \
-         patch("flash_backends.zephyr_west_flash.subprocess.run") as run_mock:
+         patch("flash_backends.zephyr_west_flash.subprocess.run",
+               return_value=_proc(rc=0)) as run_mock:
         result = backend.flash(_ctx({}))     # no runner
-    assert result.ok is False
-    assert run_mock.call_count == 0
-    assert "runner" in result.message.lower()
+    assert result.ok is True
+    assert run_mock.call_count == 1
+    invoked = run_mock.call_args[0][0]
+    assert "--runner" not in invoked
 
 
 # ---------------------------------------------------------------------
