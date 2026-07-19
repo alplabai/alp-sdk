@@ -31,6 +31,16 @@ from .models import BoardProject, Slice
 from .paths import REPO
 from .secure import emit_sysbuild_conf, emit_tfm_sysbuild_conf
 
+# The skip-vs-fail policy `Orchestrator._dispatch_slice` actually applies,
+# published verbatim in the plan envelope so a consumer stops hand-porting
+# it: an unknown os (no `_TOOL_FOR_OS` entry) fails the slice, a missing
+# tool on PATH or a null `command` skip it.
+_EXECUTION_POLICY = {
+    "unknownBackend": "fail",
+    "missingTool":    "skip",
+    "nullCommand":    "skip",
+}
+
 
 def _slice_build_dir(build_root: Path, slice_: Slice) -> Path:
     """Per-slice build directory: build/<core>-<os>/."""
@@ -380,6 +390,14 @@ def emit_build_plan(
             # Native host-path form: the value is handed to the slice
             # subprocess environment verbatim.
             "env": {"ALP_SDK_ROOT": str(REPO)},
+            # SDK-owned values the consumer APPENDS (os.pathsep) to its own
+            # env, distinct from `env` above (set-verbatim). Mirrors the
+            # append `_alp_common.env_with_sdk` / `_workspace.subprocess_env`
+            # do for a real `west build` (ADR-0020 item 3).
+            "envAppendPath": {
+                "EXTRA_ZEPHYR_MODULES": [str(REPO)],
+                "PYTHONPATH":           [str(REPO / "scripts")],
+            },
         })
 
     plan: dict[str, Any] = {
@@ -394,6 +412,7 @@ def emit_build_plan(
         "boardYaml":       Path(board_yaml).as_posix(),
         "sku":             project.sku,
         "buildRoot":       build_root.as_posix(),
+        "executionPolicy": _EXECUTION_POLICY,
         "slices":          slices_out,
         "sharedArtefacts": [
             {"path": p.as_posix(), "contents": c}

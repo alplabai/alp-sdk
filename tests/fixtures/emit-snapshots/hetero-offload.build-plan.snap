@@ -6,6 +6,11 @@
   "boardYaml": "examples/multicore/heterogeneous-offload/board.yaml",
   "sku": "E1M-V2N101",
   "buildRoot": "build",
+  "executionPolicy": {
+    "unknownBackend": "fail",
+    "missingTool": "skip",
+    "nullCommand": "skip"
+  },
   "slices": [
     {
       "coreId": "a55_cluster",
@@ -45,6 +50,14 @@
       },
       "env": {
         "ALP_SDK_ROOT": "<SDK_ROOT>"
+      },
+      "envAppendPath": {
+        "EXTRA_ZEPHYR_MODULES": [
+          "<SDK_ROOT>"
+        ],
+        "PYTHONPATH": [
+          "<SDK_ROOT>/scripts"
+        ]
       }
     },
     {
@@ -90,6 +103,14 @@
       },
       "env": {
         "ALP_SDK_ROOT": "<SDK_ROOT>"
+      },
+      "envAppendPath": {
+        "EXTRA_ZEPHYR_MODULES": [
+          "<SDK_ROOT>"
+        ],
+        "PYTHONPATH": [
+          "<SDK_ROOT>/scripts"
+        ]
       }
     }
   ],

@@ -7,6 +7,25 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.12.0 candidate
 
+### Added — build-plan envelope `executionPolicy`
+
+- `--emit build-plan`'s top-level envelope now carries `executionPolicy`
+  (`{"unknownBackend": "fail", "missingTool": "skip", "nullCommand": "skip"}`)
+  — the skip-vs-fail rules `Orchestrator._dispatch_slice` itself applies,
+  published so a plan consumer stops hand-porting that logic. Additive per
+  ADR 0014's additive-change rule — no `schemaVersion` bump.
+
+### Added — build-plan per-slice `envAppendPath` (ADR-0020 item 3)
+
+- `--emit build-plan`'s per-slice object now carries `envAppendPath`, a map
+  of `{VAR: [values]}` the consumer must APPEND (`os.pathsep`-joined) to its
+  own subprocess env, distinct from the existing `env` (set-verbatim).
+  Emitted today: `EXTRA_ZEPHYR_MODULES` → `[<sdk root>]` and `PYTHONPATH` →
+  `[<sdk root>/scripts]`, matching the append a real `west build` gets from
+  `_alp_common.env_with_sdk` / `_workspace.subprocess_env`. Closes the
+  `--emit` env leak — a plan consumer no longer has to hand-port the
+  SDK-module/PYTHONPATH append. Additive per ADR 0014's additive-change
+  rule — no `schemaVersion` bump.
 ### Fixed — Windows: forward-slash the emitted `-DPython3_EXECUTABLE`
 
 - The Zephyr slice command baked `-DPython3_EXECUTABLE=<sys.executable>`
