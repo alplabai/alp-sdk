@@ -7,6 +7,15 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.12.0 candidate
 
+### Fixed — Windows: forward-slash the emitted `-DPython3_EXECUTABLE`
+
+- The Zephyr slice command baked `-DPython3_EXECUTABLE=<sys.executable>`
+  verbatim; on Windows that is a backslash path (`C:\Users\...`), which CMake
+  rejects with `Invalid character escape '\U'` when Zephyr expands it into a
+  custom-target command, failing the build at configure. Now forward-slashed
+  (valid on every host, a no-op on posix). Per-slice command-shape change (ADR
+  0014); found via the tan↔alp-sdk e2e build.
+
 ### Removed — the `alp` console-script (ADR-0020 end-state B)
 
 - The `alp` console-script is no longer installed by `pip install -e .`.
