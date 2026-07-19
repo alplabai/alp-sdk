@@ -9,10 +9,9 @@ Runs three passes:
 
 This module is also the ONE shared board.schema.json implementation:
 `load_board_schema()` / `iter_schema_errors()` are consumed by
-`scripts/validate_board_yaml.py` (the customer-side pre-flight `west
-alp-build` shells) and `scripts/alp_orchestrate/` (the fan-out loader),
-so the schema file, draft dialect, and error ordering are decided in
-exactly one place.
+`scripts/validate_board_yaml.py` (the customer-side pre-flight validation
+CLI) and `scripts/alp_orchestrate/` (the plan/emit loader), so the schema
+file, draft dialect, and error ordering are decided in exactly one place.
 """
 
 from __future__ import annotations

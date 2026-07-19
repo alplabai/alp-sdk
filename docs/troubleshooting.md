@@ -241,14 +241,14 @@ file but a misconfigured global setting can override that.
 
 ## Where to file bugs
 
-* SDK bug: [`github.com/alplabai/alp-sdk/issues`](https://github.com/alplabai/alp-sdk/issues)
-* `west alp-build` tooling bug: same.
-* Chip driver bug: same; include the `driver_status` from the
+* SDK bug (planner/emit/validate): [`github.com/alplabai/alp-sdk/issues`](https://github.com/alplabai/alp-sdk/issues)
+* `tan build` executor bug: [`github.com/alplabai/tan-cli`](https://github.com/alplabai/tan-cli) instead -- alp-sdk no longer runs builds (ADR [0020](adr/0020-sdk-owns-build-execution.md)).
+* Chip driver bug: file against alp-sdk; include the `driver_status` from the
   chip's metadata yaml.
 
 Include in every report:
 
 * Output of `git rev-parse HEAD` for alp-sdk.
 * Your `board.yaml`.
-* The full `west alp-build` + `west build` log.
+* The full `tan build` + `west build` log.
 * If real-silicon: which board + SoM SKU.

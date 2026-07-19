@@ -322,11 +322,11 @@ V2N modules.  Owns peripherals that don't fit on the main SoC's
 pinmux.  See [`docs/gd32-bridge.md`](gd32-bridge.md).
 
 **System manifest** -- `build/system-manifest.yaml`, the generated
-artefact produced by `west alp-build` that captures every slice's
-output binary, every IPC carve-out's resolved address, the boot
-order, and pointers to helper-MCU firmware.  The single source of
-truth consumed by `west alp-image`, `west alp-flash`, the OTA
-bundler, and (eventually) alp-studio.
+artefact produced by `tan build` (seeded by the SDK's `alp_orchestrate
+--emit system-manifest`) that captures every slice's output binary,
+every IPC carve-out's resolved address, the boot order, and pointers
+to helper-MCU firmware.  The single source of truth consumed by `tan
+image`, `tan flash`, the OTA bundler, and (eventually) alp-studio.
 
 **Target mode** -- Operating an I²C or SPI controller as the bus
 *target* (slave): an external controller owns the clock and our

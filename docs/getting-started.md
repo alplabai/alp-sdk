@@ -11,26 +11,35 @@ hand-written firmware as a first-class consumer.
 > it with cross-version navigation + search.  Stuck on something?
 > Ask on [**community.alplab.ai**](https://community.alplab.ai/).
 
-> **Two front ends: `alp` CLI vs `west`.**  The SDK ships two
-> equivalent entry points, and both consume the same `board.yaml`:
+> **Two front ends: `tan` (build) vs `alp` (everything else).**  The
+> SDK's `board.yaml` drives both, but alp-sdk itself is **plans-only**
+> (ADR [0020](adr/0020-sdk-owns-build-execution.md)) — it never runs a
+> build.
 >
-> - **`alp` CLI** — the single-image quick path.  `pip install -e .`
->   once per clone, then `alp init` scaffolds a project and `alp run`
->   builds it for `native_sim` and prints its stdout straight
->   through.  This is the headline
+> - **`tan` CLI** — the sole build executor, a standalone public repo
+>   ([`alplabai/tan-cli`](https://github.com/alplabai/tan-cli)).
+>   `tan build --native` builds a project for `native_sim` and prints
+>   its stdout straight through.  This is the headline
 >   [README Quickstart](../README.md#quickstart) — if you just want
->   a hello-world running in two minutes, start there.  The full
->   verb reference (`build` / `flash` / `emit` / `doctor` /
->   `monitor` / `new-som` / …) lives in [`docs/cli.md`](cli.md).
-> - **`west alp-build`** — the multi-core / heterogeneous path this
->   walkthrough uses.  It fans a `board.yaml` out into per-core
->   build slices, runs the full pre-flight (schema validation, SoC
->   caps, hw_info header) and delegates to `west build`.
+>   a hello-world running in two minutes, start there.  `tan build
+>   --board <target>` is the multi-core / heterogeneous / real-silicon
+>   path this walkthrough uses: it fans a `board.yaml` out into
+>   per-core build slices (via alp-sdk's `alp_orchestrate --emit
+>   build-plan`), runs the full pre-flight (schema validation, SoC
+>   caps, hw_info header) and delegates to `west build`.  Install
+>   `tan` separately from its own repo.
+> - **`alp` CLI** — everything that isn't a build: `alp init`
+>   scaffolds a project, `alp validate` checks a `board.yaml`, `alp
+>   emit` inspects any generated artefact (including the build plan
+>   `tan` consumes), plus `alp doctor` / `alp monitor` / `alp model` /
+>   `alp new-som` / `alp explain` / `alp faultdecode`.  The full verb
+>   reference lives in [`docs/cli.md`](cli.md).
 >
-> Nothing is lost switching between them: `alp run` uses the same
-> loader and validator under the hood.  Pick `alp` for a first
-> taste, `west alp-build` once your project spans more than one
-> core or OS.
+> Nothing is lost switching between `tan build --native` and `tan
+> build --board <target>`: both consume the same loader and validator
+> under the hood.  The surviving west-extension commands (`west
+> alp-migrate`, `west alp-lock`, `west alp-quality`, `west alp-emit`)
+> are unaffected by the build-executor move.
 
 If you'd rather skim, the fastest path is:
 
@@ -39,8 +48,7 @@ git clone https://github.com/alplabai/alp-sdk
 cd alp-sdk
 bash scripts/bootstrap.sh                            # one-time: west + Python + apt hints
 export ZEPHYR_BASE="$PWD/../zephyr"
-west alp-build -b native_sim/native/64 examples/peripheral-io/gpio-button-led
-west build -d build -t run
+tan build --native examples/peripheral-io/gpio-button-led
 # expect: [gpio] init button=EVK_PIN_ENCODER_SW, led=EVK_PIN_LED_RED
 #          ...
 #          [gpio] done
@@ -55,10 +63,10 @@ Yocto-side backends need.  Windows-native users run the PowerShell
 twin, `scripts/bootstrap.ps1`, instead (see
 [`docs/cross-platform-setup.md`](cross-platform-setup.md) §4).
 
-`west alp-build` validates the example's `board.yaml`, generates
-the build-time config from it, and delegates to `west build`.
-The rest of this document explains *why* each step is what it is
-so you can adapt it to your own project.
+`tan build` validates the example's `board.yaml` (via alp-sdk's
+`alp_orchestrate`), generates the build-time config from it, and
+delegates to `west build`.  The rest of this document explains *why*
+each step is what it is so you can adapt it to your own project.
 
 For a full local verification pass (everything CI runs short of
 real-hardware HIL), see [`docs/testing.md`](testing.md):
@@ -203,60 +211,59 @@ After this:
 saves ~30 GB of unrelated git history.
 
 Importing alp-sdk via `west init -m` also surfaces the SDK's
-west-extension commands — `west alp-build`
-(`scripts/west_commands/alp_build.py`) plus its siblings
-`alp-image` / `alp-flash` / `alp-clean` / `alp-emit` / `alp-size` /
-`alp-renode`, all registered via `scripts/west-commands.yml` — that
-the rest of this walkthrough uses.  Every one of them is equally
-reachable through the `alp` CLI (`alp build`, `alp flash`, `alp size`,
-…) documented in [`docs/cli.md`](cli.md); the two front doors drive
-the same pipeline.
+surviving west-extension commands — `west alp-migrate` (board.yaml
+schema migration), `west alp-lock` (dependency lockfile), `west
+alp-quality` (the quality-task registry), and `west alp-emit` (the
+read-only artefact inspector), all registered via
+`scripts/west-commands.yml`.  Building is not one of them: the rest
+of this walkthrough uses the standalone `tan` CLI
+([`alplabai/tan-cli`](https://github.com/alplabai/tan-cli)), which
+consumes alp-sdk's `alp_orchestrate --emit build-plan` output and
+drives `west build` itself.  See [`docs/cli.md`](cli.md) for the
+full `alp` verb reference (init, validate, emit, doctor, monitor,
+model, new-som, …) — none of which execute a build.
 
 ## 4. First build: the GPIO example
 
 Every example in `examples/` carries a **`board.yaml`** — the
 single declarative file the loader compiles into Kconfig
-fragments, DTS overlays, and the build-time hw_info header.  The
-`west alp-build` wrapper does the pre-flight + delegates to
-`west build`:
+fragments, DTS overlays, and the build-time hw_info header.  `tan
+build` does the pre-flight + delegates to `west build`:
 
 ```bash
 cd alp-workspace
-west alp-build -b native_sim/native/64 alp-sdk/examples/peripheral-io/gpio-button-led
+tan build --native alp-sdk/examples/peripheral-io/gpio-button-led
 ```
 
 What the flags mean:
 
-- `-b native_sim/native/64` — Zephyr's POSIX simulator on a 64-bit
-  host.  No silicon needed; runs as a native process on Linux /
-  macOS / WSL.  Upstream Zephyr's `native_sim` is Linux/macOS only;
-  on native Windows there is no `native_sim` target — run it through
-  WSL2 (Ubuntu).
+- `--native` — build for Zephyr's POSIX simulator (`native_sim`) on
+  the host, then run the produced binary and stream its stdout
+  straight through.  No silicon needed; runs as a native process on
+  Linux / macOS / WSL.  Upstream Zephyr's `native_sim` is Linux/macOS
+  only; on native Windows there is no `native_sim` target — run it
+  through WSL2 (Ubuntu).
 - `alp-sdk/examples/peripheral-io/gpio-button-led` — the application directory.
   Each example under `examples/` ships a `board.yaml` + an empty
   `prj.conf` + a CMakeLists.txt that invokes the loader at
   configure time.  See [`docs/board-config-schema.md`](board-config-schema.md)
   for the schema.
 
-`west alp-build` walks four steps under the hood:
+`tan build` walks four steps under the hood, driven by alp-sdk's
+`alp_orchestrate --emit build-plan`:
 
-1. **Validates** the app's `board.yaml` via `validate_board_yaml.py`
-   (schema + SoM SKU preset + board preset + `hw_rev` /
-   SDK-version compatibility window + `peripherals:` vs SoC caps).
-2. **Pre-generates** the build-time hw_info header at
+1. **Validates** the app's `board.yaml` (schema + SoM SKU preset +
+   board preset + `hw_rev` / SDK-version compatibility window +
+   `peripherals:` vs SoC caps) — the same check `alp validate` runs
+   standalone.
+2. **Materialises** every generated artefact the plan carries,
+   including the build-time hw_info header at
    `<build>/generated/alp_hw_info_build.h` so apps that include
    it pick up the `ALP_HW_BUILD_*` macros.
-3. **Sets** `EXTRA_ZEPHYR_MODULES` + `ALP_SDK_ROOT` so the
-   application's CMakeLists.txt resolves the SDK without
-   per-customer overrides.
-4. **Delegates** to `west build`.  Any flags after the recognised
-   ones pass through verbatim (e.g. `-d <build-dir>`).
-
-Run it:
-
-```bash
-west build -d build -t run
-```
+3. **Sets** `EXTRA_ZEPHYR_MODULES` + `ALP_SDK_ROOT` (plus any
+   `envAppendPath` entries the plan carries) so the application's
+   CMakeLists.txt resolves the SDK without per-customer overrides.
+4. **Delegates** to `west build`, then runs the produced binary.
 
 Expected output:
 
@@ -304,9 +311,7 @@ for ex in peripheral-io/pwm-led-fade peripheral-io/adc-voltmeter \
           peripheral-io/can-loopback peripheral-io/qenc-readout \
           power-timing/counter-alarm power-timing/rtc-clock \
           power-timing/wdt-feed audio/i2s-tone; do
-    west build -b native_sim/native/64 alp-sdk/examples/$ex \
-        -d build/$(basename $ex)
-    west build -d build/$(basename $ex) -t run
+    tan build --native alp-sdk/examples/$ex
 done
 ```
 
@@ -351,25 +356,26 @@ the full list and how to add one.
 Real board files ship in-tree under [`zephyr/boards/alp/`](../zephyr/boards/alp/)
 (exposed via `zephyr/module.yml`'s `board_root: zephyr` — no external
 repo to wait on).  Build with the qualified board target for your SoM
-as the `-b` argument, e.g. E1M-AEN801 (Alif Ensemble E8, M55-HE):
+via `tan build --board`, e.g. E1M-AEN801 (Alif Ensemble E8, M55-HE):
 
 ```bash
-west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he alp-sdk/examples/peripheral-io/gpio-button-led
-west flash
+tan build --board alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he alp-sdk/examples/peripheral-io/gpio-button-led
+tan flash
 ```
 
 or E1M-V2N101 (Renesas RZ/V2N, Cortex-M33 system manager):
 
 ```bash
-west build -b alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33 alp-sdk/examples/peripheral-io/gpio-button-led
-west flash
+tan build --board alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33 alp-sdk/examples/peripheral-io/gpio-button-led
+tan flash
 ```
 
-The `alp` CLI equivalents are `alp build --board <name>` and
-`alp flash`; once the board is running, `alp monitor --port <port>`
-opens its serial console (run it portless to list the host's serial
-ports; `--baud` overrides the 115200 default).  See
-[`docs/cli.md`](cli.md).
+Once the board is running, `alp monitor --port <port>` opens its
+serial console (run it portless to list the host's serial ports;
+`--baud` overrides the 115200 default) — `alp monitor` never builds
+anything, so it's unaffected by the executor split.  See
+[`docs/cli.md`](cli.md) for `alp`'s verbs and
+[`alplabai/tan-cli`](https://github.com/alplabai/tan-cli) for `tan`'s.
 
 Each example's `boards/` directory has an overlay that maps
 the example's `alp,pin-array` slots to specific EVK pins.  The
@@ -498,8 +504,8 @@ resolves the MPN to the silicon ref (`alif:ensemble:e8` for
 hand.  The validator also cross-checks every entry in
 `peripherals:` against the SoC's `metadata/socs/<vendor>/<family>/<part>.json`
 caps -- a board.yaml asking for `i2s` on a SoC that doesn't route
-I²S fails at `west alp-build` time with exit code 3, before any
-compile work.
+I²S fails at `tan build` time with exit code 3, before any
+compile work (the same check runs standalone via `alp validate`).
 
 At runtime, the documented caps drive the per-`*_open` validation:
 e.g. `alp_adc_open` with `resolution_bits = 16` on a 12-bit SoC
@@ -519,7 +525,7 @@ development.  See the "Using with VS Code" section in
 adds schema-aware `board.yaml` editing (autocomplete on SKUs,
 boards, libraries; inline diagnostics from `validate_board_yaml.py`
 in the Problems panel), a GUI configurator panel with dropdowns
-for supported SoM presets + boards, west wrappers (build / flash /
+for supported SoM presets + boards, `tan` wrappers (build / flash /
 run native_sim), per-OS dependency bootstrap, and a one-keypress
 *Alp: Generate all* command for the four emit modes (`zephyr-conf`,
 `dts-overlay`, `cmake-args`, `yocto-conf`).  Install from the

@@ -42,7 +42,7 @@ the OS".
 | **Zephyr-on-M (`native_sim`)** — examples, ztests, day-to-day iteration | yes | yes | no (use WSL2) | yes (via WSL) |
 | **Zephyr-on-M (real silicon)** — `west build` + `west flash` against EVK | yes | yes | yes | yes (via WSL) |
 | **Yocto-on-A (`bitbake`)** — full Linux userland image build | yes | no | no | yes |
-| **Heterogeneous orchestrator (`west alp-build` fanning out across cores)** | yes | yes (Zephyr halves only) | yes (Zephyr halves only) | yes |
+| **Heterogeneous orchestrator (`tan build` fanning out across cores)** | yes | yes (Zephyr halves only) | yes (Zephyr halves only) | yes |
 
 Read: a Mac user can do everything on the host **except** build
 the Yocto half (use a Linux VM for that).  A Windows user runs the
@@ -524,8 +524,7 @@ This is the cross-platform end-to-end smoke test.
 # Linux / macOS / WSL2 (native_sim is Linux/macOS only; on Windows
 # run this inside WSL2 — there is no native-Windows native_sim target):
 cd ../alp-workspace
-west alp-build -b native_sim/native/64 alp-sdk/examples/peripheral-io/gpio-button-led
-west build -d build -t run
+tan build --native alp-sdk/examples/peripheral-io/gpio-button-led
 ```
 
 Expected output:

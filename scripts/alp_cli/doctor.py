@@ -440,10 +440,9 @@ def _check_west_workspace() -> CheckResult:
         )
     # A .west directory is necessary but NOT sufficient: if the workspace's
     # manifest repo isn't alp-sdk, west never discovers alp-sdk's
-    # `self.west-commands`, so `west alp-build` (and alp-flash/-image/-clean/
-    # -lock/-migrate/-quality/-renode/-emit/-size) stay "unknown command"
-    # (issue #769).  Checking only for `.west` reports a healthy workspace on
-    # exactly the layout #769 was filed about.
+    # `self.west-commands`, so `west alp-migrate` (and alp-lock/-quality/-emit)
+    # stay "unknown command" (issue #769).  Checking only for `.west` reports a
+    # healthy workspace on exactly the layout #769 was filed about.
     manifest = _manifest_dir(topdir)
     repo = _repo_root().resolve()
     if manifest is None:
@@ -456,7 +455,7 @@ def _check_west_workspace() -> CheckResult:
         return CheckResult(
             "west-workspace", FAIL,
             f"west workspace at {topdir} has manifest '{manifest}', not alp-sdk ({repo}) "
-            "-- 'west alp-build' will be an unknown command (#769)",
+            "-- 'west alp-migrate' will be an unknown command (#769)",
             "Re-bootstrap so alp-sdk is the manifest repo: scripts/bootstrap.sh "
             "(or scripts/bootstrap.ps1 on native Windows), which runs "
             "'west init -l <alp-sdk>'. An existing plain-Zephyr workspace is not reused.",

@@ -1,7 +1,7 @@
 # `board.yaml` build-artefact emission
 
 How `scripts/alp_project.py` compiles a resolved `board.yaml` into
-the per-backend native config: the `west alp-build` entry point, the
+the per-backend native config: the `tan build` entry point, the
 Zephyr `alp.conf` overlay, plain-CMake `-D` args, the Yocto
 `local.conf` snippet, `west.yml` library auto-pinning, the
 build-time `hw-info-h` identifier header, and the DTS overlay for
@@ -15,23 +15,25 @@ See [`docs/board-config.md`](board-config.md) for the landing page.
 schema, resolves the SoM SKU + board presets, applies overrides,
 and emits the requested build artifacts.  Common workflows below.
 
-### West extension -- validate, generate, and build
+### `tan` -- validate, generate, and build
 
-The SDK ships first-class west extension commands via
-[`scripts/west-commands.yml`](../scripts/west-commands.yml).  The
-usual application build entry point is:
+alp-sdk is plans-only (ADR [0020](adr/0020-sdk-owns-build-execution.md));
+the standalone [`tan` CLI](https://github.com/alplabai/tan-cli) is the
+executor.  The usual application build entry point is:
 
 ```bash
-west alp-build -b <board> <app-dir>
+tan build --board <board> <app-dir>
 ```
 
-`west alp-build` validates `<app-dir>/board.yaml`, emits the generated
+`tan build` validates `<app-dir>/board.yaml` (via alp-sdk's
+`alp_orchestrate --emit build-plan`), materialises the generated
 per-slice configuration and system manifest, then dispatches the
 underlying Zephyr / Yocto / baremetal build steps for the enabled
-cores.  Companion commands (`west alp-image`, `west alp-flash`,
-`west alp-clean`, `west alp-emit`, `west alp-size`, and
-`west alp-renode`) consume the same build state for bundle, flash,
-inspection, sizing, and simulation workflows.
+cores.  Companion `tan` verbs (`tan image`, `tan flash`, `tan clean`,
+`tan size`, and `tan renode`) consume the same build state for
+bundle, flash, sizing, and simulation workflows.  The SDK's own
+surviving `west alp-emit` remains for read-only, west-centric
+artefact inspection with no build attached.
 
 ### Zephyr -- generated `alp.conf` appended to `prj.conf`
 

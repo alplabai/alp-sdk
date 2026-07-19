@@ -1,9 +1,9 @@
 """Shared project / SDK / west-workspace discovery for the `alp` CLI.
 
-The build / run / flash / emit / monitor verbs are thin wrappers over the
-same machinery the `west alp-*` extension commands drive (the orchestrator
-package, `scripts/alp_project.py`, the flash-backend dispatcher).  This
-module centralises the three questions every wrapper asks:
+The run / emit / monitor verbs are thin wrappers over the same machinery
+the `west alp-*` extension commands drive (the orchestrator package,
+`scripts/alp_project.py`).  This module centralises the three questions
+every wrapper asks:
 
   1. Where is the app?          (walk up from cwd until board.yaml)
   2. Where is the SDK checkout? (ALP_SDK_ROOT env, else this package's repo)
@@ -12,7 +12,7 @@ module centralises the three questions every wrapper asks:
 plus the sub-process env wiring (`ALP_SDK_ROOT`, `EXTRA_ZEPHYR_MODULES`,
 `PYTHONPATH=<sdk>/scripts`) that mirrors
 `scripts/west_commands/_alp_common.env_with_sdk()` so a CLI-invoked
-orchestrator run behaves identically to a `west alp-build` one.
+orchestrator run behaves identically to a `west alp-emit` one.
 """
 
 from __future__ import annotations

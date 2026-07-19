@@ -4,8 +4,10 @@
 #
 # Builds examples/peripheral-io/hello-world for the M55-HP Zephyr
 # slice, boots the resulting ELF headless in Renode via
-# `west alp-renode`, and asserts the app's "[hello] done" marker
-# reaches the UART5 console.
+# `tan renode` (the standalone github.com/alplabai/tan-cli executor
+# -- ADR-0020 Phase 4 retired the SDK-side `west alp-build`/`west
+# alp-renode` commands this workflow used to drive), and asserts the
+# app's "[hello] done" marker reaches the UART5 console.
 #
 # !! ADVISORY until the M55 boot is validated on a Renode-equipped
 #    runner; flip to required once green.  The build/run/assert steps
@@ -18,11 +20,13 @@
 #    Promote to a required branch-protection context once a runner
 #    proves the console reaches "[hello] done".
 #
-# What IS already validated (by pr-twister.yml + tests/scripts/
-# test_alp_renode.py, not this advisory job): the `west alp-renode`
-# Python wrapper's deterministic logic -- manifest parsing, ELF-path
+# What IS already validated elsewhere, not this advisory job: `tan
+# renode`'s own deterministic logic (manifest parsing, ELF-path
 # resolution, family->descriptor mapping, command-line construction,
-# and the missing-renode-binary error path.
+# and the missing-renode-binary error path) is covered by tan-cli's
+# own test suite now that the SDK-side `west alp-renode` Python
+# wrapper (formerly tested by tests/scripts/test_alp_renode.py) was
+# retired in ADR-0020 Phase 4.
 
 name: pr-renode-aen-smoke
 
@@ -113,26 +117,38 @@ jobs:
           # $GITHUB_PATH only applies to later steps, so smoke-check by full path.
           "$HOME/renode/renode" --version
 
+      # Standalone Rust build/run executor for alp-sdk board.yaml plans
+      # (ADR-0020 Phase 4 -- the SDK-side `west alp-build`/`west alp-renode`
+      # executor was retired; `tan` is now the sole consumer of
+      # `alp_orchestrate --emit build-plan`).  No version pin: tan-cli is
+      # still a draft, main is the only meaningful ref.
+      - name: Install tan (github.com/alplabai/tan-cli)
+        run: cargo install --git https://github.com/alplabai/tan-cli --bin tan
+
       # ---- Advisory verification (continue-on-error) ----------------
 
-      - name: west alp-build hello-world (M55-HP slice)
+      - name: tan build hello-world (M55-HP slice)
         id: alp_build
         continue-on-error: true
         working-directory: ${{ github.workspace }}/alp-sdk
         env:
-          ZEPHYR_BASE: ${{ github.workspace }}/zephyrproject/zephyr
+          # Workspace topdir is the alp-sdk checkout's PARENT (west init -l,
+          # #769/#850) -- zephyr lands directly at <topdir>/zephyr, no
+          # zephyrproject/ subdir.
+          ZEPHYR_BASE: ${{ github.workspace }}/zephyr
         run: |
           set -euo pipefail
-          west alp-build examples/peripheral-io/hello-world
+          tan build --native --sdk-root "${{ github.workspace }}/alp-sdk" \
+              --board-yaml examples/peripheral-io/hello-world/board.yaml
 
-      - name: west alp-renode (boot M55-HP in Renode)
+      - name: tan renode (boot M55-HP in Renode)
         id: alp_renode
         continue-on-error: true
         working-directory: ${{ github.workspace }}/alp-sdk
         run: |
           set -euo pipefail
           mkdir -p /tmp/renode-logs
-          west alp-renode examples/peripheral-io/hello-world \
+          tan renode examples/peripheral-io/hello-world \
               --log /tmp/renode-logs/out.log \
               --expect "[hello] done" \
               --timeout 120
