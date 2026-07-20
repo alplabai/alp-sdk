@@ -1,8 +1,9 @@
 # 0020. The SDK plans; a standalone `tan` CLI is the whole command surface (three repos, one executor)
 
-Status: Accepted — implemented (end-state B; Phase 4 complete)
-Date: 2026-07-18
-Deciders: alpCaner (alp-sdk), Hakan (alp-sdk-vscode) — co-signed
+Status: Accepted — direction + alp-sdk Phase 1/4 code implemented on `dev`; a
+release-blocking remediation is outstanding (see **Amendment** below).
+Date: 2026-07-18 (Caner) · 2026-07-20 (Hakan co-sign, this commit)
+Deciders: alpCaner (alp-sdk), Hakan (alp-sdk-vscode)
 Supersedes: [0014](0014-build-plan-emit-cli-contract.md) — its
 mechanism clause **and** its 84-87 consequence (`west alp-build` stays native).
 Pairs with RFC #837 (`alp` → `tan`).
@@ -17,6 +18,42 @@ Pairs with RFC #837 (`alp` → `tan`).
 > and his to drive; alp-sdk owned Phases 1 and 4. See *Migration* below for
 > the phase history and *The one thing that must hold* for the completeness
 > gate this satisfied before Phase 4 deleted the SDK-side executor.
+
+## Amendment (2026-07-20 — Hakan co-sign + corrections)
+
+Hakan ratifies the **direction** (end-state B) and the alp-sdk-side Phase 1/4
+code. Three points below correct or condition the record; the release train is
+blocked until the remediation is met. Tracked in #855.
+
+1. **The completeness gate this ADR mandates is not yet in place.** *The one thing
+   that must hold* + *Cross-repo oracle trigger* require an automatic
+   `repository_dispatch` from alp-sdk CI into `tan`'s build-validation on every
+   planner change, plus the two-seam comparator, **before** the irreversible
+   Phase 4. That trigger does not exist in `.github/workflows` yet — Phase 4 code
+   (fan_out deletion, #848) landed ahead of it. This is recoverable, not a
+   rollback: `df312cec^` (`97ad481b`) still carries both `fan_out` and the Phase-1
+   fields, so the oracle is reconstructed retroactively. **Remediation (blocks any
+   release/tag): freeze that oracle, stand up the two-seam gate + the cross-repo
+   trigger, then tag.** (Verified: the only `97ad481b`↔`df312cec` emit delta is
+   `debug.probe` `"openocd"→null`, hand-reviewed.)
+
+2. **"No `alp`-named command survives" is narrower than shipped.** Retired: the six
+   build verbs + `fan_out`. Surviving on `dev` **by design**: the `--emit`
+   planner surface, `west alp-migrate/alp-lock/alp-quality/alp-emit`, and the
+   Python `alp` console script with 11 non-build verbs
+   (`generate/validate/init/doctor/run/model/monitor/new_som/faultdecode/explain/emit`),
+   which `tan` forwards to. `docs/cli.md` already documents this real end-state;
+   §Decision-1/§Open-Q-4 overstate it. No surviving SDK verb shells out to `tan`
+   (dependency stays one-way, tan→SDK).
+
+3. **Contract fix owed to v0.12 (schema-`required` at unchanged version).** `#847`
+   made `executionPolicy` `required` in `build-plan-v1.schema.json` while
+   `schemaVersion` stayed `const: 1` — a breaking shape change without a bump.
+   Since the consumer pins `schemaVersion == 1`, do **not** bump to 2 (it would
+   strand `tan`); instead revert the two fields to **optional**, keep the emitter
+   always emitting explicit values (strict-producer / tolerant-consumer). `tan`
+   already honors + defaults both. This is the version-skew guard (§Decision-5)
+   applied correctly.
 
 ## Context
 
