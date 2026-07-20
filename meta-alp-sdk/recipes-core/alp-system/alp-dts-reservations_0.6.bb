@@ -52,7 +52,7 @@ python do_alp_resolve_manifest() {
     if not manifest or not os.path.isfile(manifest):
         bb.fatal(
             "alp-dts-reservations: expected the orchestrator's "
-            "system-manifest.yaml at '%s'.  Build with `west alp-build` "
+            "system-manifest.yaml at '%s'.  Build with `tan build` "
             "first or override ALP_SYSTEM_MANIFEST_PATH on the bitbake "
             "command line." % manifest)
 

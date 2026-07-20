@@ -22,7 +22,7 @@ the standalone [`tan` CLI](https://github.com/alplabai/tan-cli) is the
 executor.  The usual application build entry point is:
 
 ```bash
-tan build --board <board> <app-dir>
+tan --project <app-dir> build
 ```
 
 `tan build` validates `<app-dir>/board.yaml` (via alp-sdk's

@@ -249,7 +249,7 @@ unblock.
 ## 6. Building
 
 ```bash
-tan build examples/multicore/rpmsg-v2n
+tan --project examples/multicore/rpmsg-v2n build
 ```
 
 The orchestrator:
@@ -385,11 +385,16 @@ and the composer.
 ### Iterating on one slice
 
 The Yocto cold build takes hours; the Zephyr build takes seconds.
-When you're iterating on the M-side firmware, rebuild only that slice:
+When you're iterating on the M-side firmware, re-run the build — the
+Zephyr slice rebuilds incrementally in seconds while the already-built
+Yocto slice is reused (west/bitbake short-circuit an up-to-date tree):
 
 ```bash
-tan build examples/multicore/rpmsg-v2n --core m33_sm
+tan --project examples/multicore/rpmsg-v2n build --native
 ```
+
+(There is no per-slice `--core` flag on `tan build`; it runs every
+buildable slice, and unchanged slices are near-instant.)
 
 The orchestrator skips the Yocto fan-out, re-uses the previous
 manifest, and rebuilds only `build/m33_sm-zephyr/`.  Slice failures
@@ -570,7 +575,7 @@ as the build argument:
 
 ```bash
 # good
-tan build examples/multicore/rpmsg-v2n
+tan --project examples/multicore/rpmsg-v2n build
 ```
 
 The orchestrator writes `build/` next to the project's `board.yaml`.

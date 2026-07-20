@@ -1,23 +1,26 @@
 # The `alp` CLI
 
-`alp` is the Alp SDK's command-line front door for everything that is
-**not** executing a build: scaffold a project, inspect the generated
-configuration, validate `board.yaml`, compile AI models, sanity-check
-the host environment, open a serial console, decode a diagnostic code
-or a fault dump, and scaffold the metadata for porting a new SoM.
+`alp` is the Alp SDK's command-line front door for scaffolding a
+project, inspecting the generated configuration, validating
+`board.yaml`, compiling AI models, sanity-checking the host
+environment, opening a serial console, decoding a diagnostic code or a
+fault dump, and scaffolding the metadata for porting a new SoM.
 
-Building, flashing, sizing against the SoM memory budget, bundling for
-OTA, cleaning, and Renode smoke-boots are **not** `alp` verbs.  Per
-ADR [0020](adr/0020-sdk-owns-build-execution.md), alp-sdk is
-**plans-only** -- that surface lives in the standalone, public
+The plan-based, multi-slice build / flash / size / image / clean /
+Renode surface is **not** `alp`'s job.  Per ADR
+[0020](adr/0020-sdk-owns-build-execution.md), alp-sdk is
+**plans-only** for that surface -- it lives in the standalone, public
 **`tan` CLI** ([`alplabai/tan-cli`](https://github.com/alplabai/tan-cli)),
-the SDK's sole build executor: it consumes
+the SDK's primary build executor: it consumes
 `alp_orchestrate --emit build-plan` / `--emit system-manifest` and
 runs `west` / `bitbake` / `cmake` per slice.  Install `tan` separately
 (needs a Rust toolchain / rustup): `cargo install --git
 https://github.com/alplabai/tan-cli --bin tan`; see its own repo for
 `tan build` / `tan flash` / `tan size` / `tan image` / `tan clean` /
-`tan renode`.
+`tan renode`.  `alp run` is the one exception: a retained
+single-image escape hatch (shells `west build`, and `west flash` with
+`--flash`) for a quick native_sim or single-board loop without a
+`tan` install -- see the verb reference below.
 
 `alp` is installed automatically by the bootstrap scripts
 (`scripts/bootstrap.sh` on Linux/macOS/WSL2, `scripts/bootstrap.ps1`
@@ -45,22 +48,27 @@ Three front doors, three different jobs -- pick by what you're doing:
 | Scaffolding a project, validating `board.yaml`, compiling a model, checking your host, opening a serial console, decoding a diagnostic/fault | `alp init` / `alp new-som` / `alp validate` / `alp model` / `alp doctor` / `alp monitor` / `alp explain` / `alp faultdecode` |
 | Inspecting a generated artefact without building (Kconfig fragment, DTS overlay, system manifest, build plan) | `alp emit` (or `west alp-emit` from a west workspace) |
 | Building, flashing, sizing, bundling, cleaning, or Renode-booting a project | `tan build` / `tan flash` / `tan size` / `tan image` / `tan clean` / `tan renode` -- see [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli) |
-| Scripting the surviving west-centric maintenance commands | `west alp-migrate` (board.yaml schema migration) / `west alp-lock` (dependency lockfile) / `west alp-quality` (quality-task registry) |
+| A quick single-image native_sim or single-board build/flash loop without installing `tan` | `alp run` (native_sim by default; `--board <target>` for real hardware, `--flash` to program after building) |
+| Scripting the surviving west-centric maintenance commands | `west alp-migrate` (board.yaml schema migration) / `west alp-lock` (dependency lockfile) / `west alp-quality` (quality-task registry) / `west alp-emit` (generated-artefact subset) |
 
 Rules of thumb:
 
-* `alp` never executes a build.  Every verb below is either read-only
-  (`emit`, `validate`, `doctor`, `explain`, `faultdecode`), a scaffold
-  (`init`, `new-som`), or a host-tool wrapper (`monitor`, `model`).
-* `tan` is the sole executor.  It consumes the SDK's
+* `alp` doesn't own the plan-based, multi-slice build surface.  Every
+  verb below is read-only (`emit`, `validate`, `doctor`, `explain`,
+  `faultdecode`), a scaffold (`init`, `new-som`), a host-tool wrapper
+  (`monitor`, `model`), or the retained single-image escape hatch
+  (`run`).
+* `tan` is the primary executor.  It consumes the SDK's
   `alp_orchestrate --emit build-plan` (and seeds its own
   `system-manifest.yaml` / `.alp-build-state.json` from
   `--emit system-manifest`), then drives `west` / `bitbake` / `cmake`
   per slice, owns skip-vs-fail policy, and programs hardware.  `tan
-  build --native` is the quickest way to build + run a project under
-  `native_sim`; `tan build --board <target>` targets real silicon.
-  See [heterogeneous-builds.md](heterogeneous-builds.md) for the
-  per-core fan-out the plan describes.
+  build` (`--native` is the default, explicit opt-in) materialises the
+  plan and runs each slice's build command directly, whatever
+  `board.yaml` targets -- native_sim or real silicon; it never runs
+  the produced binary itself (that's `tan run`).  See
+  [heterogeneous-builds.md](heterogeneous-builds.md) for the per-core
+  fan-out the plan describes.
 * `alp emit` is a SUPERSET of `west alp-emit`: every artefact either
   front door can generate is reachable from `alp emit` (one catalog,
   listed in the `alp emit` verb reference below).  `west alp-emit`
@@ -145,18 +153,20 @@ the missing flags).
 
 ### Building, flashing, sizing, bundling, cleaning, Renode -- now `tan`
 
-These used to be `alp build` / `alp run` / `alp flash` / `alp size` /
+These used to be `alp build` / `alp flash` / `alp size` /
 `alp image` / `alp clean` / `alp renode` (and their `west alp-*`
-twins).  ADR-0020 Phase 4 retired the SDK-side executor
-(`Orchestrator.fan_out()`, `_dispatch_slice()`, `scripts/flash_backends/`,
-and the `west alp-{build,image,flash,clean,size,renode}` extensions) --
-alp-sdk no longer runs a build.  The whole surface moved to the
+twins) -- `alp run` is the one survivor, retained as a single-image
+escape hatch (see the verb reference above).  ADR-0020 Phase 4 retired
+the SDK-side fan-out executor (`Orchestrator.fan_out()`,
+`_dispatch_slice()`, and the
+`west alp-{build,image,flash,clean,size,renode}` extensions).  The
+multi-slice build/flash/size/image/clean/renode surface moved to the
 standalone, public **`tan` CLI**:
 
 ```bash
-tan build --native                 # build for native_sim and run it
-tan build --board <target>         # real-hardware build
-tan build --core m33_sm            # iterate on one slice only
+tan build                          # materialise the plan + run every slice's build command (default)
+tan --project my-app build         # same, for a project outside the cwd
+tan build --plan                   # show the build plan only, no build
 tan flash                          # program every slice + helper MCU
 tan size --fail-over-budget        # footprint vs the SoM memory budget
 tan image                          # assemble a flashable bundle

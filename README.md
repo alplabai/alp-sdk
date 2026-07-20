@@ -57,7 +57,7 @@ cd my-app
 tan build --native
 ```
 
-`bash scripts/bootstrap.sh` is what actually gets `west` (and everything else `tan build` shells out to) onto `PATH` — skipping it is the #1 way this Quickstart fails on a fresh clone; see [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md) for the per-OS manual equivalent. `tan` is not installed by `bootstrap.sh` -- it's a separate public Rust binary from [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli); `cargo install --git https://github.com/alplabai/tan-cli --bin tan` needs `rustup`/`cargo` on `PATH` first. `alp init` walks you through SoM SKU + board preset + starter peripherals interactively, or accepts `--som`, `--preset`, `--peripherals` flags for CI. `tan build --native` builds the project's `board.yaml` against `native_sim`; a real-hardware build + flash go through `tan build` and `tan flash`.
+`bash scripts/bootstrap.sh` is what actually gets `west` (and everything else `tan build` shells out to) onto `PATH` — skipping it is the #1 way this Quickstart fails on a fresh clone; see [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md) for the per-OS manual equivalent. `tan` is not installed by `bootstrap.sh` -- it's a separate public Rust binary from [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli); `cargo install --git https://github.com/alplabai/tan-cli --bin tan` needs `rustup`/`cargo` on `PATH` first. `alp init` walks you through SoM SKU + board preset + starter peripherals interactively, or accepts `--som`, `--preset`, `--peripherals` flags for CI. `tan build` (`--native` is the default, explicit-opt-in spelling) consumes the SDK's build plan, materialises it, and runs each slice's `west`/`bitbake`/`cmake` command directly -- whatever `board.yaml` targets, native_sim or real silicon; it never runs the produced binary itself (that's `tan run`). Flashing real hardware is `tan flash`.
 
 `alp validate board.yaml` runs the diagnostic-rich validator standalone — try it on a fixture under `tests/fixtures/board_yaml_bad/` to see the format.  `alp doctor` triages the host environment (PASS/WARN/FAIL with fix hints) whenever a build machine misbehaves.  alp-sdk is plans-only — it emits `build-plan` / `system-manifest`; the whole build / flash / size / image / clean / renode surface lives in the standalone [`tan` CLI](https://github.com/alplabai/tan-cli).  alp-sdk's own remaining verb set — `emit` / `validate` / `doctor` / `monitor` / `new-som` / `model` and friends — is documented in [`docs/cli.md`](docs/cli.md).
 
@@ -586,7 +586,7 @@ ctest --test-dir build --output-on-failure
 # checkout's --emit build-plan output
 west init -m https://github.com/alplabai/alp-sdk --mr main alp-ws
 cd alp-ws && west update
-tan build examples/multicore/rpmsg-v2n
+tan --project examples/multicore/rpmsg-v2n build
 ```
 
 ## Repository layout

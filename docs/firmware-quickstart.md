@@ -121,9 +121,10 @@ Build any of them as:
 
 ```bash
 cd alp-workspace
-tan build --native alp-sdk/examples/<name>    # native_sim
-# or:
-tan build --board <board> alp-sdk/examples/<name> && tan flash   # real silicon
+tan --project alp-sdk/examples/<name> build
+# the target (native_sim above, or real silicon) comes from the
+# example's board.yaml `som.sku` -- there is no `--board` flag.
+# For real silicon, also: tan flash alp-sdk/examples/<name>
 ```
 
 ## 5. Idiomatic patterns
@@ -272,24 +273,25 @@ reference.
 
 ## 7. Build for real silicon
 
-`tan build --board` figures out the cross-compile target from the
-SoM's `silicon:` field.  Common boards:
+`tan build` figures out the cross-compile target from the project's
+`board.yaml` `som.sku` field -- there is no `--board` flag. Common
+targets:
 
 ```bash
 # V2N (RZ/V2N)
-tan build --board <renesas_rzv2n_board> alp-sdk/examples/v2n/v2n-gd32-bridge-ping
-tan flash
+tan --project alp-sdk/examples/v2n/v2n-gd32-bridge-ping build
+tan flash alp-sdk/examples/v2n/v2n-gd32-bridge-ping
 
 # AEN (Alif Ensemble)
-tan build --board <alif_ensemble_board> alp-sdk/examples/peripheral-io/gpio-button-led
-tan flash
+tan --project alp-sdk/examples/peripheral-io/gpio-button-led build
+tan flash alp-sdk/examples/peripheral-io/gpio-button-led
 ```
 
-The exact `<board>` argument depends on whether you're using an
-upstream Zephyr board file (e.g. `ensemble_e8_dk`) or one of the
-in-tree Alp E1M board files under
-[`zephyr/boards/alp/`](../zephyr/boards/alp/) (e.g.
-`alp_e1m_aen801_m55_he`, `alp_e1m_v2n101_m33_sm`).  See
+Which qualified Zephyr board a `som.sku` resolves to -- an upstream
+board file (e.g. `ensemble_e8_dk`) or one of the in-tree Alp E1M
+board files under [`zephyr/boards/alp/`](../zephyr/boards/alp/) (e.g.
+`alp_e1m_aen801_m55_he`, `alp_e1m_v2n101_m33_sm`) -- is resolved by
+the loader, not chosen on the command line.  See
 [`docs/architecture.md`](architecture.md) for the split.
 
 The `tan` CLI covers the same flow in fewer keystrokes:

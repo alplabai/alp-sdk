@@ -41,8 +41,9 @@ runners:
   - file: scripts/west_commands/runners/alif_flash.py
   - file: scripts/west_commands/runners/rzv2n_mtd_flash.py
 
-# NOTE on `west alp-build`:
-#   The command lives in `scripts/west-commands.yml` and is surfaced
+# NOTE on alp-sdk's west-extension commands (alp-lock, alp-migrate,
+# alp-quality, alp-emit):
+#   They live in `scripts/west-commands.yml` and are surfaced
 #   via the *manifest's* west-commands -- the manifest's
 #   `self.west-commands` (when alp-sdk is the workspace topdir) or the
 #   consuming project's `projects.alp-sdk.west-commands` (when alp-sdk

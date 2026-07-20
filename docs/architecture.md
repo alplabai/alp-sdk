@@ -204,10 +204,11 @@ board.yaml (`cores:`)
    {core_id: Slice}               # one Slice per non-off core
         │
         ▼
-   Orchestrator.fan_out()         # materialise alp.conf / local.conf / cmake-args
-        │                         # per slice under build/<core>-<os>/
+   --emit build-plan              # plan JSON: per-slice command + generated files (ADR 0014)
+        │
         ▼
-   build/system-manifest.yaml     # content-addressed; deterministic across rebuilds
+   tan materialise                # writes alp.conf / local.conf / cmake-args per slice
+                                   # under build/<core>-<os>/, then runs each slice's build
 ```
 
 OS inference defaults are silicon-class driven: Cortex-M cores

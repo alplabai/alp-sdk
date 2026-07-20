@@ -18,15 +18,15 @@ hand-written firmware as a first-class consumer.
 >
 > - **`tan` CLI** — the sole build executor, a standalone public repo
 >   ([`alplabai/tan-cli`](https://github.com/alplabai/tan-cli)).
->   `tan build --native` builds a project for `native_sim` and prints
->   its stdout straight through.  This is the headline
->   [README Quickstart](../README.md#quickstart) — if you just want
->   a hello-world running in two minutes, start there.  `tan build
->   --board <target>` is the multi-core / heterogeneous / real-silicon
->   path this walkthrough uses: it fans a `board.yaml` out into
->   per-core build slices (via alp-sdk's `alp_orchestrate --emit
+>   `tan --project <app-dir> build` fans the app's `board.yaml` out
+>   into per-core build slices (via alp-sdk's `alp_orchestrate --emit
 >   build-plan`), runs the full pre-flight (schema validation, SoC
->   caps, hw_info header) and delegates to `west build`.  Install
+>   caps, hw_info header) and delegates to `west build` for whichever
+>   target that `board.yaml` names — `native_sim` on your host or
+>   real silicon; there is no separate `--board`/`--core` selector,
+>   the target comes from the project itself.  This is the headline
+>   [README Quickstart](../README.md#quickstart) — if you just want
+>   a hello-world running in two minutes, start there.  Install
 >   `tan` separately from its own repo (needs a Rust toolchain /
 >   rustup): `cargo install --git https://github.com/alplabai/tan-cli
 >   --bin tan`.
@@ -37,8 +37,9 @@ hand-written firmware as a first-class consumer.
 >   `alp new-som` / `alp explain` / `alp faultdecode`.  The full verb
 >   reference lives in [`docs/cli.md`](cli.md).
 >
-> Nothing is lost switching between `tan build --native` and `tan
-> build --board <target>`: both consume the same loader and validator
+> Nothing is lost switching a project between `native_sim` and
+> real silicon: whichever the project's `board.yaml` names, `tan
+> --project <app-dir> build` consumes the same loader and validator
 > under the hood.  The surviving west-extension commands (`west
 > alp-migrate`, `west alp-lock`, `west alp-quality`, `west alp-emit`)
 > are unaffected by the build-executor move.
@@ -51,10 +52,11 @@ cd alp-sdk
 bash scripts/bootstrap.sh                            # one-time: west + Python + apt hints
 export ZEPHYR_BASE="$PWD/../zephyr"
 cargo install --git https://github.com/alplabai/tan-cli --bin tan  # one-time: install tan (needs rustup/cargo)
-tan build --native examples/peripheral-io/gpio-button-led
-# expect: [gpio] init button=EVK_PIN_ENCODER_SW, led=EVK_PIN_LED_RED
-#          ...
-#          [gpio] done
+tan --project examples/peripheral-io/gpio-button-led build
+# illustrative stdout once the build runs:
+#   [gpio] init button=EVK_PIN_ENCODER_SW, led=EVK_PIN_LED_RED
+#   ...
+#   [gpio] done
 ```
 
 `scripts/bootstrap.sh` is the canonical fresh-clone setup -- it
@@ -235,22 +237,23 @@ build` does the pre-flight + delegates to `west build`:
 
 ```bash
 cd alp-workspace
-tan build --native alp-sdk/examples/peripheral-io/gpio-button-led
+tan --project alp-sdk/examples/peripheral-io/gpio-button-led build
 ```
 
-What the flags mean:
+What this does:
 
-- `--native` — build for Zephyr's POSIX simulator (`native_sim`) on
-  the host, then run the produced binary and stream its stdout
-  straight through.  No silicon needed; runs as a native process on
-  Linux / macOS / WSL.  Upstream Zephyr's `native_sim` is Linux/macOS
-  only; on native Windows there is no `native_sim` target — run it
-  through WSL2 (Ubuntu).
-- `alp-sdk/examples/peripheral-io/gpio-button-led` — the application directory.
-  Each example under `examples/` ships a `board.yaml` + an empty
-  `prj.conf` + a CMakeLists.txt that invokes the loader at
-  configure time.  See [`docs/board-config-schema.md`](board-config-schema.md)
-  for the schema.
+- `--project alp-sdk/examples/peripheral-io/gpio-button-led` — the
+  application directory.  Each example under `examples/` ships a
+  `board.yaml` + an empty `prj.conf` + a CMakeLists.txt that invokes
+  the loader at configure time.  See
+  [`docs/board-config-schema.md`](board-config-schema.md) for the
+  schema.
+- The target (`native_sim` on the host, as here, or real silicon)
+  comes entirely from that `board.yaml` — there is no `--board`
+  selector.  `native_sim` needs no silicon; it runs as a native
+  process on Linux / macOS / WSL.  Upstream Zephyr's `native_sim` is
+  Linux/macOS only; on native Windows there is no `native_sim`
+  target — run it through WSL2 (Ubuntu).
 
 `tan build` walks four steps under the hood, driven by alp-sdk's
 `alp_orchestrate --emit build-plan`:
@@ -266,9 +269,12 @@ What the flags mean:
 3. **Sets** `EXTRA_ZEPHYR_MODULES` + `ALP_SDK_ROOT` (plus any
    `envAppendPath` entries the plan carries) so the application's
    CMakeLists.txt resolves the SDK without per-customer overrides.
-4. **Delegates** to `west build`, then runs the produced binary.
+4. **Delegates** to `west build`, then — for a `native_sim` target —
+   runs the produced binary (`build/native_sim/zephyr/zephyr.exe`)
+   directly and streams its stdout; no separate `tan run` step is
+   needed.
 
-Expected output:
+Illustrative stdout for this example (exact ordering/timing may vary):
 
 ```
 *** Booting Zephyr OS build v4.4.0 ***
@@ -314,7 +320,7 @@ for ex in peripheral-io/pwm-led-fade peripheral-io/adc-voltmeter \
           peripheral-io/can-loopback peripheral-io/qenc-readout \
           power-timing/counter-alarm power-timing/rtc-clock \
           power-timing/wdt-feed audio/i2s-tone; do
-    tan build --native alp-sdk/examples/$ex
+    tan --project alp-sdk/examples/$ex build
 done
 ```
 
@@ -358,19 +364,34 @@ the full list and how to add one.
 
 Real board files ship in-tree under [`zephyr/boards/alp/`](../zephyr/boards/alp/)
 (exposed via `zephyr/module.yml`'s `board_root: zephyr` — no external
-repo to wait on).  Build with the qualified board target for your SoM
-via `tan build --board`, e.g. E1M-AEN801 (Alif Ensemble E8, M55-HE):
+repo to wait on).  There is no `--board` flag: the target comes from
+the project's `board.yaml` `som.sku` field, which `tan build` resolves
+to the qualified Zephyr board string for you.  Point `board.yaml` at
+E1M-AEN801 (Alif Ensemble E8, M55-HE) —
 
-```bash
-tan build --board alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he alp-sdk/examples/peripheral-io/gpio-button-led
-tan flash
+```yaml
+som:
+  sku: E1M-AEN801
 ```
 
-or E1M-V2N101 (Renesas RZ/V2N, Cortex-M33 system manager):
+— then build and flash the same way:
 
 ```bash
-tan build --board alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33 alp-sdk/examples/peripheral-io/gpio-button-led
-tan flash
+tan --project alp-sdk/examples/peripheral-io/gpio-button-led build
+tan flash alp-sdk/examples/peripheral-io/gpio-button-led
+```
+
+or point it at E1M-V2N101 (Renesas RZ/V2N, Cortex-M33 system manager)
+instead:
+
+```yaml
+som:
+  sku: E1M-V2N101
+```
+
+```bash
+tan --project alp-sdk/examples/peripheral-io/gpio-button-led build
+tan flash alp-sdk/examples/peripheral-io/gpio-button-led
 ```
 
 Once the board is running, `alp monitor --port <port>` opens its

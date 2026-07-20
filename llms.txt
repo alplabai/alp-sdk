@@ -7,7 +7,7 @@ For AI coding agents: read [AGENTS.md](AGENTS.md) first (the cross-tool agent gu
 ## Getting started
 
 - [README.md](README.md): project overview, architecture diagram, and quick orientation.
-- [docs/getting-started.md](docs/getting-started.md): clone → `native_sim` build → real silicon, with the `west alp-build` workflow.
+- [docs/getting-started.md](docs/getting-started.md): clone → `native_sim` build → real silicon, with the `tan build` workflow.
 - [docs/firmware-quickstart.md](docs/firmware-quickstart.md): the shortest hand-written-firmware path.
 - [CONTRIBUTING.md](CONTRIBUTING.md): contributor workflow, branching, and local CI expectations.
 

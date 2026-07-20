@@ -242,7 +242,7 @@ file but a misconfigured global setting can override that.
 ## Where to file bugs
 
 * SDK bug (planner/emit/validate): [`github.com/alplabai/alp-sdk/issues`](https://github.com/alplabai/alp-sdk/issues)
-* `tan build` executor bug: [`github.com/alplabai/tan-cli`](https://github.com/alplabai/tan-cli) instead -- alp-sdk no longer runs builds (ADR [0020](adr/0020-sdk-owns-build-execution.md)).
+* `tan build` executor bug: [`github.com/alplabai/tan-cli`](https://github.com/alplabai/tan-cli) instead -- alp-sdk is plans-only for the multi-slice build/flash/size/image/clean/Renode surface (ADR [0020](adr/0020-sdk-owns-build-execution.md)); `alp run` is the one retained single-image escape hatch that still shells `west build`/`west flash` itself.
 * Chip driver bug: file against alp-sdk; include the `driver_status` from the
   chip's metadata yaml.
 

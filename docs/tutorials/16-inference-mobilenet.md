@@ -191,7 +191,7 @@ an explicit value).
 ## 5. Build + flash
 
 ```bash
-tan build --board alif_e7_dk_rtss_he examples/aen/edgeai-vision-aen
+tan --project examples/aen/edgeai-vision-aen build
 west flash
 ```
 

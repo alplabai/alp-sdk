@@ -54,8 +54,9 @@ Two loaders fan `board.yaml` into per-core slices:
 - `python -m alp_orchestrate --emit {system-manifest,build-plan,ipc-contract-h,dts-reservations,dts-partitions,storage-mounts-c,tfm-sysbuild-conf}`
   — the cross-core / system artefacts.
 
-`west alp-build -b <board> <app-dir>` is the convenience wrapper: it validates
-`board.yaml`, generates the build-time config, then delegates to `west build`.
+`tan --project <app-dir> build` is the convenience wrapper: it consumes the
+SDK's `--emit build-plan`, materialises the per-slice config, then runs each
+slice's native build command.
 
 The `--emit` surface is the **machine-readable contract** other tools consume
 (ADR 0014, `docs/adr/0014-build-plan-emit-cli-contract.md`). When you need to
@@ -76,8 +77,8 @@ report.
   Try it against a fixture under `tests/fixtures/board_yaml_bad/` to learn the
   output format. Exit code 1 on a hard validation or consistency failure;
   warnings return 0.
-- `west alp-build …` — does the same validation as a build pre-flight before
-  any compile work.
+- `alp validate board.yaml` / `alp emit build-plan` — the same validation as a
+  build pre-flight before any compile work.
 - CI gates — `scripts/check_*.py` (e.g. `check_doc_drift.py`,
   `check_example_portability.py`, `check_pin_conflicts.py`,
   `check_system_manifest.py`) plus **twister** for the Zephyr ztest + example

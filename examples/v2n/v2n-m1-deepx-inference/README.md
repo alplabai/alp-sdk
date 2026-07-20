@@ -63,7 +63,7 @@ host-emulated path; the example reports the failure cleanly):
 git clone https://github.com/DEEPX-AI/dx_rt modules/dx_rt
 git clone https://github.com/DEEPX-AI/dx_rt_npu_linux_driver modules/dx_rt_driver
 
-west alp-build -b alp_e1m_v2m101_m33_sm/r9a09g056n48gbg/cm33 examples/v2n/v2n-m1-deepx-inference
+tan build --board alp_e1m_v2m101_m33_sm/r9a09g056n48gbg/cm33 examples/v2n/v2n-m1-deepx-inference
 west flash
 ```
 
