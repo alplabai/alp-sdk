@@ -17,8 +17,8 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   to strict-producer / tolerant-consumer: `executionPolicy` stays in
   `properties` (a known, validated key when present) but is no longer
   `required` — the SDK emitter keeps emitting it unconditionally on every
-  plan regardless. Additive to schemaVersion 1, per ADR 0014 / the ADR-0020
-  amendment (#855).
+  plan regardless. Additive to schemaVersion 1, per ADR 0014; the ADR-0020
+  amendment is #856 (tracked in #855).
 
 ### Fixed — flash: defer the Zephyr flash runner to the board default
 

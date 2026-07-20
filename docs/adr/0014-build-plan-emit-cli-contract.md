@@ -124,6 +124,6 @@ Contract properties (locked with the consumer):
   consumer), so a field-absent plan — e.g. a `v0.11.1` plan — still
   validates and a consumer applies the documented default. (Corrected
   2026-07-20: it was briefly `required`, which is a breaking shape
-  change at unchanged `schemaVersion 1`; reverted per the ADR-0020
-  amendment. The consumer pins `schemaVersion == 1`, so a bump was not
-  the fix.)
+  change at unchanged `schemaVersion 1`; reverted here — #856 amends
+  ADR-0020 with the matching record (tracked in #855). The consumer pins
+  `schemaVersion == 1`, so a bump was not the fix.)
