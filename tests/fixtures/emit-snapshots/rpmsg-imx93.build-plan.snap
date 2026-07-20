@@ -97,7 +97,8 @@
           "alp_e1m_nx9101_m33",
           "<SDK_ROOT>/examples/multicore/rpmsg-imx93/m33",
           "--",
-          "-DPython3_EXECUTABLE=<PYTHON_EXECUTABLE>"
+          "-DPython3_EXECUTABLE=<PYTHON_EXECUTABLE>",
+          "-DEXTRA_CONF_FILE=<SDK_ROOT>/examples/multicore/rpmsg-imx93/build/m33-zephyr/alp.conf"
         ],
         "cwd": "build/m33-zephyr"
       },

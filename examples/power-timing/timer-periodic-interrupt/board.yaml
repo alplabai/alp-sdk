@@ -10,9 +10,9 @@
 #
 # Customer workflow: copy this directory, change `som.sku` to
 # your MPN, edit the `preset:` (or use an inline board) if you're on a non-EVK board,
-# and `west build`.  CMakeLists.txt invokes
-# scripts/alp_project.py at configure time + layers the
-# generated alp.conf over prj.conf via OVERLAY_CONFIG.
+# and `west build`.  The planner (scripts/alp_orchestrate) derives the
+# per-core Kconfig from this file and wires it into `west build` via
+# `-DEXTRA_CONF_FILE=...` (see docs/adr/0020-sdk-owns-build-execution.md).
 som:
   sku: E1M-AEN801
 

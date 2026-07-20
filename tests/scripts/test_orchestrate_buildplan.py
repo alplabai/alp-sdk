@@ -103,8 +103,17 @@ def test_emit_build_plan_happy(tmp_path: Path) -> None:
     assert m33["buildDir"] == "build/m33_sm-zephyr"
     assert m33["command"]["tool"] == "west"
     assert m33["command"]["args"][:2] == ["build", "-b"]
-    assert m33["command"]["args"][-2:] == [
-        "--", f"-DPython3_EXECUTABLE={sys.executable.replace(chr(92), '/')}",
+    # EXTRA_CONF_FILE names this slice's own materialised alp.conf --
+    # the same absolute path `configArtefacts` below carries relative to
+    # `buildDir` (issue #855 planner/CMakeLists atomicity fix). Anchored
+    # on board.yaml's own directory (`path.parent`), never the test
+    # process's CWD -- the #596 invariant `_resolve_app_path` also honors.
+    m33_alp_conf = (path.parent / "build" / "m33_sm-zephyr"
+                     / "alp.conf").resolve()
+    assert m33["command"]["args"][-3:] == [
+        "--",
+        f"-DPython3_EXECUTABLE={sys.executable.replace(chr(92), '/')}",
+        f"-DEXTRA_CONF_FILE={m33_alp_conf.as_posix()}",
     ]
     assert m33["command"]["cwd"] == m33["buildDir"]
     assert m33["env"]["ALP_SDK_ROOT"]
@@ -384,15 +393,20 @@ def test_zephyr_slice_command_wires_sysbuild_overlay(tmp_path: Path) -> None:
     assert "--sysbuild" in args
 
     sb_conf = (Path("build") / "alp_sysbuild.conf").resolve()
-    assert args[-3:] == [
+    # Anchored on board.yaml's own directory (`path.parent`), never the
+    # test process's CWD -- see the `test_emit_build_plan_happy` note.
+    z_alp_conf = (path.parent / z["buildDir"] / "alp.conf").resolve()
+    assert args[-4:] == [
         "--",
         f"-DPython3_EXECUTABLE={sys.executable.replace(chr(92), '/')}",
         f"-DSB_CONF_FILE={sb_conf}",
+        f"-DEXTRA_CONF_FILE={z_alp_conf.as_posix()}",
     ]
     # The overlay define is a CMake define, never a west flag: it has to
     # land AFTER `--`, and the path has to be absolute.
     assert args.index("--sysbuild") < args.index("--")
     assert sb_conf.is_absolute()
+    assert z_alp_conf.is_absolute()
 
     # Without boot: -> no sysbuild overlay -> no flag, bare command.
     path2 = _write_board(tmp_path, V2N_HAPPY, name="board-noboot.yaml")
@@ -403,9 +417,100 @@ def test_zephyr_slice_command_wires_sysbuild_overlay(tmp_path: Path) -> None:
     assert "--sysbuild" not in z2["command"]["args"]
     assert not any(a.startswith("-DSB_CONF_FILE=")
                    for a in z2["command"]["args"])
-    assert z2["command"]["args"][-2:] == [
-        "--", f"-DPython3_EXECUTABLE={sys.executable.replace(chr(92), '/')}",
+    z2_alp_conf = (path2.parent / z2["buildDir"] / "alp.conf").resolve()
+    assert z2["command"]["args"][-3:] == [
+        "--",
+        f"-DPython3_EXECUTABLE={sys.executable.replace(chr(92), '/')}",
+        f"-DEXTRA_CONF_FILE={z2_alp_conf.as_posix()}",
     ]
+
+
+def test_zephyr_slice_command_wires_extra_conf_file(tmp_path: Path) -> None:
+    """The planner wires each Zephyr slice's own materialised alp.conf into
+    `west build` via `-DEXTRA_CONF_FILE=<abs path>` -- not the deprecated
+    `OVERLAY_CONFIG` -- so the fragment `configArtefacts` already carries is
+    no longer dead (nothing in the command referenced it before; the only
+    consumer was a leaky out-of-band, no-`--core` `alp_project.py --emit
+    zephyr-conf` call in the example's CMakeLists.txt). This pins three
+    load-bearing properties: (1) EXTRA_CONF_FILE is absolute, (2) it names
+    the EXACT SAME file `configArtefacts` materialises for this slice (never
+    a second, drifting path), and (3) it lands in the single existing `--`
+    passthrough segment -- never a second `--` (a duplicate `--` would make
+    `west`/CMake silently ignore everything after the first one it already
+    parsed, and a duplicate `-D` is last-wins)."""
+    import json as _json
+    from alp_orchestrate import emit_build_plan
+
+    path = _write_board(tmp_path, V2N_HAPPY)
+    plan = _json.loads(emit_build_plan(
+        load_board_yaml(path), board_yaml=path, build_root=Path("build")))
+
+    z = next(s for s in plan["slices"]
+             if s["backend"] == "zephyr" and s["command"])
+    args = z["command"]["args"]
+
+    # Exactly one `--` passthrough segment.
+    assert args.count("--") == 1
+
+    extra_conf_flags = [a for a in args if a.startswith("-DEXTRA_CONF_FILE=")]
+    assert len(extra_conf_flags) == 1
+    extra_conf_path = extra_conf_flags[0][len("-DEXTRA_CONF_FILE="):]
+
+    # Absolute (Zephyr resolves a relative EXTRA_CONF_FILE against
+    # APPLICATION_CONFIG_DIR, not the command's cwd -- a relative form
+    # would silently look for the fragment in the wrong place).
+    assert Path(extra_conf_path).is_absolute()
+
+    # Lands after `--`, i.e. it's a CMake define, never a west flag.
+    assert args.index("-DEXTRA_CONF_FILE=" + extra_conf_path) > args.index("--")
+
+    # Names the exact file `configArtefacts` already materialises for this
+    # slice -- the two must never drift into two different files.
+    confs = {a["path"]: a["contents"] for a in z["configArtefacts"]}
+    alp_conf_entries = [p for p in confs if p.endswith("alp.conf")]
+    assert len(alp_conf_entries) == 1
+    # `configArtefacts` carries the un-resolved (relative-to-buildRoot) form;
+    # anchored on board.yaml's own directory (never the test process's CWD
+    # -- the #596 invariant), it must land on the identical file
+    # EXTRA_CONF_FILE names -- proving the two can never drift apart.
+    assert (path.parent / alp_conf_entries[0]).resolve().as_posix() \
+        == extra_conf_path
+
+
+AEN801_BAREMETAL_PLUS_DEFAULTS = """
+som:
+  sku: E1M-AEN801
+
+cores:
+  m55_hp:
+    os: baremetal
+    app: ./src
+"""
+
+
+def test_yocto_baremetal_slices_carry_no_extra_conf_file(tmp_path: Path) -> None:
+    """EXTRA_CONF_FILE is a Zephyr-`west build` CMake define -- a Yocto
+    slice's `bitbake` command and a baremetal slice's `cmake -S/-B` command
+    must never carry it (Yocto's per-core config lands in `local.conf`
+    instead, wired by a different, out-of-scope mechanism). `m55_hp: os:
+    baremetal` plus the E1M-AEN801 preset's left-at-default `a32_cluster`
+    (yocto stock image) and `m55_he` (zephyr stock shim) exercises all
+    three backends' commands out of one board.yaml."""
+    import json as _json
+    from alp_orchestrate import emit_build_plan
+
+    path = _write_board(tmp_path, AEN801_BAREMETAL_PLUS_DEFAULTS)
+    plan = _json.loads(emit_build_plan(
+        load_board_yaml(path), board_yaml=path, build_root=Path("build")))
+
+    backends = {s["coreId"]: s["backend"] for s in plan["slices"]}
+    assert set(backends.values()) == {"yocto", "baremetal", "zephyr"}
+
+    for s in plan["slices"]:
+        if s["backend"] == "zephyr" or not s["command"]:
+            continue
+        assert not any(a.startswith("-DEXTRA_CONF_FILE=")
+                       for a in s["command"]["args"]), s["coreId"]
 
 
 # Every option the emitter is allowed to hand to `west build`: the exact set

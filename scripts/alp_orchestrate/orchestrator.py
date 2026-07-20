@@ -172,6 +172,35 @@ def _slice_command(
                     else [str(sb_conf)]
                 )
                 defines.append(f"-DSB_CONF_FILE={';'.join(sb_conf_files)}")
+        # Wire the slice's materialised per-core Kconfig fragment
+        # (`_slice_config_artefact` -> build_dir/alp.conf, already carried
+        # in the plan's `configArtefacts`) into the build command itself.
+        # Before this, nothing in the command ever referenced that file --
+        # it was DEAD -- and the only consumer of ALP Kconfig symbols was a
+        # leaky out-of-band `alp_project.py --emit zephyr-conf` call in the
+        # example's own CMakeLists.txt with no `--core`, which sums every
+        # core's symbols into one fragment (a cross-core Kconfig leak on
+        # any multi-Zephyr-core SoM). EXTRA_CONF_FILE -- not the deprecated
+        # OVERLAY_CONFIG -- is Zephyr's supported extra-fragment merge
+        # point (layered on top of prj.conf, after any --sysbuild overlay
+        # above, which configures a *different* image).
+        #
+        # The path must be ABSOLUTE: Zephyr resolves a relative
+        # EXTRA_CONF_FILE against APPLICATION_CONFIG_DIR (the app source
+        # dir), not the command's cwd, so a cwd-relative form would
+        # silently look for the fragment in the wrong place. Anchor a
+        # relative `build_dir` on `base_dir` (the project's board.yaml
+        # directory) -- NEVER on `Path.cwd()` -- for the same reason
+        # `_resolve_app_path`/`_zephyr_app_dir` do above (issue #596): the
+        # plan must be byte-identical no matter where the emitting process
+        # happens to be invoked from. This is the same `build_dir` the
+        # config artefact above and this slice's own `cwd` are built from,
+        # so the three can never point at three different files.
+        alp_conf = Path(slice_.build_dir) / "alp.conf"
+        if not alp_conf.is_absolute():
+            alp_conf = Path(base_dir) / alp_conf
+        alp_conf = alp_conf.resolve()
+        defines.append(f"-DEXTRA_CONF_FILE={alp_conf.as_posix()}")
         cmd += ["--", *defines]
         return cmd
     if slice_.os == "yocto":

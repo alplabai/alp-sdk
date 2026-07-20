@@ -1,9 +1,9 @@
 # board.yaml -- per-app project configuration for aen-analog-validate.
 #
 # DAC0 -> ADC loopback on the E1M-AEN801 (Alif Ensemble E8) SoM, driven through
-# the SoM-portable <alp/dac.h> + <alp/adc.h> surface.  CMakeLists.txt invokes
-# scripts/alp_project.py at configure time and layers the generated alp.conf
-# over prj.conf via OVERLAY_CONFIG.
+# and `west build`.  The planner (scripts/alp_orchestrate) derives the
+# per-core Kconfig from this file and wires it into `west build` via
+# `-DEXTRA_CONF_FILE=...` (see docs/adr/0020-sdk-owns-build-execution.md).
 #
 # The `adc` peripheral token lights CONFIG_ADC + the <alp/adc.h> wrapper + the
 # alif_e8 ADC backend (gated on CONFIG_ALP_SOC_ALIF_ENSEMBLE_E8, set here via the

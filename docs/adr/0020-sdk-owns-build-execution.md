@@ -55,6 +55,58 @@ blocked until the remediation is met. Tracked in #855.
    already honors + defaults both. This is the version-skew guard (§Decision-5)
    applied correctly.
 
+## Addendum (2026-07-20 — planner wires per-core config; tan stays a pure executor)
+
+A `configArtefacts` gap survived Phase 4: every Zephyr slice's plan already
+carried its own per-core-scoped `alp.conf` (materialised at
+`build/<core>-zephyr/alp.conf`, `buildplan.py::_slice_config_artefact` ->
+`kconfig.py::_slice_alp_conf`), but the plan's own `command` never referenced
+it — the artefact was DEAD. The real Kconfig came from a leaky, out-of-band
+path instead: each example's own `CMakeLists.txt` shelled `alp_project.py
+--emit zephyr-conf` at CMake-configure time with **no `--core`**, which sums
+every core's symbols into one fragment (`alp_project.py`'s documented
+unscoped-sum behavior) — a cross-core Kconfig leak on any multi-Zephyr-core
+SoM (every AEN-family example is one: the SoM preset always defaults the
+unused M55 core to the `alp-stock-shim` Zephyr slice, so a single-app example
+like `i2s-tone` silently pulled in a second core's symbols too).
+
+**Decision (Fable advise, Option B): the planner wires it, `tan` stays a pure
+executor.** `_slice_command` (`orchestrator.py`) now appends
+`-DEXTRA_CONF_FILE=<abs path to the slice's own build/<core>-zephyr/alp.conf>`
+to every Zephyr slice's `west build` command, inside the existing `--`
+passthrough segment (never a second `--`; the deprecated `OVERLAY_CONFIG` is
+not used). The path is resolved absolute and anchored on the project's own
+`board.yaml` directory (`base_dir`), never the emitting process's CWD — the
+same #596 invariant `_resolve_app_path`/`_zephyr_app_dir` already honor —
+because Zephyr resolves a *relative* `EXTRA_CONF_FILE` against
+`APPLICATION_CONFIG_DIR`, not the command's `cwd`. The leaky, unscoped
+`alp_project.py --emit zephyr-conf` + `OVERLAY_CONFIG` block is removed from
+every example `CMakeLists.txt` that carried it (67 total — the audit is
+`board.yaml`-driven: any project resolving 2+ Zephyr cores, cross-referenced
+against `alp_project.py`'s own "no `--core` sums across cores" behavior — not
+a hand list).
+
+This was landed as ONE atomic change (planner + every affected example +
+regenerated `check_emit_snapshots.py` goldens), never split across two PRs:
+double-applying both paths at once resolves conflicting symbols by
+undocumented CMake `-D`/merge-order (last-`-D`-wins on a literal duplicate,
+undocumented file-list order otherwise) into a coin-flip config; retiring the
+CMakeLists.txt path first (before the planner flag lands) drops ALP Kconfig
+to zero. Either half-state is a green build with wrong firmware.
+
+**Known gap this addendum does NOT close (flagged for the next slice):**
+`EXTRA_CONF_FILE` now reaches Zephyr's Kconfig merge only when `west build`
+runs *through* a consumer of `--emit build-plan` (i.e. `tan`). `twister`
+(`pr-twister.yml`) and any bare, manual `west build` invoke the example's
+`CMakeLists.txt` directly and never read the plan — they no longer receive
+`alp.conf` by ANY path. Several examples' `prj.conf` are empty by design
+(e.g. `iot-fleet-ota/prj.conf`: *"Empty-by-design Kconfig. The effective
+build config is the overlay alp.conf emitted... at configure time"*) and
+depend on `CONFIG_ALP_SDK=y` from `alp.conf`'s baseline fragment to even pull
+the SDK sources into the build. This addendum does not wire a twister-side
+equivalent; it is a known, separately-tracked follow-up, not swept under
+Phase 4's "no in-repo build oracle" cost.
+
 ## Context
 
 ### The problem
