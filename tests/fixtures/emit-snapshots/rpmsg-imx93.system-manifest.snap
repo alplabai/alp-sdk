@@ -24,8 +24,7 @@ slices:
   toolchain: arm-zephyr-eabi
   status: pending
   flash_method: zephyr_west_flash
-  flash_args:
-    runner: openocd
+  flash_args: {}
 ipc:
 - name: alp_default_rpmsg
   kind: rpmsg

@@ -83,11 +83,14 @@ Key contract every Alp peripheral call follows:
 ## Step 3 -- Build
 
 ```bash
-west alp-build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/peripheral-io/gpio-button-led
+tan build --board alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/peripheral-io/gpio-button-led
 ```
 
-If your west workspace doesn't recognise `alp-build`, that's the
-SDK's pre-flight wrapper.  Fallback:
+`tan` is the standalone build executor (ADR
+[0020](../adr/0020-sdk-owns-build-execution.md)); alp-sdk itself only
+emits the plan.  If you don't have `tan` installed
+([`alplabai/tan-cli`](https://github.com/alplabai/tan-cli)), fall back
+to driving `alp_project.py` + `west build` directly:
 
 ```bash
 python3 alp-sdk/scripts/alp_project.py \
@@ -102,7 +105,7 @@ west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/peripheral
 ## Step 4 -- Flash + run
 
 ```bash
-west flash
+tan flash
 ```
 
 Hold the button on the EVK -- the LED should light.  Release --

@@ -47,9 +47,10 @@ PARENT_DIR="$(cd "${REPO_ROOT}/.." && pwd)"
 
 # The west workspace topdir is the alp-sdk checkout's PARENT: we init the
 # workspace from alp-sdk's OWN west.yml (`west init -l "${REPO_ROOT}"`), so
-# alp-sdk becomes the manifest repo and west discovers the `alp-build`/`alp-flash`
-# /... extension commands from its `self.west-commands` (issue #769). `west init
-# -l <repo>` always makes topdir = dirname(<repo>) = PARENT_DIR, and leaves
+# alp-sdk becomes the manifest repo and west discovers the `alp-migrate`/`alp-lock`
+# /`alp-quality`/`alp-emit` extension commands from its `self.west-commands`
+# (issue #769). `west init -l <repo>` always makes topdir = dirname(<repo>) =
+# PARENT_DIR, and leaves
 # alp-sdk in place; Zephyr (pinned in that west.yml) + HALs + extras land as
 # siblings of alp-sdk under the topdir -- the canonical alp-sdk workspace layout.
 WORKSPACE_DIR="${PARENT_DIR}"
@@ -142,7 +143,7 @@ if [ -n "${ZEPHYR_BASE:-}" ] && [ -f "${ZEPHYR_BASE}/VERSION" ]; then
         END{print j"."n}' "${ZEPHYR_BASE}/VERSION" 2>/dev/null)"
     # Only reuse a pre-existing workspace whose active manifest IS alp-sdk's
     # west.yml -- otherwise it does not register the `alp-*` extension commands
-    # and `west alp-build` stays unknown (issue #769). west/venv aren't set up
+    # and `west alp-migrate` stays unknown (issue #769). west/venv aren't set up
     # yet here, so read .west/config directly for the manifest repo path.
     EXIST_MANIFEST_REL="$(sed -n 's/^[[:space:]]*path[[:space:]]*=[[:space:]]*//p' "${EXIST_TOP}/.west/config" 2>/dev/null | head -1)"
     EXIST_MANIFEST_DIR="$(cd "${EXIST_TOP}/${EXIST_MANIFEST_REL:-.}" 2>/dev/null && pwd || true)"
@@ -153,7 +154,7 @@ if [ -n "${ZEPHYR_BASE:-}" ] && [ -f "${ZEPHYR_BASE}/VERSION" ]; then
         ok "Reusing compatible alp-sdk workspace from \$ZEPHYR_BASE: ${WORKSPACE_DIR} (Zephyr ${EXIST_MM}.x)"
     elif [ -n "${EXIST_TOP}" ] && [ -d "${EXIST_TOP}/.west" ] && [ "${EXIST_MM}" = "${PIN_MM}" ]; then
         warn "\$ZEPHYR_BASE workspace (${EXIST_TOP}) is a ${PIN_MM}.x tree but its manifest is not alp-sdk's west.yml"
-        warn "-- not reusing it (would leave 'west alp-build' unknown, #769); building an alp-sdk workspace at ${WORKSPACE_DIR}"
+        warn "-- not reusing it (would leave 'west alp-migrate' unknown, #769); building an alp-sdk workspace at ${WORKSPACE_DIR}"
         unset ZEPHYR_BASE
     else
         warn "\$ZEPHYR_BASE (${ZEPHYR_BASE}) is not a ${PIN_MM}.x west workspace -- ignoring it and building an isolated one"
@@ -214,13 +215,13 @@ if [ "${DO_WEST}" -eq 1 ]; then
         ( cd "${WORKSPACE_DIR}" && "${WEST}" zephyr-export ) || true
     fi
 
-    # Legibility guard (#769): fail at bootstrap time -- not at first `alp build`
+    # Legibility guard (#769): fail at bootstrap time -- not at first `tan build`
     # -- if the workspace manifest doesn't register the alp-* extension commands.
     if [ "${REUSE_WS}" -eq 0 ]; then
-        if ! ( cd "${WORKSPACE_DIR}" && "${WEST}" help 2>/dev/null | grep -q 'alp-build' ); then
-            die "workspace at ${WORKSPACE_DIR} does not register 'west alp-build' -- its manifest is not alp-sdk's west.yml (#769). Check 'west -C ${WORKSPACE_DIR} config manifest.path'."
+        if ! ( cd "${WORKSPACE_DIR}" && "${WEST}" help 2>/dev/null | grep -q 'alp-migrate' ); then
+            die "workspace at ${WORKSPACE_DIR} does not register 'west alp-migrate' -- its manifest is not alp-sdk's west.yml (#769). Check 'west -C ${WORKSPACE_DIR} config manifest.path'."
         fi
-        ok "alp-* extension commands registered ('west alp-build' resolves in ${WORKSPACE_DIR})"
+        ok "alp-* extension commands registered ('west alp-migrate' resolves in ${WORKSPACE_DIR})"
     fi
 
     # NOTE: this does NOT install the Zephyr SDK (the cross toolchains).
@@ -247,8 +248,8 @@ if [ "${DO_PIP}" -eq 1 ]; then
     info "Installing alp-sdk Python extras into the venv (jsonschema, imgtool)"
     "${VPY}" -m pip install -q jsonschema imgtool \
         || warn "alp-sdk extras install reported a problem -- check manually"
-    # The `alp` CLI front door (alp init / build / run / flash / emit /
-    # validate / model / doctor / monitor) -- editable install, so a
+    # The `alp` CLI front door (alp init / run / emit / validate / model /
+    # doctor / monitor) -- editable install, so a
     # `git pull` in the checkout updates the CLI in place.
     info "Installing the alp CLI into the venv (pip install -e ${REPO_ROOT})"
     "${VPY}" -m pip install -q -e "${REPO_ROOT}" \

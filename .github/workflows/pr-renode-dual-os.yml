@@ -6,12 +6,13 @@
 # design (§7 Phase 5 + §11 acceptance) this is the canary that
 # proves the orchestrator's two slices actually talk to each other.
 #
-# v0.6 note: Renode dual-OS test is a stretch goal -- `west alp-renode`
-# + the dual-OS REPL script don't exist yet (they land in Phase 3).
-# The actual command is wrapped in `continue-on-error: true` so this
-# workflow can't block PRs while Phases 1-3 are in flight.  Promotes
-# to a required check in v0.6.1 once the Phase 3 IPC contract lands
-# and the handshake message is stable.
+# v0.6 note: Renode dual-OS test is a stretch goal.  ADR-0020 Phase 4
+# retired the SDK-side `west alp-renode`; the boot step below now
+# drives `tan renode` (github.com/alplabai/tan-cli), the standalone
+# executor.  The actual command is wrapped in `continue-on-error: true`
+# so this workflow can't block PRs while the dual-OS handshake path is
+# still maturing.  Promotes to a required check in v0.6.1 once the
+# Phase 3 IPC contract lands and the handshake message is stable.
 #
 # === Trigger chain choice ===
 #
@@ -126,13 +127,20 @@ jobs:
         # the artefact-name stabilisation above.
         continue-on-error: true
 
-      # The primary verification step.  `west alp-renode` is a Phase 2
-      # stub today and Renode itself isn't part of the standard CI
-      # runner image.  Keep advisory until the self-hosted runner
-      # ships Renode + the orchestrator's `alp-renode` command boots
-      # the dual-OS image to a stable handshake.  Promotes to
-      # required when the HW integration path lands in v0.6.1.
-      - name: west alp-renode (V2N dual-OS boot)
+      # Standalone Rust build/run executor for alp-sdk board.yaml plans
+      # (ADR-0020 Phase 4 -- the SDK-side `west alp-build`/`west alp-renode`
+      # executor was retired; `tan` is now the sole consumer of
+      # `alp_orchestrate --emit build-plan`).  No version pin: tan-cli is
+      # still a draft, main is the only meaningful ref.
+      - name: Install tan (github.com/alplabai/tan-cli)
+        run: cargo install --git https://github.com/alplabai/tan-cli --bin tan
+
+      # The primary verification step.  Renode itself isn't part of the
+      # standard CI runner image.  Keep advisory until the self-hosted
+      # runner ships Renode + `tan renode` boots the dual-OS image to a
+      # stable handshake.  Promotes to required when the HW integration
+      # path lands in v0.6.1.
+      - name: tan renode (V2N dual-OS boot)
         id: renode_boot
         working-directory: ${{ github.workspace }}/alp-sdk
         run: |
@@ -146,7 +154,7 @@ jobs:
           # Cap wall time at 60s per design §11 acceptance ("RPMsg
           # handshake completes within 60s in CI").  Renode's own
           # script-level termination is layered on top.
-          timeout 90 west alp-renode \
+          timeout 90 tan renode \
               --board E1M-V2N101 \
               --image-bundle /tmp/image-bundle \
               --log /tmp/renode-logs/v2n-dual-os.log

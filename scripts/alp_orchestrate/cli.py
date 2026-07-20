@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 from . import (
-    Orchestrator,
     OrchestratorError,
     emit_build_plan,
     emit_dts_partitions,
@@ -29,16 +28,13 @@ from . import (
 def main(argv: Optional[Iterable[str]] = None) -> int:
     import argparse
     parser = argparse.ArgumentParser(
-        description="Fan-out orchestrator for board.yaml.")
+        description="Planner/emit CLI for board.yaml (the executor was "
+                     "retired -- ADR-0020 Phase 4).")
     parser.add_argument("--input", type=Path, default=Path("board.yaml"),
                         help="Path to the project's board.yaml.")
     parser.add_argument("--build-root", type=Path,
                         default=Path("build"),
-                        help="Build root directory.")
-    parser.add_argument("--core", default=None,
-                        help="Limit fan-out to a single core ID.")
-    parser.add_argument("--no-parallel", action="store_true",
-                        help="Force sequential dispatch.")
+                        help="Build root directory (used by --emit build-plan).")
     parser.add_argument("--emit", default=None,
                         choices=["system-manifest", "ipc-contract-h",
                                  "dts-reservations", "dts-partitions",
@@ -77,28 +73,9 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             return 1
         return 0
 
-    orchestrator = Orchestrator(project, args.build_root,
-                                board_yaml=args.input)
-    try:
-        manifest = orchestrator.fan_out(
-            only_core=args.core, parallel=not args.no_parallel)
-    except OrchestratorError as e:
-        print(f"alp-orchestrate: {e}", file=sys.stderr)
-        return 1
-
-    # Surface per-slice status to the console.
-    failed = 0
-    for s in manifest.slices:
-        marker = {
-            "ok":      "[OK ]",
-            "failed":  "[FAIL]",
-            "skipped": "[SKIP]",
-            "pending": "[??? ]",
-        }.get(s.status, "[??? ]")
-        extra = f" -- {s.reason}" if s.reason else ""
-        print(f"{marker} {s.core_id}/{s.os}{extra}")
-        if s.status == "failed":
-            failed += 1
-    print(f"alp-orchestrate: manifest at "
-          f"{(args.build_root / 'system-manifest.yaml')}")
-    return 1 if failed > 0 else 0
+    # ADR-0020 Phase 4 (preview): the SDK-side executor was retired --
+    # this module only plans/emits now.  Building is an external
+    # consumer's job (against `--emit build-plan`'s JSON contract).
+    print("alp-orchestrate: no executor -- pass --emit to print a "
+          "generated artefact (e.g. --emit build-plan)", file=sys.stderr)
+    return 2

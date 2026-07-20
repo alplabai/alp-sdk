@@ -87,7 +87,7 @@
       },
       "debug": {
         "console": null,
-        "probe": "openocd"
+        "probe": null
       },
       "command": {
         "tool": "west",

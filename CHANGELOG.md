@@ -7,6 +7,17 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.12.0 candidate
 
+### Fixed — flash: defer the Zephyr flash runner to the board default
+
+- `_slice_flash_recipe` hardcoded `flash_args.runner: "openocd"` for every
+  Zephyr slice, but no in-tree board registers an openocd runner (AEN's
+  `board.cmake` sets `flash-runner: alif_flash`), so `west flash --runner
+  openocd` FATAL-errored — this blocked the AEN801 flash path an on-silicon
+  bench proved broken. Now no runner is forced: `zephyr_west_flash` omits
+  `--runner` unless `flash_args.runner` is explicitly set, and `west flash`
+  falls back to the board's own `board.cmake` default. `build-plan`'s
+  `debug.probe` follows suit (null unless a runner is explicitly configured).
+
 ### Added — build-plan envelope `executionPolicy`
 
 - `--emit build-plan`'s top-level envelope now carries `executionPolicy`

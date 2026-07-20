@@ -86,9 +86,11 @@ M55-HE.)
 
 `west flash` on the carrier board does **not** use J-Link — it invokes the
 **`alif_flash`** runner, which wraps the SETOOLS `app-gen-toc` + `app-write-mram`
-sequence above (it stages the *same* signed-ATOC config, `loadAddress 0x58000000`
-for the M55-HE, that the manual path uses). Use the sysbuild flow so MCUboot
-signs your image into slot0:
+sequence above. The runner auto-detects the ATOC shape from the build's own
+reset vector: an ITCM-linked app gets the embedded `loadAddress 0x58000000`
+(M55-HE) config the manual path above uses; a slot0-XIP app (see below) gets
+a standalone `mramAddress 0x80010000` config instead. Use the sysbuild flow
+so MCUboot signs your image into slot0:
 
 ```bash
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <your-app> \
@@ -113,9 +115,12 @@ Two host prerequisites:
   and at the SE-UART with `--se-uart` or `$SE_UART` (the same env vars
   `scripts/bench/aen/flash-run.sh` uses, so a host already set up for the bench
   helper needs no extra flags). A slot0-linked app that overflows ITCM (e.g. an
-  NPU model; `mramAddress 0x80010000`, flags `["boot"]`) is NOT provisionable
-  through this SE-UART-only runner — `--mram-xip` fails fast and routes you to
-  the two-blob `scripts/bench/aen/flash-jlink-mramxip.sh` (Flow D) helper.
+  NPU model; `mramAddress 0x80010000`, flags `["boot"]`) provisions the same
+  way — bench-proven 2026-07-19, a single `app-write-mram -p` run over the
+  SE-UART burns both the standalone app blob at `0x80010000` and the signed
+  ATOC. `scripts/bench/aen/flash-jlink-mramxip.sh` (Flow D) remains available
+  as a faster SWD-only alternative that skips the SE-UART reset race, not a
+  requirement.
 
 > **Pre-provisioned modules from Alp Lab** already carry a dev-signed MCUboot +
 > self-test in slot0 (LCS=DM), so the core is already released and `west flash`
