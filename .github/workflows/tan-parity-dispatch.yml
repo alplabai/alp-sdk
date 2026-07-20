@@ -1,0 +1,53 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# ADR-0020 cross-repo parity trigger (alp-sdk side). The ADR's "one thing that
+# must hold" + "Cross-repo oracle trigger" require that every alp-sdk PLANNER
+# change automatically runs `tan`'s build-validation, so a plan that emits fine
+# but builds wrong surfaces on the alp-sdk change itself -- not later. Phase 4
+# deleted `fan_out` (the only in-repo oracle), so this trigger is what keeps the
+# contract honest. Pairs with alplabai/tan-cli's `parity.yml`
+# (repository_dispatch type `alp-sdk-planner-change`). Tracked in #855.
+#
+# SECRET REQUIRED (repo admin): TAN_DISPATCH_TOKEN — a PAT or GitHub App token
+# with permission to POST /repos/alplabai/tan-cli/dispatches. Until it is set,
+# this job SKIPS with a warning (it never hard-fails a push).
+name: tan-parity-dispatch
+
+on:
+  push:
+    branches: [dev, main]
+    paths:
+      - "scripts/alp_orchestrate/**"
+      - "metadata/schemas/build-plan-v1.schema.json"
+      - "metadata/**"
+      - "examples/**/board.yaml"
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger tan build-validation
+        env:
+          TAN_DISPATCH_TOKEN: ${{ secrets.TAN_DISPATCH_TOKEN }}
+          SDK_SHA: ${{ github.sha }}
+          SDK_BRANCH: ${{ github.ref_name }}
+        run: |
+          if [ -z "$TAN_DISPATCH_TOKEN" ]; then
+            echo "::warning::TAN_DISPATCH_TOKEN not set — skipping tan parity dispatch."
+            echo "Create a PAT/App token that can POST to alplabai/tan-cli dispatches and"
+            echo "set it as the TAN_DISPATCH_TOKEN secret to enable the ADR-0020 gate (#855)."
+            exit 0
+          fi
+          # SDK_SHA / SDK_BRANCH are trusted GitHub context (not user payload);
+          # jq builds the JSON body so no value is shell-interpolated into it.
+          body="$(jq -nc --arg ref "$SDK_SHA" --arg br "$SDK_BRANCH" \
+            '{event_type:"alp-sdk-planner-change",client_payload:{sdk_ref:$ref,branch:$br}}')"
+          curl -sSf -X POST \
+            -H "Authorization: Bearer $TAN_DISPATCH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/alplabai/tan-cli/dispatches \
+            -d "$body"
+          echo "::notice::dispatched alp-sdk-planner-change to tan-cli for $SDK_SHA ($SDK_BRANCH)"
