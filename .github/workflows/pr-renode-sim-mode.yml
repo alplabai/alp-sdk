@@ -63,7 +63,6 @@ jobs:
           filters: |
             renode:
               - 'metadata/renode/renesas_rzv2n.*'
-              - 'scripts/west_commands/alp_renode.py'
               - 'tests/scripts/test_alp_renode_sim.py'
               - 'tests/renode/v2n_m33_ramconsole.conf'
               - 'tests/renode/aen_m55_itcm_run.overlay'
