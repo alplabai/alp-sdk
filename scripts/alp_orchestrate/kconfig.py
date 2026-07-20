@@ -1164,6 +1164,9 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     from alp_project import (  # type: ignore
         _CHIP_SUBSYSTEMS,
     )
+    from alp_project_emit import (  # type: ignore
+        _emit_library_hw_backends,
+    )
 
     lines: list[str] = []
     lines.extend(_emit_baseline(slice_, diagnostics))
@@ -1179,6 +1182,19 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
         lines.extend(iot_lines)
 
     lines.extend(_emit_libraries(project, slice_))
+    # §D.lib.loader -- per-`libraries:` HW-accelerator backend wiring
+    # (CONFIG_ALP_<LIB>_<BACKEND>=y). This is the single source both the
+    # planner's build-plan `configArtefacts` and `alp_project.py --emit
+    # zephyr-conf --core <id>` (the CMakeLists.txt-driven path) now share
+    # -- folded in here (2026-07-20) so the two paths cannot silently
+    # diverge on a `libraries:` entry with a hw_backends matcher; see
+    # docs/adr/0020-sdk-owns-build-execution.md addendum.
+    hw_backend_lines = _emit_library_hw_backends(slice_.libraries, project.sku)
+    if hw_backend_lines:
+        lines.append("# §D.lib.loader -- per-library HW-accelerator "
+                     "wiring (auto-emitted).")
+        lines.extend(hw_backend_lines)
+        lines.append("")
     lines.extend(_emit_inference(project, slice_, silicon))
     lines.extend(_emit_memory(slice_))
     lines.extend(_emit_power(slice_))

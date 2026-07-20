@@ -24,24 +24,12 @@ tests:
       type: one_line
       regex:
         - "\\[ota\\] done"
-    # native_sim.conf flips CONFIG_MBEDTLS off -- works around the
+    # native_sim.conf loads LAST (after alp.conf's OVERLAY_CONFIG emit --
+    # see CMakeLists.txt's `--core m55_hp`-scoped `alp_project.py --emit
+    # zephyr-conf` call, docs/adr/0020-sdk-owns-build-execution.md
+    # addendum) so it can flip CONFIG_MBEDTLS off -- works around the
     # Zephyr 4.4 / mbedtls 3.6 ssl_misc.h include-order bug; see
     # native_sim.conf for the full rationale.
-    #
-    # KNOWN GAP (docs/adr/0020-sdk-owns-build-execution.md addendum,
-    # 2026-07-20): twister invokes `west build` directly, never through
-    # the planner's `--emit build-plan` -> `tan` path, so this test no
-    # longer receives board.yaml's derived alp.conf by ANY mechanism (the
-    # CMakeLists.txt-level `alp_project.py --emit zephyr-conf` call that
-    # used to layer it in via OVERLAY_CONFIG -- unscoped, so it also
-    # leaked m55_he's symbols into this m55_hp build -- was removed; the
-    # planner's replacement, `-DEXTRA_CONF_FILE=<alp.conf>` on the `west
-    # build` command, only reaches a build routed through `tan`). This
-    # `EXTRA_CONF_FILE=native_sim.conf` therefore no longer has an
-    # alp.conf beneath it to "load after" -- it is the ONLY conf overlay
-    # this twister build gets. Not addressed by this change; a twister-side
-    # equivalent (or a pre-generated, `--core`-scoped alp.conf fed the same
-    # way) is a separate, tracked follow-up.
     extra_args:
       - "EXTRA_CONF_FILE=native_sim.conf"
   alp_sdk.examples.iot_fleet_ota.aen:

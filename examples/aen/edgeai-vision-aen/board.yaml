@@ -3,9 +3,9 @@
 #
 # Customer workflow: copy this directory, change `som.sku` to
 # your AEN MPN, edit `preset:` if you fork the EVK, and
-# `west build`.  The planner (scripts/alp_orchestrate) derives the
-# per-core Kconfig from this file and wires it into `west build` via
-# `-DEXTRA_CONF_FILE=...` (see docs/adr/0020-sdk-owns-build-execution.md).
+# `west build`.  CMakeLists.txt invokes scripts/alp_project.py
+# at configure time and layers the generated alp.conf over
+# prj.conf via OVERLAY_CONFIG.
 
 som:
   sku: E1M-AEN801          # Alif Ensemble E8 (the lead AEN part) -- carries

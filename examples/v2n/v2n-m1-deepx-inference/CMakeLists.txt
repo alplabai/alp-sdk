@@ -14,7 +14,7 @@ set(_alp_generated ${CMAKE_BINARY_DIR}/generated/alp.conf)
 execute_process(
     COMMAND ${Python3_EXECUTABLE} ${ALP_SDK_ROOT}/scripts/alp_project.py
             --input ${CMAKE_CURRENT_SOURCE_DIR}/board.yaml
-            --emit zephyr-conf
+            --emit zephyr-conf --core m33_sm
             --output ${_alp_generated}
     RESULT_VARIABLE _alp_rv
     OUTPUT_VARIABLE _alp_stdout

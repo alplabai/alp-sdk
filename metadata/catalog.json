@@ -978,6 +978,10 @@
     {
       "purpose": "Fail if any version copy drifts from the declared SDK version.",
       "script": "scripts/check_version_doc_sync.py"
+    },
+    {
+      "purpose": "Byte-parity gate: a Zephyr example's own `CMakeLists.txt` (which shells `alp_project.py --emit zephyr-conf --core <id>` at configure time) and the planner's build-plan `configArtefacts` (`--emit build-plan`, consumed by `tan`) MUST materialise the identical `alp.conf` for the same core.",
+      "script": "scripts/check_zephyr_conf_parity.py"
     }
   ],
   "portable_api": [
