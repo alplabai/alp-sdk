@@ -119,8 +119,11 @@ Contract properties (locked with the consumer):
   (`{"unknownBackend": "fail", "missingTool": "skip", "nullCommand":
   "skip"}`), publishing the skip-vs-fail rules
   `Orchestrator._dispatch_slice` itself applies so a plan consumer
-  stops hand-porting them. Unlike the provenance keys above,
-  `executionPolicy` is always emitted, so it is in the schema's
-  top-level `required` array (no existing fixture regenerates a plan
-  without it — `check_build_plan.py`'s corpus always calls the real
-  emitter).
+  stops hand-porting them. `executionPolicy` is **always emitted**
+  (strict producer) but is **optional** in the schema (tolerant
+  consumer), so a field-absent plan — e.g. a `v0.11.1` plan — still
+  validates and a consumer applies the documented default. (Corrected
+  2026-07-20: it was briefly `required`, which is a breaking shape
+  change at unchanged `schemaVersion 1`; reverted per the ADR-0020
+  amendment. The consumer pins `schemaVersion == 1`, so a bump was not
+  the fix.)
