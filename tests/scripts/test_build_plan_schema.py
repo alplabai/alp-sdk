@@ -421,6 +421,65 @@ def test_missing_required_field_rejected():
     assert errors, "missing required 'env' should have been rejected"
 
 
+def test_execution_policy_absent_at_top_level_still_validates():
+    """Strict-producer / tolerant-consumer (#855, reverting #847's breaking
+    shape change): `executionPolicy` is no longer in the top-level
+    `required` array, so a plan that omits it entirely -- e.g. every
+    historical/v0.11.1 plan predating #847 -- still validates under
+    schemaVersion 1 rather than being rejected. The real emitter keeps
+    emitting it unconditionally on every plan regardless (see
+    test_emit_build_plan_publishes_execution_policy in
+    test_orchestrate_buildplan.py) -- this only relaxes what the SCHEMA
+    accepts, not what the SDK actually produces."""
+    ok = {
+        "schemaVersion": 1,
+        "generatedBy": "scripts/alp_orchestrate.py",
+        "boardYaml": "board.yaml",
+        "sku": "E1M-V2N101",
+        "buildRoot": "build",
+        # "executionPolicy" deliberately omitted -- optional per the schema.
+        "slices": [{
+            "coreId": "m33_sm",
+            "backend": "zephyr",
+            "buildDir": "build/m33_sm-zephyr",
+            "appDir": None,
+            "configArtefacts": [],
+            "command": None,
+            "env": {"ALP_SDK_ROOT": "/repo"},
+        }],
+        "sharedArtefacts": [],
+        "warnings": [],
+    }
+    validator = jsonschema.Draft202012Validator(_schema())
+    errors = list(validator.iter_errors(ok))
+    assert errors == [], "\n".join(str(e) for e in errors)
+
+
+def test_execution_policy_still_validated_when_present():
+    """`executionPolicy` stays a KNOWN, VALIDATED key -- optional, not
+    schema-less. A plan that includes it with a malformed shape (missing
+    `nullCommand`) is still rejected, same as before #855; only the
+    top-level `required` entry was dropped."""
+    bad = {
+        "schemaVersion": 1,
+        "generatedBy": "scripts/alp_orchestrate.py",
+        "boardYaml": "board.yaml",
+        "sku": "E1M-V2N101",
+        "buildRoot": "build",
+        "executionPolicy": {
+            "unknownBackend": "fail",
+            "missingTool": "skip",
+            # "nullCommand" deliberately omitted -- required by the
+            # executionPolicy sub-schema whenever the key is present.
+        },
+        "slices": [],
+        "sharedArtefacts": [],
+        "warnings": [],
+    }
+    validator = jsonschema.Draft202012Validator(_schema())
+    assert list(validator.iter_errors(bad)) != []
+
+
 def test_unknown_top_level_key_rejected():
     """`additionalProperties: false` at the top level catches drift/typos
     the way `check_system_manifest.py`'s contract does for the sibling

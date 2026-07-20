@@ -5,7 +5,7 @@
   "description": "The machine-readable build plan `scripts/alp_orchestrate/buildplan.py::emit_build_plan` renders for a resolved board.yaml project (the `alp` CLI / alp-sdk-vscode 'Wave C' consumer contract, settled 2026-06-04). One entry per non-`off` core slice, each carrying its build command, config artefact contents, and app source dir, plus the shared (cross-slice) generated artefacts and any non-fatal planning warnings. Every artefact carries its full `contents` so the consumer's materialise step stays pure IO -- the plan and the Orchestrator's own on-disk materialise step are written from the same `_shared_artefacts`/`_slice_config_artefact` helpers and MUST agree byte-for-byte. camelCase keys (this is a CLI-consumer contract, not an in-repo YAML). Stability: schemaVersion 1 is locked with the alp-sdk-vscode consumer -- bump schemaVersion and record the change in the CHANGELOG before altering this shape; do not add breaking changes silently.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "generatedBy", "boardYaml", "sku", "buildRoot", "executionPolicy", "slices", "sharedArtefacts", "warnings"],
+  "required": ["schemaVersion", "generatedBy", "boardYaml", "sku", "buildRoot", "slices", "sharedArtefacts", "warnings"],
   "properties": {
     "schemaVersion": {
       "const": 1,
