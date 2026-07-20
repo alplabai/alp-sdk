@@ -3,22 +3,21 @@
 # Renode single-core (Alif Ensemble E8 / E1M-AEN801) smoke test.
 #
 # Builds examples/peripheral-io/hello-world for the M55-HP Zephyr
-# slice, boots the resulting ELF headless in Renode via
-# `tan renode` (the standalone github.com/alplabai/tan-cli executor
-# -- ADR-0020 Phase 4 retired the SDK-side `west alp-build`/`west
-# alp-renode` commands this workflow used to drive), and asserts the
-# app's "[hello] done" marker reaches the UART5 console.
+# slice LOCALLY (plain `west build`, mirroring pr-renode-sim-mode.yml's
+# AEN M55 ITCM-run image step) -- this still proves the example
+# compiles for the M55-HP slice.
+#
+# PENDING (tan-cli#674): the actual headless Renode boot + "[hello]
+# done" UART5-console assertion used to run via `tan build --native` +
+# `tan renode ... --expect "[hello] done"` (ADR-0020 Phase 4 retired
+# the SDK-side `west alp-build`/`west alp-renode` executor this
+# workflow used to drive before that).  `tan renode` is the designated
+# successor but is still a stub there, so the e2e step below is
+# intentionally a no-op until tan-cli#674 closes -- see
+# pr-renode-sim-mode.yml for the same pattern.
 #
 # !! ADVISORY until the M55 boot is validated on a Renode-equipped
-#    runner; flip to required once green.  The build/run/assert steps
-#    carry `continue-on-error: true` (mirrors pr-renode-dual-os.yml) so
-#    this workflow cannot block PRs while:
-#      - the metadata/renode/alif_ensemble_e8.repl / .resc are still
-#        unverified on a real Renode (authored HW-free), and
-#      - it's unconfirmed that Renode v1.16.1 recognises "cortex-m55"
-#        (the .repl notes the cortex-m33 fallback).
-#    Promote to a required branch-protection context once a runner
-#    proves the console reaches "[hello] done".
+#    runner; flip to required once green.
 #
 # What IS already validated elsewhere, not this advisory job: `tan
 # renode`'s own deterministic logic (manifest parsing, ELF-path
@@ -35,7 +34,6 @@ on:
     branches: [main, dev]
     paths:
       - 'metadata/renode/**'
-      - 'scripts/west_commands/alp_renode.py'
       - 'examples/peripheral-io/hello-world/**'
       - '.github/workflows/pr-renode-aen-smoke.yml'
   workflow_dispatch:
@@ -117,65 +115,34 @@ jobs:
           # $GITHUB_PATH only applies to later steps, so smoke-check by full path.
           "$HOME/renode/renode" --version
 
-      # Standalone Rust build/run executor for alp-sdk board.yaml plans
-      # (ADR-0020 Phase 4 -- the SDK-side `west alp-build`/`west alp-renode`
-      # executor was retired; `tan` is now the sole consumer of
-      # `alp_orchestrate --emit build-plan`).  No version pin: tan-cli is
-      # still a draft, main is the only meaningful ref.
-      - name: Install tan (github.com/alplabai/tan-cli)
-        run: cargo install --git https://github.com/alplabai/tan-cli --bin tan
-
-      # ---- Advisory verification (continue-on-error) ----------------
-
-      - name: tan build hello-world (M55-HP slice)
-        id: alp_build
+      # Build the M55-HP slice locally (west, not tan).  ITCM-linked
+      # (chosen zephyr,flash = &itcm), same overlay/conf pair as
+      # pr-renode-sim-mode.yml's AEN M55 image -- dodges Renode 1.16.1's
+      # high-VTOR Cortex-M55 bug so the ELF stays boot-ready once the
+      # e2e below is un-stubbed.
+      - name: Build hello-world (M55-HP ITCM-run image)
+        id: build_fw
         continue-on-error: true
         working-directory: ${{ github.workspace }}/alp-sdk
         env:
-          # Workspace topdir is the alp-sdk checkout's PARENT (west init -l,
-          # #769/#850) -- zephyr lands directly at <topdir>/zephyr, no
-          # zephyrproject/ subdir.
           ZEPHYR_BASE: ${{ github.workspace }}/zephyr
         run: |
           set -euo pipefail
-          tan build --native --sdk-root "${{ github.workspace }}/alp-sdk" \
-              --board-yaml examples/peripheral-io/hello-world/board.yaml
+          west build -p always \
+              -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp \
+              examples/peripheral-io/hello-world \
+              -d /tmp/aen-smoke-build \
+              -- -DEXTRA_ZEPHYR_MODULES="${GITHUB_WORKSPACE}/alp-sdk" \
+                 -DEXTRA_DTC_OVERLAY_FILE="${GITHUB_WORKSPACE}/alp-sdk/tests/renode/aen_m55_itcm_run.overlay" \
+                 -DEXTRA_CONF_FILE="${GITHUB_WORKSPACE}/alp-sdk/tests/renode/aen_m55_sim.conf"
+          test -f /tmp/aen-smoke-build/zephyr/zephyr.elf
 
-      - name: tan renode (boot M55-HP in Renode)
-        id: alp_renode
-        continue-on-error: true
-        working-directory: ${{ github.workspace }}/alp-sdk
-        run: |
-          set -euo pipefail
-          mkdir -p /tmp/renode-logs
-          tan renode examples/peripheral-io/hello-world \
-              --log /tmp/renode-logs/out.log \
-              --expect "[hello] done" \
-              --timeout 120
-
-      - name: Assert "[hello] done" reached the console
-        id: assert
-        continue-on-error: true
-        run: |
-          set -euo pipefail
-          log=/tmp/renode-logs/out.log
-          if [ ! -s "${log}" ]; then
-            echo "::error::Renode log missing or empty at ${log}"
-            exit 1
-          fi
-          if ! grep -q "\[hello\] done" "${log}"; then
-            echo "::error::Renode console did not contain '[hello] done' within timeout"
-            echo "--- tail of ${log} ---"
-            tail -100 "${log}"
-            exit 1
-          fi
-          echo "Observed '[hello] done'; AEN801 M55-HP Renode smoke OK."
-
-      - name: Upload Renode log
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: renode-aen-smoke-log
-          path: /tmp/renode-logs/
-          retention-days: 14
-          if-no-files-found: ignore
+      # PENDING (tan-cli#674): the headless boot + "[hello] done"
+      # UART5-console assertion used to run via `tan build --native` +
+      # `tan renode ... --expect "[hello] done"` -- both retired from
+      # this repo (ADR-0020 Phase 4).  `tan renode` is the designated
+      # successor but is still a stub there -- do not delete this step
+      # silently; flip it back to a real `tan renode ...` invocation
+      # once the stub lands.
+      - name: AEN801 M55-HP Renode boot e2e [PENDING tan-cli#674]
+        run: echo "::notice::[PENDING tan-cli#674] tan renode e2e is covered in tan-cli CI"
