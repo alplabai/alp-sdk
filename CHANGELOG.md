@@ -7,6 +7,19 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.12.0 candidate
 
+### Fixed — build-plan `executionPolicy` reverted from required to optional
+
+- `#847` added `executionPolicy` to the build-plan schema's top-level
+  `required` array while `schemaVersion` stayed `const: 1` — a breaking
+  shape change with no version bump (violating ADR 0014's own
+  additive-change rule), rejecting every field-absent historical/v0.11.1
+  plan against a consumer (`tan`) that pins `schemaVersion == 1`. Reverted
+  to strict-producer / tolerant-consumer: `executionPolicy` stays in
+  `properties` (a known, validated key when present) but is no longer
+  `required` — the SDK emitter keeps emitting it unconditionally on every
+  plan regardless. Additive to schemaVersion 1, per ADR 0014 / the ADR-0020
+  amendment (#855).
+
 ### Fixed — flash: defer the Zephyr flash runner to the board default
 
 - `_slice_flash_recipe` hardcoded `flash_args.runner: "openocd"` for every
