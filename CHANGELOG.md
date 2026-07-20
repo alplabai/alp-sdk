@@ -7,6 +7,26 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.12.0 candidate
 
+### Fixed — build-plan per-core `alp.conf` was materialised but never wired into the build
+
+- Every Zephyr slice's `--emit build-plan` already carried a per-core
+  `configArtefacts` `alp.conf` (`build/<core>-zephyr/alp.conf`), but the slice's
+  own `command` never referenced it — a DEAD artefact for a `tan`-driven build
+  (`tan` materialised it, then built without it). Separately, each example's
+  `CMakeLists.txt` shelled `alp_project.py --emit zephyr-conf` with no `--core`,
+  summing every core's symbols into one fragment — a cross-core Kconfig leak on
+  any multi-Zephyr-core SoM (every AEN-family example, since the preset defaults
+  the unused M55 to the `alp-stock-shim` slice). Now `orchestrator.py` appends
+  `-DEXTRA_CONF_FILE=<abs build/<core>-zephyr/alp.conf>` to each Zephyr slice
+  command (what a `tan` build consumes), the `CMakeLists.txt` bridge is KEPT but
+  `--core`-scoped (twister / bare `west build` never read the plan), and
+  `_emit_library_hw_backends` is folded into the shared `_slice_alp_conf` so both
+  paths emit byte-identical output. New gate `check_zephyr_conf_parity.py` pins
+  that byte-parity across the example corpus and fails on any re-introduced
+  unscoped `--emit zephyr-conf`. ADR-0020 addendum (2026-07-20); the CMakeLists
+  bridge's eventual retirement is separate future work gated on a non-`tan`
+  `alp.conf` delivery mechanism.
+
 ### Fixed — build-plan `executionPolicy` reverted from required to optional
 
 - `#847` added `executionPolicy` to the build-plan schema's top-level
