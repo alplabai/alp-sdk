@@ -7,7 +7,8 @@ ADR-0020 Phase 4 (preview) retired the SDK-side executor -- the
 `Orchestrator` class that fanned build sub-processes out and materialised
 artefacts to disk.  What remains here is pure, side-effect-free: resolving
 what a slice's build command WOULD be, so `emit_build_plan` can describe it
-to an external consumer (the `alp` CLI / alp-studio) that owns execution.
+to an external consumer (`tan`, alplabai/tan-cli, / alp-studio) that owns
+execution.
 """
 
 from __future__ import annotations
@@ -22,22 +23,11 @@ from .secure import (emit_sysbuild_conf, emit_tfm_sysbuild_conf,
                       sysbuild_family_base_conf)
 
 
-# Tool table naming the executable each os's build command needs on PATH.
-# Not consulted here -- kept as the one piece of "which tool builds this
-# os" knowledge an external executor can import instead of re-deriving.
-_TOOL_FOR_OS: dict[str, str] = {
-    "zephyr":    "west",
-    "yocto":     "bitbake",
-    "baremetal": "cmake",
-    # 'off' never reaches the dispatcher.
-}
-
-
 def iter_buildable_slices(project: BoardProject):
     """Yield every non-`off` core's `Slice`, sorted by `core_id`.
 
     ADR-0020 Phase 1: the SINGLE source of WHICH cores build and in WHAT
-    ORDER, so `emit_build_plan()` (the plan the `alp` CLI reads) always
+    ORDER, so `emit_build_plan()` (the plan `tan` reads) always
     enumerates slices the same way.
     """
     for core_id in sorted(project.cores):
@@ -112,6 +102,12 @@ def _slice_command(
     if slice_.os == "zephyr":
         if not slice_.app or not slice_.board:
             return None
+        # NB: no explicit `-d`. west's default output is <cwd>/build (a
+        # subdirectory of the command's cwd = buildDir), so the tree lands
+        # at <buildDir>/build/; the consumer (tan) reconciles that nested
+        # layout when it resolves artefacts. Adding `-d <buildDir>` here
+        # would double-nest (west resolves a relative -d against its cwd,
+        # already = buildDir) -- see finding M14.
         cmd = [
             "west", "build",
             "-b", slice_.board,
@@ -156,8 +152,17 @@ def _slice_command(
                 # (share/sysbuild/cmake/modules/sysbuild_kconfig.cmake),
                 # so the cwd-relative form this used to emit would silently
                 # look for the overlay under the application's source dir.
-                sb_conf = (Path(slice_.build_dir).parent
-                           / "alp_sysbuild.conf").resolve()
+                #
+                # Anchor on `base_dir` (the board.yaml directory), never the
+                # emitting process's CWD: `slice_.build_dir`'s parent is the
+                # build root, which may itself be a relative path, and
+                # resolving a relative path bare falls back to
+                # `Path.cwd()` -- the same #596 CWD-dependence bug class
+                # `_resolve_app_path` guards against for `app:`.
+                build_root_dir = Path(slice_.build_dir).parent
+                if not build_root_dir.is_absolute():
+                    build_root_dir = base_dir / build_root_dir
+                sb_conf = (build_root_dir.resolve() / "alp_sysbuild.conf")
                 # LAYER, don't replace: SB_CONF_FILE accepts a `;`-joined
                 # list, and sysbuild merges every listed file in order
                 # (later files win on a repeated symbol).  When the SoM
@@ -167,9 +172,15 @@ def _slice_command(
                 # instead of forking family boot policy into two
                 # divergent places (issue #807).
                 family_base = sysbuild_family_base_conf(project)
+                # Forward slashes: CMake's `cmake_path()` (which
+                # sysbuild_kconfig.cmake uses to split the `;`-joined
+                # SB_CONF_FILE list) only recognises `/` -- a native
+                # Windows backslash path here dies the configure step
+                # with "File ... not found", the same class of bug
+                # #849 fixed for -DPython3_EXECUTABLE.
                 sb_conf_files = (
-                    [str(family_base), str(sb_conf)] if family_base
-                    else [str(sb_conf)]
+                    [family_base.as_posix(), sb_conf.as_posix()]
+                    if family_base else [sb_conf.as_posix()]
                 )
                 defines.append(f"-DSB_CONF_FILE={';'.join(sb_conf_files)}")
         cmd += ["--", *defines]

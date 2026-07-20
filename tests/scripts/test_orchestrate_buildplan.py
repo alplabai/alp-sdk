@@ -237,6 +237,8 @@ cores:
         "-b",
         "alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33",
     ]
+    # No explicit `-d`: west's default output (<cwd>/build) is reconciled by
+    # the consumer, so the app dir follows the board directly (finding M14).
     assert m33["command"]["args"][3] == str(
         REPO / "firmware" / "alp-stock-shim")
     assert m33["command"]["cwd"] == "build/m33_sm-zephyr"
@@ -383,16 +385,23 @@ def test_zephyr_slice_command_wires_sysbuild_overlay(tmp_path: Path) -> None:
     assert args[:2] == ["build", "-b"]
     assert "--sysbuild" in args
 
-    sb_conf = (Path("build") / "alp_sysbuild.conf").resolve()
+    # Anchored on the board.yaml's own directory (`base_dir`, #596), never
+    # the test-runner's CWD -- `_write_board` drops board.yaml straight
+    # into `tmp_path`, so that IS base_dir here.
+    sb_conf = (path.resolve().parent / "build" / "alp_sysbuild.conf")
     assert args[-3:] == [
         "--",
         f"-DPython3_EXECUTABLE={sys.executable.replace(chr(92), '/')}",
-        f"-DSB_CONF_FILE={sb_conf}",
+        f"-DSB_CONF_FILE={sb_conf.as_posix()}",
     ]
     # The overlay define is a CMake define, never a west flag: it has to
-    # land AFTER `--`, and the path has to be absolute.
+    # land AFTER `--`, the path has to be absolute, and (#849-class bug)
+    # forward-slashed even on Windows, since CMake's cmake_path() (which
+    # sysbuild_kconfig.cmake uses to split the `;`-joined list) only
+    # recognises `/`.
     assert args.index("--sysbuild") < args.index("--")
     assert sb_conf.is_absolute()
+    assert "\\" not in args[-1]
 
     # Without boot: -> no sysbuild overlay -> no flag, bare command.
     path2 = _write_board(tmp_path, V2N_HAPPY, name="board-noboot.yaml")
@@ -888,9 +897,9 @@ def test_emit_build_plan_env_append_carries_pythonpath(
 
 def test_emit_build_plan_publishes_execution_policy(tmp_path: Path) -> None:
     """The envelope's `executionPolicy` publishes the skip-vs-fail rules
-    `Orchestrator._dispatch_slice` actually applies (unknown os -> fail,
-    tool missing from PATH -> skip, command: null -> skip), so a plan
-    consumer stops hand-porting that policy. Additive, schemaVersion 1."""
+    the executor applies (unknown backend -> fail, tool missing from PATH
+    -> skip, command: null -> skip), so a plan consumer stops hand-porting
+    that policy. Additive, schemaVersion 1."""
     import json as _json
     from alp_orchestrate import emit_build_plan
 
