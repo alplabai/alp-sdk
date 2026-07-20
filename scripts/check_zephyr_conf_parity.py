@@ -46,6 +46,10 @@ _CORE_RE = re.compile(r"--emit\s+zephyr-conf\s+--core\s+(\S+)")
 _INPUT_RE = re.compile(
     r"COMMAND\b.*?--input\s+\$\{CMAKE_CURRENT_SOURCE_DIR\}/(\S+?board\.yaml)",
     re.DOTALL)
+# Any `--emit zephyr-conf`, `--core`-scoped or not. When a file's count of
+# these exceeds its `--core`-scoped count (`_CORE_RE`), some invocation is
+# UNSCOPED -- the cross-core Kconfig sum ADR-0020's addendum retired.
+_EMIT_RE = re.compile(r"--emit\s+zephyr-conf\b")
 
 
 def _find_cases() -> list[tuple[Path, Path, str]]:
@@ -64,7 +68,31 @@ def _find_cases() -> list[tuple[Path, Path, str]]:
     return cases
 
 
+def _find_unscoped_emits(repo: Path = REPO) -> list[Path]:
+    """CMakeLists.txt files with a `--emit zephyr-conf` invocation that is
+    NOT `--core`-scoped -- the cross-core Kconfig leak ADR-0020's addendum
+    retired. `_find_cases` silently skips a `--core`-less invocation, so
+    without this guard a re-introduced unscoped emit would pass the gate
+    while shipping cross-core-contaminated firmware. Fail loudly instead."""
+    leaks = []
+    for cmakelists in sorted(repo.glob("examples/**/CMakeLists.txt")):
+        text = cmakelists.read_text(encoding="utf-8")
+        if len(_EMIT_RE.findall(text)) > len(_CORE_RE.findall(text)):
+            leaks.append(cmakelists)
+    return leaks
+
+
 def main() -> int:
+    leaks = _find_unscoped_emits()
+    if leaks:
+        print("check_zephyr_conf_parity: unscoped `--emit zephyr-conf` "
+              "(no --core) -- the cross-core Kconfig leak ADR-0020 retired; "
+              "scope each to the one Zephyr core its CMakeLists.txt builds:",
+              file=sys.stderr)
+        for leak in leaks:
+            print(f"  · {leak.relative_to(REPO).as_posix()}", file=sys.stderr)
+        return 1
+
     cases = _find_cases()
     if not cases:
         print("check_zephyr_conf_parity: no --core-scoped zephyr-conf "
