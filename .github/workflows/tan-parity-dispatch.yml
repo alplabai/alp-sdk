@@ -8,9 +8,15 @@
 # contract honest. Pairs with alplabai/tan-cli's `parity.yml`
 # (repository_dispatch type `alp-sdk-planner-change`). Tracked in #855.
 #
-# SECRET REQUIRED (repo admin): TAN_DISPATCH_TOKEN — a PAT or GitHub App token
-# with permission to POST /repos/alplabai/tan-cli/dispatches. Until it is set,
-# this job SKIPS with a warning (it never hard-fails a push).
+# AUTH — reuses the EXISTING org-owned "ALP_CI" GitHub App (the same one
+# pr-bitbake.yml uses to dispatch into alp-sdk-internal). NO new secrets:
+# ALP_CI_APP_ID + ALP_CI_APP_PRIVATE_KEY are already set on this repo. The ONLY
+# admin action, one-time:
+#   Install the ALP_CI App on `alplabai/tan-cli` with "Contents: Read and write"
+#   (org Settings -> GitHub Apps -> ALP_CI -> Install/Configure -> add tan-cli).
+# Until the App is installed on tan-cli the token step fails softly and this job
+# SKIPS with a warning (never hard-fails a push). The built-in GITHUB_TOKEN
+# cannot do this -- it is scoped to alp-sdk only and cannot dispatch elsewhere.
 name: tan-parity-dispatch
 
 on:
@@ -29,16 +35,24 @@ jobs:
   dispatch:
     runs-on: ubuntu-latest
     steps:
+      - name: Mint a tan-cli-scoped installation token from the ALP_CI App
+        id: app-token
+        continue-on-error: true # App not yet installed on tan-cli -> empty token -> graceful skip
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.ALP_CI_APP_ID }}
+          private-key: ${{ secrets.ALP_CI_APP_PRIVATE_KEY }}
+          owner: alplabai
+          repositories: tan-cli
+
       - name: Trigger tan build-validation
         env:
-          TAN_DISPATCH_TOKEN: ${{ secrets.TAN_DISPATCH_TOKEN }}
+          TOKEN: ${{ steps.app-token.outputs.token }}
           SDK_SHA: ${{ github.sha }}
           SDK_BRANCH: ${{ github.ref_name }}
         run: |
-          if [ -z "$TAN_DISPATCH_TOKEN" ]; then
-            echo "::warning::TAN_DISPATCH_TOKEN not set — skipping tan parity dispatch."
-            echo "Create a PAT/App token that can POST to alplabai/tan-cli dispatches and"
-            echo "set it as the TAN_DISPATCH_TOKEN secret to enable the ADR-0020 gate (#855)."
+          if [ -z "$TOKEN" ]; then
+            echo "::warning::ALP_CI App token not minted — install the ALP_CI App on alplabai/tan-cli (Contents: write) to enable the ADR-0020 parity dispatch (#855). Skipping."
             exit 0
           fi
           # SDK_SHA / SDK_BRANCH are trusted GitHub context (not user payload);
@@ -46,7 +60,7 @@ jobs:
           body="$(jq -nc --arg ref "$SDK_SHA" --arg br "$SDK_BRANCH" \
             '{event_type:"alp-sdk-planner-change",client_payload:{sdk_ref:$ref,branch:$br}}')"
           curl -sSf -X POST \
-            -H "Authorization: Bearer $TAN_DISPATCH_TOKEN" \
+            -H "Authorization: Bearer $TOKEN" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/alplabai/tan-cli/dispatches \
             -d "$body"
