@@ -150,7 +150,7 @@ helper_firmware:
   - name:          cc3501e_otp
     chip:          cc3501e
     firmware_path: firmware/cc3501e/prebuilt/cc3501e-v0.2.0.bin
-    flash_method:  cc3501e_usb_bootloader     # west alp-flash helper backend; scripts/flash_backends/cc3501e_usb_bootloader.py
+    flash_method:  cc3501e_usb_bootloader     # tan flash helper backend; scripts/flash_backends/cc3501e_usb_bootloader.py
     flash_args:                                # device (host bootloader port) + mode are bench/host-specific; the public cc3501e-flasher CLI is not yet shipped
       speed:  921600                           # bootloader UART speed (backend default)
       device: TBD                              # host bootloader COM/tty port -- provided at flash time

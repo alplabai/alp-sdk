@@ -71,6 +71,11 @@ SCHEMA = REPO / "metadata" / "schemas" / "pinmux-capability-v1.schema.json"
 # (metadata/e1m_modules/imx93/ holds only hw-revisions.yaml pending the
 # IMX93RM ingestion / HW-config writeup), so there is nothing to project.
 # Add it here when the TSV lands.
+#
+# v2n-m1 deliberately has no entry either, despite shipping a pinout TSV:
+# it reuses the v2n edge pinout in full (the m1-additions are SoM-internal
+# nets, not new E1M edge pads), so consumers resolve E1M-V2M SKUs to the
+# "v2n" table above rather than a separate v2n-m1 one.
 FAMILIES: dict[str, dict] = {
     "aen": {
         "display_name": "E1M-AEN (Alif Ensemble)",
