@@ -10,7 +10,7 @@ execute_process(
             ${CMAKE_CURRENT_SOURCE_DIR}/../../../scripts/alp_project.py
             --input  ${CMAKE_CURRENT_SOURCE_DIR}/board.yaml
             --output ${CMAKE_CURRENT_BINARY_DIR}/alp.conf
-            --emit zephyr-conf
+            --emit zephyr-conf --core m55_hp
     RESULT_VARIABLE rc
 )
 if(NOT rc EQUAL 0)
