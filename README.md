@@ -46,7 +46,7 @@ source ../.venv/bin/activate
 export ZEPHYR_BASE="$PWD/../zephyr"
 
 # Sanity-check the host -- catches a missing toolchain/HAL before it bites later
-alp doctor
+tan doctor
 
 # One-time: install the standalone build executor (needs a Rust toolchain / rustup)
 cargo install --git https://github.com/alplabai/tan-cli --bin tan

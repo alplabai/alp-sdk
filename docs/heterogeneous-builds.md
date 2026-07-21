@@ -330,7 +330,7 @@ build/run/debug/flash; the **build plan** is the *write-free recipe* to
 drive the build itself.
 
 **Machine-readable build plan.**  Tooling that wants to drive the
-build itself — the `alp` CLI / IDE extension does — consumes the plan
+build itself — the `tan` CLI / IDE extension does — consumes the plan
 instead of re-deriving it:
 
 ```bash

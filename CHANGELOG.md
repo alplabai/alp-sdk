@@ -59,6 +59,15 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   (valid on every host, a no-op on posix). Per-slice command-shape change (ADR
   0014); found via the tan↔alp-sdk e2e build.
 
+### Removed — the `alp` console-script (ADR-0020 end-state B)
+
+- The `alp` console-script is no longer installed by `pip install -e .`.
+  Under ADR-0020, the standalone `tan` CLI is the sole user-facing command
+  surface; the `alp_cli` package stays as tan's Python backend, invoked as
+  `python -m alp_cli <sub>` by tan's `model`/`monitor`/`new-som`/`faultdecode`
+  forwarders. Use `tan <verb>` instead of `alp <verb>`. (`alp-mcp` is
+  unaffected.)
+
 ### Added — build-plan envelope provenance (`sdkVersion`/`sdkCommit`, ADR 0014)
 
 - `--emit build-plan`'s top-level envelope now carries `sdkVersion` (the

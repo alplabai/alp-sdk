@@ -308,7 +308,7 @@ environment triage.  Verb reference: [`docs/cli.md`](cli.md).
 | Topic                                            | Document                                          |
 |--------------------------------------------------|---------------------------------------------------|
 | Workspace + tooling deep-dive                    | [`docs/getting-started.md`](getting-started.md)   |
-| `alp` CLI verb reference                         | [`docs/cli.md`](cli.md)                           |
+| `tan` CLI verb reference                         | [`docs/cli.md`](cli.md)                           |
 | `board.yaml` schema reference                    | [`docs/board-config-schema.md`](board-config-schema.md) |
 | Architecture (modules, wrappers, codegen split)  | [`docs/architecture.md`](architecture.md)         |
 | SoM bring-up procedures                          | [`docs/bring-up-v2n.md`](bring-up-v2n.md), [`docs/bring-up-v2n-m1.md`](bring-up-v2n-m1.md) |

@@ -65,14 +65,15 @@ are deliberately different:
 
 - **Support floor: 3.10.**  `pyproject.toml` declares
   `requires-python = ">=3.10"` — the SDK's Python tooling
-  (validators, `alp` CLI, orchestrator) runs on any 3.10+.
+  (validators, orchestrator) runs on any 3.10+.  The `tan` CLI
+  itself is a standalone binary and isn't bound by this floor.
 - **Dev/CI pin: 3.12.**  The repo-root `.python-version` file is
   the single source; every CI workflow's `actions/setup-python`
   reads it via `python-version-file`, so CI always runs exactly
   the pinned version.
 
 To reproduce CI byte-for-byte, match the pin locally — `pyenv`
-and `uv` pick `.python-version` up automatically.  `alp doctor`
+and `uv` pick `.python-version` up automatically.  `tan doctor`
 WARNs (never FAILs) when the running interpreter differs from
 the pin; anything >= 3.10 remains supported.
 
@@ -276,7 +277,8 @@ PowerShell as Administrator for the first-time install steps; the
 day-to-day workflow runs as a normal user.
 
 > **Shortcut:** `pwsh scripts\bootstrap.ps1` automates §4.2 + §4.5
-> (venv + Python deps + west workspace + the editable `alp` CLI install) once the
+> (venv + Python deps + west workspace; `tan` itself is a standalone
+> binary set up via `tan bootstrap`) once the
 > §4.1 base toolchain is present — it prints the matching `winget`
 > one-liner for anything missing and is idempotent.  The Arm GNU
 > Toolchain (§4.3) and Zephyr SDK stay manual (GUI installers).  The
