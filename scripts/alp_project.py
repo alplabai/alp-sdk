@@ -377,13 +377,23 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
                   f"{', '.join(allowed_os)})", file=sys.stderr)
             return 1
         if args.emit == "zephyr-conf":
-            parts.append(f"# --- core: {cid} ({slice_.os}) ---")
-            parts.append(_slice_alp_conf(project, slice_))
-            hw_lines = _emit_library_hw_backends(slice_.libraries, project.sku)
-            if hw_lines:
-                parts.append("# §D.lib.loader -- per-library HW-accelerator wiring (auto-emitted).")
-                parts.extend(hw_lines)
-                parts.append("")
+            # `--core <id>` (the canonical, CMakeLists.txt-driven per-core
+            # path) emits `_slice_alp_conf(project, slice_)` VERBATIM --
+            # byte-identical to what the planner's build-plan
+            # `configArtefacts` materialises for the same core (both call
+            # the same function; `_emit_library_hw_backends` is folded
+            # inside it now, not appended here) -- so a `west build`
+            # driven by this file's CMakeLists.txt and a `west build`
+            # driven by `tan` off `--emit build-plan` can never silently
+            # diverge on Kconfig (docs/adr/0020-sdk-owns-build-execution.md
+            # addendum). The unscoped, sum-across-cores case (`--core`
+            # omitted) still needs the `# --- core: ... ---` section
+            # marker to tell the concatenated cores apart.
+            if args.core is not None:
+                parts.append(_slice_alp_conf(project, slice_))
+            else:
+                parts.append(f"# --- core: {cid} ({slice_.os}) ---")
+                parts.append(_slice_alp_conf(project, slice_))
         elif args.emit == "yocto-conf":
             parts.append(f"# --- core: {cid} ({slice_.os}) ---")
             parts.append(_slice_local_conf(project, slice_))

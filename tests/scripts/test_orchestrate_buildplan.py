@@ -103,9 +103,12 @@ def test_emit_build_plan_happy(tmp_path: Path) -> None:
     assert m33["buildDir"] == "build/m33_sm-zephyr"
     assert m33["command"]["tool"] == "west"
     assert m33["command"]["args"][:2] == ["build", "-b"]
-    assert m33["command"]["args"][-2:] == [
-        "--", f"-DPython3_EXECUTABLE={sys.executable.replace(chr(92), '/')}",
-    ]
+    assert m33["command"]["args"][-3] == "--"
+    assert m33["command"]["args"][-2] == f"-DPython3_EXECUTABLE={sys.executable.replace(chr(92), '/')}"
+    # Option A (#871): non-sysbuild Zephyr slices wire the per-core
+    # alp.conf via -DEXTRA_CONF_FILE (absolute, base_dir-anchored).
+    assert m33["command"]["args"][-1].startswith("-DEXTRA_CONF_FILE=")
+    assert m33["command"]["args"][-1].endswith(f"/{m33['buildDir']}/alp.conf")
     assert m33["command"]["cwd"] == m33["buildDir"]
     assert m33["env"]["ALP_SDK_ROOT"]
     confs = {a["path"]: a["contents"] for a in m33["configArtefacts"]}
@@ -402,6 +405,11 @@ def test_zephyr_slice_command_wires_sysbuild_overlay(tmp_path: Path) -> None:
     assert args.index("--sysbuild") < args.index("--")
     assert sb_conf.is_absolute()
     assert "\\" not in args[-1]
+    # Option A (#871): a --sysbuild slice carries NO bare
+    # -DEXTRA_CONF_FILE -- it would land on the sysbuild image, not the
+    # app (silent OTA config-miss); the per-core alp.conf reaches the app
+    # via the --core-scoped CMakeLists.txt bridge (#870) instead.
+    assert not any(a.startswith("-DEXTRA_CONF_FILE=") for a in args)
 
     # Without boot: -> no sysbuild overlay -> no flag, bare command.
     path2 = _write_board(tmp_path, V2N_HAPPY, name="board-noboot.yaml")
@@ -412,9 +420,10 @@ def test_zephyr_slice_command_wires_sysbuild_overlay(tmp_path: Path) -> None:
     assert "--sysbuild" not in z2["command"]["args"]
     assert not any(a.startswith("-DSB_CONF_FILE=")
                    for a in z2["command"]["args"])
-    assert z2["command"]["args"][-2:] == [
-        "--", f"-DPython3_EXECUTABLE={sys.executable.replace(chr(92), '/')}",
-    ]
+    assert z2["command"]["args"][-3] == "--"
+    assert z2["command"]["args"][-2] == f"-DPython3_EXECUTABLE={sys.executable.replace(chr(92), '/')}"
+    assert z2["command"]["args"][-1].startswith("-DEXTRA_CONF_FILE=")
+    assert z2["command"]["args"][-1].endswith(f"/{z2['buildDir']}/alp.conf")
 
 
 # Every option the emitter is allowed to hand to `west build`: the exact set

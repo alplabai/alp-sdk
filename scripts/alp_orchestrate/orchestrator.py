@@ -137,7 +137,8 @@ def _slice_command(
         # non-Windows (found via the tan<->alp-sdk e2e build).
         py_exe = sys.executable.replace("\\", "/")
         defines = [f"-DPython3_EXECUTABLE={py_exe}"]
-        if emit_sysbuild_conf(project) or emit_tfm_sysbuild_conf(project):
+        is_sysbuild = emit_sysbuild_conf(project) or emit_tfm_sysbuild_conf(project)
+        if is_sysbuild:
             cmd.append("--sysbuild")
             if emit_sysbuild_conf(project):
                 # SB_CONF_FILE is the only supported way to name a
@@ -183,6 +184,30 @@ def _slice_command(
                     if family_base else [sb_conf.as_posix()]
                 )
                 defines.append(f"-DSB_CONF_FILE={';'.join(sb_conf_files)}")
+        # Wire the slice's materialised per-core Kconfig fragment
+        # (`_slice_config_artefact` -> build_dir/alp.conf, carried in the
+        # plan's `configArtefacts`) into the build command via
+        # EXTRA_CONF_FILE -- Zephyr's supported extra-fragment merge point
+        # (layered on prj.conf). The path is ABSOLUTE and anchored on
+        # `base_dir` (issue #596), never Path.cwd(), so the plan is
+        # byte-identical wherever it is emitted.
+        #
+        # NOT on a --sysbuild build: a bare -DEXTRA_CONF_FILE there lands
+        # on the SYSBUILD image, not the default application image
+        # (sysbuild scopes per-image as -D<image>_VAR), so it would NOT
+        # reach the app -- silently dropping the per-core alp.conf on
+        # boot:/OTA projects. The app-image name is not derivable from
+        # board.yaml (it is the app CMakeLists `project()` name), so the
+        # image-prefixed form cannot be emitted here. Sysbuild slices
+        # still get the per-core alp.conf via the app's own --core-scoped
+        # CMakeLists.txt bridge (#870); a plan-native per-image sysbuild
+        # wiring is the remaining half of #866.
+        if not is_sysbuild:
+            alp_conf = Path(slice_.build_dir) / "alp.conf"
+            if not alp_conf.is_absolute():
+                alp_conf = Path(base_dir) / alp_conf
+            alp_conf = alp_conf.resolve()
+            defines.append(f"-DEXTRA_CONF_FILE={alp_conf.as_posix()}")
         cmd += ["--", *defines]
         return cmd
     if slice_.os == "yocto":

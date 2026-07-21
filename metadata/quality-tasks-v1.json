@@ -459,6 +459,20 @@
       ],
       "output": "none",
       "ci": "pr-doc-drift.yml:doc-drift"
+    },
+    {
+      "id": "zephyr-conf-parity",
+      "description": "Byte-parity gate: an example CMakeLists.txt's --core-scoped alp_project.py --emit zephyr-conf and the planner's build-plan configArtefacts must materialise the identical alp.conf per Zephyr core.",
+      "runner": "check-script",
+      "script": "scripts/check_zephyr_conf_parity.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": null
     }
   ]
 }

@@ -55,6 +55,25 @@ blocked until the remediation is met. Tracked in #855.
    already honors + defaults both. This is the version-skew guard (§Decision-5)
    applied correctly.
 
+4. **Second hand-reviewed seam-1 delta — the #863/#871 per-core config
+   wiring.** The planner now wires each core's `alp.conf` into the plan: a
+   `-DEXTRA_CONF_FILE=<build/<core>-zephyr/alp.conf>` arg on every
+   **non-sysbuild** Zephyr slice, plus the `_emit_library_hw_backends`
+   (`# ...lib.loader`) HW-accelerator Kconfig block folded into each Zephyr
+   slice's `configArtefacts`. Both post-date the frozen `97ad481b` oracle and
+   are the intended contract evolution, handled the probe-delta way: the
+   seam-1 comparator (`tests/parity/seam1_field_diff.py`, and its tan-cli twin
+   kept in lockstep) strips exactly these two additions in `normalize_plan`
+   before diffing — oracle BYTES stay frozen, every other field still
+   byte-checked. **Sysbuild slices deliberately carry NO `-DEXTRA_CONF_FILE`**
+   (Option A): a bare top-level `-DEXTRA_CONF_FILE` under `--sysbuild` lands on
+   the sysbuild image, not the application image, so it would silently drop
+   the per-core config on `boot:`/OTA projects; those slices get the per-core
+   `alp.conf` via the app's `--core`-scoped `CMakeLists.txt` bridge (#870),
+   and a plan-native per-image sysbuild wiring stays #866. The seam-2
+   real-build proof of the sysbuild path (`iot-fleet-ota`) is the one deferred
+   box on #871.
+
 ## Context
 
 ### The problem
