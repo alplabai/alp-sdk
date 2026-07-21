@@ -1,19 +1,59 @@
 # 0020. The SDK plans; a standalone `tan` CLI is the whole command surface (three repos, one executor)
 
-Status: Proposed
-Date: 2026-07-18
-Deciders: alpCaner (alp-sdk), Hakan (alp-sdk-vscode) — **awaiting Hakan's co-sign**
-Supersedes (on acceptance): [0014](0014-build-plan-emit-cli-contract.md) — its
+Status: Accepted — direction + alp-sdk Phase 1/4 code implemented on `dev`; a
+release-blocking remediation is outstanding (see **Amendment** below).
+Date: 2026-07-18 (Caner) · 2026-07-20 (Hakan co-sign, this commit)
+Deciders: alpCaner (alp-sdk), Hakan (alp-sdk-vscode)
+Supersedes: [0014](0014-build-plan-emit-cli-contract.md) — its
 mechanism clause **and** its 84-87 consequence (`west alp-build` stays native).
 Pairs with RFC #837 (`alp` → `tan`).
 
-> **Proposal for a joint decision — not accepted.** It retires the SDK-side
-> executor, `west alp-build`, and every SDK-side user command, and moves the
-> whole command surface into a new standalone `tan` CLI repo. It must not be
-> implemented until Hakan co-signs, and **nothing is deleted until the plan
-> contract is proven complete by a green parity window** (see *The one thing
-> that must hold*). Phase 2 (the extraction) is Hakan's repos and his to drive;
-> alp-sdk owns Phases 1 and 4.
+> **Implemented.** The SDK-side executor, `west alp-build`, and every SDK-side
+> user command are retired; the whole command surface now lives in the
+> standalone, public **`tan` CLI** ([`alplabai/tan-cli`](https://github.com/alplabai/tan-cli)).
+> alp-sdk is plans-only: `alp_orchestrate --emit build-plan` / `--emit
+> system-manifest` are the sole outputs `tan` consumes (`tan build --native`,
+> `tan build` / `flash` / `image` / `size` / `renode` / `clean` for
+> hardware/manifest-driven runs). Phase 2 (the extraction) was Hakan's repos
+> and his to drive; alp-sdk owned Phases 1 and 4. See *Migration* below for
+> the phase history and *The one thing that must hold* for the completeness
+> gate this satisfied before Phase 4 deleted the SDK-side executor.
+
+## Amendment (2026-07-20 — Hakan co-sign + corrections)
+
+Hakan ratifies the **direction** (end-state B) and the alp-sdk-side Phase 1/4
+code. Three points below correct or condition the record; the release train is
+blocked until the remediation is met. Tracked in #855.
+
+1. **The completeness gate this ADR mandates is not yet in place.** *The one thing
+   that must hold* + *Cross-repo oracle trigger* require an automatic
+   `repository_dispatch` from alp-sdk CI into `tan`'s build-validation on every
+   planner change, plus the two-seam comparator, **before** the irreversible
+   Phase 4. That trigger does not exist in `.github/workflows` yet — Phase 4 code
+   (fan_out deletion, #848) landed ahead of it. This is recoverable, not a
+   rollback: `df312cec^` (`97ad481b`) still carries both `fan_out` and the Phase-1
+   fields, so the oracle is reconstructed retroactively. **Remediation (blocks any
+   release/tag): freeze that oracle, stand up the two-seam gate + the cross-repo
+   trigger, then tag.** (Verified: the only `97ad481b`↔`df312cec` emit delta is
+   `debug.probe` `"openocd"→null`, hand-reviewed.)
+
+2. **"No `alp`-named command survives" is narrower than shipped.** Retired: the six
+   build verbs + `fan_out`. Surviving on `dev` **by design**: the `--emit`
+   planner surface, `west alp-migrate/alp-lock/alp-quality/alp-emit`, and the
+   Python `alp` console script with 11 non-build verbs
+   (`generate/validate/init/doctor/run/model/monitor/new_som/faultdecode/explain/emit`),
+   which `tan` forwards to. `docs/cli.md` already documents this real end-state;
+   §Decision-1/§Open-Q-4 overstate it. No surviving SDK verb shells out to `tan`
+   (dependency stays one-way, tan→SDK).
+
+3. **Contract fix owed to v0.12 (schema-`required` at unchanged version).** `#847`
+   made `executionPolicy` `required` in `build-plan-v1.schema.json` while
+   `schemaVersion` stayed `const: 1` — a breaking shape change without a bump.
+   Since the consumer pins `schemaVersion == 1`, do **not** bump to 2 (it would
+   strand `tan`); instead revert the two fields to **optional**, keep the emitter
+   always emitting explicit values (strict-producer / tolerant-consumer). `tan`
+   already honors + defaults both. This is the version-skew guard (§Decision-5)
+   applied correctly.
 
 ## Context
 
@@ -123,6 +163,10 @@ while `fan_out` still exists to prove it:
 
 ## Migration — the plan gains everything before anything is deleted
 
+**All four phases are complete.** `tan` (`alplabai/tan-cli`) is the sole
+executor and whole command surface; the SDK-side executor and every SDK-side
+user command are retired.
+
 1. **Phase 1 (alp-sdk):** complete the contract above; `fan_out` stays and ideally
    consumes the new fields (self-parity). Ship on an SDK tag; delete nothing.
 2. **Phase 2 (`tan`, Hakan):** extract `cli-rs` → the new `tan` repo and **grow it
@@ -137,7 +181,7 @@ while `fan_out` still exists to prove it:
    mark 0014:84-87 superseded; `tan` is the only surface. **No rollback, no
    in-repo oracle after this.**
 
-### Phase-3 parity gate — defined and runnable
+### Phase-3 parity gate — defined and runnable (satisfied before Phase 4)
 
 "Released `tan` output == `fan_out` output" is undefined and unrunnable as a
 slogan (no bitbake-capable CI runners exist; `fan_out` was never a real build
@@ -231,7 +275,7 @@ completeness must be proven while it still exists. Green-but-hollow parity
 followed by Phase-4 deletion is the failure scenario (fan_out gone, flash/renode/CI
 broken, no rollback).
 
-## Open questions / asks for Hakan
+## Open questions / asks for Hakan (resolved — see Status)
 
 1. **`cli-rs` → standalone `tan` repo, grown to the whole command surface** —
    agreed in principle? This is materially larger than "extract the executor";

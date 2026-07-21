@@ -159,7 +159,7 @@ Bring-up flow:
 1. The A55 Linux kernel exposes `/dev/remoteproc0`.
 2. Drop the Zephyr-built M33 firmware at
    `/lib/firmware/m33_zephyr.elf` (built via
-   `tan build -b imx93_evk_m33 examples/peripheral-io/gpio-button-led`).
+   `tan build --board imx93_evk_m33 examples/peripheral-io/gpio-button-led`).
 3. Boot the M33:
 
    ```bash

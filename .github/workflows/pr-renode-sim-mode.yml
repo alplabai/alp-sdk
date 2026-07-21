@@ -5,20 +5,29 @@
 #
 # Builds a headless V2N M33 Zephyr image (samples/hello_world +
 # tests/renode/v2n_m33_ramconsole.conf -- the ram_console backend, since
-# the M33-SM has no UART console), boots it in Renode via
-# `west alp-renode --sim-mode --board E1M-V2N101`, and drives the
-# published sockets exactly the way alp-studio's RealRenodeAdapter will:
+# the M33-SM has no UART console), plus an AEN M55-HP image and the
+# aen-sim-vision (TFLM) image.  These still prove the firmware compiles
+# for the sim-mode targets.
+#
+# PENDING (tan-cli#674): the socket-contract e2e that used to boot each
+# image in Renode via `west alp-renode --sim-mode --board E1M-V2N101` and
+# drive the published sockets exactly the way alp-studio's
+# RealRenodeAdapter will --
 #   - the UART socket must stream the firmware console (polled out of the
 #     ram_console_buf RAM ring), and
 #   - the control socket must round-trip WriteBytes -> ReadBytes (in M33
-#     SRAM) and apply the tmp112 inject on iic8 (read back the value).
-# This is tests/scripts/test_alp_renode_sim.py::test_sim_mode_end_to_end
-# with ALP_SIM_E2E=1 + ALP_SIM_E2E_ELF pointing at the built image.
+#     SRAM) and apply the tmp112 inject on iic8 (read back the value)
+# -- was ADR-0020 Phase 4's SDK-side executor
+# (scripts/west_commands/alp_renode.py + tests/scripts/test_alp_renode_sim.py,
+# both retired, no longer present in this repo).  `tan renode --sim-mode`
+# (github.com/alplabai/tan-cli) is the designated successor but is still a
+# stub there -- see the PENDING steps below, kept as no-ops (not deleted)
+# until tan-cli#674 closes.
 #
 # The renesas_rzv2n model boots the REAL V2N M33 firmware (faithful
 # SRAM@0x08003000 map + a coarse CPG stub for the FSP clock/reset
-# handshakes + iic8/tmp112).  This gate is the end-to-end proof; the
-# deterministic sim-mode helpers are covered by the always-on pytest gate.
+# handshakes + iic8/tmp112) -- this gate is meant to be the end-to-end
+# proof once the pending steps are un-stubbed.
 
 name: pr-renode-sim-mode
 
@@ -54,7 +63,6 @@ jobs:
           filters: |
             renode:
               - 'metadata/renode/renesas_rzv2n.*'
-              - 'scripts/west_commands/alp_renode.py'
               - 'tests/scripts/test_alp_renode_sim.py'
               - 'tests/renode/v2n_m33_ramconsole.conf'
               - 'tests/renode/aen_m55_itcm_run.overlay'
@@ -109,7 +117,7 @@ jobs:
       - name: Install Zephyr build requirements
         run: |
           set -euo pipefail
-          pip3 install -r "${GITHUB_WORKSPACE}/zephyrproject/zephyr/scripts/requirements-base.txt"
+          pip3 install -r "${GITHUB_WORKSPACE}/zephyr/scripts/requirements-base.txt"
 
       - name: Install Zephyr SDK (arm-zephyr-eabi)
         working-directory: ${{ github.workspace }}
@@ -140,7 +148,7 @@ jobs:
         id: build_fw
         working-directory: ${{ github.workspace }}/alp-sdk
         env:
-          ZEPHYR_BASE: ${{ github.workspace }}/zephyrproject/zephyr
+          ZEPHYR_BASE: ${{ github.workspace }}/zephyr
         run: |
           set -euo pipefail
           # Register alp-sdk as a Zephyr module so its board_root/dts_root
@@ -161,7 +169,7 @@ jobs:
       - name: Build AEN M55 ITCM-run image
         working-directory: ${{ github.workspace }}/alp-sdk
         env:
-          ZEPHYR_BASE: ${{ github.workspace }}/zephyrproject/zephyr
+          ZEPHYR_BASE: ${{ github.workspace }}/zephyr
         run: |
           set -euo pipefail
           west build -p always \
@@ -188,7 +196,7 @@ jobs:
       - name: Build aen-sim-vision (TFLM) ITCM-run image
         working-directory: ${{ github.workspace }}/alp-sdk
         env:
-          ZEPHYR_BASE: ${{ github.workspace }}/zephyrproject/zephyr
+          ZEPHYR_BASE: ${{ github.workspace }}/zephyr
         run: |
           set -euo pipefail
           west build -p always \
@@ -199,39 +207,23 @@ jobs:
                  -DEXTRA_DTC_OVERLAY_FILE="${GITHUB_WORKSPACE}/alp-sdk/tests/renode/aen_m55_itcm_run.overlay"
           test -f /tmp/aen-vision-build/zephyr/zephyr.elf
 
-      # Run the live e2es as SEPARATE steps: each spawns its own Renode
-      # process, and isolating them keeps one heavy boot from starving the
-      # other's monitor on a loaded runner.
-      - name: --sim-mode e2e (real V2N M33 firmware, ram_console)
-        working-directory: ${{ github.workspace }}/alp-sdk
-        env:
-          ALP_SIM_E2E: '1'
-          ALP_SIM_E2E_ELF: /tmp/v2n-m33-build/zephyr/zephyr.elf
-          ALP_SDK_ROOT: ${{ github.workspace }}/alp-sdk
-        run: |
-          set -euo pipefail
-          python3 -m pytest -q \
-              tests/scripts/test_alp_renode_sim.py::test_sim_mode_end_to_end \
-              tests/scripts/test_alp_renode_sim.py::test_elf_symbol_finds_ram_console_when_e2e_elf_set
+      # PENDING (tan-cli#674): the deterministic sim-mode harness this used
+      # to drive -- scripts/west_commands/alp_renode.py +
+      # tests/scripts/test_alp_renode_sim.py -- was the SDK-side executor
+      # ADR-0020 Phase 4 retired; neither file exists in this repo any
+      # more.  `tan renode --sim-mode` (github.com/alplabai/tan-cli) is the
+      # designated successor but is still a STUB there (the UART-poll +
+      # control-socket WriteBytes/ReadBytes/tmp112-inject contract isn't
+      # ported yet).  The three ELF builds above are kept (they still prove
+      # the firmware compiles) but the live socket-contract e2e below is
+      # intentionally a no-op until tan-cli#674 closes -- do not delete
+      # this block silently; flip each step back to a real
+      # `tan renode --sim-mode ...` invocation once the stub lands.
+      - name: --sim-mode e2e (real V2N M33 firmware, ram_console) [PENDING tan-cli#674]
+        run: echo "::notice::sim-mode e2e (V2N M33 ram_console) skipped -- tan renode --sim-mode is a stub, see tan-cli#674"
 
-      - name: --sim-mode e2e (real AEN M55 firmware, UART5 console)
-        working-directory: ${{ github.workspace }}/alp-sdk
-        env:
-          ALP_SIM_E2E: '1'
-          ALP_SIM_E2E_AEN_ELF: /tmp/aen-m55-build/zephyr/zephyr.elf
-          ALP_SDK_ROOT: ${{ github.workspace }}/alp-sdk
-        run: |
-          set -euo pipefail
-          python3 -m pytest -q \
-              tests/scripts/test_alp_renode_sim.py::test_sim_mode_aen_end_to_end
+      - name: --sim-mode e2e (real AEN M55 firmware, UART5 console) [PENDING tan-cli#674]
+        run: echo "::notice::sim-mode e2e (AEN M55 UART5) skipped -- tan renode --sim-mode is a stub, see tan-cli#674"
 
-      - name: --sim-mode e2e (aen-sim-vision, real TFLM inference)
-        working-directory: ${{ github.workspace }}/alp-sdk
-        env:
-          ALP_SIM_E2E: '1'
-          ALP_SIM_E2E_VISION_ELF: /tmp/aen-vision-build/zephyr/zephyr.elf
-          ALP_SDK_ROOT: ${{ github.workspace }}/alp-sdk
-        run: |
-          set -euo pipefail
-          python3 -m pytest -q \
-              tests/scripts/test_alp_renode_sim.py::test_sim_mode_aen_vision_pipeline
+      - name: --sim-mode e2e (aen-sim-vision, real TFLM inference) [PENDING tan-cli#674]
+        run: echo "::notice::sim-mode e2e (aen-sim-vision TFLM) skipped -- tan renode --sim-mode is a stub, see tan-cli#674"

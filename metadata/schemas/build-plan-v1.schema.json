@@ -35,6 +35,17 @@
       "type": "string",
       "description": "POSIX-style path to the root build directory every slice's buildDir and the shared artefacts are nested under."
     },
+    "executionPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unknownBackend", "missingTool", "nullCommand"],
+      "description": "SDK-owned skip-vs-fail policy the executor MUST apply when dispatching a slice's `command` -- the same rules `Orchestrator._dispatch_slice` itself applies -- so a plan consumer stops hand-porting that logic. Additive, schemaVersion 1.",
+      "properties": {
+        "unknownBackend": { "type": "string", "enum": ["skip", "fail"], "description": "Outcome when a slice's `backend` has no known tool mapping. Currently always 'fail'." },
+        "missingTool":     { "type": "string", "enum": ["skip", "fail"], "description": "Outcome when `command.tool` isn't found on the executor's PATH. Currently always 'skip' (normal on a dev host missing one toolchain)." },
+        "nullCommand":     { "type": "string", "enum": ["skip", "fail"], "description": "Outcome when a slice's `command` is null (this emitter had no valid command to produce -- see `slices[].command`). Currently always 'skip'." }
+      }
+    },
     "slices": {
       "type": "array",
       "description": "One entry per core whose resolved os is not `off`, sorted by coreId. A core this emitter cannot yet produce a build command for (e.g. missing app/board/image, or an app-only Yocto slice with no recipe:) is still carried here with command: null plus a matching entry in `warnings` -- never silently dropped.",
@@ -106,7 +117,7 @@
             "description": "Headless monitor/debug selectors for this slice (#610 §4): the console device selector + debug-probe selector a headless consumer needs, derived from board.yaml `diagnostics.console:` and the same flash-recipe fact `system-manifest.yaml`'s `slices[].flash_method`/`flash_args` already carry. null when unknown.",
             "properties": {
               "console": { "type": ["string", "null"], "description": "Resolved console backend selector: `uart` (Zephyr UART console), `ram` (Zephyr RAM console, read over SWD), or `linux` (Yocto/Ubuntu stdio/tty console). null when the slice inherits an unspecified board default (`diagnostics.console: none`/unset with no OS-derived default, e.g. a baremetal slice)." },
-              "probe": { "type": ["string", "null"], "description": "Debug-probe runner selector for this slice (currently `openocd` for a Zephyr slice's `zephyr_west_flash` recipe). null when this slice's runtime/flash recipe doesn't identify a live debug probe (Yocto image-flash, baremetal cmake-flash)." }
+              "probe": { "type": ["string", "null"], "description": "Debug-probe runner selector for this slice: the explicitly-configured runner for a Zephyr slice's `zephyr_west_flash` recipe, else null -- meaning either the board.cmake default runner applies, or (Yocto image-flash, baremetal cmake-flash) this slice's runtime/flash recipe doesn't identify a live debug probe at all." }
             }
           },
           "command": {
@@ -127,6 +138,14 @@
             "description": "Environment variables the consumer must inject into the slice subprocess, native host-path form (handed to the subprocess environment verbatim).",
             "properties": {
               "ALP_SDK_ROOT": { "type": "string", "description": "Absolute host path to the alp-sdk checkout the plan was generated from." }
+            }
+          },
+          "envAppendPath": {
+            "type": "object",
+            "description": "SDK-owned env values the consumer must APPEND (os.pathsep), skipping any value already present (de-dup first, matching `_alp_common.env_with_sdk` / `_workspace.subprocess_env`), to the slice subprocess env, distinct from `env` (set-verbatim). Plan wins / CLI fills gaps: a consumer that computes these itself should prefer the plan's values. Additive under schemaVersion 1; a new key so consumers pinned to an older shape safely ignore it.",
+            "additionalProperties": {
+              "type": "array",
+              "items": { "type": "string" }
             }
           }
         }

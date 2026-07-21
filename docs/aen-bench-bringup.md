@@ -71,6 +71,16 @@ console is not on USB — which is why flow B exists.
 > are now working on this bench** (flow D enabled 2026-06-17 after a probe swap —
 > see § Flow D). Flow D is the day-to-day default now: a burn is ~0.16 s over SWD
 > with no SE-UART maintenance-window race / power-cycle dance.
+>
+> **Both flows also provision the same two app shapes.** Bench-proven 2026-07-19
+> on real AE822 silicon: a single `app-write-mram -c <uart> -p` run over the
+> SE-UART (flow A) burns **both** the ITCM-load embedded ATOC and the slot0-XIP
+> two-blob variant (standalone app blob at `0x80010000` + the ATOC, two
+> `COMMAND_BURN_MRAM` phases, byte-exact read-back) — the `alif_flash` west
+> runner now auto-detects the shape from the app's own reset vector. Flow D's
+> `scripts/bench/aen/flash-jlink-mramxip.sh` two-blob helper (§ Flow D below)
+> is therefore a **speed / SE-UART-reset-race alternative**, not a capability
+> requirement — SE-UART was never limited to ATOC-only.
 
 > **Runnable helpers.** The shell helpers that drive all four flows below
 > (build, Flow A `flash-run.sh`, Flow C `ram-run.sh`, Flow D `flash-jlink.sh` +
@@ -97,10 +107,12 @@ cd <setools>/app-release-exec-linux
 
 A clean write ends `100% ... Done`; on reset the SES loads + boots the ATOC
 (M55-HE `loadAddress 0x58000000`). `west flash` on the carrier wraps this via the
-**`alif_flash`** runner — it does **not** use J-Link. Pre-provisioned Alp Lab
-modules ship a dev-signed MCUboot + self-test in slot0 (LCS=DM), so `west flash`
-works day-1; the manual path above is only for re-keying or recovering a bare
-module.
+**`alif_flash`** runner — it does **not** use J-Link, and auto-detects this
+ITCM-load shape vs. the slot0-XIP shape (§ Flow D) from the app's own reset
+vector, so both provision over the SE-UART with no flag. Pre-provisioned Alp
+Lab modules ship a dev-signed MCUboot + self-test in slot0 (LCS=DM), so
+`west flash` works day-1; the manual path above is only for re-keying or
+recovering a bare module.
 
 ### Flow B — Seeing the console
 
@@ -264,7 +276,9 @@ secure-boot verification — always write both consistent blobs.
 > image needs **`CONFIG_USE_DT_CODE_PARTITION=y`** so it links at the slot0 offset
 > (`0x8001xxxx` reset vector) instead of the MRAM base (`0x8000xxxx`, which faults). Proven
 > by `examples/aen/aen-npu-inference-person-mram` (the real `person_detect` MobileNet run
-> from MRAM → `RESULT PASS`).
+> from MRAM → `RESULT PASS`). The same shape provisions over the SE-UART with plain
+> `west flash` / `app-write-mram` too (§ above) — this script is the faster SWD-only path,
+> not the only path.
 
 ## 3. Board HW requirements found on the bench
 

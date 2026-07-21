@@ -26,11 +26,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _orchestrate_support import REPO, V2N_HAPPY, _write_board  # noqa: E402
 
 from alp_orchestrate import (                       # noqa: E402
-    Orchestrator,
     OrchestratorError,
     emit_tfm_sysbuild_conf,
     load_board_yaml,
 )
+from alp_orchestrate.buildplan import _shared_artefacts  # noqa: E402
 
 
 # ---------------------------------------------------------------------
@@ -270,30 +270,30 @@ def test_security_psa_attestation_optiga_rejected_when_som_lacks_it(
 
 
 def test_security_psa_materialise_writes_tfm_conf(tmp_path: Path) -> None:
-    """Orchestrator._materialise_shared() writes build/sysbuild/tfm/tfm.conf
-    when security.psa.tfm: true, and skips it otherwise."""
+    """`_shared_artefacts()` (the single source both the build-plan emit
+    and an external materialiser read from) carries
+    build/sysbuild/tfm/tfm.conf when security.psa.tfm: true, and skips
+    it otherwise."""
     path = _write_board(tmp_path, _AEN301_SECURITY_HAPPY)
     project = load_board_yaml(path)
     build_root = tmp_path / "build"
-    orch = Orchestrator(project, build_root, board_yaml=path)
-    orch._materialise_shared()
+    shared = dict(_shared_artefacts(project, build_root))
 
     tfm_conf = build_root / "sysbuild" / "tfm" / "tfm.conf"
-    assert tfm_conf.is_file(), "TF-M overlay not written"
-    text = tfm_conf.read_text(encoding="utf-8")
+    assert tfm_conf in shared, "TF-M overlay not emitted"
+    text = shared[tfm_conf]
     assert "SB_CONFIG_TFM=y" in text
     assert "CONFIG_PSA_CRYPTO_PERSISTENT_SLOT_COUNT=32" in text
 
 
 def test_security_psa_materialise_skips_when_absent(tmp_path: Path) -> None:
-    """No security.psa: -> build/sysbuild/tfm/ is not created."""
+    """No security.psa: -> no sysbuild/tfm/tfm.conf artefact."""
     path = _write_board(tmp_path, V2N_HAPPY)
     project = load_board_yaml(path)
     build_root = tmp_path / "build"
-    orch = Orchestrator(project, build_root, board_yaml=path)
-    orch._materialise_shared()
+    shared = dict(_shared_artefacts(project, build_root))
 
-    assert not (build_root / "sysbuild" / "tfm").exists()
+    assert (build_root / "sysbuild" / "tfm" / "tfm.conf") not in shared
 
 
 def test_security_psa_build_type_inherits_from_boot(tmp_path: Path) -> None:

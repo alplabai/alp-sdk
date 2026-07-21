@@ -299,6 +299,22 @@ def _check_jlink() -> CheckResult:
     )
 
 
+def _check_tan() -> CheckResult:
+    # tan is the standalone build executor (ADR 0020) -- alp-sdk itself is
+    # plans-only, so a plan-only user (CI validating board.yaml, no build)
+    # may not have it. WARN-only, never FAIL.
+    found = shutil.which("tan")
+    if found is None:
+        return CheckResult(
+            "tan", WARN, "tan (build executor) not found on PATH",
+            "Install it: cargo install --git https://github.com/alplabai/"
+            "tan-cli --bin tan (not needed if you only emit/validate plans).",
+        )
+    ver = _tool_version(["tan", "--version"])
+    label = f"tan {ver[0]}.{ver[1]} ({found})" if ver else f"tan present ({found})"
+    return CheckResult("tan", PASS, label)
+
+
 def _check_host_compiler() -> CheckResult:
     # native_sim builds with host gcc (>=11) or clang (>=14).  Missing is only a
     # WARN -- real-silicon work uses the Zephyr SDK cross-toolchain instead.
@@ -440,10 +456,9 @@ def _check_west_workspace() -> CheckResult:
         )
     # A .west directory is necessary but NOT sufficient: if the workspace's
     # manifest repo isn't alp-sdk, west never discovers alp-sdk's
-    # `self.west-commands`, so `west alp-build` (and alp-flash/-image/-clean/
-    # -lock/-migrate/-quality/-renode/-emit/-size) stay "unknown command"
-    # (issue #769).  Checking only for `.west` reports a healthy workspace on
-    # exactly the layout #769 was filed about.
+    # `self.west-commands`, so `west alp-migrate` (and alp-lock/-quality/-emit)
+    # stay "unknown command" (issue #769).  Checking only for `.west` reports a
+    # healthy workspace on exactly the layout #769 was filed about.
     manifest = _manifest_dir(topdir)
     repo = _repo_root().resolve()
     if manifest is None:
@@ -456,7 +471,7 @@ def _check_west_workspace() -> CheckResult:
         return CheckResult(
             "west-workspace", FAIL,
             f"west workspace at {topdir} has manifest '{manifest}', not alp-sdk ({repo}) "
-            "-- 'west alp-build' will be an unknown command (#769)",
+            "-- 'west alp-migrate' will be an unknown command (#769)",
             "Re-bootstrap so alp-sdk is the manifest repo: scripts/bootstrap.sh "
             "(or scripts/bootstrap.ps1 on native Windows), which runs "
             "'west init -l <alp-sdk>'. An existing plain-Zephyr workspace is not reused.",
@@ -683,6 +698,7 @@ def _all_checks() -> list[CheckResult]:
         _check_hal_alif(),
         _check_zephyr_sdk(),
         _check_jlink(),
+        _check_tan(),
     ]
     # The pin check reads the repo's .python-version; skipped (None) on a
     # packaged install without the checkout.  Slot it beside the interpreter

@@ -117,7 +117,7 @@ NOSUPPORT fallback.
 ### Real silicon (AEN-Zephyr)
 
 ```bash
-tan build -b alif_e7_dk_rtss_he examples/audio/audio-loopback
+tan build --board alif_e7_dk_rtss_he examples/audio/audio-loopback
 west flash
 ```
 

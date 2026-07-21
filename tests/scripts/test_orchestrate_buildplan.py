@@ -24,10 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _orchestrate_support import REPO, V2N_HAPPY, _write_board  # noqa: E402
 
-from alp_orchestrate import (                       # noqa: E402
-    Orchestrator,
-    load_board_yaml,
-)
+from alp_orchestrate import load_board_yaml  # noqa: E402
 
 
 # ---------------------------------------------------------------------
@@ -278,36 +275,39 @@ def test_emit_build_plan_writes_nothing(
     assert [p.name for p in tmp_path.iterdir()] == ["board.yaml"]
 
 
-def test_emit_build_plan_matches_materialiser(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_emit_build_plan_matches_materialiser(tmp_path: Path) -> None:
     """By-construction parity: every artefact the plan carries is
-    byte-identical to what the Orchestrator's materialise step writes
-    to disk (the contract promised to the CLI side)."""
+    byte-identical to `_shared_artefacts`/`_slice_config_artefact` --
+    the same pure helpers an external materialiser reads from (the
+    contract promised to the CLI side; ADR-0020 Phase 4 retired the
+    SDK-side materialiser itself, so this checks the shared source
+    functions directly instead of a real on-disk write)."""
     import json as _json
     from alp_orchestrate import emit_build_plan
-    import alp_orchestrate
+    from alp_orchestrate.buildplan import (_shared_artefacts,
+                                           _slice_config_artefact)
 
     path = _write_board(tmp_path, V2N_HAPPY)
     build_root = tmp_path / "build"
+    project = load_board_yaml(path)
 
     plan = _json.loads(emit_build_plan(
-        load_board_yaml(path), board_yaml=path, build_root=build_root))
+        project, board_yaml=path, build_root=build_root))
 
-    # Materialise via the real fan_out (dispatch skipped: no tools).
-    monkeypatch.setattr(alp_orchestrate.orchestrator.shutil, "which",
-                        lambda name: None)
-    orch = Orchestrator(load_board_yaml(path), build_root, board_yaml=path)
-    orch.fan_out(parallel=False)
+    want_shared = {p.as_posix(): c
+                   for p, c in _shared_artefacts(project, build_root)}
+    got_shared = {a["path"]: a["contents"] for a in plan["sharedArtefacts"]}
+    assert got_shared == want_shared
 
-    artefacts = list(plan["sharedArtefacts"])
     for s in plan["slices"]:
-        artefacts.extend(s["configArtefacts"])
-    assert artefacts
-    for entry in artefacts:
-        on_disk = Path(entry["path"]).read_text(encoding="utf-8")
-        assert on_disk == entry["contents"], \
-            f"{entry['path']} diverges from the materialiser"
+        slice_ = project.cores[s["coreId"]]
+        artefact = _slice_config_artefact(project, slice_)
+        want_confs = {}
+        if artefact is not None:
+            name, contents = artefact
+            want_confs[f"{s['buildDir']}/{name}"] = contents
+        got_confs = {a["path"]: a["contents"] for a in s["configArtefacts"]}
+        assert got_confs == want_confs
 
 
 def test_emit_build_plan_off_core_excluded_commandless_warns(
@@ -341,15 +341,13 @@ def test_emit_build_plan_off_core_excluded_commandless_warns(
 
 
 def test_emit_build_plan_carries_boot_sysbuild_conf(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path,
 ) -> None:
     """A `boot:` block surfaces as the build/alp_sysbuild.conf shared
-    artefact -- and the materialiser writes the same file (this also
-    pins the fix for emit_sysbuild_conf never being wired into
-    _materialise_shared)."""
+    artefact (this also pins the fix for emit_sysbuild_conf never being
+    wired into the shared-artefacts list)."""
     import json as _json
     from alp_orchestrate import emit_build_plan
-    import alp_orchestrate
 
     path = _write_board(tmp_path, V2N_BOOT_MCUBOOT)
     build_root = tmp_path / "build"
@@ -360,13 +358,6 @@ def test_emit_build_plan_carries_boot_sysbuild_conf(
     sysbuild_path = (build_root / "alp_sysbuild.conf").as_posix()
     assert sysbuild_path in shared
     assert "SB_CONFIG_BOOTLOADER_MCUBOOT=y" in shared[sysbuild_path]
-
-    monkeypatch.setattr(alp_orchestrate.orchestrator.shutil, "which",
-                        lambda name: None)
-    orch = Orchestrator(load_board_yaml(path), build_root, board_yaml=path)
-    orch.fan_out(parallel=False)
-    assert (build_root / "alp_sysbuild.conf").read_text(
-        encoding="utf-8") == shared[sysbuild_path]
 
 
 def test_zephyr_slice_command_wires_sysbuild_overlay(tmp_path: Path) -> None:
@@ -545,47 +536,6 @@ def test_slice_command_helpers_take_explicit_base_dir(tmp_path: Path) -> None:
     assert _resolve_app_path(str(abs_dir), project_dir) == abs_dir
 
 
-def test_orchestrator_dispatch_anchors_on_board_yaml_not_cwd(
-    tmp_path: Path, monkeypatch
-) -> None:
-    """The real (non-emit) dispatch path -- `Orchestrator(..., board_yaml=)`
-    -- resolves the same way `emit_build_plan` does, so `west
-    alp-build`/`west alp-build --emit build-plan` never disagree on the
-    app path depending on which directory the shell happens to be in."""
-    import alp_orchestrate
-
-    project_dir = tmp_path / "project"
-    project_dir.mkdir()
-    (project_dir / "m33").mkdir()
-    path = _write_board(project_dir, V2N_HAPPY)
-
-    elsewhere = tmp_path / "elsewhere"
-    elsewhere.mkdir()
-    monkeypatch.chdir(elsewhere)
-
-    monkeypatch.setattr(alp_orchestrate.orchestrator.shutil, "which",
-                        lambda name: None)
-    project = load_board_yaml(path)
-    build_root = tmp_path / "build"
-    orch = Orchestrator(project, build_root, board_yaml=path)
-    assert orch.base_dir == project_dir.resolve()
-
-
-def test_orchestrator_requires_board_yaml(tmp_path: Path) -> None:
-    """ADR-0020 Phase 1: `board_yaml` is a required argument -- the old
-    `Path.cwd()` fallback (dropped when this test was written) was a
-    live "same board.yaml, two answers" divergence between callers that
-    passed it and ones that didn't.  Every real in-repo caller already
-    has the path (`cli.py` always passes it), so omitting it is a bug,
-    not a legitimate use case, and now raises at construction time."""
-    path = _write_board(tmp_path, V2N_HAPPY)
-    project = load_board_yaml(path)
-    build_root = tmp_path / "build"
-
-    with pytest.raises(TypeError):
-        Orchestrator(project, build_root)  # type: ignore[call-arg]
-
-
 # ---------------------------------------------------------------------
 # Issue #597 -- Yocto app-only slices need a valid bitbake target
 # ---------------------------------------------------------------------
@@ -721,13 +671,10 @@ def test_yocto_stock_image_app_token_still_resolves_without_recipe(
 
 
 # ---------------------------------------------------------------------
-# ADR-0020 Phase 1 -- emit_build_plan() <-> Orchestrator.fan_out() must
-# enumerate the SAME slice set in the SAME order.  Before
-# `iter_buildable_slices()`, emit_build_plan sorted by core_id while
-# fan_out walked `project.cores.items()` (dict/insertion order); for a
-# project whose cores don't already land in sorted order (as this
-# fixture's SoC spec deliberately does not), the plan and the real
-# build silently disagreed on slice order.
+# ADR-0020 Phase 1 -- emit_build_plan() must enumerate slices via the
+# single `iter_buildable_slices()` source, sorted by core_id, never a
+# dict/insertion order that could silently diverge from it (as this
+# fixture's SoC spec deliberately is not already sorted).
 # ---------------------------------------------------------------------
 
 # `project.cores` dict order tracks `soc_spec["cores"]` list order (see
@@ -855,74 +802,33 @@ def test_emit_build_plan_slice_order_matches_iter_buildable_slices(
     assert "delta_off" not in iter_core_ids
 
 
-def test_fan_out_dispatches_in_iter_buildable_slices_order(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """`fan_out` must dispatch buildable slices in `iter_buildable_slices`
-    order, NOT `project.cores` dict/insertion order -- the fan_out-side
-    half of the parity `test_emit_build_plan_slice_order_...` asserts for
-    emit.  The sorted manifest (step 7) and cache-persist (`.values()`)
-    would BOTH hide a dict-order dispatch regression, so this asserts the
-    dispatch sequence directly: the fixture's dict order (`zulu_yocto,
-    alpha_zephyr, bravo_zephyr`) differs from sorted order, so a regression
-    to `self.project.cores.items()` fails here."""
-    import alp_orchestrate
-    from alp_orchestrate import Orchestrator, iter_buildable_slices
-
-    # Tools absent -> every dispatch is a no-op skip, but fan_out still
-    # walks the full enumerate/materialise/dispatch/manifest path and
-    # calls `_dispatch_slice` once per buildable slice, in target order.
-    monkeypatch.setattr(alp_orchestrate.orchestrator.shutil, "which",
-                        lambda name: None)
-
-    path, meta = _write_multicore_fixture(tmp_path)
-    project = load_board_yaml(path, metadata_root=meta)
-    orch = Orchestrator(project, tmp_path / "build", board_yaml=path)
-
-    dispatched: list[str] = []
-    orig = orch._dispatch_slice
-
-    def _record(slice_):
-        dispatched.append(slice_.core_id)
-        return orig(slice_)
-
-    monkeypatch.setattr(orch, "_dispatch_slice", _record)
-
-    orch.fan_out(parallel=False)
-
-    assert dispatched == [s.core_id for s in iter_buildable_slices(project)]
-    assert dispatched == ["alpha_zephyr", "bravo_zephyr", "zulu_yocto"]
-
-
-def test_emit_build_plan_command_and_build_dir_match_orchestrator(
+def test_emit_build_plan_command_and_build_dir_match_slice_command(
     tmp_path: Path,
 ) -> None:
     """Per matching core, the plan's `command` (tool + args) and
-    `buildDir` must equal what the orchestrator itself would resolve for
-    that slice -- locks command/buildDir parity against future
-    divergence between the two enumeration sites."""
+    `buildDir` must equal what `_slice_command`/`_slice_build_dir`
+    themselves resolve for that slice -- locks command/buildDir parity
+    against future divergence between the two enumeration sites."""
     import json as _json
     from dataclasses import replace
-    from alp_orchestrate import Orchestrator, emit_build_plan
+    from alp_orchestrate import emit_build_plan
     from alp_orchestrate.buildplan import _slice_build_dir
     from alp_orchestrate.orchestrator import _slice_command
 
     path, meta = _write_multicore_fixture(tmp_path)
     build_root = Path("build")
     project = load_board_yaml(path, metadata_root=meta)
+    base_dir = Path(path).resolve().parent
 
     plan = _json.loads(emit_build_plan(
         project, board_yaml=path, build_root=build_root))
 
-    orch = Orchestrator(load_board_yaml(path, metadata_root=meta),
-                        build_root, board_yaml=path)
-
     for entry in plan["slices"]:
-        slice_ = orch.project.cores[entry["coreId"]]
+        slice_ = project.cores[entry["coreId"]]
         want_build_dir = _slice_build_dir(build_root, slice_)
         want_cmd = _slice_command(
-            orch.project, replace(slice_, build_dir=want_build_dir),
-            base_dir=orch.base_dir)
+            project, replace(slice_, build_dir=want_build_dir),
+            base_dir=base_dir)
 
         assert entry["buildDir"] == want_build_dir.as_posix()
         if want_cmd is None:
@@ -935,26 +841,18 @@ def test_emit_build_plan_command_and_build_dir_match_orchestrator(
             }
 
 
-@pytest.mark.xfail(
-    reason="ADR-0020 item 3: emit env-append contract not yet closed",
-    strict=True,
-)
-def test_emit_build_plan_env_matches_real_build_env(tmp_path: Path) -> None:
-    """KNOWN GAP (ADR-0020 item 3, out of scope for Phase 1): a slice's
-    real build subprocess environment is `os.environ` plus
-    `ALP_SDK_ROOT` (`Orchestrator._dispatch_slice`) -- which, for a
-    Zephyr slice, a properly-configured west workspace additionally
-    needs `EXTRA_ZEPHYR_MODULES` / `PYTHONPATH` on (the
-    `_alp_common.env_with_sdk` / `_workspace.subprocess_env` append the
-    real build path relies on).  `emit_build_plan`'s per-slice `env`
-    carries only `{"ALP_SDK_ROOT": ...}` (buildplan.py) -- a consumer
-    that materialises and runs the plan's command with ONLY that env
-    is missing the module/path append a real `west build` needs.  This
-    asserts the DESIRED end state (env carries the append keys too) so
-    it fails now and flips green the day item 3 closes the gap -- it is
-    not a description of current behaviour."""
+def test_emit_build_plan_env_append_carries_extra_zephyr_modules(
+        tmp_path: Path) -> None:
+    """ADR-0020 item 3: a zephyr slice's new `envAppendPath` key carries
+    the SDK-module path a real `west build` appends to
+    `EXTRA_ZEPHYR_MODULES` (`_alp_common.env_with_sdk` /
+    `_workspace.subprocess_env`) -- so a plan consumer stops hand-porting
+    that append. `env` itself stays exactly `{"ALP_SDK_ROOT": ...}`
+    (set-verbatim, unchanged) -- the append keys live only in the new
+    additive `envAppendPath` map, never in `env`."""
     import json as _json
     from alp_orchestrate import emit_build_plan
+    from alp_orchestrate.buildplan import REPO
 
     path, meta = _write_multicore_fixture(tmp_path)
     project = load_board_yaml(path, metadata_root=meta)
@@ -962,5 +860,47 @@ def test_emit_build_plan_env_matches_real_build_env(tmp_path: Path) -> None:
         project, board_yaml=path, build_root=Path("build")))
 
     zephyr_slice = next(s for s in plan["slices"] if s["backend"] == "zephyr")
-    assert "EXTRA_ZEPHYR_MODULES" in zephyr_slice["env"]
-    assert "PYTHONPATH" in zephyr_slice["env"]
+    assert zephyr_slice["env"] == {"ALP_SDK_ROOT": str(REPO)}
+    assert str(REPO) in zephyr_slice["envAppendPath"]["EXTRA_ZEPHYR_MODULES"]
+
+
+def test_emit_build_plan_env_append_carries_pythonpath(
+        tmp_path: Path) -> None:
+    """ADR-0020 item 3: a zephyr slice's `envAppendPath["PYTHONPATH"]`
+    carries `<sdk>/scripts`, the append a real `west build` needs to
+    resolve `python -m alp_orchestrate` (mirrors
+    `_alp_common.env_with_sdk` / `_workspace.subprocess_env`). `env`
+    stays exactly `{"ALP_SDK_ROOT": ...}` -- unchanged by this key."""
+    import json as _json
+    from alp_orchestrate import emit_build_plan
+    from alp_orchestrate.buildplan import REPO
+
+    path, meta = _write_multicore_fixture(tmp_path)
+    project = load_board_yaml(path, metadata_root=meta)
+    plan = _json.loads(emit_build_plan(
+        project, board_yaml=path, build_root=Path("build")))
+
+    zephyr_slice = next(s for s in plan["slices"] if s["backend"] == "zephyr")
+    assert zephyr_slice["env"] == {"ALP_SDK_ROOT": str(REPO)}
+    assert str(REPO / "scripts") in \
+        zephyr_slice["envAppendPath"]["PYTHONPATH"]
+
+
+def test_emit_build_plan_publishes_execution_policy(tmp_path: Path) -> None:
+    """The envelope's `executionPolicy` publishes the skip-vs-fail rules
+    `Orchestrator._dispatch_slice` actually applies (unknown os -> fail,
+    tool missing from PATH -> skip, command: null -> skip), so a plan
+    consumer stops hand-porting that policy. Additive, schemaVersion 1."""
+    import json as _json
+    from alp_orchestrate import emit_build_plan
+
+    path = _write_board(tmp_path, V2N_HAPPY)
+    project = load_board_yaml(path)
+    plan = _json.loads(emit_build_plan(
+        project, board_yaml=path, build_root=Path("build")))
+
+    assert plan["executionPolicy"] == {
+        "unknownBackend": "fail",
+        "missingTool":    "skip",
+        "nullCommand":    "skip",
+    }

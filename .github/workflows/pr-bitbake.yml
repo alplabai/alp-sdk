@@ -27,7 +27,9 @@ name: pr-bitbake
 
 on:
   pull_request:
-    branches: [main, dev]
+    # Only gate the dev->main release PR: a hours-long Yocto bake on every
+    # feature->dev PR is pure noise (non-required, red-X on unrelated changes).
+    branches: [main]
     paths:
       - 'metadata/**'
       - 'scripts/**'
@@ -49,7 +51,8 @@ on:
       - 'meta-alp-sdk/**'
       - '.github/workflows/pr-bitbake.yml'
   push:
-    branches: [main, dev]
+    # Match the pull_request scope above — bake on main pushes only, not dev.
+    branches: [main]
     paths:
       - 'metadata/**'
       - 'scripts/**'

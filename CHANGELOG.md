@@ -7,6 +7,49 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.12.0 candidate
 
+### Fixed — build-plan `executionPolicy` reverted from required to optional
+
+- `#847` added `executionPolicy` to the build-plan schema's top-level
+  `required` array while `schemaVersion` stayed `const: 1` — a breaking
+  shape change with no version bump (violating ADR 0014's own
+  additive-change rule), rejecting every field-absent historical/v0.11.1
+  plan against a consumer (`tan`) that pins `schemaVersion == 1`. Reverted
+  to strict-producer / tolerant-consumer: `executionPolicy` stays in
+  `properties` (a known, validated key when present) but is no longer
+  `required` — the SDK emitter keeps emitting it unconditionally on every
+  plan regardless. Additive to schemaVersion 1, per ADR 0014; the ADR-0020
+  amendment is #856 (tracked in #855).
+
+### Fixed — flash: defer the Zephyr flash runner to the board default
+
+- `_slice_flash_recipe` hardcoded `flash_args.runner: "openocd"` for every
+  Zephyr slice, but no in-tree board registers an openocd runner (AEN's
+  `board.cmake` sets `flash-runner: alif_flash`), so `west flash --runner
+  openocd` FATAL-errored — this blocked the AEN801 flash path an on-silicon
+  bench proved broken. Now no runner is forced: `zephyr_west_flash` omits
+  `--runner` unless `flash_args.runner` is explicitly set, and `west flash`
+  falls back to the board's own `board.cmake` default. `build-plan`'s
+  `debug.probe` follows suit (null unless a runner is explicitly configured).
+
+### Added — build-plan envelope `executionPolicy`
+
+- `--emit build-plan`'s top-level envelope now carries `executionPolicy`
+  (`{"unknownBackend": "fail", "missingTool": "skip", "nullCommand": "skip"}`)
+  — the skip-vs-fail rules `Orchestrator._dispatch_slice` itself applies,
+  published so a plan consumer stops hand-porting that logic. Additive per
+  ADR 0014's additive-change rule — no `schemaVersion` bump.
+
+### Added — build-plan per-slice `envAppendPath` (ADR-0020 item 3)
+
+- `--emit build-plan`'s per-slice object now carries `envAppendPath`, a map
+  of `{VAR: [values]}` the consumer must APPEND (`os.pathsep`-joined) to its
+  own subprocess env, distinct from the existing `env` (set-verbatim).
+  Emitted today: `EXTRA_ZEPHYR_MODULES` → `[<sdk root>]` and `PYTHONPATH` →
+  `[<sdk root>/scripts]`, matching the append a real `west build` gets from
+  `_alp_common.env_with_sdk` / `_workspace.subprocess_env`. Closes the
+  `--emit` env leak — a plan consumer no longer has to hand-port the
+  SDK-module/PYTHONPATH append. Additive per ADR 0014's additive-change
+  rule — no `schemaVersion` bump.
 ### Fixed — Windows: forward-slash the emitted `-DPython3_EXECUTABLE`
 
 - The Zephyr slice command baked `-DPython3_EXECUTABLE=<sys.executable>`

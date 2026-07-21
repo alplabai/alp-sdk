@@ -111,3 +111,19 @@ Contract properties (locked with the consumer):
   correction rather than a breaking change: no known consumer parses
   these sub-keys yet (alp-sdk-vscode's cli-rs deliberately models only
   the core slice; alp-studio does not parse the tooling index).
+
+### 2026-07-18 — `executionPolicy` envelope key
+
+- **Added one additive envelope key** (per the additive-change rule
+  above, no `schemaVersion` bump): `executionPolicy`
+  (`{"unknownBackend": "fail", "missingTool": "skip", "nullCommand":
+  "skip"}`), publishing the skip-vs-fail rules
+  `Orchestrator._dispatch_slice` itself applies so a plan consumer
+  stops hand-porting them. `executionPolicy` is **always emitted**
+  (strict producer) but is **optional** in the schema (tolerant
+  consumer), so a field-absent plan — e.g. a `v0.11.1` plan — still
+  validates and a consumer applies the documented default. (Corrected
+  2026-07-20: it was briefly `required`, which is a breaking shape
+  change at unchanged `schemaVersion 1`; reverted here — #856 amends
+  ADR-0020 with the matching record (tracked in #855). The consumer pins
+  `schemaVersion == 1`, so a bump was not the fix.)

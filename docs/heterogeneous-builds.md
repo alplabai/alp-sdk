@@ -3,10 +3,10 @@
 This guide walks through writing your first **dual-app project** for
 E1M-V2N101: Yocto Linux on the four Cortex-A55 cores plus Zephyr on
 the Cortex-M33 system-manager, the two halves talking over RPMsg.
-You'll declare both halves in a single `board.yaml`, let
-`tan build` fan out into per-core slices, and end up with a
-flashable bundle that covers Linux + Zephyr + the on-module GD32
-helper MCU.
+You'll declare both halves in a single `board.yaml`, let `tan build`
+fan out into per-core slices (planned by alp-sdk's `alp_orchestrate`),
+and end up with a flashable bundle that covers Linux + Zephyr + the
+on-module GD32 helper MCU.
 
 The same pattern generalises to **E1M-AEN801** (A32 + M55-HP + M55-HE),
 **E1M-NX9101** (A55 + M33), and any future heterogeneous SoM.
@@ -25,8 +25,8 @@ By the end you'll have:
   remoteproc on first boot.
 - A two-way RPMsg channel between the two halves, accessed through
   `<alp/rpc.h>`.
-- A `system-manifest.yaml` that feeds `tan image`,
-  `tan flash`, and OTA.
+- A `system-manifest.yaml` that feeds `tan image`, `tan flash`, and
+  OTA.
 
 Out of scope: writing Yocto recipes from scratch (Yocto docs);
 writing Zephyr drivers from scratch (Zephyr docs); the wire-level
@@ -209,8 +209,8 @@ ipc:
   `#define` prefix in the generated header.  Stick to
   `[a-z][a-z0-9_]+`.
 
-For each `ipc:` entry, `tan build` emits a header both halves
-`#include`:
+For each `ipc:` entry, `tan build` (via alp-sdk's `alp_orchestrate`)
+emits a header both halves `#include`:
 
 For a channel named `alp_default_rpmsg`, the stem is its
 upper-cased name, so the generated `#define`s are
@@ -291,12 +291,13 @@ The `generated/` directory ends up on each slice's include path, so
 or the Zephyr CMakeLists.
 
 **Manifest determinism.**  `system-manifest.yaml` is byte-stable
-across rebuilds — re-running `tan build` after `tan clean`
-yields an identical manifest, which `pr-alp-build.yml` enforces.
-Wall-clock fields (per-slice `duration_s`) live on the runtime Slice
-dataclass but never land in the manifest; the cache state in
-`build/.alp-build-state.json` is internal and not part of the
-declarative output either.
+across rebuilds — re-running `alp_orchestrate --emit system-manifest`
+(what `tan build` / `tan clean` drive under the hood) yields an
+identical manifest, which `pr-alp-build.yml` enforces by calling the
+orchestrator directly.  Wall-clock fields (per-slice `duration_s`)
+live on the runtime Slice dataclass but never land in the manifest;
+the cache state in `build/.alp-build-state.json` is internal and not
+part of the declarative output either.
 
 **Manifest contract (IDE / tooling).**  `system-manifest.yaml` is the
 single derived projection of `board.yaml` — one `slices[]` entry per
@@ -452,7 +453,7 @@ tan renode
 
 Renode loads both slice images, simulates RPMsg over its mailbox
 peripheral, and runs a name-service ping/pong.  CI uses the same
-command in `pr-renode-dual-os.yml`.
+`tan renode` invocation in `pr-renode-dual-os.yml`.
 
 ## 9. Cross-core API
 
@@ -563,9 +564,9 @@ override `reserved_for: power_mgmt` — that channel carries the PMIC's
 runtime power-state machine.
 
 **Forgetting `app:` is relative to the project root.**  `app: ./linux`
-resolves to `<project_root>/linux/`, not to wherever
-`tan build` is invoked from.  Always pass the workspace-relative
-path of the project as the build argument:
+resolves to `<project_root>/linux/`, not to wherever `tan build` is
+invoked from.  Always pass the workspace-relative path of the project
+as the build argument:
 
 ```bash
 # good

@@ -252,6 +252,19 @@ def test_jlink_present_is_pass(monkeypatch):
     assert doctor._check_jlink().status == doctor.PASS
 
 
+def test_tan_missing_is_warn_only(monkeypatch):
+    monkeypatch.setattr(doctor.shutil, "which", lambda _: None)
+    assert doctor._check_tan().status == doctor.WARN
+
+
+def test_tan_present_is_pass(monkeypatch):
+    monkeypatch.setattr(
+        doctor.shutil, "which",
+        lambda name: "/usr/bin/tan" if name == "tan" else None,
+    )
+    assert doctor._check_tan().status == doctor.PASS
+
+
 def test_zephyr_pin_read_live_from_west_yml(monkeypatch, tmp_path):
     (tmp_path / "west.yml").write_text(
         "manifest:\n"

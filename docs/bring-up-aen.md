@@ -158,7 +158,7 @@ against the SKU's `som.yaml` preset.
    west flash
    ```
 
-   One-liner alternative (manifest-driven -- builds every slice
+   One-liner alternative (manifest-driven -- `tan` builds every slice
    declared in the example's `board.yaml`, then flashes them in
    `boot_order:`; see [cli.md](cli.md)):
 
@@ -288,11 +288,12 @@ top of the per-subsystem checks.
 > leads.)
 >
 > Per-core builds use plain `west build -b <target> <app>`.
-> (`tan build <app>` is the multi-core *orchestrator*: it fans a
-> board.yaml out into per-core slices using the SoM-preset board string,
-> which resolves to the `alp_e1m_aen801_m55_{he,hp}` carrier board --
-> **prefer it** once the carrier board boots, as it builds both M55
-> cores from the example's board.yaml with the EVK's actual routing.)
+> (`tan build <app>` is the multi-core *executor*: it consumes the SDK's
+> `--emit build-plan` and fans a board.yaml out into per-core slices using
+> the SoM-preset board string, which resolves to the
+> `alp_e1m_aen801_m55_{he,hp}` carrier board -- **prefer it** once the
+> carrier board boots, as it builds both M55 cores from the example's
+> board.yaml with the EVK's actual routing.)
 
 0. **Current-limited power-on + rail check.**  Bench supply at a
    **1 A** limit on V_IN (§1).  Power on, watch steady-state
