@@ -3,7 +3,7 @@
 # Customer workflow: copy this directory, change `som.sku` to your SoM MPN,
 # and `west build`.  CMakeLists.txt invokes scripts/alp_project.py at
 # configure time and layers the generated alp.conf over prj.conf via
-# OVERLAY_CONFIG.  The console rides the board's existing
+# EXTRA_CONF_FILE.  The console rides the board's existing
 # `chosen { zephyr,shell-uart }` / console UART -- no custom pins needed.
 
 som:

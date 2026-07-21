@@ -30,8 +30,8 @@ if(NOT _alp_rv EQUAL 0)
         "stderr: ${_alp_stderr}")
 endif()
 
-# Layer generated CONFIG_* over prj.conf via OVERLAY_CONFIG.
-list(APPEND OVERLAY_CONFIG ${_alp_generated})
+# Layer generated CONFIG_* over prj.conf via EXTRA_CONF_FILE.
+list(APPEND EXTRA_CONF_FILE ${_alp_generated})
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(vendor_ext_composability LANGUAGES C)

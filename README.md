@@ -187,7 +187,7 @@ Each entry under `cores:` maps one on-die programmable core to a
 runtime (`yocto`, `zephyr`, `baremetal`, or `off`) plus its app
 slice.  The loader (`scripts/alp_project.py`) fans out per-core:
 each Zephyr slice gets a Kconfig fragment layered onto its own
-`prj.conf` via `OVERLAY_CONFIG`; each Yocto slice gets a
+`prj.conf` via `EXTRA_CONF_FILE`; each Yocto slice gets a
 `local.conf` snippet consumed by bitbake.  Inside each
 `cores.<id>` block every field except `os:` + `app:` is optional;
 the [`gpio-button-led` example](examples/peripheral-io/gpio-button-led/) for

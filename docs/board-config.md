@@ -105,7 +105,7 @@ Concretely:
   comment).  The application's `CMakeLists.txt` invokes
   `scripts/alp_project.py` at configure time and layers the
   generated `alp.conf` over `prj.conf` via Zephyr's
-  `OVERLAY_CONFIG` cmake variable.  `rsource` is NOT valid in a
+  `EXTRA_CONF_FILE` cmake variable.  `rsource` is NOT valid in a
   `.conf` file (it is a Kconfig-source directive only) -- see the
   worked example at `examples/peripheral-io/gpio-button-led/CMakeLists.txt`
   for the correct wiring.

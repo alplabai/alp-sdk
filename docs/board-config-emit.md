@@ -50,7 +50,7 @@ python3 $ALP_SDK/scripts/alp_project.py \
 
 The application's `CMakeLists.txt` wires the loader as a
 configure-time step and layers the result over `prj.conf` with
-`OVERLAY_CONFIG`.  `prj.conf` itself stays empty -- everything
+`EXTRA_CONF_FILE`.  `prj.conf` itself stays empty -- everything
 flows from `board.yaml`:
 
 ```cmake
@@ -75,14 +75,14 @@ execute_process(
 if(NOT _alp_rv EQUAL 0)
     message(FATAL_ERROR "alp_project.py failed (rv=${_alp_rv})")
 endif()
-list(APPEND OVERLAY_CONFIG ${_alp_generated})
+list(APPEND EXTRA_CONF_FILE ${_alp_generated})
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(my_app LANGUAGES C)
 target_sources(app PRIVATE src/main.c)
 ```
 
-Zephyr's `OVERLAY_CONFIG` machinery merges the generated `alp.conf`
+Zephyr's `EXTRA_CONF_FILE` machinery merges the generated `alp.conf`
 on top of `prj.conf` at Kconfig time -- the app picks up every
 `CONFIG_*` line the loader emitted.
 
