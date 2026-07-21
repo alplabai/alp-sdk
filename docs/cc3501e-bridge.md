@@ -321,9 +321,10 @@ at [`firmware/cc3501e/`](../firmware/cc3501e/), built on TI's
    `firmware/cc3501e/prebuilt/cc3501e-vX.Y.Z.bin`, the payload Alp ships
    as the OTA update over the bridge SPI — not a customer rebuild-and-flash
    target.
-7. `firmware/cc3501e/flash.py` is Alp's internal release/bench tool that
-   produces and validates that blob over USB / debug probe; it is not a
-   customer-facing utility.
+7. `flash.py` is Alp's internal release/bench tool that produces and
+   validates that blob over USB / debug probe; it is not a
+   customer-facing utility and lives in `alp-sdk-internal`, not this
+   public tree.
 
 See [`firmware/cc3501e/README.md`](../firmware/cc3501e/README.md) for the
 build + tree layout and `firmware/cc3501e/DESIGN.md`

@@ -25,7 +25,10 @@ The orchestrator's ``_slice_flash_recipe`` emits these method names:
 and helper-MCU entries from SoM presets emit (e.g.):
 
     GD32 supervisor: "swd_probe"
-    CC3501E coproc:  "cc3501e_usb_bootloader"
+
+CC3501E coprocessors are Alp-OTA-updated (``update_channel:
+alp_ota_spi_otp``), never customer-flashed, so they carry no
+``flash_method`` and register no backend here.
 
 The yocto backend also registers under the short alias ``yocto_wic``
 so direct test invocations and manifest hand-edits stay terse.
@@ -133,7 +136,6 @@ from . import yocto_wic                  # noqa: E402,F401
 from . import zephyr_west_flash          # noqa: E402,F401
 from . import baremetal_cmake_flash      # noqa: E402,F401
 from . import swd_probe                  # noqa: E402,F401
-from . import cc3501e_usb_bootloader     # noqa: E402,F401
 from . import xspi_flashwriter            # noqa: E402,F401
 
 

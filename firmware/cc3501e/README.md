@@ -31,7 +31,6 @@ firmware/cc3501e/
 ├── DESIGN.md               ← v0.1 scope, wire-reply contract, reconciliation items
 ├── firmware-version.txt    ← firmware RELEASE semver (own axis)
 ├── protocol-version.txt    ← wire-protocol version expected (= ALP_CC3501E_PROTOCOL_VERSION)
-├── flash.py                ← Alp release/bench flashing helper (stub until first binary; not a customer tool)
 ├── prebuilt/               ← signed binaries shipped with each alp-sdk release
 ├── toolchain/              ← arm-none-eabi (stub/CI smoke) + ticlang (bench/production)
 ├── src/
@@ -141,11 +140,12 @@ programming the chip's own OTP; the SoM preset models this with
 `helper_firmware[].update_channel: alp_ota_spi_otp` (see
 `metadata/e1m_modules/README.md`), never a `flash_method`.  The signed
 release blob is version-pinned at `prebuilt/cc3501e-vX.Y.Z.bin`.
-[`flash.py`](flash.py) is Alp's internal release/bench tool that
-produces and validates that blob (relaying the image to the CC3501E
-over the inter-chip link) -- it is not a customer-facing utility.
-`flash.py` and `prebuilt/` are populated when the first production
-binary is built + signed on the bench.
+`flash.py` is Alp's internal release/bench tool that produces and
+validates that blob (relaying the image to the CC3501E over the
+inter-chip link) -- it is not a customer-facing utility, and lives
+in `alp-sdk-internal`, not this public tree.
+`prebuilt/` is populated when a production binary is built + signed
+on the bench.
 
 ## Status
 
@@ -157,6 +157,6 @@ binary is built + signed on the bench.
 | TI backend: SPI-slave + lifecycle (`hal/ti/`) | ✅ implemented against TI Drivers (`SPI_open` SPI_SLAVE callback) + SimpleLink (`sl_Start`/`sl_NetCfgGet`) + CMSIS reset. Hardware SS0 chip-select + per-phase READY framing (this rev wires SCLK/MOSI/MISO + `SPI1_SS0_C`); host `cc3501e_request()` reconciled to match. Compiles on the bench against the SimpleLink CC35xx SDK + a SysConfig board file (`CONFIG_SPI_0`). Bench-validated on E1M-AEN801 (FIB v0.0.207): survives radio ops and concurrent Wi-Fi/BLE scan; see [`docs/cc3501e-bridge.md`](../../docs/cc3501e-bridge.md). |
 | TI backend: SDIO-slave (`hal/ti/transport_hw_ti_sdio.c`) | 🟡 frame glue complete; the SDIO-**device** register bring-up needs SWRU626 §21 (no public SDK SDIO-device driver). Off the v0.1 critical path — SPI is the default. |
 | Next-rev hardening: HOST_IRQ / async events | 🔮 async-event delivery; command/reply framing already uses hardware SS0 + READY (see DESIGN.md "Next-rev hardening") |
-| `flash.py` real flashing | 🔮 blocked on TI's `cc3501e-flasher` CLI (not public yet); manual SWD/J-Link is the interim bench path |
+| `flash.py` real flashing | 🔮 moved to `alp-sdk-internal` (Alp-internal OTA-build tooling); blocked on TI's `cc3501e-flasher` CLI (not public yet); manual SWD/J-Link is the interim bench path |
 | `prebuilt/` populated | 🔮 when the first bench binary is built/signed (first board: E1M-AEN801) |
 | Wi-Fi / BLE / GPIO-proxy groups | ✅ implemented and silicon-validated (v0.8.0 on E1M-AEN801): Wi-Fi scan with security decode, real BLE scan (ble_gap_disc), GPIO proxy warm-boot, OTA-over-bridge staged (see [`docs/cc3501e-bridge.md`](../../docs/cc3501e-bridge.md)). |

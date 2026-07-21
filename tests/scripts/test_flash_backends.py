@@ -34,9 +34,6 @@ from flash_backends import (                       # noqa: E402
 from flash_backends.baremetal_cmake_flash import (  # noqa: E402
     BaremetalCmakeFlash,
 )
-from flash_backends.cc3501e_usb_bootloader import (  # noqa: E402
-    Cc3501eUsbBootloaderFlash,
-)
 from flash_backends.swd_probe import (             # noqa: E402
     SwdProbeFlash,
     _jlink_commander_script,
@@ -85,7 +82,6 @@ def test_registry_has_all_canonical_backends() -> None:
         "zephyr_west_flash",
         "baremetal_cmake_flash",
         "swd_probe",
-        "cc3501e_usb_bootloader",
     }
     assert expected.issubset(set(REGISTRY.keys())), \
         f"missing keys: {expected - set(REGISTRY.keys())}"
@@ -591,68 +587,4 @@ def test_swd_probe_use_openocd_skips_jlink() -> None:
     assert run_mock.call_count == 0
     assert result.command[0].endswith("openocd")
     assert "JLinkExe" not in " ".join(result.command)
-
-
-# ---------------------------------------------------------------------
-# 6. Cc3501eUsbBootloaderFlash
-# ---------------------------------------------------------------------
-
-
-def test_cc3501e_dry_run() -> None:
-    """Dry-run should print the planned command without raising
-    NotImplementedError -- caller wants to see what WOULD run."""
-    backend = Cc3501eUsbBootloaderFlash()
-    with patch("flash_backends.cc3501e_usb_bootloader.shutil.which",
-               return_value="/usr/bin/cc3501e-flasher"), \
-         patch("flash_backends.cc3501e_usb_bootloader.time.monotonic",
-               return_value=0.0):
-        result = backend.flash(_ctx(
-            {"device": "/dev/ttyACM0", "mode": "otp_program"},
-            dry_run=True,
-            artefact="/tmp/wifi.bin",
-        ))
-    assert result.ok is True
-    joined = " ".join(result.command)
-    assert "/dev/ttyACM0" in joined
-    assert "otp_program" in joined
-
-
-def test_cc3501e_real_invocation_returns_graceful_failure() -> None:
-    """The backend now returns FlashResult(ok=False) instead of raising
-    NotImplementedError, so west alp-flash gets a clean failure message
-    rather than an unhandled exception."""
-    backend = Cc3501eUsbBootloaderFlash()
-    with patch("flash_backends.cc3501e_usb_bootloader.shutil.which",
-               return_value="/usr/bin/cc3501e-flasher"):
-        result = backend.flash(_ctx(
-            {"device": "/dev/ttyACM0", "mode": "ram_load"},
-            artefact="/tmp/wifi.bin",
-        ))
-    assert result.ok is False
-    assert "cc3501e-flasher" in result.message.lower() or "not yet public" in result.message.lower()
-
-
-def test_cc3501e_missing_tool() -> None:
-    backend = Cc3501eUsbBootloaderFlash()
-    with patch("flash_backends.cc3501e_usb_bootloader.shutil.which",
-               return_value=None):
-        result = backend.flash(_ctx(
-            {"device": "/dev/ttyACM0", "mode": "ram_load"},
-            artefact="/tmp/wifi.bin",
-        ))
-    assert result.ok is False
-    msg = result.message.lower()
-    assert "cc3501e" in msg
-
-
-def test_cc3501e_invalid_mode_rejects() -> None:
-    backend = Cc3501eUsbBootloaderFlash()
-    with patch("flash_backends.cc3501e_usb_bootloader.shutil.which",
-               return_value="/usr/bin/cc3501e-flasher"):
-        result = backend.flash(_ctx(
-            {"device": "/dev/ttyACM0", "mode": "bogus_mode"},
-            artefact="/tmp/wifi.bin",
-        ))
-    assert result.ok is False
-    assert "mode" in result.message.lower()
 
