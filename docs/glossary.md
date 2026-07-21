@@ -243,7 +243,7 @@ ACT88760 (primary) + DA9292 (secondary).
 
 **`prj.conf`** -- Zephyr's per-application Kconfig fragment.
 Mostly empty in SDK examples -- the loader emits the real config
-via `OVERLAY_CONFIG`.
+via `EXTRA_CONF_FILE`.
 
 ## Q-Z
 

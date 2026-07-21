@@ -15,7 +15,7 @@ execute_process(
 if(NOT rc EQUAL 0)
     message(FATAL_ERROR "alp_project.py failed (rc=${rc})")
 endif()
-list(APPEND OVERLAY_CONFIG ${_alp_generated})
+list(APPEND EXTRA_CONF_FILE ${_alp_generated})
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(acoustic_safety_events LANGUAGES C)

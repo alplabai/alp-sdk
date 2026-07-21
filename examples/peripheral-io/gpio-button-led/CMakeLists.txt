@@ -36,11 +36,11 @@ if(NOT _alp_rv EQUAL 0)
 endif()
 
 # Layer the generated CONFIG_* lines over prj.conf via Zephyr's
-# OVERLAY_CONFIG mechanism.  Must be set before find_package(Zephyr).
+# EXTRA_CONF_FILE mechanism.  Must be set before find_package(Zephyr).
 # `rsource` is NOT valid in .conf files (it is a Kconfig-source
 # directive only), which is why prj.conf can't pull the generated
 # fragment in itself.
-list(APPEND OVERLAY_CONFIG ${_alp_generated})
+list(APPEND EXTRA_CONF_FILE ${_alp_generated})
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(gpio_button_led LANGUAGES C)

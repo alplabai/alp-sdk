@@ -18,7 +18,7 @@
 #   4. Build with `west build`.  The example's CMakeLists.txt
 #      invokes scripts/alp_project.py at configure time and layers
 #      the generated build/generated/alp.conf over prj.conf via
-#      Zephyr's OVERLAY_CONFIG -- no hand-edited Kconfig.  (`rsource`
+#      Zephyr's EXTRA_CONF_FILE -- no hand-edited Kconfig.  (`rsource`
 #      is a Kconfig directive and is NOT valid in a .conf file, which
 #      is why prj.conf cannot pull the fragment in itself.)
 #
