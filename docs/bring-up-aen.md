@@ -342,8 +342,8 @@ top of the per-subsystem checks.
    wire frame in `firmware/cc3501e/DESIGN.md`):
    `PING` (opcode `0x00`) then `GET_VERSION` (opcode `0x01`).
    A standalone host-side helper for the M55 side is **TBD**
-   (only the device firmware + `flash.py` ship today), so drive
-   it from app code via the bridge dispatch for now.
+   (only the device firmware ships today), so drive it from app
+   code via the bridge dispatch for now.
 
    * `PING` must return `RESP_OK` with empty data -- the liveness
      signal.
