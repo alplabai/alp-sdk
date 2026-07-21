@@ -536,9 +536,9 @@ Two curation tiers bound CI cost (ADR 0018):
   release.
 - **Tier B — recipe-only**: wiring + compatibility metadata are
   maintained and emitted, but the library is not built in alp-sdk CI.
-  `alp doctor` labels it.
+  `tan doctor` labels it.
 
-`alp doctor` reports the selected libraries for the project in scope
+`tan doctor` reports the selected libraries for the project in scope
 (tier + licence + compatibility), reading the same manifests, so the
 CLI and alp-studio's library picker never disagree.
 

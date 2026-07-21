@@ -50,7 +50,7 @@ Both regions are reachable from both cores, but the orchestrator
 prefers the non-cacheable region (`ocram`) for the default carve-out
 because the iMX93's M33 has no cache (spec §6.8).
 
-Until the user supplies real addresses + sizes, `west alp-build`
+Until the user supplies real addresses + sizes, `tan build`
 exits with:
 
 ```
@@ -72,7 +72,7 @@ before building.
 ## Build
 
 ```bash
-west alp-build alp-sdk/examples/multicore/rpmsg-imx93
+tan build alp-sdk/examples/multicore/rpmsg-imx93
 ```
 
 The orchestrator fans out:

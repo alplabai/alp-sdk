@@ -346,7 +346,7 @@ version-pinned, built in alp-sdk CI for at least one board per
 supported family, ships a teaching example -- breakage blocks
 release.  **Tier B (recipe-only):** wiring + compatibility metadata
 are maintained and emitted, but the library is not built in alp-sdk
-CI; `alp doctor` labels it.  Promotion B → A requires a dedicated
+CI; `tan doctor` labels it.  Promotion B → A requires a dedicated
 owner and a CI build lane.  (Distinct from the driver/library
 integration ladder in
 [ADR 0017](adr/0017-alp-sdk-over-the-vendor-sdk.md).)
