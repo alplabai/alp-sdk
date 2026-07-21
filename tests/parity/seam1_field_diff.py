@@ -114,6 +114,51 @@ def _normalize_strings(node: Any, sdk_root: str | None) -> Any:
     return node
 
 
+# The #863/#871 planner change adds two fields to a live plan that the frozen
+# 97ad481b oracle predates -- both are the intended, hand-reviewed ADR-0020
+# delta (see the ADR-0020 amendment), analogous to the debug.probe
+# openocd->null allowance. Strip them from the live plan before diffing so the
+# oracle BYTES stay frozen (the frame is never re-captured) while every OTHER
+# field still gets a byte-exact parity check:
+#   1. a `-DEXTRA_CONF_FILE=<per-core alp.conf>` arg on each NON-sysbuild
+#      Zephyr slice's command (the per-core config wiring, #863). Sysbuild
+#      slices deliberately do NOT carry it (Option A, #871: a bare
+#      -DEXTRA_CONF_FILE lands on the sysbuild image not the app), so there is
+#      nothing to strip on those.
+#   2. the `# lib.loader` per-library HW-accelerator Kconfig block folded into
+#      each Zephyr slice's configArtefacts alp.conf.
+# KEEP IN LOCKSTEP with tan-cli's vendored copy of this comparator.
+def _strip_lib_loader_block(contents):
+    """Drop the `# ...lib.loader...` block (marker line through its trailing
+    blank line) from an alp.conf `contents` string."""
+    out, skipping = [], False
+    for line in contents.split("\n"):
+        if line.lstrip().startswith("#") and "lib.loader" in line:
+            skipping = True
+            continue
+        if skipping:
+            if line.strip() == "":
+                skipping = False
+            continue
+        out.append(line)
+    return "\n".join(out)
+
+
+def _strip_863_additions(plan):
+    """Remove the intended #863/#871 additions from a (normalized) plan dict."""
+    for slice_ in plan.get("slices", []) or []:
+        cmd = slice_.get("command")
+        if isinstance(cmd, dict) and isinstance(cmd.get("args"), list):
+            cmd["args"] = [a for a in cmd["args"]
+                           if not (isinstance(a, str)
+                                   and a.startswith("-DEXTRA_CONF_FILE="))]
+        for art in slice_.get("configArtefacts", []) or []:
+            c = art.get("contents")
+            if isinstance(c, str):
+                art["contents"] = _strip_lib_loader_block(c)
+    return plan
+
+
 def normalize_plan(plan: dict) -> dict:
     """Return a checkout/host-independent copy of a build-plan dict.
 
@@ -128,6 +173,7 @@ def normalize_plan(plan: dict) -> dict:
     normalized = _normalize_strings(plan, sdk_root)
     if "sdkCommit" in normalized:
         normalized["sdkCommit"] = _SHA_TOKEN
+    normalized = _strip_863_additions(normalized)
     return normalized
 
 
