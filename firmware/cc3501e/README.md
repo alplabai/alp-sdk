@@ -31,7 +31,7 @@ firmware/cc3501e/
 ├── DESIGN.md               ← v0.1 scope, wire-reply contract, reconciliation items
 ├── firmware-version.txt    ← firmware RELEASE semver (own axis)
 ├── protocol-version.txt    ← wire-protocol version expected (= ALP_CC3501E_PROTOCOL_VERSION)
-├── flash.py                ← consumer-side prebuilt-binary flasher (stub until first binary)
+├── flash.py                ← Alp release/bench flashing helper (stub until first binary; not a customer tool)
 ├── prebuilt/               ← signed binaries shipped with each alp-sdk release
 ├── toolchain/              ← arm-none-eabi (stub/CI smoke) + ticlang (bench/production)
 ├── src/
@@ -133,14 +133,19 @@ Three independent axes (same model as the gd32-bridge):
 | Wire protocol | `ALP_CC3501E_PROTOCOL_VERSION` (`<alp/protocol/cc3501e.h>`) + `protocol-version.txt` | the wire format changes; the host refuses a mismatched version via GET_VERSION |
 | Build / signature | the signed binary's `.sha256` in `prebuilt/` | every build |
 
-## Flashing (consumer-side)
+## Firmware updates
 
-The CC3501E ships **pre-flashed by Alp**; for normal use the customer
-flashes nothing.  A version-pinned prebuilt blob also lives at
-`prebuilt/cc3501e-vX.Y.Z.bin` for field re-flash via
-[`flash.py`](flash.py) (which relays the image to the CC3501E over the
-inter-chip link).  `flash.py` and `prebuilt/` are populated when the
-first production binary is built + signed on the bench.
+The CC3501E ships **pre-flashed by Alp** and is **never customer-flashed**.
+Firmware updates are Alp-released and applied over the bridge SPI link,
+programming the chip's own OTP; the SoM preset models this with
+`helper_firmware[].update_channel: alp_ota_spi_otp` (see
+`metadata/e1m_modules/README.md`), never a `flash_method`.  The signed
+release blob is version-pinned at `prebuilt/cc3501e-vX.Y.Z.bin`.
+[`flash.py`](flash.py) is Alp's internal release/bench tool that
+produces and validates that blob (relaying the image to the CC3501E
+over the inter-chip link) -- it is not a customer-facing utility.
+`flash.py` and `prebuilt/` are populated when the first production
+binary is built + signed on the bench.
 
 ## Status
 

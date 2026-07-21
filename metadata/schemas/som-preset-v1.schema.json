@@ -222,7 +222,7 @@
     },
     "helper_firmware": {
       "type": "array",
-      "description": "On-module helper MCUs whose firmware images the orchestrator registers into the system manifest.  These are NOT heterogeneous-compute peers (they don't appear in `topology:`); they're independently-flashed supervisor / coprocessor MCUs whose flash flow needs to be visible to `west alp-flash`.  Per the project's standing convention, AEN CC3501E entries stay TBD until the embedded `firmware/cc3501e/` tree (ADR 0015) cuts its first bench-built binary.",
+      "description": "On-module helper MCUs whose firmware images the orchestrator registers into the system manifest.  These are NOT heterogeneous-compute peers (they don't appear in `topology:`).  Each entry is EITHER a customer-flashable helper MCU -- carries `flash_method`/`flash_args` (e.g. `gd32_bridge` via `swd_probe`), independently flashed via `west alp-flash` -- OR a vendor-OTA-updated coprocessor -- carries `update_channel` (e.g. AEN's `cc3501e_otp` via `alp_ota_spi_otp`), whose firmware is Alp-released and applied over the bridge link programming the chip's own OTP, and is NEVER customer-flashed.  See `$defs/helper_firmware_entry`.",
       "items": { "$ref": "#/$defs/helper_firmware_entry" }
     },
     "default_hw_rev": {
@@ -474,6 +474,10 @@
       "type": "object",
       "required": ["name", "chip"],
       "additionalProperties": false,
+      "oneOf": [
+        { "required": ["flash_method"], "not": { "required": ["update_channel"] } },
+        { "required": ["update_channel"], "not": { "required": ["flash_method"] } }
+      ],
       "properties": {
         "name": {
           "type": "string",
@@ -488,7 +492,7 @@
         "firmware_path": {
           "type": "string",
           "minLength": 1,
-          "description": "Repo-relative path to the prebuilt firmware image, or the literal string \"TBD\" pending an upstream release."
+          "description": "Repo-relative path to the prebuilt / shipped firmware image, or the literal string \"TBD\" pending an upstream release."
         },
         "flash_method": {
           "type": "string",
@@ -496,14 +500,19 @@
             { "pattern": "^[a-z][a-z0-9_]+$" },
             { "const": "TBD" }
           ],
-          "description": "Backend tool key consumed by `west alp-flash`'s helper-MCU dispatcher (e.g. `swd_probe`, `cc3501e_usb_bootloader`).  TBD pending the authoritative flow."
+          "description": "Backend tool key consumed by `west alp-flash`'s helper-MCU dispatcher (e.g. `swd_probe`) for a CUSTOMER-flashable helper.  TBD pending the authoritative flow.  Mutually exclusive with `update_channel` -- an entry carries exactly one of the two."
         },
         "flash_args": {
           "oneOf": [
             { "type": "object", "additionalProperties": true },
             { "type": "string", "const": "TBD" }
           ],
-          "description": "Backend-specific args (interface, target, base address, ...) forwarded verbatim to the flash backend.  DELIBERATELY OPEN object: the shape follows `flash_method`'s backend contract, which this schema cannot enumerate; TBD when the method is TBD."
+          "description": "Backend-specific args (interface, target, base address, ...) forwarded verbatim to the flash backend.  DELIBERATELY OPEN object: the shape follows `flash_method`'s backend contract, which this schema cannot enumerate; TBD when the method is TBD.  Only meaningful alongside `flash_method`."
+        },
+        "update_channel": {
+          "type": "string",
+          "enum": ["alp_ota_spi_otp"],
+          "description": "Marks this helper as a vendor-OTA-updated coprocessor rather than a customer-flash target (e.g. AEN's `cc3501e_otp`): firmware is Alp-released and applied over the bridge SPI link, programming the chip's own OTP -- the customer never flashes it directly.  Mutually exclusive with `flash_method` -- an entry carries exactly one of the two."
         }
       }
     },
