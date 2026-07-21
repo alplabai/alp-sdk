@@ -62,13 +62,17 @@ def _helper_mcus(project: BoardProject) -> list[dict[str, Any]]:
 
     Two sources contribute:
 
-    1. The SoM preset's `helper_firmware:` list (Phase 3) -- carries
-       authoritative firmware_path + flash_method + flash_args; each
-       entry projects verbatim into the manifest.  Entries whose
-       firmware_path is `TBD` still land in the manifest with a
-       human-readable note so reviewers see the gap (the orchestrator
-       does NOT fail the build on TBD helper firmware -- the
-       Renesas + Alif flash flows are independently scriptable).
+    1. The SoM preset's `helper_firmware:` list (Phase 3) -- each entry
+       is EITHER a customer-flashable helper (carries flash_method +
+       flash_args, projected verbatim -- e.g. gd32_bridge) OR a
+       vendor-OTA-updated coprocessor (carries update_channel instead --
+       e.g. AEN's cc3501e_otp, applied over the bridge SPI programming
+       OTP and never customer-flashed); the manifest carries whichever
+       pair the entry declares, never both.  Entries whose firmware_path
+       is `TBD` still land in the manifest with a human-readable note so
+       reviewers see the gap (the orchestrator does NOT fail the build
+       on TBD helper firmware -- the Renesas + Alif flash flows are
+       independently scriptable).
 
     2. Legacy `on_module.{supervisor_mcu,wifi_ble}` strings (kept
        for back-compat with the pre-Phase-3 metadata shape) -- only
@@ -87,9 +91,15 @@ def _helper_mcus(project: BoardProject) -> list[dict[str, Any]]:
                 "name":          entry.get("name"),
                 "chip":          entry.get("chip"),
                 "firmware_path": entry.get("firmware_path"),
-                "flash_method":  entry.get("flash_method"),
-                "flash_args":    entry.get("flash_args"),
             }
+            update_channel = entry.get("update_channel")
+            if update_channel:
+                # Vendor-OTA coprocessor (e.g. CC3501E): no flash_method/
+                # flash_args -- it is never a `west alp-flash` target.
+                row["update_channel"] = update_channel
+            else:
+                row["flash_method"] = entry.get("flash_method")
+                row["flash_args"]    = entry.get("flash_args")
             if entry.get("firmware_path") == "TBD":
                 row["note"] = ("firmware_path TBD; populated when the "
                                "upstream firmware release lands")
