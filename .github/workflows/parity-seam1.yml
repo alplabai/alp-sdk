@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# ADR-0020 parity gate, seam 1 (plan-shape) -- runs IN alp-sdk's own CI, no
+# token/App/cross-repo dispatch. seam1 is pure Python: it emits this checkout's
+# own `--emit build-plan` and diffs it (checkout-root + sdkCommit normalized)
+# against the frozen oracle at tests/parity/oracle (captured at df312cec^ =
+# 97ad481b, the last SHA with both fan_out and the Phase-1 fields). The only
+# allowed delta is debug.probe "openocd"->null (#848, hand-reviewed); any other
+# emit change fails the gate ON THIS PR -- which is exactly where the ADR wants
+# it surfaced. seam2 (real build + Renode smoke, needs a toolchain runner) is a
+# separate follow-up. Tracked in #855.
+name: parity-seam1
+
+on:
+  pull_request:
+    paths:
+      - "scripts/alp_orchestrate/**"
+      - "metadata/**"
+      - "examples/**/board.yaml"
+      - "tests/parity/**"
+  push:
+    branches: [dev, main]
+    paths:
+      - "scripts/alp_orchestrate/**"
+      - "metadata/**"
+      - "examples/**/board.yaml"
+      - "tests/parity/**"
+
+permissions:
+  contents: read
+
+jobs:
+  seam1:
+    name: "seam1 -- build-plan shape parity"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: install emit deps
+        run: pip install jsonschema pyyaml
+      - name: seam1 field-diff (own emit vs frozen oracle)
+        run: python3 tests/parity/seam1_field_diff.py --sdk . --oracle tests/parity/oracle

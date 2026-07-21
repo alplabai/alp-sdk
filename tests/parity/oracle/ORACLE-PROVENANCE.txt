@@ -1,0 +1,2 @@
+oracle SHA: 97ad481b94007eeb3439a21088c10c59aedc95ac  (feat(build-plan): publish envAppendPath + executionPolicy (ADR-0020 Phase 1, additive) (#847))
+captured from df312cec^ (parent of ADR-0020 Phase 4 #848); has fan_out + envAppendPath/executionPolicy
