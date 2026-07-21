@@ -44,25 +44,32 @@ oracle produced" is even an answerable question — freezing it now is
 reconstructing that oracle retroactively, per the Amendment's remediation
 step, not a routine fixture update.
 
-## Why the comparator normalizes two fields
+## Why the comparator normalizes three fields
 
 A `build-plan.json` is **not hermetic** — it embeds facts about the checkout
-that emitted it, not just the board it plans for:
+and host that emitted it, not just the board it plans for:
 
 - **the checkout-root absolute path**, in `env.ALP_SDK_ROOT`, every
   `envAppendPath.*` entry, each slice's `appDir`, and (for sysbuild slices)
   embedded mid-string inside `command.args` (`-DSB_CONF_FILE=<root>/a;<root>/b`,
   which isn't a root-prefixed string outright — the comparator does a global
   substring replace, not a prefix check, to catch this);
-- **`sdkCommit`**, the emitting commit's short SHA.
+- **`sdkCommit`**, the emitting commit's short SHA;
+- **the emitting host's Python interpreter path**, in each cmake/sysbuild
+  slice's `command.args` entry `-DPython3_EXECUTABLE=<path>` —
+  `orchestrator.py` pins this to `sys.executable`, so it is inherently
+  host-specific (a Homebrew path on the oracle's capture machine, `/usr/bin/
+  python3` on a WSL runner, a hosted-toolcache path on `ubuntu-latest`).
 
-Neither is a real parity break — they differ by construction between the
-oracle's `97ad481b` capture checkout and whatever checkout is emitting the
-live plan under test. `seam1_field_diff.py` normalizes both before diffing:
-the checkout root (discovered from the plan's own
+None of the three is a real parity break — they differ by construction
+between the oracle's `97ad481b` capture checkout/host and whatever checkout/
+host is emitting the live plan under test. `seam1_field_diff.py` normalizes
+all three before diffing: the checkout root (discovered from the plan's own
 `slices[0].env.ALP_SDK_ROOT` — nothing is hardcoded) is replaced everywhere
-with the literal token `__SDKROOT__`, and `sdkCommit` is replaced with
-`__SHA__`.
+with the literal token `__SDKROOT__`, `sdkCommit` is replaced with `__SHA__`,
+and any `-DPython3_EXECUTABLE=<path>` arg has its path replaced with
+`<PYEXE>` (the arg itself still must be present — only the host-specific
+value is tokenized, so the shape check survives).
 
 ## The one allowed delta: `debug.probe`
 

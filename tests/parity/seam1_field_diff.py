@@ -20,14 +20,18 @@ and every SDK-side executor, so nothing after it can be diffed against an
 in-repo oracle again -- this is the last frame where that comparison exists.
 
 Build plans are NOT hermetic: they embed the emitting checkout's absolute
-root path (`env.ALP_SDK_ROOT`, `envAppendPath.*`, per-slice `appDir`) and the
-emitting commit (`sdkCommit`). Both fields are real signal for a human but
-pure noise for a parity diff -- normalize them before comparing:
+root path (`env.ALP_SDK_ROOT`, `envAppendPath.*`, per-slice `appDir`), the
+emitting commit (`sdkCommit`), and the emitting host's Python interpreter
+path (each cmake/sysbuild slice's `-DPython3_EXECUTABLE=<path>` arg, pinned
+by `orchestrator.py`'s `sys.executable`). All three are real signal for a
+human but pure noise for a parity diff -- normalize them before comparing:
 
   * any string carrying the checkout root as a prefix -> the root prefix is
     replaced with the literal token ``__SDKROOT__`` (root discovered from the
     plan's own ``slices[0].env.ALP_SDK_ROOT`` -- no path is hardcoded);
-  * ``sdkCommit`` -> the literal token ``__SHA__``.
+  * ``sdkCommit`` -> the literal token ``__SHA__``;
+  * a ``command.args`` entry matching ``-DPython3_EXECUTABLE=<path>`` -> the
+    path is replaced with the literal token ``<PYEXE>``.
 
 The ONLY semantic delta allowed to pass without failing the gate is
 ``slices[*].debug.probe`` going from ``"openocd"`` (the oracle, at 97ad481b)
@@ -48,6 +52,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -55,6 +60,8 @@ from typing import Any, Iterator
 
 _SDKROOT_TOKEN = "__SDKROOT__"
 _SHA_TOKEN = "__SHA__"
+_PYEXE_TOKEN = "<PYEXE>"
+_PYEXE_ARG_RE = re.compile(r"^-DPython3_EXECUTABLE=.*$")
 
 # The one delta ADR-0020 hand-reviewed and allows through the gate:
 # debug.probe "openocd" (oracle, 97ad481b) -> null (df312cec+, #848).
@@ -82,29 +89,40 @@ def _discover_sdk_root(plan: dict) -> str | None:
 
 def _normalize_strings(node: Any, sdk_root: str | None) -> Any:
     """Deep-copy `node`, replacing every checkout-root occurrence in any
-    string.
+    string, and tokenizing any `-DPython3_EXECUTABLE=<path>` command arg.
 
     A plain prefix check isn't enough: some fields embed the root
     mid-string alongside other content (e.g. a sysbuild `-DSB_CONF_FILE=
     <root>/a;<root>/b` arg carries the root twice, neither at index 0), so
     this does a global substring replace rather than a prefix-only one.
+
+    `-DPython3_EXECUTABLE=<path>` is a second, unrelated non-hermetic field:
+    it carries the emitting host's interpreter path (`sys.executable`, not
+    the checkout root), so it needs its own match -- tokenizing the whole
+    arg, not just a substring, keeps the shape check (the arg must still be
+    present) while dropping the host-specific value.
     """
     if isinstance(node, dict):
         return {k: _normalize_strings(v, sdk_root) for k, v in node.items()}
     if isinstance(node, list):
         return [_normalize_strings(v, sdk_root) for v in node]
-    if isinstance(node, str) and sdk_root:
-        return node.replace(sdk_root, _SDKROOT_TOKEN)
+    if isinstance(node, str):
+        if _PYEXE_ARG_RE.match(node):
+            return f"-DPython3_EXECUTABLE={_PYEXE_TOKEN}"
+        if sdk_root:
+            return node.replace(sdk_root, _SDKROOT_TOKEN)
     return node
 
 
 def normalize_plan(plan: dict) -> dict:
-    """Return a checkout-independent copy of a build-plan dict.
+    """Return a checkout/host-independent copy of a build-plan dict.
 
-    Replaces the embedded checkout-root absolute path with ``__SDKROOT__``
-    and ``sdkCommit`` with ``__SHA__`` -- the two fields that legitimately
-    differ between the oracle's capture checkout and whatever checkout the
-    live SDK is emitted from, without being a real parity break.
+    Replaces the embedded checkout-root absolute path with ``__SDKROOT__``,
+    ``sdkCommit`` with ``__SHA__``, and any ``-DPython3_EXECUTABLE=<path>``
+    command arg's path with ``<PYEXE>`` -- the three fields that legitimately
+    differ between the oracle's capture checkout/host and whatever
+    checkout/host the live SDK is emitted from, without being a real parity
+    break.
     """
     sdk_root = _discover_sdk_root(plan)
     normalized = _normalize_strings(plan, sdk_root)
