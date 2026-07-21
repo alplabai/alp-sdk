@@ -1,2 +1,13 @@
 oracle SHA: 97ad481b94007eeb3439a21088c10c59aedc95ac  (feat(build-plan): publish envAppendPath + executionPolicy (ADR-0020 Phase 1, additive) (#847))
 captured from df312cec^ (parent of ADR-0020 Phase 4 #848); has fan_out + envAppendPath/executionPolicy
+
+Hand-reviewed field correction (alp-sdk#862, "Windows sysbuild paths" fix, H3/#596):
+`connectivity_iot-fleet-ota.build-plan.json` slices[0]/[1] `command.args`'
+`-DSB_CONF_FILE=...` second path segment was updated from
+`<root>/build/alp_sysbuild.conf` to
+`<root>/examples/connectivity/iot-fleet-ota/build/alp_sysbuild.conf` -- the
+project-relative `alp_sysbuild.conf` overlay path is now anchored on the
+resolved per-project `build_root`, not the emitting process's CWD, so the
+overlay path is CWD-independent per the plan contract. This is the only
+field touched; every other value in this fixture (and every other oracle
+fixture) is untouched, still frozen at 97ad481b.
