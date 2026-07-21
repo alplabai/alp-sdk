@@ -1,5 +1,6 @@
 {
   "schemaVersion": 1,
+  "planPathMode": "tokened",
   "generatedBy": "scripts/alp_orchestrate.py",
   "sdkVersion": "0.11.1",
   "sdkCommit": "<SDK_COMMIT>",
@@ -16,7 +17,7 @@
       "coreId": "a55_cluster",
       "backend": "yocto",
       "buildDir": "build/a55_cluster-yocto",
-      "appDir": "<SDK_ROOT>/examples/multicore/rpmsg-imx93/linux",
+      "appDir": "${PROJECT_ROOT}/linux",
       "configArtefacts": [
         {
           "path": "build/a55_cluster-yocto/local.conf",
@@ -49,14 +50,14 @@
         "cwd": "build/a55_cluster-yocto"
       },
       "env": {
-        "ALP_SDK_ROOT": "<SDK_ROOT>"
+        "ALP_SDK_ROOT": "${SDK_ROOT}"
       },
       "envAppendPath": {
         "EXTRA_ZEPHYR_MODULES": [
-          "<SDK_ROOT>"
+          "${SDK_ROOT}"
         ],
         "PYTHONPATH": [
-          "<SDK_ROOT>/scripts"
+          "${SDK_ROOT}/scripts"
         ]
       }
     },
@@ -64,7 +65,7 @@
       "coreId": "m33",
       "backend": "zephyr",
       "buildDir": "build/m33-zephyr",
-      "appDir": "<SDK_ROOT>/examples/multicore/rpmsg-imx93/m33",
+      "appDir": "${PROJECT_ROOT}/m33",
       "configArtefacts": [
         {
           "path": "build/m33-zephyr/alp.conf",
@@ -95,22 +96,22 @@
           "build",
           "-b",
           "alp_e1m_nx9101_m33",
-          "<SDK_ROOT>/examples/multicore/rpmsg-imx93/m33",
+          "${PROJECT_ROOT}/m33",
           "--",
-          "-DPython3_EXECUTABLE=<PYTHON_EXECUTABLE>",
-          "-DEXTRA_CONF_FILE=<SDK_ROOT>/examples/multicore/rpmsg-imx93/build/m33-zephyr/alp.conf"
+          "-DPython3_EXECUTABLE=${PYTHON}",
+          "-DEXTRA_CONF_FILE=${PROJECT_ROOT}/build/m33-zephyr/alp.conf"
         ],
         "cwd": "build/m33-zephyr"
       },
       "env": {
-        "ALP_SDK_ROOT": "<SDK_ROOT>"
+        "ALP_SDK_ROOT": "${SDK_ROOT}"
       },
       "envAppendPath": {
         "EXTRA_ZEPHYR_MODULES": [
-          "<SDK_ROOT>"
+          "${SDK_ROOT}"
         ],
         "PYTHONPATH": [
-          "<SDK_ROOT>/scripts"
+          "${SDK_ROOT}/scripts"
         ]
       }
     }

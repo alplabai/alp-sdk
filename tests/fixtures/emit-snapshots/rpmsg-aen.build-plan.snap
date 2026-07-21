@@ -1,5 +1,6 @@
 {
   "schemaVersion": 1,
+  "planPathMode": "tokened",
   "generatedBy": "scripts/alp_orchestrate.py",
   "sdkVersion": "0.11.1",
   "sdkCommit": "<SDK_COMMIT>",
@@ -16,7 +17,7 @@
       "coreId": "a32_cluster",
       "backend": "yocto",
       "buildDir": "build/a32_cluster-yocto",
-      "appDir": "<SDK_ROOT>/examples/multicore/rpmsg-aen/linux",
+      "appDir": "${PROJECT_ROOT}/linux",
       "configArtefacts": [
         {
           "path": "build/a32_cluster-yocto/local.conf",
@@ -49,14 +50,14 @@
         "cwd": "build/a32_cluster-yocto"
       },
       "env": {
-        "ALP_SDK_ROOT": "<SDK_ROOT>"
+        "ALP_SDK_ROOT": "${SDK_ROOT}"
       },
       "envAppendPath": {
         "EXTRA_ZEPHYR_MODULES": [
-          "<SDK_ROOT>"
+          "${SDK_ROOT}"
         ],
         "PYTHONPATH": [
-          "<SDK_ROOT>/scripts"
+          "${SDK_ROOT}/scripts"
         ]
       }
     },
@@ -64,7 +65,7 @@
       "coreId": "m55_he",
       "backend": "zephyr",
       "buildDir": "build/m55_he-zephyr",
-      "appDir": "<SDK_ROOT>/firmware/alp-stock-shim",
+      "appDir": "${SDK_ROOT}/firmware/alp-stock-shim",
       "configArtefacts": [
         {
           "path": "build/m55_he-zephyr/alp.conf",
@@ -95,22 +96,22 @@
           "build",
           "-b",
           "alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he",
-          "<SDK_ROOT>/firmware/alp-stock-shim",
+          "${SDK_ROOT}/firmware/alp-stock-shim",
           "--",
-          "-DPython3_EXECUTABLE=<PYTHON_EXECUTABLE>",
-          "-DEXTRA_CONF_FILE=<SDK_ROOT>/examples/multicore/rpmsg-aen/build/m55_he-zephyr/alp.conf"
+          "-DPython3_EXECUTABLE=${PYTHON}",
+          "-DEXTRA_CONF_FILE=${PROJECT_ROOT}/build/m55_he-zephyr/alp.conf"
         ],
         "cwd": "build/m55_he-zephyr"
       },
       "env": {
-        "ALP_SDK_ROOT": "<SDK_ROOT>"
+        "ALP_SDK_ROOT": "${SDK_ROOT}"
       },
       "envAppendPath": {
         "EXTRA_ZEPHYR_MODULES": [
-          "<SDK_ROOT>"
+          "${SDK_ROOT}"
         ],
         "PYTHONPATH": [
-          "<SDK_ROOT>/scripts"
+          "${SDK_ROOT}/scripts"
         ]
       }
     },
@@ -118,7 +119,7 @@
       "coreId": "m55_hp",
       "backend": "zephyr",
       "buildDir": "build/m55_hp-zephyr",
-      "appDir": "<SDK_ROOT>/examples/multicore/rpmsg-aen/m55_hp",
+      "appDir": "${PROJECT_ROOT}/m55_hp",
       "configArtefacts": [
         {
           "path": "build/m55_hp-zephyr/alp.conf",
@@ -149,22 +150,22 @@
           "build",
           "-b",
           "alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp",
-          "<SDK_ROOT>/examples/multicore/rpmsg-aen/m55_hp",
+          "${PROJECT_ROOT}/m55_hp",
           "--",
-          "-DPython3_EXECUTABLE=<PYTHON_EXECUTABLE>",
-          "-DEXTRA_CONF_FILE=<SDK_ROOT>/examples/multicore/rpmsg-aen/build/m55_hp-zephyr/alp.conf"
+          "-DPython3_EXECUTABLE=${PYTHON}",
+          "-DEXTRA_CONF_FILE=${PROJECT_ROOT}/build/m55_hp-zephyr/alp.conf"
         ],
         "cwd": "build/m55_hp-zephyr"
       },
       "env": {
-        "ALP_SDK_ROOT": "<SDK_ROOT>"
+        "ALP_SDK_ROOT": "${SDK_ROOT}"
       },
       "envAppendPath": {
         "EXTRA_ZEPHYR_MODULES": [
-          "<SDK_ROOT>"
+          "${SDK_ROOT}"
         ],
         "PYTHONPATH": [
-          "<SDK_ROOT>/scripts"
+          "${SDK_ROOT}/scripts"
         ]
       }
     }

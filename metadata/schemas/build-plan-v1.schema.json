@@ -23,6 +23,11 @@
       "type": ["string", "null"],
       "description": "Short git commit (`git rev-parse --short HEAD`) of the alp-sdk checkout that produced this plan. null when git or the .git directory isn't available (e.g. a wheel-installed CLI with no checkout) -- never fails the emit. Additive, schemaVersion 1 (no bump). Informational provenance, not part of the locked consumer contract."
     },
+    "planPathMode": {
+      "type": "string",
+      "enum": ["tokened"],
+      "description": "Issue #865, additive under schemaVersion 1 (no bump): 'tokened' means every checkout/project-anchored absolute path this plan would otherwise embed is instead a literal `${SDK_ROOT}` / `${PROJECT_ROOT}` / `${PYTHON}` token (see `env.ALP_SDK_ROOT`, `envAppendPath`, `slices[].appDir`, and the `-DPython3_EXECUTABLE=`/`-DEXTRA_CONF_FILE=`/`-DSB_CONF_FILE=`/`west build`-appdir command args) -- tan-cli (PR #24) substitutes them at materialise time, rather than the SDK baking in this run's absolute checkout path. Required by tan-cli's substitution step; a consumer pinned to a pre-#865 plan shape simply won't see this key."
+    },
     "boardYaml": {
       "type": "string",
       "description": "POSIX-style path to the board.yaml this plan was resolved from, as passed to emit_build_plan (issue #596: every relative path elsewhere in the plan is anchored on this file's own directory, never the emitting process's CWD)."
@@ -69,7 +74,7 @@
           },
           "appDir": {
             "type": ["string", "null"],
-            "description": "Resolved absolute (POSIX-style) path to this slice's app source directory, independent of `command` -- lets tooling watch the app source without reverse-engineering it out of a yocto/zephyr/baremetal-shaped command (issue #597). null when the slice has no app source dir to report, e.g. a Yocto slice built from the `alp-image-edge` stock-image token rather than an `app:` path."
+            "description": "This slice's app source directory, independent of `command` -- lets tooling watch the app source without reverse-engineering it out of a yocto/zephyr/baremetal-shaped command (issue #597). null when the slice has no app source dir to report, e.g. a Yocto slice built from the `alp-image-edge` stock-image token rather than an `app:` path. Issue #865 (`planPathMode: tokened`): a project-anchored app is `${PROJECT_ROOT}/<relpath>` (or exactly `${PROJECT_ROOT}`); an SDK-owned app (the stock M-core shim) is `${SDK_ROOT}/<relpath>`; the rare app resolving under neither root is left as a genuine absolute path and paired with an `appdir-unrooted` warning rather than silently mis-rooted."
           },
           "configArtefacts": {
             "type": "array",
@@ -135,14 +140,14 @@
             "type": "object",
             "additionalProperties": false,
             "required": ["ALP_SDK_ROOT"],
-            "description": "Environment variables the consumer must inject into the slice subprocess, native host-path form (handed to the subprocess environment verbatim).",
+            "description": "Environment variables the consumer must inject into the slice subprocess (handed to the subprocess environment verbatim once the consumer substitutes any token -- issue #865, `planPathMode: tokened`).",
             "properties": {
-              "ALP_SDK_ROOT": { "type": "string", "description": "Absolute host path to the alp-sdk checkout the plan was generated from." }
+              "ALP_SDK_ROOT": { "type": "string", "description": "The literal token `${SDK_ROOT}` under `planPathMode: tokened` (issue #865) -- tan-cli (PR #24) substitutes its own resolved alp-sdk checkout root before injecting this into the subprocess environment." }
             }
           },
           "envAppendPath": {
             "type": "object",
-            "description": "SDK-owned env values the consumer must APPEND, skipping any value already present (de-dup first, matching `_alp_common.env_with_sdk` / `_workspace.subprocess_env`), to the slice subprocess env, distinct from `env` (set-verbatim). The join separator is PER-KEY, not uniformly os.pathsep: `EXTRA_ZEPHYR_MODULES` is a CMake list -- Zephyr's `zephyr_module.py` splits it on `;` on every platform, never an OS path list -- while `PYTHONPATH` is a real OS-native path list joined with `os.pathsep`. Plan wins / CLI fills gaps: a consumer that computes these itself should prefer the plan's values. Additive under schemaVersion 1; a new key so consumers pinned to an older shape safely ignore it.",
+            "description": "SDK-owned env values the consumer must APPEND, skipping any value already present (de-dup first, matching `_alp_common.env_with_sdk` / `_workspace.subprocess_env`), to the slice subprocess env, distinct from `env` (set-verbatim). The join separator is PER-KEY, not uniformly os.pathsep: `EXTRA_ZEPHYR_MODULES` is a CMake list -- Zephyr's `zephyr_module.py` splits it on `;` on every platform, never an OS path list -- while `PYTHONPATH` is a real OS-native path list joined with `os.pathsep`. Plan wins / CLI fills gaps: a consumer that computes these itself should prefer the plan's values. Additive under schemaVersion 1; a new key so consumers pinned to an older shape safely ignore it. Values are `${SDK_ROOT}`-tokened under `planPathMode: tokened` (issue #865), substituted the same as `env.ALP_SDK_ROOT`.",
             "additionalProperties": {
               "type": "array",
               "items": { "type": "string" }
@@ -174,7 +179,7 @@
         "properties": {
           "code": {
             "type": "string",
-            "description": "Stable machine-readable warning code. Known values as of schemaVersion 1: 'no-command' (missing app/board/image for the core's os), 'yocto-recipe-missing' (an app-only Yocto slice has app: but no recipe:, so there is no valid bitbake target). New codes may be added without a schemaVersion bump -- consumers must not treat this as a closed enum."
+            "description": "Stable machine-readable warning code. Known values as of schemaVersion 1: 'no-command' (missing app/board/image for the core's os), 'yocto-recipe-missing' (an app-only Yocto slice has app: but no recipe:, so there is no valid bitbake target), 'appdir-unrooted' (issue #865: a slice's `app:` resolves outside both `${PROJECT_ROOT}` and `${SDK_ROOT}`, so `appDir` is left as a genuine absolute path a consumer on a different checkout cannot re-root). New codes may be added without a schemaVersion bump -- consumers must not treat this as a closed enum."
           },
           "coreId": {
             "type": "string",

@@ -13,7 +13,6 @@ execution.
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import Any, Optional
 
@@ -83,6 +82,30 @@ STOCK_SHIM_DIR = REPO / "firmware" / "alp-stock-shim"
 STOCK_IMAGE_APP = "alp-image-edge"
 
 
+def _tokenize(path: Path, base_dir: Path, repo: Path) -> str:
+    """Render an absolute path as a portable `${PROJECT_ROOT}`/`${SDK_ROOT}`
+    token (issue #865) instead of baking in THIS checkout's absolute path.
+    tan-cli (PR #24) substitutes both tokens at materialise time, so a plan
+    emitted on one machine/checkout can be materialised faithfully on
+    another -- the split-brain risk a baked-in absolute path invites.
+
+    Prefers `${PROJECT_ROOT}` (the project's own board.yaml directory) since
+    most anchored paths are project-owned; falls back to `${SDK_ROOT}` for
+    paths the SDK itself owns (e.g. the family sysbuild base, the stock
+    M-core shim app). A path under neither root is returned unchanged
+    (absolute, token-free) -- the caller is responsible for flagging that
+    case rather than silently mis-rooting it.
+    """
+    path = Path(path)
+    for root, token in ((base_dir, "${PROJECT_ROOT}"), (repo, "${SDK_ROOT}")):
+        try:
+            rel = path.relative_to(root)
+        except ValueError:
+            continue
+        return token if rel == Path(".") else f"{token}/{rel.as_posix()}"
+    return path.as_posix()
+
+
 def _slice_command(
     project: BoardProject,
     slice_: Slice,
@@ -108,10 +131,13 @@ def _slice_command(
         # layout when it resolves artefacts. Adding `-d <buildDir>` here
         # would double-nest (west resolves a relative -d against its cwd,
         # already = buildDir) -- see finding M14.
+        # Tokenized (issue #865): `_zephyr_app_dir` resolves an absolute
+        # path (project-anchored for a customer app, SDK-anchored for the
+        # stock M-core shim) -- see `_tokenize`.
         cmd = [
             "west", "build",
             "-b", slice_.board,
-            str(_zephyr_app_dir(slice_.app, base_dir)),
+            _tokenize(_zephyr_app_dir(slice_.app, base_dir), base_dir, REPO),
         ]
         # ADR 0014 Phase-3 conf->build: wire the generated sysbuild
         # overlays into the build command itself.  `_shared_artefacts`
@@ -129,14 +155,16 @@ def _slice_command(
         # hand-off and can select a host Python without the west package.
         # The orchestrator itself runs under the intended workspace Python,
         # so pin it as an explicit CMake cache override (issue #787).
-        # Forward slashes: on Windows sys.executable is a backslash path
-        # (C:\Users\...), and CMake parses `\U`/`\N` etc. in the resulting
-        # cache-override string as invalid character escapes ("Invalid
-        # character escape '\U'") when Zephyr expands it into a custom-target
-        # command. Posix slashes are valid on every host and a no-op on
-        # non-Windows (found via the tan<->alp-sdk e2e build).
-        py_exe = sys.executable.replace("\\", "/")
-        defines = [f"-DPython3_EXECUTABLE={py_exe}"]
+        # ${PYTHON} token, not `sys.executable` (issue #865): this plan is
+        # emitted once by whichever Python ran the planner, but may be
+        # materialised on a different host/checkout than that -- baking in
+        # a concrete interpreter path here would pin THIS run's Python, not
+        # the consumer's. tan-cli (PR #24) substitutes ${PYTHON} with its
+        # own resolved interpreter (forward-slashed for the same CMake
+        # backslash-escape reason issue #787/#849 fixed: CMake parses
+        # `\U`/`\N` etc. in a Windows path as an invalid character escape)
+        # at materialise time; the SDK never emits a bare fallback here.
+        defines = ["-DPython3_EXECUTABLE=${PYTHON}"]
         is_sysbuild = emit_sysbuild_conf(project) or emit_tfm_sysbuild_conf(project)
         if is_sysbuild:
             cmd.append("--sysbuild")
@@ -178,10 +206,15 @@ def _slice_command(
                 # SB_CONF_FILE list) only recognises `/` -- a native
                 # Windows backslash path here dies the configure step
                 # with "File ... not found", the same class of bug
-                # #849 fixed for -DPython3_EXECUTABLE.
+                # #849 fixed for -DPython3_EXECUTABLE. `_tokenize` (#865)
+                # already emits posix-form tokens, so this holds for both:
+                # `sb_conf` is project-anchored (`${PROJECT_ROOT}/...`),
+                # `family_base` is SDK-anchored (`${SDK_ROOT}/...`) -- the
+                # `;`-joined list correctly carries both roots.
                 sb_conf_files = (
-                    [family_base.as_posix(), sb_conf.as_posix()]
-                    if family_base else [sb_conf.as_posix()]
+                    [_tokenize(family_base, base_dir, REPO),
+                     _tokenize(sb_conf, base_dir, REPO)]
+                    if family_base else [_tokenize(sb_conf, base_dir, REPO)]
                 )
                 defines.append(f"-DSB_CONF_FILE={';'.join(sb_conf_files)}")
         # Wire the slice's materialised per-core Kconfig fragment
@@ -207,7 +240,8 @@ def _slice_command(
             if not alp_conf.is_absolute():
                 alp_conf = Path(base_dir) / alp_conf
             alp_conf = alp_conf.resolve()
-            defines.append(f"-DEXTRA_CONF_FILE={alp_conf.as_posix()}")
+            defines.append(
+                f"-DEXTRA_CONF_FILE={_tokenize(alp_conf, base_dir, REPO)}")
         cmd += ["--", *defines]
         return cmd
     if slice_.os == "yocto":
@@ -229,8 +263,11 @@ def _slice_command(
     if slice_.os == "baremetal":
         if not slice_.app:
             return None
-        return ["cmake", "-S", str(_resolve_app_path(slice_.app, base_dir)),
-                "-B", str(slice_.build_dir)]
+        # `-S` tokenized (issue #865) same as the zephyr app-dir arg above;
+        # `-B` (`slice_.build_dir`) is already relative -- left alone.
+        app_path = _tokenize(_resolve_app_path(slice_.app, base_dir),
+                              base_dir, REPO)
+        return ["cmake", "-S", app_path, "-B", str(slice_.build_dir)]
     return None
 
 
