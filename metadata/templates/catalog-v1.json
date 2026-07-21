@@ -23,7 +23,7 @@
           {
             "path": "build/generated/alp.conf",
             "emit_mode": "zephyr-conf",
-            "consumer_hint": "Zephyr build -- Kconfig fragment layered over prj.conf via OVERLAY_CONFIG"
+            "consumer_hint": "Zephyr build -- Kconfig fragment layered over prj.conf via EXTRA_CONF_FILE"
           }
         ],
         "test_backend": ["native_sim"]
@@ -91,7 +91,7 @@
           {
             "path": "build/generated/alp.conf",
             "emit_mode": "zephyr-conf",
-            "consumer_hint": "Zephyr build -- Kconfig fragment layered over prj.conf via OVERLAY_CONFIG"
+            "consumer_hint": "Zephyr build -- Kconfig fragment layered over prj.conf via EXTRA_CONF_FILE"
           }
         ],
         "test_backend": ["native_sim"]
@@ -169,7 +169,7 @@
           {
             "path": "build/generated/alp.conf",
             "emit_mode": "zephyr-conf",
-            "consumer_hint": "Zephyr build -- Kconfig fragment layered over prj.conf via OVERLAY_CONFIG"
+            "consumer_hint": "Zephyr build -- Kconfig fragment layered over prj.conf via EXTRA_CONF_FILE"
           }
         ],
         "test_backend": ["native_sim"]
@@ -236,7 +236,7 @@
           {
             "path": "build/generated/alp.conf",
             "emit_mode": "zephyr-conf",
-            "consumer_hint": "Zephyr build -- Kconfig fragment layered over prj.conf via OVERLAY_CONFIG"
+            "consumer_hint": "Zephyr build -- Kconfig fragment layered over prj.conf via EXTRA_CONF_FILE"
           },
           {
             "path": "build/generated/alp/system_ipc.h",
@@ -305,7 +305,7 @@
           {
             "path": "build/generated/alp.conf",
             "emit_mode": "zephyr-conf",
-            "consumer_hint": "Zephyr build -- Kconfig fragment layered over prj.conf via OVERLAY_CONFIG (CONFIG_MODBUS=y from the modbus library manifest)"
+            "consumer_hint": "Zephyr build -- Kconfig fragment layered over prj.conf via EXTRA_CONF_FILE (CONFIG_MODBUS=y from the modbus library manifest)"
           }
         ],
         "test_backend": ["native_sim"]
@@ -374,7 +374,7 @@
           {
             "path": "build/generated/alp.conf",
             "emit_mode": "zephyr-conf",
-            "consumer_hint": "Zephyr build -- Kconfig fragment layered over prj.conf via OVERLAY_CONFIG"
+            "consumer_hint": "Zephyr build -- Kconfig fragment layered over prj.conf via EXTRA_CONF_FILE"
           }
         ],
         "test_backend": ["native_sim", "cross_compile"]

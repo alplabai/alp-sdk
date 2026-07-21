@@ -24,7 +24,7 @@ if(NOT _alp_rv EQUAL 0)
         "alp_project.py failed (rv=${_alp_rv}); check board.yaml.\n"
         "stderr: ${_alp_stderr}")
 endif()
-list(APPEND OVERLAY_CONFIG ${_alp_generated})
+list(APPEND EXTRA_CONF_FILE ${_alp_generated})
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(v2n_gd32_bridge_ping LANGUAGES C)

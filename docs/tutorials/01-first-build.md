@@ -49,7 +49,7 @@ cores:
 That's it.  No DT overlay, no hand-rolled Kconfig fragment.  The
 loader (`scripts/alp_project.py`) reads `board.yaml` at configure
 time and emits a Zephyr-side `alp.conf` that gets layered on top
-of `prj.conf` via `OVERLAY_CONFIG`.
+of `prj.conf` via `EXTRA_CONF_FILE`.
 
 ## Step 2 -- Read the source
 
@@ -98,7 +98,7 @@ python3 alp-sdk/scripts/alp_project.py \
     --emit zephyr-conf > /tmp/alp.conf
 
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/peripheral-io/gpio-button-led -- \
-    -DOVERLAY_CONFIG=/tmp/alp.conf \
+    -DEXTRA_CONF_FILE=/tmp/alp.conf \
     -DEXTRA_ZEPHYR_MODULES=alp-sdk
 ```
 

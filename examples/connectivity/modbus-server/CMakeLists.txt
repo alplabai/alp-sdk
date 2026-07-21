@@ -29,7 +29,7 @@ if(NOT _alp_rv EQUAL 0)
         "stderr: ${_alp_stderr}")
 endif()
 
-list(APPEND OVERLAY_CONFIG ${_alp_generated})
+list(APPEND EXTRA_CONF_FILE ${_alp_generated})
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(modbus_server LANGUAGES C)

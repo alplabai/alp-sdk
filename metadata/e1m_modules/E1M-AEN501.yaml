@@ -134,20 +134,14 @@ pad_routes:
 
 # On-module helper MCUs.  CC3501E (TI Wi-Fi 6 + BLE 5.4) is wired
 # on the AEN module; firmware is embedded in alp-sdk at
-# `firmware/cc3501e/` (ADR 0015) and stays TBD until the first binary
-# is built + signed on the bench (the project's standing convention).
-# What unblocks the TBDs: the first bench-built, signed cc3501e image
-# landing in firmware/cc3501e/prebuilt/ -- see docs/v0.6-tbd-and-
-# assumptions.md and metadata/e1m_modules/README.md (issue #44).
+# `firmware/cc3501e/` (ADR 0015).
 helper_firmware:
   - name:          cc3501e_otp
     chip:          cc3501e
     firmware_path: firmware/cc3501e/prebuilt/cc3501e-v0.2.0.bin
-    flash_method:  cc3501e_usb_bootloader     # tan flash helper backend; scripts/flash_backends/cc3501e_usb_bootloader.py
-    flash_args:                                # device (host bootloader port) + mode are bench/host-specific; the public cc3501e-flasher CLI is not yet shipped
-      speed:  921600                           # bootloader UART speed (backend default)
-      device: TBD                              # host bootloader COM/tty port -- provided at flash time
-      mode:   TBD                              # bootloader entry mode -- pending the public cc3501e-flasher CLI
+    # CC3501E firmware is Alp-released, applied over the bridge SPI
+    # programming OTP; NOT customer-flashed.
+    update_channel: alp_ota_spi_otp
 
 default_hw_rev:         r2                  # see metadata/e1m_modules/<family>/hw-revisions.yaml
 

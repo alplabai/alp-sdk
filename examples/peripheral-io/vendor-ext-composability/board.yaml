@@ -4,7 +4,7 @@
 # Customer workflow: copy this directory, change `som.sku` to your
 # MPN, edit `preset:` if you fork the EVK, and `west build`.
 # CMakeLists.txt invokes scripts/alp_project.py at configure time and
-# layers the generated alp.conf over prj.conf via OVERLAY_CONFIG.
+# layers the generated alp.conf over prj.conf via EXTRA_CONF_FILE.
 
 som:
   sku: E1M-AEN801          # Alif Ensemble E8 -- ships the <alp/ext/alif/adc.h>

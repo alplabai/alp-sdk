@@ -22,7 +22,7 @@ execute_process(
 if(NOT _alp_rv EQUAL 0)
     message(FATAL_ERROR "alp_project.py failed (rv=${_alp_rv})\nstderr: ${_alp_stderr}")
 endif()
-list(APPEND OVERLAY_CONFIG ${_alp_generated})
+list(APPEND EXTRA_CONF_FILE ${_alp_generated})
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(v2n_board_id_readout LANGUAGES C)

@@ -6,7 +6,7 @@
 #
 # board.yaml-driven app (like aen-eeprom-manifest): scripts/alp_project.py
 # derives the CONFIG_* set (CONFIG_ADC, CONFIG_ALP_SOC_ALIF_ENSEMBLE_E8, ...)
-# from board.yaml and layers it over prj.conf via OVERLAY_CONFIG.  The
+# from board.yaml and layers it over prj.conf via EXTRA_CONF_FILE.  The
 # device-only DT wiring (dac0 + adc12_0 + the alp-dac0/alp-adc0 aliases) lives in
 # boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay, which Zephyr
 # auto-applies by the FULLY-QUALIFIED board name (bare-name overlays are
@@ -39,7 +39,7 @@ if(NOT _alp_rv EQUAL 0)
         "stderr: ${_alp_stderr}")
 endif()
 
-list(APPEND OVERLAY_CONFIG ${_alp_generated})
+list(APPEND EXTRA_CONF_FILE ${_alp_generated})
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(aen_analog_validate LANGUAGES C)

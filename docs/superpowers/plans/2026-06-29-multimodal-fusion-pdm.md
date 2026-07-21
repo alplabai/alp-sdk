@@ -482,7 +482,7 @@ execute_process(
 if(NOT rc EQUAL 0)
     message(FATAL_ERROR "alp_project.py failed (rc=${rc})")
 endif()
-set(OVERLAY_CONFIG ${CMAKE_CURRENT_BINARY_DIR}/alp.conf)
+list(APPEND EXTRA_CONF_FILE ${CMAKE_CURRENT_BINARY_DIR}/alp.conf)
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(multimodal_fusion_pdm LANGUAGES C)
