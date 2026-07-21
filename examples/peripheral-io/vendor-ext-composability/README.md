@@ -33,7 +33,7 @@ pins, in the same firmware.
 ## Running under native_sim
 
 ```bash
-tan build -b native_sim/native/64 examples/peripheral-io/vendor-ext-composability
+tan build --native examples/peripheral-io/vendor-ext-composability
 west build -d build -t run
 ```
 

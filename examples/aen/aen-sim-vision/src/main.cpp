@@ -4,8 +4,9 @@
  *
  * aen-sim-vision -- a minimal camera -> inference -> display pipeline AND a
  * mic -> inference -> wake-word path, both running REAL TensorFlow-Lite-Micro
- * inference on the AEN M55-HP, driven by the `west alp-renode --sim-mode`
- * studio hardware simulator (#687).
+ * inference on the AEN M55-HP, driven by the studio hardware simulator
+ * (#687) via `tan renode` (the `--sim-mode` injection harness is a pending
+ * stub in tan -- tan-cli#674).
  *
  * Two independent studio-driven pipelines share one image (issue #687's
  * acceptance is a single AEN M55 image serving both):
@@ -28,8 +29,8 @@
  * Studio reads the frame buffer + console back over the sim sockets.
  *
  * The buffers sit at fixed SRAM0 addresses the alif_ensemble_e8 sim model
- * maps -- they match the E1M-AEN801 profile in scripts/west_commands/
- * alp_renode.py.  Swapping the (sine) model for a real net is a model.cpp
+ * maps -- they match the E1M-AEN801 profile `tan renode` resolves.
+ * Swapping the (sine) model for a real net is a model.cpp
  * drop-in; the pipelines are unchanged.
  */
 #include <zephyr/kernel.h>

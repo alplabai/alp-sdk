@@ -71,17 +71,22 @@ def subprocess_env(root: Path) -> dict[str, str]:
     resolves regardless of how the CLI itself was installed.
     """
     env = os.environ.copy()
-    sep = os.pathsep
+    # EXTRA_ZEPHYR_MODULES is a CMake list -- Zephyr's zephyr_module.py
+    # splits it on `;` on every platform, never os.pathsep (joining with
+    # `:` on Linux/WSL makes "is not a valid zephyr module" fail the
+    # configure step). PYTHONPATH is a real OS path list -- os.pathsep.
+    zsep = ";"
     existing = env.get("EXTRA_ZEPHYR_MODULES", "")
-    if str(root) not in existing.split(sep):
+    if str(root) not in existing.split(zsep):
         env["EXTRA_ZEPHYR_MODULES"] = (
-            existing + sep + str(root) if existing else str(root)
+            existing + zsep + str(root) if existing else str(root)
         )
     env["ALP_SDK_ROOT"] = str(root)
+    psep = os.pathsep
     pp = env.get("PYTHONPATH", "")
     sdk_scripts = str(root / "scripts")
-    if sdk_scripts not in pp.split(sep):
-        env["PYTHONPATH"] = (pp + sep + sdk_scripts) if pp else sdk_scripts
+    if sdk_scripts not in pp.split(psep):
+        env["PYTHONPATH"] = (pp + psep + sdk_scripts) if pp else sdk_scripts
     return env
 
 

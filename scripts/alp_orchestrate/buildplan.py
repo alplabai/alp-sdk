@@ -2,10 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """Build-plan emission -- the Wave C consumer contract.
 
-`emit_build_plan` renders the machine-readable JSON build plan the `alp` CLI
-materialises; the shared helpers `_slice_build_dir` / `_slice_config_artefact` /
-`_shared_artefacts` are the single source the Orchestrator's materialise path and
-the plan MUST agree on byte-for-byte (the CLI reads what the Orchestrator writes).
+`emit_build_plan` renders the machine-readable JSON build plan `tan`
+(alplabai/tan-cli) materialises; the shared helpers `_slice_build_dir` /
+`_slice_config_artefact` / `_shared_artefacts` are the single source the
+Orchestrator's materialise path and the plan MUST agree on byte-for-byte
+(tan reads what the Orchestrator writes).
 Extracted as the #285 build-plan emit seam. The per-slice config emitters come
 from kconfig.py, the header/secure artefacts from headers.py / secure.py; the
 orchestrator-side slice-command bits (_slice_command, STOCK_SHIM_APP) are
@@ -31,10 +32,10 @@ from .models import BoardProject, Slice
 from .paths import REPO
 from .secure import emit_sysbuild_conf, emit_tfm_sysbuild_conf
 
-# The skip-vs-fail policy `Orchestrator._dispatch_slice` actually applies,
-# published verbatim in the plan envelope so a consumer stops hand-porting
-# it: an unknown os (no `_TOOL_FOR_OS` entry) fails the slice, a missing
-# tool on PATH or a null `command` skip it.
+# The skip-vs-fail policy a slice dispatcher MUST apply, published verbatim
+# in the plan envelope so a consumer (tan-cli) stops hand-porting it: an
+# unknown `backend` fails the slice, a missing tool on PATH or a null
+# `command` skip it.
 _EXECUTION_POLICY = {
     "unknownBackend": "fail",
     "missingTool":    "skip",
@@ -190,7 +191,7 @@ def _slice_debug(
     "inherit whatever the board provides" -- not a concrete selector a
     headless consumer can act on -- so it maps to null here.  `probe`
     reuses `_slice_flash_recipe`'s already-resolved runner (the same
-    fact `west alp-flash` dispatches on, computed once per slice by the
+    fact `tan flash` dispatches on, computed once per slice by the
     caller and passed in): `_slice_flash_recipe` no longer forces a
     runner for `zephyr_west_flash` slices (not every in-tree board
     registers `openocd`), so `probe` is the explicitly-configured
@@ -260,11 +261,12 @@ def emit_build_plan(
 ) -> str:
     """Emit the machine-readable build plan as JSON (Wave C contract).
 
-    Consumed by the `alp` CLI (alp-sdk-vscode), which materialises the
-    plan's files, runs each slice's command, and owns scheduling /
-    caching / progress UX on top -- instead of re-implementing this
-    planner.  Agreed 2026-06-04 with the alp-sdk-vscode team; their
-    docs/PROPOSAL-alp-build-core.md records the settlement.
+    Consumed by `tan` (alplabai/tan-cli), which materialises the plan's
+    files, runs each slice's command, and owns scheduling / caching /
+    progress UX on top -- instead of re-implementing this planner.  The
+    Wave C contract was settled 2026-06-04 with the alp-sdk-vscode team
+    (docs/PROPOSAL-alp-build-core.md records that settlement); the real
+    parser today is tan-cli, not the alp-sdk-vscode extension itself.
 
     Contract notes (locked with the consumer -- bump `schemaVersion`
     and flag in the CHANGELOG before changing the shape):
@@ -372,7 +374,7 @@ def emit_build_plan(
         app_dir = (_resolve_app_path(slice_.app, base_dir).as_posix()
                    if slice_.app and slice_.app != STOCK_IMAGE_APP else None)
         # Same flash-recipe fact `Slice.to_manifest_entry` surfaces to
-        # `west alp-flash` -- reused here (not re-derived) so `debug.probe`
+        # `tan flash` -- reused here (not re-derived) so `debug.probe`
         # can never drift from the manifest's own `flash_method`/`flash_args`.
         flash_method, flash_args = _slice_flash_recipe(slice_)
         slices_out.append({
@@ -393,10 +395,14 @@ def emit_build_plan(
             # Native host-path form: the value is handed to the slice
             # subprocess environment verbatim.
             "env": {"ALP_SDK_ROOT": str(REPO)},
-            # SDK-owned values the consumer APPENDS (os.pathsep) to its own
-            # env, distinct from `env` above (set-verbatim). Mirrors the
-            # append `_alp_common.env_with_sdk` / `_workspace.subprocess_env`
-            # do for a real `west build` (ADR-0020 item 3).
+            # SDK-owned values the consumer APPENDS to its own env, distinct
+            # from `env` above (set-verbatim). The join separator is
+            # PER-KEY, not uniformly os.pathsep: EXTRA_ZEPHYR_MODULES is a
+            # CMake list Zephyr's zephyr_module.py splits on `;` on every
+            # platform (not an OS path list), while PYTHONPATH is a real
+            # OS-native path list (os.pathsep). Mirrors the append
+            # `_alp_common.env_with_sdk` / `_workspace.subprocess_env` do
+            # for a real `west build` (ADR-0020 item 3).
             "envAppendPath": {
                 "EXTRA_ZEPHYR_MODULES": [str(REPO)],
                 "PYTHONPATH":           [str(REPO / "scripts")],

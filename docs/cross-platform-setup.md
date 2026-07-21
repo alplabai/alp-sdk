@@ -526,7 +526,7 @@ This is the cross-platform end-to-end smoke test.
 # Linux / macOS / WSL2 (native_sim is Linux/macOS only; on Windows
 # run this inside WSL2 — there is no native-Windows native_sim target):
 cd ../alp-workspace
-tan build --native alp-sdk/examples/peripheral-io/gpio-button-led
+tan --project alp-sdk/examples/peripheral-io/gpio-button-led build --native
 ```
 
 Expected output:

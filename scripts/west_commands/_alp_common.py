@@ -43,7 +43,11 @@ def find_sdk_root() -> Optional[Path]:
         return candidate
 
     for var in ("EXTRA_ZEPHYR_MODULES", "ZEPHYR_EXTRA_MODULES"):
-        for entry in os.environ.get(var, "").split(os.pathsep):
+        # `;`-joined always: this is a CMake list (Zephyr's
+        # zephyr_module.py splits it on `;` on every platform), never an
+        # OS path list -- os.pathsep would double-split on Linux/WSL,
+        # where `;` != `:`.
+        for entry in os.environ.get(var, "").split(";"):
             entry = entry.strip()
             if entry and (Path(entry) / "scripts" /
                           "alp_orchestrate" / "__init__.py").is_file():
@@ -70,16 +74,23 @@ def env_with_sdk(sdk_root: Path) -> dict[str, str]:
     """Build a sub-process env dict with ALP_SDK_ROOT +
     EXTRA_ZEPHYR_MODULES wired."""
     env = os.environ.copy()
+    # EXTRA_ZEPHYR_MODULES is a CMake list: Zephyr's zephyr_module.py
+    # splits it on `;` on every platform, never os.pathsep -- joining
+    # with `:` on Linux/WSL makes "is not a valid zephyr module" fail
+    # the configure step.
     existing = env.get("EXTRA_ZEPHYR_MODULES", "")
-    sep = os.pathsep
-    if str(sdk_root) not in existing.split(sep):
-        env["EXTRA_ZEPHYR_MODULES"] = (existing + sep + str(sdk_root)
+    zsep = ";"
+    if str(sdk_root) not in existing.split(zsep):
+        env["EXTRA_ZEPHYR_MODULES"] = (existing + zsep + str(sdk_root)
                                         if existing else str(sdk_root))
     env["ALP_SDK_ROOT"] = str(sdk_root)
     # Make sure the alp_orchestrate package is importable when a wrapper
     # invokes the python module form (`python -m alp_orchestrate`).
+    # PYTHONPATH is a real OS path list -- os.pathsep, unlike
+    # EXTRA_ZEPHYR_MODULES above.
     pp = env.get("PYTHONPATH", "")
     sdk_scripts = str(sdk_root / "scripts")
-    if sdk_scripts not in pp.split(sep):
-        env["PYTHONPATH"] = (pp + sep + sdk_scripts) if pp else sdk_scripts
+    psep = os.pathsep
+    if sdk_scripts not in pp.split(psep):
+        env["PYTHONPATH"] = (pp + psep + sdk_scripts) if pp else sdk_scripts
     return env

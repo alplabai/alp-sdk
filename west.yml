@@ -498,7 +498,8 @@ manifest:
 
   self:
     path: alp-sdk
-    # Surface `west alp-build` to workspaces where alp-sdk is the
+    # Surface alp-sdk's west-extension commands (alp-lock, alp-migrate,
+    # alp-quality, alp-emit) to workspaces where alp-sdk is the
     # topdir.  Consumers who include alp-sdk as a project in their
     # own west.yml should add the same `west-commands:` line under
     # their `projects.alp-sdk` entry.

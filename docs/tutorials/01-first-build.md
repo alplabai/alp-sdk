@@ -83,7 +83,7 @@ Key contract every Alp peripheral call follows:
 ## Step 3 -- Build
 
 ```bash
-tan build --board alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/peripheral-io/gpio-button-led
+tan --project examples/peripheral-io/gpio-button-led build
 ```
 
 `tan` is the standalone build executor (ADR

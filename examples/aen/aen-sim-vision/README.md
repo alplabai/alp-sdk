@@ -1,8 +1,11 @@
 # aen-sim-vision — camera → inference → display + mic → wake-word, in the Renode sim
 
 Two minimal pipelines in one image, both running **real TensorFlow-Lite-Micro
-inference on the Alif Ensemble E8 Cortex-M55-HP**, driven by the `tan
-renode --sim-mode` studio hardware simulator (alp-sdk#687). No NPU is
+inference on the Alif Ensemble E8 Cortex-M55-HP**, driven by the studio
+hardware simulator (alp-sdk#687) via `tan renode`. The `--sim-mode` harness
+itself is still a stub in `tan` (`tan renode --sim-mode` errors
+`renode.sim-mode-unported`, tan-cli#674) — plain `tan renode` boots the image
+under Renode without the studio injection wiring. No NPU is
 used — the inference is the **software path** (TFLM on the M55,
 Helium-accelerated), which is exactly what a sim validates: the pipeline +
 the *result*, not the Ethos-U hardware dispatch (a bench/HIL concern).
@@ -65,7 +68,7 @@ vector table; ITCM@0x0 sidesteps it):
     west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp \
         examples/aen/aen-sim-vision \
         -- -DEXTRA_DTC_OVERLAY_FILE=$PWD/tests/renode/aen_m55_itcm_run.overlay
-    tan renode --sim-mode --board E1M-AEN801 --image-bundle build
+    tan renode --board E1M-AEN801 --image-bundle build
 
 The bundled (sine) model is a placeholder — swap `src/model.cpp` for a real
 vision or KWS net and the pipelines are unchanged.

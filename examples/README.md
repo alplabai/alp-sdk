@@ -11,7 +11,7 @@ project, and modify.
 
 ```bash
 cd alp-workspace
-tan build alp-sdk/examples/<category>/<name>   # e.g. examples/peripheral-io/gpio-button-led
+tan build --native alp-sdk/examples/<category>/<name>   # e.g. examples/peripheral-io/gpio-button-led
 ```
 
 `tan build` reads the example's `board.yaml` v2, resolves the

@@ -222,7 +222,7 @@
     },
     "helper_firmware": {
       "type": "array",
-      "description": "On-module helper MCUs whose firmware images the orchestrator registers into the system manifest.  These are NOT heterogeneous-compute peers (they don't appear in `topology:`).  Each entry is EITHER a customer-flashable helper MCU -- carries `flash_method`/`flash_args` (e.g. `gd32_bridge` via `swd_probe`), independently flashed via `west alp-flash` -- OR a vendor-OTA-updated coprocessor -- carries `update_channel` (e.g. AEN's `cc3501e_otp` via `alp_ota_spi_otp`), whose firmware is Alp-released and applied over the bridge link programming the chip's own OTP, and is NEVER customer-flashed.  See `$defs/helper_firmware_entry`.",
+      "description": "On-module helper MCUs whose firmware images the orchestrator registers into the system manifest.  These are NOT heterogeneous-compute peers (they don't appear in `topology:`).  Each entry is EITHER a customer-flashable helper MCU -- carries `flash_method`/`flash_args` (e.g. `gd32_bridge` via `swd_probe`), independently flashed via `tan flash` -- OR a vendor-OTA-updated coprocessor -- carries `update_channel` (e.g. AEN's `cc3501e_otp` via `alp_ota_spi_otp`), whose firmware is Alp-released and applied over the bridge link programming the chip's own OTP, and is NEVER customer-flashed.  See `$defs/helper_firmware_entry`.",
       "items": { "$ref": "#/$defs/helper_firmware_entry" }
     },
     "default_hw_rev": {
@@ -500,7 +500,7 @@
             { "pattern": "^[a-z][a-z0-9_]+$" },
             { "const": "TBD" }
           ],
-          "description": "Backend tool key consumed by `west alp-flash`'s helper-MCU dispatcher (e.g. `swd_probe`) for a CUSTOMER-flashable helper.  TBD pending the authoritative flow.  Mutually exclusive with `update_channel` -- an entry carries exactly one of the two."
+          "description": "Backend tool key consumed by `tan flash`'s helper-MCU dispatcher (e.g. `swd_probe`) for a CUSTOMER-flashable helper.  TBD pending the authoritative flow.  Mutually exclusive with `update_channel` -- an entry carries exactly one of the two."
         },
         "flash_args": {
           "oneOf": [

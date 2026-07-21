@@ -129,7 +129,7 @@ falls back to `dd`; it requires `flash_args.confirm: true` before it
 actually writes -- see [cli.md](cli.md)):
 
 ```bash
-tan build <app> && tan flash <app>
+tan --project <app> build && tan flash <app>
 ```
 
 ## 4. EEPROM manifest verify
@@ -159,7 +159,7 @@ Bring-up flow:
 1. The A55 Linux kernel exposes `/dev/remoteproc0`.
 2. Drop the Zephyr-built M33 firmware at
    `/lib/firmware/m33_zephyr.elf` (built via
-   `tan build --board imx93_evk_m33 examples/peripheral-io/gpio-button-led`).
+   `tan --project examples/peripheral-io/gpio-button-led build`).
 3. Boot the M33:
 
    ```bash

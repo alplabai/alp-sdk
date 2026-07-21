@@ -51,7 +51,7 @@
           "--sysbuild",
           "--",
           "-DPython3_EXECUTABLE=/opt/homebrew/opt/python@3.14/bin/python3.14",
-          "-DSB_CONF_FILE=/private/tmp/claude-501/-Users-hakan-VSCodeProjects-alp-sdk-v0101/3fe25295-942f-4c84-8faa-26da1ae1d2f0/scratchpad/oracle-src-df312cec-parent/zephyr/sysbuild/aen/sysbuild.conf;/private/tmp/claude-501/-Users-hakan-VSCodeProjects-alp-sdk-v0101/3fe25295-942f-4c84-8faa-26da1ae1d2f0/scratchpad/oracle-src-df312cec-parent/build/alp_sysbuild.conf"
+          "-DSB_CONF_FILE=/private/tmp/claude-501/-Users-hakan-VSCodeProjects-alp-sdk-v0101/3fe25295-942f-4c84-8faa-26da1ae1d2f0/scratchpad/oracle-src-df312cec-parent/zephyr/sysbuild/aen/sysbuild.conf;/private/tmp/claude-501/-Users-hakan-VSCodeProjects-alp-sdk-v0101/3fe25295-942f-4c84-8faa-26da1ae1d2f0/scratchpad/oracle-src-df312cec-parent/examples/connectivity/iot-fleet-ota/build/alp_sysbuild.conf"
         ],
         "cwd": "build/m55_he-zephyr"
       },
@@ -106,7 +106,7 @@
           "--sysbuild",
           "--",
           "-DPython3_EXECUTABLE=/opt/homebrew/opt/python@3.14/bin/python3.14",
-          "-DSB_CONF_FILE=/private/tmp/claude-501/-Users-hakan-VSCodeProjects-alp-sdk-v0101/3fe25295-942f-4c84-8faa-26da1ae1d2f0/scratchpad/oracle-src-df312cec-parent/zephyr/sysbuild/aen/sysbuild.conf;/private/tmp/claude-501/-Users-hakan-VSCodeProjects-alp-sdk-v0101/3fe25295-942f-4c84-8faa-26da1ae1d2f0/scratchpad/oracle-src-df312cec-parent/build/alp_sysbuild.conf"
+          "-DSB_CONF_FILE=/private/tmp/claude-501/-Users-hakan-VSCodeProjects-alp-sdk-v0101/3fe25295-942f-4c84-8faa-26da1ae1d2f0/scratchpad/oracle-src-df312cec-parent/zephyr/sysbuild/aen/sysbuild.conf;/private/tmp/claude-501/-Users-hakan-VSCodeProjects-alp-sdk-v0101/3fe25295-942f-4c84-8faa-26da1ae1d2f0/scratchpad/oracle-src-df312cec-parent/examples/connectivity/iot-fleet-ota/build/alp_sysbuild.conf"
         ],
         "cwd": "build/m55_hp-zephyr"
       },
