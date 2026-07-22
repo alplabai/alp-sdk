@@ -22,7 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _project_support import LOADER, _run_loader, _write_board  # noqa: E402
+from _project_support import LOADER, REPO, _run_loader, _write_board  # noqa: E402
 
 
 class TestHwBackendsLoader(unittest.TestCase):
@@ -452,6 +452,37 @@ class TestInferenceFromSomCaps(unittest.TestCase):
             path = _write_board(Path(td), body)
             rv = _run_loader(input_path=path, emit="system-manifest")
         self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+
+
+class TestInferenceRequestSignalCoversRealExamples(unittest.TestCase):
+    """issue #874 adversarial follow-up: two real examples call
+    `alp_inference_open()` from a Zephyr slice but declare no
+    `cores.<id>.inference:` block, so the item-4 gate's original
+    "declared `inference:`" signal alone false-negatived them (no
+    backend emitted at all). `_slice_wants_inference` also fires on a
+    `libraries:` pull of `tflite-micro`; `ai-object-detection-realtime`
+    is covered by that broadened signal, `v2n-m1-deepx-inference` (no
+    `libraries:` at all) was fixed at the metadata level instead (its
+    board.yaml now declares `inference:`) -- see kconfig.py's
+    `_slice_wants_inference` docstring for why both were needed."""
+
+    def test_ai_object_detection_realtime_gets_tflm_via_library_signal(
+        self,
+    ) -> None:
+        board = (REPO / "examples" / "camera-vision"
+                 / "ai-object-detection-realtime" / "board.yaml")
+        rv = _run_loader(input_path=board, emit="zephyr-conf", core="m33_sm")
+        self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+        self.assertIn("CONFIG_ALP_SDK_INFERENCE_BACKEND_TFLM=y", rv.stdout)
+
+    def test_v2n_m1_deepx_inference_gets_tflm_via_declared_inference(
+        self,
+    ) -> None:
+        board = (REPO / "examples" / "v2n" / "v2n-m1-deepx-inference"
+                  / "board.yaml")
+        rv = _run_loader(input_path=board, emit="zephyr-conf", core="m33_sm")
+        self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+        self.assertIn("CONFIG_ALP_SDK_INFERENCE_BACKEND_TFLM=y", rv.stdout)
 
 
 if __name__ == "__main__":

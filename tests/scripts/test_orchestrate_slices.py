@@ -619,6 +619,49 @@ cores:
     assert "does not populate the chip" in conf
 
 
+def test_slice_alp_conf_iot_cc3501e_triple_overlap_populated_wins(
+    tmp_path: Path,
+) -> None:
+    """issue #874 adversarial follow-up: on_module.wifi_ble: cc3501e (SoM-
+    intrinsic) + `populated: { cc3501e: false }` (board DNI) + top-level
+    `chips: [cc3501e]` (project-declared) all name the same chip.
+    `populated: false` is authoritative-OFF -- a project `chips:` entry
+    must NOT silently re-enable a chip the board just turned off.  The
+    emitted CHIP line and the WIFI/BLE gate must AGREE (both off);
+    `_resolve_chip_states` and `_emit_chips` must never independently
+    derive a different answer for the same chip."""
+    body = """
+som:
+  sku: E1M-AEN701
+
+name: cc3501e-triple-overlap
+populated:
+  cc3501e: false
+
+chips:
+  - cc3501e
+
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+    iot: { wifi: true, ble: true }
+"""
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    conf = _slice_alp_conf(project, project.cores["m55_hp"])
+
+    # Exactly one CHIP_CC3501E line, resolving off -- no y-then-n (or
+    # y-then-n-then-y) self-contradiction.
+    assert conf.count("CONFIG_ALP_SDK_CHIP_CC3501E=") == 1
+    assert "CONFIG_ALP_SDK_CHIP_CC3501E=n" in conf
+    assert "CONFIG_ALP_SDK_CHIP_CC3501E=y" not in conf
+
+    # The WIFI/BLE gate must agree with the chip line above.
+    assert "CONFIG_ALP_SDK_WIFI_CC3501E=y" not in conf
+    assert "CONFIG_ALP_SDK_BLE_CC3501E=y" not in conf
+
+
 def test_slice_alp_conf_iot_tls_only_emits_network_base(tmp_path: Path) -> None:
     """issue #874 item 1: `iot.tls: true` alone (no `wifi:`/`mqtt:`) must
     still emit the networking base -- CONFIG_TLS_CREDENTIALS depends on

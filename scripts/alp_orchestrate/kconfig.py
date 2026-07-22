@@ -634,35 +634,50 @@ def _slug_kconfig(slug: str) -> str:
 
 def _resolve_chip_states(project: "BoardProject") -> dict[str, bool]:
     """Final resolved on/off state for every chip/block slug the project
-    touches, mirroring the exact som -> board-populated -> project-chips
-    precedence `_emit_chips` PRINTS (a later `CONFIG_ALP_SDK_CHIP_*=` line
-    wins under Kconfig .conf-overlay last-assignment-wins semantics).
+    touches -- the single source of truth `_emit_chips` prints its
+    `CONFIG_ALP_SDK_CHIP_*=` lines FROM (so the printed line and this map
+    can never disagree by construction) and any other emitter (e.g.
+    `_zephyr_iot_kconfig`'s CC3501E Wi-Fi/BLE gate) consults before gating
+    a dependent symbol (issue #874).
 
-    Single source both `_emit_chips` (which owns the per-block printed
-    lines/comments) and any other emitter that needs to know whether a
-    specific chip resolves ON before gating a dependent symbol (e.g.
-    `_zephyr_iot_kconfig`'s CC3501E Wi-Fi/BLE gate) share -- so the two
-    can't independently derive a different answer for the same chip
-    (issue #874).
+    Precedence: on-module presence is the physical baseline (always
+    True). An explicit `populated: {chip: true/false}` entry then applies
+    the board's stated population, on-module chip or not. Finally, a
+    project-declared `chips:` entry can still turn a board-DNI'd chip ON
+    -- the documented escape hatch for a project that wires up a sensor
+    the board preset doesn't populate by default (e.g. `ai/cold-chain-
+    monitor`'s `chips: [bme280]` overriding the EVK preset's `populated:
+    {bme280: false}`) -- UNLESS the chip is ALSO on-module: an on-module
+    (SoM-intrinsic) component is fixed at SoM-fab time (see the `som:`
+    block's own description in board.schema.json) and re-listing it in
+    `chips:` is a redundant declaration, not a fresh override, so it must
+    not silently flip a board's `populated: {chip: false}` back on for a
+    chip ALSO claimed on-module (issue #874 follow-up: the triple-overlap
+    case -- on-module + populated:false + project `chips:` all naming the
+    same chip -- used to let the project-chips pass win regardless,
+    re-creating the exact WIFI_CC3501E=y-against-chip=n contradiction
+    #874 fixed).
     """
     states: dict[str, bool] = {}
 
+    som_chips: set[str] = set()
     om = project.som_preset.get("on_module") or {}
     for slug in _slugs_from_on_module(om):
-        states[slug] = True
+        som_chips.add(slug)
     hf = project.som_preset.get("helper_firmware") or []
     for slug in _slugs_from_helper_firmware(hf):
-        states[slug] = True
+        som_chips.add(slug)
+    for chip in som_chips:
+        states[chip] = True
 
     populated: dict[str, bool] = dict(
         (project.board_preset or {}).get("populated") or {})
     for chip, on in populated.items():
         states[chip] = bool(on)
 
-    # Project-declared chips (board.yaml top-level `chips:` array) are the
-    # last block `_emit_chips` prints, so they win regardless of what an
-    # earlier som/populated line said.
     for chip in (project.chips or []):
+        if chip in som_chips:
+            continue
         states[chip] = True
 
     return states
@@ -674,14 +689,36 @@ def _emit_chips(
 ) -> tuple[list[str], set[str], dict[str, bool]]:
     """SoM-intrinsic + board-populated + project-declared chip drivers.
 
+    Every `CONFIG_ALP_SDK_CHIP_*=` / `CONFIG_ALP_SDK_BLOCK_*=` line is
+    printed FROM `_resolve_chip_states`'s resolved map (single source of
+    truth, issue #874) and printed EXACTLY ONCE regardless of how many of
+    the three sources below mention it -- a chip already printed by an
+    earlier block is skipped by a later one rather than re-asserted with
+    a value that could disagree.
+
     Returns the emitted Kconfig lines, the accumulated set of Zephyr
     subsystem names the enabled chip drivers require -- fed into
     `_emit_subsystems` alongside the slice's `peripherals:` array -- and
-    the resolved chip on/off map (`_resolve_chip_states`).
+    the resolved chip on/off map.
     """
     lines: list[str] = []
     chip_subsystems: set[str] = set()
     resolved_chip_state = _resolve_chip_states(project)
+    printed: set[str] = set()
+
+    def _emit_block(header: str, candidates) -> None:
+        chips = sorted(c for c in set(candidates) if c not in printed)
+        if not chips:
+            return
+        lines.append(header)
+        for chip in chips:
+            on = resolved_chip_state.get(chip, False)
+            lines.append(f"{_slug_kconfig(chip)}={'y' if on else 'n'}")
+            printed.add(chip)
+            if on:
+                for s in chip_subsystems_table.get(chip, ()):
+                    chip_subsystems.add(s)
+        lines.append("")
 
     # ----------------------------------------------------------------
     # SoM-intrinsic chip drivers — derived from on_module: + helper_firmware:
@@ -699,15 +736,9 @@ def _emit_chips(
     for slug in _slugs_from_helper_firmware(hf):
         som_chips.add(slug)
 
-    if som_chips:
-        sku_str = project.sku
-        lines.append(f"# SoM-intrinsic chip drivers (from `{sku_str}` "
-                     f"on_module + helper_firmware)")
-        for chip in sorted(som_chips):
-            lines.append(f"{_slug_kconfig(chip)}=y")
-            for s in chip_subsystems_table.get(chip, ()):
-                chip_subsystems.add(s)
-        lines.append("")
+    _emit_block(
+        f"# SoM-intrinsic chip drivers (from `{project.sku}` "
+        f"on_module + helper_firmware)", som_chips)
 
     # ----------------------------------------------------------------
     # Board-populated chip drivers.  Single source: the resolved
@@ -729,35 +760,26 @@ def _emit_chips(
     # ----------------------------------------------------------------
     populated: dict[str, bool] = dict(
         (project.board_preset or {}).get("populated") or {})
-    if populated:
-        lines.append("# Board-populated chip drivers (from the resolved "
-                     "board definition)")
-        for chip, on in sorted(populated.items()):
-            # Deduplicate: if the SoM block already emitted =y, skip
-            # the board line to avoid redundant CONFIG entries.
-            if on and chip in som_chips:
-                continue
-            lines.append(f"{_slug_kconfig(chip)}={'y' if on else 'n'}")
-            if on:
-                for s in chip_subsystems_table.get(chip, ()):
-                    chip_subsystems.add(s)
-        lines.append("")
+    _emit_block(
+        "# Board-populated chip drivers (from the resolved "
+        "board definition)", populated.keys())
 
     # Project-declared chips (board.yaml top-level `chips:` array).
     # Adds chip drivers the application links directly via
     # <alp/chips/<name>.h> -- e.g. when the project plugs an external
     # sensor into a board's headers that's not in the board's
-    # `populated:` table.  Each entry maps to CHIP_<NAME>=y (or
-    # BLOCK_<NAME>=y for the SDK-level block helpers).
-    project_chips = [c for c in (project.chips or [])
-                     if c not in som_chips and not populated.get(c)]
-    if project_chips:
-        lines.append("# Project-declared chips (board.yaml `chips:` array)")
-        for chip in sorted(set(project_chips)):
-            lines.append(f"{_slug_kconfig(chip)}=y")
-            for s in chip_subsystems_table.get(chip, ()):
-                chip_subsystems.add(s)
-        lines.append("")
+    # `populated:` table, or turns ON a chip the board preset DNIs by
+    # default (`_resolve_chip_states` already folded that override into
+    # the resolved value the "Board-populated" block above printed, so
+    # there is nothing left to print here for such a chip -- this block
+    # only has fresh lines for chips `populated:` never mentioned at
+    # all).  A chip that's ALSO on-module never reaches here with a
+    # different value than the SoM-intrinsic block already printed
+    # (`_resolve_chip_states` deliberately does not let a project
+    # `chips:` entry override an on-module chip's resolved state).
+    _emit_block(
+        "# Project-declared chips (board.yaml `chips:` array)",
+        project.chips or [])
 
     return lines, chip_subsystems, resolved_chip_state
 
@@ -904,6 +926,32 @@ def _emit_libraries(
     return lines
 
 
+def _slice_wants_inference(slice_: Slice) -> bool:
+    """True when this slice genuinely uses `<alp/inference.h>`.
+
+    Two independent signals, either sufficient: `cores.<id>.inference:`
+    declared (app-level tuning, e.g. `default_arena_kib:` -- the signal
+    every inference example under examples/ai, examples/audio,
+    examples/camera-vision declares), OR the slice's own `libraries:`
+    pulls in `tflite-micro` (resolved through the same alias table
+    `_per_core_library_kconfig` uses -- a `cores:`-scoped top-level
+    `libraries:` entry folds into `slice_.libraries` at load time, see
+    `loader.py::_normalize_libraries`). The library signal exists because
+    `cores.<id>.inference:` is app-level TUNING, not a declaration of
+    intent -- an app that never overrides the arena default has no reason
+    to write the block, and #874's adversarial follow-up found exactly
+    that false negative (`examples/camera-vision/
+    ai-object-detection-realtime`, `libraries: tflite-micro` with no
+    `inference:` block). A slice with NEITHER signal stays clean (no
+    unconditional emit returns, issue #874 item 4).
+    """
+    if slice_.inference:
+        return True
+    alias = _library_alias_table()
+    return any(alias.get(lib, lib) == "tflite-micro"
+               for lib in (slice_.libraries or ()))
+
+
 def _emit_inference(
     project: "BoardProject",
     slice_: Slice,
@@ -917,16 +965,14 @@ def _emit_inference(
     CPU/TFLM is the universal SW fallback and is on whenever this
     section emits at all.
 
-    *Whether* the section emits anything is gated on `cores.<id>.inference:`
-    being declared (any key, e.g. `default_arena_kib:` -- the same signal
-    `validate.py`'s Rule 4 arena/heap OOM warning already keys off, and the
-    one every inference example under examples/ai, examples/audio,
-    examples/camera-vision declares).  Emitting the backend switches
-    unconditionally on every zephyr slice used to put a misleading `=y`
-    line (silently resolving to n -- BACKEND_TFLM's `depends on
-    TENSORFLOW_LITE_MICRO && CPP` are genuinely-external symbols not every
-    slice's prj.conf sets) in front of apps that never call
-    alp_inference_open() at all (issue #874).
+    *Whether* the section emits anything is gated on `_slice_wants_inference`
+    (declared `cores.<id>.inference:` tuning OR a `libraries:` pull of
+    `tflite-micro`).  Emitting the backend switches unconditionally on
+    every zephyr slice used to put a misleading `=y` line (silently
+    resolving to n -- BACKEND_TFLM's `depends on TENSORFLOW_LITE_MICRO &&
+    CPP` are genuinely-external symbols not every slice's prj.conf sets)
+    in front of apps that never call alp_inference_open() at all
+    (issue #874).
 
     Two layers of variant detail are emitted alongside the umbrella
     switches so the SDK driver code + (upstream) kernel libraries
@@ -950,7 +996,7 @@ def _emit_inference(
         multiple core classes (E7 = A32 + M55, all three Helium /
         Neon flavours).  All three depend on BACKEND_TFLM.
     """
-    if not slice_.inference:
+    if not _slice_wants_inference(slice_):
         return []
 
     lines: list[str] = []
@@ -966,7 +1012,14 @@ def _emit_inference(
         # unconditionally (no west group gate; see west.yml's
         # name-allowlist), so both resolve here rather than requiring every
         # inference app to hand-write them in its own prj.conf (#874; see
-        # also #855 for cross-alp-sdk-version symbol skew).
+        # also #855 for cross-alp-sdk-version symbol skew).  This is
+        # effective on an alp-sdk-topdir west workspace (west.yml's own
+        # manifest); a workspace initialised off a bare upstream
+        # `zephyr` manifest (the repo's own twister CI, a plain
+        # `west init -m .../zephyr`) has no tflite-micro module at all,
+        # so TENSORFLOW_LITE_MICRO degrades gracefully to n (a Kconfig
+        # "assigned y but got n" warning, not fatal -- the inference
+        # dispatcher falls back to ALP_SDK_INFERENCE_SW_FALLBACK there).
         "CONFIG_CPP=y",
         "CONFIG_TENSORFLOW_LITE_MICRO=y",
         "CONFIG_ALP_SDK_INFERENCE_BACKEND_TFLM=y",
