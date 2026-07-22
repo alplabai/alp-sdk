@@ -495,6 +495,33 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_peripheral_wdt
              COMMAND alp_test_peripheral_wdt)
 
+    # /sys/power/state + RTC wakealarm mapping regression for issue #613
+    # (Yocto power backend): each alp_power_mode_t must write the exact
+    # kernel sysfs token, a timed wake must clear-then-program the
+    # wakealarm with the correct ceiling-rounded epoch, and a sysfs
+    # write failure must surface as an ALP_ERR_* rather than being
+    # swallowed. peripheral_power.c #includes the real
+    # src/backends/power/yocto_drv.c directly (see the test's own
+    # header comment) to drive y_request_sleep() against
+    # g_power_test_sysfs_write_hook / g_power_test_time_hook instead of
+    # the real /sys/power/state + /sys/class/rtc/rtc0/wakealarm (which
+    # would actually suspend the host running the test). Deliberately
+    # NOT linked against alp::sdk -- same ODR rationale as
+    # alp_test_rpc_yocto_self_close above.
+    add_executable(alp_test_peripheral_power
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_power.c
+    )
+    target_include_directories(alp_test_peripheral_power PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/power
+    )
+    target_compile_features(alp_test_peripheral_power PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_power
+             COMMAND alp_test_peripheral_power)
+
     # MQTT test compiles only when libmosquitto is wired into
     # alp_sdk.  Re-check here because pkg_check_modules's results
     # don't propagate across add_subdirectory boundaries.  Without

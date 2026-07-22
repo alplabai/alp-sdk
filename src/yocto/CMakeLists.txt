@@ -212,7 +212,11 @@ target_sources(alp_sdk PRIVATE
     # from libalp_sdk.a on Yocto despite being documented public API.
     # Same portable dispatcher + sw_fallback / wildcard-stub pair as
     # baremetal; none of these files touch a Zephyr or Linux-specific
-    # header, so they build unmodified here.
+    # header, so they build unmodified here.  Power is the exception:
+    # backends/power/yocto_drv.c (#613) is a REAL Linux backend and is
+    # added in the Linux-gated block below (it self-gates on __linux__,
+    # like the RTC/WDT/PWM real backends), registering above this
+    # wildcard stub at priority 100.
     ${CMAKE_CURRENT_SOURCE_DIR}/../dac_dispatch.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/dac/sw_fallback.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../dsp_dispatch.c
@@ -359,6 +363,14 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         # unconditionally above; these two files self-gate on __linux__.
         ${CMAKE_CURRENT_SOURCE_DIR}/../backends/rtc/yocto_drv.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../backends/wdt/yocto_drv.c
+        # <alp/power.h> gains a REAL Linux backend (#613):
+        # backends/power/yocto_drv.c drives /sys/power/state +
+        # /sys/class/rtc/rtc0/wakealarm, registering at priority 100
+        # (vendor "linux") above the wildcard stub
+        # (backends/power/zephyr_stub.c, priority 0, added
+        # unconditionally above) so request_sleep no longer returns
+        # ALP_ERR_NOSUPPORT on a Linux build.  Self-gates on __linux__.
+        ${CMAKE_CURRENT_SOURCE_DIR}/../backends/power/yocto_drv.c
         # <alp/rpc.h> is now a REAL registry backend (#33), not the old
         # rpc_yocto.c direct-impl: backends/rpc/yocto_drv.c is the
         # userspace RPMsg backend.  It self-gates on __linux__ and gates
