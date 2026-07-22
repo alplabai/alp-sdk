@@ -487,6 +487,68 @@ def test_derive_core_renames_picks_the_real_app_core_not_alphabetical_first():
 
 
 # --------------------------------------------------------------------------
+# _derive_pin_renames -- cross-EVK pad correspondence via `board_alias:`
+# (issue #876: re-adds E1M-V2N101 to peripheral/sensor/edge-ai's
+# `supported.som_skus`, dropped as a stopgap by #864/#877)
+# --------------------------------------------------------------------------
+
+def test_derive_pin_renames_maps_e1m_evk_pads_to_e1m_x_evk_pads():
+    """The three `board_alias:` roles peripheral/sensor exercise --
+    metadata/boards/e1m-evk.yaml and metadata/boards/e1m-x-evk.yaml
+    both declare the SAME `board_alias:` for the encoder-switch
+    button, the red-LED PWM pad, and the sensor I2C bus, so each
+    resolves to its E1M-X-EVK counterpart pad."""
+    renames = alp_template._derive_pin_renames(
+        ["E1M_GPIO_IO4", "E1M_GPIO_PWM3"], "E1M-V2N101", "e1m-evk",
+        alp_template.METADATA_ROOT)
+    assert renames == {
+        "E1M_GPIO_IO4": "E1M_X_GPIO_IO28",
+        "E1M_GPIO_PWM3": "E1M_X_GPIO_PWM5",
+    }
+    assert alp_template._derive_pin_renames(
+        ["E1M_I2C0"], "E1M-V2N101", "e1m-evk", alp_template.METADATA_ROOT
+    ) == {"E1M_I2C0": "E1M_X_I2C0"}
+
+
+def test_derive_pin_renames_is_a_passthrough_for_the_examples_own_family():
+    """`sku`'s own default board preset IS `source_preset` (E1M-AEN801
+    on its own e1m-evk canonical example) -- byte-identical
+    passthrough, nothing to rewrite."""
+    assert alp_template._derive_pin_renames(
+        ["E1M_GPIO_IO4"], "E1M-AEN801", "e1m-evk", alp_template.METADATA_ROOT
+    ) == {}
+
+
+def test_derive_pin_renames_rejects_a_pad_with_no_board_alias():
+    """`E1M_GPIO_IO2` (EVK_PIN_CAM_MUX_SEL) carries no `board_alias:`
+    on e1m-evk -- no cross-EVK correspondence declared for that role at
+    all, so re-deriving it for a different SoM family is a hard error,
+    not a silent best-effort guess."""
+    with pytest.raises(alp_template.TemplateError, match="board_alias"):
+        alp_template._derive_pin_renames(
+            ["E1M_GPIO_IO2"], "E1M-V2N101", "e1m-evk",
+            alp_template.METADATA_ROOT)
+
+
+def test_derive_pin_macro_renames_matches_the_pad_renames():
+    """The `macro:` field a `pins:` entry carries alongside `e1m:` must
+    be re-derived too -- `alp_orchestrate.loader
+    ._validate_topology_cores`'s `pins:` cross-check hard-errors on a
+    declared `macro:` that doesn't match the resolved board's own
+    macro for the (renamed) pad, not just an unrecognised pad."""
+    pins = [
+        {"e1m": "E1M_GPIO_IO4", "macro": "EVK_PIN_ENCODER_SW"},
+        {"e1m": "E1M_GPIO_PWM3", "macro": "EVK_PIN_LED_RED"},
+    ]
+    renames = alp_template._derive_pin_macro_renames(
+        pins, "E1M-V2N101", "e1m-evk", alp_template.METADATA_ROOT)
+    assert renames == {
+        "EVK_PIN_ENCODER_SW": "XEVK_PIN_ENCODER_SW",
+        "EVK_PIN_LED_RED": "XEVK_PIN_LED_RED",
+    }
+
+
+# --------------------------------------------------------------------------
 # _strip_stale_core_prose -- stale-core-mentioning comments (issue #864
 # Fable-review MINOR F)
 # --------------------------------------------------------------------------
@@ -496,10 +558,11 @@ def test_substitute_board_yaml_core_strips_stale_core_prose_comment():
     M55-HP runs the demo.  M55-HE inherits...` directly above `cores:`
     -- prose naming the OLD core in a different case/hyphenation than
     the YAML key (`M55-HP` vs `m55_hp`), which the key-line rename
-    regex alone never touches. Exercised directly (not via
-    render_to_envelope("peripheral", ...): that template no longer
-    supports a cross-family sku, issue #876) since the prose-stripping
-    behavior doesn't depend on the catalog's supported-sku list."""
+    regex alone never touches. Exercised directly (against a swap
+    `render_to_envelope("peripheral", ...)` no longer needs, now that
+    E1M-V2N101 is back in that template's `supported.som_skus`, issue
+    #876) since the prose-stripping behavior doesn't depend on the
+    catalog's supported-sku list."""
     example = REPO / "examples" / "peripheral-io" / "gpio-button-led"
     text = (example / "board.yaml").read_text(encoding="utf-8")
     assert "M55-HP" in text  # sanity: the fixture actually has stale prose
@@ -615,20 +678,6 @@ def test_render_to_envelope_every_template_sku_combo(template_id, sku, tmp_path)
             capture_output=True, text=True, cwd=REPO, check=False)
         assert proc.returncode == 0, (template_id, sku, core_id, proc.stderr)
         assert "unknown core id" not in proc.stderr
-
-
-@pytest.mark.parametrize("template_id", ["peripheral", "sensor", "edge-ai"])
-def test_render_to_envelope_rejects_the_dropped_pins_gap_combos(template_id):
-    """issue #864 Fable-review MAJOR A: `--emit scaffold --template
-    {peripheral,sensor,edge-ai} --sku E1M-V2N101` used to exit rc=0
-    emitting a scaffold `--emit zephyr-conf` then rejected on the
-    `pins:` E1M-vs-E1M_X mismatch (issue #876) -- a silent best-effort
-    render `render_to_envelope()`'s own docstring says it never does.
-    E1M-V2N101 is dropped from these three templates'
-    `supported.som_skus` until #876 lands, so the SAME request now
-    correctly hard-errors instead."""
-    with pytest.raises(alp_template.SkuNotSupportedError, match="E1M-V2N101"):
-        alp_template.render_to_envelope(template_id, "E1M-V2N101")
 
 
 def test_render_to_envelope_rejects_unsupported_sku():
