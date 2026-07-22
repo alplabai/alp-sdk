@@ -5,6 +5,7 @@
  * picks up every silicon_ref the build targets so apps that
  * #include <alp/power.h> link cleanly on every supported SoC.
  *
+ * @par Tracking: github.com/alplabai/alp-sdk/issues/22
  *
  * Behaviour differs from the Camera / Display / GPU2D stubs:
  * stub_open returns ALP_OK so the dispatcher hands the caller a
