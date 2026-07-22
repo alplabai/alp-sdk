@@ -179,6 +179,30 @@
       }
     },
     {
+      "mode": "scaffold",
+      "owner": {
+        "cli": "alp_project",
+        "module": "scripts/alp_template.py",
+        "function": "render_to_envelope"
+      },
+      "scope": "project",
+      "options": {
+        "input": "optional",
+        "output": "optional",
+        "core": "ignored",
+        "build_root": false,
+        "template": "required",
+        "sku": "required"
+      },
+      "compatible": { "os": ["any"] },
+      "output": {
+        "media": "json",
+        "schema_id": null,
+        "path": null,
+        "consumer_hint": "tan-cli / IDE project scaffolding -- {path, contents}[] envelope for a new project's user-owned files (board.yaml som.sku/preset substituted for --sku), the SDK-owned single source of the scaffold's build-integration conventions"
+      }
+    },
+    {
       "mode": "composed-route-table",
       "owner": {
         "cli": "alp_project",

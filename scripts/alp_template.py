@@ -23,6 +23,22 @@ parameters, test wiring); this module actually materialises one --
     same planning path, minus the disk writes: a preview of what
     render() would do.
 
+  * render_to_envelope(template_id, sku) -- the in-memory capture path
+    behind `scripts/alp_project.py --emit scaffold --template <id>
+    --sku <SKU>` (issue #864): renders entirely in memory (no dest_dir,
+    no disk write) and returns `[(path, contents), ...]` in the same
+    sorted order render() writes, sharing the same per-file read/
+    substitute loop so the two can never disagree on a byte. `sku` must
+    be one of the template's declared `supported.som_skus`
+    (SkuNotSupportedError otherwise, naming the supported set); the
+    rendered `board.yaml`'s `som.sku:` and top-level `preset:` lines are
+    substituted for `sku`'s own default board (metadata/e1m_modules/
+    <sku>.yaml `default_board:`), a no-op (byte-identical passthrough)
+    when `sku` already matches the example's own default. This is the
+    SDK-owned single source of the scaffold's build-integration
+    conventions -- the surface tan-cli vendors at release instead of
+    hand-porting a per-SKU Rust generator.
+
   * validate(template_id) -- renders the template into a fresh
     tempfile.mkdtemp() directory and runs its native_sim scenario(s)
     there via the real Zephyr twister (mirroring
@@ -53,12 +69,20 @@ import argparse
 import dataclasses
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 from typing import Any
+
+try:
+    import yaml  # type: ignore[import-untyped]
+except ImportError:
+    sys.exit("alp_template: PyYAML is required.  Install via `pip install pyyaml`.")
+
+from alp_project_loader import METADATA_ROOT
 
 REPO = Path(__file__).resolve().parent.parent
 CATALOG = REPO / "metadata" / "templates" / "catalog-v1.json"
@@ -80,6 +104,11 @@ class DestinationNotEmptyError(TemplateError):
 class ParameterError(TemplateError):
     """An unknown parameter name, a type mismatch, or a constraint
     violation (enum / minimum / maximum)."""
+
+
+class SkuNotSupportedError(TemplateError):
+    """`render_to_envelope`'s --sku is not in the record's declared
+    `supported.som_skus` -- a hard error, never a best-effort render."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -238,6 +267,38 @@ def plan(
     return record, render_plan
 
 
+def _rendered_bytes(
+    template_id: str,
+    record: dict[str, Any],
+    files: tuple[str, ...],
+    resolved: dict[str, Any],
+    base_dir: Path,
+) -> list[tuple[str, bytes]]:
+    """Read + apply every declared-parameter substitution for `files`
+    (a RenderPlan.files list), returning [(relpath, bytes), ...] in the
+    same order. Shared by render()'s disk-write loop and
+    render_to_envelope()'s in-memory capture -- the same bytes a
+    customer gets from `alp_template.py render` are what `--emit
+    scaffold` hands back as JSON `contents` (see the module docstring)."""
+    example = base_dir / record["example"]
+    file_subs = _substitutions_for(record, resolved)
+    out: list[tuple[str, bytes]] = []
+    for rel in files:
+        data = (example / rel).read_bytes()
+        subs = file_subs.get(rel)
+        if subs:
+            text = data.decode("utf-8")
+            for literal, value in subs:
+                if literal not in text:
+                    raise ParameterError(
+                        f"{template_id}: substitution literal {literal!r} "
+                        f"not found in {rel}")
+                text = text.replace(literal, value)
+            data = text.encode("utf-8")
+        out.append((rel, data))
+    return out
+
+
 def render(
     template_id: str,
     dest_dir: str | os.PathLike[str],
@@ -283,28 +344,107 @@ def render(
             raise DestinationNotEmptyError(
                 f"{dest} is not empty (pass force=True / --force to overwrite)")
 
-    example = (base_dir or REPO) / record["example"]
     resolved = _resolve_params(record, params)
-    file_subs = _substitutions_for(record, resolved)
+    base = base_dir or REPO
 
     dest.mkdir(parents=True, exist_ok=True)
-    for rel in render_plan.files:
-        src = example / rel
+    for rel, data in _rendered_bytes(template_id, record, render_plan.files, resolved, base):
         out = dest / rel
         out.parent.mkdir(parents=True, exist_ok=True)
-        data = src.read_bytes()
-        subs = file_subs.get(rel)
-        if subs:
-            text = data.decode("utf-8")
-            for literal, value in subs:
-                if literal not in text:
-                    raise ParameterError(
-                        f"{template_id}: substitution literal {literal!r} "
-                        f"not found in {rel}")
-                text = text.replace(literal, value)
-            data = text.encode("utf-8")
         out.write_bytes(data)
     return render_plan
+
+
+# ---------------------------------------------------------------------
+# --emit scaffold (issue #864): in-memory, SKU-parameterised capture
+# ---------------------------------------------------------------------
+
+def _default_preset_for_sku(sku: str, metadata_root: Path) -> str:
+    """The board preset a fresh project targeting `sku` ships with by
+    default -- metadata/e1m_modules/<sku>.yaml's `default_board:`,
+    lower-cased to match the `preset:` value every example board.yaml
+    already uses (e.g. `E1M-EVK` -> `e1m-evk`, `E1M-X-EVK` ->
+    `e1m-x-evk`). This is the SAME field board.yaml's own comments point
+    customers at by hand ("copy this directory, change som.sku ...,
+    edit the preset:") -- render_to_envelope just does that edit for
+    them."""
+    som_path = metadata_root / "e1m_modules" / f"{sku}.yaml"
+    if not som_path.is_file():
+        raise TemplateError(
+            f"no metadata/e1m_modules/{sku}.yaml for sku {sku!r}")
+    doc = yaml.safe_load(som_path.read_text(encoding="utf-8")) or {}
+    board = doc.get("default_board")
+    if not board:
+        raise TemplateError(
+            f"metadata/e1m_modules/{sku}.yaml has no default_board")
+    return board.lower()
+
+
+# Matches board.yaml's `som:\n  sku: E1M-...` line (only the token right
+# after `sku:`, so any trailing inline comment survives untouched) and
+# the top-level `preset: <name>` line. count=1 each: board.yaml declares
+# exactly one of each.
+_SOM_SKU_RE = re.compile(r"(?m)^(\s*sku:\s*)E1M-[A-Z0-9]+")
+_PRESET_RE = re.compile(r"(?m)^(preset:\s*)\S+")
+
+
+def _substitute_board_yaml_sku(text: str, sku: str, preset: str) -> str:
+    text, n_sku = _SOM_SKU_RE.subn(rf"\g<1>{sku}", text, count=1)
+    if n_sku == 0:
+        raise TemplateError("board.yaml has no `som.sku:` line to substitute")
+    text, n_preset = _PRESET_RE.subn(rf"\g<1>{preset}", text, count=1)
+    if n_preset == 0:
+        raise TemplateError("board.yaml has no top-level `preset:` line to substitute")
+    return text
+
+
+def render_to_envelope(
+    template_id: str,
+    sku: str,
+    params: dict[str, Any] | None = None,
+    *,
+    catalog_path: Path | None = None,
+    base_dir: Path | None = None,
+    metadata_root: Path | None = None,
+) -> list[tuple[str, str]]:
+    """Render `template_id` for `sku` entirely in memory: no dest_dir, no
+    disk write. Returns `[(path, contents), ...]` in the same sorted
+    order `plan()` computes -- the `{path, contents}[]` shape
+    `scripts/alp_project.py --emit scaffold` JSON-encodes (issue #864),
+    matching the shape `--emit build-plan`'s `configArtefacts` /
+    `sharedArtefacts` already use.
+
+    `sku` MUST be one of the record's declared `supported.som_skus` --
+    SkuNotSupportedError (naming the supported set) otherwise, never a
+    silent best-effort render. The rendered `board.yaml`'s `som.sku:`
+    and top-level `preset:` are substituted for `sku`'s own default
+    board (metadata/e1m_modules/<sku>.yaml `default_board:`); when
+    `sku` already matches the example's own default this substitution
+    is a no-op, so the output is byte-identical to the example (a
+    passthrough). Every other user_owned file is an unmodified copy --
+    reuses `_rendered_bytes()`, so it can never disagree with render()
+    on a byte.
+    """
+    doc = load_catalog(catalog_path)
+    record = find_template(doc, template_id)
+    supported = record["supported"]["som_skus"]
+    if sku not in supported:
+        raise SkuNotSupportedError(
+            f"{template_id}: sku {sku!r} is not supported "
+            f"(supported: {sorted(supported)})")
+
+    _, render_plan = plan(template_id, ".", params, catalog_path=catalog_path)
+    resolved = _resolve_params(record, params)
+    base = base_dir or REPO
+    preset = _default_preset_for_sku(sku, metadata_root or METADATA_ROOT)
+
+    out: list[tuple[str, str]] = []
+    for rel, data in _rendered_bytes(template_id, record, render_plan.files, resolved, base):
+        if rel == "board.yaml":
+            data = _substitute_board_yaml_sku(
+                data.decode("utf-8"), sku, preset).encode("utf-8")
+        out.append((rel, data.decode("utf-8")))
+    return out
 
 
 def _count_passed(outdir: Path) -> int:

@@ -279,6 +279,55 @@ def test_no_shipped_template_declares_a_substitution_target():
 
 
 # --------------------------------------------------------------------------
+# render_to_envelope() -- --emit scaffold's in-memory capture (issue #864)
+# --------------------------------------------------------------------------
+
+def test_render_to_envelope_is_passthrough_for_the_examples_own_sku():
+    """E1M-AEN801 is hello-world's own board.yaml `som.sku:` -- rendering
+    for that SKU must be byte-identical to the example, same as
+    render()."""
+    envelope = alp_template.render_to_envelope("minimal", "E1M-AEN801")
+    record = _minimal_record()
+    assert [p for p, _ in envelope] == sorted(record["files"]["user_owned"])
+    for rel, contents in envelope:
+        assert contents == (HELLO_WORLD / rel).read_text(encoding="utf-8"), rel
+
+
+def test_render_to_envelope_substitutes_sku_and_preset():
+    envelope = alp_template.render_to_envelope("minimal", "E1M-V2N101")
+    by_path = dict(envelope)
+
+    board_yaml = by_path["board.yaml"]
+    assert "sku: E1M-V2N101" in board_yaml
+    assert "sku: E1M-AEN801" not in board_yaml
+    assert "preset: e1m-x-evk" in board_yaml
+
+    # Every other user_owned file is an unmodified copy.
+    for rel in ("prj.conf", "CMakeLists.txt", "src/main.c", "testcase.yaml"):
+        assert by_path[rel] == (HELLO_WORLD / rel).read_text(encoding="utf-8"), rel
+
+
+def test_render_to_envelope_rejects_unsupported_sku():
+    with pytest.raises(alp_template.SkuNotSupportedError, match="FOO"):
+        alp_template.render_to_envelope("minimal", "FOO")
+
+
+def test_render_to_envelope_unknown_template_raises():
+    with pytest.raises(alp_template.TemplateNotFoundError):
+        alp_template.render_to_envelope("does-not-exist", "E1M-AEN801")
+
+
+def test_render_to_envelope_matches_render_for_the_default_sku(tmp_path):
+    """render_to_envelope() and render() share `_rendered_bytes()` --
+    for the example's own SKU they must produce identical bytes."""
+    dest = tmp_path / "out"
+    alp_template.render("minimal", dest)
+    envelope = dict(alp_template.render_to_envelope("minimal", "E1M-AEN801"))
+    for rel in envelope:
+        assert (dest / rel).read_text(encoding="utf-8") == envelope[rel], rel
+
+
+# --------------------------------------------------------------------------
 # validate() -- temp-dir render + twister
 # --------------------------------------------------------------------------
 

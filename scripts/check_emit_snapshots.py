@@ -88,6 +88,18 @@ for _bid, _board in _PROJ_BOARDS:
         for _mode in _PROJ_CARRIER_MODES:
             CASES.append((f"proj-{_bid}.{_mode}", PROJ, _board, _mode))
 
+# --emit scaffold (issue #864): a render_to_envelope(template, sku) render is
+# a pure function of --template/--sku, not of a board.yaml -- `board` below
+# is unused (alp_project.py dispatches scaffold before --input is ever
+# read), kept as a real path only so `_emit`'s fixed `--input <board> --emit
+# <mode>` invocation shape needs no special-casing. Pins the minimal
+# template's E1M-V2N101 SKU-substitution (som.sku + preset) byte-for-byte.
+CASES.append((
+    "scaffold.minimal-v2n101", PROJ,
+    "examples/peripheral-io/hello-world/board.yaml", "scaffold",
+    ("--template", "minimal", "--sku", "E1M-V2N101"),
+))
+
 
 def _normalize_path(text: str, path: str, token: str) -> str:
     """Replace raw, JSON-escaped, and forward-slash forms of one path."""
@@ -152,8 +164,12 @@ def _normalize_host_paths(text: str, repo: str, python: str) -> str:
     return _normalize_token_tails(text)
 
 
-def _emit(tool: Path, board: str, mode: str) -> str:
-    """Run the emitter from the repo root; normalise the SDK-root path."""
+def _emit(tool: Path, board: str, mode: str, extra: tuple[str, ...] = ()) -> str:
+    """Run the emitter from the repo root; normalise the SDK-root path.
+
+    `extra` appends extra CLI args after `--emit <mode>` -- e.g.
+    scaffold's `--template <id> --sku <SKU>` (issue #864).
+    """
     env = {**os.environ}
     scripts_dir = str(REPO / "scripts")
     env["PYTHONPATH"] = (
@@ -161,7 +177,7 @@ def _emit(tool: Path, board: str, mode: str) -> str:
         if env.get("PYTHONPATH") else scripts_dir
     )
     rv = subprocess.run(
-        [*tool, "--input", board, "--emit", mode],
+        [*tool, "--input", board, "--emit", mode, *extra],
         capture_output=True, text=True, cwd=REPO, check=False, env=env)
     if rv.returncode != 0:
         raise SystemExit(f"check_emit_snapshots: emit failed for {board} "
@@ -177,8 +193,10 @@ def main() -> int:
     SNAP_DIR.mkdir(parents=True, exist_ok=True)
 
     stale: list[str] = []
-    for snap_id, tool, board, mode in CASES:
-        got = _emit(tool, board, mode)
+    for case in CASES:
+        snap_id, tool, board, mode, *rest = case
+        extra: tuple[str, ...] = rest[0] if rest else ()
+        got = _emit(tool, board, mode, extra)
         golden = SNAP_DIR / f"{snap_id}.snap"
         if args.update:
             golden.write_text(got, encoding="utf-8")

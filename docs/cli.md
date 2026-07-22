@@ -204,6 +204,7 @@ alp emit system-manifest               # the full-system manifest
 alp emit hw-info-h --output hw_info.h  # write instead of stdout
 alp emit zephyr-conf --core m55_he     # scope per-core modes to one core
 alp emit build-plan                    # the orchestrator's build plan (JSON)
+alp emit scaffold --template minimal --sku E1M-V2N101  # new-project files, no board.yaml needed
 ```
 
 Read-only: shows exactly what a consuming tool (CMake, Yocto, the
@@ -227,6 +228,7 @@ single implementation that owns it (never a fork):
 | `os-topology` | Per-core natural-vs-effective OS facts | orchestrator |
 | `composed-route-table` | JSON route-table dump (demonstrator) | `alp_project.py` |
 | `carrier-netlist` | Studio-facing carrier nets + BOM JSON handoff | `alp_project.py` |
+| `scaffold` | New-project `{path, contents}[]` envelope for a template (`--template`/`--sku`) | `alp_project.py` |
 | `dts-partitions` | DTS fixed-partitions overlay (`storage:` entries) | orchestrator |
 | `storage-mounts-c` | Static C storage mount table | orchestrator |
 | `tfm-sysbuild-conf` | TF-M sysbuild child-image overlay (`security.psa:`) | orchestrator |
@@ -238,6 +240,8 @@ single implementation that owns it (never a fork):
 | `--output` | Write to this path instead of stdout |
 | `--core` | Scope per-core modes to one core ID |
 | `--build-root` | Build root used for `build-plan` slice paths |
+| `--template` | Template catalog id (`metadata/templates/catalog-v1.json`); required for `scaffold` |
+| `--sku` | Target SoM SKU; required for `scaffold` (must be one of the template's `supported.som_skus`) |
 
 `west alp-emit` exposes the orchestrator subset of the same catalog
 (`system-manifest`, `ipc-contract-h`, `dts-reservations`,
