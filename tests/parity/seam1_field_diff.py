@@ -37,15 +37,19 @@ in-repo oracle again -- this is the last frame where that comparison exists.
 
 Build plans are NOT hermetic: they embed the emitting checkout's absolute
 root path (`env.ALP_SDK_ROOT`, `envAppendPath.*`, per-slice `appDir`), the
-emitting commit (`sdkCommit`), and the emitting host's Python interpreter
-path (each cmake/sysbuild slice's `-DPython3_EXECUTABLE=<path>` arg, pinned
-by `orchestrator.py`'s `sys.executable`). All three are real signal for a
-human but pure noise for a parity diff -- normalize them before comparing:
+emitting commit (`sdkCommit`) and SDK release version (`sdkVersion`), and
+the emitting host's Python interpreter path (each cmake/sysbuild slice's
+`-DPython3_EXECUTABLE=<path>` arg, pinned by `orchestrator.py`'s
+`sys.executable`). All four are real signal for a human but pure noise for
+a parity diff -- normalize them before comparing:
 
   * any string carrying the checkout root as a prefix -> the root prefix is
     replaced with the literal token ``__SDKROOT__`` (root discovered from the
     plan's own ``slices[0].env.ALP_SDK_ROOT`` -- no path is hardcoded);
   * ``sdkCommit`` -> the literal token ``__SHA__``;
+  * ``sdkVersion`` -> dropped entirely (it bumps every version-bump PR with
+    zero shape change, so there is no stable token to normalize it to --
+    unlike `sdkCommit`, whose oracle value stays pinned to 97ad481b forever);
   * a ``command.args`` entry matching ``-DPython3_EXECUTABLE=<path>`` -> the
     path is replaced with the literal token ``<PYEXE>``.
 
@@ -256,6 +260,12 @@ def normalize_plan(plan: dict) -> dict:
         normalized = _normalize_strings(plan, sdk_root)
     if "sdkCommit" in normalized:
         normalized["sdkCommit"] = _SHA_TOKEN
+    # `sdkVersion` is the same class of volatile identity field as
+    # `sdkCommit`/`sdkCommit` above: it names the emitting checkout's SDK
+    # release (`metadata/sdk_version.yaml`), not the plan's shape, and bumps
+    # on every version-bump PR (e.g. 0.11.1 -> 0.12.0) with zero shape change
+    # -- drop it rather than diff it, same treatment as `sdkCommit`.
+    normalized.pop("sdkVersion", None)
     normalized = _strip_863_extra_conf_file_arg(normalized)
     normalized = _drop_artefact_contents(normalized)
     # `planPathMode` is itself a #865 addition the oracle predates (like
