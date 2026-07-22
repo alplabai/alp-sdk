@@ -86,6 +86,17 @@ Zephyr's `EXTRA_CONF_FILE` machinery merges the generated `alp.conf`
 on top of `prj.conf` at Kconfig time -- the app picks up every
 `CONFIG_*` line the loader emitted.
 
+The loader is a pure string templater: it never runs kconfiglib/west, so it
+can only reason about a symbol's dependency chain from its own metadata +
+`zephyr/kconfigs/*.kconfig` tree, not by asking the real Kconfig solver. The
+emitted `alp.conf` is therefore coupled to the alp-sdk module version that
+generated it, consistent with `west.yml`'s deliberate per-release module pins
+(see [`docs/zephyr-version-policy.md`](zephyr-version-policy.md)) -- an
+`alp.conf` generated against one alp-sdk checkout is not a promised-compatible
+input to a Zephyr tree built from a different one. A clean cross-version skew
+error (rather than a Kconfig "assign to undefined symbol" abort) is #855's
+version-detection work, not this loader's.
+
 ### Plain CMake (baremetal / yocto) -- generated `-D` args
 
 ```bash

@@ -80,6 +80,14 @@ CASES = [
     ("rpmsg-imx93.build-plan",      ORCH, "examples/multicore/rpmsg-imx93/board.yaml",          "build-plan"),
     ("hetero-offload.system-manifest", ORCH, "examples/multicore/heterogeneous-offload/board.yaml", "system-manifest"),
     ("hetero-offload.build-plan",      ORCH, "examples/multicore/heterogeneous-offload/board.yaml", "build-plan"),
+    # The remaining two tests/parity/oracle/*.build-plan.json fixtures
+    # (seam-1's frozen 97ad481b oracle) that weren't otherwise covered by a
+    # build-plan case above -- added so the seam-1 retune (dropping
+    # config-artifact CONTENT from the comparator, #874 follow-up) has a
+    # byte-for-byte golden standing in for every oracle board's emitted
+    # alp.conf; see tests/parity/README.md.
+    ("audio-i2s-tone.build-plan",   ORCH, "examples/audio/i2s-tone/board.yaml",                 "build-plan"),
+    ("iot-fleet-ota.build-plan",    ORCH, "examples/connectivity/iot-fleet-ota/board.yaml",      "build-plan"),
 ]
 for _bid, _board in _PROJ_BOARDS:
     for _mode in _PROJ_MODES:

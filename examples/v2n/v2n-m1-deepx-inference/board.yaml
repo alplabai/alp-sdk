@@ -19,7 +19,13 @@ cores:
     # Linux PCIe driver -- under Zephyr the dispatcher emits a
     # NOSUPPORT-stub.  Real DEEPX inference happens on the customer's
     # Yocto image via dx_rt; alp_inference_open(.backend=DEEPX_DXM1, ...)
-    # picks it per-handle.
+    # picks it per-handle.  `inference:` declares this slice genuinely
+    # uses <alp/inference.h> -- no `libraries:` entry names tflite-micro
+    # here (nothing to pull in beyond the always-on CPU/TFLM dispatcher
+    # fallback this slice needs even though the app requests DEEPX_DXM1),
+    # so the arena block is this slice's only inference-intent signal.
+    inference:
+      default_arena_kib: 64
 
 chips:
   - deepx_dxm1    # host driver: PCIe mux + M1_RESET sequencer

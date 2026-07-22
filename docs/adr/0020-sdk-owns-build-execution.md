@@ -56,23 +56,46 @@ blocked until the remediation is met. Tracked in #855.
    applied correctly.
 
 4. **Second hand-reviewed seam-1 delta — the #863/#871 per-core config
-   wiring.** The planner now wires each core's `alp.conf` into the plan: a
-   `-DEXTRA_CONF_FILE=<build/<core>-zephyr/alp.conf>` arg on every
-   **non-sysbuild** Zephyr slice, plus the `_emit_library_hw_backends`
-   (`# ...lib.loader`) HW-accelerator Kconfig block folded into each Zephyr
-   slice's `configArtefacts`. Both post-date the frozen `97ad481b` oracle and
-   are the intended contract evolution, handled the probe-delta way: the
-   seam-1 comparator (`tests/parity/seam1_field_diff.py`, and its tan-cli twin
-   kept in lockstep) strips exactly these two additions in `normalize_plan`
-   before diffing — oracle BYTES stay frozen, every other field still
-   byte-checked. **Sysbuild slices deliberately carry NO `-DEXTRA_CONF_FILE`**
-   (Option A): a bare top-level `-DEXTRA_CONF_FILE` under `--sysbuild` lands on
-   the sysbuild image, not the application image, so it would silently drop
-   the per-core config on `boot:`/OTA projects; those slices get the per-core
-   `alp.conf` via the app's `--core`-scoped `CMakeLists.txt` bridge (#870),
-   and a plan-native per-image sysbuild wiring stays #866. The seam-2
-   real-build proof of the sysbuild path (`iot-fleet-ota`) is the one deferred
-   box on #871.
+   wiring, superseded 2026-07-22 by a seam-1 SCOPE retune (#874 follow-up;
+   pending Hakan's re-ratification, see below).** The planner wires each
+   core's `alp.conf` into the plan: a `-DEXTRA_CONF_FILE=<build/<core>-
+   zephyr/alp.conf>` arg on every **non-sysbuild** Zephyr slice, plus the
+   `_emit_library_hw_backends` (`# ...lib.loader`) HW-accelerator Kconfig
+   block folded into each Zephyr slice's `configArtefacts`. Both post-date
+   the frozen `97ad481b` oracle. The command-arg addition is still a real
+   plan-SHAPE fact the comparator normalizes away (`_strip_863_extra_conf_
+   file_arg`, scoped to non-sysbuild slices — a sysbuild slice wrongly
+   gaining the arg still fails, see below). The `lib.loader` Kconfig block
+   was originally handled the same probe-delta way (a bespoke strip inside
+   the compared config-artefact CONTENT); that strip is now moot and
+   deleted, because **seam-1 no longer compares config-artefact content at
+   all** — see the retune paragraph below. **Sysbuild slices deliberately
+   carry NO `-DEXTRA_CONF_FILE`** (Option A): a bare top-level
+   `-DEXTRA_CONF_FILE` under `--sysbuild` lands on the sysbuild image, not
+   the application image, so it would silently drop the per-core config on
+   `boot:`/OTA projects; those slices get the per-core `alp.conf` via the
+   app's `--core`-scoped `CMakeLists.txt` bridge (#870), and a plan-native
+   per-image sysbuild wiring stays #866. The seam-2 real-build proof of the
+   sysbuild path (`iot-fleet-ota`) is the one deferred box on #871.
+
+   **Seam-1 scope retune (2026-07-22, #874 follow-up — narrows this
+   co-signed gate's contract, pending Hakan's re-ratification the same way
+   as this Amendment):** every intentional emitter content change (a
+   Kconfig dependency-gating fix, a new peripheral default) forced another
+   bespoke content strip into `normalize_plan`, eroding seam-1 into a
+   content-diff gate instead of the plan-SHAPE gate this Amendment
+   describes. Seam-1 (`tests/parity/seam1_field_diff.py`, and its tan-cli
+   vendored twin — keep in lockstep) now verifies **command, env, appDir,
+   skip/fail-decision SHAPE, and `debug.probe` only**; every artefact's
+   materialised `contents` (`configArtefacts[*].contents` /
+   `sharedArtefacts[*].contents`) is dropped before the diff runs
+   (`_drop_artefact_contents`), keeping only its `path` in the shape check
+   (an artefact appearing/vanishing/moving still fails the gate). Content
+   parity moved to `tests/fixtures/emit-snapshots/*.{build-plan,
+   zephyr-conf}.snap` (`scripts/check_emit_snapshots.py`) — confirmed
+   complete over every oracle fixture at retune time, see
+   `tests/parity/README.md`'s coverage table — and, eventually, seam-2's
+   real build.
 
 5. **Hermetic build plans (#865): the emit is now `planPathMode: tokened`.**
    Every path this plan bakes anchored on the emitting checkout or project
