@@ -195,6 +195,32 @@ def test_no_chip_ring_unknown_family_and_no_supported_boards() -> None:
     assert ring == "ring-unknown"
 
 
+def test_classify_ignores_block_slug_alongside_resolvable_chip() -> None:
+    """Issue #884: a `chips:` list carrying a block-slug pseudo-chip
+    (e.g. `button_led`, which has no metadata/chips/button_led.yaml)
+    alongside a real, resolvable chip must classify from the real
+    chip -- not fall to ring-unknown because the block-slug's family
+    set is empty."""
+    ring = portability.classify(
+        {"ssd1306": ["aen", "v2n", "v2n-m1", "imx93"]},
+        ["button_led", "ssd1306"],
+        "aen",
+    )
+    assert ring == "ring2-chip-bound"
+
+
+def test_classify_all_block_slugs_falls_back_to_no_chip_ring() -> None:
+    """An example whose `chips:` list is entirely block-slugs has no
+    real chip constraint left after filtering -- treat it the same as
+    a chip-less example (`_no_chip_ring` on som.sku / supported_boards)."""
+    ring = portability.classify(
+        {},
+        ["button_led"],
+        "aen",
+    )
+    assert ring == "ring3-som-bound"
+
+
 def test_load_board_host_families_translates_vendor_family_names() -> None:
     families = portability.load_board_host_families()
     assert families["e1m-evk"] == {"aen", "imx93"}
