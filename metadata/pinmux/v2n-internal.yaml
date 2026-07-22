@@ -1,0 +1,35 @@
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# RZ/V2N PFC alt-function-select numbers (RZV_PINMUX(port, bit, func)) for
+# the E1M-V2N101 board-level Zephyr pinctrl -- issue #655, follow-up to #523.
+#
+# metadata/pinmux/v2n.yaml already carries the raw pad names (e.g.
+# `GD32_SPI.SCLK` -> `P96`); it does NOT carry the PFC alt-function-select
+# *number* each pad must be muxed to (e.g. P96 = func2), because that
+# projection is generated from the raw peripheral-name TSVs, which don't
+# state it either.  This file adds that one missing fact for the subset of
+# `v2n.yaml` pads the board's pinctrl actually mux at boot, keyed the same
+# way (`silicon_peripheral` / `silicon_pad`) so the two tables join cleanly.
+#
+# Hand-authored, NOT generated: transcribed verbatim from the RZ/V2N PFC
+# (Table 1.2-3) via the comments already in the committed
+# zephyr/boards/alp/e1m_v2n101_m33_sm-pinctrl.dtsi (never invented; would be
+# marked `func: TBD` if a pad's number weren't stated anywhere).
+#
+# `mux: gpio` (instead of `func:`) marks a pad this board deliberately does
+# NOT put into peripheral alt-function mode -- it stays plain GPIO.  The one
+# instance here: P97 (GD32_SPI.CS0 / SCI7 SS7) -- the GD32 supervisor's
+# master Simple-SPI has no hardware slave-select, so the board drives the
+# chip-select as a GPIO instead of muxing it to SS7.
+schemaVersion: pinmux-internal-v1
+family: v2n
+pads:
+  - { silicon_peripheral: "UART0_TXD0", silicon_pad: "P50", func: 1 }
+  - { silicon_peripheral: "UART0_RXD0", silicon_pad: "P51", func: 1 }
+  - { silicon_peripheral: "GD32_SPI.MOSI", silicon_pad: "P76", func: 1 }
+  - { silicon_peripheral: "GD32_SPI.MISO", silicon_pad: "P77", func: 1 }
+  - { silicon_peripheral: "GD32_SPI.SCLK", silicon_pad: "P96", func: 2 }
+  - { silicon_peripheral: "GD32_SPI.CS0", silicon_pad: "P97", mux: gpio }
+  - { silicon_peripheral: "RIIC8_SDA8", silicon_pad: "P06", func: 1 }
+  - { silicon_peripheral: "RIIC8_SCL8", silicon_pad: "P07", func: 1 }

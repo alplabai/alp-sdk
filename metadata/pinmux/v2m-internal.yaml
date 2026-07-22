@@ -1,0 +1,42 @@
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# RZ/V2N PFC alt-function-select numbers (RZV_PINMUX(port, bit, func)) for
+# the E1M-V2M101 board-level Zephyr pinctrl -- issue #655, follow-up to #523.
+#
+# The V2N-M1 module reuses the base V2N pinout in full for this subset
+# (SCI_UART0 console, SCI7 Simple-SPI, RIIC8/BRD_I2C -- see
+# metadata/e1m_modules/v2n-m1/README.md), so this table is identical in
+# content to metadata/pinmux/v2n-internal.yaml; kept as its own file because
+# the two boards' Zephyr board trees (zephyr/boards/alp/e1m_v2n101_m33_sm
+# and e1m_v2m101_m33_sm) are likewise two separate committed file sets, not
+# one shared source.
+#
+# Hand-authored, NOT generated: transcribed verbatim from the RZ/V2N PFC
+# (Table 1.2-3) via the comments already in the committed
+# zephyr/boards/alp/e1m_v2m101_m33_sm-pinctrl.dtsi (never invented; would be
+# marked `func: TBD` if a pad's number weren't stated anywhere).
+#
+# `mux: gpio` (instead of `func:`) marks a pad this board deliberately does
+# NOT put into peripheral alt-function mode -- it stays plain GPIO.  The one
+# instance here: P97 (GD32_SPI.CS0 / SCI7 SS7) -- the GD32 supervisor's
+# master Simple-SPI has no hardware slave-select, so the board drives the
+# chip-select as a GPIO instead of muxing it to SS7.
+#
+# `family: v2n` (not `v2n-m1`, the `--emit zephyr-board` SKU-family slug):
+# scripts/check_e1m_pinout.py's join check keys its E1M/E1M-X form-factor
+# map off this field and only knows `v2n` -> E1M-X (see its
+# FAMILY_FORM_FACTOR); V2N-M1 boards are E1M-X too (same reused base V2N
+# pinout, per metadata/e1m_modules/v2n-m1/README.md), so this reuses that
+# same taxonomy rather than adding a second, redundant entry there.
+schemaVersion: pinmux-internal-v1
+family: v2n
+pads:
+  - { silicon_peripheral: "UART0_TXD0", silicon_pad: "P50", func: 1 }
+  - { silicon_peripheral: "UART0_RXD0", silicon_pad: "P51", func: 1 }
+  - { silicon_peripheral: "GD32_SPI.MOSI", silicon_pad: "P76", func: 1 }
+  - { silicon_peripheral: "GD32_SPI.MISO", silicon_pad: "P77", func: 1 }
+  - { silicon_peripheral: "GD32_SPI.SCLK", silicon_pad: "P96", func: 2 }
+  - { silicon_peripheral: "GD32_SPI.CS0", silicon_pad: "P97", mux: gpio }
+  - { silicon_peripheral: "RIIC8_SDA8", silicon_pad: "P06", func: 1 }
+  - { silicon_peripheral: "RIIC8_SCL8", silicon_pad: "P07", func: 1 }

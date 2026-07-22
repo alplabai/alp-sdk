@@ -15,12 +15,11 @@ Two things are pinned:
 2. The `scripts/alp_project.py --emit zephyr-board` CLI wiring actually
    writes those files to `--output`.
 
-`e1m_v2n101_m33_sm` / `e1m_v2m101_m33_sm` are covered for only the three
-family-agnostic files the generator produces for them today
-(`board.yml`, `Kconfig.alp_<board>`, the twister `.yaml`) -- their
-`.dts` / pinctrl `.dtsi` / `_defconfig` stay hand-authored (see the
-module docstring in `gen_zephyr_board.py`) and are intentionally not
-checked here.
+`e1m_v2n101_m33_sm` / `e1m_v2m101_m33_sm` are now fully generated too
+(issue #655, follow-up to #523): the Renesas-side GD32 supervisor pin
+wiring lives in `metadata/pinmux/v2n-internal.yaml` / `v2m-internal.yaml`,
+so their `.dts` / pinctrl `.dtsi` / `_defconfig` are covered by the same
+byte-equivalence check as the family-agnostic files.
 """
 
 from __future__ import annotations
@@ -66,10 +65,10 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
     def test_aen801_m55_he_full_tree(self) -> None:
         self._assert_matches_committed("E1M-AEN801", "m55_he", "e1m_aen801_m55_he")
 
-    def test_v2n101_m33_sm_family_agnostic_files(self) -> None:
+    def test_v2n101_m33_sm_full_tree(self) -> None:
         self._assert_matches_committed("E1M-V2N101", "m33_sm", "e1m_v2n101_m33_sm")
 
-    def test_v2m101_m33_sm_family_agnostic_files(self) -> None:
+    def test_v2m101_m33_sm_full_tree(self) -> None:
         self._assert_matches_committed("E1M-V2M101", "m33_sm", "e1m_v2m101_m33_sm")
 
     def test_aen_board_cmake_stays_hand_authored(self) -> None:
@@ -82,9 +81,10 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
             "board.cmake should stay hand-authored (asymmetric prose, not a "
             "hardware fact) -- see gen_zephyr_board.py's module docstring")
 
-    def test_v2n_dts_pinctrl_defconfig_stay_hand_authored(self) -> None:
-        """The Renesas-side GD32 supervisor pin wiring isn't in metadata
-        yet, so these three files must NOT be claimed as generated."""
+    def test_v2n_full_tree_now_claimed(self) -> None:
+        """Issue #655: the Renesas-side GD32 supervisor pin wiring now lives
+        in metadata/pinmux/v2n-internal.yaml, so the generator claims the
+        full six-file v2n board tree, not just the family-agnostic three."""
         files = emit_zephyr_board("E1M-V2N101", "m33_sm", METADATA_ROOT)
         claimed = {relpath.split("/", 1)[1] for relpath in files}
         self.assertEqual(
@@ -93,6 +93,24 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
                 "board.yml",
                 "Kconfig.alp_e1m_v2n101_m33_sm",
                 "alp_e1m_v2n101_m33_sm_r9a09g056n48gbg_cm33.yaml",
+                "alp_e1m_v2n101_m33_sm-pinctrl.dtsi",
+                "alp_e1m_v2n101_m33_sm_r9a09g056n48gbg_cm33_defconfig",
+                "alp_e1m_v2n101_m33_sm_r9a09g056n48gbg_cm33.dts",
+            },
+        )
+
+    def test_v2m_full_tree_now_claimed(self) -> None:
+        files = emit_zephyr_board("E1M-V2M101", "m33_sm", METADATA_ROOT)
+        claimed = {relpath.split("/", 1)[1] for relpath in files}
+        self.assertEqual(
+            claimed,
+            {
+                "board.yml",
+                "Kconfig.alp_e1m_v2m101_m33_sm",
+                "alp_e1m_v2m101_m33_sm_r9a09g056n48gbg_cm33.yaml",
+                "alp_e1m_v2m101_m33_sm-pinctrl.dtsi",
+                "alp_e1m_v2m101_m33_sm_r9a09g056n48gbg_cm33_defconfig",
+                "alp_e1m_v2m101_m33_sm_r9a09g056n48gbg_cm33.dts",
             },
         )
 
