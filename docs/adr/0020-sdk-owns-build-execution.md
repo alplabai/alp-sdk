@@ -226,7 +226,8 @@ user command are retired.
 
 1. **Phase 1 (alp-sdk):** complete the contract above; `fan_out` stays and ideally
    consumes the new fields (self-parity). Ship on an SDK tag; delete nothing.
-2. **Phase 2 (`tan`, Hakan):** extract `cli-rs` → the new `tan` repo and **grow it to the whole command surface** (build + flash/image/size/renode/clean + the
+2. **Phase 2 (`tan`, Hakan):** extract `cli-rs` → the new `tan` repo and **grow it
+   to the whole command surface** (build + flash/image/size/renode/clean + the
    manifest I/O those need). The executor conforms to the contract (deletes the
    hand-ported env / skip policy); add **build-validation CI** (SoM matrix,
    plan→execute).
