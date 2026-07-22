@@ -48,6 +48,7 @@ pip packages):
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -129,6 +130,42 @@ def _write_or_print(out: str, target: Path | None) -> int:
     else:
         sys.stdout.write(out)
     return 0
+
+
+def _run_scaffold_emit(args: argparse.Namespace) -> int:
+    """`--emit scaffold --template <id> --sku <SKU>` (issue #864): print
+    the `[{path, contents}, ...]` envelope for a NEW project's
+    `files.user_owned` -- no board.yaml required (there is no project
+    yet), so this never touches `_validate_and_load`/`--input` at all.
+
+    Delegates to `alp_template.render_to_envelope()`, the same
+    planning + read/substitute path `alp_template.py render` uses to
+    write to disk, so a scaffold a customer gets via this CLI and one
+    written by `alp_template.py render --param ...` can never disagree
+    on a byte. This is the single source of the scaffold's build-
+    integration conventions tan-cli vendors at release instead of
+    hand-porting a per-SKU Rust generator.
+    """
+    if not args.template:
+        print("alp_project: --emit scaffold requires --template <id>",
+              file=sys.stderr)
+        return 1
+    if not args.sku:
+        print("alp_project: --emit scaffold requires --sku <SKU>",
+              file=sys.stderr)
+        return 1
+
+    import alp_template
+    try:
+        envelope = alp_template.render_to_envelope(
+            args.template, args.sku, metadata_root=args.metadata_root)
+    except alp_template.TemplateError as e:
+        print(f"alp_project: {e}", file=sys.stderr)
+        return 1
+
+    out = json.dumps(
+        [{"path": p, "contents": c} for p, c in envelope], indent=2) + "\n"
+    return _write_or_print(out, args.output)
 
 
 def _run_v2_emit(args: argparse.Namespace) -> int:
@@ -431,13 +468,25 @@ def main() -> int:
                                  "composed-route-table",
                                  "carrier-netlist",
                                  # Zephyr board-tree generator (issue #523).
-                                 "zephyr-board"],
+                                 "zephyr-board",
+                                 # New-project scaffold envelope (issue #864).
+                                 "scaffold"],
                         default="zephyr-conf",
                         help="Output format (default: zephyr-conf).")
     parser.add_argument("--output", type=Path, default=None,
                         help="Write to this path; default: stdout.")
     parser.add_argument("--metadata-root", type=Path, default=METADATA_ROOT,
                         help="Override the metadata search root.")
+    parser.add_argument("--template", default=None,
+                        help="metadata/templates/catalog-v1.json template "
+                             "id; required for --emit scaffold.")
+    parser.add_argument("--sku", default=None,
+                        help="Target SoM SKU (e.g. E1M-V2N101); required "
+                             "for --emit scaffold -- substitutes the "
+                             "scaffolded board.yaml's som.sku/preset for "
+                             "a SKU other than the template's own "
+                             "canonical example (must be one of the "
+                             "template's supported.som_skus).")
     parser.add_argument("--core", default=None,
                         help="When the project is v2, limit emits to this "
                              "core ID.  For per-core emit modes "
@@ -452,6 +501,11 @@ def main() -> int:
                              "runtime).  Ignored for system-manifest, "
                              "ipc-contract-h, dts-reservations.")
     args = parser.parse_args()
+
+    # scaffold has no board.yaml at all (it MATERIALISES a new project),
+    # so it dispatches before --input is ever read.
+    if args.emit == "scaffold":
+        return _run_scaffold_emit(args)
 
     # Project-wide v2 emit modes (system-manifest, dts-reservations,
     # ipc-contract-h) route through alp_orchestrate/ directly.
