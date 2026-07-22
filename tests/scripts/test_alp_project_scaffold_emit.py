@@ -34,15 +34,22 @@ def test_scaffold_emits_json_envelope_for_the_examples_own_sku():
                 "--sku", "E1M-AEN801")
     assert proc.returncode == 0, proc.stderr
     envelope = json.loads(proc.stdout)
+    # testcase.yaml is not part of the envelope (dropped from
+    # metadata/templates/catalog-v1.json `files.user_owned` -- issue
+    # #864 follow-up: SDK CI wiring, not a user's project file).
     assert {item["path"] for item in envelope} == {
         "board.yaml", "prj.conf", "CMakeLists.txt", "src/main.c",
-        "README.md", "testcase.yaml",
+        "README.md",
     }
-    # Byte-identical to the canonical example -- a passthrough for the
-    # template's own SKU.
-    for item in envelope:
-        expected = (HELLO_WORLD / item["path"]).read_text(encoding="utf-8")
-        assert item["contents"] == expected, item["path"]
+    by_path = {item["path"]: item["contents"] for item in envelope}
+    # board.yaml/prj.conf/src/main.c -- byte-identical passthrough for
+    # the template's own SKU. CMakeLists.txt/README.md are scaffold-
+    # adapted regardless of SKU (ALP_SDK_ROOT hardening / dangling-link
+    # rewrite), so they differ even for the canonical example's own SKU.
+    for rel in ("board.yaml", "prj.conf", "src/main.c"):
+        assert by_path[rel] == (HELLO_WORLD / rel).read_text(encoding="utf-8"), rel
+    assert "--core m55_hp" in by_path["CMakeLists.txt"]
+    assert "ALP_SDK_ROOT is not set" in by_path["CMakeLists.txt"]
 
 
 def test_scaffold_substitutes_sku_and_preset_for_a_different_sku():
@@ -52,9 +59,29 @@ def test_scaffold_substitutes_sku_and_preset_for_a_different_sku():
     envelope = {item["path"]: item["contents"] for item in json.loads(proc.stdout)}
     assert "sku: E1M-V2N101" in envelope["board.yaml"]
     assert "preset: e1m-x-evk" in envelope["board.yaml"]
-    # Every other user_owned file is untouched.
-    for rel in ("prj.conf", "CMakeLists.txt", "src/main.c"):
+    # The AEN-only app core (m55_hp) is re-derived to V2N101's own
+    # Zephyr core -- the #864 follow-up blocker fix: VERIFIED
+    # `alp_project.py --input <old board.yaml> --emit zephyr-conf
+    # --core m55_hp` against an E1M-V2N101 board.yaml used to fail
+    # with rc=1, "unknown core id".
+    assert "m33_sm:" in envelope["board.yaml"]
+    assert "m55_hp" not in envelope["board.yaml"]
+    assert "--core m33_sm" in envelope["CMakeLists.txt"]
+    # prj.conf / src/main.c carry no sku-specific content -- unmodified.
+    for rel in ("prj.conf", "src/main.c"):
         assert envelope[rel] == (HELLO_WORLD / rel).read_text(encoding="utf-8")
+
+    # The derived core must actually be valid for E1M-V2N101 -- this is
+    # the regression coverage for the blocker itself.
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        board_yaml_path = Path(tmp) / "board.yaml"
+        board_yaml_path.write_text(envelope["board.yaml"], encoding="utf-8")
+        check = subprocess.run(
+            [sys.executable, str(ALP_PROJECT), "--input", str(board_yaml_path),
+             "--emit", "zephyr-conf", "--core", "m33_sm"],
+            capture_output=True, text=True, cwd=REPO, check=False)
+        assert check.returncode == 0, check.stderr
 
 
 def test_scaffold_rejects_unsupported_sku_with_the_supported_list():

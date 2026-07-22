@@ -34,8 +34,7 @@
           "prj.conf",
           "CMakeLists.txt",
           "src/main.c",
-          "README.md",
-          "testcase.yaml"
+          "README.md"
         ],
         "generated": [
           {
@@ -63,7 +62,7 @@
       "description": "Per-peripheral GPIO example via the <alp/blocks/button_led.h> block: reads a debounced button input and drives an LED output. Button is the EVK's encoder push switch, LED is the RGB-red channel's pad claimed as a plain GPIO. Builds on both EVKs with per-family pin macros.",
       "supported": {
         "families": ["alif-ensemble", "renesas-rzv2n"],
-        "som_skus": ["E1M-AEN801", "E1M-V2N101"],
+        "som_skus": ["E1M-AEN801"],
         "core_classes": ["m"],
         "runtimes": ["zephyr"]
       },
@@ -102,8 +101,7 @@
           "prj.conf",
           "CMakeLists.txt",
           "src/main.c",
-          "README.md",
-          "testcase.yaml"
+          "README.md"
         ],
         "generated": [
           {
@@ -146,7 +144,7 @@
       "description": "Discrete I2C master that reads the on-module TMP112 temperature sensor at a known 7-bit address via the real <alp/chips/tmp112.h> chip driver, contrasted with the address-discovery i2c-scanner example. TMP112 is populated across the AEN, V2N, and V2N-M1 families, so this is the canonical single-sensor starting point.",
       "supported": {
         "families": ["alif-ensemble", "renesas-rzv2n"],
-        "som_skus": ["E1M-AEN801", "E1M-V2N101"],
+        "som_skus": ["E1M-AEN801"],
         "core_classes": ["m"],
         "runtimes": ["zephyr"]
       },
@@ -180,8 +178,7 @@
           "prj.conf",
           "CMakeLists.txt",
           "src/main.c",
-          "README.md",
-          "testcase.yaml"
+          "README.md"
         ],
         "generated": [
           {
@@ -253,8 +250,7 @@
           "m55_hp/CMakeLists.txt",
           "m55_hp/src/main.c",
           "linux/CMakeLists.txt",
-          "README.md",
-          "m55_hp/testcase.yaml"
+          "README.md"
         ],
         "generated": [
           {
@@ -316,8 +312,7 @@
           "prj.conf",
           "CMakeLists.txt",
           "src/main.c",
-          "README.md",
-          "testcase.yaml"
+          "README.md"
         ],
         "generated": [
           {
@@ -350,7 +345,7 @@
       "description": "Predictive-maintenance edge-AI starting point: a low-power M55 node reads the on-board BME280 T/RH/P sensor on a slow logging cadence via the real <alp/chips/bme280.h> driver, computes cold-chain metrics (MKT, dewpoint, excursion time) through <alp/inference.h> + the tflite_micro library, and classifies a 4-state integrity result. Same source targets the V2N DEEPX path when som.sku is flipped.",
       "supported": {
         "families": ["alif-ensemble", "renesas-rzv2n"],
-        "som_skus": ["E1M-AEN801", "E1M-V2N101"],
+        "som_skus": ["E1M-AEN801"],
         "core_classes": ["m"],
         "runtimes": ["zephyr"]
       },
@@ -387,8 +382,7 @@
           "src/main.c",
           "src/cold_chain.c",
           "src/cold_chain.h",
-          "README.md",
-          "testcase.yaml"
+          "README.md"
         ],
         "generated": [
           {
