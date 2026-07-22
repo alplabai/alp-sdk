@@ -258,11 +258,11 @@ source, three SoMs.
 > | DRP-AI3 (V2N / V2M)  | Renesas DRP-AI TVM        | DRP-AI runtime dir          |
 > | DEEPX DX-M1 (V2M)    | `dxcom` (license-gated)   | `.dxnn` binary              |
 >
-> For **Ethos-U** the SDK runs Vela automatically as part of `alp model build`
+> For **Ethos-U** the SDK runs Vela automatically as part of `tan model build`
 > (no extra `board.yaml` needed).  For **DRP-AI** and **DEEPX** the toolchains
 > require per-model configuration (a DRP-AI TVM spec file, or a DEEPX JSON
 > config + calibration dataset).  Supply these in `board.yaml` under
-> `models[].compile:` so `alp model build` can invoke them:
+> `models[].compile:` so `tan model build` can invoke them:
 >
 > ```yaml
 > models:

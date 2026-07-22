@@ -78,7 +78,7 @@ signatures), if you have one in mind.
    the *pin* in the repo-root `.python-version` (currently 3.12) --
    every CI workflow's `actions/setup-python` reads that one file.
    Run the pinned version locally to match CI exactly (`pyenv`/`uv`
-   pick it up automatically); `alp doctor` warns on a mismatch.
+   pick it up automatically); `tan doctor` warns on a mismatch.
 6. Open a PR; CI runs the AEN-Zephyr, AEN-baremetal, and V2N-Yocto
    matrices.  CI green is necessary but not sufficient for tagging
    a release -- the test-plan row also has to flip to `✅`.

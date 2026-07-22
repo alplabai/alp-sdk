@@ -1,6 +1,7 @@
 # 0010. Heterogeneous OS orchestration: Zephyr + Yocto as peers, not alternatives
 
-Status: Accepted
+Status: Accepted — superseded by ADR-0020 (build execution moved to
+`tan`; the `west alp-*` extensions are retired)
 Date: 2026-05-15
 Deciders: alpCaner
 
@@ -161,6 +162,21 @@ hwsem by hand.  Rejected because:
   app-developer-facing walkthrough for writing a dual-app project.
 - [`include/alp/mproc.h`](../../include/alp/mproc.h) — the low-level IPC
   primitives `<alp/rpc.h>` sits on top of.
+
+## Amendments
+
+### 2026-07-22 — superseded by 0020 (build execution moved to `tan`)
+
+[0020](0020-sdk-owns-build-execution.md) supersedes this ADR's **CLI**
+row above and the `west alp-flash` mention under *Positive*: `west
+alp-build` and its `west alp-image` / `west alp-flash` / `west
+alp-clean` / `west alp-renode` companions are retired (0020 Phase 4);
+the whole build/flash/image/size/renode/clean surface now lives in
+the standalone, public `tan` CLI, which consumes alp-sdk's
+`--emit build-plan` / `--emit system-manifest`. This ADR's core
+decision — Zephyr + Yocto as heterogeneous peers under one
+`board.yaml`, one system manifest, one IPC contract — is unaffected
+and remains the live architecture.
 - [ADR 0001](0001-wrapper-on-top-of-zephyr.md) — the layering philosophy
   that puts portable surfaces above vendor + OS primitives.
 - [ADR 0005](0005-alp-sdk-vs-alp-studio-boundary.md) — the studio shares

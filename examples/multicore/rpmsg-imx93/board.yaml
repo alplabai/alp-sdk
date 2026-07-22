@@ -10,7 +10,7 @@
 #                       role so the core ID is just `m33`.
 #
 # The iMX93 SoM preset's memory_map values are TBD pending the
-# user's authoritative HW writeup; until those land, `west alp-build`
+# user's authoritative HW writeup; until those land, `tan build`
 # will fail at carve-out resolution with a clear message.  This
 # example's structural files are correct in shape today.
 libraries:

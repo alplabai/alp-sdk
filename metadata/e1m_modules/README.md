@@ -48,7 +48,7 @@ flash capacities), `on_module:` (incl. `pmic_main` and the
 always; `ethos_u_variant` / `npu_population` where applicable) — so
 a preset can no longer carry a misspelled or family-idiosyncratic
 key silently.  Unknown hardware facts stay explicit `TBD`s (values
-are never invented); `alp new-som` scaffolds a schema-valid preset
+are never invented); `tan new-som` scaffolds a schema-valid preset
 with exactly this shape.
 
 Per-family pinmux capability tables live beside the presets at
@@ -98,7 +98,7 @@ All six AEN presets (`E1M-AEN301..801`) carry a `cc3501e_otp` helper
 entry with `update_channel: alp_ota_spi_otp`, not a `flash_method`.
 The CC3501E (TI Wi-Fi 6 + BLE 5.4 coprocessor) is Alp-released firmware
 applied over the bridge SPI link, programming the chip's own OTP — it
-is never customer-flashed, so it carries no `west alp-flash` entry.
+is never customer-flashed, so it carries no `flash_method` entry.
 The six SKUs must stay in lockstep (same `update_channel`, same
 `firmware_path` provenance).  See `metadata/schemas/som-preset-v1.schema.json`
 `$defs/helper_firmware_entry` for the customer-flashable-vs-vendor-OTA

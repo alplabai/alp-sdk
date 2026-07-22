@@ -252,19 +252,24 @@ unblock.
 tan --project examples/multicore/rpmsg-v2n build
 ```
 
-The orchestrator:
+`tan build` plans first, then executes (ADR 0020: alp-sdk plans,
+`tan` is the sole executor):
 
-1. Loads + validates `board.yaml` against the board.yaml schema.
-2. Resolves the SoM preset → topology defaults → effective per-core
-   mapping.
-3. For each core with `os: != off`, materialises per-core config
-   (`build/m33_sm-zephyr/alp.conf`,
+1. The SDK's planner (`alp_orchestrate`) loads + validates
+   `board.yaml` against the board.yaml schema.
+2. The planner resolves the SoM preset → topology defaults →
+   effective per-core mapping.
+3. For each core with `os: != off`, `tan` materialises the planner's
+   per-core config to disk (`build/m33_sm-zephyr/alp.conf`,
    `build/a55_cluster-yocto/conf/local.conf`).
-4. Emits shared generated artefacts (`generated/alp/system_ipc.h`,
-   `generated/dts-reservations.dtsi`).
-5. Registers helper-MCU artefacts (GD32, CC3501E).
-6. Dispatches slice builds in parallel.
-7. Writes `build/system-manifest.yaml` joining everything together.
+4. `tan` writes the planner's shared generated artefacts
+   (`generated/alp/system_ipc.h`, `generated/dts-reservations.dtsi`).
+5. `tan` materialises the helper-MCU artefacts (GD32, CC3501E) the
+   plan registers.
+6. `tan` dispatches slice builds in parallel (`west` / `bitbake` /
+   `cmake` per slice).
+7. `tan` writes `build/system-manifest.yaml`, seeded from the
+   planner's `--emit system-manifest`, joining everything together.
 
 Output layout:
 
@@ -345,6 +350,22 @@ path resolves against the input `board.yaml`'s own directory, never the
 CLI's CWD, so the plan is deterministic, write-free, and versioned by
 its own `schemaVersion` — see
 [ADR 0014](adr/0014-build-plan-emit-cli-contract.md) for the contract.
+
+**Hermetic paths (`planPathMode: tokened`).**  Every checkout- or
+project-anchored absolute path the plan would otherwise embed —
+`env.ALP_SDK_ROOT`, `envAppendPath` entries, each slice's `appDir`,
+and the `-DPython3_EXECUTABLE=` / `-DEXTRA_CONF_FILE=` /
+`-DSB_CONF_FILE=` / `west build`-appdir command args — is instead a
+literal `${SDK_ROOT}` / `${PROJECT_ROOT}` / `${PYTHON}` token, so the
+same plan is reusable across checkouts rather than baking in this
+run's absolute paths.  `tan` substitutes these tokens at materialise
+time; a consumer implementing its own plan reader must do the same
+substitution before using any tokened field.  A slice whose `app:`
+resolves outside both roots is left as a genuine absolute path,
+paired with an `appdir-unrooted` warning rather than silently
+mis-rooted.  Additive under `schemaVersion 1` — see the
+`planPathMode` field in
+[`metadata/schemas/build-plan-v1.schema.json`](../metadata/schemas/build-plan-v1.schema.json).
 
 Its shape is pinned by
 [`metadata/schemas/build-plan-v1.schema.json`](../metadata/schemas/build-plan-v1.schema.json);

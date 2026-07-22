@@ -68,16 +68,17 @@ rather than guessing.
 An agent's loop here is: generate, then run the validators, then fix what they
 report.
 
-- `alp doctor` — HW-free environment preflight: checks the host toolchain,
+- `tan doctor` — HW-free environment preflight: checks the host toolchain,
   `west`, the pinned Zephyr version, Python deps, etc., and prints a remediation
   hint per failing check (`--json` for machine consumption). Run it first on a
   fresh checkout to find why a build won't work before you build.
-- `alp validate board.yaml` — the diagnostic-rich `board.yaml` validator
-  (CLI entry `alp`; equivalently `python3 scripts/validate_board_yaml.py`).
+- `tan validate board.yaml` — the diagnostic-rich `board.yaml` validator
+  (CLI entry `tan`, which forwards to `python -m alp_cli validate`;
+  equivalently `python3 scripts/validate_board_yaml.py`).
   Try it against a fixture under `tests/fixtures/board_yaml_bad/` to learn the
   output format. Exit code 1 on a hard validation or consistency failure;
   warnings return 0.
-- `alp validate board.yaml` / `alp emit build-plan` — the same validation as a
+- `tan validate board.yaml` / `tan emit build-plan` — the same validation as a
   build pre-flight before any compile work.
 - CI gates — `scripts/check_*.py` (e.g. `check_doc_drift.py`,
   `check_example_portability.py`, `check_pin_conflicts.py`,

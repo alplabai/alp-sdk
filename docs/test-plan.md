@@ -234,7 +234,7 @@ been green on `main` for at least two consecutive PRs.
 | VS Code extension build (split repo) | [`alplabai/alp-sdk-vscode` &mdash; ci workflow](https://github.com/alplabai/alp-sdk-vscode/actions/workflows/ci.yml) | ✅ verified |
 | `coverity.yml` weekly scan | `coverity.yml` | ✅ verified |
 | Portable-API conformance suite (13 classes × 8 cases, `alp_sdk.conformance.portable_api`) | `pr-twister.yml` (`tests/zephyr/conformance/`) | ✅ verified |
-| `alp` CLI verbs (`init` / `new-som` / `build` / `run` / `flash` / `emit` / `validate` / `doctor` / `monitor`) | click-runner pytest (`tests/scripts/test_alp_cli*.py`) via `pr-metadata-validate.yml` + `cross-platform-zephyr.yml` | ✅ verified |
+| `tan`'s Python backend (`alp_cli`) non-build verbs (`init` / `new-som` / `validate` / `model` / `doctor` / `run` / `monitor` / `explain` / `faultdecode` / `emit` / `generate`) | click-runner pytest (`tests/scripts/test_alp_cli*.py`) via `pr-metadata-validate.yml` + `cross-platform-zephyr.yml` | ✅ verified |
 
 ---
 
