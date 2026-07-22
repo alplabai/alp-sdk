@@ -380,21 +380,40 @@ def _default_preset_for_sku(sku: str, metadata_root: Path) -> str:
     return board.lower()
 
 
-# Matches board.yaml's `som:\n  sku: E1M-...` line (only the token right
-# after `sku:`, so any trailing inline comment survives untouched) and
-# the top-level `preset: <name>` line. count=1 each: board.yaml declares
-# exactly one of each.
-_SOM_SKU_RE = re.compile(r"(?m)^(\s*sku:\s*)E1M-[A-Z0-9]+")
-_PRESET_RE = re.compile(r"(?m)^(preset:\s*)\S+")
+# Matches board.yaml's `som:\n  sku: E1M-...` line and the top-level
+# `preset: <name>` line -- through end-of-line (incl. any trailing inline
+# comment), so a value CHANGE can drop a comment describing the OLD SoM
+# (e.g. `sku: E1M-AEN801   # Alif Ensemble E8 SoM` must not survive as a
+# stale label once the value becomes E1M-V2N101). Unbounded (no count=):
+# every match is inspected so a board.yaml with more than one matching
+# `sku:`/`preset:` line -- ambiguous, could silently rewrite a decoy while
+# the real som.sku/preset line survives untouched -- hard-errors instead
+# of guessing which one is real.
+_SOM_SKU_RE = re.compile(r"(?m)^(\s*sku:\s*)(E1M-[A-Z0-9]+)[^\n]*$")
+_PRESET_RE = re.compile(r"(?m)^(preset:\s*)(\S+)[^\n]*$")
 
 
 def _substitute_board_yaml_sku(text: str, sku: str, preset: str) -> str:
-    text, n_sku = _SOM_SKU_RE.subn(rf"\g<1>{sku}", text, count=1)
-    if n_sku == 0:
-        raise TemplateError("board.yaml has no `som.sku:` line to substitute")
-    text, n_preset = _PRESET_RE.subn(rf"\g<1>{preset}", text, count=1)
-    if n_preset == 0:
-        raise TemplateError("board.yaml has no top-level `preset:` line to substitute")
+    def _sub_sku(m: re.Match[str]) -> str:
+        # Value unchanged -> leave the WHOLE line (incl. any comment)
+        # untouched: this is the byte-passthrough guarantee for sku ==
+        # the example's own default.
+        return m.group(0) if m.group(2) == sku else f"{m.group(1)}{sku}"
+
+    text, n_sku = _SOM_SKU_RE.subn(_sub_sku, text)
+    if n_sku != 1:
+        raise TemplateError(
+            f"board.yaml must have exactly one `som.sku:` line to "
+            f"substitute (found {n_sku})")
+
+    def _sub_preset(m: re.Match[str]) -> str:
+        return m.group(0) if m.group(2) == preset else f"{m.group(1)}{preset}"
+
+    text, n_preset = _PRESET_RE.subn(_sub_preset, text)
+    if n_preset != 1:
+        raise TemplateError(
+            f"board.yaml must have exactly one top-level `preset:` line "
+            f"to substitute (found {n_preset})")
     return text
 
 
@@ -440,10 +459,19 @@ def render_to_envelope(
 
     out: list[tuple[str, str]] = []
     for rel, data in _rendered_bytes(template_id, record, render_plan.files, resolved, base):
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            # render() copies any file as raw bytes; the JSON envelope
+            # cannot -- a future binary user_owned asset must fail
+            # cleanly here, not escape _run_scaffold_emit's `except
+            # TemplateError` as a raw traceback.
+            raise TemplateError(
+                f"{template_id}: {rel} is not valid UTF-8 text, cannot "
+                f"be JSON-encoded for --emit scaffold ({exc})") from exc
         if rel == "board.yaml":
-            data = _substitute_board_yaml_sku(
-                data.decode("utf-8"), sku, preset).encode("utf-8")
-        out.append((rel, data.decode("utf-8")))
+            text = _substitute_board_yaml_sku(text, sku, preset)
+        out.append((rel, text))
     return out
 
 

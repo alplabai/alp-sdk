@@ -99,6 +99,15 @@ CASES.append((
     "examples/peripheral-io/hello-world/board.yaml", "scaffold",
     ("--template", "minimal", "--sku", "E1M-V2N101"),
 ))
+# peripheral's canonical board.yaml carries trailing inline comments on
+# BOTH its `sku:` and `preset:` lines describing the AEN801/e1m-evk
+# default (Fable review finding) -- this pins that the substitution
+# drops the stale comment along with the value, not just the token.
+CASES.append((
+    "scaffold.peripheral-v2n101", PROJ,
+    "examples/peripheral-io/gpio-button-led/board.yaml", "scaffold",
+    ("--template", "peripheral", "--sku", "E1M-V2N101"),
+))
 
 
 def _normalize_path(text: str, path: str, token: str) -> str:

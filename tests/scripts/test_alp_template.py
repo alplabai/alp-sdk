@@ -20,6 +20,7 @@ import os
 from pathlib import Path
 
 import pytest
+import yaml
 
 import alp_template  # noqa: E402  (scripts/ on sys.path via conftest)
 
@@ -305,6 +306,82 @@ def test_render_to_envelope_substitutes_sku_and_preset():
     # Every other user_owned file is an unmodified copy.
     for rel in ("prj.conf", "CMakeLists.txt", "src/main.c", "testcase.yaml"):
         assert by_path[rel] == (HELLO_WORLD / rel).read_text(encoding="utf-8"), rel
+
+
+def test_render_to_envelope_drops_stale_trailing_comment_on_value_change():
+    """Fable review finding: `gpio-button-led`'s board.yaml carries an
+    inline comment on BOTH its `sku:` and `preset:` lines describing the
+    AEN801/e1m-evk default (`# Alif Ensemble E8 SoM`, `# 35x35 EVK --
+    reference board...`). Substituting the VALUE must drop that comment
+    too -- leaving it would mislabel a V2N101 scaffold as Alif hardware."""
+    envelope = dict(alp_template.render_to_envelope("peripheral", "E1M-V2N101"))
+    board_yaml = envelope["board.yaml"]
+    assert "sku: E1M-V2N101" in board_yaml
+    assert "Alif Ensemble E8 SoM" not in board_yaml
+    assert "E1M-AEN801" not in board_yaml
+    assert "preset: e1m-x-evk" in board_yaml
+    assert "35x35 EVK" not in board_yaml
+
+
+def test_render_to_envelope_preserves_trailing_comment_when_value_unchanged():
+    """The flip side of the above: requesting the example's OWN sku is a
+    byte-passthrough, comment included (already covered end-to-end by
+    test_render_to_envelope_is_passthrough_for_the_examples_own_sku for
+    `minimal`; this pins it for a record whose lines DO carry inline
+    comments)."""
+    example = REPO / "examples" / "peripheral-io" / "gpio-button-led"
+    envelope = dict(alp_template.render_to_envelope("peripheral", "E1M-AEN801"))
+    assert envelope["board.yaml"] == (example / "board.yaml").read_text(encoding="utf-8")
+
+
+def test_substitute_board_yaml_sku_rejects_ambiguous_sku_line():
+    """More than one line matching the `sku:` pattern is unresolvable --
+    which one is the real `som.sku:`? -- so it must hard-error rather
+    than silently rewrite the first match and leave a decoy (or the
+    real line) untouched."""
+    text = "decoy:\n  sku: E1M-AEN801\nsom:\n  sku: E1M-AEN801\npreset: e1m-evk\n"
+    with pytest.raises(alp_template.TemplateError, match="exactly one"):
+        alp_template._substitute_board_yaml_sku(text, "E1M-V2N101", "e1m-x-evk")
+
+
+def test_substitute_board_yaml_sku_rejects_ambiguous_preset_line():
+    text = "som:\n  sku: E1M-AEN801\npreset: e1m-evk\npreset: e1m-evk\n"
+    with pytest.raises(alp_template.TemplateError, match="exactly one"):
+        alp_template._substitute_board_yaml_sku(text, "E1M-AEN801", "e1m-x-evk")
+
+
+# --------------------------------------------------------------------------
+# Every catalog template x its supported.som_skus (Fable review: only
+# minimal x {AEN801, V2N101} was covered before -- the first untested
+# combo, peripheral x V2N101, surfaced the stale-comment MAJOR above).
+# --------------------------------------------------------------------------
+
+def _every_template_sku_pair() -> list[tuple[str, str]]:
+    return [
+        (rec["id"], sku)
+        for rec in _catalog()["templates"]
+        for sku in rec["supported"]["som_skus"]
+    ]
+
+
+@pytest.mark.parametrize("template_id,sku", _every_template_sku_pair())
+def test_render_to_envelope_every_template_sku_combo(template_id, sku):
+    record = alp_template.find_template(_catalog(), template_id)
+    example = REPO / record["example"]
+    example_sku = yaml.safe_load(
+        (example / "board.yaml").read_text(encoding="utf-8"))["som"]["sku"]
+
+    board_yaml = dict(alp_template.render_to_envelope(template_id, sku))["board.yaml"]
+    parsed = yaml.safe_load(board_yaml)
+
+    assert parsed["som"]["sku"] == sku
+    som_doc = yaml.safe_load(
+        (alp_template.METADATA_ROOT / "e1m_modules" / f"{sku}.yaml")
+        .read_text(encoding="utf-8"))
+    assert parsed["preset"] == som_doc["default_board"].lower()
+
+    if example_sku != sku:
+        assert example_sku not in board_yaml
 
 
 def test_render_to_envelope_rejects_unsupported_sku():
