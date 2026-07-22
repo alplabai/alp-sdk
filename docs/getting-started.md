@@ -30,12 +30,12 @@ hand-written firmware as a first-class consumer.
 >   `tan` separately from its own repo (needs a Rust toolchain /
 >   rustup): `cargo install --git https://github.com/alplabai/tan-cli
 >   --bin tan`.
-> - **`alp` CLI** — everything that isn't a build: `alp init`
->   scaffolds a project, `alp validate` checks a `board.yaml`, `alp
->   emit` inspects any generated artefact (including the build plan
->   `tan` consumes), plus `alp doctor` / `alp monitor` / `alp model` /
->   `alp new-som` / `alp explain` / `alp faultdecode`.  The full verb
->   reference lives in [`docs/cli.md`](cli.md).
+> - **`tan`'s forwarded verbs** — everything that isn't a build: `tan
+>   init` scaffolds a project, `tan validate` checks a `board.yaml`,
+>   `tan emit` inspects any generated artefact (including the build
+>   plan `tan build` consumes), plus `tan doctor` / `tan monitor` /
+>   `tan model` / `tan new-som` / `tan explain` / `tan faultdecode`.
+>   The full verb reference lives in [`docs/cli.md`](cli.md).
 >
 > Nothing is lost switching a project between `native_sim` and
 > real silicon: whichever the project's `board.yaml` names, `tan
@@ -113,7 +113,7 @@ you install them.
 | Tool        | Version          | Notes                                                    |
 |-------------|------------------|----------------------------------------------------------|
 | Zephyr      | v4.4.0 (stable)  | Pinned by `west.yml`; see [`docs/zephyr-version-policy.md`](zephyr-version-policy.md). |
-| Python      | 3.10+ (dev/CI pin: 3.12) | 3.10 is the support **floor** (`pyproject.toml` `requires-python`); dev/CI standardise on the **pin** in the repo-root `.python-version` file. Match the pin to reproduce CI exactly -- `alp doctor` warns on a mismatch. |
+| Python      | 3.10+ (dev/CI pin: 3.12) | 3.10 is the support **floor** (`pyproject.toml` `requires-python`); dev/CI standardise on the **pin** in the repo-root `.python-version` file. Match the pin to reproduce CI exactly -- `tan doctor` warns on a mismatch. |
 | Python deps | `pyyaml`, `jsonschema`, `imgtool` | All installed by `scripts/bootstrap.sh`; manual install: `pip install pyyaml jsonschema imgtool`. |
 | CMake       | 3.20+            | `find_package(Zephyr)` minimum.                          |
 | C compiler  | GCC 11+ / Clang 14+ | `native_sim` builds; cross-toolchain for real silicon. |
@@ -146,9 +146,9 @@ pin, the `.west` workspace and the workspace venv) and prints a
 `[PASS]`/`[WARN]`/`[FAIL]` line with a fix hint for each:
 
 ```bash
-alp doctor              # human-readable report; exit 1 on any FAIL
-alp doctor --strict     # also fail on WARN (handy in CI)
-alp doctor --json       # machine-readable (used by the VS Code extension)
+tan doctor              # human-readable report; exit 1 on any FAIL
+tan doctor --strict     # also fail on WARN (handy in CI)
+tan doctor --json       # machine-readable (used by the VS Code extension)
 ```
 
 It is HW-free (no build, no board, no flash), so it is safe to run
@@ -260,7 +260,7 @@ What this does:
 
 1. **Validates** the app's `board.yaml` (schema + SoM SKU preset +
    board preset + `hw_rev` / SDK-version compatibility window +
-   `peripherals:` vs SoC caps) — the same check `alp validate` runs
+   `peripherals:` vs SoC caps) — the same check `tan validate` runs
    standalone.
 2. **Materialises** every generated artefact the plan carries,
    including the build-time hw_info header at
@@ -352,7 +352,7 @@ can't run, naming the failing constraint.  Check what's selected and
 whether it's compatible:
 
 ```bash
-alp doctor            # a "libraries" line reports tier + licence + fit
+tan doctor            # a "libraries" line reports tier + licence + fit
 ```
 
 The curated set today: `lvgl`, `cmsis-dsp`, `cmsis-nn`, `nanopb`,
@@ -394,12 +394,11 @@ tan --project alp-sdk/examples/peripheral-io/gpio-button-led build
 tan flash alp-sdk/examples/peripheral-io/gpio-button-led
 ```
 
-Once the board is running, `alp monitor --port <port>` opens its
+Once the board is running, `tan monitor --port <port>` opens its
 serial console (run it portless to list the host's serial ports;
-`--baud` overrides the 115200 default) — `alp monitor` never builds
+`--baud` overrides the 115200 default) — `tan monitor` never builds
 anything, so it's unaffected by the executor split.  See
-[`docs/cli.md`](cli.md) for `alp`'s verbs and
-[`alplabai/tan-cli`](https://github.com/alplabai/tan-cli) for `tan`'s.
+[`docs/cli.md`](cli.md) for `tan`'s full verb reference.
 
 Each example's `boards/` directory has an overlay that maps
 the example's `alp,pin-array` slots to specific EVK pins.  The
@@ -529,7 +528,7 @@ hand.  The validator also cross-checks every entry in
 `peripherals:` against the SoC's `metadata/socs/<vendor>/<family>/<part>.json`
 caps -- a board.yaml asking for `i2s` on a SoC that doesn't route
 I²S fails at `tan build` time with exit code 3, before any
-compile work (the same check runs standalone via `alp validate`).
+compile work (the same check runs standalone via `tan validate`).
 
 At runtime, the documented caps drive the per-`*_open` validation:
 e.g. `alp_adc_open` with `resolution_bits = 16` on a 12-bit SoC

@@ -248,12 +248,14 @@ if [ "${DO_PIP}" -eq 1 ]; then
     info "Installing alp-sdk Python extras into the venv (jsonschema, imgtool)"
     "${VPY}" -m pip install -q jsonschema imgtool \
         || warn "alp-sdk extras install reported a problem -- check manually"
-    # The `alp` CLI front door (alp init / run / emit / validate / model /
-    # doctor / monitor) -- editable install, so a
-    # `git pull` in the checkout updates the CLI in place.
-    info "Installing the alp CLI into the venv (pip install -e ${REPO_ROOT})"
+    # tan's Python backend (alp_cli: init / run / emit / validate / model /
+    # doctor / monitor, invoked as `python -m alp_cli <sub>` by `tan`) --
+    # editable install, so a `git pull` in the checkout updates the backend
+    # in place. `tan` itself is a separate Rust binary, installed via
+    # `cargo install --git https://github.com/alplabai/tan-cli --bin tan`.
+    info "Installing the tan CLI's Python backend into the venv (pip install -e ${REPO_ROOT})"
     "${VPY}" -m pip install -q -e "${REPO_ROOT}" \
-        || warn "alp CLI editable install reported a problem -- check manually"
+        || warn "alp_cli editable install reported a problem -- check manually"
 else
     info "Skipping pip installs (--no-pip)"
 fi
@@ -309,8 +311,9 @@ Next steps:
   export ZEPHYR_BASE="${WORKSPACE_DIR}/zephyr"
   export ZEPHYR_TOOLCHAIN_VARIANT=zephyr
 
-  # Sanity-check the host environment with the alp CLI:
-  alp doctor
+  # Sanity-check the host environment (needs tan on PATH -- see README.md
+  # for `cargo install --git https://github.com/alplabai/tan-cli --bin tan`):
+  tan doctor
 
   # Run the local test suite:
   bash scripts/test-all.sh
