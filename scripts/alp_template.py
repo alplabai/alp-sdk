@@ -25,19 +25,40 @@ parameters, test wiring); this module actually materialises one --
 
   * render_to_envelope(template_id, sku) -- the in-memory capture path
     behind `scripts/alp_project.py --emit scaffold --template <id>
-    --sku <SKU>` (issue #864): renders entirely in memory (no dest_dir,
-    no disk write) and returns `[(path, contents), ...]` in the same
-    sorted order render() writes, sharing the same per-file read/
-    substitute loop so the two can never disagree on a byte. `sku` must
-    be one of the template's declared `supported.som_skus`
+    --sku <SKU>` (issue #864, deepened by its own follow-up): renders
+    entirely in memory (no dest_dir, no disk write) and returns
+    `[(path, contents), ...]` in the same sorted order render() writes,
+    sharing the same per-file read/substitute loop so the two can
+    never disagree on a byte for the files that stay a faithful copy.
+    `sku` must be one of the template's declared `supported.som_skus`
     (SkuNotSupportedError otherwise, naming the supported set); the
     rendered `board.yaml`'s `som.sku:` and top-level `preset:` lines are
     substituted for `sku`'s own default board (metadata/e1m_modules/
-    <sku>.yaml `default_board:`), a no-op (byte-identical passthrough)
-    when `sku` already matches the example's own default. This is the
-    SDK-owned single source of the scaffold's build-integration
-    conventions -- the surface tan-cli vendors at release instead of
-    hand-porting a per-SKU Rust generator.
+    <sku>.yaml `default_board:`). The app CORE is re-derived too: a
+    template's `cores:`/`--core` id is the CANONICAL example's own SoM
+    core (e.g. `m55_hp`, an Alif-only Zephyr cluster) -- wrong, and a
+    non-buildable scaffold, for any `sku` whose topology doesn't have
+    that core (every cross-SoM-family sku the catalog declares, e.g.
+    E1M-V2N101 for the AEN-canonical `minimal` template). `board.yaml`'s
+    `cores:` key and CMakeLists.txt's `--core` flag are re-derived from
+    `sku`'s own `metadata/e1m_modules/<sku>.yaml` `topology:` (see
+    `_derive_core_renames`) whenever the canonical core isn't already
+    valid for `sku`; a no-op (byte-identical) when it already is -- the
+    canonical example's own sku, or a same-family sibling. CMakeLists.txt
+    and README.md are ALSO scaffold-flavoured regardless of `sku` (see
+    `_scaffold_cmakelists` / `_scaffold_readme`): the in-tree
+    `ALP_SDK_ROOT` guess and the SDK-tree-relative links/paths those
+    files carry are wrong for a scaffold copied out of the SDK tree,
+    sku or no sku -- render()/validate() stay byte-for-byte faithful
+    (that's what validate()'s twister run proves builds); only
+    render_to_envelope() scaffold-adapts. `testcase.yaml` is not part
+    of the envelope (dropped from the catalog's `files.user_owned`: SDK
+    CI wiring, not a user's project file); validate() copies it
+    separately, straight from the catalog's `test.testcase_yaml`, for
+    its own internal twister self-test. This is the SDK-owned single
+    source of the scaffold's build-integration conventions -- the
+    surface tan-cli vendors at release instead of hand-porting a
+    per-SKU Rust generator.
 
   * validate(template_id) -- renders the template into a fresh
     tempfile.mkdtemp() directory and runs its native_sim scenario(s)
@@ -69,6 +90,7 @@ import argparse
 import dataclasses
 import json
 import os
+import posixpath
 import re
 import shutil
 import subprocess
@@ -359,6 +381,18 @@ def render(
 # --emit scaffold (issue #864): in-memory, SKU-parameterised capture
 # ---------------------------------------------------------------------
 
+def _load_som_doc(sku: str, metadata_root: Path) -> dict[str, Any]:
+    """Parse metadata/e1m_modules/<sku>.yaml -- shared by
+    `_default_preset_for_sku` (the `default_board:` field) and
+    `_derive_core_renames` (the `topology:` block), so both read the
+    exact same doc for the same `(sku, metadata_root)`."""
+    som_path = metadata_root / "e1m_modules" / f"{sku}.yaml"
+    if not som_path.is_file():
+        raise TemplateError(
+            f"no metadata/e1m_modules/{sku}.yaml for sku {sku!r}")
+    return yaml.safe_load(som_path.read_text(encoding="utf-8")) or {}
+
+
 def _default_preset_for_sku(sku: str, metadata_root: Path) -> str:
     """The board preset a fresh project targeting `sku` ships with by
     default -- metadata/e1m_modules/<sku>.yaml's `default_board:`,
@@ -368,16 +402,80 @@ def _default_preset_for_sku(sku: str, metadata_root: Path) -> str:
     customers at by hand ("copy this directory, change som.sku ...,
     edit the preset:") -- render_to_envelope just does that edit for
     them."""
-    som_path = metadata_root / "e1m_modules" / f"{sku}.yaml"
-    if not som_path.is_file():
-        raise TemplateError(
-            f"no metadata/e1m_modules/{sku}.yaml for sku {sku!r}")
-    doc = yaml.safe_load(som_path.read_text(encoding="utf-8")) or {}
-    board = doc.get("default_board")
+    board = _load_som_doc(sku, metadata_root).get("default_board")
     if not board:
         raise TemplateError(
             f"metadata/e1m_modules/{sku}.yaml has no default_board")
     return board.lower()
+
+
+def _core_ids_from_board_yaml(text: str) -> list[str]:
+    """The `cores:` mapping keys a rendered board.yaml declares -- a
+    real YAML parse (not a line regex), since core re-derivation needs
+    the exact declared set, not a single line's value."""
+    doc = yaml.safe_load(text) or {}
+    return list((doc.get("cores") or {}).keys())
+
+
+def _derive_core_renames(
+    original_core_ids: list[str], sku: str, metadata_root: Path,
+) -> dict[str, str] | None:
+    """Re-derive every STALE core id a catalog template's `cores:`
+    block declares, for `sku`'s OWN SoM topology (issue #864 follow-up:
+    the shallow "byte-copy the example + swap som.sku" `render_to_
+    envelope()` #864 shipped hard-coded the CANONICAL example's own
+    core id -- e.g. `m55_hp`, an Alif-only Zephyr cluster -- into every
+    substituted board.yaml/CMakeLists.txt, emitting a non-buildable
+    scaffold for any cross-SoM-family sku: `alp_project.py --emit
+    zephyr-conf --core m55_hp` against an E1M-V2N101 board.yaml fails
+    with rc=1, "unknown core id ... did you mean ['a55_cluster',
+    'm33_sm']").
+
+    EVERY key `cores:` declares must exist in the target sku's own
+    topology -- `alp_orchestrate.loader._validate_topology_cores` hard-
+    errors on an unmatched key unconditionally, whether or not that
+    core is `os: off` -- so a template that also declares the OTHER
+    cluster explicitly disabled (edge-ai's `cores.a32_cluster: {os:
+    off}`, alongside the active `m55_hp`) needs THAT id renamed too,
+    not just the one core the app actually runs on.
+
+    Returns `None` when every declared id already exists in `sku`'s
+    `metadata/e1m_modules/<sku>.yaml` `topology:` -- the canonical
+    example's own SoM, or a same-family sibling that shares its core
+    ids -- a byte-identical passthrough, nothing to rewrite. Otherwise
+    returns `{old_core_id: new_core_id, ...}` for every stale id: each
+    replacement is `sku`'s own topology core sharing the same leading
+    core-class letter (`m`/`a` -- the SDK-wide one-letter-prefix
+    convention `alp_project_emit.hw_info._pick_primary_core_os` also
+    keys off), additionally requiring a Zephyr `board:` target for an
+    `m`-class replacement (only that core is ever `--core`-buildable,
+    which is why CMakeLists.txt needs it too -- see
+    `_substitute_cmake_core`); an `a`-class utility core carries no
+    such requirement (it's only ever `os: off` in every template that
+    declares one today).
+    """
+    topology = _load_som_doc(sku, metadata_root).get("topology") or {}
+    stale = [cid for cid in original_core_ids if cid not in topology]
+    if not stale:
+        return None
+    claimed = set(original_core_ids) & set(topology)
+    renames: dict[str, str] = {}
+    for old in stale:
+        prefix = old[0]
+        require_board = prefix == "m"
+        candidates = sorted(
+            cid for cid, spec in topology.items()
+            if cid.startswith(prefix) and cid not in claimed
+            and cid not in renames.values()
+            and (spec.get("board") if require_board else True))
+        if not candidates:
+            raise TemplateError(
+                f"metadata/e1m_modules/{sku}.yaml topology has no "
+                f"{prefix!r}-class core"
+                + (" with a Zephyr `board:` target" if require_board else "")
+                + f" to replace {old!r}")
+        renames[old] = candidates[0]
+    return renames
 
 
 # Matches board.yaml's `som:\n  sku: E1M-...` line and the top-level
@@ -417,6 +515,140 @@ def _substitute_board_yaml_sku(text: str, sku: str, preset: str) -> str:
     return text
 
 
+_LIBRARY_CORE_SCOPE_RE = re.compile(r"(cores:\s*\[)([^\]]*)(\])")
+
+
+def _substitute_board_yaml_core(text: str, old: str, new: str) -> str:
+    """Rewrite the `cores:` mapping's single top-level `<old>:` key to
+    `<new>:`. The per-core content underneath (`app:`, `peripherals:`)
+    is core-id-agnostic -- metadata/schemas/board.schema.json's
+    `core_entry` says every field is optional and inherits the SoM
+    preset's `topology.<core_id>` default, so only the KEY changes.
+
+    Also renames `old` wherever a top-level `libraries:` entry scopes
+    itself to this core via a `cores: [<id>, ...]` flow list (e.g.
+    cold-chain-monitor's `libraries: [{name: tflite-micro, cores:
+    [m55_hp]}]`) -- `alp_orchestrate.loader._normalize_libraries` hard-
+    errors if that list still names a core id that no longer exists
+    once the `cores:` mapping key above is renamed ("libraries: entry
+    '<name>' is scoped to core '<old>', which is not declared under
+    `cores:`")."""
+    pattern = re.compile(rf"(?m)^(\s*){re.escape(old)}:([ \t]*)$")
+    new_text, n = pattern.subn(lambda m: f"{m.group(1)}{new}:{m.group(2)}", text)
+    if n != 1:
+        raise TemplateError(
+            f"board.yaml must have exactly one `cores.{old}:` line to "
+            f"re-derive to {new!r} (found {n})")
+
+    def _fix_scope_list(m: re.Match[str]) -> str:
+        inner = re.sub(rf"\b{re.escape(old)}\b", new, m.group(2))
+        return f"{m.group(1)}{inner}{m.group(3)}"
+
+    return _LIBRARY_CORE_SCOPE_RE.sub(_fix_scope_list, new_text)
+
+
+def _substitute_cmake_core(text: str, old: str, new: str) -> str:
+    """Rewrite CMakeLists.txt's `alp_project.py --emit zephyr-conf
+    --core <old>` invocation to the re-derived core id."""
+    pattern = re.compile(rf"(--core\s+){re.escape(old)}\b")
+    new_text, n = pattern.subn(lambda m: f"{m.group(1)}{new}", text)
+    if n != 1:
+        raise TemplateError(
+            f"CMakeLists.txt must have exactly one `--core {old}` to "
+            f"re-derive to {new!r} (found {n})")
+    return new_text
+
+
+# ---------------------------------------------------------------------
+# --emit scaffold content adaptation (issue #864 follow-up)
+# ---------------------------------------------------------------------
+#
+# Every catalog template's user_owned files are the SDK's own example,
+# verbatim -- correct for render()'s documented byte-for-byte contract
+# (validate()'s in-tree twister self-test relies on exactly that), but
+# wrong for a scaffold a customer unpacks OUTSIDE the SDK tree: a
+# `west build ... examples/<...>` argument naming a path that doesn't
+# exist in their project, `../`-relative links that only resolve
+# inside the SDK checkout, and a CMakeLists.txt that silently guesses
+# `../../..` for ALP_SDK_ROOT (correct only for the in-tree example,
+# never a copied-out scaffold -- the retired tan-cli generator hard-
+# failed on exactly this: "ALP_SDK_ROOT is not set"). These transforms
+# run ONLY in render_to_envelope() (the `--emit scaffold` path, for
+# EVERY sku including the canonical example's own) -- render()/
+# validate() stay byte-for-byte faithful to the real example, since
+# that's what validate()'s temp-dir twister run is proving builds.
+
+_ALP_SDK_ROOT_GUESS_RE = re.compile(
+    r"if\(DEFINED ENV\{ALP_SDK_ROOT\}\)\n"
+    r"    set\(ALP_SDK_ROOT \$ENV\{ALP_SDK_ROOT\}\)\n"
+    r"else\(\)\n"
+    r"    get_filename_component\(ALP_SDK_ROOT \$\{CMAKE_CURRENT_SOURCE_DIR\}(?:/\.\.)+ ABSOLUTE\)\n"
+    r"endif\(\)"
+)
+_HARDCODED_ALP_PROJECT_PY_RE = re.compile(
+    r"\$\{CMAKE_CURRENT_SOURCE_DIR\}(?:/\.\.)+/scripts/alp_project\.py"
+)
+_ALP_SDK_ROOT_REQUIRED_BLOCK = (
+    "if(NOT DEFINED ENV{ALP_SDK_ROOT})\n"
+    "    message(FATAL_ERROR\n"
+    "        \"ALP_SDK_ROOT is not set -- point it at your alp-sdk checkout, \"\n"
+    "        \"e.g. `export ALP_SDK_ROOT=/path/to/alp-sdk` (or "
+    "-DALP_SDK_ROOT=... on the cmake command line).\")\n"
+    "endif()\n"
+    "set(ALP_SDK_ROOT $ENV{ALP_SDK_ROOT})"
+)
+
+
+def _scaffold_cmakelists(text: str) -> str:
+    """Replace an in-tree-relative ALP_SDK_ROOT guess with a hard
+    requirement. Two shapes exist across the catalog's example
+    CMakeLists.txt files today: the `if(DEFINED ENV{...}) ... else()
+    get_filename_component(...)` guess (most examples), and
+    `cold-chain-monitor`'s hardcoded `${CMAKE_CURRENT_SOURCE_DIR}/../..
+    /../scripts/alp_project.py` call with no ALP_SDK_ROOT resolution at
+    all (worse: no override is even possible). Best-effort: a
+    CMakeLists.txt matching neither shape (e.g. multicore-rpmsg's
+    linux/CMakeLists.txt, which never invokes alp_project.py) is
+    returned unchanged."""
+    new_text, n = _ALP_SDK_ROOT_GUESS_RE.subn(_ALP_SDK_ROOT_REQUIRED_BLOCK, text)
+    if n:
+        return new_text
+    if _HARDCODED_ALP_PROJECT_PY_RE.search(text):
+        text = _HARDCODED_ALP_PROJECT_PY_RE.sub(
+            "${ALP_SDK_ROOT}/scripts/alp_project.py", text)
+        return text.replace(
+            "execute_process(\n",
+            _ALP_SDK_ROOT_REQUIRED_BLOCK + "\n\nexecute_process(\n", 1)
+    return text
+
+
+_RELATIVE_LINK_RE = re.compile(r"\]\((\.\./[^)\s]+)\)")
+
+
+def _scaffold_readme(text: str, example_path: str) -> str:
+    """Every vendored README's `../`-relative links (`../../../docs/
+    x.md`, a sibling example's `../i2c-scanner/`, ...) resolve against
+    the CANONICAL example's OWN position inside the alp-sdk tree --
+    dangling once copied out as a standalone scaffold. Rewrite each to
+    an absolute GitHub URL instead. Also rewrites the one non-existent-
+    once-copied-out token every Build section carries: a `west build
+    ...` invocation naming THIS template's own repo-relative example
+    path -- the scaffold IS the project root wherever the customer
+    unpacks it, so that argument becomes `.`. Best-effort (neither
+    pattern found -> text returned unchanged); per-template narrative
+    prose (e.g. `tan build alp-sdk/examples/...` invocations, cross-
+    references phrased as prose rather than a link) is intentionally
+    not scaffold-normalised by this pass."""
+    def _fix_link(m: re.Match[str]) -> str:
+        target = posixpath.normpath(f"{example_path}/{m.group(1)}")
+        kind = "blob" if "." in target.rsplit("/", 1)[-1] else "tree"
+        return f"](https://github.com/alplabai/alp-sdk/{kind}/main/{target})"
+
+    text = _RELATIVE_LINK_RE.sub(_fix_link, text)
+    text = re.sub(rf"(?<!\S){re.escape(example_path)}(?!\S)", ".", text)
+    return text
+
+
 def render_to_envelope(
     template_id: str,
     sku: str,
@@ -431,18 +663,29 @@ def render_to_envelope(
     order `plan()` computes -- the `{path, contents}[]` shape
     `scripts/alp_project.py --emit scaffold` JSON-encodes (issue #864),
     matching the shape `--emit build-plan`'s `configArtefacts` /
-    `sharedArtefacts` already use.
+    `sharedArtefacts` already use. `testcase.yaml` is never in this
+    envelope (dropped from the catalog's `files.user_owned`: SDK CI
+    wiring, not a user's project file).
 
     `sku` MUST be one of the record's declared `supported.som_skus` --
     SkuNotSupportedError (naming the supported set) otherwise, never a
     silent best-effort render. The rendered `board.yaml`'s `som.sku:`
     and top-level `preset:` are substituted for `sku`'s own default
-    board (metadata/e1m_modules/<sku>.yaml `default_board:`); when
-    `sku` already matches the example's own default this substitution
-    is a no-op, so the output is byte-identical to the example (a
-    passthrough). Every other user_owned file is an unmodified copy --
-    reuses `_rendered_bytes()`, so it can never disagree with render()
-    on a byte.
+    board (metadata/e1m_modules/<sku>.yaml `default_board:`). The app
+    CORE is re-derived too (`_derive_core_renames`): `board.yaml`'s
+    `cores:` key(s) and CMakeLists.txt's `--core` flag are rewritten
+    from the canonical example's own SoM core (e.g. `m55_hp`) to
+    `sku`'s own Zephyr-buildable core (e.g. `m33_sm` for E1M-V2N101)
+    whenever the canonical core isn't already valid for `sku` -- this
+    is the fix for issue #864's follow-up: the shallow `som.sku`-only
+    swap emitted a board.yaml `--emit zephyr-conf --core m55_hp` can't
+    build against for any cross-SoM-family sku. `board.yaml`/`prj.conf`
+    /`src/main.c` are a byte-identical passthrough when `sku` already
+    matches the example's own default (or shares its core ids);
+    CMakeLists.txt and README.md are ALSO scaffold-adapted regardless
+    of `sku` (`_scaffold_cmakelists` / `_scaffold_readme`) -- their
+    in-tree `ALP_SDK_ROOT` guess and SDK-tree-relative links/paths are
+    wrong for a copied-out scaffold no matter which sku was requested.
     """
     doc = load_catalog(catalog_path)
     record = find_template(doc, template_id)
@@ -455,7 +698,20 @@ def render_to_envelope(
     _, render_plan = plan(template_id, ".", params, catalog_path=catalog_path)
     resolved = _resolve_params(record, params)
     base = base_dir or REPO
-    preset = _default_preset_for_sku(sku, metadata_root or METADATA_ROOT)
+    metadata_root = metadata_root or METADATA_ROOT
+    preset = _default_preset_for_sku(sku, metadata_root)
+
+    board_yaml_path = base / record["example"] / "board.yaml"
+    original_core_ids = _core_ids_from_board_yaml(
+        board_yaml_path.read_text(encoding="utf-8"))
+    core_renames = _derive_core_renames(original_core_ids, sku, metadata_root)
+    # The one rename CMakeLists.txt's `--core` flag also needs (the
+    # m-class core the app actually builds on) -- None when nothing
+    # was renamed, or when the template has no m-class core at all
+    # (never happens for a real `runtimes: [zephyr]` catalog record).
+    app_core_sub = next(
+        ((old, new) for old, new in (core_renames or {}).items()
+         if old.startswith("m")), None)
 
     out: list[tuple[str, str]] = []
     for rel, data in _rendered_bytes(template_id, record, render_plan.files, resolved, base):
@@ -471,6 +727,14 @@ def render_to_envelope(
                 f"be JSON-encoded for --emit scaffold ({exc})") from exc
         if rel == "board.yaml":
             text = _substitute_board_yaml_sku(text, sku, preset)
+            for old, new in (core_renames or {}).items():
+                text = _substitute_board_yaml_core(text, old, new)
+        elif rel.endswith("CMakeLists.txt"):
+            if app_core_sub:
+                text = _substitute_cmake_core(text, *app_core_sub)
+            text = _scaffold_cmakelists(text)
+        elif rel == "README.md":
+            text = _scaffold_readme(text, record["example"])
         out.append((rel, text))
     return out
 
@@ -525,6 +789,24 @@ def validate(
     tmp = Path(tempfile.mkdtemp(prefix=f"alp-template-{template_id}-"))
     try:
         render(template_id, tmp, force=True, catalog_path=catalog_path)
+
+        # `testcase.yaml` isn't part of `files.user_owned` (issue #864
+        # follow-up -- a customer's scaffold doesn't ship the SDK's own
+        # twister case), so render() above doesn't copy it; this gate's
+        # "run the real native_sim scenario" self-test still needs one
+        # for twister to discover a testsuite. Copy it here directly
+        # from the catalog's `test.testcase_yaml` list instead -- purely
+        # internal to validate(), never part of what a customer's
+        # scaffold receives.
+        doc = load_catalog(catalog_path)
+        record = find_template(doc, template_id)
+        example_prefix = record["example"] + "/"
+        for tc in record["test"]["testcase_yaml"]:
+            rel = (tc[len(example_prefix):] if tc.startswith(example_prefix)
+                    else Path(tc).name)
+            dst = tmp / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.write_bytes((REPO / tc).read_bytes())
 
         outdir = tmp / "twister-out"
         env = os.environ.copy()

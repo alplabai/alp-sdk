@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -284,14 +286,23 @@ def test_no_shipped_template_declares_a_substitution_target():
 # --------------------------------------------------------------------------
 
 def test_render_to_envelope_is_passthrough_for_the_examples_own_sku():
-    """E1M-AEN801 is hello-world's own board.yaml `som.sku:` -- rendering
-    for that SKU must be byte-identical to the example, same as
-    render()."""
+    """E1M-AEN801 is hello-world's own board.yaml `som.sku:` -- board.yaml/
+    prj.conf/src/main.c stay byte-identical to the example (the app core
+    is unchanged too: `_derive_core_renames` is a no-op for the canonical
+    sku). CMakeLists.txt/README.md are scaffold-adapted regardless of sku
+    (issue #864 follow-up -- see test_render_to_envelope_scaffold_adapts_
+    cmakelists_and_readme below); `testcase.yaml` is never in the
+    envelope at all (dropped from `files.user_owned`: SDK CI wiring, not
+    a user's project file)."""
     envelope = alp_template.render_to_envelope("minimal", "E1M-AEN801")
     record = _minimal_record()
+    by_path = dict(envelope)
     assert [p for p, _ in envelope] == sorted(record["files"]["user_owned"])
-    for rel, contents in envelope:
-        assert contents == (HELLO_WORLD / rel).read_text(encoding="utf-8"), rel
+    assert "testcase.yaml" not in by_path
+    for rel in ("board.yaml", "prj.conf", "src/main.c"):
+        assert by_path[rel] == (HELLO_WORLD / rel).read_text(encoding="utf-8"), rel
+    assert "--core m55_hp" in by_path["CMakeLists.txt"]
+    assert "ALP_SDK_ROOT is not set" in by_path["CMakeLists.txt"]
 
 
 def test_render_to_envelope_substitutes_sku_and_preset():
@@ -302,9 +313,18 @@ def test_render_to_envelope_substitutes_sku_and_preset():
     assert "sku: E1M-V2N101" in board_yaml
     assert "sku: E1M-AEN801" not in board_yaml
     assert "preset: e1m-x-evk" in board_yaml
+    # The AEN-only app core (m55_hp, an Alif-only Zephyr cluster) is
+    # re-derived to E1M-V2N101's own Zephyr core -- issue #864 follow-up
+    # blocker: the pre-fix scaffold baked `cores: m55_hp:` in unchanged,
+    # which `alp_project.py --emit zephyr-conf --core m55_hp` rejects
+    # against a V2N101 board.yaml ("unknown core id").
+    assert "m33_sm:" in board_yaml
+    assert "m55_hp" not in board_yaml
+    assert "--core m33_sm" in by_path["CMakeLists.txt"]
+    assert "--core m55_hp" not in by_path["CMakeLists.txt"]
 
-    # Every other user_owned file is an unmodified copy.
-    for rel in ("prj.conf", "CMakeLists.txt", "src/main.c", "testcase.yaml"):
+    # prj.conf / src/main.c carry no sku-specific content -- unmodified.
+    for rel in ("prj.conf", "src/main.c"):
         assert by_path[rel] == (HELLO_WORLD / rel).read_text(encoding="utf-8"), rel
 
 
@@ -332,6 +352,53 @@ def test_render_to_envelope_preserves_trailing_comment_when_value_unchanged():
     example = REPO / "examples" / "peripheral-io" / "gpio-button-led"
     envelope = dict(alp_template.render_to_envelope("peripheral", "E1M-AEN801"))
     assert envelope["board.yaml"] == (example / "board.yaml").read_text(encoding="utf-8")
+
+
+# --------------------------------------------------------------------------
+# Content adaptation: CMakeLists.txt / README.md (issue #864 follow-up --
+# scaffold-flavours these regardless of `sku`, since the SDK-tree-relative
+# `ALP_SDK_ROOT` guess and `../`-relative links/self-paths are wrong for a
+# scaffold copied out of the SDK tree no matter which sku was requested).
+# --------------------------------------------------------------------------
+
+def test_scaffold_cmakelists_requires_alp_sdk_root_explicitly():
+    envelope = dict(alp_template.render_to_envelope("minimal", "E1M-AEN801"))
+    cmakelists = envelope["CMakeLists.txt"]
+    assert "if(DEFINED ENV{ALP_SDK_ROOT})" not in cmakelists
+    assert "if(NOT DEFINED ENV{ALP_SDK_ROOT})" in cmakelists
+    assert "FATAL_ERROR" in cmakelists
+    assert "get_filename_component(ALP_SDK_ROOT" not in cmakelists
+
+
+def test_scaffold_cmakelists_hardens_the_hardcoded_variant_too():
+    """cold-chain-monitor's CMakeLists.txt has NO ALP_SDK_ROOT env-var
+    fallback at all -- a hardcoded `${CMAKE_CURRENT_SOURCE_DIR}/../../../
+    scripts/alp_project.py` -- worse than the guess-block variant since
+    there's no override at all. `_scaffold_cmakelists` must harden this
+    shape too."""
+    envelope = dict(alp_template.render_to_envelope("edge-ai", "E1M-AEN801"))
+    cmakelists = envelope["CMakeLists.txt"]
+    assert "${CMAKE_CURRENT_SOURCE_DIR}/../../../scripts/alp_project.py" not in cmakelists
+    assert "${ALP_SDK_ROOT}/scripts/alp_project.py" in cmakelists
+    assert "if(NOT DEFINED ENV{ALP_SDK_ROOT})" in cmakelists
+
+
+def test_scaffold_readme_has_no_dangling_sdk_tree_links_or_self_path():
+    envelope = dict(alp_template.render_to_envelope("minimal", "E1M-AEN801"))
+    readme = envelope["README.md"]
+    assert "examples/peripheral-io/hello-world" not in readme
+    assert "../../../docs/" not in readme
+    assert "https://github.com/alplabai/alp-sdk/blob/main/docs/" in readme
+
+
+def test_scaffold_readme_rewrites_sibling_example_links_too():
+    """i2c-master's README links a SIBLING example (`../i2c-scanner/`),
+    equally dangling once copied out as a standalone scaffold -- not just
+    the `../../../docs/...` case."""
+    envelope = dict(alp_template.render_to_envelope("sensor", "E1M-AEN801"))
+    readme = envelope["README.md"]
+    assert "../i2c-scanner/" not in readme
+    assert "https://github.com/alplabai/alp-sdk/tree/main/examples/peripheral-io/i2c-scanner" in readme
 
 
 def test_substitute_board_yaml_sku_rejects_ambiguous_sku_line():
@@ -364,12 +431,36 @@ def _every_template_sku_pair() -> list[tuple[str, str]]:
     ]
 
 
+# Combos whose canonical example's board.yaml top-level `pins:` block
+# hardcodes an E1M-EVK-only pad NAME AND NUMBER -- not a mechanical
+# `_X`-insertion, e.g. the encoder push switch is E1M_GPIO_IO4 on
+# E1M-EVK vs E1M_X_GPIO_IO28 on E1M-X-EVK (metadata/boards/e1m-evk.yaml
+# vs e1m-x-evk.yaml `e1m_routes:`, keyed only by the shared
+# `board_alias:`, e.g. BOARD_PIN_ENCODER_SW) -- a separate, PRE-EXISTING
+# example-portability gap this issue's scaffold-adaptation (core /
+# CMakeLists.txt / README.md / testcase.yaml) doesn't touch: these
+# templates' `pins:` blocks were only ever validated cross-family via a
+# native_sim COMPILER DEFINE (testcase.yaml's `-DALP_BOARD_E1M_X_EVK`),
+# never by literally swapping som.sku the way `--emit scaffold --sku`
+# does. Verified via `alp_project.py --emit zephyr-conf --core <id>`;
+# left as a follow-up (would need a `pins:` board_alias cross-reference
+# analogous to `_derive_core_renames`, out of scope for #864's core
+# blocker). Mirrors check_template_catalog.py's own KNOWN_GAP_EXAMPLES
+# allowlist pattern for a tracked, non-hidden content gap.
+_KNOWN_PINS_PORTABILITY_GAP = {
+    ("peripheral", "E1M-V2N101"),
+    ("sensor", "E1M-V2N101"),
+    ("edge-ai", "E1M-V2N101"),
+}
+
+
 @pytest.mark.parametrize("template_id,sku", _every_template_sku_pair())
-def test_render_to_envelope_every_template_sku_combo(template_id, sku):
+def test_render_to_envelope_every_template_sku_combo(template_id, sku, tmp_path):
     record = alp_template.find_template(_catalog(), template_id)
     example = REPO / record["example"]
-    example_sku = yaml.safe_load(
-        (example / "board.yaml").read_text(encoding="utf-8"))["som"]["sku"]
+    example_board_yaml = (example / "board.yaml").read_text(encoding="utf-8")
+    example_doc = yaml.safe_load(example_board_yaml)
+    example_sku = example_doc["som"]["sku"]
 
     board_yaml = dict(alp_template.render_to_envelope(template_id, sku))["board.yaml"]
     parsed = yaml.safe_load(board_yaml)
@@ -382,6 +473,32 @@ def test_render_to_envelope_every_template_sku_combo(template_id, sku):
 
     if example_sku != sku:
         assert example_sku not in board_yaml
+
+    # Every core id `cores:` declares must be valid for `sku`'s own SoM
+    # topology -- the #864 follow-up blocker regression test: VERIFIED
+    # bug was `alp_project.py --input <board.yaml> --emit zephyr-conf
+    # --core m55_hp` against an E1M-V2N101 board.yaml => rc=1, "unknown
+    # core id ... did you mean ['a55_cluster', 'm33_sm']".
+    topology = som_doc.get("topology") or {}
+    declared_cores = list(parsed["cores"].keys())
+    assert set(declared_cores) <= set(topology), (template_id, sku)
+
+    board_yaml_path = tmp_path / "board.yaml"
+    board_yaml_path.write_text(board_yaml, encoding="utf-8")
+    for core_id in declared_cores:
+        if not core_id.startswith("m"):
+            continue  # a-class clusters are Yocto/`os: off`, not `--core`-buildable
+        proc = subprocess.run(
+            [sys.executable, str(REPO / "scripts" / "alp_project.py"),
+             "--input", str(board_yaml_path),
+             "--emit", "zephyr-conf", "--core", core_id],
+            capture_output=True, text=True, cwd=REPO, check=False)
+        if (template_id, sku) in _KNOWN_PINS_PORTABILITY_GAP:
+            assert proc.returncode != 0
+            assert "e1m_routes" in proc.stderr, (template_id, sku, proc.stderr)
+            continue
+        assert proc.returncode == 0, (template_id, sku, core_id, proc.stderr)
+        assert "unknown core id" not in proc.stderr
 
 
 def test_render_to_envelope_rejects_unsupported_sku():
@@ -396,12 +513,20 @@ def test_render_to_envelope_unknown_template_raises():
 
 def test_render_to_envelope_matches_render_for_the_default_sku(tmp_path):
     """render_to_envelope() and render() share `_rendered_bytes()` --
-    for the example's own SKU they must produce identical bytes."""
+    for the example's own SKU, the files with no scaffold-specific
+    content adaptation (board.yaml/prj.conf/src/main.c) must be
+    identical bytes; render() stays byte-for-byte faithful to the real
+    example (that's what validate()'s twister run proves builds), while
+    CMakeLists.txt/README.md diverge -- render_to_envelope() scaffold-
+    adapts those regardless of sku (see the content-adaptation tests
+    above), and testcase.yaml isn't part of the envelope at all."""
     dest = tmp_path / "out"
     alp_template.render("minimal", dest)
     envelope = dict(alp_template.render_to_envelope("minimal", "E1M-AEN801"))
-    for rel in envelope:
+    assert "testcase.yaml" not in envelope
+    for rel in ("board.yaml", "prj.conf", "src/main.c"):
         assert (dest / rel).read_text(encoding="utf-8") == envelope[rel], rel
+    assert (dest / "CMakeLists.txt").read_text(encoding="utf-8") != envelope["CMakeLists.txt"]
 
 
 # --------------------------------------------------------------------------

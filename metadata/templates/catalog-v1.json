@@ -34,8 +34,7 @@
           "prj.conf",
           "CMakeLists.txt",
           "src/main.c",
-          "README.md",
-          "testcase.yaml"
+          "README.md"
         ],
         "generated": [
           {
@@ -102,8 +101,7 @@
           "prj.conf",
           "CMakeLists.txt",
           "src/main.c",
-          "README.md",
-          "testcase.yaml"
+          "README.md"
         ],
         "generated": [
           {
@@ -180,8 +178,7 @@
           "prj.conf",
           "CMakeLists.txt",
           "src/main.c",
-          "README.md",
-          "testcase.yaml"
+          "README.md"
         ],
         "generated": [
           {
@@ -253,8 +250,7 @@
           "m55_hp/CMakeLists.txt",
           "m55_hp/src/main.c",
           "linux/CMakeLists.txt",
-          "README.md",
-          "m55_hp/testcase.yaml"
+          "README.md"
         ],
         "generated": [
           {
@@ -316,8 +312,7 @@
           "prj.conf",
           "CMakeLists.txt",
           "src/main.c",
-          "README.md",
-          "testcase.yaml"
+          "README.md"
         ],
         "generated": [
           {
@@ -387,8 +382,7 @@
           "src/main.c",
           "src/cold_chain.c",
           "src/cold_chain.h",
-          "README.md",
-          "testcase.yaml"
+          "README.md"
         ],
         "generated": [
           {
