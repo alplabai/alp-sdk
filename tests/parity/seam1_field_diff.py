@@ -5,10 +5,26 @@
 ADR-0020 (alp-sdk#855 amendment) requires a two-seam parity gate before the
 `tan`-is-sole-executor migration can release. This is seam 1: **plan-shape**
 parity -- does a live `--emit build-plan` from the alp-sdk checkout under test
-still match the frozen oracle, field for field? Seam 2 (materialise byte-check
-+ a real build + a Renode smoke test) is a documented follow-up that needs a
-Linux toolchain runner -- see `tests/parity/README.md` and the `seam2`
-placeholder job in `.github/workflows/parity.yml`.
+still match the frozen oracle's command / env / appDir / skip-fail-decision
+shape, field for field? Seam 2 (materialise byte-check + a real build + a
+Renode smoke test) is a documented follow-up that needs a Linux toolchain
+runner -- see `tests/parity/README.md` and the `seam2` placeholder job in
+`.github/workflows/parity.yml`.
+
+Seam-1 deliberately does NOT compare the materialised config-artefact
+CONTENT (`slices[*].configArtefacts[*].contents` / `sharedArtefacts[*].
+contents` -- the rendered alp.conf/local.conf/cmake-args.txt/DTS-overlay/
+sysbuild-conf bytes each slice carries): that content is covered
+byte-for-byte by `tests/fixtures/emit-snapshots/*.{build-plan,zephyr-conf}.
+snap` (every oracle board has a corresponding emit-snapshot case -- see
+`tests/parity/README.md`'s coverage table) and, eventually, by seam-2's real
+build. Diffing content here as well as there turned every intentional
+emitter content change (a Kconfig-gating fix, a new peripheral default) into
+a seam-1 failure requiring a bespoke strip in `normalize_plan` -- a
+per-change treadmill that eroded the gate's actual job instead of doing it
+(#874 follow-up). `_drop_artefact_contents` removes the content, keeping
+each artefact's `path` in the shape check: an artefact appearing/vanishing/
+moving is still a real seam-1 failure.
 
 The oracle (`tests/parity/oracle/*.build-plan.json`) was captured at alp-sdk
 `df312cec^` == `97ad481b` ("feat(build-plan): publish envAppendPath +
@@ -146,60 +162,56 @@ def _project_relpath(plan: dict) -> str:
     return os.path.dirname(plan.get("boardYaml") or "")
 
 
-# The #863/#871 planner change adds two fields to a live plan that the frozen
-# 97ad481b oracle predates -- both are the intended, hand-reviewed ADR-0020
-# delta (see the ADR-0020 amendment), analogous to the debug.probe
-# openocd->null allowance. Strip them from the live plan before diffing so the
-# oracle BYTES stay frozen (the frame is never re-captured) while every OTHER
-# field still gets a byte-exact parity check:
-#   1. a `-DEXTRA_CONF_FILE=<per-core alp.conf>` arg on each NON-sysbuild
-#      Zephyr slice's command (the per-core config wiring, #863). Sysbuild
-#      slices deliberately do NOT carry it (Option A, #871: a bare
-#      -DEXTRA_CONF_FILE lands on the sysbuild image not the app), so there is
-#      nothing to strip on those.
-#   2. the `# lib.loader` per-library HW-accelerator Kconfig block folded into
-#      each Zephyr slice's configArtefacts alp.conf.
+# The #863/#871 planner change adds a `-DEXTRA_CONF_FILE=<per-core alp.conf>`
+# arg to each NON-sysbuild Zephyr slice's command that the frozen 97ad481b
+# oracle predates -- the intended, hand-reviewed ADR-0020 delta (see the
+# ADR-0020 amendment), analogous to the debug.probe openocd->null allowance.
+# This is a COMMAND-SHAPE delta (an arg present/absent), not a content delta,
+# so it stays even after content dropped out of scope below. Sysbuild slices
+# deliberately do NOT carry it (Option A, #871: a bare -DEXTRA_CONF_FILE lands
+# on the sysbuild image not the app), so there is nothing to strip on those.
 # KEEP IN LOCKSTEP with tan-cli's vendored copy of this comparator.
-def _strip_lib_loader_block(contents):
-    """Drop the `# ...lib.loader...` block (marker line through its trailing
-    blank line) from an alp.conf `contents` string."""
-    out, skipping = [], False
-    for line in contents.split("\n"):
-        if line.lstrip().startswith("#") and "lib.loader" in line:
-            skipping = True
-            continue
-        if skipping:
-            if line.strip() == "":
-                skipping = False
-            continue
-        out.append(line)
-    return "\n".join(out)
-
-
-def _strip_863_additions(plan):
-    """Remove the intended #863/#871 additions from a (normalized) plan dict."""
+def _strip_863_extra_conf_file_arg(plan):
+    """Remove the intended #863/#871 `-DEXTRA_CONF_FILE=` command arg from a
+    (normalized) plan dict."""
     for slice_ in plan.get("slices", []) or []:
         cmd = slice_.get("command")
         if isinstance(cmd, dict) and isinstance(cmd.get("args"), list):
             cmd["args"] = [a for a in cmd["args"]
                            if not (isinstance(a, str)
                                    and a.startswith("-DEXTRA_CONF_FILE="))]
+    return plan
+
+
+def _drop_artefact_contents(plan):
+    """Drop the materialised CONTENT of every artefact, keeping only its
+    `path` in the shape check.
+
+    Config-artefact content (`slices[*].configArtefacts[*].contents`) and
+    shared-artefact content (`sharedArtefacts[*].contents`) are covered
+    byte-for-byte by the emit-snapshot goldens instead (see this module's
+    docstring) -- seam-1 only needs to know an artefact still exists at the
+    same path, not what it says.
+    """
+    for slice_ in plan.get("slices", []) or []:
         for art in slice_.get("configArtefacts", []) or []:
-            c = art.get("contents")
-            if isinstance(c, str):
-                art["contents"] = _strip_lib_loader_block(c)
+            art.pop("contents", None)
+    for art in plan.get("sharedArtefacts", []) or []:
+        art.pop("contents", None)
     return plan
 
 
 def normalize_plan(plan: dict) -> dict:
-    """Return a checkout/host-independent copy of a build-plan dict.
+    """Return a checkout/host-independent, content-free copy of a build-plan
+    dict, ready for the seam-1 SHAPE diff.
 
     Replaces the embedded checkout-root absolute path with ``__SDKROOT__``,
     ``sdkCommit`` with ``__SHA__``, and any ``-DPython3_EXECUTABLE=<path>``
     command arg's path with ``<PYEXE>`` -- the three fields that legitimately
     differ between the oracle's capture checkout/host and whatever
     checkout/host the live SDK is emitted from, without being a real parity
-    break.
+    break. Also drops every artefact's materialised content
+    (``_drop_artefact_contents``) -- that's the emit-snapshot goldens' job.
 
     Issue #865 flipped a LIVE plan's emit to carry literal
     ``${SDK_ROOT}``/``${PROJECT_ROOT}``/``${PYTHON}`` tokens instead of this
@@ -233,10 +245,11 @@ def normalize_plan(plan: dict) -> dict:
         normalized = _normalize_strings(plan, sdk_root)
     if "sdkCommit" in normalized:
         normalized["sdkCommit"] = _SHA_TOKEN
-    normalized = _strip_863_additions(normalized)
+    normalized = _strip_863_extra_conf_file_arg(normalized)
+    normalized = _drop_artefact_contents(normalized)
     # `planPathMode` is itself a #865 addition the oracle predates (like
-    # the #863/#871 fields above) -- drop it rather than diff it; the
-    # token-vs-absolute SHAPE it flags is already reconciled above.
+    # the #863/#871 command-arg addition above) -- drop it rather than diff
+    # it; the token-vs-absolute SHAPE it flags is already reconciled above.
     normalized.pop("planPathMode", None)
     return normalized
 

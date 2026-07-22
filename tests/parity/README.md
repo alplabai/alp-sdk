@@ -13,7 +13,7 @@ every planner change.
 
 | Seam | Checks | Status |
 |---|---|---|
-| **1 — plan shape** | Does a live `--emit build-plan` still match a frozen, hand-verified oracle, field for field, over the SoM matrix — command + env + skip/fail-decision equivalence? Toolchain-free; runs on any `ubuntu-latest` runner. | **Implemented here**: `seam1_field_diff.py` + `.github/workflows/parity.yml`'s `seam1-plan-shape` job. |
+| **1 — plan shape** | Does a live `--emit build-plan` still match a frozen, hand-verified oracle's command / env / appDir / skip-fail-decision *shape*, field for field, over the SoM matrix? Deliberately does NOT re-diff the materialised config-artefact content (alp.conf/local.conf/cmake-args.txt/sysbuild-conf bytes) — see "Seam-1 scope" below. Toolchain-free; runs on any `ubuntu-latest` runner. | **Implemented here**: `seam1_field_diff.py` + `.github/workflows/parity.yml`'s `seam1-plan-shape` job. |
 | **2 — real build** | Materialise byte-check, an actual `west`/Zephyr build off the plan, and a Renode smoke test — the thing seam 1 can't catch (a plan that *looks* right but doesn't build). | **Follow-up, not seeded here.** Needs a Linux runner with the Zephyr SDK / toolchain installed (`west`, the AEN/E1M-X Zephyr modules, Renode). Placeholder `seam2` job in `.github/workflows/parity.yml` documents this — it does not run a fake check and does not report success for work it didn't do. |
 
 Yocto/A-core artefact parity is explicitly **out of scope** for both seams —
@@ -43,6 +43,52 @@ frame in which "does the live emit still match what the last real in-repo
 oracle produced" is even an answerable question — freezing it now is
 reconstructing that oracle retroactively, per the Amendment's remediation
 step, not a routine fixture update.
+
+## Seam-1 scope: shape only, not config-artefact content (2026-07-22 retune)
+
+Through #874, seam-1 also byte-diffed each slice's materialised
+config-artefact `contents` (the rendered `alp.conf`/`local.conf`/
+`cmake-args.txt`) and `sharedArtefacts[*].contents` (DTS overlays,
+`system_ipc.h`, sysbuild/TF-M conf) against the frozen oracle. That turned
+*every* intentional emitter content change (a Kconfig dependency-gating fix,
+a new peripheral default) into a seam-1 failure that could only be
+"resolved" by adding another hand-reviewed strip to `normalize_plan`
+(`_strip_863_additions`'s `_strip_lib_loader_block` half) — a per-change
+treadmill that eroded the gate instead of doing its stated job (plan
+*shape* parity). #874's follow-up retuned the comparator: `normalize_plan`
+now drops every artefact's `contents` (`_drop_artefact_contents`), keeping
+only its `path` in the shape check. Command, env, appDir, skip/fail
+decision, and `debug.probe` are unaffected — see the sections below.
+
+**Content coverage does not go away — it moves.** Every artefact's rendered
+bytes are covered byte-for-byte by `tests/fixtures/emit-snapshots/*.
+{build-plan,zephyr-conf}.snap` (`scripts/check_emit_snapshots.py`) instead,
+and eventually by seam-2's real build. The table below maps every oracle
+fixture to the emit-snapshot case that covers its config-artefact content —
+confirmed complete as of the retune (two boards, `audio_i2s-tone` and
+`connectivity_iot-fleet-ota`, had no prior emit-snapshot case; both were
+added as `audio-i2s-tone.build-plan` / `iot-fleet-ota.build-plan` in
+`scripts/check_emit_snapshots.py` rather than leave the retune opening an
+uncovered content-check hole):
+
+| Oracle fixture (`tests/parity/oracle/*.build-plan.json`) | `boardYaml` | Emit-snapshot golden (`tests/fixtures/emit-snapshots/`) |
+|---|---|---|
+| `audio_i2s-tone` | `examples/audio/i2s-tone/board.yaml` | `audio-i2s-tone.build-plan.snap` |
+| `connectivity_iot-fleet-ota` | `examples/connectivity/iot-fleet-ota/board.yaml` | `iot-fleet-ota.build-plan.snap` (also covers its sysbuild/TF-M `sharedArtefacts`) |
+| `multicore_heterogeneous-offload` | `examples/multicore/heterogeneous-offload/board.yaml` | `hetero-offload.build-plan.snap` |
+| `multicore_rpmsg-aen` | `examples/multicore/rpmsg-aen/board.yaml` | `rpmsg-aen.build-plan.snap` |
+| `multicore_rpmsg-imx93` | `examples/multicore/rpmsg-imx93/board.yaml` | `rpmsg-imx93.build-plan.snap` |
+| `multicore_rpmsg-v2n` | `examples/multicore/rpmsg-v2n/board.yaml` | `rpmsg-v2n.build-plan.snap` |
+
+A future oracle fixture MUST get a matching emit-snapshot `build-plan` case
+in the same change, or this coverage table (and the content-check it
+promises) silently rots.
+
+> **Contract note:** this retune narrows seam-1's ADR-0020 scope (it no
+> longer asserts config-artefact content parity at all — that assertion
+> moved to the emit-snapshot goldens). Like the #863/#865 additive deltas
+> above, this needs Hakan's ratification on review before it's load-bearing
+> for a release gate the same way ADR-0020's Amendment is.
 
 ## Why the comparator normalizes three fields
 
@@ -104,10 +150,13 @@ not-claiming, not a hidden capability loss. ADR-0020's Amendment states this
 explicitly: "the only `97ad481b`<->`df312cec` emit delta is `debug.probe`
 `"openocd"->null`, hand-reviewed."
 
-Any other diff anywhere in the plan — a changed command, a changed `env`
+Any other diff in the plan's SHAPE — a changed command, a changed `env`
 value, a changed slice count, a `probe` change to anything other than that
-exact transition — **fails** the gate. See `seam1_field_diff.py`'s module
-docstring for the exact allowed-delta rule the comparator implements.
+exact transition — **fails** the gate. Config-artefact `contents` is dropped
+before the diff runs at all (see "Seam-1 scope" above), so a content-only
+change never reaches this allow-list in the first place. See
+`seam1_field_diff.py`'s module docstring for the exact rule the comparator
+implements.
 
 ## Running it locally
 
