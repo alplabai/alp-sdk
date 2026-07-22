@@ -275,12 +275,12 @@ ZTEST(alp_chips, test_gdew0154t8_init_null_args)
 /* ==================================================================== */
 /* Register-protocol tests (fake i2c-emul target)                        */
 /* ==================================================================== */
-/* TEMPORARILY GATED — the fake EMUL_DT_INST_DEFINE pattern needs a     */
-/* paired DEVICE_DT_INST_DEFINE for Zephyr 3.7's native_sim x86 link    */
-/* to resolve `__device_dts_ord_<N>` references the parent i2c-emul     */
-/* controller's emuls_<N> array generates.  Tracked as a v0.2 follow-   */
-/* up; gated on DT_NODE_EXISTS so the tests are no-ops while the        */
-/* overlay's fake_* nodes are commented out.                             */
+/* Compiled out by maintainer decision (commit 4b0b33d5): chip          */
+/* register-protocol validation happens on real silicon via             */
+/* examples/v2n/v2n-brd-i2c-bringup, not against these i2c-emul doubles  */
+/* (see CHANGELOG.md, "Removed -- chips: fake-based register tests").    */
+/* Gated on DT_NODE_EXISTS(DT_NODELABEL(fake_*)) so they compile to      */
+/* no-ops while the overlay's fake_* nodes stay commented out.          */
 /* ==================================================================== */
 
 #if DT_NODE_EXISTS(DT_NODELABEL(fake_lsm6dso))

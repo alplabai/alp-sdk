@@ -5,8 +5,9 @@
 # Fresh-clone bootstrap for the Alp SDK on NATIVE Windows (PowerShell 7+).
 # Mirrors scripts/bootstrap.sh: a Zephyr workspace beside the alp-sdk
 # checkout, a workspace-local venv (west + Python deps), and an editable
-# install of the `alp` CLI -- see docs/cross-platform-setup.md section 4
-# for the manual walkthrough this script automates.
+# install of the `tan` CLI's Python backend (`alp_cli`) -- see
+# docs/cross-platform-setup.md section 4 for the manual walkthrough
+# this script automates.
 #
 # Honest scope -- what this script does NOT do:
 #
@@ -52,8 +53,9 @@ $ParentDir = (Resolve-Path (Join-Path $RepoRoot "..")).Path
 
 # The west workspace topdir is the alp-sdk checkout's PARENT: we init the
 # workspace from alp-sdk's OWN west.yml (`west init -l $RepoRoot`), so alp-sdk
-# becomes the manifest repo and west discovers the alp-build / alp-flash / ...
-# extension commands from its `self.west-commands` (issue #769). `west init -l
+# becomes the manifest repo and west discovers the alp-migrate / alp-lock /
+# alp-quality / alp-emit extension commands from its `self.west-commands`
+# (issue #769). `west init -l
 # <repo>` always makes topdir = the repo's parent, and leaves alp-sdk itself in
 # place; Zephyr + modules land as siblings of alp-sdk under the topdir.
 $WorkspaceDir = $ParentDir
@@ -124,7 +126,7 @@ Write-Info "Python:          $PyVer"
 # Mirrors bootstrap.sh. If $env:ZEPHYR_BASE points at a Zephyr tree whose
 # MAJOR.MINOR matches our pin AND whose workspace manifest IS alp-sdk's, reuse
 # it untouched. A workspace whose manifest is something else does NOT register
-# the alp-* extension commands, so reusing it would leave `west alp-build`
+# the alp-* extension commands, so reusing it would leave `west alp-migrate`
 # unknown (#769) -- ignore it and build our own instead.
 $ReuseWs = $false
 $PinMM = ($ZephyrVersion -replace '^v?(\d+\.\d+).*', '$1')
@@ -152,7 +154,7 @@ if ($env:ZEPHYR_BASE -and (Test-Path (Join-Path $env:ZEPHYR_BASE "VERSION"))) {
         Write-Ok "Reusing compatible alp-sdk workspace from `$env:ZEPHYR_BASE: $WorkspaceDir (Zephyr $ExistMM.x)"
     } elseif ($ExistTop -and (Test-Path (Join-Path $ExistTop ".west")) -and $ExistMM -eq $PinMM) {
         Write-Warn2 "`$env:ZEPHYR_BASE workspace ($ExistTop) is a $PinMM.x tree but its manifest is not alp-sdk's west.yml"
-        Write-Warn2 "-- not reusing it (would leave 'west alp-build' unknown, #769); building an alp-sdk workspace at $WorkspaceDir"
+        Write-Warn2 "-- not reusing it (would leave 'west alp-migrate' unknown, #769); building an alp-sdk workspace at $WorkspaceDir"
         $env:ZEPHYR_BASE = $null
     } else {
         Write-Warn2 "`$env:ZEPHYR_BASE ($env:ZEPHYR_BASE) is not a $PinMM.x west workspace -- ignoring it"
@@ -162,8 +164,8 @@ if ($env:ZEPHYR_BASE -and (Test-Path (Join-Path $env:ZEPHYR_BASE "VERSION"))) {
 
 # -------- workspace venv (hermetic west + Python deps) ------------------------
 
-# Everything -- west, the Zephyr requirements, the SDK extras, the alp CLI --
-# installs into a workspace-local venv, never the system interpreter (same
+# Everything -- west, the Zephyr requirements, the SDK extras, tan's Python
+# backend -- installs into a workspace-local venv, never the system interpreter (same
 # policy as bootstrap.sh; a global west couples the build to the host
 # interpreter's state).  Idempotent: an existing venv is reused.
 $VenvDir = Join-Path $WorkspaceDir ".venv"
@@ -226,7 +228,7 @@ if (-not $NoWest) {
     }
 
     # Legibility guard (#769): fail at bootstrap time -- not at first
-    # `alp build` -- if the workspace manifest doesn't register the alp-*
+    # `tan build` -- if the workspace manifest doesn't register the alp-*
     # extension commands.
     if (-not $ReuseWs) {
         Push-Location $WorkspaceDir
@@ -235,11 +237,11 @@ if (-not $NoWest) {
         } finally {
             Pop-Location
         }
-        if ($WestHelp -notmatch 'alp-build') {
-            Fail ("workspace at $WorkspaceDir does not register 'west alp-build' -- its manifest is not " +
+        if ($WestHelp -notmatch 'alp-migrate') {
+            Fail ("workspace at $WorkspaceDir does not register 'west alp-migrate' -- its manifest is not " +
                   "alp-sdk's west.yml (#769). Check 'west -C $WorkspaceDir config manifest.path'.")
         }
-        Write-Ok "alp-* extension commands registered ('west alp-build' resolves in $WorkspaceDir)"
+        Write-Ok "alp-* extension commands registered ('west alp-migrate' resolves in $WorkspaceDir)"
     }
 } else {
     Write-Info "Skipping west setup (-NoWest)"
@@ -259,12 +261,14 @@ if (-not $NoPip) {
     Write-Info "Installing alp-sdk Python extras into the venv (jsonschema, imgtool)"
     & $Vpy -m pip install -q jsonschema imgtool
     if ($LASTEXITCODE -ne 0) { Write-Warn2 "alp-sdk extras install reported a problem -- check manually" }
-    # The `alp` CLI front door (alp init / build / run / flash / emit /
-    # validate / model / doctor / monitor) -- editable install, so a
-    # `git pull` in the checkout updates the CLI in place.
-    Write-Info "Installing the alp CLI into the venv (pip install -e $RepoRoot)"
+    # tan's Python backend (alp_cli: init / run / emit / validate / model /
+    # doctor / monitor, invoked as `python -m alp_cli <sub>` by `tan`) --
+    # editable install, so a `git pull` in the checkout updates the backend
+    # in place. `tan` itself is a separate Rust binary, installed via
+    # `cargo install --git https://github.com/alplabai/tan-cli --bin tan`.
+    Write-Info "Installing the tan CLI's Python backend into the venv (pip install -e $RepoRoot)"
     & $Vpy -m pip install -q -e $RepoRoot
-    if ($LASTEXITCODE -ne 0) { Write-Warn2 "alp CLI editable install reported a problem -- check manually" }
+    if ($LASTEXITCODE -ne 0) { Write-Warn2 "alp_cli editable install reported a problem -- check manually" }
 } else {
     Write-Info "Skipping pip installs (-NoPip)"
 }
@@ -293,15 +297,16 @@ Write-Ok "Bootstrap complete."
 @"
 
 Next steps:
-  # Activate the workspace venv (west + Zephyr/SDK deps + the alp CLI):
+  # Activate the workspace venv (west + Zephyr/SDK deps + tan's Python backend):
   & "$VenvDir\Scripts\Activate.ps1"
 
   # Make Zephyr reachable for builds:
   `$env:ZEPHYR_BASE = "$WorkspaceDir\zephyr"
   `$env:ZEPHYR_TOOLCHAIN_VARIANT = "zephyr"
 
-  # Sanity-check the host environment with the alp CLI:
-  alp doctor
+  # Sanity-check the host environment (needs tan on PATH -- see README.md
+  # for `cargo install --git https://github.com/alplabai/tan-cli --bin tan`):
+  tan doctor
 
   # Or jump straight into building an example for real silicon:
   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he ``
@@ -309,5 +314,5 @@ Next steps:
 
 References:
   - docs\cross-platform-setup.md  -- the full per-OS setup guide
-  - docs\cli.md                   -- the alp CLI verb reference
+  - docs\cli.md                   -- the tan CLI verb reference
 "@ | Write-Host

@@ -16,9 +16,13 @@ Public API:
     emit_dts_reservations(project) -> str
     emit_ipc_contract_h(project)   -> str
     emit_build_plan(project, board_yaml=..., build_root=...) -> str
+    iter_buildable_slices(project) -> Iterator[Slice]
 
-    BoardProject, Slice, ResolvedCarveOut, SystemManifest, Orchestrator,
-    OrchestratorError
+    BoardProject, Slice, ResolvedCarveOut, SystemManifest, OrchestratorError
+
+ADR-0020 Phase 4 (preview) retired the SDK-side executor (`Orchestrator`/
+`fan_out`) -- this module is planner/emit-only; execution is an external
+consumer's job.
 
 Reference: docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md
 """
@@ -125,12 +129,15 @@ from .buildplan import emit_build_plan  # noqa: E402,F401  (re-export: cli + tes
 
 
 # ---------------------------------------------------------------------
-# Orchestrator (fan-out)
+# Slice-command resolution (planner-side; the executor was retired)
 # ---------------------------------------------------------------------
-# The Orchestrator class + the slice-command / flash-recipe cluster now live in
-# orchestrator.py (the #285 orchestrator seam -- the finale). Re-export
-# Orchestrator (cli + tests) and _slice_command (test).
-from .orchestrator import Orchestrator, _slice_command  # noqa: E402,F401
+# The slice-command / flash-recipe cluster lives in orchestrator.py.
+# Re-export _slice_command (tests) and iter_buildable_slices (ADR-0020
+# Phase 1 -- tests + buildplan.py).
+from .orchestrator import (  # noqa: E402,F401
+    _slice_command,
+    iter_buildable_slices,  # noqa: F401  (re-export: ADR-0020 Phase 1 -- tests + buildplan.py)
+)
 
 
 # ---------------------------------------------------------------------

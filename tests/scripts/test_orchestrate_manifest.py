@@ -221,6 +221,9 @@ def test_emit_system_manifest_populates_flash_method(tmp_path: Path) -> None:
     m33 = by_core["m33_sm"]
     assert m33["flash_method"] == "zephyr_west_flash"
     assert isinstance(m33["flash_args"], dict)
-    assert m33["flash_args"]["runner"] == "openocd"
+    # No runner is forced: not every in-tree board registers openocd
+    # (e.g. AEN's board.cmake sets flash-runner: alif_flash), so the
+    # slice defers to the board.cmake default runner.
+    assert m33["flash_args"] == {}
 
 

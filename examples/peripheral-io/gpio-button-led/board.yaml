@@ -18,7 +18,7 @@
 #   4. Build with `west build`.  The example's CMakeLists.txt
 #      invokes scripts/alp_project.py at configure time and layers
 #      the generated build/generated/alp.conf over prj.conf via
-#      Zephyr's OVERLAY_CONFIG -- no hand-edited Kconfig.  (`rsource`
+#      Zephyr's EXTRA_CONF_FILE -- no hand-edited Kconfig.  (`rsource`
 #      is a Kconfig directive and is NOT valid in a .conf file, which
 #      is why prj.conf cannot pull the fragment in itself.)
 #
@@ -43,7 +43,7 @@ pins:
   - { e1m: E1M_GPIO_IO4, macro: EVK_PIN_ENCODER_SW, doc: "Rotary encoder push switch (PEC12R-4222F-S0024), 10k pull-up + 0.1uF debounce" }
   - { e1m: E1M_GPIO_PWM3, macro: EVK_PIN_LED_RED, doc: "RGB LED red -- the PWM3 pad as a digital GPIO; the app opens it by the EVK_PIN_LED_RED macro" }
 
-# Single-core slice on AEN801: M55-HP runs the demo.  M55-HE inherits
+# Single-core slice: M55-HP runs the demo.  M55-HE inherits
 # the SoM topology default (stock-shim Zephyr image), keeping the
 # peer-core RPMsg boot path intact for advanced users.
 cores:

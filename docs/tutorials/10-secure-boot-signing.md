@@ -107,12 +107,12 @@ boot:
 takes its geometry from the board DT `partitions {}` node; declare an
 explicit layout via `storage:` if you need one in your `board.yaml`.)
 
-The loader emits the matching `SB_CONFIG_*` overlay; `west alp-build`
+The loader emits the matching `SB_CONFIG_*` overlay; `tan build`
 passes it as `-DSB_CONF_FILE=<abs>/build/alp_sysbuild.conf`
 automatically.  Without a `boot:` block the SDK's stock profile
 above is used unchanged.
 
-Direct build (without `west alp-build` orchestration):
+Direct build (without `tan build` orchestration):
 
 ```bash
 west build -b alif_e7_dk_rtss_he \
@@ -185,7 +185,7 @@ Two images, both signed, the new one buggy:
 ```bash
 # Build a "buggy" variant that panics shortly after boot.
 # In practice: an app that calls k_panic() at start.
-west alp-build -b alif_e7_dk_rtss_he examples/buggy-app
+tan --project examples/buggy-app build
 imgtool sign \
     --key keys/mcuboot_dev_ecdsa_p256.pem \
     --version 0.2.0 \

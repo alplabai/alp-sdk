@@ -20,8 +20,8 @@ field-by-field detail lives in four focused reference pages:
   `preset:` mode, `pins:`, pin direction, the EVK-as-reference-design
   workflow, stock presets, and the `libraries:` block (ADR 0018).
 - [`board-config-emit.md`](board-config-emit.md) -- how the loader
-  compiles the file: `west alp-build`, the Zephyr `alp.conf` overlay,
-  plain CMake, Yocto `local.conf`, `west.yml` auto-pin, the
+  compiles the file: the `tan build` entry point, the Zephyr `alp.conf`
+  overlay, plain CMake, Yocto `local.conf`, `west.yml` auto-pin, the
   `hw-info-h` header, and the DTS overlay.
 - [`board-config-hardware.md`](board-config-hardware.md) -- hardware
   revision tracking (build-time + runtime checks) and modular SoM
@@ -105,7 +105,7 @@ Concretely:
   comment).  The application's `CMakeLists.txt` invokes
   `scripts/alp_project.py` at configure time and layers the
   generated `alp.conf` over `prj.conf` via Zephyr's
-  `OVERLAY_CONFIG` cmake variable.  `rsource` is NOT valid in a
+  `EXTRA_CONF_FILE` cmake variable.  `rsource` is NOT valid in a
   `.conf` file (it is a Kconfig-source directive only) -- see the
   worked example at `examples/peripheral-io/gpio-button-led/CMakeLists.txt`
   for the correct wiring.

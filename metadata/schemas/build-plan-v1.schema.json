@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/build-plan-v1.schema.json",
   "title": "ALP Build Plan v1",
-  "description": "The machine-readable build plan `scripts/alp_orchestrate/buildplan.py::emit_build_plan` renders for a resolved board.yaml project (the `alp` CLI / alp-sdk-vscode 'Wave C' consumer contract, settled 2026-06-04). One entry per non-`off` core slice, each carrying its build command, config artefact contents, and app source dir, plus the shared (cross-slice) generated artefacts and any non-fatal planning warnings. Every artefact carries its full `contents` so the consumer's materialise step stays pure IO -- the plan and the Orchestrator's own on-disk materialise step are written from the same `_shared_artefacts`/`_slice_config_artefact` helpers and MUST agree byte-for-byte. camelCase keys (this is a CLI-consumer contract, not an in-repo YAML). Stability: schemaVersion 1 is locked with the alp-sdk-vscode consumer -- bump schemaVersion and record the change in the CHANGELOG before altering this shape; do not add breaking changes silently.",
+  "description": "The machine-readable build plan `scripts/alp_orchestrate/buildplan.py::emit_build_plan` renders for a resolved board.yaml project (the 'Wave C' consumer contract, settled 2026-06-04 with the alp-sdk-vscode team; the real consumer today is `tan`, alplabai/tan-cli). One entry per non-`off` core slice, each carrying its build command, config artefact contents, and app source dir, plus the shared (cross-slice) generated artefacts and any non-fatal planning warnings. Every artefact carries its full `contents` so the consumer's materialise step stays pure IO -- the plan and the Orchestrator's own on-disk materialise step are written from the same `_shared_artefacts`/`_slice_config_artefact` helpers and MUST agree byte-for-byte. camelCase keys (this is a CLI-consumer contract, not an in-repo YAML). Stability: schemaVersion 1 is locked with the tan-cli consumer -- bump schemaVersion and record the change in the CHANGELOG before altering this shape; do not add breaking changes silently.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schemaVersion", "generatedBy", "boardYaml", "sku", "buildRoot", "slices", "sharedArtefacts", "warnings"],
@@ -14,6 +14,19 @@
     "generatedBy": {
       "type": "string",
       "description": "Identifies the emitting tool (currently the literal 'scripts/alp_orchestrate.py'). Informational only -- not part of the locked consumer contract."
+    },
+    "sdkVersion": {
+      "type": ["string", "null"],
+      "description": "The `version:` field from metadata/sdk_version.yaml at emit time -- the single source of truth for the SDK release version. Additive, schemaVersion 1 (no bump). Informational provenance, not part of the locked consumer contract."
+    },
+    "sdkCommit": {
+      "type": ["string", "null"],
+      "description": "Short git commit (`git rev-parse --short HEAD`) of the alp-sdk checkout that produced this plan. null when git or the .git directory isn't available (e.g. a wheel-installed CLI with no checkout) -- never fails the emit. Additive, schemaVersion 1 (no bump). Informational provenance, not part of the locked consumer contract."
+    },
+    "planPathMode": {
+      "type": "string",
+      "enum": ["tokened"],
+      "description": "Issue #865, additive under schemaVersion 1 (no bump): 'tokened' means every checkout/project-anchored absolute path this plan would otherwise embed is instead a literal `${SDK_ROOT}` / `${PROJECT_ROOT}` / `${PYTHON}` token (see `env.ALP_SDK_ROOT`, `envAppendPath`, `slices[].appDir`, and the `-DPython3_EXECUTABLE=`/`-DEXTRA_CONF_FILE=`/`-DSB_CONF_FILE=`/`west build`-appdir command args) -- tan-cli (PR #24) substitutes them at materialise time, rather than the SDK baking in this run's absolute checkout path. Required by tan-cli's substitution step; a consumer pinned to a pre-#865 plan shape simply won't see this key."
     },
     "boardYaml": {
       "type": "string",
@@ -27,13 +40,24 @@
       "type": "string",
       "description": "POSIX-style path to the root build directory every slice's buildDir and the shared artefacts are nested under."
     },
+    "executionPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unknownBackend", "missingTool", "nullCommand"],
+      "description": "SDK-owned skip-vs-fail policy the executor MUST apply when dispatching a slice's `command`, so a plan consumer stops hand-porting that logic. Additive, schemaVersion 1.",
+      "properties": {
+        "unknownBackend": { "type": "string", "enum": ["skip", "fail"], "description": "Outcome when a slice's `backend` has no known tool mapping. Currently always 'fail'." },
+        "missingTool":     { "type": "string", "enum": ["skip", "fail"], "description": "Outcome when `command.tool` isn't found on the executor's PATH. Currently always 'skip' (normal on a dev host missing one toolchain)." },
+        "nullCommand":     { "type": "string", "enum": ["skip", "fail"], "description": "Outcome when a slice's `command` is null (this emitter had no valid command to produce -- see `slices[].command`). Currently always 'skip'." }
+      }
+    },
     "slices": {
       "type": "array",
       "description": "One entry per core whose resolved os is not `off`, sorted by coreId. A core this emitter cannot yet produce a build command for (e.g. missing app/board/image, or an app-only Yocto slice with no recipe:) is still carried here with command: null plus a matching entry in `warnings` -- never silently dropped.",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["coreId", "backend", "buildDir", "appDir", "configArtefacts", "command", "env"],
+        "required": ["coreId", "backend", "buildDir", "appDir", "configArtefacts", "toolchain", "artifacts", "debug", "command", "env", "envAppendPath"],
         "properties": {
           "coreId": {
             "type": "string",
@@ -50,7 +74,7 @@
           },
           "appDir": {
             "type": ["string", "null"],
-            "description": "Resolved absolute (POSIX-style) path to this slice's app source directory, independent of `command` -- lets tooling watch the app source without reverse-engineering it out of a yocto/zephyr/baremetal-shaped command (issue #597). null when the slice has no app source dir to report, e.g. a Yocto slice built from the `alp-image-edge` stock-image token rather than an `app:` path."
+            "description": "This slice's app source directory, independent of `command` -- lets tooling watch the app source without reverse-engineering it out of a yocto/zephyr/baremetal-shaped command (issue #597). null when the slice has no app source dir to report, e.g. a Yocto slice built from the `alp-image-edge` stock-image token rather than an `app:` path. Issue #865 (`planPathMode: tokened`): a project-anchored app is `${PROJECT_ROOT}/<relpath>` (or exactly `${PROJECT_ROOT}`); an SDK-owned app (the stock M-core shim) is `${SDK_ROOT}/<relpath>`; the rare app resolving under neither root is left as a genuine absolute path and paired with an `appdir-unrooted` warning rather than silently mis-rooted."
           },
           "configArtefacts": {
             "type": "array",
@@ -68,10 +92,10 @@
           "toolchain": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["target_triple", "compiler", "sysroot", "id"],
+            "required": ["targetTriple", "compiler", "sysroot", "id"],
             "description": "This slice's compiler identity (#610 §4 per-slice tooling index), grounded in the SoM preset's `topology.<core>.toolchain` -- never invented. A field genuinely not derivable for this slice's runtime is null rather than guessed (e.g. a Yocto slice's exact GCC triple depends on the Yocto build's own TUNE_FEATURES/TCLIBC, outside board.yaml/SoM metadata).",
             "properties": {
-              "target_triple": { "type": ["string", "null"], "description": "GCC target triple for this slice's compiler (e.g. `arm-zephyr-eabi` for a Zephyr Cortex-M slice, which is both the Zephyr SDK toolchain directory name and its real GCC triple). null when not derivable (e.g. Yocto -- the triple depends on the Yocto build's own TCLIBC/TUNE_FEATURES)." },
+              "targetTriple": { "type": ["string", "null"], "description": "GCC target triple for this slice's compiler (e.g. `arm-zephyr-eabi` for a Zephyr Cortex-M slice, which is both the Zephyr SDK toolchain directory name and its real GCC triple). null when not derivable (e.g. Yocto -- the triple depends on the Yocto build's own TCLIBC/TUNE_FEATURES)." },
               "compiler": { "type": ["string", "null"], "description": "Compiler executable name for this slice (e.g. `arm-zephyr-eabi-gcc`). null when not derivable." },
               "sysroot": { "type": ["string", "null"], "description": "Cross-compile sysroot path for this slice, when the runtime has one. Always null today -- Zephyr bundles its own libc per architecture inside the Zephyr SDK (no conventional sysroot), and Yocto's sysroot lives inside the Yocto build tree, not in board.yaml/SoM metadata." },
               "id": { "type": ["string", "null"], "description": "Stable toolchain identifier, taken verbatim from the SoM preset's `topology.<core>.toolchain` (e.g. `arm-zephyr-eabi`, `poky-glibc`) -- the same field `system-manifest.yaml`'s `slices[].toolchain` already surfaces. null when the SoM preset doesn't declare one for this core." }
@@ -80,15 +104,15 @@
           "artifacts": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["elf", "map", "bin", "size_report", "symbols", "compile_commands"],
+            "required": ["elf", "map", "bin", "sizeReport", "symbols", "compileCommands"],
             "description": "Deterministic OUTPUT paths under `buildDir` for this slice (#610 §4) -- the WHERE, not a promise the files exist yet (they don't until the slice is actually built). Zephyr's own CMake layout fixes these paths (cmake/modules/kernel.cmake + the top-level CMakeLists.txt); a Yocto slice's real output lands under the Yocto build tree's own deploy dir (outside this slice's buildDir), and a baremetal slice's executable name is the app's own CMakeLists.txt to pick -- both stay null rather than guess a path this emitter can't predict.",
             "properties": {
               "elf": { "type": ["string", "null"], "description": "POSIX-style path to the slice's ELF output (Zephyr: `<buildDir>/zephyr/zephyr.elf`). null when this runtime has no single predictable ELF output (yocto, baremetal)." },
               "map": { "type": ["string", "null"], "description": "POSIX-style path to the linker map file (Zephyr: `<buildDir>/zephyr/zephyr.map`). null when not derivable." },
               "bin": { "type": ["string", "null"], "description": "POSIX-style path to the flat binary image (Zephyr: `<buildDir>/zephyr/zephyr.bin`). null when not derivable." },
-              "size_report": { "type": ["string", "null"], "description": "POSIX-style path to the readelf-headers size/stat report (Zephyr: `<buildDir>/zephyr/zephyr.stat`, written only when `CONFIG_OUTPUT_STAT=y` -- same 'doesn't exist until built/enabled' caveat as every other artifact path here). null when not derivable." },
+              "sizeReport": { "type": ["string", "null"], "description": "POSIX-style path to the readelf-headers size/stat report (Zephyr: `<buildDir>/zephyr/zephyr.stat`, written only when `CONFIG_OUTPUT_STAT=y` -- same 'doesn't exist until built/enabled' caveat as every other artifact path here). null when not derivable." },
               "symbols": { "type": ["string", "null"], "description": "POSIX-style path to the symbol-table dump (Zephyr: `<buildDir>/zephyr/zephyr.symbols`, written only when `CONFIG_OUTPUT_SYMBOLS=y`). null when not derivable." },
-              "compile_commands": { "type": ["string", "null"], "description": "POSIX-style path to `compile_commands.json` (Zephyr: `<buildDir>/compile_commands.json` -- the top-level Zephyr CMakeLists.txt forces `CMAKE_EXPORT_COMPILE_COMMANDS` unconditionally). null when the slice's runtime doesn't produce one at a predictable path." }
+              "compileCommands": { "type": ["string", "null"], "description": "POSIX-style path to `compile_commands.json` (Zephyr: `<buildDir>/compile_commands.json` -- the top-level Zephyr CMakeLists.txt forces `CMAKE_EXPORT_COMPILE_COMMANDS` unconditionally). null when the slice's runtime doesn't produce one at a predictable path." }
             }
           },
           "debug": {
@@ -98,7 +122,7 @@
             "description": "Headless monitor/debug selectors for this slice (#610 §4): the console device selector + debug-probe selector a headless consumer needs, derived from board.yaml `diagnostics.console:` and the same flash-recipe fact `system-manifest.yaml`'s `slices[].flash_method`/`flash_args` already carry. null when unknown.",
             "properties": {
               "console": { "type": ["string", "null"], "description": "Resolved console backend selector: `uart` (Zephyr UART console), `ram` (Zephyr RAM console, read over SWD), or `linux` (Yocto/Ubuntu stdio/tty console). null when the slice inherits an unspecified board default (`diagnostics.console: none`/unset with no OS-derived default, e.g. a baremetal slice)." },
-              "probe": { "type": ["string", "null"], "description": "Debug-probe runner selector for this slice (currently `openocd` for a Zephyr slice's `zephyr_west_flash` recipe). null when this slice's runtime/flash recipe doesn't identify a live debug probe (Yocto image-flash, baremetal cmake-flash)." }
+              "probe": { "type": ["string", "null"], "description": "Debug-probe runner selector for this slice: the explicitly-configured runner for a Zephyr slice's `zephyr_west_flash` recipe, else null -- meaning either the board.cmake default runner applies, or (Yocto image-flash, baremetal cmake-flash) this slice's runtime/flash recipe doesn't identify a live debug probe at all." }
             }
           },
           "command": {
@@ -116,9 +140,17 @@
             "type": "object",
             "additionalProperties": false,
             "required": ["ALP_SDK_ROOT"],
-            "description": "Environment variables the consumer must inject into the slice subprocess, native host-path form (handed to the subprocess environment verbatim).",
+            "description": "Environment variables the consumer must inject into the slice subprocess (handed to the subprocess environment verbatim once the consumer substitutes any token -- issue #865, `planPathMode: tokened`).",
             "properties": {
-              "ALP_SDK_ROOT": { "type": "string", "description": "Absolute host path to the alp-sdk checkout the plan was generated from." }
+              "ALP_SDK_ROOT": { "type": "string", "description": "The literal token `${SDK_ROOT}` under `planPathMode: tokened` (issue #865) -- tan-cli (PR #24) substitutes its own resolved alp-sdk checkout root before injecting this into the subprocess environment." }
+            }
+          },
+          "envAppendPath": {
+            "type": "object",
+            "description": "SDK-owned env values the consumer must APPEND, skipping any value already present (de-dup first, matching `_alp_common.env_with_sdk` / `_workspace.subprocess_env`), to the slice subprocess env, distinct from `env` (set-verbatim). The join separator is PER-KEY, not uniformly os.pathsep: `EXTRA_ZEPHYR_MODULES` is a CMake list -- Zephyr's `zephyr_module.py` splits it on `;` on every platform, never an OS path list -- while `PYTHONPATH` is a real OS-native path list joined with `os.pathsep`. Plan wins / CLI fills gaps: a consumer that computes these itself should prefer the plan's values. Additive under schemaVersion 1; a new key so consumers pinned to an older shape safely ignore it. Values are `${SDK_ROOT}`-tokened under `planPathMode: tokened` (issue #865), substituted the same as `env.ALP_SDK_ROOT`.",
+            "additionalProperties": {
+              "type": "array",
+              "items": { "type": "string" }
             }
           }
         }
@@ -147,7 +179,7 @@
         "properties": {
           "code": {
             "type": "string",
-            "description": "Stable machine-readable warning code. Known values as of schemaVersion 1: 'no-command' (missing app/board/image for the core's os), 'yocto-recipe-missing' (an app-only Yocto slice has app: but no recipe:, so there is no valid bitbake target). New codes may be added without a schemaVersion bump -- consumers must not treat this as a closed enum."
+            "description": "Stable machine-readable warning code. Known values as of schemaVersion 1: 'no-command' (missing app/board/image for the core's os), 'yocto-recipe-missing' (an app-only Yocto slice has app: but no recipe:, so there is no valid bitbake target), 'appdir-unrooted' (issue #865: a slice's `app:` resolves outside both `${PROJECT_ROOT}` and `${SDK_ROOT}`, so `appDir` is left as a genuine absolute path a consumer on a different checkout cannot re-root). New codes may be added without a schemaVersion bump -- consumers must not treat this as a closed enum."
           },
           "coreId": {
             "type": "string",

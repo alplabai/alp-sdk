@@ -24,8 +24,7 @@ slices:
   toolchain: arm-zephyr-eabi
   status: pending
   flash_method: zephyr_west_flash
-  flash_args:
-    runner: openocd
+  flash_args: {}
 - core_id: m55_he
   os: zephyr
   app: alp-stock-shim
@@ -33,8 +32,7 @@ slices:
   toolchain: arm-zephyr-eabi
   status: pending
   flash_method: zephyr_west_flash
-  flash_args:
-    runner: openocd
+  flash_args: {}
 ipc:
 - name: alp_default_rpmsg
   kind: rpmsg
@@ -50,11 +48,7 @@ helper_mcus:
 - name: cc3501e_otp
   chip: cc3501e
   firmware_path: firmware/cc3501e/prebuilt/cc3501e-v0.2.0.bin
-  flash_method: cc3501e_usb_bootloader
-  flash_args:
-    speed: 921600
-    device: TBD
-    mode: TBD
+  update_channel: alp_ota_spi_otp
 boot_order: []
 
 # boot_order is empty -- add a `boot_order:` list to metadata/e1m_modules/E1M-AEN801.yaml when the

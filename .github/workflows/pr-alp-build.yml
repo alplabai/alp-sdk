@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Heterogeneous orchestrator gate -- `west alp-build` across the
-# SoM x scenario matrix.  Per the v0.6 heterogeneous-OS design at
+# Heterogeneous orchestrator gate -- `alp_orchestrate --emit
+# system-manifest` across the SoM x scenario matrix.  Per the v0.6
+# heterogeneous-OS design at
 # docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md
 # (§7 Phase 5 + §11 acceptance), this workflow verifies:
 #
@@ -13,11 +14,13 @@
 #      §6.1 "Determinism" clause requires re-running the build to
 #      produce identical layouts so CI can diff.
 #
-# CAVEAT: the `west alp-build` command this workflow consumes
-# doesn't exist yet -- it lands in Phase 2.  Until then every leg
-# fails at step (d).  That's
-# intentional; the workflow's YAML structure ships now so Phase 2's
-# PR can flip these legs green without touching CI.
+# ADR-0020 Phase 4: the SDK-side executor (`west alp-build` et al.)
+# was retired -- alp-sdk is plans-only now.  This workflow only ever
+# exercised plan/manifest generation (real slice compilation was
+# always `continue-on-error` -- see the step below), so it verifies
+# `alp_orchestrate --emit system-manifest` directly.  Actual slice
+# compilation is `tan build`'s job (github.com/alplabai/tan-cli),
+# exercised elsewhere.
 #
 # v0.6 examples referenced below (`examples/rpmsg-<som-short>/`,
 # `examples/connectivity/iot-connected-camera/`, `examples/peripheral-io/gpio-button-led/`)
@@ -161,12 +164,13 @@ jobs:
 
       # ----- Steps below run only when the example exists ---------
 
-      # The CI's west workspace topdir is `zephyrproject/`, not
-      # `alp-sdk/`, so west's extension-command lookup never finds
-      # alp-sdk's `west-commands.yml`.  Bypass west entirely and
-      # invoke the orchestrator (and its pre-flight validator)
-      # directly -- the wrapper at scripts/west_commands/alp_build.py
-      # delegates to exactly these two scripts.
+      # ADR-0020 Phase 4: alp_orchestrate is plans-only -- there is no
+      # SDK-side executor to bypass west for any more (the wrapper at
+      # scripts/west_commands/alp_build.py this comment used to
+      # reference was deleted with the executor).  Invoke the
+      # orchestrator's surviving `--emit system-manifest` planner
+      # directly and capture its stdout at the same path the old
+      # build-executor used to write.
       - name: alp-build (primary verification, orchestrator-direct)
         # v0.6: actual slice compilation requires Zephyr SDK +
         # bitbake on the runner, neither of which the standard
@@ -178,17 +182,15 @@ jobs:
         continue-on-error: true
         if: steps.gate.outputs.present == 'true'
         working-directory: ${{ github.workspace }}/alp-sdk
-        env:
-          ZEPHYR_BASE: ${{ github.workspace }}/zephyrproject/zephyr
-          ZEPHYR_TOOLCHAIN_VARIANT: zephyr
         run: |
           set -euo pipefail
           app_path="${{ steps.pick.outputs.example_path }}"
           board_yaml="${{ steps.pick.outputs.board_yaml }}"
           python scripts/validate_board_yaml.py --input "${board_yaml}"
+          mkdir -p "${app_path}/build"
           PYTHONPATH="$PWD/scripts" python -m alp_orchestrate \
               --input "${board_yaml}" \
-              --build-root "${app_path}/build" || true
+              --emit system-manifest > "${app_path}/build/system-manifest.yaml" || true
 
       - name: Assert system-manifest.yaml exists + has per-slice entries
         if: steps.gate.outputs.present == 'true'
@@ -218,9 +220,6 @@ jobs:
       - name: Determinism check (rebuild + diff system-manifest.yaml)
         if: steps.gate.outputs.present == 'true'
         working-directory: ${{ github.workspace }}/alp-sdk
-        env:
-          ZEPHYR_BASE: ${{ github.workspace }}/zephyrproject/zephyr
-          ZEPHYR_TOOLCHAIN_VARIANT: zephyr
         run: |
           set -euo pipefail
           app_path="${{ steps.pick.outputs.example_path }}"
@@ -229,14 +228,16 @@ jobs:
           # Snapshot the first manifest before the rebuild clobbers
           # the file.
           cp "${manifest_a}" /tmp/system-manifest-run-a.yaml
-          # Tear down + rebuild from scratch.  The spec requires
+          # Tear down + re-emit from scratch.  The spec requires
           # byte-stable output across re-runs regardless of build
-          # dir state.  Mirror `west alp-clean` by hand: remove the
-          # build dir + the orchestrator state cache.
+          # dir state.  Remove the build dir + the orchestrator state
+          # cache by hand (the `west alp-clean` executor command this
+          # used to describe was retired in ADR-0020 Phase 4).
           rm -rf "${app_path}/build" "${app_path}/.alp-build-state.json"
+          mkdir -p "${app_path}/build"
           PYTHONPATH="$PWD/scripts" python -m alp_orchestrate \
               --input "${board_yaml}" \
-              --build-root "${app_path}/build" || true
+              --emit system-manifest > "${app_path}/build/system-manifest.yaml" || true
           cp "${manifest_a}" /tmp/system-manifest-run-b.yaml
           if ! diff -u /tmp/system-manifest-run-a.yaml /tmp/system-manifest-run-b.yaml; then
             echo "::error::system-manifest.yaml is NOT byte-stable across rebuilds (spec §6.1 violation)"

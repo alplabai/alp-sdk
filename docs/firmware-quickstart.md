@@ -40,8 +40,8 @@ The per-SoM one-pager covers what's populated, which examples
 target it, the bring-up flow, and common gotchas.  The full
 per-SKU populated-parts list lives in
 [`metadata/e1m_modules/<SKU>.yaml`](../metadata/e1m_modules/);
-the loader reads this file at `west alp-build` time to decide which
-chip drivers to compile in.
+the loader reads this file at `tan build` time (via alp-sdk's
+`alp_orchestrate`) to decide which chip drivers to compile in.
 
 ## 2. Workspace setup
 
@@ -49,6 +49,14 @@ If you haven't already, follow the workspace bootstrap in
 [`docs/getting-started.md`](getting-started.md) §1-3.  That gets
 you a `alp-workspace/` with `alp-sdk/`, `zephyr/`, and the standard
 modules.
+
+You'll also need `tan`, the standalone build executor -- a separate
+public repo, not installed by `bootstrap.sh`. Needs a Rust toolchain
+(`rustup`/`cargo`) on `PATH`:
+
+```bash
+cargo install --git https://github.com/alplabai/tan-cli --bin tan
+```
 
 For the rest of this doc, all paths are relative to `alp-workspace/`.
 
@@ -78,7 +86,7 @@ diagnostics:
   log_level: info
 ```
 
-`west alp-build` validates this, fans out into per-core slices, and
+`tan build` validates this, fans out into per-core slices, and
 emits `build/system-manifest.yaml`.  See
 [`docs/board-config-schema.md`](board-config-schema.md) for the full schema and
 [`docs/heterogeneous-builds.md`](heterogeneous-builds.md) for the
@@ -113,10 +121,10 @@ Build any of them as:
 
 ```bash
 cd alp-workspace
-west alp-build -b <board> alp-sdk/examples/<name>
-west build -d build -t run     # native_sim
-# or:
-west flash                     # real silicon
+tan --project alp-sdk/examples/<name> build
+# the target (native_sim above, or real silicon) comes from the
+# example's board.yaml `som.sku` -- there is no `--board` flag.
+# For real silicon, also: tan flash alp-sdk/examples/<name>
 ```
 
 ## 5. Idiomatic patterns
@@ -265,40 +273,41 @@ reference.
 
 ## 7. Build for real silicon
 
-`west alp-build` figures out the cross-compile target from the
-SoM's `silicon:` field.  Common boards:
+`tan build` figures out the cross-compile target from the project's
+`board.yaml` `som.sku` field -- there is no `--board` flag. Common
+targets:
 
 ```bash
 # V2N (RZ/V2N)
-west alp-build -b <renesas_rzv2n_board> alp-sdk/examples/v2n/v2n-gd32-bridge-ping
-west build -d build -t flash
+tan --project alp-sdk/examples/v2n/v2n-gd32-bridge-ping build
+tan flash alp-sdk/examples/v2n/v2n-gd32-bridge-ping
 
 # AEN (Alif Ensemble)
-west alp-build -b <alif_ensemble_board> alp-sdk/examples/peripheral-io/gpio-button-led
-west build -d build -t flash
+tan --project alp-sdk/examples/peripheral-io/gpio-button-led build
+tan flash alp-sdk/examples/peripheral-io/gpio-button-led
 ```
 
-The exact `<board>` argument depends on whether you're using an
-upstream Zephyr board file (e.g. `ensemble_e8_dk`) or one of the
-in-tree Alp E1M board files under
-[`zephyr/boards/alp/`](../zephyr/boards/alp/) (e.g.
-`alp_e1m_aen801_m55_he`, `alp_e1m_v2n101_m33_sm`).  See
+Which qualified Zephyr board a `som.sku` resolves to -- an upstream
+board file (e.g. `ensemble_e8_dk`) or one of the in-tree Alp E1M
+board files under [`zephyr/boards/alp/`](../zephyr/boards/alp/) (e.g.
+`alp_e1m_aen801_m55_he`, `alp_e1m_v2n101_m33_sm`) -- is resolved by
+the loader, not chosen on the command line.  See
 [`docs/architecture.md`](architecture.md) for the split.
 
-The `alp` CLI covers the same flow in fewer keystrokes:
-`alp build && alp flash` programs every slice + helper MCU in
-`boot_order:`, and `alp monitor --port <port>` opens the board's
-serial console afterwards (portless it lists the host's serial
-ports).  If a build machine misbehaves, `alp doctor` is the
-hardware-free environment triage.  Verb reference:
-[`docs/cli.md`](cli.md).
+The `tan` CLI covers the same flow in fewer keystrokes:
+`tan build && tan flash` programs every slice + helper MCU in
+`boot_order:` (see [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli)).
+`tan monitor --port <port>` opens the board's serial console
+afterwards (portless it lists the host's serial ports).  If a
+build machine misbehaves, `tan doctor` is the hardware-free
+environment triage.  Verb reference: [`docs/cli.md`](cli.md).
 
 ## 8. Where to look next
 
 | Topic                                            | Document                                          |
 |--------------------------------------------------|---------------------------------------------------|
 | Workspace + tooling deep-dive                    | [`docs/getting-started.md`](getting-started.md)   |
-| `alp` CLI verb reference                         | [`docs/cli.md`](cli.md)                           |
+| `tan` CLI verb reference                         | [`docs/cli.md`](cli.md)                           |
 | `board.yaml` schema reference                    | [`docs/board-config-schema.md`](board-config-schema.md) |
 | Architecture (modules, wrappers, codegen split)  | [`docs/architecture.md`](architecture.md)         |
 | SoM bring-up procedures                          | [`docs/bring-up-v2n.md`](bring-up-v2n.md), [`docs/bring-up-v2n-m1.md`](bring-up-v2n-m1.md) |
@@ -314,7 +323,7 @@ hardware-free environment triage.  Verb reference:
 
 * File an issue at <https://github.com/alplabai/alp-sdk/issues>
   with a reproducer.  Include the output of
-  `west alp-build --version`, your `board.yaml`, and the full
+  `tan --version`, your `board.yaml`, and the full `tan build` /
   `west build` log.
 * For a chip driver bug: include the chip's `metadata/chips/<part>.yaml`
   driver status (`stub` chips return `ALP_ERR_NOSUPPORT` from

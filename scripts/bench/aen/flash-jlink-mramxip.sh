@@ -7,6 +7,12 @@
 #
 # FLOW D -- MRAM-XIP / slot0 TWO-BLOB variant (per docs/aen-bench-bringup.md §Flow D).
 #
+# NOT the only way to provision this shape: bench-proven 2026-07-19, a plain
+# `west flash` / `app-write-mram -p` over the SE-UART (Flow A, the `alif_flash`
+# runner) burns the same two blobs in one pass -- the runner auto-detects the
+# shape from the app's own reset vector. This script is the faster SWD-only
+# alternative (no SE-UART reset race), not a capability requirement.
+#
 # Unlike flash-jlink.sh (single-blob ITCM-load-via-ATOC, loadAddress 0x58000000),
 # this is for an app LINKED INTO MRAM slot0 (@0x80010000, CONFIG_FLASH_LOAD_OFFSET
 # 0x10000) that overflows ITCM -- e.g. a real NPU model. Two blobs are written:

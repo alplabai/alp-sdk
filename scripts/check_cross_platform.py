@@ -95,8 +95,9 @@ Scope:
   the lint does NOT object to *.sh existing, only to silent
   bash-onlyness).
 
-  Python files (.py) are NOT scanned -- scripts are by definition
-  cross-platform when written in Python.
+  Python files (.py) are out of scope for this text-idiom linter;
+  emitted-artifact portability (e.g. Windows-only escape sequences
+  produced by a generator script) is covered by tests, not this scan.
 
 Output format:
 

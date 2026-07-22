@@ -76,6 +76,16 @@
             "build_root": {
               "type": "boolean",
               "description": "Whether --build-root affects this mode's output (true only for build-plan)."
+            },
+            "template": {
+              "type": "string",
+              "enum": ["required", "ignored"],
+              "description": "--template <id> (metadata/templates/catalog-v1.json). Optional key, present only on modes that consume it (scaffold): required means the mode refuses to run without it."
+            },
+            "sku": {
+              "type": "string",
+              "enum": ["required", "ignored"],
+              "description": "--sku <SKU>. Optional key, present only on modes that consume it (scaffold): required means the mode refuses to run without it."
             }
           }
         },

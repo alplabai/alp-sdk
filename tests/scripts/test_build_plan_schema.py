@@ -298,12 +298,14 @@ def test_pinned_snapshot_slices_carry_toolchain_artifacts_debug():
     objects (schema `required`, so a validating plan already proves
     their presence -- this pins concrete derived *values*, not just
     shape). The AEN example's `m55_hp` Zephyr slice is the ground-truth
-    case: `toolchain.target_triple`/`toolchain.compiler` are the real
+    case: `toolchain.targetTriple`/`toolchain.compiler` are the real
     Zephyr SDK arm-zephyr-eabi triple (SoM preset `topology.m55_hp.
-    toolchain`), `artifacts.elf`/`.map`/`.bin`/`.compile_commands`
-    follow Zephyr's own CMake output layout, and `debug.probe` is the
-    same `openocd` runner `system-manifest.yaml`'s `flash_method`
-    resolves to for a Zephyr slice."""
+    toolchain`), `artifacts.elf`/`.map`/`.bin`/`.compileCommands`
+    follow Zephyr's own CMake output layout, and `debug.probe` is null
+    for a Zephyr slice -- `system-manifest.yaml`'s `flash_method` no
+    longer forces a runner (not every in-tree board registers
+    `openocd`), so the resolved runner defers to the board.cmake
+    default and `probe` stays null unless a runner is explicitly set."""
     board_yaml = REPO / "examples/multicore/rpmsg-aen/board.yaml"
     project = load_board_yaml(board_yaml)
     plan = json.loads(emit_build_plan(
@@ -312,29 +314,29 @@ def test_pinned_snapshot_slices_carry_toolchain_artifacts_debug():
     by_id = {s["coreId"]: s for s in plan["slices"]}
     m55_hp = by_id["m55_hp"]
     assert m55_hp["toolchain"] == {
-        "target_triple": "arm-zephyr-eabi",
-        "compiler":      "arm-zephyr-eabi-gcc",
-        "sysroot":       None,
-        "id":            "arm-zephyr-eabi",
+        "targetTriple": "arm-zephyr-eabi",
+        "compiler":     "arm-zephyr-eabi-gcc",
+        "sysroot":      None,
+        "id":           "arm-zephyr-eabi",
     }
     assert m55_hp["artifacts"] == {
-        "elf":              "build/m55_hp-zephyr/zephyr/zephyr.elf",
-        "map":              "build/m55_hp-zephyr/zephyr/zephyr.map",
-        "bin":              "build/m55_hp-zephyr/zephyr/zephyr.bin",
-        "size_report":      "build/m55_hp-zephyr/zephyr/zephyr.stat",
-        "symbols":          "build/m55_hp-zephyr/zephyr/zephyr.symbols",
-        "compile_commands": "build/m55_hp-zephyr/compile_commands.json",
+        "elf":             "build/m55_hp-zephyr/zephyr/zephyr.elf",
+        "map":             "build/m55_hp-zephyr/zephyr/zephyr.map",
+        "bin":             "build/m55_hp-zephyr/zephyr/zephyr.bin",
+        "sizeReport":      "build/m55_hp-zephyr/zephyr/zephyr.stat",
+        "symbols":         "build/m55_hp-zephyr/zephyr/zephyr.symbols",
+        "compileCommands": "build/m55_hp-zephyr/compile_commands.json",
     }
-    assert m55_hp["debug"] == {"console": "uart", "probe": "openocd"}
+    assert m55_hp["debug"] == {"console": "uart", "probe": None}
 
-    # The A-class Yocto slice: no single predictable ELF/compile_commands
+    # The A-class Yocto slice: no single predictable ELF/compileCommands
     # output under buildDir (real output lives in the Yocto build tree's
     # own deploy dir) -- artifacts stay honestly null; toolchain.id is
     # still the real SoM preset toolchain tag (`poky-glibc`); debug.probe
     # is null (a Yocto image-flash recipe doesn't name a debug probe).
     a32 = by_id["a32_cluster"]
     assert a32["toolchain"]["id"] == "poky-glibc"
-    assert a32["toolchain"]["target_triple"] is None
+    assert a32["toolchain"]["targetTriple"] is None
     assert all(v is None for v in a32["artifacts"].values())
     assert a32["debug"] == {"console": "linux", "probe": None}
 
@@ -344,16 +346,16 @@ def test_pinned_snapshot_slices_carry_toolchain_artifacts_debug():
             proj, board_yaml=REPO / board_rel, build_root=Path("build")))
         for sl in pl["slices"]:
             assert set(sl["toolchain"]) == {
-                "target_triple", "compiler", "sysroot", "id"}
+                "targetTriple", "compiler", "sysroot", "id"}
             assert set(sl["artifacts"]) == {
-                "elf", "map", "bin", "size_report", "symbols",
-                "compile_commands"}
+                "elf", "map", "bin", "sizeReport", "symbols",
+                "compileCommands"}
             assert set(sl["debug"]) == {"console", "probe"}
 
 
 def test_baremetal_slice_toolchain_artifacts_debug_are_null(tmp_path: Path):
     """A `baremetal` slice's `artifacts` + `debug` fields are all null,
-    and `toolchain.target_triple`/`.compiler` stay null too -- there is
+    and `toolchain.targetTriple`/`.compiler` stay null too -- there is
     no SDK-wide vendor bare-toolchain / executable-name / debug-probe
     convention this emitter can predict without guessing (the app's own
     CMakeLists.txt picks its own executable name and cross toolchain
@@ -373,7 +375,7 @@ def test_baremetal_slice_toolchain_artifacts_debug_are_null(tmp_path: Path):
     by_id = {s["coreId"]: s for s in plan["slices"]}
     baremetal = by_id["m55_hp"]
     assert baremetal["toolchain"] == {
-        "target_triple": None, "compiler": None, "sysroot": None,
+        "targetTriple": None, "compiler": None, "sysroot": None,
         "id": "arm-zephyr-eabi",
     }
     assert all(v is None for v in baremetal["artifacts"].values())
@@ -397,17 +399,17 @@ def test_missing_required_field_rejected():
             "appDir": None,
             "configArtefacts": [],
             "toolchain": {
-                "target_triple": "arm-zephyr-eabi",
+                "targetTriple": "arm-zephyr-eabi",
                 "compiler": "arm-zephyr-eabi-gcc",
                 "sysroot": None,
                 "id": "arm-zephyr-eabi",
             },
             "artifacts": {
                 "elf": None, "map": None, "bin": None,
-                "size_report": None, "symbols": None,
-                "compile_commands": None,
+                "sizeReport": None, "symbols": None,
+                "compileCommands": None,
             },
-            "debug": {"console": "uart", "probe": "openocd"},
+            "debug": {"console": "uart", "probe": None},
             "command": None,
             # "env" deliberately omitted -- required by the schema.
         }],
@@ -417,6 +419,78 @@ def test_missing_required_field_rejected():
     validator = jsonschema.Draft202012Validator(_schema())
     errors = list(validator.iter_errors(bad))
     assert errors, "missing required 'env' should have been rejected"
+
+
+def test_execution_policy_absent_at_top_level_still_validates():
+    """Strict-producer / tolerant-consumer (#855, reverting #847's breaking
+    shape change): `executionPolicy` is no longer in the top-level
+    `required` array, so a plan that omits it entirely -- e.g. every
+    historical/v0.11.1 plan predating #847 -- still validates under
+    schemaVersion 1 rather than being rejected. The real emitter keeps
+    emitting it unconditionally on every plan regardless (see
+    test_emit_build_plan_publishes_execution_policy in
+    test_orchestrate_buildplan.py) -- this only relaxes what the SCHEMA
+    accepts, not what the SDK actually produces."""
+    ok = {
+        "schemaVersion": 1,
+        "generatedBy": "scripts/alp_orchestrate.py",
+        "boardYaml": "board.yaml",
+        "sku": "E1M-V2N101",
+        "buildRoot": "build",
+        # "executionPolicy" deliberately omitted -- optional per the schema.
+        "slices": [{
+            "coreId": "m33_sm",
+            "backend": "zephyr",
+            "buildDir": "build/m33_sm-zephyr",
+            "appDir": None,
+            "configArtefacts": [],
+            "toolchain": {
+                "targetTriple": "arm-zephyr-eabi",
+                "compiler": "arm-zephyr-eabi-gcc",
+                "sysroot": None,
+                "id": "arm-zephyr-eabi",
+            },
+            "artifacts": {
+                "elf": None, "map": None, "bin": None,
+                "sizeReport": None, "symbols": None,
+                "compileCommands": None,
+            },
+            "debug": {"console": "uart", "probe": None},
+            "command": None,
+            "env": {"ALP_SDK_ROOT": "/repo"},
+            "envAppendPath": {},
+        }],
+        "sharedArtefacts": [],
+        "warnings": [],
+    }
+    validator = jsonschema.Draft202012Validator(_schema())
+    errors = list(validator.iter_errors(ok))
+    assert errors == [], "\n".join(str(e) for e in errors)
+
+
+def test_execution_policy_still_validated_when_present():
+    """`executionPolicy` stays a KNOWN, VALIDATED key -- optional, not
+    schema-less. A plan that includes it with a malformed shape (missing
+    `nullCommand`) is still rejected, same as before #855; only the
+    top-level `required` entry was dropped."""
+    bad = {
+        "schemaVersion": 1,
+        "generatedBy": "scripts/alp_orchestrate.py",
+        "boardYaml": "board.yaml",
+        "sku": "E1M-V2N101",
+        "buildRoot": "build",
+        "executionPolicy": {
+            "unknownBackend": "fail",
+            "missingTool": "skip",
+            # "nullCommand" deliberately omitted -- required by the
+            # executionPolicy sub-schema whenever the key is present.
+        },
+        "slices": [],
+        "sharedArtefacts": [],
+        "warnings": [],
+    }
+    validator = jsonschema.Draft202012Validator(_schema())
+    assert list(validator.iter_errors(bad)) != []
 
 
 def test_unknown_top_level_key_rejected():

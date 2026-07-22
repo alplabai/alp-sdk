@@ -22,6 +22,11 @@
 
 #include "fakes.h"
 
+/* Not part of the public bme280 API -- see chips/bme280/bme280_internal.h
+ * for why the H4/H5 calibration unpack is tested directly here rather
+ * than through bme280_init(). */
+#include "bme280_internal.h"
+
 /* ------------------------------------------------------------------ */
 /* lsm6dso                                                             */
 /* ------------------------------------------------------------------ */
@@ -453,6 +458,53 @@ ZTEST(alp_chips, test_bme280_compensate_p4_p7_int16_min_matches_reference)
 }
 
 /* ------------------------------------------------------------------ */
+/* bme280 -- H4/H5 calibration unpack (#797)                          */
+/* ------------------------------------------------------------------ */
+/* The #753 tests above pin dev.calib.H4/H5 directly, bypassing
+ * load_calibration() by design -- that isolates bme280_compensate()
+ * from the register layer. It leaves the E4/E5/E6 shared-nibble
+ * unpack itself (BST-BME280-DS002 v1.6 S5.4 Table 20) unvalidated:
+ * a nibble swap or off-by-one in that split would ship silently,
+ * since the disabled i2c-emul fake is the only other thing that ever
+ * drove load_calibration() end-to-end (see bme280_internal.h / the
+ * fake-fixtures note in CMakeLists.txt). bme280_unpack_h4_h5() is the
+ * pure nibble-unpack factored out of load_calibration() so it is
+ * testable without a bus or fake target. */
+
+ZTEST(alp_chips, test_bme280_unpack_h4_h5)
+{
+	int16_t h4, h5;
+
+	/* All-zero bytes -> both fields zero. */
+	bme280_unpack_h4_h5((const uint8_t[3]){ 0x00, 0x00, 0x00 }, &h4, &h5);
+	zassert_equal(h4, 0);
+	zassert_equal(h5, 0);
+
+	/* E5's two nibbles feed opposite fields (low -> H4, high -> H5);
+	 * asymmetric nibbles here catch a swapped-nibble regression.
+	 * E4=0x7F, E5=0xF3, E6=0x05: H4 = (0x7F<<4)|0x3 = 0x7F3 = 2035
+	 * (below 0x800, stays positive); H5 = (0x05<<4)|0xF = 0x5F = 95. */
+	bme280_unpack_h4_h5((const uint8_t[3]){ 0x7F, 0xF3, 0x05 }, &h4, &h5);
+	zassert_equal(h4, 2035);
+	zassert_equal(h5, 95);
+
+	/* Sign-extension boundary: bits12 == 0x800 is the smallest value
+	 * that must wrap negative (-2048), not stay positive (2048).
+	 * E4=0x80, E5=0x00, E6=0x80 puts both H4 and H5 exactly there. */
+	bme280_unpack_h4_h5((const uint8_t[3]){ 0x80, 0x00, 0x80 }, &h4, &h5);
+	zassert_equal(h4, -2048);
+	zassert_equal(h5, -2048);
+
+	/* Interior negative values, distinct per field (catches a field
+	 * swap even after sign-extension is correct on its own).
+	 * E4=0xFF, E5=0xF8, E6=0xFF: H4 = 0xFF8 = 4088 -> -8;
+	 * H5 = 0xFFF = 4095 -> -1. */
+	bme280_unpack_h4_h5((const uint8_t[3]){ 0xFF, 0xF8, 0xFF }, &h4, &h5);
+	zassert_equal(h4, -8);
+	zassert_equal(h5, -1);
+}
+
+/* ------------------------------------------------------------------ */
 /* lis2dw12 (v0.2 chip)                                                */
 /* ------------------------------------------------------------------ */
 
@@ -709,12 +761,13 @@ ZTEST(alp_chips, test_bmp581_set_sampling_accepts_every_declared_odr)
 /* src/fake_<chip>.c, attaches to i2c0_emul at the chip's default I2C   */
 /* address, and exposes inspection helpers via fakes.h.                  */
 /*                                                                      */
-/* TEMPORARILY GATED — the fake EMUL_DT_INST_DEFINE pattern needs a     */
-/* paired DEVICE_DT_INST_DEFINE for Zephyr 3.7's native_sim x86 link    */
-/* to resolve `__device_dts_ord_<N>` references the parent i2c-emul     */
-/* controller's emuls_<N> array generates.  Tracked as a v0.2 follow-   */
-/* up; gated on DT_NODE_EXISTS so the tests are no-ops while the        */
-/* overlay's fake_* nodes are commented out.                             */
+/* DORMANT -- the fake i2c-emul targets are compiled out by              */
+/* maintainer decision (commit 4b0b33d5): driver register-protocol       */
+/* validation moved to real silicon via examples/v2n/v2n-brd-i2c-bringup */
+/* (see CHANGELOG.md, "Removed -- chips: fake-based register tests").    */
+/* Gated on DT_NODE_EXISTS(DT_NODELABEL(fake_lsm6dso)) so this block     */
+/* compiles to nothing while the overlay's fake_* nodes stay commented   */
+/* out (see CMakeLists.txt).                                             */
 /* ==================================================================== */
 
 #if DT_NODE_EXISTS(DT_NODELABEL(fake_lsm6dso))

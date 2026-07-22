@@ -13,7 +13,7 @@ set(_alp_generated ${CMAKE_BINARY_DIR}/generated/alp.conf)
 execute_process(
     COMMAND ${Python3_EXECUTABLE} ${ALP_SDK_ROOT}/scripts/alp_project.py
             --input ${CMAKE_CURRENT_SOURCE_DIR}/board.yaml
-            --emit zephyr-conf
+            --emit zephyr-conf --core m55_he
             --output ${_alp_generated}
     RESULT_VARIABLE _alp_rv
     OUTPUT_VARIABLE _alp_stdout
@@ -22,7 +22,7 @@ execute_process(
 if(NOT _alp_rv EQUAL 0)
     message(FATAL_ERROR "alp_project.py failed (rv=${_alp_rv})\nstderr: ${_alp_stderr}")
 endif()
-list(APPEND OVERLAY_CONFIG ${_alp_generated})
+list(APPEND EXTRA_CONF_FILE ${_alp_generated})
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(aen_cc3501e_companion_tour LANGUAGES C)

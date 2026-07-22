@@ -7,6 +7,103 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.12.0 candidate
 
+### Fixed — build-plan `executionPolicy` reverted from required to optional
+
+- `#847` added `executionPolicy` to the build-plan schema's top-level
+  `required` array while `schemaVersion` stayed `const: 1` — a breaking
+  shape change with no version bump (violating ADR 0014's own
+  additive-change rule), rejecting every field-absent historical/v0.11.1
+  plan against a consumer (`tan`) that pins `schemaVersion == 1`. Reverted
+  to strict-producer / tolerant-consumer: `executionPolicy` stays in
+  `properties` (a known, validated key when present) but is no longer
+  `required` — the SDK emitter keeps emitting it unconditionally on every
+  plan regardless. Additive to schemaVersion 1, per ADR 0014; the ADR-0020
+  amendment is #856 (tracked in #855).
+
+### Fixed — flash: defer the Zephyr flash runner to the board default
+
+- `_slice_flash_recipe` hardcoded `flash_args.runner: "openocd"` for every
+  Zephyr slice, but no in-tree board registers an openocd runner (AEN's
+  `board.cmake` sets `flash-runner: alif_flash`), so `west flash --runner
+  openocd` FATAL-errored — this blocked the AEN801 flash path an on-silicon
+  bench proved broken. Now no runner is forced: `zephyr_west_flash` omits
+  `--runner` unless `flash_args.runner` is explicitly set, and `west flash`
+  falls back to the board's own `board.cmake` default. `build-plan`'s
+  `debug.probe` follows suit (null unless a runner is explicitly configured).
+
+### Added — build-plan envelope `executionPolicy`
+
+- `--emit build-plan`'s top-level envelope now carries `executionPolicy`
+  (`{"unknownBackend": "fail", "missingTool": "skip", "nullCommand": "skip"}`)
+  — the skip-vs-fail rules `Orchestrator._dispatch_slice` itself applies,
+  published so a plan consumer stops hand-porting that logic. Additive per
+  ADR 0014's additive-change rule — no `schemaVersion` bump.
+
+### Added — build-plan per-slice `envAppendPath` (ADR-0020 item 3)
+
+- `--emit build-plan`'s per-slice object now carries `envAppendPath`, a map
+  of `{VAR: [values]}` the consumer must APPEND (`os.pathsep`-joined) to its
+  own subprocess env, distinct from the existing `env` (set-verbatim).
+  Emitted today: `EXTRA_ZEPHYR_MODULES` → `[<sdk root>]` and `PYTHONPATH` →
+  `[<sdk root>/scripts]`, matching the append a real `west build` gets from
+  `_alp_common.env_with_sdk` / `_workspace.subprocess_env`. Closes the
+  `--emit` env leak — a plan consumer no longer has to hand-port the
+  SDK-module/PYTHONPATH append. Additive per ADR 0014's additive-change
+  rule — no `schemaVersion` bump.
+### Fixed — Windows: forward-slash the emitted `-DPython3_EXECUTABLE`
+
+- The Zephyr slice command baked `-DPython3_EXECUTABLE=<sys.executable>`
+  verbatim; on Windows that is a backslash path (`C:\Users\...`), which CMake
+  rejects with `Invalid character escape '\U'` when Zephyr expands it into a
+  custom-target command, failing the build at configure. Now forward-slashed
+  (valid on every host, a no-op on posix). Per-slice command-shape change (ADR
+  0014); found via the tan↔alp-sdk e2e build.
+
+### Removed — the `alp` console-script (ADR-0020 end-state B)
+
+- The `alp` console-script is no longer installed by `pip install -e .`.
+  Under ADR-0020, the standalone `tan` CLI is the sole user-facing command
+  surface; the `alp_cli` package stays as tan's Python backend, invoked as
+  `python -m alp_cli <sub>` by tan's `model`/`monitor`/`new-som`/`faultdecode`
+  forwarders. Use `tan <verb>` instead of `alp <verb>`. (`alp-mcp` is
+  unaffected.)
+
+### Added — build-plan envelope provenance (`sdkVersion`/`sdkCommit`, ADR 0014)
+
+- `--emit build-plan`'s top-level envelope now carries `sdkVersion` (the
+  `version:` field from `metadata/sdk_version.yaml` at emit time) and
+  `sdkCommit` (short git commit of the emitting checkout; `null` when git or
+  the `.git` directory isn't available — the emit never fails on this), so a
+  cached or materialised plan can be traced back to the exact planner
+  revision that produced it. Additive per ADR 0014's additive-change rule —
+  no `schemaVersion` bump.
+
+### Documented — #610 §4 per-slice tooling index (`toolchain`/`artifacts`/`debug`)
+
+- The per-slice `toolchain`, `artifacts`, and `debug` objects (#610 §4)
+  shipped in an earlier release with no CHANGELOG entry describing their
+  shape. Documenting now: `toolchain` is the slice's compiler identity
+  (`targetTriple`, `compiler`, `sysroot`, `id` — grounded in the SoM
+  preset's `topology.<core>.toolchain`, never invented); `artifacts` is the
+  slice's deterministic OUTPUT paths under `buildDir` (`elf`, `map`, `bin`,
+  `sizeReport`, `symbols`, `compileCommands` — the WHERE, not a promise the
+  files exist until the slice is built); `debug` is the headless
+  console/probe selectors (`console`, `probe`) derived from
+  `diagnostics.console:` and the resolved flash recipe. A field genuinely
+  not derivable for a runtime (e.g. a Yocto slice's exact GCC triple) is
+  `null`, never guessed. See `metadata/schemas/build-plan-v1.schema.json`.
+
+### Fixed — build-plan tooling-index sub-keys were accidentally snake_case
+
+- `toolchain.target_triple` and `artifacts.size_report` /
+  `artifacts.compile_commands` had landed in snake_case inside the
+  otherwise camelCase-locked build-plan contract (ADR 0014). Renamed to
+  `toolchain.targetTriple` / `artifacts.sizeReport` /
+  `artifacts.compileCommands`. No known consumer parses these sub-keys yet
+  (alp-sdk-vscode's cli-rs deliberately models only the core slice;
+  alp-studio doesn't parse the tooling index), so this ships as a
+  pre-release correction rather than a `schemaVersion` bump.
+
 ## [v0.11.1] - 2026-07-17
 
 ### Fixed — E1M-AEN801 customer path: build, flash, run, and VS Code all traced to stale docs describing an abandoned direction (#834)

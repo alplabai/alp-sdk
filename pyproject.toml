@@ -44,8 +44,11 @@ mcp = [
     "mcp>=1.2",
 ]
 
+# No `alp` console-script: `tan` (the standalone Rust CLI) is the sole
+# user-facing command surface (ADR-0020 end-state B). The `alp_cli` package
+# stays as tan's Python backend, invoked as `python -m alp_cli <sub>` — never
+# as a user-installed `alp` binary.
 [project.scripts]
-alp = "alp_cli.main:cli"
 alp-mcp = "alp_mcp.server:main"
 
 [tool.setuptools]

@@ -45,6 +45,7 @@ PROJECT_EMIT_MODES = [
     "composed-route-table",
     "carrier-netlist",
     "zephyr-board",
+    "scaffold",
 ]
 
 # Mirror the orchestrator's --emit choices (alp_orchestrate.cli) == the
@@ -82,8 +83,13 @@ EMIT_MODES = PROJECT_EMIT_MODES + [
 @click.option("--build-root", default=None, type=click.Path(path_type=Path),
               help="Build root used for build-plan slice paths "
                    "(default: build).")
+@click.option("--template", default=None,
+              help="Template catalog id (--emit scaffold only).")
+@click.option("--sku", default=None,
+              help="Target SoM SKU (--emit scaffold only).")
 def emit_cmd(mode: str, input_path: Path | None, output: Path | None,
-             core: str | None, build_root: Path | None) -> None:
+             core: str | None, build_root: Path | None,
+             template: str | None, sku: str | None) -> None:
     root = sdk_root()
     if root is None:
         click.echo(
@@ -92,6 +98,15 @@ def emit_cmd(mode: str, input_path: Path | None, output: Path | None,
             err=True,
         )
         raise SystemExit(1)
+
+    # scaffold materialises a NEW project -- there is no board.yaml to
+    # find yet, so it skips the project-discovery step every other mode
+    # needs.
+    if mode == "scaffold":
+        rc = _emit_scaffold(root, template, sku, output)
+        if rc != 0:
+            raise SystemExit(rc)
+        return
 
     if input_path is None:
         project = find_project(Path.cwd())
@@ -112,6 +127,36 @@ def emit_cmd(mode: str, input_path: Path | None, output: Path | None,
                                     build_root)
     if rc != 0:
         raise SystemExit(rc)
+
+
+def _emit_scaffold(root: Path, template: str | None, sku: str | None,
+                   output: Path | None) -> int:
+    """`--emit scaffold` -- `scripts/alp_project.py --emit scaffold
+    --template <id> --sku <SKU>`. Needs neither a project board.yaml
+    nor --core/--build-root (see `emit_cmd`'s early dispatch)."""
+    if not template or not sku:
+        click.echo("alp emit: --emit scaffold requires --template and --sku",
+                   err=True)
+        return 1
+    cmd = [python_exe(), str(root / "scripts" / "alp_project.py"),
+           "--emit", "scaffold", "--template", template, "--sku", sku]
+    if output is None:
+        return subprocess.run(cmd, env=subprocess_env(root)).returncode
+
+    # Same capture-then-write pattern as _emit_via_orchestrator's
+    # --output handling: alp_project.py prints the JSON envelope to
+    # stdout; --output is CLI plumbing on top of that.
+    proc = subprocess.run(cmd, env=subprocess_env(root),
+                          capture_output=True, text=True)
+    if proc.stderr:
+        click.echo(proc.stderr, err=True, nl=False)
+    if proc.returncode != 0:
+        return proc.returncode
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(proc.stdout, encoding="utf-8")
+    click.echo(f"alp emit: wrote {output} ({len(proc.stdout)} bytes)",
+               err=True)
+    return 0
 
 
 def _emit_via_alp_project(root: Path, mode: str, input_path: Path,

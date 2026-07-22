@@ -46,17 +46,20 @@ source ../.venv/bin/activate
 export ZEPHYR_BASE="$PWD/../zephyr"
 
 # Sanity-check the host -- catches a missing toolchain/HAL before it bites later
-alp doctor
+tan doctor
 
-# Scaffold + run a hello-world on native_sim — no hardware needed
-alp init my-app
+# One-time: install the standalone build executor (needs a Rust toolchain / rustup)
+cargo install --git https://github.com/alplabai/tan-cli --bin tan
+
+# Scaffold a hello-world, then let tan build it for native_sim — no hardware needed
+tan init my-app
 cd my-app
-alp run
+tan build --native
 ```
 
-`bash scripts/bootstrap.sh` is what actually gets `west` (and everything else `alp build`/`alp run` shell out to) onto `PATH` — skipping it is the #1 way this Quickstart fails on a fresh clone; see [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md) for the per-OS manual equivalent. `alp init` walks you through SoM SKU + board preset + starter peripherals interactively, or accepts `--som`, `--preset`, `--peripherals` flags for CI. `alp run` builds for `native_sim` by default and prints the app's stdout straight through; pass `--board <name>` for a real-hardware build (`--flash` to chain flash).
+`bash scripts/bootstrap.sh` is what actually gets `west` (and everything else `tan build` shells out to) onto `PATH` — skipping it is the #1 way this Quickstart fails on a fresh clone; see [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md) for the per-OS manual equivalent. `tan` is not installed by `bootstrap.sh` -- it's a separate public Rust binary from [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli); `cargo install --git https://github.com/alplabai/tan-cli --bin tan` needs `rustup`/`cargo` on `PATH` first. `tan init` walks you through SoM SKU + board preset + starter peripherals interactively, or accepts `--som`, `--preset`, `--peripherals` flags for CI. `tan build` (`--native` is the default, explicit-opt-in spelling) consumes the SDK's build plan, materialises it, and runs each slice's `west`/`bitbake`/`cmake` command directly -- whatever `board.yaml` targets, native_sim or real silicon; it never runs the produced binary itself (that's `tan run`). Flashing real hardware is `tan flash`.
 
-`alp validate board.yaml` runs the diagnostic-rich validator standalone — try it on a fixture under `tests/fixtures/board_yaml_bad/` to see the format.  `alp doctor` triages the host environment (PASS/WARN/FAIL with fix hints) whenever a build machine misbehaves.  The full verb set — `build` / `flash` / `emit` / `size` / `image` / `clean` / `renode` / `monitor` / `new-som` / `model` and friends — is documented in [`docs/cli.md`](docs/cli.md).
+`tan validate board.yaml` runs the diagnostic-rich validator standalone — try it on a fixture under `tests/fixtures/board_yaml_bad/` to see the format.  `tan doctor` triages the host environment (PASS/WARN/FAIL with fix hints) whenever a build machine misbehaves.  alp-sdk is plans-only — it emits `build-plan` / `system-manifest`; the whole build / flash / size / image / clean / renode surface lives in the standalone [`tan` CLI](https://github.com/alplabai/tan-cli).  alp-sdk's own remaining verb set — `emit` / `validate` / `doctor` / `monitor` / `new-som` / `model` and friends — is documented in [`docs/cli.md`](docs/cli.md).
 
 ## Two consumer paths
 
@@ -184,7 +187,7 @@ Each entry under `cores:` maps one on-die programmable core to a
 runtime (`yocto`, `zephyr`, `baremetal`, or `off`) plus its app
 slice.  The loader (`scripts/alp_project.py`) fans out per-core:
 each Zephyr slice gets a Kconfig fragment layered onto its own
-`prj.conf` via `OVERLAY_CONFIG`; each Yocto slice gets a
+`prj.conf` via `EXTRA_CONF_FILE`; each Yocto slice gets a
 `local.conf` snippet consumed by bitbake.  Inside each
 `cores.<id>` block every field except `os:` + `app:` is optional;
 the [`gpio-button-led` example](examples/peripheral-io/gpio-button-led/) for
@@ -260,7 +263,7 @@ Two complementary surfaces:
   alp-sdk itself) adds schema-aware `board.yaml` editing (autocomplete
   on SKUs/boards/libraries, inline validator diagnostics in the Problems
   panel), a GUI configurator panel with dropdowns for supported SoM
-  presets and boards, west wrappers (build / flash / run native_sim),
+  presets and boards, `tan` wrappers (build / flash / run native_sim),
   per-OS dependency bootstrap, and a one-keypress "Generate all" for the
   emit modes.
 
@@ -360,16 +363,16 @@ verification (`⏳`/`🟡`/`✅` rows) lives in
   - **Renesas DRP-AI3** — RZ/V2N (V2N family); supports YOLO v5 / v8 detection on top of classification + segmentation models.
   - **DEEPX DX-M1** — V2N + DX-M1 (V2M family); ONNX → DXNN compiler, model-family agnostic; first-class support for YOLO v5 / v8 / NAS detection backbones.
   - **CPU** — reference-kernel fallback on any target
-- **Portable model pipeline (`.alpmodel`)** — `alp model build` compiles a source model for **every** NPU back-end the SoM declares into one **fat multi-backend `.alpmodel`** package (CBOR manifest + per-backend blobs + a capability `requires` envelope). At runtime **`alp_inference_open_alpmodel()`** loads the package and a selection engine picks the matching blob (silicon ref + SRAM-fit + `preferred_backend` tiebreak; `ALP_ERR_NO_FIT` if none fits), then dispatches through the backend registry below. One model, portable across NPUs without source changes.
+- **Portable model pipeline (`.alpmodel`)** — `tan model build` compiles a source model for **every** NPU back-end the SoM declares into one **fat multi-backend `.alpmodel`** package (CBOR manifest + per-backend blobs + a capability `requires` envelope). At runtime **`alp_inference_open_alpmodel()`** loads the package and a selection engine picks the matching blob (silicon ref + SRAM-fit + `preferred_backend` tiebreak; `ALP_ERR_NO_FIT` if none fits), then dispatches through the backend registry below. One model, portable across NPUs without source changes.
 - Offline training (off-device) lives in TensorFlow / PyTorch.
 
 ### Dev tooling
 
 - **`board.yaml` project config** — single source of truth, covering: board identity (`name` / `description` / `hw_rev`, or `preset:` for the EVKs), SoM SKU + `hw_rev`, per-core runtime + app + peripherals + libraries + inference + iot + `memory` (stack/heap) + `power` (sleep/wakeup), board-side `populated:` chip list + `e1m_routes:` pad-to-macro routing (8 sections: gpio/buses/pwm/adc/dac/i2s/can/qenc, with `active_low` / `pull` / `debounce_ms`), used-pad subset `pins:`, cross-core `ipc:`, `boot:` (MCUboot config → sysbuild overlay), `ota:` (Mender config → Yocto local.conf), `storage:` (flash partitions), `security.psa:` (TF-M + persistent key slots), and `diagnostics:` with per-module log-level overrides
 - **`scripts/alp_project.py`** — emits Zephyr Kconfig fragments, plain-CMake `-D` flags, Yocto `local.conf` snippets, DTS overlays, or the `<alp_hw_info_build.h>` companion header
-- **`scripts/validate_board_yaml.py`** — customer-side linter (exit 0 / 1 schema / 2 missing-preset / 3 hw_rev incompatible)
+- **`scripts/validate_board_yaml.py`** — customer-side linter (exit 0 clean / 1 diagnostics-or-consistency failure)
 - **`scripts/program_eeprom.py`** — packs board.yaml + serial + mfg date into the 128-byte EEPROM manifest for production-test programming
-- **VS Code extension** ([`alplabai/alp-sdk-vscode`](https://github.com/alplabai/alp-sdk-vscode)) — schema-aware `board.yaml` editor, GUI configurator, west wrappers, per-OS bootstrap, inline validator diagnostics
+- **VS Code extension** ([`alplabai/alp-sdk-vscode`](https://github.com/alplabai/alp-sdk-vscode)) — schema-aware `board.yaml` editor, GUI configurator, `tan` wrappers, per-OS bootstrap, inline validator diagnostics
 
 ### Alp SDK (`<alp/...>`)
 
@@ -406,7 +409,7 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference bo
   ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────┐
   │ AI Models &   │ ─► │  Train (off-device):  TensorFlow · PyTorch  →  .tflite / .onnx         │
   │ Pipeline      │    │                                                                        │
-  │               │    │  Compile (host):  alp model build  →  one fat .alpmodel package        │
+  │               │    │  Compile (host):  tan model build  →  one fat .alpmodel package        │
   │               │    │     per-backend blobs:  Vela (Ethos-U) · DRP-AI · dxcom · CPU/TFLM     │
   │               │    │                                                                        │
   │               │    │  Model families:  classification · detection (YOLO v5/v8) ·            │
@@ -416,10 +419,11 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference bo
   └───────────────┘    └────────────────────────────────────────────────────────────────────────┘
           │
   ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────┐
-  │ Dev Tooling   │ ─► │  board.yaml · alp_project.py (per-core emit) · alp_orchestrate/        │
-  │               │    │  west alp-build / alp-image / alp-flash / alp-clean                    │
+  │ Dev Tooling   │ ─► │  board.yaml · alp_project.py (per-core emit) · alp_orchestrate         │
+  │               │    │  --emit build-plan/system-manifest  →  tan (executor)                  │
+  │               │    │  tan build / flash / image / size / renode / clean                     │
   │               │    │  validate_board_yaml.py · program_eeprom.py · VS Code extension        │
-  │               │    │  alp model build  →  .alpmodel   (the model-compile front-end)         │
+  │               │    │  tan model build  →  .alpmodel   (the model-compile front-end)         │
   └───────────────┘    └────────────────────────────────────────────────────────────────────────┘
           │
   ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────┐
@@ -578,10 +582,11 @@ cmake -B build -DALP_BUILD_TESTS=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
 
-# Zephyr (heterogeneous slice)
+# Zephyr (heterogeneous slice) -- tan is the executor; it consumes this
+# checkout's --emit build-plan output
 west init -m https://github.com/alplabai/alp-sdk --mr main alp-ws
 cd alp-ws && west update
-west alp-build examples/multicore/rpmsg-v2n
+tan --project examples/multicore/rpmsg-v2n build
 ```
 
 ## Repository layout

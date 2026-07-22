@@ -200,7 +200,7 @@ matching CHANGELOG `[v0.6.0]` entries.
 The 2026-07 CX batch (PRs #319..#335): `<alp/version.h>`, the SE-backed
 SoC-identity / power-profile / core-boot surfaces, I²C/SPI target
 (slave) mode + `alp_init`/`alp_deinit`, DAC capabilities + the analog/WDT
-API-consistency renames, the `alp` CLI front door, and the portable-API
+API-consistency renames, the `tan` CLI front door, and the portable-API
 conformance suite.  native_sim coverage lands with the code; every
 silicon-facing row is bench-gated as usual.
 
@@ -234,7 +234,7 @@ been green on `main` for at least two consecutive PRs.
 | VS Code extension build (split repo) | [`alplabai/alp-sdk-vscode` &mdash; ci workflow](https://github.com/alplabai/alp-sdk-vscode/actions/workflows/ci.yml) | ✅ verified |
 | `coverity.yml` weekly scan | `coverity.yml` | ✅ verified |
 | Portable-API conformance suite (13 classes × 8 cases, `alp_sdk.conformance.portable_api`) | `pr-twister.yml` (`tests/zephyr/conformance/`) | ✅ verified |
-| `alp` CLI verbs (`init` / `new-som` / `build` / `run` / `flash` / `emit` / `validate` / `doctor` / `monitor`) | click-runner pytest (`tests/scripts/test_alp_cli*.py`) via `pr-metadata-validate.yml` + `cross-platform-zephyr.yml` | ✅ verified |
+| `tan`'s Python backend (`alp_cli`) non-build verbs (`init` / `new-som` / `validate` / `model` / `doctor` / `run` / `monitor` / `explain` / `faultdecode` / `emit` / `generate`) | click-runner pytest (`tests/scripts/test_alp_cli*.py`) via `pr-metadata-validate.yml` + `cross-platform-zephyr.yml` | ✅ verified |
 
 ---
 

@@ -91,8 +91,18 @@ def generate_cmd(
     alp_template = _load_alp_template()
     resolved_params = _parse_params(params)
     try:
+        # issue #864 Fable-review MINOR G: route through the same
+        # render_to_envelope() scaffold-adaptation `alp emit scaffold`
+        # uses (core/CMakeLists.txt/README.md), for the template's own
+        # canonical sku -- otherwise the two customer-facing scaffold
+        # front doors silently disagreed on content (this one shipped
+        # the unmodified example; the other, ALP_SDK_ROOT-hardened /
+        # dangling-link-free).
+        record = alp_template.find_template(alp_template.load_catalog(), template_id)
+        sku = alp_template.default_sku(record)
         result = alp_template.render(
             template_id, dest, resolved_params, dry_run=dry_run, force=force,
+            sku=sku,
         )
     except alp_template.TemplateError as exc:
         click.echo(f"alp generate: {exc}", err=True)

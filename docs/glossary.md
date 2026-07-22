@@ -243,7 +243,7 @@ ACT88760 (primary) + DA9292 (secondary).
 
 **`prj.conf`** -- Zephyr's per-application Kconfig fragment.
 Mostly empty in SDK examples -- the loader emits the real config
-via `OVERLAY_CONFIG`.
+via `EXTRA_CONF_FILE`.
 
 ## Q-Z
 
@@ -322,11 +322,11 @@ V2N modules.  Owns peripherals that don't fit on the main SoC's
 pinmux.  See [`docs/gd32-bridge.md`](gd32-bridge.md).
 
 **System manifest** -- `build/system-manifest.yaml`, the generated
-artefact produced by `west alp-build` that captures every slice's
-output binary, every IPC carve-out's resolved address, the boot
-order, and pointers to helper-MCU firmware.  The single source of
-truth consumed by `west alp-image`, `west alp-flash`, the OTA
-bundler, and (eventually) alp-studio.
+artefact produced by `tan build` (seeded by the SDK's `alp_orchestrate
+--emit system-manifest`) that captures every slice's output binary,
+every IPC carve-out's resolved address, the boot order, and pointers
+to helper-MCU firmware.  The single source of truth consumed by `tan
+image`, `tan flash`, the OTA bundler, and (eventually) alp-studio.
 
 **Target mode** -- Operating an I²C or SPI controller as the bus
 *target* (slave): an external controller owns the clock and our
@@ -346,7 +346,7 @@ version-pinned, built in alp-sdk CI for at least one board per
 supported family, ships a teaching example -- breakage blocks
 release.  **Tier B (recipe-only):** wiring + compatibility metadata
 are maintained and emitted, but the library is not built in alp-sdk
-CI; `alp doctor` labels it.  Promotion B → A requires a dedicated
+CI; `tan doctor` labels it.  Promotion B → A requires a dedicated
 owner and a CI build lane.  (Distinct from the driver/library
 integration ladder in
 [ADR 0017](adr/0017-alp-sdk-over-the-vendor-sdk.md).)
@@ -364,9 +364,15 @@ SKUs `E1M-V2M101` / `E1M-V2M102`.  See
 [`docs/soms/v2n-m1.md`](soms/v2n-m1.md).
 
 **west** -- Zephyr's meta-tool for workspace management +
-sub-commands.  The SDK ships an extension command `west alp-build`
-that pre-flights `board.yaml` validation before delegating to
-`west build`.
+sub-commands.  alp-sdk is plans-only (ADR
+[0020](adr/0020-sdk-owns-build-execution.md)) and no longer ships a
+build-executing west extension; building goes through the standalone
+`tan` CLI (`tan build`), which pre-flights `board.yaml` validation
+before delegating to `west build`.  The SDK still ships the
+non-build west extension commands `west alp-migrate` (board.yaml
+schema migration), `west alp-lock` (dependency lockfile), `west
+alp-quality` (quality-task registry), and `west alp-emit` (artefact
+inspector).
 
 **Wi-Fi 6** -- 802.11ax.  AEN's CC3501E + V2N's Murata module
 both support it.

@@ -62,6 +62,13 @@ flashcp -v bl2_bp_spi.bin /dev/mtd0
 reboot
 ```
 <!-- cross-platform-lint:resume -->
+
+> **Now automated for the M33 image.** The M33 firmware write above
+> (`flash_erase` + `mtd_debug write` to `/dev/mtd1 0x1a0000`) is exactly what
+> the `rzv2n_mtd_flash` west runner performs end-to-end, with a byte-exact md5
+> readback: `west flash --host <board-ip>` for the `alp_e1m_v2n101_m33_sm` /
+> `alp_e1m_v2m101_m33_sm` boards. The manual steps here remain the recovery
+> path and the only way to also reflash BL2 (`bl2_bp_spi.bin`).
 Recovery if a bad BL2 won't boot: SCIF Flash Writer + a known-good `bl2_bp_spi*.srec`.
 
 ## Verify from the GD32 side (J-Link, no CM33 console needed)

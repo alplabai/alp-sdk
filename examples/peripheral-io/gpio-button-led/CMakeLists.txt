@@ -22,7 +22,7 @@ set(_alp_generated ${CMAKE_BINARY_DIR}/generated/alp.conf)
 execute_process(
     COMMAND ${Python3_EXECUTABLE} ${ALP_SDK_ROOT}/scripts/alp_project.py
             --input ${CMAKE_CURRENT_SOURCE_DIR}/board.yaml
-            --emit zephyr-conf
+            --emit zephyr-conf --core m55_hp
             --output ${_alp_generated}
     RESULT_VARIABLE _alp_rv
     OUTPUT_VARIABLE _alp_stdout
@@ -36,11 +36,11 @@ if(NOT _alp_rv EQUAL 0)
 endif()
 
 # Layer the generated CONFIG_* lines over prj.conf via Zephyr's
-# OVERLAY_CONFIG mechanism.  Must be set before find_package(Zephyr).
+# EXTRA_CONF_FILE mechanism.  Must be set before find_package(Zephyr).
 # `rsource` is NOT valid in .conf files (it is a Kconfig-source
 # directive only), which is why prj.conf can't pull the generated
 # fragment in itself.
-list(APPEND OVERLAY_CONFIG ${_alp_generated})
+list(APPEND EXTRA_CONF_FILE ${_alp_generated})
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(gpio_button_led LANGUAGES C)

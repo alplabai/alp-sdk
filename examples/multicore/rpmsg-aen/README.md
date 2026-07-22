@@ -64,7 +64,7 @@ ships the authoritative `boot_order:` block.)
 
 ```bash
 cd alp-workspace
-west alp-build alp-sdk/examples/multicore/rpmsg-aen
+tan build alp-sdk/examples/multicore/rpmsg-aen
 ```
 
 The orchestrator fans out:
@@ -75,7 +75,7 @@ The orchestrator fans out:
 Iterate on the M-side only:
 
 ```bash
-west alp-build alp-sdk/examples/multicore/rpmsg-aen --core m55_hp
+tan build alp-sdk/examples/multicore/rpmsg-aen --core m55_hp
 ```
 
 ## Reference

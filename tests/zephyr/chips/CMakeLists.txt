@@ -10,8 +10,14 @@ project(alp_sdk_chips_test LANGUAGES C)
 # test_power.c can directly exercise da9292_poll_budget_step(), the
 # #757 poll-budget boundary logic the I2C test double's address-keyed
 # (not per-register) canned-response model can't reach end-to-end.
+#
+# bme280_internal.h (chips/bme280/) is the same pattern -- it exists
+# only so test_sensors.c can directly exercise bme280_unpack_h4_h5(),
+# the #797 H4/H5 shared-nibble unpack the disabled i2c-emul fake can't
+# reach (see the fake-fixtures note below).
 target_include_directories(app PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../chips/da9292)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../chips/da9292
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../chips/bme280)
 
 target_sources(app PRIVATE
     src/main.c
@@ -32,12 +38,13 @@ target_sources(app PRIVATE
 )
 
 # Fake i2c-emul fixtures (fake_lsm6dso / fake_ssd1306 / fake_bme280)
-# are temporarily disabled -- the EMUL_DT_INST_DEFINE pattern they
-# use needs a paired DEVICE_DT_INST_DEFINE for Zephyr 3.7's
-# native_sim x86 link to resolve `__device_dts_ord_<N>` external
-# references for the parent i2c-emul controller's child list.
-# Re-enable after sorting that out (tracked as a v0.2 follow-up;
-# the fake-using ZTESTs are gated on CONFIG_TEST_FAKES_ENABLED).
+# are compiled out by maintainer decision (commit 4b0b33d5): driver
+# register-protocol validation happens on real silicon via
+# examples/v2n/v2n-brd-i2c-bringup, not against these doubles (see
+# CHANGELOG.md, "Removed -- chips: fake-based register tests"). The
+# fake-using ZTESTs stay in tree but are gated on
+# DT_NODE_EXISTS(DT_NODELABEL(fake_lsm6dso)) so they compile to
+# no-ops while the fake_* nodes below stay commented out.
 #
 # target_sources(app PRIVATE
 #     src/fake_lsm6dso.c

@@ -8,20 +8,20 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 # Emit into a generated/ subdir so the file escapes Zephyr's
 # ${APPLICATION_BINARY_DIR}/*.conf GLOB, and APPEND (don't overwrite)
-# OVERLAY_CONFIG so a per-example native_sim.conf can also layer in.
+# EXTRA_CONF_FILE so a per-example native_sim.conf can also layer in.
 set(_alp_generated ${CMAKE_BINARY_DIR}/generated/alp.conf)
 execute_process(
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/../../../scripts/alp_project.py
             --input  ${CMAKE_CURRENT_SOURCE_DIR}/board.yaml
             --output ${_alp_generated}
-            --emit zephyr-conf
+            --emit zephyr-conf --core m55_hp
     RESULT_VARIABLE rc
 )
 if(NOT rc EQUAL 0)
     message(FATAL_ERROR "alp_project.py failed (rc=${rc})")
 endif()
-list(APPEND OVERLAY_CONFIG ${_alp_generated})
+list(APPEND EXTRA_CONF_FILE ${_alp_generated})
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(lvgl_benchmark LANGUAGES C)

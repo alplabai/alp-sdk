@@ -120,7 +120,7 @@ alp-sdk/
 │   ├── gen_board_header.py        # board YAML → include/alp/boards/<board>_routes.h
 │   ├── validate_board_yaml.py       # board.yaml schema check
 │   ├── validate_metadata.py         # SoC / SoM / board preset schema check
-│   └── west_commands/               # `west alp-image`, `west alp-flash`
+│   └── west_commands/               # `west alp-migrate`, `west alp-lock`, `west alp-quality`, `west alp-emit`
 ├── west.yml                         # Zephyr-side manifest
 ├── zephyr/
 │   ├── module.yml                   # makes the repo importable as a Zephyr module
@@ -204,10 +204,11 @@ board.yaml (`cores:`)
    {core_id: Slice}               # one Slice per non-off core
         │
         ▼
-   Orchestrator.fan_out()         # materialise alp.conf / local.conf / cmake-args
-        │                         # per slice under build/<core>-<os>/
+   --emit build-plan              # plan JSON: per-slice command + generated files (ADR 0014)
+        │
         ▼
-   build/system-manifest.yaml     # content-addressed; deterministic across rebuilds
+   tan materialise                # writes alp.conf / local.conf / cmake-args per slice
+                                   # under build/<core>-<os>/, then runs each slice's build
 ```
 
 OS inference defaults are silicon-class driven: Cortex-M cores
@@ -280,7 +281,7 @@ The active generators are:
 
 | Script                                  | Reads                                                | Writes                                                                         |
 |-----------------------------------------|------------------------------------------------------|--------------------------------------------------------------------------------|
-| `scripts/alp_orchestrate/`            | `board.yaml` + SoM preset + SoC JSON + board preset| `build/system-manifest.yaml`, `build/generated/alp/system_ipc.h`, `build/generated/dts-reservations.dtsi`, `build/alp_sysbuild.conf` (when `boot:` declared), per-slice `alp.conf` / `local.conf` / `cmake-args.txt`; also `--emit build-plan` — the machine-readable plan JSON external build front-ends consume (ADR 0014) |
+| `scripts/alp_orchestrate/`            | `board.yaml` + SoM preset + SoC JSON + board preset| Emits (via `--emit`; `tan` materialises to disk -- ADR 0020): `build/system-manifest.yaml`, `build/generated/alp/system_ipc.h`, `build/generated/dts-reservations.dtsi`, `build/alp_sysbuild.conf` (when `boot:` declared), per-slice `alp.conf` / `local.conf` / `cmake-args.txt`; also `--emit build-plan` — the machine-readable plan JSON `tan` consumes as its sole build input (ADR 0014 contract, ADR 0020 executor) |
 | `scripts/alp_project.py`                | same inputs as orchestrator                          | Per-slice emits: `--emit zephyr-conf`, `--emit yocto-conf`, `--emit cmake-args`, `--emit dts-overlay`, `--emit hw-info-h`, `--emit west-libraries`; also `--emit composed-route-table` (JSON SoM × board route-table demonstrator), `--emit carrier-netlist` (Studio-facing carrier nets + BOM handoff, not PCB layout), and `--emit zephyr-board` (per-core Zephyr board tree -- see below) |
 | `scripts/gen_soc_caps.py`               | `metadata/socs/**/*.json`                            | `include/alp/soc_caps.h` (per-SoC `ALP_SOC_*_COUNT` + `ALP_SOC_*_MAX_*` macros) |
 | `scripts/gen_board_header.py`         | `metadata/boards/<name>.yaml`                       | `include/alp/boards/alp_<board>_routes.h` (board macro mapping)            |
@@ -350,7 +351,7 @@ not others.
 | BLE              | `alp/ble.h`          | AEN CC3501E backend or Zephyr `bt` host stack (peripheral + central + GATT). | v0.1 surface; impl v0.3 |
 | Security         | `alp/security.h`     | MbedTLS PSA Crypto API (Zephyr) + OpenSSL `EVP_*` (Yocto).      | v0.1 surface; Yocto OpenSSL backend (SHA-256/384/512, AES-128/256-GCM, ChaCha20-Poly1305, `alp_random_bytes`) code complete v0.4-prep with KATs green at `tests/yocto/security_openssl.c`; Zephyr MbedTLS impl v0.3 |
 | Multi-proc IPC   | `alp/mproc.h`        | Zephyr `mbox_*` (MHU on Alif), `hwsem_*`, shared-memory regions, plus framed RPC over RPMsg / OpenAMP (`rpc.h`, opened with the generated `system_ipc.h`); placeholder framing helper at `src/common/proto/alp_mproc_frame.{h,c}` (replaced by nanopb-generated codec once `extras-lwrb-nanopb` lands -- interim/deferred as of v0.9, no committed version). | v0.1 surface; framing scaffolding shipping (interim); full impl v0.3+ |
-| Inference        | `alp/inference.h` / `backend.h` | Registry-backed dispatcher + the backend-registration seam, fronted by the **`.alpmodel`** runtime loader: `alp_inference_open_alpmodel()` → a pure selection engine (silicon-ref availability + SRAM-fit `requires` check + `preferred_backend` tiebreak, `ALP_ERR_NO_FIT`/`NO_BACKEND` otherwise) → the existing `alp_inference_open`.  Host side: `scripts/alp_model/` (`alp model build`) compiles the fat multi-backend package (CBOR manifest + per-backend blobs).  Registered backends (M-class registry): `tflm` (CPU), `ethos_u_aen` / `ethos_u_n93` (Arm Ethos-U), `sw_fallback`; DRP-AI3 + DEEPX DX-M1 are A55/Linux-side only (`src/yocto/inference_{drpai,deepx}.cpp`, #58/#59).  Selector picks the highest-priority match for the SoM's silicon ref. | v0.5 registry + `.alpmodel` loader/selection (Stages 1a–1c); real per-NPU compiles + runtime = Stage 2, gate on licensed tools + HiL |
+| Inference        | `alp/inference.h` / `backend.h` | Registry-backed dispatcher + the backend-registration seam, fronted by the **`.alpmodel`** runtime loader: `alp_inference_open_alpmodel()` → a pure selection engine (silicon-ref availability + SRAM-fit `requires` check + `preferred_backend` tiebreak, `ALP_ERR_NO_FIT`/`NO_BACKEND` otherwise) → the existing `alp_inference_open`.  Host side: `scripts/alp_model/` (`tan model build`) compiles the fat multi-backend package (CBOR manifest + per-backend blobs).  Registered backends (M-class registry): `tflm` (CPU), `ethos_u_aen` / `ethos_u_n93` (Arm Ethos-U), `sw_fallback`; DRP-AI3 + DEEPX DX-M1 are A55/Linux-side only (`src/yocto/inference_{drpai,deepx}.cpp`, #58/#59).  Selector picks the highest-priority match for the SoM's silicon ref. | v0.5 registry + `.alpmodel` loader/selection (Stages 1a–1c); real per-NPU compiles + runtime = Stage 2, gate on licensed tools + HiL |
 | Storage          | `alp/storage.h`      | Block + filesystem (LittleFS) on Zephyr; standard FS on Yocto.  | v0.5 surface |
 | 2D graphics      | `alp/gpu2d.h`        | Portable blit/fill shim (Alif Dave2D / GPU2D); SW fallback.     | v0.5 surface; see [ADR 0008](adr/0008-gpu2d-portable-shim.md) |
 
@@ -705,7 +706,7 @@ for the full rationale and edge-case guidance.
   board-file repo.
 - **Not the studio.** Chat, allocator, the model-training pipeline, and
   fab routing stay in alp-studio.  (The SDK *does* own the on-device
-  `.alpmodel` compile/package/load pipeline — `alp model build` +
+  `.alpmodel` compile/package/load pipeline — `tan model build` +
   `alp_inference_open_alpmodel()` — which the studio builds on.)
 - **Not LVGL itself.** Upstream LVGL is included; we ship a config and
   integration only.

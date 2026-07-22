@@ -80,6 +80,14 @@ CASES = [
     ("rpmsg-imx93.build-plan",      ORCH, "examples/multicore/rpmsg-imx93/board.yaml",          "build-plan"),
     ("hetero-offload.system-manifest", ORCH, "examples/multicore/heterogeneous-offload/board.yaml", "system-manifest"),
     ("hetero-offload.build-plan",      ORCH, "examples/multicore/heterogeneous-offload/board.yaml", "build-plan"),
+    # The remaining two tests/parity/oracle/*.build-plan.json fixtures
+    # (seam-1's frozen 97ad481b oracle) that weren't otherwise covered by a
+    # build-plan case above -- added so the seam-1 retune (dropping
+    # config-artifact CONTENT from the comparator, #874 follow-up) has a
+    # byte-for-byte golden standing in for every oracle board's emitted
+    # alp.conf; see tests/parity/README.md.
+    ("audio-i2s-tone.build-plan",   ORCH, "examples/audio/i2s-tone/board.yaml",                 "build-plan"),
+    ("iot-fleet-ota.build-plan",    ORCH, "examples/connectivity/iot-fleet-ota/board.yaml",      "build-plan"),
 ]
 for _bid, _board in _PROJ_BOARDS:
     for _mode in _PROJ_MODES:
@@ -87,6 +95,44 @@ for _bid, _board in _PROJ_BOARDS:
     if _bid != "nsim":
         for _mode in _PROJ_CARRIER_MODES:
             CASES.append((f"proj-{_bid}.{_mode}", PROJ, _board, _mode))
+
+# --emit scaffold (issue #864): a render_to_envelope(template, sku) render is
+# a pure function of --template/--sku, not of a board.yaml -- `board` below
+# is unused (alp_project.py dispatches scaffold before --input is ever
+# read), kept as a real path only so `_emit`'s fixed `--input <board> --emit
+# <mode>` invocation shape needs no special-casing. Pins the minimal
+# template's E1M-V2N101 SKU-substitution (som.sku + preset) byte-for-byte.
+CASES.append((
+    "scaffold.minimal-v2n101", PROJ,
+    "examples/peripheral-io/hello-world/board.yaml", "scaffold",
+    ("--template", "minimal", "--sku", "E1M-V2N101"),
+))
+# peripheral's canonical board.yaml carries trailing inline comments on
+# BOTH its `sku:` and `preset:` lines describing the AEN801/e1m-evk
+# default (Fable review finding) -- this pins that the substitution
+# drops the stale comment along with the value, not just the token.
+# E1M-V2N101 is back in `peripheral`'s `supported.som_skus` (issue
+# #876: `_derive_pin_renames` re-derives the `pins:` block's
+# E1M-EVK-only pads to their E1M-X-EVK equivalents via the boards'
+# shared `board_alias:` join, so this is a buildable scaffold again,
+# not the dead-on-arrival one #864/#877 dropped this case for).
+CASES.append((
+    "scaffold.peripheral-v2n101", PROJ,
+    "examples/peripheral-io/gpio-button-led/board.yaml", "scaffold",
+    ("--template", "peripheral", "--sku", "E1M-V2N101"),
+))
+# sensor/edge-ai both re-derive a single `E1M_I2C0` -> `E1M_X_I2C0`
+# pin (issue #876) -- new golden coverage, no prior case existed.
+CASES.append((
+    "scaffold.sensor-v2n101", PROJ,
+    "examples/peripheral-io/i2c-master/board.yaml", "scaffold",
+    ("--template", "sensor", "--sku", "E1M-V2N101"),
+))
+CASES.append((
+    "scaffold.edge-ai-v2n101", PROJ,
+    "examples/ai/cold-chain-monitor/board.yaml", "scaffold",
+    ("--template", "edge-ai", "--sku", "E1M-V2N101"),
+))
 
 
 def _normalize_path(text: str, path: str, token: str) -> str:
@@ -116,6 +162,21 @@ def _normalize_token_tails(text: str) -> str:
         lambda m: m.group(1) + re.sub(r"\\{1,2}", "/", m.group(2)), text)
 
 
+# `sdkCommit` is the emitting checkout's short git commit (build-plan
+# provenance) -- it moves every commit, and a host without git emits `null`
+# instead of a hash, so the value can never be byte-stable across the two
+# hosts that write vs. check the goldens.  Reduce any value (hash or `null`)
+# to a token.  `sdkVersion` is deliberately left real: it comes from
+# metadata/sdk_version.yaml and only moves on a release bump, so it stays a
+# meaningful, stable part of the golden.
+_SDK_COMMIT_RE = re.compile(r'("sdkCommit":\s*)("[0-9a-f]+"|null)')
+
+
+def _normalize_provenance(text: str) -> str:
+    """Replace the volatile per-commit ``sdkCommit`` value with a stable token."""
+    return _SDK_COMMIT_RE.sub(r'\1"<SDK_COMMIT>"', text)
+
+
 def _normalize_host_paths(text: str, repo: str, python: str) -> str:
     """Replace host-specific SDK and Python paths with stable tokens.
 
@@ -128,14 +189,21 @@ def _normalize_host_paths(text: str, repo: str, python: str) -> str:
     well as the raw path. The Python executable added to Zephyr commands by
     issue #787 needs the same treatment. On POSIX the variants collapse to
     their raw paths, so the Linux output is unchanged apart from tokenisation.
+    The per-commit ``sdkCommit`` provenance value is tokenised too so the
+    goldens don't churn on every commit.
     """
     text = _normalize_path(text, repo, "<SDK_ROOT>")
     text = _normalize_path(text, python, "<PYTHON_EXECUTABLE>")
+    text = _normalize_provenance(text)
     return _normalize_token_tails(text)
 
 
-def _emit(tool: Path, board: str, mode: str) -> str:
-    """Run the emitter from the repo root; normalise the SDK-root path."""
+def _emit(tool: Path, board: str, mode: str, extra: tuple[str, ...] = ()) -> str:
+    """Run the emitter from the repo root; normalise the SDK-root path.
+
+    `extra` appends extra CLI args after `--emit <mode>` -- e.g.
+    scaffold's `--template <id> --sku <SKU>` (issue #864).
+    """
     env = {**os.environ}
     scripts_dir = str(REPO / "scripts")
     env["PYTHONPATH"] = (
@@ -143,7 +211,7 @@ def _emit(tool: Path, board: str, mode: str) -> str:
         if env.get("PYTHONPATH") else scripts_dir
     )
     rv = subprocess.run(
-        [*tool, "--input", board, "--emit", mode],
+        [*tool, "--input", board, "--emit", mode, *extra],
         capture_output=True, text=True, cwd=REPO, check=False, env=env)
     if rv.returncode != 0:
         raise SystemExit(f"check_emit_snapshots: emit failed for {board} "
@@ -159,8 +227,10 @@ def main() -> int:
     SNAP_DIR.mkdir(parents=True, exist_ok=True)
 
     stale: list[str] = []
-    for snap_id, tool, board, mode in CASES:
-        got = _emit(tool, board, mode)
+    for case in CASES:
+        snap_id, tool, board, mode, *rest = case
+        extra: tuple[str, ...] = rest[0] if rest else ()
+        got = _emit(tool, board, mode, extra)
         golden = SNAP_DIR / f"{snap_id}.snap"
         if args.update:
             golden.write_text(got, encoding="utf-8")

@@ -2,10 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """Build-plan emission -- the Wave C consumer contract.
 
-`emit_build_plan` renders the machine-readable JSON build plan the `alp` CLI
-materialises; the shared helpers `_slice_build_dir` / `_slice_config_artefact` /
-`_shared_artefacts` are the single source the Orchestrator's materialise path and
-the plan MUST agree on byte-for-byte (the CLI reads what the Orchestrator writes).
+`emit_build_plan` renders the machine-readable JSON build plan `tan`
+(alplabai/tan-cli) materialises; the shared helpers `_slice_build_dir` /
+`_slice_config_artefact` / `_shared_artefacts` are the single source the
+Orchestrator's materialise path and the plan MUST agree on byte-for-byte
+(tan reads what the Orchestrator writes).
 Extracted as the #285 build-plan emit seam. The per-slice config emitters come
 from kconfig.py, the header/secure artefacts from headers.py / secure.py; the
 orchestrator-side slice-command bits (_slice_command, STOCK_SHIM_APP) are
@@ -15,6 +16,7 @@ lazy-imported from the package (they stay inline until orchestrator.py).
 from __future__ import annotations
 
 import json
+import subprocess
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Optional
@@ -29,6 +31,16 @@ from .kconfig import (
 from .models import BoardProject, Slice
 from .paths import REPO
 from .secure import emit_sysbuild_conf, emit_tfm_sysbuild_conf
+
+# The skip-vs-fail policy a slice dispatcher MUST apply, published verbatim
+# in the plan envelope so a consumer (tan-cli) stops hand-porting it: an
+# unknown `backend` fails the slice, a missing tool on PATH or a null
+# `command` skip it.
+_EXECUTION_POLICY = {
+    "unknownBackend": "fail",
+    "missingTool":    "skip",
+    "nullCommand":    "skip",
+}
 
 
 def _slice_build_dir(build_root: Path, slice_: Slice) -> Path:
@@ -92,19 +104,19 @@ def _shared_artefacts(
 
 
 def _slice_toolchain(slice_: Slice) -> dict[str, Optional[str]]:
-    """This slice's compiler identity: `{target_triple, compiler, sysroot, id}`
+    """This slice's compiler identity: `{targetTriple, compiler, sysroot, id}`
     (#610 §4 per-slice tooling index).
 
     Grounded in the SoM preset's `topology.<core>.toolchain` -- the same
     field `Slice.to_manifest_entry` already surfaces in
     `system-manifest.yaml` -- never invented.  For a Zephyr slice this
     value (e.g. `arm-zephyr-eabi`) IS the real Zephyr SDK toolchain
-    directory name AND its GCC target triple, so `target_triple` /
+    directory name AND its GCC target triple, so `targetTriple` /
     `compiler` derive straight from it.  A Yocto slice's toolchain tag
     (`poky-glibc`) is a *category* (C-library flavour), not a literal
     GCC triple -- the real triple depends on the Yocto build's own
     TUNE_FEATURES/TCLIBC (outside board.yaml / SoM metadata), so
-    `target_triple` / `compiler` / `sysroot` stay null rather than
+    `targetTriple` / `compiler` / `sysroot` stay null rather than
     guess an ABI suffix (e.g. `gnueabi` vs `gnueabihf`).  Zephyr has no
     conventional cross-compile sysroot either (the SDK bundles its own
     libc per architecture) -- `sysroot` is null for every runtime today.
@@ -115,10 +127,10 @@ def _slice_toolchain(slice_: Slice) -> dict[str, Optional[str]]:
         target_triple = slice_.toolchain
         compiler = f"{slice_.toolchain}-gcc"
     return {
-        "target_triple": target_triple,
-        "compiler":      compiler,
-        "sysroot":       None,
-        "id":            slice_.toolchain,
+        "targetTriple": target_triple,
+        "compiler":     compiler,
+        "sysroot":      None,
+        "id":           slice_.toolchain,
     }
 
 
@@ -147,20 +159,20 @@ def _slice_artifacts(build_dir: Path, slice_: Slice) -> dict[str, Optional[str]]
     if slice_.os == "zephyr":
         zdir = build_dir / "zephyr"
         return {
-            "elf":              (zdir / "zephyr.elf").as_posix(),
-            "map":              (zdir / "zephyr.map").as_posix(),
-            "bin":              (zdir / "zephyr.bin").as_posix(),
-            "size_report":      (zdir / "zephyr.stat").as_posix(),
-            "symbols":          (zdir / "zephyr.symbols").as_posix(),
-            "compile_commands": (build_dir / "compile_commands.json").as_posix(),
+            "elf":             (zdir / "zephyr.elf").as_posix(),
+            "map":             (zdir / "zephyr.map").as_posix(),
+            "bin":             (zdir / "zephyr.bin").as_posix(),
+            "sizeReport":      (zdir / "zephyr.stat").as_posix(),
+            "symbols":         (zdir / "zephyr.symbols").as_posix(),
+            "compileCommands": (build_dir / "compile_commands.json").as_posix(),
         }
     return {
-        "elf":              None,
-        "map":              None,
-        "bin":              None,
-        "size_report":      None,
-        "symbols":          None,
-        "compile_commands": None,
+        "elf":             None,
+        "map":             None,
+        "bin":             None,
+        "sizeReport":      None,
+        "symbols":         None,
+        "compileCommands": None,
     }
 
 
@@ -179,11 +191,14 @@ def _slice_debug(
     "inherit whatever the board provides" -- not a concrete selector a
     headless consumer can act on -- so it maps to null here.  `probe`
     reuses `_slice_flash_recipe`'s already-resolved runner (the same
-    fact `west alp-flash` dispatches on, computed once per slice by the
-    caller and passed in): only the Zephyr `zephyr_west_flash` recipe
-    names an actual debug-probe runner (`openocd`); the Yocto image-
-    flash recipe and the baremetal cmake recipe don't identify a live
-    debug probe, so `probe` stays null there.
+    fact `tan flash` dispatches on, computed once per slice by the
+    caller and passed in): `_slice_flash_recipe` no longer forces a
+    runner for `zephyr_west_flash` slices (not every in-tree board
+    registers `openocd`), so `probe` is the explicitly-configured
+    runner when one is set, else null -- meaning "board.cmake default,
+    not independently knowable here".  The Yocto image-flash recipe and
+    the baremetal cmake recipe don't identify a live debug probe
+    either, so `probe` stays null there too.
     """
     console_sel = _resolve_console(
         project.diagnostics.get("console"), slice_.os, slice_.hw_console)
@@ -194,6 +209,50 @@ def _slice_debug(
     return {"console": console, "probe": probe}
 
 
+def _sdk_version() -> Optional[str]:
+    """The `version:` field out of `metadata/sdk_version.yaml` -- the single
+    source `scripts/bump_version.py` bumps and `check_version_doc_sync.py`
+    pins every other copy against.  Same read-and-strip idiom as
+    `alp_cli._version` / `check_version_doc_sync.declared_version`, kept
+    inline here rather than imported: neither of those lives on an import
+    path this package can reach without a sys.path hack (`scripts/` itself
+    carries no `__init__.py`).
+    """
+    sdk_version_yaml = REPO / "metadata" / "sdk_version.yaml"
+    try:
+        text = sdk_version_yaml.read_text(encoding="utf-8")
+    except OSError:
+        # No adjacent metadata/ tree (e.g. packaged as a wheel) -- provenance
+        # is best-effort, never a reason to fail the emit.  Mirrors the
+        # OSError guard in `alp_cli._version` and `_sdk_commit` below.
+        return None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("version:"):
+            return stripped.split(":", 1)[1].split("#", 1)[0].strip()
+    return None
+
+
+def _sdk_commit() -> Optional[str]:
+    """Short git commit of this checkout (`git rev-parse --short HEAD`), or
+    `None` when git -- or a `.git` dir -- isn't available.  Mirrors the
+    robustness of `scripts/build_receipt.py::_git_rev` (try/except over both
+    `CalledProcessError` and a missing `git` binary) rather than importing
+    it: that module isn't reachable from this package without the same
+    sys.path workaround noted on `_sdk_version` above, and receipt's variant
+    also resolves the FULL rev plus a dirty-tree flag this envelope doesn't
+    need.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(REPO), "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, check=True)
+    except (subprocess.CalledProcessError, OSError):
+        return None
+    commit = result.stdout.strip()
+    return commit or None
+
+
 def emit_build_plan(
     project: BoardProject,
     *,
@@ -202,11 +261,12 @@ def emit_build_plan(
 ) -> str:
     """Emit the machine-readable build plan as JSON (Wave C contract).
 
-    Consumed by the `alp` CLI (alp-sdk-vscode), which materialises the
-    plan's files, runs each slice's command, and owns scheduling /
-    caching / progress UX on top -- instead of re-implementing this
-    planner.  Agreed 2026-06-04 with the alp-sdk-vscode team; their
-    docs/PROPOSAL-alp-build-core.md records the settlement.
+    Consumed by `tan` (alplabai/tan-cli), which materialises the plan's
+    files, runs each slice's command, and owns scheduling / caching /
+    progress UX on top -- instead of re-implementing this planner.  The
+    Wave C contract was settled 2026-06-04 with the alp-sdk-vscode team
+    (docs/PROPOSAL-alp-build-core.md records that settlement); the real
+    parser today is tan-cli, not the alp-sdk-vscode extension itself.
 
     Contract notes (locked with the consumer -- bump `schemaVersion`
     and flag in the CHANGELOG before changing the shape):
@@ -231,20 +291,32 @@ def emit_build_plan(
       * Per-slice tooling index (#610 §4, additive to schemaVersion 1 --
         never renamed/removed, see `metadata/schemas/build-plan-v1.
         schema.json`): `toolchain` (compiler identity --
-        `_slice_toolchain`), `artifacts` (deterministic OUTPUT paths
-        under `buildDir`, not a promise they exist yet -- `_slice_
-        artifacts`), and `debug` (headless console/probe selectors --
-        `_slice_debug`).  A field genuinely not derivable for a
-        runtime (e.g. a Yocto slice's exact GCC triple) is null, never
-        guessed.
+        `_slice_toolchain`, keys `targetTriple`/`compiler`/`sysroot`/`id`),
+        `artifacts` (deterministic OUTPUT paths under `buildDir`, not a
+        promise they exist yet -- `_slice_artifacts`, keys `elf`/`map`/
+        `bin`/`sizeReport`/`symbols`/`compileCommands`), and `debug`
+        (headless console/probe selectors -- `_slice_debug`).  A field
+        genuinely not derivable for a runtime (e.g. a Yocto slice's exact
+        GCC triple) is null, never guessed.  (These three sub-objects'
+        keys were corrected from an accidental snake_case to camelCase
+        to match the rest of this contract -- see the CHANGELOG.)
+      * Envelope provenance, additive to schemaVersion 1: `sdkVersion`
+        (`metadata/sdk_version.yaml`'s `version:`, via `_sdk_version`)
+        and `sdkCommit` (`git rev-parse --short HEAD` of this checkout,
+        via `_sdk_commit`; `null` when git/`.git` isn't available -- never
+        raises) so a cached/materialised plan can be traced back to the
+        planner that produced it.
     """
     # Orchestrator-side (stay inline until orchestrator.py); lazy to avoid
     # a buildplan<->package import cycle.
     from .orchestrator import (
         STOCK_IMAGE_APP,
+        UnrootedPathError,
         _resolve_app_path,
         _slice_command,
         _slice_flash_recipe,
+        _tokenize,
+        iter_buildable_slices,
     )
     build_root = Path(build_root)
     # Anchor every slice's relative `app:` on the board.yaml's own
@@ -255,41 +327,59 @@ def emit_build_plan(
     slices_out: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
 
-    for slice_ in sorted(project.cores.values(),
-                         key=lambda s: s.core_id):
-        if slice_.os == "off":
-            continue
+    for slice_ in iter_buildable_slices(project):
         build_dir = _slice_build_dir(build_root, slice_)
         # `replace` keeps this emit side-effect free: _slice_command
         # reads `build_dir` off the slice (baremetal -B), and the
         # project's own Slice objects must stay untouched.
-        cmd = _slice_command(
-            project, replace(slice_, build_dir=build_dir),
-            base_dir=base_dir)
-        if cmd is None:
-            if (slice_.os == "yocto" and slice_.app
-                    and not slice_.image and not slice_.recipe):
-                # An app-only Yocto slice with no `recipe:` has no valid
-                # bitbake target -- `app:` is a source directory, not a
-                # recipe name (issue #597).  Block the plan explicitly
-                # instead of ever emitting `bitbake <path>`.
-                warnings.append({
-                    "code":    "yocto-recipe-missing",
-                    "coreId":  slice_.core_id,
-                    "message": (f"core '{slice_.core_id}' has app: "
-                                f"'{slice_.app}' but no recipe: -- add "
-                                f"the bitbake recipe name that packages "
-                                f"this app source, or set image: to "
-                                f"build a stock image instead"),
-                })
-            else:
-                warnings.append({
-                    "code":    "no-command",
-                    "coreId":  slice_.core_id,
-                    "message": (f"no build command for core "
-                                f"'{slice_.core_id}' (os: {slice_.os}) "
-                                f"-- missing app/board/image"),
-                })
+        try:
+            cmd = _slice_command(
+                project, replace(slice_, build_dir=build_dir),
+                base_dir=base_dir)
+        except UnrootedPathError as e:
+            # One of _slice_command's five `_tokenize` call sites (west
+            # build's app-dir arg, -DSB_CONF_FILE's two paths,
+            # -DEXTRA_CONF_FILE, cmake -S) hit a path outside both
+            # ${PROJECT_ROOT} and ${SDK_ROOT} (issue #865). Block the
+            # command rather than ever let a bare absolute path reach
+            # `command.args` on a plan tagged `planPathMode: tokened` --
+            # same "carry the slice, never emit a broken/non-hermetic
+            # command" convention as `no-command` below.
+            cmd = None
+            warnings.append({
+                "code":    "command-unrooted",
+                "coreId":  slice_.core_id,
+                "message": (f"core '{slice_.core_id}' build command would "
+                            f"embed a path outside both the project "
+                            f"({base_dir}) and the SDK checkout ({REPO}): "
+                            f"'{e}' -- blocked rather than emit a "
+                            f"non-hermetic command"),
+            })
+        else:
+            if cmd is None:
+                if (slice_.os == "yocto" and slice_.app
+                        and not slice_.image and not slice_.recipe):
+                    # An app-only Yocto slice with no `recipe:` has no valid
+                    # bitbake target -- `app:` is a source directory, not a
+                    # recipe name (issue #597).  Block the plan explicitly
+                    # instead of ever emitting `bitbake <path>`.
+                    warnings.append({
+                        "code":    "yocto-recipe-missing",
+                        "coreId":  slice_.core_id,
+                        "message": (f"core '{slice_.core_id}' has app: "
+                                    f"'{slice_.app}' but no recipe: -- add "
+                                    f"the bitbake recipe name that packages "
+                                    f"this app source, or set image: to "
+                                    f"build a stock image instead"),
+                    })
+                else:
+                    warnings.append({
+                        "code":    "no-command",
+                        "coreId":  slice_.core_id,
+                        "message": (f"no build command for core "
+                                    f"'{slice_.core_id}' (os: {slice_.os}) "
+                                    f"-- missing app/board/image"),
+                    })
         config_artefacts: list[dict[str, str]] = []
         artefact = _slice_config_artefact(project, slice_)
         if artefact is not None:
@@ -304,10 +394,32 @@ def emit_build_plan(
         # it out of a yocto/zephyr/baremetal-shaped command (issue #597).
         # `alp-image-edge` is the A-core stock-image token, not a source
         # path -- there is no app dir to report for it.
-        app_dir = (_resolve_app_path(slice_.app, base_dir).as_posix()
-                   if slice_.app and slice_.app != STOCK_IMAGE_APP else None)
+        # Tokenized (issue #865): almost every `app:` resolves under the
+        # project (`${PROJECT_ROOT}/...`); the SDK-owned stock M-core shim
+        # (STOCK_SHIM_APP) resolves under the SDK checkout instead
+        # (`${SDK_ROOT}/...`). `_tokenize` raises `UnrootedPathError` when
+        # it is under neither -- fall back to the absolute path (still
+        # useful for tooling) but flag it rather than let it silently
+        # mis-root on the consumer side.
+        app_dir = None
+        if slice_.app and slice_.app != STOCK_IMAGE_APP:
+            resolved_app = _resolve_app_path(slice_.app, base_dir)
+            try:
+                app_dir = _tokenize(resolved_app, base_dir, REPO)
+            except UnrootedPathError:
+                app_dir = resolved_app.as_posix()
+                warnings.append({
+                    "code":    "appdir-unrooted",
+                    "coreId":  slice_.core_id,
+                    "message": (f"core '{slice_.core_id}' app path "
+                                f"'{app_dir}' is outside both the project "
+                                f"({base_dir}) and the SDK checkout "
+                                f"({REPO}) -- emitted absolute; a consumer "
+                                f"on a different checkout cannot re-root "
+                                f"it"),
+                })
         # Same flash-recipe fact `Slice.to_manifest_entry` surfaces to
-        # `west alp-flash` -- reused here (not re-derived) so `debug.probe`
+        # `tan flash` -- reused here (not re-derived) so `debug.probe`
         # can never drift from the manifest's own `flash_method`/`flash_args`.
         flash_method, flash_args = _slice_flash_recipe(slice_)
         slices_out.append({
@@ -325,17 +437,49 @@ def emit_build_plan(
                 "args": cmd[1:],
                 "cwd":  build_dir.as_posix(),
             },
-            # Native host-path form: the value is handed to the slice
-            # subprocess environment verbatim.
-            "env": {"ALP_SDK_ROOT": str(REPO)},
+            # Tokened (issue #865), not the native host-path form: tan-cli
+            # (PR #24) substitutes ${SDK_ROOT} with its own checkout root
+            # before handing this to the slice subprocess environment, so
+            # a cached/materialised plan never carries THIS run's absolute
+            # path onto a different machine/checkout.
+            "env": {"ALP_SDK_ROOT": "${SDK_ROOT}"},
+            # SDK-owned values the consumer APPENDS to its own env, distinct
+            # from `env` above (set-verbatim). The join separator is
+            # PER-KEY, not uniformly os.pathsep: EXTRA_ZEPHYR_MODULES is a
+            # CMake list Zephyr's zephyr_module.py splits on `;` on every
+            # platform (not an OS path list), while PYTHONPATH is a real
+            # OS-native path list (os.pathsep). Mirrors the append
+            # `_alp_common.env_with_sdk` / `_workspace.subprocess_env` do
+            # for a real `west build` (ADR-0020 item 3). Tokened same as
+            # `env` above (issue #865).
+            "envAppendPath": {
+                "EXTRA_ZEPHYR_MODULES": ["${SDK_ROOT}"],
+                "PYTHONPATH":           ["${SDK_ROOT}/scripts"],
+            },
         })
 
     plan: dict[str, Any] = {
         "schemaVersion":   1,
+        # Additive to schemaVersion 1 (issue #865): every path in this plan
+        # that anchors on THIS checkout or THIS project is now emitted as
+        # a `${SDK_ROOT}`/`${PROJECT_ROOT}`/`${PYTHON}` token rather than a
+        # baked-in absolute path -- tan-cli (PR #24) requires this literal
+        # value before it will substitute them. `boardYaml` is deliberately
+        # NOT tokenized (kept repo-relative as-passed) -- it is the anchor
+        # both this plan's own comparator and tan use to locate
+        # PROJECT_ROOT in the first place.
+        "planPathMode":    "tokened",
         "generatedBy":     "scripts/alp_orchestrate.py",
+        # Additive provenance (ADR 0014's additive rule -- no schemaVersion
+        # bump): traces a cached/materialised plan back to the planner that
+        # produced it. `sdkCommit` is null, never a crash, when git/`.git`
+        # isn't available (e.g. a wheel-installed CLI with no checkout).
+        "sdkVersion":      _sdk_version(),
+        "sdkCommit":       _sdk_commit(),
         "boardYaml":       Path(board_yaml).as_posix(),
         "sku":             project.sku,
         "buildRoot":       build_root.as_posix(),
+        "executionPolicy": _EXECUTION_POLICY,
         "slices":          slices_out,
         "sharedArtefacts": [
             {"path": p.as_posix(), "contents": c}

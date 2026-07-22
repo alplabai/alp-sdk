@@ -1,461 +1,39 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""The Orchestrator -- fan-out, per-slice build dispatch, and materialise.
+"""Slice-command resolution -- the planner-side helpers `buildplan.py`'s
+`emit_build_plan` reads to describe (never run) each slice's build command.
 
-The `Orchestrator` class runs a board.yaml project: fans it into per-core build
-slices, dispatches each slice's build command, and materialises the shared +
-per-slice artefacts (byte-parity with `emit_build_plan`, which it reads from
-buildplan.py). Plus the slice-command cluster it owns: `_slice_command`,
-`_slice_flash_recipe`, `_resolve_app_path`, `_zephyr_app_dir`, the `_TOOL_FOR_OS`
-table, and the `STOCK_SHIM_APP` token. The #285 orchestrator seam -- the finale;
-after it `__init__` is a pure re-export surface.
+ADR-0020 Phase 4 (preview) retired the SDK-side executor -- the
+`Orchestrator` class that fanned build sub-processes out and materialised
+artefacts to disk.  What remains here is pure, side-effect-free: resolving
+what a slice's build command WOULD be, so `emit_build_plan` can describe it
+to an external consumer (`tan`, alplabai/tan-cli, / alp-studio) that owns
+execution.
 """
 
 from __future__ import annotations
 
-import json
-import os
-import shutil
-import subprocess
-import sys
-import time
 from pathlib import Path
 from typing import Any, Optional
 
-from .buildplan import _shared_artefacts, _slice_build_dir, _slice_config_artefact
-from .carveout import resolve_carve_outs
-from .manifest import _helper_mcus, emit_system_manifest
-from .models import BoardProject, OrchestratorError, Slice, SystemManifest
+from .models import BoardProject, Slice
 from .paths import REPO
 from .secure import (emit_sysbuild_conf, emit_tfm_sysbuild_conf,
                       sysbuild_family_base_conf)
 
 
-# metadata/sdk_version.yaml is the single source of the SDK's own
-# declared version (see scripts/check_version_doc_sync.py) -- reading it
-# raw (no YAML parse needed) gives the cache a token that changes on
-# every version/status bump, so an SDK upgrade invalidates every slice's
-# cache even when board.yaml itself is untouched (issue #591).
-_SDK_VERSION_YAML = REPO / "metadata" / "sdk_version.yaml"
+def iter_buildable_slices(project: BoardProject):
+    """Yield every non-`off` core's `Slice`, sorted by `core_id`.
 
-# Directory names never worth walking when content-hashing an app's
-# source tree -- VCS metadata and prior build output the app itself
-# doesn't ship.
-_SOURCE_HASH_SKIP_DIRS = frozenset({".git", "build", "__pycache__"})
-
-
-def _sdk_version_token() -> str:
-    """Raw contents of `metadata/sdk_version.yaml` as an opaque cache
-    token. Deliberately not parsed -- any byte change (version bump,
-    status flip, or even a comment edit) is a legitimate reason to
-    distrust a prior build, so the whole file is the input.  Falls back
-    to a fixed sentinel if the file is ever unreadable so a broken
-    checkout fails open (always rebuild) rather than silently caching
-    forever."""
-    try:
-        return _SDK_VERSION_YAML.read_text(encoding="utf-8")
-    except OSError:
-        return "sdk-version-unreadable"
-
-
-def _hash_app_sources(slice_: Slice, base_dir: Path) -> str:
-    """Content-hash of every file under this slice's resolved `app:`
-    directory, so editing e.g. `src/main.c` invalidates the slice's
-    cache entry even though no `Slice` field changed (issue #591).
-
-    Resolves the directory the same way `_slice_command` resolves it
-    (`_zephyr_app_dir` / `_resolve_app_path`), so the hash always
-    covers exactly what will actually be built.
-
-    Hashes file *contents*, not mtimes: mtimes are not preserved by
-    `git clone`/`checkout`, so hashing them would spuriously invalidate
-    on a fresh checkout with zero real content change -- content
-    hashing is both deterministic (no wall-clock/random input) and
-    accurate.
-
-    Yocto slices built purely from `image:` (no `app:`) have no
-    filesystem app dir to hash -- their inputs are the bitbake layers,
-    already tracked by Yocto's own dependency graph, not this cache.
+    ADR-0020 Phase 1: the SINGLE source of WHICH cores build and in WHAT
+    ORDER, so `emit_build_plan()` (the plan `tan` reads) always
+    enumerates slices the same way.
     """
-    if not slice_.app:
-        return "no-app-dir"
-    if slice_.os == "zephyr":
-        app_dir = _zephyr_app_dir(slice_.app, base_dir)
-    elif slice_.os == "baremetal":
-        app_dir = _resolve_app_path(slice_.app, base_dir)
-    elif slice_.os == "yocto" and slice_.app != STOCK_IMAGE_APP:
-        app_dir = _resolve_app_path(slice_.app, base_dir)
-    else:
-        return "no-app-dir"
-
-    if not app_dir.is_dir():
-        # Missing app dir is itself a distinct, deterministic state --
-        # never silently collapses onto a real prior hash.
-        return f"missing-app-dir:{app_dir.as_posix()}"
-
-    import hashlib
-    m = hashlib.sha256()
-    for path in sorted(
-        p for p in app_dir.rglob("*")
-        if p.is_file()
-        and not _SOURCE_HASH_SKIP_DIRS.intersection(
-            p.relative_to(app_dir).parts)
-    ):
-        m.update(path.relative_to(app_dir).as_posix().encode("utf-8"))
-        try:
-            m.update(path.read_bytes())
-        except OSError:
-            m.update(b"<unreadable>")
-    return m.hexdigest()
-
-
-# Tool table used to decide whether a slice can actually be built on
-# this host.  Each os maps to the executable the slice's build dispatch
-# needs; missing tools land the slice in `status: skipped`.
-_TOOL_FOR_OS: dict[str, str] = {
-    "zephyr":    "west",
-    "yocto":     "bitbake",
-    "baremetal": "cmake",
-    # 'off' never reaches the dispatcher.
-}
-
-
-class Orchestrator:
-    """Fans out one build sub-process per non-off slice.
-
-    Phase 2 ships the dispatch + manifest assembly; the per-os build
-    invocations are stubbed where a tool isn't present so the
-    orchestrator completes end-to-end on Windows / non-Yocto hosts.
-    """
-
-    def __init__(
-        self,
-        project: BoardProject,
-        build_root: Path,
-        board_yaml: Optional[Path] = None,
-    ) -> None:
-        self.project = project
-        self.build_root = Path(build_root)
-        # `board_yaml` anchors every slice's relative `app:` path (issue
-        # #596) -- pass the project's actual board.yaml so build commands
-        # resolve identically regardless of the caller's CWD.  Callers that
-        # omit it (legacy in-repo call sites, tests that don't care about
-        # app-path resolution) fall back to CWD, matching the historical
-        # behaviour.
-        self.base_dir = (Path(board_yaml).resolve().parent
-                          if board_yaml is not None else Path.cwd())
-        self.state_path = self.build_root / ".alp-build-state.json"
-        self._state: dict[str, Any] = self._load_state()
-
-    # ---- state cache ----
-
-    def _load_state(self) -> dict[str, Any]:
-        if not self.state_path.is_file():
-            return {}
-        try:
-            return json.loads(self.state_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            return {}
-
-    def _save_state(self) -> None:
-        try:
-            self.state_path.parent.mkdir(parents=True, exist_ok=True)
-            self.state_path.write_text(
-                json.dumps(self._state, indent=2, sort_keys=True),
-                encoding="utf-8")
-        except OSError as e:
-            print(f"alp-orchestrate: warning: failed to write "
-                  f"{self.state_path}: {e}", file=sys.stderr)
-
-    def _slice_hash(self, slice_: Slice) -> str:
-        """Hash every input that determines a slice's build output.
-
-        Issue #591: the previous hash covered only a handful of
-        resolved `board.yaml` fields, so it stayed unchanged after an
-        application source edit, an SDK upgrade, or a generated-config
-        change -- the slice reported `cache-hit` and the builder never
-        ran, leaving a stale artefact in place.  This hash now covers,
-        in addition to the resolved slice fields:
-
-          * the slice's application source tree content (`app:` dir,
-            resolved exactly as `_slice_command` resolves it) --
-            catches `src/main.c` edits;
-          * the SDK's own declared version -- catches an SDK upgrade
-            landing under an otherwise-unchanged board.yaml;
-          * the materialised per-slice config artefact (`alp.conf` /
-            `local.conf` / `cmake-args.txt`) and every shared generated
-            artefact (IPC header, dts reservations/partitions, sysbuild
-            overlays) -- catches a config-only change that resolves
-            differently without touching any `Slice` field directly.
-
-        Deliberately excludes orchestrator-populated bookkeeping
-        (`build_dir`, `status`, `duration_s`, ...) and does NOT walk the
-        whole SDK tree or the process environment -- only the inputs
-        that actually reach this slice's build command.
-        """
-        import dataclasses
-        import hashlib
-        m = hashlib.sha256()
-
-        # 1. Resolved slice fields -- everything the loader assigned to
-        #    this slice (board, peripherals, libraries, memory/power
-        #    tuning, extra_libraries, toolchain, recipe, ...), minus the
-        #    fields the orchestrator itself populates during/after a run.
-        slice_fields = dataclasses.asdict(slice_)
-        for bookkeeping in ("build_dir", "output_artefact", "status",
-                            "reason", "log_path", "duration_s"):
-            slice_fields.pop(bookkeeping, None)
-        m.update(json.dumps(slice_fields, sort_keys=True, default=str)
-                 .encode("utf-8"))
-
-        # 2. Project-level fields every slice's generated header/config
-        #    is derived from.
-        m.update(self.project.sku.encode("utf-8"))
-        for entry in sorted(self.project.ipc, key=lambda e: e.name):
-            m.update(entry.name.encode("utf-8"))
-            m.update(entry.kind.encode("utf-8"))
-            m.update(",".join(sorted(entry.endpoints)).encode("utf-8"))
-            m.update(str(entry.carve_out_kb).encode("utf-8"))
-
-        # 3. The materialised per-slice config artefact -- pure/
-        #    deterministic, same source `_materialise_slice_config` writes.
-        artefact = _slice_config_artefact(self.project, slice_)
-        if artefact is not None:
-            name, contents = artefact
-            m.update(name.encode("utf-8"))
-            m.update(contents.encode("utf-8"))
-
-        # 4. Shared generated artefacts -- every slice builds against
-        #    these (e.g. the IPC header), so a project-level config
-        #    change (boot/security/diagnostics) that only shows up here
-        #    must still invalidate every slice, not just the one whose
-        #    own fields changed.
-        for path, contents in _shared_artefacts(self.project, self.build_root):
-            m.update(path.relative_to(self.build_root).as_posix()
-                     .encode("utf-8"))
-            m.update(contents.encode("utf-8"))
-
-        # 5. Application source tree -- the actual files the build
-        #    command compiles.
-        m.update(_hash_app_sources(slice_, self.base_dir).encode("utf-8"))
-
-        # 6. SDK revision -- an SDK upgrade must invalidate every
-        #    slice's cache even when board.yaml is untouched.
-        m.update(_sdk_version_token().encode("utf-8"))
-
-        return m.hexdigest()[:16]
-
-    # ---- materialisation ----
-
-    def _materialise_slice_config(self, slice_: Slice) -> Path:
-        """Write per-core config artefacts under
-        build/<core>-<os>/.
-
-        The artefact itself comes from `_slice_config_artefact` -- the
-        same source `emit_build_plan` reads -- so what we write and
-        what the plan promises cannot drift.
-        """
-        slice_dir = _slice_build_dir(self.build_root, slice_)
-        slice_dir.mkdir(parents=True, exist_ok=True)
-        slice_.build_dir = slice_dir
-        slice_.log_path = slice_dir / "build.log"
-        artefact = _slice_config_artefact(self.project, slice_)
-        if artefact is not None:
-            name, contents = artefact
-            (slice_dir / name).write_text(contents, encoding="utf-8")
-        return slice_dir
-
-    def _materialise_shared(self) -> Path:
-        """Write the shared generated artefacts.
-
-        The (path, contents) set comes from `_shared_artefacts` -- the
-        same source `emit_build_plan` reads -- so what we write and
-        what the plan promises cannot drift.  Conditional artefacts
-        (sysbuild / TF-M) are absent from the list when empty, so
-        their directories are never created spuriously.
-        """
-        gen = self.build_root / "generated"
-        for path, contents in _shared_artefacts(self.project,
-                                                self.build_root):
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(contents, encoding="utf-8")
-        return gen
-
-    # ---- dispatch ----
-
-    def _dispatch_slice(self, slice_: Slice) -> Slice:
-        """Run the per-slice build sub-process (or skip if its tool
-        isn't on PATH)."""
+    for core_id in sorted(project.cores):
+        slice_ = project.cores[core_id]
         if slice_.os == "off":
-            slice_.status = "skipped"
-            slice_.reason = "os: off"
-            return slice_
-
-        tool = _TOOL_FOR_OS.get(slice_.os)
-        if tool is None:
-            slice_.status = "failed"
-            slice_.reason = f"unknown os '{slice_.os}'"
-            return slice_
-
-        if shutil.which(tool) is None:
-            slice_.status = "skipped"
-            slice_.reason = (f"{tool} not found in PATH; this is normal "
-                             f"on non-{slice_.os} dev hosts")
-            return slice_
-
-        cmd = _slice_command(self.project, slice_, base_dir=self.base_dir)
-        if cmd is None:
-            slice_.status = "skipped"
-            slice_.reason = ("no command resolver implemented yet for "
-                             f"os: {slice_.os} -- Phase 3 wires this up")
-            return slice_
-
-        # Slice subprocess: scoped env + dedicated log file.
-        env = os.environ.copy()
-        env["ALP_SDK_ROOT"] = str(REPO)
-        log_path = slice_.log_path or (slice_.build_dir / "build.log")
-        start = time.time()
-        try:
-            with open(log_path, "w", encoding="utf-8") as logf:
-                logf.write(f"# alp_orchestrate.py slice command: "
-                           f"{' '.join(cmd)}\n")
-                logf.flush()
-                proc = subprocess.run(
-                    cmd, cwd=str(slice_.build_dir),
-                    env=env, stdout=logf, stderr=subprocess.STDOUT,
-                    check=False)
-            slice_.duration_s = time.time() - start
-            if proc.returncode == 0:
-                slice_.status = "ok"
-            else:
-                slice_.status = "failed"
-                slice_.reason = (f"{tool} exited rc={proc.returncode}; "
-                                 f"see {log_path}")
-        except (OSError, subprocess.SubprocessError) as e:
-            slice_.duration_s = time.time() - start
-            slice_.status = "failed"
-            slice_.reason = f"slice subprocess raised: {e}"
-        return slice_
-
-    # ---- public API ----
-
-    def fan_out(
-        self,
-        only_core: Optional[str] = None,
-        parallel: bool = True,
-    ) -> SystemManifest:
-        """Run every non-off slice, write the manifest, return it."""
-        # #603: an explicit `--core` that doesn't name a real core of this
-        # project used to silently skip every slice (each iteration's
-        # `cid != only_core` check tripped for every core), write an
-        # all-skipped manifest, and exit 0 -- a typo'd `--core` looked
-        # exactly like a successful, deliberately-scoped build.  Fail
-        # fast instead, before any artefact is written.
-        if only_core is not None and only_core not in self.project.cores:
-            raise OrchestratorError(
-                f"--core {only_core!r} is not a core of this project. "
-                f"Known core IDs: {sorted(self.project.cores)}")
-
-        self.build_root.mkdir(parents=True, exist_ok=True)
-        # 1. Shared artefacts.
-        self._materialise_shared()
-
-        # 2. Per-slice config materialisation.
-        targets: list[Slice] = []
-        for cid, slice_ in self.project.cores.items():
-            if slice_.os == "off":
-                slice_.status = "skipped"
-                slice_.reason = "os: off"
-                continue
-            if only_core is not None and cid != only_core:
-                slice_.status = "skipped"
-                slice_.reason = f"--core {only_core} selected; this slice not in scope"
-                continue
-            self._materialise_slice_config(slice_)
-            targets.append(slice_)
-
-        # 3. Caching: skip slices whose inputs hash matches the last
-        #    successful run AND whose build actually produced evidence
-        #    of running (its build.log).  `slice_.build_dir` is created
-        #    unconditionally by `_materialise_slice_config` just above
-        #    for every target -- including ones that have never been
-        #    built -- so `build_dir.is_dir()` alone is never a useful
-        #    gate (issue #591: it was always true here and so never
-        #    actually blocked a cache-hit). `log_path` is written only
-        #    by a real `_dispatch_slice` run, so its presence is real
-        #    evidence a build happened; its absence (output missing)
-        #    can never produce a cache-hit even if the hash matches.
-        skip_targets: set[str] = set()
-        for slice_ in targets:
-            h = self._slice_hash(slice_)
-            cached = self._state.get(slice_.core_id) or {}
-            log_path = slice_.log_path
-            if (cached.get("hash") == h
-                    and cached.get("status") == "ok"
-                    and log_path is not None and log_path.is_file()):
-                slice_.status = "ok"
-                slice_.reason = "cache-hit (inputs unchanged since last successful build)"
-                slice_.output_artefact = cached.get("output_artefact")
-                skip_targets.add(slice_.core_id)
-
-        runnable = [s for s in targets if s.core_id not in skip_targets]
-
-        # 4. Dispatch.  Use ProcessPoolExecutor for parallel, but the
-        # cheap reality on Phase 2 is most slices skip (missing tool)
-        # so the sequential path is fine when parallel=False.
-        if parallel and len(runnable) > 1:
-            try:
-                from concurrent.futures import ProcessPoolExecutor, as_completed
-                with ProcessPoolExecutor(max_workers=len(runnable)) as ex:
-                    futures = {
-                        ex.submit(self._dispatch_slice, s): s
-                        for s in runnable
-                    }
-                    for fut in as_completed(futures):
-                        result = fut.result()
-                        # Mutate the original Slice in place.
-                        original = futures[fut]
-                        original.status = result.status
-                        original.reason = result.reason
-                        original.duration_s = result.duration_s
-                        original.output_artefact = result.output_artefact
-            except (OSError, RuntimeError) as e:
-                # ProcessPool on Windows in some envs fails; degrade to
-                # sequential.
-                print(f"alp-orchestrate: ProcessPoolExecutor unusable "
-                      f"({e}); falling back to sequential", file=sys.stderr)
-                for slice_ in runnable:
-                    self._dispatch_slice(slice_)
-        else:
-            for slice_ in runnable:
-                self._dispatch_slice(slice_)
-
-        # 5. Persist cache state.
-        for slice_ in self.project.cores.values():
-            if slice_.status == "ok":
-                self._state[slice_.core_id] = {
-                    "hash":           self._slice_hash(slice_),
-                    "status":         slice_.status,
-                    "output_artefact": slice_.output_artefact,
-                }
-        self._save_state()
-
-        # 6. Manifest.
-        ordered = sorted(self.project.cores.values(),
-                         key=lambda s: s.core_id)
-        manifest = SystemManifest(
-            project=self.project,
-            slices=ordered,
-            carve_outs=resolve_carve_outs(self.project),
-            boot_order=list(self.project.som_preset.get("boot_order") or []),
-            helper_mcus=_helper_mcus(self.project),
-        )
-
-        out = self.build_root / "system-manifest.yaml"
-        out.write_text(emit_system_manifest(
-            self.project, slices=ordered), encoding="utf-8")
-
-        return manifest
+            continue
+        yield slice_
 
 
 def _slice_flash_recipe(
@@ -463,10 +41,8 @@ def _slice_flash_recipe(
 ) -> tuple[Optional[str], Optional[dict[str, Any]]]:
     """Per-runtime default flash backend + args for a slice.
 
-    Used by `Slice.to_manifest_entry` to record how `west alp-flash`
-    should program the slice's output artefact.  The actual backend
-    implementations land in subsequent PRs alongside `alp_flash.py`
-    -- this Phase 3 wiring is just data plumbing.
+    Used by `Slice.to_manifest_entry` to record how an external flash
+    step should program the slice's output artefact.
 
     Returns ``(None, None)`` for `os: off` slices (skipped at flash
     time) and unknown `os:` values; the manifest emitter drops keys
@@ -476,11 +52,14 @@ def _slice_flash_recipe(
         return ("yocto_wic_to_sd_or_emmc",
                 {"target": slice_.machine or ""})
     if slice_.os == "zephyr":
-        # OpenOCD is the canonical Zephyr runner for the SoCs we
-        # ship; vendor-specific runners (jlink for AEN, segger for
-        # NX) are picked up via the slice's toolchain when set.
-        runner = "openocd"
-        return ("zephyr_west_flash", {"runner": runner})
+        # No runner is forced here: not every in-tree board registers
+        # an openocd runner (e.g. AEN's board.cmake sets
+        # flash-runner: alif_flash), so `west flash --runner openocd`
+        # FATAL-errors on those boards. Emit no runner and let `west
+        # flash` fall back to the board.cmake default; an explicit
+        # runner can still be set on flash_args downstream when one is
+        # actually known.
+        return ("zephyr_west_flash", {})
     if slice_.os == "baremetal":
         return ("baremetal_cmake_flash", {})
     return (None, None)
@@ -503,6 +82,44 @@ STOCK_SHIM_DIR = REPO / "firmware" / "alp-stock-shim"
 STOCK_IMAGE_APP = "alp-image-edge"
 
 
+class UnrootedPathError(ValueError):
+    """Raised by `_tokenize` when a path resolves under neither
+    `${PROJECT_ROOT}` nor `${SDK_ROOT}` (issue #865's split-brain guard).
+
+    A single exception type raised from the ONE place paths get tokenized
+    means every call site -- the five command-arg sites in `_slice_command`
+    plus `buildplan.py`'s `appDir` -- is guarded uniformly by construction;
+    nothing can add a sixth call site and forget the check. Callers catch
+    this and turn it into a `warnings` entry (never a hard crash of the
+    whole emit), matching the existing `no-command`/`yocto-recipe-missing`
+    "block the one broken slice, keep going" convention.
+    """
+
+
+def _tokenize(path: Path, base_dir: Path, repo: Path) -> str:
+    """Render an absolute path as a portable `${PROJECT_ROOT}`/`${SDK_ROOT}`
+    token (issue #865) instead of baking in THIS checkout's absolute path.
+    tan-cli (PR #24) substitutes both tokens at materialise time, so a plan
+    emitted on one machine/checkout can be materialised faithfully on
+    another -- the split-brain risk a baked-in absolute path invites.
+
+    Prefers `${PROJECT_ROOT}` (the project's own board.yaml directory) since
+    most anchored paths are project-owned; falls back to `${SDK_ROOT}` for
+    paths the SDK itself owns (e.g. the family sysbuild base, the stock
+    M-core shim app). Raises `UnrootedPathError` for a path under neither
+    root -- never returns a bare absolute path, so a non-hermetic path can
+    never silently reach a `planPathMode: tokened` plan.
+    """
+    path = Path(path)
+    for root, token in ((base_dir, "${PROJECT_ROOT}"), (repo, "${SDK_ROOT}")):
+        try:
+            rel = path.relative_to(root)
+        except ValueError:
+            continue
+        return token if rel == Path(".") else f"{token}/{rel.as_posix()}"
+    raise UnrootedPathError(path.as_posix())
+
+
 def _slice_command(
     project: BoardProject,
     slice_: Slice,
@@ -516,16 +133,25 @@ def _slice_command(
     the project's `board.yaml` (or an equivalent explicit root), NEVER the
     caller's process CWD.  A relative `app:` means "relative to the project
     file that named it", so the same board.yaml must resolve identically no
-    matter where `west` / `alp-orchestrate` happens to be invoked from
+    matter where the emitting process happens to be invoked from
     (issue #596).
     """
     if slice_.os == "zephyr":
         if not slice_.app or not slice_.board:
             return None
+        # NB: no explicit `-d`. west's default output is <cwd>/build (a
+        # subdirectory of the command's cwd = buildDir), so the tree lands
+        # at <buildDir>/build/; the consumer (tan) reconciles that nested
+        # layout when it resolves artefacts. Adding `-d <buildDir>` here
+        # would double-nest (west resolves a relative -d against its cwd,
+        # already = buildDir) -- see finding M14.
+        # Tokenized (issue #865): `_zephyr_app_dir` resolves an absolute
+        # path (project-anchored for a customer app, SDK-anchored for the
+        # stock M-core shim) -- see `_tokenize`.
         cmd = [
             "west", "build",
             "-b", slice_.board,
-            str(_zephyr_app_dir(slice_.app, base_dir)),
+            _tokenize(_zephyr_app_dir(slice_.app, base_dir), base_dir, REPO),
         ]
         # ADR 0014 Phase-3 conf->build: wire the generated sysbuild
         # overlays into the build command itself.  `_shared_artefacts`
@@ -543,8 +169,18 @@ def _slice_command(
         # hand-off and can select a host Python without the west package.
         # The orchestrator itself runs under the intended workspace Python,
         # so pin it as an explicit CMake cache override (issue #787).
-        defines = [f"-DPython3_EXECUTABLE={sys.executable}"]
-        if emit_sysbuild_conf(project) or emit_tfm_sysbuild_conf(project):
+        # ${PYTHON} token, not `sys.executable` (issue #865): this plan is
+        # emitted once by whichever Python ran the planner, but may be
+        # materialised on a different host/checkout than that -- baking in
+        # a concrete interpreter path here would pin THIS run's Python, not
+        # the consumer's. tan-cli (PR #24) substitutes ${PYTHON} with its
+        # own resolved interpreter (forward-slashed for the same CMake
+        # backslash-escape reason issue #787/#849 fixed: CMake parses
+        # `\U`/`\N` etc. in a Windows path as an invalid character escape)
+        # at materialise time; the SDK never emits a bare fallback here.
+        defines = ["-DPython3_EXECUTABLE=${PYTHON}"]
+        is_sysbuild = emit_sysbuild_conf(project) or emit_tfm_sysbuild_conf(project)
+        if is_sysbuild:
             cmd.append("--sysbuild")
             if emit_sysbuild_conf(project):
                 # SB_CONF_FILE is the only supported way to name a
@@ -559,8 +195,17 @@ def _slice_command(
                 # (share/sysbuild/cmake/modules/sysbuild_kconfig.cmake),
                 # so the cwd-relative form this used to emit would silently
                 # look for the overlay under the application's source dir.
-                sb_conf = (Path(slice_.build_dir).parent
-                           / "alp_sysbuild.conf").resolve()
+                #
+                # Anchor on `base_dir` (the board.yaml directory), never the
+                # emitting process's CWD: `slice_.build_dir`'s parent is the
+                # build root, which may itself be a relative path, and
+                # resolving a relative path bare falls back to
+                # `Path.cwd()` -- the same #596 CWD-dependence bug class
+                # `_resolve_app_path` guards against for `app:`.
+                build_root_dir = Path(slice_.build_dir).parent
+                if not build_root_dir.is_absolute():
+                    build_root_dir = base_dir / build_root_dir
+                sb_conf = (build_root_dir.resolve() / "alp_sysbuild.conf")
                 # LAYER, don't replace: SB_CONF_FILE accepts a `;`-joined
                 # list, and sysbuild merges every listed file in order
                 # (later files win on a repeated symbol).  When the SoM
@@ -570,11 +215,47 @@ def _slice_command(
                 # instead of forking family boot policy into two
                 # divergent places (issue #807).
                 family_base = sysbuild_family_base_conf(project)
+                # Forward slashes: CMake's `cmake_path()` (which
+                # sysbuild_kconfig.cmake uses to split the `;`-joined
+                # SB_CONF_FILE list) only recognises `/` -- a native
+                # Windows backslash path here dies the configure step
+                # with "File ... not found", the same class of bug
+                # #849 fixed for -DPython3_EXECUTABLE. `_tokenize` (#865)
+                # already emits posix-form tokens, so this holds for both:
+                # `sb_conf` is project-anchored (`${PROJECT_ROOT}/...`),
+                # `family_base` is SDK-anchored (`${SDK_ROOT}/...`) -- the
+                # `;`-joined list correctly carries both roots.
                 sb_conf_files = (
-                    [str(family_base), str(sb_conf)] if family_base
-                    else [str(sb_conf)]
+                    [_tokenize(family_base, base_dir, REPO),
+                     _tokenize(sb_conf, base_dir, REPO)]
+                    if family_base else [_tokenize(sb_conf, base_dir, REPO)]
                 )
                 defines.append(f"-DSB_CONF_FILE={';'.join(sb_conf_files)}")
+        # Wire the slice's materialised per-core Kconfig fragment
+        # (`_slice_config_artefact` -> build_dir/alp.conf, carried in the
+        # plan's `configArtefacts`) into the build command via
+        # EXTRA_CONF_FILE -- Zephyr's supported extra-fragment merge point
+        # (layered on prj.conf). The path is ABSOLUTE and anchored on
+        # `base_dir` (issue #596), never Path.cwd(), so the plan is
+        # byte-identical wherever it is emitted.
+        #
+        # NOT on a --sysbuild build: a bare -DEXTRA_CONF_FILE there lands
+        # on the SYSBUILD image, not the default application image
+        # (sysbuild scopes per-image as -D<image>_VAR), so it would NOT
+        # reach the app -- silently dropping the per-core alp.conf on
+        # boot:/OTA projects. The app-image name is not derivable from
+        # board.yaml (it is the app CMakeLists `project()` name), so the
+        # image-prefixed form cannot be emitted here. Sysbuild slices
+        # still get the per-core alp.conf via the app's own --core-scoped
+        # CMakeLists.txt bridge (#870); a plan-native per-image sysbuild
+        # wiring is the remaining half of #866.
+        if not is_sysbuild:
+            alp_conf = Path(slice_.build_dir) / "alp.conf"
+            if not alp_conf.is_absolute():
+                alp_conf = Path(base_dir) / alp_conf
+            alp_conf = alp_conf.resolve()
+            defines.append(
+                f"-DEXTRA_CONF_FILE={_tokenize(alp_conf, base_dir, REPO)}")
         cmd += ["--", *defines]
         return cmd
     if slice_.os == "yocto":
@@ -596,8 +277,11 @@ def _slice_command(
     if slice_.os == "baremetal":
         if not slice_.app:
             return None
-        return ["cmake", "-S", str(_resolve_app_path(slice_.app, base_dir)),
-                "-B", str(slice_.build_dir)]
+        # `-S` tokenized (issue #865) same as the zephyr app-dir arg above;
+        # `-B` (`slice_.build_dir`) is already relative -- left alone.
+        app_path = _tokenize(_resolve_app_path(slice_.app, base_dir),
+                              base_dir, REPO)
+        return ["cmake", "-S", app_path, "-B", str(slice_.build_dir)]
     return None
 
 

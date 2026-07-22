@@ -1,7 +1,7 @@
 # `board.yaml` build-artefact emission
 
 How `scripts/alp_project.py` compiles a resolved `board.yaml` into
-the per-backend native config: the `west alp-build` entry point, the
+the per-backend native config: the `tan build` entry point, the
 Zephyr `alp.conf` overlay, plain-CMake `-D` args, the Yocto
 `local.conf` snippet, `west.yml` library auto-pinning, the
 build-time `hw-info-h` identifier header, and the DTS overlay for
@@ -15,23 +15,25 @@ See [`docs/board-config.md`](board-config.md) for the landing page.
 schema, resolves the SoM SKU + board presets, applies overrides,
 and emits the requested build artifacts.  Common workflows below.
 
-### West extension -- validate, generate, and build
+### `tan` -- validate, generate, and build
 
-The SDK ships first-class west extension commands via
-[`scripts/west-commands.yml`](../scripts/west-commands.yml).  The
-usual application build entry point is:
+alp-sdk is plans-only (ADR [0020](adr/0020-sdk-owns-build-execution.md));
+the standalone [`tan` CLI](https://github.com/alplabai/tan-cli) is the
+executor.  The usual application build entry point is:
 
 ```bash
-west alp-build -b <board> <app-dir>
+tan --project <app-dir> build
 ```
 
-`west alp-build` validates `<app-dir>/board.yaml`, emits the generated
+`tan build` validates `<app-dir>/board.yaml` (via alp-sdk's
+`alp_orchestrate --emit build-plan`), materialises the generated
 per-slice configuration and system manifest, then dispatches the
 underlying Zephyr / Yocto / baremetal build steps for the enabled
-cores.  Companion commands (`west alp-image`, `west alp-flash`,
-`west alp-clean`, `west alp-emit`, `west alp-size`, and
-`west alp-renode`) consume the same build state for bundle, flash,
-inspection, sizing, and simulation workflows.
+cores.  Companion `tan` verbs (`tan image`, `tan flash`, `tan clean`,
+`tan size`, and `tan renode`) consume the same build state for
+bundle, flash, sizing, and simulation workflows.  The SDK's own
+surviving `west alp-emit` remains for read-only, west-centric
+artefact inspection with no build attached.
 
 ### Zephyr -- generated `alp.conf` appended to `prj.conf`
 
@@ -48,7 +50,7 @@ python3 $ALP_SDK/scripts/alp_project.py \
 
 The application's `CMakeLists.txt` wires the loader as a
 configure-time step and layers the result over `prj.conf` with
-`OVERLAY_CONFIG`.  `prj.conf` itself stays empty -- everything
+`EXTRA_CONF_FILE`.  `prj.conf` itself stays empty -- everything
 flows from `board.yaml`:
 
 ```cmake
@@ -73,16 +75,27 @@ execute_process(
 if(NOT _alp_rv EQUAL 0)
     message(FATAL_ERROR "alp_project.py failed (rv=${_alp_rv})")
 endif()
-list(APPEND OVERLAY_CONFIG ${_alp_generated})
+list(APPEND EXTRA_CONF_FILE ${_alp_generated})
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(my_app LANGUAGES C)
 target_sources(app PRIVATE src/main.c)
 ```
 
-Zephyr's `OVERLAY_CONFIG` machinery merges the generated `alp.conf`
+Zephyr's `EXTRA_CONF_FILE` machinery merges the generated `alp.conf`
 on top of `prj.conf` at Kconfig time -- the app picks up every
 `CONFIG_*` line the loader emitted.
+
+The loader is a pure string templater: it never runs kconfiglib/west, so it
+can only reason about a symbol's dependency chain from its own metadata +
+`zephyr/kconfigs/*.kconfig` tree, not by asking the real Kconfig solver. The
+emitted `alp.conf` is therefore coupled to the alp-sdk module version that
+generated it, consistent with `west.yml`'s deliberate per-release module pins
+(see [`docs/zephyr-version-policy.md`](zephyr-version-policy.md)) -- an
+`alp.conf` generated against one alp-sdk checkout is not a promised-compatible
+input to a Zephyr tree built from a different one. A clean cross-version skew
+error (rather than a Kconfig "assign to undefined symbol" abort) is #855's
+version-detection work, not this loader's.
 
 ### Plain CMake (baremetal / yocto) -- generated `-D` args
 

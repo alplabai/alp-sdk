@@ -11,7 +11,7 @@
 # your MPN, edit the `preset:` (or use an inline board) if you're on a non-EVK board,
 # and `west build`.  CMakeLists.txt invokes
 # scripts/alp_project.py at configure time + layers the
-# generated alp.conf over prj.conf via OVERLAY_CONFIG.
+# generated alp.conf over prj.conf via EXTRA_CONF_FILE.
 som:
   sku: E1M-AEN801
 

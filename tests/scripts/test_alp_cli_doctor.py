@@ -40,8 +40,14 @@ def _force_all_pass(monkeypatch, tmp_path):
 
     monkeypatch.setattr(doctor, "_tool_version", _ver)
 
-    # All Python deps importable (they really are in the test venv) -> leave
-    # _check_python_deps alone.
+    # Stub python-deps PASS directly rather than relying on the host venv
+    # actually having every optional dep (e.g. questionary) installed; the
+    # FAIL branch is covered hermetically by test_python_deps_missing_is_fail.
+    monkeypatch.setattr(
+        doctor,
+        "_check_python_deps",
+        lambda: doctor.CheckResult("python-deps", doctor.PASS, "all deps present"),
+    )
 
     # A real Zephyr workspace on disk.
     ws = tmp_path / "zephyrproject"
@@ -250,6 +256,19 @@ def test_jlink_present_is_pass(monkeypatch):
         lambda name: "/usr/bin/JLinkExe" if name == "JLinkExe" else None,
     )
     assert doctor._check_jlink().status == doctor.PASS
+
+
+def test_tan_missing_is_warn_only(monkeypatch):
+    monkeypatch.setattr(doctor.shutil, "which", lambda _: None)
+    assert doctor._check_tan().status == doctor.WARN
+
+
+def test_tan_present_is_pass(monkeypatch):
+    monkeypatch.setattr(
+        doctor.shutil, "which",
+        lambda name: "/usr/bin/tan" if name == "tan" else None,
+    )
+    assert doctor._check_tan().status == doctor.PASS
 
 
 def test_zephyr_pin_read_live_from_west_yml(monkeypatch, tmp_path):

@@ -1,5 +1,5 @@
 {
-  "generated": "2026-07-17",
+  "generated": "2026-07-18",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -62,20 +62,20 @@
       },
       "macros": {
         "ALP_ADC_CONFIG_DEFAULT": {
-          "hash": "c6292af4fc323133",
-          "value": "(id)"
+          "hash": "9a982c69993861f5",
+          "value": "(id) ((alp_adc_config_t){ .channel_id = (id), .resolution_bits = 0u, .acquisition_us = 0u, .reference = ALP_ADC_REF_INTERNAL, .gain_num = 1u, .gain_den = 1u, .oversampling_ratio = 0u, .sample_cycles = 0u })"
         },
         "ALP_ADC_FILTER_CONFIG_DEFAULT": {
-          "hash": "36c5e9bdbb7afb50",
-          "value": "(id)"
+          "hash": "bbd5a1fe1d097f4f",
+          "value": "(id) ((alp_adc_filter_config_t){ .channel_id = (id), .sample_rate_hz = 0u, .stages = NULL, .n_stages = 0u })"
         },
         "ALP_ADC_SPECTRUM_CONFIG_DEFAULT": {
-          "hash": "d3efef32c503f438",
-          "value": "(id)"
+          "hash": "50ebea905fa6afe3",
+          "value": "(id) ((alp_adc_spectrum_config_t){ .channel_id = (id), .sample_rate_hz = 0u, .stages = NULL, .n_stages = 0u })"
         },
         "ALP_ADC_STREAM_CONFIG_DEFAULT": {
-          "hash": "400be8dba7bc84e3",
-          "value": "(id)"
+          "hash": "0a2bd2c0b76471c2",
+          "value": "(id) ((alp_adc_stream_config_t){ .channel_id = (id), .sample_rate_hz = 0u })"
         }
       },
       "typedefs": {
@@ -265,8 +265,8 @@
       },
       "macros": {
         "ALP_AUDIO_CONFIG_DEFAULT": {
-          "hash": "5ecba91d4f593c78",
-          "value": "(id)"
+          "hash": "a03b1572108122e6",
+          "value": "(id) ((alp_audio_config_t){ .peripheral_id = (id), .sample_rate_hz = 16000u, .channels = 1u, .format = ALP_AUDIO_FMT_S16_LE, .frames_per_block = 256u })"
         }
       },
       "typedefs": {
@@ -323,7 +323,7 @@
       "macros": {
         "ALP_BACKEND_ANCHOR": {
           "hash": "29e2b8847a7d2406",
-          "value": "(class)        extern const int _alp_backend_anchor_decl_##class"
+          "value": "(class) extern const int _alp_backend_anchor_decl_##class"
         },
         "ALP_BACKEND_ANCHOR_DEFINE": {
           "hash": "981b3d9da3dfa2d5",
@@ -334,12 +334,12 @@
           "value": "(class) (alp_backend_count(#class) > 0u)"
         },
         "ALP_BACKEND_DEFINE_CLASS": {
-          "hash": "bf141b06a3b5f762",
-          "value": "(class)"
+          "hash": "45086ed1fea06dff",
+          "value": "(class) extern const alp_backend_t __start_alp_backends_##class[]; extern const alp_backend_t __stop_alp_backends_##class[];"
         },
         "ALP_BACKEND_REGISTER": {
-          "hash": "51ac515a65458c06",
-          "value": "(class, name, ...)"
+          "hash": "dbfd3ceb63cfb63a",
+          "value": "(class, name, ...) static const alp_backend_t _alp_be_##class##_##name __attribute__(( used, retain, aligned(__alignof__(alp_backend_t)), section(\"alp_backends_\" #class))) = __VA_ARGS__"
         }
       },
       "typedefs": {
@@ -426,8 +426,8 @@
       },
       "macros": {
         "ALP_BLE_ADV_CONFIG_DEFAULT": {
-          "hash": "50500ac94cded860",
-          "value": "(id)"
+          "hash": "08055a4739f765b9",
+          "value": "(id) ((alp_ble_adv_config_t){ .name = (id), .services = NULL, .num_services = 0u, .interval_min_ms = 100u, .interval_max_ms = 200u, .connectable = true })"
         },
         "ALP_BLE_GATT_PROP_INDICATE": {
           "hash": "017f9dd2c2e72250",
@@ -1256,12 +1256,12 @@
           "value": "0x4Au"
         },
         "XEVK_I2C_ADDR_INA236_VCAM2": {
-          "hash": "b0c8b41cc03008ca",
-          "value": ""
+          "hash": "54c31cdcf2773108",
+          "value": "0x48u"
         },
         "XEVK_I2C_ADDR_INA236_VCAM3": {
-          "hash": "502c24fa73d812fc",
-          "value": ""
+          "hash": "8398c2143398040c",
+          "value": "0x49u"
         },
         "XEVK_I2C_ADDR_TCAL9538": {
           "hash": "bd0e087dfca18e44",
@@ -1619,8 +1619,8 @@
       },
       "macros": {
         "ALP_CAMERA_CONFIG_DEFAULT": {
-          "hash": "87a0d099ec73235e",
-          "value": "(id)"
+          "hash": "f28ff4150c031b0a",
+          "value": "(id) ((alp_camera_config_t){ .camera_id = (id), .width = 0u, .height = 0u, .fps = 30u, .format = ALP_PIXFMT_RGB565 })"
         }
       },
       "typedefs": {
@@ -1708,8 +1708,8 @@
       },
       "macros": {
         "ALP_CAN_CONFIG_DEFAULT": {
-          "hash": "4a2ce1b68a43f910",
-          "value": "(id)"
+          "hash": "192b90b8c9635762",
+          "value": "(id) ((alp_can_config_t){ .bus_id = (id), .bitrate_nominal_hz = 500000u, .bitrate_data_hz = 0u, .mode = ALP_CAN_MODE_CLASSIC, .loopback = false })"
         },
         "ALP_CAN_MAX_PAYLOAD_BYTES_CLASSIC": {
           "hash": "daba941eb46a3ff5",
@@ -7542,8 +7542,8 @@
       },
       "macros": {
         "TPS628640_CTRL_DEFAULT": {
-          "hash": "ced7963bb3b02c67",
-          "value": ""
+          "hash": "99b223b4517143e2",
+          "value": "(TPS628640_CTRL_FPWM_DURING_VID_CHANGE | TPS628640_CTRL_SOFTWARE_ENABLE | TPS628640_CTRL_OUTPUT_DISCHARGE | TPS628640_CTRL_HICCUP | TPS628640_CTRL_RAMP_SPEED_MASK)"
         },
         "TPS628640_CTRL_FPWM_DURING_VID_CHANGE": {
           "hash": "990283fab0594244",
@@ -8069,8 +8069,8 @@
           "value": "(id) ((alp_counter_config_t){ .counter_id = (id) })"
         },
         "ALP_QENC_CONFIG_DEFAULT": {
-          "hash": "ec6d201c2018ee49",
-          "value": "(id)"
+          "hash": "7a1dcdf4b8fe5f98",
+          "value": "(id) ((alp_qenc_config_t){ .encoder_id = (id), .pulses_per_rev = 0u })"
         }
       },
       "typedefs": {
@@ -10257,8 +10257,8 @@
       },
       "macros": {
         "ALP_I2S_CONFIG_DEFAULT": {
-          "hash": "2f928d2d01b5ba02",
-          "value": "(id)"
+          "hash": "7ebbd10f31a92e2e",
+          "value": "(id) ((alp_i2s_config_t){ .bus_id = (id), .sample_rate_hz = 48000u, .word_bits = 16u, .channels = 2u, .format = ALP_I2S_FMT_I2S, .direction = ALP_I2S_DIR_RX, .block_frames = 256u })"
         }
       },
       "typedefs": {
@@ -10347,8 +10347,8 @@
       },
       "macros": {
         "ALP_INFERENCE_CONFIG_DEFAULT": {
-          "hash": "3fa66519832b6c90",
-          "value": "(id)"
+          "hash": "22d1014030488022",
+          "value": "(id) ((alp_inference_config_t){ .model_data = (id), .model_size = 0u, .format = ALP_INFERENCE_MODEL_TFLITE, .backend = ALP_INFERENCE_BACKEND_AUTO, .arena_bytes = 0u, .arena = NULL })"
         }
       },
       "typedefs": {
@@ -10490,8 +10490,8 @@
       },
       "macros": {
         "ALP_MQTT_CONFIG_DEFAULT": {
-          "hash": "b9ceaa19cff643fe",
-          "value": "(id)"
+          "hash": "4ae02acbcb0a1d3d",
+          "value": "(id) ((alp_mqtt_config_t){ .broker_uri = (id), .client_id = NULL, .username = NULL, .password = NULL, .keepalive_s = 60u, .clean_session = true, .tls = NULL })"
         }
       },
       "typedefs": {
@@ -10688,8 +10688,8 @@
           "value": "(id) ((alp_mbox_config_t){ .channel = (id), .peer = ALP_CORE_SELF })"
         },
         "ALP_SHMEM_CONFIG_DEFAULT": {
-          "hash": "c8991feee2020c07",
-          "value": "(id)"
+          "hash": "c6db9d60e4dd12ab",
+          "value": "(id) ((alp_shmem_config_t){ .name = (id), .size = 0u, .cacheable = false })"
         }
       },
       "typedefs": {
@@ -10924,24 +10924,24 @@
           "value": "(id) ((alp_i2c_config_t){ .bus_id = (id), .bitrate_hz = 100000u })"
         },
         "ALP_I2C_TARGET_CONFIG_DEFAULT": {
-          "hash": "2cca70af9a7edfd0",
-          "value": "(id)"
+          "hash": "d1d3e250d22ef498",
+          "value": "(id) ((alp_i2c_target_config_t){ .bus_id = (id), .own_addr_7bit = 0u, .on_write = NULL, .on_read = NULL, .on_stop = NULL, .user = NULL })"
         },
         "ALP_SPI_CONFIG_DEFAULT": {
-          "hash": "e9b7b641ff66df59",
-          "value": "(id)"
+          "hash": "f4f992eb571dcb38",
+          "value": "(id) ((alp_spi_config_t){ .bus_id = (id), .freq_hz = 1000000u, .mode = ALP_SPI_MODE_0, .bits_per_word = 8u, .cs_pin_id = ALP_SPI_NO_CS })"
         },
         "ALP_SPI_NO_CS": {
           "hash": "e4997898b273a23e",
           "value": "0xFFFFFFFFu"
         },
         "ALP_SPI_TARGET_CONFIG_DEFAULT": {
-          "hash": "6c5685530db1c509",
-          "value": "(id)"
+          "hash": "25fd53078b348a56",
+          "value": "(id) ((alp_spi_target_config_t){ .bus_id = (id), .mode = ALP_SPI_MODE_0, .bits_per_word = 0u })"
         },
         "ALP_UART_CONFIG_DEFAULT": {
-          "hash": "8ebbc877dcba1a5c",
-          "value": "(id)"
+          "hash": "3186ecc94f7ca975",
+          "value": "(id) ((alp_uart_config_t){ .port_id = (id), .baudrate = 115200u, .data_bits = 8u, .stop_bits = 1u, .parity = ALP_UART_PARITY_NONE })"
         }
       },
       "typedefs": {
@@ -11877,12 +11877,12 @@
           "value": "0x00u"
         },
         "ALP_PWM_CAPTURE_CONFIG_DEFAULT": {
-          "hash": "3555135d825480cc",
-          "value": "(id)"
+          "hash": "9cc41406173d94ca",
+          "value": "(id) ((alp_pwm_capture_config_t){ .channel_id = (id), .edge = ALP_PWM_CAPTURE_EDGE_RISING })"
         },
         "ALP_PWM_CONFIG_DEFAULT": {
-          "hash": "5fd5d79db3f46e49",
-          "value": "(id)"
+          "hash": "95306e9eb2c38cdf",
+          "value": "(id) ((alp_pwm_config_t){ .channel_id = (id), .period_ns = 0u, .polarity = ALP_PWM_POLARITY_NORMAL })"
         }
       },
       "typedefs": {
@@ -11981,8 +11981,8 @@
       },
       "macros": {
         "ALP_RPC_CONFIG_DEFAULT": {
-          "hash": "94b9128f8242828e",
-          "value": "(id)"
+          "hash": "ddb0cc491ee91637",
+          "value": "(id) ((alp_rpc_config_t){ .name = (id), .src_ept = 0u, .dst_ept = 0u, .mbox_ch = ALP_RPC_DEFAULT_MBOX_CH, .cacheable = false })"
         },
         "ALP_RPC_DEFAULT_MBOX_CH": {
           "hash": "0a9d80500b4b162f",
@@ -12478,8 +12478,8 @@
       },
       "macros": {
         "ALP_STORAGE_CONFIG_DEFAULT": {
-          "hash": "d73b3f51294ab7eb",
-          "value": "(id)"
+          "hash": "75268ef3c004fc9c",
+          "value": "(id) ((alp_storage_config_t){ .kind = (id), .instance_id = 0u, .freq_hz = 0u, .read_only = false })"
         }
       },
       "typedefs": {
@@ -12751,8 +12751,8 @@
       },
       "macros": {
         "ALP_USB_DEVICE_CONFIG_DEFAULT": {
-          "hash": "1c8ea2ea54920a02",
-          "value": "(id)"
+          "hash": "b378eaa6f949a34b",
+          "value": "(id) ((alp_usb_device_config_t){ .device_class = (id), .vendor_id = 0x0000u, .product_id = 0x0000u, .bcd_device = 0x0100u, .manufacturer = NULL, .product = NULL, .serial = NULL })"
         }
       },
       "typedefs": {
@@ -12946,8 +12946,8 @@
           "value": "ALP_VERSION_ENCODE(ALP_VERSION_MAJOR, ALP_VERSION_MINOR, ALP_VERSION_PATCH)"
         },
         "ALP_VERSION_AT_LEAST": {
-          "hash": "ef5a31bb5c3dd88a",
-          "value": "(major, minor, patch)"
+          "hash": "0d2b0d606d9d0d6e",
+          "value": "(major, minor, patch) (ALP_VERSION >= ALP_VERSION_ENCODE((major), (minor), (patch)))"
         },
         "ALP_VERSION_ENCODE": {
           "hash": "df87137fbfd21cc7",
@@ -12998,8 +12998,8 @@
       },
       "macros": {
         "ALP_WDT_CONFIG_DEFAULT": {
-          "hash": "4821b5ad5459288b",
-          "value": "(id)"
+          "hash": "1d30b05cbc938689",
+          "value": "(id) ((alp_wdt_config_t){ .wdt_id = (id), .timeout_ms = 1000u, .on_timeout = ALP_WDT_RESET_SOC })"
         }
       },
       "typedefs": {

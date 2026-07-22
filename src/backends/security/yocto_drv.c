@@ -275,7 +275,8 @@ static alp_status_t y_aead_encrypt(alp_aead_backend_state_t *state,
 
 	int outlen = 0;
 	if (aad_len > 0) {
-		if (EVP_EncryptUpdate(ctx, NULL, &outlen, aad, (int)aad_len) != 1) goto out;
+		int aad_outlen = 0;
+		if (EVP_EncryptUpdate(ctx, NULL, &aad_outlen, aad, (int)aad_len) != 1) goto out;
 	}
 	if (plain_len > 0) {
 		if (EVP_EncryptUpdate(ctx, cipher_out, &outlen, plain, (int)plain_len) != 1) goto out;
@@ -326,7 +327,8 @@ static alp_status_t y_aead_decrypt(alp_aead_backend_state_t *state,
 
 	int outlen = 0;
 	if (aad_len > 0) {
-		if (EVP_DecryptUpdate(ctx, NULL, &outlen, aad, (int)aad_len) != 1) goto out;
+		int aad_outlen = 0;
+		if (EVP_DecryptUpdate(ctx, NULL, &aad_outlen, aad, (int)aad_len) != 1) goto out;
 	}
 	if (cipher_len > 0) {
 		if (EVP_DecryptUpdate(ctx, plain_out, &outlen, cipher, (int)cipher_len) != 1) goto out;

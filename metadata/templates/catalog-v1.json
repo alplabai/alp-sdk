@@ -23,7 +23,7 @@
           {
             "path": "build/generated/alp.conf",
             "emit_mode": "zephyr-conf",
-            "consumer_hint": "Zephyr build -- Kconfig fragment layered over prj.conf via OVERLAY_CONFIG"
+            "consumer_hint": "Zephyr build -- Kconfig fragment layered over prj.conf via EXTRA_CONF_FILE"
           }
         ],
         "test_backend": ["native_sim"]
@@ -34,8 +34,7 @@
           "prj.conf",
           "CMakeLists.txt",
           "src/main.c",
-          "README.md",
-          "testcase.yaml"
+          "README.md"
         ],
         "generated": [
           {
@@ -91,7 +90,7 @@
           {
             "path": "build/generated/alp.conf",
             "emit_mode": "zephyr-conf",
-            "consumer_hint": "Zephyr build -- Kconfig fragment layered over prj.conf via OVERLAY_CONFIG"
+            "consumer_hint": "Zephyr build -- Kconfig fragment layered over prj.conf via EXTRA_CONF_FILE"
           }
         ],
         "test_backend": ["native_sim"]
@@ -102,8 +101,7 @@
           "prj.conf",
           "CMakeLists.txt",
           "src/main.c",
-          "README.md",
-          "testcase.yaml"
+          "README.md"
         ],
         "generated": [
           {
@@ -169,7 +167,7 @@
           {
             "path": "build/generated/alp.conf",
             "emit_mode": "zephyr-conf",
-            "consumer_hint": "Zephyr build -- Kconfig fragment layered over prj.conf via OVERLAY_CONFIG"
+            "consumer_hint": "Zephyr build -- Kconfig fragment layered over prj.conf via EXTRA_CONF_FILE"
           }
         ],
         "test_backend": ["native_sim"]
@@ -180,8 +178,7 @@
           "prj.conf",
           "CMakeLists.txt",
           "src/main.c",
-          "README.md",
-          "testcase.yaml"
+          "README.md"
         ],
         "generated": [
           {
@@ -236,7 +233,7 @@
           {
             "path": "build/generated/alp.conf",
             "emit_mode": "zephyr-conf",
-            "consumer_hint": "Zephyr build -- Kconfig fragment layered over prj.conf via OVERLAY_CONFIG"
+            "consumer_hint": "Zephyr build -- Kconfig fragment layered over prj.conf via EXTRA_CONF_FILE"
           },
           {
             "path": "build/generated/alp/system_ipc.h",
@@ -253,8 +250,7 @@
           "m55_hp/CMakeLists.txt",
           "m55_hp/src/main.c",
           "linux/CMakeLists.txt",
-          "README.md",
-          "m55_hp/testcase.yaml"
+          "README.md"
         ],
         "generated": [
           {
@@ -305,7 +301,7 @@
           {
             "path": "build/generated/alp.conf",
             "emit_mode": "zephyr-conf",
-            "consumer_hint": "Zephyr build -- Kconfig fragment layered over prj.conf via OVERLAY_CONFIG (CONFIG_MODBUS=y from the modbus library manifest)"
+            "consumer_hint": "Zephyr build -- Kconfig fragment layered over prj.conf via EXTRA_CONF_FILE (CONFIG_MODBUS=y from the modbus library manifest)"
           }
         ],
         "test_backend": ["native_sim"]
@@ -316,8 +312,7 @@
           "prj.conf",
           "CMakeLists.txt",
           "src/main.c",
-          "README.md",
-          "testcase.yaml"
+          "README.md"
         ],
         "generated": [
           {
@@ -374,7 +369,7 @@
           {
             "path": "build/generated/alp.conf",
             "emit_mode": "zephyr-conf",
-            "consumer_hint": "Zephyr build -- Kconfig fragment layered over prj.conf via OVERLAY_CONFIG"
+            "consumer_hint": "Zephyr build -- Kconfig fragment layered over prj.conf via EXTRA_CONF_FILE"
           }
         ],
         "test_backend": ["native_sim", "cross_compile"]
@@ -387,8 +382,7 @@
           "src/main.c",
           "src/cold_chain.c",
           "src/cold_chain.h",
-          "README.md",
-          "testcase.yaml"
+          "README.md"
         ],
         "generated": [
           {

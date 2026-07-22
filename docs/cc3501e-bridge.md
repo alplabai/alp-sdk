@@ -287,13 +287,18 @@ in one commit.  The Alif-side client still refuses to talk to a firmware
 whose `ALP_CC3501E_CMD_GET_VERSION` reply doesn't match the compile-time
 `ALP_CC3501E_PROTOCOL_VERSION`.
 
-## Firmware: pre-flashed by Alp; rebuild is optional
+## Firmware: pre-flashed by Alp; updated via OTA, never customer-flashed
 
 **The CC3501E ships pre-flashed by Alp** with the bridge firmware — for
 normal use the customer flashes and configures nothing; the device boots
-the bridge and the Alif-side `<alp/...>` calls work out of the box.  A
-version-pinned prebuilt blob also lives at
-`firmware/cc3501e/prebuilt/cc3501e-vX.Y.Z.bin` for field re-flash.
+the bridge and the Alif-side `<alp/...>` calls work out of the box.
+Firmware updates are also Alp-released and applied over the bridge SPI
+link, programming the chip's own OTP (the SoM preset models this with
+`helper_firmware[].update_channel: alp_ota_spi_otp`, never a
+`flash_method`) — the CC3501E is **never customer-flashed**.  The
+version-pinned prebuilt blob at
+`firmware/cc3501e/prebuilt/cc3501e-vX.Y.Z.bin` is that OTA payload's
+provenance, not a customer flashing target.
 
 Rebuilding or customizing the firmware is **optional and open** — the
 bridge firmware source is Alp's (public, like the GD32 bridge), in-tree
@@ -313,9 +318,13 @@ at [`firmware/cc3501e/`](../firmware/cc3501e/), built on TI's
 5. Drives `GPIO_0`, `GPIO_1` (camera enables) and the GPIO-proxy pads
    (`GPIO_2`, `GPIO_13..30` per `from-cc3501e.tsv`) — v0.4.
 6. Tags releases `vX.Y.Z`; the signed binary lands at
-   `firmware/cc3501e/prebuilt/cc3501e-vX.Y.Z.bin` so consumers can flash
-   without rebuilding.
-7. Hands off via `firmware/cc3501e/flash.py` on USB / debug probe.
+   `firmware/cc3501e/prebuilt/cc3501e-vX.Y.Z.bin`, the payload Alp ships
+   as the OTA update over the bridge SPI — not a customer rebuild-and-flash
+   target.
+7. `flash.py` is Alp's internal release/bench tool that produces and
+   validates that blob over USB / debug probe; it is not a
+   customer-facing utility and lives in `alp-sdk-internal`, not this
+   public tree.
 
 See [`firmware/cc3501e/README.md`](../firmware/cc3501e/README.md) for the
 build + tree layout and `firmware/cc3501e/DESIGN.md`

@@ -6,12 +6,15 @@
 # design (§7 Phase 5 + §11 acceptance) this is the canary that
 # proves the orchestrator's two slices actually talk to each other.
 #
-# v0.6 note: Renode dual-OS test is a stretch goal -- `west alp-renode`
-# + the dual-OS REPL script don't exist yet (they land in Phase 3).
-# The actual command is wrapped in `continue-on-error: true` so this
-# workflow can't block PRs while Phases 1-3 are in flight.  Promotes
-# to a required check in v0.6.1 once the Phase 3 IPC contract lands
-# and the handshake message is stable.
+# v0.6 note: Renode dual-OS test is a stretch goal.  ADR-0020 Phase 4
+# retired the SDK-side `west alp-renode` executor
+# (scripts/west_commands/alp_renode.py, no longer present in this
+# repo).  `tan renode` (github.com/alplabai/tan-cli) is the designated
+# successor but is still a stub there, so the actual dual-OS boot +
+# handshake assertion below is PENDING (tan-cli#674) -- kept as a
+# no-op notice, matching pr-renode-sim-mode.yml, rather than pulling
+# tan into alp-sdk CI.  Promotes to a required check in v0.6.1 once
+# the Phase 3 IPC contract lands and tan-cli#674 closes.
 #
 # === Trigger chain choice ===
 #
@@ -126,54 +129,15 @@ jobs:
         # the artefact-name stabilisation above.
         continue-on-error: true
 
-      # The primary verification step.  `west alp-renode` is a Phase 2
-      # stub today and Renode itself isn't part of the standard CI
-      # runner image.  Keep advisory until the self-hosted runner
-      # ships Renode + the orchestrator's `alp-renode` command boots
-      # the dual-OS image to a stable handshake.  Promotes to
-      # required when the HW integration path lands in v0.6.1.
-      - name: west alp-renode (V2N dual-OS boot)
-        id: renode_boot
-        working-directory: ${{ github.workspace }}/alp-sdk
-        run: |
-          set -euo pipefail
-          mkdir -p /tmp/renode-logs
-          # The orchestrator picks up artefacts from a single
-          # bundle dir; copy both downloads into it.
-          mkdir -p /tmp/image-bundle
-          cp -r "${GITHUB_WORKSPACE}/artefacts/bitbake/." /tmp/image-bundle/ || true
-          cp -r "${GITHUB_WORKSPACE}/artefacts/zephyr/."  /tmp/image-bundle/ || true
-          # Cap wall time at 60s per design §11 acceptance ("RPMsg
-          # handshake completes within 60s in CI").  Renode's own
-          # script-level termination is layered on top.
-          timeout 90 west alp-renode \
-              --board E1M-V2N101 \
-              --image-bundle /tmp/image-bundle \
-              --log /tmp/renode-logs/v2n-dual-os.log
-        continue-on-error: true
-
-      - name: Assert "RPMsg handshake complete" in Renode log
-        if: steps.renode_boot.outcome == 'success'
-        run: |
-          set -euo pipefail
-          log=/tmp/renode-logs/v2n-dual-os.log
-          if [ ! -s "${log}" ]; then
-            echo "::error::Renode log missing or empty at ${log}"
-            exit 1
-          fi
-          if ! grep -q "RPMsg handshake complete" "${log}"; then
-            echo "::error::Renode log does not contain 'RPMsg handshake complete' within timeout"
-            echo "--- tail of ${log} ---"
-            tail -100 "${log}"
-            exit 1
-          fi
-          echo "RPMsg handshake observed; dual-OS smoke OK."
-
-      - name: Upload Renode logs
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: renode-dual-os-logs
-          path: /tmp/renode-logs/
-          retention-days: 14
-          if-no-files-found: ignore
+      # PENDING (tan-cli#674): the dual-OS boot + "RPMsg handshake
+      # complete" assertion used to run via `tan renode --board
+      # E1M-V2N101 --image-bundle ... --log ...` (ADR-0020 Phase 4
+      # retired the SDK-side `west alp-renode` executor this workflow
+      # used to drive before that).  `tan renode` is the designated
+      # successor but is still a stub there, so this step is
+      # intentionally a no-op until tan-cli#674 closes -- both
+      # downloaded artefacts above (bitbake image + M33-SM ELF) are
+      # kept in place, ready to feed the real boot once it lands; do
+      # not delete this step silently.
+      - name: V2N dual-OS Renode boot e2e [PENDING tan-cli#674]
+        run: echo "::notice::[PENDING tan-cli#674] tan renode e2e is covered in tan-cli CI"

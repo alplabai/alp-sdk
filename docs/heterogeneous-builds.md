@@ -3,10 +3,10 @@
 This guide walks through writing your first **dual-app project** for
 E1M-V2N101: Yocto Linux on the four Cortex-A55 cores plus Zephyr on
 the Cortex-M33 system-manager, the two halves talking over RPMsg.
-You'll declare both halves in a single `board.yaml`, let
-`west alp-build` fan out into per-core slices, and end up with a
-flashable bundle that covers Linux + Zephyr + the on-module GD32
-helper MCU.
+You'll declare both halves in a single `board.yaml`, let `tan build`
+fan out into per-core slices (planned by alp-sdk's `alp_orchestrate`),
+and end up with a flashable bundle that covers Linux + Zephyr + the
+on-module GD32 helper MCU.
 
 The same pattern generalises to **E1M-AEN801** (A32 + M55-HP + M55-HE),
 **E1M-NX9101** (A55 + M33), and any future heterogeneous SoM.
@@ -25,8 +25,8 @@ By the end you'll have:
   remoteproc on first boot.
 - A two-way RPMsg channel between the two halves, accessed through
   `<alp/rpc.h>`.
-- A `system-manifest.yaml` that feeds `west alp-image`,
-  `west alp-flash`, and OTA.
+- A `system-manifest.yaml` that feeds `tan image`, `tan flash`, and
+  OTA.
 
 Out of scope: writing Yocto recipes from scratch (Yocto docs);
 writing Zephyr drivers from scratch (Zephyr docs); the wire-level
@@ -209,8 +209,8 @@ ipc:
   `#define` prefix in the generated header.  Stick to
   `[a-z][a-z0-9_]+`.
 
-For each `ipc:` entry, `west alp-build` emits a header both halves
-`#include`:
+For each `ipc:` entry, `tan build` (via alp-sdk's `alp_orchestrate`)
+emits a header both halves `#include`:
 
 For a channel named `alp_default_rpmsg`, the stem is its
 upper-cased name, so the generated `#define`s are
@@ -249,22 +249,27 @@ unblock.
 ## 6. Building
 
 ```bash
-west alp-build examples/multicore/rpmsg-v2n
+tan --project examples/multicore/rpmsg-v2n build
 ```
 
-The orchestrator:
+`tan build` plans first, then executes (ADR 0020: alp-sdk plans,
+`tan` is the sole executor):
 
-1. Loads + validates `board.yaml` against the board.yaml schema.
-2. Resolves the SoM preset → topology defaults → effective per-core
-   mapping.
-3. For each core with `os: != off`, materialises per-core config
-   (`build/m33_sm-zephyr/alp.conf`,
+1. The SDK's planner (`alp_orchestrate`) loads + validates
+   `board.yaml` against the board.yaml schema.
+2. The planner resolves the SoM preset → topology defaults →
+   effective per-core mapping.
+3. For each core with `os: != off`, `tan` materialises the planner's
+   per-core config to disk (`build/m33_sm-zephyr/alp.conf`,
    `build/a55_cluster-yocto/conf/local.conf`).
-4. Emits shared generated artefacts (`generated/alp/system_ipc.h`,
-   `generated/dts-reservations.dtsi`).
-5. Registers helper-MCU artefacts (GD32, CC3501E).
-6. Dispatches slice builds in parallel.
-7. Writes `build/system-manifest.yaml` joining everything together.
+4. `tan` writes the planner's shared generated artefacts
+   (`generated/alp/system_ipc.h`, `generated/dts-reservations.dtsi`).
+5. `tan` materialises the helper-MCU artefacts (GD32, CC3501E) the
+   plan registers.
+6. `tan` dispatches slice builds in parallel (`west` / `bitbake` /
+   `cmake` per slice).
+7. `tan` writes `build/system-manifest.yaml`, seeded from the
+   planner's `--emit system-manifest`, joining everything together.
 
 Output layout:
 
@@ -291,12 +296,13 @@ The `generated/` directory ends up on each slice's include path, so
 or the Zephyr CMakeLists.
 
 **Manifest determinism.**  `system-manifest.yaml` is byte-stable
-across rebuilds — re-running `west alp-build` after `west alp-clean`
-yields an identical manifest, which `pr-alp-build.yml` enforces.
-Wall-clock fields (per-slice `duration_s`) live on the runtime Slice
-dataclass but never land in the manifest; the cache state in
-`build/.alp-build-state.json` is internal and not part of the
-declarative output either.
+across rebuilds — re-running `alp_orchestrate --emit system-manifest`
+(what `tan build` / `tan clean` drive under the hood) yields an
+identical manifest, which `pr-alp-build.yml` enforces by calling the
+orchestrator directly.  Wall-clock fields (per-slice `duration_s`)
+live on the runtime Slice dataclass but never land in the manifest;
+the cache state in `build/.alp-build-state.json` is internal and not
+part of the declarative output either.
 
 **Manifest contract (IDE / tooling).**  `system-manifest.yaml` is the
 single derived projection of `board.yaml` — one `slices[]` entry per
@@ -329,7 +335,7 @@ build/run/debug/flash; the **build plan** is the *write-free recipe* to
 drive the build itself.
 
 **Machine-readable build plan.**  Tooling that wants to drive the
-build itself — the `alp` CLI / IDE extension does — consumes the plan
+build itself — the `tan` CLI / IDE extension does — consumes the plan
 instead of re-deriving it:
 
 ```bash
@@ -344,6 +350,22 @@ path resolves against the input `board.yaml`'s own directory, never the
 CLI's CWD, so the plan is deterministic, write-free, and versioned by
 its own `schemaVersion` — see
 [ADR 0014](adr/0014-build-plan-emit-cli-contract.md) for the contract.
+
+**Hermetic paths (`planPathMode: tokened`).**  Every checkout- or
+project-anchored absolute path the plan would otherwise embed —
+`env.ALP_SDK_ROOT`, `envAppendPath` entries, each slice's `appDir`,
+and the `-DPython3_EXECUTABLE=` / `-DEXTRA_CONF_FILE=` /
+`-DSB_CONF_FILE=` / `west build`-appdir command args — is instead a
+literal `${SDK_ROOT}` / `${PROJECT_ROOT}` / `${PYTHON}` token, so the
+same plan is reusable across checkouts rather than baking in this
+run's absolute paths.  `tan` substitutes these tokens at materialise
+time; a consumer implementing its own plan reader must do the same
+substitution before using any tokened field.  A slice whose `app:`
+resolves outside both roots is left as a genuine absolute path,
+paired with an `appdir-unrooted` warning rather than silently
+mis-rooted.  Additive under `schemaVersion 1` — see the
+`planPathMode` field in
+[`metadata/schemas/build-plan-v1.schema.json`](../metadata/schemas/build-plan-v1.schema.json).
 
 Its shape is pinned by
 [`metadata/schemas/build-plan-v1.schema.json`](../metadata/schemas/build-plan-v1.schema.json);
@@ -384,11 +406,16 @@ and the composer.
 ### Iterating on one slice
 
 The Yocto cold build takes hours; the Zephyr build takes seconds.
-When you're iterating on the M-side firmware, rebuild only that slice:
+When you're iterating on the M-side firmware, re-run the build — the
+Zephyr slice rebuilds incrementally in seconds while the already-built
+Yocto slice is reused (west/bitbake short-circuit an up-to-date tree):
 
 ```bash
-west alp-build examples/multicore/rpmsg-v2n --core m33_sm
+tan --project examples/multicore/rpmsg-v2n build --native
 ```
+
+(There is no per-slice `--core` flag on `tan build`; it runs every
+buildable slice, and unchanged slices are near-instant.)
 
 The orchestrator skips the Yocto fan-out, re-uses the previous
 manifest, and rebuilds only `build/m33_sm-zephyr/`.  Slice failures
@@ -398,11 +425,11 @@ don't cascade — `system-manifest.yaml` carries per-slice
 ## 7. Flashing
 
 ```bash
-west alp-image     # → build/image-bundle/alp-system.zip + .swu (Mender)
-west alp-flash     # programs attached hardware
+tan image     # → build/image-bundle/alp-system.zip + .swu (Mender)
+tan flash     # programs attached hardware
 ```
 
-`alp-image` consumes `system-manifest.yaml` and assembles a single
+`tan image` consumes `system-manifest.yaml` and assembles a single
 flashable bundle:
 
 - The Yocto `.wic.gz` rootfs.
@@ -413,7 +440,7 @@ flashable bundle:
   bundled automatically.
 - A Mender `.swu` for OTA.
 
-`alp-flash` walks the manifest's `boot_order:` and programs each piece
+`tan flash` walks the manifest's `boot_order:` and programs each piece
 with the right backend tool (vendor flasher for the SoC,
 openocd-via-SWD for the GD32 helper, USB-CDC bootloader for CC3501E).
 You don't need to remember which tool covers which piece.
@@ -447,12 +474,12 @@ jumps straight to the right log on a failure.
 You don't need a board to verify the heterogeneous handshake:
 
 ```bash
-west alp-renode
+tan renode
 ```
 
 Renode loads both slice images, simulates RPMsg over its mailbox
 peripheral, and runs a name-service ping/pong.  CI uses the same
-command in `pr-renode-dual-os.yml`.
+`tan renode` invocation in `pr-renode-dual-os.yml`.
 
 ## 9. Cross-core API
 
@@ -465,7 +492,7 @@ endpoint IDs, or mailbox channels by hand.
 ```c
 /* m33_sm/src/main.c */
 #include <alp/rpc.h>
-#include <alp/system_ipc.h>      /* generated by west alp-build */
+#include <alp/system_ipc.h>      /* generated by tan build */
 #include <zephyr/kernel.h>
 
 int main(void) {
@@ -493,7 +520,7 @@ int main(void) {
 ```c
 /* linux/src/main.c */
 #include <alp/rpc.h>
-#include <alp/system_ipc.h>      /* generated by west alp-build */
+#include <alp/system_ipc.h>      /* generated by tan build */
 #include <stdio.h>
 #include <unistd.h>
 
@@ -563,13 +590,13 @@ override `reserved_for: power_mgmt` — that channel carries the PMIC's
 runtime power-state machine.
 
 **Forgetting `app:` is relative to the project root.**  `app: ./linux`
-resolves to `<project_root>/linux/`, not to wherever
-`west alp-build` is invoked from.  Always pass the workspace-relative
-path of the project as the build argument:
+resolves to `<project_root>/linux/`, not to wherever `tan build` is
+invoked from.  Always pass the workspace-relative path of the project
+as the build argument:
 
 ```bash
 # good
-west alp-build examples/multicore/rpmsg-v2n
+tan --project examples/multicore/rpmsg-v2n build
 ```
 
 The orchestrator writes `build/` next to the project's `board.yaml`.
