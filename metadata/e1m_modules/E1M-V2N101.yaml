@@ -175,6 +175,8 @@ helper_firmware:
   - name:          gd32_bridge
     chip:          gd32g553
     firmware_path: firmware/gd32-bridge/build/gd32/gd32-bridge.bin
+    version:       0.2.11
+    sha256:        TBD                                      # gitignored build output (firmware/gd32-bridge/build/); absent on a fresh clone -- populate once built, see firmware/gd32-bridge/README.md
     flash_method:  swd_probe
     flash_args:
       interface: cmsis-dap

@@ -11,6 +11,7 @@ the #285 manifest emit seam.
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any, Optional
 
 import yaml
@@ -18,6 +19,7 @@ import yaml
 from .carveout import resolve_carve_outs
 from .models import BoardProject, Slice, SystemManifest
 from .partition import resolve_storage_partitions
+from .paths import REPO
 
 
 def emit_system_manifest(
@@ -57,14 +59,41 @@ def emit_system_manifest(
     return text
 
 
+def _artifact_status(firmware_path: Optional[str], sha256: Optional[str]) -> str:
+    """Classify a helper-firmware artefact without ever hard-failing.
+
+    `absent` (gitignored build output not yet produced -- the GD32 case on a
+    fresh clone) is reported distinctly from `mismatch` (the file is there
+    but its hash disagrees with metadata) -- see issue #852.  `verified` is
+    the happy path; `unchecked` covers a `TBD` sha256 (nothing to compare
+    against yet) and `not-applicable` covers a `TBD`/missing firmware_path.
+    """
+    if not firmware_path or firmware_path == "TBD":
+        return "not-applicable"
+    path = REPO / firmware_path
+    if not path.is_file():
+        return "absent"
+    if not sha256 or sha256 == "TBD":
+        return "unchecked"
+    actual = hashlib.sha256(path.read_bytes()).hexdigest()
+    return "verified" if actual == sha256 else "mismatch"
+
+
 def _helper_mcus(project: BoardProject) -> list[dict[str, Any]]:
     """Build the manifest's `helper_mcus[]` block.
 
     Two sources contribute:
 
     1. The SoM preset's `helper_firmware:` list (Phase 3) -- carries
-       authoritative firmware_path + flash_method + flash_args; each
-       entry projects verbatim into the manifest.  Entries whose
+       authoritative firmware_path + version + sha256 + flash_method +
+       flash_args; each entry projects verbatim into the manifest, plus a
+       derived `artifact_status` (issue #852): `verified` (present, hash
+       matches), `mismatch` (present, hash disagrees), `absent` (gitignored
+       build output not yet produced -- the GD32 case on a fresh clone),
+       `unchecked` (sha256 is TBD), or `not-applicable` (firmware_path is
+       TBD).  `absent` is a reported condition, NOT a build failure --
+       `check_helper_firmware.py` is the CI gate that turns `mismatch` into
+       a hard error while leaving `absent` non-fatal.  Entries whose
        firmware_path is `TBD` still land in the manifest with a
        human-readable note so reviewers see the gap (the orchestrator
        does NOT fail the build on TBD helper firmware -- the
@@ -83,16 +112,25 @@ def _helper_mcus(project: BoardProject) -> list[dict[str, Any]]:
         for entry in helper_firmware:
             if not isinstance(entry, dict):
                 continue
+            firmware_path = entry.get("firmware_path")
+            sha256 = entry.get("sha256")
             row: dict[str, Any] = {
-                "name":          entry.get("name"),
-                "chip":          entry.get("chip"),
-                "firmware_path": entry.get("firmware_path"),
-                "flash_method":  entry.get("flash_method"),
-                "flash_args":    entry.get("flash_args"),
+                "name":            entry.get("name"),
+                "chip":            entry.get("chip"),
+                "firmware_path":   firmware_path,
+                "version":         entry.get("version"),
+                "sha256":          sha256,
+                "artifact_status": _artifact_status(firmware_path, sha256),
+                "flash_method":    entry.get("flash_method"),
+                "flash_args":      entry.get("flash_args"),
             }
-            if entry.get("firmware_path") == "TBD":
+            if firmware_path == "TBD":
                 row["note"] = ("firmware_path TBD; populated when the "
                                "upstream firmware release lands")
+            elif row["artifact_status"] == "absent":
+                row["note"] = (f"{firmware_path} not found on disk (gitignored "
+                                "build output or not yet fetched) -- non-fatal; "
+                                "see check_helper_firmware.py")
             out.append(row)
         return out
 

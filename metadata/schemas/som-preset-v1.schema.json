@@ -490,6 +490,16 @@
           "minLength": 1,
           "description": "Repo-relative path to the prebuilt firmware image, or the literal string \"TBD\" pending an upstream release."
         },
+        "version": {
+          "type": "string",
+          "pattern": "^(\\d+\\.\\d+\\.\\d+|TBD)$",
+          "description": "Firmware image semantic version, matching the companion firmware's own version file (e.g. `firmware/cc3501e/firmware-version.txt`). TBD pending an upstream release."
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^([0-9a-f]{64}|TBD)$",
+          "description": "Lowercase hex SHA-256 of the `firmware_path` artefact. `scripts/check_helper_firmware.py` verifies it against the actual binary when present; TBD when the artefact isn't yet built or is a gitignored developer build output absent on a fresh clone (e.g. the GD32 bridge)."
+        },
         "flash_method": {
           "type": "string",
           "anyOf": [

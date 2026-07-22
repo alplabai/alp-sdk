@@ -169,6 +169,20 @@
       "ci": "pr-metadata-validate.yml:validate"
     },
     {
+      "id": "helper-firmware",
+      "description": "Helper-MCU firmware checksum gate -- verifies sha256 against metadata when the artefact is present, reports absent non-fatally.",
+      "runner": "check-script",
+      "script": "scripts/check_helper_firmware.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "emit-registry",
       "description": "Validate metadata/emit-registry-v1.json against the public IDE/tool contract and the real --emit surface.",
       "runner": "check-script",
