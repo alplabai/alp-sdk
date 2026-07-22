@@ -54,14 +54,13 @@
  * configured the matching IRQ source before calling sleep -- the
  * setup of those bits is the caller's responsibility.
  *
- * Yocto / Linux deferral
- * ----------------------
- * The /sys/power/state-write Yocto path is intentionally not
- * implemented here -- per the standing "src/yocto/ off-limits"
- * guardrail it lands in a dedicated slice when scheduled.  Customers
- * on a Linux backend should expect alp_power_request_sleep to
- * surface NOSUPPORT until that lands.  See the matching comment in
- * src/backends/power/zephyr_stub.c which carries the same note.
+ * Yocto / Linux path
+ * ------------------
+ * This backend is Zephyr-only (it includes <zephyr/pm/policy.h>) and
+ * never compiles into a Yocto/Linux build.  The Linux counterpart is
+ * src/backends/power/yocto_drv.c (issue #613): `/sys/power/state`
+ * write + `/sys/class/rtc/rtc0/wakealarm`, registered at the same
+ * priority 100 but self-gated on __linux__ instead of CONFIG_PM.
  */
 
 #include <stdbool.h>

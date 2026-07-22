@@ -359,6 +359,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         # unconditionally above; these two files self-gate on __linux__.
         ${CMAKE_CURRENT_SOURCE_DIR}/../backends/rtc/yocto_drv.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../backends/wdt/yocto_drv.c
+        # Power is now a REAL registry backend on Yocto (#613):
+        # backends/power/yocto_drv.c drives /sys/power/state +
+        # /sys/class/rtc/rtc0/wakealarm and registers at priority 100
+        # (vendor "linux") -- it self-gates on __linux__.  The
+        # dispatcher + zephyr_stub wildcard fallback are pulled in
+        # unconditionally above; power_dispatch.c owns the public
+        # alp_power_* symbols (the split stub backend is muted via
+        # ALP_VENDOR_OVERRIDES_POWER in the unconditional block above).
+        ${CMAKE_CURRENT_SOURCE_DIR}/../backends/power/yocto_drv.c
         # <alp/rpc.h> is now a REAL registry backend (#33), not the old
         # rpc_yocto.c direct-impl: backends/rpc/yocto_drv.c is the
         # userspace RPMsg backend.  It self-gates on __linux__ and gates

@@ -434,6 +434,29 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_peripheral_pwm
              COMMAND alp_test_peripheral_pwm)
 
+    # Yocto power sysfs backend regression (#613): mode -> /sys/power/state
+    # token mapping (freeze/mem), STANDBY refused writing nothing, and the
+    # rtc0 wakealarm clear-then-arm-then-clear sequencing.
+    # peripheral_power.c #includes the real src/backends/power/yocto_drv.c
+    # directly (see the test's own header comment) to drive
+    # y_request_sleep() against g_power_test_sysfs_write_hook instead of a
+    # real /sys/power/state or rtc0 wakealarm node.  Deliberately NOT
+    # linked against alp::sdk -- same ODR rationale as
+    # alp_test_rpc_yocto_self_close above.
+    add_executable(alp_test_peripheral_power
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_power.c
+    )
+    target_include_directories(alp_test_peripheral_power PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/power
+    )
+    target_compile_features(alp_test_peripheral_power PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_power
+             COMMAND alp_test_peripheral_power)
+
     # Edge-config rollback regression for issue #746 (Yocto GPIO chardev-v2
     # backend): alp_gpio_irq_enable() must restore plain-input if the IRQ
     # dispatcher fails to start (eventfd()/pthread_create() failure),
