@@ -167,19 +167,30 @@ def _project_relpath(plan: dict) -> str:
 # oracle predates -- the intended, hand-reviewed ADR-0020 delta (see the
 # ADR-0020 amendment), analogous to the debug.probe openocd->null allowance.
 # This is a COMMAND-SHAPE delta (an arg present/absent), not a content delta,
-# so it stays even after content dropped out of scope below. Sysbuild slices
-# deliberately do NOT carry it (Option A, #871: a bare -DEXTRA_CONF_FILE lands
-# on the sysbuild image not the app), so there is nothing to strip on those.
+# so it stays even after content dropped out of scope below.
+#
+# Scoped to NON-sysbuild slices ONLY, detected the same way the emitter
+# itself decides (`orchestrator.py::_slice_command`): a sysbuild slice's
+# `command.args` carries the literal `--sysbuild` flag. Sysbuild slices
+# deliberately do NOT carry `-DEXTRA_CONF_FILE` (Option A, #871: a bare
+# -DEXTRA_CONF_FILE lands on the sysbuild image not the app, silently
+# dropping the per-core alp.conf on boot:/OTA projects -- ADR-0020 Amendment
+# item 4) -- stripping the arg unconditionally from EVERY slice, sysbuild
+# included, would silently hide exactly that regression (a sysbuild slice
+# wrongly gaining the arg) from the comparator instead of catching it.
 # KEEP IN LOCKSTEP with tan-cli's vendored copy of this comparator.
 def _strip_863_extra_conf_file_arg(plan):
-    """Remove the intended #863/#871 `-DEXTRA_CONF_FILE=` command arg from a
-    (normalized) plan dict."""
+    """Remove the intended #863/#871 `-DEXTRA_CONF_FILE=` command arg from
+    every NON-sysbuild slice's command in a (normalized) plan dict."""
     for slice_ in plan.get("slices", []) or []:
         cmd = slice_.get("command")
-        if isinstance(cmd, dict) and isinstance(cmd.get("args"), list):
-            cmd["args"] = [a for a in cmd["args"]
-                           if not (isinstance(a, str)
-                                   and a.startswith("-DEXTRA_CONF_FILE="))]
+        if not (isinstance(cmd, dict) and isinstance(cmd.get("args"), list)):
+            continue
+        if "--sysbuild" in cmd["args"]:
+            continue
+        cmd["args"] = [a for a in cmd["args"]
+                       if not (isinstance(a, str)
+                               and a.startswith("-DEXTRA_CONF_FILE="))]
     return plan
 
 
