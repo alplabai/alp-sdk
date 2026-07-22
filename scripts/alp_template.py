@@ -528,17 +528,15 @@ def _derive_core_renames(
     return renames
 
 
-def _board_alias_routes(
-    board_name: str, metadata_root: Path, field: str,
-) -> dict[str, str]:
-    """{board_alias: entry[field]} from metadata/boards/<board_name>.yaml's
-    `e1m_routes:` block -- the same join scripts/gen_board_header.py's
-    `_emit_board_aliases` and scripts/alp_orchestrate/loader.py's
-    `_validate_topology_cores` pins cross-check both build from this
-    field (mirrored here rather than imported across module boundaries
-    for a handful of lines). `field` is `"e1m"` (the pad, what
-    `_derive_pin_renames` needs) or `"macro"` (what `_derive_pin_
-    macro_renames` needs) -- same join, different column."""
+_ROUTE_SECTIONS = ("gpio", "buses", "pwm", "adc", "dac", "i2s", "can", "qenc")
+
+
+def _board_route_entries(board_name: str, metadata_root: Path) -> list[dict[str, Any]]:
+    """Every metadata/boards/<board_name>.yaml `e1m_routes:` entry,
+    flattened across sections -- mirrors
+    scripts/gen_portability_matrix.py's `_route_entries` (same section
+    list, same join; mirrored here rather than imported across module
+    boundaries for a handful of lines)."""
     board_path = metadata_root / "boards" / f"{board_name}.yaml"
     if not board_path.is_file():
         raise TemplateError(
@@ -546,23 +544,119 @@ def _board_alias_routes(
     routes = (
         yaml.safe_load(board_path.read_text(encoding="utf-8")) or {}
     ).get("e1m_routes") or {}
-    out: dict[str, str] = {}
-    for entries in routes.values():
-        for entry in entries or []:
-            alias = entry.get("board_alias")
-            value = entry.get(field)
-            if alias and isinstance(value, str):
-                out[alias] = value
+    return [
+        entry for section in _ROUTE_SECTIONS
+        for entry in (routes.get(section) or [])
+        if isinstance(entry, dict)
+    ]
+
+
+def _board_alias_to_entry(board_name: str, metadata_root: Path) -> dict[str, dict[str, Any]]:
+    """{board_alias: route_entry} -- mirrors
+    scripts/gen_portability_matrix.py's `_route_by_alias`."""
+    out: dict[str, dict[str, Any]] = {}
+    for entry in _board_route_entries(board_name, metadata_root):
+        alias = entry.get("board_alias")
+        if isinstance(alias, str):
+            out[alias] = entry
     return out
 
 
-def _board_alias_to_pad(board_name: str, metadata_root: Path) -> dict[str, str]:
-    """{board_alias: e1m pad} -- see `_board_alias_routes`."""
-    return _board_alias_routes(board_name, metadata_root, "e1m")
+def _pin_pad_and_macro(item: Any) -> tuple[str | None, str | None]:
+    """A `pins:` list item is either a bare E1M pad string, or a
+    `{e1m, macro?, doc?}` mapping -- normalise both shapes to
+    `(pad, macro)`, `None` for whichever half a bare string doesn't
+    carry."""
+    if isinstance(item, str):
+        return item, None
+    if isinstance(item, dict):
+        pad = item.get("e1m")
+        macro = item.get("macro")
+        return (
+            pad if isinstance(pad, str) else None,
+            macro if isinstance(macro, str) else None,
+        )
+    return None, None
+
+
+def _alias_for_pin(entries: list[dict[str, Any]], pad: str, macro: str | None) -> str | None:
+    """Resolve a `pins:` entry's `board_alias` on its OWN board --
+    MACRO-FIRST (issue #876 review MAJOR 1). A pad can carry more
+    than one `board_alias:` (e.g. e1m-evk's `E1M_PWM1` is BOTH
+    `BOARD_PWM_LED_BLUE` and `BOARD_PWM_ARD1`, at different `macro:`
+    entries), and macro names are unique per board -- every one is
+    compiled into a single C header (scripts/gen_board_header.py), so
+    two entries sharing a macro would be a duplicate-symbol build
+    error -- so matching by `macro:` first is unambiguous.
+
+    Only when the pin carries no `macro:` at all (a bare pad-string
+    entry) does this fall back to matching by `e1m:` alone, and only
+    when exactly ONE route entry claims that pad: a bare-string entry
+    naming a multi-alias pad has nothing to disambiguate with, so
+    `None` is returned (the caller hard-errors) rather than silently
+    picking whichever entry happens to come first in the board's
+    `e1m_routes:` -- the same class of silent-wrong-pin bug a naive
+    `{alias: pad}` dict inversion (this function's predecessor) had
+    for the macro-bearing case."""
+    if macro is not None:
+        for entry in entries:
+            if entry.get("macro") == macro:
+                alias = entry.get("board_alias")
+                return alias if isinstance(alias, str) else None
+        return None
+    matches = [entry for entry in entries if entry.get("e1m") == pad]
+    if len(matches) != 1:
+        return None
+    alias = matches[0].get("board_alias")
+    return alias if isinstance(alias, str) else None
+
+
+def _resolve_pin_target(
+    item: Any, sku: str, source_preset: str, metadata_root: Path,
+) -> dict[str, Any] | None:
+    """Resolve ONE `pins:` entry to its target-board route entry
+    (issue #876, hardened by the review's MAJOR 1): looks up the
+    entry's `board_alias` on `source_preset` via `_alias_for_pin`
+    (macro-first, so a multi-alias pad resolves to the RIGHT alias
+    instead of whichever wins a lossy pad->alias dict inversion), then
+    looks that alias up on `sku`'s own target board preset.
+
+    Returns `None` when `sku`'s own default board preset IS
+    `source_preset` -- the canonical example's own sku, or a same-
+    family sibling that shares its board preset -- a byte-identical
+    passthrough, nothing to resolve.
+
+    DESIGN DECISION (maintainer-approved default): a pad with no
+    unambiguous `board_alias:` on `source_preset` -- no cross-EVK
+    correspondence declared for that role at all, or a multi-alias
+    pad with no `macro:` to disambiguate (issue #876 review MINOR 3)
+    -- is a hard error, same philosophy as `_derive_core_renames`'s
+    missing-core-class error: a genuinely unsupportable combo must
+    fail loudly here, never emit a `pins:` entry that's silently
+    stale (or a scaffold `--emit zephyr-conf` then rejects)."""
+    target_preset = _default_preset_for_sku(sku, metadata_root)
+    if target_preset == source_preset:
+        return None
+    pad, macro = _pin_pad_and_macro(item)
+    if pad is None:
+        return None
+    alias = _alias_for_pin(_board_route_entries(source_preset, metadata_root), pad, macro)
+    if alias is None:
+        raise TemplateError(
+            f"metadata/boards/{source_preset}.yaml `e1m_routes:` has no "
+            f"unambiguous `board_alias:` for pins: entry {item!r} -- can't "
+            f"re-derive it for sku {sku!r} (board {target_preset!r})")
+    target_entry = _board_alias_to_entry(target_preset, metadata_root).get(alias)
+    if target_entry is None:
+        raise TemplateError(
+            f"metadata/boards/{target_preset}.yaml `e1m_routes:` has no "
+            f"route for board_alias {alias!r} (needed to re-derive pins: "
+            f"entry {item!r} for sku {sku!r})")
+    return target_entry
 
 
 def _derive_pin_renames(
-    original_pads: list[str], sku: str, source_preset: str, metadata_root: Path,
+    original_pins: list[Any], sku: str, source_preset: str, metadata_root: Path,
 ) -> dict[str, str]:
     """Re-derive every catalog template's `pins:` entries -- each an
     E1M pad name (`E1M_GPIO_IO4`) taken from the CANONICAL example's
@@ -571,58 +665,38 @@ def _derive_pin_renames(
     dropped E1M-V2N101 from `peripheral`/`sensor`/`edge-ai`'s
     `supported.som_skus` rather than shipping a scaffold whose `pins:`
     block named an E1M-EVK-only pad that an E1M-X-EVK-resolved
-    board.yaml's `e1m_routes:` doesn't have --
-    `alp_orchestrate.loader._validate_topology_cores`'s `pins:` cross-
-    check hard-errors on exactly that mismatch, "did you mean" never
-    offered).
+    board.yaml's `e1m_routes:` doesn't have).
 
-    The two boards' `e1m_routes:` entries that share the SAME
-    `board_alias:` (metadata/boards/e1m-evk.yaml /
-    metadata/boards/e1m-x-evk.yaml's e1m-spec STANDARD.md Section 7.2
-    common-role convention) are the SAME logical pin on both EVKs --
-    `BOARD_PIN_ENCODER_SW` is `E1M_GPIO_IO4` on e1m-evk and
-    `E1M_X_GPIO_IO28` on e1m-x-evk. This walks each pad the template
-    actually uses, finds its `board_alias` on `source_preset`, and
-    looks that alias up on `sku`'s own target preset to get the
-    replacement pad. (Analogous to `_derive_core_renames`, but keyed
-    by `board_alias:` instead of core-class prefix -- pins have no
-    natural "same-class" fallback to guess from.)
-
-    Returns `{}` when `sku`'s own default board preset IS
-    `source_preset` -- the canonical example's own sku, or a same-
-    family sibling that shares its board preset -- a byte-identical
-    passthrough, nothing to rewrite.
-
-    DESIGN DECISION (maintainer-approved default): a pad with no
-    `board_alias:` on `source_preset` -- no cross-EVK correspondence
-    declared for that role at all -- is a hard error, same philosophy
-    as `_derive_core_renames`'s missing-core-class error: a genuinely
-    unsupportable combo must fail loudly here, never emit a `pins:`
-    entry `_substitute_board_yaml_pins` silently leaves stale (or a
-    scaffold `--emit zephyr-conf` then rejects)."""
-    target_preset = _default_preset_for_sku(sku, metadata_root)
-    if target_preset == source_preset:
-        return {}
-    source_pad_by_alias = _board_alias_to_pad(source_preset, metadata_root)
-    target_pad_by_alias = _board_alias_to_pad(target_preset, metadata_root)
-    source_alias_by_pad = {pad: alias for alias, pad in source_pad_by_alias.items()}
-
+    Each item is resolved via `_resolve_pin_target` (macro-first
+    `board_alias` match -- see its docstring for the multi-alias
+    fix). Returns `{}` when `sku`'s own default board preset IS
+    `source_preset` -- a byte-identical passthrough, nothing to
+    rewrite. Raises if two DIFFERENT `pins:` entries name the SAME
+    source pad but resolve to two different target pads (only
+    possible if a template ever lists one pad twice under two
+    different `board_alias` roles) -- ambiguous for the flat
+    `{old_pad: new_pad}` map `_substitute_board_yaml_pins` applies
+    across the whole file, so this fails loudly rather than silently
+    keeping whichever resolution happened to run last."""
     renames: dict[str, str] = {}
-    for pad in original_pads:
-        alias = source_alias_by_pad.get(pad)
-        if alias is None:
+    for item in original_pins:
+        target = _resolve_pin_target(item, sku, source_preset, metadata_root)
+        if target is None:
+            continue
+        pad, _ = _pin_pad_and_macro(item)
+        new_pad = target.get("e1m")
+        if not isinstance(new_pad, str):
             raise TemplateError(
-                f"metadata/boards/{source_preset}.yaml `e1m_routes:` has no "
-                f"`board_alias:` for pad {pad!r} -- can't re-derive it for "
-                f"sku {sku!r} (board {target_preset!r})")
-        new_pad = target_pad_by_alias.get(alias)
-        if new_pad is None:
+                f"metadata/boards/{_default_preset_for_sku(sku, metadata_root)}"
+                f".yaml route for pins: entry {item!r} has no `e1m:` pad")
+        if new_pad == pad:
+            continue
+        if pad in renames and renames[pad] != new_pad:
             raise TemplateError(
-                f"metadata/boards/{target_preset}.yaml `e1m_routes:` has no "
-                f"pad for board_alias {alias!r} (needed to re-derive "
-                f"{pad!r} for sku {sku!r})")
-        if new_pad != pad:
-            renames[pad] = new_pad
+                f"pad {pad!r} re-derives to two different targets "
+                f"({renames[pad]!r} and {new_pad!r}) across `pins:` "
+                f"entries for sku {sku!r} -- ambiguous")
+        renames[pad] = new_pad
     return renames
 
 
@@ -641,42 +715,73 @@ def _derive_pin_macro_renames(
     match the resolved board 'E1M-X-EVK's macros for pad
     E1M_X_GPIO_IO28: ['XEVK_PIN_ENCODER_SW']`). A bare-string `pins:`
     entry (no `macro:` at all) contributes nothing here -- there's no
-    macro to keep in sync.
-
-    Same `{}` passthrough and missing-`board_alias:` hard-error
+    macro to keep in sync. Same passthrough/ambiguity-collision
     philosophy as `_derive_pin_renames` (whose pad-rename result this
-    always agrees with -- both walk the exact same `board_alias` join,
-    just a different `e1m_routes:` column)."""
-    target_preset = _default_preset_for_sku(sku, metadata_root)
-    if target_preset == source_preset:
-        return {}
-    source_alias_by_pad = {
-        pad: alias
-        for alias, pad in _board_alias_routes(source_preset, metadata_root, "e1m").items()
-    }
-    target_macro_by_alias = _board_alias_routes(target_preset, metadata_root, "macro")
-
+    always agrees with -- both resolve the SAME target entry via
+    `_resolve_pin_target`, just read a different column off it)."""
     renames: dict[str, str] = {}
     for item in original_pins:
         if not isinstance(item, dict):
             continue
-        old_pad, old_macro = item.get("e1m"), item.get("macro")
-        if not isinstance(old_pad, str) or not isinstance(old_macro, str):
+        old_macro = item.get("macro")
+        if not isinstance(old_macro, str):
             continue
-        alias = source_alias_by_pad.get(old_pad)
-        if alias is None:
+        target = _resolve_pin_target(item, sku, source_preset, metadata_root)
+        if target is None:
+            continue
+        new_macro = target.get("macro")
+        if not isinstance(new_macro, str):
             raise TemplateError(
-                f"metadata/boards/{source_preset}.yaml `e1m_routes:` has no "
-                f"`board_alias:` for pad {old_pad!r} -- can't re-derive its "
-                f"`macro: {old_macro}` for sku {sku!r} (board {target_preset!r})")
-        new_macro = target_macro_by_alias.get(alias)
-        if new_macro is None:
+                f"metadata/boards/{_default_preset_for_sku(sku, metadata_root)}"
+                f".yaml route for pins: entry {item!r} has no `macro:`")
+        if new_macro == old_macro:
+            continue
+        if old_macro in renames and renames[old_macro] != new_macro:
             raise TemplateError(
-                f"metadata/boards/{target_preset}.yaml `e1m_routes:` has no "
-                f"`macro:` for board_alias {alias!r} (needed to re-derive "
-                f"`macro: {old_macro}` for sku {sku!r})")
-        if new_macro != old_macro:
-            renames[old_macro] = new_macro
+                f"macro {old_macro!r} re-derives to two different targets "
+                f"({renames[old_macro]!r} and {new_macro!r}) across "
+                f"`pins:` entries for sku {sku!r} -- ambiguous")
+        renames[old_macro] = new_macro
+    return renames
+
+
+def _derive_pin_doc_renames(
+    original_pins: list[Any], sku: str, source_preset: str, metadata_root: Path,
+) -> dict[str, str | None]:
+    """Companion to `_derive_pin_renames`: re-derives a `pins:`
+    entry's `doc:` field to the TARGET route's own `doc:` (issue #876
+    review MAJOR 2) -- a renamed pin's `doc:` otherwise keeps
+    describing the SOURCE board's physical pad/electricals (e.g.
+    e1m-evk's encoder-switch doc names a PEC12R-4222F-S0024 debounce
+    network; e1m-x-evk's own doc for the same role describes a
+    different part with RC debounce), which is actively wrong prose
+    once the pad itself has changed -- the same "copy the target's
+    own doc" behaviour scripts/gen_portability_matrix.py's
+    `_remap_pins` already applies for its own (unrelated) board-preset
+    swap path.
+
+    A value of `None` in the returned map means DROP the `doc:` field
+    entirely -- the target route has no `doc:` of its own, and the
+    loader already falls back to the resolved board's own `doc:` in
+    that case (metadata/schemas/board.schema.json), so dropping it is
+    safe, not a silent content gap. An entry without its own `doc:`
+    at all contributes nothing (nothing to re-derive)."""
+    renames: dict[str, str | None] = {}
+    for item in original_pins:
+        if not isinstance(item, dict):
+            continue
+        old_doc = item.get("doc")
+        if not isinstance(old_doc, str):
+            continue
+        target = _resolve_pin_target(item, sku, source_preset, metadata_root)
+        if target is None:
+            continue
+        new_doc = target.get("doc")
+        if isinstance(new_doc, str):
+            if new_doc != old_doc:
+                renames[old_doc] = new_doc
+        else:
+            renames[old_doc] = None
     return renames
 
 
@@ -767,25 +872,42 @@ def _substitute_board_yaml_core(text: str, old: str, new: str) -> str:
     return _LIBRARY_CORE_SCOPE_RE.sub(_fix_scope_list, new_text)
 
 
-def _substitute_board_yaml_pins(text: str, renames: dict[str, str]) -> str:
-    """Rewrite each `pins:` entry's `e1m: <old>` field to `e1m: <new>`
-    per `_derive_pin_renames`'s map -- scoped to the `e1m:` key
-    specifically (an `(e1m:\\s*)<pad>\\b` match), not a blanket
-    `\\b<pad>\\b` replace over the whole file: a pad name can also
-    appear in unrelated prose (e.g. gpio-button-led's `preset:` header
-    comment, "the EVK routes the user button to the encoder push
-    switch (E1M_GPIO_IO4)"), which this leaves untouched. `e1m:` is a
-    `pins:`-entry-only key in an app's own board.yaml (a board
-    preset's OWN `e1m_routes:` lives in a different file, never part
-    of this text)."""
+def _substitute_board_yaml_pins(
+    text: str, renames: dict[str, str], original_pins: list[Any],
+) -> str:
+    """Rewrite each renamed pad wherever a `pins:` entry names it --
+    scoped to the two shapes a `pins:` list item can take (issue #876
+    review MINOR 3), not a blanket `\\b<pad>\\b` replace over the whole
+    file (a pad name can also appear in unrelated prose, e.g. gpio-
+    button-led's `preset:` header comment -- see `_strip_stale_core_
+    prose`, reused for pins in `render_to_envelope`):
+
+    * the dict form's `e1m: <old>` field (`(e1m:\\s*)<pad>\\b`), and
+    * the bare pad-string list-item form (`- <old>`,
+      `([ \\t]*-[ \\t]*)<pad>\\b`) the schema also allows -- a template
+      using this form had its pad left stale by the dict-only regex
+      (silent `--emit zephyr-conf` failure downstream: the exact class
+      of bug #876 exists to kill), and a MIXED bare + dict entry for
+      the same pad hid it entirely (the dict match alone satisfied the
+      old "at least one occurrence" guard).
+
+    `original_pins` supplies the EXPECTED occurrence count per pad (how
+    many entries -- bare or dict -- actually name it), so the rewrite
+    is verified exact rather than "found at least one"."""
     for old, new in renames.items():
-        pattern = re.compile(rf"(e1m:\s*){re.escape(old)}\b")
-        new_text, n = pattern.subn(lambda m: f"{m.group(1)}{new}", text)
-        if n < 1:
+        expected = sum(
+            1 for item in original_pins
+            if _pin_pad_and_macro(item)[0] == old
+        )
+        dict_pattern = re.compile(rf"(e1m:\s*){re.escape(old)}\b")
+        text, n_dict = dict_pattern.subn(lambda m: f"{m.group(1)}{new}", text)
+        bare_pattern = re.compile(rf"(?m)^([ \t]*-[ \t]*){re.escape(old)}\b")
+        text, n_bare = bare_pattern.subn(lambda m: f"{m.group(1)}{new}", text)
+        if n_dict + n_bare != expected:
             raise TemplateError(
-                f"board.yaml `pins:` has no `e1m: {old}` entry to "
-                f"re-derive to {new!r}")
-        text = new_text
+                f"board.yaml `pins:` re-derive of `{old}` -> {new!r}: "
+                f"expected {expected} occurrence(s), rewrote "
+                f"{n_dict + n_bare}")
     return text
 
 
@@ -793,7 +915,8 @@ def _substitute_board_yaml_pin_macros(text: str, renames: dict[str, str]) -> str
     """Companion to `_substitute_board_yaml_pins`: rewrite each `pins:`
     entry's `macro:` field per `_derive_pin_macro_renames`'s map, the
     same scoped-to-the-key approach (`(macro:\\s*)<old>\\b`) -- `macro:`
-    is likewise a `pins:`-entry-only key in an app's own board.yaml."""
+    only ever appears in the dict form (a bare pad-string entry has
+    no `macro:` at all)."""
     for old, new in renames.items():
         pattern = re.compile(rf"(macro:\s*){re.escape(old)}\b")
         new_text, n = pattern.subn(lambda m: f"{m.group(1)}{new}", text)
@@ -801,6 +924,30 @@ def _substitute_board_yaml_pin_macros(text: str, renames: dict[str, str]) -> str
             raise TemplateError(
                 f"board.yaml `pins:` has no `macro: {old}` entry to "
                 f"re-derive to {new!r}")
+        text = new_text
+    return text
+
+
+def _substitute_board_yaml_pin_docs(text: str, renames: dict[str, str | None]) -> str:
+    """Companion to `_substitute_board_yaml_pins`: rewrite (or drop) a
+    `pins:` entry's `doc:` field per `_derive_pin_doc_renames`'s map
+    (issue #876 review MAJOR 2) -- `doc:` only ever appears in the
+    dict form. A `None` value means the target route has no `doc:` of
+    its own; the loader falls back to the resolved board's own `doc:`
+    in that case, so the field is dropped entirely rather than left
+    describing the wrong board."""
+    for old_doc, new_doc in renames.items():
+        old_quoted = re.escape(f'"{old_doc}"')
+        if new_doc is not None:
+            pattern = re.compile(rf"(doc:\s*){old_quoted}")
+            new_text, n = pattern.subn(lambda m: f'{m.group(1)}"{new_doc}"', text)
+        else:
+            pattern = re.compile(rf",\s*doc:\s*{old_quoted}")
+            new_text, n = pattern.subn("", text)
+        if n < 1:
+            raise TemplateError(
+                f'board.yaml `pins:` has no `doc: "{old_doc}"` entry to '
+                f"re-derive")
         text = new_text
     return text
 
@@ -924,6 +1071,36 @@ def _docs_ref(base_dir: Path) -> str:
     return "main"
 
 
+def _substitute_readme_pins(text: str, renames: dict[str, str]) -> str:
+    """Rewrite a scaffolded README's `ALP_<old_pad>` mentions to
+    `ALP_<new_pad>` for every renamed pin (issue #876 review MINOR 4)
+    -- e.g. gpio-button-led's README teaches `ALP_E1M_GPIO_IO4` as THE
+    button pin, which becomes actively wrong prose once the pad itself
+    has changed for a cross-family sku.
+
+    Paragraph-scoped (split on blank lines): a paragraph that ALREADY
+    mentions BOTH the old and the new `ALP_<pad>` form (e.g. i2c-
+    master's "resolves to `ALP_E1M_I2C0` on the E1M EVK and
+    `ALP_E1M_X_I2C0` on the E1M-X EVK" cross-EVK teaching sentence) is
+    left alone -- it's correct, portable prose about the alias
+    mechanism itself, not a stale claim about which pad THIS scaffold
+    uses, and blindly substituting would turn it into a duplicate,
+    factually wrong statement ("... on the E1M EVK" would then name
+    the E1M-X pad)."""
+    if not renames:
+        return text
+    paragraphs = text.split("\n\n")
+    for i, para in enumerate(paragraphs):
+        changed = para
+        for old, new in renames.items():
+            old_tok, new_tok = f"ALP_{old}", f"ALP_{new}"
+            if old_tok in para and new_tok in para:
+                continue  # already-correct dual-EVK teaching prose
+            changed = re.sub(rf"\b{re.escape(old_tok)}\b", new_tok, changed)
+        paragraphs[i] = changed
+    return "\n\n".join(paragraphs)
+
+
 def _scaffold_readme(
     text: str,
     example_path: str,
@@ -932,6 +1109,7 @@ def _scaffold_readme(
     sku: str = "",
     source_board: str | None = None,
     target_board: str | None = None,
+    pin_renames: dict[str, str] | None = None,
 ) -> str:
     """Every vendored README's `../`-relative links (`../../../docs/
     x.md`, a sibling example's `../i2c-scanner/`, ...) resolve against
@@ -973,6 +1151,9 @@ def _scaffold_readme(
       upgrading even the passthrough case to the fully-qualified id
       Zephyr 4.4 actually requires (issue #720; the source README's own
       bare `alp_e1m_aen801_m55_hp` is itself ambiguous/unresolvable).
+
+    `pin_renames` (issue #876 review MINOR 4) is `_derive_pin_renames`'s
+    map -- see `_substitute_readme_pins`.
     """
     def _fix_link(m: re.Match[str]) -> str:
         target = posixpath.normpath(f"{example_path}/{m.group(1)}")
@@ -988,6 +1169,7 @@ def _scaffold_readme(
         text = re.sub(rf"\b{re.escape(source_marker)}\b", target_board, text)
     if example_sku and sku and example_sku != sku:
         text = text.replace(example_sku, sku)
+    text = _substitute_readme_pins(text, pin_renames or {})
     return text
 
 
@@ -1055,19 +1237,18 @@ def render_to_envelope(
     # template ships one today) has a metadata/boards/<preset>.yaml to
     # re-derive against.
     original_pins = list(example_doc.get("pins") or [])
-    original_pads = [
-        item if isinstance(item, str) else item.get("e1m")
-        for item in original_pins
-    ]
-    original_pads = [pad for pad in original_pads if isinstance(pad, str)]
     source_preset = example_doc.get("preset")
     pin_renames = (
-        _derive_pin_renames(original_pads, sku, source_preset, metadata_root)
-        if original_pads else {}
+        _derive_pin_renames(original_pins, sku, source_preset, metadata_root)
+        if original_pins else {}
     )
     pin_macro_renames = (
         _derive_pin_macro_renames(original_pins, sku, source_preset, metadata_root)
-        if original_pads else {}
+        if original_pins else {}
+    )
+    pin_doc_renames = (
+        _derive_pin_doc_renames(original_pins, sku, source_preset, metadata_root)
+        if original_pins else {}
     )
     # The one rename CMakeLists.txt's `--core` flag also needs (the
     # m-class core the app actually builds on) -- None when nothing
@@ -1103,9 +1284,20 @@ def render_to_envelope(
             for old, new in (core_renames or {}).items():
                 text = _substitute_board_yaml_core(text, old, new)
             if pin_renames:
-                text = _substitute_board_yaml_pins(text, pin_renames)
+                text = _substitute_board_yaml_pins(text, pin_renames, original_pins)
             if pin_macro_renames:
                 text = _substitute_board_yaml_pin_macros(text, pin_macro_renames)
+            if pin_doc_renames:
+                text = _substitute_board_yaml_pin_docs(text, pin_doc_renames)
+            # A renamed pad can also survive as a stale mention in
+            # unrelated prose (issue #876 review MINOR 4) -- e.g.
+            # gpio-button-led's `preset:` header comment names the
+            # E1M-EVK pad in a continuation line the `preset:`
+            # substitution above never touches. Same treatment
+            # `_substitute_board_yaml_core` already gives a renamed
+            # core id (`_strip_stale_core_prose`).
+            for old in (pin_renames or {}):
+                text = _strip_stale_core_prose(text, old)
         elif rel.endswith("CMakeLists.txt"):
             if app_core_sub:
                 text = _substitute_cmake_core(text, *app_core_sub)
@@ -1114,7 +1306,8 @@ def render_to_envelope(
             text = _scaffold_readme(
                 text, record["example"], docs_ref,
                 example_sku=example_sku, sku=sku,
-                source_board=source_board, target_board=target_board)
+                source_board=source_board, target_board=target_board,
+                pin_renames=pin_renames)
         out.append((rel, text))
     return out
 

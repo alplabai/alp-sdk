@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -546,6 +547,138 @@ def test_derive_pin_macro_renames_matches_the_pad_renames():
         "EVK_PIN_ENCODER_SW": "XEVK_PIN_ENCODER_SW",
         "EVK_PIN_LED_RED": "XEVK_PIN_LED_RED",
     }
+
+
+# --------------------------------------------------------------------------
+# Adversarial review follow-up (issue #876 review MAJOR 1/2, MINOR 3/4)
+# --------------------------------------------------------------------------
+
+def test_derive_pin_renames_multi_alias_pad_resolves_via_macro_not_dict_inversion():
+    """e1m-evk's `E1M_PWM1` carries TWO `board_alias:` roles at two
+    DIFFERENT entries -- `BOARD_PWM_LED_BLUE` (macro
+    `EVK_PWM_LED_BLUE`) and `BOARD_PWM_ARD1` (macro `EVK_ARD_PWM1`).
+    A naive `{pad: alias}` dict inversion collapses to whichever entry
+    wins the dict (last-in-iteration-order), silently ignoring the
+    pin's own `macro:` -- verified pre-fix: resolved to the Arduino
+    pad regardless of which macro the pin actually declared. Matching
+    by `macro:` first must resolve `EVK_PWM_LED_BLUE` to the LED-blue
+    counterpart, `E1M_X_PWM6` (`XEVK_PWM_LED_BLUE`), never the
+    Arduino pad `E1M_X_PWM1`."""
+    pins = [{"e1m": "E1M_PWM1", "macro": "EVK_PWM_LED_BLUE"}]
+    pad_renames = alp_template._derive_pin_renames(
+        pins, "E1M-V2N101", "e1m-evk", alp_template.METADATA_ROOT)
+    assert pad_renames == {"E1M_PWM1": "E1M_X_PWM6"}
+    macro_renames = alp_template._derive_pin_macro_renames(
+        pins, "E1M-V2N101", "e1m-evk", alp_template.METADATA_ROOT)
+    assert macro_renames == {"EVK_PWM_LED_BLUE": "XEVK_PWM_LED_BLUE"}
+
+    # The OTHER macro on the same shared pad must resolve to ITS OWN
+    # (different) target -- proves the fix isn't just "always pick the
+    # first entry sharing the pad."
+    ard_pins = [{"e1m": "E1M_PWM1", "macro": "EVK_ARD_PWM1"}]
+    assert alp_template._derive_pin_renames(
+        ard_pins, "E1M-V2N101", "e1m-evk", alp_template.METADATA_ROOT
+    ) == {"E1M_PWM1": "E1M_X_PWM1"}
+
+
+def test_derive_pin_renames_bare_string_multi_alias_pad_hard_errors():
+    """A bare pad-string `pins:` entry (no `macro:` to disambiguate)
+    naming a multi-alias pad (`E1M_PWM1`) has nothing to resolve the
+    alias with -- hard error, never a silent guess at which of its two
+    roles was meant (issue #876 review MINOR 3)."""
+    with pytest.raises(alp_template.TemplateError, match="unambiguous"):
+        alp_template._derive_pin_renames(
+            ["E1M_PWM1"], "E1M-V2N101", "e1m-evk", alp_template.METADATA_ROOT)
+
+
+def test_derive_pin_doc_renames_copies_the_target_boards_own_doc():
+    """A renamed pin's `doc:` must be re-derived to the TARGET route's
+    own `doc:` (issue #876 review MAJOR 2) -- otherwise it keeps
+    describing the SOURCE board's electricals/part number, which is
+    actively wrong once the physical pad has changed."""
+    pins = [{
+        "e1m": "E1M_GPIO_IO4", "macro": "EVK_PIN_ENCODER_SW",
+        "doc": "Rotary encoder push switch (PEC12R-4222F-S0024), "
+               "10k pull-up + 0.1uF debounce",
+    }]
+    renames = alp_template._derive_pin_doc_renames(
+        pins, "E1M-V2N101", "e1m-evk", alp_template.METADATA_ROOT)
+    assert renames == {
+        "Rotary encoder push switch (PEC12R-4222F-S0024), 10k pull-up + "
+        "0.1uF debounce":
+            "Rotary encoder (PEC12R-4222F) push switch; pull-up + "
+            "RC debounce.",
+    }
+
+
+def test_substitute_board_yaml_pins_rewrites_the_bare_string_list_item_form():
+    """The schema also allows a bare pad-string `pins:` entry (no
+    `{e1m: ...}` mapping) -- the dict-only `e1m:`-key regex left it
+    stale (issue #876 review MINOR 3)."""
+    text = "pins:\n  - E1M_I2C0\ncores:\n  m55_hp:\n    app: ./src\n"
+    out = alp_template._substitute_board_yaml_pins(
+        text, {"E1M_I2C0": "E1M_X_I2C0"}, ["E1M_I2C0"])
+    assert "- E1M_X_I2C0" in out
+    assert "E1M_I2C0" not in out.replace("E1M_X_I2C0", "")
+
+
+def test_substitute_board_yaml_pins_mixed_bare_and_dict_for_same_pad():
+    """A mixed bare-string + dict entry for the SAME pad must rewrite
+    BOTH -- the dict match alone used to satisfy the old any-
+    occurrence guard, silently hiding the still-stale bare entry
+    (issue #876 review MINOR 3)."""
+    text = (
+        "pins:\n  - E1M_I2C0\n"
+        "  - { e1m: E1M_I2C0, macro: EVK_I2C_BUS_SENSORS }\n"
+    )
+    original_pins = ["E1M_I2C0", {"e1m": "E1M_I2C0", "macro": "EVK_I2C_BUS_SENSORS"}]
+    out = alp_template._substitute_board_yaml_pins(
+        text, {"E1M_I2C0": "E1M_X_I2C0"}, original_pins)
+    assert out.count("E1M_X_I2C0") == 2
+    assert "E1M_I2C0" not in out.replace("E1M_X_I2C0", "")
+
+
+def test_substitute_readme_pins_skips_a_paragraph_already_naming_both_forms():
+    """i2c-master's README already teaches the cross-EVK alias
+    resolution explicitly ("resolves to `ALP_E1M_I2C0` on the E1M EVK
+    and `ALP_E1M_X_I2C0` on the E1M-X EVK") -- correct, portable prose
+    about the mechanism itself, not a stale claim about which pad THIS
+    scaffold uses. Blindly substituting would turn it into a duplicate,
+    factually wrong sentence (issue #876 review MINOR 4)."""
+    text = (
+        "The `<alp/board.h>` alias resolves to `ALP_E1M_I2C0` on the E1M\n"
+        "EVK and `ALP_E1M_X_I2C0` on the E1M-X EVK.\n"
+    )
+    out = alp_template._substitute_readme_pins(text, {"E1M_I2C0": "E1M_X_I2C0"})
+    assert out == text
+
+
+def test_substitute_readme_pins_rewrites_a_single_board_prose_paragraph():
+    """gpio-button-led's README teaches `ALP_E1M_GPIO_IO4` as THE
+    button pin with no cross-EVK caveat -- must become the target
+    pad, not survive as stale E1M-EVK-only prose."""
+    text = "reads the switch on `ALP_E1M_GPIO_IO4` (active-low) as the button.\n"
+    out = alp_template._substitute_readme_pins(
+        text, {"E1M_GPIO_IO4": "E1M_X_GPIO_IO28"})
+    assert "ALP_E1M_X_GPIO_IO28" in out
+    assert "ALP_E1M_GPIO_IO4" not in out
+
+
+def test_render_to_envelope_peripheral_v2n101_has_no_stale_e1m_evk_pad_mentions():
+    """End-to-end: neither board.yaml nor README.md may still name an
+    E1M-EVK-only pad once scaffold-adapted for E1M-V2N101 -- the exact
+    bar the #876 adversarial review demanded."""
+    envelope = dict(alp_template.render_to_envelope("peripheral", "E1M-V2N101"))
+    for old in ("E1M_GPIO_IO4", "E1M_GPIO_PWM3"):
+        assert old not in envelope["board.yaml"], envelope["board.yaml"]
+        assert f"ALP_{old}" not in envelope["README.md"], envelope["README.md"]
+    # `\b` (word-boundary) checks, not plain substring `in`: the correct
+    # renamed macros (`XEVK_PIN_ENCODER_SW`/`XEVK_PIN_LED_RED`) legitimately
+    # CONTAIN the stale macro names as a substring (X-prefixed).
+    for old_macro in ("EVK_PIN_ENCODER_SW", "EVK_PIN_LED_RED"):
+        assert not re.search(rf"\b{old_macro}\b", envelope["board.yaml"]), \
+            (old_macro, envelope["board.yaml"])
+    assert "PEC12R-4222F-S0024" not in envelope["board.yaml"]  # stale e1m-evk doc
 
 
 # --------------------------------------------------------------------------
