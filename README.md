@@ -363,7 +363,7 @@ verification (`⏳`/`🟡`/`✅` rows) lives in
   - **Renesas DRP-AI3** — RZ/V2N (V2N family); supports YOLO v5 / v8 detection on top of classification + segmentation models.
   - **DEEPX DX-M1** — V2N + DX-M1 (V2M family); ONNX → DXNN compiler, model-family agnostic; first-class support for YOLO v5 / v8 / NAS detection backbones.
   - **CPU** — reference-kernel fallback on any target
-- **Portable model pipeline (`.alpmodel`)** — `alp model build` compiles a source model for **every** NPU back-end the SoM declares into one **fat multi-backend `.alpmodel`** package (CBOR manifest + per-backend blobs + a capability `requires` envelope). At runtime **`alp_inference_open_alpmodel()`** loads the package and a selection engine picks the matching blob (silicon ref + SRAM-fit + `preferred_backend` tiebreak; `ALP_ERR_NO_FIT` if none fits), then dispatches through the backend registry below. One model, portable across NPUs without source changes.
+- **Portable model pipeline (`.alpmodel`)** — `tan model build` compiles a source model for **every** NPU back-end the SoM declares into one **fat multi-backend `.alpmodel`** package (CBOR manifest + per-backend blobs + a capability `requires` envelope). At runtime **`alp_inference_open_alpmodel()`** loads the package and a selection engine picks the matching blob (silicon ref + SRAM-fit + `preferred_backend` tiebreak; `ALP_ERR_NO_FIT` if none fits), then dispatches through the backend registry below. One model, portable across NPUs without source changes.
 - Offline training (off-device) lives in TensorFlow / PyTorch.
 
 ### Dev tooling
@@ -409,7 +409,7 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference bo
   ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────┐
   │ AI Models &   │ ─► │  Train (off-device):  TensorFlow · PyTorch  →  .tflite / .onnx         │
   │ Pipeline      │    │                                                                        │
-  │               │    │  Compile (host):  alp model build  →  one fat .alpmodel package        │
+  │               │    │  Compile (host):  tan model build  →  one fat .alpmodel package        │
   │               │    │     per-backend blobs:  Vela (Ethos-U) · DRP-AI · dxcom · CPU/TFLM     │
   │               │    │                                                                        │
   │               │    │  Model families:  classification · detection (YOLO v5/v8) ·            │
@@ -423,7 +423,7 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference bo
   │               │    │  --emit build-plan/system-manifest  →  tan (executor)                  │
   │               │    │  tan build / flash / image / size / renode / clean                     │
   │               │    │  validate_board_yaml.py · program_eeprom.py · VS Code extension        │
-  │               │    │  alp model build  →  .alpmodel   (the model-compile front-end)         │
+  │               │    │  tan model build  →  .alpmodel   (the model-compile front-end)         │
   └───────────────┘    └────────────────────────────────────────────────────────────────────────┘
           │
   ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────┐

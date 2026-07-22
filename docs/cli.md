@@ -189,7 +189,13 @@ tan renode                         # headless smoke boot in Renode
 write-free build recipe -- one entry per non-`off` core, with the
 resolved app source dir, the exact tool command, and env) as its only
 input, and seeds its own `system-manifest.yaml` from
-`--emit system-manifest`.  It is independently versioned and
+`--emit system-manifest`.  The plan is hermetic: under
+`planPathMode: tokened`, checkout-/project-anchored absolute paths
+are emitted as literal `${SDK_ROOT}` / `${PROJECT_ROOT}` / `${PYTHON}`
+tokens instead of this run's real paths, and `tan` substitutes them
+at materialise time -- see the "Hermetic paths" paragraph in
+[heterogeneous-builds.md](heterogeneous-builds.md) for the field
+list.  It is independently versioned and
 distributed; installing it never pulls in alp-studio or the VS Code
 extension.  See [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli)
 for its own verb reference (flags, `--dry-run`, `--sim-mode`, helper-MCU

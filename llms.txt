@@ -60,8 +60,8 @@ For AI coding agents: read [AGENTS.md](AGENTS.md) first (the cross-tool agent gu
 
 ## Validation
 
-- [scripts/alp_cli/doctor.py](scripts/alp_cli/doctor.py): `alp doctor` — HW-free environment preflight (toolchain / west / Zephyr-pin / deps), with `--json`.
-- [scripts/validate_board_yaml.py](scripts/validate_board_yaml.py): the `board.yaml` validator (also exposed as the `alp validate` CLI command).
+- [scripts/alp_cli/doctor.py](scripts/alp_cli/doctor.py): `tan doctor` — HW-free environment preflight (toolchain / west / Zephyr-pin / deps), with `--json`.
+- [scripts/validate_board_yaml.py](scripts/validate_board_yaml.py): the `board.yaml` validator (also exposed as the `tan validate` CLI command).
 - [scripts/check_example_portability.py](scripts/check_example_portability.py): gate enforcing the portable-API rule for examples.
 - [scripts/check_doc_drift.py](scripts/check_doc_drift.py): gate catching docs that drifted from code/metadata.
 - [docs/testing.md](docs/testing.md): the full local verification pass (twister + checks) CI runs short of HIL.

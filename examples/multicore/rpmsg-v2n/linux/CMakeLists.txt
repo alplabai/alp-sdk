@@ -4,11 +4,11 @@
 # rpmsg-v2n example.
 #
 # Plain CMake -- NO `find_package(Zephyr ...)`.  The Zephyr-side
-# slice for m33_sm lives at ../m33_sm/CMakeLists.txt; the
-# orchestrator (`west alp-build`) dispatches each slice to the right
-# build backend.  This sub-tree is bitbaked by `meta-alp-sdk` as a
-# normal Linux user-space app, layered on the libalp_sdk.so runtime
-# the alp-image-edge image installs.
+# slice for m33_sm lives at ../m33_sm/CMakeLists.txt; the SDK's
+# orchestrator plans the fan-out and `tan build` dispatches each
+# slice to the right build backend.  This sub-tree is bitbaked by
+# `meta-alp-sdk` as a normal Linux user-space app, layered on the
+# libalp_sdk.so runtime the alp-image-edge image installs.
 
 cmake_minimum_required(VERSION 3.20)
 project(rpmsg_v2n_linux LANGUAGES C)

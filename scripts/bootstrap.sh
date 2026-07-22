@@ -169,9 +169,10 @@ VENV_DIR="${WORKSPACE_DIR}/.venv"
 # Everything -- west, the Zephyr requirements, the SDK extras -- installs into a
 # workspace-local venv, never the system interpreter / --user / --break-system-
 # packages (issue #93: a half-removed system `packaging` once broke `west init`,
-# and a global west couples the build to the host interpreter's state).  The
-# alp CLI + VS Code extension auto-discover <workspace>/.venv, so this is
-# backwards-compatible.  Idempotent: an existing venv is reused.
+# and a global west couples the build to the host interpreter's state).
+# tan's Python backend (alp_cli) + the VS Code extension auto-discover
+# <workspace>/.venv, so this is backwards-compatible.  Idempotent: an
+# existing venv is reused.
 if [ "${DO_WEST}" -eq 1 ] || [ "${DO_PIP}" -eq 1 ]; then
     mkdir -p "${WORKSPACE_DIR}"
     if [ -x "${VENV_DIR}/bin/python" ] || [ -x "${VENV_DIR}/Scripts/python.exe" ]; then

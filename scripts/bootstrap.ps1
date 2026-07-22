@@ -5,8 +5,9 @@
 # Fresh-clone bootstrap for the Alp SDK on NATIVE Windows (PowerShell 7+).
 # Mirrors scripts/bootstrap.sh: a Zephyr workspace beside the alp-sdk
 # checkout, a workspace-local venv (west + Python deps), and an editable
-# install of the `alp` CLI -- see docs/cross-platform-setup.md section 4
-# for the manual walkthrough this script automates.
+# install of the `tan` CLI's Python backend (`alp_cli`) -- see
+# docs/cross-platform-setup.md section 4 for the manual walkthrough
+# this script automates.
 #
 # Honest scope -- what this script does NOT do:
 #
