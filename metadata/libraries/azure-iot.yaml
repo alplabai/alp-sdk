@@ -17,6 +17,13 @@
 #   reproducible and `--emit west-libraries` can produce a concrete west
 #   project entry.
 #
+#   Re-confirmed 2026-07-22 (issue #382): a full recursive tree listing of
+#   github.com/Azure/azure-sdk-for-c at the pinned tag commit
+#   6d6e634a3bb7f4d6bb5666ec8e1005ecd248e635 (171 entries) has no
+#   `module.yml`, no `Kconfig`, and no `zephyr/` directory anywhere in the
+#   tree.  There is still no real enable symbol to transcribe -- DEFERRED,
+#   not invented.
+#
 # Enablement is BY MODULE PRESENCE, not a Kconfig gate.  There is no single
 # upstream `CONFIG_AZURE_IOT=y` enable symbol to transcribe (the SDK is a set
 # of protocol-serialization helpers configured in app code, not one Zephyr

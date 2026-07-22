@@ -19,6 +19,13 @@
 #   the pin at least makes the source revision reproducible and lets
 #   `--emit west-libraries` produce a concrete west project entry.
 #
+#   Re-confirmed 2026-07-22 (issue #382): a full recursive tree listing of
+#   github.com/aws/aws-iot-device-sdk-embedded-C at the pinned tag object
+#   (peeled commit fea3abbb65e102dd03f1238b34eecf8da311daf0, 503 entries) has
+#   no `module.yml`, no `Kconfig`, and no `zephyr/` directory anywhere in the
+#   tree.  There is still no real enable symbol to transcribe -- DEFERRED,
+#   not invented.
+#
 # Enablement is BY MODULE PRESENCE, not a Kconfig gate.  There is no single
 # upstream `CONFIG_AWS_IOT=y` enable symbol to transcribe (the SDK is configured
 # through per-library CMake options + app code, not one Zephyr master switch).
