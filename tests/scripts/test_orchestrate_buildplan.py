@@ -568,6 +568,67 @@ def test_slice_command_helpers_take_explicit_base_dir(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------
+# Issue #865 -- tokened paths; a path outside both roots blocks + warns
+# ---------------------------------------------------------------------
+
+
+def test_emit_build_plan_declares_planpathmode_tokened(tmp_path: Path) -> None:
+    """Every emit carries `planPathMode: "tokened"` (issue #865, additive
+    to schemaVersion 1) -- a refactor that silently drops the key or the
+    token substitution must fail this test, not just the schema/seam-1
+    gates."""
+    import json as _json
+    from alp_orchestrate import emit_build_plan
+
+    path = _write_board(tmp_path, V2N_HAPPY)
+    plan = _json.loads(emit_build_plan(
+        load_board_yaml(path), board_yaml=path, build_root=Path("build")))
+    assert plan["planPathMode"] == "tokened"
+
+
+def test_emit_build_plan_app_outside_both_roots_blocks_command(
+    tmp_path: Path,
+) -> None:
+    """The split-brain safety net: an `app:` resolving outside BOTH
+    `${PROJECT_ROOT}` (board.yaml's own directory) and `${SDK_ROOT}`
+    (this checkout) must never leak a bare absolute path into
+    `command.args` on a plan tagged `planPathMode: tokened`.
+    `_slice_command`'s `_tokenize` call raises `UnrootedPathError`; the
+    emit catches it, blocks that slice's command (`command: null`), and
+    records a `command-unrooted` warning instead of silently emitting a
+    non-hermetic command. A refactor that drops the guard would instead
+    emit a real (non-null) command carrying the raw absolute `outside`
+    path -- this test fails on that regression."""
+    import json as _json
+    from alp_orchestrate import emit_build_plan
+
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    board = f"""
+name: split-brain-board
+som:
+  sku: E1M-V2N101
+  hw_rev: r1
+
+cores:
+  m33_sm:
+    os: zephyr
+    app: {outside.as_posix()}
+"""
+    path = _write_board(project_dir, board)
+    plan = _json.loads(emit_build_plan(
+        load_board_yaml(path), board_yaml=path, build_root=Path("build")))
+
+    m33 = next(s for s in plan["slices"] if s["coreId"] == "m33_sm")
+    assert m33["command"] is None
+    codes = [(w["code"], w["coreId"]) for w in plan["warnings"]]
+    assert ("command-unrooted", "m33_sm") in codes
+
+
+# ---------------------------------------------------------------------
 # Issue #597 -- Yocto app-only slices need a valid bitbake target
 # ---------------------------------------------------------------------
 

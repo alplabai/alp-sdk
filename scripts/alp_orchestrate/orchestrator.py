@@ -82,6 +82,20 @@ STOCK_SHIM_DIR = REPO / "firmware" / "alp-stock-shim"
 STOCK_IMAGE_APP = "alp-image-edge"
 
 
+class UnrootedPathError(ValueError):
+    """Raised by `_tokenize` when a path resolves under neither
+    `${PROJECT_ROOT}` nor `${SDK_ROOT}` (issue #865's split-brain guard).
+
+    A single exception type raised from the ONE place paths get tokenized
+    means every call site -- the five command-arg sites in `_slice_command`
+    plus `buildplan.py`'s `appDir` -- is guarded uniformly by construction;
+    nothing can add a sixth call site and forget the check. Callers catch
+    this and turn it into a `warnings` entry (never a hard crash of the
+    whole emit), matching the existing `no-command`/`yocto-recipe-missing`
+    "block the one broken slice, keep going" convention.
+    """
+
+
 def _tokenize(path: Path, base_dir: Path, repo: Path) -> str:
     """Render an absolute path as a portable `${PROJECT_ROOT}`/`${SDK_ROOT}`
     token (issue #865) instead of baking in THIS checkout's absolute path.
@@ -92,9 +106,9 @@ def _tokenize(path: Path, base_dir: Path, repo: Path) -> str:
     Prefers `${PROJECT_ROOT}` (the project's own board.yaml directory) since
     most anchored paths are project-owned; falls back to `${SDK_ROOT}` for
     paths the SDK itself owns (e.g. the family sysbuild base, the stock
-    M-core shim app). A path under neither root is returned unchanged
-    (absolute, token-free) -- the caller is responsible for flagging that
-    case rather than silently mis-rooting it.
+    M-core shim app). Raises `UnrootedPathError` for a path under neither
+    root -- never returns a bare absolute path, so a non-hermetic path can
+    never silently reach a `planPathMode: tokened` plan.
     """
     path = Path(path)
     for root, token in ((base_dir, "${PROJECT_ROOT}"), (repo, "${SDK_ROOT}")):
@@ -103,7 +117,7 @@ def _tokenize(path: Path, base_dir: Path, repo: Path) -> str:
         except ValueError:
             continue
         return token if rel == Path(".") else f"{token}/{rel.as_posix()}"
-    return path.as_posix()
+    raise UnrootedPathError(path.as_posix())
 
 
 def _slice_command(
