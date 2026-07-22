@@ -587,6 +587,126 @@ cores:
     assert "CONFIG_ALP_SDK_BLE=y" not in conf
 
 
+def test_slice_alp_conf_iot_cc3501e_chip_off_no_backend_lines(
+    tmp_path: Path,
+) -> None:
+    """issue #874 item 2: the SoM's wireless provider is CC3501E, but this
+    board variant DNIs the chip (`populated: { cc3501e: false }`) -- the
+    CC3501E Wi-Fi/BLE bridge lines must not be emitted (they `depend on`
+    ALP_SDK_CHIP_CC3501E, which resolves off on this variant), and a clear
+    comment must explain why instead of a silently-dropped `=y` line."""
+    body = """
+som:
+  sku: E1M-AEN701
+
+name: cc3501e-dni-variant
+populated:
+  cc3501e: false
+
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+    iot: { wifi: true, ble: true }
+"""
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    conf = _slice_alp_conf(project, project.cores["m55_hp"])
+
+    assert "CONFIG_ALP_SDK_CHIP_CC3501E=n" in conf
+    assert "CONFIG_ALP_SDK_WIFI_CC3501E=y" not in conf
+    assert "CONFIG_ALP_SDK_BLE_CC3501E=y" not in conf
+    assert "does not populate the chip" in conf
+
+
+def test_slice_alp_conf_iot_tls_only_emits_network_base(tmp_path: Path) -> None:
+    """issue #874 item 1: `iot.tls: true` alone (no `wifi:`/`mqtt:`) must
+    still emit the networking base -- CONFIG_TLS_CREDENTIALS depends on
+    NETWORKING/NET_SOCKETS, which previously only the wifi/mqtt branches
+    emitted, so a TLS-only slice silently resolved TLS_CREDENTIALS to n."""
+    body = """
+som:
+  sku: E1M-NX9101
+
+libraries:
+  - name: mbedtls
+    cores: [m33]
+
+cores:
+  m33:
+    os: zephyr
+    app: ./m33
+    iot: { tls: true }
+"""
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    conf = _slice_alp_conf(project, project.cores["m33"])
+
+    assert "CONFIG_NETWORKING=y" in conf
+    assert "CONFIG_NET_IPV4=y" in conf
+    assert "CONFIG_NET_SOCKETS=y" in conf
+    assert "CONFIG_TLS_CREDENTIALS=y" in conf
+    # No wifi/mqtt requested -- those gates must stay off.
+    assert "CONFIG_WIFI=y" not in conf
+    assert "CONFIG_ALP_SDK_IOT_WIFI=y" not in conf
+    assert "CONFIG_MQTT_LIB=y" not in conf
+
+
+def test_slice_alp_conf_no_inference_declared_emits_nothing(
+    tmp_path: Path,
+) -> None:
+    """issue #874 item 4: a slice that never declares `cores.<id>.inference:`
+    must not get any INFERENCE_* line -- BACKEND_TFLM's `depends on
+    TENSORFLOW_LITE_MICRO && CPP` previously resolved silently to n on
+    every such slice (e.g. a plain blinky/tone-generator example) with a
+    misleading `=y` line sitting in its alp.conf."""
+    body = """
+som:
+  sku: E1M-AEN701
+
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+"""
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    conf = _slice_alp_conf(project, project.cores["m55_hp"])
+
+    assert "INFERENCE" not in conf
+    assert "CONFIG_TENSORFLOW_LITE_MICRO" not in conf
+
+
+def test_slice_alp_conf_inference_declared_emits_tflm_plus_deps(
+    tmp_path: Path,
+) -> None:
+    """issue #874 items 4+5: `cores.<id>.inference:` (any key, e.g.
+    `default_arena_kib:` -- the same signal validate.py's Rule 4 already
+    keys its arena/heap OOM warning off of) turns the inference section
+    back on, and BACKEND_TFLM's genuinely-external deps (CONFIG_CPP,
+    CONFIG_TENSORFLOW_LITE_MICRO) are emitted alongside it since west.yml
+    pulls the tflite-micro module in unconditionally."""
+    body = """
+som:
+  sku: E1M-AEN701
+
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+    inference: { default_arena_kib: 128 }
+"""
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    conf = _slice_alp_conf(project, project.cores["m55_hp"])
+
+    assert "CONFIG_CPP=y" in conf
+    assert "CONFIG_TENSORFLOW_LITE_MICRO=y" in conf
+    assert "CONFIG_ALP_SDK_INFERENCE_BACKEND_TFLM=y" in conf
+    assert "CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN=y" in conf
+    assert "CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55=y" in conf
+
+
 def test_slice_alp_conf_iot_unknown_provider_uses_generic_zephyr(
     tmp_path: Path,
 ) -> None:

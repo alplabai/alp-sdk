@@ -219,6 +219,14 @@ class TestInferenceFromSomCaps(unittest.TestCase):
     multi-accelerator SKUs (V2M101 = DRP-AI3 + DEEPX DX-M1); the
     build wires in EVERY backend the SoM has so the runtime pick
     always finds a compiled dispatcher.
+
+    `cores.<id>.inference: { default_arena_kib: ... }` is declared on
+    every slice below -- issue #874 gates the whole inference-backend
+    section on the slice actually requesting inference (this is *which
+    backend*, still silicon-determined and never customer-picked; it is
+    a different axis from *whether* this slice uses inference at all).
+    Every real inference example under examples/ai, examples/audio,
+    examples/camera-vision already declares this block.
     """
 
     def _v2_zephyr_slice(self, sku: str, core: str) -> tuple[int, str, str]:
@@ -229,6 +237,7 @@ class TestInferenceFromSomCaps(unittest.TestCase):
               {core}:
                 os: zephyr
                 app: ./src
+                inference: {{ default_arena_kib: 128 }}
         """
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), body)
