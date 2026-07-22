@@ -44,11 +44,16 @@ helper_mcus:
 - name: gd32_bridge
   chip: gd32g553
   firmware_path: firmware/gd32-bridge/build/gd32/gd32-bridge.bin
+  version: 0.2.11
+  sha256: TBD
+  artifact_status: absent
   flash_method: swd_probe
   flash_args:
     interface: cmsis-dap
     target: gd32g553
     base: '0x08000000'
+  note: firmware/gd32-bridge/build/gd32/gd32-bridge.bin not found on disk (gitignored
+    build output or not yet fetched) -- non-fatal; see check_helper_firmware.py
 boot_order: []
 
 # boot_order is empty -- add a `boot_order:` list to metadata/e1m_modules/E1M-V2N101.yaml when the
