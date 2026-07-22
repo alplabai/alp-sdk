@@ -5,7 +5,9 @@ All notable changes to the Alp SDK are documented here.  Format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
-## [Unreleased] - v0.12.0 candidate
+## [Unreleased] - v0.13.0 candidate
+
+## [v0.12.0] - 2026-07-22
 
 ### Fixed — build-plan `executionPolicy` reverted from required to optional
 
