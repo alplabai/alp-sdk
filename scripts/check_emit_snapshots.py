@@ -107,13 +107,32 @@ CASES.append((
     "examples/peripheral-io/hello-world/board.yaml", "scaffold",
     ("--template", "minimal", "--sku", "E1M-V2N101"),
 ))
-# `peripheral`'s own `scaffold.peripheral-v2n101` case was DROPPED
-# (issue #864 Fable-review MAJOR A): E1M-V2N101 is no longer in
-# `peripheral`'s `supported.som_skus` (its `pins:` block isn't
-# E1M-X-EVK-portable yet -- issue #876), so that combo now correctly
-# raises SkuNotSupportedError rather than emitting a byte-stable but
-# non-buildable scaffold -- nothing left to pin a byte-identical
-# golden against.
+# peripheral's canonical board.yaml carries trailing inline comments on
+# BOTH its `sku:` and `preset:` lines describing the AEN801/e1m-evk
+# default (Fable review finding) -- this pins that the substitution
+# drops the stale comment along with the value, not just the token.
+# E1M-V2N101 is back in `peripheral`'s `supported.som_skus` (issue
+# #876: `_derive_pin_renames` re-derives the `pins:` block's
+# E1M-EVK-only pads to their E1M-X-EVK equivalents via the boards'
+# shared `board_alias:` join, so this is a buildable scaffold again,
+# not the dead-on-arrival one #864/#877 dropped this case for).
+CASES.append((
+    "scaffold.peripheral-v2n101", PROJ,
+    "examples/peripheral-io/gpio-button-led/board.yaml", "scaffold",
+    ("--template", "peripheral", "--sku", "E1M-V2N101"),
+))
+# sensor/edge-ai both re-derive a single `E1M_I2C0` -> `E1M_X_I2C0`
+# pin (issue #876) -- new golden coverage, no prior case existed.
+CASES.append((
+    "scaffold.sensor-v2n101", PROJ,
+    "examples/peripheral-io/i2c-master/board.yaml", "scaffold",
+    ("--template", "sensor", "--sku", "E1M-V2N101"),
+))
+CASES.append((
+    "scaffold.edge-ai-v2n101", PROJ,
+    "examples/ai/cold-chain-monitor/board.yaml", "scaffold",
+    ("--template", "edge-ai", "--sku", "E1M-V2N101"),
+))
 
 
 def _normalize_path(text: str, path: str, token: str) -> str:
