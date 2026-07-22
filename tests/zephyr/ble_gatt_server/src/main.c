@@ -23,6 +23,7 @@
 #include <string.h>
 
 #include <zephyr/ztest.h>
+#include <zephyr/bluetooth/att.h>
 #include <zephyr/bluetooth/gatt.h>
 
 #include "alp/backend.h"
@@ -31,6 +32,11 @@
 #include "alp/soc_caps.h"
 
 #include "../../../../src/backends/ble/ble_ops.h"
+
+/* White-box seam for the client-read callback (src/backends/ble/zephyr_drv.c,
+ * CONFIG_ZTEST-only) -- see that file for why this is the smallest
+ * offline-reproducible harness for the STOP-suppresses-completion bug. */
+extern alp_status_t alp_ble_test_read_cb(uint8_t err, const void *data, uint16_t length);
 
 ZTEST_SUITE(alp_ble_gatt_server, NULL, NULL, NULL, NULL, NULL);
 
@@ -218,4 +224,35 @@ ZTEST(alp_ble_gatt_server, test_register_service_with_notify_char_assigns_distin
 	zassert_not_null(attr1);
 	zassert_not_null(attr1->read);
 	zassert_is_null(attr1->write, "READ-only characteristic must not get a write callback");
+}
+
+/* Client GATT read (conn-side z_gatt_read()/ble_read_cb()) regression tests
+ * -- issue #480 review. native_sim ships no BLE controller, so there is no
+ * live peer connection to drive bt_gatt_read() end-to-end; these drive
+ * ble_read_cb() directly via the CONFIG_ZTEST-only seam, reproducing the
+ * exact (err, data, length) shapes Zephyr's gatt_read_rsp()
+ * (subsys/bluetooth/host/gatt.c) delivers. */
+
+ZTEST(alp_ble_gatt_server, test_client_read_cb_success_does_not_time_out)
+{
+	/* BUG 1: returning BT_GATT_ITER_STOP from the data-bearing branch
+	 * used to suppress gatt_read_rsp()'s terminal func(..., NULL, 0)
+	 * completion, so a successful read never signalled its semaphore
+	 * and z_gatt_read() blocked to ALP_ERR_TIMEOUT on every success. */
+	static const uint8_t data[] = { 0xAA, 0xBB };
+	zassert_equal(alp_ble_test_read_cb(0, data, sizeof(data)),
+	              ALP_OK,
+	              "a successful client GATT read must not surface as ALP_ERR_TIMEOUT");
+}
+
+ZTEST(alp_ble_gatt_server, test_client_read_cb_att_error_maps_to_io)
+{
+	/* BUG 2: checking `data == NULL` before `err != 0` made the ATT
+	 * error branch dead code (Zephyr delivers a rejected read as
+	 * func(conn, err, params, NULL, 0) -- data is NULL there too), so a
+	 * peer-rejected read surfaced as ALP_ERR_TIMEOUT instead of
+	 * ALP_ERR_IO. */
+	zassert_equal(alp_ble_test_read_cb(BT_ATT_ERR_INVALID_HANDLE, NULL, 0),
+	              ALP_ERR_IO,
+	              "a peer-rejected read must surface as ALP_ERR_IO, not ALP_ERR_TIMEOUT");
 }

@@ -276,25 +276,66 @@ static uint8_t ble_read_cb(struct bt_conn             *conn,
 {
 	struct ble_read_ctx *ctx = (struct ble_read_ctx *)params;
 	(void)conn;
-	if (data == NULL) {
-		/* Read procedure complete (no long-read continuation in v0.3). */
-		k_sem_give(&ctx->done);
-		return BT_GATT_ITER_STOP;
-	}
+	/* Zephyr's gatt_read_rsp() (subsys/bluetooth/host/gatt.c) delivers a
+	 * peer-rejected read as func(conn, err, params, NULL, 0) -- data is
+	 * NULL here too, so err must be checked before data to avoid mapping
+	 * an I/O error onto the data==NULL "procedure complete" branch. */
 	if (err != 0) {
 		/* err is an ATT protocol error code (BT_ATT_ERR_*), not an
 		 * errno -- the peer rejected the read (bad handle, no
 		 * permission, ...). Surface as I/O; there is no ALP_ERR_*
 		 * finer-grained than that for a remote protocol error. */
 		ctx->result = ALP_ERR_IO;
+		k_sem_give(&ctx->done);
+		return BT_GATT_ITER_STOP;
+	}
+	if (data == NULL) {
+		/* Read procedure complete (no long-read continuation in v0.3). */
+		k_sem_give(&ctx->done);
 		return BT_GATT_ITER_STOP;
 	}
 	size_t n = MIN((size_t)length, ctx->out_cap);
 	memcpy(ctx->out, data, n);
 	if (ctx->out_len != NULL) *ctx->out_len = n;
 	ctx->result = ALP_OK;
+	/* gatt_read_rsp() only invokes the terminal func(..., NULL, 0)
+	 * completion when THIS data-bearing call returns
+	 * BT_GATT_ITER_CONTINUE; returning STOP (as we do -- v0.3 has no
+	 * long-read continuation) means that terminal call never fires, so
+	 * the semaphore must be signalled right here or z_gatt_read() blocks
+	 * for the full timeout on every successful read. */
+	k_sem_give(&ctx->done);
 	return BT_GATT_ITER_STOP;
 }
+
+#if defined(CONFIG_ZTEST)
+/* Test-only seam (issue #480 review): native_sim ships no BLE controller,
+ * so there is no live peer to drive a real bt_gatt_read() end-to-end. This
+ * calls ble_read_cb() directly with the exact (err, data, length) shapes
+ * Zephyr's gatt_read_rsp() (subsys/bluetooth/host/gatt.c) delivers, then
+ * mirrors z_gatt_read()'s post-call k_sem_take() -- proving whether the
+ * completion signal fires *synchronously* on each path, which is exactly
+ * the bug this seam regression-tests. */
+alp_status_t alp_ble_test_read_cb(uint8_t err, const void *data, uint16_t length)
+{
+	uint8_t             out_buf[16];
+	struct ble_read_ctx ctx = {
+		.params  = { .func = ble_read_cb },
+		.out     = out_buf,
+		.out_cap = sizeof(out_buf),
+		.out_len = NULL,
+		.result  = ALP_ERR_TIMEOUT,
+	};
+	k_sem_init(&ctx.done, 0, 1);
+
+	(void)ble_read_cb(NULL, err, &ctx.params, data, length);
+
+	if (k_sem_take(&ctx.done, K_NO_WAIT) != 0) {
+		return ALP_ERR_TIMEOUT;
+	}
+	return ctx.result;
+}
+#endif /* CONFIG_ZTEST */
 
 static void ble_write_cb(struct bt_conn *conn, uint8_t err, struct bt_gatt_write_params *params)
 {
