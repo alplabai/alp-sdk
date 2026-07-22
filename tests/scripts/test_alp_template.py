@@ -328,14 +328,22 @@ def test_render_to_envelope_substitutes_sku_and_preset():
         assert by_path[rel] == (HELLO_WORLD / rel).read_text(encoding="utf-8"), rel
 
 
-def test_render_to_envelope_drops_stale_trailing_comment_on_value_change():
+def test_substitute_board_yaml_sku_drops_stale_trailing_comment_on_value_change():
     """Fable review finding: `gpio-button-led`'s board.yaml carries an
     inline comment on BOTH its `sku:` and `preset:` lines describing the
     AEN801/e1m-evk default (`# Alif Ensemble E8 SoM`, `# 35x35 EVK --
     reference board...`). Substituting the VALUE must drop that comment
-    too -- leaving it would mislabel a V2N101 scaffold as Alif hardware."""
-    envelope = dict(alp_template.render_to_envelope("peripheral", "E1M-V2N101"))
-    board_yaml = envelope["board.yaml"]
+    too -- leaving it would mislabel a V2N101 scaffold as Alif hardware.
+
+    Exercised directly against `_substitute_board_yaml_sku` (not
+    `render_to_envelope("peripheral", "E1M-V2N101")`): that combo is no
+    longer in `supported.som_skus` (issue #876 -- peripheral's `pins:`
+    block isn't E1M-X-EVK-portable yet), but the sku/preset-comment
+    regex behavior this pins doesn't depend on the catalog's supported-
+    sku list at all."""
+    example = REPO / "examples" / "peripheral-io" / "gpio-button-led"
+    text = (example / "board.yaml").read_text(encoding="utf-8")
+    board_yaml = alp_template._substitute_board_yaml_sku(text, "E1M-V2N101", "e1m-x-evk")
     assert "sku: E1M-V2N101" in board_yaml
     assert "Alif Ensemble E8 SoM" not in board_yaml
     assert "E1M-AEN801" not in board_yaml
@@ -365,7 +373,7 @@ def test_scaffold_cmakelists_requires_alp_sdk_root_explicitly():
     envelope = dict(alp_template.render_to_envelope("minimal", "E1M-AEN801"))
     cmakelists = envelope["CMakeLists.txt"]
     assert "if(DEFINED ENV{ALP_SDK_ROOT})" not in cmakelists
-    assert "if(NOT DEFINED ENV{ALP_SDK_ROOT})" in cmakelists
+    assert "if(NOT DEFINED ALP_SDK_ROOT AND NOT DEFINED ENV{ALP_SDK_ROOT})" in cmakelists
     assert "FATAL_ERROR" in cmakelists
     assert "get_filename_component(ALP_SDK_ROOT" not in cmakelists
 
@@ -380,15 +388,16 @@ def test_scaffold_cmakelists_hardens_the_hardcoded_variant_too():
     cmakelists = envelope["CMakeLists.txt"]
     assert "${CMAKE_CURRENT_SOURCE_DIR}/../../../scripts/alp_project.py" not in cmakelists
     assert "${ALP_SDK_ROOT}/scripts/alp_project.py" in cmakelists
-    assert "if(NOT DEFINED ENV{ALP_SDK_ROOT})" in cmakelists
+    assert "if(NOT DEFINED ALP_SDK_ROOT AND NOT DEFINED ENV{ALP_SDK_ROOT})" in cmakelists
 
 
 def test_scaffold_readme_has_no_dangling_sdk_tree_links_or_self_path():
     envelope = dict(alp_template.render_to_envelope("minimal", "E1M-AEN801"))
     readme = envelope["README.md"]
+    ref = alp_template._docs_ref(alp_template.REPO)
     assert "examples/peripheral-io/hello-world" not in readme
     assert "../../../docs/" not in readme
-    assert "https://github.com/alplabai/alp-sdk/blob/main/docs/" in readme
+    assert f"https://github.com/alplabai/alp-sdk/blob/{ref}/docs/" in readme
 
 
 def test_scaffold_readme_rewrites_sibling_example_links_too():
@@ -397,8 +406,48 @@ def test_scaffold_readme_rewrites_sibling_example_links_too():
     the `../../../docs/...` case."""
     envelope = dict(alp_template.render_to_envelope("sensor", "E1M-AEN801"))
     readme = envelope["README.md"]
+    ref = alp_template._docs_ref(alp_template.REPO)
     assert "../i2c-scanner/" not in readme
-    assert "https://github.com/alplabai/alp-sdk/tree/main/examples/peripheral-io/i2c-scanner" in readme
+    assert (f"https://github.com/alplabai/alp-sdk/tree/{ref}"
+            "/examples/peripheral-io/i2c-scanner") in readme
+
+
+def test_scaffold_readme_extra_zephyr_modules_uses_alp_sdk_root_not_pwd():
+    """issue #864 Fable-review MAJOR B: `$(pwd)` only equals the alp-sdk
+    checkout root when building IN-TREE; a copied-out scaffold's cwd is
+    the scaffold dir, so the alp-sdk Zephyr module (providing
+    `CONFIG_ALP_*` / `<alp/*.h>`) never registers and the documented
+    `west build` fails."""
+    envelope = dict(alp_template.render_to_envelope("minimal", "E1M-AEN801"))
+    readme = envelope["README.md"]
+    assert "$(pwd)" not in readme
+    assert "-DEXTRA_ZEPHYR_MODULES=$ALP_SDK_ROOT" in readme
+
+
+def test_scaffold_readme_rewrites_board_target_and_som_label_for_cross_family_sku():
+    """issue #864 Fable-review MAJOR C: the canonical example's own SoM
+    label ("# Example for E1M-AEN801:") and qualified Zephyr board
+    target (bare `alp_e1m_aen801_m55_hp`) used to survive a cross-family
+    sku swap untouched -- the real E1M-V2N101 label/board target
+    appeared nowhere in a V2N101 scaffold."""
+    envelope = dict(alp_template.render_to_envelope("minimal", "E1M-V2N101"))
+    readme = envelope["README.md"]
+    assert "E1M-AEN801" not in readme
+    assert "alp_e1m_aen801_m55_hp" not in readme
+    assert "# Example for E1M-V2N101:" in readme
+    assert "alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33" in readme
+
+
+def test_scaffold_readme_upgrades_bare_board_id_even_for_the_passthrough_sku():
+    """The canonical example's own README hardcodes the BARE (non-
+    qualified) board id, which Zephyr 4.4 can't actually resolve on a
+    multi-cluster SoC (issue #720) -- `_scaffold_readme` upgrades it to
+    the fully-qualified id even when `sku` is the example's own (a
+    bonus correctness fix riding along with MAJOR C's mechanism)."""
+    envelope = dict(alp_template.render_to_envelope("minimal", "E1M-AEN801"))
+    readme = envelope["README.md"]
+    assert "west build -b alp_e1m_aen801_m55_hp " not in readme
+    assert "alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp" in readme
 
 
 def test_substitute_board_yaml_sku_rejects_ambiguous_sku_line():
@@ -418,6 +467,88 @@ def test_substitute_board_yaml_sku_rejects_ambiguous_preset_line():
 
 
 # --------------------------------------------------------------------------
+# _derive_core_renames -- app-core candidate selection (issue #864
+# Fable-review MAJOR D)
+# --------------------------------------------------------------------------
+
+def test_derive_core_renames_picks_the_real_app_core_not_alphabetical_first():
+    """E1M-AEN801's `topology:` declares `m55_hp` (the real app core)
+    BEFORE `m55_he` (a stock-shim peer core it inherits by default) --
+    `m55_he` sorts first alphabetically. Before this fix,
+    `_derive_core_renames(["m33_sm"], "E1M-AEN801", ...)` resolved
+    `m55_he`: topology-valid (so the blind board-yaml-vs-topology
+    subset check couldn't catch it), but the WRONG core -- unreachable
+    today (no template's `supported.som_skus` exercises a V2N-canonical
+    template swapping onto AEN801), but silently wrong the day one
+    does."""
+    renames = alp_template._derive_core_renames(
+        ["m33_sm"], "E1M-AEN801", alp_template.METADATA_ROOT)
+    assert renames == {"m33_sm": "m55_hp"}
+
+
+# --------------------------------------------------------------------------
+# _strip_stale_core_prose -- stale-core-mentioning comments (issue #864
+# Fable-review MINOR F)
+# --------------------------------------------------------------------------
+
+def test_substitute_board_yaml_core_strips_stale_core_prose_comment():
+    """gpio-button-led's board.yaml carries `# Single-core slice:
+    M55-HP runs the demo.  M55-HE inherits...` directly above `cores:`
+    -- prose naming the OLD core in a different case/hyphenation than
+    the YAML key (`M55-HP` vs `m55_hp`), which the key-line rename
+    regex alone never touches. Exercised directly (not via
+    render_to_envelope("peripheral", ...): that template no longer
+    supports a cross-family sku, issue #876) since the prose-stripping
+    behavior doesn't depend on the catalog's supported-sku list."""
+    example = REPO / "examples" / "peripheral-io" / "gpio-button-led"
+    text = (example / "board.yaml").read_text(encoding="utf-8")
+    assert "M55-HP" in text  # sanity: the fixture actually has stale prose
+    rewritten = alp_template._substitute_board_yaml_core(text, "m55_hp", "m33_sm")
+    assert "M55-HP" not in rewritten
+    assert "m33_sm:" in rewritten
+
+
+# --------------------------------------------------------------------------
+# _ALP_SDK_ROOT_REQUIRED_BLOCK -- -D vs ENV{} precedence (issue #864
+# Fable-review MAJOR E)
+# --------------------------------------------------------------------------
+
+def test_alp_sdk_root_required_block_checks_both_d_and_env_and_prefers_d():
+    """The FATAL_ERROR guard must only fire when NEITHER the `-D` cache
+    variable NOR the env var is set (the message advertises both), and
+    the value-assignment must not clobber an already-set `-D` with the
+    env var."""
+    block = alp_template._ALP_SDK_ROOT_REQUIRED_BLOCK
+    assert "if(NOT DEFINED ALP_SDK_ROOT AND NOT DEFINED ENV{ALP_SDK_ROOT})" in block
+    assert "if(NOT DEFINED ALP_SDK_ROOT)\n    set(ALP_SDK_ROOT $ENV{ALP_SDK_ROOT})" in block
+
+
+# --------------------------------------------------------------------------
+# render(..., sku=...) / default_sku() -- `alp generate`'s other scaffold
+# front door now agrees with `alp emit scaffold` (issue #864 Fable-review
+# MINOR G)
+# --------------------------------------------------------------------------
+
+def test_default_sku_is_the_examples_own_som_sku():
+    assert alp_template.default_sku(_minimal_record()) == "E1M-AEN801"
+
+
+def test_render_with_sku_matches_render_to_envelope(tmp_path):
+    dest = tmp_path / "out"
+    alp_template.render("minimal", dest, sku="E1M-V2N101")
+    envelope = dict(alp_template.render_to_envelope("minimal", "E1M-V2N101"))
+    for rel, contents in envelope.items():
+        assert (dest / rel).read_text(encoding="utf-8") == contents, rel
+
+
+def test_render_with_sku_rejects_unsupported_sku_before_touching_disk(tmp_path):
+    dest = tmp_path / "out"
+    with pytest.raises(alp_template.SkuNotSupportedError):
+        alp_template.render("minimal", dest, sku="FOO")
+    assert not dest.exists()
+
+
+# --------------------------------------------------------------------------
 # Every catalog template x its supported.som_skus (Fable review: only
 # minimal x {AEN801, V2N101} was covered before -- the first untested
 # combo, peripheral x V2N101, surfaced the stale-comment MAJOR above).
@@ -431,31 +562,20 @@ def _every_template_sku_pair() -> list[tuple[str, str]]:
     ]
 
 
-# Combos whose canonical example's board.yaml top-level `pins:` block
-# hardcodes an E1M-EVK-only pad NAME AND NUMBER -- not a mechanical
-# `_X`-insertion, e.g. the encoder push switch is E1M_GPIO_IO4 on
-# E1M-EVK vs E1M_X_GPIO_IO28 on E1M-X-EVK (metadata/boards/e1m-evk.yaml
-# vs e1m-x-evk.yaml `e1m_routes:`, keyed only by the shared
-# `board_alias:`, e.g. BOARD_PIN_ENCODER_SW) -- a separate, PRE-EXISTING
-# example-portability gap this issue's scaffold-adaptation (core /
-# CMakeLists.txt / README.md / testcase.yaml) doesn't touch: these
-# templates' `pins:` blocks were only ever validated cross-family via a
-# native_sim COMPILER DEFINE (testcase.yaml's `-DALP_BOARD_E1M_X_EVK`),
-# never by literally swapping som.sku the way `--emit scaffold --sku`
-# does. Verified via `alp_project.py --emit zephyr-conf --core <id>`;
-# left as a follow-up (would need a `pins:` board_alias cross-reference
-# analogous to `_derive_core_renames`, out of scope for #864's core
-# blocker). Mirrors check_template_catalog.py's own KNOWN_GAP_EXAMPLES
-# allowlist pattern for a tracked, non-hidden content gap.
-_KNOWN_PINS_PORTABILITY_GAP = {
-    ("peripheral", "E1M-V2N101"),
-    ("sensor", "E1M-V2N101"),
-    ("edge-ai", "E1M-V2N101"),
-}
-
-
 @pytest.mark.parametrize("template_id,sku", _every_template_sku_pair())
 def test_render_to_envelope_every_template_sku_combo(template_id, sku, tmp_path):
+    """Every REMAINING (template, sku) combo the catalog declares
+    supported must emit a board.yaml `alp_project.py --emit zephyr-conf`
+    actually accepts -- issue #864 Fable-review MAJOR A: `peripheral`/
+    `sensor`/`edge-ai`'s `pins:` blocks hardcode E1M-EVK-only pad names
+    (e.g. `E1M_GPIO_IO4`, not the E1M-X-EVK equivalent `E1M_X_GPIO_IO28`
+    -- not a mechanical `_X` insertion, tracked as issue #876), so
+    E1M-V2N101 was DROPPED from those three templates'
+    `supported.som_skus` rather than shipping a scaffold that silently
+    exits 0 while emitting content `--emit zephyr-conf` then rejects --
+    see test_render_to_envelope_rejects_the_dropped_pins_gap_combos
+    below for that rejection. Every combo parametrized here is now
+    expected to fully succeed."""
     record = alp_template.find_template(_catalog(), template_id)
     example = REPO / record["example"]
     example_board_yaml = (example / "board.yaml").read_text(encoding="utf-8")
@@ -493,12 +613,22 @@ def test_render_to_envelope_every_template_sku_combo(template_id, sku, tmp_path)
              "--input", str(board_yaml_path),
              "--emit", "zephyr-conf", "--core", core_id],
             capture_output=True, text=True, cwd=REPO, check=False)
-        if (template_id, sku) in _KNOWN_PINS_PORTABILITY_GAP:
-            assert proc.returncode != 0
-            assert "e1m_routes" in proc.stderr, (template_id, sku, proc.stderr)
-            continue
         assert proc.returncode == 0, (template_id, sku, core_id, proc.stderr)
         assert "unknown core id" not in proc.stderr
+
+
+@pytest.mark.parametrize("template_id", ["peripheral", "sensor", "edge-ai"])
+def test_render_to_envelope_rejects_the_dropped_pins_gap_combos(template_id):
+    """issue #864 Fable-review MAJOR A: `--emit scaffold --template
+    {peripheral,sensor,edge-ai} --sku E1M-V2N101` used to exit rc=0
+    emitting a scaffold `--emit zephyr-conf` then rejected on the
+    `pins:` E1M-vs-E1M_X mismatch (issue #876) -- a silent best-effort
+    render `render_to_envelope()`'s own docstring says it never does.
+    E1M-V2N101 is dropped from these three templates'
+    `supported.som_skus` until #876 lands, so the SAME request now
+    correctly hard-errors instead."""
+    with pytest.raises(alp_template.SkuNotSupportedError, match="E1M-V2N101"):
+        alp_template.render_to_envelope(template_id, "E1M-V2N101")
 
 
 def test_render_to_envelope_rejects_unsupported_sku():
