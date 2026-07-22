@@ -12,6 +12,9 @@ Covers:
 - issue #515: `i2c_devices:` (on-board I2C addresses + INA236
   calibration) reproduces the previously hand-authored values
   exactly, and the generator-level fixture proves the mechanism.
+- issue #637: `mux_enums:` (mux-select / IO-expander-pin enums) and
+  `pad_indices:` (overlay-pad indices) reproduce the previously
+  hand-authored enum values / offset expressions exactly.
 """
 
 from __future__ import annotations
@@ -159,24 +162,23 @@ def test_real_evk_header_covers_known_macros(gen_module):
 def test_no_clash_with_existing_alp_e1m_evk_h(gen_module):
     """The generated routes header MUST NOT also re-define macros
     that live in the surviving hand-authored sections of
-    `alp_e1m_evk.h` (overlay-pad indices, mux enums).  On-board I2C
-    device addresses + INA236 calibration constants were lifted into
-    the `i2c_devices:` metadata block (issue #515) and are generated
-    now -- see `test_real_evk_header_covers_i2c_device_macros` below.
+    `alp_e1m_evk.h` (currently just `evk_cam_select_t` + prose).
+    On-board I2C device addresses + INA236 calibration constants
+    were lifted into the `i2c_devices:` metadata block (issue #515)
+    and mux-select enums + overlay-pad indices were lifted into the
+    `mux_enums:` / `pad_indices:` blocks (issue #637) -- both are
+    generated now, see `test_real_evk_header_covers_i2c_device_macros`
+    and `test_real_evk_header_covers_mux_enums_and_pad_indices` below.
     This guards against accidental over-lift of what's still
     hand-authored in future slices."""
     rc = gen_module.main()
     assert rc == 0
     out = EVK_OUT.read_text(encoding="utf-8")
     must_not_appear = [
-        # Overlay-pad indices (slice deferred)
-        "EVK_PIN_OVERLAY_BASE",
-        "EVK_PIN_IO_EXP_INT",
-        "EVK_PIN_IO_EXP_RST",
-        "EVK_PIN_AMP_FAULT",
-        "EVK_PIN_AMP_ENABLE",
-        "EVK_PIN_CTP_INT",
-        "EVK_PIN_MB_INT",
+        # evk_cam_select_t (MIPI CSI camera mux) -- out of #637's scope
+        "EVK_CAM_A",
+        "EVK_CAM_B",
+        "evk_cam_select_t",
         # ADC spellings not generated (the shipped ADC routes are
         # EVK_ADC_ARDUINO_A1..A5 / EVK_ADC_MB_AN / EVK_ADC_VBAT_SENSE)
         "EVK_ARD_A0",
@@ -185,7 +187,7 @@ def test_no_clash_with_existing_alp_e1m_evk_h(gen_module):
     for macro in must_not_appear:
         assert macro not in out, (
             f"{macro} unexpectedly appears in generated header -- "
-            f"slice scope is gpio/buses/pwm/i2c_devices only"
+            f"slice scope is gpio/buses/pwm/i2c_devices/mux_enums/pad_indices only"
         )
 
 
@@ -272,6 +274,124 @@ def test_i2c_devices_reproduce_metadata_values(gen_module):
     assert defined["EVK_I2C_ADDR_FOO_LEGACY"] == "EVK_I2C_ADDR_FOO"
     assert defined["EVK_INA236_SHUNT_FOO_OHMS"] == "0.030f"
     assert defined["EVK_INA236_MAX_FOO_A"] == "2.5f"
+
+
+def test_real_evk_header_covers_mux_enums_and_pad_indices(gen_module):
+    """Issue #637: mux-select / IO-expander-pin enums and
+    overlay-pad indices are now single-sourced from
+    `metadata/boards/e1m-evk.yaml`'s `mux_enums:` / `pad_indices:`
+    blocks and generated -- assert every enumerator + pad-index
+    macro hand-written firmware relies on is still defined, with the
+    pre-migration hand-authored values preserved verbatim."""
+    rc = gen_module.main()
+    assert rc == 0
+    out = EVK_OUT.read_text(encoding="utf-8")
+
+    assert "typedef enum {" in out
+    for typedef_name in (
+        "evk_sdio_select_t",
+        "evk_i2s_select_t",
+        "evk_usb2_select_t",
+        "evk_pcie_select_t",
+        "evk_pcie_ioexp_pin_t",
+        "evk_ioexp_pin_t",
+    ):
+        assert f"}} {typedef_name};" in out, f"{typedef_name} missing from generated header"
+
+    enum_values = {
+        "EVK_SDIO_M2E_KEY": "0",
+        "EVK_SDIO_SDCARD": "1",
+        "EVK_I2S_AMP": "0",
+        "EVK_I2S_M2E_KEY": "1",
+        "EVK_USB2_CONNECTOR": "0",
+        "EVK_USB2_M2E_KEY": "1",
+        "EVK_PCIE_E_KEY": "0",
+        "EVK_PCIE_M_KEY": "1",
+        "EVK_PCIE_IOEXP_I2C_SEL": "0",
+        "EVK_PCIE_IOEXP_M2E_ALERT": "1",
+        "EVK_PCIE_IOEXP_E_PCIE0_RST": "2",
+        "EVK_PCIE_IOEXP_E_PCIE0_WAKE": "3",
+        "EVK_PCIE_IOEXP_E_PCIE0_CLKREQ": "4",
+        "EVK_PCIE_IOEXP_M_PCIE0_RST": "5",
+        "EVK_PCIE_IOEXP_M_PCIE0_WAKE": "6",
+        "EVK_PCIE_IOEXP_M_PCIE0_CLKREQ": "7",
+        "EVK_IOEXP_LCD_PWR_EN": "0",
+        "EVK_IOEXP_LCD_RST": "1",
+        "EVK_IOEXP_CAM_EN": "2",
+        "EVK_IOEXP_CTP_RST": "3",
+        "EVK_IOEXP_ICM42670_INT1": "4",
+        "EVK_IOEXP_ICM42670_INT2": "5",
+        "EVK_IOEXP_ICM42670_FSYNC": "6",
+        "EVK_IOEXP_BMP581_INT1": "7",
+    }
+    found = dict(re.findall(r"(EVK_[A-Z0-9_]+)\s*=\s*(\d+),", out))
+    for name, value in enum_values.items():
+        assert found.get(name) == value, (
+            f"{name} = {found.get(name)!r}, expected {value!r} -- enum value "
+            f"drifted from the hand-authored original"
+        )
+
+    assert "#define EVK_PIN_OVERLAY_BASE ALP_E1M_GPIO_COUNT" in out
+    pad_offsets = {
+        "EVK_PIN_IO_EXP_INT": 0,
+        "EVK_PIN_IO_EXP_RST": 1,
+        "EVK_PIN_AMP_FAULT": 2,
+        "EVK_PIN_AMP_ENABLE": 3,
+        "EVK_PIN_MB_INT": 4,
+        "EVK_PIN_CK_DIO4": 5,
+        "EVK_PIN_CK_DIO3": 6,
+        "EVK_PIN_CK_DIO2": 7,
+        "EVK_PIN_CK_DIO1": 8,
+        "EVK_PIN_CK_RST": 9,
+        "EVK_PIN_CTP_INT": 10,
+    }
+    for macro, offset in pad_offsets.items():
+        expected = f"(EVK_PIN_OVERLAY_BASE + {offset}u)"
+        assert expected in out, (
+            f"{macro}'s expected value {expected!r} not found -- pad-index "
+            f"offset drifted from the hand-authored original"
+        )
+
+
+def test_mux_enums_and_pad_indices_reproduce_metadata_values(gen_module):
+    """Generator unit test (issue #637): feed a hand-built YAML dict
+    with `mux_enums:` + `pad_indices:` blocks and assert the emitted
+    enum/`#define` text carries exactly the metadata's names/values --
+    not just presence.  Complements the real-YAML coverage check
+    above with a minimal, generator-only fixture."""
+    doc = {
+        "name": "TEST-MUX",
+        "e1m_routes": {},
+        "mux_enums": [
+            {
+                "name": "test_select_t",
+                "doc": "Test mux.",
+                "values": [
+                    {"name": "TEST_SEL_A", "value": 0, "doc": "A."},
+                    {"name": "TEST_SEL_B", "value": 1, "doc": "B."},
+                ],
+            },
+        ],
+        "pad_indices": {
+            "base_macro": "TEST_PIN_OVERLAY_BASE",
+            "base_value": "ALP_E1M_GPIO_COUNT",
+            "base_doc": "Test base.",
+            "entries": [
+                {"macro": "TEST_PIN_FOO", "offset": 0, "doc": "Foo pad."},
+                {"macro": "TEST_PIN_BAR", "offset": 1, "doc": "Bar pad."},
+            ],
+        },
+    }
+    out = gen_module.emit_board("TEST-MUX", doc)
+    assert out is not None
+    assert "/** Test mux. */" in out
+    assert "typedef enum {" in out
+    assert "TEST_SEL_A = 0, /**< A. */" in out
+    assert "TEST_SEL_B = 1, /**< B. */" in out
+    assert "} test_select_t;" in out
+    assert "#define TEST_PIN_OVERLAY_BASE ALP_E1M_GPIO_COUNT  /**< Test base. */" in out
+    assert "#define TEST_PIN_FOO (TEST_PIN_OVERLAY_BASE + 0u)  /**< Foo pad. */" in out
+    assert "#define TEST_PIN_BAR (TEST_PIN_OVERLAY_BASE + 1u)  /**< Bar pad. */" in out
 
 
 def test_emit_board_selects_e1m_x_pinout_for_x_routes(gen_module):

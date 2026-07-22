@@ -14,11 +14,16 @@ the C token.  The `i2c_devices:` block does the same for on-board I2C
 device addresses (EVK_I2C_ADDR_*) and INA236 shunt/max-current
 calibration (EVK_INA236_SHUNT_*_OHMS / EVK_INA236_MAX_*_A) -- these
 carry a literal hex/float value rather than an `ALP_E1M_*` token.
+The `mux_enums:` block emits mux-select / IO-expander-pin
+`typedef enum { ... }` blocks (evk_sdio_select_t, evk_pcie_ioexp_pin_t,
+...); the `pad_indices:` block emits the `EVK_PIN_OVERLAY_BASE`-relative
+overlay-pad `#define`s (issue #637).
 Idempotent: running twice produces byte-identical output.
 
-The remaining sections of `include/alp/boards/alp_<board>.h`
-(mux enums, overlay-pad indices, prose comments) stay hand-authored
-until follow-up slices lift them too.
+The remaining content of `include/alp/boards/alp_<board>.h` is prose
+explaining the hardware those generated macros/enums bind to (plus
+any board-specific enum a slice hasn't lifted yet, e.g.
+`evk_cam_select_t`).
 
 Run:
 
@@ -156,6 +161,79 @@ def _emit_i2c_devices(devices: list[dict[str, Any]]) -> list[str]:
     return out
 
 
+def _emit_mux_enums(enums: list[dict[str, Any]]) -> list[str]:
+    """Emit one `typedef enum { ... } <name>;` block per `mux_enums:`
+    entry.  Column-aligns each enum's `=` signs independently (resets
+    per enum, mirroring `Consecutive` clang-format alignment) so a
+    long enumerator name in one enum doesn't reflow a sibling enum."""
+    if not enums:
+        return []
+
+    out: list[str] = [
+        "/* ------------------------------------------------------------------ */",
+        "/* Board mux-select enums (from `mux_enums:`) */",
+        "/* ------------------------------------------------------------------ */",
+        "",
+    ]
+    for enum in enums:
+        name = enum["name"]
+        values = enum["values"]
+        doc = enum.get("doc")
+        if doc:
+            out.append(f"/** {doc} */")
+        out.append("typedef enum {")
+        widest = max(len(v["name"]) for v in values)
+        for v in values:
+            line = f"\t{v['name']:<{widest}} = {v['value']},"
+            vdoc = v.get("doc")
+            if vdoc:
+                line += f" /**< {vdoc} */"
+            out.append(line)
+        out.append(f"}} {name};")
+        out.append("")
+    return out
+
+
+def _emit_pad_indices(pad_indices: dict[str, Any] | None) -> list[str]:
+    """Emit the `EVK_PIN_OVERLAY_BASE`-relative overlay-pad `#define`s
+    from the `pad_indices:` block.  Each entry's value is
+    `(<base_macro> + <offset>u)`, matching the pre-migration
+    hand-authored expression form exactly."""
+    if not pad_indices:
+        return []
+
+    base_macro = pad_indices["base_macro"]
+    base_value = pad_indices["base_value"]
+    base_doc = pad_indices.get("base_doc")
+    entries = pad_indices.get("entries") or []
+
+    out: list[str] = [
+        "/* ------------------------------------------------------------------ */",
+        "/* Overlay-extended pad indices (from `pad_indices:`) */",
+        "/* ------------------------------------------------------------------ */",
+        "",
+    ]
+    if base_doc:
+        out.append(f"#define {base_macro} {base_value}  /**< {base_doc} */")
+    else:
+        out.append(f"#define {base_macro} {base_value}")
+    out.append("")
+
+    if entries:
+        widest = max(len(e["macro"]) for e in entries)
+        for e in entries:
+            macro = e["macro"]
+            value = f"({base_macro} + {e['offset']}u)"
+            doc = e.get("doc")
+            if doc:
+                out.append(f"#define {macro:<{widest}} {value}  /**< {doc} */")
+            else:
+                out.append(f"#define {macro:<{widest}} {value}")
+        out.append("")
+
+    return out
+
+
 def _emit_board_aliases(routes: dict[str, Any]) -> list[str]:
     """Emit portable BOARD_* aliases for every entry carrying a
     `board_alias:` (the e1m-spec §7.2 common roles).  Same BOARD_* name
@@ -210,12 +288,14 @@ def _emit_section(title: str, entries: list[dict[str, Any]]) -> list[str]:
 
 def emit_board(name: str, doc: dict[str, Any]) -> str | None:
     """Return the full text of the generated routes header for one board,
-    or `None` if the shared board YAML has neither an `e1m_routes:` nor
-    an `i2c_devices:` block.
+    or `None` if the shared board YAML has none of `e1m_routes:`,
+    `i2c_devices:`, `mux_enums:` or `pad_indices:`.
     """
     routes = doc.get("e1m_routes")
     i2c_devices = doc.get("i2c_devices")
-    if not routes and not i2c_devices:
+    mux_enums = doc.get("mux_enums")
+    pad_indices = doc.get("pad_indices")
+    if not routes and not i2c_devices and not mux_enums and not pad_indices:
         return None
     routes = routes or {}
     slug = _board_slug(name)
@@ -263,6 +343,10 @@ def emit_board(name: str, doc: dict[str, Any]) -> str | None:
             lines.extend(_emit_section(section_title, entries))
 
     lines.extend(_emit_i2c_devices(doc.get("i2c_devices") or []))
+
+    lines.extend(_emit_mux_enums(mux_enums or []))
+
+    lines.extend(_emit_pad_indices(pad_indices))
 
     lines.extend(_emit_board_aliases(routes))
 

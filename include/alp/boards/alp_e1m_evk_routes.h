@@ -157,6 +157,71 @@ extern "C" {
 #define EVK_INA236_MAX_5V_A         4.0f  /**< Max current for EVK_I2C_ADDR_INA236_5V. */
 
 /* ------------------------------------------------------------------ */
+/* Board mux-select enums (from `mux_enums:`) */
+/* ------------------------------------------------------------------ */
+
+typedef enum {
+	EVK_SDIO_M2E_KEY = 0, /**< MUX_SEL.SDIO low. */
+	EVK_SDIO_SDCARD  = 1, /**< MUX_SEL.SDIO high. */
+} evk_sdio_select_t;
+
+typedef enum {
+	EVK_I2S_AMP     = 0, /**< I2S0 routed to the TAS2563 amplifiers. */
+	EVK_I2S_M2E_KEY = 1, /**< I2S0 routed to the M.2 E-key slot. */
+} evk_i2s_select_t;
+
+typedef enum {
+	EVK_USB2_CONNECTOR = 0, /**< External USB-A jack. */
+	EVK_USB2_M2E_KEY   = 1, /**< M.2 E-key USB. */
+} evk_usb2_select_t;
+
+typedef enum {
+	EVK_PCIE_E_KEY = 0, /**< Lanes 0 routed to PCIe E-key (Wi-Fi/BT modules). */
+	EVK_PCIE_M_KEY = 1, /**< Lanes 0..3 routed to PCIe M-key (NVMe SSD). */
+} evk_pcie_select_t;
+
+/** PCIe IO expander pin layout (TCAL9538 #2 on I2C0 at 0x71). */
+typedef enum {
+	EVK_PCIE_IOEXP_I2C_SEL        = 0, /**< P0: PCIE0_I2C.SEL -- selects which slot the I2C mux routes to. */
+	EVK_PCIE_IOEXP_M2E_ALERT      = 1, /**< P1: M.2 E-key alert input. */
+	EVK_PCIE_IOEXP_E_PCIE0_RST    = 2, /**< P2: E-key PCIe reset output. */
+	EVK_PCIE_IOEXP_E_PCIE0_WAKE   = 3, /**< P3: E-key PCIe wake input. */
+	EVK_PCIE_IOEXP_E_PCIE0_CLKREQ = 4, /**< P4: E-key PCIe clock-request input. */
+	EVK_PCIE_IOEXP_M_PCIE0_RST    = 5, /**< P5: M-key PCIe reset output. */
+	EVK_PCIE_IOEXP_M_PCIE0_WAKE   = 6, /**< P6: M-key PCIe wake input. */
+	EVK_PCIE_IOEXP_M_PCIE0_CLKREQ = 7, /**< P7: M-key PCIe clock-request input. */
+} evk_pcie_ioexp_pin_t;
+
+typedef enum {
+	EVK_IOEXP_LCD_PWR_EN     = 0, /**< P0: LCD power enable. */
+	EVK_IOEXP_LCD_RST        = 1, /**< P1: LCD reset. */
+	EVK_IOEXP_CAM_EN         = 2, /**< P2: Camera-module enable (drives the camera sensor's EN/STBY pin -- NOT the +V_CAM0/+V_CAM1 power rails, which are gated separately). */
+	EVK_IOEXP_CTP_RST        = 3, /**< P3: Capacitive touch panel reset. */
+	EVK_IOEXP_ICM42670_INT1  = 4, /**< P4: ICM-42670 INT1 input. */
+	EVK_IOEXP_ICM42670_INT2  = 5, /**< P5: ICM-42670 INT2 input. */
+	EVK_IOEXP_ICM42670_FSYNC = 6, /**< P6: ICM-42670 frame-sync input. */
+	EVK_IOEXP_BMP581_INT1    = 7, /**< P7: BMP581 INT1 input. */
+} evk_ioexp_pin_t;
+
+/* ------------------------------------------------------------------ */
+/* Overlay-extended pad indices (from `pad_indices:`) */
+/* ------------------------------------------------------------------ */
+
+#define EVK_PIN_OVERLAY_BASE ALP_E1M_GPIO_COUNT  /**< Base index for EVK overlay-extended `alp,pin-array` entries. Sits just past the 52 standard entries so it never collides. */
+
+#define EVK_PIN_IO_EXP_INT (EVK_PIN_OVERLAY_BASE + 0u)  /**< AUDIO_CLK pad (E1M Z2 / Alif P9_6) repurposed as the I/O expander INT line on this EVK. When the audio path is in use the IO expander interrupt is unavailable; firmware should poll the expander instead. */
+#define EVK_PIN_IO_EXP_RST (EVK_PIN_OVERLAY_BASE + 1u)  /**< SPI0_CS1 pad (E1M N1 / Alif P3_6) repurposed as the I/O expander reset line. When SPI0 is used with two chip-selects this pin can't double as IO_EXP_RST -- the EVK assumes SPI0 is in single-CS mode at most. */
+#define EVK_PIN_AMP_FAULT  (EVK_PIN_OVERLAY_BASE + 2u)  /**< SPI0_MISO pad (E1M L1 / Alif P5_0) repurposed as the audio amplifier fault output (open-drain input from the amp). */
+#define EVK_PIN_AMP_ENABLE (EVK_PIN_OVERLAY_BASE + 3u)  /**< SPI0_CS0 pad (E1M M1 / Alif P5_2) repurposed as the audio amplifier enable input (active-high). */
+#define EVK_PIN_MB_INT     (EVK_PIN_OVERLAY_BASE + 4u)  /**< I2S1_SDI pad (E1M AH6 / Alif P13_4) repurposed as the mikroBUS click INT pin. Was earlier (mis)documented as CTP_INT; the user has since clarified that CTP_INT is on SPI1_CS1 (see EVK_PIN_CTP_INT below) and I2S1_SDI is the mikroBUS INT line. */
+#define EVK_PIN_CK_DIO4    (EVK_PIN_OVERLAY_BASE + 5u)  /**< SPI0_MOSI pad (E1M M2 / Alif P5_1) repurposed as Arduino CK_DIO4 (digital I/O 4 on the Arduino UNO header). */
+#define EVK_PIN_CK_DIO3    (EVK_PIN_OVERLAY_BASE + 6u)  /**< SPI0_SCLK pad (E1M N2) repurposed as Arduino CK_DIO3. NB: the Alif-side pad mapping for SPI0_SCLK is left blank in metadata/e1m_modules/aen/from-alif.tsv (user-supplied) and needs filling once the EVK schematic is cross-checked. */
+#define EVK_PIN_CK_DIO2    (EVK_PIN_OVERLAY_BASE + 7u)  /**< I2S1_WS pad (E1M AG7 / Alif P2_7) repurposed as Arduino CK_DIO2. */
+#define EVK_PIN_CK_DIO1    (EVK_PIN_OVERLAY_BASE + 8u)  /**< I2S1_SDO pad (E1M AG6 / Alif P13_5) repurposed as Arduino CK_DIO1. */
+#define EVK_PIN_CK_RST     (EVK_PIN_OVERLAY_BASE + 9u)  /**< I2S1_SCLK pad (E1M AH7 / Alif P2_6) repurposed as Arduino CK_RST (the Arduino UNO header's RESET signal -- shields can pulse it low to force a reboot). */
+#define EVK_PIN_CTP_INT    (EVK_PIN_OVERLAY_BASE + 10u)  /**< SPI1_CS1 pad (E1M AH8 -- CC3501E side, GPIO_15) repurposed as the capacitive touch panel interrupt input. Routed through the on-module CC3501E -- firmware reads CTP touches by registering an interrupt callback on the CC3501E's GPIO_15 via ALP_CC3501E_CMD_GPIO_SET_INTERRUPT. */
+
+/* ------------------------------------------------------------------ */
 /* Portable cross-EVK aliases (e1m-spec STANDARD.md §7.2 common set). */
 /* Same BOARD_* names on every board; include via <alp/board.h>.       */
 /* ------------------------------------------------------------------ */
