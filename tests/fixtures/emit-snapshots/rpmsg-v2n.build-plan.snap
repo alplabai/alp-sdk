@@ -1,5 +1,6 @@
 {
   "schemaVersion": 1,
+  "planPathMode": "tokened",
   "generatedBy": "scripts/alp_orchestrate.py",
   "sdkVersion": "0.11.1",
   "sdkCommit": "<SDK_COMMIT>",
@@ -16,7 +17,7 @@
       "coreId": "a55_cluster",
       "backend": "yocto",
       "buildDir": "build/a55_cluster-yocto",
-      "appDir": "<SDK_ROOT>/examples/multicore/rpmsg-v2n/linux",
+      "appDir": "${PROJECT_ROOT}/linux",
       "configArtefacts": [
         {
           "path": "build/a55_cluster-yocto/local.conf",
@@ -49,14 +50,14 @@
         "cwd": "build/a55_cluster-yocto"
       },
       "env": {
-        "ALP_SDK_ROOT": "<SDK_ROOT>"
+        "ALP_SDK_ROOT": "${SDK_ROOT}"
       },
       "envAppendPath": {
         "EXTRA_ZEPHYR_MODULES": [
-          "<SDK_ROOT>"
+          "${SDK_ROOT}"
         ],
         "PYTHONPATH": [
-          "<SDK_ROOT>/scripts"
+          "${SDK_ROOT}/scripts"
         ]
       }
     },
@@ -64,7 +65,7 @@
       "coreId": "m33_sm",
       "backend": "zephyr",
       "buildDir": "build/m33_sm-zephyr",
-      "appDir": "<SDK_ROOT>/examples/multicore/rpmsg-v2n/m33_sm",
+      "appDir": "${PROJECT_ROOT}/m33_sm",
       "configArtefacts": [
         {
           "path": "build/m33_sm-zephyr/alp.conf",
@@ -95,22 +96,22 @@
           "build",
           "-b",
           "alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33",
-          "<SDK_ROOT>/examples/multicore/rpmsg-v2n/m33_sm",
+          "${PROJECT_ROOT}/m33_sm",
           "--",
-          "-DPython3_EXECUTABLE=<PYTHON_EXECUTABLE>",
-          "-DEXTRA_CONF_FILE=<SDK_ROOT>/examples/multicore/rpmsg-v2n/build/m33_sm-zephyr/alp.conf"
+          "-DPython3_EXECUTABLE=${PYTHON}",
+          "-DEXTRA_CONF_FILE=${PROJECT_ROOT}/build/m33_sm-zephyr/alp.conf"
         ],
         "cwd": "build/m33_sm-zephyr"
       },
       "env": {
-        "ALP_SDK_ROOT": "<SDK_ROOT>"
+        "ALP_SDK_ROOT": "${SDK_ROOT}"
       },
       "envAppendPath": {
         "EXTRA_ZEPHYR_MODULES": [
-          "<SDK_ROOT>"
+          "${SDK_ROOT}"
         ],
         "PYTHONPATH": [
-          "<SDK_ROOT>/scripts"
+          "${SDK_ROOT}/scripts"
         ]
       }
     }

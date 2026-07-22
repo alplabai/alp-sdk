@@ -311,9 +311,11 @@ def emit_build_plan(
     # a buildplan<->package import cycle.
     from .orchestrator import (
         STOCK_IMAGE_APP,
+        UnrootedPathError,
         _resolve_app_path,
         _slice_command,
         _slice_flash_recipe,
+        _tokenize,
         iter_buildable_slices,
     )
     build_root = Path(build_root)
@@ -330,33 +332,54 @@ def emit_build_plan(
         # `replace` keeps this emit side-effect free: _slice_command
         # reads `build_dir` off the slice (baremetal -B), and the
         # project's own Slice objects must stay untouched.
-        cmd = _slice_command(
-            project, replace(slice_, build_dir=build_dir),
-            base_dir=base_dir)
-        if cmd is None:
-            if (slice_.os == "yocto" and slice_.app
-                    and not slice_.image and not slice_.recipe):
-                # An app-only Yocto slice with no `recipe:` has no valid
-                # bitbake target -- `app:` is a source directory, not a
-                # recipe name (issue #597).  Block the plan explicitly
-                # instead of ever emitting `bitbake <path>`.
-                warnings.append({
-                    "code":    "yocto-recipe-missing",
-                    "coreId":  slice_.core_id,
-                    "message": (f"core '{slice_.core_id}' has app: "
-                                f"'{slice_.app}' but no recipe: -- add "
-                                f"the bitbake recipe name that packages "
-                                f"this app source, or set image: to "
-                                f"build a stock image instead"),
-                })
-            else:
-                warnings.append({
-                    "code":    "no-command",
-                    "coreId":  slice_.core_id,
-                    "message": (f"no build command for core "
-                                f"'{slice_.core_id}' (os: {slice_.os}) "
-                                f"-- missing app/board/image"),
-                })
+        try:
+            cmd = _slice_command(
+                project, replace(slice_, build_dir=build_dir),
+                base_dir=base_dir)
+        except UnrootedPathError as e:
+            # One of _slice_command's five `_tokenize` call sites (west
+            # build's app-dir arg, -DSB_CONF_FILE's two paths,
+            # -DEXTRA_CONF_FILE, cmake -S) hit a path outside both
+            # ${PROJECT_ROOT} and ${SDK_ROOT} (issue #865). Block the
+            # command rather than ever let a bare absolute path reach
+            # `command.args` on a plan tagged `planPathMode: tokened` --
+            # same "carry the slice, never emit a broken/non-hermetic
+            # command" convention as `no-command` below.
+            cmd = None
+            warnings.append({
+                "code":    "command-unrooted",
+                "coreId":  slice_.core_id,
+                "message": (f"core '{slice_.core_id}' build command would "
+                            f"embed a path outside both the project "
+                            f"({base_dir}) and the SDK checkout ({REPO}): "
+                            f"'{e}' -- blocked rather than emit a "
+                            f"non-hermetic command"),
+            })
+        else:
+            if cmd is None:
+                if (slice_.os == "yocto" and slice_.app
+                        and not slice_.image and not slice_.recipe):
+                    # An app-only Yocto slice with no `recipe:` has no valid
+                    # bitbake target -- `app:` is a source directory, not a
+                    # recipe name (issue #597).  Block the plan explicitly
+                    # instead of ever emitting `bitbake <path>`.
+                    warnings.append({
+                        "code":    "yocto-recipe-missing",
+                        "coreId":  slice_.core_id,
+                        "message": (f"core '{slice_.core_id}' has app: "
+                                    f"'{slice_.app}' but no recipe: -- add "
+                                    f"the bitbake recipe name that packages "
+                                    f"this app source, or set image: to "
+                                    f"build a stock image instead"),
+                    })
+                else:
+                    warnings.append({
+                        "code":    "no-command",
+                        "coreId":  slice_.core_id,
+                        "message": (f"no build command for core "
+                                    f"'{slice_.core_id}' (os: {slice_.os}) "
+                                    f"-- missing app/board/image"),
+                    })
         config_artefacts: list[dict[str, str]] = []
         artefact = _slice_config_artefact(project, slice_)
         if artefact is not None:
@@ -371,8 +394,30 @@ def emit_build_plan(
         # it out of a yocto/zephyr/baremetal-shaped command (issue #597).
         # `alp-image-edge` is the A-core stock-image token, not a source
         # path -- there is no app dir to report for it.
-        app_dir = (_resolve_app_path(slice_.app, base_dir).as_posix()
-                   if slice_.app and slice_.app != STOCK_IMAGE_APP else None)
+        # Tokenized (issue #865): almost every `app:` resolves under the
+        # project (`${PROJECT_ROOT}/...`); the SDK-owned stock M-core shim
+        # (STOCK_SHIM_APP) resolves under the SDK checkout instead
+        # (`${SDK_ROOT}/...`). `_tokenize` raises `UnrootedPathError` when
+        # it is under neither -- fall back to the absolute path (still
+        # useful for tooling) but flag it rather than let it silently
+        # mis-root on the consumer side.
+        app_dir = None
+        if slice_.app and slice_.app != STOCK_IMAGE_APP:
+            resolved_app = _resolve_app_path(slice_.app, base_dir)
+            try:
+                app_dir = _tokenize(resolved_app, base_dir, REPO)
+            except UnrootedPathError:
+                app_dir = resolved_app.as_posix()
+                warnings.append({
+                    "code":    "appdir-unrooted",
+                    "coreId":  slice_.core_id,
+                    "message": (f"core '{slice_.core_id}' app path "
+                                f"'{app_dir}' is outside both the project "
+                                f"({base_dir}) and the SDK checkout "
+                                f"({REPO}) -- emitted absolute; a consumer "
+                                f"on a different checkout cannot re-root "
+                                f"it"),
+                })
         # Same flash-recipe fact `Slice.to_manifest_entry` surfaces to
         # `tan flash` -- reused here (not re-derived) so `debug.probe`
         # can never drift from the manifest's own `flash_method`/`flash_args`.
@@ -392,9 +437,12 @@ def emit_build_plan(
                 "args": cmd[1:],
                 "cwd":  build_dir.as_posix(),
             },
-            # Native host-path form: the value is handed to the slice
-            # subprocess environment verbatim.
-            "env": {"ALP_SDK_ROOT": str(REPO)},
+            # Tokened (issue #865), not the native host-path form: tan-cli
+            # (PR #24) substitutes ${SDK_ROOT} with its own checkout root
+            # before handing this to the slice subprocess environment, so
+            # a cached/materialised plan never carries THIS run's absolute
+            # path onto a different machine/checkout.
+            "env": {"ALP_SDK_ROOT": "${SDK_ROOT}"},
             # SDK-owned values the consumer APPENDS to its own env, distinct
             # from `env` above (set-verbatim). The join separator is
             # PER-KEY, not uniformly os.pathsep: EXTRA_ZEPHYR_MODULES is a
@@ -402,15 +450,25 @@ def emit_build_plan(
             # platform (not an OS path list), while PYTHONPATH is a real
             # OS-native path list (os.pathsep). Mirrors the append
             # `_alp_common.env_with_sdk` / `_workspace.subprocess_env` do
-            # for a real `west build` (ADR-0020 item 3).
+            # for a real `west build` (ADR-0020 item 3). Tokened same as
+            # `env` above (issue #865).
             "envAppendPath": {
-                "EXTRA_ZEPHYR_MODULES": [str(REPO)],
-                "PYTHONPATH":           [str(REPO / "scripts")],
+                "EXTRA_ZEPHYR_MODULES": ["${SDK_ROOT}"],
+                "PYTHONPATH":           ["${SDK_ROOT}/scripts"],
             },
         })
 
     plan: dict[str, Any] = {
         "schemaVersion":   1,
+        # Additive to schemaVersion 1 (issue #865): every path in this plan
+        # that anchors on THIS checkout or THIS project is now emitted as
+        # a `${SDK_ROOT}`/`${PROJECT_ROOT}`/`${PYTHON}` token rather than a
+        # baked-in absolute path -- tan-cli (PR #24) requires this literal
+        # value before it will substitute them. `boardYaml` is deliberately
+        # NOT tokenized (kept repo-relative as-passed) -- it is the anchor
+        # both this plan's own comparator and tan use to locate
+        # PROJECT_ROOT in the first place.
+        "planPathMode":    "tokened",
         "generatedBy":     "scripts/alp_orchestrate.py",
         # Additive provenance (ADR 0014's additive rule -- no schemaVersion
         # bump): traces a cached/materialised plan back to the planner that

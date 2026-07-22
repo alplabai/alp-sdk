@@ -33,6 +33,12 @@ human but pure noise for a parity diff -- normalize them before comparing:
   * a ``command.args`` entry matching ``-DPython3_EXECUTABLE=<path>`` -> the
     path is replaced with the literal token ``<PYEXE>``.
 
+Issue #865 flips a LIVE plan's emit from those baked-in absolute paths to
+literal ``${SDK_ROOT}``/``${PROJECT_ROOT}``/``${PYTHON}`` tokens (tan-cli,
+PR #24, substitutes them at materialise time). The frozen 97ad481b oracle
+predates that and stays absolute -- `normalize_plan` reconciles the two
+shapes onto the same normalized form; see its docstring for the mapping.
+
 The ONLY semantic delta allowed to pass without failing the gate is
 ``slices[*].debug.probe`` going from ``"openocd"`` (the oracle, at 97ad481b)
 to ``null`` (df312cec and later). That is #848's hand-reviewed, intentional
@@ -87,7 +93,8 @@ def _discover_sdk_root(plan: dict) -> str | None:
     return None
 
 
-def _normalize_strings(node: Any, sdk_root: str | None) -> Any:
+def _normalize_strings(node: Any, sdk_root: str | None,
+                        project_token: str | None = None) -> Any:
     """Deep-copy `node`, replacing every checkout-root occurrence in any
     string, and tokenizing any `-DPython3_EXECUTABLE=<path>` command arg.
 
@@ -100,18 +107,43 @@ def _normalize_strings(node: Any, sdk_root: str | None) -> Any:
     it carries the emitting host's interpreter path (`sys.executable`, not
     the checkout root), so it needs its own match -- tokenizing the whole
     arg, not just a substring, keeps the shape check (the arg must still be
-    present) while dropping the host-specific value.
+    present) while dropping the host-specific value. This also already
+    covers a tokened live plan's literal `${PYTHON}` (issue #865): the
+    regex matches on the `-DPython3_EXECUTABLE=` prefix alone, so it fires
+    regardless of what follows.
+
+    `project_token`, when set (a #865 tokened plan -- see `normalize_plan`),
+    substitutes `${PROJECT_ROOT}`/`${SDK_ROOT}` literal tokens; a `;`-joined
+    value (e.g. `SB_CONF_FILE`) can legitimately carry one of each, so both
+    substitutions always run rather than branching on which is present.
     """
     if isinstance(node, dict):
-        return {k: _normalize_strings(v, sdk_root) for k, v in node.items()}
+        return {k: _normalize_strings(v, sdk_root, project_token)
+                for k, v in node.items()}
     if isinstance(node, list):
-        return [_normalize_strings(v, sdk_root) for v in node]
+        return [_normalize_strings(v, sdk_root, project_token)
+                for v in node]
     if isinstance(node, str):
         if _PYEXE_ARG_RE.match(node):
             return f"-DPython3_EXECUTABLE={_PYEXE_TOKEN}"
+        if project_token is not None:
+            return (node.replace("${PROJECT_ROOT}", project_token)
+                        .replace("${SDK_ROOT}", _SDKROOT_TOKEN))
         if sdk_root:
             return node.replace(sdk_root, _SDKROOT_TOKEN)
     return node
+
+
+def _project_relpath(plan: dict) -> str:
+    """Directory holding `boardYaml`, e.g. `examples/audio/i2s-tone` for a
+    `boardYaml` of `examples/audio/i2s-tone/board.yaml`.
+
+    `boardYaml` is deliberately NOT tokenized by the #865 planner change
+    (it stays repo-relative, as-passed) precisely so it can anchor this:
+    every harness fixture lives UNDER the SDK root, so once `${SDK_ROOT}`
+    is substituted in, `${PROJECT_ROOT}` == `__SDKROOT__/<this relpath>`.
+    """
+    return os.path.dirname(plan.get("boardYaml") or "")
 
 
 # The #863/#871 planner change adds two fields to a live plan that the frozen
@@ -168,12 +200,44 @@ def normalize_plan(plan: dict) -> dict:
     differ between the oracle's capture checkout/host and whatever
     checkout/host the live SDK is emitted from, without being a real parity
     break.
+
+    Issue #865 flipped a LIVE plan's emit to carry literal
+    ``${SDK_ROOT}``/``${PROJECT_ROOT}``/``${PYTHON}`` tokens instead of this
+    checkout's absolute paths (tan-cli, PR #24, substitutes them at
+    materialise time -- KEEP THIS RECONCILIATION IN LOCKSTEP with tan-cli's
+    vendored twin of this comparator). The frozen 97ad481b oracle predates
+    that and still carries real absolute paths, so a tokened live plan is
+    mapped to the SAME normalized form the oracle collapses to rather than
+    diffed as a foreign shape:
+
+      * ``${SDK_ROOT}``     -> ``__SDKROOT__`` (the oracle's own absolute
+        checkout root also collapses here, via ``_discover_sdk_root``).
+      * ``${PROJECT_ROOT}`` -> ``__SDKROOT__/<project relpath>``, where
+        ``<project relpath>`` is ``boardYaml``'s own directory (see
+        ``_project_relpath``) -- the harness fixtures live under the SDK
+        root, so this lands on the identical string the oracle's absolute
+        ``sdk_root/<project relpath>/...`` prefix collapses to.
+      * ``${PYTHON}``       -> already handled by the existing
+        ``-DPython3_EXECUTABLE=`` regex match in `_normalize_strings`
+        (it matches on the prefix alone, regardless of what follows).
+
+    Gated on ``planPathMode == "tokened"`` -- a legacy (non-tokened) plan
+    keeps the pre-#865 absolute-path normalization untouched.
     """
-    sdk_root = _discover_sdk_root(plan)
-    normalized = _normalize_strings(plan, sdk_root)
+    if plan.get("planPathMode") == "tokened":
+        project_token = f"{_SDKROOT_TOKEN}/{_project_relpath(plan)}".rstrip("/")
+        normalized = _normalize_strings(plan, sdk_root=None,
+                                         project_token=project_token)
+    else:
+        sdk_root = _discover_sdk_root(plan)
+        normalized = _normalize_strings(plan, sdk_root)
     if "sdkCommit" in normalized:
         normalized["sdkCommit"] = _SHA_TOKEN
     normalized = _strip_863_additions(normalized)
+    # `planPathMode` is itself a #865 addition the oracle predates (like
+    # the #863/#871 fields above) -- drop it rather than diff it; the
+    # token-vs-absolute SHAPE it flags is already reconciled above.
+    normalized.pop("planPathMode", None)
     return normalized
 
 

@@ -56,10 +56,15 @@ and host that emitted it, not just the board it plans for:
   substring replace, not a prefix check, to catch this);
 - **`sdkCommit`**, the emitting commit's short SHA;
 - **the emitting host's Python interpreter path**, in each cmake/sysbuild
-  slice's `command.args` entry `-DPython3_EXECUTABLE=<path>` —
-  `orchestrator.py` pins this to `sys.executable`, so it is inherently
-  host-specific (a Homebrew path on the oracle's capture machine, `/usr/bin/
-  python3` on a WSL runner, a hosted-toolcache path on `ubuntu-latest`).
+  slice's `command.args` entry `-DPython3_EXECUTABLE=<path>` — at the
+  frozen oracle's `97ad481b`, `orchestrator.py` pinned this to
+  `sys.executable`, so it was inherently host-specific (a Homebrew path on
+  the oracle's capture machine, `/usr/bin/python3` on a WSL runner, a
+  hosted-toolcache path on `ubuntu-latest`). Issue #865 later replaced that
+  with a literal `${PYTHON}` token on a live plan (see below) — the
+  comparator's `-DPython3_EXECUTABLE=` regex match tokenizes either shape
+  the same way, so this stays true for both the frozen oracle and a live
+  `planPathMode: tokened` plan.
 
 None of the three is a real parity break — they differ by construction
 between the oracle's `97ad481b` capture checkout/host and whatever checkout/
@@ -70,6 +75,20 @@ with the literal token `__SDKROOT__`, `sdkCommit` is replaced with `__SHA__`,
 and any `-DPython3_EXECUTABLE=<path>` arg has its path replaced with
 `<PYEXE>` (the arg itself still must be present — only the host-specific
 value is tokenized, so the shape check survives).
+
+## Issue #865: this checks the token-COLLAPSED shape, not token choice
+
+A live plan is now `planPathMode: tokened` (`${SDK_ROOT}`/`${PROJECT_ROOT}`/
+`${PYTHON}` literal tokens, not baked-in absolute paths — see
+`docs/adr/0020-sdk-owns-build-execution.md`'s Amendment item 5). Every
+harness fixture board.yaml nests under the SDK checkout, so `normalize_plan`
+maps `${PROJECT_ROOT}` to `__SDKROOT__/<boardYaml's own directory>` — the
+**same** collapsed string `${SDK_ROOT}` maps to. This seam therefore proves
+the plan *shape* is unchanged; it cannot distinguish a bug that swapped
+`${SDK_ROOT}` and `${PROJECT_ROOT}` at some call site from a correct emit.
+Token *choice* is guarded elsewhere: the emit-snapshot goldens
+(`tests/fixtures/emit-snapshots/*.build-plan.snap`, which keep the two
+tokens' literal shapes) and tan-cli #24's own substitution tests.
 
 ## The one allowed delta: `debug.probe`
 

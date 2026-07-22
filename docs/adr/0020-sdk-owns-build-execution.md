@@ -74,6 +74,22 @@ blocked until the remediation is met. Tracked in #855.
    real-build proof of the sysbuild path (`iot-fleet-ota`) is the one deferred
    box on #871.
 
+5. **Hermetic build plans (#865): the emit is now `planPathMode: tokened`.**
+   Every path this plan bakes anchored on the emitting checkout or project
+   (`env.ALP_SDK_ROOT`, `envAppendPath`, `slices[].appDir`, and each Zephyr/
+   baremetal command's app-dir/`-DPython3_EXECUTABLE=`/`-DSB_CONF_FILE=`/
+   `-DEXTRA_CONF_FILE=` args) is a literal `${SDK_ROOT}`/`${PROJECT_ROOT}`/
+   `${PYTHON}` token instead of an absolute path, so a plan produced on one
+   machine/checkout materialises correctly on another instead of silently
+   pinning the wrong tree. Consumer: `tan-cli` #24 (already merged), which
+   substitutes the tokens and requires `planPathMode: "tokened"`. The seam-1
+   comparator reconciles this like the #863/#871 additions above: a tokened
+   live plan maps `${SDK_ROOT}` -> `__SDKROOT__` and `${PROJECT_ROOT}` ->
+   `__SDKROOT__/<boardYaml's own directory>` (the harness fixtures live
+   under the SDK root, and `boardYaml` itself is deliberately left
+   un-tokened as that anchor) before diffing against the frozen absolute-path
+   `97ad481b` oracle.
+
 ## Context
 
 ### The problem
