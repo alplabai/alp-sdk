@@ -146,12 +146,60 @@ static alp_status_t cc35_gatt_register_service(alp_ble_radio_state_t       *stat
                                                const alp_ble_service_def_t *def,
                                                alp_ble_attr_handle_t       *handles_out)
 {
-	(void)state;
-	(void)def;
-	(void)handles_out;
-	/* The firmware takes an opaque packed GATT descriptor.  The portable
-	 * runtime service-definition encoder is a later slice. */
-	return ALP_ERR_NOSUPPORT;
+	cc35_ble_be_t *be = (cc35_ble_be_t *)state->be_data;
+	if (be == NULL || !be->enabled) return ALP_ERR_NOT_READY;
+	if (def == NULL || handles_out == NULL) return ALP_ERR_INVAL;
+	if (def->num_chars < 1u || def->num_chars > ALP_CC3501E_BLE_GATT_MAX_CHARS) {
+		return ALP_ERR_INVAL;
+	}
+
+	/* Encode the BLE_GATT_REGISTER (0x38) request per the wire layout
+	 * documented in <alp/protocol/cc3501e.h>: version | service_uuid[16] |
+	 * num_chars, then per characteristic char_uuid[16] | properties(1) |
+	 * initial_len(LE16) | initial_value[initial_len]. */
+	uint8_t buf[ALP_CC3501E_MAX_PAYLOAD];
+	size_t  off = 0u;
+
+	buf[off++] = ALP_CC3501E_BLE_GATT_REGISTER_VERSION;
+	memcpy(&buf[off], def->service_uuid.b, sizeof(def->service_uuid.b));
+	off += sizeof(def->service_uuid.b);
+	buf[off++] = (uint8_t)def->num_chars;
+
+	for (size_t i = 0u; i < def->num_chars; i++) {
+		const alp_ble_char_def_t *c = &def->chars[i];
+		if (c->initial_len > 0xFFFFu) return ALP_ERR_INVAL; /* wire field is LE16 */
+		if (c->initial_value == NULL && c->initial_len > 0u) return ALP_ERR_INVAL;
+
+		size_t need = off + sizeof(c->uuid.b) + 1u + 2u + c->initial_len;
+		if (need > sizeof(buf)) return ALP_ERR_INVAL;
+
+		memcpy(&buf[off], c->uuid.b, sizeof(c->uuid.b));
+		off += sizeof(c->uuid.b);
+		buf[off++] = c->properties;
+		buf[off++] = (uint8_t)(c->initial_len & 0xFFu);
+		buf[off++] = (uint8_t)((c->initial_len >> 8) & 0xFFu);
+		if (c->initial_len > 0u) {
+			memcpy(&buf[off], c->initial_value, c->initial_len);
+			off += c->initial_len;
+		}
+	}
+
+	uint16_t     handles[ALP_CC3501E_BLE_GATT_MAX_CHARS];
+	size_t       num_handles = 0u;
+	alp_status_t rc          = cc3501e_ble_gatt_register(be->ctx,
+	                                                     buf,
+	                                                     off,
+	                                                     handles,
+	                                                     ALP_CC3501E_BLE_GATT_MAX_CHARS,
+	                                                     &num_handles,
+	                                                     CC3501E_BLE_OP_TIMEOUT_MS);
+	if (rc != ALP_OK) return rc;
+	if (num_handles < def->num_chars) return ALP_ERR_IO; /* short reply -- shouldn't happen */
+
+	for (size_t i = 0u; i < def->num_chars; i++) {
+		handles_out[i] = (alp_ble_attr_handle_t)handles[i];
+	}
+	return ALP_OK;
 }
 
 static alp_status_t cc35_gatt_notify(alp_ble_radio_state_t *radio_state,

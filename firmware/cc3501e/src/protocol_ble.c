@@ -13,6 +13,8 @@
  * padding that the wire format does not.
  */
 
+#include <stdbool.h>
+
 #include "protocol_internal.h"
 
 /* BLE_ENABLE (0x30): bring up the BLE stack.  Worker-routed (P0-4 seam): the
@@ -149,22 +151,63 @@ alp_cc3501e_resp_t handle_ble_disconnect(const uint8_t *req,
 	return hw_to_resp(cc3501e_hw_ble_disconnect());
 }
 
-/* BLE_GATT_REGISTER (0x38): opaque attribute-table descriptor (>= 1 byte).
- * Length-validated HERE, then WORKER-ROUTED with its payload: the real body
- * registers services + issues HCI over the shared HIF (blocks), so it MUST NOT
- * run in the SPI ISR.  worker_execute forwards the whole payload as the desc. */
+/* BLE_GATT_REGISTER (0x38) descriptor header: version(1) | service_uuid(16) |
+ * num_chars(1) -- see alp_cc3501e_ble_gatt_register_hdr_t / the wire-format
+ * doc block in <alp/protocol/cc3501e.h>. */
+#define BLE_GATT_REG_HDR 18u
+
+/* Walk the variable-length per-characteristic records (char_uuid(16) |
+ * properties(1) | initial_len(LE16) | initial_value[initial_len]) and
+ * confirm they exactly fill req_len -- no short records, no trailing bytes.
+ * Firmware-side validation only; the on-wire layout itself is documented
+ * once, in the shared header, not re-derived here. */
+static bool ble_gatt_register_validate(const uint8_t *req, size_t req_len, uint8_t *num_chars_out)
+{
+	if (req_len < BLE_GATT_REG_HDR) return false;
+	if (req[0] != ALP_CC3501E_BLE_GATT_REGISTER_VERSION) return false;
+
+	const uint8_t num_chars = req[17];
+	if (num_chars == 0u || num_chars > ALP_CC3501E_BLE_GATT_MAX_CHARS) return false;
+
+	size_t pos = BLE_GATT_REG_HDR;
+	for (uint8_t i = 0u; i < num_chars; i++) {
+		if (pos + 16u + 1u + 2u > req_len) return false; /* uuid+properties+initial_len */
+		const uint16_t initial_len = (uint16_t)req[pos + 17u] | ((uint16_t)req[pos + 18u] << 8);
+		pos += 16u + 1u + 2u + initial_len;
+		if (pos > req_len) return false;
+	}
+	if (pos != req_len) return false; /* no trailing garbage */
+
+	*num_chars_out = num_chars;
+	return true;
+}
+
+/* BLE_GATT_REGISTER (0x38): dynamic service descriptor, see the wire-format
+ * doc block in <alp/protocol/cc3501e.h>.  Length/shape-validated HERE, then
+ * WORKER-ROUTED with its payload AND a reply (like BLE_GATT_READ): the real
+ * body registers the service + issues HCI over the shared HIF (blocks), so it
+ * MUST NOT run in the SPI ISR.  min_cap sizes the reply to exactly
+ * status(1) + num_handles(1) + num_chars * handle(LE16) -- worker_execute
+ * fills it from cc3501e_hw_ble_gatt_register()'s handles_out. */
 alp_cc3501e_resp_t handle_ble_gatt_register(const uint8_t *req,
                                             size_t         req_len,
                                             uint8_t       *reply_data,
                                             size_t         reply_cap,
                                             size_t        *reply_data_len)
 {
-	(void)reply_data;
-	(void)reply_cap;
 	*reply_data_len = 0u;
-	if (req_len < 1u) return ALP_CC3501E_RESP_ERR_INVALID;
-	return handle_worker_routed_payload(
-	    ALP_CC3501E_CMD_BLE_GATT_REGISTER, req, req_len, reply_data_len);
+
+	uint8_t num_chars = 0u;
+	if (!ble_gatt_register_validate(req, req_len, &num_chars)) return ALP_CC3501E_RESP_ERR_INVALID;
+
+	const size_t min_cap = 2u + 2u * (size_t)num_chars;
+	return handle_worker_routed_payload_reply(ALP_CC3501E_CMD_BLE_GATT_REGISTER,
+	                                          req,
+	                                          req_len,
+	                                          min_cap,
+	                                          reply_data,
+	                                          reply_cap,
+	                                          reply_data_len);
 }
 
 /* BLE_GATT_NOTIFY (0x39) / WRITE (0x3B): packed wire = handle(LE16) | data.

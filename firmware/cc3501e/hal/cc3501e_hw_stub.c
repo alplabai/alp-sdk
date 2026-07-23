@@ -322,10 +322,17 @@ int cc3501e_hw_ble_disconnect(void)
 	return CC3501E_HW_ERR_NOTIMPL;
 }
 
-int cc3501e_hw_ble_gatt_register(const uint8_t *desc, uint16_t desc_len)
+int cc3501e_hw_ble_gatt_register(const uint8_t *desc,
+                                 uint16_t       desc_len,
+                                 uint16_t      *handles_out,
+                                 uint16_t       handles_cap,
+                                 uint16_t      *num_handles_out)
 {
 	(void)desc;
 	(void)desc_len;
+	(void)handles_out;
+	(void)handles_cap;
+	if (num_handles_out != 0) *num_handles_out = 0u;
 	return CC3501E_HW_ERR_NOTIMPL;
 }
 
