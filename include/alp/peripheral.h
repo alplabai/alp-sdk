@@ -288,8 +288,14 @@ alp_status_t alp_gpio_read(alp_gpio_t *pin, bool *level);
 /**
  * @brief Register an edge-triggered callback for @p pin.
  *
- * Callback runs in the IRQ context (ISR); keep work minimal +
- * defer to a thread / workqueue for anything substantive.
+ * Callback runs in the IRQ context (ISR) on Zephyr; keep work minimal
+ * + defer to a thread / workqueue for anything substantive.  On the
+ * Yocto backend the callback instead runs on a shared dispatcher
+ * thread, OUTSIDE any internal lock (issue #756): it is safe to call
+ * @ref alp_gpio_irq_disable or @ref alp_gpio_close on @p pin (a
+ * self-disable/self-close) -- or on any OTHER open pin -- from within
+ * this callback; neither re-locks anything the callback itself is
+ * still holding.
  *
  * @param[in] pin   Handle from @ref alp_gpio_open.
  * @param[in] edge  Edge polarity (RISING / FALLING / BOTH / NONE).
@@ -315,6 +321,10 @@ alp_status_t alp_gpio_irq_disable(alp_gpio_t *pin);
 
 /**
  * @brief Release the GPIO handle.  Idempotent on NULL.
+ *
+ * On the Yocto backend, safe to call from @p pin's own
+ * @ref alp_gpio_cb_t (a self-close, issue #756) or from a different
+ * pin's callback -- see @ref alp_gpio_irq_enable's doc comment.
  *
  * @param[in] pin  Handle from @ref alp_gpio_open, or NULL.
  */

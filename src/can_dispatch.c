@@ -3,6 +3,19 @@
  *
  * CAN class dispatcher.  Routes the public alp_can_* API
  * through the .alp_backends_can registry.
+ *
+ * @par Issue #756 -- worker-thread callback self-close
+ * The Yocto SocketCAN backend's RX reader thread invokes filter
+ * callbacks directly; a callback that calls alp_can_close() on its own
+ * handle is running ON that thread.  alp_can_close() now runs the
+ * backend's optional shutdown()/destroy() split (see can_ops.h's file
+ * comment) instead of unconditionally calling close(): a DEFERRED
+ * result means this call arrived from the handle's own worker thread,
+ * so the dispatcher returns immediately without draining/destroying --
+ * the backend finishes via alp_can_close_finalize() later, from that
+ * same thread, exactly once. A backend with no shutdown (every
+ * backend but yocto_drv.c) behaves exactly as before: drain, then
+ * close().
  */
 
 #include <stdbool.h>
@@ -71,9 +84,15 @@ alp_can_t *alp_can_open(const alp_can_config_t *cfg)
 		alp_z_set_last_error(ALP_ERR_NOMEM);
 		return NULL;
 	}
-	h->backend              = be;
-	h->state.ops            = ops;
-	h->cfg                  = *cfg;
+	h->backend   = be;
+	h->state.ops = ops;
+	h->cfg       = *cfg;
+	/* Stamp the dispatcher-owned back-pointer BEFORE calling into the
+	 * backend's open() -- issue #756, mirrors rpc_dispatch.c's identical
+	 * stamp: a backend that later self-closes caches this so its RX/
+	 * worker thread can call alp_can_close_finalize(owner) exactly once
+	 * from its own epilogue. */
+	h->state.owner          = h;
 	alp_capabilities_t caps = { .flags = be->base_caps };
 	if (be->probe != NULL) {
 		uint32_t refined = caps.flags;
@@ -185,22 +204,89 @@ alp_status_t alp_can_remove_filter(alp_can_t *can, int32_t filter_id)
 	return rc;
 }
 
-void alp_can_close(alp_can_t *can)
+/* Destroy -> UNOPENED -> slot-release (issue #756, mirrors
+ * rpc_dispatch.c's post-drain half of _rpc_finalize()) -- the ONE place
+ * both close-protocol outcomes converge, AFTER active_ops has already
+ * drained to 0 (see alp_can_close()'s comment on why the drain itself
+ * must happen BEFORE shutdown() is even called, not here). */
+static void _can_teardown(struct alp_can *can)
 {
-	if (can == NULL) return;
-	/* Sleep-poll drain (issue #629 follow-up): this pool counts
-	 * alp_can_send(), which can block up to its caller's timeout_ms, so
-	 * alp_handle_begin_close_blocking() sleeps between polls instead of
-	 * busy-spinning -- the busy-spin alp_handle_begin_close() would peg
-	 * a core (or hang outright at timeout_ms == UINT32_MAX) for the
-	 * whole send. See src/common/alp_slot_claim.c/.h. Idempotent: a
-	 * second/never-opened close no-ops. */
-	if (!alp_handle_begin_close_blocking(&can->lifecycle, &can->active_ops)) return;
-	if (can->state.ops != NULL && can->state.ops->close != NULL) {
-		can->state.ops->close(&can->state);
+	if (can->state.ops != NULL) {
+		if (can->state.ops->destroy != NULL) {
+			can->state.ops->destroy(&can->state);
+		} else if (can->state.ops->close != NULL) {
+			can->state.ops->close(&can->state);
+		}
 	}
 	alp_lifecycle_set(&can->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	_free(can);
+}
+
+/**
+ * @brief Complete a deferred (self-close) teardown -- see this file's
+ *        header comment and can_ops.h's alp_can_close_finalize()
+ *        declaration.  active_ops was already drained by the
+ *        alp_can_close() call that won the CAS and got DEFERRED back,
+ *        BEFORE it called shutdown() -- see that function's comment --
+ *        so no drain happens here, only teardown.
+ */
+void alp_can_close_finalize(void *owner)
+{
+	struct alp_can *can = (struct alp_can *)owner;
+	if (can == NULL) return;
+	_can_teardown(can);
+}
+
+void alp_can_close(alp_can_t *can)
+{
+	if (can == NULL) return;
+	/* Single-owner election (issue #756, mirrors rpc_dispatch.c's
+	 * _rpc_begin_close()): a racing closer (an external alp_can_close()
+	 * racing this same handle's own self-close callback, or any other
+	 * racing closer, or a stale handle whose slot has already been
+	 * recycled) loses this CAS and returns immediately without ever
+	 * touching `state`. */
+	if (!alp_lifecycle_cas(&can->lifecycle, ALP_HANDLE_LC_OPEN, ALP_HANDLE_LC_CLOSING)) return;
+
+	/* Drain BEFORE calling the backend's shutdown() (dev-review
+	 * follow-up on issue #756): shutdown() is where yocto_drv.c decides
+	 * whether an RX/worker thread exists at all (d->rx_running) and, if
+	 * so, whether THIS call is that thread (self-close) or an external
+	 * caller.  A concurrent alp_can_add_filter() that is the FIRST ever
+	 * filter add -- counted in active_ops via alp_handle_op_enter(),
+	 * about to lazily spawn the RX thread -- must be fully finished
+	 * (thread spawned, rx_running=true, op_leave run) before that
+	 * snapshot is taken.  Calling shutdown() BEFORE draining (the #756
+	 * patch's original order) let shutdown() observe rx_running==false
+	 * and decide "no thread, nothing to wake, DONE" while add_filter()
+	 * was mid-spawn; the drain below would then correctly wait for
+	 * add_filter() to finish, but by the time it returned the thread was
+	 * live and _can_teardown() would free/close the handle out from
+	 * under it -- both a use-after-free and the exact close()-vs-
+	 * concurrent-poll() hazard the wake-pipe exists to prevent.
+	 * Draining first restores the #629 invariant every other class's
+	 * close() still follows (CAS -> drain -> teardown) and makes
+	 * shutdown()'s snapshot race-free: by the time it runs, every op
+	 * counted before this CAS won -- including any add_filter() that
+	 * might spawn the thread -- has fully left. */
+	alp_handle_drain_blocking(&can->active_ops);
+
+	alp_can_shutdown_result_t result = ALP_CAN_SHUTDOWN_DONE;
+	if (can->state.ops != NULL && can->state.ops->shutdown != NULL) {
+		result = can->state.ops->shutdown(&can->state);
+	}
+	if (result == ALP_CAN_SHUTDOWN_DEFERRED) {
+		/* Self-close: the caller of alp_can_close() (and therefore of
+		 * shutdown() above) IS this handle's own RX/worker thread.
+		 * Return IMMEDIATELY: no teardown -- the slot stays claimed
+		 * with lifecycle CLOSING (structurally unrecyclable) until the
+		 * backend's own RX-epilogue calls alp_can_close_finalize()
+		 * exactly once, later, from that same thread. active_ops is
+		 * already 0 (drained above), so that call needs no drain of
+		 * its own. */
+		return;
+	}
+	_can_teardown(can);
 }
 
 const alp_capabilities_t *alp_can_capabilities(const alp_can_t *can)
