@@ -34,6 +34,7 @@
 #include <alp/soc_caps.h>
 
 #include "../../../../src/backends/ble/ble_ops.h"
+#include "../../../../src/common/alp_slot_claim.h"
 
 ZTEST_SUITE(alp_ble_registry, NULL, NULL, NULL, NULL, NULL);
 
@@ -101,6 +102,61 @@ ZTEST(alp_ble_registry, test_ble_advertise_start_inval_on_null_handle)
 ZTEST(alp_ble_registry, test_ble_capabilities_returns_null_for_null_handle)
 {
 	zassert_is_null(alp_ble_capabilities(NULL));
+}
+
+/* ---------- Adv-data 31-byte budget (#480/#888) --------------------- */
+
+/* Stub backend that always accepts whatever adv_config reaches it -- stands
+ * in for a backend with no budget check of its own, so these tests prove
+ * the dispatcher enforces the legacy 31-byte adv PDU budget centrally
+ * (ble_dispatch.c), not a specific backend's own defense-in-depth check. */
+static alp_status_t _stub_advertise_start(alp_ble_radio_state_t      *state,
+                                          const alp_ble_adv_config_t *cfg)
+{
+	(void)state;
+	(void)cfg;
+	return ALP_OK;
+}
+
+static const alp_ble_ops_t _stub_ble_ops = {
+	.advertise_start = _stub_advertise_start,
+};
+
+static void _stub_open_handle(struct alp_ble *h)
+{
+	memset(h, 0, sizeof(*h));
+	h->state.ops = &_stub_ble_ops;
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
+}
+
+ZTEST(alp_ble_registry, test_ble_advertise_start_rejects_over_budget_adv_data)
+{
+	struct alp_ble h;
+	_stub_open_handle(&h);
+
+	static const alp_ble_uuid_t svc = { 0 };
+	/* Flags 3 + name (2+15) + services (2+16*1) = 38 > 31. */
+	alp_ble_adv_config_t cfg = {
+		.name         = "123456789012345", /* 15 chars */
+		.services     = &svc,
+		.num_services = 1,
+	};
+	zassert_equal(alp_ble_advertise_start(&h, &cfg), ALP_ERR_INVAL);
+}
+
+ZTEST(alp_ble_registry, test_ble_advertise_start_accepts_at_budget_adv_data)
+{
+	struct alp_ble h;
+	_stub_open_handle(&h);
+
+	static const alp_ble_uuid_t svc = { 0 };
+	/* Flags 3 + name (2+8) + services (2+16*1) = 31 == 31 (inclusive boundary). */
+	alp_ble_adv_config_t cfg = {
+		.name         = "12345678", /* 8 chars -- exactly the 31-byte cap */
+		.services     = &svc,
+		.num_services = 1,
+	};
+	zassert_equal(alp_ble_advertise_start(&h, &cfg), ALP_OK);
 }
 
 /* ---------- Registry inventory test -------------------------------- */
