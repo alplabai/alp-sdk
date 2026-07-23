@@ -88,6 +88,13 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/camera/zephyr_stub.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/alif/camera.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/renesas/camera.c
+    # JPEG-encoder class dispatcher + stub backend.  Task 1 of the
+    # encoder rollout: the JPEG class must exist on every board,
+    # defaulting to the NOT_IMPLEMENTED stub.  The software baseline
+    # (CONFIG_ALP_SDK_JPEG_SW_BASELINE) and Alif Hantro VC9000E
+    # (CONFIG_ALP_SDK_JPEG_ALIF_HANTRO) backends land in later tasks.
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/jpeg_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/jpeg/zephyr_stub.c
 )
 
 # Boot-identity banner (CONFIG_ALP_SDK_BANNER, default y) -- one line at

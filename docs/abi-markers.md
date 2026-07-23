@@ -70,6 +70,7 @@ the PR for experimental symbols.
 | `soc_caps.h`          | `[ABI-STABLE]`     | v0.1 generated; capability constants.                              |
 | `gui.h`               | `[ABI-STABLE]`     | v0.2 LVGL re-export shim.                                          |
 | `camera.h`            | `[ABI-EXPERIMENTAL]` | v0.5 added `alp_camera_configure_isp` (ISP-Pico toggles) — surface tentative pending real hardware feedback.  Base capture path stable; ISP block experimental. |
+| `jpeg.h`              | `[ABI-EXPERIMENTAL]` | v0.13 new -- portable JPEG-encoder surface (`alp_jpeg_open/encode/capabilities/close`).  Task 1 of the encoder rollout ships only the class dispatcher + a NOT_IMPLEMENTED stub backend; no encoder (software or hardware) exists yet. |
 | `storage.h`           | `[ABI-EXPERIMENTAL]` | v0.5 added `alp_storage_configure_inline_aes` (SecAES on OSPI / HexSPI) -- surface tentative.  Base storage placeholders (v0.4 work) are still stubs. |
 | `display.h`           | `[ABI-EXPERIMENTAL]` | v0.3 placeholder; v0.9 adds the real Zephyr display backend (ADR-0017 Tier 1, `src/backends/display/zephyr_drv.c`), native_sim-verified against the upstream dummy controller -- no silicon run yet, so the surface stays experimental pending hardware. |
 | `usb.h`               | `[ABI-EXPERIMENTAL]` | v0.3 placeholder; surface skeleton only.                          |

@@ -92,6 +92,7 @@ target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_wdt.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_display.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_camera.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_jpeg.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_wifi.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_mqtt.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_audio.c

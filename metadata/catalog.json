@@ -1268,6 +1268,15 @@
     },
     {
       "functions": [
+        "alp_jpeg_capabilities",
+        "alp_jpeg_close",
+        "alp_jpeg_encode",
+        "alp_jpeg_open"
+      ],
+      "header": "include/alp/jpeg.h"
+    },
+    {
+      "functions": [
         "alp_model_parse"
       ],
       "header": "include/alp/model.h"
