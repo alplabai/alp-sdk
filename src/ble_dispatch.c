@@ -185,6 +185,27 @@ void alp_ble_close(alp_ble_t *h)
 	_free_radio(h);
 }
 
+/* Legacy (non-extended) BT LE adv PDU budget: 31 bytes total, made up of AD
+ * structures -- Flags (always emitted) = 3, Complete Local Name (if
+ * cfg->name) = 2 + strlen(name), Service UUIDs (if any, all 128-bit UUIDs
+ * packed into one AD structure) = 2 + sizeof(alp_ble_uuid_t)*num_services.
+ * The portable alp_ble_adv_config_t has no extended-advertising field, so
+ * this cap applies to every backend today; enforced once here (not
+ * per-backend) so Zephyr and CC3501E can't drift out of sync (#480/#888). */
+#define ALP_BLE_ADV_LEGACY_MAX_LEN 31u
+
+static size_t alp_ble_adv_data_size(const alp_ble_adv_config_t *cfg)
+{
+	size_t size = 3u; /* Flags AD structure: always emitted. */
+	if (cfg->name != NULL && cfg->name[0] != '\0') {
+		size += 2u + strlen(cfg->name);
+	}
+	if (cfg->services != NULL && cfg->num_services > 0u) {
+		size += 2u + sizeof(alp_ble_uuid_t) * cfg->num_services;
+	}
+	return size;
+}
+
 alp_status_t alp_ble_advertise_start(alp_ble_t *h, const alp_ble_adv_config_t *cfg)
 {
 	/* Gate on the lifecycle byte, not a plain in_use read: in_use is
@@ -197,6 +218,8 @@ alp_status_t alp_ble_advertise_start(alp_ble_t *h, const alp_ble_adv_config_t *c
 	}
 	alp_status_t rc;
 	if (cfg == NULL) {
+		rc = ALP_ERR_INVAL;
+	} else if (alp_ble_adv_data_size(cfg) > ALP_BLE_ADV_LEGACY_MAX_LEN) {
 		rc = ALP_ERR_INVAL;
 	} else if (h->state.ops == NULL || h->state.ops->advertise_start == NULL) {
 		rc = ALP_ERR_NOT_IMPLEMENTED;

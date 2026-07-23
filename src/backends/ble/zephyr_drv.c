@@ -402,9 +402,9 @@ static alp_status_t z_advertise_start(alp_ble_radio_state_t *st, const alp_ble_a
 	if (be->advertising) return ALP_ERR_BUSY;
 
 	/* Pack adv data: flags + complete local name (if provided) + service UUIDs.
-     * Size budget is 31 bytes total per BT spec; we trust the caller
-     * not to exceed that for v0.3.  v0.3.x adds extended-advertising
-     * support for larger payloads. */
+	 * Size budget is 31 bytes total per BT spec; alp_ble_advertise_start()
+	 * in ble_dispatch.c enforces this centrally before dispatch, so by the
+	 * time cfg reaches this backend it is already <= 31 bytes. */
 	struct bt_data ad[3];
 	size_t         ad_len = 0;
 

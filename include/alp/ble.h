@@ -102,7 +102,11 @@ void alp_ble_close(alp_ble_t *ble);
 
 /** Advertising configuration. */
 typedef struct {
-	const char           *name;     /**< Local name in adv data (≤ 29 chars). */
+	/** Local name in adv data.  @c name plus service UUIDs must fit the
+	 *  31-byte legacy adv PDU (Flags 3 + 2+strlen(name) +
+	 *  2+16*num_services); so <= 26 chars alone, <= 8 chars with one
+	 *  128-bit service UUID. */
+	const char           *name;
 	const alp_ble_uuid_t *services; /**< Array of advertised service UUIDs. */
 	size_t                num_services;
 	uint16_t              interval_min_ms;
