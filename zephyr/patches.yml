@@ -98,3 +98,23 @@ patches:
       own service policy. Unblocked ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM,
       which now defaults ON and is bench-validated on real E8 silicon (see
       zephyr/Kconfig). Upstream to hal_alif then drop.
+  - path: zephyr/0003-kconfig-serialize-missing-deps.patch
+    sha256sum: 873ed5171298271804ba89cba22fd2c286fdb749cec2856a7ea7c2e1d7c3c7c5
+    module: zephyr
+    author: Alp Lab AB
+    email: contact@alplab.ai
+    date: 2026-07-20
+    upstreamable: true
+    comments: |
+      Zephyr v4.4.0 (Burelli/Arduino SA, "kconfig: collect and save trace
+      data", PR #95808) writes .config-trace.json but computes missing_deps()
+      only for a stderr warning in check_assigned_sym_values() -- the
+      machine-readable trace never carries WHICH dependency blocked an ignored
+      prj.conf assignment. Add collect_missing_deps() writing a sibling
+      .config-missing-deps.json {"CONFIG_X": ["DEP (=n)", ...]} so the prj.conf
+      language server can name the blocking dependency instead of the "no
+      prompt, or unmet deps" disjunction. Gated on --handwritten-input-configs
+      to match check_assigned_sym_values()'s own warning (empty {} otherwise, so
+      the sibling always matches the .config just written). The 6-tuple trace
+      format is untouched, so traceconfig.py and tests/kconfig/tracing are
+      unaffected. Upstream to Zephyr then drop.

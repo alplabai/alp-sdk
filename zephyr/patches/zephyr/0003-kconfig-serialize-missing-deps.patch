@@ -1,0 +1,79 @@
+diff --git a/scripts/kconfig/kconfig.py b/scripts/kconfig/kconfig.py
+--- a/scripts/kconfig/kconfig.py
++++ b/scripts/kconfig/kconfig.py
+@@ -143,6 +143,19 @@
+     with open(args.config_out + '-trace.json', 'w') as f:
+         json.dump(trace_data, f, indent=2)
+ 
++    # Write the unsatisfied dependencies that blocked each ignored
++    # assignment, as a sibling of the trace. This is the same analysis
++    # whose stderr warning check_assigned_sym_values() emits, so it is
++    # gated on the SAME --handwritten-input-configs mode: upstream
++    # suppresses that warning for non-handwritten reloads as unhelpful,
++    # and this must not diverge from it. Written unconditionally (empty
++    # when gated off) so the sibling always matches the .config just
++    # written; a consumer keys freshness off mtime.
++    missing = (collect_missing_deps(kconf)
++               if args.handwritten_input_configs else {})
++    with open(args.config_out + '-missing-deps.json', 'w') as f:
++        json.dump(missing, f, indent=2)
++
+     # Write the list of parsed Kconfig files to a file
+     write_kconfig_filenames(kconf, args.kconfig_list_out)
+ 
+@@ -223,8 +236,55 @@
+         return [dep for dep in deps if expr_value(dep) < sym.user_value]
+     # string/int/hex
+     return [dep for dep in deps if expr_value(dep) == 0]
++
++
++def collect_missing_deps(kconf):
++    # Collects, for every symbol whose assigned value did not take effect,
++    # the unsatisfied direct dependencies that blocked it -- the same list
++    # check_assigned_sym_values() renders into its stderr warning, keyed by
++    # prefixed symbol name and returned as data. Written next to the trace
++    # so a consumer can name the blocking dependency.
++    #
++    # Only symbols with a non-empty missing-deps list appear: a promptless
++    # symbol whose deps are all satisfied (assignment still ignored) is
++    # absent, matching the 'no prompt' half already carried by the trace's
++    # visibility field.
++    #
++    # The per-symbol 'did it take' test mirrors check_assigned_sym_values()
++    # exactly; the caller gates this on the same handwritten-input mode, so
++    # the two never diverge.
++
++    result = {}
++    for sym in kconf.unique_defined_syms:
++        if sym.choice:
++            continue
+ 
++        user_value = sym.user_value
++        if user_value is None:
++            continue
+ 
++        if sym.type in (BOOL, TRISTATE):
++            user_value = TRI_TO_STR[user_value]
++
++        if user_value == sym.str_value:
++            continue
++
++        mdeps = missing_deps(sym)
++        if not mdeps:
++            continue
++
++        expr_strs = []
++        for expr in mdeps:
++            estr = expr_str(expr)
++            if isinstance(expr, tuple):
++                estr = f"({estr})"
++            expr_strs.append(f"{estr} (={TRI_TO_STR[expr_value(expr)]})")
++
++        result[kconf.config_prefix + sym.name] = expr_strs
++
++    return result
++
++
+ def check_assigned_choice_values(kconf):
+     # Verifies that any choice symbols that were selected (by setting them to
+     # y) ended up as the selection, printing warnings otherwise.
