@@ -177,6 +177,52 @@ jobs:
           python3 -m pytest tests/scripts/test_hil_blocks_coverage.py -q \
             -k test_emitted_sb_config_symbols_exist_in_pinned_zephyr
 
+      # --emit kconfig (#893) is the SDK's first WORKSPACE-dependent emit
+      # mode -- it needs a real board's Kconfig tree resolved by Zephyr's
+      # own CMake, which (unlike native_sim) needs a real cross-toolchain.
+      # Install ONLY the one GNU toolchain the AEN (Cortex-M55) contract
+      # case needs, with --no-hosttools (skip QEMU/friends) -- the FULL
+      # `west sdk install` bundle is the ~17 GB image this job's own
+      # header comment already ruled out; a single arch is ~a few hundred
+      # MB and doesn't touch the main twister-shard steps above (they stay
+      # ZEPHYR_TOOLCHAIN_VARIANT=host, no SDK). Shard-1-only, same as the
+      # SB_CONFIG oracle step above.
+      - name: Install ARM Zephyr SDK toolchain (for --emit kconfig contract)
+        if: matrix.shard == 1
+        uses: actions/cache@v5
+        id: zephyr-sdk-cache
+        with:
+          path: ${{ github.workspace }}/zephyr-sdk
+          key: zephyr-sdk-arm-zephyr-eabi-v4.4.0-${{ runner.os }}
+
+      - name: west sdk install (arm-zephyr-eabi only)
+        if: matrix.shard == 1 && steps.zephyr-sdk-cache.outputs.cache-hit != 'true'
+        working-directory: ${{ github.workspace }}/zephyrproject
+        env:
+          # No explicit --version below -- `west sdk install` auto-detects
+          # the right SDK release from $ZEPHYR_BASE/SDK_VERSION.
+          ZEPHYR_BASE: ${{ github.workspace }}/zephyrproject/zephyr
+        run: |
+          west sdk install --gnu-toolchains arm-zephyr-eabi --no-hosttools \
+            --install-dir "$GITHUB_WORKSPACE/zephyr-sdk"
+
+      # check_emit_kconfig_contract.py (#893) -- schema/smoke, not a
+      # byte-golden: `--emit kconfig`'s exact symbol set moves with the
+      # pinned Zephyr version, so it only asserts shape + a few
+      # known-must-exist symbols.  Deliberately NOT in
+      # check_emit_snapshots.py (the hermetic gate) -- this mode needs
+      # the workspace this job (and only this job) already bootstraps.
+      - name: check · --emit kconfig contract (#893)
+        if: matrix.shard == 1
+        working-directory: ${{ github.workspace }}/alp-sdk
+        env:
+          ZEPHYR_BASE: ${{ github.workspace }}/zephyrproject/zephyr
+          ZEPHYR_SDK_INSTALL_DIR: ${{ github.workspace }}/zephyr-sdk
+          ZEPHYR_TOOLCHAIN_VARIANT: zephyr
+          EXTRA_ZEPHYR_MODULES: ${{ github.workspace }}/alp-sdk
+        run: |
+          python3 scripts/check_emit_kconfig_contract.py
+
       # Persist the twister REPORTS (json/xml/log) regardless of
       # pass/fail.  Do NOT upload the whole twister-out/ tree: the
       # per-test build directories grew past 2 GB with the v0.6

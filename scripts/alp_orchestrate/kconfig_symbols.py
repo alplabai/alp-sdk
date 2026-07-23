@@ -45,8 +45,12 @@ SCHEMA_VERSION = 1
 # ---------------------------------------------------------------------
 
 
+def _kconfig_dir(zephyr_base: Path) -> Path:
+    return zephyr_base / "scripts" / "kconfig"
+
+
 def _kconfiglib_path(zephyr_base: Path) -> Path:
-    return zephyr_base / "scripts" / "kconfig" / "kconfiglib.py"
+    return _kconfig_dir(zephyr_base) / "kconfiglib.py"
 
 
 def _require_workspace() -> Path:
@@ -54,11 +58,20 @@ def _require_workspace() -> Path:
     message + exit(2) -- this mode's one deliberate deviation from the
     rest of the orchestrator's `OrchestratorError` -> exit(1) convention,
     marking "no workspace" as distinct from an ordinary usage error.
+
+    Also puts `$ZEPHYR_BASE/scripts/kconfig` on `sys.path`: kconfiglib is
+    a plain module file there, not a pip-installed package (Zephyr's own
+    kconfig.py relies on the same "runs from that directory" trick) --
+    every `import kconfiglib` in this module depends on this having run
+    first.
     """
     raw = os.environ.get("ZEPHYR_BASE")
     if raw:
         zephyr_base = Path(raw)
         if _kconfiglib_path(zephyr_base).is_file():
+            kconfig_dir = str(_kconfig_dir(zephyr_base))
+            if kconfig_dir not in sys.path:
+                sys.path.insert(0, kconfig_dir)
             return zephyr_base
     print(
         "alp_orchestrate: --emit kconfig requires a bootstrapped Zephyr "
@@ -224,7 +237,15 @@ def _load_board_symbols(zephyr_base: Path, board_triple: str) -> list[Any]:
             str(app_dir),
             "--", f"-DPYTHON_EXECUTABLE={spy}",
         ]
-        proc = subprocess.run(cmd, env=env, capture_output=True, text=True)
+        # `west build` is a west extension command -- it needs to run from
+        # inside a west workspace (a `.west/` upward from cwd), which
+        # `alp_orchestrate` itself is never a part of.  `$ZEPHYR_BASE/..`
+        # is that workspace's topdir under every documented Zephyr
+        # `west init` layout (Getting Started's `~/zephyrproject/{.west,
+        # zephyr, modules,...}`, and the same layout pr-twister.yml's own
+        # `west init -m .../zephyr .` step produces).
+        proc = subprocess.run(cmd, env=env, cwd=zephyr_base.parent,
+                              capture_output=True, text=True)
         if proc.returncode != 0:
             raise OrchestratorError(
                 f"--emit kconfig: `west build --cmake-only -b "
