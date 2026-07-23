@@ -393,7 +393,7 @@ alp_status_t poll_by_repeat(cc3501e_t        *ctx,
 		 * -EBUSY) rather than resp_to_status() then leaves the sentinel, so it
 		 * can never masquerade as RESP_ERR_STATE. */
 		ctx->rx_scratch[0] = 0xFFu;
-		s = cc3501e_request(
+		s                  = cc3501e_request(
 		    ctx, cmd, tx_payload, tx_len, rx_buf, rx_cap, rx_len, CC3501E_REQ_TMO_MS);
 		/* resp_to_status() maps BOTH RESP_ERR_BUSY (worker still running --
 		 * genuinely retryable) and RESP_ERR_STATE (a deterministic firmware
