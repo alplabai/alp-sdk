@@ -245,8 +245,8 @@ typedef enum {
 	ALP_CC3501E_RESP_ERR_VERSION   = 0x08, /**< Firmware ↔ host version mismatch. */
 	/** Op rejected because of the subsystem's CURRENT state (e.g. NimBLE's
 	 *  ble_gatts_mutable() ordering guard on BLE_GATT_REGISTER while
-	 *  advertising/scanning/connected).  Distinct from @ref
-	 *  ALP_CC3501E_RESP_ERR_RADIO: this is a deterministic, terminal reject --
+	 *  advertising/scanning/connected).  Distinct from
+	 *  @ref ALP_CC3501E_RESP_ERR_RADIO -- this is a deterministic, terminal reject:
 	 *  retrying without the caller first changing that state (stop
 	 *  advertising / disconnect) repeats the same answer, so the host must
 	 *  not poll-by-repeat it like a transient radio/bridge fault. */
