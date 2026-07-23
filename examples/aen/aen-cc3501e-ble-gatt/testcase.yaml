@@ -22,3 +22,8 @@ tests:
       - ble
       - gatt
     build_only: true
+    # Layer the native_sim console override AFTER the generated alp.conf
+    # (which sets CONFIG_RAM_CONSOLE=y from board.yaml diagnostics.console:
+    # ram). native_sim has no RAM console -> picolibc __stdout_hook_install
+    # link failure without this. See native_sim.conf.
+    extra_args: EXTRA_CONF_FILE=native_sim.conf
