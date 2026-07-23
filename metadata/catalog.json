@@ -55,6 +55,13 @@
       },
       {
         "board": "e1m-evk",
+        "name": "aen-cc3501e-gatt-register",
+        "path": "examples/aen/aen-cc3501e-gatt-register",
+        "som": "E1M-AEN801",
+        "summary": "Bench check for the **NEW CC3501E dynamic GATT registration** path (#480/#892) on the Alif **M55-HE** (**E1M-AEN801**, Alif Ensemble E8) SoM. `alp_ble_gatt_register_service()` (`<alp/ble.h>`) used to be a stub; on this branch it really registers a service on the CC3501E's NimBLE host over the inter-chip bridge and fills in a real attribute handle per characteristic."
+      },
+      {
+        "board": "e1m-evk",
         "name": "aen-cc3501e-gpio",
         "path": "examples/aen/aen-cc3501e-gpio",
         "som": "E1M-AEN801",
