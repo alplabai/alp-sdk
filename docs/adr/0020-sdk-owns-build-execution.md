@@ -226,7 +226,7 @@ user command are retired.
 
 1. **Phase 1 (alp-sdk):** complete the contract above; `fan_out` stays and ideally
    consumes the new fields (self-parity). Ship on an SDK tag; delete nothing.
-2. **Phase 2 (`tan`, Hakan):** extract `cli-rs` → the new `tan` repo and **grow it
+2. **Phase 2 (tan, Hakan):** extract `cli-rs` → the new `tan` repo and **grow it
    to the whole command surface** (build + flash/image/size/renode/clean + the
    manifest I/O those need). The executor conforms to the contract (deletes the
    hand-ported env / skip policy); add **build-validation CI** (SoM matrix,
@@ -245,15 +245,10 @@ slogan (no bitbake-capable CI runners exist; `fan_out` was never a real build
 oracle for A-core/yocto — `pr-alp-build.yml` runs the orchestrator with
 `continue-on-error`). Define it as:
 
-- **(in) command + env + skip/fail-decision equivalence** between `fan_out` and
-  `tan`'s dry-run of the same plan, over the **full SoM matrix**, captured
-  **toolchain-free** (this is exactly the drift that motivated the ADR, and it
-  compares without building);
-- **(out) manifest + state byte-parity** on what each writes;
-- **plus Zephyr-slice artefact parity** (buildable on today's runners —
-  `pr-renode-aen-smoke.yml` already builds via `west alp-build`);
-- **yocto/A-core artefact parity is explicitly OUT of scope** (no runner infra;
-  bitbake isn't byte-reproducible).
+- (in) **command + env + skip/fail-decision equivalence** between `fan_out` and `tan`'s dry-run of the same plan, over the full SoM matrix, captured toolchain-free (this is exactly the drift that motivated the ADR, and it compares without building);
+- (out) **manifest + state byte-parity** on what each writes;
+- plus **Zephyr-slice artefact parity** (buildable on today's runners — `pr-renode-aen-smoke.yml` already builds via `west alp-build`);
+- yocto/A-core artefact parity is explicitly **out of scope** (no runner infra; bitbake isn't byte-reproducible).
 
 ### In-repo consumers Phase 4 must migrate (grep-verified)
 
