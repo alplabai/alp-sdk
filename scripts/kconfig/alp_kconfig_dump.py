@@ -55,11 +55,33 @@ def main() -> int:
     args = ap.parse_args()
 
     kconf = kconfiglib.Kconfig(args.kconfig_root, warn=True, warn_to_stderr=False)
+
+    # TEMPORARY diagnostic (#893) -- pinpointing a partial-tree load
+    # (MAIN_STACK_SIZE/LOG/SERIAL missing from the CI contract). Remove
+    # once root-caused.
+    all_names = {s.name for s in kconf.unique_defined_syms}
+    print(f"ALP_KCONFIG_DIAG kconfig_root(argv)={args.kconfig_root!r}",
+          file=sys.stderr)
+    print(f"ALP_KCONFIG_DIAG srctree={os.environ.get('srctree')!r} "
+          f"ZEPHYR_BASE={os.environ.get('ZEPHYR_BASE')!r} "
+          f"KCONFIG_BINARY_DIR={os.environ.get('KCONFIG_BINARY_DIR')!r}",
+          file=sys.stderr)
+    print(f"ALP_KCONFIG_DIAG unique_defined_syms={len(kconf.unique_defined_syms)}",
+          file=sys.stderr)
+    print("ALP_KCONFIG_DIAG known_present="
+          f"{{'LOG': {'LOG' in all_names}, 'SERIAL': {'SERIAL' in all_names}, "
+          f"'MAIN_STACK_SIZE': {'MAIN_STACK_SIZE' in all_names}}}",
+          file=sys.stderr)
+
     symbols = _project_symbols(
         kconf.unique_defined_syms,
         type_to_str=kconfiglib.TYPE_TO_STR,
         expr_str=kconfiglib.expr_str,
     )
+
+    print(f"ALP_KCONFIG_DIAG first8_projected="
+          f"{[s['name'] for s in symbols[:8]]}", file=sys.stderr)
+
     args.output.write_text(json.dumps(symbols), encoding="utf-8")
     return 0
 
