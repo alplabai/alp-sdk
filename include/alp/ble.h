@@ -175,12 +175,20 @@ typedef struct {
  * On success populates @p handles_out with one attribute handle per
  * characteristic in declaration order.
  *
+ * @note Service registration must precede advertising.  On backends whose
+ *       host stack only supports adding services to a not-yet-started GATT
+ *       server (e.g. NimBLE's @c ble_gatts_start() / @c ble_gatts_mutable()
+ *       constraint on the CC3501E backend), registering while already
+ *       advertising, scanning, or connected is refused with
+ *       @ref ALP_ERR_BUSY -- call this before @ref alp_ble_advertise_start.
+ *
  * @param[in]  ble          Host handle from @ref alp_ble_open.
  * @param[in]  def          Service + characteristics.  Must be non-NULL.
  * @param[out] handles_out  Receives the attribute handles for each
  *                          characteristic.  Caller-allocated array of
  *                          @c def->num_chars elements.
- * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_NOMEM.
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_NOMEM /
+ *         ALP_ERR_BUSY (registration ordering constraint -- see @note).
  */
 alp_status_t alp_ble_gatt_register_service(alp_ble_t                   *ble,
                                            const alp_ble_service_def_t *def,

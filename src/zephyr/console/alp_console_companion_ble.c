@@ -281,14 +281,27 @@ static int cmd_companion_ble_gatt_register(const struct shell *sh, size_t argc, 
 		shell_error(sh, "usage: alp companion ble gatt register <hexbytes> (opaque descriptor)");
 		return -EINVAL;
 	}
+	uint16_t handles[ALP_CC3501E_BLE_GATT_MAX_CHARS];
+	size_t   num_handles = 0;
 	k_mutex_lock(&companion_bus_lock, K_FOREVER);
-	alp_status_t s = cc3501e_ble_gatt_register(companion_cc3501e, desc, len, ALP_COMPANION_BLE_MS);
+	alp_status_t s = cc3501e_ble_gatt_register(companion_cc3501e,
+	                                           desc,
+	                                           len,
+	                                           handles,
+	                                           ARRAY_SIZE(handles),
+	                                           &num_handles,
+	                                           ALP_COMPANION_BLE_MS);
 	k_mutex_unlock(&companion_bus_lock);
 	if (s != ALP_OK) {
 		shell_error(sh, "ble gatt register failed (%d)", (int)s);
 		return -EIO;
 	}
-	shell_print(sh, "GATT table registered (%u bytes)", (unsigned int)len);
+	shell_fprintf(
+	    sh, SHELL_NORMAL, "GATT table registered (%u bytes), handles:", (unsigned int)len);
+	for (size_t i = 0; i < num_handles; i++) {
+		shell_fprintf(sh, SHELL_NORMAL, " 0x%04x", (unsigned int)handles[i]);
+	}
+	shell_fprintf(sh, SHELL_NORMAL, "\n");
 	return 0;
 }
 

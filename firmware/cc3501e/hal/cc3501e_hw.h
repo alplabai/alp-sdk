@@ -245,7 +245,16 @@ int cc3501e_hw_ble_scan_stop(void);
 int cc3501e_hw_ble_scan(uint8_t *buf, size_t cap, size_t *out_len);
 int cc3501e_hw_ble_connect(uint8_t addr_type, const uint8_t addr[6]);
 int cc3501e_hw_ble_disconnect(void);
-int cc3501e_hw_ble_gatt_register(const uint8_t *desc, uint16_t desc_len);
+/* Register a dynamic GATT service from a wire-format descriptor (see
+ * ALP_CC3501E_CMD_BLE_GATT_REGISTER in <alp/protocol/cc3501e.h> for the exact
+ * byte layout).  @p handles_out receives one attribute VALUE handle per
+ * characteristic, in descriptor order, capped at @p handles_cap; @p
+ * num_handles_out is always set (0 on any error). */
+int cc3501e_hw_ble_gatt_register(const uint8_t *desc,
+                                 uint16_t       desc_len,
+                                 uint16_t      *handles_out,
+                                 uint16_t       handles_cap,
+                                 uint16_t      *num_handles_out);
 int cc3501e_hw_ble_gatt_notify(uint16_t handle, const uint8_t *data, uint16_t data_len);
 int cc3501e_hw_ble_gatt_read(uint16_t handle, uint8_t *out, uint16_t cap, uint16_t *out_len);
 int cc3501e_hw_ble_gatt_write(uint16_t handle, const uint8_t *data, uint16_t data_len);

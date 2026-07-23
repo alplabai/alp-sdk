@@ -624,6 +624,86 @@ typedef struct {
 } alp_cc3501e_ble_adv_report_t;
 
 /* ------------------------------------------------------------------ */
+/* BLE_GATT_REGISTER (0x38) dynamic-service payload format             */
+/* ------------------------------------------------------------------ */
+
+/** Max characteristics accepted per BLE_GATT_REGISTER call.  Bounds the
+ *  worst-case reply (one uint16 handle per characteristic) and the firmware's
+ *  fixed-size attribute-table scratch storage -- 8 is generous for a v1
+ *  sensor/actuator service and keeps both comfortably inside
+ *  ALP_CC3501E_MAX_PAYLOAD. */
+#define ALP_CC3501E_BLE_GATT_MAX_CHARS 8u
+
+/** BLE_GATT_REGISTER wire version (the request's first byte).  Bump this if
+ *  the layout below changes in a way older firmware/hosts can't parse. */
+#define ALP_CC3501E_BLE_GATT_REGISTER_VERSION 1u
+
+/**
+ * @brief BLE_GATT_REGISTER (0x38) request/reply wire format -- one service
+ *        per call, host (Alif) -> firmware (CC3501E).
+ *
+ * All multi-byte fields little-endian.  This is a VARIABLE-length payload
+ * (each characteristic carries its own initial_value span), so -- like the
+ * other BLE payloads in this header -- it is parsed field-by-field on both
+ * sides rather than cast onto a single struct; @ref
+ * alp_cc3501e_ble_gatt_register_hdr_t names the fixed leading fields both
+ * sides share, but the per-characteristic records are documented here only
+ * (a struct would need a uint16 field at an odd offset -- see the
+ * PACKED-wire note at the top of this file).
+ *
+ * REQUEST (host -> firmware), total length must equal req_len exactly (no
+ * trailing bytes):
+ * @code
+ *   u8      version                     ALP_CC3501E_BLE_GATT_REGISTER_VERSION
+ *   u8[16]  service_uuid                verbatim alp_ble_uuid_t.b -- NOT byte-swapped
+ *   u8      num_chars                   1 .. ALP_CC3501E_BLE_GATT_MAX_CHARS
+ *   repeat num_chars:
+ *     u8[16] char_uuid                  verbatim alp_ble_uuid_t.b
+ *     u8     properties                 ALP_BLE_GATT_PROP_* (== BT-SIG / NimBLE
+ *                                        BLE_GATT_CHR_F_* bits -- READ 0x02,
+ *                                        WRITE 0x08, NOTIFY 0x10, INDICATE 0x20)
+ *     u16    initial_len (LE)
+ *     u8[initial_len] initial_value
+ * @endcode
+ *
+ * REPLY (firmware -> host):
+ * @code
+ *   u8   status         0 = OK, nonzero = firmware error
+ *   u8   num_handles    == num_chars on success, 0 on error
+ *   repeat num_handles: u16 attr_handle (LE) -- the characteristic VALUE handle
+ * @endcode
+ *
+ * The frame-level alp_cc3501e_resp_t (the response status byte in the
+ * transport header) is authoritative for whether the call succeeded; this
+ * in-payload `status` is carried so the reply is self-describing on its own
+ * -- today's firmware only emits this payload at all on the OK path, so it
+ * is always 0 when present.
+ *
+ * NimBLE lifecycle caveat (see cc3501e_nimble_gatt_register() for the full
+ * rationale): a service registered while the NimBLE host is already up
+ * requires the firmware to re-run ble_gatts_start() -- the vendor SDK's own
+ * documented (not invented) way to add services after the first one, but
+ * unverified on silicon as of this wire-format revision.  A firmware error
+ * reply here means the service did NOT take effect; retry after a fresh
+ * BLE_ENABLE if the error persists.
+ */
+typedef struct {
+	uint8_t version;
+	uint8_t service_uuid[16];
+	uint8_t num_chars;
+	/* per-characteristic records follow -- see the wire format above;
+	 * NOT modeled as a struct array here (uint16 initial_len would land at
+	 * an odd offset and pick up compiler padding on some ABIs). */
+} alp_cc3501e_ble_gatt_register_hdr_t;
+
+/** Reply header for BLE_GATT_REGISTER; @c attr_handle[num_handles] (LE16
+ *  each) follows inline -- see the wire format doc above. */
+typedef struct {
+	uint8_t status;
+	uint8_t num_handles;
+} alp_cc3501e_ble_gatt_register_reply_hdr_t;
+
+/* ------------------------------------------------------------------ */
 /* GPIO proxy payload formats                                          */
 /* ------------------------------------------------------------------ */
 
