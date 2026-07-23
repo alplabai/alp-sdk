@@ -52,14 +52,14 @@ tan doctor
 cargo install --git https://github.com/alplabai/tan-cli --bin tan
 
 # Scaffold a hello-world, then let tan build it for native_sim — no hardware needed
-alp init my-app
+tan init my-app
 cd my-app
 tan build --native
 ```
 
-`bash scripts/bootstrap.sh` is what actually gets `west` (and everything else `tan build` shells out to) onto `PATH` — skipping it is the #1 way this Quickstart fails on a fresh clone; see [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md) for the per-OS manual equivalent. `tan` is not installed by `bootstrap.sh` -- it's a separate public Rust binary from [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli); `cargo install --git https://github.com/alplabai/tan-cli --bin tan` needs `rustup`/`cargo` on `PATH` first. `alp init` walks you through SoM SKU + board preset + starter peripherals interactively, or accepts `--som`, `--preset`, `--peripherals` flags for CI. `tan build` (`--native` is the default, explicit-opt-in spelling) consumes the SDK's build plan, materialises it, and runs each slice's `west`/`bitbake`/`cmake` command directly -- whatever `board.yaml` targets, native_sim or real silicon; it never runs the produced binary itself (that's `tan run`). Flashing real hardware is `tan flash`.
+`bash scripts/bootstrap.sh` is what actually gets `west` (and everything else `tan build` shells out to) onto `PATH` — skipping it is the #1 way this Quickstart fails on a fresh clone; see [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md) for the per-OS manual equivalent. `tan` is not installed by `bootstrap.sh` -- it's a separate public Rust binary from [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli); `cargo install --git https://github.com/alplabai/tan-cli --bin tan` needs `rustup`/`cargo` on `PATH` first. `tan init` walks you through SoM SKU + board preset + starter peripherals interactively, or accepts `--som`, `--preset`, `--peripherals` flags for CI. `tan build` (`--native` is the default, explicit-opt-in spelling) consumes the SDK's build plan, materialises it, and runs each slice's `west`/`bitbake`/`cmake` command directly -- whatever `board.yaml` targets, native_sim or real silicon; it never runs the produced binary itself (that's `tan run`). Flashing real hardware is `tan flash`.
 
-`alp validate board.yaml` runs the diagnostic-rich validator standalone — try it on a fixture under `tests/fixtures/board_yaml_bad/` to see the format.  `alp doctor` triages the host environment (PASS/WARN/FAIL with fix hints) whenever a build machine misbehaves.  alp-sdk is plans-only — it emits `build-plan` / `system-manifest`; the whole build / flash / size / image / clean / renode surface lives in the standalone [`tan` CLI](https://github.com/alplabai/tan-cli).  alp-sdk's own remaining verb set — `emit` / `validate` / `doctor` / `monitor` / `new-som` / `model` and friends — is documented in [`docs/cli.md`](docs/cli.md).
+`tan validate board.yaml` runs the diagnostic-rich validator standalone — try it on a fixture under `tests/fixtures/board_yaml_bad/` to see the format.  `tan doctor` triages the host environment (PASS/WARN/FAIL with fix hints) whenever a build machine misbehaves.  alp-sdk is plans-only — it emits `build-plan` / `system-manifest`; the whole build / flash / size / image / clean / renode surface lives in the standalone [`tan` CLI](https://github.com/alplabai/tan-cli).  alp-sdk's own remaining verb set — `emit` / `validate` / `doctor` / `monitor` / `new-som` / `model` and friends — is documented in [`docs/cli.md`](docs/cli.md).
 
 ## Two consumer paths
 
@@ -363,7 +363,7 @@ verification (`⏳`/`🟡`/`✅` rows) lives in
   - **Renesas DRP-AI3** — RZ/V2N (V2N family); supports YOLO v5 / v8 detection on top of classification + segmentation models.
   - **DEEPX DX-M1** — V2N + DX-M1 (V2M family); ONNX → DXNN compiler, model-family agnostic; first-class support for YOLO v5 / v8 / NAS detection backbones.
   - **CPU** — reference-kernel fallback on any target
-- **Portable model pipeline (`.alpmodel`)** — `alp model build` compiles a source model for **every** NPU back-end the SoM declares into one **fat multi-backend `.alpmodel`** package (CBOR manifest + per-backend blobs + a capability `requires` envelope). At runtime **`alp_inference_open_alpmodel()`** loads the package and a selection engine picks the matching blob (silicon ref + SRAM-fit + `preferred_backend` tiebreak; `ALP_ERR_NO_FIT` if none fits), then dispatches through the backend registry below. One model, portable across NPUs without source changes.
+- **Portable model pipeline (`.alpmodel`)** — `tan model build` compiles a source model for **every** NPU back-end the SoM declares into one **fat multi-backend `.alpmodel`** package (CBOR manifest + per-backend blobs + a capability `requires` envelope). At runtime **`alp_inference_open_alpmodel()`** loads the package and a selection engine picks the matching blob (silicon ref + SRAM-fit + `preferred_backend` tiebreak; `ALP_ERR_NO_FIT` if none fits), then dispatches through the backend registry below. One model, portable across NPUs without source changes.
 - Offline training (off-device) lives in TensorFlow / PyTorch.
 
 ### Dev tooling
@@ -409,7 +409,7 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference bo
   ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────┐
   │ AI Models &   │ ─► │  Train (off-device):  TensorFlow · PyTorch  →  .tflite / .onnx         │
   │ Pipeline      │    │                                                                        │
-  │               │    │  Compile (host):  alp model build  →  one fat .alpmodel package        │
+  │               │    │  Compile (host):  tan model build  →  one fat .alpmodel package        │
   │               │    │     per-backend blobs:  Vela (Ethos-U) · DRP-AI · dxcom · CPU/TFLM     │
   │               │    │                                                                        │
   │               │    │  Model families:  classification · detection (YOLO v5/v8) ·            │
@@ -423,7 +423,7 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference bo
   │               │    │  --emit build-plan/system-manifest  →  tan (executor)                  │
   │               │    │  tan build / flash / image / size / renode / clean                     │
   │               │    │  validate_board_yaml.py · program_eeprom.py · VS Code extension        │
-  │               │    │  alp model build  →  .alpmodel   (the model-compile front-end)         │
+  │               │    │  tan model build  →  .alpmodel   (the model-compile front-end)         │
   └───────────────┘    └────────────────────────────────────────────────────────────────────────┘
           │
   ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────┐

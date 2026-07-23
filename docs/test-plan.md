@@ -93,7 +93,7 @@ A release does **not** tag until every row gating it is `verified`.
 | `<alp/inference.h>` DEEPX DX-M1 (A55) | `src/yocto/inference_yocto.c` + `inference_deepx.cpp` | 🟡 code-complete, bench-unverified | Real `dxrt::InferenceEngine` body loads a `.dxnn` model + runs inference; outputs match a host-CPU reference | Body header-compiles against the **real** `dx_rt` headers (`dxrt::InferenceEngine`, replacing a fictional `dxnn_*` API); `tests/yocto/inference_dispatcher.c` covers NULL/INVAL; **real link needs the RZ/V Yocto sysroot, on-silicon run needs the DX-M1 PCIe card** | v0.8 |
 | `<alp/inference.h>` DRP-AI (A55) | `src/yocto/inference_drpai.cpp` | 🟡 code-complete, bench-unverified | Real `MeraDrpRuntimeWrapper` body loads a `drpai_dir` model (tar staged to a tempdir) + runs inference | Body header-compiles against the **real** `MeraDrpRuntimeWrapper.h`; **cross-link needs the RZ/V Yocto SDK sysroot + EdgeCortix MERA libs, on-silicon run needs the V2N board** | v0.8 |
 | `<alp/audio.h>` real impl | `src/backends/audio/zephyr_drv.c` | ⏳ untested | PDM mic captures audio playable through I²S DAC, no buffer underruns | HIL | v0.3 |
-| `<alp/ble.h>` real impl | `src/backends/ble/zephyr_drv.c` + `src/backends/ble/cc3501e.c` | ⏳ untested | Advertise + connect + GATT read from a second BLE device; AEN provider opens and scans through CC3501E | HIL | v0.3 |
+| `<alp/ble.h>` real impl | `src/backends/ble/zephyr_drv.c` + `src/backends/ble/cc3501e.c` | 🟡 partial | GATT server register + characteristic read/write host-tested under native_sim (`tests/zephyr/ble_gatt_server`, incl. client-read callback regression coverage); advertise + connect + client GATT read from a second BLE device over the air still needs a real two-device bench proof | native_sim (server register/read/write + client-read callback); HIL still pending for OTA connect/read/scan and the CC3501E provider | v0.3 |
 | `<alp/security.h>` real impl | `src/backends/security/zephyr_drv.c` | ⏳ untested | SHA-256 + AES-128-GCM round-trip against MbedTLS reference vectors | unit test or HIL | v0.3 |
 | `<alp/mproc.h>` real impl | `src/backends/mproc/zephyr_drv.c` | ⏳ untested | M55-HP <-> M55-HE shared-memory mailbox echoes a payload | HIL | v0.3 |
 | `board.yaml` loader (`scripts/alp_project.py`) | `scripts/alp_project.py` | 🟡 partial | Schema-level + capability-level checks unit-tested; cross-OS round-trips not exercised on hardware | `tests/scripts/test_project_loader.py`; **HIL exercise gates v0.3** | v0.3 |
@@ -234,7 +234,7 @@ been green on `main` for at least two consecutive PRs.
 | VS Code extension build (split repo) | [`alplabai/alp-sdk-vscode` &mdash; ci workflow](https://github.com/alplabai/alp-sdk-vscode/actions/workflows/ci.yml) | ✅ verified |
 | `coverity.yml` weekly scan | `coverity.yml` | ✅ verified |
 | Portable-API conformance suite (13 classes × 8 cases, `alp_sdk.conformance.portable_api`) | `pr-twister.yml` (`tests/zephyr/conformance/`) | ✅ verified |
-| `alp` CLI verbs (`init` / `new-som` / `build` / `run` / `flash` / `emit` / `validate` / `doctor` / `monitor`) | click-runner pytest (`tests/scripts/test_alp_cli*.py`) via `pr-metadata-validate.yml` + `cross-platform-zephyr.yml` | ✅ verified |
+| `tan`'s Python backend (`alp_cli`) non-build verbs (`init` / `new-som` / `validate` / `model` / `doctor` / `run` / `monitor` / `explain` / `faultdecode` / `emit` / `generate`) | click-runner pytest (`tests/scripts/test_alp_cli*.py`) via `pr-metadata-validate.yml` + `cross-platform-zephyr.yml` | ✅ verified |
 
 ---
 

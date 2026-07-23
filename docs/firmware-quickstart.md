@@ -297,10 +297,9 @@ the loader, not chosen on the command line.  See
 The `tan` CLI covers the same flow in fewer keystrokes:
 `tan build && tan flash` programs every slice + helper MCU in
 `boot_order:` (see [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli)).
-`alp monitor --port <port>` opens the board's serial console
-afterwards (portless it lists the host's serial ports) -- `alp`
-never builds, so it's unaffected by which executor you used.  If a
-build machine misbehaves, `alp doctor` is the hardware-free
+`tan monitor --port <port>` opens the board's serial console
+afterwards (portless it lists the host's serial ports).  If a
+build machine misbehaves, `tan doctor` is the hardware-free
 environment triage.  Verb reference: [`docs/cli.md`](cli.md).
 
 ## 8. Where to look next
