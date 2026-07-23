@@ -129,6 +129,17 @@ from .buildplan import emit_build_plan  # noqa: E402,F401  (re-export: cli + tes
 
 
 # ---------------------------------------------------------------------
+# --emit kconfig -- the board-scoped Kconfig symbol menu for the LSP (#893)
+# ---------------------------------------------------------------------
+
+
+# The board-scoped Kconfig symbol-menu emitter lives in kconfig_symbols.py
+# (deliberately separate from kconfig.py, which is the alp.conf/local.conf
+# string-templater); re-exported for cli + tests.
+from .kconfig_symbols import emit_kconfig  # noqa: E402,F401  (re-export: cli + tests)
+
+
+# ---------------------------------------------------------------------
 # Slice-command resolution (planner-side; the executor was retired)
 # ---------------------------------------------------------------------
 # The slice-command / flash-recipe cluster lives in orchestrator.py.

@@ -107,6 +107,10 @@ EMIT_MODE_DESCRIPTIONS: dict[str, str] = {
     "build-plan":
         "Per-core build plan (board target, app dir, toolchain) the "
         "orchestrator fans out.",
+    "kconfig":
+        "Board-scoped, user-settable Kconfig symbol menu for a --core "
+        "slice (the vscode prj.conf LSP's live feed); needs a "
+        "bootstrapped Zephyr workspace (ZEPHYR_BASE).",
 }
 
 

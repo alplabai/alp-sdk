@@ -221,6 +221,7 @@ tan emit system-manifest               # the full-system manifest
 tan emit hw-info-h --output hw_info.h  # write instead of stdout
 tan emit zephyr-conf --core m55_he     # scope per-core modes to one core
 tan emit build-plan                    # the orchestrator's build plan (JSON)
+tan emit kconfig --core m55_he         # board-scoped Kconfig symbol menu (needs ZEPHYR_BASE)
 tan emit scaffold --template minimal --sku E1M-V2N101  # new-project files, no board.yaml needed
 ```
 
@@ -250,6 +251,7 @@ single implementation that owns it (never a fork):
 | `storage-mounts-c` | Static C storage mount table | orchestrator |
 | `tfm-sysbuild-conf` | TF-M sysbuild child-image overlay (`security.psa:`) | orchestrator |
 | `build-plan` | Per-slice build plan, JSON (IDE / CI / `tan` consumers) | orchestrator |
+| `kconfig` | Board-scoped, user-settable Kconfig symbol menu for one `--core <id>` (the vscode `prj.conf` LSP's live feed) | orchestrator (**workspace-dependent** -- see below) |
 
 | Option | Meaning |
 |---|---|
@@ -263,7 +265,59 @@ single implementation that owns it (never a fork):
 `west alp-emit` exposes the orchestrator subset of the same catalog
 (`system-manifest`, `ipc-contract-h`, `dts-reservations`,
 `dts-partitions`, `storage-mounts-c`, `tfm-sysbuild-conf`,
-`build-plan`) for west-centric scripting.
+`build-plan`, `kconfig`) for west-centric scripting.
+
+#### `--emit kconfig` -- the SDK's first workspace-dependent emit
+
+Every other `--emit` mode is hermetic (provable from `board.yaml` +
+this repo's own metadata alone, with no Zephyr toolchain on disk --
+see `scripts/check_emit_snapshots.py`, the byte-golden gate that pins
+all of them). `--emit kconfig` is deliberately the first exception:
+it needs a bootstrapped Zephyr workspace (`ZEPHYR_BASE`, the SDK's
+pinned v4.4.0) because only the real Kconfig solver knows which
+symbols are user-promptable for a given board -- the SDK doesn't (and
+won't) re-implement Kconfig's dependency/visibility engine itself.
+
+```bash
+python -m alp_orchestrate --input board.yaml --emit kconfig --core m55_he
+# also: tan emit kconfig --core m55_he / west alp-emit kconfig --core m55_he
+```
+
+Output shape:
+
+```json
+{
+  "schemaVersion": 1,
+  "board": "alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he",
+  "core": "m55_he",
+  "symbols": [
+    { "name": "LOG", "type": "bool", "prompt": "Logging",
+      "depends": "y", "default": "n", "help": "Enable logging." }
+  ]
+}
+```
+
+`name` is the bare symbol (the LSP prepends `CONFIG_`); `type` is one
+of `bool`/`tristate`/`int`/`hex`/`string`; `symbols` is sorted by
+`name` and scoped to symbols with a real Kconfig prompt (the ~few
+hundred a customer could actually put in `prj.conf`, not the full
+invisible ~26k-symbol tree). Without a bootstrapped `ZEPHYR_BASE` the
+mode fails loudly (exit 2) rather than emit a partial/empty menu.
+
+Because the mode needs a workspace, its regression coverage is split
+the same way: `tests/scripts/test_emit_kconfig.py` unit-tests the
+JSON-shaping hermetically (a fake symbol list, no Zephyr installed),
+and `scripts/check_emit_kconfig_contract.py` -- a schema/smoke check,
+not a byte-golden, since the exact symbol set moves with the pinned
+Zephyr version -- runs against a real AEN core in the
+Zephyr-bootstrapped `pr-twister` CI job (`.github/workflows/
+pr-twister.yml`), never in the hermetic snapshot gate.
+
+Unblocks tan-cli [#35](https://github.com/alplabai/tan-cli/issues/35)
+(`tan kconfig`, wrapping this emit in `Envelope<KconfigData>`) and a
+follow-up alp-sdk-vscode change to point the `prj.conf` LSP's symbol
+menu at this live feed instead of its hand-vendored snapshot -- both
+out of scope for this change.
 
 ### `tan validate` -- check a board.yaml
 

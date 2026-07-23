@@ -18,6 +18,10 @@
       "mode": "ipc-contract-h"
     },
     {
+      "description": "Board-scoped, user-settable Kconfig symbol menu for a --core slice (the vscode prj.conf LSP's live feed); needs a bootstrapped Zephyr workspace (ZEPHYR_BASE).",
+      "mode": "kconfig"
+    },
+    {
       "description": "C source registering the project's storage mount points.",
       "mode": "storage-mounts-c"
     },
@@ -904,6 +908,10 @@
     {
       "purpose": "E1M board-route <-> SoM capability-table end-to-end gate.",
       "script": "scripts/check_e1m_route_capability.py"
+    },
+    {
+      "purpose": "CI schema/smoke contract for `--emit kconfig` (#893).",
+      "script": "scripts/check_emit_kconfig_contract.py"
     },
     {
       "purpose": "Validate metadata/emit-registry-v1.json against the public IDE/tool contract (metadata/schemas/emit-registry-v1.schema.json) AND assert its mode set is exactly the real `--emit` surface the SDK exposes.",
