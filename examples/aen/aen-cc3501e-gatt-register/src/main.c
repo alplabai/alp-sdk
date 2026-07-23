@@ -60,6 +60,8 @@
 #include <stdbool.h>
 #include <stdio.h>
 
+#include <zephyr/kernel.h> /* k_uptime_get() -- step-6 fast-path timing */
+
 #include "alp/ble.h"
 #include "alp/chips/cc3501e.h"
 #include "alp/peripheral.h"
@@ -263,20 +265,22 @@ int main(void)
 	}
 	printf("[gatt-register] step 5 OK: advertising as \"%s\"\n", adv.name);
 
-	/* ---- Step 6: register AGAIN while advertising -> must be BUSY -------
-	 * NimBLE's ble_gatts_mutable() refuses to rebuild the attribute table
-	 * once the stack is advertising/scanning/connected.  On the wire this
-	 * shows up as the firmware's cc3501e_hw_ble_gatt_register() call
-	 * failing; chips/cc3501e/cc3501e_ble.c's cc3501e_ble_gatt_register()
-	 * remaps that specific, persistent failure to ALP_ERR_BUSY (see its
-	 * @note) so callers get "stop advertising, then retry" instead of a
-	 * bare IO/timeout.  NOTE: poll_by_repeat retries across the FULL
-	 * driver op-timeout budget before giving up and returning that mapped
-	 * BUSY, so this call takes several seconds (the poll budget) to
-	 * return -- it does not fail fast.  A fast-path EBUSY signal instead
-	 * of a full-budget retry is a known follow-up, not implemented here. */
+	/* ---- Step 6: a SECOND register -> must be BUSY, PROMPTLY ---------------
+	 * Step 3 already registered a service, and v1 firmware allows one dynamic
+	 * service per boot, so this second register is a DETERMINISTIC wrong-state
+	 * reject (the same class as registering while advertising, which NimBLE's
+	 * ble_gatts_mutable() guard also refuses).  The firmware returns the
+	 * distinct wire status ALP_CC3501E_RESP_ERR_STATE (0x09), which
+	 * chips/cc3501e/cc3501e_ble.c maps to a TERMINAL ALP_ERR_BUSY --
+	 * poll_by_repeat returns it immediately (one round trip) instead of
+	 * retrying across the full op-timeout budget.  So this must come back BUSY
+	 * *promptly*, not after several seconds.  We time it: a multi-second
+	 * return would mean the distinct-status fast-path did not engage (the old
+	 * -1-misclassified-as-IO budget-burn). */
 	alp_ble_attr_handle_t handles2[2] = { 0u, 0u };
+	int64_t               t0          = k_uptime_get();
 	s                                 = alp_ble_gatt_register_service(ble, &def, handles2);
+	int64_t elapsed_ms                = k_uptime_get() - t0;
 	if (s != ALP_ERR_BUSY) {
 		printf("RESULT FAIL: step 6 register-while-advertising -> %s (expected "
 		       "ALP_ERR_BUSY -- the ble_gatts_mutable() ordering guard didn't trip)\n",
@@ -284,8 +288,16 @@ int main(void)
 		alp_ble_close(ble);
 		return 0;
 	}
-	printf("[gatt-register] step 6 OK: register-while-advertising -> ALP_ERR_BUSY (ordering "
-	       "guard held)\n");
+	if (elapsed_ms > 2000) {
+		printf("RESULT FAIL: step 6 returned ALP_ERR_BUSY but took %lld ms -- the terminal "
+		       "RESP_ERR_STATE fast-path did not engage (budget-burn regression)\n",
+		       (long long)elapsed_ms);
+		alp_ble_close(ble);
+		return 0;
+	}
+	printf("[gatt-register] step 6 OK: register-while-advertising -> ALP_ERR_BUSY in %lld ms "
+	       "(prompt terminal reject, fast-path engaged)\n",
+	       (long long)elapsed_ms);
 
 	alp_ble_close(ble);
 	printf("RESULT PASS: register(handles=[0x%04x,0x%04x]) -> post-register PING alive -> "

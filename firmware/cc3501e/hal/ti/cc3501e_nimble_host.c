@@ -959,7 +959,12 @@ int cc3501e_nimble_gatt_register(const uint8_t *desc,
 		return -1;
 	}
 	if (s_dyn_svc_registered) {
-		return -1; /* v1: one dynamic service per boot -- see the block comment above */
+		/* v1: one dynamic service per boot (see the block comment above).  This
+		 * is a DETERMINISTIC, wrong-state reject -- return the distinct STATE
+		 * code so the host maps it to a terminal ALP_ERR_BUSY promptly, NOT the
+		 * bare -1 (== ERR_NOTIMPL, folded to ERR_IO) which the host retries to a
+		 * timeout.  Silicon-caught: bench #892 register-while-advertising. */
+		return CC3501E_HW_ERR_STATE;
 	}
 
 	/* Header: version(1) | service_uuid(16) | num_chars(1) -- shape already
