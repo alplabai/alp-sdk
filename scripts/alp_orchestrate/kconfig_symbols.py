@@ -115,15 +115,26 @@ def _project_symbols(
     hermetic unit test passes its own small fakes with no kconfiglib
     installed at all.
 
-    Only symbols with a prompt on their first `MenuNode` are kept --
-    `sym.nodes and sym.nodes[0].prompt` -- the scope is a user-settable
-    `prj.conf` menu, not the full invisible symbol tree (~26k symbols).
+    Only symbols with a prompt on ANY of their `MenuNode`s are kept --
+    a symbol can be declared in multiple locations (Zephyr's own
+    `scripts/kconfig/kconfig.py::promptless()` checks the same way, with
+    the same reasoning: "the symbol might be defined in multiple
+    locations, we need to check all locations"). This matters in
+    practice: many board/SoC `Kconfig.defconfig` fragments redeclare a
+    symbol with a promptless `default`-only override block, and
+    `Kconfig.zephyr` sources those BEFORE the canonical declaration
+    (`kernel/Kconfig`, `drivers/serial/Kconfig`, ...) -- so `nodes[0]`
+    alone silently dropped real, user-facing symbols like `LOG` /
+    `SERIAL` / `MAIN_STACK_SIZE` (caught by the CI contract, #893).
+    The scope is still a user-settable `prj.conf` menu, not the full
+    invisible symbol tree (~26k symbols) -- promptless-everywhere
+    symbols are still excluded.
     """
     projected: list[dict[str, Any]] = []
     for sym in syms:
-        if not (sym.nodes and sym.nodes[0].prompt):
+        node = next((n for n in sym.nodes if n.prompt), None)
+        if node is None:
             continue
-        node = sym.nodes[0]
         default = None
         if sym.orig_defaults:
             default_expr, _cond = sym.orig_defaults[0]

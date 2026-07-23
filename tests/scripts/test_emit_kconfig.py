@@ -150,6 +150,35 @@ def test_project_symbols_keeps_only_promptable_and_sorts() -> None:
     assert arena["help"] == ""
 
 
+def test_project_symbols_checks_every_node_not_just_the_first() -> None:
+    """Regression (#893): a real Zephyr symbol can be re-declared multiple
+    times -- e.g. a board/SoC Kconfig.defconfig fragment overrides just
+    the default, with no prompt, and Kconfig.zephyr sources those BEFORE
+    the canonical declaration -- so `nodes[0]` alone silently dropped
+    real symbols like LOG/SERIAL/MAIN_STACK_SIZE. Only a symbol with NO
+    prompt on ANY node stays excluded."""
+    syms = [
+        _FakeSym(
+            "SERIAL", _FAKE_BOOL,
+            nodes=[
+                _FakeNode(prompt=None, help=None),                    # defconfig override
+                _FakeNode(prompt=("Serial drivers", None), help="Enable serial."),
+            ],
+        ),
+        _FakeSym(
+            "STILL_HIDDEN", _FAKE_BOOL,
+            nodes=[_FakeNode(prompt=None, help=None), _FakeNode(prompt=None, help=None)],
+        ),
+    ]
+
+    projected = _project_symbols(syms, type_to_str=_FAKE_TYPE_TO_STR, expr_str=str)
+
+    names = [entry["name"] for entry in projected]
+    assert names == ["SERIAL"]
+    assert projected[0]["prompt"] == "Serial drivers"
+    assert projected[0]["help"] == "Enable serial."
+
+
 def test_envelope_shape() -> None:
     symbols = [{"name": "LOG", "type": "bool", "prompt": "Logging",
                 "depends": "", "default": "n", "help": ""}]
