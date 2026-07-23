@@ -169,6 +169,20 @@
       "ci": "pr-metadata-validate.yml:validate"
     },
     {
+      "id": "emit-kconfig-contract",
+      "description": "CI schema/smoke contract for --emit kconfig (#893); needs a bootstrapped Zephyr workspace (ZEPHYR_BASE), unlike every other hermetic gate in this registry.",
+      "runner": "check-script",
+      "script": "scripts/check_emit_kconfig_contract.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-twister.yml:twister-shard"
+    },
+    {
       "id": "emit-registry",
       "description": "Validate metadata/emit-registry-v1.json against the public IDE/tool contract and the real --emit surface.",
       "runner": "check-script",

@@ -910,6 +910,10 @@
       "script": "scripts/check_e1m_route_capability.py"
     },
     {
+      "purpose": "CI schema/smoke contract for `--emit kconfig` (#893).",
+      "script": "scripts/check_emit_kconfig_contract.py"
+    },
+    {
       "purpose": "Validate metadata/emit-registry-v1.json against the public IDE/tool contract (metadata/schemas/emit-registry-v1.schema.json) AND assert its mode set is exactly the real `--emit` surface the SDK exposes.",
       "script": "scripts/check_emit_registry.py"
     },
