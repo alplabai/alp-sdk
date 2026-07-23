@@ -174,7 +174,7 @@ static alp_status_t _program_wakealarm(uint32_t wake_after_ms)
 	alp_status_t rc = _sysfs_write(ALP_YOCTO_POWER_WAKEALARM_PATH, "0");
 	if (rc != ALP_OK) return rc;
 
-	time_t target = _now() + (time_t)((wake_after_ms + 999u) / 1000u);
+	time_t target = _now() + (time_t)(((uint64_t)wake_after_ms + 999u) / 1000u);
 	char   buf[32];
 	int    n = snprintf(buf, sizeof(buf), "%lld", (long long)target);
 	if (n < 0 || (size_t)n >= sizeof(buf)) return ALP_ERR_INVAL;
@@ -224,7 +224,9 @@ static alp_status_t y_request_sleep(alp_power_backend_state_t *state,
 	clock_gettime(CLOCK_MONOTONIC, &after);
 
 	if (info != NULL) {
-		info->realised_mode = mode;
+		/* On a failed state write no sleep happened -- report RUN, not the
+		 * requested mode (mirror the wake_source guard below). */
+		info->realised_mode = (rc == ALP_OK) ? mode : ALP_POWER_MODE_RUN;
 		info->wake_source =
 		    (rc == ALP_OK && wake_after_ms > 0u) ? (uint32_t)ALP_POWER_WAKE_RTC : 0u;
 		int64_t ms     = (int64_t)(after.tv_sec - before.tv_sec) * 1000 +
