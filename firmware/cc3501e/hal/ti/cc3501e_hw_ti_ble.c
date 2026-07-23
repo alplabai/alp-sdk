@@ -248,7 +248,12 @@ int cc3501e_hw_ble_disconnect(void)
  * + a re-run of ble_gatts_start -- see that function for the NimBLE lifecycle
  * rationale).  No HCI of its own, but ble_gatts_start's attribute-table build
  * runs synchronously here, so it stays worker-routed like the other GATT ops
- * (no bridge re-sync needed -- it doesn't touch the shared HIF). */
+ * (no bridge re-sync needed -- it doesn't touch the shared HIF).
+ *
+ * cc3501e_nimble_gatt_register() already maps NimBLE's BLE_HS_EBUSY (the
+ * ble_gatts_mutable() ordering guard) to the distinct CC3501E_HW_ERR_STATE --
+ * pass that through unchanged instead of folding it into the generic
+ * CC3501E_HW_ERR_IO every OTHER NimBLE failure gets. */
 int cc3501e_hw_ble_gatt_register(const uint8_t *desc,
                                  uint16_t       desc_len,
                                  uint16_t      *handles_out,
@@ -263,7 +268,10 @@ int cc3501e_hw_ble_gatt_register(const uint8_t *desc,
 	}
 	const int rc =
 	    cc3501e_nimble_gatt_register(desc, desc_len, handles_out, handles_cap, num_handles_out);
-	return (rc == 0) ? CC3501E_HW_OK : CC3501E_HW_ERR_IO;
+	if (rc == 0) {
+		return CC3501E_HW_OK;
+	}
+	return (rc == CC3501E_HW_ERR_STATE) ? CC3501E_HW_ERR_STATE : CC3501E_HW_ERR_IO;
 }
 
 /* BLE_GATT_NOTIFY: push a notification to the connected peer.  Blocks on HCI

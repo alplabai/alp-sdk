@@ -26,15 +26,17 @@
  *      cc3501e_ble_enable() -- a REAL wire round-trip (BLE_ENABLE, 0x30)
  *      that brings the CC35's Wi-Fi stack + NimBLE host up.
  *
- *   2. alp_ble_gatt_register_service() -- expect ALP_ERR_NOSUPPORT, not
- *      ALP_OK.  cc35_gatt_register_service() (backends/ble/cc3501e.c:
- *      145-155) is an intentional, documented stub: "The firmware takes an
- *      opaque packed GATT descriptor.  The portable runtime
- *      service-definition encoder is a later slice."  Getting NOSUPPORT
- *      back -- not a hang, not a silently-wrong handle -- IS the proof that
- *      the portable dispatch reaches the real CC3501E backend and that
- *      backend correctly reports its own current limit instead of
- *      pretending to succeed.
+ *   2. alp_ble_gatt_register_service() -- expect ALP_OK with both attribute
+ *      handles non-zero, not NOSUPPORT.  cc35_gatt_register_service()
+ *      (backends/ble/cc3501e.c:145-...) is no longer a stub as of #892: it
+ *      really encodes the service over the wire (BLE_GATT_REGISTER, 0x38)
+ *      and the CC35's NimBLE host really registers it, handing back a real
+ *      per-characteristic attribute handle.  Getting ALP_OK with non-zero
+ *      handles back -- not a hang, not a silently-wrong handle -- IS the
+ *      proof that the portable dispatch reaches the real CC3501E backend and
+ *      that backend actually registered the service (see
+ *      aen-cc3501e-gatt-register for the dedicated, deeper bench proof of
+ *      this path, including the register-while-advertising ordering guard).
  *
  *   3. alp_ble_advertise_start() -- expect ALP_OK.  This is the one call in
  *      this app that is a genuine over-the-bridge wire round-trip to
@@ -220,8 +222,8 @@ int main(void)
 
 	/*
 	 * Step 4 -- register a 2-characteristic GATT service via the portable
-	 * API.  Expect ALP_ERR_NOSUPPORT -- see the file header for why that
-	 * is the correct, current answer for this backend, not a bug.
+	 * API.  Expect ALP_OK with both handles non-zero -- see the file header
+	 * for why that is the correct, current answer for this backend (#892).
 	 */
 	static const uint8_t     char1_initial[4] = { 0x00, 0x00, 0x00, 0x00 };
 	const alp_ble_char_def_t chars[2]         = {
@@ -241,7 +243,14 @@ int main(void)
 	};
 	alp_ble_attr_handle_t handles[2] = { 0u, 0u };
 	alp_status_t          rc_reg     = alp_ble_gatt_register_service(ble, &svc, handles);
-	gatt_check("gatt_register_service", rc_reg, ALP_ERR_NOSUPPORT);
+	gatt_check("gatt_register_service", rc_reg, ALP_OK);
+	if (rc_reg == ALP_OK && (handles[0] == 0u || handles[1] == 0u)) {
+		printf("[gatt] %-24s -> handles=[0x%04x, 0x%04x] (expected both non-zero)\n",
+		       "gatt_register_service",
+		       handles[0],
+		       handles[1]);
+		g_fail_count++;
+	}
 
 	/*
 	 * Step 5 -- start advertising.  Expect ALP_OK: this is the genuine
@@ -270,9 +279,10 @@ int main(void)
 	 * Step 6 -- the "local" gatt read/write/notify exercise: no live
 	 * central peer means no alp_ble_conn_t, so these are called with a
 	 * NULL conn on purpose (see the file header for exactly which guard
-	 * each expected status proves).  handles[0]/[1] are never populated
-	 * by Step 4 (NOSUPPORT left them 0) -- irrelevant here, since every
-	 * one of these calls is rejected before the handle is ever used.
+	 * each expected status proves).  handles[0]/[1] ARE real, non-zero
+	 * handles from Step 4 now (#892) -- irrelevant here regardless, since
+	 * every one of these calls is rejected on the NULL conn before the
+	 * handle is ever used.
 	 */
 	uint8_t      read_buf[32] = { 0 };
 	size_t       read_len     = 0u;
@@ -296,8 +306,8 @@ int main(void)
 	alp_ble_close(ble);
 
 	if (g_fail_count == 0u) {
-		printf("RESULT PASS: bridge ready, ble_open ok, register_service NOSUPPORT "
-		       "(expected -- stub), advertise_start OK, gatt_read/write/notify all "
+		printf("RESULT PASS: bridge ready, ble_open ok, register_service OK "
+		       "(handles non-zero), advertise_start OK, gatt_read/write/notify all "
 		       "correctly rejected with no live peer\n");
 	} else {
 		printf("RESULT FAIL: %u gatt checkpoint(s) did not match the expected "

@@ -216,20 +216,13 @@ alp_status_t cc3501e_ble_gatt_register(cc3501e_t     *ctx,
 	if (s != ALP_OK) {
 		/* The firmware's cc3501e_nimble_gatt_register() re-runs ble_gatts_start()
 		 * (via ble_gatts_reset()); NimBLE's ble_gatts_mutable() guard refuses that
-		 * while advertising/scanning/connected and returns BLE_HS_EBUSY, but
-		 * cc3501e_hw_ble_gatt_register() collapses every NimBLE error to
-		 * CC3501E_HW_ERR_IO, and the worker's generic WORKER_ERR fallback
-		 * (protocol.c handle_worker_routed_payload_reply) then collapses THAT to
-		 * ALP_CC3501E_RESP_ERR_RADIO -- so on the wire this specific, common,
-		 * non-transient failure is indistinguishable from a real radio/protocol
-		 * fault.  poll_by_repeat additionally retries an IO-mapped reply as if it
-		 * were transient bridge desync, so a persistent EBUSY guard trip surfaces
-		 * as ALP_ERR_TIMEOUT once the caller's budget elapses, not ALP_ERR_IO.
-		 * Remap both to ALP_ERR_BUSY here (GATT_REGISTER-specific -- resp_to_status
-		 * stays untouched for every other op) so a caller sees "stop advertising /
-		 * disconnect, then retry" instead of a bare IO/timeout that hides the
-		 * actual ordering constraint (see cc3501e_ble_gatt_register's @note). */
-		if (s == ALP_ERR_IO || s == ALP_ERR_TIMEOUT) return ALP_ERR_BUSY;
+		 * while advertising/scanning/connected (BLE_HS_EBUSY) and the firmware
+		 * surfaces that as the distinct ALP_CC3501E_RESP_ERR_STATE (#480/#892),
+		 * which resp_to_status()/poll_by_repeat() already map straight to
+		 * ALP_ERR_BUSY -- terminally, no retry (see poll_by_repeat's @note in
+		 * cc3501e_internal.h) -- so no remap is needed here.  A genuine
+		 * transport/radio fault still surfaces as its real ALP_ERR_IO /
+		 * ALP_ERR_TIMEOUT, unmasked. */
 		return s;
 	}
 

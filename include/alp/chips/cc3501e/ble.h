@@ -220,7 +220,10 @@ alp_status_t cc3501e_ble_disconnect(cc3501e_t *ctx, uint32_t timeout_ms);
  * @return ALP_OK once registered; ALP_ERR_INVAL on a NULL/empty/oversized
  *         descriptor; ALP_ERR_BUSY if the firmware's NimBLE lifecycle guard
  *         refused the register (advertising/scanning/connected -- see the
- *         @note above); otherwise the mapped error.
+ *         @note above) -- returned promptly, NOT after exhausting @p
+ *         timeout_ms (the guard's answer is deterministic, so it is not
+ *         retried); a real transport fault still surfaces as its own
+ *         ALP_ERR_IO / ALP_ERR_TIMEOUT; otherwise the mapped error.
  */
 alp_status_t cc3501e_ble_gatt_register(cc3501e_t     *ctx,
                                        const uint8_t *descriptor,

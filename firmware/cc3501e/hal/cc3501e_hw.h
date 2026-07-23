@@ -31,7 +31,13 @@
 #define CC3501E_HW_ERR_NOTIMPL -1 /* op not wired on this backend (stub)   */
 #define CC3501E_HW_ERR_IO      -2 /* peripheral / radio access failed       */
 #define CC3501E_HW_ERR_INVAL   -3 /* bad argument                           */
-#define CC3501E_HW_BUSY        1  /* op accepted, runs off-ISR; caller must re-poll */
+/* Op rejected because of the subsystem's CURRENT state (e.g. NimBLE's
+ * ble_gatts_mutable() ordering guard on a GATT_REGISTER attempted while
+ * advertising/scanning/connected -- BLE_HS_EBUSY, host/ble_hs.h).  Distinct
+ * from CC3501E_HW_ERR_IO: this is a deterministic, terminal reject, not a
+ * transport/radio glitch worth retrying. */
+#define CC3501E_HW_ERR_STATE -4
+#define CC3501E_HW_BUSY      1 /* op accepted, runs off-ISR; caller must re-poll */
 
 /* --------------------------------------------------------------- */
 /* Lifecycle                                                         */

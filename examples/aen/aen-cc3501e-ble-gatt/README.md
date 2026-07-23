@@ -7,11 +7,12 @@ portable [`<alp/ble.h>`](../../../include/alp/ble.h) surface, on the
 **Server-only — no live central peer on this bench.** There is no second
 BLE device in range, so the app never calls `alp_ble_connect()`. See
 `src/main.c`'s top-of-file comment for the exact PASS contract this shapes:
-`alp_ble_open()` and `alp_ble_advertise_start()` are genuine over-the-bridge
-wire round-trips to the CC3501E's own NimBLE host; `alp_ble_gatt_register_service()`
-is expected to return `ALP_ERR_NOSUPPORT` (the portable per-characteristic
-GATT encoder for this backend is a later slice —
-[`src/backends/ble/cc3501e.c`](../../../src/backends/ble/cc3501e.c)); and
+`alp_ble_open()`, `alp_ble_advertise_start()`, and `alp_ble_gatt_register_service()`
+are genuine over-the-bridge wire round-trips to the CC3501E's own NimBLE host;
+`alp_ble_gatt_register_service()` now returns `ALP_OK` with a non-zero attribute
+handle per characteristic (the CC3501E GATT encoder landed in #892 —
+[`src/backends/ble/cc3501e.c`](../../../src/backends/ble/cc3501e.c); see
+[`aen-cc3501e-gatt-register`](../aen-cc3501e-gatt-register) for the deeper proof); and
 `gatt_read`/`gatt_write`/`gatt_notify` are exercised with a `NULL` connection
 handle to prove the dispatch layer's connection guard rejects them with the
 documented status instead of a crash or a hang. A full read/write echo
