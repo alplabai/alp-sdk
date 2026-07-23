@@ -18,6 +18,10 @@
       "mode": "ipc-contract-h"
     },
     {
+      "description": "Board-scoped, user-settable Kconfig symbol menu for a --core slice (the vscode prj.conf LSP's live feed); needs a bootstrapped Zephyr workspace (ZEPHYR_BASE).",
+      "mode": "kconfig"
+    },
+    {
       "description": "C source registering the project's storage mount points.",
       "mode": "storage-mounts-c"
     },
