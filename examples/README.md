@@ -236,6 +236,7 @@ their filename (some of those internal dirs don't follow a
 |---------------------------------|--------------------------------------------------------------------------|
 | `aen/edgeai-vision-aen`         | EdgeAI vision pipeline -- CSI camera -> VeriSilicon ISP Pico (vsi,isp-pico) -> Ethos-U55 -> OLED. **v0.1 skeleton: camera + Ethos-U inference are stubbed today** (see its README's Status table). |
 | `aen/aen-analog-validate`       | DAC0 -> ADC loopback on-silicon analog validation via `<alp/dac.h>` + `<alp/adc.h>`, driven through the bench RAM-run + RAM-console flow. |
+| `aen/aen-cc3501e-ble-gatt`      | Bench proof of the CC3501E BLE GATT-SERVER path (#480) through the portable `<alp/ble.h>` surface: register/advertise/gatt read-write-notify, server-only with no live central peer. |
 | `aen/aen-cc3501e-bringup`       | Host (M55-HE) bring-up of the on-module TI CC3501E Wi-Fi 6 + BLE 5.4 coprocessor -- power, reset, `PING`/`GET_VERSION`/`GET_DIAG_INFO`. |
 | `aen/aen-cc3501e-companion-tour` | Capstone full-surface tour of the CC3501E coprocessor: the portable wireless checkpoint plus every companion surface `aen-cc3501e-bringup` doesn't exercise. |
 | `aen/aen-cc3501e-gpio`          | CC3501E GPIO proxy + camera-enable demo over the inter-chip SPI bridge. |

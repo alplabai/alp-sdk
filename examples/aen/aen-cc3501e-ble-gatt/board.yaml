@@ -1,0 +1,51 @@
+# board.yaml -- per-app project configuration for aen-cc3501e-ble-gatt.
+#
+# Bench proof of the #480 CC3501E BLE GATT-SERVER path through the
+# portable <alp/ble.h> surface on the E1M-AEN801 (Alif Ensemble E8, M55-HE):
+# register a service, advertise, then exercise gatt read/write/notify with
+# NO live central peer -- see src/main.c for the exact PASS contract.
+#
+# The inter-chip wiring (SPI1 on P14_6/5/4, WIFI_EN P15_5, E_WIFI.NRST
+# P15_1_FLEX -- metadata/e1m_modules/aen/inter-chip.tsv) lives in the
+# per-board overlay under boards/, same as aen-cc3501e-companion-tour.
+
+som:
+  sku: E1M-AEN801
+
+preset: e1m-evk
+
+cores:
+  a32_cluster:
+    os: "off"
+  m55_he:
+    app: ./src
+    # Portable peripheral subsystems this app opens directly: `spi` for the
+    # inter-chip bridge bus, `gpio` for the WIFI_EN/nRESET/READY control
+    # pins (all via cc3501e_bridge_bringup(), see src/cc3501e_bridge.c).
+    peripherals:
+      - spi
+      - gpio
+    # `iot.ble: true` is what actually turns the CC3501E BLE backend ON:
+    # the orchestrator resolves E1M-AEN801's on_module.wifi_ble: cc3501e
+    # (metadata/e1m_modules/E1M-AEN801.yaml) and emits
+    # CONFIG_ALP_SDK_BLE_CC3501E=y, which is what compiles in
+    # src/backends/ble/cc3501e.c and makes cc3501e_bridge_bringup()'s
+    # alp_ble_cc3501e_attach() call do something.  Without this knob
+    # alp_ble_open() would find no "ble" backend at all and fail --
+    # unlike aen-cc3501e-companion-tour (whose portable BLE checkpoint is
+    # a side demo), THIS example's whole point is the portable BLE path,
+    # so it must be wired on.
+    iot:
+      ble: true
+
+chips:
+  - cc3501e               # on-module Wi-Fi 6 + BLE 5.4 coprocessor (host driver).
+
+diagnostics:
+  log_level: info
+  # UART5 is not captured on THIS bench (only the SE-UART FT232R is on USB,
+  # SETOOLS-only) -- force the RAM console so `RESULT PASS:`/`RESULT FAIL:`
+  # is readable by a J-Link `ram_console_buf` read
+  # (flashing-and-bench-debugging-aen: "Console: UART is the default, RAM
+  # console is the bench observable").
+  console: ram
