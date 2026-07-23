@@ -87,6 +87,35 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   intentional emitter content change no longer needs a bespoke seam-1
   strip.
 
+### Fixed — callback self-close deadlocks in MQTT, CAN, GPIO, CC3501E BLE
+
+- `#756` — a message/scan/IRQ callback that closed its own handle hung
+  forever: the callback ran inside a counted operation (MQTT loop, BLE
+  scan) or under the backend mutex (Yocto CAN RX worker, Yocto direct GPIO
+  IRQ worker) that `close` then waited on. Fixed with one shared pattern —
+  a reentrant-defer primitive (`alp_slot_claim` + a portable current-thread
+  token) for same-thread reentrancy, a shutdown/destroy split (drain before
+  shutdown) for CAN's worker-thread self-close, and a lock-scope fix for
+  GPIO's shared dispatcher; callbacks now run outside locks/counts and
+  teardown defers to the thread that owns lifetime. Self-close is safe, and
+  close remains safe from another thread. Public callback-context / re-entry
+  guarantees are now explicit in `iot.h`, `ble.h`, `can.h`, `peripheral.h`.
+  New self-close + cross-thread + first-`add_filter`-race tests; Yocto paths
+  covered under ThreadSanitizer/ASan.
+
+### Fixed — CC3501E link-speed stated consistently; readiness doc matches reality
+
+- `#804` — the CC3501E SPI link speed was stated inconsistently across the
+  tree and the cited "14.8 MHz (400 MHz AHB / 27)" derivation was not
+  reachable (the SSI functional clock is 200 MHz; the divider truncates to
+  ~14.3 MHz). Corrected all four `cc3501e_bridge.h` copies + their board
+  overlays, deleted a dead `CC3501E_SPI_FREQ_HZ` macro that taught the wrong
+  value, and set `metadata/chips/cc3501e.yaml` `max_clock_hz` to the CC35
+  slave hardware ceiling (15 MHz) so the metadata single source of truth
+  agrees with the docs.
+- `#448` — `iot-connected-camera` was marked a completed v1.0 flagship but is
+  a v0.1 skeleton; the readiness-doc row now reflects that.
+
 ### Fixed — build-plan `executionPolicy` reverted from required to optional
 
 - `#847` added `executionPolicy` to the build-plan schema's top-level

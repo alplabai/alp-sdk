@@ -52,13 +52,52 @@ static void _sleep_tick(void)
 #endif
 }
 
+void alp_handle_drain_blocking(uint32_t *active_ops)
+{
+	while (__atomic_load_n(active_ops, __ATOMIC_ACQUIRE) != 0u) {
+		_sleep_tick();
+	}
+}
+
 bool alp_handle_begin_close_blocking(uint8_t *lifecycle, uint32_t *active_ops)
 {
 	if (!alp_lifecycle_cas(lifecycle, ALP_HANDLE_LC_OPEN, ALP_HANDLE_LC_CLOSING)) {
 		return false;
 	}
-	while (__atomic_load_n(active_ops, __ATOMIC_ACQUIRE) != 0u) {
-		_sleep_tick();
+	alp_handle_drain_blocking(active_ops);
+	return true;
+}
+
+/* See alp_slot_claim.h's "Reentrant self-close guard (issue #756)"
+ * block comment for the full contract these two functions implement. */
+
+bool alp_handle_begin_close_selfaware(uint8_t                 *lifecycle,
+                                      uint32_t                *active_ops,
+                                      const bool              *cb_active,
+                                      const uintptr_t         *cb_thread,
+                                      alp_handle_close_mode_t *mode,
+                                      bool                    *close_pending)
+{
+	if (!alp_lifecycle_cas(lifecycle, ALP_HANDLE_LC_OPEN, ALP_HANDLE_LC_CLOSING)) {
+		return false;
 	}
+
+	/* Acquire pairs with alp_handle_cb_enter()'s release store: seeing
+	 * cb_active==true here guarantees *cb_thread is the value that
+	 * same store published, not a torn/stale read. */
+	if (__atomic_load_n(cb_active, __ATOMIC_ACQUIRE) && *cb_thread == alp_thread_token_self()) {
+		/* Self-close: this thread is currently inside the callback-
+		 * invoking op that led here.  Draining active_ops now would
+		 * deadlock -- this thread's own count cannot reach zero until
+		 * IT returns from that op.  Defer: the op's own wrapper
+		 * finishes the close (see alp_handle_take_deferred_close()'s
+		 * doc comment in alp_slot_claim.h) once it leaves. */
+		__atomic_store_n(close_pending, true, __ATOMIC_RELEASE);
+		*mode = ALP_HANDLE_CLOSE_DEFERRED;
+		return true;
+	}
+
+	*mode = ALP_HANDLE_CLOSE_NOW;
+	alp_handle_drain_blocking(active_ops);
 	return true;
 }

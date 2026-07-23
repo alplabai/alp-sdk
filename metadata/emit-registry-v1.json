@@ -421,6 +421,28 @@
         "path": null,
         "consumer_hint": "alp CLI / alp-sdk-vscode -- machine-readable build plan (Wave C consumer contract)"
       }
+    },
+    {
+      "mode": "kconfig",
+      "owner": {
+        "cli": "alp_orchestrate",
+        "module": "scripts/alp_orchestrate/kconfig_symbols.py",
+        "function": "emit_kconfig"
+      },
+      "scope": "core",
+      "options": {
+        "input": "optional",
+        "output": "stdout-only",
+        "core": "required",
+        "build_root": false
+      },
+      "compatible": { "os": ["zephyr"] },
+      "output": {
+        "media": "json",
+        "schema_id": null,
+        "path": null,
+        "consumer_hint": "vscode prj.conf LSP -- board-scoped, user-settable Kconfig symbol menu (#893); the SDK's first workspace-dependent emit (requires a bootstrapped ZEPHYR_BASE), verified by scripts/check_emit_kconfig_contract.py in the pr-twister CI job rather than the hermetic snapshot gate"
+      }
     }
   ]
 }

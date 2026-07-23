@@ -86,6 +86,12 @@ alp_ble_t *alp_ble_open(void);
 /**
  * @brief Release the host (last close shuts the controller down).  NULL safe.
  *
+ * Idempotent: a second close on an already-closed handle is a safe
+ * no-op.  Safe to call from @p ble's own @ref alp_ble_scan_cb_t (a
+ * self-close -- see that typedef's doc comment, issue #756) and safe
+ * to call concurrently from a different thread than the one that
+ * called @ref alp_ble_scan_start.
+ *
  * @param[in] ble  Handle from @ref alp_ble_open, or NULL.
  */
 void alp_ble_close(alp_ble_t *ble);
@@ -96,7 +102,11 @@ void alp_ble_close(alp_ble_t *ble);
 
 /** Advertising configuration. */
 typedef struct {
-	const char           *name;     /**< Local name in adv data (≤ 29 chars). */
+	/** Local name in adv data.  @c name plus service UUIDs must fit the
+	 *  31-byte legacy adv PDU (Flags 3 + 2+strlen(name) +
+	 *  2+16*num_services); so <= 26 chars alone, <= 8 chars with one
+	 *  128-bit service UUID. */
+	const char           *name;
 	const alp_ble_uuid_t *services; /**< Array of advertised service UUIDs. */
 	size_t                num_services;
 	uint16_t              interval_min_ms;
@@ -175,12 +185,20 @@ typedef struct {
  * On success populates @p handles_out with one attribute handle per
  * characteristic in declaration order.
  *
+ * @note Service registration must precede advertising.  On backends whose
+ *       host stack only supports adding services to a not-yet-started GATT
+ *       server (e.g. NimBLE's @c ble_gatts_start() / @c ble_gatts_mutable()
+ *       constraint on the CC3501E backend), registering while already
+ *       advertising, scanning, or connected is refused with
+ *       @ref ALP_ERR_BUSY -- call this before @ref alp_ble_advertise_start.
+ *
  * @param[in]  ble          Host handle from @ref alp_ble_open.
  * @param[in]  def          Service + characteristics.  Must be non-NULL.
  * @param[out] handles_out  Receives the attribute handles for each
  *                          characteristic.  Caller-allocated array of
  *                          @c def->num_chars elements.
- * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_NOMEM.
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_NOMEM /
+ *         ALP_ERR_BUSY (registration ordering constraint -- see @note).
  */
 alp_status_t alp_ble_gatt_register_service(alp_ble_t                   *ble,
                                            const alp_ble_service_def_t *def,
@@ -218,7 +236,21 @@ typedef struct {
 	size_t         adv_len;
 } alp_ble_scan_result_t;
 
-/** Scan-result callback.  Runs on the BLE host thread. */
+/**
+ * @brief Scan-result callback.
+ *
+ * @par Callback context (issue #756)
+ * Invoked SYNCHRONOUSLY, on the calling thread, once per scan result,
+ * from inside @ref alp_ble_scan_start -- that call has not yet
+ * returned while this callback runs.  It is SAFE to call
+ * @ref alp_ble_close on @p ble's radio handle from within this
+ * callback (a "self-close"): the close is detected and its actual
+ * teardown deferred until the @ref alp_ble_scan_start call returns, so
+ * it neither deadlocks nor leaves the radio handle usable afterwards.
+ * It is likewise safe to call @ref alp_ble_close from a DIFFERENT
+ * thread while this callback is running (an ordinary close blocks
+ * until scan_start -- and this callback -- have returned).
+ */
 typedef void (*alp_ble_scan_cb_t)(const alp_ble_scan_result_t *r, void *user);
 
 /**
@@ -226,7 +258,9 @@ typedef void (*alp_ble_scan_cb_t)(const alp_ble_scan_result_t *r, void *user);
  *
  * @param[in] ble     Host handle.
  * @param[in] active  true → send SCAN_REQ; false → passive scan only.
- * @param[in] cb      Per-packet callback.  Must not be NULL.
+ * @param[in] cb      Per-packet callback.  Must not be NULL.  See
+ *                    @ref alp_ble_scan_cb_t for its calling context and
+ *                    re-entry (self-close) guarantees.
  * @param[in] user    Opaque pointer forwarded to @p cb.
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_BUSY.
  */

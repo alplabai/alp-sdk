@@ -59,7 +59,13 @@ ORCHESTRATOR_EMIT_MODES = [
     "storage-mounts-c",
     "tfm-sysbuild-conf",
     "build-plan",
+    "kconfig",
 ]
+
+# The one orchestrator-only mode that IS --core-scoped (every other
+# orchestrator mode iterates every core -- see `_emit_via_orchestrator`'s
+# --core-ignored warning, which stays correct for all of them but kconfig).
+_ORCHESTRATOR_CORE_SCOPED_MODES = frozenset({"kconfig"})
 
 # The full front-door mode set: alp_project.py's list plus every
 # orchestrator-only mode.  Overlapping modes (system-manifest,
@@ -180,12 +186,14 @@ def _emit_via_orchestrator(root: Path, mode: str, input_path: Path,
                            build_root: Path | None) -> int:
     """Orchestrator-only modes: `python -m alp_orchestrate --emit <mode>`
     -- the exact invocation `west alp-emit` performs."""
-    if core:
+    if core and mode not in _ORCHESTRATOR_CORE_SCOPED_MODES:
         # Matches alp_project.py's behaviour for project-level emits.
         click.echo(f"alp emit: --core is ignored for {mode} "
                    f"(project-level emit)", err=True)
     cmd = [python_exe(), "-m", "alp_orchestrate",
            "--input", str(input_path), "--emit", mode]
+    if core and mode in _ORCHESTRATOR_CORE_SCOPED_MODES:
+        cmd += ["--core", core]
     if build_root:
         cmd += ["--build-root", str(build_root)]
 

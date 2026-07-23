@@ -31,6 +31,13 @@
  *     a clean boundary right after the op, so a retry lands cleanly -- treat IO
  *     as transient here and keep polling for the whole budget.
  *
+ * EXCEPTION: ALP_CC3501E_RESP_ERR_STATE (a deterministic firmware reject, e.g.
+ * BLE_GATT_REGISTER's NimBLE ble_gatts_mutable() ordering guard) also maps to
+ * ALP_ERR_BUSY, but is NOT retried -- it will not resolve without the caller
+ * changing state (stop advertising / disconnect), so retrying it would just
+ * burn the whole budget on the same answer.  See the ctx->rx_scratch[0] peek
+ * in the implementation.
+ *
  * Returns the final cc3501e_request status; ALP_ERR_TIMEOUT if it never
  * resolved within the budget.  The caller's budget must therefore cover the
  * longest down-window (Wlan_Start/op, seconds) -- see cc3501e_wifi_get_mac.

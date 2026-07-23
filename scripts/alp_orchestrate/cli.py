@@ -18,6 +18,7 @@ from . import (
     emit_dts_partitions,
     emit_dts_reservations,
     emit_ipc_contract_h,
+    emit_kconfig,
     emit_storage_mounts_c,
     emit_system_manifest,
     emit_tfm_sysbuild_conf,
@@ -35,11 +36,16 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     parser.add_argument("--build-root", type=Path,
                         default=Path("build"),
                         help="Build root directory (used by --emit build-plan).")
+    parser.add_argument("--core", default=None,
+                        help="Core id to scope a per-core emit mode to "
+                             "(required by --emit kconfig; every other "
+                             "mode ignores it).")
     parser.add_argument("--emit", default=None,
                         choices=["system-manifest", "ipc-contract-h",
                                  "dts-reservations", "dts-partitions",
                                  "storage-mounts-c",
-                                 "tfm-sysbuild-conf", "build-plan"],
+                                 "tfm-sysbuild-conf", "build-plan",
+                                 "kconfig"],
                         help="Skip the build; just emit one of the "
                              "generated artefacts to stdout.")
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -68,6 +74,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                 sys.stdout.write(emit_build_plan(
                     project, board_yaml=args.input,
                     build_root=args.build_root))
+            elif args.emit == "kconfig":
+                sys.stdout.write(emit_kconfig(project, args.core))
         except OrchestratorError as e:
             print(f"alp-orchestrate: {e}", file=sys.stderr)
             return 1

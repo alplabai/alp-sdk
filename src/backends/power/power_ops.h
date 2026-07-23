@@ -5,14 +5,14 @@
  * implementations.  NOT a public header -- customer code never
  * sees this struct.  Layout may change between SDK versions.
  *
- * Slice 7 ships only the zephyr_stub backend; request_sleep returns
- * ALP_ERR_NOT_IMPLEMENTED while open / configure_wake_source succeed
- * silently so the legacy "handle is always returned, sleep is the
- * gate" contract from src/zephyr/power_zephyr.c is preserved.  Real
- * Alif/V2N power backends land per the tracking issue on the stub
- * source file.  No vendor extensions exist for power, so the
- * first-member-aliasing pattern the ADC vtable uses is not required
- * here.
+ * Backends registered against this vtable: zephyr_stub.c (wildcard
+ * priority-0 fallback), zephyr_pm_policy.c (Zephyr pm_policy_*,
+ * priority 100), alif_se_profile.c ("power_profile" class only), the
+ * V2N GD32 supervisor backend (src/backends/ext/renesas/power.c), and
+ * yocto_drv.c (real Linux /sys/power/state + RTC wakealarm backend,
+ * priority 100, #613).  No vendor extensions exist for the sleep-mode
+ * class beyond the V2N one above, so the first-member-aliasing pattern
+ * the ADC vtable uses is not required here.
  */
 
 #ifndef ALP_BACKENDS_POWER_OPS_H

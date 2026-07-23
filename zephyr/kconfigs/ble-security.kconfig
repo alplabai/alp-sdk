@@ -10,6 +10,8 @@ config ALP_SDK_BLE
 	bool "Real Bluetooth host stack via Zephyr bt"
 	default y if BT
 	depends on BT
+	select BT_GATT_DYNAMIC_DB
+	select BT_GATT_CLIENT
 	help
 	  Gates the real Zephyr bt-host body inside
 	  src/backends/ble/zephyr_drv.c.  When OFF, the registry
@@ -24,6 +26,13 @@ config ALP_SDK_BLE
 
 	  Requires CONFIG_BT=y plus CONFIG_BT_PERIPHERAL=y and/or
 	  CONFIG_BT_CENTRAL=y for the matching role.
+
+	  Selects BT_GATT_DYNAMIC_DB (issue #480: runtime
+	  bt_gatt_service_register()/unregister() in z_gatt_register_service()
+	  need it -- both are compiled out of upstream's gatt.c without it)
+	  and BT_GATT_CLIENT (the conn-side alp_ble_gatt_read()/
+	  alp_ble_gatt_write() ops call bt_gatt_read()/bt_gatt_write(), the
+	  GATT client procedures, which are compiled out without it).
 
 config ALP_SDK_BLE_CC3501E
 	bool "CC3501E BLE backend for <alp/ble.h>"

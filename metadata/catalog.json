@@ -18,6 +18,10 @@
       "mode": "ipc-contract-h"
     },
     {
+      "description": "Board-scoped, user-settable Kconfig symbol menu for a --core slice (the vscode prj.conf LSP's live feed); needs a bootstrapped Zephyr workspace (ZEPHYR_BASE).",
+      "mode": "kconfig"
+    },
+    {
       "description": "C source registering the project's storage mount points.",
       "mode": "storage-mounts-c"
     },
@@ -41,6 +45,13 @@
       },
       {
         "board": "e1m-evk",
+        "name": "aen-cc3501e-ble-gatt",
+        "path": "examples/aen/aen-cc3501e-ble-gatt",
+        "som": "E1M-AEN801",
+        "summary": "Bench proof of the **#480 CC3501E BLE GATT-SERVER path** through the portable [`<alp/ble.h>`](../../../include/alp/ble.h) surface, on the **E1M-AEN801** (Alif Ensemble E8) SoM's M55-HE core."
+      },
+      {
+        "board": "e1m-evk",
         "name": "aen-cc3501e-bringup",
         "path": "examples/aen/aen-cc3501e-bringup",
         "som": "E1M-AEN801",
@@ -52,6 +63,13 @@
         "path": "examples/aen/aen-cc3501e-companion-tour",
         "som": "E1M-AEN801",
         "summary": "The **capstone** full-surface example for the on-module **TI CC3501E** Wi-Fi 6 + BLE 5.4 coprocessor, driven from the Alif **M55-HE** core on the **E1M-AEN801** (Alif Ensemble E8) SoM."
+      },
+      {
+        "board": "e1m-evk",
+        "name": "aen-cc3501e-gatt-register",
+        "path": "examples/aen/aen-cc3501e-gatt-register",
+        "som": "E1M-AEN801",
+        "summary": "Bench check for the **NEW CC3501E dynamic GATT registration** path (#480/#892) on the Alif **M55-HE** (**E1M-AEN801**, Alif Ensemble E8) SoM. `alp_ble_gatt_register_service()` (`<alp/ble.h>`) used to be a stub; on this branch it really registers a service on the CC3501E's NimBLE host over the inter-chip bridge and fills in a real attribute handle per characteristic."
       },
       {
         "board": "e1m-evk",
@@ -890,6 +908,10 @@
     {
       "purpose": "E1M board-route <-> SoM capability-table end-to-end gate.",
       "script": "scripts/check_e1m_route_capability.py"
+    },
+    {
+      "purpose": "CI schema/smoke contract for `--emit kconfig` (#893).",
+      "script": "scripts/check_emit_kconfig_contract.py"
     },
     {
       "purpose": "Validate metadata/emit-registry-v1.json against the public IDE/tool contract (metadata/schemas/emit-registry-v1.schema.json) AND assert its mode set is exactly the real `--emit` surface the SDK exposes.",

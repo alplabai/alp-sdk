@@ -186,15 +186,58 @@ alp_status_t cc3501e_ble_disconnect(cc3501e_t *ctx, uint32_t timeout_ms)
 alp_status_t cc3501e_ble_gatt_register(cc3501e_t     *ctx,
                                        const uint8_t *descriptor,
                                        size_t         len,
+                                       uint16_t      *handles_out,
+                                       size_t         handles_cap,
+                                       size_t        *num_handles_out,
                                        uint32_t       timeout_ms)
 {
+	if (num_handles_out != NULL) *num_handles_out = 0u;
 	if (descriptor == NULL || len == 0u || len > ALP_CC3501E_MAX_PAYLOAD) return ALP_ERR_INVAL;
+	if (handles_out == NULL && handles_cap > 0u) return ALP_ERR_INVAL;
+
 	/* BLE_GATT_REGISTER (0x38): the firmware handle_ble_gatt_register takes the
-	 * payload as an OPAQUE attribute-table descriptor (>= 1 byte) -- there is no
-	 * header struct and no fixed UUID/handle layout on the host side; the host
-	 * ships the descriptor bytes verbatim and the firmware parses them. */
-	return poll_by_repeat(
-	    ctx, ALP_CC3501E_CMD_BLE_GATT_REGISTER, descriptor, len, NULL, 0, NULL, timeout_ms);
+	 * request payload as an OPAQUE attribute-table descriptor (>= 1 byte) -- there
+	 * is no header struct and no fixed UUID/handle layout on the host side; the
+	 * host ships the descriptor bytes verbatim and the firmware parses them.
+	 *
+	 * Reply DATA (after the frame-level status resp_to_status() already consumed)
+	 * is the in-payload header + handles per <alp/protocol/cc3501e.h>:
+	 * in_status(1) | num_handles(1) | attr_handle(LE16)*num_handles. */
+	uint8_t      reply[2u + 2u * ALP_CC3501E_BLE_GATT_MAX_CHARS];
+	size_t       got = 0u;
+	alp_status_t s   = poll_by_repeat(ctx,
+	                                  ALP_CC3501E_CMD_BLE_GATT_REGISTER,
+	                                  descriptor,
+	                                  len,
+	                                  reply,
+	                                  sizeof(reply),
+	                                  &got,
+	                                  timeout_ms);
+	if (s != ALP_OK) {
+		/* The firmware's cc3501e_nimble_gatt_register() re-runs ble_gatts_start()
+		 * (via ble_gatts_reset()); NimBLE's ble_gatts_mutable() guard refuses that
+		 * while advertising/scanning/connected (BLE_HS_EBUSY) and the firmware
+		 * surfaces that as the distinct ALP_CC3501E_RESP_ERR_STATE (#480/#892),
+		 * which resp_to_status()/poll_by_repeat() already map straight to
+		 * ALP_ERR_BUSY -- terminally, no retry (see poll_by_repeat's @note in
+		 * cc3501e_internal.h) -- so no remap is needed here.  A genuine
+		 * transport/radio fault still surfaces as its real ALP_ERR_IO /
+		 * ALP_ERR_TIMEOUT, unmasked. */
+		return s;
+	}
+
+	if (got < 2u) return ALP_ERR_IO; /* frame said OK but the reply payload is short */
+	uint8_t num_handles = reply[1];
+	size_t  need        = 2u + (size_t)num_handles * 2u;
+	if (got < need) return ALP_ERR_IO;
+
+	size_t n = (num_handles < handles_cap) ? (size_t)num_handles : handles_cap;
+	for (size_t i = 0u; i < n; i++) {
+		size_t off     = 2u + i * 2u;
+		handles_out[i] = (uint16_t)reply[off] | ((uint16_t)reply[off + 1u] << 8);
+	}
+	if (num_handles_out != NULL) *num_handles_out = num_handles;
+	return ALP_OK;
 }
 
 alp_status_t cc3501e_ble_gatt_notify(cc3501e_t     *ctx,
