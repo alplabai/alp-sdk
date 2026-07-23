@@ -22,6 +22,7 @@ on:
     paths:
       - 'include/**'
       - 'docs/doxygen/**'
+      - 'docs/adr/**'
       - '.github/workflows/pr-doxygen.yml'
   push:
     branches: [main, dev]

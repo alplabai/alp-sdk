@@ -12958,16 +12958,16 @@
           "value": "0"
         },
         "ALP_VERSION_MINOR": {
-          "hash": "f8d2974f32a9136f",
-          "value": "11"
+          "hash": "38ae696297bd55a1",
+          "value": "12"
         },
         "ALP_VERSION_PATCH": {
-          "hash": "dfcbd06f473b6645",
-          "value": "1"
+          "hash": "d8ce20d0b42e56fe",
+          "value": "0"
         },
         "ALP_VERSION_STRING": {
-          "hash": "bd6db07e478552b5",
-          "value": "\"0.11.1\""
+          "hash": "ce08ed32440d7f90",
+          "value": "\"0.12.0\""
         }
       },
       "typedefs": {},
@@ -13032,5 +13032,5 @@
       "variables": {}
     }
   },
-  "version": "v0.11"
+  "version": "v0.12"
 }

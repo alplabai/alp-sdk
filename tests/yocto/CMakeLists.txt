@@ -599,4 +599,178 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 
     add_test(NAME alp_test_registry_sw_fallback
              COMMAND alp_test_registry_sw_fallback)
+
+    # Issue #756: callback self-close deadlock regressions.
+    find_package(Threads REQUIRED)
+
+    # MQTT dispatcher (both the Yocto Mosquitto and Zephyr MQTT backends
+    # share this same bug -- it lives entirely above the ops vtable, in
+    # alp_mqtt_loop()/alp_mqtt_close() themselves).  #includes
+    # src/mqtt_dispatch.c directly against a hand-registered fake ops
+    # table (see the test's own header comment) -- deliberately NOT
+    # linked against alp::sdk to avoid an ODR clash with its own
+    # separately-compiled copy of the same TU.
+    add_executable(alp_test_mqtt_dispatch_self_close
+        ${CMAKE_CURRENT_SOURCE_DIR}/mqtt_dispatch_self_close.c
+        # mqtt_dispatch.c (pulled in via #include) references the
+        # backend-registry (alp_backend_select()) and thread-local
+        # last-error machinery even though this test never reaches
+        # alp_mqtt_open() -- resolve them from their one canonical
+        # definition each, same as alp_test_peripheral_gpio_irq_rollback's
+        # stub_core.c pull-in above.
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backend.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/yocto/dispatch_last_error_shim.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+        # The ALP_BACKEND_DEFINE_CLASS(mqtt) anchor in mqtt_dispatch.c
+        # needs at least one TU carrying an `alp_backends_mqtt` linker
+        # section for __start_/__stop_ to resolve; sw_fallback.c is
+        # never actually selected at runtime here (this test bypasses
+        # alp_mqtt_open()), just needed for link completeness.
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/mqtt/sw_fallback.c
+        # Out-of-line bodies for src/common/alp_slot_claim.h's
+        # alp_handle_begin_close_blocking()/_selfaware() (issues
+        # #629/#756; alp_handle_take_deferred_close() is header-inline).
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/alp_slot_claim.c
+    )
+    target_link_libraries(alp_test_mqtt_dispatch_self_close PRIVATE Threads::Threads)
+    target_include_directories(alp_test_mqtt_dispatch_self_close PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_mqtt_dispatch_self_close PRIVATE c_std_99)
+
+    add_test(NAME alp_test_mqtt_dispatch_self_close
+             COMMAND alp_test_mqtt_dispatch_self_close)
+    set_tests_properties(alp_test_mqtt_dispatch_self_close PROPERTIES TIMEOUT 30)
+
+    # BLE dispatcher (CC3501E's scan_start() invokes the scan callback
+    # synchronously the same way).  Same #include-the-.c-file /
+    # no-alp::sdk-link technique as the MQTT test above.
+    add_executable(alp_test_ble_dispatch_self_close
+        ${CMAKE_CURRENT_SOURCE_DIR}/ble_dispatch_self_close.c
+        # Same rationale as alp_test_mqtt_dispatch_self_close above.
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backend.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/yocto/dispatch_last_error_shim.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/ble/sw_fallback.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/alp_slot_claim.c
+    )
+    target_link_libraries(alp_test_ble_dispatch_self_close PRIVATE Threads::Threads)
+    target_include_directories(alp_test_ble_dispatch_self_close PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_ble_dispatch_self_close PRIVATE c_std_99)
+
+    add_test(NAME alp_test_ble_dispatch_self_close
+             COMMAND alp_test_ble_dispatch_self_close)
+    set_tests_properties(alp_test_ble_dispatch_self_close PROPERTIES TIMEOUT 30)
+
+    # Yocto SocketCAN backend RX-thread self-close (yocto_drv.c's
+    # y_shutdown()/y_destroy() split).  #includes the real backend .c
+    # file directly (see the test's own header comment) -- deliberately
+    # NOT linked against alp::sdk, same ODR rationale as
+    # alp_test_rpc_yocto_self_close above.
+    add_executable(alp_test_can_yocto_self_close
+        ${CMAKE_CURRENT_SOURCE_DIR}/can_yocto_self_close.c
+    )
+    target_link_libraries(alp_test_can_yocto_self_close PRIVATE Threads::Threads)
+    target_include_directories(alp_test_can_yocto_self_close PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/can
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_can_yocto_self_close PRIVATE c_std_99)
+
+    add_test(NAME alp_test_can_yocto_self_close
+             COMMAND alp_test_can_yocto_self_close)
+
+    # Dev-review follow-up on issue #756: alp_can_close() racing the
+    # FIRST-EVER alp_can_add_filter() (the one that lazily spawns the RX
+    # thread) mid-spawn.  #includes BOTH src/can_dispatch.c and
+    # src/backends/can/yocto_drv.c directly (see the test's own header
+    # comment for why this one needs both layers' file-local internals)
+    # -- deliberately NOT linked against alp::sdk, same ODR rationale as
+    # alp_test_rpc_yocto_self_close above.  Needs backend.c/the
+    # last-error shim/alp_slot_claim.c for the same reason
+    # alp_test_mqtt_dispatch_self_close does (see its own comment).
+    add_executable(alp_test_can_add_filter_close_race
+        ${CMAKE_CURRENT_SOURCE_DIR}/can_add_filter_close_race.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backend.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/yocto/dispatch_last_error_shim.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/alp_slot_claim.c
+    )
+    target_link_libraries(alp_test_can_add_filter_close_race PRIVATE Threads::Threads)
+    target_include_directories(alp_test_can_add_filter_close_race PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/can
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_can_add_filter_close_race PRIVATE c_std_99)
+
+    add_test(NAME alp_test_can_add_filter_close_race
+             COMMAND alp_test_can_add_filter_close_race)
+
+    # Yocto direct-GPIO IRQ-dispatcher self-close/self-disable
+    # (peripheral_gpio.c's per-index lock/unlock around callback
+    # invocation).  Same #include-the-.c-file / no-alp::sdk-link
+    # technique as alp_test_peripheral_gpio_irq_rollback above.
+    add_executable(alp_test_peripheral_gpio_self_close
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_gpio_self_close.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+    )
+    target_link_libraries(alp_test_peripheral_gpio_self_close PRIVATE Threads::Threads)
+    target_include_directories(alp_test_peripheral_gpio_self_close PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_peripheral_gpio_self_close PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_gpio_self_close
+             COMMAND alp_test_peripheral_gpio_self_close)
+
+    # ThreadSanitizer coverage for the Yocto paths (issue #756 acceptance
+    # criteria: CAN + direct GPIO) plus the dispatcher-level MQTT/BLE
+    # cross-thread-close regression (dev-review follow-up -- see
+    # alp_handle_take_deferred_close()'s doc comment in
+    # src/common/alp_slot_claim.h).  Reuses run_sanitized_rpc_tests.sh
+    # (fully generic despite the filename -- see that script's own
+    # header comment) to reconfigure + rebuild a fully-instrumented
+    # scratch copy of the tree and run the named targets under it.
+    add_test(NAME alp_test_can_gpio_tsan
+             COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/run_sanitized_rpc_tests.sh
+                     ${CMAKE_SOURCE_DIR}
+                     ${CMAKE_CURRENT_BINARY_DIR}/sanitizer-can-gpio-tsan
+                     "-fsanitize=thread"
+                     alp_test_can_yocto_self_close
+                     alp_test_can_add_filter_close_race
+                     alp_test_peripheral_gpio_self_close
+                     alp_test_peripheral_gpio_irq_rollback
+                     alp_test_mqtt_dispatch_self_close
+                     alp_test_ble_dispatch_self_close)
+    set_tests_properties(alp_test_can_gpio_tsan PROPERTIES TIMEOUT 600)
+
+    add_test(NAME alp_test_can_gpio_asan_ubsan
+             COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/run_sanitized_rpc_tests.sh
+                     ${CMAKE_SOURCE_DIR}
+                     ${CMAKE_CURRENT_BINARY_DIR}/sanitizer-can-gpio-asan
+                     "-fsanitize=address,undefined"
+                     alp_test_can_yocto_self_close
+                     alp_test_can_add_filter_close_race
+                     alp_test_peripheral_gpio_self_close
+                     alp_test_peripheral_gpio_irq_rollback
+                     alp_test_mqtt_dispatch_self_close
+                     alp_test_ble_dispatch_self_close)
+    set_tests_properties(alp_test_can_gpio_asan_ubsan PROPERTIES TIMEOUT 600)
 endif()

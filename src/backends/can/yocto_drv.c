@@ -40,11 +40,49 @@
  *     (Zephyr CAN_MODE_LOOPBACK), the frames still go out on the wire;
  *     bus-off isolation would need the netlink "ip link ... loopback on"
  *     controller mode, which a CAN_RAW socket cannot set (issue #246).
+ *
+ * @par Issue #756 -- RX-thread callback self-close
+ * The RX reader thread used to invoke filter callbacks WHILE HOLDING
+ * d->lock (see the old _dispatch_rx()), so a callback that called
+ * alp_can_close()/alp_can_remove_filter() on its own handle deadlocked
+ * re-locking that same mutex on the same thread -- and even past that,
+ * the old single-phase y_close() would pthread_join() the RX thread,
+ * which IS the calling thread on a self-close (guaranteed EDEADLK).
+ * Both are now fixed together (the issue's own warning: fixing only
+ * the mutex is insufficient):
+ *   - _dispatch_rx() now snapshots matching (cb, user) pairs under
+ *     d->lock, then invokes every callback AFTER releasing it, so a
+ *     callback-triggered add/remove_filter or close() can freely
+ *     re-take d->lock without self-deadlocking.
+ *   - y_close() is split into y_shutdown()/y_destroy() (can_ops.h),
+ *     mirroring the RPC backend's GHSA-xhm8-7f87-93q5 redesign:
+ *     y_shutdown() detects self-vs-external via
+ *     pthread_equal(pthread_self(), d->rx_thread) and reports which;
+ *     an external close joins the RX thread synchronously (DONE); a
+ *     self-close returns DEFERRED WITHOUT joining -- the RX thread's
+ *     own epilogue (in _rx_loop(), once the read loop unwinds) detaches
+ *     itself and calls alp_can_close_finalize() exactly once.
+ *   - _rx_loop() now poll()s the socket fd alongside a wake-pipe
+ *     (rx_wake_pipe) instead of blocking directly in read() -- an
+ *     earlier version of this fix cancelled the blocking read() by
+ *     close()ing d->fd from y_shutdown(), which ThreadSanitizer's
+ *     Yocto coverage (this issue's own acceptance criteria) correctly
+ *     flagged: close()ing an fd while ANOTHER thread may still be
+ *     blocked reading that same fd number is a real hazard (a
+ *     concurrently-opened, unrelated fd could reuse the number the
+ *     instant it is closed), not just a benign warning.  The wake-pipe
+ *     is the exact mechanism src/backends/rpc/yocto_drv.c already uses
+ *     for the identical reason; y_shutdown() only ever writes to the
+ *     wake-pipe end (never touches d->fd), and d->fd is closed exactly
+ *     once, in y_destroy(), strictly after the RX thread has already
+ *     exited (either joined -- external path -- or IS the thread
+ *     calling this, about to return -- self-close path).
  */
 
 #if defined(__linux__)
 
 #include <errno.h>
+#include <poll.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -89,7 +127,37 @@ typedef struct {
 	bool            rx_running;
 	pthread_mutex_t lock; /* guards filters[] */
 	y_can_filter_t  filters[ALP_Y_CAN_MAX_FILTERS];
+
+	/* Close-side wake notification for _rx_loop()'s poll() (issue
+	 * #756) -- see this file's header comment for why this replaced a
+	 * direct close(d->fd) as the cancellation mechanism. */
+	int rx_wake_pipe[2];
+
+	/* Issue #756: set by y_shutdown() (see its doc comment), read once
+	 * by _rx_loop()'s epilogue to decide whether THIS handle's single
+	 * close (the dispatcher guarantees at most one shutdown() call ever
+	 * runs per handle -- see can_dispatch.c's alp_can_close()) was the
+	 * self-close (DEFERRED) case.  Atomic: the external-close path
+	 * writes this from a DIFFERENT thread than the RX thread that reads
+	 * it in its epilogue. */
+	bool close_from_worker;
+
+	/* Dispatcher-owned back-pointer (alp_can_backend_state_t::owner,
+	 * cached at y_open() time) -- see can_ops.h.  Used ONLY by
+	 * _rx_loop()'s epilogue to call alp_can_close_finalize(owner)
+	 * exactly once on the self-close (DEFERRED) path. */
+	void *owner;
 } y_can_data_t;
+
+static inline void y_can_close_from_worker_store(y_can_data_t *d, bool from_worker)
+{
+	__atomic_store_n(&d->close_from_worker, from_worker, __ATOMIC_RELEASE);
+}
+
+static inline bool y_can_close_from_worker_load(y_can_data_t *d)
+{
+	return __atomic_load_n(&d->close_from_worker, __ATOMIC_ACQUIRE);
+}
 
 /*
  * CAN-specific overrides on top of the shared @ref
@@ -118,6 +186,17 @@ static alp_status_t _errno_to_alp(int err)
 	    err, _can_errno_overrides, sizeof(_can_errno_overrides) / sizeof(_can_errno_overrides[0]));
 }
 
+/* Test-only setsockopt(CAN_RAW_FILTER) interception (default NULL: real
+ * setsockopt()) -- dev-review follow-up on issue #756.  Lets
+ * tests/yocto/can_add_filter_close_race.c drive the REAL y_add_filter()
+ * (needed to reproduce its lazy RX-thread-spawn timing) over a
+ * socketpair stand-in for the SocketCAN fd, which cannot accept a real
+ * CAN_RAW_FILTER setsockopt().  Mirrors
+ * src/yocto/peripheral_gpio.c's g_gpio_test_set_config_hook idiom. */
+static int (*g_can_test_apply_filters_hook)(y_can_data_t            *d,
+                                            const struct can_filter *set,
+                                            size_t                   n) = NULL;
+
 /* Reinstall the union of all active kernel filters on the socket.
  * SocketCAN's CAN_RAW_FILTER takes the whole array at once; we rebuild
  * it from the slot table after any add/remove.  Caller holds d->lock. */
@@ -127,6 +206,9 @@ static int _apply_filters_locked(y_can_data_t *d)
 	size_t            n = 0;
 	for (size_t i = 0; i < ALP_Y_CAN_MAX_FILTERS; ++i) {
 		if (d->filters[i].in_use) set[n++] = d->filters[i].kf;
+	}
+	if (g_can_test_apply_filters_hook != NULL) {
+		return g_can_test_apply_filters_hook(d, n ? set : NULL, n);
 	}
 	/* n==0 leaves an empty filter set: the kernel then drops all RX,
      * which matches "no filters installed -> deliver nothing". */
@@ -181,32 +263,108 @@ static void _dispatch_rx(y_can_data_t *d, const void *buf, ssize_t nbytes)
      * extended frames so bit 31 lines up; otherwise every 29-bit slot
      * would mismatch on bit 31 and never fire. */
 	canid_t cmp = out.id | (out.ext_id ? CAN_EFF_FLAG : 0u);
+
+	/* Issue #756: snapshot the matching (cb, user) pairs UNDER d->lock,
+     * then invoke every callback AFTER releasing it.  A filter cb may
+     * call alp_can_close()/alp_can_remove_filter() on this very handle
+     * (self-close/self-remove), each of which needs d->lock -- holding
+     * it across the callback (the pre-#756 behaviour) deadlocked that
+     * re-lock.  Value-copying cb+user here (not dereferencing `f` again
+     * later) means a callback that removes/reuses a LATER slot in this
+     * same snapshot cannot invalidate an entry already copied out. */
+	struct {
+		alp_can_rx_cb_t cb;
+		void           *user;
+	} matches[ALP_Y_CAN_MAX_FILTERS];
+	size_t n = 0;
+
 	pthread_mutex_lock(&d->lock);
 	for (size_t i = 0; i < ALP_Y_CAN_MAX_FILTERS; ++i) {
 		y_can_filter_t *f = &d->filters[i];
 		if (!f->in_use || f->cb == NULL) continue;
 		if ((cmp & f->kf.can_mask) == (f->kf.can_id & f->kf.can_mask)) {
-			f->cb(&out, f->user);
+			matches[n].cb   = f->cb;
+			matches[n].user = f->user;
+			++n;
 		}
 	}
 	pthread_mutex_unlock(&d->lock);
+
+	for (size_t i = 0; i < n; ++i) {
+		matches[i].cb(&out, matches[i].user);
+	}
 }
 
-/** @brief RX reader thread: blocking read() loop until the socket closes. */
+/**
+ * @brief RX reader thread: poll() the socket + wake-pipe until told to
+ *        stop (issue #756 -- see this file's header comment for why
+ *        this is poll()-driven rather than a directly-cancelled
+ *        blocking read()).
+ *
+ * Capturing `fd`/`wake_fd` ONCE, into locals, before the loop (rather
+ * than re-reading d->fd on every iteration) is safe here specifically
+ * because neither is ever written again after y_open() publishes them
+ * -- y_shutdown() only ever writes to the wake-pipe's WRITE end
+ * (rx_wake_pipe[1]), never to d->fd or rx_wake_pipe[0] themselves, so
+ * there is no concurrent writer for this thread's reads of these two
+ * fields to race against (unlike the pre-redesign direct-close
+ * approach, where d->fd itself was mutated from the closing thread).
+ */
 static void *_rx_loop(void *arg)
 {
-	y_can_data_t *d = (y_can_data_t *)arg;
+	y_can_data_t *d       = (y_can_data_t *)arg;
+	int           fd      = d->fd;
+	int           wake_fd = d->rx_wake_pipe[0];
+
+	struct pollfd fds[2] = {
+		{ .fd = fd, .events = POLLIN },
+		{ .fd = wake_fd, .events = POLLIN },
+	};
+
 	/* A canfd_frame buffer is a superset of can_frame, so one buffer
      * serves both; read() returns the actual frame length. */
 	struct canfd_frame frame;
 	for (;;) {
-		ssize_t n = read(d->fd, &frame, sizeof(frame));
+		fds[0].revents = 0;
+		fds[1].revents = 0;
+		int rc         = poll(fds, 2, -1);
+		if (rc < 0) {
+			if (errno == EINTR) continue;
+			break; /* fatal poll() error -> stop */
+		}
+		if (fds[1].revents & POLLIN) {
+			break; /* close-side wake notification (issue #756) */
+		}
+		if (!(fds[0].revents & POLLIN)) {
+			continue;
+		}
+
+		ssize_t n = read(fd, &frame, sizeof(frame));
 		if (n < 0) {
 			if (errno == EINTR) continue;
-			break; /* socket closed (EBADF) or fatal error -> stop */
+			break; /* fatal read() error -> stop */
 		}
 		if (n == 0) break;
 		_dispatch_rx(d, &frame, n);
+	}
+
+	/* Issue #756: if a filter callback above closed THIS handle from
+     * inside this very thread (self-close), y_shutdown() returned
+     * ALP_CAN_SHUTDOWN_DEFERRED and set close_from_worker instead of
+     * joining/destroying anything itself (the original bug:
+     * pthread_join()-ing its own thread, guaranteed EDEADLK).  Finish
+     * the deferred teardown now that the read loop has unwound: detach
+     * first (the dispatcher's single-owner CAS guarantees no external
+     * caller is racing us for ownership of this close, so nobody will
+     * ever try to join this thread), then hand off to the dispatcher's
+     * alp_can_close_finalize(), which calls y_destroy() exactly once --
+     * active_ops was already drained by the alp_can_close() call that
+     * got this DEFERRED result back, BEFORE it ever called y_shutdown()
+     * (see can_dispatch.c's alp_can_close() comment), so no drain
+     * happens here. */
+	if (y_can_close_from_worker_load(d)) {
+		pthread_detach(pthread_self());
+		alp_can_close_finalize(d->owner);
 	}
 	return NULL;
 }
@@ -295,10 +453,23 @@ y_open(const alp_can_config_t *cfg, alp_can_backend_state_t *st, alp_capabilitie
 	}
 	d->fd        = fd;
 	d->fd_frames = want_fd;
+	d->owner     = st->owner; /* issue #756: for alp_can_close_finalize() */
 	if (pthread_mutex_init(&d->lock, NULL) != 0) {
 		close(fd);
 		free(d);
 		return ALP_ERR_IO;
+	}
+	/* Close-side wake pipe for _rx_loop()'s poll() (issue #756) -- see
+     * this file's header comment.  Created unconditionally at open()
+     * time (cheap: two fds) even though the RX thread only spawns
+     * lazily on the first add_filter(), matching
+     * src/backends/rpc/yocto_drv.c's identical rx_wake_pipe. */
+	if (pipe(d->rx_wake_pipe) != 0) {
+		int e = errno;
+		pthread_mutex_destroy(&d->lock);
+		close(fd);
+		free(d);
+		return _errno_to_alp(e);
 	}
 
 	st->dev         = NULL;
@@ -391,6 +562,18 @@ y_send(alp_can_backend_state_t *st, const alp_can_frame_t *frame, uint32_t timeo
 	return ALP_ERR_IO; /* short write */
 }
 
+/* Test-only hook (dev-review follow-up on issue #756): fires at the
+ * very top of y_add_filter(), BEFORE it takes d->lock -- lets a test
+ * deterministically stall the FIRST-EVER add_filter() call on a handle
+ * (the one that lazily spawns the RX thread below) so a concurrent
+ * alp_can_close() racing it can be driven through the exact window
+ * dev-review flagged: an add_filter() already counted in the
+ * dispatcher's active_ops, but not yet far enough along to have set
+ * d->rx_running.  See tests/yocto/can_add_filter_close_race.c.  NULL
+ * in production (matches g_y_call_test_late_staging_hook's existing
+ * idiom in src/backends/rpc/yocto_drv.c). */
+static void (*g_can_test_add_filter_prespawn_hook)(void) = NULL;
+
 /**
  * @brief Install an RX filter and dispatch matching frames to @p cb.
  *
@@ -408,6 +591,10 @@ static alp_status_t y_add_filter(alp_can_backend_state_t *st,
 	y_can_data_t *d = (y_can_data_t *)st->be_data;
 	if (d == NULL) return ALP_ERR_NOT_READY;
 	if (filter == NULL || cb == NULL) return ALP_ERR_INVAL;
+
+	if (g_can_test_add_filter_prespawn_hook != NULL) {
+		g_can_test_add_filter_prespawn_hook();
+	}
 
 	pthread_mutex_lock(&d->lock);
 
@@ -483,38 +670,84 @@ static alp_status_t y_remove_filter(alp_can_backend_state_t *st, int32_t filter_
 }
 
 /**
- * @brief Tear down the reader thread + socket and free the handle box.
+ * @brief Wake the RX thread's poll() out of its blocking wait and
+ *        report whether THIS call itself arrived from the handle's
+ *        own RX thread (issue #756, GHSA-xhm8-7f87-93q5-style
+ *        redesign).
  *
- * close()ing the socket makes the blocking read() in the reader thread
- * fail, which ends the loop; the thread is then joined before the box
- * (which the thread dereferences) is freed.
+ * Writing to rx_wake_pipe[1] makes _rx_loop()'s poll() return on the
+ * wake-pipe branch, breaking its loop -- see this file's header
+ * comment for why this replaced closing d->fd directly (a real
+ * ThreadSanitizer-flagged close()-vs-concurrent-read() hazard, not a
+ * false positive).  An EXTERNAL close (a different thread) then joins
+ * the RX thread synchronously and returns ALP_CAN_SHUTDOWN_DONE.  A
+ * SELF-close (a filter callback, running ON d->rx_thread, calling
+ * alp_can_close() on its own handle) must NOT join -- that thread IS
+ * this call's own caller, so pthread_join() would be a guaranteed
+ * EDEADLK -- so it returns ALP_CAN_SHUTDOWN_DEFERRED WITHOUT joining;
+ * _rx_loop()'s epilogue (this same thread, once the loop above has
+ * actually unwound) completes the deferred teardown via
+ * alp_can_close_finalize().
  */
-static void y_close(alp_can_backend_state_t *st)
+static alp_can_shutdown_result_t y_shutdown(alp_can_backend_state_t *st)
 {
 	y_can_data_t *d = (y_can_data_t *)st->be_data;
-	if (d == NULL) return;
+	if (d == NULL) return ALP_CAN_SHUTDOWN_DONE;
 
 	bool      join = false;
 	pthread_t th   = d->rx_thread;
 	pthread_mutex_lock(&d->lock);
+	bool from_worker    = d->rx_running && pthread_equal(pthread_self(), th);
+	bool thread_existed = d->rx_running;
 	if (d->rx_running) {
 		d->rx_running = false;
-		join          = true;
+		join          = !from_worker;
 	}
 	pthread_mutex_unlock(&d->lock);
+	y_can_close_from_worker_store(d, from_worker);
 
-	/* Closing the fd unblocks read() in _rx_loop so it returns and the
-     * thread exits; join before freeing the box it dereferences. */
-	if (d->fd >= 0) {
-		close(d->fd);
-		d->fd = -1;
+	/* Wake _rx_loop()'s poll() -- the SOLE cross-thread cancellation
+     * signal (d->fd itself is never touched here; it is closed exactly
+     * once, in y_destroy(), strictly after the RX thread has already
+     * exited). */
+	if (thread_existed && d->rx_wake_pipe[1] >= 0) {
+		char b = 1;
+		(void)write(d->rx_wake_pipe[1], &b, 1);
+	}
+
+	if (from_worker) {
+		return ALP_CAN_SHUTDOWN_DEFERRED;
 	}
 	if (join) {
 		(void)pthread_join(th, NULL);
 	}
+	return ALP_CAN_SHUTDOWN_DONE;
+}
+
+/**
+ * @brief Free the socket/pipe/mutex/handle box.
+ *
+ * Called exactly once by the dispatcher (src/can_dispatch.c), strictly
+ * after y_shutdown() has run AND active_ops has drained to 0 -- either
+ * synchronously from alp_can_close() (the DONE/external-close path) or
+ * via alp_can_close_finalize() (the DEFERRED/self-close path, from
+ * _rx_loop()'s epilogue).  Must not block -- by the time this runs the
+ * RX thread is already joined-and-exited (external path) or IS the
+ * very thread calling this (self path, about to return from
+ * _rx_loop() anyway) -- so closing d->fd here, rather than from
+ * y_shutdown(), can never race a still-in-flight read()/poll() on it
+ * (issue #756).
+ */
+static void y_destroy(alp_can_backend_state_t *st)
+{
+	y_can_data_t *d = (y_can_data_t *)st->be_data;
+	if (d == NULL) return;
+	st->be_data = NULL;
+	if (d->fd >= 0) close(d->fd);
+	if (d->rx_wake_pipe[0] >= 0) close(d->rx_wake_pipe[0]);
+	if (d->rx_wake_pipe[1] >= 0) close(d->rx_wake_pipe[1]);
 	pthread_mutex_destroy(&d->lock);
 	free(d);
-	st->be_data = NULL;
 }
 
 static const alp_can_ops_t _ops = {
@@ -524,7 +757,8 @@ static const alp_can_ops_t _ops = {
 	.send          = y_send,
 	.add_filter    = y_add_filter,
 	.remove_filter = y_remove_filter,
-	.close         = y_close,
+	.shutdown      = y_shutdown,
+	.destroy       = y_destroy,
 };
 
 ALP_BACKEND_REGISTER(can,
