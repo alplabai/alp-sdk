@@ -25,20 +25,12 @@
  * ALP_SDK_POWER_EXT_RENESAS), and src/backends/power/
  * alif_se_profile.c (Alif SE aiPM operating-point profile on the
  * separate "power_profile" class, gated by
- * ALP_SDK_POWER_PROFILE_ALIF_SE).  This stub only wins where none of
- * those are linked into the build, or none claims the build's
- * silicon_ref.
- *
- * @par Yocto / Linux path: not implemented.
- *      The Yocto `/sys/power/state`-write + `/sys/class/rtc/rtcN/
- *      wakealarm` path documented in <alp/power.h> is *not* served
- *      by this stub, or by any other backend today.  Per the
- *      standing "src/yocto/ off-limits" guardrail it lands in a
- *      dedicated slice when scheduled; until then customers building
- *      against ALP_OS=yocto see ALP_ERR_NOSUPPORT from
- *      request_sleep.  Open + wake-source configuration still
- *      succeed so application setup code keeps linking unchanged
- *      across both consumer paths.
+ * ALP_SDK_POWER_PROFILE_ALIF_SE), and src/backends/power/yocto_drv.c
+ * (real Linux `/sys/power/state` + `/sys/class/rtc/rtc0/wakealarm`
+ * backend, "*" at priority 100, #613).  This stub only wins where none
+ * of those are linked into the build, or none claims the build's
+ * silicon_ref -- e.g. a non-Linux plain-CMake Yocto cross-build where
+ * yocto_drv.c compiles to an empty object.
  */
 
 #include <stdint.h>
