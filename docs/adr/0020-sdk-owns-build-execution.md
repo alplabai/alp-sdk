@@ -157,8 +157,7 @@ survives anywhere (RFC #837).
    script — all in Phase 4, not before the contract is complete.
 
 2. **`tan` — a NEW standalone repo (Rust), the whole command surface.** Extracted
-   out of alp-sdk-vscode's `cli-rs/` and grown to own **`tan build / flash /
-   image / size / renode / clean / sdk / doctor / validate / …`**. It is the sole
+   out of alp-sdk-vscode's `cli-rs/` and grown to own **`tan build / flash / image / size / renode / clean / sdk / doctor / validate / …`**. It is the sole
    executor (runs `west` / `bitbake` / `cmake` per slice), owns skip-vs-fail, env
    application, scheduling, cancellation, progress UX, SDK lifecycle, **and both
    ends of the manifest** — it writes `system-manifest.yaml` + `.alp-build-state.json`
@@ -323,11 +322,9 @@ extension verifies the `tan` binary by pinned hash / signature before running it
 
 ## The one thing that must hold
 
-**Before Phase 4, the proven contract covers BOTH seams with a defined, runnable
-comparator** — (in) per-slice command + env + skip/fail equivalence over the full
+**Before Phase 4, the proven contract covers BOTH seams with a defined, runnable comparator** — (in) per-slice command + env + skip/fail equivalence over the full
 SoM matrix, runnable toolchain-free via dry-run capture; (out) manifest + state
-byte-parity — **and an automatic cross-repo trigger runs `tan`'s build validation
-on every alp-sdk planner change.** `fan_out` is the only thing that can validate
+byte-parity — **and an automatic cross-repo trigger runs `tan`'s build validation on every alp-sdk planner change.** `fan_out` is the only thing that can validate
 the contract from inside alp-sdk and it is the thing being removed, so
 completeness must be proven while it still exists. Green-but-hollow parity
 followed by Phase-4 deletion is the failure scenario (fan_out gone, flash/renode/CI

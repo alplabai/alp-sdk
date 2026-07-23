@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "planPathMode": "tokened",
   "generatedBy": "scripts/alp_orchestrate.py",
-  "sdkVersion": "0.11.1",
+  "sdkVersion": "0.12.0",
   "sdkCommit": "<SDK_COMMIT>",
   "boardYaml": "examples/connectivity/iot-fleet-ota/board.yaml",
   "sku": "E1M-AEN801",
