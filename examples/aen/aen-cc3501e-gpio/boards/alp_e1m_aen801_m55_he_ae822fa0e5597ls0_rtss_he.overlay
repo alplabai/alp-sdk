@@ -91,8 +91,8 @@
 		 * fails (-EINVAL) for the gateless dummy ALIF_SPI_CLK -> every
 		 * transceive returned ALP_ERR_INVAL with zero SCLK (witness fail_step=1,
 		 * zerr=-EINVAL). Providing the SSI input clock here makes the driver
-		 * use it directly and skip the failing clock-control path. SYST_HCLK =
-		 * AHB = 400 MHz (E8 HWRM); BAUDR = 400M/freq_hz (=50 for an 8 MHz SCLK).
+		 * use it directly and skip the failing clock-control path. The SSI
+		 * functional clock is 200 MHz (E8 HWRM); BAUDR = clk/freq_hz.
 		 */
 		clock-frequency = <200000000>; /* real SSI functional clock (was mis-set 400M -- halves the requested SCLK; proven via BAUDR scaling, parity with the bringup/tour overlays) */
 		dwc-ssi;

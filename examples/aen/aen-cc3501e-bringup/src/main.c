@@ -75,24 +75,6 @@
  */
 #define CC3501E_SPI_BUS_ID 1u
 
-/*
- * 8 MHz for first bring-up.  A slave cannot pace SCK, so the safe move is
- * to start slow and raise the clock only once the hardware-SS0 phase
- * framing is proven on silicon.  READY gates reply phases; slow Wi-Fi/BLE
- * commands still use the worker/poll model until HOST_IRQ async delivery
- * lands.
- */
-#define CC3501E_SPI_FREQ_HZ \
-	1000000u /* 1 MHz: SILICON-VALIDATED cold-boot value.  At 8 MHz with the
-                                      * Alif SSI rx_delay=0 the master sampled MISO before the CC35's bit
-                                      * propagated back over the long on-SoM traces + the crossed-data
-                                      * bodge -> reqhdr_rx=0xFFFFFFFF, cold link dead (8 MHz was only
-                                      * marginally OK warm).  At 1 MHz the bit period (1 us) >> the MISO
-                                      * round-trip, so sampling is clean and cold-boot GET_MAC works
-                                      * end-to-end.  Plenty for the control/PING path (radio data rides
-                                      * Wi-Fi, not this bridge).  FUTURE: to raise the clock, set the SSI
-                                      * rx-delay (alif,dwc-ssi rx-delay DT prop) to cover the round-trip. */
-
 /* How long to keep retrying the first PING before falling through to the
  * soak loop anyway (the soak loop keeps logging, so a console-attached
  * run still shows whether the link ever comes up). */

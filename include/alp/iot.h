@@ -156,6 +156,22 @@ typedef struct {
 
 typedef enum { ALP_MQTT_QOS_0 = 0, ALP_MQTT_QOS_1 = 1, ALP_MQTT_QOS_2 = 2 } alp_mqtt_qos_t;
 
+/**
+ * @brief Per-message MQTT callback.
+ *
+ * @par Callback context (issue #756)
+ * Invoked SYNCHRONOUSLY, on the calling thread, from inside
+ * @ref alp_mqtt_loop -- @p m's loop() call has not yet returned while
+ * this callback runs.  It is SAFE to call @ref alp_mqtt_close on @p m
+ * from within this callback (a "self-close"): the close is detected
+ * and its actual teardown deferred until this @ref alp_mqtt_loop call
+ * returns, so it neither deadlocks nor leaves @p m usable afterwards.
+ * It is likewise safe to call @ref alp_mqtt_close on @p m from a
+ * DIFFERENT thread while this callback is running (an ordinary close
+ * blocks until the loop call -- and this callback -- have returned).
+ * Do not perform long-blocking work here; it runs inline on whichever
+ * thread is driving @ref alp_mqtt_loop.
+ */
 typedef void (*alp_mqtt_msg_cb_t)(const char    *topic,
                                   const uint8_t *payload,
                                   size_t         len,
@@ -244,7 +260,12 @@ alp_status_t alp_mqtt_subscribe(alp_mqtt_t       *m,
 alp_status_t alp_mqtt_loop(alp_mqtt_t *m, uint32_t timeout_ms);
 
 /**
- * @brief Disconnect + release the MQTT client.  Idempotent on NULL.
+ * @brief Disconnect + release the MQTT client.  Idempotent on NULL (or
+ *        an already-closed handle -- a second close is a safe no-op).
+ *
+ * Safe to call from @p m's own @ref alp_mqtt_msg_cb_t (a self-close --
+ * see that typedef's doc comment) and safe to call concurrently from a
+ * different thread than the one driving @ref alp_mqtt_loop.
  *
  * @param[in] m  Handle from @ref alp_mqtt_open, or NULL.
  */

@@ -1,5 +1,5 @@
 {
-  "generated": "2026-07-22",
+  "generated": "2026-07-23",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -2759,8 +2759,8 @@
           "signature": "alp_status_t cc3501e_ble_gatt_read(cc3501e_t *ctx, uint16_t handle, uint8_t *out, size_t cap, size_t *out_len, uint32_t timeout_ms);"
         },
         "cc3501e_ble_gatt_register": {
-          "hash": "58af9a2f1dbf9868",
-          "signature": "alp_status_t cc3501e_ble_gatt_register(cc3501e_t *ctx, const uint8_t *descriptor, size_t len, uint32_t timeout_ms);"
+          "hash": "cc1dfeee7c99dd1a",
+          "signature": "alp_status_t cc3501e_ble_gatt_register(cc3501e_t *ctx, const uint8_t *descriptor, size_t len, uint16_t *handles_out, size_t handles_cap, size_t *num_handles_out, uint32_t timeout_ms);"
         },
         "cc3501e_ble_gatt_write": {
           "hash": "2f85524f7e1a32fe",
@@ -11307,6 +11307,14 @@
     "alp/protocol/cc3501e.h": {
       "functions": {},
       "macros": {
+        "ALP_CC3501E_BLE_GATT_MAX_CHARS": {
+          "hash": "a507536b271c97ea",
+          "value": "8u"
+        },
+        "ALP_CC3501E_BLE_GATT_REGISTER_VERSION": {
+          "hash": "b75b32cc72b6e0bf",
+          "value": "1u"
+        },
         "ALP_CC3501E_CMD_RESERVED_VENDOR_BASE": {
           "hash": "6c6c1cc020705b8b",
           "value": "0x80u"
@@ -11399,6 +11407,25 @@
             "uint8_t adv_data_len"
           ],
           "hash": "13f3bb31f9218252",
+          "kind": "struct"
+        },
+        "alp_cc3501e_ble_gatt_register_hdr_t": {
+          "definition": "typedef struct { uint8_t version; uint8_t service_uuid[16]; uint8_t num_chars; } alp_cc3501e_ble_gatt_register_hdr_t;",
+          "fields": [
+            "uint8_t version",
+            "uint8_t service_uuid[16]",
+            "uint8_t num_chars"
+          ],
+          "hash": "1ea51eeccc467e16",
+          "kind": "struct"
+        },
+        "alp_cc3501e_ble_gatt_register_reply_hdr_t": {
+          "definition": "typedef struct { uint8_t status; uint8_t num_handles; } alp_cc3501e_ble_gatt_register_reply_hdr_t;",
+          "fields": [
+            "uint8_t status",
+            "uint8_t num_handles"
+          ],
+          "hash": "ef37e2fb22c92bae",
           "kind": "struct"
         },
         "alp_cc3501e_cmd_t": {
@@ -12958,16 +12985,16 @@
           "value": "0"
         },
         "ALP_VERSION_MINOR": {
-          "hash": "f8d2974f32a9136f",
-          "value": "11"
+          "hash": "38ae696297bd55a1",
+          "value": "12"
         },
         "ALP_VERSION_PATCH": {
-          "hash": "dfcbd06f473b6645",
-          "value": "1"
+          "hash": "d8ce20d0b42e56fe",
+          "value": "0"
         },
         "ALP_VERSION_STRING": {
-          "hash": "bd6db07e478552b5",
-          "value": "\"0.11.1\""
+          "hash": "ce08ed32440d7f90",
+          "value": "\"0.12.0\""
         }
       },
       "typedefs": {},
@@ -13032,5 +13059,5 @@
       "variables": {}
     }
   },
-  "version": "v0.11"
+  "version": "v0.12"
 }
