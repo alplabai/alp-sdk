@@ -41,6 +41,13 @@
       },
       {
         "board": "e1m-evk",
+        "name": "aen-cc3501e-ble-gatt",
+        "path": "examples/aen/aen-cc3501e-ble-gatt",
+        "som": "E1M-AEN801",
+        "summary": "Bench proof of the **#480 CC3501E BLE GATT-SERVER path** through the portable [`<alp/ble.h>`](../../../include/alp/ble.h) surface, on the **E1M-AEN801** (Alif Ensemble E8) SoM's M55-HE core."
+      },
+      {
+        "board": "e1m-evk",
         "name": "aen-cc3501e-bringup",
         "path": "examples/aen/aen-cc3501e-bringup",
         "som": "E1M-AEN801",
