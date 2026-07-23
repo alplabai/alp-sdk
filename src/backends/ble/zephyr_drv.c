@@ -1,6 +1,15 @@
 /*
  * SPDX-License-Identifier: Apache-2.0
  *
+ * ====== ADR 0017 Tier-1.5 (thin glue over the upstream Zephyr `bt`
+ * host stack) ======
+ * Consumes upstream `bt_gatt_service_register()` / `bt_gatt_read()` /
+ * `bt_gatt_write()` / `bt_gatt_notify()` verbatim -- no forked or
+ * vendored Bluetooth host code.  The only alp-owned logic is the
+ * runtime `alp_ble_service_def_t` -> `struct bt_gatt_attr[]` mapping
+ * (register) and the two synchronous k_sem wrappers around the
+ * async client read/write callbacks (connect-side).
+ *
  * Portable Zephyr BT-host backend for the <alp/ble.h> surface.
  * Registers as silicon_ref="*" at priority 100 -- mirrors the
  * design spec Section 2 backend matrix (zephyr_drv wins on every
@@ -16,6 +25,22 @@
  * NOSUPPORT but the registry entry still links so the dispatcher
  * picks it ahead of sw_fallback on real silicon builds with BLE in
  * the device tree.
+ *
+ * @par GATT server (register/read/write/notify) -- issue #480
+ * `bt_gatt_service_register()` is a pure host-stack call: it needs
+ * neither `bt_enable()` nor a live controller (verified against
+ * upstream Zephyr's own `tests/bluetooth/gatt` suite, which never
+ * calls `bt_enable()` either).  So registration + the per-characteristic
+ * read()/write() attribute callbacks are host-testable under native_sim
+ * (see tests/zephyr/ble_gatt_server).  `alp_ble_gatt_read()` /
+ * `alp_ble_gatt_write()` (conn-side, GATT *client* reads of a connected
+ * peer) build on the real async `bt_gatt_read()`/`bt_gatt_write()` plus
+ * a k_sem wrapper -- correct against the upstream API, but DEFERRED for
+ * bench proof: native_sim ships no BLE controller (BT_USERCHAN needs a
+ * real host Bluetooth adapter, powered off, which this sandbox does not
+ * have -- confirmed by hand: bt_enable() blocks indefinitely opening the
+ * userchan HCI socket instead of failing fast), so no real over-the-air
+ * connection can be established offline to drive them end-to-end.
  */
 
 #include <errno.h>
@@ -41,6 +66,19 @@
 
 #ifndef CONFIG_ALP_SDK_BLE_MAX_CONNS
 #define CONFIG_ALP_SDK_BLE_MAX_CONNS 2
+#endif
+
+/* GATT server attribute-database pool sizing (issue #480).  Services are
+ * registered once at boot and never unregistered in v0.3, so a bump
+ * allocator over these fixed pools is sufficient -- no free-list needed. */
+#ifndef CONFIG_ALP_SDK_BLE_GATT_MAX_SERVICES
+#define CONFIG_ALP_SDK_BLE_GATT_MAX_SERVICES 4
+#endif
+#ifndef CONFIG_ALP_SDK_BLE_GATT_MAX_CHARS
+#define CONFIG_ALP_SDK_BLE_GATT_MAX_CHARS 16
+#endif
+#ifndef CONFIG_ALP_SDK_BLE_GATT_MAX_VALUE_LEN
+#define CONFIG_ALP_SDK_BLE_GATT_MAX_VALUE_LEN 64
 #endif
 
 /* ------------------------------------------------------------------ */
@@ -138,6 +176,174 @@ static void scan_recv_cb(const struct bt_le_scan_recv_info *info, struct net_buf
 static struct bt_le_scan_cb _scan_cb = {
 	.recv = scan_recv_cb,
 };
+
+/* alp_ble_char_def_t.properties is documented (<alp/ble.h>) as an OR of
+ * ALP_BLE_GATT_PROP_* -- those bit values are chosen to match Zephyr's
+ * BT_GATT_CHRC_* verbatim, so no translation table is needed below.
+ * Guard the assumption so a future edit to either side trips a build
+ * error instead of silently mis-mapping properties. */
+BUILD_ASSERT(ALP_BLE_GATT_PROP_READ == BT_GATT_CHRC_READ &&
+                 ALP_BLE_GATT_PROP_WRITE == BT_GATT_CHRC_WRITE &&
+                 ALP_BLE_GATT_PROP_NOTIFY == BT_GATT_CHRC_NOTIFY &&
+                 ALP_BLE_GATT_PROP_INDICATE == BT_GATT_CHRC_INDICATE,
+             "ALP_BLE_GATT_PROP_* must mirror BT_GATT_CHRC_* bit-for-bit");
+
+/* ------------------------------------------------------------------ */
+/* GATT server -- runtime service/characteristic registration (#480)   */
+/* ------------------------------------------------------------------ */
+
+/* Per-characteristic backing store: the UUID + bt_gatt_chrc declaration
+ * struct both need storage that outlives this call (Zephyr's attribute
+ * database keeps pointers into them), and the value buffer + CCC state
+ * back this characteristic's read()/write()/notify() callbacks. */
+struct ble_char_be {
+	struct bt_uuid_128                   uuid;
+	struct bt_gatt_chrc                  chrc;
+	struct bt_gatt_ccc_managed_user_data ccc;
+	uint8_t                              value[CONFIG_ALP_SDK_BLE_GATT_MAX_VALUE_LEN];
+	uint16_t                             value_len;
+};
+
+/* Worst case: one primary-service-decl attr per service, plus up to 3
+ * attrs (chrc-decl + value + CCC) per characteristic across all services. */
+static struct bt_gatt_attr
+    _gatt_attr_pool[CONFIG_ALP_SDK_BLE_GATT_MAX_SERVICES + CONFIG_ALP_SDK_BLE_GATT_MAX_CHARS * 3];
+static struct ble_char_be     _gatt_char_pool[CONFIG_ALP_SDK_BLE_GATT_MAX_CHARS];
+static struct bt_uuid_128     _gatt_svc_uuid_pool[CONFIG_ALP_SDK_BLE_GATT_MAX_SERVICES];
+static struct bt_gatt_service _gatt_svc_pool[CONFIG_ALP_SDK_BLE_GATT_MAX_SERVICES];
+static size_t                 _gatt_attr_used;
+static size_t                 _gatt_char_used;
+static size_t                 _gatt_svc_used;
+
+static void ble_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+	(void)attr;
+	(void)value;
+}
+
+static ssize_t ble_char_read(struct bt_conn            *conn,
+                             const struct bt_gatt_attr *attr,
+                             void                      *buf,
+                             uint16_t                   len,
+                             uint16_t                   offset)
+{
+	const struct ble_char_be *c = (const struct ble_char_be *)attr->user_data;
+	return bt_gatt_attr_read(conn, attr, buf, len, offset, c->value, c->value_len);
+}
+
+static ssize_t ble_char_write(struct bt_conn            *conn,
+                              const struct bt_gatt_attr *attr,
+                              const void                *buf,
+                              uint16_t                   len,
+                              uint16_t                   offset,
+                              uint8_t                    flags)
+{
+	struct ble_char_be *c = (struct ble_char_be *)attr->user_data;
+	(void)conn;
+	(void)flags;
+	if ((size_t)offset + len > sizeof(c->value)) {
+		return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
+	}
+	memcpy(c->value + offset, buf, len);
+	c->value_len = (uint16_t)(offset + len);
+	return len;
+}
+
+/* Synchronous client-side read/write (conn ops, below) block on this
+ * semaphore-backed context until the async bt_gatt_read()/bt_gatt_write()
+ * completion callback fires -- the ctx must remain valid until then,
+ * which the k_sem_take() call below guarantees for an on-stack instance. */
+struct ble_read_ctx {
+	struct bt_gatt_read_params params; /* MUST be first: cb casts params -> ctx */
+	struct k_sem               done;
+	alp_status_t               result;
+	uint8_t                   *out;
+	size_t                     out_cap;
+	size_t                    *out_len;
+};
+
+struct ble_write_ctx {
+	struct bt_gatt_write_params params; /* MUST be first: cb casts params -> ctx */
+	struct k_sem                done;
+	alp_status_t                result;
+};
+
+static uint8_t ble_read_cb(struct bt_conn             *conn,
+                           uint8_t                     err,
+                           struct bt_gatt_read_params *params,
+                           const void                 *data,
+                           uint16_t                    length)
+{
+	struct ble_read_ctx *ctx = (struct ble_read_ctx *)params;
+	(void)conn;
+	/* Zephyr's gatt_read_rsp() (subsys/bluetooth/host/gatt.c) delivers a
+	 * peer-rejected read as func(conn, err, params, NULL, 0) -- data is
+	 * NULL here too, so err must be checked before data to avoid mapping
+	 * an I/O error onto the data==NULL "procedure complete" branch. */
+	if (err != 0) {
+		/* err is an ATT protocol error code (BT_ATT_ERR_*), not an
+		 * errno -- the peer rejected the read (bad handle, no
+		 * permission, ...). Surface as I/O; there is no ALP_ERR_*
+		 * finer-grained than that for a remote protocol error. */
+		ctx->result = ALP_ERR_IO;
+		k_sem_give(&ctx->done);
+		return BT_GATT_ITER_STOP;
+	}
+	if (data == NULL) {
+		/* Read procedure complete (no long-read continuation in v0.3). */
+		k_sem_give(&ctx->done);
+		return BT_GATT_ITER_STOP;
+	}
+	size_t n = MIN((size_t)length, ctx->out_cap);
+	memcpy(ctx->out, data, n);
+	if (ctx->out_len != NULL) *ctx->out_len = n;
+	ctx->result = ALP_OK;
+	/* gatt_read_rsp() only invokes the terminal func(..., NULL, 0)
+	 * completion when THIS data-bearing call returns
+	 * BT_GATT_ITER_CONTINUE; returning STOP (as we do -- v0.3 has no
+	 * long-read continuation) means that terminal call never fires, so
+	 * the semaphore must be signalled right here or z_gatt_read() blocks
+	 * for the full timeout on every successful read. */
+	k_sem_give(&ctx->done);
+	return BT_GATT_ITER_STOP;
+}
+
+#if defined(CONFIG_ZTEST)
+/* Test-only seam (issue #480 review): native_sim ships no BLE controller,
+ * so there is no live peer to drive a real bt_gatt_read() end-to-end. This
+ * calls ble_read_cb() directly with the exact (err, data, length) shapes
+ * Zephyr's gatt_read_rsp() (subsys/bluetooth/host/gatt.c) delivers, then
+ * mirrors z_gatt_read()'s post-call k_sem_take() -- proving whether the
+ * completion signal fires *synchronously* on each path, which is exactly
+ * the bug this seam regression-tests. */
+alp_status_t alp_ble_test_read_cb(uint8_t err, const void *data, uint16_t length)
+{
+	uint8_t             out_buf[16];
+	struct ble_read_ctx ctx = {
+		.params  = { .func = ble_read_cb },
+		.out     = out_buf,
+		.out_cap = sizeof(out_buf),
+		.out_len = NULL,
+		.result  = ALP_ERR_TIMEOUT,
+	};
+	k_sem_init(&ctx.done, 0, 1);
+
+	(void)ble_read_cb(NULL, err, &ctx.params, data, length);
+
+	if (k_sem_take(&ctx.done, K_NO_WAIT) != 0) {
+		return ALP_ERR_TIMEOUT;
+	}
+	return ctx.result;
+}
+#endif /* CONFIG_ZTEST */
+
+static void ble_write_cb(struct bt_conn *conn, uint8_t err, struct bt_gatt_write_params *params)
+{
+	struct ble_write_ctx *ctx = (struct ble_write_ctx *)params;
+	(void)conn;
+	ctx->result = (err == 0) ? ALP_OK : ALP_ERR_IO;
+	k_sem_give(&ctx->done);
+}
 #endif /* CONFIG_ALP_SDK_BLE */
 
 /* ================================================================== */
@@ -256,20 +462,125 @@ static alp_status_t z_advertise_stop(alp_ble_radio_state_t *st)
 #endif
 }
 
+#if defined(CONFIG_ALP_SDK_BLE)
+/* Global (cross-service) lookup -- gatt_notify only gets a handle, and
+ * the registered attrs live in one flat bump-allocated pool regardless
+ * of which service they belong to. */
+static const struct bt_gatt_attr *_gatt_attr_by_handle(alp_ble_attr_handle_t handle)
+{
+	for (size_t i = 0; i < _gatt_attr_used; ++i) {
+		if (_gatt_attr_pool[i].handle == handle) return &_gatt_attr_pool[i];
+	}
+	return NULL;
+}
+#endif
+
 static alp_status_t z_gatt_register_service(alp_ble_radio_state_t       *st,
                                             const alp_ble_service_def_t *def,
                                             alp_ble_attr_handle_t       *handles_out)
 {
+#if defined(CONFIG_ALP_SDK_BLE)
+	(void)st;
+	if (def->num_chars > 0 && (def->chars == NULL || handles_out == NULL)) {
+		return ALP_ERR_INVAL;
+	}
+
+	/* Size the attrs this registration needs: 1 primary-service decl +
+     * per char (chrc-decl + value [+ CCC iff notify/indicate capable]). */
+	size_t attrs_needed = 1;
+	for (size_t i = 0; i < def->num_chars; ++i) {
+		if (def->chars[i].initial_len > sizeof(_gatt_char_pool[0].value)) {
+			return ALP_ERR_INVAL;
+		}
+		attrs_needed += 2;
+		if (def->chars[i].properties & (ALP_BLE_GATT_PROP_NOTIFY | ALP_BLE_GATT_PROP_INDICATE)) {
+			attrs_needed += 1;
+		}
+	}
+
+	if (_gatt_svc_used >= ARRAY_SIZE(_gatt_svc_pool) ||
+	    _gatt_char_used + def->num_chars > ARRAY_SIZE(_gatt_char_pool) ||
+	    _gatt_attr_used + attrs_needed > ARRAY_SIZE(_gatt_attr_pool)) {
+		return ALP_ERR_NOMEM;
+	}
+
+	struct bt_gatt_attr *attrs    = &_gatt_attr_pool[_gatt_attr_used];
+	struct ble_char_be  *chars    = &_gatt_char_pool[_gatt_char_used];
+	struct bt_uuid_128  *svc_uuid = &_gatt_svc_uuid_pool[_gatt_svc_used];
+
+	svc_uuid->uuid.type = BT_UUID_TYPE_128;
+	memcpy(svc_uuid->val, def->service_uuid.b, sizeof(svc_uuid->val));
+
+	size_t idx   = 0;
+	attrs[idx++] = (struct bt_gatt_attr)BT_GATT_ATTRIBUTE(
+	    BT_UUID_GATT_PRIMARY, BT_GATT_PERM_READ, bt_gatt_attr_read_service, NULL, &svc_uuid->uuid);
+
+	for (size_t i = 0; i < def->num_chars; ++i) {
+		struct ble_char_be *c = &chars[i];
+		memset(c, 0, sizeof(*c));
+		c->uuid.uuid.type = BT_UUID_TYPE_128;
+		memcpy(c->uuid.val, def->chars[i].uuid.b, sizeof(c->uuid.val));
+		c->chrc.uuid         = &c->uuid.uuid;
+		c->chrc.value_handle = 0U; /* auto: falls back to (this attr's handle + 1) */
+		c->chrc.properties   = def->chars[i].properties;
+
+		if (def->chars[i].initial_value != NULL && def->chars[i].initial_len > 0) {
+			memcpy(c->value, def->chars[i].initial_value, def->chars[i].initial_len);
+			c->value_len = (uint16_t)def->chars[i].initial_len;
+		}
+
+		uint16_t perm = 0;
+		if (def->chars[i].properties & ALP_BLE_GATT_PROP_READ) perm |= BT_GATT_PERM_READ;
+		if (def->chars[i].properties & ALP_BLE_GATT_PROP_WRITE) perm |= BT_GATT_PERM_WRITE;
+
+		attrs[idx++] = (struct bt_gatt_attr)BT_GATT_ATTRIBUTE(
+		    BT_UUID_GATT_CHRC, BT_GATT_PERM_READ, bt_gatt_attr_read_chrc, NULL, &c->chrc);
+
+		/* handles_out[i] temporarily holds this attr's pool index --
+         * overwritten with the real, stack-assigned handle once
+         * bt_gatt_service_register() below has run. */
+		handles_out[i] = (alp_ble_attr_handle_t)idx;
+		attrs[idx++]   = (struct bt_gatt_attr)BT_GATT_ATTRIBUTE(
+		    &c->uuid.uuid,
+		    perm,
+		    (perm & BT_GATT_PERM_READ) ? ble_char_read : NULL,
+		    (perm & BT_GATT_PERM_WRITE) ? ble_char_write : NULL,
+		    c);
+
+		if (def->chars[i].properties & (ALP_BLE_GATT_PROP_NOTIFY | ALP_BLE_GATT_PROP_INDICATE)) {
+			c->ccc.cfg_changed = ble_ccc_changed;
+			attrs[idx++]       = (struct bt_gatt_attr){
+				.uuid      = BT_UUID_GATT_CCC,
+				.perm      = BT_GATT_PERM_READ | BT_GATT_PERM_WRITE,
+				.read      = bt_gatt_attr_read_ccc,
+				.write     = bt_gatt_attr_write_ccc,
+				.user_data = &c->ccc,
+			};
+		}
+	}
+
+	struct bt_gatt_service *svc = &_gatt_svc_pool[_gatt_svc_used];
+	svc->attrs                  = attrs;
+	svc->attr_count             = idx;
+
+	int err = bt_gatt_service_register(svc);
+	if (err != 0) return errno_to_alp(err);
+
+	for (size_t i = 0; i < def->num_chars; ++i) {
+		handles_out[i] = (alp_ble_attr_handle_t)attrs[handles_out[i]].handle;
+	}
+
+	_gatt_attr_used += attrs_needed;
+	_gatt_char_used += def->num_chars;
+	_gatt_svc_used += 1;
+
+	return ALP_OK;
+#else
 	(void)st;
 	(void)def;
 	(void)handles_out;
-	/* GATT service registration via Zephyr's BT_GATT_SERVICE_DEFINE
-     * is statically declared at compile time -- not runtime-friendly
-     * for arbitrary service definitions.  v0.3.x lands a runtime
-     * shim using bt_gatt_service_register on a heap-allocated
-     * bt_gatt_attr array.  Until then this entry stays NOSUPPORT
-     * regardless of CONFIG_ALP_SDK_BLE. */
 	return ALP_ERR_NOSUPPORT;
+#endif
 }
 
 static alp_status_t z_gatt_notify(alp_ble_radio_state_t *radio_st,
@@ -278,16 +589,22 @@ static alp_status_t z_gatt_notify(alp_ble_radio_state_t *radio_st,
                                   const uint8_t         *payload,
                                   size_t                 len)
 {
+#if defined(CONFIG_ALP_SDK_BLE)
+	(void)radio_st;
+	const struct bt_gatt_attr *attr = _gatt_attr_by_handle(handle);
+	if (attr == NULL) return ALP_ERR_INVAL;
+	struct ble_conn_be *c   = (conn_st != NULL) ? (struct ble_conn_be *)conn_st->be_data : NULL;
+	struct bt_conn     *bt  = (c != NULL) ? c->bt : NULL;
+	int                 err = bt_gatt_notify(bt, attr, payload, (uint16_t)len);
+	return errno_to_alp(err);
+#else
 	(void)radio_st;
 	(void)conn_st;
 	(void)handle;
 	(void)payload;
 	(void)len;
-	/* bt_gatt_notify takes an attr pointer, not a handle.  The
-     * v0.3.x runtime shim above will materialise that mapping;
-     * for v0.3 the call falls through to NOSUPPORT until services
-     * are registered via the runtime path. */
 	return ALP_ERR_NOSUPPORT;
+#endif
 }
 
 static alp_status_t
@@ -393,17 +710,46 @@ static alp_status_t z_gatt_read(alp_ble_conn_state_t *conn_st,
                                 size_t               *out_len,
                                 uint32_t              timeout_ms)
 {
+#if defined(CONFIG_ALP_SDK_BLE)
+	/* GATT *client* read of a connected peer's characteristic (the
+     * handle came from that peer's discovery, not our own registered
+     * services above).  bt_gatt_read() is async; block on a k_sem until
+     * ble_read_cb() completes it or timeout_ms elapses.
+     * @par BENCH-UNVERIFIED (issue #480): correct against the upstream
+     * async API, but native_sim ships no working BLE controller (see
+     * this file's header) so no live peer connection exists to drive
+     * this end-to-end offline; needs a real two-device bench proof. */
+	struct ble_conn_be *c = (struct ble_conn_be *)conn_st->be_data;
+	if (c == NULL || c->bt == NULL) return ALP_ERR_NOT_READY;
+
+	struct ble_read_ctx ctx = {
+		.params =
+		    {
+		        .func         = ble_read_cb,
+		        .handle_count = 1,
+		        .single       = { .handle = handle, .offset = 0 },
+		    },
+		.out     = out,
+		.out_cap = out_cap,
+		.out_len = out_len,
+		.result  = ALP_ERR_TIMEOUT,
+	};
+	k_sem_init(&ctx.done, 0, 1);
+
+	int err = bt_gatt_read(c->bt, &ctx.params);
+	if (err != 0) return errno_to_alp(err);
+
+	if (k_sem_take(&ctx.done, K_MSEC(timeout_ms)) != 0) return ALP_ERR_TIMEOUT;
+	return ctx.result;
+#else
 	(void)conn_st;
 	(void)handle;
 	(void)out;
 	(void)out_cap;
 	(void)out_len;
 	(void)timeout_ms;
-	/* GATT discovery + sync read flow lands in v0.3.x once we've
-     * added the wait-for-callback helper.  bt_gatt_read is async
-     * via bt_gatt_read_func_t; the wrapper needs a semaphore +
-     * scratch buffer per call.  Keep NOSUPPORT for now. */
 	return ALP_ERR_NOSUPPORT;
+#endif
 }
 
 static alp_status_t z_gatt_write(alp_ble_conn_state_t *conn_st,
@@ -412,14 +758,39 @@ static alp_status_t z_gatt_write(alp_ble_conn_state_t *conn_st,
                                  size_t                len,
                                  uint32_t              timeout_ms)
 {
+#if defined(CONFIG_ALP_SDK_BLE)
+	/* Same story as z_gatt_read() above -- BENCH-UNVERIFIED (#480),
+     * correct against bt_gatt_write() but unreachable offline without a
+     * live peer connection. */
+	struct ble_conn_be *c = (struct ble_conn_be *)conn_st->be_data;
+	if (c == NULL || c->bt == NULL) return ALP_ERR_NOT_READY;
+
+	struct ble_write_ctx ctx = {
+		.params =
+		    {
+		        .func   = ble_write_cb,
+		        .handle = handle,
+		        .offset = 0,
+		        .data   = data,
+		        .length = (uint16_t)len,
+		    },
+		.result = ALP_ERR_TIMEOUT,
+	};
+	k_sem_init(&ctx.done, 0, 1);
+
+	int err = bt_gatt_write(c->bt, &ctx.params);
+	if (err != 0) return errno_to_alp(err);
+
+	if (k_sem_take(&ctx.done, K_MSEC(timeout_ms)) != 0) return ALP_ERR_TIMEOUT;
+	return ctx.result;
+#else
 	(void)conn_st;
 	(void)handle;
 	(void)data;
 	(void)len;
 	(void)timeout_ms;
-	/* Same v0.3.x story as gatt_read -- async API needs a semaphore
-     * shim before it fits the synchronous public surface. */
 	return ALP_ERR_NOSUPPORT;
+#endif
 }
 
 /* ------------------------------------------------------------------ */
