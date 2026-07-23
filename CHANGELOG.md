@@ -5,7 +5,87 @@ All notable changes to the Alp SDK are documented here.  Format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
-## [Unreleased] - v0.12.0 candidate
+## [Unreleased] - v0.13.0 candidate
+
+## [v0.12.0] - 2026-07-22
+
+### Added — build-plan hermetic path tokenization (`planPathMode: tokened`, ADR-0020 item 5)
+
+- `--emit build-plan` can now tokenize every path-bearing value (`env`/
+  `envAppendPath` → `${SDK_ROOT}`; each Zephyr slice's `appDir`/
+  `-DSB_CONF_FILE=`/`-DEXTRA_CONF_FILE=` → `${PROJECT_ROOT}`;
+  `-DPython3_EXECUTABLE=` → `${PYTHON}`) instead of baking in the emitting
+  checkout's absolute paths, gated by a new additive top-level
+  `planPathMode: "tokened"` field (default emit is unchanged — still
+  concrete, untokenized paths). A cached or relocated plan now resolves
+  against the consuming checkout's own roots instead of silently pinning
+  the machine that emitted it; `_tokenize` raises `UnrootedPathError`
+  rather than letting a non-hermetic path reach `command.args` silently.
+  Consumer: `tan-cli` #24. (#865, #873)
+
+### Added — `--emit scaffold`: SKU-parameterized zephyr-app project scaffold
+
+- New emit surface: `--emit scaffold --template <id> --sku <SKU>` produces
+  a buildable, standalone Zephyr application scaffold parameterized per
+  target SoM. The application core is derived from the target SKU's own
+  `metadata/e1m_modules/<SKU>.yaml` `topology:` instead of being
+  hardcoded — e.g. `--sku E1M-V2N101` now emits `cores: m33_sm` instead of
+  the Alif `m55_hp`. The generated `README.md` derives the real `-b
+  <board>` target from the SKU and pins its doc links to the released tag
+  instead of `main`; the generated `CMakeLists.txt` guards `ALP_SDK_ROOT`
+  (FATAL if neither `-D` nor the environment sets it) and uses
+  `$ALP_SDK_ROOT` instead of a hardcoded `$(pwd)` for
+  `-DEXTRA_ZEPHYR_MODULES`. (#864, #875, #877)
+
+### Fixed — `--emit scaffold`: `pins:` blocks portable across SoM families
+
+- Scaffolded `pins:` blocks now resolve across SoM families via a
+  `board_alias` join over the E1M/E1M-X pad-route maps (e.g.
+  `E1M_GPIO_IO4` → `E1M_X_GPIO_IO28`), macro-first so a multi-alias pad
+  can't silently scaffold to the wrong pad. E1M-V2N101 — dropped from the
+  peripheral/sensor/edge-ai scaffold templates in #864/#877 pending this
+  fix — is re-added. (#876)
+
+### Added — planner wires per-core `alp.conf` via `EXTRA_CONF_FILE` (ADR-0020 §4)
+
+- Each non-sysbuild Zephyr slice's plan command now appends
+  `-DEXTRA_CONF_FILE=<build/<core>-zephyr/alp.conf>`, and
+  `_emit_library_hw_backends` (the HW-accelerator Kconfig block) is folded
+  into the same `_slice_alp_conf` path `alp_project.py --core` already
+  uses, so a plan's `configArtefacts` and a real `--emit zephyr-conf
+  --core` invocation stay byte-identical (pinned by the new
+  `check_zephyr_conf_parity.py` gate). Sysbuild slices deliberately carry
+  NO `-DEXTRA_CONF_FILE` (Option A): a bare top-level one would land on
+  the sysbuild image, not the app image, silently dropping the per-core
+  config on `boot:`/OTA projects. (#851, #863, #871)
+- Sysbuild slices instead get their per-core `alp.conf` from the example's
+  own `CMakeLists.txt`, which now passes `--core <id>` to its
+  `alp_project.py --emit zephyr-conf` call — fixing a latent cross-core
+  Kconfig leak on multi-Zephyr-core SoMs (an unscoped emit used to sum
+  every core's config into one) (#870). Also migrates every
+  `OVERLAY_CONFIG` call site to Zephyr's `EXTRA_CONF_FILE` (the 3.4.0+
+  rename; `OVERLAY_CONFIG` is a deprecated alias that warns on every
+  build).
+
+### Fixed — `alp.conf` emitter: stop assigning Kconfig symbols with unmet dependencies
+
+- The per-core `alp.conf` emitter assigned Kconfig symbols without
+  checking whether their `depends on` chain actually resolved: harmless
+  on a match, but a FATAL `undefined symbol ALP_SDK_WIFI_CC3501E ->
+  Aborting` Kconfig abort on a mismatch. The TLS-only path now calls
+  `add_network_base()` so its networking prerequisites are actually
+  emitted; `WIFI_CC3501E` is gated on a single resolved chip-state source
+  instead of being assigned unconditionally; the inference backend is
+  gated on `cores.*.inference:` or `libraries: tflite-micro` (was an
+  unconditional `BACKEND_TFLM=y`) with intra-alp parent-gating, and
+  `TENSORFLOW_LITE_MICRO`/`TENSORFLOW_LITE_MICRO_CPP` are emitted
+  alongside it. (#874, #879)
+- `tests/parity/seam1_field_diff.py` is retuned to compare
+  command/env/appDir/skip-fail-decision SHAPE only — artefact `contents`
+  moved to the `tests/fixtures/emit-snapshots/*.snap` goldens
+  (`check_emit_snapshots.py`) instead of being diffed inline, so an
+  intentional emitter content change no longer needs a bespoke seam-1
+  strip.
 
 ### Fixed — build-plan `executionPolicy` reverted from required to optional
 
