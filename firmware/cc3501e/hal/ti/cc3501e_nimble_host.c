@@ -22,8 +22,8 @@
  * Symbol grounding (verified against SDK 10.10.01.08 ticlang libs 2026-06-18):
  *  - BleIf_EnableBLE()            : ti/net/ble_interface (ble_interface.a)
  *  - nimble_port_init / _run, ble_transport_ll_init, ble_svc_{gap,gatt,dis}_init,
- *    ble_gatts_count_cfg / _add_svcs, ble_gap_ext_adv_{configure,set_data,start,
- *    remove}, ble_hs_adv_set_fields_mbuf, ble_svc_gap_device_name_set,
+ *    ble_gatts_count_cfg / _add_svcs / _reset / _start, ble_gap_ext_adv_{configure,
+ *    set_data,start,remove}, ble_hs_adv_set_fields_mbuf, ble_svc_gap_device_name_set,
  *    ble_hs_is_enabled, ble_hs_id_*, ble_npl_task_init, ble_store_*_init,
  *    os_msys_get_pkthdr  : third_party/nimble (nimble.a)
  *  - osi_SyncObj* / OSI_WAIT_FOR_SECOND : wifi_platform_cc35xx.a via osi_dpl.c
@@ -141,9 +141,11 @@ void ble_store_ram_init(void);
 
 /* ------------------------------------------------------------------ */
 /* GATT server -- one minimal primary service so the peripheral is not  */
-/* attribute-empty (host can still add richer tables via GATT_REGISTER  */
-/* in a later rev).  Read/write/notify characteristic, like the demo's  */
-/* TI Simple Peripheral but pared to a single characteristic.           */
+/* attribute-empty even before any GATT_REGISTER call.  Read/write/notify */
+/* characteristic, like the demo's TI Simple Peripheral but pared to a   */
+/* single characteristic.  cc3501e_nimble_gatt_register() (below) ADDS a */
+/* second, caller-defined service alongside this one -- it does not     */
+/* replace it.                                                          */
 /* ------------------------------------------------------------------ */
 #define CC3501E_SVC_UUID16 0xFFF0u
 #define CC3501E_CHR_UUID16 0xFFF1u
@@ -199,6 +201,74 @@ static int cc3501e_gatt_svr_init(void)
 		return rc;
 	}
 	return ble_gatts_add_svcs(s_gatt_svcs);
+}
+
+/* ------------------------------------------------------------------ */
+/* GATT server -- dynamic service (BLE_GATT_REGISTER, 0x38).            */
+/*                                                                      */
+/* Static storage: ble_gatts_add_svcs() does not copy the svc/chr/uuid   */
+/* tables it is given -- the ATT server keeps referencing them for the   */
+/* service's whole lifetime -- so a stack-local table would dangle the   */
+/* moment cc3501e_nimble_gatt_register() returned.  v1 supports exactly  */
+/* ONE dynamic service (one register call); a second call is rejected    */
+/* rather than silently leaking/replacing the first -- multi-service      */
+/* stacking is a follow-up if a customer needs it.                       */
+/* ------------------------------------------------------------------ */
+
+/* HAL-side storage cap, independent of the wire-format cap
+ * (ALP_CC3501E_BLE_GATT_MAX_CHARS in <alp/protocol/cc3501e.h>) -- this TU
+ * stays wire-protocol-agnostic (see cc3501e_hw.h), so the two are not
+ * #include-linked; cc3501e_hw_ble_gatt_register's handles_cap argument is
+ * the actual cross-check (worker.c sizes it from the wire header). Must be
+ * >= the wire cap or a legal descriptor could exceed this table. */
+#define CC3501E_GATT_DYN_MAX_CHARS 8u
+
+/* Per-characteristic value storage cap.  A GATT_REGISTER initial_value
+ * longer than this is rejected outright (not silently truncated) -- 64
+ * bytes comfortably covers a small telemetry/config value at the default
+ * ATT MTU (23 bytes) and several MTU-negotiated steps beyond it. */
+#define CC3501E_GATT_DYN_CHR_VAL_MAX 64u
+
+typedef struct {
+	uint16_t len;
+	uint8_t  value[CC3501E_GATT_DYN_CHR_VAL_MAX];
+} cc3501e_gatt_dyn_val_t;
+
+static int                     s_dyn_svc_registered;
+static ble_uuid128_t           s_dyn_svc_uuid;
+static ble_uuid128_t           s_dyn_chr_uuid[CC3501E_GATT_DYN_MAX_CHARS];
+static cc3501e_gatt_dyn_val_t  s_dyn_chr_val[CC3501E_GATT_DYN_MAX_CHARS];
+static uint16_t                s_dyn_chr_val_handle[CC3501E_GATT_DYN_MAX_CHARS];
+static struct ble_gatt_chr_def s_dyn_chrs[CC3501E_GATT_DYN_MAX_CHARS + 1u]; /* +1 terminator */
+static struct ble_gatt_svc_def s_dyn_svcs[2];                               /* +1 terminator */
+
+/* Single access callback shared by every dynamic characteristic; @p arg is
+ * the per-characteristic cc3501e_gatt_dyn_val_t* (set as chr_def.arg below),
+ * same read/write shape as the fixed demo's cc3501e_gatt_chr_access. */
+static int cc3501e_gatt_dyn_chr_access(uint16_t                     conn_handle,
+                                       uint16_t                     attr_handle,
+                                       struct ble_gatt_access_ctxt *ctxt,
+                                       void                        *arg)
+{
+	(void)conn_handle;
+	(void)attr_handle;
+	cc3501e_gatt_dyn_val_t *v = (cc3501e_gatt_dyn_val_t *)arg;
+
+	switch (ctxt->op) {
+	case BLE_GATT_ACCESS_OP_READ_CHR: {
+		int rc = os_mbuf_append(ctxt->om, v->value, v->len);
+		return (rc == 0) ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
+	}
+	case BLE_GATT_ACCESS_OP_WRITE_CHR: {
+		uint16_t len = 0u;
+		int      rc  = ble_hs_mbuf_to_flat(ctxt->om, v->value, CC3501E_GATT_DYN_CHR_VAL_MAX, &len);
+		if (rc != 0) return BLE_ATT_ERR_UNLIKELY;
+		v->len = len;
+		return 0;
+	}
+	default:
+		return BLE_ATT_ERR_UNLIKELY;
+	}
 }
 
 /* ------------------------------------------------------------------ */
@@ -810,27 +880,166 @@ int cc3501e_nimble_gatt_write(uint16_t handle, const uint8_t *data, uint16_t len
 }
 
 /* ------------------------------------------------------------------ */
-/* GATT server.                                                         */
+/* GATT server -- dynamic registration (BLE_GATT_REGISTER, 0x38).       */
 /*                                                                      */
-/* v0.3 LIMITATION: the host's GATT_REGISTER descriptor has no defined    */
-/* wire format yet, so the firmware exposes a FIXED demo service          */
-/* registered once at BLE enable (cc3501e_gatt_svr_init: primary 0xFFF0   */
-/* with a single read/write/notify characteristic 0xFFF1, value handle    */
-/* s_chr_val_handle).  cc3501e_nimble_gatt_register() therefore does not   */
-/* parse the descriptor -- it confirms the demo service is present and     */
-/* returns OK so the host can drive notify/read/write against a known      */
-/* attribute.  A descriptor-driven dynamic table is a follow-up.          */
-/* ------------------------------------------------------------------ */
-int cc3501e_nimble_gatt_register(const uint8_t *desc, uint16_t desc_len)
+/* Descriptor layout: version(1) | service_uuid(16) | num_chars(1) then, */
+/* per characteristic: char_uuid(16) | properties(1) | initial_len(LE16) */
+/* | initial_value[initial_len] -- see the wire-format doc block in      */
+/* <alp/protocol/cc3501e.h>.  protocol_ble.c has already length/shape-    */
+/* validated @p desc (version, num_chars bound, every record fits          */
+/* exactly) before this runs off the worker drain, so this parse trusts    */
+/* the shape and only re-checks the two HAL-local storage caps            */
+/* (CC3501E_GATT_DYN_MAX_CHARS, CC3501E_GATT_DYN_CHR_VAL_MAX) that the      */
+/* wire layer does not know about.                                        */
+/*                                                                        */
+/* NimBLE lifecycle -- exactly ONE ble_gatts_start() against a live server: */
+/*                                                                          */
+/* The host's automatic first ble_gatts_start() (BLE_HS_AUTO_START, fired   */
+/* by nimble_port_run() before cc3501e_nimble_host_start() returns) has      */
+/* ALREADY registered the fixed demo service and populated ble_att_svr_list   */
+/* with its ble_att_svr_entry nodes.  A naive second ble_gatts_start() is a    */
+/* USE-AFTER-FREE: ble_gatts_start() -> ble_att_svr_start() (ble_att_svr.c)     */
+/* unconditionally ble_att_svr_free_start_mem()s the attribute-entry pool and   */
+/* re-mallocs it, but ble_att_svr_list is untouched by that path (only            */
+/* ble_att_svr_init() -- called once, at ble_hs init, never again --              */
+/* STAILQ_INITs it) -- so the demo's entries dangle into freed heap and every      */
+/* subsequent STAILQ_FOREACH walk over ble_att_svr_list (ATT read/write/MTU/        */
+/* discovery) touches freed memory.                                                 */
+/*                                                                                    */
+/* Fix: ble_gatts_reset() (ble_gatts.c) first.  It calls ble_att_svr_reset()           */
+/* (ble_att_svr.c), which STAILQ_REMOVE_HEADs every entry off ble_att_svr_list          */
+/* and ble_att_svr_hidden_list and frees each one back into the pool -- this             */
+/* happens BEFORE ble_att_svr_start()'s free+remalloc, so the list is properly            */
+/* emptied while the pool it points into is still live; nothing dangles.  Both             */
+/* calls share ble_gatts_mutable()'s guard (no active connection/adv/discover/              */
+/* connect) -- if that is not met they return BLE_HS_EBUSY rather than touch                 */
+/* anything, so a register attempt during an active link errors, it does not                 */
+/* corrupt.  After the reset we re-queue BOTH service tables -- the demo's                     */
+/* s_gatt_svcs (its ble_gatts_svc_defs entry was freed by the first                              */
+/* ble_gatts_start()'s ble_gatts_free_svc_defs(), but s_gatt_svcs itself is a                      */
+/* static const table, still valid to re-add) and our new s_dyn_svcs -- then                       */
+/* call ble_gatts_start() exactly once.  ble_gatts_count_cfg() is NOT re-run for                     */
+/* the demo table: its doc comment (ble_gatts.c) says counts accumulate without                       */
+/* being cleared first, and ble_hs_max_attrs/services/client_configs already                           */
+/* carry the demo's counts from cc3501e_gatt_svr_init()'s one-time call -- re-                           */
+/* counting it here would double it.  ble_att_svr_id resets to 0 in                                       */
+/* ble_att_svr_reset(), and ble_gatts_register_svcs() (run inside                                          */
+/* ble_gatts_start()) walks ble_gatts_svc_defs in order, so re-registering the                              */
+/* demo table FIRST reproduces its original attribute handles (s_chr_val_handle                              */
+/* comes out identical) before the dynamic table's handles are assigned after                                  */
+/* it -- the demo characteristic (0xFFF0/0xFFF1) keeps working post-register.                                   */
+int cc3501e_nimble_gatt_register(const uint8_t *desc,
+                                 uint16_t       desc_len,
+                                 uint16_t      *handles_out,
+                                 uint16_t       handles_cap,
+                                 uint16_t      *num_handles_out)
 {
-	(void)desc;
-	(void)desc_len;
+	if (num_handles_out != 0) {
+		*num_handles_out = 0u;
+	}
+	if (desc == 0 || handles_out == 0 || num_handles_out == 0) {
+		return -1;
+	}
 	if (!ble_hs_is_enabled()) {
 		return -1;
 	}
-	/* s_chr_val_handle is assigned by ble_gatts_add_svcs() during host start; a
-	 * nonzero handle means the fixed demo service is live. */
-	return (s_chr_val_handle != 0u) ? 0 : -1;
+	if (s_dyn_svc_registered) {
+		return -1; /* v1: one dynamic service per boot -- see the block comment above */
+	}
+
+	/* Header: version(1) | service_uuid(16) | num_chars(1) -- shape already
+	 * validated by protocol_ble.c; desc_len is re-checked here anyway as an
+	 * independent bounds guard, so this HAL cannot over-read desc even if a
+	 * future caller ever reaches it without going through that validator. */
+	if (desc_len < 18u) {
+		return -1;
+	}
+	const uint8_t num_chars = desc[17];
+	if (num_chars == 0u || num_chars > CC3501E_GATT_DYN_MAX_CHARS) {
+		return -1; /* exceeds THIS HAL's storage, even if the wire cap allowed it */
+	}
+
+	memcpy(s_dyn_svc_uuid.value, &desc[1], 16u); /* verbatim -- alp_ble_uuid_t.b is
+	                                              * already little-endian, matching
+	                                              * ble_uuid128_t.value's order
+	                                              * (host/ble_uuid.h BLE_UUID128_INIT
+	                                              * doc: "little-endian order"). */
+	s_dyn_svc_uuid.u.type = BLE_UUID_TYPE_128;
+
+	size_t pos = 18u; /* BLE_GATT_REG_HDR in protocol_ble.c */
+	for (uint8_t i = 0u; i < num_chars; i++) {
+		if (pos + 16u + 1u + 2u > desc_len) {
+			return -1; /* record header would run past desc_len */
+		}
+		memcpy(s_dyn_chr_uuid[i].value, &desc[pos], 16u);
+		s_dyn_chr_uuid[i].u.type   = BLE_UUID_TYPE_128;
+		const uint8_t  properties  = desc[pos + 16u];
+		const uint16_t initial_len = (uint16_t)desc[pos + 17u] | ((uint16_t)desc[pos + 18u] << 8);
+		pos += 16u + 1u + 2u;
+
+		if (initial_len > CC3501E_GATT_DYN_CHR_VAL_MAX) {
+			return -1; /* HAL storage cap, not a wire-format limit */
+		}
+		if (pos + initial_len > desc_len) {
+			return -1; /* initial_value would run past desc_len */
+		}
+		memcpy(s_dyn_chr_val[i].value, &desc[pos], initial_len);
+		s_dyn_chr_val[i].len = initial_len;
+		pos += initial_len;
+
+		s_dyn_chr_val_handle[i]    = 0u;
+		s_dyn_chrs[i].uuid         = &s_dyn_chr_uuid[i].u;
+		s_dyn_chrs[i].access_cb    = cc3501e_gatt_dyn_chr_access;
+		s_dyn_chrs[i].arg          = &s_dyn_chr_val[i];
+		s_dyn_chrs[i].descriptors  = NULL;
+		s_dyn_chrs[i].flags        = (ble_gatt_chr_flags)properties; /* ALP_BLE_GATT_PROP_* ==
+		                                                              * BLE_GATT_CHR_F_* bits,
+		                                                              * verified against
+		                                                              * host/ble_gatt.h */
+		s_dyn_chrs[i].min_key_size = 0u;
+		s_dyn_chrs[i].val_handle   = &s_dyn_chr_val_handle[i];
+	}
+	memset(&s_dyn_chrs[num_chars], 0, sizeof(s_dyn_chrs[num_chars])); /* terminator */
+
+	s_dyn_svcs[0].type            = BLE_GATT_SVC_TYPE_PRIMARY;
+	s_dyn_svcs[0].uuid            = &s_dyn_svc_uuid.u;
+	s_dyn_svcs[0].includes        = NULL;
+	s_dyn_svcs[0].characteristics = s_dyn_chrs;
+	memset(&s_dyn_svcs[1], 0, sizeof(s_dyn_svcs[1])); /* terminator */
+
+	/* ble_gatts_reset() empties ble_att_svr_list/hidden_list into the still-
+	 * live pool (see the block comment above) -- fails BLE_HS_EBUSY, not
+	 * corruption, if a connection/adv/discover/connect is active. */
+	int rc = ble_gatts_reset();
+	if (rc != 0) {
+		return rc;
+	}
+	/* Re-queue the demo table first (no re-count -- see block comment),
+	 * then the new dynamic table, then start exactly once. */
+	rc = ble_gatts_add_svcs(s_gatt_svcs);
+	if (rc != 0) {
+		return rc;
+	}
+	rc = ble_gatts_count_cfg(s_dyn_svcs);
+	if (rc != 0) {
+		return rc;
+	}
+	rc = ble_gatts_add_svcs(s_dyn_svcs);
+	if (rc != 0) {
+		return rc;
+	}
+	rc = ble_gatts_start();
+	if (rc != 0) {
+		return rc;
+	}
+
+	const uint16_t n = (handles_cap < num_chars) ? handles_cap : num_chars;
+	for (uint16_t i = 0u; i < n; i++) {
+		handles_out[i] = s_dyn_chr_val_handle[i];
+	}
+	*num_handles_out     = n;
+	s_dyn_svc_registered = 1;
+	return 0;
 }
 
 int cc3501e_nimble_gatt_notify(uint16_t handle, const uint8_t *data, uint16_t len)
