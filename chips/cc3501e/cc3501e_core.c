@@ -166,6 +166,15 @@ static alp_status_t resp_to_status(uint8_t resp)
 		return ALP_ERR_NOT_READY;
 	case ALP_CC3501E_RESP_ERR_VERSION:
 		return ALP_ERR_VERSION;
+	case ALP_CC3501E_RESP_ERR_STATE:
+		/* Deterministic firmware reject (e.g. BLE_GATT_REGISTER's NimBLE
+		 * ble_gatts_mutable() ordering guard) -- distinct from ERR_BUSY's
+		 * "worker still running, re-poll" and from ERR_RADIO's "transport/
+		 * radio fault, maybe transient".  Mapped to the SAME ALP_ERR_BUSY a
+		 * caller sees for a retryable busy, but poll_by_repeat below treats
+		 * it as TERMINAL (checks the raw resp, not just the mapped status)
+		 * so it is never retried and never burns the poll budget. */
+		return ALP_ERR_BUSY;
 	case ALP_CC3501E_RESP_ERR_RADIO:
 	case ALP_CC3501E_RESP_ERR_PROTOCOL:
 	case ALP_CC3501E_RESP_ERR_INTERNAL:
@@ -378,8 +387,27 @@ alp_status_t poll_by_repeat(cc3501e_t        *ctx,
 	uint32_t     remaining = (timeout_ms > 0u) ? timeout_ms : 1u;
 	alp_status_t s;
 	for (;;) {
+		/* Sentinel: pre-set rx_scratch[0] to a byte the peek below never
+		 * matches (0xFF).  Only a real reply payload overwrites it with the
+		 * resp byte; a BUSY that comes from the transport (alp_spi_transceive
+		 * -EBUSY) rather than resp_to_status() then leaves the sentinel, so it
+		 * can never masquerade as RESP_ERR_STATE. */
+		ctx->rx_scratch[0] = 0xFFu;
 		s = cc3501e_request(
 		    ctx, cmd, tx_payload, tx_len, rx_buf, rx_cap, rx_len, CC3501E_REQ_TMO_MS);
+		/* resp_to_status() maps BOTH RESP_ERR_BUSY (worker still running --
+		 * genuinely retryable) and RESP_ERR_STATE (a deterministic firmware
+		 * reject -- e.g. BLE_GATT_REGISTER's NimBLE ordering guard) to the
+		 * same ALP_ERR_BUSY, since that is the correct final answer for
+		 * both.  But only the FORMER is worth re-polling: retrying the
+		 * latter just repeats the same reject until the budget is gone
+		 * (register-while-advertising must fail promptly, not after burning
+		 * the whole poll window).  Only a RESP_ERR_STATE reply writes 0x09
+		 * into rx_scratch[0] (the sentinel above rules out a transport BUSY),
+		 * so the peek disambiguates safely. */
+		if (s == ALP_ERR_BUSY && ctx->rx_scratch[0] == ALP_CC3501E_RESP_ERR_STATE) {
+			return s; /* terminal reject -- do not retry */
+		}
 		if (s != ALP_ERR_BUSY && s != ALP_ERR_IO) {
 			return s; /* OK or a non-retryable error -- done. */
 		}

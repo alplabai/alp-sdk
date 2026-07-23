@@ -18,9 +18,14 @@
  *   (b) DECODE -- a crafted reply (status | num_handles | handle(LE16)*n)
  *       -> handles_out, in declaration order.
  *   (c) ERRORS -- num_chars past the wire cap -> ALP_ERR_INVAL (host-side,
- *       before any transfer); a firmware ordering-guard reply -> ALP_ERR_BUSY
- *       (not a confusing IO/timeout -- see cc3501e_ble_gatt_register's
- *       @note on the NimBLE ble_gatts_mutable() constraint).
+ *       before any transfer); a firmware ordering-guard reply
+ *       (ALP_CC3501E_RESP_ERR_STATE) -> ALP_ERR_BUSY, returned on the FIRST
+ *       poll (not a confusing IO/timeout, and not retried for the whole
+ *       budget -- see cc3501e_ble_gatt_register's @note on the NimBLE
+ *       ble_gatts_mutable() constraint); a GENUINE, persistent radio/protocol
+ *       fault (ALP_CC3501E_RESP_ERR_RADIO) is retried for the whole budget and
+ *       surfaces ALP_ERR_TIMEOUT, unmasked -- NOT folded into ALP_ERR_BUSY the
+ *       way the old IO||TIMEOUT->BUSY remap used to do (#480/#892).
  */
 
 #include <string.h>
@@ -60,6 +65,10 @@ static struct {
 
 	uint8_t  reply_pl[ALP_CC3501E_MAX_PAYLOAD]; /* staged reply: status + data */
 	uint16_t reply_len;                         /* == 1 + data bytes */
+
+	uint32_t req_hdr_count; /* # of PH_REQ_HDR entries -- one per request/reply
+	                         * round trip; proves poll_by_repeat did (or did
+	                         * NOT) retry a given command. */
 } slave;
 
 static void slave_reset(void)
@@ -103,7 +112,8 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 	}
 	switch (slave.phase) {
 	case PH_REQ_HDR:
-		slave.cmd     = tx[0];
+		slave.cmd = tx[0];
+		slave.req_hdr_count++;
 		slave.req_len = (uint16_t)tx[2] | ((uint16_t)tx[3] << 8);
 		if (rx != NULL) {
 			memset(rx, ALP_CC3501E_SYNC_IDLE, len);
@@ -298,9 +308,13 @@ ZTEST(cc3501e_ble_gatt_register, test_register_num_chars_over_max_rejected)
 }
 
 /* (c) the firmware's NimBLE ble_gatts_mutable() ordering guard (register
- * attempted while advertising/scanning/connected) collapses to
- * RESP_ERR_RADIO on the wire -- the host must remap that to ALP_ERR_BUSY,
- * not a confusing IO/timeout (see cc3501e_ble_gatt_register's @note). */
+ * attempted while advertising/scanning/connected) is reported on the wire as
+ * the DISTINCT ALP_CC3501E_RESP_ERR_STATE (#480/#892, no longer folded into
+ * RESP_ERR_RADIO) -- the host maps that straight to ALP_ERR_BUSY, and
+ * TERMINALLY: exactly one request/reply round trip, no poll_by_repeat retry
+ * loop burning the budget on a reject that will not change (see
+ * cc3501e_ble_gatt_register's @note + poll_by_repeat's @note in
+ * cc3501e_internal.h). */
 ZTEST(cc3501e_ble_gatt_register, test_register_firmware_ordering_guard_maps_to_busy)
 {
 	alp_ble_radio_state_t state = open_cc3501e_state();
@@ -314,11 +328,48 @@ ZTEST(cc3501e_ble_gatt_register, test_register_firmware_ordering_guard_maps_to_b
 	};
 	alp_ble_attr_handle_t handles_out[1] = { 0 };
 
-	stage_status(ALP_CC3501E_RESP_ERR_RADIO);
+	stage_status(ALP_CC3501E_RESP_ERR_STATE);
+	slave.req_hdr_count = 0u; /* BLE_ENABLE from open() already ran; count only this call */
 
 	zassert_equal(state.ops->gatt_register_service(&state, &def, handles_out),
 	              ALP_ERR_BUSY,
 	              "firmware ordering-guard trip -> ALP_ERR_BUSY, not IO/TIMEOUT");
+	zassert_equal(slave.req_hdr_count,
+	              1u,
+	              "terminal reject -- exactly one round trip, no poll_by_repeat retry");
+
+	state.ops->close(&state);
+}
+
+/* (c) UN-MASKING (#480/#892): a GENUINE radio/protocol failure -- distinct
+ * from the ordering-guard reject above -- still reports RESP_ERR_RADIO on the
+ * wire.  resp_to_status() maps that to ALP_ERR_IO, which poll_by_repeat
+ * (unchanged for this code -- only RESP_ERR_STATE got the terminal carve-out)
+ * keeps retrying as a possibly-transient bridge desync; the fake slave never
+ * clears the fault, so the budget (CC3501E_BLE_OP_TIMEOUT_MS) elapses and the
+ * call surfaces ALP_ERR_TIMEOUT -- MANY round trips, not the single one the
+ * ordering-guard reject gets, and (the actual regression check) NOT
+ * ALP_ERR_BUSY the way the old IO||TIMEOUT->BUSY remap used to fold it. */
+ZTEST(cc3501e_ble_gatt_register, test_register_genuine_radio_fault_stays_unmasked)
+{
+	alp_ble_radio_state_t state = open_cc3501e_state();
+
+	const alp_ble_char_def_t chars[1] = {
+		{ .properties = ALP_BLE_GATT_PROP_READ, .initial_value = NULL, .initial_len = 0u },
+	};
+	const alp_ble_service_def_t def = {
+		.chars     = chars,
+		.num_chars = 1u,
+	};
+	alp_ble_attr_handle_t handles_out[1] = { 0 };
+
+	stage_status(ALP_CC3501E_RESP_ERR_RADIO);
+	slave.req_hdr_count = 0u; /* BLE_ENABLE from open() already ran; count only this call */
+
+	alp_status_t rc = state.ops->gatt_register_service(&state, &def, handles_out);
+	zassert_equal(rc, ALP_ERR_TIMEOUT, "persistent genuine radio fault -> ALP_ERR_TIMEOUT");
+	zassert_not_equal(rc, ALP_ERR_BUSY, "un-masked -- no longer folded into ALP_ERR_BUSY");
+	zassert_true(slave.req_hdr_count > 1u, "genuine fault IS retried (unlike the STATE reject)");
 
 	state.ops->close(&state);
 }

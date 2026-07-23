@@ -243,7 +243,15 @@ typedef enum {
 	ALP_CC3501E_RESP_ERR_RADIO     = 0x06, /**< RF / antenna failure. */
 	ALP_CC3501E_RESP_ERR_PROTOCOL  = 0x07, /**< Frame mis-parse. */
 	ALP_CC3501E_RESP_ERR_VERSION   = 0x08, /**< Firmware ↔ host version mismatch. */
-	ALP_CC3501E_RESP_ERR_INTERNAL  = 0xFF
+	/** Op rejected because of the subsystem's CURRENT state (e.g. NimBLE's
+	 *  ble_gatts_mutable() ordering guard on BLE_GATT_REGISTER while
+	 *  advertising/scanning/connected).  Distinct from @ref
+	 *  ALP_CC3501E_RESP_ERR_RADIO: this is a deterministic, terminal reject --
+	 *  retrying without the caller first changing that state (stop
+	 *  advertising / disconnect) repeats the same answer, so the host must
+	 *  not poll-by-repeat it like a transient radio/bridge fault. */
+	ALP_CC3501E_RESP_ERR_STATE    = 0x09,
+	ALP_CC3501E_RESP_ERR_INTERNAL = 0xFF
 } alp_cc3501e_resp_t;
 
 /* ------------------------------------------------------------------ */
@@ -686,6 +694,13 @@ typedef struct {
  * unverified on silicon as of this wire-format revision.  A firmware error
  * reply here means the service did NOT take effect; retry after a fresh
  * BLE_ENABLE if the error persists.
+ *
+ * The frame-level resp is @ref ALP_CC3501E_RESP_ERR_STATE (not
+ * ALP_CC3501E_RESP_ERR_RADIO) when ble_gatts_start()/add_svcs()/reset() hit
+ * NimBLE's ble_gatts_mutable() ordering guard (BLE_HS_EBUSY -- an active
+ * connection/adv/discover/connect) -- the host maps that to ALP_ERR_BUSY and
+ * does not retry it; a genuine transport/radio failure still surfaces as
+ * ALP_CC3501E_RESP_ERR_RADIO -> ALP_ERR_IO.
  */
 typedef struct {
 	uint8_t version;

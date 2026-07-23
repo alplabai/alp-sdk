@@ -44,6 +44,7 @@
 #include "ble_if.h"     /* BleIf_EnableBLE */
 #include "osi_kernel.h" /* OsiSyncObj_t / osi_SyncObj* / OSI_WAIT_FOR_SECOND / OSI_OK */
 
+#include "../cc3501e_hw.h" /* CC3501E_HW_ERR_STATE -- see cc3501e_nimble_gatt_register() */
 #include "cc3501e_nimble_host.h"
 
 /* ------------------------------------------------------------------ */
@@ -914,7 +915,9 @@ int cc3501e_nimble_gatt_write(uint16_t handle, const uint8_t *data, uint16_t len
 /* calls share ble_gatts_mutable()'s guard (no active connection/adv/discover/              */
 /* connect) -- if that is not met they return BLE_HS_EBUSY rather than touch                 */
 /* anything, so a register attempt during an active link errors, it does not                 */
-/* corrupt.  After the reset we re-queue BOTH service tables -- the demo's                     */
+/* corrupt -- surfaced below as the distinct CC3501E_HW_ERR_STATE, not the generic             */
+/* CC3501E_HW_ERR_IO a real NimBLE failure gets (cc3501e_gatt_reg_map_rc).  After the           */
+/* reset we re-queue BOTH service tables -- the demo's                                          */
 /* s_gatt_svcs (its ble_gatts_svc_defs entry was freed by the first                              */
 /* ble_gatts_start()'s ble_gatts_free_svc_defs(), but s_gatt_svcs itself is a                      */
 /* static const table, still valid to re-add) and our new s_dyn_svcs -- then                       */
@@ -928,6 +931,18 @@ int cc3501e_nimble_gatt_write(uint16_t handle, const uint8_t *data, uint16_t len
 /* demo table FIRST reproduces its original attribute handles (s_chr_val_handle                              */
 /* comes out identical) before the dynamic table's handles are assigned after                                  */
 /* it -- the demo characteristic (0xFFF0/0xFFF1) keeps working post-register.                                   */
+/* ble_gatts_reset()/ble_gatts_add_svcs()/ble_gatts_start() (ble_gatts.c) all
+ * share the ble_gatts_mutable() guard and return BLE_HS_EBUSY -- not any other
+ * failure -- when a connection/adv/discover/connect is active (see the block
+ * comment above cc3501e_nimble_gatt_register()).  Surface THAT specific,
+ * deterministic reject as CC3501E_HW_ERR_STATE so the caller (cc3501e_hw_ti_ble.c)
+ * does not fold it into the generic CC3501E_HW_ERR_IO a real NimBLE failure gets;
+ * every other nonzero rc passes through unchanged. */
+static int cc3501e_gatt_reg_map_rc(int rc)
+{
+	return (rc == BLE_HS_EBUSY) ? CC3501E_HW_ERR_STATE : rc;
+}
+
 int cc3501e_nimble_gatt_register(const uint8_t *desc,
                                  uint16_t       desc_len,
                                  uint16_t      *handles_out,
@@ -1012,25 +1027,25 @@ int cc3501e_nimble_gatt_register(const uint8_t *desc,
 	 * corruption, if a connection/adv/discover/connect is active. */
 	int rc = ble_gatts_reset();
 	if (rc != 0) {
-		return rc;
+		return cc3501e_gatt_reg_map_rc(rc);
 	}
 	/* Re-queue the demo table first (no re-count -- see block comment),
 	 * then the new dynamic table, then start exactly once. */
 	rc = ble_gatts_add_svcs(s_gatt_svcs);
 	if (rc != 0) {
-		return rc;
+		return cc3501e_gatt_reg_map_rc(rc);
 	}
 	rc = ble_gatts_count_cfg(s_dyn_svcs);
 	if (rc != 0) {
-		return rc;
+		return cc3501e_gatt_reg_map_rc(rc);
 	}
 	rc = ble_gatts_add_svcs(s_dyn_svcs);
 	if (rc != 0) {
-		return rc;
+		return cc3501e_gatt_reg_map_rc(rc);
 	}
 	rc = ble_gatts_start();
 	if (rc != 0) {
-		return rc;
+		return cc3501e_gatt_reg_map_rc(rc);
 	}
 
 	const uint16_t n = (handles_cap < num_chars) ? handles_cap : num_chars;
