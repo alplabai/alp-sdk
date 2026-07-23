@@ -66,6 +66,14 @@ def _run_case(board_yaml: str, core: str) -> list[str]:
     proc = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True, env=env)
     label = f"{board_yaml}::{core}"
 
+    # TEMPORARY (#893): echo stderr even on a zero exit -- it carries
+    # alp_kconfig_dump.py's ALP_KCONFIG_DIAG lines, otherwise silently
+    # dropped by capture_output=True since the emit itself succeeds (the
+    # symptom is a shape problem, not a nonzero exit). Remove once the
+    # partial-tree symptom is root-caused.
+    if proc.stderr:
+        print(proc.stderr, file=sys.stderr, end="")
+
     if proc.returncode != 0:
         return [f"{label}: --emit kconfig exited {proc.returncode}: "
                 f"{proc.stderr.strip()}"]

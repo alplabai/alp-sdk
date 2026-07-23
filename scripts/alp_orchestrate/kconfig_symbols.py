@@ -231,6 +231,13 @@ def _load_board_symbols(zephyr_base: Path, board_triple: str) -> list[dict[str, 
         build_cmd = ["west", "build", "-d", str(build_dir), "-t", _KCONFIG_TARGET]
         proc = subprocess.run(build_cmd, cwd=zephyr_base.parent,
                               capture_output=True, text=True)
+        # TEMPORARY (#893): forward stderr (carries alp_kconfig_dump.py's
+        # ALP_KCONFIG_DIAG lines) even on success -- otherwise it's
+        # captured here and dropped, invisible to the CI log. Remove once
+        # the partial-tree symptom is root-caused (paired with the
+        # dumper's own temporary diagnostic).
+        if proc.stderr:
+            print(proc.stderr, file=sys.stderr, end="")
         if proc.returncode != 0:
             raise OrchestratorError(
                 f"--emit kconfig: `west build -t {_KCONFIG_TARGET}` failed "
