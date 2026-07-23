@@ -15,20 +15,31 @@ Two independent halves:
 
   * `_project_symbols` / `_envelope` -- pure JSON shaping, unit-tested from
     a fake symbol list with NO Zephyr installed (see
-    tests/scripts/test_emit_kconfig.py).
-  * `_load_board_symbols` -- Approach A (a stub `west build --cmake-only`,
-    then read kconfiglib against the *exact* env Zephyr's own
-    cmake/modules/kconfig.cmake computed for that invocation).  This is
-    workspace-dependent and is skipped locally without a bootstrapped
+    tests/scripts/test_emit_kconfig.py).  Reused verbatim (imported, not
+    duplicated) by `scripts/kconfig/alp_kconfig_dump.py` -- see below.
+  * `_load_board_symbols` -- Approach A: a stub `west build --cmake-only`
+    registers Zephyr's `EXTRA_KCONFIG_TARGET` custom-target mechanism
+    (`cmake/modules/kconfig.cmake` ~199-243 -- the same seam `west build -t
+    menuconfig` uses) pointed at `scripts/kconfig/alp_kconfig_dump.py`;
+    `west build -t alpkconfigjson` then runs it INSIDE the exact Kconfig
+    env Zephyr's own CMake computed for that board/toolchain/module set
+    (no env reconstruction needed -- Zephyr hands it over directly). This
+    is workspace-dependent and is skipped locally without a bootstrapped
     ZEPHYR_BASE; it is verified by the pr-twister CI job instead (see
     `scripts/check_emit_kconfig_contract.py`).
+
+    An earlier version tried overriding `-DPYTHON_EXECUTABLE=<spy>` to
+    capture kconfig.py's own env instead -- discarded: Zephyr's
+    `cmake/modules/python.cmake` re-derives `PYTHON_EXECUTABLE` via a
+    plain `set()` (not `_ifndef`), so a `-D` override is silently
+    clobbered before `kconfig.cmake` ever runs, and kconfig.py never
+    actually invokes the spy.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import stat
 import subprocess
 import sys
 import tempfile
@@ -59,19 +70,16 @@ def _require_workspace() -> Path:
     rest of the orchestrator's `OrchestratorError` -> exit(1) convention,
     marking "no workspace" as distinct from an ordinary usage error.
 
-    Also puts `$ZEPHYR_BASE/scripts/kconfig` on `sys.path`: kconfiglib is
-    a plain module file there, not a pip-installed package (Zephyr's own
-    kconfig.py relies on the same "runs from that directory" trick) --
-    every `import kconfiglib` in this module depends on this having run
-    first.
+    This process itself never imports kconfiglib (only
+    `scripts/kconfig/alp_kconfig_dump.py` does, in its own subprocess
+    running inside Zephyr's own env -- see `_load_board_symbols`); this
+    just probes `kconfiglib.py`'s presence as the "is this ZEPHYR_BASE
+    real" check.
     """
     raw = os.environ.get("ZEPHYR_BASE")
     if raw:
         zephyr_base = Path(raw)
         if _kconfiglib_path(zephyr_base).is_file():
-            kconfig_dir = str(_kconfig_dir(zephyr_base))
-            if kconfig_dir not in sys.path:
-                sys.path.insert(0, kconfig_dir)
             return zephyr_base
     print(
         "alp_orchestrate: --emit kconfig requires a bootstrapped Zephyr "
@@ -159,32 +167,12 @@ _STUB_CMAKELISTS = textwrap.dedent("""\
 
 _STUB_MAIN_C = "int main(void)\n{\n\treturn 0;\n}\n"
 
-# A transparent `PYTHON_EXECUTABLE` spy.  `cmake/modules/kconfig.cmake`
-# (Zephyr v4.4.0) invokes `${PYTHON_EXECUTABLE} ${ZEPHYR_BASE}/scripts/
-# kconfig/kconfig.py --zephyr-base=... <KCONFIG_ROOT> ...` inside
-# `${CMAKE_COMMAND} -E env <COMMON_KCONFIG_ENV_SETTINGS...>` -- a ~15-var
-# env (srctree, ARCH, ARCH_DIR, BOARD/BOARD_QUALIFIERS/BOARD_REVISION,
-# KCONFIG_BINARY_DIR, KCONFIG_BOARD_DIR, TOOLCHAIN_KCONFIG_DIR, EDT_PICKLE,
-# per-module ZEPHYR_<NAME>_KCONFIG, ...) that CMake alone computes from the
-# board/toolchain/module set.  Rather than hand-derive those ~15 vars here
-# (version-fragile -- see cmake/modules/kconfig.cmake), this spy captures
-# the exact env + argv CMake already worked out for THIS invocation, by
-# standing in for PYTHON_EXECUTABLE for the whole `--cmake-only` configure
-# and transparently forwarding every call to the real interpreter (so the
-# configure itself is unaffected) -- except the one call to kconfig.py,
-# which it snapshots first.
-_ENV_SPY = textwrap.dedent("""\
-    #!/usr/bin/env python3
-    import json, os, subprocess, sys
+# scripts/kconfig/alp_kconfig_dump.py -- a sibling of this package, not a
+# submodule of it (it has to run as a standalone script inside Zephyr's own
+# Kconfig env, not import this package).
+_DUMPER = Path(__file__).resolve().parent.parent / "kconfig" / "alp_kconfig_dump.py"
 
-    _dump = os.environ.get("_ALP_KCONFIG_ENV_DUMP")
-    _args = sys.argv[1:]
-    if _dump and _args and _args[0].replace("\\\\", "/").endswith(
-            "scripts/kconfig/kconfig.py"):
-        with open(_dump, "w", encoding="utf-8") as _f:
-            json.dump({"argv": _args, "environ": dict(os.environ)}, _f)
-    sys.exit(subprocess.call([sys.executable] + _args))
-    """)
+_KCONFIG_TARGET = "alpkconfigjson"
 
 
 def _write_stub_app(app_dir: Path) -> None:
@@ -194,82 +182,66 @@ def _write_stub_app(app_dir: Path) -> None:
     (app_dir / "src" / "main.c").write_text(_STUB_MAIN_C, encoding="utf-8")
 
 
-def _kconfig_root_from_argv(argv: list[str], zephyr_base: Path) -> str:
-    """The `kconfig_file` kconfig.py positional (== KCONFIG_ROOT) -- the
-    first non-flag token after the script path.  Falls back to
-    `$ZEPHYR_BASE/Kconfig` (the stub app declares no app-level Kconfig,
-    so that's what `cmake/modules/kconfig.cmake` resolves it to) if the
-    capture ever comes up short.
+def _load_board_symbols(zephyr_base: Path, board_triple: str) -> list[dict[str, Any]]:
+    """Approach A: configure a stub app for `board_triple`, then run
+    `alp_kconfig_dump.py` INSIDE Zephyr's own Kconfig env via the
+    `EXTRA_KCONFIG_TARGET` mechanism (the same seam `west build -t
+    menuconfig` uses -- see `alp_kconfig_dump.py`'s module docstring).
+    Returns the already-projected `list[dict]` the dumper wrote.
+
+    `west build` is a west extension command -- it needs to run from
+    inside a west workspace (a `.west/` upward from cwd), which
+    `alp_orchestrate` itself is never a part of. `$ZEPHYR_BASE/..` is
+    that workspace's topdir under every documented Zephyr `west init`
+    layout (Getting Started's `~/zephyrproject/{.west, zephyr,
+    modules,...}`, and the same layout pr-twister.yml's own `west init
+    -m .../zephyr .` step produces).
     """
-    positionals = [a for a in argv[1:] if not a.startswith("--")]
-    if positionals:
-        return positionals[0]
-    return str(zephyr_base / "Kconfig")
-
-
-def _load_board_symbols(zephyr_base: Path, board_triple: str) -> list[Any]:
-    """Approach A: configure a stub app for `board_triple`, capture the
-    exact Kconfig env/root Zephyr's own CMake computed, and load it with
-    kconfiglib directly.  Returns `kconf.unique_defined_syms`.
-    """
-    import kconfiglib  # local: only reachable once _require_workspace()
-                        # confirmed ZEPHYR_BASE/kconfiglib.py exist.
-
     tmp_dir = Path(tempfile.mkdtemp(prefix="alp-emit-kconfig-"))
     try:
         app_dir = tmp_dir / "stub"
         _write_stub_app(app_dir)
 
-        spy = tmp_dir / "_alp_kconfig_env_spy.py"
-        spy.write_text(_ENV_SPY, encoding="utf-8")
-        spy.chmod(spy.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
-
-        env_dump = tmp_dir / "kconfig-env.json"
         build_dir = tmp_dir / "build"
+        output_json = build_dir / "alp_kconfig.json"
+        # A CMake list (semicolon-separated -- COMMAND_EXPAND_LISTS on the
+        # custom target splits it into argv tokens): the dumper script,
+        # then its own `--output <path>` -- Zephyr appends ${KCONFIG_ROOT}
+        # as the final token itself (kconfig.cmake:238).
+        target_cmd = f"{_DUMPER};--output;{output_json}"
 
-        env = dict(os.environ)
-        env["_ALP_KCONFIG_ENV_DUMP"] = str(env_dump)
-
-        cmd = [
+        configure_cmd = [
             "west", "build", "--cmake-only",
             "-b", board_triple,
             "-d", str(build_dir),
             str(app_dir),
-            "--", f"-DPYTHON_EXECUTABLE={spy}",
+            "--",
+            f"-DEXTRA_KCONFIG_TARGETS={_KCONFIG_TARGET}",
+            f"-DEXTRA_KCONFIG_TARGET_COMMAND_FOR_{_KCONFIG_TARGET}={target_cmd}",
         ]
-        # `west build` is a west extension command -- it needs to run from
-        # inside a west workspace (a `.west/` upward from cwd), which
-        # `alp_orchestrate` itself is never a part of.  `$ZEPHYR_BASE/..`
-        # is that workspace's topdir under every documented Zephyr
-        # `west init` layout (Getting Started's `~/zephyrproject/{.west,
-        # zephyr, modules,...}`, and the same layout pr-twister.yml's own
-        # `west init -m .../zephyr .` step produces).
-        proc = subprocess.run(cmd, env=env, cwd=zephyr_base.parent,
+        proc = subprocess.run(configure_cmd, cwd=zephyr_base.parent,
                               capture_output=True, text=True)
         if proc.returncode != 0:
             raise OrchestratorError(
                 f"--emit kconfig: `west build --cmake-only -b "
                 f"{board_triple}` failed:\n{proc.stderr.strip()}")
-        if not env_dump.is_file():
+
+        # `add_custom_target` never runs at configure time -- `-t` builds
+        # it explicitly (a second, separate `west build`).
+        build_cmd = ["west", "build", "-d", str(build_dir), "-t", _KCONFIG_TARGET]
+        proc = subprocess.run(build_cmd, cwd=zephyr_base.parent,
+                              capture_output=True, text=True)
+        if proc.returncode != 0:
             raise OrchestratorError(
-                "--emit kconfig: `west build --cmake-only` completed but "
-                "never invoked kconfig.py -- unexpected Zephyr CMake "
-                "layout for this ZEPHYR_BASE (the PYTHON_EXECUTABLE spy "
-                "never fired)")
+                f"--emit kconfig: `west build -t {_KCONFIG_TARGET}` failed "
+                f"for board '{board_triple}':\n{proc.stderr.strip()}")
+        if not output_json.is_file():
+            raise OrchestratorError(
+                f"--emit kconfig: `west build -t {_KCONFIG_TARGET}` "
+                f"completed but never wrote {output_json} -- never emit a "
+                f"partial/empty menu")
 
-        captured = json.loads(env_dump.read_text(encoding="utf-8"))
-        kconfig_root = _kconfig_root_from_argv(captured["argv"], zephyr_base)
-
-        prior_environ = dict(os.environ)
-        os.environ.clear()
-        os.environ.update(captured["environ"])
-        try:
-            kconf = kconfiglib.Kconfig(
-                kconfig_root, warn=True, warn_to_stderr=False)
-        finally:
-            os.environ.clear()
-            os.environ.update(prior_environ)
-        return list(kconf.unique_defined_syms)
+        return json.loads(output_json.read_text(encoding="utf-8"))
     finally:
         import shutil
         shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -306,11 +278,9 @@ def emit_kconfig(project: BoardProject, core: Optional[str]) -> str:
 
     zephyr_base = _require_workspace()
 
-    import kconfiglib  # noqa: E402  (deferred: only importable once the
-                        # workspace guard above has confirmed it exists)
-
-    syms = _load_board_symbols(zephyr_base, slice_.board)
-    symbols = _project_symbols(
-        syms, type_to_str=kconfiglib.TYPE_TO_STR, expr_str=kconfiglib.expr_str)
+    # `alp_kconfig_dump.py` (run inside Zephyr's own Kconfig env -- see
+    # `_load_board_symbols`) already projects with the real kconfiglib, so
+    # this is just the envelope wrap.
+    symbols = _load_board_symbols(zephyr_base, slice_.board)
     envelope = _envelope(slice_.board, core, symbols)
     return json.dumps(envelope, indent=2) + "\n"

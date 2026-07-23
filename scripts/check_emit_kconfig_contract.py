@@ -115,6 +115,16 @@ def _run_case(board_yaml: str, core: str) -> list[str]:
 def main() -> int:
     argparse.ArgumentParser(description=__doc__).parse_args()
 
+    # Not a failure: this contract needs the real Zephyr workspace this
+    # script's own docstring says it does. `python scripts/alp_quality.py
+    # --profile pr` (and any other local-first sweep) must stay green
+    # without one -- the real gate runs in pr-twister.yml, which sets
+    # ZEPHYR_BASE.  Mirrors tests/scripts/test_emit_kconfig_workspace.py's
+    # skipif.
+    if not os.environ.get("ZEPHYR_BASE"):
+        print("skipped: --emit kconfig contract needs ZEPHYR_BASE")
+        return 0
+
     all_problems: list[str] = []
     for board_yaml, core in _CASES:
         label = f"{board_yaml}::{core}"
