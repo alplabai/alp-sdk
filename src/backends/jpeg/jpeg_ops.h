@@ -15,6 +15,7 @@
 #define ALP_BACKENDS_JPEG_OPS_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include <alp/backend.h>
@@ -30,6 +31,8 @@ typedef struct alp_jpeg_backend_state {
 
 /** Vtable each jpeg backend implements. */
 struct alp_jpeg_ops {
+	/* caps_out is never NULL -- src/jpeg_dispatch.c is the sole caller
+	 * and always passes a live stack alp_jpeg_caps_t. */
 	alp_status_t (*open)(const alp_jpeg_config_t  *cfg,
 	                     alp_jpeg_backend_state_t *state,
 	                     alp_jpeg_caps_t          *caps_out);

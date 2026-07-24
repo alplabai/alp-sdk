@@ -35,8 +35,7 @@ alp_status_t alp_jpeg_encode(alp_jpeg_t                  *h,
 }
 alp_status_t alp_jpeg_capabilities(const alp_jpeg_t *h, alp_jpeg_caps_t *out)
 {
-	(void)h;
-	if (out == NULL) {
+	if (h == NULL || out == NULL) {
 		return ALP_ERR_INVAL;
 	}
 	*out = (alp_jpeg_caps_t){ 0 };

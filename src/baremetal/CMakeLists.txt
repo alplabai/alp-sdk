@@ -82,6 +82,8 @@ target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/tmu/sw_fallback.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../camera_dispatch.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/camera/zephyr_stub.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../jpeg_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/jpeg/zephyr_stub.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../display_dispatch.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/display/zephyr_stub.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../power_dispatch.c
@@ -101,6 +103,7 @@ target_sources(alp_sdk PRIVATE
 
 target_compile_definitions(alp_sdk PRIVATE
     ALP_VENDOR_OVERRIDES_CAMERA=1
+    ALP_VENDOR_OVERRIDES_JPEG=1
     ALP_VENDOR_OVERRIDES_DISPLAY=1
     ALP_VENDOR_OVERRIDES_POWER=1
 )

@@ -12,6 +12,8 @@
  * out of the public alp_jpeg_encode() call.  The software baseline
  * (priority 50) and Alif Hantro VC9000E (priority 100, "alif:ensemble:e8")
  * backends outrank this stub once they land.
+ *
+ * @par Tracking: github.com/alplabai/alp-sdk/issues/898
  */
 
 #include <alp/backend.h>
@@ -58,7 +60,7 @@ ALP_BACKEND_REGISTER(jpeg,
                      zephyr_stub,
                      {
                          .silicon_ref = "*",
-                         .vendor      = "alp",
+                         .vendor      = "stub",
                          .base_caps   = 0u,
                          .priority    = 0u,
                          .ops         = &_ops,

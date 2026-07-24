@@ -113,7 +113,7 @@ alp_jpeg_t *alp_jpeg_open(const alp_jpeg_config_t *cfg);
 /**
  * @brief Encode one planar Y/U/V frame into a JPEG byte stream.
  *
- * @param[in]  h        Handle from @ref alp_jpeg_open.
+ * @param[in]  h         Handle from @ref alp_jpeg_open.
  * @param[in]  req       Frame + quality descriptor.  Must be non-NULL,
  *                       with non-zero @c width / @c height.
  * @param[out] out_buf   Destination buffer for the encoded stream.

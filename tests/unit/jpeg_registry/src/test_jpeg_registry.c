@@ -23,6 +23,7 @@ ZTEST(jpeg_registry, test_open_then_close_stub)
 	alp_jpeg_caps_t caps;
 	zassert_equal(alp_jpeg_capabilities(h, &caps), ALP_OK);
 	zassert_false(caps.hw_accelerated, "stub is not hw");
+	zassert_equal(alp_jpeg_capabilities(NULL, &caps), ALP_ERR_INVAL);
 
 	uint8_t               out[16];
 	size_t                out_len = 0;
@@ -30,7 +31,11 @@ ZTEST(jpeg_registry, test_open_then_close_stub)
 		.width = 16, .height = 16, .subsample = ALP_JPEG_SUBSAMPLE_420, .quality = 75
 	};
 	zassert_equal(alp_jpeg_encode(h, &req, out, sizeof(out), &out_len), ALP_ERR_NOT_IMPLEMENTED);
+
 	alp_jpeg_close(h);
+	zassert_equal(alp_jpeg_encode(h, &req, out, sizeof(out), &out_len), ALP_ERR_NOT_READY,
+	             "encode after close must be gated");
+	alp_jpeg_close(h); /* idempotent -- must not fault */
 }
 
 ZTEST_SUITE(jpeg_registry, NULL, NULL, NULL, NULL, NULL);
