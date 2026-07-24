@@ -52,6 +52,8 @@ CHIP_SCHEMA = REPO / "metadata" / "schemas" / "chip-v1.schema.json"
 CHIPS = REPO / "metadata" / "chips"
 BLOCK_SCHEMA = REPO / "metadata" / "schemas" / "block-v1.schema.json"
 BLOCKS = REPO / "metadata" / "blocks"
+NPU_OPS_SCHEMA = REPO / "metadata" / "schemas" / "npu-ops-v1.schema.json"
+NPU_OPS = REPO / "metadata" / "npu_ops"
 # Generated Zephyr board trees (one dir per <board>; each carries a twister
 # .yaml whose `identifier:` is the fully-qualified <board>/<soc>/<cpucluster>
 # triple `west build -b` resolves).  Ground truth for the board-target check.
@@ -767,6 +769,21 @@ def main() -> int:
             )
             block_failures += _check_block_realizations(block_files, chip_files)
 
+    # Per-NPU op-support lists (the static-analyzer data asset).
+    npu_ops_failures: list = []
+    npu_ops_files: list = []
+    if NPU_OPS_SCHEMA.is_file():
+        npu_ops_schema = json.loads(NPU_OPS_SCHEMA.read_text(encoding="utf-8"))
+        npu_ops_validator = jsonschema.Draft202012Validator(npu_ops_schema)
+        npu_ops_files = sorted(NPU_OPS.glob("*.json"))
+        if npu_ops_files:
+            print()
+            npu_ops_failures = _check_files(
+                "JSON", npu_ops_files, npu_ops_validator,
+                lambda p: json.loads(p.read_text(encoding="utf-8")),
+                "backend",
+            )
+
     # Library manifests (YAML) against library v1 (ADR 0018).
     library_failures: list = []
     library_semantic_failures: list = []
@@ -809,6 +826,7 @@ def main() -> int:
     total_failures = (len(soc_failures) + len(som_failures)
                       + len(hwrev_failures) + len(board_failures) + len(chip_failures)
                       + len(block_failures)
+                      + len(npu_ops_failures)
                       + len(library_failures) + len(library_semantic_failures)
                       + len(board_target_failures)
                       + len(restriction_failures)
@@ -819,6 +837,7 @@ def main() -> int:
           f"{len(hwrev_files)} hw-revisions file(s) + "
           f"{len(board_files)} board preset(s) + {len(chip_files)} chip file(s) + "
           f"{len(block_files)} block file(s) + "
+          f"{len(npu_ops_files)} npu-ops file(s) + "
           f"{len(library_files)} library manifest(s) + Kconfig registries + "
           f"tier-a-library-ci registry "
           f"checked, {total_failures} failure(s)")
