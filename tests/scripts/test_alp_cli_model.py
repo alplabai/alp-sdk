@@ -539,3 +539,55 @@ def test_model_check_board_explicit_sku_overrides_board():
     assert payload["sku"] == "E1M-V2N101"
     backends = {b["backend"] for b in payload["models"][0]["backends"]}
     assert "drpai" in backends
+
+
+def test_model_prep_json(tmp_path):
+    import json
+    import numpy as np
+    import pytest as _pytest
+    _pytest.importorskip("onnxruntime")
+    from click.testing import CliRunner
+    from alp_cli.main import cli
+    cal = tmp_path / "cal"; cal.mkdir()
+    rng = np.random.default_rng(0)
+    for i in range(8):
+        np.save(cal / f"s{i}.npy", rng.standard_normal((1, 3, 224, 224)).astype(np.float32))
+    raw = _ROOT / "tests/fixtures/models/tiny_cnn.onnx"
+    out = tmp_path / "tiny.int8.onnx"
+    res = CliRunner().invoke(cli, ["model", "prep", str(raw), "--calibration", str(cal),
+                                   "--out", str(out), "--format", "json"],
+                             catch_exceptions=False)
+    assert res.exit_code == 0, res.output
+    payload = json.loads(res.output)
+    assert out.is_file()
+    assert payload["accuracy"]["samples"] == 8
+    assert payload["accuracy"]["verdict"] in ("good", "degraded")
+
+
+def test_model_prep_too_few_calibration_errors(tmp_path):
+    import numpy as np
+    import pytest as _pytest
+    _pytest.importorskip("onnxruntime")
+    from click.testing import CliRunner
+    from alp_cli.main import cli
+    cal = tmp_path / "cal"; cal.mkdir()
+    np.save(cal / "s0.npy", np.zeros((1, 3, 224, 224), dtype=np.float32))
+    raw = _ROOT / "tests/fixtures/models/tiny_cnn.onnx"
+    res = CliRunner().invoke(cli, ["model", "prep", str(raw), "--calibration", str(cal)])
+    assert res.exit_code == 1
+
+
+def test_model_prep_non_onnx_errors_cleanly(tmp_path):
+    # A .tflite (or any non-.onnx) input must die with a clean PrepError-style
+    # message, not a raw onnxruntime InvalidProtobuf traceback.
+    import numpy as np
+    from click.testing import CliRunner
+    from alp_cli.main import cli
+    cal = tmp_path / "cal"; cal.mkdir()
+    rng = np.random.default_rng(0)
+    for i in range(8):
+        np.save(cal / f"s{i}.npy", rng.standard_normal((1, 3, 224, 224)).astype(np.float32))
+    raw = _ROOT / "tests/fixtures/models/tiny_int8.tflite"
+    res = CliRunner().invoke(cli, ["model", "prep", str(raw), "--calibration", str(cal)])
+    assert res.exit_code == 1
+    assert "onnx" in res.output.lower()

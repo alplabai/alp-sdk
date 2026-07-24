@@ -10,6 +10,7 @@ import yaml
 from alp_model.analyze import UnsupportedModelError, analyze_model
 from alp_model.build import build_model, _ADAPTERS
 from alp_model.package import read_package
+from alp_model.prep import PrepError, accuracy_delta, quantize, validate_calibration
 from alp_model.targets import resolve_targets
 from alp_model.zoo import ZooError, fetch_source, load_zoo
 
@@ -366,6 +367,43 @@ def add_cmd(zoo_id: str, board_path: Path, name: str | None, models_dir: str,
     board_path.write_text(yaml.safe_dump(board, sort_keys=False), encoding="utf-8")
     result = {"added": name, "source": rel, "from": entry.id}
     click.echo(json.dumps(result, indent=2) if fmt == "json" else f"added '{name}' ({rel}) from zoo '{entry.id}'")
+
+
+@model_group.command(name="prep", help="License-free INT8 quantize + fp32-vs-int8 accuracy report.")
+@click.argument("raw", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--calibration", "cal_dir", required=True,
+              type=click.Path(exists=True, file_okay=False, path_type=Path),
+              help="Directory of .npy calibration samples matching the model input.")
+@click.option("--out", default=None, type=click.Path(path_type=Path),
+              help="Output INT8 .onnx (default: <raw>.int8.onnx).")
+@click.option("--per-channel", is_flag=True, help="Per-channel weight quantization (often recovers accuracy).")
+@click.option("--min-samples", default=8, show_default=True, help="Minimum calibration samples.")
+@click.option("--format", "fmt", type=click.Choice(["human", "json"]), default="human")
+def prep_cmd(raw: Path, cal_dir: Path, out: Path | None, per_channel: bool,
+             min_samples: int, fmt: str) -> None:
+    if raw.suffix.lower() != ".onnx":
+        click.echo(f"error: model prep supports .onnx input in this release; got {raw.name}",
+                   err=True)
+        raise SystemExit(1)
+    out = out or raw.with_suffix(".int8.onnx")
+    try:
+        validate_calibration(cal_dir, raw, min_samples=min_samples)
+        quantize(raw, out, cal_dir, per_channel=per_channel)
+        rep = accuracy_delta(raw, out, cal_dir)
+    except PrepError as exc:
+        click.echo(f"error: {exc}", err=True)
+        raise SystemExit(1)
+    acc = {"samples": rep.samples, "top1_agreement_pct": rep.top1_agreement_pct,
+           "mean_cosine": rep.mean_cosine, "max_abs_err": rep.max_abs_err,
+           "verdict": rep.verdict, "guidance": rep.guidance}
+    if fmt == "json":
+        click.echo(json.dumps({"raw": str(raw), "quantized": str(out), "accuracy": acc}, indent=2))
+        return
+    click.echo(f"quantized: {out}")
+    click.echo(f"accuracy: {rep.verdict}  top1={rep.top1_agreement_pct}%  "
+               f"cosine={rep.mean_cosine}  max_abs_err={rep.max_abs_err}  (n={rep.samples})")
+    if rep.guidance:
+        click.echo(f"guidance: {rep.guidance}")
 
 
 @model_group.command(name="doctor", help="Report installed NPU compiler toolchains.")
