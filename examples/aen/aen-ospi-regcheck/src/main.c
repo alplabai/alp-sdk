@@ -69,7 +69,7 @@
  * binds to its expected compatible.  A pure DT predicate -- independent of
  * device_is_ready / whether the driver TU was built.
  */
-#define OSPI_BOUND                                                                               \
+#define OSPI_BOUND \
 	(DT_NODE_HAS_STATUS(OSPI_NODE, okay) && DT_NODE_HAS_COMPAT(OSPI_NODE, snps_designware_ospi))
 
 int main(void)
@@ -97,7 +97,7 @@ int main(void)
 	printk("        irq=%u (exp %u)\n", ospi_irq, OSPI_IRQ_EXPECTED);
 
 	bool node_ok = OSPI_BOUND && (ospi_base == OSPI_BASE_EXPECTED) &&
-		       (ospi_aes_base == OSPI_AES_BASE_EXPECTED) && (ospi_irq == OSPI_IRQ_EXPECTED);
+	               (ospi_aes_base == OSPI_AES_BASE_EXPECTED) && (ospi_irq == OSPI_IRQ_EXPECTED);
 
 	/*
 	 * Step 3: the flash_ospi_alif.c driver TU is always built under this
@@ -128,15 +128,15 @@ int main(void)
 	 */
 	HAL_OSPI_Handle_T app_handle = -1;
 	struct ospi_init  app_cfg    = {
-		     .bus_speed       = DT_PROP(OSPI_NODE, bus_speed),
-		     .core_clk        = DT_PROP_OR(OSPI_NODE, clock_frequency, DT_PROP(OSPI_NODE, bus_speed)),
-		     .cs_pin          = DT_PROP(OSPI_NODE, cs_pin),
-		     .rx_ds_delay     = DT_PROP(OSPI_NODE, rx_ds_delay),
-		     .ddr_drive_edge  = DT_PROP(OSPI_NODE, ddr_drive_edge),
-		     .baud2_delay     = OSPI_BAUD2_DELAY_AUTO,
-		     .base_regs       = (uint32_t *)ospi_base,
-		     .aes_regs        = (uint32_t *)ospi_aes_base,
-		     .xip_wait_cycles = DT_PROP(OSPI_NODE, xip_wait_cycles),
+		.bus_speed       = DT_PROP(OSPI_NODE, bus_speed),
+		.core_clk        = DT_PROP_OR(OSPI_NODE, clock_frequency, DT_PROP(OSPI_NODE, bus_speed)),
+		.cs_pin          = DT_PROP(OSPI_NODE, cs_pin),
+		.rx_ds_delay     = DT_PROP(OSPI_NODE, rx_ds_delay),
+		.ddr_drive_edge  = DT_PROP(OSPI_NODE, ddr_drive_edge),
+		.baud2_delay     = OSPI_BAUD2_DELAY_AUTO,
+		.base_regs       = (uint32_t *)ospi_base,
+		.aes_regs        = (uint32_t *)ospi_aes_base,
+		.xip_wait_cycles = DT_PROP(OSPI_NODE, xip_wait_cycles),
 	};
 
 	int32_t init_rc = alif_hal_ospi_initialize(&app_handle, &app_cfg);
