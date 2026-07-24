@@ -7,6 +7,21 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.14.0 candidate
 
+### Added — Alif ISP-Pico driver compiles + links against hal_alif v2.3.0
+
+The Alif Ensemble ISP-Pico (Verisilicon ISP-Nano) video driver
+(`zephyr/drivers/video/isp_pico.c`, ADR-0017 Tier-2) now builds: vendored the
+last missing dependency, the Apache-2.0 headers `isp-vsi.h` + `isp_ctrl_params.h`
+from `alifsemi/zephyr_alif` v2.3.0 (they ship in neither hal_alif nor the CMSIS
+DFP), and confirmed the v2.3.0 libisp wrapper's 3-arg `isp_vsi_bottom_half` matches
+the ported driver. `examples/aen/aen-isp-regcheck` now build-proves the driver TU
+compiles + links against `libisp_gcc.a` on E1M-AEN801 (was bind-only). Added the
+`CONFIG_FP_HARDABI` BUILD_ASSERT guard (the libisp blob is hard-float, like the
+JPEG blob). **Build-only: live capture stays BENCH-BLOCKED** — the ISP needs a
+camera→CSI→ISP→memory graph and no camera sensor is wired on this AEN batch;
+silicon verification is deferred to a camera-populated board. Internal driver
+enablement, no `<alp/*>` surface change.
+
 ## [v0.13.0] - 2026-07-24
 
 ### Added — `--emit kconfig`: board-scoped Kconfig symbol menu for the LSP
