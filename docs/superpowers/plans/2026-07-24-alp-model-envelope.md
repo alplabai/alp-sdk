@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- **Python ≥ 3.10.** Windows gate runs use `py -3.14 -m pytest …`; Linux/CI uses `python -m pytest …` (both shown per step). Default `python` on the dev box is a stale 3.9.0 — do not use it.
+- **Python ≥ 3.10.** Windows gate runs use `py -3.11 -m pytest …`; Linux/CI uses `python -m pytest …` (both shown per step). Verified 2026-07-24: this box has `py -3.11` (3.11.3, and the default `python` too) + 3.9 — there is **no `py -3.14`**. Use `py -3.11`; avoid `py -3.9` (too old — fails at collection on `dataclass(slots=True)`).
 - **Payload field names mirror the manifest** (`scripts/alp_model/manifest.py`): use `backend`, `silicon_ref`, `blob_format`, `arena`, `requires`, `compiler_version` verbatim — no renaming to `backend_id` etc. The cross-repo spec's §4 table says `backend_id`; that is reconciled to `backend` here (spec updated to match).
 - **The Python emits the payload, never the full envelope.** No `command`/`ok`/`exitCode`/`project`/`issues` keys — `tan` owns those.
 - **Exit codes:** `0` success; `1` user error (missing model artifact / unreadable package). `doctor` and `list` always exit `0` (they are reports). No new exit-code semantics.
@@ -82,7 +82,7 @@ def test_alp_model_build_json_emits_targets_and_coverage(tmp_path):
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run (Windows): `py -3.14 -m pytest tests/scripts/test_alp_cli_model.py::test_alp_model_build_json_emits_targets_and_coverage -v`
+Run (Windows): `py -3.11 -m pytest tests/scripts/test_alp_cli_model.py::test_alp_model_build_json_emits_targets_and_coverage -v`
 Run (Linux/CI): `python -m pytest tests/scripts/test_alp_cli_model.py::test_alp_model_build_json_emits_targets_and_coverage -v`
 Expected: FAIL — `build` has no `--format` option (`no such option: --format`).
 
@@ -161,10 +161,10 @@ def build_cmd(board_path: Path, out_dir: Path, metadata_root: Path,
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run (Windows): `py -3.14 -m pytest tests/scripts/test_alp_cli_model.py::test_alp_model_build_json_emits_targets_and_coverage -v`
+Run (Windows): `py -3.11 -m pytest tests/scripts/test_alp_cli_model.py::test_alp_model_build_json_emits_targets_and_coverage -v`
 Run (Linux/CI): `python -m pytest tests/scripts/test_alp_cli_model.py::test_alp_model_build_json_emits_targets_and_coverage -v`
 Expected: PASS. Also re-run the whole file to confirm no regression:
-`py -3.14 -m pytest tests/scripts/test_alp_cli_model.py -v` (all existing + new pass).
+`py -3.11 -m pytest tests/scripts/test_alp_cli_model.py -v` (all existing + new pass).
 
 - [ ] **Step 5: Commit**
 
@@ -227,7 +227,7 @@ def test_alp_model_list_reports_artifact_status(tmp_path):
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run (Windows): `py -3.14 -m pytest tests/scripts/test_alp_cli_model.py::test_alp_model_list_reports_artifact_status -v`
+Run (Windows): `py -3.11 -m pytest tests/scripts/test_alp_cli_model.py::test_alp_model_list_reports_artifact_status -v`
 Run (Linux/CI): `python -m pytest tests/scripts/test_alp_cli_model.py::test_alp_model_list_reports_artifact_status -v`
 Expected: FAIL — `No such command 'list'`.
 
@@ -270,7 +270,7 @@ def list_cmd(board_path: Path, out_dir: Path, output_format: str) -> None:
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run (Windows): `py -3.14 -m pytest tests/scripts/test_alp_cli_model.py::test_alp_model_list_reports_artifact_status -v`
+Run (Windows): `py -3.11 -m pytest tests/scripts/test_alp_cli_model.py::test_alp_model_list_reports_artifact_status -v`
 Run (Linux/CI): `python -m pytest tests/scripts/test_alp_cli_model.py::test_alp_model_list_reports_artifact_status -v`
 Expected: PASS.
 
@@ -333,7 +333,7 @@ def test_probe_reports_available_version(monkeypatch):
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run (Windows): `py -3.14 -m pytest tests/scripts/test_alp_model_adapters.py::test_probe_reports_unavailable_reason tests/scripts/test_alp_model_adapters.py::test_probe_reports_available_version -v`
+Run (Windows): `py -3.11 -m pytest tests/scripts/test_alp_model_adapters.py::test_probe_reports_unavailable_reason tests/scripts/test_alp_model_adapters.py::test_probe_reports_available_version -v`
 Run (Linux/CI): `python -m pytest tests/scripts/test_alp_model_adapters.py::test_probe_reports_unavailable_reason tests/scripts/test_alp_model_adapters.py::test_probe_reports_available_version -v`
 Expected: FAIL — `AttributeError: 'VelaAdapter' object has no attribute 'probe'`.
 
@@ -408,7 +408,7 @@ In `scripts/alp_model/adapters/drpai.py` (DrpaiAdapter), add:
 
 - [ ] **Step 4: Run the probe tests to verify they pass**
 
-Run (Windows): `py -3.14 -m pytest tests/scripts/test_alp_model_adapters.py -v`
+Run (Windows): `py -3.11 -m pytest tests/scripts/test_alp_model_adapters.py -v`
 Run (Linux/CI): `python -m pytest tests/scripts/test_alp_model_adapters.py -v`
 Expected: PASS (new + existing adapter tests).
 
@@ -429,7 +429,7 @@ def test_alp_model_doctor_lists_all_backends():
 
 - [ ] **Step 6: Run to verify it fails**
 
-Run (Windows): `py -3.14 -m pytest tests/scripts/test_alp_cli_model.py::test_alp_model_doctor_lists_all_backends -v`
+Run (Windows): `py -3.11 -m pytest tests/scripts/test_alp_cli_model.py::test_alp_model_doctor_lists_all_backends -v`
 Expected: FAIL — `No such command 'doctor'`.
 
 - [ ] **Step 7: Implement `doctor_cmd`**
@@ -455,7 +455,7 @@ Note: `_ADAPTERS` is the module-level registry already defined in `build.py`; im
 
 - [ ] **Step 8: Run to verify it passes**
 
-Run (Windows): `py -3.14 -m pytest tests/scripts/test_alp_cli_model.py::test_alp_model_doctor_lists_all_backends -v`
+Run (Windows): `py -3.11 -m pytest tests/scripts/test_alp_cli_model.py::test_alp_model_doctor_lists_all_backends -v`
 Run (Linux/CI): `python -m pytest tests/scripts/test_alp_cli_model.py::test_alp_model_doctor_lists_all_backends -v`
 Expected: PASS.
 
@@ -535,7 +535,7 @@ def test_alp_model_info_missing_artifact_errors(tmp_path):
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run (Windows): `py -3.14 -m pytest "tests/scripts/test_alp_cli_model.py::test_alp_model_info_decodes_manifest_and_matrix" "tests/scripts/test_alp_cli_model.py::test_alp_model_info_missing_artifact_errors" -v`
+Run (Windows): `py -3.11 -m pytest "tests/scripts/test_alp_cli_model.py::test_alp_model_info_decodes_manifest_and_matrix" "tests/scripts/test_alp_cli_model.py::test_alp_model_info_missing_artifact_errors" -v`
 Expected: FAIL — `No such command 'info'`.
 
 - [ ] **Step 3: Implement `info_cmd`**
@@ -581,14 +581,14 @@ def info_cmd(name: str, out_dir: Path, board_path: Path | None,
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run (Windows): `py -3.14 -m pytest "tests/scripts/test_alp_cli_model.py::test_alp_model_info_decodes_manifest_and_matrix" "tests/scripts/test_alp_cli_model.py::test_alp_model_info_missing_artifact_errors" -v`
+Run (Windows): `py -3.11 -m pytest "tests/scripts/test_alp_cli_model.py::test_alp_model_info_decodes_manifest_and_matrix" "tests/scripts/test_alp_cli_model.py::test_alp_model_info_missing_artifact_errors" -v`
 Run (Linux/CI): `python -m pytest "tests/scripts/test_alp_cli_model.py::test_alp_model_info_decodes_manifest_and_matrix" "tests/scripts/test_alp_cli_model.py::test_alp_model_info_missing_artifact_errors" -v`
 Expected: PASS.
 
 - [ ] **Step 5: Full-suite regression + commit**
 
 Run the whole model CLI + adapter suites:
-`py -3.14 -m pytest tests/scripts/test_alp_cli_model.py tests/scripts/test_alp_model_adapters.py -v` (Linux/CI: `python -m pytest …`).
+`py -3.11 -m pytest tests/scripts/test_alp_cli_model.py tests/scripts/test_alp_model_adapters.py -v` (Linux/CI: `python -m pytest …`).
 Expected: all PASS.
 
 ```bash
