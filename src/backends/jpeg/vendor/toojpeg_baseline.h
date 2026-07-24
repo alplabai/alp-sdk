@@ -45,6 +45,17 @@
 //     contract below. No dynamic allocation either way.
 //   - dropped the optional JPEG COM-marker comment parameter (unused by
 //     the SDK's <alp/jpeg.h> request).
+//   - stack-frame hoist: the Huffman code/bit-length tables and the DCT
+//     magnitude "codeword" table were built on toojpeg_encode_yuv420()'s
+//     stack every call (~20 KB combined) -- a hazard on the few-KB app
+//     threads this fallback runs on (Cortex-M33/M55). The four Huffman
+//     tables are now file-scope `static const` literals (compile-time
+//     precomputed, verified byte-for-byte equal to the original runtime
+//     generation); the codeword table is now a small pure function
+//     (tj_codeword_for()) computed on demand instead of a precomputed
+//     +/-2048-entry array. Output is bit-for-bit identical; frame dropped
+//     from ~22 KB to ~1.5 KB (measured with arm-none-eabi-gcc
+//     -fstack-usage, Cortex-M33).
 // //////////////////////////////////////////////////////////
 
 #ifndef ALP_JPEG_VENDOR_TOOJPEG_BASELINE_H

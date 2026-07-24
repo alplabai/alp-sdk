@@ -87,7 +87,7 @@ target_sources(alp_sdk PRIVATE
     # Software baseline JPEG encoder (Task 2): unlike camera/display/power,
     # JPEG has a fully portable CPU implementation (no OS or vendor HAL
     # dependency), so it links unconditionally here exactly like the dac/
-    # dsp/gpu2d sw_fallback pairs above -- "*" priority 50 always outranks
+    # dsp sw_fallback pairs above -- "*" priority 50 always outranks
     # the zephyr_stub above it, so plain-CMake baremetal apps get a real
     # encoder, not just NOT_IMPLEMENTED.
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/jpeg/sw_baseline.c
