@@ -7,6 +7,7 @@ from pathlib import Path
 import click
 import yaml
 
+from alp_model.analyze import UnsupportedModelError, analyze_model
 from alp_model.build import build_model, _ADAPTERS
 from alp_model.package import read_package
 from alp_model.targets import resolve_targets
@@ -179,6 +180,53 @@ def info_cmd(name: str, out_dir: Path, board_path: Path | None,
                    f"{len(doc['skipped'])} skipped")
         for t in doc["targets"]:
             click.echo(f"  {t['backend']:12} {t['blob_format']:12} {t['blob_bytes']} B")
+
+
+@model_group.command(name="check", help="Static pre-flight fit/perf check for a model on a SoM (offline, no toolchain).")
+@click.argument("model", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--sku", required=True, help="SoM SKU, e.g. E1M-AEN801.")
+@click.option("--metadata-root", type=click.Path(file_okay=False, path_type=Path),
+              default=_DEFAULT_META, show_default=False,
+              help="Metadata root (defaults to the SDK's metadata/).")
+@click.option("--format", "fmt", type=click.Choice(["human", "json"]), default="human")
+def check_cmd(model: Path, sku: str, metadata_root: Path, fmt: str) -> None:
+    try:
+        result = analyze_model(model, sku, metadata_root=metadata_root)
+    except (UnsupportedModelError, FileNotFoundError) as exc:
+        raise SystemExit(f"error: {exc}")
+
+    if fmt == "json":
+        payload = {
+            "model": result.model,
+            "sku": result.sku,
+            "backends": [
+                {
+                    "backend": b.backend, "verdict": b.verdict,
+                    "est_sram_kib": b.est_sram_kib, "budget_sram_kib": b.budget_sram_kib,
+                    "est_latency_ms": b.est_latency_ms,
+                    "op_coverage_pct": b.op_coverage_pct,
+                    "unsupported_ops": b.unsupported_ops, "source": b.source,
+                }
+                for b in result.backends
+            ],
+            "suggestion": result.suggestion,
+        }
+        click.echo(json.dumps(payload, indent=2))
+        return
+
+    click.echo(f"model: {result.model}")
+    click.echo(f"SoM:   {result.sku}")
+    for b in result.backends:
+        lat = "n/a" if b.est_latency_ms is None else f"{b.est_latency_ms:.2f} ms"
+        budget = "unknown" if b.budget_sram_kib is None else f"{b.budget_sram_kib} KiB"
+        click.echo(
+            f"  [{b.verdict:>12}] {b.backend:<11} "
+            f"sram ~{b.est_sram_kib} KiB / budget {budget}  "
+            f"latency {lat}  ops {b.op_coverage_pct:.0f}%  ({b.source})")
+        if b.unsupported_ops:
+            click.echo(f"               unsupported: {', '.join(b.unsupported_ops)}")
+    if result.suggestion:
+        click.echo(f"suggestion: {result.suggestion}")
 
 
 @model_group.command(name="doctor", help="Report installed NPU compiler toolchains.")
