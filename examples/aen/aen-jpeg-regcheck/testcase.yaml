@@ -26,15 +26,12 @@ tests:
       - native_sim/native/64
     integration_platforms:
       - native_sim/native/64
-    extra_configs:
-      # native_sim has no jpeg0 DT node (Alif-E8-only silicon) -- explicitly
-      # disable the HW backend + its driver Kconfigs rather than rely on the
-      # unmet-dependency auto-disable, so the merged .config carries no
-      # dangling `=y` for a symbol this platform can't satisfy.  sw_baseline
-      # (default y, priority 50) is the only backend left standing.
-      - CONFIG_VIDEO_JPEG_HANTRO_VC9000E=n
-      - CONFIG_USE_ALIF_JPEG_SW_LIB=n
-      - CONFIG_ALP_SDK_JPEG_ALIF_HANTRO=n
+    # No extra_configs: the Alif-E8 / hal_alif hardware-path symbols are
+    # board-scoped (boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.conf),
+    # so native_sim never sees them -- it builds the sw_baseline fallback
+    # (default y, priority 50) off the shared prj.conf alone.  Assigning the
+    # hal_alif CONFIG_USE_ALIF_JPEG_SW_LIB here would be an undefined-symbol
+    # Kconfig warning that CI (warnings-as-errors) fails on.
     tags:
       - alp-sdk
       - example
