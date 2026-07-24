@@ -550,6 +550,51 @@
 	};
 
 	/*
+	 * I3C (main, global peripheral space) -- Synopsys DesignWare I3C, bound by
+	 * UPSTREAM Zephyr's drivers/i3c/i3c_dw.c ("snps,designware-i3c"), pure
+	 * Tier-1 (upstream-native): no vendored/forked code, this node only
+	 * supplies reg/IRQ/clock/timing.  reg/IRQ transcribed from the Apache-2.0
+	 * zephyr_alif fork (zephyr_alif@3a2b84d9,
+	 * dts/arm/alif/ensemble/common/e1.dtsi: i3c0@0x49034000); the SoM routes
+	 * SDA/SCL to P7_6/P7_7 fn6 (I3C_SDA_D/I3C_SCL_D,
+	 * metadata/e1m_modules/aen/from-alif.tsv rows AH5/AG5) -- the SAME pads
+	 * the LP I3C below uses on a different mux, so a board enables only ONE of
+	 * the two.  vendor-ext, BENCH-UNVERIFIED.
+	 */
+	i3c0: i3c@49034000 {
+		compatible = "snps,designware-i3c";
+		#address-cells = <3>;
+		#size-cells = <0>;
+		reg = <0x49034000 0x1000>;
+		interrupts = <136 0>;
+		clocks = <&clockctrl ALIF_I3C_CLK>;
+		i3c-scl-hz = <10000000>;
+		i2c-scl-hz = <400000>;
+		status = "disabled";
+	};
+
+	/*
+	 * LP I3C (M55-HE local domain) -- same upstream i3c_dw.c driver, the
+	 * instance the E1M-AEN801 SoM actually wires (from-alif.tsv routes
+	 * P7_6/P7_7 to the LPI3C_*_B mux, fn3, not the main I3C's fn6).
+	 * reg/IRQ transcribed from the Apache-2.0 zephyr_alif fork
+	 * (zephyr_alif@3a2b84d9, dts/arm/alif/ensemble/e4_e6_e8.dtsi:
+	 * lpi3c0@0x43006000); od-thigh-min-ns/i3c-scl-hz carried over from the
+	 * same fork node.  vendor-ext, BENCH-UNVERIFIED.
+	 */
+	lpi3c0: i3c@43006000 {
+		compatible = "snps,designware-i3c";
+		#address-cells = <3>;
+		#size-cells = <0>;
+		reg = <0x43006000 0x1000>;
+		interrupts = <50 3>;
+		clocks = <&clockctrl ALIF_LPI3C_CLK>;
+		od-thigh-min-ns = <41>;
+		i3c-scl-hz = <12500000>;
+		status = "disabled";
+	};
+
+	/*
 	 * Arm Ethos-U NPUs.  The E8 (AE822) has THREE Ethos-U NPUs total -- 1x
 	 * Ethos-U85 (256 MAC) + 2x Ethos-U55 (256 + 128 MAC), per the alif_e8_dk doc.
 	 * All are bound by the UPSTREAM Zephyr driver (drivers/misc/ethos_u/
