@@ -212,6 +212,43 @@ def test_alp_model_build_dash_model_selects_one(tmp_path):
     assert result.exit_code == 1
 
 
+def test_alp_model_build_dash_model_selects_one_human_format(tmp_path):
+    # Same as test_alp_model_build_dash_model_selects_one, but the default
+    # (human) output format -- the untested path per Plan A review.
+    (tmp_path / "models").mkdir()
+    shutil.copy(_ROOT / "tests/fixtures/models/tiny_int8.tflite",
+                tmp_path / "models" / "m.tflite")
+    shutil.copy(_ROOT / "tests/fixtures/models/tiny_int8.tflite",
+                tmp_path / "models" / "m2.tflite")
+    (tmp_path / "board.yaml").write_text(
+        "name: demo\n"
+        "som:\n  sku: E1M-AEN801\n"
+        "cores: {}\n"
+        "models:\n"
+        "  - name: demo\n    source: models/m.tflite\n"
+        "  - name: other\n    source: models/m2.tflite\n",
+        encoding="utf-8")
+    result = CliRunner().invoke(cli, [
+        "model", "build",
+        "--board", str(tmp_path / "board.yaml"),
+        "--out", str(tmp_path / "out"),
+        "--metadata-root", str(_ROOT / "metadata"),
+        "--model", "demo",
+    ], catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "out" / "demo.alpmodel").is_file()
+    assert not (tmp_path / "out" / "other.alpmodel").exists()
+
+    result = CliRunner().invoke(cli, [
+        "model", "build",
+        "--board", str(tmp_path / "board.yaml"),
+        "--out", str(tmp_path / "out"),
+        "--metadata-root", str(_ROOT / "metadata"),
+        "--model", "nope",
+    ])
+    assert result.exit_code == 1
+
+
 def test_alp_model_list_reports_artifact_status(tmp_path):
     (tmp_path / "models").mkdir()
     (tmp_path / "models" / "m.tflite").write_bytes(b"TFL3xxxx")
