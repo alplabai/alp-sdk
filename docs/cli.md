@@ -495,10 +495,19 @@ calibration set is validated *before* quantizing: fewer than
 match the model input, is a clear error -- a bad calibration set is the
 silent accuracy killer this guards against. `--per-channel` enables
 per-channel weight quantization, which often recovers accuracy lost to
-per-tensor quantization. `RAW` must be `.onnx` in this release --
-TFLite/PyTorch/Keras -> ONNX conversion is a follow-on; a non-ONNX
-input is a clear "not supported yet" error, never a wrong result.
+per-tensor quantization. `RAW` must be `.onnx` or `.tflite`; other
+formats are a clear "not supported" error, never a wrong result.
 Requires the `model-prep` extra (`pip install alp-sdk-cli[model-prep]`).
+
+`.tflite` (the SDK's native format) is converted to ONNX via `tf2onnx`
+before quantizing -- the intermediate ONNX is a temp file, cleaned up
+after `prep` finishes (or fails). This needs the additional `model-convert`
+extra (`pip install alp-sdk-cli[model-convert]`, which adds `tf2onnx` +
+`tensorflow`) -- kept separate from `model-prep` because it's heavy
+(pulls in tensorflow); a `.tflite` input without it errors with a clear
+message naming the extra, never a raw import traceback. `.onnx` input
+still only needs the lighter `model-prep` extra. PyTorch/Keras -> ONNX
+conversion is a further follow-on.
 
 After quantizing, both the fp32 and INT8 models run on every
 calibration sample and the outputs are compared: top-1 agreement %,
