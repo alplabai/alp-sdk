@@ -224,11 +224,13 @@ def _echo_backends_human(backends) -> None:
 def check_cmd(model: Path | None, sku: str | None, board_path: Path | None,
               select_name: str | None, metadata_root: Path, fmt: str) -> None:
     if board_path is not None and model is not None:
-        raise SystemExit("error: MODEL and --board are mutually exclusive")
+        click.echo("error: MODEL and --board are mutually exclusive", err=True)
+        raise SystemExit(2)
 
     if board_path is None:
         if model is None or not sku:
-            raise SystemExit("error: MODEL and --sku are required unless --board is given")
+            click.echo("error: MODEL and --sku are required unless --board is given", err=True)
+            raise SystemExit(2)
         try:
             result = analyze_model(model, sku, metadata_root=metadata_root)
         except (UnsupportedModelError, FileNotFoundError) as exc:

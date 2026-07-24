@@ -373,10 +373,19 @@ under `docs/tutorials/` for the end-to-end inference flow.
 
 #### `tan model check` -- static pre-flight fit/perf check (no toolchain)
 
+Two modes:
+
 ```bash
+# single-model: check one .tflite file against an explicit SKU
 tan model check my_model.tflite --sku E1M-AEN801
 tan model check my_model.tflite --sku E1M-AEN801 --format json
 tan model check my_model.tflite --sku E1M-V2N101 --metadata-root path/to/metadata
+
+# board-mode: check every (or one) board.yaml `models:` entry; SKU comes
+# from `som.sku` unless overridden
+tan model check --board path/to/board.yaml
+tan model check --board path/to/board.yaml --model demo
+tan model check --board path/to/board.yaml --sku E1M-V2N101 --format json
 ```
 
 Offline, no-toolchain static analysis: parses the TFLite graph and,
@@ -385,15 +394,26 @@ answers "will this model fit, and roughly how fast" *before* any
 compile.  Each backend gets a fit verdict -- `fits` / `cpu-fallback`
 (one or more ops fall back to CPU) / `no-fit` (SRAM arena overflow) --
 plus conservative `est_sram_kib` / `est_latency_ms` /
-`op_coverage_pct` estimates.  `--sku` is required (e.g.
-`E1M-AEN801`); `--metadata-root` overrides the SDK's own `metadata/`
-root (defaults to it).  Exit 0 for any completed analysis -- a
-`no-fit` verdict is a valid answer, not a CLI error; exit 1 for an
-unknown SKU or a non-TFLite model (ONNX static analysis is a
-follow-on, not yet supported); a missing/unreadable model path is a
-usage error (exit 2), same as any other `tan model` path argument.
+`op_coverage_pct` estimates.  MODEL and `--board` are mutually
+exclusive.
 
-`--format json` payload:
+In single-model mode `--sku` is required (e.g. `E1M-AEN801`). In
+`--board` mode the SKU defaults to the board's `som.sku`; passing
+`--sku` alongside `--board` overrides it. `--metadata-root` overrides
+the SDK's own `metadata/` root (defaults to it) in either mode.
+
+Exit 0 for any completed analysis -- a `no-fit` verdict is a valid
+answer, not a CLI error. Exit 1 for a per-model analysis failure (an
+unknown SKU, or a non-TFLite model -- ONNX static analysis is a
+follow-on, not yet supported): in board-mode this is per-model --
+one un-analysable `models:` entry does not abort the run, it's
+recorded as an error entry and the whole invocation still exits 1
+after printing the full payload. MODEL and `--board` together, or
+neither MODEL nor `--sku` given in single-model mode, is a usage
+error (exit 2); a missing/unreadable model path is likewise a usage
+error (exit 2), same as any other `tan model` path argument.
+
+Single-model `--format json` payload:
 
 ```json
 {
@@ -412,6 +432,30 @@ usage error (exit 2), same as any other `tan model` path argument.
     }
   ],
   "suggestion": null
+}
+```
+
+Board-mode `--format json` payload -- one entry per `models:` entry
+checked, each either a full result or (when that model's source isn't
+analysable) a per-model `error`:
+
+```json
+{
+  "board": "path/to/board.yaml",
+  "sku": "E1M-AEN801",
+  "models": [
+    {
+      "name": "demo",
+      "source": "models/demo.tflite",
+      "backends": [ { "backend": "ethos_u", "verdict": "fits", "...": "..." } ],
+      "suggestion": null
+    },
+    {
+      "name": "other",
+      "source": "models/other.onnx",
+      "error": "static check supports .tflite models in this release; cannot analyse other.onnx (ONNX static analysis is a follow-on)"
+    }
+  ]
 }
 ```
 

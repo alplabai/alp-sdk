@@ -411,3 +411,45 @@ def test_model_check_board_single_model_selector():
     payload = json.loads(res.output)
     assert len(payload["models"]) == 1
     assert payload["models"][0]["name"] == "tiny"
+
+
+def test_model_check_board_mode_bad_source_is_per_model_error():
+    import json
+    from click.testing import CliRunner
+    from alp_cli.main import cli
+    board = _ROOT / "tests/fixtures/boards/check_board_badsource.yaml"
+    res = CliRunner().invoke(
+        cli, ["model", "check", "--board", str(board), "--format", "json"])
+    assert res.exit_code == 1, res.output      # per-model failure, not a usage error
+    payload = json.loads(res.output)           # payload still printed despite the failure
+    m = payload["models"][0]
+    assert m["name"] == "bad"
+    assert m["source"] == "../models/tiny_cnn.onnx"
+    assert m["error"]
+    assert "backends" not in m
+
+
+def test_model_check_board_unknown_model_selector_errors():
+    from click.testing import CliRunner
+    from alp_cli.main import cli
+    board = _ROOT / "tests/fixtures/boards/check_board.yaml"
+    res = CliRunner().invoke(
+        cli, ["model", "check", "--board", str(board), "--model", "no_such_name"])
+    assert res.exit_code != 0
+    assert "no_such_name" in res.output
+
+
+def test_model_check_board_explicit_sku_overrides_board():
+    import json
+    from click.testing import CliRunner
+    from alp_cli.main import cli
+    board = _ROOT / "tests/fixtures/boards/check_board.yaml"
+    res = CliRunner().invoke(
+        cli, ["model", "check", "--board", str(board), "--sku", "E1M-V2N101",
+              "--format", "json"],
+        catch_exceptions=False)
+    assert res.exit_code == 0, res.output
+    payload = json.loads(res.output)
+    assert payload["sku"] == "E1M-V2N101"
+    backends = {b["backend"] for b in payload["models"][0]["backends"]}
+    assert "drpai" in backends
