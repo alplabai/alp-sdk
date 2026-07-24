@@ -1,5 +1,5 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://alplab.ai/schemas/npu-ops-v1.schema.json",
   "title": "ALP per-NPU op-support list v1",
   "type": "object",
