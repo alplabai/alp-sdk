@@ -1000,6 +1000,23 @@
 	};
 
 	/*
+	 * Alif Ensemble Hantro VC9000E JPEG encoder (Verisilicon IP, compatible
+	 * "verisilicon,hantro-vc9000e-jpeg"), driven by the ported v4.4 driver
+	 * zephyr/drivers/video/jpeg_hantro_vc9000e.c.  reg base + IRQ transcribed
+	 * VERBATIM from the fork e4_e6_e8.dtsi (jpeg@49044000, single IRQ 360).
+	 * ADR-0017 Tier-2 OPT-IN.  Left status="disabled": examples that want it
+	 * flip it on in their board overlay.
+	 */
+	jpeg0: jpeg@49044000 {
+		compatible       = "verisilicon,hantro-vc9000e-jpeg";
+		reg              = <0x49044000 0x1000>;
+		interrupts       = <360 0>;
+		max-burst-length = <64>;
+		quality-factor   = <75>;
+		status           = "disabled";
+	};
+
+	/*
 	 * CAN-FD controller -- CANFD0 (CAST CAN-CTRL IP, compatible "cast,can",
 	 * base 0x49036000), bound by the Tier-2 fork driver
 	 * zephyr/drivers/can/can_cast.c as a standard Zephyr can_* device.  Upstream

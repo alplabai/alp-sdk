@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# aen-jpeg-regcheck -- <alp/jpeg.h> backend-selection proof: the software
+# baseline (src/backends/jpeg/sw_baseline.c) runs for real on native_sim; the
+# Alif Hantro VC9000E hardware backend (src/backends/jpeg/alif_hantro.c) is
+# build_only in CI for the E1M-AEN801 (Ensemble E8, M55-HE) -- the HW encode
+# path is SILICON-PROVEN on real AEN801 hardware (valid 935-byte JPEG), but
+# needs a bench flash to run, so CI builds it rather than executing it.
+
+sample:
+  name: aen-jpeg-regcheck
+  description: |
+    Opens <alp/jpeg.h>, prints the selected backend's capabilities
+    (hw_accelerated), encodes a synthetic 64x64 gradient 4:2:0 frame, and
+    checks the output for the JPEG SOI marker (FF D8).  Two scenarios
+    exercise the two backends this class currently ships:
+      - native_sim: the portable TooJpeg-derived software fallback
+        (sw_baseline.c, priority 50) -- runs for real in CI.
+      - aen: the Alif Ensemble E8 Hantro VC9000E hardware backend
+        (alif_hantro.c, priority 100) -- build_only in CI; HW encode is
+        silicon-proven on real AEN801 (valid 935-byte JPEG).
+
+tests:
+  alp_sdk.examples.aen.jpeg_regcheck.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    # No extra_configs: the Alif-E8 / hal_alif hardware-path symbols are
+    # board-scoped (boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.conf),
+    # so native_sim never sees them -- it builds the sw_baseline fallback
+    # (default y, priority 50) off the shared prj.conf alone.  Assigning the
+    # hal_alif CONFIG_USE_ALIF_JPEG_SW_LIB here would be an undefined-symbol
+    # Kconfig warning that CI (warnings-as-errors) fails on.
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - jpeg
+      - video
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "RESULT PASS"
+
+  alp_sdk.examples.aen.jpeg_regcheck.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    build_only: true   # HW encode is a bench flash, not a CI run (silicon-proven on AEN801).
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - jpeg
+      - video

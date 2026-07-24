@@ -88,6 +88,34 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/camera/zephyr_stub.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/alif/camera.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/renesas/camera.c
+    # JPEG-encoder class dispatcher + stub backend.  Task 1 of the
+    # encoder rollout: the JPEG class must exist on every board,
+    # defaulting to the NOT_IMPLEMENTED stub.  The software baseline
+    # (CONFIG_ALP_SDK_JPEG_SW_BASELINE, Task 2) and Alif Hantro VC9000E
+    # (CONFIG_ALP_SDK_JPEG_ALIF_HANTRO, Task 3/4) backends outrank it
+    # below once enabled.
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/jpeg_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/jpeg/zephyr_stub.c
+)
+
+# JPEG software baseline fallback (Task 2): portable TooJpeg-derived
+# encoder, silicon_ref="*" priority 50 -- outranks the NOT_IMPLEMENTED
+# stub above on every board.  Default y (see zephyr/kconfigs/jpeg.kconfig)
+# so <alp/jpeg.h> encodes for real out of the box; opt out only to shave
+# the ROM if a board is guaranteed to always resolve the Task 3/4 Hantro
+# hardware backend instead.
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_JPEG_SW_BASELINE
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/jpeg/sw_baseline.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/jpeg/vendor/toojpeg_baseline.c
+)
+
+# Alif Ensemble E8 Hantro VC9000E hardware JPEG-encoder backend (Task 3/4):
+# silicon_ref="alif:ensemble:e8" priority 100 -- outranks both the stub and
+# the software baseline on AEN silicon once the jpeg0 DT node is enabled.
+# Drives the vendored+v4.4-ported zephyr/drivers/video/jpeg_hantro_vc9000e.c
+# (CONFIG_VIDEO_JPEG_HANTRO_VC9000E, wired further down this file).
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_JPEG_ALIF_HANTRO
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/jpeg/alif_hantro.c
 )
 
 # Boot-identity banner (CONFIG_ALP_SDK_BANNER, default y) -- one line at
@@ -446,7 +474,12 @@ endif()
 # resolve.  ADR 0017 Tier-2 (INTERIM).  The ISP (isp_pico.c, compatible
 # "vsi,isp-pico") rides on the same v4.4 video API + the hal_alif libisp wrapper;
 # it is Tier-2 opt-in (CONFIG_ALP_SDK_CAMERA_ALIF_ISP, default n).
-if(CONFIG_VIDEO_ALIF_CAM OR CONFIG_VIDEO_MIPI_CSI2_DW OR CONFIG_VIDEO_ARX3A0 OR CONFIG_MIPI_DPHY_DW OR CONFIG_VIDEO_ISP_VSI)
+# CONFIG_VIDEO_JPEG_HANTRO_VC9000E is included in this guard so the JPEG
+# encoder TU (jpeg_hantro_vc9000e.c, below) resolves the vendored
+# <zephyr/drivers/video/video_alif.h> (its VIDEO_CID_JPEG_INPUT_BUFFER cid) and
+# upstream's private drivers/video/{video_ctrls,video_device}.h (its v4.4
+# ctrl-registry port).  ADR 0017 Tier-2 (INTERIM).
+if(CONFIG_VIDEO_ALIF_CAM OR CONFIG_VIDEO_MIPI_CSI2_DW OR CONFIG_VIDEO_ARX3A0 OR CONFIG_MIPI_DPHY_DW OR CONFIG_VIDEO_ISP_VSI OR CONFIG_VIDEO_JPEG_HANTRO_VC9000E)
     zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/include)
 zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/dma)
 if(DEFINED ZEPHYR_ALIF_MODULE_DIR)
@@ -457,10 +490,20 @@ endif()
     # for the CPI/ISP AXI buffer addresses).  hal_alif only puts its common/include
     # dir on the path under CONFIG_RTSS_HE/HP (common/CMakeLists.txt); add it here
     # explicitly so the CPI/ISP TUs resolve the header on any Ensemble RTSS build.
+    # (jpeg_hantro_vc9000e.c does NOT include soc_memory_map.h, so it stays out
+    # of this inner guard.)
     if(CONFIG_VIDEO_ALIF_CAM OR CONFIG_VIDEO_ISP_VSI)
         zephyr_include_directories(${ZEPHYR_ALIF_MODULE_DIR}/common/include)
     endif()
 endif()
+# Alif Ensemble VeriSilicon Hantro VC9000E JPEG hardware encoder (compatible
+# "verisilicon,hantro-vc9000e-jpeg"), vendored from the Apache-2.0 zephyr_alif
+# fork (drivers/video/jpeg_hantro_vc9000e.c) @ d8eed1926407087dff150a1c4d25ba586d775746
+# (branch main) and PORTED to the v4.4 video API by Alp Lab AB.  Links the
+# hal_alif libjpeg_hantro_sw_gcc.a SW helper lib under CONFIG_USE_ALIF_JPEG_SW_LIB.
+# ADR 0017 Tier-2 (INTERIM).
+zephyr_library_sources_ifdef(CONFIG_VIDEO_JPEG_HANTRO_VC9000E
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/video/jpeg_hantro_vc9000e.c)
 zephyr_library_sources_ifdef(CONFIG_VIDEO_ALIF_CAM
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/video/video_alif.c)
 zephyr_library_sources_ifdef(CONFIG_VIDEO_MIPI_CSI2_DW

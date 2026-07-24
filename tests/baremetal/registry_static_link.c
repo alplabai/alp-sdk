@@ -13,6 +13,7 @@
  * unresolved or the runtime registry empty.
  */
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "alp/backend.h"
@@ -21,11 +22,55 @@
 #include "alp/display.h"
 #include "alp/dsp.h"
 #include "alp/hw_info.h"
+#include "alp/jpeg.h"
 #include "alp/power.h"
 #include "alp/tmu.h"
 #include "alp/update_log.h"
 
 #include "test_assert.h"
+
+/*
+ * jpeg is the class with two always-compiled backend TUs on this build
+ * (zephyr_stub.c priority 0 + sw_baseline.c priority 50, Task 2) -- the
+ * static-archive anchor lives on sw_baseline.c specifically so a real
+ * consumer link (this executable) pulls the backend that actually wins
+ * arbitration, not the dominated stub.  Round-tripping a real encode
+ * here (not just open()) is the strongest proof: if the anchor had
+ * stayed on zephyr_stub.c, or sw_baseline.c were dropped from the
+ * link, this would return ALP_ERR_NOT_IMPLEMENTED, not ALP_OK.
+ */
+static void test_jpeg_resolves_sw_baseline_not_stub(void)
+{
+	static const uint8_t y[16 * 16] = { 0 }, u[8 * 8] = { 0 }, v[8 * 8] = { 0 };
+
+	alp_jpeg_config_t cfg = ALP_JPEG_CONFIG_DEFAULT;
+	alp_jpeg_t       *h   = alp_jpeg_open(&cfg);
+	ALP_ASSERT_TRUE(h != NULL);
+
+	alp_jpeg_caps_t caps;
+	ALP_ASSERT_EQ_INT(alp_jpeg_capabilities(h, &caps), ALP_OK);
+	ALP_ASSERT_TRUE(!caps.hw_accelerated);
+
+	uint8_t               out[4096];
+	size_t                out_len = 0;
+	alp_jpeg_encode_req_t req     = {
+		.width     = 16,
+		.height    = 16,
+		.format    = ALP_PIXFMT_YUV420_PLANAR,
+		.subsample = ALP_JPEG_SUBSAMPLE_420,
+		.quality   = 80,
+		.y_plane   = y,
+		.y_stride  = 16,
+		.u_plane   = u,
+		.u_stride  = 8,
+		.v_plane   = v,
+		.v_stride  = 8,
+	};
+	ALP_ASSERT_EQ_INT(alp_jpeg_encode(h, &req, out, sizeof(out), &out_len), ALP_OK);
+	ALP_ASSERT_TRUE(out_len > 4u);
+
+	alp_jpeg_close(h);
+}
 
 static void test_every_dispatcher_links(void)
 {
@@ -85,11 +130,13 @@ static void test_registry_sections_are_populated(void)
 	ALP_ASSERT_TRUE(ALP_BACKEND_AVAILABLE(power));
 	ALP_ASSERT_TRUE(ALP_BACKEND_AVAILABLE(power_profile));
 	ALP_ASSERT_TRUE(ALP_BACKEND_AVAILABLE(update_log));
+	ALP_ASSERT_TRUE(ALP_BACKEND_AVAILABLE(jpeg));
 }
 
 int main(void)
 {
 	test_every_dispatcher_links();
 	test_registry_sections_are_populated();
-	return 0;
+	test_jpeg_resolves_sw_baseline_not_stub();
+	ALP_TEST_SUMMARY();
 }

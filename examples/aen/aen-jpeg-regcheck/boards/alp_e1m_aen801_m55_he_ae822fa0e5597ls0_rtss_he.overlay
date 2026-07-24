@@ -1,0 +1,25 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-jpeg-regcheck overlay for the E1M-AEN801 (Ensemble E8, M55-HE) RAM-run.
+ *
+ * Enables the Alif Hantro VC9000E JPEG-encoder node so it BINDS + is driven
+ * on silicon:
+ *   - jpeg0 (verisilicon,hantro-vc9000e-jpeg @ 0x49044000, IRQ 360)
+ */
+
+/*
+ * RAM-run: retarget ROM to ITCM (path-reference form &itcm; the phandle-array
+ * form makes FLASH_SIZE=0 and overflows the link).
+ */
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};
+
+&jpeg0 {
+	status = "okay";
+};

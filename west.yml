@@ -175,7 +175,7 @@ manifest:
     # tagged release; bumps coordinate with the Zephyr-LTS cycle.
     - name: hal_alif
       remote: alifsemi
-      revision: v2.2.0
+      revision: v2.3.0
       path: modules/hal/alif
 
     - name: zephyr

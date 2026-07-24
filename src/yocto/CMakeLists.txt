@@ -92,6 +92,7 @@ target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_wdt.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_display.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_camera.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_jpeg.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_wifi.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_mqtt.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_audio.c
@@ -229,6 +230,16 @@ target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/tmu/sw_fallback.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../camera_dispatch.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/camera/zephyr_stub.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../jpeg_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/jpeg/zephyr_stub.c
+    # Software baseline JPEG encoder (Task 2): unlike camera/display/power,
+    # JPEG has a fully portable CPU implementation (no OS or vendor HAL
+    # dependency), so it links unconditionally here exactly like the dac/
+    # dsp/gpu2d sw_fallback pairs above -- "*" priority 50 always outranks
+    # the zephyr_stub above it, so Yocto apps get a real encoder, not just
+    # NOT_IMPLEMENTED.
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/jpeg/sw_baseline.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/jpeg/vendor/toojpeg_baseline.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../display_dispatch.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/display/zephyr_stub.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../power_dispatch.c
@@ -302,6 +313,7 @@ target_compile_definitions(alp_sdk PRIVATE
     # classes above -- their dispatchers own the symbols regardless of
     # which silicon backend (if any) is linked underneath.
     ALP_VENDOR_OVERRIDES_CAMERA=1
+    ALP_VENDOR_OVERRIDES_JPEG=1
     ALP_VENDOR_OVERRIDES_DISPLAY=1
     ALP_VENDOR_OVERRIDES_POWER=1
 )
