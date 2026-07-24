@@ -186,7 +186,14 @@ static alp_status_t hantro_encode(alp_jpeg_backend_state_t    *state,
 	if (st == NULL) {
 		return ALP_ERR_NOT_READY;
 	}
-	if (req->format != ALP_PIXFMT_NV12 || req->y_plane == NULL) {
+	/*
+	 * This block programs a fixed VIDEO_PIX_FMT_NV12 (4:2:0) encode, so both
+	 * the buffer layout (format) AND the chroma sampling (subsample) must be
+	 * the values it actually honours -- validating format alone would let
+	 * NV12 + subsample=422/400 through and silently emit 4:2:0.
+	 */
+	if (req->format != ALP_PIXFMT_NV12 || req->subsample != ALP_JPEG_SUBSAMPLE_420 ||
+	    req->y_plane == NULL) {
 		return ALP_ERR_NOSUPPORT;
 	}
 
@@ -250,15 +257,10 @@ static alp_status_t hantro_encode(alp_jpeg_backend_state_t    *state,
 		return _errno_to_alp(err);
 	}
 
-	/* ponytail: video_import_buffer() also resets the pool slot's
-	 * .bytesused to 0, and jpeg_start_encode() (the driver) latches
-	 * THAT field into JPEG_SWREG9 (the HW output-size-limit register)
-	 * before triggering the encode -- there is no public video_* call
-	 * to prime it to out_cap pre-enqueue.  Unconfirmed whether the HW
-	 * actually enforces a 0 limit as an immediate overflow (native_sim
-	 * only exercises sw_baseline, never this backend); watch for a
-	 * spurious ALP_ERR_NOMEM (JPEG_BUFFER_FULL) on the next AEN801
-	 * re-bench even after this fix. */
+	/* video_import_buffer() sets the pool slot's .size = out_cap and resets
+	 * .bytesused to 0.  The driver programs the HW output-size-limit register
+	 * (JPEG_SWREG9) from .size (fixed in jpeg_hantro_vc9000e.c), so the
+	 * capacity reaches the HW correctly -- no bytesused priming needed here. */
 	struct video_buffer vbuf = {
 		.type  = VIDEO_BUF_TYPE_OUTPUT,
 		.index = out_idx,

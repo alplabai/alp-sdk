@@ -468,8 +468,20 @@ static void jpeg_start_encode(const struct device *dev)
 	/* Flush output buffer header cache */
 	(void)sys_cache_data_flush_and_invd_range(buf->buffer, data->header_size);
 
-	/* Set output buffer size */
-	jpeg_write_reg(dev, JPEG_SWREG9_OFFSET, buf->bytesused);
+	/*
+	 * Set the output-buffer size limit.
+	 *
+	 * v4.4 video-API adaptation (Alp Lab AB): the fork drove SWREG9 from
+	 * buf->bytesused because its enqueue path pre-set bytesused to the
+	 * output capacity.  Upstream v4.4 video_import_buffer() sets .size =
+	 * capacity and RESETS .bytesused to 0, so bytesused is 0 here pre-encode
+	 * -- writing it would program a 0-byte limit and the encoder would trip
+	 * JPEG_BUFFER_FULL on the first output byte.  Use .size (the capacity),
+	 * which is the register's true meaning ("output buffer size").  The HW
+	 * overwrites SWREG9 with the produced payload size during the encode,
+	 * which the completion path reads back below.
+	 */
+	jpeg_write_reg(dev, JPEG_SWREG9_OFFSET, buf->size);
 
 	/* Reset error state and trigger encoding */
 	data->encoding_error = 0;
