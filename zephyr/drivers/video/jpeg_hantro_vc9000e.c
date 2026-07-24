@@ -87,6 +87,27 @@
 #include <jpeg_hantro_vc9000e_sw.h>
 #include "jpeg_hantro_vc9000e_regs.h"
 
+/*
+ * alp-sdk ABI enforcement (Alp Lab AB): the hal_alif prebuilt JPEG SW helper
+ * library (libjpeg_hantro_sw_gcc.a, linked in via CONFIG_USE_ALIF_JPEG_SW_LIB
+ * -- required for this driver to link at all, see jpeg_hantro_vc9000e_sw.h
+ * above) is built hard-float (VFP register args).  Zephyr's Cortex-M FP ABI
+ * (FP_HARDABI vs FP_SOFTABI) is a `choice` member under FPU, not a plain
+ * bool, so it cannot be `select`ed from Kconfig (see
+ * zephyr/kconfigs/vendor-alif-peripherals.kconfig, right after the
+ * Kconfig.jpeg_hantro_vc9000e rsource).  Catch a missing hard-float ABI here,
+ * at compile time, with a legible message -- instead of leaving the user to
+ * decode a bare "uses VFP register arguments, zephyr_pre0.elf does not"
+ * linker error.
+ */
+#if defined(CONFIG_USE_ALIF_JPEG_SW_LIB)
+BUILD_ASSERT(IS_ENABLED(CONFIG_FP_HARDABI),
+	     "CONFIG_VIDEO_JPEG_HANTRO_VC9000E + CONFIG_USE_ALIF_JPEG_SW_LIB link the "
+	     "hal_alif prebuilt libjpeg_hantro_sw_gcc.a, which is hard-float (VFP "
+	     "register arguments). Set CONFIG_FP_HARDABI=y (the \"Floating point ABI\" "
+	     "choice, under FPU) or the final link fails.");
+#endif
+
 LOG_MODULE_REGISTER(jpeg_hantro_vc9000e, CONFIG_VIDEO_LOG_LEVEL);
 
 #define DT_DRV_COMPAT verisilicon_hantro_vc9000e_jpeg
@@ -764,7 +785,7 @@ static void jpeg_hantro_vc9000e_isr(const struct device *dev)
  * v4.4 video-API shim (Alp Lab AB): no .get_ctrl / .get_volatile_ctrl slot --
  * see the ctrl re-architecture note above jpeg_hantro_vc9000e_set_ctrl().
  */
-static const struct video_driver_api jpeg_hantro_vc9000e_driver_api = {
+static DEVICE_API(video, jpeg_hantro_vc9000e_driver_api) = {
 	.set_format = jpeg_hantro_vc9000e_set_format,
 	.get_format = jpeg_hantro_vc9000e_get_format,
 	.enqueue = jpeg_hantro_vc9000e_enqueue,

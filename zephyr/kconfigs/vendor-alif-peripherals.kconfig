@@ -753,6 +753,31 @@ config VIDEO_ISP_VSI_INIT_PRIORITY
 # ---------------------------------------------------------------------------
 rsource "../drivers/video/Kconfig.jpeg_hantro_vc9000e"
 
+# alp-sdk ABI enforcement: the hal_alif prebuilt JPEG SW helper lib
+# (libjpeg_hantro_sw_gcc.a, linked in via CONFIG_USE_ALIF_JPEG_SW_LIB, which
+# this driver needs to link at all -- see jpeg_hantro_vc9000e.c) is built
+# hard-float (VFP register args).  Without the hard-float FP ABI, linking
+# fails with "libjpeg_hantro_sw_gcc.a(...) uses VFP register arguments,
+# zephyr_pre0.elf does not".  Zephyr's Cortex-M FP ABI (FP_HARDABI vs
+# FP_SOFTABI, arch/arm/core/Kconfig) is a `choice` member under FPU, not a
+# plain bool -- no in-tree Zephyr Kconfig `select`s a choice member (fragile:
+# the choice's own visible default/user pick can still override a select), so
+# we do NOT `select FP_HARDABI` here and do NOT silently `depends on
+# FP_HARDABI` (that would make the driver vanish with no explanation when a
+# user enables it).  `select FPU` gets the FPU itself on; the ABI half is
+# enforced as a compile-time BUILD_ASSERT in jpeg_hantro_vc9000e.c, so an
+# enable without CONFIG_FP_HARDABI=y fails loudly at compile time with a clear
+# message instead of a late, cryptic VFP-register-args linker error.
+config VIDEO_JPEG_HANTRO_VC9000E
+	select FPU
+	help
+	  alp-sdk ABI note: the linked hal_alif JPEG SW helper library
+	  (CONFIG_USE_ALIF_JPEG_SW_LIB) is prebuilt hard-float.  Set
+	  CONFIG_FP_HARDABI=y (the "Floating point ABI" choice, under FPU)
+	  alongside this option -- otherwise the build fails at compile time
+	  with a clear BUILD_ASSERT message (see jpeg_hantro_vc9000e.c), not a
+	  late VFP-register-args linker error.
+
 # ---------------------------------------------------------------------------
 # Alif Ensemble CAN-FD (CAST CAN-CTRL IP, compatible "cast,can"), vendored from
 # the Apache-2.0 zephyr_alif fork (zephyr/drivers/can/can_cast.c + can_cast.h).
