@@ -200,10 +200,15 @@
 	 * (see alif-ensemble-clocks-ext.h -- the fork's packed value would target
 	 * the wrong clock block).
 	 *
-	 * First bring-up uses a FIXED-LINK PHY: upstream Zephyr v4.4 ships no
-	 * snps,designware-mdio driver, so the on-SoM TI DP83825I (RMII, 100/full)
-	 * runs unmanaged.  A board enables this node (status="okay") + supplies
-	 * pinctrl_eth (the RMII pin group); the station MAC defaults to a random
+	 * First bring-up (BENCH-VERIFIED, see below) uses a FIXED-LINK PHY: the
+	 * on-SoM TI DP83825I (RMII, 100/full) runs unmanaged, since upstream
+	 * Zephyr v4.4 ships no snps,designware-mdio driver for the GMAC's
+	 * register layout.  alp-sdk now carries one (mdio_dwmac_alif.c,
+	 * BUILD-ONLY this batch -- see the disabled `mdio` child node below and
+	 * its header for the ADR 0017 tier note); a board overlay can switch to
+	 * it by enabling `mdio` + `eth_phy_managed` and repointing phy-handle.
+	 * A board enables this node (status="okay") + supplies pinctrl_eth (the
+	 * RMII pin group); the station MAC defaults to a random
 	 * locally-administered one (see the node property below).
 	 *
 	 * ADR 0017 Tier-1.5 (in-tree glue over the UPSTREAM core; kept, not
@@ -240,6 +245,38 @@
 			compatible = "ethernet-phy-fixed-link";
 			status = "okay";
 			default-speeds = "100BASE Full-Duplex";
+		};
+
+		/*
+		 * Managed-MDIO alternative to the fixed-link eth_phy above.
+		 * compatible "snps,designware-mdio" -- the GMAC's OWN embedded
+		 * Clause-22 MDIO controller (MAC_MDIO_Address/Data, MAC-relative
+		 * offsets 0x200/0x204), NOT a separate IP, so this node carries no
+		 * `reg` of its own (driver: mdio_dwmac_alif.c, resolves the base
+		 * from this node's parent). Disabled by default: fixed-link
+		 * (eth_phy above) stays the bring-up default, matching
+		 * &ethernet's phy-handle. An enabling overlay flips BOTH this node
+		 * and eth_phy_managed to "okay" and repoints &ethernet's
+		 * phy-handle to eth_phy_managed -- see the aen-ethernet-link
+		 * mdio-managed twister scenario. BUILD-ONLY this batch (ADR 0017
+		 * Tier-1.5, see mdio_dwmac_alif.c header) -- no MDIO-managed PHY
+		 * exercised on real E8 silicon yet.
+		 */
+		mdio: mdio {
+			compatible = "snps,designware-mdio";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+
+			/* On-SoM TI DP83825I at PHY address 1 (fork reference; the
+			 * fixed-link path above is the bench-verified one -- confirm
+			 * this address before relying on it for a real MDIO scan). */
+			eth_phy_managed: ethernet-phy@1 {
+				compatible = "ti,dp83825";
+				reg = <1>;
+				ti,interface-type = "rmii";
+				status = "disabled";
+			};
 		};
 	};
 

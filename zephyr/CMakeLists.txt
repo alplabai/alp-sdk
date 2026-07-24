@@ -289,6 +289,19 @@ if(CONFIG_ETH_DWMAC_ALIF)
     zephyr_include_directories(${ZEPHYR_BASE}/drivers/ethernet)
 endif()
 
+# Alif Ensemble GMAC embedded Clause-22 MDIO (compatible snps,designware-mdio);
+# driver: zephyr/drivers/ethernet/mdio/mdio_dwmac_alif.c, binding:
+# zephyr/dts/bindings/mdio/snps,designware-mdio.yaml.  Reuses eth_dwmac_priv.h's
+# MAC_MDIO_Address/Data field macros, so it needs the same drivers/ethernet
+# include dir as CONFIG_ETH_DWMAC_ALIF above (guarded separately since the mdio
+# node's own DT status doesn't formally imply its parent MAC node is enabled).
+# BUILD-ONLY this batch -- see ADR 0017 Tier-1.5 note in the driver header.
+zephyr_library_sources_ifdef(CONFIG_MDIO_DWMAC_ALIF
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/ethernet/mdio/mdio_dwmac_alif.c)
+if(CONFIG_MDIO_DWMAC_ALIF)
+    zephyr_include_directories(${ZEPHYR_BASE}/drivers/ethernet)
+endif()
+
 # Alif Ensemble DWC_ssi SPI (compatible alif,dwc-ssi-spi), vendored from the
 # Apache-2.0 zephyr_alif fork; distinct compatible so it doesn't collide with
 # upstream spi_dw.  The driver reuses upstream's private spi_context.h, so put
