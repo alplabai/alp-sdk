@@ -1,0 +1,13 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# Clause-22 MDIO bus embedded in the Synopsys DesignWare GMAC (Alif Ensemble
+# alif,ethernet). No `reg` here: MAC_MDIO_Address/Data are MAC-relative
+# offsets 0x200/0x204, resolved by the driver from the parent node's `reg`.
+# Driver: zephyr/drivers/ethernet/mdio/mdio_dwmac_alif.c.
+
+description: Synopsys DesignWare GMAC embedded MDIO controller (Clause 22)
+
+compatible: "snps,designware-mdio"
+
+include: mdio-controller.yaml

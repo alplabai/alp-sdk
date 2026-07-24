@@ -40,3 +40,33 @@ tests:
       - ethernet
       - dwmac
     build_only: true   # no Ethernet HW in CI; end-to-end is a bench flash, not a run.
+
+  # Compile-only proof for the new snps,designware-mdio controller
+  # (mdio_dwmac_alif.c, ADR 0017 Tier-1.5, BUILD-ONLY -- no MDIO-managed PHY
+  # exercised on real E8 silicon this batch). mdio-managed.overlay repoints
+  # &ethernet's phy-handle from the fixed-link eth_phy to the mdio-managed
+  # eth_phy_managed (ti,dp83825): closes that the MDIO driver binds,
+  # phy_ti_dp83825 binds on the bus, and the upstream eth_dwmac core's
+  # phy_link path compiles with a managed PHY. Same reasons as the sibling
+  # scenario above for build_only + the single AEN801 platform_allow.
+  alp_sdk.examples.aen.ethernet_link.aen.mdio_managed:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    # NOTE: twister's extra_dtc_overlay_files maps to CMake DTC_OVERLAY_FILE
+    # (NOT EXTRA_DTC_OVERLAY_FILE), which REPLACES rather than supplements
+    # CMake's own board-default-overlay auto-discovery -- so the board's
+    # default overlay must be listed explicitly here too, or the mdio-managed
+    # build silently loses it (gpio11/lpgpio, pinctrl_eth, chosen zephyr,sram
+    # all live there) and fails downstream on an unrelated undeclared-device
+    # error.
+    extra_dtc_overlay_files:
+      - boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay
+      - mdio-managed.overlay
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - ethernet
+      - dwmac
+      - mdio
+    build_only: true   # compile-proof only; MDIO-managed PHY not bench-verified.

@@ -201,4 +201,31 @@
 	ALIF_CLK_CFG(CLKCTL_PER_SLV, CANFD_CTRL, 12U, 1U, 1U, 1U, 16U,         \
 		     ALIF_PARENT_CLK_SYST_HCLK)
 
+/* I3C (main, i3c0@49034000) peripheral clock gate: bit 0 of I3C_CTRL (offset
+ * 0x24) in CLKCTL_PER_SLV (base 0x4902F000) -> sets bit 0 of 0x4902F024.
+ * Re-authored, per [[reference_alif_clock_encoding_fork_vs_upstream]], from
+ * the Apache-2.0 zephyr_alif fork (zephyr_alif@3a2b84d9,
+ * dts/arm/alif/ensemble/common/e1.dtsi + alif_ensemble_clocks.h) into the
+ * upstream 8-arg ALIF_CLK_CFG() encoding; corroborated against the AE822 DFP
+ * CMSIS sys_ctrl_i3c.h. parent_clk is a filler: the upstream i3c_dw.c driver
+ * only clock_control_on()s this id, never get_rate()s, so the parent is
+ * unused. vendor-ext, BENCH-UNVERIFIED. */
+#define ALIF_I3C_CTRL_REG 0x24U /* CLKCTL_PER_SLV base 0x4902F000 */
+#define ALIF_I3C_CLK                                                           \
+	ALIF_CLK_CFG(CLKCTL_PER_SLV, I3C_CTRL, 0U, 1U, 0U, 0U, 0U,             \
+		     ALIF_PARENT_CLK_SYST_HCLK)
+
+/* LPI3C (M55-HE local domain, lpi3c0@43006000) peripheral clock gate: bit 14
+ * of HE_CLK_ENA (offset 0x10, ALIF_HE_CLK_ENA_REG above) in M55HE_CFG (base
+ * 0x43007000) -> sets bit 14 of 0x43007010. Re-authored, per
+ * [[reference_alif_clock_encoding_fork_vs_upstream]], from the Apache-2.0
+ * zephyr_alif fork (zephyr_alif@3a2b84d9,
+ * dts/arm/alif/ensemble/e4_e6_e8.dtsi + alif_ensemble_clocks.h) into the
+ * upstream 8-arg ALIF_CLK_CFG() encoding; corroborated against the AE822 DFP
+ * CMSIS sys_ctrl_i3c.h. HE-core only. parent_clk is a filler, same reasoning
+ * as ALIF_I3C_CLK above. vendor-ext, BENCH-UNVERIFIED. */
+#define ALIF_LPI3C_CLK                                                         \
+	ALIF_CLK_CFG(M55HE_CFG, HE_CLK_ENA, 14U, 1U, 0U, 0U, 0U,               \
+		     ALIF_PARENT_CLK_SYST_HCLK)
+
 #endif /* ALP_DT_BINDINGS_CLOCK_ALIF_ENSEMBLE_CLOCKS_EXT_H_ */

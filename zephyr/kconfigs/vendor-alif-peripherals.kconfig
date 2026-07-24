@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Alif Ensemble vendor/fork peripheral drivers: MHUv2 mailbox, HWSEM, Ethernet
-# DWMAC, DWC_ssi SPI, SE-service MHUv2 transport, UTIMER PWM/counter, DW
-# RTC/LPTIMER counters, UTIMER QDEC, DWC SDHC, ADC/DAC analog, CRC, comparator,
-# PDM mic, DesignWare I2S, camera/video (CPI + MIPI D-PHY/CSI-2 + ARX3A0 + ISP-
-# Pico), and CAN-FD.
+# DWMAC + embedded MDIO (managed-PHY, BUILD-ONLY this batch), DWC_ssi SPI,
+# SE-service MHUv2 transport, UTIMER PWM/counter, DW RTC/LPTIMER counters,
+# UTIMER QDEC, DWC SDHC, ADC/DAC analog, CRC, comparator, PDM mic, DesignWare
+# I2S, camera/video (CPI + MIPI D-PHY/CSI-2 + ARX3A0 + ISP-Pico), CAN-FD, and
+# OSPI/HexSPI (Octal-SPI + HyperBus XIP controller, BUILD-ONLY / HW-BLOCKED
+# this batch -- no octal-NOR/HyperBus part populated).
 
 # Alif Ensemble ARM MHUv2 inter-core mailbox driver -- vendor-ext,
 # BENCH-UNVERIFIED.  Carried here (not upstream Zephyr) so it survives a
@@ -133,6 +135,44 @@ config ETH_DWMAC_ALIF_RMII_REFCLK_INTERNAL_PLL
 	  external RMII oscillator is populated and you want to skip the probe.
 
 endchoice
+
+config MDIO_DWMAC_ALIF
+	bool "Alif Ensemble GMAC embedded MDIO controller (ADR 0017 Tier-1.5, BUILD-ONLY)"
+	default y
+	depends on DT_HAS_SNPS_DESIGNWARE_MDIO_ENABLED
+	select MDIO
+	help
+	  Clause-22 MDIO controller embedded in the Alif Ensemble GMAC's own
+	  register window (MAC_MDIO_Address/Data, MAC-relative offsets
+	  0x200/0x204 -- NOT a separate IP, so this node carries no `reg` of its
+	  own and resolves its base from the parent `alif,ethernet` MAC node).
+	  Lets a managed PHY (e.g. ti,dp83825) replace the first-bring-up
+	  fixed-link child under &ethernet. Driver:
+	  zephyr/drivers/ethernet/mdio/mdio_dwmac_alif.c.
+
+	  ADR 0017 Tier-1.5: no upstream v4.4 driver targets this register
+	  layout, but the MAC_MDIO_Address/Data field offsets and bitmasks are
+	  CONSUMED from the upstream eth_dwmac core's own private header
+	  (eth_dwmac_priv.h) -- not reinvented. BUILD-ONLY this batch: proven by
+	  the aen-ethernet-link mdio-managed twister scenario on the AEN801
+	  M55-HE target; no MDIO-managed PHY exercised on real E8 silicon yet.
+
+config MDIO_DWMAC_ALIF_CLOCK_RANGE
+	int "GMAC MDIO CSR clock-range select (MAC_MDIO_Address CR field)"
+	default 5
+	depends on MDIO_DWMAC_ALIF
+	range 0 15
+	help
+	  Raw value for the MAC_MDIO_Address CR field (bits 11:8), selecting
+	  the CSR (AHB) clock bracket the MDC divider is derived from (DWC_
+	  ether_qos databook; e.g. CR=4 -> 150-250 MHz CSR -> MDC = CSR/102).
+	  IEEE 802.3 caps MDC at 2.5 MHz. Default 5 (250-300 MHz bracket,
+	  CSR/124 -- the largest divisor in the base GMAC4 table) is a
+	  conservative placeholder chosen because the Ensemble E8 GMAC CSR/AHB
+	  clock is not pinned down in this batch: a larger divisor only ever
+	  makes MDC slower, never faster than the 2.5 MHz ceiling. This is a
+	  bench calibration knob -- override per board once the real CSR clock
+	  is measured.
 
 config SPI_DW_ALIF
 	bool "Alif Ensemble DWC_ssi SPI (ADR 0017 Tier-2 INTERIM -> retire onto fork, BENCH-UNVERIFIED)"
@@ -824,4 +864,56 @@ config CAN_RBUF_AFWL
 	  Receive-buffer almost-full warning limit (AFWL) the cast,can driver
 	  programs into CANFD_LIMIT.  The CAST IP maximum is CAN_RBUF_AFWL_MAX = 15
 	  (can_cast.h:98).  Fork-specific symbol (absent from upstream CAN).
+
+# ---------------------------------------------------------------------------
+# Alif Ensemble OSPI / HexSPI (Synopsys DesignWare OSPI, compatible
+# "snps,designware-ospi") -- the octal-SPI controller that also drives
+# HyperBus/HyperRAM-style parts in XIP mode (ospi_hyperbus_*/ospi_psram_xip_*
+# in the hal_alif library).  ADR 0017 Tier-1.5: a small in-tree driver
+# (zephyr/drivers/flash/flash_ospi_alif.c) written over the Apache-2.0 hal_alif
+# register library (modules/hal/alif drivers/ospi/{include,src}/ospi*.{c,h}),
+# which -- like drivers/utimer and drivers/analog -- hal_alif gates on a
+# CONFIG_USE_ALIF_HAL_OSPI it only `select`s (drivers/CMakeLists.txt:1
+# `add_subdirectory_ifdef(CONFIG_USE_ALIF_HAL_OSPI ospi)`) and never DEFINES.
+# alp-sdk, as the integration layer, defines it below (the USE_ALIF_HAL_UTIMER
+# / USE_ALIF_HAL_ANALOG precedent) so OSPI_ALIF can select it and actually pull
+# the library in.
+#
+# vendor-ext, HW-BLOCKED, BUILD-ONLY this batch: the E1M-AEN801 (Ensemble E8)
+# has NO octal-NOR/HyperBus part populated on this hardware batch, so there is
+# nothing on the bus to silicon-verify against -- this only proves the ospi0
+# node BINDS + the hal_alif init/XiP-enable entry points COMPILE and LINK
+# (zephyr/drivers/flash/flash_ospi_alif.c calls both at driver init; see
+# examples/aen/aen-ospi-regcheck).  Not a full flash_driver_api (read/write/
+# erase/SFDP) -- that is a larger silicon-gated follow-up once a part is
+# populated, not this batch.
+# ---------------------------------------------------------------------------
+config USE_ALIF_HAL_OSPI
+	bool
+	help
+	  Pull in the hal_alif OSPI register library (drivers/ospi).  Selected by
+	  OSPI_ALIF; not user-facing.
+
+config OSPI_ALIF
+	bool "Alif Ensemble OSPI/HexSPI controller (ADR 0017 Tier-1.5, HW-BLOCKED / BUILD-ONLY)"
+	default y
+	depends on DT_HAS_SNPS_DESIGNWARE_OSPI_ENABLED
+	select USE_ALIF_HAL_OSPI
+	help
+	  Alif Ensemble Synopsys DesignWare OSPI/HexSPI controller (compatible
+	  "snps,designware-ospi", base 0x8300_0000 on the E8 ospi0 instance),
+	  written over the Apache-2.0 hal_alif drivers/ospi register library
+	  (USE_ALIF_HAL_OSPI pulls in modules/hal/alif drivers/ospi).  Octal-SPI
+	  NOR flash + HyperBus/HyperRAM XIP modes are both driven through the same
+	  controller; this driver programs the controller (ospi_init) and the XiP
+	  window (xip_enable) only -- no read/write/erase flash_driver_api yet.
+
+	  HW-BLOCKED, BUILD-ONLY: no octal-NOR/HyperBus part is populated on the
+	  E1M-AEN801 this batch, so live XiP reads are unverifiable here -- this
+	  gate proves the DT node binds and the hal_alif entry points link.
+	  Driver: zephyr/drivers/flash/flash_ospi_alif.c.
+
+	  ADR 0017 Tier-1.5 (in-tree thin driver over an Apache-2.0 hal_alif HW
+	  library, not a fork-driver copy -- the fork ships no OSPI Zephyr class
+	  driver either, only the DT binding).  See docs/adr/0017.
 
