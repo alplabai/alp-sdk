@@ -10,6 +10,7 @@ import yaml
 
 from alp_model.analyze import UnsupportedModelError, analyze_model
 from alp_model.build import build_model, _ADAPTERS
+from alp_model.convert import ConvertError, to_onnx
 from alp_model.measure import MeasureError, accuracy_vs, compare, default_input, run_host
 from alp_model.package import read_package
 from alp_model.prep import PrepError, accuracy_delta, quantize, validate_calibration
@@ -383,18 +384,29 @@ def add_cmd(zoo_id: str, board_path: Path, name: str | None, models_dir: str,
 @click.option("--format", "fmt", type=click.Choice(["human", "json"]), default="human")
 def prep_cmd(raw: Path, cal_dir: Path, out: Path | None, per_channel: bool,
              min_samples: int, fmt: str) -> None:
-    if raw.suffix.lower() != ".onnx":
-        click.echo(f"error: model prep supports .onnx input in this release; got {raw.name}",
-                   err=True)
+    if raw.suffix.lower() not in (".onnx", ".tflite"):
+        click.echo(f"error: model prep supports .onnx/.tflite input; got {raw.name}", err=True)
         raise SystemExit(1)
     out = out or raw.with_suffix(".int8.onnx")
+    onnx_in = raw
+    converted: Path | None = None
+    if raw.suffix.lower() == ".tflite":
+        converted = out.with_name(raw.stem + ".converted.onnx")
+        try:
+            onnx_in = to_onnx(raw, converted)
+        except ConvertError as exc:
+            click.echo(f"error: {exc}", err=True)
+            raise SystemExit(1)
     try:
-        validate_calibration(cal_dir, raw, min_samples=min_samples)
-        quantize(raw, out, cal_dir, per_channel=per_channel)
-        rep = accuracy_delta(raw, out, cal_dir)
+        validate_calibration(cal_dir, onnx_in, min_samples=min_samples)
+        quantize(onnx_in, out, cal_dir, per_channel=per_channel)
+        rep = accuracy_delta(onnx_in, out, cal_dir)
     except PrepError as exc:
         click.echo(f"error: {exc}", err=True)
         raise SystemExit(1)
+    finally:
+        if converted is not None and converted.is_file():
+            converted.unlink()                        # drop the intermediate fp32 ONNX
     acc = {"samples": rep.samples, "top1_agreement_pct": rep.top1_agreement_pct,
            "mean_cosine": rep.mean_cosine, "max_abs_err": rep.max_abs_err,
            "verdict": rep.verdict, "guidance": rep.guidance}

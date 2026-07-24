@@ -52,6 +52,9 @@ model-prep = [
     "numpy>=1.23",
     "sympy>=1.11",
 ]
+# TFLite->ONNX conversion for "alp model prep" (.tflite input) -- heavy
+# (pulls tensorflow); kept out of the base and the lighter model-prep extra.
+model-convert = ["tf2onnx>=1.16", "tensorflow-cpu>=2.15"]
 
 # No `alp` console-script: `tan` (the standalone Rust CLI) is the sole
 # user-facing command surface (ADR-0020 end-state B). The `alp_cli` package

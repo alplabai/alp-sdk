@@ -564,6 +564,29 @@ def test_model_prep_json(tmp_path):
     assert payload["accuracy"]["verdict"] in ("good", "degraded")
 
 
+def test_model_prep_accepts_tflite(tmp_path):
+    import json
+    import numpy as np
+    import pytest as _pytest
+    _pytest.importorskip("tf2onnx")
+    _pytest.importorskip("tensorflow")
+    from click.testing import CliRunner
+    from alp_cli.main import cli
+    cal = tmp_path / "cal"; cal.mkdir()
+    rng = np.random.default_rng(0)
+    for i in range(8):
+        np.save(cal / f"s{i}.npy", rng.standard_normal((1, 4)).astype(np.float32))
+    raw = _ROOT / "tests/fixtures/models/tiny_fp32.tflite"
+    out = tmp_path / "tiny.int8.onnx"
+    res = CliRunner().invoke(cli, ["model", "prep", str(raw), "--calibration", str(cal),
+                                   "--out", str(out), "--format", "json"],
+                             catch_exceptions=False)
+    assert res.exit_code == 0, res.output
+    payload = json.loads(res.output)
+    assert out.is_file()                              # quantized ONNX produced
+    assert payload["accuracy"]["verdict"] in ("good", "degraded")
+
+
 def test_model_prep_too_few_calibration_errors(tmp_path):
     import numpy as np
     import pytest as _pytest
@@ -577,9 +600,10 @@ def test_model_prep_too_few_calibration_errors(tmp_path):
     assert res.exit_code == 1
 
 
-def test_model_prep_non_onnx_errors_cleanly(tmp_path):
-    # A .tflite (or any non-.onnx) input must die with a clean PrepError-style
-    # message, not a raw onnxruntime InvalidProtobuf traceback.
+def test_model_prep_unsupported_format_errors_cleanly(tmp_path):
+    # An unsupported model format (not .onnx/.tflite) must die with a clean
+    # error message, not a raw traceback. (.tflite is now accepted -- see
+    # test_model_prep_accepts_tflite.)
     import numpy as np
     from click.testing import CliRunner
     from alp_cli.main import cli
@@ -587,7 +611,8 @@ def test_model_prep_non_onnx_errors_cleanly(tmp_path):
     rng = np.random.default_rng(0)
     for i in range(8):
         np.save(cal / f"s{i}.npy", rng.standard_normal((1, 3, 224, 224)).astype(np.float32))
-    raw = _ROOT / "tests/fixtures/models/tiny_int8.tflite"
+    raw = tmp_path / "model.pt"
+    raw.write_bytes(b"not a real model")
     res = CliRunner().invoke(cli, ["model", "prep", str(raw), "--calibration", str(cal)])
     assert res.exit_code == 1
     assert "onnx" in res.output.lower()
