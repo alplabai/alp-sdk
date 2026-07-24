@@ -206,9 +206,11 @@ config ALP_SDK_INFERENCE_BACKEND_TFLM
 	  vendor-specific NPU backend (ETHOS_U_AEN / ETHOS_U_N93)
 	  registers at priority 100 on the matching silicon_ref.
 	  Pulls in TFLM via the upstream tflite-micro Zephyr module
-	  (see west.yml's name-allowlist).
-	  Native_sim builds skip this (no TFLM module); the dispatcher
-	  falls back to sw_fallback.
+	  (see west.yml's name-allowlist).  An alp-sdk-topdir workspace
+	  HAS the module, so native_sim builds real TFLM (C++17, emitted
+	  by the orchestrator).  Only a bare upstream-zephyr workspace
+	  (no module) degrades TENSORFLOW_LITE_MICRO to n and falls back
+	  to sw_fallback.
 
 config ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN
 	bool "Ethos-U on Alif Ensemble (priority 100 on alif:ensemble:e*)"

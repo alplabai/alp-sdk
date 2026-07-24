@@ -22,11 +22,15 @@
  *   which kernel set the build linked against.
  *
  * Native-sim coverage
- *   CONFIG_TENSORFLOW_LITE_MICRO is not enabled under native_sim
- *   so this file is excluded from that build; the inference
- *   dispatcher falls back to sw_fallback (priority 0) which
- *   returns NOSUPPORT.  Real CI coverage lands when the AEN HIL
- *   runner comes online with the Vela toolchain.
+ *   On an alp-sdk-topdir west workspace (the customer setup -- west.yml
+ *   pulls the tflite-micro module in unconditionally) TENSORFLOW_LITE_MICRO
+ *   is y, so this file DOES compile under native_sim and runs the real TFLM
+ *   CPU executor; any Ethos-U custom op resolves to the module's stub
+ *   Register_ETHOSU().  Only a bare upstream-`zephyr` workspace (the repo's
+ *   own twister CI, `west init -m .../zephyr`) lacks the module -- there
+ *   TENSORFLOW_LITE_MICRO degrades to n, this TU is excluded, and the
+ *   dispatcher falls back to sw_fallback (priority 0, NOSUPPORT).  Real
+ *   Ethos-U NPU acceleration lands on AEN HIL with CONFIG_ETHOS_U + Vela.
  */
 
 #include <cstring>
@@ -55,9 +59,15 @@ extern "C" {
 #include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
 #include "tensorflow/lite/schema/schema_generated.h"
 
-#if defined(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN) ||                                       \
+#if defined(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN) || \
     defined(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93)
-#include "tensorflow/lite/micro/kernels/ethos_u/ethosu.h"
+/* The Register_ETHOSU() registration header lives at kernels/ethosu.h in the
+ * pinned (Zephyr v4.4) tflite-micro fork -- NOT kernels/ethos_u/ethosu.h.  The
+ * fork keeps the kernel implementation in kernels/ethos_u/ethosu.cc but the
+ * declaring header one level up.  Do not "correct" this to the ethos_u/ subdir:
+ * that path does not exist and fatally breaks every ETHOS_U backend build
+ * (native_sim AEN emit + real AEN silicon alike). */
+#include "tensorflow/lite/micro/kernels/ethosu.h"
 #define ALP_INFERENCE_TFLM_HAS_ETHOS_U 1
 #endif
 
