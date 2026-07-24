@@ -252,6 +252,27 @@ static alp_status_t tflm_open(const alp_inference_config_t  *cfg,
 		st->own_arena          = true;
 	}
 
+	/* Validate the flatbuffer BEFORE dereferencing it.  tflite::GetModel is a
+	 * zero-copy reinterpret_cast -- it does not inspect the buffer -- so a
+	 * stub, truncated, or corrupt model would segfault at ->version() below.
+	 * VerifyModelBuffer walks the flatbuffer against the caller-supplied
+	 * model_size (mandatory per <alp/inference.h>) and rejects anything that
+	 * isn't a well-formed TFLite model.  A customer shipping a placeholder
+	 * model (or a mismatched .alpmodel) then gets a clean ALP_ERR_INVAL and
+	 * can fall back, instead of the SDK crashing. */
+	if (cfg->model_data == nullptr || cfg->model_size == 0) {
+		if (st->own_arena) g_default_arena_in_use = false;
+		delete st;
+		return ALP_ERR_INVAL;
+	}
+	flatbuffers::Verifier model_verifier(static_cast<const uint8_t *>(cfg->model_data),
+	                                     cfg->model_size);
+	if (!tflite::VerifyModelBuffer(model_verifier)) {
+		if (st->own_arena) g_default_arena_in_use = false;
+		delete st;
+		return ALP_ERR_INVAL;
+	}
+
 	st->model = tflite::GetModel(cfg->model_data);
 	if (st->model->version() != TFLITE_SCHEMA_VERSION) {
 		if (st->own_arena) g_default_arena_in_use = false;
