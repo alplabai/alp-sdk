@@ -5,6 +5,11 @@ Unit tests for `--emit kconfig` (#893):
   * Task 1 -- emit-mode wiring + the loud "no workspace" guard.
   * Task 2 -- hermetic symbol projection + envelope shaping (a fake
     symbol list; no kconfiglib / Zephyr installed).
+  * cross-repo contract (#893 shared fixture) -- `_envelope()` +
+    `_project_symbols()`'s combined key shape matches the canonical
+    `tests/fixtures/kconfig-contract/emit-kconfig.golden.json` tan-cli and
+    alp-sdk-vscode both test against, so a field rename is caught here
+    too, not only by pr-twister's check_emit_kconfig_contract.py.
 
 The workspace-dependent load (Task 3 -- Approach A: a stub `west build
 --cmake-only` then read kconfiglib against the real env) has its own
@@ -20,6 +25,7 @@ Run locally:
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -189,3 +195,37 @@ def test_envelope_shape() -> None:
     assert envelope["board"] == "alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33"
     assert envelope["core"] == "m33_sm"
     assert envelope["symbols"] == symbols
+
+
+# ---------------------------------------------------------------------
+# Cross-repo contract regression (#893): tan-cli's `parse_kconfig` and
+# alp-sdk-vscode's `kconfigSymbolsFromEnvelope` both test their own parsers
+# against tests/fixtures/kconfig-contract/emit-kconfig.golden.json. Pin the
+# SDK's own producer against the SAME file so a field rename is caught in
+# this fast hermetic gate, not only in pr-twister.
+# ---------------------------------------------------------------------
+
+_GOLDEN = (Path(__file__).resolve().parent.parent / "fixtures"
+           / "kconfig-contract" / "emit-kconfig.golden.json")
+
+
+def test_envelope_and_symbols_match_golden_key_sets() -> None:
+    golden = json.loads(_GOLDEN.read_text(encoding="utf-8"))
+
+    syms = [
+        _FakeSym(
+            entry["name"], _FAKE_BOOL,
+            nodes=[_FakeNode(prompt=(entry["prompt"], None), help=entry["help"])],
+            direct_dep=entry["depends"],
+            orig_defaults=([(entry["default"], None)]
+                            if entry["default"] is not None else []),
+        )
+        for entry in golden["symbols"]
+    ]
+    projected = _project_symbols(syms, type_to_str=_FAKE_TYPE_TO_STR, expr_str=str)
+    envelope = _envelope(golden["board"], golden["core"], projected)
+
+    assert set(envelope.keys()) == set(golden.keys())
+    golden_symbol_keys = set(golden["symbols"][0].keys())
+    for sym in projected:
+        assert set(sym.keys()) == golden_symbol_keys

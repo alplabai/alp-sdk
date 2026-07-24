@@ -5,7 +5,177 @@ All notable changes to the Alp SDK are documented here.  Format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
-## [Unreleased] - v0.13.0 candidate
+## [Unreleased] - v0.14.0 candidate
+
+## [v0.13.0] - 2026-07-24
+
+### Added — `--emit kconfig`: board-scoped Kconfig symbol menu for the LSP
+
+- New orchestrator emit mode for the vscode `prj.conf` LSP:
+  `scripts/alp_orchestrate/kconfig_symbols.py` projects a board-scoped,
+  user-settable Kconfig symbol menu as JSON (`{schemaVersion, board, core,
+  symbols: [{name, type, prompt, depends, default, help}]}`). `--core` is
+  required; the mode exits loudly (`exit(2)`) when `ZEPHYR_BASE` /
+  `kconfiglib` aren't available instead of emitting a partial menu — this
+  is the SDK's first workspace-dependent emit mode, and is deliberately
+  outside `check_emit_snapshots.py`'s hermetic CASES list. Symbols are
+  projected against a throwaway stub app configured via `west build
+  --cmake-only`, capturing the exact env/argv Zephyr's own
+  `cmake/modules/kconfig.cmake` computes for the board/toolchain rather
+  than hand-deriving the srctree/ARCH/BOARD_DIR/module-Kconfig variables.
+  `metadata/emit-registry-v1.json` / `metadata/catalog.json` regenerated
+  for the new mode. Consumer: `tan-cli` #35. (#893, #894)
+
+### Added — canonical cross-repo `--emit kconfig` contract fixture + conformance gate
+
+- `tests/fixtures/kconfig-contract/emit-kconfig.golden.json` is now the
+  shared anchor for `--emit kconfig`'s envelope shape — `tan-cli`'s
+  `parse_kconfig` and `alp-sdk-vscode`'s `kconfigSymbolsFromEnvelope` both
+  test against this file instead of a hand-written literal per repo, so a
+  future field rename can't drift silently across the chain.
+  `check_emit_kconfig_contract.py` asserts the real emit's envelope and
+  every symbol's KEY SET (never values/counts, which move with the pinned
+  Zephyr version) conform to the golden fixture, and fails with the
+  offending keys plus a pointer to bump `schemaVersion` and update
+  `tan-cli`/`alp-sdk-vscode` together. A hermetic counterpart in
+  `tests/scripts/test_emit_kconfig.py` pins the same key shape so the fast
+  gate catches a rename too, not only `pr-twister`. (#893, #897)
+
+### Added — Yocto/Linux power backend: `/sys/power/state` + RTC wakealarm
+
+- New `src/backends/power/yocto_drv.c` real Linux power backend
+  (`request_sleep` via `/sys/power/state` — `freeze`/`standby`/`mem` — plus
+  RTC wakealarm for a timed wake), registered alongside the existing
+  `zephyr_stub`/`zephyr_pm_policy`/`alif_se_profile`/V2N GD32-supervisor
+  backends on the internal power vtable; errno-mapped failures are never
+  swallowed. Real-board confirmation is a later bench step. (#613, #896)
+
+### Added — runtime GATT server + client read/write on the Zephyr BLE backend
+
+- `zephyr_drv.c` now registers runtime GATT services via
+  `bt_gatt_service_register()` (a heap-free, bump-allocated
+  `bt_gatt_attr` pool), maps handles back to the caller, and wires
+  per-characteristic `read()`/`write()` callbacks plus `notify()`; the
+  connection-side client read/write ops build on `bt_gatt_read()` /
+  `bt_gatt_write()` with a `k_sem` synchronous wrapper. Proven host-side
+  under native_sim (new `tests/zephyr/ble_gatt_server`); the client
+  read/write path is bench-deferred since native_sim ships no reachable
+  BLE controller offline. Fixes a read-completion bug found in the same
+  pass: `ble_read_cb()` returned `BT_GATT_ITER_STOP` from the data-bearing
+  branch, suppressing `gatt_read_rsp()`'s terminal completion callback, so
+  a successful client GATT read never signalled its semaphore and blocked
+  to `ALP_ERR_TIMEOUT` on every success; the branch order also checked
+  `data == NULL` before `err != 0`, masking a peer-rejected read as
+  `ALP_ERR_IO`. (#480, #886)
+
+### Added — dynamic CC3501E GATT service registration (firmware + host)
+
+- Replaces the fixed-demo-service stub with descriptor-driven GATT
+  service registration over the CC3501E bridge: `cc35_gatt_register_service`
+  no longer returns `ALP_ERR_NOSUPPORT`. New wire message
+  `BLE_GATT_REGISTER` (`0x38`, `include/alp/protocol/cc3501e.h`) carries a
+  variable-length service/characteristic descriptor; the firmware
+  (`firmware/cc3501e/`) bounds-validates it and dynamically
+  `ble_gatts_add_svcs`, preserving the existing demo service (`0xFFF0`/
+  `0xFFF1`) across a `ble_gatts_reset()` + re-add (a naive second
+  `ble_gatts_start()` use-after-frees the demo's attribute entries — caught
+  in review against the vendored NimBLE source). Registration must precede
+  advertising (`ble_gatts_mutable()`). Host-side
+  `cc3501e_ble_gatt_register()` (`include/alp/chips/cc3501e/ble.h`) gains
+  `handles_out`/`handles_cap`/`num_handles_out` parameters to return the
+  registered attribute handles, and `EBUSY` from a register-while-advertising
+  call now maps to `ALP_ERR_BUSY`. New `aen-cc3501e-gatt-register` bench
+  example. (#480, #892)
+
+### Added — `aen-cc3501e-ble-gatt`: silicon-proven CC3501E BLE GATT-server bench example
+
+- New AEN E8 bench example exercising the CC3501E BLE path through the
+  portable `<alp/ble.h>` only: bridge PING, `alp_ble_open`, a GATT service
+  register, `advertise_start`, and NULL-conn read/write/notify guards.
+  Server-only — no BLE central on the bench, so end-to-end read/write
+  against a peer stays HIL-deferred. Proven PASS on physical E1M-AEN801
+  (SW-DP `0x4C013477`), persistent across a cold POR. (#480, #888)
+
+### Fixed — enforce the 31-byte legacy BLE adv-data budget centrally; correct the `ble.h` name-cap doc
+
+- `include/alp/ble.h` documented an unsatisfiable "name ≤ 29 chars" (the
+  mandatory Flags element always eats 3 of the 31 legacy adv bytes), and
+  only the CC3501E backend pre-checked the budget (`ALP_ERR_INVAL`) while
+  the Zephyr backend didn't, so the same portable `adv_config` diverged
+  per backend — found on E1M-AEN801 silicon (#888): a 15-char name plus
+  one 128-bit service UUID (38 bytes) failed only on CC3501E. `ble.h` now
+  documents the real budget (Flags 3 + `2+strlen(name)` +
+  `2+16*num_services`; name ≤ 26 chars alone, ≤ 8 with one 128-bit UUID,
+  comment-only). `ble_dispatch.c` adds `alp_ble_adv_data_size()` +
+  `ALP_BLE_ADV_LEGACY_MAX_LEN` (31), enforced in
+  `alp_ble_advertise_start()` before backend dispatch, so Zephyr and
+  CC3501E now reject an over-budget config identically. (#480, #890)
+
+### Fixed — CC3501E GATT register-while-advertising returns a distinct status; `#888` example corrected
+
+- Lands the bench-validated distinct-`EBUSY`-status fix stranded by the
+  #892 merge: register-while-advertising now returns `ALP_ERR_BUSY` in
+  ~52 ms on the E1M-AEN801 bench instead of being conflated with a
+  timeout/IO error, and the `aen-cc3501e-ble-gatt` / `aen-cc3501e-gatt-register`
+  examples are corrected to match the real (no-longer-`NOSUPPORT`) GATT
+  register behaviour. (#480, #895)
+
+### Fixed — callback self-close deadlocks (MQTT, Yocto CAN, Yocto GPIO, CC3501E BLE)
+
+- A message/scan/IRQ callback that closed its own handle hung forever
+  because it ran inside a counted operation (MQTT loop, BLE scan) or
+  under the backend mutex (Yocto CAN RX worker, Yocto direct GPIO IRQ
+  worker) that `close` then waited on. Fixed with one shared pattern — a
+  reentrant-defer primitive (`alp_slot_claim` + a portable current-thread
+  token) for same-thread reentrancy, a shutdown/destroy split (drain
+  before shutdown) for CAN's worker-thread self-close, and a lock-scope
+  fix for GPIO's shared dispatcher; callbacks now run outside
+  locks/counts and teardown defers to the thread that owns lifetime.
+  Public callback-context / re-entry guarantees are now explicit in
+  `iot.h`, `ble.h`, `can.h`, `peripheral.h`. New self-close + cross-thread
+  + first-`add_filter`-race tests; Yocto paths covered under
+  ThreadSanitizer/ASan. (#756, #882)
+
+### Fixed — CC3501E link-speed stated consistently across the tree
+
+- The CC3501E SPI link speed was stated inconsistently, and the cited
+  "14.8 MHz (400 MHz AHB / 27)" derivation was unreachable (the SSI
+  functional clock is 200 MHz; the divider truncates to ~14.3 MHz).
+  Corrected all four `cc3501e_bridge.h` copies plus their board overlays,
+  deleted a dead `CC3501E_SPI_FREQ_HZ` macro that taught the wrong value,
+  and set `metadata/chips/cc3501e.yaml` `max_clock_hz` to the CC35 slave
+  hardware ceiling (15 MHz) so metadata agrees with the docs. Also
+  downgrades the `iot-connected-camera` readiness-doc row from a
+  completed v1.0 flagship to its actual v0.1-skeleton state. (#804, #448,
+  #882)
+
+### Fixed — `check_example_portability.py`: block-slugs no longer resolve to `ring-unknown`
+
+- `classify()` built its `family_sets` over every chip including
+  block-slug pseudo-chips (`button_led`, `pdm_mic`) that have no
+  `metadata/chips/<slug>.yaml`, so any example carrying one resolved to an
+  empty family set and returned `ring-unknown` even when its real chips
+  resolved and its SoM family was known (e.g. `iot-connected-camera`).
+  `_BLOCK_SLUGS` is hoisted to module scope and filtered in `classify()`
+  the same way `check_example()` already did; an all-block-slug example
+  now falls through to `_no_chip_ring` like a chip-less example. (#884,
+  #885)
+
+### Fixed — ADR-0020 markdown the distro-patched Doxygen 1.9.8 can parse; `docs/adr/**` now gates `pr-doxygen`
+
+- Two earlier fix attempts (in v0.12.0) iterated against static 1.9.8 /
+  apt 1.9.1, neither of which reproduces the CI failure, and `pr-doxygen`
+  never even ran on an ADR-only PR (`docs/adr/**` was excluded from its
+  path filter), so both merged unverified. Reproduced locally against apt
+  `doxygen 1.9.8+ds-2ubuntu0.1` (Ubuntu 24.04, byte-identical to
+  `ubuntu-latest`'s package) and bisected: the real trigger is a `(`
+  immediately adjacent to a backtick code-span inside a **bold** span —
+  "**Phase 2 (`tan`, Hakan):**" in the ADR-0020 migration list. Dropping
+  the code formatting on `tan` there (kept plain, consistent with the
+  other Phase items) takes the whole document to zero warnings; also
+  applies the same defensive fix to the Phase-3 parity-gate list. Adds
+  `docs/adr/**` to `pr-doxygen`'s PR path filter so an ADR edit that
+  breaks the full-tree Doxygen build is now caught. (#889)
 
 ### Added — `<alp/jpeg.h>` portable JPEG-encoder surface (`[ABI-EXPERIMENTAL]`)
 

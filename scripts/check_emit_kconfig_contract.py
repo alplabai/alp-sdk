@@ -18,7 +18,14 @@ frozen dump --
   * valid JSON, `schemaVersion == 1`, `symbols` non-empty;
   * every symbol carries `name` + `type`, `type` in the allowed set;
   * a few known-must-exist symbols are present (core Zephyr subsystems
-    every image can enable, regardless of board).
+    every image can enable, regardless of board);
+  * the envelope's + every symbol's KEY SET conforms to the canonical
+    cross-repo contract fixture `tests/fixtures/kconfig-contract/
+    emit-kconfig.golden.json` -- tan-cli's `parse_kconfig` and
+    alp-sdk-vscode's `kconfigSymbolsFromEnvelope` both test against the
+    same file, so a key rename here needs a `schemaVersion` bump +
+    coordinated updates there (key names/shape only -- never values or
+    symbol counts, which legitimately vary with the pinned Zephyr version).
 
 Usage (from a job with ZEPHYR_BASE + west + the Zephyr Python deps on
 PATH):
@@ -37,6 +44,8 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 
+_GOLDEN = REPO / "tests" / "fixtures" / "kconfig-contract" / "emit-kconfig.golden.json"
+
 _ALLOWED_TYPES = {"bool", "tristate", "int", "hex", "string"}
 
 # (board.yaml, core).  One real AEN core is enough to prove the contract
@@ -51,6 +60,50 @@ _CASES = [
 # the Approach-A load silently resolved the wrong tree, not that this
 # particular board happens to lack them.
 _KNOWN_SYMBOLS = {"LOG", "SERIAL", "MAIN_STACK_SIZE"}
+
+
+def _golden_key_sets() -> tuple[set[str], set[str]]:
+    """(envelope key set, symbol key set) from the canonical cross-repo
+    contract fixture (tests/fixtures/kconfig-contract/README.md) -- tan-cli's
+    `parse_kconfig` and alp-sdk-vscode's `kconfigSymbolsFromEnvelope` both
+    test their own parsers against the same file."""
+    golden = json.loads(_GOLDEN.read_text(encoding="utf-8"))
+    return set(golden.keys()), set(golden["symbols"][0].keys())
+
+
+def _check_key_set_conformance(envelope: dict, label: str) -> list[str]:
+    """The real emit's KEY SET (never values/counts, which legitimately vary
+    with the pinned Zephyr version) must conform to the golden fixture's
+    shape -- a silent field rename here would break tan-cli and
+    alp-sdk-vscode's parsers without either repo's own hand-written literal
+    ever catching it (the whole point of #893's shared fixture)."""
+    problems: list[str] = []
+    golden_envelope_keys, golden_symbol_keys = _golden_key_sets()
+
+    envelope_keys = set(envelope.keys())
+    if envelope_keys != golden_envelope_keys:
+        problems.append(
+            f"{label}: envelope key set drifted from "
+            f"{_GOLDEN.relative_to(REPO)} "
+            f"(extra={sorted(envelope_keys - golden_envelope_keys)}, "
+            f"missing={sorted(golden_envelope_keys - envelope_keys)}); "
+            f"bump schemaVersion + update tan-cli/alp-sdk-vscode if this "
+            f"is intentional")
+
+    sym_key_sets = [set(sym.keys()) for sym in (envelope.get("symbols") or [])]
+    union_keys = set().union(*sym_key_sets) if sym_key_sets else set()
+    common_keys = set.intersection(*sym_key_sets) if sym_key_sets else set()
+    extra = union_keys - golden_symbol_keys
+    missing = golden_symbol_keys - common_keys
+    if extra or missing:
+        problems.append(
+            f"{label}: symbol key set drifted from "
+            f"{_GOLDEN.relative_to(REPO)} "
+            f"(extra={sorted(extra)}, missing={sorted(missing)}); "
+            f"bump schemaVersion + update tan-cli/alp-sdk-vscode if this "
+            f"is intentional")
+
+    return problems
 
 
 def _run_case(board_yaml: str, core: str) -> list[str]:
@@ -108,6 +161,13 @@ def _run_case(board_yaml: str, core: str) -> list[str]:
         problems.append(
             f"{label}: expected known symbol(s) missing: "
             f"{sorted(missing_known)}")
+
+    # #893 cross-repo contract: the real emit's key shape must conform to
+    # the golden fixture tan-cli + alp-sdk-vscode also test against
+    # (tests/fixtures/kconfig-contract/README.md). Key names/shape only --
+    # never values or symbol counts, which legitimately vary with the
+    # pinned Zephyr version.
+    problems += _check_key_set_conformance(envelope, label)
 
     return problems
 

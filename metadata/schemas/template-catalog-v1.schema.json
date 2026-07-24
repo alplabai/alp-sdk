@@ -37,7 +37,7 @@
         },
         "archetype": {
           "type": "string",
-          "enum": ["minimal", "peripheral", "sensor", "multicore-rpmsg", "gateway", "edge-ai"],
+          "enum": ["minimal", "peripheral", "sensor", "multicore-rpmsg", "gateway", "edge-ai", "diagnostics", "iot"],
           "description": "The app-shape class this template represents. One template per archetype in v1."
         },
         "example": {
