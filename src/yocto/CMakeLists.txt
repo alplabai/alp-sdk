@@ -232,6 +232,14 @@ target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/camera/zephyr_stub.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../jpeg_dispatch.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/jpeg/zephyr_stub.c
+    # Software baseline JPEG encoder (Task 2): unlike camera/display/power,
+    # JPEG has a fully portable CPU implementation (no OS or vendor HAL
+    # dependency), so it links unconditionally here exactly like the dac/
+    # dsp/gpu2d sw_fallback pairs above -- "*" priority 50 always outranks
+    # the zephyr_stub above it, so Yocto apps get a real encoder, not just
+    # NOT_IMPLEMENTED.
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/jpeg/sw_baseline.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/jpeg/vendor/toojpeg_baseline.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../display_dispatch.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/display/zephyr_stub.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../power_dispatch.c

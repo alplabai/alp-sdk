@@ -55,7 +55,11 @@ static const alp_jpeg_ops_t _ops = {
 	.close  = stub_close,
 };
 
-ALP_BACKEND_ANCHOR_DEFINE(jpeg);
+/* No ALP_BACKEND_ANCHOR_DEFINE(jpeg) here -- src/backends/jpeg/sw_baseline.c
+ * carries the one-per-class anchor instead (#Task-2/plain-CMake static-
+ * archive link: the anchor must pull in the backend that actually wins
+ * arbitration on baremetal/Yocto, not the priority-0 stub it permanently
+ * outranks there -- see the comment in sw_baseline.c). */
 ALP_BACKEND_REGISTER(jpeg,
                      zephyr_stub,
                      {

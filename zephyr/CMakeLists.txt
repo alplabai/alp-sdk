@@ -97,6 +97,17 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/jpeg/zephyr_stub.c
 )
 
+# JPEG software baseline fallback (Task 2): portable TooJpeg-derived
+# encoder, silicon_ref="*" priority 50 -- outranks the NOT_IMPLEMENTED
+# stub above on every board.  Default y (see zephyr/kconfigs/jpeg.kconfig)
+# so <alp/jpeg.h> encodes for real out of the box; opt out only to shave
+# the ROM if a board is guaranteed to always resolve the Task 3/4 Hantro
+# hardware backend instead.
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_JPEG_SW_BASELINE
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/jpeg/sw_baseline.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/jpeg/vendor/toojpeg_baseline.c
+)
+
 # Boot-identity banner (CONFIG_ALP_SDK_BANNER, default y) -- one line at
 # APPLICATION init naming the SDK + SoM + manufacturer.  Data-driven from the
 # SoM identity EEPROM when CONFIG_ALP_SDK_HW_INFO is on (src/zephyr/alp_banner.c).
