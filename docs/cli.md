@@ -526,6 +526,91 @@ model that didn't actually quantize or that can't run.
 }
 ```
 
+#### `tan model run` -- host reference run (functional + host latency + accuracy)
+
+```bash
+tan model run model.onnx                              # deterministic random input
+tan model run model.onnx --input sample.npy            # a real input sample
+tan model run model.onnx --input sample.npy --expected 3
+tan model run model.onnx --runs 50 --format json
+```
+
+Loads the ONNX model into `onnxruntime` on the **CPU** and runs it: a
+functional smoke test (does it load and produce an output) plus a
+**host** latency number (`latency_ms`, the median of `--runs`, default
+20, timed inferences after one warm-up run) and (with `--expected`) a
+top-1 accuracy check against a known label. `MODEL` must be `.onnx` in
+this release. Without `--input`, a deterministic random sample
+(seeded, matching the model's first input shape) is used and the
+payload marks `"random_input": true`.
+
+**This is not the target SoM's performance.** `backend` is always
+`"cpu-host"` and every payload -- human or JSON -- carries a `note`
+stating the host-reference caveat explicitly. `peak_sram_kib` and
+`power_mj` are always `null` here: they are populated only by the
+on-device runner (the HW-gated follow-on that reads the target's
+arena high-water mark and the on-board shunt/monitor IC for
+per-rail energy), which fills the exact same result shape with real
+numbers once flashed hardware is in the loop. A model that fails to
+load or run raises a clean error (exit 1), never a raw traceback.
+
+`--format json` payload:
+
+```json
+{
+  "model": "model.onnx",
+  "backend": "cpu-host",
+  "latency_ms": 3.214,
+  "output_argmax": 5,
+  "peak_sram_kib": null,
+  "power_mj": null,
+  "runs": 20,
+  "random_input": false,
+  "accuracy": { "expected": 3, "match": false },
+  "note": "host reference run (backend=cpu-host): functional + host latency, NOT the target SoM. On-device latency/SRAM/power is the HW-gated follow-on."
+}
+```
+
+`accuracy` is present only when `--expected` is given.
+
+#### `tan model ab` -- A/B two models on the host (latency + size)
+
+```bash
+tan model ab a.onnx b.onnx                             # deterministic random input
+tan model ab a.onnx b.onnx --input sample.npy --runs 50
+tan model ab a.onnx b.onnx --format json
+```
+
+Runs both `MODEL_A` and `MODEL_B` on the host (same `onnxruntime` CPU
+session machinery as `tan model run`) with the **same** input sample,
+then compares them: which is faster, the latency ratio (`b/a`), and
+the file-size delta. Both models must be `.onnx`; the shared input
+defaults to a deterministic random sample sized from `MODEL_A`'s input
+(or `--input` if given). The comparison itself is pure/deterministic
+given the two measured results -- no additional timing happens inside
+it. Same host-reference caveat as `model run`: `backend` is
+`"cpu-host"` for both sides and the payload carries the same `note`.
+
+`--format json` payload:
+
+```json
+{
+  "a": { "model": "a.onnx", "backend": "cpu-host", "latency_ms": 3.2, "output_argmax": 5, "runs": 20, "peak_sram_kib": null, "power_mj": null },
+  "b": { "model": "b.onnx", "backend": "cpu-host", "latency_ms": 1.8, "output_argmax": 5, "runs": 20, "peak_sram_kib": null, "power_mj": null },
+  "comparison": { "faster": "b", "latency_ratio": 0.5625, "a_latency_ms": 3.2, "b_latency_ms": 1.8, "size_delta_bytes": -40960 },
+  "note": "host reference run (backend=cpu-host): functional + host latency, NOT the target SoM. On-device latency/SRAM/power is the HW-gated follow-on."
+}
+```
+
+**The self-improving loop.** `alp_model.measure.estimate_vs_measured(est_latency_ms,
+measured_latency_ms)` (not yet wired to a CLI flag) is the intended
+bridge from `tan model check`'s static tier-1 `est_latency_ms` estimate
+to a `tan model run` measured `latency_ms`: it returns
+`{"est_latency_ms", "measured_latency_ms", "ratio"}` (`ratio =
+measured/est`, or `null` if there was no estimate). Repeated across
+models, that ratio is the feedback signal that (later) calibrates the
+tier-1 estimator against reality instead of staying a fixed guess.
+
 ### `tan doctor` -- host environment preflight
 
 ```bash
