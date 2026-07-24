@@ -1,0 +1,13 @@
+# Honest smoke entry: a genuinely tiny INT8 model used to wire + test the zoo
+# machinery. Real curated entries (person-detection, MobileNet, keyword-spotting)
+# with upstream {url, sha256} + bench-validated validated_soms are authored
+# separately (manufacturer data flywheel).
+id: example-tiny
+task: example
+description: Tiny INT8 smoke model for wiring the zoo add/build flow end to end.
+license: Apache-2.0
+source:
+  bundled: starters/example-tiny.tflite
+validated_soms:
+  - E1M-AEN801
+  - E1M-V2N101
