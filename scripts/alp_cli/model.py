@@ -11,6 +11,7 @@ from alp_model.analyze import UnsupportedModelError, analyze_model
 from alp_model.build import build_model, _ADAPTERS
 from alp_model.package import read_package
 from alp_model.targets import resolve_targets
+from alp_model.zoo import ZooError, fetch_source, load_zoo
 
 _DEFAULT_META = Path(__file__).resolve().parents[2] / "metadata"
 
@@ -301,6 +302,70 @@ def check_cmd(model: Path | None, sku: str | None, board_path: Path | None,
             click.echo(f"  suggestion: {e['result'].suggestion}")
     if failed:
         raise SystemExit(1)
+
+
+@model_group.command(name="zoo", help="Browse curated model-zoo entries (and which run on a SoM).")
+@click.option("--sku", default=None, help="Mark which entries run on this SoM (via validated_soms).")
+@click.option("--metadata-root", type=click.Path(file_okay=False, path_type=Path),
+              default=_DEFAULT_META, show_default=False)
+@click.option("--format", "fmt", type=click.Choice(["human", "json"]), default="human")
+def zoo_cmd(sku: str | None, metadata_root: Path, fmt: str) -> None:
+    entries = load_zoo(metadata_root)
+    rows = [{
+        "id": e.id, "task": e.task, "description": e.description,
+        "license": e.license, "validated_soms": e.validated_soms,
+        "runs_here": (sku in e.validated_soms) if sku else None,
+    } for e in entries]
+    if fmt == "json":
+        click.echo(json.dumps({"entries": rows}, indent=2))
+        return
+    for r in rows:
+        mark = "" if r["runs_here"] is None else ("  [runs here]" if r["runs_here"] else "  [not validated here]")
+        click.echo(f"{r['id']:<20} {r['task']:<14} {r['description']}{mark}")
+
+
+@model_group.command(name="add", help="Add a model-zoo entry to board.yaml (fetch source + append models:).")
+@click.argument("zoo_id")
+@click.option("--board", "board_path", type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              default=Path("board.yaml"), show_default=True)
+@click.option("--name", default=None, help="models: entry name (default: the zoo id).")
+@click.option("--models-dir", "models_dir", default="models",
+              help="Directory (relative to board.yaml) to cache the fetched model.")
+@click.option("--metadata-root", type=click.Path(file_okay=False, path_type=Path),
+              default=_DEFAULT_META, show_default=False)
+@click.option("--format", "fmt", type=click.Choice(["human", "json"]), default="human")
+def add_cmd(zoo_id: str, board_path: Path, name: str | None, models_dir: str,
+            metadata_root: Path, fmt: str) -> None:
+    entry = next((e for e in load_zoo(metadata_root) if e.id == zoo_id), None)
+    if entry is None:
+        click.echo(f"error: no zoo entry '{zoo_id}'", err=True)
+        raise SystemExit(1)
+    name = name or entry.id
+    board = yaml.safe_load(board_path.read_text(encoding="utf-8")) or {}
+    models = board.get("models") or []
+    if any(m.get("name") == name for m in models):
+        click.echo(f"error: board.yaml already has a model named '{name}'", err=True)
+        raise SystemExit(1)
+    base = board_path.parent
+    dest = (base / models_dir).resolve()
+    base_resolved = base.resolve()
+    if dest != base_resolved and base_resolved not in dest.parents:
+        click.echo("error: --models-dir must be inside the board directory", err=True)
+        raise SystemExit(1)
+    try:
+        fetched = fetch_source(entry, base / models_dir, metadata_root=metadata_root)
+    except ZooError as exc:
+        click.echo(f"error: {exc}", err=True)
+        raise SystemExit(1)
+    rel = fetched.resolve().relative_to(base.resolve()).as_posix()
+    new_entry = {"name": name, "source": rel}
+    if entry.compile:
+        new_entry["compile"] = entry.compile
+    models.append(new_entry)
+    board["models"] = models
+    board_path.write_text(yaml.safe_dump(board, sort_keys=False), encoding="utf-8")
+    result = {"added": name, "source": rel, "from": entry.id}
+    click.echo(json.dumps(result, indent=2) if fmt == "json" else f"added '{name}' ({rel}) from zoo '{entry.id}'")
 
 
 @model_group.command(name="doctor", help="Report installed NPU compiler toolchains.")

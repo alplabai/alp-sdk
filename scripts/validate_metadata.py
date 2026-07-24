@@ -54,6 +54,8 @@ BLOCK_SCHEMA = REPO / "metadata" / "schemas" / "block-v1.schema.json"
 BLOCKS = REPO / "metadata" / "blocks"
 NPU_OPS_SCHEMA = REPO / "metadata" / "schemas" / "npu-ops-v1.schema.json"
 NPU_OPS = REPO / "metadata" / "npu_ops"
+MODEL_ZOO_SCHEMA = REPO / "metadata" / "schemas" / "model-zoo-v1.schema.json"
+MODEL_ZOO = REPO / "metadata" / "model_zoo"
 # Generated Zephyr board trees (one dir per <board>; each carries a twister
 # .yaml whose `identifier:` is the fully-qualified <board>/<soc>/<cpucluster>
 # triple `west build -b` resolves).  Ground truth for the board-target check.
@@ -784,6 +786,21 @@ def main() -> int:
                 "backend",
             )
 
+    # Model-zoo entries (YAML) against model-zoo v1.
+    model_zoo_failures: list = []
+    model_zoo_files: list = []
+    if MODEL_ZOO_SCHEMA.is_file():
+        model_zoo_schema = json.loads(MODEL_ZOO_SCHEMA.read_text(encoding="utf-8"))
+        model_zoo_validator = jsonschema.Draft202012Validator(model_zoo_schema)
+        model_zoo_files = sorted(MODEL_ZOO.glob("*.yaml"))
+        if model_zoo_files:
+            print()
+            model_zoo_failures = _check_files(
+                "YAML", model_zoo_files, model_zoo_validator,
+                lambda p: yaml.safe_load(p.read_text(encoding="utf-8")),
+                "id",
+            )
+
     # Library manifests (YAML) against library v1 (ADR 0018).
     library_failures: list = []
     library_semantic_failures: list = []
@@ -827,6 +844,7 @@ def main() -> int:
                       + len(hwrev_failures) + len(board_failures) + len(chip_failures)
                       + len(block_failures)
                       + len(npu_ops_failures)
+                      + len(model_zoo_failures)
                       + len(library_failures) + len(library_semantic_failures)
                       + len(board_target_failures)
                       + len(restriction_failures)
@@ -838,6 +856,7 @@ def main() -> int:
           f"{len(board_files)} board preset(s) + {len(chip_files)} chip file(s) + "
           f"{len(block_files)} block file(s) + "
           f"{len(npu_ops_files)} npu-ops file(s) + "
+          f"{len(model_zoo_files)} model-zoo entry(ies) + "
           f"{len(library_files)} library manifest(s) + Kconfig registries + "
           f"tier-a-library-ci registry "
           f"checked, {total_failures} failure(s)")
