@@ -33,8 +33,9 @@ ZTEST(jpeg_registry, test_open_then_close_stub)
 	zassert_equal(alp_jpeg_encode(h, &req, out, sizeof(out), &out_len), ALP_ERR_NOT_IMPLEMENTED);
 
 	alp_jpeg_close(h);
-	zassert_equal(alp_jpeg_encode(h, &req, out, sizeof(out), &out_len), ALP_ERR_NOT_READY,
-	             "encode after close must be gated");
+	zassert_equal(alp_jpeg_encode(h, &req, out, sizeof(out), &out_len),
+	              ALP_ERR_NOT_READY,
+	              "encode after close must be gated");
 	alp_jpeg_close(h); /* idempotent -- must not fault */
 }
 
