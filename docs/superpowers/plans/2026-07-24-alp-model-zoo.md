@@ -75,7 +75,7 @@ def test_example_entry_shape():
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `cd /e/GitHub/alp-sdk/.claude/worktrees/model-zoo && py -3.11 -m pytest tests/scripts/test_alp_model_zoo.py -q`
+Run: `cd <worktree> && py -3.11 -m pytest tests/scripts/test_alp_model_zoo.py -q`
 Expected: FAIL — `FileNotFoundError: metadata/model_zoo/example-tiny.yaml`.
 
 - [ ] **Step 3: Create the schema**
@@ -504,7 +504,7 @@ def add_cmd(zoo_id: str, board_path: Path, name: str | None, models_dir: str,
 
 ```bash
 cd $(mktemp -d) && printf 'som:\n  sku: E1M-AEN801\ncores: {}\n' > board.yaml
-PYTHONPATH=/e/GitHub/alp-sdk/.claude/worktrees/model-zoo/scripts py -3.11 -m alp_cli.main model add example-tiny
+PYTHONPATH=<worktree>/scripts py -3.11 -m alp_cli.main model add example-tiny
 cat board.yaml   # should now list models: - name: example-tiny, source: models/example-tiny.tflite
 ```
 
