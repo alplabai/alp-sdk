@@ -10,7 +10,7 @@ import yaml
 
 from alp_model.analyze import UnsupportedModelError, analyze_model
 from alp_model.build import build_model, _ADAPTERS
-from alp_model.measure import MeasureError, accuracy_vs, compare, run_host
+from alp_model.measure import MeasureError, accuracy_vs, compare, default_input, run_host
 from alp_model.package import read_package
 from alp_model.prep import PrepError, accuracy_delta, quantize, validate_calibration
 from alp_model.targets import resolve_targets
@@ -423,13 +423,10 @@ def run_cmd(model: Path, input_path: Path | None, expected: int | None, runs: in
     if model.suffix.lower() != ".onnx":
         click.echo(f"error: model run supports .onnx in this release; got {model.name}", err=True)
         raise SystemExit(1)
-    import onnxruntime as ort
-    sess = ort.InferenceSession(str(model), providers=["CPUExecutionProvider"])
-    shape = [(1 if not isinstance(d, int) else d) for d in sess.get_inputs()[0].shape]
     random_input = input_path is None
-    x = (np.load(input_path).astype(np.float32) if input_path is not None
-         else np.random.default_rng(0).standard_normal(shape).astype(np.float32))
     try:
+        x = (np.load(input_path).astype(np.float32) if input_path is not None
+             else default_input(model))
         r = run_host(model, x, runs=runs)
     except MeasureError as exc:
         click.echo(f"error: {exc}", err=True)
@@ -463,12 +460,9 @@ def ab_cmd(model_a: Path, model_b: Path, input_path: Path | None, runs: int, fmt
         if m.suffix.lower() != ".onnx":
             click.echo(f"error: model ab supports .onnx in this release; got {m.name}", err=True)
             raise SystemExit(1)
-    import onnxruntime as ort
-    sess = ort.InferenceSession(str(model_a), providers=["CPUExecutionProvider"])
-    shape = [(1 if not isinstance(d, int) else d) for d in sess.get_inputs()[0].shape]
-    x = (np.load(input_path).astype(np.float32) if input_path is not None
-         else np.random.default_rng(0).standard_normal(shape).astype(np.float32))
     try:
+        x = (np.load(input_path).astype(np.float32) if input_path is not None
+             else default_input(model_a))
         ra = run_host(model_a, x, runs=runs)
         rb = run_host(model_b, x, runs=runs)
     except MeasureError as exc:

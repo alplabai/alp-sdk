@@ -30,6 +30,19 @@ class RunResult:
     runs: int
 
 
+def default_input(onnx_path: Path, *, seed: int = 0) -> np.ndarray:
+    """Deterministic random sample matching the model's first input shape.
+    Dynamic dims collapse to 1 (intent: a dynamic BATCH dim; a symbolic H/W
+    would also become 1). Wrapped in MeasureError so a bad model fails clean."""
+    import onnxruntime as ort
+    try:
+        sess = ort.InferenceSession(str(onnx_path), providers=["CPUExecutionProvider"])
+        shape = [(1 if not isinstance(d, int) else d) for d in sess.get_inputs()[0].shape]
+    except Exception as exc:
+        raise MeasureError(f"could not load model {Path(onnx_path).name}: {exc}") from exc
+    return np.random.default_rng(seed).standard_normal(shape).astype(np.float32)
+
+
 def run_host(onnx_path: Path, input_array: np.ndarray, *, runs: int = 20) -> RunResult:
     import onnxruntime as ort
     try:
@@ -56,7 +69,8 @@ def accuracy_vs(output_argmax: int | None, expected_label: int) -> bool:
 @dataclass(frozen=True)
 class ABComparison:
     faster: str                  # "a" | "b" | "tie"
-    latency_ratio: float         # b.latency_ms / a.latency_ms
+    latency_ratio: float | None  # b.latency_ms / a.latency_ms; None if a.latency_ms == 0
+                                  # (avoids emitting non-finite JSON `Infinity`)
     a_latency_ms: float
     b_latency_ms: float
     size_delta_bytes: int | None  # size_b - size_a
@@ -70,9 +84,10 @@ def compare(a: RunResult, b: RunResult, *, size_a: int | None = None,
         faster = "b"
     else:
         faster = "tie"
-    ratio = (b.latency_ms / a.latency_ms) if a.latency_ms else float("inf")
+    ratio = (b.latency_ms / a.latency_ms) if a.latency_ms else None
     delta = (size_b - size_a) if (size_a is not None and size_b is not None) else None
-    return ABComparison(faster=faster, latency_ratio=round(ratio, 4),
+    return ABComparison(faster=faster,
+                        latency_ratio=round(ratio, 4) if ratio is not None else None,
                         a_latency_ms=a.latency_ms, b_latency_ms=b.latency_ms,
                         size_delta_bytes=delta)
 

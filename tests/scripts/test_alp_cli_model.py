@@ -629,3 +629,26 @@ def test_model_ab_json(tmp_path):
     p = json.loads(res.output)
     assert p["comparison"]["faster"] in ("a", "b", "tie")
     assert p["comparison"]["size_delta_bytes"] == 0     # same file
+
+
+def test_model_run_malformed_onnx_errors_cleanly(tmp_path):
+    import pytest as _pytest
+    _pytest.importorskip("onnxruntime")
+    from click.testing import CliRunner
+    from alp_cli.main import cli
+    bogus = tmp_path / "bogus.onnx"
+    bogus.write_bytes(b"not a real onnx file")
+    res = CliRunner().invoke(cli, ["model", "run", str(bogus), "--runs", "3"],
+                             catch_exceptions=True)
+    assert res.exit_code == 1
+    assert "Traceback" not in res.output
+    assert "error:" in res.output
+
+
+def test_model_ab_non_onnx_errors():
+    from click.testing import CliRunner
+    from alp_cli.main import cli
+    tflite = str(_ROOT / "tests/fixtures/models/tiny_int8.tflite")
+    onnx = str(_ROOT / "tests/fixtures/models/tiny_cnn.onnx")
+    res = CliRunner().invoke(cli, ["model", "ab", tflite, onnx])
+    assert res.exit_code == 1
