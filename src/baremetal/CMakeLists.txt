@@ -72,6 +72,8 @@ target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../baremetal/dispatch_last_error_shim.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../dac_dispatch.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/dac/sw_fallback.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../i3c_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/i3c/sw_fallback.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../dsp_dispatch.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/dsp/sw_fallback.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../ahrs.c

@@ -776,6 +776,19 @@ if(CONFIG_ALP_SDK_V2N_SUPERVISOR)
 endif()
 
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/dac/sw_fallback.c)
+
+# I3C class dispatcher.  Owns the alp_i3c_* API surface (alp_i3c_open /
+# write / read / write_read / close) and routes through the backend
+# registry.  Backends register under .alp_backends_i3c and ship from
+# src/backends/i3c/*.c.  The dispatcher compiles unconditionally (mirrors
+# dac_dispatch); the zephyr_drv backend guards its DT-alias body on
+# CONFIG_I3C internally.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/i3c_dispatch.c)
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/i3c/zephyr_drv.c)
+zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/i3c/sw_fallback.c)
+
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/rtc_dispatch.c)
 zephyr_library_sources_ifdef(CONFIG_RTC

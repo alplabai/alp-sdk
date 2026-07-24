@@ -12,6 +12,7 @@
     "gpio": ["GPIO"],
     "i2c": ["I2C"],
     "i2s": ["I2S"],
+    "i3c": ["I3C"],
     "pwm": ["PWM"],
     "rtc": ["RTC"],
     "sensor": ["SENSOR"],

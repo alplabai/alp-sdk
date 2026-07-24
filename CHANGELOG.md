@@ -169,6 +169,63 @@ JPEG blob). **Build-only: live capture stays BENCH-BLOCKED** — the ISP needs a
 camera→CSI→ISP→memory graph and no camera sensor is wired on this AEN batch;
 silicon verification is deferred to a camera-populated board. Internal driver
 enablement, no `<alp/*>` surface change.
+### Added — portable `<alp/i3c.h>` I3C controller class
+
+New peripheral class mirroring `alp_i2c_*` (`alp_i3c_open/write/read/
+write_read/close/capabilities`), addressed by the target's dynamic (or
+legacy static) address.  `alp_i3c_write_read` is a single chained
+`i3c_transfer()` (write, then repeated-START read) — the canonical
+register-read idiom, matching `alp_i2c_write_read`'s shape.  Timing (SCL
+rate, DAA) stays devicetree-owned, not a config field: the legal rate on a
+mixed I3C/I2C bus depends on the slowest device populated.
+
+- Zephyr backend (`src/backends/i3c/zephyr_drv.c`) over upstream
+  `drivers/i3c/i3c_dw.c` (`snps,designware-i3c`), resolving `ALP_E1M_I3C0`
+  to the `alp-i3c0` DT alias.  On the E1M-AEN801 that alias points at
+  `lpi3c0@0x43006000`, the M55-HE local-domain controller (IRQ 50).  The
+  two E8 I3C controllers are INDEPENDENT and overlap on ONE pad pair only —
+  P7_6/P7_7, exposed as both `PIN_P7_6__I3C_SDA_D`/`PIN_P7_7__I3C_SCL_D`
+  (fn6, `i3c0`) and `PIN_P7_6__LPI3C_SDA_B`/`PIN_P7_7__LPI3C_SCL_B` (fn3,
+  `lpi3c0`).  The E1M-AEN801 breaks out only that pair, so on THIS SoM
+  exactly one of the two may be enabled and firmware selects `lpi3c0` (the
+  M55-HE local domain), leaving `i3c0` disabled — a board routing them to
+  non-overlapping pads (`i3c0` on P0_0/P0_1, `lpi3c0` on P6_2/P6_3) runs
+  both at once.  The SoM pinout table records those pads under the main-I3C
+  function and has no LPI3C row — it does not dictate the choice.
+- `scripts/alp_project_emit/dts.py`'s carrier DT-wiring catalog gained an
+  `i3c` entry: `board.yaml` `peripherals: [i3c]` on an `m55_he` slice emits
+  the `lpi3c0` enable + pinctrl + `alp-i3c0` alias automatically; an
+  `m55_hp` slice (or the unscoped cross-core union) gets nothing, so
+  `alp_i3c_open()` on HP surfaces `ALP_ERR_NOT_READY` instead of binding a
+  dead IRQ.
+- Legacy (non-I3C) devices sharing the bus are NOT driven through this
+  handle — they ride the existing `alp_i2c_*` surface via a board alias
+  pointed at the same controller node (Zephyr's `i3c_driver_api` embeds an
+  `i2c_api`, which `i3c_dw.c` implements); `metadata/boards/e1m-evk.yaml`
+  already establishes this pattern (`E1M_I3C0` doubling as
+  `EVK_I2C_BUS_ARDUINO`).
+- `aen-i3c-regcheck` re-based off the raw-DT bind-proof staged on
+  `feat/aen-soc-peripheral-coverage` to drive the portable API instead:
+  opens `ALP_E1M_I3C0`, reads back capabilities, and issues a probe write.
+  **SILICON-PROVEN (controller init)** on E1M-AEN801, labgrid place
+  `e1m-aen-evk-01`, Flow C ITCM RAM-run, 2026-07-25, reproduced twice:
+
+  ```
+  bus: ALP_E1M_I3C0 = 0 (alp-i3c0 alias -> lpi3c0@0x43006000)
+  alp_i3c_open: OK (handle=0x20000d20)
+  capabilities: present (flags=0x00000000)
+  alp_i3c_write(addr=0x08): status=-5 (ALP_ERR_IO -- expected, no target populated)
+  RESULT PASS: I3C controller BINDS + OPENS via <alp/i3c.h> ...
+  ```
+
+  That clears the two risks this class was flagged for: the `ALIF_LPI3C_CLK`
+  clock-id and the P7_6/P7_7 fn3 pinctrl both come up clean at device init.
+  **A live transfer remains unproven** — no I3C target is populated on this
+  AEN batch, so DAA finds zero targets and the probe write returns
+  `ALP_ERR_IO` by design; the transfer path is reached but never
+  acknowledged by a real device.  `[ABI-EXPERIMENTAL]`; the remaining
+  promotion gate is a live transfer against a populated target.
+
 ### Added — Alif Ensemble E8 SoC peripheral coverage: I3C, OSPI/HexSPI, managed-MDIO (build-only)
 
 Three previously-missing E8 peripheral drivers, all **build-only** (compile+link

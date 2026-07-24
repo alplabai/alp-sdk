@@ -64,6 +64,7 @@ typedef enum {
 	ALP_CAP_ID_INLINE_AES,
 	ALP_CAP_ID_CAU,
 	ALP_CAP_ID_DMA2D,
+	ALP_CAP_ID_HW_I3C,
 	ALP_CAP_ID_COUNT
 } alp_cap_id_t;
 

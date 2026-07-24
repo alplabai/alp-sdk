@@ -1261,6 +1261,17 @@
     },
     {
       "functions": [
+        "alp_i3c_capabilities",
+        "alp_i3c_close",
+        "alp_i3c_open",
+        "alp_i3c_read",
+        "alp_i3c_write",
+        "alp_i3c_write_read"
+      ],
+      "header": "include/alp/i3c.h"
+    },
+    {
+      "functions": [
         "alp_inference_capabilities",
         "alp_inference_close",
         "alp_inference_get_input",

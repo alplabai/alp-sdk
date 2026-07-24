@@ -292,6 +292,48 @@ _PERIPH_DT_WIRING: dict[str, dict[str, dict[str, Any]]] = {
         "adc": {
             "include": ["zephyr/dt-bindings/adc/adc.h"],
         },
+        "i3c": {
+            # E1M-AEN801 drives I3C through the LP instance
+            # (lpi3c0@0x43006000).  The two controllers are INDEPENDENT on the
+            # E8 and overlap on ONE pad pair only: P7_6/P7_7, exposed as both
+            # PIN_P7_6__I3C_SDA_D/PIN_P7_7__I3C_SCL_D (fn6, main i3c0) and
+            # PIN_P7_6__LPI3C_SDA_B/PIN_P7_7__LPI3C_SCL_B (fn3, this one).
+            # The E1M-AEN801 routes only that pair, so on THIS SoM exactly one
+            # node may be enabled and firmware picks the owner -- a board
+            # constraint, not a silicon one.  We pick the LP instance
+            # because it is the M55-HE local peripheral domain (IRQ 50), NOT
+            # because the SoM pinout selects it: from-alif.tsv's
+            # `alif_peripheral` column names the MAIN-I3C fn6 functions
+            # (I3C_SCL_D/I3C_SDA_D) and has no LPI3C row at all.  See
+            # zephyr/dts/alif/ensemble_e8_peripherals.dtsi.  Emission is gated
+            # to the m55_he core below -- an HP slice gets no alias, so
+            # alp_i3c_open() surfaces NOT_READY instead of a dead IRQ.
+            "include": ["zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h"],
+            "dts": (
+                "&pinctrl {\n"
+                "\tpinctrl_lpi3c0: pinctrl_lpi3c0 {\n"
+                "\t\tgroup0 {\n"
+                "\t\t\tpinmux = <PIN_P7_6__LPI3C_SDA_B>;\n"
+                "\t\t\tinput-enable;\n"
+                "\t\t};\n"
+                "\t\tgroup1 {\n"
+                "\t\t\tpinmux = <PIN_P7_7__LPI3C_SCL_B>;\n"
+                "\t\t\tinput-enable;\n"
+                "\t\t};\n"
+                "\t};\n"
+                "};\n"
+                "&lpi3c0 {\n"
+                "\tstatus = \"okay\";\n"
+                "\tpinctrl-0 = <&pinctrl_lpi3c0>;\n"
+                "\tpinctrl-names = \"default\";\n"
+                "};\n"
+                "/ {\n"
+                "\taliases {\n"
+                "\t\talp-i3c0 = &lpi3c0;\n"
+                "\t};\n"
+                "};\n"
+            ),
+        },
     },
 }
 
@@ -304,6 +346,7 @@ def _emit_dts_overlay(
     v2_peripherals: list[str] | None = None,
     v2_core_id: str | None = None,
     v2_core_os: str | None = None,
+    v2_core_ids: list[str] | None = None,
 ) -> str:
     """Emit a Zephyr DTS overlay describing the board wiring.
 
@@ -474,6 +517,28 @@ def _emit_dts_overlay(
         if fam == "aen" and p == "i2c":
             indices = _route_indices_for_catalog(project, macros, "I2C", {0})
             if 0 not in indices:
+                continue
+        if fam == "aen" and p == "i3c":
+            # lpi3c0 is M55-HE local domain (IRQ 50), so only a scope that
+            # CONTAINS m55_he gets the wiring -- an HP-only slice would
+            # otherwise carry an alias for an IRQ its core cannot service.
+            #
+            # Testing `v2_core_id != "m55_he"` alone would be wrong for the
+            # UNSCOPED emit (`--emit dts-overlay` with no `--core`, where
+            # v2_core_id is None): that path emits the cross-core union, so
+            # a board.yaml whose Zephyr core IS m55_he would silently get no
+            # i3c wiring while the conf emit still set CONFIG_I3C=y from
+            # peripheral-kconfig.json -- a green build whose alp_i3c_open()
+            # returns NOT_READY with nothing to point at.  So for the
+            # unscoped case, look at whether the project declares m55_he.
+            # `project` here is the v1-SHAPED dict, which carries no `cores`
+            # key at all -- so the scope has to be passed in: v2_core_ids is
+            # [--core] when scoped, and the Zephyr/baremetal core ids when not.
+            if v2_core_id is not None:
+                in_scope = v2_core_id == "m55_he"
+            else:
+                in_scope = "m55_he" in (v2_core_ids or [])
+            if not in_scope:
                 continue
         emitted.append((p, entry, entry.get("dts", "")))
 

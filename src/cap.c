@@ -40,6 +40,7 @@ static const bool _cap_table[ALP_CAP_ID_COUNT] = {
 	[ALP_CAP_ID_INLINE_AES]  = ALP_CAP_INLINE_AES,
 	[ALP_CAP_ID_CAU]         = ALP_CAP_CAU,
 	[ALP_CAP_ID_DMA2D]       = ALP_CAP_DMA2D,
+	[ALP_CAP_ID_HW_I3C]      = ALP_CAP_HW_I3C,
 };
 
 static const char *const _cap_names[ALP_CAP_ID_COUNT] = {
@@ -75,6 +76,7 @@ static const char *const _cap_names[ALP_CAP_ID_COUNT] = {
 	[ALP_CAP_ID_INLINE_AES]  = "INLINE_AES",
 	[ALP_CAP_ID_CAU]         = "CAU",
 	[ALP_CAP_ID_DMA2D]       = "DMA2D",
+	[ALP_CAP_ID_HW_I3C]      = "HW_I3C",
 };
 
 bool alp_has(alp_cap_id_t cap)
