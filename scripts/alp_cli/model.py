@@ -11,7 +11,7 @@ from alp_model.analyze import UnsupportedModelError, analyze_model
 from alp_model.build import build_model, _ADAPTERS
 from alp_model.package import read_package
 from alp_model.targets import resolve_targets
-from alp_model.zoo import ZooError, fetch_source, filter_by_sku, load_zoo
+from alp_model.zoo import ZooError, fetch_source, load_zoo
 
 _DEFAULT_META = Path(__file__).resolve().parents[2] / "metadata"
 
