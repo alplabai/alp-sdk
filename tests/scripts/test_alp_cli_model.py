@@ -128,12 +128,47 @@ def test_alp_model_build_json_emits_targets_and_coverage(tmp_path):
     payload = _json.loads(result.output)
     model = payload["models"][0]
     assert model["name"] == "demo"
+    assert model["source"] == "models/m.tflite"    # raw relative string, not the resolved absolute path
     assert model["alpmodel_path"].endswith("demo.alpmodel")
     assert model["total_bytes"] > 0
     cpu = [t for t in model["targets"] if t["backend"] == "cpu"]
     assert len(cpu) == 1 and cpu[0]["blob_bytes"] > 0
+    assert set(cpu[0].keys()) == {
+        "backend", "silicon_ref", "blob_format", "accel_config",
+        "arena", "blob_bytes", "requires", "compiler_version",
+    }
+    assert "blob" not in cpu[0]
+    assert "backend_id" not in cpu[0]
     # ethos_u is a declared AEN801 target; without vela on PATH it is a skip.
     assert all(s["status"] in ("skipped", "incompatible") for s in model["skipped"])
+
+
+def test_alp_model_build_json_reports_failure_as_json(tmp_path):
+    # source: points at a file that does not exist -> read_bytes() raises OSError
+    # deep inside build_model (CpuAdapter.compile), not the ValueError build_model
+    # itself raises for "no blob compiled". The json path must still emit a JSON
+    # envelope on stdout with the failure recorded, not an escaping traceback.
+    (tmp_path / "board.yaml").write_text(
+        "name: demo\n"
+        "som:\n  sku: E1M-AEN801\n"
+        "cores: {}\n"
+        "models:\n  - name: demo\n    source: models/missing.tflite\n",
+        encoding="utf-8")
+    result = CliRunner().invoke(cli, [
+        "model", "build",
+        "--board", str(tmp_path / "board.yaml"),
+        "--out", str(tmp_path / "out"),
+        "--metadata-root", str(_ROOT / "metadata"),
+        "--format", "json",
+    ])
+    assert result.exit_code == 1
+    payload = _json.loads(result.output)
+    model = payload["models"][0]
+    assert model["name"] == "demo"
+    assert model["source"] == "models/missing.tflite"
+    assert model["error"]
+    assert model["targets"] == []
+    assert model["skipped"] == []
 
 
 def test_alp_model_list_reports_artifact_status(tmp_path):
@@ -182,10 +217,13 @@ def test_alp_model_info_decodes_manifest_and_matrix(tmp_path):
         "models:\n  - name: demo\n    source: models/m.tflite\n",
         encoding="utf-8")
     out = tmp_path / "out"
-    CliRunner().invoke(cli, [
+    build_result = CliRunner().invoke(cli, [
         "model", "build", "--board", str(tmp_path / "board.yaml"),
         "--out", str(out), "--metadata-root", str(_ROOT / "metadata"),
+        "--format", "json",
     ], catch_exceptions=False)
+    build_cpu = next(t for t in _json.loads(build_result.output)["models"][0]["targets"]
+                     if t["backend"] == "cpu")
     result = CliRunner().invoke(cli, [
         "model", "info", "demo",
         "--out", str(out),
@@ -197,6 +235,9 @@ def test_alp_model_info_decodes_manifest_and_matrix(tmp_path):
     info = _json.loads(result.output)
     assert info["name"] == "demo"
     assert any(t["backend"] == "cpu" for t in info["targets"])
+    info_cpu = next(t for t in info["targets"] if t["backend"] == "cpu")
+    assert "blob" not in info_cpu
+    assert set(info_cpu.keys()) == set(build_cpu.keys())   # info/build target shape parity
     matrix = {row["backend"]: row["has_blob"] for row in info["coverage_matrix"]}
     assert matrix["cpu"] is True          # cpu always compiles
     assert "ethos_u" in matrix            # declared AEN801 backend appears in the matrix

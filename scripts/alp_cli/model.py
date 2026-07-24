@@ -82,14 +82,17 @@ def build_cmd(board_path: Path, out_dir: Path, metadata_root: Path,
             out = build_model(sku=sku, name=m["name"], source=source,
                               out_dir=out_dir, metadata_root=metadata_root,
                               compile_opts=_resolve_compile(m.get("compile"), base))
-        except ValueError as exc:      # build_model raises when no blob compiles
+        except Exception as exc:       # no blob compiled (ValueError), bad source
+                                        # path (OSError), or a real compiler
+                                        # failure (RuntimeError) -- all must
+                                        # surface as JSON, never a traceback.
             failed = True
-            entries.append({"name": m["name"], "source": str(source),
+            entries.append({"name": m["name"], "source": m["source"],
                             "error": str(exc), "targets": [], "skipped": []})
             continue
         mft, blobs = read_package(out.read_bytes())
         targets, skipped = _target_payload(mft, blobs)
-        entries.append({"name": m["name"], "source": str(source),
+        entries.append({"name": m["name"], "source": m["source"],
                         "alpmodel_path": str(out), "total_bytes": out.stat().st_size,
                         "targets": targets, "skipped": skipped})
     click.echo(json.dumps({"models": entries}, indent=2))
@@ -146,9 +149,11 @@ def info_cmd(name: str, out_dir: Path, board_path: Path | None,
         click.echo(f"alp model info: no .alpmodel for '{name}' at {artifact}", err=True)
         raise SystemExit(1)
     mft, blobs = read_package(artifact.read_bytes())
-    doc = json.loads(mft.to_json())        # public API; hex-encodes src_sha, keeps inputs/outputs/targets/coverage
-    doc["targets"] = [{**t, "blob_bytes": len(blobs[t["blob"]])} for t in doc["targets"]]
-    doc["skipped"] = doc.pop("coverage")
+    doc = json.loads(mft.to_json())        # name/src_sha/inputs/outputs (public API)
+    targets, skipped = _target_payload(mft, blobs)
+    doc["targets"] = targets
+    doc["skipped"] = skipped
+    doc.pop("coverage", None)
     doc.pop("v", None)
     if board_path is not None:
         sku = yaml.safe_load(board_path.read_text(encoding="utf-8"))["som"]["sku"]
