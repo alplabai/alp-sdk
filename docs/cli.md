@@ -371,6 +371,31 @@ to the single named entry instead of all of them; an unknown NAME
 exits 1 instead of building everything.  See the model-pipeline docs
 under `docs/tutorials/` for the end-to-end inference flow.
 
+`tan model` fronts the whole model lifecycle -- `build` / `list` /
+`info` / `doctor` (compile `board.yaml` `models:` into `.alpmodel`,
+enumerate them, decode a built package, and report the compile
+toolchains), `check` (static pre-flight fit/perf), `zoo` / `add`
+(browse and pull curated model-zoo entries), and `prep` / `run` / `ab`
+(license-free quantize + accuracy, host reference run, host A/B).  Each
+`tan model <cmd>` mirrors the SDK backend's `alp model <cmd>` (invoked
+here as `python -m alp_cli model <cmd>`); driven through tan-cli the
+result is delivered in tan-cli's `{command, ok, exitCode, project,
+data, issues}` envelope, and the `--format json` payloads below are the
+model-specific `data` those envelopes carry.
+
+#### `tan model list` / `info` / `doctor` -- inspect models + toolchains
+
+```bash
+tan model list                           # enumerate the board.yaml `models:` entries
+tan model info <model.alpmodel>          # decode a compiled `.alpmodel` package
+tan model doctor                         # report the model-compile toolchains present
+```
+
+`list` enumerates the declared/compiled models, `info` decodes a built
+`.alpmodel` package, and `doctor` reports which model-compile toolchains
+(Vela, DRP-AI, ...) are available -- distinct from the host-wide `tan
+doctor` preflight below.
+
 #### `tan model check` -- static pre-flight fit/perf check (no toolchain)
 
 Two modes:
@@ -471,6 +496,34 @@ static analysis.  `budget_sram_kib` is `null` until a SoC's
 value is currently a `0` placeholder, so `no-fit` can never fire from
 an SRAM overflow yet, and the in-family cross-sell suggestion (move to
 a larger-arena SoM) stays dormant until those budgets exist.
+
+#### `tan model zoo` -- browse the curated model zoo
+
+```bash
+tan model zoo --sku E1M-AEN801           # entries marked for this SoM
+tan model zoo --board path/to/board.yaml # SKU from the board's `som.sku`
+tan model zoo --format json
+```
+
+Lists the curated model-zoo entries (`metadata/model_zoo/<id>.yaml`),
+each flagged `runs_here` for the target SoM -- computed from the entry's
+`validated_soms` against the SKU (`--sku`) or the board's `som.sku`
+(`--board`).  Link, fetch, and layer only -- no model weights are
+redistributed.  `--format` is `human` (default) or `json`.
+
+#### `tan model add` -- pull a zoo entry into board.yaml
+
+```bash
+tan model add <zoo-id> --board path/to/board.yaml
+tan model add <zoo-id> --board path/to/board.yaml --name my-detector
+tan model add <zoo-id> --board path/to/board.yaml --models-dir models/
+```
+
+Fetches the zoo entry's source -- a URL verified against its recorded
+sha256, or a bundled asset -- and appends a `{name, source}` item to the
+board's `models:` list.  Non-destructive: a duplicate model `name` is an
+error, never an overwrite.  `--name` overrides the derived entry name;
+`--models-dir` sets where the fetched source lands.
 
 #### `tan model prep` -- license-free INT8 quantize + accuracy report
 
