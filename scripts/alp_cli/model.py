@@ -324,6 +324,45 @@ def zoo_cmd(sku: str | None, metadata_root: Path, fmt: str) -> None:
         click.echo(f"{r['id']:<20} {r['task']:<14} {r['description']}{mark}")
 
 
+@model_group.command(name="add", help="Add a model-zoo entry to board.yaml (fetch source + append models:).")
+@click.argument("zoo_id")
+@click.option("--board", "board_path", type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              default=Path("board.yaml"), show_default=True)
+@click.option("--name", default=None, help="models: entry name (default: the zoo id).")
+@click.option("--models-dir", "models_dir", default="models",
+              help="Directory (relative to board.yaml) to cache the fetched model.")
+@click.option("--metadata-root", type=click.Path(file_okay=False, path_type=Path),
+              default=_DEFAULT_META, show_default=False)
+@click.option("--format", "fmt", type=click.Choice(["human", "json"]), default="human")
+def add_cmd(zoo_id: str, board_path: Path, name: str | None, models_dir: str,
+            metadata_root: Path, fmt: str) -> None:
+    entry = next((e for e in load_zoo(metadata_root) if e.id == zoo_id), None)
+    if entry is None:
+        click.echo(f"error: no zoo entry '{zoo_id}'", err=True)
+        raise SystemExit(1)
+    name = name or entry.id
+    board = yaml.safe_load(board_path.read_text(encoding="utf-8")) or {}
+    models = board.get("models", [])
+    if any(m.get("name") == name for m in models):
+        click.echo(f"error: board.yaml already has a model named '{name}'", err=True)
+        raise SystemExit(1)
+    base = board_path.parent
+    try:
+        fetched = fetch_source(entry, base / models_dir, metadata_root=metadata_root)
+    except ZooError as exc:
+        click.echo(f"error: {exc}", err=True)
+        raise SystemExit(1)
+    rel = fetched.resolve().relative_to(base.resolve()).as_posix()
+    new_entry = {"name": name, "source": rel}
+    if entry.compile:
+        new_entry["compile"] = entry.compile
+    models.append(new_entry)
+    board["models"] = models
+    board_path.write_text(yaml.safe_dump(board, sort_keys=False), encoding="utf-8")
+    result = {"added": name, "source": rel, "from": entry.id}
+    click.echo(json.dumps(result, indent=2) if fmt == "json" else f"added '{name}' ({rel}) from zoo '{entry.id}'")
+
+
 @model_group.command(name="doctor", help="Report installed NPU compiler toolchains.")
 @click.option("--format", "output_format", type=click.Choice(["human", "json"]),
               default="human", show_default=True)

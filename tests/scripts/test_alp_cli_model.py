@@ -32,6 +32,34 @@ def test_model_zoo_sku_marks_runs_here():
     assert entry["runs_here"] is True
 
 
+def test_model_add_appends_bundled_to_board(tmp_path):
+    import yaml as _yaml
+    from click.testing import CliRunner
+    from alp_cli.main import cli
+    board = tmp_path / "board.yaml"
+    board.write_text("som:\n  sku: E1M-AEN801\ncores: {}\n", encoding="utf-8")
+    res = CliRunner().invoke(
+        cli, ["model", "add", "example-tiny", "--board", str(board)],
+        catch_exceptions=False)
+    assert res.exit_code == 0, res.output
+    doc = _yaml.safe_load(board.read_text("utf-8"))
+    names = [m["name"] for m in doc.get("models", [])]
+    assert "example-tiny" in names
+    entry = next(m for m in doc["models"] if m["name"] == "example-tiny")
+    assert (tmp_path / entry["source"]).is_file()  # source resolved + fetched
+
+
+def test_model_add_duplicate_name_errors(tmp_path):
+    from click.testing import CliRunner
+    from alp_cli.main import cli
+    board = tmp_path / "board.yaml"
+    board.write_text("som:\n  sku: E1M-AEN801\ncores: {}\n", encoding="utf-8")
+    args = ["model", "add", "example-tiny", "--board", str(board)]
+    CliRunner().invoke(cli, args, catch_exceptions=False)
+    res2 = CliRunner().invoke(cli, args)  # second add of the same name
+    assert res2.exit_code != 0
+
+
 def test_alp_model_build_threads_compile_opts(tmp_path, monkeypatch):
     # CLI must read models[].compile, resolve its paths relative to board.yaml,
     # and pass them to build_model as compile_opts.
