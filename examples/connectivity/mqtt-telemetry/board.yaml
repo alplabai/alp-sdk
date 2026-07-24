@@ -1,0 +1,49 @@
+# board.yaml -- per-app project configuration for the
+# mqtt-telemetry example (publish a sensor reading over MQTT/TLS).
+#
+# The "connected device" starting point: bring up the Wi-Fi
+# station, open an `mqtts://` (TLS) MQTT client via the portable
+# <alp/iot.h> surface, and publish a telemetry reading on a
+# cadence.  All app code stays on <alp/iot.h> -- the transport
+# underneath is the CC3501E Wi-Fi6+BLE coprocessor bridge on the
+# E1M-AEN801 (see docs/cc3501e-bridge.md), selected automatically
+# by the AEN board emit; no app change is needed to target it.
+#
+# AEN-only by design: the E1M-V2N101's Murata Wi-Fi
+# (murata_lbee5hy2fy) is `hil_silicon: untested` and its Linux-side
+# data path is an unmerged design, so there is no working Wi-Fi
+# transport for that family yet.  Shipping this template for the one
+# family whose transport is silicon-proven (AEN, validated
+# 2026-06-24) is deliberate -- see the catalog record's `preview`
+# note.  Do not add E1M-V2N101 to a scaffold of this template until
+# that port lands.
+#
+# Customer workflow: copy this directory, set your SSID/PSK + broker
+# URI in src/main.c (or wire them from provisioning), and `west
+# build` for the AEN board target.
+libraries:
+  # mbedtls backs the `mqtts://` TLS path.  The v0.6 board.yaml
+  # cross-field validator requires `mbedtls` (or `bearssl`) in
+  # `libraries:` whenever any core sets `iot.tls: true`.
+  - name: mbedtls
+    cores: [m55_hp]
+
+som:
+  sku: E1M-AEN801           # Alif Ensemble E8 + on-module CC3501E
+                            # Wi-Fi6+BLE bridge (the transport).
+
+preset: e1m-evk
+
+cores:
+  m55_hp:
+    app: ./src
+    # IoT toggles.  wifi:true wires the CC3501E bridge as the
+    # <alp/iot.h> Wi-Fi backend on this AEN board; tls:true selects
+    # the mqtts:// (TLS) MQTT path.  See prj.conf for why
+    # CONFIG_MBEDTLS is held off in the build today.
+    iot:
+      wifi: true
+      tls:  true
+
+diagnostics:
+  log_level: info
