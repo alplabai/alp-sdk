@@ -13,15 +13,17 @@
  * encoder fallback so customer code compiles + runs identically
  * across silicon.
  *
- * Task 1 of the encoder rollout ships only the portable surface, the
- * class dispatcher, and a NOT_IMPLEMENTED stub backend -- no encoder
- * (software or hardware) exists yet.  @ref alp_jpeg_open /
- * @ref alp_jpeg_capabilities already succeed against the stub so app
- * code compiles + links; @ref alp_jpeg_encode returns
- * @ref ALP_ERR_NOT_IMPLEMENTED until a real backend lands.
+ * Task 1 of the encoder rollout shipped only the portable surface, the
+ * class dispatcher, and a NOT_IMPLEMENTED stub backend.  Task 2 adds a
+ * portable software baseline-JPEG encoder (4:2:0 + 4:0:0 only,
+ * `src/backends/jpeg/sw_baseline.c`) that now wins backend selection
+ * on every SoM without JPEG hardware, so @ref alp_jpeg_encode actually
+ * encodes out of the box; the Alif Ensemble E8 Hantro VC9000E hardware
+ * backend (Tasks 3-4) will outrank it on AEN silicon once it lands.
  *
  * @par ABI status: [ABI-EXPERIMENTAL]
- *      v0.13 new -- no backend implements encode() yet (stub-only).
+ *      v0.13 new -- portable surface + stub (Task 1), then the
+ *      software baseline encoder (Task 2) in the same v0.13 cycle.
  *      See docs/abi-markers.md for the convention.
  */
 
