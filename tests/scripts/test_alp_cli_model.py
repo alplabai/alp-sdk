@@ -32,6 +32,34 @@ def test_model_zoo_sku_marks_runs_here():
     assert entry["runs_here"] is True
 
 
+def test_model_zoo_board_mode_marks_runs_here(tmp_path):
+    import json
+    from click.testing import CliRunner
+    from alp_cli.main import cli
+    board = tmp_path / "board.yaml"
+    board.write_text("som:\n  sku: E1M-AEN801\ncores: {}\n", encoding="utf-8")
+    res = CliRunner().invoke(
+        cli, ["model", "zoo", "--board", str(board), "--format", "json"],
+        catch_exceptions=False)
+    assert res.exit_code == 0, res.output
+    entry = next(e for e in json.loads(res.output)["entries"] if e["id"] == "example-tiny")
+    assert entry["runs_here"] is True
+
+
+def test_model_zoo_board_mode_sku_override(tmp_path):
+    import json
+    from click.testing import CliRunner
+    from alp_cli.main import cli
+    board = tmp_path / "board.yaml"
+    board.write_text("som:\n  sku: E1M-AEN801\ncores: {}\n", encoding="utf-8")
+    res = CliRunner().invoke(
+        cli, ["model", "zoo", "--board", str(board), "--sku", "E1M-NOPE", "--format", "json"],
+        catch_exceptions=False)
+    assert res.exit_code == 0, res.output
+    entry = next(e for e in json.loads(res.output)["entries"] if e["id"] == "example-tiny")
+    assert entry["runs_here"] is False
+
+
 def test_model_add_appends_bundled_to_board(tmp_path):
     import yaml as _yaml
     from click.testing import CliRunner

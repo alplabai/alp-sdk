@@ -306,10 +306,15 @@ def check_cmd(model: Path | None, sku: str | None, board_path: Path | None,
 
 @model_group.command(name="zoo", help="Browse curated model-zoo entries (and which run on a SoM).")
 @click.option("--sku", default=None, help="Mark which entries run on this SoM (via validated_soms).")
+@click.option("--board", "board_path", type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              default=None, help="Read the SoM SKU from this board.yaml (som.sku) to mark "
+                   "runs_here. Mutually exclusive with --sku unless --sku overrides.")
 @click.option("--metadata-root", type=click.Path(file_okay=False, path_type=Path),
               default=_DEFAULT_META, show_default=False)
 @click.option("--format", "fmt", type=click.Choice(["human", "json"]), default="human")
-def zoo_cmd(sku: str | None, metadata_root: Path, fmt: str) -> None:
+def zoo_cmd(sku: str | None, board_path: Path | None, metadata_root: Path, fmt: str) -> None:
+    if not sku and board_path is not None:     # --sku (if given) always wins over --board
+        sku = yaml.safe_load(board_path.read_text(encoding="utf-8"))["som"]["sku"]
     entries = load_zoo(metadata_root)
     rows = [{
         "id": e.id, "task": e.task, "description": e.description,
