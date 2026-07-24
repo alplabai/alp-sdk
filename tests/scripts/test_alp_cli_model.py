@@ -169,3 +169,41 @@ def test_alp_model_doctor_lists_all_backends():
     assert {"cpu", "ethos_u", "drpai", "deepx_dxm1"} <= backends
     cpu = next(t for t in _json.loads(result.output)["toolchains"] if t["backend"] == "cpu")
     assert cpu["available"] is True
+
+
+def test_alp_model_info_decodes_manifest_and_matrix(tmp_path):
+    (tmp_path / "models").mkdir()
+    shutil.copy(_ROOT / "tests/fixtures/models/tiny_int8.tflite",
+                tmp_path / "models" / "m.tflite")
+    (tmp_path / "board.yaml").write_text(
+        "name: demo\n"
+        "som:\n  sku: E1M-AEN801\n"
+        "cores: {}\n"
+        "models:\n  - name: demo\n    source: models/m.tflite\n",
+        encoding="utf-8")
+    out = tmp_path / "out"
+    CliRunner().invoke(cli, [
+        "model", "build", "--board", str(tmp_path / "board.yaml"),
+        "--out", str(out), "--metadata-root", str(_ROOT / "metadata"),
+    ], catch_exceptions=False)
+    result = CliRunner().invoke(cli, [
+        "model", "info", "demo",
+        "--out", str(out),
+        "--board", str(tmp_path / "board.yaml"),
+        "--metadata-root", str(_ROOT / "metadata"),
+        "--format", "json",
+    ], catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    info = _json.loads(result.output)
+    assert info["name"] == "demo"
+    assert any(t["backend"] == "cpu" for t in info["targets"])
+    matrix = {row["backend"]: row["has_blob"] for row in info["coverage_matrix"]}
+    assert matrix["cpu"] is True          # cpu always compiles
+    assert "ethos_u" in matrix            # declared AEN801 backend appears in the matrix
+
+
+def test_alp_model_info_missing_artifact_errors(tmp_path):
+    result = CliRunner().invoke(cli, [
+        "model", "info", "nope", "--out", str(tmp_path), "--format", "json",
+    ], catch_exceptions=False)
+    assert result.exit_code == 1

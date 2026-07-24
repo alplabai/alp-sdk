@@ -9,6 +9,7 @@ import yaml
 
 from alp_model.build import build_model, _ADAPTERS
 from alp_model.package import read_package
+from alp_model.targets import resolve_targets
 
 _DEFAULT_META = Path(__file__).resolve().parents[2] / "metadata"
 
@@ -126,6 +127,42 @@ def list_cmd(board_path: Path, out_dir: Path, output_format: str) -> None:
             a = e["artifact"]
             state = "missing" if not a["exists"] else ("stale" if a["stale"] else "built")
             click.echo(f"{e['name']:20} {state:8} {e['source']}")
+
+
+@model_group.command(name="info", help="Decode a built .alpmodel: targets, requires, coverage matrix.")
+@click.argument("name")
+@click.option("--out", "out_dir", type=click.Path(path_type=Path),
+              default=Path("build/models"), show_default=True, help="Build output directory.")
+@click.option("--board", "board_path", type=click.Path(exists=True, path_type=Path),
+              default=None, help="board.yaml — enables the SoM coverage matrix.")
+@click.option("--metadata-root", type=click.Path(exists=True, path_type=Path),
+              default=_DEFAULT_META, help="Path to the metadata/ root.")
+@click.option("--format", "output_format", type=click.Choice(["human", "json"]),
+              default="human", show_default=True)
+def info_cmd(name: str, out_dir: Path, board_path: Path | None,
+             metadata_root: Path, output_format: str) -> None:
+    artifact = out_dir / f"{name}.alpmodel"
+    if not artifact.is_file():
+        click.echo(f"alp model info: no .alpmodel for '{name}' at {artifact}", err=True)
+        raise SystemExit(1)
+    mft, blobs = read_package(artifact.read_bytes())
+    doc = json.loads(mft.to_json())        # public API; hex-encodes src_sha, keeps inputs/outputs/targets/coverage
+    doc["targets"] = [{**t, "blob_bytes": len(blobs[t["blob"]])} for t in doc["targets"]]
+    doc["skipped"] = doc.pop("coverage")
+    doc.pop("v", None)
+    if board_path is not None:
+        sku = yaml.safe_load(board_path.read_text(encoding="utf-8"))["som"]["sku"]
+        have = {t.backend for t in mft.targets}
+        declared = {s.backend for s in resolve_targets(sku, metadata_root=metadata_root)}
+        doc["coverage_matrix"] = [{"backend": b, "has_blob": b in have}
+                                  for b in sorted(declared)]
+    if output_format == "json":
+        click.echo(json.dumps(doc, indent=2))
+    else:
+        click.echo(f"{doc['name']}: {len(doc['targets'])} blob(s), "
+                   f"{len(doc['skipped'])} skipped")
+        for t in doc["targets"]:
+            click.echo(f"  {t['backend']:12} {t['blob_format']:12} {t['blob_bytes']} B")
 
 
 @model_group.command(name="doctor", help="Report installed NPU compiler toolchains.")
