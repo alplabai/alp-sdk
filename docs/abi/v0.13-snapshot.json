@@ -10557,6 +10557,91 @@
       },
       "variables": {}
     },
+    "alp/jpeg.h": {
+      "functions": {
+        "alp_jpeg_capabilities": {
+          "hash": "5a4f47e3d4411210",
+          "signature": "alp_status_t alp_jpeg_capabilities(const alp_jpeg_t *h, alp_jpeg_caps_t *out);"
+        },
+        "alp_jpeg_close": {
+          "hash": "22d4dfca4c5877c3",
+          "signature": "void alp_jpeg_close(alp_jpeg_t *h);"
+        },
+        "alp_jpeg_encode": {
+          "hash": "fe97f708ec254683",
+          "signature": "alp_status_t alp_jpeg_encode(alp_jpeg_t *h, const alp_jpeg_encode_req_t *req, void *out_buf, size_t out_cap, size_t *out_len);"
+        },
+        "alp_jpeg_open": {
+          "hash": "2fbe6f60f8473a46",
+          "signature": "alp_jpeg_t * alp_jpeg_open(const alp_jpeg_config_t *cfg);"
+        }
+      },
+      "macros": {
+        "ALP_JPEG_CONFIG_DEFAULT": {
+          "hash": "39faa709240c7c1e",
+          "value": "((alp_jpeg_config_t){ .engine_id = 0u, .max_width = 0u, .max_height = 0u })"
+        }
+      },
+      "typedefs": {
+        "alp_jpeg_caps_t": {
+          "definition": "typedef struct { bool hw_accelerated; bool mjpeg_supported; uint16_t max_width; uint16_t max_height; uint32_t subsample_mask; uint32_t pixfmt_mask; } alp_jpeg_caps_t;",
+          "fields": [
+            "bool hw_accelerated",
+            "bool mjpeg_supported",
+            "uint16_t max_width",
+            "uint16_t max_height",
+            "uint32_t subsample_mask",
+            "uint32_t pixfmt_mask"
+          ],
+          "hash": "63da20b1c48f93ea",
+          "kind": "struct"
+        },
+        "alp_jpeg_config_t": {
+          "definition": "typedef struct { uint32_t engine_id; uint16_t max_width; uint16_t max_height; } alp_jpeg_config_t;",
+          "fields": [
+            "uint32_t engine_id",
+            "uint16_t max_width",
+            "uint16_t max_height"
+          ],
+          "hash": "aa7b2b4967eea93c",
+          "kind": "struct"
+        },
+        "alp_jpeg_encode_req_t": {
+          "definition": "typedef struct { uint16_t width; uint16_t height; alp_pixfmt_t format; alp_jpeg_subsample_t subsample; uint8_t quality; const void *y_plane; uint32_t y_stride; const void *u_plane; uint32_t u_stride; const void *v_plane; uint32_t v_stride; } alp_jpeg_encode_req_t;",
+          "fields": [
+            "uint16_t width",
+            "uint16_t height",
+            "alp_pixfmt_t format",
+            "alp_jpeg_subsample_t subsample",
+            "uint8_t quality",
+            "const void *y_plane",
+            "uint32_t y_stride",
+            "const void *u_plane",
+            "uint32_t u_stride",
+            "const void *v_plane",
+            "uint32_t v_stride"
+          ],
+          "hash": "2653f37a17d95569",
+          "kind": "struct"
+        },
+        "alp_jpeg_subsample_t": {
+          "definition": "typedef enum { ALP_JPEG_SUBSAMPLE_400 = 0, ALP_JPEG_SUBSAMPLE_420 = 1, ALP_JPEG_SUBSAMPLE_422 = 2, } alp_jpeg_subsample_t;",
+          "enumerators": [
+            "ALP_JPEG_SUBSAMPLE_400 = 0",
+            "ALP_JPEG_SUBSAMPLE_420 = 1",
+            "ALP_JPEG_SUBSAMPLE_422 = 2"
+          ],
+          "hash": "51464c0a4af09f76",
+          "kind": "enum"
+        },
+        "alp_jpeg_t": {
+          "definition": "typedef struct alp_jpeg alp_jpeg_t;",
+          "hash": "f1eeecc9377c67e8",
+          "kind": "opaque"
+        }
+      },
+      "variables": {}
+    },
     "alp/model.h": {
       "functions": {
         "alp_model_parse": {
@@ -11033,14 +11118,16 @@
           "kind": "fnptr"
         },
         "alp_pixfmt_t": {
-          "definition": "typedef enum { ALP_PIXFMT_MONO_VLSB = 0, ALP_PIXFMT_RGB565 = 1, ALP_PIXFMT_RGB888 = 2, ALP_PIXFMT_ARGB8888 = 3 } alp_pixfmt_t;",
+          "definition": "typedef enum { ALP_PIXFMT_MONO_VLSB = 0, ALP_PIXFMT_RGB565 = 1, ALP_PIXFMT_RGB888 = 2, ALP_PIXFMT_ARGB8888 = 3, ALP_PIXFMT_YUV420_PLANAR = 4, ALP_PIXFMT_NV12 = 5, } alp_pixfmt_t;",
           "enumerators": [
             "ALP_PIXFMT_MONO_VLSB = 0",
             "ALP_PIXFMT_RGB565 = 1",
             "ALP_PIXFMT_RGB888 = 2",
-            "ALP_PIXFMT_ARGB8888 = 3"
+            "ALP_PIXFMT_ARGB8888 = 3",
+            "ALP_PIXFMT_YUV420_PLANAR = 4",
+            "ALP_PIXFMT_NV12 = 5"
           ],
-          "hash": "b7b2fa99edecde8b",
+          "hash": "884de555b8503700",
           "kind": "enum"
         },
         "alp_spi_config_t": {
