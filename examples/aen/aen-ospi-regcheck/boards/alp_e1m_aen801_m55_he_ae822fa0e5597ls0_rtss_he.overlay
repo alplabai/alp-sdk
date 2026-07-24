@@ -1,0 +1,73 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-ospi-regcheck overlay for the E1M-AEN801 (Ensemble E8, M55-HE) RAM-run.
+ *
+ * Enables the Alif OSPI/HexSPI node so it BINDS on silicon:
+ *   - ospi0 (snps,designware-ospi @ 0x83000000, IRQ 96, aes-reg 0x83001000,
+ *     xip-base 0xA0000000/0x10000000)
+ *
+ * SCOPE: this proves the ospi0 node BINDS (DT_HAS_SNPS_DESIGNWARE_OSPI_ENABLED
+ * + the reg/irq match) and that the flash_ospi_alif.c driver's
+ * alif_hal_ospi_initialize()/alif_hal_ospi_xip_enable() calls compile and
+ * link.  HW-BLOCKED this batch: no octal-NOR/HyperBus part is populated on
+ * the E1M-AEN801, so a live XiP read is NOT exercised.
+ *
+ * Pinctrl group transcribed from the Apache-2.0 zephyr_alif fork's E4/E6/E8
+ * pinctrl set (boards/alif/common/ensemble-e4-e6-e8-pinctrl.dtsi
+ * pinctrl_ospi0, the "_B" option group: SCLK/RXDS/SS0 on port 3, D0-D7 on
+ * port 2), with ONE deliberate pin substitution: the fork's stock RXDS_B
+ * pad is P3_4, which on THIS carrier is already claimed by the console
+ * (pinctrl_uart5 in alp_e1m_aen801_m55_he-pinctrl.dtsi drives UART5_RX_A on
+ * P3_4) -- reusing it here would silently fight the console driver for the
+ * pin mux at init time.  P1_6 offers the identical OSPI0_RXDS_B alternate
+ * function on a different physical pad (see
+ * <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>: both
+ * PIN_P1_6__OSPI0_RXDS_B and PIN_P3_4__OSPI0_RXDS_B exist), so it is used
+ * instead -- not invented, just the other documented route for the same
+ * signal. Pad config (read-enable=1/drive-strength=12/slew-rate=fast) is the
+ * fork's own translated onto THIS repo's upstream alif,pinctrl binding
+ * (property-allowlist has no fork-only read-enable/driver-state-control,
+ * see alif,pinctrl.yaml): read-enable -> input-enable, numeric slew-rate 0x1
+ * -> the enum string "fast".
+ */
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+
+/*
+ * MANDATORY bench RAM-run retarget: run from ITCM so J-Link can loadbin+run
+ * without programming MRAM, and drop the MCUboot code-partition fixup.
+ */
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};
+
+&pinctrl {
+	pinctrl_ospi0: pinctrl_ospi0 {
+		group0 {
+			pinmux = <PIN_P3_0__OSPI0_SCLK_B>,
+				 <PIN_P1_6__OSPI0_RXDS_B>,
+				 <PIN_P3_2__OSPI0_SS0_B>,
+				 <PIN_P2_0__OSPI0_D0_B>,
+				 <PIN_P2_1__OSPI0_D1_B>,
+				 <PIN_P2_2__OSPI0_D2_B>,
+				 <PIN_P2_3__OSPI0_D3_B>,
+				 <PIN_P2_4__OSPI0_D4_B>,
+				 <PIN_P2_5__OSPI0_D5_B>,
+				 <PIN_P2_6__OSPI0_D6_B>,
+				 <PIN_P2_7__OSPI0_D7_B>;
+			input-enable;
+			drive-strength = <12>;
+			slew-rate = "fast";
+		};
+	};
+};
+
+&ospi0 {
+	status = "okay";
+	pinctrl-0 = <&pinctrl_ospi0>;
+	pinctrl-names = "default";
+};

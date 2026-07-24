@@ -299,6 +299,17 @@ if(CONFIG_SPI_DW_ALIF)
     zephyr_include_directories(${ZEPHYR_BASE}/drivers/spi)
 endif()
 
+# Alif Ensemble OSPI/HexSPI (compatible "snps,designware-ospi"), an in-tree
+# thin driver over the Apache-2.0 hal_alif drivers/ospi register library
+# (CONFIG_USE_ALIF_HAL_OSPI, see the OSPI_ALIF Kconfig for the
+# add_subdirectory_ifdef precedent shared with USE_ALIF_HAL_UTIMER/_ANALOG).
+# hal_alif's own ospi CMakeLists is header-self-contained (its
+# zephyr_include_directories(include) fires when USE_ALIF_HAL_OSPI pulls the
+# subdirectory in), so no extra include path is needed here.  HW-BLOCKED /
+# BUILD-ONLY this batch: see the OSPI_ALIF Kconfig help + examples/aen/aen-ospi-regcheck.
+zephyr_library_sources_ifdef(CONFIG_OSPI_ALIF
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/flash/flash_ospi_alif.c)
+
 # Arm MHUv2 mailbox IPM driver (compatible "arm,mhuv2"), vendored from the
 # Apache-2.0 zephyr_alif fork (drivers/ipm/ipm_arm_mhuv2.c + ipm_arm_mhuv2.h).
 # Upstream Zephyr v4.4 ships only the MHUv1 ipm_mhu.c.  This is the v2 mailbox

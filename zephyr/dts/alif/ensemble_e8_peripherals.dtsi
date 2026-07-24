@@ -274,6 +274,42 @@
 	};
 
 	/*
+	 * Synopsys DesignWare OSPI/HexSPI -- the octal-SPI controller that also
+	 * drives HyperBus/HyperRAM-style parts in XiP mode, bound by the alp-sdk
+	 * Tier-1.5 driver flash_ospi_alif.c (compatible "snps,designware-ospi")
+	 * over the Apache-2.0 hal_alif drivers/ospi register library.  reg/aes-reg/
+	 * IRQ/bus-speed/xip-* transcribed VERBATIM from the fork's e1.dtsi
+	 * (ospi0@83000000; reg 0x83000000/0x1000; aes-reg 0x83001000/0x100; IRQ 96;
+	 * xip-base-address 0xA0000000/0x10000000).  `clocks = <&clockctrl
+	 * ALIF_OSPI0_ACLK_CLK>` from the fork node is DROPPED (no such id exists in
+	 * the upstream clock encoding this repo uses -- see
+	 * alif-ensemble-clocks-ext.h and the fork-vs-upstream clock-id-encoding
+	 * gotcha); the driver takes its core clock as a plain uint32 from
+	 * `clock-frequency` (falling back to `bus-speed`), not a clock-controller
+	 * phandle.
+	 *
+	 * HW-BLOCKED, BUILD-ONLY this batch: no octal-NOR/HyperBus part is
+	 * populated on the E1M-AEN801, so this proves the node BINDS + the
+	 * hal_alif init/XiP-enable entry points compile and link -- not a live
+	 * XiP read.  No pinctrl-0: the enabling board/example overlay supplies it
+	 * (the eth/isp precedent) -- see examples/aen/aen-ospi-regcheck.
+	 */
+	ospi0: ospi0@83000000 {
+		compatible = "snps,designware-ospi";
+		reg = <0x83000000 0x1000>;
+		interrupts = <96 3>;
+		aes-reg = <0x83001000 0x100>;
+		bus-speed = <100000000>;
+		cs-pin = <0>;
+		ddr-drive-edge = <1>;
+		rx-ds-delay = <11>;
+		tx-fifo-threshold = <0>;
+		xip-wait-cycles = <255>;
+		xip-base-address = <0xA0000000 0x10000000>;
+		status = "disabled";
+	};
+
+	/*
 	 * LPRTC -- the always-on Synopsys DesignWare APB RTC at lprtc@42000000.
 	 * Bound by the alp-sdk Tier-2 driver counter_dw_rtc.c (compatible
 	 * "snps,dw-apb-rtc") as a Zephyr COUNTER device: a free-running 32-bit
