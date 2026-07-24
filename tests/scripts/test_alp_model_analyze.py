@@ -47,6 +47,21 @@ def test_estimate_macs_conv2d():
     assert estimate_macs([op]) == 36864
 
 
+def test_estimate_macs_depthwise_conv2d():
+    from alp_model.analyze import estimate_macs
+    # weights [1,3,3,16], out [1,8,8,16] -> oh*ow*c*kh*kw = 8*8*16*3*3 = 9216
+    op = _op("DEPTHWISE_CONV_2D", [([1, 10, 10, 16],), ([1, 3, 3, 16], True)],
+             [[1, 8, 8, 16]])
+    assert estimate_macs([op]) == 9216
+
+
+def test_estimate_macs_transpose_conv_rides_conv2d_formula():
+    from alp_model.analyze import estimate_macs
+    # weights [16,3,3,4], out [1,8,8,16] -> 8*8*16*3*3*4 = 36864 (same shape as CONV_2D)
+    op = _op("TRANSPOSE_CONV", [([1, 4],), ([16, 3, 3, 4], True)], [[1, 8, 8, 16]])
+    assert estimate_macs([op]) == 36864
+
+
 def test_estimate_macs_unknown_op_is_zero():
     from alp_model.analyze import estimate_macs
     assert estimate_macs([_op("CUSTOM_THING", [[1, 4]], [[1, 4]])]) == 0
@@ -55,9 +70,6 @@ def test_estimate_macs_unknown_op_is_zero():
 def test_estimate_peak_sram_excludes_constants_and_rounds_up():
     from alp_model.analyze import estimate_peak_sram_kib
     # activations: in 4B + out 2B = 6B -> ceil(6/1024) = 1 KiB; weights (const) excluded
-    op = _op("FULLY_CONNECTED", [([1, 4], False, "int8", 4), ([2, 4], True, "int8", 8)],
-             [[1, 2]])
-    # give the output an explicit 2-byte size
     from alp_model.tensorio import OpDesc, TensorDesc
     op = OpDesc(op="FULLY_CONNECTED",
                 inputs=[TensorDesc([1, 4], "int8", 4, False),
@@ -81,6 +93,14 @@ def test_latency_prefers_mac_per_cycle_then_tops():
     assert npu_mac_per_s({}) is None
 
 
+def test_estimate_latency_applies_util_factor_and_none_path():
+    from alp_model.analyze import estimate_latency_ms
+    # rate = 1*1e6 MAC/s; 1e6 MACs / (1e6 * 0.5 util) * 1e3 = 2000 ms (the 0.5 doubles it)
+    assert estimate_latency_ms(1_000_000, {"mac_per_cycle": 1, "freq_mhz": 1}) == 2000.0
+    # no throughput field -> None (never divides by zero)
+    assert estimate_latency_ms(1_000_000, {}) is None
+
+
 def test_analyze_model_tflite_structural_invariants():
     pytest.importorskip("tflite")
     from alp_model.analyze import analyze_model
@@ -91,14 +111,14 @@ def test_analyze_model_tflite_structural_invariants():
     cpu = [b for b in res.backends if b.backend == "cpu"]
     assert len(cpu) == 1 and cpu[0].verdict == "fits"
     assert all(b.source == "static" for b in res.backends)
-    # AEN701 -> alif e7 exposes an Ethos-U backend
+    # AEN801 -> alif e8 exposes an Ethos-U backend
     assert any(b.backend == "ethos_u" for b in res.backends)
     # tiny FC model, all-supported, budget unknown -> ethos verdict never no-fit
     for b in res.backends:
         if b.backend == "ethos_u":
             assert b.verdict in ("fits", "cpu-fallback")
             assert b.est_sram_kib == 1        # 6B activations -> 1 KiB
-            assert b.budget_sram_kib is None   # e7 arena is a 0 placeholder
+            assert b.budget_sram_kib is None   # e8 arena is a 0 placeholder
 
 
 def test_analyze_model_rejects_non_tflite():
