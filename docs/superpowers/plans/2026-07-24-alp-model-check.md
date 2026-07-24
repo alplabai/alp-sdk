@@ -80,7 +80,7 @@ def test_extract_ops_walks_fixture_operators():
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /e/GitHub/alp-sdk/.claude/worktrees/model-check && py -3.11 -m pytest tests/scripts/test_alp_model_tensorio.py -q`
+Run: `cd <worktree> && py -3.11 -m pytest tests/scripts/test_alp_model_tensorio.py -q`
 Expected: FAIL — `ImportError: cannot import name 'extract_ops'`.
 
 - [ ] **Step 3: Implement `extract_ops` + the dataclasses**
