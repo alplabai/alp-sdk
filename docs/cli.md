@@ -356,7 +356,7 @@ the same rich validator plus consistency pass, so `tan validate`,
 the script entry point, and build preflight reject the same
 board.yaml contracts.
 
-### `tan model` -- compile + package AI models
+### `tan model` -- compile, package, and pre-flight check AI models
 
 ```bash
 tan model build                          # compile board.yaml `models:` entries
@@ -370,6 +370,107 @@ Ethos-U, DRP-AI for RZ/V2N, ...).  `--model NAME` restricts the build
 to the single named entry instead of all of them; an unknown NAME
 exits 1 instead of building everything.  See the model-pipeline docs
 under `docs/tutorials/` for the end-to-end inference flow.
+
+#### `tan model check` -- static pre-flight fit/perf check (no toolchain)
+
+Two modes:
+
+```bash
+# single-model: check one .tflite file against an explicit SKU
+tan model check my_model.tflite --sku E1M-AEN801
+tan model check my_model.tflite --sku E1M-AEN801 --format json
+tan model check my_model.tflite --sku E1M-V2N101 --metadata-root path/to/metadata
+
+# board-mode: check every (or one) board.yaml `models:` entry; SKU comes
+# from `som.sku` unless overridden
+tan model check --board path/to/board.yaml
+tan model check --board path/to/board.yaml --model demo
+tan model check --board path/to/board.yaml --sku E1M-V2N101 --format json
+```
+
+Offline, no-toolchain static analysis: parses the TFLite graph and,
+for every backend the SKU exposes (`cpu` plus each on-SoM NPU),
+answers "will this model fit, and roughly how fast" *before* any
+compile.  Each backend gets a fit verdict -- `fits` / `cpu-fallback`
+(one or more ops fall back to CPU) / `no-fit` (SRAM arena overflow) --
+plus conservative `est_sram_kib` / `est_latency_ms` /
+`op_coverage_pct` estimates.  MODEL and `--board` are mutually
+exclusive.
+
+In single-model mode `--sku` is required (e.g. `E1M-AEN801`). In
+`--board` mode the SKU defaults to the board's `som.sku`; passing
+`--sku` alongside `--board` overrides it. `--metadata-root` overrides
+the SDK's own `metadata/` root (defaults to it) in either mode.
+
+Exit 0 for any completed analysis -- a `no-fit` verdict is a valid
+answer, not a CLI error. Exit 1 for a per-model analysis failure (an
+unknown SKU, or a non-TFLite model -- ONNX static analysis is a
+follow-on, not yet supported): in board-mode this is per-model --
+one un-analysable `models:` entry does not abort the run, it's
+recorded as an error entry and the whole invocation still exits 1
+after printing the full payload. MODEL and `--board` together, or
+neither MODEL nor `--sku` given in single-model mode, is a usage
+error (exit 2); a missing/unreadable model path is likewise a usage
+error (exit 2), same as any other `tan model` path argument.
+
+Single-model `--format json` payload:
+
+```json
+{
+  "model": "my_model.tflite",
+  "sku": "E1M-AEN801",
+  "backends": [
+    {
+      "backend": "ethos_u",
+      "verdict": "fits",
+      "est_sram_kib": 1,
+      "budget_sram_kib": null,
+      "est_latency_ms": 0.02,
+      "op_coverage_pct": 100.0,
+      "unsupported_ops": [],
+      "source": "static"
+    }
+  ],
+  "suggestion": null
+}
+```
+
+Board-mode `--format json` payload -- one entry per `models:` entry
+checked, each either a full result or (when that model's source isn't
+analysable) a per-model `error`:
+
+```json
+{
+  "board": "path/to/board.yaml",
+  "sku": "E1M-AEN801",
+  "models": [
+    {
+      "name": "demo",
+      "source": "models/demo.tflite",
+      "backends": [ { "backend": "ethos_u", "verdict": "fits", "...": "..." } ],
+      "suggestion": null
+    },
+    {
+      "name": "other",
+      "source": "models/other.onnx",
+      "error": "static check supports .tflite models in this release; cannot analyse other.onnx (ONNX static analysis is a follow-on)"
+    }
+  ]
+}
+```
+
+Every backend result carries `"source": "static"` -- this slice ships
+fidelity tier 1 only, a conservative estimator with no NPU toolchain
+involved (round SRAM up, treat unknown/unsupported ops as
+CPU-fallback, assume <=50% NPU utilisation for latency -- a false
+"fits" is the worst failure this analyzer can make).  Tier 2
+(manufacturer-precomputed bench data, `source: "precomputed"`) and
+tier 3 (exact, on-demand toolchain compile) are follow-ons, as is ONNX
+static analysis.  `budget_sram_kib` is `null` until a SoC's
+`inference_arena_sram_kib` metadata field is authored -- every SoC's
+value is currently a `0` placeholder, so `no-fit` can never fire from
+an SRAM overflow yet, and the in-family cross-sell suggestion (move to
+a larger-arena SoM) stays dormant until those budgets exist.
 
 ### `tan doctor` -- host environment preflight
 

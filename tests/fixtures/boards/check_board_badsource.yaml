@@ -1,0 +1,11 @@
+# Board for `alp model check --board` per-model-resilience tests: a valid
+# SoM SKU + one models: entry whose source is a non-tflite file (the shared
+# ONNX fixture), which analyze_model rejects with UnsupportedModelError --
+# board-mode must record that as a per-model error, not abort the run.
+som:
+  sku: E1M-AEN801
+cores:
+  m55_hp: {}
+models:
+  - name: bad
+    source: ../models/tiny_cnn.onnx

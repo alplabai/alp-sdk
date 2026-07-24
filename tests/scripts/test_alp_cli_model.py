@@ -326,3 +326,130 @@ def test_alp_model_info_missing_artifact_errors(tmp_path):
         "model", "info", "nope", "--out", str(tmp_path), "--format", "json",
     ], catch_exceptions=False)
     assert result.exit_code == 1
+
+
+def test_model_check_json(tmp_path):
+    import json
+    from click.testing import CliRunner
+    from alp_cli.main import cli
+    model = _ROOT / "tests/fixtures/models/tiny_int8.tflite"
+    res = CliRunner().invoke(
+        cli, ["model", "check", str(model), "--sku", "E1M-AEN801", "--format", "json"],
+        catch_exceptions=False)
+    assert res.exit_code == 0, res.output
+    payload = json.loads(res.output)
+    assert payload["sku"] == "E1M-AEN801"
+    assert payload["backends"], "expected backends"
+    assert all(b["source"] == "static" for b in payload["backends"])
+    cpu = [b for b in payload["backends"] if b["backend"] == "cpu"]
+    assert cpu and cpu[0]["verdict"] == "fits"
+
+
+def test_model_check_human_lists_backends():
+    from click.testing import CliRunner
+    from alp_cli.main import cli
+    model = _ROOT / "tests/fixtures/models/tiny_int8.tflite"
+    res = CliRunner().invoke(
+        cli, ["model", "check", str(model), "--sku", "E1M-AEN801"],
+        catch_exceptions=False)
+    assert res.exit_code == 0, res.output
+    assert "ethos_u" in res.output and "cpu" in res.output
+    assert "static" in res.output
+
+
+def test_model_check_non_tflite_errors():
+    from click.testing import CliRunner
+    from alp_cli.main import cli
+    model = _ROOT / "tests/fixtures/models/tiny_cnn.onnx"
+    res = CliRunner().invoke(
+        cli, ["model", "check", str(model), "--sku", "E1M-AEN801"])
+    assert res.exit_code == 1
+    assert "tflite" in res.output.lower()
+
+
+def test_model_check_board_mode_json():
+    import json
+    from click.testing import CliRunner
+    from alp_cli.main import cli
+    board = _ROOT / "tests/fixtures/boards/check_board.yaml"
+    res = CliRunner().invoke(
+        cli, ["model", "check", "--board", str(board), "--format", "json"],
+        catch_exceptions=False)
+    assert res.exit_code == 0, res.output
+    payload = json.loads(res.output)
+    assert payload["board"] == str(board)
+    assert payload["sku"] == "E1M-AEN801"
+    assert payload["models"]
+    m = payload["models"][0]
+    assert m["name"] == "tiny"
+    assert m["backends"]
+    cpu = [b for b in m["backends"] if b["backend"] == "cpu"]
+    assert cpu and cpu[0]["verdict"] == "fits"
+
+
+def test_model_check_board_and_positional_are_exclusive():
+    from click.testing import CliRunner
+    from alp_cli.main import cli
+    board = _ROOT / "tests/fixtures/boards/check_board.yaml"
+    model = _ROOT / "tests/fixtures/models/tiny_int8.tflite"
+    res = CliRunner().invoke(
+        cli, ["model", "check", str(model), "--board", str(board)])
+    assert res.exit_code != 0
+    assert "exclusive" in res.output.lower()
+
+
+def test_model_check_board_single_model_selector():
+    import json
+    from click.testing import CliRunner
+    from alp_cli.main import cli
+    board = _ROOT / "tests/fixtures/boards/check_board.yaml"
+    res = CliRunner().invoke(
+        cli, ["model", "check", "--board", str(board), "--model", "tiny",
+              "--format", "json"],
+        catch_exceptions=False)
+    assert res.exit_code == 0, res.output
+    payload = json.loads(res.output)
+    assert len(payload["models"]) == 1
+    assert payload["models"][0]["name"] == "tiny"
+
+
+def test_model_check_board_mode_bad_source_is_per_model_error():
+    import json
+    from click.testing import CliRunner
+    from alp_cli.main import cli
+    board = _ROOT / "tests/fixtures/boards/check_board_badsource.yaml"
+    res = CliRunner().invoke(
+        cli, ["model", "check", "--board", str(board), "--format", "json"])
+    assert res.exit_code == 1, res.output      # per-model failure, not a usage error
+    payload = json.loads(res.output)           # payload still printed despite the failure
+    m = payload["models"][0]
+    assert m["name"] == "bad"
+    assert m["source"] == "../models/tiny_cnn.onnx"
+    assert m["error"]
+    assert "backends" not in m
+
+
+def test_model_check_board_unknown_model_selector_errors():
+    from click.testing import CliRunner
+    from alp_cli.main import cli
+    board = _ROOT / "tests/fixtures/boards/check_board.yaml"
+    res = CliRunner().invoke(
+        cli, ["model", "check", "--board", str(board), "--model", "no_such_name"])
+    assert res.exit_code != 0
+    assert "no_such_name" in res.output
+
+
+def test_model_check_board_explicit_sku_overrides_board():
+    import json
+    from click.testing import CliRunner
+    from alp_cli.main import cli
+    board = _ROOT / "tests/fixtures/boards/check_board.yaml"
+    res = CliRunner().invoke(
+        cli, ["model", "check", "--board", str(board), "--sku", "E1M-V2N101",
+              "--format", "json"],
+        catch_exceptions=False)
+    assert res.exit_code == 0, res.output
+    payload = json.loads(res.output)
+    assert payload["sku"] == "E1M-V2N101"
+    backends = {b["backend"] for b in payload["models"][0]["backends"]}
+    assert "drpai" in backends

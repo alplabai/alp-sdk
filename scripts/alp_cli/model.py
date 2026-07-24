@@ -7,6 +7,7 @@ from pathlib import Path
 import click
 import yaml
 
+from alp_model.analyze import UnsupportedModelError, analyze_model
 from alp_model.build import build_model, _ADAPTERS
 from alp_model.package import read_package
 from alp_model.targets import resolve_targets
@@ -179,6 +180,127 @@ def info_cmd(name: str, out_dir: Path, board_path: Path | None,
                    f"{len(doc['skipped'])} skipped")
         for t in doc["targets"]:
             click.echo(f"  {t['backend']:12} {t['blob_format']:12} {t['blob_bytes']} B")
+
+
+def _backend_payload(b) -> dict:
+    return {
+        "backend": b.backend, "verdict": b.verdict,
+        "est_sram_kib": b.est_sram_kib, "budget_sram_kib": b.budget_sram_kib,
+        "est_latency_ms": b.est_latency_ms,
+        "op_coverage_pct": b.op_coverage_pct,
+        "unsupported_ops": b.unsupported_ops, "source": b.source,
+    }
+
+
+def _echo_backends_human(backends) -> None:
+    for b in backends:
+        lat = "n/a" if b.est_latency_ms is None else f"{b.est_latency_ms:.2f} ms"
+        budget = "unknown" if b.budget_sram_kib is None else f"{b.budget_sram_kib} KiB"
+        click.echo(
+            f"  [{b.verdict:>12}] {b.backend:<11} "
+            f"sram ~{b.est_sram_kib} KiB / budget {budget}  "
+            f"latency {lat}  ops {b.op_coverage_pct:.0f}%  ({b.source})")
+        if b.unsupported_ops:
+            click.echo(f"               unsupported: {', '.join(b.unsupported_ops)}")
+
+
+@model_group.command(name="check", help="Static pre-flight fit/perf check for a model "
+                      "(or every board.yaml models: entry) on a SoM (offline, no toolchain).")
+@click.argument("model", required=False, default=None,
+                 type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--sku", default=None,
+              help="SoM SKU, e.g. E1M-AEN801. Required unless --board is given (board.yaml "
+                   "supplies som.sku); passing --sku together with --board overrides it.")
+@click.option("--board", "board_path", type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              default=None, help="Check every (or one, with --model) models: entry in this "
+                   "board.yaml instead of a single model. Mutually exclusive with the "
+                   "positional MODEL.")
+@click.option("--model", "select_name", default=None,
+              help="With --board, check only the named models: entry.")
+@click.option("--metadata-root", type=click.Path(file_okay=False, path_type=Path),
+              default=_DEFAULT_META, show_default=False,
+              help="Metadata root (defaults to the SDK's metadata/).")
+@click.option("--format", "fmt", type=click.Choice(["human", "json"]), default="human")
+def check_cmd(model: Path | None, sku: str | None, board_path: Path | None,
+              select_name: str | None, metadata_root: Path, fmt: str) -> None:
+    if board_path is not None and model is not None:
+        click.echo("error: MODEL and --board are mutually exclusive", err=True)
+        raise SystemExit(2)
+
+    if board_path is None:
+        if model is None or not sku:
+            click.echo("error: MODEL and --sku are required unless --board is given", err=True)
+            raise SystemExit(2)
+        try:
+            result = analyze_model(model, sku, metadata_root=metadata_root)
+        except (UnsupportedModelError, FileNotFoundError) as exc:
+            raise SystemExit(f"error: {exc}")
+
+        if fmt == "json":
+            payload = {
+                "model": result.model, "sku": result.sku,
+                "backends": [_backend_payload(b) for b in result.backends],
+                "suggestion": result.suggestion,
+            }
+            click.echo(json.dumps(payload, indent=2))
+            return
+        click.echo(f"model: {result.model}")
+        click.echo(f"SoM:   {result.sku}")
+        _echo_backends_human(result.backends)
+        if result.suggestion:
+            click.echo(f"suggestion: {result.suggestion}")
+        return
+
+    # --board mode: sku from board.som.sku unless --sku overrides it; walk every
+    # (or the one named) models: entry through the same engine, per-model.
+    board = yaml.safe_load(board_path.read_text(encoding="utf-8"))
+    board_sku = sku or board["som"]["sku"]
+    base = board_path.parent
+    models = board.get("models", [])
+    if select_name is not None:
+        models = [m for m in models if m["name"] == select_name]
+        if not models:
+            raise SystemExit(f"error: no model named '{select_name}' in {board_path}")
+
+    entries: list[dict] = []       # {"name","source","result"} or {"name","source","error"}
+    failed = False
+    for m in models:
+        source = (base / m["source"]).resolve()
+        try:
+            result = analyze_model(source, board_sku, metadata_root=metadata_root)
+        except (UnsupportedModelError, FileNotFoundError) as exc:
+            failed = True
+            entries.append({"name": m["name"], "source": m["source"], "error": str(exc)})
+            continue
+        entries.append({"name": m["name"], "source": m["source"], "result": result})
+
+    if fmt == "json":
+        payload_models = [
+            {"name": e["name"], "source": e["source"], "error": e["error"]}
+            if "error" in e else
+            {"name": e["name"], "source": e["source"],
+             "backends": [_backend_payload(b) for b in e["result"].backends],
+             "suggestion": e["result"].suggestion}
+            for e in entries
+        ]
+        click.echo(json.dumps(
+            {"board": str(board_path), "sku": board_sku, "models": payload_models}, indent=2))
+        if failed:
+            raise SystemExit(1)
+        return
+
+    click.echo(f"board: {board_path}")
+    click.echo(f"SoM:   {board_sku}")
+    for e in entries:
+        click.echo(f"model: {e['name']}")
+        if "error" in e:
+            click.echo(f"  error: {e['error']}")
+            continue
+        _echo_backends_human(e["result"].backends)
+        if e["result"].suggestion:
+            click.echo(f"  suggestion: {e['result'].suggestion}")
+    if failed:
+        raise SystemExit(1)
 
 
 @model_group.command(name="doctor", help="Report installed NPU compiler toolchains.")
