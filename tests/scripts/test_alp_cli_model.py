@@ -365,3 +365,49 @@ def test_model_check_non_tflite_errors():
         cli, ["model", "check", str(model), "--sku", "E1M-AEN801"])
     assert res.exit_code == 1
     assert "tflite" in res.output.lower()
+
+
+def test_model_check_board_mode_json():
+    import json
+    from click.testing import CliRunner
+    from alp_cli.main import cli
+    board = _ROOT / "tests/fixtures/boards/check_board.yaml"
+    res = CliRunner().invoke(
+        cli, ["model", "check", "--board", str(board), "--format", "json"],
+        catch_exceptions=False)
+    assert res.exit_code == 0, res.output
+    payload = json.loads(res.output)
+    assert payload["board"] == str(board)
+    assert payload["sku"] == "E1M-AEN801"
+    assert payload["models"]
+    m = payload["models"][0]
+    assert m["name"] == "tiny"
+    assert m["backends"]
+    cpu = [b for b in m["backends"] if b["backend"] == "cpu"]
+    assert cpu and cpu[0]["verdict"] == "fits"
+
+
+def test_model_check_board_and_positional_are_exclusive():
+    from click.testing import CliRunner
+    from alp_cli.main import cli
+    board = _ROOT / "tests/fixtures/boards/check_board.yaml"
+    model = _ROOT / "tests/fixtures/models/tiny_int8.tflite"
+    res = CliRunner().invoke(
+        cli, ["model", "check", str(model), "--board", str(board)])
+    assert res.exit_code != 0
+    assert "exclusive" in res.output.lower()
+
+
+def test_model_check_board_single_model_selector():
+    import json
+    from click.testing import CliRunner
+    from alp_cli.main import cli
+    board = _ROOT / "tests/fixtures/boards/check_board.yaml"
+    res = CliRunner().invoke(
+        cli, ["model", "check", "--board", str(board), "--model", "tiny",
+              "--format", "json"],
+        catch_exceptions=False)
+    assert res.exit_code == 0, res.output
+    payload = json.loads(res.output)
+    assert len(payload["models"]) == 1
+    assert payload["models"][0]["name"] == "tiny"
