@@ -102,3 +102,35 @@ def test_alp_model_build_cpu_e2e_with_real_tflite(tmp_path):
     if importlib.util.find_spec("tflite"):            # tensor-I/O populated when parser present
         assert mft.inputs and mft.inputs[0].shape == [1, 4]
         assert mft.outputs and mft.outputs[0].shape == [1, 2]
+
+
+import json as _json
+
+
+def test_alp_model_build_json_emits_targets_and_coverage(tmp_path):
+    (tmp_path / "models").mkdir()
+    shutil.copy(_ROOT / "tests/fixtures/models/tiny_int8.tflite",
+                tmp_path / "models" / "m.tflite")
+    (tmp_path / "board.yaml").write_text(
+        "name: demo\n"
+        "som:\n  sku: E1M-AEN801\n"
+        "cores: {}\n"
+        "models:\n  - name: demo\n    source: models/m.tflite\n",
+        encoding="utf-8")
+    result = CliRunner().invoke(cli, [
+        "model", "build",
+        "--board", str(tmp_path / "board.yaml"),
+        "--out", str(tmp_path / "out"),
+        "--metadata-root", str(_ROOT / "metadata"),
+        "--format", "json",
+    ], catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    payload = _json.loads(result.output)
+    model = payload["models"][0]
+    assert model["name"] == "demo"
+    assert model["alpmodel_path"].endswith("demo.alpmodel")
+    assert model["total_bytes"] > 0
+    cpu = [t for t in model["targets"] if t["backend"] == "cpu"]
+    assert len(cpu) == 1 and cpu[0]["blob_bytes"] > 0
+    # ethos_u is a declared AEN801 target; without vela on PATH it is a skip.
+    assert all(s["status"] in ("skipped", "incompatible") for s in model["skipped"])
