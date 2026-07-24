@@ -43,3 +43,21 @@ def test_load_calibration_shape_mismatch_raises(tmp_path):
     np.save(d / "wrong.npy", np.zeros((1, 3, 64, 64), dtype=np.float32))
     with pytest.raises(PrepError):
         load_calibration(d, [1, 3, 224, 224])
+
+
+def test_quantize_and_accuracy_report(tmp_path):
+    pytest.importorskip("onnxruntime")
+    from alp_model.prep import quantize, accuracy_delta
+    cal = tmp_path / "cal"; _make_calib(cal, 8)
+    out = tmp_path / "tiny.int8.onnx"
+    q = quantize(_ONNX, out, cal)
+    assert q.is_file() and q.stat().st_size > 0
+    # the quantized model must actually load + run
+    import onnxruntime as ort
+    ort.InferenceSession(str(q), providers=["CPUExecutionProvider"])
+    rep = accuracy_delta(_ONNX, q, cal)
+    assert rep.samples == 8
+    assert 0.0 <= rep.top1_agreement_pct <= 100.0
+    assert -1.0 <= rep.mean_cosine <= 1.0001
+    assert rep.verdict in ("good", "degraded")
+    assert (rep.guidance is None) == (rep.verdict == "good")
