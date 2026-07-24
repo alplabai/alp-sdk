@@ -7,6 +7,27 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.14.0 candidate
 
+### Added — Alif Ensemble E8 SoC peripheral coverage: I3C, OSPI/HexSPI, managed-MDIO (build-only)
+
+Three previously-missing E8 peripheral drivers, all **build-only** (compile+link
+proven on `alp_e1m_aen801_m55_he`; none is silicon-verifiable on this batch — no
+I3C/MDIO bus target wired, HexSPI unpopulated):
+- **I3C / I3C-LP** — Tier-1 enablement of upstream Zephyr `i3c_dw.c`
+  (`snps,designware-i3c`): DT nodes + clock-ids + pinctrl + Kconfig, no vendored
+  source. Example `aen-i3c-regcheck`.
+- **OSPI / HexSPI** — Zephyr shim `flash_ospi_alif.c` (ADR-0017 Tier-1.5) over the
+  Apache-2.0 hal_alif OSPI HAL (`CONFIG_USE_ALIF_HAL_OSPI`): init / XIP / AES-inline
+  / DDR config. `flash_driver_api` read/write/erase deferred (silicon-gated).
+  Example `aen-ospi-regcheck`. Runtime HW-blocked (HexSPI not populated — MRAM-only).
+- **Managed-MDIO** — clean-room Clause-22 controller `mdio_dwmac_alif.c` for the
+  DWC_ether_qos GMAC, authored from the DFP register map (no DFP source vendored),
+  enabling a managed-PHY path for the existing Ethernet driver.
+
+Not built (scope confirmed not gaps): DMA2D (the existing D/AVE2D GPU2D backend
+covers it), `<alp/display.h>` (the generic Zephyr-display wrapper already serves
+CDC200), `<alp/dsp.h>` (CMSIS-DSP Helium is already the E8 path), `<alp/tmu.h>`
+(E8 has no CORDIC hardware).
+
 ## [v0.13.0] - 2026-07-24
 
 ### Added — `--emit kconfig`: board-scoped Kconfig symbol menu for the LSP
