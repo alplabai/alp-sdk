@@ -1021,6 +1021,15 @@ def _emit_inference(
         # "assigned y but got n" warning, not fatal -- the inference
         # dispatcher falls back to ALP_SDK_INFERENCE_SW_FALLBACK there).
         "CONFIG_CPP=y",
+        # tflite-micro's headers require C++17 (e.g. tensorflow/lite/array.h
+        # uses std::conditional_t / std::decay_t).  Zephyr's C++ standard
+        # `choice STD_CPP` defaults to C++11, so a TFLM build compiled at
+        # -std=c++11 fails.  Emit C++17 here whenever inference (TFLM) is
+        # wanted so every inference project builds without hand-editing:
+        # real NPU apps previously set CONFIG_STD_CPP17=y in their own
+        # prj.conf; the emit now guarantees it on every platform (native_sim
+        # + real silicon alike), matching what the AEN NPU builds already use.
+        "CONFIG_STD_CPP17=y",
         "CONFIG_TENSORFLOW_LITE_MICRO=y",
         "CONFIG_ALP_SDK_INFERENCE_BACKEND_TFLM=y",
     ]

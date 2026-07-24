@@ -42,9 +42,15 @@
  * kernel set) gets cross-checked at compile time via the
  * INFERENCE_ETHOS_U_VARIANT_* Kconfigs.
  *
- * Native-sim builds skip CONFIG_TENSORFLOW_LITE_MICRO so this
- * TU is excluded from that build; the dispatcher falls back to
- * sw_fallback (priority 0, returns NOSUPPORT).
+ * This TU compiles whenever CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN
+ * is set (an AEN-family emit with the tflite-micro module present) --
+ * including under native_sim on an alp-sdk-topdir workspace, where the
+ * Ethos-U op registers against the module's stub Register_ETHOSU().  A
+ * bare upstream-`zephyr` workspace without the module degrades
+ * TENSORFLOW_LITE_MICRO to n, so BACKEND_TFLM (and this backend) drop out
+ * and the dispatcher falls back to sw_fallback (priority 0, NOSUPPORT).
+ * Real Ethos-U acceleration needs CONFIG_ETHOS_U + the hal_ethos_u driver
+ * on AEN silicon.
  */
 
 #include <stddef.h>

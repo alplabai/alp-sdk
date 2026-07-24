@@ -224,6 +224,20 @@ manifest:
           # CONFIG_ALP_SDK_INFERENCE_TFLM=y just work; the module
           # is small enough that the cost-of-presence is negligible.
           - tflite-micro
+          # hal_ethos_u is Arm's Ethos-U NPU driver (ethosu_driver +
+          # the arm,ethos-u Zephyr device).  Without it CONFIG_ETHOS_U
+          # is never DEFINED, so tflite-micro silently compiles its STUB
+          # Register_ETHOSU() (returns nullptr) instead of the real
+          # NPU kernel -- every Ethos-U inference then open()s fine but
+          # fails at invoke, never reaching the E8 NPU (and the raw
+          # DEVICE_DT_GET(ethosu_npu) apps fail to link on the absent
+          # __device_dts_ord_33).  Pulling it in makes CONFIG_ETHOS_U /
+          # CONFIG_ETHOS_U_ARM build for real so the Ethos-U55/U85 on
+          # the AEN family is actually dispatchable through the SDK.
+          # (An alp-sdk-topdir workspace set up before this entry needs
+          # a `west update` before it builds -- same as the littlefs
+          # note above.)
+          - hal_ethos_u
           # zcbor backs the `.alpmodel` container reader
           # (CONFIG_ALP_SDK_MODEL_READER selects CONFIG_ZCBOR).
           # Without this allowlist entry an alp-sdk-topdir workspace
