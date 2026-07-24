@@ -134,3 +134,28 @@ def test_alp_model_build_json_emits_targets_and_coverage(tmp_path):
     assert len(cpu) == 1 and cpu[0]["blob_bytes"] > 0
     # ethos_u is a declared AEN801 target; without vela on PATH it is a skip.
     assert all(s["status"] in ("skipped", "incompatible") for s in model["skipped"])
+
+
+def test_alp_model_list_reports_artifact_status(tmp_path):
+    (tmp_path / "models").mkdir()
+    (tmp_path / "models" / "m.tflite").write_bytes(b"TFL3xxxx")
+    (tmp_path / "board.yaml").write_text(
+        "name: demo\n"
+        "som:\n  sku: E1M-AEN801\n"
+        "cores: {}\n"
+        "models:\n  - name: demo\n    source: models/m.tflite\n",
+        encoding="utf-8")
+    out = tmp_path / "build" / "models"
+    out.mkdir(parents=True)
+    (out / "demo.alpmodel").write_bytes(b"ALPM....")   # newer than source
+    result = CliRunner().invoke(cli, [
+        "model", "list",
+        "--board", str(tmp_path / "board.yaml"),
+        "--out", str(out),
+        "--format", "json",
+    ], catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    m = _json.loads(result.output)["models"][0]
+    assert m["name"] == "demo"
+    assert m["artifact"]["exists"] is True
+    assert m["artifact"]["stale"] is False

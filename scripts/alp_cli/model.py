@@ -94,3 +94,35 @@ def build_cmd(board_path: Path, out_dir: Path, metadata_root: Path,
     click.echo(json.dumps({"models": entries}, indent=2))
     if failed:
         raise SystemExit(1)
+
+
+@model_group.command(name="list", help="List board.yaml models: + built .alpmodel status.")
+@click.option("--board", "board_path", type=click.Path(exists=True, path_type=Path),
+              default=Path("board.yaml"), show_default=True, help="Path to board.yaml.")
+@click.option("--out", "out_dir", type=click.Path(path_type=Path),
+              default=Path("build/models"), show_default=True, help="Build output directory.")
+@click.option("--format", "output_format", type=click.Choice(["human", "json"]),
+              default="human", show_default=True)
+def list_cmd(board_path: Path, out_dir: Path, output_format: str) -> None:
+    board = yaml.safe_load(board_path.read_text(encoding="utf-8"))
+    base = board_path.parent
+    entries: list[dict] = []
+    for m in board.get("models", []):
+        source = (base / m["source"]).resolve()
+        artifact = out_dir / f"{m['name']}.alpmodel"
+        exists = artifact.is_file()
+        stale = bool(exists and source.is_file()
+                     and source.stat().st_mtime > artifact.stat().st_mtime)
+        entries.append({
+            "name": m["name"], "source": m["source"], "compile": m.get("compile"),
+            "artifact": {"exists": exists, "path": str(artifact.resolve()),
+                         "bytes": artifact.stat().st_size if exists else 0,
+                         "stale": stale},
+        })
+    if output_format == "json":
+        click.echo(json.dumps({"models": entries}, indent=2))
+    else:
+        for e in entries:
+            a = e["artifact"]
+            state = "missing" if not a["exists"] else ("stale" if a["stale"] else "built")
+            click.echo(f"{e['name']:20} {state:8} {e['source']}")
