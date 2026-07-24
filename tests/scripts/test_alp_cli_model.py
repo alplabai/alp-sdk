@@ -591,3 +591,64 @@ def test_model_prep_non_onnx_errors_cleanly(tmp_path):
     res = CliRunner().invoke(cli, ["model", "prep", str(raw), "--calibration", str(cal)])
     assert res.exit_code == 1
     assert "onnx" in res.output.lower()
+
+
+def test_model_run_host_json(tmp_path):
+    import json
+    import numpy as np
+    import pytest as _pytest
+    _pytest.importorskip("onnxruntime")
+    from click.testing import CliRunner
+    from alp_cli.main import cli
+    x = tmp_path / "in.npy"
+    np.save(x, np.random.default_rng(0).standard_normal((1, 3, 224, 224)).astype(np.float32))
+    raw = _ROOT / "tests/fixtures/models/tiny_cnn.onnx"
+    res = CliRunner().invoke(cli, ["model", "run", str(raw), "--input", str(x),
+                                   "--runs", "3", "--format", "json"],
+                             catch_exceptions=False)
+    assert res.exit_code == 0, res.output
+    p = json.loads(res.output)
+    assert p["backend"] == "cpu-host" and p["latency_ms"] > 0
+    assert p["power_mj"] is None and p["random_input"] is False
+
+
+def test_model_ab_json(tmp_path):
+    import json
+    import numpy as np
+    import pytest as _pytest
+    _pytest.importorskip("onnxruntime")
+    from click.testing import CliRunner
+    from alp_cli.main import cli
+    x = tmp_path / "in.npy"
+    np.save(x, np.random.default_rng(0).standard_normal((1, 3, 224, 224)).astype(np.float32))
+    raw = str(_ROOT / "tests/fixtures/models/tiny_cnn.onnx")
+    res = CliRunner().invoke(cli, ["model", "ab", raw, raw, "--input", str(x),
+                                   "--runs", "3", "--format", "json"],
+                             catch_exceptions=False)
+    assert res.exit_code == 0, res.output
+    p = json.loads(res.output)
+    assert p["comparison"]["faster"] in ("a", "b", "tie")
+    assert p["comparison"]["size_delta_bytes"] == 0     # same file
+
+
+def test_model_run_malformed_onnx_errors_cleanly(tmp_path):
+    import pytest as _pytest
+    _pytest.importorskip("onnxruntime")
+    from click.testing import CliRunner
+    from alp_cli.main import cli
+    bogus = tmp_path / "bogus.onnx"
+    bogus.write_bytes(b"not a real onnx file")
+    res = CliRunner().invoke(cli, ["model", "run", str(bogus), "--runs", "3"],
+                             catch_exceptions=True)
+    assert res.exit_code == 1
+    assert "Traceback" not in res.output
+    assert "error:" in res.output
+
+
+def test_model_ab_non_onnx_errors():
+    from click.testing import CliRunner
+    from alp_cli.main import cli
+    tflite = str(_ROOT / "tests/fixtures/models/tiny_int8.tflite")
+    onnx = str(_ROOT / "tests/fixtures/models/tiny_cnn.onnx")
+    res = CliRunner().invoke(cli, ["model", "ab", tflite, onnx])
+    assert res.exit_code == 1

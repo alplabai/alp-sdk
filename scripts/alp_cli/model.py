@@ -5,10 +5,12 @@ import json
 from pathlib import Path
 
 import click
+import numpy as np
 import yaml
 
 from alp_model.analyze import UnsupportedModelError, analyze_model
 from alp_model.build import build_model, _ADAPTERS
+from alp_model.measure import MeasureError, accuracy_vs, compare, default_input, run_host
 from alp_model.package import read_package
 from alp_model.prep import PrepError, accuracy_delta, quantize, validate_calibration
 from alp_model.targets import resolve_targets
@@ -404,6 +406,87 @@ def prep_cmd(raw: Path, cal_dir: Path, out: Path | None, per_channel: bool,
                f"cosine={rep.mean_cosine}  max_abs_err={rep.max_abs_err}  (n={rep.samples})")
     if rep.guidance:
         click.echo(f"guidance: {rep.guidance}")
+
+
+_HOST_NOTE = ("host reference run (backend=cpu-host): functional + host latency, "
+              "NOT the target SoM. On-device latency/SRAM/power is the HW-gated follow-on.")
+
+
+@model_group.command(name="run", help="Host reference run of a model (functional + host latency + accuracy).")
+@click.argument("model", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--input", "input_path", default=None, type=click.Path(exists=True, path_type=Path),
+              help="Input sample .npy (default: deterministic random matching the model input).")
+@click.option("--expected", default=None, type=int, help="Expected class label (top-1 accuracy check).")
+@click.option("--runs", default=20, show_default=True, help="Timed inference count (median latency).")
+@click.option("--format", "fmt", type=click.Choice(["human", "json"]), default="human")
+def run_cmd(model: Path, input_path: Path | None, expected: int | None, runs: int, fmt: str) -> None:
+    if model.suffix.lower() != ".onnx":
+        click.echo(f"error: model run supports .onnx in this release; got {model.name}", err=True)
+        raise SystemExit(1)
+    random_input = input_path is None
+    try:
+        x = (np.load(input_path).astype(np.float32) if input_path is not None
+             else default_input(model))
+        r = run_host(model, x, runs=runs)
+    except MeasureError as exc:
+        click.echo(f"error: {exc}", err=True)
+        raise SystemExit(1)
+    payload = {"model": str(model), "backend": r.backend, "latency_ms": r.latency_ms,
+               "output_argmax": r.output_argmax, "peak_sram_kib": r.peak_sram_kib,
+               "power_mj": r.power_mj, "runs": r.runs, "random_input": random_input,
+               "note": _HOST_NOTE}
+    if expected is not None:
+        payload["accuracy"] = {"expected": expected, "match": accuracy_vs(r.output_argmax, expected)}
+    if fmt == "json":
+        click.echo(json.dumps(payload, indent=2))
+        return
+    click.echo(f"model: {model}")
+    click.echo(f"  [{r.backend}] latency {r.latency_ms} ms (median of {r.runs})  "
+               f"argmax {r.output_argmax}  sram {r.peak_sram_kib}  power {r.power_mj}")
+    if expected is not None:
+        click.echo(f"  accuracy: top1 {'MATCH' if payload['accuracy']['match'] else 'MISS'} (expected {expected})")
+    click.echo(f"  note: {_HOST_NOTE}")
+
+
+@model_group.command(name="ab", help="A/B two models on the same input (host reference): latency + size.")
+@click.argument("model_a", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.argument("model_b", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--input", "input_path", default=None, type=click.Path(exists=True, path_type=Path),
+              help="Shared input sample .npy (default: deterministic random matching model_a's input).")
+@click.option("--runs", default=20, show_default=True)
+@click.option("--format", "fmt", type=click.Choice(["human", "json"]), default="human")
+def ab_cmd(model_a: Path, model_b: Path, input_path: Path | None, runs: int, fmt: str) -> None:
+    for m in (model_a, model_b):
+        if m.suffix.lower() != ".onnx":
+            click.echo(f"error: model ab supports .onnx in this release; got {m.name}", err=True)
+            raise SystemExit(1)
+    try:
+        x = (np.load(input_path).astype(np.float32) if input_path is not None
+             else default_input(model_a))
+        ra = run_host(model_a, x, runs=runs)
+        rb = run_host(model_b, x, runs=runs)
+    except MeasureError as exc:
+        click.echo(f"error: {exc}", err=True)
+        raise SystemExit(1)
+    cmp = compare(ra, rb, size_a=model_a.stat().st_size, size_b=model_b.stat().st_size)
+
+    def _run(r: "object") -> dict:
+        return {"backend": r.backend, "latency_ms": r.latency_ms,
+                "output_argmax": r.output_argmax, "runs": r.runs,
+                "peak_sram_kib": r.peak_sram_kib, "power_mj": r.power_mj}
+
+    payload = {"a": {"model": str(model_a), **_run(ra)}, "b": {"model": str(model_b), **_run(rb)},
+               "comparison": {"faster": cmp.faster, "latency_ratio": cmp.latency_ratio,
+                              "a_latency_ms": cmp.a_latency_ms, "b_latency_ms": cmp.b_latency_ms,
+                              "size_delta_bytes": cmp.size_delta_bytes},
+               "note": _HOST_NOTE}
+    if fmt == "json":
+        click.echo(json.dumps(payload, indent=2))
+        return
+    click.echo(f"A {model_a.name}: {ra.latency_ms} ms   B {model_b.name}: {rb.latency_ms} ms")
+    click.echo(f"  faster: {cmp.faster}  (B/A latency x{cmp.latency_ratio})  "
+               f"size delta {cmp.size_delta_bytes} B")
+    click.echo(f"  note: {_HOST_NOTE}")
 
 
 @model_group.command(name="doctor", help="Report installed NPU compiler toolchains.")
