@@ -56,6 +56,7 @@ static void test_jpeg_resolves_sw_baseline_not_stub(void)
 	alp_jpeg_encode_req_t req     = {
 		.width     = 16,
 		.height    = 16,
+		.format    = ALP_PIXFMT_YUV420_PLANAR,
 		.subsample = ALP_JPEG_SUBSAMPLE_420,
 		.quality   = 80,
 		.y_plane   = y,

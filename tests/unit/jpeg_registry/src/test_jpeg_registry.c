@@ -35,9 +35,11 @@ ZTEST(jpeg_registry, test_open_then_close_stub)
 
 	uint8_t               out[16];
 	size_t                out_len = 0;
-	alp_jpeg_encode_req_t req     = {
-		.width = 16, .height = 16, .subsample = ALP_JPEG_SUBSAMPLE_420, .quality = 75
-	};
+	alp_jpeg_encode_req_t req     = { .width     = 16,
+		                              .height    = 16,
+		                              .format    = ALP_PIXFMT_YUV420_PLANAR,
+		                              .subsample = ALP_JPEG_SUBSAMPLE_420,
+		                              .quality   = 75 };
 	/* No y/u/v planes supplied -- sw_baseline rejects with INVAL. */
 	zassert_equal(alp_jpeg_encode(h, &req, out, sizeof(out), &out_len), ALP_ERR_INVAL);
 
@@ -70,6 +72,7 @@ ZTEST(jpeg_registry, test_sw_baseline_encodes_valid_jpeg)
 	alp_jpeg_encode_req_t req     = {
 		.width     = 16,
 		.height    = 16,
+		.format    = ALP_PIXFMT_YUV420_PLANAR,
 		.subsample = ALP_JPEG_SUBSAMPLE_420,
 		.quality   = 80,
 		.y_plane   = y,
@@ -114,6 +117,7 @@ ZTEST(jpeg_registry, test_sw_baseline_overflow_returns_nomem)
 	alp_jpeg_encode_req_t req     = {
 		.width     = 16,
 		.height    = 16,
+		.format    = ALP_PIXFMT_YUV420_PLANAR,
 		.subsample = ALP_JPEG_SUBSAMPLE_420,
 		.quality   = 80,
 		.y_plane   = y,
@@ -143,6 +147,7 @@ ZTEST(jpeg_registry, test_sw_baseline_encodes_mono_400)
 	alp_jpeg_encode_req_t req     = {
 		.width     = 8,
 		.height    = 8,
+		.format    = ALP_PIXFMT_YUV420_PLANAR,
 		.subsample = ALP_JPEG_SUBSAMPLE_400,
 		.quality   = 80,
 		.y_plane   = y,
@@ -182,6 +187,7 @@ ZTEST(jpeg_registry, test_sw_baseline_marker_structure_well_ordered)
 	alp_jpeg_encode_req_t req     = {
 		.width     = 16,
 		.height    = 16,
+		.format    = ALP_PIXFMT_YUV420_PLANAR,
 		.subsample = ALP_JPEG_SUBSAMPLE_420,
 		.quality   = 80,
 		.y_plane   = y,

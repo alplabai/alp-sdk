@@ -29,17 +29,23 @@
  * semi-planar 4:2:0 (NV12/NV21 -- one Y plane immediately followed, at
  * `pitch * height`, by an interleaved UV plane); it latches a SINGLE
  * base pointer for the whole frame.  The portable <alp/jpeg.h> request
- * carries separate y_plane/u_plane/v_plane pointers (fully planar) with
- * no HW equivalent here, so this backend only accepts
- * ALP_JPEG_SUBSAMPLE_420 and treats req->y_plane as the base of an
- * already-NV12-laid-out buffer; req->u_plane/v_plane are NOT consulted.
- * Callers that need genuine planar Y/U/V on this SoM fall back to
- * sw_baseline (priority 50) via an explicit backend pick, or lay their
- * frame out as NV12 to reach the hardware path.
+ * now makes this explicit via req->format (@ref ALP_PIXFMT_NV12,
+ * <alp/peripheral.h>): this backend only accepts that format and treats
+ * req->y_plane as the base of the already-NV12-laid-out buffer;
+ * req->u_plane/v_plane are NOT consulted (NV12's interleaved U/V plane
+ * lives inside the same y_plane allocation -- see the struct doc on
+ * alp_jpeg_encode_req_t in <alp/jpeg.h>).  Callers that need genuine
+ * planar Y/U/V on this SoM fall back to sw_baseline (priority 50) via
+ * an explicit backend pick, or lay their frame out as NV12 to reach the
+ * hardware path.
  *
  * ADR 0017 Tier-2 (interim; see jpeg_hantro_vc9000e.c for the retirement
- * note).  vendor-ext.  BENCH-PENDING: build-only proof this task, no
- * AEN801 silicon run yet.
+ * note).  vendor-ext.  A real AEN801 bench run proved JPEG_SWREG0 reads
+ * back JPEG_HW_ID (0x90001000) and the driver inits on HW, then hit a
+ * MemManage fault in jpeg_header_generation() from the output-buffer
+ * handoff below -- fixed this batch (video_import_buffer(), see
+ * hantro_encode()).  RE-BENCH-PENDING: the fix is build+link-verified
+ * only; the real proof is the next AEN801 silicon run.
  */
 
 #if defined(CONFIG_ALP_SDK_JPEG_ALIF_HANTRO)
@@ -53,6 +59,7 @@
 #include <zephyr/drivers/video/video_alif.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/util.h>
+#include <zephyr/video/video.h> /* video_import_buffer() -- see hantro_encode(). */
 
 #include <alp/backend.h>
 #include <alp/jpeg.h>
@@ -107,6 +114,7 @@ static alp_status_t _errno_to_alp(int err)
 	case -EIO:
 		return ALP_ERR_IO;
 	case -ENOSPC:
+	case -ENOBUFS:
 		return ALP_ERR_NOMEM;
 	case -ENOTSUP:
 	case -ENOSYS:
@@ -158,6 +166,10 @@ static alp_status_t hantro_open(const alp_jpeg_config_t  *cfg,
 		 * constraint.  Do NOT also advertise _400/_422: the driver's
 		 * format_caps table lists only NV12/NV21. */
 		.subsample_mask = (1u << ALP_JPEG_SUBSAMPLE_420),
+		/* Only layout this HW block understands -- see the file-header
+		 * note; ALP_PIXFMT_YUV420_PLANAR (fully-planar) has no HW
+		 * equivalent here. */
+		.pixfmt_mask = (1u << ALP_PIXFMT_NV12),
 	};
 
 	state->be_data = st;
@@ -174,7 +186,7 @@ static alp_status_t hantro_encode(alp_jpeg_backend_state_t    *state,
 	if (st == NULL) {
 		return ALP_ERR_NOT_READY;
 	}
-	if (req->subsample != ALP_JPEG_SUBSAMPLE_420 || req->y_plane == NULL) {
+	if (req->format != ALP_PIXFMT_NV12 || req->y_plane == NULL) {
 		return ALP_ERR_NOSUPPORT;
 	}
 
@@ -212,24 +224,59 @@ static alp_status_t hantro_encode(alp_jpeg_backend_state_t    *state,
 		return _errno_to_alp(err);
 	}
 
-	/* bytesused primes JPEG_SWREG9 (the HW output-size-limit register,
-	 * see jpeg_start_encode()) with the caller's buffer capacity; the
-	 * driver overwrites it with the real encoded length before this
-	 * same struct comes back out of video_dequeue(). */
+	/*
+	 * Output-buffer handoff (fixes the silicon MPU fault: MMFAR=0x0,
+	 * PC=jpeg_header_generation).  This v4.4 video subsystem's
+	 * video_enqueue() (drivers/video/video_common.c) does NOT forward a
+	 * caller's `struct video_buffer` to the driver: it copies only
+	 * .type into ITS OWN framework-owned pool slot video_buf[buf->index]
+	 * and hands the driver *that* struct instead.  The previous code
+	 * built a plain stack-local video_buffer with .buffer=out_buf and
+	 * an unset (so 0-defaulted) .index -- nothing had ever populated
+	 * pool slot 0's .buffer, so the driver's jpeg_start_encode() read
+	 * buf->buffer == NULL and faulted inside jpeg_header_generation().
+	 *
+	 * video_import_buffer() (<zephyr/video/video.h>) is the framework's
+	 * supported way to hand it a caller-owned pointer without a copy:
+	 * it claims a free pool slot, marks it VIDEO_MEMORY_EXTERNAL (so
+	 * video_buffer_release() below frees the SLOT, not our caller's
+	 * out_buf memory), and points that slot's .buffer at out_buf. Only
+	 * .index / .type then need to travel through the local vbuf --
+	 * .buffer/.size are already live on the pool slot the driver reads.
+	 */
+	uint16_t out_idx;
+	err = video_import_buffer((uint8_t *)out_buf, out_cap, &out_idx);
+	if (err != 0) {
+		return _errno_to_alp(err);
+	}
+
+	/* ponytail: video_import_buffer() also resets the pool slot's
+	 * .bytesused to 0, and jpeg_start_encode() (the driver) latches
+	 * THAT field into JPEG_SWREG9 (the HW output-size-limit register)
+	 * before triggering the encode -- there is no public video_* call
+	 * to prime it to out_cap pre-enqueue.  Unconfirmed whether the HW
+	 * actually enforces a 0 limit as an immediate overflow (native_sim
+	 * only exercises sw_baseline, never this backend); watch for a
+	 * spurious ALP_ERR_NOMEM (JPEG_BUFFER_FULL) on the next AEN801
+	 * re-bench even after this fix. */
 	struct video_buffer vbuf = {
-		.type      = VIDEO_BUF_TYPE_OUTPUT,
-		.buffer    = (uint8_t *)out_buf,
-		.size      = (uint32_t)out_cap,
-		.bytesused = (uint32_t)out_cap,
+		.type  = VIDEO_BUF_TYPE_OUTPUT,
+		.index = out_idx,
 	};
 	err = video_enqueue(st->dev, &vbuf);
 	if (err != 0) {
+		(void)video_buffer_release(&vbuf); /* never reached the driver -- reclaim the slot. */
 		return _errno_to_alp(err);
 	}
 
 	if (!st->streaming) {
 		err = video_stream_start(st->dev, VIDEO_BUF_TYPE_OUTPUT);
 		if (err != 0) {
+			/* The imported slot is already latched into the driver's
+			 * data->current_buf; releasing it here would race the
+			 * driver's own view of the same struct, so it is
+			 * intentionally left held on this error path -- see the
+			 * repeat-encode caveat below hantro_encode(). */
 			return _errno_to_alp(err);
 		}
 		st->streaming = true;
@@ -244,15 +291,40 @@ static alp_status_t hantro_encode(alp_jpeg_backend_state_t    *state,
 	struct video_buffer *done       = NULL;
 	err                             = video_dequeue(st->dev, &done, K_MSEC(timeout_ms));
 	if (err != 0) {
+		/* Timeout/error: the driver may still reference data->current_buf
+		 * (dequeue only clears it on a clean return), so the pool slot is
+		 * left held here too -- same single-encode-validated caveat. */
 		return _errno_to_alp(err);
 	}
-	if (done == NULL || done->bytesused > out_cap) {
+	if (done == NULL) {
+		return ALP_ERR_NOMEM;
+	}
+	if (done->bytesused > out_cap) {
+		*out_len = done->bytesused; /* required size, when known -- see jpeg.h. */
+		(void)video_buffer_release(done);
 		return ALP_ERR_NOMEM;
 	}
 
 	*out_len = done->bytesused;
+	(void)video_buffer_release(
+	    done); /* clean success: reclaim the pool slot for the next encode. */
 	return ALP_OK;
 }
+
+/*
+ * ponytail: repeat-encode caveat.  st->streaming is latched true on the
+ * FIRST successful call and never reset, so a second alp_jpeg_encode()
+ * on this handle skips video_stream_start() and goes straight to
+ * video_enqueue() -- untested (this backend is single-encode-validated
+ * on real silicon so far).  If the driver ever rejects a mid-stream
+ * video_set_format() with -EBUSY (format change between two encodes on
+ * an already-streaming device), that surfaces as ALP_ERR_BUSY from this
+ * function rather than a silent misencode -- a caller doing repeat
+ * encodes at a FIXED width/height/format is unaffected.  Upgrade path:
+ * stop+restart streaming per encode (or per format change) if a real
+ * multi-encode workload needs it; not done here to avoid guessing at
+ * the driver's actual re-arm behaviour without a bench to check it against.
+ */
 
 static void hantro_close(alp_jpeg_backend_state_t *state)
 {

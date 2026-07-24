@@ -35,12 +35,24 @@
 extern "C" {
 #endif
 
-/** Pixel format shared by the display and camera APIs. */
+/**
+ * @brief Pixel format shared by the display, camera, and JPEG-encoder APIs.
+ *
+ * @ref ALP_PIXFMT_YUV420_PLANAR and @ref ALP_PIXFMT_NV12 were appended
+ * (new numeric values after @ref ALP_PIXFMT_ARGB8888) for <alp/jpeg.h>'s
+ * @c alp_jpeg_encode_req_t::format -- existing values are unchanged, so
+ * this stays ABI-safe for every display/camera caller already switching
+ * on this enum.
+ */
 typedef enum {
 	ALP_PIXFMT_MONO_VLSB = 0, /**< 1 bpp, vertical bytes (SSD1306 native). */
 	ALP_PIXFMT_RGB565    = 1,
 	ALP_PIXFMT_RGB888    = 2,
-	ALP_PIXFMT_ARGB8888  = 3
+	ALP_PIXFMT_ARGB8888  = 3,
+	ALP_PIXFMT_YUV420_PLANAR =
+	    4, /**< I420: separate Y, U, V planes, each its own base pointer + stride (4:2:0). */
+	ALP_PIXFMT_NV12 =
+	    5, /**< Semi-planar 4:2:0: one Y plane immediately followed by one interleaved U/V plane. */
 } alp_pixfmt_t;
 
 /** Status codes returned by ALP peripheral functions. */

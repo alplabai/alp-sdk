@@ -7,19 +7,27 @@
  * @file jpeg.h
  * @brief Alp SDK portable JPEG-encoder abstraction.
  *
- * Encodes a planar Y/U/V frame into a JPEG byte stream in one call.
- * Maps to the Alif Ensemble E8's Hantro JPEG hardware encoder on
- * AEN-family SoMs; every other SoM is served by a portable software
- * encoder fallback so customer code compiles + runs identically
- * across silicon.
+ * Encodes a source frame into a JPEG byte stream in one call.  The
+ * caller declares the frame's buffer LAYOUT via
+ * @c alp_jpeg_encode_req_t::format (@ref alp_pixfmt_t) -- fully-planar
+ * Y/U/V or semi-planar NV12, see the struct doc.  Maps to the Alif
+ * Ensemble E8's Hantro JPEG hardware encoder on AEN-family SoMs; every
+ * other SoM is served by a portable software encoder fallback so
+ * customer code compiles + runs identically across silicon (each
+ * backend accepts a different subset of layouts -- query
+ * @ref alp_jpeg_caps_t::pixfmt_mask rather than assuming one).
  *
  * Task 1 of the encoder rollout shipped only the portable surface, the
  * class dispatcher, and a NOT_IMPLEMENTED stub backend.  Task 2 adds a
  * portable software baseline-JPEG encoder (4:2:0 + 4:0:0 only,
  * `src/backends/jpeg/sw_baseline.c`) that now wins backend selection
  * on every SoM without JPEG hardware, so @ref alp_jpeg_encode actually
- * encodes out of the box; the Alif Ensemble E8 Hantro VC9000E hardware
- * backend (Tasks 3-4) will outrank it on AEN silicon once it lands.
+ * encodes out of the box.  Tasks 3-4 add the Alif Ensemble E8 Hantro
+ * VC9000E hardware backend (`src/backends/jpeg/alif_hantro.c`), which
+ * outranks the software backend on AEN silicon, plus the explicit
+ * @c format field so the two backends' differing buffer-layout needs
+ * (planar vs. NV12) are a declared part of the request instead of an
+ * implicit per-backend reinterpretation of the same pointers.
  *
  * @par ABI status: [ABI-EXPERIMENTAL]
  *      v0.13 new -- portable surface + stub (Task 1), then the
@@ -72,21 +80,46 @@ typedef struct {
 	((alp_jpeg_config_t){ .engine_id = 0u, .max_width = 0u, .max_height = 0u })
 
 /**
- * @brief One encode request: a planar Y/U/V frame plus quality target.
+ * @brief One encode request: a source frame plus quality target.
  *
+ * @c format (@ref alp_pixfmt_t) selects the source buffer's memory
+ * LAYOUT -- which of @c y_plane / @c u_plane / @c v_plane are live, and
+ * how they relate to each other:
+ *
+ *   - @ref ALP_PIXFMT_YUV420_PLANAR (I420) -- fully planar: @c y_plane /
+ *     @c u_plane / @c v_plane are three independent buffers, each with
+ *     its own stride.  This is what the portable software backend
+ *     (src/backends/jpeg/sw_baseline.c) consumes.
+ *   - @ref ALP_PIXFMT_NV12 -- semi-planar: @c y_plane is the base of a
+ *     single contiguous buffer (Y plane, then at @c y_stride * @c height
+ *     an interleaved U/V plane); @c u_plane / @c v_plane are NOT
+ *     consulted and must be NULL.  This is what the Alif Hantro VC9000E
+ *     hardware backend (src/backends/jpeg/alif_hantro.c) latches as its
+ *     single raw-frame pointer.
+ *
+ * @c subsample stays a SEPARATE field from @c format on purpose: it is
+ * the chroma SAMPLING RATIO (4:0:0 mono / 4:2:0 / 4:2:2) a backend
+ * encodes at, orthogonal to which buffer LAYOUT carries the samples in.
+ * Both currently-registered pixel formats happen to be 4:2:0-only, but
+ * collapsing the two fields would force inventing @ref alp_pixfmt_t
+ * values for "mono, planar layout" and "4:2:2, planar layout" that
+ * <alp/peripheral.h>'s display/camera callers have no use for -- @c
+ * format only needs to grow when a new BUFFER LAYOUT shows up, @c
+ * subsample only needs to grow when a new SAMPLING RATIO shows up.
  * @c u_plane / @c v_plane are unused (and must be NULL) when
- * @c subsample is @ref ALP_JPEG_SUBSAMPLE_400.
+ * @c subsample is @ref ALP_JPEG_SUBSAMPLE_400, independent of @c format.
  */
 typedef struct {
 	uint16_t             width;  /**< 8..16384. */
 	uint16_t             height; /**< 8..16384. */
+	alp_pixfmt_t         format; /**< Source buffer layout -- see the struct doc above. */
 	alp_jpeg_subsample_t subsample;
 	uint8_t              quality; /**< 1..100. */
 	const void          *y_plane;
 	uint32_t             y_stride;
-	const void          *u_plane; /**< NULL when subsample is _400. */
+	const void          *u_plane; /**< NULL when subsample is _400, or format is _NV12. */
 	uint32_t             u_stride;
-	const void          *v_plane; /**< NULL when subsample is _400. */
+	const void          *v_plane; /**< NULL when subsample is _400, or format is _NV12. */
 	uint32_t             v_stride;
 } alp_jpeg_encode_req_t;
 
@@ -97,6 +130,8 @@ typedef struct {
 	uint16_t max_width;
 	uint16_t max_height;
 	uint32_t subsample_mask; /**< bit i set => (1u<<ALP_JPEG_SUBSAMPLE_x) supported. */
+	uint32_t pixfmt_mask;    /**< bit i set => (1u<<ALP_PIXFMT_x) accepted as @c
+	                          *   alp_jpeg_encode_req_t::format by this backend. */
 } alp_jpeg_caps_t;
 
 /**
@@ -113,11 +148,13 @@ typedef struct {
 alp_jpeg_t *alp_jpeg_open(const alp_jpeg_config_t *cfg);
 
 /**
- * @brief Encode one planar Y/U/V frame into a JPEG byte stream.
+ * @brief Encode one source frame into a JPEG byte stream.
  *
  * @param[in]  h         Handle from @ref alp_jpeg_open.
  * @param[in]  req       Frame + quality descriptor.  Must be non-NULL,
- *                       with non-zero @c width / @c height.
+ *                       with non-zero @c width / @c height and a
+ *                       @c format the opened backend's
+ *                       @ref alp_jpeg_caps_t::pixfmt_mask advertises.
  * @param[out] out_buf   Destination buffer for the encoded stream.
  * @param[in]  out_cap   Capacity of @p out_buf, in bytes.
  * @param[out] out_len   Receives the encoded length on success; on
@@ -127,7 +164,8 @@ alp_jpeg_t *alp_jpeg_open(const alp_jpeg_config_t *cfg);
  * @return @ref ALP_OK on success, or one of:
  *         - @ref ALP_ERR_INVAL -- NULL @p h / @p req / @p out_buf /
  *           @p out_len, or a zero @c width / @c height.
- *         - @ref ALP_ERR_NOSUPPORT -- subsampling the backend can't do.
+ *         - @ref ALP_ERR_NOSUPPORT -- @c format or @c subsample the
+ *           backend can't do.
  *         - @ref ALP_ERR_NOMEM -- @p out_cap too small for the result.
  *         - @ref ALP_ERR_IO -- hardware-engine fault.
  *         - @ref ALP_ERR_NOT_IMPLEMENTED -- backend has no encode path.

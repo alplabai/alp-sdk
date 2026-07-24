@@ -35,6 +35,10 @@ sw_open(const alp_jpeg_config_t *cfg, alp_jpeg_backend_state_t *state, alp_jpeg_
 		.max_width       = 16384u,
 		.max_height      = 16384u,
 		.subsample_mask  = (1u << ALP_JPEG_SUBSAMPLE_400) | (1u << ALP_JPEG_SUBSAMPLE_420),
+		/* Only layout this backend understands: real fully-planar Y/U/V
+		 * (also covers subsample _400 -- a mono frame is just this same
+		 * layout with u_plane/v_plane NULL, not a distinct pixfmt). */
+		.pixfmt_mask = (1u << ALP_PIXFMT_YUV420_PLANAR),
 	};
 	return ALP_OK;
 }
@@ -47,6 +51,9 @@ static alp_status_t sw_encode(alp_jpeg_backend_state_t    *state,
 {
 	(void)state;
 
+	if (req->format != ALP_PIXFMT_YUV420_PLANAR) {
+		return ALP_ERR_NOSUPPORT;
+	}
 	if (req->subsample == ALP_JPEG_SUBSAMPLE_422) {
 		return ALP_ERR_NOSUPPORT;
 	}

@@ -7,6 +7,53 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.13.0 candidate
 
+### Fixed — `<alp/jpeg.h>` portable input-pixelformat contract + AEN801 HW-backend bench fallout
+
+- A real AEN801 silicon bench run on the Task-3/4 Hantro VC9000E hardware
+  backend (`src/backends/jpeg/alif_hantro.c`) proved the HW path is alive
+  (`JPEG_SWREG0` reads back `JPEG_HW_ID` `0x90001000`) and found two
+  defects plus a maintainer-approved API redesign, all landed together:
+  - **Portable pixelformat contract** (`[ABI-EXPERIMENTAL]`; ABI snapshot
+    diff verified additive-only): `alp_jpeg_encode_req_t` documented a
+    planar Y/U/V frame, `sw_baseline.c` consumed true planar, but
+    `alif_hantro.c` silently reinterpreted `y_plane` as NV12 -- a
+    portability-contract break with no type-level signal. `<alp/peripheral.h>`
+    (`[ABI-STABLE]`, additive) gains `ALP_PIXFMT_YUV420_PLANAR` /
+    `ALP_PIXFMT_NV12` appended to `alp_pixfmt_t` (existing values
+    unchanged); `alp_jpeg_encode_req_t` gains an explicit `format` field
+    and `alp_jpeg_caps_t` gains `pixfmt_mask` so a backend declares which
+    layout(s) it accepts instead of an app guessing from `CONFIG_*`.
+    `subsample` is kept as a separate field (chroma sampling ratio,
+    orthogonal to buffer layout) rather than folded into `format` --
+    collapsing them would force inventing pixfmt values for "mono,
+    planar" / "4:2:2, planar" that no display/camera caller needs.
+  - **Defect #1**: `examples/aen/aen-jpeg-regcheck/prj.conf` was missing
+    `CONFIG_ALP_SOC_ALIF_ENSEMBLE_E8=y`. Without it the build resolved
+    `ALP_SOC_REF_STR="unknown"`, the backend selector filtered
+    `alif_hantro` (`silicon_ref="alif:ensemble:e8"`) out, and
+    `sw_baseline` silently won instead -- the example built and ran but
+    never touched the hardware it claimed to validate.
+  - **Defect #2 (correctness-critical)**: the HW encode MemManage-faulted
+    on real silicon (`MMFAR=0x0`, PC in `jpeg_header_generation`). Root
+    cause: the ported Zephyr v4.4 video subsystem's `video_enqueue()`
+    does not forward a caller's `struct video_buffer` to the driver -- it
+    copies only `.type` into a framework-owned pool slot
+    (`video_buf[buf->index]`) and hands the driver *that* struct instead.
+    `alif_hantro.c`'s stack-local output buffer left `.index` at its
+    0-default, so the driver read `buf->buffer == NULL`. Fixed via
+    `video_import_buffer()` (`<zephyr/video/video.h>`), the framework's
+    supported way to hand a caller-owned pointer into the pool without a
+    copy. RE-BENCH-PENDING: build+link-verified only; the real proof is
+    the next AEN801 silicon run.
+  - Reviewer minors: the NOMEM path now sets `*out_len` to the required
+    size when known (per `<alp/jpeg.h>`'s documented contract); the
+    single-encode-validated repeat-encode state is now called out with a
+    ponytail comment instead of silently assumed.
+  - `examples/aen/aen-jpeg-regcheck/src/main.c` collapses the
+    per-backend `#if CONFIG_ALP_SDK_JPEG_ALIF_HANTRO` frame branching
+    into a runtime `pixfmt_mask` query, so the example itself can no
+    longer silently build the wrong layout for whichever backend wins.
+
 ## [v0.12.0] - 2026-07-22
 
 ### Added — build-plan hermetic path tokenization (`planPathMode: tokened`, ADR-0020 item 5)
