@@ -175,3 +175,8 @@
 	pinctrl-names = "default";
 	current-speed = <115200>;
 };
+
+/* Arm Ethos-U NPU: enable the ethosu85 node declared in the SoC peripherals dtsi (see ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN). */
+&ethosu85 {
+	status = "okay";
+};

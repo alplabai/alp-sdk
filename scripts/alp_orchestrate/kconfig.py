@@ -1092,6 +1092,29 @@ def _emit_inference(
             allowed_variants = {"u55", "u85"}
         for v in sorted(ethos_variants & allowed_variants):
             inference_lines.append(f"CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_{v.upper()}=y")
+        # Real Arm Ethos-U driver config -- the silicon-proven pair (bench:
+        # E1M-AEN801/E8, person_detect U85).  BACKEND_ETHOS_U_AEN already
+        # `select ETHOS_U if DT_HAS_ARM_ETHOS_U_ENABLED` (silicon-only); these
+        # assignments complete the driver config.  The core driver compiles
+        # exactly ONE accelerator config (ETHOS_U_NPU_CONFIG is a Kconfig
+        # `choice`), so pick the single most-capable NPU this silicon carries.
+        # On native_sim (no arm,ethos-u node) ETHOS_U stays off, so the
+        # ETHOS_U*-dependent lines below no-op with a harmless Kconfig
+        # "assigned y but got n" warning (same pattern as TENSORFLOW_LITE_MICRO
+        # above).  CONFIG_ETHOS_U_DCACHE=y links the correct-signature dcache
+        # hooks (NOT CONFIG_ARM_ETHOS_U -- hal_alif's stale callback path);
+        # CONFIG_DCACHE=n is the CPU<->NPU SRAM coherence mechanism; the
+        # ethos_u driver's mutex/semaphore need a kernel heap (k_malloc).
+        if "u85" in ethos_variants:
+            accel = "ETHOS_U85_256"
+        elif "u65" in ethos_variants:
+            accel = "ETHOS_U65_256"
+        else:
+            accel = "ETHOS_U55_256"
+        inference_lines.append("CONFIG_ETHOS_U_DCACHE=y")
+        inference_lines.append(f"CONFIG_{accel}=y")
+        inference_lines.append("CONFIG_DCACHE=n")
+        inference_lines.append("CONFIG_HEAP_MEM_POOL_SIZE=65536")
     # DRP-AI3 and DEEPX DX-M1 have NO Zephyr Kconfig -- deliberately.
     # Both engines are A55/Linux-side only (DRP-AI3 via the MERA/TVM
     # userspace runtime, DX-M1 via libdxrt over the A55's PCIe); an
