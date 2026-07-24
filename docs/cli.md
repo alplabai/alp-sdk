@@ -361,12 +361,15 @@ board.yaml contracts.
 ```bash
 tan model build                          # compile board.yaml `models:` entries
 tan model build --board path/to/board.yaml --out build/models
+tan model build --model demo             # build only the `demo` models: entry
 ```
 
 Compiles every `models:` entry declared in `board.yaml` into a
 `.alpmodel` package via the SoM-appropriate backend (Vela for
-Ethos-U, DRP-AI for RZ/V2N, ...).  See the model-pipeline docs under
-`docs/tutorials/` for the end-to-end inference flow.
+Ethos-U, DRP-AI for RZ/V2N, ...).  `--model NAME` restricts the build
+to the single named entry instead of all of them; an unknown NAME
+exits 1 instead of building everything.  See the model-pipeline docs
+under `docs/tutorials/` for the end-to-end inference flow.
 
 ### `tan doctor` -- host environment preflight
 

@@ -89,6 +89,14 @@ def _tar_dir(obj_dir: Path) -> bytes:
 class DrpaiAdapter(CompilerAdapter):
     backend = "drpai"
     requires_compile_opts = True             # needs input shape/name + calib images
+    tool = "drpai-tvm"
+
+    def version(self) -> str:
+        home = _tvm_home()
+        return _compiler_version(home) if home else "drp-ai_tvm"
+
+    def reason(self) -> str:
+        return "ALP_DRPAI_TVM_HOME not set or not a built DRP-AI TVM install"
 
     def is_available(self) -> bool:
         return _tvm_home() is not None
