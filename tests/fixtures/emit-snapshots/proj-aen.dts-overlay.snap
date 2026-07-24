@@ -14,7 +14,7 @@
 / {
     /* Board: E1M-EVK (SoM SKU E1M-AEN801) */
     /* Source: include/alp/boards/alp_e1m_evk.h */
-    /* v2 scope: union of Zephyr/baremetal cores' peripherals: adc */
+    /* v2 scope: union of Zephyr/baremetal cores' peripherals: adc, dac */
 
     aliases {
         /* SPI */

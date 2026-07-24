@@ -7,6 +7,21 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.14.0 candidate
 
+### Added — `dac` peripheral class in the `board.yaml` `peripherals:` enum
+
+`core_entry.peripherals` covered `adc` but not `dac`, so the DAC half of an
+analog project could not be expressed in `board.yaml`
+(issue [#919](https://github.com/alplabai/alp-sdk/issues/919)). Everything
+under the enum was already in place — `<alp/dac.h>` with its portable backend,
+the `alp-dac` DTS alias bucket, and `dac_12bit` on the Alif E8 SoC JSON — so
+`examples/aen/aen-analog-validate` had to hand-write `CONFIG_DAC=y` in
+`prj.conf` to run its DAC0 → ADC loopback. The token now exists,
+`metadata/registries/peripheral-kconfig.json` maps it to `CONFIG_DAC`, and the
+example takes it and drops the workaround. Also corrected the enum's own
+description, which claimed every class is reached "via the matching
+`<alp/<class>.h>` wrapper" — false for 8 of the 16 existing entries
+(`gpio`/`i2c`/`spi`/`uart` live in `<alp/peripheral.h>`).
+
 ### Added — Alif ISP-Pico driver compiles + links against hal_alif v2.3.0
 
 The Alif Ensemble ISP-Pico (Verisilicon ISP-Nano) video driver

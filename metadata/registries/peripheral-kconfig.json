@@ -5,6 +5,7 @@
     "adc": ["ADC"],
     "can": ["CAN"],
     "counter": ["COUNTER"],
+    "dac": ["DAC"],
     "emmc": ["DISK_ACCESS", "DISK_DRIVER_MMC", "MMC_STACK"],
     "ethernet": ["NETWORKING", "NET_L2_ETHERNET"],
     "flash": ["FLASH", "FLASH_PAGE_LAYOUT"],
