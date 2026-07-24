@@ -381,6 +381,10 @@ def add_cmd(zoo_id: str, board_path: Path, name: str | None, models_dir: str,
 @click.option("--format", "fmt", type=click.Choice(["human", "json"]), default="human")
 def prep_cmd(raw: Path, cal_dir: Path, out: Path | None, per_channel: bool,
              min_samples: int, fmt: str) -> None:
+    if raw.suffix.lower() != ".onnx":
+        click.echo(f"error: model prep supports .onnx input in this release; got {raw.name}",
+                   err=True)
+        raise SystemExit(1)
     out = out or raw.with_suffix(".int8.onnx")
     try:
         validate_calibration(cal_dir, raw, min_samples=min_samples)

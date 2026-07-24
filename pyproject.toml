@@ -44,11 +44,13 @@ mcp = [
     "mcp>=1.2",
 ]
 # License-free INT8 quantize + fp32-vs-int8 accuracy report ("alp model prep").
-# onnxruntime.quantization only -- no vendor toolchain (Vela/dxcom/DRP-AI).
+# onnxruntime.quantization + sympy (symbolic shape inference) only -- no vendor
+# toolchain (Vela/dxcom/DRP-AI).
 model-prep = [
     "onnxruntime>=1.17",
     "onnx>=1.15",
     "numpy>=1.23",
+    "sympy>=1.11",
 ]
 
 # No `alp` console-script: `tan` (the standalone Rust CLI) is the sole

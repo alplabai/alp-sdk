@@ -498,7 +498,7 @@ per-channel weight quantization, which often recovers accuracy lost to
 per-tensor quantization. `RAW` must be `.onnx` in this release --
 TFLite/PyTorch/Keras -> ONNX conversion is a follow-on; a non-ONNX
 input is a clear "not supported yet" error, never a wrong result.
-Requires the `model-prep` extra (`pip install alp-sdk[model-prep]`).
+Requires the `model-prep` extra (`pip install alp-sdk-cli[model-prep]`).
 
 After quantizing, both the fp32 and INT8 models run on every
 calibration sample and the outputs are compared: top-1 agreement %,

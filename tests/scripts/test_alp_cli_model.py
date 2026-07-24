@@ -575,3 +575,19 @@ def test_model_prep_too_few_calibration_errors(tmp_path):
     raw = _ROOT / "tests/fixtures/models/tiny_cnn.onnx"
     res = CliRunner().invoke(cli, ["model", "prep", str(raw), "--calibration", str(cal)])
     assert res.exit_code == 1
+
+
+def test_model_prep_non_onnx_errors_cleanly(tmp_path):
+    # A .tflite (or any non-.onnx) input must die with a clean PrepError-style
+    # message, not a raw onnxruntime InvalidProtobuf traceback.
+    import numpy as np
+    from click.testing import CliRunner
+    from alp_cli.main import cli
+    cal = tmp_path / "cal"; cal.mkdir()
+    rng = np.random.default_rng(0)
+    for i in range(8):
+        np.save(cal / f"s{i}.npy", rng.standard_normal((1, 3, 224, 224)).astype(np.float32))
+    raw = _ROOT / "tests/fixtures/models/tiny_int8.tflite"
+    res = CliRunner().invoke(cli, ["model", "prep", str(raw), "--calibration", str(cal)])
+    assert res.exit_code == 1
+    assert "onnx" in res.output.lower()

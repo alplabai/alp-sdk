@@ -103,10 +103,12 @@ def quantize(raw_onnx: Path, out_onnx: Path, cal_dir: Path, *,
     out_onnx.parent.mkdir(parents=True, exist_ok=True)
     pre = out_onnx.with_suffix(".pre.onnx")
     try:
-        # skip_symbolic_shape: symbolic shape inference needs sympy, an extra
-        # dependency this license-free path doesn't require (onnxruntime/onnx/
-        # numpy only) — basic shape inference is enough for this fixed-shape model.
-        quant_pre_process(str(raw_onnx), str(pre), skip_symbolic_shape=True)
+        # Symbolic shape inference (the quant_pre_process default) is
+        # onnxruntime's recommended pre-process, including for the
+        # dynamic-batch models this tool targets. It needs sympy, a model-prep
+        # dep (pyproject.toml) -- still license-free: that just means no
+        # vendor NPU toolchain (Vela/dxcom/DRP-AI) is involved.
+        quant_pre_process(str(raw_onnx), str(pre))
         quantize_static(str(pre), str(out_onnx), _reader_cls(name, samples),
                         per_channel=per_channel, weight_type=QuantType.QInt8)
     except Exception as exc:                      # onnxruntime raises broad types
@@ -141,16 +143,21 @@ def accuracy_delta(fp32_onnx: Path, int8_onnx: Path, cal_dir: Path, *,
     import onnxruntime as ort
     name, shape = model_input(fp32_onnx)
     samples = load_calibration(cal_dir, shape)
-    s32 = ort.InferenceSession(str(fp32_onnx), providers=["CPUExecutionProvider"])
-    s8 = ort.InferenceSession(str(int8_onnx), providers=["CPUExecutionProvider"])
-    agree, coss, maxerr = 0, [], 0.0
-    for x in samples:
-        o32 = s32.run(None, {name: x})[0].ravel()
-        o8 = s8.run(None, {name: x})[0].ravel()
-        if int(o32.argmax()) == int(o8.argmax()):
-            agree += 1
-        coss.append(_cosine(o32, o8))
-        maxerr = max(maxerr, float(np.abs(o32 - o8).max()))
+    try:
+        s32 = ort.InferenceSession(str(fp32_onnx), providers=["CPUExecutionProvider"])
+        s8 = ort.InferenceSession(str(int8_onnx), providers=["CPUExecutionProvider"])
+        agree, coss, maxerr = 0, [], 0.0
+        for x in samples:
+            o32 = s32.run(None, {name: x})[0].ravel()
+            o8 = s8.run(None, {name: x})[0].ravel()
+            if int(o32.argmax()) == int(o8.argmax()):
+                agree += 1
+            coss.append(_cosine(o32, o8))
+            maxerr = max(maxerr, float(np.abs(o32 - o8).max()))
+    except Exception as exc:                       # a produced-but-unrunnable
+                                                     # model must not escape as
+                                                     # a raw traceback
+        raise PrepError(f"quantized model failed to run: {exc}") from exc
     top1 = agree / len(samples) * 100.0
     verdict = "good" if top1 >= degrade_threshold else "degraded"
     guidance = None if verdict == "good" else (
