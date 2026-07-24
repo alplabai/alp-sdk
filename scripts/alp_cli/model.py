@@ -11,6 +11,7 @@ from alp_model.analyze import UnsupportedModelError, analyze_model
 from alp_model.build import build_model, _ADAPTERS
 from alp_model.package import read_package
 from alp_model.targets import resolve_targets
+from alp_model.zoo import ZooError, fetch_source, filter_by_sku, load_zoo
 
 _DEFAULT_META = Path(__file__).resolve().parents[2] / "metadata"
 
@@ -301,6 +302,26 @@ def check_cmd(model: Path | None, sku: str | None, board_path: Path | None,
             click.echo(f"  suggestion: {e['result'].suggestion}")
     if failed:
         raise SystemExit(1)
+
+
+@model_group.command(name="zoo", help="Browse curated model-zoo entries (and which run on a SoM).")
+@click.option("--sku", default=None, help="Mark which entries run on this SoM (via validated_soms).")
+@click.option("--metadata-root", type=click.Path(file_okay=False, path_type=Path),
+              default=_DEFAULT_META, show_default=False)
+@click.option("--format", "fmt", type=click.Choice(["human", "json"]), default="human")
+def zoo_cmd(sku: str | None, metadata_root: Path, fmt: str) -> None:
+    entries = load_zoo(metadata_root)
+    rows = [{
+        "id": e.id, "task": e.task, "description": e.description,
+        "license": e.license, "validated_soms": e.validated_soms,
+        "runs_here": (sku in e.validated_soms) if sku else None,
+    } for e in entries]
+    if fmt == "json":
+        click.echo(json.dumps({"entries": rows}, indent=2))
+        return
+    for r in rows:
+        mark = "" if r["runs_here"] is None else ("  [runs here]" if r["runs_here"] else "  [not validated here]")
+        click.echo(f"{r['id']:<20} {r['task']:<14} {r['description']}{mark}")
 
 
 @model_group.command(name="doctor", help="Report installed NPU compiler toolchains.")

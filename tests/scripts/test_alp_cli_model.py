@@ -12,6 +12,26 @@ from alp_model.package import read_package
 _ROOT = Path(__file__).resolve().parents[2]
 
 
+def test_model_zoo_json_lists_example():
+    import json
+    from click.testing import CliRunner
+    from alp_cli.main import cli
+    res = CliRunner().invoke(cli, ["model", "zoo", "--format", "json"], catch_exceptions=False)
+    assert res.exit_code == 0, res.output
+    ids = [e["id"] for e in json.loads(res.output)["entries"]]
+    assert "example-tiny" in ids
+
+
+def test_model_zoo_sku_marks_runs_here():
+    import json
+    from click.testing import CliRunner
+    from alp_cli.main import cli
+    res = CliRunner().invoke(cli, ["model", "zoo", "--sku", "E1M-AEN801", "--format", "json"],
+                             catch_exceptions=False)
+    entry = next(e for e in json.loads(res.output)["entries"] if e["id"] == "example-tiny")
+    assert entry["runs_here"] is True
+
+
 def test_alp_model_build_threads_compile_opts(tmp_path, monkeypatch):
     # CLI must read models[].compile, resolve its paths relative to board.yaml,
     # and pass them to build_model as compile_opts.
