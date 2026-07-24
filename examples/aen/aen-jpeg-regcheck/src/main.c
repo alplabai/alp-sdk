@@ -10,13 +10,17 @@
  *     (src/backends/jpeg/sw_baseline.c, priority 50) -- runs for real, in CI.
  *
  *   - E1M-AEN801 (Ensemble E8, M55-HE): the Alif Hantro VC9000E hardware
- *     backend (src/backends/jpeg/alif_hantro.c, priority 100) -- BUILD-ONLY
- *     on this task; the HW encode path is RE-BENCH-PENDING (a real AEN801
- *     bench run found + this batch fixed two defects: the missing
+ *     backend (src/backends/jpeg/alif_hantro.c, priority 100) -- SILICON-
+ *     PROVEN on a real AEN801: alp_jpeg_encode() returns a valid 935-byte
+ *     64x64 JPEG that round-trips through libjpeg.  Getting there took three
+ *     defects a real bench run exposed + this batch fixed: (1) the missing
  *     CONFIG_ALP_SOC_ALIF_ENSEMBLE_E8 select in prj.conf that silently let
- *     sw_baseline win instead of the HW backend, and a silicon MemManage
- *     fault in the output-buffer handoff -- see alif_hantro.c). On real
- *     silicon, the first thing to check is the ported driver's
+ *     sw_baseline win instead of the HW backend; (2) the driver programming
+ *     the HW output-size register from buf->bytesused (0 after
+ *     video_import_buffer) instead of buf->size; and (3) the DMA buffers
+ *     landing in core-local DTCM, unreachable by the Hantro AXI master --
+ *     which is why nv12_buf / out_buf below are placed in global SRAM0.
+ *     On real silicon, the first thing to check is the ported driver's
  *     jpeg_hw_init(): it reads JPEG_SWREG0 and compares it against the
  *     documented hardware ID (JPEG_HW_ID, 0x90001000), logging "JPEG
  *     hardware not found (ID: 0x%08x)" at LOG_ERR if it doesn't match --
