@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# aen-jpeg-regcheck -- <alp/jpeg.h> backend-selection proof: the software
+# baseline (src/backends/jpeg/sw_baseline.c) runs for real on native_sim; the
+# Alif Hantro VC9000E hardware backend (src/backends/jpeg/alif_hantro.c)
+# build-only-compiles for the E1M-AEN801 (Ensemble E8, M55-HE) -- the HW
+# encode path is BENCH-PENDING (not yet validated on real AEN801 silicon).
+
+sample:
+  name: aen-jpeg-regcheck
+  description: |
+    Opens <alp/jpeg.h>, prints the selected backend's capabilities
+    (hw_accelerated), encodes a synthetic 64x64 gradient 4:2:0 frame, and
+    checks the output for the JPEG SOI marker (FF D8).  Two scenarios
+    exercise the two backends this class currently ships:
+      - native_sim: the portable TooJpeg-derived software fallback
+        (sw_baseline.c, priority 50) -- runs for real in CI.
+      - aen: the Alif Ensemble E8 Hantro VC9000E hardware backend
+        (alif_hantro.c, priority 100) -- build-only; HW encode is
+        BENCH-PENDING.
+
+tests:
+  alp_sdk.examples.aen.jpeg_regcheck.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    extra_configs:
+      # native_sim has no jpeg0 DT node (Alif-E8-only silicon) -- explicitly
+      # disable the HW backend + its driver Kconfigs rather than rely on the
+      # unmet-dependency auto-disable, so the merged .config carries no
+      # dangling `=y` for a symbol this platform can't satisfy.  sw_baseline
+      # (default y, priority 50) is the only backend left standing.
+      - CONFIG_VIDEO_JPEG_HANTRO_VC9000E=n
+      - CONFIG_USE_ALIF_JPEG_SW_LIB=n
+      - CONFIG_ALP_SDK_JPEG_ALIF_HANTRO=n
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - jpeg
+      - video
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "RESULT PASS"
+
+  alp_sdk.examples.aen.jpeg_regcheck.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    build_only: true   # HW encode is a bench flash, not a CI run -- BENCH-PENDING.
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - jpeg
+      - video

@@ -91,8 +91,9 @@ zephyr_library_sources(
     # JPEG-encoder class dispatcher + stub backend.  Task 1 of the
     # encoder rollout: the JPEG class must exist on every board,
     # defaulting to the NOT_IMPLEMENTED stub.  The software baseline
-    # (CONFIG_ALP_SDK_JPEG_SW_BASELINE) and Alif Hantro VC9000E
-    # (CONFIG_ALP_SDK_JPEG_ALIF_HANTRO) backends land in later tasks.
+    # (CONFIG_ALP_SDK_JPEG_SW_BASELINE, Task 2) and Alif Hantro VC9000E
+    # (CONFIG_ALP_SDK_JPEG_ALIF_HANTRO, Task 3/4) backends outrank it
+    # below once enabled.
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/jpeg_dispatch.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/jpeg/zephyr_stub.c
 )
@@ -106,6 +107,15 @@ zephyr_library_sources(
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_JPEG_SW_BASELINE
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/jpeg/sw_baseline.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/jpeg/vendor/toojpeg_baseline.c
+)
+
+# Alif Ensemble E8 Hantro VC9000E hardware JPEG-encoder backend (Task 3/4):
+# silicon_ref="alif:ensemble:e8" priority 100 -- outranks both the stub and
+# the software baseline on AEN silicon once the jpeg0 DT node is enabled.
+# Drives the vendored+v4.4-ported zephyr/drivers/video/jpeg_hantro_vc9000e.c
+# (CONFIG_VIDEO_JPEG_HANTRO_VC9000E, wired further down this file).
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_JPEG_ALIF_HANTRO
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/jpeg/alif_hantro.c
 )
 
 # Boot-identity banner (CONFIG_ALP_SDK_BANNER, default y) -- one line at
