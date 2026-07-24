@@ -342,11 +342,16 @@ def add_cmd(zoo_id: str, board_path: Path, name: str | None, models_dir: str,
         raise SystemExit(1)
     name = name or entry.id
     board = yaml.safe_load(board_path.read_text(encoding="utf-8")) or {}
-    models = board.get("models", [])
+    models = board.get("models") or []
     if any(m.get("name") == name for m in models):
         click.echo(f"error: board.yaml already has a model named '{name}'", err=True)
         raise SystemExit(1)
     base = board_path.parent
+    dest = (base / models_dir).resolve()
+    base_resolved = base.resolve()
+    if dest != base_resolved and base_resolved not in dest.parents:
+        click.echo("error: --models-dir must be inside the board directory", err=True)
+        raise SystemExit(1)
     try:
         fetched = fetch_source(entry, base / models_dir, metadata_root=metadata_root)
     except ZooError as exc:

@@ -8,6 +8,7 @@ description: Tiny INT8 smoke model for wiring the zoo add/build flow end to end.
 license: Apache-2.0
 source:
   bundled: starters/example-tiny.tflite
+# Wiring placeholders (this is a smoke fixture) -- NOT bench-validated results.
 validated_soms:
   - E1M-AEN801
   - E1M-V2N101

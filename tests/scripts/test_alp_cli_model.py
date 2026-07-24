@@ -60,6 +60,44 @@ def test_model_add_duplicate_name_errors(tmp_path):
     assert res2.exit_code != 0
 
 
+def test_model_add_preserves_existing_board_and_models(tmp_path):
+    import yaml as _yaml
+    from click.testing import CliRunner
+    from alp_cli.main import cli
+    board = tmp_path / "board.yaml"
+    board.write_text(
+        "name: myboard\n"
+        "som:\n  sku: E1M-AEN801\n"
+        "cores: {}\n"
+        "models:\n  - name: keep-me\n    source: keep.tflite\n",
+        encoding="utf-8")
+    res = CliRunner().invoke(
+        cli, ["model", "add", "example-tiny", "--board", str(board)],
+        catch_exceptions=False)
+    assert res.exit_code == 0, res.output
+    doc = _yaml.safe_load(board.read_text("utf-8"))
+    assert doc["name"] == "myboard"
+    names = [m["name"] for m in doc["models"]]
+    assert "keep-me" in names
+    assert "example-tiny" in names
+
+
+def test_model_add_empty_models_key_ok(tmp_path):
+    import yaml as _yaml
+    from click.testing import CliRunner
+    from alp_cli.main import cli
+    board = tmp_path / "board.yaml"
+    board.write_text(
+        "som:\n  sku: E1M-AEN801\ncores: {}\nmodels:\n", encoding="utf-8")
+    res = CliRunner().invoke(
+        cli, ["model", "add", "example-tiny", "--board", str(board)],
+        catch_exceptions=False)
+    assert res.exit_code == 0, res.output
+    doc = _yaml.safe_load(board.read_text("utf-8"))
+    names = [m["name"] for m in doc["models"]]
+    assert "example-tiny" in names
+
+
 def test_alp_model_build_threads_compile_opts(tmp_path, monkeypatch):
     # CLI must read models[].compile, resolve its paths relative to board.yaml,
     # and pass them to build_model as compile_opts.

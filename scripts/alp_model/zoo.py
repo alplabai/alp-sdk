@@ -68,6 +68,8 @@ def fetch_source(entry: ZooEntry, dest_dir: Path, *, metadata_root: Path) -> Pat
         return out
     # url + sha256
     url, want = src["url"], src["sha256"]
+    if not (url.startswith("https://") or url.startswith("file://")):
+        raise ZooError(f"unsupported source url scheme: {url}")
     tmp = dest_dir / f".{entry.id}.partial"
     try:
         with urllib.request.urlopen(url) as resp:  # noqa: S310 (url validated by schema)
