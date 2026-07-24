@@ -14,10 +14,13 @@
  * CONFIG_USE_ALIF_JPEG_SW_LIB) for the pieces the HW block doesn't do itself.
  * Upstream Zephyr v4.4 + hal_alif ship no Hantro VC9000E class driver, so this
  * is a genuine fork-driver copy carried in-tree so it survives a
- * `west update`.  Retire onto the opt-in sdk-alif fork compatible once the
- * jpeg node is repointed AND bench-verified.  See
- * docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.  vendor-ext,
- * BENCH-UNVERIFIED (build-only proof on this batch).
+ * `west update`.  vendor-ext, BENCH-VERIFIED: the jpeg0 node is enabled and
+ * silicon-proven on real E1M-AEN801 (Ensemble E8) hardware -- JPEG_SWREG0
+ * reads back JPEG_HW_ID (0x90001000) and the HW encode produces a valid
+ * 935-byte JPEG (verified by off-target libjpeg decode).  Retirement onto
+ * the opt-in sdk-alif fork compatible still awaits that fork carrying a
+ * compatible Hantro VC9000E class driver upstream.  See
+ * docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
  * ====================================================================
  *
  * Vendored from the fork, then PORTED to the upstream Zephyr v4.4 video API by

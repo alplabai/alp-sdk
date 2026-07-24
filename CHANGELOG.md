@@ -7,6 +7,37 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.13.0 candidate
 
+### Added — `<alp/jpeg.h>` portable JPEG-encoder surface (`[ABI-EXPERIMENTAL]`)
+
+- New encode-only portable JPEG-encoder surface: `alp_jpeg_open()` /
+  `alp_jpeg_encode()` / `alp_jpeg_capabilities()` / `alp_jpeg_close()`
+  dispatch across registered backends by `silicon_ref` priority (class
+  dispatcher + `NOT_IMPLEMENTED` stub, no decode API -- the E8 has no
+  hardware JPEG decoder). A portable software baseline backend
+  (`src/backends/jpeg/sw_baseline.c`, vendored `toojpeg_baseline.c`)
+  ships on **every** SoM (4:2:0 + mono), and a HW-accelerated
+  `alif_hantro` backend (`src/backends/jpeg/alif_hantro.c`) drives the
+  Alif Ensemble E8 Hantro VC9000E encoder on **E1M-AEN801** at priority
+  100, falling back to the software path everywhere else.
+- **Silicon-proven on E1M-AEN801 (Ensemble E8)**: the HW backend wins
+  backend arbitration (`alp_jpeg_capabilities()` reports
+  `hw_accelerated=1`), driver init reads `JPEG_SWREG0` back as
+  `JPEG_HW_ID` `0x90001000` (HW version `0x00c0c200`), and
+  `alp_jpeg_encode()` returns `rc=0` `out_len=935` for a 64x64 NV12
+  frame -- the 935-byte JPEG stream (`FF D8` SOI header) was pulled
+  off-target over SWD and round-tripped through libjpeg to a correct
+  64x64 image. Buffers were placed in the AXI-visible SRAM0 bank
+  (`out_buf@0x02000000`, `nv12_buf@0x02002000`) to satisfy the
+  HW-backend DMA-reachable-buffer contract below.
+- **HW-backend DMA-reachable-buffer contract**: the Hantro block is an
+  AXI DMA master and cannot reach the M55's TCM. `alif_hantro.c` sources
+  the ITCM/DTCM local-window ranges from the DT `itcm`/`dtcm` nodes (not
+  hardcoded literals) and rejects any request whose input or output
+  buffer overlaps either window, returning `ALP_ERR_NOSUPPORT` (falls
+  back to `sw_baseline`) with a `LOG_ERR` naming the offending buffer.
+- `alp_pixfmt_t` additions and the `format`/`pixfmt_mask` fields are
+  detailed in the Fixed entry directly below (same batch).
+
 ### Fixed — `<alp/jpeg.h>` portable input-pixelformat contract + AEN801 HW-backend bench fallout
 
 - A real AEN801 silicon bench run on the Task-3/4 Hantro VC9000E hardware
@@ -43,8 +74,9 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
     0-default, so the driver read `buf->buffer == NULL`. Fixed via
     `video_import_buffer()` (`<zephyr/video/video.h>`), the framework's
     supported way to hand a caller-owned pointer into the pool without a
-    copy. RE-BENCH-PENDING: build+link-verified only; the real proof is
-    the next AEN801 silicon run.
+    copy. BENCH-VERIFIED: a subsequent AEN801 silicon run confirmed the
+    fix -- `alp_jpeg_encode()` returns `rc=0 out_len=935` with a valid
+    JPEG stream (see the Added entry above).
   - Reviewer minors: the NOMEM path now sets `*out_len` to the required
     size when known (per `<alp/jpeg.h>`'s documented contract); the
     single-encode-validated repeat-encode state is now called out with a

@@ -40,12 +40,14 @@
  * hardware path.
  *
  * ADR 0017 Tier-2 (interim; see jpeg_hantro_vc9000e.c for the retirement
- * note).  vendor-ext.  A real AEN801 bench run proved JPEG_SWREG0 reads
- * back JPEG_HW_ID (0x90001000) and the driver inits on HW, then hit a
- * MemManage fault in jpeg_header_generation() from the output-buffer
- * handoff below -- fixed this batch (video_import_buffer(), see
- * hantro_encode()).  RE-BENCH-PENDING: the fix is build+link-verified
- * only; the real proof is the next AEN801 silicon run.
+ * note).  vendor-ext.  BENCH-VERIFIED on real E1M-AEN801 (Ensemble E8)
+ * silicon: JPEG_SWREG0 reads back JPEG_HW_ID (0x90001000, HW version
+ * 0x00c0c200) and alp_jpeg_encode() returns rc=0 out_len=935 for a 64x64
+ * NV12 frame -- the 935-byte JPEG (SOI FF D8) was pulled off-target over
+ * SWD and round-tripped through libjpeg to a correct 64x64 image.  The
+ * earlier MemManage fault in jpeg_header_generation() from the
+ * output-buffer handoff was fixed via video_import_buffer() (see
+ * hantro_encode()) and is confirmed resolved by this run.
  */
 
 #if defined(CONFIG_ALP_SDK_JPEG_ALIF_HANTRO)
