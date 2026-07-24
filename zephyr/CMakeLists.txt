@@ -464,7 +464,12 @@ endif()
 # resolve.  ADR 0017 Tier-2 (INTERIM).  The ISP (isp_pico.c, compatible
 # "vsi,isp-pico") rides on the same v4.4 video API + the hal_alif libisp wrapper;
 # it is Tier-2 opt-in (CONFIG_ALP_SDK_CAMERA_ALIF_ISP, default n).
-if(CONFIG_VIDEO_ALIF_CAM OR CONFIG_VIDEO_MIPI_CSI2_DW OR CONFIG_VIDEO_ARX3A0 OR CONFIG_MIPI_DPHY_DW OR CONFIG_VIDEO_ISP_VSI)
+# CONFIG_VIDEO_JPEG_HANTRO_VC9000E is included in this guard so the JPEG
+# encoder TU (jpeg_hantro_vc9000e.c, below) resolves the vendored
+# <zephyr/drivers/video/video_alif.h> (its VIDEO_CID_JPEG_INPUT_BUFFER cid) and
+# upstream's private drivers/video/{video_ctrls,video_device}.h (its v4.4
+# ctrl-registry port).  ADR 0017 Tier-2 (INTERIM).
+if(CONFIG_VIDEO_ALIF_CAM OR CONFIG_VIDEO_MIPI_CSI2_DW OR CONFIG_VIDEO_ARX3A0 OR CONFIG_MIPI_DPHY_DW OR CONFIG_VIDEO_ISP_VSI OR CONFIG_VIDEO_JPEG_HANTRO_VC9000E)
     zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/include)
 zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/dma)
 if(DEFINED ZEPHYR_ALIF_MODULE_DIR)
@@ -475,10 +480,20 @@ endif()
     # for the CPI/ISP AXI buffer addresses).  hal_alif only puts its common/include
     # dir on the path under CONFIG_RTSS_HE/HP (common/CMakeLists.txt); add it here
     # explicitly so the CPI/ISP TUs resolve the header on any Ensemble RTSS build.
+    # (jpeg_hantro_vc9000e.c does NOT include soc_memory_map.h, so it stays out
+    # of this inner guard.)
     if(CONFIG_VIDEO_ALIF_CAM OR CONFIG_VIDEO_ISP_VSI)
         zephyr_include_directories(${ZEPHYR_ALIF_MODULE_DIR}/common/include)
     endif()
 endif()
+# Alif Ensemble VeriSilicon Hantro VC9000E JPEG hardware encoder (compatible
+# "verisilicon,hantro-vc9000e-jpeg"), vendored from the Apache-2.0 zephyr_alif
+# fork (drivers/video/jpeg_hantro_vc9000e.c) @ d8eed1926407087dff150a1c4d25ba586d775746
+# (branch main) and PORTED to the v4.4 video API by Alp Lab AB.  Links the
+# hal_alif libjpeg_hantro_sw_gcc.a SW helper lib under CONFIG_USE_ALIF_JPEG_SW_LIB.
+# ADR 0017 Tier-2 (INTERIM).
+zephyr_library_sources_ifdef(CONFIG_VIDEO_JPEG_HANTRO_VC9000E
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/video/jpeg_hantro_vc9000e.c)
 zephyr_library_sources_ifdef(CONFIG_VIDEO_ALIF_CAM
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/video/video_alif.c)
 zephyr_library_sources_ifdef(CONFIG_VIDEO_MIPI_CSI2_DW

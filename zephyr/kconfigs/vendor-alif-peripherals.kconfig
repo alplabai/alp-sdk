@@ -738,6 +738,22 @@ config VIDEO_ISP_VSI_INIT_PRIORITY
 	  System initialization priority for the Alif ISP-Pico driver.
 
 # ---------------------------------------------------------------------------
+# Alif Ensemble VeriSilicon Hantro VC9000E JPEG hardware encoder (compatible
+# "verisilicon,hantro-vc9000e-jpeg") -- ADR 0017 Tier-2, INTERIM.  Vendored
+# from the Apache-2.0 zephyr_alif fork (drivers/video/jpeg_hantro_vc9000e.c) @
+# d8eed1926407087dff150a1c4d25ba586d775746 (branch main) and PORTED to the
+# v4.4 video API by Alp Lab AB (ep drop, 3-arg set_stream, ctrl-registry
+# re-architecture -- see the driver's file-header note). Links the hal_alif
+# libjpeg_hantro_sw_gcc.a SW helper lib (quantization tables + JPEG header
+# generation) via CONFIG_USE_ALIF_JPEG_SW_LIB.  Symbols VIDEO_JPEG_HANTRO_*
+# themselves are sourced from the vendored VERBATIM fork Kconfig fragment
+# (Kconfig.jpeg_hantro_vc9000e); this only rsources it into the build.
+# vendor-ext, BENCH-UNVERIFIED (build-only proof on this batch).
+# Driver: zephyr/drivers/video/jpeg_hantro_vc9000e.c.
+# ---------------------------------------------------------------------------
+rsource "../drivers/video/Kconfig.jpeg_hantro_vc9000e"
+
+# ---------------------------------------------------------------------------
 # Alif Ensemble CAN-FD (CAST CAN-CTRL IP, compatible "cast,can"), vendored from
 # the Apache-2.0 zephyr_alif fork (zephyr/drivers/can/can_cast.c + can_cast.h).
 # Upstream Zephyr v4.4 ships only the Bosch M_CAN driver (can_mcan.c), whose
