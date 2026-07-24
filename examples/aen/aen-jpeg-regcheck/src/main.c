@@ -61,11 +61,33 @@
  * layout the won backend wants, its buffer is already there to fill.
  */
 
+/*
+ * The Hantro VC9000E is an external AXI bus master: it fetches nv12_buf
+ * (input) and writes out_buf (output) over its OWN AXI master, not through
+ * the M55 core, so both addresses must be GLOBAL (AXI-visible) -- not a
+ * core-local TCM alias.  The generated board's default RAM (`zephyr,sram =
+ * &dtcm`) lands .bss in the M55's DTCM at the core-private local address
+ * 0x20000000, which the Hantro's AXI master cannot reach -- that mismatch
+ * is exactly the JPEG_BUS_ERROR_STATUS (ALP_ERR_IO) seen on the AEN801
+ * bench.  This is the identical trap aen-dma-regcheck hit with the PL330
+ * DMA AXI master (see that example's file header): the fix there, and here,
+ * is to tag the DMA-visible buffers into the "SRAM0" linker region, which
+ * resolves to the global on-chip SRAM0 bank @0x02000000 that every AXI
+ * master on this SoC can see.  Guarded to the HW build only: native_sim
+ * links this same source but has no jpeg0 node and no "SRAM0" memory
+ * region, so the attribute must vanish there.
+ */
+#if defined(CONFIG_ALP_SDK_JPEG_ALIF_HANTRO)
+#define JPEG_DMA_MEM __attribute__((section("SRAM0")))
+#else
+#define JPEG_DMA_MEM
+#endif
+
 /* ALP_PIXFMT_NV12: one contiguous buffer, Y plane then an interleaved UV
  * plane at offset (FRAME_W * FRAME_H) -- what alif_hantro.c latches as a
  * single raw pointer (see its file-header note on the y_plane-as-NV12-base
- * constraint). */
-static uint8_t nv12_buf[FRAME_W * FRAME_H + (FRAME_W * FRAME_H) / 2];
+ * constraint).  Hantro AXI INPUT -- must be SRAM0 (see JPEG_DMA_MEM above). */
+static uint8_t nv12_buf[FRAME_W * FRAME_H + (FRAME_W * FRAME_H) / 2] JPEG_DMA_MEM;
 
 /* ALP_PIXFMT_YUV420_PLANAR: three independent buffers -- what sw_baseline.c
  * (toojpeg_encode_yuv420) wants, one U and one V sample per 2x2 luma block. */
@@ -116,7 +138,8 @@ static void build_frame_planar(alp_jpeg_encode_req_t *req)
 	req->v_stride = FRAME_W / 2;
 }
 
-static uint8_t out_buf[OUT_CAP];
+/* Hantro AXI OUTPUT -- must be SRAM0 too (see JPEG_DMA_MEM above). */
+static uint8_t out_buf[OUT_CAP] JPEG_DMA_MEM;
 
 int main(void)
 {
