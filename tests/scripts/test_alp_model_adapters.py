@@ -493,3 +493,25 @@ def test_deepx_real_compile_of_tiny_fixture(tmp_path):
     assert blob.format == "dxnn"
     assert blob.payload[:4] == b"DXNN"        # self-describing .dxnn flatbuffer magic
     assert blob.compiler_version.startswith("DX-COM")
+
+
+def test_probe_reports_unavailable_reason(monkeypatch):
+    import shutil as _shutil
+    from alp_model.adapters.ethos_u import VelaAdapter
+    monkeypatch.setattr(_shutil, "which", lambda _n: None)   # vela absent
+    p = VelaAdapter().probe()
+    assert p["backend"] == "ethos_u"
+    assert p["tool"] == "vela"
+    assert p["available"] is False
+    assert p["version"] is None
+    assert "vela" in p["reason"]
+
+
+def test_probe_reports_available_version(monkeypatch):
+    import shutil as _shutil
+    from alp_model.adapters.ethos_u import VelaAdapter
+    monkeypatch.setattr(_shutil, "which", lambda n: "/usr/bin/vela" if n == "vela" else None)
+    p = VelaAdapter().probe()
+    assert p["available"] is True
+    assert p["version"].startswith("vela")
+    assert p["reason"] is None

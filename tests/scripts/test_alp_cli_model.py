@@ -159,3 +159,13 @@ def test_alp_model_list_reports_artifact_status(tmp_path):
     assert m["name"] == "demo"
     assert m["artifact"]["exists"] is True
     assert m["artifact"]["stale"] is False
+
+
+def test_alp_model_doctor_lists_all_backends():
+    result = CliRunner().invoke(cli, ["model", "doctor", "--format", "json"],
+                                catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    backends = {t["backend"] for t in _json.loads(result.output)["toolchains"]}
+    assert {"cpu", "ethos_u", "drpai", "deepx_dxm1"} <= backends
+    cpu = next(t for t in _json.loads(result.output)["toolchains"] if t["backend"] == "cpu")
+    assert cpu["available"] is True

@@ -48,6 +48,13 @@ def _dxcom_version() -> str:
 class DeepxAdapter(CompilerAdapter):
     backend = "deepx_dxm1"
     requires_compile_opts = True          # needs a per-model dxcom JSON config
+    tool = "dxcom"
+
+    def version(self) -> str:
+        return _dxcom_version()
+
+    def reason(self) -> str:
+        return "dxcom not found (dx-com wheel not installed and ALP_DEEPX_SDK_HOME unset)"
 
     def is_available(self) -> bool:
         if shutil.which("dxcom"):            # the dx-com wheel's console script

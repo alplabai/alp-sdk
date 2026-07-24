@@ -7,7 +7,7 @@ from pathlib import Path
 import click
 import yaml
 
-from alp_model.build import build_model
+from alp_model.build import build_model, _ADAPTERS
 from alp_model.package import read_package
 
 _DEFAULT_META = Path(__file__).resolve().parents[2] / "metadata"
@@ -126,3 +126,17 @@ def list_cmd(board_path: Path, out_dir: Path, output_format: str) -> None:
             a = e["artifact"]
             state = "missing" if not a["exists"] else ("stale" if a["stale"] else "built")
             click.echo(f"{e['name']:20} {state:8} {e['source']}")
+
+
+@model_group.command(name="doctor", help="Report installed NPU compiler toolchains.")
+@click.option("--format", "output_format", type=click.Choice(["human", "json"]),
+              default="human", show_default=True)
+def doctor_cmd(output_format: str) -> None:
+    tools = [a.probe() for a in _ADAPTERS]
+    if output_format == "json":
+        click.echo(json.dumps({"toolchains": tools}, indent=2))
+    else:
+        for t in tools:
+            mark = "ok" if t["available"] else "--"
+            ver = t["version"] or t["reason"] or ""
+            click.echo(f"[{mark}] {t['backend']:12} {t['tool']:12} {ver}")
