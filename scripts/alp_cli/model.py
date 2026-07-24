@@ -52,16 +52,27 @@ def _target_payload(mft, blobs) -> tuple[list[dict], list[dict]]:
               default=Path("build/models"), show_default=True, help="Output directory.")
 @click.option("--metadata-root", type=click.Path(exists=True, path_type=Path),
               default=_DEFAULT_META, help="Path to the metadata/ root.")
+@click.option("--model", "model_name", default=None,
+              help="Build only this model (default: all board.yaml models).")
 @click.option("--format", "output_format", type=click.Choice(["human", "json"]),
               default="human", show_default=True,
               help="human: 'built <path>' lines. json: a {models:[...]} payload "
                    "(targets + skipped coverage) for machine consumption.")
 def build_cmd(board_path: Path, out_dir: Path, metadata_root: Path,
-              output_format: str) -> None:
+              model_name: str | None, output_format: str) -> None:
     board = yaml.safe_load(board_path.read_text(encoding="utf-8"))
     sku = board["som"]["sku"]
     models = board.get("models", [])
     base = board_path.parent
+    if model_name is not None:
+        models = [m for m in models if m["name"] == model_name]
+        if not models:
+            if output_format == "json":
+                click.echo(json.dumps({"models": []}, indent=2))
+            else:
+                click.echo(f"alp model build: no model named '{model_name}' in board.yaml",
+                           err=True)
+            raise SystemExit(1)
     if output_format == "human":
         if not models:
             click.echo("no models: declared in board.yaml; nothing to build.")

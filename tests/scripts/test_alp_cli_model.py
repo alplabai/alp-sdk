@@ -171,6 +171,47 @@ def test_alp_model_build_json_reports_failure_as_json(tmp_path):
     assert model["skipped"] == []
 
 
+def test_alp_model_build_dash_model_selects_one(tmp_path):
+    # Two models declared; --model demo must build ONLY demo, and --model nope
+    # (unknown name) must fail clearly instead of building everything.
+    (tmp_path / "models").mkdir()
+    shutil.copy(_ROOT / "tests/fixtures/models/tiny_int8.tflite",
+                tmp_path / "models" / "m.tflite")
+    shutil.copy(_ROOT / "tests/fixtures/models/tiny_int8.tflite",
+                tmp_path / "models" / "m2.tflite")
+    (tmp_path / "board.yaml").write_text(
+        "name: demo\n"
+        "som:\n  sku: E1M-AEN801\n"
+        "cores: {}\n"
+        "models:\n"
+        "  - name: demo\n    source: models/m.tflite\n"
+        "  - name: other\n    source: models/m2.tflite\n",
+        encoding="utf-8")
+    result = CliRunner().invoke(cli, [
+        "model", "build",
+        "--board", str(tmp_path / "board.yaml"),
+        "--out", str(tmp_path / "out"),
+        "--metadata-root", str(_ROOT / "metadata"),
+        "--model", "demo",
+        "--format", "json",
+    ], catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    payload = _json.loads(result.output)
+    assert len(payload["models"]) == 1
+    assert payload["models"][0]["name"] == "demo"
+    assert not (tmp_path / "out" / "other.alpmodel").exists()
+
+    result = CliRunner().invoke(cli, [
+        "model", "build",
+        "--board", str(tmp_path / "board.yaml"),
+        "--out", str(tmp_path / "out"),
+        "--metadata-root", str(_ROOT / "metadata"),
+        "--model", "nope",
+        "--format", "json",
+    ])
+    assert result.exit_code == 1
+
+
 def test_alp_model_list_reports_artifact_status(tmp_path):
     (tmp_path / "models").mkdir()
     (tmp_path / "models" / "m.tflite").write_bytes(b"TFL3xxxx")
