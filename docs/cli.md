@@ -472,6 +472,60 @@ value is currently a `0` placeholder, so `no-fit` can never fire from
 an SRAM overflow yet, and the in-family cross-sell suggestion (move to
 a larger-arena SoM) stays dormant until those budgets exist.
 
+#### `tan model prep` -- license-free INT8 quantize + accuracy report
+
+```bash
+tan model prep raw.onnx --calibration path/to/calib_dir
+tan model prep raw.onnx --calibration path/to/calib_dir --out raw.int8.onnx
+tan model prep raw.onnx --calibration path/to/calib_dir --per-channel
+tan model prep raw.onnx --calibration path/to/calib_dir --format json
+```
+
+Quantizes an ONNX model to INT8 (QDQ static quantization) and reports
+the **fp32-vs-int8 accuracy delta** -- turning "quantization is a dark
+art" into a guided, measured flow. Entirely on free `onnxruntime`/`onnx`
+(`onnxruntime.quantization` + `onnxruntime.InferenceSession`); no
+vendor toolchain (Vela/dxcom/DRP-AI) is invoked here -- that compile
+step is a separate, later stage.
+
+`--calibration` is a directory of `*.npy` samples, each a single-sample
+batch matching the model's input shape (dynamic/-1 dims wildcard). The
+calibration set is validated *before* quantizing: fewer than
+`--min-samples` (default 8) samples, or any sample whose shape doesn't
+match the model input, is a clear error -- a bad calibration set is the
+silent accuracy killer this guards against. `--per-channel` enables
+per-channel weight quantization, which often recovers accuracy lost to
+per-tensor quantization. `RAW` must be `.onnx` in this release --
+TFLite/PyTorch/Keras -> ONNX conversion is a follow-on; a non-ONNX
+input is a clear "not supported yet" error, never a wrong result.
+Requires the `model-prep` extra (`pip install alp-sdk[model-prep]`).
+
+After quantizing, both the fp32 and INT8 models run on every
+calibration sample and the outputs are compared: top-1 agreement %,
+mean cosine similarity, and max absolute error, rolled up into a
+`verdict` of `good` or `degraded` (top-1 agreement below 95% by
+default) plus concrete `guidance` when degraded (try `--per-channel`,
+add more representative calibration data, keep sensitive ops in fp16).
+A quantize or inference failure exits 1 -- it never emits a "prepped"
+model that didn't actually quantize or that can't run.
+
+`--format json` payload:
+
+```json
+{
+  "raw": "raw.onnx",
+  "quantized": "raw.int8.onnx",
+  "accuracy": {
+    "samples": 8,
+    "top1_agreement_pct": 100.0,
+    "mean_cosine": 0.9998,
+    "max_abs_err": 0.010144,
+    "verdict": "good",
+    "guidance": null
+  }
+}
+```
+
 ### `tan doctor` -- host environment preflight
 
 ```bash

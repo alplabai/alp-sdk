@@ -43,6 +43,13 @@ model-compile = [
 mcp = [
     "mcp>=1.2",
 ]
+# License-free INT8 quantize + fp32-vs-int8 accuracy report ("alp model prep").
+# onnxruntime.quantization only -- no vendor toolchain (Vela/dxcom/DRP-AI).
+model-prep = [
+    "onnxruntime>=1.17",
+    "onnx>=1.15",
+    "numpy>=1.23",
+]
 
 # No `alp` console-script: `tan` (the standalone Rust CLI) is the sole
 # user-facing command surface (ADR-0020 end-state B). The `alp_cli` package
