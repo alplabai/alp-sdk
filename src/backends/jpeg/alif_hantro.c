@@ -55,9 +55,11 @@
 #include <string.h>
 
 #include <zephyr/device.h>
+#include <zephyr/devicetree.h>
 #include <zephyr/drivers/video.h>
 #include <zephyr/drivers/video/video_alif.h>
 #include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/video/video.h> /* video_import_buffer() -- see hantro_encode(). */
 
@@ -67,9 +69,62 @@
 
 #include "jpeg_ops.h"
 
+LOG_MODULE_REGISTER(alp_jpeg_alif_hantro, CONFIG_LOG_DEFAULT_LEVEL);
+
 #ifndef CONFIG_ALP_SDK_MAX_JPEG_HANDLES
 #define CONFIG_ALP_SDK_MAX_JPEG_HANDLES 1
 #endif
+
+/*
+ * DMA-reachable-buffer contract (DFP-confirmed, see the @note on
+ * alp_jpeg_encode() in <alp/jpeg.h>): both Alif's own Driver_JPEG.c and this
+ * driver's Zephyr port (jpeg_hantro_vc9000e.c) write the RAW caller pointer
+ * into the Hantro AXI base registers (JPEG_SWREG8/12/13) -- no bounce
+ * buffer, no CPU-local-to-system-bus translation.  That makes the M55's
+ * ITCM/DTCM windows silently wrong destinations: they hold real data from
+ * the CPU's point of view, but the JPEG block's AXI master cannot reach
+ * them at those addresses (a global alias exists -- see the board dts
+ * `global_base` comment above `&itcm`/`&dtcm` -- but nothing here would
+ * rewrite the pointer to use it).  Reject them here, before programming the
+ * hardware, rather than let the encode hang or corrupt memory.
+ *
+ * Ranges come from the DT itcm/dtcm nodes' `reg` (ensemble_rtss_he.dtsi),
+ * not a hardcoded literal, so a core with different TCM sizing still gets
+ * the right guard.
+ */
+#define _ITCM_BASE DT_REG_ADDR(DT_NODELABEL(itcm))
+#define _ITCM_SIZE DT_REG_SIZE(DT_NODELABEL(itcm))
+#define _DTCM_BASE DT_REG_ADDR(DT_NODELABEL(dtcm))
+#define _DTCM_SIZE DT_REG_SIZE(DT_NODELABEL(dtcm))
+
+static bool _range_overlaps(uintptr_t addr, size_t len, uintptr_t region_base, size_t region_size)
+{
+	uintptr_t addr_end   = addr + len;
+	uintptr_t region_end = region_base + region_size;
+
+	return (addr < region_end) && (addr_end > region_base);
+}
+
+/**
+ * @brief True if [p, p+len) does NOT overlap a core-local TCM window.
+ *
+ * Only rejects the ITCM/DTCM local windows -- everything else (SRAM0/1,
+ * MRAM, external RAM) is a valid HW-DMA destination and must pass, e.g.
+ * the silicon-proven SRAM0 addresses 0x02000000 (out_buf) / 0x02002000
+ * (nv12_buf) used by the bench example.
+ */
+static bool _is_dma_reachable(const void *p, size_t len)
+{
+	uintptr_t addr = (uintptr_t)p;
+
+	if (_range_overlaps(addr, len, _ITCM_BASE, _ITCM_SIZE)) {
+		return false;
+	}
+	if (_range_overlaps(addr, len, _DTCM_BASE, _DTCM_SIZE)) {
+		return false;
+	}
+	return true;
+}
 
 /** Per-handle backend state, held via alp_jpeg_backend_state_t::be_data. */
 typedef struct {
@@ -194,6 +249,27 @@ static alp_status_t hantro_encode(alp_jpeg_backend_state_t    *state,
 	 */
 	if (req->format != ALP_PIXFMT_NV12 || req->subsample != ALP_JPEG_SUBSAMPLE_420 ||
 	    req->y_plane == NULL) {
+		return ALP_ERR_NOSUPPORT;
+	}
+
+	/* NV12: one Y plane immediately followed, at stride*height, by an
+	 * interleaved half-height UV plane -- see the struct doc on
+	 * alp_jpeg_encode_req_t. Total footprint = stride*height*3/2. */
+	uint32_t in_stride = (req->y_stride != 0u) ? req->y_stride : req->width;
+	size_t   in_len    = (size_t)in_stride * req->height * 3u / 2u;
+
+	if (!_is_dma_reachable(req->y_plane, in_len)) {
+		LOG_ERR("hantro jpeg: input buffer %p is in core-local TCM; core-local "
+		        "TCM is not reachable by the JPEG DMA master; place the buffer "
+		        "in global SRAM",
+		        req->y_plane);
+		return ALP_ERR_NOSUPPORT;
+	}
+	if (!_is_dma_reachable(out_buf, out_cap)) {
+		LOG_ERR("hantro jpeg: output buffer %p is in core-local TCM; core-local "
+		        "TCM is not reachable by the JPEG DMA master; place the buffer "
+		        "in global SRAM",
+		        out_buf);
 		return ALP_ERR_NOSUPPORT;
 	}
 

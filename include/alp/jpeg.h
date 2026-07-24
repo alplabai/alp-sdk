@@ -125,7 +125,9 @@ typedef struct {
 
 /** Capabilities of an opened JPEG-encoder handle. */
 typedef struct {
-	bool     hw_accelerated;  /**< true if a hardware engine backs this handle. */
+	bool     hw_accelerated;  /**< true if a hardware engine backs this handle;
+	                           *   see the DMA-reachable-buffer @note on
+	                           *   @ref alp_jpeg_encode. */
 	bool     mjpeg_supported; /**< true if the backend can chain frames as M-JPEG. */
 	uint16_t max_width;
 	uint16_t max_height;
@@ -161,11 +163,25 @@ alp_jpeg_t *alp_jpeg_open(const alp_jpeg_config_t *cfg);
  *                       @ref ALP_ERR_NOMEM the backend sets it to the
  *                       required size when known.
  *
+ * @note A hardware-accelerated backend (@ref alp_jpeg_caps_t::hw_accelerated
+ *       true) DMAs directly to/from the caller-supplied buffers -- it does
+ *       NOT bounce them through an intermediate copy or translate the
+ *       pointer.  When @c hw_accelerated is true, @p req's input plane(s)
+ *       (@c y_plane / @c u_plane / @c v_plane) AND @p out_buf must reside in
+ *       memory the hardware's DMA master can reach: globally-addressable
+ *       system RAM, NOT core-local tightly-coupled memory (TCM), and should
+ *       be cache-coherent.  A backend that detects a buffer it cannot DMA to
+ *       returns @ref ALP_ERR_NOSUPPORT rather than encode incorrectly (or
+ *       hang); the caller can relocate the buffer or fall back to a
+ *       software backend (@c hw_accelerated false), which has no such
+ *       placement restriction.
+ *
  * @return @ref ALP_OK on success, or one of:
  *         - @ref ALP_ERR_INVAL -- NULL @p h / @p req / @p out_buf /
  *           @p out_len, or a zero @c width / @c height.
  *         - @ref ALP_ERR_NOSUPPORT -- @c format or @c subsample the
- *           backend can't do.
+ *           backend can't do, or (hardware backends only) a buffer that
+ *           is not DMA-reachable -- see the @note above.
  *         - @ref ALP_ERR_NOMEM -- @p out_cap too small for the result.
  *         - @ref ALP_ERR_IO -- hardware-engine fault.
  *         - @ref ALP_ERR_NOT_IMPLEMENTED -- backend has no encode path.

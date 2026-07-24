@@ -465,8 +465,24 @@ static void jpeg_start_encode(const struct device *dev)
 
 	jpeg_header_generation(data->header_info);
 
-	/* Flush output buffer header cache */
-	(void)sys_cache_data_flush_and_invd_range(buf->buffer, data->header_size);
+	/*
+	 * Flush the FULL output buffer, not just the header.
+	 *
+	 * v4.4 coherency adaptation (Alp Lab AB): buf->buffer is a caller
+	 * .bss allocation.  With CONFIG_DCACHE=y its dirty/zeroed lines can
+	 * span the whole buffer, not just the header_size prefix we just
+	 * wrote -- a line anywhere in the remainder can still evict and
+	 * write back mid-encode, after the HW has already started depositing
+	 * compressed payload past the header.  Flushing only header_size (as
+	 * the fork did) leaves that entire tail unmanaged: the post-encode
+	 * invalidate below then reads back a stale/clobbered mix instead of
+	 * what the HW wrote.  Flush buf->size (the real allocation, matching
+	 * the SWREG9 output-size-limit programmed below) so every line the HW
+	 * may write to is clean before ENC_ENABLE.  Inert under this repo's
+	 * regcheck example (CONFIG_DCACHE=n) -- that's why this fix is not
+	 * bench-gated; it matters for real DCACHE-on callers.
+	 */
+	(void)sys_cache_data_flush_and_invd_range(buf->buffer, buf->size);
 
 	/*
 	 * Set the output-buffer size limit.
