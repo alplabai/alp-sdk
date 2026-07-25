@@ -1026,6 +1026,10 @@
       "script": "scripts/check_version_doc_sync.py"
     },
     {
+      "purpose": "Guard: every scripts/ and firmware/ write_text() of a repo-tree text artifact passes newline=\"\".",
+      "script": "scripts/check_write_text_newline.py"
+    },
+    {
       "purpose": "Byte-parity gate: a Zephyr example's own `CMakeLists.txt` (which shells `alp_project.py --emit zephyr-conf --core <id>` at configure time) and the planner's build-plan `configArtefacts` (`--emit build-plan`, consumed by `tan`) MUST materialise the identical `alp.conf` for the same core.",
       "script": "scripts/check_zephyr_conf_parity.py"
     }

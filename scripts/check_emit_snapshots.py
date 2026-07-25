@@ -233,7 +233,7 @@ def main() -> int:
         got = _emit(tool, board, mode, extra)
         golden = SNAP_DIR / f"{snap_id}.snap"
         if args.update:
-            golden.write_text(got, encoding="utf-8")
+            golden.write_text(got, encoding="utf-8", newline="")
             print(f"wrote {golden.relative_to(REPO)}")
             continue
         if not golden.is_file():

@@ -336,6 +336,7 @@ def run_cell(example_dir: Path, sku: str, presets: dict[str, dict],
         raise CellError("no app-carrying core to emit for")
 
     tmp_yaml = tmpdir / f"{sku}--{example_dir.name}.board.yaml"
+    # write-text-newline-exempt: tmpdir board.yaml fed to alp_project.py
     tmp_yaml.write_text(yaml.safe_dump(doc, sort_keys=True), encoding="utf-8")
 
     for core in emit_cores:

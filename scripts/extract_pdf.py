@@ -19,7 +19,7 @@ def main(argv: list[str] | None = None) -> int:
 
     reader = PdfReader(args.input)
 
-    with open(args.output, "w", encoding="utf-8") as f:
+    with open(args.output, "w", encoding="utf-8", newline="") as f:
         f.write(f"=== {args.input} ({len(reader.pages)} pages) ===\n")
         for idx, page in enumerate(reader.pages, start=1):
             f.write(f"\n========== PAGE {idx} ==========\n")
