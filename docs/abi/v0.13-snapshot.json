@@ -4724,6 +4724,14 @@
     },
     "alp/chips/ina236.h": {
       "functions": {
+        "ina236_avg_count": {
+          "hash": "caea8159aaed6b23",
+          "signature": "uint16_t ina236_avg_count(ina236_avg_t avg);"
+        },
+        "ina236_calibration_for": {
+          "hash": "25f673a5c2aefb1b",
+          "signature": "alp_status_t ina236_calibration_for(float shunt_ohms, float max_current_a, ina236_adcrange_t adcrange, uint16_t *shunt_cal_out, float *current_lsb_a_out);"
+        },
         "ina236_configure": {
           "hash": "db04653c0ba893d8",
           "signature": "alp_status_t ina236_configure(ina236_t *ctx, ina236_avg_t avg, ina236_ct_t vbusct, ina236_ct_t vshct, ina236_mode_t mode);"
@@ -4732,9 +4740,17 @@
           "hash": "610691cc52d5ecfc",
           "signature": "alp_status_t ina236_conversion_ready(ina236_t *ctx, bool *ready_out);"
         },
+        "ina236_conversion_time_us": {
+          "hash": "1a3f63b606e87cc7",
+          "signature": "uint16_t ina236_conversion_time_us(ina236_ct_t ct);"
+        },
         "ina236_deinit": {
           "hash": "071e9b37aebdc9d8",
           "signature": "void ina236_deinit(ina236_t *ctx);"
+        },
+        "ina236_full_scale_a": {
+          "hash": "00c692a09bed1ef4",
+          "signature": "float ina236_full_scale_a(float shunt_ohms, ina236_adcrange_t adcrange);"
         },
         "ina236_init": {
           "hash": "39ab4f0b150f2cf0",

@@ -228,42 +228,107 @@ ZTEST(alp_chips, test_ina236_power_lsb_is_32x_current_lsb)
  * current more coarsely than the ADC resolved it.  The +5V EVK rail is the
  * live case: board data rates it 4.0 A, but on the +/-20.48 mV range a 20 mOhm
  * shunt saturates at 1.024 A. */
-ZTEST(alp_chips, test_ina236_current_lsb_clamps_to_adcrange_full_scale)
+ZTEST(alp_chips, test_ina236_full_scale_is_range_over_shunt)
 {
-	ina236_t   ctx;
-	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
-	    .bus_id     = ALP_E1M_I2C0,
-	    .bitrate_hz = 100000,
-	});
-	zassert_not_null(bus);
+	/* SBOSA81D table 7-4 full scales over the shunt: this is the real
+	 * measurement ceiling, above which the ADC saturates regardless of the
+	 * requested reporting scale. */
+	zassert_within(ina236_full_scale_a(0.020f, INA236_ADCRANGE_81MV), 4.096f, 1e-4f);
+	zassert_within(ina236_full_scale_a(0.020f, INA236_ADCRANGE_20MV), 1.024f, 1e-4f);
+	zassert_within(ina236_full_scale_a(0.050f, INA236_ADCRANGE_20MV), 0.4096f, 1e-5f);
+	/* Non-positive / non-finite shunt must not divide by zero. */
+	zassert_equal(ina236_full_scale_a(0.0f, INA236_ADCRANGE_81MV), 0.0f);
+	zassert_equal(ina236_full_scale_a(NAN, INA236_ADCRANGE_81MV), 0.0f);
+}
 
-	/* The init below reaches apply_calibration() only if the probe passes,
-	 * which needs a responding device; on native_sim it does not. Assert on
-	 * the arithmetic invariant instead, which is what actually regressed:
-	 * derive both scales by hand and prove the clamp direction. */
-	const float r_shunt = 0.020f;
-	const float fs_81mv = (81920.0f / 1000000.0f) / r_shunt; /* 4.096 A */
-	const float fs_20mv = (20480.0f / 1000000.0f) / r_shunt; /* 1.024 A */
-	zassert_within(fs_81mv, 4.096f, 1e-4f);
-	zassert_within(fs_20mv, 1.024f, 1e-4f);
+/* The calibration arithmetic is where BOTH shipped scaling bugs lived (power
+ * 625x low, SHUNT_CAL not /4 on the fine range) and where a third hid (a
+ * saturating clamp that left CURRENT_LSB describing a register value that was
+ * never written).  ina236_calibration_for() is the exact function
+ * apply_calibration() calls, so these assertions exercise production code
+ * rather than restating it -- the earlier version of this test re-derived the
+ * expression locally and would still have passed with the clamp reverted. */
+ZTEST(alp_chips, test_ina236_calibration_matches_datasheet_and_survives_clamp)
+{
+	uint16_t cal = 0;
+	float    lsb = 0.0f;
 
-	/* Matched points: CURRENT_LSB == the shunt ADC's own current step. */
-	zassert_within(fs_81mv / 32768.0f, (2.5e-6f) / r_shunt, 1e-9f, "81.92 mV range: 125 uA");
-	zassert_within(fs_20mv / 32768.0f, (625e-9f) / r_shunt, 1e-9f, "20.48 mV range: 31.25 uA");
+	/* E1M EVK +5V rail on the COARSE range: 20 mOhm, rated 4.0 A.  Requested
+	 * scale is just under the 4.096 A ceiling, so it is honoured.
+	 * SHUNT_CAL = 0.00512 / (CURRENT_LSB x R) rounds 2097.15 -> 2097, and
+	 * CURRENT_LSB is then back-derived from 2097. */
+	zassert_equal(ina236_calibration_for(0.020f, 4.0f, INA236_ADCRANGE_81MV, &cal, &lsb), ALP_OK);
+	zassert_equal(cal, 2097, "eq. 1 rounds to 2097, got %u", cal);
+	zassert_within(lsb, 0.00512f / (2097.0f * 0.020f), 1e-9f);
 
-	/* A 4.0 A board rating on the 20.48 mV range must clamp to 1.024 A,
-	 * i.e. 31.25 uA per count and 1.0 mW per POWER count -- NOT the
-	 * 122.07 uA / 3.906 mW an unclamped derivation would give. */
-	const float clamped = (4.0f < fs_20mv) ? 4.0f : fs_20mv;
-	zassert_within(clamped / 32768.0f, 31.25e-6f, 1e-9f);
-	zassert_within(32.0f * (clamped / 32768.0f), 0.001f, 1e-9f, "1.0 mW per POWER count");
+	/* Same rail on the FINE range.  The 4.0 A request exceeds the 1.024 A
+	 * the range can measure, so it clamps -- giving the ADC-matched
+	 * 31.25 uA and, per eq. 4, exactly 1.0 mW per POWER count.  This is the
+	 * configuration the bench measurement ran at. */
+	zassert_equal(ina236_calibration_for(0.020f, 4.0f, INA236_ADCRANGE_20MV, &cal, &lsb), ALP_OK);
+	zassert_equal(cal, 2048, "0.00512/(31.25uA x 20mOhm)/4 = 2048, got %u", cal);
+	zassert_within(lsb, 31.25e-6f, 1e-10f, "ADC-matched CURRENT_LSB");
+	zassert_within(32.0f * lsb, 0.001f, 1e-9f, "1.0 mW per POWER count (eq. 4)");
 
-	/* A caller asking for a TIGHTER scale than the range keeps it. */
-	const float tight = (0.5f < fs_20mv) ? 0.5f : fs_20mv;
-	zassert_within(tight, 0.5f, 1e-6f, "a deliberate narrow scale must not be widened");
+	/* A DELIBERATELY tighter scale than the range is honoured, not widened. */
+	zassert_equal(ina236_calibration_for(0.020f, 0.5f, INA236_ADCRANGE_81MV, &cal, &lsb), ALP_OK);
+	zassert_true(lsb < 31.25e-6f, "a narrow request must give a finer LSB");
 
-	(void)ctx;
-	alp_i2c_close(bus);
+	/* SATURATION: 20 mOhm at 0.2 A wants SHUNT_CAL 41943, above the 15-bit
+	 * 0x7FFF ceiling.  The clamp must be reflected in CURRENT_LSB -- keeping
+	 * the requested 0.2/32768 = 6.1035 uA would make every current and power
+	 * reading 21.9 % low while still returning ALP_OK. */
+	zassert_equal(ina236_calibration_for(0.020f, 0.2f, INA236_ADCRANGE_81MV, &cal, &lsb), ALP_OK);
+	zassert_equal(cal, 32767, "must saturate at the 15-bit maximum, got %u", cal);
+	zassert_within(lsb,
+	               0.00512f / (32767.0f * 0.020f),
+	               1e-10f,
+	               "CURRENT_LSB must follow the CLAMPED SHUNT_CAL");
+	zassert_true(lsb > 6.2e-6f, "must NOT keep the unclamped 6.1035 uA");
+
+	/* INVARIANT: SHUNT_CAL always lands in [2048, 32767].  2048 is the
+	 * ADC-matched floor -- clamping the scale to the range's full scale FS/R
+	 * makes (scale/32768) x R = FS/32768, which is independent of R, so
+	 * cal = 0.00512 x 32768 / FS / range_div = 2048 on BOTH ranges.  Any
+	 * narrower request only pushes cal up, toward the 15-bit ceiling.  This
+	 * is what makes the SHUNT_CAL=0 case ("report zero current and power")
+	 * unreachable rather than merely unlikely.  Sweep a wide spread of
+	 * shunts and scales, including absurd ones, and prove the bound holds. */
+	const float             shunts[] = { 0.001f, 0.020f, 0.050f, 0.500f, 1000.0f };
+	const float             scales[] = { 0.001f, 0.2f, 1.0f, 4.0f, 1000.0f };
+	const ina236_adcrange_t ranges[] = { INA236_ADCRANGE_81MV, INA236_ADCRANGE_20MV };
+	for (size_t r = 0; r < ARRAY_SIZE(shunts); ++r) {
+		for (size_t s = 0; s < ARRAY_SIZE(scales); ++s) {
+			for (size_t g = 0; g < ARRAY_SIZE(ranges); ++g) {
+				zassert_equal(ina236_calibration_for(shunts[r], scales[s], ranges[g], &cal, &lsb),
+				              ALP_OK,
+				              "R=%f scale=%f range=%d",
+				              (double)shunts[r],
+				              (double)scales[s],
+				              (int)ranges[g]);
+				zassert_between_inclusive(cal,
+				                          2048,
+				                          32767,
+				                          "SHUNT_CAL %u out of [2048,32767] for "
+				                          "R=%f scale=%f range=%d",
+				                          cal,
+				                          (double)shunts[r],
+				                          (double)scales[s],
+				                          (int)ranges[g]);
+				zassert_true(lsb > 0.0f);
+			}
+		}
+	}
+
+	/* Argument guards. */
+	zassert_equal(ina236_calibration_for(0.020f, 1.0f, INA236_ADCRANGE_81MV, NULL, &lsb),
+	              ALP_ERR_INVAL);
+	zassert_equal(ina236_calibration_for(0.020f, 1.0f, INA236_ADCRANGE_81MV, &cal, NULL),
+	              ALP_ERR_INVAL);
+	zassert_equal(ina236_calibration_for(0.0f, 1.0f, INA236_ADCRANGE_81MV, &cal, &lsb),
+	              ALP_ERR_INVAL);
+	zassert_equal(ina236_calibration_for(0.020f, NAN, INA236_ADCRANGE_81MV, &cal, &lsb),
+	              ALP_ERR_INVAL);
 }
 
 ZTEST(alp_chips, test_ina236_sample_period_matches_datasheet_tables)

@@ -255,6 +255,23 @@ alp_status_t ina236_configure(ina236_t     *ctx,
                               ina236_mode_t mode);
 
 /**
+ * @brief Number of conversions an AVG code averages (SBOSA81D table 7-4):
+ *        1, 4, 16, 64, 128, 256, 512, 1024.  0 for an out-of-range code.
+ *
+ * Exposed so a caller reporting its own configuration reads the datasheet
+ * table from the driver that owns it, instead of restating a literal that
+ * silently stops matching the code actually programmed.
+ */
+uint16_t ina236_avg_count(ina236_avg_t avg);
+
+/**
+ * @brief Conversion time in microseconds for a VBUSCT/VSHCT code (SBOSA81D
+ *        table 7-4): 140, 204, 332, 588, 1100, 2116, 4156, 8244.  0 for an
+ *        out-of-range code.  Both fields share the encoding.
+ */
+uint16_t ina236_conversion_time_us(ina236_ct_t ct);
+
+/**
  * @brief Conversion period in microseconds for a CONFIG field combination.
  *
  * AVG multiplies the summed conversion time of whichever measurements
@@ -309,6 +326,50 @@ alp_status_t ina236_read_power_raw(ina236_t *ctx, uint16_t *raw_out);
  *        32 x CURRENT_LSB (SBOSA81D eq. 4).  0.0f if ctx is null.
  */
 float ina236_power_lsb_w(const ina236_t *ctx);
+
+/**
+ * @brief Largest current this shunt + ADC range can measure at all:
+ *        (ADCRANGE full-scale shunt voltage) / shunt_ohms.
+ *
+ * Currents above it saturate the shunt ADC no matter what scale the caller
+ * asked for, so this is the real measurement ceiling. 20 mOhm gives 4.096 A
+ * on the +/-81.92 mV range and 1.024 A on the +/-20.48 mV range. Pure
+ * function of the datasheet full scales; returns 0.0f for a non-positive or
+ * non-finite shunt.
+ */
+float ina236_full_scale_a(float shunt_ohms, ina236_adcrange_t adcrange);
+
+/**
+ * @brief Compute the SHUNT_CAL register value and the CURRENT_LSB it yields,
+ *        without touching the bus.
+ *
+ * This is the calibration arithmetic `ina236_init()` itself uses (SBOSA81D
+ * eq. 1 plus the §8.1.2 ADCRANGE=1 divide-by-4), exposed because it is the
+ * part worth testing and the part that has been wrong: it is a pure function,
+ * so a unit test drives the same code that ships instead of restating it.
+ *
+ * `current_lsb_a_out` is derived from the SHUNT_CAL actually produced, not
+ * from `max_current_a` — the register is a 15-bit integer that both rounds and
+ * saturates, and carrying the requested LSB past either would leave every
+ * current and power reading wrong by the discarded ratio.
+ *
+ * @param[in]  shunt_ohms     Shunt resistance in Ohms; finite and > 0.
+ * @param[in]  max_current_a  Requested reporting scale in Amps; clamped to
+ *                            ina236_full_scale_a() (see ina236_init()).
+ * @param[in]  adcrange       ADC full-scale range.
+ * @param[out] shunt_cal_out  SHUNT_CAL to program (CALIBRATION bits 14-0).
+ * @param[out] current_lsb_a_out  Amps per CURRENT-register count.
+ *
+ * @return ALP_OK, or ALP_ERR_INVAL on a null out-pointer, a non-finite or
+ *         non-positive input, or a request whose SHUNT_CAL rounds to 0 (which
+ *         the datasheet defines as "report zero current and power", so it
+ *         cannot be calibrated rather than silently always reading zero).
+ */
+alp_status_t ina236_calibration_for(float             shunt_ohms,
+                                    float             max_current_a,
+                                    ina236_adcrange_t adcrange,
+                                    uint16_t         *shunt_cal_out,
+                                    float            *current_lsb_a_out);
 
 /** @brief Soft-reset the chip and rerun the calibration step.
  *  Useful after a brown-out or detected bus-voltage glitch. */

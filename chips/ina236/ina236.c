@@ -91,24 +91,37 @@ static bool addr_in_strap_range(uint8_t addr)
 	return (addr >= 0x40u && addr <= 0x43u) || (addr >= 0x48u && addr <= 0x4Bu);
 }
 
-/* SHUNT_CAL = 0.00512 / (CURRENT_LSB * R_SHUNT)  per datasheet
- * SBOSA81D eq. 1, where 0.00512 is "an internal fixed value used to
- * ensure scaling is maintained properly".  CURRENT_LSB is in amps and is
- * the eq.-2 minimum for a full-scale 16-bit signed CURRENT register --
- * derived below from the reporting scale, which is the requested
- * max_current clamped to what this ADCRANGE can actually measure.
- *
- * ADCRANGE=1 quarters the shunt LSB (2.5 uV -> 625 nV), so the raw
- * SHUNT register is 4x larger for the same physical shunt voltage.
- * Since CURRENT = SHUNT x SHUNT_CAL internally, SHUNT_CAL must be
- * divided by 4 to keep CURRENT (and therefore POWER) correctly scaled
- * -- SBOSA81D section 8.1.2 states this explicitly under eq. 1
- * ("The value of SHUNT_CAL must be divided by 4 for ADCRANGE = 1").
- * Omitting it reads current and power 4x high in the 20.48 mV range. */
-static alp_status_t apply_calibration(ina236_t *ctx)
+float ina236_full_scale_a(float shunt_ohms, ina236_adcrange_t adcrange)
 {
-	if (!isfinite(ctx->shunt_ohms) || ctx->shunt_ohms <= 0.0f) return ALP_ERR_INVAL;
-	if (!isfinite(ctx->max_current_a) || ctx->max_current_a <= 0.0f) return ALP_ERR_INVAL;
+	if (!isfinite(shunt_ohms) || shunt_ohms <= 0.0f) return 0.0f;
+	float fs_uv =
+	    (adcrange == INA236_ADCRANGE_20MV) ? INA236_FS_UV_RANGE_20MV : INA236_FS_UV_RANGE_81MV;
+	return (fs_uv / 1000000.0f) / shunt_ohms;
+}
+
+/* SHUNT_CAL = 0.00512 / (CURRENT_LSB * R_SHUNT)  per datasheet SBOSA81D
+ * eq. 1, where 0.00512 is "an internal fixed value used to ensure scaling
+ * is maintained properly".  CURRENT_LSB is in amps and is the eq.-2 minimum
+ * for a full-scale 16-bit signed CURRENT register -- derived below from the
+ * reporting scale, which is the requested max_current clamped to what this
+ * ADCRANGE can actually measure.
+ *
+ * ADCRANGE=1 quarters the shunt LSB (2.5 uV -> 625 nV), so the raw SHUNT
+ * register is 4x larger for the same physical shunt voltage.  Since
+ * CURRENT = SHUNT x SHUNT_CAL internally, SHUNT_CAL must be divided by 4 to
+ * keep CURRENT (and therefore POWER) correctly scaled -- SBOSA81D section
+ * 8.1.2 states this explicitly under eq. 1 ("The value of SHUNT_CAL must be
+ * divided by 4 for ADCRANGE = 1").  Omitting it reads current and power 4x
+ * high in the 20.48 mV range. */
+alp_status_t ina236_calibration_for(float             shunt_ohms,
+                                    float             max_current_a,
+                                    ina236_adcrange_t adcrange,
+                                    uint16_t         *shunt_cal_out,
+                                    float            *current_lsb_a_out)
+{
+	if (shunt_cal_out == NULL || current_lsb_a_out == NULL) return ALP_ERR_INVAL;
+	if (!isfinite(shunt_ohms) || shunt_ohms <= 0.0f) return ALP_ERR_INVAL;
+	if (!isfinite(max_current_a) || max_current_a <= 0.0f) return ALP_ERR_INVAL;
 
 	/* CURRENT_LSB sets the REPORTING scale of the CURRENT and POWER
 	 * registers; it cannot create resolution the shunt ADC does not have.
@@ -130,21 +143,60 @@ static alp_status_t apply_calibration(ina236_t *ctx)
 	 * the wasteful direction is clamped: a caller that asks for a TIGHTER
 	 * scale than the range (a known-small load) keeps it, since that is a
 	 * deliberate resolution-for-headroom trade the datasheet allows. */
-	float fs_uv =
-	    (ctx->adcrange == INA236_ADCRANGE_20MV) ? INA236_FS_UV_RANGE_20MV : INA236_FS_UV_RANGE_81MV;
-	float fs_current_a = (fs_uv / 1000000.0f) / ctx->shunt_ohms;
-	float scale_a      = (ctx->max_current_a < fs_current_a) ? ctx->max_current_a : fs_current_a;
+	float fs_current_a = ina236_full_scale_a(shunt_ohms, adcrange);
+	float scale_a      = (max_current_a < fs_current_a) ? max_current_a : fs_current_a;
 
-	ctx->full_scale_a  = fs_current_a;
-	ctx->current_lsb_a = scale_a / 32768.0f;
-	float cal_f        = 0.00512f / (ctx->current_lsb_a * ctx->shunt_ohms);
-	if (ctx->adcrange == INA236_ADCRANGE_20MV) cal_f /= 4.0f;
-	/* current_lsb_a and shunt_ohms are both finite and > 0 (checked
-	 * above), so cal_f is finite here too -- no NaN/Inf can reach the
-	 * uint16_t cast below; only the documented saturating clamp. */
+	float range_div = (adcrange == INA236_ADCRANGE_20MV) ? 4.0f : 1.0f;
+	float cal_f     = 0.00512f / ((scale_a / 32768.0f) * shunt_ohms) / range_div;
+	/* scale_a and shunt_ohms are both finite and > 0 (checked above), so
+	 * cal_f is finite here -- no NaN/Inf can reach the uint16_t cast. */
 	if (cal_f > INA236_SHUNT_CAL_MAX) cal_f = INA236_SHUNT_CAL_MAX;
 	if (cal_f < 0.0f) cal_f = 0.0f;
-	uint16_t cal = (uint16_t)cal_f;
+	/* ROUND, don't truncate.  Truncation biases every reading low, and in
+	 * float32 it does so even in the exactly-representable cases: the
+	 * ADC-matched +5V configuration (20 mOhm, 20.48 mV range) computes
+	 * 8191.9995 rather than 8192 because 20480/1e6 is not exact in float,
+	 * so a cast would program 2047 instead of 2048 and skew CURRENT_LSB by
+	 * 0.05 %. Half-up rounding is safe against the ceiling because cal_f was
+	 * already clamped to INA236_SHUNT_CAL_MAX above. */
+	uint16_t cal = (uint16_t)(cal_f + 0.5f);
+	/* SHUNT_CAL is bounded BELOW by 2048 for every valid input, so it can
+	 * never be 0 here: the reporting scale is clamped to the range's full
+	 * scale FS/R, hence (scale/32768) * R <= FS/32768, hence
+	 * cal >= 0.00512 * 32768 / FS / range_div = 2048 for both ranges (the
+	 * ADC-matched point).  The guard stays because the next line divides by
+	 * `cal`, and a SHUNT_CAL of 0 would mean "report zero current and
+	 * power" (datasheet §7.6.1.6) rather than an error the caller could
+	 * see -- it is a division guard, not a reachable input path. */
+	if (cal == 0u) return ALP_ERR_INVAL;
+
+	/* Back-compute CURRENT_LSB from the SHUNT_CAL actually written, never
+	 * from the value we wanted.  The register is a 15-bit integer, so it
+	 * both rounds and saturates; keeping the requested LSB after either
+	 * would make every current and power read wrong by exactly the ratio
+	 * we discarded, while still returning ALP_OK.  Saturation is reachable
+	 * through the documented "narrower scale than the range" path -- e.g.
+	 * a 20 mOhm shunt with max_current_a = 0.2 A wants SHUNT_CAL 41943,
+	 * clamps to 32767, and would otherwise read 21.9 % low. Deriving the
+	 * LSB from the register keeps the two consistent by construction. */
+	*current_lsb_a_out = 0.00512f / ((float)cal * range_div * shunt_ohms);
+	*shunt_cal_out     = cal;
+	return ALP_OK;
+}
+
+/* Thin wrapper: the arithmetic above is a pure function so it can be unit
+ * tested without a bus (the chips fake I2C layer is dormant by design), and
+ * production takes the same path -- a test cannot drift from what ships. */
+static alp_status_t apply_calibration(ina236_t *ctx)
+{
+	uint16_t     cal = 0;
+	float        lsb = 0.0f;
+	alp_status_t s =
+	    ina236_calibration_for(ctx->shunt_ohms, ctx->max_current_a, ctx->adcrange, &cal, &lsb);
+	if (s != ALP_OK) return s;
+
+	ctx->full_scale_a  = ina236_full_scale_a(ctx->shunt_ohms, ctx->adcrange);
+	ctx->current_lsb_a = lsb;
 	return reg_write16(ctx, INA236_REG_CALIBRATION, cal);
 }
 
@@ -308,6 +360,18 @@ alp_status_t ina236_configure(ina236_t     *ctx,
 	if (s != ALP_OK) return s;
 	ctx->cfg_cache = cfg;
 	return ALP_OK;
+}
+
+uint16_t ina236_avg_count(ina236_avg_t avg)
+{
+	if ((unsigned)avg > 7u) return 0u;
+	return INA236_AVG_N[(unsigned)avg];
+}
+
+uint16_t ina236_conversion_time_us(ina236_ct_t ct)
+{
+	if ((unsigned)ct > 7u) return 0u;
+	return INA236_CT_US[(unsigned)ct];
 }
 
 uint32_t
