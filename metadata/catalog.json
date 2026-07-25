@@ -1026,7 +1026,7 @@
       "script": "scripts/check_version_doc_sync.py"
     },
     {
-      "purpose": "Guard: every scripts/ write_text() of a repo-tree text artifact passes newline=\"\".",
+      "purpose": "Guard: every scripts/ and firmware/ write_text() of a repo-tree text artifact passes newline=\"\".",
       "script": "scripts/check_write_text_newline.py"
     },
     {

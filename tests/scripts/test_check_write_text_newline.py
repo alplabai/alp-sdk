@@ -204,3 +204,107 @@ def test_cli_exits_nonzero_on_violation(tmp_path):
     )
     assert result.returncode == 1
     assert "gen_thing.py" in result.stderr
+
+
+def test_firmware_tree_is_also_scanned(tmp_path):
+    """MAJOR 1: the gate must cover firmware/**/*.py too, not just
+    scripts/ -- the committed gd32-bridge/cc3501e protocol-vector
+    generators live there, with no scripts/ dir in this fixture at all."""
+    firmware = tmp_path / "firmware" / "some-bridge" / "tests"
+    firmware.mkdir(parents=True)
+    (firmware / "gen_thing.py").write_text(
+        'from pathlib import Path\n'
+        'Path("out.txt").write_text("hi", encoding="utf-8")\n',
+        encoding="utf-8",
+    )
+    problems = gate.find_problems(tmp_path)
+    assert len(problems) == 1
+    assert "firmware/some-bridge/tests/gen_thing.py" in problems[0]
+
+
+def test_marker_trailing_non_write_text_statement_does_not_leak(tmp_path):
+    """MAJOR 2: a marker trailing a statement that is NOT a write_text()
+    call is a trailing (non-standalone) comment on the line above -- it
+    must not leak onto an unmarked write_text() call on the very next
+    line, the same hole the id()/span-only guard used to leave open."""
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "gen_thing.py").write_text(
+        'from pathlib import Path\n'
+        'total = 1 + 1  # write-text-newline-exempt: temp\n'
+        'Path("out.txt").write_text("hi", encoding="utf-8")\n',
+        encoding="utf-8",
+    )
+    problems = gate.find_problems(tmp_path)
+    assert len(problems) == 1
+    assert ":3:" in problems[0]
+
+
+def test_bom_file_is_still_checked_not_skipped(tmp_path):
+    """MAJOR 3: a UTF-8 BOM makes `ast.parse()` on raw utf-8-decoded text
+    raise SyntaxError even though the file runs fine under CPython --
+    `tokenize.open()` must honour the BOM so a bare write_text() inside
+    such a file is still flagged, not silently skipped by a fail-open
+    except-continue."""
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "gen_thing.py").write_bytes(
+        b"\xef\xbb\xbf"
+        b'from pathlib import Path\n'
+        b'Path("out.txt").write_text("hi", encoding="utf-8")\n'
+    )
+    problems = gate.find_problems(tmp_path)
+    assert len(problems) == 1
+    assert 'newline=""' in problems[0]
+
+
+def test_marker_on_closing_line_of_multiline_call_is_honoured(tmp_path):
+    """MINOR 5a: a marker on the CLOSING line of a multi-line call (not
+    just its opening `node.lineno`) must still exempt it -- a
+    `candidates = [node.lineno]` regression would miss this."""
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "gen_thing.py").write_text(
+        'from pathlib import Path\n'
+        'Path("tmp.txt").write_text(\n'
+        '    "hi", encoding="utf-8"\n'
+        ')  # write-text-newline-exempt: tempdir scratch file\n',
+        encoding="utf-8",
+    )
+    assert gate.find_problems(tmp_path) == []
+
+
+def test_form_feed_does_not_wrongly_bind_a_too_far_marker(tmp_path):
+    """MINOR 5b: a raw form-feed character earlier in the file must not
+    skew the comment map's line numbers relative to ast/tokenize's own
+    count. `str.splitlines()` (unlike `tokenize`) also breaks on FF/VT/
+    NEL/U+2028/U+2029 -- using it here would shift this marker's line
+    number just enough to make it look adjacent to the call, when for
+    real (tokenize/ast) line numbers it is two lines above and must NOT
+    bind."""
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "gen_thing.py").write_text(
+        'from pathlib import Path\n'
+        's = "page\x0cbreak"\n'
+        'x = 1\n'
+        '# write-text-newline-exempt: too far to bind\n'
+        'y = 2\n'
+        'Path("tmp.txt").write_text("hi", encoding="utf-8")\n',
+        encoding="utf-8",
+    )
+    problems = gate.find_problems(tmp_path)
+    assert len(problems) == 1
+    assert 'newline=""' in problems[0]
+
+
+def test_cli_errors_on_root_with_no_scripts_or_firmware_dir(tmp_path):
+    """A typo'd --root that has neither scripts/ nor firmware/ must fail
+    loudly, not report a silent, empty-list OK."""
+    result = subprocess.run(
+        [sys.executable, str(REPO / "scripts" / "check_write_text_newline.py"),
+         "--root", str(tmp_path)],
+        capture_output=True, text=True,
+    )
+    assert result.returncode != 0
+    assert result.stderr.strip() != ""

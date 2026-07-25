@@ -490,7 +490,7 @@
     },
     {
       "id": "write-text-newline",
-      "description": "Every scripts/ write_text() of a repo-tree text artifact passes newline=\"\" (else Windows CRLF-rewrites it silently on write).",
+      "description": "Every scripts/ and firmware/ write_text() of a repo-tree text artifact passes newline=\"\" (else Windows CRLF-rewrites it silently on write).",
       "runner": "check-script",
       "script": "scripts/check_write_text_newline.py",
       "gate": true,
