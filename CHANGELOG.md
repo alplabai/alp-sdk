@@ -29,6 +29,35 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 - Pre-existing on `main` and `dev`, so it affects released versions.  The
   other four heredocs in the script were audited and contain no backticks
   or `$(...)`.
+### Added — `dac` peripheral class in the `board.yaml` `peripherals:` enum
+
+`core_entry.peripherals` covered `adc` but not `dac`, so the DAC half of an
+analog project could not be expressed in `board.yaml`
+(issue [#919](https://github.com/alplabai/alp-sdk/issues/919)). Everything
+under the enum was already in place — `<alp/dac.h>` with its portable backend,
+the `alp-dac` DTS alias bucket, and `dac_12bit` on the Alif E8 SoC JSON — so
+`examples/aen/aen-analog-validate` had to hand-write `CONFIG_DAC=y` in
+`prj.conf` to run its DAC0 → ADC loopback. The token now exists,
+`metadata/registries/peripheral-kconfig.json` maps it to `CONFIG_DAC`, and the
+example takes it and drops the workaround. Also corrected the enum's own
+description, which claimed every class is reached "via the matching
+`<alp/<class>.h>` wrapper" — false for 8 of the 16 existing entries
+(`gpio`/`i2c`/`spi`/`uart` live in `<alp/peripheral.h>`).
+
+### Added — Alif ISP-Pico driver compiles + links against hal_alif v2.3.0
+
+The Alif Ensemble ISP-Pico (Verisilicon ISP-Nano) video driver
+(`zephyr/drivers/video/isp_pico.c`, ADR-0017 Tier-2) now builds: vendored the
+last missing dependency, the Apache-2.0 headers `isp-vsi.h` + `isp_ctrl_params.h`
+from `alifsemi/zephyr_alif` v2.3.0 (they ship in neither hal_alif nor the CMSIS
+DFP), and confirmed the v2.3.0 libisp wrapper's 3-arg `isp_vsi_bottom_half` matches
+the ported driver. `examples/aen/aen-isp-regcheck` now build-proves the driver TU
+compiles + links against `libisp_gcc.a` on E1M-AEN801 (was bind-only). Added the
+`CONFIG_FP_HARDABI` BUILD_ASSERT guard (the libisp blob is hard-float, like the
+JPEG blob). **Build-only: live capture stays BENCH-BLOCKED** — the ISP needs a
+camera→CSI→ISP→memory graph and no camera sensor is wired on this AEN batch;
+silicon verification is deferred to a camera-populated board. Internal driver
+enablement, no `<alp/*>` surface change.
 
 ## [v0.13.0] - 2026-07-24
 

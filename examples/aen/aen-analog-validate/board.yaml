@@ -7,9 +7,9 @@
 #
 # The `adc` peripheral token lights CONFIG_ADC + the <alp/adc.h> wrapper + the
 # alif_e8 ADC backend (gated on CONFIG_ALP_SOC_ALIF_ENSEMBLE_E8, set here via the
-# E1M-AEN801 SKU).  The DAC half has no board.yaml peripheral token (the schema
-# enum carries only `adc` for the analog-converter family), so CONFIG_DAC is
-# turned on in prj.conf.  The per-example board overlay
+# E1M-AEN801 SKU).  The `dac` token does the mirror job for CONFIG_DAC + the
+# <alp/dac.h> wrapper, so neither half of the loopback needs a hand-written
+# Kconfig line in prj.conf.  The per-example board overlay
 # (boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay) enables dac0 +
 # adc12_0 and declares the alp-dac0 / alp-adc0 aliases the portable backends
 # resolve.  The filename must be the FULLY-QUALIFIED board id or Zephyr's
@@ -29,6 +29,7 @@ cores:
     app: ./src
     peripherals:
       - adc
+      - dac
 
 diagnostics:
   log_level: info

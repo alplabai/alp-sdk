@@ -693,20 +693,21 @@ config VIDEO_ARX3A0
 # (modules/hal/alif/drivers/isp/isp_wrapper -> Lib/libisp_gcc.a, the Vivante
 # blob), so it selects USE_ALIF_ISP_LIB.
 #
-# HAL_ALIF VERSION MISMATCH (FLAGGED): the vendored isp_pico.c is the
-# 2026 fork driver; it ships no <zephyr/drivers/video/isp-vsi.h> (the locally
-# vendored hal_alif isp_wrapper is 2025 and ships isp_conf.h / isp_param_conf.h
-# instead), so this driver FAILS TO COMPILE against the local hal_alif -- it
-# never reaches the linker.  Behind that: the 2025 wrapper also does NOT
-# export isp_vsi_set_param / isp_vsi_get_param, but those are no longer
-# referenced since the v4.4 port dropped their only callers -- not a blocker
-# for this driver's compile.
-# The wrapper does ship a 2-arg isp_vsi_bottom_half() vs this driver's 3-arg
-# call, a further incompatibility that only matters once isp-vsi.h exists.
-# Hence default n -- the default build stays green regardless; turning it on
-# against the 2025 wrapper is a known compile failure.  Do NOT fabricate the
-# missing hal_alif API.
-# vendor-ext, BENCH-UNVERIFIED.
+# HAL_ALIF VERSION MISMATCH -- RESOLVED: west.yml now pins hal_alif v2.3.0,
+# whose isp_wrapper/src/isp_api_wrapper.c itself #includes
+# <zephyr/drivers/video/isp-vsi.h> and ships a 3-arg
+# isp_vsi_bottom_half(dev, init_cfg, mi_mis) matching this driver's call site.
+# The header itself was never published by hal_alif -- closed by vendoring
+# isp-vsi.h + its isp_ctrl_params.h dependency VERBATIM (Apache-2.0) from
+# alifsemi/zephyr_alif @ v2.3.0 into zephyr/include/zephyr/drivers/video/.  The
+# wrapper does not export isp_vsi_set_param / isp_vsi_get_param, but the v4.4
+# port dropped their only callers, so that is not a compile blocker.
+# COMPILE + LINK now PROVEN (examples/aen/aen-isp-regcheck,
+# CONFIG_VIDEO_ISP_VSI=y, links against libisp_gcc.a).  Stays default n /
+# OPT-IN here: RUNTIME is still BENCH-BLOCKED -- no camera sensor is wired on
+# this hardware batch, so the m2m capture graph never runs; enabling it is a
+# build-only proof until a sensor is available.
+# vendor-ext, BENCH-BLOCKED (runtime only).
 # ---------------------------------------------------------------------------
 config VIDEO_ISP_VSI
 	bool "Alif Ensemble ISP-Pico (Verisilicon, ADR 0017 Tier-2 INTERIM, OPT-IN)"
@@ -720,14 +721,12 @@ config VIDEO_ISP_VSI
 	  "vsi,isp-pico") and PORTED to the v4.4 video API by Alp Lab AB.  Links the
 	  hal_alif libisp wrapper (the Vivante ISP blob, USE_ALIF_ISP_LIB).
 
-	  OPT-IN, default n.  FLAGGED hal_alif version mismatch: the vendored 2026
-	  isp_pico.c needs a newer hal_alif libisp wrapper than the locally vendored
-	  2025 one (missing isp-vsi.h; 2-arg vs 3-arg isp_vsi_bottom_half), so it
-	  FAILS TO COMPILE against the local wrapper -- it never reaches the
-	  linker.  (The wrapper also lacks isp_vsi_set_param / isp_vsi_get_param,
-	  but the v4.4 port dropped their only callers, so that is not a reason
-	  the TU fails to compile.)
-	  Bump the hal_alif wrapper before enabling.
+	  OPT-IN, default n.  Compiles + links against hal_alif v2.3.0 (isp-vsi.h +
+	  isp_ctrl_params.h vendored VERBATIM from zephyr_alif v2.3.0 into
+	  zephyr/include/zephyr/drivers/video/) -- proven by
+	  examples/aen/aen-isp-regcheck.  RUNTIME stays BENCH-BLOCKED: no camera
+	  sensor is wired on this hardware batch, so the m2m capture graph never
+	  runs.
 	  Driver: zephyr/drivers/video/isp_pico.c.
 
 config VIDEO_ISP_VSI_INIT_PRIORITY

@@ -609,13 +609,13 @@
         "peripherals": {
           "type": "array",
           "uniqueItems": true,
-          "description": "Peripheral subsystems this slice uses directly via the matching <alp/<class>.h> wrapper.  Each entry enables the corresponding Zephyr Kconfig / Yocto package at build time.",
+          "description": "Peripheral subsystems this slice uses directly through the portable <alp/*> API.  Most classes have a dedicated header (<alp/adc.h>, <alp/dac.h>, <alp/can.h>, ...); the bus and pin classes (gpio, i2c, spi, uart) live together in <alp/peripheral.h>, and a few (emmc, flash, ethernet, sensor) are reached through <alp/storage.h> / a chip driver rather than a class header of their own.  Each entry enables the corresponding Zephyr Kconfig / Yocto package at build time -- the token -> Kconfig mapping is single-sourced in metadata/registries/peripheral-kconfig.json, which a gate requires to cover this enum exactly.",
           "items": {
             "type": "string",
             "enum": [
-              "adc", "can", "counter", "emmc", "ethernet", "flash",
-              "gpio", "i2c", "i2s", "pwm", "rtc", "sensor", "spi",
-              "uart", "usb", "watchdog"
+              "adc", "can", "counter", "dac", "emmc", "ethernet",
+              "flash", "gpio", "i2c", "i2s", "pwm", "rtc", "sensor",
+              "spi", "uart", "usb", "watchdog"
             ]
           }
         },
