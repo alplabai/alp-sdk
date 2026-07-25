@@ -886,6 +886,10 @@
       "script": "scripts/check_board_schema_version.py"
     },
     {
+      "purpose": "Keep metadata/bootstrap.json in lockstep with everything that copies it.",
+      "script": "scripts/check_bootstrap_manifest.py"
+    },
+    {
       "purpose": "Validate a build plan against the public alp CLI / alp-sdk-vscode contract (metadata/schemas/build-plan-v1.schema.json).",
       "script": "scripts/check_build_plan.py"
     },

@@ -17,6 +17,20 @@
       "ci": null
     },
     {
+      "id": "bootstrap-manifest",
+      "description": "Keep metadata/bootstrap.json in lockstep with west.yml, both bootstrap scripts, and each CI workflow's own Zephyr pin.",
+      "runner": "check-script",
+      "script": "scripts/check_bootstrap_manifest.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": null
+    },
+    {
       "id": "build-plan",
       "description": "Validate a build plan against the public alp CLI / alp-sdk-vscode contract.",
       "runner": "check-script",

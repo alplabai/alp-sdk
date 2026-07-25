@@ -7,6 +7,61 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.14.0 candidate
 
+### Added — `metadata/bootstrap.json`: the cross-platform bootstrap facts as data
+
+- New committed, schema-validated manifest
+  (`metadata/schemas/bootstrap-v1.schema.json`) holding the FACTS every
+  executor needs to assemble a Zephyr workspace: the Zephyr pin, venv
+  layout, the `west` / `pip` argument vectors, the `env` map, and the
+  per-OS native-library and manual-install hints.  `scripts/bootstrap.sh`
+  and `scripts/bootstrap.ps1` now consume it instead of carrying
+  divergent hardcoded copies.  Facts only — control flow (`ZEPHYR_BASE`
+  reuse/rejection, venv idempotency, `.west` branching) stays as code in
+  each executor; this is deliberately not a step-execution DSL.  Static
+  JSON rather than an `--emit` target because `scripts/alp_project.py`
+  exits on missing `jsonschema`/`PyYAML`, which bootstrap itself installs
+  (circular), and JSON rather than YAML because bash must parse it
+  pre-venv with stdlib `json` only.  `tan` (Rust) is the intended third
+  consumer; nothing wires it yet.
+- `scripts/check_bootstrap_manifest.py` is the drift gate that keeps the
+  manifest load-bearing rather than a fourth copy of the same facts.  It
+  validates against the schema; asserts `zephyr.version` against
+  `west.yml`'s `- name: zephyr` revision, the `README.md` badge, and the
+  four CI workflows that pin Zephyr independently of `west update`
+  (`pr-twister`, `pr-tier-a-libraries`, `nightly-aen-hil`,
+  `pr-getting-started-aen801`); asserts the deliberately-hardcoded
+  prerequisite lists and Python floor in both scripts against the
+  manifest; refuses an unknown top-level key; and walks every leaf so a
+  fact no executor reads fails the gate by name.  The hardcoded-literal
+  scan is heredoc/here-string aware, so a Zephyr pin printed verbatim to
+  the user is caught as well as one in source.
+
+### Fixed — bootstrap script defects surfaced while single-sourcing the facts
+
+- `scripts/bootstrap.ps1` collapsed a single-element argument array to a
+  `String`, and PowerShell splats a string character-by-character, so
+  `west zephyr-export` ran as 13 one-character arguments — and with no
+  `$LASTEXITCODE` check it failed silently on native Windows.
+- `scripts/bootstrap.ps1` substituted `${WORKSPACE_DIR}` at load time,
+  before the workspace-reuse branch could reassign it, so a reused
+  workspace printed a wrong `$env:ZEPHYR_BASE` in the closing summary.
+- List-valued facts were joined and re-split, which also split on spaces
+  *inside* an element: a path such as `C:/Users/John Smith/alp-sdk`
+  reached `west init -l` as two arguments.  Now emitted as bash array
+  literals via `shlex.quote`.
+- `eval "$(python3 -c ...)"` swallowed a non-zero `python3` exit under
+  `set -uo pipefail` (no `-e`), so a failed or partial manifest read
+  proceeded on a partially-loaded fact set instead of reaching `die`.
+- `bash scripts/bootstrap.sh --help` sliced its own header with a
+  hardcoded `sed -n '3,32p'` line range, which silently truncated the
+  flag list and the "After it runs" block whenever the header grew.  The
+  usage text now has one authoritative copy.
+- `--print-env` / `-PrintEnv` sat behind the full prerequisite check, so
+  a host missing `cmake` (or `ninja`, on Windows) could not print env
+  lines; they now require only a working Python, which is all they use.
+- Both scripts now refuse a `metadata/bootstrap.json` whose
+  `schemaVersion` they do not understand, rather than parsing a future
+  manifest blind on a machine where the gate never runs.
 ### Fixed — `scripts/bootstrap.sh` silently ran `cargo install` on every completed run
 
 - The closing "Next steps" block used an **unquoted** heredoc tag
