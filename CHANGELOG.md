@@ -76,6 +76,47 @@ Also re-confirmed correct against the same SVDs, and left unchanged: `i2c_lp` 1,
 
 Metadata-only: `comparator_lp` has no `CAP_ALIASES` entry, so no generated file
 moves.  Refs #936.
+### Fixed — `ram-run.sh` now says why a Flow C console came back empty
+
+A Flow C ITCM RAM-run of a UART-console app produces **zero** bytes on UART5 —
+confirmed on hardware where that capture is otherwise proven working, with the
+core reaching `arch_cpu_idle` at `IPSR = 0`, i.e. the app ran fine and the output
+simply did not route (#935).
+
+`ram-run.sh` handled that case silently.  It resolved the console buffer with
+
+```sh
+BUF=0x$($OBJ-nm "$ELF" | awk '/ ram_console_buf$/{print $1}')
+```
+
+and on a UART-console build `nm` matches nothing, so `BUF` became the bare
+string `0x`, JLink ran `mem8 0x, <size>`, and the operator got an empty
+"RAM console (decoded)" block with no hint why — which reads as *the app
+crashed* when nothing is wrong with it.
+
+Now the missing symbol is detected and the run stops with the remedy, pointing
+at the fragment that already exists for this:
+
+```
+ram-run: '<elf>' has no 'ram_console_buf' symbol -- this app was built
+         with the UART console, which Flow C cannot capture.
+         Rebuild it with the RAM console layered on top:
+             scripts/bench/aen/build.sh <app-dir> \
+                 -DEXTRA_CONF_FILE=.../scripts/bench/aen/aen-bench-shared.conf
+```
+
+Verified against the ELF that produced the original silent console
+(`examples/aen/aen-i3c-regcheck` built for
+`alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he`): it carries **0**
+`ram_console_buf` symbols, so the guard fires on exactly the real case.
+
+Also corrects a stale comment in `aen-bench-shared.conf`, which claimed "the app
+UART is not on USB on this bench".  UART5 **has** been USB-routed since
+2026-07-03; the reason Flow C needs the RAM console is narrower and more
+surprising than that, and the comment now states it.
+
+The apps themselves are untouched — their committed `prj.conf` keeps the
+customer-facing UART console.  Refs #935.
 
 ### Added — `metadata/bootstrap.json`: the cross-platform bootstrap facts as data
 

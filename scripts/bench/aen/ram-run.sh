@@ -26,7 +26,27 @@ ELF="$BD/zephyr/zephyr.elf"
 BIN="$BD/zephyr/zephyr.bin"
 ENTRY_RAW=$($OBJ-readelf -h "$ELF" | awk '/Entry point/{print $NF}')
 ENTRY=$(printf '0x%X' $(( ENTRY_RAW & ~1 )))         # clear thumb bit
-BUF=0x$($OBJ-nm "$ELF" | awk '/ ram_console_buf$/{print $1}')
+BUF_SYM=$($OBJ-nm "$ELF" | awk '/ ram_console_buf$/{print $1}')
+if [ -z "$BUF_SYM" ]; then
+	# No RAM console linked in.  Without this guard BUF would be the bare
+	# string "0x", JLink would run `mem8 0x, <size>`, and the operator would
+	# get an EMPTY "RAM console (decoded)" block with no hint why -- which
+	# reads as "the app crashed" when the app is fine and simply routed its
+	# output to a UART.  Flow C produces no capturable UART output, so a
+	# UART-console app is invisible here (issue #935).
+	cat >&2 <<-EOF
+	ram-run: '$ELF' has no 'ram_console_buf' symbol -- this app was built
+	         with the UART console, which Flow C cannot capture.
+	         Rebuild it with the RAM console layered on top:
+	             scripts/bench/aen/build.sh <app-dir> \
+	                 -DEXTRA_CONF_FILE=$ALP_SDK_DIR/scripts/bench/aen/aen-bench-shared.conf
+	         (that fragment sets CONFIG_RAM_CONSOLE=y + CONFIG_UART_CONSOLE=n).
+	         The app itself is unchanged -- its committed prj.conf keeps the
+	         customer-facing UART console.
+	EOF
+	exit 3
+fi
+BUF=0x$BUF_SYM
 SCRIPT=$(mktemp /tmp/jlink.XXXX.jlink)
 {
   echo connect
