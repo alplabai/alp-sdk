@@ -1,0 +1,68 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-i3c-regcheck board overlay for the E1M-AEN801 (Ensemble E8, M55-HE).
+ *
+ * Enables the LP I3C controller (snps,designware-i3c, LPI3C0 @0x43006000)
+ * that the E8 SoC overlay (zephyr/dts/alif/ensemble_e8_peripherals.dtsi)
+ * declares status=disabled, binds the alp_i3c0 portable alias to it, and
+ * supplies the pinctrl_lpi3c0 pad group.
+ *
+ * WHY LP I3C (not the main i3c0): the E1M-AEN801 SoM only wires ONE of the
+ * two -- P7_6/P7_7 route to LPI3C_SDA_B/LPI3C_SCL_B (fn3), not the main
+ * I3C's SDA_D/SCL_D (fn6) -- per metadata/e1m_modules/aen/from-alif.tsv
+ * rows AH5/AG5.  Both instances share the same two pads on a different mux
+ * selector, so only one can ever be enabled on this SoM; LP I3C is the one
+ * the vendor netlist actually connects.
+ *
+ * PIN ROUTING (E1M-AEN801 SoM, metadata/e1m_modules/aen/from-alif.tsv):
+ *   - I3C_SDA -> LPI3C_SDA_B on P7_6 (tsv row AH5; PIN_P7_6__LPI3C_SDA_B, fn3)
+ *   - I3C_SCL -> LPI3C_SCL_B on P7_7 (tsv row AG5; PIN_P7_7__LPI3C_SCL_B, fn3)
+ */
+
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+
+/ {
+	/*
+	 * MANDATORY bench RAM-run retarget (Flow C): run from ITCM so J-Link can
+	 * loadbin+run without programming MRAM, and drop the MCUboot code-partition
+	 * fixup.  Same setup as the sibling *-regcheck examples.
+	 */
+	chosen {
+		/* PATH-REFERENCE form (&itcm), NOT the <&itcm> phandle-array form:
+		 * the phandle-array form yields CONFIG_FLASH_SIZE=0 and the image
+		 * overflows the (empty) FLASH region at link time. */
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+
+	aliases {
+		/* No portable <alp/i3c.h> dispatcher exists yet; this app resolves
+		 * bus 0 the same way its DT-only siblings do -- via a plain alp-*
+		 * alias read directly with DT_ALIAS() -- so the alias contract is
+		 * exercised without a backend to bind to it. */
+		alp-i3c0 = &lpi3c0;
+	};
+};
+
+&pinctrl {
+	pinctrl_lpi3c0: pinctrl_lpi3c0 {
+		group0 {
+			pinmux = <PIN_P7_6__LPI3C_SDA_B>;
+			input-enable; /* SDA pad: set the input buffer (REN bit) so the
+				       * controller can sense the open-drain bus. */
+		};
+		group1 {
+			pinmux = <PIN_P7_7__LPI3C_SCL_B>;
+			input-enable; /* SCL pad: same reasoning -- I3C clocks are
+				       * open-drain too (push-pull only during HDR). */
+		};
+	};
+};
+
+&lpi3c0 {
+	pinctrl-0     = <&pinctrl_lpi3c0>;
+	pinctrl-names = "default";
+	status        = "okay";
+};
