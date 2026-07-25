@@ -124,7 +124,14 @@ typedef struct {
      *  backends size this from the compile-time tensor arena
      *  estimate; if 0, the backend uses a built-in default. */
 	size_t arena_bytes;
-	/** Caller-allocated arena, or NULL to let the backend use heap. */
+	/** Caller-allocated arena, or NULL to let the backend use its
+	 *  built-in default.  A model that dispatches onto the Ethos-U NPU
+	 *  (it carries the fused Ethos-U op -- typically a Vela-compiled
+	 *  model, whatever @c format reports) has NO safe default: the NPU is
+	 *  a DMA master whose accesses are pinned to the SRAM AXI port, so the
+	 *  arena MUST be an explicit NPU-reachable (SRAM0-resident) buffer
+	 *  sized to the model.  @c arena = NULL for such a model is rejected
+	 *  with @ref ALP_ERR_INVAL (see examples/aen/aen-npu-inference-alp). */
 	void *arena;
 } alp_inference_config_t;
 
@@ -144,7 +151,9 @@ typedef struct {
  * available on the active SoM), @c arena_bytes = 0 and @c arena = NULL
  * both use the ALREADY-documented backend defaults ("if 0, the
  * backend uses a built-in default" / "NULL to let the backend use
- * heap").
+ * heap") -- EXCEPT that a model which dispatches onto the Ethos-U NPU
+ * has no safe default arena (see the @c arena field): open() rejects it
+ * with @ref ALP_ERR_INVAL, so an NPU model must set @c arena explicitly.
  *
  * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
  *       SDK's toolchains; standard through C23).  Usable as an initializer

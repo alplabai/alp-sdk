@@ -4,4 +4,5 @@
 alp	Alp Lab AB
 tes	Tes Electronic Solutions
 vsi	VeriSilicon
+verisilicon	VeriSilicon
 cast	Cast, Inc.

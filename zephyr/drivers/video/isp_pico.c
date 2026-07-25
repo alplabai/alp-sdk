@@ -16,6 +16,14 @@
  * so it survives a `west update`.  Retire onto the opt-in sdk-alif fork
  * compatible once the ISP node is repointed AND bench-verified.
  * See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
+ * COMPILES + LINKS against hal_alif v2.3.0 (west.yml pinned): the two headers
+ * this TU needed, <zephyr/drivers/video/isp-vsi.h> and its
+ * isp_ctrl_params.h, are vendored VERBATIM (Apache-2.0) into
+ * zephyr/include/zephyr/drivers/video/ -- see the HAL_ALIF note below.
+ * Build-only proof: examples/aen/aen-isp-regcheck (AEN801/E8).  RUNTIME stays
+ * BENCH-BLOCKED -- no camera sensor is wired on this hardware batch, and the
+ * ISP only does useful work inside a camera->csi->isp->memory
+ * media-controller graph.
  * ==========================================================================
  *
  * Vendored from the fork, then PORTED to the upstream Zephyr v4.4 video API by
@@ -43,26 +51,29 @@
  *   - the value-pointer .set_ctrl/.get_ctrl callbacks are dropped (see the
  *     note above the DEVICE_API table); this also removes the only callers of
  *     isp_vsi_set_param/isp_vsi_get_param -- which is intentional (see the
- *     HAL_ALIF VERSION MISMATCH note below: those symbols do not exist in the
- *     locally vendored wrapper).
+ *     HAL_ALIF note below: those symbols are declared by the vendored
+ *     isp-vsi.h but unused by this port).
  *
- * !!! HAL_ALIF VERSION MISMATCH (FLAGGED) !!!
+ * !!! HAL_ALIF VERSION MISMATCH -- RESOLVED (was FLAGGED) !!!
  * This 2026 isp_pico.c was authored against a NEWER hal_alif libisp wrapper than
- * the one vendored locally (modules/hal/alif/drivers/isp/isp_wrapper, 2025).
- * isp_pico.h #includes <zephyr/drivers/video/isp-vsi.h>, which the local
- * wrapper does NOT ship (it ships isp_conf.h / isp_param_conf.h instead) --
- * so the TU fails to COMPILE outright; it never reaches the linker.  Behind
- * that: the local wrapper (isp_api_wrapper.c) exports
- * isp_vsi_init/update_cfg/uninit/bottom_half/start/stop/enqueue/dequeue but DOES
- * NOT export isp_vsi_set_param / isp_vsi_get_param (called by the fork's ctrl
- * path -- now dropped in the v4.4 port, so no longer referenced) and its
- * isp_vsi_bottom_half() is 2-arg `(init_cfg, mi_mis)` whereas this driver calls
- * the 3-arg `(dev, init_cfg, mi_mis)` -- a further incompatibility, moot until
- * isp-vsi.h exists to let the TU compile in the first place.  Consequently
- * CONFIG_VIDEO_ISP_VSI is opt-in default n: the driver fails to COMPILE
- * against the local hal_alif until the wrapper is bumped to the matching
- * version.  Do NOT fabricate the missing API.
- * vendor-ext, BENCH-UNVERIFIED, ISP=Vivante blob (opt-in).
+ * the one that used to be vendored locally (modules/hal/alif/drivers/isp/isp_wrapper,
+ * 2025).  west.yml now pins hal_alif v2.3.0, whose isp_wrapper/src/isp_api_wrapper.c
+ * itself #includes <zephyr/drivers/video/isp-vsi.h> -- so the missing-header
+ * blocker is upstream's too, and it ships a 3-arg
+ * isp_vsi_bottom_half(dev, init_cfg, mi_mis) that already matches this driver's
+ * call site (isp_bottom_half(), below).  The remaining gap -- isp-vsi.h itself
+ * was never published by hal_alif -- is closed by vendoring it (+ its
+ * isp_ctrl_params.h dependency) VERBATIM (Apache-2.0) from
+ * alifsemi/zephyr_alif @ v2.3.0 into zephyr/include/zephyr/drivers/video/.  The
+ * v2.3.0 wrapper exports isp_vsi_init/update_cfg/uninit/bottom_half/start/stop/
+ * enqueue/dequeue -- everything this port calls.  It does not export
+ * isp_vsi_set_param/isp_vsi_get_param, but the v4.4 port's ctrl-callback drop
+ * (above) already removed their only callers, so that gap is moot.  Do NOT
+ * fabricate any hal_alif API.
+ * COMPILE + LINK: PROVEN (examples/aen/aen-isp-regcheck, CONFIG_VIDEO_ISP_VSI=y).
+ * RUNTIME: BENCH-BLOCKED -- no camera sensor wired on this batch, so the m2m
+ * capture graph (camera->csi->isp->memory) never runs.
+ * vendor-ext, BENCH-BLOCKED (runtime only), ISP=Vivante blob (opt-in).
  */
 #define DT_DRV_COMPAT vsi_isp_pico
 
@@ -79,6 +90,50 @@ LOG_MODULE_REGISTER(ISP, CONFIG_VIDEO_LOG_LEVEL);
 #include <zephyr/drivers/video/video_alif.h>
 #include <soc_memory_map.h>
 #include <zephyr/cache.h>
+
+/*
+ * alp-sdk ABI enforcement (Alp Lab AB): the hal_alif prebuilt ISP middleware
+ * library (Lib/libisp_gcc.a, linked in via CONFIG_USE_ALIF_ISP_LIB -- required
+ * for this driver to link at all) is built hard-float (VFP register args),
+ * same as the JPEG SW helper lib.  Zephyr's Cortex-M FP ABI (FP_HARDABI vs
+ * FP_SOFTABI) is a `choice` member under FPU, not a plain bool, so it cannot be
+ * `select`ed from Kconfig (see zephyr/kconfigs/vendor-alif-peripherals.kconfig,
+ * right after the VIDEO_ISP_VSI config). Catch a missing hard-float ABI here,
+ * at compile time, with a legible message -- instead of leaving the user to
+ * decode a bare "uses VFP register arguments, zephyr_pre0.elf does not"
+ * linker error.
+ */
+#if defined(CONFIG_USE_ALIF_ISP_LIB)
+BUILD_ASSERT(IS_ENABLED(CONFIG_FP_HARDABI),
+	     "CONFIG_VIDEO_ISP_VSI + CONFIG_USE_ALIF_ISP_LIB link the hal_alif prebuilt "
+	     "Lib/libisp_gcc.a, which is hard-float (VFP register arguments). Set "
+	     "CONFIG_FP_HARDABI=y (the \"Floating point ABI\" choice, under FPU) or the "
+	     "final link fails.");
+
+/*
+ * alp-sdk glue (Alp Lab AB): modules/hal/alif/drivers/isp/isp_wrapper/src/
+ * isp_api_wrapper.c declares `extern int log_level(void);` and takes its
+ * address for VsiLogLevelSet() (the wrapper's own public log API,
+ * inc/lib/vsios_log.h) -- that header's contract is for the CALLER to supply
+ * this getter; hal_alif ships no definition anywhere in the module, so
+ * without it the final link fails with an undefined reference.  This is a
+ * direct pass-through, not new logic: VsiLogLevel_t (vsios_log.h) numbers its
+ * levels identically to Zephyr's LOG_LEVEL_* for every level both define
+ * (NONE=0, ERR=1, WARN/WRN=2, INFO/INF=3, DEBUG/DBG=4).  CONFIG_LOG_DEFAULT_LEVEL
+ * only exists in autoconf.h when CONFIG_LOG=y (it lives inside an `if LOG`
+ * block, subsys/logging/Kconfig.filtering) -- guard with #if defined() rather
+ * than assume it, so this stays correct for the CONFIG_LOG=n RAM-run configs
+ * this SDK's AEN regchecks use (see aen-isp-regcheck/prj.conf).
+ */
+int log_level(void)
+{
+#if defined(CONFIG_LOG_DEFAULT_LEVEL)
+	return CONFIG_LOG_DEFAULT_LEVEL;
+#else
+	return 1; /* VSI_LOG_LEVEL_ERR -- logging subsystem compiled out */
+#endif
+}
+#endif
 
 #define WORKQ_STACK_SIZE 4096
 #define WORKQ_PRIORITY   7
@@ -972,7 +1027,15 @@ static DEVICE_API(video, isp_driver_api) = {
 #endif /* CONFIG_POLL */
 };
 
-int z_impl_isp_vsi_register_ae_status_callback(const struct device *dev,
+/*
+ * alp-sdk localization (Alp Lab AB): the vendored isp-vsi.h declares this as a
+ * PLAIN prototype, not a __syscall (see the note there) -- the Zephyr syscall
+ * generator does not scan this header in the alp-sdk module context, so the
+ * upstream `__syscall` + z_impl_/z_vrfy_ split does not build here.  This is
+ * the direct (non-marshalled) implementation; no CONFIG_USERSPACE variant
+ * exists for it.
+ */
+int isp_vsi_register_ae_status_callback(const struct device *dev,
 		isp_ae_status_cb ae_status_cb, void *user_data)
 {
 	struct isp_data *data = dev->data;
@@ -982,17 +1045,6 @@ int z_impl_isp_vsi_register_ae_status_callback(const struct device *dev,
 
 	return 0;
 }
-
-#ifdef CONFIG_USERSPACE
-#include <zephyr/internal/syscall_handler.h>
-static int z_vrfy_isp_vsi_register_ae_status_callback(const struct device *dev,
-		isp_ae_status_cb ae_status_cb, void *user_data)
-{
-	K_OOPS(K_SYSCALL_SPECIFIC_DRIVER(dev, K_OBJ_DRIVER_VIDEO, &isp_driver_api));
-	return z_impl_isp_vsi_register_ae_status_callback(dev, ae_status_cb, user_data);
-}
-#include <zephyr/syscalls/register_ae_status_callback_mrsh.c>
-#endif /* CONFIG_USERSPACE */
 
 static int isp_configure(const struct device *dev)
 {

@@ -39,7 +39,7 @@ inference:
     # metadata/socs/nxp/imx9/imx93.json (`capabilities.ethos_u65_count: 1`).
     # NXP's role label + host-core pairing are not yet in-repo-authoritative
     # (pending the IMX93RM ingestion / HW-config writeup) -> TBD, never invented.
-    - { variant: u65, role: TBD, paired_with: TBD }
+    - { variant: u65 }
 
 capabilities:
   optiga_trust_m:       true       # Populated on the E1M-NX9101 module.

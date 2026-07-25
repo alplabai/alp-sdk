@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "description": "Declarative catalog of Alp SDK project templates (app archetypes), for a frontend (alp-sdk-vscode, Alp Studio, a future `alp new`) to discover what starter projects exist and what each needs, instead of ad-hoc example copying. Every record maps to a CANONICAL existing example under examples/ -- the template does not fork or duplicate the example, it IS the example, described machine-readably. scripts/check_template_catalog.py validates this file against metadata/schemas/template-catalog-v1.schema.json AND drift-checks every referenced example/testcase.yaml/library/chip against the real tree, so a record can never point at a path or dependency that doesn't exist. Per-record `status` is grounded in the tracked example content-quality gaps in issues #448 (iot-connected-camera documented as v1.0-ready while still a runtime skeleton) and #520 (six display/LVGL + iot-dashboard examples bypass <alp/display.h>/<alp/gui.h> for direct zephyr/drivers/display.h) -- scripts/check_template_catalog.py hard-fails a `stable` record whose `example` is one of those; none of the six templates below reference one. This is the catalog + schema + drift-validation FOUNDATION (epic #610 SS3) only. The deterministic render/preview API -- `alp generate <template-id> <dest>` materialising a template into a fresh directory and running its native_sim test there -- is a deliberately-scoped FOLLOW-UP, tracked separately; it is not built by this change.",
+  "description": "Declarative catalog of Alp SDK project templates (app archetypes), for a frontend (alp-sdk-vscode, Alp Studio, a future `alp new`) to discover what starter projects exist and what each needs, instead of ad-hoc example copying. Every record maps to a CANONICAL existing example under examples/ -- the template does not fork or duplicate the example, it IS the example, described machine-readably. scripts/check_template_catalog.py validates this file against metadata/schemas/template-catalog-v1.schema.json AND drift-checks every referenced example/testcase.yaml/library/chip against the real tree, so a record can never point at a path or dependency that doesn't exist. Per-record `status` is grounded in the tracked example content-quality gaps in issues #448 (iot-connected-camera documented as v1.0-ready while still a runtime skeleton) and #520 (six display/LVGL + iot-dashboard examples bypass <alp/display.h>/<alp/gui.h> for direct zephyr/drivers/display.h) -- scripts/check_template_catalog.py hard-fails a `stable` record whose `example` is one of those; none of the eight templates below reference one. This is the catalog + schema + drift-validation FOUNDATION (epic #610 SS3) only. The deterministic render/preview API -- `alp generate <template-id> <dest>` materialising a template into a fresh directory and running its native_sim test there -- is a deliberately-scoped FOLLOW-UP, tracked separately; it is not built by this change.",
   "templates": [
     {
       "id": "minimal",
@@ -411,6 +411,134 @@
         ]
       },
       "status": "stable"
+    },
+    {
+      "id": "diagnostics",
+      "title": "Diagnostics -- Board Self-Test",
+      "archetype": "diagnostics",
+      "example": "examples/bringup/board-selftest",
+      "description": "Board bring-up / self-test starting point: reads the SoM + SoC identity (on-module EEPROM manifest + secure-firmware ping), reads the RUN operating-point profile (core rail + clock), and scans the on-module I2C management bus, then prints a single pass/fail report a field tech can read off a serial console. Portable <alp/*> APIs only -- no chip driver -- so the same source runs on every E1M family; each check a backend can't service reports SKIP (ALP_ERR_NOSUPPORT), distinct from a FAIL.",
+      "supported": {
+        "families": ["alif-ensemble", "renesas-rzv2n"],
+        "som_skus": ["E1M-AEN801", "E1M-V2N101"],
+        "core_classes": ["m"],
+        "runtimes": ["zephyr"]
+      },
+      "requires": {
+        "portable_apis": [
+          "include/alp/hw_info.h",
+          "include/alp/power.h",
+          "include/alp/peripheral.h",
+          "include/alp/board.h"
+        ],
+        "libraries": [],
+        "chips": [],
+        "routes": [
+          {
+            "e1m": "E1M_I2C0",
+            "macro": "EVK_I2C_BUS_SENSORS",
+            "doc": "Shared sensor + IO-expander + INA236 bus"
+          }
+        ],
+        "generated_artifacts": [
+          {
+            "path": "build/generated/alp.conf",
+            "emit_mode": "zephyr-conf",
+            "consumer_hint": "Zephyr build -- Kconfig fragment layered over prj.conf via EXTRA_CONF_FILE"
+          }
+        ],
+        "test_backend": ["native_sim"]
+      },
+      "files": {
+        "user_owned": [
+          "board.yaml",
+          "prj.conf",
+          "CMakeLists.txt",
+          "src/main.c",
+          "README.md"
+        ],
+        "generated": [
+          {
+            "path": "build/generated/alp.conf",
+            "note": "Emitted by scripts/alp_project.py --emit zephyr-conf at CMake configure time; not committed."
+          }
+        ]
+      },
+      "parameters": [
+        {
+          "name": "i2c_bus",
+          "type": "enum",
+          "description": "E1M I2C route the self-test scans for ACKing devices.",
+          "default": "E1M_I2C0",
+          "constraints": { "enum": ["E1M_I2C0"] }
+        }
+      ],
+      "test": {
+        "testcase_yaml": ["examples/bringup/board-selftest/testcase.yaml"],
+        "native_sim_scenarios": [
+          "alp_sdk.example.board_selftest.e1m_evk",
+          "alp_sdk.example.board_selftest.e1m_x_evk"
+        ],
+        "cross_compile_matrix": []
+      },
+      "status": "stable"
+    },
+    {
+      "id": "iot",
+      "title": "IoT -- MQTT/TLS Telemetry",
+      "archetype": "iot",
+      "example": "examples/connectivity/mqtt-telemetry",
+      "description": "Connected-device starting point: bring up the Wi-Fi station, open an mqtts:// (TLS) MQTT client, and publish a telemetry reading on a cadence -- the whole path on the portable <alp/iot.h> Wi-Fi + MQTT surface. AEN-only: the transport is the CC3501E Wi-Fi6+BLE coprocessor bridge on the E1M-AEN801 (silicon-validated), wired automatically by the AEN board emit from the board.yaml iot.wifi/tls toggles -- the app never names it. The mqtts:// TLS path is configured through the API; CONFIG_MBEDTLS is held off in the build pending the Zephyr 4.4 / mbedtls 3.6 tf-psa-crypto lift, so native_sim exercises the SDK framing + graceful NOSUPPORT degradation rather than a live TLS session.",
+      "supported": {
+        "families": ["alif-ensemble"],
+        "som_skus": ["E1M-AEN801"],
+        "core_classes": ["m"],
+        "runtimes": ["zephyr"]
+      },
+      "requires": {
+        "portable_apis": ["include/alp/iot.h"],
+        "libraries": ["mbedtls"],
+        "chips": [],
+        "routes": [],
+        "generated_artifacts": [
+          {
+            "path": "build/generated/alp.conf",
+            "emit_mode": "zephyr-conf",
+            "consumer_hint": "Zephyr build -- Kconfig fragment layered over prj.conf via EXTRA_CONF_FILE (Wi-Fi + MQTT + mbedtls from the iot.wifi/tls toggles + libraries: [mbedtls])"
+          }
+        ],
+        "test_backend": ["native_sim"]
+      },
+      "files": {
+        "user_owned": [
+          "board.yaml",
+          "prj.conf",
+          "CMakeLists.txt",
+          "src/main.c",
+          "README.md"
+        ],
+        "generated": [
+          {
+            "path": "build/generated/alp.conf",
+            "note": "Emitted by scripts/alp_project.py --emit zephyr-conf at CMake configure time; not committed."
+          }
+        ]
+      },
+      "parameters": [
+        {
+          "name": "mqtt_broker_uri",
+          "type": "string",
+          "description": "The mqtts:// broker URI the client publishes to (mqtt:// for plain TCP).",
+          "default": "mqtts://broker.example.alplab.ai:8883"
+        }
+      ],
+      "test": {
+        "testcase_yaml": ["examples/connectivity/mqtt-telemetry/testcase.yaml"],
+        "native_sim_scenarios": ["alp_sdk.example.mqtt_telemetry.native_sim"],
+        "cross_compile_matrix": []
+      },
+      "status": "preview",
+      "note": "AEN-only + preview: (1) the E1M-V2N101 Wi-Fi transport does not exist yet -- its Murata murata_lbee5hy2fy radio is hil_silicon: untested and its Linux data path is an unmerged design -- so this template supports only E1M-AEN801, whose CC3501E bridge transport is silicon-validated (2026-06-24, nightly-aen-hil). (2) The mqtts:// TLS path is wired through <alp/iot.h> + libraries: [mbedtls], but CONFIG_MBEDTLS is held off in the build (Zephyr 4.4 / mbedtls 3.6 ssl_misc.h include-order bug; full tf-psa-crypto integration is a v0.6 work item), so the native_sim scenario exercises the SDK framing + the documented alp_wifi_open/alp_mqtt_open NULL (NOT_READY) degradation, not a live TLS round-trip."
     }
   ]
 }

@@ -304,6 +304,71 @@ def _check_chip_semantics(chip_files) -> list:
     return failures
 
 
+def _check_soc_npu_pairing(soc_files) -> list:
+    """Cross-ref the SoC `npus[].paired_core` field against `cores[]`.
+
+    `paired_core` is the single source of truth for which CPU core drives an
+    NPU instance (the build emit sizes the accelerator per target core from
+    it -- scripts/alp_orchestrate/kconfig.py); JSON Schema cannot express the
+    cross-reference, so enforce it here:
+
+      1. every `npus[].paired_core` must name a real `cores[].id` in the same
+         SoC JSON (a typo would silently disable the per-core sizing);
+      2. when one NPU `type` appears with more than one distinct
+         `mac_per_cycle` (e.g. the Alif E3/E5/E7's 256-MAC + 128-MAC U55s),
+         every instance of that type MUST declare `paired_core` -- otherwise
+         the emit cannot tell the cores apart and a 256-MAC stream would error
+         a 128-MAC NPU at invoke (issue #909).
+
+    A single-MAC variant, or an instance on a shared non-core subsystem (the
+    E8 U85 on the HG subsystem), legitimately omits `paired_core`.
+    Returns a failure list shaped like `_check_files()`.
+    """
+    failures: list[tuple[Path, list[str]]] = []
+    for path in soc_files:
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        npus = doc.get("npus") or []
+        if not npus:
+            continue
+        rel = path.relative_to(REPO).as_posix()
+        core_ids = {c.get("id") for c in (doc.get("cores") or []) if c.get("id")}
+        msgs: list[str] = []
+
+        # (1) referential integrity of every declared paired_core.
+        for i, n in enumerate(npus):
+            pc = n.get("paired_core")
+            if pc is not None and pc not in core_ids:
+                msgs.append(
+                    f"npus[{i}] ({n.get('type')}/{n.get('subtype')}): "
+                    f"paired_core={pc!r} is not a cores[].id "
+                    f"(known: {sorted(core_ids)})")
+
+        # (2) multi-MAC variants must pair every instance to a core.
+        by_type: dict[str, list[dict]] = {}
+        for n in npus:
+            by_type.setdefault(str(n.get("type", "")), []).append(n)
+        for ntype, insts in by_type.items():
+            macs = {n.get("mac_per_cycle") for n in insts if n.get("mac_per_cycle")}
+            if len(macs) > 1:
+                unpaired = [n for n in insts if not n.get("paired_core")]
+                if unpaired:
+                    subs = ", ".join(str(n.get("subtype")) for n in unpaired)
+                    msgs.append(
+                        f"{ntype} appears with distinct MAC arrays {sorted(macs)} "
+                        f"but instance(s) [{subs}] omit paired_core -- the build "
+                        f"cannot size the accelerator per core (see #909)")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+    return failures
+
+
 def _check_chip_physical(chip_files) -> list:
     """Semantic cross-checks for chip `physical:` block (pin/passive→signal resolution + pad uniqueness).
 
@@ -688,6 +753,8 @@ def main() -> int:
         lambda p: json.loads(p.read_text(encoding="utf-8")),
         "ref",
     )
+    # Semantic cross-ref the schema can't express: npus[].paired_core -> cores[].
+    soc_failures += _check_soc_npu_pairing(soc_files)
 
     # SoM preset files (YAML) against som-preset v1.
     som_validator = None

@@ -248,6 +248,19 @@
         "summary": "Decodes a canned MP3 byte array to 16-bit PCM with the vendored [minimp3](https://github.com/lieff/minimp3) single-header decoder and prints the sample count + RMS of the decoded audio. Pure compute -- no I2S/codec hardware required, so this builds and runs identically on `native_sim` and real silicon."
       }
     ],
+    "bringup": [
+      {
+        "board": "e1m-evk",
+        "name": "board-selftest",
+        "path": "examples/bringup/board-selftest",
+        "som": "E1M-AEN801",
+        "summary": "The app you run **first** on a freshly-assembled board, before chasing a peripheral that \"doesn't work\". It answers the four questions every bring-up starts with and prints a single pass/fail report a field tech can read off a serial console without a debugger.",
+        "supported_boards": [
+          "e1m-evk",
+          "e1m-x-evk"
+        ]
+      }
+    ],
     "camera-vision": [
       {
         "board": "e1m-evk",
@@ -313,6 +326,13 @@
         "path": "examples/connectivity/mqtt-sn-publish",
         "som": "E1M-AEN801",
         "summary": "coreMQTT-SN teaching example. Encodes an MQTT-SN PUBLISH packet into a buffer, then parses it back out of the same buffer and asserts the topic id, message id, QoS, retain flag, and payload all survive the round trip. No socket, no gateway, no live transport -- this is the unit-test shape you'd run before wiring the encoder to a real UDP/ BLE/UART MQTT-SN link."
+      },
+      {
+        "board": "e1m-evk",
+        "name": "mqtt-telemetry",
+        "path": "examples/connectivity/mqtt-telemetry",
+        "som": "E1M-AEN801",
+        "summary": "The **connected device** starting point: bring up Wi-Fi, open an `mqtts://` (TLS) MQTT client, and publish a telemetry reading on a cadence -- the whole path on the portable [`<alp/iot.h>`](../../../include/alp/iot.h) surface."
       },
       {
         "board": "e1m-evk",
@@ -866,6 +886,10 @@
       "script": "scripts/check_board_schema_version.py"
     },
     {
+      "purpose": "Keep metadata/bootstrap.json in lockstep with everything that copies it.",
+      "script": "scripts/check_bootstrap_manifest.py"
+    },
+    {
       "purpose": "Validate a build plan against the public alp CLI / alp-sdk-vscode contract (metadata/schemas/build-plan-v1.schema.json).",
       "script": "scripts/check_build_plan.py"
     },
@@ -1237,6 +1261,17 @@
     },
     {
       "functions": [
+        "alp_i3c_capabilities",
+        "alp_i3c_close",
+        "alp_i3c_open",
+        "alp_i3c_read",
+        "alp_i3c_write",
+        "alp_i3c_write_read"
+      ],
+      "header": "include/alp/i3c.h"
+    },
+    {
+      "functions": [
         "alp_inference_capabilities",
         "alp_inference_close",
         "alp_inference_get_input",
@@ -1265,6 +1300,15 @@
         "alp_wifi_open"
       ],
       "header": "include/alp/iot.h"
+    },
+    {
+      "functions": [
+        "alp_jpeg_capabilities",
+        "alp_jpeg_close",
+        "alp_jpeg_encode",
+        "alp_jpeg_open"
+      ],
+      "header": "include/alp/jpeg.h"
     },
     {
       "functions": [
