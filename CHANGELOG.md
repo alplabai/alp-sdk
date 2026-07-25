@@ -7,6 +7,17 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.14.0 candidate
 
+### Fixed — EVK I²C table listed the pre-respin `INA236_VCAM0` address
+
+`docs/boards/e1m-evk.md` documented U32's INA236B at `0x48`.  That is the
+pre-respin strapping; the part was re-strapped `A0=SCL` to `0x4B` precisely
+because `0x48` is the TAS2563 broadcast address and is unreadable there.
+Both authoritative sources already carried `0x4B`
+(`metadata/boards/e1m-evk.yaml`, `include/alp/boards/alp_e1m_evk_routes.h`) —
+the doc was the only stale site, so this is a documentation correction, not a
+behaviour change.  The re-strap note now travels with the table row so the
+pre-respin boards stay discoverable.  Refs #637.
+
 ### Changed — Ethos-U accelerator sized per target core; NPU→core pairing single-sourced in the SoC JSON
 
 - The build emit (`_emit_inference`) now sizes the Ethos-U accelerator
