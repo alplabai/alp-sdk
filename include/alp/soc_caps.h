@@ -66,8 +66,8 @@
 #elif defined(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E4)
 /* alif:ensemble:e4 */
 #define ALP_SOC_REF_STR                 "alif:ensemble:e4"
-#define ALP_SOC_I2C_COUNT               5
-#define ALP_SOC_SPI_COUNT               5
+#define ALP_SOC_I2C_COUNT               6
+#define ALP_SOC_SPI_COUNT               6
 #define ALP_SOC_UART_COUNT              9
 #define ALP_SOC_I2S_COUNT               5
 #define ALP_SOC_PDM_COUNT               8
@@ -144,8 +144,8 @@
 #elif defined(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E6)
 /* alif:ensemble:e6 */
 #define ALP_SOC_REF_STR                 "alif:ensemble:e6"
-#define ALP_SOC_I2C_COUNT               5
-#define ALP_SOC_SPI_COUNT               5
+#define ALP_SOC_I2C_COUNT               6
+#define ALP_SOC_SPI_COUNT               6
 #define ALP_SOC_UART_COUNT              9
 #define ALP_SOC_I2S_COUNT               5
 #define ALP_SOC_PDM_COUNT               8
@@ -156,7 +156,7 @@
 #define ALP_SOC_CAN_COUNT               1
 #define ALP_SOC_CAN_FD_SUPPORTED        1
 #define ALP_SOC_RTC_COUNT               1
-#define ALP_SOC_WDT_COUNT               3
+#define ALP_SOC_WDT_COUNT               4
 #define ALP_SOC_QENC_COUNT              4
 #define ALP_SOC_TIMER_COUNT             16
 #define ALP_SOC_PWM_COUNT               12
@@ -223,7 +223,7 @@
 /* alif:ensemble:e8 */
 #define ALP_SOC_REF_STR                 "alif:ensemble:e8"
 #define ALP_SOC_I2C_COUNT               6
-#define ALP_SOC_SPI_COUNT               5
+#define ALP_SOC_SPI_COUNT               6
 #define ALP_SOC_UART_COUNT              9
 #define ALP_SOC_I2S_COUNT               5
 #define ALP_SOC_PDM_COUNT               8
