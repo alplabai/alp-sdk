@@ -130,9 +130,9 @@ def test_new_som_ethos_u_populates_npu_table_with_variant_only(tmp_path: Path):
         .read_text(encoding="utf-8")
     )
     assert doc["inference"]["ethos_u_variant"] == "u65"
-    assert doc["inference"]["npu_population"] == [
-        {"variant": "u65"}
-    ]
+    # npu_population is deprecated + silicon-derived -- the scaffold no longer
+    # emits it (variants come from the SoC JSON npus[] / capability counts).
+    assert "npu_population" not in doc["inference"]
     errors = _validate(doc, SOM_SCHEMA)
     assert not errors, [e.message for e in errors]
 
