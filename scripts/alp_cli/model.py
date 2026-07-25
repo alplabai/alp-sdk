@@ -429,6 +429,18 @@ _HOST_NOTE = ("host reference run (backend=cpu-host): functional + host latency,
               "NOT the target SoM. On-device latency/SRAM/power is the HW-gated follow-on.")
 
 
+def _energy_payload(energy) -> dict | None:
+    """`RunResult.energy` -> a nested JSON dict, or None if no real bench
+    measurement was attached — never fabricate one here."""
+    if energy is None:
+        return None
+    return {"source": energy.source, "scope": energy.scope,
+            "value_mj_per_inference": energy.value_mj_per_inference,
+            "rails": energy.rails, "n_inferences": energy.n_inferences,
+            "window_ms": energy.window_ms, "sample_count": energy.sample_count,
+            "spread_mj": energy.spread_mj}
+
+
 @model_group.command(name="run", help="Host reference run of a model (functional + host latency + accuracy).")
 @click.argument("model", type=click.Path(exists=True, dir_okay=False, path_type=Path))
 @click.option("--input", "input_path", default=None, type=click.Path(exists=True, path_type=Path),
@@ -450,7 +462,8 @@ def run_cmd(model: Path, input_path: Path | None, expected: int | None, runs: in
         raise SystemExit(1)
     payload = {"model": str(model), "backend": r.backend, "latency_ms": r.latency_ms,
                "output_argmax": r.output_argmax, "peak_sram_kib": r.peak_sram_kib,
-               "power_mj": r.power_mj, "runs": r.runs, "random_input": random_input,
+               "power_mj": r.power_mj, "energy": _energy_payload(r.energy),
+               "runs": r.runs, "random_input": random_input,
                "note": _HOST_NOTE}
     if expected is not None:
         payload["accuracy"] = {"expected": expected, "match": accuracy_vs(r.output_argmax, expected)}
@@ -490,12 +503,19 @@ def ab_cmd(model_a: Path, model_b: Path, input_path: Path | None, runs: int, fmt
     def _run(r: "object") -> dict:
         return {"backend": r.backend, "latency_ms": r.latency_ms,
                 "output_argmax": r.output_argmax, "runs": r.runs,
-                "peak_sram_kib": r.peak_sram_kib, "power_mj": r.power_mj}
+                "peak_sram_kib": r.peak_sram_kib, "power_mj": r.power_mj,
+                "energy": _energy_payload(r.energy)}
+
+    comparison = {"faster": cmp.faster, "latency_ratio": cmp.latency_ratio,
+                  "a_latency_ms": cmp.a_latency_ms, "b_latency_ms": cmp.b_latency_ms,
+                  "size_delta_bytes": cmp.size_delta_bytes}
+    if ra.energy is not None and rb.energy is not None:      # real measurements on
+                                                               # both sides only
+        comparison["energy_delta_mj_per_inference"] = round(
+            rb.energy.value_mj_per_inference - ra.energy.value_mj_per_inference, 4)
 
     payload = {"a": {"model": str(model_a), **_run(ra)}, "b": {"model": str(model_b), **_run(rb)},
-               "comparison": {"faster": cmp.faster, "latency_ratio": cmp.latency_ratio,
-                              "a_latency_ms": cmp.a_latency_ms, "b_latency_ms": cmp.b_latency_ms,
-                              "size_delta_bytes": cmp.size_delta_bytes},
+               "comparison": comparison,
                "note": _HOST_NOTE}
     if fmt == "json":
         click.echo(json.dumps(payload, indent=2))

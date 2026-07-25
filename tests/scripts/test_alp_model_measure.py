@@ -42,3 +42,62 @@ def test_accuracy_vs():
     assert accuracy_vs(3, 3) is True
     assert accuracy_vs(3, 4) is False
     assert accuracy_vs(None, 4) is False
+
+
+def test_integrate_energy_constant_power_known_duration():
+    # 2.0 W held for 3.0 s -> 6.0 J = 6000.0 mJ, exactly (constant power makes
+    # trapezoidal == rectangular, so this also pins the units/scale).
+    from alp_model.measure import integrate_energy
+    samples = [(0.0, 2.0), (1.0, 2.0), (3.0, 2.0)]
+    assert integrate_energy(samples) == pytest.approx(6000.0)
+
+
+def test_integrate_energy_under_two_samples_is_zero():
+    from alp_model.measure import integrate_energy
+    assert integrate_energy([]) == 0.0
+    assert integrate_energy([(0.0, 5.0)]) == 0.0
+
+
+def test_windowed_delta_identical_windows_cancels_to_zero():
+    from alp_model.measure import windowed_delta
+    window = [(0.0, 1.5), (1.0, 1.5), (2.0, 1.5)]
+    assert windowed_delta(window, window, n_inferences=10) == pytest.approx(0.0)
+
+
+def test_windowed_delta_divides_excess_energy_by_n_inferences():
+    from alp_model.measure import windowed_delta
+    # active: 3.0 W for 2.0 s = 6000 mJ; idle: 1.0 W for 2.0 s = 2000 mJ.
+    # excess = 4000 mJ over 8 inferences -> 500 mJ/inference.
+    active = [(0.0, 3.0), (2.0, 3.0)]
+    idle = [(0.0, 1.0), (2.0, 1.0)]
+    assert windowed_delta(active, idle, n_inferences=8) == pytest.approx(500.0)
+
+
+def test_windowed_delta_rejects_zero_inferences():
+    from alp_model.measure import windowed_delta
+    with pytest.raises(ValueError):
+        windowed_delta([(0.0, 1.0), (1.0, 1.0)], [(0.0, 1.0), (1.0, 1.0)], n_inferences=0)
+
+
+def test_energy_measurement_carries_honest_labels():
+    from alp_model.measure import EnergyMeasurement
+    m = EnergyMeasurement(value_mj_per_inference=12.3, rails=["+3V3"], n_inferences=8,
+                          window_ms=100.0, sample_count=50)
+    assert m.source == "measured"
+    assert m.scope == "carrier-rail-delta"
+    assert m.spread_mj is None
+
+
+def test_energy_measurement_rejects_non_honest_scope():
+    from alp_model.measure import EnergyMeasurement
+    with pytest.raises(ValueError):
+        EnergyMeasurement(value_mj_per_inference=1.0, rails=["+3V3"], n_inferences=1,
+                          window_ms=10.0, sample_count=2, scope="npu-only")
+
+
+def test_run_host_energy_is_honestly_none():
+    pytest.importorskip("onnxruntime")
+    from alp_model.measure import run_host
+    x = np.random.default_rng(0).standard_normal((1, 3, 224, 224)).astype(np.float32)
+    r = run_host(_ONNX, x, runs=3)
+    assert r.energy is None
