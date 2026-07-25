@@ -94,7 +94,7 @@ jobs:
           # Pin to the Zephyr release the v0.1 dependency matrix
           # documents (VERSIONS.md).  Bump intentionally; do not
           # track main.
-          west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.4.0 .
+          west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.4.1 .
           west update --narrow -o=--depth=1
           west zephyr-export
 
@@ -104,7 +104,7 @@ jobs:
           path: |
             ${{ github.workspace }}/zephyrproject/modules
             ${{ github.workspace }}/zephyrproject/zephyr
-          key: zephyr-v4.4.0-host-${{ runner.os }}
+          key: zephyr-v4.4.1-host-${{ runner.os }}
 
       # Persist ccache objects across runs, per shard.  The save key is
       # per-SHA so each run writes a fresh entry; restore-keys falls
@@ -161,7 +161,7 @@ jobs:
       # pure-Python checkouts, so the gate pytest.skip'd on every PR
       # and reported green while enforcing nothing.
       #
-      # This job already west-init'd the pinned v4.4.0 tree above, so
+      # This job already west-init'd the pinned v4.4.1 tree above, so
       # the oracle is free here -- run it on shard 1 only (the matrix
       # would otherwise run it 4x identically).  ALP_REQUIRE_ZEPHYR_ORACLE=1
       # turns the gate's skip into a hard failure: this job PROMISES

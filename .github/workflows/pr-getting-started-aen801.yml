@@ -56,7 +56,7 @@ env:
   AEN801_BOARD_TARGET: alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
   AEN801_EXAMPLE_PATH: alp-sdk/examples/peripheral-io/gpio-button-led
   # docs/getting-started.md §1 prerequisites table + docs/local-ci.md
-  # Path B §5 pin -- the Zephyr SDK release matching the v4.4.0 Zephyr
+  # Path B §5 pin -- the Zephyr SDK release matching the v4.4.1 Zephyr
   # pin in west.yml.
   ZEPHYR_SDK_VERSION: "1.0.1"
 
@@ -96,7 +96,7 @@ jobs:
           path: |
             zephyr
             modules
-          key: getting-started-aen801-zephyr-v4.4.0-${{ runner.os }}
+          key: getting-started-aen801-zephyr-v4.4.1-${{ runner.os }}
 
       - name: Cache Zephyr SDK
         uses: actions/cache@v5

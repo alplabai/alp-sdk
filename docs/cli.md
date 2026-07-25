@@ -274,7 +274,7 @@ this repo's own metadata alone, with no Zephyr toolchain on disk --
 see `scripts/check_emit_snapshots.py`, the byte-golden gate that pins
 all of them). `--emit kconfig` is deliberately the first exception:
 it needs a bootstrapped Zephyr workspace (`ZEPHYR_BASE`, the SDK's
-pinned v4.4.0) because only the real Kconfig solver knows which
+pinned v4.4.1) because only the real Kconfig solver knows which
 symbols are user-promptable for a given board -- the SDK doesn't (and
 won't) re-implement Kconfig's dependency/visibility engine itself.
 

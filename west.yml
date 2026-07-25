@@ -179,7 +179,7 @@ manifest:
       path: modules/hal/alif
 
     - name: zephyr
-      revision: v4.4.0        # Latest stable; see docs/zephyr-version-policy.md
+      revision: v4.4.1        # Latest stable; see docs/zephyr-version-policy.md
       west-commands: scripts/west-commands.yml
       import:
         # Pull in only the modules we actually need.  Filtering keeps

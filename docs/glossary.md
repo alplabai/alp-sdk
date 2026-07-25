@@ -386,5 +386,5 @@ the test plan.
 **Zephyr** -- The RTOS the SDK targets as a first-class backend
 (`cores.<id>.os: zephyr`, typically on M-class cores; the SoM
 topology supplies `zephyr` by default so customers usually omit
-the field).  Pinned to v4.4.0 per
+the field).  Pinned to v4.4.1 per
 [`docs/zephyr-version-policy.md`](zephyr-version-policy.md).
