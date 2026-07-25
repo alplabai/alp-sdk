@@ -2,9 +2,33 @@
  * Copyright (c) 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * aen-i3c-regcheck -- scopeless staging check of the Synopsys DesignWare I3C
- * controller on the E1M-AEN801 (Ensemble E8, M55-HE), via the bench RAM-run +
- * RAM-console flow.  Mirrors aen-can-regcheck.
+ * aen-i3c-regcheck -- on-silicon controller-init validation of the SDK's
+ * portable <alp/i3c.h> surface on the E1M-AEN801 (Ensemble E8, M55-HE),
+ * via the bench RAM-run flow.
+ *
+ * BENCH-PROVEN 2026-07-25 (labgrid place e1m-aen-evk-01, Flow C ITCM
+ * RAM-run, reproduced twice, byte-identical).  Captured output:
+ *
+ *     bus: ALP_E1M_I3C0 = 0 (alp-i3c0 alias -> lpi3c0@0x43006000)
+ *     alp_i3c_open: OK (handle=0x20000d20)
+ *     capabilities: present (flags=0x00000000)
+ *     alp_i3c_write(addr=0x08): status=-5 (ALP_ERR_IO -- expected, no
+ *                                          target populated)
+ *     RESULT PASS: I3C controller BINDS + OPENS via <alp/i3c.h> ...
+ *
+ * OBSERVING THIS APP ON THE BENCH: it selects the UART console below,
+ * which is the customer-facing default -- but a Flow C ITCM RAM-run
+ * produces ZERO bytes on UART5 (confirmed on hardware where UART5 capture
+ * is otherwise proven working; the core reached arch_cpu_idle with
+ * IPSR=0, i.e. it ran fine and the output simply did not route).  For a
+ * RAM-run, layer the RAM console on WITHOUT editing this app:
+ *
+ *     west build ... -- -DEXTRA_CONF_FILE=<file with CONFIG_RAM_CONSOLE=y,
+ *                        CONFIG_RAM_CONSOLE_BUFFER_SIZE=2048,
+ *                        CONFIG_UART_CONSOLE=n>
+ *
+ * then read ram_console_buf over SWD (scripts/bench/aen/ram-run.sh).  A
+ * Flow A/D MRAM boot does reach UART5 normally.
  *
  * WHAT THIS APP VALIDATES (and what it deliberately does NOT):
  *
@@ -12,168 +36,139 @@
  *   UPSTREAM Zephyr already ships a full driver (drivers/i3c/i3c_dw.c,
  *   "snps,designware-i3c") -- pure ADR 0017 Tier-1 (upstream-native): no
  *   vendored or forked driver code, only the DT node (SoC overlay
- *   zephyr/dts/alif/ensemble_e8_peripherals.dtsi) + this board overlay.
+ *   zephyr/dts/alif/ensemble_e8_peripherals.dtsi) + the board overlay.
  *
- *   The E1M-AEN801 SoM wires the LP I3C instance (lpi3c0@0x43006000, the
- *   M55-HE local-domain controller) rather than the main i3c0 -- both share
- *   pads P7_6/P7_7 on a different mux selector, and LP I3C is the one the
- *   vendor netlist actually connects (see the board overlay).  So this app
- *   validates what IS deliverable build-green on this batch:
- *     1. the lpi3c0 DT node exists and BINDS to "snps,designware-i3c" at its
- *        expected reg base (0x43006000),
- *     2. the alp_i3c0 alias resolves to that same node (mirrors the alp_can0
- *        alias contract on the CAN-FD sibling -- no portable <alp/i3c.h>
- *        dispatcher exists yet, so this is a plain DT_ALIAS() read, not a
- *        backend binding),
- *     3. the i3c_dw driver INSTANTIATES (DEVICE_DT_GET_OR_NULL resolves a
- *        real device and device_is_ready() reports its init result),
- *     4. the I3C/I2C timing DT facts are wired: i3c-scl-hz = 12.5 MHz,
- *        od-thigh-min-ns = 41 (the DesignWare Open-Drain-high-time floor
- *        the fork sets for this instance).
+ *   This app drives the LP I3C instance (lpi3c0@0x43006000, IRQ 50) rather
+ *   than the main i3c0.  The two are INDEPENDENT controllers that overlap
+ *   on one pad pair only (P7_6/P7_7); the E1M-AEN801 breaks out just that
+ *   pair, so on THIS SoM only one of them can be enabled at a time and
+ *   firmware picks the owner.  On a board that routes them to separate
+ *   pads both run at once.  We pick LP because it is the M55-HE local
+ *   peripheral domain -- the core this app runs on.  The SoM pinout table
+ *   does not make that choice for us (see the board overlay).
  *
- * WHAT IS UNTESTED ON THIS BATCH: everything past bind.  This app is
- * COMPILE-PROOF ONLY -- built + linked for the AEN board target, never run on
- * real E1M-AEN801 silicon (I3C is not silicon-verifiable this batch: no I3C
- * target device is wired on the bench carrier).  Unlike aen-dma-regcheck
- * (whose PL330 copy is proven end-to-end on silicon) this app's PASS gate is
- * BIND-based only, same posture as aen-can-regcheck: the controller binds,
- * the alias resolves, the DT facts match the fork transcription.  The
- * DEVICE_CTRL register readback below is an MMIO-reachability probe only --
- * printed for diagnostic value, NOT gated (its expected reset value is a
- * clean-room read of the DesignWare IP spec, not bench-confirmed against
- * this silicon).
+ *   This app opens ALP_E1M_I3C0 through the portable <alp/i3c.h> dispatcher
+ *   (alp_i3c_open -> the zephyr_drv backend -> the alp-i3c0 DT alias ->
+ *   lpi3c0), which proves:
+ *     1. the lpi3c0 DT node BINDS to "snps,designware-i3c" and
+ *        device_is_ready() reports its init result (clock/pinctrl all ran
+ *        during Zephyr device init),
+ *     2. the alp-i3c0 alias resolves through the dispatcher's DT-alias
+ *        table (COND_CODE_1 on DT_ALIAS(alp_i3c0)),
+ *     3. alp_i3c_capabilities() returns a valid (if empty) descriptor for
+ *        the opened handle,
+ *     4. alp_i3c_write() reaches the driver's transfer path (address
+ *        resolution + i3c_transfer()) and returns a well-formed
+ *        alp_status_t -- NOT a hang, NOT a crash.
+ *
+ * WHAT IS UNTESTED ON THIS BATCH: a real transfer landing on a real target.
+ * The E1M-AEN801 bench carrier has NO I3C target populated this batch
+ * (reduced population -- see project memory), so dynamic address
+ * assignment (DAA), which Zephyr's i3c_dw.c runs during device init for
+ * any targets DECLARED in devicetree, finds ZERO targets (there is nothing
+ * on the bus to declare).  A probe write to an arbitrary address therefore
+ * has no device to resolve to -- the backend's i3c_dev_list_i3c_addr_find()
+ * returns NULL and alp_i3c_write() reports ALP_ERR_IO, the SAME clean
+ * "nothing answered" contract an I2C NACK would report.
+ *
+ * That ALP_ERR_IO is therefore an EXPECTED, PASSING result on this batch:
+ * it is controller-init proof (the stack runs end-to-end and reports a
+ * well-formed error), not transfer proof (no target exists to transfer
+ * with).  Silicon verification of a real transfer is deferred to a
+ * target-populated board -- the promotion gate documented in
+ * include/alp/i3c.h's ABI-EXPERIMENTAL marker.
  */
 
 #include <stdbool.h>
 #include <stdint.h>
 
 #include <zephyr/kernel.h>
-#include <zephyr/device.h>
-#include <zephyr/devicetree.h>
 #include <zephyr/sys/printk.h>
-#include <zephyr/sys/sys_io.h>
 
-/* The LP I3C controller node + the alp portable-style alias that must point
- * at it (see the board overlay -- no <alp/i3c.h> dispatcher exists yet). */
-#define I3C_NODE  DT_NODELABEL(lpi3c0)
-#define I3C_ALIAS DT_ALIAS(alp_i3c0)
+#include <alp/e1m_pinout.h>
+#include <alp/i3c.h>
+#include <alp/peripheral.h>
 
-/*
- * Expected facts, transcribed from the SoC dtsi (which carries the fork's
- * e4_e6_e8.dtsi address VERBATIM).  We read the LIVE value from devicetree
- * and compare -- so this stays correct if a node ever moves, and catches a
- * binding that resolved to the wrong node.
- *
- *   reg          0x43006000 -- LPI3C0 register block (M55-HE local domain)
- *   i3c-scl-hz   12500000   -- fork e4_e6_e8.dtsi lpi3c0 node
- *   od-thigh-min 41 ns      -- fork e4_e6_e8.dtsi lpi3c0 node
- */
-#define I3C_BASE_EXPECTED         0x43006000U
-#define I3C_SCL_HZ_EXPECTED       12500000U
-#define I3C_OD_THIGH_MIN_EXPECTED 41U
-
-/* DEVICE_CTRL, offset 0x0 in the DesignWare I3C register map (drivers/i3c/
- * i3c_dw.c DEVICE_CTRL) -- probed as a raw MMIO read only (see file header:
- * NOT gated, no expected-value comparison, this silicon is unbenched). */
-#define I3C_DEVICE_CTRL_OFFSET 0x0U
-
-/*
- * Compile-time staging facts -- each is 1 iff the node exists, is enabled,
- * and binds to its expected compatible.  Pure DT predicates -- a bound node
- * at the right compatible, independent of device_is_ready (the controller's
- * runtime readiness is reported separately, since this silicon is unbenched).
- */
-#define I3C_BOUND \
-	(DT_NODE_HAS_STATUS(I3C_NODE, okay) && DT_NODE_HAS_COMPAT(I3C_NODE, snps_designware_i3c))
-
-/* The alp_i3c0 alias must resolve to the SAME node the i3c_dw driver binds. */
-#define ALIAS_OK (DT_NODE_EXISTS(I3C_ALIAS) && (DT_DEP_ORD(I3C_ALIAS) == DT_DEP_ORD(I3C_NODE)))
+/* No I3C target is populated on this bench carrier -- any address is
+ * "nothing answers here".  0x08 is the first legal 7-bit-shaped address
+ * (mirrors the I2C reserved-range floor), chosen only so the probe log
+ * reads like a real register-read attempt. */
+#define PROBE_ADDR 0x08u
 
 int main(void)
 {
-	printk("\n=== aen-i3c-regcheck ===\n");
+	printk("\n=== aen-i3c-regcheck (<alp/i3c.h>, controller-init proof) ===\n");
+	printk("bus: ALP_E1M_I3C0 = %u (alp-i3c0 alias -> lpi3c0@0x43006000)\n", ALP_E1M_I3C0);
 
 	/*
-	 * Step 1+2: report the node's binding + reg base + timing DT facts.
-	 * DT_REG_ADDR / DT_PROP are build-time constants pulled from the bound
-	 * node; a mismatch vs the fork address means the binding resolved to the
-	 * wrong node.
+	 * alp_i3c_open() resolves ALP_E1M_I3C0 through the zephyr_drv backend's
+	 * DT-alias table, checks device_is_ready(), and returns a handle.  DAA
+	 * for any declared targets already ran during Zephyr's device init --
+	 * there is nothing to declare on this bench carrier, so it finds zero.
 	 */
-	uint32_t i3c_base     = (uint32_t)DT_REG_ADDR(I3C_NODE);
-	uint32_t i3c_scl_hz   = (uint32_t)DT_PROP(I3C_NODE, i3c_scl_hz);
-	uint32_t od_thigh_min = (uint32_t)DT_PROP(I3C_NODE, od_thigh_min_ns);
+	alp_i3c_t *bus = alp_i3c_open(&ALP_I3C_CONFIG_DEFAULT(ALP_E1M_I3C0));
 
-	printk("lpi3c0: %s\n", DT_NODE_FULL_NAME(I3C_NODE));
-	printk("        bound=%d compat=snps,designware-i3c base=0x%08x (exp 0x%08x)\n",
-	       (int)I3C_BOUND,
-	       i3c_base,
-	       I3C_BASE_EXPECTED);
-	printk("        i3c-scl-hz=%u (exp %u) od-thigh-min-ns=%u (exp %u)\n",
-	       i3c_scl_hz,
-	       I3C_SCL_HZ_EXPECTED,
-	       od_thigh_min,
-	       I3C_OD_THIGH_MIN_EXPECTED);
-	printk("alias : alp_i3c0 -> %s (resolves_to_lpi3c0=%d)\n",
-	       DT_NODE_FULL_NAME(I3C_ALIAS),
-	       (int)ALIAS_OK);
+	if (bus == NULL) {
+		printk("RESULT FAIL: alp_i3c_open failed (alp_last_error=%d; "
+		       "expected NOT_READY=-2 if lpi3c0 not okay'd / clock / pinctrl)\n",
+		       (int)alp_last_error());
+		return 0;
+	}
+	printk("alp_i3c_open: OK (handle=%p)\n", (void *)bus);
+
+	/* Capabilities: an empty-but-valid descriptor proves the open path
+	 * populated caps_out, even though this backend advertises no flags. */
+	const alp_capabilities_t *caps = alp_i3c_capabilities(bus);
+
+	printk("capabilities: %s (flags=0x%08x)\n",
+	       (caps != NULL) ? "present" : "NULL",
+	       (caps != NULL) ? caps->flags : 0u);
 
 	/*
-	 * Step 3: probe the instantiated driver.  DEVICE_DT_GET_OR_NULL is NULL
-	 * only if the node is disabled or the driver TU was not built, so this
-	 * links cleanly either way.  device_is_ready() reports the i3c_dw init
-	 * result.
+	 * Probe write: reaches the driver's transfer path (address resolution +
+	 * i3c_transfer()).  EXPECTED result on this batch is ALP_ERR_IO -- no
+	 * target answers addr 0x08 because none is populated -- see the file
+	 * header.  Any OTHER outcome (a hang, a crash, or an unrecognised
+	 * status) would indicate a real bug in the backend.
 	 */
-	const struct device *dev = DEVICE_DT_GET_OR_NULL(I3C_NODE);
+	uint8_t      probe_byte = 0xAAu;
+	alp_status_t wr         = alp_i3c_write(bus, PROBE_ADDR, &probe_byte, 1u);
+	const char  *wr_note    = (wr == ALP_ERR_IO) ? "ALP_ERR_IO -- expected, no target populated"
+	                          : (wr == ALP_OK)   ? "ALP_OK -- unexpected on this batch"
+	                          : (wr == ALP_ERR_NOSUPPORT) ? "ALP_ERR_NOSUPPORT -- CONFIG_I3C off?"
+	                                                      : "unexpected status";
 
-	if (dev == NULL) {
-		printk("lpi3c0 device : <none> (node disabled or driver not built)\n");
-	} else if (!device_is_ready(dev)) {
-		printk("lpi3c0 device : present but NOT ready (init/clock/pinctrl failed)\n");
+	printk("alp_i3c_write(addr=0x%02x): status=%d (%s)\n", PROBE_ADDR, (int)wr, wr_note);
+
+	/*
+	 * PASS gate: the controller BINDS + OPENS + reports well-formed
+	 * capabilities, and the probe write reaches the transfer path and
+	 * returns a clean status (ALP_ERR_IO is the expected "no target"
+	 * outcome on this batch; ALP_OK would also be acceptable evidence the
+	 * call path works, in case a target ever IS populated).  A crash, hang,
+	 * or ALP_ERR_NOSUPPORT (subsystem not built) is the failure signature
+	 * this gate catches.
+	 */
+	/* No `caps != NULL` term here: alp_i3c_capabilities() returns non-NULL
+	 * for any non-NULL handle, and `bus` was already NULL-checked above, so
+	 * such a term can never be false -- it would dress up the PASS line with
+	 * a check that cannot fail.  The falsifiable evidence is the probe
+	 * status alone. */
+	bool probe_ok = (wr == ALP_ERR_IO) || (wr == ALP_OK);
+
+	if (probe_ok) {
+		printk("RESULT PASS: I3C controller BINDS + OPENS via <alp/i3c.h> -- "
+		       "lpi3c0 ready, alp-i3c0 alias resolves, probe write returns a "
+		       "well-formed status (%d). Controller-init proof only: no I3C "
+		       "target is populated this batch, so live transfer is UNTESTED.\n",
+		       (int)wr);
 	} else {
-		printk("lpi3c0 device : READY (snps,designware-i3c driver instantiated)\n");
+		printk("RESULT FAIL: I3C controller not fully staged "
+		       "(caps=%p write_status=%d)\n",
+		       (void *)caps,
+		       (int)wr);
 	}
 
-	/*
-	 * Diagnostic only (NOT gated -- see file header): a raw MMIO read of
-	 * DEVICE_CTRL, proving the register window is reachable.  No expected
-	 * value comparison -- the DesignWare reset value for this field is not
-	 * bench-confirmed on this silicon.
-	 */
-	printk("lpi3c0 DEVICE_CTRL (0x%08x) = 0x%08x (reachability probe, not gated)\n",
-	       i3c_base + I3C_DEVICE_CTRL_OFFSET,
-	       sys_read32(i3c_base + I3C_DEVICE_CTRL_OFFSET));
-
-	/*
-	 * PASS gate: the LP I3C controller BINDS -- lpi3c0 binds to
-	 * snps,designware-i3c at the fork reg base, the alp_i3c0 alias points at
-	 * it, and the DT timing facts (i3c-scl-hz/od-thigh-min-ns) match the
-	 * fork transcription.  This is a bind/instantiation check ONLY;
-	 * device_is_ready and the DEVICE_CTRL readback are reported above but
-	 * NOT gated -- I3C is not silicon-verifiable on this batch (no I3C
-	 * target device wired).
-	 */
-	bool nodes_ok = I3C_BOUND && (i3c_base == I3C_BASE_EXPECTED) &&
-	                (i3c_scl_hz == I3C_SCL_HZ_EXPECTED) &&
-	                (od_thigh_min == I3C_OD_THIGH_MIN_EXPECTED) && ALIAS_OK;
-
-	if (nodes_ok) {
-		printk("RESULT PASS: LP I3C controller BINDS -- lpi3c0 binds to "
-		       "snps,designware-i3c at 0x%08x, alp_i3c0 alias points at it, timing DT "
-		       "facts wired (i3c-scl-hz=%u od-thigh-min-ns=%u); live bus traffic "
-		       "UNTESTED this batch (I3C not silicon-verifiable, no target wired)\n",
-		       I3C_BASE_EXPECTED,
-		       I3C_SCL_HZ_EXPECTED,
-		       I3C_OD_THIGH_MIN_EXPECTED);
-	} else {
-		printk("RESULT FAIL: LP I3C controller NOT fully staged "
-		       "(bound=%d base=%d scl_hz=%d od_thigh=%d alias=%d -- a fact is missing, "
-		       "the node is disabled, or it bound to the wrong compatible/reg base)\n",
-		       (int)I3C_BOUND,
-		       (int)(i3c_base == I3C_BASE_EXPECTED),
-		       (int)(i3c_scl_hz == I3C_SCL_HZ_EXPECTED),
-		       (int)(od_thigh_min == I3C_OD_THIGH_MIN_EXPECTED),
-		       (int)ALIAS_OK);
-	}
-
+	alp_i3c_close(bus);
 	return 0;
 }

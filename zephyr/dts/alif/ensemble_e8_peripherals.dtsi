@@ -630,9 +630,12 @@
 	 * zephyr_alif fork (zephyr_alif@3a2b84d9,
 	 * dts/arm/alif/ensemble/common/e1.dtsi: i3c0@0x49034000); the SoM routes
 	 * SDA/SCL to P7_6/P7_7 fn6 (I3C_SDA_D/I3C_SCL_D,
-	 * metadata/e1m_modules/aen/from-alif.tsv rows AH5/AG5) -- the SAME pads
-	 * the LP I3C below uses on a different mux, so a board enables only ONE of
-	 * the two.  vendor-ext, BENCH-UNVERIFIED.
+	 * metadata/e1m_modules/aen/from-alif.tsv rows AH5/AG5).  This controller
+	 * also reaches P0_0/P0_1 (_A), P1_2/P1_3 (_B) and P3_2/P3_3 (_C); it
+	 * collides with the LP I3C below on P7_6/P7_7 ONLY.  So the two are
+	 * independently usable in general -- it is the E1M-AEN801 SoM, which
+	 * breaks out only that one pad pair, that forces a choice between them.
+	 * vendor-ext, BENCH-UNVERIFIED.
 	 */
 	i3c0: i3c@49034000 {
 		compatible = "snps,designware-i3c";
@@ -647,9 +650,24 @@
 	};
 
 	/*
-	 * LP I3C (M55-HE local domain) -- same upstream i3c_dw.c driver, the
-	 * instance the E1M-AEN801 SoM actually wires (from-alif.tsv routes
-	 * P7_6/P7_7 to the LPI3C_*_B mux, fn3, not the main I3C's fn6).
+	 * LP I3C (M55-HE local domain) -- same upstream i3c_dw.c driver, a fully
+	 * INDEPENDENT second controller.  It reaches P6_2/P6_3 (_A), P7_6/P7_7
+	 * (_B) and P14_2/P14_3 (_C); the main i3c0 above reaches P0_0/P0_1,
+	 * P1_2/P1_3, P3_2/P3_3 and P7_6/P7_7.  The two overlap on P7_6/P7_7
+	 * ONLY, where the SoC exposes both PIN_P7_6__I3C_SDA_D/PIN_P7_7__I3C_SCL_D
+	 * (fn6) and PIN_P7_6__LPI3C_SDA_B/PIN_P7_7__LPI3C_SCL_B (fn3).
+	 *
+	 * On the E1M-AEN801 that overlap is the whole story: the SoM breaks out
+	 * only P7_6/P7_7, so exactly one of the two nodes may be enabled there.
+	 * A board routing them to non-overlapping pads can run BOTH at once --
+	 * do not read the AEN801 constraint as a silicon limit.
+	 *
+	 * Do NOT read that choice out of from-alif.tsv.  That table's
+	 * `alif_peripheral` column (rows AG5/AH5) names the MAIN-I3C fn6
+	 * functions, I3C_SCL_D/I3C_SDA_D, and the file contains no LPI3C row at
+	 * all -- so if anything it documents i3c0, not this node.  lpi3c0 is
+	 * preferred on E1M-AEN801 because it sits in the M55-HE local peripheral
+	 * domain, a firmware/domain decision the pinout table does not make.
 	 * reg/IRQ transcribed from the Apache-2.0 zephyr_alif fork
 	 * (zephyr_alif@3a2b84d9, dts/arm/alif/ensemble/e4_e6_e8.dtsi:
 	 * lpi3c0@0x43006000); od-thigh-min-ns/i3c-scl-hz carried over from the

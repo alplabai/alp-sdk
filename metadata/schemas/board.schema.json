@@ -614,8 +614,8 @@
             "type": "string",
             "enum": [
               "adc", "can", "counter", "dac", "emmc", "ethernet",
-              "flash", "gpio", "i2c", "i2s", "pwm", "rtc", "sensor",
-              "spi", "uart", "usb", "watchdog"
+              "flash", "gpio", "i2c", "i2s", "i3c", "pwm", "rtc",
+              "sensor", "spi", "uart", "usb", "watchdog"
             ]
           }
         },
