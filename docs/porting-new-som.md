@@ -289,13 +289,11 @@ on_module:
 # carries once the datasheet lands.
 inference:
   preferred_backend:    ethos_u
+  # Primary variant only.  Which Ethos-U instances the part carries (and their
+  # subtype / MAC / paired core) is silicon-determined -- the SDK derives it
+  # from the SoC JSON npus[] / capabilities.ethos_uNN_count -- so the preset
+  # does not enumerate them.  (The old `npu_population:` list is deprecated.)
   ethos_u_variant:      u85
-  # One row per populated NPU instance, naming only the variant.  The
-  # instance's subtype, MAC size and paired host core are silicon facts
-  # sourced from the SoC JSON npus[] (subtype / mac_per_cycle / paired_core).
-  npu_population:
-    - { variant: u85 }
-    - { variant: u55 }
 
 # SoM-side extensions to silicon capabilities.  The loader merges
 # this on top of soc_spec.capabilities at codegen time (see

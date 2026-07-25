@@ -980,13 +980,13 @@ def _emit_inference(
     the ALP_SDK_* parent it `depends on` in
     zephyr/kconfigs/iot-audio-inference.kconfig (issue #874 item 3):
 
-      - CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U{55,65,85}=y -- picked from
-        the SoM preset's `npu_population:` list (preferred) with a
-        capability-count fallback for SoMs that haven't declared the
-        fine-grained population block yet.  U85 carries Arm's larger
-        MAC array + TensorOptimized kernels; U55 carries the smaller
-        MAC + reference kernels; U65 is i.MX 93-only.  U55/U85 depend
-        on BACKEND_ETHOS_U_AEN; U65 depends on BACKEND_ETHOS_U_N93.
+      - CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U{55,65,85}=y -- derived from
+        the silicon capability counts (ethos_u{55,65,85}_count, resolved
+        from the SoC JSON npus[]), the single source for which NPUs the
+        part carries.  U85 carries Arm's larger MAC array + TensorOptimized
+        kernels; U55 carries the smaller MAC + reference kernels; U65 is
+        i.MX 93-only.  U55/U85 depend on BACKEND_ETHOS_U_AEN; U65 depends
+        on BACKEND_ETHOS_U_N93.
 
       - CONFIG_ALP_SDK_INFERENCE_TFLM_{NEON,HELIUM,REF}=y -- picked
         from the SoC JSON's `cores[<slice.core_id>].vector_extension`
@@ -1055,21 +1055,13 @@ def _emit_inference(
     inference_lines.append(tflm_kernel_kc)
 
     # ---- G-1 -- per-variant Ethos-U selector ---------------------
-    # Which Ethos-U variants this SoM carries -- read the SoM preset's
-    # `inference.npu_population[].variant`; fall back to the capability
-    # counts (ethos_u{55,65,85}_count) for SoMs that haven't yet declared
-    # the per-instance block.  Both AEN401 / AEN601 / AEN801 populate
-    # npu_population[] (variant only -- instance subtype/MAC/paired-core are
-    # silicon facts in the SoC npus[]); the i.MX 93 SoM relies on the
-    # capability-count fallback today.
+    # Which Ethos-U variants this SoM carries -- derived from the
+    # silicon-determined capability counts (ethos_u{55,65,85}_count, resolved
+    # from the SoC JSON npus[] via resolve_capabilities).  This is the single
+    # source: an on-die NPU cannot be depopulated at the SoM level, so the SoM
+    # preset does NOT restate the variant list (the SoM `inference.npu_population`
+    # field is deprecated and no longer read here).
     ethos_variants: set[str] = set()
-    npu_pop = (project.som_preset.get("inference") or {}).get("npu_population") or []
-    for entry in npu_pop:
-        v = (entry.get("variant") if isinstance(entry, dict) else "") or ""
-        v = v.lower()
-        if v in ("u55", "u65", "u85"):
-            ethos_variants.add(v)
-    # Capability-count fallback (handles SoMs without npu_population:).
     if (capabilities.get("ethos_u55_count") or 0) > 0:
         ethos_variants.add("u55")
     if (capabilities.get("ethos_u65_count") or 0) > 0:
