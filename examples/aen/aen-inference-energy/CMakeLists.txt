@@ -25,7 +25,20 @@ cmake_minimum_required(VERSION 3.20.0)
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(aen_inference_energy LANGUAGES C CXX)
 
-set(AEN_NPU_INFERENCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../aen-npu-inference-alif")
+set(AEN_NPU_INFERENCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../aen-npu-inference-alif"
+    CACHE PATH "Sibling example whose gen_model.py (the Vela driver) is SHARED, not copied")
+
+# Fail with the actual reason.  Copying this example out of the SDK tree -- the
+# normal customer path -- leaves the sibling behind, and without this check the
+# build dies as an opaque "model-gen failed (rc=1)" from the custom command.
+if(NOT EXISTS "${AEN_NPU_INFERENCE_DIR}/gen_model.py")
+	message(FATAL_ERROR
+		"aen-inference-energy: cannot find ${AEN_NPU_INFERENCE_DIR}/gen_model.py.\n"
+		"This example deliberately SHARES the Vela driver script with "
+		"examples/aen/aen-npu-inference-alif rather than copying it, so the two "
+		"cannot drift.  Keep both example directories together, or point "
+		"-DAEN_NPU_INFERENCE_DIR=<path to aen-npu-inference-alif> at it.")
+endif()
 
 # --------------------------------------------------------------------------
 # Model-gen: Vela-compile the fixture for the U85 with the Alif system-config.

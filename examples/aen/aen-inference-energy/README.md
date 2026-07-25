@@ -109,10 +109,11 @@ byte-identical while measuring something else):
 | `AEN_NPU_MODEL` / `AEN_NPU_MODEL_NAME` | tiny_int8 fixture | Swap the model. |
 | `AEN_NPU_VELA_CONFIG` | unset | The Alif proprietary `ensemble_vela.ini` (from `alp-sdk-internal`). Unset still runs on the NPU — this app pins every region to the SRAM AXI port — but the command stream is not the bench-matched one. |
 
-Whole-board cross-check configuration (~27 s per phase, one pair):
+Whole-board cross-check configuration (~17.9 s per phase, one pair -- kept
+under the 26.8 s cycle-counter wrap, above which `span_cycles` is meaningless):
 
 ```sh
-  -DAEN_ENERGY_SAMPLES_PER_WINDOW=6000 -DAEN_ENERGY_WINDOW_PAIRS=1 \
+  -DAEN_ENERGY_SAMPLES_PER_WINDOW=4000 -DAEN_ENERGY_WINDOW_PAIRS=1 \
   -DAEN_ENERGY_EMIT_SAMPLES=0 -DAEN_ENERGY_RAIL_ADDR=0x4A
 ```
 

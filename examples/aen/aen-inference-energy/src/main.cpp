@@ -20,13 +20,14 @@
  *   1. Rail scan.  All six EVK INA236 monitors are probed, and each is watched
  *      through a short inferring window and a short quiet one -- the board is
  *      the authority on which rail feeds the compute, not a guess baked into
- *      this file.  A rail only qualifies if its shunt-voltage step clears three
- *      standard errors; the largest qualifying step wins.  If NOTHING qualifies
- *      the app falls back to the highest-current rail and reports which rule it
- *      used, because ranking rails by a difference that is entirely noise picks
- *      whichever rail's dither happened to be largest.  Bench-observed: with a
- *      trivial model that chose a 0.6 mA housekeeping rail over the 93 mA
- *      compute rail.
+ *      this file.  A rail only qualifies if its step clears three standard
+ *      errors, and rails are ranked in MILLIAMPS, never in shunt microvolts --
+ *      this board mixes 20 mOhm and 50 mOhm shunts, so microvolts are not
+ *      comparable between rails.  If NOTHING qualifies, the app falls back to
+ *      the rail carrying the most POWER and reports which rule it used, because
+ *      ranking by a difference that is entirely noise picks whichever rail's
+ *      dither happened to be largest.  Bench-observed: with a trivial model
+ *      that chose a 0.6 mA housekeeping rail over the 93 mA compute rail.
  *   2. Range pick.  Given the shunt swing just observed, the app picks the
  *      finer +/-20.48 mV ADC range when the rail fits inside it with headroom,
  *      and stays on +/-81.92 mV when it does not.  Saturating the range would
@@ -55,6 +56,7 @@
  * their SBOSA81D citations, and this app only chooses among them.
  */
 
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 
@@ -152,8 +154,18 @@ static constexpr ina236_mode_t SAMPLE_MODE   = INA236_MODE_SHUNT_BUS_CONT;
  * the host re-integrator -- which is the honest outcome, since there is no
  * sample stream for it to re-integrate.
  *
- *   -DAEN_ENERGY_SAMPLES_PER_WINDOW=6000 -DAEN_ENERGY_WINDOW_PAIRS=1 \
- *   -DAEN_ENERGY_EMIT_SAMPLES=0            (~26.9 s per phase) */
+ *   -DAEN_ENERGY_SAMPLES_PER_WINDOW=4000 -DAEN_ENERGY_WINDOW_PAIRS=1 \
+ *   -DAEN_ENERGY_EMIT_SAMPLES=0            (~17.9 s per phase)
+ *
+ * KEEP A LONG WINDOW UNDER THE CYCLE-COUNTER WRAP.  The 32-bit counter wraps
+ * every 2^32/160e6 = 26.8 s at this clock, and `span_cycles` is a single
+ * unsigned difference across the whole window -- so a window longer than that
+ * silently reports a wrapped, meaningless span, and the host's
+ * cycles-per-second reconciliation would compare two equally-wrapped spans and
+ * prefer them over the devicetree value. 4000 samples x 4.48 ms = 17.9 s
+ * leaves ~33 % margin. The per-sample timestamps are unaffected either way
+ * (consecutive deltas are far below the wrap); only the whole-window span is.
+ * A build that needs longer must integrate across several sub-windows. */
 #ifndef AEN_ENERGY_SAMPLES_PER_WINDOW
 #define AEN_ENERGY_SAMPLES_PER_WINDOW 250
 #endif
@@ -184,6 +196,13 @@ static constexpr size_t SCAN_SAMPLES = 16;
  * seen during the scan stays below this, leaving ~25 % headroom for peaks the
  * short scan did not catch.  Above it, clipping is the worse error. */
 static constexpr int32_t ADCRANGE_20MV_MAX_UV = 15000;
+
+/* One shunt-ADC count during the SCAN, which always runs on the coarse
+ * +/-81.92 mV range (2.5 uV per count, SBOSA81D section 6.5).  Used as the
+ * floor on the significance test's standard error: a rail whose scan samples
+ * are bit-identical has a computed spread of exactly zero, and a zero-spread
+ * gate accepts a one-count difference as significant. */
+static constexpr float SCAN_SHUNT_LSB_UV = 2.5f;
 
 /* ------------------------------------------------------------------------- *
  * Cycle counter.
@@ -426,6 +445,19 @@ static void run_window(ina236_t                 *mon,
 	out->span_ms     = (uint32_t)(k_uptime_get() - t_start_ms);
 	out->timed_out   = timed_out;
 	out->last_rc     = last_rc;
+
+	/* A window longer than the cycle counter's wrap (2^32 cycles = 26.8 s at
+	 * 160 MHz) cannot report a meaningful whole-window span, and a wrapped
+	 * span is indistinguishable from a real one -- so say so instead of
+	 * emitting it silently.  The per-sample deltas the energy integral uses
+	 * are unaffected; only this summary span is. */
+	if (out->span_ms >
+	    (uint32_t)(4294967295U / (cyc_per_s > 0.0f ? (uint32_t)(cyc_per_s / 1000.0f) : 1U))) {
+		printk("ENERGY-WARN %s window %u ms exceeds the cycle-counter wrap -- span_cycles "
+		       "is not meaningful; lower AEN_ENERGY_SAMPLES_PER_WINDOW\n",
+		       phase_name(phase),
+		       (unsigned)out->span_ms);
+	}
 }
 
 /* Emit one window's samples plus its span.  The host re-integrates from these
@@ -441,12 +473,19 @@ static void emit_window(size_t idx, phase_t phase, const window_result &w)
 		       (unsigned)(g_window[i].cycles - base),
 		       (unsigned)g_window[i].power_raw);
 	}
-	printk("ENERGY-W %u %s %u %u %u\n",
+	/* The inference count belongs HERE, per window, not in the one-shot
+	 * ENERGY-CFG header: it is measured, not configured, and it differs per
+	 * window.  The host divides each window pair's energy delta by it, so a
+	 * single header value could not express it -- and reading it from a field
+	 * the firmware never emitted is exactly how the host parser came to
+	 * raise KeyError on a real capture. */
+	printk("ENERGY-W %u %s %u %u %u %u\n",
 	       (unsigned)idx,
 	       phase_name(phase),
 	       (unsigned)w.samples,
 	       (unsigned)w.span_cycles,
-	       (unsigned)w.span_ms);
+	       (unsigned)w.span_ms,
+	       (unsigned)w.inferences);
 	/* Say so when the printed stream is shorter than what was integrated, so a
 	 * host re-integrating the stream cannot mistake a partial replay for the
 	 * whole window and silently report a fraction of the real energy. */
@@ -479,47 +518,71 @@ static void emit_window(size_t idx, phase_t phase, const window_result &w)
  * a 0.6 mA housekeeping rail over the 93 mA compute rail.  The standard error
  * derived from `sd_out` is what lets the caller tell a real load step from
  * dither in the last ADC count. */
-static void scan_shunt_stats(ina236_t                 *mon,
+static bool scan_shunt_stats(ina236_t                 *mon,
                              tflite::MicroInterpreter *interp,
                              phase_t                   phase,
                              uint32_t                  poll_cycles,
-                             int32_t                  *mean_out,
-                             int32_t                  *sd_out)
+                             uint32_t                  deadline_ms,
+                             float                    *mean_out,
+                             float                    *sd_out,
+                             uint32_t                 *errors_out)
 {
-	int64_t  sum       = 0;
-	int64_t  sum_sq    = 0;
+	/* Welford's online algorithm in float, NOT sum/sum-of-squares in
+	 * integers.
+	 *
+	 * The integer form truncated the mean before squaring it, so
+	 * `var = sum_sq/n - mean*mean` carried an error of up to 2*|mean|: on a
+	 * ~2050 uV rail that turned a true sigma of 3.5 uV into a reported
+	 * 53 uV, a 15x inflation.  The significance gate below is a multiple of
+	 * this sigma, so the inflation made the gate 3-15x too strict and pushed
+	 * genuine load steps into the largest-current fallback.  Welford also
+	 * avoids the catastrophic cancellation the sum-of-squares form suffers
+	 * when the mean dwarfs the spread -- exactly this measurement. */
+	float    mean      = 0.0f;
+	float    m2        = 0.0f;
 	size_t   got       = 0;
+	uint32_t errs      = 0;
 	uint32_t next_poll = cycles_now() + poll_cycles;
+	int64_t  t_start   = k_uptime_get();
+	bool     complete  = true;
 
 	while (got < SCAN_SAMPLES) {
+		/* Same deadline discipline as run_window: a loop gated on a hardware
+		 * flag must never be able to spin forever.  Without it, a monitor
+		 * that stops converting mid-scan hangs the app before it ever
+		 * reaches the measurement. */
+		if ((uint32_t)(k_uptime_get() - t_start) > deadline_ms) {
+			complete = false;
+			break;
+		}
 		if ((int32_t)(cycles_now() - next_poll) >= 0) {
 			next_poll  = cycles_now() + poll_cycles;
 			bool ready = false;
-			if (ina236_conversion_ready(mon, &ready) == ALP_OK && ready) {
+			if (ina236_conversion_ready(mon, &ready) != ALP_OK) {
+				errs++;
+			} else if (ready) {
 				int32_t uv = 0;
-				if (ina236_read_shunt_uv(mon, &uv) == ALP_OK) {
-					sum += uv;
-					sum_sq += (int64_t)uv * (int64_t)uv;
+				if (ina236_read_shunt_uv(mon, &uv) != ALP_OK) {
+					errs++;
+				} else {
 					got++;
+					float d = (float)uv - mean;
+					mean += d / (float)got;
+					m2 += d * ((float)uv - mean);
 				}
 			}
 		} else if (phase == PHASE_ACTIVE) {
-			(void)interp->Invoke();
+			/* A failing invoke means the "active" burst never inferred, so a
+			 * delta computed from it describes nothing.  Count it instead of
+			 * silently measuring an idle rail and labelling it active. */
+			if (interp->Invoke() != kTfLiteOk) errs++;
 		}
 	}
-	int64_t n    = (int64_t)SCAN_SAMPLES;
-	int64_t mean = sum / n;
-	/* Population variance is enough to size a noise floor; the sample-vs-
-	 * population distinction is far below the effect we are gating on. */
-	int64_t var = (sum_sq / n) - (mean * mean);
-	if (var < 0) var = 0;
-	*mean_out = (int32_t)mean;
-	*sd_out   = (int32_t)__builtin_sqrtf((float)var);
-}
 
-static inline int32_t abs32(int32_t v)
-{
-	return v < 0 ? -v : v;
+	*mean_out   = mean;
+	*sd_out     = (got > 1) ? __builtin_sqrtf(m2 / (float)(got - 1)) : 0.0f;
+	*errors_out = errs;
+	return complete;
 }
 
 int main(void)
@@ -628,12 +691,30 @@ int main(void)
 	 * useless, because the resulting energy figure looks real. */
 	static constexpr float NOISE_SIGMA = 3.0f;
 
-	int     best_sig       = -1;
-	int32_t best_sig_delta = 0;
-	int32_t best_sig_peak  = 0;
-	int     best_current   = -1;
-	int32_t best_cur_uv    = 0;
-	int32_t best_cur_peak  = 0;
+	/* Per-rail scan results, kept for EVERY rail rather than folded into a
+	 * running best.  The operator override below reassigns which rail is
+	 * measured, and the ADC range is then picked from that rail's observed
+	 * peak -- with only the auto-winner's peak retained, an override silently
+	 * picked the range from a DIFFERENT rail and could clip the very peaks
+	 * the measurement is about. */
+	struct scan_result {
+		bool     answered;
+		bool     complete;
+		float    act_uv;
+		float    idl_uv;
+		float    act_sd;
+		float    idl_sd;
+		int32_t  bus_mv;
+		float    peak_uv;
+		float    delta_ma; /* rail-comparable: uV / shunt_ohms */
+		float    act_mw;   /* rail-comparable: current x bus voltage */
+		bool     significant;
+		uint32_t errors;
+	};
+	static scan_result scan[ARRAY_SIZE(RAILS)] = {};
+
+	const uint32_t scan_deadline_ms =
+	    (uint32_t)(((uint64_t)SCAN_SAMPLES * period_us * WINDOW_DEADLINE_MULT) / 1000ULL);
 
 	for (size_t i = 0; i < ARRAY_SIZE(RAILS); i++) {
 		ina236_t     probe;
@@ -652,51 +733,93 @@ int main(void)
 		 * they average over both the old and new settings. */
 		k_msleep((int32_t)(2U * period_us / 1000U) + 2);
 
-		int32_t act = 0, act_sd = 0, idl = 0, idl_sd = 0;
-		scan_shunt_stats(&probe, &interpreter, PHASE_ACTIVE, poll_cycles, &act, &act_sd);
-		scan_shunt_stats(&probe, &interpreter, PHASE_IDLE, poll_cycles, &idl, &idl_sd);
-		int32_t d    = act - idl;
-		int32_t peak = abs32(act) > abs32(idl) ? abs32(act) : abs32(idl);
+		scan_result *r = &scan[i];
+		r->answered    = true;
+		uint32_t e_act = 0, e_idl = 0;
+		bool     c_act = scan_shunt_stats(&probe,
+		                                  &interpreter,
+		                                  PHASE_ACTIVE,
+		                                  poll_cycles,
+		                                  scan_deadline_ms,
+		                                  &r->act_uv,
+		                                  &r->act_sd,
+		                                  &e_act);
+		bool     c_idl = scan_shunt_stats(&probe,
+		                                  &interpreter,
+		                                  PHASE_IDLE,
+		                                  poll_cycles,
+		                                  scan_deadline_ms,
+		                                  &r->idl_uv,
+		                                  &r->idl_sd,
+		                                  &e_idl);
+		r->complete    = c_act && c_idl;
+		r->errors      = e_act + e_idl;
+		(void)ina236_read_bus_mv(&probe, &r->bus_mv);
 
-		/* Standard error of the difference of two means of SCAN_SAMPLES each. */
-		float se = __builtin_sqrtf(((float)act_sd * (float)act_sd + (float)idl_sd * (float)idl_sd) /
-		                           (float)SCAN_SAMPLES);
-		bool  significant = (d > 0) && ((float)d > NOISE_SIGMA * se);
+		float d_uv = r->act_uv - r->idl_uv;
+		r->peak_uv = (fabsf(r->act_uv) > fabsf(r->idl_uv)) ? fabsf(r->act_uv) : fabsf(r->idl_uv);
 
-		printk("ENERGY-SCAN %-6s 0x%02x active_uv=%d(sd=%d) idle_uv=%d(sd=%d) "
-		       "delta_uv=%d se_uv=%f significant=%d\n",
+		/* Standard error of the difference of two means, floored at one shunt
+		 * ADC count.  Without the floor a rail whose 16 scan samples are
+		 * BIT-IDENTICAL (reachable -- +1V8 reads 0 uV in both phases on this
+		 * board) gives se = 0, and then any +1-count offset satisfies
+		 * `d > 3*0` and is declared significant.  The 3-sigma gate would be
+		 * vacuous on exactly the quiet housekeeping rails it exists to
+		 * reject.  The scan runs on ADCRANGE_81MV, so one count is 2.5 uV. */
+		float se =
+		    __builtin_sqrtf((r->act_sd * r->act_sd + r->idl_sd * r->idl_sd) / (float)SCAN_SAMPLES);
+		if (se < SCAN_SHUNT_LSB_UV) se = SCAN_SHUNT_LSB_UV;
+		r->significant = (d_uv > 0.0f) && (d_uv > NOISE_SIGMA * se) && r->complete;
+
+		/* Rank in CURRENT and POWER, never in raw shunt microvolts.  This
+		 * board mixes 20 mOhm and 50 mOhm shunts, so microvolts are not
+		 * comparable across rails: 190 uV is 9.5 mA on 20 mOhm but 3.8 mA on
+		 * 50 mOhm, a 2.5x bias that made a small camera rail able to
+		 * outrank the real compute rail. */
+		r->delta_ma = (d_uv / RAILS[i].shunt_ohms) / 1000.0f;
+		r->act_mw   = ((r->act_uv / RAILS[i].shunt_ohms) / 1000.0f) * ((float)r->bus_mv / 1000.0f);
+
+		printk("ENERGY-SCAN %-6s 0x%02x active_uv=%.1f(sd=%.1f) idle_uv=%.1f(sd=%.1f) "
+		       "delta_uv=%.1f delta_ma=%.3f bus_mv=%d act_mw=%.1f se_uv=%.2f "
+		       "significant=%d complete=%d errors=%u\n",
 		       RAILS[i].name,
 		       RAILS[i].addr,
-		       (int)act,
-		       (int)act_sd,
-		       (int)idl,
-		       (int)idl_sd,
-		       (int)d,
+		       (double)r->act_uv,
+		       (double)r->act_sd,
+		       (double)r->idl_uv,
+		       (double)r->idl_sd,
+		       (double)d_uv,
+		       (double)r->delta_ma,
+		       (int)r->bus_mv,
+		       (double)r->act_mw,
 		       (double)se,
-		       (int)significant);
+		       (int)r->significant,
+		       (int)r->complete,
+		       (unsigned)r->errors);
 
-		if (significant && (best_sig < 0 || d > best_sig_delta)) {
-			best_sig       = (int)i;
-			best_sig_delta = d;
-			best_sig_peak  = peak;
-		}
-		if (best_current < 0 || abs32(act) > abs32(best_cur_uv)) {
-			best_current  = (int)i;
-			best_cur_uv   = act;
-			best_cur_peak = peak;
-		}
 		ina236_deinit(&probe);
 	}
 
-	if (best_current < 0) {
+	/* Pick by the largest SIGNIFICANT delta in milliamps; fall back to the
+	 * rail carrying the most POWER when no rail shows a significant step (a
+	 * trivial model genuinely produces none, and then "the rail whose noise
+	 * moved most" is worse than useless because the figure looks real). */
+	int best_sig = -1, best_pwr = -1;
+	for (size_t i = 0; i < ARRAY_SIZE(RAILS); i++) {
+		if (!scan[i].answered) continue;
+		if (scan[i].significant && (best_sig < 0 || scan[i].delta_ma > scan[best_sig].delta_ma)) {
+			best_sig = (int)i;
+		}
+		if (best_pwr < 0 || scan[i].act_mw > scan[best_pwr].act_mw) best_pwr = (int)i;
+	}
+
+	if (best_pwr < 0) {
 		printk("RESULT FAIL: no INA236 answered on EVK_I2C_BUS_SENSORS\n");
 		return 0;
 	}
 
-	int         best       = (best_sig >= 0) ? best_sig : best_current;
-	int32_t     best_delta = (best_sig >= 0) ? best_sig_delta : 0;
-	int32_t     best_peak  = (best_sig >= 0) ? best_sig_peak : best_cur_peak;
-	const char *criterion  = (best_sig >= 0) ? "largest-significant-delta" : "largest-current";
+	int         best      = (best_sig >= 0) ? best_sig : best_pwr;
+	const char *criterion = (best_sig >= 0) ? "largest-significant-delta" : "largest-power";
 
 	/* Operator override: pin a specific monitor by 7-bit address, e.g.
 	 * -DAEN_ENERGY_RAIL_ADDR=0x4A.  The automatic pick is right when a
@@ -706,6 +829,11 @@ int main(void)
 #ifdef AEN_ENERGY_RAIL_ADDR
 	for (size_t i = 0; i < ARRAY_SIZE(RAILS); i++) {
 		if (RAILS[i].addr == (uint8_t)(AEN_ENERGY_RAIL_ADDR)) {
+			if (!scan[i].answered) {
+				printk("RESULT FAIL: AEN_ENERGY_RAIL_ADDR=0x%02x did not answer\n",
+				       (unsigned)RAILS[i].addr);
+				return 0;
+			}
 			best      = (int)i;
 			criterion = "operator-override";
 			break;
@@ -714,15 +842,19 @@ int main(void)
 #endif
 	g_rail_index = best;
 
-	/* --- Range pick, from what the scan actually saw --------------------- */
+	/* --- Range pick, from what the SELECTED rail actually saw ------------
+	 * Read after the override, so the range always describes the rail that
+	 * is about to be measured. */
+	const float       best_peak  = scan[best].peak_uv;
+	const float       best_delta = scan[best].act_uv - scan[best].idl_uv;
 	ina236_adcrange_t range =
-	    (best_peak < ADCRANGE_20MV_MAX_UV) ? INA236_ADCRANGE_20MV : INA236_ADCRANGE_81MV;
-	printk("rail       : %s @0x%02x by %s delta_uv=%d peak_uv=%d -> ADCRANGE %s\n",
+	    (best_peak < (float)ADCRANGE_20MV_MAX_UV) ? INA236_ADCRANGE_20MV : INA236_ADCRANGE_81MV;
+	printk("rail       : %s @0x%02x by %s delta_uv=%.1f peak_uv=%.1f -> ADCRANGE %s\n",
 	       RAILS[best].name,
 	       RAILS[best].addr,
 	       criterion,
-	       (int)best_delta,
-	       (int)best_peak,
+	       (double)best_delta,
+	       (double)best_peak,
 	       range == INA236_ADCRANGE_20MV ? "20.48mV" : "81.92mV");
 
 	ina236_t mon;
@@ -749,9 +881,13 @@ int main(void)
 	       (double)mon.current_lsb_a,
 	       (double)power_lsb_w,
 	       (int)range,
-	       16U, /* SAMPLE_AVG = INA236_AVG_16 */
-	       140U,
-	       140U,
+	       /* Derived from the enums, never restated as literals: a hardcoded
+	        * 16/140/140 makes the emitted config describe a run that did not
+	        * happen the moment someone changes SAMPLE_AVG or a CT code.  The
+	        * driver owns both datasheet tables, so ask it. */
+	       (unsigned)ina236_avg_count(SAMPLE_AVG),
+	       (unsigned)ina236_conversion_time_us(SAMPLE_VBUSCT),
+	       (unsigned)ina236_conversion_time_us(SAMPLE_VSHCT),
 	       (unsigned)period_us,
 	       (unsigned)cps,
 	       (unsigned)SAMPLES_PER_WINDOW,
@@ -891,17 +1027,26 @@ int main(void)
 	 * "upgraded" here. */
 	printk("ENERGY-RESULT {\"source\":\"measured\",\"scope\":\"carrier-rail-delta\","
 	       "\"value_mj_per_inference\":%f,\"rails\":[\"%s\"],\"n_inferences\":%u,"
-	       "\"window_ms\":%f,\"sample_count\":%u,\"spread_mj\":%s%f,"
-	       "\"pairs_used\":%u,\"total_inferences\":%u}\n",
+	       "\"window_ms\":%f,\"sample_count\":%u,\"pairs_used\":%u,"
+	       "\"total_inferences\":%u,\"spread_mj\":",
 	       (double)mean,
 	       RAILS[best].name,
 	       (unsigned)n_last,
 	       (double)((float)SAMPLES_PER_WINDOW * (float)period_us / 1000.0f),
 	       (unsigned)(SAMPLES_PER_WINDOW * 2U * pairs_used),
-	       have_spread ? "" : "-", /* negative marks "no spread measured" */
-	       (double)spread,
 	       (unsigned)pairs_used,
 	       (unsigned)total_inferences);
+	/* JSON `null`, not a negative sentinel.  A single pair has no spread to
+	 * report, and 0.0 would read as "perfectly repeatable" rather than "never
+	 * repeated".  The earlier "-0.000000" sentinel did not work either:
+	 * json.loads gives -0.0, and `-0.0 < 0` is False in Python, so every
+	 * reader saw 0.0 -- the precise misreading it was meant to prevent.
+	 * measure.py's spread_mj is already `float | None`. */
+	if (have_spread) {
+		printk("%f}\n", (double)spread);
+	} else {
+		printk("null}\n");
+	}
 
 	if (mean > 0.0f) {
 		printk("RESULT PASS: %f mJ/inference (+/-%f) rail=%s n=%u pairs=%u/%u "
