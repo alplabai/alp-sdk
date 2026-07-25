@@ -110,6 +110,7 @@
     {
       "type": "ethos-u55",
       "subtype": "high-perf",
+      "paired_core": "m55_hp",
       "mac_per_cycle": 256,
       "freq_mhz": 400,
       "gops": 204,
@@ -118,6 +119,7 @@
     {
       "type": "ethos-u55",
       "subtype": "high-efficiency",
+      "paired_core": "m55_he",
       "mac_per_cycle": 128,
       "freq_mhz": 160,
       "gops": 46,

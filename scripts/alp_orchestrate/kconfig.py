@@ -1107,12 +1107,9 @@ def _emit_inference(
         # ethos_u driver's mutex/semaphore need a kernel heap (k_malloc).
         # Pick the most-capable variant this silicon carries (U85 > U65 > U55),
         # then read its MAC config from the SoC's npus[] `mac_per_cycle` -- NOT a
-        # hardcode.  A variant can appear more than once with different MAC sizes
-        # (e.g. the E8 carries a 256-MAC high-perf U55 AND a 128-MAC
-        # high-efficiency U55); take the most-capable of that variant, matching
-        # the most-capable-variant pick.  The derived symbol must be a real
-        # ETHOS_U_NPU_CONFIG choice member (hal_ethos_u), else it would silently
-        # no-op -- so validate and fail loudly on a metadata mismatch.
+        # hardcode.  The derived symbol must be a real ETHOS_U_NPU_CONFIG choice
+        # member (hal_ethos_u), else it would silently no-op -- so validate and
+        # fail loudly on a metadata mismatch.
         if "u85" in ethos_variants:
             variant_num = "85"
         elif "u65" in ethos_variants:
@@ -1120,13 +1117,40 @@ def _emit_inference(
         else:
             variant_num = "55"
         npu_type = f"ethos-u{variant_num}"
-        macs = [
-            n.get("mac_per_cycle")
-            for n in (project.soc_spec.get("npus") or [])
+        npus_of_type = [
+            n for n in (project.soc_spec.get("npus") or [])
             if str(n.get("type", "")).lower() == npu_type and n.get("mac_per_cycle")
         ]
-        # Fall back to 256 only when the SoC JSON is silent (older npus[]-less spec).
-        mac   = max(macs) if macs else 256
+        # Size the accelerator for the NPU instance THIS slice's core actually
+        # drives, not the SoC's most-capable one.  A part can carry two U55s of
+        # the same variant but different MACs wired to different cores (E3/E5/E7:
+        # a 256-MAC high-perf U55 on M55-HP + a 128-MAC high-efficiency U55 on
+        # M55-HE -- npus[].paired_core in the SoC JSON).  A 256-MAC command
+        # stream errors a 128-MAC NPU at invoke (register-proven on E8), so a
+        # blind max() would mis-size the HE slice.  Prefer the core-paired
+        # instance; fall back to the most-capable of the variant when the chosen
+        # variant is not core-paired (the E8 U85 on the shared HG subsystem) or
+        # the SoC JSON predates paired_core.
+        paired = [n["mac_per_cycle"] for n in npus_of_type
+                  if n.get("paired_core") == slice_.core_id]
+        macs   = [n["mac_per_cycle"] for n in npus_of_type]
+        if paired:
+            mac = paired[0]
+        elif len({*macs}) > 1:
+            # This variant has >1 distinct MAC array on the SoC but none is
+            # paired_core=<this slice's core> -- a silent max() here would
+            # re-introduce the #909 mis-sizing (a 256-MAC command stream errors
+            # a 128-MAC NPU at invoke).  Fail loudly, like the _valid_accel
+            # guard below, so a missing/typo'd paired_core is caught at emit.
+            raise ValueError(
+                f"{silicon}: inference slice core {slice_.core_id!r} drives an "
+                f"{npu_type} but the SoC JSON declares MAC variants {sorted({*macs})} "
+                f"and none sets paired_core={slice_.core_id!r} -- add "
+                f"npus[].paired_core so the build sizes the accelerator for this "
+                f"core instead of guessing (see #909).")
+        else:
+            # Single MAC for this variant (or npus[]-less older spec): unambiguous.
+            mac = macs[0] if macs else 256
         accel = f"ETHOS_U{variant_num}_{mac}"
         _valid_accel = {
             "ETHOS_U55_64", "ETHOS_U55_128", "ETHOS_U55_256",
