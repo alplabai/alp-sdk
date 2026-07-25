@@ -504,8 +504,16 @@ endif()
 # ADR 0017 Tier-2 (INTERIM).
 zephyr_library_sources_ifdef(CONFIG_VIDEO_JPEG_HANTRO_VC9000E
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/video/jpeg_hantro_vc9000e.c)
-zephyr_library_sources_ifdef(CONFIG_VIDEO_ALIF_CAM
-    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/video/video_alif.c)
+# video_alif.c also DEFINES the fourcc_to_plane_size/fourcc_to_numplanes/
+# pix_fmt_bpp helpers that isp_pico.c calls (declared extern in
+# video_alif.h and used unconditionally, not only on the CPI capture path) --
+# so ISP-only builds (CONFIG_VIDEO_ISP_VSI, no alif,cam node) need this TU too,
+# not just CONFIG_VIDEO_ALIF_CAM.  DT_INST_FOREACH_STATUS_OKAY(CPI_DEFINE) at
+# the bottom of video_alif.c expands to nothing when no alif,cam node is
+# enabled, so building it in is a no-op for the CPI device itself.
+if(CONFIG_VIDEO_ALIF_CAM OR CONFIG_VIDEO_ISP_VSI)
+    zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/video/video_alif.c)
+endif()
 zephyr_library_sources_ifdef(CONFIG_VIDEO_MIPI_CSI2_DW
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/video/video_csi_dw.c)
 zephyr_library_sources_ifdef(CONFIG_VIDEO_ARX3A0

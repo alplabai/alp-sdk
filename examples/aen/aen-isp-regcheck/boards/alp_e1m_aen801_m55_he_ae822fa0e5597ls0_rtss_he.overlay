@@ -8,14 +8,13 @@
  *   - isp (vsi,isp-pico @ 0x49046000, IRQs 367 "isp" / 368 "mi-isp")
  *
  * SCOPE: this proves the ISP node BINDS (DT_HAS_VSI_ISP_PICO_ENABLED + the reg/
- * irq match).  It does NOT build the isp_pico.c driver TU (CONFIG_VIDEO_ISP_VSI
- * stays default n): that TU links the hal_alif libisp wrapper, and the locally
- * vendored 2025 wrapper is API-incompatible with the 2026 isp_pico.c (no
- * <zephyr/drivers/video/isp-vsi.h>; 2-arg vs 3-arg isp_vsi_bottom_half) -- a
- * known EXTERNAL hal_alif blocker.  LIVE ISP processing also stays
- * HW-blocked on this batch (no camera sensor wired): the ISP only does useful
- * work inside a camera->csi->isp->memory media-controller graph, which this
- * regcheck deliberately does not stand up.
+ * irq match) AND builds+links the isp_pico.c driver TU (CONFIG_VIDEO_ISP_VSI=y,
+ * see prj.conf) against hal_alif v2.3.0 + the vendored isp-vsi.h /
+ * isp_ctrl_params.h headers (zephyr/include/zephyr/drivers/video/).  This is a
+ * BUILD-ONLY proof: LIVE ISP processing stays BENCH-BLOCKED on this batch (no
+ * camera sensor wired): the ISP only does useful work inside a
+ * camera->csi->isp->memory media-controller graph, which this regcheck
+ * deliberately does not stand up.
  */
 
 /*

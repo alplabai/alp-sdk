@@ -216,6 +216,7 @@ config ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN
 	bool "Ethos-U on Alif Ensemble (priority 100 on alif:ensemble:e*)"
 	default n
 	depends on ALP_SDK_INFERENCE_BACKEND_TFLM
+	select ETHOS_U if DT_HAS_ARM_ETHOS_U_ENABLED
 	help
 	  Compile src/backends/inference/ethos_u_aen.cpp.  Registers
 	  the same TFLM ops table against the six AEN family
@@ -224,10 +225,24 @@ config ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN
 	  AEN.  The Arm Ethos-U op resolver entry (AddEthosU) compiles
 	  into the TFLM body via the per-variant Kconfigs below.
 
+	  `select ETHOS_U if DT_HAS_ARM_ETHOS_U_ENABLED` pulls in the real
+	  Arm Ethos-U core driver ONLY when the target board declares an
+	  `arm,ethos-u` node status="okay" (a silicon AEN board -- the
+	  generated board flips it on; see gen_zephyr_board.py::_aen_ethos_u).
+	  A native_sim build has no such node, so ETHOS_U stays `default n`
+	  and the tflite-micro Ethos-U op resolves to the stub -- the
+	  inference dispatcher then serves the portable CPU TFLM path.  This
+	  is per-app: only an app that pulls in this backend pays for the
+	  driver (which needs a kernel heap), so non-inference AEN apps are
+	  unaffected.  The accelerator config (ETHOS_U85_256 / U55_256),
+	  ETHOS_U_DCACHE, DCACHE=n and the driver heap are emitted per
+	  inference app by the orchestrator (scripts/alp_orchestrate/kconfig.py).
+
 config ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93
 	bool "Ethos-U on NXP i.MX 93 (priority 100 on nxp:imx9:imx93)"
 	default n
 	depends on ALP_SDK_INFERENCE_BACKEND_TFLM
+	select ETHOS_U if DT_HAS_ARM_ETHOS_U_ENABLED
 	help
 	  Compile src/backends/inference/ethos_u_n93.cpp.  Registers
 	  the same TFLM ops table against silicon_ref="nxp:imx9:imx93"

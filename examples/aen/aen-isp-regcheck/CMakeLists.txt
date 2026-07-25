@@ -5,14 +5,13 @@
 # "vsi,isp-pico") staging on the E1M-AEN801 (Ensemble E8, M55-HE), via the bench
 # RAM-run + RAM-console flow.
 #
-# Plain prj.conf app (no alp_project.py board.yaml emit).  This regcheck does NOT
-# enable CONFIG_VIDEO_ISP_VSI -- the isp_pico.c driver TU links the hal_alif
-# libisp wrapper, and the locally vendored 2025 wrapper is API-incompatible with
-# the 2026 isp_pico.c (missing <zephyr/drivers/video/isp-vsi.h>; 2-arg vs 3-arg
-# isp_vsi_bottom_half), so the driver does not compile against it (a known
-# EXTERNAL hal_alif blocker).  So this app validates the DT BIND of the
-# isp node WITHOUT the driver, and reports the wrapper blocker at runtime.
-# See src/main.c + the board overlay.
+# Plain prj.conf app (no alp_project.py board.yaml emit).  This regcheck enables
+# CONFIG_VIDEO_ISP_VSI=y -- the isp_pico.c driver TU now COMPILES + LINKS
+# against hal_alif v2.3.0 (isp-vsi.h + isp_ctrl_params.h vendored VERBATIM into
+# zephyr/include/zephyr/drivers/video/, see the driver file header). This is a
+# BUILD-ONLY proof: RUNTIME stays BENCH-BLOCKED because no camera sensor is
+# wired on this hardware batch, so the m2m capture graph never runs. See
+# src/main.c + the board overlay.
 
 cmake_minimum_required(VERSION 3.20)
 
