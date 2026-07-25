@@ -471,6 +471,8 @@ fi
 
 echo
 ok "Bootstrap complete."
+# Split into two heredocs on purpose.  Only this first block has variables
+# left to expand, so only it gets an UNQUOTED tag.
 cat <<EOF
 
 Next steps:
@@ -479,12 +481,17 @@ Next steps:
 
   # Make Zephyr reachable for builds:
 EOF
+# The env lines dev used to hardcode here are now rendered from
+# metadata/bootstrap.json's `env` map (issue #917), so they stay in one
+# place for both this script and bootstrap.ps1.
 print_env_lines "  "
-# Quoted heredoc tag (<<'EOF', not <<EOF): this block has no variable
-# interpolation left to do, and an unquoted tag would run the backtick'd
-# `cargo install ...` text below as a real command substitution instead of
-# printing it literally -- caught during verification of this change (issue
-# #917), pre-existing, unrelated to the manifest-consumption fix itself.
+# QUOTED tag (<<'EOF') -- mandatory, not stylistic.  This block documents
+# shell commands, and an unquoted tag makes the shell treat the backtick'd
+# `cargo install ...` line below as a real command SUBSTITUTION: every
+# completed run of this script silently executed it, reinstalling tan from
+# git tip behind the user's back, and pasted its output here instead of the
+# text.  A quoted tag also means backslashes are literal, so the line
+# continuation and $PWD below are written plainly rather than escaped.
 cat <<'EOF'
 
   # Sanity-check the host environment (needs tan on PATH -- see README.md

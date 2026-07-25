@@ -62,6 +62,28 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 - Both scripts now refuse a `metadata/bootstrap.json` whose
   `schemaVersion` they do not understand, rather than parsing a future
   manifest blind on a machine where the gate never runs.
+### Fixed — `scripts/bootstrap.sh` silently ran `cargo install` on every completed run
+
+- The closing "Next steps" block used an **unquoted** heredoc tag
+  (`cat <<EOF`).  Its body documents the `tan` install with the command
+  in backticks, and an unquoted heredoc performs command substitution on
+  its body — so the backticked
+  `cargo install --git https://github.com/alplabai/tan-cli --bin tan`
+  was executed as a real command by every completed
+  `bash scripts/bootstrap.sh`, reinstalling `tan` from git tip behind the
+  user's back and pasting cargo's output into the printed instructions in
+  place of the text.  Reproduced on a clean checkout: the run reaches the
+  network (`Updating git repository ...`) and the line renders mangled as
+  `# for ):`.
+- The block is now split in two: only the first part (which genuinely
+  interpolates `${VENV_DIR}` / `${WORKSPACE_DIR}`) keeps an unquoted tag,
+  and the documentation half uses a quoted `<<'EOF'` tag so nothing in it
+  is executed.  The quoted tag also makes backslashes literal, so the
+  line continuation and `$PWD` in the example are written plainly instead
+  of escaped.
+- Pre-existing on `main` and `dev`, so it affects released versions.  The
+  other four heredocs in the script were audited and contain no backticks
+  or `$(...)`.
 ### Added — `dac` peripheral class in the `board.yaml` `peripherals:` enum
 
 `core_entry.peripherals` covered `adc` but not `dac`, so the DAC half of an
