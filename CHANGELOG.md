@@ -55,6 +55,27 @@ is populated on the bench carrier.  The conformance row asserts the contract the
 class guarantees today and implies no transfer coverage.
 
 Closes #937.
+### Fixed — `comparator_lp` removed from the E3 and E5 SoC metadata
+
+`e3.json` and `e5.json` declared `comparator_lp: 1`, but neither part has a
+low-power comparator: their DFP SVDs (`Debug/SVD/AE302F80F55D5AE_…`,
+`AE512F80F55D5LS_…`) carry `CMP0..CMP3` and **no `LPCMP`**, while the E8 SVD
+(`AE822FA0E5597BS0_…`) carries both.  The LP comparator is a `FA0E5597`-
+generation block E3/E5 do not have.
+
+Same defect and same fix as E7 in #932.  E3 and E5 were out of that pass's reach
+because the DFP ships no `Device/soc/` directory for them — only an SVD, which
+that pass did not look at.  Per the file convention an absent key means zero
+instances (no SoC JSON sets a peripheral to `0`).
+
+Also re-confirmed correct against the same SVDs, and left unchanged: `i2c_lp` 1,
+`spi_lp` 1, no `i3c_lp`, `i2c` 4, `spi` 4, `uart` 8, `i2s` 4, `adc_12bit` 3,
+`dac_12bit` 2, `comparator_hs` 4, `can_fd` 1, `ethernet` 1, `usb_2` 1, `sdio` 1,
+`rtc` 1.  The E8 SVD independently corroborates #932's changes there
+(`LPSPI0`+`LPSPI1`, `LPI2C0`+`LPI2C1`, `I3C`+`LPI3C`, `CMP0..CMP3`+`LPCMP`).
+
+Metadata-only: `comparator_lp` has no `CAP_ALIASES` entry, so no generated file
+moves.  Refs #936.
 
 ### Added — `metadata/bootstrap.json`: the cross-platform bootstrap facts as data
 
