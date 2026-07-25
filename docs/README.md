@@ -141,6 +141,12 @@ into the topic-specific docs.
   `run` / `ab` (HOST reference run — functional + host latency +
   accuracy, NOT the target SoM's performance; on-device SRAM/power
   are HW-gated).
+- [measuring-inference-energy.md](measuring-inference-energy.md) — the
+  measured millijoules per inference on E1M-AEN801 silicon: the
+  method (rail scan, conversion-ready sampling, idle-subtracted
+  window integration), the whole-board PSU cross-check, a measured
+  error budget, and the explicit list of what the figure is NOT
+  (not NPU energy, not silicon energy, not vendor-comparable).
 - [tutorials/16-inference-mobilenet.md](tutorials/16-inference-mobilenet.md)
   — end-to-end inference walkthrough on MobileNet.
 

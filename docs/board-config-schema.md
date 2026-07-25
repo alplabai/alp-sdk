@@ -401,8 +401,10 @@ models:
     source: ./models/person_detect.tflite    # local path or URL (.tflite / .onnx)
   - name: yolov8n
     source: https://example.com/yolov8n.onnx
-    compile:                                  # optional per-backend compile overrides
-      ethos-u85: {}                           # per-backend compile defaults are a follow-on
+    compile:                                  # only for backends that need a
+      deepx_dxm1:                             # per-model config the SDK cannot derive
+        config: ./models/yolov8n-dxcom.json    # keys are BACKEND IDS
+        calibration: ./models/calib/           # both required for deepx_dxm1
 cores:
   m55_hp:
     app: ./src
@@ -412,7 +414,7 @@ cores:
 |-----------|----------|--------------------------------------------------------------------------------------------------------|
 | `name`    | yes      | Model identifier, unique within `models:`.  Selects the entry for `alp model check --board board.yaml --model <name>`. |
 | `source`  | yes      | Model file the build ingests — a local path or a URL (sha256-verified on fetch).  `.tflite` / `.onnx`. |
-| `compile` | no       | Optional per-backend compile overrides, keyed by SoM backend.  Per-backend compile defaults are a follow-on; omit for the backend default. |
+| `compile` | no       | Per-backend compile configuration, keyed by **backend id** (`deepx_dxm1`, `drpai`) — only for NPU toolchains that need a per-model config + calibration the SDK cannot derive.  Arm Ethos-U (Vela) needs none and has no key here: the SDK derives its accelerator config from the SoM.  A backend with no block is recorded as a coverage skip (`"no compile config"`) rather than guessed. |
 
 **CLI verbs that manage this block** (`alp model …`; tan-cli mirrors
 each as `tan model …`, a thin envelope wrapper):

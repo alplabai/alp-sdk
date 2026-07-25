@@ -1,6 +1,7 @@
 # scripts/alp_cli/model.py
 """`alp model` subcommands: compile + package AI models into .alpmodel."""
 from __future__ import annotations
+import dataclasses
 import json
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from alp_model.analyze import UnsupportedModelError, analyze_model
 from alp_model.build import build_model, _ADAPTERS
 from alp_model.convert import ConvertError, to_onnx
 from alp_model.measure import MeasureError, accuracy_vs, compare, default_input, run_host
+from alp_model.ondevice import OnDeviceError, resolve_app_dir, run_on_device
 from alp_model.package import read_package
 from alp_model.prep import PrepError, accuracy_delta, quantize, validate_calibration
 from alp_model.targets import resolve_targets
@@ -447,8 +449,14 @@ def _energy_payload(energy) -> dict | None:
               help="Input sample .npy (default: deterministic random matching the model input).")
 @click.option("--expected", default=None, type=int, help="Expected class label (top-1 accuracy check).")
 @click.option("--runs", default=20, show_default=True, help="Timed inference count (median latency).")
+@click.option("--on-device", "on_device", is_flag=True, default=False,
+              help="After the host reference run, also run a REAL on-target energy "
+                   "measurement (AEN E8, needs a held labgrid reservation -- see "
+                   "docs/cli.md). Errors out rather than reporting a null/fabricated "
+                   "energy figure.")
 @click.option("--format", "fmt", type=click.Choice(["human", "json"]), default="human")
-def run_cmd(model: Path, input_path: Path | None, expected: int | None, runs: int, fmt: str) -> None:
+def run_cmd(model: Path, input_path: Path | None, expected: int | None, runs: int,
+            on_device: bool, fmt: str) -> None:
     if model.suffix.lower() != ".onnx":
         click.echo(f"error: model run supports .onnx in this release; got {model.name}", err=True)
         raise SystemExit(1)
@@ -460,11 +468,23 @@ def run_cmd(model: Path, input_path: Path | None, expected: int | None, runs: in
     except MeasureError as exc:
         click.echo(f"error: {exc}", err=True)
         raise SystemExit(1)
+
+    on_device_diag = None
+    if on_device:
+        try:
+            energy, on_device_diag = run_on_device(resolve_app_dir())
+        except OnDeviceError as exc:
+            click.echo(f"error: {exc}", err=True)
+            raise SystemExit(1)
+        r = dataclasses.replace(r, energy=energy)
+
     payload = {"model": str(model), "backend": r.backend, "latency_ms": r.latency_ms,
                "output_argmax": r.output_argmax, "peak_sram_kib": r.peak_sram_kib,
                "power_mj": r.power_mj, "energy": _energy_payload(r.energy),
                "runs": r.runs, "random_input": random_input,
                "note": _HOST_NOTE}
+    if on_device_diag is not None:
+        payload["on_device"] = on_device_diag
     if expected is not None:
         payload["accuracy"] = {"expected": expected, "match": accuracy_vs(r.output_argmax, expected)}
     if fmt == "json":
@@ -473,6 +493,15 @@ def run_cmd(model: Path, input_path: Path | None, expected: int | None, runs: in
     click.echo(f"model: {model}")
     click.echo(f"  [{r.backend}] latency {r.latency_ms} ms (median of {r.runs})  "
                f"argmax {r.output_argmax}  sram {r.peak_sram_kib}  power {r.power_mj}")
+    if on_device_diag is not None:
+        device_value = on_device_diag["device_value_mj_per_inference"]
+        if device_value is None:
+            click.echo("  on-device: device cross-check unavailable (no ENERGY-RESULT "
+                       f"line in capture)  cycles/s used {on_device_diag['cycles_per_s_used']}")
+        else:
+            click.echo(f"  on-device: device-reported {device_value} mJ/inference  "
+                       f"(host/device ratio {on_device_diag['host_vs_device_ratio']}, "
+                       f"cycles/s used {on_device_diag['cycles_per_s_used']})")
     if expected is not None:
         click.echo(f"  accuracy: top1 {'MATCH' if payload['accuracy']['match'] else 'MISS'} (expected {expected})")
     click.echo(f"  note: {_HOST_NOTE}")

@@ -55,13 +55,19 @@ echo ">>> FLASH $NAME  (ram_console_buf=$BUF)" >&2
 if grep -q "Done" /tmp/wrmram.log; then echo "MRAM write: Done ($(grep -oE '[0-9]+\.[0-9]+ seconds' /tmp/wrmram.log | tail -1))"; else echo "MRAM write FAILED:"; tail -5 /tmp/wrmram.log; exit 1; fi
 
 # 3. SES has booted the app; attach J-Link read-only and dump the RAM console
-cat > /tmp/flash-read.jlink <<EOF
-connect
-halt
-mem8 $BUF, $SIZE
-qc
-EOF
-$JLINK -device "$JLINK_DEVICE_READ" -if SWD -speed "$JLINK_SPEED" -nogui 1 -CommanderScript /tmp/flash-read.jlink 2>/tmp/fr.err > /tmp/fr.out || true
+# SIZE is caller-supplied ($2); JLinkExe rejects a single mem8 over 0x10000 and
+# reads NOTHING while the script keeps going -- chunk it (bench_jlink_mem8_chunks).
+{
+	echo connect
+	echo halt
+	bench_jlink_mem8_chunks "$BUF" "$SIZE"
+	echo qc
+} > /tmp/flash-read.jlink
+# shellcheck disable=SC2046  # word-splitting bench_jlink_select is intentional
+$JLINK $(bench_jlink_select) -device "$JLINK_DEVICE_READ" -if SWD -speed "$JLINK_SPEED" -nogui 1 -CommanderScript /tmp/flash-read.jlink 2>/tmp/fr.err > /tmp/fr.out || true
+if grep -qi "Cannot connect to the probe" /tmp/fr.out; then
+	echo "flash-run: J-Link probe not selected/reachable -- export JLINK_SN (multi-probe host)." >&2
+fi
 echo "----- $NAME RAM console (MRAM-flashed, SES-booted) -----"
 awk '/^[0-9A-Fa-f]+ = / { for (i=3;i<=NF;i++){ if ($i !~ /^[0-9A-Fa-f][0-9A-Fa-f]$/) continue; b=strtonum("0x"$i); if(b==0){nul++; if(nul>4)exit; next} nul=0; if(b==10||b==13){printf "\n";continue} if(b>=32&&b<127)printf "%c",b } }' /tmp/fr.out
 echo; echo "--------------------------------------------------------"
