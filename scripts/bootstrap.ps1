@@ -28,7 +28,8 @@
 #     +-- alp-sdk\                  (this repo -- the workspace manifest)
 #     +-- .west\
 #     +-- .venv\                    (hermetic west + Zephyr/SDK Python deps)
-#     +-- zephyr\                   (v4.4.0 pin -- from alp-sdk's west.yml)
+#     +-- zephyr\                   (pin recorded in metadata/bootstrap.json,
+#                                     from alp-sdk's west.yml -- #917)
 #     +-- modules\
 #
 # Usage:
@@ -59,41 +60,53 @@ $ParentDir = (Resolve-Path (Join-Path $RepoRoot "..")).Path
 # <repo>` always makes topdir = the repo's parent, and leaves alp-sdk itself in
 # place; Zephyr + modules land as siblings of alp-sdk under the topdir.
 $WorkspaceDir = $ParentDir
-# Keep in sync with the Zephyr `revision:` pin in the alp-sdk west.yml.
-# Used only to decide whether an existing $env:ZEPHYR_BASE tree is reusable --
+# The Zephyr version pin (and the other bootstrap facts below) is
+# single-sourced from metadata/bootstrap.json (issue #917) -- kept in
+# sync with the `revision:` pin in west.yml by
+# scripts/check_bootstrap_manifest.py. Loaded further down, once the
+# prereq check has confirmed the tools it needs exist. Used only to
+# decide whether an existing $env:ZEPHYR_BASE tree is reusable --
 # `west init -l` takes the actual revision from alp-sdk's west.yml.
-$ZephyrVersion = "v4.4.0"
+$BootstrapJson = Join-Path $RepoRoot "metadata\bootstrap.json"
 
 function Write-Info([string]$msg) { Write-Host "[bootstrap] $msg" -ForegroundColor Blue }
 function Write-Ok([string]$msg)   { Write-Host "[bootstrap] $msg" -ForegroundColor Green }
 function Write-Warn2([string]$msg){ Write-Host "[bootstrap] $msg" -ForegroundColor Yellow }
 function Fail([string]$msg)       { Write-Host "[bootstrap] $msg" -ForegroundColor Red; exit 1 }
 
-# -------- Print-env shortcut --------------------------------------------------
-
-if ($PrintEnv) {
-    @"
-# Add to your PowerShell profile (or run before invoking the SDK):
-# Activate the workspace venv (west + Zephyr/SDK Python deps live here):
-#   & "$WorkspaceDir\.venv\Scripts\Activate.ps1"
-`$env:ZEPHYR_BASE = "$WorkspaceDir\zephyr"
-`$env:ZEPHYR_TOOLCHAIN_VARIANT = "zephyr"
-"@ | Write-Host
-    exit 0
-}
-
 # -------- Prerequisite check --------------------------------------------------
 
 # Print the exact winget one-liner for anything missing rather than
 # attempting a system-wide install from a bootstrap script.
+# Kept as a hardcoded list, not read from the manifest: reading the manifest
+# below needs a working `python` to sanity-check ITS OWN version against the
+# >= 3.10 floor further down (the non-PrintEnv path only -- see there), and
+# this check is what confirms `python` exists in the first place for that --
+# a bootstrap-of-the-bootstrap. Its agreement with metadata/bootstrap.json's
+# `prerequisites.windows` is policed by scripts/check_bootstrap_manifest.py,
+# not by this script.  Kept as ONE list (not two) so the gate's
+# `$Prereqs = @(...)` regex still finds the full name set even though
+# -PrintEnv below skips this check entirely.
 $Prereqs = @(
     @{ Name = "git";    Hint = "winget install -e --id Git.Git" },
     @{ Name = "cmake";  Hint = "winget install -e --id Kitware.CMake" },
     @{ Name = "python"; Hint = "winget install -e --id Python.Python.3.12" },
     @{ Name = "ninja";  Hint = "winget install -e --id Ninja-build.Ninja" }
 )
+# -PrintEnv only reads metadata/bootstrap.json and prints. Unlike
+# bootstrap.sh (which shells out to python3 to parse the manifest, so its
+# --print-env genuinely needs python3 present), this script parses JSON with
+# the native `ConvertFrom-Json` cmdlet -- no python involved -- and the
+# python-version floor check below is skipped entirely for -PrintEnv too
+# (see "Python version floor" below). So -PrintEnv needs NONE of
+# git/cmake/python/ninja; skip the whole prerequisite check for it.
+if ($PrintEnv) {
+    $PrereqsToCheck = @()
+} else {
+    $PrereqsToCheck = $Prereqs
+}
 $Missing = @()
-foreach ($p in $Prereqs) {
+foreach ($p in $PrereqsToCheck) {
     if (-not (Get-Command $p.Name -ErrorAction SilentlyContinue)) {
         $Missing += $p
     }
@@ -106,7 +119,105 @@ if ($Missing.Count -gt 0) {
     Fail "Install the tools above (then reopen PowerShell) and re-run."
 }
 
-# Python >= 3.10 (dataclass slots, `X | None` unions in the tooling).
+# -------- Load bootstrap facts (metadata/bootstrap.json, issue #917) ----------
+
+# Single-source facts shared with scripts/bootstrap.sh and tan-cli (facts
+# only -- control flow stays here; see the manifest's own "_comment").
+# Deliberately placed after the prereq check above (same ordering rationale
+# as bootstrap.sh): -PrintEnv (below) needs these facts, so it cannot
+# short-circuit before this point either, even though it only prints. The
+# Python-VERSION floor is NOT a prerequisite for this -- ConvertFrom-Json
+# and the property reads below need no modern syntax -- so that check now
+# sits below the -PrintEnv shortcut instead of up here (see there).
+if (-not (Test-Path $BootstrapJson)) {
+    Fail "missing $BootstrapJson"
+}
+$Manifest = Get-Content -Raw $BootstrapJson | ConvertFrom-Json
+# Refuse a manifest shaped for a schema version this script doesn't
+# understand -- otherwise a future v2 manifest gets parsed blind by this
+# v1-shaped script on a machine where check_bootstrap_manifest.py never runs.
+if ($Manifest.schemaVersion -ne 1) {
+    Fail "metadata\bootstrap.json schemaVersion=$($Manifest.schemaVersion) -- this script only understands schemaVersion 1 (see scripts\check_bootstrap_manifest.py)."
+}
+function Resolve-BootstrapToken([string]$Value) {
+    $Value.Replace('${SDK_ROOT}', $RepoRoot).Replace('${WORKSPACE_DIR}', $WorkspaceDir)
+}
+$ZephyrVersion            = Resolve-BootstrapToken $Manifest.zephyr.version
+$ZephyrRequirementsPath   = Resolve-BootstrapToken $Manifest.zephyr.requirementsPath
+$VenvDirName              = Resolve-BootstrapToken $Manifest.venv.dirName
+$VenvWindowsBin           = Resolve-BootstrapToken $Manifest.venv.windowsBinDir
+# The @(...) MUST wrap the WHOLE pipeline, not just its input: `@(X) |
+# ForEach-Object {...}` only forces the INPUT into array context -- a
+# single-element result still collapses PowerShell's pipeline output back
+# down to a plain [string] on assignment, and `& $West @WestExportArgs`
+# then splats that string CHARACTER BY CHARACTER ('z','e','p','h',...)
+# instead of passing it as one argument.  `@(X | ForEach-Object {...})`
+# forces the OUTPUT into a real array regardless of element count.
+$WestPipSpec              = Resolve-BootstrapToken $Manifest.west.pipSpec
+$WestInitArgs             = @($Manifest.west.initArgs   | ForEach-Object { Resolve-BootstrapToken $_ })
+$WestUpdateArgs           = @($Manifest.west.updateArgs | ForEach-Object { Resolve-BootstrapToken $_ })
+$WestExportArgs           = @($Manifest.west.exportArgs | ForEach-Object { Resolve-BootstrapToken $_ })
+$WestExtGuard             = Resolve-BootstrapToken $Manifest.west.extensionGuardCommand
+$PipBootstrapUpgrade      = @($Manifest.pip.bootstrapUpgrade | ForEach-Object { Resolve-BootstrapToken $_ })
+$PipSdkExtras             = @($Manifest.pip.sdkExtras        | ForEach-Object { Resolve-BootstrapToken $_ })
+$PipEditableInstall       = Resolve-BootstrapToken $Manifest.pip.editableInstall
+# env: ordered Name/RAW-Value pairs (JSON object property order is preserved
+# by ConvertFrom-Json).  Token substitution is deliberately deferred to
+# Write-EnvLines below, NOT done here at load time: the workspace-reuse
+# block further down can reassign $WorkspaceDir (when an existing
+# $env:ZEPHYR_BASE workspace is compatible), and -PrintEnv's early-exit call
+# happens BEFORE that reassignment while the closing "Next steps" call
+# happens AFTER it -- resolving here would bake in the pre-reuse
+# $WorkspaceDir for the SECOND caller, printing a wrong $env:ZEPHYR_BASE.
+# Mirrors bootstrap.sh's print_env_lines(), which re-reads $WORKSPACE_DIR
+# fresh on every call for the same reason.
+$EnvPairsRaw = $Manifest.env.PSObject.Properties | ForEach-Object {
+    [PSCustomObject]@{ Name = $_.Name; RawValue = [string]$_.Value }
+}
+function Write-EnvLines([string]$Prefix = "") {
+    foreach ($e in $EnvPairsRaw) {
+        # Normalise to backslashes: substituting ${WORKSPACE_DIR} (bash-style
+        # "\"-free path) into a manifest value like "${WORKSPACE_DIR}/zephyr"
+        # (forward slash after the token) otherwise prints a mixed
+        # "C:\Users\...\GitHub/zephyr" -- copy-paste-broken as a profile line.
+        $val = (Resolve-BootstrapToken $e.RawValue) -replace '/', '\'
+        Write-Host "$Prefix`$env:$($e.Name) = `"$val`""
+    }
+}
+# manualInstallHints.windows.note: an ARRAY of lines (an aligned mapping
+# reads better than one unwrapped paragraph) -- the Arm GNU Toolchain /
+# Zephyr SDK manual-install fact, printed under "NOT auto-installed (manual,
+# one-time):" further down. Deliberately NOT nativeLibHints (issue #917
+# review item 7): nativeLibHints is an apt/brew/pkg-manager fact for the
+# Yocto-side native libraries, which native Windows never installs at all
+# (no heading for it exists in this script) -- printing nativeLibHints.
+# windows.note here used to smuggle the unrelated toolchain sentence in
+# under a "native libraries" framing it never had here, and separately made
+# bootstrap.sh print that same sentence under ITS "native libraries" heading
+# too, which was actively wrong (see manualInstallHints's schema comment).
+$ManualInstallNote        = @($Manifest.manualInstallHints.windows.note)
+
+# -------- Print-env shortcut --------------------------------------------------
+
+if ($PrintEnv) {
+    Write-Host "# Add to your PowerShell profile (or run before invoking the SDK):"
+    Write-Host "# Activate the workspace venv (west + Zephyr/SDK Python deps live here):"
+    Write-Host "#   & `"$WorkspaceDir\$VenvDirName\$VenvWindowsBin\Activate.ps1`""
+    Write-EnvLines
+    exit 0
+}
+
+# -------- Python version floor ------------------------------------------------
+
+# Python >= 3.10 (dataclass slots, `X | None` unions in the tooling) --
+# needed by the SDK tooling this venv/pip machinery is about to install and
+# invoke, never by -PrintEnv, which exits above without ever reaching this
+# check (ConvertFrom-Json needs no python at all -- see the Prerequisite
+# check comment above). Deliberately placed AFTER the -PrintEnv shortcut so
+# that early exit is real, not just theoretical. The "3.10" floor below is
+# likewise hardcoded and policed against the manifest's
+# `prerequisites.pythonMinVersion` by scripts/check_bootstrap_manifest.py --
+# see the comment on $Prereqs above.
 $PyVer = & python -c "import sys; print('%d.%d' % sys.version_info[:2])"
 if (-not $PyVer) {
     # The Microsoft Store `python.exe` alias exists on PATH but prints
@@ -168,9 +279,9 @@ if ($env:ZEPHYR_BASE -and (Test-Path (Join-Path $env:ZEPHYR_BASE "VERSION"))) {
 # backend -- installs into a workspace-local venv, never the system interpreter (same
 # policy as bootstrap.sh; a global west couples the build to the host
 # interpreter's state).  Idempotent: an existing venv is reused.
-$VenvDir = Join-Path $WorkspaceDir ".venv"
-$Vpy     = Join-Path $VenvDir "Scripts\python.exe"
-$West    = Join-Path $VenvDir "Scripts\west.exe"
+$VenvDir = Join-Path $WorkspaceDir $VenvDirName
+$Vpy     = Join-Path $VenvDir "$VenvWindowsBin\python.exe"
+$West    = Join-Path $VenvDir "$VenvWindowsBin\west.exe"
 
 if (-not $NoWest -or -not $NoPip) {
     New-Item -ItemType Directory -Force $WorkspaceDir | Out-Null
@@ -181,7 +292,7 @@ if (-not $NoWest -or -not $NoPip) {
         & python -m venv $VenvDir
         if ($LASTEXITCODE -ne 0) { Fail "python -m venv $VenvDir failed" }
     }
-    & $Vpy -m pip install --upgrade -q pip wheel
+    & $Vpy -m pip install --upgrade -q @PipBootstrapUpgrade
     if ($LASTEXITCODE -ne 0) { Write-Warn2 "pip/wheel upgrade reported a problem" }
 }
 
@@ -189,8 +300,11 @@ if (-not $NoWest -or -not $NoPip) {
 
 if (-not $NoWest) {
     if (-not (Test-Path $West)) {
-        Write-Info "Installing west into the workspace venv"
-        & $Vpy -m pip install --upgrade -q west
+        Write-Info "Installing west into the workspace venv ($WestPipSpec)"
+        # Pinned to metadata/bootstrap.json's west.pipSpec -- the floor
+        # Zephyr's own requirements-base.txt declares ("keep the version
+        # identical to the minimum required in cmake/modules/west.cmake").
+        & $Vpy -m pip install --upgrade -q $WestPipSpec
         if ($LASTEXITCODE -ne 0) { Fail "pip install west (venv) failed" }
     }
 
@@ -205,12 +319,12 @@ if (-not $NoWest) {
             # HALs + extras are fetched by `west update`. alp-sdk's
             # self.west-commands then exposes the alp-* extension commands in
             # this workspace (#769).
-            & $West init -l $RepoRoot
+            & $West @WestInitArgs $RepoRoot
             if ($LASTEXITCODE -ne 0) { Fail "west init -l failed" }
             Write-Info "Running 'west update' (shallow + narrow)"
-            & $West update --narrow -o=--depth=1
+            & $West @WestUpdateArgs
             if ($LASTEXITCODE -ne 0) { Fail "west update failed" }
-            & $West zephyr-export
+            & $West @WestExportArgs
         } finally {
             Pop-Location
         }
@@ -219,9 +333,9 @@ if (-not $NoWest) {
         Push-Location $WorkspaceDir
         try {
             Write-Info "Running 'west update' (shallow + narrow)"
-            & $West update --narrow -o=--depth=1
+            & $West @WestUpdateArgs
             if ($LASTEXITCODE -ne 0) { Fail "west update failed" }
-            & $West zephyr-export
+            & $West @WestExportArgs
         } finally {
             Pop-Location
         }
@@ -237,7 +351,7 @@ if (-not $NoWest) {
         } finally {
             Pop-Location
         }
-        if ($WestHelp -notmatch 'alp-migrate') {
+        if ($WestHelp -notmatch [regex]::Escape($WestExtGuard)) {
             Fail ("workspace at $WorkspaceDir does not register 'west alp-migrate' -- its manifest is not " +
                   "alp-sdk's west.yml (#769). Check 'west -C $WorkspaceDir config manifest.path'.")
         }
@@ -250,7 +364,7 @@ if (-not $NoWest) {
 # -------- pip dependencies ----------------------------------------------------
 
 if (-not $NoPip) {
-    $ZephyrReqs = Join-Path $WorkspaceDir "zephyr\scripts\requirements.txt"
+    $ZephyrReqs = Join-Path $WorkspaceDir $ZephyrRequirementsPath
     if (Test-Path $ZephyrReqs) {
         Write-Info "Installing Zephyr Python requirements into the venv"
         & $Vpy -m pip install -q -r $ZephyrReqs
@@ -258,16 +372,16 @@ if (-not $NoPip) {
     }
     # SDK-side extras: alp_project.py needs jsonschema; the MCUboot
     # dev-key script needs imgtool.
-    Write-Info "Installing alp-sdk Python extras into the venv (jsonschema, imgtool)"
-    & $Vpy -m pip install -q jsonschema imgtool
+    Write-Info "Installing alp-sdk Python extras into the venv ($($PipSdkExtras -join ', '))"
+    & $Vpy -m pip install -q @PipSdkExtras
     if ($LASTEXITCODE -ne 0) { Write-Warn2 "alp-sdk extras install reported a problem -- check manually" }
     # tan's Python backend (alp_cli: init / run / emit / validate / model /
     # doctor / monitor, invoked as `python -m alp_cli <sub>` by `tan`) --
     # editable install, so a `git pull` in the checkout updates the backend
     # in place. `tan` itself is a separate Rust binary, installed via
     # `cargo install --git https://github.com/alplabai/tan-cli --bin tan`.
-    Write-Info "Installing the tan CLI's Python backend into the venv (pip install -e $RepoRoot)"
-    & $Vpy -m pip install -q -e $RepoRoot
+    Write-Info "Installing the tan CLI's Python backend into the venv (pip install -e $PipEditableInstall)"
+    & $Vpy -m pip install -q -e $PipEditableInstall
     if ($LASTEXITCODE -ne 0) { Write-Warn2 "alp_cli editable install reported a problem -- check manually" }
 } else {
     Write-Info "Skipping pip installs (-NoPip)"
@@ -286,9 +400,18 @@ Write-Info "NOT auto-installed (manual, one-time):"
   # Zephyr SDK (alternative cross-toolchain + host tools like dtc):
   #   run 'west sdk install' from $WorkspaceDir after this script.
 
-  # native_sim / Yocto: not available on native Windows -- use WSL2
-  #   (docs/cross-platform-setup.md section 5) and scripts/bootstrap.sh there.
 "@ | Write-Host
+# Rendered from metadata/bootstrap.json's `manualInstallHints.windows.note`
+# (issue #917) -- not hardcoded here; edit the manifest to change this text.
+# ARRAY of lines, one Write-Host per line, so the mapping stays aligned
+# instead of collapsing into one unwrapped paragraph. Deliberately
+# manualInstallHints, not nativeLibHints (review item 7): this text is
+# about the manual Arm-toolchain/Zephyr-SDK install this heading names, not
+# an Optional-native-library apt/brew fact -- see the comment on
+# $ManualInstallNote above.
+foreach ($line in $ManualInstallNote) {
+    Write-Host "  $line"
+}
 
 # -------- Done ----------------------------------------------------------------
 
@@ -298,11 +421,12 @@ Write-Ok "Bootstrap complete."
 
 Next steps:
   # Activate the workspace venv (west + Zephyr/SDK deps + tan's Python backend):
-  & "$VenvDir\Scripts\Activate.ps1"
+  & "$VenvDir\$VenvWindowsBin\Activate.ps1"
 
   # Make Zephyr reachable for builds:
-  `$env:ZEPHYR_BASE = "$WorkspaceDir\zephyr"
-  `$env:ZEPHYR_TOOLCHAIN_VARIANT = "zephyr"
+"@ | Write-Host
+Write-EnvLines "  "
+@"
 
   # Sanity-check the host environment (needs tan on PATH -- see README.md
   # for `cargo install --git https://github.com/alplabai/tan-cli --bin tan`):
