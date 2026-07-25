@@ -51,6 +51,12 @@
 #define INA236_SHUNT_LSB_NV_RANGE_81MV 2500 /* 2.5 uV */
 #define INA236_SHUNT_LSB_NV_RANGE_20MV 625  /* 0.625 uV */
 
+/* Shunt-voltage full scale in microvolts for each ADCRANGE (datasheet
+ * table 7-4: 0b = ±81.92 mV, 1b = ±20.48 mV).  Divided by the shunt
+ * resistance this is the largest current the part can measure at all. */
+#define INA236_FS_UV_RANGE_81MV 81920.0f
+#define INA236_FS_UV_RANGE_20MV 20480.0f
+
 /* Bus-voltage LSB is fixed at 1.6 mV. */
 #define INA236_BUS_LSB_UV 1600u
 
@@ -87,9 +93,10 @@ static bool addr_in_strap_range(uint8_t addr)
 
 /* SHUNT_CAL = 0.00512 / (CURRENT_LSB * R_SHUNT)  per datasheet
  * SBOSA81D eq. 1, where 0.00512 is "an internal fixed value used to
- * ensure scaling is maintained properly".  CURRENT_LSB is in amps; we
- * choose CURRENT_LSB = max_current / 32768 (the eq.-2 minimum for a
- * full-scale 16-bit signed CURRENT register).
+ * ensure scaling is maintained properly".  CURRENT_LSB is in amps and is
+ * the eq.-2 minimum for a full-scale 16-bit signed CURRENT register --
+ * derived below from the reporting scale, which is the requested
+ * max_current clamped to what this ADCRANGE can actually measure.
  *
  * ADCRANGE=1 quarters the shunt LSB (2.5 uV -> 625 nV), so the raw
  * SHUNT register is 4x larger for the same physical shunt voltage.
@@ -102,7 +109,34 @@ static alp_status_t apply_calibration(ina236_t *ctx)
 {
 	if (!isfinite(ctx->shunt_ohms) || ctx->shunt_ohms <= 0.0f) return ALP_ERR_INVAL;
 	if (!isfinite(ctx->max_current_a) || ctx->max_current_a <= 0.0f) return ALP_ERR_INVAL;
-	ctx->current_lsb_a = ctx->max_current_a / 32768.0f;
+
+	/* CURRENT_LSB sets the REPORTING scale of the CURRENT and POWER
+	 * registers; it cannot create resolution the shunt ADC does not have.
+	 * The ADC's own step is the shunt LSB over R_SHUNT (2.5 uV or 625 nV
+	 * per count), and it saturates at the ADCRANGE full scale -- so a
+	 * reporting scale WIDER than that full scale spends register range on
+	 * currents the hardware physically cannot measure, and reports every
+	 * current it CAN measure more coarsely than the ADC resolved it.
+	 *
+	 * Worked example (this is not hypothetical -- it is the E1M EVK +5V
+	 * rail, 20 mOhm, whose board data rates it at 4.0 A):
+	 *   ADCRANGE=1 -> shunt full scale 20.48 mV -> 1.024 A, ADC step
+	 *   625 nV/20 mOhm = 31.25 uA.  Deriving CURRENT_LSB from 4.0 A gives
+	 *   122.07 uA -- 3.9x coarser than the ADC, on a scale 3.9x wider than
+	 *   the shunt can reach.  Deriving it from 1.024 A gives exactly
+	 *   31.25 uA: matched to the ADC, and no measurable current is lost.
+	 *
+	 * So clamp the derivation to the range's own full-scale current. Only
+	 * the wasteful direction is clamped: a caller that asks for a TIGHTER
+	 * scale than the range (a known-small load) keeps it, since that is a
+	 * deliberate resolution-for-headroom trade the datasheet allows. */
+	float fs_uv =
+	    (ctx->adcrange == INA236_ADCRANGE_20MV) ? INA236_FS_UV_RANGE_20MV : INA236_FS_UV_RANGE_81MV;
+	float fs_current_a = (fs_uv / 1000000.0f) / ctx->shunt_ohms;
+	float scale_a      = (ctx->max_current_a < fs_current_a) ? ctx->max_current_a : fs_current_a;
+
+	ctx->full_scale_a  = fs_current_a;
+	ctx->current_lsb_a = scale_a / 32768.0f;
 	float cal_f        = 0.00512f / (ctx->current_lsb_a * ctx->shunt_ohms);
 	if (ctx->adcrange == INA236_ADCRANGE_20MV) cal_f /= 4.0f;
 	/* current_lsb_a and shunt_ohms are both finite and > 0 (checked

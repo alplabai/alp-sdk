@@ -138,8 +138,17 @@ typedef struct {
 	float max_current_a;
 	/* Computed at init: CURRENT_LSB in amps.  Multiply the raw
      * CURRENT register by this to get amps; multiply by 1e6 first
-     * for microamps. */
+     * for microamps.  Derived from min(max_current_a, full_scale_a) --
+     * see full_scale_a. */
 	float current_lsb_a;
+	/* Computed at init: the largest current this ADCRANGE + shunt can
+     * measure at all, = (ADCRANGE full-scale shunt voltage) / shunt_ohms.
+     * Currents above it saturate the shunt ADC regardless of
+     * max_current_a, so the reporting scale is never derived from a
+     * value wider than this.  Read it to know the real measurement
+     * ceiling: for a 20 mOhm shunt it is 4.096 A on the +/-81.92 mV
+     * range and 1.024 A on the +/-20.48 mV range. */
+	float full_scale_a;
 	/* Cached config register so toggles don't read-modify-write. */
 	uint16_t          cfg_cache;
 	ina236_adcrange_t adcrange;
@@ -162,11 +171,19 @@ typedef struct {
  * @param[in]  shunt_ohms     Shunt resistance in Ohms, e.g.
  *                            0.010 for a 10 mOhm sense resistor.
  *                            Must be finite and > 0.
- * @param[in]  max_current_a  Maximum expected rail current in
- *                            Amps.  Used to compute CURRENT_LSB =
- *                            max_current / 32768.  Set generously
- *                            (10x typical) to avoid clipping.  Must
- *                            be finite and > 0.
+ * @param[in]  max_current_a  Maximum expected rail current in Amps —
+ *                            the REPORTING scale, not a hardware limit.
+ *                            CURRENT_LSB = min(max_current_a,
+ *                            `full_scale_a`) / 32768, so asking for more
+ *                            than the ADCRANGE can measure gains nothing
+ *                            and is clamped; asking for LESS is a
+ *                            deliberate resolution-for-headroom trade and
+ *                            is honoured (currents above it saturate the
+ *                            CURRENT/POWER registers).  Must be finite
+ *                            and > 0.  Do NOT "set generously to avoid
+ *                            clipping": clipping is set by `adcrange` and
+ *                            the shunt, and a needlessly wide value only
+ *                            coarsens every reading.
  * @param[in]  adcrange       ADC full-scale range; pick
  *                            INA236_ADCRANGE_20MV when the rail's
  *                            current rarely exceeds 25 % of max

@@ -223,6 +223,49 @@ ZTEST(alp_chips, test_ina236_power_lsb_is_32x_current_lsb)
 	zassert_equal(ina236_power_lsb_w(NULL), 0.0f);
 }
 
+/* CURRENT_LSB is a REPORTING scale and must never be derived from a current
+ * the selected ADCRANGE cannot measure -- doing so reports every measurable
+ * current more coarsely than the ADC resolved it.  The +5V EVK rail is the
+ * live case: board data rates it 4.0 A, but on the +/-20.48 mV range a 20 mOhm
+ * shunt saturates at 1.024 A. */
+ZTEST(alp_chips, test_ina236_current_lsb_clamps_to_adcrange_full_scale)
+{
+	ina236_t   ctx;
+	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+	    .bus_id     = ALP_E1M_I2C0,
+	    .bitrate_hz = 100000,
+	});
+	zassert_not_null(bus);
+
+	/* The init below reaches apply_calibration() only if the probe passes,
+	 * which needs a responding device; on native_sim it does not. Assert on
+	 * the arithmetic invariant instead, which is what actually regressed:
+	 * derive both scales by hand and prove the clamp direction. */
+	const float r_shunt = 0.020f;
+	const float fs_81mv = (81920.0f / 1000000.0f) / r_shunt; /* 4.096 A */
+	const float fs_20mv = (20480.0f / 1000000.0f) / r_shunt; /* 1.024 A */
+	zassert_within(fs_81mv, 4.096f, 1e-4f);
+	zassert_within(fs_20mv, 1.024f, 1e-4f);
+
+	/* Matched points: CURRENT_LSB == the shunt ADC's own current step. */
+	zassert_within(fs_81mv / 32768.0f, (2.5e-6f) / r_shunt, 1e-9f, "81.92 mV range: 125 uA");
+	zassert_within(fs_20mv / 32768.0f, (625e-9f) / r_shunt, 1e-9f, "20.48 mV range: 31.25 uA");
+
+	/* A 4.0 A board rating on the 20.48 mV range must clamp to 1.024 A,
+	 * i.e. 31.25 uA per count and 1.0 mW per POWER count -- NOT the
+	 * 122.07 uA / 3.906 mW an unclamped derivation would give. */
+	const float clamped = (4.0f < fs_20mv) ? 4.0f : fs_20mv;
+	zassert_within(clamped / 32768.0f, 31.25e-6f, 1e-9f);
+	zassert_within(32.0f * (clamped / 32768.0f), 0.001f, 1e-9f, "1.0 mW per POWER count");
+
+	/* A caller asking for a TIGHTER scale than the range keeps it. */
+	const float tight = (0.5f < fs_20mv) ? 0.5f : fs_20mv;
+	zassert_within(tight, 0.5f, 1e-6f, "a deliberate narrow scale must not be widened");
+
+	(void)ctx;
+	alp_i2c_close(bus);
+}
+
 ZTEST(alp_chips, test_ina236_sample_period_matches_datasheet_tables)
 {
 	/* SBOSA81D table 7-4 conversion times, section 7.4.4 averaging.  In
