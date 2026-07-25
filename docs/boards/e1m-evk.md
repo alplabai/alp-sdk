@@ -72,7 +72,7 @@ schematic (UG-E1M-001) and exposed as `EVK_I2C_ADDR_*` macros in
 | `0x47`          | BMP581 (U14)             | `EVK_I2C_ADDR_BMP581`              | Barometric pressure (SDO=1)                         |
 | `0x49`          | INA236B (U34)            | `EVK_I2C_ADDR_INA236_VCAM1`        | `+V_CAM1` rail current monitor (50 mΩ shunt, 1.6 A max) |
 | `0x4A`          | INA236B (U30)            | `EVK_I2C_ADDR_INA236_5V`           | `+5V` rail current monitor (20 mΩ shunt, 4.0 A max)  |
-| `0x4B`          | INA236B (U32)            | `EVK_I2C_ADDR_INA236_VCAM0`        | `+V_CAM0` rail current monitor (50 mΩ shunt, 1.6 A max).  Re-strapped A0=SCL → `0x4B`; PRE-RESPIN boards had it at `0x48`, colliding with the TAS2563 broadcast address (unreadable there). |
+| `0x4B`          | INA236B (U32)            | `EVK_I2C_ADDR_INA236_VCAM0`        | `+V_CAM0` rail current monitor (50 mΩ shunt, 1.6 A max).  Re-strapped A0=SCL → `0x4B` **from the next batch**; PRE-RESPIN boards had it at `0x48`, colliding with the TAS2563 broadcast address (unreadable there). |
 | `0x4D`          | TAS2563 (U27)            | `EVK_I2C_ADDR_TAS2563_LOW`         | Smart-amp #1 (AD0 = 10 kΩ to GND)                   |
 | `0x4E`          | TAS2563 (U28)            | `EVK_I2C_ADDR_TAS2563_HIGH`        | Smart-amp #2 (AD0 = 10 kΩ to VDD)                   |
 | `0x68`          | BMI323 (U13)             | `EVK_I2C_ADDR_BMI323`              | Secondary 6-axis IMU (SDO=0; no collision with ICM) |

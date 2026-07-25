@@ -25,8 +25,10 @@
  *   INA236A: 0x40..0x43  (A0 = GND/VS/SDA/SCL)
  *   INA236B: 0x48..0x4B  (same A0 encoding; different upper-nibble)
  * On the E1M EVK the SDK uses six instances at 0x40, 0x41, 0x42,
- * 0x48, 0x49, 0x4A covering the +3V3, +1V8, +VIO, +V_CAM0,
- * +V_CAM1, and +5V rails respectively.  See
+ * 0x4B, 0x49, 0x4A covering the +3V3, +1V8, +VIO, +V_CAM0,
+ * +V_CAM1, and +5V rails respectively -- the list is rail-ordered,
+ * not address-ordered, so +V_CAM0 reads 0x4B (re-strapped A0=SCL
+ * from the next batch; PRE-RESPIN boards had it at 0x48).  See
  * <alp/boards/alp_e1m_evk.h>'s `EVK_I2C_ADDR_INA236_*` macros and
  * the matching `EVK_INA236_SHUNT_*_OHMS` / `EVK_INA236_MAX_*_A`
  * pairs that callers feed to `ina236_init()`.
