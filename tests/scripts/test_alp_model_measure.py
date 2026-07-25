@@ -95,6 +95,13 @@ def test_energy_measurement_rejects_non_honest_scope():
                           window_ms=10.0, sample_count=2, scope="npu-only")
 
 
+def test_energy_measurement_rejects_non_honest_source():
+    from alp_model.measure import EnergyMeasurement
+    with pytest.raises(ValueError):
+        EnergyMeasurement(value_mj_per_inference=1.0, rails=["+3V3"], n_inferences=1,
+                          window_ms=10.0, sample_count=2, source="estimated")
+
+
 def test_run_host_energy_is_honestly_none():
     pytest.importorskip("onnxruntime")
     from alp_model.measure import run_host

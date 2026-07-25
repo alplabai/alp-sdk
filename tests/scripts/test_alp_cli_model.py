@@ -663,6 +663,7 @@ def test_model_run_host_json(tmp_path):
     p = json.loads(res.output)
     assert p["backend"] == "cpu-host" and p["latency_ms"] > 0
     assert p["power_mj"] is None and p["random_input"] is False
+    assert p["energy"] is None      # Phase A: no on-device sampler yet -- honest null
 
 
 def test_model_ab_json(tmp_path):
@@ -682,6 +683,9 @@ def test_model_ab_json(tmp_path):
     p = json.loads(res.output)
     assert p["comparison"]["faster"] in ("a", "b", "tie")
     assert p["comparison"]["size_delta_bytes"] == 0     # same file
+    assert p["a"]["energy"] is None and p["b"]["energy"] is None   # host runs only
+    # both-sides-only gate: no real energy on either side -> key absent, not null
+    assert "energy_delta_mj_per_inference" not in p["comparison"]
 
 
 def test_model_run_malformed_onnx_errors_cleanly(tmp_path):

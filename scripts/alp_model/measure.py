@@ -55,7 +55,16 @@ def windowed_delta(active_samples: Sequence[PowerSample],
                     idle_samples: Sequence[PowerSample], n_inferences: int) -> float:
     """Idle-baseline-subtracted energy per inference, in mJ: the delta between
     an active (inferring) window and an idle window, divided by how many
-    inferences ran in the active window."""
+    inferences ran in the active window.
+
+    Precondition: active_samples and idle_samples MUST cover equal wall-clock
+    duration (same integration window length). This is a subtraction of two
+    integrals, not a rate comparison -- unequal durations bias the baseline
+    (e.g. a longer idle window subtracts more idle energy than the active
+    window actually contains). The caller/firmware is responsible for taking
+    symmetric windows; this function does not (and should not) assert it,
+    since real hardware timing has jitter that would make a hard equality
+    check false-trip."""
     if n_inferences < 1:
         raise ValueError(f"n_inferences must be >= 1, got {n_inferences}")
     return (integrate_energy(active_samples) - integrate_energy(idle_samples)) / n_inferences

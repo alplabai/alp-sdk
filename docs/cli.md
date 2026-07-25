@@ -608,10 +608,10 @@ payload marks `"random_input": true`.
 
 **This is not the target SoM's performance.** `backend` is always
 `"cpu-host"` and every payload -- human or JSON -- carries a `note`
-stating the host-reference caveat explicitly. `peak_sram_kib` and
-`power_mj` are always `null` here: they are populated only by the
-on-device runner (the HW-gated follow-on that reads the target's
-arena high-water mark and the on-board shunt/monitor IC for
+stating the host-reference caveat explicitly. `peak_sram_kib`,
+`power_mj`, and `energy` are always `null` here: they are populated
+only by the on-device runner (the HW-gated follow-on that reads the
+target's arena high-water mark and the on-board shunt/monitor IC for
 per-rail energy), which fills the exact same result shape with real
 numbers once flashed hardware is in the loop. A model that fails to
 load or run raises a clean error (exit 1), never a raw traceback.
@@ -626,14 +626,23 @@ load or run raises a clean error (exit 1), never a raw traceback.
   "output_argmax": 5,
   "peak_sram_kib": null,
   "power_mj": null,
+  "energy": null,
   "runs": 20,
   "random_input": false,
-  "accuracy": { "expected": 3, "match": false },
-  "note": "host reference run (backend=cpu-host): functional + host latency, NOT the target SoM. On-device latency/SRAM/power is the HW-gated follow-on."
+  "note": "host reference run (backend=cpu-host): functional + host latency, NOT the target SoM. On-device latency/SRAM/power is the HW-gated follow-on.",
+  "accuracy": { "expected": 3, "match": false }
 }
 ```
 
-`accuracy` is present only when `--expected` is given.
+`accuracy` is present only when `--expected` is given. `energy` is
+`null` on the host reference run shown above (Phase A -- there is no
+on-device sampler yet); once a real bench run attaches one, it is a
+structured object: `{"source": "measured", "scope":
+"carrier-rail-delta", "value_mj_per_inference", "rails",
+"n_inferences", "window_ms", "sample_count", "spread_mj"}`. `source`
+and `scope` are fixed, validated labels -- `energy` is only ever
+`null` or that honest board-level-delta shape, never a fabricated or
+silicon-scoped number.
 
 #### `tan model ab` -- A/B two models on the host (latency + size)
 
@@ -657,12 +666,20 @@ it. Same host-reference caveat as `model run`: `backend` is
 
 ```json
 {
-  "a": { "model": "a.onnx", "backend": "cpu-host", "latency_ms": 3.2, "output_argmax": 5, "runs": 20, "peak_sram_kib": null, "power_mj": null },
-  "b": { "model": "b.onnx", "backend": "cpu-host", "latency_ms": 1.8, "output_argmax": 5, "runs": 20, "peak_sram_kib": null, "power_mj": null },
+  "a": { "model": "a.onnx", "backend": "cpu-host", "latency_ms": 3.2, "output_argmax": 5, "runs": 20, "peak_sram_kib": null, "power_mj": null, "energy": null },
+  "b": { "model": "b.onnx", "backend": "cpu-host", "latency_ms": 1.8, "output_argmax": 5, "runs": 20, "peak_sram_kib": null, "power_mj": null, "energy": null },
   "comparison": { "faster": "b", "latency_ratio": 0.5625, "a_latency_ms": 3.2, "b_latency_ms": 1.8, "size_delta_bytes": -40960 },
   "note": "host reference run (backend=cpu-host): functional + host latency, NOT the target SoM. On-device latency/SRAM/power is the HW-gated follow-on."
 }
 ```
+
+Each side's `energy` is `null` on the host reference run shown above
+(same structured-object-or-null shape as `model run`, see above).
+`comparison.energy_delta_mj_per_inference` (`b.energy -
+a.energy`, mJ/inference, rounded to 4 decimals) appears in
+`comparison` only when **both** `a` and `b` carry a real (non-null)
+`energy` measurement -- it is omitted entirely, not `null`, when
+either side is a host-only run (as above).
 
 **The self-improving loop.** `alp_model.measure.estimate_vs_measured(est_latency_ms,
 measured_latency_ms)` (not yet wired to a CLI flag) is the intended
