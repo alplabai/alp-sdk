@@ -64,7 +64,11 @@ def main(argv=None) -> int:
     sbom = build_sbom(lock)
     text = json.dumps(sbom, indent=2) + "\n"
     if args.output:
-        Path(args.output).write_text(text, encoding="utf-8")
+        # newline="": .github/workflows/release.yml:155 writes this into the
+        # checkout root as --output "alp-sdk-<tag>.cdx.json" and publishes it
+        # as a release asset; a maintainer regenerating it on Windows to
+        # byte-compare against that published asset needs the same LF output.
+        Path(args.output).write_text(text, encoding="utf-8", newline="")
     else:
         sys.stdout.write(text)
     return 0

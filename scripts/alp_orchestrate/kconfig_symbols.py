@@ -188,8 +188,11 @@ _KCONFIG_TARGET = "alpkconfigjson"
 
 def _write_stub_app(app_dir: Path) -> None:
     (app_dir / "src").mkdir(parents=True)
+    # write-text-newline-exempt: throwaway stub app in a scratch build dir
     (app_dir / "CMakeLists.txt").write_text(_STUB_CMAKELISTS, encoding="utf-8")
+    # write-text-newline-exempt: throwaway stub app in a scratch build dir
     (app_dir / "prj.conf").write_text("", encoding="utf-8")
+    # write-text-newline-exempt: throwaway stub app in a scratch build dir
     (app_dir / "src" / "main.c").write_text(_STUB_MAIN_C, encoding="utf-8")
 
 

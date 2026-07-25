@@ -331,6 +331,7 @@ def validate_board_yaml(path_or_content: str) -> dict[str, Any]:
             fd, name = tempfile.mkstemp(suffix=".yaml", prefix="alp_mcp_board_")
             os.close(fd)
             tmp_path = Path(name)
+            # write-text-newline-exempt: tempfile handed to a subprocess, never in the repo tree
             tmp_path.write_text(path_or_content, encoding="utf-8")
             target = tmp_path
         else:
