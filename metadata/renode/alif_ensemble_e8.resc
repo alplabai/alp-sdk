@@ -2,18 +2,69 @@
 :description: Boot a single Cortex-M55-HP Zephyr slice headless, no hardware.
 
 # ---------------------------------------------------------------------
-# Variables filled in by the `west alp-renode` wrapper
-# (scripts/west_commands/alp_renode.py -> build_renode_argv).  The
-# wrapper injects `$elf` (the resolved <build_dir>/zephyr/zephyr.elf)
-# and `$repl` (the platform descriptor) via `renode -e "$elf=@..."`
-# BEFORE this script runs.  The `?=` defaults below only apply when the
-# variable is still unset, so the wrapper's values win -- and the script
-# stays runnable by hand from an alp-build'd hello-world tree:
+# Variables filled in by `tan renode` (tan-cli, crates/tan-core/src/
+# renode.rs -> build_renode_argv).  The wrapper injects `$elf` (the
+# resolved <build_dir>/zephyr/zephyr.elf), `$repl` (the platform
+# descriptor) and `$vtor` (the vector-table base, derived from the ELF)
+# via `renode -e "$elf=@..."` BEFORE this script runs.  The `?=`
+# defaults below only apply when the variable is still unset, so the
+# wrapper's values win -- and the script stays runnable by hand from an
+# alp-build'd hello-world tree:
 #
 #     renode metadata/renode/alif_ensemble_e8.resc
 # ---------------------------------------------------------------------
 $repl ?= @metadata/renode/alif_ensemble_e8.repl
 $elf  ?= @examples/peripheral-io/hello-world/build/m55_hp-zephyr/zephyr/zephyr.elf
+
+# Vector-table base.  Renode does NOT read this from the ELF: it guesses
+# the LOWEST `vaddr` across the LOAD segments.  That is wrong for any
+# image whose vector table is not in its lowest-addressed segment -- and
+# an MRAM-linked Zephyr app is exactly that shape, because its `.data`
+# init image has a RAM `vaddr` (0x20000000, where .data is copied TO)
+# paired with an MRAM `paddr` (where the initialiser actually lives).
+# Renode guesses that 0x20000000, reads SP/PC out of memory nothing was
+# ever loaded into, gets zeros, and halts the CPU before executing an
+# instruction (#947).
+#
+# The default matches the default `$elf` directly above.  hello-world
+# ships no ITCM overlay, so it links per the m55_hp board .dts:
+# `zephyr,code-partition = &slot0_partition`, partition@10000 of the
+# MRAM -- i.e. 0x80010000 + CONFIG_ROM_START_OFFSET, which is 0 here
+# because hello-world is not MCUboot-chained (the board's
+# Kconfig.defconfig defaults that offset to 0x800 under
+# BOOTLOADER_MCUBOOT, so a chained slot0 image links at 0x80010800
+# instead).  Keep the default and the default $elf in step: a default
+# that does not describe the default $elf is just a differently-wrong
+# guess.
+#
+# Any other link shape must have $vtor passed in, and `tan renode`
+# always does, computing it from the LOAD segment that CONTAINS THE
+# ENTRY POINT (tan-cli#65) rather than the lowest one.
+#
+# IMPORTANT -- what this does and does not buy you on the pinned
+# Renode v1.16.1.  Seeding VTOR fixes the HALT: Renode now reports
+# `Setting initial values: PC = ..., SP = ...` from [$vtor]/[$vtor+4]
+# instead of reading zeros out of unloaded memory and stopping the CPU.
+# It does NOT make a high-VTOR image RUN, because of the separate
+# v1.16.1 Cortex-M55 defect the .repl documents (it mis-executes a
+# vector table placed at a high address like the MRAM base -- see the
+# `itcm_local` block there).  Measured on v1.16.1 d66b0c2a, counting
+# bus accesses after start:
+#
+#     ITCM-linked, $vtor=0x0             PC=0x42E1       197 accesses
+#     MRAM slot0,  $vtor=0x80010000      PC=0x80010EB9     0 accesses
+#     MRAM base,   $vtor=0x80000000      PC=0x80002D49     0 accesses
+#
+# So to actually observe a boot under this Renode pin, build the
+# ITCM-linked shape (tests/renode/aen_m55_itcm_run.overlay forces
+# `zephyr,flash = &itcm`, putting the vector table at the CPU-local 0x0)
+# and pass `-e $vtor=0x0` for it -- the default below is the MRAM one
+# and would halt that image.  The MRAM defaults here are
+# correct-but-inert until the Renode pin moves past that defect.
+#
+# Assign it UNQUOTED -- a quoted `$vtor="0x80010000"` fails with
+# `Cannot convert type 'string' to 'uint'`.
+$vtor ?= 0x80010000
 
 mach create "aen801"
 machine LoadPlatformDescription $repl
@@ -21,11 +72,16 @@ machine LoadPlatformDescription $repl
 # Surface the UART5 console.  Run headless (the wrapper passes
 # `--console --disable-xwt`), so Renode routes the analyzer to stdout
 # instead of a GUI window; the wrapper tees that stdout to --log, which
-# is where the CI smoke greps for the app's "[hello] done" marker.
+# is where a log-grep for the app's "[hello] done" marker would look.
+# NB: no gate greps it today -- every renode workflow's boot-and-assert
+# step is a no-op `echo` (#955), so nothing here is currently asserted.
 showAnalyzer uart5
 
-# Load the Zephyr ELF and set the CPU PC/SP from its entry point +
-# vector table.  hello-world is a RAM-run image (links/runs from DTCM).
+# Load the Zephyr ELF, then seed the vector-table base BEFORE `start`
+# so Renode takes SP/PC from [$vtor] / [$vtor+4] instead of guessing.
+# Order matters: `VectorTableOffset` set after `start` is too late, the
+# initial values are latched when emulation begins.
 sysbus LoadELF $elf
+cpu VectorTableOffset $vtor
 
 start

@@ -7,6 +7,48 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.14.0 candidate
 
+### Fixed — Renode AEN descriptor halted the CPU on an MRAM-linked image
+
+`metadata/renode/alif_ensemble_e8.resc` never seeded the vector-table base, so
+Renode guessed it — and its guess is the *lowest* `vaddr` across the LOAD
+segments.  An MRAM-linked Zephyr app is exactly the shape that breaks: its
+`.data` init image pairs a RAM `vaddr` (`0x20000000`, where `.data` is copied
+*to*) with an MRAM `paddr` (where the initialiser lives), so Renode guessed
+`0x20000000`, read SP/PC out of memory nothing was ever loaded into, got zeros,
+and halted the CPU before executing an instruction.
+
+The descriptor now takes a `$vtor` variable and applies
+`cpu VectorTableOffset $vtor` between `sysbus LoadELF` and `start`.  `tan renode`
+computes and injects it from the LOAD segment containing the entry point
+(tan-cli#65); the default matches this file's own default `$elf`, which links at
+`slot0_partition` = `0x80010000` per the m55_hp board DTS.
+
+**Scope, measured rather than assumed.**  Seeding VTOR fixes the halt and seeds
+`PC`/`SP` correctly.  It does *not* make a high-VTOR image run on the pinned
+Renode v1.16.1, because of the separate Cortex-M55 defect this repo already
+documents (`alif_ensemble_e8.repl`: it mis-executes a vector table at a bit31-set
+address like the MRAM base).  Counting bus accesses after `start` on v1.16.1
+`d66b0c2a`:
+
+| link shape | `$vtor` | initial values | bus accesses |
+| --- | --- | --- | --- |
+| ITCM (HP smoke) | `0x0` | `PC = 0x42E1, SP = 0x20002C00` | 197 |
+| ITCM (HE rpc) | `0x0` | `PC = 0x2039, SP = 0x20005C18` | 91075 |
+| MRAM slot0 | `0x80010000` | `PC = 0x80010EB9, SP = 0x200017D0` | 0 |
+| MRAM base | `0x80000000` | `PC = 0x80002D49, SP = 0x20003930` | 0 |
+
+To observe a boot under the current pin, build the ITCM-linked shape
+(`tests/renode/aen_m55_itcm_run.overlay`); the MRAM defaults are
+correct-but-inert until the pin moves past that defect.
+
+Also corrects retired-executor comment rot across the Renode surface —
+`alif_ensemble_e8.{resc,repl}`, `renesas_rzv2n.{resc,repl}`,
+`tests/renode/v2n_m33_ramconsole.conf` and
+`scripts/west_commands/_alp_common.py` still named `west alp-renode` /
+`scripts/west_commands/alp_renode.py`, deleted in ADR-0020 Phase 4 (#848).
+
+Closes #947.
+
 ### Changed — Ethos-U accelerator sized per target core; NPU→core pairing single-sourced in the SoC JSON
 
 - The build emit (`_emit_inference`) now sizes the Ethos-U accelerator
