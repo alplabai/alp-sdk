@@ -193,6 +193,79 @@ ZTEST(alp_chips, test_ina236_init_validates_address_and_numeric_edges)
 	alp_i2c_close(bus);
 }
 
+/* The POWER scaling had been wrong by a factor of 625 (it applied the
+ * bus-voltage LSB a second time on top of the 32 that already carries it),
+ * and nothing caught it because every ina236 test above only checks
+ * argument rejection.  Both new pure helpers are bus-free, so the scaling
+ * and the conversion-timing table CAN be pinned without the (dormant)
+ * chips fake layer -- which is exactly what these two tests do. */
+ZTEST(alp_chips, test_ina236_power_lsb_is_32x_current_lsb)
+{
+	/* SBOSA81D eq. 4: Power [W] = 32 x CURRENT_LSB x POWER.  The 32 is
+	 * NOT dimensionless -- the internal register math divides by 20000
+	 * and 20000 x 1.6 mV (the bus LSB) = 32 V -- so the bus LSB must NOT
+	 * be applied again.  Filling current_lsb_a directly keeps this a pure
+	 * scaling check with no bus traffic. */
+	ina236_t ctx = { 0 };
+
+	/* The +5V EVK rail: 20 mOhm shunt, 4.0 A full scale ->
+	 * CURRENT_LSB = 4.0 / 32768 = 122.070312 uA. */
+	ctx.current_lsb_a = 4.0f / 32768.0f;
+	zassert_within(ina236_power_lsb_w(&ctx),
+	               32.0f * (4.0f / 32768.0f),
+	               1e-9f,
+	               "power LSB must be exactly 32 x CURRENT_LSB (eq. 4)");
+	/* Anchor the absolute value too, so a future refactor that keeps the
+	 * relationship but rescales CURRENT_LSB still trips: 3.906250 mW. */
+	zassert_within(ina236_power_lsb_w(&ctx), 0.00390625f, 1e-9f, "expected 3.90625 mW per count");
+
+	/* A NULL context must yield 0, not read through the pointer. */
+	zassert_equal(ina236_power_lsb_w(NULL), 0.0f);
+}
+
+ZTEST(alp_chips, test_ina236_sample_period_matches_datasheet_tables)
+{
+	/* SBOSA81D table 7-4 conversion times, section 7.4.4 averaging.  In
+	 * continuous shunt+bus the ADC is multiplexed across both, so the two
+	 * conversion times ADD; a single-quantity mode counts only its own. */
+	zassert_equal(ina236_sample_period_us(
+	                  INA236_AVG_1, INA236_CT_140US, INA236_CT_140US, INA236_MODE_SHUNT_BUS_CONT),
+	              280u,
+	              "1 x (140 + 140) us");
+	/* The configuration this repo's energy runner uses: 16 x 280 us. */
+	zassert_equal(ina236_sample_period_us(
+	                  INA236_AVG_16, INA236_CT_140US, INA236_CT_140US, INA236_MODE_SHUNT_BUS_CONT),
+	              4480u,
+	              "16 x (140 + 140) us");
+	/* Reset defaults: AVG=1, both CT = 1100 us. */
+	zassert_equal(ina236_sample_period_us(
+	                  INA236_AVG_1, INA236_CT_1100US, INA236_CT_1100US, INA236_MODE_SHUNT_BUS_CONT),
+	              2200u);
+	/* Shunt-only ignores VBUSCT; bus-only ignores VSHCT. */
+	zassert_equal(ina236_sample_period_us(
+	                  INA236_AVG_4, INA236_CT_8244US, INA236_CT_204US, INA236_MODE_SHUNT_CONT),
+	              816u,
+	              "4 x 204 us -- VBUSCT must not count in shunt-only mode");
+	zassert_equal(ina236_sample_period_us(
+	                  INA236_AVG_4, INA236_CT_204US, INA236_CT_8244US, INA236_MODE_BUS_CONT),
+	              816u,
+	              "4 x 204 us -- VSHCT must not count in bus-only mode");
+	/* BOTH datasheet shutdown encodings (000b and 100b) must report 0 --
+	 * no conversions happen, and 0 makes a "divide by the period" caller
+	 * fail loudly instead of reporting an impossible sample rate. */
+	zassert_equal(ina236_sample_period_us(
+	                  INA236_AVG_1, INA236_CT_140US, INA236_CT_140US, INA236_MODE_SHUTDOWN),
+	              0u);
+	zassert_equal(ina236_sample_period_us(
+	                  INA236_AVG_1, INA236_CT_140US, INA236_CT_140US, INA236_MODE_SHUTDOWN_ALT),
+	              0u);
+	/* Largest legal combination must not overflow: 1024 x (8244 + 8244). */
+	zassert_equal(
+	    ina236_sample_period_us(
+	        INA236_AVG_1024, INA236_CT_8244US, INA236_CT_8244US, INA236_MODE_SHUNT_BUS_CONT),
+	    16883712u);
+}
+
 /* ------------------------------------------------------------------ */
 /* eeprom_24c128 -- generic 24Cxx I2C EEPROM                          */
 /* ------------------------------------------------------------------ */

@@ -16,7 +16,7 @@
 
 #include "alp/chips/ina236.h"
 
-/* Datasheet SBOSA38A table 7-1. */
+/* Datasheet SBOSA81D section 7.6.1 (register map). */
 #define INA236_REG_CONFIG      0x00u
 #define INA236_REG_SHUNT       0x01u
 #define INA236_REG_BUS         0x02u
@@ -28,16 +28,38 @@
 #define INA236_REG_MFG_ID      0x3Eu
 #define INA236_REG_DEVICE_ID   0x3Fu
 
-/* CONFIG bit fields (datasheet table 7-2). */
-#define INA236_CFG_RST           0x8000u /* Soft reset.            */
-#define INA236_CFG_ADCRANGE_20MV 0x1000u /* 0 = 81.92 mV, 1 = 20.48 mV. */
+/* CONFIG bit fields (datasheet SBOSA81D table 7-4). */
+#define INA236_CFG_RST           0x8000u /* Bit 15: soft reset, self-clearing. */
+#define INA236_CFG_ADCRANGE_20MV 0x1000u /* Bit 12: 0 = ±81.92 mV, 1 = ±20.48 mV. */
+#define INA236_CFG_AVG_SHIFT     9u      /* Bits 11-9:  AVG.    */
+#define INA236_CFG_AVG_MASK      0x0E00u
+#define INA236_CFG_VBUSCT_SHIFT  6u /* Bits 8-6:   VBUSCT. */
+#define INA236_CFG_VBUSCT_MASK   0x01C0u
+#define INA236_CFG_VSHCT_SHIFT   3u /* Bits 5-3:   VSHCT.  */
+#define INA236_CFG_VSHCT_MASK    0x0038u
+#define INA236_CFG_MODE_MASK     0x0007u /* Bits 2-0:   MODE.   */
 
-/* Shunt-voltage LSB depends on ADCRANGE (datasheet section 7.5.2). */
+/* Mask/Enable bit fields (datasheet SBOSA81D table 7-10). */
+#define INA236_MSKEN_CVRF 0x0008u /* Bit 3 (RO): conversion-ready flag. */
+
+/* SHUNT_CAL is CALIBRATION bits 14-0 (bit 15 reserved), datasheet
+ * table 7-9 -- so the programmable maximum is 0x7FFF, not 0xFFFF. */
+#define INA236_SHUNT_CAL_MAX 32767.0f
+
+/* Shunt-voltage LSB depends on ADCRANGE (datasheet section 6.5,
+ * "1 LSB step size"). */
 #define INA236_SHUNT_LSB_NV_RANGE_81MV 2500 /* 2.5 uV */
 #define INA236_SHUNT_LSB_NV_RANGE_20MV 625  /* 0.625 uV */
 
 /* Bus-voltage LSB is fixed at 1.6 mV. */
 #define INA236_BUS_LSB_UV 1600u
+
+/* VBUSCT / VSHCT code -> conversion time in microseconds, indexed by the
+ * 3-bit field value (datasheet table 7-4).  Both fields share the table. */
+static const uint16_t INA236_CT_US[8] = { 140, 204, 332, 588, 1100, 2116, 4156, 8244 };
+
+/* AVG code -> number of averaged conversions (datasheet table 7-4). */
+static const uint16_t INA236_AVG_N[8] = { 1, 4, 16, 64, 128, 256, 512, 1024 };
 
 static alp_status_t reg_read16(ina236_t *ctx, uint8_t reg, uint16_t *val_out)
 {
@@ -63,19 +85,30 @@ static bool addr_in_strap_range(uint8_t addr)
 	return (addr >= 0x40u && addr <= 0x43u) || (addr >= 0x48u && addr <= 0x4Bu);
 }
 
-/* CALIBRATION = 0.00512 / (CURRENT_LSB * R_SHUNT)  per datasheet
- * eq. 1, where 0.00512 has units (V * A).  CURRENT_LSB is in
- * amps; we choose CURRENT_LSB = max_current / 32768. */
+/* SHUNT_CAL = 0.00512 / (CURRENT_LSB * R_SHUNT)  per datasheet
+ * SBOSA81D eq. 1, where 0.00512 is "an internal fixed value used to
+ * ensure scaling is maintained properly".  CURRENT_LSB is in amps; we
+ * choose CURRENT_LSB = max_current / 32768 (the eq.-2 minimum for a
+ * full-scale 16-bit signed CURRENT register).
+ *
+ * ADCRANGE=1 quarters the shunt LSB (2.5 uV -> 625 nV), so the raw
+ * SHUNT register is 4x larger for the same physical shunt voltage.
+ * Since CURRENT = SHUNT x SHUNT_CAL internally, SHUNT_CAL must be
+ * divided by 4 to keep CURRENT (and therefore POWER) correctly scaled
+ * -- SBOSA81D section 8.1.2 states this explicitly under eq. 1
+ * ("The value of SHUNT_CAL must be divided by 4 for ADCRANGE = 1").
+ * Omitting it reads current and power 4x high in the 20.48 mV range. */
 static alp_status_t apply_calibration(ina236_t *ctx)
 {
 	if (!isfinite(ctx->shunt_ohms) || ctx->shunt_ohms <= 0.0f) return ALP_ERR_INVAL;
 	if (!isfinite(ctx->max_current_a) || ctx->max_current_a <= 0.0f) return ALP_ERR_INVAL;
 	ctx->current_lsb_a = ctx->max_current_a / 32768.0f;
 	float cal_f        = 0.00512f / (ctx->current_lsb_a * ctx->shunt_ohms);
+	if (ctx->adcrange == INA236_ADCRANGE_20MV) cal_f /= 4.0f;
 	/* current_lsb_a and shunt_ohms are both finite and > 0 (checked
 	 * above), so cal_f is finite here too -- no NaN/Inf can reach the
 	 * uint16_t cast below; only the documented saturating clamp. */
-	if (cal_f > 65535.0f) cal_f = 65535.0f;
+	if (cal_f > INA236_SHUNT_CAL_MAX) cal_f = INA236_SHUNT_CAL_MAX;
 	if (cal_f < 0.0f) cal_f = 0.0f;
 	uint16_t cal = (uint16_t)cal_f;
 	return reg_write16(ctx, INA236_REG_CALIBRATION, cal);
@@ -187,11 +220,100 @@ alp_status_t ina236_read_power_uw(ina236_t *ctx, uint32_t *uw_out)
 	uint16_t     raw;
 	alp_status_t s = reg_read16(ctx, INA236_REG_POWER, &raw);
 	if (s != ALP_OK) return s;
-	/* Power LSB = 32 * CURRENT_LSB (amps) * 1.6 mV (bus LSB)
-     * = 32 * current_lsb_a * 0.0016 V.  Multiply by 1e6 for uW. */
-	float power_w = (float)raw * 32.0f * ctx->current_lsb_a * 0.0016f;
+	/* SBOSA81D eq. 4: Power [W] = 32 x CURRENT_LSB x POWER.  The 32
+     * is NOT dimensionless and NOT a bare count -- it already carries
+     * the bus-voltage scaling (the internal register math divides by
+     * 20000, and 20000 x 1.6 mV = 32 V), so the bus LSB must NOT be
+     * applied a second time here.  Doing so under-reports power by
+     * 625x; that was the shipped behaviour until this was checked
+     * against eq. 4 (and against upstream Zephyr's
+     * drivers/sensor/ti/ina2xx INA236_POWER_SCALING = 32, applied as
+     * raw x current_lsb_uA x 32 -> uW). */
+	float power_w = (float)raw * 32.0f * ctx->current_lsb_a;
 	if (power_w < 0.0f) power_w = 0.0f;
 	*uw_out = (uint32_t)(power_w * 1000000.0f);
+	return ALP_OK;
+}
+
+alp_status_t ina236_read_power_raw(ina236_t *ctx, uint16_t *raw_out)
+{
+	if (ctx == NULL || !ctx->initialised || raw_out == NULL) return ALP_ERR_NOT_READY;
+	return reg_read16(ctx, INA236_REG_POWER, raw_out);
+}
+
+float ina236_power_lsb_w(const ina236_t *ctx)
+{
+	/* SBOSA81D eq. 4, factored out so a high-rate sampler can stream raw
+     * POWER counts and scale once on the host instead of per sample. */
+	if (ctx == NULL) return 0.0f;
+	return 32.0f * ctx->current_lsb_a;
+}
+
+alp_status_t ina236_configure(ina236_t     *ctx,
+                              ina236_avg_t  avg,
+                              ina236_ct_t   vbusct,
+                              ina236_ct_t   vshct,
+                              ina236_mode_t mode)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if ((unsigned)avg > 7u || (unsigned)vbusct > 7u || (unsigned)vshct > 7u || (unsigned)mode > 7u)
+		return ALP_ERR_INVAL;
+
+	/* Read-modify-write off the cache so RST (bit 15, self-clearing) and
+     * ADCRANGE (bit 12, owned by init/reset) survive untouched -- and so
+     * do the reserved bits 14-13, which always read back 10b. */
+	uint16_t cfg = ctx->cfg_cache;
+	cfg &= (uint16_t)~(INA236_CFG_AVG_MASK | INA236_CFG_VBUSCT_MASK | INA236_CFG_VSHCT_MASK |
+	                   INA236_CFG_MODE_MASK);
+	cfg |= (uint16_t)((unsigned)avg << INA236_CFG_AVG_SHIFT) & INA236_CFG_AVG_MASK;
+	cfg |= (uint16_t)((unsigned)vbusct << INA236_CFG_VBUSCT_SHIFT) & INA236_CFG_VBUSCT_MASK;
+	cfg |= (uint16_t)((unsigned)vshct << INA236_CFG_VSHCT_SHIFT) & INA236_CFG_VSHCT_MASK;
+	cfg |= (uint16_t)(unsigned)mode & INA236_CFG_MODE_MASK;
+
+	alp_status_t s = reg_write16(ctx, INA236_REG_CONFIG, cfg);
+	if (s != ALP_OK) return s;
+	ctx->cfg_cache = cfg;
+	return ALP_OK;
+}
+
+uint32_t
+ina236_sample_period_us(ina236_avg_t avg, ina236_ct_t vbusct, ina236_ct_t vshct, ina236_mode_t mode)
+{
+	if ((unsigned)avg > 7u || (unsigned)vbusct > 7u || (unsigned)vshct > 7u || (unsigned)mode > 7u)
+		return 0u;
+
+	uint32_t conv_us;
+	switch (mode) {
+	case INA236_MODE_SHUNT_CONT:
+	case INA236_MODE_SHUNT_TRIG:
+		conv_us = INA236_CT_US[(unsigned)vshct];
+		break;
+	case INA236_MODE_BUS_CONT:
+	case INA236_MODE_BUS_TRIG:
+		conv_us = INA236_CT_US[(unsigned)vbusct];
+		break;
+	case INA236_MODE_SHUNT_BUS_CONT:
+	case INA236_MODE_SHUNT_BUS_TRIG:
+		/* The ADC is multiplexed across both measurements (SBOSA81D
+	     * section 7.3.1), so the two conversion times add. */
+		conv_us = (uint32_t)INA236_CT_US[(unsigned)vbusct] + INA236_CT_US[(unsigned)vshct];
+		break;
+	default:
+		/* Both Shutdown encodings (000b and 100b): no conversions. */
+		return 0u;
+	}
+	return conv_us * INA236_AVG_N[(unsigned)avg];
+}
+
+alp_status_t ina236_conversion_ready(ina236_t *ctx, bool *ready_out)
+{
+	if (ctx == NULL || !ctx->initialised || ready_out == NULL) return ALP_ERR_NOT_READY;
+	uint16_t     msken;
+	alp_status_t s = reg_read16(ctx, INA236_REG_MASK_ENABLE, &msken);
+	if (s != ALP_OK) return s;
+	/* This read itself clears CVRF (SBOSA81D table 7-10, bit 3), which is
+     * what makes the flag a one-shot consume-once handshake. */
+	*ready_out = (msken & INA236_MSKEN_CVRF) != 0u;
 	return ALP_OK;
 }
 

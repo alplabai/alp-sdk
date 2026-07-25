@@ -1,5 +1,5 @@
 {
-  "generated": "2026-07-24",
+  "generated": "2026-07-25",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -4724,6 +4724,14 @@
     },
     "alp/chips/ina236.h": {
       "functions": {
+        "ina236_configure": {
+          "hash": "db04653c0ba893d8",
+          "signature": "alp_status_t ina236_configure(ina236_t *ctx, ina236_avg_t avg, ina236_ct_t vbusct, ina236_ct_t vshct, ina236_mode_t mode);"
+        },
+        "ina236_conversion_ready": {
+          "hash": "610691cc52d5ecfc",
+          "signature": "alp_status_t ina236_conversion_ready(ina236_t *ctx, bool *ready_out);"
+        },
         "ina236_deinit": {
           "hash": "071e9b37aebdc9d8",
           "signature": "void ina236_deinit(ina236_t *ctx);"
@@ -4731,6 +4739,10 @@
         "ina236_init": {
           "hash": "39ab4f0b150f2cf0",
           "signature": "alp_status_t ina236_init(ina236_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit, float shunt_ohms, float max_current_a, ina236_adcrange_t adcrange);"
+        },
+        "ina236_power_lsb_w": {
+          "hash": "f2b24d31d1a182e8",
+          "signature": "float ina236_power_lsb_w(const ina236_t *ctx);"
         },
         "ina236_read_all": {
           "hash": "26285b54d3f25d6b",
@@ -4744,6 +4756,10 @@
           "hash": "458aaf18b29943a0",
           "signature": "alp_status_t ina236_read_current_ua(ina236_t *ctx, int32_t *ua_out);"
         },
+        "ina236_read_power_raw": {
+          "hash": "85eb3c9d316664a0",
+          "signature": "alp_status_t ina236_read_power_raw(ina236_t *ctx, uint16_t *raw_out);"
+        },
         "ina236_read_power_uw": {
           "hash": "124e67f5694d7db5",
           "signature": "alp_status_t ina236_read_power_uw(ina236_t *ctx, uint32_t *uw_out);"
@@ -4755,6 +4771,10 @@
         "ina236_reset": {
           "hash": "14228d745f381138",
           "signature": "alp_status_t ina236_reset(ina236_t *ctx);"
+        },
+        "ina236_sample_period_us": {
+          "hash": "1c712b010551610b",
+          "signature": "uint32_t ina236_sample_period_us(ina236_avg_t avg, ina236_ct_t vbusct, ina236_ct_t vshct, ina236_mode_t mode);"
         }
       },
       "macros": {
@@ -4775,6 +4795,51 @@
             "INA236_ADCRANGE_20MV = 1"
           ],
           "hash": "6b51003a1bfdc80e",
+          "kind": "enum"
+        },
+        "ina236_avg_t": {
+          "definition": "typedef enum { INA236_AVG_1 = 0, INA236_AVG_4 = 1, INA236_AVG_16 = 2, INA236_AVG_64 = 3, INA236_AVG_128 = 4, INA236_AVG_256 = 5, INA236_AVG_512 = 6, INA236_AVG_1024 = 7, } ina236_avg_t;",
+          "enumerators": [
+            "INA236_AVG_1 = 0",
+            "INA236_AVG_4 = 1",
+            "INA236_AVG_16 = 2",
+            "INA236_AVG_64 = 3",
+            "INA236_AVG_128 = 4",
+            "INA236_AVG_256 = 5",
+            "INA236_AVG_512 = 6",
+            "INA236_AVG_1024 = 7"
+          ],
+          "hash": "33e07efcdee4920f",
+          "kind": "enum"
+        },
+        "ina236_ct_t": {
+          "definition": "typedef enum { INA236_CT_140US = 0, INA236_CT_204US = 1, INA236_CT_332US = 2, INA236_CT_588US = 3, INA236_CT_1100US = 4, INA236_CT_2116US = 5, INA236_CT_4156US = 6, INA236_CT_8244US = 7, } ina236_ct_t;",
+          "enumerators": [
+            "INA236_CT_140US = 0",
+            "INA236_CT_204US = 1",
+            "INA236_CT_332US = 2",
+            "INA236_CT_588US = 3",
+            "INA236_CT_1100US = 4",
+            "INA236_CT_2116US = 5",
+            "INA236_CT_4156US = 6",
+            "INA236_CT_8244US = 7"
+          ],
+          "hash": "3ec8aa765e049c5c",
+          "kind": "enum"
+        },
+        "ina236_mode_t": {
+          "definition": "typedef enum { INA236_MODE_SHUTDOWN = 0, INA236_MODE_SHUNT_TRIG = 1, INA236_MODE_BUS_TRIG = 2, INA236_MODE_SHUNT_BUS_TRIG = 3, INA236_MODE_SHUTDOWN_ALT = 4, INA236_MODE_SHUNT_CONT = 5, INA236_MODE_BUS_CONT = 6, INA236_MODE_SHUNT_BUS_CONT = 7, } ina236_mode_t;",
+          "enumerators": [
+            "INA236_MODE_SHUTDOWN = 0",
+            "INA236_MODE_SHUNT_TRIG = 1",
+            "INA236_MODE_BUS_TRIG = 2",
+            "INA236_MODE_SHUNT_BUS_TRIG = 3",
+            "INA236_MODE_SHUTDOWN_ALT = 4",
+            "INA236_MODE_SHUNT_CONT = 5",
+            "INA236_MODE_BUS_CONT = 6",
+            "INA236_MODE_SHUNT_BUS_CONT = 7"
+          ],
+          "hash": "9431b666b5c4f2cd",
           "kind": "enum"
         },
         "ina236_sample_t": {
