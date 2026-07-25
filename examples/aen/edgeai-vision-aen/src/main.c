@@ -144,7 +144,11 @@ static int stage_model_load(void)
 	cfg.model_size                           = sizeof(s_placeholder);
 	cfg.format                               = ALP_INFERENCE_MODEL_VELA;
 	cfg.backend                              = ALP_INFERENCE_BACKEND_AUTO;
-	/* arena: NULL -> backend's built-in default. */
+	/* arena: NULL here only because this 16-byte placeholder is rejected by
+	 * model validation before arena selection.  A REAL Vela model dispatches
+	 * onto the Ethos-U NPU, which has no implicit default arena (the NPU DMA
+	 * cannot reach M55-local memory) -- supply an explicit SRAM0-resident arena,
+	 * e.g. examples/aen/aen-npu-inference-alp, or open() returns ALP_ERR_INVAL. */
 	g_model = alp_inference_open(&cfg);
 	if (g_model == NULL) {
 		printf("[edgeai]   alp_inference_open            skip (last_err=%d)\n",

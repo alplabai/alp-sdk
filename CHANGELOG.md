@@ -7,6 +7,356 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.14.0 candidate
 
+### Changed — Ethos-U accelerator sized per target core; NPU→core pairing single-sourced in the SoC JSON
+
+- The build emit (`_emit_inference`) now sizes the Ethos-U accelerator
+  (`CONFIG_ETHOS_U{55,85}_<mac>`) from the NPU instance paired with the
+  target core, not the SoC's most-capable instance.  On the Alif E3/E5/E7 —
+  which carry a 256-MAC high-perf Ethos-U55 (M55-HP) and a 128-MAC
+  high-efficiency Ethos-U55 (M55-HE) — an `m55_he` inference slice used to
+  emit `CONFIG_ETHOS_U55_256`; the HE core drives the 128-MAC U55 and a
+  256-MAC command stream errors that NPU at invoke (register-proven on E8).
+  A new `npus[].paired_core` field in the SoC JSON (`$defs/npu` schema) wires
+  each instance to its `cores[].id`; the emit fails loudly if a multi-MAC
+  variant is unpaired rather than guessing (#934).
+- The NPU→core pairing is now single-sourced in the SoC JSON.  The SoM
+  preset `inference.npu_population[].role` / `paired_with` fields — dead
+  documentation no code read, scaffolded as `TBD` — are removed; an entry is
+  now `{ variant }` only.  A `validate_metadata` gate
+  (`_check_soc_npu_pairing`) enforces the single source: every `paired_core`
+  must name a real `cores[].id`, and a type carrying more than one distinct
+  `mac_per_cycle` must pair every instance (#938).
+### Added — I3C joins the portable-API conformance suite
+
+`tests/zephyr/conformance/` exercises each portable `<alp/*>` class against a
+common contract, keyed on `ALP_CAP_ID_HW_*`.  The I3C class shipped in #926
+without a row: the 16-step plan for that PR never named the suite,
+`check_test_coverage.py` passed without it, and `ALP_CAP_ID_HW_I3C` did not
+exist until #926 itself added it — so the row was hard-blocked at the time.
+
+Adds the row now that the enum value exists.  Shape mirrors `i2c` (open a bus by
+form-factor id, blocking transfer against a target address), with
+`null_handle_call` using `alp_i3c_write` as the simplest op that must reject a
+NULL handle without touching the bus.  Marked `sim_backed = false` — Zephyr
+ships no I3C emulator, so the suite contract-checks the class rather than
+exercising it, exactly as it already does for `dac`, `can` and `rtc`.
+
+Verified on `native_sim/native/64`: 93 of 93 cases pass, and the new rows do
+execute rather than silently skip —
+
+```
+conformance[i3c]: degrade path -- no instance 0 on this build, open refused with -6 (failure contract validated)
+conformance[i3c]: degrade path -- no instance to double-close (NULL-close covered by case C)
+```
+
+Note the class stays `[ABI-EXPERIMENTAL]`: controller init is bench-proven on
+E1M-AEN801 (#926), but a live transfer is still unproven because no I3C target
+is populated on the bench carrier.  The conformance row asserts the contract the
+class guarantees today and implies no transfer coverage.
+
+Closes #937.
+### Fixed — `comparator_lp` removed from the E3 and E5 SoC metadata
+
+`e3.json` and `e5.json` declared `comparator_lp: 1`, but neither part has a
+low-power comparator: their DFP SVDs (`Debug/SVD/AE302F80F55D5AE_…`,
+`AE512F80F55D5LS_…`) carry `CMP0..CMP3` and **no `LPCMP`**, while the E8 SVD
+(`AE822FA0E5597BS0_…`) carries both.  The LP comparator is a `FA0E5597`-
+generation block E3/E5 do not have.
+
+Same defect and same fix as E7 in #932.  E3 and E5 were out of that pass's reach
+because the DFP ships no `Device/soc/` directory for them — only an SVD, which
+that pass did not look at.  Per the file convention an absent key means zero
+instances (no SoC JSON sets a peripheral to `0`).
+
+Also re-confirmed correct against the same SVDs, and left unchanged: `i2c_lp` 1,
+`spi_lp` 1, no `i3c_lp`, `i2c` 4, `spi` 4, `uart` 8, `i2s` 4, `adc_12bit` 3,
+`dac_12bit` 2, `comparator_hs` 4, `can_fd` 1, `ethernet` 1, `usb_2` 1, `sdio` 1,
+`rtc` 1.  The E8 SVD independently corroborates #932's changes there
+(`LPSPI0`+`LPSPI1`, `LPI2C0`+`LPI2C1`, `I3C`+`LPI3C`, `CMP0..CMP3`+`LPCMP`).
+
+Metadata-only: `comparator_lp` has no `CAP_ALIASES` entry, so no generated file
+moves.  Refs #936.
+### Fixed — `ram-run.sh` now says why a Flow C console came back empty
+
+A Flow C ITCM RAM-run of a UART-console app produces **zero** bytes on UART5 —
+confirmed on hardware where that capture is otherwise proven working, with the
+core reaching `arch_cpu_idle` at `IPSR = 0`, i.e. the app ran fine and the output
+simply did not route (#935).
+
+`ram-run.sh` handled that case silently.  It resolved the console buffer with
+
+```sh
+BUF=0x$($OBJ-nm "$ELF" | awk '/ ram_console_buf$/{print $1}')
+```
+
+and on a UART-console build `nm` matches nothing, so `BUF` became the bare
+string `0x`, JLink ran `mem8 0x, <size>`, and the operator got an empty
+"RAM console (decoded)" block with no hint why — which reads as *the app
+crashed* when nothing is wrong with it.
+
+Now the missing symbol is detected and the run stops with the remedy, pointing
+at the fragment that already exists for this:
+
+```
+ram-run: '<elf>' has no 'ram_console_buf' symbol -- this app was built
+         with the UART console, which Flow C cannot capture.
+         Rebuild it with the RAM console layered on top:
+             scripts/bench/aen/build.sh <app-dir> \
+                 -DEXTRA_CONF_FILE=.../scripts/bench/aen/aen-bench-shared.conf
+```
+
+Verified against the ELF that produced the original silent console
+(`examples/aen/aen-i3c-regcheck` built for
+`alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he`): it carries **0**
+`ram_console_buf` symbols, so the guard fires on exactly the real case.
+
+Also corrects a stale comment in `aen-bench-shared.conf`, which claimed "the app
+UART is not on USB on this bench".  UART5 **has** been USB-routed since
+2026-07-03; the reason Flow C needs the RAM console is narrower and more
+surprising than that, and the comment now states it.
+
+The apps themselves are untouched — their committed `prj.conf` keeps the
+customer-facing UART console.  Refs #935.
+
+### Added — `metadata/bootstrap.json`: the cross-platform bootstrap facts as data
+
+- New committed, schema-validated manifest
+  (`metadata/schemas/bootstrap-v1.schema.json`) holding the FACTS every
+  executor needs to assemble a Zephyr workspace: the Zephyr pin, venv
+  layout, the `west` / `pip` argument vectors, the `env` map, and the
+  per-OS native-library and manual-install hints.  `scripts/bootstrap.sh`
+  and `scripts/bootstrap.ps1` now consume it instead of carrying
+  divergent hardcoded copies.  Facts only — control flow (`ZEPHYR_BASE`
+  reuse/rejection, venv idempotency, `.west` branching) stays as code in
+  each executor; this is deliberately not a step-execution DSL.  Static
+  JSON rather than an `--emit` target because `scripts/alp_project.py`
+  exits on missing `jsonschema`/`PyYAML`, which bootstrap itself installs
+  (circular), and JSON rather than YAML because bash must parse it
+  pre-venv with stdlib `json` only.  `tan` (Rust) is the intended third
+  consumer; nothing wires it yet.
+- `scripts/check_bootstrap_manifest.py` is the drift gate that keeps the
+  manifest load-bearing rather than a fourth copy of the same facts.  It
+  validates against the schema; asserts `zephyr.version` against
+  `west.yml`'s `- name: zephyr` revision, the `README.md` badge, and the
+  four CI workflows that pin Zephyr independently of `west update`
+  (`pr-twister`, `pr-tier-a-libraries`, `nightly-aen-hil`,
+  `pr-getting-started-aen801`); asserts the deliberately-hardcoded
+  prerequisite lists and Python floor in both scripts against the
+  manifest; refuses an unknown top-level key; and walks every leaf so a
+  fact no executor reads fails the gate by name.  The hardcoded-literal
+  scan is heredoc/here-string aware, so a Zephyr pin printed verbatim to
+  the user is caught as well as one in source.
+
+### Fixed — bootstrap script defects surfaced while single-sourcing the facts
+
+- `scripts/bootstrap.ps1` collapsed a single-element argument array to a
+  `String`, and PowerShell splats a string character-by-character, so
+  `west zephyr-export` ran as 13 one-character arguments — and with no
+  `$LASTEXITCODE` check it failed silently on native Windows.
+- `scripts/bootstrap.ps1` substituted `${WORKSPACE_DIR}` at load time,
+  before the workspace-reuse branch could reassign it, so a reused
+  workspace printed a wrong `$env:ZEPHYR_BASE` in the closing summary.
+- List-valued facts were joined and re-split, which also split on spaces
+  *inside* an element: a path such as `C:/Users/John Smith/alp-sdk`
+  reached `west init -l` as two arguments.  Now emitted as bash array
+  literals via `shlex.quote`.
+- `eval "$(python3 -c ...)"` swallowed a non-zero `python3` exit under
+  `set -uo pipefail` (no `-e`), so a failed or partial manifest read
+  proceeded on a partially-loaded fact set instead of reaching `die`.
+- `bash scripts/bootstrap.sh --help` sliced its own header with a
+  hardcoded `sed -n '3,32p'` line range, which silently truncated the
+  flag list and the "After it runs" block whenever the header grew.  The
+  usage text now has one authoritative copy.
+- `--print-env` / `-PrintEnv` sat behind the full prerequisite check, so
+  a host missing `cmake` (or `ninja`, on Windows) could not print env
+  lines; they now require only a working Python, which is all they use.
+- Both scripts now refuse a `metadata/bootstrap.json` whose
+  `schemaVersion` they do not understand, rather than parsing a future
+  manifest blind on a machine where the gate never runs.
+### Fixed — Alif Ensemble SoC peripheral counts re-ingested from the DFP
+
+`metadata/socs/alif/ensemble/{e4,e6,e7,e8}.json` carried counts that were never
+read from their own part: E4's block was inherited from the E3 sibling and E6's
+from E7.  But E3/E5/E7 are the older `F80F55xx` generation while E4/E6/E8 are
+`FA0E5597`, so both inheritances imported the wrong generation's numbers.  E8's
+own note already flagged its counts as provisional (ingested against datasheet
+v0.51, never reconciled to v1.0).
+
+Re-derived from the Alif DFP — peripheral `*_BASE` symbols and the feature flags
+in `Device/soc/<part>/include/soc_features.h`, which ships directories for
+`AE402FA0E5597` (E4), `AE722F80F55D5` (E7) and `AE822FA0E5597` (E8):
+
+| field | e4 | e6 | e7 | e8 |
+| --- | --- | --- | --- | --- |
+| `i2c_lp` | 1 → **2** | 1 → **2** | 1 | 2 |
+| `spi_lp` | 1 → **2** | 1 → **2** | 1 | 1 → **2** |
+| `gpio_18v` | 120 → **136** | 120 → **136** | 120 | 136 |
+| `i3c_lp` | — → **1** | — → **1** | — | 1 |
+| `timer_lp_32bit` | — → **3** | — → **3** | — | 3 |
+| `watchdog` | 2 | 3 → **4** | 4 | 4 |
+| `dma_general_32ch` | 3 | 3 | 3 | — → **3** |
+| `comparator_lp` | 1 | 1 | 1 → **removed** | 1 |
+
+- `spi_lp` was wrong on **every** Alif part including E8, the one we bench:
+  `LPSPI0_BASE` and `LPSPI1_BASE` both exist.
+- `gpio_18v` is derivable rather than opaque: GPIO ports × 8.  E4/E8 expose
+  `GPIO0`–`GPIO14` + `GPIO16` + `GPIO17` = 17 ports = 136; E7 exposes 15 = 120.
+  `SOC_FEAT_GPIO_HAS_PORT16_17` (1 on E4/E8, 0 on E7) confirms it independently.
+- `watchdog` is core-count-driven but not one-per-core: the A32 contributes
+  **two** views (`WDT_AP_CTRL` + `WDT_AP_S_CTRL`), which is why E8 — same three
+  cores as E6 — is 4.  E6's old 3 came from the one-per-core rule.
+- `i3c_lp` / `timer_lp_32bit`: `LPI3C_BASE` (`0x43006000`, `IRQ50`) and
+  `LPUTIMER_BASE` exist on E4/E8 and not on E7 — `FA0E5597`-generation blocks
+  E4/E6 carry but had not declared.  The vendor fork agrees on I3C: `lpi3c0` is
+  defined in exactly one file, `dts/arm/alif/ensemble/common/e4_e6_e8.dtsi`.
+- `comparator_lp` removed from E7: it defines `CMP0..CMP3` but no `LPCMP_BASE`,
+  while E8 defines both.  Per the file convention an absent key means zero (no
+  SoC JSON sets a peripheral to `0`).
+- E4's full `*_BASE` set is a strict **subset** of E8's (183 vs 199), and all 16
+  extra E8 symbols are A32-related (`MHU_A32_*`, `MHU_APSS_*`, `WDT_AP_*`) —
+  confirming E4 and E8 are identical apart from the A32 cluster.
+
+Re-verified as **already correct** rather than changed, via `soc_features.h`:
+`timer_32bit` 12 + `encoder_quadrature` 4 (`SOC_FEAT_HAS_UTIMER4_15` +
+`SOC_FEAT_QEC_HAS_SEP_CHANNELS`, identical on all three parts), `timer_lp` 4
+(`SOC_FEAT_HAS_LPTIMER2_3`), `rtc` 1 (`SOC_FEAT_HAS_LPRTC1` = 0), `isp`
+(`SOC_FEAT_HAS_ISP` = 1 on E4/E8, 0 on E7 — matching the key's presence), and
+`dpi_parallel` / `pdm` / `pdm_lp` (single `CDC` / `PDM` / `LPPDM` instances).
+
+Only the `pdm` / `pdm_lp` value of **4** remains unconfirmed — a channel count
+inside one block, uniform across every Alif SoC file, so no cross-part
+inconsistency remains; confirming the number needs the datasheet.  E6 has no DFP
+directory at all, so its values come from the two DFP-present members of its
+generation (E4 and E8), which agree on every field changed here.
+
+### Fixed — `scripts/bootstrap.sh` silently ran `cargo install` on every completed run
+
+- The closing "Next steps" block used an **unquoted** heredoc tag
+  (`cat <<EOF`).  Its body documents the `tan` install with the command
+  in backticks, and an unquoted heredoc performs command substitution on
+  its body — so the backticked
+  `cargo install --git https://github.com/alplabai/tan-cli --bin tan`
+  was executed as a real command by every completed
+  `bash scripts/bootstrap.sh`, reinstalling `tan` from git tip behind the
+  user's back and pasting cargo's output into the printed instructions in
+  place of the text.  Reproduced on a clean checkout: the run reaches the
+  network (`Updating git repository ...`) and the line renders mangled as
+  `# for ):`.
+- The block is now split in two: only the first part (which genuinely
+  interpolates `${VENV_DIR}` / `${WORKSPACE_DIR}`) keeps an unquoted tag,
+  and the documentation half uses a quoted `<<'EOF'` tag so nothing in it
+  is executed.  The quoted tag also makes backslashes literal, so the
+  line continuation and `$PWD` in the example are written plainly instead
+  of escaped.
+- Pre-existing on `main` and `dev`, so it affects released versions.  The
+  other four heredocs in the script were audited and contain no backticks
+  or `$(...)`.
+### Added — `dac` peripheral class in the `board.yaml` `peripherals:` enum
+
+`core_entry.peripherals` covered `adc` but not `dac`, so the DAC half of an
+analog project could not be expressed in `board.yaml`
+(issue [#919](https://github.com/alplabai/alp-sdk/issues/919)). Everything
+under the enum was already in place — `<alp/dac.h>` with its portable backend,
+the `alp-dac` DTS alias bucket, and `dac_12bit` on the Alif E8 SoC JSON — so
+`examples/aen/aen-analog-validate` had to hand-write `CONFIG_DAC=y` in
+`prj.conf` to run its DAC0 → ADC loopback. The token now exists,
+`metadata/registries/peripheral-kconfig.json` maps it to `CONFIG_DAC`, and the
+example takes it and drops the workaround. Also corrected the enum's own
+description, which claimed every class is reached "via the matching
+`<alp/<class>.h>` wrapper" — false for 8 of the 16 existing entries
+(`gpio`/`i2c`/`spi`/`uart` live in `<alp/peripheral.h>`).
+
+### Added — Alif ISP-Pico driver compiles + links against hal_alif v2.3.0
+
+The Alif Ensemble ISP-Pico (Verisilicon ISP-Nano) video driver
+(`zephyr/drivers/video/isp_pico.c`, ADR-0017 Tier-2) now builds: vendored the
+last missing dependency, the Apache-2.0 headers `isp-vsi.h` + `isp_ctrl_params.h`
+from `alifsemi/zephyr_alif` v2.3.0 (they ship in neither hal_alif nor the CMSIS
+DFP), and confirmed the v2.3.0 libisp wrapper's 3-arg `isp_vsi_bottom_half` matches
+the ported driver. `examples/aen/aen-isp-regcheck` now build-proves the driver TU
+compiles + links against `libisp_gcc.a` on E1M-AEN801 (was bind-only). Added the
+`CONFIG_FP_HARDABI` BUILD_ASSERT guard (the libisp blob is hard-float, like the
+JPEG blob). **Build-only: live capture stays BENCH-BLOCKED** — the ISP needs a
+camera→CSI→ISP→memory graph and no camera sensor is wired on this AEN batch;
+silicon verification is deferred to a camera-populated board. Internal driver
+enablement, no `<alp/*>` surface change.
+### Added — portable `<alp/i3c.h>` I3C controller class
+
+New peripheral class mirroring `alp_i2c_*` (`alp_i3c_open/write/read/
+write_read/close/capabilities`), addressed by the target's dynamic (or
+legacy static) address.  `alp_i3c_write_read` is a single chained
+`i3c_transfer()` (write, then repeated-START read) — the canonical
+register-read idiom, matching `alp_i2c_write_read`'s shape.  Timing (SCL
+rate, DAA) stays devicetree-owned, not a config field: the legal rate on a
+mixed I3C/I2C bus depends on the slowest device populated.
+
+- Zephyr backend (`src/backends/i3c/zephyr_drv.c`) over upstream
+  `drivers/i3c/i3c_dw.c` (`snps,designware-i3c`), resolving `ALP_E1M_I3C0`
+  to the `alp-i3c0` DT alias.  On the E1M-AEN801 that alias points at
+  `lpi3c0@0x43006000`, the M55-HE local-domain controller (IRQ 50).  The
+  two E8 I3C controllers are INDEPENDENT and overlap on ONE pad pair only —
+  P7_6/P7_7, exposed as both `PIN_P7_6__I3C_SDA_D`/`PIN_P7_7__I3C_SCL_D`
+  (fn6, `i3c0`) and `PIN_P7_6__LPI3C_SDA_B`/`PIN_P7_7__LPI3C_SCL_B` (fn3,
+  `lpi3c0`).  The E1M-AEN801 breaks out only that pair, so on THIS SoM
+  exactly one of the two may be enabled and firmware selects `lpi3c0` (the
+  M55-HE local domain), leaving `i3c0` disabled — a board routing them to
+  non-overlapping pads (`i3c0` on P0_0/P0_1, `lpi3c0` on P6_2/P6_3) runs
+  both at once.  The SoM pinout table records those pads under the main-I3C
+  function and has no LPI3C row — it does not dictate the choice.
+- `scripts/alp_project_emit/dts.py`'s carrier DT-wiring catalog gained an
+  `i3c` entry: `board.yaml` `peripherals: [i3c]` on an `m55_he` slice emits
+  the `lpi3c0` enable + pinctrl + `alp-i3c0` alias automatically; an
+  `m55_hp` slice (or the unscoped cross-core union) gets nothing, so
+  `alp_i3c_open()` on HP surfaces `ALP_ERR_NOT_READY` instead of binding a
+  dead IRQ.
+- Legacy (non-I3C) devices sharing the bus are NOT driven through this
+  handle — they ride the existing `alp_i2c_*` surface via a board alias
+  pointed at the same controller node (Zephyr's `i3c_driver_api` embeds an
+  `i2c_api`, which `i3c_dw.c` implements); `metadata/boards/e1m-evk.yaml`
+  already establishes this pattern (`E1M_I3C0` doubling as
+  `EVK_I2C_BUS_ARDUINO`).
+- `aen-i3c-regcheck` re-based off the raw-DT bind-proof staged on
+  `feat/aen-soc-peripheral-coverage` to drive the portable API instead:
+  opens `ALP_E1M_I3C0`, reads back capabilities, and issues a probe write.
+  **SILICON-PROVEN (controller init)** on E1M-AEN801, labgrid place
+  `e1m-aen-evk-01`, Flow C ITCM RAM-run, 2026-07-25, reproduced twice:
+
+  ```
+  bus: ALP_E1M_I3C0 = 0 (alp-i3c0 alias -> lpi3c0@0x43006000)
+  alp_i3c_open: OK (handle=0x20000d20)
+  capabilities: present (flags=0x00000000)
+  alp_i3c_write(addr=0x08): status=-5 (ALP_ERR_IO -- expected, no target populated)
+  RESULT PASS: I3C controller BINDS + OPENS via <alp/i3c.h> ...
+  ```
+
+  That clears the two risks this class was flagged for: the `ALIF_LPI3C_CLK`
+  clock-id and the P7_6/P7_7 fn3 pinctrl both come up clean at device init.
+  **A live transfer remains unproven** — no I3C target is populated on this
+  AEN batch, so DAA finds zero targets and the probe write returns
+  `ALP_ERR_IO` by design; the transfer path is reached but never
+  acknowledged by a real device.  `[ABI-EXPERIMENTAL]`; the remaining
+  promotion gate is a live transfer against a populated target.
+
+### Added — Alif Ensemble E8 SoC peripheral coverage: I3C, OSPI/HexSPI, managed-MDIO (build-only)
+
+Three previously-missing E8 peripheral drivers, all **build-only** (compile+link
+proven on `alp_e1m_aen801_m55_he`; none is silicon-verifiable on this batch — no
+I3C/MDIO bus target wired, HexSPI unpopulated):
+- **I3C / I3C-LP** — Tier-1 enablement of upstream Zephyr `i3c_dw.c`
+  (`snps,designware-i3c`): DT nodes + clock-ids + pinctrl + Kconfig, no vendored
+  source. Example `aen-i3c-regcheck`.
+- **OSPI / HexSPI** — Zephyr shim `flash_ospi_alif.c` (ADR-0017 Tier-1.5) over the
+  Apache-2.0 hal_alif OSPI HAL (`CONFIG_USE_ALIF_HAL_OSPI`): init / XIP / AES-inline
+  / DDR config. `flash_driver_api` read/write/erase deferred (silicon-gated).
+  Example `aen-ospi-regcheck`. Runtime HW-blocked (HexSPI not populated — MRAM-only).
+- **Managed-MDIO** — clean-room Clause-22 controller `mdio_dwmac_alif.c` for the
+  DWC_ether_qos GMAC, authored from the DFP register map (no DFP source vendored),
+  enabling a managed-PHY path for the existing Ethernet driver.
+
+Not built (scope confirmed not gaps): DMA2D (the existing D/AVE2D GPU2D backend
+covers it), `<alp/display.h>` (the generic Zephyr-display wrapper already serves
+CDC200), `<alp/dsp.h>` (CMSIS-DSP Helium is already the E8 path), `<alp/tmu.h>`
+(E8 has no CORDIC hardware).
 ### Fixed — INA236 power and calibration scaling (BEHAVIOUR CHANGE for every caller)
 
 - `chips/ina236` reported power **625x too low**. `ina236_read_power_uw()`
@@ -241,6 +591,85 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   applies the same defensive fix to the Phase-3 parity-gate list. Adds
   `docs/adr/**` to `pr-doxygen`'s PR path filter so an ADR edit that
   breaks the full-tree Doxygen build is now caught. (#889)
+
+### Added — `<alp/jpeg.h>` portable JPEG-encoder surface (`[ABI-EXPERIMENTAL]`)
+
+- New encode-only portable JPEG-encoder surface: `alp_jpeg_open()` /
+  `alp_jpeg_encode()` / `alp_jpeg_capabilities()` / `alp_jpeg_close()`
+  dispatch across registered backends by `silicon_ref` priority (class
+  dispatcher + `NOT_IMPLEMENTED` stub, no decode API -- the E8 has no
+  hardware JPEG decoder). A portable software baseline backend
+  (`src/backends/jpeg/sw_baseline.c`, vendored `toojpeg_baseline.c`)
+  ships on **every** SoM (4:2:0 + mono), and a HW-accelerated
+  `alif_hantro` backend (`src/backends/jpeg/alif_hantro.c`) drives the
+  Alif Ensemble E8 Hantro VC9000E encoder on **E1M-AEN801** at priority
+  100, falling back to the software path everywhere else.
+- **Silicon-proven on E1M-AEN801 (Ensemble E8)**: the HW backend wins
+  backend arbitration (`alp_jpeg_capabilities()` reports
+  `hw_accelerated=1`), driver init reads `JPEG_SWREG0` back as
+  `JPEG_HW_ID` `0x90001000` (HW version `0x00c0c200`), and
+  `alp_jpeg_encode()` returns `rc=0` `out_len=935` for a 64x64 NV12
+  frame -- the 935-byte JPEG stream (`FF D8` SOI header) was pulled
+  off-target over SWD and round-tripped through libjpeg to a correct
+  64x64 image. Buffers were placed in the AXI-visible SRAM0 bank
+  (`out_buf@0x02000000`, `nv12_buf@0x02002000`) to satisfy the
+  HW-backend DMA-reachable-buffer contract below.
+- **HW-backend DMA-reachable-buffer contract**: the Hantro block is an
+  AXI DMA master and cannot reach the M55's TCM. `alif_hantro.c` sources
+  the ITCM/DTCM local-window ranges from the DT `itcm`/`dtcm` nodes (not
+  hardcoded literals) and rejects any request whose input or output
+  buffer overlaps either window, returning `ALP_ERR_NOSUPPORT` (falls
+  back to `sw_baseline`) with a `LOG_ERR` naming the offending buffer.
+- `alp_pixfmt_t` additions and the `format`/`pixfmt_mask` fields are
+  detailed in the Fixed entry directly below (same batch).
+
+### Fixed — `<alp/jpeg.h>` portable input-pixelformat contract + AEN801 HW-backend bench fallout
+
+- A real AEN801 silicon bench run on the Task-3/4 Hantro VC9000E hardware
+  backend (`src/backends/jpeg/alif_hantro.c`) proved the HW path is alive
+  (`JPEG_SWREG0` reads back `JPEG_HW_ID` `0x90001000`) and found two
+  defects plus a maintainer-approved API redesign, all landed together:
+  - **Portable pixelformat contract** (`[ABI-EXPERIMENTAL]`; ABI snapshot
+    diff verified additive-only): `alp_jpeg_encode_req_t` documented a
+    planar Y/U/V frame, `sw_baseline.c` consumed true planar, but
+    `alif_hantro.c` silently reinterpreted `y_plane` as NV12 -- a
+    portability-contract break with no type-level signal. `<alp/peripheral.h>`
+    (`[ABI-STABLE]`, additive) gains `ALP_PIXFMT_YUV420_PLANAR` /
+    `ALP_PIXFMT_NV12` appended to `alp_pixfmt_t` (existing values
+    unchanged); `alp_jpeg_encode_req_t` gains an explicit `format` field
+    and `alp_jpeg_caps_t` gains `pixfmt_mask` so a backend declares which
+    layout(s) it accepts instead of an app guessing from `CONFIG_*`.
+    `subsample` is kept as a separate field (chroma sampling ratio,
+    orthogonal to buffer layout) rather than folded into `format` --
+    collapsing them would force inventing pixfmt values for "mono,
+    planar" / "4:2:2, planar" that no display/camera caller needs.
+  - **Defect #1**: `examples/aen/aen-jpeg-regcheck/prj.conf` was missing
+    `CONFIG_ALP_SOC_ALIF_ENSEMBLE_E8=y`. Without it the build resolved
+    `ALP_SOC_REF_STR="unknown"`, the backend selector filtered
+    `alif_hantro` (`silicon_ref="alif:ensemble:e8"`) out, and
+    `sw_baseline` silently won instead -- the example built and ran but
+    never touched the hardware it claimed to validate.
+  - **Defect #2 (correctness-critical)**: the HW encode MemManage-faulted
+    on real silicon (`MMFAR=0x0`, PC in `jpeg_header_generation`). Root
+    cause: the ported Zephyr v4.4 video subsystem's `video_enqueue()`
+    does not forward a caller's `struct video_buffer` to the driver -- it
+    copies only `.type` into a framework-owned pool slot
+    (`video_buf[buf->index]`) and hands the driver *that* struct instead.
+    `alif_hantro.c`'s stack-local output buffer left `.index` at its
+    0-default, so the driver read `buf->buffer == NULL`. Fixed via
+    `video_import_buffer()` (`<zephyr/video/video.h>`), the framework's
+    supported way to hand a caller-owned pointer into the pool without a
+    copy. BENCH-VERIFIED: a subsequent AEN801 silicon run confirmed the
+    fix -- `alp_jpeg_encode()` returns `rc=0 out_len=935` with a valid
+    JPEG stream (see the Added entry above).
+  - Reviewer minors: the NOMEM path now sets `*out_len` to the required
+    size when known (per `<alp/jpeg.h>`'s documented contract); the
+    single-encode-validated repeat-encode state is now called out with a
+    ponytail comment instead of silently assumed.
+  - `examples/aen/aen-jpeg-regcheck/src/main.c` collapses the
+    per-backend `#if CONFIG_ALP_SDK_JPEG_ALIF_HANTRO` frame branching
+    into a runtime `pixfmt_mask` query, so the example itself can no
+    longer silently build the wrong layout for whichever backend wins.
 
 ## [v0.12.0] - 2026-07-22
 

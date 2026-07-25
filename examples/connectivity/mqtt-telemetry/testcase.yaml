@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: mqtt-telemetry
+  description: |
+    Publish a sensor reading over MQTT/TLS via the portable
+    <alp/iot.h> Wi-Fi + MQTT surface.  AEN-only: the transport is
+    the CC3501E Wi-Fi6+BLE bridge on the E1M-AEN801.  On native_sim
+    there is no radio, so alp_wifi_open()/alp_mqtt_open() return
+    NULL (NOT_READY) and the app prints the telemetry framing it
+    would publish, then exits on the done marker.
+
+tests:
+  alp_sdk.example.mqtt_telemetry.native_sim:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - iot
+      - mqtt
+      - aen
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[mqtt\\] done"
+    # native_sim.conf loads LAST (after alp.conf's EXTRA_CONF_FILE
+    # emit) so it can flip CONFIG_MBEDTLS off -- works around the
+    # Zephyr 4.4 / mbedtls 3.6 ssl_misc.h include-order bug; see
+    # native_sim.conf for the full rationale.
+    extra_args:
+      - "EXTRA_CONF_FILE=native_sim.conf"

@@ -421,6 +421,30 @@ def _aen_pinctrl_dtsi(
     )
 
 
+def _aen_ethos_u(soc_spec: dict[str, Any]) -> tuple[str, str] | None:
+    """The Arm Ethos-U accelerator this SoC's silicon carries, as
+    ``(accelerator_config_kconfig, dt_node_label)`` -- or ``None`` when the
+    SoC has no NPU.
+
+    A SoC carrying more than one Ethos-U variant (the E8 has 2x U55 + 1x U85)
+    builds the core driver for its MOST capable NPU -- the U85 -- because the
+    upstream Arm Ethos-U driver compiles exactly one accelerator config per
+    image (``ETHOS_U_NPU_CONFIG`` is a Kconfig ``choice``).  Vela targets must
+    match (``--accelerator-config ethos-u85-256`` for the U85 case).
+
+    Used only to flip the (already-declared, disabled) NPU DT node to
+    ``status="okay"`` on the generated silicon board -- harmless on its own
+    (``CONFIG_ETHOS_U`` is ``default n``, so no driver binds until an inference
+    app selects it via ``ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN``).
+    """
+    caps = soc_spec.get("capabilities") or {}
+    if (caps.get("ethos_u85_count") or 0) > 0:
+        return ("ETHOS_U85_256", "ethosu85")
+    if (caps.get("ethos_u55_count") or 0) > 0:
+        return ("ETHOS_U55_256", "ethosu55")
+    return None
+
+
 def _aen_defconfig(uart_node: str) -> str:
     return (
         _COPYRIGHT_HASH +
@@ -466,6 +490,7 @@ def _aen_kconfig_defconfig(dir_name: str, role: str) -> str:
 def _aen_dts(
     sku: str, core_id: str, soc_spec: dict[str, Any], variant: dict[str, Any],
     dir_name: str, basename: str, rx_row: dict[str, Any], tx_row: dict[str, Any],
+    ethos_u: tuple[str, str] | None = None,
 ) -> str:
     role = core_id.split("_")[-1]                     # "hp" / "he"
     role_u = role.upper()
@@ -706,6 +731,26 @@ def _aen_dts(
         "};",
         "",
     ]
+
+    if ethos_u is not None:
+        _accel, node = ethos_u
+        # Enable the Arm Ethos-U NPU node this SoC carries.  The full node
+        # (reg/interrupts/compatible/secure-enable) is already declared
+        # status="disabled" in the SoC peripherals dtsi
+        # (zephyr/dts/alif/ensemble_e8_peripherals.dtsi); a silicon board just
+        # flips it on.  Harmless on its own -- CONFIG_ETHOS_U is `default n`,
+        # so no driver binds until an inference app pulls it in via
+        # ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN (select ETHOS_U if
+        # DT_HAS_ARM_ETHOS_U_ENABLED).  A native_sim build uses the native_sim
+        # board (no such node) and so stays on the tflite-micro stub kernel.
+        lines += [
+            f"/* Arm Ethos-U NPU: enable the {node} node declared in the SoC "
+            "peripherals dtsi (see ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN). */",
+            f"&{node} {{",
+            '\tstatus = "okay";',
+            "};",
+            "",
+        ]
     return "\n".join(lines)
 
 
@@ -756,7 +801,8 @@ def emit_zephyr_board(
         files[f"{dir_name}/{basename}_defconfig"] = _aen_defconfig(uart_node)
         files[f"{dir_name}/Kconfig.defconfig"] = _aen_kconfig_defconfig(dir_name, role)
         files[f"{dir_name}/{basename}.dts"] = _aen_dts(
-            sku, core_id, soc_spec, variant, dir_name, basename, rx_row, tx_row)
+            sku, core_id, soc_spec, variant, dir_name, basename, rx_row, tx_row,
+            _aen_ethos_u(soc_spec))
 
     silicon_parts = sku_preset["silicon"].split(":")
     soc_json_rel = f"metadata/socs/{silicon_parts[0]}/{silicon_parts[1]}/{silicon_parts[2]}.json"

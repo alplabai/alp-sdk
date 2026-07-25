@@ -283,6 +283,13 @@ day-to-day workflow runs as a normal user.
 > one-liner for anything missing and is idempotent.  The Arm GNU
 > Toolchain (§4.3) and Zephyr SDK stay manual (GUI installers).  The
 > sections below remain the manual walkthrough the script automates.
+> Both this script and its Linux/macOS twin `scripts/bootstrap.sh` read
+> their facts (the pinned Zephyr version, venv layout, `west`/`pip`
+> arguments, optional-native-lib hints) from
+> [`metadata/bootstrap.json`](../metadata/bootstrap.json) -- a single
+> source both scripts stay in lockstep with, policed by
+> `scripts/check_bootstrap_manifest.py` (see
+> [`docs/zephyr-version-policy.md`](zephyr-version-policy.md)).
 
 ### 4.1 Base toolchain via winget
 
@@ -640,7 +647,10 @@ The following scripts under `scripts/` are intentionally Bash:
 
 - `scripts/bootstrap.sh` — fresh-clone setup.  Works on
   Linux / macOS / WSL.  Windows-native users run the PowerShell
-  twin `scripts/bootstrap.ps1` (see §4), or follow §4 manually.
+  twin `scripts/bootstrap.ps1` (see §4), or follow §4 manually.  Both
+  twins read their facts from
+  [`metadata/bootstrap.json`](../metadata/bootstrap.json) (issue
+  #917) rather than hardcoding them separately.
 - `scripts/test-all.sh` — local CI driver.  Works on
   Linux / macOS / WSL.  Windows-native users invoke the
   individual Python tests directly (see §6.4).

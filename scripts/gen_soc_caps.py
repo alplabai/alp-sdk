@@ -49,6 +49,8 @@ CAP_C_OUT = REPO / "src" / "cap.c"
 CAPS: list[tuple[str, callable]] = [
     ("I2C_COUNT",
         lambda p: (p.get("i2c", 0) or 0) + (p.get("i2c_lp", 0) or 0)),
+    ("I3C_COUNT",
+        lambda p: (p.get("i3c", 0) or 0) + (p.get("i3c_lp", 0) or 0)),
     ("SPI_COUNT",
         lambda p: (p.get("spi", 0) or 0) + (p.get("spi_lp", 0) or 0)),
     ("UART_COUNT",
@@ -163,6 +165,13 @@ CAP_ALIASES: list[tuple[str, str, str]] = [
     ("INLINE_AES", "INLINE_AES", "bool"),
     ("CAU", "CAU", "bool"),
     ("DMA2D", "DMA2D", "bool"),
+    # APPENDED, not grouped with the other *_COUNT rows above, on purpose:
+    # ALP_CAP_ID_* are implicit enum values, so this list's ORDER is their
+    # numbering, and those IDs are recorded in docs/abi/v*-snapshot.json.
+    # Inserting I3C_COUNT next to I2C_COUNT where it belongs alphabetically
+    # would renumber every ALP_CAP_ID_* after it -- an ABI change far larger
+    # than the one symbol being added. New capabilities go at the END.
+    ("I3C_COUNT", "HW_I3C", "count"),
 ]
 
 

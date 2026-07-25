@@ -310,16 +310,20 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
                 v2_peripherals=v2_peripherals,
                 v2_core_id=args.core,
                 v2_core_os=slice_.os,
+                v2_core_ids=[args.core],
             )
         else:
             union: set[str] = set()
-            for slice_ in project.cores.values():
+            zephyr_core_ids: list[str] = []
+            for core_id, slice_ in project.cores.items():
                 if slice_.os in ("zephyr", "baremetal"):
                     union.update(slice_.peripherals)
+                    zephyr_core_ids.append(core_id)
             out = _emit_dts_overlay(
                 project_v1_shaped, project.som_preset,
                 project.board_preset,
                 v2_peripherals=sorted(union),
+                v2_core_ids=zephyr_core_ids,
             )
         return _write_or_print(out, args.output)
 
