@@ -632,8 +632,14 @@ failed". On success, the JSON payload gains a top-level `on_device`
 key with cross-check diagnostics: `cycles_per_s_used`,
 `cycles_per_s_dt`, `cycles_per_s_measured` (the DT-constant-vs-
 kernel-uptime reconciliation), `device_value_mj_per_inference` (the
-on-target app's own computed figure), `host_vs_device_ratio`,
-`npu_dispatched`, and `windows`.
+on-target app's own computed figure, `null` when the capture carried
+no `ENERGY-RESULT` line), `host_vs_device_ratio`, `npu_dispatched`,
+`windows`, and `werr_lines`/`warn_lines` (the raw `ENERGY-WERR`/
+`ENERGY-WARN` diagnostic lines seen, so a degraded run -- I2C errors, a
+timed-out window, a too-long window span -- stays visible instead of
+looking identical to a clean one). The human-readable form says the
+device cross-check is unavailable rather than printing a formatted
+`None` when there is no on-target result to compare against.
 
 `--format json` payload:
 

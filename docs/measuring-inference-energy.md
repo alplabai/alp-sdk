@@ -18,18 +18,18 @@ model. Nothing here is estimated or scaled from a datasheet.
              input 9216 B (96x96x1), output 2 B
   rail       +5V, INA236B U30 @ I2C 0x4A, 20 mOhm shunt
   scope      carrier-rail-delta   (see "What this is NOT")
-  n          2874 inferences per active window
-  window     1120 ms nominal per window (measured 1100 ms active / 1102 ms idle)
+  n          2886 inferences per active window
+  window     1120 ms nominal per window (measured 1101-1105 ms active / 1102-1107 ms idle)
   samples    1500 INA236 conversions (250 per window x 2 phases x 3 pairs)
   scaling    CURRENT_LSB 31.25 uA, POWER LSB 1.0 mW (ADCRANGE=1, matched -- below)
-  spread     +/-0.000338 mJ across the 3 window pairs  (2.0 % of the value)
-  per pair   0.017099 / 0.016569 / 0.017198 mJ
-  windows    active ~542.6 mJ, idle ~493.8 mJ -> delta ~48.8 mJ per 1.10 s
-  latency    383 us per inference (derived: 1100 ms / 2874)
+  spread     +/-0.000200 mJ across the 3 window pairs  (1.2 % of the value)
+  per pair   0.017285 / 0.017019 / 0.017409 mJ
+  windows    active ~545.3 mJ, idle ~495.6 mJ -> delta ~49.7 mJ per 1.10 s
+  latency    383 us per inference (derived: 1101 ms / 2886)
 ```
 
 **Two significant figures is the supportable precision** — see the error budget.
-Four independent runs across different build configurations and a 24x range of
+Five independent runs across different build configurations and a 24x range of
 window length agree within +/-9 %:
 
 | Run | Window | POWER LSB | mJ/inference |
@@ -37,7 +37,13 @@ window length agree within +/-9 %:
 | cycle-counter deadline | 1.12 s x 3 pairs | 3.906 mW | 0.018406 |
 | ms deadline | 1.12 s x 3 pairs | 3.906 mW | 0.017177 |
 | long window | 26.6 s x 1 pair | 3.906 mW | 0.016832 |
-| **matched CURRENT_LSB (primary)** | 1.12 s x 3 pairs | **1.0 mW** | **0.016955** |
+| matched CURRENT_LSB | 1.12 s x 3 pairs | 1.0 mW | 0.016955 |
+| **all review fixes (primary)** | 1.12 s x 3 pairs | **1.0 mW** | **0.017237** |
+
+The last row is the one to quote. It is the only run with the corrected
+statistics (see the scan table's note), the rounded `SHUNT_CAL`, and the
+current-based rail ranking; the earlier rows are kept because their agreement
+across five different builds is itself the evidence for the +/-9 % figure.
 
 ### Why the POWER LSB is 1.0 mW and not 3.906 mW
 
@@ -68,11 +74,11 @@ milliamp) rather than just reporting scale. It is not limiting here. The
 measured load is 102 mA, which is 2.04 mV across 20 mOhm — **10 % of the fine
 range** — so the headroom is already unused rather than exhausted:
 
-| R_shunt | V at 102 mA | % of FS | Max measurable I | 9.5 mA delta | counts @625 nV | I^2R | series drop |
+| R_shunt | V at 102 mA | % of FS | Max measurable I | 8.6 mA delta | counts @625 nV | I^2R | series drop |
 |---|---|---|---|---|---|---|---|
-| 20 mOhm (fitted) | 2.04 mV | 10.0 % | 1.024 A | 190 uV | 304 | 0.21 mW | 2.0 mV |
-| 50 mOhm | 5.10 mV | 24.9 % | 409.6 mA | 475 uV | 760 | 0.52 mW | 5.1 mV |
-| 100 mOhm | 10.2 mV | 49.8 % | 204.8 mA | 950 uV | 1520 | 1.04 mW | 10.2 mV |
+| 20 mOhm (fitted) | 2.04 mV | 10.0 % | 1.024 A | 172 uV | 276 | 0.21 mW | 2.0 mV |
+| 50 mOhm | 5.10 mV | 24.9 % | 409.6 mA | 431 uV | 690 | 0.52 mW | 5.1 mV |
+| 100 mOhm | 10.2 mV | 49.8 % | 204.8 mA | 863 uV | 1380 | 1.04 mW | 10.2 mV |
 
 Three constraints bound the choice: max measurable current is
 `ADCRANGE full scale / R_shunt` (100 mOhm would cap this rail at 204.8 mA and
@@ -95,26 +101,43 @@ the exact build and flash commands.
 
 1. **Pick the rail from the board, not from an assumption.** All six EVK INA236
    monitors are probed, and each is watched through a short inferring window and
-   a short quiet one. A rail is only eligible if its shunt-voltage step clears
-   three standard errors; the largest significant step wins. If no rail shows a
-   significant step, the app falls back to the rail carrying the most current
-   and says so (`rail_selected_by`), because ranking rails by a difference that
-   is all noise picks whichever rail's dither was largest — bench-observed: with
-   a trivial model it chose a 0.6 mA housekeeping rail over the 93 mA compute
-   rail. Measured on this board:
+   a short quiet one. A rail is only eligible if its step clears three standard
+   errors; the largest significant step wins. If no rail shows a significant
+   step, the app falls back to the rail carrying the most power and says so
+   (`rail_selected_by`), because ranking rails by a difference that is all noise
+   picks whichever rail's dither was largest — bench-observed: with a trivial
+   model it chose a 0.6 mA housekeeping rail over the 93 mA compute rail.
 
-   | Rail | Addr | Active | Idle | Delta | Significant |
-   |---|---|---|---|---|---|
-   | +3V3 | 0x40 | 215 uV | 217 uV | -2 uV | no |
-   | +1V8 | 0x41 | 0 uV | 0 uV | 0 uV | no |
-   | +VIO | 0x42 | 25 uV | 27 uV | -2 uV | no |
-   | +V_CAM0 | 0x4B | absent | — | — | — |
-   | +V_CAM1 | 0x49 | 0 uV | -2 uV | 2 uV | no |
-   | **+5V** | **0x4A** | **2050 uV** | **1860 uV** | **+190 uV** | **yes (12 sigma)** |
+   Rails are ranked in **milliamps**, never in shunt microvolts: this board
+   mixes 20 mOhm and 50 mOhm shunts, so microvolts are not comparable between
+   rails (172.5 uV is 8.6 mA on 20 mOhm but 3.5 mA on 50 mOhm). The fallback
+   ranks by power. From the primary run:
+
+   | Rail | Addr | Active | Idle | Delta | Delta | Bus | Power | Significant |
+   |---|---|---|---|---|---|---|---|---|
+   | +3V3 | 0x40 | 205.0 uV | 210.0 uV | -5.0 uV | -0.250 mA | 3302 mV | 33.8 mW | no |
+   | +1V8 | 0x41 | 0.0 uV | 0.0 uV | 0.0 uV | 0.000 mA | 1792 mV | 0.0 mW | no |
+   | +VIO | 0x42 | 37.5 uV | 22.5 uV | +15.0 uV | +0.300 mA | 1792 mV | 1.3 mW | no |
+   | +V_CAM0 | 0x4B | absent | — | — | — | — | — | — |
+   | +V_CAM1 | 0x49 | 0.0 uV | 0.0 uV | 0.0 uV | 0.000 mA | 0 mV | 0.0 mW | no |
+   | **+5V** | **0x4A** | **2042.5 uV** | **1870.0 uV** | **+172.5 uV** | **+8.625 mA** | **4736 mV** | **483.7 mW** | **yes, 10.1 sigma** |
 
    (+V_CAM0 does not answer at 0x4B on this board: pre-respin units strap it to
    0x48, which collides with the TAS2563 broadcast address and is unreadable
-   there.)
+   there. +V_CAM1 reads 0 mV bus — no camera fitted.)
+
+   **The significance figure is 10.1 sigma, and an earlier version of this page
+   said 12.** That was not a different measurement; it was an artefact of a
+   defect. The spread was accumulated as integer `sum`/`sum_of_squares` with the
+   mean truncated before squaring, which inflated sigma by up to `2*|mean|` — on
+   a ~2050 uV rail, a true 3.5 uV sigma was reported as 53 uV. Because the
+   3-sigma gate is a multiple of that sigma, the gate was also 3-15x too strict
+   and would have pushed a genuine load step into the fallback. It now uses
+   Welford's algorithm in float. Separately, sigma is floored at one shunt ADC
+   count (2.5 uV on the coarse range the scan uses): a rail whose 16 samples are
+   bit-identical — +1V8 and +V_CAM1 above — computes a spread of exactly zero,
+   and a zero-spread gate declares any one-count offset significant, which is
+   vacuous on precisely the quiet rails the gate exists to reject.
 
 2. **Range picked from the observed swing.** With the +5V shunt peaking at
    ~2.05 mV, the app selects the INA236's finer +/-20.48 mV ADC range (625 nV
@@ -211,8 +234,9 @@ and the resolution figures say which:
   active phase alternated between just two (0.078/0.079 A) — the instrument is
   visibly at its floor.
 - The INA236 side is nowhere near its floor: 44.0 mW on the +5V rail is a
-  190 uV shunt step resolved at 625 nV per count, and it repeated to +/-1.5 %
-  across windows.
+  172.5 uV shunt step resolved at 2.5 uV per count on the coarse range the scan
+  uses (69 counts), against a 17.1 uV standard error, and the resulting energy
+  repeated to +/-1.2 % across windows.
 
 44.0 mW sits well inside 40.5 +/- 16 mW, so the inversion is fully explained by
 DPS quantisation and carries no information about the rail measurement. It also
@@ -246,9 +270,9 @@ built only from quantities that were actually measured.
 
 | Term | Size | How it was obtained |
 |---|---|---|
-| Within-run repeatability | +/-2.0 % | Sample std dev across 3 window pairs (+/-0.000338 of 0.016955 mJ) |
+| Within-run repeatability | +/-1.2 % | Sample std dev across 3 window pairs (+/-0.000200 of 0.017237 mJ) |
 | Quantisation | 1.3 %, NOT limiting | A 3.91x finer POWER LSB (3.906 -> 1.0 mW) moved the result 0.017177 -> 0.016955 mJ, inside the run-to-run spread |
-| Window-length sensitivity | 2 % | 250-sample (1.1 s) vs 6000-sample (26.6 s) windows: 0.017177 vs 0.016832 mJ |
+| Window-length sensitivity | 2 % | 250-sample (1.1 s) vs 6000-sample (26.6 s) windows: 0.017177 vs 0.016832 mJ (both on the pre-fix build) |
 | Baseline-loop composition | ~7 % | Adding one clock read per iteration of the shared sampling loop raised the idle floor 491.4 -> 496.5 mJ and moved the result 0.018406 -> 0.017177 mJ |
 | Baseline **definition** | +38 % | Spin-idle (76 mA) vs WFI (75 mA) at the board input; a WFI baseline would report ~38 % more per inference |
 | Whole-board agreement | within 9 %, bound NOT testable | 44.0 mW single-rail vs 40.5 mW total board input — different measurement points; the input figure carries +/-40 % from 1 mA quantisation, so it bounds nothing at this scale |
@@ -284,10 +308,10 @@ one blocks a specific wrong reading.
 
 The incremental energy drawn from the named carrier rail (+5V) per inference of
 this model, idle-subtracted against a stated CPU-spin baseline, averaged over
-2874 inferences per window and repeated over 3 windows, with a measured spread
-of +/-2.0 % and an error budget dominated by a +38 % baseline-definition choice:
+2886 inferences per window and repeated over 3 windows, with a measured spread
+of +/-1.2 % and an error budget dominated by a +38 % baseline-definition choice:
 
-**0.017 mJ/inference (+/-0.0003 measured spread), carrier-rail-delta scope.**
+**0.017 mJ/inference (+/-0.0002 measured spread), carrier-rail-delta scope.**
 
 The `source: "measured"` / `scope: "carrier-rail-delta"` labels are validated in
 code (`scripts/alp_model/measure.py`, `EnergyMeasurement.__post_init__`) and
