@@ -62,6 +62,62 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 - Both scripts now refuse a `metadata/bootstrap.json` whose
   `schemaVersion` they do not understand, rather than parsing a future
   manifest blind on a machine where the gate never runs.
+### Fixed — Alif Ensemble SoC peripheral counts re-ingested from the DFP
+
+`metadata/socs/alif/ensemble/{e4,e6,e7,e8}.json` carried counts that were never
+read from their own part: E4's block was inherited from the E3 sibling and E6's
+from E7.  But E3/E5/E7 are the older `F80F55xx` generation while E4/E6/E8 are
+`FA0E5597`, so both inheritances imported the wrong generation's numbers.  E8's
+own note already flagged its counts as provisional (ingested against datasheet
+v0.51, never reconciled to v1.0).
+
+Re-derived from the Alif DFP — peripheral `*_BASE` symbols and the feature flags
+in `Device/soc/<part>/include/soc_features.h`, which ships directories for
+`AE402FA0E5597` (E4), `AE722F80F55D5` (E7) and `AE822FA0E5597` (E8):
+
+| field | e4 | e6 | e7 | e8 |
+| --- | --- | --- | --- | --- |
+| `i2c_lp` | 1 → **2** | 1 → **2** | 1 | 2 |
+| `spi_lp` | 1 → **2** | 1 → **2** | 1 | 1 → **2** |
+| `gpio_18v` | 120 → **136** | 120 → **136** | 120 | 136 |
+| `i3c_lp` | — → **1** | — → **1** | — | 1 |
+| `timer_lp_32bit` | — → **3** | — → **3** | — | 3 |
+| `watchdog` | 2 | 3 → **4** | 4 | 4 |
+| `dma_general_32ch` | 3 | 3 | 3 | — → **3** |
+| `comparator_lp` | 1 | 1 | 1 → **removed** | 1 |
+
+- `spi_lp` was wrong on **every** Alif part including E8, the one we bench:
+  `LPSPI0_BASE` and `LPSPI1_BASE` both exist.
+- `gpio_18v` is derivable rather than opaque: GPIO ports × 8.  E4/E8 expose
+  `GPIO0`–`GPIO14` + `GPIO16` + `GPIO17` = 17 ports = 136; E7 exposes 15 = 120.
+  `SOC_FEAT_GPIO_HAS_PORT16_17` (1 on E4/E8, 0 on E7) confirms it independently.
+- `watchdog` is core-count-driven but not one-per-core: the A32 contributes
+  **two** views (`WDT_AP_CTRL` + `WDT_AP_S_CTRL`), which is why E8 — same three
+  cores as E6 — is 4.  E6's old 3 came from the one-per-core rule.
+- `i3c_lp` / `timer_lp_32bit`: `LPI3C_BASE` (`0x43006000`, `IRQ50`) and
+  `LPUTIMER_BASE` exist on E4/E8 and not on E7 — `FA0E5597`-generation blocks
+  E4/E6 carry but had not declared.  The vendor fork agrees on I3C: `lpi3c0` is
+  defined in exactly one file, `dts/arm/alif/ensemble/common/e4_e6_e8.dtsi`.
+- `comparator_lp` removed from E7: it defines `CMP0..CMP3` but no `LPCMP_BASE`,
+  while E8 defines both.  Per the file convention an absent key means zero (no
+  SoC JSON sets a peripheral to `0`).
+- E4's full `*_BASE` set is a strict **subset** of E8's (183 vs 199), and all 16
+  extra E8 symbols are A32-related (`MHU_A32_*`, `MHU_APSS_*`, `WDT_AP_*`) —
+  confirming E4 and E8 are identical apart from the A32 cluster.
+
+Re-verified as **already correct** rather than changed, via `soc_features.h`:
+`timer_32bit` 12 + `encoder_quadrature` 4 (`SOC_FEAT_HAS_UTIMER4_15` +
+`SOC_FEAT_QEC_HAS_SEP_CHANNELS`, identical on all three parts), `timer_lp` 4
+(`SOC_FEAT_HAS_LPTIMER2_3`), `rtc` 1 (`SOC_FEAT_HAS_LPRTC1` = 0), `isp`
+(`SOC_FEAT_HAS_ISP` = 1 on E4/E8, 0 on E7 — matching the key's presence), and
+`dpi_parallel` / `pdm` / `pdm_lp` (single `CDC` / `PDM` / `LPPDM` instances).
+
+Only the `pdm` / `pdm_lp` value of **4** remains unconfirmed — a channel count
+inside one block, uniform across every Alif SoC file, so no cross-part
+inconsistency remains; confirming the number needs the datasheet.  E6 has no DFP
+directory at all, so its values come from the two DFP-present members of its
+generation (E4 and E8), which agree on every field changed here.
+
 ### Fixed — `scripts/bootstrap.sh` silently ran `cargo install` on every completed run
 
 - The closing "Next steps" block used an **unquoted** heredoc tag
