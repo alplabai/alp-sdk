@@ -7,6 +7,94 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.14.0 candidate
 
+### Added — `prerequisites.install`: single source for host-tool install commands (#949)
+
+`metadata/bootstrap.json`'s `prerequisites` declared tool NAMES only; the
+install COMMAND for each was hand-copied into six places with nothing
+keeping the copies in agreement.
+
+Adds `prerequisites.install.{linux,macos,windows}` — one shell command per
+tool, keyed by OS rather than `posix`: a `sudo apt-get install`-shaped
+command is Debian-family-specific and a `brew install`-shaped one is
+macOS-specific, the same reason `nativeLibHints` already keys per-OS
+instead of per-`posix`. The four `windows` commands are copied verbatim
+from `scripts/bootstrap.ps1`'s own `$Prereqs` `Hint=` values, which stay
+the authority (bootstrap.ps1 can't read this file for its own
+prereq-missing hint — the bootstrap-of-the-bootstrap circularity the
+manifest's own comment already documents). `metadata/schemas/bootstrap-v1.
+schema.json` gains the matching `install` property, required, with a
+description that points at `check_bootstrap_manifest.py`'s
+`_check_install_commands` as the enforcement point rather than restating
+what it checks.
+
+`scripts/check_bootstrap_manifest.py` gains `_check_install_commands` — a
+real gate; previously the whole `prerequisites.*` subtree was blanket-
+exempt from the orphaned-leaf scan, so the schema addition alone would
+have passed with zero coverage. It asserts: (1) every prerequisite tool has
+a matching install command; (2) `bootstrap.ps1`'s `Hint=` values agree with
+`install.windows` byte-for-byte; (3) any line under `docs/**/*.md`,
+`scripts/**/*.py`, `scripts/*.ps1`, `scripts/*.sh` or `README.md` naming a
+winget package identifier the manifest itself declares must carry that
+identifier's full canonical command verbatim — and an `install.windows`
+command with no `--id <PackageId>` to extract is itself flagged rather
+than silently dropped from that scan's trigger set.
+
+The scan triggers on the package IDENTIFIER, not on the install verb, and
+derives its trigger set from `install.windows` at run time rather than
+keeping a second hardcoded copy of the IDs inside the gate meant to catch
+hardcoded copies. A verb trigger (`winget install` / `brew install` / `apt
+install`) was tried first and rejected — it fires on every install
+one-liner in the repo and needed an allowlist to stay green; keyed on
+identifiers instead, the allowlist is empty (see
+`_winget_ids_and_commands`'s docstring for the full reasoning). Only
+`docs/adr/**` is excluded, on the same grounds `check_doc_drift.py` already
+excludes it: an ADR quotes an identifier as evidence about a past or
+proposed state rather than asserting a current one.
+
+The scan deliberately covers the Windows side only. The linux/macos
+identifiers are the bare words `git`, `cmake` and `python3`, which appear
+throughout ordinary prose; any scan over them is unfixably noisy, so
+assertion (1) carries those instead.
+
+`scripts/alp_cli/doctor.py`'s `_check_ninja` and `_check_cmake` now source
+their FAIL remediation hints from the manifest instead of hardcoding one.
+`cmake` — tracked in both `prerequisites.posix` and `prerequisites.windows`
+— is what actually gives all three `install.{linux,macos,windows}` maps a
+run-time reader (`ninja` is windows-only, so its hint alone never reaches
+`install.linux`/`install.macos`). `dtc`/`gperf` aren't among the four
+tracked prerequisites and are left as-is (dtc's Windows-bundling claim is a
+separate, already-tracked ADR 0021 question).
+
+Also: `metadata/bootstrap.json`'s `_comment` (and the schema's matching
+description) no longer claims tan is only an "INTENDED future consumer" of
+these facts — `tan-core`'s `parse_bootstrap_manifest` / `BootstrapFacts`
+has read them since tan-cli PR #55; and `manualInstallHints.windows.note`
+gains a second line: 7-Zip must be on PATH before `west sdk install` on
+native Windows (west delegates `.7z` extraction to `patoolib`, which shells
+out to an external `7z`/`7za`/`7zr`/`7zz`/`7zzs`/`unar` binary with no
+pure-Python fallback).
+
+### Fixed — bootstrap script defects surfaced while wiring `prerequisites.install`
+
+- `scripts/alp_cli/doctor.py`'s ninja hint printed `winget install
+  Ninja-build.Ninja` (missing `-e --id`) next to an `apt install
+  ninja-build` that matched no canonical command anywhere else; it now
+  sources its remediation string from `prerequisites.install` (above)
+  instead of hardcoding one.
+- `_bootstrap_manifest` (the reader backing that lookup) now degrades to
+  `None` — never raises — on a `metadata/bootstrap.json` that's missing,
+  not valid UTF-8, not valid JSON, or valid JSON whose top level isn't a
+  JSON object; `_prereq_install_hint` guards each of the
+  `prerequisites`/`install`/`<os>`/`<tool>` hops with
+  `isinstance(node, dict)` for the same reason. A truncated or bad-merge
+  manifest is exactly the broken workspace `alp doctor` exists to
+  diagnose, so it must degrade to a generic hint rather than crash the
+  whole command.
+- `docs/cross-platform-setup.md` drops its stray `winget install -e --id
+  GnuWin32.Make` line — nothing in this repo's native-Windows path invokes
+  `make` (the Zephyr generator here is Ninja, itself a tracked
+  prerequisite).
+
 ### Fixed — pre-respin `INA236_VCAM0` address (`0x48`) still documented in five places
 
 U32's INA236B was re-strapped `A0=SCL` to `0x4B` from the next batch, precisely

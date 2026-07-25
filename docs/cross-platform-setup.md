@@ -298,7 +298,6 @@ winget install -e --id Git.Git
 winget install -e --id Python.Python.3.12
 winget install -e --id Kitware.CMake
 winget install -e --id Ninja-build.Ninja
-winget install -e --id GnuWin32.Make
 ```
 
 Close and reopen PowerShell after the installs so the updated
