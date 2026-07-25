@@ -185,6 +185,27 @@ void fill_tensor_descriptor(const TfLiteTensor *t, alp_inference_tensor_t *out)
 	        : 0;
 }
 
+/* True when the model carries the Ethos-U custom op, i.e. it dispatches onto the
+ * NPU.  NPU routing is OP-driven (the "ethos-u" custom op the Vela compiler
+ * fuses in), NOT cfg->format-driven: a Vela model is still a .tflite flatbuffer
+ * and ALP_INFERENCE_CONFIG_DEFAULT reports format=TFLITE, so the arena guard in
+ * tflm_open() must key on the op, not the format enum.  The op's custom_code is
+ * "ethos-u" (tflite-micro GetString_ETHOSU(), kernels/ethos_u/ethosu.cc) -- kept
+ * as a literal here so this check works in a CPU-only build that does not
+ * include the Ethos-U kernel header. */
+bool model_uses_ethos_u(const tflite::Model *model)
+{
+	const auto *codes = model->operator_codes();
+	if (codes == nullptr) return false;
+	for (const auto *oc : *codes) {
+		const flatbuffers::String *cc = oc->custom_code();
+		if (cc != nullptr && cc->str() == "ethos-u") {
+			return true;
+		}
+	}
+	return false;
+}
+
 } // namespace
 
 /* ------------------------------------------------------------------ */
@@ -237,10 +258,51 @@ static alp_status_t tflm_open(const alp_inference_config_t  *cfg,
 	auto *st = new (std::nothrow) TflmState();
 	if (st == nullptr) return ALP_ERR_NOMEM;
 
+	/* Validate + parse the flatbuffer FIRST -- the arena decision below needs to
+	 * know which ops the model uses.  tflite::GetModel is a zero-copy
+	 * reinterpret_cast (it does not inspect the buffer), so a stub, truncated,
+	 * or corrupt model would segfault at ->version(); VerifyModelBuffer walks
+	 * the flatbuffer against the caller-supplied model_size (mandatory per
+	 * <alp/inference.h>) and rejects anything that isn't a well-formed TFLite
+	 * model, so a placeholder / mismatched .alpmodel gets a clean ALP_ERR_INVAL
+	 * instead of a crash. */
+	if (cfg->model_data == nullptr || cfg->model_size == 0) {
+		delete st;
+		return ALP_ERR_INVAL;
+	}
+	flatbuffers::Verifier model_verifier(static_cast<const uint8_t *>(cfg->model_data),
+	                                     cfg->model_size);
+	if (!tflite::VerifyModelBuffer(model_verifier)) {
+		delete st;
+		return ALP_ERR_INVAL;
+	}
+	st->model = tflite::GetModel(cfg->model_data);
+	if (st->model->version() != TFLITE_SCHEMA_VERSION) {
+		delete st;
+		return ALP_ERR_INVAL;
+	}
+
+	/* Arena selection.  Dispatch onto the Ethos-U NPU is OP-driven, not
+	 * format-driven: a model routes to the NPU when it carries the "ethos-u"
+	 * custom op (model_uses_ethos_u), regardless of cfg->format -- a Vela model
+	 * opened with ALP_INFERENCE_CONFIG_DEFAULT reports format=TFLITE.  The NPU
+	 * is a DMA master whose accesses are pinned to the SRAM AXI port
+	 * (ethos_u_aen.cpp ethosu_config_select), so the built-in default arena --
+	 * an M55-local .bss buffer that port cannot reach -- would bus-abort at
+	 * ethosu_invoke (NPU STATUS bus_status=1) on a buffer the CPU thinks is
+	 * fine.  An NPU model therefore has NO safe implicit arena: require an
+	 * explicit NPU-reachable (SRAM0-resident) one sized to the model (see
+	 * examples/aen/aen-npu-inference-alp).  CPU/TFLite models keep the default. */
 	if (cfg->arena != nullptr && cfg->arena_bytes > 0) {
 		st->arena_buf  = static_cast<uint8_t *>(cfg->arena);
 		st->arena_size = cfg->arena_bytes;
 		st->own_arena  = false;
+	} else if (model_uses_ethos_u(st->model)) {
+		LOG_ERR("Ethos-U NPU model requires an explicit NPU-reachable "
+		        "(SRAM0-resident) arena; arena=NULL selects an M55-local default "
+		        "the NPU DMA cannot reach.  See examples/aen/aen-npu-inference-alp.");
+		delete st;
+		return ALP_ERR_INVAL;
 	} else {
 		if (g_default_arena_in_use) {
 			delete st;
@@ -250,34 +312,6 @@ static alp_status_t tflm_open(const alp_inference_config_t  *cfg,
 		st->arena_buf          = g_default_arena;
 		st->arena_size         = kDefaultArenaBytes;
 		st->own_arena          = true;
-	}
-
-	/* Validate the flatbuffer BEFORE dereferencing it.  tflite::GetModel is a
-	 * zero-copy reinterpret_cast -- it does not inspect the buffer -- so a
-	 * stub, truncated, or corrupt model would segfault at ->version() below.
-	 * VerifyModelBuffer walks the flatbuffer against the caller-supplied
-	 * model_size (mandatory per <alp/inference.h>) and rejects anything that
-	 * isn't a well-formed TFLite model.  A customer shipping a placeholder
-	 * model (or a mismatched .alpmodel) then gets a clean ALP_ERR_INVAL and
-	 * can fall back, instead of the SDK crashing. */
-	if (cfg->model_data == nullptr || cfg->model_size == 0) {
-		if (st->own_arena) g_default_arena_in_use = false;
-		delete st;
-		return ALP_ERR_INVAL;
-	}
-	flatbuffers::Verifier model_verifier(static_cast<const uint8_t *>(cfg->model_data),
-	                                     cfg->model_size);
-	if (!tflite::VerifyModelBuffer(model_verifier)) {
-		if (st->own_arena) g_default_arena_in_use = false;
-		delete st;
-		return ALP_ERR_INVAL;
-	}
-
-	st->model = tflite::GetModel(cfg->model_data);
-	if (st->model->version() != TFLITE_SCHEMA_VERSION) {
-		if (st->own_arena) g_default_arena_in_use = false;
-		delete st;
-		return ALP_ERR_INVAL;
 	}
 
 	register_default_ops(st->resolver);
