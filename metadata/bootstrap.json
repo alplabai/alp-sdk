@@ -1,0 +1,66 @@
+{
+  "_comment": "Single source of truth for the FACTS scripts/bootstrap.sh and scripts/bootstrap.ps1 both read to assemble a Zephyr workspace (issue #917); tan (Rust, cross-platform) is the INTENDED future consumer of the same facts, not a current reader -- no tan-side code reads this file yet, and scripts/check_bootstrap_manifest.py has no tan-side check. Facts only -- control flow (ZEPHYR_BASE reuse/rejection, venv idempotency, .west branching) stays as CODE in each executor; do not grow this file into a step-execution DSL. Checkout/workspace-anchored paths use the ${SDK_ROOT} / ${WORKSPACE_DIR} tokens, the same convention metadata/schemas/build-plan-v1.schema.json's planPathMode: tokened uses -- a consumer substitutes its own resolved paths before use. scripts/check_bootstrap_manifest.py is the drift gate that keeps this file, its schema, both bootstrap scripts, and everything else that copies a fact from here in lockstep -- see that script's own module docstring for the full, authoritative list of what it checks; do not restate that list here, it will only drift again.",
+  "schemaVersion": 1,
+  "zephyr": {
+    "version": "v4.4.0",
+    "requirementsPath": "zephyr/scripts/requirements.txt"
+  },
+  "venv": {
+    "dirName": ".venv",
+    "posixBinDir": "bin",
+    "windowsBinDir": "Scripts"
+  },
+  "prerequisites": {
+    "posix": ["git", "cmake", "python3"],
+    "windows": ["git", "cmake", "python", "ninja"],
+    "pythonMinVersion": "3.10"
+  },
+  "west": {
+    "pipSpec": "west>=0.14.0",
+    "initArgs": ["init", "-l"],
+    "updateArgs": ["update", "--narrow", "-o=--depth=1"],
+    "exportArgs": ["zephyr-export"],
+    "extensionGuardCommand": "alp-migrate"
+  },
+  "pip": {
+    "bootstrapUpgrade": ["pip", "wheel"],
+    "sdkExtras": ["jsonschema", "imgtool"],
+    "editableInstall": "${SDK_ROOT}"
+  },
+  "env": {
+    "ZEPHYR_BASE": "${WORKSPACE_DIR}/zephyr",
+    "ZEPHYR_TOOLCHAIN_VARIANT": "zephyr"
+  },
+  "nativeLibHints": {
+    "linux": {
+      "note": [
+        "libmosquitto-dev  -> alp_mqtt_* (cleartext + TLS)",
+        "libasound2-dev    -> alp_audio_*",
+        "libssl-dev        -> alp_hash_* / alp_aead_* / alp_random_bytes"
+      ],
+      "command": "sudo apt-get install -y libmosquitto-dev libasound2-dev libssl-dev pkg-config"
+    },
+    "macos": {
+      "note": [
+        "Equivalents via Homebrew:",
+        "mosquitto  -> alp_mqtt_* (cleartext + TLS)",
+        "macOS uses CoreAudio rather than ALSA, so the Yocto audio backend doesn't apply on macOS hosts.",
+        "OpenSSL ships with macOS."
+      ],
+      "command": "brew install mosquitto pkg-config"
+    },
+    "windows": {
+      "note": [
+        "Under Git Bash / MSYS2 the Yocto-side backends aren't intended to run -- the canonical use is WSL2 + Ubuntu with the linux command above; skip this step on native Windows."
+      ],
+      "command": null
+    }
+  },
+  "manualInstallHints": {
+    "windows": {
+      "note": [
+        "The Arm GNU Toolchain and the Zephyr SDK (`west sdk install`) are separate manual, one-time installs on native Windows -- not auto-installed by bootstrap.ps1; native_sim / Yocto need WSL2 (docs/cross-platform-setup.md section 5)."
+      ]
+    }
+  }
+}

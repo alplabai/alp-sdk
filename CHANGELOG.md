@@ -7,6 +7,168 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.14.0 candidate
 
+### Added — `metadata/bootstrap.json`: the cross-platform bootstrap facts as data
+
+- New committed, schema-validated manifest
+  (`metadata/schemas/bootstrap-v1.schema.json`) holding the FACTS every
+  executor needs to assemble a Zephyr workspace: the Zephyr pin, venv
+  layout, the `west` / `pip` argument vectors, the `env` map, and the
+  per-OS native-library and manual-install hints.  `scripts/bootstrap.sh`
+  and `scripts/bootstrap.ps1` now consume it instead of carrying
+  divergent hardcoded copies.  Facts only — control flow (`ZEPHYR_BASE`
+  reuse/rejection, venv idempotency, `.west` branching) stays as code in
+  each executor; this is deliberately not a step-execution DSL.  Static
+  JSON rather than an `--emit` target because `scripts/alp_project.py`
+  exits on missing `jsonschema`/`PyYAML`, which bootstrap itself installs
+  (circular), and JSON rather than YAML because bash must parse it
+  pre-venv with stdlib `json` only.  `tan` (Rust) is the intended third
+  consumer; nothing wires it yet.
+- `scripts/check_bootstrap_manifest.py` is the drift gate that keeps the
+  manifest load-bearing rather than a fourth copy of the same facts.  It
+  validates against the schema; asserts `zephyr.version` against
+  `west.yml`'s `- name: zephyr` revision, the `README.md` badge, and the
+  four CI workflows that pin Zephyr independently of `west update`
+  (`pr-twister`, `pr-tier-a-libraries`, `nightly-aen-hil`,
+  `pr-getting-started-aen801`); asserts the deliberately-hardcoded
+  prerequisite lists and Python floor in both scripts against the
+  manifest; refuses an unknown top-level key; and walks every leaf so a
+  fact no executor reads fails the gate by name.  The hardcoded-literal
+  scan is heredoc/here-string aware, so a Zephyr pin printed verbatim to
+  the user is caught as well as one in source.
+
+### Fixed — bootstrap script defects surfaced while single-sourcing the facts
+
+- `scripts/bootstrap.ps1` collapsed a single-element argument array to a
+  `String`, and PowerShell splats a string character-by-character, so
+  `west zephyr-export` ran as 13 one-character arguments — and with no
+  `$LASTEXITCODE` check it failed silently on native Windows.
+- `scripts/bootstrap.ps1` substituted `${WORKSPACE_DIR}` at load time,
+  before the workspace-reuse branch could reassign it, so a reused
+  workspace printed a wrong `$env:ZEPHYR_BASE` in the closing summary.
+- List-valued facts were joined and re-split, which also split on spaces
+  *inside* an element: a path such as `C:/Users/John Smith/alp-sdk`
+  reached `west init -l` as two arguments.  Now emitted as bash array
+  literals via `shlex.quote`.
+- `eval "$(python3 -c ...)"` swallowed a non-zero `python3` exit under
+  `set -uo pipefail` (no `-e`), so a failed or partial manifest read
+  proceeded on a partially-loaded fact set instead of reaching `die`.
+- `bash scripts/bootstrap.sh --help` sliced its own header with a
+  hardcoded `sed -n '3,32p'` line range, which silently truncated the
+  flag list and the "After it runs" block whenever the header grew.  The
+  usage text now has one authoritative copy.
+- `--print-env` / `-PrintEnv` sat behind the full prerequisite check, so
+  a host missing `cmake` (or `ninja`, on Windows) could not print env
+  lines; they now require only a working Python, which is all they use.
+- Both scripts now refuse a `metadata/bootstrap.json` whose
+  `schemaVersion` they do not understand, rather than parsing a future
+  manifest blind on a machine where the gate never runs.
+### Fixed — Alif Ensemble SoC peripheral counts re-ingested from the DFP
+
+`metadata/socs/alif/ensemble/{e4,e6,e7,e8}.json` carried counts that were never
+read from their own part: E4's block was inherited from the E3 sibling and E6's
+from E7.  But E3/E5/E7 are the older `F80F55xx` generation while E4/E6/E8 are
+`FA0E5597`, so both inheritances imported the wrong generation's numbers.  E8's
+own note already flagged its counts as provisional (ingested against datasheet
+v0.51, never reconciled to v1.0).
+
+Re-derived from the Alif DFP — peripheral `*_BASE` symbols and the feature flags
+in `Device/soc/<part>/include/soc_features.h`, which ships directories for
+`AE402FA0E5597` (E4), `AE722F80F55D5` (E7) and `AE822FA0E5597` (E8):
+
+| field | e4 | e6 | e7 | e8 |
+| --- | --- | --- | --- | --- |
+| `i2c_lp` | 1 → **2** | 1 → **2** | 1 | 2 |
+| `spi_lp` | 1 → **2** | 1 → **2** | 1 | 1 → **2** |
+| `gpio_18v` | 120 → **136** | 120 → **136** | 120 | 136 |
+| `i3c_lp` | — → **1** | — → **1** | — | 1 |
+| `timer_lp_32bit` | — → **3** | — → **3** | — | 3 |
+| `watchdog` | 2 | 3 → **4** | 4 | 4 |
+| `dma_general_32ch` | 3 | 3 | 3 | — → **3** |
+| `comparator_lp` | 1 | 1 | 1 → **removed** | 1 |
+
+- `spi_lp` was wrong on **every** Alif part including E8, the one we bench:
+  `LPSPI0_BASE` and `LPSPI1_BASE` both exist.
+- `gpio_18v` is derivable rather than opaque: GPIO ports × 8.  E4/E8 expose
+  `GPIO0`–`GPIO14` + `GPIO16` + `GPIO17` = 17 ports = 136; E7 exposes 15 = 120.
+  `SOC_FEAT_GPIO_HAS_PORT16_17` (1 on E4/E8, 0 on E7) confirms it independently.
+- `watchdog` is core-count-driven but not one-per-core: the A32 contributes
+  **two** views (`WDT_AP_CTRL` + `WDT_AP_S_CTRL`), which is why E8 — same three
+  cores as E6 — is 4.  E6's old 3 came from the one-per-core rule.
+- `i3c_lp` / `timer_lp_32bit`: `LPI3C_BASE` (`0x43006000`, `IRQ50`) and
+  `LPUTIMER_BASE` exist on E4/E8 and not on E7 — `FA0E5597`-generation blocks
+  E4/E6 carry but had not declared.  The vendor fork agrees on I3C: `lpi3c0` is
+  defined in exactly one file, `dts/arm/alif/ensemble/common/e4_e6_e8.dtsi`.
+- `comparator_lp` removed from E7: it defines `CMP0..CMP3` but no `LPCMP_BASE`,
+  while E8 defines both.  Per the file convention an absent key means zero (no
+  SoC JSON sets a peripheral to `0`).
+- E4's full `*_BASE` set is a strict **subset** of E8's (183 vs 199), and all 16
+  extra E8 symbols are A32-related (`MHU_A32_*`, `MHU_APSS_*`, `WDT_AP_*`) —
+  confirming E4 and E8 are identical apart from the A32 cluster.
+
+Re-verified as **already correct** rather than changed, via `soc_features.h`:
+`timer_32bit` 12 + `encoder_quadrature` 4 (`SOC_FEAT_HAS_UTIMER4_15` +
+`SOC_FEAT_QEC_HAS_SEP_CHANNELS`, identical on all three parts), `timer_lp` 4
+(`SOC_FEAT_HAS_LPTIMER2_3`), `rtc` 1 (`SOC_FEAT_HAS_LPRTC1` = 0), `isp`
+(`SOC_FEAT_HAS_ISP` = 1 on E4/E8, 0 on E7 — matching the key's presence), and
+`dpi_parallel` / `pdm` / `pdm_lp` (single `CDC` / `PDM` / `LPPDM` instances).
+
+Only the `pdm` / `pdm_lp` value of **4** remains unconfirmed — a channel count
+inside one block, uniform across every Alif SoC file, so no cross-part
+inconsistency remains; confirming the number needs the datasheet.  E6 has no DFP
+directory at all, so its values come from the two DFP-present members of its
+generation (E4 and E8), which agree on every field changed here.
+
+### Fixed — `scripts/bootstrap.sh` silently ran `cargo install` on every completed run
+
+- The closing "Next steps" block used an **unquoted** heredoc tag
+  (`cat <<EOF`).  Its body documents the `tan` install with the command
+  in backticks, and an unquoted heredoc performs command substitution on
+  its body — so the backticked
+  `cargo install --git https://github.com/alplabai/tan-cli --bin tan`
+  was executed as a real command by every completed
+  `bash scripts/bootstrap.sh`, reinstalling `tan` from git tip behind the
+  user's back and pasting cargo's output into the printed instructions in
+  place of the text.  Reproduced on a clean checkout: the run reaches the
+  network (`Updating git repository ...`) and the line renders mangled as
+  `# for ):`.
+- The block is now split in two: only the first part (which genuinely
+  interpolates `${VENV_DIR}` / `${WORKSPACE_DIR}`) keeps an unquoted tag,
+  and the documentation half uses a quoted `<<'EOF'` tag so nothing in it
+  is executed.  The quoted tag also makes backslashes literal, so the
+  line continuation and `$PWD` in the example are written plainly instead
+  of escaped.
+- Pre-existing on `main` and `dev`, so it affects released versions.  The
+  other four heredocs in the script were audited and contain no backticks
+  or `$(...)`.
+### Added — `dac` peripheral class in the `board.yaml` `peripherals:` enum
+
+`core_entry.peripherals` covered `adc` but not `dac`, so the DAC half of an
+analog project could not be expressed in `board.yaml`
+(issue [#919](https://github.com/alplabai/alp-sdk/issues/919)). Everything
+under the enum was already in place — `<alp/dac.h>` with its portable backend,
+the `alp-dac` DTS alias bucket, and `dac_12bit` on the Alif E8 SoC JSON — so
+`examples/aen/aen-analog-validate` had to hand-write `CONFIG_DAC=y` in
+`prj.conf` to run its DAC0 → ADC loopback. The token now exists,
+`metadata/registries/peripheral-kconfig.json` maps it to `CONFIG_DAC`, and the
+example takes it and drops the workaround. Also corrected the enum's own
+description, which claimed every class is reached "via the matching
+`<alp/<class>.h>` wrapper" — false for 8 of the 16 existing entries
+(`gpio`/`i2c`/`spi`/`uart` live in `<alp/peripheral.h>`).
+
+### Added — Alif ISP-Pico driver compiles + links against hal_alif v2.3.0
+
+The Alif Ensemble ISP-Pico (Verisilicon ISP-Nano) video driver
+(`zephyr/drivers/video/isp_pico.c`, ADR-0017 Tier-2) now builds: vendored the
+last missing dependency, the Apache-2.0 headers `isp-vsi.h` + `isp_ctrl_params.h`
+from `alifsemi/zephyr_alif` v2.3.0 (they ship in neither hal_alif nor the CMSIS
+DFP), and confirmed the v2.3.0 libisp wrapper's 3-arg `isp_vsi_bottom_half` matches
+the ported driver. `examples/aen/aen-isp-regcheck` now build-proves the driver TU
+compiles + links against `libisp_gcc.a` on E1M-AEN801 (was bind-only). Added the
+`CONFIG_FP_HARDABI` BUILD_ASSERT guard (the libisp blob is hard-float, like the
+JPEG blob). **Build-only: live capture stays BENCH-BLOCKED** — the ISP needs a
+camera→CSI→ISP→memory graph and no camera sensor is wired on this AEN batch;
+silicon verification is deferred to a camera-populated board. Internal driver
+enablement, no `<alp/*>` surface change.
 ### Added — Alif Ensemble E8 SoC peripheral coverage: I3C, OSPI/HexSPI, managed-MDIO (build-only)
 
 Three previously-missing E8 peripheral drivers, all **build-only** (compile+link

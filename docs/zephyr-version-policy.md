@@ -13,12 +13,13 @@ upstream releases.**
 
 | Surface                              | Pinned to                | Where                                                                                |
 |--------------------------------------|--------------------------|--------------------------------------------------------------------------------------|
-| Zephyr release                       | **v4.4.0** (stable)      | [`west.yml`](../west.yml) (manifest), [`.github/workflows/pr-twister.yml`](../.github/workflows/pr-twister.yml) (CI), [`.github/workflows/nightly-aen-hil.yml`](../.github/workflows/nightly-aen-hil.yml) (HIL) |
+| Zephyr release                       | **v4.4.0** (stable)      | [`metadata/bootstrap.json`](../metadata/bootstrap.json) (`zephyr.version` -- the bootstrap-facts single source of truth, issue #917), [`west.yml`](../west.yml) (manifest), [`.github/workflows/pr-twister.yml`](../.github/workflows/pr-twister.yml), [`.github/workflows/pr-tier-a-libraries.yml`](../.github/workflows/pr-tier-a-libraries.yml), [`.github/workflows/pr-getting-started-aen801.yml`](../.github/workflows/pr-getting-started-aen801.yml) (CI), [`.github/workflows/nightly-aen-hil.yml`](../.github/workflows/nightly-aen-hil.yml) (HIL), and the `Zephyr-vX.Y.Z` badge in [`README.md`](../README.md) |
 | Zephyr CI docker image               | `v0.27.4`                | [`.github/workflows/pr-twister.yml`](../.github/workflows/pr-twister.yml)             |
 | `hal_alif` Zephyr module             | Whatever ships with the pinned Zephyr | (we do **not** re-pin -- Zephyr's own west.yml owns this revision)         |
 
-All three pins move together when we bump.  Drift between them
-fails CI on the next PR -- by design.
+All pins above move together when we bump.  Drift between them fails
+[`scripts/check_bootstrap_manifest.py`](../scripts/check_bootstrap_manifest.py)
+locally and CI on the next PR -- by design.
 
 > **Migration note (2026-05).**  v0.5 bumps from Zephyr **v3.7.0
 > LTS** to **v4.4.0** stable.  The trade is mainline-feature access
@@ -79,12 +80,21 @@ When a new Zephyr LTS lands and we want to adopt it:
 2. **Verify vendor packs.**  Confirm `hal_alif`, Renesas RZ/V2N AI
    SDK, DEEPX DXNN, and NXP i.MX 93 AI SDK ship a revision that
    targets the new Zephyr LTS.  If any is lagging, defer.
-3. **Branch + bump the three pins together** in a single PR:
+3. **Branch + bump all the pins together** in a single PR:
+   - `metadata/bootstrap.json` &mdash; `zephyr.version` (the pin's home,
+     issue #917; `scripts/check_bootstrap_manifest.py` cross-checks every
+     other entry below against this one)
    - `west.yml` &mdash; `projects.zephyr.revision`
    - `.github/workflows/pr-twister.yml` &mdash; `--mr` arg + cache key
+   - `.github/workflows/pr-tier-a-libraries.yml` &mdash; `--mr` arg + cache key
+   - `.github/workflows/pr-getting-started-aen801.yml` &mdash; cache key
+     (does **not** track the separate `ZEPHYR_SDK_VERSION` toolchain pin)
    - `.github/workflows/nightly-aen-hil.yml` &mdash; `--mr` arg
    - `.github/workflows/pr-twister.yml`'s docker `image:` tag (the
      Zephyr `ci:vX.Y.Z` image tracks the LTS line).
+   - `README.md`'s `Zephyr-vX.Y.Z` badge
+   - Run `python3 scripts/check_bootstrap_manifest.py` locally -- it fails
+     loudly on any pin left behind.
 4. **Re-verify the peripheral matrix** -- every column in
    [`docs/os-support-matrix.md`](os-support-matrix.md) re-runs
    either on native_sim (CI) or on real hardware (nightly HIL).

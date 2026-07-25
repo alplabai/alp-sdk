@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/bootstrap-v1.schema.json",
+  "title": "ALP Bootstrap Facts v1",
+  "description": "Validates metadata/bootstrap.json -- the single source of truth for the Zephyr-workspace-assembly FACTS scripts/bootstrap.sh and scripts/bootstrap.ps1 both read today; tan (Rust, cross-platform) is the INTENDED future consumer of the same facts (issue #917), not a current reader -- no tan-side code exists yet, and this gate has no tan-side check. Facts only; control flow (ZEPHYR_BASE reuse/rejection, venv idempotency, .west branching) stays as CODE in each executor -- this schema deliberately has no step/action shape. scripts/check_bootstrap_manifest.py is the drift gate that keeps this file, west.yml's zephyr revision, and each CI workflow's own Zephyr pin in lockstep (see that script's own module docstring for the full list of checks it runs).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["_comment", "schemaVersion", "zephyr", "venv", "prerequisites", "west", "pip", "env", "nativeLibHints", "manualInstallHints"],
+  "properties": {
+    "_comment": {
+      "type": "string",
+      "description": "The file's own contract statement: facts only, no control-flow DSL. Kept as a real JSON field (not a comment) since JSON has no native comment syntax."
+    },
+    "schemaVersion": {
+      "const": 1,
+      "description": "This manifest's own contract version, independent of board.yaml's schema_version or the build-plan's schemaVersion."
+    },
+    "zephyr": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "requirementsPath"],
+      "properties": {
+        "version": {
+          "type": "string",
+          "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$",
+          "description": "The Zephyr revision alp-sdk is verified against -- MUST equal the `revision:` under `- name: zephyr` in west.yml (check_bootstrap_manifest.py enforces this, and separately that neither bootstrap script hardcodes this value itself)."
+        },
+        "requirementsPath": {
+          "type": "string",
+          "description": "Workspace-relative POSIX-style path to Zephyr's own Python requirements file, installed into the workspace venv."
+        }
+      }
+    },
+    "venv": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dirName", "posixBinDir", "windowsBinDir"],
+      "properties": {
+        "dirName": { "type": "string", "description": "Workspace-relative venv directory name." },
+        "posixBinDir": { "type": "string", "description": "Executable subdirectory name inside the venv on POSIX (Linux/macOS/git-bash)." },
+        "windowsBinDir": { "type": "string", "description": "Executable subdirectory name inside the venv on native Windows." }
+      }
+    },
+    "prerequisites": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["posix", "windows", "pythonMinVersion"],
+      "description": "Mirrors the CURRENT scripts' own prereq checks (bootstrap.sh checks the posix list; bootstrap.ps1 checks the windows list, which additionally includes ninja, plus a separate python >= pythonMinVersion check) -- recorded faithfully, not silently unified, since the two scripts genuinely check different tool sets today. Neither script can read THIS list to perform its own prereq check (that would be circular: the check exists to confirm python/jsonschema-free tooling is present before this JSON can be parsed with confidence) -- instead scripts/check_bootstrap_manifest.py asserts each script's hardcoded copy agrees with this list byte-for-byte, so a drift here fails the gate instead of going unnoticed.",
+      "properties": {
+        "posix": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "windows": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "pythonMinVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" }
+      }
+    },
+    "west": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pipSpec", "initArgs", "updateArgs", "exportArgs", "extensionGuardCommand"],
+      "properties": {
+        "pipSpec": {
+          "type": "string",
+          "description": "The west pip floor Zephyr's own requirements-base.txt declares ('Keep the version identical to the minimum required in cmake/modules/west.cmake'). This IS the exact spec both bootstrap scripts pip-install west with (`pip install --upgrade -q <pipSpec>`) -- not merely informational; bump this value to change the floor both scripts install."
+        },
+        "initArgs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "Static flags for `west <initArgs...> <repo-root>` (the repo-root argument is supplied by the executor, not baked in here)."
+        },
+        "updateArgs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "Full argv (after `west`) for the shallow+narrow `west update` both scripts run."
+        },
+        "exportArgs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "Full argv (after `west`) for `west zephyr-export`."
+        },
+        "extensionGuardCommand": {
+          "type": "string",
+          "description": "The alp-* extension-command substring (issue #769) both scripts grep for in `west help` output to confirm the workspace's manifest really is alp-sdk's west.yml."
+        }
+      }
+    },
+    "pip": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bootstrapUpgrade", "sdkExtras", "editableInstall"],
+      "properties": {
+        "bootstrapUpgrade": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "Packages `pip install --upgrade -q` bootstraps into the fresh venv before anything else."
+        },
+        "sdkExtras": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "alp-sdk-side pip extras installed into the workspace venv (jsonschema for scripts/alp_project.py, imgtool for the MCUboot dev-key script)."
+        },
+        "editableInstall": {
+          "type": "string",
+          "description": "Target `pip install -e <target>` installs -- the ${SDK_ROOT}-tokened alp-sdk checkout (tan's Python backend, alp_cli)."
+        }
+      }
+    },
+    "env": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ZEPHYR_BASE", "ZEPHYR_TOOLCHAIN_VARIANT"],
+      "properties": {
+        "ZEPHYR_BASE": {
+          "type": "string",
+          "description": "${WORKSPACE_DIR}-tokened path to the Zephyr tree a consumer should export ZEPHYR_BASE as."
+        },
+        "ZEPHYR_TOOLCHAIN_VARIANT": {
+          "type": "string",
+          "const": "zephyr",
+          "description": "The toolchain variant both bootstrap scripts export alongside ZEPHYR_BASE."
+        }
+      }
+    },
+    "nativeLibHints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["linux", "macos", "windows"],
+      "description": "Per-OS hints for the optional native libraries the Yocto-side backends need -- an apt/brew/pkg-manager fact, printed under a heading about OPTIONAL NATIVE LIBRARIES. Does NOT carry the Arm GNU Toolchain / Zephyr SDK manual-install sentence (see manualInstallHints below): that fact is not about a native library and was pulled out after it was found printing under this key's 'native libraries' heading when bootstrap.sh ran under git-bash (issue #917 review).",
+      "properties": {
+        "linux": { "$ref": "#/$defs/nativeLibHint" },
+        "macos": { "$ref": "#/$defs/nativeLibHint" },
+        "windows": { "$ref": "#/$defs/nativeLibHint" }
+      }
+    },
+    "manualInstallHints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["windows"],
+      "description": "Manual, one-time install steps a script cannot automate for itself (a GUI/EXE installer, or a step that only makes sense from an already-assembled workspace) -- distinct from nativeLibHints (an apt/brew/pkg-manager command bootstrap CAN hand the user verbatim). Windows-only today: the Arm GNU Toolchain and the Zephyr SDK are manual installs on native Windows, printed by bootstrap.ps1 under its 'NOT auto-installed (manual, one-time)' heading; bootstrap.sh's Linux/macOS paths have no equivalent fact here and don't read this key.",
+      "properties": {
+        "windows": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["note"],
+          "properties": {
+            "note": {
+              "type": "array",
+              "items": { "type": "string" },
+              "minItems": 1,
+              "description": "One or more human-readable lines, safe to print verbatim under a MANUAL-install heading (not the native-library apt/brew heading nativeLibHints.*.note prints under)."
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "nativeLibHint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["note", "command"],
+      "properties": {
+        "note": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "One or more human-readable lines, safe to print verbatim -- an ARRAY (not one long paragraph) so both scripts can render an aligned, multi-line mapping instead of an unwrapped ~200-380 char line."
+        },
+        "command": { "type": ["string", "null"], "description": "A single copy-pasteable shell command, or null when the OS has no equivalent install command (e.g. native Windows)." }
+      }
+    }
+  }
+}

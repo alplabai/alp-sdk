@@ -32,10 +32,10 @@
  * DFP) are bound by the UPSTREAM Arm Apache-2.0 ethos-u-core-driver
  * (the `hal_ethos_u` Zephyr module, drivers/misc/ethos_u/
  * ethos_u_arm.c), which runs ethosu_init() -- the NPU soft reset +
- * attach -- at POST_KERNEL with no vendor HAL pack.  The app
+ * attach -- at POST_KERNEL with no vendor HAL pack.  This backend
  * supplies the strong ethosu_address_remap()/ethosu_config_select()
- * weak-overrides (CPU->NPU translation + AXI-port routing); see the
- * aen-npu-inference* examples.  alp_ethosu_aen_register() below
+ * weak-overrides (CPU->NPU translation + AXI-port routing) below, so
+ * an app no longer has to.  alp_ethosu_aen_register() below
  * therefore just confirms that auto-attach succeeded -- it is a
  * BSP-init readiness check, not a missing vendor sequence.  The
  * Vela target consistency (model U55 vs U85 vs build's compiled
@@ -64,9 +64,59 @@ extern "C" {
 
 #if defined(CONFIG_ETHOS_U)
 #include <zephyr/device.h>
+/* hal_alif local_to_global(): CPU-local (ITCM/DTCM) -> NPU global AXI view. */
+#include <soc_memory_map.h>
 #endif
 
 extern "C" {
+
+#if defined(CONFIG_ETHOS_U)
+/*
+ * STRONG ethosu_address_remap -- the matched-runtime fix for ethosu_invoke=1.
+ *
+ * The Arm Ethos-U core driver programs the NPU's QBASE + every BASEP via the
+ * WEAK ethosu_address_remap(addr, index) (ethosu_device_u85.c), whose default
+ * returns the address UNCHANGED -- the CPU-local M55 view -- which for any
+ * ITCM/DTCM-resident buffer is NOT the address the NPU's AXI master must use,
+ * so the NPU reads the wrong memory and ethosu_invoke fails (status 1).  This
+ * strong override translates to the NPU global view via hal_alif's own
+ * local_to_global() (soc_memory_map.h) -- nothing re-authored.  For an
+ * SRAM0-resident model/arena it is a no-op (SRAM0 @0x02000000 is already
+ * global); the override is what makes the general path correct.  Previously
+ * every AEN NPU app had to supply this itself; the SDK backend now owns it.
+ */
+uint64_t ethosu_address_remap(uint64_t address, int index)
+{
+	(void)index;
+	/* Double cast silences the pointer/integer width warning on 32-bit M55. */
+	return local_to_global((void *)(uint32_t)address);
+}
+
+/*
+ * STRONG ethosu_config_select -- the SECOND half of the invoke=1 fix (NPU AXI
+ * PORT selection), bench-isolated on E8.
+ *
+ * The core driver programs QCONFIG (command stream) + REGIONCFG (each BASEP
+ * region) via the WEAK ethosu_config_select(addr, index), returning a MEM_ATTR
+ * index whose bit2 picks the AXI master PORT: 0/1 -> SRAM port, 2/3 -> EXT
+ * port.  The Arm defaults route the command stream (NPU_QCONFIG=2) + region 0
+ * to the EXT port -- correct for the Arm reference layout (weights in external
+ * flash/DRAM), but WRONG for Alif's `Ethos_U85_SRAM_Only` Vela system-config
+ * where model + command stream + arena ALL live in SRAM0 (reachable only over
+ * the SRAM port).  Sending the SRAM-resident command stream over EXT bus-aborts
+ * on the first fetch: BENCH-CONFIRMED on E8 (ETHOS_U_LOG_LEVEL=DBG) invoke
+ * returns 1 with NPU STATUS=0x00000804 (bus_status=1, faulting_interface=1).
+ * Pinning every access to a SRAM-port MEM_ATTR (index 0) clears the fault.
+ * MEM_ATTR index 0 (bit2=0) = SRAM AXI port, for the command stream (index -1)
+ * and all regions -- everything a SRAM_Only model touches is SRAM0-resident.
+ */
+unsigned int ethosu_config_select(uint64_t address, int index)
+{
+	(void)address;
+	(void)index;
+	return 0U;
+}
+#endif /* CONFIG_ETHOS_U */
 
 /**
  * @brief Confirm the AEN Ethos-U NPU attached to the Arm driver.
@@ -107,8 +157,8 @@ alp_status_t alp_ethosu_aen_register(void)
  * U-variant selector almost certainly means an orchestrator drift.
  * The cross-check protects HIL from a build that links the wrong
  * Vela kernels for the model. */
-#if defined(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN) &&                                       \
-    !defined(CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55) &&                                      \
+#if defined(CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN) && \
+    !defined(CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55) && \
     !defined(CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85)
 #error "ETHOS_U_AEN backend enabled without VARIANT_U55 or _U85; orchestrator drift"
 #endif
