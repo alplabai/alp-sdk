@@ -356,6 +356,9 @@ jobs:
       - name: Gate — quality-task registry matches scripts/check_*.py on disk
         run: python3 scripts/check_quality_registry.py
 
+      - name: Gate — scripts/ write_text() writers pass newline=""
+        run: python3 scripts/check_write_text_newline.py
+
       - name: alp.lock in sync
         run: python3 scripts/west_commands/alp_lock.py --workspace . --check
 

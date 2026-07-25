@@ -189,7 +189,7 @@ def main() -> int:
     GOLDEN.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(result, indent=2, sort_keys=True) + "\n"
     if args.update:
-        GOLDEN.write_text(text, encoding="utf-8")
+        GOLDEN.write_text(text, encoding="utf-8", newline="")
         print(f"wrote {GOLDEN.relative_to(REPO)} "
               f"({len(result)} combos, {len(base)} full symbols)")
         if errors:  # still surface structural breakage on --update

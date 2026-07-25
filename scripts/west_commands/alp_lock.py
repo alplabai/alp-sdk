@@ -63,7 +63,7 @@ def run(args) -> int:
         print(f"alp-lock: {lock_path} matches the workspace.")
         return 0
     lock = alp_lock.build_lock(root, board)
-    lock_path.write_text(_dump(lock), encoding="utf-8")
+    lock_path.write_text(_dump(lock), encoding="utf-8", newline="")
     print(f"alp-lock: wrote {lock_path}")
     return 0
 
