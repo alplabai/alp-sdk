@@ -7,13 +7,13 @@
 # AEN M55 ITCM-run image step) -- this still proves the example
 # compiles for the M55-HP slice.
 #
-# PENDING (tan-cli#674): the actual headless Renode boot + "[hello]
+# PENDING (tan-cli#77): the actual headless Renode boot + "[hello]
 # done" UART5-console assertion used to run via `tan build --native` +
 # `tan renode ... --expect "[hello] done"` (ADR-0020 Phase 4 retired
 # the SDK-side `west alp-build`/`west alp-renode` executor this
 # workflow used to drive before that).  `tan renode` is the designated
 # successor but is still a stub there, so the e2e step below is
-# intentionally a no-op until tan-cli#674 closes -- see
+# intentionally a no-op until tan-cli#77 closes -- see
 # pr-renode-sim-mode.yml for the same pattern.
 #
 # !! ADVISORY until the M55 boot is validated on a Renode-equipped
@@ -137,12 +137,12 @@ jobs:
                  -DEXTRA_CONF_FILE="${GITHUB_WORKSPACE}/alp-sdk/tests/renode/aen_m55_sim.conf"
           test -f /tmp/aen-smoke-build/zephyr/zephyr.elf
 
-      # PENDING (tan-cli#674): the headless boot + "[hello] done"
+      # PENDING (tan-cli#77): the headless boot + "[hello] done"
       # UART5-console assertion used to run via `tan build --native` +
       # `tan renode ... --expect "[hello] done"` -- both retired from
       # this repo (ADR-0020 Phase 4).  `tan renode` is the designated
       # successor but is still a stub there -- do not delete this step
       # silently; flip it back to a real `tan renode ...` invocation
       # once the stub lands.
-      - name: AEN801 M55-HP Renode boot e2e [PENDING tan-cli#674]
-        run: echo "::notice::[PENDING tan-cli#674] tan renode e2e is covered in tan-cli CI"
+      - name: AEN801 M55-HP Renode boot e2e [PENDING tan-cli#77]
+        run: echo "::notice::[PENDING tan-cli#77] tan renode e2e is covered in tan-cli CI"
