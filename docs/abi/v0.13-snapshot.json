@@ -4854,7 +4854,7 @@
           "kind": "struct"
         },
         "ina236_t": {
-          "definition": "typedef struct { bool initialised; alp_i2c_t *bus; uint8_t addr; float shunt_ohms; float max_current_a; float current_lsb_a; uint16_t cfg_cache; ina236_adcrange_t adcrange; } ina236_t;",
+          "definition": "typedef struct { bool initialised; alp_i2c_t *bus; uint8_t addr; float shunt_ohms; float max_current_a; float current_lsb_a; float full_scale_a; uint16_t cfg_cache; ina236_adcrange_t adcrange; } ina236_t;",
           "fields": [
             "bool initialised",
             "alp_i2c_t *bus",
@@ -4862,10 +4862,11 @@
             "float shunt_ohms",
             "float max_current_a",
             "float current_lsb_a",
+            "float full_scale_a",
             "uint16_t cfg_cache",
             "ina236_adcrange_t adcrange"
           ],
-          "hash": "8003bcc36e214535",
+          "hash": "2cdd0d0d7ce3cad5",
           "kind": "struct"
         }
       },
