@@ -69,6 +69,7 @@ def _point_gate_at(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(gate, "BOOTSTRAP_SH", tmp_path / "scripts/bootstrap.sh")
     monkeypatch.setattr(gate, "BOOTSTRAP_PS1", tmp_path / "scripts/bootstrap.ps1")
     monkeypatch.setattr(gate, "README_MD", tmp_path / "README.md")
+    monkeypatch.setattr(gate, "LIBRARIES_DIR", tmp_path / "metadata/libraries")
     monkeypatch.setattr(gate, "CI_WORKFLOWS", [
         tmp_path / ".github/workflows/pr-twister.yml",
         tmp_path / ".github/workflows/pr-tier-a-libraries.yml",
@@ -138,7 +139,7 @@ def test_schema_missing_required_key_fails(tmp_path, monkeypatch, capsys):
 
 def test_west_yml_revision_disagreement_fails(tmp_path, monkeypatch, capsys):
     _scaffold(tmp_path)
-    _replace(tmp_path / "west.yml", "revision: v4.4.0", "revision: v4.5.0")
+    _replace(tmp_path / "west.yml", "revision: v4.4.1", "revision: v4.5.0")
     _point_gate_at(tmp_path, monkeypatch)
     rv = gate.main()
     err = capsys.readouterr().err
@@ -158,7 +159,7 @@ def test_hardcoded_literal_in_bootstrap_sh_fails(tmp_path, monkeypatch, capsys):
     text = sh.read_text(encoding="utf-8")
     # Inject a literal (non-comment) hardcode of the pinned version -- the
     # exact "read from JSON, not baked in" regression this check exists for.
-    sh.write_text(text + '\nZEPHYR_VERSION_SHADOW="v4.4.0"\n', encoding="utf-8")
+    sh.write_text(text + '\nZEPHYR_VERSION_SHADOW="v4.4.1"\n', encoding="utf-8")
     _point_gate_at(tmp_path, monkeypatch)
     rv = gate.main()
     err = capsys.readouterr().err
@@ -191,7 +192,7 @@ def test_hardcoded_literal_inside_heredoc_body_fails(tmp_path, monkeypatch, caps
     _replace(
         tmp_path / "scripts/bootstrap.sh",
         "  # Run the local test suite:",
-        "  # Zephyr v4.4.0 is required for this suite:",
+        "  # Zephyr v4.4.1 is required for this suite:",
     )
     _point_gate_at(tmp_path, monkeypatch)
     rv = gate.main()
@@ -227,7 +228,7 @@ def test_ci_workflow_mr_pin_disagreement_fails(tmp_path, monkeypatch, capsys):
     _scaffold(tmp_path)
     _replace(
         tmp_path / ".github/workflows/pr-tier-a-libraries.yml",
-        "--mr v4.4.0", "--mr v4.5.0",
+        "--mr v4.4.1", "--mr v4.5.0",
     )
     _point_gate_at(tmp_path, monkeypatch)
     rv = gate.main()
@@ -241,7 +242,7 @@ def test_ci_cache_key_disagreement_fails(tmp_path, monkeypatch, capsys):
     _scaffold(tmp_path)
     _replace(
         tmp_path / ".github/workflows/pr-twister.yml",
-        "key: zephyr-v4.4.0-host-${{ runner.os }}",
+        "key: zephyr-v4.4.1-host-${{ runner.os }}",
         "key: zephyr-v4.5.0-host-${{ runner.os }}",
     )
     _point_gate_at(tmp_path, monkeypatch)
@@ -276,7 +277,7 @@ def test_readme_badge_disagreement_fails(tmp_path, monkeypatch, capsys):
     _scaffold(tmp_path)
     _replace(
         tmp_path / "README.md",
-        "Zephyr-v4.4.0-blue",
+        "Zephyr-v4.4.1-blue",
         "Zephyr-v4.5.0-blue",
     )
     _point_gate_at(tmp_path, monkeypatch)
@@ -496,6 +497,117 @@ def test_bootstrap_sh_refuses_unknown_schema_version(tmp_path):
     assert "schemaVersion" in (proc.stdout + proc.stderr)
 
 
+# ---------------------------------------------------------------------
+# 10. --fix propagator
+# ---------------------------------------------------------------------
+
+
+def test_fix_propagates_bumped_version_to_every_site(tmp_path, monkeypatch, capsys):
+    """Targets v4.10.0 -- a different STRING LENGTH than v4.4.1 -- so the
+    back-to-front `reversed(matches)` walk in `_apply_version_fix` (which
+    exists solely to survive a length-changing target) is actually
+    exercised; a same-length target like v4.5.0 would pass even with a
+    broken offset-bookkeeping implementation."""
+    _scaffold(tmp_path)
+    _edit_manifest(tmp_path, lambda d: d["zephyr"].__setitem__("version", "v4.10.0"))
+    _point_gate_at(tmp_path, monkeypatch)
+    monkeypatch.setattr(sys, "argv", ["check_bootstrap_manifest.py", "--fix"])
+    rv = gate.main()
+    out = capsys.readouterr().out
+    assert rv == 0, out
+
+    # A change report line per rewritten site, plus the summary line.
+    assert "west.yml:" in out
+    assert "v4.4.1 -> v4.10.0" in out
+
+    # The ordinary (no --fix) verify pass must now agree -- this IS the
+    # point: --fix output is provable by the same gate that flagged drift.
+    monkeypatch.setattr(sys, "argv", ["check_bootstrap_manifest.py"])
+    rv = gate.main()
+    out = capsys.readouterr().out
+    assert rv == 0, out
+    assert "OK" in out
+
+    assert "revision: v4.10.0" in (tmp_path / "west.yml").read_text(encoding="utf-8")
+    assert "Zephyr-v4.10.0-blue" in (tmp_path / "README.md").read_text(encoding="utf-8")
+
+    twister = (tmp_path / ".github/workflows/pr-twister.yml").read_text(encoding="utf-8")
+    assert "--mr v4.10.0" in twister
+    assert "key: zephyr-v4.10.0-host-${{ runner.os }}" in twister
+
+    tier_a = (tmp_path / ".github/workflows/pr-tier-a-libraries.yml").read_text(encoding="utf-8")
+    assert "--mr v4.10.0" in tier_a
+    assert "key: zephyr-v4.10.0-tier-a-${{ runner.os }}" in tier_a
+
+    nightly = (tmp_path / ".github/workflows/nightly-aen-hil.yml").read_text(encoding="utf-8")
+    assert "--mr v4.10.0" in nightly
+
+    getting_started = (tmp_path / ".github/workflows/pr-getting-started-aen801.yml").read_text(
+        encoding="utf-8")
+    assert "key: getting-started-aen801-zephyr-v4.10.0-${{ runner.os }}" in getting_started
+
+
+def test_fix_is_idempotent(tmp_path, monkeypatch, capsys):
+    _scaffold(tmp_path)
+    _edit_manifest(tmp_path, lambda d: d["zephyr"].__setitem__("version", "v4.5.0"))
+    _point_gate_at(tmp_path, monkeypatch)
+    monkeypatch.setattr(sys, "argv", ["check_bootstrap_manifest.py", "--fix"])
+
+    assert gate.main() == 0
+    # `_apply_version_fix` writes with `newline=""` specifically so the
+    # rewrite never flips these LF-pinned files to CRLF on a Windows host --
+    # the other --fix tests use newline-agnostic `in` checks against
+    # `.read_text()`, which stay green even if `newline=""` were deleted
+    # (Windows universal-newline decoding hides the CRLF). Assert on the raw
+    # bytes so that regression actually has a test.
+    assert b"\r\n" not in (tmp_path / "west.yml").read_bytes()
+    capsys.readouterr()
+    before = {rel: (tmp_path / rel).read_bytes() for rel in _CORPUS_RELPATHS}
+
+    rv = gate.main()
+    out = capsys.readouterr().out
+    assert rv == 0, out
+    assert "nothing to do" in out
+
+    after = {rel: (tmp_path / rel).read_bytes() for rel in _CORPUS_RELPATHS}
+    assert before == after, "second --fix run must not touch a single byte"
+
+
+def test_fix_does_not_touch_zephyr_sdk_cache_key(tmp_path, monkeypatch, capsys):
+    """Item 11 of the original review, re-exercised through --fix this
+    time: the Zephyr *SDK* toolchain cache key tracks a separate release
+    and must survive a Zephyr revision bump untouched."""
+    _scaffold(tmp_path)
+    _edit_manifest(tmp_path, lambda d: d["zephyr"].__setitem__("version", "v4.5.0"))
+    _point_gate_at(tmp_path, monkeypatch)
+    monkeypatch.setattr(sys, "argv", ["check_bootstrap_manifest.py", "--fix"])
+    assert gate.main() == 0
+
+    twister = (tmp_path / ".github/workflows/pr-twister.yml").read_text(encoding="utf-8")
+    assert "zephyr-sdk-arm-zephyr-eabi-v4.4.0" in twister
+    assert "zephyr-sdk-arm-zephyr-eabi-v4.5.0" not in twister
+
+
+def test_fix_fails_loudly_on_unmatchable_site(tmp_path, monkeypatch, capsys):
+    """A regex that stops matching must never be a silent --fix no-op --
+    break the one west.yml site's shape and --fix must name it and fail,
+    not quietly leave west.yml unrewritten and exit 0."""
+    _scaffold(tmp_path)
+    _edit_manifest(tmp_path, lambda d: d["zephyr"].__setitem__("version", "v4.5.0"))
+    _replace(
+        tmp_path / "west.yml",
+        "- name: zephyr\n      revision:",
+        "- name: zephyr-renamed\n      revision:",
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    monkeypatch.setattr(sys, "argv", ["check_bootstrap_manifest.py", "--fix"])
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "west.yml" in err
+    assert "not found" in err
+
+
 def test_bootstrap_ps1_refuses_unknown_schema_version(tmp_path):
     """scripts/bootstrap.ps1's mirrored `if ($Manifest.schemaVersion -ne 1)
     { Fail ... }` guard, exercised end-to-end. Skipped cleanly (not failed)
@@ -521,3 +633,84 @@ def test_bootstrap_ps1_refuses_unknown_schema_version(tmp_path):
     )
     assert proc.returncode != 0, proc.stdout + proc.stderr
     assert "schemaVersion" in (proc.stdout + proc.stderr)
+
+
+# ---------------------------------------------------------------------
+# 11. In-tree Zephyr library manifest `version:` guard (finding: coap/
+#     lwm2m/modbus's `version:` field is a live pin nothing verified --
+#     it would stay stale after a future bump even with a green gate).
+# ---------------------------------------------------------------------
+
+# The three real in-tree-Zephyr-subsystem manifests, plus one real
+# `module: null` manifest that must NOT be swept in (it pins its own
+# upstream release, not Zephyr's) -- the negative case that proves the
+# derivation is `module: null` AND `requires.os == ["zephyr"]`, not
+# `module: null` alone.
+_LIBRARY_RELPATHS = [
+    "metadata/libraries/coap.yaml",
+    "metadata/libraries/lwm2m.yaml",
+    "metadata/libraries/modbus.yaml",
+    "metadata/libraries/nlohmann-json.yaml",
+]
+
+
+def _scaffold_with_libraries(tmp_path: Path) -> None:
+    _scaffold(tmp_path)
+    for rel in _LIBRARY_RELPATHS:
+        src = REPO / rel
+        dst = tmp_path / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+
+
+def test_library_manifest_version_drift_fails(tmp_path, monkeypatch, capsys):
+    _scaffold_with_libraries(tmp_path)
+    _replace(tmp_path / "metadata/libraries/coap.yaml", 'version: "4.4.1"', 'version: "4.4.0"')
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "metadata/libraries/coap.yaml" in err
+    assert "4.4.0" in err
+
+
+def test_library_manifest_with_own_upstream_pin_is_not_checked(tmp_path, monkeypatch, capsys):
+    """nlohmann-json.yaml also has `integration.zephyr.module: null`, but it
+    pins its OWN upstream release (3.11.3) and does not declare
+    `requires.os: [zephyr]` -- it must never be compared against
+    zephyr.version. Mutating it far away from 4.4.1 must NOT fail the gate."""
+    _scaffold_with_libraries(tmp_path)
+    text = (tmp_path / "metadata/libraries/nlohmann-json.yaml").read_text(encoding="utf-8")
+    assert 'version: "3.11.3"' in text
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    out = capsys.readouterr().out
+    assert rv == 0, out
+    assert "OK" in out
+
+
+def test_fix_rewrites_library_manifest_versions(tmp_path, monkeypatch, capsys):
+    _scaffold_with_libraries(tmp_path)
+    _edit_manifest(tmp_path, lambda d: d["zephyr"].__setitem__("version", "v4.10.0"))
+    _point_gate_at(tmp_path, monkeypatch)
+    monkeypatch.setattr(sys, "argv", ["check_bootstrap_manifest.py", "--fix"])
+    rv = gate.main()
+    out = capsys.readouterr().out
+    assert rv == 0, out
+
+    for name in ("coap.yaml", "lwm2m.yaml", "modbus.yaml"):
+        text = (tmp_path / "metadata/libraries" / name).read_text(encoding="utf-8")
+        assert 'version: "4.10.0"' in text, f"{name} not rewritten: {text}"
+
+    # nlohmann-json is NOT a --fix site -- it must survive the sweep
+    # byte-for-byte untouched.
+    nlohmann_text = (tmp_path / "metadata/libraries/nlohmann-json.yaml").read_text(
+        encoding="utf-8")
+    assert 'version: "3.11.3"' in nlohmann_text
+
+    # The ordinary (no --fix) verify pass must now agree.
+    monkeypatch.setattr(sys, "argv", ["check_bootstrap_manifest.py"])
+    rv = gate.main()
+    out = capsys.readouterr().out
+    assert rv == 0, out
+    assert "OK" in out

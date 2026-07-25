@@ -550,7 +550,7 @@ def test_emit_lwm2m_coap_zephyr_kconfig(tmp_path: Path) -> None:
     assert "CONFIG_LWM2M=y" in out
     assert "CONFIG_COAP=y" in out
     assert "ADR 0018" in out
-    assert "lwm2m v4.4.0" in out  # version transcribed from the manifest
+    assert "lwm2m v4.4.1" in out  # version transcribed from the manifest
 
 
 # --- emit: a prerequisite cloud lib emits the tag with NO fabricated CONFIG ---
@@ -627,7 +627,7 @@ def test_industrial_scripting_manifests_present() -> None:
 def test_modbus_manifest_is_tier_a_in_tree() -> None:
     doc = yaml.safe_load((LIBRARIES_DIR / "modbus.yaml").read_text(encoding="utf-8"))
     assert doc["tier"] == "A"
-    assert doc["version"] == "4.4.0"
+    assert doc["version"] == "4.4.1"
     assert doc["license"] == "Apache-2.0"
     zephyr = doc["integration"]["zephyr"]
     assert zephyr.get("module") is None
@@ -676,7 +676,7 @@ def test_emit_modbus_canopennode_zephyr_kconfig(tmp_path: Path) -> None:
     out = _slice_alp_conf(project, project.cores["m33_sm"])
     assert "CONFIG_MODBUS=y" in out
     assert "CONFIG_CANOPENNODE=y" in out
-    assert "modbus v4.4.0" in out
+    assert "modbus v4.4.1" in out
     assert "canopennode vdec12fa3f0d790cafa8414a4c2930ea71ab72ffd" in out
 
 

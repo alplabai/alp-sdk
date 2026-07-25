@@ -2,7 +2,7 @@
   "_comment": "Single source of truth for the FACTS scripts/bootstrap.sh and scripts/bootstrap.ps1 both read to assemble a Zephyr workspace (issue #917); tan (Rust, cross-platform) is the INTENDED future consumer of the same facts, not a current reader -- no tan-side code reads this file yet, and scripts/check_bootstrap_manifest.py has no tan-side check. Facts only -- control flow (ZEPHYR_BASE reuse/rejection, venv idempotency, .west branching) stays as CODE in each executor; do not grow this file into a step-execution DSL. Checkout/workspace-anchored paths use the ${SDK_ROOT} / ${WORKSPACE_DIR} tokens, the same convention metadata/schemas/build-plan-v1.schema.json's planPathMode: tokened uses -- a consumer substitutes its own resolved paths before use. scripts/check_bootstrap_manifest.py is the drift gate that keeps this file, its schema, both bootstrap scripts, and everything else that copies a fact from here in lockstep -- see that script's own module docstring for the full, authoritative list of what it checks; do not restate that list here, it will only drift again.",
   "schemaVersion": 1,
   "zephyr": {
-    "version": "v4.4.0",
+    "version": "v4.4.1",
     "requirementsPath": "zephyr/scripts/requirements.txt"
   },
   "venv": {

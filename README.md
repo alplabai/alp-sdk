@@ -5,7 +5,7 @@
 [![CI](https://github.com/alplabai/alp-sdk/actions/workflows/pr-twister.yml/badge.svg?branch=main)](https://github.com/alplabai/alp-sdk/actions/workflows/pr-twister.yml)
 [![Release](https://img.shields.io/github/v/release/alplabai/alp-sdk)](https://github.com/alplabai/alp-sdk/releases)
 [![License](https://img.shields.io/github/license/alplabai/alp-sdk)](LICENSE)
-[![Zephyr](https://img.shields.io/badge/Zephyr-v4.4.0-blue)](docs/zephyr-version-policy.md)
+[![Zephyr](https://img.shields.io/badge/Zephyr-v4.4.1-blue)](docs/zephyr-version-policy.md)
 
 > [!WARNING]
 > **Partially silicon-verified:** every chip driver, peripheral wrapper, and

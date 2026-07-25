@@ -586,7 +586,7 @@ the wrong peer and emit fails naming the `os` / `core_class` constraint.
 Two honest limits are recorded in the manifest headers rather than
 hidden:
 
-- **micro-ROS is not yet pinned** in the Zephyr v4.4.0 `west.yml`. Its
+- **micro-ROS is not yet pinned** in the Zephyr v4.4.1 `west.yml`. Its
   manifest names the upstream `micro_ros_zephyr_module` (branch
   `humble`) as a west prerequisite and enables **by module presence**
   (no invented Kconfig); emit renders the selection tag with no

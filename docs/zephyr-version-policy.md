@@ -13,8 +13,7 @@ upstream releases.**
 
 | Surface                              | Pinned to                | Where                                                                                |
 |--------------------------------------|--------------------------|--------------------------------------------------------------------------------------|
-| Zephyr release                       | **v4.4.0** (stable)      | [`metadata/bootstrap.json`](../metadata/bootstrap.json) (`zephyr.version` -- the bootstrap-facts single source of truth, issue #917), [`west.yml`](../west.yml) (manifest), [`.github/workflows/pr-twister.yml`](../.github/workflows/pr-twister.yml), [`.github/workflows/pr-tier-a-libraries.yml`](../.github/workflows/pr-tier-a-libraries.yml), [`.github/workflows/pr-getting-started-aen801.yml`](../.github/workflows/pr-getting-started-aen801.yml) (CI), [`.github/workflows/nightly-aen-hil.yml`](../.github/workflows/nightly-aen-hil.yml) (HIL), and the `Zephyr-vX.Y.Z` badge in [`README.md`](../README.md) |
-| Zephyr CI docker image               | `v0.27.4`                | [`.github/workflows/pr-twister.yml`](../.github/workflows/pr-twister.yml)             |
+| Zephyr release                       | **v4.4.1** (stable)      | [`metadata/bootstrap.json`](../metadata/bootstrap.json) (`zephyr.version` -- the bootstrap-facts single source of truth, issue #917), [`west.yml`](../west.yml) (manifest), [`.github/workflows/pr-twister.yml`](../.github/workflows/pr-twister.yml), [`.github/workflows/pr-tier-a-libraries.yml`](../.github/workflows/pr-tier-a-libraries.yml), [`.github/workflows/pr-getting-started-aen801.yml`](../.github/workflows/pr-getting-started-aen801.yml) (CI), [`.github/workflows/nightly-aen-hil.yml`](../.github/workflows/nightly-aen-hil.yml) (HIL), and the `Zephyr-vX.Y.Z` badge in [`README.md`](../README.md) |
 | `hal_alif` Zephyr module             | Whatever ships with the pinned Zephyr | (we do **not** re-pin -- Zephyr's own west.yml owns this revision)         |
 
 All pins above move together when we bump.  Drift between them fails
@@ -60,9 +59,10 @@ Five reasons, in order of weight:
    Zephyr's monthly RCs.  Tracking tip breaks the pack we depend on.
 3. **CI cost.**  Every Zephyr bump invalidates the `actions/cache`
    build artefacts under `~/zephyrproject` -- a clean rebuild adds
-   ~5 min per PR.  Patch bumps stay within the cache key
-   (`zephyr-v4.4.0-${{ runner.os }}`); minor bumps blow it away
-   intentionally.
+   ~5 min per PR.  The cache key embeds the full `X.Y.Z`
+   (`zephyr-v4.4.1-${{ runner.os }}`), so a patch bump forces the same
+   clean rebuild a minor bump does -- there is no tier that stays
+   within the cache key.
 4. **Customer support window.**  Per [`VERSIONS.md`](../VERSIONS.md),
    alp-sdk v1.0 carries a 24-month LTS commitment.  That commitment
    only holds if the Zephyr line underneath it is also under LTS
@@ -81,24 +81,40 @@ When a new Zephyr LTS lands and we want to adopt it:
    SDK, DEEPX DXNN, and NXP i.MX 93 AI SDK ship a revision that
    targets the new Zephyr LTS.  If any is lagging, defer.
 3. **Branch + bump all the pins together** in a single PR:
-   - `metadata/bootstrap.json` &mdash; `zephyr.version` (the pin's home,
-     issue #917; `scripts/check_bootstrap_manifest.py` cross-checks every
-     other entry below against this one)
-   - `west.yml` &mdash; `projects.zephyr.revision`
-   - `.github/workflows/pr-twister.yml` &mdash; `--mr` arg + cache key
-   - `.github/workflows/pr-tier-a-libraries.yml` &mdash; `--mr` arg + cache key
-   - `.github/workflows/pr-getting-started-aen801.yml` &mdash; cache key
-     (does **not** track the separate `ZEPHYR_SDK_VERSION` toolchain pin)
-   - `.github/workflows/nightly-aen-hil.yml` &mdash; `--mr` arg
-   - `.github/workflows/pr-twister.yml`'s docker `image:` tag (the
-     Zephyr `ci:vX.Y.Z` image tracks the LTS line).
-   - `README.md`'s `Zephyr-vX.Y.Z` badge
-   - Run `python3 scripts/check_bootstrap_manifest.py` locally -- it fails
-     loudly on any pin left behind.
+   - Edit `metadata/bootstrap.json` &mdash; `zephyr.version` (the pin's
+     single source, issue #917).
+   - Run `python3 scripts/check_bootstrap_manifest.py --fix` to propagate
+     that one edit to every dependent machine-pin site:
+     - `west.yml` &mdash; `projects.zephyr.revision`
+     - `.github/workflows/pr-twister.yml` &mdash; `--mr` arg + cache key
+     - `.github/workflows/pr-tier-a-libraries.yml` &mdash; `--mr` arg + cache key
+     - `.github/workflows/pr-getting-started-aen801.yml` &mdash; cache key
+       (does **not** track the separate `ZEPHYR_SDK_VERSION` toolchain pin)
+     - `.github/workflows/nightly-aen-hil.yml` &mdash; `--mr` arg
+     - `README.md`'s `Zephyr-vX.Y.Z` badge
+     - every `metadata/libraries/*.yaml` manifest that is a genuine
+       in-tree Zephyr subsystem (`integration.zephyr.module: null` **and**
+       `requires.os == [zephyr]` -- today that's `coap.yaml`, `lwm2m.yaml`,
+       `modbus.yaml`) &mdash; its `version:` field
+   - Run `python3 scripts/check_bootstrap_manifest.py` with no flag to
+     prove every pin above now agrees with `metadata/bootstrap.json` --
+     it fails loudly on any pin left behind.
+   - Prose docs, CHANGELOG history, and every other `metadata/libraries/*.yaml`
+     manifest (anything pinning its own upstream release/SHA, plus every
+     manifest's `# Grounding (pinned Zephyr ...)` provenance comment and
+     `$ZEPHYR_BASE/...:<line>` citations, which record where a symbol was
+     READ and stay frozen at the old version) are **not** `--fix` sites --
+     update them by hand.
 4. **Re-verify the peripheral matrix** -- every column in
    [`docs/os-support-matrix.md`](os-support-matrix.md) re-runs
    either on native_sim (CI) or on real hardware (nightly HIL).
    Twister failures get peripheral-by-peripheral triage.
+
+Steps 5-7 below apply to an **LTS-to-LTS / minor** bump only -- a same-line
+**patch** bump (e.g. 4.4.0 -> 4.4.1) stops after step 4: no
+`metadata/sdk_version.yaml` change, no CHANGELOG `[Unreleased] -- vX.Y.0
+candidate` heading, and no tag/release (see the "When we bump" table above).
+
 5. **Update `metadata/sdk_version.yaml`** with the new minor.
 6. **CHANGELOG entry** under
    `[Unreleased] -- v0.<minor>.0 candidate` calling out the

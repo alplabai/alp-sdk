@@ -130,7 +130,7 @@ a build.
 | `catch2` | B | `3.7.1` | BSL-1.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `cmsis-dsp` | A | `97512610ec92058f0119450b9e743eeb7e95b5c8` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `cmsis-nn` | A | `d20117c9e88cf9018d6fa06744dddac700c3e3a1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `coap` | B | `4.4.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `coap` | B | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `coremqtt-sn` | B | `v1.0.1` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `doctest` | B | `2.4.11` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `etl` | B | `20.39.4` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -140,13 +140,13 @@ a build.
 | `libwebsockets` | B | `v4.3.4` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `littlefs` | B | `2.11` | BSD-3-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `lvgl` | A | `9.5.0` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `lwm2m` | B | `4.4.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `lwm2m` | B | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `madgwick-ahrs` | B | `unpinned (west.yml tracks xio-technologies/Fusion@main; TBD pin SHA after maintainer audit)` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `mbedtls` | B | `4.1.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `micro-ros` | B | `humble` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `micropython` | B | `v1.24.1` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `minimp3` | B | `master` | CC0-1.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `modbus` | A | `4.4.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `modbus` | A | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `nanopb` | A | `0.4.9.1` | Zlib | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `nlohmann-json` | B | `3.11.3` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `opus` | B | `v1.5.2` | BSD-3-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -169,7 +169,7 @@ a build.
 | `catch2` | B | `3.7.1` | BSL-1.0 | ✅ | ✅ | ✅ | ✅ |
 | `cmsis-dsp` | A | `97512610ec92058f0119450b9e743eeb7e95b5c8` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `cmsis-nn` | A | `d20117c9e88cf9018d6fa06744dddac700c3e3a1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `coap` | B | `4.4.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
+| `coap` | B | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `coremqtt-sn` | B | `v1.0.1` | MIT | ✅ | ✅ | ✅ | ✅ |
 | `doctest` | B | `2.4.11` | MIT | ✅ | ✅ | ✅ | ✅ |
 | `etl` | B | `20.39.4` | MIT | ✅ | ✅ | ✅ | ✅ |
@@ -179,13 +179,13 @@ a build.
 | `libwebsockets` | B | `v4.3.4` | MIT | ✅ | ✅ | ✅ | ✅ |
 | `littlefs` | B | `2.11` | BSD-3-Clause | ✅ | ✅ | ✅ | ✅ |
 | `lvgl` | A | `9.5.0` | MIT | ✅ | ✅ | ✅ | ✅ |
-| `lwm2m` | B | `4.4.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
+| `lwm2m` | B | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `madgwick-ahrs` | B | `unpinned (west.yml tracks xio-technologies/Fusion@main; TBD pin SHA after maintainer audit)` | MIT | ✅ | ✅ | ✅ | ✅ |
 | `mbedtls` | B | `4.1.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `micro-ros` | B | `humble` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `micropython` | B | `v1.24.1` | MIT | ✅ | ✅ | ✅ | ✅ |
 | `minimp3` | B | `master` | CC0-1.0 | ✅ | ✅ | ✅ | ✅ |
-| `modbus` | A | `4.4.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
+| `modbus` | A | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `nanopb` | A | `0.4.9.1` | Zlib | ✅ | ✅ | ✅ | ✅ |
 | `nlohmann-json` | B | `3.11.3` | MIT | ✅ | ✅ | ✅ | ✅ |
 | `opus` | B | `v1.5.2` | BSD-3-Clause | ✅ | ✅ | ✅ | ✅ |
