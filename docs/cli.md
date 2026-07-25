@@ -595,6 +595,7 @@ tan model run model.onnx                              # deterministic random inp
 tan model run model.onnx --input sample.npy            # a real input sample
 tan model run model.onnx --input sample.npy --expected 3
 tan model run model.onnx --runs 50 --format json
+tan model run model.onnx --on-device                   # + a real on-target energy measurement
 ```
 
 Loads the ONNX model into `onnxruntime` on the **CPU** and runs it: a
@@ -608,13 +609,31 @@ payload marks `"random_input": true`.
 
 **This is not the target SoM's performance.** `backend` is always
 `"cpu-host"` and every payload -- human or JSON -- carries a `note`
-stating the host-reference caveat explicitly. `peak_sram_kib`,
-`power_mj`, and `energy` are always `null` here: they are populated
-only by the on-device runner (the HW-gated follow-on that reads the
-target's arena high-water mark and the on-board shunt/monitor IC for
-per-rail energy), which fills the exact same result shape with real
-numbers once flashed hardware is in the loop. A model that fails to
-load or run raises a clean error (exit 1), never a raw traceback.
+stating the host-reference caveat explicitly. `peak_sram_kib` and
+`power_mj` stay `null` here (the on-device arena high-water mark and
+per-rail power reads are a separate, still-HW-gated surface).
+`energy` stays `null` unless `--on-device` is given (see below). A
+model that fails to load or run raises a clean error (exit 1), never
+a raw traceback.
+
+**`--on-device`** -- after the host reference run, also runs a REAL
+on-target energy measurement: builds and RAM-runs an energy-sampling
+app on an Alif Ensemble E8 (AEN801), reads back its console capture (a
+`ENERGY-CFG`/`ENERGY-S`/`ENERGY-W`/`ENERGY-RESULT` protocol over the
+on-board INA236 shunt monitor), and idle-subtracts active vs. idle
+windows into mJ/inference. This needs a **held labgrid reservation**
+for the target bench place and real hardware -- it never acquires or
+releases that reservation itself (that is the human/orchestrator's
+responsibility). On any failure (no reservation held, build/flash
+failure, malformed capture) it **errors out (exit 1) instead of
+reporting a null or fabricated energy figure** -- a silent `null`
+would read as "measured nothing" when the truth is "the bench run
+failed". On success, the JSON payload gains a top-level `on_device`
+key with cross-check diagnostics: `cycles_per_s_used`,
+`cycles_per_s_dt`, `cycles_per_s_measured` (the DT-constant-vs-
+kernel-uptime reconciliation), `device_value_mj_per_inference` (the
+on-target app's own computed figure), `host_vs_device_ratio`,
+`npu_dispatched`, and `windows`.
 
 `--format json` payload:
 
@@ -635,14 +654,15 @@ load or run raises a clean error (exit 1), never a raw traceback.
 ```
 
 `accuracy` is present only when `--expected` is given. `energy` is
-`null` on the host reference run shown above (Phase A -- there is no
-on-device sampler yet); once a real bench run attaches one, it is a
-structured object: `{"source": "measured", "scope":
-"carrier-rail-delta", "value_mj_per_inference", "rails",
-"n_inferences", "window_ms", "sample_count", "spread_mj"}`. `source`
-and `scope` are fixed, validated labels -- `energy` is only ever
-`null` or that honest board-level-delta shape, never a fabricated or
-silicon-scoped number.
+`null` on the host reference run shown above (no `--on-device`); with
+`--on-device` and a successful bench run it is a structured object:
+`{"source": "measured", "scope": "carrier-rail-delta",
+"value_mj_per_inference", "rails", "n_inferences", "window_ms",
+"sample_count", "spread_mj"}`. `source` and `scope` are fixed,
+validated labels -- `energy` is only ever `null` or that honest
+board-level-delta shape, never a fabricated or silicon-scoped number,
+and a failed `--on-device` run exits non-zero rather than emitting a
+payload with `energy: null` (see above).
 
 #### `tan model ab` -- A/B two models on the host (latency + size)
 
