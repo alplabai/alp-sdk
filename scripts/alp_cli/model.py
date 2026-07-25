@@ -494,9 +494,14 @@ def run_cmd(model: Path, input_path: Path | None, expected: int | None, runs: in
     click.echo(f"  [{r.backend}] latency {r.latency_ms} ms (median of {r.runs})  "
                f"argmax {r.output_argmax}  sram {r.peak_sram_kib}  power {r.power_mj}")
     if on_device_diag is not None:
-        click.echo(f"  on-device: device-reported {on_device_diag['device_value_mj_per_inference']} "
-                   f"mJ/inference  (host/device ratio {on_device_diag['host_vs_device_ratio']}, "
-                   f"cycles/s used {on_device_diag['cycles_per_s_used']})")
+        device_value = on_device_diag["device_value_mj_per_inference"]
+        if device_value is None:
+            click.echo("  on-device: device cross-check unavailable (no ENERGY-RESULT "
+                       f"line in capture)  cycles/s used {on_device_diag['cycles_per_s_used']}")
+        else:
+            click.echo(f"  on-device: device-reported {device_value} mJ/inference  "
+                       f"(host/device ratio {on_device_diag['host_vs_device_ratio']}, "
+                       f"cycles/s used {on_device_diag['cycles_per_s_used']})")
     if expected is not None:
         click.echo(f"  accuracy: top1 {'MATCH' if payload['accuracy']['match'] else 'MISS'} (expected {expected})")
     click.echo(f"  note: {_HOST_NOTE}")

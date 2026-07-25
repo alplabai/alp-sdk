@@ -12,12 +12,25 @@ build/run failure, or a malformed capture all raise `OnDeviceError` rather
 than silently returning `energy=None` (a null would read as "measured
 nothing" when the truth is "the bench run failed").
 
-Console protocol (owned by the on-target app, treated as fixed here):
-  ENERGY-CFG {"rail":..., "power_lsb_w":..., "cycles_per_s":..., "n_inferences":...,
-              "windows":..., "npu_dispatched":...}          -- one header line
+Console protocol (owned by the on-target app, treated as fixed here -- see
+examples/aen/aen-inference-energy/src/main.cpp for the printk calls that are
+the actual source of truth):
+  ENERGY-CFG {"rail":..., "power_lsb_w":..., "cycles_per_s":..., "windows":...,
+              "npu_dispatched":...}                         -- one header line.
+              There is NO "n_inferences" key here -- inference count is
+              measured per window, not configured, so it lives in ENERGY-W.
   ENERGY-S <window> <phase> <cycles> <power_raw>             -- many sample lines
-  ENERGY-W <window> <phase> <n_samples> <span_cycles> <span_ms_uptime>  -- one per window/phase
+  ENERGY-W <window> <phase> <n_samples> <span_cycles> <span_ms> <inferences>
+                                                              -- one per window/phase;
+              <inferences> is that window's completed inference count (0 for idle)
+              and the ONLY source of the per-inference divisor.
   ENERGY-RESULT {"value_mj_per_inference":..., "spread_mj":...}         -- one line, cross-check only
+Tolerated diagnostic lines, never crashed on (surfaced in capture_diagnostics()
+where useful, or simply ignored): ENERGY-SCAN, ENERGY-WARN, ENERGY-WERR. ENERGY-WPART is
+the one exception -- it means the printed sample stream is shorter than what
+the device integrated, so host re-integration of that window is invalid, and
+parse_console() raises OnDeviceError for it rather than silently returning an
+energy computed from a partial window.
 Any other line (Zephyr banner, other printk) is ignored."""
 from __future__ import annotations
 
@@ -71,23 +84,34 @@ class OnDeviceError(Exception):
 @dataclass(frozen=True)
 class ParsedCapture:
     """A tolerantly-parsed on-target console capture. `samples` and
-    `uptime_spans` are keyed [window_index][phase] ("active"/"idle")."""
+    `uptime_spans` are keyed [window_index][phase] ("active"/"idle").
+    `werr`/`warn` are the raw ENERGY-WERR/ENERGY-WARN lines seen, in capture
+    order -- surfaced verbatim in capture_diagnostics() so a degraded run
+    (I2C errors, a timed-out window, a too-long span) stays visible instead
+    of silently vanishing into a clean-looking energy figure."""
     cfg: dict[str, Any]
     samples: dict[int, dict[str, list[tuple[int, int]]]]
-    uptime_spans: dict[int, dict[str, tuple[int, int, float]]]  # (n, span_cycles, span_ms)
+    uptime_spans: dict[int, dict[str, tuple[int, int, float, int]]]  # (n, span_cycles, span_ms, inferences)
     device_result: dict[str, Any] | None
+    werr: list[str]
+    warn: list[str]
 
 
 def parse_console(text: str) -> ParsedCapture:
-    """Tolerant of interleaved noise (Zephyr banner, other printk lines) --
-    only the four `ENERGY-*` prefixes are recognised, everything else is
-    ignored. Raises OnDeviceError on a missing/malformed header, zero
-    windows, or any window/phase with fewer than 2 samples (no interval to
-    integrate)."""
+    """Tolerant of interleaved noise (Zephyr banner, other printk lines,
+    ENERGY-SCAN) -- only the recognised `ENERGY-*` prefixes are acted on.
+    Raises OnDeviceError on a missing/malformed header, zero windows, any
+    window/phase with fewer than 2 samples (no interval to integrate), an
+    ENERGY-W line from an older 5-field firmware image (no per-window
+    inference count), or an ENERGY-WPART line (the emitted sample stream is
+    shorter than what the device integrated, so host re-integration of that
+    window would be invalid)."""
     cfg: dict[str, Any] | None = None
     samples: dict[int, dict[str, list[tuple[int, int]]]] = {}
-    uptime_spans: dict[int, dict[str, tuple[int, int, float]]] = {}
+    uptime_spans: dict[int, dict[str, tuple[int, int, float, int]]] = {}
     device_result: dict[str, Any] | None = None
+    werr: list[str] = []
+    warn: list[str] = []
 
     for raw_line in text.splitlines():
         line = raw_line.strip()
@@ -107,20 +131,38 @@ def parse_console(text: str) -> ParsedCapture:
             samples.setdefault(w_i, {}).setdefault(parts[2], []).append((cycles, power_raw))
         elif line.startswith("ENERGY-W "):
             parts = line.split()
-            if len(parts) != 6 or parts[2] not in ("active", "idle"):
+            if len(parts) == 6 and parts[2] in ("active", "idle"):
+                raise OnDeviceError(
+                    f"ENERGY-W line has 5 fields, no per-window inference count: {line!r} -- "
+                    "this capture is from an older firmware image that predates per-window "
+                    "ENERGY-W inference reporting; re-flash the current "
+                    "aen-inference-energy build")
+            if len(parts) != 7 or parts[2] not in ("active", "idle"):
                 raise OnDeviceError(f"malformed ENERGY-W line: {line!r}")
             try:
                 w_i = int(parts[1])
-                span = (int(parts[3]), int(parts[4]), float(parts[5]))
+                span = (int(parts[3]), int(parts[4]), float(parts[5]), int(parts[6]))
             except ValueError as exc:
                 raise OnDeviceError(f"malformed ENERGY-W line: {line!r}") from exc
             uptime_spans.setdefault(w_i, {})[parts[2]] = span
+        elif line.startswith("ENERGY-WPART "):
+            parts = line.split()
+            if len(parts) < 3 or parts[2] not in ("active", "idle"):
+                raise OnDeviceError(f"malformed ENERGY-WPART line: {line!r}")
+            raise OnDeviceError(
+                f"window {parts[1]} phase {parts[2]!r} emitted a partial sample stream "
+                f"({line!r}) -- the device integral is authoritative for this build and "
+                "--on-device cannot re-derive energy from a partial window")
+        elif line.startswith("ENERGY-WERR "):
+            werr.append(line)
+        elif line.startswith("ENERGY-WARN "):
+            warn.append(line)
         elif line.startswith("ENERGY-RESULT "):
             try:
                 device_result = json.loads(line[len("ENERGY-RESULT "):])
             except json.JSONDecodeError as exc:
                 raise OnDeviceError(f"malformed ENERGY-RESULT line: {line!r}") from exc
-        # else: not one of the four prefixes -- banner/printk noise, ignored.
+        # else: not a recognised prefix -- banner/printk noise (incl. ENERGY-SCAN), ignored.
 
     if cfg is None:
         raise OnDeviceError("no ENERGY-CFG header line found in capture")
@@ -133,7 +175,7 @@ def parse_console(text: str) -> ParsedCapture:
                     f"window {w_i} phase {phase!r} has {len(points)} sample(s); need >= 2")
 
     return ParsedCapture(cfg=cfg, samples=samples, uptime_spans=uptime_spans,
-                         device_result=device_result)
+                         device_result=device_result, werr=werr, warn=warn)
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +203,7 @@ def _measured_cycles_per_s(parsed: ParsedCapture) -> float | None:
     cycles_per_s constant. None when there are no ENERGY-W lines at all."""
     rates = [span_cycles / span_ms * 1000.0
              for phases in parsed.uptime_spans.values()
-             for (_n, span_cycles, span_ms) in phases.values() if span_ms > 0]
+             for (_n, span_cycles, span_ms, _inf) in phases.values() if span_ms > 0]
     return median(rates) if rates else None
 
 
@@ -174,7 +216,7 @@ def _effective_cycles_per_s(parsed: ParsedCapture) -> float:
         return dt
     rates = [span_cycles / span_ms * 1000.0
              for phases in parsed.uptime_spans.values()
-             for (_n, span_cycles, span_ms) in phases.values() if span_ms > 0]
+             for (_n, span_cycles, span_ms, _inf) in phases.values() if span_ms > 0]
     if (max(rates) - min(rates)) / measured > _CYCLES_PER_S_TOLERANCE:
         return dt
     return measured
@@ -182,34 +224,50 @@ def _effective_cycles_per_s(parsed: ParsedCapture) -> float:
 
 def measurement_from_capture(parsed: ParsedCapture) -> EnergyMeasurement:
     """Per (active, idle) window pair: convert samples to (t, watts), call
-    the PURE `windowed_delta()` once. `value_mj_per_inference` is the mean
-    across windows, `spread_mj` the sample stdev (None for a single window).
-    `window_ms` is the mean active-window duration; `sample_count` totals
-    every sample (both phases) across every window used."""
+    the PURE `windowed_delta()` once, dividing by THAT WINDOW's own active
+    inference count (ENERGY-W's 6th field -- inference count is measured
+    per window, not a single config-wide constant; there is no
+    `cfg["n_inferences"]`, ENERGY-CFG never carries one). `value_mj_per_inference`
+    is the mean across windows, `spread_mj` the sample stdev (None for a
+    single window). `window_ms` is the mean active-window duration;
+    `sample_count` totals every sample (both phases) across every window
+    used; `EnergyMeasurement.n_inferences` is the sum of every window's
+    active-phase inference count actually used."""
     cfg = parsed.cfg
     cycles_per_s = _effective_cycles_per_s(parsed)
     power_lsb_w = float(cfg["power_lsb_w"])
-    n_inferences = int(cfg["n_inferences"])
 
     per_window_mj: list[float] = []
     window_ms_list: list[float] = []
     total_samples = 0
+    total_inferences = 0
     for w_i in sorted(parsed.samples.keys()):
         phases = parsed.samples[w_i]
         if "active" not in phases or "idle" not in phases:
             raise OnDeviceError(f"window {w_i} is missing an active or idle phase")
+        active_span = parsed.uptime_spans.get(w_i, {}).get("active")
+        if active_span is None:
+            raise OnDeviceError(
+                f"window {w_i} has no ENERGY-W line for phase 'active' -- cannot recover "
+                "its per-inference divisor")
+        n_inferences = active_span[3]
+        if n_inferences < 1:
+            raise OnDeviceError(
+                f"window {w_i} active phase completed 0 inferences (ENERGY-W reports "
+                f"inferences={n_inferences}) -- no valid mJ/inference divisor for this pair")
         active = _samples_to_power(phases["active"], cycles_per_s, power_lsb_w)
         idle = _samples_to_power(phases["idle"], cycles_per_s, power_lsb_w)
         per_window_mj.append(windowed_delta(active, idle, n_inferences))
         window_ms_list.append((active[-1][0] - active[0][0]) * 1000.0)
         total_samples += len(active) + len(idle)
+        total_inferences += n_inferences
 
     value = per_window_mj[0] if len(per_window_mj) == 1 else mean(per_window_mj)
     spread = None if len(per_window_mj) < 2 else stdev(per_window_mj)
     return EnergyMeasurement(
         value_mj_per_inference=value,
         rails=[cfg["rail"]],
-        n_inferences=n_inferences,
+        n_inferences=total_inferences,
         window_ms=mean(window_ms_list),
         sample_count=total_samples,
         spread_mj=spread,
@@ -219,8 +277,10 @@ def measurement_from_capture(parsed: ParsedCapture) -> EnergyMeasurement:
 def capture_diagnostics(parsed: ParsedCapture) -> dict:
     """Everything `EnergyMeasurement` (frozen, fixed field set) can't carry:
     which cycles_per_s won the DT-vs-measured reconciliation (and both raw
-    values), the device's own self-reported result as a cross-check, and the
-    host/device ratio."""
+    values), the device's own self-reported result as a cross-check, the
+    host/device ratio, and any degraded-run evidence (ENERGY-WERR/ENERGY-WARN
+    lines, `npu_dispatched: false`) so a degraded capture stays visible
+    rather than looking identical to a clean one."""
     dt = float(parsed.cfg["cycles_per_s"])
     measured = _measured_cycles_per_s(parsed)
     used = _effective_cycles_per_s(parsed)
@@ -236,6 +296,8 @@ def capture_diagnostics(parsed: ParsedCapture) -> dict:
         "host_vs_device_ratio": ratio,
         "npu_dispatched": bool(parsed.cfg.get("npu_dispatched", False)),
         "windows": sorted(parsed.samples.keys()),
+        "werr_lines": list(parsed.werr),
+        "warn_lines": list(parsed.warn),
     }
 
 
