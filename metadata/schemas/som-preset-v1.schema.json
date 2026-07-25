@@ -147,7 +147,7 @@
           "type": "array",
           "minItems": 1,
           "items": { "$ref": "#/$defs/npu_instance" },
-          "description": "Per-instance NPU population.  REQUIRED for NPU-bearing (`ethos_u`) SoMs; each entry names the variant, the silicon's role label, and the host core/subsystem it pairs with."
+          "description": "Per-instance NPU population — one entry per Ethos-U instance exposed on the module, naming only its `variant`.  REQUIRED for NPU-bearing (`ethos_u`) SoMs.  Instance detail (subtype, MAC size, paired host core) is silicon-determined and sourced from the SoC JSON `npus[]` — not restated here."
         }
       },
       "allOf": [
@@ -327,22 +327,12 @@
     "npu_instance": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["variant", "role", "paired_with"],
+      "required": ["variant"],
       "properties": {
         "variant": {
           "type": "string",
           "pattern": "^u[0-9]+$",
-          "description": "Ethos-U variant of this instance (`u55`, `u65`, `u85`)."
-        },
-        "role": {
-          "type": "string",
-          "pattern": "^[A-Za-z0-9_-]+$",
-          "description": "Silicon's role label for the instance (e.g. `NPU-HE`, `NPU-HP`, `NPU-HG`)."
-        },
-        "paired_with": {
-          "type": "string",
-          "pattern": "^[A-Za-z0-9_-]+$",
-          "description": "Host core / subsystem the instance is paired with (e.g. `M55-HE`, `HG-subsystem`).  `TBD` when the pairing awaits the HW-config writeup."
+          "description": "Ethos-U variant of this instance (`u55`, `u65`, `u85`).  The instance's role/subtype, MAC size, and the host core it pairs with are silicon facts and live once in the SoC JSON (`npus[].subtype` / `mac_per_cycle` / `paired_core`) — a SoM preset does not restate them."
         }
       }
     },

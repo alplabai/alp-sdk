@@ -63,9 +63,9 @@ inference:
   preferred_backend:    ethos_u                # E8 ships Ethos-U85 alongside two U55s.
   ethos_u_variant:      u85                    # primary.
   npu_population:
-    - { variant: u55, role: NPU-HE, paired_with: M55-HE }
-    - { variant: u55, role: NPU-HP, paired_with: M55-HP }
-    - { variant: u85, role: NPU-HG, paired_with: HG-subsystem }
+    - { variant: u55 }
+    - { variant: u55 }
+    - { variant: u85 }
 
 capabilities:
   optiga_trust_m:       true

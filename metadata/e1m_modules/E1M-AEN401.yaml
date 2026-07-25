@@ -59,9 +59,9 @@ inference:
   # shim picks the instance at runtime based on which M55 / HG
   # subsystem the firmware runs on.
   npu_population:
-    - { variant: u55, role: NPU-HE, paired_with: M55-HE }       # High-Efficiency subsystem.
-    - { variant: u55, role: NPU-HP, paired_with: M55-HP }       # High-Performance subsystem.
-    - { variant: u85, role: NPU-HG, paired_with: HG-subsystem } # Hyper-Generative NPU.
+    - { variant: u55 }       # High-Efficiency subsystem.
+    - { variant: u55 }       # High-Performance subsystem.
+    - { variant: u85 } # Hyper-Generative NPU.
 
 capabilities:
   optiga_trust_m:       true
