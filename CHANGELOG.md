@@ -26,6 +26,35 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   (`_check_soc_npu_pairing`) enforces the single source: every `paired_core`
   must name a real `cores[].id`, and a type carrying more than one distinct
   `mac_per_cycle` must pair every instance (#938).
+### Added — I3C joins the portable-API conformance suite
+
+`tests/zephyr/conformance/` exercises each portable `<alp/*>` class against a
+common contract, keyed on `ALP_CAP_ID_HW_*`.  The I3C class shipped in #926
+without a row: the 16-step plan for that PR never named the suite,
+`check_test_coverage.py` passed without it, and `ALP_CAP_ID_HW_I3C` did not
+exist until #926 itself added it — so the row was hard-blocked at the time.
+
+Adds the row now that the enum value exists.  Shape mirrors `i2c` (open a bus by
+form-factor id, blocking transfer against a target address), with
+`null_handle_call` using `alp_i3c_write` as the simplest op that must reject a
+NULL handle without touching the bus.  Marked `sim_backed = false` — Zephyr
+ships no I3C emulator, so the suite contract-checks the class rather than
+exercising it, exactly as it already does for `dac`, `can` and `rtc`.
+
+Verified on `native_sim/native/64`: 93 of 93 cases pass, and the new rows do
+execute rather than silently skip —
+
+```
+conformance[i3c]: degrade path -- no instance 0 on this build, open refused with -6 (failure contract validated)
+conformance[i3c]: degrade path -- no instance to double-close (NULL-close covered by case C)
+```
+
+Note the class stays `[ABI-EXPERIMENTAL]`: controller init is bench-proven on
+E1M-AEN801 (#926), but a live transfer is still unproven because no I3C target
+is populated on the bench carrier.  The conformance row asserts the contract the
+class guarantees today and implies no transfer coverage.
+
+Closes #937.
 
 ### Added — `metadata/bootstrap.json`: the cross-platform bootstrap facts as data
 
