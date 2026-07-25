@@ -91,7 +91,6 @@
     "adc_24bit": 1,
     "dac_12bit": 2,
     "comparator_hs": 4,
-    "comparator_lp": 1,
     "gpio_18v": 120,
     "gpio_18v_or_33v": 8,
     "timer_32bit": 12,
@@ -233,6 +232,7 @@
     }
   ],
   "notes": [
+    "2026-07-25 DFP SVD audit (Debug/SVD/AE302F80F55D5AE_CM55_HE_View.svd): removed `comparator_lp` (was 1).  This part's SVD peripheral list carries CMP0..CMP3 but NO LPCMP, while the E8 SVD (AE822FA0E5597BS0) carries both -- the low-power comparator is a FA0E5597-generation block this part does not have.  Same defect and same fix as E7 in #932; E3/E5 were out of that pass's reach because the DFP ships no Device/soc/ directory for them, only an SVD.  Per the file convention an absent key means zero instances (no SoC JSON sets a peripheral to 0).  Also re-confirmed correct against the same SVD: i2c_lp 1, spi_lp 1, no i3c_lp, i2c 4, spi 4, uart 8, i2s 4, adc_12bit 3, dac_12bit 2, comparator_hs 4, can_fd 1, ethernet 1, usb_2 1, sdio 1, rtc 1.",
     "Datasheet: 187 pages, ADTS0007 v2.8 May 2024.",
     "Variants differ in NPU-HP presence, CAN-FD presence, MRAM size (5.5 MB vs 1.5 MB), and SRAM tier (13.5 / 8.25 / 5.75 / 3.75 MB).",
     "AE302F80F55D5LE is the variant Alp Lab uses on the E1M-AEN301 module SKU."
