@@ -7,6 +7,29 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.14.0 candidate
 
+### Fixed — `scripts/bootstrap.sh` silently ran `cargo install` on every completed run
+
+- The closing "Next steps" block used an **unquoted** heredoc tag
+  (`cat <<EOF`).  Its body documents the `tan` install with the command
+  in backticks, and an unquoted heredoc performs command substitution on
+  its body — so the backticked
+  `cargo install --git https://github.com/alplabai/tan-cli --bin tan`
+  was executed as a real command by every completed
+  `bash scripts/bootstrap.sh`, reinstalling `tan` from git tip behind the
+  user's back and pasting cargo's output into the printed instructions in
+  place of the text.  Reproduced on a clean checkout: the run reaches the
+  network (`Updating git repository ...`) and the line renders mangled as
+  `# for ):`.
+- The block is now split in two: only the first part (which genuinely
+  interpolates `${VENV_DIR}` / `${WORKSPACE_DIR}`) keeps an unquoted tag,
+  and the documentation half uses a quoted `<<'EOF'` tag so nothing in it
+  is executed.  The quoted tag also makes backslashes literal, so the
+  line continuation and `$PWD` in the example are written plainly instead
+  of escaped.
+- Pre-existing on `main` and `dev`, so it affects released versions.  The
+  other four heredocs in the script were audited and contain no backticks
+  or `$(...)`.
+
 ## [v0.13.0] - 2026-07-24
 
 ### Added — `--emit kconfig`: board-scoped Kconfig symbol menu for the LSP

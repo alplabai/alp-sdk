@@ -302,6 +302,8 @@ esac
 
 echo
 ok "Bootstrap complete."
+# Split into two heredocs on purpose.  Only this first block has variables
+# left to expand, so only it gets an UNQUOTED tag.
 cat <<EOF
 
 Next steps:
@@ -311,6 +313,15 @@ Next steps:
   # Make Zephyr reachable for builds:
   export ZEPHYR_BASE="${WORKSPACE_DIR}/zephyr"
   export ZEPHYR_TOOLCHAIN_VARIANT=zephyr
+EOF
+# QUOTED tag (<<'EOF') -- mandatory, not stylistic.  This block documents
+# shell commands, and an unquoted tag makes the shell treat the backtick'd
+# `cargo install ...` line below as a real command SUBSTITUTION: every
+# completed run of this script silently executed it, reinstalling tan from
+# git tip behind the user's back, and pasted its output here instead of the
+# text.  A quoted tag also means backslashes are literal, so the line
+# continuation and $PWD below are written plainly rather than escaped.
+cat <<'EOF'
 
   # Sanity-check the host environment (needs tan on PATH -- see README.md
   # for `cargo install --git https://github.com/alplabai/tan-cli --bin tan`):
@@ -320,8 +331,8 @@ Next steps:
   bash scripts/test-all.sh
 
   # Or jump straight into building an example:
-  west build -b native_sim/native/64 examples/peripheral-io/uart-echo \\
-      -- -DEXTRA_ZEPHYR_MODULES=\$PWD
+  west build -b native_sim/native/64 examples/peripheral-io/uart-echo \
+      -- -DEXTRA_ZEPHYR_MODULES=$PWD
 
 References:
   - docs/testing.md          -- full test-coverage map + how to run from scratch
