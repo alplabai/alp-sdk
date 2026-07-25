@@ -120,7 +120,7 @@ def test_new_som_ethos_u_requires_variant(tmp_path: Path):
     assert "--ethos-u-variant" in result.output
 
 
-def test_new_som_ethos_u_populates_npu_table_with_tbd_pairings(tmp_path: Path):
+def test_new_som_ethos_u_populates_npu_table_with_variant_only(tmp_path: Path):
     result = _run(
         tmp_path, ["--inference-backend", "ethos_u", "--ethos-u-variant", "u65"]
     )
@@ -131,7 +131,7 @@ def test_new_som_ethos_u_populates_npu_table_with_tbd_pairings(tmp_path: Path):
     )
     assert doc["inference"]["ethos_u_variant"] == "u65"
     assert doc["inference"]["npu_population"] == [
-        {"variant": "u65", "role": "TBD", "paired_with": "TBD"}
+        {"variant": "u65"}
     ]
     errors = _validate(doc, SOM_SCHEMA)
     assert not errors, [e.message for e in errors]

@@ -290,9 +290,12 @@ on_module:
 inference:
   preferred_backend:    ethos_u
   ethos_u_variant:      u85
+  # One row per populated NPU instance, naming only the variant.  The
+  # instance's subtype, MAC size and paired host core are silicon facts
+  # sourced from the SoC JSON npus[] (subtype / mac_per_cycle / paired_core).
   npu_population:
-    - { variant: u85, role: NPU-HP, paired_with: M55-HP }
-    - { variant: u55, role: NPU-HE, paired_with: M55-HE }
+    - { variant: u85 }
+    - { variant: u55 }
 
 # SoM-side extensions to silicon capabilities.  The loader merges
 # this on top of soc_spec.capabilities at codegen time (see

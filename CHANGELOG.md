@@ -7,6 +7,26 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.14.0 candidate
 
+### Changed — Ethos-U accelerator sized per target core; NPU→core pairing single-sourced in the SoC JSON
+
+- The build emit (`_emit_inference`) now sizes the Ethos-U accelerator
+  (`CONFIG_ETHOS_U{55,85}_<mac>`) from the NPU instance paired with the
+  target core, not the SoC's most-capable instance.  On the Alif E3/E5/E7 —
+  which carry a 256-MAC high-perf Ethos-U55 (M55-HP) and a 128-MAC
+  high-efficiency Ethos-U55 (M55-HE) — an `m55_he` inference slice used to
+  emit `CONFIG_ETHOS_U55_256`; the HE core drives the 128-MAC U55 and a
+  256-MAC command stream errors that NPU at invoke (register-proven on E8).
+  A new `npus[].paired_core` field in the SoC JSON (`$defs/npu` schema) wires
+  each instance to its `cores[].id`; the emit fails loudly if a multi-MAC
+  variant is unpaired rather than guessing (#934).
+- The NPU→core pairing is now single-sourced in the SoC JSON.  The SoM
+  preset `inference.npu_population[].role` / `paired_with` fields — dead
+  documentation no code read, scaffolded as `TBD` — are removed; an entry is
+  now `{ variant }` only.  A `validate_metadata` gate
+  (`_check_soc_npu_pairing`) enforces the single source: every `paired_core`
+  must name a real `cores[].id`, and a type carrying more than one distinct
+  `mac_per_cycle` must pair every instance (#938).
+
 ### Added — `metadata/bootstrap.json`: the cross-platform bootstrap facts as data
 
 - New committed, schema-validated manifest

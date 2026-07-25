@@ -1055,12 +1055,13 @@ def _emit_inference(
     inference_lines.append(tflm_kernel_kc)
 
     # ---- G-1 -- per-variant Ethos-U selector ---------------------
-    # Prefer the SoM preset's `inference.npu_population[]` (richer --
-    # also names the role + paired-core); fall back to the capability
-    # counts (ethos_u{55,65,85}_count) for SoMs that haven't yet
-    # declared the per-instance block.  Both AEN401 / AEN601 / AEN801
-    # populate npu_population[]; AEN801 declares U55s there too; the
-    # i.MX 93 SoM relies on the capability-count fallback today.
+    # Which Ethos-U variants this SoM carries -- read the SoM preset's
+    # `inference.npu_population[].variant`; fall back to the capability
+    # counts (ethos_u{55,65,85}_count) for SoMs that haven't yet declared
+    # the per-instance block.  Both AEN401 / AEN601 / AEN801 populate
+    # npu_population[] (variant only -- instance subtype/MAC/paired-core are
+    # silicon facts in the SoC npus[]); the i.MX 93 SoM relies on the
+    # capability-count fallback today.
     ethos_variants: set[str] = set()
     npu_pop = (project.som_preset.get("inference") or {}).get("npu_population") or []
     for entry in npu_pop:
