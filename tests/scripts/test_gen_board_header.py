@@ -345,11 +345,22 @@ def test_real_evk_header_covers_mux_enums_and_pad_indices(gen_module):
         "EVK_PIN_CK_RST": 9,
         "EVK_PIN_CTP_INT": 10,
     }
+    # Bind each macro to ITS OWN offset.  A membership test ("is the string
+    # `(EVK_PIN_OVERLAY_BASE + 5u)` somewhere in the file") is permutation-
+    # blind: swap two entries in the YAML and every expected substring is
+    # still present, so two Arduino header pins can point at each other's
+    # silicon pads with this test green.  Extract macro -> offset the same
+    # way the enum branch above does, and compare the pair.
+    found_pads = dict(
+        re.findall(
+            r"#define\s+(EVK_PIN_[A-Z0-9_]+)\s+\(EVK_PIN_OVERLAY_BASE \+ (\d+)u\)",
+            out,
+        )
+    )
     for macro, offset in pad_offsets.items():
-        expected = f"(EVK_PIN_OVERLAY_BASE + {offset}u)"
-        assert expected in out, (
-            f"{macro}'s expected value {expected!r} not found -- pad-index "
-            f"offset drifted from the hand-authored original"
+        assert found_pads.get(macro) == str(offset), (
+            f"{macro} = {found_pads.get(macro)!r}, expected {str(offset)!r} -- "
+            f"pad-index offset drifted from the hand-authored original"
         )
 
 
