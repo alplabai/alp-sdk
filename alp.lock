@@ -1,6 +1,6 @@
 {
   "digests": {
-    "metadata": "sha256:ab186f519cc9a3c42c6043b24c2d2b19aa9bd47eef1b123a222db95cdb3435da",
+    "metadata": "sha256:db6d73221a4af3ebf637f15bd34d9d69199f47cf4a0586818acf7656f82b3026",
     "schemas": "sha256:db169e2270d7960cfd1998797463af848cc2a9c38cfc1eb7c559c63906d8599f"
   },
   "generatedBy": "west alp-lock",
@@ -51,7 +51,7 @@
       "license": "Apache-2.0",
       "name": "coap",
       "revision": null,
-      "version": "4.4.0"
+      "version": "4.4.1"
     },
     {
       "license": "MIT",
@@ -111,7 +111,7 @@
       "license": "Apache-2.0",
       "name": "lwm2m",
       "revision": null,
-      "version": "4.4.0"
+      "version": "4.4.1"
     },
     {
       "license": "MIT",
@@ -147,7 +147,7 @@
       "license": "Apache-2.0",
       "name": "modbus",
       "revision": null,
-      "version": "4.4.0"
+      "version": "4.4.1"
     },
     {
       "license": "Zlib",
@@ -213,7 +213,7 @@
     "groupsEnabled": []
   },
   "sdk": {
-    "revision": "044fc359e2936a59e8836de6c6b87a84ec07eaa6",
+    "revision": "0d666e2c282814878395169d14813e9ab2dce62f",
     "version": "0.13.0"
   },
   "west": {
@@ -384,7 +384,7 @@
       {
         "groups": [],
         "name": "zephyr",
-        "revision": "v4.4.0"
+        "revision": "v4.4.1"
       }
     ]
   }

@@ -265,7 +265,7 @@ top of the per-subsystem checks.
 > AEN701 (E7) is deprioritised and may never be produced -- AEN801
 > supersedes it (it adds the Ethos-U85 on top of the U55 pair), so
 > bench bring-up centres on the **E8** part.  E8 is fully supported on
-> **alp-sdk's own upstream Zephyr base (v4.4.0)** -- no fork needed,
+> **alp-sdk's own upstream Zephyr base (v4.4.1)** -- no fork needed,
 > backed by the `hal_alif` module pinned in our `west.yml`.
 >
 > The **primary target is the Alp-Lab carrier board**, now authored +

@@ -15,7 +15,7 @@ iteration cycle for the same checks.
 
 | Piece                          | Why                                                 |
 |--------------------------------|-----------------------------------------------------|
-| Zephyr v4.4.0 (pinned)         | Twister, board files, the kernel itself.            |
+| Zephyr v4.4.1 (pinned)         | Twister, board files, the kernel itself.            |
 | Zephyr SDK 1.0.1 (arm-eabi)    | Cross-compiler for the `*.aen` scenarios — optional for native_sim. |
 | System gcc + g++               | `native_sim/native/64` builds use host gcc (CI does the same). |
 | `dtc` (devicetree compiler)    | Preprocesses board `.dts` files.                    |
@@ -51,11 +51,11 @@ This is the path that matches GitHub Actions exactly.
    pip3 install --user west
    ```
 
-3. **Clone Zephyr v4.4.0 into your home directory.**  This keeps
+3. **Clone Zephyr v4.4.1 into your home directory.**  This keeps
    the workspace on WSL's native ext4 (Linux file-system speed),
    not the slower 9P mount of `C:\`:
    ```sh
-   west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.4.0 ~/zephyrproject
+   west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.4.1 ~/zephyrproject
    cd ~/zephyrproject
    west update
    pip3 install --user -r zephyr/scripts/requirements.txt
@@ -139,7 +139,7 @@ builds are not supported on Windows by upstream Zephyr.
 4. **Initialise the Zephyr workspace** somewhere off `C:\`'s root
    (Windows MAX_PATH bites long build paths):
    ```pwsh
-   west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.4.0 C:\dev\zephyrproject
+   west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.4.1 C:\dev\zephyrproject
    cd C:\dev\zephyrproject
    west update
    python -m pip install --user -r zephyr\scripts\requirements.txt
@@ -203,6 +203,6 @@ the metadata schema violations, the loader's emitter logic.
   walkthrough for the **consumer** path (you're using the SDK in
   an application).  This page is the **contributor** equivalent.
 - [`docs/zephyr-version-policy.md`](zephyr-version-policy.md) --
-  why we pin to v4.4.0.
+  why we pin to v4.4.1.
 - [`docs/troubleshooting.md`](troubleshooting.md) -- diagnostic
   cookbook for common build failures.

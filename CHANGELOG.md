@@ -358,6 +358,135 @@ covers it), `<alp/display.h>` (the generic Zephyr-display wrapper already serves
 CDC200), `<alp/dsp.h>` (CMSIS-DSP Helium is already the E8 path), `<alp/tmu.h>`
 (E8 has no CORDIC hardware).
 
+### Added — `check_bootstrap_manifest.py --fix`: the pin propagator
+
+- Bumping `metadata/bootstrap.json`'s `zephyr.version` used to mean an
+  error-prone manual sweep across 8 dependent sites (`west.yml`, four CI
+  workflows' `--mr`/cache-key pins, and the README badge) with only the
+  existing gate to catch a missed one after the fact. `--fix` closes the
+  loop: it rewrites every one of those sites FROM the manifest, reusing
+  the exact same compiled regexes/constants (`_WEST_YML_ZEPHYR_RE`,
+  `_WEST_MR_RE`, `_CACHE_KEY_RE`, `_README_BADGE_RE`) the verify-only
+  checks already read — deliberately no second, parallel pin map, which
+  would just be a new flavour of the drift issue #917 exists to kill. A
+  bump is now: edit one line in `metadata/bootstrap.json`, run `--fix`,
+  then run the gate with no flag to prove the propagation. Idempotent (a
+  site already at `zephyr.version` is left byte-for-byte untouched); a
+  site the gate expects but can no longer find/match is a hard failure
+  naming it, never a silent no-op. Writes with `newline=""` so the
+  rewrite never flips these LF-pinned (`.gitattributes` `eol=lf`) files
+  to CRLF on a Windows host — the same class of Windows-only-digest trap
+  `alp.lock`'s `_dir_digest` hit (see below). `--fix` does not touch
+  `scripts/bootstrap.sh`/`bootstrap.ps1` (they read `zephyr.version` at
+  run time and must never hardcode it — that is what the gate's existing
+  hardcoded-literal scan polices) or any prose doc/CHANGELOG history.
+
+### Changed — Zephyr v4.4.0 → v4.4.1 (patch bump)
+
+- `metadata/bootstrap.json` `zephyr.version` moves to `v4.4.1` (upstream
+  tag object `247e755247840abefa16136168b4a56682150f50` for
+  `refs/tags/v4.4.1`, which dereferences to commit
+  `1f6485eca25431b5ff27ce9a754218c9e559bbbb` -- `--mr v4.4.1` resolves to
+  that commit, not the tag object, so this distinction matters for anyone
+  diffing the quoted SHA against a checked-out workspace HEAD), applied
+  to every dependent machine-pin site via the new `--fix` propagator above
+  — this bump is also its first real-world proof. Per
+  [`docs/zephyr-version-policy.md`](docs/zephyr-version-policy.md)'s "When
+  we bump" table, a patch bump within the same LTS/stable line carries
+  **no visible API change** and rolls into the next alp-sdk patch release
+  automatically — `metadata/sdk_version.yaml` is deliberately NOT bumped
+  and there is no accompanying tag/release for this change. `SDK_VERSION`
+  (the separate Zephyr SDK toolchain pin, `1.0.1`) and the `west>=0.14.0`
+  floor are unaffected; MAJOR.MINOR stays `4.4`, so
+  `bootstrap.sh`/`bootstrap.ps1`'s `PIN_MM` workspace-reuse check sees no
+  change either. Prose mentions of the pin updated by hand across
+  `docs/zephyr-version-policy.md`, `docs/getting-started.md`,
+  `docs/local-ci.md`, `docs/glossary.md`, `docs/troubleshooting.md`,
+  `docs/cli.md`, `docs/board-config-schema.md`, `docs/bring-up-aen.md`,
+  and CI-workflow comments in `pr-getting-started-aen801.yml`,
+  `pr-renode-sim-mode.yml`, and `pr-twister.yml` — a mechanical regex
+  sweep across prose/history is exactly how a CHANGELOG or an ADR gets
+  corrupted, so those stayed hand-edited, not `--fix`-swept.
+  The three in-tree-subsystem library manifests (`metadata/libraries/coap.yaml`,
+  `lwm2m.yaml`, `modbus.yaml`) had their `version:` field bumped to `4.4.1`
+  per the schema's "pinned upstream version" definition
+  (`metadata/schemas/library-v1.schema.json:31`) — their pinned upstream
+  version IS the pinned Zephyr release — and `docs/portability-matrix.md`
+  was regenerated (`scripts/gen_portability_matrix.py`) to pick up the new
+  `4.4.1` cells. Each manifest's in-file comments split two ways: the
+  `# Grounding (pinned Zephyr v4.4.0 workspace)` header and its
+  `$ZEPHYR_BASE/...:<line>` Kconfig citations are genuine provenance —
+  they record where a symbol was READ, in a v4.4.0 checkout, and stay at
+  `v4.4.0` on purpose; rewriting them would fabricate a re-transcription
+  that never happened. The `west.yml revision v4.4.0` cross-reference and
+  the `upstream version 4.4.0 ... PATCHLEVEL 0` bullet describe the PIN
+  itself, not the reading, so those move to `v4.4.1`/`PATCHLEVEL 1` along
+  with `west.yml`. `scripts/check_bootstrap_manifest.py` gained a new
+  verify check + `--fix` site for exactly this class of manifest (any
+  `metadata/libraries/*.yaml` with `integration.zephyr.module: null` **and**
+  `requires.os == [zephyr]` — the structural signal that distinguishes a
+  genuine in-tree Zephyr subsystem from alp-sdk's own in-tree libraries and
+  unpinned placeholders, which also carry `module: null` but pin their own
+  version) — this class of drift was previously unguarded, so a future
+  bump's `--fix` run would have left these three silently stale. ADR 0017's
+  Context section (`docs/adr/0017-alp-sdk-over-the-vendor-sdk.md:15`,
+  "alp-sdk targets one upstream Zephyr base (v4.4.0)") is left alone: it is
+  a present-tense statement of what the ADR's decision applied to at its
+  2026-06-15 acceptance, not the LTS-migration narrative (that lives in
+  `docs/zephyr-version-policy.md`'s "Migration note" above) — freezing an
+  ADR is defensible because it is a decision record, but it is a decision
+  record, not a narrative, and the two should not be conflated. The frozen
+  v3.7.0→v4.4.0 CHANGELOG entries above are left alone likewise, as history,
+  not live pin statements. **Peripheral re-verification (policy
+  step 4) is NOT claimed as done locally for this patch** — it runs via CI
+  twister (`pr-twister.yml`) and the nightly HIL job
+  (`nightly-aen-hil.yml`) against real E1M-AEN801 silicon, same as every
+  other pin bump.
+- `docs/zephyr-version-policy.md` dropped the dead "Zephyr CI docker image
+  `v0.27.4`" row from the "What's pinned today" table and its matching
+  bump-procedure bullet — no `container:`/`image:` line exists anywhere
+  in `.github/workflows/`, and `0.27.4` appeared nowhere else in the repo
+  outside CHANGELOG history, so both pointed at a pin that does not exist.
+  The bump procedure's step 3 now documents the fast path: edit
+  `metadata/bootstrap.json`'s `zephyr.version`, run `python3
+  scripts/check_bootstrap_manifest.py --fix` to propagate to `west.yml` +
+  the four CI workflows' `--mr`/cache-key pins + the README badge + every
+  in-tree-Zephyr-subsystem library manifest's `version:` field, then run
+  the plain (no-flag) check to prove it; prose docs, CHANGELOG history,
+  every manifest's provenance comments, and every other
+  `metadata/libraries/*.yaml` manifest (the ones pinning their own upstream
+  release/SHA) stay hand-edited. Steps 5–7 (the `sdk_version.yaml` bump,
+  the `[Unreleased]` CHANGELOG heading, and the tag/release) are now marked
+  LTS/minor-only — this patch bump stops after step 4, and the procedure
+  was previously silent about that split. The "Why LTS, not the latest"
+  CI-cost reason is corrected: it previously claimed a patch bump "stays
+  within the cache key" — wrong, the cache key embeds the full `X.Y.Z`, so
+  this very 4.4.0→4.4.1 bump changed every Zephyr cache key and forces the
+  same clean ~5 min rebuild a minor bump does.
+- `alp.lock` regenerated (`scripts/west_commands/alp_lock.py`) against the
+  bumped manifest; `west.zephyr.revision`, the provenance-only
+  `sdk.revision`, and `digests.metadata` moved — the last of those because
+  the in-tree-subsystem library manifests' provenance comments (finding
+  above) also changed bytes under `metadata/**`. Regenerating from a
+  CRLF-corrupted working tree bakes a Windows-only `_dir_digest` that reds
+  CI for everyone (bit this repo on f3d1ab72, and again earlier this
+  session) — `metadata/**/*.yaml` and `metadata/schemas/*.schema.json`
+  were normalized to LF first, and `alp.lock` itself was normalized to LF
+  after `alp_lock.py` wrote it (the script's own `open()`/`json.dump`
+  aren't newline-safe on Windows, the same class of trap).
+- `docs/abi/v0.5-sbom.spdx.json.template` deleted — a dead template
+  declaring `versionInfo: "v4.4.0"` and a matching
+  `.../tags/v4.4.0.tar.gz` downloadLocation, i.e. its own supply-chain pin
+  would have gone stale the moment this bump landed. Nothing consumed it:
+  `release.yml`, `scripts/gen_sbom.py`, and `scripts/check_sbom.py` all
+  build the real release SBOM as CycloneDX from `alp.lock`, never from
+  this SPDX template. Per the no-legacy-compat rule (no active customers;
+  delete cleanly, no tombstones), it is removed rather than bumped in
+  place. `docs/v1.0-readiness.md:379` claimed this template was "wired
+  into `release.yml` as part of the artefact-generation step" — that was
+  never true — and is corrected to describe the actual `gen_sbom.py`/
+  `alp.lock` path instead.
+
 ## [v0.13.0] - 2026-07-24
 
 ### Added — `--emit kconfig`: board-scoped Kconfig symbol menu for the LSP

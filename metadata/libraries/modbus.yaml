@@ -7,12 +7,12 @@
 # Grounding (pinned Zephyr v4.4.0 workspace):
 #   * IN-TREE Zephyr subsystem -- NOT a separate west module.  It lives in the
 #     zephyr repo itself at subsys/modbus/ (west module `zephyr`, west.yml
-#     revision v4.4.0), so `integration.zephyr.module` is null.
+#     revision v4.4.1), so `integration.zephyr.module` is null.
 #   * enable symbol CONFIG_MODBUS
 #     ($ZEPHYR_BASE/subsys/modbus/Kconfig:4 `menuconfig MODBUS`).  It
 #     `select CRC`, so the manifest transcribes only the real master switch.
-#   * upstream version 4.4.0 -- the pinned Zephyr release the subsystem ships
-#     with ($ZEPHYR_BASE/VERSION: VERSION_MAJOR/MINOR = 4/4, PATCHLEVEL 0).
+#   * upstream version 4.4.1 -- the pinned Zephyr release the subsystem ships
+#     with ($ZEPHYR_BASE/VERSION: VERSION_MAJOR/MINOR = 4/4, PATCHLEVEL 1).
 #   * licence Apache-2.0
 #     ($ZEPHYR_BASE/subsys/modbus/Kconfig:2 "SPDX-License-Identifier:
 #     Apache-2.0"; the whole zephyr repo is Apache-2.0, $ZEPHYR_BASE/LICENSE).
@@ -26,7 +26,7 @@ schema_version: 1
 name: modbus
 description: "Modbus -- industrial register protocol over RTU/ASCII or raw ADU."
 tier: A
-version: "4.4.0"
+version: "4.4.1"
 license: Apache-2.0
 
 requires:

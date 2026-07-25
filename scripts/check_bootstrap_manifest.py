@@ -54,10 +54,42 @@ when:
      the manifest ALSO fails schema validation (an unknown key trips
      `additionalProperties: false` too) so this guidance isn't hidden behind
      the bare schema error.
+  10. A metadata/libraries/*.yaml manifest's `version:` field disagrees with
+      `zephyr.version` when that manifest is a genuine IN-TREE ZEPHYR
+      SUBSYSTEM -- per metadata/schemas/library-v1.schema.json:31, its
+      pinned upstream version IS the pinned Zephyr release. Derived
+      structurally every run (never a hardcoded filename list):
+      `integration.zephyr.module: null` (no separate west module) alone is
+      NOT enough -- alp-sdk's own in-tree source (e.g. `pid`, `gfx-compat`)
+      and unpinned placeholders (e.g. `nlohmann-json`) also carry
+      `module: null` but pin their OWN version, not Zephyr's. The
+      OS-exclusivity a real in-tree Zephyr subsystem also always declares
+      (`requires.os == ["zephyr"]` -- it exists only inside the zephyr repo,
+      nothing else) is what actually distinguishes the two; see
+      `_in_tree_zephyr_library_manifests`.
+
+--fix propagates a changed `zephyr.version` OUT to every machine pin site
+this gate verifies above (points 2, 4, 5, 10 -- west.yml, the CI workflow
+`--mr`/cache-key pins, the README badge, and every in-tree-Zephyr-subsystem
+library manifest's `version:` field). It reuses the exact same
+compiled regexes/constants the verify-only checks read (`_WEST_YML_ZEPHYR_RE`,
+`_WEST_MR_RE`, `_CACHE_KEY_RE`, `_README_BADGE_RE`, `_LIBRARY_VERSION_RE`) --
+there is deliberately no second, parallel pin map; that would just be a new
+flavour of the drift issue #917 exists to kill. Idempotent (a site already
+at zephyr.version is left untouched, byte-for-byte); a site the gate expects
+but can no longer find/match is a hard failure naming it, never a silent
+no-op. bootstrap.sh and bootstrap.ps1 are NOT --fix sites -- they read
+zephyr.version from the manifest at run time and must never hardcode it
+(that's what point 3 above polices); prose docs, CHANGELOG history, and each
+library manifest's own `# Grounding (pinned Zephyr ...)` provenance comment
+are out of scope for a mechanical regex rewrite by design (see
+docs/zephyr-version-policy.md) -- only the `version:` field itself is a fix
+site.
 
 Run locally:
 
     python3 scripts/check_bootstrap_manifest.py
+    python3 scripts/check_bootstrap_manifest.py --fix
 """
 from __future__ import annotations
 
@@ -68,6 +100,7 @@ import sys
 from pathlib import Path
 
 import jsonschema
+import yaml
 
 REPO = Path(__file__).resolve().parent.parent
 MANIFEST = REPO / "metadata" / "bootstrap.json"
@@ -76,6 +109,7 @@ WEST_YML = REPO / "west.yml"
 BOOTSTRAP_SH = REPO / "scripts" / "bootstrap.sh"
 BOOTSTRAP_PS1 = REPO / "scripts" / "bootstrap.ps1"
 README_MD = REPO / "README.md"
+LIBRARIES_DIR = REPO / "metadata" / "libraries"
 
 # Every CI workflow that assembles its own throwaway Zephyr workspace and
 # therefore pins a Zephyr revision independent of west.yml/west update.
@@ -95,6 +129,13 @@ KNOWN_KEYS = {
     "west", "pip", "env", "nativeLibHints", "manualInstallHints",
 }
 
+# The `revision:` line under `- name: zephyr` in west.yml. Hoisted to a
+# module constant (rather than staying inline in `_check_west_yml` as it did
+# before --fix existed) specifically so `_run_fix` reuses this SAME compiled
+# pattern instead of a second, drift-prone copy of the same shape.
+_WEST_YML_ZEPHYR_RE = re.compile(r"-\s*name:\s*zephyr\s*\n\s*revision:\s*(\S+)")
+
+_LIBRARY_VERSION_RE = re.compile(r'^version:\s*"([^"]*)"', re.MULTILINE)
 _WEST_MR_RE = re.compile(r"--mr\s+(v\d+\.\d+\.\d+)")
 # A cache `key:` line that names the Zephyr checkout itself and embeds a
 # literal version, e.g.
@@ -162,7 +203,7 @@ def _check_west_yml(manifest_version: str) -> list[str]:
     if not WEST_YML.is_file():
         return [f"missing {WEST_YML.relative_to(REPO).as_posix()}"]
     text = WEST_YML.read_text(encoding="utf-8")
-    m = re.search(r"-\s*name:\s*zephyr\s*\n\s*revision:\s*(\S+)", text)
+    m = _WEST_YML_ZEPHYR_RE.search(text)
     if m is None:
         return ["west.yml: could not find a `revision:` line under `- name: zephyr`"]
     west_version = m.group(1)
@@ -305,6 +346,195 @@ def _check_readme_badge(manifest_version: str) -> list[str]:
         return [f"README.md badge pins Zephyr {badge_version!r}, "
                  f"metadata/bootstrap.json declares zephyr.version {manifest_version!r}"]
     return []
+
+
+def _in_tree_zephyr_library_manifests() -> list[Path]:
+    """metadata/libraries/*.yaml manifests that are genuine IN-TREE ZEPHYR
+    SUBSYSTEMS -- the only per-library manifests whose `version:` must equal
+    the pinned Zephyr release itself (module docstring point 10).
+
+    `integration.zephyr.module: null` alone is NOT the bar: it also covers
+    alp-sdk's own maintainer-written in-tree source (`pid`, `gfx-compat`,
+    each pinning its OWN version/SHA) and unpinned best-effort placeholders
+    (`nlohmann-json`). What actually distinguishes a real in-tree Zephyr
+    subsystem -- and is what every one of coap/lwm2m/modbus's own header
+    comments says in prose -- is that it exists ONLY inside the zephyr repo
+    and nowhere else, which every one of them also encodes structurally as
+    `requires.os == ["zephyr"]`. alp-sdk's own in-tree libraries and
+    placeholders never declare that OS-exclusivity (they're portable, or
+    the constraint hasn't been written down), so requiring BOTH conditions
+    -- not `module: null` alone -- is what keeps this derived set exactly
+    right without a hardcoded filename list.
+    """
+    if not LIBRARIES_DIR.is_dir():
+        return []
+    result = []
+    for path in sorted(LIBRARIES_DIR.glob("*.yaml")):
+        doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        zephyr = (doc.get("integration") or {}).get("zephyr")
+        if not isinstance(zephyr, dict) or "module" not in zephyr or zephyr["module"] is not None:
+            continue
+        os_list = (doc.get("requires") or {}).get("os") or []
+        if set(os_list) == {"zephyr"}:
+            result.append(path)
+    return result
+
+
+def _check_library_versions(manifest_version: str) -> list[str]:
+    target = manifest_version.removeprefix("v")
+    problems = []
+    for path in _in_tree_zephyr_library_manifests():
+        doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        lib_version = doc.get("version")
+        rel = path.relative_to(REPO).as_posix()
+        if lib_version != target:
+            problems.append(
+                f"{rel}: version {lib_version!r} disagrees with metadata/bootstrap.json "
+                f"zephyr.version {manifest_version!r} -- this manifest is an in-tree "
+                f"Zephyr subsystem (module: null, requires.os == ['zephyr']), so its "
+                f"pinned upstream version IS the pinned Zephyr release"
+            )
+    return problems
+
+
+def _apply_version_fix(path: Path, pattern: re.Pattern, target: str, *,
+                        site_desc: str) -> tuple[list[str], list[str]]:
+    """Rewrite every occurrence of `pattern`'s captured group 1 in `path` to
+    `target`, editing ONLY the captured substring -- everything else in the
+    file (surrounding text, line endings) is left exactly as-is, no reflow.
+    Reused by every --fix site below so there is one rewrite mechanism, not
+    one per site.
+
+    Returns (change-report lines, problems). `pattern` matching nothing at
+    all in `path` is a problem (`site_desc` names it) -- a regex that stops
+    matching must fail loudly here, never silently write nothing. A pattern
+    that matches but is already == target is NOT a problem and produces no
+    report line (idempotency: a clean second run touches nothing).
+
+    Writes with `newline=""` deliberately -- these files are pinned LF via
+    .gitattributes (`eol=lf`), and Path.write_text's default newline
+    translation rewrites '\\n' to os.linesep on write, which on a Windows
+    host would silently flip every line in the file to CRLF (the same class
+    of Windows-only-digest trap `alp.lock`'s `_dir_digest` hit -- see
+    docs/zephyr-version-policy.md and the CHANGELOG entry for this change).
+
+    A write that fails (e.g. the file went read-only mid-sweep) is caught
+    and reported as a problem naming the file, never left to propagate as a
+    bare uncaught exception -- an uncaught exception here would abort the
+    whole --fix sweep, silently leaving every site after this one in the
+    caller's loop unrewritten with no report of what did or didn't land.
+    """
+    if not path.is_file():
+        return [], [f"missing {path.relative_to(REPO).as_posix()}"]
+    rel = path.relative_to(REPO).as_posix()
+    text = path.read_text(encoding="utf-8")
+    matches = list(pattern.finditer(text))
+    if not matches:
+        return [], [f"{rel}: {site_desc} not found -- --fix has nothing to rewrite; "
+                     f"update this gate if the site's format changed"]
+    report: list[str] = []
+    new_text = text
+    # Walk matches back-to-front: rewriting the rightmost match first means
+    # every span still to be processed (all to its left) stays valid even
+    # when `target` is a different LENGTH than what it replaces (e.g. a
+    # v4.4.0 -> v4.10.0 bump), no separate offset bookkeeping needed.
+    for m in reversed(matches):
+        old = m.group(1)
+        if old == target:
+            continue
+        start, end = m.span(1)
+        line_no = new_text.count("\n", 0, start) + 1
+        new_text = new_text[:start] + target + new_text[end:]
+        report.append(f"{rel}:{line_no}: {old} -> {target}")
+    if report:
+        try:
+            path.write_text(new_text, encoding="utf-8", newline="")
+        except OSError as exc:
+            return [], [f"{rel}: could not write {site_desc} -- {exc}"]
+    return list(reversed(report)), []
+
+
+def _fix_ci_workflow(path: Path, manifest_version: str) -> tuple[list[str], list[str]]:
+    """A CI workflow may carry the `--mr` pin, the cache `key:` pin, or
+    both (see CI_WORKFLOWS' docstring table) -- fix whichever it actually
+    has, same as `_check_ci_workflow` verifies whichever it actually has."""
+    if not path.is_file():
+        return [], [f"missing {path.relative_to(REPO).as_posix()}"]
+    text = path.read_text(encoding="utf-8")
+    if not (_WEST_MR_RE.search(text) or _CACHE_KEY_RE.search(text)):
+        rel = path.relative_to(REPO).as_posix()
+        return [], [f"{rel}: no `--mr <ver>` west-init pin or zephyr cache `key:` line found "
+                     f"-- update this gate if the pin format changed"]
+    report: list[str] = []
+    problems: list[str] = []
+    for pattern, desc in (
+        (_WEST_MR_RE, "the `--mr <ver>` west-init pin"),
+        (_CACHE_KEY_RE, "the zephyr cache `key:` line"),
+    ):
+        # Re-read so the second pattern sees any rewrite the first just made
+        # to the same file.
+        if pattern.search(path.read_text(encoding="utf-8")):
+            r, p = _apply_version_fix(path, pattern, manifest_version, site_desc=desc)
+            report += r
+            problems += p
+    return report, problems
+
+
+def _run_fix(manifest_version: str) -> int:
+    """--fix entry point: rewrite west.yml, every CI_WORKFLOWS pin, and the
+    README badge FROM manifest_version, then report what changed."""
+    report: list[str] = []
+    problems: list[str] = []
+
+    r, p = _apply_version_fix(WEST_YML, _WEST_YML_ZEPHYR_RE, manifest_version,
+                               site_desc="the `revision:` line under `- name: zephyr`")
+    report += r
+    problems += p
+
+    for wf in CI_WORKFLOWS:
+        r, p = _fix_ci_workflow(wf, manifest_version)
+        report += r
+        problems += p
+
+    # _README_BADGE_RE's own capture group excludes the leading 'v'
+    # (`Zephyr-v(\d+\.\d+\.\d+)`) -- target it with the same de-'v'd shape,
+    # not manifest_version verbatim, or an already-correct badge would look
+    # perpetually "different" and get rewritten (with a 'v' duplicated) on
+    # every single run, breaking idempotency.
+    r, p = _apply_version_fix(README_MD, _README_BADGE_RE, manifest_version.removeprefix("v"),
+                               site_desc="the `Zephyr-vX.Y.Z` badge")
+    report += r
+    problems += p
+
+    target = manifest_version.removeprefix("v")
+    for lib_path in _in_tree_zephyr_library_manifests():
+        r, p = _apply_version_fix(lib_path, _LIBRARY_VERSION_RE, target,
+                                   site_desc="the `version:` field")
+        report += r
+        problems += p
+
+    # Print whatever DID get rewritten first, unconditionally -- a failure
+    # partway through the sweep above (a site that failed to match, or a
+    # write that raised OSError) must never hide that other sites already
+    # landed on disk (module docstring point about --fix's failure mode).
+    if report:
+        for line in report:
+            print(line)
+
+    if problems:
+        print(f"FAIL check_bootstrap_manifest --fix (metadata/bootstrap.json declares "
+              f"zephyr.version {manifest_version!r}):", file=sys.stderr)
+        for prob in problems:
+            print(f"  · {prob}", file=sys.stderr)
+        return 1
+
+    if report:
+        print(f"check_bootstrap_manifest --fix: rewrote {len(report)} site(s) to Zephyr "
+              f"{manifest_version}.")
+    else:
+        print(f"check_bootstrap_manifest --fix: every site already agrees with Zephyr "
+              f"{manifest_version} -- nothing to do.")
+    return 0
 
 
 # `prerequisites` is deliberately NOT read by either script at run time
@@ -475,8 +705,13 @@ def _check_known_keys(manifest: dict) -> list[str]:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1] if __doc__ else "")
+    ap.add_argument(
+        "--fix", action="store_true",
+        help="Rewrite west.yml, the CI workflow --mr/cache-key pins, and the README badge "
+             "FROM metadata/bootstrap.json's zephyr.version instead of only verifying them. "
+             "Idempotent; run the gate without --fix afterwards to confirm.",
+    )
     args = ap.parse_args()
-    del args
 
     manifest, problems = _load_manifest_and_schema()
     if not manifest:
@@ -500,6 +735,9 @@ def main() -> int:
 
     manifest_version = manifest["zephyr"]["version"]
 
+    if args.fix:
+        return _run_fix(manifest_version)
+
     problems = []
     problems += _check_west_yml(manifest_version)
     problems += _check_no_hardcoded_literal(BOOTSTRAP_SH, manifest_version)
@@ -513,6 +751,7 @@ def main() -> int:
     problems += _check_native_lib_hints_consumption(manifest)
     for wf in CI_WORKFLOWS:
         problems += _check_ci_workflow(wf, manifest_version)
+    problems += _check_library_versions(manifest_version)
 
     if problems:
         print(f"FAIL bootstrap manifest drift (metadata/bootstrap.json declares "

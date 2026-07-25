@@ -705,7 +705,15 @@ def main() -> int:
         print(f"OK   {DOC.relative_to(REPO)}  (in sync)")
         return 0
 
-    DOC.write_text(text, encoding="utf-8")
+    # newline="" so the regenerated doc keeps the LF endings .gitattributes
+    # pins (`eol=lf`).  Without it write_text translates every '\n' to
+    # os.linesep, so regenerating on a Windows host rewrites all ~390 lines to
+    # CRLF.  `git add` normalizes that back (so it never reaches a commit or
+    # reds CI) and `--check` reads with universal newlines (so it still passes)
+    # -- which is exactly why it goes unnoticed: it just leaves the file
+    # permanently `M` in `git status` and whole-file-dirty in every editor
+    # diff, burying the one row that actually changed.
+    DOC.write_text(text, encoding="utf-8", newline="")
     print(f"wrote {DOC.relative_to(REPO)}")
     return 0
 
