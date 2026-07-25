@@ -7,24 +7,28 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.14.0 candidate
 
-### Added — `check_write_text_newline`: `scripts/` `write_text()` writers must pass `newline=""`
+### Added — `check_write_text_newline`: `scripts/` + `firmware/` `write_text()` writers must pass `newline=""`
 
 New **blocking** PR gate (`scripts/check_write_text_newline.py`, wired into
-`pr-metadata-validate.yml:validate`) flags any `scripts/` `write_text()` call
-on a repo-tree artifact that omits `newline=""` (or `newline="\n"`).
-`Path.write_text()` otherwise translates `'\n'` to `os.linesep`, silently
-rewriting the whole file to CRLF on a Windows host; `.gitattributes`
-normalizes it back to LF on `git add`, so the bug never reds CI, it just
-leaves the file permanently whole-file-dirty in every working tree. A
-genuine tempfile/scratch/out-of-tree writer is exempt per call, not per
-file, via `# write-text-newline-exempt: <reason>` directly above or on the
-call. Scope: matches `.write_text()` only, not an `open(path, "w")` writer.
+`pr-metadata-validate.yml:validate`) flags any `scripts/` or `firmware/`
+`write_text()` call on a repo-tree artifact that omits `newline=""` (or
+`newline="\n"`). `Path.write_text()` otherwise translates `'\n'` to
+`os.linesep`, silently rewriting the whole file to CRLF on a Windows host;
+`.gitattributes` normalizes it back to LF on `git add`, so the bug never reds
+CI, it just leaves the file permanently whole-file-dirty in every working
+tree. A genuine tempfile/scratch/out-of-tree writer is exempt per call, not
+per file, via `# write-text-newline-exempt: <reason>` on the call itself or
+as a standalone comment directly above it. The `newline=` **value** is
+checked too, not just its presence — `newline=None` is the CRLF-translating
+default. Scope: matches `.write_text()` only, not an `open(path, "w")`
+writer.
 
-Every repo-tree `write_text()` under `scripts/` now passes `newline=""`
-(goldens, catalogs, headers, generated docs, `alp.lock`). `alp init`'s
-scaffolded `board.yaml`/`README.md` and the `--output` writers in `alp emit`
-and `gen_sbom.py` pick up the same fix, so a Windows `alp init` no longer
-seeds CRLF that a later `west alp-migrate --apply` (or a release-asset
+Every repo-tree `write_text()` under `scripts/` and `firmware/` now passes
+`newline=""` (goldens, catalogs, headers, generated docs, `alp.lock`, and the
+`protocol_vectors.txt` generators for both the GD32 bridge and the CC3501E).
+`alp init`'s scaffolded `board.yaml`/`README.md` and the `--output` writers in
+`alp emit` and `gen_sbom.py` pick up the same fix, so a Windows `alp init` no
+longer seeds CRLF that a later `west alp-migrate --apply` (or a release-asset
 regen) then flips to LF as unrelated churn.
 
 ### Changed — Ethos-U accelerator sized per target core; NPU→core pairing single-sourced in the SoC JSON
