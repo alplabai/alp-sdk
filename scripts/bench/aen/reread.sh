@@ -23,7 +23,11 @@ BUF=0x$($OBJ-nm "$BD/zephyr/zephyr.elf" | awk '/ ram_console_buf$/{print $1}')
 	echo qc
 } > /tmp/rr.jlink
 # shellcheck disable=SC2046  # word-splitting bench_jlink_select is intentional
-$JLINK $(bench_jlink_select) -device "$JLINK_DEVICE_READ" -if SWD -speed "$JLINK_SPEED" -nogui 1 -CommanderScript /tmp/rr.jlink 2>/dev/null > /tmp/rr.out || true
+# "Cannot connect to the probe" can land on either stream -- stderr used to be
+# discarded (2>/dev/null), so a stderr-only failure never tripped the grep
+# below. Merge it in; the awk decoder only matches "<hex addr> = ..." lines so
+# the extra text is harmless.
+$JLINK $(bench_jlink_select) -device "$JLINK_DEVICE_READ" -if SWD -speed "$JLINK_SPEED" -nogui 1 -CommanderScript /tmp/rr.jlink > /tmp/rr.out 2>&1 || true
 if grep -qi "Cannot connect to the probe" /tmp/rr.out; then
 	echo "reread: J-Link probe not selected/reachable -- export JLINK_SN (multi-probe host)." >&2
 fi

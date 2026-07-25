@@ -73,7 +73,8 @@ r
 g
 exit
 EOF
-$JLINK -nogui 1 -CommanderScript /tmp/hp-write.jlink 2>&1 | tee /tmp/hp-write.out | \
+# shellcheck disable=SC2046  # word-splitting bench_jlink_select is intentional
+$JLINK $(bench_jlink_select) -nogui 1 -CommanderScript /tmp/hp-write.jlink 2>&1 | tee /tmp/hp-write.out | \
   grep -iE "could not connect|fail|error|Verify|O\.K\.|Reset" | head -20
 if grep -qi "Could not connect to the target device" /tmp/hp-write.out; then
   echo "!! $JLINK_DEVICE_FLASH profile FAILED to connect -- flow D not unlocked on this probe."
@@ -95,7 +96,8 @@ Sleep 400
 mem32 $HB, 0x4
 exit
 EOF
-$JLINK -nogui 1 -CommanderScript /tmp/hp-read.jlink 2>/tmp/hp-read.err > /tmp/hp-read.out || true
+# shellcheck disable=SC2046  # word-splitting bench_jlink_select is intentional
+$JLINK $(bench_jlink_select) -nogui 1 -CommanderScript /tmp/hp-read.jlink > /tmp/hp-read.out 2>&1 || true
 echo "----- $NAME M55-HP SRAM0 beacon (magic / CPUID / VTOR / heartbeat) -----"
 grep -iE "^$(printf '%08X' $BEACON)| = " /tmp/hp-read.out | head
 echo "(heartbeat re-read below should differ from beacon[3] above = HP actively running)"

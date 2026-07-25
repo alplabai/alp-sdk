@@ -42,7 +42,11 @@ SCRIPT=$(mktemp /tmp/jlink.XXXX.jlink)
 } > "$SCRIPT"
 echo ">>> RAM-run $(basename "$BD")  entry=$ENTRY  ram_console_buf=$BUF  sleep=${SLEEP}ms" >&2
 # shellcheck disable=SC2046  # word-splitting bench_jlink_select is intentional
-$JLINK $(bench_jlink_select) -device "$JLINK_DEVICE_READ" -if SWD -speed "$JLINK_SPEED" -nogui 1 -CommanderScript "$SCRIPT" 2>/tmp/jlink.err > /tmp/jlink.out || true
+# JLinkExe can emit "Cannot connect to the probe" on EITHER stream depending on
+# where the failure happens; merge into one file (the awk decoder below only
+# matches "<hex addr> = ..." lines, so the extra text is harmless) so the grep
+# below actually sees it instead of missing a stderr-only failure.
+$JLINK $(bench_jlink_select) -device "$JLINK_DEVICE_READ" -if SWD -speed "$JLINK_SPEED" -nogui 1 -CommanderScript "$SCRIPT" > /tmp/jlink.out 2>&1 || true
 # A probe that never connected looks exactly like an app that printed nothing;
 # say which, instead of leaving the operator to diff two empty consoles.
 if grep -qi "Cannot connect to the probe" /tmp/jlink.out; then
