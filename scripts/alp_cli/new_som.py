@@ -267,14 +267,11 @@ def _render_preset(
     a("inference:")
     a(f"  preferred_backend:    {inference_backend}")
     if inference_backend == "ethos_u":
+        # Primary variant only.  Which Ethos-U instances the part carries is
+        # silicon-determined -- the SDK derives it from the SoC JSON npus[] /
+        # capabilities.ethos_uNN_count -- so the preset does NOT enumerate them
+        # (the deprecated `npu_population` field is intentionally not scaffolded).
         a(f"  ethos_u_variant:      {ethos_u_variant}")
-        a("  npu_population:")
-        a("    # One row per populated NPU instance, naming only the variant.")
-        a("    # The instance count is authoritative from the SoC JSON")
-        a("    # capabilities.ethos_uNN_count; each instance's subtype, MAC size")
-        a("    # and paired host core are silicon facts sourced from the SoC")
-        a("    # JSON npus[] (subtype / mac_per_cycle / paired_core), not here.")
-        a(f"    - {{ variant: {ethos_u_variant} }}")
     a("")
     a("# capabilities: -- OPTIONAL, omitted in the skeleton.  Declare ONLY")
     a("# keys the SoM ADDS on top of the silicon capabilities (e.g. an")

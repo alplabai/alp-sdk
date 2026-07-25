@@ -60,7 +60,8 @@ Backend selection:
 The `ETHOS_U` token is a single customer-facing handle that
 covers every Arm Ethos NPU variant.  The orchestrator emits
 per-variant `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U{55,65,85}=y`
-gates from the SoM preset's `inference.npu_population[]` (G-1
+gates from the silicon capability counts (`ethos_u{55,65,85}_count`,
+resolved from the SoC JSON `npus[]`) (G-1
 selector); the driver code at runtime dispatches to the right
 shim and logs the active variant once per boot
 (`alp_inference_tflm_npu_variant_name()`).  Customers don't
@@ -165,9 +166,10 @@ cores:
 ```
 
 There is no `inference.backend:` field — the dispatcher set is
-silicon-determined. AEN801's SoM preset declares the U85 primary plus
-the U55 pair via `inference.npu_population[]` (with fallback
-capability counters), so the loader emits:
+silicon-determined. AEN801's SoM preset declares the U85 primary
+(`ethos_u_variant`); the full variant set (the U85 + the U55 pair) is
+derived from the SoC JSON `npus[]` / `capabilities.ethos_u{55,85}_count`,
+so the loader emits:
 
 ```
 CONFIG_ALP_SDK_INFERENCE_BACKEND_TFLM=y
