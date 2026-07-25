@@ -419,10 +419,10 @@ top of the per-subsystem checks.
    ```
 
    Expect the console to report the Ethos-U variant the SKU
-   preset declares (`u85` primary + dual `u55`
-   on AEN801 -- see the `inference.npu_population` block).  A
-   variant mismatch means the board DTS NPU node disagrees with
-   the SoC JSON `npus[]`.
+   carries (`u85` primary + dual `u55` on AEN801 -- the primary is
+   the preset's `ethos_u_variant`; the full set is derived from the
+   SoC JSON `npus[]`).  A variant mismatch means the board DTS NPU
+   node disagrees with the SoC JSON `npus[]`.
 
 8. **Load a host-pre-compiled `.alpmodel` + Vela walkthrough.**
    Final gate: prove the end-to-end model path.
