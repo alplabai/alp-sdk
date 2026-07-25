@@ -321,6 +321,7 @@ class AlifFlashBinaryRunner(ZephyrBinaryRunner):
 
         cfg_name = f'{name}.json'
         cfg_path = config_dir / cfg_name
+        # write-text-newline-exempt: generated flash cfg in a scratch run dir
         cfg_path.write_text(
             _build_atoc_config(name, app_shape), encoding='utf-8')
 

@@ -60,6 +60,7 @@ def main() -> int:
         type_to_str=kconfiglib.TYPE_TO_STR,
         expr_str=kconfiglib.expr_str,
     )
+    # write-text-newline-exempt: scratch mkdtemp build dir, written only by kconfig_symbols.py
     args.output.write_text(json.dumps(symbols), encoding="utf-8")
     return 0
 

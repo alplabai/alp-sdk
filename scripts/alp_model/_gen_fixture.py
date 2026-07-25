@@ -55,7 +55,7 @@ def main() -> None:
     _ALPMODEL.parent.mkdir(parents=True, exist_ok=True)
     _HEADER.parent.mkdir(parents=True, exist_ok=True)
     _ALPMODEL.write_bytes(raw)
-    _HEADER.write_text(to_c_header(raw))
+    _HEADER.write_text(to_c_header(raw), encoding="utf-8", newline="")
     print(f"wrote {_ALPMODEL} ({len(raw)} bytes) and {_HEADER}")
 
 

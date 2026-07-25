@@ -120,7 +120,7 @@ from alp_project_emit import (  # noqa: F401  (compat re-export)
 def _write_or_print(out: str, target: Path | None) -> int:
     if target is not None:
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(out, encoding="utf-8")
+        target.write_text(out, encoding="utf-8", newline="")
         try:
             rel = target.relative_to(Path.cwd())
         except ValueError:
@@ -290,7 +290,7 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
             _, fname = relpath.split("/", 1)
             target = args.output / fname
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(content, encoding="utf-8")
+            target.write_text(content, encoding="utf-8", newline="")
             print(f"alp_project: wrote {target} ({len(content)} bytes)",
                   file=sys.stderr)
         return 0

@@ -229,7 +229,7 @@ def main() -> int:
             else:
                 print(f"OK   {out.relative_to(REPO)}  ({len(pads)} pads, in sync)")
         else:
-            out.write_text(text, encoding="utf-8")
+            out.write_text(text, encoding="utf-8", newline="")
             print(f"wrote {out.relative_to(REPO)}  ({len(pads)} pads)")
 
     if args.check and stale:

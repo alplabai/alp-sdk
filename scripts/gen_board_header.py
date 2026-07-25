@@ -298,7 +298,7 @@ def main() -> int:
         if out_text is None:
             continue
         out_path = OUT_DIR / f"alp_{_board_slug(name)}_routes.h"
-        out_path.write_text(out_text, encoding="utf-8")
+        out_path.write_text(out_text, encoding="utf-8", newline="")
         print(
             f"wrote {out_path.relative_to(REPO)} "
             f"({len(out_text.splitlines())} lines)"
