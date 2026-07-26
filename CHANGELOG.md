@@ -7,6 +7,28 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.14.0 candidate
 
+### Fixed — `scripts/test-all.sh`'s inline Doxyfile had drifted from
+`pr-doxygen.yml`'s on four settings (#970)
+
+Both files hand-maintained their own copy of the SDK's Doxygen config
+despite `test-all.sh`'s own comment claiming they stayed identical. They
+had drifted in both directions: `test-all.sh` was missing
+`DOT_GRAPH_MAX_NODES = 200`, so a real "Included by graph ... too many
+nodes" warning that only fires where Graphviz `dot` is installed got
+promoted to a **false local RED** under `WARN_AS_ERROR=FAIL_ON_WARNINGS`
+that CI never saw; and it omitted `examples/README.md` from `INPUT` and
+set `GENERATE_HTML = NO`, either of which could let a **false local
+GREEN** through that CI would catch. `QUIET`/`PROJECT_NUMBER` were also
+cosmetically inconsistent.
+
+Fixed by single-sourcing the config: `docs/doxygen/Doxyfile` is now the
+one committed copy, and both `pr-doxygen.yml` and `test-all.sh`'s
+`stage_doxygen` `cat` it into `doxygen -` (stdin), appending only the
+per-run values that must not be templated in (`PROJECT_NUMBER`, and
+locally, a fresh `OUTPUT_DIRECTORY`/`WARN_LOGFILE` per run). A new gate,
+`scripts/check_doxyfile_single_source.py`, fails CI if a Doxyfile-shaped
+heredoc ever regrows in `.github/workflows/**` or `scripts/**` while the
+single source exists.
 ### Fixed — `tests/zephyr/peripheral` did not compile for a board without an `alp-uart1` alias
 
 `src/uart.c` took `DEVICE_DT_GET(DT_ALIAS(alp_uart1))` at file scope with no

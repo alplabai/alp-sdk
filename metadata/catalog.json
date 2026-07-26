@@ -922,6 +922,10 @@
       "script": "scripts/check_doc_drift.py"
     },
     {
+      "purpose": "Guard: no second Doxyfile-shaped heredoc regrows next to docs/doxygen/Doxyfile.",
+      "script": "scripts/check_doxyfile_single_source.py"
+    },
+    {
       "purpose": "Doxygen-coverage audit -- walks include/alp/*.h and flags every public function declaration that lacks a `@brief` (or `\\brief`) tag in the preceding doc-comment block.",
       "script": "scripts/check_doxygen_coverage.py"
     },
