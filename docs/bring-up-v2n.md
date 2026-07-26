@@ -45,7 +45,14 @@ If the SoC console stays silent:
 ## 2. SWD attach + GD32 firmware flash
 
 The GD32 bridge firmware is **separate** from the Renesas-side
-firmware -- the GD32 ships blank from GigaDevice.  Two paths cover
+firmware -- the GD32 **chip** ships blank from GigaDevice; that's the
+vendor's silicon state, not what a customer receives.  Alp Lab's own
+production flash step is what turns that blank chip into a
+**customer-shipped module** pre-flashed with the bridge firmware (see
+[`docs/cross-platform-setup.md`](cross-platform-setup.md)
+§2.3/§3.4/§4.3).  The "unprogrammed module" scenarios below are a
+freshly-assembled board straight off SMT, before that production flash
+step -- not the state a customer's module arrives in.  Two paths cover
 the lifecycle:
 
 ### 2a. External probe (first power-on)
@@ -55,10 +62,13 @@ fastest route to first firmware:
 
 1. Attach SWD probe to the V2N programming header (pads
    `GD32_SWDIO` = GD32 `PA13`, `GD32_SWCLK` = GD32 `PA14`).
-2. Build the bridge firmware:
+2. Build the bridge firmware (needs the Arm GNU Toolchain
+   (`arm-none-eabi-gcc`) -- this custom-carrier bring-up is exactly the
+   optional trigger for that install; see
+   [`docs/cross-platform-setup.md`](cross-platform-setup.md) §2.3/§3.4/§4.3):
 
    ```bash
-   cd alp-sdk/gd32-bridge
+   cd firmware/gd32-bridge
    cmake -B build -DCMAKE_TOOLCHAIN_FILE=toolchain/arm-none-eabi.cmake
    cmake --build build
    ```
