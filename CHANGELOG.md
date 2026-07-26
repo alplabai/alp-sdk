@@ -7,6 +7,61 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.14.0 candidate
 
+### Fixed — `doctor.py`'s `dtc`/`gperf` hints cited a Windows bundle that doesn't ship them; ADR 0021 item 2's injection set corrected
+
+`scripts/alp_cli/doctor.py`'s `_check_dtc` / `_check_gperf` WARN remediation
+both ended with "(bundled with the Zephyr SDK on Windows)" — false. Verified
+by downloading and `sha256`-checking the separately published sdk-ng v1.0.1
+`hosttools_windows-x86_64.7z` asset against upstream's own `sha256.sum`, then
+listing it with `7z l`: 1486 entries, 21 executables, zero `dtc`/`gperf`/
+`device-tree`/`devicetree` matches (the equivalent Linux hosttools bundle
+does ship `dtc`). A Windows customer following the old hint would install the
+Zephyr SDK and still not have either tool. Both hints now say so and point at
+`docs/cross-platform-setup.md` for the Windows install steps, without adding
+an unpoliced winget package ID — `dtc`/`gperf` stay out of
+`prerequisites.windows` / `prerequisites.install.*` (they're WARN-only:
+`edtlib` does the load-bearing dts parse in pure Python, and plain
+kernel-mode apps build without `gperf`), so hardcoding a winget ID here
+without a manifest entry would recreate the undeclared-install-command class
+issue #949 exists to eliminate. A manifest home for optional build-time
+tools (so these DO get policed the way `prerequisites.install` polices
+`git`/`cmake`/`ninja`) is a possible follow-up, not built here.
+`metadata/bootstrap.json`'s `manualInstallHints.windows.note` gains a line
+recording the same finding, placed next to the existing Zephyr SDK / 7-Zip
+lines it qualifies rather than at the end; `bootstrap-v1.schema.json`'s
+`manualInstallHints` description is touched to match.
+
+Also corrects `docs/adr/0021-toolchain-provisioning.md`'s Decision item 2,
+the "Never mutate PATH" injection list: `-DCMAKE_MAKE_PROGRAM` is dropped
+from the injection set, leaving the pair `ZEPHYR_SDK_INSTALL_DIR` /
+`ZEPHYR_TOOLCHAIN_VARIANT` — `ninja` is a `prerequisites.windows` / winget
+tool, never a Zephyr SDK artifact (this ADR's Context section already said
+so), so a `${TOOLCHAIN_ROOT}`-style path for it would resolve to nothing on
+every host. The fix for the actual problem (`ninja` missing from `PATH`
+when an editor spawns before winget updates it) is tan's business at spawn
+time, not plan content. A new dated Amendment also corrects the previous
+("tokened toolchain-root injection") Amendment's overstatement that "both
+landing sites are closed, `additionalProperties: false` contracts" —
+`slices[].command.args` (the actual landing site once
+`-DCMAKE_MAKE_PROGRAM` is in scope) is an open, unconstrained string array,
+not a closed contract; the conclusion that this needs a coordinated `tan`
+change still held, but because the `${TOOLCHAIN_ROOT}` token wasn't yet in
+tan's substitution set (tan-cli#86), not because a schema was closed against
+it — and notes that any new arg/env key still needs a
+`tests/parity/seam1_field_diff.py` (+ tan-cli vendored twin) normalization
+entry and an emit-snapshot regeneration, schema-open is not gate-free. Also
+adds a footnote to the ADR's Tier A table naming `ninja`/`dtc`/`gperf` as
+package-manager-delivered, since this ADR's own new dtc/gperf evidence put
+all three tools (not just `ninja`) in the same "table vs. Decision text"
+shape and the table itself carried no marker or forward pointer. Answers
+the Open evidence `dtc`/`gperf`-on-Windows bullet with the finding above
+(struck in full, `**Answered**`, same as the sizes bullet — including the
+`.7z`-self-extraction half, which was answered before this amendment, not
+newly here), leaving the Arm GNU Toolchain bullet exactly as already
+recorded. The ADR paragraph above is doc-only: no code, schema shape, or
+`metadata/toolchains.json` `sha256`/size change beyond the `doctor.py` hint
+strings and `bootstrap.json` note already described above.
+
 ### Fixed — ADR 0021 Decision: "resolve absolute paths and inject them" was the wrong mechanism
 
 `docs/adr/0021-toolchain-provisioning.md`'s Decision (`:112-116`) told the

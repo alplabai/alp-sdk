@@ -1,8 +1,8 @@
 # 0021. Toolchain provisioning: pin upstream, never rehost; onboard per lane
 
 Status: Proposed — see **Amendments** below (2026-07-26) for the Arm GNU
-Toolchain open-evidence answer and the tokened-toolchain-root-injection
-wording correction.
+Toolchain open-evidence answer, the tokened-toolchain-root-injection wording
+correction, and the item-2 injection-set / dtc-gperf corrections.
 Date: 2026-07-25
 Deciders: alpCaner
 
@@ -41,10 +41,11 @@ GD32-only scoping:
 
 ## Amendment (2026-07-26 — tokened toolchain-root injection, not absolute paths)
 
-Corrects the Decision section's toolchain-injection mechanism (`:112-116`,
-"**Never mutate PATH.** Resolve absolute paths and inject them..."). This is a
-correction of *mechanism*, not a reversal of the decision -- the headline and
-its consequences still stand; only the word "absolute" was wrong.
+Corrects the Decision section's toolchain-injection mechanism (the
+**"Never mutate PATH."** paragraph: "Resolve absolute paths and inject
+them..."). This is a correction of *mechanism*, not a reversal of the
+decision -- the headline and its consequences still stand; only the word
+"absolute" was wrong.
 
 - **Read "resolve absolute paths and inject them" as tokened
   toolchain-root injection, resolved by the executor.** The build-plan
@@ -84,7 +85,7 @@ its consequences still stand; only the word "absolute" was wrong.
   deliverable; the injection half does not, for the reason above, and stays
   open.
 - **Footprint figures corrected.** The Alternatives entry ("Key the
-  toolchain store by SDK version", `:194`) and the Open evidence bullet
+  toolchain store by SDK version") and the Open evidence bullet
   below both carry an unmeasured estimate -- ~1 GB (minimal SDK +
   `arm-zephyr-eabi`) to ~17 GB (full bundle) -- sourced from a
   `pr-twister.yml` comment, never a measurement. Measured, linux-x86_64,
@@ -103,6 +104,118 @@ its consequences still stand; only the word "absolute" was wrong.
   nearly halves the on-disk store but loses `dtc`, which is exactly this
   ADR's still-open `dtc`/`gperf`-on-Windows question below. Recorded as a
   trade-off; not resolved here.
+
+## Amendment (2026-07-26 — drop `-DCMAKE_MAKE_PROGRAM` from item 2's injection set; correct the previous amendment's schema claim; answer the dtc/gperf open-evidence bullet)
+
+Three corrections; none reverses the Decision's headline.
+
+- **Item 2's injection triple becomes a pair.** The Decision's **"Never
+  mutate PATH."** paragraph names `-DCMAKE_MAKE_PROGRAM`,
+  `ZEPHYR_SDK_INSTALL_DIR`, and `ZEPHYR_TOOLCHAIN_VARIANT`. Drop
+  `-DCMAKE_MAKE_PROGRAM`: there is nothing for it to point at. `ninja` is a
+  `prerequisites.windows` / winget tool (`metadata/bootstrap.json`), not a
+  Zephyr SDK artifact -- this ADR's Context section already says so
+  ("`west sdk install` does not ship `ninja`"), and
+  `metadata/toolchains.json` lists only the minimal SDK and
+  `arm-zephyr-eabi`. So a `${TOOLCHAIN_ROOT}/.../ninja`-style token would
+  resolve to nothing on every host, and tan's contract deliberately folds a
+  blank toolchain root to unresolved precisely so such a path cannot degrade
+  silently. The real problem `-DCMAKE_MAKE_PROGRAM` appeared to solve -- an
+  editor spawned before winget's `PATH` update lands, so CMake's generator
+  search misses `ninja` -- is a host-runtime fact only the executor knows at
+  spawn time; under ADR 0020's split that is tan's business, not plan
+  content. The remaining pair, `ZEPHYR_SDK_INSTALL_DIR` /
+  `ZEPHYR_TOOLCHAIN_VARIANT`, is unaffected -- both point at a real,
+  `metadata/toolchains.json`-pinned Zephyr SDK artifact.
+- **The Tier A row and the Decision's package-manager paragraph were never
+  in tension -- Tier A's label is about elevation, not delivery
+  mechanism.** The Tier A table's Contents column lists `ninja`, `cmake`,
+  `dtc`, and `gperf` alongside the Zephyr SDK and `arm-zephyr-eabi`; the
+  Decision's **"Signed package manager stays primary for the small host
+  tools"** paragraph names `ninja` as one of those tools, and the dtc/gperf
+  bullet below establishes that `dtc` and `gperf` are winget-delivered too
+  -- so, read as "hermetic archive contents," the row disagrees with the
+  Decision text on three tools, not the one this ADR flagged before. But
+  Tier A's Rule column is "install after one consent click" -- a statement
+  about *elevation and consent friction*, not about *which mechanism*
+  delivers the tool. A user-scope winget install satisfies "no elevation,
+  one consent click" exactly as a hermetic-archive unpack would, so the row
+  and the Decision paragraph were never actually opposed; the row was
+  underspecified about mechanism, not wrong about tier membership. Marked
+  at the table itself, not just asserted here: the Tier A row now carries a
+  footnote naming `ninja`, `dtc`, and `gperf` as package-manager-delivered
+  and forward-pointing to this amendment, so a reader going top-down from
+  the table hits the pointer instead of an unmarked ambiguity.
+- **Correcting the previous ("tokened toolchain-root injection") Amendment's
+  schema claim.** It states "both landing sites are closed,
+  `additionalProperties: false` contracts", naming `slices[].toolchain` and
+  `slices[].env`. That is accurate for those two, but with
+  `-DCMAKE_MAKE_PROGRAM` dropped, the landing site that actually mattered
+  for it was never either of those -- it was `slices[].command.args`
+  (`build-plan-v1.schema.json`), a plain
+  `{"type": "array", "items": {"type": "string"}}`: an open, unconstrained
+  string array, not a closed contract needing a Wave-C schema edit to
+  accept a new argument value.
+  The previous Amendment's *conclusion* -- that this needed a coordinated
+  `tan` change first -- still held, but for a different reason than the one
+  it gave: the `${TOOLCHAIN_ROOT}` token simply did not exist in tan's
+  substitution set until tan-cli#86, not because a schema was closed
+  against it. The "closed contract" reasoning should not be inherited into
+  future readings of that Amendment for this landing site.
+
+  Schema-open is not gate-free, though. Seam-1 verifies command and env
+  **shape** against the frozen oracle (ADR 0020's Amendment item 4 retune),
+  so any new arg landing in `slices[].command.args` (or a new key landing in
+  `slices[].env`) needs a comparator normalization entry in
+  `tests/parity/seam1_field_diff.py` (confirmed present at that path) *and*
+  its tan-cli vendored twin (`tan-cli/tests/parity/seam1_field_diff.py`,
+  kept in lockstep per that Amendment's own instruction), plus regenerating
+  `tests/fixtures/emit-snapshots/*.build-plan.snap`
+  (`scripts/check_emit_snapshots.py`) -- otherwise a live plan carrying the
+  new arg either silently diverges from the frozen oracle seam-1 diffs
+  against, or the emit-snapshot gate flags stale goldens. (`*.zephyr-conf.snap`
+  holds generated Kconfig content, unaffected by a command-arg change, so it
+  is not part of this regeneration.)
+- **Answering the Open evidence dtc/gperf bullet.** Settled without a clean
+  Windows VM. `hosttools_windows-x86_64.7z` is the right asset to inspect
+  because `west sdk install` installs hosttools by default unless
+  `--no-hosttools` (`scripts/west_commands/sdk.py:452`, already established
+  in the 2026-07-26 "tokened toolchain-root injection" Amendment above),
+  not because it happens to be the only asset published. It is a
+  **separately published** sdk-ng v1.0.1 asset (104312951 bytes),
+  `sha256`-verified against upstream's own published `sha256.sum`
+  (`b5aca806f7d3de696317db1c3902003421d366a083cb8d68f276c60f655ceaf0`), and
+  listed with `7z l`: **1486 entries, 21 executables** (`openocd.exe`, 19x
+  `qemu-*.exe`, `wget.exe`) -- **zero** matches for `dtc`, `gperf`,
+  `device-tree`, or `devicetree` anywhere in the listing. The equivalent
+  Linux hosttools bundle at the same SDK version
+  (`hosttools/sysroots/x86_64-pokysdk-linux/usr/bin/dtc` in a local
+  extracted `zephyr-sdk-1.0.1` tree) **does** ship `dtc`. So, for the two
+  hosts actually inspected (`windows-x86_64`, `linux-x86_64`): the Zephyr
+  SDK ships `dtc` on Linux but not on Windows, and ships `gperf` on
+  neither -- `macos-aarch64`, also pinned in `metadata/toolchains.json`,
+  was not inspected here. This is consistent with Zephyr's own
+  native-Windows guide winget-installing `oss-winget.dtc` and
+  `oss-winget.gperf` as a load-bearing step, not redundancy. Method
+  recorded because it is reusable and cheaper than this ADR assumed:
+  `hosttools_*` is a separately published asset, so the question was
+  answerable by downloading and listing it from any host with `7z` -- no
+  clean Windows VM required. Consumers:
+  `scripts/alp_cli/doctor.py`'s `_check_dtc` / `_check_gperf` hints and
+  `metadata/bootstrap.json`'s `manualInstallHints.windows.note` now state
+  this plainly instead of the (false) "bundled with the Zephyr SDK on
+  Windows" claim they carried before. The `.7z`-self-extraction half of
+  that same Open evidence bullet stays answered-as-already-recorded, not
+  newly answered here: `manualInstallHints.windows.note`'s pre-existing
+  "7-Zip must already be on PATH..." line already states west delegates
+  `.7z` extraction to patoolib, which shells out to an external
+  7z/7za/7zr/7zz/7zzs/unar binary with no pure-Python fallback. The Arm GNU
+  Toolchain bullet is untouched, exactly as the first (2026-07-26) Amendment
+  above left it.
+
+  This does not resolve the toolchain-store keying question (Alternatives,
+  "Key the toolchain store by SDK version") or the Lane 0 prebuilt-blink
+  question -- only the dtc/gperf bundle-contents question is settled.
 
 ## Context
 
@@ -149,8 +262,9 @@ Two facts constrain the fix more than they first appear:
    The missing-tool path simply never reaches it.
 2. **`west sdk install` does not ship `ninja`.**  It is the right tool for the
    Zephyr SDK and `arm-zephyr-eabi`, but it would not have fixed the failure
-   above.  Whether it delivers `dtc` / `gperf` on native Windows is unverified
-   (see Open evidence).
+   above.  It does not deliver `dtc` or `gperf` on native Windows either
+   (verified; see Open evidence and the 2026-07-26 "drop
+   `-DCMAKE_MAKE_PROGRAM`..." Amendment above).
 
 ## Decision
 
@@ -185,9 +299,17 @@ install, and two SDK versions coexist on one host.
 
 | Tier | Contents | Rule |
 |---|---|---|
-| A — hermetic, no elevation | Zephyr SDK + `arm-zephyr-eabi`, `ninja`, `cmake`, `dtc`, `gperf`, west + pip deps, `tan` | install after one consent click |
+| A — hermetic, no elevation | Zephyr SDK + `arm-zephyr-eabi`, `ninja`\*, `cmake`, `dtc`\*, `gperf`\*, west + pip deps, `tan` | install after one consent click |
 | B — needs elevation | J-Link / WinUSB drivers, Linux udev rules, WSL2 enablement | prompt once, **skippable**, and show the command with a "Run for me" button |
 | C — licence-gated third party | DEEPX DX-M1 SDK, vendor NPU compilers | never silently fetched; show licence, then verify |
+
+\* `ninja`, `dtc`, and `gperf` are delivered by the signed package manager
+(winget/apt/brew), not unpacked from a hermetic archive -- see the
+2026-07-26 "drop `-DCMAKE_MAKE_PROGRAM`..." Amendment above. Tier A
+membership here means "no elevation, one consent click," not "shipped as
+a hermetic archive" -- delivery mechanism and elevation are independent
+axes, and this row was never actually in tension with the Decision's
+package-manager paragraph below.
 
 The rule is **never *require* copying a command** — not "never print one".
 Corporate security teams want to see what will run, and J-Link's licence likely
@@ -282,9 +404,20 @@ shipping path other than baremetal needs it, the `manualInstallHints` item
 
 These block P1 tickets, not P0:
 
-- Contents of the Zephyr SDK **Windows** bundle at the pinned version: does
-  `west sdk install` deliver `dtc` and `gperf` on win-x64, and does it
-  self-extract `.7z` on a host with no 7-Zip?  Test on a clean Windows VM.
+- ~~Contents of the Zephyr SDK **Windows** bundle at the pinned version:
+  does `west sdk install` deliver `dtc` and `gperf` on win-x64, and does it
+  self-extract `.7z` on a host with no 7-Zip?  Test on a clean Windows
+  VM.~~ **Answered** — see the 2026-07-26 "drop `-DCMAKE_MAKE_PROGRAM`..."
+  Amendment above: for the hosts inspected (`windows-x86_64`,
+  `linux-x86_64`), neither `dtc` nor `gperf` ships in the Windows hosttools
+  bundle — the archive `west sdk install` installs by default — verified
+  via `7z l` against a `sha256`-checked `hosttools_windows-x86_64.7z`, no
+  clean Windows VM needed. The `.7z`-self-extraction half was already
+  answered before this amendment, not newly here:
+  `manualInstallHints.windows.note`'s pre-existing "7-Zip must already be
+  on PATH..." line already states west delegates `.7z` extraction to
+  patoolib, which shells out to an external 7z/7za/7zr/7zz/7zzs/unar binary
+  with no pure-Python fallback.
 - Is the Arm GNU Toolchain required by any shipping path other than baremetal?
 - ~~Real per-artifact sizes for our minimal set.  The ~17 GB figure is a
   comment in `pr-twister.yml`, not a measurement.~~ **Answered** — see the

@@ -311,7 +311,9 @@ def _check_dtc() -> CheckResult:
         return CheckResult(
             "dtc", WARN, "devicetree compiler (dtc) not found on PATH",
             "Install it: apt install device-tree-compiler / brew install dtc "
-            "(bundled with the Zephyr SDK on Windows).",
+            "-- on native Windows the Zephyr SDK bundle does not ship dtc, "
+            "so it needs a separate install (see docs/cross-platform-setup.md "
+            "for Windows steps).",
         )
     ver = _tool_version(["dtc", "--version"])
     label = f"dtc {ver[0]}.{ver[1]}" if ver else "dtc present"
@@ -325,7 +327,9 @@ def _check_gperf() -> CheckResult:
         return CheckResult(
             "gperf", WARN, "gperf not found on PATH",
             "Install it: apt install gperf / brew install gperf "
-            "(bundled with the Zephyr SDK on Windows).",
+            "-- on native Windows the Zephyr SDK bundle does not ship gperf "
+            "either, so it needs a separate install (see "
+            "docs/cross-platform-setup.md for Windows steps).",
         )
     ver = _tool_version(["gperf", "--version"])
     label = f"gperf {ver[0]}.{ver[1]}" if ver else "gperf present"

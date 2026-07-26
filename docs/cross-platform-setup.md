@@ -360,6 +360,22 @@ winget install -e --id Ninja-build.Ninja
 Close and reopen PowerShell after the installs so the updated
 `PATH` is picked up.
 
+Two more tools, listed separately because they are build-time and
+optional rather than part of the four required above:
+
+```powershell
+winget install -e --id oss-winget.dtc
+winget install -e --id oss-winget.gperf
+```
+
+Neither `dtc` nor `gperf` is in `prerequisites.windows`, and
+`bootstrap.ps1` does not require them.  `alp doctor`'s `_check_dtc` /
+`_check_gperf` are WARN-only: `edtlib` does the load-bearing devicetree
+parse in pure Python (a missing `dtc` never blocks a build), and plain
+kernel-mode apps build without `gperf`.  Install them if your build needs
+extra dts validation or kobject/userspace generation -- the Zephyr SDK's
+Windows bundle ships neither.
+
 ### 4.2 Python deps
 
 ```powershell
