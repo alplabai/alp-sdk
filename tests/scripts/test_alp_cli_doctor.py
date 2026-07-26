@@ -376,8 +376,19 @@ def test_prereq_install_hint_falls_back_on_malformed_manifest(monkeypatch, tmp_p
 
 def test_dtc_and_gperf_missing_are_warn_only(monkeypatch):
     monkeypatch.setattr(doctor.shutil, "which", lambda _: None)
-    assert doctor._check_dtc().status == doctor.WARN
-    assert doctor._check_gperf().status == doctor.WARN
+    dtc_result = doctor._check_dtc()
+    gperf_result = doctor._check_gperf()
+    assert dtc_result.status == doctor.WARN
+    assert gperf_result.status == doctor.WARN
+    for result in (dtc_result, gperf_result):
+        # issue #949: this hint used to claim the tool was "bundled with the
+        # Zephyr SDK on Windows" -- false, and a customer following it would
+        # install the SDK and still not have the tool. Pin both the absence
+        # of the old false claim and the presence of the corrective text so
+        # a regression here fails a test instead of shipping silently.
+        assert "bundled with the Zephyr SDK on Windows" not in result.hint
+        assert "does not ship" in result.hint
+        assert "cross-platform-setup.md" in result.hint
 
 
 def test_jlink_missing_is_warn_only(monkeypatch):
