@@ -48,8 +48,9 @@
 // non-sim smoke .resc now seeds it (`cpu VectorTableOffset $vtor`,
 // #947); the --sim-mode gateway did it in its generated boot script,
 // but that gateway is not ported yet (tan-cli#77).  AEN stays advisory
-// for the separate reason that no renode workflow asserts anything
-// yet (#955).
+// for the separate reason that no renode workflow asserts anything yet
+// -- every boot-and-assert e2e step is a no-op `echo` until tan-cli#77
+// lands.
 cpu: CPU.CortexM @ sysbus
     cpuType: "cortex-m55"
     nvic: nvic

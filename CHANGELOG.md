@@ -28,13 +28,16 @@ default `hello-world` build — so `CONFIG_FLASH_LOAD_OFFSET` keeps its `default
 reading SP/PC out of code words instead of out of unloaded memory.
 
 The descriptor now asks Renode for the real address instead of computing one:
-right after `sysbus LoadELF $elf`, `$vtor ?= \`sysbus GetSymbolAddress
-"_vector_table"\`` reads Zephyr's vector-table symbol straight out of the
+right after `sysbus LoadELF $elf`, ``$vtor ?= `sysbus GetSymbolAddress
+"_vector_table"` `` reads Zephyr's vector-table symbol straight out of the
 loaded ELF's own symbol table, then `cpu VectorTableOffset $vtor` applies it
-before `start`. This is correct for whatever `$elf` actually is — the
-MRAM-linked shape, the ITCM-linked shape, an MCUboot-chained slot, or a future
-partition layout — with no address arithmetic left to fall out of sync with
-the board's Kconfig. Verified on the pinned Renode v1.16.1 (`d66b0c2a`)
+before `start`. This is correct for any link shape where the vector table's
+own segment has `vaddr == paddr` — the MRAM-linked shape and the ITCM-linked
+shape both measured here, but *not* an MCUboot `RAM_LOAD` slot, where
+`GetSymbolAddress` still returns the symbol's link-time VADDR while Renode
+places segment bytes by PADDR; with no address arithmetic left to fall out of
+sync with the board's Kconfig for the shapes it does cover. Verified on the
+pinned Renode v1.16.1 (`d66b0c2a`)
 against both shapes: the ITCM-linked build's `_vector_table` resolves to
 `0x0` and seeding it lets the CPU run cleanly (PC/SP progress normally); the
 MRAM-linked default build's `_vector_table` resolves to `0x80000000`

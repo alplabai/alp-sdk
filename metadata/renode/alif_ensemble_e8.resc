@@ -6,15 +6,20 @@
 # renode.rs -> build_renode_argv).  The wrapper injects `$elf` (the
 # resolved <build_dir>/zephyr/zephyr.elf), `$repl` (the platform
 # descriptor) and (per tan-cli#65) `$vtor` via `renode -e "$elf=@..."`
-# BEFORE this script runs.  The `?=` defaults below only apply when a
-# variable is still unset, so any wrapper-supplied value wins -- and the
-# script stays runnable by hand from an alp-build'd hello-world tree:
+# BEFORE this script runs.  The `?=` assignment only takes when a
+# variable is still unset -- but the lookup on its right-hand side is
+# NOT conditional: Renode's Monitor parses and executes the backtick
+# command before it ever checks `?=`, so the `$vtor ?=` lookup below
+# runs on every invocation, wrapper-supplied value or not, and a
+# stripped or non-Zephyr ELF still aborts the script even when the
+# wrapper already passed `-e $vtor=0x...`.  The script stays runnable
+# by hand from an alp-build'd hello-world tree:
 #
 #     renode metadata/renode/alif_ensemble_e8.resc
 #
-# This script now derives its own `$vtor` default from the loaded ELF's
-# symbol table (see the comment at the `$vtor ?=` line below), so a bare
-# hand run no longer needs one passed in either.
+# This script derives a `$vtor` default from the loaded ELF's symbol
+# table when none was supplied (see the comment at the `$vtor ?=` line
+# below), so a bare hand run no longer needs one passed in either.
 # ---------------------------------------------------------------------
 $repl ?= @metadata/renode/alif_ensemble_e8.repl
 $elf  ?= @examples/peripheral-io/hello-world/build/m55_hp-zephyr/zephyr/zephyr.elf
@@ -27,7 +32,8 @@ machine LoadPlatformDescription $repl
 # instead of a GUI window; the wrapper tees that stdout to --log, which
 # is where a log-grep for the app's "[hello] done" marker would look.
 # NB: no gate greps it today -- every renode workflow's boot-and-assert
-# step is a no-op `echo` (#955), so nothing here is currently asserted.
+# step is a no-op `echo` (tan-cli#77), so nothing here is currently
+# asserted.
 showAnalyzer uart5
 
 # Load the Zephyr ELF, then seed the vector-table base BEFORE `start`
@@ -52,11 +58,17 @@ sysbus LoadELF $elf
 # `_vector_table` is Zephyr's vector-table symbol
 # (arch/arm/core/cortex_m/vector_table.S) and survives in every Zephyr
 # .elf -- the default build never strips it.  `sysbus GetSymbolAddress`
-# reads it straight out of the just-loaded ELF's own symbol table, so
-# the value is right for whatever $elf actually is: the ITCM-linked
-# shape, the MRAM-linked shape, an MCUboot-chained slot, or a future
-# partition layout -- with no arithmetic here to fall out of sync with
-# the board's Kconfig.
+# reads it straight out of the just-loaded ELF's own symbol table -- but
+# that's the symbol's link-time VADDR (SymbolLookup.LoadELF, the pinned
+# renode-infrastructure add012af, inserts the raw `st_value` when no
+# textAddress override applies), and Renode places segment bytes by
+# PADDR.  The two coincide -- and this lookup is correct -- for any link
+# shape where the vector table's own segment has `vaddr == paddr`: true
+# for both the ITCM-linked and MRAM-linked shapes this file measures,
+# but NOT for an MCUboot RAM-LOAD slot (MCUBOOT_BOOTLOADER_MODE_RAM_LOAD),
+# where the two diverge; tan-cli#65's own derivation deliberately uses
+# `p_paddr` for that reason.  No arithmetic here to fall out of sync
+# with the board's Kconfig for the shapes it does cover.
 #
 # What used to be here derived $vtor from the devicetree
 # (`zephyr,code-partition = &slot0_partition`, partition@10000 of MRAM
@@ -100,8 +112,13 @@ sysbus LoadELF $elf
 # $vtor=...` override is needed for either shape any more.
 #
 # Assign it UNQUOTED -- a quoted `$vtor="0x80010000"` used to fail with
-# `Cannot convert type 'string' to 'uint'`; GetSymbolAddress already
-# returns a bare numeric value, so this stays true for the lookup too.
+# `Cannot convert type 'string' to 'uint'`.  That's not because
+# `GetSymbolAddress` returns something other than a string either way:
+# Renode's `Monitor.ExecuteWithResult` wraps the backtick command's
+# printed output in a `StringToken` regardless.  What makes the
+# unquoted form work is `reParse` -- the Monitor re-parses the composed
+# line and resolves that string into a `HexToken`; quoting it would
+# keep it a string and reproduce the old failure.
 $vtor ?= `sysbus GetSymbolAddress "_vector_table"`
 cpu VectorTableOffset $vtor
 
