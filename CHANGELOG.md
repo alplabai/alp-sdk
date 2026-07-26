@@ -7,6 +7,53 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.14.0 candidate
 
+### Fixed — Renode AEN descriptor halted the CPU on an MRAM-linked image
+
+`metadata/renode/alif_ensemble_e8.resc` never seeded the vector-table base, so
+Renode guessed it — and its guess is the *lowest* `vaddr` across the LOAD
+segments.  An MRAM-linked Zephyr app is exactly the shape that breaks: its
+`.data` init image pairs a RAM `vaddr` (`0x20000000`, where `.data` is copied
+*to*) with an MRAM `paddr` (where the initialiser lives), so Renode guessed
+`0x20000000`, read SP/PC out of memory nothing was ever loaded into, got zeros,
+and halted the CPU before executing an instruction.
+
+A first pass at this fix seeded `$vtor` from a hardcoded default
+(`0x80010000`) reasoned from the devicetree's `zephyr,code-partition =
+&slot0_partition`. That reasoning doesn't hold: `zephyr,code-partition` only
+takes effect through `CONFIG_USE_DT_CODE_PARTITION`, which defaults off and is
+`select`ed only by `BOOTLOADER_MCUBOOT`/`BOOTLOADER_BOSSA` — neither on for the
+default `hello-world` build — so `CONFIG_FLASH_LOAD_OFFSET` keeps its `default
+0` and the image actually links at the MRAM base, `0x80000000`. The hardcoded
+`0x80010000` guess would have landed 64 KiB inside the image's own `.text`,
+reading SP/PC out of code words instead of out of unloaded memory.
+
+The descriptor now asks Renode for the real address instead of computing one:
+right after `sysbus LoadELF $elf`, `$vtor ?= \`sysbus GetSymbolAddress
+"_vector_table"\`` reads Zephyr's vector-table symbol straight out of the
+loaded ELF's own symbol table, then `cpu VectorTableOffset $vtor` applies it
+before `start`. This is correct for whatever `$elf` actually is — the
+MRAM-linked shape, the ITCM-linked shape, an MCUboot-chained slot, or a future
+partition layout — with no address arithmetic left to fall out of sync with
+the board's Kconfig. Verified on the pinned Renode v1.16.1 (`d66b0c2a`)
+against both shapes: the ITCM-linked build's `_vector_table` resolves to
+`0x0` and seeding it lets the CPU run cleanly (PC/SP progress normally); the
+MRAM-linked default build's `_vector_table` resolves to `0x80000000`
+(confirmed independently with `arm-zephyr-eabi-nm`), and seeding it fixes the
+halt-on-zero — PC/SP now come from the image's real entry point — but the
+image still does not complete a boot, because of the separate Cortex-M55
+defect `alif_ensemble_e8.repl` already documents (Renode v1.16.1 mis-executes
+a vector table placed at a high, bit31-set address like the MRAM base). A
+plain `renode metadata/renode/alif_ensemble_e8.resc` on the default `$elf`
+no longer halts from zero; no `-e $vtor=...` override is required for either
+link shape any more.
+
+Also corrects retired-executor comment rot across the Renode surface —
+`alif_ensemble_e8.{resc,repl}`, `renesas_rzv2n.{resc,repl}`,
+`tests/renode/v2n_m33_ramconsole.conf` and
+`scripts/west_commands/_alp_common.py` still named `west alp-renode` /
+`scripts/west_commands/alp_renode.py`, deleted in ADR-0020 Phase 4 (#848).
+
+Closes #947.
 ### Fixed — `scripts/test-all.sh`'s inline Doxyfile had drifted from
 `pr-doxygen.yml`'s on four settings (#970)
 
