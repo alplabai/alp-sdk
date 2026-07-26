@@ -7,6 +7,52 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.14.0 candidate
 
+### Fixed — ADR 0021 Decision: "resolve absolute paths and inject them" was the wrong mechanism
+
+`docs/adr/0021-toolchain-provisioning.md`'s Decision (`:112-116`) told the
+toolchain-injection story as "resolve absolute paths and inject them", which
+contradicts this repo's own hermetic-plan design: `build-plan-v1.schema.json`'s
+`planPathMode: tokened` (issue #865, ADR 0020 item 5) already replaced every
+checkout/project-anchored absolute path the plan would otherwise embed with a
+literal `${SDK_ROOT}` / `${PROJECT_ROOT}` / `${PYTHON}` token, substituted by
+`tan` at materialise time. A build-plan that instead baked in an absolute
+toolchain path would regress #865 and make plans host-specific again.
+
+Adds a dated Amendment to ADR 0021 (a second, separately-titled `## Amendment`
+heading alongside the existing 2026-07-26 Arm-GNU-Toolchain one — the two
+answer unrelated open questions and ADR 0006/0012/0017/0021 already each carry
+their own singular, topic-titled `## Amendment` heading, so a second heading
+matches the established convention better than overloading one heading's
+title with unrelated content) that: reads "absolute paths" as a
+`${TOOLCHAIN_ROOT}`-style token resolved by `tan`, the same way as the three
+tokens above; confirms "Never mutate PATH" and its two consequences (no
+editor restart; two SDK versions coexist on one host) are unaffected — this
+corrects mechanism, not the decision; records that neither landing site has
+an alp-sdk-only slice (`slices[].toolchain` and `slices[].env` are both
+`additionalProperties: false` closed contracts, and `tan-core`'s
+`crates/tan-core/src/build_plan.rs` has zero references to `toolchain`), so
+this needs a coordinated `tan` change shipped additive-optional per ADR
+0020's Amendment item 3; and notes that ADR 0021's Lane 1 P1 bullet fuses the
+lockfile and the path-injection work, but only the lockfile half shipped
+(`metadata/toolchains.json`, #962) — it had a self-contained alp-sdk
+deliverable, the injection half does not, and the two separated in practice.
+
+Also replaces the ADR's unmeasured footprint estimate (Alternatives `:194`,
+Open evidence) with the real numbers already recorded in
+`metadata/toolchains.json`'s `measuredFootprint` (#949/#962): 172403720 bytes
+compressed download and 2026739200 bytes extracted on disk (of which
+`hosttools/` is 1242632545 bytes and `gnu/arm-zephyr-eabi/` is 784086497
+bytes) for the linux-x86_64 minimal SDK + `arm-zephyr-eabi` pair — the ADR's
+~1 GB estimate was ~6x too high on download and its ~17 GB estimate ~2x too
+low on disk, because it conflated the two. Records, without resolving, the
+`hosttools`/`--no-hosttools`/`dtc` trade-off the measurement exposes
+(`hosttools/` is 61% of the on-disk footprint and is what carries `dtc`;
+`west sdk install` installs it by default). Marks the Open evidence "real
+per-artifact sizes" bullet answered; the `dtc`/`gperf`-on-Windows and `.7z`
+bullets are untouched — only a clean-Windows-VM test settles those.
+
+Doc-only: no code, schema, or `metadata/toolchains.json` change.
+
 ### Added — `metadata/toolchains.json`: the Zephyr SDK (cross-toolchain) pin as data (#949)
 
 alp-sdk pinned the Zephyr *version* as data (`metadata/bootstrap.json`) but
