@@ -461,6 +461,20 @@
       "ci": "pr-metadata-validate.yml:validate"
     },
     {
+      "id": "toolchain-lock",
+      "description": "Keep metadata/toolchains.json (the pinned Zephyr SDK release) in lockstep with Zephyr's own SDK_VERSION and each CI workflow's own SDK reference.",
+      "runner": "check-script",
+      "script": "scripts/check_toolchain_lock.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": null
+    },
+    {
       "id": "vendor-ext-tags",
       "description": "CI gate: every function declaration under include/alp/ext/**/*.h carries a Supported-silicon tag.",
       "runner": "check-script",

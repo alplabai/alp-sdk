@@ -254,13 +254,19 @@ def test_ci_cache_key_disagreement_fails(tmp_path, monkeypatch, capsys):
 
 def test_zephyr_sdk_cache_key_ignored(tmp_path, monkeypatch, capsys):
     """The zephyr-SDK toolchain cache key (a DIFFERENT release, pinned
-    independently) must not be compared against zephyr.version -- item 11
-    of the review. Changing ONLY that key must not fail the gate."""
+    independently and gated separately by scripts/check_toolchain_lock.py
+    against metadata/toolchains.json, issue #949 item 3) must not be
+    compared against zephyr.version -- item 11 of the review. The real
+    corpus no longer hardcodes a literal SDK-cache-key version at all (the
+    #949 fix keys pr-twister.yml's cache on `${{ env.ZEPHYR_SDK_VERSION }}`
+    instead) -- inject a synthetic literal-version line so this regex-
+    exclusion behaviour itself stays regression-locked."""
     _scaffold(tmp_path)
-    _replace(
-        tmp_path / ".github/workflows/pr-twister.yml",
-        "key: zephyr-sdk-arm-zephyr-eabi-v4.4.0-${{ runner.os }}",
-        "key: zephyr-sdk-arm-zephyr-eabi-v9.9.9-${{ runner.os }}",
+    twister = tmp_path / ".github/workflows/pr-twister.yml"
+    twister.write_text(
+        twister.read_text(encoding="utf-8")
+        + "          key: zephyr-sdk-arm-zephyr-eabi-v9.9.9-${{ runner.os }}\n",
+        encoding="utf-8",
     )
     _point_gate_at(tmp_path, monkeypatch)
     rv = gate.main()
@@ -576,14 +582,24 @@ def test_fix_is_idempotent(tmp_path, monkeypatch, capsys):
 def test_fix_does_not_touch_zephyr_sdk_cache_key(tmp_path, monkeypatch, capsys):
     """Item 11 of the original review, re-exercised through --fix this
     time: the Zephyr *SDK* toolchain cache key tracks a separate release
-    and must survive a Zephyr revision bump untouched."""
+    and must survive a Zephyr revision bump untouched. The real corpus no
+    longer hardcodes a literal SDK-cache-key version (issue #949 item 3
+    keys it on `${{ env.ZEPHYR_SDK_VERSION }}` instead), so this test
+    injects a synthetic literal-version line to keep the --fix-must-not-
+    touch-this-key behaviour regression-locked."""
     _scaffold(tmp_path)
+    twister_path = tmp_path / ".github/workflows/pr-twister.yml"
+    twister_path.write_text(
+        twister_path.read_text(encoding="utf-8")
+        + "          key: zephyr-sdk-arm-zephyr-eabi-v4.4.0-${{ runner.os }}\n",
+        encoding="utf-8",
+    )
     _edit_manifest(tmp_path, lambda d: d["zephyr"].__setitem__("version", "v4.5.0"))
     _point_gate_at(tmp_path, monkeypatch)
     monkeypatch.setattr(sys, "argv", ["check_bootstrap_manifest.py", "--fix"])
     assert gate.main() == 0
 
-    twister = (tmp_path / ".github/workflows/pr-twister.yml").read_text(encoding="utf-8")
+    twister = twister_path.read_text(encoding="utf-8")
     assert "zephyr-sdk-arm-zephyr-eabi-v4.4.0" in twister
     assert "zephyr-sdk-arm-zephyr-eabi-v4.5.0" not in twister
 

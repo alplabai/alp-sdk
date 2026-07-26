@@ -24,7 +24,9 @@ when:
      `_iter_scannable_lines`).
   4. Any CI workflow's own Zephyr pin (the `--mr <ver>` west-init argument, or
      a `key:` cache line naming the Zephyr checkout itself -- NOT the
-     separate Zephyr SDK toolchain cache, which tracks its own release)
+     separate Zephyr SDK toolchain cache, which tracks its own release and
+     is instead gated by `scripts/check_toolchain_lock.py` against
+     `metadata/toolchains.json`, issue #949 item 3)
      disagrees with `zephyr.version`.
   5. README.md's Zephyr badge disagrees with `zephyr.version`.
   6. `prerequisites.posix` disagrees with bootstrap.sh's hardcoded
@@ -157,12 +159,13 @@ _WEST_MR_RE = re.compile(r"--mr\s+(v\d+\.\d+\.\d+)")
 #   key: getting-started-aen801-zephyr-v4.4.0-${{ runner.os }}
 # Requires "zephyr-v<digits>" CONTIGUOUS (no `-eabi-`/`-sdk-` etc. in
 # between), which is exactly what excludes a Zephyr *SDK* toolchain cache
-# key like `zephyr-sdk-arm-zephyr-eabi-v4.4.0-...` -- that key names the
-# separate Zephyr SDK release (pinned independently, e.g. as
-# `ZEPHYR_SDK_VERSION: "1.0.1"` elsewhere in the same workflow) and only
-# agrees with `zephyr.version` today by coincidence, not by contract.
-# Deliberately does NOT match a `${{ env.ZEPHYR_SDK_VERSION }}`-interpolated
-# key either (no literal digits to compare).
+# key like `zephyr-sdk-arm-zephyr-eabi-${{ env.ZEPHYR_SDK_VERSION }}-...` --
+# that key names the separate Zephyr SDK release (pinned independently in
+# `metadata/toolchains.json`, gated by `scripts/check_toolchain_lock.py`,
+# not this script) and would only agree with `zephyr.version` today by
+# coincidence, not by contract.  Deliberately does NOT match a
+# `${{ env.ZEPHYR_SDK_VERSION }}`-interpolated key either (no literal
+# digits to compare).
 _CACHE_KEY_RE = re.compile(r"key:.*?zephyr-(v\d+\.\d+\.\d+)", re.IGNORECASE)
 _README_BADGE_RE = re.compile(r"Zephyr-v(\d+\.\d+\.\d+)")
 
