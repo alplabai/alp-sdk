@@ -1,7 +1,8 @@
 # 0021. Toolchain provisioning: pin upstream, never rehost; onboard per lane
 
-Status: Proposed — see **Amendment** below (2026-07-26) for the Arm GNU
-Toolchain open-evidence answer.
+Status: Proposed — see **Amendments** below (2026-07-26) for the Arm GNU
+Toolchain open-evidence answer and the tokened-toolchain-root-injection
+wording correction.
 Date: 2026-07-25
 Deciders: alpCaner
 
@@ -37,6 +38,70 @@ GD32-only scoping:
   `docs/cross-platform-setup.md` §2.3/§3.4/§4.3 and
   `metadata/bootstrap.json`'s `manualInstallHints.windows.note` carry the
   three-path scoping; ADR 0012's own Amendment cross-references this one.
+
+## Amendment (2026-07-26 — tokened toolchain-root injection, not absolute paths)
+
+Corrects the Decision section's toolchain-injection mechanism (`:112-116`,
+"**Never mutate PATH.** Resolve absolute paths and inject them..."). This is a
+correction of *mechanism*, not a reversal of the decision -- the headline and
+its consequences still stand; only the word "absolute" was wrong.
+
+- **Read "resolve absolute paths and inject them" as tokened
+  toolchain-root injection, resolved by the executor.** The build-plan
+  already has the right mechanism for this, just not applied here yet:
+  `metadata/schemas/build-plan-v1.schema.json`'s `planPathMode` (issue #865)
+  states that "`'tokened'` means every checkout/project-anchored absolute
+  path this plan would otherwise embed is instead a literal `${SDK_ROOT}` /
+  `${PROJECT_ROOT}` / `${PYTHON}` token ... tan-cli (PR #24) substitutes them
+  at materialise time, rather than the SDK baking in this run's absolute
+  checkout path." A toolchain root is the same class of fact: a
+  `${TOOLCHAIN_ROOT}`-style token emitted in the plan, substituted by `tan`
+  at materialise time exactly like the three tokens above -- not a literal
+  absolute path baked in by alp-sdk.
+- **"Never mutate PATH" and both stated consequences still stand.** No
+  editor restart after an install, and two SDK versions coexisting on one
+  host, are both delivered by tokened injection exactly as they would be by
+  literal-absolute-path injection -- the token still resolves to an
+  absolute path on the executor's host at the moment of use, and PATH is
+  still never touched. Only the wire representation of that path was wrong.
+- **This has no alp-sdk-only slice.** Both landing sites are closed,
+  `additionalProperties: false` contracts: `slices[].toolchain`
+  (`build-plan-v1.schema.json`) requires exactly `[targetTriple, compiler,
+  sysroot, id]`, and `slices[].env` permits only `ALP_SDK_ROOT`. Widening
+  either is a Wave-C contract edit, and `tan-core`'s build-plan parser
+  (`crates/tan-core/src/build_plan.rs`) models only the core slice today --
+  zero references to `toolchain` anywhere in it -- so an alp-sdk-side emit
+  would be a schema field nothing on the consumer side reads. It needs a
+  coordinated `tan` change first, and per [ADR 0020](0020-sdk-owns-build-execution.md)'s
+  Amendment item 3, a Wave-C contract edit at unchanged `schemaVersion` must
+  ship additive-optional with a strict-producer / tolerant-consumer rollout,
+  the same way `executionPolicy` was corrected there.
+- **The two Lane 1 P1 halves separated in practice.** This ADR's Decision
+  fuses "the `sha256` lockfile" and "build-plan path injection" into one
+  Lane 1 P1 bullet. Only the lockfile half shipped
+  (`metadata/toolchains.json`, #962) -- it had a self-contained alp-sdk
+  deliverable; the injection half does not, for the reason above, and stays
+  open.
+- **Footprint figures corrected.** The Alternatives entry ("Key the
+  toolchain store by SDK version", `:194`) and the Open evidence bullet
+  below both carry an unmeasured estimate -- ~1 GB (minimal SDK +
+  `arm-zephyr-eabi`) to ~17 GB (full bundle) -- sourced from a
+  `pr-twister.yml` comment, never a measurement. Measured, linux-x86_64,
+  minimal SDK + `arm-zephyr-eabi` (`metadata/toolchains.json`'s
+  `measuredFootprint`): **172403720 bytes** compressed download (~164 MiB)
+  and **2026739200 bytes** extracted on disk (~1.89 GiB), of which
+  `hosttools/` is **1242632545 bytes** and `gnu/arm-zephyr-eabi/` is
+  **784086497 bytes**. The estimate was wrong in both directions at once
+  because it conflated the two numbers: ~6x too high on download, ~2x too
+  low on disk.
+- **Design consequence the measurement exposes.** `hosttools/` is 61% of
+  the on-disk footprint -- larger than the compiler itself -- and it is what
+  carries `dtc`. `west sdk install` installs it by default
+  (`scripts/west_commands/sdk.py:452`:
+  `if not args.interactive and not args.no_hosttools`). `--no-hosttools`
+  nearly halves the on-disk store but loses `dtc`, which is exactly this
+  ADR's still-open `dtc`/`gperf`-on-Windows question below. Recorded as a
+  trade-off; not resolved here.
 
 ## Context
 
@@ -220,8 +285,10 @@ These block P1 tickets, not P0:
   `west sdk install` deliver `dtc` and `gperf` on win-x64, and does it
   self-extract `.7z` on a host with no 7-Zip?  Test on a clean Windows VM.
 - Is the Arm GNU Toolchain required by any shipping path other than baremetal?
-- Real per-artifact sizes for our minimal set.  The ~17 GB figure is a comment
-  in `pr-twister.yml`, not a measurement.
+- ~~Real per-artifact sizes for our minimal set.  The ~17 GB figure is a
+  comment in `pr-twister.yml`, not a measurement.~~ **Answered** — see the
+  2026-07-26 "tokened toolchain-root injection" Amendment above;
+  `metadata/toolchains.json`'s `measuredFootprint` carries the real numbers.
 
 ## Consequences
 
