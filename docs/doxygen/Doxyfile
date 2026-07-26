@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Single source for the SDK's Doxygen config -- committed here so
+# pr-doxygen.yml (CI) and scripts/test-all.sh (local) both consume the
+# SAME file instead of hand-maintaining two heredocs that drift (#970).
+#
+# Per-run values that must NOT be baked into this file are appended on
+# stdin by the caller instead of templated in:
+#   - PROJECT_NUMBER (varies per commit -- v0.13.0-31-g84e1967c)
+#   - OUTPUT_DIRECTORY / WARN_LOGFILE, for a local run only (test-all.sh
+#     uses a fresh mktemp per run so concurrent local runs do not collide;
+#     CI keeps the values below as-is since it runs once per job).
+# Doxygen re-assigns a plain "=" tag to the LAST value seen, so appending
+# an override after -ing this file on stdin works exactly like a
+# second Doxyfile without maintaining one.  See
+# .github/workflows/pr-doxygen.yml and scripts/test-all.sh stage_doxygen.
+#
+# INPUT / EXCLUDE_PATTERNS / WARN_AS_ERROR here ARE the CI-faithful
+# config -- do not re-embed a second copy of these settings anywhere
+# else (scripts/check_doxyfile_single_source.py gates that).
+
+PROJECT_NAME           = "Alp SDK"
+OUTPUT_DIRECTORY       = doxygen-out
+INPUT                  = include/alp
+RECURSIVE              = YES
+EXTRACT_ALL            = YES
+EXTRACT_STATIC         = NO
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+QUIET                  = NO
+WARN_AS_ERROR          = FAIL_ON_WARNINGS
+WARN_LOGFILE           = doxygen-warnings.log
+OPTIMIZE_OUTPUT_FOR_C  = YES
+DOT_GRAPH_MAX_NODES    = 200
+JAVADOC_AUTOBRIEF      = YES
+USE_MDFILE_AS_MAINPAGE = README.md
+INPUT                 += README.md VERSIONS.md CONTRIBUTING.md TRADEMARKS.md docs                          chips/README.md                          vendors/alif/README.md                          vendors/deepx-dxm1/README.md                          vendors/gd32_firmware_library/README.md                          firmware/cc3501e/README.md                          keys/README.md                          meta-alp-sdk/README.md                          examples/README.md                          metadata/library-profiles/README.md                          zephyr/sysbuild/aen/README.md
+# CHANGELOG.md is volatile release notes (not customer-facing
+# reference) and contains literals Doxygen mis-parses (<batch>, @v3,
+# etc.); keep it out of INPUT.  docs/superpowers/* are internal
+# design specs / WIP plans, not part of the public reference.
+EXCLUDE_PATTERNS       = */superpowers/*

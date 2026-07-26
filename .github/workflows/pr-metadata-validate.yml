@@ -359,6 +359,9 @@ jobs:
       - name: Gate — scripts/ and firmware/ write_text() writers pass newline=""
         run: python3 scripts/check_write_text_newline.py
 
+      - name: Gate — no re-embedded Doxyfile outside docs/doxygen/Doxyfile
+        run: python3 scripts/check_doxyfile_single_source.py
+
       - name: alp.lock in sync
         run: python3 scripts/west_commands/alp_lock.py --workspace . --check
 

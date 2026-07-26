@@ -141,6 +141,20 @@
       "ci": "pr-doc-drift.yml:doc-drift"
     },
     {
+      "id": "doxyfile-single-source",
+      "description": "No second Doxyfile-shaped heredoc regrows in .github/workflows/** or scripts/** while docs/doxygen/Doxyfile is the committed single source (#970).",
+      "runner": "check-script",
+      "script": "scripts/check_doxyfile_single_source.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "doxygen-coverage",
       "description": "Doxygen-coverage audit -- walks include/alp/*.h and flags every undocumented public symbol.",
       "runner": "check-script",

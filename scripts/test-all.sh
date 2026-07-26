@@ -444,41 +444,27 @@ stage_doxygen() {
     if [ -z "${dox}" ]; then
         return 99
     fi
-    # The repo ships NO committed Doxyfile -- pr-doxygen.yml generates one
-    # inline.  Reproduce that Doxyfile FAITHFULLY here so the full
-    # WARN_AS_ERROR build (which alone catches bad @ref / dead md links --
-    # the coverage script does NOT) runs locally before the PR.  Keep
-    # INPUT / EXCLUDE_PATTERNS / WARN_AS_ERROR identical to
-    # .github/workflows/pr-doxygen.yml.
-    local cfg warn_log
-    cfg=$(mktemp)
+    # docs/doxygen/Doxyfile is the single source shared with
+    # pr-doxygen.yml (#970) -- run the SAME full WARN_AS_ERROR build
+    # here (it alone catches bad @ref / dead md links -- the coverage
+    # script does NOT) instead of hand-maintaining a second Doxyfile
+    # that drifts.  Per-run values that must not collide across
+    # concurrent local runs (OUTPUT_DIRECTORY, WARN_LOGFILE) plus the
+    # commit-varying PROJECT_NUMBER are appended on stdin, mirroring
+    # the CI workflow's own stdin-override technique.
+    if [ ! -f docs/doxygen/Doxyfile ]; then
+        return 99
+    fi
+    local out_dir warn_log project_number
+    out_dir=$(mktemp -d)
     warn_log=$(mktemp)
-    cat > "${cfg}" <<EOF
-PROJECT_NAME           = "Alp SDK"
-OUTPUT_DIRECTORY       = $(mktemp -d)
-INPUT                  = include/alp
-RECURSIVE              = YES
-EXTRACT_ALL            = YES
-EXTRACT_STATIC         = NO
-GENERATE_HTML          = NO
-GENERATE_LATEX         = NO
-QUIET                  = YES
-WARN_AS_ERROR          = FAIL_ON_WARNINGS
-WARN_LOGFILE           = ${warn_log}
-OPTIMIZE_OUTPUT_FOR_C  = YES
-JAVADOC_AUTOBRIEF      = YES
-USE_MDFILE_AS_MAINPAGE = README.md
-INPUT                 += README.md VERSIONS.md CONTRIBUTING.md TRADEMARKS.md docs \
-                         chips/README.md vendors/alif/README.md \
-                         vendors/deepx-dxm1/README.md \
-                         vendors/gd32_firmware_library/README.md \
-                         firmware/cc3501e/README.md keys/README.md \
-                         meta-alp-sdk/README.md \
-                         metadata/library-profiles/README.md \
-                         zephyr/sysbuild/aen/README.md
-EXCLUDE_PATTERNS       = */superpowers/*
-EOF
-    "${dox}" "${cfg}" >/dev/null 2>&1 || true
+    project_number=$(git describe --tags --always 2>/dev/null || echo 0.1.0-pre)
+    {
+        cat docs/doxygen/Doxyfile
+        printf 'OUTPUT_DIRECTORY = %s\n' "${out_dir}"
+        printf 'WARN_LOGFILE = %s\n' "${warn_log}"
+        printf 'PROJECT_NUMBER = "%s"\n' "${project_number}"
+    } | "${dox}" - >/dev/null 2>&1 || true
     if [ -s "${warn_log}" ]; then
         cat "${warn_log}"
         return 1
