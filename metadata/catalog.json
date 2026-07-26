@@ -1018,6 +1018,10 @@
       "script": "scripts/check_test_coverage.py"
     },
     {
+      "purpose": "Keep metadata/toolchains.json (the Zephyr SDK pin) in lockstep with everything that copies it.",
+      "script": "scripts/check_toolchain_lock.py"
+    },
+    {
       "purpose": "CI gate: every function declaration under include/alp/ext/**/*.h whose name matches alp_<vendor>_<class>_<verb> must carry an @par Supported silicon: tag in its immediately-preceding Doxygen block.",
       "script": "scripts/check_vendor_ext_tags.py"
     },

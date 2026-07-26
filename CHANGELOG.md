@@ -7,6 +7,79 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.14.0 candidate
 
+### Added — `metadata/toolchains.json`: the Zephyr SDK (cross-toolchain) pin as data (#949)
+
+alp-sdk pinned the Zephyr *version* as data (`metadata/bootstrap.json`) but
+had no equivalent pin for the Zephyr **SDK** (the `arm-zephyr-eabi` cross
+toolchain) — four CI workflows each fetched it ad hoc, with no integrity
+check and no shared source, so the versions could (and did) drift from each
+other and from the Zephyr pin.
+
+Adds `metadata/toolchains.json` (+ `metadata/schemas/toolchains-v1.schema.json`)
+as a declared, hand-maintained input beside `bootstrap.json` — never
+`alp.lock`, which is *generated* to record what a workspace resolved to;
+`alp-lock-v1.schema.json`'s reserved `toolchain` key stays unpopulated and is
+explicitly out of scope here. It carries the pinned SDK release (`1.0.1`,
+derived from Zephyr's own `SDK_VERSION` file at the pinned `v4.4.1`
+revision), the canonical upstream `sdk-ng` release URL, and a `sha256` + size
+per artifact for all three hosts (linux-x86_64, windows-x86_64,
+macos-aarch64) — pinned at origin, never rehosted, per
+`docs/adr/0021-toolchain-provisioning.md`'s Decision (GPLv3 corresponding-
+source obligations on the GCC toolchains, an unreviewed Arm EULA, and a
+download domain with no AV reputation are all costs a rehost would carry
+that a pin does not). It also records real, *measured* install-footprint
+numbers, replacing that ADR's unmeasured ~1 GB / ~17 GB figures (measured:
+~164 MiB compressed download, ~1.89 GiB on disk for the same
+minimal + `arm-zephyr-eabi` set) and states, without resolving, the
+`hosttools`/`--no-hosttools`/`dtc` trade-off `west sdk install` makes by
+default.
+
+New **blocking** gate `scripts/check_toolchain_lock.py` makes this repo's
+own CI the first consumer: it asserts the manifest validates against its
+schema; that `zephyrSdk.version` equals the real `SDK_VERSION` file at the
+Zephyr revision `bootstrap.json` pins (read via `git show <rev>:SDK_VERSION`
+against a resolved Zephyr checkout, skipped-with-reason when none resolves,
+promotable to a hard failure with `ALP_REQUIRE_ZEPHYR_ORACLE=1` — the same
+flag `tests/scripts/test_hil_blocks_coverage.py`'s `#807`-class gate already
+uses for the identical situation); and that no `.github/workflows/*.yml`
+file — every one, not a curated list — names the sdk-ng release URL or one
+of the manifest's own artifact filenames with a version slot that isn't the
+manifest-sourced `${{ env.ZEPHYR_SDK_VERSION }}` reference, or does either
+with no `ZEPHYR_SDK_SHA256` check anywhere in the file. The trigger for that
+scan is derived from `metadata/toolchains.json` itself (the release URL path
+and each artifact's filename shape, both wildcarded past their version) at
+run time, never a second hardcoded copy in the gate — the same discipline
+`check_bootstrap_manifest.py`'s winget-identifier scan already established,
+applied here after a repo-wide scan review found the original curated
+four-file scan scope caught none of a dropped-in fifth workflow's hardcoded
+version, hardcoded URL, or missing hash check. The original four workflows
+(`TOOLCHAIN_WORKFLOWS`) are still asserted separately: each must still
+contain a real read of `metadata/toolchains.json`, catching a deleted
+manifest-read step even in a file (`pr-twister.yml`) that names no SDK URL
+literal for the repo-wide scan to trigger on. A `container:` image-tag pin
+is a known, documented gap (the module docstring explains why) — it bundles
+a toolchain, not a URL/version/hash triple this gate's checks are shaped to
+verify.
+
+Fixes four live defects this closes: `pr-renode-aen-smoke.yml` hardcoded
+`SDK_VER=0.16.8` — wrong, not merely stale, for every Zephyr revision this
+repo has ever pinned (its own `SDK_VERSION` was already `1.0.1` back when
+this workflow was authored against Zephyr v4.4.0); `pr-renode-sim-mode.yml`
+hardcoded the correct `1.0.1` independently, with nothing keeping the two
+copies in agreement; `pr-getting-started-aen801.yml` downloaded the SDK
+archive with `wget` and no integrity check at all; and `pr-twister.yml`'s
+SDK-toolchain cache key was keyed on a **Zephyr** version
+(`zephyr-sdk-arm-zephyr-eabi-v4.4.0-...`, itself one patch behind the actual
+`v4.4.1` Zephyr pin) instead of the **SDK** version, so an SDK bump would
+have silently kept reusing a stale cached toolchain forever. All four now
+read version/URL/sha256 from `metadata/toolchains.json` at run time and
+verify the download's `sha256` before extracting it; the twister cache key
+is now keyed on `${{ env.ZEPHYR_SDK_VERSION }}`.
+
+`scripts/check_bootstrap_manifest.py` already scoped itself out of "the
+separate Zephyr SDK toolchain cache, which tracks its own release" — this
+change fills that deliberately-left gap rather than duplicating it.
+
 ### Added — `prerequisites.install`: single source for host-tool install commands (#949)
 
 `metadata/bootstrap.json`'s `prerequisites` declared tool NAMES only; the

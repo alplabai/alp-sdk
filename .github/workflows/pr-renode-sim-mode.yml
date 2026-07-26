@@ -119,14 +119,36 @@ jobs:
           set -euo pipefail
           pip3 install -r "${GITHUB_WORKSPACE}/zephyr/scripts/requirements-base.txt"
 
+      # metadata/toolchains.json (issue #949 item 3) is the single source
+      # for the pinned Zephyr SDK version/URL/sha256 -- scripts/
+      # check_toolchain_lock.py gates this file staying in lockstep with it.
+      - name: Read Zephyr SDK toolchain pin (metadata/toolchains.json)
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          python3 -c '
+          import json
+          d = json.load(open("alp-sdk/metadata/toolchains.json"))
+          sdk = d["zephyrSdk"]
+          art = next(a for a in sdk["artifacts"] if a["host"] == "linux-x86_64" and a["component"] == "minimal-sdk")
+          version = sdk["version"]
+          url = sdk["baseUrl"] + art["filename"]
+          sha256 = art["sha256"]
+          print(f"ZEPHYR_SDK_VERSION={version}")
+          print(f"ZEPHYR_SDK_URL={url}")
+          print(f"ZEPHYR_SDK_SHA256={sha256}")
+          ' >> "$GITHUB_ENV"
+
       - name: Install Zephyr SDK (arm-zephyr-eabi)
         working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
-          # Pinned Zephyr v4.4.1 requires Zephyr SDK 1.0.1 (zephyr/SDK_VERSION).
-          SDK_VER=1.0.1
-          curl -fsSL -o /tmp/zephyr-sdk.tar.xz \
-            "https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${SDK_VER}/zephyr-sdk-${SDK_VER}_linux-x86_64_minimal.tar.xz"
+          curl -fsSL -o /tmp/zephyr-sdk.tar.xz "${ZEPHYR_SDK_URL}"
+          ACTUAL_SHA256="$(sha256sum /tmp/zephyr-sdk.tar.xz | awk '{print $1}')"
+          if [ "${ACTUAL_SHA256}" != "${ZEPHYR_SDK_SHA256}" ]; then
+            echo "::error::sha256 mismatch for zephyr-sdk-${ZEPHYR_SDK_VERSION}_linux-x86_64_minimal.tar.xz: expected ${ZEPHYR_SDK_SHA256}, got ${ACTUAL_SHA256}"
+            exit 1
+          fi
           mkdir -p "$HOME/zephyr-sdk"
           tar -xJf /tmp/zephyr-sdk.tar.xz -C "$HOME/zephyr-sdk" --strip-components=1
           "$HOME/zephyr-sdk/setup.sh" -t arm-zephyr-eabi -c
