@@ -67,6 +67,20 @@ when:
       (`requires.os == ["zephyr"]` -- it exists only inside the zephyr repo,
       nothing else) is what actually distinguishes the two; see
       `_in_tree_zephyr_library_manifests`.
+  11. `prerequisites.install` (issue #949) -- the single source for every
+      per-tool install COMMAND (as opposed to point 6 above, which only
+      polices the tool NAME lists) -- disagrees with anything that copies
+      one of those commands: a tool listed in `prerequisites.windows` or
+      `prerequisites.posix` with no matching `install.<os>.<tool>` entry;
+      `scripts/bootstrap.ps1`'s own hardcoded `$Prereqs` `Hint = "..."`
+      value for a tool disagreeing with `install.windows.<tool>`; or one of
+      `install.windows`'s own winget PACKAGE IDs (derived from the manifest,
+      never hardcoded a second time) appearing in the scanned doc/script
+      file set without its full canonical command alongside it -- or one
+      of those PACKAGE IDs failing to extract from its own `install.windows`
+      command in the first place. The literal scan covers the windows/
+      winget side only; see `_check_install_commands`'s own docstring for
+      why, the full assertion list, and the exact file set scanned.
 
 --fix propagates a changed `zephyr.version` OUT to every machine pin site
 this gate verifies above (points 2, 4, 5, 10 -- west.yml, the CI workflow
@@ -613,6 +627,285 @@ def _check_python_min_version_windows(manifest: dict) -> list[str]:
     return []
 
 
+# -------- prerequisites.install (issue #949) ---------------------------------
+#
+# Unlike the NAME lists above (which stay hardcoded in both scripts BY
+# DESIGN -- see the section comment above _SH_REQUIRED_BINS_RE), the per-tool
+# install COMMAND has no such bootstrap-of-the-bootstrap circularity anywhere
+# it duplicates: bootstrap.ps1's own $Prereqs already carries a Hint= string
+# for the same reason (printing "install this" before python/JSON is even
+# confirmed present), but every OTHER site that ever needs a copy of that
+# string -- a doc, `alp doctor` (which runs from INSIDE the workspace venv,
+# so it has no such circularity and could always have read the manifest) --
+# has no excuse to hardcode its own. `install.windows` is compared against
+# bootstrap.ps1's Hint= values below because bootstrap.ps1 is still the
+# AUTHORITY for that value (it's the one script that cannot read this file
+# for it); every other site is checked by the repo-wide literal scan instead.
+
+# `Name = "git";    Hint = "winget install -e --id Git.Git"` -- both fields
+# from the SAME $Prereqs entry, so a Hint can be compared against the
+# matching tool's install.windows entry (as opposed to _PS1_PREREQ_NAME_RE
+# above, which only ever extracted Name= for the point-6 tool-set check).
+_PS1_PREREQ_ENTRY_RE = re.compile(r'Name\s*=\s*"([^"]+)"\s*;\s*Hint\s*=\s*"([^"]+)"')
+
+# Pulls the winget PACKAGE ID out of one `install.windows.<tool>` command
+# string ("winget install -e --id Git.Git" -> "Git.Git"). Used by
+# `_winget_ids_and_commands` below to derive the literal scan's trigger set
+# FROM the manifest at run time -- see that function's own docstring for why
+# this must never be a second hardcoded copy of the four IDs.
+_WINGET_ID_RE = re.compile(r"--id\s+(\S+)")
+
+
+def _winget_ids_and_commands(install_windows: dict) -> tuple[dict[str, str], list[str]]:
+    """({winget PackageId: its full canonical command string}, problems),
+    derived from `prerequisites.install.windows` at run time.
+
+    This -- not a hardcoded verb list like "winget install" -- is the
+    literal scan's trigger set (issue #949 review). A bare verb fires on
+    every install one-liner in the repo (Arm toolchain casks, Yocto apt
+    walkthroughs, tutorial package hints, ...), none of which duplicate a
+    manifest fact; the thing that actually marks a line as a COPY of a
+    tracked command is the distinctive package identifier the manifest
+    itself declares (`Git.Git`, `Kitware.CMake`, `Python.Python.3.12`,
+    `Ninja-build.Ninja` today) appearing without its canonical command
+    around it. Deriving the ID set from the manifest instead of
+    hardcoding a second copy here is the same discipline this whole
+    change is enforcing everywhere else -- a hardcoded copy in the gate
+    that's supposed to catch hardcoded copies would be self-defeating.
+
+    A command `_WINGET_ID_RE` doesn't match is itself reported as a
+    problem, not silently excluded from the trigger set: the whole scan
+    exists to catch a copy of a tracked command going stale elsewhere in
+    the repo, so a tracked command with no extractable ID would make the
+    scan cover nothing for that tool repo-wide while every one of the
+    three assertions in `_check_install_commands` stayed green -- the
+    reviewer's exact reproduction for this defect.
+    """
+    ids: dict[str, str] = {}
+    problems: list[str] = []
+    for tool, cmd in install_windows.items():
+        m = _WINGET_ID_RE.search(cmd)
+        if m:
+            ids[m.group(1)] = cmd
+        else:
+            problems.append(
+                f"prerequisites.install.windows.{tool} = {cmd!r} has no "
+                f"`--id <PackageId>` for the literal scan to key on -- the "
+                f"repo-wide scan cannot cover this tool until the command is "
+                f"fixed to the `winget install -e --id <PackageId>` shape"
+            )
+    return ids, problems
+
+
+# Historical/decision-record doc trees that legitimately quote an exact
+# identifier as evidence about a PAST or PROPOSED state rather than
+# asserting a current one -- the same reasoning check_doc_drift.py already
+# applies to its own identifier scan. docs/adr/0021-toolchain-provisioning.md
+# is the concrete, present-day case: it quotes `Git.Git` / `Kitware.CMake` /
+# `Python.Python.3.12` / `Ninja-build.Ninja` while describing that tan-cli's
+# `steps.rs` (a SEPARATE repo) hardcodes them too -- true, cited as context
+# for a proposal, not an alp-sdk install command to reconcile. Only `adr` is
+# excluded (YAGNI): nothing under docs/superpowers/** or docs/abi/** quotes a
+# tracked identifier today -- add either only once a real case shows up.
+_LITERAL_SCAN_EXCLUDE_DOC_DIRS = ("adr",)
+
+
+def _iter_literal_scan_files():
+    """Yield every path the winget-identifier literal scan
+    (`_check_install_commands` point 3, issue #949) reads -- deliberately
+    narrow (not the whole tree) so the gate stays cheap and its file set is
+    easy to reason about: `docs/**/*.md` (excluding
+    `_LITERAL_SCAN_EXCLUDE_DOC_DIRS`), `scripts/**/*.py` (recursive),
+    `scripts/*.ps1` and `scripts/*.sh` (top-level only -- the only
+    bootstrap-shaped scripts in this repo live directly under scripts/;
+    firmware/**'s and meta-alp-sdk/**'s own shell scripts are a different
+    concern, vendor/board bring-up rather than host bootstrap, and are out
+    of scope), and README.md."""
+    docs_dir = REPO / "docs"
+    if docs_dir.is_dir():
+        for path in sorted(docs_dir.rglob("*.md")):
+            if path.relative_to(docs_dir).parts[0] in _LITERAL_SCAN_EXCLUDE_DOC_DIRS:
+                continue
+            yield path
+    scripts_dir = REPO / "scripts"
+    if scripts_dir.is_dir():
+        yield from sorted(scripts_dir.rglob("*.py"))
+        yield from sorted(scripts_dir.glob("*.ps1"))
+        yield from sorted(scripts_dir.glob("*.sh"))
+    if README_MD.is_file():
+        yield README_MD
+
+
+def _check_install_commands(manifest: dict) -> list[str]:
+    """Drift gate for `prerequisites.install` (issue #949) -- the single
+    source every per-tool install COMMAND must agree with. Three
+    independent assertions, each covering a different slice:
+
+      1. Completeness -- `install.windows`'s keys equal `prerequisites.
+         windows`'s tools, and `install.linux` / `install.macos`'s keys
+         each equal `prerequisites.posix`'s tools. A tool with no install
+         command is the exact hole that produced the drifted/incomplete
+         ninja hint in scripts/alp_cli/doctor.py this change fixes. This
+         is the ONLY assertion covering install.linux / install.macos --
+         see point 3's own note on why.
+      2. scripts/bootstrap.ps1 agreement -- each `$Prereqs` entry's
+         `Hint = "..."` value must equal `install.windows[<Name>]`
+         byte-for-byte. Asserted HERE, not by extending
+         `_check_prerequisites_windows` above (which only ever parsed
+         `Name=` for the point-6 tool-SET check) -- this is a new,
+         separate assertion over a field that function never looked at.
+      3. Repo-wide literal scan, WINDOWS SIDE ONLY -- walks
+         `_iter_literal_scan_files()` looking for one of the winget
+         PACKAGE IDs `_winget_ids_and_commands` derives from
+         `install.windows` (`Git.Git`, `Kitware.CMake`,
+         `Python.Python.3.12`, `Ninja-build.Ninja` today -- never
+         hardcoded a second time here). A line containing an ID without
+         its full canonical command string is a drifted copy -- this is
+         exactly the shape scripts/alp_cli/doctor.py's old ninja hint
+         had (`winget install Ninja-build.Ninja.` contains the ID but not
+         `winget install -e --id Ninja-build.Ninja`).
+
+         KNOWN LIMITATION: the match is PER LINE, so a canonical command
+         legitimately wrapped across two source lines (e.g. a PowerShell
+         string literal split `"winget install -e --id "` + `"Ninja-build.
+         Ninja"`) false-positives -- there is no escape hatch for that
+         shape short of a trailing `#` comment on the line carrying the ID.
+         Not fixed here: multi-line-joining the scan would need to track
+         string-continuation syntax per language (bash, PowerShell, Python,
+         Markdown all differ), which is a bigger change than this gate's
+         narrow per-line design set out to be.
+
+         KNOWN LIMITATION: the trigger set is derived from install.windows's
+         CURRENT values (deliberately -- see _winget_ids_and_commands's own
+         docstring for why that must stay a derivation, not a second
+         hardcoded copy), so a LOCKSTEP RENAME -- install.windows.<tool> and
+         bootstrap.ps1's Hint= both changed together to a new package ID --
+         orphans every existing copy of the OLD id silently: the scan only
+         ever catches a drifted copy of the id the manifest currently
+         declares, never one the manifest used to declare and no longer
+         does. Not fixed here for the same reason as the wrapped-string
+         case above.
+
+         Deliberately does NOT scan for linux/macos install commands --
+         posix coverage instead stops at completeness (point 1); see
+         `_winget_ids_and_commands`'s own docstring for why a verb-triggered
+         scan was rejected in favour of keying on the identifier.
+
+         `scripts/bootstrap.ps1` reuses `_iter_scannable_lines` (the same
+         heredoc/here-string-aware comment tracking `_check_no_hardcoded_
+         literal` already uses) so a rationale comment naming an ID stays
+         exempt the same way it does there; `.py` files only skip a plain
+         `#`-prefixed line as a comment, and `.md` files have no comment
+         syntax at all, so every line counts there. This gate script's own
+         source (which necessarily quotes the ID regex) is excluded by
+         name, not by content -- it would otherwise flag itself.
+    """
+    problems: list[str] = []
+    prereqs = manifest.get("prerequisites", {})
+    install = prereqs.get("install", {})
+
+    # -------- 1. completeness ---------------------------------------------
+    windows_tools = set(prereqs.get("windows", []))
+    windows_install = set(install.get("windows", {}))
+    if windows_install != windows_tools:
+        problems.append(
+            f"prerequisites.install.windows keys {sorted(windows_install)} disagree "
+            f"with prerequisites.windows tools {sorted(windows_tools)} -- every "
+            f"windows prerequisite needs its own install command"
+        )
+    posix_tools = set(prereqs.get("posix", []))
+    for os_key in ("linux", "macos"):
+        os_install = set(install.get(os_key, {}))
+        if os_install != posix_tools:
+            problems.append(
+                f"prerequisites.install.{os_key} keys {sorted(os_install)} disagree "
+                f"with prerequisites.posix tools {sorted(posix_tools)} -- every "
+                f"posix prerequisite needs its own install command on {os_key}"
+            )
+
+    # -------- 2. scripts/bootstrap.ps1 Hint= agreement ---------------------
+    if not BOOTSTRAP_PS1.is_file():
+        problems.append(f"missing {BOOTSTRAP_PS1.relative_to(REPO).as_posix()}")
+    else:
+        ps1_text = BOOTSTRAP_PS1.read_text(encoding="utf-8")
+        m = re.search(r"\$Prereqs\s*=\s*@\((.*?)\n\)", ps1_text, re.DOTALL)
+        if m is None:
+            problems.append(
+                "scripts/bootstrap.ps1: could not find `$Prereqs = @(...)` -- "
+                "update this gate if it was renamed/restructured"
+            )
+        else:
+            entries = _PS1_PREREQ_ENTRY_RE.findall(m.group(1))
+            if not entries:
+                problems.append(
+                    "scripts/bootstrap.ps1: `$Prereqs` entries have no "
+                    "`Hint = \"...\"` field -- update this gate if the shape changed"
+                )
+            windows_install_map = install.get("windows", {})
+            # A PARTIAL parse -- an entry `_PS1_PREREQ_ENTRY_RE` couldn't
+            # match (its `Hint = "..."` field was deleted, or `Name=`/`Hint=`
+            # appear in some other order than the `Name = "..."; Hint =
+            # "..."` shape that regex requires) -- silently drops that tool
+            # out of `entries` while `if not entries:` above only fires when
+            # EVERY entry fails to parse. That's the same "goes dark" defect
+            # `_winget_ids_and_commands` above was fixed for, one level
+            # down: a tool present in install.windows with no entry it can
+            # be checked against must be named, not silently skipped by the
+            # loop below.
+            parsed_names = {name for name, _ in entries}
+            for tool in sorted(windows_install_map):
+                if tool not in parsed_names:
+                    problems.append(
+                        f"scripts/bootstrap.ps1 $Prereqs has no parseable "
+                        f"`Name = \"{tool}\"; Hint = \"...\"` entry for "
+                        f"prerequisites.install.windows.{tool} -- its Hint= "
+                        f"field is missing, or Name=/Hint= appear out of "
+                        f"order, so this gate cannot verify it agrees"
+                    )
+            for name, hint in entries:
+                canonical = windows_install_map.get(name)
+                if canonical is None:
+                    problems.append(
+                        f"scripts/bootstrap.ps1 $Prereqs entry {name!r} has "
+                        f"Hint={hint!r}, but metadata/bootstrap.json has no "
+                        f"prerequisites.install.windows.{name}"
+                    )
+                elif hint != canonical:
+                    problems.append(
+                        f"scripts/bootstrap.ps1 $Prereqs entry {name!r} Hint={hint!r} "
+                        f"disagrees with prerequisites.install.windows.{name}={canonical!r}"
+                    )
+
+    # -------- 3. winget-identifier literal scan (windows side only) --------
+    winget_ids, winget_id_problems = _winget_ids_and_commands(install.get("windows", {}))
+    problems.extend(winget_id_problems)
+    for path in _iter_literal_scan_files():
+        rel = path.relative_to(REPO).as_posix()
+        if rel == "scripts/check_bootstrap_manifest.py":
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if path.suffix in (".ps1", ".sh"):
+            scannable = _iter_scannable_lines(text)
+        elif path.suffix == ".py":
+            scannable = ((line, line.strip().startswith("#")) for line in text.splitlines())
+        else:
+            # .md (and anything else in the file set): every line counts --
+            # a Markdown `#`/`##`/... heading is not a comment, and treating
+            # it as one let a heading naming a drifted winget command slip
+            # the scan entirely (issue #949 review).
+            scannable = ((line, False) for line in text.splitlines())
+        for lineno, (line, is_comment) in enumerate(scannable, start=1):
+            if is_comment:
+                continue
+            for pkg_id, canonical in winget_ids.items():
+                if pkg_id in line and canonical not in line:
+                    problems.append(
+                        f"{rel}:{lineno}: winget package id {pkg_id!r} found without its "
+                        f"canonical command {canonical!r} -- {line.strip()!r}"
+                    )
+    return problems
+
+
 def _iter_leaf_paths(obj, prefix: str = ""):
     """Yield every leaf (dotted-path) in the manifest, stopping recursion at
     `_GROUP_LEAF_PATHS` (consumed as a whole sub-tree, not field-by-field)."""
@@ -747,6 +1040,7 @@ def main() -> int:
     problems += _check_prerequisites_windows(manifest)
     problems += _check_python_min_version_posix(manifest)
     problems += _check_python_min_version_windows(manifest)
+    problems += _check_install_commands(manifest)
     problems += _check_no_orphaned_leaves(manifest)
     problems += _check_native_lib_hints_consumption(manifest)
     for wf in CI_WORKFLOWS:

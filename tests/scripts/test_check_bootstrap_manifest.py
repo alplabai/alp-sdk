@@ -714,3 +714,320 @@ def test_fix_rewrites_library_manifest_versions(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert rv == 0, out
     assert "OK" in out
+
+
+# ---------------------------------------------------------------------
+# 12. prerequisites.install (issue #949)
+# ---------------------------------------------------------------------
+
+
+def test_install_missing_tool_command_fails(tmp_path, monkeypatch, capsys):
+    """A tool listed in prerequisites.windows with no matching
+    install.windows entry is the exact hole that shipped the drifted/
+    incomplete ninja hint in scripts/alp_cli/doctor.py -- the completeness
+    assertion must catch it."""
+    _scaffold(tmp_path)
+    _edit_manifest(tmp_path, lambda d: d["prerequisites"]["install"]["windows"].pop("ninja"))
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "prerequisites.install.windows" in err
+    assert "prerequisites.windows" in err
+
+
+def test_install_linux_missing_tool_command_fails(tmp_path, monkeypatch, capsys):
+    """The gate's own docstring (point 1 in `_check_install_commands`) calls
+    this "the ONLY assertion covering install.linux / install.macos" -- yet
+    nothing in this file ever mutated `install.linux`/`install.macos` before
+    this test. Branch coverage reported the `if os_install != posix_tools:`
+    line covered by two unrelated fixtures tripping it incidentally; only a
+    real `if False:` mutation of that line exposed the gap (it still stayed
+    42 passed, 1 skipped). Popping a tool from install.linux must fail."""
+    _scaffold(tmp_path)
+    _edit_manifest(tmp_path, lambda d: d["prerequisites"]["install"]["linux"].pop("cmake"))
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "prerequisites.install.linux" in err
+    assert "prerequisites.posix" in err
+
+
+def test_install_macos_missing_tool_command_fails(tmp_path, monkeypatch, capsys):
+    """Same defect, macos side -- see test_install_linux_missing_tool_command_fails."""
+    _scaffold(tmp_path)
+    _edit_manifest(tmp_path, lambda d: d["prerequisites"]["install"]["macos"].pop("git"))
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "prerequisites.install.macos" in err
+    assert "prerequisites.posix" in err
+
+
+def test_install_command_missing_winget_id_fails_instead_of_going_dark(tmp_path, monkeypatch, capsys):
+    """Reproduces the review finding verbatim: `_winget_ids_and_commands`
+    must not silently drop an `install.windows` command whose shape
+    `_WINGET_ID_RE` doesn't match -- if it did, the literal scan would cover
+    nothing for that tool repo-wide even with a mirrored drift planted in
+    both bootstrap.ps1's Hint= and README.md, and all three assertions
+    would stay green."""
+    _scaffold(tmp_path)
+    drifted = "winget install Ninja-build.Ninja"  # no `--id`
+    _edit_manifest(
+        tmp_path,
+        lambda d: d["prerequisites"]["install"]["windows"].__setitem__("ninja", drifted),
+    )
+    _replace(
+        tmp_path / "scripts/bootstrap.ps1",
+        'Hint = "winget install -e --id Ninja-build.Ninja"',
+        f'Hint = "{drifted}"',
+    )
+    readme = tmp_path / "README.md"
+    readme.write_text(
+        readme.read_text(encoding="utf-8") + "\nwinget install --exact Ninja-build.Ninja\n",
+        encoding="utf-8",
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "prerequisites.install.windows.ninja" in err
+    assert "--id <PackageId>" in err
+
+
+def test_install_ps1_hint_disagreement_fails(tmp_path, monkeypatch, capsys):
+    """scripts/bootstrap.ps1's own $Prereqs Hint= value for a tool must
+    agree with prerequisites.install.windows[<tool>] byte-for-byte -- this
+    is the exact shape of the shipped drift (missing `-e --id`)."""
+    _scaffold(tmp_path)
+    _replace(
+        tmp_path / "scripts/bootstrap.ps1",
+        'Hint = "winget install -e --id Ninja-build.Ninja"',
+        'Hint = "winget install Ninja-build.Ninja"',
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "$Prereqs entry 'ninja'" in err
+    assert "disagrees with prerequisites.install.windows.ninja" in err
+
+
+def test_install_ps1_hint_deleted_does_not_silently_drop_tool(tmp_path, monkeypatch, capsys):
+    """The sibling of `_winget_ids_and_commands`'s "goes dark" fix, one
+    level down: deleting a $Prereqs entry's `Hint = "..."` field entirely
+    (leaving only `Name = "ninja"`) makes `_PS1_PREREQ_ENTRY_RE` skip that
+    one entry -- `if not entries:` only fires when ZERO entries parse, so a
+    partial parse used to pass silently while bootstrap.ps1:117 prints an
+    empty hint (`ninja  ->  `) to the user."""
+    _scaffold(tmp_path)
+    _replace(
+        tmp_path / "scripts/bootstrap.ps1",
+        '@{ Name = "ninja";  Hint = "winget install -e --id Ninja-build.Ninja" }',
+        '@{ Name = "ninja" }',
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "no parseable" in err
+    assert "prerequisites.install.windows.ninja" in err
+
+
+def test_install_ps1_hint_reordered_does_not_silently_drop_tool(tmp_path, monkeypatch, capsys):
+    """Same defect, different malformed shape: reordering an entry's fields
+    to `Hint = "..."; Name = "..."` (rather than the `Name = "..."; Hint =
+    "..."` order `_PS1_PREREQ_ENTRY_RE` requires) also makes that one entry
+    unparseable -- and must be caught the same way, not silently pass."""
+    _scaffold(tmp_path)
+    _replace(
+        tmp_path / "scripts/bootstrap.ps1",
+        '@{ Name = "ninja";  Hint = "winget install -e --id Ninja-build.Ninja" }',
+        '@{ Hint = "winget install -e --id Ninja-build.Ninja"; Name = "ninja" }',
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "no parseable" in err
+    assert "prerequisites.install.windows.ninja" in err
+
+
+def test_install_literal_scan_catches_drifted_winget_id(tmp_path, monkeypatch, capsys):
+    """A winget PACKAGE ID from install.windows (`Ninja-build.Ninja`)
+    appearing anywhere in the scanned file set WITHOUT its full canonical
+    command alongside it must fail -- this is exactly the shape
+    scripts/alp_cli/doctor.py's drifted ninja hint had (`winget install
+    Ninja-build.Ninja.`, missing `-e --id`)."""
+    _scaffold(tmp_path)
+    readme = tmp_path / "README.md"
+    readme.write_text(
+        readme.read_text(encoding="utf-8") + "\nwinget install Ninja-build.Ninja\n",
+        encoding="utf-8",
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "README.md" in err
+    assert "winget package id 'Ninja-build.Ninja' found without its canonical command" in err
+
+
+def test_install_literal_scan_catches_drifted_winget_id_in_markdown_heading(
+    tmp_path, monkeypatch, capsys
+):
+    """A Markdown `#`-heading is not a comment -- `.md` files have no comment
+    syntax at all, so every line must count. `.py`'s plain `#`-prefixed
+    comment skip must not leak onto `.md` (issue #949 review): it used to,
+    letting a drifted winget id hide inside a heading."""
+    _scaffold(tmp_path)
+    readme = tmp_path / "README.md"
+    readme.write_text(
+        readme.read_text(encoding="utf-8") +
+        "\n## Install ninja: winget install Ninja-build.Ninja\n",
+        encoding="utf-8",
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "README.md" in err
+    assert "winget package id 'Ninja-build.Ninja' found without its canonical command" in err
+
+
+def test_install_literal_scan_ignores_unrelated_winget_id(tmp_path, monkeypatch, capsys):
+    """dorssel.usbipd-win is not a winget ID `prerequisites.install.windows`
+    declares -- the scan's trigger set is derived from the manifest, so this
+    line is never even looked at (no allowlist entry needed, unlike the
+    verb-triggered design this replaces)."""
+    _scaffold(tmp_path)
+    readme = tmp_path / "README.md"
+    readme.write_text(
+        readme.read_text(encoding="utf-8") +
+        "\nwinget install -e --id dorssel.usbipd-win\n",
+        encoding="utf-8",
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    out = capsys.readouterr().out
+    assert rv == 0, out
+    assert "OK" in out
+
+
+def test_install_literal_scan_ignores_combined_posix_line(tmp_path, monkeypatch, capsys):
+    """Regression lock for the redesign: a combined multi-package posix
+    one-liner (docs/getting-started.md's real shape) must pass with NO
+    allowlist entry -- the literal scan doesn't trigger on posix installs
+    at all (`git`/`cmake`/`python3` are bare words, not distinctive winget
+    IDs; posix coverage stops at the completeness assertion instead, see
+    `_check_install_commands`'s docstring)."""
+    _scaffold(tmp_path)
+    readme = tmp_path / "README.md"
+    readme.write_text(
+        readme.read_text(encoding="utf-8") +
+        "\nbrew install cmake ninja python git\n"
+        "sudo apt install -y cmake ninja-build python3 python3-pip git\n",
+        encoding="utf-8",
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    out = capsys.readouterr().out
+    assert rv == 0, out
+    assert "OK" in out
+
+
+def test_install_clean_tree_passes(tmp_path, monkeypatch, capsys):
+    """The unmodified scaffold (real prerequisites.install + real
+    bootstrap.ps1 + real README.md) must pass with no --fix involved."""
+    _scaffold(tmp_path)
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    out = capsys.readouterr().out
+    assert rv == 0, out
+    assert "OK" in out
+
+
+# ---------------------------------------------------------------------
+# 13. literal scan file-set coverage (issue #949 review: the scaffold above
+#    has no docs/ tree and no scripts/*.py, so the doc-dir exclusion, the
+#    .py path, and the gate's by-name self-exclusion were all untested)
+# ---------------------------------------------------------------------
+
+
+def test_install_literal_scan_covers_non_readme_docs_file(tmp_path, monkeypatch, capsys):
+    """A drifted winget id under docs/ (not just README.md, the only doc
+    the scaffold exercised before) must still be caught."""
+    _scaffold(tmp_path)
+    doc = tmp_path / "docs" / "some-guide.md"
+    doc.parent.mkdir(parents=True, exist_ok=True)
+    doc.write_text("winget install Ninja-build.Ninja\n", encoding="utf-8")
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "docs/some-guide.md" in err
+
+
+def test_install_literal_scan_excludes_docs_adr_dir(tmp_path, monkeypatch, capsys):
+    """The same drifted id under docs/adr/ must NOT be flagged --
+    `_LITERAL_SCAN_EXCLUDE_DOC_DIRS`'s historical-record exclusion."""
+    _scaffold(tmp_path)
+    doc = tmp_path / "docs" / "adr" / "0099-some-decision.md"
+    doc.parent.mkdir(parents=True, exist_ok=True)
+    doc.write_text("winget install Ninja-build.Ninja\n", encoding="utf-8")
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    out = capsys.readouterr().out
+    assert rv == 0, out
+    assert "OK" in out
+
+
+def test_install_literal_scan_covers_python_scripts(tmp_path, monkeypatch, capsys):
+    """A `.py` file under scripts/ (not just README.md/*.sh/*.ps1) must be
+    scanned too, with only a plain `#`-prefixed line skipped as a comment
+    there (unlike bootstrap.sh/.ps1's heredoc/here-string-aware tracking)."""
+    _scaffold(tmp_path)
+    py = tmp_path / "scripts" / "some_helper.py"
+    py.write_text(
+        "# rationale comment: winget install Ninja-build.Ninja is the old form\n"
+        "print('winget install Ninja-build.Ninja')\n",
+        encoding="utf-8",
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "scripts/some_helper.py:2:" in err
+    assert "scripts/some_helper.py:1:" not in err
+
+
+def test_install_literal_scan_self_excludes_gate_script_by_name(tmp_path, monkeypatch, capsys):
+    """This gate's own source necessarily quotes winget package IDs in its
+    docstrings/comments without the full canonical command on the same
+    line (e.g. the `Git.Git`, `Kitware.CMake`, ... enumeration) -- it is
+    excluded from the scan BY NAME (`scripts/check_bootstrap_manifest.py`),
+    not by content, or it would flag itself."""
+    _scaffold(tmp_path)
+    shutil.copy2(SCRIPT, tmp_path / "scripts" / "check_bootstrap_manifest.py")
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    out = capsys.readouterr().out
+    assert rv == 0, out
+    assert "OK" in out
+
+
+def test_install_literal_scan_flags_gate_script_content_under_another_name(
+    tmp_path, monkeypatch, capsys
+):
+    """Proves the self-exclusion above does real work, not merely
+    absent-by-coincidence: the SAME source content, copied under a name
+    other than `check_bootstrap_manifest.py`, must fail."""
+    _scaffold(tmp_path)
+    shutil.copy2(SCRIPT, tmp_path / "scripts" / "check_bootstrap_manifest_copy.py")
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "scripts/check_bootstrap_manifest_copy.py" in err

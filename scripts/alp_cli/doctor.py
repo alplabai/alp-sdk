@@ -122,6 +122,58 @@ def _pin_mm() -> tuple[int, int]:
     return _parse_two(_zephyr_pin()) or (4, 4)
 
 
+def _bootstrap_manifest() -> dict | None:
+    """Load metadata/bootstrap.json -- the single source (issue #949) for the
+    per-tool prerequisite install command every check below used to hardcode
+    its own (drifted) copy of. Returns None on any read/parse problem --
+    including a file that isn't valid UTF-8, or one that parses but whose
+    top level isn't a JSON object -- so a check can fall back to a generic
+    hint instead of crashing `alp doctor` (a packaged install without the
+    repo checkout has no metadata/ at all; a truncated or bad-merge
+    bootstrap.json is exactly the broken workspace this command exists to
+    diagnose)."""
+    try:
+        text = (_repo_root() / "metadata" / "bootstrap.json").read_text(encoding="utf-8")
+        data = _json.loads(text)
+    except (OSError, ValueError):  # ValueError covers JSONDecodeError + UnicodeDecodeError
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _prereq_os_key() -> str:
+    if _is_windows():
+        return "windows"
+    if sys.platform == "darwin":
+        return "macos"
+    return "linux"
+
+
+def _prereq_install_hint(tool: str) -> str:
+    """The remediation string for a missing prerequisite `tool`, sourced from
+    metadata/bootstrap.json's prerequisites.install.<os> map -- the same
+    manifest scripts/bootstrap.sh and scripts/bootstrap.ps1 read (issue
+    #949). Falls back to a generic, package-manager-agnostic pointer when
+    the manifest is unreadable, when `tool` isn't tracked as an install
+    command on the current OS (e.g. ninja on linux/macos: only
+    prerequisites.windows lists it, so prerequisites.install has no
+    linux/macos ninja entry to source -- printing an invented apt/brew
+    command here would just reintroduce the drift this change removes), or
+    when the manifest parses but is shaped wrong at any of the four key
+    hops (`prerequisites`, `install`, `<os>`, `<tool>`) -- each hop is
+    guarded with `isinstance(node, dict)` before it is indexed, so a
+    truncated/bad-merge manifest degrades to the generic hint instead of
+    raising."""
+    node: object = _bootstrap_manifest()
+    for key in ("prerequisites", "install", _prereq_os_key(), tool):
+        if not isinstance(node, dict):
+            node = None
+            break
+        node = node.get(key)
+    if isinstance(node, str) and node:
+        return f"Install it: {node}."
+    return f"Install {tool} via your OS package manager."
+
+
 def _python_pin() -> str | None:
     """The dev/CI interpreter pin, read live from the repo's .python-version.
 
@@ -212,10 +264,15 @@ def _check_python_deps() -> CheckResult:
 
 
 def _check_cmake() -> CheckResult:
+    # cmake is tracked in BOTH prerequisites.posix and prerequisites.windows,
+    # so routing its two install/upgrade hints through _prereq_install_hint
+    # gives all three prerequisites.install OS maps (linux/macos/windows) a
+    # real run-time reader -- _check_ninja's own hint only ever reaches
+    # install.windows (ninja isn't a posix prerequisite), so linux/macos
+    # would otherwise have no code path exercising them at all.
     if shutil.which("cmake") is None:
         return CheckResult(
-            "cmake", FAIL, "cmake not found on PATH",
-            "Install CMake 3.20+ (find_package(Zephyr) minimum).",
+            "cmake", FAIL, "cmake not found on PATH", _prereq_install_hint("cmake"),
         )
     ver = _tool_version(["cmake", "--version"])
     if ver is None:
@@ -227,17 +284,19 @@ def _check_cmake() -> CheckResult:
         return CheckResult("cmake", PASS, f"cmake {ver[0]}.{ver[1]}")
     return CheckResult(
         "cmake", FAIL, f"cmake {ver[0]}.{ver[1]} is below the required 3.20",
-        "Upgrade CMake to 3.20+ (find_package(Zephyr) minimum).",
+        _prereq_install_hint("cmake"),
     )
 
 
 def _check_ninja() -> CheckResult:
-    # Zephyr's default CMake generator; every west build needs it.
+    # Zephyr's default CMake generator; every west build needs it. The
+    # remediation hint is sourced from metadata/bootstrap.json (issue #949)
+    # instead of a hardcoded per-OS string -- this used to hand out a
+    # winget ID missing `-e --id` and an apt package name matching no
+    # canonical command anywhere else.
     if shutil.which("ninja") is None:
         return CheckResult(
-            "ninja", FAIL, "ninja not found on PATH",
-            "Install it: apt install ninja-build / brew install ninja / "
-            "winget install Ninja-build.Ninja.",
+            "ninja", FAIL, "ninja not found on PATH", _prereq_install_hint("ninja"),
         )
     ver = _tool_version(["ninja", "--version"])
     label = f"ninja {ver[0]}.{ver[1]}" if ver else "ninja present"
