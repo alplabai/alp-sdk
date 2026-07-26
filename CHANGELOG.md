@@ -7,6 +7,29 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.14.0 candidate
 
+### Fixed — `tests/zephyr/peripheral` did not compile for a board without an `alp-uart1` alias
+
+`src/uart.c` took `DEVICE_DT_GET(DT_ALIAS(alp_uart1))` at file scope with no
+devicetree guard, so any target lacking that alias failed to build with
+`'__device_dts_ord_DT_N_ALIAS_alp_uart1_ORD' undeclared here (not in a
+function)`.  `alp-uart1` is a `zephyr,uart-emul` node aliased only by the two
+native_sim overlays; a real board has no emulated UART to alias.  Reproduced on
+E1M-AEN801 silicon (`alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he`) against
+both the outgoing Zephyr v4.4.0 and the pinned v4.4.1, so this was never
+version-specific.  The device pointer, its `_open_uart1()` helper and the five
+ZTESTs that use it now sit behind `HAVE_UART1_NODE`; the other 10 UART ZTESTs
+are unaffected, and both native_sim platforms alias `alp-uart1` as
+`status = "okay"` so their coverage is unchanged.
+
+The guard uses `DT_NODE_HAS_STATUS(..., okay)`, not `DT_NODE_EXISTS(...)`:
+`DT_NODE_EXISTS` is also true for a `status = "disabled"` node, which would
+compile the block and then fail to link against a device that was never
+instantiated.  `tests/zephyr/display/src/main.c`'s `HAVE_DISPLAY_NODE` carried
+the same latent bug and is corrected too.  The same status-blind pattern across
+22 backend files is tracked separately in
+[#966](https://github.com/alplabai/alp-sdk/issues/966) and is **not** fixed
+here — it is also why the parked `alp_sdk.peripheral.evk_aen` scenario needs
+more than this guard to run.
 ### Fixed — `doctor.py`'s `dtc`/`gperf` hints cited a Windows bundle that doesn't ship them; ADR 0021 item 2's injection set corrected
 
 `scripts/alp_cli/doctor.py`'s `_check_dtc` / `_check_gperf` WARN remediation
