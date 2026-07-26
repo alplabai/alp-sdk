@@ -50,7 +50,7 @@ its consequences still stand; only the word "absolute" was wrong.
   toolchain-root injection, resolved by the executor.** The build-plan
   already has the right mechanism for this, just not applied here yet:
   `metadata/schemas/build-plan-v1.schema.json`'s `planPathMode` (issue #865)
-  states that "`'tokened'` means every checkout/project-anchored absolute
+  states that the `tokened` mode means "every checkout/project-anchored absolute
   path this plan would otherwise embed is instead a literal `${SDK_ROOT}` /
   `${PROJECT_ROOT}` / `${PYTHON}` token ... tan-cli (PR #24) substitutes them
   at materialise time, rather than the SDK baking in this run's absolute
@@ -66,8 +66,9 @@ its consequences still stand; only the word "absolute" was wrong.
   still never touched. Only the wire representation of that path was wrong.
 - **This has no alp-sdk-only slice.** Both landing sites are closed,
   `additionalProperties: false` contracts: `slices[].toolchain`
-  (`build-plan-v1.schema.json`) requires exactly `[targetTriple, compiler,
-  sysroot, id]`, and `slices[].env` permits only `ALP_SDK_ROOT`. Widening
+  (`build-plan-v1.schema.json`) requires exactly
+  `[targetTriple, compiler, sysroot, id]`, and `slices[].env` permits only
+  `ALP_SDK_ROOT`. Widening
   either is a Wave-C contract edit, and `tan-core`'s build-plan parser
   (`crates/tan-core/src/build_plan.rs`) models only the core slice today --
   zero references to `toolchain` anywhere in it -- so an alp-sdk-side emit
