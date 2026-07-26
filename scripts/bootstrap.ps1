@@ -391,16 +391,6 @@ if (-not $NoPip) {
 
 Write-Host ""
 Write-Info "NOT auto-installed (manual, one-time):"
-@"
-
-  # Arm GNU Toolchain (cross-compiles for real silicon) -- installer EXE:
-  #   https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads
-  #   (tick 'Add path to environment variable' during install)
-
-  # Zephyr SDK (alternative cross-toolchain + host tools like dtc):
-  #   run 'west sdk install' from $WorkspaceDir after this script.
-
-"@ | Write-Host
 # Rendered from metadata/bootstrap.json's `manualInstallHints.windows.note`
 # (issue #917) -- not hardcoded here; edit the manifest to change this text.
 # ARRAY of lines, one Write-Host per line, so the mapping stays aligned

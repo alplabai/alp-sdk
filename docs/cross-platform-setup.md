@@ -117,9 +117,42 @@ sudo dnf install -y \
 pip3 install --user west pyyaml jsonschema imgtool pytest
 ```
 
-### 2.3 Arm GNU Toolchain (real silicon)
+### 2.3 Arm GNU Toolchain (three opt-in paths, not the Zephyr-on-M default)
 
-For cross-builds against E1M / E1M-X SoMs:
+The Zephyr-on-M real-silicon path (`west build` + `west flash` against an
+E1M / E1M-X EVK) does **not** need this toolchain -- it cross-compiles
+with the Zephyr SDK's `arm-zephyr-eabi` (`west sdk install`;
+`ZEPHYR_TOOLCHAIN_VARIANT=zephyr`).  For a manual sdk-ng install instead
+of `west sdk install`, see [`docs/local-ci.md`](local-ci.md) Path A
+step 4.
+Ubuntu's own apt `gcc-arm-none-eabi` predates Cortex-M55/Helium support,
+which is why CI installs the Zephyr SDK toolchain instead of this one
+(`.github/workflows/pr-getting-started-aen801.yml`).
+
+The Arm GNU Toolchain below is needed by three opt-in paths, none of
+them the Zephyr-on-M default:
+
+- Rebuilding the **E1M-X V2N / V2N-M1 GD32 bridge firmware** --
+  pre-flashed by Alp Lab, so normal customers never touch it, but fully
+  open to rebuild (see [`docs/gd32-bridge.md`](gd32-bridge.md)):
+  custom-carrier bring-up ([`docs/bring-up-v2n.md`](bring-up-v2n.md)) or
+  bridge recovery
+  ([`docs/tutorials/07-recovering-a-bricked-bridge.md`](tutorials/07-recovering-a-bricked-bridge.md)).
+- Building the **CC3501E bridge firmware's silicon-free stub target**
+  ([`firmware/cc3501e/README.md`](../firmware/cc3501e/README.md) "Build")
+  -- the CC3501E's *production* image builds with TI's `ticlang`, not
+  this toolchain
+  ([`firmware/cc3501e/toolchain/arm-none-eabi.cmake`](../firmware/cc3501e/toolchain/arm-none-eabi.cmake));
+  only the stub / CI-compile-smoke target needs `arm-none-eabi-gcc`.
+- Hand-writing **bare-metal firmware for a real M-class core**
+  (`ALP_OS=baremetal`, no Zephyr -- see [`docs/architecture.md`](architecture.md)
+  "OS targets").  Caveat: the SDK does not ship a cross-compiled
+  bare-metal build recipe today -- the in-repo `ALP_OS=baremetal` CI job
+  (`.github/workflows/pr-plain-cmake.yml`) compiles with the **host**
+  toolchain as a compile smoke, not against real M-class silicon.  A
+  hand-written bare-metal firmware targeting real silicon needs this
+  toolchain; wiring the cross-compile yourself is on you until a recipe
+  ships.
 
 ```bash
 # Download the 13.x release from arm.com (no apt package tracks
@@ -202,7 +235,31 @@ brew install \
 pip3 install --user west pyyaml jsonschema imgtool pytest
 ```
 
-### 3.4 Arm GNU Toolchain
+### 3.4 Arm GNU Toolchain (three opt-in paths, not the Zephyr-on-M default)
+
+Same scoping as §2.3: the Zephyr-on-M real-silicon path uses the Zephyr
+SDK's `arm-zephyr-eabi` (`west sdk install`), not this toolchain.  The
+Arm GNU Toolchain below is needed by three opt-in paths, none of them
+the Zephyr-on-M default:
+
+- Rebuilding the **E1M-X V2N / V2N-M1 GD32 bridge firmware** --
+  pre-flashed by Alp Lab and optional to touch, but fully open (see
+  [`docs/gd32-bridge.md`](gd32-bridge.md)): custom-carrier bring-up
+  ([`docs/bring-up-v2n.md`](bring-up-v2n.md)) or bridge recovery
+  ([`docs/tutorials/07-recovering-a-bricked-bridge.md`](tutorials/07-recovering-a-bricked-bridge.md)).
+- Building the **CC3501E bridge firmware's silicon-free stub target**
+  ([`firmware/cc3501e/README.md`](../firmware/cc3501e/README.md) "Build")
+  -- the CC3501E's *production* image builds with TI's `ticlang`, not
+  this toolchain; only the stub / CI-compile-smoke target needs
+  `arm-none-eabi-gcc`.
+- Hand-writing **bare-metal firmware for a real M-class core**
+  (`ALP_OS=baremetal`, no Zephyr).  Caveat: the SDK does not ship a
+  cross-compiled bare-metal build recipe today -- the in-repo
+  `ALP_OS=baremetal` CI job (`.github/workflows/pr-plain-cmake.yml`)
+  compiles with the **host** toolchain as a compile smoke, not against
+  real M-class silicon.  A hand-written bare-metal firmware targeting
+  real silicon needs this toolchain; wiring the cross-compile yourself
+  is on you until a recipe ships.
 
 ```bash
 brew install --cask gcc-arm-embedded
@@ -312,7 +369,33 @@ pip install --user west pyyaml jsonschema imgtool pytest
 If `pip` is not on PATH after the Python install, run
 `python -m ensurepip --upgrade` and `python -m pip install --user west ...`.
 
-### 4.3 Arm GNU Toolchain (real silicon)
+### 4.3 Arm GNU Toolchain (three opt-in paths, not the Zephyr-on-M default)
+
+Same scoping as §2.3: the Zephyr-on-M real-silicon path uses the Zephyr
+SDK's `arm-zephyr-eabi` (`west sdk install`), not this toolchain.  For a
+manual sdk-ng install instead of `west sdk install`, see
+[`docs/local-ci.md`](local-ci.md) Path B step 5 (the Windows Zephyr-SDK
+walkthrough).  The Arm GNU Toolchain below is needed by three opt-in
+paths, none of them the Zephyr-on-M default:
+
+- Rebuilding the **E1M-X V2N / V2N-M1 GD32 bridge firmware** --
+  pre-flashed by Alp Lab and optional to touch, but fully open (see
+  [`docs/gd32-bridge.md`](gd32-bridge.md)): custom-carrier bring-up
+  ([`docs/bring-up-v2n.md`](bring-up-v2n.md)) or bridge recovery
+  ([`docs/tutorials/07-recovering-a-bricked-bridge.md`](tutorials/07-recovering-a-bricked-bridge.md)).
+- Building the **CC3501E bridge firmware's silicon-free stub target**
+  ([`firmware/cc3501e/README.md`](../firmware/cc3501e/README.md) "Build")
+  -- the CC3501E's *production* image builds with TI's `ticlang`, not
+  this toolchain; only the stub / CI-compile-smoke target needs
+  `arm-none-eabi-gcc`.
+- Hand-writing **bare-metal firmware for a real M-class core**
+  (`ALP_OS=baremetal`, no Zephyr).  Caveat: the SDK does not ship a
+  cross-compiled bare-metal build recipe today -- the in-repo
+  `ALP_OS=baremetal` CI job (`.github/workflows/pr-plain-cmake.yml`)
+  compiles with the **host** toolchain as a compile smoke, not against
+  real M-class silicon.  A hand-written bare-metal firmware targeting
+  real silicon needs this toolchain; wiring the cross-compile yourself
+  is on you until a recipe ships.
 
 The arm.com installer ships a Windows MSI:
 

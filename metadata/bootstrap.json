@@ -77,8 +77,10 @@
   "manualInstallHints": {
     "windows": {
       "note": [
-        "The Arm GNU Toolchain and the Zephyr SDK (`west sdk install`) are separate manual, one-time installs on native Windows -- not auto-installed by bootstrap.ps1; native_sim / Yocto need WSL2 (docs/cross-platform-setup.md section 5).",
-        "7-Zip must already be on PATH before running `west sdk install` on native Windows: west delegates .7z extraction to patoolib, which shells out to an external 7z/7za/7zr/7zz/7zzs/unar binary and has no pure-Python fallback."
+        "The Zephyr SDK (`west sdk install`) is a separate, manual, one-time install on native Windows -- not auto-installed by bootstrap.ps1. It is the one every Zephyr-on-M customer needs: it provides the `arm-zephyr-eabi` cross toolchain the real-silicon build (`west build` / `west flash`) actually uses. Run it from your west workspace's top-level directory -- the alp-sdk checkout's parent directory -- after this script completes.",
+        "7-Zip must already be on PATH before running `west sdk install` on native Windows: west delegates .7z extraction to patoolib, which shells out to an external 7z/7za/7zr/7zz/7zzs/unar binary and has no pure-Python fallback.",
+        "The Arm GNU Toolchain (`arm-none-eabi-gcc`) is a SEPARATE manual install, needed by three opt-in paths -- rebuilding the GD32 bridge firmware (custom-carrier bring-up or bridge recovery), building the CC3501E bridge firmware's silicon-free stub target (its production image builds with TI ticlang, not this toolchain), or hand-writing bare-metal firmware for a real M-class core -- most customers never touch any of them, since the GD32G553 ships pre-flashed by Alp Lab (rebuilding it is optional and fully open, see docs/gd32-bridge.md). Installer EXE: https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads (tick 'Add path to environment variable' during install).",
+        "native_sim / Yocto need WSL2 (docs/cross-platform-setup.md section 5)."
       ]
     }
   }

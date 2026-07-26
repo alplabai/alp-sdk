@@ -1,8 +1,42 @@
 # 0021. Toolchain provisioning: pin upstream, never rehost; onboard per lane
 
-Status: Proposed
+Status: Proposed — see **Amendment** below (2026-07-26) for the Arm GNU
+Toolchain open-evidence answer.
 Date: 2026-07-25
 Deciders: alpCaner
+
+## Amendment (2026-07-26 — answer the Arm GNU Toolchain open-evidence question)
+
+"Open evidence"'s second bullet below asks whether the Arm GNU Toolchain is
+required by any shipping path other than baremetal, framed against the
+"Automate the Arm GNU Toolchain install" alternative: if nothing else needs
+it, the `manualInstallHints` item *disappears* rather than gets automated.
+Answered while fixing `docs/cross-platform-setup.md`'s over-narrow
+GD32-only scoping:
+
+- **Three paths need it, so the entry is scoped, not deleted.** Rebuilding
+  the E1M-X V2N / V2N-M1 GD32 bridge firmware (`docs/gd32-bridge.md`,
+  `docs/bring-up-v2n.md`, `docs/tutorials/07-recovering-a-bricked-bridge.md`);
+  building the CC3501E bridge firmware's silicon-free stub target
+  (`firmware/cc3501e/README.md`, `firmware/cc3501e/toolchain/arm-none-eabi.cmake`
+  -- the CC3501E's *production* image builds with TI `ticlang`, not this
+  toolchain); and hand-written bare-metal firmware targeting a real
+  M-class core (`ALP_OS=baremetal`, no Zephyr).
+- **This ADR's own "other than baremetal" framing rested on an imprecise
+  premise.** What CI calls `baremetal` (`.github/workflows/pr-plain-cmake.yml`)
+  is a host-toolchain compile smoke -- it configures and builds
+  `-DALP_OS=baremetal` with the **host's own** compiler, not a cross
+  toolchain, and proves nothing about a cross-compiled bare-metal build.
+  No cross-compiled bare-metal recipe ships in-tree today. So "baremetal"
+  as written in that bullet does not, by itself, need an Arm toolchain --
+  it is hand-written bare-metal firmware *targeting real M-class silicon*
+  (which the in-repo job does not exercise) that needs one.
+- **Net effect:** the `manualInstallHints` entry stays -- scoped to the
+  three paths above, not deleted -- and this remains a documentation-scope
+  answer, not a decision to automate the install; that stays future work.
+  `docs/cross-platform-setup.md` §2.3/§3.4/§4.3 and
+  `metadata/bootstrap.json`'s `manualInstallHints.windows.note` carry the
+  three-path scoping; ADR 0012's own Amendment cross-references this one.
 
 ## Context
 

@@ -94,6 +94,46 @@ pure-Python fallback).
   GnuWin32.Make` line — nothing in this repo's native-Windows path invokes
   `make` (the Zephyr generator here is Ninja, itself a tracked
   prerequisite).
+- `manualInstallHints.windows.note` presented the Arm GNU Toolchain and the
+  Zephyr SDK as an unscoped, interchangeable pair — calling the Zephyr SDK
+  an "alternative cross-toolchain" implied either one does the same job.
+  It doesn't: the Zephyr-on-M real-silicon path (`west build` / `west
+  flash`) cross-compiles with the Zephyr SDK's `arm-zephyr-eabi`
+  (Ubuntu's apt `gcc-arm-none-eabi` predates Cortex-M55/Helium support —
+  `.github/workflows/pr-getting-started-aen801.yml:116-119`); the Arm GNU
+  Toolchain (`arm-none-eabi-gcc`) is needed only by a customer rebuilding
+  the GD32 bridge firmware — pre-flashed by Alp Lab, optional and fully
+  open. Reworded the manifest note (and the matching schema description)
+  so the Zephyr SDK reads as the one every Zephyr customer needs and the
+  Arm GNU Toolchain reads as conditional (the installer URL and the "tick
+  'Add path to environment variable'" tip moved onto the manifest's Arm GNU
+  Toolchain line). `scripts/bootstrap.ps1` had been printing this fact
+  **twice** — a hardcoded here-string (wrong wording) immediately above the
+  `foreach ($line in $ManualInstallNote)` loop that already renders the
+  same manifest note (right wording, once corrected) — so the fix deletes
+  the hardcoded here-string rather than rewording it, leaving the `foreach`
+  as the only print path (net: `bootstrap.ps1` shrinks). The stale comment
+  sitting between the two ("Rendered from metadata/bootstrap.json's
+  `manualInstallHints.windows.note` … not hardcoded here") had described the
+  `foreach` below it but sat directly under the contradicting here-string;
+  removing the here-string resolves that too. Scoped
+  `docs/cross-platform-setup.md` §2.3/§3.4/§4.3 to the three opt-in paths
+  that actually need the Arm GNU Toolchain — GD32 bridge rebuild, the
+  CC3501E bridge firmware's silicon-free stub target (its production image
+  builds with TI `ticlang`, not this toolchain), and hand-written
+  bare-metal firmware on a real M-class core (no cross-compiled bare-metal
+  recipe ships in-tree today — the in-repo `ALP_OS=baremetal` CI job is a
+  host-toolchain compile smoke, not a cross-compiled one); added a dated
+  Amendment to ADR 0012 correcting its Decision-section
+  operational-consequences bullet and its Consequences → Neutral bullet,
+  which made the same unscoped claim, and a dated Amendment to ADR 0021
+  recording this three-path answer to its Arm-GNU-Toolchain open-evidence
+  question. `docs/bring-up-v2n.md`'s GD32-build step also had a stale
+  `cd alp-sdk/gd32-bridge` (no such directory) — corrected to
+  `firmware/gd32-bridge/`, and its "unprogrammed module" framing now
+  distinguishes the bare GD32 chip shipped blank from GigaDevice from a
+  customer-shipped module, which Alp Lab pre-flashes during production.
+
 ### Added — `check_write_text_newline`: `scripts/` + `firmware/` `write_text()` writers must pass `newline=""`
 
 New **blocking** PR gate (`scripts/check_write_text_newline.py`, wired into

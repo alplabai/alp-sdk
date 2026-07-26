@@ -1,8 +1,57 @@
 # 0012. alp-sdk developer host is cross-platform; Linux required ONLY for Yocto
 
-Status: Accepted
+Status: Accepted — see **Amendment** below (2026-07-26) for a correction to
+the Arm GNU Toolchain claim.
 Date: 2026-05-18
 Deciders: alpCaner
+
+## Amendment (2026-07-26 — correct the Arm GNU Toolchain claim)
+
+The `## Decision` section's operational-consequences bullet and the
+separate `## Consequences` → `### Neutral` bullet below (and the parallel
+wording in `docs/cross-platform-setup.md` this ADR cites as the
+operationalisation) overstated what `arm-none-eabi-gcc` is for. Corrected,
+not rewritten in place, per this repo's convention for amending a decided
+ADR (see ADR 0020's own Amendment):
+
+- **`arm-none-eabi-gcc` (the Arm GNU Toolchain) is not what the Zephyr-on-M
+  real-silicon path builds with.** `west build` + `west flash` against an
+  E1M / E1M-X EVK cross-compiles with the **Zephyr SDK's**
+  `arm-zephyr-eabi` (`west sdk install`, `ZEPHYR_TOOLCHAIN_VARIANT=zephyr`)
+  -- confirmed in `.github/workflows/pr-getting-started-aen801.yml:116-119`
+  ("Real-silicon (non-native_sim) targets need the Zephyr SDK's
+  arm-zephyr-eabi cross toolchain -- Ubuntu's apt gcc-arm-none-eabi
+  predates Cortex-M55/Helium support") and `docs/local-ci.md` Path A
+  step 4 (Linux) / Path B step 5 (Windows). This claim lives in two
+  separate places below, not one: the `## Decision` section's
+  operational-consequences bullet claiming a Win/Mac user with `python` +
+  `west` + `arm-none-eabi-gcc` can "produce a flashable Zephyr image"
+  (:161), and the `## Consequences` → `### Neutral` bullet listing "Arm
+  GNU Toolchain" among what the SDK "already does" cross-platform
+  (:284-291). Both should be read as **Zephyr SDK's `arm-zephyr-eabi`**
+  instead.
+- **The Arm GNU Toolchain is conditional, not a baseline dependency -- and
+  the condition is three paths, not one.** It is needed by: a customer who
+  rebuilds the **E1M-X V2N / V2N-M1 GD32 bridge firmware** -- pre-flashed
+  by Alp Lab, so normal customers never touch it, but fully open to
+  rebuild (see `docs/gd32-bridge.md`): custom-carrier bring-up
+  (`docs/bring-up-v2n.md`) or bridge recovery
+  (`docs/tutorials/07-recovering-a-bricked-bridge.md`); building the
+  **CC3501E bridge firmware's silicon-free stub target**
+  (`firmware/cc3501e/README.md`) -- its *production* image builds with TI
+  `ticlang`, not this toolchain; and hand-writing **bare-metal firmware
+  for a real M-class core** (`ALP_OS=baremetal`, no Zephyr) -- the SDK
+  ships no cross-compiled bare-metal build recipe today, so this path is
+  real but unserved by an in-tree recipe (see ADR 0021's Amendment). It is
+  still cross-platform (arm.com ships Win/Mac/Linux builds), which is the
+  one part of the original claim that stands.
+- **This is a documentation-accuracy correction, not a reversal of the
+  decision.** Every load-bearing claim this ADR makes (Zephyr-on-M is
+  cross-platform; Yocto-on-A is Linux-only; CI runs a Win + a Mac runner)
+  is unaffected -- only the toolchain *name* backing the Zephyr-on-M claim
+  was wrong. `docs/cross-platform-setup.md` §2.3/§3.4/§4.3 and
+  `metadata/bootstrap.json`'s `manualInstallHints.windows.note` carry the
+  corrected scoping.
 
 ## Context
 
