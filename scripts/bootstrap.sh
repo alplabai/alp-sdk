@@ -125,6 +125,30 @@ REQUIRED_BINS=(git cmake python3)
 if [ "${PRINT_ENV_ONLY}" -eq 1 ]; then
     REQUIRED_BINS=(python3)
 fi
+
+# Per-tool install hints for the missing-tools message below (issue #978) --
+# the POSIX-side analogue of bootstrap.ps1's own $Prereqs Name/Hint pairs,
+# and under the SAME bootstrap-of-the-bootstrap constraint as REQUIRED_BINS
+# above (this runs before python3 is confirmed present, so it can't read
+# metadata/bootstrap.json for the hint text either). A second hardcoded
+# copy, kept in lockstep with metadata/bootstrap.json's
+# prerequisites.install.linux / .macos by scripts/check_bootstrap_manifest.py.
+# Three PARALLEL arrays, not an associative array: bash 3.2 (the
+# macOS-shipped version) has no `declare -A` -- the same reason the
+# nativeLibHints print loop further down duplicates itself per OS instead of
+# using indirection. Matched up by POSITION, not by key.
+PREREQ_HINT_NAMES=(git cmake python3)
+PREREQ_HINT_LINUX=(
+    "sudo apt-get install -y git"
+    "sudo apt-get install -y cmake"
+    "sudo apt-get install -y python3"
+)
+PREREQ_HINT_MACOS=(
+    "brew install git"
+    "brew install cmake"
+    "brew install python3"
+)
+
 MISSING=()
 for bin in "${REQUIRED_BINS[@]}"; do
     if ! command -v "${bin}" >/dev/null 2>&1; then
@@ -132,7 +156,28 @@ for bin in "${REQUIRED_BINS[@]}"; do
     fi
 done
 if [ "${#MISSING[@]}" -gt 0 ]; then
-    die "Missing required tools: ${MISSING[*]}.  Install them and re-run."
+    warn "Missing required tools:"
+    UNAME_S="$(uname -s 2>/dev/null || echo unknown)"
+    for bin in "${MISSING[@]}"; do
+        hint=""
+        idx=0
+        for name in "${PREREQ_HINT_NAMES[@]}"; do
+            if [ "${name}" = "${bin}" ]; then
+                case "${UNAME_S}" in
+                    Darwin) hint="${PREREQ_HINT_MACOS[$idx]}" ;;
+                    *)      hint="${PREREQ_HINT_LINUX[$idx]}" ;;
+                esac
+                break
+            fi
+            idx=$((idx + 1))
+        done
+        if [ -n "${hint}" ]; then
+            warn "  ${bin}  ->  ${hint}"
+        else
+            warn "  ${bin}"
+        fi
+    done
+    die "Install the tools above and re-run."
 fi
 
 # -------- Load bootstrap facts (metadata/bootstrap.json, issue #917) ----------
