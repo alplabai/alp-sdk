@@ -721,10 +721,14 @@ def _check_board_targets(som_files) -> list:
         (guards against qualifying a SKU -- e.g. V2N102/V2M102 -- before its
         board tree is generated).
 
-    A bare board with no generated tree is left alone: it is either a
-    single-cluster target Zephyr resolves as-is, or a not-yet-generated
-    board that cannot build regardless.  Returns a failure list shaped like
-    _check_files().
+    A bare board with no generated tree is left alone HERE -- this check's
+    only job is qualification-form drift against a tree that exists, not
+    existence itself.  Whether that bare board should have a tree at all
+    (single-cluster target Zephyr resolves as-is, vs. a not-yet-generated
+    board that cannot build regardless) is `check_board_target_tree_parity.py`'s
+    job: it requires the gap be declared in its `_NOT_YET_SUPPORTED`
+    allowlist, with a reason, rather than silently unbuildable.  Returns a
+    failure list shaped like _check_files().
     """
     failures: list[tuple[Path, list[str]]] = []
     trees = _board_tree_identifiers()
