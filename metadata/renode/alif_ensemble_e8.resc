@@ -29,11 +29,17 @@ machine LoadPlatformDescription $repl
 
 # Surface the UART5 console.  Run headless (the wrapper passes
 # `--console --disable-xwt`), so Renode routes the analyzer to stdout
-# instead of a GUI window; the wrapper tees that stdout to --log, which
-# is where a log-grep for the app's "[hello] done" marker would look.
-# NB: no gate greps it today -- every renode workflow's boot-and-assert
-# step is a no-op `echo` (tan-cli#77), so nothing here is currently
-# asserted.
+# instead of a GUI window; a caller tees that stdout to a log file,
+# which is where a log-grep for the app's "[hello] done" marker would
+# look.
+# NB (#974): pr-renode-aen-smoke.yml's e2e step DOES now grep this
+# log -- but for Renode's own boot-time lines ("Setting initial
+# values: PC = 0x" / "CPU was halted" / "Guessing VectorTableOffset
+# value to be 0x", all from CortexM.cs), not yet for the app's
+# "[hello] done" marker above. pr-renode-sim-mode.yml and
+# pr-renode-dual-os.yml still have no-op `echo` boot-and-assert steps
+# (tan-cli#77) -- this descriptor is asserted on only from the AEN
+# smoke job so far.
 showAnalyzer uart5
 
 # Load the Zephyr ELF, then seed the vector-table base BEFORE `start`
