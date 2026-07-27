@@ -122,7 +122,7 @@
     {
       "code": "board-tree-missing",
       "coreId": "m33",
-      "message": "SoM 'E1M-NX9101' core 'm33' wants Zephyr board 'alp_e1m_nx9101_m33', which has no tree under zephyr/boards/alp/ -- board bring-up for this target has not happened yet. Boards that exist today: alp_e1m_aen401_m55_hp, alp_e1m_aen601_m55_hp, alp_e1m_aen801_m55_he, alp_e1m_aen801_m55_hp, alp_e1m_v2m101_m33_sm, alp_e1m_v2n101_m33_sm"
+      "message": "SoM 'E1M-NX9101' core 'm33' wants Zephyr board 'alp_e1m_nx9101_m33', which has no tree under zephyr/boards/alp/ -- board bring-up for this target has not happened yet."
     }
   ]
 }

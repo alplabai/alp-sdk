@@ -19,6 +19,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -379,8 +380,12 @@ def test_emit_build_plan_missing_board_tree_blocks_command_not_dropped(
     Zephyr's own board lookup is guaranteed to reject it with "No board
     named ... Invalid BOARD". The slice is still carried (never dropped)
     with `command: null` plus a `board-tree-missing` warning naming the
-    SKU, core, the board it wanted, and a real board that does exist --
-    the customer's own terms, not just an internal code."""
+    SKU, core, and the board it wanted -- the customer's own terms, not
+    just an internal code. The message deliberately does NOT enumerate
+    the boards that DO exist (issue #999 review finding): that would
+    make one SKU's plan text depend on every other SKU's board tree, so
+    an unrelated bring-up landing a new tree would redden this SKU's
+    frozen fixtures."""
     import json as _json
     from alp_orchestrate import emit_build_plan
 
@@ -396,9 +401,44 @@ def test_emit_build_plan_missing_board_tree_blocks_command_not_dropped(
     assert "E1M-AEN701" in warning["message"]
     assert "m55_hp" in warning["message"]
     assert "alp_e1m_aen701_m55_hp" in warning["message"]
-    # A board that DOES exist, so the message hands the customer a real
-    # alternative rather than just naming the gap.
-    assert "alp_e1m_aen801_m55_hp" in warning["message"]
+    # Not enumerated in the message text (still available on the raised
+    # exception's `.real_boards` attribute for a caller that wants it).
+    assert "alp_e1m_aen801_m55_hp" not in warning["message"]
+
+
+def test_real_zephyr_board_names_lists_every_shipped_tree() -> None:
+    """No test named the actual members of `_real_zephyr_board_names`,
+    only that ONE of them showed up in a warning message -- a regression
+    that dropped every board but one would still pass that check. Pin
+    the full set."""
+    from alp_orchestrate.orchestrator import REPO, _real_zephyr_board_names
+
+    assert _real_zephyr_board_names(REPO) == {
+        "alp_e1m_aen401_m55_hp", "alp_e1m_aen601_m55_hp",
+        "alp_e1m_aen801_m55_he", "alp_e1m_aen801_m55_hp",
+        "alp_e1m_v2m101_m33_sm", "alp_e1m_v2n101_m33_sm",
+    }
+
+
+def test_real_zephyr_board_names_raises_on_corrupt_board_yml(
+    tmp_path: Path,
+) -> None:
+    """A broken `board.yml` must crash loudly (matching
+    `check_board_target_tree_parity.py`'s `_load_real_board_names`,
+    which has no such guard), never silently drop that board from the
+    real set -- a swallowed `yaml.YAMLError` here would misreport a
+    board whose tree DOES exist (e.g. the lead part AEN801) as missing,
+    with the wrong root cause: 'bring-up hasn't happened yet' instead of
+    'this board.yml is broken'."""
+    from alp_orchestrate.orchestrator import _real_zephyr_board_names
+
+    board_dir = tmp_path / "zephyr" / "boards" / "alp" / "e1m_aen801_m55_hp"
+    board_dir.mkdir(parents=True)
+    (board_dir / "board.yml").write_text(
+        "board: [unclosed", encoding="utf-8")
+
+    with pytest.raises(yaml.YAMLError):
+        _real_zephyr_board_names(tmp_path)
 
 
 def test_emit_build_plan_carries_boot_sysbuild_conf(

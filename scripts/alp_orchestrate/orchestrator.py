@@ -114,10 +114,7 @@ def _real_zephyr_board_names(repo: Path) -> set[str]:
     if not boards_dir.is_dir():
         return names
     for board_yml in sorted(boards_dir.glob("*/board.yml")):
-        try:
-            doc = yaml.safe_load(board_yml.read_text(encoding="utf-8")) or {}
-        except yaml.YAMLError:
-            continue
+        doc = yaml.safe_load(board_yml.read_text(encoding="utf-8")) or {}
         name = (doc.get("board") or {}).get("name")
         if isinstance(name, str):
             names.add(name)
@@ -145,12 +142,10 @@ class UnknownBoardTargetError(ValueError):
         self.core_id = core_id
         self.board = board
         self.real_boards = real_boards
-        existing = ", ".join(sorted(real_boards)) or "(none)"
         super().__init__(
             f"SoM '{sku}' core '{core_id}' wants Zephyr board '{board}', "
             f"which has no tree under zephyr/boards/alp/ -- board bring-up "
-            f"for this target has not happened yet. Boards that exist "
-            f"today: {existing}"
+            f"for this target has not happened yet."
         )
 
 
@@ -185,7 +180,9 @@ def _slice_command(
 ) -> Optional[list[str]]:
     """Resolve the build command for a slice.  Returns None when there is no
     buildable command yet -- the caller carries the slice as `skipped` /
-    `no-command`, never dropped.
+    `no-command`, never dropped.  Raises `UnrootedPathError` /
+    `UnknownBoardTargetError` for a slice the plan must block rather than
+    mis-emit.
 
     `base_dir` anchors every relative `app:` path -- the directory holding
     the project's `board.yaml` (or an equivalent explicit root), NEVER the
