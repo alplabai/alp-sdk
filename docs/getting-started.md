@@ -119,7 +119,7 @@ you install them.
 | Tool        | Version          | Notes                                                    |
 |-------------|------------------|----------------------------------------------------------|
 | Zephyr      | v4.4.1 (stable)  | Pinned by `west.yml`; see [`docs/zephyr-version-policy.md`](zephyr-version-policy.md). |
-| Python      | 3.10+ (dev/CI pin: 3.12) | 3.10 is the support **floor** (`pyproject.toml` `requires-python`); dev/CI standardise on the **pin** in the repo-root `.python-version` file. Match the pin to reproduce CI exactly -- `tan doctor` warns on a mismatch. |
+| Python      | 3.10+ (dev/CI pin: 3.12) | 3.10 is the support **floor** (`pyproject.toml` `requires-python`); dev/CI standardise on the **pin** in the repo-root `.python-version` file. Match the pin to reproduce CI exactly -- `tan doctor`'s `python` check is a presence probe only (no pin comparison). |
 | Python deps | `pyyaml`, `jsonschema`, `imgtool` | All installed by `scripts/bootstrap.sh`; manual install: `pip install pyyaml jsonschema imgtool`. |
 | CMake       | 3.20+            | `find_package(Zephyr)` minimum.                          |
 | C compiler  | GCC 11+ / Clang 14+ | `native_sim` builds; cross-toolchain for real silicon. |
@@ -147,19 +147,44 @@ wsl --install -d Ubuntu
 ```
 
 **Verify your setup first.**  Before building anything, run the
-read-only preflight -- it checks every tool above (plus the Zephyr
-pin, the `.west` workspace and the workspace venv) and prints a
-`[PASS]`/`[WARN]`/`[FAIL]` line with a fix hint for each:
+read-only build-readiness preflight -- it checks the tools above
+(Python, `west`, `cmake`, `ninja`, the Zephyr pin read live from
+`west.yml`, the Zephyr SDK) plus `board.yaml` resolution, and prints
+a `[+]` (pass) / `[!]` (warn) / `[x]` (fail) line with a fix hint for
+each -- not `[PASS]`/`[WARN]`/`[FAIL]`, and there is no `--strict`
+flag:
 
 ```bash
-tan doctor              # human-readable report; exit 1 on any FAIL
-tan doctor --strict     # also fail on WARN (handy in CI)
-tan doctor --json       # machine-readable (used by the VS Code extension)
+tan doctor --build                    # human-readable report
+tan doctor --build --format json      # machine-readable
+```
+
+```
+  tan doctor --build  zephyr · yocto · baremetal
+
+  [+]  sdk               alp-sdk at /work/alp-sdk
+  [x]  boardYaml         board.yaml not found — run `tan init` or pass `--board-yaml <path>`
+  [+]  workspace         Zephyr workspace at /work
+  [+]  westResolved      west resolved
+  [+]  zephyrVersion     Zephyr v4.4 matches the SDK pin
+  [+]  west              west is available.
+  [+]  cmake             cmake is available.
+  [!]  ninja             ninja not found on PATH — needed for Zephyr builds.
+  [!]  zephyrSdk         Zephyr SDK toolchain not detected (ZEPHYR_SDK_INSTALL_DIR unset).
+  [!]  bitbake           bitbake not found on PATH — needed for Yocto builds.
+  [!]  bmaptool          bmaptool not found; Yocto .wic flash falls back to dd (slower).
+  [!]  vendorToolchain   Baremetal needs a vendor toolchain (Alif/Renesas/NXP), per SoC family.
+  [+]  sdkProvenance     alp-sdk 0.13.0 @ 08230793
+
+  7 passed · 5 warnings · 1 failed
 ```
 
 It is HW-free (no build, no board, no flash), so it is safe to run
-anytime.  Resolve every `[FAIL]` before continuing; `[WARN]` lines
-are for optional / real-silicon-only tooling (Zephyr SDK, hal_alif).
+anytime.  Resolve every `[x]` before continuing; `[!]` lines are for
+optional / real-silicon-only tooling (Zephyr SDK, hal_alif).  Plain
+`tan doctor` (no `--build`) is a different, debug-readiness preflight
+for attaching a debugger to a target/server, not this build check --
+see [`docs/cli.md`](cli.md#tan-doctor----debug-readiness-preflight).
 
 For real-silicon builds you'll also need the Zephyr SDK
 (`zephyr-sdk-1.0.1` matches the v0.6 Zephyr v4.4 pin — see
@@ -358,7 +383,7 @@ can't run, naming the failing constraint.  Check what's selected and
 whether it's compatible:
 
 ```bash
-tan doctor            # a "libraries" line reports tier + licence + fit
+python -m alp_cli doctor    # a "libraries" line reports tier + licence + fit
 ```
 
 The curated set today: `lvgl`, `cmsis-dsp`, `cmsis-nn`, `nanopb`,

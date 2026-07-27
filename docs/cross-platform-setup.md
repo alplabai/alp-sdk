@@ -73,8 +73,8 @@ are deliberately different:
   the pinned version.
 
 To reproduce CI byte-for-byte, match the pin locally — `pyenv`
-and `uv` pick `.python-version` up automatically.  `tan doctor`
-WARNs (never FAILs) when the running interpreter differs from
+and `uv` pick `.python-version` up automatically.  `tan doctor`'s
+`python` check is a presence probe only, with no comparison against
 the pin; anything >= 3.10 remains supported.
 
 ### 1.2 Rust toolchain (only for building `tan` from source)
