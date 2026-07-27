@@ -7,6 +7,71 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.14.0 candidate
 
+### Added — advisory gate: alp-sdk's documented `tan` surface vs a real, installed `tan`
+
+alp-sdk deliberately tracks tan-cli's `latest` (`docs/cli.md` argues why, and
+that decision stands) — a tan release changes documented CLI behaviour
+immediately, with no version pin to buffer alp-sdk's docs from it, and
+nothing checked that the two stayed in sync. `parity-seam1.yml` diffs this
+checkout's own `--emit build-plan` against a frozen oracle; it never invokes
+`tan` at all.
+
+New `scripts/check_tan_docs_surface.py` extracts every `tan <subcommand>`
+mention and docs/cli.md-tabulated flag from `README.md`, `docs/cli.md`,
+`docs/getting-started.md`, `docs/troubleshooting.md`, and
+`scripts/bootstrap.sh`'s printed next-steps block, then asserts each verb
+still exists (`tan <verb> --help`, exit 0) and, for a native (non-forwarding)
+verb, that the flag string is present in that help output, against a real
+`tan` installed by `docs/cli.md`'s own documented `install.sh` path. A
+FORWARDING verb (`new-som`, `monitor`, `model`, `faultdecode` today — their
+`--help` never lists their real flags, only a generic "forwarded verbatim"
+blurb) has its flag check skipped rather than matched against that blurb;
+the OK line names which verbs were skipped. It deliberately does not check
+output text, exit codes, or semantic behaviour — see the script's own
+docstring for the full scope and what's excluded. New
+`.github/workflows/tan-docs-drift.yml` runs it on a daily schedule (tan can
+drift with no alp-sdk commit at all) plus path-filtered on PRs touching the
+doc sources themselves.
+
+**Advisory only** — not a required context on `dev` or `main`. It already
+surfaces real, pre-existing drift on its first run: `tan emit` was renamed
+to `tan generate`. Fixing that is separate follow-up work.
+
+Two sibling `docs/cli.md` rewrites exposed three more false-positive
+shapes. A flag-table row inside `` ### `tan generate` `` that tabulates a
+*different* front door's flags (`--sku`/`--template`, real `python -m
+alp_cli emit` options contrasted against `tan generate`'s narrower one)
+was attributed to `tan generate` by section position alone; a `#`-led
+English sentence inside a fenced `bash` block (`` `... its own top-level
+tan verb -- NOT tan generate ...` ``) misparsed as a fake `tan verb`
+subcommand; and, once a sibling branch retired `tan emit` from the doc's
+how-to-use sections, the historical note explaining the retirement
+(`` `This replaces the retired `tan emit` command ...` ``) itself
+misparsed as a live `tan emit` reference. All three are now handled
+structurally rather than by widening `_ENGLISH_STOPWORDS`: a flag table
+row is skipped for attribution if it names `python -m alp_cli`,
+`west alp-*`, or `alp_orchestrate`; every fenced code block (regardless of
+its language tag, or the lack of one — not gated by a bash/sh/shell
+allowlist, which reproduces the same false positive one fence tag away)
+plus bootstrap.sh's heredoc bodies has its `#`-comment tails stripped
+before the `tan <verb>` regex runs; and docs/cli.md's own existence-scan
+now only trusts a REFERENCE-QUALITY mention (a `` ### `tan <verb>` ``
+heading, a fenced invocation, a table cell, or a flag/arg-bearing span)
+rather than any bare `` `tan <verb>` `` span in ordinary prose -- the one
+source that narrates CLI history, so the one source where a verb can be
+*named* while being said to be *gone*. A multi-token inline span (e.g.
+`` `tan is the executor` ``) is also now subtracted against
+`_ENGLISH_STOPWORDS`, closing the one path that regex reached unfiltered.
+
+The front-door row skip above was silent; the OK line now names which
+verb's flag table rows were skipped and how many, the same way the
+forwarding-verb skip already is. The gate's own wording no longer claims a
+documented flag "parses" -- it proves the flag string is listed in
+`tan <verb> --help` output, nothing about whether it's actually accepted
+on a real command line; that correction now matches the script's own
+docstring in the OK line, the workflow step name, and
+`metadata/quality-tasks-v1.json`'s task description.
+
 ### Added — debug-probe identity (`jlink_device`, `jlink_flash_device`, `pyocd_target`) on the Alif Ensemble SoC specs (#987)
 
 `alp-sdk-vscode` generates a `cortex-debug` `launch.json` from board metadata,

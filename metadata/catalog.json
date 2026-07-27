@@ -1014,6 +1014,10 @@
       "script": "scripts/check_system_manifest.py"
     },
     {
+      "purpose": "Fail when alp-sdk's documented `tan` surface no longer exists in real `tan`.",
+      "script": "scripts/check_tan_docs_surface.py"
+    },
+    {
       "purpose": "Validate metadata/templates/catalog-v1.json against the public template contract (metadata/schemas/template-catalog-v1.schema.json) AND drift-check every record against the real tree.",
       "script": "scripts/check_template_catalog.py"
     },

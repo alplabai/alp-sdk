@@ -449,6 +449,18 @@
       "ci": null
     },
     {
+      "id": "tan-docs-drift",
+      "description": "Advisory: every `tan` subcommand + docs/cli.md-tabulated flag alp-sdk's docs name must exist and be listed in `--help` output for a real, installed `tan` binary.",
+      "runner": "check-script",
+      "script": "scripts/check_tan_docs_surface.py",
+      "gate": false,
+      "profiles": [
+        "full"
+      ],
+      "output": "none",
+      "ci": "tan-docs-drift.yml:tan-docs-drift"
+    },
+    {
       "id": "template-catalog",
       "description": "Validate metadata/templates/catalog-v1.json against the public template contract and drift-check every record against the real tree.",
       "runner": "check-script",
