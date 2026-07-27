@@ -215,6 +215,51 @@ def _resolve_inline_or_preset_board(
     }
 
 
+def resolve_soc_path(silicon: str | None, metadata_root: Path) -> Path | None:
+    """Resolve a `vendor:family:part` `silicon:` key to the SoC-JSON path
+    it names: `metadata/socs/<vendor>/<family>/<part>.json`.
+
+    Returns None when `silicon` is falsy or not exactly 3 colon-separated
+    parts -- does NOT check the path exists, callers decide what an
+    unresolved/missing SoC spec means for them (e.g. a SoM preset with no
+    `silicon:` at all is a valid, if incomplete, state; a `silicon:` that
+    names a spec that isn't on disk is not).
+
+    Single source for this resolution within `alp_project_loader.py` -- issue
+    #997 collapsed the three copies that used to live here, in
+    `resolve_capabilities()`, and inline in `pr-metadata-validate.yml` (now
+    `check_som_topology_parity.py`) down to this one helper, and folded a
+    fourth in-module copy from `resolve_memory_map()` into it too.
+
+    Nine more hand-rolled copies remain outside this module (issue #1004).
+    Most differ in the shape they fail with, so a blind call-site swap would
+    change behaviour; one does not, and is the cheap migration:
+
+      - `alp_cli/validator.py:351` (`_load_soc_caps`) -- same 3-part guard,
+        same `None` on failure. Behaviourally identical to this helper, so
+        it is the one site migratable with provably zero behaviour change.
+      - `gen_zephyr_board.py:88` (`_load_soc_spec`) -- raises
+        `ZephyrBoardEmitError`.
+      - `alp_orchestrate/loader.py:45` -- raises `OrchestratorError`.
+      - `alp_model/targets.py:69` -- unguarded 3-tuple unpack (`ValueError`
+        on a malformed ref), then raises `FileNotFoundError`.
+      - `validate_metadata.py:152` and `:217` -- soft-fail into a diagnostic
+        message list rather than raising at all.
+      - `gen_zephyr_board.py:807`, `alp_cli/new_som.py:199` -- build a `str`
+        path, not a `Path`.
+      - `alp_cli/new_som.py:526` -- `Path`, but rooted at `output_root`
+        rather than `metadata_root`.
+
+    Migrate one of those onto this helper -- don't add a tenth.
+    """
+    if not silicon:
+        return None
+    parts = silicon.split(":")
+    if len(parts) != 3:
+        return None
+    return metadata_root / "socs" / parts[0] / parts[1] / f"{parts[2]}.json"
+
+
 def _resolve_silicon_variant(
     sku_preset: dict[str, Any],
     metadata_root: Path,
@@ -234,14 +279,8 @@ def _resolve_silicon_variant(
     preset declares no silicon_variant, or declares `silicon_variant:
     TBD` per the no-inventing-values rule).
     """
-    silicon = sku_preset.get("silicon")
-    if not silicon:
-        return None
-    parts = silicon.split(":")
-    if len(parts) != 3:
-        return None
-    soc_path = metadata_root / "socs" / parts[0] / parts[1] / f"{parts[2]}.json"
-    if not soc_path.is_file():
+    soc_path = resolve_soc_path(sku_preset.get("silicon"), metadata_root)
+    if soc_path is None or not soc_path.is_file():
         return None
     soc_spec = json.loads(soc_path.read_text(encoding="utf-8"))
     variants = soc_spec.get("variants") or []
@@ -406,12 +445,8 @@ def resolve_memory_map(
 
     # Re-load the SoC JSON to grab the cores[] topology (the variant
     # dict alone doesn't carry per-core ids).
-    silicon = sku_preset.get("silicon", "")
-    parts = silicon.split(":")
-    if len(parts) != 3:
-        return []
-    soc_path = metadata_root / "socs" / parts[0] / parts[1] / f"{parts[2]}.json"
-    if not soc_path.is_file():
+    soc_path = resolve_soc_path(sku_preset.get("silicon"), metadata_root)
+    if soc_path is None or not soc_path.is_file():
         return []
     soc_spec = json.loads(soc_path.read_text(encoding="utf-8"))
     soc_cores = [c.get("id") for c in soc_spec.get("cores", []) if c.get("id")]
@@ -483,14 +518,11 @@ def resolve_capabilities(
          (enforced by scripts/validate_metadata.py); presets without the
          field keep the full silicon capability set.
     """
-    silicon = sku_preset.get("silicon", "")
-    parts = silicon.split(":")
+    soc_path = resolve_soc_path(sku_preset.get("silicon"), metadata_root)
     soc_caps: dict[str, Any] = {}
-    if len(parts) == 3:
-        soc_path = metadata_root / "socs" / parts[0] / parts[1] / f"{parts[2]}.json"
-        if soc_path.is_file():
-            soc_spec = json.loads(soc_path.read_text(encoding="utf-8"))
-            soc_caps = soc_spec.get("capabilities") or {}
+    if soc_path is not None and soc_path.is_file():
+        soc_spec = json.loads(soc_path.read_text(encoding="utf-8"))
+        soc_caps = soc_spec.get("capabilities") or {}
 
     som_caps: dict[str, Any] = sku_preset.get("capabilities") or {}
 

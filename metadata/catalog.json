@@ -1002,6 +1002,10 @@
       "script": "scripts/check_som_bundle.py"
     },
     {
+      "purpose": "CI gate: every `id:` in every `metadata/socs/**/*.json` `cores[]` block must have a matching key in every consuming SoM preset's `topology:` block. Catches the case where a silicon update adds a new core (e.g. m33_sm) but the SoM preset's topology stops declaring an OS for it. Per design doc section 4.2 the topology key set is required to mirror the SoC's `cores[].id` set exactly.",
+      "script": "scripts/check_som_topology_parity.py"
+    },
+    {
       "purpose": "CI gate: every src/backends/**/*_stub.c file must reference an open GitHub issue in its top comment block, on a line of the form:",
       "script": "scripts/check_stub_issues.py"
     },
