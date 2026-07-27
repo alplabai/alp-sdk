@@ -128,9 +128,14 @@ blocked until the remediation is met. Tracked in #855.
    and replaced by the narrower, differently-shaped `tan generate --target
    <mode>` (6 of `metadata/emit-registry-v1.json`'s 20 registered modes,
    fixed output paths, no `--output`/`--core`/`--template`/`--sku`). Point
-   2's "11 non-build verbs" list should read 9 (`generate/validate/init/
-   run/model/monitor/new-som/faultdecode/explain`) plus `doctor`, which is
-   native Rust, not forwarded (`docs/cli.md` already says this too).
+   2's "11 non-build verbs" all still survive in the `alp_cli` package
+   (`ls scripts/alp_cli/*.py`: `doctor`, `emit`, `explain`, `faultdecode`,
+   `generate`, `init`, `model`, `monitor`, `new_som`, `run`, `validate`);
+   what narrowed is the *forwarded* set. `tan` forwards 9 of them
+   (`generate/validate/init/run/model/monitor/new-som/faultdecode/explain`),
+   never `emit` (retired, per above) and never `doctor` (native Rust —
+   `docs/cli.md`'s forwarding table already reads `tan doctor  native-host
+   · none`).
 
    This landed alongside the full 15-mode classification `docs/cli.md`'s
    "Six modes, no front door: which ones are gaps?" now carries: of the
