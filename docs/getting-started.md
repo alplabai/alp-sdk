@@ -133,8 +133,10 @@ brew install cmake ninja python git
 pip3 install west
 
 # Linux (Debian / Ubuntu)
-sudo apt install -y cmake ninja-build python3 python3-pip git
-pip3 install west
+sudo apt install -y cmake ninja-build python3 python3-pip python3-venv git
+# no `pip3 install west` here -- scripts/bootstrap.sh installs west into
+# the workspace venv itself, and on Ubuntu 24.04 running it against the
+# system interpreter fails outright (PEP 668 externally-managed-environment)
 
 # Windows -- PowerShell + Python from Microsoft Store
 winget install -e --id Kitware.CMake

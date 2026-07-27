@@ -332,6 +332,30 @@ info "Repo root:       ${REPO_ROOT}"
 info "Workspace dir:   ${WORKSPACE_DIR}"
 info "Detected OS:     ${OS_LABEL}"
 
+# -------- venv capability check (issue #984) -----------------------------
+
+# `python3-venv` is a Debian/Ubuntu PACKAGE name, not a binary -- it can
+# never be a `command -v`-checkable REQUIRED_BINS entry (see that array's
+# comment above).  What actually breaks -- Debian/Ubuntu ship the
+# `ensurepip`-bundled pip/setuptools wheels `python3 -m venv` needs in the
+# separate `python3-venv` package, not in `python3` itself -- only shows up
+# when a venv is actually built, so `import ensurepip` alone (importable
+# even when the wheels are missing) would not catch it.  This is a
+# CAPABILITY probe -- build a disposable throwaway venv and discard it --
+# not a presence probe, using the same curated warn/die treatment the
+# missing-tools message above got in #978 (commit 8a1bc6d9).
+VENV_PROBE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/alp-bootstrap-venv-probe.XXXXXX" 2>/dev/null || true)"
+if [ -z "${VENV_PROBE_DIR}" ] || ! python3 -m venv "${VENV_PROBE_DIR}" >/dev/null 2>&1; then
+    rm -rf "${VENV_PROBE_DIR:-}" 2>/dev/null || true
+    warn "python3 -m venv is not usable (ensurepip unavailable):"
+    case "${OS_LABEL}" in
+        macos) warn "  python3-venv  ->  brew install python3" ;;
+        *)     warn "  python3-venv  ->  sudo apt-get install -y python3-venv" ;;
+    esac
+    die "Install the package above and re-run."
+fi
+rm -rf "${VENV_PROBE_DIR}"
+
 # -------- workspace selection (reuse a compatible ZEPHYR_BASE) ----------------
 
 # If ZEPHYR_BASE points at a Zephyr tree whose MAJOR.MINOR matches our pin and
