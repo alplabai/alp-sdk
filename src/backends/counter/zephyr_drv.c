@@ -21,7 +21,7 @@
 #include "counter_ops.h"
 
 #define ALP_COUNTER_DEV_OR_NULL(idx) \
-	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_counter, idx))), \
+	COND_CODE_1(DT_NODE_HAS_STATUS(DT_ALIAS(_CONCAT(alp_counter, idx)), okay), \
 	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_counter, idx)))), \
 	            (NULL))
 
