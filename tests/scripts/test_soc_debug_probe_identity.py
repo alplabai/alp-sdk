@@ -41,9 +41,10 @@ _E8_LIKE = {
             "debug": {
                 "pyocd_target": "AE822FA0E5597LS0",
                 "jlink_device": {
-                    "m55_hp": "AE822FA0E5597LS0_HP",
-                    "m55_he": "AE822FA0E5597LS0_HE",
+                    "m55_hp": "Cortex-M55",
+                    "m55_he": "Cortex-M55",
                 },
+                "jlink_flash_device": "AE822FA0E5597LS0_M55_HE",
             },
         }
     ],
@@ -56,7 +57,7 @@ def test_valid_jlink_device_keys_pass(tmp_path, monkeypatch):
 
 def test_jlink_device_key_referencing_unknown_core_fails(tmp_path, monkeypatch):
     doc = copy.deepcopy(_E8_LIKE)
-    doc["variants"][0]["debug"]["jlink_device"]["m55_nope"] = "AE822FA0E5597LS0_XX"
+    doc["variants"][0]["debug"]["jlink_device"]["m55_nope"] = "Cortex-M55"
     assert _run(tmp_path, monkeypatch, doc) == 1
 
 

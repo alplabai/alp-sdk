@@ -369,9 +369,10 @@ def _check_soc_debug_probe_identity(soc_files) -> list:
     """Cross-ref `variants[].debug.jlink_device` keys against `cores[].id`.
 
     #987 publishes the debug-probe identity (J-Link device, pyOCD target)
-    per variant, with `jlink_device` keyed by core id since a J-Link device
-    profile usually names one specific core view on a multi-core part (e.g.
-    the E8's `..._HP` vs `..._HE` profiles).  JSON Schema can express that
+    per variant, with `jlink_device` keyed by core id since a J-Link attach
+    device can in principle differ per core class (a future non-M55 core
+    would need a different value, even though every Alif M55 core today
+    shares the generic `Cortex-M55` string).  JSON Schema can express that
     `jlink_device` is an object of string values but not that its *keys*
     are real cores on *this* SoC -- a typo (or a stale key surviving a core
     rename) would silently point the extension's launch-config generator at

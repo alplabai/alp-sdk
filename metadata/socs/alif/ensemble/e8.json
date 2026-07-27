@@ -229,7 +229,7 @@
       "shipment_suffixes": ["-T", "-Y"],
       "debug": {
         "pyocd_target": "AE822FA0E5597BS0",
-        "jlink_device": { "m55_hp": "AE822FA0E5597BS0_HP", "m55_he": "AE822FA0E5597BS0_HE" }
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" }
       }
     },
     {
@@ -249,7 +249,8 @@
       "alp_module_skus": ["E1M-AEN801"],
       "debug": {
         "pyocd_target": "AE822FA0E5597LS0",
-        "jlink_device": { "m55_hp": "AE822FA0E5597LS0_HP", "m55_he": "AE822FA0E5597LS0_HE" }
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" },
+        "jlink_flash_device": "AE822FA0E5597LS0_M55_HE"
       }
     }
   ],

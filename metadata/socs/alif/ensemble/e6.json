@@ -207,7 +207,7 @@
       "alp_module_skus": ["E1M-AEN601"],
       "debug": {
         "pyocd_target": "AE612FA0E5597LS0",
-        "jlink_device": { "m55_hp": "AE612FA0E5597LS0_HP", "m55_he": "AE612FA0E5597LS0_HE" }
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" }
       }
     }
   ],

@@ -359,19 +359,26 @@
         "debug": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Debug-probe identity for this variant (#987), consumed by alp-sdk-vscode to generate a working cortex-debug launch.json without human input. Every key is optional -- an absent key is a published 'unknown', not a guess, and must be copied verbatim from the owning tool's own list (SEGGER's device list, pyOCD's target list); a plausible-looking guess fails at the probe rather than at validation.",
+          "description": "Debug-probe identity for this variant (#987), consumed by alp-sdk-vscode to generate a working cortex-debug launch.json without human input. Every key is optional -- an absent key is a published 'unknown', not a guess, and must be copied verbatim from the owning tool's own list or a working in-tree invocation; a plausible-looking guess fails at the probe rather than at validation.",
           "properties": {
             "pyocd_target": {
               "type": "string",
-              "description": "pyOCD target id (cortex-debug `targetId` for servertype `pyocd`). For Alif Ensemble parts this is the variant's own `order_code` -- confirmed 1:1 against the CMSIS-Pack index (pack AlifSemiconductor.Ensemble)."
+              "minLength": 1,
+              "description": "pyOCD target id (cortex-debug `targetId` for servertype `pyocd`). For Alif Ensemble parts this is the variant's own `order_code` -- confirmed 1:1 against the CMSIS-Pack index (pack AlifSemiconductor.Ensemble 2.2.0)."
             },
             "jlink_device": {
               "type": "object",
-              "description": "SEGGER J-Link device name (cortex-debug `device` for servertype `jlink`), keyed by the `cores[].id` it names -- a J-Link device profile usually views one specific core on a multi-core part (e.g. the E8's `..._HP` vs `..._HE` profiles), so a bare per-variant string would be ambiguous. Validated against cores[].id by scripts/validate_metadata.py::_check_soc_debug_probe_identity. Provenance for the Alif Ensemble entries: every order_code's `<order_code>_HP` / `<order_code>_HE` pair is confirmed vendor-pack data -- the CMSIS-Pack `AlifSemiconductor.Ensemble` 2.2.0 .pdsc lists both an `M55_HP` and an `M55_HE` `Pname` processor for all 13 shipped devices, and no `a32_cluster`-equivalent processor for any of them (a positive vendor statement of absence, not an unevidenced gap). The `_HP`/`_HE` suffix convention itself is fixed by two bench-verified strings -- `AE822FA0E5597LS0_HP` (zephyr/boards/alp/e1m_aen801_m55_hp/board.cmake:15) and `AE822FA0E5597LS0_HE` (zephyr/boards/alp/e1m_aen801_m55_he/board.cmake:47) -- plus the E4/E6 `..._HP` strings each copied from their own in-tree board.cmake; every other value in this block applies that confirmed convention to a vendor-pack-confirmed core rather than being independently probe-verified.",
-              "additionalProperties": { "type": "string" }
+              "description": "SEGGER J-Link **attach/debug** device name (cortex-debug `device` for servertype `jlink`) for a live core, keyed by `cores[].id`. On Alif Ensemble this is the GENERIC `Cortex-M55` for every M55 core, not a part-number profile: `scripts/bench/aen/bench-env.sh:99-111` documents two distinct J-Link identities and states the part-number profile 'will NOT connect to a live/running secure core' -- corroborated by `docs/_aen-runbook-section.md:251` (`Could not connect to the target device` when the part profile is used to attach) and `docs/aen-bench-bringup.md:14` (the generic profile is what is bench-proven to attach, CPUID `0x411FD220` / SW-DP IDR `0x4C013477`). The part-number profile is a *separate* fact -- see `jlink_flash_device`. Validated against cores[].id by scripts/validate_metadata.py::_check_soc_debug_probe_identity.",
+              "additionalProperties": { "type": "string", "minLength": 1 }
+            },
+            "jlink_flash_device": {
+              "type": "string",
+              "minLength": 1,
+              "description": "SEGGER J-Link **part-number device profile**, used ONLY to unlock J-Link's built-in Flow D MRAM loader (`scripts/bench/aen/bench-env.sh:99-102`) -- it cannot attach to a live/running core (use `jlink_device` for that) and is not per-core: both `scripts/bench/aen/flash-jlink-hp.sh` and `flash-jlink-mramxip.sh` select the SAME device string regardless of which core they flash, so this is a single per-variant string, not a jlink_device-shaped map. Populate only where an in-tree script proves the exact string -- do not derive it from a naming convention."
             },
             "openocd_config": {
               "type": "string",
+              "minLength": 1,
               "description": "OpenOCD board/target config file path relative to OpenOCD's own scripts/ tree (cortex-debug `configFiles[]` for servertype `openocd`). No SoC family in this repo has one today (verified absent from OpenOCD upstream master's tcl/target + tcl/board for Alif Ensemble and Renesas RZ/V2N as of this issue) -- schema-only until a vendor config exists; do not populate with a guess."
             }
           }

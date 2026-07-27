@@ -154,7 +154,7 @@
       "shipment_suffixes": ["-T", "-Y"],
       "debug": {
         "pyocd_target": "AE302F80F55D5AE",
-        "jlink_device": { "m55_hp": "AE302F80F55D5AE_HP", "m55_he": "AE302F80F55D5AE_HE" }
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" }
       }
     },
     {
@@ -173,7 +173,7 @@
       "shipment_suffixes": ["-T", "-Y"],
       "debug": {
         "pyocd_target": "AE302F80F5582AE",
-        "jlink_device": { "m55_hp": "AE302F80F5582AE_HP", "m55_he": "AE302F80F5582AE_HE" }
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" }
       }
     },
     {
@@ -194,7 +194,7 @@
       "alp_module_skus": ["E1M-AEN301"],
       "debug": {
         "pyocd_target": "AE302F80F55D5LE",
-        "jlink_device": { "m55_hp": "AE302F80F55D5LE_HP", "m55_he": "AE302F80F55D5LE_HE" }
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" }
       }
     },
     {
@@ -213,7 +213,7 @@
       "shipment_suffixes": ["-T", "-Y"],
       "debug": {
         "pyocd_target": "AE302F80F5582LE",
-        "jlink_device": { "m55_hp": "AE302F80F5582LE_HP", "m55_he": "AE302F80F5582LE_HE" }
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" }
       }
     },
     {
@@ -232,7 +232,7 @@
       "shipment_suffixes": ["-T", "-Y"],
       "debug": {
         "pyocd_target": "AE302F80C1557LE",
-        "jlink_device": { "m55_hp": "AE302F80C1557LE_HP", "m55_he": "AE302F80C1557LE_HE" }
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" }
       }
     },
     {
@@ -251,7 +251,7 @@
       "shipment_suffixes": ["-T", "-Y"],
       "debug": {
         "pyocd_target": "AE302F40C1537LE",
-        "jlink_device": { "m55_hp": "AE302F40C1537LE_HP", "m55_he": "AE302F40C1537LE_HE" }
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" }
       }
     }
   ],
