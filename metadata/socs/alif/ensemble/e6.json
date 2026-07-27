@@ -204,7 +204,11 @@
       "sram_kb": 9984,
       "optional_features": { "npu_hg": true, "isp": true, "jpeg_encoder": true },
       "shipment_suffixes": ["-T", "-Y"],
-      "alp_module_skus": ["E1M-AEN601"]
+      "alp_module_skus": ["E1M-AEN601"],
+      "debug": {
+        "pyocd_target": "AE612FA0E5597LS0",
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" }
+      }
     }
   ],
   "notes": [

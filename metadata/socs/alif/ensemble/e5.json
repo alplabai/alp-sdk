@@ -139,7 +139,11 @@
       "mram_mb": 5.5,
       "sram_kb": 13824,
       "shipment_suffixes": ["-T", "-Y"],
-      "alp_module_skus": ["E1M-AEN501"]
+      "alp_module_skus": ["E1M-AEN501"],
+      "debug": {
+        "pyocd_target": "AE512F80F55D5LS",
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" }
+      }
     }
   ],
   "notes": [

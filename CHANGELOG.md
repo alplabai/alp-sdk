@@ -7,6 +7,72 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.14.0 candidate
 
+### Added — debug-probe identity (`jlink_device`, `jlink_flash_device`, `pyocd_target`) on the Alif Ensemble SoC specs (#987)
+
+`alp-sdk-vscode` generates a `cortex-debug` `launch.json` from board metadata,
+but the SEGGER J-Link device name and the pyOCD target id had no source
+anywhere in `metadata/` — the extension emitted `"<resolved-device>"` /
+`"<resolved-target-id>"` literal placeholders and every probe-based launch
+config needed a manual edit before it would start.
+
+`metadata/schemas/soc-spec-v1.schema.json` grows an optional `debug:` block
+on `variants[]` (not the SoC top level, and not a `cores[]` item schema,
+since a `pyocd_target` is per orderable SKU). Every string in the block
+requires `minLength: 1` — an empty string is a third, meaningless state the
+absent-key contract has no room for. `openocd_config` is schema-only for
+now: verified absent from OpenOCD upstream `master`'s `tcl/target/` +
+`tcl/board/` for both Alif Ensemble and Renesas RZ/V2N.
+
+`pyocd_target` is populated for all thirteen Alif Ensemble variants (E3–E8)
+from the CMSIS-Pack index (`AlifSemiconductor.Ensemble` 2.2.0) — every
+`order_code` in this repo matches a pack part name exactly, so the target id
+**is** the order code.
+
+**`jlink_device` went through a wrong first draft that this entry replaces.**
+That draft read `board_runner_args(alif_flash "--device=...")` in each
+board's `board.cmake` as a SEGGER J-Link device name; it is not — its own
+comment says `--device first-5-chars must match the SETOOLS global-cfg.db
+Part#`, the **SETOOLS flasher** argument, unrelated to J-Link. The
+authoritative source is `scripts/bench/aen/bench-env.sh:99-111`, which
+documents two *distinct* J-Link identities and why they differ:
+`JLINK_DEVICE_READ` — the **generic** `Cortex-M55`, used for every
+read/attach/RAM-run, because it is what attaches to a live/running core —
+and `JLINK_DEVICE_FLASH` — the Alif **part-number** profile, which unlocks
+the built-in Flow D MRAM loader but "will NOT connect to a live/running
+secure core". `docs/_aen-runbook-section.md:251` and
+`docs/aen-bench-bringup.md:14` corroborate: attaching with the part-number
+device gives `Could not connect to the target device`; the generic profile
+is what is bench-proven to attach (CPUID `0x411FD220`, SW-DP IDR
+`0x4C013477`). Since `#987`'s `jlink_device` feeds cortex-debug's `device`
+for a **debug/attach** session, every Alif M55 core on all thirteen
+variants now carries the generic `Cortex-M55` — copied verbatim from
+`bench-env.sh`'s `JLINK_DEVICE_READ` default, not derived. `a32_cluster`
+still gets no `jlink_device` key on any variant: the CMSIS pack lists no
+A32 processor on any of the 13 devices, a positive vendor statement of
+absence, not an unevidenced gap.
+
+The part-number *flash* identity is real and useful but is a **different
+fact** — it unlocks Flow D, not a debug attach, and per
+`flash-jlink-hp.sh`/`flash-jlink-mramxip.sh` it is **not per-core** (both
+scripts select the same string regardless of which core they flash). It
+gets its own optional key, `jlink_flash_device`, populated **only** on the
+one variant an in-tree script proves it for: E8's `AE822FA0E5597LS0`, value
+`AE822FA0E5597LS0_M55_HE`, copied verbatim from `bench-env.sh`'s
+`JLINK_DEVICE_FLASH` default (also literal in
+`docs/aen-bench-bringup.md:212`). No other variant gets this key — nothing
+in tree proves a flash-device string for E3–E7 or E8's `BS0`, and per
+`#987`'s cardinal rule an absent key is the correct publishable state, not
+a gap to fill by extrapolating the naming pattern.
+
+The Renesas RZ/V2N (`n44.json`, no J-Link runner in tree at all) is
+untouched and carries no `debug` block.
+
+New semantic gate `validate_metadata._check_soc_debug_probe_identity`
+(alongside the existing `_check_soc_npu_pairing`) asserts that every
+`variants[].debug.jlink_device` key names a real `cores[].id` on that SoC —
+JSON Schema can express the value shape but not that cross-reference.
+Covered by `tests/scripts/test_soc_debug_probe_identity.py`.
+
 ### Fixed — the renode gate installed Renode and asserted nothing (#974)
 
 Every e2e step in the three renode workflows was an `echo ::notice::` no-op
