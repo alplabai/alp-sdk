@@ -215,6 +215,29 @@ def _resolve_inline_or_preset_board(
     }
 
 
+def resolve_soc_path(silicon: str | None, metadata_root: Path) -> Path | None:
+    """Resolve a `vendor:family:part` `silicon:` key to the SoC-JSON path
+    it names: `metadata/socs/<vendor>/<family>/<part>.json`.
+
+    Returns None when `silicon` is falsy or not exactly 3 colon-separated
+    parts -- does NOT check the path exists, callers decide what an
+    unresolved/missing SoC spec means for them (e.g. a SoM preset with no
+    `silicon:` at all is a valid, if incomplete, state; a `silicon:` that
+    names a spec that isn't on disk is not).
+
+    Single source for this resolution -- see issue #997: it was hand-rolled
+    three times independently (here, in `resolve_capabilities()`, and
+    inline in `pr-metadata-validate.yml`), and the untested inline copy is
+    exactly how the `soc_ref`/`soc` bug in #995 rotted unnoticed.
+    """
+    if not silicon:
+        return None
+    parts = silicon.split(":")
+    if len(parts) != 3:
+        return None
+    return metadata_root / "socs" / parts[0] / parts[1] / f"{parts[2]}.json"
+
+
 def _resolve_silicon_variant(
     sku_preset: dict[str, Any],
     metadata_root: Path,
@@ -234,14 +257,8 @@ def _resolve_silicon_variant(
     preset declares no silicon_variant, or declares `silicon_variant:
     TBD` per the no-inventing-values rule).
     """
-    silicon = sku_preset.get("silicon")
-    if not silicon:
-        return None
-    parts = silicon.split(":")
-    if len(parts) != 3:
-        return None
-    soc_path = metadata_root / "socs" / parts[0] / parts[1] / f"{parts[2]}.json"
-    if not soc_path.is_file():
+    soc_path = resolve_soc_path(sku_preset.get("silicon"), metadata_root)
+    if soc_path is None or not soc_path.is_file():
         return None
     soc_spec = json.loads(soc_path.read_text(encoding="utf-8"))
     variants = soc_spec.get("variants") or []
@@ -483,14 +500,11 @@ def resolve_capabilities(
          (enforced by scripts/validate_metadata.py); presets without the
          field keep the full silicon capability set.
     """
-    silicon = sku_preset.get("silicon", "")
-    parts = silicon.split(":")
+    soc_path = resolve_soc_path(sku_preset.get("silicon"), metadata_root)
     soc_caps: dict[str, Any] = {}
-    if len(parts) == 3:
-        soc_path = metadata_root / "socs" / parts[0] / parts[1] / f"{parts[2]}.json"
-        if soc_path.is_file():
-            soc_spec = json.loads(soc_path.read_text(encoding="utf-8"))
-            soc_caps = soc_spec.get("capabilities") or {}
+    if soc_path is not None and soc_path.is_file():
+        soc_spec = json.loads(soc_path.read_text(encoding="utf-8"))
+        soc_caps = soc_spec.get("capabilities") or {}
 
     som_caps: dict[str, Any] = sku_preset.get("capabilities") or {}
 
