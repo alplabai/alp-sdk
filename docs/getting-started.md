@@ -1,9 +1,9 @@
 # Getting started with the Alp SDK
 
 This walkthrough takes you from "git clone" to a working
-`gpio-button-led` build under `native_sim`, then onto real
-silicon.  No `alp-studio` required — the SDK supports
-hand-written firmware as a first-class consumer.
+`gpio-button-led` build, cross-compiled for its real E1M-AEN801
+target.  No `alp-studio` required — the SDK supports hand-written
+firmware as a first-class consumer.
 
 > **Rendered version:** the full SDK documentation site lives at
 > [**docs.alplab.ai/sdk/introduction**](https://docs.alplab.ai/sdk/introduction).
@@ -59,7 +59,9 @@ bash scripts/bootstrap.sh                            # one-time: west + Python +
 export ZEPHYR_BASE="$PWD/../zephyr"
 curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh  # one-time: install tan (no Rust toolchain needed)
 tan --project examples/peripheral-io/gpio-button-led build
-# illustrative stdout once the build runs:
+# this cross-compiles for the example's real SoM (E1M-AEN801) -- it
+# needs the Zephyr SDK toolchain pinned in metadata/toolchains.json;
+# flash it and open a serial monitor to see output like:
 #   [gpio] init button=EVK_PIN_ENCODER_SW, led=EVK_PIN_LED_RED
 #   ...
 #   [gpio] done
@@ -188,10 +190,11 @@ optional / real-silicon-only tooling (Zephyr SDK, hal_alif).  Plain
 for attaching a debugger to a target/server, not this build check --
 see [`docs/cli.md`](cli.md#tan-doctor----debug-readiness-preflight).
 
-For real-silicon builds you'll also need the Zephyr SDK
-(`zephyr-sdk-1.0.1` matches the v0.6 Zephyr v4.4 pin — see
-`docs/zephyr-version-policy.md`) and a JTAG / SWD probe matching
-your board.  See [`docs/boards/e1m-evk.md`](boards/e1m-evk.md) for
+For real-silicon builds you'll also need the Zephyr SDK toolchain --
+its pinned version/URL/sha256 live in
+[`metadata/toolchains.json`](../metadata/toolchains.json), the
+single source (see `docs/zephyr-version-policy.md`) -- and a JTAG /
+SWD probe matching your board.  See [`docs/boards/e1m-evk.md`](boards/e1m-evk.md) for
 the EVK's wiring.
 
 > **Note for Windows users.**  The repo's `.gitattributes` pins
@@ -281,12 +284,15 @@ What this does:
   the loader at configure time.  See
   [`docs/board-config-schema.md`](board-config-schema.md) for the
   schema.
-- The target (`native_sim` on the host, as here, or real silicon)
-  comes entirely from that `board.yaml` — there is no `--board`
-  selector.  `native_sim` needs no silicon; it runs as a native
-  process on Linux / macOS / WSL.  Upstream Zephyr's `native_sim` is
-  Linux/macOS only; on native Windows there is no `native_sim`
-  target — run it through WSL2 (Ubuntu).
+- The target comes entirely from that `board.yaml` — there is no
+  `--board` selector.  This example's `board.yaml` targets a real
+  SoM (`E1M-AEN801`), so this build cross-compiles and needs the
+  Zephyr SDK toolchain pinned in
+  [`metadata/toolchains.json`](../metadata/toolchains.json).
+  `native_sim` is also a valid `board.yaml` target — it needs no
+  silicon and runs as a native process on Linux / macOS / WSL
+  (Windows: via WSL2, since upstream Zephyr's `native_sim` is
+  Linux/macOS only) — but no example ships one today.
 
 `tan build` walks four steps under the hood, driven by alp-sdk's
 `alp_orchestrate --emit build-plan`:
@@ -307,7 +313,10 @@ What this does:
    directly and streams its stdout; no separate `tan run` step is
    needed.
 
-Illustrative stdout for this example (exact ordering/timing may vary):
+This example targets real silicon, so `tan build` above only cross-compiles
+it (step 4's "runs the produced binary" applies to a `native_sim` target,
+not this one) — flash it and open a serial monitor to see illustrative
+output like this (exact ordering/timing may vary):
 
 ```
 *** Booting Zephyr OS build v4.4.0 ***

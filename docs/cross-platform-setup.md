@@ -655,27 +655,29 @@ lint is soft initially.
 
 ### 6.3 Native_sim example build
 
-This is the cross-platform end-to-end smoke test.
+This is the cross-platform end-to-end smoke test.  `tan --project
+... build` follows `gpio-button-led`'s `board.yaml`, which targets a
+real SoM (`E1M-AEN801`) — it cross-compiles and needs the Zephyr SDK
+toolchain, it is not a `native_sim` build (`--native` selects how
+`tan` runs the build tooling, not the board target).  The actual
+`native_sim` build of this example runs through twister instead, the
+same way [`docs/testing.md`](testing.md)'s Zephyr suite does:
 
 ```bash
 # Linux / macOS / WSL2 (native_sim is Linux/macOS only; on Windows
 # run this inside WSL2 — there is no native-Windows native_sim target):
 cd ../alp-workspace
-tan --project alp-sdk/examples/peripheral-io/gpio-button-led build --native
+export ZEPHYR_BASE="$PWD/zephyr"
+python3 "$ZEPHYR_BASE/scripts/twister" \
+    -T alp-sdk/examples/peripheral-io/gpio-button-led \
+    -s alp_sdk.example.gpio_button_led.e1m_evk \
+    -p native_sim/native/64 \
+    --inline-logs --no-detailed-test-id
 ```
 
-Expected output:
-
-```
-*** Booting Zephyr OS build v4.4.0 ***
-[gpio] init button=EVK_PIN_ENCODER_SW, led=EVK_PIN_LED_RED
-[gpio] led=0 status=0
-...
-[gpio] done
-```
-
-If you see `[gpio] done`, the SDK is fully functional on your
-host.
+Its `testcase.yaml` looks for `[gpio] done` on the console as the
+pass condition — if twister reports the scenario PASSED, the SDK is
+fully functional on your host.
 
 ### 6.4 Run the test suite
 

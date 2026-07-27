@@ -132,9 +132,10 @@ Build any of them as:
 ```bash
 cd alp-workspace
 tan --project alp-sdk/examples/<name> build
-# the target (native_sim above, or real silicon) comes from the
-# example's board.yaml `som.sku` -- there is no `--board` flag.
-# For real silicon, also: tan flash alp-sdk/examples/<name>
+# the target comes from the example's board.yaml `som.sku` -- there
+# is no `--board` flag.  Every example in this repo targets a real
+# SoM (none ship a native_sim target), so this cross-compiles; also
+# flash it: tan flash alp-sdk/examples/<name>
 ```
 
 ## 5. Idiomatic patterns

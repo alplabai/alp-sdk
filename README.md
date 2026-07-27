@@ -52,8 +52,10 @@ curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | 
 # Sanity-check the host -- catches a missing toolchain/HAL before it bites later
 tan doctor --build
 
-# Scaffold a hello-world (--sdk-root points it at this checkout), then let
-# tan build it for native_sim — no hardware needed
+# Scaffold a hello-world (--sdk-root points it at this checkout); it
+# defaults to a real E1M SoM target, so this cross-builds and needs the
+# Zephyr SDK toolchain (pinned in metadata/toolchains.json) -- see
+# docs/getting-started.md
 tan init --name my-app --sdk-root "$PWD" --non-interactive
 cd my-app
 tan build --native
