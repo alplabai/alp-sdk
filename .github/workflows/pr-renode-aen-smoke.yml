@@ -104,6 +104,20 @@ jobs:
         working-directory: ${{ github.workspace }}/alp-sdk
         run: bash scripts/bootstrap.sh
 
+      # Zephyr's build scripts (gen_kobject_list.py etc.) need pyelftools +
+      # friends; install the pinned Zephyr build requirements now that the
+      # workspace exists.  bootstrap.sh installs them into the workspace venv,
+      # but `west build` here runs under the runner's hosted interpreter, so
+      # they have to be present there too -- same step, same reason, as
+      # pr-renode-sim-mode.yml.  Without it the build died at
+      # `ModuleNotFoundError: No module named 'elftools'`, which
+      # `continue-on-error: true` swallowed for as long as the e2e below was a
+      # no-op echo: the job reported success having never produced an ELF.
+      - name: Install Zephyr build requirements
+        run: |
+          set -euo pipefail
+          pip3 install -r "${GITHUB_WORKSPACE}/zephyr/scripts/requirements-base.txt"
+
       # metadata/toolchains.json (issue #949 item 3) is the single source
       # for the pinned Zephyr SDK version/URL/sha256 -- scripts/
       # check_toolchain_lock.py gates this file staying in lockstep with it.
