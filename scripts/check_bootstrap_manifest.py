@@ -957,7 +957,17 @@ def _check_bootstrap_sh_install_hints(manifest: dict) -> list[str]:
     `prerequisites.install.linux` / `.macos`. Each array is parsed
     independently and then zipped by index -- a length mismatch between
     `PREREQ_HINT_NAMES` and either hint array is reported directly rather
-    than silently truncated by `zip`."""
+    than silently truncated by `zip`.
+
+    Also asserts completeness (mirrors `_check_install_commands` point 2's
+    own `parsed_names` loop, same "goes dark" failure one level down): every
+    tool key in `prerequisites.install.linux` / `.macos` must have a
+    `PREREQ_HINT_NAMES` entry, not just every `PREREQ_HINT_NAMES` entry a
+    matching install key (which the zip loop below already covers). Without
+    this, a tool added to `install.linux`/`.macos` + `REQUIRED_BINS` but
+    left out of the hint table falls through bootstrap.sh's bare-name
+    `warn "  ${bin}"` branch with this gate reporting rc=0 -- the #978
+    defect, restored."""
     if not BOOTSTRAP_SH.is_file():
         return [f"missing {BOOTSTRAP_SH.relative_to(REPO).as_posix()}"]
     text = BOOTSTRAP_SH.read_text(encoding="utf-8")
@@ -968,6 +978,7 @@ def _check_bootstrap_sh_install_hints(manifest: dict) -> list[str]:
         return ["scripts/bootstrap.sh: could not find `PREREQ_HINT_NAMES=(...)` "
                  "-- update this gate if it was renamed/restructured"]
     names = m_names.group(1).split()
+    parsed_names = set(names)
 
     install = manifest.get("prerequisites", {}).get("install", {})
     for os_key, os_re in (
@@ -982,6 +993,15 @@ def _check_bootstrap_sh_install_hints(manifest: dict) -> list[str]:
             )
             continue
         hints = _SH_QUOTED_STRING_RE.findall(m.group(1))
+        os_install = install.get(os_key, {})
+        for tool in sorted(os_install):
+            if tool not in parsed_names:
+                problems.append(
+                    f"prerequisites.install.{os_key}.{tool} has no "
+                    f"PREREQ_HINT_NAMES entry in scripts/bootstrap.sh -- it "
+                    f"would fall through to the bare-name warn() branch "
+                    f"(issue #978) instead of printing an install hint"
+                )
         if len(hints) != len(names):
             problems.append(
                 f"scripts/bootstrap.sh PREREQ_HINT_{os_key.upper()} has {len(hints)} "
@@ -989,7 +1009,6 @@ def _check_bootstrap_sh_install_hints(manifest: dict) -> list[str]:
                 f"parallel arrays"
             )
             continue
-        os_install = install.get(os_key, {})
         for name, hint in zip(names, hints):
             canonical = os_install.get(name)
             if canonical is None:
