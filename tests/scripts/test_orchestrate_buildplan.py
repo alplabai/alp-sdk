@@ -359,6 +359,48 @@ def test_emit_build_plan_off_core_excluded_commandless_warns(
     assert ("no-command", "m33_sm") in codes
 
 
+AEN701_NO_BOARD_TREE = """
+som:
+  sku: E1M-AEN701
+
+cores:
+  m55_hp:
+    app: ./src
+"""
+
+
+def test_emit_build_plan_missing_board_tree_blocks_command_not_dropped(
+    tmp_path: Path,
+) -> None:
+    """`E1M-AEN701`'s `topology.m55_hp.board:` names
+    `alp_e1m_aen701_m55_hp`, which has no tree under `zephyr/boards/alp/`
+    (issue #999's own finding, one layer down at emit time): the plan
+    must never carry a `west build -b alp_e1m_aen701_m55_hp` command --
+    Zephyr's own board lookup is guaranteed to reject it with "No board
+    named ... Invalid BOARD". The slice is still carried (never dropped)
+    with `command: null` plus a `board-tree-missing` warning naming the
+    SKU, core, the board it wanted, and a real board that does exist --
+    the customer's own terms, not just an internal code."""
+    import json as _json
+    from alp_orchestrate import emit_build_plan
+
+    path = _write_board(tmp_path, AEN701_NO_BOARD_TREE)
+    plan = _json.loads(emit_build_plan(
+        load_board_yaml(path), board_yaml=path, build_root=Path("build")))
+
+    m55_hp = next(s for s in plan["slices"] if s["coreId"] == "m55_hp")
+    assert m55_hp["command"] is None
+
+    warning = next(w for w in plan["warnings"] if w["coreId"] == "m55_hp")
+    assert warning["code"] == "board-tree-missing"
+    assert "E1M-AEN701" in warning["message"]
+    assert "m55_hp" in warning["message"]
+    assert "alp_e1m_aen701_m55_hp" in warning["message"]
+    # A board that DOES exist, so the message hands the customer a real
+    # alternative rather than just naming the gap.
+    assert "alp_e1m_aen801_m55_hp" in warning["message"]
+
+
 def test_emit_build_plan_carries_boot_sysbuild_conf(
     tmp_path: Path,
 ) -> None:
@@ -807,11 +849,11 @@ topology:
     os: 'off'
   alpha_zephyr:
     app: ./m33a
-    board: alp_e1m_tst002_alpha
+    board: alp_e1m_aen401_m55_hp
     toolchain: arm-zephyr-eabi
   bravo_zephyr:
     app: ./m33b
-    board: alp_e1m_tst002_bravo
+    board: alp_e1m_aen601_m55_hp
     toolchain: arm-zephyr-eabi
 default_hw_rev: r1
 default_board: E1M-EVK
