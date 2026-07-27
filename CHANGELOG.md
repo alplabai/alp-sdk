@@ -7,6 +7,28 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.14.0 candidate
 
+### Fixed — ABI freeze gate guarded on a `v0.1` git tag that never existed and never ran
+
+`pr-generated-files.yml`'s "ABI freeze gate" step waited for a `refs/tags/v0.1`
+git tag before it would compare a PR's public headers against the frozen
+`docs/abi/v0.1-snapshot.json` baseline. That tag has never existed and never
+will — `v0.1` predates `scripts/bump_version.py` and the `vX.Y.Z` release-tag
+convention — so the step always took its "no tag yet" branch and exited 0
+without ever running the comparison. No PR has ever had a silent public-symbol
+removal caught by this gate (#996).
+
+The fix drops the tag lookup (the frozen snapshot file is committed and never
+regenerated, so diffing straight against it needs no tag) and rebases the
+comparison off `v0.1` entirely: 12+ releases of legitimate pre-1.0 header
+churn (splits, capability growth, field additions — all allowed by
+`docs/contribution.md`'s ABI policy) leave ~200 REMOVED/CHANGED entries
+against `v0.1` today, none of them a real regression. The gate now diffs
+against the newest already-released snapshot on disk instead, and blocks only
+on a `REMOVED` public symbol — a `CHANGED` entry still prints for review but
+doesn't fail the step, matching the pre-1.0 policy that already allows
+signature changes; full REMOVED+CHANGED enforcement remains `pr-abi-snapshot.yml`'s
+job once it activates at v1.0.
+
 ### Added — advisory gate: alp-sdk's documented `tan` surface vs a real, installed `tan`
 
 alp-sdk deliberately tracks tan-cli's `latest` (`docs/cli.md` argues why, and
