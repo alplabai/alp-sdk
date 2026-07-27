@@ -82,12 +82,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-        with:
-          # The ABI freeze gate below needs tags + the v0.1 commit
-          # reachable so `git show v0.1:docs/abi/v0.1-snapshot.json`
-          # works.  Default fetch-depth=1 strips tags.
-          fetch-depth: 0
-          fetch-tags: true
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -252,33 +246,64 @@ jobs:
             exit 1
           fi
 
-      # ABI freeze gate -- compares the PR's current ABI against the
-      # snapshot stored on the tagged v0.1 release.  Once v0.1 ships
-      # the snapshot is *frozen* -- additions land in
-      # docs/abi/v0.<N>-snapshot.json, removals require a major bump
-      # (per the deprecation policy in VERSIONS.md).  Until the v0.1
-      # tag exists the step is a no-op (we're still pre-v0.1 today).
+      # ABI freeze gate -- flags a public symbol silently dropped since
+      # the last actual release.  This step used to diff against
+      # docs/abi/v0.1-snapshot.json via `git show v0.1:...`, gated on
+      # `refs/tags/v0.1` existing -- no such tag has ever existed (v0.1
+      # predates scripts/bump_version.py and the vX.Y.Z release-tag
+      # convention, docs/abi/README.md's footnote), so the step always
+      # took the "no tag yet" branch and never once actually ran
+      # (issue #996).
       #
-      # scripts/abi_snapshot.py --diff exits 1 only on REMOVED or
-      # CHANGED symbols.  ADDED symbols pass (we accept additive
-      # extensions silently within a major version).
-      - name: ABI freeze gate vs tagged v0.1
+      # Comparing straight against the committed docs/abi/v0.1-snapshot.json
+      # (no tag needed -- it's a frozen file, never regenerated) fixes
+      # the mechanical bug but not the design: 12+ releases of
+      # legitimate pre-1.0 churn (header splits e.g. dac.h out of
+      # adc.h in v0.8.0, capability/enum growth, field additions --
+      # docs/contribution.md's ABI policy explicitly allows API changes
+      # between pre-1.0 minors) leave ~200 REMOVED/CHANGED entries
+      # against v0.1 today, none of them a real regression -- v0.1 does
+      # not work as a permanent floor.  The baseline that actually
+      # answers "did THIS PR silently drop something that shipped" is
+      # the LAST RELEASED snapshot, not the first one ever taken.
+      #
+      # "Last released" = the newest docs/abi/v*-snapshot.json that
+      # ISN'T the current (still-tracks-HEAD, kept in sync by the gate
+      # above) one -- sort -V, same idiom docs/abi/README.md and
+      # running-local-ci already use for this directory, just excluding
+      # the current label instead of trusting position alone.
+      #
+      # Blocks on REMOVED only, not CHANGED: a signature/field change
+      # is still allowed pre-1.0 (docs/contribution.md), and
+      # pr-abi-snapshot.yml already owns full REMOVED+CHANGED
+      # enforcement (with [ABI-STABLE]/[ABI-EXPERIMENTAL] awareness)
+      # once it activates at v1.0 -- duplicating that here would just
+      # be a second, cruder copy of the same job.  CHANGED entries are
+      # still printed for review visibility, not silently dropped.
+      - name: ABI freeze gate vs the last released snapshot
+        id: abi_freeze_gate
+        env:
+          ABI_VERSION: ${{ steps.abi.outputs.version }}
         run: |
-          # Need the full repo + tags for `git show v0.1:...` to work.
-          # actions/checkout@v6 already fetched tags so this is cheap.
-          if ! git rev-parse --verify --quiet refs/tags/v0.1 >/dev/null; then
-            echo "::notice::No v0.1 tag yet -- ABI freeze gate is a no-op until v0.1 ships."
+          baseline=$(ls -1 docs/abi/v*-snapshot.json | sort -V \
+              | grep -v "/${ABI_VERSION}-snapshot\.json\$" | tail -1)
+          if [ -z "${baseline}" ]; then
+            echo "::notice::No prior released ABI snapshot to compare against yet -- skipping."
             exit 0
           fi
-          mkdir -p .abi-baseline
-          git show v0.1:docs/abi/v0.1-snapshot.json \
-              > .abi-baseline/v0.1-snapshot.json
-          if ! python3 scripts/abi_snapshot.py \
-                  --version v0.1 \
-                  --diff .abi-baseline/v0.1-snapshot.json; then
-            echo "::error::Public ABI changed vs the frozen v0.1 baseline."
-            echo "::error::Removals + signature changes require a major bump after v1.0."
-            echo "::error::Pre-1.0 lands the breaking change with a CHANGELOG entry + "
-            echo "::error::a new snapshot at docs/abi/v0.<N>-snapshot.json."
+          echo "Comparing current ABI against ${baseline} (last released)."
+          set +e
+          diff_out=$(python3 scripts/abi_snapshot.py --diff "${baseline}")
+          diff_rc=$?
+          set -e
+          echo "${diff_out}"
+          if [ "${diff_rc}" -ge 2 ]; then
+            echo "::error::abi_snapshot.py --diff failed (exit ${diff_rc}); see the output above."
+            exit "${diff_rc}"
+          fi
+          if echo "${diff_out}" | grep -q '^  REMOVED '; then
+            echo "::error::Public symbol(s) removed vs the last released ABI snapshot (${baseline})."
+            echo "::error::A removal requires a major bump after v1.0; pre-1.0 it still needs a"
+            echo "::error::deliberate CHANGELOG entry, not a silent drop."
             exit 1
           fi
