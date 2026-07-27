@@ -42,16 +42,19 @@ on:
     paths:
       - 'metadata/renode/**'
       - 'examples/peripheral-io/hello-world/**'
-      # The boot assertion is now downstream of these two: the overlay
-      # picks the ITCM link that dodges the v1.16.1 high-VTOR defect,
-      # and the conf enables the banner the job's build step relies on
-      # existing. Both were already `west build` inputs before this
-      # change but weren't gated -- now that a change to either can
-      # change what the e2e boots (and so what it asserts), they belong
-      # in the filter too. Nothing else under tests/renode/ is consumed
-      # by this job.
+      # The boot assertion is now downstream of these: the overlay picks
+      # the ITCM link that dodges the v1.16.1 high-VTOR defect, the conf
+      # enables the banner the job's build step relies on existing, and
+      # the board tree determines the link layout `_vector_table`
+      # actually resolves against (a `.dts` memory/`chosen` edit changes
+      # the ELF's link shape the same way the overlay can). All three
+      # were already `west build` inputs before this change but weren't
+      # gated -- now that a change to any of them can change what the
+      # e2e boots (and so what it asserts), they belong in the filter
+      # too. Nothing else under tests/renode/ is consumed by this job.
       - 'tests/renode/aen_m55_itcm_run.overlay'
       - 'tests/renode/aen_m55_sim.conf'
+      - 'zephyr/boards/alp/e1m_aen801_m55_hp/**'
       - '.github/workflows/pr-renode-aen-smoke.yml'
   workflow_dispatch:
 
@@ -206,32 +209,40 @@ jobs:
         run: |
           set -uo pipefail
           ELF=/tmp/aen-smoke-build/zephyr/zephyr.elf
+          LOG="${RUNNER_TEMP:-/tmp}/renode-boot.log"
           if [ ! -f "${ELF}" ]; then
             echo "::error::AEN801 M55-HP Renode boot e2e: ${ELF} is missing -- the 'Build hello-world (M55-HP ITCM-run image)' step did not produce it."
             exit 1
           fi
 
+          # `run:` steps execute under `bash -e {0}` with no `shell:`
+          # override, and `set -uo pipefail` above does NOT clear
+          # errexit. A bare `cmd; RC=$?` would exit AT the failing
+          # command -- `RC=$?` and every check below it would never
+          # run, and the ::error:: lines naming this artifact are
+          # exactly the ones that couldn't fire. `|| RC=$?` keeps the
+          # nonzero status from tripping errexit.
+          RC=0
           timeout 120 "$HOME/renode/renode" --console --disable-xwt --plain \
               -e "\$repl=@metadata/renode/alif_ensemble_e8.repl" \
               -e "\$elf=@${ELF}" \
               -e "i @metadata/renode/alif_ensemble_e8.resc" \
               -e "pause" \
-              -e "quit" > renode-boot.log 2>&1
-          RC=$?
+              -e "quit" > "${LOG}" 2>&1 || RC=$?
           if [ "${RC}" -ne 0 ]; then
             echo "::error::AEN801 M55-HP Renode boot e2e: renode exited ${RC} -- see the renode-boot-log artifact."
             exit 1
           fi
 
-          if ! grep -q "Setting initial values: PC = 0x" renode-boot.log; then
+          if ! grep -q "Setting initial values: PC = 0x" "${LOG}"; then
             echo "::error::AEN801 M55-HP Renode boot e2e: 'Setting initial values: PC = 0x' not found -- the vector table was never seeded. See the renode-boot-log artifact."
             exit 1
           fi
-          if grep -q "CPU was halted" renode-boot.log; then
+          if grep -q "CPU was halted" "${LOG}"; then
             echo "::error::AEN801 M55-HP Renode boot e2e: 'CPU was halted' found -- the PC/SP seed was unusable. See the renode-boot-log artifact."
             exit 1
           fi
-          if grep -q "Guessing VectorTableOffset value to be 0x" renode-boot.log; then
+          if grep -q "Guessing VectorTableOffset value to be 0x" "${LOG}"; then
             echo "::error::AEN801 M55-HP Renode boot e2e: 'Guessing VectorTableOffset value to be 0x' found -- the descriptor's \$vtor seed did not apply and Renode fell back to inference (the condition #947 exists to eliminate). See the renode-boot-log artifact."
             exit 1
           fi
@@ -243,6 +254,6 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: renode-boot-log
-          path: alp-sdk/renode-boot.log
+          path: ${{ runner.temp }}/renode-boot.log
           retention-days: 14
           if-no-files-found: ignore
