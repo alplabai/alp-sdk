@@ -13,6 +13,7 @@ Run locally:
 """
 from __future__ import annotations
 
+import importlib.util
 import os
 import stat
 import subprocess
@@ -22,6 +23,10 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts" / "check_tan_docs_surface.py"
+
+_spec = importlib.util.spec_from_file_location("check_tan_docs_surface", SCRIPT)
+_mod = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_mod)  # direct import for pure-function-level tests below
 
 
 def _write_docroot(root: Path) -> None:
@@ -565,3 +570,341 @@ def test_forwarding_verb_flag_check_is_skipped_not_matched_by_generic_blurb(tmp_
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "new-som" in proc.stdout  # named by the OK line's skip note
     assert "--sku" not in proc.stdout + proc.stderr
+
+
+def test_strip_shell_comment_tail_edge_cases():
+    """Direct unit coverage of `_strip_shell_comment_tail`'s edges: a
+    full-line comment truncates to empty, a trailing comment keeps the code
+    before it, a `#` inside a quoted string is data (not a comment), a `#`
+    glued to a non-whitespace character is data, and a `#!` shebang is left
+    alone -- the exact edges the follow-up task called out by name."""
+    strip = _mod._strip_shell_comment_tail
+    assert strip("# whole line is a comment") == ""
+    assert strip("tan build   # trailing comment") == "tan build   "
+    assert strip('echo "value #not-a-comment"') == 'echo "value #not-a-comment"'
+    assert strip("echo foo#bar") == "echo foo#bar"
+    assert strip("#!/usr/bin/env bash") == "#!/usr/bin/env bash"
+
+
+def test_flag_row_naming_another_front_door_is_not_attributed_to_section_verb(tmp_path):
+    """The real docs/cli.md shape: `### `tan generate`` contrasts its own
+    narrow `--target` catalog against the WIDER `python -m alp_cli emit`
+    one, and one of that catalog's rows tabulates `--template`/`--sku` --
+    real flags of `python -m alp_cli emit`, never `tan generate`. Those
+    flags sitting physically inside the `tan generate` section must not be
+    demanded of `tan generate --help`."""
+    doc_root = tmp_path / "repo"
+    (doc_root / "docs").mkdir(parents=True)
+    (doc_root / "scripts").mkdir(parents=True)
+    (doc_root / "README.md").write_text(
+        "`tan generate` writes a config artefact.\n", encoding="utf-8",
+    )
+    (doc_root / "docs" / "getting-started.md").write_text(
+        "No commands documented yet.\n", encoding="utf-8",
+    )
+    (doc_root / "docs" / "troubleshooting.md").write_text(
+        "No commands documented yet.\n", encoding="utf-8",
+    )
+    (doc_root / "scripts" / "bootstrap.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    (doc_root / "docs" / "cli.md").write_text(
+        textwrap.dedent(
+            """\
+            # The `tan` CLI
+
+            ### `tan generate` -- materialise a board-derived config artefact
+
+            | Mode | Artefact | Owned by | Reachable via |
+            |---|---|---|---|
+            | `zephyr-conf` | Zephyr Kconfig fragment | `alp_project.py` | `tan generate` |
+            | `scaffold` | New-project envelope for a template (`--template`/`--sku`) | `alp_project.py` | `python -m alp_cli emit` only |
+
+            | Option | Meaning |
+            |---|---|
+            | `--target` | Which target to generate |
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    recognized = {"generate": {"--target"}}
+    tan_bin = _write_fake_tan(tmp_path / "bin", recognized=recognized, missing=set())
+
+    proc = _run(doc_root, tmp_path / "bin")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "--sku" not in proc.stdout + proc.stderr
+    assert "--template" not in proc.stdout + proc.stderr
+
+
+def test_flag_row_naming_only_its_own_verb_still_catches_drift(tmp_path):
+    """Nearest true positive for the front-door-attribution rule above: a
+    catalog-shaped row inside `tan generate`'s OWN section whose 'Reachable
+    via' column names `tan generate` itself (no other front door) must
+    still have its flag checked -- proves the rule skips a row for naming
+    ANOTHER front door, not merely for having a 4-column catalog shape."""
+    doc_root = tmp_path / "repo"
+    (doc_root / "docs").mkdir(parents=True)
+    (doc_root / "scripts").mkdir(parents=True)
+    (doc_root / "README.md").write_text(
+        "`tan generate` writes a config artefact.\n", encoding="utf-8",
+    )
+    (doc_root / "docs" / "getting-started.md").write_text(
+        "No commands documented yet.\n", encoding="utf-8",
+    )
+    (doc_root / "docs" / "troubleshooting.md").write_text(
+        "No commands documented yet.\n", encoding="utf-8",
+    )
+    (doc_root / "scripts" / "bootstrap.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    (doc_root / "docs" / "cli.md").write_text(
+        textwrap.dedent(
+            """\
+            # The `tan` CLI
+
+            ### `tan generate` -- materialise a board-derived config artefact
+
+            | Mode | Artefact | Owned by | Reachable via |
+            |---|---|---|---|
+            | `dts-overlay` | Board DTS overlay (needs `--force` to overwrite) | `alp_project.py` | `tan generate` |
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    recognized = {"generate": set()}  # --force silently dropped
+    tan_bin = _write_fake_tan(tmp_path / "bin", recognized=recognized, missing=set())
+
+    proc = _run(doc_root, tmp_path / "bin")
+    assert proc.returncode != 0
+    assert "`tan generate --force`" in proc.stderr
+    assert "not listed in" in proc.stderr
+
+
+def test_comment_inside_bash_fence_does_not_misparse_as_a_subcommand(tmp_path):
+    """The real docs/cli.md shape: a `#`-led English sentence inside a
+    ```bash fence ('...its own top-level tan verb -- NOT tan generate...')
+    must never mint a fake `tan verb` (or `tan generate`) subcommand.
+    `_ENGLISH_STOPWORDS` deliberately does not (and must not) contain
+    "verb" -- this is handled structurally by stripping the comment tail,
+    not by growing the denylist."""
+    doc_root = tmp_path / "repo"
+    _write_docroot(doc_root)
+    cli_md = doc_root / "docs" / "cli.md"
+    cli_md.write_text(
+        cli_md.read_text(encoding="utf-8")
+        + textwrap.dedent(
+            """
+
+            ```bash
+            # also: tan kconfig --core m55_he         (its own top-level tan verb --
+            #                                           NOT tan generate, which has no
+            #                                           front door for this target)
+            ```
+            """
+        ),
+        encoding="utf-8",
+    )
+    tan_bin = _write_fake_tan(tmp_path / "bin", recognized=_ALL_RECOGNIZED, missing=set())
+
+    proc = _run(doc_root, tmp_path / "bin")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "`tan verb`" not in proc.stdout + proc.stderr
+    assert "`tan generate`" not in proc.stdout + proc.stderr
+
+
+def test_real_command_after_a_stripped_comment_is_still_checked(tmp_path):
+    """Nearest true positive for comment-tail stripping: a REAL, un-commented
+    `tan kconfig --core m55_he` invocation sitting in the SAME fenced block
+    as `#`-led commentary must still enter the checked surface and still
+    fail loudly if `tan kconfig` stops existing -- stripping the comment
+    lines must not also swallow the real command line beneath them."""
+    doc_root = tmp_path / "repo"
+    _write_docroot(doc_root)
+    cli_md = doc_root / "docs" / "cli.md"
+    cli_md.write_text(
+        cli_md.read_text(encoding="utf-8")
+        + textwrap.dedent(
+            """
+
+            ```bash
+            # also: tan kconfig --core m55_he         (its own top-level tan verb --
+            #                                           NOT tan generate, which has no
+            #                                           front door for this target)
+            tan kconfig --core m55_he
+            ```
+            """
+        ),
+        encoding="utf-8",
+    )
+    recognized = dict(_ALL_RECOGNIZED)
+    tan_bin = _write_fake_tan(tmp_path / "bin", recognized=recognized, missing={"kconfig"})
+
+    proc = _run(doc_root, tmp_path / "bin")
+    assert proc.returncode != 0
+    assert "`tan kconfig`" in proc.stderr
+    assert "no longer a recognised subcommand" in proc.stderr
+
+
+def test_heredoc_comment_line_does_not_misparse_as_a_subcommand(tmp_path):
+    """bootstrap.sh's next-steps heredoc mixes commentary with real
+    commands the same way docs/cli.md's fenced blocks do -- comment-tail
+    stripping must apply to the heredoc body too, not just markdown
+    fences, or the same false-positive shape recurs there."""
+    doc_root = tmp_path / "repo"
+    _write_docroot(doc_root)
+    (doc_root / "scripts" / "bootstrap.sh").write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env bash
+            cat <<EOF
+
+            Next steps:
+            EOF
+            cat <<'EOF'
+
+              # Sanity-check the host build environment (needs tan on PATH -- see
+              # README.md for the tan-cli `install.sh` one-liner): `tan explain --core`
+              # is a different, unrelated tool -- see docs/cli.md.
+              tan doctor --build
+            EOF
+            """
+        ),
+        encoding="utf-8",
+    )
+    tan_bin = _write_fake_tan(tmp_path / "bin", recognized=_ALL_RECOGNIZED, missing=set())
+
+    proc = _run(doc_root, tmp_path / "bin")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "`tan explain`" not in proc.stdout + proc.stderr
+
+
+def test_retired_verb_bare_prose_mention_does_not_misparse_as_live(tmp_path):
+    """The real docs/cli.md shape once a sibling branch retires `tan emit`
+    from the how-to-use sections and leaves only the historical note: 'This
+    replaces the retired `tan emit` command ...' and 'The rest of the old
+    `tan emit` catalog ...' are both bare `` `tan emit` `` spans in ordinary
+    prose, with no heading, fence, table cell, or fuller invocation for
+    `emit` anywhere in the file. That prose is correct and must not turn
+    into a false `tan emit` drift report."""
+    doc_root = tmp_path / "repo"
+    (doc_root / "docs").mkdir(parents=True)
+    (doc_root / "scripts").mkdir(parents=True)
+    (doc_root / "README.md").write_text(
+        "`tan generate` writes a config artefact.\n", encoding="utf-8",
+    )
+    (doc_root / "docs" / "getting-started.md").write_text(
+        "No commands documented yet.\n", encoding="utf-8",
+    )
+    (doc_root / "docs" / "troubleshooting.md").write_text(
+        "No commands documented yet.\n", encoding="utf-8",
+    )
+    (doc_root / "scripts" / "bootstrap.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    (doc_root / "docs" / "cli.md").write_text(
+        textwrap.dedent(
+            """\
+            # The `tan` CLI
+
+            ### `tan generate` -- materialise a board-derived config artefact
+
+            ```bash
+            tan generate --target zephyr-conf
+            ```
+
+            This replaces the retired `tan emit` command (a positional `tan
+            emit <mode>`, one flat catalog printed to stdout).  The rest of
+            the old `tan emit` catalog has no `tan` front door at all.
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    recognized = {"generate": set()}
+    tan_bin = _write_fake_tan(tmp_path / "bin", recognized=recognized, missing={"emit"})
+
+    proc = _run(doc_root, tmp_path / "bin")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "`tan emit`" not in proc.stdout + proc.stderr
+
+
+def test_table_only_verb_with_no_heading_still_catches_drift(tmp_path):
+    """Nearest true positive #1 for the docs/cli.md reference-quality rule:
+    a verb named ONLY via a bare `` `tan kconfig` `` table CELL -- no
+    `### `tan kconfig`` heading, no fence -- must still enter the checked
+    surface and still fail loudly if it stops existing (the real corpus
+    shape: `kconfig` has no heading of its own, only a 'Reachable via'
+    table-cell mention)."""
+    doc_root = tmp_path / "repo"
+    (doc_root / "docs").mkdir(parents=True)
+    (doc_root / "scripts").mkdir(parents=True)
+    (doc_root / "README.md").write_text(
+        "`tan generate` writes a config artefact.\n", encoding="utf-8",
+    )
+    (doc_root / "docs" / "getting-started.md").write_text(
+        "No commands documented yet.\n", encoding="utf-8",
+    )
+    (doc_root / "docs" / "troubleshooting.md").write_text(
+        "No commands documented yet.\n", encoding="utf-8",
+    )
+    (doc_root / "scripts" / "bootstrap.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    (doc_root / "docs" / "cli.md").write_text(
+        textwrap.dedent(
+            """\
+            # The `tan` CLI
+
+            ### `tan generate` -- materialise a board-derived config artefact
+
+            | Mode | Reachable via |
+            |---|---|
+            | `kconfig` | `west alp-emit`, `tan kconfig` |
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    recognized = {"generate": set()}
+    tan_bin = _write_fake_tan(tmp_path / "bin", recognized=recognized, missing={"kconfig"})
+
+    proc = _run(doc_root, tmp_path / "bin")
+    assert proc.returncode != 0
+    assert "`tan kconfig`" in proc.stderr
+    assert "no longer a recognised subcommand" in proc.stderr
+
+
+def test_multitoken_invocation_in_prose_with_no_heading_still_catches_drift(tmp_path):
+    """Nearest true positive #2 for the docs/cli.md reference-quality rule:
+    a verb named via a flag/arg-bearing span in ordinary prose (`` `tan
+    kconfig --core <id>` `` -- a fuller invocation, not a passing name-drop)
+    -- no heading, no table, no fence -- must still enter the checked
+    surface and still fail loudly if it stops existing."""
+    doc_root = tmp_path / "repo"
+    (doc_root / "docs").mkdir(parents=True)
+    (doc_root / "scripts").mkdir(parents=True)
+    (doc_root / "README.md").write_text(
+        "`tan generate` writes a config artefact.\n", encoding="utf-8",
+    )
+    (doc_root / "docs" / "getting-started.md").write_text(
+        "No commands documented yet.\n", encoding="utf-8",
+    )
+    (doc_root / "docs" / "troubleshooting.md").write_text(
+        "No commands documented yet.\n", encoding="utf-8",
+    )
+    (doc_root / "scripts" / "bootstrap.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    (doc_root / "docs" / "cli.md").write_text(
+        textwrap.dedent(
+            """\
+            # The `tan` CLI
+
+            ### `tan generate` -- materialise a board-derived config artefact
+
+            You can also run it as the top-level `tan kconfig --core <id>`
+            verb (wraps this emit in a friendlier UI).
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    recognized = {"generate": set()}
+    tan_bin = _write_fake_tan(tmp_path / "bin", recognized=recognized, missing={"kconfig"})
+
+    proc = _run(doc_root, tmp_path / "bin")
+    assert proc.returncode != 0
+    assert "`tan kconfig`" in proc.stderr
+    assert "no longer a recognised subcommand" in proc.stderr

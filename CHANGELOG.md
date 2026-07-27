@@ -37,6 +37,28 @@ doc sources themselves.
 surfaces real, pre-existing drift on its first run: `tan emit` was renamed
 to `tan generate`. Fixing that is separate follow-up work.
 
+Two sibling `docs/cli.md` rewrites exposed three more false-positive
+shapes. A flag-table row inside `### `tan generate`` that tabulates a
+*different* front door's flags (`--sku`/`--template`, real `python -m
+alp_cli emit` options contrasted against `tan generate`'s narrower one)
+was attributed to `tan generate` by section position alone; a `#`-led
+English sentence inside a ```bash fence (`... its own top-level tan verb
+-- NOT tan generate ...`) misparsed as a fake `tan verb` subcommand; and,
+once a sibling branch retired `tan emit` from the doc's how-to-use
+sections, the historical note explaining the retirement (`This replaces
+the retired `tan emit` command ...`) itself misparsed as a live `tan
+emit` reference. All three are now handled structurally rather than by
+widening `_ENGLISH_STOPWORDS`: a flag table row is skipped for
+attribution if it names `python -m alp_cli`, `west alp-*`, or
+`alp_orchestrate`; every fenced bash/sh/shell block (plus bootstrap.sh's
+heredoc bodies) has its `#`-comment tails stripped before the `tan <verb>`
+regex runs; and docs/cli.md's own existence-scan now only trusts a
+REFERENCE-QUALITY mention (a `### `tan <verb>`` heading, a fenced
+invocation, a table cell, or a flag/arg-bearing span) rather than any bare
+`` `tan <verb>` `` span in ordinary prose -- the one source that narrates
+CLI history, so the one source where a verb can be *named* while being
+said to be *gone*.
+
 ### Added — debug-probe identity (`jlink_device`, `jlink_flash_device`, `pyocd_target`) on the Alif Ensemble SoC specs (#987)
 
 `alp-sdk-vscode` generates a `cortex-debug` `launch.json` from board metadata,
