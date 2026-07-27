@@ -113,6 +113,39 @@ blocked until the remediation is met. Tracked in #855.
    un-tokened as that anchor) before diffing against the frozen absolute-path
    `97ad481b` oracle.
 
+6. **(2026-07-27) Point 2 above is itself now stale, on two counts — corrected
+   here rather than edited in place, so the record shows what changed.**
+   First, "the Python `alp` console script" was never the right name for what
+   survives: `pyproject.toml`'s `[project.scripts]` registers only
+   `alp-mcp` — its own comment says so ("No `alp` console-script:
+   ... invoked as `python -m alp_cli <sub>` — never as a user-installed
+   `alp` binary"). What survives is the `alp_cli` **package**, run as
+   `python -m alp_cli <sub>`; `docs/cli.md` has always described it this
+   way, so point 2's phrasing drifted from the doc it cited as authoritative
+   even at the time it was written. Second, `emit` is no longer one of the
+   verbs `tan` forwards to: `tan` 0.3.1 has no `emit` subcommand at all
+   (`tan emit` → `error: unrecognized subcommand 'emit'`) — it was retired
+   and replaced by the narrower, differently-shaped `tan generate --target
+   <mode>` (6 of `metadata/emit-registry-v1.json`'s 20 registered modes,
+   fixed output paths, no `--output`/`--core`/`--template`/`--sku`). Point
+   2's "11 non-build verbs" list should read 9 (`generate/validate/init/
+   run/model/monitor/new-som/faultdecode/explain`) plus `doctor`, which is
+   native Rust, not forwarded (`docs/cli.md` already says this too).
+
+   This landed alongside the full 15-mode classification `docs/cli.md`'s
+   "Six modes, no front door: which ones are gaps?" now carries: of the
+   nine `alp_project.py`/orchestrator modes with no `tan` front door,
+   three (`system-manifest`, `dts-reservations`, `ipc-contract-h`) are
+   deliberately orchestrator-internal (`west alp-emit` already reaches
+   them, and `tan` consumes `system-manifest` indirectly); `scaffold` is
+   consumed by `tan` already, just not live (vendored into the binary at
+   release time, `tan-cli`#14 tracks finishing the vendored set);
+   `composed-route-table` is an intentional maintainer-only pad-route
+   regression/demonstrator tool with no product consumer; and the
+   remaining four (`hw-info-h`, `west-libraries`, `os-topology`,
+   `zephyr-board`) are real gaps with no design reason for the absence,
+   filed as `tan-cli`#113–#116.
+
 ## Context
 
 ### The problem

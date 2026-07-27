@@ -133,7 +133,21 @@ Rules of thumb:
   front door at all; reach them by running the SDK's own Python CLI
   directly (`python -m alp_cli emit <mode>`, which still exposes the
   full old catalog).  Same emitters underneath either way -- no front
-  door can ever produce different output for the same mode.
+  door can ever produce different output for the same mode.  Three of
+  `alp_project.py`'s 15 modes (`system-manifest`, `dts-reservations`,
+  `ipc-contract-h`) are the same artefacts `west alp-emit` already
+  reaches -- `alp_project.py` just re-dispatches them to the same
+  orchestrator emitters (see `emit.py`'s `PROJECT_EMIT_MODES` /
+  `ORCHESTRATOR_EMIT_MODES` overlap). They are **deliberately
+  orchestrator-internal**, not a `tan` gap: `tan` already gets them
+  indirectly (`tan build` seeds `system-manifest.yaml` from `--emit
+  system-manifest`; the other two feed the Zephyr build itself, not a
+  user command). Of the six with no front door at all, `scaffold` and
+  `composed-route-table` are also intentional, not gaps -- see
+  "Six modes, no front door: which ones are gaps?" below. The other
+  four (`hw-info-h`, `west-libraries`, `os-topology`, `zephyr-board`)
+  have no `tan` companion and no design reason not to -- filed against
+  `tan-cli` (see the same section).
 
 ## Verb reference
 
@@ -335,6 +349,62 @@ have no `tan` or `west` front door at all; `python -m alp_cli emit
 `--output`, `--core`, `--template`, and `--sku` -- it is the SDK's own
 unforwarded Python CLI, run straight from a checkout
 (`PYTHONPATH=scripts python3 -m alp_cli emit --help`).
+
+#### Six modes, no front door: which ones are gaps?
+
+"No `tan` or `west` front door" isn't one category -- each of the six
+was checked against its actual consumer (not guessed), per the emit
+surface classification (ADR [0020](adr/0020-sdk-owns-build-execution.md)
+amendment 6):
+
+- **Gaps -- filed against `tan-cli`, no design reason for the absence:**
+  `hw-info-h` and `west-libraries` are board-derived, per-project
+  config artefacts exactly like the six `tan generate` already covers
+  (`hw-info-h` bakes `board.yaml` identifiers into a header an app
+  `#include`s and checks at runtime -- see [above](#build-time-identifier-header---emit-hw-info-h);
+  `west-libraries` produces the `west.yml` fragment a project's own
+  manifest imports) -- both are consumed by the same CI jobs
+  (`cross-platform-zephyr.yml`, `pr-metadata-validate.yml`) as the six
+  that DO have a `tan generate` target, with no reason the seventh and
+  eighth don't. `os-topology` (per-core natural-vs-effective OS facts,
+  issue [#95](https://github.com/alplabai/alp-sdk/issues/95)) is richer
+  than `system-manifest`'s flat `slices[].os` -- it also carries
+  `core_type`, `runtime_class`, `overridden`, and `allowed_os`, exactly
+  the shape a heterogeneous-SoM configurator UI needs and
+  `system-manifest` cannot provide -- but no `tan` or IDE consumer
+  reads it yet (confirmed: zero hits for `os-topology`/`osTopology` in
+  `alplabai/alp-sdk-vscode`). `zephyr-board` (per-core Zephyr board
+  tree, issue #523) is the next documented step after `tan new-som` in
+  the SoM-porting walkthrough ([porting-new-som.md](porting-new-som.md)
+  §10) -- a real front door exists for scaffolding a new SoM's
+  *metadata*, none for generating its *board tree*, so a porting
+  partner falls off `tan` mid-workflow. All four filed:
+  [`tan-cli`#113](https://github.com/alplabai/tan-cli/issues/113)
+  (`hw-info-h`), [`tan-cli`#114](https://github.com/alplabai/tan-cli/issues/114)
+  (`west-libraries`), [`tan-cli`#115](https://github.com/alplabai/tan-cli/issues/115)
+  (`os-topology`), [`tan-cli`#116](https://github.com/alplabai/tan-cli/issues/116)
+  (`zephyr-board`).
+- **Intentional -- consumed by `tan` already, just not live:**
+  `scaffold`'s output is vendored byte-for-byte into the `tan` binary
+  at release time (`crates/tan-core/src/wizard/vendored/`,
+  `include_str!`'d at compile time -- no filesystem or subprocess call
+  at `tan init`/`tan scaffold` runtime), pinned to an SDK release tag
+  and checked for drift by `tests/parity/scaffold_byte_parity.py`. It
+  has no *live* front door by design (`tan init` is deliberately
+  SDK-checkout-free). [`tan-cli`#14](https://github.com/alplabai/tan-cli/issues/14)
+  tracks extending the vendored set to the wizard's remaining
+  hand-written templates -- not a new gap, don't re-file it.
+- **Intentional -- no product consumer, kept for its own value:**
+  `composed-route-table` is explicitly a "demonstrator" in its own
+  owning code (`scripts/alp_project_emit/bom_netlist.py`) and doc
+  table (above) -- it exists to give
+  `tests/scripts/test_emit_composed_route_table.py` a way to assert on
+  the board × SoM pad-route composition algorithm's JSON shape, and it
+  was run by hand once as a maintainer verification step during a
+  hardware-revision fix (see `docs/portability-matrix.md`'s A2-1). No
+  build, IDE, or `tan` verb consumes its output; it earns its keep as
+  regression coverage for the composition logic, not as a shipped
+  artefact. Not filed -- there's nothing to file.
 
 | Option | Meaning |
 |---|---|
