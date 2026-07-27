@@ -231,13 +231,26 @@ def resolve_soc_path(silicon: str | None, metadata_root: Path) -> Path | None:
     `check_som_topology_parity.py`) down to this one helper, and folded a
     fourth in-module copy from `resolve_memory_map()` into it too.
 
-    Five more hand-rolled copies remain outside this module, each with its
-    own error-raising shape a naive migration would change: `gen_zephyr_board.py:91`
-    (raises `ZephyrBoardEmitError`), `gen_zephyr_board.py:808` (builds a `str`,
-    not a `Path`), `validate_metadata.py:155` and `:221` (soft-fail to a
-    diagnostic string), and `alp_orchestrate/loader.py:49` (raises
-    `OrchestratorError`). Migrate one of those onto this helper -- don't add
-    a sixth hand-rolled copy.
+    Nine more hand-rolled copies remain outside this module (issue #1004).
+    Most differ in the shape they fail with, so a blind call-site swap would
+    change behaviour; one does not, and is the cheap migration:
+
+      - `alp_cli/validator.py:351` (`_load_soc_caps`) -- same 3-part guard,
+        same `None` on failure. Behaviourally identical to this helper, so
+        it is the one site migratable with provably zero behaviour change.
+      - `gen_zephyr_board.py:88` (`_load_soc_spec`) -- raises
+        `ZephyrBoardEmitError`.
+      - `alp_orchestrate/loader.py:45` -- raises `OrchestratorError`.
+      - `alp_model/targets.py:69` -- unguarded 3-tuple unpack (`ValueError`
+        on a malformed ref), then raises `FileNotFoundError`.
+      - `validate_metadata.py:152` and `:217` -- soft-fail into a diagnostic
+        message list rather than raising at all.
+      - `gen_zephyr_board.py:807`, `alp_cli/new_som.py:199` -- build a `str`
+        path, not a `Path`.
+      - `alp_cli/new_som.py:526` -- `Path`, but rooted at `output_root`
+        rather than `metadata_root`.
+
+    Migrate one of those onto this helper -- don't add a tenth.
     """
     if not silicon:
         return None
