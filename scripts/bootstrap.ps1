@@ -420,9 +420,11 @@ Next steps:
 Write-EnvLines "  "
 @"
 
-  # Sanity-check the host environment (needs tan on PATH -- see README.md
-  # for the tan-cli `install.sh` one-liner):
-  tan doctor
+  # Sanity-check the host build environment (needs tan on PATH -- see
+  # README.md for the tan-cli `install.sh` one-liner): `tan doctor --build`
+  # is the host/build preflight; plain `tan doctor` is a different,
+  # debug-readiness check (lldb, codeLLDBExtension) -- see docs/cli.md.
+  tan doctor --build
 
   # Or jump straight into building an example for real silicon:
   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he ``

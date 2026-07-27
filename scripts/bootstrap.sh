@@ -332,30 +332,6 @@ info "Repo root:       ${REPO_ROOT}"
 info "Workspace dir:   ${WORKSPACE_DIR}"
 info "Detected OS:     ${OS_LABEL}"
 
-# -------- venv capability check (issue #984) -----------------------------
-
-# `python3-venv` is a Debian/Ubuntu PACKAGE name, not a binary -- it can
-# never be a `command -v`-checkable REQUIRED_BINS entry (see that array's
-# comment above).  What actually breaks -- Debian/Ubuntu ship the
-# `ensurepip`-bundled pip/setuptools wheels `python3 -m venv` needs in the
-# separate `python3-venv` package, not in `python3` itself -- only shows up
-# when a venv is actually built, so `import ensurepip` alone (importable
-# even when the wheels are missing) would not catch it.  This is a
-# CAPABILITY probe -- build a disposable throwaway venv and discard it --
-# not a presence probe, using the same curated warn/die treatment the
-# missing-tools message above got in #978 (commit 8a1bc6d9).
-VENV_PROBE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/alp-bootstrap-venv-probe.XXXXXX" 2>/dev/null || true)"
-if [ -z "${VENV_PROBE_DIR}" ] || ! python3 -m venv "${VENV_PROBE_DIR}" >/dev/null 2>&1; then
-    rm -rf "${VENV_PROBE_DIR:-}" 2>/dev/null || true
-    warn "python3 -m venv is not usable (ensurepip unavailable):"
-    case "${OS_LABEL}" in
-        macos) warn "  python3-venv  ->  brew install python3" ;;
-        *)     warn "  python3-venv  ->  sudo apt-get install -y python3-venv" ;;
-    esac
-    die "Install the package above and re-run."
-fi
-rm -rf "${VENV_PROBE_DIR}"
-
 # -------- workspace selection (reuse a compatible ZEPHYR_BASE) ----------------
 
 # If ZEPHYR_BASE points at a Zephyr tree whose MAJOR.MINOR matches our pin and
@@ -394,6 +370,19 @@ fi
 
 VENV_DIR="${WORKSPACE_DIR}/${VENV_DIR_NAME}"
 
+# Refuse an empty or path-unsafe venv.dirName BEFORE it is ever used to
+# build a delete target: an empty value collapses VENV_DIR to
+# "${WORKSPACE_DIR}/", which the recreate-on-broken-venv path below then
+# `rm -rf`s -- taking out the whole workspace (zephyr/, modules/, .west/,
+# and the alp-sdk checkout itself if WORKSPACE_DIR is a parent of it).
+# metadata/schemas/bootstrap-v1.schema.json constrains this same field, but
+# a schema-drifted or hand-edited manifest must not reach the `rm -rf`
+# unchecked -- this is the last line of defense, not a duplicate of that
+# one.
+case "${VENV_DIR_NAME}" in
+    ""|.|..|*/*) die "metadata/bootstrap.json's venv.dirName is empty or path-unsafe (\"${VENV_DIR_NAME}\") -- refusing to build a workspace path (and a future 'rm -rf' target) from it." ;;
+esac
+
 # -------- workspace venv (hermetic west + Python deps) ------------------------
 
 # Everything -- west, the Zephyr requirements, the SDK extras -- installs into a
@@ -426,6 +415,42 @@ if [ "${DO_WEST}" -eq 1 ] || [ "${DO_PIP}" -eq 1 ]; then
             warn "Workspace venv at ${VENV_DIR} exists but has no working pip -- recreating it"
             rm -rf "${VENV_DIR}"
         fi
+        # -------- venv capability check (issue #984) -------------------------
+        # `python3-venv` is a Debian/Ubuntu PACKAGE name, not a binary -- it
+        # can never be a `command -v`-checkable REQUIRED_BINS entry (see that
+        # array's comment above).  What actually breaks -- Debian/Ubuntu ship
+        # the `ensurepip`-bundled pip/setuptools wheels `python3 -m venv`
+        # needs in the separate `python3-venv` package, not in `python3`
+        # itself -- only shows up when a venv is actually built, so `import
+        # ensurepip` alone (importable even when the wheels are missing)
+        # would not catch it.  This is a CAPABILITY probe -- build a
+        # disposable throwaway venv and discard it -- not a presence probe,
+        # using the same curated warn/die treatment the missing-tools message
+        # above got in #978.  Runs only here, right before an actual venv
+        # build is about to happen (issue #985 review): `--no-pip --no-west`
+        # needs no venv at all, and an idempotent re-run of an already-healthy
+        # venv was otherwise paying a real `python3 -m venv` (~1.65s measured)
+        # for a probe nothing needed.
+        VENV_PROBE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/alp-bootstrap-venv-probe.XXXXXX" 2>/dev/null || true)"
+        if [ -z "${VENV_PROBE_DIR}" ]; then
+            # mktemp itself failing (full/read-only/noexec TMPDIR, routine on
+            # CI runners) is a DIFFERENT failure than python3-venv being
+            # missing (checked next) and must not share that message: telling
+            # the customer to install an already-installed package leaves
+            # them stuck on the identical failure after they do -- the #985
+            # misdiagnosis loop, reintroduced.
+            die "mktemp -d under \${TMPDIR:-/tmp} (${TMPDIR:-/tmp}) failed -- check free space and write permissions there, or set TMPDIR to a writable directory, and re-run."
+        fi
+        if ! python3 -m venv "${VENV_PROBE_DIR}" >/dev/null 2>&1; then
+            rm -rf "${VENV_PROBE_DIR}" 2>/dev/null || true
+            warn "python3 -m venv is not usable (ensurepip unavailable):"
+            case "${OS_LABEL}" in
+                macos) warn "  python3-venv  ->  brew install python3" ;;
+                *)     warn "  python3-venv  ->  sudo apt-get install -y python3-venv" ;;
+            esac
+            die "Install the package above and re-run."
+        fi
+        rm -rf "${VENV_PROBE_DIR}"
         info "Creating workspace venv at ${VENV_DIR}"
         python3 -m venv "${VENV_DIR}" || die "python3 -m venv ${VENV_DIR} failed"
     fi
@@ -583,9 +608,11 @@ print_env_lines "  "
 # $PWD below are written plainly rather than escaped.
 cat <<'EOF'
 
-  # Sanity-check the host environment (needs tan on PATH -- see README.md
-  # for the tan-cli `install.sh` one-liner):
-  tan doctor
+  # Sanity-check the host build environment (needs tan on PATH -- see
+  # README.md for the tan-cli `install.sh` one-liner): `tan doctor --build`
+  # is the host/build preflight; plain `tan doctor` is a different,
+  # debug-readiness check (lldb, codeLLDBExtension) -- see docs/cli.md.
+  tan doctor --build
 
   # Run the local test suite:
   bash scripts/test-all.sh
