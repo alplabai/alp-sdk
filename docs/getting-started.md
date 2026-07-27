@@ -37,8 +37,9 @@ firmware as a first-class consumer.
 >   cargo install --path crates/tan-cli --locked`.
 > - **`tan`'s forwarded verbs** — everything that isn't a build: `tan
 >   init` scaffolds a project, `tan validate` checks a `board.yaml`,
->   `tan emit` inspects any generated artefact (including the build
->   plan `tan build` consumes), plus `tan monitor` / `tan model` /
+>   `tan generate --target zephyr-conf` (one of six supported targets
+>   — see [`docs/cli.md`](cli.md) for the full list) regenerates a
+>   single build artefact, plus `tan monitor` / `tan model` /
 >   `tan new-som` / `tan explain` / `tan faultdecode`.  `tan doctor`
 >   is the one exception -- a native Rust check, not a forwarded verb.
 >   The full verb reference lives in [`docs/cli.md`](cli.md).
