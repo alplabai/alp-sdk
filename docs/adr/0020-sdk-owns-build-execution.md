@@ -125,8 +125,9 @@ blocked until the remediation is met. Tracked in #855.
    even at the time it was written. Second, `emit` is no longer one of the
    verbs `tan` forwards to: `tan` 0.3.1 has no `emit` subcommand at all
    (`tan emit` → `error: unrecognized subcommand 'emit'`) — it was retired
-   and replaced by the narrower, differently-shaped `tan generate --target
-   <mode>` (6 of `metadata/emit-registry-v1.json`'s 20 registered modes,
+   and replaced by the narrower, differently-shaped
+   `tan generate --target` `<mode>` (6 of
+   `metadata/emit-registry-v1.json`'s 20 registered modes,
    fixed output paths, no `--output`/`--core`/`--template`/`--sku`). Point
    2's "11 non-build verbs" all still survive in the `alp_cli` package --
    `scripts/alp_cli/main.py`'s 11 `cli.add_command(...)` registrations
@@ -135,11 +136,13 @@ blocked until the remediation is met. Tracked in #855.
    `ls scripts/alp_cli/*.py`, which also lists 8 non-verb modules --
    `__init__.py`, `__main__.py`, `main.py` itself, `_workspace.py`,
    `diagnostic.py`, `diagnostic_format.py`, `validator.py`,
-   `yaml_pos.py`); what narrowed is the *forwarded* set. `tan` forwards 9 of them
+   `yaml_pos.py`); what narrowed is the *forwarded* set.
+
+   `tan` forwards 9 of them
    (`generate/validate/init/run/model/monitor/new-som/faultdecode/explain`),
    never `emit` (retired, per above) and never `doctor` (native Rust —
-   `docs/cli.md`'s forwarding table already reads `tan doctor  native-host
-   · none`).
+   `docs/cli.md`'s forwarding table already reads
+   `tan doctor  native-host · none`).
 
    This landed alongside the full 15-mode classification `docs/cli.md`'s
    "Six modes, no front door: which ones are gaps?" now carries: of the

@@ -58,13 +58,13 @@ Two execution paths live behind the one binary:
   native Rust checks implemented in tan-cli itself, not forwarded
   anywhere; their check lists are unrelated to alp-sdk's own separate
   Python preflight (`python -m alp_cli doctor`, aka "`alp doctor`" in
-  older docs) -- see [below](#tan-doctor----debug-readiness-preflight).
+  older docs) -- see [below](#tan-doctor).
 * **Everything else** (`init`, `new-som`, `validate`, `model`,
   `monitor`, `explain`, `faultdecode`, `generate`, `run`) --
   `tan` forwards to the SDK's Python backend, most verbs as `python -m
   alp_cli <sub>`; `tan generate` is the one exception, invoking
   `scripts/alp_project.py` directly rather than through `alp_cli` (see
-  [below](#tan-generate----materialise-a-board-derived-config-artefact-no-build)).
+  [below](#tan-generate)).
   No `alp` binary is installed anywhere -- `pyproject.toml`
   registers only `alp-mcp`; `alp_cli` is a library `tan` shells out to,
   never a user-installed command of its own.  The bootstrap scripts
@@ -107,7 +107,7 @@ Rules of thumb:
   `init`, `new-som`, `monitor`, `model`, `run`) forward to the Python
   backend; alp-sdk itself never runs them directly.  `tan doctor` is
   the one exception -- a native Rust check, not a forwarded verb (see
-  [below](#tan-doctor----debug-readiness-preflight)).
+  [below](#tan-doctor)).
 * For build/flash: `tan` consumes the SDK's
   `alp_orchestrate --emit build-plan` (and seeds its own
   `system-manifest.yaml` / `.alp-build-state.json` from
@@ -282,7 +282,7 @@ PYTHONPATH=scripts python3 -m alp_orchestrate --input board.yaml --emit system-m
 See [heterogeneous-builds.md](heterogeneous-builds.md) for the
 per-core fan-out the plan describes.
 
-### `tan generate` -- materialise a board-derived config artefact (no build)
+### `tan generate` -- materialise a board-derived config artefact (no build) {#tan-generate}
 
 ```bash
 tan generate --target zephyr-conf         # the per-core Zephyr fragment
@@ -361,7 +361,8 @@ amendment 6):
   `hw-info-h` and `west-libraries` are board-derived, per-project
   config artefacts exactly like the six `tan generate` already covers
   (`hw-info-h` bakes `board.yaml` identifiers into a header an app
-  `#include`s and checks at runtime -- see [above](#build-time-identifier-header---emit-hw-info-h);
+  `#include`s and checks at runtime -- see the `hw-info-h` row in the
+  emit-modes table above;
   `west-libraries` produces the `west.yml` fragment a project's own
   manifest imports) -- both are consumed by the same CI jobs
   (`cross-platform-zephyr.yml`, `pr-metadata-validate.yml`) as the six
@@ -524,7 +525,7 @@ Compiles every `models:` entry declared in `board.yaml` into a
 Ethos-U, DRP-AI for RZ/V2N, ...).  See the model-pipeline docs under
 `docs/tutorials/` for the end-to-end inference flow.
 
-### `tan doctor` -- debug-readiness preflight
+### `tan doctor` -- debug-readiness preflight {#tan-doctor}
 
 `tan doctor` has two distinct modes behind one subcommand -- neither
 takes `--strict`, and both use `[+]` (pass) / `[!]` (warn) / `[x]`
