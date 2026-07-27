@@ -309,8 +309,8 @@ jobs:
                   continue
               silicon = preset.get("silicon") or ""
               # NOTE: this vendor:family:part -> metadata/socs/<v>/<f>/<p>.json
-              # resolution duplicates scripts/alp_project_loader.py's
-              # _resolve_silicon_variant() and resolve_capabilities() (a
+              # resolution duplicates the one in scripts/alp_project_loader.py
+              # (_resolve_silicon_variant + resolve_capabilities -- a
               # third hand-rolled copy). Not extracted here; see #997.
               soc_path = (root / "metadata/socs" / (silicon.replace(":", "/") + ".json")).as_posix() if silicon else ""
               if soc_path not in soc_cores:
