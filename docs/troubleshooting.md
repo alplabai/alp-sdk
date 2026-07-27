@@ -85,6 +85,35 @@ export ZEPHYR_BASE="$PWD/zephyr"
 west zephyr-export
 ```
 
+### `CMake Error: ... You probably need to select a different build tool` (missing `ninja`)
+
+```
+CMake Error: CMake was unable to find a build program corresponding to "Ninja".  CMAKE_MAKE_PROGRAM is not set.  You probably need to select a different build tool.
+CMake Error: CMAKE_C_COMPILER not set, after EnableLanguage
+CMake Error: CMAKE_CXX_COMPILER not set, after EnableLanguage
+```
+
+Despite what the first line suggests, the fix is not to pick a
+different build tool -- `ninja` is Zephyr's build generator, and
+`scripts/bootstrap.sh` / `bootstrap.ps1` don't check for it today, so
+a host that's otherwise bootstrapped can still be missing it.
+Installing it clears all three lines above (the two compiler errors
+are downstream of the same missing generator):
+
+```bash
+# Linux (Debian / Ubuntu)
+sudo apt install -y ninja-build
+
+# macOS
+brew install ninja
+
+# Windows (PowerShell)
+winget install -e --id Ninja-build.Ninja
+```
+
+See [`docs/cross-platform-setup.md`](cross-platform-setup.md) §2.1 /
+§3.2 / §4.1 for the base-toolchain block this belongs to.
+
 ### Compile error: `'alp_<thing>_t' undeclared`
 
 You haven't included the right header.  Check the chip's manifest

@@ -11,11 +11,37 @@ project.
 
 `tan` is a standalone, independently-versioned, public Rust binary
 ([`alplabai/tan-cli`](https://github.com/alplabai/tan-cli)); install it
-separately (needs a Rust toolchain / rustup):
+separately. The automatic installer needs no Rust toolchain:
 
 ```bash
-cargo install --git https://github.com/alplabai/tan-cli --bin tan
+curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"  # install.sh already made this permanent in your shell rc; needed once more in THIS shell
 ```
+
+Or grab a prebuilt, per-platform binary directly from a release tag, e.g.
+Linux x86_64:
+
+```bash
+curl -fsSL -o tan \
+  https://github.com/alplabai/tan-cli/releases/latest/download/tan-x86_64-unknown-linux-gnu
+chmod +x tan && sudo mv tan /usr/local/bin/tan
+```
+
+Building from source instead needs Rust 1.86+ (get it from
+[rustup.rs](https://rustup.rs)) plus a system C toolchain
+(`build-essential` on Debian/Ubuntu, `gcc`/`gcc-c++` on Fedora/RHEL -- see
+[`docs/cross-platform-setup.md`](cross-platform-setup.md) §2.1):
+
+```bash
+git clone https://github.com/alplabai/tan-cli && cd tan-cli
+cargo install --path crates/tan-cli --locked
+```
+
+None of the three install paths above pin a `tan` version (`install.sh`
+tracks the mutable `main` ref and installs `releases/latest`; the
+source path clones `main`'s HEAD) -- this is deliberate: all three are
+tan-cli's own recommended install methods, and staying on its latest
+release is the point until a project needs otherwise.
 
 Two execution paths live behind the one binary:
 
@@ -25,8 +51,13 @@ Two execution paths live behind the one binary:
   **plans-only** for this surface: `tan` consumes
   `alp_orchestrate --emit build-plan` / `--emit system-manifest` and
   runs `west` / `bitbake` / `cmake` per slice itself.
+* **Host preflight** -- `tan doctor` and `tan doctor --build` are
+  native Rust checks implemented in tan-cli itself, not forwarded
+  anywhere; their check lists are unrelated to alp-sdk's own separate
+  Python preflight (`python -m alp_cli doctor`, aka "`alp doctor`" in
+  older docs) -- see [below](#tan-doctor----debug-readiness-preflight).
 * **Everything else** (`init`, `new-som`, `validate`, `model`,
-  `doctor`, `monitor`, `explain`, `faultdecode`, `emit`, `run`) --
+  `monitor`, `explain`, `faultdecode`, `emit`, `run`) --
   `tan` forwards to the SDK's Python backend as `python -m alp_cli
   <sub>`.  No `alp` binary is installed anywhere -- `pyproject.toml`
   registers only `alp-mcp`; `alp_cli` is a library `tan` shells out to,
@@ -54,7 +85,7 @@ Two front doors, two different jobs -- pick by what you're doing:
 
 | You are... | Use |
 |---|---|
-| Scaffolding a project, validating `board.yaml`, compiling a model, checking your host, opening a serial console, decoding a diagnostic/fault, or running a quick single-image native_sim/single-board loop | `tan init` / `tan new-som` / `tan validate` / `tan model` / `tan doctor` / `tan monitor` / `tan explain` / `tan faultdecode` / `tan run` |
+| Scaffolding a project, validating `board.yaml`, compiling a model, checking your host, opening a serial console, decoding a diagnostic/fault, or running a quick single-image native_sim/single-board loop | `tan init` / `tan new-som` / `tan validate` / `tan model` / `tan doctor --build` / `tan monitor` / `tan explain` / `tan faultdecode` / `tan run` |
 | Inspecting a generated artefact without building (Kconfig fragment, DTS overlay, system manifest, build plan) | `tan emit` (or `west alp-emit` from a west workspace) |
 | Building, flashing, sizing, bundling, cleaning, or Renode-booting a project | `tan build` / `tan flash` / `tan size` / `tan image` / `tan clean` / `tan renode` -- see [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli) |
 | Scripting the surviving west-centric maintenance commands | `west alp-migrate` (board.yaml schema migration) / `west alp-lock` (dependency lockfile) / `west alp-quality` (quality-task registry) / `west alp-emit` (generated-artefact subset) |
@@ -65,18 +96,20 @@ Rules of thumb:
   plan-based, multi-slice build surface and every scaffold / validate
   / inspect / host-tool verb (ADR
   [0020](adr/0020-sdk-owns-build-execution.md), end-state B).  The
-  non-build verbs (`emit`, `validate`, `doctor`, `explain`,
-  `faultdecode`, `init`, `new-som`, `monitor`, `model`, `run`) forward
-  to the Python backend; alp-sdk itself never runs them directly.
+  non-build verbs (`emit`, `validate`, `explain`, `faultdecode`,
+  `init`, `new-som`, `monitor`, `model`, `run`) forward to the Python
+  backend; alp-sdk itself never runs them directly.  `tan doctor` is
+  the one exception -- a native Rust check, not a forwarded verb (see
+  [below](#tan-doctor----debug-readiness-preflight)).
 * For build/flash: `tan` consumes the SDK's
   `alp_orchestrate --emit build-plan` (and seeds its own
   `system-manifest.yaml` / `.alp-build-state.json` from
   `--emit system-manifest`), then drives `west` / `bitbake` / `cmake`
   per slice, owns skip-vs-fail policy, and programs hardware.  `tan
   build` (`--native` is the default, explicit opt-in) materialises the
-  plan and runs each slice's build command directly, whatever
-  `board.yaml` targets -- native_sim or real silicon; it never runs
-  the produced binary itself (that's `tan run`).  See
+  plan and runs each slice's build command directly for the real SoM
+  `board.yaml` targets; it never runs the produced binary itself
+  (that's `tan run`).  See
   [heterogeneous-builds.md](heterogeneous-builds.md) for the per-core
   fan-out the plan describes.
 * `tan emit` is a SUPERSET of `west alp-emit`: every artefact either
@@ -92,20 +125,27 @@ Rules of thumb:
 ### `tan init` -- scaffold a new project
 
 ```bash
-tan init my-app --som E1M-AEN801 --preset e1m-evk --peripherals uart,gpio
-tan init my-app          # interactive: pick SoM / preset / peripherals
+tan init --name my-app --som E1M-AEN801 --template minimal-app --sdk-root <path-to-alp-sdk> --non-interactive
+tan init                     # interactive: prompts for every field
 ```
 
-Copies the hello-world template, rewrites `board.yaml` for the chosen
-SoM SKU + board preset, and seeds the optional starter `peripherals:`
-list.  Omit any flag to be prompted interactively.
+`tan init` takes options only -- there is no positional `NAME`
+argument.  Scaffolds a new project directory (named by `--name`),
+rewrites `board.yaml` for the chosen SoM SKU + template, and resolves
+the alp-sdk checkout the project should build against via
+`--sdk-root`.  Omit a flag to be prompted interactively, or add
+`--non-interactive` (a global flag, not a `tan init` option -- see
+`tan --help`) to fail instead of prompting, which is what CI wants.
 
 | Option | Meaning |
 |---|---|
-| `NAME` (argument) | New project directory (must not exist) |
+| `--name` | New project directory name |
 | `--som` | SoM SKU, e.g. `E1M-AEN801` |
-| `--preset` | Board preset from `metadata/boards/`, e.g. `e1m-evk` |
-| `--peripherals` | Comma-separated starter peripherals (`uart,gpio,i2c,spi,pwm`) |
+| `--template` | Project template id, e.g. `minimal-app` (the default), `sensor-starter` |
+| `--sdk-root` | Path to the alp-sdk checkout the scaffolded project should resolve |
+| `--destination` | Where to write the project |
+| `--cores` | Comma-separated `id[:os]` core map for a heterogeneous project (OS inferred from the id when omitted) |
+| `--project`, `--board-yaml`, `--from-example`, `--target`, `--all`, `--format`, `--preview`, `--force`, `--quiet`, `--no-color`, `--verbose` | See `tan init --help` for the full reference -- not restated here to avoid a second copy drifting from the CLI. |
 
 ### `tan new-som` -- scaffold metadata for a new SoM port
 
@@ -368,21 +408,84 @@ Compiles every `models:` entry declared in `board.yaml` into a
 Ethos-U, DRP-AI for RZ/V2N, ...).  See the model-pipeline docs under
 `docs/tutorials/` for the end-to-end inference flow.
 
-### `tan doctor` -- host environment preflight
+### `tan doctor` -- debug-readiness preflight
+
+`tan doctor` has two distinct modes behind one subcommand -- neither
+takes `--strict`, and both use `[+]` (pass) / `[!]` (warn) / `[x]`
+(fail) markers, not `[PASS]`/`[WARN]`/`[FAIL]`.  `alp-sdk`'s own
+separate Python preflight, `python -m alp_cli doctor`, is a third,
+unrelated command with its own check list -- see the note at the end
+of this section.
 
 ```bash
-tan doctor                     # human-readable PASS/WARN/FAIL report
-tan doctor --json              # machine-readable
-tan doctor --strict            # WARNs also fail the exit code
+tan doctor                     # debug readiness (below)
+tan doctor --format json       # machine-readable
 ```
 
-Strictly hardware-free: checks Python / west / CMake / Ninja / dtc /
-gperf / imgtool / host compiler / J-Link presence, the Zephyr pin
-(read live from `west.yml`), the workspace venv, `ZEPHYR_BASE`, the
-Zephyr SDK, plus Windows-specific traps (git `core.autocrlf`,
-long-path support).  Exit 0 = ready to build; every FAIL/WARN comes
-with a remediation hint.  Run it first whenever a build machine
-misbehaves.
+Diagnoses whether a target/server combination is ready for a debug
+session -- checks `workspaceRoot`, `sdkRoot`, `boardYaml`, a `python`
+interpreter presence probe (no `.python-version` pin comparison),
+`codeLLDBExtension`, `lldb`, and `sdkProvenance`.  See `tan doctor
+--help` for the full flag reference (including `--fix`, `--target`,
+and `--all`) -- not restated here to avoid a second copy drifting from
+the CLI.  Example:
+
+```
+  tan doctor  native-host · none
+
+  [+]  workspaceRoot       /work/alp-sdk
+  [+]  sdkRoot             /work/alp-sdk
+  [x]  boardYaml           /work/alp-sdk/board.yaml
+  [+]  python              Interpreter probe: python3
+  [+]  codeLLDBExtension   vadimcn.vscode-lldb is installed.
+  [!]  lldb                No local LLDB executable was found on PATH.
+  [+]  sdkProvenance       alp-sdk 0.13.0 @ 08230793
+
+  5 passed · 1 warning · 1 failed
+```
+
+### `tan doctor --build` -- build-readiness preflight
+
+```bash
+tan doctor --build                       # human-readable report
+tan doctor --build --format json         # machine-readable
+```
+
+This is the check to run first whenever a build machine misbehaves:
+checks `sdk`, `boardYaml`, `workspace`, `westResolved`,
+`zephyrVersion` (the Zephyr pin, read live from `west.yml`), `west`,
+`cmake`, `ninja`, `zephyrSdk`, `bitbake`, `bmaptool`,
+`vendorToolchain`, and `sdkProvenance`.  Exit 0 = ready to build;
+every `[!]`/`[x]` comes with a `fix` remediation hint.  Example:
+
+```
+  tan doctor --build  zephyr · yocto · baremetal
+
+  [+]  sdk               alp-sdk at /work/alp-sdk
+  [x]  boardYaml         board.yaml not found — run `tan init` or pass `--board-yaml <path>`
+  [+]  workspace         Zephyr workspace at /work
+  [+]  westResolved      west resolved
+  [+]  zephyrVersion     Zephyr v4.4 matches the SDK pin
+  [+]  west              west is available.
+  [+]  cmake             cmake is available.
+  [!]  ninja             ninja not found on PATH — needed for Zephyr builds.
+  [!]  zephyrSdk         Zephyr SDK toolchain not detected (ZEPHYR_SDK_INSTALL_DIR unset).
+  [!]  bitbake           bitbake not found on PATH — needed for Yocto builds.
+  [!]  bmaptool          bmaptool not found; Yocto .wic flash falls back to dd (slower).
+  [!]  vendorToolchain   Baremetal needs a vendor toolchain (Alif/Renesas/NXP), per SoC family.
+  [+]  sdkProvenance     alp-sdk 0.13.0 @ 08230793
+
+  7 passed · 5 warnings · 1 failed
+```
+
+Note: `python -m alp_cli doctor` (alp-sdk's own separate Python
+preflight -- `pyproject.toml` deliberately ships no `alp`
+console-script) is a different tool again, with the fuller check list
+(Python / west / CMake / Ninja / dtc / gperf / imgtool / host
+compiler / J-Link presence, the workspace venv, `ZEPHYR_BASE`,
+Windows-specific traps) and its own `--strict` / `--json` flags and
+`[PASS]`/`[WARN]`/`[FAIL]` markers.  It predates the `tan` CLI
+migration and is not what either `tan doctor` invocation above runs.
 
 ### `tan monitor` -- serial console
 
@@ -441,7 +544,7 @@ it emits build plans only.
 | Variable | Effect |
 |---|---|
 | `ALP_SDK_ROOT` | Explicit path to the alp-sdk checkout; otherwise the CLI locates the repo it was installed (editable) from |
-| `ZEPHYR_BASE` | The Zephyr tree checked by `tan doctor` |
+| `ZEPHYR_BASE` | The Zephyr tree checked by `tan doctor --build` |
 
 `tan emit` exports `ALP_SDK_ROOT` and puts `<sdk>/scripts` on
 `PYTHONPATH` for its sub-processes -- the same wiring `west alp-emit`
@@ -459,7 +562,7 @@ see [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli).
   build` fronts.
 - [board-config-schema.md](board-config-schema.md) -- the `board.yaml`
   field reference `tan validate` enforces.
-- [troubleshooting.md](troubleshooting.md) -- when `tan doctor`
+- [troubleshooting.md](troubleshooting.md) -- when `tan doctor --build`
   isn't enough.
 - [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli) -- the
   standalone executor's own docs (`tan build` / `flash` / `size` /

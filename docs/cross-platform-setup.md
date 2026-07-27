@@ -73,9 +73,39 @@ are deliberately different:
   the pinned version.
 
 To reproduce CI byte-for-byte, match the pin locally — `pyenv`
-and `uv` pick `.python-version` up automatically.  `tan doctor`
-WARNs (never FAILs) when the running interpreter differs from
+and `uv` pick `.python-version` up automatically.  `tan doctor`'s
+`python` check is a presence probe only, with no comparison against
 the pin; anything >= 3.10 remains supported.
+
+### 1.2 Rust toolchain (only for building `tan` from source)
+
+`tan`, the standalone build executor
+([`alplabai/tan-cli`](https://github.com/alplabai/tan-cli)), ships
+prebuilt binaries and an `install.sh` / `install.ps1` one-liner --
+most users never need a Rust toolchain at all.  It's only a
+prerequisite for the from-source alternative documented alongside
+every `tan` install instruction in this repo
+(`cargo install --path crates/tan-cli --locked` from a clone).
+
+Get `rustup` from [rustup.rs](https://rustup.rs) (Rust 1.86+,
+edition 2024):
+
+```bash
+# Linux / macOS:
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+```powershell
+# Windows native (PowerShell):
+winget install -e --id Rustlang.Rustup
+```
+
+A from-source build also needs a system C linker (`rustup`'s own
+installer warns if one is missing).  On Linux, §2.1's `build-essential`
+covers it.  On macOS, the Homebrew install in §3.1 prompts to install
+the Xcode Command Line Tools, which include one.  On native Windows,
+`rustup`'s own installer offers to fetch the Visual Studio Build
+Tools C++ workload for you the first time it runs.
 
 ---
 
@@ -625,27 +655,29 @@ lint is soft initially.
 
 ### 6.3 Native_sim example build
 
-This is the cross-platform end-to-end smoke test.
+This is the cross-platform end-to-end smoke test.  `tan --project
+... build` follows `gpio-button-led`'s `board.yaml`, which targets a
+real SoM (`E1M-AEN801`) — it cross-compiles and needs the Zephyr SDK
+toolchain, it is not a `native_sim` build (`--native` selects how
+`tan` runs the build tooling, not the board target).  The actual
+`native_sim` build of this example runs through twister instead, the
+same way [`docs/testing.md`](testing.md)'s Zephyr suite does:
 
 ```bash
 # Linux / macOS / WSL2 (native_sim is Linux/macOS only; on Windows
 # run this inside WSL2 — there is no native-Windows native_sim target):
 cd ../alp-workspace
-tan --project alp-sdk/examples/peripheral-io/gpio-button-led build --native
+export ZEPHYR_BASE="$PWD/zephyr"
+python3 "$ZEPHYR_BASE/scripts/twister" \
+    -T alp-sdk/examples/peripheral-io/gpio-button-led \
+    -s alp_sdk.example.gpio_button_led.e1m_evk \
+    -p native_sim/native/64 \
+    --inline-logs --no-detailed-test-id
 ```
 
-Expected output:
-
-```
-*** Booting Zephyr OS build v4.4.0 ***
-[gpio] init button=EVK_PIN_ENCODER_SW, led=EVK_PIN_LED_RED
-[gpio] led=0 status=0
-...
-[gpio] done
-```
-
-If you see `[gpio] done`, the SDK is fully functional on your
-host.
+Its `testcase.yaml` looks for `[gpio] done` on the console as the
+pass condition — if twister reports the scenario PASSED, the SDK is
+fully functional on your host.
 
 ### 6.4 Run the test suite
 

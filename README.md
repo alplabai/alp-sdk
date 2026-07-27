@@ -45,21 +45,26 @@ bash scripts/bootstrap.sh
 source ../.venv/bin/activate
 export ZEPHYR_BASE="$PWD/../zephyr"
 
+# One-time: install the standalone build executor (no Rust toolchain needed --
+# see below for a from-source alternative)
+curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"  # install.sh already made this permanent in your shell rc; needed once more in THIS shell
+
 # Sanity-check the host -- catches a missing toolchain/HAL before it bites later
-tan doctor
+tan doctor --build
 
-# One-time: install the standalone build executor (needs a Rust toolchain / rustup)
-cargo install --git https://github.com/alplabai/tan-cli --bin tan
-
-# Scaffold a hello-world, then let tan build it for native_sim — no hardware needed
-tan init my-app
+# Scaffold a hello-world (--sdk-root points it at this checkout); it
+# defaults to a real E1M SoM target, so this cross-builds and needs the
+# Zephyr SDK toolchain (pinned in metadata/toolchains.json) -- see
+# docs/getting-started.md
+tan init --name my-app --sdk-root "$PWD" --non-interactive
 cd my-app
 tan build --native
 ```
 
-`bash scripts/bootstrap.sh` is what actually gets `west` (and everything else `tan build` shells out to) onto `PATH` — skipping it is the #1 way this Quickstart fails on a fresh clone; see [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md) for the per-OS manual equivalent. `tan` is not installed by `bootstrap.sh` -- it's a separate public Rust binary from [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli); `cargo install --git https://github.com/alplabai/tan-cli --bin tan` needs `rustup`/`cargo` on `PATH` first. `tan init` walks you through SoM SKU + board preset + starter peripherals interactively, or accepts `--som`, `--preset`, `--peripherals` flags for CI. `tan build` (`--native` is the default, explicit-opt-in spelling) consumes the SDK's build plan, materialises it, and runs each slice's `west`/`bitbake`/`cmake` command directly -- whatever `board.yaml` targets, native_sim or real silicon; it never runs the produced binary itself (that's `tan run`). Flashing real hardware is `tan flash`.
+`bash scripts/bootstrap.sh` is what actually gets `west` (and everything else `tan build` shells out to) onto `PATH` — skipping it is the #1 way this Quickstart fails on a fresh clone; see [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md) for the per-OS manual equivalent. `tan` is not installed by `bootstrap.sh` -- it's a separate public Rust binary from [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli); the `install.sh` one-liner above needs no Rust toolchain. Building from source instead needs Rust 1.86+ (get it from [rustup.rs](https://rustup.rs)) plus a system C toolchain (`build-essential` on Debian/Ubuntu, `gcc`/`gcc-c++` on Fedora/RHEL -- see [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md) §2.1): `git clone https://github.com/alplabai/tan-cli && cd tan-cli && cargo install --path crates/tan-cli --locked`. `tan init` walks you through SoM SKU + template + destination interactively, or accepts `--som`, `--template`, `--cores` (and friends) for CI -- see `tan init --help` for the full flag set. `tan build` (`--native` is the default, explicit-opt-in spelling) consumes the SDK's build plan, materialises it, and runs each slice's `west`/`bitbake`/`cmake` command directly for the real SoM `board.yaml` targets; it never runs the produced binary itself (that's `tan run`). Flashing real hardware is `tan flash`.
 
-`tan validate board.yaml` runs the diagnostic-rich validator standalone — try it on a fixture under `tests/fixtures/board_yaml_bad/` to see the format.  `tan doctor` triages the host environment (PASS/WARN/FAIL with fix hints) whenever a build machine misbehaves.  alp-sdk is plans-only — it emits `build-plan` / `system-manifest`; the whole build / flash / size / image / clean / renode surface lives in the standalone [`tan` CLI](https://github.com/alplabai/tan-cli).  alp-sdk's own remaining verb set — `emit` / `validate` / `doctor` / `monitor` / `new-som` / `model` and friends — is documented in [`docs/cli.md`](docs/cli.md).
+`tan validate board.yaml` runs the diagnostic-rich validator standalone — try it on a fixture under `tests/fixtures/board_yaml_bad/` to see the format.  `tan doctor --build` triages the host build environment (`[+]`/`[!]`/`[x]` lines with fix hints) whenever a build machine misbehaves.  alp-sdk is plans-only — it emits `build-plan` / `system-manifest`; the whole build / flash / size / image / clean / renode surface lives in the standalone [`tan` CLI](https://github.com/alplabai/tan-cli).  alp-sdk's own remaining verb set — `emit` / `validate` / `doctor` / `monitor` / `new-som` / `model` and friends — is documented in [`docs/cli.md`](docs/cli.md).
 
 ## Two consumer paths
 

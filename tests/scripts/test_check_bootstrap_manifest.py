@@ -966,6 +966,73 @@ def test_install_clean_tree_passes(tmp_path, monkeypatch, capsys):
 
 
 # ---------------------------------------------------------------------
+# 12b. scripts/bootstrap.sh PREREQ_HINT_* agreement (issue #978 gate review)
+# ---------------------------------------------------------------------
+
+
+def test_bootstrap_sh_hint_value_drift_fails(tmp_path, monkeypatch, capsys):
+    """A PREREQ_HINT_LINUX entry's command must agree with
+    prerequisites.install.linux[<tool>] byte-for-byte -- the POSIX-side
+    analogue of test_install_ps1_hint_disagreement_fails."""
+    _scaffold(tmp_path)
+    _replace(
+        tmp_path / "scripts/bootstrap.sh",
+        '"sudo apt-get install -y git"',
+        '"sudo apt-get install git"',
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "PREREQ_HINT_LINUX entry 'git'" in err
+    assert "disagrees with prerequisites.install.linux.git" in err
+
+
+def test_bootstrap_sh_hint_length_mismatch_fails(tmp_path, monkeypatch, capsys):
+    """PREREQ_HINT_NAMES and PREREQ_HINT_LINUX/_MACOS are matched up by
+    array POSITION (bash 3.2 has no `declare -A`) -- a length mismatch
+    between them must be reported directly, not silently truncated by
+    `zip`."""
+    _scaffold(tmp_path)
+    _replace(
+        tmp_path / "scripts/bootstrap.sh",
+        '    "sudo apt-get install -y cmake"\n',
+        "",
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "PREREQ_HINT_LINUX has 2 entries but PREREQ_HINT_NAMES has 3" in err
+    assert "must stay parallel arrays" in err
+
+
+def test_bootstrap_sh_hint_deleted_in_lockstep_does_not_silently_drop_tool(
+    tmp_path, monkeypatch, capsys
+):
+    """Reproduces the review finding verbatim: deleting a tool's entry from
+    PREREQ_HINT_NAMES + PREREQ_HINT_LINUX + PREREQ_HINT_MACOS in lockstep
+    keeps the two arrays parallel (no length mismatch) and every remaining
+    zip pair still agrees -- the old zip-only check went dark on this.
+    metadata/bootstrap.json's prerequisites.install.linux/.macos still
+    declare a command for the deleted tool, so bootstrap.sh:174 falls
+    through to the bare-name `warn "  ${bin}"` branch (the #978 defect,
+    restored) with nothing here to catch it before this completeness
+    assertion existed."""
+    _scaffold(tmp_path)
+    sh_path = tmp_path / "scripts/bootstrap.sh"
+    _replace(sh_path, "PREREQ_HINT_NAMES=(git cmake python3)", "PREREQ_HINT_NAMES=(cmake python3)")
+    _replace(sh_path, '    "sudo apt-get install -y git"\n', "")
+    _replace(sh_path, '    "brew install git"\n', "")
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "prerequisites.install.linux.git has no PREREQ_HINT_NAMES entry" in err
+    assert "prerequisites.install.macos.git has no PREREQ_HINT_NAMES entry" in err
+
+
+# ---------------------------------------------------------------------
 # 13. literal scan file-set coverage (issue #949 review: the scaffold above
 #    has no docs/ tree and no scripts/*.py, so the doc-dir exclusion, the
 #    .py path, and the gate's by-name self-exclusion were all untested)
