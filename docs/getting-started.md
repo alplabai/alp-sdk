@@ -132,13 +132,13 @@ Per-platform install one-liners:
 
 ```bash
 # macOS (Homebrew)
-brew install cmake ninja python git
+brew install cmake ninja python git curl
 # no `pip3 install west` here -- scripts/bootstrap.sh installs west into
 # the workspace venv itself, and Homebrew's Python 3.12 is PEP 668
 # externally-managed too, so a system-wide `pip3 install` fails outright
 
 # Linux (Debian / Ubuntu)
-sudo apt install -y cmake ninja-build python3 python3-pip python3-venv git
+sudo apt install -y cmake ninja-build python3 python3-pip python3-venv git curl
 # no `pip3 install west` here -- scripts/bootstrap.sh installs west into
 # the workspace venv itself, and on Ubuntu 24.04 running it against the
 # system interpreter fails outright (PEP 668 externally-managed-environment)
