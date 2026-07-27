@@ -460,6 +460,58 @@ def test_generated_files_stage_does_not_swallow_a_failed_regen():
 # ---------------------------------------------------------------------
 
 
+@pytestmark_bash
+def test_freeze_gate_baseline_is_the_real_last_released_snapshot():
+    """`test_freeze_gate_fails_on_a_removed_symbol` and
+    `..._passes_on_a_changed_only_diff` below only ever exercise the
+    gate against a PLANTED `v99.9x-snapshot.json` -- a version number
+    engineered to sort above anything real, which proves the gate
+    picks whatever `sort -V | tail -1` names, but not that this
+    resolves to the actual previous release on a real, unmodified
+    `docs/abi/`.  That's the exact claim `docs/abi/README.md`'s
+    freeze-gate carve-out makes ("once CURRENT is off the list, the
+    highest remaining label genuinely is the last release"): run the
+    baseline computation alone, against the real committed snapshots,
+    with no fixture, and check it against a Python-side recomputation
+    of "second-highest committed version" -- an independent
+    implementation, not a copy of the bash line under test."""
+    run_script = _extract_workflow_run_step(
+        GENERATED_FILES_WORKFLOW, "check", "abi_freeze_gate"
+    )
+    current = abi.current_snapshot_version()
+    assert current is not None
+    proc = subprocess.run(
+        ["bash", "-c", run_script],
+        cwd=str(REPO),
+        env={**os.environ, "ABI_VERSION": current},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    # REMOVED (rc=1) or clean (rc=0) both print the "Comparing..." line
+    # before the diff even runs; a hard failure (rc>=2, a real
+    # abi_snapshot.py error) would mean the baseline was never resolved.
+    assert proc.returncode in (0, 1), proc.stdout + proc.stderr
+
+    released = [
+        p
+        for p in (REPO / "docs" / "abi").glob("v*-snapshot.json")
+        if p.name != f"{current}-snapshot.json"
+    ]
+    assert released, "no released snapshot on disk to compare against"
+
+    def _key(p: Path) -> tuple[int, int]:
+        m = re.match(r"v(\d+)\.(\d+)-snapshot\.json$", p.name)
+        assert m, f"unexpected snapshot filename: {p.name}"
+        return (int(m.group(1)), int(m.group(2)))
+
+    expected = max(released, key=_key)
+    assert f"Comparing current ABI against docs/abi/{expected.name}" in proc.stdout, (
+        f"expected the gate to pick {expected.name} as the last released "
+        f"snapshot; got:\n{proc.stdout}"
+    )
+
+
 def _run_freeze_gate(baseline_path: Path, payload: dict) -> subprocess.CompletedProcess:
     """Write `payload` to `baseline_path` (a throwaway file under the
     real docs/abi/ -- the step's `python3 scripts/abi_snapshot.py`
