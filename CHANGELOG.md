@@ -7,6 +7,43 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.14.0 candidate
 
+### Added — debug-probe identity (`jlink_device`, `pyocd_target`) on the Alif Ensemble SoC specs (#987)
+
+`alp-sdk-vscode` generates a `cortex-debug` `launch.json` from board metadata,
+but the SEGGER J-Link device name and the pyOCD target id had no source
+anywhere in `metadata/` — the extension emitted `"<resolved-device>"` /
+`"<resolved-target-id>"` literal placeholders and every probe-based launch
+config needed a manual edit before it would start.
+
+`metadata/schemas/soc-spec-v1.schema.json` grows an optional `debug:` block
+on `variants[]` (not the SoC top level, and not a `cores[]` item schema,
+since a `pyocd_target` is per orderable SKU and a `jlink_device` is per SKU
+**and** per core view — the E8 alone has two variants and two J-Link device
+profiles per variant). `jlink_device` is an object keyed by `cores[].id`
+rather than a bare string, since a J-Link device profile usually names one
+specific core on a multi-core part. `openocd_config` is schema-only for now:
+verified absent from OpenOCD upstream `master`'s `tcl/target/` + `tcl/board/`
+for both Alif Ensemble and Renesas RZ/V2N.
+
+`pyocd_target` is populated for all thirteen Alif Ensemble variants (E3–E8)
+from the CMSIS-Pack index (`AlifSemiconductor.Ensemble` 2.2.0) — every
+`order_code` in this repo matches a pack part name exactly, so the target id
+**is** the order code. `jlink_device` is populated only where a bench-proven
+`board.cmake` evidences it — the E8, E6, and E4 M55-HP boards, plus the E8
+M55-HE board — publishing the part-specific SEGGER profile the maintainer
+chose over the generic `Cortex-M55` debug default. E3, E5, E7, every A32
+cluster, and the Renesas RZ/V2N (`n44.json`, no J-Link runner in tree at
+all) carry no `jlink_device`: no board evidences a profile for them, and a
+guessed value "fails at the probe rather than at validation" — the design
+principle the source issue states outright. Absence is deliberate and
+publishable, not a gap to fill by extrapolation.
+
+New semantic gate `validate_metadata._check_soc_debug_probe_identity`
+(alongside the existing `_check_soc_npu_pairing`) asserts that every
+`variants[].debug.jlink_device` key names a real `cores[].id` on that SoC —
+JSON Schema can express the value shape but not that cross-reference.
+Covered by `tests/scripts/test_soc_debug_probe_identity.py`.
+
 ### Fixed — the renode gate installed Renode and asserted nothing (#974)
 
 Every e2e step in the three renode workflows was an `echo ::notice::` no-op

@@ -168,7 +168,8 @@
         "SRAM6": 2048, "SRAM7": 512, "SRAM8": 2048, "SRAM9": 768
       },
       "gpio_18v": 120,
-      "shipment_suffixes": ["-T", "-Y"]
+      "shipment_suffixes": ["-T", "-Y"],
+      "debug": { "pyocd_target": "AE722F80F55D5AS" }
     },
     {
       "order_code": "AE722F80F55D5LS",
@@ -184,7 +185,8 @@
       },
       "gpio_18v": 120,
       "shipment_suffixes": ["-T", "-Y"],
-      "alp_module_skus": ["E1M-AEN701"]
+      "alp_module_skus": ["E1M-AEN701"],
+      "debug": { "pyocd_target": "AE722F80F55D5LS" }
     }
   ],
   "notes": [

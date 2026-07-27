@@ -151,7 +151,8 @@
       },
       "gpio_18v": 120,
       "optional_features": { "npu_hp": true, "can_fd": true },
-      "shipment_suffixes": ["-T", "-Y"]
+      "shipment_suffixes": ["-T", "-Y"],
+      "debug": { "pyocd_target": "AE302F80F55D5AE" }
     },
     {
       "order_code": "AE302F80F5582AE",
@@ -166,7 +167,8 @@
       },
       "gpio_18v": 120,
       "optional_features": { "npu_hp": true, "can_fd": true },
-      "shipment_suffixes": ["-T", "-Y"]
+      "shipment_suffixes": ["-T", "-Y"],
+      "debug": { "pyocd_target": "AE302F80F5582AE" }
     },
     {
       "order_code": "AE302F80F55D5LE",
@@ -183,7 +185,8 @@
       "gpio_18v": 120,
       "optional_features": { "npu_hp": true, "can_fd": true },
       "shipment_suffixes": ["-T", "-Y"],
-      "alp_module_skus": ["E1M-AEN301"]
+      "alp_module_skus": ["E1M-AEN301"],
+      "debug": { "pyocd_target": "AE302F80F55D5LE" }
     },
     {
       "order_code": "AE302F80F5582LE",
@@ -198,7 +201,8 @@
       },
       "gpio_18v": 120,
       "optional_features": { "npu_hp": true, "can_fd": true },
-      "shipment_suffixes": ["-T", "-Y"]
+      "shipment_suffixes": ["-T", "-Y"],
+      "debug": { "pyocd_target": "AE302F80F5582LE" }
     },
     {
       "order_code": "AE302F80C1557LE",
@@ -213,7 +217,8 @@
       },
       "gpio_18v": 120,
       "optional_features": { "npu_hp": true, "can_fd": false },
-      "shipment_suffixes": ["-T", "-Y"]
+      "shipment_suffixes": ["-T", "-Y"],
+      "debug": { "pyocd_target": "AE302F80C1557LE" }
     },
     {
       "order_code": "AE302F40C1537LE",
@@ -228,7 +233,8 @@
       },
       "gpio_18v": 120,
       "optional_features": { "npu_hp": false, "can_fd": false },
-      "shipment_suffixes": ["-T", "-Y"]
+      "shipment_suffixes": ["-T", "-Y"],
+      "debug": { "pyocd_target": "AE302F40C1537LE" }
     }
   ],
   "notes": [

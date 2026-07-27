@@ -365,6 +365,50 @@ def _check_soc_npu_pairing(soc_files) -> list:
     return failures
 
 
+def _check_soc_debug_probe_identity(soc_files) -> list:
+    """Cross-ref `variants[].debug.jlink_device` keys against `cores[].id`.
+
+    #987 publishes the debug-probe identity (J-Link device, pyOCD target)
+    per variant, with `jlink_device` keyed by core id since a J-Link device
+    profile usually names one specific core view on a multi-core part (e.g.
+    the E8's `..._HP` vs `..._HE` profiles).  JSON Schema can express that
+    `jlink_device` is an object of string values but not that its *keys*
+    are real cores on *this* SoC -- a typo (or a stale key surviving a core
+    rename) would silently point the extension's launch-config generator at
+    a core that does not exist.  Enforce it here.
+
+    Returns a failure list shaped like `_check_files()`.
+    """
+    failures: list[tuple[Path, list[str]]] = []
+    for path in soc_files:
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        variants = doc.get("variants") or []
+        if not variants:
+            continue
+        rel = path.relative_to(REPO).as_posix()
+        core_ids = {c.get("id") for c in (doc.get("cores") or []) if c.get("id")}
+        msgs: list[str] = []
+
+        for i, v in enumerate(variants):
+            jlink_device = ((v.get("debug") or {}).get("jlink_device")) or {}
+            for core_id in jlink_device:
+                if core_id not in core_ids:
+                    msgs.append(
+                        f"variants[{i}] ({v.get('order_code')}): "
+                        f"debug.jlink_device key {core_id!r} is not a "
+                        f"cores[].id (known: {sorted(core_ids)})")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+    return failures
+
+
 def _check_chip_physical(chip_files) -> list:
     """Semantic cross-checks for chip `physical:` block (pin/passive→signal resolution + pad uniqueness).
 
@@ -751,6 +795,8 @@ def main() -> int:
     )
     # Semantic cross-ref the schema can't express: npus[].paired_core -> cores[].
     soc_failures += _check_soc_npu_pairing(soc_files)
+    # Semantic cross-ref the schema can't express: variants[].debug.jlink_device keys -> cores[].
+    soc_failures += _check_soc_debug_probe_identity(soc_files)
 
     # SoM preset files (YAML) against som-preset v1.
     som_validator = None
