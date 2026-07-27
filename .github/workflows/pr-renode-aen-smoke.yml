@@ -4,28 +4,35 @@
 #
 # Builds examples/peripheral-io/hello-world for the M55-HP Zephyr
 # slice LOCALLY (plain `west build`, mirroring pr-renode-sim-mode.yml's
-# AEN M55 ITCM-run image step) -- this still proves the example
-# compiles for the M55-HP slice.
+# AEN M55 ITCM-run image step), then actually boots the resulting ELF
+# under the pinned Renode v1.16.1 and asserts on the log (issue #974).
+# `tan renode` is NOT needed for this: the .resc descriptor is
+# hand-runnable by its own header, so the e2e below drives Renode
+# directly with plain `renode --console --disable-xwt --plain`.
 #
-# PENDING (tan-cli#77): the actual headless Renode boot + "[hello]
-# done" UART5-console assertion used to run via `tan build --native` +
-# `tan renode ... --expect "[hello] done"` (ADR-0020 Phase 4 retired
-# the SDK-side `west alp-build`/`west alp-renode` executor this
-# workflow used to drive before that).  `tan renode` is the designated
-# successor but is still a stub there, so the e2e step below is
-# intentionally a no-op until tan-cli#77 closes -- see
-# pr-renode-sim-mode.yml for the same pattern.
+# What the e2e asserts, and why (metadata/renode/alif_ensemble_e8.resc
+# documents the derivation these lines come from):
+#   - PRESENT "Setting initial values: PC = 0x" -- Renode read SP/PC
+#     from the seeded vector table (CortexM.cs, logged synchronously
+#     inside the .resc's own `start`, so pause+quit right after the
+#     include is not a race against this line).
+#   - ABSENT  "CPU was halted" -- the seed was usable (PC/SP nonzero
+#     and PC lands in loaded memory); this is the failure string from
+#     the same code path.
+#   - ABSENT  "Guessing VectorTableOffset value to be 0x" -- the
+#     descriptor's own `$vtor` seed applied; this string means Renode
+#     fell back to inferring VTOR from the lowest LOAD vaddr, exactly
+#     the condition #947 exists to eliminate (and the condition that
+#     shipped green before this gate existed -- #953's first attempt
+#     hardcoded `$vtor ?= 0x80010000`, 64 KiB inside the image's own
+#     `.text`, and nothing here contradicted it).
 #
-# !! ADVISORY until the M55 boot is validated on a Renode-equipped
-#    runner; flip to required once green.
-#
-# What IS already validated elsewhere, not this advisory job: `tan
-# renode`'s own deterministic logic (manifest parsing, ELF-path
-# resolution, family->descriptor mapping, command-line construction,
-# and the missing-renode-binary error path) is covered by tan-cli's
-# own test suite now that the SDK-side `west alp-renode` Python
-# wrapper (formerly tested by tests/scripts/test_alp_renode.py) was
-# retired in ADR-0020 Phase 4.
+# !! ADVISORY, not required, while this pattern proves itself. It
+#    graduates to required (folding into `renode ·
+#    V2N101 --sim-mode socket contract`, the actual required context)
+#    once it has run green across a handful of PRs that touch a
+#    renode path -- see issue #974's recommended order. Until then a
+#    flaky emulator run here cannot block anyone's merge.
 
 name: pr-renode-aen-smoke
 
@@ -35,6 +42,16 @@ on:
     paths:
       - 'metadata/renode/**'
       - 'examples/peripheral-io/hello-world/**'
+      # The boot assertion is now downstream of these two: the overlay
+      # picks the ITCM link that dodges the v1.16.1 high-VTOR defect,
+      # and the conf enables the banner the job's build step relies on
+      # existing. Both were already `west build` inputs before this
+      # change but weren't gated -- now that a change to either can
+      # change what the e2e boots (and so what it asserts), they belong
+      # in the filter too. Nothing else under tests/renode/ is consumed
+      # by this job.
+      - 'tests/renode/aen_m55_itcm_run.overlay'
+      - 'tests/renode/aen_m55_sim.conf'
       - '.github/workflows/pr-renode-aen-smoke.yml'
   workflow_dispatch:
 
@@ -141,11 +158,15 @@ jobs:
       # Build the M55-HP slice locally (west, not tan).  ITCM-linked
       # (chosen zephyr,flash = &itcm), same overlay/conf pair as
       # pr-renode-sim-mode.yml's AEN M55 image -- dodges Renode 1.16.1's
-      # high-VTOR Cortex-M55 bug so the ELF stays boot-ready once the
-      # e2e below is un-stubbed.
+      # high-VTOR Cortex-M55 bug so the ELF stays boot-ready for the
+      # e2e boot below.
+      #
+      # No `continue-on-error` here (there used to be one): the e2e
+      # step now actually boots this ELF, so a build failure must fail
+      # the job, not be swallowed and handed to a no-op next step that
+      # always went green regardless.
       - name: Build hello-world (M55-HP ITCM-run image)
         id: build_fw
-        continue-on-error: true
         working-directory: ${{ github.workspace }}/alp-sdk
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyr
@@ -160,12 +181,68 @@ jobs:
                  -DEXTRA_CONF_FILE="${GITHUB_WORKSPACE}/alp-sdk/tests/renode/aen_m55_sim.conf"
           test -f /tmp/aen-smoke-build/zephyr/zephyr.elf
 
-      # PENDING (tan-cli#77): the headless boot + "[hello] done"
-      # UART5-console assertion used to run via `tan build --native` +
-      # `tan renode ... --expect "[hello] done"` -- both retired from
-      # this repo (ADR-0020 Phase 4).  `tan renode` is the designated
-      # successor but is still a stub there -- do not delete this step
-      # silently; flip it back to a real `tan renode ...` invocation
-      # once the stub lands.
-      - name: AEN801 M55-HP Renode boot e2e [PENDING tan-cli#77]
-        run: echo "::notice::[PENDING tan-cli#77] tan renode e2e is covered in tan-cli CI"
+      # Boot the ELF headless and assert on the log (issue #974). This
+      # drives Renode directly, no `tan renode` involved -- the .resc is
+      # hand-runnable by its own header (metadata/renode/
+      # alif_ensemble_e8.resc:1-16).
+      #
+      # Termination: the .resc ends in `start`, which is non-blocking,
+      # so control returns to the monitor as soon as the CPU is seeded
+      # -- and the three lines this step greps for are all logged
+      # SYNCHRONOUSLY inside that `start` call, before it returns
+      # (CortexM.cs seeds/reports PC+SP or halts at machine-start, not
+      # on a later tick). So `pause` immediately after the include is
+      # not racing those log lines -- they're already flushed by the
+      # time `i @resc` returns. `pause` is used instead of `emulation
+      # RunFor` because the descriptor already called `start`: RunFor
+      # errors ("this action is not available when emulation is already
+      # started") against a running emulation, `pause` does not. The
+      # outer `timeout 120` is a backstop for a genuine hang, not the
+      # normal exit path -- pause+quit has exited 0 on every observed
+      # run.
+      - name: AEN801 M55-HP Renode boot e2e
+        timeout-minutes: 5
+        working-directory: ${{ github.workspace }}/alp-sdk
+        run: |
+          set -uo pipefail
+          ELF=/tmp/aen-smoke-build/zephyr/zephyr.elf
+          if [ ! -f "${ELF}" ]; then
+            echo "::error::AEN801 M55-HP Renode boot e2e: ${ELF} is missing -- the 'Build hello-world (M55-HP ITCM-run image)' step did not produce it."
+            exit 1
+          fi
+
+          timeout 120 "$HOME/renode/renode" --console --disable-xwt --plain \
+              -e "\$repl=@metadata/renode/alif_ensemble_e8.repl" \
+              -e "\$elf=@${ELF}" \
+              -e "i @metadata/renode/alif_ensemble_e8.resc" \
+              -e "pause" \
+              -e "quit" > renode-boot.log 2>&1
+          RC=$?
+          if [ "${RC}" -ne 0 ]; then
+            echo "::error::AEN801 M55-HP Renode boot e2e: renode exited ${RC} -- see the renode-boot-log artifact."
+            exit 1
+          fi
+
+          if ! grep -q "Setting initial values: PC = 0x" renode-boot.log; then
+            echo "::error::AEN801 M55-HP Renode boot e2e: 'Setting initial values: PC = 0x' not found -- the vector table was never seeded. See the renode-boot-log artifact."
+            exit 1
+          fi
+          if grep -q "CPU was halted" renode-boot.log; then
+            echo "::error::AEN801 M55-HP Renode boot e2e: 'CPU was halted' found -- the PC/SP seed was unusable. See the renode-boot-log artifact."
+            exit 1
+          fi
+          if grep -q "Guessing VectorTableOffset value to be 0x" renode-boot.log; then
+            echo "::error::AEN801 M55-HP Renode boot e2e: 'Guessing VectorTableOffset value to be 0x' found -- the descriptor's \$vtor seed did not apply and Renode fell back to inference (the condition #947 exists to eliminate). See the renode-boot-log artifact."
+            exit 1
+          fi
+
+          echo "::notice::AEN801 M55-HP Renode boot e2e: vector table seeded, no halt, no VTOR guess fallback."
+
+      - name: Upload Renode boot log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: renode-boot-log
+          path: alp-sdk/renode-boot.log
+          retention-days: 14
+          if-no-files-found: ignore
