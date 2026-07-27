@@ -300,6 +300,7 @@ jobs:
           # "alif:ensemble:e8" -> metadata/socs/alif/ensemble/e8.json),
           # and compare its topology keys against that SoC s id set.
           failures = []
+          unresolved = []
           for sf in (root / "metadata/e1m_modules").glob("*.yaml"):
               with sf.open() as fh:
                   preset = yaml.safe_load(fh) or {}
@@ -307,9 +308,14 @@ jobs:
               if not topology:
                   continue
               silicon = preset.get("silicon") or ""
+              # NOTE: this vendor:family:part -> metadata/socs/<v>/<f>/<p>.json
+              # resolution duplicates scripts/alp_project_loader.py's
+              # _resolve_silicon_variant() and resolve_capabilities() (a
+              # third hand-rolled copy). Not extracted here; see #997.
               soc_path = (root / "metadata/socs" / (silicon.replace(":", "/") + ".json")).as_posix() if silicon else ""
               if soc_path not in soc_cores:
-                  print(f"NOTE: {sf} -> silicon={silicon!r} not yet resolvable; skipping.")
+                  print(f"::error::{sf}: silicon={silicon!r} does not resolve to a metadata/socs/ spec; topology cannot be cross-checked")
+                  unresolved.append(sf.as_posix())
                   continue
               expected = soc_cores[soc_path]
               actual = set(topology.keys())
@@ -317,7 +323,7 @@ jobs:
                   failures.append((sf.as_posix(), soc_path, expected, actual))
           for sf, sp, exp, act in failures:
               print(f"::error::topology mismatch in {sf}: SoC {sp} declares cores={sorted(exp)}, topology has {sorted(act)}")
-          sys.exit(1 if failures else 0)
+          sys.exit(1 if failures or unresolved else 0)
           '
 
       # Unit-test the loader contract -- schema pass/fail, missing-
