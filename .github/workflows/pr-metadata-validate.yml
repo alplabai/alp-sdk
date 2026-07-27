@@ -17,9 +17,11 @@ on:
       - 'examples/**/board.yaml'
       - 'include/alp/boards/**'
       - 'include/alp/chips/**'
+      - 'zephyr/boards/alp/**'
       - '.github/workflows/pr-metadata-validate.yml'
       - 'scripts/validate_metadata.py'
       - 'scripts/validate_board_yaml.py'
+      - 'scripts/check_board_target_tree_parity.py'
       - 'scripts/alp_project.py'
       - 'scripts/alp_orchestrate/**'
       - 'scripts/check_emit_snapshots.py'
@@ -51,7 +53,9 @@ on:
       - 'examples/**/board.yaml'
       - 'include/alp/boards/**'
       - 'include/alp/chips/**'
+      - 'zephyr/boards/alp/**'
       - 'scripts/validate_board_yaml.py'
+      - 'scripts/check_board_target_tree_parity.py'
       - 'scripts/alp_project.py'
       - 'scripts/check_stub_symbol_matrix.py'
       - 'src/common/stub_backend.c'
@@ -349,6 +353,9 @@ jobs:
 
       - name: Gate — chip driver <-> metadata manifest parity
         run: python3 scripts/check_chip_manifest_parity.py
+
+      - name: "Gate — SoM preset board: targets resolve to a real board tree"
+        run: python3 scripts/check_board_target_tree_parity.py
 
       - name: Gate — chip header driver-status labels match metadata
         run: python3 scripts/check_chip_header_status.py
