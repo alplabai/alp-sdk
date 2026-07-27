@@ -7,6 +7,32 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.14.0 candidate
 
+### Added — advisory gate: alp-sdk's documented `tan` surface vs a real, installed `tan`
+
+alp-sdk deliberately tracks tan-cli's `latest` (`docs/cli.md` argues why, and
+that decision stands) — a tan release changes documented CLI behaviour
+immediately, with no version pin to buffer alp-sdk's docs from it, and
+nothing checked that the two stayed in sync. `parity-seam1.yml` diffs this
+checkout's own `--emit build-plan` against a frozen oracle; it never invokes
+`tan` at all.
+
+New `scripts/check_tan_docs_surface.py` extracts every `tan <subcommand>`
+mention and docs/cli.md-tabulated flag from `README.md`, `docs/cli.md`,
+`docs/getting-started.md`, `docs/troubleshooting.md`, and
+`scripts/bootstrap.sh`'s printed next-steps block, then asserts each one
+still exists and parses (`tan <verb> --help`, exit 0; the flag string
+present in that help output) against a real `tan` installed by `docs/cli.md`'s
+own documented `install.sh` path. It deliberately does not check output
+text, exit codes, or semantic behaviour — see the script's own docstring for
+the full scope and what's excluded. New `.github/workflows/tan-docs-drift.yml`
+runs it on a daily schedule (tan can drift with no alp-sdk commit at all)
+plus path-filtered on PRs touching the doc sources themselves.
+
+**Advisory only** — not a required context on `dev` or `main`. It already
+surfaces real, pre-existing drift on its first run: `tan emit` was renamed
+to `tan generate`, and `tan new-som`'s SoM-porting flags are forwarded args
+rather than native clap options. Fixing that is separate follow-up work.
+
 ### Added — debug-probe identity (`jlink_device`, `jlink_flash_device`, `pyocd_target`) on the Alif Ensemble SoC specs (#987)
 
 `alp-sdk-vscode` generates a `cortex-debug` `launch.json` from board metadata,
