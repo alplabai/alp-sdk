@@ -60,7 +60,12 @@ when:
      hardcoded exemption list, and `prerequisites.*`/`_comment` are excluded
      from this scan the same as from the read-scan above (the former is
      gate-asserted equal on purpose by point 6's own checks, so a repeat
-     there is by design, not drift).
+     there is by design, not drift). `env` and `nativeLibHints` are ALSO
+     exempt from this scan, for the same reason point 8 gives them their own
+     dedicated group-consumption check instead of the generic per-leaf walk:
+     `_iter_leaf_paths` stops recursion at those two group names, so no
+     per-field leaf (e.g. `env.ZEPHYR_BASE`) is ever produced for either
+     assertion to see.
   8. `nativeLibHints`'s own group-level consumption bar is broken: the
      manifest's OS key set no longer matches bootstrap.sh's `for os_key in
      (...)` loop, or bootstrap.sh no longer references the "note"/"command"
@@ -927,14 +932,18 @@ def _check_install_commands(manifest: dict) -> list[str]:
 
 
 def _iter_leaf_paths(obj, prefix: str = ""):
-    """Yield every leaf (dotted-path) in the manifest, stopping recursion at
-    `_GROUP_LEAF_PATHS` (consumed as a whole sub-tree, not field-by-field)."""
+    """Yield every (dotted-path, value) leaf pair in the manifest, stopping
+    recursion at `_GROUP_LEAF_PATHS` (consumed as a whole sub-tree, not
+    field-by-field). Yielding the value alongside its path -- rather than
+    making a caller re-walk the same path with a separate lookup helper --
+    is deliberate: the only consumer (`_check_no_orphaned_leaves`) needs
+    both together, and a second walk of the same tree is pure duplication."""
     if isinstance(obj, dict) and prefix not in _GROUP_LEAF_PATHS:
         for key, value in obj.items():
             child = f"{prefix}.{key}" if prefix else key
             yield from _iter_leaf_paths(value, child)
     else:
-        yield prefix
+        yield prefix, obj
 
 
 def _bash_needle(leaf: str) -> str:
@@ -956,7 +965,7 @@ def _ps1_needle(leaf: str) -> str:
 # narrower rule that needs none: every leaf value in the manifest today
 # that is genuinely short-and-generic stays under it, while the fragment
 # that shipped duplicated for as long as it did -- the Arm GNU Toolchain
-# installer URL in `manualInstallHints.windows.note`, 68 characters -- and
+# installer URL in `manualInstallHints.windows.note`, 65 characters -- and
 # every other today's-manifest fragment worth policing (long paths, long
 # URLs, long sentences-as-a-whole) clears it easily. Swept against the real
 # repo (see the test suite) with zero false positives at this value.
@@ -995,13 +1004,6 @@ def _distinctive_literals(value) -> set[str]:
     return out
 
 
-def _leaf_value(manifest: dict, leaf: str):
-    obj = manifest
-    for part in leaf.split("."):
-        obj = obj[part]
-    return obj
-
-
 def _check_no_orphaned_leaves(manifest: dict) -> list[str]:
     """Generalisation of "is this fact actually read by anything" past just
     `env`/`nativeLibHints` (issue #917 review finding: `west.pipSpec` shipped
@@ -1033,7 +1035,13 @@ def _check_no_orphaned_leaves(manifest: dict) -> list[str]:
     that constant's own comment for why a length floor was chosen over a
     hardcoded exemption list) -- it still has to clear the first assertion
     above (demonstrably read by at least one script), which a hardcoded
-    duplicate does not by itself defeat.
+    duplicate does not by itself defeat. KNOWN LIMIT, separately: neither
+    assertion here ever sees a leaf under `env` or `nativeLibHints` at all --
+    `_iter_leaf_paths` stops recursion at those two group names (see
+    `_GROUP_LEAF_PATHS`), so a duplicate of, say, `env.ZEPHYR_BASE` is
+    outside this check's reach; `_check_native_lib_hints_consumption` gives
+    `nativeLibHints` its own dedicated consumption bar, but no equivalent
+    duplicate-literal scan exists for either group today.
     """
     if not BOOTSTRAP_SH.is_file():
         return [f"missing {BOOTSTRAP_SH.relative_to(REPO).as_posix()}"]
@@ -1044,7 +1052,7 @@ def _check_no_orphaned_leaves(manifest: dict) -> list[str]:
     sh_scannable = list(_iter_scannable_lines(sh_text))
     ps1_scannable = list(_iter_scannable_lines(ps1_text))
     problems = []
-    for leaf in _iter_leaf_paths(manifest):
+    for leaf, value in _iter_leaf_paths(manifest):
         if leaf in _STRUCTURAL_LEAVES or leaf.startswith(_GATE_ASSERTED_LEAF_PREFIX):
             continue
         sh_needle = _bash_needle(leaf)
@@ -1056,7 +1064,7 @@ def _check_no_orphaned_leaves(manifest: dict) -> list[str]:
                 f"-- wire it up, or add it to the allowlist in this gate with a reason"
             )
             continue
-        for literal in sorted(_distinctive_literals(_leaf_value(manifest, leaf))):
+        for literal in sorted(_distinctive_literals(value)):
             for rel, scannable in (
                 (BOOTSTRAP_SH.relative_to(REPO).as_posix(), sh_scannable),
                 (BOOTSTRAP_PS1.relative_to(REPO).as_posix(), ps1_scannable),
@@ -1067,7 +1075,7 @@ def _check_no_orphaned_leaves(manifest: dict) -> list[str]:
                     problems.append(
                         f"{rel}:{lineno}: hardcodes {literal!r}, a fragment of "
                         f"metadata/bootstrap.json leaf {leaf!r}, outside a comment -- this "
-                        f"leaf is already read from the manifest elsewhere in this script; "
+                        f"leaf is already read from the manifest by these scripts; "
                         f"a second, hardcoded copy of the same fact is exactly the drift "
                         f"issue #965 exists to catch -- derive it from the manifest instead"
                     )

@@ -7,6 +7,36 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.14.0 candidate
 
+### Fixed — `check_bootstrap_manifest.py`'s orphaned-leaf scan couldn't tell a correct manifest read from a read sitting beside a hardcoded duplicate (#965)
+
+`_check_no_orphaned_leaves` asked only "is this leaf read by at least one of
+`scripts/bootstrap.sh` / `scripts/bootstrap.ps1`" — a needle-presence check
+that stayed green even when the same fact was *also* hardcoded a second
+time elsewhere in the same script. `scripts/bootstrap.ps1` shipped exactly
+that shape: `manualInstallHints.windows.note`'s Arm-toolchain installer URL
+was both rendered from a genuine manifest read (`$ManifestModule.
+manualInstallHints.windows.note` via the `foreach ($line in
+$ManualInstallNote)` loop) and printed a second time from a hardcoded
+here-string a few lines above it — with a comment between the two claiming
+the opposite of what the code did.
+
+Fixed by adding a second, independent assertion per leaf: for every
+whitespace-delimited fragment of a string leaf's value that is
+`>= _DUPLICATE_LITERAL_MIN_LEN` (20) characters after trimming sentence
+punctuation (`_DUPLICATE_LITERAL_STRIP_CHARS`), both scripts are scanned
+(via the existing heredoc/here-string-aware `_iter_scannable_lines`) for
+that fragment appearing on a CODE line — it can never legitimately appear
+there at all, since both scripts load the manifest at run time and read a
+leaf's value through the parsed object, never by spelling it out as a
+source literal. Zero false positives against the real corpus at the chosen
+length floor; `env`/`nativeLibHints` (consumed as whole groups, not
+per-field) and `prerequisites.*`/`_comment` (already gate-asserted or
+purely structural) stay out of scope, same as the existing read-scan.
+
+`_iter_leaf_paths` now yields `(path, value)` pairs instead of `path`
+alone, so the duplicate-literal scan's value lookup no longer needs a
+second walk of the same tree.
+
 ### Fixed — status-blind DT existence guards (`DT_NODE_EXISTS`, `DT_HAS_CHOSEN`) let 33 backend sites reference a disabled node's device (#966)
 
 `DT_NODE_EXISTS(DT_ALIAS(...))` was used across `src/backends/**` as the

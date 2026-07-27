@@ -1085,6 +1085,39 @@ def test_hardcoded_duplicate_of_read_leaf_fails(tmp_path, monkeypatch, capsys):
     assert "manualInstallHints.windows.note" in err
 
 
+def test_hardcoded_duplicate_of_punctuation_wrapped_leaf_fragment_fails(
+    tmp_path, monkeypatch, capsys
+):
+    """`_DUPLICATE_LITERAL_STRIP_CHARS` is what makes the duplicate scan
+    above catch a fact that only appears in the manifest wrapped in sentence
+    punctuation. `manualInstallHints.windows.note` carries "...install them
+    (see docs/cross-platform-setup.md); WARN-only..." -- the raw
+    whitespace-delimited token is `(see` / `docs/cross-platform-setup.md);`,
+    not the bare doc path. Without the strip, the literal search key stays
+    `docs/cross-platform-setup.md);` (with its wrapping punctuation) and a
+    hardcoded duplicate that spells the bare path -- exactly how a script
+    would legitimately reference the doc, and exactly how a real duplicate
+    would read -- goes uncaught. Injecting the bare path as a hardcoded
+    duplicate here must fail; `_DUPLICATE_LITERAL_STRIP_CHARS = ""` must
+    turn this RED (see the constant's own mutation-testing note)."""
+    _scaffold(tmp_path)
+    ps1_path = tmp_path / "scripts/bootstrap.ps1"
+    needle = "foreach ($line in $ManualInstallNote) {"
+    duplicate_block = (
+        '@"\n\n'
+        "  # See docs/cross-platform-setup.md for manual Windows toolchain steps.\n\n"
+        '"@ | Write-Host\n'
+    )
+    _replace(ps1_path, needle, duplicate_block + needle)
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "scripts/bootstrap.ps1" in err
+    assert "docs/cross-platform-setup.md" in err
+    assert "manualInstallHints.windows.note" in err
+
+
 def test_short_leaf_fragment_duplicate_is_not_flagged(tmp_path, monkeypatch, capsys):
     """Fixture-assumption + design guard: `west.extensionGuardCommand`
     ("alp-migrate", 11 chars) is BOTH read from the manifest (via
