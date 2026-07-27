@@ -128,12 +128,12 @@ Rules of thumb:
   `ipc-contract-h`, `dts-reservations`, `dts-partitions`,
   `storage-mounts-c`, `tfm-sysbuild-conf`, `build-plan`, `kconfig`).
   Neither front door reaches `hw-info-h`, `west-libraries`,
-  `composed-route-table`, or `scaffold` -- those remaining
-  `alp_project.py` targets have no `tan` or `west` front door at all;
-  reach them by running the SDK's own Python CLI directly
-  (`python -m alp_cli emit <mode>`, which still exposes the full old
-  catalog).  Same emitters underneath either way -- no front door can
-  ever produce different output for the same mode.
+  `composed-route-table`, `scaffold`, `zephyr-board`, or `os-topology`
+  -- those remaining `alp_project.py` targets have no `tan` or `west`
+  front door at all; reach them by running the SDK's own Python CLI
+  directly (`python -m alp_cli emit <mode>`, which still exposes the
+  full old catalog).  Same emitters underneath either way -- no front
+  door can ever produce different output for the same mode.
 
 ## Verb reference
 
@@ -320,6 +320,7 @@ at all:
 | `west-libraries` | `west.yml` fragment for `libraries:` deps | `alp_project.py` | `python -m alp_cli emit` only |
 | `composed-route-table` | JSON route-table dump (demonstrator) | `alp_project.py` | `python -m alp_cli emit` only |
 | `scaffold` | New-project `{path, contents}[]` envelope for a template (`--template`/`--sku`) | `alp_project.py` | `python -m alp_cli emit` only |
+| `zephyr-board` | Per-core Zephyr board tree (`--core` + `--output <dir>`) | `alp_project.py` | `python -m alp_cli emit` only |
 | `os-topology` | Per-core natural-vs-effective OS facts | orchestrator, via `alp_project.py`'s dispatch shim | `python -m alp_cli emit` only |
 
 `os-topology`'s logic still lives in the orchestrator (`emit_os_topology`),
@@ -328,7 +329,7 @@ but it is no longer one of `alp_orchestrate`'s own `--emit` choices
 "invalid choice") and was never in `west alp-emit`'s mode list either --
 it is only dispatched through `alp_project.py`'s v2 shim, so
 `python -m alp_cli emit os-topology` is its only surviving front door.
-The five `python -m alp_cli emit`-only rows
+The six `python -m alp_cli emit`-only rows
 have no `tan` or `west` front door at all; `python -m alp_cli emit
 <mode>` still exposes the full old catalog end to end, including
 `--output`, `--core`, `--template`, and `--sku` -- it is the SDK's own
