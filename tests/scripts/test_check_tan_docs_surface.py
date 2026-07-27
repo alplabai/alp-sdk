@@ -710,6 +710,138 @@ def test_comment_inside_bash_fence_does_not_misparse_as_a_subcommand(tmp_path):
     assert "`tan generate`" not in proc.stdout + proc.stderr
 
 
+def test_comment_inside_unlabeled_fence_does_not_misparse_as_a_subcommand(tmp_path):
+    """Same false-positive shape as the ```bash test above, but the fence
+    carries NO language tag at all -- proves comment-tail stripping is not
+    gated on a fence-language allowlist (alp-sdk#994-adjacent finding: a
+    ```bash/```sh/```shell-only allowlist reproduces the exact same false
+    positive one fence tag away, since it's a denylist wearing a different
+    hat). `docs/cli.md` has real unlabeled fences (`tan doctor --build`
+    sample output) today; a comment sentence in one of those must not
+    misparse either."""
+    doc_root = tmp_path / "repo"
+    _write_docroot(doc_root)
+    cli_md = doc_root / "docs" / "cli.md"
+    cli_md.write_text(
+        cli_md.read_text(encoding="utf-8")
+        + textwrap.dedent(
+            """
+
+            ```
+            # use its own top-level tan verb -- NOT tan generate
+            tan build
+            ```
+            """
+        ),
+        encoding="utf-8",
+    )
+    tan_bin = _write_fake_tan(tmp_path / "bin", recognized=_ALL_RECOGNIZED, missing=set())
+
+    proc = _run(doc_root, tmp_path / "bin")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "`tan verb`" not in proc.stdout + proc.stderr
+    assert "`tan generate`" not in proc.stdout + proc.stderr
+
+
+def test_multitoken_span_stopword_is_not_treated_as_a_verb_in_cli_md(tmp_path):
+    """docs/cli.md's own reference-quality scan trusts a MULTI-token inline
+    span (`` `tan <verb> <more>` ``) unconditionally -- before this fix that
+    path never subtracted `_ENGLISH_STOPWORDS`, so a stray bare sentence
+    like `` `tan is the executor` `` (no fence, no `#`) minted a fake `tan
+    is` subcommand. The module docstring names this exact span as the
+    residual case `_ENGLISH_STOPWORDS` exists to catch; this proves it
+    actually does on the multi-token path, not just the bare one."""
+    doc_root = tmp_path / "repo"
+    _write_docroot(doc_root)
+    cli_md = doc_root / "docs" / "cli.md"
+    cli_md.write_text(
+        cli_md.read_text(encoding="utf-8")
+        + "\nNote that `tan is the executor` for build slices.\n",
+        encoding="utf-8",
+    )
+    tan_bin = _write_fake_tan(tmp_path / "bin", recognized=_ALL_RECOGNIZED, missing=set())
+
+    proc = _run(doc_root, tmp_path / "bin")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "`tan is`" not in proc.stdout + proc.stderr
+
+
+def test_bare_span_stopword_in_table_row_is_not_treated_as_a_verb_in_cli_md(tmp_path):
+    """Sibling to the multi-token case above, for the OTHER path that reads
+    `_ENGLISH_STOPWORDS` in `extract_cli_md_referenced_subcommands`: a bare
+    two-word span (`` `tan is` ``, nothing else) sitting in a table CELL is
+    reference-quality by the table-row rule, so a stray stopword there must
+    also be filtered -- not just the multi-token sentence case."""
+    doc_root = tmp_path / "repo"
+    _write_docroot(doc_root)
+    cli_md = doc_root / "docs" / "cli.md"
+    cli_md.write_text(
+        cli_md.read_text(encoding="utf-8")
+        + textwrap.dedent(
+            """
+
+            | Note | Detail |
+            |---|---|
+            | Reminder | `tan is` the standalone executor, not a subcommand |
+            """
+        ),
+        encoding="utf-8",
+    )
+    tan_bin = _write_fake_tan(tmp_path / "bin", recognized=_ALL_RECOGNIZED, missing=set())
+
+    proc = _run(doc_root, tmp_path / "bin")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "`tan is`" not in proc.stdout + proc.stderr
+
+
+def test_front_door_row_skip_is_named_in_ok_line(tmp_path):
+    """The front-door row skip (a table row inside a verb's own section that
+    names `python -m alp_cli` / `west alp-*` / `alp_orchestrate` and is
+    therefore not attributed to the section's own verb) must be visible in
+    the OK line, the same way the forwarding-verb flag-check skip already
+    is named there -- an unannounced exclusion is easy to mistake for full
+    coverage."""
+    doc_root = tmp_path / "repo"
+    (doc_root / "docs").mkdir(parents=True)
+    (doc_root / "scripts").mkdir(parents=True)
+    (doc_root / "README.md").write_text(
+        "`tan generate` writes a config artefact.\n", encoding="utf-8",
+    )
+    (doc_root / "docs" / "getting-started.md").write_text(
+        "No commands documented yet.\n", encoding="utf-8",
+    )
+    (doc_root / "docs" / "troubleshooting.md").write_text(
+        "No commands documented yet.\n", encoding="utf-8",
+    )
+    (doc_root / "scripts" / "bootstrap.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    (doc_root / "docs" / "cli.md").write_text(
+        textwrap.dedent(
+            """\
+            # The `tan` CLI
+
+            ### `tan generate` -- materialise a board-derived config artefact
+
+            | Mode | Artefact | Owned by | Reachable via |
+            |---|---|---|---|
+            | `scaffold` | New-project envelope for a template (`--template`/`--sku`) | `alp_project.py` | `python -m alp_cli emit` only |
+
+            | Option | Meaning |
+            |---|---|
+            | `--target` | Which target to generate |
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    recognized = {"generate": {"--target"}}
+    tan_bin = _write_fake_tan(tmp_path / "bin", recognized=recognized, missing=set())
+
+    proc = _run(doc_root, tmp_path / "bin")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "generate" in proc.stdout
+    assert "1 row" in proc.stdout
+
+
 def test_real_command_after_a_stripped_comment_is_still_checked(tmp_path):
     """Nearest true positive for comment-tail stripping: a REAL, un-commented
     `tan kconfig --core m55_he` invocation sitting in the SAME fenced block

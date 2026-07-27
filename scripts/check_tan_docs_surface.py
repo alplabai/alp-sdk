@@ -28,20 +28,31 @@ Extraction is mechanical, not a hand-maintained list:
     code (an inline `` `tan foo` `` span or a fenced ```` ``` ```` block) --
     never bare prose (a stray "tan is a standalone..." sentence would
     otherwise misparse "is" as a subcommand).
-  - A `#`-led shell comment tail inside a fenced ```bash/```sh/```shell block,
-    or inside one of bootstrap.sh's heredoc bodies, is stripped BEFORE the
-    `tan <verb>` regex runs over it. Code fences legitimately mix real
-    commands with commentary in the same block (`# also: tan kconfig --core
-    m55_he (its own top-level tan verb -- NOT tan generate, ...)`), and that
-    commentary is English prose, not something a customer types -- structural
-    stripping (a `#` at the start of a word, outside quotes, is a comment;
-    `#!` and a `#` glued to a non-whitespace character or sitting inside
-    quotes is not) means a sentence like "...tan verb..." can never mint a
-    fake `tan verb` subcommand, without hand-maintaining a denylist entry for
-    every English word that happens to follow "tan" in some future comment.
-    The `_ENGLISH_STOPWORDS` set below still exists for the residual case
-    this doesn't reach -- a stray bare inline code span like `` `tan is the
-    executor` `` with no fence and no `#` at all.
+  - A `#`-led shell comment tail inside ANY fenced ``` block -- regardless of
+    its language tag, or the lack of one -- or inside one of bootstrap.sh's
+    heredoc bodies, is stripped BEFORE the `tan <verb>` regex runs over it.
+    Code fences legitimately mix real commands with commentary in the same
+    block (`# also: tan kconfig --core m55_he (its own top-level tan verb --
+    NOT tan generate, ...)`), and that commentary is English prose, not
+    something a customer types -- structural stripping (a `#` at the start
+    of a word, outside quotes, is a comment; `#!` and a `#` glued to a
+    non-whitespace character or sitting inside quotes is not) means a
+    sentence like "...tan verb..." can never mint a fake `tan verb`
+    subcommand, without hand-maintaining a denylist entry for every English
+    word that happens to follow "tan" in some future comment. This is
+    deliberately NOT gated on a fence-language allowlist (```bash/```sh/
+    ```shell/... only): an allowlist here is a denylist wearing a different
+    hat -- the identical false positive reproduces one fence tag away (an
+    unlabeled fence, a ```powershell one), and stripping only ever REMOVES
+    candidate text, so applying it to every fence body stays in the
+    already-documented under-checking direction rather than adding a new
+    over-checking risk (see "Known blind spots" below). The
+    `_ENGLISH_STOPWORDS` set below still exists for the residual case this
+    doesn't reach -- a stray bare inline code span like `` `tan is the
+    executor` `` with no fence and no `#` at all -- and it now also applies to
+    a MULTI-token inline span in docs/cli.md's own reference-quality scan
+    (`` `tan is the executor` `` as a flag/arg-bearing-looking span), not
+    just a bare one.
   - Per-subcommand FLAGS are extracted only from docs/cli.md's own
     `### `tan <verb>` -- ...` verb-reference sections: the verb from the
     heading itself (including a header-embedded flag like
@@ -101,8 +112,14 @@ positive each rule still catches):
     `# also: tan kconfig ...` line is harmless in practice -- `kconfig` is
     also named in a table cell and in prose elsewhere in docs/cli.md -- but
     a doc that named a verb ONLY in a fenced comment would go unchecked).
-    A real, uncommented `tan <verb>` invocation in the same fenced block is
-    still extracted and checked (see
+    The worse unnamed shape of this same gap is the ROOT-PROMPT convention:
+    a fence that shows `# tan bogusverb --core m55` to mean "run this" (a
+    `#`-as-prompt-marker style some shells/docs use, not an English
+    comment) is a REAL invocation a customer types, and this rule silently
+    drops it from the checked surface exactly like it would a genuine
+    comment -- this check cannot tell the two apart structurally. A real,
+    uncommented `tan <verb>` invocation in the same fenced block is still
+    extracted and checked (see
     `test_real_command_after_a_stripped_comment_is_still_checked`).
   - Front-door skip: a table row that documents a REAL `tan <verb>` flag but
     also happens to mention `python -m alp_cli` / `west alp-*` /
@@ -125,6 +142,16 @@ positive each rule still catches):
     positive -- a verb named via a table cell or a flag/arg-bearing span,
     with no heading of its own -- still fires (see
     `test_table_only_verb_with_no_heading_still_catches_drift`).
+    The converse holds too, and is the opposite failure direction: a
+    RETIRED verb named in a table CELL, or with a flag/arg attached (``
+    `tan emit --core m55` `` in prose explaining what the old command used
+    to take), is reference-quality by this same definition and WILL enter
+    the checked surface and fire -- this rule only protects a bare,
+    passing, no-other-structure mention (see
+    `test_retired_verb_bare_prose_mention_does_not_misparse_as_live`); a
+    retired verb narrated with more structure than that still needs the
+    old prose reworded to a form this check doesn't treat as reference
+    quality, or accepted as a known false positive when it lands.
 
 Deliberately OUT of scope (log it here, don't let silence read as coverage):
   - Output TEXT and semantic behaviour (the "Reusing compatible ... workspace"
@@ -133,7 +160,8 @@ Deliberately OUT of scope (log it here, don't let silence read as coverage):
     no Zephyr in its CMake, an unreadable `metadata/bootstrap.json` becoming
     a hard error). Those need a human diffing tan's own CHANGELOG against
     docs/cli.md -- this gate only proves the documented INTERFACE SURFACE
-    (subcommand + flag spelling) still parses, nothing about what it does.
+    (subcommand + flag spelling) still exists and is listed in --help
+    output, nothing about what it does or whether it actually parses.
   - Flags mentioned only in README.md / docs/getting-started.md /
     docs/troubleshooting.md prose (not tabulated in docs/cli.md) -- only
     subcommand EXISTENCE is checked for those files, never a flag, because
@@ -197,7 +225,6 @@ _INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
 _HEREDOC_RE = re.compile(r"<<-?'?(\w+)'?\n(.*?)\n\1\b", re.S)
 _TABLE_FLAG_RE = re.compile(r"`(--[a-zA-Z][a-zA-Z0-9-]*)`")
 _VERB_HEADING_RE = re.compile(r"^#{2,6}\s")
-_SHELL_FENCE_LANGS = {"bash", "sh", "shell", "zsh", "console"}
 # A table row inside a `### `tan <verb>`` section that names one of these
 # OTHER front doors is documenting THAT command's flags, not the section
 # heading verb's -- see the module docstring's "Per-subcommand FLAGS" bullet.
@@ -236,13 +263,21 @@ def _strip_shell_comment_tails(shell_text: str) -> str:
 
 
 def _fence_bodies(markdown_text: str) -> list[str]:
-    """Every fenced code block's body, with a ```bash/```sh/```shell/...
-    fence's `#`-comment tails stripped first (see `_strip_shell_comment_tails`)."""
+    """Every fenced code block's body, with `#`-comment tails stripped first
+    (see `_strip_shell_comment_tails`) REGARDLESS of the fence's language tag
+    (or the lack of one). A language allowlist here (only strip inside
+    ```bash/```sh/```shell/...) is a denylist wearing a different hat: a doc
+    author reaches the exact same false-positive shape one fence tag away
+    (an unlabeled fence, a ```powershell one) just by not spelling the tag
+    the way the allowlist expected. Stripping only ever REMOVES candidate
+    text from the corpus -- it can turn a true positive into a missed one
+    (see the module docstring's "Known blind spots" section) but it can
+    never invent a fake `tan <verb>` mention, so applying it unconditionally
+    stays in the already-documented under-checking direction rather than
+    adding a new over-checking risk."""
     bodies = []
-    for lang, body in _FENCE_RE.findall(markdown_text):
-        if lang.strip().lower() in _SHELL_FENCE_LANGS:
-            body = _strip_shell_comment_tails(body)
-        bodies.append(body)
+    for _lang, body in _FENCE_RE.findall(markdown_text):
+        bodies.append(_strip_shell_comment_tails(body))
     return bodies
 
 
@@ -291,11 +326,12 @@ def extract_cli_md_referenced_subcommands(cli_md_text: str, heading_verbs: set[s
             span = span.strip()
             multi = _MULTI_TOKEN_VERB_SPAN_RE.match(span)
             if multi:
-                trusted.add(multi.group(1))
+                if multi.group(1) not in _ENGLISH_STOPWORDS:
+                    trusted.add(multi.group(1))
                 continue
             if is_table_row:
                 bare = _BARE_VERB_SPAN_RE.match(span)
-                if bare:
+                if bare and bare.group(1) not in _ENGLISH_STOPWORDS:
                     trusted.add(bare.group(1))
     return trusted
 
@@ -334,11 +370,19 @@ def _verbs_in_heading(line: str) -> list[tuple[str, set[str]]]:
     return out
 
 
-def extract_cli_md_verb_flags(cli_md_text: str) -> tuple[set[str], dict[str, set[str]]]:
+def extract_cli_md_verb_flags(
+    cli_md_text: str,
+) -> tuple[set[str], dict[str, set[str]], dict[str, int]]:
     """Return (all verbs named in any `### `tan ...`` heading,
-    {verb: flags tabulated under that verb's OWN single-verb section})."""
+    {verb: flags tabulated under that verb's OWN single-verb section},
+    {verb: count of table rows skipped for naming another front door}).
+    The front-door skip is silent to a doc author unless they know to look
+    for it -- the third return value lets the caller name it in the OK line
+    the same way the forwarding-verb skip already is (see the module
+    docstring's "Per-subcommand FLAGS" bullet and `check_surface`)."""
     all_verbs: set[str] = set()
     verb_flags: dict[str, set[str]] = {}
+    skipped_front_door_rows: dict[str, int] = {}
     current_verb: str | None = None
     for line in cli_md_text.splitlines():
         if _VERB_HEADING_RE.match(line):
@@ -355,12 +399,17 @@ def extract_cli_md_verb_flags(cli_md_text: str) -> tuple[set[str], dict[str, set
             continue
         if current_verb and line.lstrip().startswith("|") and "--" in line:
             if _OTHER_FRONT_DOOR_RE.search(line):
+                skipped_front_door_rows[current_verb] = (
+                    skipped_front_door_rows.get(current_verb, 0) + 1
+                )
                 continue  # this row documents a DIFFERENT front door's flag
             verb_flags[current_verb] |= set(_TABLE_FLAG_RE.findall(line))
-    return all_verbs, verb_flags
+    return all_verbs, verb_flags, skipped_front_door_rows
 
 
-def collect_documented_surface(repo_root: Path) -> tuple[set[str], dict[str, set[str]]]:
+def collect_documented_surface(
+    repo_root: Path,
+) -> tuple[set[str], dict[str, set[str]], dict[str, int]]:
     """Union the documented `tan` subcommand set across every named source,
     and the docs/cli.md-tabulated per-subcommand flags. docs/cli.md's own
     contribution uses the stricter, reference-quality-only extraction (see
@@ -368,7 +417,7 @@ def collect_documented_surface(repo_root: Path) -> tuple[set[str], dict[str, set
     fence+any-inline-span scan the other three DOC_SOURCES use -- it is the
     one source that also narrates CLI history in ordinary prose."""
     cli_md_text = (repo_root / "docs/cli.md").read_text(encoding="utf-8")
-    heading_verbs, verb_flags = extract_cli_md_verb_flags(cli_md_text)
+    heading_verbs, verb_flags, skipped_front_door_rows = extract_cli_md_verb_flags(cli_md_text)
 
     subcommands = extract_cli_md_referenced_subcommands(cli_md_text, heading_verbs)
     for rel in DOC_SOURCES:
@@ -381,7 +430,7 @@ def collect_documented_surface(repo_root: Path) -> tuple[set[str], dict[str, set
     heredoc_found = _TAN_INVOCATION_RE.findall(heredoc_body)
     subcommands |= set(heredoc_found) - _ENGLISH_STOPWORDS
 
-    return subcommands, verb_flags
+    return subcommands, verb_flags, skipped_front_door_rows
 
 
 def _forwards_to_python_backend(help_text: str) -> bool:
@@ -402,7 +451,7 @@ def _forwards_to_python_backend(help_text: str) -> bool:
 
 def check_surface(
     repo_root: Path, tan_bin: str
-) -> tuple[list[str], list[str]]:
+) -> tuple[list[str], list[str], dict[str, int]]:
     """Run `tan <verb> --help` for every documented verb and confirm every
     docs/cli.md-tabulated flag for that verb is listed in its output --
     except a FORWARDING verb (see `_forwards_to_python_backend`), whose flag
@@ -411,14 +460,16 @@ def check_surface(
     OTHER forwarding verbs, so matching it produces both false positives --
     it doesn't name this verb's own flags -- and false negatives -- it stays
     present even if this verb's own forwarded flag support is dropped).
-    Returns (problems, forwarding_verbs_skipped) -- problems empty == all
-    clear on the parts this check can actually verify."""
-    subcommands, verb_flags = collect_documented_surface(repo_root)
+    Returns (problems, forwarding_verbs_skipped, skipped_front_door_rows) --
+    problems empty == all clear on the parts this check can actually
+    verify."""
+    subcommands, verb_flags, skipped_front_door_rows = collect_documented_surface(repo_root)
     if not subcommands:
         return (
             ["no `tan <verb>` mentions found in any doc source -- extraction is "
              "broken, not the documented surface (fix this check, don't ignore it)"],
             [],
+            {},
         )
 
     problems: list[str] = []
@@ -447,7 +498,7 @@ def check_surface(
                     f"`tan {verb} {flag}` -- docs/cli.md documents this flag but it "
                     f"is not listed in `tan {verb} --help`"
                 )
-    return problems, skipped_forwarding
+    return problems, skipped_forwarding, skipped_front_door_rows
 
 
 def main() -> int:
@@ -471,7 +522,7 @@ def main() -> int:
         return 1
 
     repo_root = Path(args.repo_root).resolve()
-    problems, skipped_forwarding = check_surface(repo_root, tan_path)
+    problems, skipped_forwarding, skipped_front_door_rows = check_surface(repo_root, tan_path)
     if problems:
         version_proc = subprocess.run(
             [tan_path, "--version"], capture_output=True, text=True, timeout=10,
@@ -482,18 +533,27 @@ def main() -> int:
             print(f"  · {p}", file=sys.stderr)
         return 1
 
-    skip_note = ""
+    skip_notes = []
     if skipped_forwarding:
         plural = "s" if len(skipped_forwarding) != 1 else ""
-        skip_note = (
-            f" (flag check skipped for forwarding verb{plural} "
+        skip_notes.append(
+            f"flag check skipped for forwarding verb{plural} "
             f"{', '.join(sorted(skipped_forwarding))} -- their `--help` forwards "
-            "to the Python backend and never lists their real flags)"
+            "to the Python backend and never lists their real flags"
         )
+    if skipped_front_door_rows:
+        rows = ", ".join(
+            f"{verb} ({n} row{'s' if n != 1 else ''})"
+            for verb, n in sorted(skipped_front_door_rows.items())
+        )
+        skip_notes.append(
+            f"flag table row(s) skipped for naming another front door: {rows}"
+        )
+    skip_note = f" ({'; '.join(skip_notes)})" if skip_notes else ""
     print(
         "check_tan_docs_surface: OK -- every `tan` subcommand alp-sdk's docs name "
         "still exists, and every flag docs/cli.md tabulates for a non-forwarding "
-        f"verb still parses in {tan_path}{skip_note}."
+        f"verb is listed in `tan <verb> --help` output in {tan_path}{skip_note}."
     )
     return 0
 

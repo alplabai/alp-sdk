@@ -38,26 +38,39 @@ surfaces real, pre-existing drift on its first run: `tan emit` was renamed
 to `tan generate`. Fixing that is separate follow-up work.
 
 Two sibling `docs/cli.md` rewrites exposed three more false-positive
-shapes. A flag-table row inside `### `tan generate`` that tabulates a
+shapes. A flag-table row inside `` ### `tan generate` `` that tabulates a
 *different* front door's flags (`--sku`/`--template`, real `python -m
 alp_cli emit` options contrasted against `tan generate`'s narrower one)
 was attributed to `tan generate` by section position alone; a `#`-led
-English sentence inside a ```bash fence (`... its own top-level tan verb
--- NOT tan generate ...`) misparsed as a fake `tan verb` subcommand; and,
-once a sibling branch retired `tan emit` from the doc's how-to-use
-sections, the historical note explaining the retirement (`This replaces
-the retired `tan emit` command ...`) itself misparsed as a live `tan
-emit` reference. All three are now handled structurally rather than by
-widening `_ENGLISH_STOPWORDS`: a flag table row is skipped for
-attribution if it names `python -m alp_cli`, `west alp-*`, or
-`alp_orchestrate`; every fenced bash/sh/shell block (plus bootstrap.sh's
-heredoc bodies) has its `#`-comment tails stripped before the `tan <verb>`
-regex runs; and docs/cli.md's own existence-scan now only trusts a
-REFERENCE-QUALITY mention (a `### `tan <verb>`` heading, a fenced
-invocation, a table cell, or a flag/arg-bearing span) rather than any bare
-`` `tan <verb>` `` span in ordinary prose -- the one source that narrates
-CLI history, so the one source where a verb can be *named* while being
-said to be *gone*.
+English sentence inside a fenced `bash` block (`` `... its own top-level
+tan verb -- NOT tan generate ...` ``) misparsed as a fake `tan verb`
+subcommand; and, once a sibling branch retired `tan emit` from the doc's
+how-to-use sections, the historical note explaining the retirement
+(`` `This replaces the retired `tan emit` command ...` ``) itself
+misparsed as a live `tan emit` reference. All three are now handled
+structurally rather than by widening `_ENGLISH_STOPWORDS`: a flag table
+row is skipped for attribution if it names `python -m alp_cli`,
+`west alp-*`, or `alp_orchestrate`; every fenced code block (regardless of
+its language tag, or the lack of one — not gated by a bash/sh/shell
+allowlist, which reproduces the same false positive one fence tag away)
+plus bootstrap.sh's heredoc bodies has its `#`-comment tails stripped
+before the `tan <verb>` regex runs; and docs/cli.md's own existence-scan
+now only trusts a REFERENCE-QUALITY mention (a `` ### `tan <verb>` ``
+heading, a fenced invocation, a table cell, or a flag/arg-bearing span)
+rather than any bare `` `tan <verb>` `` span in ordinary prose -- the one
+source that narrates CLI history, so the one source where a verb can be
+*named* while being said to be *gone*. A multi-token inline span (e.g.
+`` `tan is the executor` ``) is also now subtracted against
+`_ENGLISH_STOPWORDS`, closing the one path that regex reached unfiltered.
+
+The front-door row skip above was silent; the OK line now names which
+verb's flag table rows were skipped and how many, the same way the
+forwarding-verb skip already is. The gate's own wording no longer claims a
+documented flag "parses" -- it proves the flag string is listed in
+`tan <verb> --help` output, nothing about whether it's actually accepted
+on a real command line; that correction now matches the script's own
+docstring in the OK line, the workflow step name, and
+`metadata/quality-tasks-v1.json`'s task description.
 
 ### Added — debug-probe identity (`jlink_device`, `jlink_flash_device`, `pyocd_target`) on the Alif Ensemble SoC specs (#987)
 
