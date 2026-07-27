@@ -7,6 +7,28 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.14.0 candidate
 
+### Fixed — the planner refused to emit `west build -b <board>` for a Zephyr board with no tree
+
+`--emit build-plan` used to hand a consumer (`tan`, or a customer's own
+`west build`) a `-b <board>` command for whatever board a SoM preset's
+`topology.<core>.board:` named, even when that board had no tree under
+`zephyr/boards/alp/` — a command guaranteed to fail with Zephyr's own "No
+board named ... Invalid BOARD" error, one layer downstream of the
+declaration-level `check_board_target_tree_parity.py` gate (issue #999).
+
+`_slice_command` now checks board-tree existence at emit time and, when the
+tree is missing, blocks the command (`command: null`, matching the existing
+`no-command`/`yocto-recipe-missing` "carry the slice, never emit a broken
+command" convention) and adds a new `board-tree-missing` warning, now
+documented in `metadata/schemas/build-plan-v1.schema.json`'s `warnings[].code`
+description alongside the codes #865 added there. `_real_zephyr_board_names`
+(the directory glob backing the check) now raises loudly on a corrupt
+`board.yml` instead of silently dropping that board from the real set — a
+swallowed parse error would have misreported an existing tree (e.g. the lead
+part AEN801's) as missing, with the wrong root cause. The warning message
+itself does not enumerate every board that DOES exist, so one SKU's frozen
+plan text no longer depends on every other SKU's board tree.
+
 ### Fixed — ABI freeze gate guarded on a `v0.1` git tag that never existed and never ran
 
 `pr-generated-files.yml`'s "ABI freeze gate" step waited for a `refs/tags/v0.1`
