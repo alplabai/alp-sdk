@@ -118,20 +118,27 @@ Rules of thumb:
 ### `tan init` -- scaffold a new project
 
 ```bash
-tan init my-app --som E1M-AEN801 --preset e1m-evk --peripherals uart,gpio
-tan init my-app          # interactive: pick SoM / preset / peripherals
+tan init --name my-app --som E1M-AEN801 --template e1m-evk --sdk-root <path-to-alp-sdk> --non-interactive
+tan init                     # interactive: prompts for every field
 ```
 
-Copies the hello-world template, rewrites `board.yaml` for the chosen
-SoM SKU + board preset, and seeds the optional starter `peripherals:`
-list.  Omit any flag to be prompted interactively.
+`tan init` takes options only -- there is no positional `NAME`
+argument.  Scaffolds a new project directory (named by `--name`),
+rewrites `board.yaml` for the chosen SoM SKU + template, and resolves
+the alp-sdk checkout the project should build against via
+`--sdk-root`.  Omit a flag to be prompted interactively, or add
+`--non-interactive` (a global flag, not a `tan init` option -- see
+`tan --help`) to fail instead of prompting, which is what CI wants.
 
 | Option | Meaning |
 |---|---|
-| `NAME` (argument) | New project directory (must not exist) |
+| `--name` | New project directory name |
 | `--som` | SoM SKU, e.g. `E1M-AEN801` |
-| `--preset` | Board preset from `metadata/boards/`, e.g. `e1m-evk` |
-| `--peripherals` | Comma-separated starter peripherals (`uart,gpio,i2c,spi,pwm`) |
+| `--template` | Project template (the nearest equivalent to a "preset") |
+| `--sdk-root` | Path to the alp-sdk checkout the scaffolded project should resolve |
+| `--destination` | Where to write the project |
+| `--cores` | Comma-separated `id[:os]` core map for a heterogeneous project (OS inferred from the id when omitted) |
+| `--project`, `--board-yaml`, `--from-example`, `--target`, `--all`, `--format`, `--preview`, `--force`, `--quiet`, `--no-color`, `--verbose` | See `tan init --help` for the full reference -- not restated here to avoid a second copy drifting from the CLI. |
 
 ### `tan new-som` -- scaffold metadata for a new SoM port
 
