@@ -125,6 +125,30 @@ REQUIRED_BINS=(git cmake python3)
 if [ "${PRINT_ENV_ONLY}" -eq 1 ]; then
     REQUIRED_BINS=(python3)
 fi
+
+# Per-tool install hints for the missing-tools message below (issue #978) --
+# the POSIX-side analogue of bootstrap.ps1's own $Prereqs Name/Hint pairs,
+# and under the SAME bootstrap-of-the-bootstrap constraint as REQUIRED_BINS
+# above (this runs before python3 is confirmed present, so it can't read
+# metadata/bootstrap.json for the hint text either). A second hardcoded
+# copy, kept in lockstep with metadata/bootstrap.json's
+# prerequisites.install.linux / .macos by scripts/check_bootstrap_manifest.py.
+# Three PARALLEL arrays, not an associative array: bash 3.2 (the
+# macOS-shipped version) has no `declare -A` -- the same reason the
+# nativeLibHints print loop further down duplicates itself per OS instead of
+# using indirection. Matched up by POSITION, not by key.
+PREREQ_HINT_NAMES=(git cmake python3)
+PREREQ_HINT_LINUX=(
+    "sudo apt-get install -y git"
+    "sudo apt-get install -y cmake"
+    "sudo apt-get install -y python3"
+)
+PREREQ_HINT_MACOS=(
+    "brew install git"
+    "brew install cmake"
+    "brew install python3"
+)
+
 MISSING=()
 for bin in "${REQUIRED_BINS[@]}"; do
     if ! command -v "${bin}" >/dev/null 2>&1; then
@@ -132,7 +156,28 @@ for bin in "${REQUIRED_BINS[@]}"; do
     fi
 done
 if [ "${#MISSING[@]}" -gt 0 ]; then
-    die "Missing required tools: ${MISSING[*]}.  Install them and re-run."
+    warn "Missing required tools:"
+    UNAME_S="$(uname -s 2>/dev/null || echo unknown)"
+    for bin in "${MISSING[@]}"; do
+        hint=""
+        idx=0
+        for name in "${PREREQ_HINT_NAMES[@]}"; do
+            if [ "${name}" = "${bin}" ]; then
+                case "${UNAME_S}" in
+                    Darwin) hint="${PREREQ_HINT_MACOS[$idx]}" ;;
+                    *)      hint="${PREREQ_HINT_LINUX[$idx]}" ;;
+                esac
+                break
+            fi
+            idx=$((idx + 1))
+        done
+        if [ -n "${hint}" ]; then
+            warn "  ${bin}  ->  ${hint}"
+        else
+            warn "  ${bin}"
+        fi
+    done
+    die "Install the tools above and re-run."
 fi
 
 # -------- Load bootstrap facts (metadata/bootstrap.json, issue #917) ----------
@@ -325,6 +370,19 @@ fi
 
 VENV_DIR="${WORKSPACE_DIR}/${VENV_DIR_NAME}"
 
+# Refuse an empty or path-unsafe venv.dirName BEFORE it is ever used to
+# build a delete target: an empty value collapses VENV_DIR to
+# "${WORKSPACE_DIR}/", which the recreate-on-broken-venv path below then
+# `rm -rf`s -- taking out the whole workspace (zephyr/, modules/, .west/,
+# and the alp-sdk checkout itself if WORKSPACE_DIR is a parent of it).
+# metadata/schemas/bootstrap-v1.schema.json constrains this same field, but
+# a schema-drifted or hand-edited manifest must not reach the `rm -rf`
+# unchecked -- this is the last line of defense, not a duplicate of that
+# one.
+case "${VENV_DIR_NAME}" in
+    ""|.|..|*/*) die "metadata/bootstrap.json's venv.dirName is empty or path-unsafe (\"${VENV_DIR_NAME}\") -- refusing to build a workspace path (and a future 'rm -rf' target) from it." ;;
+esac
+
 # -------- workspace venv (hermetic west + Python deps) ------------------------
 
 # Everything -- west, the Zephyr requirements, the SDK extras -- installs into a
@@ -333,12 +391,66 @@ VENV_DIR="${WORKSPACE_DIR}/${VENV_DIR_NAME}"
 # and a global west couples the build to the host interpreter's state).
 # tan's Python backend (alp_cli) + the VS Code extension auto-discover
 # <workspace>/.venv, so this is backwards-compatible.  Idempotent: an
-# existing venv is reused.
+# existing WORKING venv is reused.
 if [ "${DO_WEST}" -eq 1 ] || [ "${DO_PIP}" -eq 1 ]; then
     mkdir -p "${WORKSPACE_DIR}"
-    if [ -x "${VENV_DIR}/${VENV_POSIX_BIN}/python" ] || [ -x "${VENV_DIR}/${VENV_WINDOWS_BIN}/python.exe" ]; then
+    # Reuse only a working venv (issue #985): `python3 -m venv` on a host
+    # missing python3-venv creates the directory tree and a `python`
+    # executable before failing at ensurepip, so the previous
+    # executable-exists-only probe treated that half-built, pip-less venv
+    # as valid and reused it forever -- every retry then died one step
+    # later on "No module named pip" with nothing pointing at the venv
+    # itself as the problem.  Probe the thing that actually broke: pip.
+    VENV_REUSABLE=0
+    for candidate in "${VENV_DIR}/${VENV_POSIX_BIN}/python" "${VENV_DIR}/${VENV_WINDOWS_BIN}/python.exe"; do
+        if [ -x "${candidate}" ] && "${candidate}" -m pip --version >/dev/null 2>&1; then
+            VENV_REUSABLE=1
+            break
+        fi
+    done
+    if [ "${VENV_REUSABLE}" -eq 1 ]; then
         ok "Workspace venv already present at ${VENV_DIR}"
     else
+        if [ -e "${VENV_DIR}" ]; then
+            warn "Workspace venv at ${VENV_DIR} exists but has no working pip -- recreating it"
+            rm -rf "${VENV_DIR}"
+        fi
+        # -------- venv capability check (issue #984) -------------------------
+        # `python3-venv` is a Debian/Ubuntu PACKAGE name, not a binary -- it
+        # can never be a `command -v`-checkable REQUIRED_BINS entry (see that
+        # array's comment above).  What actually breaks -- Debian/Ubuntu ship
+        # the `ensurepip`-bundled pip/setuptools wheels `python3 -m venv`
+        # needs in the separate `python3-venv` package, not in `python3`
+        # itself -- only shows up when a venv is actually built, so `import
+        # ensurepip` alone (importable even when the wheels are missing)
+        # would not catch it.  This is a CAPABILITY probe -- build a
+        # disposable throwaway venv and discard it -- not a presence probe,
+        # using the same curated warn/die treatment the missing-tools message
+        # above got in #978.  Runs only here, right before an actual venv
+        # build is about to happen (issue #985 review): `--no-pip --no-west`
+        # needs no venv at all, and an idempotent re-run of an already-healthy
+        # venv was otherwise paying a real `python3 -m venv` (~1.65s measured)
+        # for a probe nothing needed.
+        VENV_PROBE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/alp-bootstrap-venv-probe.XXXXXX" 2>/dev/null || true)"
+        if [ -z "${VENV_PROBE_DIR}" ]; then
+            # mktemp itself failing (full/read-only/noexec TMPDIR, routine on
+            # CI runners) is a DIFFERENT failure than python3-venv being
+            # missing (checked next) and must not share that message: telling
+            # the customer to install an already-installed package leaves
+            # them stuck on the identical failure after they do -- the #985
+            # misdiagnosis loop, reintroduced.
+            die "mktemp -d under \${TMPDIR:-/tmp} (${TMPDIR:-/tmp}) failed -- check free space and write permissions there, or set TMPDIR to a writable directory, and re-run."
+        fi
+        if ! python3 -m venv "${VENV_PROBE_DIR}" >/dev/null 2>&1; then
+            rm -rf "${VENV_PROBE_DIR}" 2>/dev/null || true
+            warn "python3 -m venv is not usable (ensurepip unavailable):"
+            case "${OS_LABEL}" in
+                macos) warn "  python3-venv  ->  brew install python3" ;;
+                *)     warn "  python3-venv  ->  sudo apt-get install -y python3-venv" ;;
+            esac
+            die "Install the package above and re-run."
+        fi
+        rm -rf "${VENV_PROBE_DIR}"
         info "Creating workspace venv at ${VENV_DIR}"
         python3 -m venv "${VENV_DIR}" || die "python3 -m venv ${VENV_DIR} failed"
     fi
@@ -416,8 +528,10 @@ if [ "${DO_PIP}" -eq 1 ]; then
     # tan's Python backend (alp_cli: init / run / emit / validate / model /
     # doctor / monitor, invoked as `python -m alp_cli <sub>` by `tan`) --
     # editable install, so a `git pull` in the checkout updates the backend
-    # in place. `tan` itself is a separate Rust binary, installed via
-    # `cargo install --git https://github.com/alplabai/tan-cli --bin tan`.
+    # in place. `tan` itself is a separate Rust binary, installed
+    # separately -- see README.md for the tan-cli `install.sh` one-liner
+    # (or the `cargo install --path crates/tan-cli --locked` from-source
+    # alternative).
     info "Installing the tan CLI's Python backend into the venv (pip install -e ${PIP_EDITABLE_INSTALL})"
     "${VPY}" -m pip install -q -e "${PIP_EDITABLE_INSTALL}" \
         || warn "alp_cli editable install reported a problem -- check manually"
@@ -487,16 +601,18 @@ EOF
 print_env_lines "  "
 # QUOTED tag (<<'EOF') -- mandatory, not stylistic.  This block documents
 # shell commands, and an unquoted tag makes the shell treat the backtick'd
-# `cargo install ...` line below as a real command SUBSTITUTION: every
-# completed run of this script silently executed it, reinstalling tan from
-# git tip behind the user's back, and pasted its output here instead of the
-# text.  A quoted tag also means backslashes are literal, so the line
-# continuation and $PWD below are written plainly rather than escaped.
+# install command below as a real command SUBSTITUTION: every completed
+# run of this script silently executed it, reinstalling tan behind the
+# user's back, and pasted its output here instead of the text.  A quoted
+# tag also means backslashes are literal, so the line continuation and
+# $PWD below are written plainly rather than escaped.
 cat <<'EOF'
 
-  # Sanity-check the host environment (needs tan on PATH -- see README.md
-  # for `cargo install --git https://github.com/alplabai/tan-cli --bin tan`):
-  tan doctor
+  # Sanity-check the host build environment (needs tan on PATH -- see
+  # README.md for the tan-cli `install.sh` one-liner): `tan doctor --build`
+  # is the host/build preflight; plain `tan doctor` is a different,
+  # debug-readiness check (lldb, codeLLDBExtension) -- see docs/cli.md.
+  tan doctor --build
 
   # Run the local test suite:
   bash scripts/test-all.sh

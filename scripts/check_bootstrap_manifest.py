@@ -105,6 +105,12 @@ when:
       command in the first place. The literal scan covers the windows/
       winget side only; see `_check_install_commands`'s own docstring for
       why, the full assertion list, and the exact file set scanned.
+  12. `scripts/bootstrap.sh`'s own hardcoded POSIX-side hint table (issue
+      #978) -- `PREREQ_HINT_NAMES` / `PREREQ_HINT_LINUX` / `PREREQ_HINT_MACOS`,
+      the bash analogue of bootstrap.ps1's `$Prereqs` `Hint=` field -- must
+      agree entry-for-entry (matched up by array position, since bash 3.2
+      has no associative arrays) with `install.linux` / `install.macos`; see
+      `_check_bootstrap_sh_install_hints`.
 
 --fix propagates a changed `zephyr.version` OUT to every machine pin site
 this gate verifies above (points 2, 4, 5, 10 -- west.yml, the CI workflow
@@ -931,6 +937,95 @@ def _check_install_commands(manifest: dict) -> list[str]:
     return problems
 
 
+# -------- scripts/bootstrap.sh PREREQ_HINT_* agreement (issue #978) ----------
+#
+# The POSIX-side analogue of `_check_install_commands`'s point 2
+# (bootstrap.ps1's own `$Prereqs` `Hint=` agreement). bootstrap.sh's hint
+# table is three PARALLEL arrays, not one `Name=...; Hint=...` pair per line
+# the way `$Prereqs` is (bash 3.2 -- the macOS-shipped version -- has no
+# `declare -A`), so this is matched up by array POSITION rather than a
+# per-entry regex.
+_SH_PREREQ_HINT_NAMES_RE = re.compile(r"PREREQ_HINT_NAMES=\(([^)]*)\)")
+_SH_PREREQ_HINT_LINUX_RE = re.compile(r"PREREQ_HINT_LINUX=\((.*?)\n\)", re.DOTALL)
+_SH_PREREQ_HINT_MACOS_RE = re.compile(r"PREREQ_HINT_MACOS=\((.*?)\n\)", re.DOTALL)
+_SH_QUOTED_STRING_RE = re.compile(r'"([^"]*)"')
+
+
+def _check_bootstrap_sh_install_hints(manifest: dict) -> list[str]:
+    """`scripts/bootstrap.sh`'s `PREREQ_HINT_NAMES` / `PREREQ_HINT_LINUX` /
+    `PREREQ_HINT_MACOS` (issue #978) must agree, entry-for-entry, with
+    `prerequisites.install.linux` / `.macos`. Each array is parsed
+    independently and then zipped by index -- a length mismatch between
+    `PREREQ_HINT_NAMES` and either hint array is reported directly rather
+    than silently truncated by `zip`.
+
+    Also asserts completeness (mirrors `_check_install_commands` point 2's
+    own `parsed_names` loop, same "goes dark" failure one level down): every
+    tool key in `prerequisites.install.linux` / `.macos` must have a
+    `PREREQ_HINT_NAMES` entry, not just every `PREREQ_HINT_NAMES` entry a
+    matching install key (which the zip loop below already covers). Without
+    this, a tool added to `install.linux`/`.macos` + `REQUIRED_BINS` but
+    left out of the hint table falls through bootstrap.sh's bare-name
+    `warn "  ${bin}"` branch with this gate reporting rc=0 -- the #978
+    defect, restored."""
+    if not BOOTSTRAP_SH.is_file():
+        return [f"missing {BOOTSTRAP_SH.relative_to(REPO).as_posix()}"]
+    text = BOOTSTRAP_SH.read_text(encoding="utf-8")
+    problems: list[str] = []
+
+    m_names = _SH_PREREQ_HINT_NAMES_RE.search(text)
+    if m_names is None:
+        return ["scripts/bootstrap.sh: could not find `PREREQ_HINT_NAMES=(...)` "
+                 "-- update this gate if it was renamed/restructured"]
+    names = m_names.group(1).split()
+    parsed_names = set(names)
+
+    install = manifest.get("prerequisites", {}).get("install", {})
+    for os_key, os_re in (
+        ("linux", _SH_PREREQ_HINT_LINUX_RE),
+        ("macos", _SH_PREREQ_HINT_MACOS_RE),
+    ):
+        m = os_re.search(text)
+        if m is None:
+            problems.append(
+                f"scripts/bootstrap.sh: could not find `PREREQ_HINT_{os_key.upper()}=(...)` "
+                f"-- update this gate if it was renamed/restructured"
+            )
+            continue
+        hints = _SH_QUOTED_STRING_RE.findall(m.group(1))
+        os_install = install.get(os_key, {})
+        for tool in sorted(os_install):
+            if tool not in parsed_names:
+                problems.append(
+                    f"prerequisites.install.{os_key}.{tool} has no "
+                    f"PREREQ_HINT_NAMES entry in scripts/bootstrap.sh -- it "
+                    f"would fall through to the bare-name warn() branch "
+                    f"(issue #978) instead of printing an install hint"
+                )
+        if len(hints) != len(names):
+            problems.append(
+                f"scripts/bootstrap.sh PREREQ_HINT_{os_key.upper()} has {len(hints)} "
+                f"entries but PREREQ_HINT_NAMES has {len(names)} -- they must stay "
+                f"parallel arrays"
+            )
+            continue
+        for name, hint in zip(names, hints):
+            canonical = os_install.get(name)
+            if canonical is None:
+                problems.append(
+                    f"scripts/bootstrap.sh PREREQ_HINT_{os_key.upper()} has an entry "
+                    f"for {name!r}, but metadata/bootstrap.json has no "
+                    f"prerequisites.install.{os_key}.{name}"
+                )
+            elif hint != canonical:
+                problems.append(
+                    f"scripts/bootstrap.sh PREREQ_HINT_{os_key.upper()} entry {name!r} "
+                    f"= {hint!r} disagrees with prerequisites.install.{os_key}.{name} "
+                    f"= {canonical!r}"
+                )
+    return problems
+
+
 def _iter_leaf_paths(obj, prefix: str = ""):
     """Yield every (dotted-path, value) leaf pair in the manifest, stopping
     recursion at `_GROUP_LEAF_PATHS` (consumed as a whole sub-tree, not
@@ -1170,6 +1265,7 @@ def main() -> int:
     problems += _check_python_min_version_posix(manifest)
     problems += _check_python_min_version_windows(manifest)
     problems += _check_install_commands(manifest)
+    problems += _check_bootstrap_sh_install_hints(manifest)
     problems += _check_no_orphaned_leaves(manifest)
     problems += _check_native_lib_hints_consumption(manifest)
     for wf in CI_WORKFLOWS:

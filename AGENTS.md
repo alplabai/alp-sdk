@@ -68,10 +68,13 @@ rather than guessing.
 An agent's loop here is: generate, then run the validators, then fix what they
 report.
 
-- `tan doctor` — HW-free environment preflight: checks the host toolchain,
-  `west`, the pinned Zephyr version, Python deps, etc., and prints a remediation
-  hint per failing check (`--json` for machine consumption). Run it first on a
-  fresh checkout to find why a build won't work before you build.
+- `tan doctor --build` — HW-free build-readiness preflight: checks `west`,
+  `cmake`, `ninja`, the pinned Zephyr version, the Zephyr SDK, etc., and
+  prints a remediation hint per failing check (`--format json` for machine
+  consumption; there's no `--strict`). Run it first on a fresh checkout to
+  find why a build won't work before you build. (Plain `tan doctor`, no
+  `--build`, is a different debug-readiness preflight — see
+  [`docs/cli.md`](docs/cli.md).)
 - `tan validate board.yaml` — the diagnostic-rich `board.yaml` validator
   (CLI entry `tan`, which forwards to `python -m alp_cli validate`;
   equivalently `python3 scripts/validate_board_yaml.py`).

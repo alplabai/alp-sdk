@@ -36,9 +36,9 @@
       "additionalProperties": false,
       "required": ["dirName", "posixBinDir", "windowsBinDir"],
       "properties": {
-        "dirName": { "type": "string", "description": "Workspace-relative venv directory name." },
-        "posixBinDir": { "type": "string", "description": "Executable subdirectory name inside the venv on POSIX (Linux/macOS/git-bash)." },
-        "windowsBinDir": { "type": "string", "description": "Executable subdirectory name inside the venv on native Windows." }
+        "dirName": { "type": "string", "minLength": 1, "pattern": "^(?!\\.{1,2}$)[^/]+$", "description": "Workspace-relative venv directory name (e.g. '.venv' -- a leading dot is fine, the literal path segments '.' and '..' are not). Constrained non-empty and slash-free, and rejects exactly '.'/'..': bootstrap.sh interpolates this raw into a workspace path that a later `rm -rf` can target (recreate-on-broken-venv) -- an empty, '.', or '..' value would turn that into a workspace-wide delete." },
+        "posixBinDir": { "type": "string", "minLength": 1, "pattern": "^(?!\\.{1,2}$)[^/]+$", "description": "Executable subdirectory name inside the venv on POSIX (Linux/macOS/git-bash). Same path-safety constraint as dirName for defense in depth -- also interpolated into venv paths, though today's `rm -rf` target is built from dirName alone, not this field." },
+        "windowsBinDir": { "type": "string", "minLength": 1, "pattern": "^(?!\\.{1,2}$)[^/]+$", "description": "Executable subdirectory name inside the venv on native Windows. Same path-safety constraint as dirName for defense in depth -- also interpolated into venv paths, though today's `rm -rf` target is built from dirName alone, not this field." }
       }
     },
     "prerequisites": {
