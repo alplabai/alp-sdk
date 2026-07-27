@@ -30,6 +30,8 @@ import jsonschema
 import pytest
 import yaml
 
+from .conftest import clang_format_text
+
 REPO = Path(__file__).resolve().parents[2]
 SOM_SCHEMA_PATH = REPO / "metadata" / "schemas" / "som-preset-v1.schema.json"
 REAL_PRESET = REPO / "metadata" / "e1m_modules" / "E1M-AEN801.yaml"
@@ -240,11 +242,13 @@ def test_unrestricted_catalogue_emits_byte_identical_header(gen, tmp_path):
     assert gen.emit(som_dir=empty) == gen.emit()  # real catalogue == none restricted
 
 
-def test_regen_leaves_committed_header_unchanged():
-    """Running the real generator against the repo must not change the
-    committed header — existing SKUs regenerate byte-identical."""
-    import subprocess
-    before = SOC_CAPS_HEADER.read_text(encoding="utf-8")
-    subprocess.run([sys.executable, str(GEN_SCRIPT)], check=True)
-    after = SOC_CAPS_HEADER.read_text(encoding="utf-8")
-    assert before == after
+def test_regen_leaves_committed_header_unchanged(gen, tmp_path):
+    """The real generator's output, clang-formatted, must be byte-identical
+    to the committed header — existing SKUs regenerate byte-identical.
+
+    Generates into tmp_path rather than running the script as a subprocess
+    against the repo: the script's main() writes SOC_CAPS_HEADER (and
+    include/alp/cap.h, src/cap.c) in place, which would leave the working
+    tree dirty as a side effect of running this test (issue #973)."""
+    formatted = clang_format_text(tmp_path, "soc_caps.h", gen.emit())
+    assert formatted == SOC_CAPS_HEADER.read_text(encoding="utf-8")

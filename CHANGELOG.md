@@ -7,6 +7,69 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.14.0 candidate
 
+### Fixed — the renode gate installed Renode and asserted nothing (#974)
+
+Every e2e step in the three renode workflows was an `echo ::notice::` no-op
+and Renode itself was invoked only for `--version`, so a `.resc` descriptor
+could be committed broken and every renode check still went green. That is
+how #947's first fix attempt reached review: it hardcoded
+`$vtor ?= 0x80010000`, which lands 64 KiB inside the image's own `.text`,
+and no CI signal contradicted it.
+
+`.github/workflows/pr-renode-aen-smoke.yml` now boots the M55-HP ITCM-run
+ELF it already builds, under the Renode v1.16.1 it already installs, and
+asserts on the log: `Setting initial values: PC = 0x` must be **present**,
+`CPU was halted` **absent**, and `Guessing VectorTableOffset value to be 0x`
+**absent** — the last being Renode falling back to inference, precisely the
+condition #947 exists to eliminate. All three strings were verified against
+the pinned v1.16.1 binary's own format strings, and each was observed
+failing before being relied on: deleting the descriptor's
+`cpu VectorTableOffset $vtor` line reproduces `Guessing VectorTableOffset
+value to be 0x0.` on the ITCM image and `PC does not lay in memory or PC and
+SP are equal to zero. CPU was halted.` on the MRAM-linked one. Note the
+first assertion still passes on that broken descriptor — only the
+`Guessing` check catches the real #947 regression, so the three are not
+redundant.
+
+Landed in the **advisory** AEN smoke job only. `pr-renode-sim-mode.yml` is
+the required `renode · V2N101 --sim-mode socket contract` context on `dev`
+and is left untouched until this pattern proves stable, per #974's
+recommended order. `continue-on-error` is dropped from the build step (a
+swallowed build failure would otherwise reach a step that depends on the
+ELF), the log is uploaded as an artifact on `if: always()`, and the path
+filter gains the overlay, the sim conf, and the board tree that determine
+what the job boots.
+
+### Fixed — `check_bootstrap_manifest.py`'s orphaned-leaf scan couldn't tell a correct manifest read from a read sitting beside a hardcoded duplicate (#965)
+
+`_check_no_orphaned_leaves` asked only "is this leaf read by at least one of
+`scripts/bootstrap.sh` / `scripts/bootstrap.ps1`" — a needle-presence check
+that stayed green even when the same fact was *also* hardcoded a second
+time elsewhere in the same script. `scripts/bootstrap.ps1` shipped exactly
+that shape: `manualInstallHints.windows.note`'s Arm-toolchain installer URL
+was both rendered from a genuine manifest read (`$ManifestModule.
+manualInstallHints.windows.note` via the `foreach ($line in
+$ManualInstallNote)` loop) and printed a second time from a hardcoded
+here-string a few lines above it — with a comment between the two claiming
+the opposite of what the code did.
+
+Fixed by adding a second, independent assertion per leaf: for every
+whitespace-delimited fragment of a string leaf's value that is
+`>= _DUPLICATE_LITERAL_MIN_LEN` (20) characters after trimming sentence
+punctuation (`_DUPLICATE_LITERAL_STRIP_CHARS`), both scripts are scanned
+(via the existing heredoc/here-string-aware `_iter_scannable_lines`) for
+that fragment appearing on a CODE line — it can never legitimately appear
+there at all, since both scripts load the manifest at run time and read a
+leaf's value through the parsed object, never by spelling it out as a
+source literal. Zero false positives against the real corpus at the chosen
+length floor; `env`/`nativeLibHints` (consumed as whole groups, not
+per-field) and `prerequisites.*`/`_comment` (already gate-asserted or
+purely structural) stay out of scope, same as the existing read-scan.
+
+`_iter_leaf_paths` now yields `(path, value)` pairs instead of `path`
+alone, so the duplicate-literal scan's value lookup no longer needs a
+second walk of the same tree.
+
 ### Fixed — status-blind DT existence guards (`DT_NODE_EXISTS`, `DT_HAS_CHOSEN`) let 33 backend sites reference a disabled node's device (#966)
 
 `DT_NODE_EXISTS(DT_ALIAS(...))` was used across `src/backends/**` as the
