@@ -1047,3 +1047,57 @@ def test_install_literal_scan_flags_gate_script_content_under_another_name(
     err = capsys.readouterr().err
     assert rv == 1
     assert "scripts/check_bootstrap_manifest_copy.py" in err
+
+
+# ---------------------------------------------------------------------
+# 14. Hardcoded duplicate beside a correct read (issue #965)
+# ---------------------------------------------------------------------
+
+
+def test_hardcoded_duplicate_of_read_leaf_fails(tmp_path, monkeypatch, capsys):
+    """The exact reproduction from issue #965: re-insert the hardcoded
+    here-string block PR #961 (a27757b8) deleted immediately above the
+    `foreach ($line in $ManualInstallNote)` render loop in
+    scripts/bootstrap.ps1. `$Manifest.manualInstallHints.windows.note` is
+    still present at the foreach line below the reinsertion, so the OLD
+    `_check_no_orphaned_leaves` (needle-presence only) stayed green through
+    this for as long as it shipped -- a plain "is this read by something"
+    scan cannot tell a single correct read from a correct read sitting next
+    to a hardcoded duplicate of the same fact. This is the regression test
+    for the fix: the duplicated Arm-toolchain installer URL must now be
+    caught."""
+    _scaffold(tmp_path)
+    ps1_path = tmp_path / "scripts/bootstrap.ps1"
+    needle = "foreach ($line in $ManualInstallNote) {"
+    duplicate_block = (
+        '@"\n\n'
+        "  # Arm GNU Toolchain (cross-compiles for real silicon) -- installer EXE:\n"
+        "  #   https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads\n\n"
+        '"@ | Write-Host\n'
+    )
+    _replace(ps1_path, needle, duplicate_block + needle)
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "scripts/bootstrap.ps1" in err
+    assert "https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads" in err
+    assert "manualInstallHints.windows.note" in err
+
+
+def test_short_leaf_fragment_duplicate_is_not_flagged(tmp_path, monkeypatch, capsys):
+    """Fixture-assumption + design guard: `west.extensionGuardCommand`
+    ("alp-migrate", 11 chars) is BOTH read from the manifest (via
+    `$WestExtGuard`/`$WEST_EXT_GUARD`) AND separately spelled out literally
+    in bootstrap.ps1's own user-facing Fail/Write-Ok messages -- a real,
+    pre-existing, harmless repeat that is exactly the shape a hardcoded
+    exemption list would otherwise have to carry. Confirms the length floor
+    (`_DUPLICATE_LITERAL_MIN_LEN`), not a growing allowlist, is what keeps
+    this gate green on it."""
+    _scaffold(tmp_path)
+    ps1_text = (tmp_path / "scripts/bootstrap.ps1").read_text(encoding="utf-8")
+    assert "'west alp-migrate'" in ps1_text
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    out = capsys.readouterr().out
+    assert rv == 0, out

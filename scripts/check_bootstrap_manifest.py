@@ -44,6 +44,23 @@ when:
      at least one of the two scripts, and isn't in an explicit allowlist of
      leaves that are gate-asserted-instead (`prerequisites.*`, point 6 above)
      or purely structural (`_comment`) -- see `_check_no_orphaned_leaves`.
+     The same walk ALSO asserts a leaf being read is not ALSO sitting beside
+     a hardcoded duplicate of itself: any whitespace-delimited fragment of a
+     string leaf's value that is >= `_DUPLICATE_LITERAL_MIN_LEN` characters
+     must not appear as a CODE-line literal (outside a comment, by the same
+     heredoc/here-string-aware `_iter_scannable_lines` point 3 uses) in
+     either script (issue #965 -- `scripts/bootstrap.ps1` printed
+     `manualInstallHints.windows.note`'s Arm-toolchain installer URL both as
+     a rendered manifest read AND as a hardcoded here-string for as long as
+     that duplicate existed, and the plain "is this read by something" scan
+     above cannot distinguish that from a single correct read). KNOWN LIMIT:
+     the fragment-length floor means a duplicated short leaf value (under
+     `_DUPLICATE_LITERAL_MIN_LEN` chars) is not caught this way -- see that
+     constant's own comment for why a length floor was chosen over a
+     hardcoded exemption list, and `prerequisites.*`/`_comment` are excluded
+     from this scan the same as from the read-scan above (the former is
+     gate-asserted equal on purpose by point 6's own checks, so a repeat
+     there is by design, not drift).
   8. `nativeLibHints`'s own group-level consumption bar is broken: the
      manifest's OS key set no longer matches bootstrap.sh's `for os_key in
      (...)` loop, or bootstrap.sh no longer references the "note"/"command"
@@ -928,19 +945,104 @@ def _ps1_needle(leaf: str) -> str:
     return "$Manifest." + leaf
 
 
+# Minimum length, in characters, for a whitespace-delimited fragment of a
+# string leaf's value to be treated as "distinctive" enough to police for a
+# hardcoded duplicate (issue #965, `_check_no_orphaned_leaves`'s second
+# assertion below). A short generic fragment (`bin`, `Scripts`, `zephyr`,
+# `.venv`, even `alp-migrate`, all < 20 chars) is exactly the kind of weak
+# trigger issue #965 warns against: it would need a growing allowlist of
+# incidental matches (a rationale comment that happens to name the same
+# short word for an unrelated reason) to stay usable. A length floor is a
+# narrower rule that needs none: every leaf value in the manifest today
+# that is genuinely short-and-generic stays under it, while the fragment
+# that shipped duplicated for as long as it did -- the Arm GNU Toolchain
+# installer URL in `manualInstallHints.windows.note`, 68 characters -- and
+# every other today's-manifest fragment worth policing (long paths, long
+# URLs, long sentences-as-a-whole) clears it easily. Swept against the real
+# repo (see the test suite) with zero false positives at this value.
+_DUPLICATE_LITERAL_MIN_LEN = 20
+
+# Characters trimmed off both ends of an extracted fragment before the
+# length check above and the literal search itself -- sentence punctuation
+# (a trailing '.', a wrapping '(...)') that legitimately surrounds a fact in
+# prose but is never part of a genuine hardcoded COPY of it (a script that
+# duplicates a URL copies the URL, not the parenthesis around it in the
+# manifest's sentence).
+_DUPLICATE_LITERAL_STRIP_CHARS = "()[]{}.,;:'\""
+
+_DUPLICATE_LITERAL_TOKEN_RE = re.compile(r"\S+")
+
+
+def _distinctive_literals(value) -> set[str]:
+    """Extract every whitespace-delimited fragment of `value` (a string, or
+    a list of strings -- `manualInstallHints.*.note`/`nativeLibHints.*.note`
+    shape) that is >= `_DUPLICATE_LITERAL_MIN_LEN` characters after
+    stripping `_DUPLICATE_LITERAL_STRIP_CHARS` from both ends. Fragment, not
+    the value as a WHOLE: a duplicate can reword the sentence around a fact
+    while keeping the fact itself verbatim (issue #965's reproduction kept
+    the installer URL but reworded the surrounding text), so matching only
+    the complete leaf string would miss it. Non-string list elements (there
+    are none in the schema today) are skipped rather than raising."""
+    texts = value if isinstance(value, list) else [value]
+    out: set[str] = set()
+    for text in texts:
+        if not isinstance(text, str):
+            continue
+        for tok in _DUPLICATE_LITERAL_TOKEN_RE.findall(text):
+            tok = tok.strip(_DUPLICATE_LITERAL_STRIP_CHARS)
+            if len(tok) >= _DUPLICATE_LITERAL_MIN_LEN:
+                out.add(tok)
+    return out
+
+
+def _leaf_value(manifest: dict, leaf: str):
+    obj = manifest
+    for part in leaf.split("."):
+        obj = obj[part]
+    return obj
+
+
 def _check_no_orphaned_leaves(manifest: dict) -> list[str]:
     """Generalisation of "is this fact actually read by anything" past just
     `env`/`nativeLibHints` (issue #917 review finding: `west.pipSpec` shipped
     fully unread while the old, narrower check stayed green). A leaf need
     only be demonstrably read by AT LEAST ONE of the two scripts -- some
     facts are legitimately single-script (e.g. `venv.posixBinDir`, which
-    bootstrap.ps1 has no reason to ever reference on native Windows)."""
+    bootstrap.ps1 has no reason to ever reference on native Windows).
+
+    A second, independent assertion per leaf (issue #965): "is read by"
+    alone cannot tell a single correct read apart from a correct read
+    sitting beside a hardcoded DUPLICATE of the same fact -- exactly the
+    shape `scripts/bootstrap.ps1` shipped in for as long as it printed
+    `manualInstallHints.windows.note`'s Arm-toolchain installer URL both
+    from a rendered manifest read and from a hardcoded here-string, with a
+    comment between them claiming the opposite. For every distinctive
+    fragment `_distinctive_literals` extracts from a leaf's value, both
+    scripts are scanned (via `_iter_scannable_lines`, so a heredoc/
+    here-string BODY line -- printed OUTPUT, not source comment -- counts
+    the same way it does for point 3's Zephyr-version scan) for that
+    fragment appearing on a CODE line. It legitimately can never appear
+    there at all: both scripts load `metadata/bootstrap.json` at run time
+    (`json.load`/`ConvertFrom-Json`) and read a leaf's value through that
+    parsed object, never by spelling the value out as a literal in their own
+    source -- so any occurrence outside a comment is, by construction, a
+    second copy, not a second legitimate reference.
+
+    KNOWN LIMIT: a duplicated leaf value shorter than
+    `_DUPLICATE_LITERAL_MIN_LEN` is not caught by this second assertion (see
+    that constant's own comment for why a length floor was chosen over a
+    hardcoded exemption list) -- it still has to clear the first assertion
+    above (demonstrably read by at least one script), which a hardcoded
+    duplicate does not by itself defeat.
+    """
     if not BOOTSTRAP_SH.is_file():
         return [f"missing {BOOTSTRAP_SH.relative_to(REPO).as_posix()}"]
     if not BOOTSTRAP_PS1.is_file():
         return [f"missing {BOOTSTRAP_PS1.relative_to(REPO).as_posix()}"]
     sh_text = BOOTSTRAP_SH.read_text(encoding="utf-8")
     ps1_text = BOOTSTRAP_PS1.read_text(encoding="utf-8")
+    sh_scannable = list(_iter_scannable_lines(sh_text))
+    ps1_scannable = list(_iter_scannable_lines(ps1_text))
     problems = []
     for leaf in _iter_leaf_paths(manifest):
         if leaf in _STRUCTURAL_LEAVES or leaf.startswith(_GATE_ASSERTED_LEAF_PREFIX):
@@ -953,6 +1055,22 @@ def _check_no_orphaned_leaves(manifest: dict) -> list[str]:
                 f"(expected {sh_needle!r}) or scripts/bootstrap.ps1 (expected {ps1_needle!r}) "
                 f"-- wire it up, or add it to the allowlist in this gate with a reason"
             )
+            continue
+        for literal in sorted(_distinctive_literals(_leaf_value(manifest, leaf))):
+            for rel, scannable in (
+                (BOOTSTRAP_SH.relative_to(REPO).as_posix(), sh_scannable),
+                (BOOTSTRAP_PS1.relative_to(REPO).as_posix(), ps1_scannable),
+            ):
+                for lineno, (line, is_comment) in enumerate(scannable, start=1):
+                    if is_comment or literal not in line:
+                        continue
+                    problems.append(
+                        f"{rel}:{lineno}: hardcodes {literal!r}, a fragment of "
+                        f"metadata/bootstrap.json leaf {leaf!r}, outside a comment -- this "
+                        f"leaf is already read from the manifest elsewhere in this script; "
+                        f"a second, hardcoded copy of the same fact is exactly the drift "
+                        f"issue #965 exists to catch -- derive it from the manifest instead"
+                    )
     return problems
 
 
