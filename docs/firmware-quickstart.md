@@ -56,6 +56,7 @@ needs no Rust toolchain:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"  # install.sh already made this permanent in your shell rc; needed once more in THIS shell
 ```
 
 Building from source instead needs Rust 1.86+ ([rustup.rs](https://rustup.rs))

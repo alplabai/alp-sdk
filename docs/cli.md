@@ -15,15 +15,16 @@ separately. The automatic installer needs no Rust toolchain:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"  # install.sh already made this permanent in your shell rc; needed once more in THIS shell
 ```
 
 Or grab a prebuilt, per-platform binary directly from a release tag, e.g.
 Linux x86_64:
 
 ```bash
-curl -fsSL -o /usr/local/bin/tan \
+curl -fsSL -o tan \
   https://github.com/alplabai/tan-cli/releases/latest/download/tan-x86_64-unknown-linux-gnu
-chmod +x /usr/local/bin/tan
+chmod +x tan && sudo mv tan /usr/local/bin/tan
 ```
 
 Building from source instead needs Rust 1.86+ (get it from
@@ -35,6 +36,12 @@ Building from source instead needs Rust 1.86+ (get it from
 git clone https://github.com/alplabai/tan-cli && cd tan-cli
 cargo install --path crates/tan-cli --locked
 ```
+
+None of the three install paths above pin a `tan` version (`install.sh`
+tracks the mutable `main` ref and installs `releases/latest`; the
+source path clones `main`'s HEAD) -- this is deliberate: all three are
+tan-cli's own recommended install methods, and staying on its latest
+release is the point until a project needs otherwise.
 
 Two execution paths live behind the one binary:
 
@@ -78,7 +85,7 @@ Two front doors, two different jobs -- pick by what you're doing:
 
 | You are... | Use |
 |---|---|
-| Scaffolding a project, validating `board.yaml`, compiling a model, checking your host, opening a serial console, decoding a diagnostic/fault, or running a quick single-image native_sim/single-board loop | `tan init` / `tan new-som` / `tan validate` / `tan model` / `tan doctor` / `tan monitor` / `tan explain` / `tan faultdecode` / `tan run` |
+| Scaffolding a project, validating `board.yaml`, compiling a model, checking your host, opening a serial console, decoding a diagnostic/fault, or running a quick single-image native_sim/single-board loop | `tan init` / `tan new-som` / `tan validate` / `tan model` / `tan doctor --build` / `tan monitor` / `tan explain` / `tan faultdecode` / `tan run` |
 | Inspecting a generated artefact without building (Kconfig fragment, DTS overlay, system manifest, build plan) | `tan emit` (or `west alp-emit` from a west workspace) |
 | Building, flashing, sizing, bundling, cleaning, or Renode-booting a project | `tan build` / `tan flash` / `tan size` / `tan image` / `tan clean` / `tan renode` -- see [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli) |
 | Scripting the surviving west-centric maintenance commands | `west alp-migrate` (board.yaml schema migration) / `west alp-lock` (dependency lockfile) / `west alp-quality` (quality-task registry) / `west alp-emit` (generated-artefact subset) |
@@ -100,9 +107,9 @@ Rules of thumb:
   `--emit system-manifest`), then drives `west` / `bitbake` / `cmake`
   per slice, owns skip-vs-fail policy, and programs hardware.  `tan
   build` (`--native` is the default, explicit opt-in) materialises the
-  plan and runs each slice's build command directly, whatever
-  `board.yaml` targets -- native_sim or real silicon; it never runs
-  the produced binary itself (that's `tan run`).  See
+  plan and runs each slice's build command directly for the real SoM
+  `board.yaml` targets; it never runs the produced binary itself
+  (that's `tan run`).  See
   [heterogeneous-builds.md](heterogeneous-builds.md) for the per-core
   fan-out the plan describes.
 * `tan emit` is a SUPERSET of `west alp-emit`: every artefact either
@@ -118,7 +125,7 @@ Rules of thumb:
 ### `tan init` -- scaffold a new project
 
 ```bash
-tan init --name my-app --som E1M-AEN801 --template e1m-evk --sdk-root <path-to-alp-sdk> --non-interactive
+tan init --name my-app --som E1M-AEN801 --template minimal-app --sdk-root <path-to-alp-sdk> --non-interactive
 tan init                     # interactive: prompts for every field
 ```
 
@@ -134,7 +141,7 @@ the alp-sdk checkout the project should build against via
 |---|---|
 | `--name` | New project directory name |
 | `--som` | SoM SKU, e.g. `E1M-AEN801` |
-| `--template` | Project template (the nearest equivalent to a "preset") |
+| `--template` | Project template id, e.g. `minimal-app` (the default), `sensor-starter` |
 | `--sdk-root` | Path to the alp-sdk checkout the scaffolded project should resolve |
 | `--destination` | Where to write the project |
 | `--cores` | Comma-separated `id[:os]` core map for a heterogeneous project (OS inferred from the id when omitted) |
@@ -418,10 +425,10 @@ tan doctor --format json       # machine-readable
 Diagnoses whether a target/server combination is ready for a debug
 session -- checks `workspaceRoot`, `sdkRoot`, `boardYaml`, a `python`
 interpreter presence probe (no `.python-version` pin comparison),
-`codeLLDBExtension`, `lldb`, and `sdkProvenance`.  Real flags:
-`--project`, `--target-kind`, `--board-yaml`, `--server`,
-`--sdk-root` (plus the shared `--format`, `--verbose`, `--quiet`,
-`--no-color`, `--non-interactive`).  Example:
+`codeLLDBExtension`, `lldb`, and `sdkProvenance`.  See `tan doctor
+--help` for the full flag reference (including `--fix`, `--target`,
+and `--all`) -- not restated here to avoid a second copy drifting from
+the CLI.  Example:
 
 ```
   tan doctor  native-host · none
@@ -555,7 +562,7 @@ see [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli).
   build` fronts.
 - [board-config-schema.md](board-config-schema.md) -- the `board.yaml`
   field reference `tan validate` enforces.
-- [troubleshooting.md](troubleshooting.md) -- when `tan doctor`
+- [troubleshooting.md](troubleshooting.md) -- when `tan doctor --build`
   isn't enough.
 - [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli) -- the
   standalone executor's own docs (`tan build` / `flash` / `size` /

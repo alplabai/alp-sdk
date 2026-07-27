@@ -21,10 +21,9 @@ firmware as a first-class consumer.
 >   `tan --project <app-dir> build` fans the app's `board.yaml` out
 >   into per-core build slices (via alp-sdk's `alp_orchestrate --emit
 >   build-plan`), runs the full pre-flight (schema validation, SoC
->   caps, hw_info header) and delegates to `west build` for whichever
->   target that `board.yaml` names — `native_sim` on your host or
->   real silicon; there is no separate `--board`/`--core` selector,
->   the target comes from the project itself.  This is the headline
+>   caps, hw_info header) and delegates to `west build` for the real
+>   SoM `board.yaml` names; there is no separate `--board`/`--core`
+>   selector, the target comes from the project itself.  This is the headline
 >   [README Quickstart](../README.md#quickstart) — if you just want
 >   a hello-world running in two minutes, start there.  Install
 >   `tan` separately from its own repo -- the automatic installer
@@ -39,14 +38,14 @@ firmware as a first-class consumer.
 > - **`tan`'s forwarded verbs** — everything that isn't a build: `tan
 >   init` scaffolds a project, `tan validate` checks a `board.yaml`,
 >   `tan emit` inspects any generated artefact (including the build
->   plan `tan build` consumes), plus `tan doctor` / `tan monitor` /
->   `tan model` / `tan new-som` / `tan explain` / `tan faultdecode`.
+>   plan `tan build` consumes), plus `tan monitor` / `tan model` /
+>   `tan new-som` / `tan explain` / `tan faultdecode`.  `tan doctor`
+>   is the one exception -- a native Rust check, not a forwarded verb.
 >   The full verb reference lives in [`docs/cli.md`](cli.md).
 >
-> Nothing is lost switching a project between `native_sim` and
-> real silicon: whichever the project's `board.yaml` names, `tan
-> --project <app-dir> build` consumes the same loader and validator
-> under the hood.  The surviving west-extension commands (`west
+> Every `board.yaml`-driven `tan --project <app-dir> build` runs
+> through the same loader and validator, whichever real SoM the
+> project targets.  The surviving west-extension commands (`west
 > alp-migrate`, `west alp-lock`, `west alp-quality`, `west alp-emit`)
 > are unaffected by the build-executor move.
 
@@ -58,6 +57,7 @@ cd alp-sdk
 bash scripts/bootstrap.sh                            # one-time: west + Python + apt hints
 export ZEPHYR_BASE="$PWD/../zephyr"
 curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh  # one-time: install tan (no Rust toolchain needed)
+export PATH="$HOME/.local/bin:$PATH"  # install.sh already made this permanent in your shell rc; needed once more in THIS shell
 tan --project examples/peripheral-io/gpio-button-led build
 # this cross-compiles for the example's real SoM (E1M-AEN801) -- it
 # needs the Zephyr SDK toolchain pinned in metadata/toolchains.json;
@@ -132,7 +132,9 @@ Per-platform install one-liners:
 ```bash
 # macOS (Homebrew)
 brew install cmake ninja python git
-pip3 install west
+# no `pip3 install west` here -- scripts/bootstrap.sh installs west into
+# the workspace venv itself, and Homebrew's Python 3.12 is PEP 668
+# externally-managed too, so a system-wide `pip3 install` fails outright
 
 # Linux (Debian / Ubuntu)
 sudo apt install -y cmake ninja-build python3 python3-pip python3-venv git
@@ -289,10 +291,10 @@ What this does:
   SoM (`E1M-AEN801`), so this build cross-compiles and needs the
   Zephyr SDK toolchain pinned in
   [`metadata/toolchains.json`](../metadata/toolchains.json).
-  `native_sim` is also a valid `board.yaml` target — it needs no
-  silicon and runs as a native process on Linux / macOS / WSL
-  (Windows: via WSL2, since upstream Zephyr's `native_sim` is
-  Linux/macOS only) — but no example ships one today.
+  `board.yaml`'s `som.sku` is pattern-locked to real SoM SKUs
+  (`metadata/schemas/board.schema.json`) — `native_sim` is not a
+  `board.yaml` target; it's reached through twister /
+  `testcase.yaml`'s `platform_allow`, a separate mechanism.
 
 `tan build` walks four steps under the hood, driven by alp-sdk's
 `alp_orchestrate --emit build-plan`:
