@@ -77,6 +77,36 @@ and `uv` pick `.python-version` up automatically.  `tan doctor`
 WARNs (never FAILs) when the running interpreter differs from
 the pin; anything >= 3.10 remains supported.
 
+### 1.2 Rust toolchain (only for building `tan` from source)
+
+`tan`, the standalone build executor
+([`alplabai/tan-cli`](https://github.com/alplabai/tan-cli)), ships
+prebuilt binaries and an `install.sh` / `install.ps1` one-liner --
+most users never need a Rust toolchain at all.  It's only a
+prerequisite for the from-source alternative documented alongside
+every `tan` install instruction in this repo
+(`cargo install --path crates/tan-cli --locked` from a clone).
+
+Get `rustup` from [rustup.rs](https://rustup.rs) (Rust 1.86+,
+edition 2024):
+
+```bash
+# Linux / macOS:
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+```powershell
+# Windows native (PowerShell):
+winget install -e --id Rustlang.Rustup
+```
+
+A from-source build also needs a system C linker (`rustup`'s own
+installer warns if one is missing).  On Linux, §2.1's `build-essential`
+covers it.  On macOS, the Homebrew install in §3.1 prompts to install
+the Xcode Command Line Tools, which include one.  On native Windows,
+`rustup`'s own installer offers to fetch the Visual Studio Build
+Tools C++ workload for you the first time it runs.
+
 ---
 
 ## 2. Linux setup (Debian / Ubuntu / Fedora)

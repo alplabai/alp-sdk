@@ -11,10 +11,29 @@ project.
 
 `tan` is a standalone, independently-versioned, public Rust binary
 ([`alplabai/tan-cli`](https://github.com/alplabai/tan-cli)); install it
-separately (needs a Rust toolchain / rustup):
+separately. The automatic installer needs no Rust toolchain:
 
 ```bash
-cargo install --git https://github.com/alplabai/tan-cli --bin tan
+curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh
+```
+
+Or grab a prebuilt, per-platform binary directly from a release tag, e.g.
+Linux x86_64:
+
+```bash
+curl -fsSL -o /usr/local/bin/tan \
+  https://github.com/alplabai/tan-cli/releases/latest/download/tan-x86_64-unknown-linux-gnu
+chmod +x /usr/local/bin/tan
+```
+
+Building from source instead needs Rust 1.86+ (get it from
+[rustup.rs](https://rustup.rs)) plus a system C toolchain
+(`build-essential` on Debian/Ubuntu, `gcc`/`gcc-c++` on Fedora/RHEL -- see
+[`docs/cross-platform-setup.md`](cross-platform-setup.md) §2.1):
+
+```bash
+git clone https://github.com/alplabai/tan-cli && cd tan-cli
+cargo install --path crates/tan-cli --locked
 ```
 
 Two execution paths live behind the one binary:

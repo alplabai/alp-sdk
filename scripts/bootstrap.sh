@@ -416,8 +416,10 @@ if [ "${DO_PIP}" -eq 1 ]; then
     # tan's Python backend (alp_cli: init / run / emit / validate / model /
     # doctor / monitor, invoked as `python -m alp_cli <sub>` by `tan`) --
     # editable install, so a `git pull` in the checkout updates the backend
-    # in place. `tan` itself is a separate Rust binary, installed via
-    # `cargo install --git https://github.com/alplabai/tan-cli --bin tan`.
+    # in place. `tan` itself is a separate Rust binary, installed
+    # separately -- see README.md for the tan-cli `install.sh` one-liner
+    # (or the `cargo install --path crates/tan-cli --locked` from-source
+    # alternative).
     info "Installing the tan CLI's Python backend into the venv (pip install -e ${PIP_EDITABLE_INSTALL})"
     "${VPY}" -m pip install -q -e "${PIP_EDITABLE_INSTALL}" \
         || warn "alp_cli editable install reported a problem -- check manually"
@@ -487,15 +489,15 @@ EOF
 print_env_lines "  "
 # QUOTED tag (<<'EOF') -- mandatory, not stylistic.  This block documents
 # shell commands, and an unquoted tag makes the shell treat the backtick'd
-# `cargo install ...` line below as a real command SUBSTITUTION: every
-# completed run of this script silently executed it, reinstalling tan from
-# git tip behind the user's back, and pasted its output here instead of the
-# text.  A quoted tag also means backslashes are literal, so the line
-# continuation and $PWD below are written plainly rather than escaped.
+# install command below as a real command SUBSTITUTION: every completed
+# run of this script silently executed it, reinstalling tan behind the
+# user's back, and pasted its output here instead of the text.  A quoted
+# tag also means backslashes are literal, so the line continuation and
+# $PWD below are written plainly rather than escaped.
 cat <<'EOF'
 
   # Sanity-check the host environment (needs tan on PATH -- see README.md
-  # for `cargo install --git https://github.com/alplabai/tan-cli --bin tan`):
+  # for the tan-cli `install.sh` one-liner):
   tan doctor
 
   # Run the local test suite:

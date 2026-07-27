@@ -27,9 +27,15 @@ hand-written firmware as a first-class consumer.
 >   the target comes from the project itself.  This is the headline
 >   [README Quickstart](../README.md#quickstart) — if you just want
 >   a hello-world running in two minutes, start there.  Install
->   `tan` separately from its own repo (needs a Rust toolchain /
->   rustup): `cargo install --git https://github.com/alplabai/tan-cli
->   --bin tan`.
+>   `tan` separately from its own repo -- the automatic installer
+>   needs no Rust toolchain: `curl -fsSL
+>   https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh
+>   | sh`.  Building from source instead needs Rust 1.86+
+>   ([rustup.rs](https://rustup.rs)) and a system C toolchain
+>   (`build-essential` / `gcc gcc-c++` -- see
+>   [`docs/cross-platform-setup.md`](cross-platform-setup.md) §2.1):
+>   `git clone https://github.com/alplabai/tan-cli && cd tan-cli &&
+>   cargo install --path crates/tan-cli --locked`.
 > - **`tan`'s forwarded verbs** — everything that isn't a build: `tan
 >   init` scaffolds a project, `tan validate` checks a `board.yaml`,
 >   `tan emit` inspects any generated artefact (including the build
@@ -51,7 +57,7 @@ git clone https://github.com/alplabai/alp-sdk
 cd alp-sdk
 bash scripts/bootstrap.sh                            # one-time: west + Python + apt hints
 export ZEPHYR_BASE="$PWD/../zephyr"
-cargo install --git https://github.com/alplabai/tan-cli --bin tan  # one-time: install tan (needs rustup/cargo)
+curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh  # one-time: install tan (no Rust toolchain needed)
 tan --project examples/peripheral-io/gpio-button-led build
 # illustrative stdout once the build runs:
 #   [gpio] init button=EVK_PIN_ENCODER_SW, led=EVK_PIN_LED_RED

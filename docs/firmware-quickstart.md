@@ -51,11 +51,21 @@ you a `alp-workspace/` with `alp-sdk/`, `zephyr/`, and the standard
 modules.
 
 You'll also need `tan`, the standalone build executor -- a separate
-public repo, not installed by `bootstrap.sh`. Needs a Rust toolchain
-(`rustup`/`cargo`) on `PATH`:
+public repo, not installed by `bootstrap.sh`. The automatic installer
+needs no Rust toolchain:
 
 ```bash
-cargo install --git https://github.com/alplabai/tan-cli --bin tan
+curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh
+```
+
+Building from source instead needs Rust 1.86+ ([rustup.rs](https://rustup.rs))
+and a system C toolchain (`build-essential` on Debian/Ubuntu, `gcc`/`gcc-c++`
+on Fedora/RHEL -- see [`docs/cross-platform-setup.md`](cross-platform-setup.md)
+§2.1):
+
+```bash
+git clone https://github.com/alplabai/tan-cli && cd tan-cli
+cargo install --path crates/tan-cli --locked
 ```
 
 For the rest of this doc, all paths are relative to `alp-workspace/`.

@@ -378,8 +378,10 @@ if (-not $NoPip) {
     # tan's Python backend (alp_cli: init / run / emit / validate / model /
     # doctor / monitor, invoked as `python -m alp_cli <sub>` by `tan`) --
     # editable install, so a `git pull` in the checkout updates the backend
-    # in place. `tan` itself is a separate Rust binary, installed via
-    # `cargo install --git https://github.com/alplabai/tan-cli --bin tan`.
+    # in place. `tan` itself is a separate Rust binary, installed
+    # separately -- see README.md for the tan-cli `install.sh` one-liner
+    # (or the `cargo install --path crates/tan-cli --locked` from-source
+    # alternative).
     Write-Info "Installing the tan CLI's Python backend into the venv (pip install -e $PipEditableInstall)"
     & $Vpy -m pip install -q -e $PipEditableInstall
     if ($LASTEXITCODE -ne 0) { Write-Warn2 "alp_cli editable install reported a problem -- check manually" }
@@ -419,7 +421,7 @@ Write-EnvLines "  "
 @"
 
   # Sanity-check the host environment (needs tan on PATH -- see README.md
-  # for `cargo install --git https://github.com/alplabai/tan-cli --bin tan`):
+  # for the tan-cli `install.sh` one-liner):
   tan doctor
 
   # Or jump straight into building an example for real silicon:
