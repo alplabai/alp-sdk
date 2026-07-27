@@ -119,9 +119,9 @@ die()  { printf "\033[1;31m[bootstrap]\033[0m %s\n" "$*" >&2; exit 1; }
 # `prerequisites.posix` is policed by scripts/check_bootstrap_manifest.py,
 # whose regex expects the full array assignment right below, not by this
 # script.
-REQUIRED_BINS=(git cmake python3)
+REQUIRED_BINS=(git cmake python3 ninja)
 # --print-env only reads metadata/bootstrap.json and prints -- it never
-# touches git/cmake, so it only needs python3 present.
+# touches git/cmake/ninja, so it only needs python3 present.
 if [ "${PRINT_ENV_ONLY}" -eq 1 ]; then
     REQUIRED_BINS=(python3)
 fi
@@ -137,16 +137,18 @@ fi
 # macOS-shipped version) has no `declare -A` -- the same reason the
 # nativeLibHints print loop further down duplicates itself per OS instead of
 # using indirection. Matched up by POSITION, not by key.
-PREREQ_HINT_NAMES=(git cmake python3)
+PREREQ_HINT_NAMES=(git cmake python3 ninja)
 PREREQ_HINT_LINUX=(
     "sudo apt-get install -y git"
     "sudo apt-get install -y cmake"
     "sudo apt-get install -y python3"
+    "sudo apt-get install -y ninja-build"
 )
 PREREQ_HINT_MACOS=(
     "brew install git"
     "brew install cmake"
     "brew install python3"
+    "brew install ninja"
 )
 
 MISSING=()

@@ -1003,7 +1003,7 @@ def test_bootstrap_sh_hint_length_mismatch_fails(tmp_path, monkeypatch, capsys):
     rv = gate.main()
     err = capsys.readouterr().err
     assert rv == 1
-    assert "PREREQ_HINT_LINUX has 2 entries but PREREQ_HINT_NAMES has 3" in err
+    assert "PREREQ_HINT_LINUX has 3 entries but PREREQ_HINT_NAMES has 4" in err
     assert "must stay parallel arrays" in err
 
 
@@ -1021,7 +1021,7 @@ def test_bootstrap_sh_hint_deleted_in_lockstep_does_not_silently_drop_tool(
     assertion existed."""
     _scaffold(tmp_path)
     sh_path = tmp_path / "scripts/bootstrap.sh"
-    _replace(sh_path, "PREREQ_HINT_NAMES=(git cmake python3)", "PREREQ_HINT_NAMES=(cmake python3)")
+    _replace(sh_path, "PREREQ_HINT_NAMES=(git cmake python3 ninja)", "PREREQ_HINT_NAMES=(cmake python3 ninja)")
     _replace(sh_path, '    "sudo apt-get install -y git"\n', "")
     _replace(sh_path, '    "brew install git"\n', "")
     _point_gate_at(tmp_path, monkeypatch)
