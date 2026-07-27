@@ -52,8 +52,9 @@ def real_headers(gen_module, tmp_path, monkeypatch):
     out_dir = tmp_path / "boards"
     monkeypatch.setattr(gen_module, "OUT_DIR", out_dir)
     # main() logs each written path via out_path.relative_to(REPO); REPO is
-    # looked up fresh from the module namespace at call time (BOARDS_DIR /
-    # OUT_DIR were already bound at import time, so this doesn't touch them).
+    # looked up fresh from the module namespace at call time, so patching
+    # REPO doesn't move BOARDS_DIR (it was already bound at import time);
+    # OUT_DIR is redirected explicitly above.
     monkeypatch.setattr(gen_module, "REPO", tmp_path)
     rc = gen_module.main()
     assert rc == 0

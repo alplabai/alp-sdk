@@ -1,10 +1,9 @@
 from pathlib import Path
 
-import gen_soc_caps as gsc  # noqa: E402  (scripts/ on sys.path via conftest)
+import gen_soc_caps as gsc  # scripts/ on sys.path via conftest
 from .conftest import clang_format_text
 
 REPO = Path(__file__).resolve().parents[2]
-HEADER = REPO / "include" / "alp" / "soc_caps.h"
 CAP_H = REPO / "include" / "alp" / "cap.h"
 CAP_C = REPO / "src" / "cap.c"
 
@@ -17,14 +16,6 @@ def test_header_contains_alp_has_macro_and_cap_definitions():
     assert "#define ALP_CAP_HW_SPI" in text
     assert "#define ALP_CAP_NPU_DRPAI" in text
     assert "#define ALP_CAP_HELIUM_MVE" in text
-
-
-def test_soc_caps_h_matches_committed_file(tmp_path):
-    """Generator output, clang-formatted, must be byte-identical to the
-    committed header -- otherwise gen_soc_caps.py and include/alp/soc_caps.h
-    have drifted and the `generated-files` CI gate should be catching it."""
-    formatted = clang_format_text(tmp_path, "soc_caps.h", gsc.emit())
-    assert formatted == HEADER.read_text(encoding="utf-8")
 
 
 def test_cap_h_emits_enum_and_function_prototypes():
