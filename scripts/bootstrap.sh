@@ -402,12 +402,30 @@ VENV_DIR="${WORKSPACE_DIR}/${VENV_DIR_NAME}"
 # and a global west couples the build to the host interpreter's state).
 # tan's Python backend (alp_cli) + the VS Code extension auto-discover
 # <workspace>/.venv, so this is backwards-compatible.  Idempotent: an
-# existing venv is reused.
+# existing WORKING venv is reused.
 if [ "${DO_WEST}" -eq 1 ] || [ "${DO_PIP}" -eq 1 ]; then
     mkdir -p "${WORKSPACE_DIR}"
-    if [ -x "${VENV_DIR}/${VENV_POSIX_BIN}/python" ] || [ -x "${VENV_DIR}/${VENV_WINDOWS_BIN}/python.exe" ]; then
+    # Reuse only a working venv (issue #985): `python3 -m venv` on a host
+    # missing python3-venv creates the directory tree and a `python`
+    # executable before failing at ensurepip, so the previous
+    # executable-exists-only probe treated that half-built, pip-less venv
+    # as valid and reused it forever -- every retry then died one step
+    # later on "No module named pip" with nothing pointing at the venv
+    # itself as the problem.  Probe the thing that actually broke: pip.
+    VENV_REUSABLE=0
+    for candidate in "${VENV_DIR}/${VENV_POSIX_BIN}/python" "${VENV_DIR}/${VENV_WINDOWS_BIN}/python.exe"; do
+        if [ -x "${candidate}" ] && "${candidate}" -m pip --version >/dev/null 2>&1; then
+            VENV_REUSABLE=1
+            break
+        fi
+    done
+    if [ "${VENV_REUSABLE}" -eq 1 ]; then
         ok "Workspace venv already present at ${VENV_DIR}"
     else
+        if [ -e "${VENV_DIR}" ]; then
+            warn "Workspace venv at ${VENV_DIR} exists but has no working pip -- recreating it"
+            rm -rf "${VENV_DIR}"
+        fi
         info "Creating workspace venv at ${VENV_DIR}"
         python3 -m venv "${VENV_DIR}" || die "python3 -m venv ${VENV_DIR} failed"
     fi
