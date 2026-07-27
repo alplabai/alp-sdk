@@ -43,6 +43,23 @@ def gen_module():
     return mod
 
 
+@pytest.fixture()
+def real_headers(gen_module, tmp_path, monkeypatch):
+    """Run the real generator against the committed board YAMLs, redirected
+    into tmp_path.  gen_module.main() would otherwise write every generated
+    header (including EVK_OUT / XEVK_OUT) straight into the real
+    include/alp/boards/ tree as a side effect of running this test (#973)."""
+    out_dir = tmp_path / "boards"
+    monkeypatch.setattr(gen_module, "OUT_DIR", out_dir)
+    # main() logs each written path via out_path.relative_to(REPO); REPO is
+    # looked up fresh from the module namespace at call time (BOARDS_DIR /
+    # OUT_DIR were already bound at import time, so this doesn't touch them).
+    monkeypatch.setattr(gen_module, "REPO", tmp_path)
+    rc = gen_module.main()
+    assert rc == 0
+    return out_dir / EVK_OUT.name, out_dir / XEVK_OUT.name
+
+
 def _sample_doc() -> dict[str, Any]:
     return {
         "name": "TEST-CARRIER",
@@ -94,27 +111,25 @@ def test_active_low_flag_renders_in_doxygen(gen_module):
     assert "Active-low." in out
 
 
-def test_real_evk_header_is_idempotent(gen_module):
+def test_real_evk_header_is_idempotent(gen_module, real_headers):
     """Generate twice against the committed E1M-EVK YAML; output must
     be byte-identical (idempotency is non-negotiable for code-gen)."""
+    evk_out, _xevk_out = real_headers
+    first = evk_out.read_bytes()
     rc = gen_module.main()
     assert rc == 0
-    first = EVK_OUT.read_bytes()
-    rc = gen_module.main()
-    assert rc == 0
-    second = EVK_OUT.read_bytes()
+    second = evk_out.read_bytes()
     assert hashlib.sha256(first).hexdigest() == hashlib.sha256(second).hexdigest()
 
 
-def test_real_evk_header_covers_known_macros(gen_module):
+def test_real_evk_header_covers_known_macros(real_headers):
     """Smoke check: every macro that hand-written firmware already
     relies on must be present in the generated EVK header.  If a
     macro is dropped from the YAML, this test breaks the build --
     intentional: deletion needs an explicit `pytest --update-snapshots`
     -equivalent gesture, not a silent regression."""
-    rc = gen_module.main()
-    assert rc == 0
-    out = EVK_OUT.read_text(encoding="utf-8")
+    evk_out, _xevk_out = real_headers
+    out = evk_out.read_text(encoding="utf-8")
     must_define = [
         # GPIO section
         "EVK_PIN_CAM_MUX_SEL",
@@ -156,7 +171,7 @@ def test_real_evk_header_covers_known_macros(gen_module):
         assert f"#define {macro}" in out, f"{macro} missing from generated header"
 
 
-def test_no_clash_with_existing_alp_e1m_evk_h(gen_module):
+def test_no_clash_with_existing_alp_e1m_evk_h(real_headers):
     """The generated routes header MUST NOT also re-define macros
     that live in the surviving hand-authored sections of
     `alp_e1m_evk.h` (overlay-pad indices, mux enums).  On-board I2C
@@ -165,9 +180,8 @@ def test_no_clash_with_existing_alp_e1m_evk_h(gen_module):
     now -- see `test_real_evk_header_covers_i2c_device_macros` below.
     This guards against accidental over-lift of what's still
     hand-authored in future slices."""
-    rc = gen_module.main()
-    assert rc == 0
-    out = EVK_OUT.read_text(encoding="utf-8")
+    evk_out, _xevk_out = real_headers
+    out = evk_out.read_text(encoding="utf-8")
     must_not_appear = [
         # Overlay-pad indices (slice deferred)
         "EVK_PIN_OVERLAY_BASE",
@@ -189,15 +203,14 @@ def test_no_clash_with_existing_alp_e1m_evk_h(gen_module):
         )
 
 
-def test_real_evk_header_covers_i2c_device_macros(gen_module):
+def test_real_evk_header_covers_i2c_device_macros(real_headers):
     """Issue #515: on-board I2C device addresses + INA236 calibration
     are now single-sourced from `metadata/boards/e1m-evk.yaml`'s
     `i2c_devices:` block and generated -- assert every macro
     hand-written firmware relies on is still defined, with the
     bench-confirmed values preserved verbatim."""
-    rc = gen_module.main()
-    assert rc == 0
-    out = EVK_OUT.read_text(encoding="utf-8")
+    evk_out, _xevk_out = real_headers
+    out = evk_out.read_text(encoding="utf-8")
     must_define = {
         "EVK_I2C_ADDR_ICM42670": "0x69u",
         "EVK_I2C_ADDR_BMI323": "0x68u",
@@ -295,15 +308,14 @@ def test_emit_board_selects_e1m_x_pinout_for_x_routes(gen_module):
     assert "#define XC_I2C_MAIN" in out
 
 
-def test_real_xevk_header_uses_x_pinout_and_covers_macros(gen_module):
+def test_real_xevk_header_uses_x_pinout_and_covers_macros(real_headers):
     """The committed E1M-X-EVK YAML must generate a routes header that
     pulls the E1M-X pinout namespace and defines the XEVK_* macros
     hand-written X-EVK firmware relies on (mirrors the EVK coverage
     smoke check, one form factor over)."""
-    rc = gen_module.main()
-    assert rc == 0
-    assert XEVK_OUT.exists(), "alp_e1m_x_evk_routes.h was not generated"
-    out = XEVK_OUT.read_text(encoding="utf-8")
+    _evk_out, xevk_out = real_headers
+    assert xevk_out.exists(), "alp_e1m_x_evk_routes.h was not generated"
+    out = xevk_out.read_text(encoding="utf-8")
     assert '#include "alp/e1m_x_pinout.h"' in out
     must_define = [
         "XEVK_I2C_BUS_SENSORS",   # buses
