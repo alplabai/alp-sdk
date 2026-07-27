@@ -152,7 +152,10 @@
       "gpio_18v": 120,
       "optional_features": { "npu_hp": true, "can_fd": true },
       "shipment_suffixes": ["-T", "-Y"],
-      "debug": { "pyocd_target": "AE302F80F55D5AE" }
+      "debug": {
+        "pyocd_target": "AE302F80F55D5AE",
+        "jlink_device": { "m55_hp": "AE302F80F55D5AE_HP", "m55_he": "AE302F80F55D5AE_HE" }
+      }
     },
     {
       "order_code": "AE302F80F5582AE",
@@ -168,7 +171,10 @@
       "gpio_18v": 120,
       "optional_features": { "npu_hp": true, "can_fd": true },
       "shipment_suffixes": ["-T", "-Y"],
-      "debug": { "pyocd_target": "AE302F80F5582AE" }
+      "debug": {
+        "pyocd_target": "AE302F80F5582AE",
+        "jlink_device": { "m55_hp": "AE302F80F5582AE_HP", "m55_he": "AE302F80F5582AE_HE" }
+      }
     },
     {
       "order_code": "AE302F80F55D5LE",
@@ -186,7 +192,10 @@
       "optional_features": { "npu_hp": true, "can_fd": true },
       "shipment_suffixes": ["-T", "-Y"],
       "alp_module_skus": ["E1M-AEN301"],
-      "debug": { "pyocd_target": "AE302F80F55D5LE" }
+      "debug": {
+        "pyocd_target": "AE302F80F55D5LE",
+        "jlink_device": { "m55_hp": "AE302F80F55D5LE_HP", "m55_he": "AE302F80F55D5LE_HE" }
+      }
     },
     {
       "order_code": "AE302F80F5582LE",
@@ -202,7 +211,10 @@
       "gpio_18v": 120,
       "optional_features": { "npu_hp": true, "can_fd": true },
       "shipment_suffixes": ["-T", "-Y"],
-      "debug": { "pyocd_target": "AE302F80F5582LE" }
+      "debug": {
+        "pyocd_target": "AE302F80F5582LE",
+        "jlink_device": { "m55_hp": "AE302F80F5582LE_HP", "m55_he": "AE302F80F5582LE_HE" }
+      }
     },
     {
       "order_code": "AE302F80C1557LE",
@@ -218,7 +230,10 @@
       "gpio_18v": 120,
       "optional_features": { "npu_hp": true, "can_fd": false },
       "shipment_suffixes": ["-T", "-Y"],
-      "debug": { "pyocd_target": "AE302F80C1557LE" }
+      "debug": {
+        "pyocd_target": "AE302F80C1557LE",
+        "jlink_device": { "m55_hp": "AE302F80C1557LE_HP", "m55_he": "AE302F80C1557LE_HE" }
+      }
     },
     {
       "order_code": "AE302F40C1537LE",
@@ -234,7 +249,10 @@
       "gpio_18v": 120,
       "optional_features": { "npu_hp": false, "can_fd": false },
       "shipment_suffixes": ["-T", "-Y"],
-      "debug": { "pyocd_target": "AE302F40C1537LE" }
+      "debug": {
+        "pyocd_target": "AE302F40C1537LE",
+        "jlink_device": { "m55_hp": "AE302F40C1537LE_HP", "m55_he": "AE302F40C1537LE_HE" }
+      }
     }
   ],
   "notes": [

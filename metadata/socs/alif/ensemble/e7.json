@@ -169,7 +169,10 @@
       },
       "gpio_18v": 120,
       "shipment_suffixes": ["-T", "-Y"],
-      "debug": { "pyocd_target": "AE722F80F55D5AS" }
+      "debug": {
+        "pyocd_target": "AE722F80F55D5AS",
+        "jlink_device": { "m55_hp": "AE722F80F55D5AS_HP", "m55_he": "AE722F80F55D5AS_HE" }
+      }
     },
     {
       "order_code": "AE722F80F55D5LS",
@@ -186,7 +189,10 @@
       "gpio_18v": 120,
       "shipment_suffixes": ["-T", "-Y"],
       "alp_module_skus": ["E1M-AEN701"],
-      "debug": { "pyocd_target": "AE722F80F55D5LS" }
+      "debug": {
+        "pyocd_target": "AE722F80F55D5LS",
+        "jlink_device": { "m55_hp": "AE722F80F55D5LS_HP", "m55_he": "AE722F80F55D5LS_HE" }
+      }
     }
   ],
   "notes": [

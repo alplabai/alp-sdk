@@ -28,15 +28,29 @@ for both Alif Ensemble and Renesas RZ/V2N.
 `pyocd_target` is populated for all thirteen Alif Ensemble variants (E3–E8)
 from the CMSIS-Pack index (`AlifSemiconductor.Ensemble` 2.2.0) — every
 `order_code` in this repo matches a pack part name exactly, so the target id
-**is** the order code. `jlink_device` is populated only where a bench-proven
-`board.cmake` evidences it — the E8, E6, and E4 M55-HP boards, plus the E8
-M55-HE board — publishing the part-specific SEGGER profile the maintainer
-chose over the generic `Cortex-M55` debug default. E3, E5, E7, every A32
-cluster, and the Renesas RZ/V2N (`n44.json`, no J-Link runner in tree at
-all) carry no `jlink_device`: no board evidences a profile for them, and a
-guessed value "fails at the probe rather than at validation" — the design
-principle the source issue states outright. Absence is deliberate and
-publishable, not a gap to fill by extrapolation.
+**is** the order code.
+
+`jlink_device` is populated for **all thirteen variants, both M55 cores**,
+on two distinct kinds of evidence — this repo's initial pass under-scoped it
+to in-tree `board.cmake` only, and the maintainer corrected that: the same
+CMSIS pack's `.pdsc` lists an `M55_HP` *and* an `M55_HE` `Pname` processor
+for every one of the 13 shipped devices, so the core pair itself is
+vendor-pack-confirmed, not inferred from which boards happen to exist in
+this tree. The `<order_code>_HP` / `<order_code>_HE` naming convention is
+fixed by two bench-verified strings — `AE822FA0E5597LS0_HP`
+(`zephyr/boards/alp/e1m_aen801_m55_hp/board.cmake:15`) and
+`AE822FA0E5597LS0_HE` (`e1m_aen801_m55_he/board.cmake:47`) — and the E4/E6
+`..._HP` strings are each independently copied from their own in-tree
+`board.cmake`. Every other one of the 26 values (all of E3/E5/E7, E8-BS0,
+and the `_HE` half of E4/E6) applies that confirmed convention to a
+vendor-pack-confirmed core; call these **convention-derived**, not
+individually probe-verified, to keep the provenance honest — only four
+strings were copied from a working runner invocation. `a32_cluster` still
+gets no `jlink_device` on any variant, and that absence is now *stronger*
+than before: the pack lists no A32 processor on any device, so it is a
+positive vendor statement of absence rather than merely an unevidenced gap.
+The Renesas RZ/V2N (`n44.json`, no J-Link runner in tree at all, out of
+scope for this pack) is untouched and carries no `debug` block.
 
 New semantic gate `validate_metadata._check_soc_debug_probe_identity`
 (alongside the existing `_check_soc_npu_pairing`) asserts that every

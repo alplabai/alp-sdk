@@ -227,7 +227,10 @@
       "gpio_18v": 136,
       "optional_features": { "npu_hg": true, "isp": true, "jpeg_encoder": true },
       "shipment_suffixes": ["-T", "-Y"],
-      "debug": { "pyocd_target": "AE822FA0E5597BS0" }
+      "debug": {
+        "pyocd_target": "AE822FA0E5597BS0",
+        "jlink_device": { "m55_hp": "AE822FA0E5597BS0_HP", "m55_he": "AE822FA0E5597BS0_HE" }
+      }
     },
     {
       "order_code": "AE822FA0E5597LS0",

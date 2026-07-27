@@ -190,7 +190,7 @@
       "alp_module_skus": ["E1M-AEN401"],
       "debug": {
         "pyocd_target": "AE402FA0E5597LE0",
-        "jlink_device": { "m55_hp": "AE402FA0E5597LE0_HP" }
+        "jlink_device": { "m55_hp": "AE402FA0E5597LE0_HP", "m55_he": "AE402FA0E5597LE0_HE" }
       }
     }
   ],
