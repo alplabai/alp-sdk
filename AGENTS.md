@@ -49,9 +49,9 @@ core) come from the SoM preset under `metadata/e1m_modules/<MPN>.yaml` and are
 
 Two loaders fan `board.yaml` into per-core slices:
 
-- `scripts/alp_project.py --emit {zephyr-conf,cmake-args,yocto-conf,hw-info-h,dts-overlay,west-libraries,os-topology}`
+- `scripts/alp_project.py --emit {zephyr-conf,cmake-args,yocto-conf,hw-info-h,dts-overlay,west-libraries,os-topology,native-sim-overlay,system-manifest,dts-reservations,ipc-contract-h,composed-route-table,carrier-netlist,zephyr-board,scaffold}`
   — the per-slice build config.
-- `python -m alp_orchestrate --emit {system-manifest,build-plan,ipc-contract-h,dts-reservations,dts-partitions,storage-mounts-c,tfm-sysbuild-conf}`
+- `python -m alp_orchestrate --emit {system-manifest,build-plan,ipc-contract-h,dts-reservations,dts-partitions,storage-mounts-c,tfm-sysbuild-conf,kconfig}`
   — the cross-core / system artefacts.
 
 `tan --project <app-dir> build` is the convenience wrapper: it consumes the
@@ -81,8 +81,9 @@ report.
   Try it against a fixture under `tests/fixtures/board_yaml_bad/` to learn the
   output format. Exit code 1 on a hard validation or consistency failure;
   warnings return 0.
-- `tan validate board.yaml` / `tan emit build-plan` — the same validation as a
-  build pre-flight before any compile work.
+- `tan validate board.yaml` / `python -m alp_orchestrate --input board.yaml
+  --emit build-plan` — the same validation as a build pre-flight before any
+  compile work.
 - CI gates — `scripts/check_*.py` (e.g. `check_doc_drift.py`,
   `check_example_portability.py`, `check_pin_conflicts.py`,
   `check_system_manifest.py`) plus **twister** for the Zephyr ztest + example
