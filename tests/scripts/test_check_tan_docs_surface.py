@@ -110,24 +110,58 @@ def _write_docroot(root: Path) -> None:
     )
 
 
+def _install_tan_stub(bin_dir: Path, body: str) -> Path:
+    """Install a Python-source `body` as an executable named `tan`,
+    resolvable by `shutil.which("tan")` on this OS.
+
+    POSIX: the kernel's shebang support makes an extensionless file with
+    `#!/usr/bin/env python3` on its first line + the exec bit directly
+    executable, and `which` finds any executable-bit file regardless of
+    name/extension -- this is the historical shape of this stub.
+
+    Windows has no kernel shebang support, and `shutil.which()` there only
+    resolves names ending in a `PATHEXT` extension (.exe/.bat/.cmd/...) --
+    an extensionless `tan` is invisible to it (alp-sdk#993). So on Windows
+    we ship the same body as `tan.py` plus a `tan.bat` shim that PATHEXT
+    picks up, mirroring how a real `cargo install`'d `tan.exe` would be
+    found. `body` never itself contains OS-specific logic; only this
+    installer branches."""
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    if os.name == "nt":
+        script_path = bin_dir / "tan.py"
+        script_path.write_text(body, encoding="utf-8")
+        tan_path = bin_dir / "tan.bat"
+        tan_path.write_text(
+            f'@"{sys.executable}" "{script_path}" %*\r\nexit /b %errorlevel%\r\n',
+            encoding="utf-8",
+        )
+    else:
+        tan_path = bin_dir / "tan"
+        tan_path.write_text("#!/usr/bin/env python3\n" + body, encoding="utf-8")
+        tan_path.chmod(tan_path.stat().st_mode | stat.S_IEXEC)
+    return tan_path
+
+
 def _write_fake_tan(bin_dir: Path, *, recognized: dict[str, set[str]], missing: set[str]) -> Path:
     """A stub `tan` whose `<verb> --help` prints the given flags for a
     recognized verb (exit 0) or errors like real clap does for `missing`
     verbs (exit 2, message on stderr, nothing on stdout)."""
-    bin_dir.mkdir(parents=True, exist_ok=True)
-    tan_path = bin_dir / "tan"
     lines = [
-        "#!/usr/bin/env python3",
         "import sys",
         f"RECOGNIZED = {recognized!r}",
         f"MISSING = {missing!r}",
         "verb = sys.argv[1] if len(sys.argv) > 1 else ''",
-        "if verb in MISSING:",
-        "    print(f\"error: unrecognized subcommand {verb!r}\", file=sys.stderr)",
-        "    sys.exit(2)",
+        # --version is checked before MISSING/RECOGNIZED: it's a real clap
+        # global flag, not a subcommand, so it must resolve the same way
+        # regardless of what a test happens to put in MISSING/RECOGNIZED
+        # (no test currently puts '--version' in MISSING, but the check
+        # order shouldn't depend on that).
         "if verb == '--version':",
         "    print('tan 0.0.0-test')",
         "    sys.exit(0)",
+        "if verb in MISSING:",
+        "    print(f\"error: unrecognized subcommand {verb!r}\", file=sys.stderr)",
+        "    sys.exit(2)",
         "if verb in RECOGNIZED:",
         "    print('Options:')",
         "    for f in sorted(RECOGNIZED[verb]):",
@@ -136,9 +170,32 @@ def _write_fake_tan(bin_dir: Path, *, recognized: dict[str, set[str]], missing: 
         "print(f\"error: unrecognized subcommand {verb!r}\", file=sys.stderr)",
         "sys.exit(2)",
     ]
-    tan_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    tan_path.chmod(tan_path.stat().st_mode | stat.S_IEXEC)
-    return tan_path
+    return _install_tan_stub(bin_dir, "\n".join(lines) + "\n")
+
+
+def test_install_tan_stub_takes_the_windows_branch_when_forced(tmp_path, monkeypatch):
+    """This host is Linux -- a `.bat` cannot actually be executed here, so
+    this only proves branch SELECTION and the shim's shape (a PATHEXT-
+    recognised name, the right `sys.executable` + script path, `%*` arg
+    passthrough, explicit exit-code propagation since cmd.exe does not
+    reliably surface the last command's exit code as the .bat's own
+    without it). Actually running a `tan.bat` through `subprocess.run` and
+    resolving it via `shutil.which()` on real PATHEXT needs a real Windows
+    host -- unverified here (alp-sdk#993)."""
+    monkeypatch.setattr(os, "name", "nt")
+    bin_dir = tmp_path / "winbin"
+    body = "import sys\nprint('hi')\nsys.exit(0)\n"
+    tan_path = _install_tan_stub(bin_dir, body)
+
+    assert tan_path == bin_dir / "tan.bat"  # PATHEXT default includes .BAT
+    assert not (bin_dir / "tan").exists()  # no extensionless file on this branch
+    assert (bin_dir / "tan.py").read_text(encoding="utf-8") == body
+
+    bat = tan_path.read_text(encoding="utf-8")
+    assert bat.startswith(f'@"{sys.executable}"')
+    assert str(bin_dir / "tan.py") in bat
+    assert "%*" in bat
+    assert "exit /b %errorlevel%" in bat
 
 
 def _run(repo_root: Path, tan_bin_dir: Path, **kw):
@@ -530,11 +587,10 @@ def test_forwarding_verb_flag_check_is_skipped_not_matched_by_generic_blurb(tmp_
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    tan_path = bin_dir / "tan"
-    tan_path.write_text(
+    _install_tan_stub(
+        bin_dir,
         textwrap.dedent(
             """\
-            #!/usr/bin/env python3
             import sys
             verb = sys.argv[1] if len(sys.argv) > 1 else ""
             HELP = {
@@ -562,9 +618,7 @@ def test_forwarding_verb_flag_check_is_skipped_not_matched_by_generic_blurb(tmp_
             sys.exit(2)
             """
         ),
-        encoding="utf-8",
     )
-    tan_path.chmod(tan_path.stat().st_mode | stat.S_IEXEC)
 
     proc = _run(doc_root, bin_dir)
     assert proc.returncode == 0, proc.stdout + proc.stderr
