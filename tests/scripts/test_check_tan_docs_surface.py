@@ -229,3 +229,339 @@ def test_prose_after_tan_does_not_misparse_as_a_subcommand(tmp_path):
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "`tan is" not in proc.stderr
     assert "`tan on" not in proc.stderr
+
+
+def test_prose_outside_a_fence_does_not_misparse_as_a_subcommand(tmp_path):
+    """A content word right after the bare word "tan" in REAL paragraph
+    prose -- no backtick span, no fence -- must never be extracted as a
+    subcommand. The test above puts its prose INSIDE a fenced block, so it
+    only exercises the _ENGLISH_STOPWORDS set, not whether _code_corpus()
+    actually strips raw prose: mutating _code_corpus to `return
+    markdown_text` (skip fence/prose stripping entirely) still passes that
+    test, because "is"/"on" are in the stopword set regardless of where
+    they came from. "handles" is not a stopword, so it proves the corpus
+    was actually built from code spans, not the raw file."""
+    doc_root = tmp_path / "repo"
+    _write_docroot(doc_root)
+    readme = doc_root / "README.md"
+    readme.write_text(
+        readme.read_text(encoding="utf-8")
+        + "\ntan handles retries automatically, with no flags of its own.\n",
+        encoding="utf-8",
+    )
+    tan_bin = _write_fake_tan(tmp_path / "bin", recognized=_ALL_RECOGNIZED, missing=set())
+
+    proc = _run(doc_root, tmp_path / "bin")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "`tan handles`" not in proc.stderr
+
+
+def test_heredoc_only_verb_is_still_checked(tmp_path):
+    """`tan support-bundle`, mentioned ONLY inside scripts/bootstrap.sh's
+    printed heredoc body -- nowhere in README.md/docs/cli.md/
+    docs/getting-started.md/docs/troubleshooting.md -- must still enter the
+    checked surface. Mutating extract_heredoc_bodies() to `return ""` would
+    silently drop it: the gate would stay green even if `tan
+    support-bundle` no longer existed."""
+    doc_root = tmp_path / "repo"
+    _write_docroot(doc_root)
+    (doc_root / "scripts" / "bootstrap.sh").write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env bash
+            cat <<EOF
+
+            Next steps:
+            EOF
+            cat <<'EOF'
+
+              # needs tan on PATH -- see README.md
+              tan doctor --build
+              tan support-bundle
+            EOF
+            """
+        ),
+        encoding="utf-8",
+    )
+    tan_bin = _write_fake_tan(
+        tmp_path / "bin", recognized=dict(_ALL_RECOGNIZED), missing={"support-bundle"},
+    )
+
+    proc = _run(doc_root, tmp_path / "bin")
+    assert proc.returncode != 0
+    assert "`tan support-bundle`" in proc.stderr
+    assert "no longer a recognised subcommand" in proc.stderr
+
+
+def test_doctor_build_removed_from_help_is_caught(tmp_path):
+    """`### `tan doctor --build`` -- the heading-EMBEDDED flag docs/cli.md
+    encodes for `doctor` (the case the module docstring specifically calls
+    out) -- must actually be verified. Dropping the loop that folds a
+    heading's own embedded flags into verb_flags[current_verb] would
+    silently stop checking `--build` at all: the fixture sets this path up,
+    but nothing removes `--build` from the stub to prove it's checked."""
+    doc_root = tmp_path / "repo"
+    _write_docroot(doc_root)
+    recognized = dict(_ALL_RECOGNIZED)
+    recognized["doctor"] = set()  # --build silently dropped from real tan
+    tan_bin = _write_fake_tan(tmp_path / "bin", recognized=recognized, missing=set())
+
+    proc = _run(doc_root, tmp_path / "bin")
+    assert proc.returncode != 0
+    assert "`tan doctor --build`" in proc.stderr
+    assert "not listed in" in proc.stderr
+
+
+def test_flag_prefix_collision_is_not_masked(tmp_path):
+    """A `--build` -> `--build-root` rename must still be reported as
+    drift: the substring "--build" is textually present inside
+    "--build-root", so an unbounded `re.escape(flag)` match (no word-
+    boundary lookaround) would incorrectly consider the documented
+    `--build` still present. Proves the boundary regex at check_surface's
+    flag-match step actually matters."""
+    doc_root = tmp_path / "repo"
+    _write_docroot(doc_root)
+    recognized = dict(_ALL_RECOGNIZED)
+    recognized["doctor"] = {"--build-root"}  # renamed, not the documented --build
+    tan_bin = _write_fake_tan(tmp_path / "bin", recognized=recognized, missing=set())
+
+    proc = _run(doc_root, tmp_path / "bin")
+    assert proc.returncode != 0
+    assert "`tan doctor --build`" in proc.stderr
+    assert "`tan doctor --build-root`" not in proc.stderr
+
+
+def test_heading_embedded_non_flag_token_is_not_treated_as_a_flag(tmp_path):
+    """Only a `--flag`-shaped token in a heading's own verb zone becomes a
+    documented flag (`_parse_verb_span`'s `p.startswith("--")` filter); a
+    bare word after the verb is prose, never a flag. Dropping that filter
+    would fabricate a flag requirement from any such word and produce a
+    false "documents this flag" problem for something docs/cli.md never
+    claimed as a flag."""
+    doc_root = tmp_path / "repo"
+    _write_docroot(doc_root)
+    cli_md = doc_root / "docs" / "cli.md"
+    cli_md.write_text(
+        cli_md.read_text(encoding="utf-8").replace(
+            "### `tan doctor --build` -- build-readiness preflight",
+            "### `tan doctor --build status` -- build-readiness preflight",
+        ),
+        encoding="utf-8",
+    )
+    tan_bin = _write_fake_tan(tmp_path / "bin", recognized=dict(_ALL_RECOGNIZED), missing=set())
+
+    proc = _run(doc_root, tmp_path / "bin")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "status" not in proc.stdout + proc.stderr
+
+
+def test_multiverb_heading_does_not_leak_a_stray_flag_to_the_prior_verb(tmp_path):
+    """A table-like line directly under a multi-verb heading (`` `tan
+    build` / `flash` ``) must never be attributed to whichever single verb
+    happened to precede it. Replacing the `else: current_verb = None` reset
+    with a no-op would leave `current_verb` at the PRIOR single-verb
+    section ('init' here), silently mis-attributing a stray flag row to
+    `init` and producing a false "documented but not listed" problem for a
+    flag docs/cli.md never actually associated with `init`."""
+    doc_root = tmp_path / "repo"
+    (doc_root / "docs").mkdir(parents=True)
+    (doc_root / "scripts").mkdir(parents=True)
+    (doc_root / "README.md").write_text("`tan init` scaffolds a project.\n", encoding="utf-8")
+    (doc_root / "docs" / "getting-started.md").write_text(
+        "`tan validate` checks board.yaml.\n", encoding="utf-8",
+    )
+    (doc_root / "docs" / "troubleshooting.md").write_text(
+        "`tan run` is the escape hatch.\n", encoding="utf-8",
+    )
+    (doc_root / "scripts" / "bootstrap.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    (doc_root / "docs" / "cli.md").write_text(
+        textwrap.dedent(
+            """\
+            # The `tan` CLI
+
+            ### `tan init` -- scaffold a new project
+
+            | Option | Meaning |
+            |---|---|
+            | `--som` | Target SoM SKU |
+
+            ### `tan build` / `flash` -- build execution
+
+            | Option | Meaning |
+            |---|---|
+            | `--stray` | must NOT attach to `init` -- no per-verb table here |
+
+            ```bash
+            tan build
+            tan flash
+            ```
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    recognized = {
+        "init": {"--som"}, "build": set(), "flash": set(),
+        "validate": set(), "run": set(),
+    }
+    tan_bin = _write_fake_tan(tmp_path / "bin", recognized=recognized, missing=set())
+
+    proc = _run(doc_root, tmp_path / "bin")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "--stray" not in proc.stdout + proc.stderr
+
+
+def test_getting_started_only_subcommand_is_checked(tmp_path):
+    """`validate` is documented ONLY in docs/getting-started.md in the base
+    fixture -- not in cli.md's headings/fenced code, README.md, or
+    bootstrap.sh. Shrinking DOC_SOURCES to just docs/cli.md would silently
+    stop checking it; no existing test ever marks `validate` MISSING to
+    prove that file's scan is load-bearing."""
+    doc_root = tmp_path / "repo"
+    _write_docroot(doc_root)
+    recognized = dict(_ALL_RECOGNIZED)
+    del recognized["validate"]
+    tan_bin = _write_fake_tan(tmp_path / "bin", recognized=recognized, missing={"validate"})
+
+    proc = _run(doc_root, tmp_path / "bin")
+    assert proc.returncode != 0
+    assert "`tan validate`" in proc.stderr
+
+
+def test_second_verb_in_multiverb_heading_with_no_other_mention_is_checked(tmp_path):
+    """The SECOND (bare, non-`tan `-prefixed) verb name in a multi-verb
+    heading -- `` `flash` `` in `` ### `tan build` / `flash` -- ... `` --
+    only ever enters `all_verbs` via `_verbs_in_heading`'s heading parse.
+    Unlike a single-verb `` `tan <verb>` `` heading (whose own backtick
+    span IS a valid `tan <verb>` match under the plain DOC_SOURCES scan,
+    making `heading_verbs` redundant for it), a bare second name is
+    invisible to that generic scan unless something else repeats `tan
+    flash` in a fenced/inline span. Omit any such repeat here: zeroing the
+    `subcommands = set(heading_verbs)` seed would silently drop `flash`
+    from the checked surface with nothing else to catch it."""
+    doc_root = tmp_path / "repo"
+    (doc_root / "docs").mkdir(parents=True)
+    (doc_root / "scripts").mkdir(parents=True)
+    (doc_root / "README.md").write_text("`tan init` scaffolds a project.\n", encoding="utf-8")
+    (doc_root / "docs" / "getting-started.md").write_text(
+        "`tan validate` checks board.yaml.\n", encoding="utf-8",
+    )
+    (doc_root / "docs" / "troubleshooting.md").write_text(
+        "`tan run` is the escape hatch.\n", encoding="utf-8",
+    )
+    (doc_root / "scripts" / "bootstrap.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    (doc_root / "docs" / "cli.md").write_text(
+        "# The `tan` CLI\n\n"
+        "### `tan build` / `flash` -- build execution\n\n"
+        "No fenced example here -- `flash` is named nowhere else in the doc tree.\n",
+        encoding="utf-8",
+    )
+
+    recognized = {"init": set(), "build": set(), "validate": set(), "run": set()}
+    tan_bin = _write_fake_tan(tmp_path / "bin", recognized=recognized, missing={"flash"})
+
+    proc = _run(doc_root, tmp_path / "bin")
+    assert proc.returncode != 0
+    assert "`tan flash`" in proc.stderr
+
+
+def test_empty_doc_tree_reports_broken_extraction(tmp_path):
+    """A doc tree with zero `tan <verb>` mentions anywhere must fail loudly
+    naming extraction as broken, never silently exit 0 (an empty
+    documented surface is vacuously "fully checked" otherwise)."""
+    doc_root = tmp_path / "repo"
+    (doc_root / "docs").mkdir(parents=True)
+    (doc_root / "scripts").mkdir(parents=True)
+    (doc_root / "README.md").write_text("Nothing to see here.\n", encoding="utf-8")
+    (doc_root / "docs" / "cli.md").write_text("# The `tan` CLI\n", encoding="utf-8")
+    (doc_root / "docs" / "getting-started.md").write_text(
+        "No commands documented yet.\n", encoding="utf-8",
+    )
+    (doc_root / "docs" / "troubleshooting.md").write_text(
+        "No commands documented yet.\n", encoding="utf-8",
+    )
+    (doc_root / "scripts" / "bootstrap.sh").write_text(
+        "#!/usr/bin/env bash\necho hi\n", encoding="utf-8",
+    )
+    tan_bin = _write_fake_tan(tmp_path / "bin", recognized={}, missing=set())
+
+    proc = _run(doc_root, tmp_path / "bin")
+    assert proc.returncode != 0
+    assert "extraction is broken" in proc.stderr
+
+
+def test_forwarding_verb_flag_check_is_skipped_not_matched_by_generic_blurb(tmp_path):
+    """A FORWARDING verb's `--help` ends its `Usage:` line in `[ARGS]...`
+    and prints a generic "Arguments forwarded verbatim ..." blurb naming a
+    few EXAMPLE flags that belong to OTHER forwarding verbs, never its own.
+    docs/cli.md's tabulated flags for that verb must never be matched
+    against that blurb -- matching it is both noisy (fires regardless of
+    this verb's real flags) and unsafe (stays present even if this verb's
+    own forwarded flag support were dropped). The real, installed tan
+    confirms `new-som --sdk-root ... --dry-run` genuinely works
+    (alp-sdk#973-adjacent review); this check must not report it missing."""
+    doc_root = tmp_path / "repo"
+    _write_docroot(doc_root)
+    cli_md = doc_root / "docs" / "cli.md"
+    cli_md.write_text(
+        cli_md.read_text(encoding="utf-8")
+        + textwrap.dedent(
+            """
+
+            ### `tan new-som` -- scaffold a new SoM
+
+            | Option | Meaning |
+            |---|---|
+            | `--sku` | Target SoM SKU |
+            """
+        ),
+        encoding="utf-8",
+    )
+    readme = doc_root / "README.md"
+    readme.write_text(
+        readme.read_text(encoding="utf-8") + "\n`tan new-som` ports a SoM.\n",
+        encoding="utf-8",
+    )
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    tan_path = bin_dir / "tan"
+    tan_path.write_text(
+        textwrap.dedent(
+            """\
+            #!/usr/bin/env python3
+            import sys
+            verb = sys.argv[1] if len(sys.argv) > 1 else ""
+            HELP = {
+                "init": "Usage: tan init [OPTIONS]\\n\\nOptions:\\n"
+                        "      --sdk-root <PATH>\\n      --som <SOM>\\n",
+                "build": "Usage: tan build [OPTIONS]\\n",
+                "flash": "Usage: tan flash [OPTIONS]\\n",
+                "validate": "Usage: tan validate [OPTIONS]\\n",
+                "run": "Usage: tan run [OPTIONS]\\n",
+                "doctor": "Usage: tan doctor [OPTIONS]\\n\\nOptions:\\n      --build\\n",
+                "new-som": (
+                    "Usage: tan new-som [OPTIONS] [ARGS]...\\n\\n"
+                    "Arguments:\\n  [ARGS]...\\n"
+                    "          Arguments forwarded verbatim to the underlying command "
+                    "(e.g. app path, `--core <id>`, `--sequential`, `-b <board>`)\\n"
+                ),
+            }
+            if verb == "--version":
+                print("tan 0.0.0-test")
+                sys.exit(0)
+            if verb in HELP:
+                print(HELP[verb])
+                sys.exit(0)
+            print(f"error: unrecognized subcommand {verb!r}", file=sys.stderr)
+            sys.exit(2)
+            """
+        ),
+        encoding="utf-8",
+    )
+    tan_path.chmod(tan_path.stat().st_mode | stat.S_IEXEC)
+
+    proc = _run(doc_root, bin_dir)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "new-som" in proc.stdout  # named by the OK line's skip note
+    assert "--sku" not in proc.stdout + proc.stderr

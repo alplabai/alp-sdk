@@ -7,11 +7,15 @@ instructions pin nothing) -- a tan release changes customer-visible CLI
 behaviour immediately, with no version pin to buffer alp-sdk's docs from it.
 This check extracts every `tan <subcommand>` alp-sdk's docs show a customer
 typing, plus every flag docs/cli.md tabulates for a given subcommand, and
-proves each one still exists and parses against a REAL, installed `tan`
-binary (`tan <subcommand> --help`, exit 0; the flag string listed in that
-help text). It never invokes a network `tan` install itself -- the caller
-(CI step or a human) is expected to have put `tan` on PATH first, by
-docs/cli.md's own documented install path.
+proves each one still exists against a REAL, installed `tan` binary
+(`tan <subcommand> --help`, exit 0) and, for a native (non-forwarding) verb,
+that the documented flag STRING appears somewhere in that verb's --help
+text. That flag check only proves the string is present in --help output --
+it is not proof the flag actually parses on a real command line (clap could
+list it and still reject it for an unrelated reason). It never invokes a
+network `tan` install itself -- the caller (CI step or a human) is expected
+to have put `tan` on PATH first, by docs/cli.md's own documented install
+path.
 
 Sources scanned (the set the task names):
   README.md, docs/cli.md, docs/getting-started.md, docs/troubleshooting.md,
@@ -35,6 +39,18 @@ Extraction is mechanical, not a hand-maintained list:
     flag association -- that section has no per-verb flag table today, and
     guessing which verb a stray flag belongs to would be a false positive,
     which is worse than under-checking.
+  - A verb whose `tan <verb> --help` `Usage:` line ends `[ARGS]...` is a
+    FORWARDING verb (`new-som`, `monitor`, `model`, `faultdecode` today) --
+    clap never lists its real flags there, it only prints a generic
+    "Arguments forwarded verbatim ..." blurb naming a few EXAMPLE flags
+    (`--core`, `-b`, ...) that happen to belong to other forwarding verbs.
+    Checking that blurb against docs/cli.md's tabulated flags is worse than
+    not checking: it fires on every forwarding verb regardless of what its
+    OWN flags are (noise), and it would stay silent if a real forwarded flag
+    were actually dropped (false confidence). So this check skips flag
+    verification entirely for a forwarding verb -- existence of the verb
+    itself is still checked -- and says so by name in the OK line so the
+    exclusion is visible rather than silent.
 
 Deliberately OUT of scope (log it here, don't let silence read as coverage):
   - Output TEXT and semantic behaviour (the "Reusing compatible ... workspace"
@@ -49,11 +65,16 @@ Deliberately OUT of scope (log it here, don't let silence read as coverage):
     subcommand EXISTENCE is checked for those files, never a flag, because
     associating a prose flag mention with the right subcommand outside a
     structured table is not reliably mechanical.
+  - docs/cli.md-tabulated flags for a FORWARDING verb (see above) -- e.g.
+    `tan new-som`'s SoM-porting flags are real, working, forwarded args
+    (verified by hand against a real `tan`), but this check cannot confirm
+    that mechanically from --help text, so it doesn't claim to.
   - Windows. This installs/runs the Linux `tan` build only.
   - `west alp-*` (a different, still-supported front door) and
     `python -m alp_cli` (the separate Python preflight) -- neither is `tan`.
 
-Exit codes: 0 = every documented subcommand + tabulated flag still parses.
+Exit codes: 0 = every documented subcommand exists, and every docs/cli.md-
+tabulated flag for a non-forwarding verb is listed in that verb's --help.
 1 = drift found, OR `tan` is not on PATH (never a silent skip-as-pass).
 """
 
@@ -82,7 +103,15 @@ _TAN_INVOCATION_RE = re.compile(r"\btan[ \t]+([a-z][a-z0-9-]+)\b")
 # on PATH") and would otherwise misparse as a fake subcommand. This is NOT a
 # copy of tan's own command list (which would drift with tan and defeat the
 # point of extracting mechanically) -- it is a small, closed set of English
-# function words no real CLI subcommand would ever be spelled as.
+# function words no real CLI subcommand would ever be spelled as. It is a
+# DENYLIST, not a grammar: a future in-code-block sentence using a content
+# word right after "tan" ("tan supports hot-reload") mints a bogus
+# subcommand this set doesn't catch. The failure mode when it misses is
+# NOISE, not silence -- `tan supports --help` fails, so this check reports a
+# fake "`tan supports` -- no longer a recognised subcommand" problem for
+# prose that was never a real invocation, exactly the false-positive shape
+# this gate exists to avoid. If this set needs to grow, prefer narrowing the
+# extraction regex over widening it indefinitely.
 _ENGLISH_STOPWORDS = {
     "is", "on", "a", "an", "the", "to", "for", "and", "or", "in", "at",
     "as", "of", "with", "was", "be", "has", "have", "will", "not", "no",
@@ -180,18 +209,45 @@ def collect_documented_surface(repo_root: Path) -> tuple[set[str], dict[str, set
     return subcommands, verb_flags
 
 
+def _forwards_to_python_backend(help_text: str) -> bool:
+    """True when `tan <verb> --help`'s own `Usage:` line ends in a bare
+    `[ARGS]...` positional catch-all -- tan's marker for a verb that
+    forwards straight to the legacy Python backend (`new-som`, `monitor`,
+    `model`, `faultdecode` as of tan 0.3.1) and never lists its real flags
+    in its own --help output; it prints a generic "Arguments forwarded
+    verbatim ..." blurb instead. Verified by hand against a real, installed
+    tan: every `[OPTIONS]`-only verb (`init`/`validate`/`run`/`explain`/
+    `doctor`/`build`) lists its flags directly; every verb whose Usage line
+    also carries `[ARGS]...` does not."""
+    for line in help_text.splitlines():
+        if line.startswith("Usage:"):
+            return line.rstrip().endswith("[ARGS]...")
+    return False
+
+
 def check_surface(
     repo_root: Path, tan_bin: str
-) -> list[str]:
+) -> tuple[list[str], list[str]]:
     """Run `tan <verb> --help` for every documented verb and confirm every
-    docs/cli.md-tabulated flag for that verb is listed in its output.
-    Returns a list of human-readable problems (empty == all clear)."""
+    docs/cli.md-tabulated flag for that verb is listed in its output --
+    except a FORWARDING verb (see `_forwards_to_python_backend`), whose flag
+    check is skipped entirely rather than matched against its generic
+    "forwarded verbatim" blurb (that blurb names a few EXAMPLE flags from
+    OTHER forwarding verbs, so matching it produces both false positives --
+    it doesn't name this verb's own flags -- and false negatives -- it stays
+    present even if this verb's own forwarded flag support is dropped).
+    Returns (problems, forwarding_verbs_skipped) -- problems empty == all
+    clear on the parts this check can actually verify."""
     subcommands, verb_flags = collect_documented_surface(repo_root)
     if not subcommands:
-        return ["no `tan <verb>` mentions found in any doc source -- extraction is "
-                "broken, not the documented surface (fix this check, don't ignore it)"]
+        return (
+            ["no `tan <verb>` mentions found in any doc source -- extraction is "
+             "broken, not the documented surface (fix this check, don't ignore it)"],
+            [],
+        )
 
     problems: list[str] = []
+    skipped_forwarding: list[str] = []
     for verb in sorted(subcommands):
         proc = subprocess.run(
             [tan_bin, verb, "--help"], capture_output=True, text=True, timeout=20,
@@ -205,6 +261,10 @@ def check_surface(
                 f"(exit {proc.returncode}): {first_err}"
             )
             continue
+        if _forwards_to_python_backend(proc.stdout):
+            if verb in verb_flags:
+                skipped_forwarding.append(verb)
+            continue
         for flag in sorted(verb_flags.get(verb, ())):
             pattern = re.compile(rf"(?<![\w-]){re.escape(flag)}(?![\w-])")
             if not pattern.search(proc.stdout):
@@ -212,7 +272,7 @@ def check_surface(
                     f"`tan {verb} {flag}` -- docs/cli.md documents this flag but it "
                     f"is not listed in `tan {verb} --help`"
                 )
-    return problems
+    return problems, skipped_forwarding
 
 
 def main() -> int:
@@ -236,7 +296,7 @@ def main() -> int:
         return 1
 
     repo_root = Path(args.repo_root).resolve()
-    problems = check_surface(repo_root, tan_path)
+    problems, skipped_forwarding = check_surface(repo_root, tan_path)
     if problems:
         version_proc = subprocess.run(
             [tan_path, "--version"], capture_output=True, text=True, timeout=10,
@@ -247,10 +307,18 @@ def main() -> int:
             print(f"  · {p}", file=sys.stderr)
         return 1
 
+    skip_note = ""
+    if skipped_forwarding:
+        plural = "s" if len(skipped_forwarding) != 1 else ""
+        skip_note = (
+            f" (flag check skipped for forwarding verb{plural} "
+            f"{', '.join(sorted(skipped_forwarding))} -- their `--help` forwards "
+            "to the Python backend and never lists their real flags)"
+        )
     print(
-        "check_tan_docs_surface: OK -- every `tan` subcommand alp-sdk's docs name, "
-        "and every flag docs/cli.md tabulates for it, still exists and parses in "
-        f"{tan_path}."
+        "check_tan_docs_surface: OK -- every `tan` subcommand alp-sdk's docs name "
+        "still exists, and every flag docs/cli.md tabulates for a non-forwarding "
+        f"verb still parses in {tan_path}{skip_note}."
     )
     return 0
 

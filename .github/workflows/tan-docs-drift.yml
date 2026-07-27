@@ -17,9 +17,8 @@
 #
 # ADVISORY ONLY -- not a required context on dev or main. It already
 # surfaces real, pre-existing drift the day it was added (`tan emit` was
-# renamed to `tan generate`; `tan new-som`'s SoM-porting flags are
-# forwarded args, not native clap options) -- fixing that is separate
-# follow-up work, not something this gate's introduction should block on.
+# renamed to `tan generate`) -- fixing that is separate follow-up work, not
+# something this gate's introduction should block on.
 name: tan-docs-drift
 
 on:
