@@ -19,11 +19,14 @@ export PATH="$HOME/.local/bin:$PATH"  # install.sh already made this permanent i
 ```
 
 Or grab a prebuilt, per-platform binary directly from a release tag, e.g.
-Linux x86_64:
+Linux x86_64 — use the `-musl` asset, not `-gnu`: the `-gnu` build requires
+`GLIBC_2.30`+ and hard-fails (`version 'GLIBC_2.30' not found`) on distros
+older than roughly Ubuntu 20.04/Debian 11, while `-musl` is fully static and
+runs on any distro/libc:
 
 ```bash
 curl -fsSL -o tan \
-  https://github.com/alplabai/tan-cli/releases/latest/download/tan-x86_64-unknown-linux-gnu
+  https://github.com/alplabai/tan-cli/releases/latest/download/tan-x86_64-unknown-linux-musl
 chmod +x tan && sudo mv tan /usr/local/bin/tan
 ```
 
