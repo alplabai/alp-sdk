@@ -128,10 +128,14 @@ blocked until the remediation is met. Tracked in #855.
    and replaced by the narrower, differently-shaped `tan generate --target
    <mode>` (6 of `metadata/emit-registry-v1.json`'s 20 registered modes,
    fixed output paths, no `--output`/`--core`/`--template`/`--sku`). Point
-   2's "11 non-build verbs" all still survive in the `alp_cli` package
-   (`ls scripts/alp_cli/*.py`: `doctor`, `emit`, `explain`, `faultdecode`,
-   `generate`, `init`, `model`, `monitor`, `new_som`, `run`, `validate`);
-   what narrowed is the *forwarded* set. `tan` forwards 9 of them
+   2's "11 non-build verbs" all still survive in the `alp_cli` package --
+   `scripts/alp_cli/main.py`'s 11 `cli.add_command(...)` registrations
+   (`doctor`, `emit`, `explain`, `faultdecode`, `generate`, `init`,
+   `model`, `monitor`, `new_som`, `run`, `validate`; NOT a raw
+   `ls scripts/alp_cli/*.py`, which also lists 8 non-verb modules --
+   `__init__.py`, `__main__.py`, `main.py` itself, `_workspace.py`,
+   `diagnostic.py`, `diagnostic_format.py`, `validator.py`,
+   `yaml_pos.py`); what narrowed is the *forwarded* set. `tan` forwards 9 of them
    (`generate/validate/init/run/model/monitor/new-som/faultdecode/explain`),
    never `emit` (retired, per above) and never `doctor` (native Rust —
    `docs/cli.md`'s forwarding table already reads `tan doctor  native-host
