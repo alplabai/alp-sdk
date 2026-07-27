@@ -94,11 +94,15 @@ CMake Error: CMAKE_CXX_COMPILER not set, after EnableLanguage
 ```
 
 Despite what the first line suggests, the fix is not to pick a
-different build tool -- `ninja` is Zephyr's build generator, and
-`scripts/bootstrap.sh` / `bootstrap.ps1` don't check for it today, so
-a host that's otherwise bootstrapped can still be missing it.
-Installing it clears all three lines above (the two compiler errors
-are downstream of the same missing generator):
+different build tool -- `ninja` is Zephyr's build generator on every
+host.  `scripts/bootstrap.sh` / `bootstrap.ps1` and `python -m alp_cli
+doctor` both check for it and FAIL with an install command when it's
+missing; if you hit the raw CMake error above instead, check whether
+you resolved a `[!] ninja` line from `tan doctor --build` -- it still
+rates a missing `ninja` a warning rather than a failure
+(`alplabai/tan-cli#103`), so it's easy to leave unresolved and hit
+this error anyway.  Installing it clears all three lines above (the
+two compiler errors are downstream of the same missing generator):
 
 ```bash
 # Linux (Debian / Ubuntu)

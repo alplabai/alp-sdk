@@ -125,6 +125,39 @@ New semantic gate `validate_metadata._check_soc_debug_probe_identity`
 JSON Schema can express the value shape but not that cross-reference.
 Covered by `tests/scripts/test_soc_debug_probe_identity.py`.
 
+### Fixed — `ninja` was a Windows-only prerequisite; POSIX hosts got no check, no hint (#971, #981)
+
+Zephyr's default CMake generator is Ninja on every host, but
+`metadata/bootstrap.json`'s `prerequisites.posix` listed only `git`,
+`cmake`, `python3` — `ninja` was tracked under `prerequisites.windows`
+alone, so `scripts/bootstrap.sh` never probed for it on Linux/macOS and
+reported success on a host that would go on to fail `west build` with a
+raw `CMake Error: CMake was unable to find a build program corresponding
+to "Ninja"` deep inside the first build. `scripts/alp_cli/doctor.py`'s
+`_check_ninja()` did rate the same gap `FAIL`, but its remediation hint
+had nowhere to source a real command from and fell through to the
+generic `Install ninja via your OS package manager.` line — its own
+docstring conceded the hole.
+
+`ninja` is now in `prerequisites.posix` with real entries in
+`prerequisites.install.linux` (`sudo apt-get install -y ninja-build` —
+note the Debian *package* name differs from the `ninja` *binary* it
+installs) and `prerequisites.install.macos` (`brew install ninja`).
+`scripts/bootstrap.sh`'s `REQUIRED_BINS` and its hardcoded
+`PREREQ_HINT_NAMES`/`PREREQ_HINT_LINUX`/`PREREQ_HINT_MACOS` table (kept
+in lockstep by `scripts/check_bootstrap_manifest.py`) now check and hint
+`ninja` too, and `alp_cli/doctor.py`'s hint resolves to the same real
+command with no code change beyond the two comments that used to
+document the gap. `docs/getting-started.md` no longer lumps `ninja`
+into the "`[!]` lines are optional / real-silicon-only" guidance — it is
+neither, and every default Zephyr build needs it. `docs/troubleshooting.md`
+already carried the raw-CMake-error entry; its stale claim that
+`bootstrap.sh` doesn't check for `ninja` is corrected.
+
+`tan doctor --build` (a separate repo, `alplabai/tan-cli`) still rates
+this `warn` with an unsourced `"fix": "Install Ninja."` — filed as
+`alplabai/tan-cli#103`, not fixable here.
+
 ### Fixed — the renode gate installed Renode and asserted nothing (#974)
 
 Every e2e step in the three renode workflows was an `echo ::notice::` no-op

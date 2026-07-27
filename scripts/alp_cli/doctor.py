@@ -154,15 +154,13 @@ def _prereq_install_hint(tool: str) -> str:
     manifest scripts/bootstrap.sh and scripts/bootstrap.ps1 read (issue
     #949). Falls back to a generic, package-manager-agnostic pointer when
     the manifest is unreadable, when `tool` isn't tracked as an install
-    command on the current OS (e.g. ninja on linux/macos: only
-    prerequisites.windows lists it, so prerequisites.install has no
-    linux/macos ninja entry to source -- printing an invented apt/brew
-    command here would just reintroduce the drift this change removes), or
-    when the manifest parses but is shaped wrong at any of the four key
-    hops (`prerequisites`, `install`, `<os>`, `<tool>`) -- each hop is
-    guarded with `isinstance(node, dict)` before it is indexed, so a
-    truncated/bad-merge manifest degrades to the generic hint instead of
-    raising."""
+    command on the current OS at all (e.g. a future prerequisite added to
+    only one OS's list -- printing an invented command here would just
+    reintroduce the drift this change removes), or when the manifest parses
+    but is shaped wrong at any of the four key hops (`prerequisites`,
+    `install`, `<os>`, `<tool>`) -- each hop is guarded with
+    `isinstance(node, dict)` before it is indexed, so a truncated/bad-merge
+    manifest degrades to the generic hint instead of raising."""
     node: object = _bootstrap_manifest()
     for key in ("prerequisites", "install", _prereq_os_key(), tool):
         if not isinstance(node, dict):
@@ -264,12 +262,10 @@ def _check_python_deps() -> CheckResult:
 
 
 def _check_cmake() -> CheckResult:
-    # cmake is tracked in BOTH prerequisites.posix and prerequisites.windows,
+    # cmake is tracked in both prerequisites.posix and prerequisites.windows,
     # so routing its two install/upgrade hints through _prereq_install_hint
-    # gives all three prerequisites.install OS maps (linux/macos/windows) a
-    # real run-time reader -- _check_ninja's own hint only ever reaches
-    # install.windows (ninja isn't a posix prerequisite), so linux/macos
-    # would otherwise have no code path exercising them at all.
+    # exercises all three prerequisites.install OS maps (linux/macos/windows)
+    # at run time (ninja, below, now covers the same three since #971).
     if shutil.which("cmake") is None:
         return CheckResult(
             "cmake", FAIL, "cmake not found on PATH", _prereq_install_hint("cmake"),
