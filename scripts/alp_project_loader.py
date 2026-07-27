@@ -225,10 +225,19 @@ def resolve_soc_path(silicon: str | None, metadata_root: Path) -> Path | None:
     `silicon:` at all is a valid, if incomplete, state; a `silicon:` that
     names a spec that isn't on disk is not).
 
-    Single source for this resolution -- see issue #997: it was hand-rolled
-    three times independently (here, in `resolve_capabilities()`, and
-    inline in `pr-metadata-validate.yml`), and the untested inline copy is
-    exactly how the `soc_ref`/`soc` bug in #995 rotted unnoticed.
+    Single source for this resolution within `alp_project_loader.py` -- issue
+    #997 collapsed the three copies that used to live here, in
+    `resolve_capabilities()`, and inline in `pr-metadata-validate.yml` (now
+    `check_som_topology_parity.py`) down to this one helper, and folded a
+    fourth in-module copy from `resolve_memory_map()` into it too.
+
+    Five more hand-rolled copies remain outside this module, each with its
+    own error-raising shape a naive migration would change: `gen_zephyr_board.py:91`
+    (raises `ZephyrBoardEmitError`), `gen_zephyr_board.py:808` (builds a `str`,
+    not a `Path`), `validate_metadata.py:155` and `:221` (soft-fail to a
+    diagnostic string), and `alp_orchestrate/loader.py:49` (raises
+    `OrchestratorError`). Migrate one of those onto this helper -- don't add
+    a sixth hand-rolled copy.
     """
     if not silicon:
         return None
@@ -423,12 +432,8 @@ def resolve_memory_map(
 
     # Re-load the SoC JSON to grab the cores[] topology (the variant
     # dict alone doesn't carry per-core ids).
-    silicon = sku_preset.get("silicon", "")
-    parts = silicon.split(":")
-    if len(parts) != 3:
-        return []
-    soc_path = metadata_root / "socs" / parts[0] / parts[1] / f"{parts[2]}.json"
-    if not soc_path.is_file():
+    soc_path = resolve_soc_path(sku_preset.get("silicon"), metadata_root)
+    if soc_path is None or not soc_path.is_file():
         return []
     soc_spec = json.loads(soc_path.read_text(encoding="utf-8"))
     soc_cores = [c.get("id") for c in soc_spec.get("cores", []) if c.get("id")]

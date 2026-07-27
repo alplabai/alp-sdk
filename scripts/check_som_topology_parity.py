@@ -88,7 +88,7 @@ def find_problems(root: Path) -> list[str]:
         if expected != actual:
             problems.append(
                 f"topology mismatch in {preset.name}: SoC "
-                f"{soc_path.relative_to(root) if soc_path else '?'} declares "
+                f"{soc_path.relative_to(root)} declares "
                 f"cores={sorted(expected)}, topology has {sorted(actual)}"
             )
 
