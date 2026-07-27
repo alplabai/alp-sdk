@@ -39,10 +39,23 @@ a past release cut leave the gate silently regenerating an
 already-frozen snapshot against `HEAD` (issue #803), and then let the
 next release cut leave the hardcoded literal pointing at the
 now-frozen PREVIOUS snapshot (issue #826). None of the three ever
-falls back to `ls docs/abi/v*-snapshot.json | sort -V | tail -1` --
-that selector only ever agreed with the derived path by coincidence of
-version-sort ordering, and isn't protected by the write guard the way
-the derivation is.
+falls back to `ls docs/abi/v*-snapshot.json | sort -V | tail -1` to
+find the CURRENT snapshot -- that selector only ever agreed with the
+derived path by coincidence of version-sort ordering, and isn't
+protected by the write guard the way the derivation is.
+
+(The ABI freeze gate below also runs `sort -V` over this directory,
+but for a narrower question the prohibition above doesn't cover:
+ranking the already-FROZEN snapshots against each other *after*
+CURRENT has been excluded via this same `metadata/sdk_version.yaml`
+derivation. A frozen snapshot's version label is fixed the moment it
+freezes and releases only ever ship in increasing version order, so
+once CURRENT is off the list, the highest remaining label genuinely
+*is* the last release -- there's no separate authoritative "previous
+version" pointer it could silently disagree with, unlike CURRENT,
+which the write guard exists precisely because it's mutable and can
+drift from the derived label. See "A separate, unrelated check"
+below.)
 
 `pr-generated-files.yml` also fails loudly, before it would otherwise
 regenerate anything, if the version `metadata/sdk_version.yaml`

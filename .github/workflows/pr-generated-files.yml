@@ -269,9 +269,15 @@ jobs:
       #
       # "Last released" = the newest docs/abi/v*-snapshot.json that
       # ISN'T the current (still-tracks-HEAD, kept in sync by the gate
-      # above) one -- sort -V, same idiom docs/abi/README.md and
-      # running-local-ci already use for this directory, just excluding
-      # the current label instead of trusting position alone.
+      # above) one.  NOTE: docs/abi/README.md and pr-abi-snapshot.yml
+      # reject `ls | sort -V | tail -1` as a way to find the CURRENT
+      # snapshot -- that stays derived from metadata/sdk_version.yaml
+      # (ABI_VERSION above), never guessed by listing.  sort -V is used
+      # here only to rank the remaining, already-FROZEN snapshots once
+      # CURRENT is excluded: frozen labels never change and releases
+      # ship in increasing version order, so the highest label left
+      # genuinely is the last release -- no coincidence, and nothing
+      # else to derive it from (see docs/abi/README.md).
       #
       # Blocks on REMOVED only, not CHANGED: a signature/field change
       # is still allowed pre-1.0 (docs/contribution.md), and
