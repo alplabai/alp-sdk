@@ -44,42 +44,42 @@
 
 #include "pwm_ops.h"
 
-#if DT_NODE_EXISTS(DT_ALIAS(alp_pwm0))
+#if DT_NODE_HAS_STATUS(DT_PWMS_CTLR(DT_ALIAS(alp_pwm0)), okay)
 #define ALP_PWM_SPEC_0_INIT PWM_DT_SPEC_GET(DT_ALIAS(alp_pwm0))
 #else
 #define ALP_PWM_SPEC_0_INIT { .dev = NULL }
 #endif
-#if DT_NODE_EXISTS(DT_ALIAS(alp_pwm1))
+#if DT_NODE_HAS_STATUS(DT_PWMS_CTLR(DT_ALIAS(alp_pwm1)), okay)
 #define ALP_PWM_SPEC_1_INIT PWM_DT_SPEC_GET(DT_ALIAS(alp_pwm1))
 #else
 #define ALP_PWM_SPEC_1_INIT { .dev = NULL }
 #endif
-#if DT_NODE_EXISTS(DT_ALIAS(alp_pwm2))
+#if DT_NODE_HAS_STATUS(DT_PWMS_CTLR(DT_ALIAS(alp_pwm2)), okay)
 #define ALP_PWM_SPEC_2_INIT PWM_DT_SPEC_GET(DT_ALIAS(alp_pwm2))
 #else
 #define ALP_PWM_SPEC_2_INIT { .dev = NULL }
 #endif
-#if DT_NODE_EXISTS(DT_ALIAS(alp_pwm3))
+#if DT_NODE_HAS_STATUS(DT_PWMS_CTLR(DT_ALIAS(alp_pwm3)), okay)
 #define ALP_PWM_SPEC_3_INIT PWM_DT_SPEC_GET(DT_ALIAS(alp_pwm3))
 #else
 #define ALP_PWM_SPEC_3_INIT { .dev = NULL }
 #endif
-#if DT_NODE_EXISTS(DT_ALIAS(alp_pwm4))
+#if DT_NODE_HAS_STATUS(DT_PWMS_CTLR(DT_ALIAS(alp_pwm4)), okay)
 #define ALP_PWM_SPEC_4_INIT PWM_DT_SPEC_GET(DT_ALIAS(alp_pwm4))
 #else
 #define ALP_PWM_SPEC_4_INIT { .dev = NULL }
 #endif
-#if DT_NODE_EXISTS(DT_ALIAS(alp_pwm5))
+#if DT_NODE_HAS_STATUS(DT_PWMS_CTLR(DT_ALIAS(alp_pwm5)), okay)
 #define ALP_PWM_SPEC_5_INIT PWM_DT_SPEC_GET(DT_ALIAS(alp_pwm5))
 #else
 #define ALP_PWM_SPEC_5_INIT { .dev = NULL }
 #endif
-#if DT_NODE_EXISTS(DT_ALIAS(alp_pwm6))
+#if DT_NODE_HAS_STATUS(DT_PWMS_CTLR(DT_ALIAS(alp_pwm6)), okay)
 #define ALP_PWM_SPEC_6_INIT PWM_DT_SPEC_GET(DT_ALIAS(alp_pwm6))
 #else
 #define ALP_PWM_SPEC_6_INIT { .dev = NULL }
 #endif
-#if DT_NODE_EXISTS(DT_ALIAS(alp_pwm7))
+#if DT_NODE_HAS_STATUS(DT_PWMS_CTLR(DT_ALIAS(alp_pwm7)), okay)
 #define ALP_PWM_SPEC_7_INIT PWM_DT_SPEC_GET(DT_ALIAS(alp_pwm7))
 #else
 #define ALP_PWM_SPEC_7_INIT { .dev = NULL }

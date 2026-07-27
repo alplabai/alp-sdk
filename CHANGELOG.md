@@ -7,6 +7,84 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.14.0 candidate
 
+### Fixed — status-blind DT existence guards (`DT_NODE_EXISTS`, `DT_HAS_CHOSEN`) let 33 backend sites reference a disabled node's device (#966)
+
+`DT_NODE_EXISTS(DT_ALIAS(...))` was used across `src/backends/**` as the
+"does this instance exist" guard feeding `DEVICE_DT_GET` (directly, or via
+`ADC_DT_SPEC_GET`/`PWM_DT_SPEC_GET`), but `DT_NODE_EXISTS` is also true for a
+`status = "disabled"` node — it only checks the node is present in the
+compiled devicetree, not that it was instantiated. A board whose overlay
+aliases `alp-<periph>N` to a disabled node passed the guard and then failed
+to link against a `struct device` that was never created (bench-confirmed on
+E1M-AEN801, `e1m-aen-evk-01`). `src/zephyr/v2n_power_mgmt.c:56` already used
+the correct guard, `DT_NODE_HAS_STATUS(..., okay)`, and is the reference this
+fix matches.
+
+A literal-string sweep for `DT_NODE_EXISTS(DT_ALIAS(` found 52 sites across
+22 files. 51 moved to `DT_NODE_HAS_STATUS(DT_ALIAS(...), okay)`; one,
+`dac/zephyr_drv.c`'s `ALP_DAC_REF_MV_OR_DEFAULT`, was left unchanged — it
+feeds `DT_PROP_OR` (a compile-time property read, not a device get) and is
+only ever consulted after `ALP_DAC_DEV_OR_NULL` has gated `dev != NULL`, so
+it carries no behavioural bug.
+
+Of those 51 conversions, **32 (`adc/{alif_e7,alif_e8,zephyr_drv}.c`'s 24,
+`pwm/zephyr_drv.c`'s 8) guarded the wrong node** and were themselves a
+no-op: `ADC_DT_SPEC_GET`/`PWM_DT_SPEC_GET` instantiate the *controller*
+reached through the alias node's `io-channels`/`pwms` phandle, not the alias
+node itself, and every `alp-adcN`/`alp-pwmN` alias is emitted `okay` in
+every in-tree and generated overlay — so the "fixed" guard evaluated
+identically to the old one, and a controller left `disabled` behind an
+`okay` consumer still linked against an uninstantiated device. Repointed at
+`DT_NODE_HAS_STATUS(DT_IO_CHANNELS_CTLR(DT_ALIAS(alp_adcN)), okay)` /
+`DT_NODE_HAS_STATUS(DT_PWMS_CTLR(DT_ALIAS(alp_pwmN)), okay)`, which check the
+node that is actually instantiated and fall back to the zeroed spec / NULL
+`.dev` when either the alias or the controller is absent or disabled.
+
+The other 19 conversions were already correct — the alias directly names
+the instantiated device (`audio`, `camera` x3, `can`, `counter`, `dac`'s
+device macro, `display`, `i2c`, `i2s`, `i3c`, `mproc`'s mailbox table and
+shmem region table, `qenc`, `rtc` x2, `spi`, `uart`, `wdt`) — and are
+untouched.
+
+A 33rd site of the same defect class, missed by the literal-string sweep
+because it uses a different status-blind existence macro, is fixed too:
+`src/backends/rpc/zephyr_drv.c:649` gated
+`DEVICE_DT_GET(DT_CHOSEN(zephyr_ipc))` on `DT_HAS_CHOSEN(zephyr_ipc)` alone,
+which is true for a `disabled` chosen node too (`write_chosen()` in
+`gen_defines.py` applies no status filter) — contradicting the code's own
+comment that a missing/bad `zephyr,ipc` chosen node "surfaces a clean
+NOT_READY". Fixed by adding `&& DT_NODE_HAS_STATUS(DT_CHOSEN(zephyr_ipc),
+okay)`.
+
+Also fixed beyond the backends: `tests/zephyr/mproc/src/main.c` guarded its
+shmem ZTESTs with `DT_HAS_ALIAS(alp_shmem0)`, which `<zephyr/devicetree.h>`
+`#define`s as literally `DT_NODE_EXISTS(DT_ALIAS(...))` — the same latent
+form under a different name — updated alongside its backend.
+
+**Behaviour change, not just link-safety:** `mproc/zephyr_drv.c`'s shmem
+region table is the one site where the fix has a *runtime* delta rather
+than a compile/link one — `DT_REG_ADDR`/`DT_REG_SIZE` resolve fine on a
+disabled node, so a present-but-not-`okay` `alp-shmemN` alias used to still
+populate a live table entry; it now correctly drops out, and
+`alp_shmem_open()` returns `ALP_ERR_NOT_READY` where it previously handed
+back a mapping. Both in-tree overlays declare their shmem nodes `okay`, so
+this is latent today, not an observed regression.
+
+Reviewed and left alone as genuine "is this node present at all" checks,
+independent of status, with no `DEVICE_DT_GET` in scope:
+`examples/peripheral-io/alp-console/src/cc3501e_bridge.c`'s
+`DT_NODE_EXISTS(DT_NODELABEL(gpio2))` gates a raw-register pinctrl bodge,
+and `tests/zephyr/chips/src/test_displays.c` / `test_sensors.c`'s
+`DT_NODE_EXISTS(DT_NODELABEL(fake_lsm6dso))` gates fake i2c-emul ZTESTs
+whose DT node is either fully commented out of the overlay or fully `okay`
+— never present-but-disabled — so the two guards are equivalent for that
+node today.
+
+This fix does **not** by itself unblock the parked
+`alp_sdk.peripheral.evk_aen` scenario: `tests/zephyr/peripheral/prj.conf`'s
+unconditional `CONFIG_GPIO_EMUL`/`I2C_EMUL`/`SPI_EMUL`/`UART_EMUL=y` aborts
+at Kconfig **configure**, before the link stage this class of guard
+affects.
 ### Fixed — Renode AEN descriptor halted the CPU on an MRAM-linked image
 
 `metadata/renode/alif_ensemble_e8.resc` never seeded the vector-table base, so

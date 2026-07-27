@@ -646,7 +646,7 @@ z_open(const alp_rpc_config_t *cfg, alp_rpc_backend_state_t *st, alp_capabilitie
 	/* The Zephyr DT overlay's chosen { zephyr,ipc = ... } picks the
      * default ipc backend.  When the chosen alias isn't set we surface
      * a clean NOT_READY so the customer learns to fix their overlay. */
-#if DT_HAS_CHOSEN(zephyr_ipc)
+#if DT_HAS_CHOSEN(zephyr_ipc) && DT_NODE_HAS_STATUS(DT_CHOSEN(zephyr_ipc), okay)
 	be->ipc_dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_ipc));
 #else
 	be->ipc_dev = NULL;

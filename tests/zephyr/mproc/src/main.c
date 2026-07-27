@@ -14,7 +14,7 @@
  *   2. shmem-impl (alp_sdk.mproc.shmem_hwsem scenario,
  *      CONFIG_ALP_SDK_MPROC=y + boards/native_sim_native_64.overlay
  *      declaring alp-shmem0 + alp-shmem1).  Guarded with
- *      #if defined(CONFIG_ALP_SDK_MPROC) && DT_HAS_ALIAS(alp_shmem0).
+ *      #if defined(CONFIG_ALP_SDK_MPROC) && DT_NODE_HAS_STATUS(DT_ALIAS(alp_shmem0), okay).
  *      Verifies the DT-alias lookup table resolves names to the
  *      right base+size, unknown names hit NOT_READY, the handle
  *      pool exhausts cleanly.
@@ -237,7 +237,7 @@ ZTEST(alp_mproc, test_frame_decode_null_frame_invalid)
 /* Real backend (CONFIG_ALP_SDK_MPROC=y + DT overlay supplying        */
 /* alp-shmem0..1 + the k_sem-backed hwsem fallback).                  */
 /* ------------------------------------------------------------------ */
-#if defined(CONFIG_ALP_SDK_MPROC) && DT_HAS_ALIAS(alp_shmem0)
+#if defined(CONFIG_ALP_SDK_MPROC) && DT_NODE_HAS_STATUS(DT_ALIAS(alp_shmem0), okay)
 
 ZTEST(alp_mproc, test_shmem_open_resolves_name)
 {
@@ -367,4 +367,4 @@ ZTEST(alp_mproc, test_hwsem_unlock_without_lock_returns_inval)
 	alp_hwsem_close(sem);
 }
 
-#endif /* CONFIG_ALP_SDK_MPROC && DT_HAS_ALIAS(alp_shmem0) */
+#endif /* CONFIG_ALP_SDK_MPROC && DT_NODE_HAS_STATUS(DT_ALIAS(alp_shmem0), okay) */
