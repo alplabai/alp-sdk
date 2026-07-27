@@ -293,15 +293,15 @@ def test_ninja_missing_hint_windows_sourced_from_bootstrap_manifest(monkeypatch)
     assert result.hint == "Install it: winget install -e --id Ninja-build.Ninja."
 
 
-def test_ninja_missing_hint_posix_has_no_invented_command(monkeypatch):
-    """ninja is not one of prerequisites.posix's tracked tools -- there is
-    no canonical apt/brew command to source, so the hint must fall back to
-    a generic pointer instead of reinventing one (that reinvention is
-    exactly how the hardcoded copy drifted before)."""
+def test_ninja_missing_hint_posix_has_real_command(monkeypatch):
+    """ninja is one of prerequisites.posix's tracked tools (issue #971) --
+    the hint must source the real apt/brew command from
+    metadata/bootstrap.json's prerequisites.install.linux, not fall back to
+    the generic pointer."""
     monkeypatch.setattr(doctor.shutil, "which", lambda _: None)
     monkeypatch.setattr(doctor.sys, "platform", "linux")
     result = doctor._check_ninja()
-    assert result.hint == "Install ninja via your OS package manager."
+    assert result.hint == "Install it: sudo apt-get install -y ninja-build."
 
 
 # -------- malformed metadata/bootstrap.json: must degrade, never crash -------

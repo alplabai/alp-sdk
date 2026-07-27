@@ -186,8 +186,23 @@ tan doctor --build --format json      # machine-readable
 ```
 
 It is HW-free (no build, no board, no flash), so it is safe to run
-anytime.  Resolve every `[x]` before continuing; `[!]` lines are for
-optional / real-silicon-only tooling (Zephyr SDK, hal_alif).  Plain
+anytime.  Resolve every `[x]` before continuing.  Most `[!]` lines are
+optional or real-silicon-only tooling (Zephyr SDK, hal_alif) and can
+wait -- but `ninja` is the one exception: `tan doctor --build` rates
+it `[!]` today, yet every `west build` needs it (Zephyr's default
+CMake generator on every host), so treat a `[!] ninja` line the same
+as a `[x]` and install it before building:
+
+```bash
+sudo apt-get install -y ninja-build   # Linux
+brew install ninja                    # macOS
+winget install -e --id Ninja-build.Ninja   # Windows
+```
+
+Skipping it doesn't fail here; it surfaces later as a raw `CMake
+Error: CMake was unable to find a build program corresponding to
+"Ninja"` deep inside `west build` (see
+[`docs/troubleshooting.md`](troubleshooting.md)).  Plain
 `tan doctor` (no `--build`) is a different, debug-readiness preflight
 for attaching a debugger to a target/server, not this build check --
 see [`docs/cli.md`](cli.md#tan-doctor----debug-readiness-preflight).
