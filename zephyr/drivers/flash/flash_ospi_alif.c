@@ -15,17 +15,17 @@
  * hardware batch, so there is nothing on the bus to silicon-verify: this
  * driver's init reads its `struct ospi_init` straight out of the devicetree
  * node (reg/aes-reg/cs-pin/rx-ds-delay/ddr-drive-edge/bus-speed) and calls
- * alif_hal_ospi_initialize() + alif_hal_ospi_xip_enable() ONCE at POST_KERNEL
- * -- exercising the controller-side register program (expected to complete
- * now that the OSPI0 clock-enable below has landed and its gating mechanism
- * is bench-measured, see that block) and proving the two hal_alif entry
- * points compile + link.
- * It does NOT prove a live XiP read (no part on the bus) and does NOT
- * implement flash_driver_api (read/write/erase/SFDP) -- that is a larger
- * silicon-gated follow-up once a part is populated, not this batch.  See
- * examples/aen/aen-ospi-regcheck, which
- * exercises the same two hal_alif calls directly from application code as an
- * independent compile+link+reachability proof.
+ * alif_hal_ospi_initialize() ONCE at POST_KERNEL -- exercising the
+ * controller-side register program (expected to complete now that the OSPI0
+ * clock-enable below has landed and its gating mechanism is bench-measured,
+ * see that block) and proving that hal_alif entry point compiles + links.
+ * It does NOT call alif_hal_ospi_xip_enable() -- see the FOURTH section
+ * below, that call bus-faults on AE822 and init must not fault regardless of
+ * whether an app wants XiP -- and does NOT implement flash_driver_api
+ * (read/write/erase/SFDP) -- that is a larger silicon-gated follow-up once a
+ * part is populated, not this batch.  See examples/aen/aen-ospi-regcheck,
+ * which exercises alif_hal_ospi_initialize() directly from application code
+ * as an independent compile+link+reachability proof.
  *
  * core_clk: the binding's `clock-frequency` property has no documented
  * default and this batch does not set it on the ospi0 node (per the alp-sdk
@@ -166,9 +166,10 @@
  *
  * The Device attribute is confirmed in force. The original fault above is
  * confirmed gone: alif_hal_ospi_initialize() now returns OSPI_ERR_NONE,
- * proven because execution reaches the alif_hal_ospi_xip_enable() call below
- * (:310), which is only reachable past the `return -EIO` at :297-299. The
- * abort also changed character exactly as the Device attribute predicts:
+ * proven because execution reached the alif_hal_ospi_xip_enable() call this
+ * driver made at the time (since removed, see FOURTH section), which was
+ * only reachable past the `return -EIO` on a nonzero init rc. The abort also
+ * changed character exactly as the Device attribute predicts:
  * from imprecise with a wandering PC (0x6e34, 0x6e20 across runs, as above)
  * to precise with a valid BFAR (see the THIRD, DISTINCT FAULT below) -- this
  * corroborates the store-buffer/ENR-ordering mechanism as this fault's real
@@ -193,9 +194,8 @@
  *
  * THIRD, DISTINCT FAULT (same MPU-region bench session, measured
  * 2026-07-28) -- further into alif_hal_ospi_xip_enable() than the region
- * fix above reaches. Root cause is OPEN; an alp-advisor pass is running on
- * it (ruling on whether OSPI_XIP_SER even exists on AE822 vs. whether the
- * unpopulated XiP device is genuinely the cause). Do NOT add a fix here:
+ * fix above reaches. ROOT-CAUSED 2026-07-28 by an alp-advisor pass -- see the
+ * FOURTH section below for the citation chain and the fix:
  *
  *   ***** BUS FAULT *****
  *     Precise data bus error
@@ -205,11 +205,12 @@
  *
  * 0x00006d26 -> ospi_control_xip_ss(), hal_alif modules/hal/alif drivers/
  * ospi/src/ospi.c:273; LR 0x00006e9f -> alif_hal_ospi_xip_enable(),
- * ospi_hal.c:412 (the call this driver makes below, :310). The faulting
- * instruction is a LOAD, `ldr.w r4, [r0, #268]` (0x10C) -- the read half of
- * the `OSPI_XIP_SER &= ~(1 << slave)` read-modify-write; BFAR matches
- * exactly. OSPI_XIP_SER at offset 0x10C is cited from hal_alif's own
- * ospi.c:273 (the driver's own source), not the SVD.
+ * ospi_hal.c:412 (this driver called it here at POST_KERNEL at the time --
+ * removed, see FOURTH section). The faulting instruction is a LOAD,
+ * `ldr.w r4, [r0, #268]` (0x10C) -- the read half of the
+ * `OSPI_XIP_SER &= ~(1 << slave)` read-modify-write; BFAR matches exactly.
+ * OSPI_XIP_SER at offset 0x10C is cited from hal_alif's own ospi.c:273 (the
+ * driver's own source), not the SVD.
  *
  * DECISIVE MEASUREMENT distinguishing this from the fault above: 0x8300010C
  * is unreadable from the debugger too (`mem32 0x8300010C,1` -> "Could not
@@ -223,10 +224,61 @@
  * NOT the store-buffer/ENR-ordering mechanism above: an address inside the
  * now-Device-mapped window simply does not respond to a read.
  *
- * PRACTICAL EFFECT: examples/aen/aen-ospi-regcheck still FAILS. The fault
- * is inside alif_hal_ospi_xip_enable(), called from this driver's
- * POST_KERNEL init (ospi_alif_init() below), so main() still never runs --
- * the fault is still inside driver init, before application code starts.
+ * PRACTICAL EFFECT AT THE TIME: examples/aen/aen-ospi-regcheck FAILED. The
+ * fault was inside alif_hal_ospi_xip_enable(), called from this driver's
+ * POST_KERNEL init (ospi_alif_init() below), so main() never ran -- the
+ * fault was inside driver init, before application code started. See the
+ * FOURTH section immediately below for the fix.
+ *
+ * FOURTH -- RESOLVED 2026-07-28: OSPI_XIP_SER (offset 0x10C) does not exist
+ * on AE822. This is a real silicon delta, not an artifact of the missing
+ * external part:
+ *   - AE822FA0E5597/include/soc_features.h:89 -- SOC_FEAT_OSPI_HAS_XIP_SER
+ *     (0). AE722F80F55D5/soc_features.h:85 -- E7 has (1) (this Zephyr port
+ *     carries no E7 SoC layer today, so E7 is not reachable from this repo,
+ *     but the flag is the E7->E8 silicon delta regardless).
+ *   - Corroborating: soc_features.h:91 (AE822) --
+ *     SOC_FEAT_OSPI_ADDR_IN_SINGLE_FIFO_LOCATION (1); the E7 header has it
+ *     (0) at soc_features.h:87 -- exactly complementary to
+ *     SOC_FEAT_OSPI_HAS_XIP_SER on both parts. AE822 addresses XiP through a
+ *     single FIFO location instead of a per-slave XIP_SER register; there is
+ *     nothing at offset 0x10C to program.
+ *   - The AE822 SVD's OSPI0 register list goes OSPI_XIP_CTRL @ 0x108 ->
+ *     OSPI_XIP_CNT_TIME_OUT @ 0x114 -- nothing at 0x10C or 0x110.
+ *   - Alif's own driver wraps every OSPI_XIP_SER access in
+ *     `#if SOC_FEAT_OSPI_HAS_XIP_SER` (drivers/source/ospi.c:185,
+ *     ospi_xip/source/ospi/ospi_drv.c:244,283) -- hal_alif's ospi.c instead
+ *     hardcodes the E7-era register map (include/ospi.h:85) and RMWs it
+ *     unconditionally at ospi.c:273 (ospi_control_xip_ss(), reached from both
+ *     ospi_xip_enable() and ospi_xip_disable()), guarded only by
+ *     `#ifndef CONFIG_FLASH_ADDRESS_IN_SINGLE_FIFO_LOCATION` at ospi.c:810
+ *     and :860 -- a symbol hal_alif itself never defines.
+ *
+ * FIX, two layers (a DT-only gate is not enough: a populated AE822 board
+ * would fault identically, since the missing register is a property of the
+ * die, not the BOM):
+ *   1. THIS DRIVER no longer calls alif_hal_ospi_xip_enable() at
+ *      POST_KERNEL at all (see ospi_alif_init() below) -- init must not
+ *      fault regardless of what any given app wants. A devicetree-only gate
+ *      was considered (DT_INST_NODE_HAS_PROP(inst, xip_base_address) --
+ *      `xip-base-address` is optional per the vendored binding,
+ *      snps,designware-ospi.yaml:86-88; a `jedec,spi-nor` child-node test was
+ *      rejected because that binding declares no `bus:`, so a child flash
+ *      node would not bind). Not used: the fork's own e1.dtsi sets
+ *      xip-base-address unconditionally on ospi0 (a controller-side XiP
+ *      window reservation, not a populated-part signal), so on THIS batch's
+ *      dtsi the DT test would evaluate true regardless of what's on the bus
+ *      and gate nothing. Removing the call outright is both simpler and
+ *      actually correct for this hardware.
+ *   2. hal_alif's own OSPI_XIP_SER touches are silenced for any Ensemble-E8
+ *      build by defining CONFIG_FLASH_ADDRESS_IN_SINGLE_FIFO_LOCATION (see
+ *      zephyr/CMakeLists.txt, gated on CONFIG_SOC_SERIES_E8) -- so a future
+ *      caller of alif_hal_ospi_xip_enable()/_disable() on this part (this
+ *      driver does not expose one yet) does not reintroduce the fault. Not
+ *      done in hal_alif itself: it is an external module, not edited here.
+ * Whether XiP then *functions* in single-FIFO-address mode on AE822 is TBD
+ * pending a populated part -- out of scope here; the requirement met is only
+ * "must not fault".
  *
  * INSTANCE DERIVATION: computed from the DT reg address, not hardcoded --
  * both instances are DFP-sourced and mapped to their enable_ospi_clk()
@@ -356,23 +408,15 @@ static int ospi_alif_init(const struct device *dev)
 	}
 
 	/*
-	 * BUILD-ONLY reachability proof: exercise the XiP-enable path so the
-	 * linker keeps both hal_alif entry points reachable (LTO can't dead-strip
-	 * a called symbol).  No octal-NOR/HyperBus part is populated this batch,
-	 * so a non-zero rc here is EXPECTED -- the controller register program
-	 * completes either way; only a live external part would make the XiP
-	 * window actually readable.  Not fatal to driver init -- IF this call
-	 * returns.  As of the 2026-07-28 bench A/B it currently bus-faults
-	 * instead of returning (the THIRD, DISTINCT FAULT in the file-header
-	 * provenance block, root cause open); aen-ospi-regcheck still FAILS here
-	 * and this rc check is not yet reached.
+	 * alif_hal_ospi_xip_enable() is deliberately NOT called here anymore --
+	 * see the FOURTH section of the file-header provenance block. It
+	 * bus-faults on AE822 (SOC_FEAT_OSPI_HAS_XIP_SER=0: the register is
+	 * absent from the die, not merely unmapped), and POST_KERNEL runs before
+	 * main(), so calling it here bricks every app that enables this node
+	 * regardless of what the app itself needs. Init ends at a successful
+	 * controller program; XiP setup is left to a future caller that actually
+	 * has a populated part to program it for.
 	 */
-	rc = alif_hal_ospi_xip_enable(data->handle);
-	if (rc != OSPI_ERR_NONE) {
-		LOG_WRN("alif_hal_ospi_xip_enable rc=%d (expected: no OSPI flash/HyperBus "
-			"part populated this batch)",
-			rc);
-	}
 
 	return 0;
 }
