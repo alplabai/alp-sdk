@@ -37,6 +37,12 @@ bench_require_setools || exit $?
 SET="$SETOOLS_DIR"
 OBJ="$(bench_tool_prefix)" || exit $?
 JLINK="$(bench_jlink_exe)" || exit $?
+# See ram-run.sh for why the selector is conditional on JLINK_SN. NOTE: unlike
+# flash-jlink-mramxip.sh, this script has no post-connect SW-DP ID gate before
+# writing MRAM -- the selector narrows probe choice but does not by itself
+# confirm the target board.
+JLINK_ARGS=("$JLINK")
+[ -n "${JLINK_SN:-}" ] && JLINK_ARGS+=(-SelectEmuBySN "$JLINK_SN")
 NAME=$(basename "$BD")
 BIN="$BD/zephyr/zephyr.bin"
 
@@ -73,7 +79,7 @@ r
 g
 exit
 EOF
-$JLINK -nogui 1 -CommanderScript /tmp/hp-write.jlink 2>&1 | tee /tmp/hp-write.out | \
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/hp-write.jlink 2>&1 | tee /tmp/hp-write.out | \
   grep -iE "could not connect|fail|error|Verify|O\.K\.|Reset" | head -20
 if grep -qi "Could not connect to the target device" /tmp/hp-write.out; then
   echo "!! $JLINK_DEVICE_FLASH profile FAILED to connect -- flow D not unlocked on this probe."
@@ -95,7 +101,7 @@ Sleep 400
 mem32 $HB, 0x4
 exit
 EOF
-$JLINK -nogui 1 -CommanderScript /tmp/hp-read.jlink 2>/tmp/hp-read.err > /tmp/hp-read.out || true
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/hp-read.jlink 2>/tmp/hp-read.err > /tmp/hp-read.out || true
 echo "----- $NAME M55-HP SRAM0 beacon (magic / CPUID / VTOR / heartbeat) -----"
 grep -iE "^$(printf '%08X' $BEACON)| = " /tmp/hp-read.out | head
 echo "(heartbeat re-read below should differ from beacon[3] above = HP actively running)"

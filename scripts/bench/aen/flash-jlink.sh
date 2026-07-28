@@ -37,6 +37,12 @@ SET="$SETOOLS_DIR"
 OBJ="$(bench_tool_prefix)" || exit $?
 JLINK="$(bench_jlink_exe)" || exit $?
 DEV="$JLINK_DEVICE_FLASH"
+# See ram-run.sh for why the selector is conditional on JLINK_SN. NOTE: unlike
+# flash-jlink-mramxip.sh, this script has no post-connect SW-DP ID gate before
+# writing MRAM -- the selector narrows probe choice but does not by itself
+# confirm the target board.
+JLINK_ARGS=("$JLINK")
+[ -n "${JLINK_SN:-}" ] && JLINK_ARGS+=(-SelectEmuBySN "$JLINK_SN")
 NAME=$(basename "$BD")
 BIN="$BD/zephyr/zephyr.bin"
 ELF="$BD/zephyr/zephyr.elf"
@@ -76,7 +82,7 @@ r
 g
 exit
 EOF
-$JLINK -nogui 1 -CommanderScript /tmp/flowd.jlink 2>&1 | tee /tmp/flowd.out | \
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/flowd.jlink 2>&1 | tee /tmp/flowd.out | \
   grep -iE "could not connect|fail|error|Verify|O\.K\.|Writing|Programming|Reset|Cortex|Found" | head -30
 echo "----- (full log: /tmp/flowd.out) -----"
 if grep -qi "Could not connect to the target device" /tmp/flowd.out; then
@@ -96,7 +102,7 @@ connect
 mem8 $BUF, $SIZE
 exit
 EOF
-$JLINK -nogui 1 -CommanderScript /tmp/flowd-read.jlink 2>/tmp/flowd-rd.err > /tmp/flowd-rd.out || true
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/flowd-read.jlink 2>/tmp/flowd-rd.err > /tmp/flowd-rd.out || true
 echo "----- $NAME RAM console (flow-D flashed, SE-booted) -----"
 awk '/^[0-9A-Fa-f]+ = / { for (i=3;i<=NF;i++){ if ($i !~ /^[0-9A-Fa-f][0-9A-Fa-f]$/) continue; b=strtonum("0x"$i); if(b==0){nul++; if(nul>6)exit; next} nul=0; if(b==10||b==13){printf "\n";continue} if(b>=32&&b<127)printf "%c",b } }' /tmp/flowd-rd.out
 echo; echo "--------------------------------------------------------"

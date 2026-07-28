@@ -36,6 +36,15 @@ SIZE="${3:-0x600}"
 PRELOAD="${4:-}"
 OBJ="$(bench_tool_prefix)" || exit $?
 JLINK="$(bench_jlink_exe)" || exit $?
+# Select the AEN probe by serial when JLINK_SN is set (bench-env.sh resolves it
+# from JLINK_SN/JLINK_SERIAL) -- on alplab-gw, JLinkExe otherwise picks an
+# arbitrary probe among the V2N CM33 DAP / AEN E8 / GD32 bridge and either
+# fails to connect or attaches the wrong one. Leaving JLINK_SN unset preserves
+# today's single-probe behaviour exactly. NOTE: this is read/RAM-run only (no
+# MRAM write) and this script does not confirm the SW-DP ID the way
+# flash-jlink-mramxip.sh does before a write -- see README/gate note.
+JLINK_ARGS=("$JLINK")
+[ -n "${JLINK_SN:-}" ] && JLINK_ARGS+=(-SelectEmuBySN "$JLINK_SN")
 ELF="$BD/zephyr/zephyr.elf"
 BIN="$BD/zephyr/zephyr.bin"
 ENTRY_RAW=$($OBJ-readelf -h "$ELF" | awk '/Entry point/{print $NF}')
@@ -138,7 +147,7 @@ SCRIPT=$(mktemp /tmp/jlink.XXXX.jlink)
   echo qc
 } > "$SCRIPT"
 echo ">>> RAM-run $(basename "$BD")  entry=$ENTRY  base=$BASE  ram_console_buf=$BUF  sleep=${SLEEP}ms" >&2
-$JLINK -device "$JLINK_DEVICE_READ" -if SWD -speed "$JLINK_SPEED" -nogui 1 -CommanderScript "$SCRIPT" 2>/tmp/jlink.err > /tmp/jlink.out || true
+"${JLINK_ARGS[@]}" -device "$JLINK_DEVICE_READ" -if SWD -speed "$JLINK_SPEED" -nogui 1 -CommanderScript "$SCRIPT" 2>/tmp/jlink.err > /tmp/jlink.out || true
 echo "----- RAM console (decoded) -----"
 # Decode the 'ADDR = HH HH ...' mem8 lines into ASCII; stop at first NUL run.
 awk '
