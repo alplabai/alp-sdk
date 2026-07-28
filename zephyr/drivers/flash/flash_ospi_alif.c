@@ -113,8 +113,9 @@
  * aes-reg (0x83001000, ospi_hal.c:141) follows the same gate per the DFP
  * sequence -- no separate enable is written or expected.
  *
- * SECOND, DISTINCT FAULT (same 2026-07-28 bench session) -- OPEN, further
- * into alif_hal_ospi_initialize() than the CKEN fix reaches:
+ * SECOND, DISTINCT FAULT (same 2026-07-28 bench session) -- ROOT-CAUSED
+ * 2026-07-28 by alp-advisor, further into alif_hal_ospi_initialize() than
+ * the CKEN fix above reaches:
  *
  *   ***** BUS FAULT *****
  *     Imprecise data bus error
@@ -132,12 +133,44 @@
  * (alif-dfp-ref/drivers/include/sys_ctrl_ospi.h:45-48); and
  * SOC_FEAT_FORCE_ENABLE_SYSTEM_CLOCKS is (0) for this part
  * (AE822FA0E5597/include/soc_features.h:124). The second fault above is
- * therefore NOT a missing documented enable -- it is a separate, open issue
- * further into the same call, out of scope for this fix. Do not add a
- * DSB/DMB/barrier or a speculative second enable to chase it: ARMv8-M
- * already orders Device-nGnRnE accesses to the same peripheral, a barrier
- * cannot prevent a slave/decode error (it only makes an imprecise abort
- * precise), and the vendor's own AE822 sequences contain neither.
+ * therefore NOT a missing documented enable -- it is a separate, root-caused
+ * issue.
+ *
+ * ROOT CAUSE: no MPU region in this build maps the OSPI register window
+ * (0x83000000) as Device memory, so the CPU reaches it as NORMAL
+ * write-through memory via the ARMv8-M PRIVDEFENA default map
+ * (0x8000_0000-0x9FFF_FFFF = External RAM, Normal). ospi_mode_master()
+ * (ospi.h:477, inlined here) brackets a protected register write with
+ * ENR=0 ... write ... ENR=1 -- both ENR=0 and ENR=1 are the same word
+ * (offset 0x08); under Normal attributes the M55 store buffer may merge or
+ * reorder those stores before they drain, so the peripheral never sees the
+ * disable and the protected write can land while ENR=1. MEASURED
+ * 2026-07-28: a debugger CTRLR0 write while ENR=1 errors ("Failed to write
+ * memory", read-back unchanged); the identical write with ENR=0 is
+ * accepted -- an errored buffered write is exactly an imprecise BusFault,
+ * taken wherever the pipeline had reached, which is also why the reported
+ * PC wandered between bench runs. (TXFTLR and IMR are NOT in the protected
+ * set measured this way -- narrower than the SVD's prose implies.) THE FIX
+ * IS THE DT/MPU REGION, NOT THIS DRIVER: see `ospi_reg_region` in
+ * zephyr/dts/alif/ensemble_e8_peripherals.dtsi, which maps this window (+
+ * AES0/OSPI1/AES1) as ATTR_MPU_DEVICE. AWAITING BENCH A/B -- not yet
+ * silicon-proven with the region in place.
+ *
+ * Both reference SoC layers already carve this window out as Device
+ * (zephyr_alif fork mpu_regions.c:10-11,105-106, region "OSPI_CTRL",
+ * KB(16); Alif CMSIS mpu.c:97-99, MEMATTRIDX_DEVICE_nGnRE) -- the
+ * upstream-Zephyr-based v4.4 port this repo builds against dropped it; this
+ * is a port regression, not a silicon or driver defect.
+ *
+ * CORRECTED PREMISE: an earlier pass of this note argued no barrier was
+ * needed because "ARMv8-M already orders Device-nGnRnE accesses to the same
+ * peripheral" -- that premise is FALSE as stated here: the accesses at
+ * fault time were NOT Device (that is the whole bug above). The conclusion
+ * survives for a different reason -- once the region above maps this window
+ * Device, ordering is architectural and no barrier is needed; a per-store
+ * DSB would only mask the symptom (and the vendor's own AE822 sequences add
+ * neither). Do not add a DSB/DMB/barrier or a speculative second enable
+ * here.
  *
  * INSTANCE DERIVATION: computed from the DT reg address, not hardcoded --
  * both instances are DFP-sourced and mapped to their enable_ospi_clk()
