@@ -153,8 +153,27 @@
  * set measured this way -- narrower than the SVD's prose implies.) THE FIX
  * IS THE DT/MPU REGION, NOT THIS DRIVER: see `ospi_reg_region` in
  * zephyr/dts/alif/ensemble_e8_peripherals.dtsi, which maps this window (+
- * AES0/OSPI1/AES1) as ATTR_MPU_DEVICE. AWAITING BENCH A/B -- not yet
- * silicon-proven with the region in place.
+ * AES0/OSPI1/AES1) as ATTR_MPU_DEVICE.
+ *
+ * BENCH A/B RAN, MEASURED 2026-07-28: CONFIRMED for this fault -- this is a
+ * real step forward, but it does NOT fully fix the OSPI path; see the THIRD,
+ * DISTINCT FAULT section below. One held J-Link session, region in place:
+ *
+ *   RNR 3  RBAR 83000001  RLAR 83003FF7   OSPI_REG 0x83000000..0x83003FFF
+ *                                         AttrIndx=3 -> MAIR0 Attr3=0x00 = Device-nGnRnE
+ *   MPU_CTRL (0xE000ED94) = 00000005  (ENABLE | PRIVDEFENA)
+ *   MPU_TYPE (0xE000ED90) = 00001000  -> DREGION = 16 regions, 4 in use
+ *
+ * The Device attribute is confirmed in force. The original fault above is
+ * confirmed gone: alif_hal_ospi_initialize() now returns OSPI_ERR_NONE,
+ * proven because execution reaches the alif_hal_ospi_xip_enable() call below
+ * (:310), which is only reachable past the `return -EIO` at :297-299. The
+ * abort also changed character exactly as the Device attribute predicts:
+ * from imprecise with a wandering PC (0x6e34, 0x6e20 across runs, as above)
+ * to precise with a valid BFAR (see the THIRD, DISTINCT FAULT below) -- this
+ * corroborates the store-buffer/ENR-ordering mechanism as this fault's real
+ * cause. Do not read this as "OSPI is fixed": a second, distinct fault
+ * remains further along, root cause open.
  *
  * Both reference SoC layers already carve this window out as Device
  * (zephyr_alif fork mpu_regions.c:10-11,105-106, region "OSPI_CTRL",
@@ -171,6 +190,43 @@
  * DSB would only mask the symptom (and the vendor's own AE822 sequences add
  * neither). Do not add a DSB/DMB/barrier or a speculative second enable
  * here.
+ *
+ * THIRD, DISTINCT FAULT (same MPU-region bench session, measured
+ * 2026-07-28) -- further into alif_hal_ospi_xip_enable() than the region
+ * fix above reaches. Root cause is OPEN; an alp-advisor pass is running on
+ * it (ruling on whether OSPI_XIP_SER even exists on AE822 vs. whether the
+ * unpopulated XiP device is genuinely the cause). Do NOT add a fix here:
+ *
+ *   ***** BUS FAULT *****
+ *     Precise data bus error
+ *   BFAR Address: 0x8300010c
+ *   r0/a1:  0x83000000   r1/a2:  0x83001000   r2/a3:  0x00000001
+ *   Faulting instruction address (r15/pc): 0x00006d26
+ *
+ * 0x00006d26 -> ospi_control_xip_ss(), hal_alif modules/hal/alif drivers/
+ * ospi/src/ospi.c:273; LR 0x00006e9f -> alif_hal_ospi_xip_enable(),
+ * ospi_hal.c:412 (the call this driver makes below, :310). The faulting
+ * instruction is a LOAD, `ldr.w r4, [r0, #268]` (0x10C) -- the read half of
+ * the `OSPI_XIP_SER &= ~(1 << slave)` read-modify-write; BFAR matches
+ * exactly. OSPI_XIP_SER at offset 0x10C is cited from hal_alif's own
+ * ospi.c:273 (the driver's own source), not the SVD.
+ *
+ * DECISIVE MEASUREMENT distinguishing this from the fault above: 0x8300010C
+ * is unreadable from the debugger too (`mem32 0x8300010C,1` -> "Could not
+ * read memory."), at BOTH ENR=0 and ENR=1, with the clock gate set -- and
+ * it was already unreadable before anything was written. The ENR-bracket
+ * registers at offsets 0xF0 / 0xF8 -- carried through as RX_SAMPLE_DELAY /
+ * DDR_DRIVE_EDGE respectively, TBD pending SVD/DFP confirmation, unlike
+ * OSPI_XIP_SER those two names are not independently cited here -- read
+ * back fine at both ENR states in the same session (accepted with ENR=0,
+ * "Failed to write memory" with ENR=1, value unchanged). So this fault is
+ * NOT the store-buffer/ENR-ordering mechanism above: an address inside the
+ * now-Device-mapped window simply does not respond to a read.
+ *
+ * PRACTICAL EFFECT: examples/aen/aen-ospi-regcheck still FAILS. The fault
+ * is inside alif_hal_ospi_xip_enable(), called from this driver's
+ * POST_KERNEL init (ospi_alif_init() below), so main() still never runs --
+ * the fault is still inside driver init, before application code starts.
  *
  * INSTANCE DERIVATION: computed from the DT reg address, not hardcoded --
  * both instances are DFP-sourced and mapped to their enable_ospi_clk()
@@ -305,7 +361,11 @@ static int ospi_alif_init(const struct device *dev)
 	 * a called symbol).  No octal-NOR/HyperBus part is populated this batch,
 	 * so a non-zero rc here is EXPECTED -- the controller register program
 	 * completes either way; only a live external part would make the XiP
-	 * window actually readable.  Not fatal to driver init.
+	 * window actually readable.  Not fatal to driver init -- IF this call
+	 * returns.  As of the 2026-07-28 bench A/B it currently bus-faults
+	 * instead of returning (the THIRD, DISTINCT FAULT in the file-header
+	 * provenance block, root cause open); aen-ospi-regcheck still FAILS here
+	 * and this rc check is not yet reached.
 	 */
 	rc = alif_hal_ospi_xip_enable(data->handle);
 	if (rc != OSPI_ERR_NONE) {
