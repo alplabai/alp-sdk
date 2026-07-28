@@ -1,7 +1,10 @@
 # 0020. The SDK plans; a standalone `tan` CLI is the whole command surface (three repos, one executor)
 
-Status: Accepted — direction + alp-sdk Phase 1/4 code implemented on `dev`; a
-release-blocking remediation is outstanding (see **Amendment** below).
+Status: Accepted — direction + alp-sdk Phase 1/4 code implemented on `dev`; the
+Amendment's release-blocking remediation is met on two of its three conditions
+(oracle frozen, both seams live), the cross-repo `repository_dispatch` trigger
+remains outstanding as a maintainer action, and the release train ran anyway
+(see **Amendment** points 1 and 7).
 Date: 2026-07-18 (Caner) · 2026-07-20 (Hakan co-sign, this commit)
 Deciders: alpCaner (alp-sdk), Hakan (alp-sdk-vscode)
 Supersedes: [0014](0014-build-plan-emit-cli-contract.md) — its
@@ -157,6 +160,103 @@ blocked until the remediation is met. Tracked in #855.
    remaining four (`hw-info-h`, `west-libraries`, `os-topology`,
    `zephyr-board`) are real gaps with no design reason for the absence,
    filed as `tan-cli`#113–#116.
+
+7. **(2026-07-28) Remediation status — point 1's gate is met on two of its
+   three conditions, and its "blocks any release/tag" clause was overtaken by
+   events.** Point 1 conditioned any release on *"freeze that oracle, stand up
+   the two-seam gate + the cross-repo trigger, then tag."* Re-verified against
+   the code rather than assumed:
+
+   - **Oracle frozen — done.** Six fixtures under `tests/parity/oracle/`,
+     provenance and every hand-reviewed field correction recorded in
+     `ORACLE-PROVENANCE.txt` (the #862 `-DSB_CONF_FILE` anchor, and the #999
+     `multicore_rpmsg-imx93` slices[1] `command`→`null` + `board-tree-missing`
+     correction).
+   - **Two-seam gate — done.** Seam 1 runs on both sides
+     (`.github/workflows/parity-seam1.yml` here; `seam1 -- plan-shape parity`
+     in tan against `PINNED_SDK_TAG`). Seam 2 is implemented and green —
+     `tan-cli`#146, merged `33fe9f5b` — materialise → a real cross-compile
+     *through* `tan` → ARM ELF → Renode boot, all asserted. **Scope caveat,
+     stated rather than glossed:** seam 2 covers ONE representative slice
+     (AEN801 M55-HP, `hello-world`), not all six oracle boards, and no
+     `--sysbuild` case; the `iot-fleet-ota` sysbuild proof remains the one
+     deferred box on #871.
+   - **Cross-repo trigger — NOT done, and it is the one real gap.** No
+     `repository_dispatch` from alp-sdk into `tan` exists anywhere in
+     `.github/workflows` (grep-verified; the only occurrence of the keyword is
+     an unrelated comment in `pr-bitbake.yml` about alp-sdk-internal). It
+     cannot be built from either repo's CI without a PAT/App secret, so it is a
+     **maintainer action**, not an implementation task. The consequence is
+     concrete: `PINNED_SDK_TAG` is bumped by hand and therefore **rots
+     silently** — both seams stay green against an alp-sdk that no longer
+     reflects this repo's planner. The token-free half is closed by
+     `tan-cli`#153, a warn-only freshness check that reports how far the pin is
+     behind counting only the contract surface (`scripts/alp_orchestrate`,
+     `metadata`, `tests/parity`), so a docs-only week does not cry wolf. That
+     makes the missing dispatch **visible instead of silent; it does not
+     replace it.**
+
+   **The tag gate did not hold.** Point 1 said the remediation blocks any
+   release; `v0.12.0` and then `v0.13.0` were both tagged with the trigger
+   still absent, `tan` released `v0.4.0` (validated by a `v0.4.0-rc1` first),
+   and the extension pinned `SUPPORTED_CLI_VERSION` to `0.4.0`
+   (`alp-sdk-vscode`#385). Recording that plainly: the release train ran on two
+   of the three conditions. Whether that was the right call is not re-litigated
+   here — what would be wrong is leaving a co-signed gate on the record as
+   though it had been satisfied.
+
+   Point 3's contract fix is **also done** and needs no further action:
+   `executionPolicy` is absent from `build-plan-v1.schema.json`'s top-level
+   `required` and its description reads *"Additive, schemaVersion 1"* — the
+   strict-producer / tolerant-consumer shape point 3 asked for. Its companion
+   clause, *"reconcile the stale #839 `schemaVersion: 2` fixture"*, is
+   satisfied in a way that must **not** be "fixed": the two surviving
+   `"schemaVersion": 2` occurrences are deliberate **negative tests**
+   (`tests/scripts/test_check_build_plan.py:90`, carrying the comment
+   `# locked const -- any other value must fail`, and
+   `tests/scripts/test_build_plan_schema.py:520`), asserting that a future
+   breaking bump the consumer has not been told about fails rather than
+   silently validating. Deleting them would delete a real assertion.
+
+   Two seam-1 weaknesses found while verifying the above, both in the
+   comparator rather than the contract, and both worth recording because a gate
+   that cannot fail is indistinguishable from one that passes:
+
+   - **Point 4's "keep in lockstep" had silently failed, and a tolerance grew
+     to cover for it.** When #999 landed here, this repo fixed it the way the
+     oracle's own discipline prescribes — by re-freezing
+     `multicore_rpmsg-imx93.build-plan.json` (`slices[1]` `command`→`null` plus
+     a `board-tree-missing` warning) and recording the hand-review in
+     `ORACLE-PROVENANCE.txt`, leaving `diff_plans` untouched. tan's **vendored
+     copy of that fixture was never re-synced.** Its live diff therefore showed
+     a command vanishing, and a `_ALLOWED_COMMAND_TO_NULL` tolerance was added
+     on that side instead — a permanent comparator allowance standing in for a
+     one-file sync. Five of the six fixtures were byte-identical across the two
+     repos; only that one had drifted, far enough that it still baked the
+     absolute scratch path of the machine it was first frozen on.
+   - **That tolerance was itself uncoupled.** `is_command_dropped` and
+     `is_warning_added` were independent `or` branches, so a `command`→`null`
+     delta passed **whether or not** an accompanying warning appeared — despite
+     the code's own comment calling the paired warning *"the guard's whole
+     point — to say why."* A slice could lose its command silently and seam 1
+     stay green.
+   - `tests/parity/test_seam1_field_diff.py` — the comparator's own
+     negative-matrix suite, on **both** sides — was executed by no workflow:
+     tan's `parity.yml` ran the parity scripts directly with no pytest step,
+     and this repo's `scripts/test-all.sh` pytest stage covers `tests/scripts/`
+     only. A gate that cannot fail is indistinguishable from one that passes,
+     and this one guarded the comparator that judges every planner change.
+
+   Resolved in `tan-cli`#156: the fixture is re-vendored from this repo at
+   `PINNED_SDK_TAG` (all six now verified byte-identical), the tolerance and
+   its three helpers are deleted so `debug.probe` is once again the only
+   allowed delta, and the negative-matrix suite runs in CI ahead of the live
+   comparator. The lesson is worth keeping even after the fix: **a vendored
+   oracle that drifts does not announce itself — it shows up as a plausible
+   diff, and the cheap response is to widen the comparator rather than re-sync
+   the fixture.** Point 4's lockstep note is a real constraint, not a
+   pleasantry; when the two copies disagree, re-vendor and record it, and treat
+   a new comparator allowance as evidence the sync was skipped.
 
 ## Context
 
