@@ -430,97 +430,36 @@
 	};
 
 	/*
-	 * MRAM MPU split -- restores the partition-aware split the Alif fork
-	 * carries (zephyr_alif-ref soc/alif/ensemble/common/mpu_regions.c:90-92,
-	 * "Writable MRAM (device mode for write access)") and this
-	 * upstream-Zephyr-v4.4-based port drops: v4.4's soc/alif/ensemble/ ships
-	 * no mpu_regions.c at all (only common/soc.c enabling I+D cache), so
-	 * builds fall back to the generic 2-region table
-	 * (zephyr/arch/arm/core/mpu/arm_mpu_regions.c:18-45), whose Region 0
-	 * ("FLASH_0") maps the ENTIRE flash (== the whole 5632 KiB MRAM, since
-	 * `zephyr,flash = &mram_storage`) as one REGION_FLASH_ATTR window. With
-	 * CONFIG_MPU_ALLOW_FLASH_WRITE=y that is P_RW_U_RW (arm_mpu_v8.h:316-322)
-	 * -- ALL of MRAM, including slot0 and the MCUboot partition, becomes
-	 * writable by UNPRIVILEGED code. Root-caused by alp-advisor 2026-07-28.
+	 * MRAM MPU split -- SUPERSEDED here, see
+	 * zephyr/soc-bridge/alif/mpu_regions_e8.c.
 	 *
-	 * Delivered the same alp-sdk-owned way as the OSPI_REG region above
-	 * (`zephyr,memory-region` + `zephyr,memory-attr`, processed by
-	 * arm_mpu.c's mpu_configure_regions_from_dt() when CONFIG_MEM_ATTR=y --
-	 * default y for CONFIG_ARM_MPU, see zephyr/subsys/mem_mgmt/Kconfig:6)
-	 * rather than a patched/carried soc/alif/ensemble/common/mpu_regions.c:
-	 * alp-sdk does not own the pinned Zephyr tree (see zephyr/patches.yml --
-	 * reserved for deltas Zephyr itself has no other hook for), and this SoC
-	 * layer already has a hook Zephyr provides for exactly this. DT-derived
-	 * memory-attr regions are appended by mpu_configure_regions_from_dt()
-	 * AFTER the two generic static regions (index 0/1), so on the ARMv8-M
-	 * MPU the higher-numbered index always wins where they overlap the
-	 * whole-MRAM FLASH_0 background window -- no patch to the generic table
-	 * is needed.
+	 * commit 4ad5e941 first restored this split as two `zephyr,memory-region`
+	 * DT nodes (mram_exec_region / mram_device_region) processed by
+	 * mpu_configure_regions_from_dt(). That was UNSAFE on Flow D (production
+	 * MRAM boot) and has been reverted: mpu_configure_regions_from_dt()
+	 * (arch/arm/core/mpu/arm_mpu.c:110-183) APPENDS DT regions AFTER the
+	 * generic static table (arm_mpu_regions.c), it does not split overlaps
+	 * (arch/arm/core/mpu/arm_mpu_v8_internal.h:532-658 handles that only for
+	 * the app/kernel static-partition path) -- and PMSAv8-M
+	 * (CONFIG_MPU_REQUIRES_NON_OVERLAPPING_REGIONS=y in this build) treats an
+	 * address matching multiple enabled regions as an ACCESS VIOLATION, not
+	 * an ARMv7-M-style "higher index wins". Flow D's generic FLASH_0 already
+	 * covers the whole MRAM (`zephyr,flash = &mram_storage`, CONFIG_XIP), so
+	 * appending the two new regions on top triple-matched every MRAM
+	 * address, including the first slot0 instruction fetch -- a
+	 * self-bricking image. Root-caused by alp-advisor 2026-07-28.
 	 *
-	 * Shape mirrors the fork's `elif defined(CONFIG_BOOTLOADER_MCUBOOT)` case
-	 * (mpu_regions.c:51-68 -- "boot and slot0 (minus trailer sector) are
-	 * executable... The last sector of slot0 is reserved as writable device
-	 * memory for MCUboot API trailer writes... Writable regions: slot0
-	 * trailer sector, slot1, scratch, storage"): it only widens what the fork
-	 * already treated as writable, it never narrows what was executable.
-	 *
-	 * Lives HERE (the shared SoC overlay), not in either per-board board.dts,
-	 * because the boundaries are SoC/SoM-invariant, not per-core: both
-	 * alp_e1m_aen801_m55_he and ..._m55_hp declare a BYTE-FOR-BYTE identical
-	 * mram_storage partition table (the HP board dts says so explicitly --
-	 * "Kept byte-for-byte identical to the HE-sibling board so a future
-	 * HE+HP AMP sysbuild sees one MRAM partition map"), and both board.dts
-	 * files are themselves generated output (`DO NOT EDIT BY HAND --
-	 * regenerate`, from scripts/gen_zephyr_board.py) with no MPU-region
-	 * concept in the generator -- a hand-added node there would be silently
-	 * dropped on the next regen. This file is the existing, hand-maintained,
-	 * core-agnostic hook both boards already `#include`, exactly like
-	 * ospi_reg_region above and `peripheral_region`
-	 * (ensemble_common.dtsi:34-39).
-	 *
-	 * Boundaries, derived from the partition table both board.dts files
-	 * carry (alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.dts and the
-	 * _hp sibling, `mram_storage@80000000` and its `partitions` child --
-	 * not hardcoded), using the same arithmetic as the fork's
-	 * FLASH_MRAM_SIZE / DEVICE_MRAM_BASE_ADDR / DEVICE_MRAM_SIZE
-	 * (mpu_regions.c:61-68):
-	 *
-	 *   mram base            = 0x80000000        (mram_storage@80000000)
-	 *   MRAM_SECTOR_SIZE      = erase-block-size = 1024  (== 0x400)
-	 *   slot0_partition end   = 0x80000000 + 0x10000 (boot_partition)
-	 *                           + 0x2A0000 (slot0_partition size)
-	 *                         = 0x802b0000
-	 *   -> executable window  = [0x80000000, 0x802b0000 - 0x400)
-	 *                         = [0x80000000, 0x802afc00), size 0x2afc00
-	 *                           = DT_SIZE_K(2751)
-	 *   storage_partition end = 0x80000000 + 0x560000 + 0x20000
-	 *                         = 0x80580000
-	 *   -> writable window     = [0x802afc00, 0x80580000),
-	 *                          size 0x2d0400 = DT_SIZE_K(2881)
-	 *   2751 KiB + 2881 KiB = 5632 KiB == the full mram_storage size; no gap,
-	 *   no overlap.
-	 *
-	 * MPU region budget: silicon MPU_TYPE reports DREGION=16 (bench-measured
-	 * on the E8 HE core, 2026-07-28); before this change 4 of 16 are in use
-	 * (the 2 generic static regions FLASH_0/SRAM_0 + the 2 existing DT
-	 * memory-attr regions PERIPHERALS (ensemble_common.dtsi:34-39) and
-	 * OSPI_REG above) -- confirmed by building aen-mram-flash-validate and
-	 * grepping the generated zephyr.dts for `zephyr,memory-attr`. These two
-	 * new regions bring it to 6 of 16, on BOTH cores.
+	 * The fix REPLACES the generic table instead of appending to it:
+	 * zephyr/soc-bridge/alif/mpu_regions_e8.c defines MRAM_EXEC/MRAM_DEVICE
+	 * (same boundaries/arithmetic this file used to carry, now DT-derived at
+	 * compile time from the boot/slot0/storage partitions instead of
+	 * hand-computed literals) alongside ITCM/DTCM as a REPLACEMENT static
+	 * table (`select CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS`, wired from the
+	 * hand-maintained top-level zephyr/CMakeLists.txt + each board's
+	 * hand-maintained `Kconfig`), so no generic whole-MRAM FLASH_0 region
+	 * exists to collide with the split. See that file's header for the full
+	 * design + the flow-awareness BUILD_ASSERT.
 	 */
-	mram_exec_region: memory@80000000 {
-		compatible = "zephyr,memory-region";
-		reg = <0x80000000 DT_SIZE_K(2751)>;
-		zephyr,memory-region = "MRAM_EXEC";
-		zephyr,memory-attr = <DT_MEM_ARM(ATTR_MPU_FLASH)>;
-	};
-
-	mram_device_region: memory@802afc00 {
-		compatible = "zephyr,memory-region";
-		reg = <0x802afc00 DT_SIZE_K(2881)>;
-		zephyr,memory-region = "MRAM_DEVICE";
-		zephyr,memory-attr = <DT_MEM_ARM(ATTR_MPU_DEVICE)>;
-	};
 
 	/*
 	 * Synopsys DesignWare OSPI/HexSPI -- the octal-SPI controller that also

@@ -94,6 +94,21 @@ if(CONFIG_SOC_SERIES_E8)
     zephyr_compile_definitions(CONFIG_FLASH_ADDRESS_IN_SINGLE_FIFO_LOCATION)
 endif()
 
+# Custom fixed MPU region table for the Ensemble E8 (mpu_regions_e8.c),
+# REPLACING arm_mpu_regions.c's generic FLASH_0/SRAM_0 fallback -- restores
+# the fork's MRAM exec/device split without the DT-node-append overlap bug
+# (see the file header for the full root cause). Gated on
+# CONFIG_CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS, which the E8 HE/HP boards'
+# hand-maintained `Kconfig` (not the generated Kconfig.alp_<board> /
+# Kconfig.defconfig) selects. Needed for ANY Ensemble-E8 build -- including
+# MCUboot itself, which never sets CONFIG_ALP_SDK -- so this is applied
+# before the CONFIG_ALP_SDK early-return, mirroring the GPIO clock-enable /
+# OSPI_XIP_SER precedents above.
+if(CONFIG_SOC_SERIES_E8)
+    zephyr_sources_ifdef(CONFIG_CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/soc-bridge/alif/mpu_regions_e8.c)
+endif()
+
 if(NOT CONFIG_ALP_SDK)
     return()
 endif()
