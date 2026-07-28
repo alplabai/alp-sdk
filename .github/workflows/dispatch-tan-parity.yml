@@ -1,0 +1,113 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# ADR-0020 cross-repo trigger — SENDER half (alp-sdk → tan-cli).
+#
+# Fires a `repository_dispatch` at `alplabai/tan-cli` whenever this repo's
+# CONTRACT SURFACE moves, carrying the SHA that just landed so tan's parity
+# gate tests THAT ref instead of its hand-bumped `PINNED_SDK_TAG`.
+#
+# Why this exists, stated as the gap it closes rather than as the ADR line it
+# satisfies:
+#
+#   * `parity-seam1.yml` (this repo) diffs our own `--emit build-plan` against
+#     our OWN frozen oracle. It never runs tan. It cannot tell us that a
+#     planner change broke tan's ability to EXECUTE the plan.
+#   * tan's `parity.yml` on a pull_request tests against a PINNED alp-sdk ref,
+#     bumped by hand. Until someone bumps it, tan is green against an alp-sdk
+#     that no longer exists.
+#
+# So "alp-sdk changed and tan can no longer build from the plan" is invisible on
+# both sides. tan's seam2 -- materialise, cross-compile through `tan build`,
+# boot in Renode -- is exactly the check that sees it, and this is what points
+# it at the right commit.
+#
+# Security model, following pr-bitbake.yml (read its header; the argument is the
+# same one):
+#   * The token is minted at RUNTIME from the org's GitHub App
+#     (`actions/create-github-app-token`), scoped to tan-cli alone and valid
+#     ~1h. The only long-lived secret is the App's private key -- org-owned and
+#     revocable. A long-lived PAT was the alternative and is deliberately not
+#     used: it would contradict the model the neighbouring workflow argues for.
+#   * `repository_dispatch` needs Contents:write on the TARGET. That is the
+#     whole grant; the App holds nothing else on tan-cli.
+#   * Fork PRs receive no secrets, and this triggers on `push` to dev/main
+#     only, so a fork cannot reach it at all.
+
+name: dispatch-tan-parity
+
+on:
+  push:
+    branches: [dev, main]
+    # Kept in lockstep with parity-seam1.yml's path list ON PURPOSE: that job
+    # decides when OUR plan shape is re-checked, and this decides when TAN
+    # re-checks it. If the two lists drift, one side starts testing changes the
+    # other ignores, which is the silent-divergence this whole gate exists to
+    # prevent.
+    paths:
+      - "scripts/alp_orchestrate/**"
+      - "metadata/**"
+      - "examples/**/board.yaml"
+      - "tests/parity/**"
+  workflow_dispatch:
+
+concurrency:
+  # A burst of merges should leave tan testing the NEWEST contract surface, not
+  # queue one run per commit against refs that are already superseded.
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch:
+    name: "dispatch · tan parity"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint a short-lived App token (scoped to tan-cli)
+        id: apptoken
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.ALP_CI_APP_ID }}
+          private-key: ${{ secrets.ALP_CI_APP_PRIVATE_KEY }}
+          owner: alplabai
+          repositories: tan-cli
+
+      - name: Dispatch planner-change to tan-cli
+        env:
+          GH_TOKEN: ${{ steps.apptoken.outputs.token }}
+        run: |
+          set -euo pipefail
+          # `alp-sdk-planner-change` and `client_payload.sdk_ref` are the names
+          # tan's `tests/parity/README.md` specifies and its `parity.yml`
+          # listens for. Renaming either here silently stops the dispatch
+          # arriving -- GitHub accepts an unrecognised event_type with a 204,
+          # so the failure looks exactly like success from this side.
+          gh api repos/alplabai/tan-cli/dispatches \
+            -f event_type=alp-sdk-planner-change \
+            -F "client_payload[sdk_ref]=${{ github.sha }}" \
+            -F "client_payload[branch]=${{ github.ref_name }}"
+          echo "::notice::dispatched alp-sdk-planner-change to tan-cli for ${{ github.sha }} (${{ github.ref_name }})"
+
+      # The dispatch API answers 204 with no body whether or not anything is
+      # listening, so "the call succeeded" is not evidence a run started. Look
+      # for the run itself, and say plainly which of the two happened rather
+      # than leaving a green step to imply the good one.
+      - name: Confirm a run actually started
+        env:
+          GH_TOKEN: ${{ steps.apptoken.outputs.token }}
+        run: |
+          set -uo pipefail
+          for _ in $(seq 1 10); do
+            sleep 6
+            count="$(gh api "repos/alplabai/tan-cli/actions/runs?event=repository_dispatch&per_page=5" \
+                      -q '[.workflow_runs[] | select(.created_at > (now - 300 | todate))] | length' 2>/dev/null || echo 0)"
+            if [ "${count:-0}" -gt 0 ]; then
+              echo "::notice::tan-cli started ${count} repository_dispatch run(s)"
+              exit 0
+            fi
+          done
+          # WARN, not fail: the dispatch was accepted, and a missed run is most
+          # often Actions queueing rather than a broken wiring. Failing this
+          # repo's push for tan's scheduler would be the wrong blame.
+          echo "::warning::dispatched, but no tan-cli repository_dispatch run appeared within ~60s. Check that parity.yml still lists 'alp-sdk-planner-change' under repository_dispatch.types -- a renamed type is accepted with a 204 and silently does nothing."
