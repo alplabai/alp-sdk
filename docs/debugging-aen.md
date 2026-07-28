@@ -135,6 +135,30 @@ The same pre-idle-window logic applies to the SE-UART/SETOOLS
 maintenance channel: forcing a fresh boot and catching the SETOOLS
 handshake in that same early window recovers it the same way.
 
+**In-session variant:** the symptom above is what a *fresh* attach sees.
+If you are already attached and connected, and the resident app idles out
+from under you mid-session, the signature looks completely different and
+reads as a much worse failure:
+
+1. `halt` either fails outright (`WARNING: CPU could not be halted`) or
+   SUCCEEDS and lands in `sys_clock_isr` with `IPSR = 00F` (SysTick) — the
+   expected capture for a WFI-idling core, since the tick ISR is the only
+   window where it's awake enough to halt;
+2. every subsequent memory access then fails (`Could not read memory.`),
+   ending in `****** Error: Could not start CPU core. (ErrorCode: -1)`;
+3. the Coresight scan itself then dies: `AP[0]: Skipped. Could not read
+   CPUID register` / `Could not find core in Coresight setup`.
+
+Same cause, same fix (catch the boot window, or flash a build that stays
+busy and never idles). A cold power cycle only *looks* like it fixes this:
+a busy resident image (e.g. the canonical `person_detect` slot0) keeps the
+DAP powered, so cycling back onto that image recovers attach — but the
+idle-gate itself never changed, and the same in-session symptoms return
+the moment an idling image is resident again. The `sys_clock_isr` capture
+is also useful diagnostic evidence on its own: against a busy park loop
+the tick ISR is roughly a 1000:1 shot, so landing there on a `halt` is
+itself strong evidence the core was idling, not stuck.
+
 ## 5. How do I see program output?
 
 However your application gets onto the board (§3), reading its output
