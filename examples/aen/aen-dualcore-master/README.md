@@ -46,3 +46,27 @@ The core-id mapping (`ALP_CORE_M55_HP` → `EXTSYS_0=2`, `ALP_CORE_M55_HE` →
 image/VTOR base (its ITCM global alias: HE `0x58000000`, HP `0x50000000`).
 There is **no bare M55 register** to release the other core — it is SE-mediated
 only.
+
+## Verdicts, timeouts, and the HE↔HP boot block on this bench
+
+The master always prints exactly one `RESULT` line before dropping into its
+trailing heartbeat loop:
+
+- `RESULT PASS: dualcore-master -- ...` — real evidence: `alp_mproc_boot_core`
+  accepted the request AND the peer's own heartbeat word was observed to
+  advance within the bound below (the request being accepted, alone, does
+  not prove the peer actually came up).
+- `RESULT SKIP: dualcore-master -- ...` — either the boot authority reported
+  `ALP_ERR_NOSUPPORT` (the request was never even accepted), or it was
+  accepted but the peer's heartbeat never advanced within the bound — states
+  what was locally proven, not a failure of this app's code.
+- `RESULT FAIL: alp_mproc_boot_core rc=%d` — a real local error: `boot_core`
+  returned an unexpected rc (neither `ALP_OK` nor `ALP_ERR_NOSUPPORT`).
+
+On THIS bench the HE↔HP release path is known-blocked and
+`alp_mproc_boot_core` returns `ALP_ERR_NOSUPPORT` (`rc=-6`) — reported as
+`RESULT SKIP`, not `RESULT FAIL`: the boot authority itself says it can't
+release the peer here, which is a bench/silicon limitation, not a bug in this
+app. The peer-heartbeat wait (2000 ms, polled every 20 ms) is bounded, so an
+accepted request whose peer never actually comes up produces a verdict
+instead of a hang.

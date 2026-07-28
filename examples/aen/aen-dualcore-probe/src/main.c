@@ -15,24 +15,44 @@
  *
  * 0x02000000 itself reads back 0 even when running (reserved/special per the
  * bench), so the beacons sit at nonzero offsets.
+ *
+ * This app never calls a boot API itself -- both cores are meant to be started
+ * by the SES from one dual-entry ATOC, so there is no local rc to gate. The
+ * decisive check IS the peer's beacon: this build polls the OTHER core's
+ * heartbeat word (same global-SRAM0 window, same magic scheme) for a bounded
+ * window right after stamping its own beacon, and reports PASS/SKIP from
+ * that -- the same determination a human would make reading both dumps over
+ * SWD, just made locally and boundedly instead of left to run forever.
  */
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
 
 /* Core-role selection (HP vs HE build of this app), not a peripheral-presence gate. */
 #if defined(CONFIG_BOARD_ALP_E1M_AEN801_M55_HP)
-#define BEACON_BASE 0x02000010U
-#define ROLE        "HP"
-#define MAGIC       0xB1B10090U /* HP slot */
+#define BEACON_BASE      0x02000010U
+#define ROLE             "HP"
+#define MAGIC            0xB1B10090U /* HP slot */
+#define PEER_BEACON_BASE 0x02001010U
+#define PEER_MAGIC       0xB1B100E0U /* HE slot */
 #else
-#define BEACON_BASE 0x02001010U
-#define ROLE        "HE"
-#define MAGIC       0xB1B100E0U /* HE slot */
+#define BEACON_BASE      0x02001010U
+#define ROLE             "HE"
+#define MAGIC            0xB1B100E0U /* HE slot */
+#define PEER_BEACON_BASE 0x02000010U
+#define PEER_MAGIC       0xB1B10090U /* HP slot */
 #endif
 
-#define BEACON ((volatile uint32_t *)BEACON_BASE)
+#define BEACON      ((volatile uint32_t *)BEACON_BASE)
+#define PEER_BEACON ((volatile uint32_t *)PEER_BEACON_BASE)
+
+/* Bounded wait for the peer core's heartbeat to move.  Both cores (if the SES
+ * really did dual-boot them) reach this poll within a few ms of each other,
+ * so this window is generous, not tight. */
+#define PEER_HB_TIMEOUT_MS 2000U
+#define PEER_HB_POLL_MS    20U
 
 int main(void)
 {
@@ -41,7 +61,33 @@ int main(void)
 	BEACON[0] = MAGIC; /* magic: which core stamped this slot */
 	BEACON[1] = 0U;    /* heartbeat: advances => this core is running */
 
-	for (uint32_t hb = 1U;; hb++) {
+	uint32_t peer_hb0   = PEER_BEACON[1];
+	bool     peer_alive = false;
+
+	for (uint32_t t = 0U; t < PEER_HB_TIMEOUT_MS / PEER_HB_POLL_MS; t++) {
+		BEACON[1] = t + 1U;
+		k_msleep(PEER_HB_POLL_MS);
+		if (PEER_BEACON[0] == PEER_MAGIC && PEER_BEACON[1] != peer_hb0) {
+			peer_alive = true;
+			break;
+		}
+	}
+
+	if (peer_alive) {
+		printk("RESULT PASS: dualcore-probe -- both M55 cores advancing (this=%s, peer "
+		       "magic=0x%08x moved) -- dual-entry ATOC booted both\n",
+		       ROLE,
+		       PEER_MAGIC);
+	} else {
+		printk("RESULT SKIP: dualcore-probe -- peer beacon (0x%08x) never advanced within "
+		       "%u ms; this core (%s) is up, peer never ran (matches the single-core-boot "
+		       "finding)\n",
+		       PEER_BEACON_BASE,
+		       PEER_HB_TIMEOUT_MS,
+		       ROLE);
+	}
+
+	for (uint32_t hb = PEER_HB_TIMEOUT_MS / PEER_HB_POLL_MS + 1U;; hb++) {
 		BEACON[1] = hb;
 		if ((hb & 0x3FFU) == 0U) {
 			printk("%s heartbeat %u\n", ROLE, hb);

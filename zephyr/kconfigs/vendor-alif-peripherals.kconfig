@@ -638,6 +638,36 @@ config VIDEO_ALIF_CAM_EXTENDED
 	  The CPI has extended registers and ports to forward video signals to the
 	  ISP and dump the frame to memory.
 
+config DISPLAY_CDC200
+	bool "TES CDC-2.1 (CDC200) DPI/RGB display controller for Alif (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
+	default y
+	depends on DISPLAY
+	depends on DT_HAS_TES_CDC_2_1_ENABLED
+	help
+	  TES CDC-2.1 (CDC200) DPI/RGB display controller, the pixel-pump that
+	  feeds the MIPI-DSI bridge on the Alif Ensemble E8.  Vendored from the
+	  Apache-2.0 zephyr_alif fork (drivers/display/display_cdc200.c,
+	  compatible "tes,cdc-2.1") and PORTED to the v4.4 display API by Alp Lab
+	  AB.  Upstream Zephyr v4.4 + hal_alif ship no tes,cdc-2.1 (or any DPI
+	  display-controller) driver.
+
+	  ADR 0017 Tier-2 (fork-driver copy): INTERIM.  Retires onto the opt-in
+	  sdk-alif fork once the cdc node is repointed AND bench-verified
+	  (task #21).
+	  Driver: zephyr/drivers/display/display_cdc200.c.
+
+config FB_USES_DTCM_REGION
+	bool "CDC200 framebuffer lives in DTCM (needs the hal_alif local_to_global map)"
+	depends on DISPLAY_CDC200
+	help
+	  Selects the DTCM-resident framebuffer path in display_cdc200.c, which
+	  pulls in hal_alif's <soc_memory_map.h> (local_to_global) to translate
+	  the DTCM address for the CDC200 DMA engine.  Neither upstream Zephyr
+	  nor hal_alif declare this symbol -- it is alp-sdk's own gate around a
+	  vendored TU.  Leave off (default n) for the default SRAM0 framebuffer
+	  path, which needs neither the header nor the hal_alif common include
+	  dir.
+
 config MIPI_DPHY
 	bool "MIPI-DPHY host controllers (vendored, ADR 0017 Tier-2 INTERIM)"
 	select EXPERIMENTAL

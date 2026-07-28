@@ -181,17 +181,17 @@
     {
       "e1m": "E1M_GPIO_PWM3",
       "board_category": "gpio",
-      "board_macro": "EVK_PIN_LED_RED",
+      "board_macro": "EVK_PIN_LED_GREEN",
       "board_role": null,
-      "board_doc": "RGB LED red -- the PWM3 pad driven as a digital GPIO.",
+      "board_doc": "RGB LED green -- the PWM3 pad driven as a digital GPIO.",
       "dispatch": "direct"
     },
     {
       "e1m": "E1M_GPIO_PWM0",
       "board_category": "gpio",
-      "board_macro": "EVK_PIN_LED_GREEN",
+      "board_macro": "EVK_PIN_LED_RED",
       "board_role": null,
-      "board_doc": "RGB LED green -- the PWM0 pad driven as a digital GPIO.",
+      "board_doc": "RGB LED red -- the PWM0 pad driven as a digital GPIO.",
       "dispatch": "direct"
     },
     {
@@ -254,9 +254,9 @@
     {
       "e1m": "E1M_PWM0",
       "board_category": "pwm",
-      "board_macro": "EVK_PWM_LED_GREEN",
+      "board_macro": "EVK_PWM_LED_RED",
       "board_role": null,
-      "board_doc": "RGB LED green; schematic-wired via PWM0 (non-contiguous with R/B).",
+      "board_doc": "RGB LED red; schematic-wired via PWM0 (non-contiguous with G/B).",
       "dispatch": "direct"
     },
     {
@@ -286,9 +286,9 @@
     {
       "e1m": "E1M_PWM3",
       "board_category": "pwm",
-      "board_macro": "EVK_PWM_LED_RED",
+      "board_macro": "EVK_PWM_LED_GREEN",
       "board_role": null,
-      "board_doc": "RGB LED red channel.",
+      "board_doc": "RGB LED green channel.",
       "dispatch": "direct"
     },
     {

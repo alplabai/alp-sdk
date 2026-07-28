@@ -12,8 +12,15 @@
 # boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay and
 # app.overlay by name automatically -- no explicit -DEXTRA_DTC_OVERLAY_FILE
 # force needed (the examples ship fully-qualified overlay names, not the
-# bare board name that would silently drop). Prints errors + the
-# memory-region summary only.
+# bare board name that would silently drop). For a Flow C RAM-run, pass
+# the bench-only ITCM retarget explicitly -- it is NOT one of the
+# auto-applied overlays above (it lives outside the app, on purpose: the
+# retarget is a bench concern, not something any app's own prj.conf/overlay
+# should carry) -- both halves together, e.g.:
+#   -DEXTRA_CONF_FILE="scripts/bench/aen/aen-bench-shared.conf;scripts/bench/aen/aen-flowc-itcm.conf" \
+#   -DEXTRA_DTC_OVERLAY_FILE="scripts/bench/aen/aen-flowc-itcm.overlay"
+# See docs/aen-bench-bringup.md, Flow C. Prints errors + the memory-region
+# summary only.
 set -e
 
 # shellcheck source=scripts/bench/aen/bench-env.sh

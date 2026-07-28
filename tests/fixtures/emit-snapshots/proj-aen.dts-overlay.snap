@@ -23,10 +23,10 @@
         alp-uart0 = &uart0;  /* EVK_UART_PORT_DEBUG */
         alp-uart1 = &uart1;  /* EVK_UART_PORT_ARDUINO */
         /* PWM */
-        alp-pwm0 = &pwm0;  /* EVK_PWM_LED_GREEN */
+        alp-pwm0 = &pwm0;  /* EVK_PWM_LED_RED */
         alp-pwm1 = &pwm1;  /* EVK_PWM_LED_BLUE, EVK_ARD_PWM1 */
         alp-pwm2 = &pwm2;  /* EVK_ARD_PWM4 */
-        alp-pwm3 = &pwm3;  /* EVK_PWM_LED_RED */
+        alp-pwm3 = &pwm3;  /* EVK_PWM_LED_GREEN */
         alp-pwm4 = &pwm4;  /* EVK_ARD_PWM2 */
         alp-pwm5 = &pwm5;  /* EVK_ARD_PWM3 */
         alp-pwm6 = &pwm6;  /* EVK_MB_PWM */
@@ -70,10 +70,10 @@
             <&gpio0 0 GPIO_ACTIVE_HIGH>,  /* [23] ALP_E1M_GPIO_IO23  routed: EVK_PIN_PCIE_MUX_SEL */
             <&gpio0 0 GPIO_ACTIVE_HIGH>,  /* [24] ALP_E1M_GPIO_IO24 */
             <&gpio0 0 GPIO_ACTIVE_HIGH>,  /* [25] ALP_E1M_GPIO_IO25 */
-            <&gpio0 0 GPIO_ACTIVE_HIGH>,  /* [26] ALP_E1M_GPIO_PWM0  default fn: EVK_PWM_LED_GREEN */
+            <&gpio0 0 GPIO_ACTIVE_HIGH>,  /* [26] ALP_E1M_GPIO_PWM0  default fn: EVK_PWM_LED_RED */
             <&gpio0 0 GPIO_ACTIVE_HIGH>,  /* [27] ALP_E1M_GPIO_PWM1  default fn: EVK_ARD_PWM1 */
             <&gpio0 0 GPIO_ACTIVE_HIGH>,  /* [28] ALP_E1M_GPIO_PWM2  default fn: EVK_ARD_PWM4 */
-            <&gpio0 0 GPIO_ACTIVE_HIGH>,  /* [29] ALP_E1M_GPIO_PWM3  default fn: EVK_PWM_LED_RED */
+            <&gpio0 0 GPIO_ACTIVE_HIGH>,  /* [29] ALP_E1M_GPIO_PWM3  default fn: EVK_PWM_LED_GREEN */
             <&gpio0 0 GPIO_ACTIVE_HIGH>,  /* [30] ALP_E1M_GPIO_PWM4  default fn: EVK_ARD_PWM2 */
             <&gpio0 0 GPIO_ACTIVE_HIGH>,  /* [31] ALP_E1M_GPIO_PWM5  default fn: EVK_ARD_PWM3 */
             <&gpio0 0 GPIO_ACTIVE_HIGH>,  /* [32] ALP_E1M_GPIO_PWM6  default fn: EVK_MB_PWM */

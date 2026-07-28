@@ -23,7 +23,7 @@
  * No alp-uart0 alias: src/main.c never calls alp_uart_open() (console
  * output goes through printf/Zephyr's own console), and the E1M edge
  * "UART0" signal is wired to Alif UART5 (see
- * alp_e1m_aen801_m55_he-pinctrl.dtsi's pinctrl_uart5), not the SoC's
+ * alp_e1m_aen801_m55_hp-pinctrl.dtsi's pinctrl_uart5), not the SoC's
  * own uart0 block -- there is no pinctrl group for uart0 on this
  * carrier.  Enabling it would need status="okay" to satisfy
  * DEVICE_DT_GET (src/backends/uart/zephyr_drv.c resolves every
@@ -35,16 +35,18 @@
  * it by the E1M GPIO index, so entry N is E1M pad N in the
  * e1m_pinout.h canonical order (IO0..IO25 = 0..25, PWM0..PWM7 =
  * 26..33, ...).  The EVK's RGB LED sits on PWM pads, so the status
- * LED is driven through a pad's GPIO-secondary index (ALP_E1M_GPIO_PWM3).
- * This overlay covers indices 0..29 -- enough for the two pads this
- * demo touches (encoder switch at [4], RGB-red LED at [29]).  gpio0/
+ * LED is driven through a pad's GPIO-secondary index (ALP_E1M_GPIO_PWM0
+ * -- bench-measured 2026-07-28; PWM0, not PWM3, is red, see
+ * metadata/boards/e1m-evk.yaml).  This overlay covers indices 0..29 --
+ * enough for the two pads this demo touches (encoder switch at [4],
+ * RGB-red LED at [26]).  gpio0/
  * gpio1 are disabled by default in the SoC dtsi; GPIO_DT_SPEC_GET_BY_IDX
  * (src/backends/gpio/zephyr_drv.c) resolves every entry in this array
  * unconditionally at compile time, so both controllers are enabled
  * below or the build fails the same way i2c0/uart0 did.
  *
- * The authoritative alp_e1m_aen801_m55_he board file ships in-tree at
- * zephyr/boards/alp/e1m_aen801_m55_he/; this overlay only re-aliases
+ * The authoritative alp_e1m_aen801_m55_hp board file ships in-tree at
+ * zephyr/boards/alp/e1m_aen801_m55_hp/; this overlay only re-aliases
  * what that board exposes.  The HW-in-loop scenario stays parked
  * pending twister CI wiring (see testcase.yaml).
  */
@@ -133,17 +135,17 @@
                 <&gpio0 23 GPIO_ACTIVE_HIGH>,                            /* [23] ALP_E1M_GPIO_IO23 (unrouted placeholder) */
                 <&gpio0 24 GPIO_ACTIVE_HIGH>,                            /* [24] ALP_E1M_GPIO_IO24 (unrouted placeholder) */
                 <&gpio0 25 GPIO_ACTIVE_HIGH>,                            /* [25] ALP_E1M_GPIO_IO25 (unrouted placeholder) */
-                <&gpio0 26 GPIO_ACTIVE_HIGH>,                            /* [26] ALP_E1M_GPIO_PWM0 -- RGB LED green pad as GPIO */
+                <&gpio0 26 GPIO_ACTIVE_HIGH>,                            /* [26] ALP_E1M_GPIO_PWM0 -- EVK_PIN_LED_RED (RGB-red pad as GPIO) */
                 <&gpio0 27 GPIO_ACTIVE_HIGH>,                            /* [27] ALP_E1M_GPIO_PWM1 -- RGB LED blue pad as GPIO */
                 <&gpio0 28 GPIO_ACTIVE_HIGH>,                            /* [28] ALP_E1M_GPIO_PWM2 (unrouted placeholder) */
-                <&gpio1  1 GPIO_ACTIVE_HIGH>;                            /* [29] ALP_E1M_GPIO_PWM3 -- EVK_PIN_LED_RED (RGB-red pad as GPIO) */
+                <&gpio1  1 GPIO_ACTIVE_HIGH>;                            /* [29] ALP_E1M_GPIO_PWM3 -- RGB LED green pad as GPIO (unused here) */
     };
 };
 
 /*
  * NOTE -- gpio bank/pin numbers in the gpios property above are
  * PLACEHOLDERS.  The authoritative mapping lands when the
- * alp_e1m_aen801_m55_he board file (zephyr/boards/alp/e1m_aen801_m55_he/)
+ * alp_e1m_aen801_m55_hp board file (zephyr/boards/alp/e1m_aen801_m55_hp/)
  * grows a pinctrl group naming the exact gpio bank/index for each
  * EVK net (RGB LED on the PWM pads, encoder switch).  The POSITIONAL
  * INDEX (the [NN] in each comment) is the stable ABI; only the

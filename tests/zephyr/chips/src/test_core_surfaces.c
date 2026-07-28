@@ -41,8 +41,14 @@ ZTEST(alp_chips, test_public_headers_co_compile)
      * here at runtime is the success signal. */
 	zassert_equal((int)ALP_OK, 0, "ALP_OK must remain 0 across header-set evolution");
 	zassert_equal((unsigned)ALP_E1M_GPIO_IO0, 0u);
+	/* RED is PWM0, not PWM3: bench-measured 2026-07-28 on an E1M-AEN801
+	 * r1 + E1M-EVK-2626-R2 by driving one RGB channel at a time.  The
+	 * internal netlist's LED_R / LED_G net names are swapped, and
+	 * metadata/boards/e1m-evk.yaml had inherited that error.  If this
+	 * assertion fails again, check whether the routes were "corrected"
+	 * back toward the netlist rather than toward the measurement. */
 	zassert_equal((unsigned)EVK_PWM_LED_RED,
-	              ALP_E1M_PWM3,
+	              ALP_E1M_PWM0,
 	              "EVK feature names must layer atop the global e1m_pinout map");
 }
 

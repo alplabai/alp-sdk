@@ -189,7 +189,10 @@ static void portable_ble_scan_cb(const alp_ble_scan_result_t *r, void *user)
  * portable Wi-Fi and BLE backends; this checkpoint verifies the public handles
  * open and that BLE can run a real scan through <alp/ble.h>.
  */
-static void tour_portable_wireless_checkpoint(void)
+/* Returns the fail count so main() can fold this checkpoint's own tally
+ * into the RESULT verdict -- see the header comment on RESULT below for
+ * why this is the one checkpoint in the tour that gates it. */
+static unsigned tour_portable_wireless_checkpoint(void)
 {
 	unsigned pass = 0u;
 	unsigned fail = 0u;
@@ -225,6 +228,7 @@ static void tour_portable_wireless_checkpoint(void)
 	}
 
 	printf("PORTABLE_WIRELESS: SUMMARY pass=%u fail=%u\n", pass, fail);
+	return fail;
 }
 
 /* Step: run a Wi-Fi scan and print the discovered APs.  SCAN_START is
@@ -442,8 +446,11 @@ int main(void)
 	       (s == ALP_ERR_NOSUPPORT) ? " (control pins not bound?)" : "");
 
 	/* Step 2 -- liveness.  Every later step is non-fatal, but if the link never
-	 * comes up they will all just log errors, so surface it clearly here. */
-	if (!tour_ping(&fw)) {
+	 * comes up they will all just log errors, so surface it clearly here.
+	 * `up` feeds the RESULT verdict below -- it is the app's own witness of
+	 * whether the coprocessor ever answered. */
+	bool up = tour_ping(&fw);
+	if (!up) {
 		printf("[tour] link down -- the remaining steps will report errors; continuing so "
 		       "the call shapes are still shown\n");
 	}
@@ -451,8 +458,11 @@ int main(void)
 	/* Step 3 -- version + diagnostics. */
 	tour_diag(&fw);
 
-	/* Step 4 -- portable Wi-Fi/BLE dispatch checkpoint. */
-	tour_portable_wireless_checkpoint();
+	/* Step 4 -- portable Wi-Fi/BLE dispatch checkpoint.  This is the one step
+	 * in the tour with its own pass/fail tally (PORTABLE_WIRELESS: SUMMARY);
+	 * everything else here is deliberately non-fatal narration (see the file
+	 * header), so this checkpoint's fail count is what RESULT gates on. */
+	unsigned wireless_fail = tour_portable_wireless_checkpoint();
 
 	/* Step 5 -- Wi-Fi scan (poll-by-repeat worker seam). */
 	tour_wifi_scan(&fw);
@@ -468,5 +478,28 @@ int main(void)
 	tour_gpio_proxy();
 
 	printf("[tour] full-surface tour complete\n");
+
+	/*
+	 * RESULT verdict.  Most of the tour is deliberately non-fatal narration
+	 * (see the file header: "a demo, not a gate"), so RESULT can't just fire
+	 * unconditionally at the end -- that would print PASS even on a dead
+	 * link.  It gates on the two pieces of state the tour DOES track:
+	 *   - `up`: did the coprocessor ever answer a PING (tour_ping's own
+	 *     result, not just "we reached this line"),
+	 *   - `wireless_fail`: the portable Wi-Fi/BLE checkpoint's own fail
+	 *     tally (PORTABLE_WIRELESS: SUMMARY above).
+	 * Both are false/zero only on a run that actually talked to the radio
+	 * successfully -- a run where the link never came up leaves `up` false
+	 * (and the checkpoint's own opens would fail too), so neither path here
+	 * can reach PASS without having done the work.
+	 */
+	if (up && wireless_fail == 0u) {
+		printf("RESULT PASS: cc3501e link up, portable Wi-Fi+BLE checkpoint clean "
+		       "(fail=0)\n");
+	} else if (!up) {
+		printf("RESULT FAIL: coprocessor never answered PING\n");
+	} else {
+		printf("RESULT FAIL: %u portable Wi-Fi/BLE checkpoint failure(s)\n", wireless_fail);
+	}
 	return 0;
 }

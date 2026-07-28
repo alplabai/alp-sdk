@@ -20,13 +20,14 @@ cluster on the PWM pads.  So this demo:
 
 - reads the **encoder push switch** on `ALP_E1M_GPIO_IO4` (active-low) as
   the button, and
-- drives the **RGB-red pad** (default function PWM3) as a digital GPIO
-  via `ALP_E1M_GPIO_PWM3` (index 29) as the LED.
+- drives the **RGB-red pad** (default function PWM0 -- bench-measured
+  2026-07-28, see `metadata/boards/e1m-evk.yaml`) as a digital GPIO
+  via `ALP_E1M_GPIO_PWM0` (index 26) as the LED.
 
 The portable rule (`e1m_pinout.h` "Pin-as-GPIO fallback"): open a pad's
-analog/timer function with its peripheral id (`ALP_E1M_PWM3` ->
+analog/timer function with its peripheral id (`ALP_E1M_PWM0` ->
 `alp_pwm_open`), or claim it as a GPIO with its `ALP_E1M_GPIO_<class><N>`
-index (`ALP_E1M_GPIO_PWM3` -> `alp_gpio_open`).  Never hold both against
+index (`ALP_E1M_GPIO_PWM0` -> `alp_gpio_open`).  Never hold both against
 the same pad -- the silicon is shared.
 
 > The `alp,pin-array` is **positional**: `alp_gpio_open(pin_id)`

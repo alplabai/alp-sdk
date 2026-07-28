@@ -1,5 +1,5 @@
 {
-  "generated": "2026-07-25",
+  "generated": "2026-07-28",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -1141,12 +1141,12 @@
           "value": "ALP_E1M_GPIO_PWM1"
         },
         "EVK_PIN_LED_GREEN": {
-          "hash": "232b4acbbfe92d97",
-          "value": "ALP_E1M_GPIO_PWM0"
+          "hash": "451ee02558e0873d",
+          "value": "ALP_E1M_GPIO_PWM3"
         },
         "EVK_PIN_LED_RED": {
-          "hash": "44d35457749072d5",
-          "value": "ALP_E1M_GPIO_PWM3"
+          "hash": "2a47f3fae481d947",
+          "value": "ALP_E1M_GPIO_PWM0"
         },
         "EVK_PIN_M2E_SDIO_WAKE": {
           "hash": "06f1aa053529ae84",
@@ -1201,12 +1201,12 @@
           "value": "ALP_E1M_PWM1"
         },
         "EVK_PWM_LED_GREEN": {
-          "hash": "6987ca5a9d17a9dd",
-          "value": "ALP_E1M_PWM0"
+          "hash": "34dc6229d05613c6",
+          "value": "ALP_E1M_PWM3"
         },
         "EVK_PWM_LED_RED": {
-          "hash": "4184b621eb9629d7",
-          "value": "ALP_E1M_PWM3"
+          "hash": "7731adfd2c2372d4",
+          "value": "ALP_E1M_PWM0"
         },
         "EVK_SPI_BUS_ARDUINO": {
           "hash": "bc83ec57c38a74ed",

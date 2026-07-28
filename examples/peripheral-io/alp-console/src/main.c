@@ -116,10 +116,21 @@ static void bind_companion(void)
  * A low-priority background thread breathes the on-module RGB LED through a
  * rainbow so the demo is visibly alive while the `alp` shell stays fully
  * responsive on the console.  Wiring + the breathe maths are lifted from the
- * aen-rgb-led-fade example (RED=PWM3/P2_4, GREEN=PWM0/P12_7, BLUE=PWM1/P12_6 --
- * the board overlay's pwm-leds children).  Device-tree-guarded: on a board
- * without the led_red pwm-leds child (native_sim, V2N) the whole block compiles
- * out and no thread is spawned.
+ * aen-rgb-led-fade example -- the board overlay's pwm-leds children
+ * (led_red = PWM3/P2_4, led_green = PWM0/P12_7, led_blue = PWM1/P12_6).
+ *
+ * NOTE: those DT node LABELS are misnamed relative to the physically
+ * bench-measured colour (2026-07-28, see metadata/boards/e1m-evk.yaml):
+ * PWM3/P2_4 is physically GREEN and PWM0/P12_7 is physically RED, so
+ * `led_red` actually drives the green pad and `led_green` the red one.
+ * Left unrenamed here on purpose -- this thread drives all three
+ * channels simultaneously in a continuous phase-shifted rainbow with no
+ * per-colour semantic (see rgb_status_thread below), so the label swap
+ * has no visible effect and a DT node rename is out of scope for this
+ * fix; fix `led_red`/`led_green` in the board overlay + here together if
+ * this ever needs to report an actual colour.  Device-tree-guarded: on a
+ * board without the led_red pwm-leds child (native_sim, V2N) the whole
+ * block compiles out and no thread is spawned.
  */
 #if DT_NODE_HAS_STATUS(DT_NODELABEL(led_red), okay)
 #include <zephyr/drivers/pwm.h>

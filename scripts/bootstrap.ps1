@@ -430,13 +430,20 @@ Write-EnvLines "  "
   # debug-readiness check (lldb, codeLLDBExtension) -- see docs/cli.md.
   tan doctor --build
 
-  # Start your own project from a ready-made example, then build it for real
-  # silicon. This is the customer path: ``tan`` is the whole command surface
-  # (ADR-0020), and ``tan build`` resolves the board from the project's own
-  # board.yaml -- there is no -b to pass. ``tan examples`` lists what you can
-  # start from.
+  # BUILDING YOUR OWN PROJECT -- the customer path. ``tan`` is the whole
+  # command surface (ADR-0020), and ``tan build`` resolves the board from the
+  # project's own board.yaml, so there is no -b to pass. ``tan examples`` lists
+  # what you can start from. It always targets the real SKU your board.yaml
+  # declares, so a real toolchain is required; ``tan doctor --build`` reports
+  # whether you have one.
   tan init --from-example peripheral-io/uart-echo --name my-app
   cd my-app; tan build
+
+  # WORKING ON THE SDK ITSELF -- a contributor command, not part of building
+  # your firmware. Spelling the Zephyr board target by hand is only needed on
+  # this path:
+  west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he ``
+      examples\peripheral-io\uart-echo -- -DEXTRA_ZEPHYR_MODULES=$RepoRoot
 
 References:
   - docs\cross-platform-setup.md  -- the full per-OS setup guide

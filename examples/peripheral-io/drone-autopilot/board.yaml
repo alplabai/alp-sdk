@@ -31,7 +31,7 @@ preset: e1m-evk             # External sensors plugged into the EVK's
 pins:
   - { e1m: E1M_I2C0, macro: EVK_I2C_BUS_SENSORS, doc: "Shared sensor + IO-expander + INA236 bus" }
   - { e1m: E1M_UART0, macro: EVK_UART_PORT_DEBUG, doc: "Console UART exposed on the JTAG/SWD-side debug header" }
-  - { e1m: E1M_PWM0, macro: EVK_PWM_LED_GREEN, doc: "RGB LED green; schematic-wired via PWM0 (non-contiguous with R/B)" }
+  - { e1m: E1M_PWM0, macro: EVK_PWM_LED_RED, doc: "RGB LED red; schematic-wired via PWM0 (non-contiguous with G/B). Bench-measured 2026-07-28: PWM0 is red, not green -- see metadata/boards/e1m-evk.yaml" }
 
 # Flight controller on M55-HP only.  A32 cluster off (no Linux on a
 # weight-sensitive vehicle); M55-HE inherits the SoM topology

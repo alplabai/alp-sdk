@@ -630,15 +630,23 @@ cat <<'EOF'
   # debug-readiness check (lldb, codeLLDBExtension) -- see docs/cli.md.
   tan doctor --build
 
-  # Start your own project from a ready-made example, then build it. This is
-  # the customer path: `tan` is the whole command surface (ADR-0020), and
-  # `tan build` resolves the board from the project's own board.yaml -- there
-  # is no -b to pass. `tan examples` lists what you can start from.
+  # BUILDING YOUR OWN PROJECT -- the customer path. `tan` is the whole command
+  # surface (ADR-0020), and `tan build` resolves the board from the project's
+  # own board.yaml, so there is no -b to pass. `tan examples` lists what you
+  # can start from.
+  #
+  # Note `tan build` has NO native_sim option: board.yaml's `os:` is
+  # zephyr/yocto/baremetal/off, so it always targets the real SKU your
+  # board.yaml declares and a real toolchain is required. `tan doctor --build`
+  # reports whether you have one.
   tan init --from-example peripheral-io/uart-echo --name my-app
   cd my-app && tan build
 
-  # SDK CONTRIBUTORS ONLY -- the SDK's own suite, run from this checkout. Not
-  # part of building your firmware.
+  # WORKING ON THE SDK ITSELF -- contributor commands, not part of building
+  # your firmware. native_sim is reachable only through west, for the same
+  # reason as above: it is not a SKU any board.yaml can declare.
+  west build -b native_sim/native/64 examples/peripheral-io/uart-echo       -- -DEXTRA_ZEPHYR_MODULES=$PWD
+
   # Run the local test suite:
   bash scripts/test-all.sh
 

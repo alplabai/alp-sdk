@@ -29,7 +29,7 @@ preset: e1m-evk
 
 # E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
 pins:
-  - { e1m: E1M_PWM0, macro: EVK_PWM_LED_GREEN, doc: "RGB LED green; schematic-wired via PWM0 (non-contiguous with R/B)" }
+  - { e1m: E1M_PWM0, macro: EVK_PWM_LED_RED, doc: "RGB LED red; schematic-wired via PWM0 (non-contiguous with G/B). Bench-measured 2026-07-28: PWM0 is red, not green -- see metadata/boards/e1m-evk.yaml" }
   - { e1m: E1M_I2C0, macro: EVK_I2C_BUS_SENSORS, doc: "Shared sensor + IO-expander + INA236 bus" }
 cores:
   a55_cluster:
