@@ -531,9 +531,13 @@ if [ "${DO_PIP}" -eq 1 ]; then
     # doctor / monitor, invoked as `python -m alp_cli <sub>` by `tan`) --
     # editable install, so a `git pull` in the checkout updates the backend
     # in place. `tan` itself is a separate Rust binary, installed
-    # separately -- see README.md for the tan-cli `install.sh` one-liner
-    # (or the `cargo install --path crates/tan-cli --locked` from-source
-    # alternative).
+    # separately:
+    #   curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh
+    # The from-source alternative is `git clone https://github.com/alplabai/
+    # tan-cli && cd tan-cli && cargo install --path crates/tan-cli --locked`
+    # -- that path is relative to a TAN-CLI checkout, not to this one. This
+    # comment used to name `crates/tan-cli` alone, which does not exist in
+    # alp-sdk, so anyone who followed it from here got "no such directory".
     info "Installing the tan CLI's Python backend into the venv (pip install -e ${PIP_EDITABLE_INSTALL})"
     "${VPY}" -m pip install -q -e "${PIP_EDITABLE_INSTALL}" \
         || warn "alp_cli editable install reported a problem -- check manually"
@@ -608,6 +612,16 @@ print_env_lines "  "
 # user's back, and pasted its output here instead of the text.  A quoted
 # tag also means backslashes are literal, so the line continuation and
 # $PWD below are written plainly rather than escaped.
+#
+# Everything between the EOF markers is PRINTED TO THE USER, so a '#' line in
+# there is output, not a source comment -- keep internal notes (like this one)
+# outside the heredoc. `check_bootstrap_manifest.py` enforces exactly that
+# distinction, and `tests/scripts/test_check_bootstrap_manifest.py`
+# ::test_hardcoded_literal_inside_heredoc_body_fails proves it by rewriting the
+# printed `  # Run the local test suite:` line to carry a version literal and
+# asserting the gate goes red. That test asserts its anchor exists and fails
+# loudly if it does not, so rewording that printed line breaks a real gate for
+# a non-reason. Reword the lines around it instead.
 cat <<'EOF'
 
   # Sanity-check the host build environment (needs tan on PATH -- see
@@ -616,12 +630,17 @@ cat <<'EOF'
   # debug-readiness check (lldb, codeLLDBExtension) -- see docs/cli.md.
   tan doctor --build
 
+  # Start your own project from a ready-made example, then build it. This is
+  # the customer path: `tan` is the whole command surface (ADR-0020), and
+  # `tan build` resolves the board from the project's own board.yaml -- there
+  # is no -b to pass. `tan examples` lists what you can start from.
+  tan init --from-example peripheral-io/uart-echo --name my-app
+  cd my-app && tan build
+
+  # SDK CONTRIBUTORS ONLY -- the SDK's own suite, run from this checkout. Not
+  # part of building your firmware.
   # Run the local test suite:
   bash scripts/test-all.sh
-
-  # Or jump straight into building an example:
-  west build -b native_sim/native/64 examples/peripheral-io/uart-echo \
-      -- -DEXTRA_ZEPHYR_MODULES=$PWD
 
 References:
   - docs/testing.md          -- full test-coverage map + how to run from scratch

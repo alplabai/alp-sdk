@@ -8,9 +8,9 @@
 # SAME source runs on every E1M family; the checks degrade
 # gracefully (ALP_ERR_NOSUPPORT) on a backend that lacks a probe.
 #
-# Customer workflow: copy this directory, change `som.sku` to
+# Customer workflow: `tan init --from-example bringup/board-selftest`, change `som.sku` to
 # your MPN, edit the `preset:` (or use an inline board) if you're on a non-EVK board,
-# and `west build`.  CMakeLists.txt invokes
+# and `tan build`.  CMakeLists.txt invokes
 # scripts/alp_project.py at configure time + layers the
 # generated alp.conf over prj.conf via EXTRA_CONF_FILE.
 som:

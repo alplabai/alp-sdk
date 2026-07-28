@@ -2,8 +2,8 @@
 #
 # Target: E1M-AEN401 (Alif Ensemble E4) M55-HP core.
 #
-# Customer workflow: copy this directory, change `som.sku` to your MPN,
-# and `west build -b alp_e1m_aen401_m55_hp/ae402fa0e5597le0/rtss_hp`.
+# Customer workflow: `tan init --from-example peripheral-io/usb-host-storage`, change `som.sku` to your MPN,
+# and `tan build`.
 #
 # USB host bring-up is bench-gated:
 #   - CONFIG_USB_HOST_STACK=y + CONFIG_UHC_XHCI_ALIF=y (in prj.conf)

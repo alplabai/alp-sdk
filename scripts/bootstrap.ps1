@@ -379,9 +379,13 @@ if (-not $NoPip) {
     # doctor / monitor, invoked as `python -m alp_cli <sub>` by `tan`) --
     # editable install, so a `git pull` in the checkout updates the backend
     # in place. `tan` itself is a separate Rust binary, installed
-    # separately -- see README.md for the tan-cli `install.sh` one-liner
-    # (or the `cargo install --path crates/tan-cli --locked` from-source
-    # alternative).
+    # separately:
+    #   irm https://raw.githubusercontent.com/alplabai/tan-cli/main/install.ps1 | iex
+    # The from-source alternative is `git clone https://github.com/alplabai/
+    # tan-cli; cd tan-cli; cargo install --path crates/tan-cli --locked`
+    # -- that path is relative to a TAN-CLI checkout, not to this one. This
+    # comment used to name `crates/tan-cli` alone, which does not exist in
+    # alp-sdk, so anyone who followed it from here got "no such directory".
     Write-Info "Installing the tan CLI's Python backend into the venv (pip install -e $PipEditableInstall)"
     & $Vpy -m pip install -q -e $PipEditableInstall
     if ($LASTEXITCODE -ne 0) { Write-Warn2 "alp_cli editable install reported a problem -- check manually" }
@@ -426,9 +430,13 @@ Write-EnvLines "  "
   # debug-readiness check (lldb, codeLLDBExtension) -- see docs/cli.md.
   tan doctor --build
 
-  # Or jump straight into building an example for real silicon:
-  west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he ``
-      examples\peripheral-io\uart-echo -- -DEXTRA_ZEPHYR_MODULES=$RepoRoot
+  # Start your own project from a ready-made example, then build it for real
+  # silicon. This is the customer path: ``tan`` is the whole command surface
+  # (ADR-0020), and ``tan build`` resolves the board from the project's own
+  # board.yaml -- there is no -b to pass. ``tan examples`` lists what you can
+  # start from.
+  tan init --from-example peripheral-io/uart-echo --name my-app
+  cd my-app; tan build
 
 References:
   - docs\cross-platform-setup.md  -- the full per-OS setup guide
