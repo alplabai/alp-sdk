@@ -37,16 +37,41 @@ SET="$SETOOLS_DIR"
 OBJ="$(bench_tool_prefix)" || exit $?
 JLINK="$(bench_jlink_exe)" || exit $?
 DEV="$JLINK_DEVICE_FLASH"
-# See ram-run.sh for why the selector is conditional on JLINK_SN. NOTE: unlike
-# flash-jlink-mramxip.sh, this script has no post-connect SW-DP ID gate before
-# writing MRAM -- the selector narrows probe choice but does not by itself
-# confirm the target board.
+# See ram-run.sh for why the selector is conditional on JLINK_SN.
 JLINK_ARGS=("$JLINK")
 [ -n "${JLINK_SN:-}" ] && JLINK_ARGS+=(-SelectEmuBySN "$JLINK_SN")
 NAME=$(basename "$BD")
 BIN="$BD/zephyr/zephyr.bin"
 ELF="$BD/zephyr/zephyr.elf"
 BUF=0x$($OBJ-nm "$ELF" | awk '/ ram_console_buf$/{print $1}')
+
+# 0. SAFETY GATE -- confirm we are talking to the AEN E8, not some other probe
+# on the bench, BEFORE any MRAM write. Same DPIDR gate as
+# flash-jlink-mramxip.sh (see that script for the full rationale): JLINK_SN
+# narrows probe choice but does not itself prove which board answered. Hard
+# ABORT, not a warning -- read-only connect first, no writes until confirmed.
+cat > /tmp/flowd-preflight.jlink <<EOF
+si SWD
+speed $JLINK_SPEED
+device $JLINK_DEVICE_READ
+connect
+exit
+EOF
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/flowd-preflight.jlink \
+  > /tmp/flowd-preflight.out 2>&1 || true
+if grep -qi "$GD32_DPIDR" /tmp/flowd-preflight.out; then
+  echo "!! ABORT: probe reports SW-DP IDR 0x$GD32_DPIDR -- that is the V2N-M1" >&2
+  echo "   GD32, NOT the AEN E8. Wrong probe selected (JLINK_SN='${JLINK_SN:-}')." >&2
+  echo "   Refusing to write MRAM. See /tmp/flowd-preflight.out." >&2
+  exit 4
+fi
+if ! grep -qi "$AEN_DPIDR" /tmp/flowd-preflight.out; then
+  echo "!! ABORT: expected AEN E8 SW-DP IDR 0x$AEN_DPIDR not seen on connect." >&2
+  echo "   Refusing to write MRAM -- check JLINK_SN / wiring / probe selection." >&2
+  cat /tmp/flowd-preflight.out >&2
+  exit 4
+fi
+echo ">>> DPIDR gate OK: probe confirmed AEN E8 (0x$AEN_DPIDR)" >&2
 
 # 1. stage the image + the per-app signed-ATOC config (same JSON flow-run.sh uses)
 cp -f "$BIN" "$SET/build/images/$NAME.bin"

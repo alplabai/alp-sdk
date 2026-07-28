@@ -123,6 +123,19 @@ export JLINK_SPEED="${JLINK_SPEED:-4000}"
 export JLINK_SN="${JLINK_SN:-${JLINK_SERIAL:-}}"
 
 # --------------------------------------------------------------------
+# DP-ID safety gate (Flow-D MRAM writers)
+# --------------------------------------------------------------------
+# This bench has TWO J-Links (the AEN E8 + the V2N-M1 GD32 bridge) that can
+# share OEM serial 603000869, differing only by USB path -- JLINK_SN narrows
+# probe choice but does not itself prove which board is on the other end. The
+# MRAM-writing helpers (flash-jlink.sh, flash-jlink-hp.sh,
+# flash-jlink-mramxip.sh) read the SW-DP IDR on connect and abort before any
+# write if it doesn't match AEN_DPIDR. BENCH-VERIFIED IDs, see
+# docs/aen-bench-bringup.md.
+export AEN_DPIDR="${AEN_DPIDR:-4C013477}"
+export GD32_DPIDR="${GD32_DPIDR:-0BE12477}"
+
+# --------------------------------------------------------------------
 # Tool resolution helpers
 # --------------------------------------------------------------------
 
