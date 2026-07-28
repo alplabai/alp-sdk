@@ -39,6 +39,21 @@ jobs:
         with:
           python-version: "3.x"
       - name: install emit deps
-        run: pip install jsonschema pyyaml
+        run: pip install jsonschema pyyaml pytest
+      # The comparator's own unit tests, BEFORE the live comparison it guards.
+      # These 11 ran in no workflow on either side: this job invoked only
+      # `seam1_field_diff.py` itself, and `test-all.sh`'s pytest stage is scoped
+      # to `tests/scripts/`, so `tests/parity/` was excluded from both. A gate
+      # whose comparator is unverified reports whatever that comparator happens
+      # to do -- and tan-cli#156 is the proof this is not theoretical: a
+      # tolerance there accepted a slice's `command` vanishing with NO warning,
+      # so seam 1 could go green on a silently dropped command.
+      #
+      # Ordered first on purpose. If the comparator is broken, the live diff
+      # below is not evidence of anything, and its result should not be the
+      # thing anyone reads.
+      - name: seam1 comparator unit tests
+        run: python3 -m pytest tests/parity/test_seam1_field_diff.py -q
+
       - name: seam1 field-diff (own emit vs frozen oracle)
         run: python3 tests/parity/seam1_field_diff.py --sdk . --oracle tests/parity/oracle
