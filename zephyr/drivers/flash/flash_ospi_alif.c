@@ -17,8 +17,9 @@
  * node (reg/aes-reg/cs-pin/rx-ds-delay/ddr-drive-edge/bus-speed) and calls
  * alif_hal_ospi_initialize() + alif_hal_ospi_xip_enable() ONCE at POST_KERNEL
  * -- exercising the controller-side register program (expected to complete
- * now that the OSPI0 clock-enable below has landed; bench A/B still pending,
- * see that block) and proving the two hal_alif entry points compile + link.
+ * now that the OSPI0 clock-enable below has landed and its gating mechanism
+ * is bench-measured, see that block) and proving the two hal_alif entry
+ * points compile + link.
  * It does NOT prove a live XiP read (no part on the bus) and does NOT
  * implement flash_driver_api (read/write/erase/SFDP) -- that is a larger
  * silicon-gated follow-up once a part is populated, not this batch.  See
@@ -37,7 +38,7 @@
  * ======================================================================
  *
  * ====== OSPI0 clock-enable (CLKCTL_PER_SLV->OSPI_CTRL) -- FIXES A
- * REPRODUCED BUS FAULT, ROOT CAUSE PER DFP, GATING SCOPE UNVERIFIED ======
+ * REPRODUCED BUS FAULT, ROOT CAUSE PER DFP, GATING SCOPE MEASURED ======
  * On AE822FA0E5597 (E8) the OSPI register window sits behind a per-instance
  * clock-enable gate that hal_alif's OSPI library never writes -- that library
  * targets parts without the gate.  Without it, alif_hal_ospi_initialize()'s
@@ -61,14 +62,30 @@
  *     (soc.h:2584) -> OSPI0 = bit 0 of 0x4902F03C
  *   - OSPI0_BASE 0x83000000 (rtss_he/soc.h:3778; rtss_hp/soc.h:3784, same base)
  *
- * UNVERIFIED (flag, not fact): the DFP does not say -- and no HW reference
- * manual text was available to check -- whether OSPI_CTRL bit 0 gates the APB
- * register interface specifically vs only the serial/functional clock.  This
- * fix follows the DFP's documented enable-before-touch ORDERING, which is
- * sufficient to explain and (pending bench) fix the observed bus fault, but
- * the exact gating mechanism is NOT independently confirmed.  Pending bench
- * A/B: read 0x83000018 with 0x4902F03C bit 0 clear (expect data abort), set
- * bit 0, read again (expect success).
+ * MEASURED 2026-07-28 (was UNVERIFIED -- the pending bench A/B below has now
+ * run): OSPI_CTRL bit 0 gates the APB register interface itself, not just the
+ * serial/functional clock. One held J-Link session on E1M-AEN801 / AE822
+ * M55-HE, verbatim:
+ *
+ *   J-Link>mem32 0x4902F03C,1
+ *   4902F03C = 00000000
+ *   J-Link>mem32 0x83000018,1
+ *   Could not read memory.
+ *   J-Link>w4 0x4902F03C, 0x00000001
+ *   Writing 00000001 -> 4902F03C
+ *   J-Link>mem32 0x83000018,1
+ *   83000018 = 00000000
+ *   J-Link>mem32 0x83000000,1
+ *   83000000 = 00C00407
+ *
+ * With CLKCTL_PER_SLV->OSPI_CTRL bit 0 clear, the debugger's own AHB-AP
+ * access to the OSPI register window (0x83000018, OSPI_TXFTLR -- the same
+ * offset that produced BFAR 0x83000018 above) aborts ("Could not read
+ * memory"); with the bit set, the identical read succeeds and a second
+ * register (0x83000000) also reads back cleanly. That confirms the APB-gating
+ * reading: the bit gates register-interface access, not merely the serial
+ * clock. This is narrower than "the fix works" (already known from the bus
+ * fault going away) -- it is now also known WHY.
  *
  * CORROBORATION: Alif_CMSIS/Source/Driver_OSPI.c:441 calls enable_ospi_clk()
  * in ARM_OSPI_PowerControl() immediately before ospi_set_tx_threshold(OSPI->regs,
@@ -76,15 +93,16 @@
  * BFAR 0x83000018 here.  Tighter than the ospi_xip/ospi_drv.c:305-307 citation
  * above (same file, same call site, same register); kept alongside it.
  *
- * COUNTER-EVIDENCE (weighed, not dismissed): zephyr/drivers/gpio/gpio_clk_alif.c:23-36
+ * COUNTER-EVIDENCE CITATION (kept for context, does NOT carry over now that
+ * OSPI_CTRL is independently measured above): zephyr/drivers/gpio/gpio_clk_alif.c:23-36
  * records that on this SAME SoC and this SAME CLKCTL_PER_SLV block,
- * GPIO_CTRL bit 16 (CKEN) was bench-measured NOT required for pad drive --
- * the one time this APB-vs-functional-clock question was actually measured
- * on AE822, the answer was "functional clock only".  That does not prove
- * OSPI_CTRL bit 0 behaves the same way -- it is cited here only as the
- * closest available data point against our hypothesis, not as proof of the
- * mechanism.  The fix is still right regardless: it mirrors the vendor's
- * documented ordering, independent of which clock the bit actually gates.
+ * GPIO_CTRL bit 16 (CKEN) was bench-measured NOT required for pad drive.
+ * That bit was inert for pad drive; the OSPI0 A/B above demonstrates
+ * OSPI_CTRL bit 0 is not inert -- it gates register access (AHB-AP read
+ * aborts with it clear, succeeds with it set). Different bit, different
+ * block function, different measured outcome -- the GPIO result was never
+ * proof for OSPI and is retained only as the prior data point the OSPI
+ * question was weighed against before its own bench A/B ran.
  *
  * aes-reg (0x83001000, ospi_hal.c:141) follows the same gate per the DFP
  * sequence -- no separate enable is written or expected.

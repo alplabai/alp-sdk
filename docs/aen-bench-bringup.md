@@ -149,8 +149,13 @@ same SWD link.
 
 ### Flow C — J-Link RAM-run (no MRAM write)
 
-The SoC `select`s XIP, so retarget the ROM region to ITCM in the app overlay —
-**use the path-reference form** (`<&itcm>` makes `FLASH_SIZE=0` → link overflow):
+The SoC `select`s XIP, so retarget the ROM region to ITCM — **as a bench-only
+overlay applied via `-DEXTRA_DTC_OVERLAY_FILE`, never by editing the app's own
+overlay** (the retarget is a bench concern; none of the six `aen-*` bench apps
+carries it in-tree). The shipped overlay,
+[`scripts/bench/aen/aen-flowc-itcm.overlay`](../scripts/bench/aen/aen-flowc-itcm.overlay),
+carries exactly this DTS — **use the path-reference form** (`<&itcm>` makes
+`FLASH_SIZE=0` → link overflow):
 
 ```dts
 / {
@@ -175,22 +180,31 @@ J-Link> go                                       # core is already at our reset 
 
 `<base>` is the app's link base, **not always `0x0`**: the overlay above only
 retargets the ROM *region* to ITCM, it does not reset a `prj.conf`'s own
-`CONFIG_FLASH_LOAD_OFFSET`. The retarget is really two independent settings and
-both matter:
+`CONFIG_FLASH_LOAD_OFFSET`. The retarget is really two independent, BOTH-required
+settings, each a committed artifact under `scripts/bench/aen/`:
 
-- the overlay's `zephyr,flash = &itcm;` (path-ref, not `<&itcm>`) +
-  `/delete-property/ zephyr,code-partition;`, which stops Zephyr from deriving
-  the link offset from a DT code-partition, **and**
-- a **second, Flow-C-only** conf fragment
+- the devicetree half — [`aen-flowc-itcm.overlay`](../scripts/bench/aen/aen-flowc-itcm.overlay)
+  (`zephyr,flash = &itcm;`, path-ref not `<&itcm>`, +
+  `/delete-property/ zephyr,code-partition;`), which stops Zephyr from deriving
+  the link offset from a DT code-partition, applied via
+  `-DEXTRA_DTC_OVERLAY_FILE`, **and**
+- the Kconfig half — a **Flow-C-only** conf fragment
   (`scripts/bench/aen/aen-flowc-itcm.conf`) that sets
   `CONFIG_USE_DT_CODE_PARTITION=n` **and** `CONFIG_FLASH_LOAD_OFFSET=0x0`, layered
   on top of the generic `scripts/bench/aen/aen-bench-shared.conf` (RAM-console
   observability + `CONFIG_DCACHE=n`, no link-offset override — that fragment is
   also used unmodified by Flow A/D, where overriding the link offset would be
-  wrong):
-  ```
-  -DEXTRA_CONF_FILE="scripts/bench/aen/aen-bench-shared.conf;scripts/bench/aen/aen-flowc-itcm.conf"
-  ```
+  wrong), applied via `-DEXTRA_CONF_FILE`.
+
+The conf half alone still links into MRAM (`CONFIG_FLASH_BASE_ADDRESS` stays
+`0x80000000`) — it only stops Zephyr *deriving* the offset from the DT
+code-partition; the overlay half is what moves the code-partition itself.
+Pass both together:
+```
+scripts/bench/aen/build.sh <app-dir> \
+    -DEXTRA_CONF_FILE="scripts/bench/aen/aen-bench-shared.conf;scripts/bench/aen/aen-flowc-itcm.conf" \
+    -DEXTRA_DTC_OVERLAY_FILE="scripts/bench/aen/aen-flowc-itcm.overlay"
+```
 
 Both `aen-flowc-itcm.conf` lines are needed because they undo two different
 things. `USE_DT_CODE_PARTITION=n` alone stops an app that *derives* its offset
@@ -207,11 +221,17 @@ conf instead —
 Flow C RAM-run must ALSO carry the explicit `CONFIG_FLASH_LOAD_OFFSET=0x0`
 override, since a later `EXTRA_CONF_FILE` fragment wins over both an app's
 `prj.conf` and its board-scoped conf. Confirm the real link base from
-the build (`readelf -l build/*/zephyr/zephyr.elf` — the first `LOAD` segment's
-`PhysAddr`), and pass that as `<base>` — `scripts/bench/aen/ram-run.sh` now
-derives it this way automatically instead of assuming `0x0`, and refuses to
+the build (`readelf -l build/*/zephyr/zephyr.elf` — the LOAD segment with the
+LOWEST `PhysAddr` among segments with a NONZERO `FileSiz`, **not** just the
+first LOAD segment: an ITCM-retargeted link's first LOAD segment is often a
+zero-FileSiz `.bss` segment in DTCM, and loading there corrupts live RAM), and
+pass that as `<base>` — `scripts/bench/aen/ram-run.sh` derives it this way
+automatically instead of assuming `0x0` or trusting segment order, refuses to
 run an ELF whose derived base is `>= 0x80000000` (slot0/MRAM-linked — Flow C
-cannot RAM-run that; rebuild with this retarget or use Flow D).
+cannot RAM-run that; rebuild with this retarget or use Flow D), and separately
+refuses (exit 6) any derived base that isn't `0x0`, the ITCM global alias
+(`0x50000000`/`0x58000000`), or SRAM (`0x02xxxxxx`) — a DTCM address slipping
+through is exactly the failure mode this whole section warns about.
 
 > **Reset caveat:** a J-Link reset asserts **SYSRESETREQ**, which reboots the
 > **SES** (not just the M55). Prefer `loadbin`/`go`; don't `reset` mid-loop.
