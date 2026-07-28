@@ -16,11 +16,13 @@
  * driver's init reads its `struct ospi_init` straight out of the devicetree
  * node (reg/aes-reg/cs-pin/rx-ds-delay/ddr-drive-edge/bus-speed) and calls
  * alif_hal_ospi_initialize() + alif_hal_ospi_xip_enable() ONCE at POST_KERNEL
- * -- proving the controller-side register program completes and the two
- * hal_alif entry points compile + link.  It does NOT prove a live XiP read
- * (no part on the bus) and does NOT implement flash_driver_api (read/write/
- * erase/SFDP) -- that is a larger silicon-gated follow-up once a part is
- * populated, not this batch.  See examples/aen/aen-ospi-regcheck, which
+ * -- exercising the controller-side register program (expected to complete
+ * now that the OSPI0 clock-enable below has landed; bench A/B still pending,
+ * see that block) and proving the two hal_alif entry points compile + link.
+ * It does NOT prove a live XiP read (no part on the bus) and does NOT
+ * implement flash_driver_api (read/write/erase/SFDP) -- that is a larger
+ * silicon-gated follow-up once a part is populated, not this batch.  See
+ * examples/aen/aen-ospi-regcheck, which
  * exercises the same two hal_alif calls directly from application code as an
  * independent compile+link+reachability proof.
  *
@@ -68,20 +70,46 @@
  * A/B: read 0x83000018 with 0x4902F03C bit 0 clear (expect data abort), set
  * bit 0, read again (expect success).
  *
+ * CORROBORATION: Alif_CMSIS/Source/Driver_OSPI.c:441 calls enable_ospi_clk()
+ * in ARM_OSPI_PowerControl() immediately before ospi_set_tx_threshold(OSPI->regs,
+ * ...) -- the identical first register touch whose OSPI_TXFTLR read produced
+ * BFAR 0x83000018 here.  Tighter than the ospi_xip/ospi_drv.c:305-307 citation
+ * above (same file, same call site, same register); kept alongside it.
+ *
+ * COUNTER-EVIDENCE (weighed, not dismissed): zephyr/drivers/gpio/gpio_clk_alif.c:23-36
+ * records that on this SAME SoC and this SAME CLKCTL_PER_SLV block,
+ * GPIO_CTRL bit 16 (CKEN) was bench-measured NOT required for pad drive --
+ * the one time this APB-vs-functional-clock question was actually measured
+ * on AE822, the answer was "functional clock only".  That does not prove
+ * OSPI_CTRL bit 0 behaves the same way -- it is cited here only as the
+ * closest available data point against our hypothesis, not as proof of the
+ * mechanism.  The fix is still right regardless: it mirrors the vendor's
+ * documented ordering, independent of which clock the bit actually gates.
+ *
  * aes-reg (0x83001000, ospi_hal.c:141) follows the same gate per the DFP
  * sequence -- no separate enable is written or expected.
  *
  * INSTANCE DERIVATION: computed from the DT reg address, not hardcoded --
- * OSPI0_BASE (0x83000000) maps to bit 0.  OSPI1_BASE was not sourced for
- * this fix (out of scope); if a second OSPI instance is ever bound at a
- * different base, look up OSPI1_BASE from the DFP before extending this map
- * instead of guessing the stride.
+ * both instances are DFP-sourced and mapped to their enable_ospi_clk()
+ * OSPI_INSTANCE bit (sys_ctrl_ospi.h:32-35, bit = drv_instance):
+ *   - OSPI0_BASE 0x83000000 (rtss_he/soc.h:3778, rtss_hp/soc.h:3784) -> bit 0
+ *   - OSPI1_BASE 0x83002000 (rtss_he/soc.h:3780, rtss_hp/soc.h:3786) -> bit 1
+ * No ospi1 DT node exists in-tree today (only ospi0 is declared in the fork
+ * e1.dtsi), so the second entry is currently unreachable -- kept anyway:
+ * an unrecognized-base skip previously reproduced the identical bus fault it
+ * was meant to avoid (see alif_ospi_clk_enable()), and unreachable-today is
+ * exactly how that class of bug survives.
  *
  * Applies core-agnostically: OSPI_CTRL is a system-level CLKCTL_PER_SLV
  * register, not per-core -- the write covers both alp_e1m_aen801_m55_he and
- * ..._m55_hp.  Written once in this driver's POST_KERNEL init, which also
- * covers aen-ospi-regcheck's direct alif_hal_ospi_initialize() call (both
- * paths run after this init has already executed).
+ * ..._m55_hp, which also means concurrent init on both cores races on this
+ * same register (sys_set_bit() is a plain non-atomic read-modify-write,
+ * sys_bitops.h:24-29).  The DFP's own enable_ospi_clk() has the identical
+ * hazard, so this mirrors the vendor's sequence rather than introducing a
+ * new race -- not fixed here; deviating from that sequence is out of scope.
+ * Written once in this driver's POST_KERNEL init, which also covers
+ * aen-ospi-regcheck's direct alif_hal_ospi_initialize() call (both paths run
+ * after this init has already executed).
  * ===================================================================
  */
 
@@ -94,7 +122,6 @@
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
-#include <zephyr/sys/sys_io.h>
 
 #include <ospi_hal.h>
 
@@ -119,29 +146,43 @@ struct ospi_alif_data {
  * full DFP citation chain (soc.h:3763 base + soc.h:2584 offset). */
 #define ALIF_CLKCTL_OSPI_CTRL 0x4902F03Cu
 
-/* OSPI0's own reg base (rtss_he/soc.h:3778, rtss_hp/soc.h:3784 -- same
- * value).  OSPI1_BASE is not sourced for this fix; see the header note. */
-#define ALIF_OSPI0_BASE 0x83000000u
+/* OSPI reg bases, mapped to their CLKCTL_PER_SLV->OSPI_CTRL enable bit per
+ * the DFP's enable_ospi_clk()/OSPI_INSTANCE enum (sys_ctrl_ospi.h:32-35,
+ * bit = drv_instance); see the header note for the full citation chain and
+ * why OSPI1 is currently unreachable (no ospi1 DT node in-tree). */
+#define ALIF_OSPI0_BASE 0x83000000u /* rtss_he/soc.h:3778, rtss_hp/soc.h:3784 -- bit 0 */
+#define ALIF_OSPI1_BASE 0x83002000u /* rtss_he/soc.h:3780, rtss_hp/soc.h:3786 -- bit 1 */
 
 /*
  * Enable the CLKCTL_PER_SLV->OSPI_CTRL clock-gate bit for the OSPI instance
  * at base_regs, per the DFP's documented enable_ospi_clk()/sys_ctrl_ospi.h
  * sequence: CLKCTL_PER_SLV->OSPI_CTRL |= (1 << drv_instance).  Derived from
- * the reg address rather than hardcoded, but only OSPI0 is currently
- * resolvable (see the header note on OSPI1_BASE); an unrecognized base skips
- * the write rather than guessing a bit.
+ * the reg address rather than hardcoded.  Returns -ENOTSUP on an
+ * unrecognized base instead of silently skipping the write: skipping it
+ * does not soften anything -- alif_hal_ospi_initialize() then walks
+ * straight into the same first register touch that bus-faults without the
+ * clock-enable, only now with the one explanatory LOG_WRN likely lost to
+ * deferred-logging before the fault.  The caller turns this into a
+ * device_is_ready()-visible init failure instead.
  */
-static void alif_ospi_clk_enable(uint32_t base_regs)
+static int alif_ospi_clk_enable(uint32_t base_regs)
 {
-	if (base_regs != ALIF_OSPI0_BASE) {
-		LOG_WRN("ospi clk-enable: unrecognized OSPI base 0x%08x (only OSPI0 0x%08x "
-			"is DFP-cited for this fix); skipping clock-enable write -- register "
-			"access may bus-fault",
-			base_regs, ALIF_OSPI0_BASE);
-		return;
+	unsigned int bit;
+
+	if (base_regs == ALIF_OSPI0_BASE) {
+		bit = 0;
+	} else if (base_regs == ALIF_OSPI1_BASE) {
+		bit = 1;
+	} else {
+		LOG_WRN("ospi clk-enable: unrecognized OSPI base 0x%08x (only OSPI0 0x%08x / "
+			"OSPI1 0x%08x are DFP-cited for this fix); refusing to touch OSPI "
+			"registers -- they would bus-fault",
+			base_regs, ALIF_OSPI0_BASE, ALIF_OSPI1_BASE);
+		return -ENOTSUP;
 	}
 
-	sys_set_bit(ALIF_CLKCTL_OSPI_CTRL, 0);
+	sys_set_bit(ALIF_CLKCTL_OSPI_CTRL, bit);
+	return 0;
 }
 
 static int ospi_alif_init(const struct device *dev)
@@ -160,10 +201,14 @@ static int ospi_alif_init(const struct device *dev)
 		.xip_wait_cycles = config->xip_wait_cycles,
 	};
 	int32_t rc;
+	int     clk_rc;
 
 	/* Must happen before the first OSPI register touch inside
 	 * alif_hal_ospi_initialize() -- see the file-header provenance block. */
-	alif_ospi_clk_enable((uint32_t)config->base_regs);
+	clk_rc = alif_ospi_clk_enable((uint32_t)config->base_regs);
+	if (clk_rc != 0) {
+		return clk_rc;
+	}
 
 	rc = alif_hal_ospi_initialize(&data->handle, &init_cfg);
 	if (rc != OSPI_ERR_NONE) {

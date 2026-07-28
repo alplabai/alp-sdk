@@ -103,15 +103,21 @@ int main(void)
 	 * Step 3: the flash_ospi_alif.c driver TU is always built under this
 	 * app's prj.conf (CONFIG_OSPI_ALIF=y), so DEVICE_DT_GET is safe here --
 	 * unlike aen-isp-regcheck, there is no link-blocked driver TU on this
-	 * batch.  ospi_alif_init() does NOT return 0 unconditionally: on E8
-	 * silicon its first register touch used to bus-fault (BFAR 0x83000018,
-	 * the OSPI0 register window is clock-gated on this part and hal_alif's
-	 * OSPI library never wrote the enable) before it could reach
-	 * alif_hal_ospi_initialize() at all.  The driver now writes that
-	 * clock-enable first (CLKCTL_PER_SLV->OSPI_CTRL bit 0, per the DFP's
-	 * documented sequence -- see the driver's file header), after which
-	 * alif_hal_ospi_initialize() succeeds and a non-zero
-	 * alif_hal_ospi_xip_enable() rc is logged but not fatal to init.
+	 * batch.  ospi_alif_init() does NOT return 0 unconditionally: on a build
+	 * without the clock-enable, its first register touch faults on E8
+	 * silicon (BFAR 0x83000018 -- the OSPI0 register window is clock-gated
+	 * on this part and hal_alif's OSPI library never wrote the enable)
+	 * before it could reach alif_hal_ospi_initialize() at all.  A bus fault
+	 * never returns, though, so it is not what makes device_is_ready() read
+	 * false below -- that is the driver's own `return -EIO`
+	 * (flash_ospi_alif.c) on a nonzero alif_hal_ospi_initialize() rc.  The
+	 * driver now writes the clock-enable first (CLKCTL_PER_SLV->OSPI_CTRL
+	 * bit 0, per the DFP's documented sequence -- see the driver's file
+	 * header), which is EXPECTED to make alif_hal_ospi_initialize() succeed
+	 * -- bench A/B on this fix is still pending (no HW run yet); the driver
+	 * header carries the authoritative UNVERIFIED flag.  A non-zero
+	 * alif_hal_ospi_xip_enable() rc is logged but not fatal to init either
+	 * way.
 	 */
 	const struct device *ospi_dev = DEVICE_DT_GET(OSPI_NODE);
 
