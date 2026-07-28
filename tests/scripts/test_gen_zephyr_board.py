@@ -36,6 +36,27 @@ sys.path.insert(0, str(REPO / "scripts"))
 from gen_zephyr_board import emit_zephyr_board  # noqa: E402
 
 BOARDS_ROOT = REPO / "zephyr" / "boards" / "alp"
+
+# Files that live in a generated board directory but are HAND-MAINTAINED, so
+# `--emit zephyr-board` is not expected to write them.
+#
+# Everything else in that directory must round-trip byte-for-byte -- that is the
+# whole point of this test, and the reason board files are generated from YAML
+# rather than edited in place. So this set is an EXEMPTION LIST, not a
+# convenience: a file added here stops being checked at all, and a generated
+# file that quietly lands in it would drift forever with nothing red.
+#
+#   board.cmake  -- the runner/flash wiring, hand-written per board.
+#   Kconfig      -- selects the custom E8 MPU region table. Zephyr's
+#                   hwm_v2.cmake unconditionally osources a bare `Kconfig` in a
+#                   board directory whether or not it exists, which is what lets
+#                   a hand-maintained file survive regeneration here exactly as
+#                   board.cmake does. Its own header says so; the GENERATED
+#                   Kconfig files in the same directory are named
+#                   `Kconfig.<board>` / `Kconfig.defconfig` and carry
+#                   "DO NOT EDIT BY HAND", so the two are distinguishable by
+#                   name rather than by convention.
+HAND_MAINTAINED = frozenset({"board.cmake", "Kconfig"})
 METADATA_ROOT = REPO / "metadata"
 
 
@@ -118,7 +139,7 @@ class TestZephyrBoardCli(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             committed_dir = BOARDS_ROOT / "e1m_aen801_m55_he"
             for committed_file in committed_dir.iterdir():
-                if committed_file.name == "board.cmake":
+                if committed_file.name in HAND_MAINTAINED:
                     continue
                 generated_file = out_dir / committed_file.name
                 self.assertTrue(generated_file.is_file(),
