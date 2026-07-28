@@ -23,7 +23,7 @@
  * No alp-uart0 alias: src/main.c never calls alp_uart_open() (console
  * output goes through printf/Zephyr's own console), and the E1M edge
  * "UART0" signal is wired to Alif UART5 (see
- * alp_e1m_aen801_m55_he-pinctrl.dtsi's pinctrl_uart5), not the SoC's
+ * alp_e1m_aen801_m55_hp-pinctrl.dtsi's pinctrl_uart5), not the SoC's
  * own uart0 block -- there is no pinctrl group for uart0 on this
  * carrier.  Enabling it would need status="okay" to satisfy
  * DEVICE_DT_GET (src/backends/uart/zephyr_drv.c resolves every
@@ -45,8 +45,8 @@
  * unconditionally at compile time, so both controllers are enabled
  * below or the build fails the same way i2c0/uart0 did.
  *
- * The authoritative alp_e1m_aen801_m55_he board file ships in-tree at
- * zephyr/boards/alp/e1m_aen801_m55_he/; this overlay only re-aliases
+ * The authoritative alp_e1m_aen801_m55_hp board file ships in-tree at
+ * zephyr/boards/alp/e1m_aen801_m55_hp/; this overlay only re-aliases
  * what that board exposes.  The HW-in-loop scenario stays parked
  * pending twister CI wiring (see testcase.yaml).
  */
@@ -145,7 +145,7 @@
 /*
  * NOTE -- gpio bank/pin numbers in the gpios property above are
  * PLACEHOLDERS.  The authoritative mapping lands when the
- * alp_e1m_aen801_m55_he board file (zephyr/boards/alp/e1m_aen801_m55_he/)
+ * alp_e1m_aen801_m55_hp board file (zephyr/boards/alp/e1m_aen801_m55_hp/)
  * grows a pinctrl group naming the exact gpio bank/index for each
  * EVK net (RGB LED on the PWM pads, encoder switch).  The POSITIONAL
  * INDEX (the [NN] in each comment) is the stable ABI; only the

@@ -168,10 +168,50 @@ it) + the flow-B RAM console. Build with both module paths
 ```
 JLinkExe -device Cortex-M55 -if SWD -speed 4000 -nogui 1   # GENERIC device
 J-Link> halt
-J-Link> loadbin build/zephyr/zephyr.bin 0x0   # loadbin's implicit reset re-reads
-J-Link> halt                                  # our freshly-loaded ITCM vectors:
-J-Link> go                                    # core is already at our reset handler
+J-Link> loadbin build/zephyr/zephyr.bin <base>   # loadbin's implicit reset re-reads
+J-Link> halt                                     # our freshly-loaded ITCM vectors:
+J-Link> go                                       # core is already at our reset handler
 ```
+
+`<base>` is the app's link base, **not always `0x0`**: the overlay above only
+retargets the ROM *region* to ITCM, it does not reset a `prj.conf`'s own
+`CONFIG_FLASH_LOAD_OFFSET`. The retarget is really two independent settings and
+both matter:
+
+- the overlay's `zephyr,flash = &itcm;` (path-ref, not `<&itcm>`) +
+  `/delete-property/ zephyr,code-partition;`, which stops Zephyr from deriving
+  the link offset from a DT code-partition, **and**
+- a **second, Flow-C-only** conf fragment
+  (`scripts/bench/aen/aen-flowc-itcm.conf`) that sets
+  `CONFIG_USE_DT_CODE_PARTITION=n` **and** `CONFIG_FLASH_LOAD_OFFSET=0x0`, layered
+  on top of the generic `scripts/bench/aen/aen-bench-shared.conf` (RAM-console
+  observability + `CONFIG_DCACHE=n`, no link-offset override — that fragment is
+  also used unmodified by Flow A/D, where overriding the link offset would be
+  wrong):
+  ```
+  -DEXTRA_CONF_FILE="scripts/bench/aen/aen-bench-shared.conf;scripts/bench/aen/aen-flowc-itcm.conf"
+  ```
+
+Both `aen-flowc-itcm.conf` lines are needed because they undo two different
+things. `USE_DT_CODE_PARTITION=n` alone stops an app that *derives* its offset
+from the DT code-partition, but it does **not** touch a hard-coded literal
+`CONFIG_FLASH_LOAD_OFFSET=0x10000`. Seven examples hard-code that offset for
+their normal slot0 boot and must keep it — do NOT remove it from these files:
+the five `aen-cc3501e-*` apps (`aen-cc3501e-ble-gatt`, `aen-cc3501e-bringup`,
+`aen-cc3501e-companion-tour`, `aen-cc3501e-gatt-register`, `aen-cc3501e-gpio`)
+and `aen-eeprom-manifest`, all via their own `prj.conf`, plus
+`examples/peripheral-io/alp-console`, which sets it via a **BOARD-scoped**
+conf instead —
+`boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.conf`
+(see `examples/peripheral-io/alp-console/README.md`). For any of these, a
+Flow C RAM-run must ALSO carry the explicit `CONFIG_FLASH_LOAD_OFFSET=0x0`
+override, since a later `EXTRA_CONF_FILE` fragment wins over both an app's
+`prj.conf` and its board-scoped conf. Confirm the real link base from
+the build (`readelf -l build/*/zephyr/zephyr.elf` — the first `LOAD` segment's
+`PhysAddr`), and pass that as `<base>` — `scripts/bench/aen/ram-run.sh` now
+derives it this way automatically instead of assuming `0x0`, and refuses to
+run an ELF whose derived base is `>= 0x80000000` (slot0/MRAM-linked — Flow C
+cannot RAM-run that; rebuild with this retarget or use Flow D).
 
 > **Reset caveat:** a J-Link reset asserts **SYSRESETREQ**, which reboots the
 > **SES** (not just the M55). Prefer `loadbin`/`go`; don't `reset` mid-loop.

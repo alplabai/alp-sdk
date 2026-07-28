@@ -11,6 +11,14 @@
 #     setpc <entry> + go (loadbin alone does NOT reliably enter our vectors).
 #   - optional preload file: extra JLink commands run AFTER halt, BEFORE loadbin
 #     (e.g. clear a SoC integration reg for the cold-RAM-run gotcha).
+#   - the load address is DERIVED from the ELF's first LOAD segment p_paddr
+#     (readelf -l), not hard-coded 0x0 -- an app that hard-codes
+#     CONFIG_FLASH_LOAD_OFFSET (e.g. the slot0 offset 0x10000) still links
+#     correctly at a non-zero ITCM address and must be loaded there. If the
+#     derived base is >= 0x80000000 the image is slot0/MRAM-linked and Flow C
+#     cannot run it (loading it at its resident address just re-enters the
+#     already-resident MRAM image, not the freshly built one) -- refuse rather
+#     than silently mis-run it.
 set -e
 
 # shellcheck source=scripts/bench/aen/bench-env.sh
@@ -37,22 +45,45 @@ if [ -z "$BUF_SYM" ]; then
 	cat >&2 <<-EOF
 	ram-run: '$ELF' has no 'ram_console_buf' symbol -- this app was built
 	         with the UART console, which Flow C cannot capture.
-	         Rebuild it with the RAM console layered on top:
+	         Rebuild it with the RAM console AND the Flow C link-offset
+	         override layered on top (both fragments, in this order):
 	             scripts/bench/aen/build.sh <app-dir> \
-	                 -DEXTRA_CONF_FILE=$ALP_SDK_DIR/scripts/bench/aen/aen-bench-shared.conf
-	         (that fragment sets CONFIG_RAM_CONSOLE=y + CONFIG_UART_CONSOLE=n).
+	                 -DEXTRA_CONF_FILE="$ALP_SDK_DIR/scripts/bench/aen/aen-bench-shared.conf;$ALP_SDK_DIR/scripts/bench/aen/aen-flowc-itcm.conf"
+	         (aen-bench-shared.conf sets CONFIG_RAM_CONSOLE=y +
+	         CONFIG_UART_CONSOLE=n; aen-flowc-itcm.conf sets
+	         CONFIG_USE_DT_CODE_PARTITION=n + CONFIG_FLASH_LOAD_OFFSET=0x0 --
+	         Flow-C-only, do not use it for a Flow A/D MRAM build).
 	         The app itself is unchanged -- its committed prj.conf keeps the
 	         customer-facing UART console.
 	EOF
 	exit 3
 fi
 BUF=0x$BUF_SYM
+
+BASE_RAW=$($OBJ-readelf -l "$ELF" | awk '/^[[:space:]]*LOAD[[:space:]]/{print $4; exit}')
+if [ -z "$BASE_RAW" ]; then
+	echo "ram-run: could not find a LOAD segment in '$ELF' -- can't derive the load address." >&2
+	exit 4
+fi
+BASE=$(printf '0x%X' "$BASE_RAW")
+if (( BASE_RAW >= 0x80000000 )); then
+	cat >&2 <<-EOF
+	ram-run: '$ELF' is slot0/MRAM-linked (first LOAD segment at $BASE) --
+	         Flow C cannot RAM-run this: loading it at its resident address
+	         just re-enters the ALREADY-RESIDENT MRAM image, not the freshly
+	         built one, and JLinkExe will not warn you. Rebuild with the
+	         ITCM retarget (see docs/aen-bench-bringup.md, Flow C) or use
+	         Flow D (scripts/bench/aen/flash-jlink-mramxip.sh).
+	EOF
+	exit 5
+fi
+
 SCRIPT=$(mktemp /tmp/jlink.XXXX.jlink)
 {
   echo connect
   echo halt
   [ -n "$PRELOAD" ] && cat "$PRELOAD"
-  echo "loadbin $BIN 0x0"
+  echo "loadbin $BIN $BASE"
   echo "setpc $ENTRY"
   echo go
   echo "Sleep $SLEEP"
@@ -60,7 +91,7 @@ SCRIPT=$(mktemp /tmp/jlink.XXXX.jlink)
   echo "mem8 $BUF, $SIZE"
   echo qc
 } > "$SCRIPT"
-echo ">>> RAM-run $(basename "$BD")  entry=$ENTRY  ram_console_buf=$BUF  sleep=${SLEEP}ms" >&2
+echo ">>> RAM-run $(basename "$BD")  entry=$ENTRY  base=$BASE  ram_console_buf=$BUF  sleep=${SLEEP}ms" >&2
 $JLINK -device "$JLINK_DEVICE_READ" -if SWD -speed "$JLINK_SPEED" -nogui 1 -CommanderScript "$SCRIPT" 2>/tmp/jlink.err > /tmp/jlink.out || true
 echo "----- RAM console (decoded) -----"
 # Decode the 'ADDR = HH HH ...' mem8 lines into ASCII; stop at first NUL run.

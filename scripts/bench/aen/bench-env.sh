@@ -78,6 +78,11 @@ export HAL_ALIF_DIR
 # --------------------------------------------------------------------
 # Board target (the lead part: AEN801 / E8 / M55-HE, RTSS-HE)
 # --------------------------------------------------------------------
+# HAZARD: build.sh uses this default unconditionally. An app whose overlay is
+# qualified for a DIFFERENT board target (e.g. an M55-HP-qualified overlay
+# like examples/aen/edgeai-vision-aen) would silently build with no overlay
+# applied under this default -- the same class of bug the HP-qualified rename
+# just fixed there. Not yet exercised (edgeai-vision-aen isn't in apps.txt).
 export AEN_BOARD="${AEN_BOARD:-alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he}"
 
 # --------------------------------------------------------------------

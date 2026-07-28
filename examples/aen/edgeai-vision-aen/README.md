@@ -42,7 +42,7 @@ RPi CSI │  (e.g. ARX3A0    │ →  │  (vsi,       │ →  │  inference  
 
 | Version | Status   | What works                                                                                                |
 |---------|----------|-----------------------------------------------------------------------------------------------------------|
-| v0.1    | skeleton | Compiles under `native_sim/native/64` and on the EVK (`alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he`, in-tree).  Init flow is real (I²C, OLED, IMU init); camera + Ethos-U inference are stubbed. |
+| v0.1    | skeleton | Compiles under `native_sim/native/64` and on the EVK (`alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp`, in-tree).  Init flow is real (I²C, OLED, IMU init); camera + Ethos-U inference are stubbed. |
 | v0.2    | target   | Real ARX3A0 (ON Semi MIPI sensor) capture via `<alp/camera.h>`, Vela-compiled MobileNetV2 inference on Ethos-U55-HP, results overlay on OLED. **Acceptance ≥ 10 fps.** |
 
 The full pipeline is the v0.2 [EdgeAI Application Example](../../../VERSIONS.md#v020--richer-blocks--v2n-intro--6-weeks-after-v01)
@@ -57,7 +57,7 @@ edgeai-vision-aen/
 ├── prj.conf                      # SDK + chips + camera + math toggles
 ├── testcase.yaml                 # twister: compile under native_sim
 ├── boards/
-│   ├── alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay
+│   ├── alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay
 │   │                                    # EVK pinout + camera/display routing
 │   │                                    # (fully-qualified board id -- Zephyr
 │   │                                    # only auto-applies a boards/<name>
@@ -85,10 +85,10 @@ and which v0.2 stubs it skipped.
 ## Build (v0.1+, on the EVK)
 
 The board file ships in-tree at
-[`zephyr/boards/alp/e1m_aen801_m55_he/`](../../../zephyr/boards/alp/e1m_aen801_m55_he/):
+[`zephyr/boards/alp/e1m_aen801_m55_hp/`](../../../zephyr/boards/alp/e1m_aen801_m55_hp/):
 
 ```bash
-west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he .
+west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp .
 west flash
 ```
 

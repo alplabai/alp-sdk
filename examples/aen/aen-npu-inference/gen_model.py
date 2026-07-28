@@ -170,6 +170,8 @@ def main() -> int:
 
 	if shutil.which(args.vela) is None and not os.path.isfile(args.vela):
 		print("ERROR: vela not found at", args.vela, file=sys.stderr)
+		print("       point at your vela install with "
+		      "-DAEN_NPU_VELA=<path-to-vela> (west build ...)", file=sys.stderr)
 		return 2
 
 	name = args.name or os.path.splitext(os.path.basename(args.model))[0]

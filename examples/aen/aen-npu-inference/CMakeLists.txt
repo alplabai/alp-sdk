@@ -39,8 +39,22 @@ project(aen_npu_inference LANGUAGES C CXX)
 # -DAEN_NPU_MODEL=<path> on the command line to point at a larger REAL int8
 # model (e.g. a person-detect / mobilenet) once one is staged in-tree; the
 # RESULT contract in main.c is model-agnostic.
-set(AEN_NPU_VELA   "${CMAKE_CURRENT_SOURCE_DIR}/../../../.venv-vela/bin/vela"
-    CACHE FILEPATH "Path to the Vela compiler executable")
+#
+# Vela default: prefer `vela` on PATH (a venv the user has activated, a
+# system install, ...); fall back to the in-tree .venv-vela only if PATH has
+# nothing.  That fallback assumes a venv location relative to the SOURCE
+# tree, which does not exist in every checkout (e.g. a git worktree) -- so
+# it is a fallback, not the primary lookup.  -DAEN_NPU_VELA=<path> always
+# wins over both (CACHE set here is a no-op once the var is already defined
+# on the command line).
+find_program(_aen_npu_vela_on_path vela)
+if(_aen_npu_vela_on_path)
+    set(_aen_npu_vela_default ${_aen_npu_vela_on_path})
+else()
+    set(_aen_npu_vela_default "${CMAKE_CURRENT_SOURCE_DIR}/../../../.venv-vela/bin/vela")
+endif()
+set(AEN_NPU_VELA   "${_aen_npu_vela_default}"
+    CACHE FILEPATH "Path to the Vela compiler executable (defaults to `vela` on PATH, else the in-tree .venv-vela)")
 set(AEN_NPU_ACCEL  "ethos-u85-256"
     CACHE STRING   "Vela --accelerator-config (the AEN801 U85 is 256-MAC)")
 set(AEN_NPU_MODEL  "${CMAKE_CURRENT_SOURCE_DIR}/../../../tests/fixtures/models/tiny_int8.tflite"

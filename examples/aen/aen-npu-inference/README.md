@@ -38,7 +38,7 @@ west build -p always \
 
 | Var | Purpose |
 | --- | --- |
-| `AEN_NPU_VELA` | Vela executable (default: the `.venv-vela/bin/vela` scratch env). |
+| `AEN_NPU_VELA` | Vela executable (default: `vela` on `PATH`, falling back to the in-tree `.venv-vela/bin/vela` if `PATH` has none). |
 | `AEN_NPU_VELA_CONFIG` | **Alif-proprietary** `ensemble_vela.ini` — see *Vela system-config injection*. |
 | `AEN_NPU_MODEL` | Input `.tflite` (default: the repo `tiny_int8.tflite` fixture). |
 | `AEN_NPU_MODEL_NAME` | Embedded model identity string printed on the `RESULT` line. |
