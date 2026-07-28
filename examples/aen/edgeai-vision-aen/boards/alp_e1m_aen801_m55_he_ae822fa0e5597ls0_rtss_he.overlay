@@ -35,9 +35,11 @@
  * it by the E1M GPIO index, so entry N is E1M pad N in the
  * e1m_pinout.h canonical order (IO0..IO25 = 0..25, PWM0..PWM7 =
  * 26..33, ...).  The EVK's RGB LED sits on PWM pads, so the status
- * LED is driven through a pad's GPIO-secondary index (ALP_E1M_GPIO_PWM3).
- * This overlay covers indices 0..29 -- enough for the two pads this
- * demo touches (encoder switch at [4], RGB-red LED at [29]).  gpio0/
+ * LED is driven through a pad's GPIO-secondary index (ALP_E1M_GPIO_PWM0
+ * -- bench-measured 2026-07-28; PWM0, not PWM3, is red, see
+ * metadata/boards/e1m-evk.yaml).  This overlay covers indices 0..29 --
+ * enough for the two pads this demo touches (encoder switch at [4],
+ * RGB-red LED at [26]).  gpio0/
  * gpio1 are disabled by default in the SoC dtsi; GPIO_DT_SPEC_GET_BY_IDX
  * (src/backends/gpio/zephyr_drv.c) resolves every entry in this array
  * unconditionally at compile time, so both controllers are enabled
@@ -133,10 +135,10 @@
                 <&gpio0 23 GPIO_ACTIVE_HIGH>,                            /* [23] ALP_E1M_GPIO_IO23 (unrouted placeholder) */
                 <&gpio0 24 GPIO_ACTIVE_HIGH>,                            /* [24] ALP_E1M_GPIO_IO24 (unrouted placeholder) */
                 <&gpio0 25 GPIO_ACTIVE_HIGH>,                            /* [25] ALP_E1M_GPIO_IO25 (unrouted placeholder) */
-                <&gpio0 26 GPIO_ACTIVE_HIGH>,                            /* [26] ALP_E1M_GPIO_PWM0 -- RGB LED green pad as GPIO */
+                <&gpio0 26 GPIO_ACTIVE_HIGH>,                            /* [26] ALP_E1M_GPIO_PWM0 -- EVK_PIN_LED_RED (RGB-red pad as GPIO) */
                 <&gpio0 27 GPIO_ACTIVE_HIGH>,                            /* [27] ALP_E1M_GPIO_PWM1 -- RGB LED blue pad as GPIO */
                 <&gpio0 28 GPIO_ACTIVE_HIGH>,                            /* [28] ALP_E1M_GPIO_PWM2 (unrouted placeholder) */
-                <&gpio1  1 GPIO_ACTIVE_HIGH>;                            /* [29] ALP_E1M_GPIO_PWM3 -- EVK_PIN_LED_RED (RGB-red pad as GPIO) */
+                <&gpio1  1 GPIO_ACTIVE_HIGH>;                            /* [29] ALP_E1M_GPIO_PWM3 -- RGB LED green pad as GPIO (unused here) */
     };
 };
 

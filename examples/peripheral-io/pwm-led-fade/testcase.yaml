@@ -5,7 +5,7 @@ sample:
   description: |
     Per-peripheral example for <alp/pwm.h>.  Fades the board's green
     LED on BOARD_PWM_LED_GREEN.  Builds on both EVKs: E1M EVK uses
-    E1M_PWM0; E1M-X EVK uses E1M_X_PWM7.  On native_sim there's no
+    E1M_PWM3; E1M-X EVK uses E1M_X_PWM7.  On native_sim there's no
     PWM emul controller so the example prints the alp_last_error()
     diagnostic and exits -- proves the open / last_error / close path works.
 

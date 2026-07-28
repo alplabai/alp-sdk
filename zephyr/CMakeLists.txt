@@ -55,6 +55,19 @@ zephyr_sources_ifdef(CONFIG_DMA_ALIF_EVENT_ROUTER
 zephyr_sources_ifdef(CONFIG_DMA_PL330_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/dma/dma_alif_boot_latch.c)
 
+# Tier-1.5 glue: AE822 (E8) DW GPIO functional-clock enable (CLKCTL_PER_SLV->
+# GPIO_CTRL[n] bit 16) -- nothing in upstream gpio_dw or Zephyr's Alif SoC layer
+# writes it, so an enabled port's APB registers respond but the pad never
+# physically moves.  E7 has no such gate (SOC_FEAT_GPIO_HAS_CLOCK_ENABLE=0 in
+# the DFP), hence the CONFIG_SOC_SERIES_E8 gate below rather than the whole
+# Ensemble family.  Needed for any Ensemble-E8 build that uses a DW GPIO port,
+# not just alp-feature builds, so this is applied before the CONFIG_ALP_SDK
+# early-return (the soc-bridge / MRAM-flash precedent above).
+if(CONFIG_SOC_SERIES_E8)
+    zephyr_sources_ifdef(CONFIG_GPIO_DW
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/gpio/gpio_clk_alif.c)
+endif()
+
 if(NOT CONFIG_ALP_SDK)
     return()
 endif()

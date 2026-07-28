@@ -167,6 +167,83 @@
 		status = "disabled";
 	};
 
+	/*
+	 * GPIO11..GPIO14 -- the ports this dtsi used to stop short of.
+	 *
+	 * The omission was not harmless.  The pinctrl bindings already
+	 * define GPIO alt-0 for these pads (`PIN_P12_6__GPIO` /
+	 * `PIN_P12_7__GPIO`, alif-ensemble-pinctrl.h:1177,1186), and the
+	 * E1M-EVK routes point the RGB LED's GREEN and BLUE channels at
+	 * P12_7 / P12_6 (`EVK_PIN_LED_GREEN` = ALP_E1M_GPIO_PWM0,
+	 * `EVK_PIN_LED_BLUE` = ALP_E1M_GPIO_PWM1, metadata/boards/
+	 * e1m-evk.yaml).  With no controller node above gpio10, those two
+	 * routes resolved to nothing: `alp_gpio_open()` could not reach a
+	 * port, so two of the three RGB channels were undriveable through
+	 * the portable API while looking perfectly well-formed in the
+	 * routes header.  Measured on an E1M-AEN801 r1 bench board
+	 * 2026-07-28: only the red channel (P2_4 -> gpio2) could be
+	 * driven at all.
+	 *
+	 * reg + interrupts transcribed from the Alif DFP for THIS part,
+	 * AE822FA0E5597 (Device/soc/AE822FA0E5597/include/rtss_he/soc.h):
+	 * GPIO11_BASE 0x4900B000 :3714, GPIO12_BASE 0x4900C000 :3715,
+	 * GPIO13_BASE 0x4900D000 :3716, GPIO14_BASE 0x4900E000 :3717;
+	 * IRQs GPIO11_IRQ0..7 = 267..274 (:367-374), GPIO12_IRQ0..7 =
+	 * 275..282 (:375-382), GPIO13_IRQ0..7 = 283..290 (:383-390),
+	 * GPIO14_IRQ0..7 = 291..298 (:391-398).  Priority 3 matches every
+	 * other node in this overlay.  No value here is inferred from the
+	 * gpio10 pattern -- each was read from the DFP enum.
+	 *
+	 * vendor-ext, BENCH-UNVERIFIED: the nodes are DFP-grounded but no
+	 * pad on ports 11..14 has been driven on silicon yet (the bench
+	 * run that found the gap could not, precisely because these nodes
+	 * were missing).  Driving P12_7 / P12_6 is the first thing that
+	 * will exercise them.
+	 */
+	gpio11: gpio@4900b000 {
+		compatible = "snps,designware-gpio";
+		reg = <0x4900b000 0x1000>;
+		ngpios = <8>;
+		interrupts = <267 3>, <268 3>, <269 3>, <270 3>,
+			     <271 3>, <272 3>, <273 3>, <274 3>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "disabled";
+	};
+
+	gpio12: gpio@4900c000 {
+		compatible = "snps,designware-gpio";
+		reg = <0x4900c000 0x1000>;
+		ngpios = <8>;
+		interrupts = <275 3>, <276 3>, <277 3>, <278 3>,
+			     <279 3>, <280 3>, <281 3>, <282 3>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "disabled";
+	};
+
+	gpio13: gpio@4900d000 {
+		compatible = "snps,designware-gpio";
+		reg = <0x4900d000 0x1000>;
+		ngpios = <8>;
+		interrupts = <283 3>, <284 3>, <285 3>, <286 3>,
+			     <287 3>, <288 3>, <289 3>, <290 3>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "disabled";
+	};
+
+	gpio14: gpio@4900e000 {
+		compatible = "snps,designware-gpio";
+		reg = <0x4900e000 0x1000>;
+		ngpios = <8>;
+		interrupts = <291 3>, <292 3>, <293 3>, <294 3>,
+			     <295 3>, <296 3>, <297 3>, <298 3>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "disabled";
+	};
+
 	lpgpio: gpio@42002000 {
 		compatible = "snps,designware-gpio";
 		reg = <0x42002000 0x1000>;

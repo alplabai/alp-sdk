@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: blink
+  description: |
+    The canonical first Alp SDK program: toggle the RGB-red LED pad
+    (the PWM3/PWM5 pad claimed as plain digital GPIO) via the
+    portable BOARD_PIN_LED_RED alias.  Builds on both EVKs: E1M EVK
+    uses ALP_E1M_GPIO_PWM3; E1M-X EVK uses ALP_E1M_X_GPIO_PWM5.
+
+tests:
+  alp_sdk.example.blink.e1m_x_evk:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_X_EVK"'
+    tags:
+      - alp-sdk
+      - example
+      - gpio
+      - v2n
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[blink\\] done"
+  alp_sdk.example.blink.e1m_evk:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
+    tags:
+      - alp-sdk
+      - example
+      - gpio
+      - aen
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[blink\\] done"

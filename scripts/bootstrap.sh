@@ -616,12 +616,21 @@ cat <<'EOF'
   # debug-readiness check (lldb, codeLLDBExtension) -- see docs/cli.md.
   tan doctor --build
 
+If you are working ON the SDK itself:
   # Run the local test suite:
   bash scripts/test-all.sh
 
   # Or jump straight into building an example:
   west build -b native_sim/native/64 examples/peripheral-io/uart-echo \
       -- -DEXTRA_ZEPHYR_MODULES=$PWD
+
+If you are building your own project against the SDK:
+  # Scaffold from an example, then build for your board's real SKU.
+  # `tan build` targets the SKU your board.yaml declares -- there is no
+  # native_sim option (board.yaml `os:` is zephyr/yocto/baremetal/off),
+  # so a real toolchain is needed; `tan doctor --build` reports it.
+  tan init --from-example peripheral-io/uart-echo
+  tan build
 
 References:
   - docs/testing.md          -- full test-coverage map + how to run from scratch

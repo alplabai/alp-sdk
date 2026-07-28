@@ -73,8 +73,14 @@ uart:~$ alp companion ble scan
 ### RGB status LED
 
 A low-priority background thread breathes the on-board RGB LED through a rainbow
-(Alif UTIMER PWM: RED=PWM3/P2_4, GREEN=PWM0/P12_7, BLUE=PWM1/P12_6 — the board
-overlay's `pwm-leds` children). The shell stays fully responsive while it runs.
+(Alif UTIMER PWM, board overlay's `pwm-leds` children: `led_red` = PWM3/P2_4,
+`led_green` = PWM0/P12_7, `led_blue` = PWM1/P12_6). The shell stays fully
+responsive while it runs. Note: those DT node *labels* don't match the
+physically bench-measured colour (2026-07-28, see
+`metadata/boards/e1m-evk.yaml`) — PWM3/P2_4 is physically green and
+PWM0/P12_7 is physically red — but the thread drives all three channels in a
+continuous phase-shifted rainbow with no per-colour meaning, so it's left
+unrenamed; see the comment in `src/main.c`.
 The thread is device-tree-guarded on `led_red`, so on a board without those PWM
 nodes (native_sim, V2N) it compiles out and nothing is spawned.
 

@@ -426,9 +426,15 @@ Write-EnvLines "  "
   # debug-readiness check (lldb, codeLLDBExtension) -- see docs/cli.md.
   tan doctor --build
 
-  # Or jump straight into building an example for real silicon:
+If you are working ON the SDK itself:
+  # Jump straight into building an example for real silicon:
   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he ``
       examples\peripheral-io\uart-echo -- -DEXTRA_ZEPHYR_MODULES=$RepoRoot
+
+If you are building your own project against the SDK:
+  # Scaffold from an example, then build for your board's real SKU:
+  tan init --from-example peripheral-io/uart-echo
+  tan build
 
 References:
   - docs\cross-platform-setup.md  -- the full per-OS setup guide

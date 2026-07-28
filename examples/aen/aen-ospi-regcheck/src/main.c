@@ -103,9 +103,15 @@ int main(void)
 	 * Step 3: the flash_ospi_alif.c driver TU is always built under this
 	 * app's prj.conf (CONFIG_OSPI_ALIF=y), so DEVICE_DT_GET is safe here --
 	 * unlike aen-isp-regcheck, there is no link-blocked driver TU on this
-	 * batch.  device_is_ready() is `true` once ospi_alif_init() returns 0,
-	 * which it does unconditionally (a non-zero alif_hal_ospi_xip_enable()
-	 * is logged but not fatal to init -- see the driver).
+	 * batch.  ospi_alif_init() does NOT return 0 unconditionally: on E8
+	 * silicon its first register touch used to bus-fault (BFAR 0x83000018,
+	 * the OSPI0 register window is clock-gated on this part and hal_alif's
+	 * OSPI library never wrote the enable) before it could reach
+	 * alif_hal_ospi_initialize() at all.  The driver now writes that
+	 * clock-enable first (CLKCTL_PER_SLV->OSPI_CTRL bit 0, per the DFP's
+	 * documented sequence -- see the driver's file header), after which
+	 * alif_hal_ospi_initialize() succeeds and a non-zero
+	 * alif_hal_ospi_xip_enable() rc is logged but not fatal to init.
 	 */
 	const struct device *ospi_dev = DEVICE_DT_GET(OSPI_NODE);
 

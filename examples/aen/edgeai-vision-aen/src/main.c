@@ -75,7 +75,7 @@ static int stage_peripherals_init(void)
 	/* User trigger + status LED via the button_led block, both opened
      * by board-macro name.  The EVK has no plain GPIO LED, so
      * EVK_PIN_LED_RED resolves to the RGB-red pad driven as a digital
-     * GPIO (ALP_E1M_GPIO_PWM3, the e1m-spec "GPIO secondary"); the trigger
+     * GPIO (ALP_E1M_GPIO_PWM0, the e1m-spec "GPIO secondary"); the trigger
      * is the encoder push switch, EVK_PIN_ENCODER_SW (ALP_E1M_GPIO_IO4). */
 	s = alp_button_led_init(&g_trigger,
 	                        &(alp_button_led_config_t){

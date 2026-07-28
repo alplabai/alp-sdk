@@ -3,7 +3,7 @@
 #
 # Customer workflow: copy this directory, change `som.sku` to
 # your AEN MPN, edit `preset:` if you fork the EVK, and
-# `west build`.  CMakeLists.txt invokes scripts/alp_project.py
+# `tan build`.  CMakeLists.txt invokes scripts/alp_project.py
 # at configure time and layers the generated alp.conf over
 # prj.conf via EXTRA_CONF_FILE.
 
@@ -19,13 +19,15 @@ preset: e1m-evk            # Forks the EVK preset.  lsm6dso + ssd1306 are
                            # them to the I2C0 header and declares them in the
                            # `chips:` array below.  It also adds an encoder-
                            # switch trigger (GPIO) + an RGB-red status LED
-                           # (the PWM3 pad as a GPIO) from the routes below.
+                           # (the PWM0 pad as a GPIO -- bench-measured
+                           # 2026-07-28, see metadata/boards/e1m-evk.yaml)
+                           # from the routes below.
 
 # E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
 pins:
   - { e1m: E1M_I2C0,      macro: EVK_I2C_BUS_SENSORS, doc: "Shared sensor + IO-expander bus (LSM6DSO + SSD1306)" }
   - { e1m: E1M_GPIO_IO4,  macro: EVK_PIN_ENCODER_SW,  doc: "Rotary encoder push switch (trigger), active-low" }
-  - { e1m: E1M_GPIO_PWM3, macro: EVK_PIN_LED_RED,     doc: "RGB LED red (status indicator) -- the PWM3 pad opened as a digital GPIO via the EVK_PIN_LED_RED macro" }
+  - { e1m: E1M_GPIO_PWM0, macro: EVK_PIN_LED_RED,     doc: "RGB LED red (status indicator) -- the PWM0 pad opened as a digital GPIO via the EVK_PIN_LED_RED macro. PWM0 (not PWM3) is the red channel: bench-measured 2026-07-28, the netlist's LED_R/LED_G net names are swapped" }
 
 # Single-OS app: the M55-HP core runs the vision pipeline + dispatches
 # to the NPU bonded to it via topology.  M55-HE keeps the SoM

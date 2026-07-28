@@ -12,7 +12,7 @@
 #
 # Customer workflow: copy this directory, change `som.sku` to
 # your V2N / V2H MPN, edit `preset:` if you're on a custom
-# board, and `west build`.  CMakeLists.txt invokes
+# board, and `tan build`.  CMakeLists.txt invokes
 # scripts/alp_project.py at configure time + layers the
 # generated alp.conf over prj.conf via EXTRA_CONF_FILE.
 

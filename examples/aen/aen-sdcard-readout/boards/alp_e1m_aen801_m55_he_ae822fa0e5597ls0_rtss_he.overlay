@@ -12,10 +12,12 @@
  * PADS -- TBD, see [[project_pending_hw_configs]]: this overlay wires the SD "D"
  * pad route (CLK=P4_1, CMD=P4_2, D0..D3=P6_0..P6_3) from the upstream
  * alif-ensemble-pinctrl.h as a documented default; confirm the E1M-AEN801 SoM/EVK
- * SD routing against the schematic.  The bidirectional CMD + D0..D3 lines set the
- * pad read-enable (REN) -- the alif,pinctrl binding DOES carry `read-enable`, so
- * the SoC can sample the card's CMD/DATA response lines (CLK is output-only and
- * omits it).
+ * SD routing against the schematic.  The bidirectional CMD + D0..D3 lines enable
+ * the pad input buffer via the pincfg-node.yaml boolean `input-enable` property
+ * (the pinned Zephyr v4.4 alif,pinctrl binding's property-allowlist carries
+ * `input-enable`, not `read-enable` -- an earlier revision of this overlay used
+ * the wrong spelling and failed devicetree validation), so the SoC can sample
+ * the card's CMD/DATA response lines (CLK is output-only and omits it).
  *
  * CARD REACHABILITY -- the EVK microSD is behind a 74LVC157 SDIO mux whose
  * EN (IO20) + SEL (IO21) are BOTH on the CC3501E side (driven over the SPI
@@ -38,15 +40,16 @@
 			pinmux = <PIN_P4_1__SD_CLK_D>;
 			drive-strength = <8>;
 		};
-		/* CMD + D0..D3 are bidirectional: the pad receiver (read-enable /
-		 * REN bit) MUST be on so the SoC can sample the card's CMD/DATA
-		 * response lines, otherwise enumeration can never complete. */
+		/* CMD + D0..D3 are bidirectional: the pad input buffer
+		 * (input-enable) MUST be on so the SoC can sample the card's
+		 * CMD/DATA response lines, otherwise enumeration can never
+		 * complete. */
 		group1 {
 			pinmux = <PIN_P4_2__SD_CMD_D>,
 				 <PIN_P6_0__SD_D0_D>, <PIN_P6_1__SD_D1_D>,
 				 <PIN_P6_2__SD_D2_D>, <PIN_P6_3__SD_D3_D>;
 			drive-strength = <8>;
-			read-enable = <1>;
+			input-enable;
 		};
 	};
 };

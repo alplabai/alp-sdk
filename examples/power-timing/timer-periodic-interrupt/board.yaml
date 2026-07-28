@@ -10,7 +10,7 @@
 #
 # Customer workflow: copy this directory, change `som.sku` to
 # your MPN, edit the `preset:` (or use an inline board) if you're on a non-EVK board,
-# and `west build`.  CMakeLists.txt invokes
+# and `tan build`.  CMakeLists.txt invokes
 # scripts/alp_project.py at configure time + layers the
 # generated alp.conf over prj.conf via EXTRA_CONF_FILE.
 som:
@@ -24,7 +24,7 @@ supported_boards:
 
 # E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
 pins:
-  - { e1m: E1M_GPIO_PWM3, macro: EVK_PIN_LED_RED, doc: "RGB LED red -- the PWM3 pad as a digital GPIO; the app opens it by the EVK_PIN_LED_RED macro" }
+  - { e1m: E1M_GPIO_PWM0, macro: EVK_PIN_LED_RED, doc: "RGB LED red -- the PWM0 pad as a digital GPIO; the app opens it by the EVK_PIN_LED_RED macro. PWM0 (not PWM3) is the red channel: bench-measured 2026-07-28, the netlist's LED_R/LED_G net names are swapped" }
 cores:
   m55_hp:
     app: ./src
