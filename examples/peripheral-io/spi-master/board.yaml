@@ -6,7 +6,7 @@
 # MOSI to MISO).  Contrasts with examples/peripheral-io/spi-loopback which is
 # the same chip acting as both halves of the bus.
 #
-# Customer workflow: copy this directory, change `som.sku` to
+# Customer workflow: `tan init --from-example peripheral-io/spi-master`, change `som.sku` to
 # your MPN, edit the `preset:` (or use an inline board) if you're on a non-EVK board,
 # and `tan build`.  CMakeLists.txt invokes
 # scripts/alp_project.py at configure time + layers the

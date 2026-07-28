@@ -1,7 +1,7 @@
 # board.yaml -- per-app project configuration for the
 # i2c-scanner example.
 #
-# Customer workflow: copy this directory, change `som.sku` to
+# Customer workflow: `tan init --from-example peripheral-io/i2c-scanner`, change `som.sku` to
 # your MPN, edit the `preset:` (or use an inline board) if you're on a non-EVK board,
 # and `tan build`.  CMakeLists.txt invokes
 # scripts/alp_project.py at configure time + layers the

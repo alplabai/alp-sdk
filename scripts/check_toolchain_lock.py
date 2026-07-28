@@ -120,6 +120,32 @@ checkout is present (mirrors the same flag `tests/scripts/
 test_hil_blocks_coverage.py`'s `#807` class gate already uses for the
 identical "workspace not resolvable" situation) to turn check 2's skip into
 a hard failure instead.
+
+SCOPE, and what it does NOT cover (issue #1012). Check 3 scans every
+`.github/workflows/*.yml` in THIS repo. The invariant people read off that
+sentence is broader than what it enforces: the real one is "nothing outside
+metadata/toolchains.json hardcodes the SDK version", and this gate can only
+police one repo's workflows.
+
+The live counter-example is a different repo. `alplabai/tan-cli` consumes the
+same fact -- `tan doctor`'s `zephyrSdk` check names the exact
+`west sdk install --version <..>` remedy a customer runs -- from a hand-ported
+Rust constant (`ZEPHYR_SDK_INSTALL_VERSION` in
+`crates/tan-core/src/host_env.rs`) that has to track `zephyrSdk.version` here
+by hand. This script cannot see that checkout, so a bump here could leave tan
+printing a stale install command with nothing red on either side. tan-cli
+issue #172, closed by its PR #173, covers that half from the other end: it
+vendors `metadata/toolchains.json` into `contract/fixtures/toolchains/` and
+asserts byte-parity against the constant in tan's own required `cargo test` --
+the same shape its bootstrap-manifest fallback already uses. So the pair is
+covered TODAY, by a gate on the other side of the seam, not by this one.
+
+Stated here because the wording is what let the gap open: a scope sentence
+that reads like a guarantee invites exactly the copy it does not cover. When a
+NEW consumer of this pin appears, in this repo or another, it needs its own
+parity assertion -- widening this scan will not reach it. Same caveat applies
+to `metadata/toolchains.json`'s own `_comment`, which repeats the CI-workflow
+scoping verbatim in its point (3).
 """
 from __future__ import annotations
 

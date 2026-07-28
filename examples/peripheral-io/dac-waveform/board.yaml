@@ -13,7 +13,7 @@
 # `dac` token), so the `adc` entry lights the analog subsystem; the DAC
 # subsystem (CONFIG_DAC) is turned on in prj.conf.
 #
-# Customer workflow: copy this directory, change `som.sku` to
+# Customer workflow: `tan init --from-example peripheral-io/dac-waveform`, change `som.sku` to
 # your MPN, edit the `preset:` (or use an inline board) if you're on a non-EVK board,
 # and `tan build`.  CMakeLists.txt invokes
 # scripts/alp_project.py at configure time + layers the
