@@ -84,6 +84,7 @@ int main(void)
 	 * open failure here is a real fault, not an expected-absent-part SKIP. */
 	if (bus == NULL) {
 		printf("[manifest] alp_i2c_open failed: err=%d\n", (int)alp_last_error());
+		printf("RESULT FAIL: alp_i2c_open -> NULL, err=%d\n", (int)alp_last_error());
 		return 0;
 	}
 
@@ -93,6 +94,7 @@ int main(void)
 		printf("[manifest] eeprom_24c128_init -> %d "
 		       "(EEPROM populated?  bridge/DNP selecting I2C2?  bus right?)\n",
 		       (int)s);
+		printf("RESULT FAIL: eeprom_24c128_init -> %d\n", (int)s);
 		alp_i2c_close(bus);
 		return 0;
 	}
@@ -103,6 +105,7 @@ int main(void)
 	s = eeprom_24c128_read(&ee, /* offset */ 0x0000u, raw, sizeof(raw));
 	if (s != ALP_OK) {
 		printf("[manifest] eeprom_24c128_read -> %d (bus error?)\n", (int)s);
+		printf("RESULT FAIL: eeprom_24c128_read -> %d\n", (int)s);
 		eeprom_24c128_deinit(&ee);
 		alp_i2c_close(bus);
 		return 0;
@@ -117,15 +120,21 @@ int main(void)
 	 * long as that layout and this decode stay in lock-step. */
 	const alp_hw_info_eeprom_t *m = (const alp_hw_info_eeprom_t *)raw;
 
+	/* Each field check's OK/FAIL folds into `magic_ok` / `schema_ok` /
+	 * `crc_ok` below (crc_ok is set where it's computed, further down) --
+	 * those three are what the RESULT verdict at the end of main() gates
+	 * on, so a malformed or unprogrammed manifest cannot read as PASS. */
+	bool magic_ok = (m->magic == ALP_HW_INFO_MAGIC);
 	printf("\n[manifest] magic         = 0x%08x", m->magic);
-	if (m->magic == ALP_HW_INFO_MAGIC) {
+	if (magic_ok) {
 		printf("  (OK -- ASCII 'ALPH')\n");
 	} else {
 		printf("  (FAIL -- expected 0x%08x; module not programmed?)\n", ALP_HW_INFO_MAGIC);
 	}
 
+	bool schema_ok = (m->schema_version == ALP_HW_INFO_SCHEMA_VERSION);
 	printf("[manifest] schema_version= %u", (unsigned)m->schema_version);
-	printf(m->schema_version == ALP_HW_INFO_SCHEMA_VERSION ? "  (OK)\n" : "  (FAIL)\n");
+	printf(schema_ok ? "  (OK)\n" : "  (FAIL)\n");
 
 	printf("[manifest] family        = %.*s\n", ALP_HW_INFO_FAMILY_LEN, m->family);
 	printf("[manifest] sku           = %.*s\n", ALP_HW_INFO_SKU_LEN, m->sku);
@@ -143,8 +152,9 @@ int main(void)
 	 * (which the magic check above already catches). */
 	const size_t crc_covered_len = sizeof(*m) - sizeof(m->crc32);
 	uint32_t     calc            = crc32_iso3309(raw, crc_covered_len);
+	bool         crc_ok          = (calc == m->crc32);
 	printf("[manifest] crc32         = 0x%08x (stored) vs 0x%08x (computed)", m->crc32, calc);
-	printf(calc == m->crc32 ? "  (OK)\n" : "  (FAIL -- partial program or corruption)\n");
+	printf(crc_ok ? "  (OK)\n" : "  (FAIL -- partial program or corruption)\n");
 
 	/* Production apps call alp_hw_info_read() instead of decoding by hand;
 	 * that path resolves the EEPROM bus from the SoM metadata once the
@@ -153,5 +163,19 @@ int main(void)
 	eeprom_24c128_deinit(&ee);
 	alp_i2c_close(bus);
 	printf("[manifest] done\n");
+
+	/* RESULT verdict -- gated on the three field checks actually decoded
+	 * above, not on merely reaching this line: a torn/unprogrammed EEPROM
+	 * still lets the I2C read succeed (I2C doesn't know the payload is
+	 * garbage), so only magic_ok/schema_ok/crc_ok tell us the manifest is
+	 * real. */
+	if (magic_ok && schema_ok && crc_ok) {
+		printf("RESULT PASS: manifest magic/schema/crc32 all OK\n");
+	} else {
+		printf("RESULT FAIL: manifest %s%s%s\n",
+		       magic_ok ? "" : "magic mismatch ",
+		       schema_ok ? "" : "schema_version mismatch ",
+		       crc_ok ? "" : "crc32 mismatch");
+	}
 	return 0;
 }

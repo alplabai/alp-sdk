@@ -7,6 +7,24 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.14.0 candidate
 
+### Changed — `zephyr/kconfigs/core.kconfig`: E8 builds now default to the real SoC capability profile, not the permissive one
+
+The "Active SoC capability profile" choice now defaults to
+`ALP_SOC_ALIF_ENSEMBLE_E8` when `SOC_SERIES_E8` is set, instead of falling
+through to `ALP_SOC_NONE`. Every E8 app's `include/alp/soc_caps.h` macros
+flip from the permissive `UINT16_MAX` (any config accepted) to the real E8
+counts (`ALP_SOC_I2C_COUNT=6`, `ALP_SOC_SPI_COUNT=6`, `ALP_SOC_UART_COUNT=9`,
+`ALP_SOC_PWM_COUNT=12`, `ALP_SOC_WDT_COUNT=4`, `ALP_SOC_CAN_COUNT=1`,
+`ALP_SOC_RTC_COUNT=1`, `ALP_SOC_I3C_COUNT=2`, etc.), so a dispatcher's
+`bus_id`/`channel_id`/`rtc_id`/`wdt_id` range check
+(`src/backends/*/zephyr_drv.c`, `src/i3c_dispatch.c`, `src/dac_dispatch.c`)
+now rejects an out-of-range instance with `ALP_ERR_OUT_OF_RANGE` where it
+previously accepted anything. `native_sim` and other non-E8 builds are
+unaffected — the choice is gated on `SOC_SERIES_E8`, which only the E8 SoC
+tree selects. Swept every `examples/aen/*` peripheral-open call: all use
+instance literals of `0` (or an `ALP_E1M_*` macro that resolves to `0`),
+well inside every E8 count above — no example regresses.
+
 ### Added — `gpio11`..`gpio14` on the E8 peripherals dtsi; the RGB LED's green/blue channels are now reachable
 
 `zephyr/dts/alif/ensemble_e8_peripherals.dtsi` declared only `gpio0`..`gpio10`

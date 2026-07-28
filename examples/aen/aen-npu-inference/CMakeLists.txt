@@ -24,8 +24,17 @@
 # is ALIF PROPRIETARY and is NOT vendored / redistributed by alp-sdk.  It is
 # injected at build time from alp-sdk-internal via -DAEN_NPU_VELA_CONFIG=<path>
 # (default empty -> Vela's built-in system-config, which does NOT match the
-# bench-validated E8 RTSS-HE runtime).  See aen-npu-inference-alif for the
-# matched-runtime variant whose strong remap/config-select fixes ethosu_invoke=1.
+# bench-validated E8 RTSS-HE runtime).
+#
+# The ethosu_invoke=1 fix itself is alp-sdk's AEN Ethos-U backend
+# (src/backends/inference/ethos_u_aen.cpp, CONFIG_ALP_SDK_INFERENCE_BACKEND_
+# ETHOS_U_AEN=y in prj.conf) -- it supplies the strong ethosu_address_remap /
+# ethosu_config_select overrides.  Measured 2026-07-28: the Vela
+# --memory-mode/--system-config flags are NOT that fix by themselves (a
+# byte-identical Vela blob to the aen-npu-inference-alif sibling still
+# returned invoke=1 without the overrides); they only make the compiled
+# command stream match the bench-validated Alif system-config when
+# AEN_NPU_VELA_CONFIG is supplied.
 
 cmake_minimum_required(VERSION 3.20.0)
 
@@ -73,6 +82,10 @@ if(NOT AEN_NPU_VELA_CONFIG)
 		"system-config and the emitted command stream will NOT match the "
 		"bench-validated E8 runtime.  Pass -DAEN_NPU_VELA_CONFIG=<alp-sdk-internal>/ensemble_vela.ini.")
 endif()
+set(AEN_NPU_SYSTEM_CONFIG "Ethos_U85_SRAM_Only"
+    CACHE STRING   "Vela --system-config (HE core, single SRAM region)")
+set(AEN_NPU_MEMORY_MODE   "Sram_Only"
+    CACHE STRING   "Vela --memory-mode (single region -> SRAM0)")
 
 set(AEN_NPU_GEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/model-gen")
 set(AEN_NPU_MODEL_H "${AEN_NPU_GEN_DIR}/model.h")
@@ -87,8 +100,13 @@ set(_gen_args
 	--build-dir  ${AEN_NPU_GEN_DIR}
 	--out        ${AEN_NPU_MODEL_H}
 )
+# --system-config/--memory-mode name sections that live ONLY in the Alif
+# proprietary ensemble_vela.ini -- pass them ONLY when that config is
+# supplied, else Vela errors "Section ... not found" against its built-in
+# vela.ini (matches the aen-npu-inference-alif sibling's pattern).
 if(AEN_NPU_VELA_CONFIG)
-	list(APPEND _gen_args --config ${AEN_NPU_VELA_CONFIG})
+	list(APPEND _gen_args --config ${AEN_NPU_VELA_CONFIG}
+	     --system-config ${AEN_NPU_SYSTEM_CONFIG} --memory-mode ${AEN_NPU_MEMORY_MODE})
 endif()
 
 # Run at configure time so the header exists before the first compile, and
@@ -116,6 +134,15 @@ endif()
 
 add_custom_target(aen_npu_model DEPENDS ${AEN_NPU_MODEL_H})
 add_dependencies(app aen_npu_model)
+
+# Publish hal_alif's common/include on the GLOBAL Zephyr include path so
+# alp-sdk's AEN Ethos-U backend (src/backends/inference/ethos_u_aen.cpp,
+# enabled by CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN in prj.conf) can
+# #include <soc_memory_map.h> (local_to_global(), its strong
+# ethosu_address_remap uses).  Header only -- not CONFIG_RTSS_HE, which would
+# also compile the TZ sources that hard-#error without a non-secure DTS node
+# on this bench board (see aen-npu-inference-alif's CMakeLists.txt).
+zephyr_include_directories(${ZEPHYR_ALIF_MODULE_DIR}/common/include)
 
 target_include_directories(app PRIVATE ${AEN_NPU_GEN_DIR})
 target_sources(app PRIVATE src/main.cpp)

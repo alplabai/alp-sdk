@@ -34,8 +34,9 @@
  * slot0 and SE-booted (bench flow D -- the SES boots the resident slot0 image
  * in preference to a Flow-C ITCM RAM-run), so slot0 briefly holds THIS app
  * instead of person_detect; the canonical person_detect slot0 is RESTORED after
- * the run (byte-exact, reset vector 0x80011F15).  No other MRAM region is
- * mutated by the test itself.
+ * the run (byte-exact, reset vector 0x80013225 -- bench-measured 2026-07-28,
+ * verified across three cold power cycles: 80010000 = 20004C60 80013225).
+ * No other MRAM region is mutated by the test itself.
  *
  * Console is the Alp UART console (see prj.conf): E1M edge UART0 = Alif UART5
  * (P3_4/P3_5, 115200 8N1), USB-routed to the labgrid `console` resource

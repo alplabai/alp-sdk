@@ -35,29 +35,31 @@ import sys
 
 
 def vela_compile(vela: str, accel: str, model: str, out_dir: str,
-                 config: str) -> str:
+                 config: str, system_config: str, memory_mode: str) -> str:
 	"""Run Vela and return the path to the produced *_vela.tflite."""
 	os.makedirs(out_dir, exist_ok=True)
 	cmd = [
 		vela,
 		"--accelerator-config", accel,
 	]
-	# The Alif Vela system-config (ensemble_vela.ini) is ALIF PROPRIETARY and is
-	# NOT redistributed by alp-sdk -- it is injected at build time from
+	# The Alif Vela config (ensemble_vela.ini) is ALIF PROPRIETARY and is NOT
+	# redistributed by alp-sdk -- it is injected at build time from
 	# alp-sdk-internal via the app's -DAEN_NPU_VELA_CONFIG cache var (see
-	# CMakeLists.txt).  When supplied it declares the Ethos_U85_SRAM_* region
-	# model the bench-validated E8 RTSS-HE runtime was matched against; when
-	# absent Vela falls back to its built-in system-config (the command stream
-	# will NOT match the bench).  Empty string -> omit the flag entirely.
+	# CMakeLists.txt).  --system-config/--memory-mode only resolve to the Alif
+	# region model when --config is also given, so gate all three together
+	# (matches the aen-npu-inference-alif sibling's pattern) instead of always
+	# passing --memory-mode Sram_Only: measured 2026-07-28, that flag alone is
+	# NOT what fixes ethosu_invoke=1 -- a rebuild with it produced a Vela blob
+	# byte-identical to the sibling's and still returned invoke=1 on E8.  The
+	# actual fix is the strong ethosu_address_remap/ethosu_config_select
+	# overrides in src/backends/inference/ethos_u_aen.cpp (see prj.conf).
 	if config:
 		cmd += ["--config", config]
+	if system_config:
+		cmd += ["--system-config", system_config]
+	if memory_mode:
+		cmd += ["--memory-mode", memory_mode]
 	cmd += [
-		# Sram_Only: the model + tensor arena both live in ONE region (SRAM0) on
-		# this board.  Vela's default (Dedicated_Sram) splits weights into a
-		# separate DRAM region the NPU then addresses -- which we do NOT have, so
-		# the NPU job fails (ethosu_invoke returns status 1, BENCH-CONFIRMED on E8).
-		# Single-region Sram_Only matches our SRAM0-only placement.
-		"--memory-mode", "Sram_Only",
 		"--output-dir", out_dir,
 		model,
 	]
@@ -165,6 +167,8 @@ def main() -> int:
 	ap.add_argument("--config", default="",
 	                help="vela --config .ini path (Alif-proprietary "
 	                     "ensemble_vela.ini from alp-sdk-internal; omitted if empty)")
+	ap.add_argument("--system-config", default="", help="vela --system-config")
+	ap.add_argument("--memory-mode", default="", help="vela --memory-mode")
 	ap.add_argument("--arena-bytes", type=int, default=256 * 1024)
 	args = ap.parse_args()
 
@@ -176,7 +180,8 @@ def main() -> int:
 
 	name = args.name or os.path.splitext(os.path.basename(args.model))[0]
 	vela_tflite = vela_compile(args.vela, args.accel, args.model,
-	                           args.build_dir, args.config)
+	                           args.build_dir, args.config,
+	                           args.system_config, args.memory_mode)
 	emit_header(vela_tflite, args.out, name, args.arena_bytes)
 	return 0
 

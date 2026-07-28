@@ -11,15 +11,17 @@
  * (256-MAC) via ethosu_invoke.
  *
  * WHY THIS RUNS WHERE aen-npu-inference RETURNED ethosu_invoke=1:
- *   1. CONFIG_ARM_ETHOS_U=y links hal_alif's ethosu_callback.c, whose STRONG
- *      ethosu_address_remap = local_to_global() overrides the Arm core driver's
- *      weak identity remap -- the NPU's AXI master now sees the correct global
- *      view of every base address it is programmed with.
- *   2. The model is Vela-compiled with the Alif --system-config
- *      Ethos_U85_SRAM_Only (single SRAM region), so the command stream's region
- *      config matches the E8 RTSS-HE runtime the callback is built for.
- *   3. The itcm/dtcm nodes carry global_base (overlay), so local_to_global()
- *      -- and hence ethosu_callback.c -- compiles and is correct.
+ *   The Arm Ethos-U core driver's weak ethosu_address_remap()/
+ *   ethosu_config_select() defaults leave ITCM/DTCM addresses untranslated and
+ *   route the command stream + regions to the EXT AXI port -- wrong for this
+ *   board's all-in-SRAM0 layout (bus-aborts on the first NPU fetch).  The fix
+ *   is alp-sdk's AEN Ethos-U backend (src/backends/inference/ethos_u_aen.cpp),
+ *   which supplies the STRONG overrides; CONFIG_ALP_SDK_INFERENCE_BACKEND_
+ *   ETHOS_U_AEN=y (prj.conf) links it in -- see that file for the full
+ *   explanation of both overrides, moved there from this file's previous
+ *   in-app copies (measured 2026-07-28: the Vela --memory-mode flag alone is
+ *   NOT the fix -- a byte-identical command stream to this app's sibling still
+ *   returned ethosu_invoke=1 without the address-remap/config-select overrides).
  *
  * WHAT THIS PROVES (and what it does NOT):
  *   It proves the full matched path: a Vela-compiled .tflite ->
@@ -56,9 +58,6 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/sys/printk.h>
 
-/* hal_alif local_to_global() -- ITCM/DTCM CPU-local -> NPU global view. */
-#include <soc_memory_map.h>
-
 /* Arm Apache-2.0 InferenceProcess wrapper (vendored: ethosu_utils/). */
 #include "inference_process.hpp"
 
@@ -72,72 +71,15 @@ using namespace InferenceProcess;
 #define NPU_NODE DT_NODELABEL(ethosu_npu)
 
 /*
- * STRONG ethosu_address_remap -- the matched-runtime fix for ethosu_invoke=1.
- *
- * The Arm Ethos-U core driver programs the NPU's QBASE + every BASEP with
- * ethosu_address_remap((uintptr_t)ptr, index) (ethosu_device_u85.c:147/158).
- * Its WEAK default (ethosu_device_u85.c:54) returns the address UNCHANGED --
- * the CPU-local M55 view -- which for any ITCM/DTCM-resident buffer is NOT the
- * address the NPU's AXI master must use, so the NPU reads the wrong memory and
- * ethosu_invoke fails (status 1).
- *
- * hal_alif ships this exact override in drivers/ethos_u/src/ethosu_callback.c
- * (ethosu_address_remap = local_to_global), but that vendor file ALSO defines
- * ethosu_flush/invalidate_dcache with a signature that is STALE relative to the
- * pinned Arm core driver -- compiling it (CONFIG_ARM_ETHOS_U) collides with the
- * correct-signature upstream ethos_u_common.c dcache hooks.  So we leave that
- * vendor file out and re-provide ONLY the remap here, calling hal_alif's own
- * local_to_global() (soc_memory_map.h) -- nothing is re-authored.  This is a
- * STRONG definition; it overrides the core driver's weak identity remap.
- *
- * For the SRAM0-resident model + arena + I/O of this app, local_to_global() is
- * a no-op (SRAM0 @0x02000000 is already a global system address); the override
- * is what makes the path correct in general and what `nm` shows as a strong
- * (non-weak) ethosu_address_remap with local_to_global linked in.
+ * The strong ethosu_address_remap()/ethosu_config_select() overrides that
+ * make ethosu_invoke succeed on this board (NPU AXI address translation +
+ * SRAM-port MEM_ATTR routing) used to live here.  They are now owned by
+ * alp-sdk's AEN Ethos-U backend -- see src/backends/inference/ethos_u_aen.cpp
+ * for the full explanation (WEAK-default behaviour, why it is wrong for an
+ * all-in-SRAM0 layout, the bench-confirmed fault signature) and
+ * CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN in this app's prj.conf for how
+ * they get linked into a build that never calls <alp/inference.h>.
  */
-extern "C" uint64_t ethosu_address_remap(uint64_t address, int index)
-{
-	(void)index;
-	/* Double cast: silence the pointer/integer width warning on 32-bit. */
-	return local_to_global((void *)(uint32_t)address);
-}
-
-/*
- * STRONG ethosu_config_select -- the SECOND half of the invoke=1 fix (NPU AXI
- * PORT selection), bench-isolated on E8.
- *
- * The core driver programs the NPU's QCONFIG (command stream) + REGIONCFG
- * (each BASEP region) by calling the WEAK ethosu_config_select(addr, index)
- * (ethosu_device_u85.c:60), which returns a MEM_ATTR index 0-3.  MEM_ATTR bit2
- * picks the AXI master PORT: index 0/1 -> SRAM port, index 2/3 -> EXT port
- * (ethosu_config_u85.h).  The Arm defaults route the command stream
- * (NPU_QCONFIG=2) and region 0 (NPU_REGIONCFG_0=3) to the EXT port -- correct
- * for the Arm reference layout (const/weights in external flash/DRAM, only the
- * scratch arena in SRAM), but WRONG for the Alif `Ethos_U85_SRAM_Only`
- * system-config this app Vela-compiles with: there the model + command stream +
- * arena ALL live in SRAM0 (ensemble_vela.ini: axi0_port=Sram for const/arena/
- * cache), which is reachable ONLY over the NPU's SRAM port.  Sending the
- * SRAM-resident command stream over the EXT port bus-aborts on the very first
- * fetch.
- *
- * BENCH-CONFIRMED on E8 (ETHOS_U_LOG_LEVEL=DBG): with the Arm default, invoke
- * returns 1 and the NPU reports STATUS=0x00000804 (bus_status=1,
- * faulting_interface=1), qread=0, cmd_end_reached=0 -- i.e. an AXI bus abort on
- * interface 1 (EXT) while fetching the SRAM-resident command stream.  Pinning
- * the command stream + every region to a SRAM-port MEM_ATTR (index 0) routes
- * the SRAM0 accesses over the SRAM port and clears the fault.  Every BASEP this
- * model uses (BASEP0..4) is in SRAM0, so a uniform SRAM-port selection is both
- * correct and the simplest expression of the SRAM_Only layout.  STRONG; it
- * overrides the core driver's weak default.
- */
-extern "C" unsigned int ethosu_config_select(uint64_t address, int index)
-{
-	(void)address;
-	(void)index;
-	/* MEM_ATTR index 0 = SRAM AXI port (bit2=0), for the command stream
-	 * (index -1) and all regions 0-7 -- everything is SRAM0-resident. */
-	return 0U;
-}
 
 /*
  * Tensor arena -- DMA-reachable SRAM0, 16-byte aligned (NPU access

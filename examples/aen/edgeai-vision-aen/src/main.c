@@ -231,13 +231,45 @@ int main(void)
 {
 	printf("[edgeai] vision-aen reference — v0.1 skeleton\n");
 
-	if (stage_peripherals_init() != 0) goto done;
-	if (stage_camera_init() != 0) goto done;
-	if (stage_model_load() != 0) goto done;
-	if (stage_inference_loop() != 0) goto done;
+	/* Named by the stage that actually failed, so the RESULT line below
+	 * can't just claim "done" -- reaching the `done:` label proves nothing
+	 * on its own (stage_teardown() runs on every path, success or not). */
+	const char *fail_stage = NULL;
+
+	if (stage_peripherals_init() != 0) {
+		fail_stage = "stage 1: peripherals (alp_i2c_open(SENSORS) failed)";
+		goto done;
+	}
+	if (stage_camera_init() != 0) {
+		fail_stage = "stage 2: camera";
+		goto done;
+	}
+	if (stage_model_load() != 0) {
+		fail_stage = "stage 3: model load";
+		goto done;
+	}
+	if (stage_inference_loop() != 0) {
+		fail_stage = "stage 4: inference loop";
+		goto done;
+	}
 
 done:
 	stage_teardown();
 	printf("[edgeai] done\n");
+
+	/* RESULT verdict.  `fail_stage` is set ONLY on a real stage failure
+	 * (stage_peripherals_init's non-NULL sensor-bus open is the only one
+	 * that can fail today -- camera/model/inference always return 0 and
+	 * self-report "skip" for v0.2 gaps, so they cannot trip this).  Even
+	 * on the all-return-0 path this is a v0.1 skeleton: the vision
+	 * pipeline itself (camera/model/inference) is still scaffolding, so a
+	 * clean run is SKIP, not PASS -- claiming PASS here would say this
+	 * demo did edge-AI vision, and it does not yet. */
+	if (fail_stage != NULL) {
+		printf("RESULT FAIL: %s\n", fail_stage);
+	} else {
+		printf("RESULT SKIP: v0.1 skeleton reached teardown, but camera/model/inference "
+		       "are still v0.2 stub scaffolding -- no real capture or inference ran\n");
+	}
 	return 0;
 }
