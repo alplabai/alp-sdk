@@ -42,8 +42,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include <cmsis_core.h>
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
+#include <zephyr/fatal.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
 
@@ -51,6 +53,32 @@
 
 /* The OSPI node (status set by the board overlay). */
 #define OSPI_NODE DT_NODELABEL(ospi0)
+
+/*
+ * A hal_alif call in this app can bus-fault before reaching the RESULT
+ * PASS/FAIL gate at the bottom of main() (see the SECOND, DISTINCT FAULT
+ * note on flash_ospi_alif.c and the scope note below) -- that would
+ * otherwise produce NO "RESULT" line at all, a bench NO-RESULT that hides a
+ * real failure behind a state the harness can't tell apart from "still
+ * running". Overriding the weak default (kernel/fatal.c) makes the crash
+ * path self-reporting: print a RESULT FAIL naming the fatal reason code to
+ * the RAM console, then hand off to the normal halt so nothing else runs.
+ * The prefix is deliberately the same "RESULT FAIL:" the bottom-of-main gate
+ * uses (so a simple grep for RESULT catches this path too) but the text
+ * after it can never be mistaken for the success line -- that line is
+ * "RESULT PASS: ..." and is only ever reached by returning normally past
+ * this handler, which never returns.
+ */
+void k_sys_fatal_error_handler(unsigned int reason, const struct arch_esf *esf)
+{
+	ARG_UNUSED(esf);
+	printk("RESULT FAIL: fatal error before the PASS/FAIL gate could run (reason=%u) -- "
+	       "a hal_alif call trapped (see flash_ospi_alif.c's SECOND, DISTINCT FAULT note)\n",
+	       reason);
+	for (;;) {
+		__WFE();
+	}
+}
 
 /*
  * Expected reg/aes-reg base + IRQ.  Transcribed VERBATIM from the fork's
@@ -107,17 +135,29 @@ int main(void)
 	 * without the clock-enable, its first register touch faults on E8
 	 * silicon (BFAR 0x83000018 -- the OSPI0 register window is clock-gated
 	 * on this part and hal_alif's OSPI library never wrote the enable)
-	 * before it could reach alif_hal_ospi_initialize() at all.  A bus fault
-	 * never returns, though, so it is not what makes device_is_ready() read
-	 * false below -- that is the driver's own `return -EIO`
-	 * (flash_ospi_alif.c) on a nonzero alif_hal_ospi_initialize() rc.  The
-	 * driver now writes the clock-enable first (CLKCTL_PER_SLV->OSPI_CTRL
-	 * bit 0, per the DFP's documented sequence -- see the driver's file
-	 * header), which is EXPECTED to make alif_hal_ospi_initialize() succeed
-	 * -- bench A/B on this fix is still pending (no HW run yet); the driver
-	 * header carries the authoritative UNVERIFIED flag.  A non-zero
-	 * alif_hal_ospi_xip_enable() rc is logged but not fatal to init either
-	 * way.
+	 * before it could reach alif_hal_ospi_initialize() at all.  The driver
+	 * now writes the clock-enable first (CLKCTL_PER_SLV->OSPI_CTRL bit 0,
+	 * per the DFP's documented sequence -- see the driver's file header).
+	 *
+	 * The bench A/B on that fix RAN 2026-07-28, not pending anymore: it
+	 * fixes the FIRST fault above (confirmed by an independent J-Link A/B
+	 * on the same register window -- see the driver header's MEASURED
+	 * block). But alif_hal_ospi_initialize() still bus-faults, further in
+	 * -- a SECOND, DISTINCT, currently OPEN fault inside ospi_mode_master()
+	 * (see the driver header's SECOND, DISTINCT FAULT note for the
+	 * transcript and file:line). Until that second fault is resolved,
+	 * device_is_ready() below is expected to read false, and that IS a
+	 * genuine RESULT FAIL of this app's own contract (WHAT THIS APP
+	 * VALIDATES item 4 above: the two hal_alif calls must not crash) -- it
+	 * is not excused by the missing external OSPI NOR/HyperBus part.  That
+	 * missing part excuses only alif_hal_ospi_xip_enable()'s nonzero rc
+	 * below, nothing upstream of it: an advisor pass proved the missing
+	 * part cannot reach far enough to explain a fault this early, because
+	 * the controller answered a register read with its documented CTRLR0
+	 * reset value on this same unpopulated silicon (driver header, MEASURED
+	 * block) -- the APB register file is live regardless of what is or
+	 * isn't wired to the XiP pins.  A non-zero alif_hal_ospi_xip_enable()
+	 * rc is logged but not fatal to init either way.
 	 */
 	const struct device *ospi_dev = DEVICE_DT_GET(OSPI_NODE);
 

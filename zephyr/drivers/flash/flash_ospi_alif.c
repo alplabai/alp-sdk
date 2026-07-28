@@ -63,9 +63,10 @@
  *   - OSPI0_BASE 0x83000000 (rtss_he/soc.h:3778; rtss_hp/soc.h:3784, same base)
  *
  * MEASURED 2026-07-28 (was UNVERIFIED -- the pending bench A/B below has now
- * run): OSPI_CTRL bit 0 gates the APB register interface itself, not just the
- * serial/functional clock. One held J-Link session on E1M-AEN801 / AE822
- * M55-HE, verbatim:
+ * run), READ HALF ONLY: every step below is a J-Link `mem32` READ -- no write
+ * to the 0x8300_00xx OSPI register window has ever been tested from the
+ * debugger, so the write-gating half of the APB-gating reading is UNMEASURED.
+ * One held J-Link session on E1M-AEN801 / AE822 M55-HE, verbatim:
  *
  *   J-Link>mem32 0x4902F03C,1
  *   4902F03C = 00000000
@@ -79,13 +80,18 @@
  *   83000000 = 00C00407
  *
  * With CLKCTL_PER_SLV->OSPI_CTRL bit 0 clear, the debugger's own AHB-AP
- * access to the OSPI register window (0x83000018, OSPI_TXFTLR -- the same
+ * *read* of the OSPI register window (0x83000018, OSPI_TXFTLR -- the same
  * offset that produced BFAR 0x83000018 above) aborts ("Could not read
- * memory"); with the bit set, the identical read succeeds and a second
- * register (0x83000000) also reads back cleanly. That confirms the APB-gating
- * reading: the bit gates register-interface access, not merely the serial
- * clock. This is narrower than "the fix works" (already known from the bus
- * fault going away) -- it is now also known WHY.
+ * memory"); with the bit set, the identical read succeeds, and a second
+ * register read (0x83000000, CTRLR0) returns 0x00C00407 -- an alp-advisor
+ * pass confirmed this equals the SVD's documented CTRLR0 resetValue
+ * 0x00C00407 (alif-dfp-ref/Debug/SVD/AE822FA0E5597BS0_CM55_HE_View.svd:75097),
+ * i.e. what the read exposes is the controller's power-on-reset value
+ * becoming visible once the gate opens, not evidence any register was ever
+ * written through it. This confirms the APB-gating reading for READS: bit 0
+ * gates read access to the register interface, not merely the serial clock.
+ * Whether it also gates WRITES is UNMEASURED -- no write to this window has
+ * been attempted from the debugger.
  *
  * CORROBORATION: Alif_CMSIS/Source/Driver_OSPI.c:441 calls enable_ospi_clk()
  * in ARM_OSPI_PowerControl() immediately before ospi_set_tx_threshold(OSPI->regs,
@@ -106,6 +112,32 @@
  *
  * aes-reg (0x83001000, ospi_hal.c:141) follows the same gate per the DFP
  * sequence -- no separate enable is written or expected.
+ *
+ * SECOND, DISTINCT FAULT (same 2026-07-28 bench session) -- OPEN, further
+ * into alif_hal_ospi_initialize() than the CKEN fix reaches:
+ *
+ *   ***** BUS FAULT *****
+ *     Imprecise data bus error
+ *   r0/a1:  0x83000000   r14/lr: 0x00006e17
+ *   Faulting instruction address (r15/pc): 0x00006e20
+ *
+ * 0x00006e20 -> ospi_mode_master(), modules/hal/alif drivers/ospi/include/
+ * ospi.h:477, inlined into alif_hal_ospi_initialize(), modules/hal/alif
+ * drivers/ospi/src/ospi_hal.c:135.
+ *
+ * This CKEN fix is correct and complete with respect to everything the DFP
+ * documents: an advisor pass exhausted the documented enable surface --
+ * OSPI_CTRL has exactly ONE field, CKEN bit[0], resetMask 0x00000001 (SVD
+ * lines 53038-53064); enable_ospi_clk() writes only (1 << drv_instance)
+ * (alif-dfp-ref/drivers/include/sys_ctrl_ospi.h:45-48); and
+ * SOC_FEAT_FORCE_ENABLE_SYSTEM_CLOCKS is (0) for this part
+ * (AE822FA0E5597/include/soc_features.h:124). The second fault above is
+ * therefore NOT a missing documented enable -- it is a separate, open issue
+ * further into the same call, out of scope for this fix. Do not add a
+ * DSB/DMB/barrier or a speculative second enable to chase it: ARMv8-M
+ * already orders Device-nGnRnE accesses to the same peripheral, a barrier
+ * cannot prevent a slave/decode error (it only makes an imprecise abort
+ * precise), and the vendor's own AE822 sequences contain neither.
  *
  * INSTANCE DERIVATION: computed from the DT reg address, not hardcoded --
  * both instances are DFP-sourced and mapped to their enable_ospi_clk()
