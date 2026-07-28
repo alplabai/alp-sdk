@@ -253,6 +253,20 @@
       "ci": "pr-metadata-validate.yml:validate"
     },
     {
+      "id": "example-board-overlay-parity",
+      "description": "Every example board.yaml core declared via cores.<core>.app: has a matching boards/ overlay wherever the example ships qualified overlays (issue #1009).",
+      "runner": "check-script",
+      "script": "scripts/check_example_board_overlay_parity.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "example-portability",
       "description": "Cross-family portability lint for examples/*/{board.yaml,testcase.yaml}.",
       "runner": "check-script",
