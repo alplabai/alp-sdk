@@ -93,43 +93,24 @@ jobs:
       # listening, so "the call succeeded" is not evidence a run started. Look
       # for the run itself, and say plainly which of the two happened rather
       # than leaving a green step to imply the good one.
+      #
+      # The polling + verdict logic lives in scripts/dispatch-confirm.sh (not
+      # inline) so it's runnable and testable outside CI -- see
+      # tests/scripts/test_dispatch_confirm.py, which stubs `gh` and proves
+      # both a PASS and a FAIL transcript. That test file is what caught the
+      # #194 failure mode this step used to have: its only FAIL condition was
+      # tan-cli's LIFETIME repository_dispatch total_count being exactly 0,
+      # which stops being reachable forever the moment the seam fires once
+      # (it now sits at 2) -- a gate that can only ever warn is a guard
+      # wearing a guard's name. The script instead compares the AGE of
+      # tan-cli's most recent repository_dispatch run (of any kind) against
+      # DISPATCH_CONFIRM_STALE_THRESHOLD_S: recent -> WARN (ordinary Actions
+      # queueing), older than that -> FAIL (the wiring broke again, #194's
+      # actual failure mode), regardless of how many runs have ever fired.
       - name: Confirm a run actually started
         env:
           GH_TOKEN: ${{ steps.apptoken.outputs.token }}
         run: |
           set -uo pipefail
-          for _ in $(seq 1 10); do
-            sleep 6
-            count="$(gh api "repos/alplabai/tan-cli/actions/runs?event=repository_dispatch&per_page=5" \
-                      -q '[.workflow_runs[] | select(.created_at > (now - 300 | todate))] | length' 2>/dev/null || echo 0)"
-            if [ "${count:-0}" -gt 0 ]; then
-              echo "::notice::tan-cli started ${count} repository_dispatch run(s)"
-              exit 0
-            fi
-          done
-          # Two DIFFERENT failures share this code path, and until #194 they
-          # shared a message too. Separate them, because one is transient and
-          # the other is the gate being dead:
-          #
-          #   * no run appeared THIS TIME, but tan has had dispatch runs before
-          #     -> almost always Actions queueing. WARN. Failing this repo's
-          #     push for tan's scheduler would be the wrong blame.
-          #   * tan has had ZERO repository_dispatch runs in its LIFETIME
-          #     -> the wiring is dead, not slow. A queue delay cannot produce a
-          #     lifetime total of 0 once the seam has ever worked, so this is
-          #     unambiguous and gets to FAIL.
-          #
-          # That distinction is the whole lesson of #194: the dispatch had never
-          # fired even once, this step warned on every push, and green
-          # everywhere else made it easy to keep not reading. A permanently dead
-          # gate that only ever warns is a guard wearing a guard's name.
-          lifetime="$(gh api "repos/alplabai/tan-cli/actions/runs?event=repository_dispatch&per_page=1"                         -q '.total_count' 2>/dev/null || echo unknown)"
-          if [ "${lifetime}" = "0" ]; then
-            echo "::error::tan-cli has NEVER had a repository_dispatch run (lifetime total_count=0). The dispatch is accepted with a 204 and goes nowhere, so the cross-repo parity gate is not running at all."
-            echo "::error::Most likely cause, and the one that caused #194: parity.yml's 'repository_dispatch:' trigger is missing from tan-cli's DEFAULT branch. GitHub triggers repository_dispatch ONLY from the default branch's copy of a workflow -- having it on 'dev' alone does nothing. Check https://github.com/alplabai/tan-cli/blob/main/.github/workflows/parity.yml"
-            echo "::error::Second possibility: the event_type no longer matches. This repo posts 'alp-sdk-planner-change'; tan's parity.yml must list that exact string under repository_dispatch.types."
-            exit 1
-          fi
-          # WARN: tan has dispatched before, so the wiring works and this is a
-          # timing miss rather than a broken seam.
-          echo "::warning::dispatched, but no NEW tan-cli repository_dispatch run appeared within ~60s (lifetime runs: ${lifetime}). The wiring has worked before, so this is most likely Actions queueing -- confirm a run for this SHA appeared at https://github.com/alplabai/tan-cli/actions?query=event%3Arepository_dispatch"
+          export DISPATCH_EPOCH="$(date +%s)"
+          bash scripts/dispatch-confirm.sh
