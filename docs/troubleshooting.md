@@ -44,16 +44,6 @@ third entry).  Common slip-ups:
 
 Full schema reference: [`docs/board-config-schema.md`](board-config-schema.md).
 
-### `alp_project: SDK <V> is older than SoM hw_rev '<R>' minimum <M>`
-
-Your `som.hw_rev` declares a rev that needs a newer SDK than this
-checkout.  Either:
-
-* Update the SDK (`west update`) to a version >= `<M>`, OR
-* Pick an older `som.hw_rev` whose `min_sdk_version` window covers
-  the current SDK.  The available revs for your family are listed
-  in `metadata/e1m_modules/<family>/hw-revisions.yaml`.
-
 ### `west: command not found` / `pip install west` fails
 
 The Zephyr meta-tool needs Python 3.10+.  On macOS:

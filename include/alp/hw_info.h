@@ -44,10 +44,10 @@
  * }
  * @endcode
  *
- * The `ALP_HW_BUILD_*` constants come from a future
- * `<alp/hw_info_build.h>` that `scripts/alp_project.py` emits
- * from `board.yaml` (v0.3.x deliverable).  Until that lands,
- * apps pass NULL to skip the matching field.
+ * The `ALP_HW_BUILD_*` constants come from `<alp/hw_info_build.h>`,
+ * which `scripts/alp_project.py` emits from `board.yaml` at
+ * configure time.  Apps pass NULL for a given field to skip
+ * matching it.
  *
  * The runtime EEPROM read path is implemented.  On a build with no
  * EEPROM bus configured (CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID
