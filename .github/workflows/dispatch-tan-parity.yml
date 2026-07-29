@@ -52,12 +52,23 @@ on:
 
 concurrency:
   # A burst of merges should leave tan testing the NEWEST contract surface, not
-  # queue one run per commit against refs that are already superseded.
+  # queue one run per commit against refs that are already superseded. This
+  # does mean the "Confirm a run actually started" step's poll can itself get
+  # cancelled mid-flight by a fast-follow push -- see that step's poll-window
+  # comment in scripts/dispatch-confirm.sh for how that's kept in check
+  # (shorter window, backstopped by the self-calibrated staleness check
+  # rather than a long poll).
   group: ${{ github.workflow }}
   cancel-in-progress: true
 
 permissions:
   contents: read
+  # Needed only to list THIS workflow's own past runs on alp-sdk (the
+  # "Find this workflow's previous dispatch" step below) -- the baseline
+  # for dispatch-confirm.sh's self-calibrated staleness check. Scoped to
+  # read, and to this repo's default GITHUB_TOKEN only; it grants nothing
+  # on tan-cli, which still goes through the separately-minted App token.
+  actions: read
 
 jobs:
   dispatch:
@@ -78,16 +89,62 @@ jobs:
           GH_TOKEN: ${{ steps.apptoken.outputs.token }}
         run: |
           set -euo pipefail
+          # Captured HERE, immediately before the dispatch call, not in the
+          # later "Confirm a run actually started" step. dispatch-confirm.sh's
+          # contract requires DISPATCH_EPOCH to be the moment the dispatch
+          # call returned; capturing it a step later leaves a 1-3s step
+          # transition during which a fast, healthy dispatch's run can be
+          # created before DISPATCH_EPOCH, making the confirm step's strict
+          # `>` comparison miss it. Erring early is the safe direction.
+          echo "DISPATCH_EPOCH=$(date +%s)" >> "$GITHUB_ENV"
           # `alp-sdk-planner-change` and `client_payload.sdk_ref` are the names
           # tan's `tests/parity/README.md` specifies and its `parity.yml`
           # listens for. Renaming either here silently stops the dispatch
           # arriving -- GitHub accepts an unrecognised event_type with a 204,
           # so the failure looks exactly like success from this side.
+          #
+          # NOTE (residual correlation gap, see dispatch-confirm.sh): the run
+          # this creates on tan-cli carries tan-cli's own default-branch
+          # head_sha, not ${{ github.sha }} -- repository_dispatch does not
+          # let the sender's SHA travel into the receiver's run ref. So
+          # nothing in this repo can filter tan-cli's run list down to "the
+          # run THIS dispatch caused" versus a concurrent alp-sdk push (or
+          # any other repository_dispatch sender to tan-cli); dispatch-confirm.sh
+          # can only correlate on event=repository_dispatch plus recency.
+          # Closing that gap needs a tan-cli-side change (e.g. tan's
+          # parity.yml naming its run from client_payload.sdk_ref so it's
+          # visible in the run list) -- tracked as follow-up, not done here.
           gh api repos/alplabai/tan-cli/dispatches \
             -f event_type=alp-sdk-planner-change \
             -F "client_payload[sdk_ref]=${{ github.sha }}" \
             -F "client_payload[branch]=${{ github.ref_name }}"
           echo "::notice::dispatched alp-sdk-planner-change to tan-cli for ${{ github.sha }} (${{ github.ref_name }})"
+
+      - name: Find this workflow's previous dispatch (self-calibration baseline)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          # Baseline for dispatch-confirm.sh's self-calibrated staleness
+          # check: the created_at of THIS workflow's own previous run on
+          # alp-sdk (any status), i.e. roughly when we last dispatched to
+          # tan-cli before this push. Comparing tan-cli's most recent run
+          # against that, instead of a wall-clock constant, is immune to
+          # ordinary quiet periods by construction -- if alp-sdk itself went
+          # N hours without touching the contract surface, no tan-cli run is
+          # expected in those N hours either. Uses the default GITHUB_TOKEN
+          # (read-only, this repo only) -- deliberately NOT the App token,
+          # which is scoped to tan-cli and has no access to alp-sdk itself.
+          # If this can't be determined (the workflow's first-ever run, or
+          # the query fails), PREV_DISPATCH_EPOCH stays unset and the script
+          # falls back to its own documented wall-clock threshold.
+          prev_created="$(gh api "repos/${{ github.repository }}/actions/workflows/dispatch-tan-parity.yml/runs?per_page=5" \
+              -q "[.workflow_runs[] | select(.id != ${{ github.run_id }})][0].created_at // empty" 2>/dev/null)"
+          prev_epoch=""
+          if [ -n "${prev_created}" ]; then
+              prev_epoch="$(date -u -d "${prev_created}" +%s 2>/dev/null || echo "")"
+          fi
+          echo "PREV_DISPATCH_EPOCH=${prev_epoch}" >> "$GITHUB_ENV"
 
       # The dispatch API answers 204 with no body whether or not anything is
       # listening, so "the call succeeded" is not evidence a run started. Look
@@ -97,20 +154,25 @@ jobs:
       # The polling + verdict logic lives in scripts/dispatch-confirm.sh (not
       # inline) so it's runnable and testable outside CI -- see
       # tests/scripts/test_dispatch_confirm.py, which stubs `gh` and proves
-      # both a PASS and a FAIL transcript. That test file is what caught the
-      # #194 failure mode this step used to have: its only FAIL condition was
-      # tan-cli's LIFETIME repository_dispatch total_count being exactly 0,
-      # which stops being reachable forever the moment the seam fires once
+      # PASS, WARN, and both FAIL transcripts. That test file is what caught
+      # the #194 failure mode this step used to have: its only FAIL condition
+      # was tan-cli's LIFETIME repository_dispatch total_count being exactly
+      # 0, which stops being reachable forever the moment the seam fires once
       # (it now sits at 2) -- a gate that can only ever warn is a guard
-      # wearing a guard's name. The script instead compares the AGE of
-      # tan-cli's most recent repository_dispatch run (of any kind) against
-      # DISPATCH_CONFIRM_STALE_THRESHOLD_S: recent -> WARN (ordinary Actions
-      # queueing), older than that -> FAIL (the wiring broke again, #194's
-      # actual failure mode), regardless of how many runs have ever fired.
+      # wearing a guard's name. The script's reachable failure is now
+      # self-calibrated (see PREV_DISPATCH_EPOCH, set by the previous step):
+      # it fails when tan-cli has produced NO repository_dispatch run at all
+      # since the last time THIS workflow itself dispatched, which is real
+      # evidence of a broken seam and, unlike a wall-clock constant, does not
+      # false-positive on this workflow's own ordinary quiet periods (up to
+      # 110.8h measured -- see the script's fallback-threshold comment).
+      #
+      # DISPATCH_EPOCH and PREV_DISPATCH_EPOCH are both already in
+      # $GITHUB_ENV from the two preceding steps -- not captured here, so
+      # this step's own 1-3s startup lag can't shrink either window.
       - name: Confirm a run actually started
         env:
           GH_TOKEN: ${{ steps.apptoken.outputs.token }}
         run: |
           set -uo pipefail
-          export DISPATCH_EPOCH="$(date +%s)"
           bash scripts/dispatch-confirm.sh
