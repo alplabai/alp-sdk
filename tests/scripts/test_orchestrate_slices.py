@@ -197,7 +197,6 @@ _SYNTHETIC_V2N_WITH_ON_MODULE = """\
     helper_firmware:
       - name: gd32_bridge
         chip: gd32g553
-        firmware_path: firmware/gd32-bridge/build/gd32/gd32-bridge.bin
         flash_method:  swd_probe
         flash_args:
           interface: cmsis-dap

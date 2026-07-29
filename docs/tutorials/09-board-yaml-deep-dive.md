@@ -65,9 +65,13 @@ for production SoMs plus placeholder presets for active bring-up:
 | RZ/V2N + DEEPX    | `E1M-V2M101`, `V2M102`                                                        |
 | NXP i.MX 93       | `E1M-NX9101` (placeholder MPN; production `E1M-NX9xxx` TBD pending HW config) |
 
-`hw_rev` cross-checks against the family's `hw-revisions.yaml`.
-If the customer's SDK version is older than the rev's
-`min_sdk_version`, the loader exits with code 3.  Always pin
+`hw_rev` selects an entry from the family's `hw-revisions.yaml` to
+pick up its pad-routing overrides; an unrecognised value falls back
+to the base revision's routing instead of failing (see
+[#1025](https://github.com/alplabai/alp-sdk/issues/1025)), so
+double-check the spelling.  Each entry's `min_sdk_version` /
+`max_sdk_version` window is declarative compatibility data only --
+nothing checks it against the running SDK version.  Always pin
 `hw_rev` for production; omit for bring-up convenience.
 
 ### Board declaration

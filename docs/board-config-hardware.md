@@ -13,12 +13,15 @@ Every released SoM family and every released board carries a
 `hw_revisions:` table.  The SDK uses it to detect "wrong firmware
 for this hardware" two ways:
 
-- **Build-time** -- the loader + validator read
-  [`metadata/sdk_version.yaml`](../metadata/sdk_version.yaml) and
-  fail-fast if the chosen `hw_rev`'s
-  `[min_sdk_version, max_sdk_version]` window doesn't cover the
-  current SDK version.  Validator exit code `3`; loader aborts the
-  CMake configure with a clear error.
+- **Build-time (declarative only)** -- each `hw_revisions:` entry
+  carries a `[min_sdk_version, max_sdk_version]` window as
+  human-readable compatibility data, but nothing in the SDK reads
+  or enforces it today: `scripts/alp_project.py` and
+  `scripts/validate_board_yaml.py` never open
+  [`metadata/sdk_version.yaml`](../metadata/sdk_version.yaml), and
+  there is no exit-3 path.  An unrecognised `hw_rev` value silently
+  falls back to base-revision overrides instead of failing --
+  tracked as [#1025](https://github.com/alplabai/alp-sdk/issues/1025).
 - **Runtime** -- the SDK boots into a board-ID check that uses
   a single ADC pin per board (SoM-side and board-side) fed by a
   resistor divider from a 1.8 V rail.  Each `hw_rev` entry's
