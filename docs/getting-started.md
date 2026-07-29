@@ -52,6 +52,11 @@ firmware as a first-class consumer.
 
 If you'd rather skim, the fastest path is:
 
+> Needs `git` and `curl` already on PATH -- a from-scratch host (a bare
+> container, a fresh VM) needs those installed first; see the
+> per-platform one-liners in [§1 Prerequisites](#1-prerequisites) below
+> (`sudo apt install -y git curl` on Debian/Ubuntu).
+
 ```bash
 git clone https://github.com/alplabai/alp-sdk
 cd alp-sdk
@@ -59,6 +64,20 @@ bash scripts/bootstrap.sh                            # one-time: west + Python +
 export ZEPHYR_BASE="$PWD/../zephyr"
 curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh  # one-time: install tan (no Rust toolchain needed)
 export PATH="$HOME/.local/bin:$PATH"  # install.sh already made this permanent in your shell rc; needed once more in THIS shell
+
+# one-time: the arm-zephyr-eabi cross toolchain this build needs (~a few
+# hundred MB with --no-hosttools) -- bootstrap.sh does not install this
+# for you, only the west/Python layer above it
+( cd .. && west sdk install --gnu-toolchains arm-zephyr-eabi --no-hosttools \
+    --install-dir "$PWD/zephyr-sdk" )
+export ZEPHYR_SDK_INSTALL_DIR="$PWD/../zephyr-sdk"
+
+# one-time per project: pin THIS alp-sdk checkout for the example --
+# `--project` scoping means this has to match the --project value below,
+# not just be run once at the repo root; until it's run, `tan build`
+# reports `[x]  sdk   no SDK selected`
+tan --project examples/peripheral-io/gpio-button-led sdk switch "$PWD"
+
 tan --project examples/peripheral-io/gpio-button-led build
 # this cross-compiles for the example's real SoM (E1M-AEN801) -- it
 # needs the Zephyr SDK toolchain pinned in metadata/toolchains.json;
@@ -212,7 +231,27 @@ For real-silicon builds you'll also need the Zephyr SDK toolchain --
 its pinned version/URL/sha256 live in
 [`metadata/toolchains.json`](../metadata/toolchains.json), the
 single source (see `docs/zephyr-version-policy.md`) -- and a JTAG /
-SWD probe matching your board.  See [`docs/boards/e1m-evk.md`](boards/e1m-evk.md) for
+SWD probe matching your board.  Nothing installs it for you; from
+your west workspace's top-level directory (the alp-sdk checkout's
+parent):
+
+```bash
+west sdk install --gnu-toolchains arm-zephyr-eabi --no-hosttools \
+    --install-dir "$PWD/zephyr-sdk"
+export ZEPHYR_SDK_INSTALL_DIR="$PWD/zephyr-sdk"
+```
+
+Then, once per project, tell `tan` which alp-sdk checkout to build
+with -- scoped to the SAME `--project` value you pass to `tan build`,
+not run once globally:
+
+```bash
+tan --project <app-dir> sdk switch <path-to-this-alp-sdk-checkout>
+```
+
+Skipping this makes `tan doctor --build`'s `sdk` line, and `tan
+build` itself, report `no SDK selected` even with everything else in
+place.  See [`docs/boards/e1m-evk.md`](boards/e1m-evk.md) for
 the EVK's wiring.
 
 > **Note for Windows users.**  The repo's `.gitattributes` pins
@@ -269,6 +308,16 @@ After this:
 `west update --narrow -o=--depth=1` keeps the clone shallow —
 saves ~30 GB of unrelated git history.
 
+The steps above get you Zephyr itself, not a cross toolchain — every
+example below targets a real SoM, so install the Zephyr SDK's
+`arm-zephyr-eabi` too (one-time, still from `alp-workspace`):
+
+```bash
+west sdk install --gnu-toolchains arm-zephyr-eabi --no-hosttools \
+    --install-dir "$PWD/zephyr-sdk"
+export ZEPHYR_SDK_INSTALL_DIR="$PWD/zephyr-sdk"
+```
+
 Importing alp-sdk via `west init -m` also surfaces the SDK's
 surviving west-extension commands — `west alp-migrate` (board.yaml
 schema migration), `west alp-lock` (dependency lockfile), `west
@@ -291,8 +340,16 @@ build` does the pre-flight + delegates to `west build`:
 
 ```bash
 cd alp-workspace
+tan --project alp-sdk/examples/peripheral-io/gpio-button-led sdk switch "$PWD/alp-sdk"   # one-time per project
 tan --project alp-sdk/examples/peripheral-io/gpio-button-led build
 ```
+
+The `sdk switch` step pins which alp-sdk checkout `tan` builds this
+project with — it's scoped to the exact `--project` value, so a
+DIFFERENT `--project` (a different example, or your own app) needs its
+own `sdk switch` first; see "6. Run more examples" below for the
+multi-project shape. Skip it and `tan build` fails with `[x]  sdk   no
+SDK selected` even though the checkout is right there.
 
 What this does:
 
@@ -380,7 +437,11 @@ for ex in peripheral-io/pwm-led-fade peripheral-io/adc-voltmeter \
           peripheral-io/can-loopback peripheral-io/qenc-readout \
           power-timing/counter-alarm power-timing/rtc-clock \
           power-timing/wdt-feed audio/i2s-tone; do
-    tan --project alp-sdk/examples/$ex build
+    # --sdk-root here (rather than a `sdk switch` per project) is the
+    # right shape for a one-shot loop over many --project values: it
+    # takes effect for this invocation only, no persistent per-project
+    # pointer to clean up afterwards.
+    tan --sdk-root "$PWD/alp-sdk" --project alp-sdk/examples/$ex build
 done
 ```
 

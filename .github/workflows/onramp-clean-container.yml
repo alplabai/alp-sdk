@@ -1,0 +1,245 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Clean-container onramp check (issue #949 addendum A7).
+#
+# pr-getting-started-aen801.yml already builds the AEN801 example on
+# every relevant PR, but it runs on `ubuntu-latest` -- a GitHub-hosted
+# runner image that ships git/curl/cmake/python3/ninja/xz-utils out of
+# the box -- and it drives the build with a raw `west build` command,
+# never `tan`.  That combination means it could never have caught any
+# of #949's defects: a genuinely bare host failing `git clone` (no
+# git/curl), `scripts/bootstrap.sh` refusing without saying what to
+# install, nothing installing the Zephyr SDK toolchain, `tan sdk
+# switch` never being run, or `west sdk install` dying on a missing
+# `xz` binary.  This workflow closes that gap by running the
+# DOCUMENTED path (docs/getting-started.md's quickstart, verbatim,
+# `tan` and all) inside a genuinely bare `ubuntu:24.04` CONTAINER --
+# no apt package this job doesn't itself install first.
+#
+# Two jobs, deliberately different cost/frequency, per the addendum's
+# own ask to be honest about cost:
+#
+#   prereqs-and-bootstrap (every relevant PR, ~1-2 min): proves a bare
+#     host can go from nothing to an assembled west/Zephyr workspace
+#     following ONLY docs/getting-started.md §1's per-OS one-liner +
+#     `bash scripts/bootstrap.sh`.  No Zephyr SDK download -- catches
+#     defects 1, 2, 5 (git/curl, the bootstrap.sh refusal message, the
+#     missing `xz` prerequisite) cheaply, on every PR that touches the
+#     onramp surface.
+#
+#   full-quickstart-build (weekly + workflow_dispatch only, ~10-15 min
+#     -- a real `west sdk install --gnu-toolchains arm-zephyr-eabi
+#     --no-hosttools` download, a few hundred MB per pr-twister.yml's
+#     own measurement): walks the REST of the documented quickstart --
+#     installs `tan`, installs the toolchain, runs `tan sdk switch` +
+#     `tan --project ... build`, and asserts a real `zephyr.elf` came
+#     out the other end.  This is the expensive half (defects 3, 4)
+#     and does NOT run on every PR -- a doc-only PR that breaks this
+#     path waits for the weekly run or a manual workflow_dispatch,
+#     which is the trade the addendum asked to make explicit rather
+#     than silently skip.
+#
+name: onramp-clean-container
+
+on:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - 'docs/getting-started.md'
+      - 'README.md'
+      - 'scripts/bootstrap.sh'
+      - 'scripts/bootstrap.ps1'
+      - 'metadata/bootstrap.json'
+      - 'metadata/schemas/bootstrap-v1.schema.json'
+      - 'scripts/check_bootstrap_manifest.py'
+      - '.github/workflows/onramp-clean-container.yml'
+  schedule:
+    # Sunday 07:00 UTC -- the expensive full-build job only; cheap
+    # enough weekly that a stale toolchain/tan-flow regression surfaces
+    # within days, not silently forever.
+    - cron: '0 7 * * 0'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prereqs-and-bootstrap:
+    name: onramp · bare container -- prereqs + bootstrap.sh (docs §1)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    container:
+      image: ubuntu:24.04
+    steps:
+      # A genuinely bare ubuntu:24.04 container has neither git nor
+      # curl -- actions/checkout's documented fallback (no git found ->
+      # download the ref as a tarball via the GitHub REST API) is what
+      # makes checkout possible here at all; this step ALSO proves the
+      # premise: if these ever stop being absent (a base-image change
+      # upstream), this job silently stops testing what it claims to.
+      - name: Assert the base image is actually bare (git/curl/cmake/python3/ninja/xz absent)
+        shell: bash
+        run: |
+          set -uo pipefail
+          missing=0
+          for bin in git curl cmake python3 ninja xz; do
+            if command -v "${bin}" >/dev/null 2>&1; then
+              echo "::error::${bin} is already on PATH in ubuntu:24.04 -- this job's premise (a bare host) no longer holds; update this job or the base image pin"
+              missing=1
+            fi
+          done
+          exit "${missing}"
+
+      - name: Checkout alp-sdk
+        uses: actions/checkout@v6
+        with:
+          path: alp-sdk
+          fetch-depth: 1
+
+      # docs/getting-started.md's own prerequisite note above the
+      # quickstart -- `git`/`curl` first, since bootstrap.sh itself
+      # can't be fetched without them.
+      - name: Install git + curl (docs/getting-started.md's own prerequisite note)
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git curl ca-certificates
+
+      # scripts/bootstrap.sh should refuse HERE (cmake/python3/ninja/xz
+      # still absent) with a curated per-tool install hint, not a bare
+      # tool-name list -- the exact defect #949 addendum item 2 fixes.
+      - name: bootstrap.sh refuses with an actionable per-tool hint (expect failure)
+        working-directory: alp-sdk
+        run: |
+          set +e
+          out="$(bash scripts/bootstrap.sh 2>&1)"
+          rc=$?
+          echo "${out}"
+          set -e
+          if [ "${rc}" -eq 0 ]; then
+            echo "::error::bootstrap.sh succeeded on a host missing cmake/python3/ninja/xz -- it should have refused"
+            exit 1
+          fi
+          # Every missing tool's curated install command (from
+          # metadata/bootstrap.json's prerequisites.install.linux, via
+          # bootstrap.sh's drift-gated PREREQ_HINT_LINUX mirror) must
+          # actually appear -- a bare tool-name-only message is the
+          # pre-#978/#949 regression this asserts against.
+          for hint in \
+            "sudo apt-get install -y cmake" \
+            "sudo apt-get install -y python3" \
+            "sudo apt-get install -y ninja-build" \
+            "sudo apt-get install -y xz-utils"; do
+            case "${out}" in
+              *"${hint}"*) ;;
+              *) echo "::error::bootstrap.sh's refusal message is missing the hint: ${hint}"; exit 1 ;;
+            esac
+          done
+
+      # Now install exactly what docs/getting-started.md section 1's
+      # Debian/Ubuntu one-liner tells a customer to install (plus the
+      # newly-declared `xz` prerequisite) and prove bootstrap.sh
+      # succeeds -- a real customer's next step after reading the
+      # refusal message above.
+      - name: Install prerequisites (docs/getting-started.md section 1)
+        run: |
+          apt-get install -y --no-install-recommends \
+              cmake ninja-build python3 python3-pip python3-venv xz-utils
+
+      - name: bootstrap.sh succeeds once every prerequisite is installed
+        working-directory: alp-sdk
+        run: bash scripts/bootstrap.sh --no-west
+          # --no-west here: this job is the cheap PRE-toolchain phase
+          # (addendum's own cost split) -- `west init`/`update` fetch
+          # Zephyr itself (~30 MB shallow) and belong in the full-build
+          # job below, which already pays for a much larger SDK
+          # download and can absorb it. This job's job is proving the
+          # venv + prerequisite layer alone, not re-proving west.yml
+          # resolves (pr-twister.yml already covers that on every PR).
+
+  full-quickstart-build:
+    name: onramp · bare container -- full quickstart to a real ELF (docs §1-4)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      image: ubuntu:24.04
+    steps:
+      - name: Install prerequisites (docs/getting-started.md section 1, plus xz)
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+              git curl ca-certificates cmake ninja-build python3 python3-pip python3-venv xz-utils
+
+      - name: Checkout alp-sdk
+        uses: actions/checkout@v6
+        with:
+          path: alp-sdk
+          fetch-depth: 1
+
+      - name: bash scripts/bootstrap.sh (docs quickstart step 1)
+        working-directory: alp-sdk
+        run: bash scripts/bootstrap.sh
+
+      - name: Install tan (docs quickstart step 2 -- the documented install.sh one-liner)
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh
+          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+
+      # metadata/toolchains.json (issue #949 item 3) is the single
+      # source for the pinned SDK version -- read the same way
+      # pr-getting-started-aen801.yml and pr-twister.yml already do,
+      # so the cache key tracks the real pin.
+      - name: Read Zephyr SDK toolchain pin (metadata/toolchains.json)
+        working-directory: alp-sdk
+        run: |
+          set -euo pipefail
+          source ../.venv/bin/activate
+          python3 -c '
+          import json
+          d = json.load(open("metadata/toolchains.json"))
+          print(f"ZEPHYR_SDK_VERSION={d[\"zephyrSdk\"][\"version\"]}")
+          ' >> "$GITHUB_ENV"
+
+      - name: Cache Zephyr SDK (arm-zephyr-eabi only)
+        uses: actions/cache@v5
+        with:
+          path: zephyr-sdk
+          key: onramp-sdk-${{ env.ZEPHYR_SDK_VERSION }}-arm-zephyr-eabi-${{ runner.os }}
+
+      # The documented command itself (docs/getting-started.md quickstart
+      # + section 1) -- not pr-getting-started-aen801.yml's hand-rolled
+      # wget+sha256 shortcut, so a `west sdk install` regression (the
+      # patoolib/xz failure #949 reported) is exactly what this catches.
+      - name: west sdk install (docs quickstart -- the real toolchain install command)
+        # No working-directory override: this runs at GITHUB_WORKSPACE
+        # itself (alp-sdk's PARENT, i.e. bootstrap.sh's own WORKSPACE_DIR),
+        # where bootstrap.sh (run with `working-directory: alp-sdk` above)
+        # already left `.venv/` and `zephyr/` as siblings of `alp-sdk/`.
+        run: |
+          source .venv/bin/activate
+          west sdk install --gnu-toolchains arm-zephyr-eabi --no-hosttools \
+              --install-dir "${GITHUB_WORKSPACE}/zephyr-sdk"
+        env:
+          ZEPHYR_BASE: ${{ github.workspace }}/zephyr
+
+      - name: tan sdk switch + tan build (docs quickstart -- the documented per-project pin)
+        working-directory: alp-sdk
+        env:
+          ZEPHYR_SDK_INSTALL_DIR: ${{ github.workspace }}/zephyr-sdk
+        run: |
+          set -euo pipefail
+          tan --project examples/peripheral-io/gpio-button-led sdk switch "${PWD}"
+          tan --project examples/peripheral-io/gpio-button-led build
+
+      - name: Assert a real ELF came out the other end
+        working-directory: alp-sdk
+        run: |
+          set -euo pipefail
+          elf="$(find examples/peripheral-io/gpio-button-led/build -name zephyr.elf -print -quit)"
+          if [ -z "${elf}" ] || [ ! -s "${elf}" ]; then
+            echo "::error::no non-empty zephyr.elf under examples/peripheral-io/gpio-button-led/build -- the documented quickstart did not reach a real build output"
+            exit 1
+          fi
+          echo "Built: ${elf} ($(stat -c%s "${elf}") bytes)"
