@@ -1643,6 +1643,27 @@ git commit -m "build(python): package tan as a single-file executable the extens
 
 **Why:** Rust `tan` is shipped and correct. Diffing against it is what removes the "port with no reference" risk — it is the direct replacement for the `fan_out` oracle that Phase 4 deleted. Rust `tan` is retired only for capabilities this harness has confirmed.
 
+> **Parity must be defined PER SURFACE — a naive whole-plan diff will fail for a
+> reason that is not a port bug.** Established while reviewing Task 4:
+> `crates/tan-core/src/build_plan.rs:138-164`'s `BuildSlice` does **not** model
+> `appDir`, `toolchain`, `artifacts` or `debug`, and
+> `crates/tan-cli/src/commands/build/plan_modes.rs:234` says so outright — the
+> typed struct would "drop them and emit a schema-invalid plan", which is why
+> Rust's `--plan --format json` passes **raw, unsubstituted** JSON through
+> instead of re-serialising.
+>
+> So for the `build --plan` case: Rust emits the raw plan; Python models and
+> substitutes four keys Rust never touches. Diffing those two whole documents
+> compares different things and always differs.
+>
+> **Do not "fix" Python to match.** The schema requires those fields and names
+> `slices[].appDir` among the tokened ones — Python is correct and the
+> checked-out Rust is behind. Either scope this case's parity to the surface
+> both actually produce (envelope shape, exit code, and the keys Rust models),
+> or add `app_dir` to the Rust struct first. Record which was chosen.
+>
+> The `--version` and `validate` cases are unaffected and remain strict.
+
 - [ ] **Step 1: Write the failing test**
 
 ```python
