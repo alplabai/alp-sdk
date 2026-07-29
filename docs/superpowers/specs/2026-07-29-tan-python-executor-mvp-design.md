@@ -147,19 +147,56 @@ Per-slice fields consumed: `coreId`, `backend`, `buildDir`, `appDir`,
 `configArtefacts`, `toolchain`, `artifacts`, `debug`, `command`, `env`,
 `envAppendPath`.
 
-### 2. Packaging — the hash-pin must survive
+### 2. Packaging — one raw executable per target
 
-This is the load-bearing unknown. The extension today downloads a **pinned-hash,
-signed single binary**; ADR-0020's security clause names that download "the
-softest link… it executes arbitrary build commands". A Python program that
-shells a user's site-packages cannot be hash-pinned, and `SUPPORTED_CLI_VERSION`
-would degrade from a hash pin to an advisory string. That is an unacceptable
-regression, so the MVP must prove it away.
+**Correction to ADR-0020 (verified against the extension source).** ADR-0020
+states the extension "Bundles or downloads the `tan` binary with **pinned-hash /
+signature verification**", and its security clause calls that download "the
+softest link… it executes arbitrary build commands". **That verification does
+not exist.** `alp-sdk-vscode/src/alpCli/download.ts:11-16` disclaims it in its
+own comment — verbatim: *"there's no checksum/signature check here"* — pointing
+at an open tracking issue, `alplabai/tan-cli#7`. The only integrity check is a
+byte-count match against `Content-Length` (`download.ts:100-123`); the bundled
+path is trusted purely because it shipped inside the `.vsix`
+(`adapterCore.ts:106-110` chmods it and runs it). The PATH path's "verified"
+means only a `--version` probe matching a regex (see below).
 
-**Approach: PyInstaller one-file build per platform**, producing a single
-executable that is hashed and signed exactly like the Rust artifact — the
-existing 8-asset release shape and the extension's verification flow are
-preserved.
+So there is **no hash-pin to preserve** — the ADR describes an intent, not the
+shipped state. Packaging is therefore not a security-regression risk. It is a
+**shape** requirement, which is a harder constraint than it sounds:
+
+`service.ts:293-314` builds the download URL as
+`https://github.com/alplabai/tan-cli/releases/download/v${version}/tan-${target}${".exe" on win32}`,
+and its comment states verbatim: *"tan-cli ships a RAW binary per target (not an
+archive)"*. `download.ts:159-162` writes the response **straight to the
+destination file — there is no unarchive/unpack step anywhere in the
+extension.**
+
+**Requirement: PyInstaller `--onefile`.**
+
+- A **one-file** artifact drops in unchanged — same URL scheme, same
+  download→rename→`chmod 0o755` (`download.ts:124-129`)→cache-at-one-path flow.
+- A **one-dir** artifact **breaks the extension.** There is no code path that
+  can materialise a directory of files. One-dir is out of scope, permanently,
+  unless the extension's download path is rewritten.
+
+**Release assets must keep the existing names and targets** (`service.ts:34-46`)
+— six targets, named by Rust target triple even though the producer is no longer
+Rust:
+
+| platform/arch | asset name |
+|---|---|
+| `win32/x64` | `tan-x86_64-pc-windows-msvc.exe` |
+| `win32/arm64` | `tan-aarch64-pc-windows-msvc.exe` |
+| `linux/x64` | `tan-x86_64-unknown-linux-musl` |
+| `linux/arm64` | `tan-aarch64-unknown-linux-musl` |
+| `darwin/x64` | `tan-x86_64-apple-darwin` |
+| `darwin/arm64` | `tan-aarch64-apple-darwin` |
+
+Keeping the triple-shaped names means **zero extension change** for the
+MVP. (The `musl` names imply a static-linking property PyInstaller does not
+provide; renaming them is a follow-up that touches `service.ts:34-46`, so it is
+deliberately deferred out of sub-project 1.)
 
 This does **not** claim `tan` becomes Python-free at runtime for *building*: a
 build always needs the host's west/Zephyr Python environment. That is equally
@@ -191,6 +228,45 @@ oracle has confirmed. **No oracle-less window opens at any point** — this is t
 direct mitigation of the "reverse drift, no reference" risk, and it is why the
 port is safe in a way the original Phase 4 deletion was not.
 
+## Constraints the extension imposes (verified in `alp-sdk-vscode`)
+
+These are contract facts the Python `tan` must satisfy exactly, or the extension
+fails **silently** — it renders nothing, with no compile error and no test
+failure. All verified against the checkout at `E:\GitHub\alp-sdk-vscode`.
+
+- **`--version` first line must match `/^tan \d+\.\d+\.\d+/`**
+  (`service.ts:107-121` `isNativeTanVersionOutput`, used by
+  `service.ts:128-132` `parseTanVersion` for the behind/ahead skew checks and by
+  `vscodeAdapter.ts:846-861` `commandOnPath` to decide whether a PATH binary is
+  a real `tan`). A Python `tan` whose `--version` prints anything else is
+  treated as *not `tan`*.
+- **The pin is `SUPPORTED_CLI_VERSION = "0.4.0"`** (`service.ts:27`). The
+  extension resolves a **released tag** — `v${version}`. A change merged to
+  tan-cli `dev` reaches nobody here until it is released *and* pinned.
+- **Invocation**: `spawn(command, [...args, "--format", "json"], { cwd, signal })`
+  (`adapterCore.ts:152-176`, seam at `vscodeAdapter.ts:784`). **No `shell: true`**,
+  no `env` override — the child inherits `process.env`. Output cap
+  `ALP_SPAWN_MAX_OUTPUT = 16 * 1024 * 1024`.
+- **Envelope shape is asserted** (`service.ts:235-246` `isEnvelope`): `command`
+  string, `ok` boolean, `exitCode` number, `issues` array. Parsed from trimmed
+  stdout (`service.ts:219-233`); anything unparseable yields `null` and the
+  extension degrades quietly. **Nothing but JSON may reach stdout.**
+- **Issue codes are matched by exact string.** Reproduce these verbatim:
+  `"bootstrap.prerequisites-missing"`, `"bootstrap.python-not-runnable"`,
+  `"bootstrap.python-too-old"` (`service.ts:397-401` `PREREQ_CODES`), plus
+  `"bootstrap.windows-unsupported"` and `"bootstrap.yocto-host"`
+  (`service.ts:365-386` `bootstrapHostVerdict`), all with `severity: "error"`.
+  Note these already encode host-Python prerequisite handling — the Python port
+  must keep the distinction between *the interpreter that runs `tan`* (bundled,
+  invisible) and *the host west/Zephyr Python* these codes describe.
+- **Startup overhead is not free.** `vscodeAdapter.ts:762` sets
+  `ALP_SPAWN_TIMEOUT_MS = 60_000`, and `vscodeAdapter.ts:288-290` probes
+  `--version` with a **3 s** timeout. PyInstaller one-file pays a per-invocation
+  unpack cost; the `--version` probe is the tightest budget in the system and
+  must be measured against that 3 s. **Verify which spawn path a long build
+  actually uses before assuming the 60 s cap does not apply to it** — that is an
+  explicit MVP check, not an assumption.
+
 ## Test strategy
 
 - **Unit** (pytest) on `core/`: `apply_env_append` de-dup, `assemble_slice_env`
@@ -220,7 +296,8 @@ Plans remain **trusted input**, as today: writes are confined under
 
 | Risk | Mitigation |
 |---|---|
-| Python artifact can't be hash-pinned → vscode security regression | PyInstaller single-file, signed + SHA-256 pinned. **Proven in this sub-project or the port stops.** |
+| ~~Python artifact can't be hash-pinned → vscode security regression~~ **RETIRED** | No hash or signature verification exists in the extension today (`download.ts:11-16`), so there is nothing to regress from. The real constraint is *shape*: PyInstaller `--onefile`, because the download path has no unpack step. |
+| PyInstaller startup cost breaks the 3 s `--version` probe | Measured as an explicit acceptance criterion against `vscodeAdapter.ts:288-290`; one-file unpack cost is the known worst case. |
 | Reverse drift while porting, no reference | Rust `tan` is the live oracle for every capability; it is retired only after parity. |
 | Process/cancel/streaming UX regression on long builds | stdlib `subprocess`; west is the existence proof. Cancellation + streaming are explicit acceptance criteria, not assumed. |
 | Python environment ambiguity (documented drift trap in this lab) | The shipped artifact bundles its own interpreter; the west venv is resolved explicitly and separately. Never PATH. |
@@ -235,14 +312,22 @@ Sub-project 1 is done when all five hold:
 2. Envelope parity with Rust `tan` on every exercised path, success and failure.
 3. Execution parity (command / env / skip-fail decision) over the AEN +
    native_sim dry-run matrix.
-4. A signed, SHA-256-pinnable single-file artifact on all three platforms, with
-   startup overhead recorded.
+4. A PyInstaller `--onefile` artifact under the existing asset names, dropped
+   into the extension's download path **with zero extension changes**, running a
+   real build end-to-end; `--version` prints `tan X.Y.Z` as its first line and
+   the probe completes inside the 3 s budget.
 5. Unit tests green on `core/`; the repo's existing cargo gates still green
    (the Rust workspace is untouched).
 
-## Open question for Hakan
+## Follow-ups deliberately deferred
 
-Packaging and verification are his surface. **Does a PyInstaller single-file
-artifact satisfy the extension's pinned-hash / signature flow unchanged, or does
-the bundling path in `alp-sdk-vscode` need work?** If it needs work, that cost
-belongs in this sub-project, not discovered at cutover.
+- **ADR-0020's verification claim is factually wrong** and should be corrected
+  when the superseding ADR is written — it describes pinned-hash/signature
+  verification that was never implemented (`alplabai/tan-cli#7` is still open).
+  Whatever language `tan` is written in, the download is unverified today.
+- **Asset names keep Rust target triples** (`tan-x86_64-unknown-linux-musl`
+  etc.) so the MVP needs no extension change. The `musl` names imply a
+  static-linking property PyInstaller does not provide; renaming them touches
+  `service.ts:34-46` and belongs in the cutover sub-project.
+- **Actually adding checksum verification** is orthogonal to this port and
+  cheaper to do once, on whichever artifact ships.
