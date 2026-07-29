@@ -502,6 +502,19 @@ def test_bootstrap_sh_darwin_excludes_xz_and_wget_from_refusal(tmp_path):
     to just `dirname`/`git`/`python3` (real, via symlink) so `cmake`/`ninja`
     are genuinely absent too -- the only way to force an actual refusal --
     and assert the refusal names cmake/ninja but never xz/wget."""
+    if sys.platform == "win32":
+        # The whole premise -- fake a Darwin host by putting a `uname` shim
+        # first on a stripped PATH -- does not hold on native Windows. Git
+        # Bash resolves its own `uname` (`MINGW64_NT-...`) ahead of an
+        # extensionless shim, and `Path.symlink_to` needs a privilege the
+        # runner does not have, so the Darwin branch never fires and the
+        # refusal correctly lists xz/wget. Nothing about scripts/bootstrap.sh
+        # is under test here on Windows: it is POSIX-only (tan bootstrap
+        # refuses native Windows outright with `windows-unsupported`), and
+        # Windows users run scripts/bootstrap.ps1. The macOS branch this
+        # covers is exercised on the ubuntu and macos legs, which is where
+        # the assertion means something.
+        pytest.skip("bootstrap.sh is POSIX-only; the Darwin uname shim cannot work on native Windows")
     bash_path = shutil.which("bash")
     if bash_path is None:
         pytest.skip("bash not available on PATH")
