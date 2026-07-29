@@ -319,6 +319,58 @@ Sub-project 1 is done when all five hold:
 5. Unit tests green on `core/`; the repo's existing cargo gates still green
    (the Rust workspace is untouched).
 
+## Boundaries the rest of the port must not cross (ADR-0017 unification)
+
+alp-sdk is a **unification layer over the vendor SDK**, for hardware and
+software alike. Moving the planner into `tan` must leave that position intact.
+Two consequences bind sub-projects 2-4:
+
+1. **`metadata/**` stays in alp-sdk. It does not move.** ADR-0017's rule is that
+   every hardware fact (peripheral count, memory size, clock id, pin route)
+   lives **once** under `metadata/**`, and every downstream file — `soc_caps.h`,
+   `cap.h`/`cap.c`, board `dts`/`yaml`/`_defconfig`, route headers — is
+   *generated* from it and carries a "do not edit — regenerate" banner. What
+   relocates into `tan` is the **generators**, never the facts. `tan` reads
+   `metadata/` and emits; alp-sdk remains metadata + C/HAL + the portable
+   `<alp/*>` API. A hardware fact duplicated into the `tan` repo is a defect by
+   this doctrine, not a convenience.
+
+2. **Sub-project 2 is a RELOCATION, not a rewrite.** ADR-0017's other rule is
+   "consume what exists; don't reimplement". The alp-sdk planner is *already
+   Python* (~6,230 lines under `scripts/alp_orchestrate/`, plus `scripts/alp_cli/`),
+   so it moves substantially as-is. Only the **Rust executor** is genuinely
+   rewritten. Anyone treating sub-project 2 as a from-scratch reimplementation
+   is both taking on needless risk and violating the doctrine — the planner's
+   accumulated silicon knowledge is exactly what must not be re-derived.
+
+The same rule applies to this port's own dependencies: consume `kconfiglib`,
+`west`, `PyYAML`, `jsonschema` — never vendor or reimplement them.
+
+## Correction: Zephyr's kconfig hook cannot be pointed at the `tan` binary
+
+An earlier working assumption — that `--emit kconfig` could escape Python by
+pointing `EXTRA_KCONFIG_TARGET_COMMAND_FOR_*` at the `tan` binary — is **false**,
+verified against the Zephyr checkout:
+
+- `zephyr/cmake/modules/kconfig.cmake:236-237` places `${PYTHON_EXECUTABLE}`
+  immediately before the `EXTRA_KCONFIG_TARGET_COMMAND_FOR_<target>` expansion in
+  one flat argument list. The value's first token is therefore always argv[0]
+  **to the interpreter** and must be parseable Python source. `tan;kconfig-dump;…`
+  would run `python tan kconfig-dump …` and fail.
+- The alternate escape — overriding `PYTHON_EXECUTABLE` itself — is closed by
+  `zephyr/cmake/modules/python.cmake:44`, a plain
+  `set(PYTHON_EXECUTABLE ${Python3_EXECUTABLE})` that clobbers any `-D` override.
+  This is the same trap already documented in `scripts/kconfig/alp_kconfig_dump.py`'s
+  own docstring.
+
+**Consequence for the goal.** "No Python *files* in the alp-sdk tree" is
+achievable: the dumper shim can be generated into a `mkdtemp` scratch dir at
+runtime, the same pattern `_load_board_symbols` already uses for its stub app.
+"No Python *involved* in an alp-sdk build" is **not** achievable, and never was —
+Zephyr and west are themselves Python, which is precisely why ADR-0020 refused a
+Rust planner. Any plan that promises otherwise is promising something the build
+system cannot deliver.
+
 ## Follow-ups deliberately deferred
 
 - **ADR-0020's verification claim is factually wrong** and should be corrected
