@@ -39,16 +39,15 @@ issues at
 ## Quickstart
 
 ```bash
-# One-time per clone: stand up the west/Zephyr workspace + install the
-# CLI into it (scripts/bootstrap.ps1 on native Windows)
-bash scripts/bootstrap.sh
-source ../.venv/bin/activate
-export ZEPHYR_BASE="$PWD/../zephyr"
-
-# One-time: install the standalone build executor (no Rust toolchain needed --
-# see below for a from-source alternative)
+# One-time: install the build executor and user command surface (no Rust
+# toolchain needed -- see below for a from-source alternative)
 curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"  # install.sh already made this permanent in your shell rc; needed once more in THIS shell
+
+# One-time per clone: stand up the west/Zephyr workspace + venv beside this
+# checkout (Linux, macOS and native Windows alike). Reads
+# metadata/bootstrap.json, so it cannot drift from what the SDK pins.
+tan bootstrap --sdk-root "$PWD"
 
 # Sanity-check the host -- catches a missing toolchain/HAL before it bites later
 tan doctor --build
@@ -62,7 +61,7 @@ cd my-app
 tan build --native
 ```
 
-`bash scripts/bootstrap.sh` is what actually gets `west` (and everything else `tan build` shells out to) onto `PATH` — skipping it is the #1 way this Quickstart fails on a fresh clone; see [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md) for the per-OS manual equivalent. `tan` is not installed by `bootstrap.sh` -- it's a separate public Rust binary from [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli); the `install.sh` one-liner above needs no Rust toolchain. Building from source instead needs Rust 1.86+ (get it from [rustup.rs](https://rustup.rs)) plus a system C toolchain (`build-essential` on Debian/Ubuntu, `gcc`/`gcc-c++` on Fedora/RHEL -- see [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md) §2.1): `git clone https://github.com/alplabai/tan-cli && cd tan-cli && cargo install --path crates/tan-cli --locked`. `tan init` walks you through SoM SKU + template + destination interactively, or accepts `--som`, `--template`, `--cores` (and friends) for CI -- see `tan init --help` for the full flag set. `tan build` (`--native` is the default, explicit-opt-in spelling) consumes the SDK's build plan, materialises it, and runs each slice's `west`/`bitbake`/`cmake` command directly for the real SoM `board.yaml` targets; it never runs the produced binary itself (that's `tan run`). Flashing real hardware is `tan flash`.
+`tan bootstrap` is what stands up the workspace `tan build` needs — the west/Zephyr tree and the Python venv, one level up from `alp-sdk/` — and skipping it is the #1 way this Quickstart fails on a fresh clone. You do **not** activate that venv by hand: the SDK's build plan carries the `PATH` additions per slice, so `tan build` finds `west` on its own. Activate it (`source ../.venv/bin/activate`) only if you intend to run `west` yourself. `scripts/bootstrap.sh` (and `scripts/bootstrap.ps1` on native Windows) is the same setup as a shell script for CI and for hosts without `tan`; both read the same `metadata/bootstrap.json`, so they cannot drift apart. See [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md) for the per-OS manual equivalent. `tan` is not installed by either -- it's a separate public Rust binary from [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli); the `install.sh` one-liner above needs no Rust toolchain. Building from source instead needs Rust 1.86+ (get it from [rustup.rs](https://rustup.rs)) plus a system C toolchain (`build-essential` on Debian/Ubuntu, `gcc`/`gcc-c++` on Fedora/RHEL -- see [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md) §2.1): `git clone https://github.com/alplabai/tan-cli && cd tan-cli && cargo install --path crates/tan-cli --locked`. `tan init` walks you through SoM SKU + template + destination interactively, or accepts `--som`, `--template`, `--cores` (and friends) for CI -- see `tan init --help` for the full flag set. `tan build` (`--native` is the default, explicit-opt-in spelling) consumes the SDK's build plan, materialises it, and runs each slice's `west`/`bitbake`/`cmake` command directly for the real SoM `board.yaml` targets; it never runs the produced binary itself (that's `tan run`). Flashing real hardware is `tan flash`.
 
 `tan validate board.yaml` runs the diagnostic-rich validator standalone — try it on a fixture under `tests/fixtures/board_yaml_bad/` to see the format.  `tan doctor --build` triages the host build environment (`[+]`/`[!]`/`[x]` lines with fix hints) whenever a build machine misbehaves.  alp-sdk is plans-only — it emits `build-plan` / `system-manifest`; the whole build / flash / size / image / clean / renode surface lives in the standalone [`tan` CLI](https://github.com/alplabai/tan-cli).  alp-sdk's own remaining verb set — `generate` / `validate` / `doctor` / `monitor` / `new-som` / `model` and friends — is documented in [`docs/cli.md`](docs/cli.md).
 
