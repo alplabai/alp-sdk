@@ -29,8 +29,10 @@ when:
      `metadata/toolchains.json`, issue #949 item 3)
      disagrees with `zephyr.version`.
   5. README.md's Zephyr badge disagrees with `zephyr.version`.
-  6. `prerequisites.posix` disagrees with bootstrap.sh's hardcoded
-     `REQUIRED_BINS=(...)`, `prerequisites.windows` disagrees with
+  6. `prerequisites.posix` disagrees with bootstrap.sh's hardcoded (canonical,
+     non-Darwin) `REQUIRED_BINS=(...)`, `prerequisites.macos` disagrees with
+     bootstrap.sh's Darwin-branch `REQUIRED_BINS=(...)` reassignment (the
+     macOS xz/wget exemption), `prerequisites.windows` disagrees with
      bootstrap.ps1's hardcoded `$Prereqs` name list, or
      `prerequisites.pythonMinVersion` disagrees with either script's
      hardcoded Python floor (bootstrap.sh's `PYTHON_MIN_VERSION="..."`,
@@ -607,6 +609,42 @@ def _check_prerequisites_posix(manifest: dict) -> list[str]:
     if sh_bins != manifest_bins:
         return [f"scripts/bootstrap.sh REQUIRED_BINS={sorted(sh_bins)} disagrees with "
                  f"metadata/bootstrap.json prerequisites.posix={sorted(manifest_bins)}"]
+    return []
+
+
+# bootstrap.sh's Darwin branch reassigns REQUIRED_BINS to a narrower set (no
+# xz/wget) -- `_SH_REQUIRED_BINS_RE` above is a plain `.search` (first match
+# wins, BY DESIGN: it targets the canonical, non-Darwin literal), so it can
+# never see this second assignment. Anchored on the `"Darwin" ]; then` guard
+# so it can't accidentally match the canonical or --print-env arrays instead.
+_SH_DARWIN_REQUIRED_BINS_RE = re.compile(
+    r'"Darwin"\s*\]\s*;\s*then.*?REQUIRED_BINS=\(([^)]*)\)', re.DOTALL)
+
+
+def _check_prerequisites_macos(manifest: dict) -> list[str]:
+    """scripts/bootstrap.sh's Darwin-branch `REQUIRED_BINS=(...)`
+    reassignment (the macOS xz/wget exemption) must agree with
+    `prerequisites.macos` -- the single source of truth for the EFFECTIVE
+    macOS prerequisite set, the same way `prerequisites.posix` polices the
+    canonical (non-Darwin) `REQUIRED_BINS` literal `_check_prerequisites_posix`
+    above already checks. Without this, `prerequisites.macos` could drift
+    (a tool added or dropped on either side) with nothing to catch it --
+    exactly the hole `prerequisites.posix`/`.windows` already close for the
+    non-Darwin lists."""
+    if not BOOTSTRAP_SH.is_file():
+        return [f"missing {BOOTSTRAP_SH.relative_to(REPO).as_posix()}"]
+    text = BOOTSTRAP_SH.read_text(encoding="utf-8")
+    m = _SH_DARWIN_REQUIRED_BINS_RE.search(text)
+    if m is None:
+        return ["scripts/bootstrap.sh: could not find the Darwin-branch "
+                 "`REQUIRED_BINS=(...)` reassignment -- update this gate if "
+                 "it was renamed/restructured"]
+    sh_bins = set(m.group(1).split())
+    manifest_bins = set(manifest["prerequisites"]["macos"])
+    if sh_bins != manifest_bins:
+        return [f"scripts/bootstrap.sh Darwin-branch REQUIRED_BINS={sorted(sh_bins)} "
+                 f"disagrees with metadata/bootstrap.json prerequisites.macos="
+                 f"{sorted(manifest_bins)}"]
     return []
 
 
@@ -1261,6 +1299,7 @@ def main() -> int:
     problems += _check_no_hardcoded_literal(BOOTSTRAP_PS1, manifest_version)
     problems += _check_readme_badge(manifest_version)
     problems += _check_prerequisites_posix(manifest)
+    problems += _check_prerequisites_macos(manifest)
     problems += _check_prerequisites_windows(manifest)
     problems += _check_python_min_version_posix(manifest)
     problems += _check_python_min_version_windows(manifest)

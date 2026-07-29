@@ -38,6 +38,12 @@ twister-out.*/
 modules/
 zephyr/.cache/
 
+# tan's per-project active-SDK pointer (`tan sdk switch`, issue #949) --
+# written under whatever directory `--project` names, including an
+# in-tree example (e.g. examples/peripheral-io/gpio-button-led/.alp/)
+# when following docs/getting-started.md's quickstart from this checkout.
+.alp/
+
 # Compiled binaries
 *.exe
 *.out

@@ -234,7 +234,8 @@ cross-platform since tan-cli#55) owns the Python layer — `.venv`, `west`,
 
 - `metadata/bootstrap.json` declares `prerequisites.windows:
   ["git", "cmake", "python", "ninja"]` and `prerequisites.posix:
-  ["git", "cmake", "python3"]` — **names only**, no install commands.
+  ["git", "cmake", "python3", "ninja", "xz", "wget"]` — **names only**, no
+  install commands.
 - tan hardcodes the winget IDs per tool
   (`crates/tan-cli/src/commands/bootstrap/steps.rs`: `Git.Git`,
   `Kitware.CMake`, `Python.Python.3.12`, `Ninja-build.Ninja`), formats them

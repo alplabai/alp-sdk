@@ -6,17 +6,24 @@
 #
 #   1. `build` job:
 #      a. Verify the tag matches `metadata/sdk_version.yaml`.
-#      b. Verify CHANGELOG.md has a matching `## [v<N>] - YYYY-MM-DD`
-#         section (release notes will be sliced from this).
-#      c. Verify the ABI snapshot at docs/abi/v<N>-snapshot.json
+#      b. Verify the ABI snapshot at docs/abi/v<N>-snapshot.json
 #         exists.
+#      c. Verify CHANGELOG.md has a matching `## [v<N>] - YYYY-MM-DD`
+#         section and slice it for the release notes -- a missing
+#         heading, or one present but with an empty body (e.g. the
+#         section is still under `## [Unreleased]`), FAILS the
+#         release rather than publishing an empty/stub body.  A
+#         pre-release tag (`vX.Y.Z-rcN`) is cut before the final
+#         heading exists, so it falls back to `## [Unreleased]`
+#         instead -- clearly labelled, never a silent stub.
 #      d. Build a source tarball (no binaries -- the SDK is a source
 #         release).
 #      e. Generate SHA-256 + SHA-512 checksums.
-#      f. Create the GitHub Release with the CHANGELOG slice as the
-#         body and the tarball + checksums as artefacts.
+#      f. Emit an SBOM + build receipt (`*.cdx.json`).
 #      g. Emit the tarball's base64-encoded SHA-256 digest for the
 #         provenance generator (consumed via `outputs.hashes`).
+#      h. Create the GitHub Release with the CHANGELOG slice as the
+#         body and the tarball + checksums + SBOM as artefacts.
 #
 #   2. `provenance` job (calls the slsa-framework reusable workflow):
 #      a. Runs inside an isolated, ephemeral GitHub-hosted runner
@@ -36,7 +43,10 @@
 #
 # Tag form: `v<MAJOR>.<MINOR>.<PATCH>` (SemVer).  Pre-release tags
 # (`vX.Y.Z-rc1`) are supported and produce a "pre-release" Release
-# on GitHub.
+# on GitHub.  Because an rc is cut before the CHANGELOG's final
+# `## [vX.Y.Z]` heading exists, its release notes are pulled from
+# `## [Unreleased]` instead and the body is prefixed to say so --
+# see the "Verify + slice CHANGELOG" step below.
 #
 # Verification (downstream customer):
 #
@@ -119,25 +129,90 @@ jobs:
           # Confirm working-tree headers match the committed snapshot.
           python3 scripts/abi_snapshot.py --diff "$SNAPSHOT"
 
-      - name: Slice CHANGELOG section for the release notes
+      - name: Verify + slice CHANGELOG section for the release notes
         id: changelog
         run: |
           VERSION="${{ steps.tag.outputs.core_version }}"
-          # The CHANGELOG section header is `## [v<VERSION>]` (date
-          # follows after a dash).  Slice from that line up to (but
-          # not including) the next `## ` line.
-          python3 - <<PY > release_notes.md
+          IS_PRERELEASE="${{ steps.tag.outputs.is_prerelease }}"
+          # The CHANGELOG section header is `## [v<VERSION>] - YYYY-MM-DD`.
+          # Slice from that line up to (but not including) the next `## `
+          # line. A miss (e.g. the section is still headed `## [Unreleased]
+          # - vX.Y.Z candidate`), or a heading that exists but has nothing
+          # under it, fails the release rather than publishing an
+          # empty/stub body -- except for a pre-release tag, which is cut
+          # before the final heading exists and so falls back to
+          # `## [Unreleased]` instead, clearly labelled as such.
+          #
+          # Args (not `${{ }}` interpolated into the script) so a stray
+          # `$`/backtick in either value can't be read as shell/Python.
+          python3 - "$VERSION" "$IS_PRERELEASE" <<'PY' > release_notes.md
           import re, sys
-          version = "${{ steps.tag.outputs.core_version }}"
+
+          version, is_prerelease = sys.argv[1], sys.argv[2] == "true"
           text = open("CHANGELOG.md").read()
-          # Match either '## [v0.4.0] - ...' or '## [Unreleased] - v0.4.0 candidate'
-          # We want the first form once the slice has been cut.
-          pattern = rf"^## \[v{re.escape(version)}\][^\n]*\n(.*?)(?=^## |\Z)"
-          m = re.search(pattern, text, re.MULTILINE | re.DOTALL)
-          if not m:
-              print(f"# v{version}\n\nRelease notes pending CHANGELOG slice.", file=sys.stdout)
-              sys.exit(0)
-          print(m.group(1).strip())
+
+
+          def slice_section(heading_pattern):
+              m = re.search(
+                  rf"^{heading_pattern}[^\n]*\n(.*?)(?=^## |\Z)",
+                  text,
+                  re.MULTILINE | re.DOTALL,
+              )
+              return m.group(1).strip() if m else None
+
+
+          def fail(message):
+              print(f"::error::{message}", file=sys.stderr)
+              sys.exit(1)
+
+
+          final_heading = f"## [v{version}]"
+          heading_used = final_heading
+          prefix = ""
+          body = slice_section(rf"## \[v{re.escape(version)}\]")
+
+          if body is None and is_prerelease:
+              # rc tags are cut off `dev` before the final dated heading is
+              # cut -- fall back to Unreleased rather than failing outright,
+              # but never silently: the body says exactly where it came from.
+              heading_used = "## [Unreleased]"
+              prefix = (
+                  f"> Pre-release build -- final CHANGELOG heading "
+                  f"'{final_heading}' not cut yet. Notes below are pulled "
+                  f"from '{heading_used}'.\n\n"
+              )
+              body = slice_section(r"## \[Unreleased\]")
+
+          if body is None:
+              # Report the closest real heading, not just the first '## ['
+              # in the file (always '## [Unreleased]') -- a typo'd heading
+              # like '## [0.14.0]' (missing the 'v') would otherwise send
+              # the operator to the wrong place.
+              near_miss = re.search(
+                  rf"^## \[v?{re.escape(version)}\][^\n]*$", text, re.MULTILINE
+              )
+              if near_miss:
+                  found = near_miss.group(0)
+              else:
+                  found = next(
+                      (ln.rstrip("\n") for ln in text.splitlines() if ln.startswith("## [")),
+                      "<no '## [' heading found>",
+                  )
+              fail(
+                  f"CHANGELOG.md has no '{heading_used}' section for this "
+                  f"release. Expected a heading starting with "
+                  f"'{heading_used}', found '{found}' instead. Cut the "
+                  f"CHANGELOG slice (move it out of Unreleased) before tagging."
+              )
+
+          if not body:
+              fail(
+                  f"CHANGELOG.md has a '{heading_used}' heading but its body "
+                  f"is empty -- nothing to publish. Fill in the release "
+                  f"notes under that heading before tagging."
+              )
+
+          print(prefix + body)
           PY
 
       - name: Build source tarball

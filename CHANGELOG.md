@@ -83,6 +83,40 @@ the generated `soc_caps.h`, so the gap is visible where the macros are
 actually consumed, not just recorded in metadata nobody reads. This does
 not correct any count — the full re-audit against Alif's datasheets/DFP is
 tracked as follow-up work.
+### Fixed — the macOS and Windows CI legs can now fail the PR (ADR 0012 enforced, not just claimed)
+
+`cross-platform-zephyr.yml`'s `python-smoke` and `loader-smoke` jobs ran their
+macOS and Windows legs under a job-level `continue-on-error: true`, so those
+checks reported **success no matter what their steps did** ([#1023]). ADR 0012
+calls the Zephyr-on-M developer workflow first-class on Win + Mac + Linux; that
+commitment was documented and unenforced, and a host-specific regression landed
+green. Same defect class as #994, #995, #1002 and #1017 — a gate that exists but
+cannot fail. The `include:` overrides and the
+`continue-on-error: ${{ matrix.continue-on-error }}` lines are gone; all three
+legs of both jobs now gate, with `fail-fast: false` kept so a Windows break does
+not cancel the macOS leg that would show the same defect from another angle.
+
+Read the run history with care: while the override was in place a green tick on
+those legs proved nothing, so "they have always passed" was never evidence. The
+flip rests on the per-**step** conclusions of four consecutive runs
+(`30457062916`, `30455621379`, `30450805406`, `30441032872`), which were 24/24
+clean — not on the job conclusions the override forged.
+
+`scripts/check_cross_platform.py` deliberately **stays** in soft-warn mode: its
+`--fail-on-warning` flip waits on the separate `docs/*` cleanup of Linux-only
+idioms, so that lint still reports without gating.
+
+**This is half the fix, and the remaining half is a repo setting, not a file.**
+`dev`'s required status checks are `clang-format · diff-only`,
+`twister-shard 1/4`–`4/4` and `renode · V2N101 --sim-mode socket contract`.
+`python-smoke (macos-latest)` and `python-smoke (windows-latest)` are **not**
+among them, so a failing leg now reports red but still does not block the merge.
+Until those six contexts are added to branch protection on `dev` and `main`,
+[#1023]'s stated expectation — "a Windows or macOS failure blocks the PR" — is
+still not true.
+
+[#1023]: https://github.com/alplabai/alp-sdk/issues/1023
+
 ### Fixed — docs stopped advertising an `hw_rev` / SDK-version gate that has never existed
 
 `metadata/sdk_version.yaml` and `metadata/e1m_modules/v2n/hw-revisions.yaml`'s
@@ -105,6 +139,57 @@ equality against the single `hw_rev` the firmware was built for
 silently falling back to base-revision pad routing instead of failing -- is
 tracked at [#1025](https://github.com/alplabai/alp-sdk/issues/1025); every
 rewritten doc now points there instead of restating the false gate.
+### Added — the hw_rev / SDK-version gate now exists, so the claim the entry above removed can come back true (#1019)
+
+The entry above removed `metadata/sdk_version.yaml`'s claim that
+`scripts/alp_project.py` "refuses to emit when the requested hw_rev is outside
+`[min_sdk_version, max_sdk_version]`" — correctly, because nothing implemented
+it. This builds the gate, so the file states the behaviour again rather than
+disclaiming it. The two changes are sequential, not contradictory: the docs
+were made honest first, and this makes them honest in the other direction.
+
+The exposure was real. `grep -rn 'min_sdk_version\|max_sdk_version' scripts/`
+returned nothing, and `alp_project_loader.py:35`'s `SDK_VERSION_FILE` was
+referenced nowhere else in its own file, so a customer whose upgraded SDK no
+longer supported their board revision got a normal, successful emit and
+firmware built against the wrong hardware assumptions, silently — while the
+data to catch it (`metadata/boards/e1m-evk.yaml:324-325`,
+`metadata/boards/e1m-x-evk.yaml:294-295`,
+`metadata/e1m_modules/*/hw-revisions.yaml`) sat in tree, unread.
+
+New `scripts/alp_orchestrate/sdk_compat.py` is that check, kept pure and
+data-only so the comparison is testable without a board.yaml, a metadata tree
+or a loader. `loader.py` calls it once both the SoM and board revisions are
+resolved, so the single implementation serves every consumer of
+`load_board_yaml` — including both `alp_project.py` emit paths (`:193`,
+`:237`), which is what makes the version file's claim true rather than
+relocating it.
+
+Both bounds are **inclusive**, and the comparison is numeric: string ordering
+puts `"0.13.0" < "0.5.0"` and would have silently allowed the exact upgrade
+this exists to catch. An absent bound is unbounded, never zero — reading it
+otherwise would refuse every `status: reserved` revision, which declares no
+range at all. An unreadable SDK version stays quiet, mirroring
+`buildplan._sdk_version`'s behaviour with no adjacent `metadata/` tree, and a
+malformed bound is treated as absent rather than turning a metadata typo into
+a refused build.
+
+`scripts/validate_board_yaml.py` maps exactly this failure to **exit code 3**
+via a new `SdkRevisionUnsupported`, an `OrchestratorError` subclass — so every
+existing `except OrchestratorError` keeps catching it, and the exit code needs
+no message string-matching.
+
+Nothing currently in tree is affected: all 27 shipped ranges are open-ended on
+the high side with a floor of `0.3.0` or none, against an SDK of `0.13.0`.
+Verified by mutation — capping a family revision at `0.5.0` in a copied
+metadata tree makes the loader refuse and the CLI exit 3, and disabling both
+bound checks fails 6 of the 15 new tests in
+`tests/scripts/test_sdk_revision_gate.py`.
+
+Deliberately out of scope: whether a requested revision *exists* or is
+`status: reserved` is a different failure with a different message, tracked at
+#1025.
+
 ### Changed — one first command: `README.md` and `docs/getting-started.md` now lead with `tan bootstrap`, like tan's own quickstart does
 
 Three published quickstarts taught three different first commands for the
@@ -154,6 +239,44 @@ the host compiler (`native_sim`, ztests, `tan validate`, `tan doctor`,
 metadata work), and `tan` itself, which publishes a working
 `tan-x86_64-apple-darwin`. The equivalent overclaim in the extension's docs
 is tracked at alp-sdk-vscode#415.
+
+### Fixed — the documented fresh-clone quickstart hard-refused on a bare POSIX host: undeclared `xz`/`wget`, no toolchain step, no per-project SDK pin (#949)
+
+Five defects blocked the quickstart on a genuinely clean host, verified end
+to end in a bare `ubuntu:24.04` container: `git`/`curl` were assumed
+present with no upfront note; nothing installed the `arm-zephyr-eabi`
+cross toolchain; `tan sdk switch` (per-project, not global) was never
+documented; `west sdk install`'s `tar --xz` extraction silently needs
+`xz`; and the pinned Zephyr SDK's own `setup.sh` hard-checks for `wget` on
+Linux. Both gaps were undeclared anywhere in `metadata/bootstrap.json` or
+`scripts/bootstrap.sh`.
+
+`metadata/bootstrap.json` / `bootstrap-v1.schema.json` now declare `xz`
+and `wget` as Linux-only POSIX prerequisites (apt/brew install commands,
+`manualInstallHints.posix`); a `prerequisites.macos` block plus a new
+`_check_prerequisites_macos` gate keeps the macOS exemption honest —
+`bsdtar` decompresses `.xz` in-process and macOS resolves `wget` from its
+own hosttools, so neither is required there, only on Linux.
+`scripts/bootstrap.sh` gates on both up front. `docs/getting-started.md`'s
+§1 Debian/Ubuntu one-liner and `docs/cross-platform-setup.md` §2.1 now
+name both packages explicitly. Both quickstarts add the missing
+`west sdk install --gnu-toolchains arm-zephyr-eabi` step and the
+per-project `tan --project <dir> sdk switch "$PWD"` step, without which
+`tan build` reports `[x]  sdk   no SDK selected` even after bootstrap
+succeeds. `docs/firmware-quickstart.md` gets the same `sdk switch` fix at
+its three onramp-adjacent sites.
+
+New `.github/workflows/onramp-clean-container.yml` walks the documented
+quickstart, verbatim, inside a genuinely bare `ubuntu:24.04` container —
+`pr-getting-started-aen801.yml`'s pre-provisioned runner and raw
+`west build` invocation could never have caught any of this. A cheap
+prereqs+bootstrap phase runs on every relevant PR; the full toolchain +
+`tan build` phase runs weekly and on `run-full-quickstart`-labeled PRs.
+
+This does not change which command a quickstart leads with — dev's
+`tan bootstrap --sdk-root "$PWD"` ordering (#1021) is unaffected; these
+prerequisites apply transitively, since `tan bootstrap` shells out to
+`scripts/bootstrap.sh`.
 
 ### Changed — `zephyr/kconfigs/core.kconfig`: E8 builds now default to the real SoC capability profile, not the permissive one
 
