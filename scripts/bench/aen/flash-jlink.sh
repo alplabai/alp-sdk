@@ -43,7 +43,12 @@ JLINK_ARGS=("$JLINK")
 NAME=$(basename "$BD")
 BIN="$BD/zephyr/zephyr.bin"
 ELF="$BD/zephyr/zephyr.elf"
-BUF=0x$($OBJ-nm "$ELF" | awk '/ ram_console_buf$/{print $1}')
+# See ram-run.sh (issue #935): if BUF_SYM is empty, do NOT fold it into BUF --
+# BUF would silently become the bare string "0x" and step 4's `mem8 $BUF,
+# $SIZE` would run as `mem8 0x, $SIZE`, printing an EMPTY "RAM console" block
+# indistinguishable from a boot failure. Step 4 below checks BUF_SYM directly.
+BUF_SYM=$($OBJ-nm "$ELF" | awk '/ ram_console_buf$/{print $1}')
+BUF=0x$BUF_SYM
 
 # 0. SAFETY GATE -- confirm we are talking to the AEN E8, not some other probe
 # on the bench, BEFORE any MRAM write. Same DPIDR gate as
@@ -84,7 +89,7 @@ cat > "$SET/build/config/$NAME.json" <<JSON
 JSON
 
 cd "$SET"
-echo ">>> FLOW-D J-Link flash $NAME  (ram_console_buf=$BUF)" >&2
+echo ">>> FLOW-D J-Link flash $NAME  (ram_console_buf=${BUF_SYM:-none (UART console)})" >&2
 # 2. build the signed ATOC package (app-gen-toc only -- NO SE-UART) + read its
 #    MRAM placement from the generated map (shifts per build/config -- never hardcode).
 ./app-gen-toc -f "build/config/$NAME.json" >/tmp/gentoc.log 2>&1 || { echo "gen-toc FAILED"; tail /tmp/gentoc.log; exit 1; }
@@ -119,7 +124,12 @@ fi
 # 4. SES has re-booted the app; attach read-only with the GENERIC device and dump
 #    the RAM console (the part-number profile can't re-halt the running secure core).
 sleep 3
-cat > /tmp/flowd-read.jlink <<EOF
+if [ -z "$BUF_SYM" ]; then
+  echo "----- $NAME RAM console: no 'ram_console_buf' in this image (UART-console app) -----" >&2
+  echo "      the flash above still completed -- this is not a boot failure. Read the" >&2
+  echo "      console via the labgrid 'console' resource instead." >&2
+else
+  cat > /tmp/flowd-read.jlink <<EOF
 device $JLINK_DEVICE_READ
 si SWD
 speed $JLINK_SPEED
@@ -127,7 +137,8 @@ connect
 mem8 $BUF, $SIZE
 exit
 EOF
-"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/flowd-read.jlink 2>/tmp/flowd-rd.err > /tmp/flowd-rd.out || true
-echo "----- $NAME RAM console (flow-D flashed, SE-booted) -----"
-awk '/^[0-9A-Fa-f]+ = / { for (i=3;i<=NF;i++){ if ($i !~ /^[0-9A-Fa-f][0-9A-Fa-f]$/) continue; b=strtonum("0x"$i); if(b==0){nul++; if(nul>6)exit; next} nul=0; if(b==10||b==13){printf "\n";continue} if(b>=32&&b<127)printf "%c",b } }' /tmp/flowd-rd.out
-echo; echo "--------------------------------------------------------"
+  "${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/flowd-read.jlink 2>/tmp/flowd-rd.err > /tmp/flowd-rd.out || true
+  echo "----- $NAME RAM console (flow-D flashed, SE-booted) -----"
+  awk '/^[0-9A-Fa-f]+ = / { for (i=3;i<=NF;i++){ if ($i !~ /^[0-9A-Fa-f][0-9A-Fa-f]$/) continue; b=strtonum("0x"$i); if(b==0){nul++; if(nul>6)exit; next} nul=0; if(b==10||b==13){printf "\n";continue} if(b>=32&&b<127)printf "%c",b } }' /tmp/flowd-rd.out
+  echo; echo "--------------------------------------------------------"
+fi
