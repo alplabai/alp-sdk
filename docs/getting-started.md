@@ -55,10 +55,9 @@ If you'd rather skim, the fastest path is:
 ```bash
 git clone https://github.com/alplabai/alp-sdk
 cd alp-sdk
-bash scripts/bootstrap.sh                            # one-time: west + Python + apt hints
-export ZEPHYR_BASE="$PWD/../zephyr"
 curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh  # one-time: install tan (no Rust toolchain needed)
 export PATH="$HOME/.local/bin:$PATH"  # install.sh already made this permanent in your shell rc; needed once more in THIS shell
+tan bootstrap --sdk-root "$PWD"                      # one-time: west + Zephyr workspace + venv
 tan --project examples/peripheral-io/gpio-button-led build
 # this cross-compiles for the example's real SoM (E1M-AEN801) -- it
 # needs the Zephyr SDK toolchain pinned in metadata/toolchains.json;
@@ -68,14 +67,27 @@ tan --project examples/peripheral-io/gpio-button-led build
 #   [gpio] done
 ```
 
-`scripts/bootstrap.sh` is the canonical fresh-clone setup -- it
-creates the Zephyr workspace one level up from `alp-sdk/`, runs
-`west update --narrow`, installs the Zephyr Python deps + the
-SDK's extras (`jsonschema`, `imgtool`), and prints OS-specific
-`apt` / `brew` commands for the optional native libraries the
-Yocto-side backends need.  Windows-native users run the PowerShell
-twin, `scripts/bootstrap.ps1`, instead (see
-[`docs/cross-platform-setup.md`](cross-platform-setup.md) §4).
+`tan bootstrap` is the canonical fresh-clone setup, on Linux, macOS
+and native Windows alike -- it creates the Zephyr workspace one level
+up from `alp-sdk/`, runs `west update --narrow`, installs the Zephyr
+Python deps + the SDK's extras (`jsonschema`, `imgtool`), and prints
+OS-specific `apt` / `brew` commands for the optional native libraries
+the Yocto-side backends need.  It is a native Rust implementation, not
+a wrapper around the shell script, and it reads the same
+`metadata/bootstrap.json` the scripts do, so the two cannot drift.
+
+`scripts/bootstrap.sh` (and its PowerShell twin `scripts/bootstrap.ps1`
+-- see [`docs/cross-platform-setup.md`](cross-platform-setup.md) §4)
+does the same job without `tan`, which is what CI and a host that has
+no `tan` yet use.  Either is fine; the commands above lead with `tan`
+because it is the SDK's documented user command surface (ADR
+[0020](adr/0020-sdk-owns-build-execution.md)) and because a reader who
+runs one first command everywhere has one thing to debug, not two.
+
+Note the venv is **not** something you activate by hand for a build:
+the build plan carries the per-slice `PATH` additions, so `tan build`
+resolves `west` itself.  Activate it (`source ../.venv/bin/activate`)
+only if you intend to drive `west` directly.
 
 `tan build` validates the example's `board.yaml` (via alp-sdk's
 `alp_orchestrate`), generates the build-time config from it, and

@@ -1,29 +1,11 @@
 # Cross-platform developer setup
 
-The Alp SDK supports development on **Linux, macOS (Apple
-Silicon), native Windows, and Windows + WSL2**.  The
-Zephyr-on-M-class workflow (`board.yaml` → `west build` → flash)
-is first-class on every one of those hosts — same source tree,
-same `west.yml`, same metadata, identical artefacts.
-
-**Intel Macs cannot build real-silicon Zephyr images or run `tan
-build` against `arm-zephyr-eabi`.**  The pinned Zephyr SDK (see
-`metadata/toolchains.json`) publishes host builds for
-`linux-x86_64`, `linux-aarch64`, `macos-aarch64`, and
-`windows-x86_64` only — `macos-x86_64` was published through the
-SDK's `0.17.4` release and dropped starting `1.0.0`.
-`macos-aarch64` is not a usable substitute: Rosetta translates
-x86_64 binaries *for* Apple Silicon, not the reverse, and macOS has
-no WSL2-style fallback to a different host arch the way Windows
-does.  Real-silicon Zephyr builds and `tan build` need a Linux host
-instead — a `linux-x86_64` VM/container on the same machine, or a
-remote Linux builder.
-
-The `native_sim` half of the Zephyr-on-M workflow is unaffected:
-it builds with the host's own compiler
-(`ZEPHYR_TOOLCHAIN_VARIANT=host`, see
-[`docs/local-ci.md`](local-ci.md)), never the Zephyr SDK, so §3's
-Homebrew prerequisites apply on an Intel Mac exactly as written.
+The Alp SDK supports development on **Linux, macOS, native
+Windows, and Windows + WSL2**.  The Zephyr-on-M-class workflow
+(`board.yaml` → `west build` → flash) is first-class on every
+host OS — same source tree, same `west.yml`, same metadata,
+identical artefacts — with one exception: real-silicon builds on
+macOS need Apple Silicon (see §1, §3).
 
 The Yocto-on-A-class workflow is Linux-only by upstream constraint
 (`bitbake` does not run on macOS or native Windows).  Mac /
@@ -56,30 +38,36 @@ which host OSes support which workflow natively.  **Native** means
 **WSL2 / VM** means "runs inside a Linux environment hosted on
 the OS".
 
-| Workflow | Linux | macOS (Apple Silicon) | macOS (Intel) | Win native | Win + WSL2 |
-|---|---|---|---|---|---|
-| **Zephyr-on-M (`native_sim`)** — examples, ztests, day-to-day iteration | yes | yes | yes¹ | no (use WSL2) | yes (via WSL) |
-| **Zephyr-on-M (real silicon)** — `west build` + `west flash` against EVK | yes | yes | no | yes | yes (via WSL) |
-| **Yocto-on-A (`bitbake`)** — full Linux userland image build | yes | no | no | no | yes |
-| **Heterogeneous orchestrator (`tan build` fanning out across cores)** | yes | yes (Zephyr halves only) | no | yes (Zephyr halves only) | yes |
+| Workflow | Linux | macOS | Win native | Win + WSL2 |
+|---|---|---|---|---|
+| **Zephyr-on-M (`native_sim`)** — examples, ztests, day-to-day iteration | yes | yes | no (use WSL2) | yes (via WSL) |
+| **Zephyr-on-M (real silicon)** — `west build` + `west flash` against EVK | yes | **Apple silicon only** | yes | yes (via WSL) |
+| **Yocto-on-A (`bitbake`)** — full Linux userland image build | yes | no | no | yes |
+| **Heterogeneous orchestrator (`tan build` fanning out across cores)** | yes | **Apple silicon only** (Zephyr halves) | yes (Zephyr halves only) | yes |
 
-¹ Host-toolchain build (`ZEPHYR_TOOLCHAIN_VARIANT=host`) — `native_sim`
-never touches the Zephyr SDK, so the SDK's missing `macos-x86_64`
-artifact doesn't apply.  See §3.
-
-Read: an Apple Silicon Mac user can do everything on the host
-**except** build the Yocto half (use a Linux VM for that).  An
-Intel Mac user can run `native_sim` on the host — it's a
-host-toolchain build, no Zephyr SDK involved — but cannot
-cross-compile for real silicon or run `tan build`: those need the
-Zephyr SDK's missing `macos-x86_64` artifact (see above) and need a
-Linux host (VM, container, or remote builder) instead.  A Windows
-user runs the cross-compiled real-silicon `west build` natively in
-PowerShell, but **both** the `native_sim` simulator target and the
-Yocto half need WSL2 — upstream Zephyr's `native_sim` is
-Linux/macOS only and has no native-Windows target.  Switching is
-`cd {project}` from PowerShell into the WSL filesystem
+Read: a Mac user can do everything on the host **except** build
+the Yocto half (use a Linux VM for that).  A Windows user runs the
+cross-compiled real-silicon `west build` natively in PowerShell,
+but **both** the `native_sim` simulator target and the Yocto half
+need WSL2 — upstream Zephyr's `native_sim` is Linux/macOS only and
+has no native-Windows target.  Switching is `cd {project}` from
+PowerShell into the WSL filesystem
 (`\\wsl$\Ubuntu-22.04\home\{user}\...`).
+
+**Intel Macs cannot cross-compile.**  The two "Apple silicon only"
+cells above are not a preference — the pinned Zephyr SDK
+(`metadata/toolchains.json`, version `1.0.1`) publishes host builds
+for `linux-aarch64`, `linux-x86_64`, `macos-aarch64` and
+`windows-x86_64` only.  Upstream shipped `macos-x86_64` through
+`0.17.4` and dropped it in `1.0.0`, so there is no
+`arm-zephyr-eabi` cross toolchain for an Intel Mac at the version
+this SDK pins.  `macos-aarch64` is not a substitute: Rosetta
+translates x86_64 *for* Apple silicon, not the reverse, and macOS
+has no WSL2 equivalent to fall back to.  What an Intel Mac *can*
+still do is everything that uses the host compiler — `native_sim`
+builds, ztests, `tan validate`, `tan doctor`, metadata work — and
+`tan` itself has a published `tan-x86_64-apple-darwin` binary and
+runs fine.  For real-silicon firmware, build on a Linux host.
 
 ADR [0012](adr/0012-cross-platform-developer-host.md) is the
 load-bearing decision behind this matrix.  ADR
@@ -262,20 +250,9 @@ Persist `ZEPHYR_BASE` in your shell profile (typically
 
 ## 3. macOS setup (13 Ventura+)
 
-§3.1–§3.3 below (Homebrew, base toolchain, Python deps) apply on
-**both** Apple Silicon and Intel Macs — none of it is arch-gated —
-and get you a working `native_sim` build on either.  **Real-silicon
-Zephyr builds are Apple Silicon only**: `west sdk install` pulls the
-Zephyr SDK, which publishes no `macos-x86_64` artifact for the
-pinned version (see the callout in §1); an Intel Mac needs a Linux
-host for that one workflow instead.  §3.4 (Arm GNU Toolchain) is
-unaffected by any of this either way — it's for three opt-in paths,
-none of them the Zephyr-on-M default, and arm.com ships that
-toolchain for both macOS architectures.
-
 macOS is supported natively for the Zephyr-on-M `native_sim`
 workflow on both architectures; real-silicon builds are Apple
-Silicon only (see above).  Mac users targeting Yocto reach for a
+Silicon only (see §1).  Mac users targeting Yocto reach for a
 Linux VM (UTM, Parallels, VirtualBox) — `bitbake` does not run on
 macOS.
 

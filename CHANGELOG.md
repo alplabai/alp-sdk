@@ -7,6 +7,88 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.14.0 candidate
 
+### Fixed — `cross-platform-zephyr.yml`'s macOS and Windows jobs carried `continue-on-error: true` and could never fail
+
+The comment above the two jobs called it a "scaffolding pass" pending the
+runners proving out; that flip never happened, so for two of the three
+OSes ADR 0012 calls first-class, the gate could not go red no matter what
+broke. All three jobs now block on failure, and the dead per-OS
+`include:` blocks and `continue-on-error: ${{ matrix.continue-on-error }}`
+expressions that carried the always-`false` flag are deleted from both
+jobs — the exact mechanism that caused the defect, one word from
+returning. The header comment now says plainly what removing
+`continue-on-error` buys: a visible red run, not a blocked merge — neither
+job is in `dev`'s or `main`'s required-status-check list
+(`gh api repos/alplabai/alp-sdk/rulesets` returns `[]`); making them
+required is a separate maintainer decision.
+
+`scripts/check_cross_platform.py`'s CI step is flipped to
+`--fail-on-warning`, now possible because `tests/yocto/build_rpc_uio_bench_aarch64.sh`
+and `tests/yocto/run_sanitized_rpc_tests.sh` — both Linux-only Yocto-target
+bench helpers with no Mac/Windows equivalent to document — are whitelisted
+with header notes explaining why, closing the last two BASH-ONLY-SHEBANG
+findings that kept the lint at "0 expected, 2 found".
+
+`scripts/bootstrap.sh` now warns (does not refuse) on an Intel Mac's
+`uname -m`: bootstrap itself and `native_sim` both work there, and only
+`west sdk install` for real silicon is blocked, so refusing outright would
+be wrong. [ADR 0012](docs/adr/0012-cross-platform-developer-host.md) gained
+a 2026-07-29 Amendment recording this narrowing as the decision record;
+`README.md`'s "Development hosts" section and
+`docs/getting-started.md`'s "1. Prerequisites" section — neither touched by
+the `docs/cross-platform-setup.md` entry below — carry the same corrected
+scoping.
+
+### Changed — one first command: `README.md` and `docs/getting-started.md` now lead with `tan bootstrap`, like tan's own quickstart does
+
+Three published quickstarts taught three different first commands for the
+same journey (#1021). `README.md` said `bash scripts/bootstrap.sh` then
+`source ../.venv/bin/activate`; `docs/getting-started.md` said
+`bash scripts/bootstrap.sh` then `tan --project ... build`; tan-cli's
+`README.md:118-131` said `tan bootstrap --sdk-root ./alp-sdk` then
+`tan init` then `tan build`. Only the tan path applies the
+workspace-parent guard, the ensurepip probe and the manifest-fact
+reporting, so two thirds of readers were routed around the checks the
+third got.
+
+Both alp-sdk quickstarts now install `tan` first and call
+`tan bootstrap --sdk-root "$PWD"`, matching tan's ordering exactly.
+`scripts/bootstrap.sh` and `scripts/bootstrap.ps1` are documented for what
+they are — the same setup without `tan`, for CI and for a host that does
+not have it yet — rather than as the canonical path. Both read the same
+`metadata/bootstrap.json`, so they cannot drift apart.
+
+`README.md`'s claim that `bash scripts/bootstrap.sh` "is what actually gets
+`west` … onto `PATH` — skipping it is the #1 way this Quickstart fails" was
+arguing for the bypass ADR
+[0020](docs/adr/0020-sdk-owns-build-execution.md) removed; it now describes
+`tan bootstrap`. Both files also state the thing neither did: the venv is
+**not** activated by hand for a build, because the build plan carries the
+per-slice `PATH` additions — activation is only needed to drive `west`
+directly.
+
+Nothing about the Zephyr SDK cross-toolchain gap changes here; that is
+#949.
+
+### Fixed — `docs/cross-platform-setup.md`: an Intel Mac was listed as a supported real-silicon host, and cannot be one
+
+The workflow/host matrix marked macOS `yes` for **Zephyr-on-M (real
+silicon)** and for the heterogeneous orchestrator without qualification
+(#1022). The pinned Zephyr SDK (`metadata/toolchains.json`, `1.0.1`)
+publishes host builds for `linux-aarch64`, `linux-x86_64`,
+`macos-aarch64` and `windows-x86_64` only — upstream shipped
+`macos-x86_64` through `0.17.4` and dropped it in `1.0.0` — so there is no
+`arm-zephyr-eabi` cross toolchain for an Intel Mac at the pinned version,
+and `macos-aarch64` is not a substitute (Rosetta translates x86_64 *for*
+Apple silicon, not the reverse; macOS has no WSL2 fallback).
+
+Both cells now read **Apple silicon only**, with a paragraph stating the
+limit, its cause, and what an Intel Mac can still do — everything that uses
+the host compiler (`native_sim`, ztests, `tan validate`, `tan doctor`,
+metadata work), and `tan` itself, which publishes a working
+`tan-x86_64-apple-darwin`. The equivalent overclaim in the extension's docs
+is tracked at alp-sdk-vscode#415.
+
 ### Changed — `zephyr/kconfigs/core.kconfig`: E8 builds now default to the real SoC capability profile, not the permissive one
 
 The "Active SoC capability profile" choice now defaults to
