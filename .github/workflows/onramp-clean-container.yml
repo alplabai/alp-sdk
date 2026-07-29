@@ -324,6 +324,11 @@ jobs:
         # itself (alp-sdk's PARENT, i.e. bootstrap.sh's own WORKSPACE_DIR),
         # where bootstrap.sh (run with `working-directory: alp-sdk` above)
         # already left `.venv/` and `zephyr/` as siblings of `alp-sdk/`.
+        #
+        # shell: bash is load-bearing, not decoration -- `source` is a bash
+        # builtin and this container's /bin/sh is dash, which has `.` instead
+        # and answers `source: not found` with exit 127 before west is reached.
+        shell: bash
         run: |
           source .venv/bin/activate
           west sdk install --gnu-toolchains arm-zephyr-eabi --no-hosttools \
