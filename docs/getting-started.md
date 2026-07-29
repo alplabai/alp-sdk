@@ -157,10 +157,14 @@ brew install cmake ninja python git curl
 # externally-managed too, so a system-wide `pip3 install` fails outright
 
 # Linux (Debian / Ubuntu)
-sudo apt install -y cmake ninja-build python3 python3-pip python3-venv git curl
+sudo apt install -y cmake ninja-build python3 python3-pip python3-venv git curl xz-utils wget
 # no `pip3 install west` here -- scripts/bootstrap.sh installs west into
 # the workspace venv itself, and on Ubuntu 24.04 running it against the
 # system interpreter fails outright (PEP 668 externally-managed-environment)
+# xz-utils/wget: scripts/bootstrap.sh hard-refuses without them on Linux --
+# GNU tar (what `west sdk install` shells out to) execs a standalone
+# /usr/bin/xz to unpack the SDK archive, and the pinned Zephyr SDK's own
+# setup.sh hard-checks for `wget` on Linux (issue #949)
 
 # Windows -- PowerShell + Python from Microsoft Store
 winget install -e --id Kitware.CMake

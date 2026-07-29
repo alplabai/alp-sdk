@@ -310,6 +310,24 @@ def test_prerequisites_posix_drift_fails(tmp_path, monkeypatch, capsys):
     assert "prerequisites.posix" in err
 
 
+def test_prerequisites_macos_drift_fails(tmp_path, monkeypatch, capsys):
+    """POSIX twin of test_prerequisites_posix_drift_fails: prerequisites.macos
+    must agree with scripts/bootstrap.sh's Darwin-branch REQUIRED_BINS
+    reassignment (the macOS xz/wget exemption) -- `_check_prerequisites_macos`
+    is a SEPARATE regex from `_check_prerequisites_posix`'s (which only ever
+    sees the first/canonical REQUIRED_BINS literal), so this needs its own
+    drift test rather than assuming the posix test above covers it."""
+    _scaffold(tmp_path)
+    _edit_manifest(tmp_path, lambda d: d["prerequisites"].__setitem__(
+        "macos", ["git", "python3"]))  # dropped "cmake" and "ninja"
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "Darwin-branch REQUIRED_BINS" in err
+    assert "prerequisites.macos" in err
+
+
 def test_prerequisites_windows_drift_fails(tmp_path, monkeypatch, capsys):
     _scaffold(tmp_path)
     _edit_manifest(tmp_path, lambda d: d["prerequisites"].__setitem__(
@@ -474,6 +492,49 @@ def _bash_available_with_python3() -> bool:
         return False
     proc = subprocess.run(["bash", "-c", "command -v python3"], capture_output=True)
     return proc.returncode == 0
+
+
+def test_bootstrap_sh_darwin_excludes_xz_and_wget_from_refusal(tmp_path):
+    """scripts/bootstrap.sh's Darwin branch reassigns REQUIRED_BINS to drop
+    xz/wget (the #949 macOS fix this branch adds) -- nothing else exercises
+    that branch: the only CI container is ubuntu:24.04, and no other test
+    stubs `uname`. Fake a Darwin `uname` on PATH, restrict the rest of PATH
+    to just `dirname`/`git`/`python3` (real, via symlink) so `cmake`/`ninja`
+    are genuinely absent too -- the only way to force an actual refusal --
+    and assert the refusal names cmake/ninja but never xz/wget."""
+    bash_path = shutil.which("bash")
+    if bash_path is None:
+        pytest.skip("bash not available on PATH")
+    real_tools = {}
+    for tool in ("dirname", "git", "python3"):
+        found = shutil.which(tool)
+        if found is None:
+            pytest.skip(f"{tool} not available on PATH -- cannot build the restricted PATH shim")
+        real_tools[tool] = found
+
+    scaffold_root = tmp_path / "darwin-repo"
+    (scaffold_root / "scripts").mkdir(parents=True)
+    shutil.copy2(REPO / "scripts" / "bootstrap.sh", scaffold_root / "scripts" / "bootstrap.sh")
+
+    shim_dir = tmp_path / "shim"
+    shim_dir.mkdir()
+    uname_shim = shim_dir / "uname"
+    uname_shim.write_text("#!/bin/sh\necho Darwin\n", encoding="utf-8")
+    uname_shim.chmod(0o755)
+    for tool, real_path in real_tools.items():
+        (shim_dir / tool).symlink_to(real_path)
+
+    proc = subprocess.run(
+        [bash_path, str(scaffold_root / "scripts" / "bootstrap.sh")],
+        capture_output=True, text=True, cwd=str(scaffold_root),
+        env={"PATH": str(shim_dir)},
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, out
+    assert "cmake" in out
+    assert "ninja" in out
+    assert "xz" not in out
+    assert "wget" not in out
 
 
 def test_bootstrap_sh_refuses_unknown_schema_version(tmp_path):

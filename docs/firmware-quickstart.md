@@ -297,6 +297,9 @@ reference.
 targets:
 
 ```bash
+cd alp-workspace   # if you left it after §4 -- the rest of this doc is
+                    # relative to alp-workspace/ (see §3)
+
 # sdk switch is per-project (see §4 above) -- run it once for each
 # --project value before its first build.
 

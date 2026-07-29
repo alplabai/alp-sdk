@@ -57,6 +57,14 @@ name: onramp-clean-container
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    # `labeled` is required: without it, adding `run-full-quickstart` to an
+    # already-open PR fires a `labeled` event this trigger's own default
+    # (`[opened, synchronize, reopened]`) never subscribes to, and
+    # full-quickstart-build's own `contains(...labels...)` condition below
+    # never gets a chance to run at all -- the job stays structurally
+    # unrunnable from label alone, only a new commit or a close/reopen would
+    # start it.
     branches: [main, dev]
     paths:
       - 'docs/getting-started.md'
@@ -153,15 +161,20 @@ jobs:
             esac
           done
 
-      # Now install exactly what docs/getting-started.md section 1's
-      # Debian/Ubuntu one-liner tells a customer to install (plus the
-      # newly-declared `xz`/`wget` prerequisites) and prove bootstrap.sh
-      # succeeds -- a real customer's next step after reading the
-      # refusal message above.
-      - name: Install prerequisites (docs/getting-started.md section 1)
+      # Install EXACTLY docs/getting-started.md:160's Debian/Ubuntu one-liner
+      # -- byte-for-byte, git/curl included even though the earlier step
+      # already installed them (apt no-ops on an already-installed package)
+      # -- so this step stays a mirror of the doc and any future divergence
+      # between the two reddens this job instead of silently installing a
+      # superset the doc never told a customer to install (this job used to
+      # install "plus the newly-declared xz/wget prerequisites" beyond the
+      # doc's own list, which is exactly how the doc fell behind in the
+      # first place -- see docs/getting-started.md:160 for the source of
+      # truth this must keep matching).
+      - name: Install prerequisites (docs/getting-started.md section 1's Debian/Ubuntu one-liner, verbatim)
         run: |
           apt-get install -y --no-install-recommends \
-              cmake ninja-build python3 python3-pip python3-venv xz-utils wget
+              cmake ninja-build python3 python3-pip python3-venv git curl xz-utils wget
 
       - name: bootstrap.sh succeeds once every prerequisite is installed
         working-directory: alp-sdk
@@ -173,9 +186,23 @@ jobs:
         # venv + prerequisite layer alone, not re-proving west.yml
         # resolves (pr-twister.yml already covers that on every PR).
         run: |
-          set -euo pipefail
-          out="$(bash scripts/bootstrap.sh --no-west)"
+          # set -e (not set -euo pipefail) is deliberate here: the refusal
+          # step above (line ~131) captures rc/output BEFORE dying for the
+          # same reason -- `set -euo pipefail` with
+          # `out="$(bash scripts/bootstrap.sh --no-west)"` would kill this
+          # step at that line on a NONzero rc, before the `echo "${out}"`
+          # below ever ran, discarding every diagnostic bootstrap.sh printed
+          # right when this step needs them most (a bootstrap.sh regression
+          # here). Mirror the refusal step's own capture-then-check pattern.
+          set +e
+          out="$(bash scripts/bootstrap.sh --no-west 2>&1)"
+          rc=$?
           echo "${out}"
+          set -e
+          if [ "${rc}" -ne 0 ]; then
+            echo "::error::bootstrap.sh --no-west failed after every documented prerequisite was installed (see output above)"
+            exit 1
+          fi
           # Exit status alone doesn't prove the manual-install-hints section
           # (metadata/bootstrap.json's manualInstallHints.posix.note, the
           # #949 addendum A4 fix) actually rendered -- a script that quietly
@@ -183,7 +210,7 @@ jobs:
           # the heading substring shows up.
           case "${out}" in
             *"NOT auto-installed (manual, one-time):"*) ;;
-            *) echo "::error::bootstrap.sh succeeded but never printed the manual-install-hints heading (manualInstallHints.posix.note) -- see scripts/bootstrap.sh:612"; exit 1 ;;
+            *) echo "::error::bootstrap.sh succeeded but never printed the manual-install-hints heading (manualInstallHints.posix.note) -- see scripts/bootstrap.sh:641"; exit 1 ;;
           esac
 
   full-quickstart-build:
@@ -203,17 +230,33 @@ jobs:
     container:
       image: ubuntu:24.04
     steps:
-      - name: Install prerequisites (docs/getting-started.md section 1, plus xz + wget)
+      # git/curl/ca-certificates are needed to check out alp-sdk on this bare
+      # image at all -- NOT part of docs/getting-started.md section 1's own
+      # one-liner (ca-certificates in particular never appears there; the doc
+      # assumes a host that can already reach HTTPS). Kept as its own step,
+      # deliberately separate from the doc-exact install below, so that step
+      # stays an honest mirror of what the doc tells a customer to run --
+      # mirrors prereqs-and-bootstrap's own "Install git + curl" /
+      # "Install prerequisites" split above.
+      - name: Install checkout prerequisites (git/curl/ca-certificates -- not part of docs/getting-started.md section 1)
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends \
-              git curl ca-certificates cmake ninja-build python3 python3-pip python3-venv xz-utils wget
+          apt-get install -y --no-install-recommends git curl ca-certificates
 
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
         with:
           path: alp-sdk
           fetch-depth: 1
+
+      # Install EXACTLY docs/getting-started.md:160's Debian/Ubuntu one-liner
+      # -- byte-for-byte (git/curl already present from the step above, kept
+      # here anyway so this stays a mirror of the doc and any future
+      # divergence between the two reddens this job).
+      - name: Install prerequisites (docs/getting-started.md section 1's Debian/Ubuntu one-liner, verbatim)
+        run: |
+          apt-get install -y --no-install-recommends \
+              cmake ninja-build python3 python3-pip python3-venv git curl xz-utils wget
 
       - name: bash scripts/bootstrap.sh (docs quickstart step 1)
         working-directory: alp-sdk

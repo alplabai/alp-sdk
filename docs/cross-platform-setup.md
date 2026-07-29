@@ -124,7 +124,7 @@ sudo apt install -y \
     git python3 python3-pip python3-venv \
     cmake ninja-build gperf ccache \
     device-tree-compiler \
-    build-essential file xz-utils \
+    build-essential file xz-utils wget \
     libffi-dev libssl-dev libsdl2-dev libmagic1 \
     dfu-util
 ```
@@ -136,7 +136,7 @@ sudo dnf install -y \
     git python3 python3-pip python3-virtualenv \
     cmake ninja-build gperf ccache \
     dtc \
-    gcc gcc-c++ make file xz \
+    gcc gcc-c++ make file xz wget \
     libffi-devel openssl-devel SDL2-devel file-libs \
     dfu-util
 ```
