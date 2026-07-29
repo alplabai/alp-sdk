@@ -54,7 +54,7 @@ If you'd rather skim, the fastest path is:
 
 > Needs `git` and `curl` already on PATH -- a from-scratch host (a bare
 > container, a fresh VM) needs those installed first; see the
-> per-platform one-liners in [§1 Prerequisites](#1-prerequisites) below
+> per-platform one-liners under "1. Prerequisites" below
 > (`sudo apt install -y git curl` on Debian/Ubuntu).
 
 ```bash
