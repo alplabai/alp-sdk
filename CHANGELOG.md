@@ -5,7 +5,9 @@ All notable changes to the Alp SDK are documented here.  Format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
-## [Unreleased] - v0.14.0 candidate
+## [Unreleased] - v0.15.0 candidate
+
+## [v0.14.0] - 2026-07-29
 
 ### Fixed — four V2N/V2M SoM manifests promised a `gd32_bridge` firmware path that exists in no clone (#852)
 
