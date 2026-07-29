@@ -119,11 +119,13 @@ The SDK is supported on **macOS (Apple Silicon)**, **Windows**, and
 are identical across hosts; the only platform-specific bit is how
 you install them.
 
-**Intel Macs are not supported.**  The pinned Zephyr SDK ships no
-`macos-x86_64` host build (dropped in `1.0.0`; `macos-aarch64` is
-not a substitute -- Rosetta translates x86_64 *for* Apple Silicon,
-not the reverse, and macOS has no WSL2 fallback).  Build on a Linux
-host instead -- see
+**Intel Macs can build and run `native_sim`** (host-toolchain build,
+no Zephyr SDK involved) **but not real-silicon Zephyr images or
+`tan build`.**  The pinned Zephyr SDK ships no `macos-x86_64` host
+build (dropped in `1.0.0`; `macos-aarch64` is not a substitute --
+Rosetta translates x86_64 *for* Apple Silicon, not the reverse, and
+macOS has no WSL2 fallback).  Real-silicon builds need a Linux host
+instead -- see
 [`docs/cross-platform-setup.md`](cross-platform-setup.md).
 
 | Tool        | Version          | Notes                                                    |

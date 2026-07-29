@@ -10,8 +10,10 @@ into the topic-specific docs.
 - [getting-started.md](getting-started.md) — install + first build,
   cross-platform.
 - [cross-platform-setup.md](cross-platform-setup.md) — per-OS
-  quickstart (Linux + macOS + Windows native + WSL2).  *NEW —
-  Codified in [ADR 0012](adr/0012-cross-platform-developer-host.md).*
+  quickstart (Linux + macOS + Windows native + WSL2; macOS
+  real-silicon Zephyr builds and `tan build` are Apple Silicon
+  only, `native_sim` works on Intel too).  *NEW — Codified in
+  [ADR 0012](adr/0012-cross-platform-developer-host.md).*
 - [cli.md](cli.md) — the `tan` CLI verb reference
   (init / build / flash / generate / validate / doctor / size /
   image / clean / renode) + when to use `tan` vs `west alp-*`.

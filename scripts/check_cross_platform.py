@@ -206,6 +206,12 @@ INTENTIONALLY_BASH_HELPERS: frozenset[str] = frozenset({
     "scripts/bench/aen/read-update-log-proof.sh",
     "scripts/bench/aen/reread.sh",
     "scripts/bench/aen/flash-all-flowd.sh",
+    # RZ/V2N A55 Yocto-target RPC bench + sanitizer helpers.  Both
+    # cross-compile/run against an aarch64-linux-gnu Yocto sysroot;
+    # neither has a Mac/Windows equivalent to document.  Each carries
+    # a "Cross-platform scope:" header note.
+    "tests/yocto/build_rpc_uio_bench_aarch64.sh",
+    "tests/yocto/run_sanitized_rpc_tests.sh",
 })
 
 # Markdown files that, by their very topic, MUST mention Linux-only
