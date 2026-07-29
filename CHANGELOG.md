@@ -12,9 +12,14 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 `metadata/e1m_modules/E1M-V2N101.yaml`, `…V2N102.yaml`, `…V2M101.yaml`, and
 `…V2M102.yaml` declared `helper_firmware[].firmware_path:
 firmware/gd32-bridge/build/gd32/gd32-bridge.bin` — a gitignored CMake build
-output, absent from every fresh clone, and not even the actual output path
-the GD32 bridge's own `CMakeLists.txt` produces (no `build/gd32/`
-subdirectory exists in any documented invocation). `tan-cli`'s flash planner
+output, absent from every fresh clone. That exact path only matches
+`.github/workflows/pr-gd32-bridge-build.yml`'s `-B firmware/gd32-bridge/build/gd32`
+CI invocation (whose binary is a 14-day GitHub Actions artifact, not
+something the repo ships); `firmware/gd32-bridge/README.md`'s own quick-start
+(`cmake -B build`, matching the `CMakeLists.txt` top comment) lands the same
+binary one directory up, at `build/gd32-bridge.bin` — so even a customer who
+builds the firmware by the tree's own documented instructions does not land
+the file at the path the metadata promised. `tan-cli`'s flash planner
 (`crates/tan-core/src/flash/mod.rs`) turns that string into a real
 `FlashKind::Helper` target on every default `tan flash`, so a customer who
 cloned and flashed a V2N/V2M board got a missing-file failure from a path
