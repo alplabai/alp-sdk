@@ -37,9 +37,12 @@ only `name`/`chip`), so `flash/mod.rs`'s existing artefact-resolution branch
 takes the `None` path and refuses cleanly: `"flash: helper 'gd32_bridge' has
 no output_artefact / firmware_path; can't flash."` `flash_method:
 swd_probe` and `flash_args` (including `base: "0x08000000"`) are untouched —
-real hardware facts for whenever a prebuilt binary ships, and never reached
-by the flash planner until `firmware_path` exists again, since artefact
-resolution fails before `base` is ever consulted.
+real hardware facts for whenever a prebuilt binary ships, and on a real
+flash are never reached until `firmware_path` exists again, since artefact
+resolution fails before `base` is ever consulted. (Under `tan flash
+--dry-run` a placeholder artefact is substituted instead, so `base` IS
+reached and validated there — inert since nothing is spawned, but not
+"never reached" in that mode.)
 
 ### Fixed — Alif Ensemble SoC peripheral counts shipped as fact with no way to tell audited from inherited (#936)
 
