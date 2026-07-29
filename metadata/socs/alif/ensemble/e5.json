@@ -6,6 +6,8 @@
   "part": "E5",
   "status": "preliminary",
   "pending_alif_datasheet": true,
+  "pending_reference_manual_ingestion": true,
+  "_pending_reason": "Every `peripherals` count below is inherited from the E7 sibling (E5 = E7 with one A32 depopulated per this file's own topology note), not independently ingested from an E5-specific datasheet/DFP/SVD -- no primary source for E5's own silicon is on file as of 2026-07-27 (issue #936). Clear this flag once the Alif E5 datasheet ships and the counts are re-ingested against it.",
   "datasheet": {
     "extracted_at": "2026-05-09",
     "source": "Alp Lab E1M-AEN - Datasheet Draft.pdf (Table 1, Table 11) — Alif primary datasheet not yet on file"

@@ -26,6 +26,7 @@
 
 #if defined(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E3)
 /* alif:ensemble:e3 */
+/* UNVERIFIED (no datasheet/DFP/HWRM citation): pdm, pdm_lp */
 #define ALP_SOC_REF_STR                 "alif:ensemble:e3"
 #define ALP_SOC_I2C_COUNT               5
 #define ALP_SOC_I3C_COUNT               1
@@ -66,6 +67,7 @@
 
 #elif defined(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E4)
 /* alif:ensemble:e4 */
+/* UNVERIFIED (no datasheet/DFP/HWRM citation): pdm, pdm_lp */
 #define ALP_SOC_REF_STR                 "alif:ensemble:e4"
 #define ALP_SOC_I2C_COUNT               6
 #define ALP_SOC_I3C_COUNT               2
@@ -106,6 +108,7 @@
 
 #elif defined(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E5)
 /* alif:ensemble:e5 */
+/* UNVERIFIED (no datasheet/DFP/HWRM citation): adc_12bit, adc_24bit, can_fd, comparator_hs, cpi_lp, cpi_parallel, dac_12bit, dma_general_32ch, dpi_parallel, encoder_quadrature, ethernet, gpio_18v, gpio_18v_or_33v, i2c, i2c_lp, i2s, i2s_lp, i3c, mipi_csi2, mipi_dsi, pdm, pdm_lp, rtc, sdio, spi, spi_lp, timer_32bit, timer_lp, uart, uart_lp, usb_2, watchdog */
 #define ALP_SOC_REF_STR                 "alif:ensemble:e5"
 #define ALP_SOC_I2C_COUNT               5
 #define ALP_SOC_I3C_COUNT               1
@@ -146,6 +149,7 @@
 
 #elif defined(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E6)
 /* alif:ensemble:e6 */
+/* UNVERIFIED (no datasheet/DFP/HWRM citation): pdm, pdm_lp */
 #define ALP_SOC_REF_STR                 "alif:ensemble:e6"
 #define ALP_SOC_I2C_COUNT               6
 #define ALP_SOC_I3C_COUNT               2
@@ -186,6 +190,7 @@
 
 #elif defined(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E7)
 /* alif:ensemble:e7 */
+/* UNVERIFIED (no datasheet/DFP/HWRM citation): pdm, pdm_lp */
 #define ALP_SOC_REF_STR                 "alif:ensemble:e7"
 #define ALP_SOC_I2C_COUNT               5
 #define ALP_SOC_I3C_COUNT               1
@@ -226,6 +231,7 @@
 
 #elif defined(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E8)
 /* alif:ensemble:e8 */
+/* UNVERIFIED (no datasheet/DFP/HWRM citation): pdm, pdm_lp */
 #define ALP_SOC_REF_STR                 "alif:ensemble:e8"
 #define ALP_SOC_I2C_COUNT               6
 #define ALP_SOC_I3C_COUNT               2
@@ -306,6 +312,7 @@
 
 #elif defined(CONFIG_ALP_SOC_NXP_IMX9_IMX93)
 /* nxp:imx9:imx93 */
+/* UNVERIFIED (no datasheet/DFP/HWRM citation): lcdif, mipi_dsi */
 #define ALP_SOC_REF_STR                 "nxp:imx9:imx93"
 #define ALP_SOC_I2C_COUNT               0
 #define ALP_SOC_I3C_COUNT               0

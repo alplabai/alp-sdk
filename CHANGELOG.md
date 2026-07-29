@@ -7,6 +7,54 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.14.0 candidate
 
+### Fixed — four V2N/V2M SoM manifests promised a `gd32_bridge` firmware path that exists in no clone (#852)
+
+`metadata/e1m_modules/E1M-V2N101.yaml`, `…V2N102.yaml`, `…V2M101.yaml`, and
+`…V2M102.yaml` declared `helper_firmware[].firmware_path:
+firmware/gd32-bridge/build/gd32/gd32-bridge.bin` — a gitignored CMake build
+output, absent from every fresh clone, and not even the actual output path
+the GD32 bridge's own `CMakeLists.txt` produces (no `build/gd32/`
+subdirectory exists in any documented invocation). `tan-cli`'s flash planner
+(`crates/tan-core/src/flash/mod.rs`) turns that string into a real
+`FlashKind::Helper` target on every default `tan flash`, so a customer who
+cloned and flashed a V2N/V2M board got a missing-file failure from a path
+the metadata itself promised.
+
+`firmware_path` is now the literal `TBD`, matching the schema's own
+documented convention for "no prebuilt/shipped image yet" (already used for
+AEN's `cc3501e_otp` helper) — `firmware/gd32-bridge/` is source-only today;
+alp-sdk does not vendor a prebuilt binary. `flash_method: swd_probe` and
+`flash_args` are untouched (that half is silicon-proven); only the "which
+binary" half was the false promise. `scripts/alp_orchestrate/manifest.py`'s
+existing `TBD` handling now surfaces a human-readable note on these four
+SKUs' `system-manifest.yaml` for free.
+
+### Fixed — Alif Ensemble SoC peripheral counts shipped as fact with no way to tell audited from inherited (#936)
+
+Every `metadata/socs/alif/ensemble/*.json` file carried `pdm: 4` /
+`pdm_lp: 4` with no citation on any part — a suspiciously uniform value
+E4's own ingestion note already flagged as "still unconfirmed" — and E5's
+entire `peripherals` block is inherited from its E7 sibling pending E5's own
+still-unpublished datasheet, with no machine-readable marker saying so.
+`gen_soc_caps.py` asserted both into `include/alp/soc_caps.h` as fact:
+`ALP_SOC_PDM_COUNT` / `ALP_HAS(HW_PDM)` looked exactly as confirmed as any
+DFP-audited count (#932 already proved two inherited blocks — E4 from E3,
+E6 from E7 — wrong).
+
+Added `peripherals_unverified` (per-file array of uncited `peripherals`
+keys) to `metadata/schemas/soc-spec-v1.schema.json`, and set it to
+`["pdm", "pdm_lp"]` on every Alif Ensemble SoC file. E5, whose entire block
+is inherited rather than independently ingested, is instead marked with the
+existing `pending_reference_manual_ingestion: true` flag (already wired to
+a `validate_metadata.py` warning), which `gen_soc_caps.py` now treats as
+"every `peripherals` key on this file is unverified." Both cases surface as
+an `/* UNVERIFIED (no datasheet/DFP/HWRM citation): ... */` comment directly
+above the affected `#elif defined(CONFIG_ALP_SOC_...)` block in the
+generated `soc_caps.h`, so the gap is visible where the macros are actually
+consumed, not just recorded in metadata nobody reads. This does not correct
+any count — the full re-audit against Alif's datasheets/DFP is tracked as
+follow-up work.
+
 ### Changed — `zephyr/kconfigs/core.kconfig`: E8 builds now default to the real SoC capability profile, not the permissive one
 
 The "Active SoC capability profile" choice now defaults to

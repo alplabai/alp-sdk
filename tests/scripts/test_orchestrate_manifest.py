@@ -178,7 +178,10 @@ def test_emit_system_manifest_populates_helper_mcus(tmp_path: Path) -> None:
 
     V2N101's preset declares one helper_firmware entry (gd32_bridge);
     the manifest must carry the chip slug + firmware_path + flash_method
-    verbatim.
+    verbatim.  firmware_path is `TBD` (#852) -- alp-sdk vendors no prebuilt
+    gd32-bridge binary; `firmware/gd32-bridge/` is a source-only tree whose
+    `build/` output is gitignored -- so the manifest also carries the TBD
+    note per `_helper_mcus`'s documented convention.
     """
     path = _write_board(tmp_path, V2N_HAPPY)
     project = load_board_yaml(path)
@@ -191,8 +194,9 @@ def test_emit_system_manifest_populates_helper_mcus(tmp_path: Path) -> None:
     assert "gd32_bridge" in by_name
     gd32 = by_name["gd32_bridge"]
     assert gd32["chip"] == "gd32g553"
-    assert gd32["firmware_path"] == \
-        "firmware/gd32-bridge/build/gd32/gd32-bridge.bin"
+    assert gd32["firmware_path"] == "TBD"
+    assert gd32["note"] == \
+        "firmware_path TBD; populated when the upstream firmware release lands"
     assert gd32["flash_method"] == "swd_probe"
     assert isinstance(gd32["flash_args"], dict)
     assert gd32["flash_args"]["target"] == "gd32g553"

@@ -172,7 +172,12 @@ pad_routes:
 helper_firmware:
   - name:          gd32_bridge
     chip:          gd32g553
-    firmware_path: firmware/gd32-bridge/build/gd32/gd32-bridge.bin
+    # No prebuilt binary ships in the repo -- firmware/gd32-bridge/build/ is
+    # a gitignored build output, absent from every clone (#852).  Build it
+    # yourself per firmware/gd32-bridge/README.md before flashing, or wait
+    # for an Alp Lab firmware release; TBD is the schema's own convention
+    # for "no shipped image yet" (see docs/v0.6-tbd-and-assumptions.md).
+    firmware_path: TBD
     flash_method:  swd_probe
     flash_args:
       interface: cmsis-dap

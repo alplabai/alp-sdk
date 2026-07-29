@@ -414,14 +414,29 @@ def extract_bool_caps(soc: dict[str, Any]) -> dict[str, int]:
     return {key.upper(): (1 if caps.get(key) else 0) for key in BOOL_CAPS}
 
 
+def extract_unverified_peripherals(soc: dict[str, Any]) -> list[str]:
+    """Peripheral keys on this SoC whose count has no primary-source citation.
+
+    #936: an audited-but-incomplete file lists its gaps in
+    `peripherals_unverified` (e.g. `pdm`/`pdm_lp`, uncited on every Alif
+    Ensemble part).  A file whose peripherals block was never independently
+    ingested for this part at all (`pending_reference_manual_ingestion: true`,
+    e.g. E5 inheriting from E7) is treated as ALL of its `peripherals` keys
+    being unverified, so the header doesn't understate the gap.
+    """
+    if soc.get("pending_reference_manual_ingestion"):
+        return sorted((soc.get("peripherals") or {}).keys())
+    return sorted(str(k) for k in (soc.get("peripherals_unverified") or []))
+
+
 def emit(meta_dir: Path = META_DIR, som_dir: Path = SOM_DIR) -> str:
-    socs: list[tuple[str, str, dict[str, int], dict[str, int], int]] = []
+    socs: list[tuple[str, str, dict[str, int], dict[str, int], int, list[str]]] = []
     for path in sorted(meta_dir.rglob("*.json")):
         soc = json.loads(path.read_text(encoding="utf-8"))
         ref = soc["ref"]
         arena_kib = int(soc.get("inference_arena_sram_kib", 0))
         socs.append((ref, kconfig_token(ref), extract_caps(soc), extract_bool_caps(soc),
-                     arena_kib))
+                     arena_kib, extract_unverified_peripherals(soc)))
 
     lines: list[str] = [
         "/**",
@@ -457,10 +472,17 @@ def emit(meta_dir: Path = META_DIR, som_dir: Path = SOM_DIR) -> str:
         "",
     ]
 
-    for i, (ref, kc, caps, bool_caps, arena_kib) in enumerate(socs):
+    for i, (ref, kc, caps, bool_caps, arena_kib, unverified) in enumerate(socs):
         keyword = "if" if i == 0 else "elif"
         lines.append(f"#{keyword} defined(CONFIG_ALP_SOC_{kc})")
         lines.append(f"/* {ref} */")
+        if unverified:
+            # #936: this SoC's own metadata file cites no datasheet/DFP/HWRM
+            # source for these `peripherals` keys -- the ALP_SOC_*_COUNT
+            # macros derived from them (and thus ALP_HAS()) are asserted,
+            # not confirmed.  See `peripherals_unverified` in the source
+            # JSON under metadata/socs/.
+            lines.append(f"/* UNVERIFIED (no datasheet/DFP/HWRM citation): {', '.join(unverified)} */")
         soc_defs: list[tuple[str, str]] = [("ALP_SOC_REF_STR", f"\"{ref}\"")]
         soc_defs += [(f"ALP_SOC_{cap}", str(caps[cap])) for cap, _ in CAPS]
         soc_defs += [(f"ALP_SOC_{key.upper()}", str(bool_caps[key.upper()])) for key in BOOL_CAPS]
