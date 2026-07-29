@@ -29,15 +29,21 @@ list in practice (`install.macos` has carried `xz`/`wget` with no
 `prerequisites.macos` entry since #949), but `scripts/check_bootstrap_manifest.py`
 and `bootstrap-v1.schema.json` only documented and enforced that pattern for
 posix — the windows side asserted exact key-set equality against
-`prerequisites.windows`. Both now allow `install.windows` to be a superset
-the same way, one direction only (every gated tool needs an install
-command; an install command with no gate entry is legal and intentional) —
-`scripts/check_bootstrap_manifest.py`'s completeness check and its
+`prerequisites.windows`. `install.windows` is now allowed to carry an entry
+with no matching `prerequisites.windows` gate too — NOT symmetrically with
+`install.linux` / `install.macos`, which remain pinned by exact-equality to
+`prerequisites.posix` (a stray key there is still rejected); only
+`install.windows` is one-directional, and even that is bounded, not
+open-ended: an extra `install.windows` key is legal only when it is also
+named in `scripts/check_bootstrap_manifest.py`'s own
+`_WINDOWS_INSTALL_ONLY_TOOLS` allowlist (`7zip` today), so a stray or stale
+`install.windows` key that is neither gated nor allowlisted still fails the
+gate. `scripts/check_bootstrap_manifest.py`'s completeness check and its
 `$Prereqs` `Hint=` cross-check are updated accordingly, and
 `bootstrap-v1.schema.json`'s `prerequisites.install` / `install.windows`
-descriptions now state the superset contract and name both live cases
-(`install.macos.xz`/`.wget`, `install.windows.7zip`) so neither reads as
-drift to a future editor.
+descriptions now state the bounded one-directional contract and name both
+live superset cases (`install.macos.xz`/`.wget`, `install.windows.7zip`) so
+neither reads as drift to a future editor.
 
 ## [v0.14.0] - 2026-07-29
 

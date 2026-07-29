@@ -1040,27 +1040,94 @@ def test_install_clean_tree_passes(tmp_path, monkeypatch, capsys):
     assert "OK" in out
 
 
-def test_install_windows_superset_entry_with_no_gate_or_prereqs_entry_passes(
+def test_install_windows_allowlisted_entry_with_no_gate_or_prereqs_entry_passes(
     tmp_path, monkeypatch, capsys
 ):
     """`install.windows` may carry a tool with no matching
-    `prerequisites.windows` gate and no `$Prereqs` entry at all (issue
-    #1036's `7zip` -- gates `west sdk install`, not bootstrap.ps1) -- this
-    is the one-directional completeness contract (gate tools subset-of
-    install commands), not equality. Synthetic `unzip` here rather than
-    relying on the real `7zip` entry, so this test still proves the
-    behaviour even if the real manifest's `7zip` entry is ever removed."""
+    `prerequisites.windows` gate and no `$Prereqs` entry at all, PROVIDED it
+    is named in this script's own `_WINDOWS_INSTALL_ONLY_TOOLS` allowlist
+    (issue #1036's `7zip` -- gates `west sdk install`, not bootstrap.ps1) --
+    the completeness contract is one-directional (gate tools subset-of
+    install commands) AND bounded on the reverse direction by that
+    allowlist, not an open-ended superset. Overwrites the real `7zip` value
+    here (rather than merely relying on it already being present) so this
+    test proves the ALLOWLIST behaviour itself, not just that the real
+    manifest happens to carry a passing entry today. See
+    `test_install_windows_extra_entry_not_allowlisted_fails` for the
+    negative twin: an entry NOT on this allowlist (`unzip`, `nnija`, ...)
+    must fail, not pass, unlike before this bound existed."""
     _scaffold(tmp_path)
     _edit_manifest(
         tmp_path,
         lambda d: d["prerequisites"]["install"]["windows"].__setitem__(
-            "unzip", "winget install -e --id Info-ZIP.UnZip"
+            "7zip", "winget install -e --id 7zip.7zip"
         ),
     )
     _point_gate_at(tmp_path, monkeypatch)
     rv = gate.main()
     out = capsys.readouterr().out
     assert rv == 0, out
+
+
+def test_install_windows_extra_entry_not_allowlisted_fails(tmp_path, monkeypatch, capsys):
+    """The reverse-direction bound on the #1036 superset relaxation: an
+    `install.windows` key with no matching `prerequisites.windows` gate AND
+    no matching `_WINDOWS_INSTALL_ONLY_TOOLS` allowlist entry must be
+    rejected. Before this bound existed, a garbage key with a garbage ID
+    (like this one) sat completely undetected -- nothing else in the gate
+    ever looks at an `install.windows` key that isn't on one of those two
+    lists (the schema's `additionalProperties: {type: string, minLength: 1}`
+    accepts any key name, and the `$Prereqs` / literal-scan checks only ever
+    walk FROM `prerequisites.windows` / `install.windows`'s current values).
+    Sensitivity: on the code as it stood before `extra_windows` was added
+    (completeness checked only `windows_tools - windows_install`, never the
+    reverse), this exact mutation passed with rv == 0 -- this test is the
+    regression lock for that gap."""
+    _scaffold(tmp_path)
+    _edit_manifest(
+        tmp_path,
+        lambda d: d["prerequisites"]["install"]["windows"].__setitem__(
+            "nnija", "winget install -e --id Nnija.Typo"
+        ),
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "nnija" in err
+    assert "_WINDOWS_INSTALL_ONLY_TOOLS" in err
+
+
+def test_install_windows_stale_entry_after_gate_removal_fails(tmp_path, monkeypatch, capsys):
+    """The realistic shape of the same gap: a tool removed from
+    `prerequisites.windows` AND its `scripts/bootstrap.ps1` `$Prereqs`
+    entry in lockstep (the "this tool stopped gating bootstrap" refactor)
+    but left behind in `install.windows` must still fail -- a stale install
+    command silently strands itself with nothing pointing a future reader
+    at whether it is still wired to anything. `ninja` is not in
+    `_WINDOWS_INSTALL_ONLY_TOOLS`, so removing its gate must not let its
+    `install.windows` entry go quiet. Before `extra_windows` was added this
+    mutation passed with rv == 0, the same regression `_WINDOWS_INSTALL_ONLY_TOOLS`
+    now closes."""
+    _scaffold(tmp_path)
+    _edit_manifest(
+        tmp_path,
+        lambda d: d["prerequisites"].__setitem__(
+            "windows", ["git", "cmake", "python"]  # dropped "ninja"
+        ),
+    )
+    _replace(
+        tmp_path / "scripts/bootstrap.ps1",
+        '    @{ Name = "python"; Hint = "winget install -e --id Python.Python.3.12" },\n'
+        '    @{ Name = "ninja";  Hint = "winget install -e --id Ninja-build.Ninja" }\n)',
+        '    @{ Name = "python"; Hint = "winget install -e --id Python.Python.3.12" }\n)',
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "ninja" in err
+    assert "_WINDOWS_INSTALL_ONLY_TOOLS" in err
 
 
 # ---------------------------------------------------------------------

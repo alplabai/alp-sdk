@@ -778,6 +778,35 @@ def _winget_ids_and_commands(install_windows: dict) -> tuple[dict[str, str], lis
 # tracked identifier today -- add either only once a real case shows up.
 _LITERAL_SCAN_EXCLUDE_DOC_DIRS = ("adr",)
 
+# The exhaustive allowlist of `prerequisites.install.windows` keys with no
+# matching `prerequisites.windows` gate entry (issue #1036's superset
+# relaxation). `_check_install_commands` point 1 checks completeness in the
+# gate -> install direction only (every gated tool needs an install command);
+# without a bound on the REVERSE direction, ANY key here -- typo'd, garbage,
+# or a stale leftover from a tool that stopped gating bootstrap -- would sit
+# undetected forever, since nothing else in this repo notices an
+# `install.windows` entry with no reader (the schema's
+# `additionalProperties: {type: string, minLength: 1}` accepts any key name,
+# and the $Prereqs / literal-scan checks below only ever walk FROM
+# prerequisites.windows / install.windows's current values, never flag an
+# extra key that isn't on either list).
+#
+#   "7zip": gates `west sdk install` (patoolib's external 7z/7za/7zr/7zz/
+#   7zzs/unar shell-out for `.7z` extraction, no pure-Python fallback), a
+#   separate manual step `bootstrap.ps1` deliberately never runs -- so 7-Zip
+#   must NOT be added to `prerequisites.windows` (that would make
+#   bootstrap.ps1 refuse on every Windows host lacking 7-Zip, for a tool
+#   bootstrap itself never touches). See metadata/bootstrap.json's
+#   `prerequisites.install.windows.7zip` and
+#   metadata/schemas/bootstrap-v1.schema.json's `install.windows`
+#   description.
+#
+# Add a NEW entry here only if the tool gates something bootstrap.ps1
+# deliberately doesn't run (the 7zip shape) -- if it should instead refuse
+# bootstrap without it, add it to `prerequisites.windows` (and a matching
+# $Prereqs entry in scripts/bootstrap.ps1), not here.
+_WINDOWS_INSTALL_ONLY_TOOLS = {"7zip"}
+
 
 def _iter_literal_scan_files():
     """Yield every path the winget-identifier literal scan
@@ -812,17 +841,23 @@ def _check_install_commands(manifest: dict) -> list[str]:
 
       1. Completeness -- every `prerequisites.windows` tool has a matching
          `install.windows` entry, and `install.linux` / `install.macos`'s
-         keys each equal `prerequisites.posix`'s tools. This direction only
-         (gate tools subset-of install commands): `install.windows` MAY
-         carry additional entries with no matching `prerequisites.windows`
-         gate -- issue #1036's `7zip` is the first live case, gating `west
-         sdk install` rather than bootstrap itself, the same "install has a
+         keys each equal `prerequisites.posix`'s tools. The gate ->
+         install direction is subset-only: `install.windows` MAY carry
+         additional entries with no matching `prerequisites.windows` gate --
+         issue #1036's `7zip` is the first live case, gating `west sdk
+         install` rather than bootstrap itself, the same "install has a
          command but nothing refuses without it" shape `install.macos`'s
          `xz`/`wget` already established on the posix side (see
-         metadata/bootstrap.json's own `_comment` and
          metadata/schemas/bootstrap-v1.schema.json's `prerequisites.install`
-         description for the full rationale). A tool with no install
-         command at all is the exact hole that produced the drifted/
+         description for the full rationale). The REVERSE direction is
+         bounded, not unchecked: any `install.windows` key that is neither
+         in `prerequisites.windows` nor in this script's own
+         `_WINDOWS_INSTALL_ONLY_TOOLS` allowlist is rejected -- without that
+         bound a typo'd or stale `install.windows` entry (a garbage key, or
+         a tool removed from `prerequisites.windows` and
+         `scripts/bootstrap.ps1`'s `$Prereqs` but left behind in
+         `install.windows`) would sit undetected forever. A tool with no
+         install command at all is the exact hole that produced the drifted/
          incomplete ninja hint in scripts/alp_cli/doctor.py this change
          fixes. This is the ONLY assertion covering install.linux /
          install.macos -- see point 3's own note on why.
@@ -891,6 +926,17 @@ def _check_install_commands(manifest: dict) -> list[str]:
             f"prerequisites.install.windows is missing install command(s) for "
             f"{sorted(missing_windows)} -- every windows prerequisite needs its "
             f"own install command"
+        )
+    extra_windows = windows_install - windows_tools - _WINDOWS_INSTALL_ONLY_TOOLS
+    if extra_windows:
+        problems.append(
+            f"prerequisites.install.windows has entr(y/ies) {sorted(extra_windows)} "
+            f"with no matching prerequisites.windows gate and no "
+            f"_WINDOWS_INSTALL_ONLY_TOOLS allowlist entry in this script -- either "
+            f"add the tool to prerequisites.windows (if bootstrap.ps1 should refuse "
+            f"without it) or to _WINDOWS_INSTALL_ONLY_TOOLS (if it gates something "
+            f"bootstrap.ps1 deliberately never runs, the 7zip/`west sdk install` "
+            f"shape)"
         )
     posix_tools = set(prereqs.get("posix", []))
     for os_key in ("linux", "macos"):
