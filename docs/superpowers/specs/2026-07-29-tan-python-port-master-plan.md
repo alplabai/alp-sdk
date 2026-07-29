@@ -52,10 +52,29 @@ What is true, and what is not:
 | SETOOLS must be *installed on the host* | **True, for BOTH flows** — `aen-provisioning.md:29-31`: *"both require SETOOLS' `app-gen-toc` to **sign** the ATOC first — Flow D runs `app-gen-toc` locally, with no SE-UART involved in that step"* |
 | That host must be Linux/WSL2 | **True** — `alif_flash.py:283` hard-codes the bundle name `app-release-exec-linux` |
 
-So the residual constraint is a **one-time, license-gated install on a Linux
-host**, not a per-rebuild burden. Target 1 is therefore *not* blocked on
-inventing a new flash path; it needs `tan doctor` to detect SETOOLS and guide
-precisely, and it needs the cross-platform promise corrected.
+So the residual constraint is a **one-time install on a Linux host**, not a
+per-rebuild burden.
+
+**Target 1 is NOT blocked** (maintainer, 2026-07-29: *"the customer can download
+setools from Alif"*). SETOOLS comes from Alif's developer download
+(`app-release-exec-linux-SE_FW_x.y.z`, `aen-provisioning.md:91-94`) — a normal
+one-time step in embedded, not something engineering can or should remove.
+Earlier drafts of this plan called Target 1 "blocked by an external dependency
+this port cannot resolve"; that was overstated and is withdrawn.
+
+What the port actually owes here — all tractable:
+
+1. **`tan doctor` must detect SETOOLS and guide.** Today neither `alp doctor`
+   nor `tan doctor` mentions `SETOOLS_DIR`, `SE_UART` or the required `fdt` pip
+   package at all, so a customer gets a clean bill of health and then fails at
+   flash time with a raw `RuntimeError`. The check must name the Alif download
+   and the exact env var.
+2. **Fix the false cross-platform promise.** `docs/cross-platform-setup.md:887-888`
+   tells customers *"If you're targeting an M-class core only, you never need to
+   leave macOS or Windows"* — untrue while `alif_flash.py:283` hard-codes
+   `app-release-exec-linux`. Either state the Linux/WSL2 requirement plainly, or
+   make the Windows/macOS SETOOLS bundle work.
+3. **Default to Flow D** (below), so the customer never wires an SE-UART.
 
 ### Flow D is what we use for MRAM — and `tan flash` should default to it
 
