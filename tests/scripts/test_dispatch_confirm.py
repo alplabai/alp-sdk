@@ -384,3 +384,55 @@ def test_workflow_invokes_the_script_and_captures_dispatch_epoch_first() -> None
         "step to inline shell would silently drop all of that coverage "
         "while every test here kept passing."
     )
+
+
+def test_the_job_checks_out_the_script_before_running_it() -> None:
+    """The confirm step runs a file from the repo, so the job must check it out.
+
+    This job had NO checkout for its whole life, and correctly so: every step
+    only called `gh api`, which needs no working tree. Moving the verdict
+    logic out of the workflow and into `scripts/dispatch-confirm.sh` changed
+    that premise, and the extraction shipped without adding one -- so every
+    run on `main` and `dev` died with
+
+        bash: scripts/dispatch-confirm.sh: No such file or directory
+
+    and exit 127, on a runner whose workspace was simply empty.
+
+    Nothing in this file caught it. The tests exec the script directly from a
+    real checkout, and the workflow-shape test above asserts only that the
+    step *invokes* it. Both are true of a job that can never find the file.
+    The gap is the boundary between the workflow's declared steps and the
+    runner's actual filesystem, so the assertion has to be about the job's
+    step list, not about the script or the command string.
+    """
+    yaml = pytest.importorskip("yaml")
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["dispatch"]["steps"]
+
+    checkout_idx = next(
+        (i for i, s in enumerate(steps) if str(s.get("uses", "")).startswith("actions/checkout")),
+        None,
+    )
+    assert checkout_idx is not None, (
+        "the dispatch job must check out the repository -- the confirm step "
+        "runs scripts/dispatch-confirm.sh from the working tree, and without "
+        "a checkout the runner's workspace is empty (exit 127)."
+    )
+
+    # Match the INVOCATION, not any mention: the two preceding steps name the
+    # script in their `run:` comments, and a substring match picks one of
+    # those instead -- the same comment-versus-code confusion that made an
+    # empty `${{ }}` in a run: comment invalidate release.yml (#1039).
+    def _invokes(step: dict) -> bool:
+        return any(
+            line.strip().startswith(("bash scripts/dispatch-confirm.sh", "./scripts/dispatch-confirm.sh"))
+            for line in str(step.get("run", "")).splitlines()
+        )
+
+    run_idx = next((i for i, s in enumerate(steps) if _invokes(s)), None)
+    assert run_idx is not None, "no step invokes scripts/dispatch-confirm.sh"
+    assert checkout_idx < run_idx, (
+        "the checkout must come BEFORE the step that runs the script; "
+        f"checkout is step {checkout_idx}, the script runs at step {run_idx}."
+    )
