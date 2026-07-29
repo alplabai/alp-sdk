@@ -340,7 +340,45 @@ target. Any CMake centralization must therefore land **with** the template
 renderer, never before it.
 
 Success is a blinking LED on the E1M-AEN801, verified on the bench — not a
-successful compile.
+successful compile — **and it must survive a cold power-cycle.** (Maintainer
+decision, 2026-07-29. A RAM-run blink was explicitly considered and rejected:
+customers ship devices that boot on their own, so a volatile demo would flatter
+the result.)
+
+> **Target 1 is currently blocked by an external dependency this port cannot
+> resolve.** Persistent flashing of an E1M-AEN801 requires the Alif SETOOLS
+> `app-gen-toc` to sign an ATOC, for every probe and every rebuild — and in this
+> tree SETOOLS is **Linux-only**: `scripts/west_commands/runners/alif_flash.py:283`
+> hard-codes the bundle name `app-release-exec-linux`. Three independent
+> blockers, none of them fixable in Python:
+>
+> 1. `zephyr/boards/alp/e1m_aen801_m55_he/board.cmake:53-54` wires
+>    `board_set_flasher_ifnset(alif_flash)`, so `tan flash` → `west flash` →
+>    `alif_flash`, which hard-errors without both `SETOOLS_DIR` and `SE_UART`.
+> 2. `docs/debugging-aen.md:79-81`: *"the J-Link write itself is SETOOLS-free,
+>    but producing a valid, signed `AppTocPackage.bin` is not. There is no
+>    'stock J-Link, no SETOOLS' flashing path."*
+> 3. SETOOLS is Linux-only (above), while `docs/cross-platform-setup.md:887-888`
+>    promises customers the opposite — a separate, customer-facing doc defect.
+>
+> **MCUboot slot1 is not the way out** — investigated and rejected under three
+> adversarial lenses. **OpenOCD and CMSIS-DAP are not options either**:
+> `openocd_config` is populated **zero** times across all of `metadata/`; only
+> `jlink_flash_device` exists, for one part. "Probe-only" means J-Link
+> specifically.
+>
+> **The one open question, and the experiment that settles it.** Four places in
+> the repo *state* that the SE content-verifies slot0; one place *records* the
+> SE booting **"a garbage image"** from a blank slot0
+> (`CHANGELOG.md:2988-2993`). An SE that boots garbage did not verify the bytes
+> it booted — behaviour outweighs prose, so this is genuinely undecided rather
+> than merely undocumented. The test: on a sacrificial module, J-Link `loadbin`
+> a **one-byte-modified** copy of the resident `zephyr.bin` to `0x80010000`,
+> then **rail the board down and back up** (not `SYSRESETREQ`). If it boots, the
+> SE does not content-verify slot0 and a probe-only model becomes architecturally
+> live. `Verify successful.` must NOT be used as the pass signal —
+> `docs/debugging-aen.md:71` records that exact signal lying. **Parked by the
+> maintainer until the port is finished.**
 
 **The artifact is `examples/peripheral-io/gpio-button-led`, not
 `examples/aen/aen-pwm-utimer-pwmleds`.** Both drive the EVK's RGB cluster, but
