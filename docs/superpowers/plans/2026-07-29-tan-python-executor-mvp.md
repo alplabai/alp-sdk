@@ -675,7 +675,7 @@ class Slice:
     app_dir: str
     config_artefacts: list[dict[str, Any]]
     toolchain: Any
-    artifacts: list[Any]
+    artifacts: dict[str, Any]
     debug: dict[str, Any]
     command: SliceCommand | None
     env: dict[str, str]
@@ -774,11 +774,21 @@ Run:
 ```bash
 python -c "import sys; from tan.core.build_plan import parse_build_plan; p=parse_build_plan(sys.stdin.read()); print(p.sku, len(p.slices), p.plan_path_mode)"
 ```
-piping a live plan from the alp-sdk checkout:
+piping a live plan from the alp-sdk checkout. The real invocation — note it is
+`-m alp_orchestrate` with `--input`, NOT `--board-yaml` (that flag is `tan`'s,
+not the planner's):
 ```bash
-python scripts/alp_orchestrate --emit build-plan --board-yaml examples/multicore/rpmsg-v2n/board.yaml
+PYTHONPATH=scripts python -m alp_orchestrate --emit build-plan --input examples/multicore/rpmsg-v2n/board.yaml
 ```
-Expected: parses without raising; prints the SKU, a non-zero slice count, and the `planPathMode`. **Record the real `planPathMode` value** — Task 4 depends on whether live plans are tokened.
+Expected: parses without raising; prints the SKU, slice count, and `planPathMode`.
+
+**Already confirmed (2026-07-29, reproduced twice):** a live plan for
+`examples/multicore/rpmsg-v2n/board.yaml` emits `E1M-V2N101`, **2** slices, and
+`planPathMode: "tokened"`. This settles a live contradiction in the sources:
+ADR-0020 Amendment item 5 is correct, and the Rust comment at
+`crates/tan-cli/src/commands/build/token_substitution.rs:58-59` — *"every plan
+the SDK emits today has none"* — is **stale**. Task 4's token substitution is
+therefore load-bearing, not a no-op path. Do not treat it as optional.
 
 - [ ] **Step 6: Commit**
 
