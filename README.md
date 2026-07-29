@@ -274,11 +274,17 @@ Two complementary surfaces:
 
 ## Development hosts
 
-First-class on **Linux**, **macOS**, and **Windows 11 / 10** (native
-PowerShell or WSL2).  The Zephyr-on-M-class developer workflow is
-fully cross-platform; only Yocto host builds require Linux (or WSL2)
-by upstream `bitbake` / OE-core constraint.  Codified in
-[ADR 0012](docs/adr/0012-cross-platform-developer-host.md).
+First-class on **Linux**, **macOS (Apple Silicon)**, and
+**Windows 11 / 10** (native PowerShell or WSL2).  The
+Zephyr-on-M-class developer workflow is fully cross-platform on
+those hosts; only Yocto host builds require Linux (or WSL2) by
+upstream `bitbake` / OE-core constraint.  **Intel Macs are not
+supported** — the pinned Zephyr SDK dropped its `macos-x86_64`
+host build in `1.0.0` and `macos-aarch64` is not a substitute
+(Rosetta translates the other direction); build on a Linux host
+instead.  Codified in
+[ADR 0012](docs/adr/0012-cross-platform-developer-host.md); detail
+in [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md).
 
 - [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md) —
   per-OS quickstart (Linux + macOS + Windows native + WSL2),
@@ -289,10 +295,9 @@ by upstream `bitbake` / OE-core constraint.  Codified in
 - See the *Using with VS Code* section above for the in-repo
   `.vscode/` config and the separate VS Code extension.
 - `scripts/check_cross_platform.py` lints docs + scripts for
-  Linux-only idioms; CI matrix scaffolding at
-  `.github/workflows/cross-platform-zephyr.yml` runs the Python +
-  loader smoke tests on Ubuntu (strict), macOS, and Windows
-  (continue-on-error while runners prove out).
+  Linux-only idioms; `.github/workflows/cross-platform-zephyr.yml`
+  runs the Python + loader smoke tests on Ubuntu, macOS, and
+  Windows and blocks merge on any of the three.
 - See [`docs/getting-started.md`](docs/getting-started.md) for
   per-host setup notes.
 

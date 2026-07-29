@@ -114,10 +114,17 @@ M33 core — the two paths coexist on one module.
 
 ## 1. Prerequisites
 
-The SDK is supported equally on **macOS**, **Windows**, and
+The SDK is supported on **macOS (Apple Silicon)**, **Windows**, and
 **Linux** -- pick whichever you already have.  Tooling versions
 are identical across hosts; the only platform-specific bit is how
 you install them.
+
+**Intel Macs are not supported.**  The pinned Zephyr SDK ships no
+`macos-x86_64` host build (dropped in `1.0.0`; `macos-aarch64` is
+not a substitute -- Rosetta translates x86_64 *for* Apple Silicon,
+not the reverse, and macOS has no WSL2 fallback).  Build on a Linux
+host instead -- see
+[`docs/cross-platform-setup.md`](cross-platform-setup.md).
 
 | Tool        | Version          | Notes                                                    |
 |-------------|------------------|----------------------------------------------------------|

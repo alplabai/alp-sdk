@@ -1,10 +1,22 @@
 # Cross-platform developer setup
 
-The Alp SDK supports development on **Linux, macOS, native
-Windows, and Windows + WSL2**.  The Zephyr-on-M-class workflow
-(`board.yaml` → `west build` → flash) is first-class on every
-host OS — same source tree, same `west.yml`, same metadata,
-identical artefacts.
+The Alp SDK supports development on **Linux, macOS (Apple
+Silicon), native Windows, and Windows + WSL2**.  The
+Zephyr-on-M-class workflow (`board.yaml` → `west build` → flash)
+is first-class on every one of those hosts — same source tree,
+same `west.yml`, same metadata, identical artefacts.
+
+**Intel Macs are not supported.**  The pinned Zephyr SDK (`1.0.1`,
+see `metadata/toolchains.json`) publishes host builds for
+`linux-x86_64`, `linux-aarch64`, `macos-aarch64`, and
+`windows-x86_64` only — `macos-x86_64` was published through the
+SDK's `0.17.4` release and dropped starting `1.0.0`.
+`macos-aarch64` is not a usable substitute: Rosetta translates
+x86_64 binaries *for* Apple Silicon, not the reverse, and macOS has
+no WSL2-style fallback to a different host arch the way Windows
+does.  An Intel Mac customer's honest path is to build on a Linux
+host — a `linux-x86_64` VM/container on the same machine, or a
+remote Linux builder.
 
 The Yocto-on-A-class workflow is Linux-only by upstream constraint
 (`bitbake` does not run on macOS or native Windows).  Mac /
@@ -20,7 +32,7 @@ Sections:
 
 - §1 Overview -- workflow vs host matrix
 - §2 Linux setup (Debian / Ubuntu / Fedora)
-- §3 macOS setup (13 Ventura+)
+- §3 macOS setup (13 Ventura+, Apple Silicon only)
 - §4 Windows native setup (PowerShell)
 - §5 Windows + WSL2 setup (for Yocto targets)
 - §6 Verification -- hello-world per OS
@@ -37,19 +49,23 @@ which host OSes support which workflow natively.  **Native** means
 **WSL2 / VM** means "runs inside a Linux environment hosted on
 the OS".
 
-| Workflow | Linux | macOS | Win native | Win + WSL2 |
-|---|---|---|---|---|
-| **Zephyr-on-M (`native_sim`)** — examples, ztests, day-to-day iteration | yes | yes | no (use WSL2) | yes (via WSL) |
-| **Zephyr-on-M (real silicon)** — `west build` + `west flash` against EVK | yes | yes | yes | yes (via WSL) |
-| **Yocto-on-A (`bitbake`)** — full Linux userland image build | yes | no | no | yes |
-| **Heterogeneous orchestrator (`tan build` fanning out across cores)** | yes | yes (Zephyr halves only) | yes (Zephyr halves only) | yes |
+| Workflow | Linux | macOS (Apple Silicon) | macOS (Intel) | Win native | Win + WSL2 |
+|---|---|---|---|---|---|
+| **Zephyr-on-M (`native_sim`)** — examples, ztests, day-to-day iteration | yes | yes | no | no (use WSL2) | yes (via WSL) |
+| **Zephyr-on-M (real silicon)** — `west build` + `west flash` against EVK | yes | yes | no | yes | yes (via WSL) |
+| **Yocto-on-A (`bitbake`)** — full Linux userland image build | yes | no | no | no | yes |
+| **Heterogeneous orchestrator (`tan build` fanning out across cores)** | yes | yes (Zephyr halves only) | no | yes (Zephyr halves only) | yes |
 
-Read: a Mac user can do everything on the host **except** build
-the Yocto half (use a Linux VM for that).  A Windows user runs the
-cross-compiled real-silicon `west build` natively in PowerShell,
-but **both** the `native_sim` simulator target and the Yocto half
-need WSL2 — upstream Zephyr's `native_sim` is Linux/macOS only and
-has no native-Windows target.  Switching is `cd {project}` from
+Read: an Apple Silicon Mac user can do everything on the host
+**except** build the Yocto half (use a Linux VM for that).  An
+Intel Mac user cannot build any Zephyr-on-M target on the host at
+all — the pinned Zephyr SDK ships no `macos-x86_64` host build (see
+above) — and needs a Linux host (VM, container, or remote builder)
+for every row.  A Windows user runs the cross-compiled real-silicon
+`west build` natively in PowerShell, but **both** the `native_sim`
+simulator target and the Yocto half need WSL2 — upstream Zephyr's
+`native_sim` is Linux/macOS(Apple Silicon) only and has no
+native-Windows target.  Switching is `cd {project}` from
 PowerShell into the WSL filesystem
 (`\\wsl$\Ubuntu-22.04\home\{user}\...`).
 
@@ -232,11 +248,16 @@ Persist `ZEPHYR_BASE` in your shell profile (typically
 
 ---
 
-## 3. macOS setup (13 Ventura+)
+## 3. macOS setup (13 Ventura+, Apple Silicon only)
 
-macOS is supported natively for the Zephyr-on-M workflow.  Mac
-users targeting Yocto reach for a Linux VM (UTM, Parallels,
-VirtualBox) — `bitbake` does not run on macOS.
+**Apple Silicon only.**  This section is for M1/M2/M3-class Macs.
+Intel Macs cannot run the Zephyr-on-M workflow at all — see the
+Intel Mac callout in §1 — and should build on a Linux host instead;
+none of §3 applies to them.
+
+macOS (Apple Silicon) is supported natively for the Zephyr-on-M
+workflow.  Mac users targeting Yocto reach for a Linux VM (UTM,
+Parallels, VirtualBox) — `bitbake` does not run on macOS.
 
 ### 3.1 Homebrew prerequisites
 
