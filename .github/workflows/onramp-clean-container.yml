@@ -285,11 +285,22 @@ jobs:
         run: |
           set -euo pipefail
           source ../.venv/bin/activate
-          python3 -c '
+          # Heredoc, not `python3 -c '...'`: the script needs BOTH quote
+          # characters (double for the f-string, single for the dict keys), and
+          # a single-quoted -c argument cannot carry a nested `'` -- the shell
+          # ends the quote there and passes the key through unquoted, which
+          # Python then reads as a bare name (`NameError: name 'zephyrSdk' is
+          # not defined`).  Escaping them instead (`\"`) fails the other way:
+          # the backslash survives into the f-string expression and Python
+          # reads it as a line continuation (`SyntaxError: unexpected character
+          # after line continuation character`).  A quoted heredoc delimiter
+          # ('PY') disables shell expansion entirely, so the body is passed
+          # through byte-for-byte and both quote characters are safe.
+          python3 >> "$GITHUB_ENV" <<'PY'
           import json
           d = json.load(open("metadata/toolchains.json"))
           print(f"ZEPHYR_SDK_VERSION={d['zephyrSdk']['version']}")
-          ' >> "$GITHUB_ENV"
+          PY
 
       - name: Cache Zephyr SDK (arm-zephyr-eabi only)
         uses: actions/cache@v5
