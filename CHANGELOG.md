@@ -7,20 +7,7 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.14.0 candidate
 
-### Fixed — `cross-platform-zephyr.yml`'s macOS and Windows jobs carried `continue-on-error: true` and could never fail
-
-The comment above the two jobs called it a "scaffolding pass" pending the
-runners proving out; that flip never happened, so for two of the three
-OSes ADR 0012 calls first-class, the gate could not go red no matter what
-broke. All three jobs now block on failure, and the dead per-OS
-`include:` blocks and `continue-on-error: ${{ matrix.continue-on-error }}`
-expressions that carried the always-`false` flag are deleted from both
-jobs — the exact mechanism that caused the defect, one word from
-returning. The header comment now says plainly what removing
-`continue-on-error` buys: a visible red run, not a blocked merge — neither
-job is in `dev`'s or `main`'s required-status-check list
-(`gh api repos/alplabai/alp-sdk/rulesets` returns `[]`); making them
-required is a separate maintainer decision.
+### Fixed — `check_cross_platform.py`'s `--fail-on-warning` flip was waiting on two Yocto-script findings, and the Intel-Mac host claim was still overbroad in three docs
 
 `scripts/check_cross_platform.py`'s CI step is flipped to
 `--fail-on-warning`, now possible because `tests/yocto/build_rpc_uio_bench_aarch64.sh`
@@ -33,11 +20,145 @@ findings that kept the lint at "0 expected, 2 found".
 `uname -m`: bootstrap itself and `native_sim` both work there, and only
 `west sdk install` for real silicon is blocked, so refusing outright would
 be wrong. [ADR 0012](docs/adr/0012-cross-platform-developer-host.md) gained
-a 2026-07-29 Amendment recording this narrowing as the decision record;
-`README.md`'s "Development hosts" section and
-`docs/getting-started.md`'s "1. Prerequisites" section — neither touched by
-the `docs/cross-platform-setup.md` entry below — carry the same corrected
-scoping.
+a 2026-07-29 Amendment recording this narrowing as the decision record.
+`docs/cross-platform-setup.md`'s §3 heading/body and opening summary carried
+the same overbroad claim that [#1028] only half-corrected; `README.md` and
+`docs/getting-started.md` are brought into the same corrected scoping.
+
+[#1028]: https://github.com/alplabai/alp-sdk/pull/1028
+
+### Fixed — four V2N/V2M SoM manifests promised a `gd32_bridge` firmware path that exists in no clone (#852)
+
+`metadata/e1m_modules/E1M-V2N101.yaml`, `…V2N102.yaml`, `…V2M101.yaml`, and
+`…V2M102.yaml` declared `helper_firmware[].firmware_path:
+firmware/gd32-bridge/build/gd32/gd32-bridge.bin` — a gitignored CMake build
+output, absent from every fresh clone. That exact path only matches
+`.github/workflows/pr-gd32-bridge-build.yml`'s `-B firmware/gd32-bridge/build/gd32`
+CI invocation (whose binary is a 14-day GitHub Actions artifact, not
+something the repo ships); `firmware/gd32-bridge/README.md`'s own quick-start
+(`cmake -B build`, matching the `CMakeLists.txt` top comment) lands the same
+binary one directory up, at `build/gd32-bridge.bin` — so even a customer who
+builds the firmware by the tree's own documented instructions does not land
+the file at the path the metadata promised. `tan-cli`'s flash planner
+(`crates/tan-cli/src/commands/flash/mod.rs`) turns that string into a real
+`FlashKind::Helper` target on every default `tan flash`, so a customer who
+cloned and flashed a V2N/V2M board got a missing-file failure from a path
+the metadata itself promised.
+
+An earlier fix in this same slice set `firmware_path: TBD`, on the theory
+that `TBD` is the schema's convention for "no shipped image yet" — but
+`crates/tan-cli/src/commands/flash/mod.rs` does not treat `"TBD"` as a
+sentinel: its artefact filter is `.filter(|s| !s.is_empty())`, so `TBD`
+becomes the artefact string, gets resolved to `<build_root>/TBD`, and a real
+flasher gets spawned against that nonexistent path — replacing a clean
+refusal with a worse failure mode. `firmware_path` is now dropped from all
+four entries entirely (schema-legal: `som-preset-v1.schema.json` requires
+only `name`/`chip`), so `flash/mod.rs`'s existing artefact-resolution branch
+takes the `None` path and refuses cleanly: `"flash: helper 'gd32_bridge' has
+no output_artefact / firmware_path; can't flash."` `flash_method:
+swd_probe` and `flash_args` (including `base: "0x08000000"`) are untouched —
+real hardware facts for whenever a prebuilt binary ships, and on a real
+flash are never reached until `firmware_path` exists again, since artefact
+resolution fails before `base` is ever consulted. (Under `tan flash
+--dry-run` a placeholder artefact is substituted instead, so `base` IS
+reached and validated there — inert since nothing is spawned, but not
+"never reached" in that mode.)
+
+### Fixed — Alif Ensemble SoC peripheral counts shipped as fact with no way to tell audited from inherited (#936)
+
+Every `metadata/socs/alif/ensemble/*.json` file carried `pdm: 4` /
+`pdm_lp: 4` with no citation on any part — a suspiciously uniform value
+E4's own ingestion note already flagged as "still unconfirmed" — and E5's
+entire `peripherals` block is inherited from its E7 sibling pending E5's own
+still-unpublished datasheet, with no machine-readable marker saying so.
+`gen_soc_caps.py` asserted both into `include/alp/soc_caps.h` as fact:
+`ALP_SOC_PDM_COUNT` / `ALP_HAS(HW_PDM)` looked exactly as confirmed as any
+DFP-audited count (#932 already proved two inherited blocks — E4 from E3,
+E6 from E7 — wrong).
+
+Added `peripherals_unverified` (per-file array of uncited `peripherals`
+keys) to `metadata/schemas/soc-spec-v1.schema.json`, and set it to
+`["pdm", "pdm_lp"]` on every Alif Ensemble SoC file. E5, whose entire block
+is inherited rather than independently ingested, carries its own explicit
+`peripherals_unverified` listing all 32 of its keys — not the
+`pending_reference_manual_ingestion` flag, which means "`peripherals: {}` /
+counts default to zero" per its own schema description, a claim that's
+false for E5's fully-populated (if uncited) block and produced a wrong
+`validate_metadata.py` WARN. `gen_soc_caps.py`'s `extract_unverified_peripherals()`
+now gives an explicit `peripherals_unverified` (even `[]`) precedence over
+the wholesale `pending_reference_manual_ingestion` fallback, so a file that
+grounds specific keys individually — e.g. i.MX93, whose `mipi_dsi`/`lcdif`
+are both cited to the pinned Zephyr v4.4.0 dtsi in its own `notes` even
+though the rest of its `peripherals` block is still pending RM ingestion —
+can say so with `peripherals_unverified: []` instead of the generator
+falsely marking those two cited keys unverified too. The emitted comment
+also changed wording, from "no datasheet/DFP/HWRM citation" to "count not
+backed by a primary source", because E4's own ingestion note confirms the
+pdm/pdm_lp *instance* against the DFP and only leaves the channel-count
+*value* uncited — the old wording overstated E4's gap by implying nothing
+about pdm was known. Every case surfaces as an
+`/* UNVERIFIED (count not backed by a primary source): ... */` comment
+directly above the affected `#elif defined(CONFIG_ALP_SOC_...)` block in
+the generated `soc_caps.h`, so the gap is visible where the macros are
+actually consumed, not just recorded in metadata nobody reads. This does
+not correct any count — the full re-audit against Alif's datasheets/DFP is
+tracked as follow-up work.
+### Fixed — the macOS and Windows CI legs can now fail the PR (ADR 0012 enforced, not just claimed)
+
+`cross-platform-zephyr.yml`'s `python-smoke` and `loader-smoke` jobs ran their
+macOS and Windows legs under a job-level `continue-on-error: true`, so those
+checks reported **success no matter what their steps did** ([#1023]). ADR 0012
+calls the Zephyr-on-M developer workflow first-class on Win + Mac + Linux; that
+commitment was documented and unenforced, and a host-specific regression landed
+green. Same defect class as #994, #995, #1002 and #1017 — a gate that exists but
+cannot fail. The `include:` overrides and the
+`continue-on-error: ${{ matrix.continue-on-error }}` lines are gone; all three
+legs of both jobs now gate, with `fail-fast: false` kept so a Windows break does
+not cancel the macOS leg that would show the same defect from another angle.
+
+Read the run history with care: while the override was in place a green tick on
+those legs proved nothing, so "they have always passed" was never evidence. The
+flip rests on the per-**step** conclusions of four consecutive runs
+(`30457062916`, `30455621379`, `30450805406`, `30441032872`), which were 24/24
+clean — not on the job conclusions the override forged.
+
+`scripts/check_cross_platform.py` deliberately **stays** in soft-warn mode: its
+`--fail-on-warning` flip waits on the separate `docs/*` cleanup of Linux-only
+idioms, so that lint still reports without gating.
+
+**This is half the fix, and the remaining half is a repo setting, not a file.**
+`dev`'s required status checks are `clang-format · diff-only`,
+`twister-shard 1/4`–`4/4` and `renode · V2N101 --sim-mode socket contract`.
+`python-smoke (macos-latest)` and `python-smoke (windows-latest)` are **not**
+among them, so a failing leg now reports red but still does not block the merge.
+Until those six contexts are added to branch protection on `dev` and `main`,
+[#1023]'s stated expectation — "a Windows or macOS failure blocks the PR" — is
+still not true.
+
+[#1023]: https://github.com/alplabai/alp-sdk/issues/1023
+
+### Fixed — docs stopped advertising an `hw_rev` / SDK-version gate that has never existed
+
+`metadata/sdk_version.yaml` and `metadata/e1m_modules/v2n/hw-revisions.yaml`'s
+header used to claim two enforcement points that were never implemented:
+that `scripts/alp_project.py` refuses to emit, and `scripts/validate_board_yaml.py`
+exits `3`, when a `board.yaml`'s `som.hw_rev` falls outside its declared
+`[min_sdk_version, max_sdk_version]` window. Neither script has ever read
+`sdk_version.yaml` or checked that window; the previous release already
+dropped the claim from `sdk_version.yaml` and the v2n header, but it survived
+verbatim in `docs/board-config-hardware.md`, `docs/tutorials/09-board-yaml-deep-dive.md`,
+`docs/tutorials/08-runtime-board-detection.md`, `metadata/e1m_modules/v2n/CHANGELOG.md`,
+and `include/alp/hw_info.h` (which also stated an already-shipped `<alp/hw_info_build.h>`
+emitter was still a "future" deliverable). `docs/troubleshooting.md` carried a
+whole section for the error string `alp_project: SDK <V> is older than SoM hw_rev
+'<R>' minimum <M>`, which is emitted nowhere -- deleted. All six now describe
+what actually runs: `min_sdk_version`/`max_sdk_version` are declarative data
+only, and the real hardware-mismatch check is the runtime EEPROM read's strict
+equality against the single `hw_rev` the firmware was built for
+(`src/zephyr/hw_info_zephyr.c`). The real hazard -- an unrecognised `hw_rev`
+silently falling back to base-revision pad routing instead of failing -- is
+tracked at [#1025](https://github.com/alplabai/alp-sdk/issues/1025); every
+rewritten doc now points there instead of restating the false gate.
 
 ### Changed — one first command: `README.md` and `docs/getting-started.md` now lead with `tan bootstrap`, like tan's own quickstart does
 

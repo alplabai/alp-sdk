@@ -16,19 +16,28 @@
 #
 # Operating mode:
 #
-#   - Linux / macOS / Windows jobs: each job now goes red -- and stays
-#     red -- if any step fails, instead of the macOS/Windows legs
-#     silently passing.  ADR 0012 claims Zephyr-on-M is first-class on
-#     Win + Mac + Linux; a gate that cannot go red on two of those
-#     three OSes does not even surface a violation of that claim.
-#     macOS + Windows used to run continue-on-error: true
-#     ("scaffolding pass" while the runners were characterised) --
-#     that scaffolding was never removed, so this gate could never
-#     fail on Mac or Win. It now can.
+#   - EVERY leg blocks the PR, Linux + macOS + Windows alike.
+#     A macOS-only or Windows-only failure is a REAL defect on a
+#     host ADR 0012 calls first-class, and it fails the PR.
+#
+#     This was scaffolding until 2026-07-29 (alp-sdk#1023): the Mac
+#     and Win legs carried `continue-on-error: true`, so a job-level
+#     `continue-on-error` made the check report SUCCESS no matter
+#     what its steps did -- the ADR 0012 claim was unenforced and a
+#     host-specific regression landed green.  Note what that means
+#     for the run history: while the override was in place, a green
+#     tick on these legs proved nothing, so "it has always passed"
+#     was never evidence.  The flip was made on the back of four
+#     consecutive runs (30457062916, 30455621379, 30450805406,
+#     30441032872) whose per-STEP conclusions -- not the job
+#     conclusions the override forged -- were 24/24 clean.
+#
 #     NOTE: this workflow's jobs (python-smoke, loader-smoke) are not
 #     in dev's or main's required-status-check list (verified via
-#     `gh api repos/alplabai/alp-sdk/rulesets` -> `[]`), so a red run
-#     here is visible but does not block merge yet -- removing
+#     `gh api repos/alplabai/alp-sdk/rulesets` -> `[]` and
+#     `.../branches/{dev,main}/protection/required_status_checks`,
+#     neither of which lists these six contexts), so a red run here
+#     is visible but does not block merge yet -- removing
 #     continue-on-error buys a real signal, not enforcement. Adding
 #     these six contexts (three OSes x two jobs) to branch protection
 #     is a separate follow-up requiring the maintainer's decision.
@@ -105,14 +114,12 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     strategy:
+      # Every leg reports independently: a Windows-only break must not
+      # cancel the macOS leg that would have shown the same defect from
+      # a second angle.
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        # All three OSes block this job on failure -- ADR 0012 claims
-        # Zephyr-on-M is first-class on Win + Mac + Linux, so this
-        # gate has to be able to fail on Win + Mac too. (No per-OS
-        # continue-on-error opt-out anymore -- that mechanism is what
-        # let macOS + Windows silently pass; see the header comment.)
 
     steps:
       - name: Checkout alp-sdk
