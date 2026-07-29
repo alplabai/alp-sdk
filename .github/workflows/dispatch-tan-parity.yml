@@ -170,9 +170,28 @@ jobs:
       # DISPATCH_EPOCH and PREV_DISPATCH_EPOCH are both already in
       # $GITHUB_ENV from the two preceding steps -- not captured here, so
       # this step's own 1-3s startup lag can't shrink either window.
+      # This job had no checkout before the verdict logic moved out of the
+      # workflow and into scripts/dispatch-confirm.sh -- it only ever called
+      # `gh api`, which needs no working tree. Extracting the script without
+      # adding this made every run die with
+      #   bash: scripts/dispatch-confirm.sh: No such file or directory
+      # (exit 127), because the runner's workspace was empty. Sparse, because
+      # the one file is all this job reads.
+      - name: Check out the confirm script
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          sparse-checkout: |
+            scripts/dispatch-confirm.sh
+          sparse-checkout-cone-mode: false
+
       - name: Confirm a run actually started
         env:
           GH_TOKEN: ${{ steps.apptoken.outputs.token }}
         run: |
           set -uo pipefail
+          test -f scripts/dispatch-confirm.sh || {
+            echo "::error::scripts/dispatch-confirm.sh missing from the runner workspace -- the checkout step above did not fetch it"
+            exit 1
+          }
           bash scripts/dispatch-confirm.sh
