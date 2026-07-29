@@ -60,25 +60,23 @@ def emit_system_manifest(
 def _helper_mcus(project: BoardProject) -> list[dict[str, Any]]:
     """Build the manifest's `helper_mcus[]` block.
 
-    Two sources contribute:
+    Source: the SoM preset's `helper_firmware:` list (Phase 3) -- each
+    entry is EITHER a customer-flashable helper (carries flash_method +
+    flash_args, projected verbatim -- e.g. gd32_bridge) OR a
+    vendor-OTA-updated coprocessor (carries update_channel instead --
+    e.g. AEN's cc3501e_otp, applied over the bridge SPI programming OTP
+    and never customer-flashed); the manifest carries whichever pair the
+    entry declares, never both.  `firmware_path` is entirely ABSENT from
+    the row when the preset doesn't declare one (e.g. GD32 bridge SKUs
+    pending a released binary, #852/#936) -- it is never emitted as
+    `null`, because `system-manifest-v1.schema.json` types it `string`
+    when present (the orchestrator does NOT fail the build on a missing
+    helper firmware path -- the Renesas + Alif flash flows are
+    independently scriptable).
 
-    1. The SoM preset's `helper_firmware:` list (Phase 3) -- each entry
-       is EITHER a customer-flashable helper (carries flash_method +
-       flash_args, projected verbatim -- e.g. gd32_bridge) OR a
-       vendor-OTA-updated coprocessor (carries update_channel instead --
-       e.g. AEN's cc3501e_otp, applied over the bridge SPI programming
-       OTP and never customer-flashed); the manifest carries whichever
-       pair the entry declares, never both.  Entries whose firmware_path
-       is `TBD` still land in the manifest with a human-readable note so
-       reviewers see the gap (the orchestrator does NOT fail the build
-       on TBD helper firmware -- the Renesas + Alif flash flows are
-       independently scriptable).
-
-    2. Legacy `on_module.{supervisor_mcu,wifi_ble}` strings (kept
-       for back-compat with the pre-Phase-3 metadata shape) -- only
-       added if the SKU has no explicit helper_firmware list, so
-       Phase 1 presets that haven't yet been extended still surface
-       their helper MCUs in the manifest.
+    Every in-tree SoM preset carries a `helper_firmware:` list (no more
+    Phase-1 stragglers), so there is no back-compat `on_module.{
+    supervisor_mcu,wifi_ble}` fallback here -- no-legacy-compat.
     """
     out: list[dict[str, Any]] = []
 
@@ -88,10 +86,12 @@ def _helper_mcus(project: BoardProject) -> list[dict[str, Any]]:
             if not isinstance(entry, dict):
                 continue
             row: dict[str, Any] = {
-                "name":          entry.get("name"),
-                "chip":          entry.get("chip"),
-                "firmware_path": entry.get("firmware_path"),
+                "name": entry.get("name"),
+                "chip": entry.get("chip"),
             }
+            firmware_path = entry.get("firmware_path")
+            if firmware_path is not None:
+                row["firmware_path"] = firmware_path
             update_channel = entry.get("update_channel")
             if update_channel:
                 # Vendor-OTA coprocessor (e.g. CC3501E): no flash_method/
@@ -100,22 +100,5 @@ def _helper_mcus(project: BoardProject) -> list[dict[str, Any]]:
             else:
                 row["flash_method"] = entry.get("flash_method")
                 row["flash_args"]    = entry.get("flash_args")
-            if entry.get("firmware_path") == "TBD":
-                row["note"] = ("firmware_path TBD; populated when the "
-                               "upstream firmware release lands")
             out.append(row)
-        return out
-
-    # Back-compat path -- only invoked when the preset is still on
-    # the pre-Phase-3 shape (no helper_firmware: block at all).
-    om = project.som_preset.get("on_module") or {}
-    for key in ("supervisor_mcu", "wifi_ble"):
-        val = om.get(key)
-        if val:
-            out.append({
-                "name":          val,
-                "role":          key,
-                "firmware_path": None,
-                "flash_method":  None,
-            })
     return out
