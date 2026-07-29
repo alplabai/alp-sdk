@@ -53,10 +53,9 @@ documents:
 ## How to read this with `hw-revisions.yaml`
 
 The `min_sdk_version` / `max_sdk_version` window per rev in
-[`hw-revisions.yaml`](hw-revisions.yaml) is the **enforced**
-compatibility contract: the SDK loader refuses to build firmware
-whose SDK version falls outside that window for the declared
-`som.hw_rev`.
+[`hw-revisions.yaml`](hw-revisions.yaml) is declarative compatibility
+data only -- nothing in the SDK reads or enforces it today (see
+[#1025](https://github.com/alplabai/alp-sdk/issues/1025)).
 
 This file is the **human-readable explanation** of what each rev
 contains -- use it to decide whether a code change you're making
