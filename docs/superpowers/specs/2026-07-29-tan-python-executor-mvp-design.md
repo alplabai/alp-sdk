@@ -490,6 +490,41 @@ alp-sdk ships `scripts/west_commands/runners/alif_flash.py` into Zephyr's
 `ZephyrBinaryRunner` namespace, and registers four extension commands via
 `scripts/west-commands.yml`. The pattern is not novel here.
 
+### The unification guard — the plugin pattern must REINFORCE ADR-0017, not erode it
+
+Unification is the point of alp-sdk, and a naive reading of "plugins" would
+destroy it. The failure mode: if an extension is *per-SoM* or *per-vendor*, a
+customer on an AEN module sees a different command set than one on a V2N, and
+alp-sdk degrades from a unification layer into a dispatcher over three vendor
+SDKs — precisely what ADR-0017 exists to prevent.
+
+**Zephyr's design is the opposite of fragmentation, and that is why it is the
+right model.** There is exactly **one** `west flash` command; it is identical on
+every board. What varies underneath is the **runner** — `jlink`, `openocd`,
+`pyocd`, `alif_flash` — selected declaratively from board metadata, never chosen
+by the user. The command surface is unified; only the backend is pluggable.
+
+| Layer | Unified or pluggable | Owner |
+|---|---|---|
+| Command surface (`tan build`, `tan flash`, `tan init`) | **Unified — identical on every SoM** | ONE alp-sdk extension |
+| Portable `<alp/*>` API | **Unified** (existing doctrine) | alp-sdk |
+| `metadata/**` — every hardware fact, once | **Unified, stays in alp-sdk** | alp-sdk |
+| Runner / flash backend / NPU compiler adapter | **Pluggable** — vendor specifics live here | alp-sdk, below the portable surface |
+
+Two rules follow, and they are not negotiable:
+
+1. **ONE alp-sdk extension registering a unified command surface** — never a
+   per-SKU or per-vendor plugin. If two SoM families ever appear to need
+   different *commands* rather than different *runners*, that is a unification
+   failure surfacing and must be fixed at the metadata/API layer, not papered
+   over with a second plugin.
+2. **`tan` must never learn a hardware fact.** It receives the runner name, the
+   toolchain and the paths from alp-sdk's metadata. The moment `tan` contains a
+   SKU, an address, an I2C address, a pin name or a vendor branch, there is a
+   second source of truth and ADR-0017's "every hardware fact lives once under
+   `metadata/**`" is broken. This is a review gate for every change in
+   sub-projects 2-4, not an aspiration.
+
 ### Two facts that must hold before this is committed to code
 
 1. **Does the extension mechanism survive a frozen binary?** west discovers
