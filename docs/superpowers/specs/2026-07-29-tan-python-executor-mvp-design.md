@@ -371,6 +371,62 @@ Zephyr and west are themselves Python, which is precisely why ADR-0020 refused a
 Rust planner. Any plan that promises otherwise is promising something the build
 system cannot deliver.
 
+## The example-CMakeLists centralization (sub-project 4) — surveyed 2026-07-29
+
+Removing `scripts/alp_project.py` from the tree requires dealing with the
+example `CMakeLists.txt` files that shell it at CMake configure time. Survey
+results, correcting two earlier claims:
+
+- **96 files invoke it, not 124.** A `grep -rl` returns 124, but **28 are
+  comment-only false positives** — `examples/aen/*-regcheck` and plain-`prj.conf`
+  apps whose comments say they *do not* invoke it.
+- **Six mechanical shapes**, not one: `A1`/`A2`/`A3` (72 files) differ only in
+  `FATAL_ERROR` text; `B1`/`B2` (20 files) hardcode a relative
+  `../../../scripts/alp_project.py` with **no `ALP_SDK_ROOT` override possible**
+  and **no `OUTPUT_VARIABLE`/`ERROR_VARIABLE`, so stderr is lost on failure**;
+  `C` (5 multicore files) makes a *second* `execute_process` for
+  `ipc-contract-h`. Only two `--emit` modes appear anywhere: `zephyr-conf` (96)
+  and `ipc-contract-h` (5). `--core` is always a literal, never derived.
+
+**Ordering is load-bearing and already documented in the examples themselves.**
+`execute_process` must run *before* `find_package(Zephyr)` because Zephyr pins a
+Python interpreter the moment it imports, and `EXTRA_CONF_FILE` must be appended
+before that same call. `prj.conf` cannot pull the fragment in itself because
+`rsource` is a Kconfig directive and is **not valid in `.conf` files**. Any
+helper that reorders `find_package(Python3)` → `execute_process` →
+`list(APPEND EXTRA_CONF_FILE …)` → `find_package(Zephyr)` breaks configure
+silently.
+
+### The blocker that must be solved in lockstep
+
+`scripts/alp_template.py::_scaffold_cmakelists()` **regex-rewrites these
+CMakeLists when `tan init` scaffolds a customer project**, and it matches the two
+*current* shapes by text. Eight catalog templates use these files as canonical
+sources (`minimal`, `peripheral`, `sensor`, `multicore-rpmsg`, `gateway`,
+`edge-ai`, `diagnostics`, `iot`). A third shape — `include(cmake/alp.cmake)` —
+falls through that function's `return text` no-op path, so **every scaffolded
+customer project would ship an `include()` naming a path that only resolves
+inside an SDK checkout.** That ships broken projects to customers. The template
+renderer must be updated in the same change, or the centralization must not
+land.
+
+### Teaching-value trade-off
+
+A representative block is 49 lines: 20 comment, 6 blank, 23 mechanism. Only
+**two** comments carry non-obvious knowledge — why a copied-out example needs
+`ALP_SDK_ROOT`, and the `rsource`-is-invalid-in-`.conf` fact. Those two must
+survive into the helper's own documentation or they are lost from the examples,
+which are teaching artifacts here. The rest is boilerplate whose removal is a
+net gain.
+
+### Style precedent
+
+`cmake/alp-sdk-warnings.cmake` is the only existing shared module, and **no
+example includes any `cmake/*.cmake` today** — this would be the first. Its
+conventions: `function()` (not `macro()`), `alp_sdk_*` snake_case names, a
+doc-comment block above each definition, `_alp_sdk_*`-prefixed locals, guarded
+early `return()`s.
+
 ## Follow-ups deliberately deferred
 
 - **ADR-0020's verification claim is factually wrong** and should be corrected

@@ -812,6 +812,42 @@ git commit -m "feat(python): parse the build plan and enforce the version-skew g
 **Port note — the guards are the point, not the string replacement.** Each refusal below prevents a silent wrong-tree build. Reproduce every error code verbatim; they appear in envelopes the extension and the goldens match on:
 `build.plan-invalid`, `build.project-root-mismatch`, `build.sdk-root-unresolved`, `build.sdk-commit-mismatch`, `build.plan-token-unresolved`, `build.toolchain-root-unresolved`.
 
+> **CRITICAL — the field list below is the authoritative one; the reference code
+> further down this task is INCOMPLETE and must not be treated as the spec.**
+>
+> `crates/tan-core/src/plan_tokens.rs` is the oracle. **Read it before writing
+> anything** and derive the exact field set from `substitute_plan_tokens` /
+> `substitute_slice` / `substitute_command_lenient` / `substitute_artefact`.
+> Its own module doc states the rule: *"NO arg-parsing: every `command.args`
+> entry and `cwd`, every slice `env` … `GeneratedFile`'s `path`/`contents`
+> (config + shared artefacts)"* are substituted.
+>
+> Every one of these must be substituted:
+>
+> | Field | Note |
+> |---|---|
+> | `boardYaml` | plan level; hard error on unresolved `${TOOLCHAIN_ROOT}` (no slice to demote to) |
+> | `slices[].buildDir` | |
+> | `slices[].appDir` | |
+> | `slices[].env.<KEY>` | |
+> | **`slices[].envAppendPath.<KEY>[n]`** | **each list element.** Miss this and a literal `${SDK_ROOT}/scripts` lands on `PYTHONPATH` — a silently wrong build, not a crash |
+> | **`slices[].command.cwd`** | |
+> | `slices[].command.args[n]` | |
+> | **`slices[].configArtefacts[n]`** | **`path` AND `contents`** — artefact bodies carry paths too |
+> | **`sharedArtefacts[n]`** | **`path` AND `contents`** |
+>
+> Ordering matters: a slice's artefacts are substituted **with** the slice so a
+> demoted slice's artefacts are stripped together with it; plan-level
+> `sharedArtefacts` are substituted after all slices. Follow the Rust order.
+>
+> **Mandatory structural test — this is what catches a field nobody listed.**
+> Beyond the per-field tests, add a test that takes a plan whose EVERY string
+> field contains a token, runs the substitution, re-serialises the whole
+> resulting plan to JSON, and asserts the literal substring `${` appears
+> nowhere. A per-field test only proves the fields someone remembered; this
+> sweep fails loudly on any field the port forgot. Treat a failure of this test
+> as a missing field, never as a reason to relax the assertion.
+
 - [ ] **Step 1: Write the failing test**
 
 ```python
