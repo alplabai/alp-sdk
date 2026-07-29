@@ -263,6 +263,7 @@ jobs:
         run: bash scripts/bootstrap.sh
 
       - name: Install tan (docs quickstart step 2 -- the documented install.sh one-liner)
+        shell: bash
         run: |
           set -euo pipefail
           # GHA's default shell is `bash -e {0}`, which does NOT set
@@ -280,6 +281,7 @@ jobs:
       # so the cache key tracks the real pin.
       - name: Read Zephyr SDK toolchain pin (metadata/toolchains.json)
         working-directory: alp-sdk
+        shell: bash
         run: |
           set -euo pipefail
           source ../.venv/bin/activate
@@ -323,6 +325,7 @@ jobs:
         env:
           ZEPHYR_SDK_INSTALL_DIR: ${{ github.workspace }}/zephyr-sdk
           ZEPHYR_BASE: ${{ github.workspace }}/zephyr
+        shell: bash
         run: |
           set -euo pipefail
           # Each GHA step is a fresh shell -- the earlier `bootstrap.sh` step's
@@ -337,6 +340,7 @@ jobs:
 
       - name: Assert a real ELF came out the other end
         working-directory: alp-sdk
+        shell: bash
         run: |
           set -euo pipefail
           elf="$(find examples/peripheral-io/gpio-button-led/build -name zephyr.elf -print -quit)"
