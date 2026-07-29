@@ -83,6 +83,10 @@ def _emit_pending_warnings(rel: Path, doc) -> None:
     * pending_reference_manual_ingestion -- peripherals: {} on such SoCs means
       "unknown / TBD", so ALP_SOC_*_COUNT ceilings on derived SoMs will
       under-report until the RM has been ingested.
+    * peripherals_unverified (#936) -- a subset of `peripherals` keys this
+      file itself flags as uncited (e.g. `pdm`/`pdm_lp`, uniform across every
+      Alif Ensemble part with no datasheet/DFP citation).  Also catches a
+      typo'd key that doesn't match anything in `peripherals`.
     """
     if not isinstance(doc, dict):
         return
@@ -90,6 +94,16 @@ def _emit_pending_warnings(rel: Path, doc) -> None:
         print(f"WARN  {rel}: pending_reference_manual_ingestion -> "
               f"peripheral counts default to zero, ALP_SOC_*_COUNT ceilings "
               f"may under-report")
+    unverified = doc.get("peripherals_unverified")
+    if isinstance(unverified, list) and unverified:
+        peripherals = doc.get("peripherals") if isinstance(doc.get("peripherals"), dict) else {}
+        unknown = [k for k in unverified if k not in peripherals]
+        if unknown:
+            print(f"WARN  {rel}: peripherals_unverified references key(s) not present in "
+                  f"peripherals: {unknown} -- likely a typo")
+        print(f"WARN  {rel}: peripherals_unverified -> {sorted(unverified)} counts have no "
+              f"datasheet/DFP/HWRM citation; the matching ALP_SOC_*_COUNT macros are asserted, "
+              f"not confirmed")
 
 
 def _check_files(label, files, validator, loader, key_for_summary):
