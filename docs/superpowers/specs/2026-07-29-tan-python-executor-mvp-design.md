@@ -456,6 +456,58 @@ into the critical path** — they were scheduled as "the rest of the surface", b
 a fresh customer cannot start without them. Target 2 makes the vscode
 resolution path and the stamp logic first-class rather than cutover details.
 
+## Target architecture: model tan/alp-sdk on west/Zephyr (decided 2026-07-29)
+
+**Decision:** `tan` becomes a generic, stable, domain-free core; **alp-sdk ships
+its own commands and runners into it as extensions**, the way Zephyr extends
+west. Maintainer-agreed; supersedes the "collapse everything into one process"
+framing this spec previously carried.
+
+| west / Zephyr | tan / alp-sdk |
+|---|---|
+| `west` core: `init`, `update`, `manifest` — generic, stable, domain-free | `tan` core: plan consume/materialise/execute, envelope, exit codes, process control |
+| Zephyr ships `build`, `flash`, `debug`, `sign` as **extension commands** | alp-sdk ships the SoM-specific command surface |
+| `west-commands.yml` is the registration contract | a registration manifest alp-sdk owns |
+| `ZephyrBinaryRunner` base class in Zephyr; `jlink`/`openocd` subclasses | a runner base class in tan; per-SoM flash backends in alp-sdk |
+| `board.cmake` selects the runner declaratively | `board.yaml` / `metadata/` selects it |
+
+**Why this over a single collapsed process.** It decouples the release trains.
+Zephyr adds a board, a runner or a command **without a west release**. Today
+`tan` and alp-sdk are coupled by a versioned JSON contract *and* the
+`SUPPORTED_CLI_VERSION` pin, so a new SoM capability can require both repos to
+move. Under the plugin pattern a new SKU, flash backend or peripheral command
+lands in **alp-sdk alone** — which is the right shape for a SoM vendor whose
+product line grows, and it is a design already proven to survive a decade of
+both sides changing.
+
+Note this **re-frames the port's prize**. Earlier drafts justified the work as
+"collapse the SDK↔tan seam into one process". Under this architecture the seam
+is not collapsed, it is **replaced by a plugin contract** — a materially
+different, and better-precedented, end-state than ADR-0020's.
+
+There is already a working precedent for the runner half **inside this repo**:
+alp-sdk ships `scripts/west_commands/runners/alif_flash.py` into Zephyr's
+`ZephyrBinaryRunner` namespace, and registers four extension commands via
+`scripts/west-commands.yml`. The pattern is not novel here.
+
+### Two facts that must hold before this is committed to code
+
+1. **Does the extension mechanism survive a frozen binary?** west discovers
+   extensions by importing a module from a path named in a YAML. A PyInstaller
+   `--onefile` `tan` carries a **bundled** CPython, so importing alp-sdk's
+   Python from the customer's checkout crosses an interpreter boundary. If that
+   fails, the *shape* of this architecture survives but the *loading mechanism*
+   must change — a subprocess-per-command or an entry-point protocol rather
+   than an in-process import.
+2. **Which side owns the runner base class**, and whether a plugin can be
+   registered without the core having to know about it in advance.
+
+Until both are answered against the real west/Zephyr source, this section is a
+decided *direction*, not an implementation contract. It was reached by analogy,
+and analogies in this port have twice been wrong (the J-Link flash path; the
+claim that Rust's `--plan` drops schema keys — it does not, it passes raw JSON
+through verbatim).
+
 ## Boundaries the rest of the port must not cross (ADR-0017 unification)
 
 alp-sdk is a **unification layer over the vendor SDK**, for hardware and
