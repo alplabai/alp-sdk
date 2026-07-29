@@ -319,6 +319,52 @@ Sub-project 1 is done when all five hold:
 5. Unit tests green on `core/`; the repo's existing cargo gates still green
    (the Rust workspace is untouched).
 
+## What "shippable" means — the two acceptance targets
+
+Set by the maintainer 2026-07-29. These are the definition of done for the whole
+port, not smoke tests. Byte-parity against the Rust binary is evidence; **these
+two are the product.**
+
+### Target 1 — a fresh customer, blink or RGB LED
+
+A customer who has never used the SDK installs `tan`, scaffolds a blink /
+RGB-LED project, builds it, flashes it, and the LED blinks on real hardware.
+Nothing else. If that path has a rough edge, the port is not shippable.
+
+The path exercises `tan init` → template scaffold → build → flash, and it runs
+straight through the **known blocker** recorded under the CMakeLists survey
+below: `scripts/alp_template.py::_scaffold_cmakelists()` rewrites a scaffolded
+project's `CMakeLists.txt` by matching the *current* boilerplate text. A
+customer scaffold that ships an unresolvable `include()` fails at this exact
+target. Any CMake centralization must therefore land **with** the template
+renderer, never before it.
+
+Success is a blinking LED on the E1M-AEN801, verified on the bench — not a
+successful compile.
+
+### Target 2 — an existing user upgrades
+
+Someone on the shipped Rust `tan` v0.4.0 upgrades to the Python `tan` and their
+existing project keeps building with **no manual migration**. Specifically:
+
+- the VS Code extension's resolution/download path finds and runs the new binary
+  (`SUPPORTED_CLI_VERSION`, the cached-binary replacement at
+  `<globalStorage>/cli/tan[.exe]`);
+- an **already-configured build dir** keeps working — this is what
+  `sdk_stamp_action` / the `.tan-sdk-root` stamp exist for, and an upgrade is
+  precisely the scenario that wipes-or-keeps a stale CMake cache;
+- no plan re-emit, no config edit, no cache clear is demanded of the user.
+
+An upgrade that silently produces a wrong image is worse than one that refuses;
+the version-skew and `sdkCommit` guards are what make refusal the failure mode.
+
+### What these targets imply for sequencing
+
+Target 1 pulls `init` / scaffold / template rendering **out of sub-project 3 and
+into the critical path** — they were scheduled as "the rest of the surface", but
+a fresh customer cannot start without them. Target 2 makes the vscode
+resolution path and the stamp logic first-class rather than cutover details.
+
 ## Boundaries the rest of the port must not cross (ADR-0017 unification)
 
 alp-sdk is a **unification layer over the vendor SDK**, for hardware and
