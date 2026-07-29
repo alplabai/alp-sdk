@@ -93,3 +93,48 @@ def test_dispatch_sends_the_event_name_tan_listens_for() -> None:
         "makes tan silently fall back to the pin, i.e. test the wrong commit "
         "while reporting green."
     )
+
+
+def test_a_never_fired_dispatch_is_a_failure_not_a_warning() -> None:
+    """A lifetime total of zero dispatch runs must FAIL, not warn.
+
+    This is the #194 lesson pinned as a mechanism rather than a comment. The
+    cross-repo dispatch went its entire lifetime without firing once: the
+    trigger was on tan's `dev` while `repository_dispatch` only ever reads the
+    DEFAULT branch's copy of a workflow. Every push warned, everything else was
+    green, and the gate protected nothing for weeks.
+
+    The two cases must not share an exit status, because they are different
+    facts:
+
+    * a run missing THIS TIME while tan has fired before -- Actions queueing.
+      Warn; failing this repo's push for tan's scheduler is the wrong blame.
+    * ZERO runs in tan's lifetime -- the wiring is dead. A queue delay cannot
+      produce a lifetime total of 0 once the seam has ever worked, so there is
+      no transient reading of it.
+
+    Without this test the escalation is itself unfalsifiable -- exactly the
+    shape it exists to catch.
+    """
+    body = SENDER.read_text(encoding="utf-8")
+
+    assert "total_count" in body, (
+        "the confirmation step must read tan's LIFETIME repository_dispatch "
+        "count (`total_count`), not only runs in a recent time window. A "
+        "window-only check cannot tell 'never wired' from 'slow this time', "
+        "which is precisely how #194 stayed invisible."
+    )
+    assert 'if [ "${lifetime}" = "0" ]' in body, (
+        "a lifetime count of 0 must be branched on explicitly -- that is the "
+        "unambiguous 'the dispatch has never worked' signal."
+    )
+    assert "::error::" in body and "exit 1" in body, (
+        "a never-fired dispatch must FAIL the step (::error:: + exit 1). "
+        "Warning on a permanently dead gate is a guard wearing a guard's name."
+    )
+    assert "DEFAULT branch" in body, (
+        "the failure message must name the default-branch rule as the likely "
+        "cause. #194's original wording sent the reader to check the `types:` "
+        "entry, which was correct all along -- so the message cost time rather "
+        "than saving it."
+    )

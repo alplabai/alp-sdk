@@ -107,7 +107,29 @@ jobs:
               exit 0
             fi
           done
-          # WARN, not fail: the dispatch was accepted, and a missed run is most
-          # often Actions queueing rather than a broken wiring. Failing this
-          # repo's push for tan's scheduler would be the wrong blame.
-          echo "::warning::dispatched, but no tan-cli repository_dispatch run appeared within ~60s. Check that parity.yml still lists 'alp-sdk-planner-change' under repository_dispatch.types -- a renamed type is accepted with a 204 and silently does nothing."
+          # Two DIFFERENT failures share this code path, and until #194 they
+          # shared a message too. Separate them, because one is transient and
+          # the other is the gate being dead:
+          #
+          #   * no run appeared THIS TIME, but tan has had dispatch runs before
+          #     -> almost always Actions queueing. WARN. Failing this repo's
+          #     push for tan's scheduler would be the wrong blame.
+          #   * tan has had ZERO repository_dispatch runs in its LIFETIME
+          #     -> the wiring is dead, not slow. A queue delay cannot produce a
+          #     lifetime total of 0 once the seam has ever worked, so this is
+          #     unambiguous and gets to FAIL.
+          #
+          # That distinction is the whole lesson of #194: the dispatch had never
+          # fired even once, this step warned on every push, and green
+          # everywhere else made it easy to keep not reading. A permanently dead
+          # gate that only ever warns is a guard wearing a guard's name.
+          lifetime="$(gh api "repos/alplabai/tan-cli/actions/runs?event=repository_dispatch&per_page=1"                         -q '.total_count' 2>/dev/null || echo unknown)"
+          if [ "${lifetime}" = "0" ]; then
+            echo "::error::tan-cli has NEVER had a repository_dispatch run (lifetime total_count=0). The dispatch is accepted with a 204 and goes nowhere, so the cross-repo parity gate is not running at all."
+            echo "::error::Most likely cause, and the one that caused #194: parity.yml's 'repository_dispatch:' trigger is missing from tan-cli's DEFAULT branch. GitHub triggers repository_dispatch ONLY from the default branch's copy of a workflow -- having it on 'dev' alone does nothing. Check https://github.com/alplabai/tan-cli/blob/main/.github/workflows/parity.yml"
+            echo "::error::Second possibility: the event_type no longer matches. This repo posts 'alp-sdk-planner-change'; tan's parity.yml must list that exact string under repository_dispatch.types."
+            exit 1
+          fi
+          # WARN: tan has dispatched before, so the wiring works and this is a
+          # timing miss rather than a broken seam.
+          echo "::warning::dispatched, but no NEW tan-cli repository_dispatch run appeared within ~60s (lifetime runs: ${lifetime}). The wiring has worked before, so this is most likely Actions queueing -- confirm a run for this SHA appeared at https://github.com/alplabai/tan-cli/actions?query=event%3Arepository_dispatch"
