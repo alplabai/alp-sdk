@@ -1003,7 +1003,7 @@ def test_bootstrap_sh_hint_length_mismatch_fails(tmp_path, monkeypatch, capsys):
     rv = gate.main()
     err = capsys.readouterr().err
     assert rv == 1
-    assert "PREREQ_HINT_LINUX has 3 entries but PREREQ_HINT_NAMES has 4" in err
+    assert "PREREQ_HINT_LINUX has 5 entries but PREREQ_HINT_NAMES has 6" in err
     assert "must stay parallel arrays" in err
 
 
@@ -1021,7 +1021,7 @@ def test_bootstrap_sh_hint_deleted_in_lockstep_does_not_silently_drop_tool(
     assertion existed."""
     _scaffold(tmp_path)
     sh_path = tmp_path / "scripts/bootstrap.sh"
-    _replace(sh_path, "PREREQ_HINT_NAMES=(git cmake python3 ninja)", "PREREQ_HINT_NAMES=(cmake python3 ninja)")
+    _replace(sh_path, "PREREQ_HINT_NAMES=(git cmake python3 ninja xz wget)", "PREREQ_HINT_NAMES=(cmake python3 ninja xz wget)")
     _replace(sh_path, '    "sudo apt-get install -y git"\n', "")
     _replace(sh_path, '    "brew install git"\n', "")
     _point_gate_at(tmp_path, monkeypatch)
@@ -1183,6 +1183,36 @@ def test_hardcoded_duplicate_of_punctuation_wrapped_leaf_fragment_fails(
     assert "scripts/bootstrap.ps1" in err
     assert "docs/cross-platform-setup.md" in err
     assert "manualInstallHints.windows.note" in err
+
+
+def test_hardcoded_duplicate_of_posix_manual_install_note_fails(tmp_path, monkeypatch, capsys):
+    """POSIX twin of `test_hardcoded_duplicate_of_read_leaf_fails` above.
+    `manualInstallHints.posix.note` (issue #949 addendum A4 -- POSIX finally
+    got the same manual-install-hints render `manualInstallHints.windows.note`
+    already had) is read generically by `_check_no_orphaned_leaves`'s
+    per-leaf scan the same as every other leaf, but until now nothing proved
+    that scan actually fires for scripts/bootstrap.sh's own render site --
+    only the bootstrap.ps1/windows side had a regression test. Re-inject a
+    hardcoded copy of `docs/cross-platform-setup.md` (a distinctive >= 20
+    char fragment of `manualInstallHints.posix.note`) immediately above
+    bootstrap.sh's `MANUAL_INSTALL_POSIX_NOTE` render loop -- the only
+    existing appearance of that path in bootstrap.sh is inside the header
+    comment at the top of the file (exempt), so this is a genuine second,
+    hardcoded copy outside a comment and must be caught."""
+    _scaffold(tmp_path)
+    sh_path = tmp_path / "scripts/bootstrap.sh"
+    needle = 'for line in "${MANUAL_INSTALL_POSIX_NOTE[@]}"; do echo "  ${line}"; done'
+    duplicate_line = (
+        'echo "See docs/cross-platform-setup.md for the manual install steps."\n        '
+    )
+    _replace(sh_path, needle, duplicate_line + needle)
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "scripts/bootstrap.sh" in err
+    assert "docs/cross-platform-setup.md" in err
+    assert "manualInstallHints.posix.note" in err
 
 
 def test_short_leaf_fragment_duplicate_is_not_flagged(tmp_path, monkeypatch, capsys):

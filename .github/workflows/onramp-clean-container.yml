@@ -4,15 +4,18 @@
 #
 # pr-getting-started-aen801.yml already builds the AEN801 example on
 # every relevant PR, but it runs on `ubuntu-latest` -- a GitHub-hosted
-# runner image that ships git/curl/cmake/python3/ninja/xz-utils out of
-# the box -- and it drives the build with a raw `west build` command,
+# runner image that ships git/curl/cmake/python3/ninja/xz-utils/wget out
+# of the box -- and it drives the build with a raw `west build` command,
 # never `tan`.  That combination means it could never have caught any
 # of #949's defects: a genuinely bare host failing `git clone` (no
 # git/curl), `scripts/bootstrap.sh` refusing without saying what to
 # install, nothing installing the Zephyr SDK toolchain, `tan sdk
-# switch` never being run, or `west sdk install` dying on a missing
-# `xz` binary.  This workflow closes that gap by running the
-# DOCUMENTED path (docs/getting-started.md's quickstart, verbatim,
+# switch` never being run, `west sdk install` dying on a missing `xz`
+# binary, or the pinned Zephyr SDK's own `setup.sh` dying on a missing
+# `wget` binary (found by this workflow's own first clean-container
+# acceptance run, one step past where the `xz` fix got it -- `wget` was
+# declared nowhere either).  This workflow closes that gap by running
+# the DOCUMENTED path (docs/getting-started.md's quickstart, verbatim,
 # `tan` and all) inside a genuinely bare `ubuntu:24.04` CONTAINER --
 # no apt package this job doesn't itself install first.
 #
@@ -24,21 +27,32 @@
 #     following ONLY docs/getting-started.md §1's per-OS one-liner +
 #     `bash scripts/bootstrap.sh`.  No Zephyr SDK download -- catches
 #     defects 1, 2, 5 (git/curl, the bootstrap.sh refusal message, the
-#     missing `xz` prerequisite) cheaply, on every PR that touches the
-#     onramp surface.
+#     missing `xz`/`wget` prerequisites) cheaply, on every PR that
+#     touches the onramp surface.
 #
-#   full-quickstart-build (weekly + workflow_dispatch only, ~10-15 min
-#     -- a real `west sdk install --gnu-toolchains arm-zephyr-eabi
-#     --no-hosttools` download, a few hundred MB per pr-twister.yml's
-#     own measurement): walks the REST of the documented quickstart --
-#     installs `tan`, installs the toolchain, runs `tan sdk switch` +
-#     `tan --project ... build`, and asserts a real `zephyr.elf` came
-#     out the other end.  This is the expensive half (defects 3, 4)
-#     and does NOT run on every PR -- a doc-only PR that breaks this
-#     path waits for the weekly run or a manual workflow_dispatch,
-#     which is the trade the addendum asked to make explicit rather
-#     than silently skip.
+#   full-quickstart-build (weekly + workflow_dispatch + a labelled PR,
+#     ~10-15 min -- a real `west sdk install --gnu-toolchains
+#     arm-zephyr-eabi --no-hosttools` download, a few hundred MB per
+#     pr-twister.yml's own measurement): walks the REST of the
+#     documented quickstart -- installs `tan`, installs the toolchain,
+#     runs `tan sdk switch` + `tan --project ... build`, and asserts a
+#     real `zephyr.elf` came out the other end.  This is the expensive
+#     half (defects 3, 4) and does NOT run on every PR by default -- a
+#     doc-only PR that breaks this path normally waits for the weekly
+#     run, which is the cost/frequency trade the addendum asked to make
+#     explicit rather than silently skip.
 #
+#     IMPORTANT: `schedule` and `workflow_dispatch` BOTH only fire from
+#     the copy of this file already on the repo's DEFAULT branch --
+#     until a dev->main release lands this file, neither can run at all,
+#     which means the weekly cron above is currently a no-op and there
+#     is no Run-workflow button either.  `pull_request`, by contrast,
+#     runs the workflow version FROM THE PR's OWN BRANCH, so it is the
+#     only trigger that can exercise full-quickstart-build before this
+#     file ever reaches main.  The `run-full-quickstart` label (create
+#     it in the repo taxonomy if it doesn't exist yet) opts a specific
+#     PR into the expensive job without paying its cost on every PR that
+#     merely touches one of the `paths:` above.
 name: onramp-clean-container
 
 on:
@@ -56,7 +70,8 @@ on:
   schedule:
     # Sunday 07:00 UTC -- the expensive full-build job only; cheap
     # enough weekly that a stale toolchain/tan-flow regression surfaces
-    # within days, not silently forever.
+    # within days, not silently forever. Currently inert until this
+    # file lands on the default branch (main) -- see the note above.
     - cron: '0 7 * * 0'
   workflow_dispatch:
 
@@ -79,12 +94,12 @@ jobs:
       # makes checkout possible here at all; this step ALSO proves the
       # premise: if these ever stop being absent (a base-image change
       # upstream), this job silently stops testing what it claims to.
-      - name: Assert the base image is actually bare (git/curl/cmake/python3/ninja/xz absent)
+      - name: Assert the base image is actually bare (git/curl/cmake/python3/ninja/xz/wget absent)
         shell: bash
         run: |
           set -uo pipefail
           missing=0
-          for bin in git curl cmake python3 ninja xz; do
+          for bin in git curl cmake python3 ninja xz wget; do
             if command -v "${bin}" >/dev/null 2>&1; then
               echo "::error::${bin} is already on PATH in ubuntu:24.04 -- this job's premise (a bare host) no longer holds; update this job or the base image pin"
               missing=1
@@ -106,7 +121,7 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends git curl ca-certificates
 
-      # scripts/bootstrap.sh should refuse HERE (cmake/python3/ninja/xz
+      # scripts/bootstrap.sh should refuse HERE (cmake/python3/ninja/xz/wget
       # still absent) with a curated per-tool install hint, not a bare
       # tool-name list -- the exact defect #949 addendum item 2 fixes.
       - name: bootstrap.sh refuses with an actionable per-tool hint (expect failure)
@@ -118,7 +133,7 @@ jobs:
           echo "${out}"
           set -e
           if [ "${rc}" -eq 0 ]; then
-            echo "::error::bootstrap.sh succeeded on a host missing cmake/python3/ninja/xz -- it should have refused"
+            echo "::error::bootstrap.sh succeeded on a host missing cmake/python3/ninja/xz/wget -- it should have refused"
             exit 1
           fi
           # Every missing tool's curated install command (from
@@ -130,7 +145,8 @@ jobs:
             "sudo apt-get install -y cmake" \
             "sudo apt-get install -y python3" \
             "sudo apt-get install -y ninja-build" \
-            "sudo apt-get install -y xz-utils"; do
+            "sudo apt-get install -y xz-utils" \
+            "sudo apt-get install -y wget"; do
             case "${out}" in
               *"${hint}"*) ;;
               *) echo "::error::bootstrap.sh's refusal message is missing the hint: ${hint}"; exit 1 ;;
@@ -139,38 +155,59 @@ jobs:
 
       # Now install exactly what docs/getting-started.md section 1's
       # Debian/Ubuntu one-liner tells a customer to install (plus the
-      # newly-declared `xz` prerequisite) and prove bootstrap.sh
+      # newly-declared `xz`/`wget` prerequisites) and prove bootstrap.sh
       # succeeds -- a real customer's next step after reading the
       # refusal message above.
       - name: Install prerequisites (docs/getting-started.md section 1)
         run: |
           apt-get install -y --no-install-recommends \
-              cmake ninja-build python3 python3-pip python3-venv xz-utils
+              cmake ninja-build python3 python3-pip python3-venv xz-utils wget
 
       - name: bootstrap.sh succeeds once every prerequisite is installed
         working-directory: alp-sdk
-        run: bash scripts/bootstrap.sh --no-west
-          # --no-west here: this job is the cheap PRE-toolchain phase
-          # (addendum's own cost split) -- `west init`/`update` fetch
-          # Zephyr itself (~30 MB shallow) and belong in the full-build
-          # job below, which already pays for a much larger SDK
-          # download and can absorb it. This job's job is proving the
-          # venv + prerequisite layer alone, not re-proving west.yml
-          # resolves (pr-twister.yml already covers that on every PR).
+        # --no-west here: this job is the cheap PRE-toolchain phase
+        # (addendum's own cost split) -- `west init`/`update` fetch
+        # Zephyr itself (~30 MB shallow) and belong in the full-build
+        # job below, which already pays for a much larger SDK
+        # download and can absorb it. This job's job is proving the
+        # venv + prerequisite layer alone, not re-proving west.yml
+        # resolves (pr-twister.yml already covers that on every PR).
+        run: |
+          set -euo pipefail
+          out="$(bash scripts/bootstrap.sh --no-west)"
+          echo "${out}"
+          # Exit status alone doesn't prove the manual-install-hints section
+          # (metadata/bootstrap.json's manualInstallHints.posix.note, the
+          # #949 addendum A4 fix) actually rendered -- a script that quietly
+          # dropped that section entirely would still exit 0 here. Assert
+          # the heading substring shows up.
+          case "${out}" in
+            *"NOT auto-installed (manual, one-time):"*) ;;
+            *) echo "::error::bootstrap.sh succeeded but never printed the manual-install-hints heading (manualInstallHints.posix.note) -- see scripts/bootstrap.sh:612"; exit 1 ;;
+          esac
 
   full-quickstart-build:
     name: onramp · bare container -- full quickstart to a real ELF (docs §1-4)
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    # schedule/workflow_dispatch: see the trigger note in the file header --
+    # both are inert until this file reaches the default branch. The
+    # `run-full-quickstart` label lets a PR (on the branch that's actually
+    # introducing a regression) opt into this job's real toolchain download
+    # instead of waiting for that release.
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'run-full-quickstart'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     container:
       image: ubuntu:24.04
     steps:
-      - name: Install prerequisites (docs/getting-started.md section 1, plus xz)
+      - name: Install prerequisites (docs/getting-started.md section 1, plus xz + wget)
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-              git curl ca-certificates cmake ninja-build python3 python3-pip python3-venv xz-utils
+              git curl ca-certificates cmake ninja-build python3 python3-pip python3-venv xz-utils wget
 
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
@@ -184,6 +221,13 @@ jobs:
 
       - name: Install tan (docs quickstart step 2 -- the documented install.sh one-liner)
         run: |
+          set -euo pipefail
+          # GHA's default shell is `bash -e {0}`, which does NOT set
+          # pipefail: on a 404, `curl -f` exits nonzero but `sh` reads
+          # empty stdin and exits 0, so the pipeline (graded on the LAST
+          # command) reports success and the real failure only surfaces
+          # two steps later as "tan: command not found". `set -o pipefail`
+          # makes the pipeline fail on curl's exit code instead.
           curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh
           echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
 
@@ -204,6 +248,7 @@ jobs:
 
       - name: Cache Zephyr SDK (arm-zephyr-eabi only)
         uses: actions/cache@v5
+        id: zephyr-sdk-cache
         with:
           path: zephyr-sdk
           key: onramp-sdk-${{ env.ZEPHYR_SDK_VERSION }}-arm-zephyr-eabi-${{ runner.os }}
@@ -212,7 +257,13 @@ jobs:
       # + section 1) -- not pr-getting-started-aen801.yml's hand-rolled
       # wget+sha256 shortcut, so a `west sdk install` regression (the
       # patoolib/xz failure #949 reported) is exactly what this catches.
+      # Guarded on the cache step's own `cache-hit` (matches
+      # pr-twister.yml:215-221's pattern) -- without this the cache restore
+      # above bought nothing: a hit was unconditionally overwritten by a
+      # full re-download here, and `actions/cache@v5` skips its own save on
+      # a hit anyway, so the download happened on every run either way.
       - name: west sdk install (docs quickstart -- the real toolchain install command)
+        if: steps.zephyr-sdk-cache.outputs.cache-hit != 'true'
         # No working-directory override: this runs at GITHUB_WORKSPACE
         # itself (alp-sdk's PARENT, i.e. bootstrap.sh's own WORKSPACE_DIR),
         # where bootstrap.sh (run with `working-directory: alp-sdk` above)
@@ -228,8 +279,16 @@ jobs:
         working-directory: alp-sdk
         env:
           ZEPHYR_SDK_INSTALL_DIR: ${{ github.workspace }}/zephyr-sdk
+          ZEPHYR_BASE: ${{ github.workspace }}/zephyr
         run: |
           set -euo pipefail
+          # Each GHA step is a fresh shell -- the earlier `bootstrap.sh` step's
+          # own `source .venv/bin/activate` does not carry here, and
+          # bootstrap.sh writes nothing to GITHUB_PATH/GITHUB_ENV. Without
+          # this, `west` is off PATH and alp_orchestrate.py has no
+          # PyYAML/jsonschema, so `tan build` fails -- matches
+          # pr-getting-started-aen801.yml's own venv activation.
+          source ../.venv/bin/activate
           tan --project examples/peripheral-io/gpio-button-led sdk switch "${PWD}"
           tan --project examples/peripheral-io/gpio-button-led build
 
