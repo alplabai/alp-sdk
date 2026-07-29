@@ -7,6 +7,38 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.15.0 candidate
 
+### Added — a machine-readable install command for the 7-Zip prerequisite of `west sdk install` on native Windows (#1036)
+
+7-Zip was documented only as prose, at `manualInstallHints.windows.note[1]`:
+`west sdk install`'s `.7z` extraction shells out to an external
+`7z`/`7za`/`7zr`/`7zz`/`7zzs`/`unar` binary via `patoolib`, with no
+pure-Python fallback, so 7-Zip must already be on PATH — but nothing in the
+repo could hand a caller (tan-cli's future `doctor --build` check, #204
+upstream) the actual command to run. `metadata/bootstrap.json` now declares
+`prerequisites.install.windows.7zip: "winget install -e --id 7zip.7zip"`
+(package ID confirmed against `microsoft/winget-pkgs`'
+`manifests/7/7zip/7zip/` tree). It is deliberately NOT added to
+`prerequisites.windows`: that list is the gate `bootstrap.ps1` refuses
+without, and 7-Zip only gates `west sdk install` (toolchain acquisition), a
+separate manual step bootstrap never runs — gating on it would make
+bootstrap refuse on every Windows host without 7-Zip installed, for a tool
+bootstrap itself never touches.
+
+`prerequisites.install.<os>` was already a superset of its matching gate
+list in practice (`install.macos` has carried `xz`/`wget` with no
+`prerequisites.macos` entry since #949), but `scripts/check_bootstrap_manifest.py`
+and `bootstrap-v1.schema.json` only documented and enforced that pattern for
+posix — the windows side asserted exact key-set equality against
+`prerequisites.windows`. Both now allow `install.windows` to be a superset
+the same way, one direction only (every gated tool needs an install
+command; an install command with no gate entry is legal and intentional) —
+`scripts/check_bootstrap_manifest.py`'s completeness check and its
+`$Prereqs` `Hint=` cross-check are updated accordingly, and
+`bootstrap-v1.schema.json`'s `prerequisites.install` / `install.windows`
+descriptions now state the superset contract and name both live cases
+(`install.macos.xz`/`.wget`, `install.windows.7zip`) so neither reads as
+drift to a future editor.
+
 ## [v0.14.0] - 2026-07-29
 
 ### Fixed — four V2N/V2M SoM manifests promised a `gd32_bridge` firmware path that exists in no clone (#852)

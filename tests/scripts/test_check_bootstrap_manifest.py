@@ -823,7 +823,8 @@ def test_install_missing_tool_command_fails(tmp_path, monkeypatch, capsys):
     err = capsys.readouterr().err
     assert rv == 1
     assert "prerequisites.install.windows" in err
-    assert "prerequisites.windows" in err
+    assert "missing install command" in err
+    assert "ninja" in err
 
 
 def test_install_linux_missing_tool_command_fails(tmp_path, monkeypatch, capsys):
@@ -1037,6 +1038,29 @@ def test_install_clean_tree_passes(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert rv == 0, out
     assert "OK" in out
+
+
+def test_install_windows_superset_entry_with_no_gate_or_prereqs_entry_passes(
+    tmp_path, monkeypatch, capsys
+):
+    """`install.windows` may carry a tool with no matching
+    `prerequisites.windows` gate and no `$Prereqs` entry at all (issue
+    #1036's `7zip` -- gates `west sdk install`, not bootstrap.ps1) -- this
+    is the one-directional completeness contract (gate tools subset-of
+    install commands), not equality. Synthetic `unzip` here rather than
+    relying on the real `7zip` entry, so this test still proves the
+    behaviour even if the real manifest's `7zip` entry is ever removed."""
+    _scaffold(tmp_path)
+    _edit_manifest(
+        tmp_path,
+        lambda d: d["prerequisites"]["install"]["windows"].__setitem__(
+            "unzip", "winget install -e --id Info-ZIP.UnZip"
+        ),
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    out = capsys.readouterr().out
+    assert rv == 0, out
 
 
 # ---------------------------------------------------------------------
