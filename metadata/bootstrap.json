@@ -11,7 +11,8 @@
     "windowsBinDir": "Scripts"
   },
   "prerequisites": {
-    "posix": ["git", "cmake", "python3", "ninja"],
+    "posix": ["git", "cmake", "python3", "ninja", "xz", "wget"],
+    "macos": ["git", "cmake", "python3", "ninja"],
     "windows": ["git", "cmake", "python", "ninja"],
     "pythonMinVersion": "3.10",
     "install": {
@@ -19,13 +20,17 @@
         "git": "sudo apt-get install -y git",
         "cmake": "sudo apt-get install -y cmake",
         "python3": "sudo apt-get install -y python3",
-        "ninja": "sudo apt-get install -y ninja-build"
+        "ninja": "sudo apt-get install -y ninja-build",
+        "xz": "sudo apt-get install -y xz-utils",
+        "wget": "sudo apt-get install -y wget"
       },
       "macos": {
         "git": "brew install git",
         "cmake": "brew install cmake",
         "python3": "brew install python3",
-        "ninja": "brew install ninja"
+        "ninja": "brew install ninja",
+        "xz": "brew install xz",
+        "wget": "brew install wget"
       },
       "windows": {
         "git": "winget install -e --id Git.Git",
@@ -77,6 +82,13 @@
     }
   },
   "manualInstallHints": {
+    "posix": {
+      "note": [
+        "The Zephyr SDK (`west sdk install`) is a separate, manual, one-time install on Linux/macOS -- not auto-installed by bootstrap.sh. It is the one every Zephyr-on-M customer needs: it provides the `arm-zephyr-eabi` cross toolchain the real-silicon build (`west build` / `west flash`) actually uses. Run it from your west workspace's top-level directory -- the alp-sdk checkout's parent directory -- after this script completes, e.g. `west sdk install --gnu-toolchains arm-zephyr-eabi --no-hosttools --install-dir \"$PWD/zephyr-sdk\"`; see docs/getting-started.md for the full one-liner and the `tan sdk switch` step that pins it per project.",
+        "The Arm GNU Toolchain (`arm-none-eabi-gcc`) is a SEPARATE manual install, needed by three opt-in paths -- rebuilding the GD32 bridge firmware (custom-carrier bring-up or bridge recovery), building the CC3501E bridge firmware's silicon-free stub target (its production image builds with TI ticlang, not this toolchain), or hand-writing bare-metal firmware for a real M-class core -- most customers never touch any of them, since the GD32G553 ships pre-flashed by Alp Lab (rebuilding it is optional and fully open, see docs/gd32-bridge.md). See docs/cross-platform-setup.md section 2.3 (Linux) / 3.4 (macOS) for the apt/brew/curl install.",
+        "`west sdk install` may print \"could not find a 'file' executable, falling back to guess mime type by file extension\" -- patool's extension-based fallback works fine without it; this is WARN-only, not a bootstrap.sh prerequisite. Install `file` (`apt-get install -y file` / it ships by default on macOS) only to silence the message."
+      ]
+    },
     "windows": {
       "note": [
         "The Zephyr SDK (`west sdk install`) is a separate, manual, one-time install on native Windows -- not auto-installed by bootstrap.ps1. It is the one every Zephyr-on-M customer needs: it provides the `arm-zephyr-eabi` cross toolchain the real-silicon build (`west build` / `west flash`) actually uses. Run it from your west workspace's top-level directory -- the alp-sdk checkout's parent directory -- after this script completes.",

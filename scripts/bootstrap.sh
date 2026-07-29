@@ -119,11 +119,38 @@ die()  { printf "\033[1;31m[bootstrap]\033[0m %s\n" "$*" >&2; exit 1; }
 # `prerequisites.posix` is policed by scripts/check_bootstrap_manifest.py,
 # whose regex expects the full array assignment right below, not by this
 # script.
-REQUIRED_BINS=(git cmake python3 ninja)
+REQUIRED_BINS=(git cmake python3 ninja xz wget)
 # --print-env only reads metadata/bootstrap.json and prints -- it never
 # touches git/cmake/ninja, so it only needs python3 present.
 if [ "${PRINT_ENV_ONLY}" -eq 1 ]; then
     REQUIRED_BINS=(python3)
+elif [ "$(uname -s 2>/dev/null)" = "Darwin" ]; then
+    # xz and wget are REQUIRED on Linux, not macOS -- both are proven-on-Linux,
+    # never-demonstrated-on-macOS failure modes, so blocking on them
+    # unconditionally would hard-refuse every macOS user's first `bash
+    # scripts/bootstrap.sh` -- the documented first command -- on a host
+    # where it previously worked.
+    #
+    # xz: GNU tar (what `west sdk install`'s `tar --xz` shells out to on
+    # Linux) execs a standalone `/usr/bin/xz` binary to unpack the SDK
+    # archive -- the failure issue #949 actually proved, on a bare
+    # ubuntu:24.04 container. macOS `tar` is bsdtar (libarchive), which
+    # decompresses .xz IN-PROCESS and needs no xz binary, and stock macOS
+    # ships no /usr/bin/xz.
+    #
+    # wget: the pinned Zephyr SDK's own `setup.sh` (metadata/toolchains.json
+    # zephyrSdk.version) only hard-checks for a system `wget` on the
+    # `linux-*` host branch (`[[ "${host}" =~ ^linux-.* ]] && check_command
+    # wget 91`) -- confirmed by inspecting a real extracted setup.sh at that
+    # exact pinned version. On `macos-*` it resolves a bundled wget from the
+    # SDK's own hosttools instead and never runs that check at all -- issue
+    # #949's clean-container acceptance run proved the Linux failure
+    # (`Zephyr SDK setup requires 'wget'`), never a macOS one.
+    #
+    # `prerequisites.install.macos.{xz,wget}` (metadata/bootstrap.json) and
+    # PREREQ_HINT_MACOS below stay as-is so the hint still exists for the
+    # rare case a user needs either; only the hard block is dropped.
+    REQUIRED_BINS=(git cmake python3 ninja)
 fi
 
 # Per-tool install hints for the missing-tools message below (issue #978) --
@@ -137,18 +164,22 @@ fi
 # macOS-shipped version) has no `declare -A` -- the same reason the
 # nativeLibHints print loop further down duplicates itself per OS instead of
 # using indirection. Matched up by POSITION, not by key.
-PREREQ_HINT_NAMES=(git cmake python3 ninja)
+PREREQ_HINT_NAMES=(git cmake python3 ninja xz wget)
 PREREQ_HINT_LINUX=(
     "sudo apt-get install -y git"
     "sudo apt-get install -y cmake"
     "sudo apt-get install -y python3"
     "sudo apt-get install -y ninja-build"
+    "sudo apt-get install -y xz-utils"
+    "sudo apt-get install -y wget"
 )
 PREREQ_HINT_MACOS=(
     "brew install git"
     "brew install cmake"
     "brew install python3"
     "brew install ninja"
+    "brew install xz"
+    "brew install wget"
 )
 
 MISSING=()
@@ -254,6 +285,11 @@ for os_key in ("linux", "macos", "windows"):
     hint = d["nativeLibHints"][os_key]
     emit("HINT_" + os_key.upper() + "_NOTE", hint["note"])
     emit("HINT_" + os_key.upper() + "_CMD", hint["command"] or "")
+# manualInstallHints.posix.note (issue #949 addendum A4): the Zephyr
+# SDK / Arm GNU Toolchain manual-install facts, POSIX's twin of
+# bootstrap.ps1's manualInstallHints.windows.note -- this key used to
+# carry only "windows", so no Linux/macOS hint could ever render here.
+emit("MANUAL_INSTALL_POSIX_NOTE", d["manualInstallHints"]["posix"]["note"])
 PY
 )" || die "failed to read ${BOOTSTRAP_JSON} (see scripts/check_bootstrap_manifest.py)"
 eval "${_facts}"
@@ -551,8 +587,9 @@ fi
 # not hardcoded here; edit the manifest to change this text. This script is
 # the sole consumer of nativeLibHints today: bootstrap.ps1 has no "native
 # libraries" heading of its own (native Windows never installs the
-# Yocto-side native libs directly) -- see `manualInstallHints` for the
-# separate, Windows-only fact bootstrap.ps1 DOES print (review item 7).
+# Yocto-side native libs directly) -- see `manualInstallHints` below for the
+# separate fact bootstrap.ps1 ALSO prints, under its own OS key (review
+# item 7).
 echo
 info "Optional native libraries unlock the Yocto-side backends:"
 case "${OS_LABEL}" in
@@ -586,6 +623,25 @@ if [ -n "${HINT_CMD}" ]; then
     echo
     echo "  ${HINT_CMD}"
 fi
+
+# -------- Manual-install hints -------------------------------------------------
+
+# Rendered from metadata/bootstrap.json's `manualInstallHints.posix.note`
+# (issue #949 addendum A4) -- not hardcoded here; edit the manifest to
+# change this text.  bootstrap.ps1 prints the `windows` twin of this same
+# key under an identical heading; POSIX had no equivalent key to read
+# until this addendum, so a Linux/macOS customer never saw this at all.
+# Only for true POSIX (linux/macos) -- a git-bash/MSYS invocation on native
+# Windows is the unsupported combo the top-of-file header comment already
+# points elsewhere (WSL2 or bootstrap.ps1), so it gets neither this section
+# nor windows' bootstrap.ps1-only one.
+case "${OS_LABEL}" in
+    linux|macos)
+        echo
+        info "NOT auto-installed (manual, one-time):"
+        for line in "${MANUAL_INSTALL_POSIX_NOTE[@]}"; do echo "  ${line}"; done
+        ;;
+esac
 
 # -------- Done ----------------------------------------------------------------
 

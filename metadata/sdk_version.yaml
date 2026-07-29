@@ -35,14 +35,25 @@
 #
 # Per-hw_rev `[min_sdk_version, max_sdk_version]` bounds declared in the
 # board/family hw_revisions tables (metadata/boards/*.yaml,
-# metadata/e1m_modules/*/hw-revisions.yaml) are DECLARATIVE ONLY: no
-# tool in this repo, and nothing in alp-sdk-vscode, cross-checks a
-# project's hw_rev against them today.  An unknown or out-of-range
-# hw_rev emits normally.  Enforcing the bound (a refuse-to-emit /
-# non-zero-exit-code gate) is tracked in #1025 -- do not assume it
-# exists.
+# metadata/e1m_modules/*/hw-revisions.yaml) ARE enforced, as of #1019:
+# `scripts/alp_orchestrate/sdk_compat.py` compares `version:` above
+# against the resolved SoM and board revisions, and `loader.py` raises
+# `SdkRevisionUnsupported` when it falls outside either -- so every
+# consumer of `load_board_yaml` refuses, including both of
+# `scripts/alp_project.py`'s emit paths.  `scripts/validate_board_yaml.py`
+# maps that one failure to exit code 3.
+#
+# Both bounds are INCLUSIVE.  An ABSENT bound is unbounded, not zero --
+# `status: reserved` revisions declare no range at all and must keep
+# resolving.  A malformed bound is treated as absent rather than
+# refusing a build over a metadata typo.
+#
+# What is still NOT checked here: whether the requested hw_rev EXISTS,
+# or is `status: reserved`.  An unknown revision still resolves to
+# base-rev routing and emits normally -- that is a different failure
+# with a different message, tracked in #1025.
 #
 # Bump in the same PR that lands the matching CHANGELOG.md entry.
 
-version: 0.13.0
+version: 0.14.0
 status:  released        # released | development | preview
