@@ -536,11 +536,13 @@ Two curation tiers bound CI cost (ADR 0018):
   release.
 - **Tier B — recipe-only**: wiring + compatibility metadata are
   maintained and emitted, but the library is not built in alp-sdk CI.
-  `tan doctor` labels it.
+  `python -m alp_cli doctor` labels it.
 
-`tan doctor` reports the selected libraries for the project in scope
-(tier + licence + compatibility), reading the same manifests, so the
-CLI and alp-studio's library picker never disagree.
+`python -m alp_cli doctor` reports the selected libraries for the
+project in scope (tier + licence + compatibility), reading the same
+manifests, so the CLI and alp-studio's library picker never disagree.
+(This is alp-sdk's own Python preflight, distinct from `tan doctor` --
+see [`docs/cli.md`](cli.md).)
 
 Scoping a library to specific cores (`cores: [<id>]`) folds in what
 earlier schema drafts spelled as a separate per-core
@@ -586,7 +588,7 @@ the wrong peer and emit fails naming the `os` / `core_class` constraint.
 Two honest limits are recorded in the manifest headers rather than
 hidden:
 
-- **micro-ROS is not yet pinned** in the Zephyr v4.4.0 `west.yml`. Its
+- **micro-ROS is not yet pinned** in the Zephyr v4.4.1 `west.yml`. Its
   manifest names the upstream `micro_ros_zephyr_module` (branch
   `humble`) as a west prerequisite and enables **by module presence**
   (no invented Kconfig); emit renders the selection tag with no

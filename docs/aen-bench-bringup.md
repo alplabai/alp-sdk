@@ -16,7 +16,7 @@ and [`aen-provisioning.md`](aen-provisioning.md).
 | **Zephyr boot (alp-sdk image)** | ✅ first light | Boots to the idle thread; "Hello World" read back via RAM console over SWD. |
 | **M55-HP core (second M55)** | ✅ first light (2026-06-17) | The HP core is held in reset at power-on (only the HE core's AP shows a CPUID); released by SES booting an **`M55_HP` ATOC** (`cpu_id=M55_HP`, `loadAddress=0x50000000` = HP ITCM global, vs HE's `0x58000000`). Proven alive by an advancing **SRAM0 liveness beacon** (`0x02000000`: magic `0xA11FE000` + CPUID `0x411FD220` + heartbeat that advances across a re-read) — read over the system/HE AP, not the HP AP. Example `examples/aen/aen-hp-core-smoke`; helper `scripts/bench/aen/flash-jlink-hp.sh`. Unblocks the HE↔HP MHUv2 doorbell. |
 | **UTIMER counter** (Tier-1.5) | ✅ PASS *after a fix* | As-merged it never counted (read 0); fixed in **PR #158** (missing `alif_utimer_enable_soft_counter_ctrl`). Re-validated: counter advances. |
-| **GPIO** (`gpio_dw`, Tier-1) | ✅ PASS (controller) | DDR/DR set+readback correct via the Zephyr GPIO API (J-Link ground truth). Driving an actual **pad** needs the GPIO pad-mux (gpio_dw doesn't apply it). |
+| **GPIO** (`gpio_dw`, Tier-1) | ✅ PASS *(re-proven 2026-07-27 on silicon; earlier same-day CKEN theory REFUTED — see below)* | DDR/DR set+readback correct via the Zephyr GPIO API (J-Link ground truth) — but that alone is only the gpio_dw controller-register path: the original PASS criterion also read `EXT_PORTA` and treated it as pad-level proof, and on this controller `EXT_PORTA` mirrors `SWPORTA_DR` for an OUTPUT-direction pin (Synopsys DW_apb_gpio databook), so it could never independently fail and proved nothing beyond DR/DDR — **this half still stands.** Earlier the same day, `CLKCTL_PER_SLV->GPIO_CTRL[n]` bit 16 (`GPIO_CTRL_CKEN`, the per-port GPIO functional-clock enable) — clear on every port and never written by alp-sdk — was suspected as the reason a pad looked electrically dark, and a fix was added (`zephyr/drivers/gpio/gpio_clk_alif.c`, PR-tracked). **That theory is REFUTED, decisively, on the same bench**: after a cold reset with CKEN still clear, driving `SWPORTA_DDR`/`SWPORTA_DR` from the debugger moved the pad — `0x49002050 = 0x00000010` with `0x4902F088 = 0x00000100` (bit 16 unset). CKEN is not required for pad drive. The real explanation for "the LED was dark": the old `blink` example toggled ~10 times over ~2 s and returned with the pad left LOW — a window nobody was watching, not a pad that couldn't move. Once `blink` was changed to loop forever, the maintainer confirmed **by eye that the LED blinks** — GPIO output on the E8 pad is now proven on real silicon, with REN enabled at `0x1A603050`, `EXT_PORTA` following `SWPORTA_DR` 12/12 on P2_4 while `blink` ran. **Not yet proven:** the colour is wrong (`EVK_PIN_LED_RED` lights GREEN) — still being measured, no colour conclusion asserted here — and until `gpio11`–`gpio14` landed (§ this doc, dtsi), the green/blue RGB channels (P12_7/P12_6) had no controller to reach at all. `gpio_clk_alif.c`'s CKEN write is kept (it matches Alif's own documented `enable_gpio_clk()` init) but is no longer claimed to fix a dark pad. See `examples/aen/aen-gpio-bench/src/main.c`. |
 | **I2C2 + 24C128 EEPROM** (`i2c_dw`, Tier-1) | ✅ PASS | EEPROM ACKs at 0x50 and returns a **populated Alp manifest** (not blank) — magic `ALPH`, SKU, serial, mfg date, CRC-32 all decode; one of 12 devices on the bus — once the pinctrl carries the **pad config** Alif's reference uses — `input-enable` (REN) + `bias-pull-down` (DSC=2). See §3. |
 | **PWM** (Tier-1.5) | ✅ PASS | pwm_set_cycles reg readback matches (CNTR_PTR/COMPARE/CTRL), shares the hal_alif UTIMER start-path the counter fix validated. |
 | **SPI** (`alif,dwc-ssi-spi`, Tier-2) | ✅ PASS *after a fix* | DWC-SSI stayed in slave mode → `spi_transceive` -116 (TX FIFO full, no SCLK). The Alif SoC gates master mode behind `CLKCTRL_PER_SLV.SSI_CTRL` (`0x4902F028`), which upstream never sets. **PR #162** sets it in the driver. Re-validated: `rc=0`, internal-loopback `rx==tx`, CTRLR0=`0x80002007`. See §3. |
@@ -47,7 +47,15 @@ The flow-D batch (17 aen-* apps) booted on real E8 at **15 PASS, 2 PARTIAL** (bo
 hardware-gated). A 2026-06-19 Flow-C RAM-run pass then **reconfirmed** the SE-crypto
 offload + the CRC / HWSEM / LPTIMER / HSCMP driver bodies (rows above) and the LPRTC
 counter (§ below); the quadrature encoder stays PARTIAL (live count needs the encoder
-physically spun — not a code bug).
+physically spun — not a code bug). **That 15/2 tally predates the 2026-07-27
+GPIO re-classification above** — one of the 15 PASS entries was `gpio_dw`, whose
+original pass criterion is now known to have been unable to fail (see the GPIO
+row). GPIO has since been re-proven PASS by a different, decisive check (the
+maintainer's optical confirmation that `blink` blinks, plus 12/12 `EXT_PORTA`
+agreement while it ran) — the CKEN gate that this note used to say the tally
+was waiting on turned out not to be the blocker (see the GPIO row); the 15/2
+tally still has not been formally recomputed against the corrected GPIO
+criterion, but nothing in the correction moves GPIO out of the PASS column.
 
 ## 2. The four flashing / observation flows
 
@@ -141,8 +149,13 @@ same SWD link.
 
 ### Flow C — J-Link RAM-run (no MRAM write)
 
-The SoC `select`s XIP, so retarget the ROM region to ITCM in the app overlay —
-**use the path-reference form** (`<&itcm>` makes `FLASH_SIZE=0` → link overflow):
+The SoC `select`s XIP, so retarget the ROM region to ITCM — **as a bench-only
+overlay applied via `-DEXTRA_DTC_OVERLAY_FILE`, never by editing the app's own
+overlay** (the retarget is a bench concern; none of the six `aen-*` bench apps
+carries it in-tree). The shipped overlay,
+[`scripts/bench/aen/aen-flowc-itcm.overlay`](../scripts/bench/aen/aen-flowc-itcm.overlay),
+carries exactly this DTS — **use the path-reference form** (`<&itcm>` makes
+`FLASH_SIZE=0` → link overflow):
 
 ```dts
 / {
@@ -160,10 +173,65 @@ it) + the flow-B RAM console. Build with both module paths
 ```
 JLinkExe -device Cortex-M55 -if SWD -speed 4000 -nogui 1   # GENERIC device
 J-Link> halt
-J-Link> loadbin build/zephyr/zephyr.bin 0x0   # loadbin's implicit reset re-reads
-J-Link> halt                                  # our freshly-loaded ITCM vectors:
-J-Link> go                                    # core is already at our reset handler
+J-Link> loadbin build/zephyr/zephyr.bin <base>   # loadbin's implicit reset re-reads
+J-Link> halt                                     # our freshly-loaded ITCM vectors:
+J-Link> go                                       # core is already at our reset handler
 ```
+
+`<base>` is the app's link base, **not always `0x0`**: the overlay above only
+retargets the ROM *region* to ITCM, it does not reset a `prj.conf`'s own
+`CONFIG_FLASH_LOAD_OFFSET`. The retarget is really two independent, BOTH-required
+settings, each a committed artifact under `scripts/bench/aen/`:
+
+- the devicetree half — [`aen-flowc-itcm.overlay`](../scripts/bench/aen/aen-flowc-itcm.overlay)
+  (`zephyr,flash = &itcm;`, path-ref not `<&itcm>`, +
+  `/delete-property/ zephyr,code-partition;`), which stops Zephyr from deriving
+  the link offset from a DT code-partition, applied via
+  `-DEXTRA_DTC_OVERLAY_FILE`, **and**
+- the Kconfig half — a **Flow-C-only** conf fragment
+  (`scripts/bench/aen/aen-flowc-itcm.conf`) that sets
+  `CONFIG_USE_DT_CODE_PARTITION=n` **and** `CONFIG_FLASH_LOAD_OFFSET=0x0`, layered
+  on top of the generic `scripts/bench/aen/aen-bench-shared.conf` (RAM-console
+  observability + `CONFIG_DCACHE=n`, no link-offset override — that fragment is
+  also used unmodified by Flow A/D, where overriding the link offset would be
+  wrong), applied via `-DEXTRA_CONF_FILE`.
+
+The conf half alone still links into MRAM (`CONFIG_FLASH_BASE_ADDRESS` stays
+`0x80000000`) — it only stops Zephyr *deriving* the offset from the DT
+code-partition; the overlay half is what moves the code-partition itself.
+Pass both together:
+```
+scripts/bench/aen/build.sh <app-dir> \
+    -DEXTRA_CONF_FILE="scripts/bench/aen/aen-bench-shared.conf;scripts/bench/aen/aen-flowc-itcm.conf" \
+    -DEXTRA_DTC_OVERLAY_FILE="scripts/bench/aen/aen-flowc-itcm.overlay"
+```
+
+Both `aen-flowc-itcm.conf` lines are needed because they undo two different
+things. `USE_DT_CODE_PARTITION=n` alone stops an app that *derives* its offset
+from the DT code-partition, but it does **not** touch a hard-coded literal
+`CONFIG_FLASH_LOAD_OFFSET=0x10000`. Seven examples hard-code that offset for
+their normal slot0 boot and must keep it — do NOT remove it from these files:
+the five `aen-cc3501e-*` apps (`aen-cc3501e-ble-gatt`, `aen-cc3501e-bringup`,
+`aen-cc3501e-companion-tour`, `aen-cc3501e-gatt-register`, `aen-cc3501e-gpio`)
+and `aen-eeprom-manifest`, all via their own `prj.conf`, plus
+`examples/peripheral-io/alp-console`, which sets it via a **BOARD-scoped**
+conf instead —
+`boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.conf`
+(see `examples/peripheral-io/alp-console/README.md`). For any of these, a
+Flow C RAM-run must ALSO carry the explicit `CONFIG_FLASH_LOAD_OFFSET=0x0`
+override, since a later `EXTRA_CONF_FILE` fragment wins over both an app's
+`prj.conf` and its board-scoped conf. Confirm the real link base from
+the build (`readelf -l build/*/zephyr/zephyr.elf` — the LOAD segment with the
+LOWEST `PhysAddr` among segments with a NONZERO `FileSiz`, **not** just the
+first LOAD segment: an ITCM-retargeted link's first LOAD segment is often a
+zero-FileSiz `.bss` segment in DTCM, and loading there corrupts live RAM), and
+pass that as `<base>` — `scripts/bench/aen/ram-run.sh` derives it this way
+automatically instead of assuming `0x0` or trusting segment order, refuses to
+run an ELF whose derived base is `>= 0x80000000` (slot0/MRAM-linked — Flow C
+cannot RAM-run that; rebuild with this retarget or use Flow D), and separately
+refuses (exit 6) any derived base that isn't `0x0`, the ITCM global alias
+(`0x50000000`/`0x58000000`), or SRAM (`0x02xxxxxx`) — a DTCM address slipping
+through is exactly the failure mode this whole section warns about.
 
 > **Reset caveat:** a J-Link reset asserts **SYSRESETREQ**, which reboots the
 > **SES** (not just the M55). Prefer `loadbin`/`go`; don't `reset` mid-loop.

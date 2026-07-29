@@ -54,14 +54,6 @@ memory:
 inference:
   preferred_backend:    ethos_u
   ethos_u_variant:      u85               # primary -- E4 ships one U85 alongside two U55s.
-  # Full NPU population on this silicon.  Each named instance has
-  # its own base address + IRQ + dedicated cache; the TFLM driver
-  # shim picks the instance at runtime based on which M55 / HG
-  # subsystem the firmware runs on.
-  npu_population:
-    - { variant: u55, role: NPU-HE, paired_with: M55-HE }       # High-Efficiency subsystem.
-    - { variant: u55, role: NPU-HP, paired_with: M55-HP }       # High-Performance subsystem.
-    - { variant: u85, role: NPU-HG, paired_with: HG-subsystem } # Hyper-Generative NPU.
 
 capabilities:
   optiga_trust_m:       true

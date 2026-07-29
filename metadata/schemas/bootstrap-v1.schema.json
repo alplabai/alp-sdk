@@ -1,0 +1,213 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/bootstrap-v1.schema.json",
+  "title": "ALP Bootstrap Facts v1",
+  "description": "Validates metadata/bootstrap.json -- the single source of truth for the Zephyr-workspace-assembly FACTS scripts/bootstrap.sh and scripts/bootstrap.ps1 both read today; tan (Rust, cross-platform) has read the same facts since tan-cli PR #55 (tan-core's parse_bootstrap_manifest / BootstrapFacts), not merely an INTENDED future consumer (issue #917). Facts only; control flow (ZEPHYR_BASE reuse/rejection, venv idempotency, .west branching) stays as CODE in each executor -- this schema deliberately has no step/action shape. scripts/check_bootstrap_manifest.py is the drift gate that keeps this file, west.yml's zephyr revision, and each CI workflow's own Zephyr pin in lockstep (see that script's own module docstring for the full list of checks it runs).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["_comment", "schemaVersion", "zephyr", "venv", "prerequisites", "west", "pip", "env", "nativeLibHints", "manualInstallHints"],
+  "properties": {
+    "_comment": {
+      "type": "string",
+      "description": "The file's own contract statement: facts only, no control-flow DSL. Kept as a real JSON field (not a comment) since JSON has no native comment syntax."
+    },
+    "schemaVersion": {
+      "const": 1,
+      "description": "This manifest's own contract version, independent of board.yaml's schema_version or the build-plan's schemaVersion."
+    },
+    "zephyr": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "requirementsPath"],
+      "properties": {
+        "version": {
+          "type": "string",
+          "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$",
+          "description": "The Zephyr revision alp-sdk is verified against -- MUST equal the `revision:` under `- name: zephyr` in west.yml (check_bootstrap_manifest.py enforces this, and separately that neither bootstrap script hardcodes this value itself)."
+        },
+        "requirementsPath": {
+          "type": "string",
+          "description": "Workspace-relative POSIX-style path to Zephyr's own Python requirements file, installed into the workspace venv."
+        }
+      }
+    },
+    "venv": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dirName", "posixBinDir", "windowsBinDir"],
+      "properties": {
+        "dirName": { "type": "string", "minLength": 1, "pattern": "^(?!\\.{1,2}$)[^/]+$", "description": "Workspace-relative venv directory name (e.g. '.venv' -- a leading dot is fine, the literal path segments '.' and '..' are not). Constrained non-empty and slash-free, and rejects exactly '.'/'..': bootstrap.sh interpolates this raw into a workspace path that a later `rm -rf` can target (recreate-on-broken-venv) -- an empty, '.', or '..' value would turn that into a workspace-wide delete." },
+        "posixBinDir": { "type": "string", "minLength": 1, "pattern": "^(?!\\.{1,2}$)[^/]+$", "description": "Executable subdirectory name inside the venv on POSIX (Linux/macOS/git-bash). Same path-safety constraint as dirName for defense in depth -- also interpolated into venv paths, though today's `rm -rf` target is built from dirName alone, not this field." },
+        "windowsBinDir": { "type": "string", "minLength": 1, "pattern": "^(?!\\.{1,2}$)[^/]+$", "description": "Executable subdirectory name inside the venv on native Windows. Same path-safety constraint as dirName for defense in depth -- also interpolated into venv paths, though today's `rm -rf` target is built from dirName alone, not this field." }
+      }
+    },
+    "prerequisites": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["posix", "macos", "windows", "pythonMinVersion", "install"],
+      "description": "Mirrors the CURRENT scripts' own prereq checks (bootstrap.sh checks the posix list on Linux, which includes ninja since #971 -- Zephyr's default CMake generator on every host, not just Windows -- and the narrower macos list on Darwin, see that key's own description below; bootstrap.ps1 checks the windows list, plus a separate python >= pythonMinVersion check) -- recorded faithfully, not silently unified, since the scripts genuinely check different tool sets today (posix and windows track different binary names for the same interpreter -- python3 vs python). Neither script can read THIS list to perform its own prereq check (that would be circular: the check exists to confirm python/jsonschema-free tooling is present before this JSON can be parsed with confidence) -- instead scripts/check_bootstrap_manifest.py asserts each script's hardcoded copy agrees with the list it's declared against byte-for-byte (bootstrap.sh's canonical REQUIRED_BINS against posix, its Darwin-branch REQUIRED_BINS reassignment against macos, bootstrap.ps1's $Prereqs against windows), so a drift on any of the three fails the gate instead of going unnoticed.",
+      "properties": {
+        "posix": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "macos": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "The EFFECTIVE macOS prerequisite set -- a narrower subset of `posix` (drops `xz`/`wget`: bsdtar decompresses .xz in-process on macOS, and the pinned Zephyr SDK's setup.sh only hard-checks for `wget` on its linux-* host branch -- see scripts/bootstrap.sh's Darwin-branch REQUIRED_BINS comment for the full rationale). A separate declared key, not `posix` minus a hardcoded exclusion list, so bootstrap.sh's Darwin-branch REQUIRED_BINS reassignment has its own byte-for-byte comparison target -- without one, that reassignment could silently drift (add or drop a tool) with nothing to catch it, the same hole prerequisites.posix/windows close for the non-Darwin lists." },
+        "windows": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "pythonMinVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
+        "install": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["linux", "macos", "windows"],
+          "description": "The single-source-of-truth install command for each prerequisites.* tool (issue #949) -- one shell command per tool, not per bare package name, so a doctor/doc/script site can print it verbatim. Deliberately keyed by linux/macos/windows -- NOT by a single `posix` key the way prerequisites.posix itself is -- because a `sudo apt-get install`-shaped command is Debian-family-specific and a `brew install`-shaped command is macOS-specific; one `posix` key cannot hold both without silently picking one distro's package manager as the de-facto POSIX standard, which is exactly why the issue #949 body itself already listed `posix` and `macos` separately rather than folding them together. These three OS keys instead mirror nativeLibHints' own OS key set immediately below, which hit the identical apt-vs-brew problem for the same reason. Each OS object's tool-name KEYS must exactly equal `prerequisites.posix` -- for BOTH install.linux and install.macos, deliberately, even though macOS only hard-*checks* the narrower `prerequisites.macos` subset at run time (see that key's own description): install.macos still carries a command for every posix tool, `xz`/`wget` included, so the hint text exists for the rare macOS user who needs one of them manually even though bootstrap.sh doesn't refuse without it. install.windows' keys instead equal prerequisites.windows. scripts/check_bootstrap_manifest.py's `_check_install_commands` is the drift gate for this whole subtree -- see that function's own docstring for the full, authoritative list of what it verifies; not restated here so it can't drift out of step a second time.",
+          "properties": {
+            "linux": {
+              "type": "object",
+              "additionalProperties": { "type": "string", "minLength": 1 },
+              "description": "One shell install command per prerequisites.posix tool, `sudo apt-get install -y <pkg>`-shaped -- the same command style nativeLibHints.linux.command already uses, so the manifest stays internally consistent."
+            },
+            "macos": {
+              "type": "object",
+              "additionalProperties": { "type": "string", "minLength": 1 },
+              "description": "One shell install command per prerequisites.posix tool, `brew install <pkg>`-shaped -- the same command style nativeLibHints.macos.command already uses."
+            },
+            "windows": {
+              "type": "object",
+              "additionalProperties": { "type": "string", "minLength": 1 },
+              "description": "One `winget install -e --id <PackageId>` command per prerequisites.windows tool, copied VERBATIM from scripts/bootstrap.ps1's own hardcoded $Prereqs Hint= values -- those values remain the authority (bootstrap.ps1 cannot read this file to print its own prereq-missing hint; see prerequisites' own description above), and scripts/check_bootstrap_manifest.py asserts the two agree byte-for-byte."
+            }
+          }
+        }
+      }
+    },
+    "west": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pipSpec", "initArgs", "updateArgs", "exportArgs", "extensionGuardCommand"],
+      "properties": {
+        "pipSpec": {
+          "type": "string",
+          "description": "The west pip floor Zephyr's own requirements-base.txt declares ('Keep the version identical to the minimum required in cmake/modules/west.cmake'). This IS the exact spec both bootstrap scripts pip-install west with (`pip install --upgrade -q <pipSpec>`) -- not merely informational; bump this value to change the floor both scripts install."
+        },
+        "initArgs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "Static flags for `west <initArgs...> <repo-root>` (the repo-root argument is supplied by the executor, not baked in here)."
+        },
+        "updateArgs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "Full argv (after `west`) for the shallow+narrow `west update` both scripts run."
+        },
+        "exportArgs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "Full argv (after `west`) for `west zephyr-export`."
+        },
+        "extensionGuardCommand": {
+          "type": "string",
+          "description": "The alp-* extension-command substring (issue #769) both scripts grep for in `west help` output to confirm the workspace's manifest really is alp-sdk's west.yml."
+        }
+      }
+    },
+    "pip": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bootstrapUpgrade", "sdkExtras", "editableInstall"],
+      "properties": {
+        "bootstrapUpgrade": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "Packages `pip install --upgrade -q` bootstraps into the fresh venv before anything else."
+        },
+        "sdkExtras": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "alp-sdk-side pip extras installed into the workspace venv (jsonschema for scripts/alp_project.py, imgtool for the MCUboot dev-key script)."
+        },
+        "editableInstall": {
+          "type": "string",
+          "description": "Target `pip install -e <target>` installs -- the ${SDK_ROOT}-tokened alp-sdk checkout (tan's Python backend, alp_cli)."
+        }
+      }
+    },
+    "env": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ZEPHYR_BASE", "ZEPHYR_TOOLCHAIN_VARIANT"],
+      "properties": {
+        "ZEPHYR_BASE": {
+          "type": "string",
+          "description": "${WORKSPACE_DIR}-tokened path to the Zephyr tree a consumer should export ZEPHYR_BASE as."
+        },
+        "ZEPHYR_TOOLCHAIN_VARIANT": {
+          "type": "string",
+          "const": "zephyr",
+          "description": "The toolchain variant both bootstrap scripts export alongside ZEPHYR_BASE."
+        }
+      }
+    },
+    "nativeLibHints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["linux", "macos", "windows"],
+      "description": "Per-OS hints for the optional native libraries the Yocto-side backends need -- an apt/brew/pkg-manager fact, printed under a heading about OPTIONAL NATIVE LIBRARIES. Does NOT carry the Arm GNU Toolchain / Zephyr SDK manual-install sentence (see manualInstallHints below): that fact is not about a native library and was pulled out after it was found printing under this key's 'native libraries' heading when bootstrap.sh ran under git-bash (issue #917 review).",
+      "properties": {
+        "linux": { "$ref": "#/$defs/nativeLibHint" },
+        "macos": { "$ref": "#/$defs/nativeLibHint" },
+        "windows": { "$ref": "#/$defs/nativeLibHint" }
+      }
+    },
+    "manualInstallHints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["windows", "posix"],
+      "description": "Manual, one-time install steps a script cannot automate for itself (a GUI/EXE installer, or a step that only makes sense from an already-assembled workspace) -- distinct from nativeLibHints (an apt/brew/pkg-manager command bootstrap CAN hand the user verbatim). Both `windows` and `posix` carry the same two facts (the Zephyr SDK, and the conditionally-needed Arm GNU Toolchain), NOT peer facts within either key: the Zephyr SDK (providing `arm-zephyr-eabi`, what the Zephyr-on-M real-silicon path actually builds with) is what every Zephyr customer needs; the Arm GNU Toolchain (`arm-none-eabi-gcc`) is conditional -- needed by three opt-in paths (rebuilding the optional, open GD32 bridge firmware; building the CC3501E bridge firmware's silicon-free stub target; or hand-writing bare-metal firmware for a real M-class core), none of them the Zephyr-on-M default. `windows`'s note also records that the Zephyr SDK's Windows bundle ships neither `dtc` nor `gperf` (unlike its Linux bundle, which does ship `dtc`), so both need their own separate install too on native Windows -- `posix` has no such caveat (`dtc`/`gperf` come from the same apt/brew line nativeLibHints already covers, or ship with the Zephyr SDK's Linux hosttools). Both are printed under a 'NOT auto-installed (manual, one-time)' heading -- bootstrap.ps1 for `windows`, bootstrap.sh for `posix` (issue #949 addendum A4 -- `posix` used to be absent, so no Linux/macOS hint could ever render).",
+      "properties": {
+        "windows": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["note"],
+          "properties": {
+            "note": {
+              "type": "array",
+              "items": { "type": "string" },
+              "minItems": 1,
+              "description": "One or more human-readable lines, safe to print verbatim under a MANUAL-install heading (not the native-library apt/brew heading nativeLibHints.*.note prints under)."
+            }
+          }
+        },
+        "posix": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["note"],
+          "properties": {
+            "note": {
+              "type": "array",
+              "items": { "type": "string" },
+              "minItems": 1,
+              "description": "One or more human-readable lines, safe to print verbatim under bootstrap.sh's MANUAL-install heading. Shared by Linux and macOS (bootstrap.sh doesn't split posix by OS here the way nativeLibHints does -- the two facts this key carries don't have OS-specific commands worth splitting over)."
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "nativeLibHint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["note", "command"],
+      "properties": {
+        "note": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "One or more human-readable lines, safe to print verbatim -- an ARRAY (not one long paragraph) so both scripts can render an aligned, multi-line mapping instead of an unwrapped ~200-380 char line."
+        },
+        "command": { "type": ["string", "null"], "description": "A single copy-pasteable shell command, or null when the OS has no equivalent install command (e.g. native Windows)." }
+      }
+    }
+  }
+}

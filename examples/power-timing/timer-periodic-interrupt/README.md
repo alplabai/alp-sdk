@@ -24,7 +24,7 @@ example.
   -- LED toggle from the main thread.  The EVK has no plain GPIO
   LED, so the indicator is reached through the portable
   `BOARD_PIN_LED_RED` alias (`<alp/board.h>`): on the E1M EVK it
-  resolves to the red RGB pad (default function PWM3) claimed as a
+  resolves to the red RGB pad (default function PWM0) claimed as a
   digital GPIO via the e1m-spec "GPIO secondary" capability; on the
   E1M-X EVK it resolves to the equivalent carrier pad.
 * The "flag + main-thread drain" coordination pattern.
@@ -75,7 +75,7 @@ native_sim (no counter device):
 [timer] done
 ```
 
-Real hardware (AEN, EVK with the RGB-red LED on the PWM3 pad as GPIO):
+Real hardware (AEN, EVK with the RGB-red LED on the PWM0 pad as GPIO):
 
 ```
 [timer] open counter=0

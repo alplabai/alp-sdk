@@ -1,5 +1,5 @@
 {
-  "generated": "2026-07-24",
+  "generated": "2026-07-28",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -1141,12 +1141,12 @@
           "value": "ALP_E1M_GPIO_PWM1"
         },
         "EVK_PIN_LED_GREEN": {
-          "hash": "232b4acbbfe92d97",
-          "value": "ALP_E1M_GPIO_PWM0"
+          "hash": "451ee02558e0873d",
+          "value": "ALP_E1M_GPIO_PWM3"
         },
         "EVK_PIN_LED_RED": {
-          "hash": "44d35457749072d5",
-          "value": "ALP_E1M_GPIO_PWM3"
+          "hash": "2a47f3fae481d947",
+          "value": "ALP_E1M_GPIO_PWM0"
         },
         "EVK_PIN_M2E_SDIO_WAKE": {
           "hash": "06f1aa053529ae84",
@@ -1201,12 +1201,12 @@
           "value": "ALP_E1M_PWM1"
         },
         "EVK_PWM_LED_GREEN": {
-          "hash": "6987ca5a9d17a9dd",
-          "value": "ALP_E1M_PWM0"
+          "hash": "34dc6229d05613c6",
+          "value": "ALP_E1M_PWM3"
         },
         "EVK_PWM_LED_RED": {
-          "hash": "4184b621eb9629d7",
-          "value": "ALP_E1M_PWM3"
+          "hash": "7731adfd2c2372d4",
+          "value": "ALP_E1M_PWM0"
         },
         "EVK_SPI_BUS_ARDUINO": {
           "hash": "bc83ec57c38a74ed",
@@ -1793,7 +1793,7 @@
       "macros": {},
       "typedefs": {
         "alp_cap_id_t": {
-          "definition": "typedef enum { ALP_CAP_ID_HW_I2C, ALP_CAP_ID_HW_SPI, ALP_CAP_ID_HW_UART, ALP_CAP_ID_HW_I2S, ALP_CAP_ID_HW_PDM, ALP_CAP_ID_HW_ADC, ALP_CAP_ID_HW_DAC, ALP_CAP_ID_HW_CAN, ALP_CAP_ID_HW_CAN_FD, ALP_CAP_ID_HW_RTC, ALP_CAP_ID_HW_WDT, ALP_CAP_ID_HW_QENC, ALP_CAP_ID_HW_TIMER, ALP_CAP_ID_HW_PWM, ALP_CAP_ID_HW_ETHERNET, ALP_CAP_ID_HW_USB, ALP_CAP_ID_HW_MIPI_CSI, ALP_CAP_ID_HW_MIPI_DSI, ALP_CAP_ID_HW_LCDIF, ALP_CAP_ID_XSPI_DMA, ALP_CAP_ID_HEXSPI_DMA, ALP_CAP_ID_EMMC_DMA, ALP_CAP_ID_QUADSPI_DMA, ALP_CAP_ID_NPU_DRPAI, ALP_CAP_ID_HELIUM_MVE, ALP_CAP_ID_NEON, ALP_CAP_ID_GPU2D, ALP_CAP_ID_DAVE2D, ALP_CAP_ID_CRYPTOCELL, ALP_CAP_ID_INLINE_AES, ALP_CAP_ID_CAU, ALP_CAP_ID_DMA2D, ALP_CAP_ID_COUNT } alp_cap_id_t;",
+          "definition": "typedef enum { ALP_CAP_ID_HW_I2C, ALP_CAP_ID_HW_SPI, ALP_CAP_ID_HW_UART, ALP_CAP_ID_HW_I2S, ALP_CAP_ID_HW_PDM, ALP_CAP_ID_HW_ADC, ALP_CAP_ID_HW_DAC, ALP_CAP_ID_HW_CAN, ALP_CAP_ID_HW_CAN_FD, ALP_CAP_ID_HW_RTC, ALP_CAP_ID_HW_WDT, ALP_CAP_ID_HW_QENC, ALP_CAP_ID_HW_TIMER, ALP_CAP_ID_HW_PWM, ALP_CAP_ID_HW_ETHERNET, ALP_CAP_ID_HW_USB, ALP_CAP_ID_HW_MIPI_CSI, ALP_CAP_ID_HW_MIPI_DSI, ALP_CAP_ID_HW_LCDIF, ALP_CAP_ID_XSPI_DMA, ALP_CAP_ID_HEXSPI_DMA, ALP_CAP_ID_EMMC_DMA, ALP_CAP_ID_QUADSPI_DMA, ALP_CAP_ID_NPU_DRPAI, ALP_CAP_ID_HELIUM_MVE, ALP_CAP_ID_NEON, ALP_CAP_ID_GPU2D, ALP_CAP_ID_DAVE2D, ALP_CAP_ID_CRYPTOCELL, ALP_CAP_ID_INLINE_AES, ALP_CAP_ID_CAU, ALP_CAP_ID_DMA2D, ALP_CAP_ID_HW_I3C, ALP_CAP_ID_COUNT } alp_cap_id_t;",
           "enumerators": [
             "ALP_CAP_ID_HW_I2C",
             "ALP_CAP_ID_HW_SPI",
@@ -1827,9 +1827,10 @@
             "ALP_CAP_ID_INLINE_AES",
             "ALP_CAP_ID_CAU",
             "ALP_CAP_ID_DMA2D",
+            "ALP_CAP_ID_HW_I3C",
             "ALP_CAP_ID_COUNT"
           ],
-          "hash": "325dd5f6c2f30e21",
+          "hash": "cacabf2cc15b87bb",
           "kind": "enum"
         }
       },
@@ -10306,6 +10307,56 @@
       },
       "variables": {}
     },
+    "alp/i3c.h": {
+      "functions": {
+        "alp_i3c_capabilities": {
+          "hash": "77c8fdc86639bfb4",
+          "signature": "const alp_capabilities_t * alp_i3c_capabilities(const alp_i3c_t *bus);"
+        },
+        "alp_i3c_close": {
+          "hash": "9208fdbf15ebdb70",
+          "signature": "void alp_i3c_close(alp_i3c_t *bus);"
+        },
+        "alp_i3c_open": {
+          "hash": "0b62df238578a78d",
+          "signature": "alp_i3c_t * alp_i3c_open(const alp_i3c_config_t *cfg);"
+        },
+        "alp_i3c_read": {
+          "hash": "46b894cd221b1504",
+          "signature": "alp_status_t alp_i3c_read(alp_i3c_t *bus, uint8_t addr, uint8_t *data, size_t len);"
+        },
+        "alp_i3c_write": {
+          "hash": "e8908f6fa96eb6c7",
+          "signature": "alp_status_t alp_i3c_write(alp_i3c_t *bus, uint8_t addr, const uint8_t *data, size_t len);"
+        },
+        "alp_i3c_write_read": {
+          "hash": "da0a9a612321c83d",
+          "signature": "alp_status_t alp_i3c_write_read(alp_i3c_t *bus, uint8_t addr, const uint8_t *wdata, size_t wlen, uint8_t *rdata, size_t rlen);"
+        }
+      },
+      "macros": {
+        "ALP_I3C_CONFIG_DEFAULT": {
+          "hash": "a920829f2e562694",
+          "value": "(id) ((alp_i3c_config_t){ .bus_id = (id) })"
+        }
+      },
+      "typedefs": {
+        "alp_i3c_config_t": {
+          "definition": "typedef struct { uint32_t bus_id; } alp_i3c_config_t;",
+          "fields": [
+            "uint32_t bus_id"
+          ],
+          "hash": "19c827c9b22f23df",
+          "kind": "struct"
+        },
+        "alp_i3c_t": {
+          "definition": "typedef struct alp_i3c alp_i3c_t;",
+          "hash": "28e3bb9e75bd72e6",
+          "kind": "opaque"
+        }
+      },
+      "variables": {}
+    },
     "alp/inference.h": {
       "functions": {
         "alp_inference_capabilities": {
@@ -10552,6 +10603,91 @@
         "alp_wifi_t": {
           "definition": "typedef struct alp_wifi alp_wifi_t;",
           "hash": "600afdff064fac2f",
+          "kind": "opaque"
+        }
+      },
+      "variables": {}
+    },
+    "alp/jpeg.h": {
+      "functions": {
+        "alp_jpeg_capabilities": {
+          "hash": "5a4f47e3d4411210",
+          "signature": "alp_status_t alp_jpeg_capabilities(const alp_jpeg_t *h, alp_jpeg_caps_t *out);"
+        },
+        "alp_jpeg_close": {
+          "hash": "22d4dfca4c5877c3",
+          "signature": "void alp_jpeg_close(alp_jpeg_t *h);"
+        },
+        "alp_jpeg_encode": {
+          "hash": "fe97f708ec254683",
+          "signature": "alp_status_t alp_jpeg_encode(alp_jpeg_t *h, const alp_jpeg_encode_req_t *req, void *out_buf, size_t out_cap, size_t *out_len);"
+        },
+        "alp_jpeg_open": {
+          "hash": "2fbe6f60f8473a46",
+          "signature": "alp_jpeg_t * alp_jpeg_open(const alp_jpeg_config_t *cfg);"
+        }
+      },
+      "macros": {
+        "ALP_JPEG_CONFIG_DEFAULT": {
+          "hash": "39faa709240c7c1e",
+          "value": "((alp_jpeg_config_t){ .engine_id = 0u, .max_width = 0u, .max_height = 0u })"
+        }
+      },
+      "typedefs": {
+        "alp_jpeg_caps_t": {
+          "definition": "typedef struct { bool hw_accelerated; bool mjpeg_supported; uint16_t max_width; uint16_t max_height; uint32_t subsample_mask; uint32_t pixfmt_mask; } alp_jpeg_caps_t;",
+          "fields": [
+            "bool hw_accelerated",
+            "bool mjpeg_supported",
+            "uint16_t max_width",
+            "uint16_t max_height",
+            "uint32_t subsample_mask",
+            "uint32_t pixfmt_mask"
+          ],
+          "hash": "63da20b1c48f93ea",
+          "kind": "struct"
+        },
+        "alp_jpeg_config_t": {
+          "definition": "typedef struct { uint32_t engine_id; uint16_t max_width; uint16_t max_height; } alp_jpeg_config_t;",
+          "fields": [
+            "uint32_t engine_id",
+            "uint16_t max_width",
+            "uint16_t max_height"
+          ],
+          "hash": "aa7b2b4967eea93c",
+          "kind": "struct"
+        },
+        "alp_jpeg_encode_req_t": {
+          "definition": "typedef struct { uint16_t width; uint16_t height; alp_pixfmt_t format; alp_jpeg_subsample_t subsample; uint8_t quality; const void *y_plane; uint32_t y_stride; const void *u_plane; uint32_t u_stride; const void *v_plane; uint32_t v_stride; } alp_jpeg_encode_req_t;",
+          "fields": [
+            "uint16_t width",
+            "uint16_t height",
+            "alp_pixfmt_t format",
+            "alp_jpeg_subsample_t subsample",
+            "uint8_t quality",
+            "const void *y_plane",
+            "uint32_t y_stride",
+            "const void *u_plane",
+            "uint32_t u_stride",
+            "const void *v_plane",
+            "uint32_t v_stride"
+          ],
+          "hash": "2653f37a17d95569",
+          "kind": "struct"
+        },
+        "alp_jpeg_subsample_t": {
+          "definition": "typedef enum { ALP_JPEG_SUBSAMPLE_400 = 0, ALP_JPEG_SUBSAMPLE_420 = 1, ALP_JPEG_SUBSAMPLE_422 = 2, } alp_jpeg_subsample_t;",
+          "enumerators": [
+            "ALP_JPEG_SUBSAMPLE_400 = 0",
+            "ALP_JPEG_SUBSAMPLE_420 = 1",
+            "ALP_JPEG_SUBSAMPLE_422 = 2"
+          ],
+          "hash": "51464c0a4af09f76",
+          "kind": "enum"
+        },
+        "alp_jpeg_t": {
+          "definition": "typedef struct alp_jpeg alp_jpeg_t;",
+          "hash": "f1eeecc9377c67e8",
           "kind": "opaque"
         }
       },
@@ -11033,14 +11169,16 @@
           "kind": "fnptr"
         },
         "alp_pixfmt_t": {
-          "definition": "typedef enum { ALP_PIXFMT_MONO_VLSB = 0, ALP_PIXFMT_RGB565 = 1, ALP_PIXFMT_RGB888 = 2, ALP_PIXFMT_ARGB8888 = 3 } alp_pixfmt_t;",
+          "definition": "typedef enum { ALP_PIXFMT_MONO_VLSB = 0, ALP_PIXFMT_RGB565 = 1, ALP_PIXFMT_RGB888 = 2, ALP_PIXFMT_ARGB8888 = 3, ALP_PIXFMT_YUV420_PLANAR = 4, ALP_PIXFMT_NV12 = 5, } alp_pixfmt_t;",
           "enumerators": [
             "ALP_PIXFMT_MONO_VLSB = 0",
             "ALP_PIXFMT_RGB565 = 1",
             "ALP_PIXFMT_RGB888 = 2",
-            "ALP_PIXFMT_ARGB8888 = 3"
+            "ALP_PIXFMT_ARGB8888 = 3",
+            "ALP_PIXFMT_YUV420_PLANAR = 4",
+            "ALP_PIXFMT_NV12 = 5"
           ],
-          "hash": "b7b2fa99edecde8b",
+          "hash": "884de555b8503700",
           "kind": "enum"
         },
         "alp_spi_config_t": {
@@ -12245,6 +12383,10 @@
           "hash": "1aadee7172fb0900",
           "value": "(ALP_SOC_I2S_COUNT > 0)"
         },
+        "ALP_CAP_HW_I3C": {
+          "hash": "a157ade572b177ec",
+          "value": "(ALP_SOC_I3C_COUNT > 0)"
+        },
         "ALP_CAP_HW_LCDIF": {
           "hash": "e7982d60d184e2d8",
           "value": "(ALP_SOC_LCDIF_COUNT > 0)"
@@ -12387,6 +12529,10 @@
         },
         "ALP_SOC_I2S_COUNT": {
           "hash": "3ef1cad74a105ea5",
+          "value": "UINT16_MAX"
+        },
+        "ALP_SOC_I3C_COUNT": {
+          "hash": "b08ca1fa94609a2f",
           "value": "UINT16_MAX"
         },
         "ALP_SOC_INLINE_AES": {

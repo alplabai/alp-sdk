@@ -11,19 +11,24 @@ flows through the Arm Apache-2.0 `InferenceProcess` wrapper → TFLM
 `MicroInterpreter` (`AddEthosU()`) → `ethosu_invoke()` onto the NPU command
 stream, and the app prints a single `RESULT PASS`/`FAIL` line.
 
-This is the example whose silicon bring-up fixed the long-standing
-`ethosu_invoke=1` residual. Two in-app **strong** weak-overrides are the fix
-(both in `src/main.cpp`, both grounded — nothing re-authored):
+This is the example whose silicon bring-up found the fix for the long-standing
+`ethosu_invoke=1` residual: two **strong** weak-overrides, now owned by
+alp-sdk's AEN Ethos-U backend (`src/backends/inference/ethos_u_aen.cpp`,
+enabled via `CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN=y` in `prj.conf` —
+grounded, nothing re-authored). They used to be in-app copies in `src/main.cpp`;
+hoisted 2026-07-28 so every AEN NPU app inherits them, including the sibling
+`aen-npu-inference`.
 
 1. `ethosu_address_remap = local_to_global()` — the CPU→NPU address translation
    the Arm core driver needs for any TCM-resident buffer. `local_to_global()` is
    hal_alif's (`soc_memory_map.h`); the overlay supplies the `global_base` props
    on the ITCM/DTCM nodes that it reads.
 2. `ethosu_config_select()` returning MEM_ATTR index 0 (the **SRAM AXI port**) for
-   the command stream and every region — because the Alif `Ethos_U85_SRAM_Only`
-   memory mode places the model/arena/IO in SRAM0, reachable only over the SRAM
-   port (the Arm default routes region 0 + the command stream to the EXT port and
-   aborts).
+   the command stream and every region — because this app's SRAM0-only placement
+   is reachable only over the SRAM port (the Arm default routes region 0 + the
+   command stream to the EXT port and aborts). Measured 2026-07-28: Vela's
+   `--memory-mode Sram_Only` alone does NOT fix this -- a byte-identical Vela
+   blob to this app's still returned `ethosu_invoke=1` without these overrides.
 
 > The model + tensor arena are DMA-visible to the NPU master and live in **SRAM0**
 > (`@0x02000000`) with **`CONFIG_DCACHE=n`** — never DTCM. This is the same
@@ -63,7 +68,8 @@ init-copied). No model data is committed.
 
 `CONFIG_ARM_ETHOS_U` is intentionally **off**: the stale hal_alif
 `ethosu_callback.c` targets an older core-driver dcache signature and would
-clash with the pinned `hal_ethos_u`. The strong remap comes from the app, the
+clash with the pinned `hal_ethos_u`. The strong remap comes from alp-sdk's AEN
+Ethos-U backend (`CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN=y`), the
 correct-signature cache hooks from upstream `ethos_u_common.c`
 (`CONFIG_ETHOS_U_DCACHE=y`).
 

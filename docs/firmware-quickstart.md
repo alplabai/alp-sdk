@@ -51,11 +51,22 @@ you a `alp-workspace/` with `alp-sdk/`, `zephyr/`, and the standard
 modules.
 
 You'll also need `tan`, the standalone build executor -- a separate
-public repo, not installed by `bootstrap.sh`. Needs a Rust toolchain
-(`rustup`/`cargo`) on `PATH`:
+public repo, not installed by `bootstrap.sh`. The automatic installer
+needs no Rust toolchain:
 
 ```bash
-cargo install --git https://github.com/alplabai/tan-cli --bin tan
+curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"  # install.sh already made this permanent in your shell rc; needed once more in THIS shell
+```
+
+Building from source instead needs Rust 1.86+ ([rustup.rs](https://rustup.rs))
+and a system C toolchain (`build-essential` on Debian/Ubuntu, `gcc`/`gcc-c++`
+on Fedora/RHEL -- see [`docs/cross-platform-setup.md`](cross-platform-setup.md)
+§2.1):
+
+```bash
+git clone https://github.com/alplabai/tan-cli && cd tan-cli
+cargo install --path crates/tan-cli --locked
 ```
 
 For the rest of this doc, all paths are relative to `alp-workspace/`.
@@ -121,11 +132,19 @@ Build any of them as:
 
 ```bash
 cd alp-workspace
+tan --project alp-sdk/examples/<name> sdk switch "$PWD/alp-sdk"   # one-time per project
 tan --project alp-sdk/examples/<name> build
-# the target (native_sim above, or real silicon) comes from the
-# example's board.yaml `som.sku` -- there is no `--board` flag.
-# For real silicon, also: tan flash alp-sdk/examples/<name>
+# the target comes from the example's board.yaml `som.sku` -- there
+# is no `--board` flag.  Every example in this repo targets a real
+# SoM (none ship a native_sim target), so this cross-compiles; also
+# flash it: tan flash alp-sdk/examples/<name>
 ```
+
+`sdk switch` is scoped to the exact `--project` value (getting-started.md §4)
+-- switching to a different example needs its own `sdk switch` first, or
+skip the per-project pin entirely with `tan --sdk-root "$PWD/alp-sdk"
+--project alp-sdk/examples/<name> build`.  Without either, `tan build` fails
+with `[x]  sdk   no SDK selected` even though the checkout is right there.
 
 ## 5. Idiomatic patterns
 
@@ -278,11 +297,19 @@ reference.
 targets:
 
 ```bash
+cd alp-workspace   # if you left it after §4 -- the rest of this doc is
+                    # relative to alp-workspace/ (see §3)
+
+# sdk switch is per-project (see §4 above) -- run it once for each
+# --project value before its first build.
+
 # V2N (RZ/V2N)
+tan --project alp-sdk/examples/v2n/v2n-gd32-bridge-ping sdk switch "$PWD/alp-sdk"
 tan --project alp-sdk/examples/v2n/v2n-gd32-bridge-ping build
 tan flash alp-sdk/examples/v2n/v2n-gd32-bridge-ping
 
 # AEN (Alif Ensemble)
+tan --project alp-sdk/examples/peripheral-io/gpio-button-led sdk switch "$PWD/alp-sdk"
 tan --project alp-sdk/examples/peripheral-io/gpio-button-led build
 tan flash alp-sdk/examples/peripheral-io/gpio-button-led
 ```
@@ -299,8 +326,8 @@ The `tan` CLI covers the same flow in fewer keystrokes:
 `boot_order:` (see [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli)).
 `tan monitor --port <port>` opens the board's serial console
 afterwards (portless it lists the host's serial ports).  If a
-build machine misbehaves, `tan doctor` is the hardware-free
-environment triage.  Verb reference: [`docs/cli.md`](cli.md).
+build machine misbehaves, `tan doctor --build` is the hardware-free
+build-readiness triage.  Verb reference: [`docs/cli.md`](cli.md).
 
 ## 8. Where to look next
 

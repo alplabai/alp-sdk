@@ -159,7 +159,10 @@ def _emit_scaffold(root: Path, template: str | None, sku: str | None,
     if proc.returncode != 0:
         return proc.returncode
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(proc.stdout, encoding="utf-8")
+    # newline="": mirrors _emit_via_alp_project's own alp_project.py --output
+    # writer, which passes newline="" (scripts/alp_project.py:123) -- some
+    # scaffold modes generate committed-artefact shapes downstream.
+    output.write_text(proc.stdout, encoding="utf-8", newline="")
     click.echo(f"alp emit: wrote {output} ({len(proc.stdout)} bytes)",
                err=True)
     return 0
@@ -209,7 +212,11 @@ def _emit_via_orchestrator(root: Path, mode: str, input_path: Path,
     if proc.returncode != 0:
         return proc.returncode
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(proc.stdout, encoding="utf-8")
+    # newline="": mirrors alp_project.py's own --output writer
+    # (scripts/alp_project.py:123, `_write_or_print`) -- modes routed here
+    # include storage-mounts-c (C source), dts-partitions (.dtsi) and
+    # tfm-sysbuild-conf, all generate-then-commit artefact shapes.
+    output.write_text(proc.stdout, encoding="utf-8", newline="")
     click.echo(f"alp emit: wrote {output} ({len(proc.stdout)} bytes)",
                err=True)
     return 0

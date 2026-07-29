@@ -111,6 +111,18 @@ config ALP_SDK_MAX_DAC_HANDLES
 	int "Maximum concurrent alp_dac_t handles"
 	default 2
 
+config ALP_SDK_MAX_I3C_HANDLES
+	int "Maximum concurrent alp_i3c_t handles"
+	default 1
+	help
+	  The E8 has TWO INDEPENDENT I3C controllers (i3c0 and lpi3c0).  They
+	  are usable simultaneously in general -- each has several pad options
+	  and the two sets overlap on only ONE pair (i3c0: P0_0/P0_1, P1_2/P1_3,
+	  P3_2/P3_3, P7_6/P7_7; lpi3c0: P6_2/P6_3, P7_6/P7_7, P14_2/P14_3).
+	  The default of 1 is sized for the E1M-AEN801, which breaks out only
+	  P7_6/P7_7 and so can enable exactly one of them.  Raise it on a board
+	  that routes the two controllers to non-overlapping pads.
+
 config ALP_SDK_MAX_ADC_STREAM_HANDLES
 	int "Maximum concurrent alp_adc_stream_t handles"
 	default 2

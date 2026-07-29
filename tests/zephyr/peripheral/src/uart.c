@@ -9,10 +9,17 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
+#include <zephyr/devicetree.h>
 #include <zephyr/drivers/serial/uart_emul.h>
 #include <zephyr/ztest.h>
 
 #include "alp/peripheral.h"
+
+/* alp-uart1 is a zephyr,uart-emul alias -- native_sim's overlays define
+ * it (boards/native_sim.overlay, boards/native_sim_native_64.overlay)
+ * but a real board has no emulated UART to alias, so any target
+ * without the alias must still compile this file. */
+#define HAVE_UART1_NODE DT_NODE_HAS_STATUS(DT_ALIAS(alp_uart1), okay)
 
 ZTEST(alp_peripheral, test_uart_open_close_roundtrip)
 {
@@ -47,6 +54,8 @@ ZTEST(alp_peripheral, test_uart_invalid_port_returns_null)
 /* uart_emul_put_rx_data(), which is what lets these tests drive the   */
 /* read path deterministically without a live external UART peer.     */
 /* ------------------------------------------------------------------ */
+
+#if HAVE_UART1_NODE
 
 static const struct device *const _uart1_emul_dev = DEVICE_DT_GET(DT_ALIAS(alp_uart1));
 
@@ -160,6 +169,8 @@ ZTEST(alp_peripheral, test_uart_read_partial_arrival_then_deadline_returns_ok)
 
 	alp_uart_close(u);
 }
+
+#endif /* HAVE_UART1_NODE */
 
 /* UART RX ringbuf: failure paths exercised on every build.  On builds
  * without CONFIG_ALP_SDK_UART_RX_RINGBUF the attach helper returns

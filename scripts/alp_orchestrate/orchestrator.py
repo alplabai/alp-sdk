@@ -16,6 +16,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Optional
 
+import yaml
+
 from .models import BoardProject, Slice
 from .paths import REPO
 from .secure import (emit_sysbuild_conf, emit_tfm_sysbuild_conf,
@@ -96,6 +98,57 @@ class UnrootedPathError(ValueError):
     """
 
 
+def _real_zephyr_board_names(repo: Path) -> set[str]:
+    """Every Zephyr board name that actually has a tree under
+    `zephyr/boards/alp/`, read from each tree's own `board.yml`
+    `board: name:` field -- existence, not naming shape, is what makes a
+    target buildable. Mirrors `check_board_target_tree_parity.py`'s
+    `_load_real_board_names` (issue #999's own list of what's real),
+    duplicated here rather than imported: that script is a CI gate over
+    declared SoM presets, this is a runtime planner check over one
+    resolved slice, and a ~10-line directory glob is cheaper than
+    cross-importing a top-level gate script into the package.
+    """
+    boards_dir = repo / "zephyr" / "boards" / "alp"
+    names: set[str] = set()
+    if not boards_dir.is_dir():
+        return names
+    for board_yml in sorted(boards_dir.glob("*/board.yml")):
+        doc = yaml.safe_load(board_yml.read_text(encoding="utf-8")) or {}
+        name = (doc.get("board") or {}).get("name")
+        if isinstance(name, str):
+            names.add(name)
+    return names
+
+
+class UnknownBoardTargetError(ValueError):
+    """Raised by `_slice_command` when a zephyr slice's `board:` target
+    (resolved from the SoM preset's `topology.<core>.board:`) names no
+    tree under `zephyr/boards/alp/` (issue #999 one layer down: the
+    *declaration* gate `check_board_target_tree_parity.py` already
+    flags this at the metadata level; this is the same fact checked at
+    *emit* time, so the planner never hands a consumer -- `tan`, `west`
+    itself -- a `west build -b <board>` command that is guaranteed to
+    fail with Zephyr's own "No board named ... Invalid BOARD" error).
+
+    Carries the SKU/core/board/what-exists facts so the caller can
+    render them in the customer's own terms, same as `UnrootedPathError`
+    above.
+    """
+
+    def __init__(self, sku: str, core_id: str, board: str,
+                 real_boards: set[str]) -> None:
+        self.sku = sku
+        self.core_id = core_id
+        self.board = board
+        self.real_boards = real_boards
+        super().__init__(
+            f"SoM '{sku}' core '{core_id}' wants Zephyr board '{board}', "
+            f"which has no tree under zephyr/boards/alp/ -- board bring-up "
+            f"for this target has not happened yet."
+        )
+
+
 def _tokenize(path: Path, base_dir: Path, repo: Path) -> str:
     """Render an absolute path as a portable `${PROJECT_ROOT}`/`${SDK_ROOT}`
     token (issue #865) instead of baking in THIS checkout's absolute path.
@@ -127,7 +180,9 @@ def _slice_command(
 ) -> Optional[list[str]]:
     """Resolve the build command for a slice.  Returns None when there is no
     buildable command yet -- the caller carries the slice as `skipped` /
-    `no-command`, never dropped.
+    `no-command`, never dropped.  Raises `UnrootedPathError` /
+    `UnknownBoardTargetError` for a slice the plan must block rather than
+    mis-emit.
 
     `base_dir` anchors every relative `app:` path -- the directory holding
     the project's `board.yaml` (or an equivalent explicit root), NEVER the
@@ -139,6 +194,18 @@ def _slice_command(
     if slice_.os == "zephyr":
         if not slice_.app or not slice_.board:
             return None
+        real_boards = _real_zephyr_board_names(REPO)
+        # `board:` may carry Zephyr's extended `board/soc/variant`
+        # qualifier (e.g. AEN801's `alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/
+        # rtss_hp`) -- a tree's board.yml `name:` is always the bare board
+        # only, so check existence on the bare form (same `bare =
+        # raw.split()[0].split("/")[0]` normalisation
+        # check_board_target_tree_parity.py uses); the full qualified
+        # string still goes to `west build -b` unchanged below.
+        bare_board = slice_.board.split()[0].split("/")[0]
+        if bare_board not in real_boards:
+            raise UnknownBoardTargetError(
+                project.sku, slice_.core_id, slice_.board, real_boards)
         # NB: no explicit `-d`. west's default output is <cwd>/build (a
         # subdirectory of the command's cwd = buildDir), so the tree lands
         # at <buildDir>/build/; the consumer (tan) reconciles that nested

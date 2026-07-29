@@ -33,7 +33,7 @@
 #include "i2s_ops.h"
 
 #define ALP_I2S_DEV_OR_NULL(idx) \
-	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_i2s, idx))), \
+	COND_CODE_1(DT_NODE_HAS_STATUS(DT_ALIAS(_CONCAT(alp_i2s, idx)), okay), \
 	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_i2s, idx)))), \
 	            (NULL))
 

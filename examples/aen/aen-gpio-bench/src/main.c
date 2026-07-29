@@ -5,8 +5,8 @@
  * On-silicon GPIO validation for the E1M-AEN801 (Alif Ensemble E8) over the
  * UPSTREAM DesignWare gpio_dw driver (ADR 0017 Tier-1, "snps,designware-gpio").
  *
- * What it proves
- * --------------
+ * What it proves -- and what it does NOT
+ * ---------------------------------------
  * Drive a SAFE, uncontended pin -- P8_0 (gpio8, pin 0) -- as a push-pull
  * output, set it HIGH then LOW through the portable Zephyr GPIO API, and after
  * each step read back the DesignWare data (DR) + direction (DDR) registers so
@@ -18,11 +18,42 @@
  *   2. over J-Link:  the human reads the same registers with mem32 (addresses
  *      below) -- the ground truth on silicon, independent of any printk.
  *
+ * This ONLY proves the gpio_dw controller-register path: pinctrl_configure_pins
+ * accepted the mux request, and DDR/DR read back what gpio_pin_configure /
+ * gpio_pin_set wrote.  It does NOT prove the pad electrically moved.  Per the
+ * Synopsys DW_apb_gpio databook, for a pin whose SWPORTA_DDR direction bit is
+ * OUTPUT, reading EXT_PORTA for that bit returns the SWPORTA_DR value, not the
+ * external/pad signal -- only an INPUT-direction pin's EXT_PORTA bit reads the
+ * real pad level. TEST_PIN is never put into INPUT mode here, so EXT_PORTA is
+ * mathematically identical to DR for this whole run and cannot independently
+ * confirm anything DR didn't already say. (Bench-confirmed 2026-07-27 on real
+ * AE822 silicon: an earlier version of this comment attributed a dark LED
+ * seen on a different, similar pad to CLKCTL_PER_SLV->GPIO_CTRL[n] bit 16
+ * GPIO_CTRL_CKEN (the per-port GPIO functional-clock enable) being clear.
+ * CORRECTION, same bench, later + decisive: that theory is REFUTED -- a
+ * follow-up A/B drove SWPORTA_DDR/SWPORTA_DR from the debugger with CKEN
+ * still clear after a cold reset and the pad moved (`0x49002050 =
+ * 0x00000010` with `0x4902F088 = 0x00000100`, bit 16 unset). CKEN is
+ * measured NOT required for pad drive on AE822. The actual explanation for
+ * "the LED was dark": the old bench app toggled a handful of times over a
+ * couple of seconds and returned with the pad left LOW -- a window nobody
+ * was watching, not a pad that couldn't move. Once changed to loop forever,
+ * the maintainer confirmed by eye that the LED blinks. GPIO output on E8 is
+ * proven on silicon this way; this app's own criterion is still only the
+ * gpio_dw controller-register path described above, unrelated to CKEN
+ * either way.)
+ * To prove the pad actually moved, probe P8_0 with a multimeter/scope, or
+ * route it to a visible LED load and confirm illumination -- this app alone
+ * cannot make that claim.
+ *
  * DesignWare gpio register map for gpio8 @ 0x49008000 (PORT-A; gpio_dw derives
  * port 0 because 0x49008000 & 0x3f == 0):
  *     DR  (SWPORTA_DR)  = 0x49008000    bit0 = driven output level
  *     DDR (SWPORTA_DDR) = 0x49008004    bit0 = 1 -> output
- *     EXT_PORTA         = 0x49008050    bit0 = read-back pad level
+ *     EXT_PORTA         = 0x49008050    bit0 = mirrors DR for an OUTPUT pin
+ *                                              (see above) -- printed for
+ *                                              J-Link cross-check only, not
+ *                                              part of the pass criterion
  *
  * Expected (pin = bit 0):
  *     after configure OUTPUT_HIGH / set 1:  DDR bit0 = 1, DR bit0 = 1
@@ -58,11 +89,11 @@
  * word; the Alif impl ignores the reg argument).
  *
  * ALIF_PAD_REN = the pad RECEIVER-ENABLE bit (pinctrl_soc.h REN_BIT_POS=16, the
- * low bit of the pad-config byte [23:16] of the pinmux word).  gpio_dw drives the
- * output via DDR/DR, but the pad's input buffer must be enabled for EXT_PORTA to
- * SENSE the driven level back -- same REN the I2C2 path needs to sense SDA.  With
- * it set, EXT_PORTA tracks the output, validating the FULL pad path (mux + drive +
- * sense), not just the gpio_dw controller registers. */
+ * low bit of the pad-config byte [23:16] of the pinmux word) -- same REN the
+ * I2C2 path needs to sense SDA.  Set here so EXT_PORTA is at least well-defined,
+ * but for an OUTPUT-direction pin on this controller EXT_PORTA mirrors DR
+ * regardless of REN (see the file header) -- REN does NOT make this test
+ * independently prove the pad moved. */
 #define ALIF_PAD_REN (1U << 16)
 static const pinctrl_soc_pin_t p8_0_gpio[] = { PIN_P8_0__GPIO | ALIF_PAD_REN };
 
@@ -132,7 +163,7 @@ int main(void)
 	dump_regs("driven-high");
 	dr_hi  = sys_read32(DW_SWPORTA_DR);
 	ddr_hi = sys_read32(DW_SWPORTA_DDR);
-	ext_hi = sys_read32(DW_EXT_PORTA); /* pad sense (REN on) -> tracks output */
+	ext_hi = sys_read32(DW_EXT_PORTA); /* mirrors DR for this OUTPUT pin -- see header */
 
 	/* --- J-Link readback window #1 (HIGH): mem32 0x49008000 / 0x49008004 --- */
 
@@ -147,27 +178,31 @@ int main(void)
 	dump_regs("driven-low");
 	dr_lo  = sys_read32(DW_SWPORTA_DR);
 	ddr_lo = sys_read32(DW_SWPORTA_DDR);
-	ext_lo = sys_read32(DW_EXT_PORTA); /* pad sense (REN on) -> tracks output */
+	ext_lo = sys_read32(DW_EXT_PORTA); /* mirrors DR for this OUTPUT pin -- see header */
 
 	/* --- J-Link readback window #2 (LOW): mem32 0x49008000 / 0x49008004 --- */
 
-	/* 6. verdict: DDR shows the pin as output in BOTH states, DR tracks the
-	 *    driven level (controller), AND -- with the pad receiver enabled
-	 *    (ALIF_PAD_REN) -- EXT_PORTA reads back the same level (the FULL pad
-	 *    path: mux + push-pull drive + sense), high then low. */
+	/* 6. verdict: DDR shows the pin as output in BOTH states, and DR tracks
+	 *    the requested level (controller-register path only -- see the file
+	 *    header for why EXT_PORTA cannot add independent proof here: for an
+	 *    OUTPUT pin it mirrors DR by construction, so folding it into this
+	 *    verdict would let the app PASS on register plumbing alone while
+	 *    implying pad/electrical proof it does not have. ext_hi/ext_lo are
+	 *    still read + printed above for the J-Link cross-check, deliberately
+	 *    excluded from the pass/fail gate below. */
 	bool ddr_ok = ((ddr_hi & TEST_BIT) != 0U) && ((ddr_lo & TEST_BIT) != 0U);
 	bool dr_ok  = ((dr_hi & TEST_BIT) != 0U) && ((dr_lo & TEST_BIT) == 0U);
-	bool ext_ok = ((ext_hi & TEST_BIT) != 0U) && ((ext_lo & TEST_BIT) == 0U);
 
-	if (ddr_ok && dr_ok && ext_ok) {
-		printk("RESULT PASS: gpio_dw P8_0 FULL pad path -- DDR bit0=1, DR & "
-		       "EXT_PORTA both high=1 low=0 (mux+drive+sense, REN on)\n");
+	if (ddr_ok && dr_ok) {
+		printk("RESULT PASS: gpio_dw P8_0 controller-register path -- DDR "
+		       "bit0=1, DR high=1 low=0 (mux accepted + DDR/DR correct). "
+		       "NOT pad/electrical proof -- probe P8_0 or wire a load to "
+		       "confirm it actually moved.\n");
 	} else {
-		printk("RESULT FAIL: ddr_ok=%d dr_ok=%d ext_ok=%d "
+		printk("RESULT FAIL: ddr_ok=%d dr_ok=%d "
 		       "DR_hi=0x%08x DR_lo=0x%08x EXT_hi=0x%08x EXT_lo=0x%08x\n",
 		       (int)ddr_ok,
 		       (int)dr_ok,
-		       (int)ext_ok,
 		       dr_hi,
 		       dr_lo,
 		       ext_hi,

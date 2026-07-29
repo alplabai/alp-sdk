@@ -54,10 +54,6 @@ memory:
 inference:
   preferred_backend:    ethos_u
   ethos_u_variant:      u85               # primary -- E6 ships one U85 alongside two U55s.
-  npu_population:
-    - { variant: u55, role: NPU-HE, paired_with: M55-HE }
-    - { variant: u55, role: NPU-HP, paired_with: M55-HP }
-    - { variant: u85, role: NPU-HG, paired_with: HG-subsystem }
 
 capabilities:
   optiga_trust_m:       true

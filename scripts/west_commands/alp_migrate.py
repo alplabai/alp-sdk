@@ -69,7 +69,7 @@ def run(args) -> int:
             sys.stdout.write("\n")
             continue
         if args.apply:
-            path.write_text(new_text, encoding="utf-8")
+            path.write_text(new_text, encoding="utf-8", newline="")
             print(f"alp-migrate: migrated {path}")
     if args.check:
         if drift:

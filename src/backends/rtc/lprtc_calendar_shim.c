@@ -59,9 +59,10 @@
 /* The LPRTC counter that backs the calendar.  Resolved via a dedicated DT alias
  * so the time source is explicit and SoM-overridable: point `alp-lprtc-counter`
  * at the snps,dw-apb-rtc node (lprtc@42000000) in the board overlay.  If the
- * alias is absent the device pointer is NULL and open() returns NOT_READY. */
+ * alias is absent OR present but not `okay`, the device pointer is NULL and
+ * open() returns NOT_READY. */
 #define ALP_LPRTC_COUNTER_DEV \
-	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(alp_lprtc_counter)), \
+	COND_CODE_1(DT_NODE_HAS_STATUS(DT_ALIAS(alp_lprtc_counter), okay), \
 	            (DEVICE_DT_GET(DT_ALIAS(alp_lprtc_counter))), \
 	            (NULL))
 

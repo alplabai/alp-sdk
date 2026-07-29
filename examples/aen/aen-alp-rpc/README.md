@@ -57,12 +57,41 @@ in the pingpong README and live in `mbox_alif_mhuv2.c`.
 [HP] boot_cpu rc=0
 [HP] alp_rpc_open OK
 [HP] subscribe rc=0
-RESULT: alp-rpc PASS -- pongs=16/16
+RESULT PASS: alp-rpc -- received 16/16 pong(s) after sending 16 ping(s)
 ```
 
 The app UART is not on USB on this bench, so the console is the RAM console;
 liveness/result also mirror to global-SRAM0 beacons (read `ram_console_buf` and
 the beacons over SWD). HE's console is in HE-local memory, hence the beacons.
+
+## Verdicts, timeouts, and the HE<->HP boot block on this bench
+
+Both HP and HE always print exactly one `RESULT` line before `main()` returns
+(no more idling forever with no verdict):
+
+- `RESULT PASS: alp-rpc -- ...` — real evidence: HP received all 16 pongs (or,
+  on HE, every ping received was queued back to HP -- `alp_rpc_send()`
+  returning `ALP_OK` only means the frame reached the local vring, HE never
+  observes whether HP actually accepted it).
+- `RESULT SKIP: alp-rpc -- ...` — the peer never showed within a bounded
+  window (boot never happened, or the channel opened/subscribed locally but
+  the peer never sent anything) — states what was locally proven, not a
+  failure of this app's code.
+- `RESULT FAIL: alp-rpc -- ...` — a real local error: `alp_mproc_boot_core`
+  (HP) returned an unexpected rc, `alp_rpc_open`/`alp_rpc_subscribe` failed,
+  or every local `alp_rpc_send` failed.
+
+On THIS bench the HE<->HP release path is known-blocked and
+`alp_mproc_boot_core` returns `ALP_ERR_NOSUPPORT` (`rc=-6`) — HP reports that
+as `RESULT SKIP`, not `RESULT FAIL`: the boot authority itself says it can't
+release HE here, which is a bench/silicon limitation, not a bug in this app.
+Every wait (the NS-bind settle window: 1500 ms; HP's round-drive grace window:
+5 extra heartbeats; HE's serve window: 3000 ms) is bounded so a genuinely
+absent peer produces a verdict instead of a hang. The verdict is also
+mirrored into a beacon word (`SELF_BEACON[2]`, right after the heartbeat word)
+before `main()` returns, so a bench SWD read can tell a completed run (word
+set to 1/2/3) apart from a crash (word still 0) even though the heartbeat
+itself stops moving once `main()` has exited.
 
 ## Build
 

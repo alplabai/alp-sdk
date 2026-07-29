@@ -1,7 +1,7 @@
 {
   "digests": {
-    "metadata": "sha256:aeb7ab7a14fff66db518929818e4dcadd33696613094cd08e5e94cfedae8ff2b",
-    "schemas": "sha256:81fb4eaf4d84906e3bddc385d177fc104695e2812c79e4839c22687aa87320b4"
+    "metadata": "sha256:b73a3723ec95ae05079d40565a5698f16f9e4eadf00bae4c25de9405396a599a",
+    "schemas": "sha256:596967e2d3d347810fd6b3bc07a89bae4fd01e9d69afc920df67423c14869cd4"
   },
   "generatedBy": "west alp-lock",
   "libraries": [
@@ -51,7 +51,7 @@
       "license": "Apache-2.0",
       "name": "coap",
       "revision": null,
-      "version": "4.4.0"
+      "version": "4.4.1"
     },
     {
       "license": "MIT",
@@ -111,7 +111,7 @@
       "license": "Apache-2.0",
       "name": "lwm2m",
       "revision": null,
-      "version": "4.4.0"
+      "version": "4.4.1"
     },
     {
       "license": "MIT",
@@ -147,7 +147,7 @@
       "license": "Apache-2.0",
       "name": "modbus",
       "revision": null,
-      "version": "4.4.0"
+      "version": "4.4.1"
     },
     {
       "license": "Zlib",
@@ -213,7 +213,7 @@
     "groupsEnabled": []
   },
   "sdk": {
-    "revision": "bec9c0abe7b0267aadde31d6c954f07c9f33dff2",
+    "revision": "f4ec547d41835392e9b3336cab62025a91f9f9df",
     "version": "0.13.0"
   },
   "west": {
@@ -283,7 +283,7 @@
       {
         "groups": [],
         "name": "hal_alif",
-        "revision": "v2.2.0"
+        "revision": "v2.3.0"
       },
       {
         "groups": [
@@ -384,7 +384,7 @@
       {
         "groups": [],
         "name": "zephyr",
-        "revision": "v4.4.0"
+        "revision": "v4.4.1"
       }
     ]
   }

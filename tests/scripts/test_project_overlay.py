@@ -121,6 +121,100 @@ class TestDtsOverlayEmit(unittest.TestCase):
         self.assertNotIn("alp-i2c0 = &i2c2;", out)
         self.assertNotIn("pinctrl_i2c2", out)
 
+    def test_overlay_aen_i3c_emits_lpi3c0_alias_for_he_slice(self) -> None:
+        """AEN801 M55-HE slice declaring `peripherals: [i3c]` gets the
+        lpi3c0 node enabled + pinctrl + the alp-i3c0 alias.  lpi3c0 is the
+        M55-HE local-domain controller (IRQ 50); it shares pads P7_6/P7_7
+        with the main i3c0 through a different pad mux, and firmware picks
+        the owner."""
+        with tempfile.TemporaryDirectory() as td:
+            path = _write_board(Path(td), """
+                som:
+                  sku: E1M-AEN801
+                preset: e1m-evk
+                cores:
+                  m55_he:
+                    app: ./src
+                    peripherals:
+                      - i3c
+            """)
+            rv = _run_loader(input_path=path, emit="dts-overlay", core="m55_he")
+        self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+        out = rv.stdout
+        self.assertIn("alp-i3c0 = &lpi3c0;", out)
+        self.assertIn("&lpi3c0 {", out)
+        self.assertIn('status = "okay";', out)
+        self.assertIn("pinctrl_lpi3c0", out)
+
+    def test_overlay_aen_i3c_emits_nothing_for_hp_slice(self) -> None:
+        """An M55-HP slice never gets the lpi3c0 alias -- it's the M55-HE
+        local domain (IRQ 50); alp_i3c_open() on HP must surface
+        NOT_READY, never bind to a dead IRQ."""
+        with tempfile.TemporaryDirectory() as td:
+            path = _write_board(Path(td), """
+                som:
+                  sku: E1M-AEN801
+                preset: e1m-evk
+                cores:
+                  m55_hp:
+                    app: ./src
+                    peripherals:
+                      - i3c
+            """)
+            rv = _run_loader(input_path=path, emit="dts-overlay", core="m55_hp")
+        self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+        out = rv.stdout
+        self.assertNotIn("alp-i3c0", out)
+        self.assertNotIn("lpi3c0", out)
+
+    def test_overlay_aen_i3c_unscoped_emit_follows_the_declared_cores(self) -> None:
+        """The UNSCOPED emit (no --core) must not silently drop i3c wiring.
+
+        Regression guard: gating on `v2_core_id != "m55_he"` alone skips the
+        unscoped path, where v2_core_id is None -- so a board whose Zephyr
+        core IS m55_he got no lpi3c0 alias while the conf emit still set
+        CONFIG_I3C=y, i.e. a green build whose alp_i3c_open() returns
+        NOT_READY with nothing to point at.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            path = _write_board(Path(td), """
+                som:
+                  sku: E1M-AEN801
+                preset: e1m-evk
+                cores:
+                  m55_he:
+                    app: ./src
+                    peripherals:
+                      - i3c
+            """)
+            rv = _run_loader(input_path=path, emit="dts-overlay")
+        self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+        self.assertIn("alp-i3c0 = &lpi3c0;", rv.stdout)
+
+    def test_overlay_aen_i3c_unscoped_emit_skips_a_he_less_project(self) -> None:
+        """...and the same unscoped path emits nothing once m55_he is OFF.
+
+        Note m55_he must be turned off explicitly: the AEN801 topology
+        supplies it with `effective_os: zephyr` even when board.yaml names
+        only m55_hp, so an unscoped union legitimately covers it.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            path = _write_board(Path(td), """
+                som:
+                  sku: E1M-AEN801
+                preset: e1m-evk
+                cores:
+                  m55_he:
+                    os: "off"
+                  m55_hp:
+                    app: ./src
+                    peripherals:
+                      - i3c
+            """)
+            rv = _run_loader(input_path=path, emit="dts-overlay")
+        self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+        self.assertNotIn("lpi3c0", rv.stdout)
+
     def test_overlay_emits_alp_pin_array(self) -> None:
         rv = _run_loader(input_path=TEMPLATE, emit="dts-overlay")
         out = rv.stdout

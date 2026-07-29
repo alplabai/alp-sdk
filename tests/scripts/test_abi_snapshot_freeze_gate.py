@@ -32,6 +32,7 @@ asserting agreement with the new implementation's own text.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -328,20 +329,18 @@ def test_ci_gate_contains_no_abi_version_literal(workflow):
     a regression there would go unnoticed if only one workflow were
     checked.
 
-    Scoped to the executable body: the `v0.1` freeze-baseline gate is a
-    deliberate fixed reference (the ABI floor, not the current
-    snapshot), and prose in comments is not what runs.
+    Scoped to the executable body: prose in comments is not what runs.
+    The ABI freeze gate (issue #996) derives its baseline from `ls
+    docs/abi/v*-snapshot.json | sort -V`, excluding whatever
+    `--print-current-version` names as current -- a glob, not a version
+    literal -- so it carries no exception here.
     """
     text = workflow.read_text(encoding="utf-8")
     body = "\n".join(
         line for line in text.splitlines() if not line.lstrip().startswith("#")
     )
 
-    offenders = [
-        m.group(0)
-        for m in re.finditer(r"v\d+\.\d+-snapshot\.json", body)
-        if m.group(0) != "v0.1-snapshot.json"
-    ]
+    offenders = [m.group(0) for m in re.finditer(r"v\d+\.\d+-snapshot\.json", body)]
     assert not offenders, (
         f"{workflow.name} names snapshot file(s) {offenders} "
         f"literally; derive from metadata/sdk_version.yaml instead (#826)"
@@ -453,6 +452,153 @@ def test_generated_files_stage_does_not_swallow_a_failed_regen():
     assert not any("|| true" in s for s in abi_statements), (
         "a failed ABI regen must fail the stage, not pass silently (#795)"
     )
+
+
+# ---------------------------------------------------------------------
+# 5. issue #996: the freeze gate itself -- blocks a REMOVED symbol vs
+# the last released snapshot, does not block a CHANGED-only diff.
+# ---------------------------------------------------------------------
+
+
+@pytestmark_bash
+def test_freeze_gate_baseline_is_the_real_last_released_snapshot():
+    """`test_freeze_gate_fails_on_a_removed_symbol` and
+    `..._passes_on_a_changed_only_diff` below only ever exercise the
+    gate against a PLANTED `v99.9x-snapshot.json` -- a version number
+    engineered to sort above anything real, which proves the gate
+    picks whatever `sort -V | tail -1` names, but not that this
+    resolves to the actual previous release on a real, unmodified
+    `docs/abi/`.  That's the exact claim `docs/abi/README.md`'s
+    freeze-gate carve-out makes ("once CURRENT is off the list, the
+    highest remaining label genuinely is the last release"): run the
+    baseline computation alone, against the real committed snapshots,
+    with no fixture, and check it against a Python-side recomputation
+    of "second-highest committed version" -- an independent
+    implementation, not a copy of the bash line under test."""
+    run_script = _extract_workflow_run_step(
+        GENERATED_FILES_WORKFLOW, "check", "abi_freeze_gate"
+    )
+    current = abi.current_snapshot_version()
+    assert current is not None
+    proc = subprocess.run(
+        ["bash", "-c", run_script],
+        cwd=str(REPO),
+        env={**os.environ, "ABI_VERSION": current},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    # REMOVED (rc=1) or clean (rc=0) both print the "Comparing..." line
+    # before the diff even runs; a hard failure (rc>=2, a real
+    # abi_snapshot.py error) would mean the baseline was never resolved.
+    assert proc.returncode in (0, 1), proc.stdout + proc.stderr
+
+    released = [
+        p
+        for p in (REPO / "docs" / "abi").glob("v*-snapshot.json")
+        if p.name != f"{current}-snapshot.json"
+    ]
+    assert released, "no released snapshot on disk to compare against"
+
+    def _key(p: Path) -> tuple[int, int]:
+        m = re.match(r"v(\d+)\.(\d+)-snapshot\.json$", p.name)
+        assert m, f"unexpected snapshot filename: {p.name}"
+        return (int(m.group(1)), int(m.group(2)))
+
+    expected = max(released, key=_key)
+    assert f"Comparing current ABI against docs/abi/{expected.name}" in proc.stdout, (
+        f"expected the gate to pick {expected.name} as the last released "
+        f"snapshot; got:\n{proc.stdout}"
+    )
+
+
+def _run_freeze_gate(baseline_path: Path, payload: dict) -> subprocess.CompletedProcess:
+    """Write `payload` to `baseline_path` (a throwaway file under the
+    real docs/abi/ -- the step's `python3 scripts/abi_snapshot.py`
+    call is a relative path, so it must run with cwd=REPO), execute
+    the WORKFLOW'S OWN `id: abi_freeze_gate` step against it, then
+    remove the file -- proving the gate without mutating anything real
+    under include/alp/."""
+    assert not baseline_path.exists(), f"would clobber a real file: {baseline_path}"
+    baseline_path.write_text(json.dumps(payload), encoding="utf-8")
+    try:
+        run_script = _extract_workflow_run_step(
+            GENERATED_FILES_WORKFLOW, "check", "abi_freeze_gate"
+        )
+        current = abi.current_snapshot_version()
+        assert current is not None
+        return subprocess.run(
+            ["bash", "-c", run_script],
+            cwd=str(REPO),
+            env={**os.environ, "ABI_VERSION": current},
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    finally:
+        baseline_path.unlink()
+
+
+@pytestmark_bash
+def test_freeze_gate_fails_on_a_removed_symbol():
+    """A symbol present in the baseline but absent from every real
+    header today (a fabricated name, not a mutated one) must fail the
+    step and name the removed symbol -- the exact case #996 reported
+    as never having been checked."""
+    baseline = REPO / "docs" / "abi" / "v99.99-snapshot.json"
+    payload = {
+        "version": "v99.99",
+        "generated": "1970-01-01",
+        "headers": {
+            "alp/peripheral.h": {
+                "functions": {
+                    "alp___freeze_gate_regression_test_only": {
+                        "signature": "void alp___freeze_gate_regression_test_only(void);",
+                        "hash": "0000000000000000",
+                    }
+                },
+                "typedefs": {},
+                "macros": {},
+                "variables": {},
+            }
+        },
+    }
+    proc = _run_freeze_gate(baseline, payload)
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert (
+        "REMOVED function alp/peripheral.h::alp___freeze_gate_regression_test_only"
+        in proc.stdout
+    )
+    assert "::error::Public symbol(s) removed" in proc.stdout
+
+
+@pytestmark_bash
+def test_freeze_gate_passes_on_a_changed_only_diff():
+    """A CHANGED entry (a real symbol, deliberately mis-hashed so it
+    still exists but its recorded signature differs) must NOT fail the
+    step -- docs/contribution.md's ABI policy allows a signature/field
+    change between pre-1.0 minors; only a silent REMOVED blocks."""
+    baseline = REPO / "docs" / "abi" / "v99.98-snapshot.json"
+    payload = {
+        "version": "v99.98",
+        "generated": "1970-01-01",
+        "headers": {
+            "alp/peripheral.h": {
+                "functions": {
+                    "alp_gpio_read": {
+                        "signature": "not the real signature",
+                        "hash": "0000000000000000",
+                    }
+                },
+                "typedefs": {},
+                "macros": {},
+                "variables": {},
+            }
+        },
+    }
+    proc = _run_freeze_gate(baseline, payload)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "CHANGED function alp/peripheral.h::alp_gpio_read" in proc.stdout
 
 
 if __name__ == "__main__":

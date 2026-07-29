@@ -39,3 +39,36 @@ This is the working substrate for HE↔HP IPC / a dual-core RPC.
 
 Recipe: dual ATOC with HP-APP `["load","boot"]` @0x50000000 + HE-APP `["load"]`
 @0x58000000; `app-gen-toc` + `app-write-mram`. Restore the canonical slot0 after.
+
+## Verdicts, timeouts, and the HE↔HP boot block on this bench
+
+Both HP and HE hold their verdict to a bounded window rather than looping
+forever waiting for it, and each always prints exactly one `RESULT` line
+before dropping into its trailing idle/ring loop:
+
+- `RESULT PASS: dualcore-doorbell -- ...` — real evidence: HP counted >=1
+  doorbell actually received on MHU-1 @`0x400A0000` (or, on HE, HP's
+  cross-read received-count was observed to advance after a ring).
+- `RESULT SKIP: dualcore-doorbell -- ...` — the peer never showed within a
+  bounded window: the boot authority reported `ALP_ERR_NOSUPPORT` and HE was
+  never released, HE released but never rang, HE's own MHU-1 sender link
+  never came ready (`ACCESS_READY`), or HP never saw HE's ring — states what
+  was locally proven, not a failure of this app's code.
+- `RESULT FAIL: alp_mproc_boot_core rc=%d` — HP only: a real local error,
+  `alp_mproc_boot_core` returned an unexpected rc (neither `ALP_OK` nor
+  `ALP_ERR_NOSUPPORT`).
+
+On THIS bench the HE↔HP release path is known-blocked and
+`alp_mproc_boot_core` returns `ALP_ERR_NOSUPPORT` (`rc=-6`) — HP reports that
+as `RESULT SKIP`, not `RESULT FAIL`: the boot authority itself says it can't
+release HE here, which is a bench/silicon limitation, not a bug in this app.
+Every wait (HP's receive verdict window: 3000 ms; HE's MHU-1 sender-link-ready
+wait: 3000 ms; HE's ring-and-cross-check window: 3000 ms, all polled every
+20 ms) is bounded, so a genuinely absent peer or a sender link that never
+comes ready produces a verdict instead of a hang.
+
+Before the verdict window, HP clears the latched `RCV_CH0_ST` doorbell-status
+bit (`sys_write32(0xFFFFFFFFU, RCV_CH0_CLR)`): MHUv2 channel-status bits are
+NOT cleared by a core-only warm reset or a J-Link RAM-run, so a leftover set
+bit from a PRIOR run's HE ring would otherwise satisfy iteration 0 of this
+run's window and produce a false PASS with HE never released this run.

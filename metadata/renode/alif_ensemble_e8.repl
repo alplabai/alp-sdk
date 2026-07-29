@@ -44,9 +44,13 @@
 // which is the pinned version; the earlier v1.15.3 lacked it and needed
 // a cortex-m33 fallback.  NB: like the RZ/V2N M33, an ARMv8-M image on
 // v1.16.x needs its Secure VTOR (SCB->VTOR @ 0xE000ED08) seeded to the
-// vector table or exceptions fetch from 0 and HardFault-storm -- the
-// --sim-mode boot script does this (build_sim_resc_text); the non-sim
-// smoke .resc does not yet, so it stays advisory on AEN.
+// vector table or exceptions fetch from 0 and HardFault-storm.  The
+// non-sim smoke .resc now seeds it (`cpu VectorTableOffset $vtor`,
+// #947); the --sim-mode gateway did it in its generated boot script,
+// but that gateway is not ported yet (tan-cli#77).  AEN stays advisory
+// for the separate reason that no renode workflow asserts anything yet
+// -- every boot-and-assert e2e step is a no-op `echo` until tan-cli#77
+// lands.
 cpu: CPU.CortexM @ sysbus
     cpuType: "cortex-m55"
     nvic: nvic
@@ -69,8 +73,8 @@ itcm: Memory.MappedMemory @ sysbus 0x50000000
     size: 0x40000
 
 // ITCM *local* alias @ 0x0.  The M55 sees its ITCM at both the global
-// window (0x50000000) and the CPU-local 0x0.  `west alp-renode
-// --sim-mode` boots an ITCM-linked image (chosen zephyr,flash = &itcm)
+// window (0x50000000) and the CPU-local 0x0.  `tan renode --sim-mode`
+// boots an ITCM-linked image (chosen zephyr,flash = &itcm)
 // whose vector table + code link at the local 0x0 -- a low, bit31-clear
 // Code-region address.  This is deliberate: Renode v1.16.1's Cortex-M55
 // mis-executes a vector table placed at a high address like the MRAM

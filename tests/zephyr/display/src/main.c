@@ -32,7 +32,7 @@
 #include <alp/peripheral.h>
 #include <alp/soc_caps.h>
 
-#define HAVE_DISPLAY_NODE DT_NODE_EXISTS(DT_ALIAS(alp_display0))
+#define HAVE_DISPLAY_NODE DT_NODE_HAS_STATUS(DT_ALIAS(alp_display0), okay)
 
 ZTEST_SUITE(alp_display, NULL, NULL, NULL, NULL, NULL);
 

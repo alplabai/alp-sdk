@@ -94,7 +94,7 @@ jobs:
           # Pin to the Zephyr release the v0.1 dependency matrix
           # documents (VERSIONS.md).  Bump intentionally; do not
           # track main.
-          west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.4.0 .
+          west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.4.1 .
           west update --narrow -o=--depth=1
           west zephyr-export
 
@@ -104,7 +104,7 @@ jobs:
           path: |
             ${{ github.workspace }}/zephyrproject/modules
             ${{ github.workspace }}/zephyrproject/zephyr
-          key: zephyr-v4.4.0-host-${{ runner.os }}
+          key: zephyr-v4.4.1-host-${{ runner.os }}
 
       # Persist ccache objects across runs, per shard.  The save key is
       # per-SHA so each run writes a fresh entry; restore-keys falls
@@ -161,7 +161,7 @@ jobs:
       # pure-Python checkouts, so the gate pytest.skip'd on every PR
       # and reported green while enforcing nothing.
       #
-      # This job already west-init'd the pinned v4.4.0 tree above, so
+      # This job already west-init'd the pinned v4.4.1 tree above, so
       # the oracle is free here -- run it on shard 1 only (the matrix
       # would otherwise run it 4x identically).  ALP_REQUIRE_ZEPHYR_ORACLE=1
       # turns the gate's skip into a hard failure: this job PROMISES
@@ -187,13 +187,35 @@ jobs:
       # MB and doesn't touch the main twister-shard steps above (they stay
       # ZEPHYR_TOOLCHAIN_VARIANT=host, no SDK). Shard-1-only, same as the
       # SB_CONFIG oracle step above.
+      # metadata/toolchains.json (issue #949 item 3) is the single source
+      # for the pinned Zephyr SDK version -- scripts/check_toolchain_lock.py
+      # gates the cache key below staying keyed on it, not on the Zephyr
+      # checkout version (the two are different releases; conflating them
+      # let this cache key silently outlive an SDK bump).
+      - name: Read Zephyr SDK toolchain pin (metadata/toolchains.json)
+        if: matrix.shard == 1
+        working-directory: ${{ github.workspace }}/alp-sdk
+        run: |
+          set -euo pipefail
+          python3 -c '
+          import json
+          d = json.load(open("metadata/toolchains.json"))
+          version = d["zephyrSdk"]["version"]
+          print(f"ZEPHYR_SDK_VERSION={version}")
+          ' >> "$GITHUB_ENV"
+
+      # Cache key is keyed on the SDK VERSION (from metadata/toolchains.json),
+      # never the Zephyr checkout version above -- an SDK release and a
+      # Zephyr release are different things pinned independently; naming the
+      # wrong one here let an SDK bump silently reuse a stale cached
+      # toolchain forever.
       - name: Install ARM Zephyr SDK toolchain (for --emit kconfig contract)
         if: matrix.shard == 1
         uses: actions/cache@v5
         id: zephyr-sdk-cache
         with:
           path: ${{ github.workspace }}/zephyr-sdk
-          key: zephyr-sdk-arm-zephyr-eabi-v4.4.0-${{ runner.os }}
+          key: zephyr-sdk-arm-zephyr-eabi-${{ env.ZEPHYR_SDK_VERSION }}-${{ runner.os }}
 
       - name: west sdk install (arm-zephyr-eabi only)
         if: matrix.shard == 1 && steps.zephyr-sdk-cache.outputs.cache-hit != 'true'

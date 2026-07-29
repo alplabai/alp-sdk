@@ -980,13 +980,13 @@ def _emit_inference(
     the ALP_SDK_* parent it `depends on` in
     zephyr/kconfigs/iot-audio-inference.kconfig (issue #874 item 3):
 
-      - CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U{55,65,85}=y -- picked from
-        the SoM preset's `npu_population:` list (preferred) with a
-        capability-count fallback for SoMs that haven't declared the
-        fine-grained population block yet.  U85 carries Arm's larger
-        MAC array + TensorOptimized kernels; U55 carries the smaller
-        MAC + reference kernels; U65 is i.MX 93-only.  U55/U85 depend
-        on BACKEND_ETHOS_U_AEN; U65 depends on BACKEND_ETHOS_U_N93.
+      - CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U{55,65,85}=y -- derived from
+        the silicon capability counts (ethos_u{55,65,85}_count, resolved
+        from the SoC JSON npus[]), the single source for which NPUs the
+        part carries.  U85 carries Arm's larger MAC array + TensorOptimized
+        kernels; U55 carries the smaller MAC + reference kernels; U65 is
+        i.MX 93-only.  U55/U85 depend on BACKEND_ETHOS_U_AEN; U65 depends
+        on BACKEND_ETHOS_U_N93.
 
       - CONFIG_ALP_SDK_INFERENCE_TFLM_{NEON,HELIUM,REF}=y -- picked
         from the SoC JSON's `cores[<slice.core_id>].vector_extension`
@@ -1021,6 +1021,15 @@ def _emit_inference(
         # "assigned y but got n" warning, not fatal -- the inference
         # dispatcher falls back to ALP_SDK_INFERENCE_SW_FALLBACK there).
         "CONFIG_CPP=y",
+        # tflite-micro's headers require C++17 (e.g. tensorflow/lite/array.h
+        # uses std::conditional_t / std::decay_t).  Zephyr's C++ standard
+        # `choice STD_CPP` defaults to C++11, so a TFLM build compiled at
+        # -std=c++11 fails.  Emit C++17 here whenever inference (TFLM) is
+        # wanted so every inference project builds without hand-editing:
+        # real NPU apps previously set CONFIG_STD_CPP17=y in their own
+        # prj.conf; the emit now guarantees it on every platform (native_sim
+        # + real silicon alike), matching what the AEN NPU builds already use.
+        "CONFIG_STD_CPP17=y",
         "CONFIG_TENSORFLOW_LITE_MICRO=y",
         "CONFIG_ALP_SDK_INFERENCE_BACKEND_TFLM=y",
     ]
@@ -1046,20 +1055,13 @@ def _emit_inference(
     inference_lines.append(tflm_kernel_kc)
 
     # ---- G-1 -- per-variant Ethos-U selector ---------------------
-    # Prefer the SoM preset's `inference.npu_population[]` (richer --
-    # also names the role + paired-core); fall back to the capability
-    # counts (ethos_u{55,65,85}_count) for SoMs that haven't yet
-    # declared the per-instance block.  Both AEN401 / AEN601 / AEN801
-    # populate npu_population[]; AEN801 declares U55s there too; the
-    # i.MX 93 SoM relies on the capability-count fallback today.
+    # Which Ethos-U variants this SoM carries -- derived from the
+    # silicon-determined capability counts (ethos_u{55,65,85}_count, resolved
+    # from the SoC JSON npus[] via resolve_capabilities).  This is the single
+    # source: an on-die NPU cannot be depopulated at the SoM level, so the SoM
+    # preset does NOT restate the variant list (the SoM `inference.npu_population`
+    # field is deprecated and no longer read here).
     ethos_variants: set[str] = set()
-    npu_pop = (project.som_preset.get("inference") or {}).get("npu_population") or []
-    for entry in npu_pop:
-        v = (entry.get("variant") if isinstance(entry, dict) else "") or ""
-        v = v.lower()
-        if v in ("u55", "u65", "u85"):
-            ethos_variants.add(v)
-    # Capability-count fallback (handles SoMs without npu_population:).
     if (capabilities.get("ethos_u55_count") or 0) > 0:
         ethos_variants.add("u55")
     if (capabilities.get("ethos_u65_count") or 0) > 0:
@@ -1083,6 +1085,81 @@ def _emit_inference(
             allowed_variants = {"u55", "u85"}
         for v in sorted(ethos_variants & allowed_variants):
             inference_lines.append(f"CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_{v.upper()}=y")
+        # Real Arm Ethos-U driver config -- the silicon-proven pair (bench:
+        # E1M-AEN801/E8, person_detect U85).  BACKEND_ETHOS_U_AEN already
+        # `select ETHOS_U if DT_HAS_ARM_ETHOS_U_ENABLED` (silicon-only); these
+        # assignments complete the driver config.  The core driver compiles
+        # exactly ONE accelerator config (ETHOS_U_NPU_CONFIG is a Kconfig
+        # `choice`), so pick the single most-capable NPU this silicon carries.
+        # On native_sim (no arm,ethos-u node) ETHOS_U stays off, so the
+        # ETHOS_U*-dependent lines below no-op with a harmless Kconfig
+        # "assigned y but got n" warning (same pattern as TENSORFLOW_LITE_MICRO
+        # above).  CONFIG_ETHOS_U_DCACHE=y links the correct-signature dcache
+        # hooks (NOT CONFIG_ARM_ETHOS_U -- hal_alif's stale callback path);
+        # CONFIG_DCACHE=n is the CPU<->NPU SRAM coherence mechanism; the
+        # ethos_u driver's mutex/semaphore need a kernel heap (k_malloc).
+        # Pick the most-capable variant this silicon carries (U85 > U65 > U55),
+        # then read its MAC config from the SoC's npus[] `mac_per_cycle` -- NOT a
+        # hardcode.  The derived symbol must be a real ETHOS_U_NPU_CONFIG choice
+        # member (hal_ethos_u), else it would silently no-op -- so validate and
+        # fail loudly on a metadata mismatch.
+        if "u85" in ethos_variants:
+            variant_num = "85"
+        elif "u65" in ethos_variants:
+            variant_num = "65"
+        else:
+            variant_num = "55"
+        npu_type = f"ethos-u{variant_num}"
+        npus_of_type = [
+            n for n in (project.soc_spec.get("npus") or [])
+            if str(n.get("type", "")).lower() == npu_type and n.get("mac_per_cycle")
+        ]
+        # Size the accelerator for the NPU instance THIS slice's core actually
+        # drives, not the SoC's most-capable one.  A part can carry two U55s of
+        # the same variant but different MACs wired to different cores (E3/E5/E7:
+        # a 256-MAC high-perf U55 on M55-HP + a 128-MAC high-efficiency U55 on
+        # M55-HE -- npus[].paired_core in the SoC JSON).  A 256-MAC command
+        # stream errors a 128-MAC NPU at invoke (register-proven on E8), so a
+        # blind max() would mis-size the HE slice.  Prefer the core-paired
+        # instance; fall back to the most-capable of the variant when the chosen
+        # variant is not core-paired (the E8 U85 on the shared HG subsystem) or
+        # the SoC JSON predates paired_core.
+        paired = [n["mac_per_cycle"] for n in npus_of_type
+                  if n.get("paired_core") == slice_.core_id]
+        macs   = [n["mac_per_cycle"] for n in npus_of_type]
+        if paired:
+            mac = paired[0]
+        elif len({*macs}) > 1:
+            # This variant has >1 distinct MAC array on the SoC but none is
+            # paired_core=<this slice's core> -- a silent max() here would
+            # re-introduce the #909 mis-sizing (a 256-MAC command stream errors
+            # a 128-MAC NPU at invoke).  Fail loudly, like the _valid_accel
+            # guard below, so a missing/typo'd paired_core is caught at emit.
+            raise ValueError(
+                f"{silicon}: inference slice core {slice_.core_id!r} drives an "
+                f"{npu_type} but the SoC JSON declares MAC variants {sorted({*macs})} "
+                f"and none sets paired_core={slice_.core_id!r} -- add "
+                f"npus[].paired_core so the build sizes the accelerator for this "
+                f"core instead of guessing (see #909).")
+        else:
+            # Single MAC for this variant (or npus[]-less older spec): unambiguous.
+            mac = macs[0] if macs else 256
+        accel = f"ETHOS_U{variant_num}_{mac}"
+        _valid_accel = {
+            "ETHOS_U55_64", "ETHOS_U55_128", "ETHOS_U55_256",
+            "ETHOS_U65_128", "ETHOS_U65_256", "ETHOS_U65_512",
+            "ETHOS_U85_128", "ETHOS_U85_256", "ETHOS_U85_512",
+            "ETHOS_U85_1024", "ETHOS_U85_2048",
+        }
+        if accel not in _valid_accel:
+            raise ValueError(
+                f"{silicon}: derived Ethos-U accelerator {accel!r} "
+                f"(npus[].mac_per_cycle={mac} for {npu_type}) is not a valid "
+                f"ETHOS_U_NPU_CONFIG choice member -- check the SoC JSON npus[]")
+        inference_lines.append("CONFIG_ETHOS_U_DCACHE=y")
+        inference_lines.append(f"CONFIG_{accel}=y")
+        inference_lines.append("CONFIG_DCACHE=n")
+        inference_lines.append("CONFIG_HEAP_MEM_POOL_SIZE=65536")
     # DRP-AI3 and DEEPX DX-M1 have NO Zephyr Kconfig -- deliberately.
     # Both engines are A55/Linux-side only (DRP-AI3 via the MERA/TVM
     # userspace runtime, DX-M1 via libdxrt over the A55's PCIe); an

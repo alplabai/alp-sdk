@@ -38,12 +38,18 @@ time).
 code is the same regardless of which NPU runs the model:
 
 ```c
+/* The Ethos-U NPU is a DMA master, so its tensor arena MUST live in
+ * NPU-reachable SRAM0 -- there is no safe implicit default (arena=NULL is
+ * rejected for an NPU model).  Place it in the "SRAM0" linker region. */
+static uint8_t arena[512 * 1024] __aligned(16) __attribute__((section("SRAM0")));
+
 alp_inference_t *inf = alp_inference_open(&(alp_inference_config_t){
     .backend     = ALP_INFERENCE_BACKEND_AUTO,
     .model_data  = mobilenet_vela_tflite,
     .model_size  = sizeof(mobilenet_vela_tflite),
     .format      = ALP_INFERENCE_MODEL_VELA,
-    .arena_bytes = 512 * 1024,
+    .arena       = arena,
+    .arena_bytes = sizeof(arena),
 });
 ```
 
@@ -60,7 +66,8 @@ Backend selection:
 The `ETHOS_U` token is a single customer-facing handle that
 covers every Arm Ethos NPU variant.  The orchestrator emits
 per-variant `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U{55,65,85}=y`
-gates from the SoM preset's `inference.npu_population[]` (G-1
+gates from the silicon capability counts (`ethos_u{55,65,85}_count`,
+resolved from the SoC JSON `npus[]`) (G-1
 selector); the driver code at runtime dispatches to the right
 shim and logs the active variant once per boot
 (`alp_inference_tflm_npu_variant_name()`).  Customers don't
@@ -109,13 +116,19 @@ xxd -i vela-out/mobilenet_v2_1.0_224_quant_vela.tflite \
 #include "alp/inference.h"
 #include "mobilenet.h"   // generated above
 
+/* NPU-reachable tensor arena in the "SRAM0" linker region (the SoC dtsi
+ * sram0 node) -- the Ethos-U DMA master cannot reach M55-local memory, and
+ * an NPU model has no implicit default arena. */
+static uint8_t arena[512 * 1024] __aligned(16) __attribute__((section("SRAM0")));
+
 int main(void) {
     alp_inference_t *inf = alp_inference_open(&(alp_inference_config_t){
         .backend     = ALP_INFERENCE_BACKEND_AUTO,
         .model_data  = vela_out_mobilenet_v2_1_0_224_quant_vela_tflite,
         .model_size  = vela_out_mobilenet_v2_1_0_224_quant_vela_tflite_len,
         .format      = ALP_INFERENCE_MODEL_VELA,
-        .arena_bytes = 512 * 1024,
+        .arena       = arena,
+        .arena_bytes = sizeof(arena),
     });
     if (inf == NULL) {
         printf("[inf] open failed: last_err=%d\n", (int)alp_last_error());
@@ -165,9 +178,10 @@ cores:
 ```
 
 There is no `inference.backend:` field — the dispatcher set is
-silicon-determined. AEN801's SoM preset declares the U85 primary plus
-the U55 pair via `inference.npu_population[]` (with fallback
-capability counters), so the loader emits:
+silicon-determined. AEN801's SoM preset declares the U85 primary
+(`ethos_u_variant`); the full variant set (the U85 + the U55 pair) is
+derived from the SoC JSON `npus[]` / `capabilities.ethos_u{55,85}_count`,
+so the loader emits:
 
 ```
 CONFIG_ALP_SDK_INFERENCE_BACKEND_TFLM=y
@@ -199,7 +213,7 @@ Expected output (on real silicon):
 
 ```
 [inf] open: model 612 KiB, backend ETHOS_U (variant U55)
-[inf] tensor arena 512 KiB allocated
+[inf] tensor arena 512 KiB @ SRAM0 (caller-supplied)
 [inf] invoke: 7.2 ms (Ethos-U inference)
 [inf] top-1 class 285 score 240  -- "Egyptian cat"
 ```
@@ -209,7 +223,7 @@ falls back to CPU:
 
 ```
 [inf] open: model 612 KiB, backend CPU (Ethos-U unavailable)
-[inf] tensor arena 512 KiB allocated
+[inf] tensor arena 512 KiB @ SRAM0 (caller-supplied)
 [inf] invoke: 1240 ms (CPU inference, kernels=REF)
 [inf] top-1 class 285 score 240  -- "Egyptian cat"
 ```

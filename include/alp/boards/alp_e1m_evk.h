@@ -631,18 +631,20 @@ typedef enum {
  * strap selects address per TAS2563 datasheet table 7-3:
  *   AD0 = 10k to GND  -> 0x4D  -- U27 on the EVK
  *   AD0 = 10k to VDD  -> 0x4E  -- U28 on the EVK
- * The TAS2563 also has a hardware broadcast page-write convention,
- * but the address it would normally use (0x48) is occupied on this
- * EVK by U32 INA236B (+V_CAM0 rail).  Firmware that wants to write
- * both amps simultaneously must issue two targeted unit-address
- * writes back-to-back rather than relying on a 0x48 broadcast.
+ * The TAS2563 also has a hardware broadcast page-write convention at
+ * 0x48.  On PRE-RESPIN boards that address was occupied by U32
+ * INA236B (+V_CAM0 rail), so the broadcast was unusable; U32 was
+ * re-strapped A0=SCL -> 0x4B from the next batch, which frees 0x48.
+ * Firmware that must work on both board revisions still has to issue
+ * two targeted unit-address writes back-to-back rather than relying
+ * on a 0x48 broadcast.
  *
  * EVK_I2C_ADDR_TAS2563_LOW and EVK_I2C_ADDR_TAS2563_HIGH are defined
  * in the generated routes header. */
 
 /* Six INA236 high-side current-shunt monitors -- one per power
  * rail -- on I2C0.  TI's INA236A variant occupies 0x40..0x43 and
- * the INA236B variant occupies 0x44..0x47, so all six fit on one
+ * the INA236B variant occupies 0x48..0x4B, so all six fit on one
  * bus despite each variant only having 2 strap bits.
  *
  * EVK ref-des per the user-confirmed schematic:
@@ -657,12 +659,13 @@ typedef enum {
  *
  * INA236A variants occupy 0x40..0x43 (A0 strap = GND/VS/SDA/SCL);
  * INA236B variants occupy 0x48..0x4B with the same A0 encoding.
- * Confirmed against the EVK schematic strap labels.  The B-bank
- * addresses 0x48..0x4A do NOT collide with TAS2563 unit addresses
- * (0x4D / 0x4E) -- they would collide with TAS2563's broadcast
- * address if and only if the TAS2563s are programmed for a
- * broadcast write at 0x48; firmware writers must avoid that
- * sequence on this EVK or use targeted unit-address writes.
+ * Confirmed against the EVK schematic strap labels.  The three
+ * B-bank addresses actually in use (0x49 / 0x4A / 0x4B) collide with
+ * nothing: not the TAS2563 unit addresses (0x4D / 0x4E), and not its
+ * broadcast address (0x48), which the U32 re-strap freed.  On
+ * PRE-RESPIN boards U32 sat at 0x48 and did shadow that broadcast --
+ * see the TAS2563 block above for the two-write workaround that
+ * remains necessary if you support both revisions.
  *
  * EVK_I2C_ADDR_INA236_3V3, _1V8, _VIO, _VCAM0, _VCAM1 and _5V are
  * defined in the generated routes header. */

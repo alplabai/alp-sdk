@@ -29,7 +29,9 @@ except ImportError:
 from alp_cli.validator import iter_schema_errors
 from alp_project import resolve_memory_map
 
-from .models import BoardProject, IpcEntry, OrchestratorError, Slice, StorageEntry
+from . import sdk_compat
+from .models import (BoardProject, IpcEntry, OrchestratorError,
+                     SdkRevisionUnsupported, Slice, StorageEntry)
 from .partition import _known_flash_devices
 from .paths import BOARD_SCHEMA, METADATA_ROOT, REPO
 from .topology import _default_os_from_core_type
@@ -236,6 +238,59 @@ def _resolve_board(
     Returns (sku, hw_rev, som_preset, silicon, soc_spec, board_preset,
     board_name, board_hw_rev).
     """
+    return _resolve_board_impl(project, metadata_root)
+
+
+def _check_sdk_supports_hw_rev(
+    metadata_root: Path,
+    *,
+    sku: str,
+    som_hw_rev: Optional[str],
+    board_name: Optional[str],
+    board_hw_rev: Optional[str],
+    board_preset: Optional[dict[str, Any]],
+) -> None:
+    """Refuse when the running SDK is outside a requested revision's range.
+
+    `metadata/sdk_version.yaml` has always documented this refusal -- and
+    the matching `exit code 3` in `scripts/validate_board_yaml.py` -- but
+    nothing implemented it, so an upgraded SDK silently emitted for a
+    revision it no longer supported (#1019).
+
+    Deliberately NOT a check that the revision exists or is usable: an
+    unknown or `status: reserved` revision is a different failure with a
+    different message, tracked at #1025.
+    """
+    sdk_version = sdk_compat.read_sdk_version(metadata_root)
+    if sdk_version is None:
+        return
+
+    try:
+        from alp_project import _sku_family
+        family_dir = _sku_family(sku)
+    except (ImportError, ValueError):
+        # An unrecognised SKU is _resolve_board's error to raise, not
+        # this gate's to pre-empt with a worse message.
+        family_dir = None
+
+    reason = sdk_compat.check(
+        sdk_version,
+        som_revision=sdk_compat.family_revision(
+            metadata_root, family_dir, som_hw_rev),
+        som_label=f"SoM {sku} hw_rev {som_hw_rev}",
+        board_revision_entry=sdk_compat.board_revision(
+            board_preset, board_hw_rev),
+        board_label=f"board {board_name} hw_rev {board_hw_rev}",
+    )
+    if reason:
+        raise SdkRevisionUnsupported(
+            f"SDK {sdk_version} does not support this hardware revision: "
+            f"{reason}. Pin an SDK inside the declared range, or set a "
+            f"hw_rev this SDK supports.")
+
+
+def _resolve_board_impl(project: dict[str, Any],
+                        metadata_root: Path) -> tuple[Any, ...]:
     sku = project["som"]["sku"]
     hw_rev = project["som"].get("hw_rev")
 
@@ -671,6 +726,14 @@ def load_board_yaml(path: Path, *,
 
     (sku, hw_rev, som_preset, silicon, soc_spec, board_preset,
      board_name, board_hw_rev) = _resolve_board(project, metadata_root)
+
+    _check_sdk_supports_hw_rev(
+        metadata_root,
+        sku=sku,
+        som_hw_rev=hw_rev or som_preset.get("default_hw_rev"),
+        board_name=board_name,
+        board_hw_rev=board_hw_rev,
+        board_preset=board_preset)
 
     cores, ipc_entries = _validate_topology_cores(
         project, som_preset, soc_spec, sku, silicon, board_preset,

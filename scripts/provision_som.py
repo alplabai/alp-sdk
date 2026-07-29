@@ -138,6 +138,7 @@ def _alloc_serial(cfg: Cfg, bundle: dict):
 def _eeprom(cfg: Cfg, bundle: dict):
     """Build the 128-byte manifest (real, host-side). The i2c write+verify is HW-gated."""
     tmp = Path(tempfile.mkdtemp(prefix="provision_"))
+    # write-text-newline-exempt: tempdir board.yaml, never in the repo tree
     (tmp / "board.yaml").write_text(
         f"som:\n  sku: {bundle['sku']}\n  hw_rev: {bundle['hw_rev']}\n", encoding="utf-8")
     manifest = tmp / "eeprom-manifest.bin"

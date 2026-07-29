@@ -101,6 +101,23 @@ def test_validate_metadata_passes_on_real_tree():
     assert r.returncode == 0, r.stdout + r.stderr
     assert "metadata/chips/" in r.stdout  # chips are now being checked
 
+def test_emit_pending_warnings_peripherals_unverified(capsys):
+    # #936: a listed key present in `peripherals` -> one WARN, no typo WARN.
+    import validate_metadata as vm
+    vm._emit_pending_warnings(Path("x.json"),
+                               {"peripherals": {"pdm": 4}, "peripherals_unverified": ["pdm"]})
+    out = capsys.readouterr().out
+    assert "peripherals_unverified -> ['pdm']" in out
+    assert "likely a typo" not in out
+
+def test_emit_pending_warnings_peripherals_unverified_typo(capsys):
+    # A listed key absent from `peripherals` -> the typo WARN fires too.
+    import validate_metadata as vm
+    vm._emit_pending_warnings(Path("x.json"),
+                               {"peripherals": {"pdm": 4}, "peripherals_unverified": ["pmd_lp"]})
+    out = capsys.readouterr().out
+    assert "references key(s) not present in peripherals: ['pmd_lp'] -- likely a typo" in out
+
 def test_reference_blocks_present_and_valid():
     for name in ("button_led", "pdm_mic"):
         assert (REPO / f"metadata/blocks/{name}.yaml").is_file()

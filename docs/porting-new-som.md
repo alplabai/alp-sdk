@@ -222,9 +222,11 @@ artifact per silicon SKU.
 | `cores[].type`                  | Used by codegen + by `<alp/system_ipc.h>` ARM core checks.                                                                                              |
 | `capabilities`                  | Drives `include/alp/soc_caps.h` boolean macros (`ALP_SOC_HELIUM_MVE`, `ALP_SOC_NEON`, etc.) via `scripts/gen_soc_caps.py`.                              |
 | `peripherals`                   | Counts per peripheral kind; drives `ALP_SOC_*_COUNT` ceilings in the same generated header.  `{}` is legal but trips the `pending_*` warning.          |
+| `peripherals_unverified`        | Array of `peripherals` keys whose count has no datasheet/DFP/HWRM citation in this file (#936) — e.g. a value copied from a sibling part and never independently confirmed. `scripts/gen_soc_caps.py` prints an `UNVERIFIED` comment above the SoC's block in `soc_caps.h`; `validate_metadata.py` warns if a listed key doesn't exist in `peripherals`. Use this — listing every key, if that's every key — even when the WHOLE block is inherited wholesale from a sibling (e.g. E5 from E7): `pending_reference_manual_ingestion: true` means something narrower, "`peripherals: {}` / counts default to zero," which is false for a fully-populated-but-uncited block and produces a wrong `validate_metadata.py` WARN. `pending_reference_manual_ingestion` is for a file that genuinely has no populated counts yet (e.g. i.MX93, still mostly `{}` pending its RM pass); a file can combine both flags when most of the block is genuinely pending but a handful of keys are individually grounded — in that case `peripherals_unverified: []` on the grounded keys tells `gen_soc_caps.py` NOT to also mark them unverified via the wholesale fallback. |
 | `variants[].order_code`         | Vendor order code; **must match** the SoM preset's `silicon_variant:` field for the loader to resolve memory layout from this entry's `sram_banks_kb`. |
 | `variants[].alp_module_skus`    | Reverse-lookup hint; lets the validator catch a SoM SKU that references this variant by silicon ref alone (no `silicon_variant:` declared).            |
-| `pending_alif_datasheet: true`  | Surfaces a non-fatal `WARN` line from `validate_metadata.py` so reviewers know the values are preliminary.                                              |
+| `variants[].debug`              | Debug-probe identity (`jlink_device`, `jlink_flash_device`, `pyocd_target`, `openocd_config`) consumed by `alp-sdk-vscode` to generate a working launch config.  Every key optional; an absent key is the correct, publishable "unknown" state.  Populate each key **only** from the owning tool's own list or a working in-tree invocation (SEGGER's device list / `pyocd list --targets` / an actual `board.cmake` or bench script) — never by pattern-extending a sibling part's string to an unverified one.  #987 shipped a first draft that broke this: it read a *SETOOLS flasher* argument as a J-Link device name and then extended that wrong string to every part by naming convention.  A plausible-looking guess fails at the probe, not at `validate_metadata.py`, so nothing catches it until a customer's launch does. |
+| `pending_alif_datasheet: true`  | Declarative only — nothing in `scripts/` reads this key today (unlike `pending_reference_manual_ingestion`, which `validate_metadata.py` and `gen_soc_caps.py` both act on). It documents intent for reviewers reading the JSON directly; it does not produce a WARN or any other gate output. See #1027 for the general problem of docs asserting behaviour that doesn't exist. |
 
 **Rules of thumb:**
 
@@ -289,10 +291,11 @@ on_module:
 # carries once the datasheet lands.
 inference:
   preferred_backend:    ethos_u
+  # Primary variant only.  Which Ethos-U instances the part carries (and their
+  # subtype / MAC / paired core) is silicon-determined -- the SDK derives it
+  # from the SoC JSON npus[] / capabilities.ethos_uNN_count -- so the preset
+  # does not enumerate them.  (The old `npu_population:` list is deprecated.)
   ethos_u_variant:      u85
-  npu_population:
-    - { variant: u85, role: NPU-HP, paired_with: M55-HP }
-    - { variant: u55, role: NPU-HE, paired_with: M55-HE }
 
 # SoM-side extensions to silicon capabilities.  The loader merges
 # this on top of soc_spec.capabilities at codegen time (see

@@ -72,7 +72,8 @@ The portable bus + GPIO + analog surfaces.  Start here.
 | Directory                    | What it shows                                                            |
 |------------------------------|--------------------------------------------------------------------------|
 | `hello-world`                | Minimal "first program" -- no peripherals; just a printf heartbeat.       |
-| `gpio-button-led`            | GPIO open + configure (input + output); the canonical first build.       |
+| `blink`                      | Toggle the RGB-red LED pad as plain GPIO -- start here, before anything else. |
+| `gpio-button-led`            | GPIO open + configure (input + output); button + LED via the `button_led` block. |
 | `i2c-scanner`                | Walk an I2C bus + report every device that ACKs.                         |
 | `i2c-master`                 | Read a known I2C device (TMP112) at a known address.                     |
 | `i2c-slave`                  | I2C target (slave) mode -- register-file pattern over `alp_i2c_target_open` callbacks. |

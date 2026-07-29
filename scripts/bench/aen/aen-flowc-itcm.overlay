@@ -1,0 +1,31 @@
+/*
+ * Flow-C-ONLY AEN801 (E8, M55-HE) devicetree overlay -- retargets the ROM
+ * region to ITCM for a J-Link RAM-run. This is the other half of the
+ * Flow C ITCM retarget; the Kconfig half lives in
+ * scripts/bench/aen/aen-flowc-itcm.conf. BOTH halves are required --
+ * the conf fragment alone still links into MRAM (CONFIG_FLASH_BASE_ADDRESS
+ * stays 0x80000000, FLASH region stays several hundred KB) because it only
+ * stops Zephyr from DERIVING the link offset from the DT code-partition;
+ * it does not move the code-partition itself. This overlay is what moves
+ * it.
+ *
+ * NOT for Flow A/D (production MRAM boot): layering this on a Flow A/D
+ * build relinks the app into ITCM instead of its intended MRAM slot0 and
+ * produces a broken shipping image.
+ *
+ * Bench-proven: applying exactly this overlay out-of-tree made all six
+ * apps -- the five aen-cc3501e- variants (ble-gatt, bringup,
+ * companion-tour, gatt-register, gpio) and aen-eeprom-manifest -- link
+ * into the 256 KB ITCM at base=0x0 and run.
+ *
+ * Apply via -DEXTRA_DTC_OVERLAY_FILE, layered with the conf half via
+ * -DEXTRA_CONF_FILE. See scripts/bench/aen/build.sh and
+ * docs/aen-bench-bringup.md (Flow C) for the exact invocation.
+ */
+
+/ {
+	chosen {
+		zephyr,flash = &itcm; /* path-ref form -- the pointer form makes FLASH_SIZE=0 and overflows the link */
+		/delete-property/ zephyr,code-partition;
+	};
+};

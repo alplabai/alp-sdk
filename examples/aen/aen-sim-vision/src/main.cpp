@@ -28,8 +28,10 @@
  *
  * Studio reads the frame buffer + console back over the sim sockets.
  *
- * The buffers sit at fixed SRAM0 addresses the alif_ensemble_e8 sim model
- * maps -- they match the E1M-AEN801 profile `tan renode` resolves.
+ * The buffers sit at fixed DTCM addresses the alif_ensemble_e8 sim model
+ * maps -- they match the E1M-AEN801 profile `tan renode` resolves, and only
+ * exist on the M55-HP (1 MiB DTCM); the M55-HE's DTCM ends at 0x20040000,
+ * short of all five, so this app is gated to the HP core (CMakeLists.txt).
  * Swapping the (sine) model for a real net is a model.cpp
  * drop-in; the pipelines are unchanged.
  */
@@ -43,7 +45,7 @@
 
 #include "model.hpp"
 
-/* Sim contract -- fixed SRAM0 buffers (see the E1M-AEN801 descriptor). */
+/* Sim contract -- fixed M55-HP DTCM buffers (see the E1M-AEN801 descriptor). */
 #define SIM_FRAME          ((volatile uint8_t *)0x20041000)  /* camera in      */
 #define SIM_FRAME_LEN      1024
 #define SIM_DOORBELL       ((volatile uint32_t *)0x20042000) /* camera trigger */

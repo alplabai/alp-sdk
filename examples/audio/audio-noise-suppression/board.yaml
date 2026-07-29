@@ -10,9 +10,9 @@
 # on V2N-M1, or the Renesas DRP-AI3 path on V2H once the §D.lib
 # loader resolves a HW backend).
 #
-# Customer workflow: copy this directory, change `som.sku` to
+# Customer workflow: `tan init --from-example audio/audio-noise-suppression`, change `som.sku` to
 # your V2N / V2H MPN, edit `preset:` if you're on a custom
-# board, and `west build`.  CMakeLists.txt invokes
+# board, and `tan build`.  CMakeLists.txt invokes
 # scripts/alp_project.py at configure time + layers the
 # generated alp.conf over prj.conf via EXTRA_CONF_FILE.
 

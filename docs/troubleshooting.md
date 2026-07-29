@@ -44,16 +44,6 @@ third entry).  Common slip-ups:
 
 Full schema reference: [`docs/board-config-schema.md`](board-config-schema.md).
 
-### `alp_project: SDK <V> is older than SoM hw_rev '<R>' minimum <M>`
-
-Your `som.hw_rev` declares a rev that needs a newer SDK than this
-checkout.  Either:
-
-* Update the SDK (`west update`) to a version >= `<M>`, OR
-* Pick an older `som.hw_rev` whose `min_sdk_version` window covers
-  the current SDK.  The available revs for your family are listed
-  in `metadata/e1m_modules/<family>/hw-revisions.yaml`.
-
 ### `west: command not found` / `pip install west` fails
 
 The Zephyr meta-tool needs Python 3.10+.  On macOS:
@@ -84,6 +74,39 @@ export ZEPHYR_BASE="$PWD/zephyr"
 # OR:
 west zephyr-export
 ```
+
+### `CMake Error: ... You probably need to select a different build tool` (missing `ninja`)
+
+```
+CMake Error: CMake was unable to find a build program corresponding to "Ninja".  CMAKE_MAKE_PROGRAM is not set.  You probably need to select a different build tool.
+CMake Error: CMAKE_C_COMPILER not set, after EnableLanguage
+CMake Error: CMAKE_CXX_COMPILER not set, after EnableLanguage
+```
+
+Despite what the first line suggests, the fix is not to pick a
+different build tool -- `ninja` is Zephyr's build generator on every
+host.  `scripts/bootstrap.sh` / `bootstrap.ps1` and `python -m alp_cli
+doctor` both check for it and FAIL with an install command when it's
+missing; if you hit the raw CMake error above instead, check whether
+you resolved a `[!] ninja` line from `tan doctor --build` -- it still
+rates a missing `ninja` a warning rather than a failure
+(`alplabai/tan-cli#103`), so it's easy to leave unresolved and hit
+this error anyway.  Installing it clears all three lines above (the
+two compiler errors are downstream of the same missing generator):
+
+```bash
+# Linux (Debian / Ubuntu)
+sudo apt install -y ninja-build
+
+# macOS
+brew install ninja
+
+# Windows (PowerShell)
+winget install -e --id Ninja-build.Ninja
+```
+
+See [`docs/cross-platform-setup.md`](cross-platform-setup.md) §2.1 /
+§3.2 / §4.1 for the base-toolchain block this belongs to.
 
 ### Compile error: `'alp_<thing>_t' undeclared`
 
@@ -230,7 +253,7 @@ bus id matching `ALP_E1M_I2C0` on your board.
 
 ### `pr-twister.yml` fails with `west-commands: invalid in module.yml`
 
-You're using a Zephyr release older than the SDK's pin.  Bump to v4.4.0 per
+You're using a Zephyr release older than the SDK's pin.  Bump to v4.4.1 per
 [`docs/zephyr-version-policy.md`](zephyr-version-policy.md).
 
 ### `clang-format` CI reports diffs you can't reproduce

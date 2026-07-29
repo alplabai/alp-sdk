@@ -11,11 +11,40 @@ project.
 
 `tan` is a standalone, independently-versioned, public Rust binary
 ([`alplabai/tan-cli`](https://github.com/alplabai/tan-cli)); install it
-separately (needs a Rust toolchain / rustup):
+separately. The automatic installer needs no Rust toolchain:
 
 ```bash
-cargo install --git https://github.com/alplabai/tan-cli --bin tan
+curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"  # install.sh already made this permanent in your shell rc; needed once more in THIS shell
 ```
+
+Or grab a prebuilt, per-platform binary directly from a release tag, e.g.
+Linux x86_64 — use the `-musl` asset, not `-gnu`: the `-gnu` build requires
+`GLIBC_2.30`+ and hard-fails (`version 'GLIBC_2.30' not found`) on distros
+older than roughly Ubuntu 20.04/Debian 11, while `-musl` is fully static and
+runs on any distro/libc:
+
+```bash
+curl -fsSL -o tan \
+  https://github.com/alplabai/tan-cli/releases/latest/download/tan-x86_64-unknown-linux-musl
+chmod +x tan && sudo mv tan /usr/local/bin/tan
+```
+
+Building from source instead needs Rust 1.86+ (get it from
+[rustup.rs](https://rustup.rs)) plus a system C toolchain
+(`build-essential` on Debian/Ubuntu, `gcc`/`gcc-c++` on Fedora/RHEL -- see
+[`docs/cross-platform-setup.md`](cross-platform-setup.md) §2.1):
+
+```bash
+git clone https://github.com/alplabai/tan-cli && cd tan-cli
+cargo install --path crates/tan-cli --locked
+```
+
+None of the three install paths above pin a `tan` version (`install.sh`
+tracks the mutable `main` ref and installs `releases/latest`; the
+source path clones `main`'s HEAD) -- this is deliberate: all three are
+tan-cli's own recommended install methods, and staying on its latest
+release is the point until a project needs otherwise.
 
 Two execution paths live behind the one binary:
 
@@ -25,10 +54,18 @@ Two execution paths live behind the one binary:
   **plans-only** for this surface: `tan` consumes
   `alp_orchestrate --emit build-plan` / `--emit system-manifest` and
   runs `west` / `bitbake` / `cmake` per slice itself.
+* **Host preflight** -- `tan doctor` and `tan doctor --build` are
+  native Rust checks implemented in tan-cli itself, not forwarded
+  anywhere; their check lists are unrelated to alp-sdk's own separate
+  Python preflight (`python -m alp_cli doctor`, aka "`alp doctor`" in
+  older docs) -- see [below](#tan-doctor).
 * **Everything else** (`init`, `new-som`, `validate`, `model`,
-  `doctor`, `monitor`, `explain`, `faultdecode`, `emit`, `run`) --
-  `tan` forwards to the SDK's Python backend as `python -m alp_cli
-  <sub>`.  No `alp` binary is installed anywhere -- `pyproject.toml`
+  `monitor`, `explain`, `faultdecode`, `generate`, `run`) --
+  `tan` forwards to the SDK's Python backend, most verbs as `python -m
+  alp_cli <sub>`; `tan generate` is the one exception, invoking
+  `scripts/alp_project.py` directly rather than through `alp_cli` (see
+  [below](#tan-generate)).
+  No `alp` binary is installed anywhere -- `pyproject.toml`
   registers only `alp-mcp`; `alp_cli` is a library `tan` shells out to,
   never a user-installed command of its own.  The bootstrap scripts
   (`scripts/bootstrap.sh` on Linux/macOS/WSL2, `scripts/bootstrap.ps1`
@@ -54,8 +91,9 @@ Two front doors, two different jobs -- pick by what you're doing:
 
 | You are... | Use |
 |---|---|
-| Scaffolding a project, validating `board.yaml`, compiling a model, checking your host, opening a serial console, decoding a diagnostic/fault, or running a quick single-image native_sim/single-board loop | `tan init` / `tan new-som` / `tan validate` / `tan model` / `tan doctor` / `tan monitor` / `tan explain` / `tan faultdecode` / `tan run` |
-| Inspecting a generated artefact without building (Kconfig fragment, DTS overlay, system manifest, build plan) | `tan emit` (or `west alp-emit` from a west workspace) |
+| Scaffolding a project, validating `board.yaml`, compiling a model, checking your host, opening a serial console, decoding a diagnostic/fault, or running a quick single-image native_sim/single-board loop | `tan init` / `tan new-som` / `tan validate` / `tan model` / `tan doctor --build` / `tan monitor` / `tan explain` / `tan faultdecode` / `tan run` |
+| Inspecting a board-derived Zephyr/CMake/Yocto/DTS config artefact without building (`zephyr-conf`, `dts-overlay`, `cmake-args`, `yocto-conf`, `native-sim-overlay`, `carrier-netlist`) | `tan generate --target <mode>` |
+| Inspecting an orchestrator-owned artefact without building (system manifest, build plan, Kconfig menu, IPC contract header, DTS reservations/partitions, storage mounts, TF-M sysbuild overlay) | `west alp-emit <mode>` from a west workspace |
 | Building, flashing, sizing, bundling, cleaning, or Renode-booting a project | `tan build` / `tan flash` / `tan size` / `tan image` / `tan clean` / `tan renode` -- see [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli) |
 | Scripting the surviving west-centric maintenance commands | `west alp-migrate` (board.yaml schema migration) / `west alp-lock` (dependency lockfile) / `west alp-quality` (quality-task registry) / `west alp-emit` (generated-artefact subset) |
 
@@ -65,47 +103,78 @@ Rules of thumb:
   plan-based, multi-slice build surface and every scaffold / validate
   / inspect / host-tool verb (ADR
   [0020](adr/0020-sdk-owns-build-execution.md), end-state B).  The
-  non-build verbs (`emit`, `validate`, `doctor`, `explain`,
-  `faultdecode`, `init`, `new-som`, `monitor`, `model`, `run`) forward
-  to the Python backend; alp-sdk itself never runs them directly.
+  non-build verbs (`generate`, `validate`, `explain`, `faultdecode`,
+  `init`, `new-som`, `monitor`, `model`, `run`) forward to the Python
+  backend; alp-sdk itself never runs them directly.  `tan doctor` is
+  the one exception -- a native Rust check, not a forwarded verb (see
+  [below](#tan-doctor)).
 * For build/flash: `tan` consumes the SDK's
   `alp_orchestrate --emit build-plan` (and seeds its own
   `system-manifest.yaml` / `.alp-build-state.json` from
   `--emit system-manifest`), then drives `west` / `bitbake` / `cmake`
   per slice, owns skip-vs-fail policy, and programs hardware.  `tan
   build` (`--native` is the default, explicit opt-in) materialises the
-  plan and runs each slice's build command directly, whatever
-  `board.yaml` targets -- native_sim or real silicon; it never runs
-  the produced binary itself (that's `tan run`).  See
+  plan and runs each slice's build command directly for the real SoM
+  `board.yaml` targets; it never runs the produced binary itself
+  (that's `tan run`).  See
   [heterogeneous-builds.md](heterogeneous-builds.md) for the per-core
   fan-out the plan describes.
-* `tan emit` is a SUPERSET of `west alp-emit`: every artefact either
-  front door can generate is reachable from `tan emit` (one catalog,
-  listed in the `tan emit` verb reference below).  `west alp-emit`
-  remains for west-centric scripting and
-  exposes the orchestrator's ADR-0014 subset.  Same emitters
-  underneath either way -- the two can never produce different output
-  for the same mode.
+* `tan generate` and `west alp-emit` cover **disjoint** artefact sets,
+  not a superset/subset pair: `tan generate --target <mode>` reaches
+  only the six board-derived config targets `alp_project.py` owns
+  (`zephyr-conf`, `dts-overlay`, `native-sim-overlay`, `cmake-args`,
+  `yocto-conf`, `carrier-netlist`); `west alp-emit <mode>` reaches only
+  the eight orchestrator-owned targets (`system-manifest`,
+  `ipc-contract-h`, `dts-reservations`, `dts-partitions`,
+  `storage-mounts-c`, `tfm-sysbuild-conf`, `build-plan`, `kconfig`).
+  Neither front door reaches `hw-info-h`, `west-libraries`,
+  `composed-route-table`, `scaffold`, `zephyr-board`, or `os-topology`
+  -- those remaining `alp_project.py` targets have no `tan` or `west`
+  front door at all; reach them by running the SDK's own Python CLI
+  directly (`python -m alp_cli emit <mode>`, which still exposes the
+  full old catalog).  Same emitters underneath either way -- no front
+  door can ever produce different output for the same mode.  Three of
+  `alp_project.py`'s 15 modes (`system-manifest`, `dts-reservations`,
+  `ipc-contract-h`) are the same artefacts `west alp-emit` already
+  reaches -- `alp_project.py` just re-dispatches them to the same
+  orchestrator emitters (see `emit.py`'s `PROJECT_EMIT_MODES` /
+  `ORCHESTRATOR_EMIT_MODES` overlap). They are **deliberately
+  orchestrator-internal**, not a `tan` gap: `tan` already gets them
+  indirectly (`tan build` seeds `system-manifest.yaml` from `--emit
+  system-manifest`; the other two feed the Zephyr build itself, not a
+  user command). Of the six with no front door at all, `scaffold` and
+  `composed-route-table` are also intentional, not gaps -- see
+  "Six modes, no front door: which ones are gaps?" below. The other
+  four (`hw-info-h`, `west-libraries`, `os-topology`, `zephyr-board`)
+  have no `tan` companion and no design reason not to -- filed against
+  `tan-cli` (see the same section).
 
 ## Verb reference
 
 ### `tan init` -- scaffold a new project
 
 ```bash
-tan init my-app --som E1M-AEN801 --preset e1m-evk --peripherals uart,gpio
-tan init my-app          # interactive: pick SoM / preset / peripherals
+tan init --name my-app --som E1M-AEN801 --template minimal-app --sdk-root <path-to-alp-sdk> --non-interactive
+tan init                     # interactive: prompts for every field
 ```
 
-Copies the hello-world template, rewrites `board.yaml` for the chosen
-SoM SKU + board preset, and seeds the optional starter `peripherals:`
-list.  Omit any flag to be prompted interactively.
+`tan init` takes options only -- there is no positional `NAME`
+argument.  Scaffolds a new project directory (named by `--name`),
+rewrites `board.yaml` for the chosen SoM SKU + template, and resolves
+the alp-sdk checkout the project should build against via
+`--sdk-root`.  Omit a flag to be prompted interactively, or add
+`--non-interactive` (a global flag, not a `tan init` option -- see
+`tan --help`) to fail instead of prompting, which is what CI wants.
 
 | Option | Meaning |
 |---|---|
-| `NAME` (argument) | New project directory (must not exist) |
+| `--name` | New project directory name |
 | `--som` | SoM SKU, e.g. `E1M-AEN801` |
-| `--preset` | Board preset from `metadata/boards/`, e.g. `e1m-evk` |
-| `--peripherals` | Comma-separated starter peripherals (`uart,gpio,i2c,spi,pwm`) |
+| `--template` | Project template id, e.g. `minimal-app` (the default), `sensor-starter` |
+| `--sdk-root` | Path to the alp-sdk checkout the scaffolded project should resolve |
+| `--destination` | Where to write the project |
+| `--cores` | Comma-separated `id[:os]` core map for a heterogeneous project (OS inferred from the id when omitted) |
+| `--project`, `--board-yaml`, `--from-example`, `--target`, `--all`, `--format`, `--preview`, `--force`, `--quiet`, `--no-color`, `--verbose` | See `tan init --help` for the full reference -- not restated here to avoid a second copy drifting from the CLI. |
 
 ### `tan new-som` -- scaffold metadata for a new SoM port
 
@@ -213,56 +282,139 @@ PYTHONPATH=scripts python3 -m alp_orchestrate --input board.yaml --emit system-m
 See [heterogeneous-builds.md](heterogeneous-builds.md) for the
 per-core fan-out the plan describes.
 
-### `tan emit` -- print one generated artefact (no build)
+### `tan generate` -- materialise a board-derived config artefact (no build) {#tan-generate}
 
 ```bash
-tan emit zephyr-conf                   # the per-core Zephyr fragment
-tan emit system-manifest               # the full-system manifest
-tan emit hw-info-h --output hw_info.h  # write instead of stdout
-tan emit zephyr-conf --core m55_he     # scope per-core modes to one core
-tan emit build-plan                    # the orchestrator's build plan (JSON)
-tan emit kconfig --core m55_he         # board-scoped Kconfig symbol menu (needs ZEPHYR_BASE)
-tan emit scaffold --template minimal --sku E1M-V2N101  # new-project files, no board.yaml needed
+tan generate --target zephyr-conf         # the per-core Zephyr fragment
+tan generate --target dts-overlay         # board DTS overlay (bus aliases + pin array)
+tan generate --target cmake-args          # per-core -D CMake argument list
+tan generate --target yocto-conf          # per-core Yocto local.conf fragment
+tan generate --target native-sim-overlay  # native_sim GPIO overlay
+tan generate --target carrier-netlist     # Studio-facing carrier nets + BOM JSON
+tan generate --all                        # every target above, one run
 ```
 
-Read-only: shows exactly what a consuming tool (CMake, Yocto, the
-IDE, or `tan`) would see.  This is the ONE catalog of every generated
-artefact -- `tan emit` reaches everything `scripts/alp_project.py
---emit` and `west alp-emit` can produce, delegating each mode to the
-single implementation that owns it (never a fork):
+Writes files, not stdout -- there is no `--output` flag.  Each target
+lands at a fixed, conventional path (`--force` to overwrite an existing
+one):
 
-| Mode | Artefact | Emitted by |
-|---|---|---|
-| `zephyr-conf` | Per-core Zephyr `alp.conf` Kconfig fragment | `alp_project.py` |
-| `cmake-args` | Per-core `-D` CMake argument list | `alp_project.py` |
-| `yocto-conf` | Per-core `local.conf` fragment | `alp_project.py` |
-| `dts-overlay` | Board DTS overlay (bus aliases + pin array) | `alp_project.py` |
-| `native-sim-overlay` | native_sim overlay: `alp,pin-array` on `zephyr,gpio-emul` | `alp_project.py` |
-| `hw-info-h` | Build-time `hw_info.h` macro header | `alp_project.py` |
-| `west-libraries` | `west.yml` fragment for `libraries:` deps | `alp_project.py` |
-| `system-manifest` | Full-system manifest (slices, boot order) | orchestrator |
-| `dts-reservations` | DTS reserved-memory overlay (cross-core carve-outs) | orchestrator |
-| `ipc-contract-h` | Cross-core IPC contract header | orchestrator |
-| `os-topology` | Per-core natural-vs-effective OS facts | orchestrator |
-| `composed-route-table` | JSON route-table dump (demonstrator) | `alp_project.py` |
-| `carrier-netlist` | Studio-facing carrier nets + BOM JSON handoff | `alp_project.py` |
-| `scaffold` | New-project `{path, contents}[]` envelope for a template (`--template`/`--sku`) | `alp_project.py` |
-| `dts-partitions` | DTS fixed-partitions overlay (`storage:` entries) | orchestrator |
-| `storage-mounts-c` | Static C storage mount table | orchestrator |
-| `tfm-sysbuild-conf` | TF-M sysbuild child-image overlay (`security.psa:`) | orchestrator |
-| `build-plan` | Per-slice build plan, JSON (IDE / CI / `tan` consumers) | orchestrator |
-| `kconfig` | Board-scoped, user-settable Kconfig symbol menu for one `--core <id>` (the vscode `prj.conf` LSP's live feed) | orchestrator (**workspace-dependent** -- see below) |
+| Target | Written to |
+|---|---|
+| `zephyr-conf` | `build/generated/alp.conf` |
+| `dts-overlay` | `build/generated/alp.overlay` |
+| `cmake-args` | `build/generated/alp-cmake-args.txt` |
+| `yocto-conf` | `build/generated/alp-yocto.conf` |
+| `native-sim-overlay` | `boards/native_sim_native_64.overlay` (the app's own source tree, not `build/`) |
+| `carrier-netlist` | `build/generated/carrier-netlist.json` |
+
+This replaces the retired `tan emit` command (a positional `tan emit
+<mode>`, one flat catalog printed to stdout, an `--output` flag), but
+it is a **narrower** catalog, not a rename: `tan generate --target`
+only reaches the six `alp_project.py`-owned, per-core-config targets
+above.  The rest of the old `tan emit` catalog has no `tan` front door
+at all:
+
+| Mode | Artefact | Owned by | Reachable via |
+|---|---|---|---|
+| `zephyr-conf` | Per-core Zephyr `alp.conf` Kconfig fragment | `alp_project.py` | `tan generate` |
+| `cmake-args` | Per-core `-D` CMake argument list | `alp_project.py` | `tan generate` |
+| `yocto-conf` | Per-core `local.conf` fragment | `alp_project.py` | `tan generate` |
+| `dts-overlay` | Board DTS overlay (bus aliases + pin array) | `alp_project.py` | `tan generate` |
+| `native-sim-overlay` | native_sim overlay: `alp,pin-array` on `zephyr,gpio-emul` | `alp_project.py` | `tan generate` |
+| `carrier-netlist` | Studio-facing carrier nets + BOM JSON handoff | `alp_project.py` | `tan generate` |
+| `system-manifest` | Full-system manifest (slices, boot order) | orchestrator | `west alp-emit` |
+| `dts-reservations` | DTS reserved-memory overlay (cross-core carve-outs) | orchestrator | `west alp-emit` |
+| `ipc-contract-h` | Cross-core IPC contract header | orchestrator | `west alp-emit` |
+| `dts-partitions` | DTS fixed-partitions overlay (`storage:` entries) | orchestrator | `west alp-emit` |
+| `storage-mounts-c` | Static C storage mount table | orchestrator | `west alp-emit` |
+| `tfm-sysbuild-conf` | TF-M sysbuild child-image overlay (`security.psa:`) | orchestrator | `west alp-emit` |
+| `build-plan` | Per-slice build plan, JSON (IDE / CI / `tan` consumers) | orchestrator | `west alp-emit` |
+| `kconfig` | Board-scoped, user-settable Kconfig symbol menu for one `--core <id>` (the vscode `prj.conf` LSP's live feed) | orchestrator (**workspace-dependent** -- see below) | `west alp-emit`, `tan kconfig` |
+| `hw-info-h` | Build-time `hw_info.h` macro header | `alp_project.py` | `python -m alp_cli emit` only |
+| `west-libraries` | `west.yml` fragment for `libraries:` deps | `alp_project.py` | `python -m alp_cli emit` only |
+| `composed-route-table` | JSON route-table dump (demonstrator) | `alp_project.py` | `python -m alp_cli emit` only |
+| `scaffold` | New-project `{path, contents}[]` envelope for a template (`--template`/`--sku`) | `alp_project.py` | `python -m alp_cli emit` only |
+| `zephyr-board` | Per-core Zephyr board tree (`--core` + `--output <dir>`) | `alp_project.py` | `python -m alp_cli emit` only |
+| `os-topology` | Per-core natural-vs-effective OS facts | orchestrator, via `alp_project.py`'s dispatch shim | `python -m alp_cli emit` only |
+
+`os-topology`'s logic still lives in the orchestrator (`emit_os_topology`),
+but it is no longer one of `alp_orchestrate`'s own `--emit` choices
+(`python -m alp_orchestrate --emit os-topology` now fails, exit 2,
+"invalid choice") and was never in `west alp-emit`'s mode list either --
+it is only dispatched through `alp_project.py`'s v2 shim, so
+`python -m alp_cli emit os-topology` is its only surviving front door.
+The six `python -m alp_cli emit`-only rows
+have no `tan` or `west` front door at all; `python -m alp_cli emit
+<mode>` still exposes the full old catalog end to end, including
+`--output`, `--core`, `--template`, and `--sku` -- it is the SDK's own
+unforwarded Python CLI, run straight from a checkout
+(`PYTHONPATH=scripts python3 -m alp_cli emit --help`).
+
+#### Six modes, no front door: which ones are gaps?
+
+"No `tan` or `west` front door" isn't one category -- each of the six
+was checked against its actual consumer (not guessed), per the emit
+surface classification (ADR [0020](adr/0020-sdk-owns-build-execution.md)
+amendment 6):
+
+- **Gaps -- filed against `tan-cli`, no design reason for the absence:**
+  `hw-info-h` and `west-libraries` are board-derived, per-project
+  config artefacts exactly like the six `tan generate` already covers
+  (`hw-info-h` bakes `board.yaml` identifiers into a header an app
+  `#include`s and checks at runtime -- see the `hw-info-h` row in the
+  emit-modes table above;
+  `west-libraries` produces the `west.yml` fragment a project's own
+  manifest imports) -- both are consumed by the same CI jobs
+  (`cross-platform-zephyr.yml`, `pr-metadata-validate.yml`) as the six
+  that DO have a `tan generate` target, with no reason the seventh and
+  eighth don't. `os-topology` (per-core natural-vs-effective OS facts,
+  issue [#95](https://github.com/alplabai/alp-sdk/issues/95)) is richer
+  than `system-manifest`'s flat `slices[].os` -- it also carries
+  `core_type`, `runtime_class`, `overridden`, and `allowed_os`, exactly
+  the shape a heterogeneous-SoM configurator UI needs and
+  `system-manifest` cannot provide -- but no `tan` or IDE consumer
+  reads it yet (confirmed: zero hits for `os-topology`/`osTopology` in
+  `alplabai/alp-sdk-vscode`). `zephyr-board` (per-core Zephyr board
+  tree, issue #523) is the next documented step after `tan new-som` in
+  the SoM-porting walkthrough ([porting-new-som.md](porting-new-som.md)
+  §10) -- a real front door exists for scaffolding a new SoM's
+  *metadata*, none for generating its *board tree*, so a porting
+  partner falls off `tan` mid-workflow. All four filed:
+  [`tan-cli`#113](https://github.com/alplabai/tan-cli/issues/113)
+  (`hw-info-h`), [`tan-cli`#114](https://github.com/alplabai/tan-cli/issues/114)
+  (`west-libraries`), [`tan-cli`#115](https://github.com/alplabai/tan-cli/issues/115)
+  (`os-topology`), [`tan-cli`#116](https://github.com/alplabai/tan-cli/issues/116)
+  (`zephyr-board`).
+- **Intentional -- consumed by `tan` already, just not live:**
+  `scaffold`'s output is vendored byte-for-byte into the `tan` binary
+  at release time (`crates/tan-core/src/wizard/vendored/`,
+  `include_str!`'d at compile time -- no filesystem or subprocess call
+  at `tan init`/`tan scaffold` runtime), pinned to an SDK release tag
+  and checked for drift by `tests/parity/scaffold_byte_parity.py`. It
+  has no *live* front door by design (`tan init` is deliberately
+  SDK-checkout-free). [`tan-cli`#14](https://github.com/alplabai/tan-cli/issues/14)
+  tracks extending the vendored set to the wizard's remaining
+  hand-written templates -- not a new gap, don't re-file it.
+- **Intentional -- no product consumer, kept for its own value:**
+  `composed-route-table` is explicitly a "demonstrator" in its own
+  owning code (`scripts/alp_project_emit/bom_netlist.py`) and doc
+  table (above) -- it exists to give
+  `tests/scripts/test_emit_composed_route_table.py` a way to assert on
+  the board × SoM pad-route composition algorithm's JSON shape, and it
+  was run by hand once as a maintainer verification step during a
+  hardware-revision fix (see `docs/portability-matrix.md`'s A2-1). No
+  build, IDE, or `tan` verb consumes its output; it earns its keep as
+  regression coverage for the composition logic, not as a shipped
+  artefact. Not filed -- there's nothing to file.
 
 | Option | Meaning |
 |---|---|
-| `--input` | Path to `board.yaml` (default: nearest one upward) |
-| `--output` | Write to this path instead of stdout |
-| `--core` | Scope per-core modes to one core ID |
-| `--build-root` | Build root used for `build-plan` slice paths |
-| `--template` | Template catalog id (`metadata/templates/catalog-v1.json`); required for `scaffold` |
-| `--sku` | Target SoM SKU; required for `scaffold` (must be one of the template's `supported.som_skus`) |
+| `--target` | Which of the six targets to generate |
+| `--all` | Generate all six targets in one run |
+| `--force` | Overwrite an existing output file |
+| `--project`, `--board-yaml`, `--sdk-root`, `--format`, `--verbose`, `--quiet`, `--no-color`, `--non-interactive`, `--ci` | See `tan generate --help` for the full reference -- not restated here to avoid a second copy drifting from the CLI. |
 
-`west alp-emit` exposes the orchestrator subset of the same catalog
+`west alp-emit` exposes the orchestrator subset of the old catalog
 (`system-manifest`, `ipc-contract-h`, `dts-reservations`,
 `dts-partitions`, `storage-mounts-c`, `tfm-sysbuild-conf`,
 `build-plan`, `kconfig`) for west-centric scripting.
@@ -274,13 +426,16 @@ this repo's own metadata alone, with no Zephyr toolchain on disk --
 see `scripts/check_emit_snapshots.py`, the byte-golden gate that pins
 all of them). `--emit kconfig` is deliberately the first exception:
 it needs a bootstrapped Zephyr workspace (`ZEPHYR_BASE`, the SDK's
-pinned v4.4.0) because only the real Kconfig solver knows which
+pinned v4.4.1) because only the real Kconfig solver knows which
 symbols are user-promptable for a given board -- the SDK doesn't (and
 won't) re-implement Kconfig's dependency/visibility engine itself.
 
 ```bash
 python -m alp_orchestrate --input board.yaml --emit kconfig --core m55_he
-# also: tan emit kconfig --core m55_he / west alp-emit kconfig --core m55_he
+# also: west alp-emit kconfig --core m55_he
+# also: tan kconfig --core m55_he         (its own top-level tan verb --
+#                                           NOT tan generate, which has no
+#                                           front door for this target)
 ```
 
 Output shape:
@@ -313,11 +468,13 @@ Zephyr version -- runs against a real AEN core in the
 Zephyr-bootstrapped `pr-twister` CI job (`.github/workflows/
 pr-twister.yml`), never in the hermetic snapshot gate.
 
-Unblocks tan-cli [#35](https://github.com/alplabai/tan-cli/issues/35)
-(`tan kconfig`, wrapping this emit in `Envelope<KconfigData>`) and a
-follow-up alp-sdk-vscode change to point the `prj.conf` LSP's symbol
-menu at this live feed instead of its hand-vendored snapshot -- both
-out of scope for this change.
+Landed in tan-cli [#35](https://github.com/alplabai/tan-cli/issues/35)
+as the top-level `tan kconfig --core <id>` verb (wraps this emit in
+`Envelope<KconfigData>` as planned; confirmed against the installed
+`tan 0.3.1`).  A follow-up alp-sdk-vscode change to point the
+`prj.conf` LSP's symbol menu at this live feed instead of its
+hand-vendored snapshot is a separate repo's change, out of scope
+here.
 
 ### `tan validate` -- check a board.yaml
 
@@ -368,21 +525,84 @@ Compiles every `models:` entry declared in `board.yaml` into a
 Ethos-U, DRP-AI for RZ/V2N, ...).  See the model-pipeline docs under
 `docs/tutorials/` for the end-to-end inference flow.
 
-### `tan doctor` -- host environment preflight
+### `tan doctor` -- debug-readiness preflight {#tan-doctor}
+
+`tan doctor` has two distinct modes behind one subcommand -- neither
+takes `--strict`, and both use `[+]` (pass) / `[!]` (warn) / `[x]`
+(fail) markers, not `[PASS]`/`[WARN]`/`[FAIL]`.  `alp-sdk`'s own
+separate Python preflight, `python -m alp_cli doctor`, is a third,
+unrelated command with its own check list -- see the note at the end
+of this section.
 
 ```bash
-tan doctor                     # human-readable PASS/WARN/FAIL report
-tan doctor --json              # machine-readable
-tan doctor --strict            # WARNs also fail the exit code
+tan doctor                     # debug readiness (below)
+tan doctor --format json       # machine-readable
 ```
 
-Strictly hardware-free: checks Python / west / CMake / Ninja / dtc /
-gperf / imgtool / host compiler / J-Link presence, the Zephyr pin
-(read live from `west.yml`), the workspace venv, `ZEPHYR_BASE`, the
-Zephyr SDK, plus Windows-specific traps (git `core.autocrlf`,
-long-path support).  Exit 0 = ready to build; every FAIL/WARN comes
-with a remediation hint.  Run it first whenever a build machine
-misbehaves.
+Diagnoses whether a target/server combination is ready for a debug
+session -- checks `workspaceRoot`, `sdkRoot`, `boardYaml`, a `python`
+interpreter presence probe (no `.python-version` pin comparison),
+`codeLLDBExtension`, `lldb`, and `sdkProvenance`.  See `tan doctor
+--help` for the full flag reference (including `--fix`, `--target`,
+and `--all`) -- not restated here to avoid a second copy drifting from
+the CLI.  Example:
+
+```
+  tan doctor  native-host · none
+
+  [+]  workspaceRoot       /work/alp-sdk
+  [+]  sdkRoot             /work/alp-sdk
+  [x]  boardYaml           /work/alp-sdk/board.yaml
+  [+]  python              Interpreter probe: python3
+  [+]  codeLLDBExtension   vadimcn.vscode-lldb is installed.
+  [!]  lldb                No local LLDB executable was found on PATH.
+  [+]  sdkProvenance       alp-sdk 0.13.0 @ 08230793
+
+  5 passed · 1 warning · 1 failed
+```
+
+### `tan doctor --build` -- build-readiness preflight
+
+```bash
+tan doctor --build                       # human-readable report
+tan doctor --build --format json         # machine-readable
+```
+
+This is the check to run first whenever a build machine misbehaves:
+checks `sdk`, `boardYaml`, `workspace`, `westResolved`,
+`zephyrVersion` (the Zephyr pin, read live from `west.yml`), `west`,
+`cmake`, `ninja`, `zephyrSdk`, `bitbake`, `bmaptool`,
+`vendorToolchain`, and `sdkProvenance`.  Exit 0 = ready to build;
+every `[!]`/`[x]` comes with a `fix` remediation hint.  Example:
+
+```
+  tan doctor --build  zephyr · yocto · baremetal
+
+  [+]  sdk               alp-sdk at /work/alp-sdk
+  [x]  boardYaml         board.yaml not found — run `tan init` or pass `--board-yaml <path>`
+  [+]  workspace         Zephyr workspace at /work
+  [+]  westResolved      west resolved
+  [+]  zephyrVersion     Zephyr v4.4 matches the SDK pin
+  [+]  west              west is available.
+  [+]  cmake             cmake is available.
+  [!]  ninja             ninja not found on PATH — needed for Zephyr builds.
+  [!]  zephyrSdk         Zephyr SDK toolchain not detected (ZEPHYR_SDK_INSTALL_DIR unset).
+  [!]  bitbake           bitbake not found on PATH — needed for Yocto builds.
+  [!]  bmaptool          bmaptool not found; Yocto .wic flash falls back to dd (slower).
+  [!]  vendorToolchain   Baremetal needs a vendor toolchain (Alif/Renesas/NXP), per SoC family.
+  [+]  sdkProvenance     alp-sdk 0.13.0 @ 08230793
+
+  7 passed · 5 warnings · 1 failed
+```
+
+Note: `python -m alp_cli doctor` (alp-sdk's own separate Python
+preflight -- `pyproject.toml` deliberately ships no `alp`
+console-script) is a different tool again, with the fuller check list
+(Python / west / CMake / Ninja / dtc / gperf / imgtool / host
+compiler / J-Link presence, the workspace venv, `ZEPHYR_BASE`,
+Windows-specific traps) and its own `--strict` / `--json` flags and
+`[PASS]`/`[WARN]`/`[FAIL]` markers.  It predates the `tan` CLI
+migration and is not what either `tan doctor` invocation above runs.
 
 ### `tan monitor` -- serial console
 
@@ -441,12 +661,16 @@ it emits build plans only.
 | Variable | Effect |
 |---|---|
 | `ALP_SDK_ROOT` | Explicit path to the alp-sdk checkout; otherwise the CLI locates the repo it was installed (editable) from |
-| `ZEPHYR_BASE` | The Zephyr tree checked by `tan doctor` |
+| `ZEPHYR_BASE` | The Zephyr tree checked by `tan doctor --build` |
 
-`tan emit` exports `ALP_SDK_ROOT` and puts `<sdk>/scripts` on
-`PYTHONPATH` for its sub-processes -- the same wiring `west alp-emit`
-uses, so a CLI-invoked orchestrator run behaves identically to a west
-one.  `tan` reads the plan's own `env` / `envAppendPath` entries
+`west alp-emit` exports `ALP_SDK_ROOT` and puts `<sdk>/scripts` on
+`PYTHONPATH` for its sub-process, so a west-invoked orchestrator run
+behaves identically to running `alp_orchestrate` directly.  `tan
+generate` does its own SDK-root resolution and invokes
+`<sdk_root>/scripts/alp_project.py` by its full path with plain
+`--input`/`--emit`/`--output` arguments instead -- no env wiring, since
+the script is addressed directly rather than imported as a module.
+`tan` separately reads the plan's own `env` / `envAppendPath` entries
 (sourced from the SDK's `--emit build-plan`) to set up
 `EXTRA_ZEPHYR_MODULES` and `PYTHONPATH` for the slices it builds --
 see [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli).
@@ -459,7 +683,7 @@ see [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli).
   build` fronts.
 - [board-config-schema.md](board-config-schema.md) -- the `board.yaml`
   field reference `tan validate` enforces.
-- [troubleshooting.md](troubleshooting.md) -- when `tan doctor`
+- [troubleshooting.md](troubleshooting.md) -- when `tan doctor --build`
   isn't enough.
 - [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli) -- the
   standalone executor's own docs (`tan build` / `flash` / `size` /

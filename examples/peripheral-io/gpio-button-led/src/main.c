@@ -14,7 +14,7 @@
  * Per-board resolution:
  *   E1M EVK:
  *     BOARD_PIN_ENCODER_SW = EVK_PIN_ENCODER_SW  = ALP_E1M_GPIO_IO4
- *     BOARD_PIN_LED_RED    = EVK_PIN_LED_RED      = ALP_E1M_GPIO_PWM3
+ *     BOARD_PIN_LED_RED    = EVK_PIN_LED_RED      = ALP_E1M_GPIO_PWM0
  *       (the RGB-red PWM pad claimed as a digital GPIO; the E1M EVK
  *       has no plain GPIO LED, so the LED rides a PWM pad as GPIO)
  *   E1M-X EVK:
@@ -49,9 +49,13 @@ int main(void)
 	                                             .active_low_button = true,
 	                                         });
 	if (s != ALP_OK) {
-		printf("[gpio] init failed: status=%d\n", (int)s);
-		printf("[gpio] done\n");
-		return 0;
+		/* Deliberately NOT "[gpio] done": that string is the twister
+		 * harness's success marker (testcase.yaml).  A failure path
+		 * that still printed it would make the test pass while the
+		 * button/LED never opened -- which is exactly the hole this
+		 * example must not have. */
+		printf("[gpio] failed: init status=%d\n", (int)s);
+		return 1;
 	}
 
 	/* Quick lifecycle exercise: toggle 4 times and read the button
@@ -59,12 +63,22 @@ int main(void)
 	for (int i = 0; i < 4; i++) {
 		bool on = (i & 1);
 		s       = alp_button_led_set(&bl, on);
+		if (s != ALP_OK) {
+			printf("[gpio] failed: set status=%d\n", (int)s);
+			alp_button_led_deinit(&bl);
+			return 1;
+		}
 		printf("[gpio] led=%d status=%d\n", (int)on, (int)s);
 		alp_delay_ms(50);
 	}
 
 	bool pressed = false;
 	s            = alp_button_led_is_pressed(&bl, &pressed);
+	if (s != ALP_OK) {
+		printf("[gpio] failed: is_pressed status=%d\n", (int)s);
+		alp_button_led_deinit(&bl);
+		return 1;
+	}
 	printf("[gpio] is_pressed -> status=%d pressed=%d\n", (int)s, (int)pressed);
 
 	alp_button_led_deinit(&bl);

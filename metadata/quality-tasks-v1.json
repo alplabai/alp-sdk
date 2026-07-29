@@ -17,6 +17,34 @@
       "ci": null
     },
     {
+      "id": "board-target-tree-parity",
+      "description": "Every SoM preset's topology.<core>.board: target resolves to a real zephyr/boards/alp/ tree, or is a declared not-yet-supported entry (issue #999).",
+      "runner": "check-script",
+      "script": "scripts/check_board_target_tree_parity.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "bootstrap-manifest",
+      "description": "Keep metadata/bootstrap.json in lockstep with west.yml, both bootstrap scripts, and each CI workflow's own Zephyr pin.",
+      "runner": "check-script",
+      "script": "scripts/check_bootstrap_manifest.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": null
+    },
+    {
       "id": "build-plan",
       "description": "Validate a build plan against the public alp CLI / alp-sdk-vscode contract.",
       "runner": "check-script",
@@ -127,6 +155,20 @@
       "ci": "pr-doc-drift.yml:doc-drift"
     },
     {
+      "id": "doxyfile-single-source",
+      "description": "No second Doxyfile-shaped heredoc regrows in .github/workflows/** or scripts/** while docs/doxygen/Doxyfile is the committed single source (#970).",
+      "runner": "check-script",
+      "script": "scripts/check_doxyfile_single_source.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "doxygen-coverage",
       "description": "Doxygen-coverage audit -- walks include/alp/*.h and flags every undocumented public symbol.",
       "runner": "check-script",
@@ -201,6 +243,20 @@
       "description": "Byte-for-byte `--emit` snapshot regression gate.",
       "runner": "check-script",
       "script": "scripts/check_emit_snapshots.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "example-board-overlay-parity",
+      "description": "Every example board.yaml core declared via cores.<core>.app: has a matching boards/ overlay wherever the example ships qualified overlays (issue #1009).",
+      "runner": "check-script",
+      "script": "scripts/check_example_board_overlay_parity.py",
       "gate": true,
       "profiles": [
         "pr",
@@ -365,6 +421,20 @@
       "ci": "pr-metadata-validate.yml:validate"
     },
     {
+      "id": "som-topology-parity",
+      "description": "Every SoM preset's topology.<core> key set matches its resolved SoC's cores[].id set, and every preset's silicon: key resolves to a real metadata/socs/ spec (issue #997).",
+      "runner": "check-script",
+      "script": "scripts/check_som_topology_parity.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "stub-issues",
       "description": "CI gate: every src/backends/**/*_stub.c file must reference an open GitHub issue.",
       "runner": "check-script",
@@ -421,6 +491,18 @@
       "ci": null
     },
     {
+      "id": "tan-docs-drift",
+      "description": "Advisory: every `tan` subcommand + docs/cli.md-tabulated flag alp-sdk's docs name must exist and be listed in `--help` output for a real, installed `tan` binary.",
+      "runner": "check-script",
+      "script": "scripts/check_tan_docs_surface.py",
+      "gate": false,
+      "profiles": [
+        "full"
+      ],
+      "output": "none",
+      "ci": "tan-docs-drift.yml:tan-docs-drift"
+    },
+    {
       "id": "template-catalog",
       "description": "Validate metadata/templates/catalog-v1.json against the public template contract and drift-check every record against the real tree.",
       "runner": "check-script",
@@ -445,6 +527,20 @@
       ],
       "output": "none",
       "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "toolchain-lock",
+      "description": "Keep metadata/toolchains.json (the pinned Zephyr SDK release) in lockstep with Zephyr's own SDK_VERSION and each CI workflow's own SDK reference.",
+      "runner": "check-script",
+      "script": "scripts/check_toolchain_lock.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": null
     },
     {
       "id": "vendor-ext-tags",
@@ -473,6 +569,20 @@
       ],
       "output": "none",
       "ci": "pr-doc-drift.yml:doc-drift"
+    },
+    {
+      "id": "write-text-newline",
+      "description": "Every scripts/ and firmware/ write_text() of a repo-tree text artifact passes newline=\"\" (else Windows CRLF-rewrites it silently on write).",
+      "runner": "check-script",
+      "script": "scripts/check_write_text_newline.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
     },
     {
       "id": "zephyr-conf-parity",

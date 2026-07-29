@@ -236,7 +236,7 @@ def _clang_format(path: Path) -> None:
 def main() -> int:
     entries = extract_entries(HEADER.read_text(encoding="utf-8"))
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(emit(entries), encoding="utf-8")
+    OUT.write_text(emit(entries), encoding="utf-8", newline="")
     _clang_format(OUT)
     print(f"wrote {OUT.relative_to(REPO)} ({len(OUT.read_text().splitlines())} lines)")
     return 0

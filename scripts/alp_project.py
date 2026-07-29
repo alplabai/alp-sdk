@@ -120,7 +120,7 @@ from alp_project_emit import (  # noqa: F401  (compat re-export)
 def _write_or_print(out: str, target: Path | None) -> int:
     if target is not None:
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(out, encoding="utf-8")
+        target.write_text(out, encoding="utf-8", newline="")
         try:
             rel = target.relative_to(Path.cwd())
         except ValueError:
@@ -290,7 +290,7 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
             _, fname = relpath.split("/", 1)
             target = args.output / fname
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(content, encoding="utf-8")
+            target.write_text(content, encoding="utf-8", newline="")
             print(f"alp_project: wrote {target} ({len(content)} bytes)",
                   file=sys.stderr)
         return 0
@@ -310,16 +310,20 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
                 v2_peripherals=v2_peripherals,
                 v2_core_id=args.core,
                 v2_core_os=slice_.os,
+                v2_core_ids=[args.core],
             )
         else:
             union: set[str] = set()
-            for slice_ in project.cores.values():
+            zephyr_core_ids: list[str] = []
+            for core_id, slice_ in project.cores.items():
                 if slice_.os in ("zephyr", "baremetal"):
                     union.update(slice_.peripherals)
+                    zephyr_core_ids.append(core_id)
             out = _emit_dts_overlay(
                 project_v1_shaped, project.som_preset,
                 project.board_preset,
                 v2_peripherals=sorted(union),
+                v2_core_ids=zephyr_core_ids,
             )
         return _write_or_print(out, args.output)
 

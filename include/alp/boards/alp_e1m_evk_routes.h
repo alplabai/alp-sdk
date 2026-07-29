@@ -52,8 +52,8 @@ extern "C" {
 #define EVK_PIN_SDIO_MUX_SEL   ALP_E1M_GPIO_IO21  /**< SDIO 74LVC157 S; 0 = M.2 E-key SDIO, 1 = microSD slot. */
 #define EVK_PIN_PCIE_MUX_PD    ALP_E1M_GPIO_IO22  /**< Drive HIGH to power down all four PCIe lane muxes. */
 #define EVK_PIN_PCIE_MUX_SEL   ALP_E1M_GPIO_IO23  /**< Selects M-key vs E-key routing on the PCIe lane muxes. */
-#define EVK_PIN_LED_RED        ALP_E1M_GPIO_PWM3  /**< RGB LED red -- the PWM3 pad driven as a digital GPIO. */
-#define EVK_PIN_LED_GREEN      ALP_E1M_GPIO_PWM0  /**< RGB LED green -- the PWM0 pad driven as a digital GPIO. */
+#define EVK_PIN_LED_GREEN      ALP_E1M_GPIO_PWM3  /**< RGB LED green -- the PWM3 pad driven as a digital GPIO. */
+#define EVK_PIN_LED_RED        ALP_E1M_GPIO_PWM0  /**< RGB LED red -- the PWM0 pad driven as a digital GPIO. */
 #define EVK_PIN_LED_BLUE       ALP_E1M_GPIO_PWM1  /**< RGB LED blue -- the PWM1 pad driven as a digital GPIO. */
 
 /* ------------------------------------------------------------------ */
@@ -71,11 +71,11 @@ extern "C" {
 /* PWM channels (ALP_E1M_PWM<N> -> board-side feature) */
 /* ------------------------------------------------------------------ */
 
-#define EVK_PWM_LED_GREEN ALP_E1M_PWM0  /**< RGB LED green; schematic-wired via PWM0 (non-contiguous with R/B). */
+#define EVK_PWM_LED_RED   ALP_E1M_PWM0  /**< RGB LED red; schematic-wired via PWM0 (non-contiguous with G/B). */
 #define EVK_PWM_LED_BLUE  ALP_E1M_PWM1  /**< RGB LED blue channel. */
 #define EVK_ARD_PWM1      ALP_E1M_PWM1  /**< Arduino header CK_PWM1; shares E1M_PWM1 with LED_BLUE. */
 #define EVK_ARD_PWM4      ALP_E1M_PWM2  /**< Arduino header CK_PWM4 = E1M_PWM2. */
-#define EVK_PWM_LED_RED   ALP_E1M_PWM3  /**< RGB LED red channel. */
+#define EVK_PWM_LED_GREEN ALP_E1M_PWM3  /**< RGB LED green channel. */
 #define EVK_ARD_PWM2      ALP_E1M_PWM4  /**< Arduino header CK_PWM2 = E1M_PWM4. */
 #define EVK_ARD_PWM3      ALP_E1M_PWM5  /**< Arduino header CK_PWM3 = E1M_PWM5. */
 #define EVK_MB_PWM        ALP_E1M_PWM6  /**< mikroBUS PWM pin. */
@@ -131,7 +131,7 @@ extern "C" {
 #define EVK_I2C_ADDR_TCAL9538_PCIE 0x71u  /**< U37 PCIe I/O expander (A0=1, A1=0). Handles the I2C-mux SEL + PCIe slot RST/WAKE/CLKREQ signals + M2E_ALERT. */
 #define EVK_I2C_ADDR_TCA6408A_MAIN 0x20u  /**< U35 main I/O expander, TCA6408ARSVR alternative (R112 fitted, R145 DNP). PCA9538-register-compatible, so chips/tcal9538 drives it unchanged. BENCH-CONFIRMED 2026-06-16: read back config=0xFF + a live input port. */
 #define EVK_I2C_ADDR_TAS2563_LOW   0x4Du  /**< U27 smart amp (AD0 = 10k to GND). */
-#define EVK_I2C_ADDR_TAS2563_HIGH  0x4Eu  /**< U28 smart amp (AD0 = 10k to VDD). The TAS2563 broadcast address (0x48) is occupied on this EVK by U32 INA236B (+V_CAM0 rail, pre-respin) -- firmware that wants to write both amps must issue two targeted unit-address writes. */
+#define EVK_I2C_ADDR_TAS2563_HIGH  0x4Eu  /**< U28 smart amp (AD0 = 10k to VDD). The TAS2563 broadcast address (0x48) was occupied on PRE-RESPIN boards by U32 INA236B (+V_CAM0 rail); the U32 re-strap to 0x4B from the next batch freed it -- firmware that supports both board revisions must still issue two targeted unit-address writes rather than a 0x48 broadcast. */
 #define EVK_I2C_ADDR_INA236_3V3    0x40u  /**< U21 INA236A, +3V3 rail (20 mOhm shunt, 4.0 A max). A0 = GND. */
 #define EVK_I2C_ADDR_INA236_1V8    0x41u  /**< U31 INA236A, +1V8 rail (20 mOhm shunt, 4.0 A max). A0 = V+. */
 #define EVK_I2C_ADDR_INA236_VIO    0x42u  /**< U33 INA236A, +VIO rail (50 mOhm shunt, 1.6 A max). A0 = SDA. */

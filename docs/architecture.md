@@ -326,6 +326,7 @@ in [`docs/test-plan.md`](test-plan.md), not duplicated here.
 | PWM              | `alp/pwm.h`         | `pwm_*`                                       |
 | ADC              | `alp/adc.h`         | `adc_*` + `adc_dt_spec`                       |
 | DAC              | `alp/dac.h`         | `dac_*` (GD32 IO-MCU bridge on V2N)           |
+| I3C              | `alp/i3c.h`         | `i3c_*` (`i3c_dw.c` on Alif Ensemble E8)      |
 | Counter / Timer  | `alp/counter.h`     | `counter_*`                                   |
 | Quadrature decoder | `alp/counter.h`   | `sensor_*` (SENSOR_CHAN_ROTATION)             |
 | I2S / SAI        | `alp/i2s.h`         | `i2s_*` + memory slab                         |

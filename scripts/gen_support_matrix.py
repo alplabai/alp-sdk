@@ -225,7 +225,7 @@ def main() -> int:
         return 0
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(text, encoding="utf-8")
+    OUT.write_text(text, encoding="utf-8", newline="")
     print(f"wrote {OUT.relative_to(REPO)}  ({len(rows)} SoMs)")
     return 0
 

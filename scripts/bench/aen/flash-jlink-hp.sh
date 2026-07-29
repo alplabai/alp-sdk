@@ -37,8 +37,39 @@ bench_require_setools || exit $?
 SET="$SETOOLS_DIR"
 OBJ="$(bench_tool_prefix)" || exit $?
 JLINK="$(bench_jlink_exe)" || exit $?
+# See ram-run.sh for why the selector is conditional on JLINK_SN.
+JLINK_ARGS=("$JLINK")
+[ -n "${JLINK_SN:-}" ] && JLINK_ARGS+=(-SelectEmuBySN "$JLINK_SN")
 NAME=$(basename "$BD")
 BIN="$BD/zephyr/zephyr.bin"
+
+# 0. SAFETY GATE -- confirm we are talking to the AEN E8, not some other probe
+# on the bench, BEFORE any MRAM write. Same DPIDR gate as
+# flash-jlink-mramxip.sh (see that script for the full rationale): JLINK_SN
+# narrows probe choice but does not itself prove which board answered. Hard
+# ABORT, not a warning -- read-only connect first, no writes until confirmed.
+cat > /tmp/hp-preflight.jlink <<EOF
+si SWD
+speed $JLINK_SPEED
+device $JLINK_DEVICE_READ
+connect
+exit
+EOF
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/hp-preflight.jlink \
+  > /tmp/hp-preflight.out 2>&1 || true
+if grep -qi "$GD32_DPIDR" /tmp/hp-preflight.out; then
+  echo "!! ABORT: probe reports SW-DP IDR 0x$GD32_DPIDR -- that is the V2N-M1" >&2
+  echo "   GD32, NOT the AEN E8. Wrong probe selected (JLINK_SN='${JLINK_SN:-}')." >&2
+  echo "   Refusing to write MRAM. See /tmp/hp-preflight.out." >&2
+  exit 4
+fi
+if ! grep -qi "$AEN_DPIDR" /tmp/hp-preflight.out; then
+  echo "!! ABORT: expected AEN E8 SW-DP IDR 0x$AEN_DPIDR not seen on connect." >&2
+  echo "   Refusing to write MRAM -- check JLINK_SN / wiring / probe selection." >&2
+  cat /tmp/hp-preflight.out >&2
+  exit 4
+fi
+echo ">>> DPIDR gate OK: probe confirmed AEN E8 (0x$AEN_DPIDR)" >&2
 
 # 1. stage the HP image + an M55_HP signed-ATOC config (cpu_id/loadAddress are
 #    the HP core's, the one structural difference from the HE flash configs).
@@ -73,7 +104,7 @@ r
 g
 exit
 EOF
-$JLINK -nogui 1 -CommanderScript /tmp/hp-write.jlink 2>&1 | tee /tmp/hp-write.out | \
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/hp-write.jlink 2>&1 | tee /tmp/hp-write.out | \
   grep -iE "could not connect|fail|error|Verify|O\.K\.|Reset" | head -20
 if grep -qi "Could not connect to the target device" /tmp/hp-write.out; then
   echo "!! $JLINK_DEVICE_FLASH profile FAILED to connect -- flow D not unlocked on this probe."
@@ -95,7 +126,7 @@ Sleep 400
 mem32 $HB, 0x4
 exit
 EOF
-$JLINK -nogui 1 -CommanderScript /tmp/hp-read.jlink 2>/tmp/hp-read.err > /tmp/hp-read.out || true
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/hp-read.jlink 2>/tmp/hp-read.err > /tmp/hp-read.out || true
 echo "----- $NAME M55-HP SRAM0 beacon (magic / CPUID / VTOR / heartbeat) -----"
 grep -iE "^$(printf '%08X' $BEACON)| = " /tmp/hp-read.out | head
 echo "(heartbeat re-read below should differ from beacon[3] above = HP actively running)"

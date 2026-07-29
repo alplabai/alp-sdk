@@ -26,8 +26,10 @@
 
 #if defined(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E3)
 /* alif:ensemble:e3 */
+/* UNVERIFIED (count not backed by a primary source): pdm, pdm_lp */
 #define ALP_SOC_REF_STR                 "alif:ensemble:e3"
 #define ALP_SOC_I2C_COUNT               5
+#define ALP_SOC_I3C_COUNT               1
 #define ALP_SOC_SPI_COUNT               5
 #define ALP_SOC_UART_COUNT              9
 #define ALP_SOC_I2S_COUNT               5
@@ -65,9 +67,11 @@
 
 #elif defined(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E4)
 /* alif:ensemble:e4 */
+/* UNVERIFIED (count not backed by a primary source): pdm, pdm_lp */
 #define ALP_SOC_REF_STR                 "alif:ensemble:e4"
-#define ALP_SOC_I2C_COUNT               5
-#define ALP_SOC_SPI_COUNT               5
+#define ALP_SOC_I2C_COUNT               6
+#define ALP_SOC_I3C_COUNT               2
+#define ALP_SOC_SPI_COUNT               6
 #define ALP_SOC_UART_COUNT              9
 #define ALP_SOC_I2S_COUNT               5
 #define ALP_SOC_PDM_COUNT               8
@@ -104,8 +108,10 @@
 
 #elif defined(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E5)
 /* alif:ensemble:e5 */
+/* UNVERIFIED (count not backed by a primary source): adc_12bit, adc_24bit, can_fd, comparator_hs, cpi_lp, cpi_parallel, dac_12bit, dma_general_32ch, dpi_parallel, encoder_quadrature, ethernet, gpio_18v, gpio_18v_or_33v, i2c, i2c_lp, i2s, i2s_lp, i3c, mipi_csi2, mipi_dsi, pdm, pdm_lp, rtc, sdio, spi, spi_lp, timer_32bit, timer_lp, uart, uart_lp, usb_2, watchdog */
 #define ALP_SOC_REF_STR                 "alif:ensemble:e5"
 #define ALP_SOC_I2C_COUNT               5
+#define ALP_SOC_I3C_COUNT               1
 #define ALP_SOC_SPI_COUNT               5
 #define ALP_SOC_UART_COUNT              9
 #define ALP_SOC_I2S_COUNT               5
@@ -143,9 +149,11 @@
 
 #elif defined(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E6)
 /* alif:ensemble:e6 */
+/* UNVERIFIED (count not backed by a primary source): pdm, pdm_lp */
 #define ALP_SOC_REF_STR                 "alif:ensemble:e6"
-#define ALP_SOC_I2C_COUNT               5
-#define ALP_SOC_SPI_COUNT               5
+#define ALP_SOC_I2C_COUNT               6
+#define ALP_SOC_I3C_COUNT               2
+#define ALP_SOC_SPI_COUNT               6
 #define ALP_SOC_UART_COUNT              9
 #define ALP_SOC_I2S_COUNT               5
 #define ALP_SOC_PDM_COUNT               8
@@ -156,7 +164,7 @@
 #define ALP_SOC_CAN_COUNT               1
 #define ALP_SOC_CAN_FD_SUPPORTED        1
 #define ALP_SOC_RTC_COUNT               1
-#define ALP_SOC_WDT_COUNT               3
+#define ALP_SOC_WDT_COUNT               4
 #define ALP_SOC_QENC_COUNT              4
 #define ALP_SOC_TIMER_COUNT             16
 #define ALP_SOC_PWM_COUNT               12
@@ -182,8 +190,10 @@
 
 #elif defined(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E7)
 /* alif:ensemble:e7 */
+/* UNVERIFIED (count not backed by a primary source): pdm, pdm_lp */
 #define ALP_SOC_REF_STR                 "alif:ensemble:e7"
 #define ALP_SOC_I2C_COUNT               5
+#define ALP_SOC_I3C_COUNT               1
 #define ALP_SOC_SPI_COUNT               5
 #define ALP_SOC_UART_COUNT              9
 #define ALP_SOC_I2S_COUNT               5
@@ -221,9 +231,11 @@
 
 #elif defined(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E8)
 /* alif:ensemble:e8 */
+/* UNVERIFIED (count not backed by a primary source): pdm, pdm_lp */
 #define ALP_SOC_REF_STR                 "alif:ensemble:e8"
 #define ALP_SOC_I2C_COUNT               6
-#define ALP_SOC_SPI_COUNT               5
+#define ALP_SOC_I3C_COUNT               2
+#define ALP_SOC_SPI_COUNT               6
 #define ALP_SOC_UART_COUNT              9
 #define ALP_SOC_I2S_COUNT               5
 #define ALP_SOC_PDM_COUNT               8
@@ -262,6 +274,7 @@
 /* deepx:dx:m1 */
 #define ALP_SOC_REF_STR                 "deepx:dx:m1"
 #define ALP_SOC_I2C_COUNT               1
+#define ALP_SOC_I3C_COUNT               0
 #define ALP_SOC_SPI_COUNT               1
 #define ALP_SOC_UART_COUNT              1
 #define ALP_SOC_I2S_COUNT               0
@@ -301,6 +314,7 @@
 /* nxp:imx9:imx93 */
 #define ALP_SOC_REF_STR                 "nxp:imx9:imx93"
 #define ALP_SOC_I2C_COUNT               0
+#define ALP_SOC_I3C_COUNT               0
 #define ALP_SOC_SPI_COUNT               0
 #define ALP_SOC_UART_COUNT              0
 #define ALP_SOC_I2S_COUNT               0
@@ -340,6 +354,7 @@
 /* renesas:rzv2n:n44 */
 #define ALP_SOC_REF_STR                 "renesas:rzv2n:n44"
 #define ALP_SOC_I2C_COUNT               9
+#define ALP_SOC_I3C_COUNT               1
 #define ALP_SOC_SPI_COUNT               3
 #define ALP_SOC_UART_COUNT              10
 #define ALP_SOC_I2S_COUNT               10
@@ -378,6 +393,7 @@
 #else /* No SoC selected — accept any config. */
 #define ALP_SOC_REF_STR                 "unknown"
 #define ALP_SOC_I2C_COUNT               UINT16_MAX
+#define ALP_SOC_I3C_COUNT               UINT16_MAX
 #define ALP_SOC_SPI_COUNT               UINT16_MAX
 #define ALP_SOC_UART_COUNT              UINT16_MAX
 #define ALP_SOC_I2S_COUNT               UINT16_MAX
@@ -454,6 +470,7 @@
 #define ALP_CAP_INLINE_AES  (ALP_SOC_INLINE_AES)
 #define ALP_CAP_CAU         (ALP_SOC_CAU)
 #define ALP_CAP_DMA2D       (ALP_SOC_DMA2D)
+#define ALP_CAP_HW_I3C      (ALP_SOC_I3C_COUNT > 0)
 
 #define ALP_HAS(cap) (ALP_CAP_##cap)
 

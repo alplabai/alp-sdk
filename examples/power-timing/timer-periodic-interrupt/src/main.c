@@ -44,7 +44,7 @@
  *
  * The LED: BOARD_PIN_LED_RED resolves to the board-specific
  * indicator pad (on the E1M EVK this is the red RGB pad, default
- * function PWM3, claimed as a digital GPIO via the e1m-spec
+ * function PWM0, claimed as a digital GPIO via the e1m-spec
  * "GPIO secondary" capability; on the E1M-X EVK it resolves to
  * the equivalent carrier pad).
  *

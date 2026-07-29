@@ -66,9 +66,6 @@ memory:
 inference:
   preferred_backend:    ethos_u
   ethos_u_variant:      u55
-  npu_population:
-    - { variant: u55, role: NPU-HE, paired_with: M55-HE }       # E3 carries two U55s; no U85.
-    - { variant: u55, role: NPU-HP, paired_with: M55-HP }
 
 # §D.lib.loader -- per-SoM hardware-accelerator capabilities.  Loader
 # (scripts/alp_project.py) reads this against each enabled library's

@@ -131,7 +131,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["preferred_backend"],
-      "description": "Inference-accelerator selection.  One canonical shape: `preferred_backend` always; `ethos_u_variant` + `npu_population` are REQUIRED whenever the preferred backend is `ethos_u` (every Ethos-bearing SoM must enumerate its NPU instances -- the kconfig emitter reads the population list).  Non-Ethos backends (drpai, deepx_dxm1) have no per-instance population table.",
+      "description": "Inference-accelerator selection.  `preferred_backend` is always required; `ethos_u_variant` (the primary variant) is required whenever the preferred backend is `ethos_u`.  Which Ethos-U variants the part carries is silicon-determined -- derived from the SoC JSON `npus[]` / capability counts -- so the SoM preset does NOT enumerate them (`npu_population` is deprecated, see below).  Non-Ethos backends (drpai, deepx_dxm1) have no per-instance table.",
       "properties": {
         "preferred_backend": {
           "type": "string",
@@ -147,7 +147,8 @@
           "type": "array",
           "minItems": 1,
           "items": { "$ref": "#/$defs/npu_instance" },
-          "description": "Per-instance NPU population.  REQUIRED for NPU-bearing (`ethos_u`) SoMs; each entry names the variant, the silicon's role label, and the host core/subsystem it pairs with."
+          "deprecated": true,
+          "description": "DEPRECATED — no longer read by the SDK.  Which Ethos-U instances a part carries is silicon-determined and sourced from the SoC JSON `npus[]` (+ the `ethos_u{55,65,85}_count` capabilities); an on-die NPU cannot be depopulated at the SoM level, so restating it here duplicated the SoC.  Retained as an optional field for back-compat with older consumers; do not author it in new presets.  Scheduled for removal in som-preset v2."
         }
       },
       "allOf": [
@@ -156,7 +157,7 @@
             "properties": { "preferred_backend": { "const": "ethos_u" } },
             "required": ["preferred_backend"]
           },
-          "then": { "required": ["ethos_u_variant", "npu_population"] }
+          "then": { "required": ["ethos_u_variant"] }
         }
       ]
     },
@@ -327,22 +328,12 @@
     "npu_instance": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["variant", "role", "paired_with"],
+      "required": ["variant"],
       "properties": {
         "variant": {
           "type": "string",
           "pattern": "^u[0-9]+$",
-          "description": "Ethos-U variant of this instance (`u55`, `u65`, `u85`)."
-        },
-        "role": {
-          "type": "string",
-          "pattern": "^[A-Za-z0-9_-]+$",
-          "description": "Silicon's role label for the instance (e.g. `NPU-HE`, `NPU-HP`, `NPU-HG`)."
-        },
-        "paired_with": {
-          "type": "string",
-          "pattern": "^[A-Za-z0-9_-]+$",
-          "description": "Host core / subsystem the instance is paired with (e.g. `M55-HE`, `HG-subsystem`).  `TBD` when the pairing awaits the HW-config writeup."
+          "description": "Ethos-U variant of this instance (`u55`, `u65`, `u85`).  The instance's role/subtype, MAC size, and the host core it pairs with are silicon facts and live once in the SoC JSON (`npus[].subtype` / `mac_per_cycle` / `paired_core`) — a SoM preset does not restate them."
         }
       }
     },
@@ -492,7 +483,7 @@
         "firmware_path": {
           "type": "string",
           "minLength": 1,
-          "description": "Repo-relative path to the prebuilt / shipped firmware image, or the literal string \"TBD\" pending an upstream release."
+          "description": "Repo-relative path to the prebuilt / shipped firmware image.  Omit this key entirely when no artefact exists yet (schema-legal -- only `name` and `chip` are required) so `tan flash` gives its clean refusal ('has no output_artefact / firmware_path; can't flash') instead of resolving a sentinel path."
         },
         "flash_method": {
           "type": "string",

@@ -7,6 +7,1374 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.14.0 candidate
 
+### Fixed — four V2N/V2M SoM manifests promised a `gd32_bridge` firmware path that exists in no clone (#852)
+
+`metadata/e1m_modules/E1M-V2N101.yaml`, `…V2N102.yaml`, `…V2M101.yaml`, and
+`…V2M102.yaml` declared `helper_firmware[].firmware_path:
+firmware/gd32-bridge/build/gd32/gd32-bridge.bin` — a gitignored CMake build
+output, absent from every fresh clone. That exact path only matches
+`.github/workflows/pr-gd32-bridge-build.yml`'s `-B firmware/gd32-bridge/build/gd32`
+CI invocation (whose binary is a 14-day GitHub Actions artifact, not
+something the repo ships); `firmware/gd32-bridge/README.md`'s own quick-start
+(`cmake -B build`, matching the `CMakeLists.txt` top comment) lands the same
+binary one directory up, at `build/gd32-bridge.bin` — so even a customer who
+builds the firmware by the tree's own documented instructions does not land
+the file at the path the metadata promised. `tan-cli`'s flash planner
+(`crates/tan-cli/src/commands/flash/mod.rs`) turns that string into a real
+`FlashKind::Helper` target on every default `tan flash`, so a customer who
+cloned and flashed a V2N/V2M board got a missing-file failure from a path
+the metadata itself promised.
+
+An earlier fix in this same slice set `firmware_path: TBD`, on the theory
+that `TBD` is the schema's convention for "no shipped image yet" — but
+`crates/tan-cli/src/commands/flash/mod.rs` does not treat `"TBD"` as a
+sentinel: its artefact filter is `.filter(|s| !s.is_empty())`, so `TBD`
+becomes the artefact string, gets resolved to `<build_root>/TBD`, and a real
+flasher gets spawned against that nonexistent path — replacing a clean
+refusal with a worse failure mode. `firmware_path` is now dropped from all
+four entries entirely (schema-legal: `som-preset-v1.schema.json` requires
+only `name`/`chip`), so `flash/mod.rs`'s existing artefact-resolution branch
+takes the `None` path and refuses cleanly: `"flash: helper 'gd32_bridge' has
+no output_artefact / firmware_path; can't flash."` `flash_method:
+swd_probe` and `flash_args` (including `base: "0x08000000"`) are untouched —
+real hardware facts for whenever a prebuilt binary ships, and on a real
+flash are never reached until `firmware_path` exists again, since artefact
+resolution fails before `base` is ever consulted. (Under `tan flash
+--dry-run` a placeholder artefact is substituted instead, so `base` IS
+reached and validated there — inert since nothing is spawned, but not
+"never reached" in that mode.)
+
+### Fixed — Alif Ensemble SoC peripheral counts shipped as fact with no way to tell audited from inherited (#936)
+
+Every `metadata/socs/alif/ensemble/*.json` file carried `pdm: 4` /
+`pdm_lp: 4` with no citation on any part — a suspiciously uniform value
+E4's own ingestion note already flagged as "still unconfirmed" — and E5's
+entire `peripherals` block is inherited from its E7 sibling pending E5's own
+still-unpublished datasheet, with no machine-readable marker saying so.
+`gen_soc_caps.py` asserted both into `include/alp/soc_caps.h` as fact:
+`ALP_SOC_PDM_COUNT` / `ALP_HAS(HW_PDM)` looked exactly as confirmed as any
+DFP-audited count (#932 already proved two inherited blocks — E4 from E3,
+E6 from E7 — wrong).
+
+Added `peripherals_unverified` (per-file array of uncited `peripherals`
+keys) to `metadata/schemas/soc-spec-v1.schema.json`, and set it to
+`["pdm", "pdm_lp"]` on every Alif Ensemble SoC file. E5, whose entire block
+is inherited rather than independently ingested, carries its own explicit
+`peripherals_unverified` listing all 32 of its keys — not the
+`pending_reference_manual_ingestion` flag, which means "`peripherals: {}` /
+counts default to zero" per its own schema description, a claim that's
+false for E5's fully-populated (if uncited) block and produced a wrong
+`validate_metadata.py` WARN. `gen_soc_caps.py`'s `extract_unverified_peripherals()`
+now gives an explicit `peripherals_unverified` (even `[]`) precedence over
+the wholesale `pending_reference_manual_ingestion` fallback, so a file that
+grounds specific keys individually — e.g. i.MX93, whose `mipi_dsi`/`lcdif`
+are both cited to the pinned Zephyr v4.4.0 dtsi in its own `notes` even
+though the rest of its `peripherals` block is still pending RM ingestion —
+can say so with `peripherals_unverified: []` instead of the generator
+falsely marking those two cited keys unverified too. The emitted comment
+also changed wording, from "no datasheet/DFP/HWRM citation" to "count not
+backed by a primary source", because E4's own ingestion note confirms the
+pdm/pdm_lp *instance* against the DFP and only leaves the channel-count
+*value* uncited — the old wording overstated E4's gap by implying nothing
+about pdm was known. Every case surfaces as an
+`/* UNVERIFIED (count not backed by a primary source): ... */` comment
+directly above the affected `#elif defined(CONFIG_ALP_SOC_...)` block in
+the generated `soc_caps.h`, so the gap is visible where the macros are
+actually consumed, not just recorded in metadata nobody reads. This does
+not correct any count — the full re-audit against Alif's datasheets/DFP is
+tracked as follow-up work.
+### Fixed — the macOS and Windows CI legs can now fail the PR (ADR 0012 enforced, not just claimed)
+
+`cross-platform-zephyr.yml`'s `python-smoke` and `loader-smoke` jobs ran their
+macOS and Windows legs under a job-level `continue-on-error: true`, so those
+checks reported **success no matter what their steps did** ([#1023]). ADR 0012
+calls the Zephyr-on-M developer workflow first-class on Win + Mac + Linux; that
+commitment was documented and unenforced, and a host-specific regression landed
+green. Same defect class as #994, #995, #1002 and #1017 — a gate that exists but
+cannot fail. The `include:` overrides and the
+`continue-on-error: ${{ matrix.continue-on-error }}` lines are gone; all three
+legs of both jobs now gate, with `fail-fast: false` kept so a Windows break does
+not cancel the macOS leg that would show the same defect from another angle.
+
+Read the run history with care: while the override was in place a green tick on
+those legs proved nothing, so "they have always passed" was never evidence. The
+flip rests on the per-**step** conclusions of four consecutive runs
+(`30457062916`, `30455621379`, `30450805406`, `30441032872`), which were 24/24
+clean — not on the job conclusions the override forged.
+
+`scripts/check_cross_platform.py` deliberately **stays** in soft-warn mode: its
+`--fail-on-warning` flip waits on the separate `docs/*` cleanup of Linux-only
+idioms, so that lint still reports without gating.
+
+**This is half the fix, and the remaining half is a repo setting, not a file.**
+`dev`'s required status checks are `clang-format · diff-only`,
+`twister-shard 1/4`–`4/4` and `renode · V2N101 --sim-mode socket contract`.
+`python-smoke (macos-latest)` and `python-smoke (windows-latest)` are **not**
+among them, so a failing leg now reports red but still does not block the merge.
+Until those six contexts are added to branch protection on `dev` and `main`,
+[#1023]'s stated expectation — "a Windows or macOS failure blocks the PR" — is
+still not true.
+
+[#1023]: https://github.com/alplabai/alp-sdk/issues/1023
+
+### Fixed — docs stopped advertising an `hw_rev` / SDK-version gate that has never existed
+
+`metadata/sdk_version.yaml` and `metadata/e1m_modules/v2n/hw-revisions.yaml`'s
+header used to claim two enforcement points that were never implemented:
+that `scripts/alp_project.py` refuses to emit, and `scripts/validate_board_yaml.py`
+exits `3`, when a `board.yaml`'s `som.hw_rev` falls outside its declared
+`[min_sdk_version, max_sdk_version]` window. Neither script has ever read
+`sdk_version.yaml` or checked that window; the previous release already
+dropped the claim from `sdk_version.yaml` and the v2n header, but it survived
+verbatim in `docs/board-config-hardware.md`, `docs/tutorials/09-board-yaml-deep-dive.md`,
+`docs/tutorials/08-runtime-board-detection.md`, `metadata/e1m_modules/v2n/CHANGELOG.md`,
+and `include/alp/hw_info.h` (which also stated an already-shipped `<alp/hw_info_build.h>`
+emitter was still a "future" deliverable). `docs/troubleshooting.md` carried a
+whole section for the error string `alp_project: SDK <V> is older than SoM hw_rev
+'<R>' minimum <M>`, which is emitted nowhere -- deleted. All six now describe
+what actually runs: `min_sdk_version`/`max_sdk_version` are declarative data
+only, and the real hardware-mismatch check is the runtime EEPROM read's strict
+equality against the single `hw_rev` the firmware was built for
+(`src/zephyr/hw_info_zephyr.c`). The real hazard -- an unrecognised `hw_rev`
+silently falling back to base-revision pad routing instead of failing -- is
+tracked at [#1025](https://github.com/alplabai/alp-sdk/issues/1025); every
+rewritten doc now points there instead of restating the false gate.
+### Added — the hw_rev / SDK-version gate now exists, so the claim the entry above removed can come back true (#1019)
+
+The entry above removed `metadata/sdk_version.yaml`'s claim that
+`scripts/alp_project.py` "refuses to emit when the requested hw_rev is outside
+`[min_sdk_version, max_sdk_version]`" — correctly, because nothing implemented
+it. This builds the gate, so the file states the behaviour again rather than
+disclaiming it. The two changes are sequential, not contradictory: the docs
+were made honest first, and this makes them honest in the other direction.
+
+The exposure was real. `grep -rn 'min_sdk_version\|max_sdk_version' scripts/`
+returned nothing, and `alp_project_loader.py:35`'s `SDK_VERSION_FILE` was
+referenced nowhere else in its own file, so a customer whose upgraded SDK no
+longer supported their board revision got a normal, successful emit and
+firmware built against the wrong hardware assumptions, silently — while the
+data to catch it (`metadata/boards/e1m-evk.yaml:324-325`,
+`metadata/boards/e1m-x-evk.yaml:294-295`,
+`metadata/e1m_modules/*/hw-revisions.yaml`) sat in tree, unread.
+
+New `scripts/alp_orchestrate/sdk_compat.py` is that check, kept pure and
+data-only so the comparison is testable without a board.yaml, a metadata tree
+or a loader. `loader.py` calls it once both the SoM and board revisions are
+resolved, so the single implementation serves every consumer of
+`load_board_yaml` — including both `alp_project.py` emit paths (`:193`,
+`:237`), which is what makes the version file's claim true rather than
+relocating it.
+
+Both bounds are **inclusive**, and the comparison is numeric: string ordering
+puts `"0.13.0" < "0.5.0"` and would have silently allowed the exact upgrade
+this exists to catch. An absent bound is unbounded, never zero — reading it
+otherwise would refuse every `status: reserved` revision, which declares no
+range at all. An unreadable SDK version stays quiet, mirroring
+`buildplan._sdk_version`'s behaviour with no adjacent `metadata/` tree, and a
+malformed bound is treated as absent rather than turning a metadata typo into
+a refused build.
+
+`scripts/validate_board_yaml.py` maps exactly this failure to **exit code 3**
+via a new `SdkRevisionUnsupported`, an `OrchestratorError` subclass — so every
+existing `except OrchestratorError` keeps catching it, and the exit code needs
+no message string-matching.
+
+Nothing currently in tree is affected: all 27 shipped ranges are open-ended on
+the high side with a floor of `0.3.0` or none, against an SDK of `0.13.0`.
+Verified by mutation — capping a family revision at `0.5.0` in a copied
+metadata tree makes the loader refuse and the CLI exit 3, and disabling both
+bound checks fails 6 of the 15 new tests in
+`tests/scripts/test_sdk_revision_gate.py`.
+
+Deliberately out of scope: whether a requested revision *exists* or is
+`status: reserved` is a different failure with a different message, tracked at
+#1025.
+
+### Changed — one first command: `README.md` and `docs/getting-started.md` now lead with `tan bootstrap`, like tan's own quickstart does
+
+Three published quickstarts taught three different first commands for the
+same journey (#1021). `README.md` said `bash scripts/bootstrap.sh` then
+`source ../.venv/bin/activate`; `docs/getting-started.md` said
+`bash scripts/bootstrap.sh` then `tan --project ... build`; tan-cli's
+`README.md:118-131` said `tan bootstrap --sdk-root ./alp-sdk` then
+`tan init` then `tan build`. Only the tan path applies the
+workspace-parent guard, the ensurepip probe and the manifest-fact
+reporting, so two thirds of readers were routed around the checks the
+third got.
+
+Both alp-sdk quickstarts now install `tan` first and call
+`tan bootstrap --sdk-root "$PWD"`, matching tan's ordering exactly.
+`scripts/bootstrap.sh` and `scripts/bootstrap.ps1` are documented for what
+they are — the same setup without `tan`, for CI and for a host that does
+not have it yet — rather than as the canonical path. Both read the same
+`metadata/bootstrap.json`, so they cannot drift apart.
+
+`README.md`'s claim that `bash scripts/bootstrap.sh` "is what actually gets
+`west` … onto `PATH` — skipping it is the #1 way this Quickstart fails" was
+arguing for the bypass ADR
+[0020](docs/adr/0020-sdk-owns-build-execution.md) removed; it now describes
+`tan bootstrap`. Both files also state the thing neither did: the venv is
+**not** activated by hand for a build, because the build plan carries the
+per-slice `PATH` additions — activation is only needed to drive `west`
+directly.
+
+Nothing about the Zephyr SDK cross-toolchain gap changes here; that is
+#949.
+
+### Fixed — `docs/cross-platform-setup.md`: an Intel Mac was listed as a supported real-silicon host, and cannot be one
+
+The workflow/host matrix marked macOS `yes` for **Zephyr-on-M (real
+silicon)** and for the heterogeneous orchestrator without qualification
+(#1022). The pinned Zephyr SDK (`metadata/toolchains.json`, `1.0.1`)
+publishes host builds for `linux-aarch64`, `linux-x86_64`,
+`macos-aarch64` and `windows-x86_64` only — upstream shipped
+`macos-x86_64` through `0.17.4` and dropped it in `1.0.0` — so there is no
+`arm-zephyr-eabi` cross toolchain for an Intel Mac at the pinned version,
+and `macos-aarch64` is not a substitute (Rosetta translates x86_64 *for*
+Apple silicon, not the reverse; macOS has no WSL2 fallback).
+
+Both cells now read **Apple silicon only**, with a paragraph stating the
+limit, its cause, and what an Intel Mac can still do — everything that uses
+the host compiler (`native_sim`, ztests, `tan validate`, `tan doctor`,
+metadata work), and `tan` itself, which publishes a working
+`tan-x86_64-apple-darwin`. The equivalent overclaim in the extension's docs
+is tracked at alp-sdk-vscode#415.
+
+### Fixed — the documented fresh-clone quickstart hard-refused on a bare POSIX host: undeclared `xz`/`wget`, no toolchain step, no per-project SDK pin (#949)
+
+Five defects blocked the quickstart on a genuinely clean host, verified end
+to end in a bare `ubuntu:24.04` container: `git`/`curl` were assumed
+present with no upfront note; nothing installed the `arm-zephyr-eabi`
+cross toolchain; `tan sdk switch` (per-project, not global) was never
+documented; `west sdk install`'s `tar --xz` extraction silently needs
+`xz`; and the pinned Zephyr SDK's own `setup.sh` hard-checks for `wget` on
+Linux. Both gaps were undeclared anywhere in `metadata/bootstrap.json` or
+`scripts/bootstrap.sh`.
+
+`metadata/bootstrap.json` / `bootstrap-v1.schema.json` now declare `xz`
+and `wget` as Linux-only POSIX prerequisites (apt/brew install commands,
+`manualInstallHints.posix`); a `prerequisites.macos` block plus a new
+`_check_prerequisites_macos` gate keeps the macOS exemption honest —
+`bsdtar` decompresses `.xz` in-process and macOS resolves `wget` from its
+own hosttools, so neither is required there, only on Linux.
+`scripts/bootstrap.sh` gates on both up front. `docs/getting-started.md`'s
+§1 Debian/Ubuntu one-liner and `docs/cross-platform-setup.md` §2.1 now
+name both packages explicitly. Both quickstarts add the missing
+`west sdk install --gnu-toolchains arm-zephyr-eabi` step and the
+per-project `tan --project <dir> sdk switch "$PWD"` step, without which
+`tan build` reports `[x]  sdk   no SDK selected` even after bootstrap
+succeeds. `docs/firmware-quickstart.md` gets the same `sdk switch` fix at
+its three onramp-adjacent sites.
+
+New `.github/workflows/onramp-clean-container.yml` walks the documented
+quickstart, verbatim, inside a genuinely bare `ubuntu:24.04` container —
+`pr-getting-started-aen801.yml`'s pre-provisioned runner and raw
+`west build` invocation could never have caught any of this. A cheap
+prereqs+bootstrap phase runs on every relevant PR; the full toolchain +
+`tan build` phase runs weekly and on `run-full-quickstart`-labeled PRs.
+
+This does not change which command a quickstart leads with — dev's
+`tan bootstrap --sdk-root "$PWD"` ordering (#1021) is unaffected; these
+prerequisites apply transitively, since `tan bootstrap` shells out to
+`scripts/bootstrap.sh`.
+
+### Changed — `zephyr/kconfigs/core.kconfig`: E8 builds now default to the real SoC capability profile, not the permissive one
+
+The "Active SoC capability profile" choice now defaults to
+`ALP_SOC_ALIF_ENSEMBLE_E8` when `SOC_SERIES_E8` is set, instead of falling
+through to `ALP_SOC_NONE`. Every E8 app's `include/alp/soc_caps.h` macros
+flip from the permissive `UINT16_MAX` (any config accepted) to the real E8
+counts (`ALP_SOC_I2C_COUNT=6`, `ALP_SOC_SPI_COUNT=6`, `ALP_SOC_UART_COUNT=9`,
+`ALP_SOC_PWM_COUNT=12`, `ALP_SOC_WDT_COUNT=4`, `ALP_SOC_CAN_COUNT=1`,
+`ALP_SOC_RTC_COUNT=1`, `ALP_SOC_I3C_COUNT=2`, etc.), so a dispatcher's
+`bus_id`/`channel_id`/`rtc_id`/`wdt_id` range check
+(`src/backends/*/zephyr_drv.c`, `src/i3c_dispatch.c`, `src/dac_dispatch.c`)
+now rejects an out-of-range instance with `ALP_ERR_OUT_OF_RANGE` where it
+previously accepted anything. `native_sim` and other non-E8 builds are
+unaffected — the choice is gated on `SOC_SERIES_E8`, which only the E8 SoC
+tree selects. Swept every `examples/aen/*` peripheral-open call: all use
+instance literals of `0` (or an `ALP_E1M_*` macro that resolves to `0`),
+well inside every E8 count above — no example regresses.
+
+### Added — `gpio11`..`gpio14` on the E8 peripherals dtsi; the RGB LED's green/blue channels are now reachable
+
+`zephyr/dts/alif/ensemble_e8_peripherals.dtsi` declared only `gpio0`..`gpio10`
+plus `lpgpio`, while the E1M-EVK routes the RGB LED's green and blue channels
+to P12_7 / P12_6 — pads that only exist behind a `gpio12` controller node.
+With no such node, those two `alp,pin-array` entries resolved to no
+controller at all: `alp_gpio_open()` could not reach them through the
+portable API, even though the routes header looked perfectly well-formed.
+`gpio11`..`gpio14` (DFP-transcribed from `AE822FA0E5597/include/rtss_he/
+soc.h`: `reg` + all eight per-port IRQ lines each) are added, `status =
+"disabled"` by default like every other port in this dtsi. This unblocks —
+but does not itself wire — the green/blue RGB channels; see
+`examples/aen/edgeai-vision-aen`'s overlay for the remaining placeholder pin
+mux those channels still need.
+
+### Added — `zephyr/drivers/gpio/gpio_clk_alif.c`: DesignWare GPIO functional-clock enable (ADR 0017 Tier-1.5)
+
+Mirrors the Alif DFP's own documented `enable_gpio_clk()` sequence: sets
+`CLKCTL_PER_SLV->GPIO_CTRL[n]` bit 16 (`GPIO_CTRL_CKEN`) for every
+`snps,designware-gpio` node DT declares `status = "okay"`, at `PRE_KERNEL_1`
+priority 1 (ahead of `gpio_dw`'s own init). Upstream Zephyr's `gpio_dw`
+driver never touches this SoC-level gate, which was clear on every AE822
+port and unwritten anywhere in alp-sdk. **Bench correction, same day:** this
+was first suspected to be why an AEN801 LED looked dark under GPIO alt-0; a
+follow-up A/B on the same silicon proved it wrong — with CKEN still clear
+after a cold reset, driving `SWPORTA_DDR`/`SWPORTA_DR` from the debugger
+moved the pad. CKEN is not required for pad drive on AE822. The write is
+kept because it matches Alif's documented init, not because it fixes a dark
+pad — see the GPIO row in `docs/aen-bench-bringup.md` for the real
+explanation and the corrected bench record.
+
+### Fixed — `zephyr/drivers/flash/flash_ospi_alif.c`: OSPI0 clock-enable, reproduced bus fault on E8 (ADR 0017 Tier-1.5)
+
+On AE822FA0E5597 (E8) the OSPI register window sits behind a per-instance
+clock-enable gate (`CLKCTL_PER_SLV->OSPI_CTRL`) that hal_alif's OSPI library
+never writes — that library targets parts without the gate. Without it,
+`alif_hal_ospi_initialize()`'s first register touch (`ospi_set_tx_threshold()`
+reading `OSPI_TXFTLR`) bus-faulted: `***** BUS FAULT ***** Precise data bus
+error, BFAR 0x83000018`, reproduced identically on two bench runs of
+`examples/aen/aen-ospi-regcheck`. The driver now writes the clock-enable bit
+first, mirroring the DFP's own documented `enable_ospi_clk()`
+enable-before-touch ordering (`drivers/include/sys_ctrl_ospi.h`). The instance
+map now covers both OSPI0 (bit 0) and OSPI1 (bit 1); an unrecognized base
+returns `-ENOTSUP` instead of silently skipping the write, since skipping it
+previously walked straight into the same fault it was meant to avoid. Whether
+`OSPI_CTRL` bit 0 gates the APB register interface specifically vs only the
+serial/functional clock is **UNVERIFIED** — the DFP does not say, and bench
+A/B on this fix (read `0x83000018` with the bit clear vs set) is still
+pending; see the driver's file header for the full citation chain and the
+open question.
+
+### Fixed — `docs/aen-bench-bringup.md` and `examples/aen/aen-gpio-bench/src/main.c` named the wrong cause for the "dark LED"
+
+Both files had attributed a dark AEN801 LED to `CLKCTL_PER_SLV->GPIO_CTRL[n]`
+bit 16 (`GPIO_CTRL_CKEN`) being clear. That theory is refuted on the same
+bench: with CKEN still clear after a cold reset, `SWPORTA_DDR`/`SWPORTA_DR`
+driven from the debugger moved the pad (`0x49002050 = 0x00000010` with
+`0x4902F088 = 0x00000100`). The real explanation was a 2-second unwatched
+window — the old `blink` example toggled ~10 times and returned with the pad
+left LOW; once changed to loop forever, the maintainer confirmed by eye that
+the LED blinks. GPIO output on the E8 is now recorded PASS in
+`docs/aen-bench-bringup.md` (12/12 `EXT_PORTA`/`SWPORTA_DR` agreement on
+P2_4 with REN enabled, plus the optical confirmation) — the colour is
+separately known wrong (`EVK_PIN_LED_RED` lights GREEN) and still being
+measured, with no colour conclusion asserted. The `EXT_PORTA`-mirrors-`DR`
+finding for an OUTPUT-direction pin (Synopsys DW_apb_gpio databook) is
+unaffected by this correction and still stands as the reason the *original*
+`aen-gpio-bench` PASS criterion could never independently fail.
+
+### Fixed — the planner refused to emit `west build -b <board>` for a Zephyr board with no tree
+
+`--emit build-plan` used to hand a consumer (`tan`, or a customer's own
+`west build`) a `-b <board>` command for whatever board a SoM preset's
+`topology.<core>.board:` named, even when that board had no tree under
+`zephyr/boards/alp/` — a command guaranteed to fail with Zephyr's own "No
+board named ... Invalid BOARD" error, one layer downstream of the
+declaration-level `check_board_target_tree_parity.py` gate (issue #999).
+
+`_slice_command` now checks board-tree existence at emit time and, when the
+tree is missing, blocks the command (`command: null`, matching the existing
+`no-command`/`yocto-recipe-missing` "carry the slice, never emit a broken
+command" convention) and adds a new `board-tree-missing` warning, now
+documented in `metadata/schemas/build-plan-v1.schema.json`'s `warnings[].code`
+description alongside the codes #865 added there. `_real_zephyr_board_names`
+(the directory glob backing the check) now raises loudly on a corrupt
+`board.yml` instead of silently dropping that board from the real set — a
+swallowed parse error would have misreported an existing tree (e.g. the lead
+part AEN801's) as missing, with the wrong root cause. The warning message
+itself does not enumerate every board that DOES exist, so one SKU's frozen
+plan text no longer depends on every other SKU's board tree.
+
+### Fixed — ABI freeze gate guarded on a `v0.1` git tag that never existed and never ran
+
+`pr-generated-files.yml`'s "ABI freeze gate" step waited for a `refs/tags/v0.1`
+git tag before it would compare a PR's public headers against the frozen
+`docs/abi/v0.1-snapshot.json` baseline. That tag has never existed and never
+will — `v0.1` predates `scripts/bump_version.py` and the `vX.Y.Z` release-tag
+convention — so the step always took its "no tag yet" branch and exited 0
+without ever running the comparison. No PR has ever had a silent public-symbol
+removal caught by this gate (#996).
+
+The fix drops the tag lookup (the frozen snapshot file is committed and never
+regenerated, so diffing straight against it needs no tag) and rebases the
+comparison off `v0.1` entirely: 12+ releases of legitimate pre-1.0 header
+churn (splits, capability growth, field additions — all allowed by
+`docs/contribution.md`'s ABI policy) leave ~200 REMOVED/CHANGED entries
+against `v0.1` today, none of them a real regression. The gate now diffs
+against the newest already-released snapshot on disk instead, and blocks only
+on a `REMOVED` public symbol — a `CHANGED` entry still prints for review but
+doesn't fail the step, matching the pre-1.0 policy that already allows
+signature changes; full REMOVED+CHANGED enforcement remains `pr-abi-snapshot.yml`'s
+job once it activates at v1.0.
+
+### Added — advisory gate: alp-sdk's documented `tan` surface vs a real, installed `tan`
+
+alp-sdk deliberately tracks tan-cli's `latest` (`docs/cli.md` argues why, and
+that decision stands) — a tan release changes documented CLI behaviour
+immediately, with no version pin to buffer alp-sdk's docs from it, and
+nothing checked that the two stayed in sync. `parity-seam1.yml` diffs this
+checkout's own `--emit build-plan` against a frozen oracle; it never invokes
+`tan` at all.
+
+New `scripts/check_tan_docs_surface.py` extracts every `tan <subcommand>`
+mention and docs/cli.md-tabulated flag from `README.md`, `docs/cli.md`,
+`docs/getting-started.md`, `docs/troubleshooting.md`, and
+`scripts/bootstrap.sh`'s printed next-steps block, then asserts each verb
+still exists (`tan <verb> --help`, exit 0) and, for a native (non-forwarding)
+verb, that the flag string is present in that help output, against a real
+`tan` installed by `docs/cli.md`'s own documented `install.sh` path. A
+FORWARDING verb (`new-som`, `monitor`, `model`, `faultdecode` today — their
+`--help` never lists their real flags, only a generic "forwarded verbatim"
+blurb) has its flag check skipped rather than matched against that blurb;
+the OK line names which verbs were skipped. It deliberately does not check
+output text, exit codes, or semantic behaviour — see the script's own
+docstring for the full scope and what's excluded. New
+`.github/workflows/tan-docs-drift.yml` runs it on a daily schedule (tan can
+drift with no alp-sdk commit at all) plus path-filtered on PRs touching the
+doc sources themselves.
+
+**Advisory only** — not a required context on `dev` or `main`. It already
+surfaces real, pre-existing drift on its first run: `tan emit` was renamed
+to `tan generate`. Fixing that is separate follow-up work.
+
+Two sibling `docs/cli.md` rewrites exposed three more false-positive
+shapes. A flag-table row inside `` ### `tan generate` `` that tabulates a
+*different* front door's flags (`--sku`/`--template`, real `python -m
+alp_cli emit` options contrasted against `tan generate`'s narrower one)
+was attributed to `tan generate` by section position alone; a `#`-led
+English sentence inside a fenced `bash` block (`` `... its own top-level
+tan verb -- NOT tan generate ...` ``) misparsed as a fake `tan verb`
+subcommand; and, once a sibling branch retired `tan emit` from the doc's
+how-to-use sections, the historical note explaining the retirement
+(`` `This replaces the retired `tan emit` command ...` ``) itself
+misparsed as a live `tan emit` reference. All three are now handled
+structurally rather than by widening `_ENGLISH_STOPWORDS`: a flag table
+row is skipped for attribution if it names `python -m alp_cli`,
+`west alp-*`, or `alp_orchestrate`; every fenced code block (regardless of
+its language tag, or the lack of one — not gated by a bash/sh/shell
+allowlist, which reproduces the same false positive one fence tag away)
+plus bootstrap.sh's heredoc bodies has its `#`-comment tails stripped
+before the `tan <verb>` regex runs; and docs/cli.md's own existence-scan
+now only trusts a REFERENCE-QUALITY mention (a `` ### `tan <verb>` ``
+heading, a fenced invocation, a table cell, or a flag/arg-bearing span)
+rather than any bare `` `tan <verb>` `` span in ordinary prose -- the one
+source that narrates CLI history, so the one source where a verb can be
+*named* while being said to be *gone*. A multi-token inline span (e.g.
+`` `tan is the executor` ``) is also now subtracted against
+`_ENGLISH_STOPWORDS`, closing the one path that regex reached unfiltered.
+
+The front-door row skip above was silent; the OK line now names which
+verb's flag table rows were skipped and how many, the same way the
+forwarding-verb skip already is. The gate's own wording no longer claims a
+documented flag "parses" -- it proves the flag string is listed in
+`tan <verb> --help` output, nothing about whether it's actually accepted
+on a real command line; that correction now matches the script's own
+docstring in the OK line, the workflow step name, and
+`metadata/quality-tasks-v1.json`'s task description.
+
+### Added — debug-probe identity (`jlink_device`, `jlink_flash_device`, `pyocd_target`) on the Alif Ensemble SoC specs (#987)
+
+`alp-sdk-vscode` generates a `cortex-debug` `launch.json` from board metadata,
+but the SEGGER J-Link device name and the pyOCD target id had no source
+anywhere in `metadata/` — the extension emitted `"<resolved-device>"` /
+`"<resolved-target-id>"` literal placeholders and every probe-based launch
+config needed a manual edit before it would start.
+
+`metadata/schemas/soc-spec-v1.schema.json` grows an optional `debug:` block
+on `variants[]` (not the SoC top level, and not a `cores[]` item schema,
+since a `pyocd_target` is per orderable SKU). Every string in the block
+requires `minLength: 1` — an empty string is a third, meaningless state the
+absent-key contract has no room for. `openocd_config` is schema-only for
+now: verified absent from OpenOCD upstream `master`'s `tcl/target/` +
+`tcl/board/` for both Alif Ensemble and Renesas RZ/V2N.
+
+`pyocd_target` is populated for all thirteen Alif Ensemble variants (E3–E8)
+from the CMSIS-Pack index (`AlifSemiconductor.Ensemble` 2.2.0) — every
+`order_code` in this repo matches a pack part name exactly, so the target id
+**is** the order code.
+
+**`jlink_device` went through a wrong first draft that this entry replaces.**
+That draft read `board_runner_args(alif_flash "--device=...")` in each
+board's `board.cmake` as a SEGGER J-Link device name; it is not — its own
+comment says `--device first-5-chars must match the SETOOLS global-cfg.db
+Part#`, the **SETOOLS flasher** argument, unrelated to J-Link. The
+authoritative source is `scripts/bench/aen/bench-env.sh:99-111`, which
+documents two *distinct* J-Link identities and why they differ:
+`JLINK_DEVICE_READ` — the **generic** `Cortex-M55`, used for every
+read/attach/RAM-run, because it is what attaches to a live/running core —
+and `JLINK_DEVICE_FLASH` — the Alif **part-number** profile, which unlocks
+the built-in Flow D MRAM loader but "will NOT connect to a live/running
+secure core". `docs/_aen-runbook-section.md:251` and
+`docs/aen-bench-bringup.md:14` corroborate: attaching with the part-number
+device gives `Could not connect to the target device`; the generic profile
+is what is bench-proven to attach (CPUID `0x411FD220`, SW-DP IDR
+`0x4C013477`). Since `#987`'s `jlink_device` feeds cortex-debug's `device`
+for a **debug/attach** session, every Alif M55 core on all thirteen
+variants now carries the generic `Cortex-M55` — copied verbatim from
+`bench-env.sh`'s `JLINK_DEVICE_READ` default, not derived. `a32_cluster`
+still gets no `jlink_device` key on any variant: the CMSIS pack lists no
+A32 processor on any of the 13 devices, a positive vendor statement of
+absence, not an unevidenced gap.
+
+The part-number *flash* identity is real and useful but is a **different
+fact** — it unlocks Flow D, not a debug attach, and per
+`flash-jlink-hp.sh`/`flash-jlink-mramxip.sh` it is **not per-core** (both
+scripts select the same string regardless of which core they flash). It
+gets its own optional key, `jlink_flash_device`, populated **only** on the
+one variant an in-tree script proves it for: E8's `AE822FA0E5597LS0`, value
+`AE822FA0E5597LS0_M55_HE`, copied verbatim from `bench-env.sh`'s
+`JLINK_DEVICE_FLASH` default (also literal in
+`docs/aen-bench-bringup.md:212`). No other variant gets this key — nothing
+in tree proves a flash-device string for E3–E7 or E8's `BS0`, and per
+`#987`'s cardinal rule an absent key is the correct publishable state, not
+a gap to fill by extrapolating the naming pattern.
+
+The Renesas RZ/V2N (`n44.json`, no J-Link runner in tree at all) is
+untouched and carries no `debug` block.
+
+New semantic gate `validate_metadata._check_soc_debug_probe_identity`
+(alongside the existing `_check_soc_npu_pairing`) asserts that every
+`variants[].debug.jlink_device` key names a real `cores[].id` on that SoC —
+JSON Schema can express the value shape but not that cross-reference.
+Covered by `tests/scripts/test_soc_debug_probe_identity.py`.
+
+### Fixed — `ninja` was a Windows-only prerequisite; POSIX hosts got no check, no hint (#971, #981)
+
+Zephyr's default CMake generator is Ninja on every host, but
+`metadata/bootstrap.json`'s `prerequisites.posix` listed only `git`,
+`cmake`, `python3` — `ninja` was tracked under `prerequisites.windows`
+alone, so `scripts/bootstrap.sh` never probed for it on Linux/macOS and
+reported success on a host that would go on to fail `west build` with a
+raw `CMake Error: CMake was unable to find a build program corresponding
+to "Ninja"` deep inside the first build. `scripts/alp_cli/doctor.py`'s
+`_check_ninja()` did rate the same gap `FAIL`, but its remediation hint
+had nowhere to source a real command from and fell through to the
+generic `Install ninja via your OS package manager.` line — its own
+docstring conceded the hole.
+
+`ninja` is now in `prerequisites.posix` with real entries in
+`prerequisites.install.linux` (`sudo apt-get install -y ninja-build` —
+note the Debian *package* name differs from the `ninja` *binary* it
+installs) and `prerequisites.install.macos` (`brew install ninja`).
+`scripts/bootstrap.sh`'s `REQUIRED_BINS` and its hardcoded
+`PREREQ_HINT_NAMES`/`PREREQ_HINT_LINUX`/`PREREQ_HINT_MACOS` table (kept
+in lockstep by `scripts/check_bootstrap_manifest.py`) now check and hint
+`ninja` too, and `alp_cli/doctor.py`'s hint resolves to the same real
+command with no code change beyond the two comments that used to
+document the gap. `docs/getting-started.md` no longer lumps `ninja`
+into the "`[!]` lines are optional / real-silicon-only" guidance — it is
+neither, and every default Zephyr build needs it. `docs/troubleshooting.md`
+already carried the raw-CMake-error entry; its stale claim that
+`bootstrap.sh` doesn't check for `ninja` is corrected.
+
+`tan doctor --build` (a separate repo, `alplabai/tan-cli`) still rates
+this `warn` with an unsourced `"fix": "Install Ninja."` — filed as
+`alplabai/tan-cli#103`, not fixable here.
+
+### Fixed — the renode gate installed Renode and asserted nothing (#974)
+
+Every e2e step in the three renode workflows was an `echo ::notice::` no-op
+and Renode itself was invoked only for `--version`, so a `.resc` descriptor
+could be committed broken and every renode check still went green. That is
+how #947's first fix attempt reached review: it hardcoded
+`$vtor ?= 0x80010000`, which lands 64 KiB inside the image's own `.text`,
+and no CI signal contradicted it.
+
+`.github/workflows/pr-renode-aen-smoke.yml` now boots the M55-HP ITCM-run
+ELF it already builds, under the Renode v1.16.1 it already installs, and
+asserts on the log: `Setting initial values: PC = 0x` must be **present**,
+`CPU was halted` **absent**, and `Guessing VectorTableOffset value to be 0x`
+**absent** — the last being Renode falling back to inference, precisely the
+condition #947 exists to eliminate. All three strings were verified against
+the pinned v1.16.1 binary's own format strings, and each was observed
+failing before being relied on: deleting the descriptor's
+`cpu VectorTableOffset $vtor` line reproduces `Guessing VectorTableOffset
+value to be 0x0.` on the ITCM image and `PC does not lay in memory or PC and
+SP are equal to zero. CPU was halted.` on the MRAM-linked one. Note the
+first assertion still passes on that broken descriptor — only the
+`Guessing` check catches the real #947 regression, so the three are not
+redundant.
+
+Landed in the **advisory** AEN smoke job only. `pr-renode-sim-mode.yml` is
+the required `renode · V2N101 --sim-mode socket contract` context on `dev`
+and is left untouched until this pattern proves stable, per #974's
+recommended order. `continue-on-error` is dropped from the build step (a
+swallowed build failure would otherwise reach a step that depends on the
+ELF), the log is uploaded as an artifact on `if: always()`, and the path
+filter gains the overlay, the sim conf, and the board tree that determine
+what the job boots.
+
+### Fixed — `check_bootstrap_manifest.py`'s orphaned-leaf scan couldn't tell a correct manifest read from a read sitting beside a hardcoded duplicate (#965)
+
+`_check_no_orphaned_leaves` asked only "is this leaf read by at least one of
+`scripts/bootstrap.sh` / `scripts/bootstrap.ps1`" — a needle-presence check
+that stayed green even when the same fact was *also* hardcoded a second
+time elsewhere in the same script. `scripts/bootstrap.ps1` shipped exactly
+that shape: `manualInstallHints.windows.note`'s Arm-toolchain installer URL
+was both rendered from a genuine manifest read (`$ManifestModule.
+manualInstallHints.windows.note` via the `foreach ($line in
+$ManualInstallNote)` loop) and printed a second time from a hardcoded
+here-string a few lines above it — with a comment between the two claiming
+the opposite of what the code did.
+
+Fixed by adding a second, independent assertion per leaf: for every
+whitespace-delimited fragment of a string leaf's value that is
+`>= _DUPLICATE_LITERAL_MIN_LEN` (20) characters after trimming sentence
+punctuation (`_DUPLICATE_LITERAL_STRIP_CHARS`), both scripts are scanned
+(via the existing heredoc/here-string-aware `_iter_scannable_lines`) for
+that fragment appearing on a CODE line — it can never legitimately appear
+there at all, since both scripts load the manifest at run time and read a
+leaf's value through the parsed object, never by spelling it out as a
+source literal. Zero false positives against the real corpus at the chosen
+length floor; `env`/`nativeLibHints` (consumed as whole groups, not
+per-field) and `prerequisites.*`/`_comment` (already gate-asserted or
+purely structural) stay out of scope, same as the existing read-scan.
+
+`_iter_leaf_paths` now yields `(path, value)` pairs instead of `path`
+alone, so the duplicate-literal scan's value lookup no longer needs a
+second walk of the same tree.
+
+### Fixed — status-blind DT existence guards (`DT_NODE_EXISTS`, `DT_HAS_CHOSEN`) let 33 backend sites reference a disabled node's device (#966)
+
+`DT_NODE_EXISTS(DT_ALIAS(...))` was used across `src/backends/**` as the
+"does this instance exist" guard feeding `DEVICE_DT_GET` (directly, or via
+`ADC_DT_SPEC_GET`/`PWM_DT_SPEC_GET`), but `DT_NODE_EXISTS` is also true for a
+`status = "disabled"` node — it only checks the node is present in the
+compiled devicetree, not that it was instantiated. A board whose overlay
+aliases `alp-<periph>N` to a disabled node passed the guard and then failed
+to link against a `struct device` that was never created (bench-confirmed on
+E1M-AEN801, `e1m-aen-evk-01`). `src/zephyr/v2n_power_mgmt.c:56` already used
+the correct guard, `DT_NODE_HAS_STATUS(..., okay)`, and is the reference this
+fix matches.
+
+A literal-string sweep for `DT_NODE_EXISTS(DT_ALIAS(` found 52 sites across
+22 files. 51 moved to `DT_NODE_HAS_STATUS(DT_ALIAS(...), okay)`; one,
+`dac/zephyr_drv.c`'s `ALP_DAC_REF_MV_OR_DEFAULT`, was left unchanged — it
+feeds `DT_PROP_OR` (a compile-time property read, not a device get) and is
+only ever consulted after `ALP_DAC_DEV_OR_NULL` has gated `dev != NULL`, so
+it carries no behavioural bug.
+
+Of those 51 conversions, **32 (`adc/{alif_e7,alif_e8,zephyr_drv}.c`'s 24,
+`pwm/zephyr_drv.c`'s 8) guarded the wrong node** and were themselves a
+no-op: `ADC_DT_SPEC_GET`/`PWM_DT_SPEC_GET` instantiate the *controller*
+reached through the alias node's `io-channels`/`pwms` phandle, not the alias
+node itself, and every `alp-adcN`/`alp-pwmN` alias is emitted `okay` in
+every in-tree and generated overlay — so the "fixed" guard evaluated
+identically to the old one, and a controller left `disabled` behind an
+`okay` consumer still linked against an uninstantiated device. Repointed at
+`DT_NODE_HAS_STATUS(DT_IO_CHANNELS_CTLR(DT_ALIAS(alp_adcN)), okay)` /
+`DT_NODE_HAS_STATUS(DT_PWMS_CTLR(DT_ALIAS(alp_pwmN)), okay)`, which check the
+node that is actually instantiated and fall back to the zeroed spec / NULL
+`.dev` when either the alias or the controller is absent or disabled.
+
+The other 19 conversions were already correct — the alias directly names
+the instantiated device (`audio`, `camera` x3, `can`, `counter`, `dac`'s
+device macro, `display`, `i2c`, `i2s`, `i3c`, `mproc`'s mailbox table and
+shmem region table, `qenc`, `rtc` x2, `spi`, `uart`, `wdt`) — and are
+untouched.
+
+A 33rd site of the same defect class, missed by the literal-string sweep
+because it uses a different status-blind existence macro, is fixed too:
+`src/backends/rpc/zephyr_drv.c:649` gated
+`DEVICE_DT_GET(DT_CHOSEN(zephyr_ipc))` on `DT_HAS_CHOSEN(zephyr_ipc)` alone,
+which is true for a `disabled` chosen node too (`write_chosen()` in
+`gen_defines.py` applies no status filter) — contradicting the code's own
+comment that a missing/bad `zephyr,ipc` chosen node "surfaces a clean
+NOT_READY". Fixed by adding `&& DT_NODE_HAS_STATUS(DT_CHOSEN(zephyr_ipc),
+okay)`.
+
+Also fixed beyond the backends: `tests/zephyr/mproc/src/main.c` guarded its
+shmem ZTESTs with `DT_HAS_ALIAS(alp_shmem0)`, which `<zephyr/devicetree.h>`
+`#define`s as literally `DT_NODE_EXISTS(DT_ALIAS(...))` — the same latent
+form under a different name — updated alongside its backend.
+
+**Behaviour change, not just link-safety:** `mproc/zephyr_drv.c`'s shmem
+region table is the one site where the fix has a *runtime* delta rather
+than a compile/link one — `DT_REG_ADDR`/`DT_REG_SIZE` resolve fine on a
+disabled node, so a present-but-not-`okay` `alp-shmemN` alias used to still
+populate a live table entry; it now correctly drops out, and
+`alp_shmem_open()` returns `ALP_ERR_NOT_READY` where it previously handed
+back a mapping. Both in-tree overlays declare their shmem nodes `okay`, so
+this is latent today, not an observed regression.
+
+Reviewed and left alone as genuine "is this node present at all" checks,
+independent of status, with no `DEVICE_DT_GET` in scope:
+`examples/peripheral-io/alp-console/src/cc3501e_bridge.c`'s
+`DT_NODE_EXISTS(DT_NODELABEL(gpio2))` gates a raw-register pinctrl bodge,
+and `tests/zephyr/chips/src/test_displays.c` / `test_sensors.c`'s
+`DT_NODE_EXISTS(DT_NODELABEL(fake_lsm6dso))` gates fake i2c-emul ZTESTs
+whose DT node is either fully commented out of the overlay or fully `okay`
+— never present-but-disabled — so the two guards are equivalent for that
+node today.
+
+This fix does **not** by itself unblock the parked
+`alp_sdk.peripheral.evk_aen` scenario: `tests/zephyr/peripheral/prj.conf`'s
+unconditional `CONFIG_GPIO_EMUL`/`I2C_EMUL`/`SPI_EMUL`/`UART_EMUL=y` aborts
+at Kconfig **configure**, before the link stage this class of guard
+affects.
+### Fixed — Renode AEN descriptor halted the CPU on an MRAM-linked image
+
+`metadata/renode/alif_ensemble_e8.resc` never seeded the vector-table base, so
+Renode guessed it — and its guess is the *lowest* `vaddr` across the LOAD
+segments.  An MRAM-linked Zephyr app is exactly the shape that breaks: its
+`.data` init image pairs a RAM `vaddr` (`0x20000000`, where `.data` is copied
+*to*) with an MRAM `paddr` (where the initialiser lives), so Renode guessed
+`0x20000000`, read SP/PC out of memory nothing was ever loaded into, got zeros,
+and halted the CPU before executing an instruction.
+
+A first pass at this fix seeded `$vtor` from a hardcoded default
+(`0x80010000`) reasoned from the devicetree's `zephyr,code-partition =
+&slot0_partition`. That reasoning doesn't hold: `zephyr,code-partition` only
+takes effect through `CONFIG_USE_DT_CODE_PARTITION`, which defaults off and is
+`select`ed only by `BOOTLOADER_MCUBOOT`/`BOOTLOADER_BOSSA` — neither on for the
+default `hello-world` build — so `CONFIG_FLASH_LOAD_OFFSET` keeps its `default
+0` and the image actually links at the MRAM base, `0x80000000`. The hardcoded
+`0x80010000` guess would have landed 64 KiB inside the image's own `.text`,
+reading SP/PC out of code words instead of out of unloaded memory.
+
+The descriptor now asks Renode for the real address instead of computing one:
+right after `sysbus LoadELF $elf`, ``$vtor ?= `sysbus GetSymbolAddress
+"_vector_table"` `` reads Zephyr's vector-table symbol straight out of the
+loaded ELF's own symbol table, then `cpu VectorTableOffset $vtor` applies it
+before `start`. This is correct for any link shape where the vector table's
+own segment has `vaddr == paddr` — the MRAM-linked shape and the ITCM-linked
+shape both measured here, but *not* an MCUboot `RAM_LOAD` slot, where
+`GetSymbolAddress` still returns the symbol's link-time VADDR while Renode
+places segment bytes by PADDR; with no address arithmetic left to fall out of
+sync with the board's Kconfig for the shapes it does cover. Verified on the
+pinned Renode v1.16.1 (`d66b0c2a`)
+against both shapes: the ITCM-linked build's `_vector_table` resolves to
+`0x0` and seeding it lets the CPU run cleanly (PC/SP progress normally); the
+MRAM-linked default build's `_vector_table` resolves to `0x80000000`
+(confirmed independently with `arm-zephyr-eabi-nm`), and seeding it fixes the
+halt-on-zero — PC/SP now come from the image's real entry point — but the
+image still does not complete a boot, because of the separate Cortex-M55
+defect `alif_ensemble_e8.repl` already documents (Renode v1.16.1 mis-executes
+a vector table placed at a high, bit31-set address like the MRAM base). A
+plain `renode metadata/renode/alif_ensemble_e8.resc` on the default `$elf`
+no longer halts from zero; no `-e $vtor=...` override is required for either
+link shape any more.
+
+Also corrects retired-executor comment rot across the Renode surface —
+`alif_ensemble_e8.{resc,repl}`, `renesas_rzv2n.{resc,repl}`,
+`tests/renode/v2n_m33_ramconsole.conf` and
+`scripts/west_commands/_alp_common.py` still named `west alp-renode` /
+`scripts/west_commands/alp_renode.py`, deleted in ADR-0020 Phase 4 (#848).
+
+Closes #947.
+### Fixed — `scripts/test-all.sh`'s inline Doxyfile had drifted from
+`pr-doxygen.yml`'s on four settings (#970)
+
+Both files hand-maintained their own copy of the SDK's Doxygen config
+despite `test-all.sh`'s own comment claiming they stayed identical. They
+had drifted in both directions: `test-all.sh` was missing
+`DOT_GRAPH_MAX_NODES = 200`, so a real "Included by graph ... too many
+nodes" warning that only fires where Graphviz `dot` is installed got
+promoted to a **false local RED** under `WARN_AS_ERROR=FAIL_ON_WARNINGS`
+that CI never saw; and it omitted `examples/README.md` from `INPUT` and
+set `GENERATE_HTML = NO`, either of which could let a **false local
+GREEN** through that CI would catch. `QUIET`/`PROJECT_NUMBER` were also
+cosmetically inconsistent.
+
+Fixed by single-sourcing the config: `docs/doxygen/Doxyfile` is now the
+one committed copy, and both `pr-doxygen.yml` and `test-all.sh`'s
+`stage_doxygen` `cat` it into `doxygen -` (stdin), appending only the
+per-run values that must not be templated in (`PROJECT_NUMBER`, and
+locally, a fresh `OUTPUT_DIRECTORY`/`WARN_LOGFILE` per run). A new gate,
+`scripts/check_doxyfile_single_source.py`, fails CI if a Doxyfile-shaped
+heredoc ever regrows in `.github/workflows/**` or `scripts/**` while the
+single source exists.
+### Fixed — `tests/zephyr/peripheral` did not compile for a board without an `alp-uart1` alias
+
+`src/uart.c` took `DEVICE_DT_GET(DT_ALIAS(alp_uart1))` at file scope with no
+devicetree guard, so any target lacking that alias failed to build with
+`'__device_dts_ord_DT_N_ALIAS_alp_uart1_ORD' undeclared here (not in a
+function)`.  `alp-uart1` is a `zephyr,uart-emul` node aliased only by the two
+native_sim overlays; a real board has no emulated UART to alias.  Reproduced on
+E1M-AEN801 silicon (`alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he`) against
+both the outgoing Zephyr v4.4.0 and the pinned v4.4.1, so this was never
+version-specific.  The device pointer, its `_open_uart1()` helper and the five
+ZTESTs that use it now sit behind `HAVE_UART1_NODE`; the other 10 UART ZTESTs
+are unaffected, and both native_sim platforms alias `alp-uart1` as
+`status = "okay"` so their coverage is unchanged.
+
+The guard uses `DT_NODE_HAS_STATUS(..., okay)`, not `DT_NODE_EXISTS(...)`:
+`DT_NODE_EXISTS` is also true for a `status = "disabled"` node, which would
+compile the block and then fail to link against a device that was never
+instantiated.  `tests/zephyr/display/src/main.c`'s `HAVE_DISPLAY_NODE` carried
+the same latent bug and is corrected too.  The same status-blind pattern across
+22 backend files is tracked separately in
+[#966](https://github.com/alplabai/alp-sdk/issues/966) and is **not** fixed
+here — it is also why the parked `alp_sdk.peripheral.evk_aen` scenario needs
+more than this guard to run.
+### Fixed — `doctor.py`'s `dtc`/`gperf` hints cited a Windows bundle that doesn't ship them; ADR 0021 item 2's injection set corrected
+
+`scripts/alp_cli/doctor.py`'s `_check_dtc` / `_check_gperf` WARN remediation
+both ended with "(bundled with the Zephyr SDK on Windows)" — false. Verified
+by downloading and `sha256`-checking the separately published sdk-ng v1.0.1
+`hosttools_windows-x86_64.7z` asset against upstream's own `sha256.sum`, then
+listing it with `7z l`: 1486 entries, 21 executables, zero `dtc`/`gperf`/
+`device-tree`/`devicetree` matches (the equivalent Linux hosttools bundle
+does ship `dtc`). A Windows customer following the old hint would install the
+Zephyr SDK and still not have either tool. Both hints now say so and point at
+`docs/cross-platform-setup.md` for the Windows install steps, without adding
+an unpoliced winget package ID — `dtc`/`gperf` stay out of
+`prerequisites.windows` / `prerequisites.install.*` (they're WARN-only:
+`edtlib` does the load-bearing dts parse in pure Python, and plain
+kernel-mode apps build without `gperf`), so hardcoding a winget ID here
+without a manifest entry would recreate the undeclared-install-command class
+issue #949 exists to eliminate. A manifest home for optional build-time
+tools (so these DO get policed the way `prerequisites.install` polices
+`git`/`cmake`/`ninja`) is a possible follow-up, not built here.
+`metadata/bootstrap.json`'s `manualInstallHints.windows.note` gains a line
+recording the same finding, placed next to the existing Zephyr SDK / 7-Zip
+lines it qualifies rather than at the end; `bootstrap-v1.schema.json`'s
+`manualInstallHints` description is touched to match.
+
+Also corrects `docs/adr/0021-toolchain-provisioning.md`'s Decision item 2,
+the "Never mutate PATH" injection list: `-DCMAKE_MAKE_PROGRAM` is dropped
+from the injection set, leaving the pair `ZEPHYR_SDK_INSTALL_DIR` /
+`ZEPHYR_TOOLCHAIN_VARIANT` — `ninja` is a `prerequisites.windows` / winget
+tool, never a Zephyr SDK artifact (this ADR's Context section already said
+so), so a `${TOOLCHAIN_ROOT}`-style path for it would resolve to nothing on
+every host. The fix for the actual problem (`ninja` missing from `PATH`
+when an editor spawns before winget updates it) is tan's business at spawn
+time, not plan content. A new dated Amendment also corrects the previous
+("tokened toolchain-root injection") Amendment's overstatement that "both
+landing sites are closed, `additionalProperties: false` contracts" —
+`slices[].command.args` (the actual landing site once
+`-DCMAKE_MAKE_PROGRAM` is in scope) is an open, unconstrained string array,
+not a closed contract; the conclusion that this needs a coordinated `tan`
+change still held, but because the `${TOOLCHAIN_ROOT}` token wasn't yet in
+tan's substitution set (tan-cli#86), not because a schema was closed against
+it — and notes that any new arg/env key still needs a
+`tests/parity/seam1_field_diff.py` (+ tan-cli vendored twin) normalization
+entry and an emit-snapshot regeneration, schema-open is not gate-free. Also
+adds a footnote to the ADR's Tier A table naming `ninja`/`dtc`/`gperf` as
+package-manager-delivered, since this ADR's own new dtc/gperf evidence put
+all three tools (not just `ninja`) in the same "table vs. Decision text"
+shape and the table itself carried no marker or forward pointer. Answers
+the Open evidence `dtc`/`gperf`-on-Windows bullet with the finding above
+(struck in full, `**Answered**`, same as the sizes bullet — including the
+`.7z`-self-extraction half, which was answered before this amendment, not
+newly here), leaving the Arm GNU Toolchain bullet exactly as already
+recorded. The ADR paragraph above is doc-only: no code, schema shape, or
+`metadata/toolchains.json` `sha256`/size change beyond the `doctor.py` hint
+strings and `bootstrap.json` note already described above.
+
+### Fixed — ADR 0021 Decision: "resolve absolute paths and inject them" was the wrong mechanism
+
+`docs/adr/0021-toolchain-provisioning.md`'s Decision (`:112-116`) told the
+toolchain-injection story as "resolve absolute paths and inject them", which
+contradicts this repo's own hermetic-plan design: `build-plan-v1.schema.json`'s
+`planPathMode: tokened` (issue #865, ADR 0020 item 5) already replaced every
+checkout/project-anchored absolute path the plan would otherwise embed with a
+literal `${SDK_ROOT}` / `${PROJECT_ROOT}` / `${PYTHON}` token, substituted by
+`tan` at materialise time. A build-plan that instead baked in an absolute
+toolchain path would regress #865 and make plans host-specific again.
+
+Adds a dated Amendment to ADR 0021 (a second, separately-titled `## Amendment`
+heading alongside the existing 2026-07-26 Arm-GNU-Toolchain one — the two
+answer unrelated open questions and ADR 0006/0012/0017/0021 already each carry
+their own singular, topic-titled `## Amendment` heading, so a second heading
+matches the established convention better than overloading one heading's
+title with unrelated content) that: reads "absolute paths" as a
+`${TOOLCHAIN_ROOT}`-style token resolved by `tan`, the same way as the three
+tokens above; confirms "Never mutate PATH" and its two consequences (no
+editor restart; two SDK versions coexist on one host) are unaffected — this
+corrects mechanism, not the decision; records that neither landing site has
+an alp-sdk-only slice (`slices[].toolchain` and `slices[].env` are both
+`additionalProperties: false` closed contracts, and `tan-core`'s
+`crates/tan-core/src/build_plan.rs` has zero references to `toolchain`), so
+this needs a coordinated `tan` change shipped additive-optional per ADR
+0020's Amendment item 3; and notes that ADR 0021's Lane 1 P1 bullet fuses the
+lockfile and the path-injection work, but only the lockfile half shipped
+(`metadata/toolchains.json`, #962) — it had a self-contained alp-sdk
+deliverable, the injection half does not, and the two separated in practice.
+
+Also replaces the ADR's unmeasured footprint estimate (Alternatives `:194`,
+Open evidence) with the real numbers already recorded in
+`metadata/toolchains.json`'s `measuredFootprint` (#949/#962): 172403720 bytes
+compressed download and 2026739200 bytes extracted on disk (of which
+`hosttools/` is 1242632545 bytes and `gnu/arm-zephyr-eabi/` is 784086497
+bytes) for the linux-x86_64 minimal SDK + `arm-zephyr-eabi` pair — the ADR's
+~1 GB estimate was ~6x too high on download and its ~17 GB estimate ~2x too
+low on disk, because it conflated the two. Records, without resolving, the
+`hosttools`/`--no-hosttools`/`dtc` trade-off the measurement exposes
+(`hosttools/` is 61% of the on-disk footprint and is what carries `dtc`;
+`west sdk install` installs it by default). Marks the Open evidence "real
+per-artifact sizes" bullet answered; the `dtc`/`gperf`-on-Windows and `.7z`
+bullets are untouched — only a clean-Windows-VM test settles those.
+
+Doc-only: no code, schema, or `metadata/toolchains.json` change.
+
+### Added — `metadata/toolchains.json`: the Zephyr SDK (cross-toolchain) pin as data (#949)
+
+alp-sdk pinned the Zephyr *version* as data (`metadata/bootstrap.json`) but
+had no equivalent pin for the Zephyr **SDK** (the `arm-zephyr-eabi` cross
+toolchain) — four CI workflows each fetched it ad hoc, with no integrity
+check and no shared source, so the versions could (and did) drift from each
+other and from the Zephyr pin.
+
+Adds `metadata/toolchains.json` (+ `metadata/schemas/toolchains-v1.schema.json`)
+as a declared, hand-maintained input beside `bootstrap.json` — never
+`alp.lock`, which is *generated* to record what a workspace resolved to;
+`alp-lock-v1.schema.json`'s reserved `toolchain` key stays unpopulated and is
+explicitly out of scope here. It carries the pinned SDK release (`1.0.1`,
+derived from Zephyr's own `SDK_VERSION` file at the pinned `v4.4.1`
+revision), the canonical upstream `sdk-ng` release URL, and a `sha256` + size
+per artifact for all three hosts (linux-x86_64, windows-x86_64,
+macos-aarch64) — pinned at origin, never rehosted, per
+`docs/adr/0021-toolchain-provisioning.md`'s Decision (GPLv3 corresponding-
+source obligations on the GCC toolchains, an unreviewed Arm EULA, and a
+download domain with no AV reputation are all costs a rehost would carry
+that a pin does not). It also records real, *measured* install-footprint
+numbers, replacing that ADR's unmeasured ~1 GB / ~17 GB figures (measured:
+~164 MiB compressed download, ~1.89 GiB on disk for the same
+minimal + `arm-zephyr-eabi` set) and states, without resolving, the
+`hosttools`/`--no-hosttools`/`dtc` trade-off `west sdk install` makes by
+default.
+
+New **blocking** gate `scripts/check_toolchain_lock.py` makes this repo's
+own CI the first consumer: it asserts the manifest validates against its
+schema; that `zephyrSdk.version` equals the real `SDK_VERSION` file at the
+Zephyr revision `bootstrap.json` pins (read via `git show <rev>:SDK_VERSION`
+against a resolved Zephyr checkout, skipped-with-reason when none resolves,
+promotable to a hard failure with `ALP_REQUIRE_ZEPHYR_ORACLE=1` — the same
+flag `tests/scripts/test_hil_blocks_coverage.py`'s `#807`-class gate already
+uses for the identical situation); and that no `.github/workflows/*.yml`
+file — every one, not a curated list — names the sdk-ng release URL or one
+of the manifest's own artifact filenames with a version slot that isn't the
+manifest-sourced `${{ env.ZEPHYR_SDK_VERSION }}` reference, or does either
+with no `ZEPHYR_SDK_SHA256` check anywhere in the file. The trigger for that
+scan is derived from `metadata/toolchains.json` itself (the release URL path
+and each artifact's filename shape, both wildcarded past their version) at
+run time, never a second hardcoded copy in the gate — the same discipline
+`check_bootstrap_manifest.py`'s winget-identifier scan already established,
+applied here after a repo-wide scan review found the original curated
+four-file scan scope caught none of a dropped-in fifth workflow's hardcoded
+version, hardcoded URL, or missing hash check. The original four workflows
+(`TOOLCHAIN_WORKFLOWS`) are still asserted separately: each must still
+contain a real read of `metadata/toolchains.json`, catching a deleted
+manifest-read step even in a file (`pr-twister.yml`) that names no SDK URL
+literal for the repo-wide scan to trigger on. A `container:` image-tag pin
+is a known, documented gap (the module docstring explains why) — it bundles
+a toolchain, not a URL/version/hash triple this gate's checks are shaped to
+verify.
+
+Fixes four live defects this closes: `pr-renode-aen-smoke.yml` hardcoded
+`SDK_VER=0.16.8` — wrong, not merely stale, for every Zephyr revision this
+repo has ever pinned (its own `SDK_VERSION` was already `1.0.1` back when
+this workflow was authored against Zephyr v4.4.0); `pr-renode-sim-mode.yml`
+hardcoded the correct `1.0.1` independently, with nothing keeping the two
+copies in agreement; `pr-getting-started-aen801.yml` downloaded the SDK
+archive with `wget` and no integrity check at all; and `pr-twister.yml`'s
+SDK-toolchain cache key was keyed on a **Zephyr** version
+(`zephyr-sdk-arm-zephyr-eabi-v4.4.0-...`, itself one patch behind the actual
+`v4.4.1` Zephyr pin) instead of the **SDK** version, so an SDK bump would
+have silently kept reusing a stale cached toolchain forever. All four now
+read version/URL/sha256 from `metadata/toolchains.json` at run time and
+verify the download's `sha256` before extracting it; the twister cache key
+is now keyed on `${{ env.ZEPHYR_SDK_VERSION }}`.
+
+`scripts/check_bootstrap_manifest.py` already scoped itself out of "the
+separate Zephyr SDK toolchain cache, which tracks its own release" — this
+change fills that deliberately-left gap rather than duplicating it.
+
+### Added — `prerequisites.install`: single source for host-tool install commands (#949)
+
+`metadata/bootstrap.json`'s `prerequisites` declared tool NAMES only; the
+install COMMAND for each was hand-copied into six places with nothing
+keeping the copies in agreement.
+
+Adds `prerequisites.install.{linux,macos,windows}` — one shell command per
+tool, keyed by OS rather than `posix`: a `sudo apt-get install`-shaped
+command is Debian-family-specific and a `brew install`-shaped one is
+macOS-specific, the same reason `nativeLibHints` already keys per-OS
+instead of per-`posix`. The four `windows` commands are copied verbatim
+from `scripts/bootstrap.ps1`'s own `$Prereqs` `Hint=` values, which stay
+the authority (bootstrap.ps1 can't read this file for its own
+prereq-missing hint — the bootstrap-of-the-bootstrap circularity the
+manifest's own comment already documents). `metadata/schemas/bootstrap-v1.
+schema.json` gains the matching `install` property, required, with a
+description that points at `check_bootstrap_manifest.py`'s
+`_check_install_commands` as the enforcement point rather than restating
+what it checks.
+
+`scripts/check_bootstrap_manifest.py` gains `_check_install_commands` — a
+real gate; previously the whole `prerequisites.*` subtree was blanket-
+exempt from the orphaned-leaf scan, so the schema addition alone would
+have passed with zero coverage. It asserts: (1) every prerequisite tool has
+a matching install command; (2) `bootstrap.ps1`'s `Hint=` values agree with
+`install.windows` byte-for-byte; (3) any line under `docs/**/*.md`,
+`scripts/**/*.py`, `scripts/*.ps1`, `scripts/*.sh` or `README.md` naming a
+winget package identifier the manifest itself declares must carry that
+identifier's full canonical command verbatim — and an `install.windows`
+command with no `--id <PackageId>` to extract is itself flagged rather
+than silently dropped from that scan's trigger set.
+
+The scan triggers on the package IDENTIFIER, not on the install verb, and
+derives its trigger set from `install.windows` at run time rather than
+keeping a second hardcoded copy of the IDs inside the gate meant to catch
+hardcoded copies. A verb trigger (`winget install` / `brew install` / `apt
+install`) was tried first and rejected — it fires on every install
+one-liner in the repo and needed an allowlist to stay green; keyed on
+identifiers instead, the allowlist is empty (see
+`_winget_ids_and_commands`'s docstring for the full reasoning). Only
+`docs/adr/**` is excluded, on the same grounds `check_doc_drift.py` already
+excludes it: an ADR quotes an identifier as evidence about a past or
+proposed state rather than asserting a current one.
+
+The scan deliberately covers the Windows side only. The linux/macos
+identifiers are the bare words `git`, `cmake` and `python3`, which appear
+throughout ordinary prose; any scan over them is unfixably noisy, so
+assertion (1) carries those instead.
+
+`scripts/alp_cli/doctor.py`'s `_check_ninja` and `_check_cmake` now source
+their FAIL remediation hints from the manifest instead of hardcoding one.
+`cmake` — tracked in both `prerequisites.posix` and `prerequisites.windows`
+— is what actually gives all three `install.{linux,macos,windows}` maps a
+run-time reader (`ninja` is windows-only, so its hint alone never reaches
+`install.linux`/`install.macos`). `dtc`/`gperf` aren't among the four
+tracked prerequisites and are left as-is (dtc's Windows-bundling claim is a
+separate, already-tracked ADR 0021 question).
+
+Also: `metadata/bootstrap.json`'s `_comment` (and the schema's matching
+description) no longer claims tan is only an "INTENDED future consumer" of
+these facts — `tan-core`'s `parse_bootstrap_manifest` / `BootstrapFacts`
+has read them since tan-cli PR #55; and `manualInstallHints.windows.note`
+gains a second line: 7-Zip must be on PATH before `west sdk install` on
+native Windows (west delegates `.7z` extraction to `patoolib`, which shells
+out to an external `7z`/`7za`/`7zr`/`7zz`/`7zzs`/`unar` binary with no
+pure-Python fallback).
+
+### Fixed — bootstrap script defects surfaced while wiring `prerequisites.install`
+
+- `scripts/alp_cli/doctor.py`'s ninja hint printed `winget install
+  Ninja-build.Ninja` (missing `-e --id`) next to an `apt install
+  ninja-build` that matched no canonical command anywhere else; it now
+  sources its remediation string from `prerequisites.install` (above)
+  instead of hardcoding one.
+- `_bootstrap_manifest` (the reader backing that lookup) now degrades to
+  `None` — never raises — on a `metadata/bootstrap.json` that's missing,
+  not valid UTF-8, not valid JSON, or valid JSON whose top level isn't a
+  JSON object; `_prereq_install_hint` guards each of the
+  `prerequisites`/`install`/`<os>`/`<tool>` hops with
+  `isinstance(node, dict)` for the same reason. A truncated or bad-merge
+  manifest is exactly the broken workspace `alp doctor` exists to
+  diagnose, so it must degrade to a generic hint rather than crash the
+  whole command.
+- `docs/cross-platform-setup.md` drops its stray `winget install -e --id
+  GnuWin32.Make` line — nothing in this repo's native-Windows path invokes
+  `make` (the Zephyr generator here is Ninja, itself a tracked
+  prerequisite).
+- `manualInstallHints.windows.note` presented the Arm GNU Toolchain and the
+  Zephyr SDK as an unscoped, interchangeable pair — calling the Zephyr SDK
+  an "alternative cross-toolchain" implied either one does the same job.
+  It doesn't: the Zephyr-on-M real-silicon path (`west build` / `west
+  flash`) cross-compiles with the Zephyr SDK's `arm-zephyr-eabi`
+  (Ubuntu's apt `gcc-arm-none-eabi` predates Cortex-M55/Helium support —
+  `.github/workflows/pr-getting-started-aen801.yml:116-119`); the Arm GNU
+  Toolchain (`arm-none-eabi-gcc`) is needed only by a customer rebuilding
+  the GD32 bridge firmware — pre-flashed by Alp Lab, optional and fully
+  open. Reworded the manifest note (and the matching schema description)
+  so the Zephyr SDK reads as the one every Zephyr customer needs and the
+  Arm GNU Toolchain reads as conditional (the installer URL and the "tick
+  'Add path to environment variable'" tip moved onto the manifest's Arm GNU
+  Toolchain line). `scripts/bootstrap.ps1` had been printing this fact
+  **twice** — a hardcoded here-string (wrong wording) immediately above the
+  `foreach ($line in $ManualInstallNote)` loop that already renders the
+  same manifest note (right wording, once corrected) — so the fix deletes
+  the hardcoded here-string rather than rewording it, leaving the `foreach`
+  as the only print path (net: `bootstrap.ps1` shrinks). The stale comment
+  sitting between the two ("Rendered from metadata/bootstrap.json's
+  `manualInstallHints.windows.note` … not hardcoded here") had described the
+  `foreach` below it but sat directly under the contradicting here-string;
+  removing the here-string resolves that too. Scoped
+  `docs/cross-platform-setup.md` §2.3/§3.4/§4.3 to the three opt-in paths
+  that actually need the Arm GNU Toolchain — GD32 bridge rebuild, the
+  CC3501E bridge firmware's silicon-free stub target (its production image
+  builds with TI `ticlang`, not this toolchain), and hand-written
+  bare-metal firmware on a real M-class core (no cross-compiled bare-metal
+  recipe ships in-tree today — the in-repo `ALP_OS=baremetal` CI job is a
+  host-toolchain compile smoke, not a cross-compiled one); added a dated
+  Amendment to ADR 0012 correcting its Decision-section
+  operational-consequences bullet and its Consequences → Neutral bullet,
+  which made the same unscoped claim, and a dated Amendment to ADR 0021
+  recording this three-path answer to its Arm-GNU-Toolchain open-evidence
+  question. `docs/bring-up-v2n.md`'s GD32-build step also had a stale
+  `cd alp-sdk/gd32-bridge` (no such directory) — corrected to
+  `firmware/gd32-bridge/`, and its "unprogrammed module" framing now
+  distinguishes the bare GD32 chip shipped blank from GigaDevice from a
+  customer-shipped module, which Alp Lab pre-flashes during production.
+
+### Added — `check_write_text_newline`: `scripts/` + `firmware/` `write_text()` writers must pass `newline=""`
+
+New **blocking** PR gate (`scripts/check_write_text_newline.py`, wired into
+`pr-metadata-validate.yml:validate`) flags any `scripts/` or `firmware/`
+`write_text()` call on a repo-tree artifact that omits `newline=""` (or
+`newline="\n"`). `Path.write_text()` otherwise translates `'\n'` to
+`os.linesep`, silently rewriting the whole file to CRLF on a Windows host;
+`.gitattributes` normalizes it back to LF on `git add`, so the bug never reds
+CI, it just leaves the file permanently whole-file-dirty in every working
+tree. A genuine tempfile/scratch/out-of-tree writer is exempt per call, not
+per file, via `# write-text-newline-exempt: <reason>` on the call itself or
+as a standalone comment directly above it. The `newline=` **value** is
+checked too, not just its presence — `newline=None` is the CRLF-translating
+default. Scope: matches `.write_text()` only, not an `open(path, "w")`
+writer.
+
+Every repo-tree `write_text()` under `scripts/` and `firmware/` now passes
+`newline=""` (goldens, catalogs, headers, generated docs, `alp.lock`, and the
+`protocol_vectors.txt` generators for both the GD32 bridge and the CC3501E).
+`alp init`'s scaffolded `board.yaml`/`README.md` and the `--output` writers in
+`alp emit` and `gen_sbom.py` pick up the same fix, so a Windows `alp init` no
+longer seeds CRLF that a later `west alp-migrate --apply` (or a release-asset
+regen) then flips to LF as unrelated churn.
+
+### Fixed — pre-respin `INA236_VCAM0` address (`0x48`) still documented in five places
+
+U32's INA236B was re-strapped `A0=SCL` to `0x4B` from the next batch, precisely
+because `0x48` is the TAS2563 broadcast address and is unreadable there.  The
+macro and the metadata already carried `0x4B`; the prose describing the part did
+not.  Corrected in `docs/boards/e1m-evk.md` (the table row, which also moves —
+the table is address-sorted), `include/alp/chips/ina236.h`,
+`include/alp/boards/alp_e1m_evk.h` (two separate blocks) and
+`metadata/boards/e1m-evk.yaml` (whose text is mirrored into the generated
+`alp_e1m_evk_routes.h`).
+
+Two of those were wrong rather than merely stale: `alp_e1m_evk.h` claimed the
+INA236B variant occupies `0x44..0x47` — it occupies `0x48..0x4B`, and
+`tests/zephyr/chips/src/test_platform_ics.c:168` already named `0x44..0x47` as
+out of range — and both the header and the metadata asserted in the present
+tense that `0x48` "is occupied", which stopped being true at the re-strap.
+
+Comment-only in the headers: the ABI snapshot is unchanged.  Refs #637.
+
+### Changed — Ethos-U accelerator sized per target core; NPU→core pairing single-sourced in the SoC JSON
+
+- The build emit (`_emit_inference`) now sizes the Ethos-U accelerator
+  (`CONFIG_ETHOS_U{55,85}_<mac>`) from the NPU instance paired with the
+  target core, not the SoC's most-capable instance.  On the Alif E3/E5/E7 —
+  which carry a 256-MAC high-perf Ethos-U55 (M55-HP) and a 128-MAC
+  high-efficiency Ethos-U55 (M55-HE) — an `m55_he` inference slice used to
+  emit `CONFIG_ETHOS_U55_256`; the HE core drives the 128-MAC U55 and a
+  256-MAC command stream errors that NPU at invoke (register-proven on E8).
+  A new `npus[].paired_core` field in the SoC JSON (`$defs/npu` schema) wires
+  each instance to its `cores[].id`; the emit fails loudly if a multi-MAC
+  variant is unpaired rather than guessing (#934).
+- The NPU→core pairing is now single-sourced in the SoC JSON.  The SoM
+  preset `inference.npu_population[].role` / `paired_with` fields — dead
+  documentation no code read, scaffolded as `TBD` — are removed; an entry is
+  now `{ variant }` only.  A `validate_metadata` gate
+  (`_check_soc_npu_pairing`) enforces the single source: every `paired_core`
+  must name a real `cores[].id`, and a type carrying more than one distinct
+  `mac_per_cycle` must pair every instance (#938).
+### Added — I3C joins the portable-API conformance suite
+
+`tests/zephyr/conformance/` exercises each portable `<alp/*>` class against a
+common contract, keyed on `ALP_CAP_ID_HW_*`.  The I3C class shipped in #926
+without a row: the 16-step plan for that PR never named the suite,
+`check_test_coverage.py` passed without it, and `ALP_CAP_ID_HW_I3C` did not
+exist until #926 itself added it — so the row was hard-blocked at the time.
+
+Adds the row now that the enum value exists.  Shape mirrors `i2c` (open a bus by
+form-factor id, blocking transfer against a target address), with
+`null_handle_call` using `alp_i3c_write` as the simplest op that must reject a
+NULL handle without touching the bus.  Marked `sim_backed = false` — Zephyr
+ships no I3C emulator, so the suite contract-checks the class rather than
+exercising it, exactly as it already does for `dac`, `can` and `rtc`.
+
+Verified on `native_sim/native/64`: 93 of 93 cases pass, and the new rows do
+execute rather than silently skip —
+
+```
+conformance[i3c]: degrade path -- no instance 0 on this build, open refused with -6 (failure contract validated)
+conformance[i3c]: degrade path -- no instance to double-close (NULL-close covered by case C)
+```
+
+Note the class stays `[ABI-EXPERIMENTAL]`: controller init is bench-proven on
+E1M-AEN801 (#926), but a live transfer is still unproven because no I3C target
+is populated on the bench carrier.  The conformance row asserts the contract the
+class guarantees today and implies no transfer coverage.
+
+Closes #937.
+### Fixed — `comparator_lp` removed from the E3 and E5 SoC metadata
+
+`e3.json` and `e5.json` declared `comparator_lp: 1`, but neither part has a
+low-power comparator: their DFP SVDs (`Debug/SVD/AE302F80F55D5AE_…`,
+`AE512F80F55D5LS_…`) carry `CMP0..CMP3` and **no `LPCMP`**, while the E8 SVD
+(`AE822FA0E5597BS0_…`) carries both.  The LP comparator is a `FA0E5597`-
+generation block E3/E5 do not have.
+
+Same defect and same fix as E7 in #932.  E3 and E5 were out of that pass's reach
+because the DFP ships no `Device/soc/` directory for them — only an SVD, which
+that pass did not look at.  Per the file convention an absent key means zero
+instances (no SoC JSON sets a peripheral to `0`).
+
+Also re-confirmed correct against the same SVDs, and left unchanged: `i2c_lp` 1,
+`spi_lp` 1, no `i3c_lp`, `i2c` 4, `spi` 4, `uart` 8, `i2s` 4, `adc_12bit` 3,
+`dac_12bit` 2, `comparator_hs` 4, `can_fd` 1, `ethernet` 1, `usb_2` 1, `sdio` 1,
+`rtc` 1.  The E8 SVD independently corroborates #932's changes there
+(`LPSPI0`+`LPSPI1`, `LPI2C0`+`LPI2C1`, `I3C`+`LPI3C`, `CMP0..CMP3`+`LPCMP`).
+
+Metadata-only: `comparator_lp` has no `CAP_ALIASES` entry, so no generated file
+moves.  Refs #936.
+### Fixed — `ram-run.sh` now says why a Flow C console came back empty
+
+A Flow C ITCM RAM-run of a UART-console app produces **zero** bytes on UART5 —
+confirmed on hardware where that capture is otherwise proven working, with the
+core reaching `arch_cpu_idle` at `IPSR = 0`, i.e. the app ran fine and the output
+simply did not route (#935).
+
+`ram-run.sh` handled that case silently.  It resolved the console buffer with
+
+```sh
+BUF=0x$($OBJ-nm "$ELF" | awk '/ ram_console_buf$/{print $1}')
+```
+
+and on a UART-console build `nm` matches nothing, so `BUF` became the bare
+string `0x`, JLink ran `mem8 0x, <size>`, and the operator got an empty
+"RAM console (decoded)" block with no hint why — which reads as *the app
+crashed* when nothing is wrong with it.
+
+Now the missing symbol is detected and the run stops with the remedy, pointing
+at the fragment that already exists for this:
+
+```
+ram-run: '<elf>' has no 'ram_console_buf' symbol -- this app was built
+         with the UART console, which Flow C cannot capture.
+         Rebuild it with the RAM console layered on top:
+             scripts/bench/aen/build.sh <app-dir> \
+                 -DEXTRA_CONF_FILE=.../scripts/bench/aen/aen-bench-shared.conf
+```
+
+Verified against the ELF that produced the original silent console
+(`examples/aen/aen-i3c-regcheck` built for
+`alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he`): it carries **0**
+`ram_console_buf` symbols, so the guard fires on exactly the real case.
+
+Also corrects a stale comment in `aen-bench-shared.conf`, which claimed "the app
+UART is not on USB on this bench".  UART5 **has** been USB-routed since
+2026-07-03; the reason Flow C needs the RAM console is narrower and more
+surprising than that, and the comment now states it.
+
+The apps themselves are untouched — their committed `prj.conf` keeps the
+customer-facing UART console.  Refs #935.
+
+### Added — `metadata/bootstrap.json`: the cross-platform bootstrap facts as data
+
+- New committed, schema-validated manifest
+  (`metadata/schemas/bootstrap-v1.schema.json`) holding the FACTS every
+  executor needs to assemble a Zephyr workspace: the Zephyr pin, venv
+  layout, the `west` / `pip` argument vectors, the `env` map, and the
+  per-OS native-library and manual-install hints.  `scripts/bootstrap.sh`
+  and `scripts/bootstrap.ps1` now consume it instead of carrying
+  divergent hardcoded copies.  Facts only — control flow (`ZEPHYR_BASE`
+  reuse/rejection, venv idempotency, `.west` branching) stays as code in
+  each executor; this is deliberately not a step-execution DSL.  Static
+  JSON rather than an `--emit` target because `scripts/alp_project.py`
+  exits on missing `jsonschema`/`PyYAML`, which bootstrap itself installs
+  (circular), and JSON rather than YAML because bash must parse it
+  pre-venv with stdlib `json` only.  `tan` (Rust) is the intended third
+  consumer; nothing wires it yet.
+- `scripts/check_bootstrap_manifest.py` is the drift gate that keeps the
+  manifest load-bearing rather than a fourth copy of the same facts.  It
+  validates against the schema; asserts `zephyr.version` against
+  `west.yml`'s `- name: zephyr` revision, the `README.md` badge, and the
+  four CI workflows that pin Zephyr independently of `west update`
+  (`pr-twister`, `pr-tier-a-libraries`, `nightly-aen-hil`,
+  `pr-getting-started-aen801`); asserts the deliberately-hardcoded
+  prerequisite lists and Python floor in both scripts against the
+  manifest; refuses an unknown top-level key; and walks every leaf so a
+  fact no executor reads fails the gate by name.  The hardcoded-literal
+  scan is heredoc/here-string aware, so a Zephyr pin printed verbatim to
+  the user is caught as well as one in source.
+
+### Fixed — bootstrap script defects surfaced while single-sourcing the facts
+
+- `scripts/bootstrap.ps1` collapsed a single-element argument array to a
+  `String`, and PowerShell splats a string character-by-character, so
+  `west zephyr-export` ran as 13 one-character arguments — and with no
+  `$LASTEXITCODE` check it failed silently on native Windows.
+- `scripts/bootstrap.ps1` substituted `${WORKSPACE_DIR}` at load time,
+  before the workspace-reuse branch could reassign it, so a reused
+  workspace printed a wrong `$env:ZEPHYR_BASE` in the closing summary.
+- List-valued facts were joined and re-split, which also split on spaces
+  *inside* an element: a path such as `C:/Users/John Smith/alp-sdk`
+  reached `west init -l` as two arguments.  Now emitted as bash array
+  literals via `shlex.quote`.
+- `eval "$(python3 -c ...)"` swallowed a non-zero `python3` exit under
+  `set -uo pipefail` (no `-e`), so a failed or partial manifest read
+  proceeded on a partially-loaded fact set instead of reaching `die`.
+- `bash scripts/bootstrap.sh --help` sliced its own header with a
+  hardcoded `sed -n '3,32p'` line range, which silently truncated the
+  flag list and the "After it runs" block whenever the header grew.  The
+  usage text now has one authoritative copy.
+- `--print-env` / `-PrintEnv` sat behind the full prerequisite check, so
+  a host missing `cmake` (or `ninja`, on Windows) could not print env
+  lines; they now require only a working Python, which is all they use.
+- Both scripts now refuse a `metadata/bootstrap.json` whose
+  `schemaVersion` they do not understand, rather than parsing a future
+  manifest blind on a machine where the gate never runs.
+### Fixed — Alif Ensemble SoC peripheral counts re-ingested from the DFP
+
+`metadata/socs/alif/ensemble/{e4,e6,e7,e8}.json` carried counts that were never
+read from their own part: E4's block was inherited from the E3 sibling and E6's
+from E7.  But E3/E5/E7 are the older `F80F55xx` generation while E4/E6/E8 are
+`FA0E5597`, so both inheritances imported the wrong generation's numbers.  E8's
+own note already flagged its counts as provisional (ingested against datasheet
+v0.51, never reconciled to v1.0).
+
+Re-derived from the Alif DFP — peripheral `*_BASE` symbols and the feature flags
+in `Device/soc/<part>/include/soc_features.h`, which ships directories for
+`AE402FA0E5597` (E4), `AE722F80F55D5` (E7) and `AE822FA0E5597` (E8):
+
+| field | e4 | e6 | e7 | e8 |
+| --- | --- | --- | --- | --- |
+| `i2c_lp` | 1 → **2** | 1 → **2** | 1 | 2 |
+| `spi_lp` | 1 → **2** | 1 → **2** | 1 | 1 → **2** |
+| `gpio_18v` | 120 → **136** | 120 → **136** | 120 | 136 |
+| `i3c_lp` | — → **1** | — → **1** | — | 1 |
+| `timer_lp_32bit` | — → **3** | — → **3** | — | 3 |
+| `watchdog` | 2 | 3 → **4** | 4 | 4 |
+| `dma_general_32ch` | 3 | 3 | 3 | — → **3** |
+| `comparator_lp` | 1 | 1 | 1 → **removed** | 1 |
+
+- `spi_lp` was wrong on **every** Alif part including E8, the one we bench:
+  `LPSPI0_BASE` and `LPSPI1_BASE` both exist.
+- `gpio_18v` is derivable rather than opaque: GPIO ports × 8.  E4/E8 expose
+  `GPIO0`–`GPIO14` + `GPIO16` + `GPIO17` = 17 ports = 136; E7 exposes 15 = 120.
+  `SOC_FEAT_GPIO_HAS_PORT16_17` (1 on E4/E8, 0 on E7) confirms it independently.
+- `watchdog` is core-count-driven but not one-per-core: the A32 contributes
+  **two** views (`WDT_AP_CTRL` + `WDT_AP_S_CTRL`), which is why E8 — same three
+  cores as E6 — is 4.  E6's old 3 came from the one-per-core rule.
+- `i3c_lp` / `timer_lp_32bit`: `LPI3C_BASE` (`0x43006000`, `IRQ50`) and
+  `LPUTIMER_BASE` exist on E4/E8 and not on E7 — `FA0E5597`-generation blocks
+  E4/E6 carry but had not declared.  The vendor fork agrees on I3C: `lpi3c0` is
+  defined in exactly one file, `dts/arm/alif/ensemble/common/e4_e6_e8.dtsi`.
+- `comparator_lp` removed from E7: it defines `CMP0..CMP3` but no `LPCMP_BASE`,
+  while E8 defines both.  Per the file convention an absent key means zero (no
+  SoC JSON sets a peripheral to `0`).
+- E4's full `*_BASE` set is a strict **subset** of E8's (183 vs 199), and all 16
+  extra E8 symbols are A32-related (`MHU_A32_*`, `MHU_APSS_*`, `WDT_AP_*`) —
+  confirming E4 and E8 are identical apart from the A32 cluster.
+
+Re-verified as **already correct** rather than changed, via `soc_features.h`:
+`timer_32bit` 12 + `encoder_quadrature` 4 (`SOC_FEAT_HAS_UTIMER4_15` +
+`SOC_FEAT_QEC_HAS_SEP_CHANNELS`, identical on all three parts), `timer_lp` 4
+(`SOC_FEAT_HAS_LPTIMER2_3`), `rtc` 1 (`SOC_FEAT_HAS_LPRTC1` = 0), `isp`
+(`SOC_FEAT_HAS_ISP` = 1 on E4/E8, 0 on E7 — matching the key's presence), and
+`dpi_parallel` / `pdm` / `pdm_lp` (single `CDC` / `PDM` / `LPPDM` instances).
+
+Only the `pdm` / `pdm_lp` value of **4** remains unconfirmed — a channel count
+inside one block, uniform across every Alif SoC file, so no cross-part
+inconsistency remains; confirming the number needs the datasheet.  E6 has no DFP
+directory at all, so its values come from the two DFP-present members of its
+generation (E4 and E8), which agree on every field changed here.
+
 ### Fixed — `scripts/bootstrap.sh` silently ran `cargo install` on every completed run
 
 - The closing "Next steps" block used an **unquoted** heredoc tag
@@ -29,6 +1397,241 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 - Pre-existing on `main` and `dev`, so it affects released versions.  The
   other four heredocs in the script were audited and contain no backticks
   or `$(...)`.
+### Added — `dac` peripheral class in the `board.yaml` `peripherals:` enum
+
+`core_entry.peripherals` covered `adc` but not `dac`, so the DAC half of an
+analog project could not be expressed in `board.yaml`
+(issue [#919](https://github.com/alplabai/alp-sdk/issues/919)). Everything
+under the enum was already in place — `<alp/dac.h>` with its portable backend,
+the `alp-dac` DTS alias bucket, and `dac_12bit` on the Alif E8 SoC JSON — so
+`examples/aen/aen-analog-validate` had to hand-write `CONFIG_DAC=y` in
+`prj.conf` to run its DAC0 → ADC loopback. The token now exists,
+`metadata/registries/peripheral-kconfig.json` maps it to `CONFIG_DAC`, and the
+example takes it and drops the workaround. Also corrected the enum's own
+description, which claimed every class is reached "via the matching
+`<alp/<class>.h>` wrapper" — false for 8 of the 16 existing entries
+(`gpio`/`i2c`/`spi`/`uart` live in `<alp/peripheral.h>`).
+
+### Added — Alif ISP-Pico driver compiles + links against hal_alif v2.3.0
+
+The Alif Ensemble ISP-Pico (Verisilicon ISP-Nano) video driver
+(`zephyr/drivers/video/isp_pico.c`, ADR-0017 Tier-2) now builds: vendored the
+last missing dependency, the Apache-2.0 headers `isp-vsi.h` + `isp_ctrl_params.h`
+from `alifsemi/zephyr_alif` v2.3.0 (they ship in neither hal_alif nor the CMSIS
+DFP), and confirmed the v2.3.0 libisp wrapper's 3-arg `isp_vsi_bottom_half` matches
+the ported driver. `examples/aen/aen-isp-regcheck` now build-proves the driver TU
+compiles + links against `libisp_gcc.a` on E1M-AEN801 (was bind-only). Added the
+`CONFIG_FP_HARDABI` BUILD_ASSERT guard (the libisp blob is hard-float, like the
+JPEG blob). **Build-only: live capture stays BENCH-BLOCKED** — the ISP needs a
+camera→CSI→ISP→memory graph and no camera sensor is wired on this AEN batch;
+silicon verification is deferred to a camera-populated board. Internal driver
+enablement, no `<alp/*>` surface change.
+### Added — portable `<alp/i3c.h>` I3C controller class
+
+New peripheral class mirroring `alp_i2c_*` (`alp_i3c_open/write/read/
+write_read/close/capabilities`), addressed by the target's dynamic (or
+legacy static) address.  `alp_i3c_write_read` is a single chained
+`i3c_transfer()` (write, then repeated-START read) — the canonical
+register-read idiom, matching `alp_i2c_write_read`'s shape.  Timing (SCL
+rate, DAA) stays devicetree-owned, not a config field: the legal rate on a
+mixed I3C/I2C bus depends on the slowest device populated.
+
+- Zephyr backend (`src/backends/i3c/zephyr_drv.c`) over upstream
+  `drivers/i3c/i3c_dw.c` (`snps,designware-i3c`), resolving `ALP_E1M_I3C0`
+  to the `alp-i3c0` DT alias.  On the E1M-AEN801 that alias points at
+  `lpi3c0@0x43006000`, the M55-HE local-domain controller (IRQ 50).  The
+  two E8 I3C controllers are INDEPENDENT and overlap on ONE pad pair only —
+  P7_6/P7_7, exposed as both `PIN_P7_6__I3C_SDA_D`/`PIN_P7_7__I3C_SCL_D`
+  (fn6, `i3c0`) and `PIN_P7_6__LPI3C_SDA_B`/`PIN_P7_7__LPI3C_SCL_B` (fn3,
+  `lpi3c0`).  The E1M-AEN801 breaks out only that pair, so on THIS SoM
+  exactly one of the two may be enabled and firmware selects `lpi3c0` (the
+  M55-HE local domain), leaving `i3c0` disabled — a board routing them to
+  non-overlapping pads (`i3c0` on P0_0/P0_1, `lpi3c0` on P6_2/P6_3) runs
+  both at once.  The SoM pinout table records those pads under the main-I3C
+  function and has no LPI3C row — it does not dictate the choice.
+- `scripts/alp_project_emit/dts.py`'s carrier DT-wiring catalog gained an
+  `i3c` entry: `board.yaml` `peripherals: [i3c]` on an `m55_he` slice emits
+  the `lpi3c0` enable + pinctrl + `alp-i3c0` alias automatically; an
+  `m55_hp` slice (or the unscoped cross-core union) gets nothing, so
+  `alp_i3c_open()` on HP surfaces `ALP_ERR_NOT_READY` instead of binding a
+  dead IRQ.
+- Legacy (non-I3C) devices sharing the bus are NOT driven through this
+  handle — they ride the existing `alp_i2c_*` surface via a board alias
+  pointed at the same controller node (Zephyr's `i3c_driver_api` embeds an
+  `i2c_api`, which `i3c_dw.c` implements); `metadata/boards/e1m-evk.yaml`
+  already establishes this pattern (`E1M_I3C0` doubling as
+  `EVK_I2C_BUS_ARDUINO`).
+- `aen-i3c-regcheck` re-based off the raw-DT bind-proof staged on
+  `feat/aen-soc-peripheral-coverage` to drive the portable API instead:
+  opens `ALP_E1M_I3C0`, reads back capabilities, and issues a probe write.
+  **SILICON-PROVEN (controller init)** on E1M-AEN801, labgrid place
+  `e1m-aen-evk-01`, Flow C ITCM RAM-run, 2026-07-25, reproduced twice:
+
+  ```
+  bus: ALP_E1M_I3C0 = 0 (alp-i3c0 alias -> lpi3c0@0x43006000)
+  alp_i3c_open: OK (handle=0x20000d20)
+  capabilities: present (flags=0x00000000)
+  alp_i3c_write(addr=0x08): status=-5 (ALP_ERR_IO -- expected, no target populated)
+  RESULT PASS: I3C controller BINDS + OPENS via <alp/i3c.h> ...
+  ```
+
+  That clears the two risks this class was flagged for: the `ALIF_LPI3C_CLK`
+  clock-id and the P7_6/P7_7 fn3 pinctrl both come up clean at device init.
+  **A live transfer remains unproven** — no I3C target is populated on this
+  AEN batch, so DAA finds zero targets and the probe write returns
+  `ALP_ERR_IO` by design; the transfer path is reached but never
+  acknowledged by a real device.  `[ABI-EXPERIMENTAL]`; the remaining
+  promotion gate is a live transfer against a populated target.
+
+### Added — Alif Ensemble E8 SoC peripheral coverage: I3C, OSPI/HexSPI, managed-MDIO (build-only)
+
+Three previously-missing E8 peripheral drivers, all **build-only** (compile+link
+proven on `alp_e1m_aen801_m55_he`; none is silicon-verifiable on this batch — no
+I3C/MDIO bus target wired, HexSPI unpopulated):
+- **I3C / I3C-LP** — Tier-1 enablement of upstream Zephyr `i3c_dw.c`
+  (`snps,designware-i3c`): DT nodes + clock-ids + pinctrl + Kconfig, no vendored
+  source. Example `aen-i3c-regcheck`.
+- **OSPI / HexSPI** — Zephyr shim `flash_ospi_alif.c` (ADR-0017 Tier-1.5) over the
+  Apache-2.0 hal_alif OSPI HAL (`CONFIG_USE_ALIF_HAL_OSPI`): init / XIP / AES-inline
+  / DDR config. `flash_driver_api` read/write/erase deferred (silicon-gated).
+  Example `aen-ospi-regcheck`. Runtime HW-blocked (HexSPI not populated — MRAM-only).
+- **Managed-MDIO** — clean-room Clause-22 controller `mdio_dwmac_alif.c` for the
+  DWC_ether_qos GMAC, authored from the DFP register map (no DFP source vendored),
+  enabling a managed-PHY path for the existing Ethernet driver.
+
+Not built (scope confirmed not gaps): DMA2D (the existing D/AVE2D GPU2D backend
+covers it), `<alp/display.h>` (the generic Zephyr-display wrapper already serves
+CDC200), `<alp/dsp.h>` (CMSIS-DSP Helium is already the E8 path), `<alp/tmu.h>`
+(E8 has no CORDIC hardware).
+
+### Added — `check_bootstrap_manifest.py --fix`: the pin propagator
+
+- Bumping `metadata/bootstrap.json`'s `zephyr.version` used to mean an
+  error-prone manual sweep across 8 dependent sites (`west.yml`, four CI
+  workflows' `--mr`/cache-key pins, and the README badge) with only the
+  existing gate to catch a missed one after the fact. `--fix` closes the
+  loop: it rewrites every one of those sites FROM the manifest, reusing
+  the exact same compiled regexes/constants (`_WEST_YML_ZEPHYR_RE`,
+  `_WEST_MR_RE`, `_CACHE_KEY_RE`, `_README_BADGE_RE`) the verify-only
+  checks already read — deliberately no second, parallel pin map, which
+  would just be a new flavour of the drift issue #917 exists to kill. A
+  bump is now: edit one line in `metadata/bootstrap.json`, run `--fix`,
+  then run the gate with no flag to prove the propagation. Idempotent (a
+  site already at `zephyr.version` is left byte-for-byte untouched); a
+  site the gate expects but can no longer find/match is a hard failure
+  naming it, never a silent no-op. Writes with `newline=""` so the
+  rewrite never flips these LF-pinned (`.gitattributes` `eol=lf`) files
+  to CRLF on a Windows host — the same class of Windows-only-digest trap
+  `alp.lock`'s `_dir_digest` hit (see below). `--fix` does not touch
+  `scripts/bootstrap.sh`/`bootstrap.ps1` (they read `zephyr.version` at
+  run time and must never hardcode it — that is what the gate's existing
+  hardcoded-literal scan polices) or any prose doc/CHANGELOG history.
+
+### Changed — Zephyr v4.4.0 → v4.4.1 (patch bump)
+
+- `metadata/bootstrap.json` `zephyr.version` moves to `v4.4.1` (upstream
+  tag object `247e755247840abefa16136168b4a56682150f50` for
+  `refs/tags/v4.4.1`, which dereferences to commit
+  `1f6485eca25431b5ff27ce9a754218c9e559bbbb` -- `--mr v4.4.1` resolves to
+  that commit, not the tag object, so this distinction matters for anyone
+  diffing the quoted SHA against a checked-out workspace HEAD), applied
+  to every dependent machine-pin site via the new `--fix` propagator above
+  — this bump is also its first real-world proof. Per
+  [`docs/zephyr-version-policy.md`](docs/zephyr-version-policy.md)'s "When
+  we bump" table, a patch bump within the same LTS/stable line carries
+  **no visible API change** and rolls into the next alp-sdk patch release
+  automatically — `metadata/sdk_version.yaml` is deliberately NOT bumped
+  and there is no accompanying tag/release for this change. `SDK_VERSION`
+  (the separate Zephyr SDK toolchain pin, `1.0.1`) and the `west>=0.14.0`
+  floor are unaffected; MAJOR.MINOR stays `4.4`, so
+  `bootstrap.sh`/`bootstrap.ps1`'s `PIN_MM` workspace-reuse check sees no
+  change either. Prose mentions of the pin updated by hand across
+  `docs/zephyr-version-policy.md`, `docs/getting-started.md`,
+  `docs/local-ci.md`, `docs/glossary.md`, `docs/troubleshooting.md`,
+  `docs/cli.md`, `docs/board-config-schema.md`, `docs/bring-up-aen.md`,
+  and CI-workflow comments in `pr-getting-started-aen801.yml`,
+  `pr-renode-sim-mode.yml`, and `pr-twister.yml` — a mechanical regex
+  sweep across prose/history is exactly how a CHANGELOG or an ADR gets
+  corrupted, so those stayed hand-edited, not `--fix`-swept.
+  The three in-tree-subsystem library manifests (`metadata/libraries/coap.yaml`,
+  `lwm2m.yaml`, `modbus.yaml`) had their `version:` field bumped to `4.4.1`
+  per the schema's "pinned upstream version" definition
+  (`metadata/schemas/library-v1.schema.json:31`) — their pinned upstream
+  version IS the pinned Zephyr release — and `docs/portability-matrix.md`
+  was regenerated (`scripts/gen_portability_matrix.py`) to pick up the new
+  `4.4.1` cells. Each manifest's in-file comments split two ways: the
+  `# Grounding (pinned Zephyr v4.4.0 workspace)` header and its
+  `$ZEPHYR_BASE/...:<line>` Kconfig citations are genuine provenance —
+  they record where a symbol was READ, in a v4.4.0 checkout, and stay at
+  `v4.4.0` on purpose; rewriting them would fabricate a re-transcription
+  that never happened. The `west.yml revision v4.4.0` cross-reference and
+  the `upstream version 4.4.0 ... PATCHLEVEL 0` bullet describe the PIN
+  itself, not the reading, so those move to `v4.4.1`/`PATCHLEVEL 1` along
+  with `west.yml`. `scripts/check_bootstrap_manifest.py` gained a new
+  verify check + `--fix` site for exactly this class of manifest (any
+  `metadata/libraries/*.yaml` with `integration.zephyr.module: null` **and**
+  `requires.os == [zephyr]` — the structural signal that distinguishes a
+  genuine in-tree Zephyr subsystem from alp-sdk's own in-tree libraries and
+  unpinned placeholders, which also carry `module: null` but pin their own
+  version) — this class of drift was previously unguarded, so a future
+  bump's `--fix` run would have left these three silently stale. ADR 0017's
+  Context section (`docs/adr/0017-alp-sdk-over-the-vendor-sdk.md:15`,
+  "alp-sdk targets one upstream Zephyr base (v4.4.0)") is left alone: it is
+  a present-tense statement of what the ADR's decision applied to at its
+  2026-06-15 acceptance, not the LTS-migration narrative (that lives in
+  `docs/zephyr-version-policy.md`'s "Migration note" above) — freezing an
+  ADR is defensible because it is a decision record, but it is a decision
+  record, not a narrative, and the two should not be conflated. The frozen
+  v3.7.0→v4.4.0 CHANGELOG entries above are left alone likewise, as history,
+  not live pin statements. **Peripheral re-verification (policy
+  step 4) is NOT claimed as done locally for this patch** — it runs via CI
+  twister (`pr-twister.yml`) and the nightly HIL job
+  (`nightly-aen-hil.yml`) against real E1M-AEN801 silicon, same as every
+  other pin bump.
+- `docs/zephyr-version-policy.md` dropped the dead "Zephyr CI docker image
+  `v0.27.4`" row from the "What's pinned today" table and its matching
+  bump-procedure bullet — no `container:`/`image:` line exists anywhere
+  in `.github/workflows/`, and `0.27.4` appeared nowhere else in the repo
+  outside CHANGELOG history, so both pointed at a pin that does not exist.
+  The bump procedure's step 3 now documents the fast path: edit
+  `metadata/bootstrap.json`'s `zephyr.version`, run `python3
+  scripts/check_bootstrap_manifest.py --fix` to propagate to `west.yml` +
+  the four CI workflows' `--mr`/cache-key pins + the README badge + every
+  in-tree-Zephyr-subsystem library manifest's `version:` field, then run
+  the plain (no-flag) check to prove it; prose docs, CHANGELOG history,
+  every manifest's provenance comments, and every other
+  `metadata/libraries/*.yaml` manifest (the ones pinning their own upstream
+  release/SHA) stay hand-edited. Steps 5–7 (the `sdk_version.yaml` bump,
+  the `[Unreleased]` CHANGELOG heading, and the tag/release) are now marked
+  LTS/minor-only — this patch bump stops after step 4, and the procedure
+  was previously silent about that split. The "Why LTS, not the latest"
+  CI-cost reason is corrected: it previously claimed a patch bump "stays
+  within the cache key" — wrong, the cache key embeds the full `X.Y.Z`, so
+  this very 4.4.0→4.4.1 bump changed every Zephyr cache key and forces the
+  same clean ~5 min rebuild a minor bump does.
+- `alp.lock` regenerated (`scripts/west_commands/alp_lock.py`) against the
+  bumped manifest; `west.zephyr.revision`, the provenance-only
+  `sdk.revision`, and `digests.metadata` moved — the last of those because
+  the in-tree-subsystem library manifests' provenance comments (finding
+  above) also changed bytes under `metadata/**`. Regenerating from a
+  CRLF-corrupted working tree bakes a Windows-only `_dir_digest` that reds
+  CI for everyone (bit this repo on f3d1ab72, and again earlier this
+  session) — `metadata/**/*.yaml` and `metadata/schemas/*.schema.json`
+  were normalized to LF first, and `alp.lock` itself was normalized to LF
+  after `alp_lock.py` wrote it (the script's own `open()`/`json.dump`
+  aren't newline-safe on Windows, the same class of trap).
+- `docs/abi/v0.5-sbom.spdx.json.template` deleted — a dead template
+  declaring `versionInfo: "v4.4.0"` and a matching
+  `.../tags/v4.4.0.tar.gz` downloadLocation, i.e. its own supply-chain pin
+  would have gone stale the moment this bump landed. Nothing consumed it:
+  `release.yml`, `scripts/gen_sbom.py`, and `scripts/check_sbom.py` all
+  build the real release SBOM as CycloneDX from `alp.lock`, never from
+  this SPDX template. Per the no-legacy-compat rule (no active customers;
+  delete cleanly, no tombstones), it is removed rather than bumped in
+  place. `docs/v1.0-readiness.md:379` claimed this template was "wired
+  into `release.yml` as part of the artefact-generation step" — that was
+  never true — and is corrected to describe the actual `gen_sbom.py`/
+  `alp.lock` path instead.
 
 ## [v0.13.0] - 2026-07-24
 
@@ -199,6 +1802,85 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   applies the same defensive fix to the Phase-3 parity-gate list. Adds
   `docs/adr/**` to `pr-doxygen`'s PR path filter so an ADR edit that
   breaks the full-tree Doxygen build is now caught. (#889)
+
+### Added — `<alp/jpeg.h>` portable JPEG-encoder surface (`[ABI-EXPERIMENTAL]`)
+
+- New encode-only portable JPEG-encoder surface: `alp_jpeg_open()` /
+  `alp_jpeg_encode()` / `alp_jpeg_capabilities()` / `alp_jpeg_close()`
+  dispatch across registered backends by `silicon_ref` priority (class
+  dispatcher + `NOT_IMPLEMENTED` stub, no decode API -- the E8 has no
+  hardware JPEG decoder). A portable software baseline backend
+  (`src/backends/jpeg/sw_baseline.c`, vendored `toojpeg_baseline.c`)
+  ships on **every** SoM (4:2:0 + mono), and a HW-accelerated
+  `alif_hantro` backend (`src/backends/jpeg/alif_hantro.c`) drives the
+  Alif Ensemble E8 Hantro VC9000E encoder on **E1M-AEN801** at priority
+  100, falling back to the software path everywhere else.
+- **Silicon-proven on E1M-AEN801 (Ensemble E8)**: the HW backend wins
+  backend arbitration (`alp_jpeg_capabilities()` reports
+  `hw_accelerated=1`), driver init reads `JPEG_SWREG0` back as
+  `JPEG_HW_ID` `0x90001000` (HW version `0x00c0c200`), and
+  `alp_jpeg_encode()` returns `rc=0` `out_len=935` for a 64x64 NV12
+  frame -- the 935-byte JPEG stream (`FF D8` SOI header) was pulled
+  off-target over SWD and round-tripped through libjpeg to a correct
+  64x64 image. Buffers were placed in the AXI-visible SRAM0 bank
+  (`out_buf@0x02000000`, `nv12_buf@0x02002000`) to satisfy the
+  HW-backend DMA-reachable-buffer contract below.
+- **HW-backend DMA-reachable-buffer contract**: the Hantro block is an
+  AXI DMA master and cannot reach the M55's TCM. `alif_hantro.c` sources
+  the ITCM/DTCM local-window ranges from the DT `itcm`/`dtcm` nodes (not
+  hardcoded literals) and rejects any request whose input or output
+  buffer overlaps either window, returning `ALP_ERR_NOSUPPORT` (falls
+  back to `sw_baseline`) with a `LOG_ERR` naming the offending buffer.
+- `alp_pixfmt_t` additions and the `format`/`pixfmt_mask` fields are
+  detailed in the Fixed entry directly below (same batch).
+
+### Fixed — `<alp/jpeg.h>` portable input-pixelformat contract + AEN801 HW-backend bench fallout
+
+- A real AEN801 silicon bench run on the Task-3/4 Hantro VC9000E hardware
+  backend (`src/backends/jpeg/alif_hantro.c`) proved the HW path is alive
+  (`JPEG_SWREG0` reads back `JPEG_HW_ID` `0x90001000`) and found two
+  defects plus a maintainer-approved API redesign, all landed together:
+  - **Portable pixelformat contract** (`[ABI-EXPERIMENTAL]`; ABI snapshot
+    diff verified additive-only): `alp_jpeg_encode_req_t` documented a
+    planar Y/U/V frame, `sw_baseline.c` consumed true planar, but
+    `alif_hantro.c` silently reinterpreted `y_plane` as NV12 -- a
+    portability-contract break with no type-level signal. `<alp/peripheral.h>`
+    (`[ABI-STABLE]`, additive) gains `ALP_PIXFMT_YUV420_PLANAR` /
+    `ALP_PIXFMT_NV12` appended to `alp_pixfmt_t` (existing values
+    unchanged); `alp_jpeg_encode_req_t` gains an explicit `format` field
+    and `alp_jpeg_caps_t` gains `pixfmt_mask` so a backend declares which
+    layout(s) it accepts instead of an app guessing from `CONFIG_*`.
+    `subsample` is kept as a separate field (chroma sampling ratio,
+    orthogonal to buffer layout) rather than folded into `format` --
+    collapsing them would force inventing pixfmt values for "mono,
+    planar" / "4:2:2, planar" that no display/camera caller needs.
+  - **Defect #1**: `examples/aen/aen-jpeg-regcheck/prj.conf` was missing
+    `CONFIG_ALP_SOC_ALIF_ENSEMBLE_E8=y`. Without it the build resolved
+    `ALP_SOC_REF_STR="unknown"`, the backend selector filtered
+    `alif_hantro` (`silicon_ref="alif:ensemble:e8"`) out, and
+    `sw_baseline` silently won instead -- the example built and ran but
+    never touched the hardware it claimed to validate.
+  - **Defect #2 (correctness-critical)**: the HW encode MemManage-faulted
+    on real silicon (`MMFAR=0x0`, PC in `jpeg_header_generation`). Root
+    cause: the ported Zephyr v4.4 video subsystem's `video_enqueue()`
+    does not forward a caller's `struct video_buffer` to the driver -- it
+    copies only `.type` into a framework-owned pool slot
+    (`video_buf[buf->index]`) and hands the driver *that* struct instead.
+    `alif_hantro.c`'s stack-local output buffer left `.index` at its
+    0-default, so the driver read `buf->buffer == NULL`. Fixed via
+    `video_import_buffer()` (`<zephyr/video/video.h>`), the framework's
+    supported way to hand a caller-owned pointer into the pool without a
+    copy. BENCH-VERIFIED: a subsequent AEN801 silicon run confirmed the
+    fix -- `alp_jpeg_encode()` returns `rc=0 out_len=935` with a valid
+    JPEG stream (see the Added entry above).
+  - Reviewer minors: the NOMEM path now sets `*out_len` to the required
+    size when known (per `<alp/jpeg.h>`'s documented contract); the
+    single-encode-validated repeat-encode state is now called out with a
+    ponytail comment instead of silently assumed.
+  - `examples/aen/aen-jpeg-regcheck/src/main.c` collapses the
+    per-backend `#if CONFIG_ALP_SDK_JPEG_ALIF_HANTRO` frame branching
+    into a runtime `pixfmt_mask` query, so the example itself can no
+    longer silently build the wrong layout for whichever backend wins.
 
 ## [v0.12.0] - 2026-07-22
 
