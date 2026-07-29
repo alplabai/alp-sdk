@@ -24,6 +24,12 @@
  *
  * native_sim wires a GPIO-emul controller in boards/, so the open /
  * configure / read / write path runs and the harness latches `done`.
+ * On real hardware the demo keeps running after `done`: it blinks the
+ * LED forever at a slow, visible 500 ms on / 500 ms off cadence so a
+ * fresh-out-of-the-box board shows something happening at the bench.
+ * That endless loop is skipped under native_sim (guarded on
+ * CONFIG_BOARD_NATIVE_SIM in main()) so the twister harness still
+ * gets a clean, prompt exit.
  */
 
 #include <stdio.h>
@@ -67,7 +73,27 @@ int main(void)
 	s            = alp_button_led_is_pressed(&bl, &pressed);
 	printf("[gpio] is_pressed -> status=%d pressed=%d\n", (int)s, (int)pressed);
 
-	alp_button_led_deinit(&bl);
 	printf("[gpio] done\n");
+
+#ifdef CONFIG_BOARD_NATIVE_SIM
+	/* native_sim: the twister harness only waits for the "done" line
+	 * above and then tears the process down, so exit cleanly instead
+	 * of falling into the endless blink below. */
+	alp_button_led_deinit(&bl);
 	return 0;
+#else
+	/* Real hardware: this is the "fresh customer sees a blinking LED"
+     * acceptance target, so keep driving the pin forever after
+     * "done".  Deliberately no deinit here -- deinit would leave the
+     * LED off, and every iteration below still needs the handle.  Do
+     * NOT delete this #ifdef to "simplify" an unconditional loop:
+     * that would also hang under native_sim and break both twister
+     * tests in testcase.yaml. */
+	for (;;) {
+		alp_button_led_set(&bl, true);
+		alp_delay_ms(500);
+		alp_button_led_set(&bl, false);
+		alp_delay_ms(500);
+	}
+#endif
 }
