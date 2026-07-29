@@ -20,6 +20,46 @@ is the two acceptance targets: a fresh customer scaffolds a blink project and
 sees the LED blink on an E1M-AEN801 (surviving a cold power-cycle), and an
 existing Rust-`tan` v0.4.0 user upgrades with no manual migration.
 
+## INVARIANT — one `board.yaml`, and the OS is DERIVED, never chosen
+
+Maintainer, 2026-07-29, marked *"you need to keep those things"*:
+
+> *"we define everything from one file `board.yaml` and yocto and zephyr are
+> automatically selected for the cores… for example core M33, zephyr, for A32
+> yocto is selected automatically."*
+
+**This is the product, not an implementation detail.** A customer writes exactly
+one `board.yaml`. They never pick an OS, never pick a build system, never pick a
+toolchain. The per-core OS class is **derived** from the core's architecture —
+Cortex-M → Zephyr, Cortex-A → Yocto — and everything downstream (which tool
+runs, which config is emitted, which artefacts appear) follows from that
+derivation. The taxonomy lives in `scripts/alp_orchestrate/topology.py`
+(`core_os_topology()` / `emit_os_topology()`) and the derived value reaches the
+executor as `slices[].backend`.
+
+Binding consequences for the port:
+
+1. **`tan` never offers an OS/backend choice.** No `--os`, no `--backend`, no
+   prompt, no default to override. If a command appears to need one, the
+   derivation is incomplete — fix it in the planner, do not add a flag. A flag
+   here would convert a derived fact into a second source of truth and break
+   both the unification guard and this invariant at once.
+2. **The derivation stays in alp-sdk**, with `metadata/**`. `tan` receives an
+   already-resolved `backend` per slice and executes it. `tan` must not contain
+   the Cortex-M→Zephyr / Cortex-A→Yocto mapping, or any core-to-OS knowledge at
+   all — that is a hardware fact.
+3. **One `board.yaml` drives every slice.** A heterogeneous build (M33 + A55 in
+   one module) comes from a single file and a single `tan build`. Splitting
+   per-OS inputs, or requiring one invocation per OS class, regresses the
+   product even if every individual command still works.
+4. **This is a review gate**, alongside the two unification rules: any change
+   that makes the OS user-selectable, duplicates the taxonomy into `tan`, or
+   requires more than one input file is rejected regardless of its other merits.
+
+Prior art to preserve, not rediscover: this was already settled once — the
+recorded decision is that OS is *class-derived, not a picker*, and
+`system-manifest.yaml` is the contract carrying the result.
+
 ## The user-facing surface is FROZEN; the internals are ours
 
 Maintainer, 2026-07-29: *"the tan commands will stay as is and tan will be
