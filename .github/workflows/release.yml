@@ -143,8 +143,17 @@ jobs:
           # before the final heading exists and so falls back to
           # `## [Unreleased]` instead, clearly labelled as such.
           #
-          # Args (not `${{ }}` interpolated into the script) so a stray
-          # `$`/backtick in either value can't be read as shell/Python.
+          # Passed as argv, NOT interpolated as a workflow expression into
+          # the script body, so a stray `$`/backtick in either value can't
+          # be read as shell/Python.
+          #
+          # Do not write an empty workflow expression anywhere in this file,
+          # not even inside a `run:` comment: expression substitution happens
+          # before the shell ever sees the text, an empty one is a syntax
+          # error, and GitHub then rejects the WHOLE file -- every push
+          # reports a 0-second "workflow file issue" failure and no tag can
+          # ever build a release. That is what an illustrative empty
+          # expression in this very comment did (fixed here).
           python3 - "$VERSION" "$IS_PRERELEASE" <<'PY' > release_notes.md
           import re, sys
 
