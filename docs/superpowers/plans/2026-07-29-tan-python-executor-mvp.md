@@ -1369,7 +1369,14 @@ from pathlib import Path
 
 from tan.core.plan_exec import PolicyAction, assemble_slice_env, resolve_action
 
-KNOWN_BACKENDS = frozenset({"zephyr", "baremetal", "yocto", "native"})
+// CORRECTION (2026-07-29): the line below is WRONG as originally written — it
+// listed "native", which is not a legal backend. `metadata/schemas/
+// build-plan-v1.schema.json` defines slices[].backend as
+// enum: ["zephyr", "yocto", "baremetal"] and nothing else; Rust's `Backend`
+// enum matches, with an explicit Unknown(String) variant "preserved verbatim so
+// the executor can apply executionPolicy.unknownBackend". Treating "native" as
+// known makes Python execute a slice Rust would refuse. Use exactly:
+KNOWN_BACKENDS = frozenset({"zephyr", "yocto", "baremetal"})
 
 
 @dataclass(frozen=True)
