@@ -15,6 +15,14 @@
 ## Global Constraints
 
 - **Python 3.11+.** No dependency beyond `typer`, `rich`, `pytest`, `pyinstaller`.
+  **Scope note:** this four-dependency ceiling binds **sub-project 1 only**. The
+  executor genuinely needs nothing more. From sub-project 2 on — when the
+  planner moves in — `tan` additionally requires `PyYAML`, `jsonschema`,
+  `click`, `cryptography`, `cbor2`, `questionary`, `colorama` and `pyserial`
+  (already alp-sdk's declared deps), plus `kconfiglib` loaded at runtime from
+  `$ZEPHYR_BASE/scripts/kconfig`. Do not carry this ceiling into a later
+  sub-project as if it were permanent. Note `alp_cli` is already built on
+  `click` and Typer is a layer over click, so the two CLI surfaces converge.
 - **Nothing but JSON on stdout** in `--format json` mode. Logs/progress go to stderr. A stray `print()` silently breaks the extension.
 - **`--version` first line must match `/^tan \d+\.\d+\.\d+/`** — the extension rejects the binary otherwise (`alp-sdk-vscode/src/alpCli/service.ts:107-121`).
 - **Envelope key set is `{command, ok, exitCode, project, sdk?, data, issues}`.** `sdk` is **omitted entirely when absent — never `null`** (that is what keeps the goldens byte-identical).
