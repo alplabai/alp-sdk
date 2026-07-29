@@ -60,6 +60,18 @@ def test_extract_unverified_peripherals_pending_rm_ingestion_covers_all_keys():
     assert gsc.extract_unverified_peripherals(soc) == ["i2c", "spi"]
 
 
+def test_extract_unverified_peripherals_explicit_list_wins_over_pending_flag():
+    """A file can carry BOTH `pending_reference_manual_ingestion: true` (the
+    rest of the block is still unpopulated) AND its own `peripherals_unverified`
+    (even `[]`) for the handful of keys it individually grounds (e.g.
+    i.MX93: mipi_dsi/lcdif cited from the pinned Zephyr dtsi). The explicit
+    list -- not the wholesale fallback -- decides the outcome."""
+    soc = {"peripherals": {"mipi_dsi": 1, "lcdif": 1},
+           "pending_reference_manual_ingestion": True,
+           "peripherals_unverified": []}
+    assert gsc.extract_unverified_peripherals(soc) == []
+
+
 def test_extract_unverified_peripherals_absent_is_empty():
     assert gsc.extract_unverified_peripherals({"peripherals": {"i2c": 4}}) == []
 
@@ -71,5 +83,5 @@ def test_header_flags_alif_pdm_as_unverified():
     text = gsc.emit()
     assert ("#if defined(CONFIG_ALP_SOC_ALIF_ENSEMBLE_E3)\n"
             "/* alif:ensemble:e3 */\n"
-            "/* UNVERIFIED (no datasheet/DFP/HWRM citation): pdm, pdm_lp */\n") in text
-    assert "UNVERIFIED (no datasheet/DFP/HWRM citation): adc_12bit" in text
+            "/* UNVERIFIED (count not backed by a primary source): pdm, pdm_lp */\n") in text
+    assert "UNVERIFIED (count not backed by a primary source): adc_12bit" in text

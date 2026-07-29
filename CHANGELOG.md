@@ -20,19 +20,26 @@ something the repo ships); `firmware/gd32-bridge/README.md`'s own quick-start
 binary one directory up, at `build/gd32-bridge.bin` — so even a customer who
 builds the firmware by the tree's own documented instructions does not land
 the file at the path the metadata promised. `tan-cli`'s flash planner
-(`crates/tan-core/src/flash/mod.rs`) turns that string into a real
+(`crates/tan-cli/src/commands/flash/mod.rs`) turns that string into a real
 `FlashKind::Helper` target on every default `tan flash`, so a customer who
 cloned and flashed a V2N/V2M board got a missing-file failure from a path
 the metadata itself promised.
 
-`firmware_path` is now the literal `TBD`, matching the schema's own
-documented convention for "no prebuilt/shipped image yet" (already used for
-AEN's `cc3501e_otp` helper) — `firmware/gd32-bridge/` is source-only today;
-alp-sdk does not vendor a prebuilt binary. `flash_method: swd_probe` and
-`flash_args` are untouched (that half is silicon-proven); only the "which
-binary" half was the false promise. `scripts/alp_orchestrate/manifest.py`'s
-existing `TBD` handling now surfaces a human-readable note on these four
-SKUs' `system-manifest.yaml` for free.
+An earlier fix in this same slice set `firmware_path: TBD`, on the theory
+that `TBD` is the schema's convention for "no shipped image yet" — but
+`crates/tan-cli/src/commands/flash/mod.rs` does not treat `"TBD"` as a
+sentinel: its artefact filter is `.filter(|s| !s.is_empty())`, so `TBD`
+becomes the artefact string, gets resolved to `<build_root>/TBD`, and a real
+flasher gets spawned against that nonexistent path — replacing a clean
+refusal with a worse failure mode. `firmware_path` is now dropped from all
+four entries entirely (schema-legal: `som-preset-v1.schema.json` requires
+only `name`/`chip`), so `flash/mod.rs`'s existing artefact-resolution branch
+takes the `None` path and refuses cleanly: `"flash: helper 'gd32_bridge' has
+no output_artefact / firmware_path; can't flash."` `flash_method:
+swd_probe` and `flash_args` (including `base: "0x08000000"`) are untouched —
+real hardware facts for whenever a prebuilt binary ships, and never reached
+by the flash planner until `firmware_path` exists again, since artefact
+resolution fails before `base` is ever consulted.
 
 ### Fixed — Alif Ensemble SoC peripheral counts shipped as fact with no way to tell audited from inherited (#936)
 
@@ -49,16 +56,30 @@ E6 from E7 — wrong).
 Added `peripherals_unverified` (per-file array of uncited `peripherals`
 keys) to `metadata/schemas/soc-spec-v1.schema.json`, and set it to
 `["pdm", "pdm_lp"]` on every Alif Ensemble SoC file. E5, whose entire block
-is inherited rather than independently ingested, is instead marked with the
-existing `pending_reference_manual_ingestion: true` flag (already wired to
-a `validate_metadata.py` warning), which `gen_soc_caps.py` now treats as
-"every `peripherals` key on this file is unverified." Both cases surface as
-an `/* UNVERIFIED (no datasheet/DFP/HWRM citation): ... */` comment directly
-above the affected `#elif defined(CONFIG_ALP_SOC_...)` block in the
-generated `soc_caps.h`, so the gap is visible where the macros are actually
-consumed, not just recorded in metadata nobody reads. This does not correct
-any count — the full re-audit against Alif's datasheets/DFP is tracked as
-follow-up work.
+is inherited rather than independently ingested, carries its own explicit
+`peripherals_unverified` listing all 32 of its keys — not the
+`pending_reference_manual_ingestion` flag, which means "`peripherals: {}` /
+counts default to zero" per its own schema description, a claim that's
+false for E5's fully-populated (if uncited) block and produced a wrong
+`validate_metadata.py` WARN. `gen_soc_caps.py`'s `extract_unverified_peripherals()`
+now gives an explicit `peripherals_unverified` (even `[]`) precedence over
+the wholesale `pending_reference_manual_ingestion` fallback, so a file that
+grounds specific keys individually — e.g. i.MX93, whose `mipi_dsi`/`lcdif`
+are both cited to the pinned Zephyr v4.4.0 dtsi in its own `notes` even
+though the rest of its `peripherals` block is still pending RM ingestion —
+can say so with `peripherals_unverified: []` instead of the generator
+falsely marking those two cited keys unverified too. The emitted comment
+also changed wording, from "no datasheet/DFP/HWRM citation" to "count not
+backed by a primary source", because E4's own ingestion note confirms the
+pdm/pdm_lp *instance* against the DFP and only leaves the channel-count
+*value* uncited — the old wording overstated E4's gap by implying nothing
+about pdm was known. Every case surfaces as an
+`/* UNVERIFIED (count not backed by a primary source): ... */` comment
+directly above the affected `#elif defined(CONFIG_ALP_SOC_...)` block in
+the generated `soc_caps.h`, so the gap is visible where the macros are
+actually consumed, not just recorded in metadata nobody reads. This does
+not correct any count — the full re-audit against Alif's datasheets/DFP is
+tracked as follow-up work.
 
 ### Changed — `zephyr/kconfigs/core.kconfig`: E8 builds now default to the real SoC capability profile, not the permissive one
 

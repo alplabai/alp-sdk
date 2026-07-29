@@ -121,8 +121,9 @@ def test_emit_system_manifest_round_trip(tmp_path: Path) -> None:
 
     # Helper-MCU registration: V2N101's Phase-3 `helper_firmware:`
     # block lists gd32_bridge (the GD32G553 supervisor firmware
-    # image).  The manifest carries the chip slug + firmware_path
-    # + flash_method verbatim.
+    # image).  The manifest carries the chip slug + flash_method
+    # verbatim; firmware_path is absent (#852/#936 review fix, see
+    # test_emit_system_manifest_populates_helper_mcus below).
     helper_names = [h["name"] for h in parsed["helper_mcus"]]
     assert "gd32_bridge" in helper_names
     gd32 = next(h for h in parsed["helper_mcus"]
@@ -177,11 +178,15 @@ def test_emit_system_manifest_populates_helper_mcus(tmp_path: Path) -> None:
     """Phase 3 helper-MCU population.
 
     V2N101's preset declares one helper_firmware entry (gd32_bridge);
-    the manifest must carry the chip slug + firmware_path + flash_method
-    verbatim.  firmware_path is `TBD` (#852) -- alp-sdk vendors no prebuilt
-    gd32-bridge binary; `firmware/gd32-bridge/` is a source-only tree whose
-    `build/` output is gitignored -- so the manifest also carries the TBD
-    note per `_helper_mcus`'s documented convention.
+    the manifest must carry the chip slug + flash_method verbatim.
+    `firmware_path` is entirely ABSENT from the preset (#852 review fix,
+    2026-07): the old `firmware_path: TBD` sentinel wasn't actually treated
+    as a sentinel by tan-cli's flash planner
+    (`crates/tan-cli/src/commands/flash/mod.rs`) -- it became the artefact
+    string and a real flasher was spawned against a nonexistent `TBD`
+    path. Dropping the field entirely makes tan-cli's own clean-refusal
+    path fire instead ("has no output_artefact / firmware_path; can't
+    flash"). No `firmware_path` key means no TBD note either.
     """
     path = _write_board(tmp_path, V2N_HAPPY)
     project = load_board_yaml(path)
@@ -194,9 +199,8 @@ def test_emit_system_manifest_populates_helper_mcus(tmp_path: Path) -> None:
     assert "gd32_bridge" in by_name
     gd32 = by_name["gd32_bridge"]
     assert gd32["chip"] == "gd32g553"
-    assert gd32["firmware_path"] == "TBD"
-    assert gd32["note"] == \
-        "firmware_path TBD; populated when the upstream firmware release lands"
+    assert "firmware_path" not in gd32
+    assert "note" not in gd32
     assert gd32["flash_method"] == "swd_probe"
     assert isinstance(gd32["flash_args"], dict)
     assert gd32["flash_args"]["target"] == "gd32g553"

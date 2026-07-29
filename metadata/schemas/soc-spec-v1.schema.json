@@ -143,7 +143,7 @@
     "peripherals_unverified": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "Subset of THIS file's `peripherals` keys whose count is not backed by a datasheet table, HWRM, DFP soc_features.h, or SVD citation -- i.e. inherited from a sibling part, carried forward from an early ingestion pass, or otherwise asserted without a traceable primary source. Distinct from `pending_reference_manual_ingestion`, which marks the WHOLE peripherals block as not yet ingested for an otherwise-placeholder file; this field flags specific gaps on a file that IS mostly grounded (e.g. `pdm`/`pdm_lp` = 4 is identical and uncited on every Alif Ensemble part -- issue #936). `scripts/gen_soc_caps.py` surfaces the listed keys as a comment above the SoC's block in the generated soc_caps.h, so a reader of ALP_SOC_*_COUNT / ALP_HAS() can see which ceilings rest on an unaudited count. `scripts/validate_metadata.py` warns (non-fatal) if a listed key isn't actually present in `peripherals`."
+      "description": "Subset of THIS file's `peripherals` keys whose count has no datasheet/DFP/HWRM/SVD citation (inherited from a sibling, carried forward from an early ingestion pass, or otherwise asserted without a primary source). Distinct from `pending_reference_manual_ingestion`, which marks the WHOLE block unaudited on an otherwise-placeholder file; this field flags specific gaps on a file that IS mostly grounded (issue #936). `gen_soc_caps.py` surfaces the listed keys as a comment above the SoC's block in soc_caps.h; `validate_metadata.py` warns (non-fatal) if a listed key isn't actually present in `peripherals`."
     },
 
     "capabilities": {

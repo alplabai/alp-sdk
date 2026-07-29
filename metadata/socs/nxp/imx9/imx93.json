@@ -53,7 +53,8 @@
     "lcdif": 1
   },
   "pending_reference_manual_ingestion": true,
-  "_pending_reason": "IMX93RM.pdf ingestion against peripherals: pending; the full per-peripheral count table still defaults to zero -- ALP_SOC_*_COUNT ceilings on NX9101 under-report until it is populated. Exception: peripherals.mipi_dsi is grounded ahead of the RM pass from the pinned Zephyr v4.4.0 dtsi (see notes), so the flag stays true while a single display-path count is populated.",
+  "_pending_reason": "IMX93RM.pdf ingestion against peripherals: pending; the full per-peripheral count table still defaults to zero -- ALP_SOC_*_COUNT ceilings on NX9101 under-report until it is populated. Exception: peripherals.mipi_dsi and peripherals.lcdif are both grounded ahead of the RM pass from the pinned Zephyr v4.4.0 dtsi (see notes), so the flag stays true for the rest of the block while `peripherals_unverified: []` below records that these two populated counts are NOT part of the gap (#936).",
+  "peripherals_unverified": [],
   "capabilities": {
     "ethos_u65_count": 1,
     "neon":            true,
