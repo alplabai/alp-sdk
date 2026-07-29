@@ -180,9 +180,38 @@ extension.**
   can materialise a directory of files. One-dir is out of scope, permanently,
   unless the extension's download path is rewritten.
 
-**Release assets must keep the existing names and targets** (`service.ts:34-46`)
-— six targets, named by Rust target triple even though the producer is no longer
-Rust:
+### CORRECTION — the release contract is EIGHT assets, and PyInstaller cannot satisfy it
+
+The six entries below are the **extension's consumption map** (`service.ts:34-46`).
+The **release** produces **eight** (`release.yml:26-33`, `:107-142`): Linux ships
+both a `-gnu` and a `-musl` asset per architecture, and the extension maps both
+Linux platforms to `-musl` deliberately.
+
+Two of the eight are **not producible by PyInstaller**, and this is a real
+packaging blocker for the cutover, not a naming quibble:
+
+- **The `-gnu` pair carries a glibc 2.31 floor**, achieved by cross-building with
+  `cargo-zigbuild` pinned to `x86_64-unknown-linux-gnu.2.31`. `release.yml:38-40`
+  states why: *"building on the raw runner links its glibc — 2.39 on ubuntu-24.04
+  — which breaks consumers on older distros."* PyInstaller links the build host's
+  glibc and has **no equivalent floor mechanism**. Producing a 2.31-floor artifact
+  means building inside an old-glibc image (manylinux / ubuntu-20.04), not a flag.
+- **The `-musl` pair is documented as "static, any libc"** (`release.yml:30-31`).
+  PyInstaller **cannot produce this at all** — the frozen binary embeds a
+  dynamically-linked CPython. The name would become a lie in a way that silently
+  breaks exactly the users it exists to serve.
+- **PyInstaller cannot cross-compile**, full stop. Rust's matrix cross-builds all
+  eight from a few runners; a Python build needs a **native runner per target**,
+  including `aarch64` Windows and Linux.
+
+**This is unresolved.** Options are: build each target on a native runner of that
+architecture (CI cost, and aarch64 Windows runners are scarce); drop the `-musl`
+assets and accept a glibc floor set by whatever image CI uses; or keep a
+Rust-built shim. It must be decided before sub-project 4 (cutover), and it does
+not affect sub-project 1.
+
+**The extension's consumption map** (`service.ts:34-46`) — six entries, named by
+Rust target triple even though the producer is no longer Rust:
 
 | platform/arch | asset name |
 |---|---|
