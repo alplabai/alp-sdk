@@ -342,6 +342,30 @@ renderer, never before it.
 Success is a blinking LED on the E1M-AEN801, verified on the bench — not a
 successful compile.
 
+**The artifact is `examples/peripheral-io/gpio-button-led`, not
+`examples/aen/aen-pwm-utimer-pwmleds`.** Both drive the EVK's RGB cluster, but
+only one is the customer path:
+
+| | `gpio-button-led` | `aen-pwm-utimer-pwmleds` |
+|---|---|---|
+| `board.yaml` | yes — `som.sku: E1M-AEN801`, `preset: e1m-evk` | **none** |
+| Scaffoldable | yes — canonical source for the **`peripheral`** template | no — not in the catalog |
+| Exercises the planner | yes — `board.yaml` → `alp_project.py` → `EXTRA_CONF_FILE` | **no** — plain `prj.conf` app |
+| Purpose | customer teaching example | *"on-silicon (scopeless) validation of `zephyr/drivers/pwm/pwm_alif_utimer.c`"* |
+
+`gpio-button-led`'s own comment records why it is the RGB path on this board:
+the EVK *"routes the user button to the encoder push switch (`E1M_GPIO_IO4`) and
+its only user LEDs to the RGB cluster on PWM"*.
+
+`aen-pwm-utimer-pwmleds` remains useful as an independent bench sanity check —
+it proves the LEDs physically light — but it validates a driver, not the toolchain
+under port.
+
+**Consequence:** Target 1's critical path runs **through** the
+`_scaffold_cmakelists()` blocker, because `gpio-button-led` is one of the eight
+templates that function regex-rewrites. The fresh-customer path and the known
+blocker are the same code path, not adjacent risks.
+
 ### Target 2 — an existing user upgrades
 
 Someone on the shipped Rust `tan` v0.4.0 upgrades to the Python `tan` and their
