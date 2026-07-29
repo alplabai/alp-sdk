@@ -288,7 +288,7 @@ jobs:
           python3 -c '
           import json
           d = json.load(open("metadata/toolchains.json"))
-          print(f"ZEPHYR_SDK_VERSION={d[\"zephyrSdk\"][\"version\"]}")
+          print(f"ZEPHYR_SDK_VERSION={d['zephyrSdk']['version']}")
           ' >> "$GITHUB_ENV"
 
       - name: Cache Zephyr SDK (arm-zephyr-eabi only)
