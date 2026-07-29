@@ -237,6 +237,29 @@ second source of truth inside `tan` would destroy.
 See ADR-0010 (heterogeneous OS orchestration) for the existing decision this
 builds on.
 
+## Distribution: BOTH pip and a single-file binary (decided 2026-07-29)
+
+Maintainer: *"tan should be installable with pip too."* Verified working in a
+clean Python 3.12 venv — `pip install .` then `tan --version` → `tan 0.5.0-dev`,
+envelope path intact. `[project.scripts] tan = "tan.__main__:main"` already
+provides it; the `requires-python = ">=3.12"` floor correctly refuses a 3.11
+interpreter with `ERROR: Package 'tan' requires a different Python`.
+
+| Path | For whom | Notes |
+|---|---|---|
+| **`pip install tan`** | anyone who already has Python ≥3.12 — developers, CI, container images | No platform binaries needed at all. Sidesteps the 8-asset / glibc-floor / musl problem entirely for these users. |
+| **PyInstaller `--onefile`** | the bare-machine bootstrap case, and the VS Code extension's download path | Mandatory there: you cannot pip-install the tool whose job is to install Python. The extension writes a raw binary to one cached path with no unpack step. |
+
+Neither replaces the other. **pip is the better default for the customer who
+already has Python**, which is most embedded developers, and it makes the
+frozen-binary distribution problem smaller rather than solving it: the binary is
+still required for bootstrap and for the extension.
+
+Consequence for the 8-asset contract: the unresolved `-musl` / glibc-2.31 /
+cross-compile problem now blocks a *narrower* audience than it appeared to. It
+still must be settled before cutover, but "pip for developers, binary for
+bootstrap" is a viable interim.
+
 ## The one unresolved mechanism
 
 **How does a frozen `tan` load an alp-sdk extension?** west imports a module
