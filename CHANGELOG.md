@@ -7,6 +7,29 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.14.0 candidate
 
+### Fixed — docs stopped advertising an `hw_rev` / SDK-version gate that has never existed
+
+`metadata/sdk_version.yaml` and `metadata/e1m_modules/v2n/hw-revisions.yaml`'s
+header used to claim two enforcement points that were never implemented:
+that `scripts/alp_project.py` refuses to emit, and `scripts/validate_board_yaml.py`
+exits `3`, when a `board.yaml`'s `som.hw_rev` falls outside its declared
+`[min_sdk_version, max_sdk_version]` window. Neither script has ever read
+`sdk_version.yaml` or checked that window; the previous release already
+dropped the claim from `sdk_version.yaml` and the v2n header, but it survived
+verbatim in `docs/board-config-hardware.md`, `docs/tutorials/09-board-yaml-deep-dive.md`,
+`docs/tutorials/08-runtime-board-detection.md`, `metadata/e1m_modules/v2n/CHANGELOG.md`,
+and `include/alp/hw_info.h` (which also stated an already-shipped `<alp/hw_info_build.h>`
+emitter was still a "future" deliverable). `docs/troubleshooting.md` carried a
+whole section for the error string `alp_project: SDK <V> is older than SoM hw_rev
+'<R>' minimum <M>`, which is emitted nowhere -- deleted. All six now describe
+what actually runs: `min_sdk_version`/`max_sdk_version` are declarative data
+only, and the real hardware-mismatch check is the runtime EEPROM read's strict
+equality against the single `hw_rev` the firmware was built for
+(`src/zephyr/hw_info_zephyr.c`). The real hazard -- an unrecognised `hw_rev`
+silently falling back to base-revision pad routing instead of failing -- is
+tracked at [#1025](https://github.com/alplabai/alp-sdk/issues/1025); every
+rewritten doc now points there instead of restating the false gate.
+
 ### Changed — `zephyr/kconfigs/core.kconfig`: E8 builds now default to the real SoC capability profile, not the permissive one
 
 The "Active SoC capability profile" choice now defaults to
