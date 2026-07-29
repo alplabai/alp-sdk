@@ -20,6 +20,89 @@ is the two acceptance targets: a fresh customer scaffolds a blink project and
 sees the LED blink on an E1M-AEN801 (surviving a cold power-cycle), and an
 existing Rust-`tan` v0.4.0 user upgrades with no manual migration.
 
+## CORRECTION — the AEN developer loop already works; only the SETOOLS *install* is the constraint
+
+Earlier drafts of this plan claimed Target 1 was blocked because "a customer
+cannot flash an E1M-AEN801 without SETOOLS". **That conflated two different
+things and overstated the problem.** `docs/aen-provisioning.md:58-85` is
+explicit:
+
+> *"**E1M-AEN modules ship pre-provisioned by Alp Lab.** At manufacturing we
+> write a development-signed **MCUboot** bootloader as the factory ATOC and a
+> small **self-test** image into MCUboot's primary slot (slot0), with the module
+> left in lifecycle state **DM** (development — debug open, fully
+> re-provisionable)."*
+>
+> *"That means your day-1 path is the normal Zephyr one — **no hand-run SETOOLS,
+> no SE-UART wiring of your own**"*
+
+The day-1 and rebuild loop is just:
+
+```bash
+west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <your-app> \
+    --sysbuild -- -DSB_CONF_FILE=<abs-alp-sdk>/zephyr/sysbuild/aen/sysbuild.conf
+west flash
+```
+
+What is true, and what is not:
+
+| Claim | Verdict |
+|---|---|
+| Customer runs `app-gen-toc` / wires an SE-UART by hand | **False** — only for re-keying to a production key, or recovering a wiped module (`:80-85`) |
+| SETOOLS must be *installed on the host* | **True, for BOTH flows** — `aen-provisioning.md:29-31`: *"both require SETOOLS' `app-gen-toc` to **sign** the ATOC first — Flow D runs `app-gen-toc` locally, with no SE-UART involved in that step"* |
+| That host must be Linux/WSL2 | **True** — `alif_flash.py:283` hard-codes the bundle name `app-release-exec-linux` |
+
+So the residual constraint is a **one-time, license-gated install on a Linux
+host**, not a per-rebuild burden. Target 1 is therefore *not* blocked on
+inventing a new flash path; it needs `tan doctor` to detect SETOOLS and guide
+precisely, and it needs the cross-platform promise corrected.
+
+### Flow D is what we use for MRAM — and `tan flash` should default to it
+
+Maintainer, 2026-07-29: *"we use flow D for MRAM."* The two host paths
+(`aen-provisioning.md:33-46`):
+
+| | Flow A | **Flow D** |
+|---|---|---|
+| Transport | SETOOLS over the **SE-UART** | **J-Link direct over SWD** |
+| Needs `app-gen-toc` | yes | **yes** — run locally |
+| Needs an SE-UART | **yes** — a 1.8 V-capable USB-UART, which the docs call *"the #1 trap"* (`:95`) | **no** |
+| Persists to MRAM | yes | **yes** — *"it also persists to MRAM, same as Flow A"* |
+| Speed | — | **~0.16 s** burn |
+| Used by `west flash` | **yes, by default** (`board_set_flasher_ifnset(alif_flash)`) | **no** |
+
+**Flow D eliminates the SE-UART, not SETOOLS.** That matters because the SE-UART
+is the genuinely painful dependency — dedicated 1.8 V hardware, separate wiring,
+and the documented #1 trap — whereas `app-gen-toc` is a host binary that runs
+locally and invisibly.
+
+Flow D requirements, verbatim and not to be rounded off:
+- the **part-number device profile** `AE822FA0E5597LS0_M55_HE`, *not* generic
+  `Cortex-M55` — the generic profile has no MRAM loader
+- J-Link **V9.46+** DLL (bench has V9.50), probe on matched **J-Link V13**
+  firmware
+- the **MRAM-XIP build shape**, not the ITCM (Flow C) build
+  (`aen-bench-bringup.md:195`)
+- bench-verified 2026-06-17; *"Flow D is the day-to-day default now"*
+  (`aen-bench-bringup.md:72`, `:244`, `:252`)
+
+**Port decision:** `tan flash` should default to **Flow D** for AEN MRAM, not
+inherit `west flash`'s Flow A default. That is a real UX gain the port can
+deliver — a fast SWD burn with no SE-UART wiring — and it is already the
+validated bench path. It requires a Flow-D flash backend under the runner
+abstraction, with Flow A retained as the fallback and for re-keying/recovery.
+
+This also retires the MCUboot-slot1 investigation for the right reason: **the
+shipped design already uses MCUboot as the factory ATOC.** The earlier analysis
+concluded "MCUboot slot1 is dead" because it was asked whether we could *invent*
+a SETOOLS-free path — the wrong question, since the mechanism already exists and
+is what modules ship with.
+
+**Dependency ownership** (maintainer, 2026-07-29): the VS Code extension manages
+dependency installation incrementally — west, Zephyr, the SDK and toolchains.
+Python is assumed rather than installed by us. SETOOLS is the one dependency we
+cannot install (license-gated) but must detect and explain.
+
 ## INVARIANT — one `board.yaml`, and the OS is DERIVED, never chosen
 
 Maintainer, 2026-07-29, marked *"you need to keep those things"*:
