@@ -6,8 +6,9 @@
 # the Zephyr-on-M-class developer workflow is first-class on
 # Win + Mac + Linux.  This workflow is the mechanical CI proof
 # of that claim: every PR runs the metadata validator, the
-# cross-platform lint, public/private classifier, and a single-board native_sim build on
-# Ubuntu + macOS + Windows runners.
+# cross-platform lint, public/private classifier, a bash-3.2 parse
+# sweep of every shipped shell script, and a single-board native_sim
+# build on Ubuntu + macOS + Windows runners.
 #
 # Linux remains the canonical baseline (the shipped pr-twister.yml
 # + pr-metadata-validate.yml + pr-bitbake.yml gates stay on
@@ -236,13 +237,24 @@ jobs:
                       ;;
               esac
           fi
+          count=0
           rc=0
           while IFS= read -r f; do
+            count=$((count + 1))
             if ! "${PARSER}" -n "${f}"; then
               echo "::error file=${f}::bash -n parse error under ${PARSER_VERSION} (see bash output above)"
               rc=1
             fi
           done < <(git ls-files '*.sh')
+          # `git ls-files` failing (wrong cwd, not a checkout) discards its
+          # exit status through the pipe into `read` -- the loop body would
+          # just never run and this step would exit 0 having "parsed" zero
+          # files, the exact silent-empty-loop shape this gate exists to
+          # rule out one level down. Fail loudly instead.
+          if [ "${count}" -eq 0 ]; then
+            echo "::error::git ls-files '*.sh' returned NO files -- refusing to report a silent pass."
+            exit 1
+          fi
           exit "${rc}"
 
       # ---------------------------------------------------------
