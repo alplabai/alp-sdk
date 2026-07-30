@@ -5,7 +5,7 @@
   "description": "Validates metadata/bootstrap.json -- the single source of truth for the Zephyr-workspace-assembly FACTS scripts/bootstrap.sh and scripts/bootstrap.ps1 both read today; tan (Rust, cross-platform) has read the same facts since tan-cli PR #55 (tan-core's parse_bootstrap_manifest / BootstrapFacts), not merely an INTENDED future consumer (issue #917). Facts only; control flow (ZEPHYR_BASE reuse/rejection, venv idempotency, .west branching) stays as CODE in each executor -- this schema deliberately has no step/action shape. scripts/check_bootstrap_manifest.py is the drift gate that keeps this file, west.yml's zephyr revision, and each CI workflow's own Zephyr pin in lockstep (see that script's own module docstring for the full list of checks it runs).",
   "type": "object",
   "additionalProperties": false,
-  "required": ["_comment", "schemaVersion", "zephyr", "venv", "prerequisites", "west", "pip", "env", "nativeLibHints", "manualInstallHints"],
+  "required": ["_comment", "schemaVersion", "zephyr", "venv", "prerequisites", "west", "pip", "verdict", "env", "nativeLibHints", "manualInstallHints"],
   "properties": {
     "_comment": {
       "type": "string",
@@ -129,6 +129,32 @@
         "editableInstall": {
           "type": "string",
           "description": "Target `pip install -e <target>` installs -- the ${SDK_ROOT}-tokened alp-sdk checkout (tan's Python backend, alp_cli)."
+        }
+      }
+    },
+    "verdict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["blockingPhases", "partialNoteTemplate", "incompleteMessageTemplate", "incompleteRemedy"],
+      "description": "The single source for the closing-verdict rule (issue #1038 / tan-cli#220): each pip-install phase below stays non-fatal in itself -- the workspace is left on disk regardless of which packages failed -- but a run that hit one of `blockingPhases` has NOT produced an environment that can do what it was bootstrapped for, and must not report unqualified success. Both scripts/bootstrap.sh and scripts/bootstrap.ps1 read this object (instead of each hardcoding the phase set and the wording a second time); tan-cli's own `WORKSPACE_BLOCKING` (crates/tan-cli/src/commands/bootstrap/steps.rs) declares the identical three phase IDs independently -- tan does not read this manifest key today, so keeping the two declarations in sync across repos is still a by-hand contract, not a mechanically-gated one.",
+      "properties": {
+        "blockingPhases": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "The `pip` sub-step identifiers (matching the `code` argument each script's warn-call site tags itself with -- `zephyr-requirements`, `sdk-extras`, `editable-install`) after which the closing verdict must not be an unqualified success. Deliberately excludes `pip-upgrade`: the pip already present still installs packages, so a failed pip/wheel self-upgrade is cosmetic, not blocking."
+        },
+        "partialNoteTemplate": {
+          "type": "string",
+          "description": "Printed as a second line under a still-successful 'Bootstrap complete.' when --allow-partial was passed and blockingPhases is non-empty. The literal token `{{PHASES}}` is replaced with the comma-joined list of the phases that actually failed this run (a subset of blockingPhases, not the whole list) -- substituted by each script itself, not by any token both scripts already share (${SDK_ROOT}/${WORKSPACE_DIR}), since this substitution is run-dependent, not a fixed path."
+        },
+        "incompleteMessageTemplate": {
+          "type": "string",
+          "description": "The closing message when blockingPhases is non-empty and --allow-partial was NOT passed -- the run exits non-zero. Same `{{PHASES}}` substitution as partialNoteTemplate."
+        },
+        "incompleteRemedy": {
+          "type": "string",
+          "description": "The remedy line printed alongside incompleteMessageTemplate, naming both ways out (fix the failed installs and re-run, or accept the workspace as-is with --allow-partial)."
         }
       }
     },

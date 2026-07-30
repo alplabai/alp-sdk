@@ -38,12 +38,18 @@
 #     pwsh scripts\bootstrap.ps1 -NoPip         # skip pip installs
 #     pwsh scripts\bootstrap.ps1 -NoWest        # skip west init/update
 #     pwsh scripts\bootstrap.ps1 -PrintEnv      # only print env-var lines
+#     pwsh scripts\bootstrap.ps1 -AllowPartial
+#         # report success even if zephyr-requirements / sdk-extras /
+#         # editable-install failed to install (issue #1038); the failures
+#         # are still printed and the workspace is left on disk either way --
+#         # this only changes the closing verdict
 
 [CmdletBinding()]
 param(
     [switch]$NoPip,
     [switch]$NoWest,
-    [switch]$PrintEnv
+    [switch]$PrintEnv,
+    [switch]$AllowPartial
 )
 
 $ErrorActionPreference = "Stop"
@@ -73,6 +79,22 @@ function Write-Info([string]$msg) { Write-Host "[bootstrap] $msg" -ForegroundCol
 function Write-Ok([string]$msg)   { Write-Host "[bootstrap] $msg" -ForegroundColor Green }
 function Write-Warn2([string]$msg){ Write-Host "[bootstrap] $msg" -ForegroundColor Yellow }
 function Fail([string]$msg)       { Write-Host "[bootstrap] $msg" -ForegroundColor Red; exit 1 }
+
+# Phase IDs (from metadata/bootstrap.json's verdict.blockingPhases, loaded
+# further down as $VerdictBlockingPhases) whose pip install actually failed
+# THIS run -- a subset of $VerdictBlockingPhases, filled in by
+# Add-BlockingPhase as each pip step in "-------- pip dependencies --------"
+# below completes. Read by the closing verdict logic at the end of the script.
+$BlockingPhases = @()
+function Add-BlockingPhase([string]$Phase) {
+    # Appends to $BlockingPhases only when $VerdictBlockingPhases (metadata/
+    # bootstrap.json, not hardcoded here) names it -- issue #1038: the
+    # pip/wheel self-upgrade warns too (see the venv section below) but is
+    # deliberately NOT in that list, so it must never reach this function.
+    if ($script:VerdictBlockingPhases -contains $Phase) {
+        $script:BlockingPhases += $Phase
+    }
+}
 
 # -------- Prerequisite check --------------------------------------------------
 
@@ -161,6 +183,14 @@ $WestExtGuard             = Resolve-BootstrapToken $Manifest.west.extensionGuard
 $PipBootstrapUpgrade      = @($Manifest.pip.bootstrapUpgrade | ForEach-Object { Resolve-BootstrapToken $_ })
 $PipSdkExtras             = @($Manifest.pip.sdkExtras        | ForEach-Object { Resolve-BootstrapToken $_ })
 $PipEditableInstall       = Resolve-BootstrapToken $Manifest.pip.editableInstall
+# verdict: the single source for which pip phases make the closing verdict
+# non-success, and the wording for it (issue #1038 / tan-cli#220) -- see
+# metadata/schemas/bootstrap-v1.schema.json's verdict.* descriptions. No
+# token substitution: these are phase IDs and prose, not paths.
+$VerdictBlockingPhases           = @($Manifest.verdict.blockingPhases)
+$VerdictPartialNoteTemplate      = $Manifest.verdict.partialNoteTemplate
+$VerdictIncompleteMessageTemplate = $Manifest.verdict.incompleteMessageTemplate
+$VerdictIncompleteRemedy         = $Manifest.verdict.incompleteRemedy
 # env: ordered Name/RAW-Value pairs (JSON object property order is preserved
 # by ConvertFrom-Json).  Token substitution is deliberately deferred to
 # Write-EnvLines below, NOT done here at load time: the workspace-reuse
@@ -368,13 +398,19 @@ if (-not $NoPip) {
     if (Test-Path $ZephyrReqs) {
         Write-Info "Installing Zephyr Python requirements into the venv"
         & $Vpy -m pip install -q -r $ZephyrReqs
-        if ($LASTEXITCODE -ne 0) { Write-Warn2 "Zephyr requirements install reported a problem -- check manually" }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warn2 "Zephyr requirements install reported a problem -- check manually"
+            Add-BlockingPhase "zephyr-requirements"
+        }
     }
     # SDK-side extras: alp_project.py needs jsonschema; the MCUboot
     # dev-key script needs imgtool.
     Write-Info "Installing alp-sdk Python extras into the venv ($($PipSdkExtras -join ', '))"
     & $Vpy -m pip install -q @PipSdkExtras
-    if ($LASTEXITCODE -ne 0) { Write-Warn2 "alp-sdk extras install reported a problem -- check manually" }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn2 "alp-sdk extras install reported a problem -- check manually"
+        Add-BlockingPhase "sdk-extras"
+    }
     # tan's Python backend (alp_cli: init / run / emit / validate / model /
     # doctor / monitor, invoked as `python -m alp_cli <sub>` by `tan`) --
     # editable install, so a `git pull` in the checkout updates the backend
@@ -388,7 +424,10 @@ if (-not $NoPip) {
     # alp-sdk, so anyone who followed it from here got "no such directory".
     Write-Info "Installing the tan CLI's Python backend into the venv (pip install -e $PipEditableInstall)"
     & $Vpy -m pip install -q -e $PipEditableInstall
-    if ($LASTEXITCODE -ne 0) { Write-Warn2 "alp_cli editable install reported a problem -- check manually" }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn2 "alp_cli editable install reported a problem -- check manually"
+        Add-BlockingPhase "editable-install"
+    }
 } else {
     Write-Info "Skipping pip installs (-NoPip)"
 }
@@ -412,7 +451,34 @@ foreach ($line in $ManualInstallNote) {
 # -------- Done ----------------------------------------------------------------
 
 Write-Host ""
-Write-Ok "Bootstrap complete."
+# The closing verdict (issue #1038 / tan-cli#220): every pip phase above
+# stays non-fatal in itself -- the workspace is left on disk regardless of
+# which packages failed -- but a run that hit one of
+# metadata/bootstrap.json's verdict.blockingPhases has NOT produced an
+# environment that can do what it was bootstrapped for, and must not report
+# unqualified success. $BlockingPhases is populated by Add-BlockingPhase
+# above; $Verdict* comes from the manifest, not hardcoded here, so this
+# wording has exactly one declaration shared with scripts/bootstrap.sh (and,
+# independently, tan-cli's WORKSPACE_BLOCKING).
+#
+# $ExitCode is set here but NOT acted on until the very end of this script
+# (matching tan-cli's `verdict()`/`finish()` split): the Next steps block
+# below -- including `tan doctor --build`, the tool that diagnoses exactly
+# this kind of failure -- must still print on the incomplete path. Exiting
+# here would take that away on the one run that needs it most.
+$ExitCode = 0
+if ($BlockingPhases.Count -eq 0) {
+    Write-Ok "Bootstrap complete."
+} elseif ($AllowPartial) {
+    $PhasesJoined = $BlockingPhases -join ', '
+    Write-Ok "Bootstrap complete."
+    Write-Warn2 ("  " + ($VerdictPartialNoteTemplate -replace '\{\{PHASES\}\}', $PhasesJoined))
+} else {
+    $PhasesJoined = $BlockingPhases -join ', '
+    Write-Warn2 ($VerdictIncompleteMessageTemplate -replace '\{\{PHASES\}\}', $PhasesJoined)
+    Write-Warn2 "  $VerdictIncompleteRemedy"
+    $ExitCode = 1
+}
 @"
 
 Next steps:
@@ -449,3 +515,9 @@ References:
   - docs\cross-platform-setup.md  -- the full per-OS setup guide
   - docs\cli.md                   -- the tan CLI verb reference
 "@ | Write-Host
+
+# $ExitCode was decided by the closing verdict above (1 only on the
+# INCOMPLETE path, i.e. -AllowPartial was not passed) -- deferred until here
+# so the Next steps block always prints first, on every path (issue #1038 /
+# tan-cli#220).
+exit $ExitCode

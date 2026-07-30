@@ -53,6 +53,12 @@
     "sdkExtras": ["jsonschema", "imgtool"],
     "editableInstall": "${SDK_ROOT}"
   },
+  "verdict": {
+    "blockingPhases": ["zephyr-requirements", "sdk-extras", "editable-install"],
+    "partialNoteTemplate": "(--allow-partial: {{PHASES}} did not install; commands that need them will fail.)",
+    "incompleteMessageTemplate": "INCOMPLETE -- {{PHASES}} did not install, so this workspace cannot build yet.",
+    "incompleteRemedy": "The messages above name the remedy for each. Fix them and re-run this script, or pass --allow-partial to accept this workspace as-is (the west workspace and venv are already on disk, and a build that needs none of the missing packages will still work)."
+  },
   "env": {
     "ZEPHYR_BASE": "${WORKSPACE_DIR}/zephyr",
     "ZEPHYR_TOOLCHAIN_VARIANT": "zephyr"
