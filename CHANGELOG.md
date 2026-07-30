@@ -7,6 +7,55 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.15.0 candidate
 
+### Fixed — an `hw_rev` absent from the resolved table silently built against the wrong hardware (#1025, the safe half)
+
+`scripts/alp_project_loader.py`'s `_hwrev_pad_route_overrides()` did
+
+    (data.get("hw_revisions") or {}).get(hw_rev) or {}
+
+A typo, or a revision newer than the installed SDK, resolved to `{}` —
+empty per-rev overrides — so the build proceeded with **base-revision pad
+routing** and a clean exit code. On AEN, r1 and r2 differ in real routes
+(`metadata/e1m_modules/aen/hw-revisions.yaml`: IO8 -> WIFI_GPIO30, IO10 ->
+WIFI_GPIO35, IO21 unrouted), so this was a wrong-hardware emit that looked
+like a success.
+
+New `sdk_compat.revision_known()` is the existence predicate: given a
+resolved `hw_revisions:` table and a requested rev, is that rev a declared
+key. Pure and data-only, same shape as `#1019`'s `incompatibility()` /
+`check()`. Deliberately blind to `status:` — a `status: reserved` or
+`status: tbd` revision, or one carrying no `status` key at all, still
+PASSES this gate; whether an *existing* reserved/tbd revision should
+refuse a build remains open (the metadata disagrees across families on
+what `status:` even means: aen r3-r8 are `reserved`, v2n/v2n-m1 r2-r8
+carry no `status` key, imx93 r1 is `tbd` and an in-tree example
+(`examples/multicore/rpmsg-imx93/board.yaml`) builds against it).
+
+`scripts/alp_orchestrate/loader.py`'s `_check_hw_rev_exists()` runs this
+BEFORE `_check_sdk_supports_hw_rev()`'s min/max comparison — an unknown
+revision has no bounds to compare, so reporting it as out-of-range would
+name the wrong cause. It raises a new `SdkRevisionUnknown`
+(`OrchestratorError` subclass, so every existing `except
+OrchestratorError` keeps catching it), distinct from `SdkRevisionUnsupported`
+so a caller can map exactly this failure without string-matching a
+message. `scripts/validate_board_yaml.py` maps it to a new **exit code
+4** (`EXIT_SDK_REVISION_UNSUPPORTED` stays 3).
+
+**Both loaders, not one**: `--emit composed-route-table` /
+`carrier-netlist` resolve the SoM/board tables through
+`alp_project_loader.py`'s own copy of the resolution, independent of
+`load_board_yaml` — `_hwrev_pad_route_overrides()` (the site with the
+original bug) carries the same gate directly, so both consumers of the
+family `hw-revisions.yaml` table refuse identically.
+
+The error message names the requested revision, the SKU or board, and the
+revisions that ARE available, so a customer hitting this knows what their
+SDK actually knows about.
+
+Verified by mutation: disabling the enforcement (not the predicate) in
+both loaders fails 6 of the 21 new tests in
+`tests/scripts/test_hw_rev_existence_gate.py`.
+
 ## [v0.14.0] - 2026-07-29
 
 ### Fixed — four V2N/V2M SoM manifests promised a `gd32_bridge` firmware path that exists in no clone (#852)
