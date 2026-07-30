@@ -116,26 +116,33 @@ def _python_hashes(root: Path) -> dict:
 # depend on: YAML/JSON data, TSV/CSV tables (pin/IO maps), C headers
 # (library-profiles), a protobuf schema, Renode platform scripts (.resc/
 # .repl), the vendored e1m-spec lock, and board.yaml.example (parsed by
-# tooling, not prose). Deliberately OUTSIDE this tuple: `.md` (documentation)
-# and `.gitkeep` (placeholder) -- neither can change what a build produces,
-# so hashing them would only manufacture false drift on doc-only edits.
-# `tests/scripts/test_alp_lock_metadata_coverage.py` asserts every tracked
-# file under metadata/ is covered by one of these globs or is in its own
-# small allowlist -- keep that test in sync with any addition here.
+# tooling, not prose). `**/*.json` deliberately covers GENERATED artifacts
+# too (metadata/catalog.json, metadata/error-catalog.json) -- a stale
+# regenerated-but-uncommitted file is exactly the drift this lock exists to
+# catch, same as any hand-written input. Deliberately OUTSIDE this tuple:
+# `.md` (documentation) and `.gitkeep` (placeholder) -- neither can change
+# what a build produces, so hashing them would only manufacture false drift
+# on doc-only edits. `tests/scripts/test_alp_lock_metadata_coverage.py`
+# asserts every tracked file under metadata/ is covered by one of these
+# globs or is in its own small allowlist -- keep that test in sync with any
+# addition here.
 _METADATA_DIGEST_GLOBS = (
     "**/*.yaml", "**/*.json", "**/*.tsv", "**/*.csv", "**/*.h",
     "**/*.proto", "**/*.resc", "**/*.repl", "**/*.lock", "**/*.example",
 )
 
 
-def _dir_digest(root: Path, rel: str, globs) -> str:
+def _dir_digest(root: Path, rel: str, globs: str | tuple[str, ...]) -> str:
     d = root / rel
     h = hashlib.sha256()
     if isinstance(globs, str):
         globs = (globs,)
-    # A file matched by more than one glob (e.g. under `metadata/schemas/`,
-    # every `*.schema.json` is also `**/*.json`) is hashed exactly once --
-    # gather into a set before sorting/hashing.
+    # Gather into a set before sorting/hashing so a file matched by more
+    # than one glob in `globs` is hashed exactly once. All ten suffixes in
+    # `_METADATA_DIGEST_GLOBS` are disjoint today, so this never actually
+    # fires there -- it's cheap insurance against a future overlapping
+    # addition (e.g. a second glob that also matches `.json`), not a fix
+    # for a live collision.
     matches = {p for glob in globs for p in d.glob(glob)} if d.is_dir() else set()
     # Order by the relative path's POSIX *parts*, never by the Path objects.
     # `sorted(Path)` compares pathlib's case-normalised form, which on Windows is

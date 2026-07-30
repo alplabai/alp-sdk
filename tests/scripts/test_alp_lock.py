@@ -198,3 +198,16 @@ def test_dir_digest_orders_by_posix_parts(tmp_path):
     expected = "sha256:" + h.hexdigest()
 
     assert _dir_digest(tmp_path, "metadata", "**/*.yaml") == expected
+
+
+def test_dir_digest_dedups_overlapping_globs(tmp_path):
+    """A tuple of globs that both match the same file must hash it once,
+    not twice (#1045's multi-glob widening)."""
+    from alp_lock import _dir_digest
+
+    d = tmp_path / "metadata"
+    d.mkdir()
+    (d / "a.json").write_bytes(b"a\n")
+
+    assert (_dir_digest(tmp_path, "metadata", ("**/*.json", "**/*.json"))
+            == _dir_digest(tmp_path, "metadata", "**/*.json"))

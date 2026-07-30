@@ -318,10 +318,10 @@ stage_metadata_validate() {
 stage_alp_lock() {
     # Mirrors pr-metadata-validate.yml's `alp.lock --check` step (#1045) --
     # previously the ONLY place that check ran, so a locally-green branch
-    # could still redden CI on lock drift it never saw.
-    if [ ! -f scripts/west_commands/alp_lock.py ]; then
-        return 99
-    fi
+    # could still redden CI on lock drift it never saw. No "script missing"
+    # skip: this is a tracked repo file, so a missing/renamed script means
+    # the gate itself vanished and that must redden, not SKIP silently
+    # (same reasoning as stage_generated_files above).
     python3 scripts/west_commands/alp_lock.py --workspace . --check || return 1
 }
 
@@ -637,10 +637,6 @@ else
 
     run_stage "metadata-validate" stage_metadata_validate
 
-    # alp.lock --check -- both the dev (fast) and main (release-grade)
-    # profiles run this unconditionally, same as metadata-validate above.
-    run_stage "alp-lock" stage_alp_lock
-
     # Documentation lint -- cheap, always runnable, no special tooling.
     if [ -f scripts/lint_doc_yaml_fragments.py ]; then
         run_stage "doc-yaml-fragments" stage_doc_yaml_fragments
@@ -663,6 +659,14 @@ else
     # artifact + fail on drift.  Catches the class of red that bit #623 /
     # #636 / #642 (new macro/symbol/gate without a committed regen).
     run_stage "generated-files" stage_generated_files
+
+    # alp.lock --check -- both the dev (fast) and main (release-grade)
+    # profiles run this unconditionally, same as metadata-validate above.
+    # MUST run after generated-files: that stage rewrites metadata/catalog.json
+    # and metadata/error-catalog.json in place, and both are now lock-covered
+    # (#1045) -- checking the lock first would pass on pre-regen bytes and
+    # leave a just-regenerated catalog unverified.
+    run_stage "alp-lock" stage_alp_lock
 
     # Main-only: the strict ABI-snapshot diff gate that pr-abi-snapshot.yml
     # runs on `main` + `release/**` only.  The `--target main` release-grade
