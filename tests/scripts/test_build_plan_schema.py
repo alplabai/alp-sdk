@@ -27,7 +27,13 @@ REPO = Path(__file__).resolve().parents[2]
 SCHEMA_PATH = REPO / "metadata" / "schemas" / "build-plan-v1.schema.json"
 
 sys.path.insert(0, str(REPO / "scripts"))
-from alp_orchestrate import emit_build_plan, load_board_yaml  # noqa: E402
+
+# NOTE: alp_orchestrate imports are deliberately NOT at module scope.
+# scripts/alp_orchestrate/ is slated for deletion in a later slice; a
+# module-scope import here would make the whole file fail to COLLECT
+# at that point, including the pure schema-shape tests below that never
+# touch the planner.  Each planner-dependent test imports what it
+# needs in-body instead.
 
 V2N_HAPPY = """
 name: test-v2n-board
@@ -85,6 +91,7 @@ def test_real_build_plan_conforms(tmp_path: Path):
     """The emitter's real output for a representative multi-core (Yocto
     + Zephyr) project validates against the schema with zero errors --
     the emitter <-> contract lockstep this schema exists to pin."""
+    from alp_orchestrate import emit_build_plan, load_board_yaml
     path = _write_board(tmp_path, V2N_HAPPY)
     project = load_board_yaml(path)
     plan = json.loads(emit_build_plan(
@@ -118,6 +125,7 @@ _PINNED_SNAPSHOT_BOARDS = [
 def test_pinned_emit_snapshot_boards_conform(board_rel: str):
     """The real board.yaml fixtures check_emit_snapshots.py pins a
     byte-for-byte golden for all emit a schema-conformant build plan."""
+    from alp_orchestrate import emit_build_plan, load_board_yaml
     board_yaml = REPO / board_rel
     project = load_board_yaml(board_yaml)
     plan = json.loads(emit_build_plan(
@@ -146,6 +154,7 @@ def test_baremetal_slice_and_stock_image_appdir_null_conform(tmp_path: Path):
     (`tool: cmake`, `-S`/`-B` args), AND the A-class core's stock-image
     Yocto slice, which reports `appDir: null` (issue #597 -- there is no
     app source dir to report for the `alp-image-edge` token)."""
+    from alp_orchestrate import emit_build_plan, load_board_yaml
     path = _write_board(tmp_path, AEN801_BAREMETAL_AND_STOCK_IMAGE)
     project = load_board_yaml(path)
     plan = json.loads(emit_build_plan(
@@ -183,6 +192,7 @@ def test_yocto_recipe_missing_warning_conforms(tmp_path: Path):
     """An app-only Yocto slice with no `recipe:` (issue #597) is carried
     with `command: null` plus a `yocto-recipe-missing` warning -- and the
     resulting plan still validates against the schema."""
+    from alp_orchestrate import emit_build_plan, load_board_yaml
     path = _write_board(tmp_path, AEN801_YOCTO_APP_NO_RECIPE)
     project = load_board_yaml(path)
     plan = json.loads(emit_build_plan(
@@ -241,6 +251,7 @@ def test_sysbuild_and_tfm_conditional_shared_artefacts_conform(tmp_path: Path):
     (-> build/sysbuild/tfm/tfm.conf) are both conditional sharedArtefacts
     (absence-emits-nothing); combined on one project they both appear,
     and the plan still validates against the schema."""
+    from alp_orchestrate import emit_build_plan, load_board_yaml
     path = _write_board(tmp_path, AEN301_MCUBOOT_AND_TFM)
     project = load_board_yaml(path)
     plan = json.loads(emit_build_plan(
@@ -273,6 +284,7 @@ def test_commandless_slice_and_warning_conform(tmp_path: Path):
     never-dropped-just-warned contract. `off` cores never enter the
     plan at all, and the schema's `backend` enum must not include
     `off` as a result."""
+    from alp_orchestrate import emit_build_plan, load_board_yaml
     path = _write_board(tmp_path, V2N_OFF_AND_COMMANDLESS)
     project = load_board_yaml(path)
     # Force the no-command path: no resolved board target, but a real
@@ -306,6 +318,7 @@ def test_pinned_snapshot_slices_carry_toolchain_artifacts_debug():
     longer forces a runner (not every in-tree board registers
     `openocd`), so the resolved runner defers to the board.cmake
     default and `probe` stays null unless a runner is explicitly set."""
+    from alp_orchestrate import emit_build_plan, load_board_yaml
     board_yaml = REPO / "examples/multicore/rpmsg-aen/board.yaml"
     project = load_board_yaml(board_yaml)
     plan = json.loads(emit_build_plan(
@@ -367,6 +380,8 @@ def test_baremetal_slice_toolchain_artifacts_debug_are_null(tmp_path: Path):
     override -- an honest passthrough of the real resolved `Slice.
     toolchain` fact, not a fabricated value, even though it's a
     leftover from the core's un-overridden default."""
+    from alp_orchestrate import emit_build_plan, load_board_yaml
+
     path = _write_board(tmp_path, AEN801_BAREMETAL_AND_STOCK_IMAGE)
     project = load_board_yaml(path)
     plan = json.loads(emit_build_plan(

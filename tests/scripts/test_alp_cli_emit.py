@@ -16,7 +16,13 @@ from types import SimpleNamespace
 from click.testing import CliRunner
 
 from alp_cli.emit import EMIT_MODES, ORCHESTRATOR_EMIT_MODES, PROJECT_EMIT_MODES
-from alp_cli.main import cli
+
+# NOTE: alp_cli.main is deliberately NOT imported at module scope.  It pulls
+# in alp_cli.validate, which imports scripts/alp_orchestrate/ at module
+# scope; scripts/alp_orchestrate/ is slated for deletion in a later slice,
+# and a module-scope import here would make the whole file fail to COLLECT
+# at that point, including the mode-list/regex-harvest tests below that
+# never touch `cli`.  Each test that needs `cli` imports it in-body instead.
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -47,6 +53,7 @@ def _project(tmp_path: Path) -> Path:
 
 
 def test_emit_registered_in_help():
+    from alp_cli.main import cli
     result = CliRunner().invoke(cli, ["--help"])
     assert result.exit_code == 0
     assert "emit" in result.output
@@ -90,12 +97,14 @@ def test_west_alp_emit_mirror_matches_orchestrator():
 
 
 def test_emit_rejects_unknown_mode():
+    from alp_cli.main import cli
     result = CliRunner().invoke(cli, ["emit", "not-a-mode"])
     assert result.exit_code != 0
     assert "not-a-mode" in result.output
 
 
 def test_emit_requires_board_yaml_or_input(tmp_path, monkeypatch):
+    from alp_cli.main import cli
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(cli, ["emit", "zephyr-conf"])
     assert result.exit_code != 0
@@ -103,6 +112,7 @@ def test_emit_requires_board_yaml_or_input(tmp_path, monkeypatch):
 
 
 def test_emit_delegates_to_alp_project(tmp_path, monkeypatch, mocker):
+    from alp_cli.main import cli
     proj = _project(tmp_path)
     monkeypatch.chdir(proj)
     # A stray ALP_SDK_ROOT pointing at another checkout would redirect
@@ -123,6 +133,7 @@ def test_emit_delegates_to_alp_project(tmp_path, monkeypatch, mocker):
 
 
 def test_emit_forwards_input_output_core(tmp_path, mocker, monkeypatch):
+    from alp_cli.main import cli
     proj = _project(tmp_path)
     monkeypatch.chdir(tmp_path)          # NOT the project dir: --input wins
     run = mocker.patch(
@@ -143,6 +154,7 @@ def test_emit_forwards_input_output_core(tmp_path, mocker, monkeypatch):
 
 
 def test_emit_nonzero_rc_propagates(tmp_path, monkeypatch, mocker):
+    from alp_cli.main import cli
     proj = _project(tmp_path)
     monkeypatch.chdir(proj)
     mocker.patch(
@@ -157,6 +169,7 @@ def test_emit_orchestrator_mode_delegates_to_alp_orchestrate(
         tmp_path, monkeypatch, mocker):
     """Orchestrator-only modes go through `python -m alp_orchestrate
     --emit <mode>` -- the exact invocation `west alp-emit` performs."""
+    from alp_cli.main import cli
     proj = _project(tmp_path)
     monkeypatch.chdir(proj)
     run = mocker.patch(
@@ -176,6 +189,7 @@ def test_emit_orchestrator_mode_delegates_to_alp_orchestrate(
 def test_emit_orchestrator_mode_output_written(tmp_path, monkeypatch, mocker):
     """--output for an orchestrator mode is CLI plumbing: capture the
     delegated stdout, write it to the file."""
+    from alp_cli.main import cli
     proj = _project(tmp_path)
     monkeypatch.chdir(proj)
     mocker.patch(
@@ -192,6 +206,7 @@ def test_emit_orchestrator_mode_output_written(tmp_path, monkeypatch, mocker):
 
 def test_emit_orchestrator_mode_warns_core_ignored(tmp_path, monkeypatch,
                                                    mocker):
+    from alp_cli.main import cli
     proj = _project(tmp_path)
     monkeypatch.chdir(proj)
     run = mocker.patch(

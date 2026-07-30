@@ -19,11 +19,12 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "scripts"))
 
-from alp_orchestrate import (  # noqa: E402
-    core_os_topology,
-    emit_os_topology,
-    load_board_yaml,
-)
+# NOTE: alp_orchestrate imports are deliberately NOT at module scope.
+# scripts/alp_orchestrate/ is slated for deletion in a later slice; a
+# module-scope import here would make the whole file fail to COLLECT
+# at that point, including test_cli_emit_os_topology below, which
+# never touches the planner (it only shells out to alp_project.py).
+# Each planner-dependent test imports what it needs in-body instead.
 
 SCRIPT = REPO / "scripts" / "alp_project.py"
 
@@ -39,6 +40,7 @@ def _by_id(topo: dict) -> dict:
 
 
 def test_class_derived_os_no_override(tmp_path: Path) -> None:
+    from alp_orchestrate import core_os_topology, load_board_yaml
     body = """
         som:
           sku: E1M-AEN801
@@ -65,6 +67,7 @@ def test_class_derived_os_no_override(tmp_path: Path) -> None:
 
 
 def test_baremetal_and_off_overrides_flagged(tmp_path: Path) -> None:
+    from alp_orchestrate import core_os_topology, load_board_yaml
     body = """
         som:
           sku: E1M-AEN801
@@ -86,6 +89,7 @@ def test_baremetal_and_off_overrides_flagged(tmp_path: Path) -> None:
 
 
 def test_emit_os_topology_is_valid_json(tmp_path: Path) -> None:
+    from alp_orchestrate import emit_os_topology, load_board_yaml
     body = """
         som:
           sku: E1M-V2N101
@@ -103,6 +107,7 @@ def test_emit_os_topology_is_valid_json(tmp_path: Path) -> None:
 def test_allowed_os_derived_from_schema_minus_cross_class(tmp_path: Path) -> None:
     # unification: per-core allowed_os is the board-schema enum minus the
     # other class's OS -- not a hardcoded list.
+    from alp_orchestrate import core_os_topology, load_board_yaml
     schema = json.loads(
         (REPO / "metadata" / "schemas" / "board.schema.json").read_text(encoding="utf-8"))
     enum = set(schema["$defs"]["core_entry"]["properties"]["os"]["enum"])
