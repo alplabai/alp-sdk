@@ -23,10 +23,12 @@ import yaml
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "scripts"))
 
-from alp_orchestrate import load_board_yaml  # noqa: E402
-from alp_orchestrate.kconfig import _slice_alp_conf, _slice_local_conf  # noqa: E402
-from alp_orchestrate.models import BoardProject, OrchestratorError, Slice  # noqa: E402
-from alp_orchestrate import libraries as liblayer  # noqa: E402
+# NOTE: alp_orchestrate imports are deliberately NOT at module scope.
+# scripts/alp_orchestrate/ is slated for deletion in a later slice; a
+# module-scope import here would make the whole file fail to COLLECT
+# at that point, including the metadata-only tests below that never
+# touch the planner.  Each planner-dependent test imports what it
+# needs in-body instead.
 
 LIBRARY_SCHEMA = REPO / "metadata" / "schemas" / "library-v1.schema.json"
 LIBRARIES_DIR = REPO / "metadata" / "libraries"
@@ -176,6 +178,8 @@ cores:
 
 
 def test_emit_lvgl_zephyr_kconfig(tmp_path: Path) -> None:
+    from alp_orchestrate import load_board_yaml
+    from alp_orchestrate.kconfig import _slice_alp_conf
     project = load_board_yaml(_write_board(tmp_path, _V2N_LVGL))
     out = _slice_alp_conf(project, project.cores["m33_sm"])
     assert "CONFIG_LVGL=y" in out
@@ -184,6 +188,8 @@ def test_emit_lvgl_zephyr_kconfig(tmp_path: Path) -> None:
 
 
 def test_emit_cmsis_dsp_zephyr_kconfig(tmp_path: Path) -> None:
+    from alp_orchestrate import load_board_yaml
+    from alp_orchestrate.kconfig import _slice_alp_conf
     project = load_board_yaml(_write_board(tmp_path, _V2N_DSP))
     out = _slice_alp_conf(project, project.cores["m33_sm"])
     assert "CONFIG_CMSIS_DSP=y" in out
@@ -192,6 +198,9 @@ def test_emit_cmsis_dsp_zephyr_kconfig(tmp_path: Path) -> None:
 
 def test_emit_zero_diff_without_libraries(tmp_path: Path) -> None:
     """A project that declares no `libraries:` must not gain the library block."""
+    from alp_orchestrate import load_board_yaml
+    from alp_orchestrate import libraries as liblayer
+    from alp_orchestrate.kconfig import _slice_alp_conf
     project = load_board_yaml(_write_board(tmp_path, _V2N_NOLIB))
     out = _slice_alp_conf(project, project.cores["m33_sm"])
     assert "ADR 0018" not in out
@@ -201,6 +210,9 @@ def test_emit_zero_diff_without_libraries(tmp_path: Path) -> None:
 
 
 def test_emit_unknown_library_lists_available(tmp_path: Path) -> None:
+    from alp_orchestrate import load_board_yaml
+    from alp_orchestrate import libraries as liblayer
+    from alp_orchestrate.models import OrchestratorError
     body = _V2N_NOLIB.replace("cores:", "libraries: [lvglx]\ncores:")
     project = load_board_yaml(_write_board(tmp_path, body))
     with pytest.raises(OrchestratorError) as exc:
@@ -215,6 +227,8 @@ def test_library_scoped_to_undeclared_core_is_rejected(tmp_path: Path) -> None:
     """A `libraries:` entry whose `cores:` names a core the topology doesn't
     declare is a hard error -- silently dropping it would emit nothing for a
     library the app author explicitly asked for."""
+    from alp_orchestrate import load_board_yaml
+    from alp_orchestrate.models import OrchestratorError
     body = """
     som:
       sku: E1M-V2N101
@@ -238,6 +252,9 @@ def test_library_scoped_to_undeclared_core_is_rejected(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------
 
 def test_requires_min_ram_names_constraint(tmp_path: Path) -> None:
+    from alp_orchestrate import load_board_yaml
+    from alp_orchestrate import libraries as liblayer
+    from alp_orchestrate.models import OrchestratorError
     project = load_board_yaml(_write_board(tmp_path, _V2N_NOLIB))
     manifest = {"requires": {"min_ram_kib": 10 ** 9}}
     with pytest.raises(OrchestratorError) as exc:
@@ -246,6 +263,9 @@ def test_requires_min_ram_names_constraint(tmp_path: Path) -> None:
 
 
 def test_requires_capability_names_constraint(tmp_path: Path) -> None:
+    from alp_orchestrate import load_board_yaml
+    from alp_orchestrate import libraries as liblayer
+    from alp_orchestrate.models import OrchestratorError
     project = load_board_yaml(_write_board(tmp_path, _V2N_NOLIB))
     manifest = {"requires": {"capabilities": ["gpu2d"]}}  # V2N has no gpu2d cap
     with pytest.raises(OrchestratorError) as exc:
@@ -256,6 +276,9 @@ def test_requires_capability_names_constraint(tmp_path: Path) -> None:
 def test_incompatible_selection_not_wireable(tmp_path: Path) -> None:
     """cmsis-nn is Zephyr-only; a project whose only live core runs yocto
     cannot wire it -- resolve_selection must reject naming the mismatch."""
+    from alp_orchestrate import load_board_yaml
+    from alp_orchestrate import libraries as liblayer
+    from alp_orchestrate.models import OrchestratorError
     body = """
     som:
       sku: E1M-V2N101
@@ -279,6 +302,8 @@ def test_incompatible_selection_not_wireable(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------
 
 def test_emit_lvgl_yocto_image_install(tmp_path: Path) -> None:
+    from alp_orchestrate import load_board_yaml
+    from alp_orchestrate.kconfig import _slice_local_conf
     body = """
     som:
       sku: E1M-V2N101
@@ -408,6 +433,8 @@ cores:
 def test_emit_microros_module_and_kconfig(tmp_path: Path) -> None:
     """micro-ROS on the M33 emits the ADR 0018 selection tag naming the west
     module plus the real upstream master enable symbol."""
+    from alp_orchestrate import load_board_yaml
+    from alp_orchestrate.kconfig import _slice_alp_conf
     project = load_board_yaml(_write_board(tmp_path, _V2N_MICROROS))
     out = _slice_alp_conf(project, project.cores["m33_sm"])
     assert "ADR 0018" in out
@@ -419,6 +446,9 @@ def test_emit_microros_module_and_kconfig(tmp_path: Path) -> None:
 def test_microros_requires_zephyr_core(tmp_path: Path) -> None:
     """micro-ROS is the M/Zephyr client; selecting it on a project whose live
     cores run no Zephyr fails naming the os constraint."""
+    from alp_orchestrate import load_board_yaml
+    from alp_orchestrate import libraries as liblayer
+    from alp_orchestrate.models import OrchestratorError
     body = """
     som:
       sku: E1M-V2N101
@@ -454,6 +484,8 @@ cores:
 def test_emit_ros2_yocto_image_install(tmp_path: Path) -> None:
     """ROS 2 on the A55 Yocto slice appends the grounded rclcpp package
     (transcribed from meta-alp-sdk alp-image-common.inc)."""
+    from alp_orchestrate import load_board_yaml
+    from alp_orchestrate.kconfig import _slice_local_conf
     project = load_board_yaml(_write_board(tmp_path, _V2N_ROS2_YOCTO))
     out = _slice_local_conf(project, project.cores["a55_cluster"])
     assert 'IMAGE_INSTALL:append = " rclcpp"' in out
@@ -462,6 +494,9 @@ def test_emit_ros2_yocto_image_install(tmp_path: Path) -> None:
 def test_ros2_on_non_yocto_target_errors(tmp_path: Path) -> None:
     """ROS 2 requires os: [yocto] + core_class a; a project whose only live
     core is the M33 running Zephyr fails naming the os constraint."""
+    from alp_orchestrate import load_board_yaml
+    from alp_orchestrate import libraries as liblayer
+    from alp_orchestrate.models import OrchestratorError
     body = """
     som:
       sku: E1M-V2N101
@@ -545,6 +580,8 @@ cores:
 
 def test_emit_lwm2m_coap_zephyr_kconfig(tmp_path: Path) -> None:
     """lwm2m + coap on the M33 emit their grounded upstream enable symbols."""
+    from alp_orchestrate import load_board_yaml
+    from alp_orchestrate.kconfig import _slice_alp_conf
     project = load_board_yaml(_write_board(tmp_path, _V2N_LWM2M))
     out = _slice_alp_conf(project, project.cores["m33_sm"])
     assert "CONFIG_LWM2M=y" in out
@@ -570,6 +607,8 @@ def test_emit_aws_iot_module_only_no_kconfig(tmp_path: Path) -> None:
     """aws-iot on the M33 emits the ADR 0018 selection tag naming the upstream
     module and -- because the SDK has no confirmed enable symbol -- NO
     fabricated CONFIG line."""
+    from alp_orchestrate import load_board_yaml
+    from alp_orchestrate.kconfig import _slice_alp_conf
     project = load_board_yaml(_write_board(tmp_path, _V2N_AWS))
     out = _slice_alp_conf(project, project.cores["m33_sm"])
     assert "ADR 0018" in out
@@ -584,6 +623,9 @@ def test_lwm2m_on_non_zephyr_target_errors(tmp_path: Path) -> None:
     """lwm2m requires os: [zephyr]; a project whose only live core is the A55
     running Yocto fails naming the os constraint (upstream-lib variant of the
     incompatibility path)."""
+    from alp_orchestrate import load_board_yaml
+    from alp_orchestrate import libraries as liblayer
+    from alp_orchestrate.models import OrchestratorError
     body = """
     som:
       sku: E1M-V2N101
@@ -672,6 +714,8 @@ cores:
 
 def test_emit_modbus_canopennode_zephyr_kconfig(tmp_path: Path) -> None:
     """The industrial libraries emit their grounded upstream enable symbols."""
+    from alp_orchestrate import load_board_yaml
+    from alp_orchestrate.kconfig import _slice_alp_conf
     project = load_board_yaml(_write_board(tmp_path, _V2N_MODBUS_CANOPEN))
     out = _slice_alp_conf(project, project.cores["m33_sm"])
     assert "CONFIG_MODBUS=y" in out
@@ -693,6 +737,8 @@ cores:
 
 def test_emit_micropython_module_only_no_kconfig(tmp_path: Path) -> None:
     """MicroPython emits a selection tag and no fabricated CONFIG line."""
+    from alp_orchestrate import load_board_yaml
+    from alp_orchestrate.kconfig import _slice_alp_conf
     project = load_board_yaml(_write_board(tmp_path, _V2N_MICROPYTHON))
     out = _slice_alp_conf(project, project.cores["m33_sm"])
     assert "ADR 0018" in out
@@ -703,6 +749,8 @@ def test_emit_micropython_module_only_no_kconfig(tmp_path: Path) -> None:
 
 def test_new_m_class_libraries_reject_a_only_soc() -> None:
     """The new Zephyr/Cortex-M entries name core_class on an A-only target."""
+    from alp_orchestrate import libraries as liblayer
+    from alp_orchestrate.models import BoardProject, OrchestratorError, Slice
     project = BoardProject(
         sku="E1M-TST-AONLY",
         hw_rev=None,

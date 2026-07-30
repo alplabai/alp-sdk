@@ -46,14 +46,12 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 import run_smoke                                       # noqa: E402
 
-from alp_orchestrate import (                          # noqa: E402
-    BoardProject,
-    OrchestratorError,
-    Slice,
-    _slice_alp_conf,
-    emit_sysbuild_conf,
-)
-
+# NOTE: alp_orchestrate imports are deliberately NOT at module scope.
+# scripts/alp_orchestrate/ is slated for deletion in a later slice; a
+# module-scope import here would make the whole file fail to COLLECT
+# at that point, including the spec-vs-schema tests below that never
+# touch the planner.  Each planner-dependent test imports what it
+# needs in-body instead.
 
 _COMMON = REPO / "tests" / "hil" / "_common"
 
@@ -139,6 +137,7 @@ def _make_project(
     below.  We don't go through load_board_yaml() because that
     requires real preset files on disk; the emit functions take
     BoardProject + Slice directly."""
+    from alp_orchestrate import BoardProject
     return BoardProject(
         sku="E1M-AEN701",
         hw_rev=None,
@@ -164,6 +163,7 @@ def _make_slice(
     power: dict | None = None,
 ) -> Slice:
     """Minimal Slice carrying the per-core block under test."""
+    from alp_orchestrate import Slice
     return Slice(
         core_id="m55_hp",
         os="zephyr",
@@ -190,6 +190,7 @@ def test_boot_block_emits_mcuboot_config() -> None:
     pinned_zephyr` below is the class gate that catches a future
     invented name generically, against the pinned Zephyr's actual
     Kconfig tree rather than a string someone typed."""
+    from alp_orchestrate import emit_sysbuild_conf
     project = _make_project(boot={
         "method": "mcuboot",
         "signing": {"algorithm": "ecdsa_p256",
@@ -219,6 +220,7 @@ def test_rsa3072_hard_errors_in_mcuboot_path() -> None:
     forwards into).  Silently emitting rsa2048's default length for
     an rsa3072-declared key would ship a signature the customer never
     asked for -- this MUST raise, not silently degrade."""
+    from alp_orchestrate import OrchestratorError, emit_sysbuild_conf
     project = _make_project(boot={
         "method": "mcuboot",
         "signing": {"algorithm": "rsa3072",
@@ -377,6 +379,7 @@ def test_emitted_sb_config_symbols_exist_in_pinned_zephyr(
             "that DOES provide the workspace to turn this skip into a "
             "failure."
         )
+    from alp_orchestrate import emit_sysbuild_conf
     boot: dict = {"method": method}
     if method == "mcuboot":
         boot["signing"] = {"algorithm": algorithm,
@@ -405,6 +408,7 @@ def test_memory_block_emits_stack_heap_isr_config() -> None:
     HEAP_MEM_POOL_SIZE, and ISR_STACK_SIZE lines with byte counts =
     KiB * 1024.  The memory_stacks.yaml HiL spec checks the runtime
     reads back the configured value."""
+    from alp_orchestrate import _slice_alp_conf
     project = _make_project()
     slice_ = _make_slice(memory={
         "stack_kib": 8, "heap_kib": 16, "isr_stack_kib": 4,
@@ -428,6 +432,7 @@ def test_power_block_emits_pm_and_wake_sources() -> None:
     `undefined symbol` warning.  Until per-silicon DT-overlay + runtime
     enable lands (v0.7), the wake-source list is documented in the
     generated alp.conf for the customer to wire by hand."""
+    from alp_orchestrate import _slice_alp_conf
     project = _make_project()
     slice_ = _make_slice(power={
         "sleep_mode": "standby",
@@ -449,6 +454,7 @@ def test_power_block_emits_pm_and_wake_sources() -> None:
 def test_power_block_disabled_emits_no_pm() -> None:
     """`power.sleep_mode: disabled` (or omitted) must NOT enable PM
     -- pulling in CONFIG_PM on always-on apps wastes ROM."""
+    from alp_orchestrate import _slice_alp_conf
     project = _make_project()
     slice_ = _make_slice(power={"sleep_mode": "disabled"})
     conf = _slice_alp_conf(project, slice_)
@@ -465,6 +471,7 @@ def test_diagnostics_modules_emits_per_module_log_level() -> None:
     already exists) keep the live CONFIG_<MOD>_LOG_LEVEL=N form.
     Level-name -> integer mapping (off=0 / error=1 / warn=2 / info=3
     / debug=trace=4) is preserved either way."""
+    from alp_orchestrate import _slice_alp_conf
     project = _make_project(diagnostics={
         "log_level": "info",
         "modules": {

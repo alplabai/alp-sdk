@@ -106,6 +106,24 @@ CASES = [
     # alp.conf; see tests/parity/README.md.
     ("audio-i2s-tone.build-plan",   ORCH, "examples/audio/i2s-tone/board.yaml",                 "build-plan"),
     ("iot-fleet-ota.build-plan",    ORCH, "examples/connectivity/iot-fleet-ota/board.yaml",      "build-plan"),
+    # THE OVERLAP CASE, and it exists for another gate.
+    #
+    # `check_zephyr_conf_parity.py` pins that the `alp.conf` a Zephyr example's
+    # own CMakeLists.txt materialises and the one carried in the build plan's
+    # `configArtefacts` are byte-identical. Once that gate stopped importing
+    # the planner and started diffing COMMITTED artefacts instead, it needed a
+    # board present in both snapshot families -- and there was none: the
+    # `proj-*` (zephyr-conf) boards below and the ORCH (build-plan) boards
+    # above were chosen for two unrelated purposes and share nothing. The gate
+    # correctly refused to pass on an empty comparison, which is what made it
+    # red.
+    #
+    # `rpmsg-v2n` is the board that fixes it: it already has a build-plan
+    # golden two lines up, and this line gives it the matching zephyr-conf one.
+    # Multicore on purpose -- the parity gate splits on the per-core
+    # `# --- core: <id> (zephyr) ---` banner, so a two-Zephyr-core board
+    # exercises the split as well as the comparison.
+    ("rpmsg-v2n.zephyr-conf",       PROJ, "examples/multicore/rpmsg-v2n/board.yaml",             "zephyr-conf"),
 ]
 for _bid, _board in _PROJ_BOARDS:
     for _mode in _PROJ_MODES:

@@ -78,9 +78,16 @@ SNAPSHOT_DIR = REPO / "tests" / "fixtures" / "emit-snapshots"
 # fixtures) -- keep in sync if a PROJ board is added, renamed, or dropped
 # there; an id missing here is a hard failure below, not a silent skip.
 _PROJ_BOARD_YAML = {
-    "aen": "examples/aen/aen-analog-validate/board.yaml",
-    "v2n": "examples/v2n/v2n-power-monitor/board.yaml",
-    "nsim": "examples/peripheral-io/spi-slave/board.yaml",
+    "proj-aen": "examples/aen/aen-analog-validate/board.yaml",
+    "proj-v2n": "examples/v2n/v2n-power-monitor/board.yaml",
+    "proj-nsim": "examples/peripheral-io/spi-slave/board.yaml",
+    # The one fixture that also has a build-plan golden, and therefore the only
+    # (board, core) pair this gate can actually compare. Added to
+    # check_emit_snapshots.py's CASES for exactly that reason -- the three
+    # `proj-*` boards above have no build-plan counterpart, so before this
+    # entry the comparison set was empty and the gate failed rather than
+    # passing on nothing.
+    "rpmsg-v2n": "examples/multicore/rpmsg-v2n/board.yaml",
 }
 
 # A `proj-*.zephyr-conf.snap` file concatenates one section per declared
@@ -148,8 +155,12 @@ def _zephyr_conf_pairs(snapshot_dir: Path) -> dict[tuple[str, str], str]:
     counterpart's `contents` value does).
     """
     out: dict[tuple[str, str], str] = {}
-    for snap in sorted(snapshot_dir.glob("proj-*.zephyr-conf.snap")):
-        bid = snap.name[len("proj-"): -len(".zephyr-conf.snap")]
+    # EVERY zephyr-conf golden, not just the `proj-*` ones. The prefix is a
+    # naming convention of one generator loop, not a property of the artefact,
+    # and scoping the glob to it silently excluded the only fixture that has a
+    # build-plan counterpart -- which is how this gate came to compare nothing.
+    for snap in sorted(snapshot_dir.glob("*.zephyr-conf.snap")):
+        bid = snap.name[: -len(".zephyr-conf.snap")]
         if bid not in _PROJ_BOARD_YAML:
             raise SystemExit(
                 f"check_zephyr_conf_parity: {snap.name} has no entry in "

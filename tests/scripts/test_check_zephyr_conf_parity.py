@@ -8,6 +8,7 @@ emit-snapshot families that stand in for them can never diverge).
 """
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -67,18 +68,23 @@ def _build_plan_snap(dir_: Path, name: str, board_yaml: str, core_id: str,
     return path
 
 
-def test_default_corpus_currently_has_zero_overlap():
-    # Pinned finding (module docstring's "CURRENT STATE OF THE FIXTURE
-    # CORPUS"): check_emit_snapshots.py's PROJ boards (the zephyr-conf
-    # family) and its ORCH/CASES boards (the build-plan family) share no
-    # board.yaml today, so there is nothing yet for the byte-parity
-    # comparison below to exercise on the real corpus. This test pins that
-    # fact loudly so a future change either fixes it (and this test gets
-    # rewritten to assert real coverage) or the CI failure it causes is
-    # expected, not a surprise regression report.
+def test_default_corpus_compares_at_least_one_real_pair():
+    # Replaces `test_default_corpus_currently_has_zero_overlap`, which pinned
+    # the opposite state: check_emit_snapshots.py's PROJ (zephyr-conf) and ORCH
+    # (build-plan) board sets shared no board.yaml, so this gate had nothing to
+    # compare and failed rather than passing on an empty set. `rpmsg-v2n` now
+    # carries BOTH goldens, so the overlap is real and the gate is green for a
+    # reason.
+    #
+    # Asserted as ">= 1", not "== 1": a second overlapping board is exactly the
+    # improvement this corpus wants, and a test forbidding it would make the
+    # gate harder to strengthen than to leave weak. Zero is the state that must
+    # never come back, and `test_zero_pairs_fails_loudly` below pins that.
     proc = _run()
-    assert proc.returncode == 1, proc.stdout + proc.stderr
-    assert "0 board/core pairs" in proc.stdout + proc.stderr
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    match = re.search(r"(\d+) board/core pair\(s\)", proc.stdout + proc.stderr)
+    assert match, proc.stdout + proc.stderr
+    assert int(match.group(1)) >= 1, proc.stdout + proc.stderr
 
 
 def test_zero_pairs_fails_loudly(tmp_path):
