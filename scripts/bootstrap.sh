@@ -698,6 +698,13 @@ echo
 # this kind of failure -- must still print on the incomplete path. Exiting
 # here would take that away on the one run that needs it most.
 EXIT_CODE=0
+# The substitution pattern is held in a variable rather than written inline as
+# ${VAR//\{\{PHASES\}\}/${x}}.  Escaped braces in a substitution PATTERN, with an
+# expansion as the REPLACEMENT, is the one construct added here whose parsing
+# differs between the bash 4/5 on the Linux + Windows runners and the bash 3.2
+# macOS ships -- and a mis-parse there does not fail locally, it reports a
+# syntax error at an unrelated line much earlier in the file.
+_phases_token='{{PHASES}}'
 if [ "${#BLOCKING_PHASES[@]}" -eq 0 ]; then
     ok "Bootstrap complete."
 elif [ "${ALLOW_PARTIAL}" -eq 1 ]; then
@@ -706,13 +713,13 @@ elif [ "${ALLOW_PARTIAL}" -eq 1 ]; then
         if [ -z "${_phases_joined}" ]; then _phases_joined="${_p}"; else _phases_joined="${_phases_joined}, ${_p}"; fi
     done
     ok "Bootstrap complete."
-    warn "  ${VERDICT_PARTIAL_NOTE_TEMPLATE//\{\{PHASES\}\}/${_phases_joined}}"
+    warn "  ${VERDICT_PARTIAL_NOTE_TEMPLATE//$_phases_token/$_phases_joined}"
 else
     _phases_joined=""
     for _p in "${BLOCKING_PHASES[@]}"; do
         if [ -z "${_phases_joined}" ]; then _phases_joined="${_p}"; else _phases_joined="${_phases_joined}, ${_p}"; fi
     done
-    warn "${VERDICT_INCOMPLETE_MESSAGE_TEMPLATE//\{\{PHASES\}\}/${_phases_joined}}"
+    warn "${VERDICT_INCOMPLETE_MESSAGE_TEMPLATE//$_phases_token/$_phases_joined}"
     warn "  ${VERDICT_INCOMPLETE_REMEDY}"
     EXIT_CODE=1
 fi
