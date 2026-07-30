@@ -7,23 +7,37 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.15.0 candidate
 
-### Added — macOS onramp execution coverage: a `macos-latest` leg that actually exercises the Darwin `xz`/`wget` exemption (#1033)
+### Added — macOS onramp execution coverage: a `macos-latest` leg that actually runs the Darwin `xz`/`wget` exemption, not just checks it on paper (#1033)
 
 The macOS narrowing of `scripts/bootstrap.sh`'s prerequisite check (dropping
 `xz`/`wget` from `REQUIRED_BINS` on Darwin, since macOS `tar` is bsdtar and
 decompresses `.xz` in-process, and the pinned Zephyr SDK's `setup.sh` only
-hard-checks for `wget` on `linux-*` hosts) had zero execution coverage — it
-was caught by reading source, not by any gate. `onramp-clean-container.yml`
-gains `prereqs-and-bootstrap-macos`, a `macos-latest` job that installs only
-`git`/`cmake`/`python3`/`ninja` (from `metadata/bootstrap.json`'s
-`prerequisites.install.macos`, not a hardcoded brew line), then relocates any
-pre-existing `xz`/`wget` binaries out of PATH before running
-`bootstrap.sh --no-west` — a bare run on a stock `macos-latest` runner (which
-carries a large Homebrew tree) would pass whether or not the narrowing still
-exists, since `xz`/`wget` are typically already resolvable there. The job
-asserts `bootstrap.sh` reports the macOS prerequisite set satisfied
-(`Bootstrap complete.`) and never names `xz` or `wget` as missing. Not added
-to branch protection.
+hard-checks for `wget` on `linux-*` hosts) already has a static gate —
+`scripts/check_bootstrap_manifest.py`'s `_check_prerequisites_macos` polices
+`bootstrap.sh`'s Darwin `REQUIRED_BINS` against `metadata/bootstrap.json`'s
+`prerequisites.macos` on every `python-smoke` OS leg, and catches a one-sided
+edit to either file alone. What it cannot catch is (a) whether the documented
+macOS quickstart step actually *executes* successfully — #1033's own framing
+is "enforcement of a list, not proof the journey works" — or (b) a
+*coordinated* regression where both `bootstrap.sh`'s Darwin list and the
+manifest's `prerequisites.macos` are widened together (e.g. both regain
+`xz`), which passes the static check by construction since the two sides
+still agree with each other.
+
+`onramp-clean-container.yml` gains `prereqs-and-bootstrap-macos`, a
+`macos-latest` job (billed at 10x a Linux runner's minutes; not added to
+branch protection, so a red run is visible but does not block merge) that
+installs only `git`/`cmake`/`python3`/`ninja` (from `metadata/bootstrap.json`'s
+`prerequisites.macos`, not a hardcoded brew line), then relocates every copy
+of any pre-existing `xz`/`wget` binaries off PATH (looped, not a single
+`command -v`, plus a hard post-condition that fails the job if either is
+still resolvable afterwards) before running `bootstrap.sh --no-west` — a bare
+run on a stock `macos-latest` runner (which carries a large Homebrew tree)
+would pass whether or not the narrowing still exists, since `xz`/`wget` are
+typically already resolvable there. The job asserts `bootstrap.sh` reports
+the macOS prerequisite set satisfied (`Bootstrap complete.`) and never names
+`xz` or `wget` as missing, checking that message before the generic exit
+code so the failure is diagnostic.
 
 ### Fixed — `alp.lock`'s `digests.metadata` only hashed `metadata/**/*.yaml`, missing 23 JSON files including every SoC spec (#1045)
 
