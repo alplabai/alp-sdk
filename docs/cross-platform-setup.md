@@ -4,7 +4,8 @@ The Alp SDK supports development on **Linux, macOS, native
 Windows, and Windows + WSL2**.  The Zephyr-on-M-class workflow
 (`board.yaml` → `west build` → flash) is first-class on every
 host OS — same source tree, same `west.yml`, same metadata,
-identical artefacts.
+identical artefacts — with one exception: real-silicon builds on
+macOS need Apple Silicon (see §1, §3).
 
 The Yocto-on-A-class workflow is Linux-only by upstream constraint
 (`bitbake` does not run on macOS or native Windows).  Mac /
@@ -20,7 +21,7 @@ Sections:
 
 - §1 Overview -- workflow vs host matrix
 - §2 Linux setup (Debian / Ubuntu / Fedora)
-- §3 macOS setup (13 Ventura+)
+- §3 macOS setup (13 Ventura+; real silicon is Apple Silicon only)
 - §4 Windows native setup (PowerShell)
 - §5 Windows + WSL2 setup (for Yocto targets)
 - §6 Verification -- hello-world per OS
@@ -56,8 +57,10 @@ PowerShell into the WSL filesystem
 **Intel Macs cannot cross-compile.**  The two "Apple silicon only"
 cells above are not a preference — the pinned Zephyr SDK
 (`metadata/toolchains.json`, version `1.0.1`) publishes host builds
-for `linux-aarch64`, `linux-x86_64`, `macos-aarch64` and
-`windows-x86_64` only.  Upstream shipped `macos-x86_64` through
+for `linux-x86_64`, `macos-aarch64` and `windows-x86_64` only
+(`linux-aarch64` exists upstream at this release too, but the
+manifest's own `_comment` records it as deliberately not listed —
+no current alp-sdk path runs or downloads it).  Upstream shipped `macos-x86_64` through
 `0.17.4` and dropped it in `1.0.0`, so there is no
 `arm-zephyr-eabi` cross toolchain for an Intel Mac at the version
 this SDK pins.  `macos-aarch64` is not a substitute: Rosetta
@@ -249,9 +252,11 @@ Persist `ZEPHYR_BASE` in your shell profile (typically
 
 ## 3. macOS setup (13 Ventura+)
 
-macOS is supported natively for the Zephyr-on-M workflow.  Mac
-users targeting Yocto reach for a Linux VM (UTM, Parallels,
-VirtualBox) — `bitbake` does not run on macOS.
+macOS is supported natively for the Zephyr-on-M `native_sim`
+workflow on both architectures; real-silicon builds are Apple
+Silicon only (see §1).  Mac users targeting Yocto reach for a
+Linux VM (UTM, Parallels, VirtualBox) — `bitbake` does not run on
+macOS.
 
 ### 3.1 Homebrew prerequisites
 

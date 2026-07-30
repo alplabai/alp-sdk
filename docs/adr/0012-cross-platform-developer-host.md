@@ -1,9 +1,53 @@
 # 0012. alp-sdk developer host is cross-platform; Linux required ONLY for Yocto
 
-Status: Accepted — see **Amendment** below (2026-07-26) for a correction to
-the Arm GNU Toolchain claim.
+Status: Accepted — see **Amendments** below: (2026-07-26) corrects the Arm
+GNU Toolchain claim; (2026-07-29) narrows the macOS claim to Apple Silicon
+for real-silicon builds and `tan build`.
 Date: 2026-05-18
 Deciders: alpCaner
+
+## Amendment (2026-07-29 — narrow the macOS claim to Apple Silicon for real-silicon builds and `tan build`)
+
+The `## Decision` section's claim 1 ("The Zephyr-on-M-class developer
+workflow is first-class on Win + Mac + Linux") reads as unqualified macOS
+support. That is too broad for one sub-case, corrected here rather than
+rewritten in place, per this repo's amend-don't-rewrite convention (see
+this ADR's own 2026-07-26 Amendment above):
+
+- **Real-silicon Zephyr builds (`west build` cross-compiling with the
+  Zephyr SDK's `arm-zephyr-eabi`) and `tan build` targeting
+  `arm-zephyr-eabi` are Apple Silicon only, not "macOS".** The pinned
+  Zephyr SDK (`metadata/toolchains.json`) publishes host builds for
+  `linux-x86_64`, `macos-aarch64`, and `windows-x86_64` only --
+  `linux-aarch64` exists upstream at this SDK release too, but
+  `metadata/toolchains.json`'s own `_comment` records it as
+  deliberately not listed there (no current alp-sdk path runs or
+  downloads it). Upstream `sdk-ng` shipped a `macos-x86_64` host build (and a
+  matching `toolchain_macos-x86_64_arm-zephyr-eabi.tar.xz`) through its
+  `v0.17.4` release; `v1.0.0` and this repo's pinned `v1.0.1` ship
+  `macos-aarch64` only. `macos-aarch64` is not a usable substitute for an
+  Intel host: Rosetta translates x86_64 binaries *for* Apple Silicon, not
+  the reverse, and macOS has no WSL2-style fallback to a different host
+  arch the way Windows does. An Intel Mac needs a Linux host (VM,
+  container, or remote builder) for these two workflows.
+- **`native_sim` is unaffected -- it stays "macOS", no arch qualifier.**
+  `native_sim` builds with the host's own compiler
+  (`ZEPHYR_TOOLCHAIN_VARIANT=host`, confirmed in
+  `.github/workflows/pr-twister.yml:54`, `docs/local-ci.md:79`,
+  `docs/testing.md:31`, `docs/ci/README.md:17`) and never touches the
+  Zephyr SDK. Section 3's Homebrew prerequisite list (`docs/
+  cross-platform-setup.md` §3.1-§3.3: cmake / ninja / gperf / dtc / host
+  clang) is not arch-gated either. An Intel Mac runs `native_sim`,
+  ztests, and day-to-day example iteration exactly like an Apple Silicon
+  Mac.
+- **This narrows claim 1's scope, it does not reverse it.** Every other
+  load-bearing claim in this ADR (Yocto-on-A is Linux-only; CI runs a Win
+  + a Mac runner; the standalone-from-alp-studio promise holds without
+  Linux) is unaffected -- only "macOS" in claim 1 needed an Apple-Silicon
+  qualifier for the two workflows above. `docs/cross-platform-setup.md`
+  §1's matrix and §3's heading carry the corrected scoping;
+  `scripts/bootstrap.sh` gained an arch check that warns (not refuses) an
+  Intel Mac about the real-silicon gap.
 
 ## Amendment (2026-07-26 — correct the Arm GNU Toolchain claim)
 

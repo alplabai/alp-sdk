@@ -22,6 +22,26 @@ placeholders can't change a build), enforced by a completeness test that lists
 lock drift) and widens that workflow's `paths:` filters to include
 `scripts/alp_lock/**` / `scripts/west_commands/alp_lock.py` themselves.
 
+### Fixed — `check_cross_platform.py`'s `--fail-on-warning` flip was waiting on two Yocto-script findings, and the Intel-Mac host claim was still overbroad in three docs (#1032 A5/A6)
+
+`scripts/check_cross_platform.py`'s CI step is flipped to
+`--fail-on-warning`, now possible because `tests/yocto/build_rpc_uio_bench_aarch64.sh`
+and `tests/yocto/run_sanitized_rpc_tests.sh` — both Linux-only Yocto-target
+bench helpers with no Mac/Windows equivalent to document — are whitelisted
+with header notes explaining why, closing the last two BASH-ONLY-SHEBANG
+findings that kept the lint at "0 expected, 2 found".
+
+`scripts/bootstrap.sh` now warns (does not refuse) on an Intel Mac's
+`uname -m`: bootstrap itself and `native_sim` both work there, and only
+`west sdk install` for real silicon is blocked, so refusing outright would
+be wrong. [ADR 0012](docs/adr/0012-cross-platform-developer-host.md) gained
+a 2026-07-29 Amendment recording this narrowing as the decision record.
+`docs/cross-platform-setup.md`'s §3 heading/body and opening summary carried
+the same overbroad claim that [#1028] only half-corrected; `README.md` and
+`docs/getting-started.md` are brought into the same corrected scoping.
+
+[#1028]: https://github.com/alplabai/alp-sdk/pull/1028
+
 ### Added — a machine-readable install command for the 7-Zip prerequisite of `west sdk install` on native Windows (#1036)
 
 7-Zip was documented only as prose, at `manualInstallHints.windows.note[1]`:

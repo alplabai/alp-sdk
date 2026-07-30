@@ -345,6 +345,14 @@ stage_public_private() {
     python3 scripts/check_public_private.py || return 1
 }
 
+stage_cross_platform_lint() {
+    # Mirrors cross-platform-zephyr.yml's python-smoke step (alp-sdk#1032
+    # A5) -- the ONLY place --fail-on-warning ran before this was three
+    # legs of a non-required workflow, so a repo drifting back to N
+    # findings had no local signal and no required check to catch it.
+    python3 scripts/check_cross_platform.py --fail-on-warning || return 1
+}
+
 stage_pytest_scripts() {
     # Runs the full pytest suite under tests/scripts/ -- linter,
     # silicon-determined-field rejection (a3cd4fd regression lock),
@@ -648,6 +656,15 @@ else
         run_stage "public-private" stage_public_private
     else
         skip_stage "public-private" "scripts/check_public_private.py missing"
+    fi
+
+    # Mirrors cross-platform-zephyr.yml's python-smoke --fail-on-warning
+    # step (alp-sdk#1032 A5) so a repo drifting back to N findings is
+    # caught locally, not only on three legs of a non-required workflow.
+    if [ -f scripts/check_cross_platform.py ]; then
+        run_stage "cross-platform-lint" stage_cross_platform_lint
+    else
+        skip_stage "cross-platform-lint" "scripts/check_cross_platform.py missing"
     fi
 
     # Required scripts/check_*.py gates -- see REQUIRED_GATE_SCRIPTS
