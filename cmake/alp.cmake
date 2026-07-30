@@ -75,8 +75,8 @@ include_guard(GLOBAL)
 # assume it: an older `tan` keeps working, a newer one is picked up with
 # no further change here.
 #
-# `--emit ipc-contract-h` has no `tan generate --target` at all
-# (docs/cli.md's mode table) and always takes the alp_project.py path.
+# Both modes are served by `tan generate --target` as of tan v0.5.0; the
+# fallback below stays for a customer whose `tan` predates it.
 # ----------------------------------------------------------------------
 if(NOT DEFINED ALP_SDK_TAN_EMITTER)
     set(ALP_SDK_TAN_EMITTER "" CACHE INTERNAL
@@ -110,7 +110,7 @@ function(_alp_sdk_emit mode core board_yaml output)
             "CMake configures.")
     endif()
 
-    if(ALP_SDK_TAN_EMITTER AND NOT "${mode}" STREQUAL "ipc-contract-h")
+    if(ALP_SDK_TAN_EMITTER)
         set(_alp_sdk_cmd
             ${ALP_SDK_TAN_EMITTER} generate
             --target ${mode}
