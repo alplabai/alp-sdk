@@ -285,7 +285,15 @@ def test_emit_missing_board_is_clear_error():
     assert "not found" in res["error"]
 
 
-def test_emit_constructs_orchestrate_command(monkeypatch, tmp_path):
+def test_emit_constructs_planner_cli_command(monkeypatch, tmp_path):
+    """The planner CLI, not `alp_orchestrate` and not the `tan` binary.
+
+    `tan.planner_cli` is `scripts/alp_orchestrate/__main__.py` relocated, so the
+    argv is the same one this tool always sent. `tan generate` is NOT
+    interchangeable: its `--target` set and this tool's 8 catalogue modes are
+    disjoint surfaces, so routing there would fail at the flag parser for most
+    of them.
+    """
     board = tmp_path / "board.yaml"
     board.write_text("som: E1M-AEN801\n", encoding="utf-8")
 
@@ -302,6 +310,11 @@ def test_emit_constructs_orchestrate_command(monkeypatch, tmp_path):
         return _Proc()
 
     monkeypatch.setattr(server, "_run", _fake_run)
+    # The planner lives in another distribution now, so its absence is an
+    # ordinary state this tool reports rather than a crash -- pretend it is
+    # importable here; the refusal path has its own test below.
+    monkeypatch.setattr(
+        server.importlib.util, "find_spec", lambda name: object())
     res = server.emit(str(board), "system-manifest")
     assert res["ok"] is True
     assert res["artifact"] == "# generated artefact"
@@ -309,9 +322,30 @@ def test_emit_constructs_orchestrate_command(monkeypatch, tmp_path):
 
     cmd = captured["cmd"]
     assert cmd[0] == sys.executable
-    assert cmd[1:3] == ["-m", "alp_orchestrate"]
+    assert cmd[1:3] == ["-m", "tan.planner_cli"]
     assert "--emit" in cmd and "system-manifest" in cmd
     # Absolute, resolved input path so cwd does not matter.
     assert str(board.resolve()) in cmd
-    # scripts/ is placed on PYTHONPATH so `-m alp_orchestrate` resolves.
-    assert str(server.SCRIPTS_DIR) in captured["env"]["PYTHONPATH"]
+    # The root is handed over rather than discovered: planner_cli's own marker
+    # is `scripts/alp_project.py`, which this repo is about to delete.
+    assert "--sdk-root" in cmd and str(server.REPO_ROOT) in cmd
+
+
+def test_emit_without_the_planner_installed_is_actionable_not_a_traceback(
+        monkeypatch, tmp_path):
+    """`find_spec` RAISES ModuleNotFoundError when the parent package is
+    missing rather than returning None, so the guard has to catch as well as
+    test -- otherwise the check produces the very traceback it exists to
+    prevent."""
+    board = tmp_path / "board.yaml"
+    board.write_text("som: E1M-AEN801\n", encoding="utf-8")
+
+    def _raise(name):
+        raise ModuleNotFoundError("No module named 'tan'")
+
+    monkeypatch.setattr(server.importlib.util, "find_spec", _raise)
+    res = server.emit(str(board), "system-manifest")
+
+    assert res["ok"] is False
+    assert "pip install alp-tan" in res["error"]
+    assert "PYTHONPATH" in res["error"]

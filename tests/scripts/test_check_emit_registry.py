@@ -1,10 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for scripts/check_emit_registry.py + the emit-registry v1 contract.
+"""Tests for scripts/check_emit_registry.py + the emit-registry v1 catalogue.
 
 The registry is the single source of truth for every `--emit` mode the SDK
-exposes (scripts/alp_project.py + scripts/alp_orchestrate/cli.py, re-exposed
-by scripts/alp_cli/emit.py). These lock the schema/registry validity and the
-code<->registry drift-detection gate.
+publishes. It used to be checked for EQUALITY against the `--emit ...
+choices=[...]` lists in `scripts/alp_project.py` and
+`scripts/alp_orchestrate/cli.py`; both are being deleted with the planner, and
+after that no file here enumerates the full surface. The gate now checks the
+catalogue against the two PARTIAL enumerations alp-sdk still holds -- the
+committed emit snapshots and `west alp-emit`'s `_EMIT_MODES` -- as subsets, plus
+`owner.module` paths that name this repo.
+
+`test_phantom_mode_rejected` is deliberately GONE rather than rewritten: a
+registry entry nothing implements can no longer be detected from this
+repository, because the implementation is in another one. Re-establishing it is
+tan-side work. A test asserting the registry against itself would have kept the
+name and lost the meaning.
 """
 import copy
 import json
@@ -36,19 +46,25 @@ def test_schema_is_valid_draft202012():
 def test_committed_registry_conforms():
     proc = _run()
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert "in sync with the code" in proc.stdout
+    assert "emit modes catalogued" in proc.stdout
 
 
 def test_committed_registry_is_valid_json():
     json.loads(REGISTRY.read_text(encoding="utf-8"))
 
 
-def test_real_emit_modes_matches_registry_exactly():
+def test_west_alp_emit_modes_are_all_catalogued():
+    """The surviving half of the old equality check.
+
+    `west alp-emit` is the one in-repo CLI that still enumerates emit modes
+    after the planner leaves, and it offers 8 of the 20. Read through the
+    gate's own `ast` reader, so this test and the gate cannot disagree about
+    what the west command declares.
+    """
     sys.path.insert(0, str(REPO / "scripts"))
     import check_emit_registry as cer
-    code_modes = cer.real_emit_modes()
     registry_modes = {m["mode"] for m in _registry()["modes"]}
-    assert code_modes == registry_modes
+    assert cer.west_emit_modes() <= registry_modes
 
 
 def test_every_mode_field_is_grounded_in_code_paths():
@@ -58,28 +74,31 @@ def test_every_mode_field_is_grounded_in_code_paths():
         assert m["scope"] in ("project", "core", "system")
 
 
-def test_missing_mode_rejected(tmp_path):
+def test_a_mode_west_offers_but_the_registry_omits_is_rejected(tmp_path):
+    """Replaces `test_missing_mode_rejected`, which planted its break in the
+    old AST-of-alp_project.py path. `kconfig` is in `_EMIT_MODES`, so dropping
+    it from the catalogue is the same defect in the surviving direction."""
     doc = copy.deepcopy(_registry())
-    doc["modes"] = [m for m in doc["modes"] if m["mode"] != "build-plan"]
+    doc["modes"] = [m for m in doc["modes"] if m["mode"] != "kconfig"]
     p = tmp_path / "registry.json"
     p.write_text(json.dumps(doc), encoding="utf-8")
     proc = _run("--registry", str(p))
     assert proc.returncode != 0
-    assert "missing from the registry" in proc.stdout
-    assert "build-plan" in proc.stdout
+    assert "west alp-emit" in proc.stdout
+    assert "kconfig" in proc.stdout
 
 
-def test_phantom_mode_rejected(tmp_path):
+def test_an_owner_module_naming_a_deleted_path_is_rejected(tmp_path):
+    """The check that keeps the catalogue from describing code that is gone --
+    which is exactly the state the planner deletion creates if the fields are
+    not repointed in the same commit."""
     doc = copy.deepcopy(_registry())
-    phantom = copy.deepcopy(doc["modes"][0])
-    phantom["mode"] = "totally-fake-mode"
-    doc["modes"].append(phantom)
+    doc["modes"][0]["owner"]["module"] = "scripts/gone/nowhere.py"
     p = tmp_path / "registry.json"
     p.write_text(json.dumps(doc), encoding="utf-8")
     proc = _run("--registry", str(p))
     assert proc.returncode != 0
-    assert "phantom entries" in proc.stdout
-    assert "totally-fake-mode" in proc.stdout
+    assert "does not exist" in proc.stdout
 
 
 def test_unknown_top_level_key_rejected(tmp_path):

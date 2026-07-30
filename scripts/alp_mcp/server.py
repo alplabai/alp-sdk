@@ -25,6 +25,7 @@ which calls :func:`main`.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import subprocess
@@ -359,10 +360,31 @@ def validate_board_yaml(path_or_content: str) -> dict[str, Any]:
 
 
 def emit(board_yaml_path: str, mode: str) -> dict[str, Any]:
-    """Emit a generated artefact for a project via ``python -m alp_orchestrate``.
+    """Emit a generated artefact for a project via ``python -m tan.planner_cli``.
 
-    Runs ``python -m alp_orchestrate --emit <mode> --input <board_yaml_path>``
-    and returns the generated artefact:
+    THE PLANNER CLI, NOT THE ``tan`` BINARY, and that is not a stylistic
+    choice. ``tan generate``'s ``--target`` set and this tool's mode set are
+    DISJOINT, not one inside the other (``docs/cli.md`` draws the same
+    distinction between the two front doors): the eight modes this tool
+    accepts come from ``metadata/catalog.json``'s ``emit_modes`` and are
+    exactly ``west alp-emit``'s ``_EMIT_MODES``
+    (``scripts/west_commands/alp_emit.py``) -- ``build-plan``,
+    ``dts-partitions``, ``dts-reservations``, ``ipc-contract-h``, ``kconfig``,
+    ``storage-mounts-c``, ``system-manifest``, ``tfm-sysbuild-conf``. Routing
+    them at ``tan generate`` would reject most of them at the flag parser. The
+    module that answers this argv is the RELOCATED one: tan's
+    ``python/tan/planner_cli.py`` says in its own docstring that it is
+    ``scripts/alp_orchestrate/__main__.py`` moved, and that ``tan build``
+    reaches the same dispatch in-process. Same code, same modes, new home --
+    which is the whole reason this repoint is a repoint and not a rewrite.
+
+    ``--sdk-root`` is passed EXPLICITLY. Left to discover its own root,
+    ``planner_cli`` walks up from the CWD looking for ``scripts/alp_project.py``
+    -- a marker this repository is about to delete. Passing the root turns a
+    future silent "could not find the SDK" into a non-issue.
+
+    Runs ``python -m tan.planner_cli --emit <mode> --input <board_yaml_path>
+    --sdk-root <repo>`` and returns the generated artefact:
 
         {"ok": bool, "returncode": int, "mode": str, "artifact": str,
          "stderr": str}
@@ -388,24 +410,50 @@ def emit(board_yaml_path: str, mode: str) -> dict[str, Any]:
     if not board.is_file():
         return {"ok": False, "error": f"board.yaml not found: {board_yaml_path}"}
 
-    # Run with the SDK's scripts/ dir importable so `-m alp_orchestrate`
-    # resolves; pass an absolute --input so cwd does not matter.
-    env = dict(os.environ)
-    env["PYTHONPATH"] = (
-        str(SCRIPTS_DIR) + os.pathsep + env.get("PYTHONPATH", "")
-    ).rstrip(os.pathsep)
+    # The planner is another package now, so its absence is an ordinary
+    # deployment state rather than a bug -- and it must read as one. Without
+    # this check the subprocess dies with a `ModuleNotFoundError: No module
+    # named 'tan'` traceback on stderr, which an MCP client renders to an agent
+    # as a crash with no instruction in it. `find_spec` asks the interpreter
+    # that will actually run the subprocess (`sys.executable` is this one), so
+    # the answer is not a guess.
+    try:
+        planner_spec = importlib.util.find_spec("tan.planner_cli")
+    except (ImportError, ValueError):
+        # `find_spec` IMPORTS the parent package to search it, so a missing
+        # `tan` raises here instead of returning None -- the check would have
+        # produced exactly the traceback it exists to prevent. ValueError covers
+        # a half-initialised module with a null `__spec__`.
+        planner_spec = None
+    if planner_spec is None:
+        return {
+            "ok": False,
+            "error": (
+                "the tan planner is not importable by "
+                f"{sys.executable}: `python -m tan.planner_cli` cannot run. "
+                "Install it with `pip install alp-tan`, or put the tan "
+                "checkout's `python/` directory on PYTHONPATH."
+            ),
+            "mode": mode,
+        }
+
+    # Absolute --input so cwd does not matter; explicit --sdk-root so the
+    # planner never has to find this checkout by a marker file (see the
+    # docstring). No PYTHONPATH injection: `scripts/` used to be prepended so
+    # `-m alp_orchestrate` resolved, and that module is going away.
     proc = _run(
         [
             sys.executable,
             "-m",
-            "alp_orchestrate",
+            "tan.planner_cli",
             "--emit",
             mode,
             "--input",
             str(board.resolve()),
+            "--sdk-root",
+            str(REPO_ROOT),
         ],
         cwd=REPO_ROOT,
-        env=env,
     )
     return {
         "ok": proc.returncode == 0,
