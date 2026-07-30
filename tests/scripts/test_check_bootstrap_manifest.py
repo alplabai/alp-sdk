@@ -310,6 +310,24 @@ def test_prerequisites_posix_drift_fails(tmp_path, monkeypatch, capsys):
     assert "prerequisites.posix" in err
 
 
+def test_prerequisites_macos_drift_fails(tmp_path, monkeypatch, capsys):
+    """POSIX twin of test_prerequisites_posix_drift_fails: prerequisites.macos
+    must agree with scripts/bootstrap.sh's Darwin-branch REQUIRED_BINS
+    reassignment (the macOS xz/wget exemption) -- `_check_prerequisites_macos`
+    is a SEPARATE regex from `_check_prerequisites_posix`'s (which only ever
+    sees the first/canonical REQUIRED_BINS literal), so this needs its own
+    drift test rather than assuming the posix test above covers it."""
+    _scaffold(tmp_path)
+    _edit_manifest(tmp_path, lambda d: d["prerequisites"].__setitem__(
+        "macos", ["git", "python3"]))  # dropped "cmake" and "ninja"
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "Darwin-branch REQUIRED_BINS" in err
+    assert "prerequisites.macos" in err
+
+
 def test_prerequisites_windows_drift_fails(tmp_path, monkeypatch, capsys):
     _scaffold(tmp_path)
     _edit_manifest(tmp_path, lambda d: d["prerequisites"].__setitem__(
@@ -474,6 +492,62 @@ def _bash_available_with_python3() -> bool:
         return False
     proc = subprocess.run(["bash", "-c", "command -v python3"], capture_output=True)
     return proc.returncode == 0
+
+
+def test_bootstrap_sh_darwin_excludes_xz_and_wget_from_refusal(tmp_path):
+    """scripts/bootstrap.sh's Darwin branch reassigns REQUIRED_BINS to drop
+    xz/wget (the #949 macOS fix this branch adds) -- nothing else exercises
+    that branch: the only CI container is ubuntu:24.04, and no other test
+    stubs `uname`. Fake a Darwin `uname` on PATH, restrict the rest of PATH
+    to just `dirname`/`git`/`python3` (real, via symlink) so `cmake`/`ninja`
+    are genuinely absent too -- the only way to force an actual refusal --
+    and assert the refusal names cmake/ninja but never xz/wget."""
+    if sys.platform == "win32":
+        # The whole premise -- fake a Darwin host by putting a `uname` shim
+        # first on a stripped PATH -- does not hold on native Windows. Git
+        # Bash resolves its own `uname` (`MINGW64_NT-...`) ahead of an
+        # extensionless shim, and `Path.symlink_to` needs a privilege the
+        # runner does not have, so the Darwin branch never fires and the
+        # refusal correctly lists xz/wget. Nothing about scripts/bootstrap.sh
+        # is under test here on Windows: it is POSIX-only (tan bootstrap
+        # refuses native Windows outright with `windows-unsupported`), and
+        # Windows users run scripts/bootstrap.ps1. The macOS branch this
+        # covers is exercised on the ubuntu and macos legs, which is where
+        # the assertion means something.
+        pytest.skip("bootstrap.sh is POSIX-only; the Darwin uname shim cannot work on native Windows")
+    bash_path = shutil.which("bash")
+    if bash_path is None:
+        pytest.skip("bash not available on PATH")
+    real_tools = {}
+    for tool in ("dirname", "git", "python3"):
+        found = shutil.which(tool)
+        if found is None:
+            pytest.skip(f"{tool} not available on PATH -- cannot build the restricted PATH shim")
+        real_tools[tool] = found
+
+    scaffold_root = tmp_path / "darwin-repo"
+    (scaffold_root / "scripts").mkdir(parents=True)
+    shutil.copy2(REPO / "scripts" / "bootstrap.sh", scaffold_root / "scripts" / "bootstrap.sh")
+
+    shim_dir = tmp_path / "shim"
+    shim_dir.mkdir()
+    uname_shim = shim_dir / "uname"
+    uname_shim.write_text("#!/bin/sh\necho Darwin\n", encoding="utf-8")
+    uname_shim.chmod(0o755)
+    for tool, real_path in real_tools.items():
+        (shim_dir / tool).symlink_to(real_path)
+
+    proc = subprocess.run(
+        [bash_path, str(scaffold_root / "scripts" / "bootstrap.sh")],
+        capture_output=True, text=True, cwd=str(scaffold_root),
+        env={"PATH": str(shim_dir)},
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, out
+    assert "cmake" in out
+    assert "ninja" in out
+    assert "xz" not in out
+    assert "wget" not in out
 
 
 def test_bootstrap_sh_refuses_unknown_schema_version(tmp_path):
@@ -749,7 +823,8 @@ def test_install_missing_tool_command_fails(tmp_path, monkeypatch, capsys):
     err = capsys.readouterr().err
     assert rv == 1
     assert "prerequisites.install.windows" in err
-    assert "prerequisites.windows" in err
+    assert "missing install command" in err
+    assert "ninja" in err
 
 
 def test_install_linux_missing_tool_command_fails(tmp_path, monkeypatch, capsys):
@@ -965,6 +1040,96 @@ def test_install_clean_tree_passes(tmp_path, monkeypatch, capsys):
     assert "OK" in out
 
 
+def test_install_windows_allowlisted_entry_with_no_gate_or_prereqs_entry_passes(
+    tmp_path, monkeypatch, capsys
+):
+    """`install.windows` may carry a tool with no matching
+    `prerequisites.windows` gate and no `$Prereqs` entry at all, PROVIDED it
+    is named in this script's own `_WINDOWS_INSTALL_ONLY_TOOLS` allowlist
+    (issue #1036's `7zip` -- gates `west sdk install`, not bootstrap.ps1) --
+    the completeness contract is one-directional (gate tools subset-of
+    install commands) AND bounded on the reverse direction by that
+    allowlist, not an open-ended superset. Overwrites the real `7zip` value
+    here (rather than merely relying on it already being present) so this
+    test proves the ALLOWLIST behaviour itself, not just that the real
+    manifest happens to carry a passing entry today. See
+    `test_install_windows_extra_entry_not_allowlisted_fails` for the
+    negative twin: an entry NOT on this allowlist (`unzip`, `nnija`, ...)
+    must fail, not pass, unlike before this bound existed."""
+    _scaffold(tmp_path)
+    _edit_manifest(
+        tmp_path,
+        lambda d: d["prerequisites"]["install"]["windows"].__setitem__(
+            "7zip", "winget install -e --id 7zip.7zip"
+        ),
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    out = capsys.readouterr().out
+    assert rv == 0, out
+
+
+def test_install_windows_extra_entry_not_allowlisted_fails(tmp_path, monkeypatch, capsys):
+    """The reverse-direction bound on the #1036 superset relaxation: an
+    `install.windows` key with no matching `prerequisites.windows` gate AND
+    no matching `_WINDOWS_INSTALL_ONLY_TOOLS` allowlist entry must be
+    rejected. Before this bound existed, a garbage key with a garbage ID
+    (like this one) sat completely undetected -- nothing else in the gate
+    ever looks at an `install.windows` key that isn't on one of those two
+    lists (the schema's `additionalProperties: {type: string, minLength: 1}`
+    accepts any key name, and the `$Prereqs` / literal-scan checks only ever
+    walk FROM `prerequisites.windows` / `install.windows`'s current values).
+    Sensitivity: on the code as it stood before `extra_windows` was added
+    (completeness checked only `windows_tools - windows_install`, never the
+    reverse), this exact mutation passed with rv == 0 -- this test is the
+    regression lock for that gap."""
+    _scaffold(tmp_path)
+    _edit_manifest(
+        tmp_path,
+        lambda d: d["prerequisites"]["install"]["windows"].__setitem__(
+            "nnija", "winget install -e --id Nnija.Typo"
+        ),
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "nnija" in err
+    assert "_WINDOWS_INSTALL_ONLY_TOOLS" in err
+
+
+def test_install_windows_stale_entry_after_gate_removal_fails(tmp_path, monkeypatch, capsys):
+    """The realistic shape of the same gap: a tool removed from
+    `prerequisites.windows` AND its `scripts/bootstrap.ps1` `$Prereqs`
+    entry in lockstep (the "this tool stopped gating bootstrap" refactor)
+    but left behind in `install.windows` must still fail -- a stale install
+    command silently strands itself with nothing pointing a future reader
+    at whether it is still wired to anything. `ninja` is not in
+    `_WINDOWS_INSTALL_ONLY_TOOLS`, so removing its gate must not let its
+    `install.windows` entry go quiet. Before `extra_windows` was added this
+    mutation passed with rv == 0, the same regression `_WINDOWS_INSTALL_ONLY_TOOLS`
+    now closes."""
+    _scaffold(tmp_path)
+    _edit_manifest(
+        tmp_path,
+        lambda d: d["prerequisites"].__setitem__(
+            "windows", ["git", "cmake", "python"]  # dropped "ninja"
+        ),
+    )
+    _replace(
+        tmp_path / "scripts/bootstrap.ps1",
+        '    @{ Name = "python"; Hint = "winget install -e --id Python.Python.3.12" },\n'
+        '    @{ Name = "ninja";  Hint = "winget install -e --id Ninja-build.Ninja" }\n)',
+        '    @{ Name = "python"; Hint = "winget install -e --id Python.Python.3.12" }\n)',
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "ninja" in err
+    assert "_WINDOWS_INSTALL_ONLY_TOOLS" in err
+
+
 # ---------------------------------------------------------------------
 # 12b. scripts/bootstrap.sh PREREQ_HINT_* agreement (issue #978 gate review)
 # ---------------------------------------------------------------------
@@ -1003,7 +1168,7 @@ def test_bootstrap_sh_hint_length_mismatch_fails(tmp_path, monkeypatch, capsys):
     rv = gate.main()
     err = capsys.readouterr().err
     assert rv == 1
-    assert "PREREQ_HINT_LINUX has 3 entries but PREREQ_HINT_NAMES has 4" in err
+    assert "PREREQ_HINT_LINUX has 5 entries but PREREQ_HINT_NAMES has 6" in err
     assert "must stay parallel arrays" in err
 
 
@@ -1021,7 +1186,7 @@ def test_bootstrap_sh_hint_deleted_in_lockstep_does_not_silently_drop_tool(
     assertion existed."""
     _scaffold(tmp_path)
     sh_path = tmp_path / "scripts/bootstrap.sh"
-    _replace(sh_path, "PREREQ_HINT_NAMES=(git cmake python3 ninja)", "PREREQ_HINT_NAMES=(cmake python3 ninja)")
+    _replace(sh_path, "PREREQ_HINT_NAMES=(git cmake python3 ninja xz wget)", "PREREQ_HINT_NAMES=(cmake python3 ninja xz wget)")
     _replace(sh_path, '    "sudo apt-get install -y git"\n', "")
     _replace(sh_path, '    "brew install git"\n', "")
     _point_gate_at(tmp_path, monkeypatch)
@@ -1183,6 +1348,36 @@ def test_hardcoded_duplicate_of_punctuation_wrapped_leaf_fragment_fails(
     assert "scripts/bootstrap.ps1" in err
     assert "docs/cross-platform-setup.md" in err
     assert "manualInstallHints.windows.note" in err
+
+
+def test_hardcoded_duplicate_of_posix_manual_install_note_fails(tmp_path, monkeypatch, capsys):
+    """POSIX twin of `test_hardcoded_duplicate_of_read_leaf_fails` above.
+    `manualInstallHints.posix.note` (issue #949 addendum A4 -- POSIX finally
+    got the same manual-install-hints render `manualInstallHints.windows.note`
+    already had) is read generically by `_check_no_orphaned_leaves`'s
+    per-leaf scan the same as every other leaf, but until now nothing proved
+    that scan actually fires for scripts/bootstrap.sh's own render site --
+    only the bootstrap.ps1/windows side had a regression test. Re-inject a
+    hardcoded copy of `docs/cross-platform-setup.md` (a distinctive >= 20
+    char fragment of `manualInstallHints.posix.note`) immediately above
+    bootstrap.sh's `MANUAL_INSTALL_POSIX_NOTE` render loop -- the only
+    existing appearance of that path in bootstrap.sh is inside the header
+    comment at the top of the file (exempt), so this is a genuine second,
+    hardcoded copy outside a comment and must be caught."""
+    _scaffold(tmp_path)
+    sh_path = tmp_path / "scripts/bootstrap.sh"
+    needle = 'for line in "${MANUAL_INSTALL_POSIX_NOTE[@]}"; do echo "  ${line}"; done'
+    duplicate_line = (
+        'echo "See docs/cross-platform-setup.md for the manual install steps."\n        '
+    )
+    _replace(sh_path, needle, duplicate_line + needle)
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "scripts/bootstrap.sh" in err
+    assert "docs/cross-platform-setup.md" in err
+    assert "manualInstallHints.posix.note" in err
 
 
 def test_short_leaf_fragment_duplicate_is_not_flagged(tmp_path, monkeypatch, capsys):

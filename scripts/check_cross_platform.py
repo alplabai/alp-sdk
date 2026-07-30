@@ -190,6 +190,9 @@ INTENTIONALLY_BASH_HELPERS: frozenset[str] = frozenset({
     "scripts/bootstrap.sh",
     "scripts/test-all.sh",
     "scripts/setup-clang-format.sh",
+    # CI-only helper for dispatch-tan-parity.yml, which runs solely on
+    # ubuntu-latest; carries a "Cross-platform scope:" header note.
+    "scripts/dispatch-confirm.sh",
     # AEN801 (E8) bench flash + RAM-run helpers.  These drive JLinkExe
     # and the Alif SETOOLS (both Linux binaries on the bench) over SWD;
     # they're Linux-side bench tooling, not customer-facing build

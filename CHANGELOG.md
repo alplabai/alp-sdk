@@ -5,7 +5,47 @@ All notable changes to the Alp SDK are documented here.  Format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
-## [Unreleased] - v0.14.0 candidate
+## [Unreleased] - v0.15.0 candidate
+
+### Added — a machine-readable install command for the 7-Zip prerequisite of `west sdk install` on native Windows (#1036)
+
+7-Zip was documented only as prose, at `manualInstallHints.windows.note[1]`:
+`west sdk install`'s `.7z` extraction shells out to an external
+`7z`/`7za`/`7zr`/`7zz`/`7zzs`/`unar` binary via `patoolib`, with no
+pure-Python fallback, so 7-Zip must already be on PATH — but nothing in the
+repo could hand a caller (tan-cli's future `doctor --build` check, #204
+upstream) the actual command to run. `metadata/bootstrap.json` now declares
+`prerequisites.install.windows.7zip: "winget install -e --id 7zip.7zip"`
+(package ID confirmed against `microsoft/winget-pkgs`'
+`manifests/7/7zip/7zip/` tree). It is deliberately NOT added to
+`prerequisites.windows`: that list is the gate `bootstrap.ps1` refuses
+without, and 7-Zip only gates `west sdk install` (toolchain acquisition), a
+separate manual step bootstrap never runs — gating on it would make
+bootstrap refuse on every Windows host without 7-Zip installed, for a tool
+bootstrap itself never touches.
+
+`prerequisites.install.<os>` was already a superset of its matching gate
+list in practice (`install.macos` has carried `xz`/`wget` with no
+`prerequisites.macos` entry since #949), but `scripts/check_bootstrap_manifest.py`
+and `bootstrap-v1.schema.json` only documented and enforced that pattern for
+posix — the windows side asserted exact key-set equality against
+`prerequisites.windows`. `install.windows` is now allowed to carry an entry
+with no matching `prerequisites.windows` gate too — NOT symmetrically with
+`install.linux` / `install.macos`, which remain pinned by exact-equality to
+`prerequisites.posix` (a stray key there is still rejected); only
+`install.windows` is one-directional, and even that is bounded, not
+open-ended: an extra `install.windows` key is legal only when it is also
+named in `scripts/check_bootstrap_manifest.py`'s own
+`_WINDOWS_INSTALL_ONLY_TOOLS` allowlist (`7zip` today), so a stray or stale
+`install.windows` key that is neither gated nor allowlisted still fails the
+gate. `scripts/check_bootstrap_manifest.py`'s completeness check and its
+`$Prereqs` `Hint=` cross-check are updated accordingly, and
+`bootstrap-v1.schema.json`'s `prerequisites.install` / `install.windows`
+descriptions now state the bounded one-directional contract and name both
+live superset cases (`install.macos.xz`/`.wget`, `install.windows.7zip`) so
+neither reads as drift to a future editor.
+
+## [v0.14.0] - 2026-07-29
 
 ### Fixed — `check_cross_platform.py`'s `--fail-on-warning` flip was waiting on two Yocto-script findings, and the Intel-Mac host claim was still overbroad in three docs
 
@@ -160,6 +200,57 @@ silently falling back to base-revision pad routing instead of failing -- is
 tracked at [#1025](https://github.com/alplabai/alp-sdk/issues/1025); every
 rewritten doc now points there instead of restating the false gate.
 
+### Added — the hw_rev / SDK-version gate now exists, so the claim the entry above removed can come back true (#1019)
+
+The entry above removed `metadata/sdk_version.yaml`'s claim that
+`scripts/alp_project.py` "refuses to emit when the requested hw_rev is outside
+`[min_sdk_version, max_sdk_version]`" — correctly, because nothing implemented
+it. This builds the gate, so the file states the behaviour again rather than
+disclaiming it. The two changes are sequential, not contradictory: the docs
+were made honest first, and this makes them honest in the other direction.
+
+The exposure was real. `grep -rn 'min_sdk_version\|max_sdk_version' scripts/`
+returned nothing, and `alp_project_loader.py:35`'s `SDK_VERSION_FILE` was
+referenced nowhere else in its own file, so a customer whose upgraded SDK no
+longer supported their board revision got a normal, successful emit and
+firmware built against the wrong hardware assumptions, silently — while the
+data to catch it (`metadata/boards/e1m-evk.yaml:324-325`,
+`metadata/boards/e1m-x-evk.yaml:294-295`,
+`metadata/e1m_modules/*/hw-revisions.yaml`) sat in tree, unread.
+
+New `scripts/alp_orchestrate/sdk_compat.py` is that check, kept pure and
+data-only so the comparison is testable without a board.yaml, a metadata tree
+or a loader. `loader.py` calls it once both the SoM and board revisions are
+resolved, so the single implementation serves every consumer of
+`load_board_yaml` — including both `alp_project.py` emit paths (`:193`,
+`:237`), which is what makes the version file's claim true rather than
+relocating it.
+
+Both bounds are **inclusive**, and the comparison is numeric: string ordering
+puts `"0.13.0" < "0.5.0"` and would have silently allowed the exact upgrade
+this exists to catch. An absent bound is unbounded, never zero — reading it
+otherwise would refuse every `status: reserved` revision, which declares no
+range at all. An unreadable SDK version stays quiet, mirroring
+`buildplan._sdk_version`'s behaviour with no adjacent `metadata/` tree, and a
+malformed bound is treated as absent rather than turning a metadata typo into
+a refused build.
+
+`scripts/validate_board_yaml.py` maps exactly this failure to **exit code 3**
+via a new `SdkRevisionUnsupported`, an `OrchestratorError` subclass — so every
+existing `except OrchestratorError` keeps catching it, and the exit code needs
+no message string-matching.
+
+Nothing currently in tree is affected: all 27 shipped ranges are open-ended on
+the high side with a floor of `0.3.0` or none, against an SDK of `0.13.0`.
+Verified by mutation — capping a family revision at `0.5.0` in a copied
+metadata tree makes the loader refuse and the CLI exit 3, and disabling both
+bound checks fails 6 of the 15 new tests in
+`tests/scripts/test_sdk_revision_gate.py`.
+
+Deliberately out of scope: whether a requested revision *exists* or is
+`status: reserved` is a different failure with a different message, tracked at
+#1025.
+
 ### Changed — one first command: `README.md` and `docs/getting-started.md` now lead with `tan bootstrap`, like tan's own quickstart does
 
 Three published quickstarts taught three different first commands for the
@@ -209,6 +300,44 @@ the host compiler (`native_sim`, ztests, `tan validate`, `tan doctor`,
 metadata work), and `tan` itself, which publishes a working
 `tan-x86_64-apple-darwin`. The equivalent overclaim in the extension's docs
 is tracked at alp-sdk-vscode#415.
+
+### Fixed — the documented fresh-clone quickstart hard-refused on a bare POSIX host: undeclared `xz`/`wget`, no toolchain step, no per-project SDK pin (#949)
+
+Five defects blocked the quickstart on a genuinely clean host, verified end
+to end in a bare `ubuntu:24.04` container: `git`/`curl` were assumed
+present with no upfront note; nothing installed the `arm-zephyr-eabi`
+cross toolchain; `tan sdk switch` (per-project, not global) was never
+documented; `west sdk install`'s `tar --xz` extraction silently needs
+`xz`; and the pinned Zephyr SDK's own `setup.sh` hard-checks for `wget` on
+Linux. Both gaps were undeclared anywhere in `metadata/bootstrap.json` or
+`scripts/bootstrap.sh`.
+
+`metadata/bootstrap.json` / `bootstrap-v1.schema.json` now declare `xz`
+and `wget` as Linux-only POSIX prerequisites (apt/brew install commands,
+`manualInstallHints.posix`); a `prerequisites.macos` block plus a new
+`_check_prerequisites_macos` gate keeps the macOS exemption honest —
+`bsdtar` decompresses `.xz` in-process and macOS resolves `wget` from its
+own hosttools, so neither is required there, only on Linux.
+`scripts/bootstrap.sh` gates on both up front. `docs/getting-started.md`'s
+§1 Debian/Ubuntu one-liner and `docs/cross-platform-setup.md` §2.1 now
+name both packages explicitly. Both quickstarts add the missing
+`west sdk install --gnu-toolchains arm-zephyr-eabi` step and the
+per-project `tan --project <dir> sdk switch "$PWD"` step, without which
+`tan build` reports `[x]  sdk   no SDK selected` even after bootstrap
+succeeds. `docs/firmware-quickstart.md` gets the same `sdk switch` fix at
+its three onramp-adjacent sites.
+
+New `.github/workflows/onramp-clean-container.yml` walks the documented
+quickstart, verbatim, inside a genuinely bare `ubuntu:24.04` container —
+`pr-getting-started-aen801.yml`'s pre-provisioned runner and raw
+`west build` invocation could never have caught any of this. A cheap
+prereqs+bootstrap phase runs on every relevant PR; the full toolchain +
+`tan build` phase runs weekly and on `run-full-quickstart`-labeled PRs.
+
+This does not change which command a quickstart leads with — dev's
+`tan bootstrap --sdk-root "$PWD"` ordering (#1021) is unaffected; these
+prerequisites apply transitively, since `tan bootstrap` shells out to
+`scripts/bootstrap.sh`.
 
 ### Changed — `zephyr/kconfigs/core.kconfig`: E8 builds now default to the real SoC capability profile, not the permissive one
 

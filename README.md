@@ -45,23 +45,30 @@ curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | 
 export PATH="$HOME/.local/bin:$PATH"  # install.sh already made this permanent in your shell rc; needed once more in THIS shell
 
 # One-time per clone: stand up the west/Zephyr workspace + venv beside this
-# checkout (Linux, macOS and native Windows alike). Reads
-# metadata/bootstrap.json, so it cannot drift from what the SDK pins.
+# checkout. POSIX only (Linux/macOS) -- native Windows uses WSL2 or
+# scripts/bootstrap.ps1 directly, see docs/cross-platform-setup.md §4. Runs
+# the SDK's own scripts/bootstrap.sh, so the two cannot drift.
 tan bootstrap --sdk-root "$PWD"
 
 # Sanity-check the host -- catches a missing toolchain/HAL before it bites later
 tan doctor --build
 
+# One-time: the arm-zephyr-eabi cross toolchain a real-SoM build needs --
+# bootstrap.sh above got you west/Python, not this; see docs/getting-started.md
+( cd .. && west sdk install --gnu-toolchains arm-zephyr-eabi --no-hosttools \
+    --install-dir "$PWD/zephyr-sdk" )
+export ZEPHYR_SDK_INSTALL_DIR="$PWD/../zephyr-sdk"
+
 # Scaffold a hello-world (--sdk-root points it at this checkout); it
 # defaults to a real E1M SoM target, so this cross-builds and needs the
-# Zephyr SDK toolchain (pinned in metadata/toolchains.json) -- see
-# docs/getting-started.md
+# Zephyr SDK toolchain just installed above
 tan init --name my-app --sdk-root "$PWD" --non-interactive
 cd my-app
+tan sdk switch ..   # one-time per project: pin the alp-sdk checkout my-app builds against
 tan build --native
 ```
 
-`tan bootstrap` is what stands up the workspace `tan build` needs — the west/Zephyr tree and the Python venv, one level up from `alp-sdk/` — and skipping it is the #1 way this Quickstart fails on a fresh clone. You do **not** activate that venv by hand: the SDK's build plan carries the `PATH` additions per slice, so `tan build` finds `west` on its own. Activate it (`source ../.venv/bin/activate`) only if you intend to run `west` yourself. `scripts/bootstrap.sh` (and `scripts/bootstrap.ps1` on native Windows) is the same setup as a shell script for CI and for hosts without `tan`; both read the same `metadata/bootstrap.json`, so they cannot drift apart. See [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md) for the per-OS manual equivalent. `tan` is not installed by either -- it's a separate public Rust binary from [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli); the `install.sh` one-liner above needs no Rust toolchain. Building from source instead needs Rust 1.86+ (get it from [rustup.rs](https://rustup.rs)) plus a system C toolchain (`build-essential` on Debian/Ubuntu, `gcc`/`gcc-c++` on Fedora/RHEL -- see [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md) §2.1): `git clone https://github.com/alplabai/tan-cli && cd tan-cli && cargo install --path crates/tan-cli --locked`. `tan init` walks you through SoM SKU + template + destination interactively, or accepts `--som`, `--template`, `--cores` (and friends) for CI -- see `tan init --help` for the full flag set. `tan build` (`--native` is the default, explicit-opt-in spelling) consumes the SDK's build plan, materialises it, and runs each slice's `west`/`bitbake`/`cmake` command directly for the real SoM `board.yaml` targets; it never runs the produced binary itself (that's `tan run`). Flashing real hardware is `tan flash`.
+`tan bootstrap` is what stands up the workspace `tan build` needs — the west/Zephyr tree and the Python venv, one level up from `alp-sdk/` — and skipping it is the #1 way this Quickstart fails on a fresh clone. You do **not** activate that venv by hand: the SDK's build plan carries the `PATH` additions per slice, so `tan build` finds `west` on its own. Activate it (`source ../.venv/bin/activate`) only if you intend to run `west` yourself. `scripts/bootstrap.sh` (and `scripts/bootstrap.ps1` on native Windows) is the same setup as a shell script for CI and for hosts without `tan`; both read the same `metadata/bootstrap.json`, so they cannot drift apart. See [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md) for the per-OS manual equivalent. `west sdk install` and `tan sdk switch` are both one-time, per-checkout/per-project steps neither `tan bootstrap` nor `bootstrap.sh` do for you (no elevation, no silent re-pin) — skip either and `tan build`/`tan doctor --build` report a missing toolchain or `no SDK selected` respectively; see [`docs/getting-started.md`](docs/getting-started.md) for the full explanation. `tan` is not installed by either -- it's a separate public Rust binary from [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli); the `install.sh` one-liner above needs no Rust toolchain. Building from source instead needs Rust 1.86+ (get it from [rustup.rs](https://rustup.rs)) plus a system C toolchain (`build-essential` on Debian/Ubuntu, `gcc`/`gcc-c++` on Fedora/RHEL -- see [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md) §2.1): `git clone https://github.com/alplabai/tan-cli && cd tan-cli && cargo install --path crates/tan-cli --locked`. `tan init` walks you through SoM SKU + template + destination interactively, or accepts `--som`, `--template`, `--cores` (and friends) for CI -- see `tan init --help` for the full flag set. `tan build` (`--native` is the default, explicit-opt-in spelling) consumes the SDK's build plan, materialises it, and runs each slice's `west`/`bitbake`/`cmake` command directly for the real SoM `board.yaml` targets; it never runs the produced binary itself (that's `tan run`). Flashing real hardware is `tan flash`.
 
 `tan validate board.yaml` runs the diagnostic-rich validator standalone — try it on a fixture under `tests/fixtures/board_yaml_bad/` to see the format.  `tan doctor --build` triages the host build environment (`[+]`/`[!]`/`[x]` lines with fix hints) whenever a build machine misbehaves.  alp-sdk is plans-only — it emits `build-plan` / `system-manifest`; the whole build / flash / size / image / clean / renode surface lives in the standalone [`tan` CLI](https://github.com/alplabai/tan-cli).  alp-sdk's own remaining verb set — `generate` / `validate` / `doctor` / `monitor` / `new-som` / `model` and friends — is documented in [`docs/cli.md`](docs/cli.md).
 
