@@ -29,8 +29,10 @@ when:
      `metadata/toolchains.json`, issue #949 item 3)
      disagrees with `zephyr.version`.
   5. README.md's Zephyr badge disagrees with `zephyr.version`.
-  6. `prerequisites.posix` disagrees with bootstrap.sh's hardcoded
-     `REQUIRED_BINS=(...)`, `prerequisites.windows` disagrees with
+  6. `prerequisites.posix` disagrees with bootstrap.sh's hardcoded (canonical,
+     non-Darwin) `REQUIRED_BINS=(...)`, `prerequisites.macos` disagrees with
+     bootstrap.sh's Darwin-branch `REQUIRED_BINS=(...)` reassignment (the
+     macOS xz/wget exemption), `prerequisites.windows` disagrees with
      bootstrap.ps1's hardcoded `$Prereqs` name list, or
      `prerequisites.pythonMinVersion` disagrees with either script's
      hardcoded Python floor (bootstrap.sh's `PYTHON_MIN_VERSION="..."`,
@@ -610,6 +612,42 @@ def _check_prerequisites_posix(manifest: dict) -> list[str]:
     return []
 
 
+# bootstrap.sh's Darwin branch reassigns REQUIRED_BINS to a narrower set (no
+# xz/wget) -- `_SH_REQUIRED_BINS_RE` above is a plain `.search` (first match
+# wins, BY DESIGN: it targets the canonical, non-Darwin literal), so it can
+# never see this second assignment. Anchored on the `"Darwin" ]; then` guard
+# so it can't accidentally match the canonical or --print-env arrays instead.
+_SH_DARWIN_REQUIRED_BINS_RE = re.compile(
+    r'"Darwin"\s*\]\s*;\s*then.*?REQUIRED_BINS=\(([^)]*)\)', re.DOTALL)
+
+
+def _check_prerequisites_macos(manifest: dict) -> list[str]:
+    """scripts/bootstrap.sh's Darwin-branch `REQUIRED_BINS=(...)`
+    reassignment (the macOS xz/wget exemption) must agree with
+    `prerequisites.macos` -- the single source of truth for the EFFECTIVE
+    macOS prerequisite set, the same way `prerequisites.posix` polices the
+    canonical (non-Darwin) `REQUIRED_BINS` literal `_check_prerequisites_posix`
+    above already checks. Without this, `prerequisites.macos` could drift
+    (a tool added or dropped on either side) with nothing to catch it --
+    exactly the hole `prerequisites.posix`/`.windows` already close for the
+    non-Darwin lists."""
+    if not BOOTSTRAP_SH.is_file():
+        return [f"missing {BOOTSTRAP_SH.relative_to(REPO).as_posix()}"]
+    text = BOOTSTRAP_SH.read_text(encoding="utf-8")
+    m = _SH_DARWIN_REQUIRED_BINS_RE.search(text)
+    if m is None:
+        return ["scripts/bootstrap.sh: could not find the Darwin-branch "
+                 "`REQUIRED_BINS=(...)` reassignment -- update this gate if "
+                 "it was renamed/restructured"]
+    sh_bins = set(m.group(1).split())
+    manifest_bins = set(manifest["prerequisites"]["macos"])
+    if sh_bins != manifest_bins:
+        return [f"scripts/bootstrap.sh Darwin-branch REQUIRED_BINS={sorted(sh_bins)} "
+                 f"disagrees with metadata/bootstrap.json prerequisites.macos="
+                 f"{sorted(manifest_bins)}"]
+    return []
+
+
 def _check_prerequisites_windows(manifest: dict) -> list[str]:
     if not BOOTSTRAP_PS1.is_file():
         return [f"missing {BOOTSTRAP_PS1.relative_to(REPO).as_posix()}"]
@@ -740,6 +778,35 @@ def _winget_ids_and_commands(install_windows: dict) -> tuple[dict[str, str], lis
 # tracked identifier today -- add either only once a real case shows up.
 _LITERAL_SCAN_EXCLUDE_DOC_DIRS = ("adr",)
 
+# The exhaustive allowlist of `prerequisites.install.windows` keys with no
+# matching `prerequisites.windows` gate entry (issue #1036's superset
+# relaxation). `_check_install_commands` point 1 checks completeness in the
+# gate -> install direction only (every gated tool needs an install command);
+# without a bound on the REVERSE direction, ANY key here -- typo'd, garbage,
+# or a stale leftover from a tool that stopped gating bootstrap -- would sit
+# undetected forever, since nothing else in this repo notices an
+# `install.windows` entry with no reader (the schema's
+# `additionalProperties: {type: string, minLength: 1}` accepts any key name,
+# and the $Prereqs / literal-scan checks below only ever walk FROM
+# prerequisites.windows / install.windows's current values, never flag an
+# extra key that isn't on either list).
+#
+#   "7zip": gates `west sdk install` (patoolib's external 7z/7za/7zr/7zz/
+#   7zzs/unar shell-out for `.7z` extraction, no pure-Python fallback), a
+#   separate manual step `bootstrap.ps1` deliberately never runs -- so 7-Zip
+#   must NOT be added to `prerequisites.windows` (that would make
+#   bootstrap.ps1 refuse on every Windows host lacking 7-Zip, for a tool
+#   bootstrap itself never touches). See metadata/bootstrap.json's
+#   `prerequisites.install.windows.7zip` and
+#   metadata/schemas/bootstrap-v1.schema.json's `install.windows`
+#   description.
+#
+# Add a NEW entry here only if the tool gates something bootstrap.ps1
+# deliberately doesn't run (the 7zip shape) -- if it should instead refuse
+# bootstrap without it, add it to `prerequisites.windows` (and a matching
+# $Prereqs entry in scripts/bootstrap.ps1), not here.
+_WINDOWS_INSTALL_ONLY_TOOLS = {"7zip"}
+
 
 def _iter_literal_scan_files():
     """Yield every path the winget-identifier literal scan
@@ -772,13 +839,28 @@ def _check_install_commands(manifest: dict) -> list[str]:
     source every per-tool install COMMAND must agree with. Three
     independent assertions, each covering a different slice:
 
-      1. Completeness -- `install.windows`'s keys equal `prerequisites.
-         windows`'s tools, and `install.linux` / `install.macos`'s keys
-         each equal `prerequisites.posix`'s tools. A tool with no install
-         command is the exact hole that produced the drifted/incomplete
-         ninja hint in scripts/alp_cli/doctor.py this change fixes. This
-         is the ONLY assertion covering install.linux / install.macos --
-         see point 3's own note on why.
+      1. Completeness -- every `prerequisites.windows` tool has a matching
+         `install.windows` entry, and `install.linux` / `install.macos`'s
+         keys each equal `prerequisites.posix`'s tools. The gate ->
+         install direction is subset-only: `install.windows` MAY carry
+         additional entries with no matching `prerequisites.windows` gate --
+         issue #1036's `7zip` is the first live case, gating `west sdk
+         install` rather than bootstrap itself, the same "install has a
+         command but nothing refuses without it" shape `install.macos`'s
+         `xz`/`wget` already established on the posix side (see
+         metadata/schemas/bootstrap-v1.schema.json's `prerequisites.install`
+         description for the full rationale). The REVERSE direction is
+         bounded, not unchecked: any `install.windows` key that is neither
+         in `prerequisites.windows` nor in this script's own
+         `_WINDOWS_INSTALL_ONLY_TOOLS` allowlist is rejected -- without that
+         bound a typo'd or stale `install.windows` entry (a garbage key, or
+         a tool removed from `prerequisites.windows` and
+         `scripts/bootstrap.ps1`'s `$Prereqs` but left behind in
+         `install.windows`) would sit undetected forever. A tool with no
+         install command at all is the exact hole that produced the drifted/
+         incomplete ninja hint in scripts/alp_cli/doctor.py this change
+         fixes. This is the ONLY assertion covering install.linux /
+         install.macos -- see point 3's own note on why.
       2. scripts/bootstrap.ps1 agreement -- each `$Prereqs` entry's
          `Hint = "..."` value must equal `install.windows[<Name>]`
          byte-for-byte. Asserted HERE, not by extending
@@ -838,11 +920,23 @@ def _check_install_commands(manifest: dict) -> list[str]:
     # -------- 1. completeness ---------------------------------------------
     windows_tools = set(prereqs.get("windows", []))
     windows_install = set(install.get("windows", {}))
-    if windows_install != windows_tools:
+    missing_windows = windows_tools - windows_install
+    if missing_windows:
         problems.append(
-            f"prerequisites.install.windows keys {sorted(windows_install)} disagree "
-            f"with prerequisites.windows tools {sorted(windows_tools)} -- every "
-            f"windows prerequisite needs its own install command"
+            f"prerequisites.install.windows is missing install command(s) for "
+            f"{sorted(missing_windows)} -- every windows prerequisite needs its "
+            f"own install command"
+        )
+    extra_windows = windows_install - windows_tools - _WINDOWS_INSTALL_ONLY_TOOLS
+    if extra_windows:
+        problems.append(
+            f"prerequisites.install.windows has entr(y/ies) {sorted(extra_windows)} "
+            f"with no matching prerequisites.windows gate and no "
+            f"_WINDOWS_INSTALL_ONLY_TOOLS allowlist entry in this script -- either "
+            f"add the tool to prerequisites.windows (if bootstrap.ps1 should refuse "
+            f"without it) or to _WINDOWS_INSTALL_ONLY_TOOLS (if it gates something "
+            f"bootstrap.ps1 deliberately never runs, the 7zip/`west sdk install` "
+            f"shape)"
         )
     posix_tools = set(prereqs.get("posix", []))
     for os_key in ("linux", "macos"):
@@ -880,11 +974,21 @@ def _check_install_commands(manifest: dict) -> list[str]:
             # out of `entries` while `if not entries:` above only fires when
             # EVERY entry fails to parse. That's the same "goes dark" defect
             # `_winget_ids_and_commands` above was fixed for, one level
-            # down: a tool present in install.windows with no entry it can
-            # be checked against must be named, not silently skipped by the
-            # loop below.
+            # down: a GATED tool present in install.windows with no entry it
+            # can be checked against must be named, not silently skipped by
+            # the loop below.
+            #
+            # Deliberately walks `windows_tools` (the `prerequisites.windows`
+            # gate list), not `windows_install_map`'s full key set: bootstrap.ps1
+            # only ever prompts for a GATED tool (that's the entire reason
+            # $Prereqs exists -- to refuse before python/JSON is even
+            # confirmed present), so a superset `install.windows` entry with
+            # no gate (issue #1036's `7zip`, which gates `west sdk install`,
+            # not bootstrap.ps1) has no reason to appear in $Prereqs at all;
+            # requiring one here would force a bootstrap-time prompt for a
+            # tool bootstrap.ps1 never needs.
             parsed_names = {name for name, _ in entries}
-            for tool in sorted(windows_install_map):
+            for tool in sorted(windows_tools):
                 if tool not in parsed_names:
                     problems.append(
                         f"scripts/bootstrap.ps1 $Prereqs has no parseable "
@@ -1261,6 +1365,7 @@ def main() -> int:
     problems += _check_no_hardcoded_literal(BOOTSTRAP_PS1, manifest_version)
     problems += _check_readme_badge(manifest_version)
     problems += _check_prerequisites_posix(manifest)
+    problems += _check_prerequisites_macos(manifest)
     problems += _check_prerequisites_windows(manifest)
     problems += _check_python_min_version_posix(manifest)
     problems += _check_python_min_version_windows(manifest)

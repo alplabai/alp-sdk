@@ -16,20 +16,40 @@
 #
 # Operating mode:
 #
-#   - Linux job (canonical):   fails the PR if any step fails.
-#   - macOS / Windows jobs:    continue-on-error: true.  These
-#                               surface cross-platform drift but do
-#                               NOT block PR merge while the runners
-#                               are still being characterised.  Per
-#                               ADR 0012 the gating flips on once
-#                               the runners prove out -- this is the
-#                               scaffolding pass.
+#   - EVERY leg fails the JOB, Linux + macOS + Windows alike, on
+#     its own defect -- see the NOTE below for whether that also
+#     fails the PR (it does not, yet).  A macOS-only or Windows-only
+#     failure is a REAL defect on a host ADR 0012 calls first-class.
 #
-#   - check_cross_platform.py: runs in default (soft-warn) mode on
-#                               every runner.  The --fail-on-warning
-#                               gating flips on once docs/* are
-#                               cleaned of the existing Linux-only
-#                               idioms (separate cleanup task).
+#     This was scaffolding until 2026-07-29 (alp-sdk#1023): the Mac
+#     and Win legs carried `continue-on-error: true`, so a job-level
+#     `continue-on-error` made the check report SUCCESS no matter
+#     what its steps did -- the ADR 0012 claim was unenforced and a
+#     host-specific regression landed green.  Note what that means
+#     for the run history: while the override was in place, a green
+#     tick on these legs proved nothing, so "it has always passed"
+#     was never evidence.  The flip was made on the back of four
+#     consecutive runs (30457062916, 30455621379, 30450805406,
+#     30441032872) whose per-STEP conclusions -- not the job
+#     conclusions the override forged -- were 24/24 clean.
+#
+#     NOTE: this workflow's jobs (python-smoke, loader-smoke) are not
+#     in dev's or main's required-status-check list (verified via
+#     `gh api repos/alplabai/alp-sdk/rulesets` -> `[]` and
+#     `.../branches/{dev,main}/protection/required_status_checks`,
+#     neither of which lists these six contexts), so a red run here
+#     is visible but does not block merge yet -- removing
+#     continue-on-error buys a real signal, not enforcement. Adding
+#     these six contexts (three OSes x two jobs) to branch protection
+#     is a separate follow-up requiring the maintainer's decision.
+#
+#   - check_cross_platform.py: runs with --fail-on-warning on every
+#                               runner. The existing-doc cleanup this
+#                               was waiting on is done (2 bash-shebang
+#                               findings in tests/yocto/*.sh, fixed by
+#                               whitelisting them with header notes --
+#                               see INTENTIONALLY_BASH_HELPERS in the
+#                               script); 0 findings as of this change.
 #
 # Twister + bitbake are NOT exercised here:
 #   - Twister is the load-bearing Zephyr coverage gate -- it lives
@@ -95,21 +115,12 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     strategy:
+      # Every leg reports independently: a Windows-only break must not
+      # cancel the macOS leg that would have shown the same defect from
+      # a second angle.
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        # Linux is the canonical baseline; failures here block
-        # merge.  Mac + Win runners surface drift without blocking
-        # initially -- the override below flips Linux to strict.
-        include:
-          - os: ubuntu-latest
-            continue-on-error: false
-          - os: macos-latest
-            continue-on-error: true
-          - os: windows-latest
-            continue-on-error: true
-
-    continue-on-error: ${{ matrix.continue-on-error }}
 
     steps:
       - name: Checkout alp-sdk
@@ -139,11 +150,12 @@ jobs:
 
       # ---------------------------------------------------------
       # 2. Cross-platform lint (this slice, ADR 0012).
-      #    Soft-warn today; flip to --fail-on-warning once the
-      #    existing-doc cleanup task lands.
+      #    --fail-on-warning: the existing-doc cleanup this was
+      #    waiting on is done (0 findings); a new Linux-only idiom
+      #    now fails the job instead of passing silently.
       # ---------------------------------------------------------
-      - name: check_cross_platform lint (soft-warn)
-        run: python scripts/check_cross_platform.py
+      - name: check_cross_platform lint
+        run: python scripts/check_cross_platform.py --fail-on-warning
 
       - name: check public/private classifier
         run: python scripts/check_public_private.py
@@ -168,15 +180,6 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        include:
-          - os: ubuntu-latest
-            continue-on-error: false
-          - os: macos-latest
-            continue-on-error: true
-          - os: windows-latest
-            continue-on-error: true
-
-    continue-on-error: ${{ matrix.continue-on-error }}
 
     steps:
       - name: Checkout alp-sdk

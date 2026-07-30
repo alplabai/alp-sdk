@@ -26,9 +26,16 @@ import pytest
 
 yaml = pytest.importorskip("yaml")
 
-WORKFLOWS = pathlib.Path(__file__).resolve().parents[2] / ".github" / "workflows"
+REPO = pathlib.Path(__file__).resolve().parents[2]
+WORKFLOWS = REPO / ".github" / "workflows"
 SENDER = WORKFLOWS / "dispatch-tan-parity.yml"
 SEAM1 = WORKFLOWS / "parity-seam1.yml"
+# The poll + verdict logic lives here now (issue #190), not inline in SENDER
+# -- extracted so it's runnable and testable outside CI. See
+# tests/scripts/test_dispatch_confirm.py for the behavioural (stubbed-`gh`)
+# proof; this file still pins the literal mechanism, just against its new
+# home.
+CONFIRM_SCRIPT = REPO / "scripts" / "dispatch-confirm.sh"
 
 
 def _push_paths(path: pathlib.Path) -> list[str]:
@@ -92,4 +99,77 @@ def test_dispatch_sends_the_event_name_tan_listens_for() -> None:
         "`client_payload.sdk_ref` to override its PINNED_SDK_TAG. A rename "
         "makes tan silently fall back to the pin, i.e. test the wrong commit "
         "while reporting green."
+    )
+
+
+def test_a_never_fired_dispatch_is_a_failure_not_a_warning() -> None:
+    """A lifetime total of zero dispatch runs must FAIL, not warn.
+
+    This is the #194 lesson pinned as a mechanism rather than a comment. The
+    cross-repo dispatch went its entire lifetime without firing once: the
+    trigger was on tan's `dev` while `repository_dispatch` only ever reads the
+    DEFAULT branch's copy of a workflow. Every push warned, everything else was
+    green, and the gate protected nothing for weeks.
+
+    The verdict logic moved to scripts/dispatch-confirm.sh (issue #190), so
+    this test reads that script rather than the workflow YAML.
+
+    The two cases must not share an exit status, because they are different
+    facts:
+
+    * a run missing THIS TIME while tan has fired before -- Actions queueing.
+      Warn; failing this repo's push for tan's scheduler is the wrong blame.
+    * ZERO runs in tan's lifetime -- the wiring is dead. A queue delay cannot
+      produce a lifetime total of 0 once the seam has ever worked, so there is
+      no transient reading of it.
+
+    Without this test the escalation is itself unfalsifiable -- exactly the
+    shape it exists to catch.
+    """
+    body = CONFIRM_SCRIPT.read_text(encoding="utf-8")
+
+    assert "total_count" in body, (
+        "the confirmation step must read tan's LIFETIME repository_dispatch "
+        "count (`total_count`), not only runs in a recent time window. A "
+        "window-only check cannot tell 'never wired' from 'slow this time', "
+        "which is precisely how #194 stayed invisible."
+    )
+    assert '[ "${lifetime}" = "0" ]' in body, (
+        "a lifetime count of 0 must be branched on explicitly -- that is the "
+        "unambiguous 'the dispatch has never worked' signal."
+    )
+    assert "::error::" in body and "exit 1" in body, (
+        "a never-fired dispatch must FAIL the step (::error:: + exit 1). "
+        "Warning on a permanently dead gate is a guard wearing a guard's name."
+    )
+    assert "DEFAULT branch" in body, (
+        "the failure message must name the default-branch rule as the likely "
+        "cause. #194's original wording sent the reader to check the `types:` "
+        "entry, which was correct all along -- so the message cost time rather "
+        "than saving it."
+    )
+
+
+def test_a_stale_dispatch_history_is_also_a_reachable_failure() -> None:
+    """`lifetime == 0` must not be the ONLY way this step can fail.
+
+    tan-cli's lifetime `repository_dispatch` total_count left 0 the first
+    time the seam ever fired (it sits at 2 as of #190) and only grows from
+    there, so `lifetime == 0` alone is a condition that can never occur again
+    in practice -- a gate that can only ever warn from here on, the exact
+    #194 shape reproduced one level down. This pins that a SECOND, still
+    reachable failure path exists: the most recent dispatch run being older
+    than a staleness threshold, independent of how many runs have ever fired.
+    """
+    body = CONFIRM_SCRIPT.read_text(encoding="utf-8")
+
+    assert "STALE_THRESHOLD_S" in body, (
+        "a staleness threshold must exist -- otherwise 'lifetime > 0' is "
+        "treated as permanent proof the seam works, which is the #194 shape "
+        "rebuilt one level down."
+    )
+    assert body.count("exit 1") >= 2, (
+        "there must be a FAIL path reachable even when lifetime > 0 (a stale "
+        "most-recent run), not only the lifetime==0 path -- lifetime==0 alone "
+        "cannot recur once the seam has ever fired."
     )

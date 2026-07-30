@@ -119,11 +119,38 @@ die()  { printf "\033[1;31m[bootstrap]\033[0m %s\n" "$*" >&2; exit 1; }
 # `prerequisites.posix` is policed by scripts/check_bootstrap_manifest.py,
 # whose regex expects the full array assignment right below, not by this
 # script.
-REQUIRED_BINS=(git cmake python3 ninja)
+REQUIRED_BINS=(git cmake python3 ninja xz wget)
 # --print-env only reads metadata/bootstrap.json and prints -- it never
 # touches git/cmake/ninja, so it only needs python3 present.
 if [ "${PRINT_ENV_ONLY}" -eq 1 ]; then
     REQUIRED_BINS=(python3)
+elif [ "$(uname -s 2>/dev/null)" = "Darwin" ]; then
+    # xz and wget are REQUIRED on Linux, not macOS -- both are proven-on-Linux,
+    # never-demonstrated-on-macOS failure modes, so blocking on them
+    # unconditionally would hard-refuse every macOS user's first `bash
+    # scripts/bootstrap.sh` -- the documented first command -- on a host
+    # where it previously worked.
+    #
+    # xz: GNU tar (what `west sdk install`'s `tar --xz` shells out to on
+    # Linux) execs a standalone `/usr/bin/xz` binary to unpack the SDK
+    # archive -- the failure issue #949 actually proved, on a bare
+    # ubuntu:24.04 container. macOS `tar` is bsdtar (libarchive), which
+    # decompresses .xz IN-PROCESS and needs no xz binary, and stock macOS
+    # ships no /usr/bin/xz.
+    #
+    # wget: the pinned Zephyr SDK's own `setup.sh` (metadata/toolchains.json
+    # zephyrSdk.version) only hard-checks for a system `wget` on the
+    # `linux-*` host branch (`[[ "${host}" =~ ^linux-.* ]] && check_command
+    # wget 91`) -- confirmed by inspecting a real extracted setup.sh at that
+    # exact pinned version. On `macos-*` it resolves a bundled wget from the
+    # SDK's own hosttools instead and never runs that check at all -- issue
+    # #949's clean-container acceptance run proved the Linux failure
+    # (`Zephyr SDK setup requires 'wget'`), never a macOS one.
+    #
+    # `prerequisites.install.macos.{xz,wget}` (metadata/bootstrap.json) and
+    # PREREQ_HINT_MACOS below stay as-is so the hint still exists for the
+    # rare case a user needs either; only the hard block is dropped.
+    REQUIRED_BINS=(git cmake python3 ninja)
 fi
 
 # Per-tool install hints for the missing-tools message below (issue #978) --
@@ -137,18 +164,22 @@ fi
 # macOS-shipped version) has no `declare -A` -- the same reason the
 # nativeLibHints print loop further down duplicates itself per OS instead of
 # using indirection. Matched up by POSITION, not by key.
-PREREQ_HINT_NAMES=(git cmake python3 ninja)
+PREREQ_HINT_NAMES=(git cmake python3 ninja xz wget)
 PREREQ_HINT_LINUX=(
     "sudo apt-get install -y git"
     "sudo apt-get install -y cmake"
     "sudo apt-get install -y python3"
     "sudo apt-get install -y ninja-build"
+    "sudo apt-get install -y xz-utils"
+    "sudo apt-get install -y wget"
 )
 PREREQ_HINT_MACOS=(
     "brew install git"
     "brew install cmake"
     "brew install python3"
     "brew install ninja"
+    "brew install xz"
+    "brew install wget"
 )
 
 MISSING=()
@@ -254,6 +285,11 @@ for os_key in ("linux", "macos", "windows"):
     hint = d["nativeLibHints"][os_key]
     emit("HINT_" + os_key.upper() + "_NOTE", hint["note"])
     emit("HINT_" + os_key.upper() + "_CMD", hint["command"] or "")
+# manualInstallHints.posix.note (issue #949 addendum A4): the Zephyr
+# SDK / Arm GNU Toolchain manual-install facts, POSIX's twin of
+# bootstrap.ps1's manualInstallHints.windows.note -- this key used to
+# carry only "windows", so no Linux/macOS hint could ever render here.
+emit("MANUAL_INSTALL_POSIX_NOTE", d["manualInstallHints"]["posix"]["note"])
 PY
 )" || die "failed to read ${BOOTSTRAP_JSON} (see scripts/check_bootstrap_manifest.py)"
 eval "${_facts}"
@@ -329,6 +365,32 @@ case "$(uname -s)" in
     Darwin) OS_LABEL="macos" ;;
     MINGW*|MSYS*|CYGWIN*) OS_LABEL="windows-bash" ;;
 esac
+
+# Intel Mac: this script's own steps (west init/update, Python deps) work
+# fine -- they're arch-independent -- and so does native_sim (host-toolchain
+# build, no Zephyr SDK involved). What does NOT work is `west sdk install`
+# for real-silicon builds: the pinned Zephyr SDK (metadata/toolchains.json)
+# ships macos-aarch64 only, no macos-x86_64 -- dropped upstream starting
+# sdk-ng v1.0.0 (see docs/adr/0012-cross-platform-developer-host.md's
+# 2026-07-29 Amendment, and the cross-platform setup guide's section 1).
+# Warn, don't refuse: bootstrap itself and native_sim both still work here.
+#
+# `uname -m` alone is not enough: an Apple Silicon Mac running this
+# script under Rosetta 2 (e.g. an x86_64 shell/terminal) also reports
+# "x86_64", which would wrongly warn a native macos-aarch64 host.
+# `sysctl -n sysctl.proc_translated` is the canonical discriminator --
+# "1" means the CURRENT process is translated, "0" means it is native;
+# the sysctl itself is macOS-only (absent on Linux, irrelevant there).
+IS_ROSETTA=0
+if [ "${OS_LABEL}" = "macos" ] && [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" = "1" ]; then
+    IS_ROSETTA=1
+fi
+if [ "${OS_LABEL}" = "macos" ] && [ "$(uname -m)" = "x86_64" ] && [ "${IS_ROSETTA}" -eq 0 ]; then
+    warn "Intel Mac detected: native_sim and this bootstrap work fine, but"
+    warn "  'west sdk install' will fail later -- the pinned Zephyr SDK ships"
+    warn "  no macos-x86_64 build. Real-silicon Zephyr builds and 'tan build'"
+    warn "  need a Linux host instead (VM, container, or remote builder)."
+fi
 
 info "Repo root:       ${REPO_ROOT}"
 info "Workspace dir:   ${WORKSPACE_DIR}"
@@ -531,9 +593,13 @@ if [ "${DO_PIP}" -eq 1 ]; then
     # doctor / monitor, invoked as `python -m alp_cli <sub>` by `tan`) --
     # editable install, so a `git pull` in the checkout updates the backend
     # in place. `tan` itself is a separate Rust binary, installed
-    # separately -- see README.md for the tan-cli `install.sh` one-liner
-    # (or the `cargo install --path crates/tan-cli --locked` from-source
-    # alternative).
+    # separately:
+    #   curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh
+    # The from-source alternative is `git clone https://github.com/alplabai/
+    # tan-cli && cd tan-cli && cargo install --path crates/tan-cli --locked`
+    # -- that path is relative to a TAN-CLI checkout, not to this one. This
+    # comment used to name `crates/tan-cli` alone, which does not exist in
+    # alp-sdk, so anyone who followed it from here got "no such directory".
     info "Installing the tan CLI's Python backend into the venv (pip install -e ${PIP_EDITABLE_INSTALL})"
     "${VPY}" -m pip install -q -e "${PIP_EDITABLE_INSTALL}" \
         || warn "alp_cli editable install reported a problem -- check manually"
@@ -547,8 +613,9 @@ fi
 # not hardcoded here; edit the manifest to change this text. This script is
 # the sole consumer of nativeLibHints today: bootstrap.ps1 has no "native
 # libraries" heading of its own (native Windows never installs the
-# Yocto-side native libs directly) -- see `manualInstallHints` for the
-# separate, Windows-only fact bootstrap.ps1 DOES print (review item 7).
+# Yocto-side native libs directly) -- see `manualInstallHints` below for the
+# separate fact bootstrap.ps1 ALSO prints, under its own OS key (review
+# item 7).
 echo
 info "Optional native libraries unlock the Yocto-side backends:"
 case "${OS_LABEL}" in
@@ -583,6 +650,25 @@ if [ -n "${HINT_CMD}" ]; then
     echo "  ${HINT_CMD}"
 fi
 
+# -------- Manual-install hints -------------------------------------------------
+
+# Rendered from metadata/bootstrap.json's `manualInstallHints.posix.note`
+# (issue #949 addendum A4) -- not hardcoded here; edit the manifest to
+# change this text.  bootstrap.ps1 prints the `windows` twin of this same
+# key under an identical heading; POSIX had no equivalent key to read
+# until this addendum, so a Linux/macOS customer never saw this at all.
+# Only for true POSIX (linux/macos) -- a git-bash/MSYS invocation on native
+# Windows is the unsupported combo the top-of-file header comment already
+# points elsewhere (WSL2 or bootstrap.ps1), so it gets neither this section
+# nor windows' bootstrap.ps1-only one.
+case "${OS_LABEL}" in
+    linux|macos)
+        echo
+        info "NOT auto-installed (manual, one-time):"
+        for line in "${MANUAL_INSTALL_POSIX_NOTE[@]}"; do echo "  ${line}"; done
+        ;;
+esac
+
 # -------- Done ----------------------------------------------------------------
 
 echo
@@ -608,6 +694,16 @@ print_env_lines "  "
 # user's back, and pasted its output here instead of the text.  A quoted
 # tag also means backslashes are literal, so the line continuation and
 # $PWD below are written plainly rather than escaped.
+#
+# Everything between the EOF markers is PRINTED TO THE USER, so a '#' line in
+# there is output, not a source comment -- keep internal notes (like this one)
+# outside the heredoc. `check_bootstrap_manifest.py` enforces exactly that
+# distinction, and `tests/scripts/test_check_bootstrap_manifest.py`
+# ::test_hardcoded_literal_inside_heredoc_body_fails proves it by rewriting the
+# printed `  # Run the local test suite:` line to carry a version literal and
+# asserting the gate goes red. That test asserts its anchor exists and fails
+# loudly if it does not, so rewording that printed line breaks a real gate for
+# a non-reason. Reword the lines around it instead.
 cat <<'EOF'
 
   # Sanity-check the host build environment (needs tan on PATH -- see
@@ -616,21 +712,25 @@ cat <<'EOF'
   # debug-readiness check (lldb, codeLLDBExtension) -- see docs/cli.md.
   tan doctor --build
 
-If you are working ON the SDK itself:
+  # BUILDING YOUR OWN PROJECT -- the customer path. `tan` is the whole command
+  # surface (ADR-0020), and `tan build` resolves the board from the project's
+  # own board.yaml, so there is no -b to pass. `tan examples` lists what you
+  # can start from.
+  #
+  # Note `tan build` has NO native_sim option: board.yaml's `os:` is
+  # zephyr/yocto/baremetal/off, so it always targets the real SKU your
+  # board.yaml declares and a real toolchain is required. `tan doctor --build`
+  # reports whether you have one.
+  tan init --from-example peripheral-io/uart-echo --name my-app
+  cd my-app && tan build
+
+  # WORKING ON THE SDK ITSELF -- contributor commands, not part of building
+  # your firmware. native_sim is reachable only through west, for the same
+  # reason as above: it is not a SKU any board.yaml can declare.
+  west build -b native_sim/native/64 examples/peripheral-io/uart-echo       -- -DEXTRA_ZEPHYR_MODULES=$PWD
+
   # Run the local test suite:
   bash scripts/test-all.sh
-
-  # Or jump straight into building an example:
-  west build -b native_sim/native/64 examples/peripheral-io/uart-echo \
-      -- -DEXTRA_ZEPHYR_MODULES=$PWD
-
-If you are building your own project against the SDK:
-  # Scaffold from an example, then build for your board's real SKU.
-  # `tan build` targets the SKU your board.yaml declares -- there is no
-  # native_sim option (board.yaml `os:` is zephyr/yocto/baremetal/off),
-  # so a real toolchain is needed; `tan doctor --build` reports it.
-  tan init --from-example peripheral-io/uart-echo
-  tan build
 
 References:
   - docs/testing.md          -- full test-coverage map + how to run from scratch

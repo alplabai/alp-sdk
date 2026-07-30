@@ -25,6 +25,17 @@ class OrchestratorError(RuntimeError):
     """
 
 
+class SdkRevisionUnsupported(OrchestratorError):
+    """The running SDK is outside a requested hw_rev's declared range.
+
+    A subclass rather than a flag so `scripts/validate_board_yaml.py` can
+    map exactly this failure to the **exit code 3** that
+    `metadata/sdk_version.yaml` documents, without string-matching a
+    message.  Every existing `except OrchestratorError` keeps catching it
+    (#1019).
+    """
+
+
 _E1M_I2C_BUS_RE = re.compile(r"^e1m(?:_x)?_i2c([0-9]+)$")
 
 

@@ -169,6 +169,7 @@
     "isp": 1,
     "jpeg_encoder": 1
   },
+  "peripherals_unverified": ["pdm", "pdm_lp"],
   "capabilities": {
     "ethos_u55_count": 2,
     "ethos_u85_count": 1,
