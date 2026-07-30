@@ -315,6 +315,16 @@ stage_metadata_validate() {
     fi
 }
 
+stage_alp_lock() {
+    # Mirrors pr-metadata-validate.yml's `alp.lock --check` step (#1045) --
+    # previously the ONLY place that check ran, so a locally-green branch
+    # could still redden CI on lock drift it never saw. No "script missing"
+    # skip: this is a tracked repo file, so a missing/renamed script means
+    # the gate itself vanished and that must redden, not SKIP silently
+    # (same reasoning as stage_generated_files above).
+    python3 scripts/west_commands/alp_lock.py --workspace . --check || return 1
+}
+
 stage_doc_yaml_fragments() {
     # Lints ```yaml fenced blocks in *.md against board.schema.json.
     # Catches README + tutorial drift after schema changes.  Skips if
@@ -333,6 +343,14 @@ stage_public_private() {
         return 99
     fi
     python3 scripts/check_public_private.py || return 1
+}
+
+stage_cross_platform_lint() {
+    # Mirrors cross-platform-zephyr.yml's python-smoke step (alp-sdk#1032
+    # A5) -- the ONLY place --fail-on-warning ran before this was three
+    # legs of a non-required workflow, so a repo drifting back to N
+    # findings had no local signal and no required check to catch it.
+    python3 scripts/check_cross_platform.py --fail-on-warning || return 1
 }
 
 stage_pytest_scripts() {
@@ -640,6 +658,15 @@ else
         skip_stage "public-private" "scripts/check_public_private.py missing"
     fi
 
+    # Mirrors cross-platform-zephyr.yml's python-smoke --fail-on-warning
+    # step (alp-sdk#1032 A5) so a repo drifting back to N findings is
+    # caught locally, not only on three legs of a non-required workflow.
+    if [ -f scripts/check_cross_platform.py ]; then
+        run_stage "cross-platform-lint" stage_cross_platform_lint
+    else
+        skip_stage "cross-platform-lint" "scripts/check_cross_platform.py missing"
+    fi
+
     # Required scripts/check_*.py gates -- see REQUIRED_GATE_SCRIPTS
     # above.  Keeps this wrapper's coverage aligned with the hard
     # gates pr-metadata-validate.yml / pr-doc-drift.yml run in CI.
@@ -649,6 +676,14 @@ else
     # artifact + fail on drift.  Catches the class of red that bit #623 /
     # #636 / #642 (new macro/symbol/gate without a committed regen).
     run_stage "generated-files" stage_generated_files
+
+    # alp.lock --check -- both the dev (fast) and main (release-grade)
+    # profiles run this unconditionally, same as metadata-validate above.
+    # MUST run after generated-files: that stage rewrites metadata/catalog.json
+    # and metadata/error-catalog.json in place, and both are now lock-covered
+    # (#1045) -- checking the lock first would pass on pre-regen bytes and
+    # leave a just-regenerated catalog unverified.
+    run_stage "alp-lock" stage_alp_lock
 
     # Main-only: the strict ABI-snapshot diff gate that pr-abi-snapshot.yml
     # runs on `main` + `release/**` only.  The `--target main` release-grade
