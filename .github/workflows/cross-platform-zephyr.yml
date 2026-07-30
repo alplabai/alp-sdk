@@ -16,9 +16,10 @@
 #
 # Operating mode:
 #
-#   - EVERY leg blocks the PR, Linux + macOS + Windows alike.
-#     A macOS-only or Windows-only failure is a REAL defect on a
-#     host ADR 0012 calls first-class, and it fails the PR.
+#   - EVERY leg fails the JOB, Linux + macOS + Windows alike, on
+#     its own defect -- see the NOTE below for whether that also
+#     fails the PR (it does not, yet).  A macOS-only or Windows-only
+#     failure is a REAL defect on a host ADR 0012 calls first-class.
 #
 #     This was scaffolding until 2026-07-29 (alp-sdk#1023): the Mac
 #     and Win legs carried `continue-on-error: true`, so a job-level

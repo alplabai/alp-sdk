@@ -57,8 +57,10 @@ PowerShell into the WSL filesystem
 **Intel Macs cannot cross-compile.**  The two "Apple silicon only"
 cells above are not a preference — the pinned Zephyr SDK
 (`metadata/toolchains.json`, version `1.0.1`) publishes host builds
-for `linux-aarch64`, `linux-x86_64`, `macos-aarch64` and
-`windows-x86_64` only.  Upstream shipped `macos-x86_64` through
+for `linux-x86_64`, `macos-aarch64` and `windows-x86_64` only
+(`linux-aarch64` exists upstream at this release too, but the
+manifest's own `_comment` records it as deliberately not listed —
+no current alp-sdk path runs or downloads it).  Upstream shipped `macos-x86_64` through
 `0.17.4` and dropped it in `1.0.0`, so there is no
 `arm-zephyr-eabi` cross toolchain for an Intel Mac at the version
 this SDK pins.  `macos-aarch64` is not a substitute: Rosetta

@@ -214,7 +214,6 @@ equality against the single `hw_rev` the firmware was built for
 silently falling back to base-revision pad routing instead of failing -- is
 tracked at [#1025](https://github.com/alplabai/alp-sdk/issues/1025); every
 rewritten doc now points there instead of restating the false gate.
-
 ### Added — the hw_rev / SDK-version gate now exists, so the claim the entry above removed can come back true (#1019)
 
 The entry above removed `metadata/sdk_version.yaml`'s claim that

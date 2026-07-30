@@ -6,8 +6,7 @@ for real-silicon builds and `tan build`.
 Date: 2026-05-18
 Deciders: alpCaner
 
-## Amendment (2026-07-29 — narrow the macOS claim to Apple Silicon for
-real-silicon builds and `tan build`)
+## Amendment (2026-07-29 — narrow the macOS claim to Apple Silicon for real-silicon builds and `tan build`)
 
 The `## Decision` section's claim 1 ("The Zephyr-on-M-class developer
 workflow is first-class on Win + Mac + Linux") reads as unqualified macOS
@@ -19,8 +18,11 @@ this ADR's own 2026-07-26 Amendment above):
   Zephyr SDK's `arm-zephyr-eabi`) and `tan build` targeting
   `arm-zephyr-eabi` are Apple Silicon only, not "macOS".** The pinned
   Zephyr SDK (`metadata/toolchains.json`) publishes host builds for
-  `linux-x86_64`, `linux-aarch64`, `macos-aarch64`, and `windows-x86_64`
-  only. Upstream `sdk-ng` shipped a `macos-x86_64` host build (and a
+  `linux-x86_64`, `macos-aarch64`, and `windows-x86_64` only --
+  `linux-aarch64` exists upstream at this SDK release too, but
+  `metadata/toolchains.json`'s own `_comment` records it as
+  deliberately not listed there (no current alp-sdk path runs or
+  downloads it). Upstream `sdk-ng` shipped a `macos-x86_64` host build (and a
   matching `toolchain_macos-x86_64_arm-zephyr-eabi.tar.xz`) through its
   `v0.17.4` release; `v1.0.0` and this repo's pinned `v1.0.1` ship
   `macos-aarch64` only. `macos-aarch64` is not a usable substitute for an

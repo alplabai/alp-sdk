@@ -374,7 +374,18 @@ esac
 # sdk-ng v1.0.0 (see docs/adr/0012-cross-platform-developer-host.md's
 # 2026-07-29 Amendment, and the cross-platform setup guide's section 1).
 # Warn, don't refuse: bootstrap itself and native_sim both still work here.
-if [ "${OS_LABEL}" = "macos" ] && [ "$(uname -m)" = "x86_64" ]; then
+#
+# `uname -m` alone is not enough: an Apple Silicon Mac running this
+# script under Rosetta 2 (e.g. an x86_64 shell/terminal) also reports
+# "x86_64", which would wrongly warn a native macos-aarch64 host.
+# `sysctl -n sysctl.proc_translated` is the canonical discriminator --
+# "1" means the CURRENT process is translated, "0" means it is native;
+# the sysctl itself is macOS-only (absent on Linux, irrelevant there).
+IS_ROSETTA=0
+if [ "${OS_LABEL}" = "macos" ] && [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" = "1" ]; then
+    IS_ROSETTA=1
+fi
+if [ "${OS_LABEL}" = "macos" ] && [ "$(uname -m)" = "x86_64" ] && [ "${IS_ROSETTA}" -eq 0 ]; then
     warn "Intel Mac detected: native_sim and this bootstrap work fine, but"
     warn "  'west sdk install' will fail later -- the pinned Zephyr SDK ships"
     warn "  no macos-x86_64 build. Real-silicon Zephyr builds and 'tan build'"

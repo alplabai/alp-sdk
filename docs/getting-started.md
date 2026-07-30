@@ -149,10 +149,11 @@ M33 core — the two paths coexist on one module.
 
 ## 1. Prerequisites
 
-The SDK is supported on **macOS (Apple Silicon)**, **Windows**, and
-**Linux** -- pick whichever you already have.  Tooling versions
-are identical across hosts; the only platform-specific bit is how
-you install them.
+The SDK is supported on **macOS**, **Windows**, and **Linux** --
+pick whichever you already have.  Tooling versions are identical
+across hosts for `native_sim` and day-to-day iteration; real-silicon
+Zephyr builds are the one platform-specific exception, and only on
+Intel Macs (see below).
 
 **Intel Macs can build and run `native_sim`** (host-toolchain build,
 no Zephyr SDK involved) **but not real-silicon Zephyr images or
