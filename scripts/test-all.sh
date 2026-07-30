@@ -257,6 +257,55 @@ stage_shellcheck() {
     return "${rc}"
 }
 
+stage_bash32_parse() {
+    # Parse every shell script the repo ships under REAL bash 3.2.57
+    # (macOS's frozen system bash) inside a container -- catches the
+    # class of defect shellcheck and `bash -n` on a modern bash both
+    # miss: bash 3.2 keeps tracking single-quote state ACROSS a
+    # heredoc body while scanning for the closing `)` of an enclosing
+    # `$( )`, even when the heredoc tag is quoted (<<'PY'). An ODD
+    # apostrophe count inside such a heredoc desyncs the parser and it
+    # fails much later at an unrelated token -- see PR #1050, where a
+    # single apostrophe added to a comment inside
+    # scripts/bootstrap.sh:271's `<<'PY'` heredoc broke parsing 131
+    # lines later. This is a REPRO, not a "second shellcheck": that
+    # gate already runs (stage_shellcheck) and did not catch #1050.
+    #
+    # cross-platform-zephyr.yml's python-smoke job runs this same
+    # `bash -n` sweep unconditionally on its macos-latest leg (real
+    # bash 3.2.57, no container), so a missing runtime here is a SKIP,
+    # not a gap: that CI leg still covers it.
+    #
+    # Never build bash 3.2.57 from source to avoid the container --
+    # its shipped y.tab.c is stale against parse.y and the build fails
+    # without `bison`.
+    local runtime
+    runtime=$(command -v podman 2>/dev/null || command -v docker 2>/dev/null || true)
+    if [ -z "${runtime}" ]; then
+        echo "stage_bash32_parse: no podman/docker on PATH -- SKIPPING the local bash-3.2 parse check."
+        echo "stage_bash32_parse: this is still covered unconditionally by cross-platform-zephyr.yml's"
+        echo "stage_bash32_parse: python-smoke job on its macos-latest leg (real bash 3.2.57, no container)."
+        return 99
+    fi
+    # One container run, not one per file -- the container itself
+    # (bash 3.2) loops the file list, since 24 separate `podman run`
+    # spins would be needlessly slow.
+    local -a files=()
+    local f
+    while IFS= read -r f; do
+        files+=("${f}")
+    done < <(git ls-files '*.sh')
+    "${runtime}" run --rm -v "${REPO_ROOT}:/w:ro" -w /w docker.io/library/bash:3.2 \
+        bash -c 'rc=0
+            for f in "$@"; do
+                if ! bash -n "${f}"; then
+                    echo "stage_bash32_parse: bash -n FAILED on ${f} (see error above)"
+                    rc=1
+                fi
+            done
+            exit "${rc}"' _ "${files[@]}" || return 1
+}
+
 stage_clang_format() {
     if ! command -v clang-format >/dev/null 2>&1; then
         return 99
@@ -641,6 +690,19 @@ else
         run_stage "shellcheck" stage_shellcheck
     else
         skip_stage "shellcheck" "shellcheck not installed (PATH or ~/.local/bin)"
+    fi
+
+    # bash 3.2 parse gate -- catches the class of defect PR #1050 hit
+    # that shellcheck (above) and `bash -n` on a modern bash both miss
+    # (see stage_bash32_parse for the apostrophe/heredoc mechanism).
+    # Skips cleanly if neither podman nor docker is on PATH -- CI's
+    # macOS leg (cross-platform-zephyr.yml python-smoke) still runs
+    # this unconditionally with real bash 3.2.57, no container needed
+    # there.
+    if command -v podman >/dev/null 2>&1 || command -v docker >/dev/null 2>&1; then
+        run_stage "bash32-parse" stage_bash32_parse
+    else
+        skip_stage "bash32-parse" "neither podman nor docker on PATH -- CI's macos-latest python-smoke leg runs this unconditionally with real bash 3.2.57"
     fi
 
     run_stage "metadata-validate" stage_metadata_validate
