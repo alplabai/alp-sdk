@@ -435,10 +435,10 @@
       "board_doc": "Selects M-key vs E-key routing on the PCIe lane muxes."
     },
     {
-      "net_id": "EVK_PIN_LED_RED",
+      "net_id": "EVK_PIN_LED_GREEN",
       "e1m": "E1M_GPIO_PWM3",
       "board_category": "gpio",
-      "board_macro": "EVK_PIN_LED_RED",
+      "board_macro": "EVK_PIN_LED_GREEN",
       "board_role": null,
       "dispatch": "direct",
       "endpoints": [
@@ -448,16 +448,16 @@
         },
         {
           "kind": "board-macro",
-          "ref": "EVK_PIN_LED_RED"
+          "ref": "EVK_PIN_LED_GREEN"
         }
       ],
-      "board_doc": "RGB LED red -- the PWM3 pad driven as a digital GPIO."
+      "board_doc": "RGB LED green -- the PWM3 pad driven as a digital GPIO."
     },
     {
-      "net_id": "EVK_PIN_LED_GREEN",
+      "net_id": "EVK_PIN_LED_RED",
       "e1m": "E1M_GPIO_PWM0",
       "board_category": "gpio",
-      "board_macro": "EVK_PIN_LED_GREEN",
+      "board_macro": "EVK_PIN_LED_RED",
       "board_role": null,
       "dispatch": "direct",
       "endpoints": [
@@ -467,10 +467,10 @@
         },
         {
           "kind": "board-macro",
-          "ref": "EVK_PIN_LED_GREEN"
+          "ref": "EVK_PIN_LED_RED"
         }
       ],
-      "board_doc": "RGB LED green -- the PWM0 pad driven as a digital GPIO."
+      "board_doc": "RGB LED red -- the PWM0 pad driven as a digital GPIO."
     },
     {
       "net_id": "EVK_PIN_LED_BLUE",
@@ -611,10 +611,10 @@
       "board_doc": "Arduino UNO header UART (D0/D1); CK_RXD = UART1_TX, CK_TXD = UART1_RX."
     },
     {
-      "net_id": "EVK_PWM_LED_GREEN",
+      "net_id": "EVK_PWM_LED_RED",
       "e1m": "E1M_PWM0",
       "board_category": "pwm",
-      "board_macro": "EVK_PWM_LED_GREEN",
+      "board_macro": "EVK_PWM_LED_RED",
       "board_role": null,
       "dispatch": "direct",
       "endpoints": [
@@ -624,10 +624,10 @@
         },
         {
           "kind": "board-macro",
-          "ref": "EVK_PWM_LED_GREEN"
+          "ref": "EVK_PWM_LED_RED"
         }
       ],
-      "board_doc": "RGB LED green; schematic-wired via PWM0 (non-contiguous with R/B)."
+      "board_doc": "RGB LED red; schematic-wired via PWM0 (non-contiguous with G/B)."
     },
     {
       "net_id": "EVK_PWM_LED_BLUE",
@@ -687,10 +687,10 @@
       "board_doc": "Arduino header CK_PWM4 = E1M_PWM2."
     },
     {
-      "net_id": "EVK_PWM_LED_RED",
+      "net_id": "EVK_PWM_LED_GREEN",
       "e1m": "E1M_PWM3",
       "board_category": "pwm",
-      "board_macro": "EVK_PWM_LED_RED",
+      "board_macro": "EVK_PWM_LED_GREEN",
       "board_role": null,
       "dispatch": "direct",
       "endpoints": [
@@ -700,10 +700,10 @@
         },
         {
           "kind": "board-macro",
-          "ref": "EVK_PWM_LED_RED"
+          "ref": "EVK_PWM_LED_GREEN"
         }
       ],
-      "board_doc": "RGB LED red channel."
+      "board_doc": "RGB LED green channel."
     },
     {
       "net_id": "EVK_ARD_PWM2",

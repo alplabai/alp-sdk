@@ -560,11 +560,11 @@ def test_derive_pin_renames_maps_e1m_evk_pads_to_e1m_x_evk_pads():
     button, the red-LED PWM pad, and the sensor I2C bus, so each
     resolves to its E1M-X-EVK counterpart pad."""
     renames = alp_template._derive_pin_renames(
-        ["E1M_GPIO_IO4", "E1M_GPIO_PWM3"], "E1M-V2N101", "e1m-evk",
+        ["E1M_GPIO_IO4", "E1M_GPIO_PWM0"], "E1M-V2N101", "e1m-evk",
         alp_template.METADATA_ROOT)
     assert renames == {
         "E1M_GPIO_IO4": "E1M_X_GPIO_IO28",
-        "E1M_GPIO_PWM3": "E1M_X_GPIO_PWM5",
+        "E1M_GPIO_PWM0": "E1M_X_GPIO_PWM5",
     }
     assert alp_template._derive_pin_renames(
         ["E1M_I2C0"], "E1M-V2N101", "e1m-evk", alp_template.METADATA_ROOT

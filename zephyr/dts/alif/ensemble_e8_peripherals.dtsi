@@ -35,6 +35,7 @@
 #include <zephyr/dt-bindings/timer/alif_utimer.h>
 #include <zephyr/dt-bindings/i2c/i2c.h>
 #include <zephyr/dt-bindings/adc/adc_alif.h>
+#include <zephyr/dt-bindings/memory-attr/memory-attr-arm.h>
 
 &soc {
 	/*
@@ -162,6 +163,83 @@
 		ngpios = <8>;
 		interrupts = <259 3>, <260 3>, <261 3>, <262 3>,
 			     <263 3>, <264 3>, <265 3>, <266 3>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "disabled";
+	};
+
+	/*
+	 * GPIO11..GPIO14 -- the ports this dtsi used to stop short of.
+	 *
+	 * The omission was not harmless.  The pinctrl bindings already
+	 * define GPIO alt-0 for these pads (`PIN_P12_6__GPIO` /
+	 * `PIN_P12_7__GPIO`, alif-ensemble-pinctrl.h:1177,1186), and the
+	 * E1M-EVK routes point the RGB LED's GREEN and BLUE channels at
+	 * P12_7 / P12_6 (`EVK_PIN_LED_GREEN` = ALP_E1M_GPIO_PWM0,
+	 * `EVK_PIN_LED_BLUE` = ALP_E1M_GPIO_PWM1, metadata/boards/
+	 * e1m-evk.yaml).  With no controller node above gpio10, those two
+	 * routes resolved to nothing: `alp_gpio_open()` could not reach a
+	 * port, so two of the three RGB channels were undriveable through
+	 * the portable API while looking perfectly well-formed in the
+	 * routes header.  Measured on an E1M-AEN801 r1 bench board
+	 * 2026-07-28: only the red channel (P2_4 -> gpio2) could be
+	 * driven at all.
+	 *
+	 * reg + interrupts transcribed from the Alif DFP for THIS part,
+	 * AE822FA0E5597 (Device/soc/AE822FA0E5597/include/rtss_he/soc.h):
+	 * GPIO11_BASE 0x4900B000 :3714, GPIO12_BASE 0x4900C000 :3715,
+	 * GPIO13_BASE 0x4900D000 :3716, GPIO14_BASE 0x4900E000 :3717;
+	 * IRQs GPIO11_IRQ0..7 = 267..274 (:367-374), GPIO12_IRQ0..7 =
+	 * 275..282 (:375-382), GPIO13_IRQ0..7 = 283..290 (:383-390),
+	 * GPIO14_IRQ0..7 = 291..298 (:391-398).  Priority 3 matches every
+	 * other node in this overlay.  No value here is inferred from the
+	 * gpio10 pattern -- each was read from the DFP enum.
+	 *
+	 * vendor-ext, BENCH-UNVERIFIED: the nodes are DFP-grounded but no
+	 * pad on ports 11..14 has been driven on silicon yet (the bench
+	 * run that found the gap could not, precisely because these nodes
+	 * were missing).  Driving P12_7 / P12_6 is the first thing that
+	 * will exercise them.
+	 */
+	gpio11: gpio@4900b000 {
+		compatible = "snps,designware-gpio";
+		reg = <0x4900b000 0x1000>;
+		ngpios = <8>;
+		interrupts = <267 3>, <268 3>, <269 3>, <270 3>,
+			     <271 3>, <272 3>, <273 3>, <274 3>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "disabled";
+	};
+
+	gpio12: gpio@4900c000 {
+		compatible = "snps,designware-gpio";
+		reg = <0x4900c000 0x1000>;
+		ngpios = <8>;
+		interrupts = <275 3>, <276 3>, <277 3>, <278 3>,
+			     <279 3>, <280 3>, <281 3>, <282 3>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "disabled";
+	};
+
+	gpio13: gpio@4900d000 {
+		compatible = "snps,designware-gpio";
+		reg = <0x4900d000 0x1000>;
+		ngpios = <8>;
+		interrupts = <283 3>, <284 3>, <285 3>, <286 3>,
+			     <287 3>, <288 3>, <289 3>, <290 3>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "disabled";
+	};
+
+	gpio14: gpio@4900e000 {
+		compatible = "snps,designware-gpio";
+		reg = <0x4900e000 0x1000>;
+		ngpios = <8>;
+		interrupts = <291 3>, <292 3>, <293 3>, <294 3>,
+			     <295 3>, <296 3>, <297 3>, <298 3>;
 		gpio-controller;
 		#gpio-cells = <2>;
 		status = "disabled";
@@ -309,6 +387,79 @@
 		fifo-depth = <16>;
 		status = "disabled";
 	};
+
+	/*
+	 * OSPI/AES register window -- Device MPU region.
+	 *
+	 * Root-caused by alp-advisor 2026-07-28: no MPU region maps
+	 * 0x83000000.. as Device memory in this build, so the CPU reaches it
+	 * as NORMAL write-through memory via the ARMv8-M PRIVDEFENA default
+	 * map (0x8000_0000-0x9FFF_FFFF = External RAM, Normal). Under Normal
+	 * attributes the M55 store buffer may merge/reorder the driver's
+	 * ENR=0/ENR=1 write brackets (see flash_ospi_alif.c's "SECOND,
+	 * DISTINCT FAULT" block), letting a protected register write land
+	 * enabled -- which bus-faults on this silicon (bench-measured: a
+	 * debugger write to CTRLR0 with ENR=1 errors; the same write with
+	 * ENR=0 is accepted). Both reference SoC layers carve this window out
+	 * as Device (zephyr_alif fork mpu_regions.c:10-11,105-106, region
+	 * "OSPI_CTRL", KB(16); Alif CMSIS mpu.c:97-99,
+	 * MEMATTRIDX_DEVICE_nGnRE); the upstream-Zephyr-based v4.4 port this
+	 * repo builds against carries no such region -- this node is that
+	 * missing region, added the same way the SoC layer already declares
+	 * `peripheral_region` (ensemble_common.dtsi:34-39) for 0x1a000000.
+	 *
+	 * KB(16) covers all four registers behind this window, per the AE822
+	 * DFP (Device/soc/AE822FA0E5597/include/rtss_he/soc.h):
+	 *   OSPI0_BASE 0x83000000 :3778, AES0_BASE 0x83001000 :3779,
+	 *   OSPI1_BASE 0x83002000 :3780, AES1_BASE 0x83003000 :3781
+	 * (rtss_hp/soc.h carries the identical bases). Core-agnostic: this
+	 * node lives in the shared &soc block included by BOTH
+	 * alp_e1m_aen801_m55_he and ..._m55_hp, exactly like the ospi0 node
+	 * it protects below.
+	 *
+	 * AWAITING BENCH A/B: the region compiles + the generated zephyr.dts
+	 * carries it (see flash_ospi_alif.c header for the bring-up log), but
+	 * no write through the now-Device-mapped window has yet been
+	 * measured on silicon -- do not read this as bench-proven.
+	 */
+	ospi_reg_region: memory@83000000 {
+		compatible = "zephyr,memory-region";
+		reg = <0x83000000 DT_SIZE_K(16)>;
+		zephyr,memory-region = "OSPI_REG";
+		zephyr,memory-attr = <DT_MEM_ARM(ATTR_MPU_DEVICE)>;
+	};
+
+	/*
+	 * MRAM MPU split -- SUPERSEDED here, see
+	 * zephyr/soc-bridge/alif/mpu_regions_e8.c.
+	 *
+	 * commit 4ad5e941 first restored this split as two `zephyr,memory-region`
+	 * DT nodes (mram_exec_region / mram_device_region) processed by
+	 * mpu_configure_regions_from_dt(). That was UNSAFE on Flow D (production
+	 * MRAM boot) and has been reverted: mpu_configure_regions_from_dt()
+	 * (arch/arm/core/mpu/arm_mpu.c:110-183) APPENDS DT regions AFTER the
+	 * generic static table (arm_mpu_regions.c), it does not split overlaps
+	 * (arch/arm/core/mpu/arm_mpu_v8_internal.h:532-658 handles that only for
+	 * the app/kernel static-partition path) -- and PMSAv8-M
+	 * (CONFIG_MPU_REQUIRES_NON_OVERLAPPING_REGIONS=y in this build) treats an
+	 * address matching multiple enabled regions as an ACCESS VIOLATION, not
+	 * an ARMv7-M-style "higher index wins". Flow D's generic FLASH_0 already
+	 * covers the whole MRAM (`zephyr,flash = &mram_storage`, CONFIG_XIP), so
+	 * appending the two new regions on top triple-matched every MRAM
+	 * address, including the first slot0 instruction fetch -- a
+	 * self-bricking image. Root-caused by alp-advisor 2026-07-28.
+	 *
+	 * The fix REPLACES the generic table instead of appending to it:
+	 * zephyr/soc-bridge/alif/mpu_regions_e8.c defines MRAM_EXEC/MRAM_DEVICE
+	 * (same boundaries/arithmetic this file used to carry, now DT-derived at
+	 * compile time from the boot/slot0/storage partitions instead of
+	 * hand-computed literals) alongside ITCM/DTCM as a REPLACEMENT static
+	 * table (`select CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS`, wired from the
+	 * hand-maintained top-level zephyr/CMakeLists.txt + each board's
+	 * hand-maintained `Kconfig`), so no generic whole-MRAM FLASH_0 region
+	 * exists to collide with the split. See that file's header for the full
+	 * design + the flow-awareness BUILD_ASSERT.
+	 */
 
 	/*
 	 * Synopsys DesignWare OSPI/HexSPI -- the octal-SPI controller that also

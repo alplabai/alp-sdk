@@ -1111,7 +1111,20 @@ def _substitute_readme_pins(text: str, renames: dict[str, str]) -> str:
     mechanism itself, not a stale claim about which pad THIS scaffold
     uses, and blindly substituting would turn it into a duplicate,
     factually wrong statement ("... on the E1M EVK" would then name
-    the E1M-X pad)."""
+    the E1M-X pad).
+
+    A `` `ALP_<old_pad>` (index N) `` parenthetical (e.g. gpio-button-
+    led's "`ALP_E1M_GPIO_PWM0` (index 26)") names N per `old_pad`'s
+    OWN family's `ALP_E1M_GPIO_<class><N>` numbering
+    (`include/alp/e1m_pinout.h`'s canonical IO0..25 = 0..25, PWM0..7 =
+    26..33 order) -- a DIFFERENT numbering on a cross-family target
+    (E1M-X's `include/alp/e1m_x_pinout.h` has 36 IOs, so its PWM0..7
+    sits at 36..43, not the source family's index at all). The route
+    data available here (`metadata/boards/*.yaml` `e1m_routes:`
+    entries: `e1m`/`macro`/`board_alias`/`doc`, no index column) can't
+    re-derive `new_pad`'s own index, so rather than carry the stale
+    source-family number forward as if it were true of the target,
+    drop the parenthetical along with the pad it was describing."""
     if not renames:
         return text
     paragraphs = text.split("\n\n")
@@ -1121,6 +1134,9 @@ def _substitute_readme_pins(text: str, renames: dict[str, str]) -> str:
             old_tok, new_tok = f"ALP_{old}", f"ALP_{new}"
             if old_tok in para and new_tok in para:
                 continue  # already-correct dual-EVK teaching prose
+            changed = re.sub(
+                rf"`{re.escape(old_tok)}`(?:\s*\(index\s+\d+\))?",
+                f"`{new_tok}`", changed)
             changed = re.sub(rf"\b{re.escape(old_tok)}\b", new_tok, changed)
         paragraphs[i] = changed
     return "\n\n".join(paragraphs)

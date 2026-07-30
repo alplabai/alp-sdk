@@ -17,7 +17,15 @@ from pathlib import Path
 
 from alp_cli.diagnostic import render
 from alp_cli.validator import validate_board_yaml
-from alp_orchestrate import OrchestratorError, load_board_yaml
+from alp_orchestrate import (OrchestratorError, SdkRevisionUnsupported,
+                             load_board_yaml)
+
+# `metadata/sdk_version.yaml` documents this script as running the hw_rev
+# compatibility check with "exit code 3 on mismatch".  It is its own code
+# because it is the one failure a caller can act on mechanically -- pin a
+# different SDK, or change hw_rev -- rather than a generic invalid-project 1
+# (#1019).
+EXIT_SDK_REVISION_UNSUPPORTED = 3
 
 
 def main() -> int:
@@ -51,6 +59,9 @@ def main() -> int:
                 load_board_yaml(args.input)
             else:
                 load_board_yaml(args.input, metadata_root=args.metadata_root)
+        except SdkRevisionUnsupported as exc:
+            print(f"FAIL sdk-compat: {exc}", file=sys.stderr)
+            return EXIT_SDK_REVISION_UNSUPPORTED
         except OrchestratorError as exc:
             print(f"FAIL consistency: {exc}", file=sys.stderr)
             return 1

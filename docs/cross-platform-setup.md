@@ -40,9 +40,9 @@ the OS".
 | Workflow | Linux | macOS | Win native | Win + WSL2 |
 |---|---|---|---|---|
 | **Zephyr-on-M (`native_sim`)** — examples, ztests, day-to-day iteration | yes | yes | no (use WSL2) | yes (via WSL) |
-| **Zephyr-on-M (real silicon)** — `west build` + `west flash` against EVK | yes | yes | yes | yes (via WSL) |
+| **Zephyr-on-M (real silicon)** — `west build` + `west flash` against EVK | yes | **Apple silicon only** | yes | yes (via WSL) |
 | **Yocto-on-A (`bitbake`)** — full Linux userland image build | yes | no | no | yes |
-| **Heterogeneous orchestrator (`tan build` fanning out across cores)** | yes | yes (Zephyr halves only) | yes (Zephyr halves only) | yes |
+| **Heterogeneous orchestrator (`tan build` fanning out across cores)** | yes | **Apple silicon only** (Zephyr halves) | yes (Zephyr halves only) | yes |
 
 Read: a Mac user can do everything on the host **except** build
 the Yocto half (use a Linux VM for that).  A Windows user runs the
@@ -52,6 +52,21 @@ need WSL2 — upstream Zephyr's `native_sim` is Linux/macOS only and
 has no native-Windows target.  Switching is `cd {project}` from
 PowerShell into the WSL filesystem
 (`\\wsl$\Ubuntu-22.04\home\{user}\...`).
+
+**Intel Macs cannot cross-compile.**  The two "Apple silicon only"
+cells above are not a preference — the pinned Zephyr SDK
+(`metadata/toolchains.json`, version `1.0.1`) publishes host builds
+for `linux-aarch64`, `linux-x86_64`, `macos-aarch64` and
+`windows-x86_64` only.  Upstream shipped `macos-x86_64` through
+`0.17.4` and dropped it in `1.0.0`, so there is no
+`arm-zephyr-eabi` cross toolchain for an Intel Mac at the version
+this SDK pins.  `macos-aarch64` is not a substitute: Rosetta
+translates x86_64 *for* Apple silicon, not the reverse, and macOS
+has no WSL2 equivalent to fall back to.  What an Intel Mac *can*
+still do is everything that uses the host compiler — `native_sim`
+builds, ztests, `tan validate`, `tan doctor`, metadata work — and
+`tan` itself has a published `tan-x86_64-apple-darwin` binary and
+runs fine.  For real-silicon firmware, build on a Linux host.
 
 ADR [0012](adr/0012-cross-platform-developer-host.md) is the
 load-bearing decision behind this matrix.  ADR
@@ -124,7 +139,7 @@ sudo apt install -y \
     git python3 python3-pip python3-venv \
     cmake ninja-build gperf ccache \
     device-tree-compiler \
-    build-essential file xz-utils \
+    build-essential file xz-utils wget \
     libffi-dev libssl-dev libsdl2-dev libmagic1 \
     dfu-util
 ```
@@ -136,7 +151,7 @@ sudo dnf install -y \
     git python3 python3-pip python3-virtualenv \
     cmake ninja-build gperf ccache \
     dtc \
-    gcc gcc-c++ make file xz \
+    gcc gcc-c++ make file xz wget \
     libffi-devel openssl-devel SDL2-devel file-libs \
     dfu-util
 ```

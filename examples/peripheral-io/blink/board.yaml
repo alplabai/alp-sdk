@@ -1,0 +1,55 @@
+# board.yaml -- per-app project configuration for the blink example.
+#
+# === The customer workflow this example demonstrates ===
+#
+#   1. Copy this file (and the rest of examples/peripheral-io/blink/)
+#      to your own app directory.
+#   2. Change `som.sku` to your MPN.  Stock SoM presets live at
+#      metadata/e1m_modules/<MPN>.yaml; the SDK ships one
+#      for every supported SoM preset.
+#   3. If your board is not the EVK, swap `preset: e1m-evk` for
+#      an inline board definition: top-level `name:` + `populated:`
+#      + `e1m_routes:` blocks.  See docs/board-config-schema.md for the
+#      shape.
+#   4. Build with `tan build` (see README.md).
+#
+# Validated against metadata/schemas/board.schema.json; the field
+# reference is docs/board-config-schema.md.
+
+som:
+  sku: E1M-AEN801          # Alif Ensemble E8 SoM
+
+preset: e1m-evk            # 35x35 EVK -- reference board.  Like every
+                           # E1M board, the EVK has no dedicated GPIO
+                           # LED; its only user-visible LED is the RGB
+                           # cluster riding the PWM pads.  This demo
+                           # claims the red channel's pad as a plain
+                           # digital GPIO (E1M_GPIO_PWM0 -- bench-measured
+                           # 2026-07-28; the RED/GREEN pads were swapped
+                           # from the netlist's wrong LED_R/LED_G labels,
+                           # see metadata/boards/e1m-evk.yaml).
+supported_boards:
+  - e1m-evk
+  - e1m-x-evk
+
+# E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
+# The LED is a BOARD fact, not a SoM fact: metadata/e1m_modules/
+# E1M-AEN801.yaml (the SoM) carries no LED key at all -- the LED lives
+# on whichever carrier board is populated, so it's declared here
+# against the board preset, not against the SoM.
+pins:
+  - { e1m: E1M_GPIO_PWM0, macro: EVK_PIN_LED_RED, doc: "RGB LED red -- the PWM0 pad as a digital GPIO; the app opens it by the EVK_PIN_LED_RED macro" }
+
+# Single-core slice: M55-HP runs the demo.  M55-HE inherits the SoM
+# topology default (stock-shim Zephyr image), keeping the peer-core
+# RPMsg boot path intact for advanced users.
+cores:
+  m55_hp:
+    app: ./src
+    # Zephyr peripheral subsystems exercised by this example.  The
+    # loader translates each entry to CONFIG_<X>=y in alp.conf.
+    peripherals:
+      - gpio
+
+diagnostics:
+  log_level: info

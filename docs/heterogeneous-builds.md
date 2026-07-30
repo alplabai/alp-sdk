@@ -34,8 +34,11 @@ RPMsg protocol details (OpenAMP docs).
 
 ## 2. Prerequisites
 
-1. West workspace bootstrapped — `bash scripts/bootstrap.sh` from the
-   SDK root.  See [`docs/getting-started.md`](getting-started.md) §1–3.
+1. West workspace bootstrapped — `tan bootstrap --sdk-root "$PWD"` from
+   the SDK root (or `bash scripts/bootstrap.sh` / `scripts/bootstrap.ps1`
+   on a host without `tan`; both read the same
+   `metadata/bootstrap.json`).  See
+   [`docs/getting-started.md`](getting-started.md) §1–3.
 2. Zephyr SDK installed (1.0.1, `ZEPHYR_SDK_INSTALL_DIR` exported) for
    the Zephyr slice's real-silicon target.  Not required for
    `native_sim/native/64` smoke builds — those use host gcc with

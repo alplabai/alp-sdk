@@ -249,6 +249,7 @@ config ALP_SDK_CC3501E_EVENT_IRQ
 
 choice
 	prompt "Active SoC capability profile (for runtime config validation)"
+	default ALP_SOC_ALIF_ENSEMBLE_E8 if SOC_SERIES_E8
 	default ALP_SOC_NONE
 	help
 	  Select the SoM's SoC so the SDK can reject runtime configs

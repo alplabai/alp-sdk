@@ -13,9 +13,11 @@
  * 26..33, ...).  This demo touches two pads through the button_led
  * block:
  *   - index  4 = ALP_E1M_GPIO_IO4   (EVK_PIN_ENCODER_SW) -- capture trigger
- *   - index 29 = ALP_E1M_GPIO_PWM3  (EVK_PIN_LED_RED)    -- status LED, the
+ *   - index 26 = ALP_E1M_GPIO_PWM0  (EVK_PIN_LED_RED)    -- status LED, the
  *                RGB-red PWM pad claimed as a plain GPIO (the e1m-spec
  *                "GPIO secondary"; the EVK has no dedicated GPIO LED).
+ *                Bench-measured 2026-07-28 -- PWM0, not PWM3, is red;
+ *                see metadata/boards/e1m-evk.yaml.
  * The sensor bus (LSM6DSO + SSD1306) rides the emulated I2C controller.
  *
  * (gpio-emul controllers cap at 32 pins, so a real 52-slot board file
@@ -80,9 +82,9 @@
                 <&gpio_emul0 23 GPIO_ACTIVE_HIGH>,   /* [23] ALP_E1M_GPIO_IO23 */
                 <&gpio_emul0 24 GPIO_ACTIVE_HIGH>,   /* [24] ALP_E1M_GPIO_IO24 */
                 <&gpio_emul0 25 GPIO_ACTIVE_HIGH>,   /* [25] ALP_E1M_GPIO_IO25 */
-                <&gpio_emul0 26 GPIO_ACTIVE_HIGH>,   /* [26] ALP_E1M_GPIO_PWM0 */
+                <&gpio_emul0 26 GPIO_ACTIVE_HIGH>,   /* [26] ALP_E1M_GPIO_PWM0 -- LED (EVK_PIN_LED_RED, RGB-red pad as GPIO) */
                 <&gpio_emul0 27 GPIO_ACTIVE_HIGH>,   /* [27] ALP_E1M_GPIO_PWM1 */
                 <&gpio_emul0 28 GPIO_ACTIVE_HIGH>,   /* [28] ALP_E1M_GPIO_PWM2 */
-                <&gpio_emul0 29 GPIO_ACTIVE_HIGH>;   /* [29] ALP_E1M_GPIO_PWM3 -- LED (EVK_PIN_LED_RED, RGB-red pad as GPIO) */
+                <&gpio_emul0 29 GPIO_ACTIVE_HIGH>;   /* [29] ALP_E1M_GPIO_PWM3 */
     };
 };

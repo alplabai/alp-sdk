@@ -24,7 +24,7 @@ supported_boards:
 
 # E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
 pins:
-  - { e1m: E1M_GPIO_PWM3, macro: EVK_PIN_LED_RED, doc: "RGB LED red -- the PWM3 pad as a digital GPIO; the app opens it by the EVK_PIN_LED_RED macro" }
+  - { e1m: E1M_GPIO_PWM0, macro: EVK_PIN_LED_RED, doc: "RGB LED red -- the PWM0 pad as a digital GPIO; the app opens it by the EVK_PIN_LED_RED macro. PWM0 (not PWM3) is the red channel: bench-measured 2026-07-28, the netlist's LED_R/LED_G net names are swapped" }
 cores:
   m55_hp:
     app: ./src

@@ -414,7 +414,7 @@ top of the per-subsystem checks.
    reports the detected variant:
 
    ```bash
-   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/edgeai-vision-aen
+   west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/aen/edgeai-vision-aen
    west flash
    ```
 

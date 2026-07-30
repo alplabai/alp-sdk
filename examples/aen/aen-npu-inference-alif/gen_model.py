@@ -8,19 +8,21 @@
 # ALIF SYSTEM-CONFIG, and emits a C header (model.h) that embeds the
 # *_vela.tflite as a byte array plus the tensor-arena placement attributes.
 #
-# WHY THE ALIF SYSTEM-CONFIG (the fix vs the sibling aen-npu-inference):
-#   The sibling app ran vela with only `--memory-mode Sram_Only` and the vela
-#   internal-default system-config.  That defaults the command-stream base
-#   addresses / region config to a generic memory model that does NOT match the
-#   Alif E8 RTSS runtime + the hal_alif ethosu_address_remap (local_to_global),
-#   so ethosu_invoke returned status 1 on E8.
+# WHAT ACTUALLY FIXES ethosu_invoke=1 (measured 2026-07-28, corrects an earlier
+# claim in this file that credited the Alif system-config alone):
+#   It is NOT the Alif Vela system-config (`--config <ensemble_vela.ini>`
+#   --system-config Ethos_U85_SRAM_Only --memory-mode Sram_Only) by itself --
+#   this app PASSED on E8 in the same bench session WITHOUT that config, using
+#   Vela's built-in system-config.  A bench A/B rebuilt the sibling
+#   aen-npu-inference with the identical --memory-mode Sram_Only flag; Vela then
+#   produced a command stream byte-identical to this app's, and it STILL
+#   returned ethosu_invoke=1.  The actual fix is the strong
+#   ethosu_address_remap()/ethosu_config_select() overrides -- now alp-sdk's AEN
+#   Ethos-U backend (src/backends/inference/ethos_u_aen.cpp), see src/main.cpp.
 #
-#   This variant passes the ALIF Vela config (`--config <ensemble_vela.ini>`)
-#   and selects the HE-core single-SRAM-region system-config
-#   (`--system-config Ethos_U85_SRAM_Only`) with `--memory-mode Sram_Only`.
-#   That is the system-config the Alif samples (samples/modules/executorch,
-#   tflm_ethosu) compile against, so the command stream matches the silicon the
-#   hal_alif Ethos-U callback is built for.  The .ini path is passed in from
+#   The Alif system-config (when AEN_NPU_VELA_CONFIG IS supplied) still matters
+#   for matching the bench-validated command-stream layout exactly, but it is
+#   not what makes ethosu_invoke succeed.  The .ini path is passed in from
 #   CMake (AEN_NPU_VELA_CONFIG); see the app CMakeLists.txt.
 #
 # WHY a Vela pass (not the raw .tflite): the Ethos-U custom op only exists in a

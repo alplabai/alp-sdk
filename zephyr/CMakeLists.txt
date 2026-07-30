@@ -55,6 +55,60 @@ zephyr_sources_ifdef(CONFIG_DMA_ALIF_EVENT_ROUTER
 zephyr_sources_ifdef(CONFIG_DMA_PL330_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/dma/dma_alif_boot_latch.c)
 
+# Tier-1.5 glue: AE822 (E8) DW GPIO functional-clock enable (CLKCTL_PER_SLV->
+# GPIO_CTRL[n] bit 16) -- nothing in upstream gpio_dw or Zephyr's Alif SoC layer
+# writes it, so an enabled port's APB registers respond but the pad never
+# physically moves.  E7 has no such gate (SOC_FEAT_GPIO_HAS_CLOCK_ENABLE=0 in
+# the DFP), hence the CONFIG_SOC_SERIES_E8 gate below rather than the whole
+# Ensemble family.  Needed for any Ensemble-E8 build that uses a DW GPIO port,
+# not just alp-feature builds, so this is applied before the CONFIG_ALP_SDK
+# early-return (the soc-bridge / MRAM-flash precedent above).
+if(CONFIG_SOC_SERIES_E8)
+    zephyr_sources_ifdef(CONFIG_GPIO_DW
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/gpio/gpio_clk_alif.c)
+endif()
+
+# Tier-1.5 glue: silence hal_alif's OSPI_XIP_SER (offset 0x10C) register
+# touches on AE822 (E8) -- that register does not exist on this part
+# (AE822FA0E5597/include/soc_features.h:89 SOC_FEAT_OSPI_HAS_XIP_SER (0);
+# E7 has it (1) at AE722F80F55D5/soc_features.h:85, hence the
+# CONFIG_SOC_SERIES_E8 gate below rather than the whole Ensemble family,
+# mirroring the GPIO clock-enable gate above -- this repo's Zephyr port
+# carries no E7 SoC layer today, so this cannot reach an E7 build even
+# without the gate, but the gate is the correct scope regardless). hal_alif's
+# ospi_xip_enable()/_disable() (modules/hal/alif drivers/ospi/src/ospi.c:810,
+# :860) RMW that register unconditionally unless
+# CONFIG_FLASH_ADDRESS_IN_SINGLE_FIFO_LOCATION is defined -- a symbol
+# hal_alif never defines itself (it mirrors the vendor DFP's own
+# SOC_FEAT_OSPI_ADDR_IN_SINGLE_FIFO_LOCATION, which is (1) on AE822 and (0)
+# on E7 -- exactly complementary to SOC_FEAT_OSPI_HAS_XIP_SER on both parts).
+# Without it, the RMW bus-faults (BFAR 0x8300010c; the register is genuinely
+# absent from the AE822 SVD, not merely unmapped -- see
+# flash_ospi_alif.c's file-header FOURTH section for the full citation
+# chain). Applied for any Ensemble-E8 build that pulls in the hal_alif OSPI
+# library (CONFIG_USE_ALIF_HAL_OSPI), not just alp-feature builds, so this is
+# before the CONFIG_ALP_SDK early-return (the soc-bridge / MRAM-flash
+# precedent above). Whether XiP then functions in single-FIFO-address mode
+# on a populated AE822 is TBD -- out of scope; this only prevents the fault.
+if(CONFIG_SOC_SERIES_E8)
+    zephyr_compile_definitions(CONFIG_FLASH_ADDRESS_IN_SINGLE_FIFO_LOCATION)
+endif()
+
+# Custom fixed MPU region table for the Ensemble E8 (mpu_regions_e8.c),
+# REPLACING arm_mpu_regions.c's generic FLASH_0/SRAM_0 fallback -- restores
+# the fork's MRAM exec/device split without the DT-node-append overlap bug
+# (see the file header for the full root cause). Gated on
+# CONFIG_CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS, which the E8 HE/HP boards'
+# hand-maintained `Kconfig` (not the generated Kconfig.alp_<board> /
+# Kconfig.defconfig) selects. Needed for ANY Ensemble-E8 build -- including
+# MCUboot itself, which never sets CONFIG_ALP_SDK -- so this is applied
+# before the CONFIG_ALP_SDK early-return, mirroring the GPIO clock-enable /
+# OSPI_XIP_SER precedents above.
+if(CONFIG_SOC_SERIES_E8)
+    zephyr_sources_ifdef(CONFIG_CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/soc-bridge/alif/mpu_regions_e8.c)
+endif()
+
 if(NOT CONFIG_ALP_SDK)
     return()
 endif()

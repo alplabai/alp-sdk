@@ -461,6 +461,17 @@
       },
       {
         "board": "e1m-evk",
+        "name": "blink",
+        "path": "examples/peripheral-io/blink",
+        "som": "E1M-AEN801",
+        "summary": "Toggle an LED. The canonical first program -- if you're new to the Alp SDK, start here before anything else in this repo.",
+        "supported_boards": [
+          "e1m-evk",
+          "e1m-x-evk"
+        ]
+      },
+      {
+        "board": "e1m-evk",
         "name": "can-loopback",
         "path": "examples/peripheral-io/can-loopback",
         "som": "E1M-AEN801",
@@ -577,7 +588,7 @@
         "name": "pwm-led-fade",
         "path": "examples/peripheral-io/pwm-led-fade",
         "som": "E1M-AEN801",
-        "summary": "Per-peripheral example for `<alp/pwm.h>`. Fades an LED on PWM channel `ALP_E1M_PWM0` from 0 % to 100 % and back, demonstrating the canonical open / set-duty / close pattern.",
+        "summary": "Per-peripheral example for `<alp/pwm.h>`. Fades an LED on PWM channel `ALP_E1M_PWM3` from 0 % to 100 % and back, demonstrating the canonical open / set-duty / close pattern.",
         "supported_boards": [
           "e1m-evk",
           "e1m-x-evk"
@@ -952,6 +963,10 @@
     {
       "purpose": "Byte-for-byte `--emit` snapshot regression gate.",
       "script": "scripts/check_emit_snapshots.py"
+    },
+    {
+      "purpose": "CI gate: if an example ships >=1 board-qualified overlay/conf under `boards/`, then every core its `board.yaml` declares via `cores.<core>.app:` must have its OWN matching qualified overlay there too -- a declared core with no matching file, while qualified overlays exist for other core(s), means the core the app actually builds silently loses its overlay.",
+      "script": "scripts/check_example_board_overlay_parity.py"
     },
     {
       "purpose": "Cross-family portability lint for examples/*/{board.yaml,testcase.yaml}.",
