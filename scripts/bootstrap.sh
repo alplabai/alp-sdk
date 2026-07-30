@@ -300,7 +300,7 @@ emit("PIP_SDK_EXTRAS", d["pip"]["sdkExtras"])
 emit("PIP_EDITABLE_INSTALL", d["pip"]["editableInstall"])
 # verdict: the single source for which pip phases make the closing verdict
 # non-success, and the wording for it (issue #1038 / tan-cli#220) -- see
-# the verdict.* descriptions in metadata/schemas/bootstrap-v1.schema.json.
+# metadata/schemas/bootstrap-v1.schema.json's verdict.* descriptions.
 # NOTE: no apostrophes in this heredoc. bash 3.2 (macOS) tracks single-quote
 # state across a heredoc body while scanning for the closing ) of the
 # enclosing $( ), even with a quoted <<'PY' tag, so an ODD apostrophe count
