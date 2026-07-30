@@ -110,6 +110,16 @@ class Slice:
     # its console.  Consumed by the console emitter for `diagnostics.
     # sim_console:` (issue #686).
     hw_console: bool = True
+    # SEGGER J-Link **part-number flash-device** profile for this slice's
+    # SoC variant (soc-spec-v1 `variants[].debug.jlink_flash_device`) --
+    # unlocks the built-in Alif MRAM loader (Flow D), distinct from the
+    # generic attach/debug `jlink_device` profile.  A resolved SoC-variant
+    # fact, like `hw_console` above, NOT customer-overridable; None when
+    # the variant publishes no such profile -- a published "unknown", not
+    # a gap to guess at (see soc-spec-v1.schema.json's `jlink_flash_device`
+    # description).  Consumed by `_slice_flash_recipe`'s `zephyr` branch to
+    # arm the direct-flash path in `flash_args`.
+    jlink_flash_device: Optional[str] = None
 
     # Populated by Orchestrator.fan_out:
     build_dir: Optional[Path] = None
