@@ -13,7 +13,7 @@
   "prerequisites": {
     "posix": ["git", "cmake", "python3", "ninja"],
     "windows": ["git", "cmake", "python", "ninja"],
-    "pythonMinVersion": "3.10",
+    "pythonMinVersion": "3.12",
     "install": {
       "linux": {
         "git": "sudo apt-get install -y git",

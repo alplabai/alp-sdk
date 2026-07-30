@@ -80,7 +80,7 @@ function Fail([string]$msg)       { Write-Host "[bootstrap] $msg" -ForegroundCol
 # attempting a system-wide install from a bootstrap script.
 # Kept as a hardcoded list, not read from the manifest: reading the manifest
 # below needs a working `python` to sanity-check ITS OWN version against the
-# >= 3.10 floor further down (the non-PrintEnv path only -- see there), and
+# version floor further down (the non-PrintEnv path only -- see there), and
 # this check is what confirms `python` exists in the first place for that --
 # a bootstrap-of-the-bootstrap. Its agreement with metadata/bootstrap.json's
 # `prerequisites.windows` is policed by scripts/check_bootstrap_manifest.py,
@@ -209,23 +209,34 @@ if ($PrintEnv) {
 
 # -------- Python version floor ------------------------------------------------
 
-# Python >= 3.10 (dataclass slots, `X | None` unions in the tooling) --
-# needed by the SDK tooling this venv/pip machinery is about to install and
-# invoke, never by -PrintEnv, which exits above without ever reaching this
-# check (ConvertFrom-Json needs no python at all -- see the Prerequisite
+# Python >= 3.12, a floor set by ZEPHYR rather than by this SDK's own Python
+# syntax: Zephyr's cmake/modules/python.cmake declares
+# PYTHON_MINIMUM_REQUIRED 3.12, so an older interpreter configures no build at
+# all -- which is why this REFUSES (non-zero exit) instead of warning; the
+# failure it prevents otherwise surfaces much later as a CMake error naming
+# Zephyr. Needed by the toolchain this venv/pip machinery is about to install
+# and invoke, never by -PrintEnv, which exits above without ever reaching
+# this check (ConvertFrom-Json needs no python at all -- see the Prerequisite
 # check comment above). Deliberately placed AFTER the -PrintEnv shortcut so
-# that early exit is real, not just theoretical. The "3.10" floor below is
-# likewise hardcoded and policed against the manifest's
+# that early exit is real, not just theoretical. The floor below is likewise
+# hardcoded and policed against the manifest's
 # `prerequisites.pythonMinVersion` by scripts/check_bootstrap_manifest.py --
-# see the comment on $Prereqs above.
+# see the comment on $Prereqs above. That gate finds the floor by regex over
+# this file, keying on the `[version]`-cast comparison against a QUOTED
+# literal below, and takes the FIRST such match: hoisting the floor into a
+# variable would make it report the check as missing entirely, and spelling
+# the comparison out a second time up here in prose would shadow the real one.
 $PyVer = & python -c "import sys; print('%d.%d' % sys.version_info[:2])"
 if (-not $PyVer) {
     # The Microsoft Store `python.exe` alias exists on PATH but prints
     # nothing (it opens the Store instead of running).
     Fail "python did not run (Windows Store alias?).  Install real Python: winget install -e --id Python.Python.3.12, reopen PowerShell, re-run."
 }
-if ([version]$PyVer -lt [version]"3.10") {
-    Fail "Python $PyVer found; the SDK tooling needs >= 3.10 (winget install -e --id Python.Python.3.12)."
+if ([version]$PyVer -lt [version]"3.12") {
+    # Unlike the POSIX side (where the distro's own python3 package can itself
+    # be below the floor, so bootstrap.sh has to spell that trap out), the
+    # winget package named here IS a 3.12 -- one command, actionable as-is.
+    Fail "Python $PyVer found; Zephyr's own CMake configure needs >= 3.12 -- install it with: winget install -e --id Python.Python.3.12, reopen PowerShell, re-run."
 }
 
 Write-Info "Repo root:       $RepoRoot"

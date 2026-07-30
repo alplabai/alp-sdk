@@ -151,6 +151,28 @@ PREREQ_HINT_MACOS=(
     "brew install ninja"
 )
 
+# Look one tool up in the three parallel arrays above and print its
+# OS-appropriate install command (nothing at all if the tool has no entry --
+# the caller decides what to do with an empty result).  ONE lookup
+# implementation, used by both refusals that need it: the missing-tools
+# message immediately below, and the too-old-python3 refusal further down
+# (which must name a real install command, not just a version number, or the
+# customer is told what is wrong with no way to act on it).
+prereq_hint() {
+    local want="$1" idx=0 name uname_s
+    uname_s="$(uname -s 2>/dev/null || echo unknown)"
+    for name in "${PREREQ_HINT_NAMES[@]}"; do
+        if [ "${name}" = "${want}" ]; then
+            case "${uname_s}" in
+                Darwin) printf '%s' "${PREREQ_HINT_MACOS[$idx]}" ;;
+                *)      printf '%s' "${PREREQ_HINT_LINUX[$idx]}" ;;
+            esac
+            return 0
+        fi
+        idx=$((idx + 1))
+    done
+}
+
 MISSING=()
 for bin in "${REQUIRED_BINS[@]}"; do
     if ! command -v "${bin}" >/dev/null 2>&1; then
@@ -159,20 +181,8 @@ for bin in "${REQUIRED_BINS[@]}"; do
 done
 if [ "${#MISSING[@]}" -gt 0 ]; then
     warn "Missing required tools:"
-    UNAME_S="$(uname -s 2>/dev/null || echo unknown)"
     for bin in "${MISSING[@]}"; do
-        hint=""
-        idx=0
-        for name in "${PREREQ_HINT_NAMES[@]}"; do
-            if [ "${name}" = "${bin}" ]; then
-                case "${UNAME_S}" in
-                    Darwin) hint="${PREREQ_HINT_MACOS[$idx]}" ;;
-                    *)      hint="${PREREQ_HINT_LINUX[$idx]}" ;;
-                esac
-                break
-            fi
-            idx=$((idx + 1))
-        done
+        hint="$(prereq_hint "${bin}")"
         if [ -n "${hint}" ]; then
             warn "  ${bin}  ->  ${hint}"
         else
@@ -189,12 +199,12 @@ fi
 # with python3 + stdlib json ONLY (jsonschema/PyYAML aren't installed yet --
 # this script is what installs them, and the JSON-loading snippet below
 # deliberately uses only baseline python syntax, nothing that needs the
-# >= 3.10 floor checked further down).  Deliberately placed AFTER the prereq
+# version floor checked further down).  Deliberately placed AFTER the prereq
 # check above: a machine missing python3 must see the curated `die` message,
 # not a raw "python3: command not found" -- this is also why --print-env
 # (below) cannot short-circuit BEFORE this point even though it only prints
 # facts: it needs those facts, and reading them needs python3 to already be
-# confirmed present. It does NOT need the >= 3.10 floor, which is why that
+# confirmed present. It does NOT need the version floor, which is why that
 # check now sits below the --print-env shortcut instead of up here.
 [ -f "${BOOTSTRAP_JSON}" ] || die "missing ${BOOTSTRAP_JSON}"
 # Capture the python output into a variable FIRST, then eval it as a
@@ -302,24 +312,47 @@ fi
 
 # -------- Python version floor -------------------------------------------------
 
-# python3 >= <floor> (dataclass slots, `X | None` unions the SDK's own
-# Python tooling -- alp_project.py, alp_orchestrate.py -- uses).  Deliberately
-# placed AFTER the --print-env shortcut above (unlike the git/cmake/python3
-# PRESENCE check up in "Prerequisite check", this is a version-of-python3
-# check): --print-env only loads and prints the manifest facts, which needs
-# python3 present but never touches the SDK tooling this floor protects, so
-# it must not pay this cost or fail on an old-but-present python3.  Hardcoded
-# (same bootstrap-of-the-bootstrap rationale as REQUIRED_BINS above) and
-# policed against metadata/bootstrap.json's `prerequisites.pythonMinVersion`
-# by scripts/check_bootstrap_manifest.py.
-PYTHON_MIN_VERSION="3.10"
+# python3 >= <floor>, where the floor is set by ZEPHYR, not by this SDK's own
+# Python syntax: Zephyr's cmake/modules/python.cmake declares
+# PYTHON_MINIMUM_REQUIRED 3.12, so an older interpreter configures no build at
+# all no matter what the SDK scripts themselves would tolerate.  This is why
+# the floor must REFUSE here rather than warn: the failure it prevents is a
+# CMake error naming Zephyr, several steps and one confusing message later.
+# Deliberately placed AFTER the --print-env shortcut above (unlike the
+# git/cmake/python3 PRESENCE check up in "Prerequisite check", this is a
+# version-of-python3 check): --print-env only loads and prints the manifest
+# facts, which needs python3 present but never touches the toolchain this
+# floor protects, so it must not pay this cost or fail on an old-but-present
+# python3.  Hardcoded (same bootstrap-of-the-bootstrap rationale as
+# REQUIRED_BINS above) and policed against metadata/bootstrap.json's
+# `prerequisites.pythonMinVersion` by scripts/check_bootstrap_manifest.py.
+PYTHON_MIN_VERSION="3.12"
 PY_VER="$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
 if ! python3 -c "
 import sys
 floor = tuple(int(x) for x in '${PYTHON_MIN_VERSION}'.split('.'))
 sys.exit(0 if sys.version_info[:2] >= floor else 1)
 "; then
-    die "python3 ${PY_VER} found; the SDK tooling needs >= ${PYTHON_MIN_VERSION}."
+    warn "python3 ${PY_VER} found; Zephyr's own CMake configure needs >= ${PYTHON_MIN_VERSION}:"
+    PY_HINT="$(prereq_hint python3)"
+    if [ -n "${PY_HINT}" ]; then
+        warn "  python3  ->  ${PY_HINT}"
+    fi
+    # LINUX ONLY, deliberately: the apt command above installs the DISTRO's
+    # python3, which on an older release is itself below the floor -- saying
+    # only "install python3" there sends the customer round the same failure a
+    # second time (the #985 misdiagnosis loop, in a new place). Homebrew's
+    # `python3` is a current release, so on macOS this caveat would be a
+    # plainly false statement about the command printed right above it.
+    case "$(uname -s 2>/dev/null || echo unknown)" in
+        Darwin) ;;
+        *)
+            warn "  On a release whose own python3 package is older than ${PYTHON_MIN_VERSION} (Ubuntu 22.04 ships 3.10),"
+            warn "  that command reinstalls the SAME version -- get ${PYTHON_MIN_VERSION} from a newer distro release,"
+            warn "  deadsnakes, or pyenv, and make it the python3 on PATH."
+            ;;
+    esac
+    die "Install a python3 >= ${PYTHON_MIN_VERSION} and re-run."
 fi
 
 # Detect OS for the optional-native-libs hint at the end.

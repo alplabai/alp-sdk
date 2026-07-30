@@ -14,6 +14,7 @@ Run locally:
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -328,7 +329,7 @@ def test_python_min_version_posix_drift_fails(tmp_path, monkeypatch, capsys):
     _scaffold(tmp_path)
     _replace(
         tmp_path / "scripts/bootstrap.sh",
-        'PYTHON_MIN_VERSION="3.10"', 'PYTHON_MIN_VERSION="3.11"',
+        'PYTHON_MIN_VERSION="3.12"', 'PYTHON_MIN_VERSION="3.11"',
     )
     _point_gate_at(tmp_path, monkeypatch)
     rv = gate.main()
@@ -345,7 +346,7 @@ def test_python_min_version_windows_drift_fails(tmp_path, monkeypatch, capsys):
     _scaffold(tmp_path)
     _replace(
         tmp_path / "scripts/bootstrap.ps1",
-        '-lt [version]"3.10"', '-lt [version]"3.11"',
+        '-lt [version]"3.12"', '-lt [version]"3.11"',
     )
     _point_gate_at(tmp_path, monkeypatch)
     rv = gate.main()
@@ -501,6 +502,125 @@ def test_bootstrap_sh_refuses_unknown_schema_version(tmp_path):
     )
     assert proc.returncode != 0, proc.stdout + proc.stderr
     assert "schemaVersion" in (proc.stdout + proc.stderr)
+
+
+# ---------------------------------------------------------------------
+# 9b. The Python-version floor REFUSES, it does not merely warn
+# ---------------------------------------------------------------------
+#
+# `_check_python_min_version_posix` / `_windows` above only prove each script's
+# hardcoded floor VALUE agrees with the manifest. Neither proves the comparison
+# actually EXITS NON-ZERO -- and a floor that only warned would let a customer
+# on a too-old interpreter bootstrap green and then die several steps later
+# inside Zephyr's own CMake configure, with an error naming Zephyr rather than
+# their Python. That is the defect these two tests exist to catch.
+#
+# Each scaffolds a copy of the real script with its floor rewritten ABOVE any
+# version that could plausibly be installed, so the refusal fires on any host
+# without needing an old interpreter present. The rewrites are `_replace`
+# calls, which assert their anchor exists -- so they ALSO fail loudly if the
+# two hand-synced copies of the floor in bootstrap.ps1 (the comparison and the
+# message text) ever drift apart.
+_UNREACHABLE_FLOOR = "99.0"
+
+
+def _stub_tools(bin_dir: Path, names: list[str], *, cmd_ext: bool) -> None:
+    """Put no-op executables for `names` on a throwaway PATH entry.
+
+    Both scripts gate their version floor behind a `command -v` / `Get-Command`
+    PRESENCE check for git/cmake/python/ninja. That check is not what is under
+    test here, and a real host may legitimately be missing one of them (ninja
+    especially), so stub them rather than skipping the whole test. `python`/
+    `python3` is stubbed to the interpreter running pytest so the manifest
+    fact-load that precedes the floor check still works for real.
+    """
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    real_py = Path(sys.executable).as_posix()
+    for name in names:
+        if cmd_ext:
+            body = (f'@echo off\r\n"{Path(sys.executable)}" %*\r\n'
+                    if name.startswith("python") else "@echo off\r\nexit /b 0\r\n")
+            (bin_dir / f"{name}.cmd").write_text(body, encoding="utf-8")
+        else:
+            body = (f'#!/bin/sh\nexec "{real_py}" "$@"\n'
+                    if name.startswith("python") else "#!/bin/sh\nexit 0\n")
+            p = bin_dir / name
+            p.write_text(body, encoding="utf-8")
+            p.chmod(0o755)
+
+
+def test_bootstrap_sh_refuses_too_old_python(tmp_path, monkeypatch):
+    """scripts/bootstrap.sh's `PYTHON_MIN_VERSION` check must `die` (exit
+    non-zero) and name the version found, the version required, and an
+    actionable install command -- not warn and carry on."""
+    if shutil.which("bash") is None:
+        pytest.skip("bash not available on PATH")
+    scaffold_root = tmp_path / "sh-repo"
+    (scaffold_root / "scripts").mkdir(parents=True)
+    (scaffold_root / "metadata").mkdir(parents=True)
+    shutil.copy2(REPO / "scripts" / "bootstrap.sh", scaffold_root / "scripts" / "bootstrap.sh")
+    shutil.copy2(REPO / "metadata" / "bootstrap.json",
+                 scaffold_root / "metadata" / "bootstrap.json")
+    manifest = json.loads((REPO / "metadata" / "bootstrap.json").read_text(encoding="utf-8"))
+    floor = manifest["prerequisites"]["pythonMinVersion"]
+    _replace(
+        scaffold_root / "scripts" / "bootstrap.sh",
+        f'PYTHON_MIN_VERSION="{floor}"', f'PYTHON_MIN_VERSION="{_UNREACHABLE_FLOOR}"',
+    )
+    stub_bin = tmp_path / "stub-bin"
+    _stub_tools(stub_bin, ["git", "cmake", "ninja", "python3"], cmd_ext=False)
+    env = dict(os.environ, PATH=f"{stub_bin}{os.pathsep}{os.environ.get('PATH', '')}")
+    # --no-pip --no-west so a hypothetical PASS of the floor check creates no
+    # venv and runs no `west init` in the test's parent directory.
+    proc = subprocess.run(
+        ["bash", (scaffold_root / "scripts" / "bootstrap.sh").as_posix(),
+         "--no-pip", "--no-west"],
+        capture_output=True, text=True, cwd=str(scaffold_root), env=env,
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, out
+    assert _UNREACHABLE_FLOOR in out, out          # the version REQUIRED
+    assert "found" in out, out                     # the version FOUND
+    # An actionable install command, single-sourced from the manifest rather
+    # than a third hardcoded copy of the string.
+    install = manifest["prerequisites"]["install"]
+    assert any(install[k]["python3"] in out for k in ("linux", "macos")), out
+
+
+def test_bootstrap_ps1_refuses_too_old_python(tmp_path):
+    """The bootstrap.ps1 mirror of the test above. Windows-only: bootstrap.ps1
+    targets native Windows, and the tool stubs it needs are `.cmd` files."""
+    if os.name != "nt":
+        pytest.skip("bootstrap.ps1 targets native Windows")
+    if shutil.which("pwsh") is None:
+        pytest.skip("pwsh not available on PATH")
+    scaffold_root = tmp_path / "ps1-repo"
+    (scaffold_root / "scripts").mkdir(parents=True)
+    (scaffold_root / "metadata").mkdir(parents=True)
+    shutil.copy2(REPO / "scripts" / "bootstrap.ps1", scaffold_root / "scripts" / "bootstrap.ps1")
+    shutil.copy2(REPO / "metadata" / "bootstrap.json",
+                 scaffold_root / "metadata" / "bootstrap.json")
+    manifest = json.loads((REPO / "metadata" / "bootstrap.json").read_text(encoding="utf-8"))
+    floor = manifest["prerequisites"]["pythonMinVersion"]
+    ps1 = scaffold_root / "scripts" / "bootstrap.ps1"
+    # BOTH copies of the floor -- the comparison the gate polices, and the
+    # message the customer reads. Anchored asserts, so a drift between the two
+    # fails here instead of shipping a refusal that misreports its own floor.
+    _replace(ps1, f'-lt [version]"{floor}"', f'-lt [version]"{_UNREACHABLE_FLOOR}"')
+    _replace(ps1, f"needs >= {floor}", f"needs >= {_UNREACHABLE_FLOOR}")
+    stub_bin = tmp_path / "stub-bin"
+    _stub_tools(stub_bin, ["git", "cmake", "ninja", "python"], cmd_ext=True)
+    env = dict(os.environ, PATH=f"{stub_bin}{os.pathsep}{os.environ.get('PATH', '')}")
+    # -NoPip -NoWest for the same reason as the bash half above.
+    proc = subprocess.run(
+        ["pwsh", "-NoProfile", "-File", str(ps1), "-NoPip", "-NoWest"],
+        capture_output=True, text=True, cwd=str(scaffold_root), env=env,
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, out
+    assert _UNREACHABLE_FLOOR in out, out
+    assert "found" in out, out
+    assert manifest["prerequisites"]["install"]["windows"]["python"] in out, out
 
 
 # ---------------------------------------------------------------------
