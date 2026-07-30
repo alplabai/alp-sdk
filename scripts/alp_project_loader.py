@@ -354,6 +354,14 @@ def _hwrev_pad_route_overrides(
     ``--emit composed-route-table`` differ between revisions of one SKU --
     e.g. AEN ``r1`` restores IO8/IO10 to Alif GPIOs and IO21 to the CC3501E,
     the pre-2626-R2 routing.
+
+    Raises ``alp_orchestrate.models.SdkRevisionUnknown`` when ``hw_rev`` is
+    set but isn't a key in the family table.  Before #1025 an unrecognised
+    ``hw_rev`` fell through to ``{}`` here, so the composed table silently
+    emitted with base (production) pad routing instead of naming the
+    wrong-hardware problem -- this is the site that bug lived at, and this
+    emit path resolves its own SoM/board data independently of
+    ``alp_orchestrate.loader.load_board_yaml``, so it needs its own gate.
     """
     if not hw_rev:
         return []
@@ -365,6 +373,18 @@ def _hwrev_pad_route_overrides(
     if not path.is_file():
         return []
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+
+    # Lazy import: alp_orchestrate imports this module at load time (the
+    # resolve_memory_map edge -- see `_load_yaml` above), so the reverse
+    # import must happen at call time, not at module scope.
+    from alp_orchestrate.models import SdkRevisionUnknown
+    from alp_orchestrate.sdk_compat import revision_known
+    if revision_known(data, hw_rev) is False:
+        available = sorted((data.get("hw_revisions") or {}).keys())
+        raise SdkRevisionUnknown(
+            f"SoM {sku} hw_rev {hw_rev!r} is not a known hardware "
+            f"revision. Available hw_rev(s) for {sku}: {available}.")
+
     rev = (data.get("hw_revisions") or {}).get(hw_rev) or {}
     overrides = rev.get("pad_route_overrides") or []
     return [e for e in overrides

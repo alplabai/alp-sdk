@@ -15,11 +15,22 @@ This module is that check.  It is deliberately pure and data-only so the
 comparison can be tested without a board.yaml, a metadata tree, or a
 loader.
 
-Scope, and what is deliberately NOT here: whether the requested revision
-*exists* or is `status: reserved` is a different question with a different
-failure mode, tracked separately (#1025).  This module answers one thing --
-given a revision that resolved, does the running SDK version fall inside
-the range that revision declares.
+Also here (#1025's SAFE half only): `revision_known()`, the existence
+predicate -- given a resolved `hw_revisions:` table, is the requested
+hw_rev even a declared key.  A revision absent from the table used to
+silently resolve to base-revision routing with a clean exit code; that is
+a wrong-hardware emit, not a version mismatch, so it is a distinct check
+with a distinct error (`SdkRevisionUnknown`, not `SdkRevisionUnsupported`)
+run BEFORE the range comparison below -- an unknown revision has no bounds
+to compare against.
+
+Deliberately NOT here: whether an EXISTING revision is `status: reserved`
+(or carries no `status` at all) and whether that should refuse a build.
+That is a separate, still-open question -- the metadata itself disagrees
+across families today (aen r3-r8 are `status: reserved`; v2n and v2n-m1
+r2-r8 carry no `status` key; imx93 r1 is `status: tbd` and an in-tree
+example builds against it) -- so `revision_known()` answers existence only
+and stays blind to `status:` on purpose.
 """
 
 from __future__ import annotations
@@ -113,6 +124,53 @@ def _revision(table: Any, hw_rev: Optional[str]) -> dict[str, Any]:
     return entry if isinstance(entry, dict) else {}
 
 
+def _hw_revisions(table: Any) -> Optional[dict[str, Any]]:
+    """The raw `hw_revisions:` mapping out of `table`, or None if absent.
+
+    None -- not {} -- distinguishes "this table declares no `hw_revisions:`
+    section at all" (an inline board has no per-board table; there is
+    nothing to assert existence against) from "a table exists and the key
+    simply isn't in it" (a genuine unknown-revision refusal).
+    """
+    if not isinstance(table, dict):
+        return None
+    revisions = table.get("hw_revisions")
+    return revisions if isinstance(revisions, dict) else None
+
+
+def revision_known(table: Any, hw_rev: Optional[str]) -> Optional[bool]:
+    """Whether `hw_rev` is a declared key in `table`'s `hw_revisions:` map.
+
+    Pure existence check (#1025's safe half) -- deliberately blind to
+    `status:`.  A `status: reserved` revision, or one carrying no `status`
+    key at all, is still "known" here; whether it is buildable is a
+    different question this predicate does not answer.
+
+    Returns None -- not False -- when `table` has no `hw_revisions:`
+    mapping at all, so a caller can tell "nothing to check existence
+    against" (e.g. an inline board with no per-board table -- skip) apart
+    from "checked, and it's missing" (True/False -- refuse on False).
+    """
+    revisions = _hw_revisions(table)
+    if revisions is None:
+        return None
+    return bool(hw_rev) and hw_rev in revisions
+
+
+def _load_family_table(metadata_root: Path, family_dir: str) -> Any:
+    """The raw parsed `hw-revisions.yaml` for a SoM family, or {} if
+    missing/unreadable -- same tolerant-read idiom `family_revision` used
+    inline before this was factored out for `family_revision_known` to
+    share."""
+    path = metadata_root / "e1m_modules" / family_dir / "hw-revisions.yaml"
+    if not path.is_file():
+        return {}
+    try:
+        return yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return {}
+
+
 def family_revision(metadata_root: Path,
                     family_dir: Optional[str],
                     hw_rev: Optional[str]) -> dict[str, Any]:
@@ -124,13 +182,29 @@ def family_revision(metadata_root: Path,
     """
     if not family_dir:
         return {}
-    path = metadata_root / "e1m_modules" / family_dir / "hw-revisions.yaml"
-    if not path.is_file():
-        return {}
-    try:
-        return _revision(yaml.safe_load(path.read_text(encoding="utf-8")), hw_rev)
-    except (OSError, yaml.YAMLError):
-        return {}
+    return _revision(_load_family_table(metadata_root, family_dir), hw_rev)
+
+
+def family_revision_known(metadata_root: Path,
+                          family_dir: Optional[str],
+                          hw_rev: Optional[str]) -> Optional[bool]:
+    """`revision_known()` against the SoM-family hw-revisions.yaml table."""
+    if not family_dir:
+        return None
+    return revision_known(_load_family_table(metadata_root, family_dir), hw_rev)
+
+
+def family_available_revisions(metadata_root: Path,
+                               family_dir: Optional[str]) -> list[str]:
+    """Sorted `hw_revisions:` keys for a SoM family, or [] if none/missing.
+
+    For an error message naming what a customer's SDK actually knows about
+    (`family_revision_known` returning False needs somewhere to point).
+    """
+    if not family_dir:
+        return []
+    revisions = _hw_revisions(_load_family_table(metadata_root, family_dir))
+    return sorted(revisions.keys()) if revisions else []
 
 
 def board_revision(board_preset: Any, hw_rev: Optional[str]) -> dict[str, Any]:

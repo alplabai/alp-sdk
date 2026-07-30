@@ -36,6 +36,21 @@ class SdkRevisionUnsupported(OrchestratorError):
     """
 
 
+class SdkRevisionUnknown(OrchestratorError):
+    """The requested hw_rev is not a key in its resolved `hw_revisions:` table.
+
+    Distinct from `SdkRevisionUnsupported`: that one names a revision that
+    exists but whose declared SDK range excludes the running SDK.  This one
+    names a revision that doesn't exist at all -- there is no range to
+    compare against, so reporting it as out-of-range would name the wrong
+    cause.  A subclass (not a flag) for the same reason as
+    `SdkRevisionUnsupported`: `scripts/validate_board_yaml.py` maps exactly
+    this failure to its own exit code without string-matching a message,
+    and every existing `except OrchestratorError` keeps catching it (#1025,
+    the existence-only half).
+    """
+
+
 _E1M_I2C_BUS_RE = re.compile(r"^e1m(?:_x)?_i2c([0-9]+)$")
 
 
