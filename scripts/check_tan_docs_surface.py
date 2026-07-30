@@ -487,6 +487,56 @@ def _forwards_to_python_backend(help_text: str) -> bool:
     return False
 
 
+def check_front_doors_still_exist(repo_root: Path) -> list[str]:
+    """Every OTHER front door docs/cli.md names must still exist in the tree.
+
+    `_OTHER_FRONT_DOOR_RE` recognises `python -m alp_cli`, `west alp-<verb>`
+    and `alp_orchestrate` in prose so a table row documenting one of them is
+    not mistaken for the section's own `tan <verb>` flags. That classification
+    is pure text matching -- it never asks whether the thing it just named is
+    real -- so deleting `scripts/alp_orchestrate/` does not change one byte of
+    what it matches. The gate would keep passing while docs/cli.md instructs a
+    customer to run a module that is not in the tree.
+
+    A doc-surface gate that cannot notice its own subject disappearing is the
+    failure this check exists to prevent, so the recognition now carries an
+    existence claim: name a front door, and it has to be there. At the
+    deletion this fails until the prose is updated -- which is one docs edit,
+    in the commit that removes the module, and is the point.
+    """
+    cli_md = repo_root / "docs" / "cli.md"
+    if not cli_md.is_file():
+        return [f"{cli_md.relative_to(repo_root).as_posix()} is missing -- "
+                f"this gate's whole corpus"]
+    if not ((repo_root / "scripts").is_dir() and (repo_root / "metadata").is_dir()):
+        # `scripts/` AND `metadata/` together are the "this is a real alp-sdk
+        # checkout" marker. The unit tests drive this gate against fabricated
+        # doc trees that carry a partial `scripts/` skeleton and no metadata at
+        # all; asking those whether a front door exists answers about the
+        # fixture, not the repo. A real checkout missing a front door its own
+        # docs name is the case this check is for.
+        return []
+    text = cli_md.read_text(encoding="utf-8", errors="replace")
+
+    problems: list[str] = []
+    if "alp_orchestrate" in text and not (repo_root / "scripts" / "alp_orchestrate").is_dir():
+        problems.append(
+            "docs/cli.md names `alp_orchestrate` but scripts/alp_orchestrate/ "
+            "does not exist -- update the prose to name whatever runs those "
+            "emits now")
+    if "python -m alp_cli" in text and not (repo_root / "scripts" / "alp_cli").is_dir():
+        problems.append(
+            "docs/cli.md names `python -m alp_cli` but scripts/alp_cli/ does "
+            "not exist -- update the prose to name its replacement")
+    for verb in sorted(set(re.findall(r"west (alp-[a-z][a-z-]*)", text))):
+        module = repo_root / "scripts" / "west_commands" / (verb.replace("-", "_") + ".py")
+        if not module.is_file():
+            problems.append(
+                f"docs/cli.md documents `west {verb}` but "
+                f"{module.relative_to(repo_root).as_posix()} does not exist")
+    return problems
+
+
 def check_surface(
     repo_root: Path, tan_bin: str
 ) -> tuple[list[str], list[str], dict[str, int]]:
@@ -548,6 +598,18 @@ def main() -> int:
     ap.add_argument("--repo-root", default=str(REPO_ROOT), help="alp-sdk checkout root")
     ap.add_argument("--tan-bin", default="tan", help="tan executable name or path")
     args = ap.parse_args()
+
+    repo_root = Path(args.repo_root).resolve()
+
+    # Before the `tan` lookup on purpose: this half is a pure docs-vs-tree
+    # question and needs no binary, so it must not be skippable by not having
+    # one installed.
+    front_door_problems = check_front_doors_still_exist(repo_root)
+    if front_door_problems:
+        print("FAIL tan-docs-drift (front doors named in docs/cli.md):", file=sys.stderr)
+        for p in front_door_problems:
+            print(f"  · {p}", file=sys.stderr)
+        return 1
 
     tan_path = shutil.which(args.tan_bin)
     if tan_path is None:

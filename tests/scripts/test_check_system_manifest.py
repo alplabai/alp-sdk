@@ -2,8 +2,10 @@
 """Tests for scripts/check_system_manifest.py + the system-manifest v1 contract.
 
 The manifest is the single derived projection of board.yaml that tools (the
-alp-sdk-vscode extension, CI, flashers) consume. These lock the emitter <->
-contract lockstep and the gate behaviour.
+alp-sdk-vscode extension, CI, flashers) consume. These lock the schema
+against the committed corpus + a caller-supplied manifest, and the gate
+behaviour -- see check_system_manifest.py's WHAT WAS LOST docstring for why
+this no longer regenerates from board.yaml via the (deleted) orchestrator.
 """
 import json
 import subprocess
@@ -27,23 +29,23 @@ def test_schema_is_valid_draft202012():
 
 
 def test_default_corpus_conforms():
-    # the orchestrator's emitter output for representative projects matches
-    # the documented contract (emitter <-> schema lockstep / drift detection).
+    # the committed corpus at tests/fixtures/emit-snapshots/*.system-manifest.snap
+    # matches the documented contract.
     proc = _run()
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "0 failure(s)" in proc.stdout
 
 
 def test_multicore_manifest_is_the_per_image_map():
-    sys.path.insert(0, str(REPO / "scripts"))
+    # reads the committed snapshot rather than emitting one -- see
+    # check_system_manifest.py's WHAT WAS LOST docstring.
     import jsonschema
     import yaml
-    from alp_orchestrate import emit_system_manifest, load_board_yaml
     schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
     v = jsonschema.Draft202012Validator(
         schema, format_checker=jsonschema.FormatChecker())
-    doc = yaml.safe_load(emit_system_manifest(
-        load_board_yaml(REPO / "examples/multicore/rpmsg-v2n/board.yaml")))
+    snap = REPO / "tests/fixtures/emit-snapshots/rpmsg-v2n.system-manifest.snap"
+    doc = yaml.safe_load(snap.read_text(encoding="utf-8"))
     assert list(v.iter_errors(doc)) == []
     # one slice per core -- the multi-image map the IDE consumes
     by_id = {s["core_id"]: s for s in doc["slices"]}

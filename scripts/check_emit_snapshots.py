@@ -4,10 +4,10 @@
 """
 Byte-for-byte `--emit` snapshot regression gate.
 
-The planner of record (`scripts/alp_orchestrate.py`) is being modularized
-into a layered package (issue #285).  A refactor must change *shape*, never
-*behaviour*: the `--emit` surfaces the IDE/CLI consume (ADR 0014) have to
-stay byte-identical.  This gate pins them.
+The multicore planner of record has RELOCATED to the tan repo
+(`tan.planner_cli`, née `scripts/alp_orchestrate/__main__.py`, issue #285).
+A migration must change *shape*, never *behaviour*: the `--emit` surfaces the
+IDE/CLI consume (ADR 0014) have to stay byte-identical.  This gate pins them.
 
 For each (board.yaml, emit-mode) case it runs the emitter and compares the
 output, byte-for-byte, to a committed golden under
@@ -27,7 +27,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import os
+import importlib.util
 import re
 import subprocess
 import sys
@@ -35,10 +35,28 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 SNAP_DIR = REPO / "tests" / "fixtures" / "emit-snapshots"
-# The orchestrator is now a package; invoke it as a module.  scripts/ goes on
-# PYTHONPATH so the package + its `alp_project` sibling import both resolve
-# (replaces the old file-path call to scripts/alp_orchestrate.py).
-ORCH = [sys.executable, "-m", "alp_orchestrate"]
+
+# The multicore planner has RELOCATED to the tan repo: `tan.planner_cli` IS
+# `scripts/alp_orchestrate/__main__.py` moved verbatim (same argv, same eight
+# `--emit` modes) -- see `scripts/alp_mcp/server.py`'s `emit()`, which made
+# this exact repoint and is the house pattern this follows, including the
+# `--sdk-root` requirement below. `--sdk-root` must be passed explicitly:
+# left to discover its own root, `planner_cli` walks up from the CWD looking
+# for `scripts/alp_project.py`, a marker this repository is going to delete.
+# No `scripts/` PYTHONPATH injection here (unlike the old `-m alp_orchestrate`
+# call this replaces) -- `tan.planner_cli` is resolved off the interpreter's
+# own PYTHONPATH/site-packages, not this checkout's `scripts/` dir.
+ORCH = [sys.executable, "-m", "tan.planner_cli", "--sdk-root", str(REPO)]
+
+# The single-core `--emit` surfaces (rendered by `alp_project_emit.py`) have
+# NOT relocated to tan behind an equivalent `--emit`-to-stdout entry point:
+# `tan.planner_cli`'s argv only accepts the eight ORCH modes above (see
+# `tan/planner/cli.py`'s `--emit` choices). The renderers for these modes DO
+# exist in `tan.planner_emit.IN_PROCESS_MODES`, but the only way to reach them
+# is `tan generate --target <mode>`, which writes an artefact to `--output`
+# and prints a JSON *envelope* on stdout, not the raw artefact bytes this
+# byte-parity gate needs -- a different contract, not a drop-in swap. Left
+# pointed at the SDK's own script pending a tan-side entry point.
 PROJ = [sys.executable, str(REPO / "scripts" / "alp_project.py")]
 
 # (snapshot id, tool, board.yaml, emit mode).  Deterministic, write-free
@@ -46,7 +64,7 @@ PROJ = [sys.executable, str(REPO / "scripts" / "alp_project.py")]
 # must preserve.  build-plan carries the SDK-root abs path (normalised below).
 #
 # Two families of cases:
-#   * ORCH (`-m alp_orchestrate`) -- the multicore system-manifest / build-plan
+#   * ORCH (`-m tan.planner_cli`) -- the multicore system-manifest / build-plan
 #     surfaces.  build-plan embeds each slice's rendered `alp.conf`, so it also
 #     pins `kconfig.py::_slice_alp_conf` byte-for-byte.
 #   * PROJ (`alp_project.py`) -- the single-core `--emit` surfaces rendered by
@@ -203,20 +221,50 @@ def _emit(tool: Path, board: str, mode: str, extra: tuple[str, ...] = ()) -> str
 
     `extra` appends extra CLI args after `--emit <mode>` -- e.g.
     scaffold's `--template <id> --sku <SKU>` (issue #864).
+
+    No `PYTHONPATH` injection: the file-path `PROJ` invocation gets its own
+    directory (`scripts/`) on `sys.path[0]` for free by running as a script,
+    and `ORCH`'s `tan.planner_cli` must resolve off the *caller's* inherited
+    PYTHONPATH (or site-packages) -- adding this checkout's `scripts/` would
+    only mask a genuinely unimportable `tan`, which `main()` checks for
+    up front instead.
     """
-    env = {**os.environ}
-    scripts_dir = str(REPO / "scripts")
-    env["PYTHONPATH"] = (
-        scripts_dir + os.pathsep + env["PYTHONPATH"]
-        if env.get("PYTHONPATH") else scripts_dir
-    )
     rv = subprocess.run(
         [*tool, "--input", board, "--emit", mode, *extra],
-        capture_output=True, text=True, cwd=REPO, check=False, env=env)
+        capture_output=True, text=True, cwd=REPO, check=False)
     if rv.returncode != 0:
         raise SystemExit(f"check_emit_snapshots: emit failed for {board} "
                          f"--emit {mode} (rc={rv.returncode}):\n{rv.stderr}")
     return _normalize_host_paths(rv.stdout, str(REPO), sys.executable)
+
+
+def _require_tan_importable() -> None:
+    """Fail loudly if `tan.planner_cli` can't run -- never silently skip.
+
+    Every ORCH case below spawns `python -m tan.planner_cli`; if that module
+    is not importable by `sys.executable` the loop would just report every
+    ORCH case as an emit failure and (with no PROJ case affected) *look*
+    partially green -- exactly the "gate that reports success having checked
+    nothing" failure this gate exists to prevent. Check once, up front, and
+    fail with an actionable message instead.
+
+    `find_spec` RAISES `ModuleNotFoundError` (not a plain `None` return) when
+    the PARENT package (`tan`) is missing, since it has to import that parent
+    to search it -- an unguarded call reproduces the traceback this check
+    exists to avoid, so it must be wrapped in try/except (the pattern is
+    `scripts/alp_mcp/server.py`'s `emit()`).
+    """
+    try:
+        spec = importlib.util.find_spec("tan.planner_cli")
+    except (ImportError, ValueError):
+        spec = None
+    if spec is None:
+        raise SystemExit(
+            "check_emit_snapshots: `tan.planner_cli` is not importable by "
+            f"{sys.executable} -- the ORCH emit cases (system-manifest / "
+            "build-plan) cannot run.  Install it with `pip install "
+            "alp-tan`, or put the tan checkout's `python/` directory on "
+            "PYTHONPATH.")
 
 
 def main() -> int:
@@ -225,6 +273,7 @@ def main() -> int:
                     help="rewrite the golden snapshots instead of checking")
     args = ap.parse_args()
     SNAP_DIR.mkdir(parents=True, exist_ok=True)
+    _require_tan_importable()
 
     stale: list[str] = []
     for case in CASES:

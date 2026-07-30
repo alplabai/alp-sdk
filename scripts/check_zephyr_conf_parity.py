@@ -6,39 +6,87 @@ Byte-parity gate: a Zephyr example's own `CMakeLists.txt` (which calls
 planner's build-plan `configArtefacts` (`--emit build-plan`, consumed by
 `tan`) MUST materialise the identical `alp.conf` for the same core.
 
-Both paths call the same function (`alp_orchestrate.kconfig._slice_alp_conf`)
--- this gate pins that invariant byte-for-byte so a future change to either
-call site (or to `_emit_library_hw_backends`, folded into `_slice_alp_conf`
-so both paths share it -- see docs/adr/0020-sdk-owns-build-execution.md
-addendum) can't silently fork the two paths again. Mirrors the
-`check_emit_snapshots.py` byte-identical-emit precedent, scoped to this one
-pinned invariant across the whole example corpus rather than a fixed golden
-set, so a NEW example inherits the check automatically.
+THIS GATE NO LONGER RUNS EITHER LIVE CODE PATH.
 
-Scope: every example `CMakeLists.txt` under `examples/**` whose zephyr-conf
-emit is core-scoped (single-app examples AND per-core multicore subdirs
-alike) -- spelled either as `alp_sdk_zephyr_conf(<id>)` or as a raw
-`alp_project.py --emit zephyr-conf --core <id>` invocation. An unscoped
-(`--core`-less) raw invocation sums across cores by design and is out of
-scope for a per-core byte-parity check; `_find_unscoped_emits` fails on it
-rather than skipping it.
+It used to: both call sites route through `alp_orchestrate.kconfig.
+_slice_alp_conf`, and the gate imported that function plus `load_board_yaml`
+to invoke both paths itself (a live `subprocess` call to `alp_project.py` on
+one side, a direct function call on the other) and diff the output.
+`scripts/alp_orchestrate/` is being deleted -- the planner it fronted now
+lives in the tan repository -- so nothing left in this repo can run that
+comparison directly.
+
+What alp-sdk CAN still see are two pieces of evidence ALREADY COMMITTED by
+`check_emit_snapshots.py`, each pinning one side of the invariant as of the
+last time both paths were observed to agree:
+
+  * `tests/fixtures/emit-snapshots/proj-*.zephyr-conf.snap` -- the per-core
+    `alp.conf` rendering (the `CMakeLists.txt` / `alp_sdk_zephyr_conf()`
+    side). A `proj-<id>.zephyr-conf.snap` file is the UNSCOPED
+    (`--core`-less) emit -- ADR-0020's own per-core-sum spelling -- so it
+    holds one `# --- core: <id> (zephyr) ---` section per Zephyr core the
+    fixture's board.yaml declares.
+  * the `configArtefacts` entry inside `tests/fixtures/emit-snapshots/
+    *.build-plan.snap` whose `path` ends in `alp.conf` -- the planner's
+    build-plan side, one per Zephyr slice.
+
+This gate diffs those two ALREADY-COMMITTED artefacts, byte-for-byte, for
+every (board.yaml, core id) pair that appears in BOTH families. No code runs
+on either side any more.
+
+WHAT WAS LOST, and it needs saying rather than discovering later: the gate no
+longer proves the two LIVE code paths still agree -- it proves the two
+COMMITTED artefacts do. If a golden is ever refreshed (`check_emit_snapshots.
+py --update`) without a human noticing the two paths had actually forked in
+the process, this gate goes green over a real divergence. The live
+invariant -- "the code that renders each of these still agrees" -- moves to
+whoever renders them now, i.e. `tan`; nothing left in alp-sdk can stand in
+for that.
+
+CURRENT STATE OF THE FIXTURE CORPUS, also worth saying rather than
+discovering later: as of this writing the overlap is EMPTY. `check_emit_
+snapshots.py`'s `_PROJ_BOARDS` (aen-analog-validate, v2n-power-monitor,
+spi-slave -- exercises `alp_project.py`'s single/multi-Zephyr-core `--emit`
+surfaces) and its `CASES` ORCH boards (rpmsg-aen/-v2n/-imx93,
+heterogeneous-offload, audio/i2s-tone, connectivity/iot-fleet-ota --
+exercises `alp_orchestrate`'s multicore surfaces) were built for two separate
+purposes and share no board.yaml. The guard below fails loudly on that
+instead of reporting a false "0 pairs, OK". Expanding the corpus -- adding a
+board.yaml that appears in both `_PROJ_BOARDS` and `CASES` -- is what would
+restore real coverage; that edit belongs to `check_emit_snapshots.py`, out of
+scope here.
 
 Usage:
 
-    python3 scripts/check_zephyr_conf_parity.py
+    python scripts/check_zephyr_conf_parity.py [--snapshot-dir PATH]
 """
 from __future__ import annotations
 
+import argparse
+import json
 import re
-import subprocess
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO / "scripts"))
+SNAPSHOT_DIR = REPO / "tests" / "fixtures" / "emit-snapshots"
 
-from alp_orchestrate import load_board_yaml, OrchestratorError  # noqa: E402
-from alp_orchestrate.kconfig import _slice_alp_conf  # noqa: E402
+# Which board.yaml a `proj-<id>.zephyr-conf.snap` fixture was rendered from --
+# the .snap file itself is plain alp.conf text with no board.yaml field of its
+# own (unlike a build-plan .snap, which carries `boardYaml`). Mirrors
+# `check_emit_snapshots.py`'s `_PROJ_BOARDS` (the generator of these exact
+# fixtures) -- keep in sync if a PROJ board is added, renamed, or dropped
+# there; an id missing here is a hard failure below, not a silent skip.
+_PROJ_BOARD_YAML = {
+    "aen": "examples/aen/aen-analog-validate/board.yaml",
+    "v2n": "examples/v2n/v2n-power-monitor/board.yaml",
+    "nsim": "examples/peripheral-io/spi-slave/board.yaml",
+}
+
+# A `proj-*.zephyr-conf.snap` file concatenates one section per declared
+# Zephyr core: `# --- core: <id> (zephyr) ---` followed by that core's
+# rendered `alp.conf`.
+_CORE_HEADER_RE = re.compile(r"(?m)^# --- core: (\S+) \(zephyr\) ---\n")
 
 # The core id an example's CMakeLists.txt scopes its emit to. Two spellings
 # are recognised:
@@ -52,13 +100,6 @@ from alp_orchestrate.kconfig import _slice_alp_conf  # noqa: E402
 _CORE_RE = re.compile(
     r"alp_sdk_zephyr_conf\(\s*([^\s)]+)"
     r"|--emit\s+zephyr-conf\s+--core\s+(\S+)")
-# `BOARD_YAML ${CMAKE_CURRENT_SOURCE_DIR}/<rel>` (helper) or the raw
-# `--input <path>` argument on any adjacent line of the same
-# `execute_process(COMMAND ...)` block.
-_INPUT_RE = re.compile(
-    r"BOARD_YAML\s+\$\{CMAKE_CURRENT_SOURCE_DIR\}/(\S+?board\.yaml)"
-    r"|COMMAND\b.*?--input\s+\$\{CMAKE_CURRENT_SOURCE_DIR\}/(\S+?board\.yaml)",
-    re.DOTALL)
 # Any zephyr-conf emit, `--core`-scoped or not. When a file's count of these
 # exceeds its `--core`-scoped count (`_CORE_RE`), some invocation is UNSCOPED
 # -- the cross-core Kconfig sum ADR-0020's addendum retired. `alp_sdk_zephyr_
@@ -68,41 +109,22 @@ _EMIT_RE = re.compile(r"alp_sdk_zephyr_conf\(|--emit\s+zephyr-conf\b")
 
 
 def _code(text: str) -> str:
-    """`text` with every whole-line `#` comment dropped. Both patterns below
-    are matched against CODE only: `examples/**` carries 28 CMakeLists.txt
-    files whose comments MENTION the emit precisely to say they do NOT invoke
-    it, plus several that name `alp_sdk_zephyr_conf()` in prose -- a bare
-    text match reads those as invocations and (for `_find_unscoped_emits`)
-    fails the gate on a comment."""
+    """`text` with every whole-line `#` comment dropped. `examples/**` carries
+    CMakeLists.txt files whose comments MENTION the emit precisely to say
+    they do NOT invoke it, plus several that name `alp_sdk_zephyr_conf()` in
+    prose -- a bare text match reads those as invocations and fails the gate
+    on a comment."""
     return "\n".join(
         line for line in text.splitlines() if not line.lstrip().startswith("#"))
-
-
-def _find_cases() -> list[tuple[Path, Path, str]]:
-    """(CMakeLists.txt path, board.yaml path, core id) for every scoped
-    `--emit zephyr-conf --core <id>` invocation under `examples/**`."""
-    cases = []
-    for cmakelists in sorted(REPO.glob("examples/**/CMakeLists.txt")):
-        text = _code(cmakelists.read_text(encoding="utf-8"))
-        core_m = _CORE_RE.search(text)
-        if core_m is None:
-            continue
-        input_m = _INPUT_RE.search(text)
-        board_rel = "board.yaml"
-        if input_m:
-            board_rel = input_m.group(1) or input_m.group(2)
-        board_yaml = (cmakelists.parent / board_rel).resolve()
-        core_id = core_m.group(1) or core_m.group(2)
-        cases.append((cmakelists, board_yaml, core_id))
-    return cases
 
 
 def _find_unscoped_emits(repo: Path = REPO) -> list[Path]:
     """CMakeLists.txt files with a `--emit zephyr-conf` invocation that is
     NOT `--core`-scoped -- the cross-core Kconfig leak ADR-0020's addendum
-    retired. `_find_cases` silently skips a `--core`-less invocation, so
-    without this guard a re-introduced unscoped emit would pass the gate
-    while shipping cross-core-contaminated firmware. Fail loudly instead."""
+    retired. The byte-parity check below no longer scans CMakeLists.txt at
+    all (it diffs committed snapshot artefacts instead), so without this
+    guard a re-introduced unscoped emit would go completely uncaught while
+    shipping cross-core-contaminated firmware. Fail loudly instead."""
     leaks = []
     for cmakelists in sorted(repo.glob("examples/**/CMakeLists.txt")):
         text = _code(cmakelists.read_text(encoding="utf-8"))
@@ -111,7 +133,60 @@ def _find_unscoped_emits(repo: Path = REPO) -> list[Path]:
     return leaks
 
 
+def _zephyr_conf_pairs(snapshot_dir: Path) -> dict[tuple[str, str], str]:
+    """{(board.yaml, core id): rendered alp.conf} for every
+    `proj-*.zephyr-conf.snap` under `snapshot_dir`.
+
+    Splitting a file on `_CORE_HEADER_RE` re-derives each core's own content,
+    except that every chunk but the LAST in a multi-core file carries one
+    extra trailing newline -- the blank-line separator the aggregate emit
+    inserts before the next `# --- core: ... ---` header, no part of any
+    single core's own rendered `alp.conf`. Stripped here so the comparison is
+    against the same bytes a `--core`-scoped emit would have produced (the
+    last chunk in a file needs no stripping: a single-core fixture like
+    `proj-v2n.zephyr-conf.snap` already ends exactly where its build-plan
+    counterpart's `contents` value does).
+    """
+    out: dict[tuple[str, str], str] = {}
+    for snap in sorted(snapshot_dir.glob("proj-*.zephyr-conf.snap")):
+        bid = snap.name[len("proj-"): -len(".zephyr-conf.snap")]
+        if bid not in _PROJ_BOARD_YAML:
+            raise SystemExit(
+                f"check_zephyr_conf_parity: {snap.name} has no entry in "
+                f"_PROJ_BOARD_YAML -- add its (id, board.yaml) pair (mirror "
+                f"check_emit_snapshots.py's _PROJ_BOARDS) rather than "
+                f"silently dropping it from the corpus.")
+        board_yaml = _PROJ_BOARD_YAML[bid]
+        text = snap.read_text(encoding="utf-8")
+        parts = _CORE_HEADER_RE.split(text)
+        cores = list(zip(parts[1::2], parts[2::2]))
+        for i, (core_id, chunk) in enumerate(cores):
+            if i != len(cores) - 1 and chunk.endswith("\n"):
+                chunk = chunk[:-1]
+            out[(board_yaml, core_id)] = chunk
+    return out
+
+
+def _build_plan_alp_confs(snapshot_dir: Path) -> dict[tuple[str, str], str]:
+    """{(board.yaml, core id): configArtefact contents} for the `alp.conf`
+    artefact of every Zephyr slice in every `*.build-plan.snap` under
+    `snapshot_dir`."""
+    out: dict[tuple[str, str], str] = {}
+    for snap in sorted(snapshot_dir.glob("*.build-plan.snap")):
+        doc = json.loads(snap.read_text(encoding="utf-8"))
+        board_yaml = doc.get("boardYaml")
+        for slc in doc.get("slices", []):
+            for art in slc.get("configArtefacts", []):
+                if art.get("path", "").endswith("alp.conf"):
+                    out[(board_yaml, slc["coreId"])] = art["contents"]
+    return out
+
+
 def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--snapshot-dir", type=Path, default=SNAPSHOT_DIR)
+    args = ap.parse_args()
+
     leaks = _find_unscoped_emits()
     if leaks:
         print("check_zephyr_conf_parity: unscoped `--emit zephyr-conf` "
@@ -122,46 +197,30 @@ def main() -> int:
             print(f"  · {leak.relative_to(REPO).as_posix()}", file=sys.stderr)
         return 1
 
-    cases = _find_cases()
-    if not cases:
-        print("check_zephyr_conf_parity: no --core-scoped zephyr-conf "
-              "CMakeLists.txt found -- suspiciously empty corpus",
-              file=sys.stderr)
+    zephyr_conf = _zephyr_conf_pairs(args.snapshot_dir)
+    build_plan = _build_plan_alp_confs(args.snapshot_dir)
+    pairs = sorted(set(zephyr_conf) & set(build_plan))
+
+    if not pairs:
+        print(f"check_zephyr_conf_parity: 0 board/core pairs found in both "
+              f"proj-*.zephyr-conf.snap ({len(zephyr_conf)} core(s) "
+              f"catalogued) and *.build-plan.snap ({len(build_plan)} core(s) "
+              f"catalogued) under {args.snapshot_dir} -- an empty comparison "
+              f"proves nothing; see the module docstring's \"CURRENT STATE "
+              f"OF THE FIXTURE CORPUS\".", file=sys.stderr)
         return 1
 
     failures: list[str] = []
-    for cmakelists, board_yaml, core_id in cases:
-        rel = cmakelists.relative_to(REPO).as_posix()
-        if not board_yaml.is_file():
-            failures.append(f"{rel}: board.yaml not found at {board_yaml}")
-            continue
-        try:
-            project = load_board_yaml(board_yaml)
-        except OrchestratorError as e:
-            failures.append(f"{rel}: board.yaml failed to load ({e})")
-            continue
-        if core_id not in project.cores:
-            failures.append(f"{rel}: --core {core_id} not in board.yaml")
-            continue
-        want = _slice_alp_conf(project, project.cores[core_id])
-
-        proc = subprocess.run(
-            [sys.executable, str(REPO / "scripts" / "alp_project.py"),
-             "--input", str(board_yaml), "--emit", "zephyr-conf",
-             "--core", core_id],
-            capture_output=True, text=True, cwd=REPO)
-        if proc.returncode != 0:
-            failures.append(f"{rel}: alp_project.py --core {core_id} "
-                             f"failed (rc={proc.returncode}): {proc.stderr}")
-            continue
-        got = proc.stdout
-        if got != want:
+    for board_yaml, core_id in pairs:
+        want = zephyr_conf[(board_yaml, core_id)]
+        got = build_plan[(board_yaml, core_id)]
+        if want != got:
             failures.append(
-                f"{rel}: CMakeLists.txt-emitted alp.conf (core {core_id}) "
-                f"!= planner-materialised alp.conf -- the two paths have "
-                f"diverged")
+                f"{board_yaml} (core {core_id}): proj-*.zephyr-conf.snap != "
+                f"build-plan configArtefact -- the two committed evidence "
+                f"artefacts have diverged")
         else:
-            print(f"OK   {rel} (core {core_id})")
+            print(f"OK   {board_yaml} (core {core_id})")
 
     if failures:
         print(f"\ncheck_zephyr_conf_parity: {len(failures)} mismatch(es):",
@@ -170,8 +229,8 @@ def main() -> int:
             print(f"  · {f}", file=sys.stderr)
         return 1
 
-    print(f"\ncheck_zephyr_conf_parity: {len(cases)} example(s), "
-          f"CMakeLists.txt <-> build-plan alp.conf byte-identical.")
+    print(f"\ncheck_zephyr_conf_parity: {len(pairs)} board/core pair(s), "
+          f"proj-*.zephyr-conf.snap <-> build-plan alp.conf byte-identical.")
     return 0
 
 

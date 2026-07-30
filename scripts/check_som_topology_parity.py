@@ -19,12 +19,21 @@ Extracted from an inline YAML step in `pr-metadata-validate.yml` (issue
 path resolution a THIRD time (alongside `_resolve_silicon_variant()` and
 `resolve_capabilities()` in `alp_project_loader.py`), untested and
 un-runnable locally -- exactly how the `soc_ref`/`soc` bug in #995 rotted
-unnoticed. This script shares `alp_project_loader.resolve_soc_path()`
-with those two call sites instead of a fourth hand-rolled copy.
+unnoticed.
+
+This gate no longer shares `alp_project_loader.resolve_soc_path()`:
+`alp_project_loader.py` is doomed code slated for deletion in a later
+slice of the tan/sdk gate migration, so this gate inlines the same
+`silicon:` -> `metadata/socs/<vendor>/<family>/<part>.json` resolution
+(`_resolve_soc_path()` below, copied verbatim from that helper's logic)
+instead of importing it. Nothing is lost: the resolution is one `Path`
+join plus a 3-part guard, reproduced here so this gate stays pure
+metadata -- no import of any doomed module, no subprocess -- and keeps
+every tooth described above.
 
 Run locally:
 
-    python3 scripts/check_som_topology_parity.py
+    python scripts/check_som_topology_parity.py
 
 CI wires this in `pr-metadata-validate.yml`.
 """
@@ -38,15 +47,33 @@ from pathlib import Path
 import yaml
 
 REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO / "scripts"))
 
-from alp_project_loader import resolve_soc_path  # noqa: E402
+
+def _resolve_soc_path(silicon: str | None, metadata_root: Path) -> Path | None:
+    """Resolve a `vendor:family:part` `silicon:` key to the SoC-JSON path
+    it names: `metadata/socs/<vendor>/<family>/<part>.json`.
+
+    Returns None when `silicon` is falsy or not exactly 3 colon-separated
+    parts -- does NOT check the path exists, the caller decides what an
+    unresolved/missing SoC spec means (here: a hard failure, never a
+    skip -- see module docstring).
+
+    Inlined from `alp_project_loader.resolve_soc_path()` so this gate
+    does not import that (doomed) module; the resolution itself is
+    unchanged.
+    """
+    if not silicon:
+        return None
+    parts = silicon.split(":")
+    if len(parts) != 3:
+        return None
+    return metadata_root / "socs" / parts[0] / parts[1] / f"{parts[2]}.json"
 
 
 def _soc_cores_by_path(socs_dir: Path) -> dict[str, set[str]]:
     """Index every SoC JSON's `cores[].id` set, keyed by the file's
     resolved path (as a string, so it compares equal to a
-    `resolve_soc_path()` result regardless of glob ordering)."""
+    `_resolve_soc_path()` result regardless of glob ordering)."""
     cores: dict[str, set[str]] = {}
     if not socs_dir.is_dir():
         return cores
@@ -74,7 +101,7 @@ def find_problems(root: Path) -> list[str]:
             continue
 
         silicon = doc.get("silicon") or ""
-        soc_path = resolve_soc_path(silicon, root / "metadata")
+        soc_path = _resolve_soc_path(silicon, root / "metadata")
         key = str(soc_path.resolve()) if soc_path is not None and soc_path.is_file() else None
         if key is None or key not in soc_cores:
             problems.append(

@@ -216,10 +216,42 @@ def collect_known_symbols(root: pathlib.Path) -> set[str]:
             return
         symbols.update(m.group(1) for m in _SYMBOL_RE.finditer(text))
 
-    def harvest_tree(base: pathlib.Path, pattern: str) -> None:
-        if base.is_dir():
+    def harvest_tree(base: pathlib.Path, pattern: str, *, required: bool = False) -> None:
+        """Harvest every `pattern` file under `base`.
+
+        `required=True` means "this source layer must contribute something".
+        Without it, a layer that empties out contributes an empty set in
+        SILENCE: the gate does not fail, it just stops recognising the
+        identifiers that layer used to define. Docs describing them then read
+        as drift when they are not -- or, worse, real drift in that surface
+        starts passing once the false positives have trained someone to look
+        past this check's output.
+
+        Not hypothetical. `scripts/**/*.py` loses the planner in the migration
+        this branch is part of, and a later slice empties more of it. A source
+        layer going to zero has to be a loud failure and a deliberate edit
+        here, never a quiet narrowing.
+        """
+        found = False
+        present = base.is_dir()
+        if present:
             for path in base.rglob(pattern):
                 harvest(path)
+                found = True
+        # `present and not found` -- the layer's DIRECTORY exists but holds no
+        # matching file. An absent directory is a caller pointing this at a
+        # partial tree (the unit tests build doc-only fixtures with no
+        # `scripts/` at all); an existing-but-empty one is the real repo losing
+        # a source layer, which is the case worth failing on. `scripts/` keeps
+        # other tooling after the planner leaves, so this stays a live check.
+        if required and present and not found:
+            raise SystemExit(
+                f"check_doc_drift: the '{pattern}' source layer under "
+                f"{base.name}/ matched NO files. This gate recognises "
+                f"identifiers from that layer, so an empty one narrows the "
+                f"drift check instead of failing it. Point the layer at "
+                f"wherever those identifiers live now, or drop the layer here "
+                f"on purpose.")
 
     # C-API: public + internal headers.
     harvest_tree(root / "include", "*.h")
@@ -236,7 +268,9 @@ def collect_known_symbols(root: pathlib.Path) -> set[str]:
     harvest_tree(root / "cmake", "*.cmake")
     # Generators / orchestrator / project tooling -- emit board target
     # names, ALP_HW_BUILD_* / ALP_SOC_* macros, board.yaml field identifiers.
-    harvest_tree(root / "scripts", "*.py")
+    # REQUIRED: this is the layer the planner migration empties out, and an
+    # empty one here is invisible without the guard (see `harvest_tree`).
+    harvest_tree(root / "scripts", "*.py", required=True)
     # Config schemas -- board.yaml field names.
     harvest_tree(root / "metadata" / "schemas", "*.json")
     # Yocto layer -- MACHINE / image variables (ALP_BOOT_DEVICE, ...).

@@ -10,11 +10,21 @@ its runtime + build/flash wiring. Tools (the alp-sdk-vscode extension, CI,
 flashers) read THIS instead of re-deriving folder layout and build wiring
 from board.yaml + the SoM presets.
 
-With no --manifest, this regenerates a manifest from a representative set of
-example projects via the orchestrator and validates each -- a conformance
-gate that keeps scripts/alp_orchestrate/'s emitter and this contract in
-lockstep. With --manifest PATH it validates an existing manifest (e.g. a real
-build/system-manifest.yaml an IDE consumes).
+WHAT WAS LOST: this gate used to REGENERATE a manifest from a representative
+set of example board.yaml files via scripts/alp_orchestrate/'s emitter and
+validate the fresh output -- a conformance gate that kept the emitter and
+this schema in lockstep. scripts/alp_orchestrate/ is being deleted (the
+planner it fronted now lives in the tan repository), so alp-sdk can no
+longer produce a manifest to check. With no --manifest, this now validates
+the COMMITTED corpus at tests/fixtures/emit-snapshots/*.system-manifest.snap
+instead -- proof that corpus still conforms to the schema, NOT proof that a
+freshly emitted manifest does. Freshness moves to whoever emits it now
+(tan); nothing in this repo can stand in for that check, and treating a
+green run here as emitter conformance would be exactly the vacuous-green
+shape this migration is trying to avoid.
+
+With --manifest PATH it validates an existing manifest (e.g. a real
+build/system-manifest.yaml an IDE consumes), unchanged.
 
 Run locally:
 
@@ -34,17 +44,8 @@ import yaml
 
 REPO = Path(__file__).resolve().parent.parent
 SCHEMA = REPO / "metadata" / "schemas" / "system-manifest-v1.schema.json"
-sys.path.insert(0, str(REPO / "scripts"))
-
-# Representative projects exercising the multi-image (A+M) and single-image
-# shapes across all three SoC families.
-_DEFAULT_PROJECTS = [
-    "examples/multicore/rpmsg-v2n/board.yaml",
-    "examples/multicore/rpmsg-aen/board.yaml",
-    "examples/multicore/rpmsg-imx93/board.yaml",
-    "examples/multicore/heterogeneous-offload/board.yaml",
-    "examples/peripheral-io/i2c-scanner/board.yaml",
-]
+CORPUS_DIR = REPO / "tests" / "fixtures" / "emit-snapshots"
+CORPUS_GLOB = "*.system-manifest.snap"
 
 
 def _make_validator(schema_path: Path) -> jsonschema.Draft202012Validator:
@@ -75,40 +76,34 @@ def _validate_file(path: Path, validator: jsonschema.Draft202012Validator) -> in
     return _validate_doc(path.name, doc, validator)
 
 
-def _validate_generated(board_yaml: Path, validator: jsonschema.Draft202012Validator) -> int:
-    from alp_orchestrate import (
-        OrchestratorError,
-        emit_system_manifest,
-        load_board_yaml,
-    )
-    try:
-        manifest_yaml = emit_system_manifest(load_board_yaml(board_yaml))
-    except OrchestratorError as e:
-        print(f"FAIL {board_yaml}: {e}")
-        return 1
-    try:
-        rel = board_yaml.relative_to(REPO)
-    except ValueError:
-        rel = board_yaml
-    return _validate_doc(f"{rel} (generated)", yaml.safe_load(manifest_yaml), validator)
+def _default_corpus() -> list[Path]:
+    """The committed system-manifest snapshots -- see the module docstring's
+    WHAT WAS LOST for why this replaced regenerating from board.yaml."""
+    return sorted(CORPUS_DIR.glob(CORPUS_GLOB))
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="Validate system-manifest.yaml against the v1 contract.")
     ap.add_argument("--manifest", type=Path, action="append", default=[],
-                    help="manifest file(s) to validate. Default: regenerate "
-                         "from representative example projects and validate.")
+                    help="manifest file(s) to validate. Default: validate the "
+                         "committed corpus at tests/fixtures/emit-snapshots/"
+                         "*.system-manifest.snap")
     ap.add_argument("--schema", type=Path, default=SCHEMA)
     args = ap.parse_args()
 
     validator = _make_validator(args.schema)
     if args.manifest:
         targets = args.manifest
-        failures = sum(_validate_file(p, validator) for p in targets)
     else:
-        targets = [REPO / p for p in _DEFAULT_PROJECTS]
-        failures = sum(_validate_generated(p, validator) for p in targets)
+        targets = _default_corpus()
+        if not targets:
+            print(f"FAIL corpus empty: {CORPUS_DIR / CORPUS_GLOB} matched no "
+                  f"files -- a gate whose corpus silently becomes zero files "
+                  f"is passing vacuously, not validating anything")
+            return 1
+
+    failures = sum(_validate_file(p, validator) for p in targets)
     print(f"\n{len(targets)} manifest(s) checked, {failures} failure(s)")
     return 0 if failures == 0 else 1
 

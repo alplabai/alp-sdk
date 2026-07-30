@@ -4,202 +4,164 @@
 """
 CI schema/smoke contract for `--emit kconfig` (#893).
 
-`--emit kconfig` is the SDK's first workspace-dependent emit mode (it
-needs a bootstrapped `ZEPHYR_BASE`, v4.4.0) -- deliberately OUTSIDE
-`scripts/check_emit_snapshots.py` (the hermetic byte-golden gate every
-other `--emit` surface is pinned against). Run this from a job that
-already bootstrapped the Zephyr workspace (the `pr-twister` CI job); it
-is a no-op you should not attempt without one.
+THE LIVE WORKSPACE SMOKE IS GONE, NOT NARROWED IN PLACE.
 
-Unlike a byte-golden, this gate is schema/smoke only: the exact symbol
-set moves with the pinned Zephyr version, so it asserts SHAPE, never a
-frozen dump --
+`--emit kconfig` was the SDK's only workspace-dependent emit mode: it needed
+a bootstrapped `ZEPHYR_BASE` (v4.4.0) to run the real Kconfig solver, so this
+gate used to spawn `python -m alp_orchestrate --input <board.yaml> --emit
+kconfig --core <id>` against a real board and assert shape on the LIVE
+output. `scripts/alp_orchestrate/kconfig_symbols.py` -- the emitter -- has
+moved to tan; alp-sdk no longer has a `--emit kconfig` to invoke, live or
+otherwise. Unlike `check_emit_snapshots.py`, which repoints its own
+subprocess list at `tan.planner_cli` for the modes tan still renders on
+request, there is nothing to repoint here: nothing in this repo implements
+or runs the mode any more, so the spawn is deleted outright.
 
-  * valid JSON, `schemaVersion == 1`, `symbols` non-empty;
-  * every symbol carries `name` + `type`, `type` in the allowed set;
-  * a few known-must-exist symbols are present (core Zephyr subsystems
-    every image can enable, regardless of board);
-  * the envelope's + every symbol's KEY SET conforms to the canonical
-    cross-repo contract fixture `tests/fixtures/kconfig-contract/
-    emit-kconfig.golden.json` -- tan-cli's `parse_kconfig` and
-    alp-sdk-vscode's `kconfigSymbolsFromEnvelope` both test against the
-    same file, so a key rename here needs a `schemaVersion` bump +
-    coordinated updates there (key names/shape only -- never values or
-    symbol counts, which legitimately vary with the pinned Zephyr version).
+What alp-sdk CAN still see, hermetically and with no `ZEPHYR_BASE`, is the
+CONTRACT the emitter's output has to conform to:
 
-Usage (from a job with ZEPHYR_BASE + west + the Zephyr Python deps on
-PATH):
+  * the contract shape itself (`_ENVELOPE_SCHEMA` below) is a valid Draft
+    2020-12 JSON Schema (`jsonschema.Draft202012Validator.check_schema`);
+  * the committed cross-repo golden
+    (`tests/fixtures/kconfig-contract/emit-kconfig.golden.json`) validates
+    against it;
+  * that golden is non-empty and structurally sane -- at least one symbol,
+    every symbol carrying `name` + `type` (`type` one of the Kconfig
+    types) plus `prompt`/`depends`/`default`/`help`.
 
-    python3 scripts/check_emit_kconfig_contract.py
+No `metadata/schemas/*.schema.json` file backs this mode today --
+`metadata/emit-registry-v1.json`'s `kconfig` entry already records
+`output.schema_id: null` for exactly that reason -- so the schema lives
+here, inline, rather than as a new file this single-file gate migration
+would then also have to wire into that registry (`schema_id` plus whatever
+else references it). Promoting `_ENVELOPE_SCHEMA` to a real
+`metadata/schemas/emit-kconfig-v1.schema.json`, and flipping the registry's
+`output.schema_id` to match in the same commit, is still open work.
+
+WHAT WAS LOST, deliberately: the live `--emit kconfig` smoke against a real
+bootstrapped Zephyr workspace no longer runs from this gate, or from
+anywhere in alp-sdk. tan covers the dumper's own render invariants in
+`python/tests/core/test_kconfig_symbols.py`; the real `west build`
+round-trip -- proof that a LIVE envelope, not just this committed golden,
+still conforms to the shared contract -- is now uncovered by alp-sdk and
+must be re-established in tan's own CI. No `--emit-output <path>`-style
+"validate a live document" flag was added here to soften that: this script
+never had one, and inventing one now would just be alp-sdk speculatively
+building tan's half of the fix. If tan's CI wants this exact
+schema/key-set check reused rather than re-implemented against its own copy
+of the golden, that reuse is tan's call to make, not alp-sdk's to
+pre-empt.
+
+Run locally (no ZEPHYR_BASE, no west, no Zephyr workspace required):
+
+    python scripts/check_emit_kconfig_contract.py
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import os
-import subprocess
 import sys
 from pathlib import Path
+
+import jsonschema
 
 REPO = Path(__file__).resolve().parent.parent
 
 _GOLDEN = REPO / "tests" / "fixtures" / "kconfig-contract" / "emit-kconfig.golden.json"
 
-_ALLOWED_TYPES = {"bool", "tristate", "int", "hex", "string"}
+_ALLOWED_TYPES = ["bool", "hex", "int", "string", "tristate"]
 
-# (board.yaml, core).  One real AEN core is enough to prove the contract
-# end-to-end (Approach A's stub-app load is board-target-agnostic) without
-# paying for a per-SKU toolchain matrix in CI.
-_CASES = [
-    ("examples/aen/aen-eeprom-manifest/board.yaml", "m55_he"),
-]
-
-# Symbols the resolved Kconfig tree always carries regardless of board
-# (core Zephyr subsystems every image can enable) -- their absence means
-# the Approach-A load silently resolved the wrong tree, not that this
-# particular board happens to lack them.
-_KNOWN_SYMBOLS = {"LOG", "SERIAL", "MAIN_STACK_SIZE"}
-
-
-def _golden_key_sets() -> tuple[set[str], set[str]]:
-    """(envelope key set, symbol key set) from the canonical cross-repo
-    contract fixture (tests/fixtures/kconfig-contract/README.md) -- tan-cli's
-    `parse_kconfig` and alp-sdk-vscode's `kconfigSymbolsFromEnvelope` both
-    test their own parsers against the same file."""
-    golden = json.loads(_GOLDEN.read_text(encoding="utf-8"))
-    return set(golden.keys()), set(golden["symbols"][0].keys())
-
-
-def _check_key_set_conformance(envelope: dict, label: str) -> list[str]:
-    """The real emit's KEY SET (never values/counts, which legitimately vary
-    with the pinned Zephyr version) must conform to the golden fixture's
-    shape -- a silent field rename here would break tan-cli and
-    alp-sdk-vscode's parsers without either repo's own hand-written literal
-    ever catching it (the whole point of #893's shared fixture)."""
-    problems: list[str] = []
-    golden_envelope_keys, golden_symbol_keys = _golden_key_sets()
-
-    envelope_keys = set(envelope.keys())
-    if envelope_keys != golden_envelope_keys:
-        problems.append(
-            f"{label}: envelope key set drifted from "
-            f"{_GOLDEN.relative_to(REPO)} "
-            f"(extra={sorted(envelope_keys - golden_envelope_keys)}, "
-            f"missing={sorted(golden_envelope_keys - envelope_keys)}); "
-            f"bump schemaVersion + update tan-cli/alp-sdk-vscode if this "
-            f"is intentional")
-
-    sym_key_sets = [set(sym.keys()) for sym in (envelope.get("symbols") or [])]
-    union_keys = set().union(*sym_key_sets) if sym_key_sets else set()
-    common_keys = set.intersection(*sym_key_sets) if sym_key_sets else set()
-    extra = union_keys - golden_symbol_keys
-    missing = golden_symbol_keys - common_keys
-    if extra or missing:
-        problems.append(
-            f"{label}: symbol key set drifted from "
-            f"{_GOLDEN.relative_to(REPO)} "
-            f"(extra={sorted(extra)}, missing={sorted(missing)}); "
-            f"bump schemaVersion + update tan-cli/alp-sdk-vscode if this "
-            f"is intentional")
-
-    return problems
+# Inline Draft 2020-12 schema for the `--emit kconfig` envelope shape
+# (what `alp_orchestrate.kconfig_symbols._envelope()` used to return, now
+# tan's to produce) -- see the module docstring for why this is inline
+# rather than a metadata/schemas/*.schema.json file.
+_ENVELOPE_SCHEMA: dict = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://github.com/alplabai/alp-sdk/scripts/check_emit_kconfig_contract.py",
+    "title": "`--emit kconfig` envelope contract",
+    "description": (
+        "The shape of tests/fixtures/kconfig-contract/emit-kconfig.golden.json "
+        "-- the canonical cross-repo contract fixture tan-cli's `parse_kconfig` "
+        "and alp-sdk-vscode's `kconfigSymbolsFromEnvelope` both test their own "
+        "parsers against."
+    ),
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["schemaVersion", "board", "core", "symbols"],
+    "properties": {
+        "schemaVersion": {"const": 1},
+        "board": {"type": "string", "minLength": 1},
+        "core": {"type": "string", "minLength": 1},
+        "symbols": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["name", "type", "prompt", "depends", "default", "help"],
+                "properties": {
+                    "name":    {"type": "string", "minLength": 1},
+                    "type":    {"type": "string", "enum": _ALLOWED_TYPES},
+                    "prompt":  {"type": "string"},
+                    "depends": {"type": "string"},
+                    "default": {"type": ["string", "null"]},
+                    "help":    {"type": "string"},
+                },
+            },
+        },
+    },
+}
 
 
-def _run_case(board_yaml: str, core: str) -> list[str]:
-    env = {**os.environ}
-    scripts_dir = str(REPO / "scripts")
-    env["PYTHONPATH"] = (
-        scripts_dir + os.pathsep + env["PYTHONPATH"]
-        if env.get("PYTHONPATH") else scripts_dir
-    )
-    cmd = [sys.executable, "-m", "alp_orchestrate",
-           "--input", str(REPO / board_yaml),
-           "--emit", "kconfig", "--core", core]
-    proc = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True, env=env)
-    label = f"{board_yaml}::{core}"
+def _make_validator(schema: dict) -> jsonschema.Draft202012Validator:
+    """The schema is itself checked for Draft 2020-12 validity before it is
+    used to validate anything -- an invalid schema would otherwise silently
+    validate nothing, which is worse than no gate at all."""
+    jsonschema.Draft202012Validator.check_schema(schema)
+    return jsonschema.Draft202012Validator(
+        schema, format_checker=jsonschema.FormatChecker())
 
-    if proc.returncode != 0:
-        return [f"{label}: --emit kconfig exited {proc.returncode}: "
-                f"{proc.stderr.strip()}"]
 
+def _check_golden(golden_path: Path,
+                   validator: jsonschema.Draft202012Validator) -> list[str]:
+    """Every problem is prefixed with the golden's own repo-relative path,
+    so a failure names the file as well as the violation."""
+    label = golden_path.relative_to(REPO).as_posix()
     try:
-        envelope = json.loads(proc.stdout)
-    except json.JSONDecodeError as e:
-        return [f"{label}: stdout is not valid JSON ({e})"]
+        doc = json.loads(golden_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        return [f"{label}: parse error ({e})"]
 
-    problems: list[str] = []
-    if envelope.get("schemaVersion") != 1:
-        problems.append(f"{label}: schemaVersion != 1 "
-                         f"({envelope.get('schemaVersion')!r})")
-    if envelope.get("core") != core:
-        problems.append(f"{label}: core != {core!r} "
-                         f"({envelope.get('core')!r})")
-
-    symbols = envelope.get("symbols")
-    if not symbols:
-        problems.append(f"{label}: symbols is empty")
-        return problems
-
-    names: set[str] = set()
-    for sym in symbols:
-        name = sym.get("name")
-        sym_type = sym.get("type")
-        if not name:
-            problems.append(f"{label}: a symbol entry has no name: {sym!r}")
-            continue
-        names.add(name)
-        if not sym_type:
-            problems.append(f"{label}: symbol {name} has no type")
-        elif sym_type not in _ALLOWED_TYPES:
-            problems.append(
-                f"{label}: symbol {name} has type {sym_type!r}, not one "
-                f"of {sorted(_ALLOWED_TYPES)}")
-
-    missing_known = _KNOWN_SYMBOLS - names
-    if missing_known:
-        problems.append(
-            f"{label}: expected known symbol(s) missing: "
-            f"{sorted(missing_known)}")
-
-    # #893 cross-repo contract: the real emit's key shape must conform to
-    # the golden fixture tan-cli + alp-sdk-vscode also test against
-    # (tests/fixtures/kconfig-contract/README.md). Key names/shape only --
-    # never values or symbol counts, which legitimately vary with the
-    # pinned Zephyr version.
-    problems += _check_key_set_conformance(envelope, label)
-
+    errors = sorted(validator.iter_errors(doc), key=lambda e: list(e.absolute_path))
+    problems = []
+    for err in errors:
+        loc = "/".join(str(p) for p in err.absolute_path) or "<root>"
+        problems.append(f"{label}: {loc}: {err.message}")
     return problems
 
 
 def main() -> int:
-    argparse.ArgumentParser(description=__doc__).parse_args()
+    ap = argparse.ArgumentParser(description=__doc__,
+                                  formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--golden", type=Path, default=_GOLDEN,
+                     help="Path to the golden envelope to check (default: "
+                          "the committed cross-repo contract fixture).")
+    args = ap.parse_args()
 
-    # Not a failure: this contract needs the real Zephyr workspace this
-    # script's own docstring says it does. `python scripts/alp_quality.py
-    # --profile pr` (and any other local-first sweep) must stay green
-    # without one -- the real gate runs in pr-twister.yml, which sets
-    # ZEPHYR_BASE.  Mirrors tests/scripts/test_emit_kconfig_workspace.py's
-    # skipif.
-    if not os.environ.get("ZEPHYR_BASE"):
-        print("skipped: --emit kconfig contract needs ZEPHYR_BASE")
-        return 0
+    validator = _make_validator(_ENVELOPE_SCHEMA)
+    problems = _check_golden(args.golden, validator)
 
-    all_problems: list[str] = []
-    for board_yaml, core in _CASES:
-        label = f"{board_yaml}::{core}"
-        problems = _run_case(board_yaml, core)
-        all_problems += problems
-        if problems:
-            print(f"FAIL {label}")
-            for p in problems:
-                print(f"  · {p}")
-        else:
-            print(f"OK   {label}")
+    label = args.golden.relative_to(REPO).as_posix() if args.golden.is_relative_to(REPO) \
+        else str(args.golden)
 
-    if all_problems:
+    if problems:
+        print(f"FAIL {label}")
+        for p in problems:
+            print(f"  · {p}")
         return 1
-    print(f"check_emit_kconfig_contract: {len(_CASES)} case(s) OK.")
+
+    print(f"OK   {label}  (schema is valid Draft 2020-12; golden conforms)")
     return 0
 
 

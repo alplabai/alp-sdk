@@ -3,7 +3,9 @@
 
 The plan is the machine-readable projection of board.yaml that the `alp`
 CLI / alp-sdk-vscode 'Wave C' consumer reads (see #610). These lock the
-emitter <-> contract lockstep and the gate behaviour.
+committed build-plan snapshot corpus <-> contract lockstep and the gate
+behaviour (the gate no longer generates a fresh plan -- see
+scripts/check_build_plan.py's docstring for what that demotion costs).
 """
 import json
 import subprocess
@@ -27,22 +29,28 @@ def test_schema_is_valid_draft202012():
 
 
 def test_default_corpus_conforms():
-    # the orchestrator's emitter output for representative projects matches
-    # the documented contract (emitter <-> schema lockstep / drift detection).
+    # the committed build-plan snapshots under tests/fixtures/emit-snapshots/
+    # still match the documented contract (corpus <-> schema drift detection,
+    # now that the gate no longer generates a fresh plan to check).
     proc = _run()
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "0 failure(s)" in proc.stdout
 
 
+def test_empty_corpus_rejected(tmp_path):
+    # a corpus dir with no *.build-plan.snap files must fail, not pass --
+    # the exact silent-erosion failure this gate exists to catch.
+    proc = _run("--snapshot-dir", str(tmp_path))
+    assert proc.returncode != 0
+    assert "FAIL" in proc.stdout
+
+
 def test_valid_plan_file_passes(tmp_path):
-    sys.path.insert(0, str(REPO / "scripts"))
-    from alp_orchestrate import emit_build_plan, load_board_yaml
-    board_yaml = REPO / "examples/multicore/rpmsg-v2n/board.yaml"
-    plan_json = emit_build_plan(
-        load_board_yaml(board_yaml), board_yaml=board_yaml,
-        build_root=Path("build"))
+    # build the fixture from a committed snapshot instead of invoking the
+    # doomed orchestrator emitter directly.
+    snapshot = REPO / "tests/fixtures/emit-snapshots/rpmsg-v2n.build-plan.snap"
     p = tmp_path / "build-plan.json"
-    p.write_text(plan_json, encoding="utf-8")
+    p.write_text(snapshot.read_text(encoding="utf-8"), encoding="utf-8")
     proc = _run("--plan", str(p))
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "OK" in proc.stdout

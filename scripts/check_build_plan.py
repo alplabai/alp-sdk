@@ -12,11 +12,25 @@ artefacts and any non-fatal planning warnings. The `alp` CLI / alp-sdk-vscode
 'Wave C' consumer reads THIS instead of re-deriving folder layout and build
 wiring from board.yaml + the SoM presets.
 
-With no --plan, this regenerates a plan from a representative set of example
-projects via the orchestrator and validates each -- a conformance gate that
-keeps `scripts/alp_orchestrate/`'s emitter and this contract in lockstep.
+THIS GATE NO LONGER GENERATES A PLAN TO CHECK.
+
+It used to call the orchestrator's emitter directly on a representative set
+of example projects and validate the fresh output -- proof that a plan built
+*right now* still matched the contract. `scripts/alp_orchestrate/` is being
+deleted (the planner it fronted now lives in the tan repository), so with no
+--plan this gate instead validates the COMMITTED build-plan snapshots under
+`tests/fixtures/emit-snapshots/*.build-plan.snap` -- generated output already
+checked into the tree, the same artefact class `check_emit_registry.py`
+leans on for the same reason.
+
+WHAT IS LOST: this no longer proves a FRESHLY EMITTED plan conforms to the
+schema -- only that the committed corpus does. If the corpus goes stale (an
+emitter/tan change lands without regenerated snapshots), this gate stays
+green on the old shape. Freshness is tan's responsibility now; it is the
+thing that actually emits a build plan today.
+
 With --plan PATH it validates an existing plan (e.g. a real build plan an IDE
-consumes).
+consumes) -- unchanged.
 
 Run locally:
 
@@ -35,16 +49,8 @@ import jsonschema
 
 REPO = Path(__file__).resolve().parent.parent
 SCHEMA = REPO / "metadata" / "schemas" / "build-plan-v1.schema.json"
-sys.path.insert(0, str(REPO / "scripts"))
-
-# Representative projects exercising the multi-image (A+M) shape across all
-# three SoC families -- the same corpus check_system_manifest.py pins.
-_DEFAULT_PROJECTS = [
-    "examples/multicore/rpmsg-v2n/board.yaml",
-    "examples/multicore/rpmsg-aen/board.yaml",
-    "examples/multicore/rpmsg-imx93/board.yaml",
-    "examples/multicore/heterogeneous-offload/board.yaml",
-]
+SNAPSHOT_GLOB = "*.build-plan.snap"
+DEFAULT_SNAPSHOT_DIR = REPO / "tests" / "fixtures" / "emit-snapshots"
 
 
 def _make_validator(schema_path: Path) -> jsonschema.Draft202012Validator:
@@ -75,43 +81,33 @@ def _validate_file(path: Path, validator: jsonschema.Draft202012Validator) -> in
     return _validate_doc(path.name, doc, validator)
 
 
-def _validate_generated(board_yaml: Path, validator: jsonschema.Draft202012Validator) -> int:
-    from alp_orchestrate import (
-        OrchestratorError,
-        emit_build_plan,
-        load_board_yaml,
-    )
-    try:
-        plan_json = emit_build_plan(
-            load_board_yaml(board_yaml), board_yaml=board_yaml,
-            build_root=REPO / "build")
-    except OrchestratorError as e:
-        print(f"FAIL {board_yaml}: {e}")
-        return 1
-    try:
-        rel = board_yaml.relative_to(REPO)
-    except ValueError:
-        rel = board_yaml
-    return _validate_doc(f"{rel} (generated)", json.loads(plan_json), validator)
-
-
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="Validate a build plan against the v1 contract.")
     ap.add_argument("--plan", type=Path, action="append", default=[],
                     help="build-plan JSON file(s) to validate. Default: "
-                         "regenerate from representative example projects "
-                         "and validate.")
+                         "validate the committed corpus under "
+                         "tests/fixtures/emit-snapshots/*.build-plan.snap.")
     ap.add_argument("--schema", type=Path, default=SCHEMA)
+    ap.add_argument("--snapshot-dir", type=Path, default=DEFAULT_SNAPSHOT_DIR,
+                    help="Directory to glob %s from when --plan is not "
+                         "given (default: tests/fixtures/emit-snapshots)."
+                         % SNAPSHOT_GLOB)
     args = ap.parse_args()
 
     validator = _make_validator(args.schema)
     if args.plan:
         targets = args.plan
-        failures = sum(_validate_file(p, validator) for p in targets)
     else:
-        targets = [REPO / p for p in _DEFAULT_PROJECTS]
-        failures = sum(_validate_generated(p, validator) for p in targets)
+        targets = sorted(args.snapshot_dir.glob(SNAPSHOT_GLOB))
+        if not targets:
+            print(f"FAIL no build-plan snapshots matched "
+                  f"{args.snapshot_dir}/{SNAPSHOT_GLOB} -- an empty corpus "
+                  f"checks nothing, which is the failure class this gate "
+                  f"exists to catch, not a pass")
+            return 1
+
+    failures = sum(_validate_file(p, validator) for p in targets)
     print(f"\n{len(targets)} plan(s) checked, {failures} failure(s)")
     return 0 if failures == 0 else 1
 
