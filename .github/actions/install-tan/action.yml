@@ -7,10 +7,11 @@
 # pr-getting-started-aen801.yml, pr-renode-aen-smoke.yml and
 # pr-renode-sim-mode.yml -- and every `examples/**/CMakeLists.txt` they reach
 # calls `alp_sdk_zephyr_conf()`, which resolves its emitter from PATH
-# (cmake/alp.cmake, "Emitter resolution").  With no `tan` installed, all four
-# take the `scripts/alp_project.py` fallback: legal, but it means the `tan`
-# path this SDK documents as its front door is exercised by NO gate at all,
-# and the fallback branch is the only one CI has ever proved.
+# (cmake/alp.cmake, "Emitter resolution").  `tan` is that helper's ONLY
+# emitter -- the `scripts/alp_project.py` fallback this action was first
+# written beside is gone -- so with no `tan` installed all four jobs die at
+# configure with the helper's FATAL_ERROR.  This action is what makes them
+# configure at all.
 #
 # This is a composite action rather than a step copy-pasted into four
 # workflows for one reason: the ref below is then ONE edit, not four.
@@ -32,8 +33,13 @@
 # To bump: confirm the new ref is PUSHED --
 # `git ls-remote https://github.com/alplabai/tan-cli <ref>` -- because an
 # unpushed SHA fails every one of the four jobs with pip's "did not match any
-# file(s) known to git", then replace the SHA below.  Nothing else in this
-# repo names it.
+# file(s) known to git", then replace the SHA below AND its two copies:
+# cmake/alp.cmake, whose refusal quotes this same install line so a customer
+# who hits it gets a command that works, and docs/cli.md, which documents it
+# as the only install a `board.yaml` build accepts until a release ships
+# `--output`.  Those three are the only places in this repo that name the SHA,
+# and tests/scripts/test_cmake_alp_emitter_probe.py reads all three and fails
+# if they drift, so a one-sided bump is caught rather than shipped.
 #
 # The interpreter is each job's own actions/setup-python, so it must satisfy
 # tan-cli `python/pyproject.toml`'s `requires-python`, which is `>=3.12`
@@ -59,19 +65,19 @@ runs:
       run: |
         set -euo pipefail
         tan --version
-        # cmake/alp.cmake takes the tan branch ONLY when `tan generate --help`
-        # exits 0 AND its output mentions `--output`.  Any other outcome is a
-        # SILENT fall back to scripts/alp_project.py -- the build still
-        # succeeds, so the job reports green having never run tan.  Assert
-        # both conditions here, where the failure is legible, rather than
-        # shipping a gate that proves nothing.
+        # cmake/alp.cmake emits ONLY when `tan generate --help` exits 0 AND
+        # its output mentions `--output`.  Any other outcome is a FATAL_ERROR
+        # at configure time, in every job and every example that reaches the
+        # helper.  Assert both conditions here instead: one failure naming the
+        # install, rather than a wall of identical configure failures whose
+        # cause is this step.
         help_text="$(tan generate --help 2>&1)"
         case "${help_text}" in
           *--output*)
             echo "tan generate accepts --output; cmake/alp.cmake will use this tan."
             ;;
           *)
-            echo "::error::the installed tan's \`generate --help\` never mentions --output, so cmake/alp.cmake would silently fall back to scripts/alp_project.py."
+            echo "::error::the installed tan's \`generate --help\` never mentions --output, so cmake/alp.cmake will refuse to configure every example that reaches it. Bump the pinned ref above to a tan whose \`generate\` accepts --output."
             exit 1
             ;;
         esac

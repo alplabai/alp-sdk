@@ -885,7 +885,12 @@ runs in Linux only.
 > firmware) is cross-platform on the host.
 
 If you're targeting an M-class core only, you never need to
-leave macOS or Windows.  If you're targeting an A-class core,
+leave macOS.  On native Windows the cross-compiled real-silicon
+`west build` / `west flash` also stays on the host, but
+`native_sim` — the day-to-day iteration and ztest target — does
+not exist for native Windows and needs WSL2 (§4.6); the §1
+matrix is the authority per workflow.  If you're targeting an
+A-class core,
 you need a Linux environment somewhere in your build pipeline —
 locally (Linux host or VM / WSL2) or remotely (CI runner,
 shared dev box).

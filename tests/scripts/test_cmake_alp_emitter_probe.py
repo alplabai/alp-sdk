@@ -34,6 +34,7 @@ import pytest
 REPO = Path(__file__).resolve().parents[2]
 ALP_CMAKE = REPO / "cmake" / "alp.cmake"
 INSTALL_TAN_ACTION = REPO / ".github" / "actions" / "install-tan" / "action.yml"
+DOCS_CLI = REPO / "docs" / "cli.md"
 
 # Resolved once, and invoked by absolute path below: the runs narrow PATH to a
 # single directory, so `cmake` itself would not be findable on it.
@@ -153,3 +154,18 @@ def test_tan_with_output_satisfies_the_probe(tmp_path):
     proc = _include_alp_cmake(tmp_path, tan.parent)
     assert proc.returncode == 0, proc.stderr
     assert f"probe resolved: {tan}" in proc.stdout
+
+
+def test_docs_cli_pins_the_same_tan():
+    """docs/cli.md carries the THIRD copy of the pin, and the one a customer
+    actually installs from -- neither the CI action nor a CMake error string is
+    where someone setting up the SDK looks first.  A one-sided bump would leave
+    the documented install fetching a `tan` this helper then refuses, which is
+    precisely the failure that doc note exists to prevent.
+
+    The module marks skip this on Windows and without cmake; the Linux PR gate
+    (`pr-metadata-validate`'s `pytest tests/scripts/`) is where it has to hold.
+    """
+    doc = DOCS_CLI.read_text(encoding="utf-8")
+    assert f"tan-cli@{_pinned_tan_ref()}" in doc, \
+        "docs/cli.md's install line has drifted from .github/actions/install-tan"

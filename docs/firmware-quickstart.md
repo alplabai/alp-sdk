@@ -52,7 +52,9 @@ modules.
 
 You'll also need `tan`, the standalone build executor -- a separate
 public repo, not installed by `bootstrap.sh`. The automatic installer
-needs no Rust toolchain:
+needs no Rust toolchain, but INTERIM: the release it fetches cannot
+configure a `board.yaml` project yet -- [`docs/cli.md`](cli.md) carries
+the pinned install that can:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh

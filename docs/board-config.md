@@ -96,7 +96,7 @@ commented template see
 `board.yaml` is the **only** place to configure the firmware.  Every
 other config artefact -- `prj.conf` (Zephyr), CMake `-D` args (plain
 CMake), `local.conf` + `MACHINE` (Yocto) -- is **derived** from it
-by `scripts/alp_project.py`.
+by `tan generate`, which `cmake/alp.cmake` runs at configure time.
 
 Concretely:
 

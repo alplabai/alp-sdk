@@ -78,6 +78,12 @@ subdirectory adds `BOARD_YAML ${CMAKE_CURRENT_SOURCE_DIR}/../board.yaml`,
 and a project with an `ipc:` block also calls
 `alp_sdk_ipc_contract_header()` to render `<alp/system_ipc.h>`.
 
+Both calls emit through `tan`, and only through `tan`: the module requires
+a `tan` on PATH whose `generate` accepts `--output`, and stops the
+configure with the install command when it finds none.  No released `tan`
+carries that flag yet -- [`docs/cli.md`](cli.md) has the pinned install
+that does.
+
 Zephyr's `EXTRA_CONF_FILE` machinery merges the generated `alp.conf`
 on top of `prj.conf` at Kconfig time -- the app picks up every
 `CONFIG_*` line the loader emitted.

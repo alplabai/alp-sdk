@@ -29,7 +29,9 @@ firmware as a first-class consumer.
 >   `tan` separately from its own repo -- the automatic installer
 >   needs no Rust toolchain: `curl -fsSL
 >   https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh
->   | sh`.  Building from source instead needs Rust 1.86+
+>   | sh`.  INTERIM: the release that fetches cannot configure a
+>   `board.yaml` project yet -- [`docs/cli.md`](cli.md) carries the
+>   pinned install that can.  Building from source instead needs Rust 1.86+
 >   ([rustup.rs](https://rustup.rs)) and a system C toolchain
 >   (`build-essential` / `gcc gcc-c++` -- see
 >   [`docs/cross-platform-setup.md`](cross-platform-setup.md) §2.1):
@@ -57,6 +59,8 @@ git clone https://github.com/alplabai/alp-sdk
 cd alp-sdk
 bash scripts/bootstrap.sh                            # one-time: west + Python + apt hints
 export ZEPHYR_BASE="$PWD/../zephyr"
+# INTERIM: the released tan below cannot configure a board.yaml project yet
+# (its `generate` has no --output) -- docs/cli.md has the pinned install
 curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh  # one-time: install tan (no Rust toolchain needed)
 export PATH="$HOME/.local/bin:$PATH"  # install.sh already made this permanent in your shell rc; needed once more in THIS shell
 tan --project examples/peripheral-io/gpio-button-led build

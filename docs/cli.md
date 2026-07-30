@@ -11,7 +11,49 @@ project.
 
 `tan` is a standalone, independently-versioned, public Rust binary
 ([`alplabai/tan-cli`](https://github.com/alplabai/tan-cli)); install it
-separately. The automatic installer needs no Rust toolchain:
+separately.
+
+> **Interim: no released `tan` builds a `board.yaml` project yet — use the
+> pinned install below, not the one-liner.**  Every `board.yaml`-driven build
+> (all 96 Zephyr examples, and any project scaffolded from one) configures
+> through [`cmake/alp.cmake`](../cmake/alp.cmake), which requires a `tan` whose
+> `generate` accepts `--output` and aborts the configure with an install line
+> when it finds anything else -- alp-sdk ships no second emitter.  **No
+> released `tan` has that flag:** v0.4.1's `generate` takes
+> `--target`/`--core`/`--board-yaml`/`--sdk-root` and no `--output` (verified
+> by running `tan generate --help` on the v0.4.1 release asset).  So the
+> `install.sh` one-liner and the release-asset download below both land a `tan`
+> this SDK then refuses; the from-source path builds the same `main` lineage,
+> so probe it the same way before relying on it.  Until a release
+> ships `--output`, install the exact build this repo's CI is pinned to -- the
+> tan CLI's Python distribution (`alp-tan`, from tan-cli's `python/`
+> subdirectory, needs Python 3.12 or newer):
+>
+> ```bash
+> pip install "git+https://github.com/alplabai/tan-cli@4ec44171491a8ee0a2b1dcf45b45b7757fdead0b#subdirectory=python"
+> ```
+>
+> The pin and the procedure for bumping it live in
+> [`.github/actions/install-tan/action.yml`](../.github/actions/install-tan/action.yml);
+> `cmake/alp.cmake` quotes the same commit in its refusal, and
+> `tests/scripts/test_cmake_alp_emitter_probe.py` fails if the two drift.
+> Watch the capability, not a version number: `tan generate --help` listing
+> `--output` is the whole gate, so the first release whose help shows it is the
+> one that retires this pin.
+>
+> **The pin is a work in progress, and the trade is real.**  It carries
+> `bootstrap` / `build` / `clean` / `debug-config` / `doctor` / `examples` /
+> `explain` / `flash` / `generate` / `image` / `init` / `presets` / `sdk` /
+> `size` / `validate` (its own `tan --help`), so it carries the
+> configure/build/flash verbs -- but `faultdecode`, `kconfig`, `model`,
+> `monitor`, `new-som`, `renode` and `run`, plus `doctor --build` and most of
+> the `init` flags this page tabulates, are NOT in it yet.  Released v0.4.1
+> has those verbs and cannot configure a `board.yaml` project; the pin
+> configures one and does not have them.  Nothing installs both today.  For a
+> verb the pin lacks, run it from a released `tan` kept outside PATH (or a
+> second venv) rather than replacing the one your builds resolve.
+
+The automatic installer needs no Rust toolchain:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh
@@ -42,9 +84,10 @@ cargo install --path crates/tan-cli --locked
 
 None of the three install paths above pin a `tan` version (`install.sh`
 tracks the mutable `main` ref and installs `releases/latest`; the
-source path clones `main`'s HEAD) -- this is deliberate: all three are
-tan-cli's own recommended install methods, and staying on its latest
-release is the point until a project needs otherwise.
+source path clones `main`'s HEAD) -- they are tan-cli's own recommended
+install methods, and tracking its latest release is the intent for every
+surface except the emitter gate in the note above, which no release
+passes yet.
 
 Two execution paths live behind the one binary:
 
@@ -663,13 +706,17 @@ it emits build plans only.
 | `ALP_SDK_ROOT` | Explicit path to the alp-sdk checkout; otherwise the CLI locates the repo it was installed (editable) from |
 | `ZEPHYR_BASE` | The Zephyr tree checked by `tan doctor --build` |
 
-`west alp-emit` exports `ALP_SDK_ROOT` and puts `<sdk>/scripts` on
-`PYTHONPATH` for its sub-process, so a west-invoked orchestrator run
-behaves identically to running `alp_orchestrate` directly.  `tan
-generate` does its own SDK-root resolution and invokes
-`<sdk_root>/scripts/alp_project.py` by its full path with plain
-`--input`/`--emit`/`--output` arguments instead -- no env wiring, since
-the script is addressed directly rather than imported as a module.
+`west alp-emit` exports `ALP_SDK_ROOT` and appends the SDK root to
+`EXTRA_ZEPHYR_MODULES` (a `;`-joined CMake list on every platform, never
+`os.pathsep`) for its sub-process, so a west-invoked emit resolves the
+same SDK root and module as a direct run.  `tan generate` does its own
+SDK-root resolution and needs no env wiring at all: the pinned build
+renders every target in-process from its own planner, and spawns
+`<sdk_root>/scripts/alp_project.py --input/--emit/--output` only as an
+escape hatch -- pinned with `TAN_GENERATE_EXECUTOR=subprocess`, or when
+the in-process path cannot serve the checkout, which it reports as a
+`generate.in-process-unavailable` warning rather than switching engines
+silently.
 `tan` separately reads the plan's own `env` / `envAppendPath` entries
 (sourced from the SDK's `--emit build-plan`) to set up
 `EXTRA_ZEPHYR_MODULES` and `PYTHONPATH` for the slices it builds --

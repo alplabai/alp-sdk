@@ -46,7 +46,9 @@ source ../.venv/bin/activate
 export ZEPHYR_BASE="$PWD/../zephyr"
 
 # One-time: install the standalone build executor (no Rust toolchain needed --
-# see below for a from-source alternative)
+# see below for a from-source alternative).  INTERIM: no released tan can
+# configure a board.yaml project yet, so read the pinned-install note in
+# docs/cli.md before the build step below.
 curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"  # install.sh already made this permanent in your shell rc; needed once more in THIS shell
 
@@ -190,7 +192,8 @@ diagnostics:
 
 Each entry under `cores:` maps one on-die programmable core to a
 runtime (`yocto`, `zephyr`, `baremetal`, or `off`) plus its app
-slice.  The loader (`scripts/alp_project.py`) fans out per-core:
+slice.  The loader (`tan generate`, which `cmake/alp.cmake` runs at
+configure time) fans out per-core:
 each Zephyr slice gets a Kconfig fragment layered onto its own
 `prj.conf` via `EXTRA_CONF_FILE`; each Yocto slice gets a
 `local.conf` snippet consumed by bitbake.  Inside each
@@ -374,7 +377,7 @@ verification (`⏳`/`🟡`/`✅` rows) lives in
 ### Dev tooling
 
 - **`board.yaml` project config** — single source of truth, covering: board identity (`name` / `description` / `hw_rev`, or `preset:` for the EVKs), SoM SKU + `hw_rev`, per-core runtime + app + peripherals + libraries + inference + iot + `memory` (stack/heap) + `power` (sleep/wakeup), board-side `populated:` chip list + `e1m_routes:` pad-to-macro routing (8 sections: gpio/buses/pwm/adc/dac/i2s/can/qenc, with `active_low` / `pull` / `debounce_ms`), used-pad subset `pins:`, cross-core `ipc:`, `boot:` (MCUboot config → sysbuild overlay), `ota:` (Mender config → Yocto local.conf), `storage:` (flash partitions), `security.psa:` (TF-M + persistent key slots), and `diagnostics:` with per-module log-level overrides
-- **`scripts/alp_project.py`** — emits Zephyr Kconfig fragments, plain-CMake `-D` flags, Yocto `local.conf` snippets, DTS overlays, or the `<alp_hw_info_build.h>` companion header
+- **`tan generate`** — renders `board.yaml` into Zephyr Kconfig fragments, plain-CMake `-D` flags, Yocto `local.conf` snippets, DTS overlays, or the `<alp_hw_info_build.h>` companion header. `cmake/alp.cmake` runs it at configure time for every example and refuses to configure without it; `scripts/alp_project.py` is the SDK's in-tree implementation of the same emits, no longer a build path — see [`docs/cli.md`](docs/cli.md) for which `tan` builds today
 - **`scripts/validate_board_yaml.py`** — customer-side linter (exit 0 clean / 1 diagnostics-or-consistency failure)
 - **`scripts/program_eeprom.py`** — packs board.yaml + serial + mfg date into the 128-byte EEPROM manifest for production-test programming
 - **VS Code extension** ([`alplabai/alp-sdk-vscode`](https://github.com/alplabai/alp-sdk-vscode)) — schema-aware `board.yaml` editor, GUI configurator, `tan` wrappers, per-OS bootstrap, inline validator diagnostics
@@ -424,7 +427,7 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference bo
   └───────────────┘    └────────────────────────────────────────────────────────────────────────┘
           │
   ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────┐
-  │ Dev Tooling   │ ─► │  board.yaml · alp_project.py (per-core emit) · alp_orchestrate         │
+  │ Dev Tooling   │ ─► │  board.yaml · tan generate (per-core emit) · alp_orchestrate           │
   │               │    │  --emit build-plan/system-manifest  →  tan (executor)                  │
   │               │    │  tan build / flash / image / size / renode / clean                     │
   │               │    │  validate_board_yaml.py · program_eeprom.py · VS Code extension        │

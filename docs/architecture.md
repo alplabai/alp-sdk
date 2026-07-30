@@ -288,6 +288,16 @@ The active generators are:
 | `scripts/validate_board_yaml.py`        | `board.yaml`                                         | (validator only -- non-zero exit on schema/xref/consistency error)             |
 | `scripts/validate_metadata.py`          | `metadata/**/*.{json,yaml}`                          | (validator only)                                                               |
 
+An example never invokes the per-slice emitter itself.  `cmake/alp.cmake`
+-- the one helper every `examples/**/CMakeLists.txt` includes -- runs `tan
+generate --target <mode> --output <path>` at configure time and aborts the
+configure when PATH has no `tan` whose `generate` accepts `--output`, since
+the SDK offers no second emitter behind it (ADR
+[0020](adr/0020-sdk-owns-build-execution.md); [`cli.md`](cli.md) records
+which `tan` satisfies that today).  `scripts/alp_project.py` above is the
+in-tree implementation of those same per-slice emits -- run directly, or as
+`tan generate`'s escape-hatch engine -- not the build path.
+
 All generated artefacts are byte-stable across rebuilds (deterministic
 key ordering, no timestamps, no run IDs) so CI can diff them against
 the checked-in copies under `include/alp/` and reject any drift.

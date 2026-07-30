@@ -2,9 +2,19 @@
 # SPDX-License-Identifier: Apache-2.0
 """Fail when alp-sdk's documented `tan` surface no longer exists in real `tan`.
 
-alp-sdk deliberately tracks tan-cli's `latest` (docs/cli.md's own install
-instructions pin nothing) -- a tan release changes customer-visible CLI
-behaviour immediately, with no version pin to buffer alp-sdk's docs from it.
+alp-sdk deliberately tracks tan-cli's `latest` -- a tan release changes
+customer-visible CLI behaviour immediately, with no version pin to buffer
+alp-sdk's docs from it, and tan-docs-drift.yml installs `latest` accordingly.
+
+Which is no longer the whole picture, and matters before acting on a finding:
+since a7c1bc4e, docs/cli.md ALSO documents one PINNED interim commit, because
+`cmake/alp.cmake` requires a `tan generate` with `--output` that no release
+carries yet.  That pinned build is an in-progress port and does not implement
+every verb these docs tabulate (`faultdecode`, `kconfig`, `model`, `monitor`,
+`new-som`, `renode`, `run`, `doctor --build`, several `init` flags).  Run
+against `latest` this gate measures the released surface, which is what it is
+for; run against the pin, those absences are the port's backlog, NOT doc drift
+-- deleting the docs to green it would retire verbs a released `tan` still has.
 This check extracts every `tan <subcommand>` alp-sdk's docs show a customer
 typing, plus every flag docs/cli.md tabulates for a given subcommand, and
 proves each one still exists against a REAL, installed `tan` binary
@@ -514,7 +524,7 @@ def main() -> int:
         print(
             f"FAIL tan-docs-drift: `{args.tan_bin}` is not on PATH.\n"
             "  This gate needs a real, installed `tan` to check alp-sdk's docs against "
-            "-- install it via docs/cli.md's own documented install.sh path and put it "
+            "-- install it via one of docs/cli.md's documented install paths and put it "
             "on PATH, then re-run. `tan` being unavailable is a hard failure here, "
             "never a silent skip.",
             file=sys.stderr,
