@@ -7,7 +7,22 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.15.0 candidate
 
-### Fixed — `check_cross_platform.py`'s `--fail-on-warning` flip was waiting on two Yocto-script findings, and the Intel-Mac host claim was still overbroad in three docs
+### Fixed — `alp.lock`'s `digests.metadata` only hashed `metadata/**/*.yaml`, missing 23 JSON files including every SoC spec (#1045)
+
+`_digests()` globbed just `**/*.yaml` under `metadata/`, so `metadata/socs/**/*.json`
+(memory maps, variant resolution, core topology), `metadata/bootstrap.json`,
+`metadata/catalog.json`, and 20 more JSON/TSV/CSV/header/proto/Renode/lock/example
+files could change with `alp_lock.py --check` staying green. `_METADATA_DIGEST_GLOBS`
+now widens coverage to `**/*.{yaml,json,tsv,csv,h,proto,resc,repl,lock,example}`;
+only `.md` and `.gitkeep` remain deliberately uncovered (documentation and
+placeholders can't change a build), enforced by a completeness test that lists
+`git ls-files metadata` against the glob set. Also adds the `alp-lock` stage to
+`scripts/test-all.sh` (previously the ONLY place `alp_lock.py --check` ran was
+`pr-metadata-validate.yml`, so a locally-green branch could still redden CI on
+lock drift) and widens that workflow's `paths:` filters to include
+`scripts/alp_lock/**` / `scripts/west_commands/alp_lock.py` themselves.
+
+### Fixed — `check_cross_platform.py`'s `--fail-on-warning` flip was waiting on two Yocto-script findings, and the Intel-Mac host claim was still overbroad in three docs (#1032 A5/A6)
 
 `scripts/check_cross_platform.py`'s CI step is flipped to
 `--fail-on-warning`, now possible because `tests/yocto/build_rpc_uio_bench_aarch64.sh`
