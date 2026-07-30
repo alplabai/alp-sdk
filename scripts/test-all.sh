@@ -315,6 +315,16 @@ stage_metadata_validate() {
     fi
 }
 
+stage_alp_lock() {
+    # Mirrors pr-metadata-validate.yml's `alp.lock --check` step (#1045) --
+    # previously the ONLY place that check ran, so a locally-green branch
+    # could still redden CI on lock drift it never saw.
+    if [ ! -f scripts/west_commands/alp_lock.py ]; then
+        return 99
+    fi
+    python3 scripts/west_commands/alp_lock.py --workspace . --check || return 1
+}
+
 stage_doc_yaml_fragments() {
     # Lints ```yaml fenced blocks in *.md against board.schema.json.
     # Catches README + tutorial drift after schema changes.  Skips if
@@ -626,6 +636,10 @@ else
     fi
 
     run_stage "metadata-validate" stage_metadata_validate
+
+    # alp.lock --check -- both the dev (fast) and main (release-grade)
+    # profiles run this unconditionally, same as metadata-validate above.
+    run_stage "alp-lock" stage_alp_lock
 
     # Documentation lint -- cheap, always runnable, no special tooling.
     if [ -f scripts/lint_doc_yaml_fragments.py ]; then
