@@ -12,7 +12,7 @@
   },
   "prerequisites": {
     "posix": ["git", "cmake", "python3", "ninja", "xz", "wget"],
-    "macos": ["git", "cmake", "python3", "ninja"],
+    "macos": ["git", "cmake", "python3", "ninja", "xz"],
     "windows": ["git", "cmake", "python", "ninja"],
     "pythonMinVersion": "3.10",
     "install": {
