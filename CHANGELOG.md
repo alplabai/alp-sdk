@@ -482,6 +482,93 @@ finding for an OUTPUT-direction pin (Synopsys DW_apb_gpio databook) is
 unaffected by this correction and still stands as the reason the *original*
 `aen-gpio-bench` PASS criterion could never independently fail.
 
+### Changed — `zephyr/kconfigs/core.kconfig`: E8 builds now default to the real SoC capability profile, not the permissive one
+
+The "Active SoC capability profile" choice now defaults to
+`ALP_SOC_ALIF_ENSEMBLE_E8` when `SOC_SERIES_E8` is set, instead of falling
+through to `ALP_SOC_NONE`. Every E8 app's `include/alp/soc_caps.h` macros
+flip from the permissive `UINT16_MAX` (any config accepted) to the real E8
+counts (`ALP_SOC_I2C_COUNT=6`, `ALP_SOC_SPI_COUNT=6`, `ALP_SOC_UART_COUNT=9`,
+`ALP_SOC_PWM_COUNT=12`, `ALP_SOC_WDT_COUNT=4`, `ALP_SOC_CAN_COUNT=1`,
+`ALP_SOC_RTC_COUNT=1`, `ALP_SOC_I3C_COUNT=2`, etc.), so a dispatcher's
+`bus_id`/`channel_id`/`rtc_id`/`wdt_id` range check
+(`src/backends/*/zephyr_drv.c`, `src/i3c_dispatch.c`, `src/dac_dispatch.c`)
+now rejects an out-of-range instance with `ALP_ERR_OUT_OF_RANGE` where it
+previously accepted anything. `native_sim` and other non-E8 builds are
+unaffected — the choice is gated on `SOC_SERIES_E8`, which only the E8 SoC
+tree selects. Swept every `examples/aen/*` peripheral-open call: all use
+instance literals of `0` (or an `ALP_E1M_*` macro that resolves to `0`),
+well inside every E8 count above — no example regresses.
+
+### Added — `gpio11`..`gpio14` on the E8 peripherals dtsi; the RGB LED's green/blue channels are now reachable
+
+`zephyr/dts/alif/ensemble_e8_peripherals.dtsi` declared only `gpio0`..`gpio10`
+plus `lpgpio`, while the E1M-EVK routes the RGB LED's green and blue channels
+to P12_7 / P12_6 — pads that only exist behind a `gpio12` controller node.
+With no such node, those two `alp,pin-array` entries resolved to no
+controller at all: `alp_gpio_open()` could not reach them through the
+portable API, even though the routes header looked perfectly well-formed.
+`gpio11`..`gpio14` (DFP-transcribed from `AE822FA0E5597/include/rtss_he/
+soc.h`: `reg` + all eight per-port IRQ lines each) are added, `status =
+"disabled"` by default like every other port in this dtsi. This unblocks —
+but does not itself wire — the green/blue RGB channels; see
+`examples/aen/edgeai-vision-aen`'s overlay for the remaining placeholder pin
+mux those channels still need.
+
+### Added — `zephyr/drivers/gpio/gpio_clk_alif.c`: DesignWare GPIO functional-clock enable (ADR 0017 Tier-1.5)
+
+Mirrors the Alif DFP's own documented `enable_gpio_clk()` sequence: sets
+`CLKCTL_PER_SLV->GPIO_CTRL[n]` bit 16 (`GPIO_CTRL_CKEN`) for every
+`snps,designware-gpio` node DT declares `status = "okay"`, at `PRE_KERNEL_1`
+priority 1 (ahead of `gpio_dw`'s own init). Upstream Zephyr's `gpio_dw`
+driver never touches this SoC-level gate, which was clear on every AE822
+port and unwritten anywhere in alp-sdk. **Bench correction, same day:** this
+was first suspected to be why an AEN801 LED looked dark under GPIO alt-0; a
+follow-up A/B on the same silicon proved it wrong — with CKEN still clear
+after a cold reset, driving `SWPORTA_DDR`/`SWPORTA_DR` from the debugger
+moved the pad. CKEN is not required for pad drive on AE822. The write is
+kept because it matches Alif's documented init, not because it fixes a dark
+pad — see the GPIO row in `docs/aen-bench-bringup.md` for the real
+explanation and the corrected bench record.
+
+### Fixed — `zephyr/drivers/flash/flash_ospi_alif.c`: OSPI0 clock-enable, reproduced bus fault on E8 (ADR 0017 Tier-1.5)
+
+On AE822FA0E5597 (E8) the OSPI register window sits behind a per-instance
+clock-enable gate (`CLKCTL_PER_SLV->OSPI_CTRL`) that hal_alif's OSPI library
+never writes — that library targets parts without the gate. Without it,
+`alif_hal_ospi_initialize()`'s first register touch (`ospi_set_tx_threshold()`
+reading `OSPI_TXFTLR`) bus-faulted: `***** BUS FAULT ***** Precise data bus
+error, BFAR 0x83000018`, reproduced identically on two bench runs of
+`examples/aen/aen-ospi-regcheck`. The driver now writes the clock-enable bit
+first, mirroring the DFP's own documented `enable_ospi_clk()`
+enable-before-touch ordering (`drivers/include/sys_ctrl_ospi.h`). The instance
+map now covers both OSPI0 (bit 0) and OSPI1 (bit 1); an unrecognized base
+returns `-ENOTSUP` instead of silently skipping the write, since skipping it
+previously walked straight into the same fault it was meant to avoid. Whether
+`OSPI_CTRL` bit 0 gates the APB register interface specifically vs only the
+serial/functional clock is **UNVERIFIED** — the DFP does not say, and bench
+A/B on this fix (read `0x83000018` with the bit clear vs set) is still
+pending; see the driver's file header for the full citation chain and the
+open question.
+
+### Fixed — `docs/aen-bench-bringup.md` and `examples/aen/aen-gpio-bench/src/main.c` named the wrong cause for the "dark LED"
+
+Both files had attributed a dark AEN801 LED to `CLKCTL_PER_SLV->GPIO_CTRL[n]`
+bit 16 (`GPIO_CTRL_CKEN`) being clear. That theory is refuted on the same
+bench: with CKEN still clear after a cold reset, `SWPORTA_DDR`/`SWPORTA_DR`
+driven from the debugger moved the pad (`0x49002050 = 0x00000010` with
+`0x4902F088 = 0x00000100`). The real explanation was a 2-second unwatched
+window — the old `blink` example toggled ~10 times and returned with the pad
+left LOW; once changed to loop forever, the maintainer confirmed by eye that
+the LED blinks. GPIO output on the E8 is now recorded PASS in
+`docs/aen-bench-bringup.md` (12/12 `EXT_PORTA`/`SWPORTA_DR` agreement on
+P2_4 with REN enabled, plus the optical confirmation) — the colour is
+separately known wrong (`EVK_PIN_LED_RED` lights GREEN) and still being
+measured, with no colour conclusion asserted. The `EXT_PORTA`-mirrors-`DR`
+finding for an OUTPUT-direction pin (Synopsys DW_apb_gpio databook) is
+unaffected by this correction and still stands as the reason the *original*
+`aen-gpio-bench` PASS criterion could never independently fail.
+
 ### Fixed — the planner refused to emit `west build -b <board>` for a Zephyr board with no tree
 
 `--emit build-plan` used to hand a consumer (`tan`, or a customer's own

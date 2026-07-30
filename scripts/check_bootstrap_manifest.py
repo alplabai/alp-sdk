@@ -172,7 +172,7 @@ CI_WORKFLOWS = [
 # copy). This is the generalisation past just zephyr.version (issue #917).
 KNOWN_KEYS = {
     "_comment", "schemaVersion", "zephyr", "venv", "prerequisites",
-    "west", "pip", "env", "nativeLibHints", "manualInstallHints",
+    "west", "pip", "verdict", "env", "nativeLibHints", "manualInstallHints",
 }
 
 # The `revision:` line under `- name: zephyr` in west.yml. Hoisted to a
