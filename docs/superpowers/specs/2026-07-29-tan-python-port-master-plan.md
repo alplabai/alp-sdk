@@ -105,6 +105,37 @@ Flow D requirements, verbatim and not to be rounded off:
 - bench-verified 2026-06-17; *"Flow D is the day-to-day default now"*
   (`aen-bench-bringup.md:72`, `:244`, `:252`)
 
+### CORRECTION — arming Flow D is a two-repo change, not one function
+
+I previously wrote that arming Flow D was "a one-function change on the alp-sdk
+side". That is wrong, and the reason matters for the design:
+
+- **The device profile IS plan-time metadata.**
+  `metadata/socs/alif/ensemble/e8.json` `variants[1].debug.jlink_flash_device`
+  = `AE822FA0E5597LS0_M55_HE`. Publishing it is what lets the executor choose
+  Flow D; today `_slice_flash_recipe` emits `("zephyr_west_flash", {})` for every
+  Zephyr slice, so **no entry carries the key and every AEN slice silently falls
+  back to Flow A** over the SE-UART.
+- **The MRAM and ATOC addresses are NOT plan-time facts.** `app-gen-toc` writes
+  them into `build/app-package-map.txt` at *signing* time. All three bench
+  scripts parse them out —
+  `ATOC_ADDR=$(awk '/APP Package Start Address:/{print $NF}' build/app-package-map.txt | tail -1)`
+  (`scripts/bench/aen/flash-jlink-mramxip.sh:123`, `flash-jlink-hp.sh:58`,
+  `flash-jlink.sh:61`) — and the runbook states they shift per build. **No MRAM
+  or ATOC address exists anywhere under `metadata/`.**
+
+So the work splits, and the split is the ADR-0017-correct one: the planner
+publishes the device profile; **`tan flash` parses the map file**, reading a build
+artefact rather than learning an address.
+
+The alp-sdk half has a real obstacle: `_slice_flash_recipe(slice_)` receives only
+a `Slice`, and `Slice` has no route to `soc_spec` (that lives on `BoardProject`).
+Both call sites need context threaded — `models.py:131`
+`Slice.to_manifest_entry`, which takes only `self`, and `buildplan.py:444`.
+`buildplan.py` already derives `debug.probe` with project context via
+`_slice_debug`, which is the precedent to follow. Changing emitted `flash_args`
+drifts the emit snapshots, so they must be regenerated in the same change.
+
 **Port decision:** `tan flash` should default to **Flow D** for AEN MRAM, not
 inherit `west flash`'s Flow A default. That is a real UX gain the port can
 deliver — a fast SWD burn with no SE-UART wiring — and it is already the
