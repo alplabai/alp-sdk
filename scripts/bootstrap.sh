@@ -61,12 +61,14 @@ BOOTSTRAP_JSON="${REPO_ROOT}/metadata/bootstrap.json"
 DO_PIP=1
 DO_WEST=1
 PRINT_ENV_ONLY=0
+ALLOW_PARTIAL=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --no-pip)       DO_PIP=0 ;;
         --no-west)      DO_WEST=0 ;;
         --print-env)    PRINT_ENV_ONLY=1 ;;
+        --allow-partial) ALLOW_PARTIAL=1 ;;
         -h|--help)
             # The SINGLE authoritative copy of the usage text (issue #917
             # review item 11): the header comment above deliberately does
@@ -87,6 +89,11 @@ Usage:
     bash scripts/bootstrap.sh --no-pip       # skip pip installs
     bash scripts/bootstrap.sh --no-west      # skip west init/update
     bash scripts/bootstrap.sh --print-env    # only print env-var lines
+    bash scripts/bootstrap.sh --allow-partial
+        # report success even if zephyr-requirements / sdk-extras /
+        # editable-install failed to install (issue #1038); the failures
+        # are still printed and the workspace is left on disk either way --
+        # this only changes the closing verdict
 
 After it runs:
 
@@ -109,6 +116,28 @@ info() { printf "\033[1;34m[bootstrap]\033[0m %s\n" "$*"; }
 ok()   { printf "\033[1;32m[bootstrap]\033[0m %s\n" "$*"; }
 warn() { printf "\033[1;33m[bootstrap]\033[0m %s\n" "$*" >&2; }
 die()  { printf "\033[1;31m[bootstrap]\033[0m %s\n" "$*" >&2; exit 1; }
+
+# Phase IDs (from metadata/bootstrap.json's verdict.blockingPhases, loaded
+# further down) whose pip install actually failed THIS run -- a subset of
+# VERDICT_BLOCKING_PHASES, filled in by record_phase_warning below as each
+# pip step in "-------- pip dependencies --------" below completes. Read by
+# the closing verdict logic in "-------- Done --------".
+BLOCKING_PHASES=()
+record_phase_warning() {
+    # $1 = the phase id this warn() call just reported. Appends to
+    # BLOCKING_PHASES only when VERDICT_BLOCKING_PHASES (metadata/
+    # bootstrap.json, not hardcoded here) names it -- issue #1038:
+    # pip-upgrade warns too (see the venv section below) but is deliberately
+    # NOT in that list, so it never reaches this function.
+    local phase="$1" p
+    for p in "${VERDICT_BLOCKING_PHASES[@]}"; do
+        if [ "${p}" = "${phase}" ]; then
+            BLOCKING_PHASES+=("${phase}")
+            return 0
+        fi
+    done
+    return 0
+}
 
 # -------- Prerequisite check --------------------------------------------------
 
@@ -269,6 +298,19 @@ emit("WEST_EXT_GUARD", d["west"]["extensionGuardCommand"])
 emit("PIP_BOOTSTRAP_UPGRADE", d["pip"]["bootstrapUpgrade"])
 emit("PIP_SDK_EXTRAS", d["pip"]["sdkExtras"])
 emit("PIP_EDITABLE_INSTALL", d["pip"]["editableInstall"])
+# verdict: the single source for which pip phases make the closing verdict
+# non-success, and the wording for it (issue #1038 / tan-cli#220) -- see
+# the verdict.* descriptions in metadata/schemas/bootstrap-v1.schema.json.
+# NOTE: no apostrophes in this heredoc. bash 3.2 (macOS) tracks single-quote
+# state across a heredoc body while scanning for the closing ) of the
+# enclosing $( ), even with a quoted <<'PY' tag, so an ODD apostrophe count
+# in here opens a quote state that runs until the parser hits something
+# illegal in it -- surfacing as a syntax error at an unrelated line far
+# below. See #1050.
+emit("VERDICT_BLOCKING_PHASES", d["verdict"]["blockingPhases"])
+emit("VERDICT_PARTIAL_NOTE_TEMPLATE", d["verdict"]["partialNoteTemplate"])
+emit("VERDICT_INCOMPLETE_MESSAGE_TEMPLATE", d["verdict"]["incompleteMessageTemplate"])
+emit("VERDICT_INCOMPLETE_REMEDY", d["verdict"]["incompleteRemedy"])
 # env: keys and RAW (untokenized) values as two parallel arrays (bash has
 # no portable ordered-map array type across the bash 3.2 macOS ships and
 # bash 4+). Token substitution happens in bash, not here: git-bash silently
@@ -582,13 +624,13 @@ if [ "${DO_PIP}" -eq 1 ]; then
         info "Installing Zephyr Python requirements into the venv"
         "${VPY}" -m pip install -q \
             -r "${WORKSPACE_DIR}/${ZEPHYR_REQUIREMENTS_PATH}" \
-            || warn "Zephyr requirements install reported a problem -- check manually"
+            || { warn "Zephyr requirements install reported a problem -- check manually"; record_phase_warning "zephyr-requirements"; }
     fi
     # SDK-side extras: alp_project.py needs jsonschema; the MCUboot
     # dev-key script needs imgtool.
     info "Installing alp-sdk Python extras into the venv (${PIP_SDK_EXTRAS[*]})"
     "${VPY}" -m pip install -q "${PIP_SDK_EXTRAS[@]}" \
-        || warn "alp-sdk extras install reported a problem -- check manually"
+        || { warn "alp-sdk extras install reported a problem -- check manually"; record_phase_warning "sdk-extras"; }
     # tan's Python backend (alp_cli: init / run / emit / validate / model /
     # doctor / monitor, invoked as `python -m alp_cli <sub>` by `tan`) --
     # editable install, so a `git pull` in the checkout updates the backend
@@ -602,7 +644,7 @@ if [ "${DO_PIP}" -eq 1 ]; then
     # alp-sdk, so anyone who followed it from here got "no such directory".
     info "Installing the tan CLI's Python backend into the venv (pip install -e ${PIP_EDITABLE_INSTALL})"
     "${VPY}" -m pip install -q -e "${PIP_EDITABLE_INSTALL}" \
-        || warn "alp_cli editable install reported a problem -- check manually"
+        || { warn "alp_cli editable install reported a problem -- check manually"; record_phase_warning "editable-install"; }
 else
     info "Skipping pip installs (--no-pip)"
 fi
@@ -672,7 +714,40 @@ esac
 # -------- Done ----------------------------------------------------------------
 
 echo
-ok "Bootstrap complete."
+# The closing verdict (issue #1038 / tan-cli#220): every pip phase above
+# stays non-fatal in itself -- the workspace is left on disk regardless of
+# which packages failed -- but a run that hit one of
+# metadata/bootstrap.json's verdict.blockingPhases has NOT produced an
+# environment that can do what it was bootstrapped for, and must not report
+# unqualified success. BLOCKING_PHASES is populated by record_phase_warning
+# above; VERDICT_* comes from the manifest, not hardcoded here, so this
+# wording has exactly one declaration shared with scripts/bootstrap.ps1
+# (and, independently, tan-cli's WORKSPACE_BLOCKING).
+#
+# EXIT_CODE is set here but NOT acted on until the very end of this script
+# (matching tan-cli's `verdict()`/`finish()` split): the Next steps block
+# below -- including `tan doctor --build`, the tool that diagnoses exactly
+# this kind of failure -- must still print on the incomplete path. Exiting
+# here would take that away on the one run that needs it most.
+EXIT_CODE=0
+if [ "${#BLOCKING_PHASES[@]}" -eq 0 ]; then
+    ok "Bootstrap complete."
+elif [ "${ALLOW_PARTIAL}" -eq 1 ]; then
+    _phases_joined=""
+    for _p in "${BLOCKING_PHASES[@]}"; do
+        if [ -z "${_phases_joined}" ]; then _phases_joined="${_p}"; else _phases_joined="${_phases_joined}, ${_p}"; fi
+    done
+    ok "Bootstrap complete."
+    warn "  ${VERDICT_PARTIAL_NOTE_TEMPLATE//\{\{PHASES\}\}/${_phases_joined}}"
+else
+    _phases_joined=""
+    for _p in "${BLOCKING_PHASES[@]}"; do
+        if [ -z "${_phases_joined}" ]; then _phases_joined="${_p}"; else _phases_joined="${_phases_joined}, ${_p}"; fi
+    done
+    warn "${VERDICT_INCOMPLETE_MESSAGE_TEMPLATE//\{\{PHASES\}\}/${_phases_joined}}"
+    warn "  ${VERDICT_INCOMPLETE_REMEDY}"
+    EXIT_CODE=1
+fi
 # Split into two heredocs on purpose.  Only this first block has variables
 # left to expand, so only it gets an UNQUOTED tag.
 cat <<EOF
@@ -736,3 +811,9 @@ References:
   - docs/testing.md          -- full test-coverage map + how to run from scratch
   - docs/test-plan.md        -- per-feature verification ledger (⏳ / 🟡 / ✅)
 EOF
+
+# EXIT_CODE was decided by the closing verdict above (1 only on the
+# INCOMPLETE path, i.e. --allow-partial was not passed) -- deferred until
+# here so the Next steps block always prints first, on every path (issue
+# #1038 / tan-cli#220).
+exit "${EXIT_CODE}"
