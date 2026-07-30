@@ -195,6 +195,7 @@ from __future__ import annotations
 import argparse
 import re
 import shutil
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -443,6 +444,33 @@ def collect_documented_surface(
     return subcommands, verb_flags, skipped_front_door_rows
 
 
+
+#: A flag string can be INVISIBLE in coloured `--help` output. `rich` styles a
+#: flag's leading dash as its own span, so `--output` is emitted as
+#: `ESC[1;36m-ESC[0mESC[1;36m-output` and a literal substring search finds
+#: nothing -- the check then reports a flag that is present as missing. Capturing
+#: to a pipe usually makes rich drop colour on its own, but `FORCE_COLOR` in the
+#: environment defeats that, and CI sets it more often than anyone expects. So:
+#: ask for no colour, AND strip escapes anyway. Belt and braces, because the
+#: failure is a FALSE ALARM on a merge-blocking gate, which is the kind that gets
+#: "fixed" by deleting the assertion.
+_ANSI_RE = re.compile(r"\[[0-9;]*[A-Za-z]")
+
+
+def _plain(text: str) -> str:
+    """`text` with any ANSI SGR escapes removed."""
+    return _ANSI_RE.sub("", text)
+
+
+def _no_colour_env() -> dict:
+    """The current environment, with every colour-forcing knob neutralised."""
+    env = dict(os.environ)
+    env["NO_COLOR"] = "1"
+    env["TERM"] = "dumb"
+    env.pop("FORCE_COLOR", None)
+    return env
+
+
 def _forwards_to_python_backend(help_text: str) -> bool:
     """True when `tan <verb> --help`'s own `Usage:` line ends in a bare
     `[ARGS]...` positional catch-all -- tan's marker for a verb that
@@ -487,6 +515,7 @@ def check_surface(
     for verb in sorted(subcommands):
         proc = subprocess.run(
             [tan_bin, verb, "--help"], capture_output=True, text=True, timeout=20,
+            env=_no_colour_env(),
         )
         if proc.returncode != 0:
             first_err = next(
@@ -497,13 +526,14 @@ def check_surface(
                 f"(exit {proc.returncode}): {first_err}"
             )
             continue
-        if _forwards_to_python_backend(proc.stdout):
+        help_text = _plain(proc.stdout)
+        if _forwards_to_python_backend(help_text):
             if verb in verb_flags:
                 skipped_forwarding.append(verb)
             continue
         for flag in sorted(verb_flags.get(verb, ())):
             pattern = re.compile(rf"(?<![\w-]){re.escape(flag)}(?![\w-])")
-            if not pattern.search(proc.stdout):
+            if not pattern.search(help_text):
                 problems.append(
                     f"`tan {verb} {flag}` -- docs/cli.md documents this flag but it "
                     f"is not listed in `tan {verb} --help`"
