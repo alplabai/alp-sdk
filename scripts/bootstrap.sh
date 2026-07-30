@@ -150,7 +150,7 @@ elif [ "$(uname -s 2>/dev/null)" = "Darwin" ]; then
     # `prerequisites.install.macos.{xz,wget}` (metadata/bootstrap.json) and
     # PREREQ_HINT_MACOS below stay as-is so the hint still exists for the
     # rare case a user needs either; only the hard block is dropped.
-    REQUIRED_BINS=(git cmake python3 ninja xz)
+    REQUIRED_BINS=(git cmake python3 ninja)
 fi
 
 # Per-tool install hints for the missing-tools message below (issue #978) --
