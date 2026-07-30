@@ -7,6 +7,26 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.15.0 candidate
 
+### Fixed — `check_cross_platform.py`'s `--fail-on-warning` flip was waiting on two Yocto-script findings, and the Intel-Mac host claim was still overbroad in three docs
+
+`scripts/check_cross_platform.py`'s CI step is flipped to
+`--fail-on-warning`, now possible because `tests/yocto/build_rpc_uio_bench_aarch64.sh`
+and `tests/yocto/run_sanitized_rpc_tests.sh` — both Linux-only Yocto-target
+bench helpers with no Mac/Windows equivalent to document — are whitelisted
+with header notes explaining why, closing the last two BASH-ONLY-SHEBANG
+findings that kept the lint at "0 expected, 2 found".
+
+`scripts/bootstrap.sh` now warns (does not refuse) on an Intel Mac's
+`uname -m`: bootstrap itself and `native_sim` both work there, and only
+`west sdk install` for real silicon is blocked, so refusing outright would
+be wrong. [ADR 0012](docs/adr/0012-cross-platform-developer-host.md) gained
+a 2026-07-29 Amendment recording this narrowing as the decision record.
+`docs/cross-platform-setup.md`'s §3 heading/body and opening summary carried
+the same overbroad claim that [#1028] only half-corrected; `README.md` and
+`docs/getting-started.md` are brought into the same corrected scoping.
+
+[#1028]: https://github.com/alplabai/alp-sdk/pull/1028
+
 ### Added — a machine-readable install command for the 7-Zip prerequisite of `west sdk install` on native Windows (#1036)
 
 7-Zip was documented only as prose, at `manualInstallHints.windows.note[1]`:
@@ -46,26 +66,6 @@ live superset cases (`install.macos.xz`/`.wget`, `install.windows.7zip`) so
 neither reads as drift to a future editor.
 
 ## [v0.14.0] - 2026-07-29
-
-### Fixed — `check_cross_platform.py`'s `--fail-on-warning` flip was waiting on two Yocto-script findings, and the Intel-Mac host claim was still overbroad in three docs
-
-`scripts/check_cross_platform.py`'s CI step is flipped to
-`--fail-on-warning`, now possible because `tests/yocto/build_rpc_uio_bench_aarch64.sh`
-and `tests/yocto/run_sanitized_rpc_tests.sh` — both Linux-only Yocto-target
-bench helpers with no Mac/Windows equivalent to document — are whitelisted
-with header notes explaining why, closing the last two BASH-ONLY-SHEBANG
-findings that kept the lint at "0 expected, 2 found".
-
-`scripts/bootstrap.sh` now warns (does not refuse) on an Intel Mac's
-`uname -m`: bootstrap itself and `native_sim` both work there, and only
-`west sdk install` for real silicon is blocked, so refusing outright would
-be wrong. [ADR 0012](docs/adr/0012-cross-platform-developer-host.md) gained
-a 2026-07-29 Amendment recording this narrowing as the decision record.
-`docs/cross-platform-setup.md`'s §3 heading/body and opening summary carried
-the same overbroad claim that [#1028] only half-corrected; `README.md` and
-`docs/getting-started.md` are brought into the same corrected scoping.
-
-[#1028]: https://github.com/alplabai/alp-sdk/pull/1028
 
 ### Fixed — four V2N/V2M SoM manifests promised a `gd32_bridge` firmware path that exists in no clone (#852)
 
