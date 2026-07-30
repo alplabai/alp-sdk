@@ -17,25 +17,21 @@
 # ======================================================================
 #
 # `alp_sdk_zephyr_conf()` and `alp_sdk_ipc_contract_header()` MUST both
-# be called BEFORE `find_package(Zephyr ...)`, for two independent
-# reasons.  Both are quoted verbatim from the examples this module
-# replaces, because they are the only two non-obvious facts those files
-# carried and there is nowhere else left to record them:
+# be called BEFORE `find_package(Zephyr ...)`.  The reason is quoted
+# verbatim from the examples this module replaces, because it is a
+# non-obvious fact those files carried and there is nowhere else left to
+# record it:
 #
-#   1. "find_package(Python3 ...) MUST run before find_package(Zephyr
-#      ...) because Zephyr's CMake machinery pins a Python interpreter
-#      the moment it imports."
-#
-#   2. "`rsource` is NOT valid in .conf files (it is a Kconfig-source
-#      directive only), which is why prj.conf can't pull the generated
-#      fragment in itself."  So `EXTRA_CONF_FILE` is the only wiring
-#      available, and Zephyr reads it during `find_package(Zephyr)` --
-#      appending to it afterwards is a silent no-op, not an error.
+#   "`rsource` is NOT valid in .conf files (it is a Kconfig-source
+#   directive only), which is why prj.conf can't pull the generated
+#   fragment in itself."  So `EXTRA_CONF_FILE` is the only wiring
+#   available, and Zephyr reads it during `find_package(Zephyr)` --
+#   appending to it afterwards is a silent no-op, not an error.
 #
 # A caller that reorders these configures a build with NO
 # board.yaml-derived `CONFIG_*` at all and no diagnostic anywhere.
 #
-# A third fact, from the same examples, is why the fragment lands in
+# A second fact, from the same examples, is why the fragment lands in
 # `generated/` and never at the build-dir root: "Zephyr's kconfig.cmake
 # greps `${APPLICATION_BINARY_DIR}/*.conf` at the END of the
 # merge-config-files list (cmake/modules/kconfig.cmake line 303 in
@@ -63,38 +59,69 @@
 include_guard(GLOBAL)
 
 # ----------------------------------------------------------------------
-# Emitter resolution (once per build tree, cached).
+# Emitter resolution.
 #
-# `tan` is the SDK's own front door and is preferred over shelling
-# `scripts/alp_project.py` -- but only when the `tan` on PATH can write
-# to an explicit path.  `tan generate` hardcodes its output to
+# `tan` is this module's ONLY emitter -- required, not preferred.  There
+# is no second code path behind it, so a missing or too-old `tan` is a
+# hard configure failure with an install command in it, not a silent
+# switch to an in-tree Python script that CI then has to prove twice.
+#
+# `--output` is the one capability probed for, and it doubles as the
+# version floor.  `tan generate` otherwise hardcodes its output to
 # `<project>/build/generated/<name>` and CMAKE_BINARY_DIR is NOT the
 # project directory (an in-tree `west build examples/<...>` puts it under
 # the repo root), so a `tan` without `--output` would emit the fragment
-# somewhere this build never reads.  Probe for that one flag rather than
-# assume it: an older `tan` keeps working, a newer one is picked up with
-# no further change here.
+# somewhere this build never reads.
 #
-# Both modes are served by `tan generate --target` as of tan v0.5.0; the
-# fallback below stays for a customer whose `tan` predates it.
+# One probe is enough, and a `--target` probe would be dead code: every
+# released `tan` up to and including v0.4.1 already accepts `generate
+# --target/--core/--board-yaml/--sdk-root` and NONE of them accepts
+# `--output` (verified by running `tan generate --help` on the v0.4.1
+# musl binary), so `--output` alone rejects exactly the too-old builds --
+# including the one docs/cli.md's `install.sh` one-liner still installs.
+# Probing the capability rather than parsing `tan --version` is also what
+# lets a newer `tan` work here with no edit to this file.
 # ----------------------------------------------------------------------
-if(NOT DEFINED ALP_SDK_TAN_EMITTER)
-    set(ALP_SDK_TAN_EMITTER "" CACHE INTERNAL
-        "Absolute path to a `tan` that can serve alp_sdk_zephyr_conf(), or \
-empty when the alp_project.py fallback is in use.")
-    find_program(ALP_SDK_TAN_PROGRAM NAMES tan)
-    if(ALP_SDK_TAN_PROGRAM)
-        execute_process(
-            COMMAND ${ALP_SDK_TAN_PROGRAM} generate --help
-            RESULT_VARIABLE _alp_sdk_tan_rv
-            OUTPUT_VARIABLE _alp_sdk_tan_stdout
-            ERROR_VARIABLE  _alp_sdk_tan_stderr
-        )
-        if(_alp_sdk_tan_rv EQUAL 0
-           AND "${_alp_sdk_tan_stdout}${_alp_sdk_tan_stderr}" MATCHES "--output")
-            set(ALP_SDK_TAN_EMITTER "${ALP_SDK_TAN_PROGRAM}" CACHE INTERNAL "" FORCE)
-        endif()
+find_program(ALP_SDK_TAN_PROGRAM NAMES tan)
+set(_alp_sdk_tan_help "")
+if(ALP_SDK_TAN_PROGRAM)
+    execute_process(
+        COMMAND ${ALP_SDK_TAN_PROGRAM} generate --help
+        RESULT_VARIABLE _alp_sdk_tan_rv
+        OUTPUT_VARIABLE _alp_sdk_tan_stdout
+        ERROR_VARIABLE  _alp_sdk_tan_stderr
+    )
+    if(_alp_sdk_tan_rv EQUAL 0)
+        set(_alp_sdk_tan_help "${_alp_sdk_tan_stdout}${_alp_sdk_tan_stderr}")
     endif()
+endif()
+if(NOT "${_alp_sdk_tan_help}" MATCHES "--output")
+    if(ALP_SDK_TAN_PROGRAM)
+        set(_alp_sdk_tan_why
+            "the `tan` at ${ALP_SDK_TAN_PROGRAM} is too old -- its `generate` \
+has no `--output`")
+    else()
+        set(_alp_sdk_tan_why "no `tan` was found on PATH")
+    endif()
+    # find_program() writes its NOTFOUND into CMakeCache.txt even though
+    # the configure aborts immediately below, so without this a customer
+    # who then installs `tan` and re-runs the build in the SAME build tree
+    # would keep getting this error from the cache.  Drop the negative
+    # result along with the message.
+    unset(ALP_SDK_TAN_PROGRAM CACHE)
+    message(FATAL_ERROR
+        "alp-sdk: ${_alp_sdk_tan_why}.\n"
+        "  `tan` renders this project's board.yaml into the generated Kconfig\n"
+        "  fragment (and IPC header) this build reads; alp-sdk ships no other\n"
+        "  emitter, so CMake cannot continue without it.\n"
+        "  Needed: a `tan` whose `generate` accepts `--output` -- tan 0.5.0-dev\n"
+        "  or newer.  Released v0.4.1 and earlier do NOT, so the `install.sh`\n"
+        "  one-liner in docs/cli.md is not sufficient yet.\n"
+        "  Install the exact build this SDK's CI is pinned to (needs Python\n"
+        "  3.12 or newer):\n"
+        "    pip install \"git+https://github.com/alplabai/tan-cli@4ec44171491a8ee0a2b1dcf45b45b7757fdead0b#subdirectory=python\"\n"
+        "  That commit pin, and the procedure for bumping it, is documented in\n"
+        "  .github/actions/install-tan/action.yml -- keep the two in step.")
 endif()
 
 # _alp_sdk_emit(<mode> <core> <board_yaml> <output>)
@@ -110,35 +137,18 @@ function(_alp_sdk_emit mode core board_yaml output)
             "CMake configures.")
     endif()
 
-    if(ALP_SDK_TAN_EMITTER)
-        set(_alp_sdk_cmd
-            ${ALP_SDK_TAN_EMITTER} generate
-            --target ${mode}
-            --board-yaml ${board_yaml}
-            --sdk-root ${ALP_SDK_ROOT}
-            --output ${output}
-            --non-interactive --quiet)
-        if(core)
-            list(APPEND _alp_sdk_cmd --core ${core})
-        endif()
-        set(_alp_sdk_via "tan (${ALP_SDK_TAN_EMITTER})")
-    else()
-        # The fallback, logged rather than silent: a customer mid-upgrade
-        # with no `tan` on PATH (or one predating `--output`) must still
-        # be able to configure this project.
-        find_package(Python3 REQUIRED COMPONENTS Interpreter)
-        set(_alp_sdk_cmd
-            ${Python3_EXECUTABLE} ${ALP_SDK_ROOT}/scripts/alp_project.py
-            --input ${board_yaml}
-            --emit ${mode}
-            --output ${output})
-        if(core)
-            list(APPEND _alp_sdk_cmd --core ${core})
-        endif()
-        set(_alp_sdk_via "scripts/alp_project.py (no `tan` with --output on PATH)")
+    set(_alp_sdk_cmd
+        ${ALP_SDK_TAN_PROGRAM} generate
+        --target ${mode}
+        --board-yaml ${board_yaml}
+        --sdk-root ${ALP_SDK_ROOT}
+        --output ${output}
+        --non-interactive --quiet)
+    if(core)
+        list(APPEND _alp_sdk_cmd --core ${core})
     endif()
 
-    message(STATUS "alp-sdk: --emit ${mode} via ${_alp_sdk_via}")
+    message(STATUS "alp-sdk: --emit ${mode} via tan (${ALP_SDK_TAN_PROGRAM})")
     execute_process(
         COMMAND ${_alp_sdk_cmd}
         RESULT_VARIABLE _alp_sdk_rv
