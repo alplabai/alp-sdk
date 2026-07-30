@@ -16,9 +16,10 @@
 #
 # Operating mode:
 #
-#   - EVERY leg blocks the PR, Linux + macOS + Windows alike.
-#     A macOS-only or Windows-only failure is a REAL defect on a
-#     host ADR 0012 calls first-class, and it fails the PR.
+#   - EVERY leg fails the JOB, Linux + macOS + Windows alike, on
+#     its own defect -- see the NOTE below for whether that also
+#     fails the PR (it does not, yet).  A macOS-only or Windows-only
+#     failure is a REAL defect on a host ADR 0012 calls first-class.
 #
 #     This was scaffolding until 2026-07-29 (alp-sdk#1023): the Mac
 #     and Win legs carried `continue-on-error: true`, so a job-level
@@ -32,13 +33,23 @@
 #     30441032872) whose per-STEP conclusions -- not the job
 #     conclusions the override forged -- were 24/24 clean.
 #
-#   - check_cross_platform.py: STILL runs in default (soft-warn)
-#                               mode on every runner, deliberately.
-#                               Its --fail-on-warning flip waits on
-#                               the docs/* cleanup of the existing
-#                               Linux-only idioms (separate task) --
-#                               so this lint reports and does not
-#                               gate, even now that the legs do.
+#     NOTE: this workflow's jobs (python-smoke, loader-smoke) are not
+#     in dev's or main's required-status-check list (verified via
+#     `gh api repos/alplabai/alp-sdk/rulesets` -> `[]` and
+#     `.../branches/{dev,main}/protection/required_status_checks`,
+#     neither of which lists these six contexts), so a red run here
+#     is visible but does not block merge yet -- removing
+#     continue-on-error buys a real signal, not enforcement. Adding
+#     these six contexts (three OSes x two jobs) to branch protection
+#     is a separate follow-up requiring the maintainer's decision.
+#
+#   - check_cross_platform.py: runs with --fail-on-warning on every
+#                               runner. The existing-doc cleanup this
+#                               was waiting on is done (2 bash-shebang
+#                               findings in tests/yocto/*.sh, fixed by
+#                               whitelisting them with header notes --
+#                               see INTENTIONALLY_BASH_HELPERS in the
+#                               script); 0 findings as of this change.
 #
 # Twister + bitbake are NOT exercised here:
 #   - Twister is the load-bearing Zephyr coverage gate -- it lives
@@ -139,11 +150,12 @@ jobs:
 
       # ---------------------------------------------------------
       # 2. Cross-platform lint (this slice, ADR 0012).
-      #    Soft-warn today; flip to --fail-on-warning once the
-      #    existing-doc cleanup task lands.
+      #    --fail-on-warning: the existing-doc cleanup this was
+      #    waiting on is done (0 findings); a new Linux-only idiom
+      #    now fails the job instead of passing silently.
       # ---------------------------------------------------------
-      - name: check_cross_platform lint (soft-warn)
-        run: python scripts/check_cross_platform.py
+      - name: check_cross_platform lint
+        run: python scripts/check_cross_platform.py --fail-on-warning
 
       - name: check public/private classifier
         run: python scripts/check_public_private.py

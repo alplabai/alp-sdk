@@ -7,6 +7,38 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.15.0 candidate
 
+### Added — macOS onramp execution coverage: a `macos-latest` leg that actually runs the Darwin `xz`/`wget` exemption, not just checks it on paper (#1033)
+
+The macOS narrowing of `scripts/bootstrap.sh`'s prerequisite check (dropping
+`xz`/`wget` from `REQUIRED_BINS` on Darwin, since macOS `tar` is bsdtar and
+decompresses `.xz` in-process, and the pinned Zephyr SDK's `setup.sh` only
+hard-checks for `wget` on `linux-*` hosts) already has a static gate —
+`scripts/check_bootstrap_manifest.py`'s `_check_prerequisites_macos` polices
+`bootstrap.sh`'s Darwin `REQUIRED_BINS` against `metadata/bootstrap.json`'s
+`prerequisites.macos` on every `python-smoke` OS leg, and catches a one-sided
+edit to either file alone. What it cannot catch is (a) whether the documented
+macOS quickstart step actually *executes* successfully — #1033's own framing
+is "enforcement of a list, not proof the journey works" — or (b) a
+*coordinated* regression where both `bootstrap.sh`'s Darwin list and the
+manifest's `prerequisites.macos` are widened together (e.g. both regain
+`xz`), which passes the static check by construction since the two sides
+still agree with each other.
+
+`onramp-clean-container.yml` gains `prereqs-and-bootstrap-macos`, a
+`macos-latest` job (billed at 10x a Linux runner's minutes; not added to
+branch protection, so a red run is visible but does not block merge) that
+installs only `git`/`cmake`/`python3`/`ninja` (from `metadata/bootstrap.json`'s
+`prerequisites.macos`, not a hardcoded brew line), then relocates every copy
+of any pre-existing `xz`/`wget` binaries off PATH (looped, not a single
+`command -v`, plus a hard post-condition that fails the job if either is
+still resolvable afterwards) before running `bootstrap.sh --no-west` — a bare
+run on a stock `macos-latest` runner (which carries a large Homebrew tree)
+would pass whether or not the narrowing still exists, since `xz`/`wget` are
+typically already resolvable there. The job asserts `bootstrap.sh` reports
+the macOS prerequisite set satisfied (`Bootstrap complete.`) and never names
+`xz` or `wget` as missing, checking that message before the generic exit
+code so the failure is diagnostic.
+
 ### Fixed — `alp.lock`'s `digests.metadata` only hashed `metadata/**/*.yaml`, missing 23 JSON files including every SoC spec (#1045)
 
 `_digests()` globbed just `**/*.yaml` under `metadata/`, so `metadata/socs/**/*.json`
@@ -21,6 +53,26 @@ placeholders can't change a build), enforced by a completeness test that lists
 `pr-metadata-validate.yml`, so a locally-green branch could still redden CI on
 lock drift) and widens that workflow's `paths:` filters to include
 `scripts/alp_lock/**` / `scripts/west_commands/alp_lock.py` themselves.
+
+### Fixed — `check_cross_platform.py`'s `--fail-on-warning` flip was waiting on two Yocto-script findings, and the Intel-Mac host claim was still overbroad in three docs (#1032 A5/A6)
+
+`scripts/check_cross_platform.py`'s CI step is flipped to
+`--fail-on-warning`, now possible because `tests/yocto/build_rpc_uio_bench_aarch64.sh`
+and `tests/yocto/run_sanitized_rpc_tests.sh` — both Linux-only Yocto-target
+bench helpers with no Mac/Windows equivalent to document — are whitelisted
+with header notes explaining why, closing the last two BASH-ONLY-SHEBANG
+findings that kept the lint at "0 expected, 2 found".
+
+`scripts/bootstrap.sh` now warns (does not refuse) on an Intel Mac's
+`uname -m`: bootstrap itself and `native_sim` both work there, and only
+`west sdk install` for real silicon is blocked, so refusing outright would
+be wrong. [ADR 0012](docs/adr/0012-cross-platform-developer-host.md) gained
+a 2026-07-29 Amendment recording this narrowing as the decision record.
+`docs/cross-platform-setup.md`'s §3 heading/body and opening summary carried
+the same overbroad claim that [#1028] only half-corrected; `README.md` and
+`docs/getting-started.md` are brought into the same corrected scoping.
+
+[#1028]: https://github.com/alplabai/alp-sdk/pull/1028
 
 ### Added — a machine-readable install command for the 7-Zip prerequisite of `west sdk install` on native Windows (#1036)
 
