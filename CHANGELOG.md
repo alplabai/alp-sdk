@@ -7,6 +7,21 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.15.0 candidate
 
+### Fixed — `alp.lock`'s `digests.metadata` only hashed `metadata/**/*.yaml`, missing 23 JSON files including every SoC spec (#1045)
+
+`_digests()` globbed just `**/*.yaml` under `metadata/`, so `metadata/socs/**/*.json`
+(memory maps, variant resolution, core topology), `metadata/bootstrap.json`,
+`metadata/catalog.json`, and 20 more JSON/TSV/CSV/header/proto/Renode/lock/example
+files could change with `alp_lock.py --check` staying green. `_METADATA_DIGEST_GLOBS`
+now widens coverage to `**/*.{yaml,json,tsv,csv,h,proto,resc,repl,lock,example}`;
+only `.md` and `.gitkeep` remain deliberately uncovered (documentation and
+placeholders can't change a build), enforced by a completeness test that lists
+`git ls-files metadata` against the glob set. Also adds the `alp-lock` stage to
+`scripts/test-all.sh` (previously the ONLY place `alp_lock.py --check` ran was
+`pr-metadata-validate.yml`, so a locally-green branch could still redden CI on
+lock drift) and widens that workflow's `paths:` filters to include
+`scripts/alp_lock/**` / `scripts/west_commands/alp_lock.py` themselves.
+
 ### Added — a machine-readable install command for the 7-Zip prerequisite of `west sdk install` on native Windows (#1036)
 
 7-Zip was documented only as prose, at `manualInstallHints.windows.note[1]`:

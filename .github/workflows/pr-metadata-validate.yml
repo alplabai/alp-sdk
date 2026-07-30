@@ -48,6 +48,8 @@ on:
       - 'metadata/libraries/**'
       - 'scripts/requirements.txt'
       - 'scripts/alp_cli/__init__.py'
+      - 'scripts/alp_lock/**'
+      - 'scripts/west_commands/alp_lock.py'
       - 'alp.lock'
   push:
     branches: [main, dev]
@@ -82,6 +84,8 @@ on:
       - 'metadata/libraries/**'
       - 'scripts/requirements.txt'
       - 'scripts/alp_cli/__init__.py'
+      - 'scripts/alp_lock/**'
+      - 'scripts/west_commands/alp_lock.py'
       - 'alp.lock'
   workflow_dispatch:
 
