@@ -54,8 +54,6 @@ configure-time step and layers the result over `prj.conf` with
 flows from `board.yaml`:
 
 ```cmake
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
-
 # Point ALP_SDK_ROOT at your alp-sdk checkout (env override, else a
 # tree-relative fallback -- mirrors the examples/*/CMakeLists.txt pattern).
 if(DEFINED ENV{ALP_SDK_ROOT})
@@ -63,28 +61,36 @@ if(DEFINED ENV{ALP_SDK_ROOT})
 else()
     get_filename_component(ALP_SDK_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../.. ABSOLUTE)
 endif()
+include(${ALP_SDK_ROOT}/cmake/alp.cmake)
 
-set(_alp_generated ${CMAKE_BINARY_DIR}/generated/alp.conf)
-execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${ALP_SDK_ROOT}/scripts/alp_project.py
-            --input ${CMAKE_CURRENT_SOURCE_DIR}/board.yaml
-            --emit zephyr-conf
-            --output ${_alp_generated}
-    RESULT_VARIABLE _alp_rv
-)
-if(NOT _alp_rv EQUAL 0)
-    message(FATAL_ERROR "alp_project.py failed (rv=${_alp_rv})")
-endif()
-list(APPEND EXTRA_CONF_FILE ${_alp_generated})
+alp_sdk_zephyr_conf(m55_hp)
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(my_app LANGUAGES C)
 target_sources(app PRIVATE src/main.c)
 ```
 
+`alp_sdk_zephyr_conf(<core_id>)` comes from
+[`cmake/alp.cmake`](../cmake/alp.cmake), the one shared module every
+example uses.  It emits `${CMAKE_BINARY_DIR}/generated/alp.conf` for that
+core and appends it to `EXTRA_CONF_FILE`; a multicore project's per-core
+subdirectory adds `BOARD_YAML ${CMAKE_CURRENT_SOURCE_DIR}/../board.yaml`,
+and a project with an `ipc:` block also calls
+`alp_sdk_ipc_contract_header()` to render `<alp/system_ipc.h>`.
+
 Zephyr's `EXTRA_CONF_FILE` machinery merges the generated `alp.conf`
 on top of `prj.conf` at Kconfig time -- the app picks up every
 `CONFIG_*` line the loader emitted.
+
+**Both calls must precede `find_package(Zephyr ...)`.**  Zephyr pins a
+Python interpreter the moment it imports, and it reads `EXTRA_CONF_FILE`
+during that call -- appending afterwards is a silent no-op, not an error.
+`prj.conf` cannot pull the fragment in itself either: `rsource` is a
+Kconfig-source directive and is not valid in a `.conf` file.  The
+fragment also has to sit in `generated/`, not at the build-dir root:
+Zephyr's `kconfig.cmake` globs `${APPLICATION_BINARY_DIR}/*.conf` at the
+END of its merge list, so a `.conf` dropped in the build root wins over
+every `EXTRA_CONF_FILE` overlay.  `cmake/alp.cmake` handles all three.
 
 The loader is a pure string templater: it never runs kconfiglib/west, so it
 can only reason about a symbol's dependency chain from its own metadata +

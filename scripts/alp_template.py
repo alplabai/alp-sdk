@@ -953,13 +953,18 @@ def _substitute_board_yaml_pin_docs(text: str, renames: dict[str, str | None]) -
 
 
 def _substitute_cmake_core(text: str, old: str, new: str) -> str:
-    """Rewrite CMakeLists.txt's `alp_project.py --emit zephyr-conf
-    --core <old>` invocation to the re-derived core id."""
-    pattern = re.compile(rf"(--core\s+){re.escape(old)}\b")
+    """Rewrite CMakeLists.txt's `alp_sdk_zephyr_conf(<old> ...)` core
+    argument to the re-derived core id. Still accepts the pre-helper
+    `alp_project.py --emit zephyr-conf --core <old>` spelling, so an
+    example not yet migrated to `cmake/alp.cmake` re-derives rather than
+    scaffolding the wrong core."""
+    pattern = re.compile(
+        rf"(alp_sdk_zephyr_conf\(\s*|--core\s+){re.escape(old)}\b")
     new_text, n = pattern.subn(lambda m: f"{m.group(1)}{new}", text)
     if n != 1:
         raise TemplateError(
-            f"CMakeLists.txt must have exactly one `--core {old}` to "
+            f"CMakeLists.txt must name core {old!r} exactly once (as "
+            f"`alp_sdk_zephyr_conf({old} ...)` or `--core {old}`) to "
             f"re-derive to {new!r} (found {n})")
     return new_text
 
@@ -990,9 +995,13 @@ _ALP_SDK_ROOT_GUESS_RE = re.compile(
     r"    get_filename_component\(ALP_SDK_ROOT \$\{CMAKE_CURRENT_SOURCE_DIR\}(?:/\.\.)+ ABSOLUTE\)\n"
     r"endif\(\)"
 )
-_HARDCODED_ALP_PROJECT_PY_RE = re.compile(
-    r"\$\{CMAKE_CURRENT_SOURCE_DIR\}(?:/\.\.)+/scripts/alp_project\.py"
-)
+# Anything that only resolves against a real alp-sdk checkout, i.e. that a
+# scaffold copied OUT of the SDK tree cannot satisfy unless ALP_SDK_ROOT has
+# been rewritten into a hard requirement: the shared `cmake/alp.cmake`
+# include, either helper it defines, or a direct `alp_project.py` shell.
+_SDK_ROOT_DEPENDENT_RE = re.compile(
+    r"cmake/alp\.cmake|alp_sdk_zephyr_conf|alp_sdk_ipc_contract_header"
+    r"|alp_project\.py")
 _ALP_SDK_ROOT_REQUIRED_BLOCK = (
     # Issue #864 Fable-review MAJOR E: the ORIGINAL block here checked
     # only `ENV{ALP_SDK_ROOT}` while the message also advertised
@@ -1016,24 +1025,40 @@ _ALP_SDK_ROOT_REQUIRED_BLOCK = (
 
 def _scaffold_cmakelists(text: str) -> str:
     """Replace an in-tree-relative ALP_SDK_ROOT guess with a hard
-    requirement. Two shapes exist across the catalog's example
-    CMakeLists.txt files today: the `if(DEFINED ENV{...}) ... else()
-    get_filename_component(...)` guess (most examples), and
-    `cold-chain-monitor`'s hardcoded `${CMAKE_CURRENT_SOURCE_DIR}/../..
-    /../scripts/alp_project.py` call with no ALP_SDK_ROOT resolution at
-    all (worse: no override is even possible). Best-effort: a
-    CMakeLists.txt matching neither shape (e.g. multicore-rpmsg's
-    linux/CMakeLists.txt, which never invokes alp_project.py) is
-    returned unchanged."""
+    requirement.
+
+    Every example that consumes the SDK carries exactly one shape today
+    -- the `if(DEFINED ENV{ALP_SDK_ROOT}) ... else()
+    get_filename_component(...)` guess, immediately above
+    `include(${ALP_SDK_ROOT}/cmake/alp.cmake)`. The guess resolves only
+    for the in-tree example; a scaffold a customer unpacks elsewhere
+    needs the value supplied, so it becomes a FATAL_ERROR-if-unset
+    block. The include line itself already names `${ALP_SDK_ROOT}` and
+    needs no rewriting.
+
+    A CMakeLists.txt with no SDK-root-dependent line at all (e.g.
+    multicore-rpmsg's `linux/CMakeLists.txt`) is legitimately returned
+    unchanged. One that DOES depend on the SDK root but carries an
+    unrecognised resolution shape raises: this used to be a silent
+    best-effort no-op, which shipped every scaffolded project an
+    `include()`/`alp_project.py` path that resolves only inside an SDK
+    checkout -- broken on the very first thing a new customer does, with
+    nothing failing here to say so."""
     new_text, n = _ALP_SDK_ROOT_GUESS_RE.subn(_ALP_SDK_ROOT_REQUIRED_BLOCK, text)
     if n:
         return new_text
-    if _HARDCODED_ALP_PROJECT_PY_RE.search(text):
-        text = _HARDCODED_ALP_PROJECT_PY_RE.sub(
-            "${ALP_SDK_ROOT}/scripts/alp_project.py", text)
-        return text.replace(
-            "execute_process(\n",
-            _ALP_SDK_ROOT_REQUIRED_BLOCK + "\n\nexecute_process(\n", 1)
+    if _ALP_SDK_ROOT_REQUIRED_BLOCK in text:
+        return text  # already hardened (idempotent)
+    dependent = _SDK_ROOT_DEPENDENT_RE.search(text)
+    if dependent:
+        raise TemplateError(
+            f"CMakeLists.txt depends on the SDK root (`{dependent.group(0)}`) "
+            f"but carries no recognised ALP_SDK_ROOT resolution block to "
+            f"rewrite into a hard requirement -- a scaffold of it would ship "
+            f"a path that only resolves inside an alp-sdk checkout. Use the "
+            f"`if(DEFINED ENV{{ALP_SDK_ROOT}}) ... else() "
+            f"get_filename_component(...) endif()` shape the other examples "
+            f"use, or teach `_scaffold_cmakelists` the new one.")
     return text
 
 

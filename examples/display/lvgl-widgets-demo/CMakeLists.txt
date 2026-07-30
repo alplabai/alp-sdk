@@ -5,32 +5,20 @@
 # overlays prj.conf.
 cmake_minimum_required(VERSION 3.20.0)
 
-# Run the SDK project loader BEFORE find_package(Zephyr ...) so the
-# generated overlay is in EXTRA_CONF_FILE when Zephyr starts parsing
-# Kconfig.  See examples/peripheral-io/i2c-scanner/CMakeLists.txt for the canonical
-# pattern this example follows.
-#
-# PYTHON_EXECUTABLE is only set after find_package(Zephyr); we need a
-# Python interpreter at configure time *before* that, so resolve one
-# ourselves here.
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
-
-# Emit into a generated/ subdir so the file escapes Zephyr's
-# ${APPLICATION_BINARY_DIR}/*.conf GLOB, and APPEND (don't overwrite)
-# EXTRA_CONF_FILE so a per-example native_sim.conf can also layer in.
-set(_alp_generated ${CMAKE_BINARY_DIR}/generated/alp.conf)
-execute_process(
-    COMMAND ${Python3_EXECUTABLE}
-            ${CMAKE_CURRENT_SOURCE_DIR}/../../../scripts/alp_project.py
-            --input  ${CMAKE_CURRENT_SOURCE_DIR}/board.yaml
-            --output ${_alp_generated}
-            --emit zephyr-conf --core m55_hp
-    RESULT_VARIABLE rc
-)
-if(NOT rc EQUAL 0)
-    message(FATAL_ERROR "alp_project.py failed (rc=${rc})")
+# board.yaml -> build/generated/alp.conf at configure time, layered
+# over prj.conf via EXTRA_CONF_FILE.  Both the emit and the append
+# MUST happen before find_package(Zephyr) -- cmake/alp.cmake documents
+# why, and the ALP_SDK_ROOT contract a copied-out project relies on.
+if(DEFINED ENV{ALP_SDK_ROOT})
+    set(ALP_SDK_ROOT $ENV{ALP_SDK_ROOT})
+else()
+    get_filename_component(ALP_SDK_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../.. ABSOLUTE)
 endif()
-list(APPEND EXTRA_CONF_FILE ${_alp_generated})
+include(${ALP_SDK_ROOT}/cmake/alp.cmake)
+
+# ourselves here.
+
+alp_sdk_zephyr_conf(m55_hp)
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(lvgl_widgets_demo LANGUAGES C)

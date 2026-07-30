@@ -302,7 +302,7 @@ def test_render_to_envelope_is_passthrough_for_the_examples_own_sku():
     assert "testcase.yaml" not in by_path
     for rel in ("board.yaml", "prj.conf", "src/main.c"):
         assert by_path[rel] == (HELLO_WORLD / rel).read_text(encoding="utf-8"), rel
-    assert "--core m55_hp" in by_path["CMakeLists.txt"]
+    assert "alp_sdk_zephyr_conf(m55_hp)" in by_path["CMakeLists.txt"]
     assert "ALP_SDK_ROOT is not set" in by_path["CMakeLists.txt"]
 
 
@@ -317,12 +317,12 @@ def test_render_to_envelope_substitutes_sku_and_preset():
     # The AEN-only app core (m55_hp, an Alif-only Zephyr cluster) is
     # re-derived to E1M-V2N101's own Zephyr core -- issue #864 follow-up
     # blocker: the pre-fix scaffold baked `cores: m55_hp:` in unchanged,
-    # which `alp_project.py --emit zephyr-conf --core m55_hp` rejects
+    # which `alp_sdk_zephyr_conf(m55_hp)` rejects
     # against a V2N101 board.yaml ("unknown core id").
     assert "m33_sm:" in board_yaml
     assert "m55_hp" not in board_yaml
-    assert "--core m33_sm" in by_path["CMakeLists.txt"]
-    assert "--core m55_hp" not in by_path["CMakeLists.txt"]
+    assert "alp_sdk_zephyr_conf(m33_sm)" in by_path["CMakeLists.txt"]
+    assert "m55_hp" not in by_path["CMakeLists.txt"]
 
     # prj.conf / src/main.c carry no sku-specific content -- unmodified.
     for rel in ("prj.conf", "src/main.c"):
@@ -379,17 +379,77 @@ def test_scaffold_cmakelists_requires_alp_sdk_root_explicitly():
     assert "get_filename_component(ALP_SDK_ROOT" not in cmakelists
 
 
-def test_scaffold_cmakelists_hardens_the_hardcoded_variant_too():
-    """cold-chain-monitor's CMakeLists.txt has NO ALP_SDK_ROOT env-var
-    fallback at all -- a hardcoded `${CMAKE_CURRENT_SOURCE_DIR}/../../../
-    scripts/alp_project.py` -- worse than the guess-block variant since
-    there's no override at all. `_scaffold_cmakelists` must harden this
-    shape too."""
+def test_scaffold_cmakelists_hardens_every_template_not_just_the_canonical_one():
+    """cold-chain-monitor (the `edge-ai` source) used to carry a hardcoded
+    `${CMAKE_CURRENT_SOURCE_DIR}/../../../scripts/alp_project.py` with no
+    ALP_SDK_ROOT override possible at all. It now goes through the shared
+    `cmake/alp.cmake` helper like every other example, so the ONE thing a
+    scaffold of it must not ship is an SDK-tree-relative path: the include
+    names `${ALP_SDK_ROOT}` and the hard-requirement block supplies it."""
     envelope = dict(alp_template.render_to_envelope("edge-ai", "E1M-AEN801"))
     cmakelists = envelope["CMakeLists.txt"]
     assert "${CMAKE_CURRENT_SOURCE_DIR}/../../../scripts/alp_project.py" not in cmakelists
-    assert "${ALP_SDK_ROOT}/scripts/alp_project.py" in cmakelists
+    assert "include(${ALP_SDK_ROOT}/cmake/alp.cmake)" in cmakelists
+    assert "get_filename_component(ALP_SDK_ROOT" not in cmakelists
     assert "if(NOT DEFINED ALP_SDK_ROOT AND NOT DEFINED ENV{ALP_SDK_ROOT})" in cmakelists
+
+
+def test_every_template_scaffolds_a_resolvable_sdk_root():
+    """The blocker the `cmake/alp.cmake` centralization would otherwise
+    ship: every scaffolded CMakeLists.txt that consumes the SDK reaches it
+    through `${ALP_SDK_ROOT}` ONLY, and carries the block that makes an
+    unset ALP_SDK_ROOT a FATAL_ERROR instead of an unresolvable path. Swept
+    over the WHOLE catalog rather than one template, because
+    `_scaffold_cmakelists` used to return an unrecognised shape unchanged."""
+    catalog = json.loads(
+        (alp_template.REPO / "metadata" / "templates" / "catalog-v1.json")
+        .read_text(encoding="utf-8"))
+    checked = 0
+    for record in catalog["templates"]:
+        sku = record["supported"]["som_skus"][0]
+        for rel, text in alp_template.render_to_envelope(record["id"], sku):
+            if not rel.endswith("CMakeLists.txt"):
+                continue
+            if not alp_template._SDK_ROOT_DEPENDENT_RE.search(text):
+                continue  # e.g. multicore-rpmsg's linux/CMakeLists.txt
+            checked += 1
+            where = f"{record['id']}:{rel}"
+            assert "include(${ALP_SDK_ROOT}/cmake/alp.cmake)" in text, where
+            assert ("if(NOT DEFINED ALP_SDK_ROOT AND NOT DEFINED "
+                    "ENV{ALP_SDK_ROOT})") in text, where
+            assert "get_filename_component(ALP_SDK_ROOT" not in text, where
+            # No `${CMAKE_CURRENT_SOURCE_DIR}`-relative path may climb OUT of
+            # the scaffold. `../board.yaml` from a `m55_hp/` subdir is fine
+            # (the scaffold keeps that layout); `../../..` is the SDK-tree
+            # guess that only ever resolved in-tree.
+            depth = rel.count("/")
+            for climb in re.findall(
+                    r"\$\{CMAKE_CURRENT_SOURCE_DIR\}((?:/\.\.)+)", text):
+                assert climb.count("..") <= depth, f"{where}: {climb}"
+    assert checked == len(catalog["templates"]), (
+        f"only {checked} of {len(catalog['templates'])} templates contributed "
+        f"an SDK-consuming CMakeLists.txt -- the sweep may have stopped "
+        f"looking")
+
+
+def test_scaffold_cmakelists_raises_on_an_unrecognised_sdk_root_shape():
+    """A new example shape `_scaffold_cmakelists` cannot rewrite must FAIL
+    the scaffold emit, not pass the file through: the pre-helper no-op only
+    left a mis-guessed `../../..`, whereas an unrewritten
+    `include(${ALP_SDK_ROOT}/cmake/alp.cmake)` is an unresolvable path in
+    every customer project."""
+    unknown = ("set(ALP_SDK_ROOT /opt/alp-sdk)\n"
+               "include(${ALP_SDK_ROOT}/cmake/alp.cmake)\n"
+               "alp_sdk_zephyr_conf(m55_hp)\n")
+    with pytest.raises(alp_template.TemplateError, match="no recognised"):
+        alp_template._scaffold_cmakelists(unknown)
+
+
+def test_scaffold_cmakelists_passes_through_a_file_that_never_needs_the_sdk():
+    """multicore-rpmsg's `linux/CMakeLists.txt` names no SDK path at all --
+    still a legitimate unchanged pass-through, not a failure."""
+    plain = "cmake_minimum_required(VERSION 3.20)\nproject(demo C)\n"
+    assert alp_template._scaffold_cmakelists(plain) == plain
 
 
 def test_scaffold_readme_has_no_dangling_sdk_tree_links_or_self_path():

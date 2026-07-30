@@ -1,20 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
 cmake_minimum_required(VERSION 3.20.0)
 
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
-
-execute_process(
-    COMMAND ${Python3_EXECUTABLE}
-            ${CMAKE_CURRENT_SOURCE_DIR}/../../../scripts/alp_project.py
-            --input  ${CMAKE_CURRENT_SOURCE_DIR}/board.yaml
-            --output ${CMAKE_CURRENT_BINARY_DIR}/alp.conf
-            --emit zephyr-conf --core m55_hp
-    RESULT_VARIABLE rc
-)
-if(NOT rc EQUAL 0)
-    message(FATAL_ERROR "alp_project.py failed (rc=${rc})")
+# board.yaml -> build/generated/alp.conf at configure time, layered
+# over prj.conf via EXTRA_CONF_FILE.  Both the emit and the append
+# MUST happen before find_package(Zephyr) -- cmake/alp.cmake documents
+# why, and the ALP_SDK_ROOT contract a copied-out project relies on.
+if(DEFINED ENV{ALP_SDK_ROOT})
+    set(ALP_SDK_ROOT $ENV{ALP_SDK_ROOT})
+else()
+    get_filename_component(ALP_SDK_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../.. ABSOLUTE)
 endif()
-list(APPEND EXTRA_CONF_FILE ${CMAKE_CURRENT_BINARY_DIR}/alp.conf)
+include(${ALP_SDK_ROOT}/cmake/alp.cmake)
+
+alp_sdk_zephyr_conf(m55_hp)
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(multimodal_fusion_pdm LANGUAGES C)

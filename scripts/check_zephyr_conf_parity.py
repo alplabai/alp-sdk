@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 """
-Byte-parity gate: a Zephyr example's own `CMakeLists.txt` (which shells
-`alp_project.py --emit zephyr-conf --core <id>` at configure time) and the
+Byte-parity gate: a Zephyr example's own `CMakeLists.txt` (which calls
+`alp_sdk_zephyr_conf(<id>)` from `cmake/alp.cmake` at configure time) and the
 planner's build-plan `configArtefacts` (`--emit build-plan`, consumed by
 `tan`) MUST materialise the identical `alp.conf` for the same core.
 
@@ -15,11 +15,13 @@ addendum) can't silently fork the two paths again. Mirrors the
 pinned invariant across the whole example corpus rather than a fixed golden
 set, so a NEW example inherits the check automatically.
 
-Scope: every example `CMakeLists.txt` under `examples/**` whose
-`alp_project.py --emit zephyr-conf --core <id>` invocation is `--core`-
-scoped (single-app examples AND per-core multicore subdirs alike). An
-unscoped (`--core`-less) invocation sums across cores by design and is out
-of scope for a per-core byte-parity check.
+Scope: every example `CMakeLists.txt` under `examples/**` whose zephyr-conf
+emit is core-scoped (single-app examples AND per-core multicore subdirs
+alike) -- spelled either as `alp_sdk_zephyr_conf(<id>)` or as a raw
+`alp_project.py --emit zephyr-conf --core <id>` invocation. An unscoped
+(`--core`-less) raw invocation sums across cores by design and is out of
+scope for a per-core byte-parity check; `_find_unscoped_emits` fails on it
+rather than skipping it.
 
 Usage:
 
@@ -38,18 +40,42 @@ sys.path.insert(0, str(REPO / "scripts"))
 from alp_orchestrate import load_board_yaml, OrchestratorError  # noqa: E402
 from alp_orchestrate.kconfig import _slice_alp_conf  # noqa: E402
 
-# `--emit zephyr-conf ... --core <id>` -- tolerant of the flag order + the
-# `--input <path>` argument sitting on any adjacent line within the same
-# `execute_process(COMMAND ...)` block (the examples carry a handful of
-# harmless formatting variants; see `applying-the-alp-sdk-c-house-style`).
-_CORE_RE = re.compile(r"--emit\s+zephyr-conf\s+--core\s+(\S+)")
+# The core id an example's CMakeLists.txt scopes its emit to. Two spellings
+# are recognised:
+#
+#   * `alp_sdk_zephyr_conf(<core> [BOARD_YAML <path>])` -- the shared
+#     `cmake/alp.cmake` helper every example calls today.
+#   * a raw `--emit zephyr-conf --core <id>` invocation -- the pre-helper
+#     shape, still matched so a hand-rolled example (or one copied from an
+#     older release) stays inside this gate instead of silently dropping out
+#     of the corpus.
+_CORE_RE = re.compile(
+    r"alp_sdk_zephyr_conf\(\s*([^\s)]+)"
+    r"|--emit\s+zephyr-conf\s+--core\s+(\S+)")
+# `BOARD_YAML ${CMAKE_CURRENT_SOURCE_DIR}/<rel>` (helper) or the raw
+# `--input <path>` argument on any adjacent line of the same
+# `execute_process(COMMAND ...)` block.
 _INPUT_RE = re.compile(
-    r"COMMAND\b.*?--input\s+\$\{CMAKE_CURRENT_SOURCE_DIR\}/(\S+?board\.yaml)",
+    r"BOARD_YAML\s+\$\{CMAKE_CURRENT_SOURCE_DIR\}/(\S+?board\.yaml)"
+    r"|COMMAND\b.*?--input\s+\$\{CMAKE_CURRENT_SOURCE_DIR\}/(\S+?board\.yaml)",
     re.DOTALL)
-# Any `--emit zephyr-conf`, `--core`-scoped or not. When a file's count of
-# these exceeds its `--core`-scoped count (`_CORE_RE`), some invocation is
-# UNSCOPED -- the cross-core Kconfig sum ADR-0020's addendum retired.
-_EMIT_RE = re.compile(r"--emit\s+zephyr-conf\b")
+# Any zephyr-conf emit, `--core`-scoped or not. When a file's count of these
+# exceeds its `--core`-scoped count (`_CORE_RE`), some invocation is UNSCOPED
+# -- the cross-core Kconfig sum ADR-0020's addendum retired. `alp_sdk_zephyr_
+# conf()` FATAL_ERRORs on an empty core argument, so the helper spelling can
+# only ever be scoped; the raw spelling still can't.
+_EMIT_RE = re.compile(r"alp_sdk_zephyr_conf\(|--emit\s+zephyr-conf\b")
+
+
+def _code(text: str) -> str:
+    """`text` with every whole-line `#` comment dropped. Both patterns below
+    are matched against CODE only: `examples/**` carries 28 CMakeLists.txt
+    files whose comments MENTION the emit precisely to say they do NOT invoke
+    it, plus several that name `alp_sdk_zephyr_conf()` in prose -- a bare
+    text match reads those as invocations and (for `_find_unscoped_emits`)
+    fails the gate on a comment."""
+    return "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#"))
 
 
 def _find_cases() -> list[tuple[Path, Path, str]]:
@@ -57,14 +83,17 @@ def _find_cases() -> list[tuple[Path, Path, str]]:
     `--emit zephyr-conf --core <id>` invocation under `examples/**`."""
     cases = []
     for cmakelists in sorted(REPO.glob("examples/**/CMakeLists.txt")):
-        text = cmakelists.read_text(encoding="utf-8")
+        text = _code(cmakelists.read_text(encoding="utf-8"))
         core_m = _CORE_RE.search(text)
         if core_m is None:
             continue
         input_m = _INPUT_RE.search(text)
-        board_rel = input_m.group(1) if input_m else "board.yaml"
+        board_rel = "board.yaml"
+        if input_m:
+            board_rel = input_m.group(1) or input_m.group(2)
         board_yaml = (cmakelists.parent / board_rel).resolve()
-        cases.append((cmakelists, board_yaml, core_m.group(1)))
+        core_id = core_m.group(1) or core_m.group(2)
+        cases.append((cmakelists, board_yaml, core_id))
     return cases
 
 
@@ -76,7 +105,7 @@ def _find_unscoped_emits(repo: Path = REPO) -> list[Path]:
     while shipping cross-core-contaminated firmware. Fail loudly instead."""
     leaks = []
     for cmakelists in sorted(repo.glob("examples/**/CMakeLists.txt")):
-        text = cmakelists.read_text(encoding="utf-8")
+        text = _code(cmakelists.read_text(encoding="utf-8"))
         if len(_EMIT_RE.findall(text)) > len(_CORE_RE.findall(text)):
             leaks.append(cmakelists)
     return leaks

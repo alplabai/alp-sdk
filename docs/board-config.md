@@ -102,9 +102,10 @@ Concretely:
 
 - **Don't edit `prj.conf` directly.**  The minimum-correct
   `prj.conf` in a v0.3 alp-sdk app is empty (or carries only a
-  comment).  The application's `CMakeLists.txt` invokes
-  `scripts/alp_project.py` at configure time and layers the
-  generated `alp.conf` over `prj.conf` via Zephyr's
+  comment).  The application's `CMakeLists.txt` calls
+  `alp_sdk_zephyr_conf(<core_id>)` (from `cmake/alp.cmake`) at
+  configure time, which layers the generated `alp.conf` over
+  `prj.conf` via Zephyr's
   `EXTRA_CONF_FILE` cmake variable.  `rsource` is NOT valid in a
   `.conf` file (it is a Kconfig-source directive only) -- see the
   worked example at `examples/peripheral-io/gpio-button-led/CMakeLists.txt`

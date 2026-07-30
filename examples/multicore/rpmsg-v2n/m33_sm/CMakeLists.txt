@@ -5,77 +5,31 @@
 #
 # This is the build entry point Zephyr's machinery picks up when the
 # orchestrator dispatches the M33 slice (board target
-# `alp_e1m_v2n101_m33_sm`).  alp_project.py renders this slice's
-# `cores.m33_sm.*` block from ../board.yaml into a Kconfig fragment
-# that gets layered over prj.conf via EXTRA_CONF_FILE.
+# `alp_e1m_v2n101_m33_sm`).  `alp_sdk_zephyr_conf()` renders this
+# slice's `cores.m33_sm.*` block from ../board.yaml into a Kconfig
+# fragment that gets layered over prj.conf via EXTRA_CONF_FILE.
 
 cmake_minimum_required(VERSION 3.20)
 
-# ---------------------------------------------------------------------
-# 1. Resolve the Alp SDK root.
-# ALP_SDK_ROOT lets a customer point this example at an out-of-tree
-# SDK checkout; the fallback walks up four levels
-# (examples/multicore/<name>/<core> -> examples/multicore/<name>
-# -> examples/multicore -> examples -> repo root) so an in-tree
-# `west build` Just Works.
-# ---------------------------------------------------------------------
+# board.yaml -> build/generated/alp.conf at configure time, layered
+# over prj.conf via EXTRA_CONF_FILE.  Both the emit and the append
+# MUST happen before find_package(Zephyr) -- cmake/alp.cmake documents
+# why, and the ALP_SDK_ROOT contract a copied-out project relies on.
 if(DEFINED ENV{ALP_SDK_ROOT})
     set(ALP_SDK_ROOT $ENV{ALP_SDK_ROOT})
 else()
     get_filename_component(ALP_SDK_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../../.. ABSOLUTE)
 endif()
+include(${ALP_SDK_ROOT}/cmake/alp.cmake)
 
-# ---------------------------------------------------------------------
-# 2. Python3 BEFORE Zephyr -- alp_project.py renders this slice's
-# board.yaml view into a Kconfig fragment that Zephyr then layers
-# over prj.conf via EXTRA_CONF_FILE.  find_package(Python3 ...) MUST
-# run before find_package(Zephyr ...) because Zephyr's CMake
-# machinery pins a Python interpreter the moment it imports.
-# ---------------------------------------------------------------------
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
-
-set(_alp_generated ${CMAKE_BINARY_DIR}/generated/alp.conf)
-execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${ALP_SDK_ROOT}/scripts/alp_project.py
-            --input ${CMAKE_CURRENT_SOURCE_DIR}/../board.yaml
-            --emit zephyr-conf --core m33_sm
-            --output ${_alp_generated}
-    RESULT_VARIABLE _alp_rv
-    OUTPUT_VARIABLE _alp_stdout
-    ERROR_VARIABLE  _alp_stderr
-)
-if(NOT _alp_rv EQUAL 0)
-    message(FATAL_ERROR
-        "alp_project.py failed (rv=${_alp_rv}); "
-        "check ${CMAKE_CURRENT_SOURCE_DIR}/../board.yaml.\n"
-        "stderr: ${_alp_stderr}")
-endif()
-
-list(APPEND EXTRA_CONF_FILE ${_alp_generated})
+alp_sdk_zephyr_conf(m33_sm BOARD_YAML ${CMAKE_CURRENT_SOURCE_DIR}/../board.yaml)
 
 # Generate <alp/system_ipc.h> from the board.yaml `ipc:` block.  The
 # producer (src/main.c) opens RPC channels via the auto-emitted macros
 # (ALP_IPC_<NAME>_NAME, _ADDR, _SIZE, ...), so the header must be on
 # the include path before any source compiles.
-set(_alp_ipc_header ${CMAKE_BINARY_DIR}/generated/alp/system_ipc.h)
-execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${ALP_SDK_ROOT}/scripts/alp_project.py
-            --input ${CMAKE_CURRENT_SOURCE_DIR}/../board.yaml
-            --emit ipc-contract-h
-            --output ${_alp_ipc_header}
-    RESULT_VARIABLE _alp_ipc_rv
-    OUTPUT_VARIABLE _alp_ipc_stdout
-    ERROR_VARIABLE  _alp_ipc_stderr
-)
-if(NOT _alp_ipc_rv EQUAL 0)
-    message(FATAL_ERROR
-        "alp_project.py --emit ipc-contract-h failed "
-        "(rv=${_alp_ipc_rv}); stderr: ${_alp_ipc_stderr}")
-endif()
+alp_sdk_ipc_contract_header(BOARD_YAML ${CMAKE_CURRENT_SOURCE_DIR}/../board.yaml)
 
-# ---------------------------------------------------------------------
-# 3. Zephyr.
-# ---------------------------------------------------------------------
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(rpmsg_v2n_m33_sm LANGUAGES C)
 
