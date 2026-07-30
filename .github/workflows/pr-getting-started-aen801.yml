@@ -84,6 +84,16 @@ jobs:
         with:
           python-version-file: alp-sdk/.python-version
 
+      # examples/peripheral-io/gpio-button-led's CMakeLists.txt calls
+      # `alp_sdk_zephyr_conf()`, and cmake/alp.cmake resolves its emitter from
+      # PATH.  Installed under the hosted interpreter, not the workspace venv
+      # the build step activates: `source .venv/bin/activate` PREPENDS to PATH
+      # and leaves the hosted bin dir on it, so `find_program(tan)` still
+      # resolves, and a console script carries its own interpreter in its
+      # shebang regardless of which venv is active.
+      - name: Install tan (pinned)
+        uses: ./alp-sdk/.github/actions/install-tan
+
       - name: Install host build tools
         run: |
           sudo apt-get update

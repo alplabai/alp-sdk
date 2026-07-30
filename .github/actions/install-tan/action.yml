@@ -1,0 +1,77 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Put a working `tan` on PATH for the jobs that CONFIGURE a Zephyr build over
+# an example.
+#
+# Four jobs do that -- pr-twister.yml (its `examples` testsuite root),
+# pr-getting-started-aen801.yml, pr-renode-aen-smoke.yml and
+# pr-renode-sim-mode.yml -- and every `examples/**/CMakeLists.txt` they reach
+# calls `alp_sdk_zephyr_conf()`, which resolves its emitter from PATH
+# (cmake/alp.cmake, "Emitter resolution").  With no `tan` installed, all four
+# take the `scripts/alp_project.py` fallback: legal, but it means the `tan`
+# path this SDK documents as its front door is exercised by NO gate at all,
+# and the fallback branch is the only one CI has ever proved.
+#
+# This is a composite action rather than a step copy-pasted into four
+# workflows for one reason: the ref below is then ONE edit, not four.
+#
+# ----------------------------------------------------------------------
+# WHAT IS PINNED, AND HOW TO BUMP IT
+# ----------------------------------------------------------------------
+# `alp-tan` is the tan CLI's Python distribution (import package `tan`,
+# console script `tan`) and lives in the `python/` subdirectory of the public
+# alplabai/tan-cli repo.  It is NOT published on PyPI, so there is no version
+# to install by name -- the install has to name a git ref.
+#
+# That ref is a full 40-char COMMIT SHA on purpose.  A branch name (the port
+# currently lives on tan-cli's `feat/python-executor-mvp`) would make this
+# repo's CI silently track someone else's in-flight work: a push over there
+# would change what alp-sdk builds with, with no commit here and no review.
+# An immutable tag would serve equally well; this port has none yet.
+#
+# To bump: confirm the new ref is PUSHED --
+# `git ls-remote https://github.com/alplabai/tan-cli <ref>` -- because an
+# unpushed SHA fails every one of the four jobs with pip's "did not match any
+# file(s) known to git", then replace the SHA below.  Nothing else in this
+# repo names it.
+#
+# The interpreter is each job's own actions/setup-python, so it must satisfy
+# tan-cli `python/pyproject.toml`'s `requires-python`, which is `>=3.12`
+# (Zephyr's own `PYTHON_MINIMUM_REQUIRED 3.12`, not tan's syntax).  All four
+# jobs resolve setup-python from this repo's `.python-version` (3.12), so they
+# already satisfy it; a job that pins something older fails HERE, at install
+# time, which is the legible place for it to fail.
+name: install-tan
+description: >
+  Install the pinned `tan` CLI (alp-tan, from alplabai/tan-cli's python/
+  subdirectory) so cmake/alp.cmake's emitter probe resolves it from PATH.
+runs:
+  using: composite
+  steps:
+    - name: pip install alp-tan at the pinned tan-cli commit
+      shell: bash
+      run: |
+        set -euo pipefail
+        pip install "git+https://github.com/alplabai/tan-cli@4ec44171491a8ee0a2b1dcf45b45b7757fdead0b#subdirectory=python"
+
+    - name: Assert this tan satisfies cmake/alp.cmake's emitter probe
+      shell: bash
+      run: |
+        set -euo pipefail
+        tan --version
+        # cmake/alp.cmake takes the tan branch ONLY when `tan generate --help`
+        # exits 0 AND its output mentions `--output`.  Any other outcome is a
+        # SILENT fall back to scripts/alp_project.py -- the build still
+        # succeeds, so the job reports green having never run tan.  Assert
+        # both conditions here, where the failure is legible, rather than
+        # shipping a gate that proves nothing.
+        help_text="$(tan generate --help 2>&1)"
+        case "${help_text}" in
+          *--output*)
+            echo "tan generate accepts --output; cmake/alp.cmake will use this tan."
+            ;;
+          *)
+            echo "::error::the installed tan's \`generate --help\` never mentions --output, so cmake/alp.cmake would silently fall back to scripts/alp_project.py."
+            exit 1
+            ;;
+        esac

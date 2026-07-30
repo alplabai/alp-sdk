@@ -119,6 +119,13 @@ jobs:
           set -euo pipefail
           pip3 install -r "${GITHUB_WORKSPACE}/zephyr/scripts/requirements-base.txt"
 
+      # Only the third `west build` in this job configures an alp-sdk example
+      # (examples/aen/aen-sim-vision -- the first two build Zephyr's own
+      # samples/hello_world), and that example's CMakeLists.txt calls
+      # `alp_sdk_zephyr_conf()`, which resolves its emitter from PATH.
+      - name: Install tan (pinned)
+        uses: ./alp-sdk/.github/actions/install-tan
+
       # metadata/toolchains.json (issue #949 item 3) is the single source
       # for the pinned Zephyr SDK version/URL/sha256 -- scripts/
       # check_toolchain_lock.py gates this file staying in lockstep with it.

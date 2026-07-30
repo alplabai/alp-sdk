@@ -130,6 +130,13 @@ jobs:
         run: |
           pip3 install jsonschema
 
+      # Every `examples/**/CMakeLists.txt` twister configures below calls
+      # `alp_sdk_zephyr_conf()`, so this is the gate with the widest reach
+      # over cmake/alp.cmake's emitter.  Without a `tan` on PATH all of them
+      # take the `scripts/alp_project.py` fallback -- see the action's header.
+      - name: Install tan (pinned)
+        uses: ./alp-sdk/.github/actions/install-tan
+
       - name: twister · run shard ${{ matrix.shard }}/4 on native_sim/native/64
         working-directory: ${{ github.workspace }}/zephyrproject
         env:

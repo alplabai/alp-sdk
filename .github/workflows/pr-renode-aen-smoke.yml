@@ -118,6 +118,13 @@ jobs:
           set -euo pipefail
           pip3 install -r "${GITHUB_WORKSPACE}/zephyr/scripts/requirements-base.txt"
 
+      # examples/peripheral-io/hello-world's CMakeLists.txt calls
+      # `alp_sdk_zephyr_conf()`; cmake/alp.cmake resolves its emitter from
+      # PATH.  Installed under the same hosted interpreter the `west build`
+      # below runs on (see the step above for why that matters here).
+      - name: Install tan (pinned)
+        uses: ./alp-sdk/.github/actions/install-tan
+
       # metadata/toolchains.json (issue #949 item 3) is the single source
       # for the pinned Zephyr SDK version/URL/sha256 -- scripts/
       # check_toolchain_lock.py gates this file staying in lockstep with it.
