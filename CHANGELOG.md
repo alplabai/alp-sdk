@@ -7,6 +7,24 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.15.0 candidate
 
+### Added — macOS onramp execution coverage: a `macos-latest` leg that actually exercises the Darwin `xz`/`wget` exemption (#1033)
+
+The macOS narrowing of `scripts/bootstrap.sh`'s prerequisite check (dropping
+`xz`/`wget` from `REQUIRED_BINS` on Darwin, since macOS `tar` is bsdtar and
+decompresses `.xz` in-process, and the pinned Zephyr SDK's `setup.sh` only
+hard-checks for `wget` on `linux-*` hosts) had zero execution coverage — it
+was caught by reading source, not by any gate. `onramp-clean-container.yml`
+gains `prereqs-and-bootstrap-macos`, a `macos-latest` job that installs only
+`git`/`cmake`/`python3`/`ninja` (from `metadata/bootstrap.json`'s
+`prerequisites.install.macos`, not a hardcoded brew line), then relocates any
+pre-existing `xz`/`wget` binaries out of PATH before running
+`bootstrap.sh --no-west` — a bare run on a stock `macos-latest` runner (which
+carries a large Homebrew tree) would pass whether or not the narrowing still
+exists, since `xz`/`wget` are typically already resolvable there. The job
+asserts `bootstrap.sh` reports the macOS prerequisite set satisfied
+(`Bootstrap complete.`) and never names `xz` or `wget` as missing. Not added
+to branch protection.
+
 ### Fixed — `alp.lock`'s `digests.metadata` only hashed `metadata/**/*.yaml`, missing 23 JSON files including every SoC spec (#1045)
 
 `_digests()` globbed just `**/*.yaml` under `metadata/`, so `metadata/socs/**/*.json`

@@ -30,6 +30,26 @@
 #     missing `xz`/`wget` prerequisites) cheaply, on every PR that
 #     touches the onramp surface.
 #
+#   prereqs-and-bootstrap-macos (every relevant PR, ~2-3 min, `macos-latest`):
+#     the macOS half of the same coverage gap (issue #1033) -- until this
+#     job existed, the ENTIRE macOS onramp (prerequisite refusal, the
+#     Darwin `REQUIRED_BINS` narrowing that drops `xz`/`wget`) had zero
+#     execution coverage; the narrowing itself was caught by reading source,
+#     not by any gate. NOT a container job like the two above -- GitHub
+#     ships no bare/minimal macOS runner image to run one in, and
+#     `macos-latest` is a real (non-containerized) VM with a large Homebrew
+#     tree already on PATH, so `xz` and `wget` are typically already
+#     resolvable there -- a bare `bootstrap.sh --no-west` run would pass
+#     whether or not the Darwin narrowing (scripts/bootstrap.sh:153) still
+#     exists, proving nothing. This job instead relocates any pre-existing
+#     `xz`/`wget` binaries out of PATH before invoking bootstrap.sh, so a
+#     regression that put either back into the macOS `REQUIRED_BINS` fails
+#     this job for real. This file's name (onramp-clean-container) predates
+#     this job and describes the two jobs above, not this one -- kept here
+#     anyway because this IS the onramp's home and the coverage gap it
+#     closes is squarely an onramp gap (#1033), not because it runs in a
+#     container.
+#
 #   full-quickstart-build (weekly + workflow_dispatch + a labelled PR,
 #     ~10-15 min -- a real `west sdk install --gnu-toolchains
 #     arm-zephyr-eabi --no-hosttools` download, a few hundred MB per
@@ -211,6 +231,98 @@ jobs:
           case "${out}" in
             *"NOT auto-installed (manual, one-time):"*) ;;
             *) echo "::error::bootstrap.sh succeeded but never printed the manual-install-hints heading (manualInstallHints.posix.note) -- see scripts/bootstrap.sh:641"; exit 1 ;;
+          esac
+
+  prereqs-and-bootstrap-macos:
+    name: onramp · macos-latest -- prereqs + bootstrap.sh --no-west (docs §1, #1033)
+    if: github.event_name != 'schedule'
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout alp-sdk
+        uses: actions/checkout@v6
+        with:
+          path: alp-sdk
+          fetch-depth: 1
+
+      # Only the tools scripts/bootstrap.sh actually requires on Darwin
+      # (metadata/bootstrap.json's prerequisites.macos == its
+      # prerequisites.install.macos keys) -- driven from the manifest, not
+      # a hardcoded brew line, so scripts/check_bootstrap_manifest.py stays
+      # the single place that can catch this drifting from bootstrap.sh's
+      # own REQUIRED_BINS narrowing. Does NOT install xz/wget: those are
+      # deliberately left for the next step to find (or not) and hide.
+      - name: Install macOS prerequisites (metadata/bootstrap.json prerequisites.install.macos)
+        working-directory: alp-sdk
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' > /tmp/macos-prereq-install.sh
+          import json
+          d = json.load(open("metadata/bootstrap.json"))
+          install = d["prerequisites"]["install"]["macos"]
+          for tool in d["prerequisites"]["macos"]:
+              print(install[tool])
+          PY
+          cat /tmp/macos-prereq-install.sh
+          bash /tmp/macos-prereq-install.sh
+
+      # THE POINT OF THIS JOB: macos-latest carries a large Homebrew tree,
+      # so xz/wget are typically already on PATH -- a bare bootstrap.sh run
+      # would pass whether or not the Darwin REQUIRED_BINS narrowing
+      # (scripts/bootstrap.sh:153) still excludes them, proving nothing.
+      # Relocate (not delete -- an ephemeral runner, but no reason to be
+      # careless) whichever of the two are actually present so the next
+      # step exercises a host that genuinely lacks them, the way stock
+      # macOS does. Filtering PATH instead would also hide git/cmake/ninja,
+      # which live in the same directories (/opt/homebrew/bin, /usr/bin) --
+      # so this moves the two specific binaries instead.
+      - name: Hide xz + wget (prove the macOS exemption is real, not just untested)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for bin in xz wget; do
+            p="$(command -v "${bin}" 2>/dev/null || true)"
+            if [ -n "${p}" ]; then
+              echo "hiding ${bin}: ${p} -> ${p}.hidden-by-ci"
+              sudo mv "${p}" "${p}.hidden-by-ci"
+            else
+              echo "${bin}: already absent from PATH (nothing to hide)"
+            fi
+          done
+
+      # scripts/bootstrap.sh:153 narrows REQUIRED_BINS to (git cmake
+      # python3 ninja) on Darwin -- this must succeed with xz/wget
+      # unreachable, and must not name either as missing.
+      - name: bootstrap.sh --no-west succeeds on macOS without xz/wget
+        working-directory: alp-sdk
+        shell: bash
+        run: |
+          set +e
+          out="$(bash scripts/bootstrap.sh --no-west 2>&1)"
+          rc=$?
+          echo "${out}"
+          set -e
+          if [ "${rc}" -ne 0 ]; then
+            echo "::error::bootstrap.sh --no-west failed on macOS with xz/wget hidden -- the Darwin REQUIRED_BINS narrowing (scripts/bootstrap.sh:153) may be gone or broken"
+            exit 1
+          fi
+          case "${out}" in
+            *"Detected OS:     macos"*) ;;
+            *) echo "::error::bootstrap.sh did not report 'Detected OS:     macos' -- see scripts/bootstrap.sh:397"; exit 1 ;;
+          esac
+          case "${out}" in
+            *"Bootstrap complete."*) ;;
+            *) echo "::error::bootstrap.sh did not report 'Bootstrap complete.' -- it should have succeeded on this prerequisite set"; exit 1 ;;
+          esac
+          # bootstrap.sh's missing-tools report prints "  <tool>" (with the
+          # curated hint appended, or bare if none) per scripts/bootstrap.sh:208-210
+          # -- either shape starts with two spaces and the bare tool name.
+          case "${out}" in
+            *"  xz"*) echo "::error::bootstrap.sh reported xz as missing on macOS -- the Darwin REQUIRED_BINS narrowing (scripts/bootstrap.sh:153) is gone or broken"; exit 1 ;;
+          esac
+          case "${out}" in
+            *"  wget"*) echo "::error::bootstrap.sh reported wget as missing on macOS -- the Darwin REQUIRED_BINS narrowing (scripts/bootstrap.sh:153) is gone or broken"; exit 1 ;;
           esac
 
   full-quickstart-build:
