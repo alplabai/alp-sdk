@@ -7,6 +7,59 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.15.0 candidate
 
+### Fixed — `alp.lock`'s `digests.metadata` only hashed `metadata/**/*.yaml`, missing 23 JSON files including every SoC spec (#1045)
+
+`_digests()` globbed just `**/*.yaml` under `metadata/`, so `metadata/socs/**/*.json`
+(memory maps, variant resolution, core topology), `metadata/bootstrap.json`,
+`metadata/catalog.json`, and 20 more JSON/TSV/CSV/header/proto/Renode/lock/example
+files could change with `alp_lock.py --check` staying green. `_METADATA_DIGEST_GLOBS`
+now widens coverage to `**/*.{yaml,json,tsv,csv,h,proto,resc,repl,lock,example}`;
+only `.md` and `.gitkeep` remain deliberately uncovered (documentation and
+placeholders can't change a build), enforced by a completeness test that lists
+`git ls-files metadata` against the glob set. Also adds the `alp-lock` stage to
+`scripts/test-all.sh` (previously the ONLY place `alp_lock.py --check` ran was
+`pr-metadata-validate.yml`, so a locally-green branch could still redden CI on
+lock drift) and widens that workflow's `paths:` filters to include
+`scripts/alp_lock/**` / `scripts/west_commands/alp_lock.py` themselves.
+
+### Added — a machine-readable install command for the 7-Zip prerequisite of `west sdk install` on native Windows (#1036)
+
+7-Zip was documented only as prose, at `manualInstallHints.windows.note[1]`:
+`west sdk install`'s `.7z` extraction shells out to an external
+`7z`/`7za`/`7zr`/`7zz`/`7zzs`/`unar` binary via `patoolib`, with no
+pure-Python fallback, so 7-Zip must already be on PATH — but nothing in the
+repo could hand a caller (tan-cli's future `doctor --build` check, #204
+upstream) the actual command to run. `metadata/bootstrap.json` now declares
+`prerequisites.install.windows.7zip: "winget install -e --id 7zip.7zip"`
+(package ID confirmed against `microsoft/winget-pkgs`'
+`manifests/7/7zip/7zip/` tree). It is deliberately NOT added to
+`prerequisites.windows`: that list is the gate `bootstrap.ps1` refuses
+without, and 7-Zip only gates `west sdk install` (toolchain acquisition), a
+separate manual step bootstrap never runs — gating on it would make
+bootstrap refuse on every Windows host without 7-Zip installed, for a tool
+bootstrap itself never touches.
+
+`prerequisites.install.<os>` was already a superset of its matching gate
+list in practice (`install.macos` has carried `xz`/`wget` with no
+`prerequisites.macos` entry since #949), but `scripts/check_bootstrap_manifest.py`
+and `bootstrap-v1.schema.json` only documented and enforced that pattern for
+posix — the windows side asserted exact key-set equality against
+`prerequisites.windows`. `install.windows` is now allowed to carry an entry
+with no matching `prerequisites.windows` gate too — NOT symmetrically with
+`install.linux` / `install.macos`, which remain pinned by exact-equality to
+`prerequisites.posix` (a stray key there is still rejected); only
+`install.windows` is one-directional, and even that is bounded, not
+open-ended: an extra `install.windows` key is legal only when it is also
+named in `scripts/check_bootstrap_manifest.py`'s own
+`_WINDOWS_INSTALL_ONLY_TOOLS` allowlist (`7zip` today), so a stray or stale
+`install.windows` key that is neither gated nor allowlisted still fails the
+gate. `scripts/check_bootstrap_manifest.py`'s completeness check and its
+`$Prereqs` `Hint=` cross-check are updated accordingly, and
+`bootstrap-v1.schema.json`'s `prerequisites.install` / `install.windows`
+descriptions now state the bounded one-directional contract and name both
+live superset cases (`install.macos.xz`/`.wget`, `install.windows.7zip`) so
+neither reads as drift to a future editor.
+
 ## [v0.14.0] - 2026-07-29
 
 ### Fixed — four V2N/V2M SoM manifests promised a `gd32_bridge` firmware path that exists in no clone (#852)
