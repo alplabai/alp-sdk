@@ -50,3 +50,4 @@ guidance comments before submitting.
 - [ ] If this changes the public surface, `VERSIONS.md` reflects the new row / acceptance bar.
 - [ ] If this adds a chip driver, the symbols use the chip's natural prefix (no `alp_` on third-party silicon).
 - [ ] If this adds a SoC, `metadata/socs/<vendor>/<family>/<part>.json` validates and references the right datasheet revision.
+- [ ] If this touches a gate, script or workflow: read its own docstring/header comment and confirm it still describes what the code does. If not, fix the prose in the same commit — not a follow-up.

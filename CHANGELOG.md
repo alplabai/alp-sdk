@@ -7,6 +7,16 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.15.0 candidate
 
+### Added — a PR-template checklist item: a touched gate/script/workflow's own docstring must still describe what the code does, fixed in the same commit (#1027)
+
+Every accumulated instance of stale docs-vs-code (`sdk_version.yaml`'s phantom
+`hw_rev` gate, `check_bootstrap_manifest.py`'s own docstring contradicting its
+`!=` check, `check_cross_platform.py`'s stale workflow description) was
+behaviour-divergence a symbol-resolving gate cannot see, and every one was
+caught by a human reading prose against code — never a gate. `#1027` ruled
+against building one; this adds the review-checklist item that already caught
+the corpus, per `.github/PULL_REQUEST_TEMPLATE.md`'s `## Checklist`.
+
 ### Added — macOS onramp execution coverage: a `macos-latest` leg that actually runs the Darwin `xz`/`wget` exemption, not just checks it on paper (#1033)
 
 The macOS narrowing of `scripts/bootstrap.sh`'s prerequisite check (dropping
