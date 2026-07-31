@@ -61,7 +61,17 @@ def _slice_flash_recipe(
         # flash` fall back to the board.cmake default; an explicit
         # runner can still be set on flash_args downstream when one is
         # actually known.
-        return ("zephyr_west_flash", {})
+        #
+        # `jlink_flash_device` is added only when this slice's SoC
+        # variant actually publishes one: it's the part-number J-Link
+        # profile that arms Flow D's built-in Alif MRAM loader, a fact a
+        # downstream consumer (tan) needs to pick that path over the
+        # SETOOLS/SE-UART fallback. Absent for every non-AEN slice today,
+        # so the args dict stays `{}` -- no shape change for them.
+        args: dict[str, Any] = {}
+        if slice_.jlink_flash_device:
+            args["jlink_flash_device"] = slice_.jlink_flash_device
+        return ("zephyr_west_flash", args)
     if slice_.os == "baremetal":
         return ("baremetal_cmake_flash", {})
     return (None, None)

@@ -235,3 +235,76 @@ def test_emit_system_manifest_populates_flash_method(tmp_path: Path) -> None:
     assert m33["flash_args"] == {}
 
 
+# ---------------------------------------------------------------------
+# `flash_args.jlink_flash_device` -- the AEN Flow D arming fact
+# ---------------------------------------------------------------------
+
+# Off-topology a32_cluster (nothing to build in these flash-recipe-only
+# tests, mirrors examples/aen/aen-analog-validate/board.yaml); m55_hp and
+# m55_he fall back to the SoM preset's `topology:` stock-shim defaults, so
+# no `app:` needs restating here.
+AEN_HAPPY = """
+som:
+  sku: E1M-AEN801
+
+cores:
+  a32_cluster:
+    os: "off"
+"""
+
+
+def test_emit_system_manifest_aen_flash_args_carries_jlink_flash_device(
+    tmp_path: Path,
+) -> None:
+    """E1M-AEN801's resolved SoC variant (silicon_variant:
+    AE822FA0E5597LS0) publishes `debug.jlink_flash_device:
+    AE822FA0E5597LS0_M55_HE` (metadata/socs/alif/ensemble/e8.json) -- the
+    J-Link part-number profile that arms Flow D's built-in MRAM loader.
+    Both M55 zephyr slices must carry it in `flash_args` so a downstream
+    consumer (tan) can pick that path over the SETOOLS/SE-UART fallback.
+    """
+    path = _write_board(tmp_path, AEN_HAPPY)
+    project = load_board_yaml(path)
+    parsed = yaml.safe_load(emit_system_manifest(project))
+
+    by_core = {s["core_id"]: s for s in parsed["slices"]}
+    for core_id in ("m55_hp", "m55_he"):
+        slice_ = by_core[core_id]
+        assert slice_["flash_method"] == "zephyr_west_flash"
+        assert slice_["flash_args"]["jlink_flash_device"] == \
+            "AE822FA0E5597LS0_M55_HE"
+
+
+# E1M-AEN701's resolved SoC variant (silicon_variant: AE722F80F55D5LS in
+# metadata/socs/alif/ensemble/e7.json) DOES publish a `debug:` block --
+# `jlink_device` -- but no `jlink_flash_device` key.  That's the branch that
+# actually needs coverage: V2N's n44.json has no `debug:` block at all, so
+# asserting against it only proves the all-absent case, not "variant
+# resolved, `debug:` present, key missing".
+AEN_NO_JLINK_FLASH_DEVICE = """
+som:
+  sku: E1M-AEN701
+
+cores:
+  a32_cluster:
+    os: "off"
+"""
+
+
+def test_emit_system_manifest_flash_args_omits_jlink_flash_device_when_absent(
+    tmp_path: Path,
+) -> None:
+    """`flash_args` must stay the tidy `{}` with NO `jlink_flash_device`
+    key, never a `null` placeholder (the schema's published-unknown
+    contract: an absent key IS the correct unknown state) -- even though
+    this variant's `debug:` block exists and carries its sibling
+    `jlink_device`."""
+    path = _write_board(tmp_path, AEN_NO_JLINK_FLASH_DEVICE)
+    project = load_board_yaml(path)
+    parsed = yaml.safe_load(emit_system_manifest(project))
+
+    by_core = {s["core_id"]: s for s in parsed["slices"]}
+    for core_id in ("m55_hp", "m55_he"):
+        assert by_core[core_id]["flash_args"] == {}
+
+

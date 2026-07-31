@@ -24,6 +24,14 @@ flash_args contract:
                     a slice produces both zephyr.elf + a signed
                     zephyr.signed.hex).
 
+  `jlink_flash_device` (the AEN SoC-variant's part-number J-Link MRAM-loader
+  profile, when the SoM preset publishes one) is a CONSUMER-SIDE-ONLY key:
+  this backend doesn't read it and takes no `--runner` from it, so a
+  west-flash run through this in-tree backend still defers to the
+  board.cmake default runner (AEN's is `flash-runner: alif_flash`, i.e. the
+  SETOOLS path) even when it's present in flash_args -- that's expected,
+  not a sign the key is broken.
+
 Tool requirement: ``west`` on PATH.  We rely on west's own runner
 plumbing (``west flash --runner X``) so each underlying runner's
 prerequisite (openocd / J-Link / pyocd / nrfjprog) is implicitly
