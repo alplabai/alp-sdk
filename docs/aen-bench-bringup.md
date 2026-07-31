@@ -42,6 +42,7 @@ and [`aen-provisioning.md`](aen-provisioning.md).
 | **HWSEM** (`hwsem_alif` / `alif,hwsem`, Tier-1.5) | ✅ PASS (RAM-run, 2026-06-19) | `hwsem@4902e000` take/give/count over the in-tree driver: count `0→1→0` across `take_busy`/`give` (master_id `0x410fd222`). Example: `examples/aen/aen-hwsem-regcheck`. |
 | **LPTIMER** (`counter_alif_lptimer` / `alif,lptimer`, Tier-1.5) | ✅ PASS (RAM-run, 2026-06-19) | Always-on `lptimer@42001000` ch0 — 32768 Hz down-counter advances (3456 ticks / ~100 ms) via the portable `counter_*` API. Example: `examples/aen/aen-lptimer-regcheck`. |
 | **Comparator (HSCMP)** (`comparator_alif` / `alif,cmp`, Tier-2) | ✅ PASS (RAM-run, 2026-06-19) | `cmp0@49023000` driven via the portable `comparator_*` API (output 1/1, internal DAC6 reference; the connect-but-don't-enable init held — no ISR storm). External pin/threshold edge-trigger = bench TBD (no analog stimulus). Example: `examples/aen/aen-cmp-regcheck`. |
+| **Secure boot** (MCUboot ECDSA-P256 chain) | ✅ PASS (bench-proven at `0da1f1b4`) | SES → MCUboot (ITCM) → slot0 (MRAM XIP) → application boots with `CONFIG_BOOT_SIGNATURE_TYPE_ECDSA_P256=y` + `CONFIG_BOOT_VALIDATE_SLOT0=y` (read back from the built `mcuboot/zephyr/.config`): `PC=80012FBC`, `VTOR=80010800`, `CFSR=00000000`, `IPSR=000`. Verification proven live, not inferred from a boot: flipping one byte of the TLV `0x22` signature (offset `0x4a30`, `0xda`→`0xdb`, TLV `0x10`/SHA-256 and TLV `0x01`/key intact) produces `D: bootutil_verify_sig: ECDSA builtin key 0` then `E: Unable to find bootable image` — the check runs to completion. `SIGNATURE_TYPE_NONE` + `VALIDATE_SLOT0=y` boots in twelve seconds (watched ten minutes, CycleCnt advancing). This verification run was `CONFIG_SINGLE_APPLICATION_SLOT=y`. Verified backend is TinyCrypt (`CONFIG_BOOT_ECDSA_TINYCRYPT=y`), not PSA; `.config` confirms `CONFIG_SINGLE_APPLICATION_SLOT=y` + `CONFIG_FLASH_BASE_ADDRESS=0x0`. **Separately, a swap-using-scratch build boots and logs** `I: Bootloader chainload address offset: 0x10000` — **boot only; the swap/rollback path itself was not exercised `[UNTESTED]`.** Still requires `CONFIG_DCACHE=n`, `ROM_START_OFFSET=0x800`, and the `zephyr/patches/mcuboot` `do_boot` patch. **Customer path proven too (second session):** a plain-J-Link `loadbin` of an imgtool-signed image to slot0 `0x80010000` — no SETOOLS/ATOC/SE-UART — is verified + chainloaded and survives repeated cold power-cycles; **proven at `0x80010000` only** (ATOC region / erasing MCUboot untested); both refusal shapes (tampered sig, non-MCUboot image) leave the debug port alive (`Secure debug: enabled`, halts + single-steps cleanly). Single-slot result (`CONFIG_SINGLE_APPLICATION_SLOT=y`) — A/B swap / OTA untested. See `docs/aen-provisioning.md` §0.5 and `docs/secure-boot.md`. |
 
 The flow-D batch (17 aen-* apps) booted on real E8 at **15 PASS, 2 PARTIAL** (both
 hardware-gated). A 2026-06-19 Flow-C RAM-run pass then **reconfirmed** the SE-crypto
@@ -120,7 +121,11 @@ ITCM-load shape vs. the slot0-XIP shape (§ Flow D) from the app's own reset
 vector, so both provision over the SE-UART with no flag. Pre-provisioned Alp
 Lab modules ship a dev-signed MCUboot + self-test in slot0 (LCS=DM), so
 `west flash` works day-1; the manual path above is only for re-keying or
-recovering a bare module.
+recovering a bare module. A pre-provisioned module also takes a plain
+J-Link `loadbin` straight to slot0 at `0x80010000` **only** (ATOC region
+/ erasing MCUboot untested) with no SETOOLS/ATOC/SE-UART at all — see
+the **Secure boot** row in §1 above and `docs/aen-provisioning.md`
+§0.5 for the exact sequence.
 
 ### Flow B — Seeing the console
 

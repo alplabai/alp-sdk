@@ -10,12 +10,52 @@ want MCUboot-verified secure boot.
 The configuration matches the reference path (MCUboot + ECDSA-P256 +
 swap-using-scratch) and builds against the in-repo
 `alp_e1m_aen801_m55_{he,hp}` boards (the MRAM partition map it relies on
-lives in those board DTs).  The remaining bench-validation step is the
-**SES → MCUboot → slot0** chain itself: the E8 bench has proven the
-SES → app-direct path (a signed app as the ATOC), and this profile is the
-MCUboot-as-ATOC variant of the same flow.  See
-[`docs/bring-up-aen.md`](../../../docs/bring-up-aen.md) and
-[`docs/aen-provisioning.md`](../../../docs/aen-provisioning.md).
+lives in those board DTs).  The **SES → MCUboot → slot0** boot +
+signature-verification chain is now measured working on real silicon:
+E1M-AEN801 (`AE822FA0E5597LS0` Rev A0), alp-sdk `0da1f1b4` -- **but the
+build that proved verification ran `CONFIG_SINGLE_APPLICATION_SLOT=y`,
+not this profile's two-slot swap-using-scratch mode**; a separate run
+on this actual reference profile only proved that it boots (below),
+not its swap behaviour.  SES launches MCUboot from ITCM, MCUboot
+verifies slot0 (MRAM XIP) with `CONFIG_BOOT_SIGNATURE_TYPE_ECDSA_P256=y`
+and `CONFIG_BOOT_VALIDATE_SLOT0=y` (read back from the built
+`mcuboot/zephyr/.config`, not assumed), and the app boots --
+`PC=80012FBC`, `VTOR=80010800`, `CFSR=00000000`, `IPSR=000`.
+Verification was proven live, not inferred from a clean boot: flipping
+one byte of the TLV `0x22` ECDSA signature (file offset `0x4a30`,
+`0xda` -> `0xdb`, TLV `0x10`/SHA-256 and TLV `0x01`/key intact)
+produces `D: bootutil_verify_sig: ECDSA builtin key 0` then `E: Unable
+to find bootable image`, `VTOR = 0x00000000` -- a halt, not a swap-back
+(that single-slot build has no previous slot).
+
+**Swap-using-scratch itself -- this profile's actual swap mode --
+is `[UNTESTED]`.**  The reference-profile build boots and logs
+`I: Bootloader chainload address offset: 0x10000`; that is a boot-only
+datum from that separate run, not proof of the swap/rollback path (see
+"Why swap-using-scratch" below) -- the `slot1` (OTA) and `scratch`
+regions in the MRAM map below are correspondingly untested.
+
+The verified backend is **TinyCrypt**
+(`CONFIG_BOOT_ECDSA_TINYCRYPT=y`), not MbedTLS PSA; the `.config` also
+confirms `CONFIG_SINGLE_APPLICATION_SLOT=y` and
+`CONFIG_FLASH_BASE_ADDRESS=0x0` (MCUboot itself is ITCM-linked).
+Still required: `CONFIG_DCACHE=n` (a separate, established hang in
+`SCB_EnableDCache`), the board's `ROM_START_OFFSET=0x800`, and
+the `zephyr/patches/mcuboot` `do_boot` flash-base patch (a candidate
+for upstreaming rather than carrying indefinitely).
+
+**The customer path is now proven too.**  Writing slot0 with a plain
+J-Link -- no SETOOLS, no ATOC, no SE-UART -- is measured working:
+an `imgtool`-signed image `loadbin`'d to `0x80010000` is verified by
+MCUboot and chainloaded, and survived three cold power-cycles.
+**Proven at `0x80010000` only** -- writing the ATOC region or erasing
+MCUboot itself was not tested.  A tampered signature or a non-MCUboot
+image at slot0 both leave the debug port alive (a bad slot0 write
+does not brick J-Link access).  Single-slot result
+(`CONFIG_SINGLE_APPLICATION_SLOT=y`) -- A/B swap and OTA are untested,
+not an upgrade-path guarantee.  Full recipe:
+[`docs/aen-provisioning.md`](../../../docs/aen-provisioning.md) §0.5.
+See also [`docs/bring-up-aen.md`](../../../docs/bring-up-aen.md).
 
 ## Boot chain
 
@@ -28,11 +68,24 @@ SES ──ATOC──▶ MCUboot ──verify slot0──▶ application
 ```
 
 MRAM map (from the board DT; MRAM base `0x80000000`): MCUboot `0x80000000`
-· slot0 `0x80010000` (2688 KiB) · slot1 `0x802b0000` (OTA) · scratch ·
-storage.  This is also the **SoM-maker provisioning model** — Alp Lab
-pre-provisions this MCUboot as the factory ATOC so shipped modules boot
-out-of-box and customers `west flash` into slot0 (see
-[`docs/aen-provisioning.md`](../../../docs/aen-provisioning.md)).
+· slot0 `0x80010000` (2688 KiB, bench-proven) · slot1 `0x802b0000`
+(OTA, `[UNTESTED]`) · scratch (`[UNTESTED]`) · storage.  This is also
+the **SoM-maker provisioning model** — Alp Lab pre-provisions this
+MCUboot as the factory ATOC, once per module, over the SE-UART:
+
+```bash
+cd "$SETOOLS_DIR"
+./app-gen-toc -f build/config/app-mcuboot-only.json
+./app-write-mram -c $SE_UART -p
+```
+
+(MCUboot entry: `cpu_id M55_HE`, `loadAddress 0x58000000`,
+`flags ["load","boot"]`, `signed true`.  The SES banner then shows
+`| MCUBOOT- | M55-HE | ... | uLVB |` -- slot0 is no longer an SES boot
+entry; MCUboot owns it from here.)  Shipped modules then boot
+out-of-box, and customers load apps into slot0 via `west flash` **or**
+a plain J-Link with no SETOOLS/SE-UART of their own (see
+[`docs/aen-provisioning.md`](../../../docs/aen-provisioning.md) §0.5).
 
 ## Usage
 
@@ -79,7 +132,11 @@ lifecycle.
   so production signing routes through OPTIGA without an
   intermediate key-format conversion.
 
-## Why swap-using-scratch
+## Why swap-using-scratch `[UNTESTED]`
+
+Neither bench session exercised this mode (both ran
+`CONFIG_SINGLE_APPLICATION_SLOT=y`); this section is the documented
+design rationale, not a bench-run result.
 
 Trades a small flash partition (scratch slot, typically 16-32
 KiB) for crash-robust image swaps: a power loss mid-swap leaves

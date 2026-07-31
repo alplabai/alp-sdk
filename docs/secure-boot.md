@@ -4,16 +4,54 @@ This document describes the chain of trust from immutable ROM
 through to the application on E1M-AEN-family SoMs, plus the
 signing key lifecycle that makes it work.
 
-> **Status: v0.4-prep.**  Scaffolding lands in this revision --
-> the sysbuild config, dev-key generation script, and this
-> document.  Compile-verification gates on the real in-tree board
-> file (`alp_e1m_aen801_m55_he` / `alp_e1m_aen801_m55_hp`, under
-> [`zephyr/boards/alp/`](../zephyr/boards/alp/)).  Full HIL
-> secure-boot verification (signed boot, tampered-image rollback,
-> mid-swap power loss recovery) is still bench-pending — see the
-> MCUboot rows in [`docs/test-plan.md`](test-plan.md) — so treat this
-> doc as the contract downstream consumers build against, not a
-> silicon-proven claim.
+> **Status: boot + signature verification bench-proven on
+> E1M-AEN801 (single-slot); swap-using-scratch's swap/rollback path
+> is untested.**  The chain of trust below -- SES -> MCUboot (ITCM)
+> -> slot0 (MRAM XIP) -> application -- is measured working on real
+> silicon (`AE822FA0E5597LS0` Rev A0, alp-sdk `0da1f1b4`), with
+> `CONFIG_BOOT_SIGNATURE_TYPE_ECDSA_P256=y` and
+> `CONFIG_BOOT_VALIDATE_SLOT0=y` read back from the built
+> `mcuboot/zephyr/.config` rather than assumed: `PC=80012FBC`,
+> `VTOR=80010800`, `CFSR=00000000`, `IPSR=000`.  Verification was
+> proven live, not inferred from a clean boot: flipping one byte of
+> the TLV `0x22` ECDSA signature (file offset `0x4a30`, `0xda` ->
+> `0xdb`, with TLV `0x10`/SHA-256 and TLV `0x01`/key left intact)
+> produces `D: bootutil_verify_sig: ECDSA builtin key 0` then
+> `E: Unable to find bootable image`, `VTOR = 0x00000000` -- a halt,
+> not a swap-back to a previous slot (this build had none:
+> `CONFIG_SINGLE_APPLICATION_SLOT=y`).  `SIGNATURE_TYPE_NONE` +
+> `VALIDATE_SLOT0=y` boots in twelve seconds (watched ten minutes,
+> CycleCnt advancing).
+>
+> **A separate build on the reference `swap-using-scratch` profile
+> boots and logs `I: Bootloader chainload address offset: 0x10000` --
+> boot only.  The swap/rollback path itself (failed-image swap-back,
+> mid-swap power loss recovery, revert-on-unconfirmed) was NOT
+> exercised** -- see "Failure modes + rollback" below.
+>
+> The verified backend is **TinyCrypt** (`CONFIG_BOOT_ECDSA_TINYCRYPT=y`),
+> not yet MbedTLS PSA.  The built `.config` also confirms
+> `CONFIG_SINGLE_APPLICATION_SLOT=y` and `CONFIG_FLASH_BASE_ADDRESS=0x0`
+> (MCUboot itself is ITCM-linked).  Still required: `CONFIG_DCACHE=n`
+> (a separate, established hang in `SCB_EnableDCache`), the board's
+> `ROM_START_OFFSET=0x800`, and the `zephyr/patches/mcuboot`
+> `do_boot` flash-base patch (a candidate for upstreaming rather than
+> carrying indefinitely).  Compile-verification also gates on the real
+> in-tree board file (`alp_e1m_aen801_m55_he` / `alp_e1m_aen801_m55_hp`,
+> under [`zephyr/boards/alp/`](../zephyr/boards/alp/)).
+>
+> **The customer path is now proven too.**  A plain J-Link `loadbin` of
+> an `imgtool`-signed image straight to slot0 (`0x80010000`) -- no
+> SETOOLS, no ATOC, no SE-UART -- is verified by MCUboot and
+> chainloaded, and survived three cold power-cycles.  **Proven at
+> `0x80010000` only** -- writing the ATOC region or erasing MCUboot
+> itself was not tested.  Both refusal shapes (tampered signature, or a
+> non-MCUboot image) leave the debug port alive (`Secure debug:
+> enabled`, core halts and single-steps normally) -- a bad slot0 write
+> does not brick J-Link access.  This is a **single-slot** result
+> (`CONFIG_SINGLE_APPLICATION_SLOT=y`); A/B swap and OTA are untested,
+> so don't read it as an upgrade-path guarantee.  Full recipe:
+> [`docs/aen-provisioning.md`](aen-provisioning.md) §0.5.
 
 ## Chain of trust
 
@@ -42,6 +80,14 @@ signing key lifecycle that makes it work.
 │     is probe-only today; see "Signing key lifecycle".)      │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+> **`[UNTESTED]` -- the "Failed verification triggers swap-back to
+> the previous slot" bullet above.**  Neither bench session ran
+> swap-using-scratch's two-slot swap-back; the single-slot build that
+> was tested has no previous slot to fall back to, and measured
+> `E: Unable to find bootable image` / `VTOR = 0x00000000` -- a halt,
+> not a swap.  See the status block above and "Failure modes +
+> rollback" below.
 
 The SDK touches the MCUboot layer.  The Alif Secure Enclave
 ROM + first-stage are out of scope -- they ship with the SoM
@@ -181,8 +227,16 @@ image escapes a slot whose key is still trusted.
 
 ## Failure modes + rollback
 
-MCUboot in `swap-using-scratch` mode handles three pathological
-cases:
+`[UNTESTED]` -- both bench sessions ran `CONFIG_SINGLE_APPLICATION_SLOT=y`
+(no secondary slot); the table below is swap-using-scratch's documented
+two-slot design and has not itself been exercised.  What **is** measured:
+a single-slot build with a bad signature halts (`E: Unable to find
+bootable image`, `VTOR = 0x00000000`) rather than falling back to a
+previous slot -- there is no previous slot in that configuration, which
+also means row 1 below does not describe the single-slot case.
+
+MCUboot in `swap-using-scratch` mode is *designed* to handle three
+pathological cases:
 
 | Failure                                | What happens                                   |
 |----------------------------------------|------------------------------------------------|

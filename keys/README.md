@@ -5,6 +5,12 @@
 **This directory holds development keys for MCUboot image
 signing.  Production keys never live in git.**
 
+> **Bench status.** MCUboot's ECDSA-P256 verification of a
+> `mcuboot_dev_ecdsa_p256.pem`-signed slot0 image is measured working
+> on E1M-AEN801 (`AE822FA0E5597LS0` Rev A0, alp-sdk `0da1f1b4`) --
+> see [`docs/secure-boot.md`](../docs/secure-boot.md) for the full
+> measurement.
+
 ## Key files
 
 | File                              | Type                 | Tracked in git? | Notes |
