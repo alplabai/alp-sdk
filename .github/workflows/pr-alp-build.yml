@@ -38,6 +38,14 @@ on:
       - 'scripts/**'
       - 'examples/**/board.yaml'
       - 'src/**'
+      # Bootloader/sysbuild config. Added because a change to the AEN MCUboot
+      # profile -- switching slot0 verification from SIGNATURE_TYPE_NONE to
+      # ECDSA-P256 -- matched NONE of the filters above and so was merged past a
+      # check list with zero build jobs in it. A bootloader config that nothing
+      # builds in CI is exactly how a stale verdict survives for six weeks.
+      - 'zephyr/sysbuild/**'
+      - 'examples/**/sysbuild.conf'
+      - 'examples/**/sysbuild/**'
       - '.github/workflows/pr-alp-build.yml'
   push:
     branches: [main, dev]
@@ -46,6 +54,9 @@ on:
       - 'scripts/**'
       - 'examples/**/board.yaml'
       - 'src/**'
+      - 'zephyr/sysbuild/**'
+      - 'examples/**/sysbuild.conf'
+      - 'examples/**/sysbuild/**'
   workflow_dispatch:
 
 concurrency:
