@@ -24,7 +24,7 @@ west-commands:
       - name: alp-quality
         class: AlpQuality
         help: Run the quality-task registry for a profile (JSON/JUnit/SARIF)
-  # Read-only inspector for the orchestrator's --emit seam (no build).
+  # Read-only inspector for the planner's --emit seam (no build).
   - file: scripts/west_commands/alp_emit.py
     commands:
       - name: alp-emit

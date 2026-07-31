@@ -1,11 +1,25 @@
 # SPDX-License-Identifier: Apache-2.0
 """`west alp-emit` -- print one generated config artefact from board.yaml.
 
-A read-only, west-native front door to the orchestrator's `--emit` surface (the
+A read-only, west-native front door to the planner's `--emit` surface (the
 ADR-0014 seam the CLI + IDE consume): the system-manifest, the build-plan, and
 the per-slice dts/conf shapes. It runs no build and writes nothing -- it just
-fans `board.yaml` through `alp_orchestrate --emit <mode>` and prints the result
-to stdout, so you can inspect exactly what a tool would consume.
+fans `board.yaml` through the planner and prints the result to stdout, so you
+can inspect exactly what a tool would consume.
+
+The planner is tan's, not the SDK's (ADR-0020): this spawns
+`python -m tan.planner_cli`, the relocated argv entry for the package that used
+to be `scripts/alp_orchestrate/`. Same flags, same eight modes, same bytes on
+stdout -- `tan/planner/cli.py` IS the module that moved.
+
+NOT `tan generate`: that command and this one cover disjoint artefact sets
+(docs/cli.md's "disjoint artefact sets" note). `tan generate --target` reaches
+the board-derived config targets and writes them to FILES via `--output`; none
+of the eight modes below is one of them, and no `tan` subcommand streams them
+to stdout.
+
+Requires the tan Python distribution (`pip install alp-tan`) -- a frozen `tan`
+binary alone cannot serve this, since `python -m` needs the importable package.
 
 Examples:
     west alp-emit system-manifest
@@ -15,6 +29,7 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
@@ -55,9 +70,35 @@ from _alp_common import (                         # noqa: E402
     resolve_board_yaml,
 )
 
-# Mirror the orchestrator's --emit choices (alp_orchestrate.cli).  Kept here as
-# the user-facing list; the orchestrator validates it again, so a drift just
-# surfaces as its error, never a silent wrong emit.
+# The planner's argv entry: tan's relocation of `alp_orchestrate/__main__.py`,
+# deliberately a sibling module rather than `tan.planner.__main__` (its own
+# docstring: `python -m <pkg>` imports the PACKAGE first, which would bind the
+# SDK root before anything could set it).  A module form, not the `tan`
+# executable, because no `tan` subcommand exposes the modes below.
+_PLANNER_MODULE = "tan.planner_cli"
+
+#: What to tell a user who has no importable tan (see the module docstring).
+_PLANNER_INSTALL_HINT = "pip install alp-tan"
+
+
+def _planner_importable() -> bool:
+    """Whether `_PLANNER_MODULE` can be imported by this interpreter.
+
+    `find_spec` on a SUBMODULE imports its parent package to read
+    `__path__`, so a missing `tan` RAISES ModuleNotFoundError here rather
+    than returning None -- which is the whole case this probe exists for.
+    ValueError covers a parent that is importable but has no `__spec__`.
+    """
+    try:
+        return importlib.util.find_spec(_PLANNER_MODULE) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+# Mirror the planner's --emit choices (tan/planner/cli.py, the relocated
+# alp_orchestrate.cli).  Kept here as the user-facing list; the planner
+# validates it again, so a drift just surfaces as its error, never a silent
+# wrong emit.
 _EMIT_MODES = [
     "system-manifest",
     "ipc-contract-h",
@@ -112,11 +153,25 @@ class AlpEmit(WestCommand):
         if not board_yaml.is_file():
             log.die(f"alp-emit: board.yaml not found at {board_yaml}")
 
-        # Same module-form invocation as `west alp-build`; env_with_sdk() puts
-        # scripts/ on PYTHONPATH so `-m alp_orchestrate` resolves.
+        # Probed here, in-process, rather than left to the spawn: python_exe()
+        # is sys.executable (its `python3` fallback needs an interpreter with
+        # no sys.executable, which west never is), so a spec found here is a
+        # spec the child will find too -- and a bare `python -m
+        # tan.planner_cli` that misses lands as a raw ModuleNotFoundError
+        # traceback with no install line anywhere in it.
+        if not _planner_importable():
+            log.die(f"alp-emit: the tan planner ({_PLANNER_MODULE}) is not "
+                    f"importable from {python_exe()} -- install it with "
+                    f"`{_PLANNER_INSTALL_HINT}`. A frozen `tan` binary on PATH "
+                    f"is not enough: this needs the importable package.")
+
+        # --sdk-root wins over ALP_SDK_ROOT and over the planner's own walk-up
+        # (tan/planner_cli.py's _bootstrap), so the root west resolved is the
+        # root the planner binds -- never a checkout the CWD happens to sit in.
         cmd = [
             python_exe(),
-            "-m", "alp_orchestrate",
+            "-m", _PLANNER_MODULE,
+            "--sdk-root", str(sdk_root),
             "--input", str(board_yaml),
             "--emit", args.mode,
         ]

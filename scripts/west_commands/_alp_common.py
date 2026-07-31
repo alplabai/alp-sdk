@@ -4,7 +4,7 @@ Shared helpers for the alp-sdk west extension commands.
 
 A wrapper using this module needs to:
 
-  1. Locate the SDK root so it can call scripts/alp_orchestrate/.
+  1. Locate the SDK root so it can hand it to the planner.
   2. Resolve the board.yaml the customer points at.
   3. Bootstrap ALP_SDK_ROOT + EXTRA_ZEPHYR_MODULES in the sub-process
      env without spamming the system PATH.
@@ -21,6 +21,20 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+# The alp-sdk root marker.  NOT west.yml or pyproject.toml: every Zephyr
+# module ships the first and every Python project the second, so bare
+# existence would resolve a workspace that merely NESTS alp-sdk (or any
+# sibling repo) to the wrong root.  metadata/sdk_version.yaml is named
+# after alp-sdk, is committed, and already carries the version every
+# emit checks a board's hw_rev against -- it cannot outlive the SDK it
+# identifies.
+_SDK_MARKER = ("metadata", "sdk_version.yaml")
+
+
+def _is_sdk_root(path: Path) -> bool:
+    """Whether `path` is an alp-sdk checkout root (see `_SDK_MARKER`)."""
+    return path.joinpath(*_SDK_MARKER).is_file()
+
 
 def find_sdk_root() -> Optional[Path]:
     """Locate the alp-sdk root through (in order):
@@ -28,19 +42,19 @@ def find_sdk_root() -> Optional[Path]:
       ALP_SDK_ROOT env -> this file's grandparent ->
       EXTRA_ZEPHYR_MODULES / ZEPHYR_EXTRA_MODULES entries.
 
-    Returns the first path that contains scripts/alp_orchestrate/;
-    None when no candidate works.
+    Returns the first path carrying `_SDK_MARKER`; None when no
+    candidate works.
     """
     env_root = os.environ.get("ALP_SDK_ROOT", "").strip()
     if env_root:
         p = Path(env_root)
-        if (p / "scripts" / "alp_orchestrate" / "__init__.py").is_file():
+        if _is_sdk_root(p):
             return p
 
     # scripts/west_commands/_alp_common.py -> the sdk root is two
     # parents up.
     candidate = Path(__file__).resolve().parents[2]
-    if (candidate / "scripts" / "alp_orchestrate" / "__init__.py").is_file():
+    if _is_sdk_root(candidate):
         return candidate
 
     for var in ("EXTRA_ZEPHYR_MODULES", "ZEPHYR_EXTRA_MODULES"):
@@ -50,8 +64,7 @@ def find_sdk_root() -> Optional[Path]:
         # where `;` != `:`.
         for entry in os.environ.get(var, "").split(";"):
             entry = entry.strip()
-            if entry and (Path(entry) / "scripts" /
-                          "alp_orchestrate" / "__init__.py").is_file():
+            if entry and _is_sdk_root(Path(entry)):
                 return Path(entry)
     return None
 
@@ -85,13 +98,8 @@ def env_with_sdk(sdk_root: Path) -> dict[str, str]:
         env["EXTRA_ZEPHYR_MODULES"] = (existing + zsep + str(sdk_root)
                                         if existing else str(sdk_root))
     env["ALP_SDK_ROOT"] = str(sdk_root)
-    # Make sure the alp_orchestrate package is importable when a wrapper
-    # invokes the python module form (`python -m alp_orchestrate`).
-    # PYTHONPATH is a real OS path list -- os.pathsep, unlike
-    # EXTRA_ZEPHYR_MODULES above.
-    pp = env.get("PYTHONPATH", "")
-    sdk_scripts = str(sdk_root / "scripts")
-    psep = os.pathsep
-    if sdk_scripts not in pp.split(psep):
-        env["PYTHONPATH"] = (pp + psep + sdk_scripts) if pp else sdk_scripts
+    # No PYTHONPATH injection: the planner is tan's (`tan.planner`), and
+    # it resolves metadata off the SDK root it is handed, not off an
+    # import path.  Putting <sdk>/scripts on PYTHONPATH would only make
+    # the SDK's own soon-to-go Python importable again.
     return env
