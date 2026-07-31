@@ -7,6 +7,50 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.15.0 candidate
 
+### Fixed — a scaffolded AEN Zephyr app linked at the MRAM base, so no flash flow accepted it (#1067)
+
+`tan init --from-example` + `tan build` for an AEN board produced an image
+`alif_flash` refuses, verbatim:
+
+    FATAL ERROR: unrecognised reset vector 0x80005b55 -- expected a slot0-XIP
+    image in App MRAM (0x80010000..0x80580000) or an ITCM-load image
+    (0x58xxxxxx M55-HE / 0x50xxxxxx M55-HP). Refusing to burn a mismatched image
+
+The refusal was correct: `CONFIG_FLASH_LOAD_OFFSET=0`, so the image linked at
+the MRAM base `0x80000000` — on top of the boot partition — while the board DT
+already said `zephyr,code-partition = &slot0_partition` (`partition@10000`).
+Only the Kconfig that honours that chosen was missing. Hand-maintained AEN
+examples set it in their own `prj.conf` and flashed fine; the documented
+scaffold path did not, and that asymmetry was the defect.
+
+The AEN board `_defconfig` now carries `CONFIG_USE_DT_CODE_PARTITION=y`
+(emitted by `scripts/gen_zephyr_board.py`'s `_aen_defconfig()`, paired with the
+`zephyr,code-partition` chosen the same generator lays down; hand-applied to
+the hand-authored AEN401/AEN601 defconfigs). The link offset is a property of
+the board's flash map, not of any app, so the board layer is where every
+consumer picks it up — plain `west build`, twister, the `board.yaml` planner
+and `tan` alike, with no per-app `prj.conf` line and no re-sync. Measured on
+`alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp`: `FLASH_LOAD_OFFSET`
+`0` -> `0x10000`, `FLASH_LOAD_SIZE` `0` -> `0x2a0000` (an overflow into
+`image-1` is now a link error), reset vector `0x80005b55` -> `0x80010d55`. No
+MCUboot involved — a bare app links slot0-correctly on its own.
+
+The four examples that hand-set the Kconfig drop it. Two Flow C overlays
+(`aen-tz-secure-log-append`, `aen-tz-secure-log-probe`) deleted
+`zephyr,code-partition` from `&itcm` instead of from `/chosen`, which is a
+no-op; latent before, it would have relinked those apps at `0x10000` inside a
+256 KiB ITCM, so both are corrected to the `/chosen` form the other ~55 AEN
+overlays already use. **Bench note:** every Flow C RAM-run now needs the ITCM
+retarget (`scripts/bench/aen/aen-flowc-itcm.conf` + `.overlay`), not just the
+apps that hard-code the offset; `ram-run.sh` already refuses a slot0-linked
+image with exit 5 rather than mis-running it.
+
+Still open, deliberately not resolved here: `metadata/schemas/board.schema.json`
+promises that an absent `boot:` block yields SDK defaults ("AEN-Zephyr: MCUboot
++ ECDSA-P256 + swap-using-scratch") while `scripts/alp_orchestrate/secure.py`
+returns early on an empty `boot:` and emits nothing. Which of the two is
+authoritative is a design call, not a patch.
+
 ### Fixed — an `hw_rev` absent from the resolved table silently built against the wrong hardware (#1025, the safe half)
 
 `scripts/alp_project_loader.py`'s `_hwrev_pad_route_overrides()` did

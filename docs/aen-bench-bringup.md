@@ -188,6 +188,16 @@ retargets the ROM *region* to ITCM, it does not reset a `prj.conf`'s own
 `CONFIG_FLASH_LOAD_OFFSET`. The retarget is really two independent, BOTH-required
 settings, each a committed artifact under `scripts/bench/aen/`:
 
+> **Since alp-sdk#1067 the ITCM retarget is required for EVERY Flow C RAM-run,
+> not just for the apps that hard-code the offset.** The AEN board `_defconfig`
+> now sets `CONFIG_USE_DT_CODE_PARTITION=y`, so a plain `west build` links into
+> MRAM slot0 (`FLASH_LOAD_OFFSET=0x10000`, reset vector `0x8001xxxx`) — which is
+> what Flow A/D and `alif_flash` need, and what Flow C must undo. `ram-run.sh`
+> refuses a slot0-linked image (exit 5) rather than mis-running it. An app whose
+> own `boards/*.overlay` already carries the two `chosen` lines below needs no
+> extra fragments; one that deletes `zephyr,code-partition` from `&itcm` instead
+> of from `/chosen` does **not** — that form is a no-op and now mislinks.
+
 - the devicetree half — [`aen-flowc-itcm.overlay`](../scripts/bench/aen/aen-flowc-itcm.overlay)
   (`zephyr,flash = &itcm;`, path-ref not `<&itcm>`, +
   `/delete-property/ zephyr,code-partition;`), which stops Zephyr from deriving
@@ -212,10 +222,11 @@ scripts/bench/aen/build.sh <app-dir> \
 ```
 
 Both `aen-flowc-itcm.conf` lines are needed because they undo two different
-things. `USE_DT_CODE_PARTITION=n` alone stops an app that *derives* its offset
-from the DT code-partition, but it does **not** touch a hard-coded literal
-`CONFIG_FLASH_LOAD_OFFSET=0x10000`. Seven examples hard-code that offset for
-their normal slot0 boot and must keep it — do NOT remove it from these files:
+things. `USE_DT_CODE_PARTITION=n` alone undoes the board `_defconfig`'s
+*derived* offset, but it does **not** touch a hard-coded literal
+`CONFIG_FLASH_LOAD_OFFSET=0x10000`. Seven examples hard-code that offset —
+redundant since #1067 (Kconfig resolves the same `0x10000` with no warning) but
+harmless, and they are still the reason the second line exists:
 the five `aen-cc3501e-*` apps (`aen-cc3501e-ble-gatt`, `aen-cc3501e-bringup`,
 `aen-cc3501e-companion-tour`, `aen-cc3501e-gatt-register`, `aen-cc3501e-gpio`)
 and `aen-eeprom-manifest`, all via their own `prj.conf`, plus
@@ -347,7 +358,8 @@ secure-boot verification — always write both consistent blobs.
 > facts the bench pinned down: the app entry's `mramAddress` is the **full** address
 > `0x80010000` (the `0x10000` *offset* gives SETOOLS `Invalid Global Address`), and the
 > image needs **`CONFIG_USE_DT_CODE_PARTITION=y`** so it links at the slot0 offset
-> (`0x8001xxxx` reset vector) instead of the MRAM base (`0x8000xxxx`, which faults). Proven
+> (`0x8001xxxx` reset vector) instead of the MRAM base (`0x8000xxxx`, which faults) —
+> since #1067 the board `_defconfig` supplies that, so no app sets it. Proven
 > by `examples/aen/aen-npu-inference-person-mram` (the real `person_detect` MobileNet run
 > from MRAM → `RESULT PASS`). The same shape provisions over the SE-UART with plain
 > `west flash` / `app-write-mram` too (§ above) — this script is the faster SWD-only path,

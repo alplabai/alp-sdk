@@ -58,8 +58,8 @@ scripts/bench/aen/build.sh   $PWD/examples/aen/aen-tz-secure-log-append
 scripts/bench/aen/ram-run.sh "$BENCH_ROOT/build/aen-tz-secure-log-append"
 # then read 0x02001100 over SWD (table above)
 
-# Or SES-boot it via Flow D: drop boards/*.overlay, add
-# CONFIG_USE_DT_CODE_PARTITION=y, then scripts/bench/aen/flash-jlink-mramxip.sh.
+# Or SES-boot it via Flow D: drop boards/*.overlay (the board _defconfig then
+# links it into slot0), then scripts/bench/aen/flash-jlink-mramxip.sh.
 ```
 
 Anti-rollback across a full reflash still needs a monotonic NV counter (#111).

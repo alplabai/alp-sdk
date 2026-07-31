@@ -22,9 +22,12 @@
 # OFFSET gives SETOOLS "Invalid Global Address") + flags ["boot"] (NOT loadAddress),
 # so app-gen-toc signs the app where it sits in MRAM rather than embedding it.
 #
-# The app build MUST set CONFIG_USE_DT_CODE_PARTITION=y so it links at the slot0
-# offset (reset vector 0x8001xxxx). Without it FLASH_LOAD_OFFSET stays 0 and the
-# image links at the MRAM base (0x8000xxxx) and faults on an SE slot0 boot.
+# The image MUST link at the slot0 offset (reset vector 0x8001xxxx). Since
+# alp-sdk#1067 the board _defconfig supplies that (CONFIG_USE_DT_CODE_PARTITION=y),
+# so a plain build is already correct; a 0x8000xxxx vector now means something in
+# the build OVERRODE it (a Flow C fragment/overlay left layered on), not that the
+# app forgot to opt in. FLASH_LOAD_OFFSET back at 0 links the image at the MRAM
+# base and it faults on an SE slot0 boot.
 #
 # GOTCHA -- returning to ITCM apps: once a slot0 image is resident, the SE boots
 # it preferentially over an ITCM-load ATOC, and a J-Link `erase` does NOT clear
@@ -73,7 +76,9 @@ echo ">>> FLOW-D MRAM-XIP $NAME  (reset vector=0x$RV  ram_console_buf=${BUF_SYM:
 case "$RV" in
   8001*) : ;;  # good -- linked into slot0 (0x80010000 + reset-handler offset)
   8000*) echo "!! reset vector 0x$RV is BASE-linked (0x8000xxxx), not slot0."
-         echo "   Add CONFIG_USE_DT_CODE_PARTITION=y so FLASH_LOAD_OFFSET=0x10000."
+         echo "   The board _defconfig sets CONFIG_USE_DT_CODE_PARTITION=y, so"
+         echo "   something overrode it -- drop any Flow C fragment/overlay"
+         echo "   (aen-flowc-itcm.conf / .overlay) and rebuild pristine."
          exit 3 ;;
   *) echo "!! reset vector 0x$RV unexpected -- not a 0x8001xxxx slot0 image."
      echo "   Drop any &itcm overlay; let the board default link into MRAM slot0."

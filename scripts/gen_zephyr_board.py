@@ -446,11 +446,38 @@ def _aen_ethos_u(soc_spec: dict[str, Any]) -> tuple[str, str] | None:
 
 
 def _aen_defconfig(uart_node: str) -> str:
+    # CONFIG_USE_DT_CODE_PARTITION is the Kconfig half of the very
+    # `zephyr,code-partition = &slot0_partition;` chosen that _aen_dts()
+    # (below) lays down for every board this function serves -- the two are
+    # emitted as a pair, from the same MRAM partition map, so the board can
+    # never carry the DT fact without the Kconfig that honours it.  Without
+    # it Zephyr leaves FLASH_LOAD_OFFSET at 0 and the image links at the MRAM
+    # base 0x80000000, on top of the boot partition: the reset vector comes
+    # out 0x8000xxxx, which `alif_flash` rejects ("unrecognised reset vector
+    # ... expected a slot0-XIP image") and which faults if it is written
+    # anyway.  Set here, in the board layer, rather than in each app's
+    # prj.conf, because the link offset is a property of THIS BOARD's flash
+    # map, not of any app -- so it reaches every consumer of the board
+    # equally (plain `west build`, twister, the board.yaml planner, `tan`).
+    # It is also where upstream Zephyr boards with a fixed bootloader slot
+    # set it (`grep -l USE_DT_CODE_PARTITION=y zephyr/boards/**/*_defconfig`).
+    #
+    # A Flow C ITCM RAM-run deliberately undoes it (a board defconfig is the
+    # lowest-precedence Kconfig layer): `scripts/bench/aen/aen-flowc-itcm.conf`
+    # + `aen-flowc-itcm.overlay`.  MCUboot's own image is unaffected -- it
+    # re-points the chosen at &boot_partition via mcuboot's app.overlay.
     return (
         _COPYRIGHT_HASH +
         "\n"
         "CONFIG_ARM_MPU=y\n"
         "CONFIG_HW_STACK_PROTECTION=y\n"
+        "\n"
+        "# Link the image into the board's `zephyr,code-partition`\n"
+        "# (slot0_partition, MRAM 0x80010000) instead of the MRAM base --\n"
+        "# without it the reset vector lands at 0x8000xxxx and no AEN flash\n"
+        "# flow accepts the image.  Flow C (ITCM RAM-run) overrides it via\n"
+        "# scripts/bench/aen/aen-flowc-itcm.conf.\n"
+        "CONFIG_USE_DT_CODE_PARTITION=y\n"
         "\n"
         f"# Console: Alif {uart_node.upper()} (E1M edge \"UART0\", "
         "P3_4/P3_5) -- NS16550-class UART.\n"

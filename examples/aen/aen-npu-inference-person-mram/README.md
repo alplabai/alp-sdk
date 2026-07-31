@@ -31,7 +31,7 @@ path correctly. The model rodata lives in MRAM (XIP) and is `memcpy`'d into an
 | Model | `tiny_int8` fixture (8 MACs) | `person_detect` MobileNet (~7.1M MACs) |
 | Link / boot | ITCM RAM-run (≤256 KiB) | **MRAM slot0** `0x80010000` |
 | Flash | Flow D single-blob (ITCM ATOC) | **Flow D two-blob** (app + ATOC) |
-| Key Kconfig | — | **`CONFIG_USE_DT_CODE_PARTITION=y`** (links at the slot0 offset; without it the image links at `0x80000000` and faults) |
+| Key Kconfig | ITCM retarget overlay (`zephyr,flash = &itcm` + `/delete-property/ zephyr,code-partition`) | — (the board `_defconfig`'s **`CONFIG_USE_DT_CODE_PARTITION=y`** links every image at the slot0 offset; nothing to set per app) |
 
 ## Build
 
@@ -73,7 +73,9 @@ west build ... \
 ```
 
 Sanity-check the link before flashing: `xxd -e -l 8 zephyr.bin` word 2 must read
-`0x8001xxxx` (slot0). `0x8000xxxx` means `CONFIG_USE_DT_CODE_PARTITION` is missing.
+`0x8001xxxx` (slot0). `0x8000xxxx` means the board `_defconfig`'s
+`CONFIG_USE_DT_CODE_PARTITION=y` was overridden — usually a Flow C fragment or
+ITCM overlay still layered on the build.
 
 ## Run (Flow D — MRAM-XIP two-blob)
 
