@@ -1,4 +1,5 @@
-<!-- Last verified: 2026-05-18 against slice-3b state. -->
+<!-- Last verified: 2026-07-31 against alp-sdk 0da1f1b4 on E1M-AEN801
+     (AE822FA0E5597LS0 Rev A0). -->
 
 # Tutorial 10: Secure boot + image signing
 
@@ -20,6 +21,32 @@ lifecycle, and the swap-using-scratch rollback path.
 > is the design + lifecycle.  This tutorial is the
 > step-by-step.  [`docs/security-advisories.md`](../security-advisories.md)
 > is the disclosure flow for any signing-related issues you find.
+
+> **Bench status (§§1-3 only).** Building, signing, and MCUboot's
+> reject-on-bad-signature path are measured working on real
+> E1M-AEN801 silicon (`AE822FA0E5597LS0` Rev A0, alp-sdk `0da1f1b4`),
+> with `CONFIG_BOOT_SIGNATURE_TYPE_ECDSA_P256=y` and
+> `CONFIG_BOOT_VALIDATE_SLOT0=y` read back from the built
+> `mcuboot/zephyr/.config`.  The bench's own repro of rejection was a
+> one-byte flip inside the TLV `0x22` signature (file offset `0x4a30`,
+> `0xda` -> `0xdb`), not a wrong-key resign: `bootutil_verify_sig:
+> ECDSA builtin key 0` then `Unable to find bootable image`.  §3
+> below exercises the same reject path with a differently-signed
+> image; its transcript is illustrative, not a bench-run quote.
+> **§4 (swap-using-scratch rollback) and the two `[UNTESTED]` bullets
+> in §5 were not exercised** -- every session ran
+> `CONFIG_SINGLE_APPLICATION_SLOT=y`, which has no secondary slot to
+> swap into.  Still required on this part: `CONFIG_DCACHE=n` (a
+> separate, established hang in `SCB_EnableDCache`, not something new
+> from this bench round), the board's default `ROM_START_OFFSET=0x800`,
+> and the `zephyr/patches/mcuboot` `do_boot` flash-base patch (a
+> candidate for upstreaming).  The verified backend is TinyCrypt
+> (`CONFIG_BOOT_ECDSA_TINYCRYPT=y`), not MbedTLS PSA.  Flashing
+> `build/zephyr/zephyr.signed.bin` straight to slot0 with a plain
+> J-Link, no SETOOLS/SE-UART/ATOC, is a proven customer path too --
+> at `0x80010000` only, single-slot, A/B/OTA untested -- see
+> [`docs/aen-provisioning.md`](../aen-provisioning.md) §0.5 for the
+> exact recipe.
 
 ---
 
@@ -178,7 +205,12 @@ MCUboot output on the UART:
 The bootloader refuses to chain into a wrongly-signed image
 and halts.  Recovery: reflash with a properly-signed image.
 
-## 4. Verify swap-using-scratch rollback
+## 4. Verify swap-using-scratch rollback `[UNTESTED — single-slot only]`
+
+> Neither bench session exercised this section -- both ran
+> `CONFIG_SINGLE_APPLICATION_SLOT=y` (no secondary slot to swap
+> into).  The steps below are the documented swap-using-scratch flow,
+> not a bench-run transcript.
 
 Two images, both signed, the new one buggy:
 
@@ -227,9 +259,10 @@ is automatic; no host intervention needed.
 - An attacker who can reflash the application slot but doesn't
   have the signing key can't get the new image to boot.
 - A buggy-but-signed update reverts cleanly on the next boot
-  cycle if the watchdog or panic fires.
+  cycle if the watchdog or panic fires. `[UNTESTED — single-slot only]`
 - A mid-swap power loss doesn't brick the device --
   swap-using-scratch's atomic-commit semantics handle it.
+  `[UNTESTED — single-slot only]`
 
 **Doesn't guarantee:**
 

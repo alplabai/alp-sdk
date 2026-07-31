@@ -7,6 +7,213 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.15.0 candidate
 
+### Fixed — a scaffolded AEN Zephyr app linked at the MRAM base, so no flash flow accepted it (#1067)
+
+`tan init --from-example` + `tan build` for an AEN board produced an image
+`alif_flash` refuses, verbatim:
+
+    FATAL ERROR: unrecognised reset vector 0x80005b55 -- expected a slot0-XIP
+    image in App MRAM (0x80010000..0x80580000) or an ITCM-load image
+    (0x58xxxxxx M55-HE / 0x50xxxxxx M55-HP). Refusing to burn a mismatched image
+
+The refusal was correct: `CONFIG_FLASH_LOAD_OFFSET=0`, so the image linked at
+the MRAM base `0x80000000` — on top of the boot partition — while the board DT
+already said `zephyr,code-partition = &slot0_partition` (`partition@10000`).
+Only the Kconfig that honours that chosen was missing. Hand-maintained AEN
+examples set it in their own `prj.conf` and flashed fine; the documented
+scaffold path did not, and that asymmetry was the defect.
+
+The AEN board `_defconfig` now carries `CONFIG_USE_DT_CODE_PARTITION=y`
+(emitted by `scripts/gen_zephyr_board.py`'s `_aen_defconfig()`, paired with the
+`zephyr,code-partition` chosen the same generator lays down; hand-applied to
+the hand-authored AEN401/AEN601 defconfigs). The link offset is a property of
+the board's flash map, not of any app, so the board layer is where every
+consumer picks it up — plain `west build`, twister, the `board.yaml` planner
+and `tan` alike, with no per-app `prj.conf` line and no re-sync. Measured on
+`alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp`: `FLASH_LOAD_OFFSET`
+`0` -> `0x10000`, `FLASH_LOAD_SIZE` `0` -> `0x2a0000` (an overflow into
+`image-1` is now a link error), reset vector `0x80005b55` -> `0x80010d55`. No
+MCUboot involved — a bare app links slot0-correctly on its own.
+
+The four examples that hand-set the Kconfig drop it. Two Flow C overlays
+(`aen-tz-secure-log-append`, `aen-tz-secure-log-probe`) deleted
+`zephyr,code-partition` from `&itcm` instead of from `/chosen`, which is a
+no-op; latent before, it would have relinked those apps at `0x10000` inside a
+256 KiB ITCM, so both are corrected to the `/chosen` form the other ~55 AEN
+overlays already use. **Bench note:** every Flow C RAM-run now needs the ITCM
+retarget (`scripts/bench/aen/aen-flowc-itcm.conf` + `.overlay`), not just the
+apps that hard-code the offset; `ram-run.sh` already refuses a slot0-linked
+image with exit 5 rather than mis-running it.
+
+Still open, deliberately not resolved here: `metadata/schemas/board.schema.json`
+promises that an absent `boot:` block yields SDK defaults ("AEN-Zephyr: MCUboot
++ ECDSA-P256 + swap-using-scratch") while `scripts/alp_orchestrate/secure.py`
+returns early on an empty `boot:` and emits nothing. Which of the two is
+authoritative is a design call, not a patch.
+
+### Fixed — an `hw_rev` absent from the resolved table silently built against the wrong hardware (#1025, the safe half)
+
+`scripts/alp_project_loader.py`'s `_hwrev_pad_route_overrides()` did
+
+    (data.get("hw_revisions") or {}).get(hw_rev) or {}
+
+A typo, or a revision newer than the installed SDK, resolved to `{}` —
+empty per-rev overrides — so the build proceeded with **base-revision pad
+routing** and a clean exit code. On AEN, r1 and r2 differ in real routes
+(`metadata/e1m_modules/aen/hw-revisions.yaml`: IO8 -> WIFI_GPIO30, IO10 ->
+WIFI_GPIO35, IO21 unrouted), so this was a wrong-hardware emit that looked
+like a success.
+
+New `sdk_compat.revision_known()` is the existence predicate: given a
+resolved `hw_revisions:` table and a requested rev, is that rev a declared
+key. Pure and data-only, same shape as `#1019`'s `incompatibility()` /
+`check()`. Deliberately blind to `status:` — a `status: reserved` or
+`status: tbd` revision, or one carrying no `status` key at all, still
+PASSES this gate; whether an *existing* reserved/tbd revision should
+refuse a build remains open (the metadata disagrees across families on
+what `status:` even means: aen r3-r8 are `reserved`, v2n/v2n-m1 r2-r8
+carry no `status` key, imx93 r1 is `tbd` and an in-tree example
+(`examples/multicore/rpmsg-imx93/board.yaml`) builds against it).
+
+`scripts/alp_orchestrate/loader.py`'s `_check_hw_rev_exists()` runs this
+BEFORE `_check_sdk_supports_hw_rev()`'s min/max comparison — an unknown
+revision has no bounds to compare, so reporting it as out-of-range would
+name the wrong cause. It raises a new `SdkRevisionUnknown`
+(`OrchestratorError` subclass, so every existing `except
+OrchestratorError` keeps catching it), distinct from `SdkRevisionUnsupported`
+so a caller can map exactly this failure without string-matching a
+message. `scripts/validate_board_yaml.py` maps it to a new **exit code
+4** (`EXIT_SDK_REVISION_UNSUPPORTED` stays 3).
+
+**Both loaders, not one**: `--emit composed-route-table` /
+`carrier-netlist` resolve the SoM/board tables through
+`alp_project_loader.py`'s own copy of the resolution, independent of
+`load_board_yaml` — `_hwrev_pad_route_overrides()` (the site with the
+original bug) carries the same gate directly, so both consumers of the
+family `hw-revisions.yaml` table refuse identically.
+
+The error message names the requested revision, the SKU or board, and the
+revisions that ARE available, so a customer hitting this knows what their
+SDK actually knows about.
+
+Verified by mutation: disabling the enforcement (not the predicate) in
+both loaders fails 6 of the 21 new tests in
+`tests/scripts/test_hw_rev_existence_gate.py`.
+### Added — a PR-template checklist item: a touched gate/script/workflow's own docstring must still describe what the code does, fixed in the same commit (#1027)
+
+Every accumulated instance of stale docs-vs-code (`sdk_version.yaml`'s phantom
+`hw_rev` gate, `check_bootstrap_manifest.py`'s own docstring contradicting its
+`!=` check, `check_cross_platform.py`'s stale workflow description) was
+behaviour-divergence a symbol-resolving gate cannot see, and every one was
+caught by a human reading prose against code — never a gate. `#1027` ruled
+against building one; this adds the review-checklist item that already caught
+the corpus, per `.github/PULL_REQUEST_TEMPLATE.md`'s `## Checklist`.
+
+### Added — macOS onramp execution coverage: a `macos-latest` leg that actually runs the Darwin `xz`/`wget` exemption, not just checks it on paper (#1033)
+
+The macOS narrowing of `scripts/bootstrap.sh`'s prerequisite check (dropping
+`xz`/`wget` from `REQUIRED_BINS` on Darwin, since macOS `tar` is bsdtar and
+decompresses `.xz` in-process, and the pinned Zephyr SDK's `setup.sh` only
+hard-checks for `wget` on `linux-*` hosts) already has a static gate —
+`scripts/check_bootstrap_manifest.py`'s `_check_prerequisites_macos` polices
+`bootstrap.sh`'s Darwin `REQUIRED_BINS` against `metadata/bootstrap.json`'s
+`prerequisites.macos` on every `python-smoke` OS leg, and catches a one-sided
+edit to either file alone. What it cannot catch is (a) whether the documented
+macOS quickstart step actually *executes* successfully — #1033's own framing
+is "enforcement of a list, not proof the journey works" — or (b) a
+*coordinated* regression where both `bootstrap.sh`'s Darwin list and the
+manifest's `prerequisites.macos` are widened together (e.g. both regain
+`xz`), which passes the static check by construction since the two sides
+still agree with each other.
+
+`onramp-clean-container.yml` gains `prereqs-and-bootstrap-macos`, a
+`macos-latest` job (billed at 10x a Linux runner's minutes; not added to
+branch protection, so a red run is visible but does not block merge) that
+installs only `git`/`cmake`/`python3`/`ninja` (from `metadata/bootstrap.json`'s
+`prerequisites.macos`, not a hardcoded brew line), then relocates every copy
+of any pre-existing `xz`/`wget` binaries off PATH (looped, not a single
+`command -v`, plus a hard post-condition that fails the job if either is
+still resolvable afterwards) before running `bootstrap.sh --no-west` — a bare
+run on a stock `macos-latest` runner (which carries a large Homebrew tree)
+would pass whether or not the narrowing still exists, since `xz`/`wget` are
+typically already resolvable there. The job asserts `bootstrap.sh` reports
+the macOS prerequisite set satisfied (`Bootstrap complete.`) and never names
+`xz` or `wget` as missing, checking that message before the generic exit
+code so the failure is diagnostic.
+
+### Fixed — `alp.lock`'s `digests.metadata` only hashed `metadata/**/*.yaml`, missing 23 JSON files including every SoC spec (#1045)
+
+`_digests()` globbed just `**/*.yaml` under `metadata/`, so `metadata/socs/**/*.json`
+(memory maps, variant resolution, core topology), `metadata/bootstrap.json`,
+`metadata/catalog.json`, and 20 more JSON/TSV/CSV/header/proto/Renode/lock/example
+files could change with `alp_lock.py --check` staying green. `_METADATA_DIGEST_GLOBS`
+now widens coverage to `**/*.{yaml,json,tsv,csv,h,proto,resc,repl,lock,example}`;
+only `.md` and `.gitkeep` remain deliberately uncovered (documentation and
+placeholders can't change a build), enforced by a completeness test that lists
+`git ls-files metadata` against the glob set. Also adds the `alp-lock` stage to
+`scripts/test-all.sh` (previously the ONLY place `alp_lock.py --check` ran was
+`pr-metadata-validate.yml`, so a locally-green branch could still redden CI on
+lock drift) and widens that workflow's `paths:` filters to include
+`scripts/alp_lock/**` / `scripts/west_commands/alp_lock.py` themselves.
+
+### Fixed — `check_cross_platform.py`'s `--fail-on-warning` flip was waiting on two Yocto-script findings, and the Intel-Mac host claim was still overbroad in three docs (#1032 A5/A6)
+
+`scripts/check_cross_platform.py`'s CI step is flipped to
+`--fail-on-warning`, now possible because `tests/yocto/build_rpc_uio_bench_aarch64.sh`
+and `tests/yocto/run_sanitized_rpc_tests.sh` — both Linux-only Yocto-target
+bench helpers with no Mac/Windows equivalent to document — are whitelisted
+with header notes explaining why, closing the last two BASH-ONLY-SHEBANG
+findings that kept the lint at "0 expected, 2 found".
+
+`scripts/bootstrap.sh` now warns (does not refuse) on an Intel Mac's
+`uname -m`: bootstrap itself and `native_sim` both work there, and only
+`west sdk install` for real silicon is blocked, so refusing outright would
+be wrong. [ADR 0012](docs/adr/0012-cross-platform-developer-host.md) gained
+a 2026-07-29 Amendment recording this narrowing as the decision record.
+`docs/cross-platform-setup.md`'s §3 heading/body and opening summary carried
+the same overbroad claim that [#1028] only half-corrected; `README.md` and
+`docs/getting-started.md` are brought into the same corrected scoping.
+
+[#1028]: https://github.com/alplabai/alp-sdk/pull/1028
+
+### Added — a machine-readable install command for the 7-Zip prerequisite of `west sdk install` on native Windows (#1036)
+
+7-Zip was documented only as prose, at `manualInstallHints.windows.note[1]`:
+`west sdk install`'s `.7z` extraction shells out to an external
+`7z`/`7za`/`7zr`/`7zz`/`7zzs`/`unar` binary via `patoolib`, with no
+pure-Python fallback, so 7-Zip must already be on PATH — but nothing in the
+repo could hand a caller (tan-cli's future `doctor --build` check, #204
+upstream) the actual command to run. `metadata/bootstrap.json` now declares
+`prerequisites.install.windows.7zip: "winget install -e --id 7zip.7zip"`
+(package ID confirmed against `microsoft/winget-pkgs`'
+`manifests/7/7zip/7zip/` tree). It is deliberately NOT added to
+`prerequisites.windows`: that list is the gate `bootstrap.ps1` refuses
+without, and 7-Zip only gates `west sdk install` (toolchain acquisition), a
+separate manual step bootstrap never runs — gating on it would make
+bootstrap refuse on every Windows host without 7-Zip installed, for a tool
+bootstrap itself never touches.
+
+`prerequisites.install.<os>` was already a superset of its matching gate
+list in practice (`install.macos` has carried `xz`/`wget` with no
+`prerequisites.macos` entry since #949), but `scripts/check_bootstrap_manifest.py`
+and `bootstrap-v1.schema.json` only documented and enforced that pattern for
+posix — the windows side asserted exact key-set equality against
+`prerequisites.windows`. `install.windows` is now allowed to carry an entry
+with no matching `prerequisites.windows` gate too — NOT symmetrically with
+`install.linux` / `install.macos`, which remain pinned by exact-equality to
+`prerequisites.posix` (a stray key there is still rejected); only
+`install.windows` is one-directional, and even that is bounded, not
+open-ended: an extra `install.windows` key is legal only when it is also
+named in `scripts/check_bootstrap_manifest.py`'s own
+`_WINDOWS_INSTALL_ONLY_TOOLS` allowlist (`7zip` today), so a stray or stale
+`install.windows` key that is neither gated nor allowlisted still fails the
+gate. `scripts/check_bootstrap_manifest.py`'s completeness check and its
+`$Prereqs` `Hint=` cross-check are updated accordingly, and
+`bootstrap-v1.schema.json`'s `prerequisites.install` / `install.windows`
+descriptions now state the bounded one-directional contract and name both
+live superset cases (`install.macos.xz`/`.wget`, `install.windows.7zip`) so
+neither reads as drift to a future editor.
+
 ## [v0.14.0] - 2026-07-29
 
 ### Fixed — four V2N/V2M SoM manifests promised a `gd32_bridge` firmware path that exists in no clone (#852)
@@ -279,6 +486,93 @@ This does not change which command a quickstart leads with — dev's
 `tan bootstrap --sdk-root "$PWD"` ordering (#1021) is unaffected; these
 prerequisites apply transitively, since `tan bootstrap` shells out to
 `scripts/bootstrap.sh`.
+
+### Changed — `zephyr/kconfigs/core.kconfig`: E8 builds now default to the real SoC capability profile, not the permissive one
+
+The "Active SoC capability profile" choice now defaults to
+`ALP_SOC_ALIF_ENSEMBLE_E8` when `SOC_SERIES_E8` is set, instead of falling
+through to `ALP_SOC_NONE`. Every E8 app's `include/alp/soc_caps.h` macros
+flip from the permissive `UINT16_MAX` (any config accepted) to the real E8
+counts (`ALP_SOC_I2C_COUNT=6`, `ALP_SOC_SPI_COUNT=6`, `ALP_SOC_UART_COUNT=9`,
+`ALP_SOC_PWM_COUNT=12`, `ALP_SOC_WDT_COUNT=4`, `ALP_SOC_CAN_COUNT=1`,
+`ALP_SOC_RTC_COUNT=1`, `ALP_SOC_I3C_COUNT=2`, etc.), so a dispatcher's
+`bus_id`/`channel_id`/`rtc_id`/`wdt_id` range check
+(`src/backends/*/zephyr_drv.c`, `src/i3c_dispatch.c`, `src/dac_dispatch.c`)
+now rejects an out-of-range instance with `ALP_ERR_OUT_OF_RANGE` where it
+previously accepted anything. `native_sim` and other non-E8 builds are
+unaffected — the choice is gated on `SOC_SERIES_E8`, which only the E8 SoC
+tree selects. Swept every `examples/aen/*` peripheral-open call: all use
+instance literals of `0` (or an `ALP_E1M_*` macro that resolves to `0`),
+well inside every E8 count above — no example regresses.
+
+### Added — `gpio11`..`gpio14` on the E8 peripherals dtsi; the RGB LED's green/blue channels are now reachable
+
+`zephyr/dts/alif/ensemble_e8_peripherals.dtsi` declared only `gpio0`..`gpio10`
+plus `lpgpio`, while the E1M-EVK routes the RGB LED's green and blue channels
+to P12_7 / P12_6 — pads that only exist behind a `gpio12` controller node.
+With no such node, those two `alp,pin-array` entries resolved to no
+controller at all: `alp_gpio_open()` could not reach them through the
+portable API, even though the routes header looked perfectly well-formed.
+`gpio11`..`gpio14` (DFP-transcribed from `AE822FA0E5597/include/rtss_he/
+soc.h`: `reg` + all eight per-port IRQ lines each) are added, `status =
+"disabled"` by default like every other port in this dtsi. This unblocks —
+but does not itself wire — the green/blue RGB channels; see
+`examples/aen/edgeai-vision-aen`'s overlay for the remaining placeholder pin
+mux those channels still need.
+
+### Added — `zephyr/drivers/gpio/gpio_clk_alif.c`: DesignWare GPIO functional-clock enable (ADR 0017 Tier-1.5)
+
+Mirrors the Alif DFP's own documented `enable_gpio_clk()` sequence: sets
+`CLKCTL_PER_SLV->GPIO_CTRL[n]` bit 16 (`GPIO_CTRL_CKEN`) for every
+`snps,designware-gpio` node DT declares `status = "okay"`, at `PRE_KERNEL_1`
+priority 1 (ahead of `gpio_dw`'s own init). Upstream Zephyr's `gpio_dw`
+driver never touches this SoC-level gate, which was clear on every AE822
+port and unwritten anywhere in alp-sdk. **Bench correction, same day:** this
+was first suspected to be why an AEN801 LED looked dark under GPIO alt-0; a
+follow-up A/B on the same silicon proved it wrong — with CKEN still clear
+after a cold reset, driving `SWPORTA_DDR`/`SWPORTA_DR` from the debugger
+moved the pad. CKEN is not required for pad drive on AE822. The write is
+kept because it matches Alif's documented init, not because it fixes a dark
+pad — see the GPIO row in `docs/aen-bench-bringup.md` for the real
+explanation and the corrected bench record.
+
+### Fixed — `zephyr/drivers/flash/flash_ospi_alif.c`: OSPI0 clock-enable, reproduced bus fault on E8 (ADR 0017 Tier-1.5)
+
+On AE822FA0E5597 (E8) the OSPI register window sits behind a per-instance
+clock-enable gate (`CLKCTL_PER_SLV->OSPI_CTRL`) that hal_alif's OSPI library
+never writes — that library targets parts without the gate. Without it,
+`alif_hal_ospi_initialize()`'s first register touch (`ospi_set_tx_threshold()`
+reading `OSPI_TXFTLR`) bus-faulted: `***** BUS FAULT ***** Precise data bus
+error, BFAR 0x83000018`, reproduced identically on two bench runs of
+`examples/aen/aen-ospi-regcheck`. The driver now writes the clock-enable bit
+first, mirroring the DFP's own documented `enable_ospi_clk()`
+enable-before-touch ordering (`drivers/include/sys_ctrl_ospi.h`). The instance
+map now covers both OSPI0 (bit 0) and OSPI1 (bit 1); an unrecognized base
+returns `-ENOTSUP` instead of silently skipping the write, since skipping it
+previously walked straight into the same fault it was meant to avoid. Whether
+`OSPI_CTRL` bit 0 gates the APB register interface specifically vs only the
+serial/functional clock is **UNVERIFIED** — the DFP does not say, and bench
+A/B on this fix (read `0x83000018` with the bit clear vs set) is still
+pending; see the driver's file header for the full citation chain and the
+open question.
+
+### Fixed — `docs/aen-bench-bringup.md` and `examples/aen/aen-gpio-bench/src/main.c` named the wrong cause for the "dark LED"
+
+Both files had attributed a dark AEN801 LED to `CLKCTL_PER_SLV->GPIO_CTRL[n]`
+bit 16 (`GPIO_CTRL_CKEN`) being clear. That theory is refuted on the same
+bench: with CKEN still clear after a cold reset, `SWPORTA_DDR`/`SWPORTA_DR`
+driven from the debugger moved the pad (`0x49002050 = 0x00000010` with
+`0x4902F088 = 0x00000100`). The real explanation was a 2-second unwatched
+window — the old `blink` example toggled ~10 times and returned with the pad
+left LOW; once changed to loop forever, the maintainer confirmed by eye that
+the LED blinks. GPIO output on the E8 is now recorded PASS in
+`docs/aen-bench-bringup.md` (12/12 `EXT_PORTA`/`SWPORTA_DR` agreement on
+P2_4 with REN enabled, plus the optical confirmation) — the colour is
+separately known wrong (`EVK_PIN_LED_RED` lights GREEN) and still being
+measured, with no colour conclusion asserted. The `EXT_PORTA`-mirrors-`DR`
+finding for an OUTPUT-direction pin (Synopsys DW_apb_gpio databook) is
+unaffected by this correction and still stands as the reason the *original*
+`aen-gpio-bench` PASS criterion could never independently fail.
 
 ### Changed — `zephyr/kconfigs/core.kconfig`: E8 builds now default to the real SoC capability profile, not the permissive one
 

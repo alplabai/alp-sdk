@@ -42,6 +42,7 @@ and [`aen-provisioning.md`](aen-provisioning.md).
 | **HWSEM** (`hwsem_alif` / `alif,hwsem`, Tier-1.5) | ✅ PASS (RAM-run, 2026-06-19) | `hwsem@4902e000` take/give/count over the in-tree driver: count `0→1→0` across `take_busy`/`give` (master_id `0x410fd222`). Example: `examples/aen/aen-hwsem-regcheck`. |
 | **LPTIMER** (`counter_alif_lptimer` / `alif,lptimer`, Tier-1.5) | ✅ PASS (RAM-run, 2026-06-19) | Always-on `lptimer@42001000` ch0 — 32768 Hz down-counter advances (3456 ticks / ~100 ms) via the portable `counter_*` API. Example: `examples/aen/aen-lptimer-regcheck`. |
 | **Comparator (HSCMP)** (`comparator_alif` / `alif,cmp`, Tier-2) | ✅ PASS (RAM-run, 2026-06-19) | `cmp0@49023000` driven via the portable `comparator_*` API (output 1/1, internal DAC6 reference; the connect-but-don't-enable init held — no ISR storm). External pin/threshold edge-trigger = bench TBD (no analog stimulus). Example: `examples/aen/aen-cmp-regcheck`. |
+| **Secure boot** (MCUboot ECDSA-P256 chain) | ✅ PASS (bench-proven at `0da1f1b4`) | SES → MCUboot (ITCM) → slot0 (MRAM XIP) → application boots with `CONFIG_BOOT_SIGNATURE_TYPE_ECDSA_P256=y` + `CONFIG_BOOT_VALIDATE_SLOT0=y` (read back from the built `mcuboot/zephyr/.config`): `PC=80012FBC`, `VTOR=80010800`, `CFSR=00000000`, `IPSR=000`. Verification proven live, not inferred from a boot: flipping one byte of the TLV `0x22` signature (offset `0x4a30`, `0xda`→`0xdb`, TLV `0x10`/SHA-256 and TLV `0x01`/key intact) produces `D: bootutil_verify_sig: ECDSA builtin key 0` then `E: Unable to find bootable image` — the check runs to completion. `SIGNATURE_TYPE_NONE` + `VALIDATE_SLOT0=y` boots in twelve seconds (watched ten minutes, CycleCnt advancing). This verification run was `CONFIG_SINGLE_APPLICATION_SLOT=y`. Verified backend is TinyCrypt (`CONFIG_BOOT_ECDSA_TINYCRYPT=y`), not PSA; `.config` confirms `CONFIG_SINGLE_APPLICATION_SLOT=y` + `CONFIG_FLASH_BASE_ADDRESS=0x0`. **Separately, a swap-using-scratch build boots and logs** `I: Bootloader chainload address offset: 0x10000` — **boot only; the swap/rollback path itself was not exercised `[UNTESTED]`.** Still requires `CONFIG_DCACHE=n`, `ROM_START_OFFSET=0x800`, and the `zephyr/patches/mcuboot` `do_boot` patch. **Customer path proven too (second session):** a plain-J-Link `loadbin` of an imgtool-signed image to slot0 `0x80010000` — no SETOOLS/ATOC/SE-UART — is verified + chainloaded and survives repeated cold power-cycles; **proven at `0x80010000` only** (ATOC region / erasing MCUboot untested); both refusal shapes (tampered sig, non-MCUboot image) leave the debug port alive (`Secure debug: enabled`, halts + single-steps cleanly). Single-slot result (`CONFIG_SINGLE_APPLICATION_SLOT=y`) — A/B swap / OTA untested. See `docs/aen-provisioning.md` §0.5 and `docs/secure-boot.md`. |
 
 The flow-D batch (17 aen-* apps) booted on real E8 at **15 PASS, 2 PARTIAL** (both
 hardware-gated). A 2026-06-19 Flow-C RAM-run pass then **reconfirmed** the SE-crypto
@@ -120,7 +121,11 @@ ITCM-load shape vs. the slot0-XIP shape (§ Flow D) from the app's own reset
 vector, so both provision over the SE-UART with no flag. Pre-provisioned Alp
 Lab modules ship a dev-signed MCUboot + self-test in slot0 (LCS=DM), so
 `west flash` works day-1; the manual path above is only for re-keying or
-recovering a bare module.
+recovering a bare module. A pre-provisioned module also takes a plain
+J-Link `loadbin` straight to slot0 at `0x80010000` **only** (ATOC region
+/ erasing MCUboot untested) with no SETOOLS/ATOC/SE-UART at all — see
+the **Secure boot** row in §1 above and `docs/aen-provisioning.md`
+§0.5 for the exact sequence.
 
 ### Flow B — Seeing the console
 
@@ -183,6 +188,16 @@ retargets the ROM *region* to ITCM, it does not reset a `prj.conf`'s own
 `CONFIG_FLASH_LOAD_OFFSET`. The retarget is really two independent, BOTH-required
 settings, each a committed artifact under `scripts/bench/aen/`:
 
+> **Since alp-sdk#1067 the ITCM retarget is required for EVERY Flow C RAM-run,
+> not just for the apps that hard-code the offset.** The AEN board `_defconfig`
+> now sets `CONFIG_USE_DT_CODE_PARTITION=y`, so a plain `west build` links into
+> MRAM slot0 (`FLASH_LOAD_OFFSET=0x10000`, reset vector `0x8001xxxx`) — which is
+> what Flow A/D and `alif_flash` need, and what Flow C must undo. `ram-run.sh`
+> refuses a slot0-linked image (exit 5) rather than mis-running it. An app whose
+> own `boards/*.overlay` already carries the two `chosen` lines below needs no
+> extra fragments; one that deletes `zephyr,code-partition` from `&itcm` instead
+> of from `/chosen` does **not** — that form is a no-op and now mislinks.
+
 - the devicetree half — [`aen-flowc-itcm.overlay`](../scripts/bench/aen/aen-flowc-itcm.overlay)
   (`zephyr,flash = &itcm;`, path-ref not `<&itcm>`, +
   `/delete-property/ zephyr,code-partition;`), which stops Zephyr from deriving
@@ -207,10 +222,11 @@ scripts/bench/aen/build.sh <app-dir> \
 ```
 
 Both `aen-flowc-itcm.conf` lines are needed because they undo two different
-things. `USE_DT_CODE_PARTITION=n` alone stops an app that *derives* its offset
-from the DT code-partition, but it does **not** touch a hard-coded literal
-`CONFIG_FLASH_LOAD_OFFSET=0x10000`. Seven examples hard-code that offset for
-their normal slot0 boot and must keep it — do NOT remove it from these files:
+things. `USE_DT_CODE_PARTITION=n` alone undoes the board `_defconfig`'s
+*derived* offset, but it does **not** touch a hard-coded literal
+`CONFIG_FLASH_LOAD_OFFSET=0x10000`. Seven examples hard-code that offset —
+redundant since #1067 (Kconfig resolves the same `0x10000` with no warning) but
+harmless, and they are still the reason the second line exists:
 the five `aen-cc3501e-*` apps (`aen-cc3501e-ble-gatt`, `aen-cc3501e-bringup`,
 `aen-cc3501e-companion-tour`, `aen-cc3501e-gatt-register`, `aen-cc3501e-gpio`)
 and `aen-eeprom-manifest`, all via their own `prj.conf`, plus
@@ -342,7 +358,8 @@ secure-boot verification — always write both consistent blobs.
 > facts the bench pinned down: the app entry's `mramAddress` is the **full** address
 > `0x80010000` (the `0x10000` *offset* gives SETOOLS `Invalid Global Address`), and the
 > image needs **`CONFIG_USE_DT_CODE_PARTITION=y`** so it links at the slot0 offset
-> (`0x8001xxxx` reset vector) instead of the MRAM base (`0x8000xxxx`, which faults). Proven
+> (`0x8001xxxx` reset vector) instead of the MRAM base (`0x8000xxxx`, which faults) —
+> since #1067 the board `_defconfig` supplies that, so no app sets it. Proven
 > by `examples/aen/aen-npu-inference-person-mram` (the real `person_detect` MobileNet run
 > from MRAM → `RESULT PASS`). The same shape provisions over the SE-UART with plain
 > `west flash` / `app-write-mram` too (§ above) — this script is the faster SWD-only path,

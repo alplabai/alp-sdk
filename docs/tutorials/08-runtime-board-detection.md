@@ -82,9 +82,12 @@ single-source-of-truth for "what was this firmware intended for?"
   EEPROM manifest's `hw_rev` field failing the strict-equality
   check in `alp_hw_info_assert_matches_build()` above against the
   build-time `ALP_HW_BUILD_SOM_HW_REV` constant.  (The
-  `hw-revisions.yaml` `min_sdk_version` / `max_sdk_version` window
-  is separate, declarative-only data with no enforcement today --
-  see [#1025](https://github.com/alplabai/alp-sdk/issues/1025).)
+  `hw-revisions.yaml` `min_sdk_version` / `max_sdk_version` window is
+  separate, build-time-enforced data -- see
+  [`docs/board-config-hardware.md`](../board-config-hardware.md).
+  Whether an *existing* `status: reserved` / `status: tbd` revision
+  should also refuse a build remains open -- see
+  [#1025](https://github.com/alplabai/alp-sdk/issues/1025).)
 
 ## See also
 

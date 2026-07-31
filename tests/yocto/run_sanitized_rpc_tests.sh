@@ -2,6 +2,11 @@
 # Copyright 2026 Alp Lab AB
 # SPDX-License-Identifier: Apache-2.0
 #
+# Cross-platform scope: Linux-only bench helper.  It builds and runs
+# the Yocto-side RPC sanitizer suite (ASan/UBSan/TSan) via CTest; no
+# Mac/Windows equivalent exists because the code under test is
+# Yocto/Linux-target RPC dispatch, not a host-portable surface.
+#
 # GHSA-xhm8-7f87-93q5 defect 3: this directory's RPC close-path
 # regression tests (rpc_yocto_self_close.c, rpc_dispatch_close_race.c)
 # only proved "no double-free" / "no data race" when a developer

@@ -51,6 +51,21 @@ adversaries, and the mitigation we ship against each.
        └──────────────┘                  └───────────────┘
 ```
 
+> **Bench status.** MCUboot's software ECDSA-P256 verification of
+> slot0 is now measured working on E1M-AEN801 (`AE822FA0E5597LS0`
+> Rev A0, alp-sdk `0da1f1b4`): flipping one byte of the TLV `0x22`
+> signature produces `bootutil_verify_sig: ECDSA builtin key 0` then
+> `Unable to find bootable image` -- the check runs to completion
+> rather than hanging.  See [`docs/secure-boot.md`](secure-boot.md)
+> for the full measurement.  The **customer** path -- writing slot0
+> directly via J-Link, no SETOOLS/SE-UART/ATOC -- is now proven too,
+> at `0x80010000` only (ATOC-region writes / erasing MCUboot itself
+> untested).  Both refusal shapes (tampered signature, non-MCUboot
+> image) leave the debug port alive per the §3.4 mitigation below --
+> a bad slot0 write does not brick JTAG/SWD access, and this does not
+> change the production recommendation there (blow the debug-disable
+> fuse).  Single-slot result only -- A/B swap / OTA untested.
+
 Each arrow is a trust boundary.  Bytes crossing it are
 untrusted from the receiving side's perspective.
 
