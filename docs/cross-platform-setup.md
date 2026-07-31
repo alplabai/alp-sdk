@@ -574,7 +574,7 @@ Two cross-edit patterns work well:
 
    ```text
    Template: \\wsl$\{distro}\home\{user}\...
-   Example : \\wsl$\Ubuntu-22.04\home\caner\dev\alp-workspace
+   Example : \\wsl$\Ubuntu-22.04\home\<user>\dev\alp-workspace
    ```
 
    VS Code with the *Remote -- WSL* extension handles this

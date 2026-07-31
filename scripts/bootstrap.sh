@@ -314,8 +314,8 @@ emit("VERDICT_INCOMPLETE_REMEDY", d["verdict"]["incompleteRemedy"])
 # env: keys and RAW (untokenized) values as two parallel arrays (bash has
 # no portable ordered-map array type across the bash 3.2 macOS ships and
 # bash 4+). Token substitution happens in bash, not here: git-bash silently
-# rewrites a POSIX-style path argument (e.g. "/c/Users/x") into
-# "C:/Users/x" when handed to a native (non-MSYS) python.exe, which would
+# rewrites a POSIX-style path argument (e.g. "/c/Users/<user>") into
+# "C:/Users/<user>" when handed to a native (non-MSYS) python.exe, which would
 # make this same directory print two different ways depending on whether
 # it went through python's tok() or bash's own $WORKSPACE_DIR -- see
 # print_env_lines() below.
