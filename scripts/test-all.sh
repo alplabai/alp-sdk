@@ -19,14 +19,18 @@
 #   2. Plain-CMake / baremetal build (compile-only -- no tests yet)
 #   3. Zephyr twister (skipped if ZEPHYR_BASE is unset)
 #   4. clang-format diff vs HEAD~1 (skipped if no clang-format)
-#   5. board.yaml metadata schema validate
-#   6. Public/private text classifier
-#   7. Required scripts/check_*.py gates (the same list
+#   5. shellcheck over scripts/*.sh (skipped if shellcheck isn't installed)
+#   6. bash -n parse of every shipped *.sh under REAL bash 3.2.57 in a
+#      container (skipped, loudly, if podman/docker isn't on PATH --
+#      cross-platform-zephyr.yml's macos-latest leg still covers it)
+#   7. board.yaml metadata schema validate
+#   8. Public/private text classifier
+#   9. Required scripts/check_*.py gates (the same list
 #      pr-metadata-validate.yml / pr-doc-drift.yml run as hard
 #      gates -- see REQUIRED_GATE_SCRIPTS below)
-#   8. Generated-files-in-sync (regenerate every single-sourced
+#  10. Generated-files-in-sync (regenerate every single-sourced
 #      artifact + fail on drift -- the pr-generated-files.yml gate)
-#   9. Doxygen zero-warnings build (generates the pr-doxygen.yml
+#  11. Doxygen zero-warnings build (generates the pr-doxygen.yml
 #      Doxyfile inline; finds doxygen on PATH or in ~/doxybin)
 #
 # Each stage prints `[stage] PASS` or `[stage] FAIL`; the script
@@ -255,6 +259,105 @@ stage_shellcheck() {
         "${sc}" -S error "${other}" || rc=1
     done
     return "${rc}"
+}
+
+stage_bash32_parse() {
+    # Parse every shell script the repo ships under REAL bash 3.2.57
+    # (macOS's frozen system bash) inside a container -- catches the
+    # class of defect shellcheck and `bash -n` on a modern bash both
+    # miss: bash 3.2 keeps tracking single-quote state ACROSS a
+    # heredoc body while scanning for the closing `)` of an enclosing
+    # `$( )`, even when the heredoc tag is quoted (<<'PY'). An ODD
+    # apostrophe count inside such a heredoc desyncs the parser and it
+    # fails much later at an unrelated token -- see PR #1050, where a
+    # single apostrophe added to a comment inside
+    # scripts/bootstrap.sh:271's `<<'PY'` heredoc broke parsing 131
+    # lines later. This is a REPRO, not a "second shellcheck": that
+    # gate already runs (stage_shellcheck) and did not catch #1050.
+    #
+    # cross-platform-zephyr.yml's python-smoke job runs this same
+    # `bash -n` sweep unconditionally on its macos-latest leg (real
+    # bash 3.2.57, no container), so a missing runtime here is a SKIP,
+    # not a gap: that CI leg still covers it.
+    #
+    # Never build bash 3.2.57 from source to avoid the container --
+    # its shipped y.tab.c is stale against parse.y and the build fails
+    # without `bison`.
+    local runtime
+    runtime=$(command -v podman 2>/dev/null || command -v docker 2>/dev/null || true)
+    if [ -z "${runtime}" ]; then
+        echo "stage_bash32_parse: no podman/docker on PATH -- SKIPPING the local bash-3.2 parse check."
+        echo "stage_bash32_parse: this is still covered unconditionally by cross-platform-zephyr.yml's"
+        echo "stage_bash32_parse: python-smoke job on its macos-latest leg (real bash 3.2.57, no container)."
+        return 99
+    fi
+    # One container run, not one per file -- the container itself
+    # (bash 3.2) loops the file list, since 24 separate `podman run`
+    # spins would be needlessly slow.
+    local -a files=()
+    local f
+    while IFS= read -r f; do
+        files+=("${f}")
+    done < <(git ls-files '*.sh')
+    # An empty file list must never read as "0 broken files == PASS" --
+    # that is a silent-empty-loop, the exact shape of gate this PR argues
+    # against, just one level up (wrong cwd, git ls-files broke, REPO_ROOT
+    # pointed somewhere without a .git). Fail loudly instead of parsing
+    # nothing and calling it clean.
+    if [ "${#files[@]}" -eq 0 ]; then
+        echo "stage_bash32_parse: 'git ls-files *.sh' returned NO files from ${REPO_ROOT} -- refusing to report a silent pass."
+        return 1
+    fi
+    # `"${files[@]}"` on a NON-empty array is fine, but this codepath must
+    # stay safe even if `files` were ever empty -- bash 3.2 (inside the
+    # container we're about to invoke, and on macOS outside it) trips
+    # `set -u` "unbound variable" expanding `"${arr[@]}"` on an EMPTY array;
+    # the `${arr[@]+"${arr[@]}"}` guard (already used at :211 above) expands
+    # to nothing instead. This is the exact #654/#658 bash-3.2 crash class.
+    "${runtime}" run --rm -v "${REPO_ROOT}:/w:ro" -w /w docker.io/library/bash:3.2 \
+        bash -c '
+            set -u
+            # Assert the pinned image really is bash 3.2, same as the CI
+            # step (cross-platform-zephyr.yml) asserts /bin/bash really is
+            # 3.2 on macOS. docker.io/library/bash:3.2 is a mutable
+            # Docker-official tag; if it ever moves off 3.2, this stage
+            # would otherwise silently stop proving anything.
+            ver=$(bash --version | head -1)
+            case "$ver" in
+                *"version 3.2"*) ;;
+                *)
+                    echo "stage_bash32_parse: container bash reports [$ver], not 3.2 -- the docker.io/library/bash:3.2 tag has drifted off real bash 3.2, so this stage no longer proves what it claims. Fix the pin before trusting it again."
+                    exit 3
+                    ;;
+            esac
+            rc=0
+            for f in "$@"; do
+                if ! bash -n "$f"; then
+                    echo "stage_bash32_parse: bash -n FAILED on $f (see error above)"
+                    rc=1
+                fi
+            done
+            exit "$rc"
+        ' _ ${files[@]+"${files[@]}"}
+    local rc=$?
+    # Distinguish a REAL result from this stage's own script (0 = clean,
+    # 1 = a genuine bash -n parse failure, 3 = the version-pin assertion
+    # above caught a drifted image) from a RUNTIME failure of the
+    # container invocation itself (offline image pull, an SELinux denial
+    # on the `-v ...:/w:ro` mount with no `,Z`, a rootless-docker
+    # permission error) -- those surface as some OTHER exit code from
+    # `podman run`/`docker run` and must never read as "a parse defect
+    # shipped"; they mean the local check couldn't run, and CI's
+    # macos-latest leg is still the unconditional backstop.
+    case "${rc}" in
+        0) return 0 ;;
+        1) return 1 ;;
+        3) return 1 ;;
+        *)
+            echo "stage_bash32_parse: '${runtime} run' itself failed (rc=${rc}) -- a container/runtime problem, NOT a parse defect. SKIPPING; cross-platform-zephyr.yml's python-smoke (macos-latest) leg still covers this unconditionally."
+            return 99
+            ;;
+    esac
 }
 
 stage_clang_format() {
@@ -641,6 +744,19 @@ else
         run_stage "shellcheck" stage_shellcheck
     else
         skip_stage "shellcheck" "shellcheck not installed (PATH or ~/.local/bin)"
+    fi
+
+    # bash 3.2 parse gate -- catches the class of defect PR #1050 hit
+    # that shellcheck (above) and `bash -n` on a modern bash both miss
+    # (see stage_bash32_parse for the apostrophe/heredoc mechanism).
+    # Skips cleanly if neither podman nor docker is on PATH -- CI's
+    # macOS leg (cross-platform-zephyr.yml python-smoke) still runs
+    # this unconditionally with real bash 3.2.57, no container needed
+    # there.
+    if command -v podman >/dev/null 2>&1 || command -v docker >/dev/null 2>&1; then
+        run_stage "bash32-parse" stage_bash32_parse
+    else
+        skip_stage "bash32-parse" "neither podman nor docker on PATH -- CI's macos-latest python-smoke leg runs this unconditionally with real bash 3.2.57"
     fi
 
     run_stage "metadata-validate" stage_metadata_validate
