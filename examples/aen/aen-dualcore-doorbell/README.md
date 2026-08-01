@@ -61,9 +61,9 @@ before dropping into its trailing idle/ring loop:
   doorbell actually received on MHU-1 @`0x400A0000` (or, on HE, HP's
   cross-read received-count was observed to advance after a ring).
 - `RESULT SKIP: dualcore-doorbell -- ...` — the peer never showed within a
-  bounded window: HE released but never rang, HE's own MHU-1 sender link
-  never came ready (`ACCESS_READY`), or HP never saw HE's ring — states what
-  was locally proven, not a failure of this app's code.
+  bounded window: no doorbell arrived within the window, HE's own MHU-1
+  sender link never came ready (`ACCESS_READY`), or HP never saw HE's ring —
+  states what was locally proven, not a failure of this app's code.
 - `RESULT FAIL: alp_mproc_boot_core rc=%d` — HP only: a real local error,
   `alp_mproc_boot_core` returned an unexpected rc (`ALP_ERR_NOSUPPORT`
   included -- see below).

@@ -38,13 +38,18 @@ AXI-AP read" hazard `aen-hp-core-smoke/prj.conf` already names. All five now
 set `CONFIG_DCACHE=n` in their own `prj.conf`, making the setting
 flow-independent instead of an artifact of one bench script.
 
-Not fixed here (deliberately): all three dual-core apps' `RESULT SKIP` text
-still asserts the peer "never ran" / "no evidence HP is running", which is
-now measurably false, and `aen-dualcore-probe`'s message still claims its
-result "matches the single-core-boot finding" — a finding this same sweep
-overturned. Both are `src/main.c` prose fixes (plus one paired README.md
-claim), tracked as a fast follow-up now that #1074 (which was touching those
-same files) has merged.
+Also corrected: all three dual-core apps' `RESULT SKIP` text used to assert
+the peer "never ran" / "no evidence HP is running" / "peer image
+absent/not running" — measurably false per this sweep, the peer was running
+every time and its beacon genuinely advancing; only the D-cache was hiding
+it from this core's own read. Each message now states what was locally
+observed (the beacon/count never advanced within the bound) without
+asserting the wrong cause. `aen-dualcore-probe`'s README/comment claim that
+its result "matches the single-core-boot finding" is likewise corrected —
+that finding is overturned by this same sweep (both `["load","boot"]` ATOC
+entries reported `uLVB`, both cores ran, both beacons advanced) — and marked
+**SUPERSEDED 2026-08-01** with the prior finding kept as dated history
+rather than deleted.
 
 ### Fixed — five AEN examples treated ALP_ERR_NOSUPPORT as an unreachable-in-practice skip (#1071)
 

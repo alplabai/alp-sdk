@@ -130,7 +130,7 @@ int main(void)
 			       received);
 		} else {
 			printk("RESULT SKIP: dualcore-doorbell -- HE released (rc=0) but no doorbell "
-			       "received within %u ms; local receiver poll OK, peer never rang\n",
+			       "received within %u ms; local receiver poll OK\n",
 			       VERDICT_WAIT_MS);
 		}
 	}

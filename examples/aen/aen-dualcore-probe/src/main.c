@@ -11,7 +11,8 @@
  * advances a heartbeat forever. After flashing a dual-entry ATOC (HE@0x58000000
  * + HP@0x50000000, both flags [load,boot]) and resetting, read BOTH beacons:
  *   - both heartbeats advance  -> the SES booted BOTH cores from one power-on
- *   - only HP advances, HE = 0 -> single-core boot
+ *   - only HP advances, HE = 0 -> single-core boot (with CONFIG_DCACHE=n; see
+ *     below)
  *
  * SUPERSEDED 2026-08-01: the 2026-06-18 bench run recorded "only HP advances"
  * and read that as a single-core boot. It wasn't -- with CONFIG_DCACHE=n

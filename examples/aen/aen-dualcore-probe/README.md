@@ -80,9 +80,10 @@ its trailing heartbeat loop:
   within the bound below.
 - `RESULT SKIP: dualcore-probe -- ...` — the peer's heartbeat never advanced
   within the bound — states what was locally proven (this core is up), not a
-  failure of this app's code. As of `CONFIG_DCACHE=n` (see above) this path
-  is unreachable in a correct build on this bench: the peer genuinely was
-  live every time it was seen SKIP historically, see "Historical" above.
+  failure of this app's code. With `CONFIG_DCACHE=n` (see above), the
+  2026-08-01 dual-entry run PASSed on both cores (see "Result" above); a SKIP
+  now means the peer genuinely did not run, which is exactly the question
+  this B1 probe exists to answer.
 
 There is no `RESULT FAIL` case: with no boot call to check an rc on, the only
 outcomes this app can distinguish are "the peer showed up" and "it didn't".
