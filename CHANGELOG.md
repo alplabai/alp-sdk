@@ -7,6 +7,42 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.15.0 candidate
 
+### Added — a deferred-TOC release path for the AEN SE peer-core boot backend, the only way to release an M55-HP peer
+
+`alp_mproc_boot_core()`'s default release (`se_service_boot_cpu()`, service
+501) only starts a core at an address; Alif's own SE Host Services API docs
+say plainly it "does not perform image loading, verification, etc." For the
+M55-HP core specifically, Alif documents that this reset step invalidates the
+core's TCM content, so a peer released this way can vector from empty memory
+and lock up. Bench-measured on E8 (2026-07-31, HE master releasing an HP
+peer via 501): `CFSR=0x00000101` (IACCVIOL+IBUSERR), `PC=0xEFFFFFFE`. The
+same 501 release is bench-proven fine for an M55-HE peer, in two independent
+sessions (2026-06-17, 2026-08-01) — the defect is directional, not general.
+
+Two new Kconfig symbols in `zephyr/kconfigs/mproc-rpc-usb.kconfig`:
+`CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_PEER_IS_HP` names which core
+a build's `alp_mproc_boot_core()` releases; when the peer is HP it now
+defaults ON (no working legacy HP-peer deployment exists to preserve) and
+routes the release through `se_service_process_toc_entry()` (service 500)
+against an ATOC entry flagged `["load","boot","deferred"]` instead — the SES
+skips the boot-time release entirely, so there is no reset step and no TCM
+invalidation. `CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_ENTRY_ID`
+names the ATOC entry key (default `"ALP-HP"`/`"ALP-HE"` matching the peer).
+When the peer is HE the default stays OFF (501 already proven fine there;
+flipping it would require every existing HE-peer ATOC to be reflashed with
+the `"deferred"` flag). `alp_mproc_boot_core()`'s signature and every other
+default are unchanged. `src/backends/mproc/alif_se_boot.c` rejects a call
+naming any core other than the configured peer with `ALP_ERR_INVAL` instead
+of silently releasing the configured entry regardless of which core was
+asked for.
+
+`se_service_process_toc_entry()` ships unpatched in the west-pinned hal_alif
+v2.3.0 module — no new hal_alif patch needed. New bench tooling
+`scripts/bench/aen/flash-run-dualcore.sh` emits + flashes the two-entry
+dual-core ATOC over the SE-UART. See `docs/aen-bench-bringup.md` § Flow A —
+Dual-core deferred-TOC boot for the full asymmetry table and the two SE Host
+Services API passages (p.113, p.115-116) this is built on.
+
 ### Fixed — a scaffolded AEN Zephyr app linked at the MRAM base, so no flash flow accepted it (#1067)
 
 `tan init --from-example` + `tan build` for an AEN board produced an image

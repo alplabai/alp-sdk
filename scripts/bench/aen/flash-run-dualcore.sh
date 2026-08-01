@@ -17,16 +17,21 @@
 #     ITCM but SKIPS the boot-time release (TOC_IMAGE_DEFERRED=0x100; shows
 #     "uLs  D" in the SES boot table, Dest Addr blank, Time 0.00 ms).
 #
-# This is the FIX for a real silicon bug: an entry flagged ["load"] alone
-# (no "deferred") reports "uLV" (Loaded, Verified) in the SES table while
-# the destination ITCM holds NO image -- releasing that core with
-# se_service_boot_cpu() makes it vector from empty memory and lock up
-# (CFSR=0x00000101 IACCVIOL+IBUSERR, PC=0xEFFFFFFE). "deferred" makes the
-# SES skip the boot-time action instead of silently mis-reporting it as
-# done; the HP image then un-defers + releases HE at runtime with ONE
-# se_service_process_toc_entry() call (service 500) -- see
+# NOTE ON WHY: for THIS direction (HP master -> HE peer), plain
+# ["load","boot"] + se_service_boot_cpu() (service 501) also works --
+# bench-proven on E8 both 2026-06-17 and 2026-08-01. This script's deferred
+# shape is not a bug fix for HE; it demonstrates the recipe that is the ONLY
+# proven way to release an HP peer (HE-master -> HP-peer), where 501 fails
+# for a real, vendor-documented reason: Alif's SE Host Services API docs
+# (v1.109.0 p.115-116) name "the M55-HP core in Ensemble devices" as a case
+# where resetting the core (which service 501's release does) invalidates
+# its TCM content -- measured on E8 (2026-07-31, HE master releasing an HP
+# peer via 501) as CFSR=0x00000101 IACCVIOL+IBUSERR, PC=0xEFFFFFFE. Service
+# 500 (se_service_process_toc_entry(), used here) has no reset step, so no
+# TCM invalidation, and works both directions -- see
 # src/backends/mproc/alif_se_boot.c and the
-# CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC Kconfig help.
+# CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC Kconfig help for the full
+# asymmetry table and vendor citations.
 #
 # The HP image's build MUST set:
 #   CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC=y
@@ -94,5 +99,7 @@ if grep -q "Done" /tmp/wrmram-dual.log; then echo "MRAM write: Done ($(grep -oE 
 
 echo "----- dual-core ATOC flashed -----" >&2
 echo "confirm ALP-HE shows 'uLs  D' (deferred, Dest Addr blank, Time 0.00 ms) in the SES boot table --" >&2
-echo "NOT 'uLV' (that would mean the SES thinks it already released an image it never placed)." >&2
+echo "NOT 'uLV' (that would mean the 'deferred' flag didn't take and the SES already released it," >&2
+echo "which the plain 501 release path handles fine for an HE peer -- this script exists for the" >&2
+echo "HP-peer direction, where 501 is vendor-documented broken; see the script header)." >&2
 echo "then confirm HP un-defers + releases HE via your app's IPC proof (RPMsg link, SRAM0 beacon, etc)." >&2

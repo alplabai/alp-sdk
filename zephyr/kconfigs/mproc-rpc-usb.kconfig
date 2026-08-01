@@ -229,6 +229,113 @@ config ALP_SDK_MPROC_HWSEM_COUNT
 	  more than 16 hwsem IDs intra-core.  Has no effect on real-HWSEM
 	  paths (AEN HWSEM block, ST HSEM, etc.) which are per-SoC.
 
+config ALP_SDK_MPROC_BOOT_ALIF_SE
+	bool "Route alp_mproc_boot_core() to the Alif SE-service boot authority"
+	depends on ALP_SDK && HAS_ALIF_SE_SERVICES
+	default y
+	help
+	  Compiles the Alif SE-service peer-core boot backend
+	  (src/backends/mproc/alif_se_boot.c).  It registers at
+	  silicon_ref="alif:ensemble:e8" priority 100 in the "mproc_boot"
+	  class -- ahead of the silicon_ref="*" priority-0 NOSUPPORT
+	  fallback -- so on the E8 the portable alp_mproc_boot_core()
+	  (<alp/mproc.h>) releases the other M55 through the SE MHUv2
+	  mailbox: either se_service_boot_cpu() (service 501) or
+	  se_service_process_toc_entry() (service 500), see
+	  ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC for the choice.
+
+	  se_service_boot_cpu() itself is added to hal_alif by
+	  zephyr/patches/hal_alif/0001-se-service-add-boot-cpu.patch.
+	  Needs the SE mailboxes (ARM_MHUV2 + the se_service DT node).
+	  With this OFF, or on non-E8 AEN SoMs without a matching
+	  silicon_ref registration, alp_mproc_boot_core() returns
+	  ALP_ERR_NOSUPPORT through the wildcard fallback.
+
+config ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_PEER_IS_HP
+	bool "The deferred/released peer core is M55-HP (off = M55-HE)"
+	depends on ALP_SDK_MPROC_BOOT_ALIF_SE
+	default n
+	help
+	  Names which core THIS build's alp_mproc_boot_core() calls release
+	  -- a build only ever masters one specific peer.  Drives both the
+	  default of ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC (see there) and
+	  the wrong-core guard in alif_se_boot.c: a call naming the other
+	  core returns ALP_ERR_INVAL instead of silently un-deferring this
+	  build's configured entry regardless of which core was asked for.
+
+config ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC
+	bool "Release the AEN SE peer core via the deferred-TOC un-defer path"
+	depends on ALP_SDK_MPROC_BOOT_ALIF_SE
+	default y if ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_PEER_IS_HP
+	default n
+	help
+	  se_service_boot_cpu() (service 501, the path when this is OFF)
+	  only STARTS a core at an address -- Alif's SE Host Services API
+	  docs (v1.109.0 p.113) say it "does not perform image loading,
+	  verification, etc., it just boots the core"; loading it is the
+	  ATOC's ["load","boot"] job, done once at power-on.  For M55-HP
+	  specifically, Alif documents that RE-releasing it this way can
+	  fail: "resetting the core also invalidates its TCM content" --
+	  p.115-116 scopes this to "a known case is the M55-HP core in
+	  Ensemble devices" (E8 is Ensemble); p.113 instead says "FUSION
+	  REV_Bx devices" for the same defect -- the vendor text disagrees
+	  with itself on scope, cited here rather than resolved. Bench
+	  effect on E8 (2026-07-31, HE master releasing an HP peer via
+	  501): SES table reports HP Loaded/Verified, but its ITCM read
+	  as uninitialized SRAM, and releasing it made the core vector
+	  from empty memory and lock up (CFSR=0x00000101 IACCVIOL+IBUSERR,
+	  PC=0xEFFFFFFE) -- consistent with the reset silently wiping the
+	  TCM the SES had just filled. Releasing an HE peer via 501 is
+	  bench-proven fine (2026-06-17 AND 2026-07-31, HP master) --
+	  neither vendor passage names HE.
+
+	  With this ON, boot_core() instead flags the peer's ATOC entry
+	  ["load","boot","deferred"] (SES loads it, skips the boot-time
+	  release) and releases it at runtime with ONE
+	  se_service_process_toc_entry() call (service 500) -- Alif calls
+	  this "a convenient way to boot a CPU core" (p.112) and
+	  recommends it (or an explicit set_vtor/reset_cpu/reload/
+	  release_cpu sequence) over 501 for the M55 cores in the cases
+	  above. Bench-proven on E8 (2026-07-31) releasing an HE peer this
+	  way too (16/16 RPMsg pings) and, separately, releasing an HP
+	  peer (the case 501 cannot do at all -- the SES only auto-boots
+	  the HP ATOC entry, so an HE-master image has no working way to
+	  release an HP peer except this path). See
+	  docs/aen-bench-bringup.md for the full asymmetry table.
+	  se_service_process_toc_entry() ships unpatched in the west-pinned
+	  hal_alif v2.3.0 module (se_services/zephyr/src/se_service.c) --
+	  not every hal_alif tree carries it, so this is a property of the
+	  pinned revision, not the API in general.
+
+	  Default: ON when the configured peer is HP (501 is vendor-
+	  documented broken there and no working legacy HP-peer deployment
+	  exists to preserve); OFF when the peer is HE (501 is bench-proven
+	  fine there in two independent sessions, and flipping the default
+	  would require every existing HE-peer ATOC to be reflashed with
+	  the "deferred" flag or this path fails against it).
+
+config ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_ENTRY_ID
+	string "ATOC entry id of the deferred peer image"
+	# Depends on the parent backend (not on _DEFERRED_TOC itself): the
+	# string literal is referenced unconditionally in
+	# alif_se_boot.c's C source (an `if (IS_ENABLED(...))` runtime
+	# branch, not an #ifdef) so it must stay a DEFINED macro even when
+	# _DEFERRED_TOC is off -- Kconfig omits a symbol's #define entirely
+	# when its own `depends on` is unmet, which is a build break
+	# ("undeclared identifier"), not a harmless zero/empty value.
+	depends on ALP_SDK_MPROC_BOOT_ALIF_SE
+	default "ALP-HP" if ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_PEER_IS_HP
+	default "ALP-HE"
+	help
+	  Used only when CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC is
+	  also on. Must exactly match the ATOC entry key the peer image was
+	  flashed under (the JSON object key in the signed-ATOC config --
+	  see scripts/bench/aen/flash-run-dualcore.sh).  Truncated to
+	  IMAGE_NAME_LENGTH (8 bytes, hal_alif services_lib_protocol.h) by
+	  se_service_process_toc_entry().  alp-sdk's own ATOC naming is
+	  project-specific; set this to match whatever the dual-core ATOC
+	  names the peer entry.
+
 config ALP_SDK_MAX_HASH_HANDLES
 	int "Maximum concurrent alp_hash_t handles"
 	default 4

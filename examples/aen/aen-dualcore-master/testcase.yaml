@@ -1,0 +1,52 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for aen-dualcore-master's two roles. The HE-role
+# scenario is the only in-tree consumer of
+# CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_PEER_IS_HP=y -- without it
+# the deferred-TOC path (mandatory for releasing an HP peer; see
+# zephyr/kconfigs/mproc-rpc-usb.kconfig and docs/aen-bench-bringup.md) never
+# gets compiled by CI and would silently rot.
+#
+# Filtered OUT of the native_sim PR gate: both platforms are real E8 board
+# targets, which the native_sim twister run never selects.
+#
+# NOTE: the platform id below MUST match the board .yaml `identifier` exactly
+# or twister silently skips the scenario.
+
+sample:
+  name: aen-dualcore-master
+  description: |
+    B1 Option B dual-core master/peer release via the portable
+    alp_mproc_boot_core(). Board-aware and symmetric (see main.c): the HP
+    build releases an HE peer (default se_service_boot_cpu() path, bench-
+    proven both directions of that recipe); the HE build releases an HP
+    peer, which the plain 501 path cannot do (Alif SE Host Services API,
+    v1.109.0 p.115-116: resetting the HP core invalidates its TCM) -- so
+    the HE-role scenario below builds with the deferred-TOC path
+    (PEER_IS_HP=y) that defaults ON for exactly this case.
+
+tests:
+  alp_sdk.examples.aen.dualcore_master.hp_role:
+    platform_allow:
+      - alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - multicore
+      - rtss-hp
+    build_only: true   # release-at-runtime is a Flow-A ATOC flash, not a CI run.
+
+  alp_sdk.examples.aen.dualcore_master.he_role_deferred_hp_peer:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    extra_configs:
+      - CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_PEER_IS_HP=y
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - multicore
+      - rtss-he
+      - mproc-deferred-toc
+    build_only: true   # release-at-runtime is a Flow-A ATOC flash, not a CI run.
