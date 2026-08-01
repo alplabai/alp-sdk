@@ -40,6 +40,17 @@ This is the working substrate for HE↔HP IPC / a dual-core RPC.
 Recipe: dual ATOC with HP-APP `["load","boot"]` @0x50000000 + HE-APP `["load"]`
 @0x58000000; `app-gen-toc` + `app-write-mram`. Restore the canonical slot0 after.
 
+## One correctness requirement (bench-found)
+
+**`CONFIG_DCACHE=n`.** `DB_BEACON`/`PEER_DB_BEACON` are read/written by both
+cores, each with its own D-cache → cross-core reads saw stale lines (the
+verdict window saw HP's received-count and HE's sent-count as equal and
+advancing over SWD while the app itself never observed the update, i.e.
+`RESULT SKIP`). Disabling the D-cache makes the shared SRAM0 region coherent
+(the AEN-SRAM precedent). A cache-on variant would `sys_cache_data_flush_range`
+on the writer + `invd_range` on the reader, on silicon where the D-cache can be
+enabled at all.
+
 ## Verdicts, timeouts, and the HE↔HP boot block on this bench
 
 Both HP and HE hold their verdict to a bounded window rather than looping

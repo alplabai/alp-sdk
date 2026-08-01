@@ -47,6 +47,17 @@ image/VTOR base (its ITCM global alias: HE `0x58000000`, HP `0x50000000`).
 There is **no bare M55 register** to release the other core — it is SE-mediated
 only.
 
+## One correctness requirement (bench-found)
+
+**`CONFIG_DCACHE=n`.** The peer's heartbeat beacon is read/written by both
+cores, each with its own D-cache → the master's cross-core read of the peer's
+heartbeat saw a stale value (the boot request was accepted but the released
+core's own heartbeat never appeared to advance, i.e. `RESULT SKIP`, even
+though it was live and running). Disabling the D-cache makes the shared SRAM0
+region coherent (the AEN-SRAM precedent). A cache-on variant would
+`sys_cache_data_flush_range` on the writer + `invd_range` on the reader, on
+silicon where the D-cache can be enabled at all.
+
 ## Verdicts, timeouts, and the HE↔HP boot block on this bench
 
 The master always prints exactly one `RESULT` line before dropping into its

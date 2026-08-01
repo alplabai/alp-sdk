@@ -7,6 +7,45 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.15.0 candidate
 
+### Fixed — three AEN dual-core examples SKIPped on E8, and five more were silently exposed to the same D-cache hazard, because they didn't set `CONFIG_DCACHE=n` on their own
+
+A bench sweep of all seven `examples/aen/*` dual-core apps on E8 found an
+exact 4/7-PASS split along one config symbol: `aen-dualcore-doorbell`,
+`aen-dualcore-master`, and `aen-dualcore-probe` were the only three that did
+not set `CONFIG_DCACHE=n`, and all three `RESULT SKIP`, always with the
+peer's counter/beacon provably advancing over SWD while software on the
+other core never saw the update — textbook cross-core D-cache incoherence on
+the shared global-SRAM0 mailbox/beacon, the same class this repo already
+documents for the eth/NPU SRAM0 carve-outs. The other four
+(`aen-rpc-pingpong`, `aen-dualcore-ipc`, `aen-alp-rpc`, `aen-hp-core-smoke`)
+already carried `CONFIG_DCACHE=n` and already passed. Adding the same line to
+the remaining three `prj.conf`s took the suite from 4/7 to 7/7 on silicon,
+with no app-logic change — the apps were correct all along; the D-cache was
+hiding the peer's write from software while the debug AP, which bypasses the
+cache, saw it advancing the whole time.
+
+Review turned up five more examples exposed to the identical hazard, just not
+yet caught by the sweep because they only pass today when built through
+`scripts/bench/aen/aen-bench-shared.conf`, which layers `CONFIG_DCACHE=n` in
+via `-DEXTRA_CONF_FILE` — a plain `west build` of any of them leaves the
+hazard live: `examples/multicore/mproc-mailbox` (a real M55-HP↔HE mailbox
+over `<alp/mproc.h>`, `prj.conf` intentionally empty — its `board.yaml` has no
+inference block, so `scripts/alp_orchestrate/kconfig.py` never emits the
+setting for it), and four SRAM0-beacon apps read raw over the AXI-AP
+(`aen-power-smoke`, `aen-power-iwic`, `aen-tz-secure-log-probe`,
+`aen-tz-secure-log-append`) — the same "cached beacon write unseen by the
+AXI-AP read" hazard `aen-hp-core-smoke/prj.conf` already names. All five now
+set `CONFIG_DCACHE=n` in their own `prj.conf`, making the setting
+flow-independent instead of an artifact of one bench script.
+
+Not fixed here (deliberately): all three dual-core apps' `RESULT SKIP` text
+still asserts the peer "never ran" / "no evidence HP is running", which is
+now measurably false, and `aen-dualcore-probe`'s message still claims its
+result "matches the single-core-boot finding" — a finding this same sweep
+overturned. Both are `src/main.c` prose fixes (plus one paired README.md
+claim), tracked as a fast follow-up now that #1074 (which was touching those
+same files) has merged.
+
 ### Fixed — five AEN examples treated ALP_ERR_NOSUPPORT as an unreachable-in-practice skip (#1071)
 
 `aen-alp-rpc`, `aen-dualcore-doorbell`, `aen-dualcore-ipc`, `aen-dualcore-master`,
