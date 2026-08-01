@@ -670,7 +670,7 @@ SoM; the conformance suite proves its *backends*.
 every backend must pass — it mechanically exercises the uniform
 lifecycle contract of every portable peripheral class (GPIO / I²C /
 SPI / UART / ADC / DAC / PWM / CAN / RTC / WDT / counter / qenc /
-I²S, plus the I²C/SPI target modes) and the non-class v0.9
+I²S / I3C, plus the I²C/SPI target modes) and the non-class v0.9
 surfaces (`alp_init`/`alp_deinit` idempotency, the
 `alp_uart_rx_ringbuf_*` contract, I²C-target config validation):
 
