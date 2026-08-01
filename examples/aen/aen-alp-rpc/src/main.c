@@ -178,21 +178,12 @@ int main(void)
 
 	printk("[HP] boot_core rc=%d\n", (int)brc);
 
-	if (brc == ALP_ERR_NOSUPPORT) {
-		/* NOSUPPORT means no mproc_boot backend was selected for this core --
-		 * an environment/config state (e.g. backend registration/link-time
-		 * state, see alp_mproc_boot_core() in src/mproc_dispatch.c), NOT the
-		 * SE boot authority refusing: se_rc_to_alp() in
-		 * src/backends/mproc/alif_se_boot.c never maps a real SE error to
-		 * NOSUPPORT for ALP_CORE_M55_HE, and the SE boot path itself is
-		 * proven working on E8 silicon. */
-		SELF_BEACON[2] = V_SKIP;
-		printk("RESULT SKIP: alp-rpc -- no mproc_boot backend selected for HE "
-		       "(alp_mproc_boot_core rc=%d); HE never released, nothing past this "
-		       "point was attempted\n",
-		       (int)brc);
-		return 0;
-	}
+	/* This build ships CONFIG_HAS_ALIF_SE_SERVICES=y and no native_sim
+	 * overlay, so alp_mproc_boot_core() always resolves to the E8 SE
+	 * backend for ALP_CORE_M55_HE (<alp/mproc.h>'s ALP_ERR_NOSUPPORT case
+	 * -- "no boot authority for core in this build" -- is not reachable
+	 * here). Any nonzero rc, NOSUPPORT included, is therefore a real
+	 * local error: report it as FAIL, not a skippable environment state. */
 	if (brc != ALP_OK) {
 		SELF_BEACON[2] = V_FAIL;
 		printk("RESULT FAIL: alp_mproc_boot_core rc=%d\n", (int)brc);

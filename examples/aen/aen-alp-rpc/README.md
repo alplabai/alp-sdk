@@ -73,27 +73,25 @@ Both HP and HE always print exactly one `RESULT` line before `main()` returns
   on HE, every ping received was queued back to HP -- `alp_rpc_send()`
   returning `ALP_OK` only means the frame reached the local vring, HE never
   observes whether HP actually accepted it).
-- `RESULT SKIP: alp-rpc -- ...` — the peer never showed within a bounded
-  window (boot never happened, or the channel opened/subscribed locally but
-  the peer never sent anything) — states what was locally proven, not a
-  failure of this app's code.
+- `RESULT SKIP: alp-rpc -- ...` — HE was released but the peer never showed
+  within a bounded window (the channel opened/subscribed locally but the
+  peer never sent anything) — states what was locally proven, not a failure
+  of this app's code.
 - `RESULT FAIL: alp-rpc -- ...` — a real local error: `alp_mproc_boot_core`
   (HP) returned an unexpected rc, `alp_rpc_open`/`alp_rpc_subscribe` failed,
   or every local `alp_rpc_send` failed.
 
-If `alp_mproc_boot_core` returns `ALP_ERR_NOSUPPORT` (`rc=-6`), HP reports that
-as `RESULT SKIP`, not `RESULT FAIL` — but `-6` here means no `mproc_boot`
-backend was selected for HE (an environment/config state:
-`alp_mproc_boot_core()` in `src/mproc_dispatch.c` returns `ALP_ERR_NOSUPPORT`
-only when backend resolution finds no `mproc_boot` ops for `ALP_SOC_REF_STR`),
-**not** a boot-authority refusal: `se_rc_to_alp()`
-(`src/backends/mproc/alif_se_boot.c`) never maps a real SE error to `-6` for
-`ALP_CORE_M55_HE`, and the SE boot path itself is bench-proven working on E8
-silicon (a peer M55 started and ran an RPMsg link for 495 consecutive
-PING/PONG round-trips). A real SE refusal comes back as `ALP_ERR_IO` (`-5`)
-and is a `RESULT FAIL`, not a skip. What actually causes a `-6` observation on
-a given bench (e.g. why backend resolution didn't match) is a separate,
-unproven question — this README doesn't claim an answer for it.
+This build ships `CONFIG_HAS_ALIF_SE_SERVICES=y` and no `native_sim` overlay,
+so `alp_mproc_boot_core()` always resolves to the E8 SE backend for
+`ALP_CORE_M55_HE` — the `<alp/mproc.h>` contract's `ALP_ERR_NOSUPPORT` case
+("no boot authority for `core` in this build: wrong SoM, `native_sim`, or a
+core the platform boots by other means") is not reachable in this
+configuration. So HP treats *any* nonzero `alp_mproc_boot_core` rc, including
+`ALP_ERR_NOSUPPORT`, as `RESULT FAIL`, not a skip: on these boards a `-6`
+here would mean the boot path fell out of the build (e.g. the SE backend lost
+the link, or the silicon-ref stopped matching) — a regression this app must
+surface, not paper over.
+
 Every wait (the NS-bind settle window: 1500 ms; HP's round-drive grace window:
 5 extra heartbeats; HE's serve window: 3000 ms) is bounded so a genuinely
 absent peer produces a verdict instead of a hang. The verdict is also

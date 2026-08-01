@@ -56,25 +56,23 @@ trailing heartbeat loop:
   accepted the request AND the peer's own heartbeat word was observed to
   advance within the bound below (the request being accepted, alone, does
   not prove the peer actually came up).
-- `RESULT SKIP: dualcore-master -- ...` — either no `mproc_boot` backend was
-  selected (`ALP_ERR_NOSUPPORT`, the request was never even accepted), or it
-  was accepted but the peer's heartbeat never advanced within the bound —
-  states what was locally proven, not a failure of this app's code.
+- `RESULT SKIP: dualcore-master -- ...` — the request was accepted but the
+  peer's heartbeat never advanced within the bound — states what was locally
+  proven, not a failure of this app's code.
 - `RESULT FAIL: alp_mproc_boot_core rc=%d` — a real local error: `boot_core`
-  returned an unexpected rc (neither `ALP_OK` nor `ALP_ERR_NOSUPPORT`); a real
-  SE refusal comes back as `ALP_ERR_IO` and lands here, not in the skip above.
+  returned an unexpected rc (`ALP_ERR_NOSUPPORT` included -- see below).
 
-If `alp_mproc_boot_core` returns `ALP_ERR_NOSUPPORT` (`rc=-6`), it is reported
-as `RESULT SKIP`, not `RESULT FAIL` — but `-6` here means no `mproc_boot`
-backend was selected for the peer (an environment/config state:
-`alp_mproc_boot_core()` in `src/mproc_dispatch.c` returns `ALP_ERR_NOSUPPORT`
-only when backend resolution finds no `mproc_boot` ops for the SoC), **not** a
-boot-authority refusal: `se_rc_to_alp()`
-(`src/backends/mproc/alif_se_boot.c`) never maps a real SE error to `-6` for
-either M55 core, and the SE boot path itself is bench-proven working on E8
-silicon (a peer M55 started and ran an RPMsg link for 495 consecutive
-PING/PONG round-trips). Why a given bench observed `-6` (e.g. why backend
-resolution didn't match) is a separate, unproven question this README doesn't
-claim to answer. The peer-heartbeat wait (2000 ms, polled every 20 ms) is
-bounded, so an accepted request whose peer never actually comes up produces a
-verdict instead of a hang.
+This build ships `CONFIG_HAS_ALIF_SE_SERVICES=y` and no `native_sim` overlay,
+so `alp_mproc_boot_core()` always resolves to the E8 SE backend for either
+M55 core — the `<alp/mproc.h>` contract's `ALP_ERR_NOSUPPORT` case ("no boot
+authority for `core` in this build: wrong SoM, `native_sim`, or a core the
+platform boots by other means") is not reachable in this configuration. So
+the master treats *any* nonzero `alp_mproc_boot_core` rc, including
+`ALP_ERR_NOSUPPORT`, as `RESULT FAIL`, not a skip: on these boards a `-6`
+here would mean the boot path fell out of the build (e.g. the SE backend lost
+the link, or the silicon-ref stopped matching) — a regression this app must
+surface, not paper over.
+
+The peer-heartbeat wait (2000 ms, polled every 20 ms) is bounded, so an
+accepted request whose peer never actually comes up produces a verdict
+instead of a hang.
