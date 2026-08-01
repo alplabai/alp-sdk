@@ -7,6 +7,34 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Added — `aen-dualcore-he-master`, the HE-master → HP-peer example (silicon-proven 2026-08-01)
+
+Every existing AEN dual-core example releases its peer HP-master → HE-peer.
+The reverse direction — HE releases HP — was until now only reachable by
+hand-pairing `aen-dualcore-master`'s HE build with `aen-dualcore-probe`'s HP
+build; this adds it as its own self-contained example. It defaults
+`CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_PEER_IS_HP=y` on the HE board
+target so the deferred-TOC release path (service 500, `["load","boot",
+"deferred"]`) — the only proven way to release an HP peer, per Alif's SE Host
+Services API docs (v1.109.0 p.112/p.115) — is on by construction, not an
+opt-in `-D` flag. `CONFIG_DCACHE=n` ships from the start (PR #1080's finding
+on three sibling dual-core examples: a stale cross-core D-cache line made a
+genuinely advancing peer beacon read as flat).
+
+Silicon-proven on E8 (2026-08-01, `AE822FA0E5597LS0`, cold power-cycle --
+**a J-Link reset-pin reset is not a valid first-light for this app**: on that
+path the SES table read correctly but the HE image never executed,
+`ram_console_buf` stayed uninitialized, beacon all zeros, `CFSR = 0x00000000`,
+no fault): at SES-boot time global HP ITCM `0x50000000` held un-loaded junk
+(`FE8C1E42 7184989D ...`) while HE's `0x58000000` byte-matched its `.bin` --
+direct evidence the SES genuinely skips a deferred entry and service 500
+genuinely places it at runtime. Peer beacon `0x02000010` advanced
+(`B1B10090 000027A6` → `B1B10090 00002CDF`, +8s), `RESULT PASS`. The bench
+runner found no prebuilt artefacts and rebuilt both roles from source,
+reproducing the authoring build's `zephyr.bin` md5s bit-exactly
+(`3023a9d8d2e7d730c41804840f22a291` HE, `359f9618751d4e00bb2682dd8c34f670`
+HP).
+
 ## [v0.15.0] - 2026-07-31
 
 ### Added — documented `alp_mproc_boot_core()`'s image-residency precondition, and a direction-specific M55-HP erratum (#1070)
