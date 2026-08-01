@@ -301,12 +301,17 @@ emit("PIP_EDITABLE_INSTALL", d["pip"]["editableInstall"])
 # verdict: the single source for which pip phases make the closing verdict
 # non-success, and the wording for it (issue #1038 / tan-cli#220) -- see
 # the verdict.* descriptions in metadata/schemas/bootstrap-v1.schema.json.
-# NOTE: no apostrophes in this heredoc. bash 3.2 (macOS) tracks single-quote
-# state across a heredoc body while scanning for the closing ) of the
-# enclosing $( ), even with a quoted <<'PY' tag, so an ODD apostrophe count
-# in here opens a quote state that runs until the parser hits something
-# illegal in it -- surfacing as a syntax error at an unrelated line far
-# below. See #1050.
+# NOTE: no apostrophes, and no lone angle-bracket character, anywhere in
+# this heredoc. bash 3.2 (macOS) scans this whole body -- comments included
+# -- character by character while hunting for the closing paren of the
+# enclosing $( ), even though the quoted PY-tagged heredoc makes it inert
+# Python-only text to every other shell. An ODD apostrophe count opens a
+# quote state that runs until the parser hits something illegal in it
+# (#1050); a lone angle bracket (as in an angle-bracket-wrapped placeholder)
+# is misread as a redirection operator and desyncs the same scan -- both
+# surface as a syntax error at an unrelated line far below. Spell a
+# placeholder as plain "user", not a bracketed one, down here.
+# See #1050 and #1061.
 emit("VERDICT_BLOCKING_PHASES", d["verdict"]["blockingPhases"])
 emit("VERDICT_PARTIAL_NOTE_TEMPLATE", d["verdict"]["partialNoteTemplate"])
 emit("VERDICT_INCOMPLETE_MESSAGE_TEMPLATE", d["verdict"]["incompleteMessageTemplate"])
@@ -314,8 +319,8 @@ emit("VERDICT_INCOMPLETE_REMEDY", d["verdict"]["incompleteRemedy"])
 # env: keys and RAW (untokenized) values as two parallel arrays (bash has
 # no portable ordered-map array type across the bash 3.2 macOS ships and
 # bash 4+). Token substitution happens in bash, not here: git-bash silently
-# rewrites a POSIX-style path argument (e.g. "/c/Users/<user>") into
-# "C:/Users/<user>" when handed to a native (non-MSYS) python.exe, which would
+# rewrites a POSIX-style path argument (e.g. "/c/Users/user") into
+# "C:/Users/user" when handed to a native (non-MSYS) python.exe, which would
 # make this same directory print two different ways depending on whether
 # it went through python's tok() or bash's own $WORKSPACE_DIR -- see
 # print_env_lines() below.
