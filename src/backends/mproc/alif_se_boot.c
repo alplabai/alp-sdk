@@ -27,37 +27,44 @@
  * se_service_boot_cpu() (service 501, "boot_cpu") only STARTS a core at
  * an address -- Alif's own SE Host Services API docs say plainly it
  * "does not perform image loading, verification, etc., it just boots
- * the core" (v1.109.0 p.113) -- so it depends on the peer's ATOC entry
- * having already placed the image via ["load","boot"].  For the M55-HP
- * core specifically, Alif documents that this can fail: "resetting the
- * core also invalidates its TCM content" (p.115-116, "a known case is
- * the M55-HP core in Ensemble devices"; p.113 scopes the same defect to
- * "FUSION REV_Bx devices" -- the vendor text is not fully consistent on
- * scope, but E8 is Ensemble, so the broader p.115-116 statement covers
- * it).  Bench-measured effect on E8 (2026-07-31, HE-master releasing an
- * HP peer via 501): the SES table reports the HP entry Loaded/Verified,
- * but its ITCM read as uninitialized SRAM, and releasing it made the
- * core vector from empty memory and lock up (CFSR=0x00000101
- * IACCVIOL+IBUSERR, PC=0xEFFFFFFE) -- consistent with load-then-reset
- * wiping the TCM the SES just filled.  Releasing an M55-HE peer via 501
- * is bench-proven fine in both bring-up sessions (2026-06-17 and
- * 2026-07-31) -- HE isn't named in either vendor passage.
+ * the core" (v1.109.0 p.112) -- so it depends on the peer's ATOC entry
+ * having already placed the image via ["load","boot"] AT POWER-ON.  For
+ * the M55-HP core specifically, Alif documents that this can fail:
+ * "resetting the core also invalidates its TCM content" (p.115, "a
+ * known case is the M55-HP core in Ensemble devices"; p.113 scopes the
+ * same defect to "FUSION REV_Bx devices" -- the vendor text is not
+ * fully consistent on scope, but E8 is Ensemble, so the broader p.115
+ * statement covers it).  Bench-measured effect on E8 (2026-07-31,
+ * HE-master releasing an HP peer via 501): the SES table reports the HP
+ * entry Loaded/Verified, but its ITCM read as uninitialized SRAM, and
+ * releasing it made the core vector from empty memory and lock up
+ * (CFSR=0x00000101 IACCVIOL+IBUSERR, PC=0xEFFFFFFE) -- boot_cpu's
+ * release resets the core, which invalidates the TCM the power-on load
+ * had already filled: load-then-reset, the ordering p.115 says fails.
+ * Releasing an M55-HE peer via 501 is bench-proven fine in two
+ * independent sessions (2026-06-17 and 2026-08-01) -- HE isn't named in
+ * either vendor passage.
  *
- * The alternative is an ATOC entry flagged ["load","boot","deferred"]
- * (the SES loads it but skips the boot-time release) plus a runtime
- * se_service_process_toc_entry() call (service 500, "un-defer the TOC
- * entry" -- p.112, "a convenient way to boot a CPU core"), which
- * performs load, verify AND release together, avoiding the reset step
- * that wipes TCM.  Alif recommends this route (or an explicit
- * set_vtor/reset_cpu/reload/release_cpu sequence) over service 501 "for
- * the M55 cores" in the cases above.  Bench-proven on E8 (2026-07-31)
- * releasing an HE peer this way; see the Kconfig help text and
- * docs/aen-bench-bringup.md for the full asymmetry table and both PDF
- * citations.  se_service_process_toc_entry() ships unpatched in the
- * west-pinned hal_alif v2.3.0 module (se_services/zephyr/src/se_service.c);
- * it is NOT present in every hal_alif tree (e.g. the separate
- * alif-dfp-ref checkout used for vendor-doc research does not carry it),
- * so its availability here is a property of the pinned module revision.
+ * The alternative is an ATOC entry flagged ["load","boot","deferred"].
+ * The SETOOLS guide (AUGD0005 p.35) defines deferred as "skipped at
+ * boot time (i.e., no boot OR LOAD)" -- unlike the plain path, NOTHING
+ * is placed in ITCM at power-on.  A runtime se_service_process_toc_entry()
+ * call (service 500, "un-defer the TOC entry" -- p.112, "a convenient
+ * way to boot a CPU core") then performs the load, verify AND release
+ * together, in the order p.115's own documented remedy requires: reset
+ * -> reload -> release (reload strictly AFTER any reset, so the image
+ * survives it).  Service 500 implements exactly that sequence in one
+ * call; the plain path's failure mode is loading BEFORE the reset
+ * instead.  Bench-proven on E8 releasing an HE peer this way: a
+ * bare-Zephyr repro (2026-07-31, 495 RPMsg PING/PONG round-trips over
+ * 4m11s) and the in-tree aen-rpc-pingpong example (2026-08-01, 16/16
+ * pongs) -- see the Kconfig help text and docs/aen-bench-bringup.md for
+ * the full asymmetry table and both PDF citations.
+ * se_service_process_toc_entry() ships unpatched in the west-pinned
+ * hal_alif v2.3.0 module (se_services/zephyr/src/se_service.c); it is
+ * NOT present in every hal_alif tree (e.g. the separate alif-dfp-ref
+ * checkout used for vendor-doc research does not carry it), so its
+ * availability here is a property of the pinned module revision.
  *
  * A third recipe exists and is NOT used by this backend: Alif's own
  * DualCore devkit example packages both cores mramAddress + ["boot"]
@@ -128,13 +135,20 @@ static alp_status_t alif_se_boot_core(alp_core_id_t core, uintptr_t entry_addr)
 		 * WHICH one matches the configured peer. entry_addr is
 		 * unused on the accepted path -- the SES already knows the
 		 * entry's load address from the ATOC. See
-		 * CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_PEER_IS_HP. */
+		 * CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_PEER_IS_HP.
+		 * ALP_ERR_NOSUPPORT, not ALP_ERR_INVAL: <alp/mproc.h> reserves
+		 * INVAL for ALP_CORE_SELF and documents NOSUPPORT for "a core
+		 * the platform boots by other means" -- this build's boot
+		 * authority only knows how to release ONE specific peer, so
+		 * any other core is exactly that case (and callers, e.g.
+		 * aen-dualcore-master's main.c, already map NOSUPPORT to a
+		 * bench SKIP rather than a hard FAIL). */
 		alp_core_id_t configured_peer =
 		    IS_ENABLED(CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_PEER_IS_HP) ? ALP_CORE_M55_HP
 		                                                                          : ALP_CORE_M55_HE;
 
 		if (core != configured_peer) {
-			return ALP_ERR_INVAL;
+			return ALP_ERR_NOSUPPORT;
 		}
 		return se_rc_to_alp(
 		    se_service_process_toc_entry(CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_ENTRY_ID));

@@ -23,11 +23,20 @@
  * window this app can check that itself: after a successful boot request it
  * polls the peer's own heartbeat word (written by whatever image the peer is
  * running -- aen-dualcore-probe or another aen-dualcore-master) for a bounded
- * window and only claims PASS once that word is observed to move.  On this
- * bench the HE<->HP release path is known-blocked and boot_core reports
- * ALP_ERR_NOSUPPORT -- that is reported as SKIP, not FAIL: the boot authority
- * itself said "can't do this here", which is a bench/silicon limitation, not
- * a local error in this app's code.
+ * window and only claims PASS once that word is observed to move.
+ *
+ * The HP build (releasing an HE peer) works with the DEFAULT config --
+ * bench-proven fine on 2026-06-17 and 2026-08-01. The HE build (releasing an
+ * HP peer) does NOT work with the default config: se_service_boot_cpu()
+ * (service 501) is accepted (rc=ALP_OK) but Alif's SE Host Services API docs
+ * (v1.109.0 p.115) document that releasing the M55-HP core this way
+ * invalidates its TCM, so the peer never comes up and the heartbeat poll
+ * below times out -- reported as RESULT SKIP, not FAIL: the local request
+ * path is fine, the peer just never ran. To make the HE build actually
+ * release HP, set CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_PEER_IS_HP=y
+ * (see examples/aen/aen-dualcore-master/testcase.yaml and
+ * docs/aen-bench-bringup.md) and flash the peer's ATOC entry
+ * ["load","boot","deferred"] instead of ["load"].
  */
 
 #include <stdbool.h>

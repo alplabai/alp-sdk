@@ -13,9 +13,11 @@
 #     -- the SES releases it normally at power-on, same as any single-core
 #     image.
 #   - ALP-HE (peer):   M55_HE, loadAddress 0x58000000, flags
-#     ["load","boot","deferred"] -- the SES LOADS + VERIFIES the image into
-#     ITCM but SKIPS the boot-time release (TOC_IMAGE_DEFERRED=0x100; shows
-#     "uLs  D" in the SES boot table, Dest Addr blank, Time 0.00 ms).
+#     ["load","boot","deferred"] -- the SETOOLS guide (AUGD0005 p.35) defines
+#     deferred as "skipped at boot time (i.e., no boot OR LOAD)": the SES
+#     places NOTHING in ITCM at power-on (TOC_IMAGE_DEFERRED=0x100; shows
+#     "uLs  D" in the SES boot table, Dest Addr blank, Time 0.00 ms) and does
+#     the load at runtime instead, inside the service-500 call below.
 #
 # NOTE ON WHY: for THIS direction (HP master -> HE peer), plain
 # ["load","boot"] + se_service_boot_cpu() (service 501) also works --
@@ -23,13 +25,15 @@
 # shape is not a bug fix for HE; it demonstrates the recipe that is the ONLY
 # proven way to release an HP peer (HE-master -> HP-peer), where 501 fails
 # for a real, vendor-documented reason: Alif's SE Host Services API docs
-# (v1.109.0 p.115-116) name "the M55-HP core in Ensemble devices" as a case
+# (v1.109.0 p.115) name "the M55-HP core in Ensemble devices" as a case
 # where resetting the core (which service 501's release does) invalidates
 # its TCM content -- measured on E8 (2026-07-31, HE master releasing an HP
-# peer via 501) as CFSR=0x00000101 IACCVIOL+IBUSERR, PC=0xEFFFFFFE. Service
-# 500 (se_service_process_toc_entry(), used here) has no reset step, so no
-# TCM invalidation, and works both directions -- see
-# src/backends/mproc/alif_se_boot.c and the
+# peer via 501) as CFSR=0x00000101 IACCVIOL+IBUSERR, PC=0xEFFFFFFE. p.115's
+# own remedy is reset -> reload -> release, i.e. the reset still happens;
+# the fix is loading AFTER it. Service 500 (se_service_process_toc_entry(),
+# used here) does exactly that in one call -- the plain path instead loads
+# at power-on, BEFORE 501's release resets the core -- so 500 works both
+# directions -- see src/backends/mproc/alif_se_boot.c and the
 # CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC Kconfig help for the full
 # asymmetry table and vendor citations.
 #
