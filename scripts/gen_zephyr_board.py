@@ -60,6 +60,7 @@ from pathlib import Path
 from typing import Any
 
 from alp_project_loader import _load_yaml, _resolve_sku
+from sentinels import is_tbd
 
 _COPYRIGHT_C = (
     "/*\n"
@@ -97,7 +98,7 @@ def _load_soc_spec(sku_preset: dict[str, Any], metadata_root: Path) -> dict[str,
 def _resolve_variant(sku_preset: dict[str, Any], soc_spec: dict[str, Any]) -> dict[str, Any]:
     declared = sku_preset.get("silicon_variant")
     variants = soc_spec.get("variants") or []
-    if declared and declared != "TBD":
+    if declared and not is_tbd(declared):
         for v in variants:
             if v.get("order_code") == declared:
                 return v

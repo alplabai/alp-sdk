@@ -45,16 +45,14 @@ from pathlib import Path
 
 import yaml
 
+from sentinels import is_tbd
+
 try:
     import jsonschema
 except ImportError:  # pragma: no cover - dependency is in CI + dev env
     sys.exit("error: jsonschema not installed -- `pip install jsonschema`.")
 
 REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO / "scripts"))
-
-from sentinels import is_tbd  # noqa: E402
-
 E1M_DIR = REPO / "metadata" / "e1m"
 PINMUX_DIR = REPO / "metadata" / "pinmux"
 SCHEMA_PATH = REPO / "metadata" / "schemas" / "loom-v1.schema.json"

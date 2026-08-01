@@ -36,11 +36,9 @@ import sys
 from pathlib import Path
 from collections import defaultdict
 
+from sentinels import is_tbd
+
 REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO / "scripts"))
-
-from sentinels import is_tbd  # noqa: E402
-
 MODULES = REPO / "metadata" / "e1m_modules"
 
 # Pads that are documented as legitimately dual-claimed by two
