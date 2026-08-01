@@ -7,6 +7,26 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Added — an AEN801 twister gate: `examples/aen`'s AEN-only scenarios finally build in CI (#1076)
+
+25 of `examples/aen`'s `testcase.yaml` files name an AEN801 board target in
+`platform_allow`, and `pr-twister.yml` runs `-p native_sim/native/64` only
+(by design — that gate deliberately skips the Zephyr SDK), so every one of
+those scenarios was statically filtered out of every PR. Nothing else
+compiled them either: the `alp-build · E1M-AEN801` jobs only emit a
+system-manifest. A new `pr-twister-aen` workflow runs twister against both
+`alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he` and
+`alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp`, scoped to `examples/aen`,
+path-gated to that tree plus the AEN801 board trees and the mproc/SE
+backends. A local run selected 29 scenarios (58 configurations, 19 left
+after platform filtering) and surfaced 6 pre-existing build errors this is
+the first thing to ever compile far enough to see — so the gate ships
+**advisory**, not required, until those are fixed and it has run clean
+across a handful of AEN PRs. The `aen-npu-inference*` family (needs
+`ethos-u-vela` on `PATH`) and `aen-mcuboot-smoke` (needs `sysbuild: true`)
+have no `testcase.yaml` yet, so neither is selected today — tracked for the
+separate follow-on that adds the remaining 42 examples' metadata.
+
 ### Added — `aen-dualcore-he-master`, the HE-master → HP-peer example (silicon-proven 2026-08-01)
 
 Every existing AEN dual-core example releases its peer HP-master → HE-peer.
