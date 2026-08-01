@@ -22,6 +22,20 @@
  * se_service_boot_cpu() is provided by the alp-sdk hal_alif patch
  * zephyr/patches/hal_alif/0001-se-service-add-boot-cpu.patch and
  * bounds its wait inside se_service.c, so the call never hangs.
+ *
+ * Deferred-TOC path (CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC,
+ * default OFF): se_service_boot_cpu() STARTS a peer core but does not
+ * PLACE an image there -- it depends on the peer's ATOC entry having
+ * already loaded the image via ["load","boot"].  An entry declared
+ * ["load"]-only reports Loaded/Verified in the SES table while the
+ * peer's ITCM holds no image; releasing that core makes it vector from
+ * empty memory and lock up.  The alternative is an ATOC entry flagged
+ * ["load","boot","deferred"] (the SES skips its boot-time action) plus
+ * a runtime se_service_process_toc_entry() call (service 500), which
+ * performs load, verify AND release together -- no separate boot_cpu
+ * release needed.  se_service_process_toc_entry() ships unpatched in
+ * hal_alif v2.3.0; see the Kconfig help text and docs/aen-bench-bringup.md
+ * for the bench evidence.
  */
 
 #include <errno.h>
@@ -70,6 +84,17 @@ static alp_status_t alif_se_boot_core(alp_core_id_t core, uintptr_t entry_addr)
 		/* The A32 cluster (and any non-AEN core id) is not bootable
 		 * over this SE service. */
 		return ALP_ERR_NOSUPPORT;
+	}
+
+	if (IS_ENABLED(CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC)) {
+		/* The peer's ATOC entry is ["load","boot","deferred"]: the
+		 * SES skipped the boot-time release, so un-defer + release
+		 * happen together here via SERVICE_BOOT_PROCESS_TOC_ENTRY
+		 * (service 500).  entry_addr is unused on this path -- the
+		 * SES already knows the entry's load address from the ATOC.
+		 * See CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC. */
+		return se_rc_to_alp(
+		    se_service_process_toc_entry(CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_ENTRY_ID));
 	}
 
 	return se_rc_to_alp(se_service_boot_cpu(cpu_id, (uint32_t)entry_addr));

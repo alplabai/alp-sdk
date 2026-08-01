@@ -15,6 +15,7 @@ and [`aen-provisioning.md`](aen-provisioning.md).
 | **Production MRAM flash** | ✅ end-to-end | SETOOLS `app-gen-toc` + `app-write-mram` over the SE-UART; device auto-enters maintenance (no strap); SES loads + boots the ATOC (blink ran at `0x58000000`). |
 | **Zephyr boot (alp-sdk image)** | ✅ first light | Boots to the idle thread; "Hello World" read back via RAM console over SWD. |
 | **M55-HP core (second M55)** | ✅ first light (2026-06-17) | The HP core is held in reset at power-on (only the HE core's AP shows a CPUID); released by SES booting an **`M55_HP` ATOC** (`cpu_id=M55_HP`, `loadAddress=0x50000000` = HP ITCM global, vs HE's `0x58000000`). Proven alive by an advancing **SRAM0 liveness beacon** (`0x02000000`: magic `0xA11FE000` + CPUID `0x411FD220` + heartbeat that advances across a re-read) — read over the system/HE AP, not the HP AP. Example `examples/aen/aen-hp-core-smoke`; helper `scripts/bench/aen/flash-jlink-hp.sh`. Unblocks the HE↔HP MHUv2 doorbell. |
+| **Dual-core deferred-TOC release** | ✅ bare-Zephyr repro (2026-07-31), alp-sdk build pending | A two-entry ATOC's peer flagged `["load"]`-only reports `uLV` (Loaded, Verified) while the ITCM destination holds **no image** (two independent debug APs, every sample t+0.80s–t+60s); releasing it makes the core vector from empty memory and lock up (`CFSR=0x00000101` IACCVIOL+IBUSERR, `PC=0xEFFFFFFE`). Fix: flag the peer `["load","boot","deferred"]` (`TOC_IMAGE_DEFERRED=0x100`, SES table shows `uLs  D`, skips the boot-time action) and un-defer + release it at RUNTIME with **one** `se_service_process_toc_entry()` call (`SERVICE_BOOT_PROCESS_TOC_ENTRY` = service 500 — ships unpatched in hal_alif v2.3.0) — no separate `boot_cpu` (501) release needed. Bench-proven from a bare-Zephyr repro: an RPMsg link carried 495 consecutive PING/PONG round-trips over 4m11s. Portable surface: `CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC` (default **OFF** until re-proven from an alp-sdk image on this bench) in `src/backends/mproc/alif_se_boot.c`; bench tooling: `scripts/bench/aen/flash-run-dualcore.sh`. See § Flow A — Dual-core deferred-TOC boot below. |
 | **UTIMER counter** (Tier-1.5) | ✅ PASS *after a fix* | As-merged it never counted (read 0); fixed in **PR #158** (missing `alif_utimer_enable_soft_counter_ctrl`). Re-validated: counter advances. |
 | **GPIO** (`gpio_dw`, Tier-1) | ✅ PASS *(re-proven 2026-07-27 on silicon; earlier same-day CKEN theory REFUTED — see below)* | DDR/DR set+readback correct via the Zephyr GPIO API (J-Link ground truth) — but that alone is only the gpio_dw controller-register path: the original PASS criterion also read `EXT_PORTA` and treated it as pad-level proof, and on this controller `EXT_PORTA` mirrors `SWPORTA_DR` for an OUTPUT-direction pin (Synopsys DW_apb_gpio databook), so it could never independently fail and proved nothing beyond DR/DDR — **this half still stands.** Earlier the same day, `CLKCTL_PER_SLV->GPIO_CTRL[n]` bit 16 (`GPIO_CTRL_CKEN`, the per-port GPIO functional-clock enable) — clear on every port and never written by alp-sdk — was suspected as the reason a pad looked electrically dark, and a fix was added (`zephyr/drivers/gpio/gpio_clk_alif.c`, PR-tracked). **That theory is REFUTED, decisively, on the same bench**: after a cold reset with CKEN still clear, driving `SWPORTA_DDR`/`SWPORTA_DR` from the debugger moved the pad — `0x49002050 = 0x00000010` with `0x4902F088 = 0x00000100` (bit 16 unset). CKEN is not required for pad drive. The real explanation for "the LED was dark": the old `blink` example toggled ~10 times over ~2 s and returned with the pad left LOW — a window nobody was watching, not a pad that couldn't move. Once `blink` was changed to loop forever, the maintainer confirmed **by eye that the LED blinks** — GPIO output on the E8 pad is now proven on real silicon, with REN enabled at `0x1A603050`, `EXT_PORTA` following `SWPORTA_DR` 12/12 on P2_4 while `blink` ran. **Not yet proven:** the colour is wrong (`EVK_PIN_LED_RED` lights GREEN) — still being measured, no colour conclusion asserted here — and until `gpio11`–`gpio14` landed (§ this doc, dtsi), the green/blue RGB channels (P12_7/P12_6) had no controller to reach at all. `gpio_clk_alif.c`'s CKEN write is kept (it matches Alif's own documented `enable_gpio_clk()` init) but is no longer claimed to fix a dark pad. See `examples/aen/aen-gpio-bench/src/main.c`. |
 | **I2C2 + 24C128 EEPROM** (`i2c_dw`, Tier-1) | ✅ PASS | EEPROM ACKs at 0x50 and returns a **populated Alp manifest** (not blank) — magic `ALPH`, SKU, serial, mfg date, CRC-32 all decode; one of 12 devices on the bus — once the pinctrl carries the **pad config** Alif's reference uses — `input-enable` (REN) + `bias-pull-down` (DSC=2). See §3. |
@@ -126,6 +127,64 @@ J-Link `loadbin` straight to slot0 at `0x80010000` **only** (ATOC region
 / erasing MCUboot untested) with no SETOOLS/ATOC/SE-UART at all — see
 the **Secure boot** row in §1 above and `docs/aen-provisioning.md`
 §0.5 for the exact sequence.
+
+### Flow A — Dual-core deferred-TOC boot
+
+Booting a **second, dependent** M55 image (a peer the master releases at
+runtime, not one that boots freestanding) needs a different ATOC shape than
+the single-entry recipe above — and the naive shape is a real silicon trap,
+proven on E8 (bare-Zephyr repro, 2026-07-31):
+
+- An ATOC entry declared `"flags": ["load"]` reports **`uLV`** (Loaded,
+  Verified) in the SES boot table — but the peer's ITCM held **no image**,
+  measured from two independent debug APs at every sample from t+0.80s to
+  t+60s. Releasing that core (`se_service_boot_cpu()`) makes it vector from
+  empty memory and lock up: `CFSR = 0x00000101` (IACCVIOL + IBUSERR),
+  `PC = 0xEFFFFFFE`.
+- The fix: flag the peer entry `"flags": ["load", "boot", "deferred"]`.
+  `"deferred"` is a member of the `flags` **array** (a sibling
+  `"deferred": true` key is rejected: `ERROR: Invalid key: "deferred"`). It
+  sets `TOC_IMAGE_DEFERRED = 0x100` in the entry's flags word
+  (`0x00000022` → `0x00000122`) and prints `D` in the SES table — the SES
+  then **skips the boot-time action entirely** for that entry (`uLs  D`,
+  Dest Addr blank, Time `0.00 ms`) instead of mis-reporting it as done.
+- The master image un-defers the peer at **runtime** with
+  `se_service_process_toc_entry()` (`SERVICE_BOOT_PROCESS_TOC_ENTRY` =
+  **service 500**), which performs load, verify AND release in **one**
+  call — no separate `boot_cpu` (service 501) release needed afterwards.
+  With this recipe an RPMsg link carried 495 consecutive PING/PONG
+  round-trips over 4m11s.
+
+`se_service_process_toc_entry()` ships **unpatched** in hal_alif v2.3.0
+(`services_lib_ids.h SERVICE_BOOT_PROCESS_TOC_ENTRY=500`,
+`se_services/zephyr/src/se_service.c`) — unlike `se_service_boot_cpu()`
+(hal_alif patch `0001-se-service-add-boot-cpu.patch`), no hal_alif patch is
+needed for this path.
+
+The portable surface is
+[`CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC`](../zephyr/kconfigs/ble-security.kconfig)
+in `src/backends/mproc/alif_se_boot.c`: when ON, `alp_mproc_boot_core()`
+(`<alp/mproc.h>`) calls `se_service_process_toc_entry()` with the ATOC entry
+id from `CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_ENTRY_ID` (default
+`"ALP-HE"`) instead of `se_service_boot_cpu()`. **Default OFF** — the recipe
+above is proven from a bare-Zephyr repro, not yet from an alp-sdk image on
+this bench; today's `se_service_boot_cpu()` path is unchanged unless a build
+opts in.
+
+Bench tooling: `scripts/bench/aen/flash-run-dualcore.sh <hp-build-dir>
+<he-build-dir>` emits and flashes the two-entry ATOC over the SE-UART (Flow
+A) — `ALP-HP` normal (`["load","boot"]`), `ALP-HE` deferred
+(`["load","boot","deferred"]`). It generalizes `flash-run.sh`'s single
+M55-HE entry; unlike `flash-run.sh` it does not auto-read a RAM console —
+prove both cores independently (HP via `reread.sh`, HE via your app's own
+IPC/beacon proof).
+
+> **Known-broken pattern already in the tree**: `flash-update-log-dual.sh`
+> (`examples/connectivity/firmware-update-log`, Flow D) emits its HE-client
+> entry as `"flags": ["load"]` — exactly the pattern proven broken above.
+> That example's AEN hardware tier has never been more than a stub; treat
+> its dual-core release as unverified until it is re-checked against this
+> recipe.
 
 ### Flow B — Seeing the console
 
