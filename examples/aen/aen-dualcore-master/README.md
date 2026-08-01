@@ -29,30 +29,13 @@ west build -p always -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/
 # dual ATOC: HP-APP ["load","boot"] @0x50000000 ; HE-APP ["load"] @0x58000000 ; app-gen-toc + app-write-mram
 ```
 
-**The reverse direction (HE master → HP peer) needs a different config and ATOC.**
-The plain 501 path above cannot release an HP peer at all (see the next section);
-the only proven way is `CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_PEER_IS_HP=y`
-(see `examples/aen/aen-dualcore-master/testcase.yaml`), which defaults the
-deferred-TOC path ON and requires the HP peer's ATOC entry to be flagged
-`["load","boot","deferred"]` instead of `["load"]`:
-
-```sh
-# master (HE) + the HP probe as the released, deferred-TOC peer:
-west build -p always -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-dualcore-master -d build/he -- "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>" -DCONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_PEER_IS_HP=y
-west build -p always -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/aen/aen-dualcore-probe  -d build/hp -- "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>"
-# dual ATOC: HE-APP ["load","boot"] @0x58000000 ; HP-APP ["load","boot","deferred"] @0x50000000 ; app-gen-toc + app-write-mram
-```
-
-This HE-master combination is not yet bench-run (silicon-code-verified, not
-bench-verified) -- see `docs/aen-bench-bringup.md` § Flow A for the
-bench-proven case (`aen-rpc-pingpong`, same deferred-TOC mechanism, HP master
-releasing a deferred HE peer).
-
-**Related:** `aen-dualcore-he-master` packages this exact HE-master ->
-HP-peer combination as its own self-contained example (one app, both roles,
-`PEER_IS_HP=y` on by construction instead of a `-D` override) and is the one
-that's actually bench-proven for this direction (2026-08-01) -- start there
-if this is the direction you need.
+**The reverse direction (HE master → HP peer) is a different app, not a flag
+on this one.** The plain 501 path above cannot release an HP peer at all (see
+"Verdicts, timeouts..." below) -- `aen-dualcore-he-master` is the
+self-contained example for that direction (one app, both roles,
+`PEER_IS_HP=y` on by construction instead of a hand-paired `-D` override) and
+is bench-proven for it (2026-08-01). Start there if that's the direction you
+need.
 
 ## Result (bench-verified on E8, 2026-06-18) — BOTH cores run ✅
 

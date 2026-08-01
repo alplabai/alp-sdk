@@ -166,8 +166,8 @@ at `entry_addr` is the caller's responsibility, arranged before this call.
 > `aen-dualcore-ipc`, `aen-dualcore-doorbell`, `aen-dualcore-master`,
 > `firmware-update-log`) release **HE from an HP master**, the working
 > direction for the plain path, and none of them set `PEER_IS_HP`. The
-> `aen-dualcore-master` HE role is the one in-tree consumer of the deferred
-> path (`examples/aen/aen-dualcore-master/testcase.yaml`), silicon-proven
+> `aen-dualcore-he-master` example is the in-tree consumer of the deferred
+> path (`examples/aen/aen-dualcore-he-master/testcase.yaml`), silicon-proven
 > releasing an HP peer via a cold-cycle bench run. Full writeup: the
 > precondition comment on `alif_se_boot_core()` and
 > `docs/aen-bench-bringup.md` § Flow A — Dual-core deferred-TOC boot.
