@@ -156,13 +156,21 @@ at `entry_addr` is the caller's responsibility, arranged before this call.
 > (p.112) calls 500 the "higher-level ... convenient way to boot a CPU core"
 > and recommends it over 501 for M55 cores generally. That combination
 > carried an RPMsg link through 495 consecutive PING/PONG round-trips over
-> 4m11s; see branch `feat/aen-mproc-deferred-toc-boot`. This backend still
-> rides service 501 as-is -- all six examples that call
+> 4m11s, and 16/16 on the in-tree `aen-rpc-pingpong` example. This backend
+> now implements that path too, gated by
+> `CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC` (default ON only when the
+> configured peer is HP -- `CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_PEER_IS_HP`,
+> see the Kconfig help in `zephyr/kconfigs/mproc-rpc-usb.kconfig`) -- but
+> every shipped example still rides service 501 as-is: all six that call
 > `alp_mproc_boot_core()` (`aen-alp-rpc`, `aen-rpc-pingpong`,
 > `aen-dualcore-ipc`, `aen-dualcore-doorbell`, `aen-dualcore-master`,
 > `firmware-update-log`) release **HE from an HP master**, the working
-> direction -- none of them are exposed to this erratum. Full writeup: the
-> precondition comment on `alif_se_boot_core()`.
+> direction for the plain path, and none of them set `PEER_IS_HP`. The
+> `aen-dualcore-master` HE role is the one in-tree consumer of the deferred
+> path (`examples/aen/aen-dualcore-master/testcase.yaml`), silicon-proven
+> releasing an HP peer via a cold-cycle bench run. Full writeup: the
+> precondition comment on `alif_se_boot_core()` and
+> `docs/aen-bench-bringup.md` § Flow A — Dual-core deferred-TOC boot.
 >
 > **Open:** whether `entry_addr` is honoured by service 501 at all was not
 > isolated by either run above -- the entry point came from the ATOC in

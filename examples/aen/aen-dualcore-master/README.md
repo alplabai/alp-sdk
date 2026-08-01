@@ -17,7 +17,10 @@ carries **no vendor include**.
 On the E8 the SES boots the **HP** entry from a dual ATOC, so the **HP build is the
 master** — it releases HE. The app is board-aware (the HE build would release HP).
 The partner is the `aen-dualcore-probe` build for the other core, packaged
-`["load"]`-only (the SES loads it but does not auto-boot it).
+`["load"]`-only (the SES loads it but does not auto-boot it). This is the plain
+`se_service_boot_cpu()` (service 501) release path, and for the HP-master →
+HE-peer direction shown here it works fine with the DEFAULT config
+(bench-proven 2026-06-17 and re-confirmed 2026-08-01).
 
 ```sh
 # master (HP) + the HE probe as the released core:
@@ -25,6 +28,25 @@ west build -p always -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/
 west build -p always -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-dualcore-probe  -d build/he -- "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>"
 # dual ATOC: HP-APP ["load","boot"] @0x50000000 ; HE-APP ["load"] @0x58000000 ; app-gen-toc + app-write-mram
 ```
+
+**The reverse direction (HE master → HP peer) needs a different config and ATOC.**
+The plain 501 path above cannot release an HP peer at all (see the next section);
+the only proven way is `CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_PEER_IS_HP=y`
+(see `examples/aen/aen-dualcore-master/testcase.yaml`), which defaults the
+deferred-TOC path ON and requires the HP peer's ATOC entry to be flagged
+`["load","boot","deferred"]` instead of `["load"]`:
+
+```sh
+# master (HE) + the HP probe as the released, deferred-TOC peer:
+west build -p always -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-dualcore-master -d build/he -- "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>" -DCONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_PEER_IS_HP=y
+west build -p always -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/aen/aen-dualcore-probe  -d build/hp -- "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>"
+# dual ATOC: HE-APP ["load","boot"] @0x58000000 ; HP-APP ["load","boot","deferred"] @0x50000000 ; app-gen-toc + app-write-mram
+```
+
+This HE-master combination is not yet bench-run (silicon-code-verified, not
+bench-verified) -- see `docs/aen-bench-bringup.md` § Flow A for the
+bench-proven case (`aen-rpc-pingpong`, same deferred-TOC mechanism, HP master
+releasing a deferred HE peer).
 
 ## Result (bench-verified on E8, 2026-06-18) — BOTH cores run ✅
 
@@ -73,17 +95,35 @@ trailing heartbeat loop:
 - `RESULT FAIL: alp_mproc_boot_core rc=%d` — a real local error: `boot_core`
   returned an unexpected rc (`ALP_ERR_NOSUPPORT` included -- see below).
 
-This build ships `CONFIG_HAS_ALIF_SE_SERVICES=y` and no `native_sim` overlay,
-so `alp_mproc_boot_core()` always resolves to the E8 SE backend for either
-M55 core — the `<alp/mproc.h>` contract's `ALP_ERR_NOSUPPORT` case ("no boot
-authority for `core` in this build: wrong SoM, `native_sim`, or a core the
-platform boots by other means") is not reachable in this configuration. So
-the master treats *any* nonzero `alp_mproc_boot_core` rc, including
-`ALP_ERR_NOSUPPORT`, as `RESULT FAIL`, not a skip: on these boards a `-6`
-here would mean the boot path fell out of the build (e.g. the SE backend lost
-the link, or the silicon-ref stopped matching) — a regression this app must
-surface, not paper over.
+With the **default** config (`CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC`
+off), this build ships `CONFIG_HAS_ALIF_SE_SERVICES=y` and no `native_sim`
+overlay, so `alp_mproc_boot_core()` always resolves to the E8 SE backend's
+plain `se_service_boot_cpu()` path for either M55 core — the `<alp/mproc.h>`
+contract's `ALP_ERR_NOSUPPORT` case ("no boot authority for `core` in this
+build: wrong SoM, `native_sim`, or a core the platform boots by other means")
+is not reachable there. So the master treats *any* nonzero
+`alp_mproc_boot_core` rc as `RESULT FAIL`, not a skip: on these boards a
+nonzero rc here would mean the boot path fell out of the build (e.g. the SE
+backend lost the link, or the silicon-ref stopped matching) — a regression
+this app must surface, not paper over.
+
+That said, an HE build releasing an HP peer via this default config is
+**accepted** (`rc=ALP_OK`, not a nonzero rc, so the FAIL check above doesn't
+fire) but the peer never comes up: Alif's SE Host Services API docs (v1.109.0
+p.115) document that `se_service_boot_cpu()` (service 501) invalidates the HP
+core's TCM on release, so the peer locks up before it can advance its
+heartbeat, and this is reported as `RESULT SKIP` (accepted, peer never
+advanced) — not `RESULT FAIL`, since the local request path is fine.
+
+With the deferred-TOC path ON
+(`CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_PEER_IS_HP=y`, see above),
+`ALP_ERR_NOSUPPORT` DOES become reachable: a build whose `PEER_IS_HP` doesn't
+match which core this role's `TARGET_CORE` actually releases is a
+build-config bug, not a bench/silicon state, and now correctly falls into
+`RESULT FAIL` via the same nonzero-rc check as any other real local error.
 
 The peer-heartbeat wait (2000 ms, polled every 20 ms) is bounded, so an
 accepted request whose peer never actually comes up produces a verdict
-instead of a hang.
+instead of a hang. To make the HE build actually release an HP peer, use the
+deferred-TOC path (`CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_PEER_IS_HP=y`,
+see above and `docs/aen-bench-bringup.md`).
