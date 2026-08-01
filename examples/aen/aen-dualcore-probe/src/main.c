@@ -11,7 +11,15 @@
  * advances a heartbeat forever. After flashing a dual-entry ATOC (HE@0x58000000
  * + HP@0x50000000, both flags [load,boot]) and resetting, read BOTH beacons:
  *   - both heartbeats advance  -> the SES booted BOTH cores from one power-on
- *   - only HP advances, HE = 0 -> single-core boot (the prior finding)
+ *   - only HP advances, HE = 0 -> single-core boot (with CONFIG_DCACHE=n; see
+ *     below)
+ *
+ * SUPERSEDED 2026-08-01: the 2026-06-18 bench run recorded "only HP advances"
+ * and read that as a single-core boot. It wasn't -- with CONFIG_DCACHE=n
+ * added (see prj.conf), a 2026-08-01 re-run of the SAME dual-entry ATOC shows
+ * BOTH heartbeats advancing: the SES was booting both cores all along, and
+ * the D-cache was hiding HE's beacon writes from HP's cross-core read (and
+ * vice versa). See README.md's "Result" section for the current reading.
  *
  * 0x02000000 itself reads back 0 even when running (reserved/special per the
  * bench), so the beacons sit at nonzero offsets.
@@ -80,8 +88,7 @@ int main(void)
 		       PEER_MAGIC);
 	} else {
 		printk("RESULT SKIP: dualcore-probe -- peer beacon (0x%08x) never advanced within "
-		       "%u ms; this core (%s) is up, peer never ran (matches the single-core-boot "
-		       "finding)\n",
+		       "%u ms; this core (%s) is up\n",
 		       PEER_BEACON_BASE,
 		       PEER_HB_TIMEOUT_MS,
 		       ROLE);

@@ -105,7 +105,7 @@ int main(void)
 		} else {
 			printk("RESULT SKIP: dualcore-master -- alp_mproc_boot_core(%s) accepted "
 			       "(rc=0) but its beacon never advanced within %u ms; local boot "
-			       "request OK, peer image absent/not running\n",
+			       "request OK\n",
 			       TARGET_NAME,
 			       PEER_HB_TIMEOUT_MS);
 		}

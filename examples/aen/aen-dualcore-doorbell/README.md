@@ -40,6 +40,17 @@ This is the working substrate for HE↔HP IPC / a dual-core RPC.
 Recipe: dual ATOC with HP-APP `["load","boot"]` @0x50000000 + HE-APP `["load"]`
 @0x58000000; `app-gen-toc` + `app-write-mram`. Restore the canonical slot0 after.
 
+## One correctness requirement (bench-found)
+
+**`CONFIG_DCACHE=n`.** `DB_BEACON`/`PEER_DB_BEACON` are read/written by both
+cores, each with its own D-cache → cross-core reads saw stale lines (the
+verdict window saw HP's received-count and HE's sent-count as equal and
+advancing over SWD while the app itself never observed the update, i.e.
+`RESULT SKIP`). Disabling the D-cache makes the shared SRAM0 region coherent
+(the AEN-SRAM precedent). A cache-on variant would `sys_cache_data_flush_range`
+on the writer + `invd_range` on the reader, on silicon where the D-cache can be
+enabled at all.
+
 ## Verdicts, timeouts, and the HE↔HP boot block on this bench
 
 Both HP and HE hold their verdict to a bounded window rather than looping
@@ -50,9 +61,9 @@ before dropping into its trailing idle/ring loop:
   doorbell actually received on MHU-1 @`0x400A0000` (or, on HE, HP's
   cross-read received-count was observed to advance after a ring).
 - `RESULT SKIP: dualcore-doorbell -- ...` — the peer never showed within a
-  bounded window: HE released but never rang, HE's own MHU-1 sender link
-  never came ready (`ACCESS_READY`), or HP never saw HE's ring — states what
-  was locally proven, not a failure of this app's code.
+  bounded window: no doorbell arrived within the window, HE's own MHU-1
+  sender link never came ready (`ACCESS_READY`), or HP never saw HE's ring —
+  states what was locally proven, not a failure of this app's code.
 - `RESULT FAIL: alp_mproc_boot_core rc=%d` — HP only: a real local error,
   `alp_mproc_boot_core` returned an unexpected rc (`ALP_ERR_NOSUPPORT`
   included -- see below).
