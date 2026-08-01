@@ -1,4 +1,4 @@
-From: Alp Lab AB
+From: Alp Lab AB <contact@alplab.ai>
 Date: Wed, 3 Jun 2026 20:00:00 +0200
 Subject: [PATCH] clk: renesas: r9a09g056: keep CM33-owned RSCI7/RIIC8 clocks
  and MSTOP gates on

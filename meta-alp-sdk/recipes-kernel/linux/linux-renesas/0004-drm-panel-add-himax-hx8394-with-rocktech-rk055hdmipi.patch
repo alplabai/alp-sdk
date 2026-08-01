@@ -1,5 +1,5 @@
 From 3f7ee5e684e711048c07e8ef18b5691a9ab6202f Mon Sep 17 00:00:00 2001
-From: Alp Lab AB
+From: Alp Lab AB <contact@alplab.ai>
 Date: Fri, 5 Jun 2026 21:28:50 +0200
 Subject: [PATCH] drm/panel: add himax-hx8394 with rocktech,rk055hdmipi4ma0
  (backport from v6.6)

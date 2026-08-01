@@ -1,5 +1,5 @@
 From f7897b7a3933f9b0795d1c2c5097d4e9c7a3cd0f Mon Sep 17 00:00:00 2001
-From: Alp Lab AB <gate@alp-lab.se>
+From: Alp Lab AB <contact@alplab.ai>
 Date: Fri, 12 Jun 2026 12:25:36 +0200
 Subject: [PATCH] usb: ohci-platform: add "spurious-oc" DT property (mirrors
  generic-EHCI)

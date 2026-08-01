@@ -1,4 +1,4 @@
-From: Alp Lab AB
+From: Alp Lab AB <contact@alplab.ai>
 Date: Thu, 4 Jun 2026 14:33:20 +0200
 Subject: [PATCH] gpio: add Alp Lab GD32 bridge expander driver
 
