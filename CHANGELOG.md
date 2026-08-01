@@ -71,6 +71,24 @@ generator's `CONFIG_DCACHE=n` only reaches `m55_he` today through the
 orchestrator-driven `tan build` flow (which still targets `alp-stock-shim`,
 not `peer/`), not through the documented standalone `west build peer/`.
 
+### Removed — the HE-master → HP-peer overlap in `aen-dualcore-master`'s docs (superseded by `aen-dualcore-he-master`)
+
+`aen-dualcore-master` is a symmetric app: both boards build the same source,
+and until now its `README.md` also carried the reverse direction's own build
+recipe (a `-DCONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_PEER_IS_HP=y`
+override, hand-paired with `aen-dualcore-probe`'s HP build) and its
+`testcase.yaml` carried a matching `he_role_deferred_hp_peer` scenario. That
+direction now has its own self-contained, silicon-proven example
+(`aen-dualcore-he-master`, added below), which makes the hand-paired recipe a
+second, worse answer to a question the new example already answers -- a
+reader hitting `aen-dualcore-master` first had no signal the dedicated
+example existed (#1082 added a `Related` pointer as a stopgap). The README's
+reverse-direction section and the `he_role_deferred_hp_peer` scenario are
+removed and replaced with a single pointer to `aen-dualcore-he-master`;
+`aen-dualcore-master`'s own direction (HP-master → HE-peer, bench-proven) is
+untouched, as is the app's `main.c`, which is genuinely symmetric and not
+duplicated documentation.
+
 ### Added — `aen-dualcore-he-master`, the HE-master → HP-peer example (silicon-proven 2026-08-01)
 
 Every existing AEN dual-core example releases its peer HP-master → HE-peer.
