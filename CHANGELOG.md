@@ -7,6 +7,32 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.15.0 candidate
 
+### Fixed — five AEN examples blamed `ALP_ERR_NOSUPPORT` on a boot-authority refusal that cannot produce it (#1071)
+
+`aen-alp-rpc`, `aen-dualcore-doorbell`, `aen-dualcore-ipc`, `aen-dualcore-master`,
+and `aen-rpc-pingpong` each gated `RESULT SKIP` on `alp_mproc_boot_core()`
+returning `ALP_ERR_NOSUPPORT` (`rc=-6`) and told the reader, in the README and
+in a `main.c` comment, that the Secure Enclave boot authority itself was
+refusing to release the peer M55 -- a bench/silicon limitation, not a bug in
+the app. Neither half of that held up: `se_rc_to_alp()`
+(`src/backends/mproc/alif_se_boot.c`) never maps a real SE error to `-6` for
+`ALP_CORE_M55_HE` (its `default:` case returns `ALP_ERR_IO`, and the switch
+handles HP/HE explicitly), and the SE boot path itself is bench-proven working
+on E8 silicon -- a peer M55 started and ran an RPMsg link for 495 consecutive
+PING/PONG round-trips. `ALP_ERR_NOSUPPORT` can only reach these examples from
+`alp_mproc_boot_core()` finding no `mproc_boot` backend for the SoC
+(`src/mproc_dispatch.c:419`), the `sw_fallback.c` wildcard backend, or the SE
+backend's own `default:` for a core id that isn't HP/HE -- none of which is
+"the boot authority said no" for the core these examples pass.
+
+Each README now states what `-6` actually means here (no backend selected --
+an environment/config state) and says plainly that where a given bench's `-6`
+came from is unproven, instead of asserting a specific untrue cause. Each
+`main.c`'s `RESULT SKIP` message and header comment were reworded to match;
+the branch logic is unchanged -- `ALP_ERR_IO` (a genuine SE refusal) already
+fell through to `RESULT FAIL` in every one of the five, so no skip/fail split
+was needed, only the wording each printed.
+
 ### Fixed — a scaffolded AEN Zephyr app linked at the MRAM base, so no flash flow accepted it (#1067)
 
 `tan init --from-example` + `tan build` for an AEN board produced an image

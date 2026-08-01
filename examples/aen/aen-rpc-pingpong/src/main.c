@@ -178,12 +178,17 @@ int main(void)
 	printk("[HP] boot_core rc=%d\n", (int)brc);
 
 	if (brc == ALP_ERR_NOSUPPORT) {
-		/* The boot authority itself says it can't release HE on this bench --
-		 * a bench/silicon limitation, not a bug in this app. */
+		/* NOSUPPORT means no mproc_boot backend was selected for this core --
+		 * an environment/config state (e.g. backend registration/link-time
+		 * state, see alp_mproc_boot_core() in src/mproc_dispatch.c), NOT the
+		 * SE boot authority refusing: se_rc_to_alp() in
+		 * src/backends/mproc/alif_se_boot.c never maps a real SE error to
+		 * NOSUPPORT for ALP_CORE_M55_HE, and the SE boot path itself is
+		 * proven working on E8 silicon. */
 		SELF_BEACON[2] = V_SKIP;
-		printk("RESULT SKIP: pingpong -- boot authority has no support for releasing HE "
-		       "on this bench (alp_mproc_boot_core rc=%d); HE never released, nothing "
-		       "past this point was attempted\n",
+		printk("RESULT SKIP: pingpong -- no mproc_boot backend selected for HE "
+		       "(alp_mproc_boot_core rc=%d); HE never released, nothing past this "
+		       "point was attempted\n",
 		       (int)brc);
 		return 0;
 	}

@@ -25,11 +25,15 @@
  * forever waiting for it: HP checks its OWN received-count; HE cross-reads
  * HP's DB_BEACON (globally addressable, same trick the doc above uses for
  * a human SWD read) so it can report the SAME propagation verdict locally
- * instead of blindly claiming "sent" proves anything reached the peer. On
- * this bench boot_core is known to report ALP_ERR_NOSUPPORT for the HE
- * release (the HE<->HP boot path is blocked), which HP reports as SKIP, not
- * FAIL -- a boot authority that says "unsupported" is a bench/silicon
- * limit, not a bug in this app.
+ * instead of blindly claiming "sent" proves anything reached the peer. If
+ * boot_core reports ALP_ERR_NOSUPPORT for the HE release, HP reports that as
+ * SKIP, not FAIL -- but NOSUPPORT means no mproc_boot backend was selected
+ * for HE (an environment/config state; see alp_mproc_boot_core() in
+ * src/mproc_dispatch.c), not the boot authority refusing: the SE backend's
+ * se_rc_to_alp() (src/backends/mproc/alif_se_boot.c) never maps a real SE
+ * error to NOSUPPORT for ALP_CORE_M55_HE, and the SE boot path itself is
+ * proven working on E8 silicon.  A real SE refusal comes back as
+ * ALP_ERR_IO and is a genuine FAIL below, not folded into this skip.
  */
 
 #include <stdbool.h>
@@ -101,9 +105,9 @@ int main(void)
 	       (int)rc);
 
 	if (rc == ALP_ERR_NOSUPPORT) {
-		printk("RESULT SKIP: dualcore-doorbell -- boot authority has no support for "
-		       "releasing HE on this bench (alp_mproc_boot_core rc=%d); HE never released, "
-		       "no doorbell possible\n",
+		printk("RESULT SKIP: dualcore-doorbell -- no mproc_boot backend selected for "
+		       "HE (alp_mproc_boot_core rc=%d); HE never released, no doorbell "
+		       "possible\n",
 		       (int)rc);
 	} else if (rc != ALP_OK) {
 		printk("RESULT FAIL: alp_mproc_boot_core rc=%d\n", (int)rc);

@@ -23,11 +23,15 @@
  * window this app can check that itself: after a successful boot request it
  * polls the peer's own heartbeat word (written by whatever image the peer is
  * running -- aen-dualcore-probe or another aen-dualcore-master) for a bounded
- * window and only claims PASS once that word is observed to move.  On this
- * bench the HE<->HP release path is known-blocked and boot_core reports
- * ALP_ERR_NOSUPPORT -- that is reported as SKIP, not FAIL: the boot authority
- * itself said "can't do this here", which is a bench/silicon limitation, not
- * a local error in this app's code.
+ * window and only claims PASS once that word is observed to move.  If
+ * boot_core reports ALP_ERR_NOSUPPORT that is reported as SKIP, not FAIL --
+ * but NOSUPPORT means no mproc_boot backend was selected for the target core
+ * (an environment/config state; see alp_mproc_boot_core() in
+ * src/mproc_dispatch.c), not the boot authority refusing: the SE backend's
+ * se_rc_to_alp() (src/backends/mproc/alif_se_boot.c) never maps a real SE
+ * error to NOSUPPORT for either M55 core, and the SE boot path itself is
+ * proven working on E8 silicon.  A real SE refusal comes back as
+ * ALP_ERR_IO and is a genuine FAIL below, not folded into this skip.
  */
 
 #include <stdbool.h>
@@ -81,8 +85,8 @@ int main(void)
 	printk("alp_mproc_boot_core(%s, 0x%08x) rc=%d\n", TARGET_NAME, TARGET_ADDR, (int)rc);
 
 	if (rc == ALP_ERR_NOSUPPORT) {
-		printk("RESULT SKIP: dualcore-master -- boot authority has no support for releasing "
-		       "%s on this bench (alp_mproc_boot_core rc=%d); local request path OK, peer "
+		printk("RESULT SKIP: dualcore-master -- no mproc_boot backend selected for "
+		       "%s (alp_mproc_boot_core rc=%d); local request path OK, peer "
 		       "never released\n",
 		       TARGET_NAME,
 		       (int)rc);

@@ -56,17 +56,25 @@ trailing heartbeat loop:
   accepted the request AND the peer's own heartbeat word was observed to
   advance within the bound below (the request being accepted, alone, does
   not prove the peer actually came up).
-- `RESULT SKIP: dualcore-master -- ...` — either the boot authority reported
-  `ALP_ERR_NOSUPPORT` (the request was never even accepted), or it was
-  accepted but the peer's heartbeat never advanced within the bound — states
-  what was locally proven, not a failure of this app's code.
+- `RESULT SKIP: dualcore-master -- ...` — either no `mproc_boot` backend was
+  selected (`ALP_ERR_NOSUPPORT`, the request was never even accepted), or it
+  was accepted but the peer's heartbeat never advanced within the bound —
+  states what was locally proven, not a failure of this app's code.
 - `RESULT FAIL: alp_mproc_boot_core rc=%d` — a real local error: `boot_core`
-  returned an unexpected rc (neither `ALP_OK` nor `ALP_ERR_NOSUPPORT`).
+  returned an unexpected rc (neither `ALP_OK` nor `ALP_ERR_NOSUPPORT`); a real
+  SE refusal comes back as `ALP_ERR_IO` and lands here, not in the skip above.
 
-On THIS bench the HE↔HP release path is known-blocked and
-`alp_mproc_boot_core` returns `ALP_ERR_NOSUPPORT` (`rc=-6`) — reported as
-`RESULT SKIP`, not `RESULT FAIL`: the boot authority itself says it can't
-release the peer here, which is a bench/silicon limitation, not a bug in this
-app. The peer-heartbeat wait (2000 ms, polled every 20 ms) is bounded, so an
-accepted request whose peer never actually comes up produces a verdict
-instead of a hang.
+If `alp_mproc_boot_core` returns `ALP_ERR_NOSUPPORT` (`rc=-6`), it is reported
+as `RESULT SKIP`, not `RESULT FAIL` — but `-6` here means no `mproc_boot`
+backend was selected for the peer (an environment/config state:
+`alp_mproc_boot_core()` in `src/mproc_dispatch.c` returns `ALP_ERR_NOSUPPORT`
+only when backend resolution finds no `mproc_boot` ops for the SoC), **not** a
+boot-authority refusal: `se_rc_to_alp()`
+(`src/backends/mproc/alif_se_boot.c`) never maps a real SE error to `-6` for
+either M55 core, and the SE boot path itself is bench-proven working on E8
+silicon (a peer M55 started and ran an RPMsg link for 495 consecutive
+PING/PONG round-trips). Why a given bench observed `-6` (e.g. why backend
+resolution didn't match) is a separate, unproven question this README doesn't
+claim to answer. The peer-heartbeat wait (2000 ms, polled every 20 ms) is
+bounded, so an accepted request whose peer never actually comes up produces a
+verdict instead of a hang.

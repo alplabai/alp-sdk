@@ -247,8 +247,15 @@ int main(void)
 	uint32_t last_seq = 0U;
 
 	if (rc == ALP_ERR_NOSUPPORT) {
-		printk("RESULT SKIP: dualcore-ipc -- boot authority has no support for releasing HE "
-		       "on this bench (alp_mproc_boot_core rc=%d); HE never released, no requests "
+		/* NOSUPPORT means no mproc_boot backend was selected for HE -- an
+		 * environment/config state (see alp_mproc_boot_core() in
+		 * src/mproc_dispatch.c), NOT the SE boot authority refusing:
+		 * se_rc_to_alp() (src/backends/mproc/alif_se_boot.c) never maps a
+		 * real SE error to NOSUPPORT for ALP_CORE_M55_HE, and the SE boot
+		 * path itself is proven working on E8 silicon. A real SE refusal
+		 * comes back as ALP_ERR_IO and is a genuine FAIL below. */
+		printk("RESULT SKIP: dualcore-ipc -- no mproc_boot backend selected for HE "
+		       "(alp_mproc_boot_core rc=%d); HE never released, no requests "
 		       "possible\n",
 		       (int)rc);
 	} else if (rc != ALP_OK) {

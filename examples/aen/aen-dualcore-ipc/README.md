@@ -61,19 +61,27 @@ before dropping into its trailing idle/serve loop:
   request (or, on HE, all `ROUND_TRIPS` round-trips completed with 0 reply
   mismatches).
 - `RESULT SKIP: dualcore-ipc -- ...` — the peer never showed, or stopped
-  responding, within a bounded window: the boot authority reported
-  `ALP_ERR_NOSUPPORT` and HE was never released, either core's MHU-1 sender
+  responding, within a bounded window: no `mproc_boot` backend was selected
+  (`ALP_ERR_NOSUPPORT`) and HE was never released, either core's MHU-1 sender
   link never came ready (`ACCESS_READY`), HP never saw a request, or HP never
   replied to HE's first (or a later) round — states what was locally proven,
   not a failure of this app's code.
 - `RESULT FAIL: dualcore-ipc -- ...` — a real local error: `alp_mproc_boot_core`
-  (HP) returned an unexpected rc, or a reply's payload did not match
-  `request.payload + 1` (a correctness bug, not an absent peer).
+  (HP) returned an unexpected rc (a real SE refusal comes back as
+  `ALP_ERR_IO` and lands here, not in the skip above), or a reply's payload
+  did not match `request.payload + 1` (a correctness bug, not an absent peer).
 
-On THIS bench the HE↔HP release path is known-blocked and
-`alp_mproc_boot_core` returns `ALP_ERR_NOSUPPORT` (`rc=-6`) — HP reports that
-as `RESULT SKIP`, not `RESULT FAIL`: the boot authority itself says it can't
-release HE here, which is a bench/silicon limitation, not a bug in this app.
+If `alp_mproc_boot_core` returns `ALP_ERR_NOSUPPORT` (`rc=-6`), HP reports
+that as `RESULT SKIP`, not `RESULT FAIL` — but `-6` here means no `mproc_boot`
+backend was selected for HE (an environment/config state:
+`alp_mproc_boot_core()` in `src/mproc_dispatch.c` returns `ALP_ERR_NOSUPPORT`
+only when backend resolution finds no `mproc_boot` ops for the SoC), **not** a
+boot-authority refusal: `se_rc_to_alp()`
+(`src/backends/mproc/alif_se_boot.c`) never maps a real SE error to `-6` for
+`ALP_CORE_M55_HE`, and the SE boot path itself is bench-proven working on E8
+silicon (a peer M55 started and ran an RPMsg link for 495 consecutive
+PING/PONG round-trips). Why a given bench observed `-6` is a separate,
+unproven question this README doesn't claim to answer.
 Every wait for the peer (HP's/HE's MHU-1 sender-link-ready wait: 3000 ms; HP's
 request verdict window: 3000 ms; HE's per-round reply wait: 200 ms) is
 bounded, so a genuinely absent peer or a sender link that never comes ready
