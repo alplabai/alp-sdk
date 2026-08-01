@@ -10,10 +10,12 @@ triple, an unrelated shape -- and must NOT be pinned here.
 
 `metadata/schemas/som-release-bundle-v1.schema.json:sku` is a *third*, looser
 copy (`^E1M-(AEN|V2N|V2M|NX9)\\d{3}$`, no AEN tier-3-8 restriction). It is
-deliberately not pinned equal to the two above: it validates a private
-producer/consumer artifact (the SoM release-bundle manifest an internal
-provisioning tool reads), not a customer-facing board/preset SKU, so it is
-not the same constraint and not in scope for the #1089 fix.
+deliberately not pinned equal to the two above: it constrains a different
+artifact -- the SoM release-bundle manifest `scripts/provision_som.py` consumes
+(public, documented at `docs/provisioning.md`, gated by
+`scripts/check_som_bundle.py`) -- rather than a board/preset SKU field, so it is
+not the same constraint and not in scope for the #1089 fix. It also carries its
+own `family` enum, which the two pinned schemas do not.
 """
 import json
 import re

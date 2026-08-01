@@ -424,9 +424,12 @@ Edit the pattern in **both** schema files to accept `AEN[3-9][0-9]{2}`:
 > touch for a new SoM *within an existing family*. If you are also
 > extending an existing family's SKU shape (e.g. adding a `-2P`
 > suffix), expand the pattern accordingly in both files; for a
-> brand-new family, add a fresh alternation branch to both. The
-> pattern is the only schema-side constraint specific to SKU
-> strings; everything else is structural.
+> brand-new family, add a fresh alternation branch to both **and**
+> edit `metadata/schemas/som-release-bundle-v1.schema.json`, which
+> carries a third, looser SKU pattern plus a `family` enum — miss it
+> and provisioning rejects the new family's release bundle. Within an
+> existing family those two patterns are the only schema-side
+> constraints specific to SKU strings; everything else is structural.
 
 ---
 
