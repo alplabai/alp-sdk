@@ -167,7 +167,7 @@ instead -- see
 | Tool        | Version          | Notes                                                    |
 |-------------|------------------|----------------------------------------------------------|
 | Zephyr      | v4.4.1 (stable)  | Pinned by `west.yml`; see [`docs/zephyr-version-policy.md`](zephyr-version-policy.md). |
-| Python      | 3.10+ (dev/CI pin: 3.12) | 3.10 is the support **floor** (`pyproject.toml` `requires-python`); dev/CI standardise on the **pin** in the repo-root `.python-version` file. Match the pin to reproduce CI exactly -- `tan doctor`'s `python` check is a presence probe only (no pin comparison). |
+| Python      | 3.10+ to bootstrap; 3.12+ to actually build | 3.10 is `bootstrap.sh`/`.ps1`'s and `pyproject.toml`'s support **floor**. Zephyr v4.4.1's own `cmake/modules/python.cmake` separately hardcodes `PYTHON_MINIMUM_REQUIRED 3.12`, so a host below that gets through bootstrap but fails later, at `west build`'s CMake configure -- bootstrap doesn't raise its own floor to match today; see [`docs/cross-platform-setup.md`](cross-platform-setup.md) §1.1 for why. Dev/CI standardise on the repo-root `.python-version` **pin** (currently 3.12). |
 | Python deps | `pyyaml`, `jsonschema`, `imgtool` | All installed by `scripts/bootstrap.sh`; manual install: `pip install pyyaml jsonschema imgtool`. |
 | CMake       | 3.20+            | `find_package(Zephyr)` minimum.                          |
 | C compiler  | GCC 11+ / Clang 14+ | `native_sim` builds; cross-toolchain for real silicon. |
