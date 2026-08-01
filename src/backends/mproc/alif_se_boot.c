@@ -163,9 +163,12 @@ static alp_status_t se_rc_to_alp(int rc)
  * the "higher-level ... convenient way to boot a CPU core" and
  * recommends it over 501 for M55 cores generally.  That combination
  * carried an RPMsg link through 495 consecutive PING/PONG round-trips
- * over 4m11s.  See branch feat/aen-mproc-deferred-toc-boot for that
- * work; this backend still rides service 501 as-is because every
- * shipped example uses the working HP-master -> HE-peer direction.
+ * over 4m11s.  This backend now implements that path too, gated by
+ * CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC below (default OFF
+ * unless the configured peer is HP -- see the Kconfig help): every
+ * shipped example still rides service 501 as-is because all six use
+ * the working HP-master -> HE-peer direction and none set
+ * CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_PEER_IS_HP.
  *
  * Left open: whether service 501 honours @p entry_addr at all was not
  * isolated by either run above -- the entry point came from the ATOC
