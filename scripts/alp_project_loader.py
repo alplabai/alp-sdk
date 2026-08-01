@@ -238,9 +238,9 @@ def resolve_soc_path(silicon: str | None, metadata_root: Path) -> Path | None:
     each behind a thin wrapper that preserves that site's original
     exception type or soft-fail shape.
 
-    Four more hand-rolled copies remain outside this module. Most differ in
-    the shape they fail with, so a blind call-site swap would change
-    behaviour; one does not, and is the cheap migration:
+    Four more hand-rolled copies remain outside this module (issue #1096).
+    Most differ in the shape they fail with, so a blind call-site swap
+    would change behaviour; one does not, and is the cheap migration:
 
       - `alp_cli/validator.py:351` (`_load_soc_caps`) -- same 3-part guard,
         same `None` on failure. Behaviourally identical to this helper, so
@@ -251,7 +251,13 @@ def resolve_soc_path(silicon: str | None, metadata_root: Path) -> Path | None:
       - `alp_cli/new_som.py:526` -- `Path`, but rooted at `output_root`
         rather than `metadata_root`.
 
-    Migrate one of those onto this helper -- don't add a fifth.
+    Migrate one of those onto this helper -- don't add a fifth. (A further
+    three `soc_ref.split(":")` sites in `alp_cli/new_som.py` -- :154, :339,
+    :503 -- are out of scope for this helper: they extract vendor/family/
+    part slugs to seed a *new* preset's scaffold content, not to resolve a
+    path to an existing SoC JSON, so there is no `resolve_soc_path()` call
+    to swap in. They'd still need re-deriving by hand if the ref format
+    ever widens past 3 parts.)
     """
     if not silicon:
         return None

@@ -830,7 +830,14 @@ def emit_zephyr_board(
             sku, core_id, soc_spec, variant, dir_name, basename, rx_row, tx_row,
             _aen_ethos_u(soc_spec))
 
+    # `_load_soc_spec()` above already raised ZephyrBoardEmitError if
+    # `sku_preset["silicon"]` didn't resolve, so `soc_path` can't be None
+    # here -- but that's a dependency on call order, not a guarantee this
+    # function itself enforces, so don't drop the None-guard idiom.
     soc_path = resolve_soc_path(sku_preset["silicon"], metadata_root)
+    if soc_path is None:
+        raise ZephyrBoardEmitError(
+            f"silicon ref {sku_preset['silicon']!r} is not a triple-colon string")
     soc_json_rel = f"metadata/{soc_path.relative_to(metadata_root).as_posix()}"
     for relpath in list(files):
         style = "c" if relpath.endswith((".dts", "-pinctrl.dtsi")) else "hash"
