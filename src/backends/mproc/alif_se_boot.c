@@ -31,7 +31,7 @@
  * having already placed the image via ["load","boot"] AT POWER-ON.  For
  * the M55-HP core specifically, Alif documents that this can fail:
  * "resetting the core also invalidates its TCM content" (p.115, "a
- * known case is the M55-HP core in Ensemble devices"; p.113 scopes the
+ * known case is the M55-HP core in Ensemble devices"; p.112 scopes the
  * same defect to "FUSION REV_Bx devices" -- the vendor text is not
  * fully consistent on scope, but E8 is Ensemble, so the broader p.115
  * statement covers it).  Bench-measured effect on E8 (2026-07-31,

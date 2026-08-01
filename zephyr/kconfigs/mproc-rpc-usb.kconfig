@@ -282,7 +282,7 @@ config ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC
 	  release. For M55-HP specifically, Alif documents that releasing
 	  it this way can fail: "resetting the core also invalidates its
 	  TCM content" -- p.115 scopes this to "a known case is the M55-HP
-	  core in Ensemble devices" (E8 is Ensemble); p.113 instead says
+	  core in Ensemble devices" (E8 is Ensemble); p.112 instead says
 	  "FUSION REV_Bx devices" for the same defect -- the vendor text
 	  disagrees with itself on scope, cited here rather than resolved.
 	  Bench effect on E8 (2026-07-31, HE master releasing an HP peer
