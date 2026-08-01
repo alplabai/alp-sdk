@@ -90,6 +90,7 @@ from alp_project_loader import (  # noqa: F401  (compat re-export)
     _validate_and_load,
     resolve_capabilities,
     resolve_memory_map,
+    resolve_soc_path,
     silicon_to_kconfig,
     som_unpopulated_capabilities,
 )
