@@ -48,6 +48,12 @@ bench-verified) -- see `docs/aen-bench-bringup.md` § Flow A for the
 bench-proven case (`aen-rpc-pingpong`, same deferred-TOC mechanism, HP master
 releasing a deferred HE peer).
 
+**Related:** `aen-dualcore-he-master` packages this exact HE-master ->
+HP-peer combination as its own self-contained example (one app, both roles,
+`PEER_IS_HP=y` on by construction instead of a `-D` override) and is the one
+that's actually bench-proven for this direction (2026-08-01) -- start there
+if this is the direction you need.
+
 ## Result (bench-verified on E8, 2026-06-18) — BOTH cores run ✅
 
 ```

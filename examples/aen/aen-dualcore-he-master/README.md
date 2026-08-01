@@ -5,9 +5,11 @@ SPDX-License-Identifier: Apache-2.0
 
 # aen-dualcore-he-master — HE releases HP at runtime (the direction every other AEN dual-core example doesn't do)
 
-All seven other AEN dual-core examples (`aen-dualcore-master`, `aen-dualcore-probe`,
-`aen-dualcore-doorbell`, `aen-dualcore-ipc`, ...) release their peer
-**HP-master → HE-peer**. This example is the reverse: **HE-master → HP-peer**,
+Every other AEN dual-core example that releases a peer (`aen-dualcore-master`,
+`aen-dualcore-doorbell`, `aen-dualcore-ipc`, ...) does it **HP-master →
+HE-peer** (`aen-dualcore-probe` releases nothing — see its own README: "This
+app never calls `alp_mproc_boot_core` itself"). This example is the reverse:
+**HE-master → HP-peer**,
 via the portable `alp_mproc_boot_core(core, entry_addr)` (`<alp/mproc.h>`) —
 self-contained, so a reader doesn't have to discover it by hand-pairing
 `aen-dualcore-master`'s HE build with `aen-dualcore-probe`'s HP build (which is
@@ -23,7 +25,7 @@ an HP peer at all. Alif's SE Host Services API docs
 - p.112, `SERVICES_boot_cpu`: *"This service does not perform image loading,
   verification, etc., it just boots the core... You would need to use an ATOC
   to achieve these."*
-- p.113, `SERVICES_boot_cpu`: *"For the M55 cores, there are cases in which
+- p.112, `SERVICES_boot_cpu`: *"For the M55 cores, there are cases in which
   this service does not work. The currently known case is the **M55-HP core
   in FUSION REV_Bx devices**, where resetting the core also invalidates its
   TCM content."*
@@ -33,7 +35,7 @@ an HP peer at all. Alif's SE Host Services API docs
   stop the core, the image in the TCM must be reloaded, before calling
   `SERVICES_boot_release_cpu()` to start the core."*
 
-**The two vendor passages disagree with each other on device scope** — p.113
+**The two vendor passages disagree with each other on device scope** — p.112
 says "FUSION REV_Bx devices", p.115 says "Ensemble devices" with no
 qualifier — and that disagreement is quoted here rather than resolved. The
 E1M-AEN801 is an Ensemble part, so p.115 covers it either way. Bench-measured
@@ -45,7 +47,7 @@ uninitialized SRAM, and releasing it vectored the core from empty memory —
 **The fix** is p.112's `SERVICES_boot_process_toc_entry` (service 500,
 `se_service_process_toc_entry()`) — the vendor calls it *"a higher-level...
 convenient way to boot a CPU core"* — against a peer ATOC entry flagged
-`["load","boot","deferred"]`. Per the SETOOLS guide (`AUGD0005` p.35),
+`["load","boot","deferred"]`. Per the SETOOLS guide (`AUGD0005` v1.110.0, p.35),
 `deferred` means the SES **skips the entry entirely at boot** ("no boot OR
 LOAD") instead of loading it and releasing it later; the master then un-defers
 it at runtime with ONE call that loads, verifies, AND releases together,
@@ -73,10 +75,15 @@ service 500.
 (default `"ALP-HP"` once `..._PEER_IS_HP=y`, see
 `boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.conf`). The SE service
 takes an 8-byte image id (`IMAGE_NAME_LENGTH`, hal_alif
-`services_lib_protocol.h`) and truncates silently — a mismatched key doesn't
-error, it just un-defers nothing, and the peer sits deferred forever with no
-local error to report (`alp_mproc_boot_core` still returns `ALP_OK`; only the
-peer's beacon staying flat gives it away — see Result below).
+`services_lib_protocol.h`) and truncates it silently (`strncpy(...,
+image_id, 8)`) — that truncation is verified. What the SE does with a
+truncated/unknown id is **untested**: the vendor page's `Returns:` and
+`Restrictions:` fields are blank for this call, and no bench run has covered
+a mismatched key, so whether the request comes back accepted-but-inert
+(`RESULT SKIP`, peer beacon never advances) or as a real error
+(`se_service_process_toc_entry()` propagates the SE's `resp_error_code`
+verbatim, and any nonzero maps to `ALP_ERR_IO` — `RESULT FAIL`) is not
+known. Don't rely on either — match the key exactly.
 
 ## Build
 
@@ -151,10 +158,14 @@ human SWD read:
   inferred cause. Do **not** read this as "the peer never ran": that
   inference was measured wrong on this exact family of examples — see the
   `CONFIG_DCACHE=n` note below.
-- `RESULT FAIL: alp_mproc_boot_core rc=%d` — `boot_core()` itself refused the
-  request: either a build-config bug (this build's `PEER_IS_HP` not matching
-  the flashed ATOC's deferred entry key, see the ATOC-shape section above) or
-  a real backend regression.
+- `RESULT FAIL: alp_mproc_boot_core rc=%d` — states only the observation:
+  `boot_core()` itself returned a nonzero rc, a real SE-backend/IO error.
+  This is **not** what a `PEER_IS_HP` misconfiguration produces on this
+  build: the backend's peer-mismatch guard (`src/backends/mproc/alif_se_boot.c`)
+  compares the call's core argument against the *configured* peer, never
+  the flashed ATOC, and `PEER_IS_HP=n` here makes `DEFERRED_TOC` default
+  off too — `boot_core()` then falls through to the plain service-501 path
+  and returns `rc=0` (a `RESULT SKIP` above, never this `FAIL`).
 
 ## `CONFIG_DCACHE=n` — non-negotiable, both boards
 

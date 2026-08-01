@@ -6,16 +6,16 @@
  * (portable alp_mproc_boot_core(), <alp/mproc.h>), as its OWN example instead
  * of a hand-paired combination of two others.
  *
- * Every one of the seven other AEN dual-core examples (aen-dualcore-master,
- * aen-dualcore-probe, aen-dualcore-doorbell, aen-dualcore-ipc, ...) releases
- * its peer HP-master -> HE-peer. That direction works with the plain
- * se_service_boot_cpu() release path (service 501). This example is the
- * OTHER direction -- HE releases HP -- which 501 cannot do at all: Alif's SE
- * Host Services API docs (SE_Host_Services_API_v1.109.0.pdf) say plainly
- * that 501 "does not perform image loading, verification, etc., it just
- * boots the core" (p.112), and that resetting the M55-HP core specifically
- * invalidates its TCM content on release -- p.113 scopes this to "FUSION
- * REV_Bx devices", p.115 instead says "Ensemble devices" with no qualifier
+ * Every other AEN dual-core example that releases a peer (aen-dualcore-master,
+ * aen-dualcore-doorbell, aen-dualcore-ipc, ...) releases it HP-master ->
+ * HE-peer. That direction works with the plain se_service_boot_cpu() release
+ * path (service 501). This example is the OTHER direction -- HE releases HP
+ * -- which 501 cannot do at all: Alif's SE Host Services API docs
+ * (SE_Host_Services_API_v1.109.0.pdf) say plainly that 501 "does not perform
+ * image loading, verification, etc., it just boots the core" (p.112), and
+ * that resetting the M55-HP core specifically invalidates its TCM content
+ * on release -- p.112 scopes this to "FUSION REV_Bx devices", p.115 instead
+ * says "Ensemble devices" with no qualifier
  * (E8 is Ensemble, so p.115 covers it either way; the two vendor passages
  * disagree with each other on scope and are cited here rather than
  * resolved). Bench-measured on E8 (2026-07-31, HE master releasing an HP
@@ -26,7 +26,7 @@
  * The fix is service 500 (se_service_process_toc_entry(), "a convenient way
  * to boot a CPU core", p.112) against a peer ATOC entry flagged
  * ["load","boot","deferred"]: the SES skips the entry entirely at power-on
- * (SETOOLS guide AUGD0005 p.35: "skipped at boot time, i.e., no boot OR
+ * (SETOOLS guide AUGD0005 v1.110.0 p.35: "skipped at boot time, i.e., no boot OR
  * load"), and this master's boot_core() call un-defers it at runtime -- load,
  * verify AND release together, strictly AFTER whatever reset the release
  * involves, matching p.115's own documented remedy (reset -> reload ->
@@ -156,10 +156,17 @@ int main(void)
 	printk("alp_mproc_boot_core(M55-HP, 0x%08x) rc=%d\n", HP_ENTRY, (int)rc);
 
 	if (rc != ALP_OK) {
-		/* A build-config bug (this build's PEER_IS_HP not matching the
-		 * flashed ATOC's deferred entry) or a real backend regression --
-		 * either way boot_core() itself refused the request, which is a
-		 * local fact this app can state outright. */
+		/* State only the observation: boot_core() itself returned a
+		 * nonzero rc. Do NOT name "this build's PEER_IS_HP not matching
+		 * the flashed ATOC" as the cause -- the backend's peer-mismatch
+		 * guard (alif_se_boot.c) compares this CALL's core argument
+		 * (hardcoded ALP_CORE_M55_HP above) against the CONFIGURED peer,
+		 * never the flashed ATOC, and on this exact build a PEER_IS_HP=n
+		 * misconfiguration does NOT reach that guard at all: it makes
+		 * CONFIG_..._DEFERRED_TOC default off too, so boot_core() falls
+		 * through to the plain service-501 path and returns rc=0 (a
+		 * RESULT SKIP below, never this FAIL). A nonzero rc here is a
+		 * real SE-backend/IO error. */
 		printk("RESULT FAIL: alp_mproc_boot_core rc=%d\n", (int)rc);
 	} else {
 		/* Accepted is not proof: the plain-501 direction this example
