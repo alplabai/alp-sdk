@@ -71,6 +71,47 @@ generator's `CONFIG_DCACHE=n` only reaches `m55_he` today through the
 orchestrator-driven `tan build` flow (which still targets `alp-stock-shim`,
 not `peer/`), not through the documented standalone `west build peer/`.
 
+### Fixed — four pre-existing AEN build errors surfaced by the new twister-on-real-hardware gate (#1076, #1085)
+
+`examples/aen/**` had never actually been compiled in CI (the `alp-build`
+matrix only emits a manifest; `pr-twister.yml` is `native_sim`-only), so these
+four defects were latent since they were authored. #1085's first
+`--testsuite-root examples/aen` run against the real AEN801 board targets
+errored 6 of 19 built configurations; fixing all four brings that to 0:
+
+- `zephyr/drivers/misc/alif_hwsem/hwsem_alif.c:11` — a stray `/*` inside the
+  file header's block comment (`drivers/misc/*`) tripped `-Werror=comment`.
+  Build-time only; never reachable at runtime. This is the one that mattered
+  most: it blocked `aen-dualcore-he-master` (merged, silicon-proven
+  2026-08-01) from ever building under warnings-as-errors, even though it
+  built fine under a plain `west build`.
+- `examples/aen/aen-dualcore-he-master/src/main.c:84` — the SAME class of bug
+  (a literal `/*` inside a comment, `boards/*.conf`) in a second, unrelated
+  file. This one was masked in the original run: it errors both
+  `dualcore_he_master` roles independently of the hwsem driver above (this
+  example doesn't even compile the hwsem driver), so the initial 6-error count
+  reflects 4 distinct root causes, not 3, even though it arithmetically
+  reconciles either way. Build-time only; never reachable at runtime.
+- `examples/aen/aen-ethernet-link/src/main.c` — `printf("...rx_bytes=%u...")`
+  against `iface->stats.bytes.received`, a `uint64_t` in current Zephyr
+  (`net_stats_bytes`). Fixed with `%" PRIu64 "` (`<inttypes.h>`) rather than a
+  narrowing cast, since the counter is a genuine 64-bit running total. This
+  was a real behavioral bug, not just a build nit: the format/argument-size
+  mismatch is undefined behavior and would have printed a garbage byte count
+  on any build that got far enough to run (masked so far only because the
+  build itself never succeeded). Hits both `ethernet_link` test scenarios
+  (`aen` and `aen.mdio_managed`), which share the same `src/main.c`.
+- `examples/aen/aen-mram-flash-validate/src/main.c` — used the deprecated
+  `FIXED_PARTITION_DEVICE`/`FIXED_PARTITION_OFFSET`/`FIXED_PARTITION_SIZE`
+  macros (`zephyr/include/zephyr/storage/flash_map.h`), which now assert
+  `__DEPRECATED_MACRO` under `-Werror`. Replaced with their current
+  `PARTITION_DEVICE`/`PARTITION_OFFSET`/`PARTITION_SIZE` equivalents.
+  Build-time only.
+
+`python3 zephyr/scripts/twister -p alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he -p alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp --testsuite-root examples/aen`:
+before `0 of 19 executed test configurations passed (0.00%), 13 built (not run), 0 failed, 6 errored`;
+after `0 of 19 executed test configurations passed (0.00%), 19 built (not run), 0 failed, 0 errored`.
+
 ### Removed — the HE-master → HP-peer overlap in `aen-dualcore-master`'s docs (superseded by `aen-dualcore-he-master`)
 
 `aen-dualcore-master` is a symmetric app: both boards build the same source,

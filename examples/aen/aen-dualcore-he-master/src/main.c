@@ -81,7 +81,7 @@
 
 /* <alp/mproc.h> is included further down, MASTER-role only: the PEER role
  * never calls into the SDK (it doesn't even build with CONFIG_ALP_SDK=y --
- * see prj.conf / boards/*.conf), so its include path doesn't carry this
+ * see prj.conf / boards/ *.conf), so its include path doesn't carry this
  * header at all. Keeping the include role-scoped, not just the call, keeps
  * the peer build exactly as lean as aen-dualcore-probe's. */
 
