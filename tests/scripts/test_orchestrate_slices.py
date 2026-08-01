@@ -160,9 +160,12 @@ def _make_som_only_project(tmp_path: Path, sku_yaml_content: str,
     bc_schema_text = (real_meta / "schemas" / "board.schema.json"
                       ).read_text(encoding="utf-8")
     bc_schema = _json.loads(bc_schema_text)
-    bc_schema["properties"]["som"]["properties"]["sku"]["pattern"] = (
-        r"^E1M-(AEN[3-8]01|V2N10[12]|V2M10[12]|NX9[0-9]{3}|TST[0-9]{3})$"
-    )
+    sku_prop = bc_schema["properties"]["som"]["properties"]["sku"]
+    # Splice a TST[0-9]{3} branch into the *real* pattern (rather than
+    # hard-coding a copy) so this fixture can never drift back to a
+    # pre-#1089 literal when the schema's own pattern changes.
+    assert sku_prop["pattern"].endswith(")$")
+    sku_prop["pattern"] = sku_prop["pattern"][:-2] + "|TST[0-9]{3})$"
     (schemas / "board.schema.json").write_text(
         _json.dumps(bc_schema), encoding="utf-8")
     shutil.copy(real_meta / "schemas" / "som-preset-v1.schema.json",
@@ -268,9 +271,12 @@ def test_slice_alp_conf_deduplicate_som_vs_board(tmp_path: Path) -> None:
     bc_schema_text = (real_meta / "schemas" / "board.schema.json"
                       ).read_text(encoding="utf-8")
     bc_schema = _json2.loads(bc_schema_text)
-    bc_schema["properties"]["som"]["properties"]["sku"]["pattern"] = (
-        r"^E1M-(AEN[3-8]01|V2N10[12]|V2M10[12]|NX9[0-9]{3}|TST[0-9]{3})$"
-    )
+    sku_prop = bc_schema["properties"]["som"]["properties"]["sku"]
+    # Splice a TST[0-9]{3} branch into the *real* pattern (rather than
+    # hard-coding a copy) so this fixture can never drift back to a
+    # pre-#1089 literal when the schema's own pattern changes.
+    assert sku_prop["pattern"].endswith(")$")
+    sku_prop["pattern"] = sku_prop["pattern"][:-2] + "|TST[0-9]{3})$"
     (schemas / "board.schema.json").write_text(
         _json2.dumps(bc_schema), encoding="utf-8")
     shutil.copy(real_meta / "schemas" / "som-preset-v1.schema.json",

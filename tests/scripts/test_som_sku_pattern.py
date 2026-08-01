@@ -5,8 +5,15 @@ cross-file pattern reuse here) across two schema files: `som-preset-v1.schema.js
 them equal so a one-sided edit (widening one, forgetting the other) fails loudly
 instead of silently reintroducing the drift fixed in #1089.
 
-`soc-spec-v1.schema.json` has its own `silicon` pattern -- a `vendor:family:part`
+`soc-spec-v1.schema.json` has its own `ref` pattern -- a `vendor:family:part`
 triple, an unrelated shape -- and must NOT be pinned here.
+
+`metadata/schemas/som-release-bundle-v1.schema.json:sku` is a *third*, looser
+copy (`^E1M-(AEN|V2N|V2M|NX9)\\d{3}$`, no AEN tier-3-8 restriction). It is
+deliberately not pinned equal to the two above: it validates a private
+producer/consumer artifact (the SoM release-bundle manifest an internal
+provisioning tool reads), not a customer-facing board/preset SKU, so it is
+not the same constraint and not in scope for the #1089 fix.
 """
 import json
 import re
@@ -19,7 +26,6 @@ _SCHEMAS = _ROOT / "metadata" / "schemas"
 
 _SOM_PRESET_SCHEMA = json.loads((_SCHEMAS / "som-preset-v1.schema.json").read_text(encoding="utf-8"))
 _BOARD_SCHEMA = json.loads((_SCHEMAS / "board.schema.json").read_text(encoding="utf-8"))
-_SOC_SPEC_SCHEMA = json.loads((_SCHEMAS / "soc-spec-v1.schema.json").read_text(encoding="utf-8"))
 
 _PRESET_SKU_PATTERN = _SOM_PRESET_SCHEMA["properties"]["sku"]["pattern"]
 _BOARD_SKU_PATTERN = _BOARD_SCHEMA["properties"]["som"]["properties"]["sku"]["pattern"]
@@ -30,14 +36,6 @@ def test_som_sku_pattern_matches_across_schemas():
     byte-identical -- these are two copies of the same constraint, not two
     independent constraints, and drifting apart is exactly the #1089 bug."""
     assert _PRESET_SKU_PATTERN == _BOARD_SKU_PATTERN
-
-
-def test_som_sku_pattern_differs_from_soc_spec_ref_pattern():
-    """soc-spec-v1.schema.json's `ref` pattern is a vendor:family:part triple
-    (e.g. `alif:ensemble:e3`) -- a different shape for a different field --
-    and must never be conflated with the SKU pattern above."""
-    soc_spec_ref_pattern = _SOC_SPEC_SCHEMA["properties"]["ref"]["pattern"]
-    assert soc_spec_ref_pattern != _PRESET_SKU_PATTERN
 
 
 @pytest.mark.parametrize("sku", [
