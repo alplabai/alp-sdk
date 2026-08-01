@@ -37,6 +37,10 @@ from pathlib import Path
 from collections import defaultdict
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "scripts"))
+
+from sentinels import is_tbd  # noqa: E402
+
 MODULES = REPO / "metadata" / "e1m_modules"
 
 # Pads that are documented as legitimately dual-claimed by two
@@ -90,7 +94,7 @@ def _check_pad_first(rel: str) -> list[str]:
         if len(row) < 2:
             continue
         peripheral, pad = row[0].strip(), row[1].strip()
-        if not pad or pad == "TBD":
+        if not pad or is_tbd(pad):
             continue
         pad_to_peripherals[pad].append(peripheral)
 
@@ -116,7 +120,7 @@ def _check_e1m_pad(rel: str) -> list[str]:
         if len(row) < 4:
             continue
         e1m_function, silicon_pad = row[1].strip(), row[3].strip()
-        if not silicon_pad or silicon_pad == "TBD":
+        if not silicon_pad or is_tbd(silicon_pad):
             continue
         sipad_to_funcs[silicon_pad].add(e1m_function)
     errors: list[str] = []

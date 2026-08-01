@@ -28,6 +28,8 @@ try:
 except ImportError:
     sys.exit("alp_project: PyYAML is required.  Install via `pip install pyyaml`.")
 
+from sentinels import is_tbd
+
 
 REPO = Path(__file__).resolve().parent.parent
 METADATA_ROOT = REPO / "metadata"
@@ -286,7 +288,7 @@ def _resolve_silicon_variant(
     variants = soc_spec.get("variants") or []
 
     declared = sku_preset.get("silicon_variant")
-    if declared and declared != "TBD":
+    if declared and not is_tbd(declared):
         for v in variants:
             if v.get("order_code") == declared:
                 return v

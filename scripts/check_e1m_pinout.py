@@ -51,6 +51,10 @@ except ImportError:  # pragma: no cover - dependency is in CI + dev env
     sys.exit("error: jsonschema not installed -- `pip install jsonschema`.")
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "scripts"))
+
+from sentinels import is_tbd  # noqa: E402
+
 E1M_DIR = REPO / "metadata" / "e1m"
 PINMUX_DIR = REPO / "metadata" / "pinmux"
 SCHEMA_PATH = REPO / "metadata" / "schemas" / "loom-v1.schema.json"
@@ -160,7 +164,7 @@ def check_join(snapshots: dict[str, dict], errors: list[str]) -> None:
         total = joined = 0
         for row in doc.get("pads", []):
             pad = row.get("e1m_pad", "TBD")
-            if pad == "TBD":
+            if is_tbd(pad):
                 continue
             total += 1
             fn = row.get("e1m_function")
