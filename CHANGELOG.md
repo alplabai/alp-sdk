@@ -25,7 +25,11 @@ the first thing to ever compile far enough to see — so the gate ships
 across a handful of AEN PRs. The `aen-npu-inference*` family (needs
 `ethos-u-vela` on `PATH`) and `aen-mcuboot-smoke` (needs `sysbuild: true`)
 have no `testcase.yaml` yet, so neither is selected today — tracked for the
-separate follow-on that adds the remaining 42 examples' metadata.
+separate follow-on that adds the remaining 42 examples' metadata. (The
+workflow installs `zephyr/scripts/requirements.txt`, not just
+`requirements-base.txt` — twister itself needs `requirements-run-test.txt`'s
+`natsort`, which a plain `west build` doesn't; a fresh CI runner has none of
+it preinstalled, unlike the shared dev workspace this was first measured on.)
 
 ### Fixed — four pre-existing AEN build errors surfaced by the new twister-on-real-hardware gate (#1076, #1085)
 
