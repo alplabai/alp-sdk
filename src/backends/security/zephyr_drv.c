@@ -378,7 +378,10 @@ static alp_status_t z_aead_encrypt(alp_aead_backend_state_t *state,
 	psa_algorithm_t psa_alg;
 	psa_key_type_t  kt;
 	size_t          kb;
-	(void)aead_alg_meta(state->alg, &psa_alg, &kt, &kb);
+	/* state->alg was already validated by aead_alg_meta() in z_aead_open();
+	 * check the return again rather than discard it, so psa_alg is never
+	 * used unset if that invariant is ever broken. */
+	if (aead_alg_meta(state->alg, &psa_alg, &kt, &kb) != ALP_OK) return ALP_ERR_INVAL;
 
 	/* GHSA-7xh2-9pcg-r824: this used to buffer the whole ciphertext||tag
      * in a 4,112-byte automatic array, which overflows a 4 KiB caller
@@ -484,7 +487,8 @@ static alp_status_t z_aead_decrypt(alp_aead_backend_state_t *state,
 	psa_algorithm_t psa_alg;
 	psa_key_type_t  kt;
 	size_t          kb;
-	(void)aead_alg_meta(state->alg, &psa_alg, &kt, &kb);
+	/* See z_aead_encrypt: check the return rather than discard it. */
+	if (aead_alg_meta(state->alg, &psa_alg, &kt, &kb) != ALP_OK) return ALP_ERR_INVAL;
 
 	/* GHSA-7xh2-9pcg-r824: see z_aead_encrypt -- multipart AEAD streams
      * ciphertext straight from the caller's `cipher` into `plain_out`,

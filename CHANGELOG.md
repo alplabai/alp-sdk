@@ -37,7 +37,7 @@ to compile against vanilla Zephyr v4.4.1; a long-lived dev workspace already
 carries that patch applied, uncommitted, which is exactly why this was
 invisible until a genuinely clean CI checkout ran the job.)
 
-### Added — `testcase.yaml` for 37 of the 42 `examples/aen` dirs `pr-twister-aen` couldn't discover (#1076)
+### Added — `testcase.yaml` for 36 of the 42 `examples/aen` dirs `pr-twister-aen` couldn't discover (#1076)
 
 The `pr-twister-aen` gate above only builds what has a `testcase.yaml` —
 so the 42 dirs without one were still invisible to it. Re-measured the gap
@@ -45,20 +45,49 @@ against `origin/dev@d8d113fd`: 67 example dirs, 25 with metadata, 42
 without (confirms the `67/25/42` follow-up count, not the issue body's
 stale `43 of 66`). Adds `testcase.yaml` (`build_only`, `platform_allow`
 scoped per example's actual `boards/` overlay set — not blanket-assumed)
-for 37 of the 42, matching the shape of the existing 25. `aen-alp-rpc`,
+for 36 of the 42, matching the shape of the existing 25. `aen-alp-rpc`,
 `aen-dualcore-doorbell`, `aen-dualcore-ipc`, `aen-dualcore-probe`, and
 `aen-rpc-pingpong` are role-by-board (HP host/master, HE remote/peer), so
 each gets two platform-scoped scenarios rather than one `platform_allow`
 list with both targets. `aen-sim-vision` is HP-only (its `CMakeLists.txt`
 hard-fails configure on any other board — its `SIM_*` buffers live in the
 HP core's DTCM) and gets only the HP scenario. `aen-mcuboot-smoke` gets
-`sysbuild: true`, with a note that its own `sysbuild.conf` ships no signing
-key by design (needs an absolute `-DSB_CONF_FILE=` at build time neither
-`testcase.yaml` nor this gate can synthesize) — left in rather than
-silently dropped. The remaining 5, the `aen-npu-inference*` family, are
-still deliberately excluded: `gen_model.py` needs `vela` on `PATH` at CMake
-configure time, which no workflow installs yet (tracked as the
-`ethos-u-vela` follow-up the gate's own header comment already names).
+`sysbuild: true`; its own `sysbuild.conf` deliberately ships no
+`SB_CONFIG_BOOT_SIGNATURE_KEY_FILE` (the documented invocation needs an
+absolute `-DSB_CONF_FILE=` neither `testcase.yaml` nor this gate can
+synthesize), but the build does NOT hard-fail without it — Zephyr's
+`bootloader/Kconfig` falls back to MCUboot's own bundled
+`root-ec-p256.pem`, so this scenario builds clean and proves the boot chain
+compiles, signed with mcuboot's upstream test key rather than the alp-sdk
+dev key. The remaining 6 are deliberately excluded: the `aen-npu-inference*`
+family (5 dirs) — `gen_model.py` needs `vela` on `PATH` at CMake configure
+time, which no workflow installs yet (tracked as the `ethos-u-vela`
+follow-up the gate's own header comment already names) — and
+`aen-sdcard-readout`, dropped after the real build surfaced that its driver
+(`zephyr/drivers/sdhc/sdhc_dwc.c`) expands
+`Z_GENERIC_SECTION(CONFIG_SDHC_DESCRIPTOR_SECTION)` to an empty linker
+section name on this board (`default ""` in
+`zephyr/kconfigs/vendor-alif-peripherals.kconfig`), which orphan-sections
+under `-Wl,--fatal-warnings`; giving the board a real descriptor section
+name is a design decision for a follow-up, not this sweep.
+
+A real (non-dry-run) twister build of all 36 new + 25 existing scenarios
+(69 test scenarios, 138 configurations, 59 left after `platform_allow`
+filtering) surfaced 5 real, pre-existing build breaks this gate was the
+first thing to ever compile far enough to see — fixed in this same PR
+rather than shipped broken: a missing-braces nested initializer in
+`aen-spi-regcheck`'s `main.c`, an uninitialized `psa_alg` in
+`src/backends/security/zephyr_drv.c`'s AEAD encrypt/decrypt paths (the
+return of `aead_alg_meta()` was discarded via `(void)`), two
+unused-function driver statics in `zephyr/drivers/video/video_alif.c`
+(`alif_video_cam_init`/`alif_video_cam_isr`, unreferenced when
+`CONFIG_VIDEO_ALIF_CAM` has no DT node but `CONFIG_VIDEO_ISP_VSI` still
+pulls the TU in for its shared fourcc helpers), and a deprecated I2S
+option macro (`I2S_OPT_*_MASTER`/`*_SLAVE` → `*_CONTROLLER`/`*_TARGET`)
+hit twice — once in `aen-i2s-amp-alif`'s `main.c`, once in the vendored
+`zephyr/drivers/i2s/i2s_dw.c` driver itself, plus an unused-variable
+`use_dma` in `zephyr/drivers/spi/spi_dw_alif.c`'s non-DMA build path. All
+59 configurations now build clean, 0 failed, 0 errored.
 
 ### Fixed — `zephyr/patches.yml`'s two `hal_alif` patches never applied, silently, since the day they were added
 

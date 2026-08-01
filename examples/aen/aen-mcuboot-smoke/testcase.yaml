@@ -8,17 +8,21 @@
 # note.  Bench-VALIDATED end-to-end (alp-sdk 0da1f1b4): SES -> MCUboot
 # (ITCM) -> slot0 app (MRAM XIP) -> app main(), ECDSA-P256 + VALIDATE_SLOT0.
 #
-# NOT covered here: signing.  This app's own sysbuild.conf deliberately ships
-# no SB_CONFIG_BOOT_SIGNATURE_KEY_FILE (a relative key path cannot be fixed
-# in-repo -- MCUboot resolves it against WEST_TOPDIR, not the alp-sdk module
-# root -- see the README + the file's own comment) and requires the
-# documented invocation to pass an absolute
-# -DSB_CONF_FILE=<abs>/alp-sdk/zephyr/sysbuild/aen/sysbuild.conf.  Neither
-# testcase.yaml `extra_args` nor `sysbuild: true` can synthesize an absolute
-# CI-runner path, so this entry builds MCUboot + the app image with sysbuild's
-# OWN auto-loaded app-local sysbuild.conf and will hard-fail configure on a
-# missing key until that is plumbed as a separate CI concern -- left as-is
-# deliberately (see note above) rather than silently dropped from this sweep.
+# NOT covered here: signing with the alp-sdk dev key.  This app's own
+# sysbuild.conf deliberately ships no SB_CONFIG_BOOT_SIGNATURE_KEY_FILE (a
+# relative key path cannot be fixed in-repo -- MCUboot resolves it against
+# WEST_TOPDIR, not the alp-sdk module root -- see the README + the file's own
+# comment) and the documented invocation passes an absolute
+# -DSB_CONF_FILE=<abs>/alp-sdk/zephyr/sysbuild/aen/sysbuild.conf to supply it.
+# Neither testcase.yaml `extra_args` nor `sysbuild: true` can synthesize an
+# absolute CI-runner path, so this entry builds with sysbuild's OWN
+# auto-loaded app-local sysbuild.conf instead.  That does NOT hard-fail
+# configure -- Zephyr's bootloader/Kconfig falls back to MCUboot's own bundled
+# $(ZEPHYR_MCUBOOT_MODULE_DIR)/root-ec-p256.pem when no key file is set (build
+# confirmed clean under `sysbuild: true` in CI), so this scenario proves the
+# boot chain builds but signs with mcuboot's upstream test key, not the
+# alp-sdk dev key -- left in deliberately (see note above) rather than
+# silently dropped from this sweep.
 #
 # Filtered OUT of the native_sim PR gate (platform_allow = AEN801 M55-HE
 # only, no native_sim overlay); build_only in the advisory pr-twister-aen.yml

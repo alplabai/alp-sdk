@@ -2,17 +2,20 @@
 #
 # AEN801 real-silicon twister gate (issue #1076).
 #
-# The problem this closes: 25 of examples/aen/**'s testcase.yaml files
+# The problem this closes: 61 of examples/aen/**'s testcase.yaml files
 # name AEN board targets in platform_allow (alp_e1m_aen801_m55_he/... and
-# /_hp/...). pr-twister.yml's shards run `-p native_sim/native/64` only
-# (by design -- see that file's own header comment: it deliberately skips
-# the Zephyr SDK to dodge a disk-space failure mode), so every AEN-only
-# scenario is statically filtered out of that gate on every PR. Nothing
-# else picks up the slack: pr-alp-build.yml's AEN jobs only emit a
-# system-manifest (continue-on-error, no west build/cmake/ninja), and the
-# only real AEN-board compile in CI was one path-gated example
-# (pr-renode-aen-smoke.yml). This job runs twister itself against the two
-# AEN801 board targets so those 25 scenarios actually build.
+# /_hp/...) -- 25 from this gate's own PR (#1085), the rest added by the
+# #1076 metadata sweep (#1095) that gave the remaining buildable examples/aen
+# dirs their own testcase.yaml. pr-twister.yml's shards run
+# `-p native_sim/native/64` only (by design -- see that file's own header
+# comment: it deliberately skips the Zephyr SDK to dodge a disk-space
+# failure mode), so every AEN-only scenario is statically filtered out of
+# that gate on every PR. Nothing else picks up the slack: pr-alp-build.yml's
+# AEN jobs only emit a system-manifest (continue-on-error, no west
+# build/cmake/ninja), and the only real AEN-board compile in CI was one
+# path-gated example (pr-renode-aen-smoke.yml). This job runs twister
+# itself against the two AEN801 board targets so those 61 scenarios
+# actually build.
 #
 # New workflow, not a pr-twister.yml shard: that file's shards are
 # ZEPHYR_TOOLCHAIN_VARIANT=host / native_sim-only on purpose (see its
@@ -26,31 +29,35 @@
 # workflows that already do a real AEN801 cross-compile in CI) rather
 # than re-invented here.
 #
-# ADVISORY, not required: a local run of the exact command below (see
-# issue #1076) selected 29 scenarios (58 configurations), with 19 left
-# after platform_allow filtering -- 13 built clean, 6 errored on
-# PRE-EXISTING bugs this gate is the first thing to ever compile far
-# enough to see (a "/*" within a comment in
-# zephyr/drivers/misc/alif_hwsem/hwsem_alif.c, a %u/uint64_t format
-# mismatch in aen-ethernet-link, and a deprecated-macro error in
-# aen-mram-flash-validate -- see the linked issue for the full list).
-# A brand-new gate over previously-unbuilt code cannot be required from
-# its first PR without instantly reddening unrelated work; promote it
-# once those pre-existing failures are fixed and it has run clean across
-# a handful of AEN-touching PRs (same graduation criteria as
+# ADVISORY, not required: a local run of the exact command below against
+# the full post-#1095 metadata sweep selected 69 scenarios (138
+# configurations), with 59 left after platform_allow filtering -- all 59
+# built clean, 0 failed, 0 errored. That sweep (#1095) is also what fixed
+# the 5 build breaks it exposed on its own first local run (a missing-braces
+# nested initializer in aen-spi-regcheck, an uninitialized psa_alg in
+# src/backends/security/zephyr_drv.c, two unused-function driver statics in
+# zephyr/drivers/video/video_alif.c, a deprecated I2S option macro repeated
+# in both aen-i2s-amp-alif and zephyr/drivers/i2s/i2s_dw.c, and an
+# unused-variable in zephyr/drivers/spi/spi_dw_alif.c) -- all PRE-EXISTING
+# bugs this gate was the first thing to ever compile far enough to see, not
+# regressions from the metadata itself. A brand-new gate over
+# previously-unbuilt code cannot be required from its first PR without
+# instantly reddening unrelated work; promote it once it has run clean
+# across a handful of AEN-touching PRs (same graduation criteria as
 # pr-renode-aen-smoke.yml).
 #
-# Two known gaps this job does NOT paper over (tracked, not fixed here --
-# neither currently has a testcase.yaml, so neither is selected today):
-#   - aen-npu-inference* (the tflite-micro/Ethos-U family) will need
-#     `ethos-u-vela` on PATH once it gains a testcase.yaml -- tflite-micro
-#     and hal_ethos_u are already unconditional west.yml groups, so no
-#     manifest change, just a `pip install ethos-u-vela` step here.
-#   - aen-mcuboot-smoke will need `sysbuild: true` in its own
-#     testcase.yaml entry to build at all (a sysbuild property, not
-#     something this workflow can supply).
-# Both belong to the separate 42-missing-testcase.yaml follow-on this
-# gate exists to make worth doing, not to this PR.
+# One known gap this job does NOT paper over (tracked, not fixed here --
+# has no testcase.yaml, so it is not selected today): aen-npu-inference*
+# (the tflite-micro/Ethos-U family) will need `ethos-u-vela` on PATH once it
+# gains a testcase.yaml -- tflite-micro and hal_ethos_u are already
+# unconditional west.yml groups, so no manifest change, just a
+# `pip install ethos-u-vela` step here. `aen-sdcard-readout` also has no
+# testcase.yaml as of #1095 -- its driver (zephyr/drivers/sdhc/sdhc_dwc.c)
+# expands `Z_GENERIC_SECTION(CONFIG_SDHC_DESCRIPTOR_SECTION)` to an empty
+# linker section name on this board (`default ""` in
+# zephyr/kconfigs/vendor-alif-peripherals.kconfig), which orphan-sections
+# under `-Wl,--fatal-warnings`; giving the board a real descriptor section
+# name is a design decision left to a follow-up, not this gate.
 
 name: pr-twister-aen
 
@@ -194,7 +201,7 @@ jobs:
           echo "ZEPHYR_SDK_INSTALL_DIR=$HOME/zephyr-sdk" >> "$GITHUB_ENV"
 
       # Run twister against both AEN801 board targets, scoped to
-      # examples/aen -- the 25 testcase.yaml files whose platform_allow
+      # examples/aen -- the 61 testcase.yaml files whose platform_allow
       # names an AEN target are the entire point; nothing outside that
       # tree is in scope for this job.
       - name: twister · AEN801 (M55-HE + M55-HP) on examples/aen
