@@ -23,11 +23,12 @@
  * window this app can check that itself: after a successful boot request it
  * polls the peer's own heartbeat word (written by whatever image the peer is
  * running -- aen-dualcore-probe or another aen-dualcore-master) for a bounded
- * window and only claims PASS once that word is observed to move.  On this
- * bench the HE<->HP release path is known-blocked and boot_core reports
- * ALP_ERR_NOSUPPORT -- that is reported as SKIP, not FAIL: the boot authority
- * itself said "can't do this here", which is a bench/silicon limitation, not
- * a local error in this app's code.
+ * window and only claims PASS once that word is observed to move.  This
+ * build ships CONFIG_HAS_ALIF_SE_SERVICES=y and no native_sim overlay, so
+ * boot_core always resolves to the E8 SE backend for either M55 core
+ * (<alp/mproc.h>'s ALP_ERR_NOSUPPORT case -- "no boot authority for core in
+ * this build" -- is not reachable here); any nonzero rc is a real local
+ * error and reported FAIL, not a skippable environment state.
  */
 
 #include <stdbool.h>
@@ -80,13 +81,7 @@ int main(void)
 	BOOT_SLOT[1] = (uint32_t)rc;
 	printk("alp_mproc_boot_core(%s, 0x%08x) rc=%d\n", TARGET_NAME, TARGET_ADDR, (int)rc);
 
-	if (rc == ALP_ERR_NOSUPPORT) {
-		printk("RESULT SKIP: dualcore-master -- boot authority has no support for releasing "
-		       "%s on this bench (alp_mproc_boot_core rc=%d); local request path OK, peer "
-		       "never released\n",
-		       TARGET_NAME,
-		       (int)rc);
-	} else if (rc != ALP_OK) {
+	if (rc != ALP_OK) {
 		printk("RESULT FAIL: alp_mproc_boot_core rc=%d\n", (int)rc);
 	} else {
 		/* Boot request accepted -- confirm the peer is actually alive by watching

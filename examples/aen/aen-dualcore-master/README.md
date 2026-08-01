@@ -56,17 +56,23 @@ trailing heartbeat loop:
   accepted the request AND the peer's own heartbeat word was observed to
   advance within the bound below (the request being accepted, alone, does
   not prove the peer actually came up).
-- `RESULT SKIP: dualcore-master -- ...` — either the boot authority reported
-  `ALP_ERR_NOSUPPORT` (the request was never even accepted), or it was
-  accepted but the peer's heartbeat never advanced within the bound — states
-  what was locally proven, not a failure of this app's code.
+- `RESULT SKIP: dualcore-master -- ...` — the request was accepted but the
+  peer's heartbeat never advanced within the bound — states what was locally
+  proven, not a failure of this app's code.
 - `RESULT FAIL: alp_mproc_boot_core rc=%d` — a real local error: `boot_core`
-  returned an unexpected rc (neither `ALP_OK` nor `ALP_ERR_NOSUPPORT`).
+  returned an unexpected rc (`ALP_ERR_NOSUPPORT` included -- see below).
 
-On THIS bench the HE↔HP release path is known-blocked and
-`alp_mproc_boot_core` returns `ALP_ERR_NOSUPPORT` (`rc=-6`) — reported as
-`RESULT SKIP`, not `RESULT FAIL`: the boot authority itself says it can't
-release the peer here, which is a bench/silicon limitation, not a bug in this
-app. The peer-heartbeat wait (2000 ms, polled every 20 ms) is bounded, so an
+This build ships `CONFIG_HAS_ALIF_SE_SERVICES=y` and no `native_sim` overlay,
+so `alp_mproc_boot_core()` always resolves to the E8 SE backend for either
+M55 core — the `<alp/mproc.h>` contract's `ALP_ERR_NOSUPPORT` case ("no boot
+authority for `core` in this build: wrong SoM, `native_sim`, or a core the
+platform boots by other means") is not reachable in this configuration. So
+the master treats *any* nonzero `alp_mproc_boot_core` rc, including
+`ALP_ERR_NOSUPPORT`, as `RESULT FAIL`, not a skip: on these boards a `-6`
+here would mean the boot path fell out of the build (e.g. the SE backend lost
+the link, or the silicon-ref stopped matching) — a regression this app must
+surface, not paper over.
+
+The peer-heartbeat wait (2000 ms, polled every 20 ms) is bounded, so an
 accepted request whose peer never actually comes up produces a verdict
 instead of a hang.

@@ -178,16 +178,12 @@ int main(void)
 
 	printk("[HP] boot_core rc=%d\n", (int)brc);
 
-	if (brc == ALP_ERR_NOSUPPORT) {
-		/* The boot authority itself says it can't release HE on this bench --
-		 * a bench/silicon limitation, not a bug in this app. */
-		SELF_BEACON[2] = V_SKIP;
-		printk("RESULT SKIP: alp-rpc -- boot authority has no support for releasing HE "
-		       "on this bench (alp_mproc_boot_core rc=%d); HE never released, nothing "
-		       "past this point was attempted\n",
-		       (int)brc);
-		return 0;
-	}
+	/* This build ships CONFIG_HAS_ALIF_SE_SERVICES=y and no native_sim
+	 * overlay, so alp_mproc_boot_core() always resolves to the E8 SE
+	 * backend for ALP_CORE_M55_HE (<alp/mproc.h>'s ALP_ERR_NOSUPPORT case
+	 * -- "no boot authority for core in this build" -- is not reachable
+	 * here). Any nonzero rc, NOSUPPORT included, is therefore a real
+	 * local error: report it as FAIL, not a skippable environment state. */
 	if (brc != ALP_OK) {
 		SELF_BEACON[2] = V_FAIL;
 		printk("RESULT FAIL: alp_mproc_boot_core rc=%d\n", (int)brc);
