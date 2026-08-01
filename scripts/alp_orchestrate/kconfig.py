@@ -13,7 +13,8 @@ Kconfig is read from each library's manifest via `_per_core_library_kconfig`.
 
 `_slice_alp_conf` itself is a thin composer over a set of `_emit_*` section
 helpers (console / SoM capability / chip driver / subsystem / library /
-inference / memory / power / storage / OTA / diagnostics), each returning
+inference / cross-core shmem cache / memory / power / storage / OTA /
+diagnostics), each returning
 that section's `list[str]` fragment. Split out mechanically as the #673
 Phase-1 kconfig split -- behavior-preserving, byte-identical emit output;
 see `check_emit_snapshots.py`.
@@ -1456,11 +1457,12 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
 
     This is a thin composer: each section below is delegated to a
     dedicated ``_emit_*`` helper (console / SoM capability / chip driver
-    / subsystem / library / inference / memory / power / storage / OTA /
-    diagnostics), called in the exact fixed order the fragment has
-    always used. Split out mechanically as the #673 Phase-1 kconfig
-    split -- behavior-preserving; emit output is byte-identical to the
-    pre-split monolith (see ``check_emit_snapshots.py``).
+    / subsystem / library / inference / cross-core shmem cache / memory /
+    power / storage / OTA / diagnostics), called in the exact fixed order
+    the fragment has always used. Split out mechanically as the #673
+    Phase-1 kconfig split -- behavior-preserving for every section that
+    predates this one; ``check_emit_snapshots.py``'s fixtures (none of
+    which declare a ``raw_shmem`` ``ipc:`` entry) stay byte-identical.
     """
     silicon = project.som_preset.get("silicon")
     kconfig = silicon_to_kconfig(silicon)
