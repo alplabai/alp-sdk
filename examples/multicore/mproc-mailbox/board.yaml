@@ -2,7 +2,14 @@
 # mproc-mailbox example (M55-HP side).
 #
 # Targets AEN-Zephyr; the peer-side (M55-HE) firmware lands
-# alongside the v0.4 dual-image build flow.
+# alongside the v0.4 dual-image build flow.  `m55_he` is deliberately
+# NOT overridden in `cores:` below -- it already resolves to a slice
+# via the SoM preset's `topology.m55_he` (every SoC core gets a slice
+# regardless of what `cores:` mentions), so it's a valid `ipc:`
+# endpoint without changing what `tan build` does for that core (it
+# keeps building the topology-default `alp-stock-shim`, not `peer/`,
+# which still builds standalone -- `west build` directly against it,
+# see README -- pending the v0.4 dual-image flow).
 som:
   sku: E1M-AEN801
 
@@ -10,6 +17,33 @@ preset: e1m-evk
 cores:
   m55_hp:
     app: ./src
+
+# Cross-core shared SRAM + hardware mailbox used to signal the peer.
+# `raw_shmem`, not `rpmsg`: this is the low-level <alp/mproc.h>
+# shmem+mailbox primitive, so the carve-out stays at its non-cacheable
+# default (kconfig.py's `_emit_cross_core_shmem_cache` reads this
+# block and emits CONFIG_DCACHE=n for both m55_hp and m55_he
+# accordingly -- see the comment in prj.conf / peer/prj.conf for the
+# hardware reasoning). `name: alp_shmem0` matches the DT-alias name
+# `src/backends/mproc/zephyr_drv.c` and both main.c's hardcode --
+# it is NOT a free-form label like an rpmsg channel name.
+#
+# This carve-out resolves `status: blocked` today (`--emit
+# system-manifest`): E1M-AEN801 has no `memory_map:` base yet (same as
+# every other AEN `ipc:` entry in this repo, e.g. rpmsg-aen) -- pending
+# real AEN memory-map addresses, tracked in metadata/e1m_modules/
+# E1M-AEN801.yaml. The carve-out being blocked does not affect this
+# example: the generated `<alp/system_ipc.h>` / DTS reservation it
+# would drive aren't consumed here (main.c / peer/main.c open
+# "alp_shmem0" by its DT alias, wired by the board overlay directly,
+# not by the orchestrator's resolved address) -- only the
+# `_emit_cross_core_shmem_cache` Kconfig path this PR adds reads this
+# block, and that path doesn't need resolution to fire.
+ipc:
+  - kind: raw_shmem
+    endpoints: [m55_hp, m55_he]
+    carve_out_kb: 4
+    name: alp_shmem0
 
 diagnostics:
   log_level: info

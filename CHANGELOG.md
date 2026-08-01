@@ -7,6 +7,70 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Changed — `CONFIG_DCACHE=n` now emits for any cross-core `raw_shmem` carve-out, not only the Ethos-U inference path (#1080 follow-up)
+
+PR #1080 found the hazard but scoped the fix to hand-written `prj.conf`
+lines; `scripts/alp_orchestrate/kconfig.py` still only emitted
+`CONFIG_DCACHE=n` from `_emit_inference`'s Ethos-U branch, so a
+non-inference cross-core project got no help from the generator and had to
+carry the setting by hand — exactly `examples/multicore/mproc-mailbox`'s
+situation, called out in that entry as an artifact of the missing
+`inference:` block. A new `_emit_cross_core_shmem_cache` reads the existing
+`ipc:` schema field instead (`ipc[].kind` / `endpoints` / `cacheable` are
+all pre-existing in `board.schema.json`, no schema change): any core named
+as an endpoint of an `ipc[].kind: raw_shmem` entry (the low-level
+`<alp/mproc.h>` shmem+mailbox primitive, which has no cache-maintenance
+layer) gets `CONFIG_DCACHE=n`, unless the entry opts in to
+`cacheable: true` (the app declaring it will do its own cache ops).
+`kind: mailbox_only` is excluded (no shared memory, nothing to keep
+coherent).
+
+`kind: rpmsg` is excluded too, but **not** because `<alp/rpc.h>` handles
+cache maintenance for it — it doesn't. `cfg->cacheable` is stored on the
+backend struct (`src/backends/rpc/{zephyr,yocto}_drv.c`) and never read
+again; there is no `sys_cache_*`/`arch_dcache_*` call anywhere under `src/`
+or `include/`. A `cacheable: true` rpmsg channel on AEN (e.g.
+`examples/multicore/rpmsg-aen`, `a32_cluster` ↔ `m55_hp`) carries the exact
+same #1080-class hazard today — tracked separately as **#1088**, since
+forcing every rpmsg slice's D-cache off in *this* change would be an
+unreviewed fix for a different code path than the one #1080 root-caused.
+
+Verified non-regressing: `check_emit_snapshots.py`'s fixtures (35 pre-existing
++ 2 new, see below) stay byte-identical for every project that doesn't
+declare a `raw_shmem` entry, and an existing Ethos-U inference project's
+emitted Kconfig is unchanged.
+
+`examples/multicore/mproc-mailbox/board.yaml` now declares the carve-out
+it always had: `ipc: [{kind: raw_shmem, endpoints: [m55_hp, m55_he],
+name: alp_shmem0, carve_out_kb: 4}]` (`alp_shmem0` — not a free-form
+label — is the name `src/backends/mproc/zephyr_drv.c`'s DT-alias lookup
+and both `main.c`s hardcode). `m55_he` is not otherwise overridden in
+`cores:`; the SoM preset's `topology.m55_he` already resolves it to a
+slice for every project regardless (`app: alp-stock-shim`, unchanged —
+`tan build`'s `m55_he` behaviour is not affected by this PR). This carve-out
+resolves `status: blocked` today via `--emit system-manifest` — E1M-AEN801
+has no `memory_map:` base yet, same as every other AEN `ipc:` entry in this
+repo (`rpmsg-aen` is blocked identically) — pending real AEN memory-map
+addresses. The block doesn't affect this example: `main.c`/`peer/main.c`
+open `"alp_shmem0"` by its DT alias wired directly in the board overlay,
+not by the orchestrator's resolved address, and the new Kconfig path reads
+the raw `ipc:` declaration, not the resolved carve-out. Added
+`mproc-mailbox.{system-manifest,build-plan}` to `check_emit_snapshots.py`'s
+fixture set so this path — the only one exercising `raw_shmem` — has
+regression coverage; `build-plan` pins the blocked `<alp/system_ipc.h>`
+stub too.
+
+The hand-written line in `prj.conf` / `peer/prj.conf` stays — removing it
+in the same change that adds the generator path would make a regression
+impossible to attribute to either side; that cleanup is a follow-up once
+the generator path is trusted. Note for that follow-up: `peer/CMakeLists.txt`
+never invokes `alp_project.py` (the peer image builds standalone, per
+README, pending the v0.4 dual-image flow), so deleting `peer/prj.conf`'s
+`CONFIG_DCACHE=n` would silently re-enable the D-cache on that path — the
+generator's `CONFIG_DCACHE=n` only reaches `m55_he` today through the
+orchestrator-driven `tan build` flow (which still targets `alp-stock-shim`,
+not `peer/`), not through the documented standalone `west build peer/`.
+
 ### Fixed — four pre-existing AEN build errors surfaced by the new twister-on-real-hardware gate (#1076, #1085)
 
 `examples/aen/**` had never actually been compiled in CI (the `alp-build`
