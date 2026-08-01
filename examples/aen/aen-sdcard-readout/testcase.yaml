@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the vendored ADR 0017 Tier-2 DesignWare SDHC
+# driver (drivers/sdhc/sdhc_dwc.c, "snps,dwc-sdhc") on the E1M-AEN801 (Alif
+# Ensemble E8, M55-HE): probes a microSD card through the standard
+# disk-access API.
+#
+# Compile-checks the driver + DT node on the real E8 board target; filtered OUT
+# of the native_sim PR gate (platform_allow = the AEN801 HE board only).
+
+sample:
+  name: aen-sdcard-readout
+  description: |
+    Bench RAM-run SD Host Controller (snps,dwc-sdhc, sdhc@48102000) proof for
+    the E1M-AEN801 (Alif Ensemble E8, Cortex-M55-HE): probes a microSD card
+    via disk_access_init/disk_access_ioctl over the Zephyr SDMMC disk.
+
+tests:
+  alp_sdk.examples.aen.sdcard_readout.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - sdcard
+      - storage
+    build_only: true   # the microSD probe is a bench flash, not a CI run.

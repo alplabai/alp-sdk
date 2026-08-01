@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only presence/clock probe of the global Ethos-U85 (256-MAC,
+# @0x49042000) on the E1M-AEN801 (Ensemble E8, M55-HE).  Sibling of
+# aen-npu-ethosu55-regcheck (the HE-core-local Ethos-U55); vendor-ext,
+# BENCH-UNVERIFIED -- no node for this NPU existed in the alp-sdk SoC overlay
+# before this app's overlay declared it.
+#
+# hal_ethos_u is already an unconditional west.yml group (issue #1076 Q2), so
+# no extra module wiring is needed here.  Compile-checks the driver + DT node
+# on the real E8 board target; filtered OUT of the native_sim PR gate
+# (platform_allow = the AEN801 HE board only).
+
+sample:
+  name: aen-npu-ethosu-regcheck
+  description: |
+    Bench RAM-run Ethos-U85 (256-MAC, global @0x49042000) presence/clock
+    probe for the E1M-AEN801 (Alif Ensemble E8, Cortex-M55-HE) through the
+    Arm Ethos-U core driver.  vendor-ext, BENCH-UNVERIFIED.  Precursor to the
+    aen-npu-inference* full-inference family.
+
+tests:
+  alp_sdk.examples.aen.npu_ethosu_regcheck.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - npu
+      - ethos-u
+    build_only: true   # the U85 ID-register probe is a bench flash, not a CI run.

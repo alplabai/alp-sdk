@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# aen-dualcore-ipc -- bidirectional HE<->HP shared-memory request/response,
+# built on the proven dual-core boot (alp_mproc_boot_core) + MHU-1 doorbell.
+# One app, role-by-board: the HP build is the master + responder (boots HE,
+# replies payload+1 into a reply mailbox); the HE build is the requester
+# (writes a {seq, len, payload} message, rings HP, verifies the reply).
+# BENCH-VERIFIED PASS on E8 (2026-06-18): 64/64 round-trips.
+#
+# Filtered OUT of the native_sim PR gate (platform_allow = AEN801 board
+# targets only, no native_sim overlay); build_only in the advisory
+# pr-twister-aen.yml gate -- the round-trip proof is a dual-ATOC bench flash,
+# not a CI run.
+
+sample:
+  name: aen-dualcore-ipc
+  description: |
+    Bidirectional HE<->HP shared-memory request/response over one MHU-1 pair
+    (the fabric cross-routes each core's TX into the other's RX).  HP is
+    master + responder (boots HE, replies payload+1); HE is the requester
+    (writes {seq, len, payload}, rings HP, verifies the reply).
+    BENCH-VERIFIED PASS on E8 (2026-06-18): 64/64 round-trips.
+
+tests:
+  alp_sdk.examples.aen.dualcore_ipc.hp_master_responder:
+    platform_allow:
+      - alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - multicore
+      - mhu
+      - rtss-hp
+    build_only: true   # the 64/64 round-trip proof is a dual-ATOC bench flash, not a CI run.
+
+  alp_sdk.examples.aen.dualcore_ipc.he_requester:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - multicore
+      - mhu
+      - rtss-he
+    build_only: true   # this role never runs until the HP master releases it.

@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the portable <alp/i3c.h> surface over the
+# upstream Synopsys DesignWare I3C controller (drivers/i3c/i3c_dw.c,
+# "snps,designware-i3c") on the E1M-AEN801 (Ensemble E8, M55-HE).
+# BENCH-PROVEN 2026-07-25 (controller init).  No I3C target is populated on
+# this bench carrier, so live-transfer proof is deferred.
+#
+# Compile-checks the driver + DT node on the real E8 board target; filtered OUT
+# of the native_sim PR gate (platform_allow = the AEN801 HE board only).
+
+sample:
+  name: aen-i3c-regcheck
+  description: |
+    Bench RAM-run I3C (snps,designware-i3c) controller-init proof for the
+    E1M-AEN801 (Alif Ensemble E8, Cortex-M55-HE) through the portable
+    <alp/i3c.h> surface.  BENCH-PROVEN 2026-07-25.  No target populated this
+    batch, so DAA finds zero targets by design.
+
+tests:
+  alp_sdk.examples.aen.i3c_regcheck.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - i3c
+    build_only: true   # the I3C controller-init check is a bench flash, not a CI run.

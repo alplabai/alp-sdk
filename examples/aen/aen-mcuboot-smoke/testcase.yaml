@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# aen-mcuboot-smoke -- minimal slot0 application bench-validating the
+# SES -> MCUboot -> slot0 -> app boot chain on the E1M-AEN801 (M55-HE).
+# Requires `--sysbuild` (this app never links standalone: it is the slot0
+# image MCUboot chainloads) -- sysbuild: true below is what makes twister
+# build it that way, per issue #1076 Q2 / pr-twister-aen.yml's own header
+# note.  Bench-VALIDATED end-to-end (alp-sdk 0da1f1b4): SES -> MCUboot
+# (ITCM) -> slot0 app (MRAM XIP) -> app main(), ECDSA-P256 + VALIDATE_SLOT0.
+#
+# NOT covered here: signing.  This app's own sysbuild.conf deliberately ships
+# no SB_CONFIG_BOOT_SIGNATURE_KEY_FILE (a relative key path cannot be fixed
+# in-repo -- MCUboot resolves it against WEST_TOPDIR, not the alp-sdk module
+# root -- see the README + the file's own comment) and requires the
+# documented invocation to pass an absolute
+# -DSB_CONF_FILE=<abs>/alp-sdk/zephyr/sysbuild/aen/sysbuild.conf.  Neither
+# testcase.yaml `extra_args` nor `sysbuild: true` can synthesize an absolute
+# CI-runner path, so this entry builds MCUboot + the app image with sysbuild's
+# OWN auto-loaded app-local sysbuild.conf and will hard-fail configure on a
+# missing key until that is plumbed as a separate CI concern -- left as-is
+# deliberately (see note above) rather than silently dropped from this sweep.
+#
+# Filtered OUT of the native_sim PR gate (platform_allow = AEN801 M55-HE
+# only, no native_sim overlay); build_only in the advisory pr-twister-aen.yml
+# gate -- the boot-chain proof is a slot0 bench flash, not a CI run.
+
+sample:
+  name: aen-mcuboot-smoke
+  description: |
+    SES -> MCUboot -> slot0 -> app boot-chain bench test for the
+    E1M-AEN801: a signed slot0 app that only proves it BOOTED (RAM console +
+    VTOR).  Bench-VALIDATED end-to-end (alp-sdk 0da1f1b4) with ECDSA-P256 +
+    VALIDATE_SLOT0.
+
+tests:
+  alp_sdk.examples.aen.mcuboot_smoke.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    sysbuild: true
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - mcuboot
+      - sysbuild
+      - secure-boot
+    build_only: true   # the SES->MCUboot->slot0 chain is a bench flash, not a CI run.
