@@ -156,14 +156,13 @@ typedef enum {
  * @pre The image for @p core must already be RESIDENT at @p
  *      entry_addr before this call.  This API asks the boot authority
  *      to start execution there -- it does not load, copy, or verify
- *      any bytes.  Placing the image is the boot package / boot-time
- *      loader's job, done before the peer is released.  On at least
- *      one platform a loader can report an image entry as loaded and
- *      verified while the destination is still empty (see the backend
- *      implementation for the bench-measured case); a released core
- *      whose image is not actually resident vectors from garbage and
- *      locks up immediately.  This API has no way to detect that case
- *      -- only the caller's boot-package configuration prevents it.
+ *      any bytes.  Placing the image, and keeping it in place until
+ *      the peer actually runs, is the caller's responsibility (via
+ *      the boot package / boot-time loader).  A core released before
+ *      its image is resident vectors from garbage and locks up
+ *      immediately.  This API cannot detect that case; some backends
+ *      carry additional platform-specific constraints on top of this
+ *      precondition -- see the backend implementation for specifics.
  *
  * @param[in] core        Peer to start.  @ref ALP_CORE_SELF is
  *                        invalid.

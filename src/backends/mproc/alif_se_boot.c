@@ -56,36 +56,68 @@ static alp_status_t se_rc_to_alp(int rc)
 }
 
 /*
- * PRECONDITION, bench-measured on E8 silicon (AE822FA0E5597LS0), 2026-07-31:
- * se_service_boot_cpu() asks the SE to release @p core at @p entry_addr.
- * It does NOT place an image there -- it assumes one is already resident
- * at that address, and nothing in this call's return value says otherwise.
+ * PRECONDITION: se_service_boot_cpu() (SE service 501) asks the SE to
+ * release @p core at @p entry_addr.  Per the vendor manual
+ * (SE_Host_Services_API_v1.109.0.pdf, p.112, SERVICES_boot_cpu) it
+ * "does not perform image loading, verification, etc., it just boots
+ * the core" -- placing and keeping the image resident at @p entry_addr
+ * is the caller's responsibility, done before this call.
  *
- * On a bare-Zephyr repro, an ATOC entry declared `"flags": ["load"]`
- * reported `uLV` (Loaded, Verified) in the SES boot table while the
- * destination held no image: two independent debug access ports read the
- * peer's ITCM as uninitialized SRAM from t+0.80s to t+60s, never the
- * staged image's first words (`20002200 00002641`).  Releasing that core
+ * DIRECTION-SPECIFIC FAILURE, bench-measured on E8 silicon
+ * (AE822FA0E5597LS0), 2026-07-31: a plain `"flags": ["load"]` ATOC
+ * entry + se_service_boot_cpu() WORKS in the HP-master -> HE-peer
+ * direction -- ALP-HE read `uLV` (Loaded, Verified) with Dest Addr
+ * 0x58000000 populated (28.52 ms load time), 0x58000000 held
+ * `20006160 00004A85` matching the staged binary on a repeat read
+ * (ground-truth control passed first), and the link carried 16/16
+ * PING/PONG round-trips.
+ *
+ * The SAME recipe FAILS in the HE-master -> HP-peer direction: the
+ * ATOC still reported `uLV`, but two independent debug access ports
+ * read the HP peer's ITCM as uninitialized SRAM from t+0.80s to
+ * t+60s, never the staged image's first words.  Releasing that core
  * made it vector from empty memory and lock up immediately:
  * CFSR = 0x00000101 (IACCVIOL + IBUSERR), PC = 0xEFFFFFFE.
  *
- * The working declaration is `"flags": ["load", "boot", "deferred"]`
- * ("deferred" is a member of the flags array -- a sibling `"deferred":
- * true` key is rejected).  It sets TOC_IMAGE_DEFERRED = 0x100 (the
- * entry's flags word goes 0x00000022 -> 0x00000122) and prints `D` in
- * the SES table; the SES then skips the boot-time action entirely
- * (`uLs  D`, Dest Addr blank, Time 0.00 ms), and the host un-defers it
- * at runtime with SERVICES_boot_process_toc_entry (service 500,
- * services_host_boot.c:46-63), which performs load, verify and release
- * together.  With that ATOC shape, se_service_boot_cpu() started the
- * peer and carried an RPMsg link through 495 consecutive PING/PONG
- * round-trips over 4m11s.
+ * ROOT CAUSE (vendor-documented, not "Loaded is a lie"): the SES DOES
+ * place the bytes at ATOC-processing time in both directions.  The
+ * M55-HP core's own TCM is separately invalidated by the reset that
+ * SERVICES_boot_cpu() / SERVICES_boot_reset_cpu() issues before
+ * release, so by the time HP is released its TCM is empty again even
+ * though the SES table still (correctly, as of load time) says `uLV`.
+ * M55-HE is not documented as having this behaviour, matching the
+ * working direction above.  Two vendor passages describe it and
+ * DISAGREE on device scope -- both are quoted verbatim rather than
+ * silently picking one:
+ *   - p.112, SERVICES_boot_cpu: "For the M55 cores, there are cases
+ *     in which this service does not work. The currently known case
+ *     is the M55-HP core in FUSION REV_Bx devices, where resetting
+ *     the core also invalidates its TCM content."
+ *   - p.115, SERVICES_boot_release_cpu: "A known case is the M55-HP
+ *     core in Ensemble devices. Because of that, after calling
+ *     SERVICES_boot_reset_cpu() to stop the core, the image in the
+ *     TCM must be reloaded, before calling SERVICES_boot_release_cpu()."
+ * E8 is Ensemble, so the second passage is the one that applies here;
+ * the two passages naming different device families for what reads
+ * as the same erratum is the vendor doc's inconsistency, not ours.
  *
- * Left open: whether service 501 (se_service_boot_cpu()) honours
- * @p entry_addr at all was not isolated by this run -- the working
- * entry point came from the ATOC itself, not from this call's
- * argument.  Do not assume @p entry_addr is (or isn't) authoritative
- * until that is bench-checked separately.
+ * The working fix for the HE-master -> HP-peer direction is deferred
+ * ATOC processing: `"flags": ["load", "boot", "deferred"]` (sets
+ * TOC_IMAGE_DEFERRED = 0x100; "deferred" is a flags-array member, a
+ * sibling `"deferred": true` key is rejected) skips the SES boot-time
+ * release, and the host reloads + releases at runtime with
+ * SERVICES_boot_process_toc_entry (service 500,
+ * services_host_boot.c:46-63) -- the vendor manual (p.112) calls 500
+ * the "higher-level ... convenient way to boot a CPU core" and
+ * recommends it over 501 for M55 cores generally.  That combination
+ * carried an RPMsg link through 495 consecutive PING/PONG round-trips
+ * over 4m11s.  See branch feat/aen-mproc-deferred-toc-boot for that
+ * work; this backend still rides service 501 as-is because every
+ * shipped example uses the working HP-master -> HE-peer direction.
+ *
+ * Left open: whether service 501 honours @p entry_addr at all was not
+ * isolated by either run above -- the entry point came from the ATOC
+ * in both cases, not from this call's argument.
  */
 static alp_status_t alif_se_boot_core(alp_core_id_t core, uintptr_t entry_addr)
 {
