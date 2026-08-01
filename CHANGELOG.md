@@ -37,6 +37,29 @@ to compile against vanilla Zephyr v4.4.1; a long-lived dev workspace already
 carries that patch applied, uncommitted, which is exactly why this was
 invisible until a genuinely clean CI checkout ran the job.)
 
+### Added — `testcase.yaml` for 37 of the 42 `examples/aen` dirs `pr-twister-aen` couldn't discover (#1076)
+
+The `pr-twister-aen` gate above only builds what has a `testcase.yaml` —
+so the 42 dirs without one were still invisible to it. Re-measured the gap
+against `origin/dev@d8d113fd`: 67 example dirs, 25 with metadata, 42
+without (confirms the `67/25/42` follow-up count, not the issue body's
+stale `43 of 66`). Adds `testcase.yaml` (`build_only`, `platform_allow`
+scoped per example's actual `boards/` overlay set — not blanket-assumed)
+for 37 of the 42, matching the shape of the existing 25. `aen-alp-rpc`,
+`aen-dualcore-doorbell`, `aen-dualcore-ipc`, `aen-dualcore-probe`, and
+`aen-rpc-pingpong` are role-by-board (HP host/master, HE remote/peer), so
+each gets two platform-scoped scenarios rather than one `platform_allow`
+list with both targets. `aen-sim-vision` is HP-only (its `CMakeLists.txt`
+hard-fails configure on any other board — its `SIM_*` buffers live in the
+HP core's DTCM) and gets only the HP scenario. `aen-mcuboot-smoke` gets
+`sysbuild: true`, with a note that its own `sysbuild.conf` ships no signing
+key by design (needs an absolute `-DSB_CONF_FILE=` at build time neither
+`testcase.yaml` nor this gate can synthesize) — left in rather than
+silently dropped. The remaining 5, the `aen-npu-inference*` family, are
+still deliberately excluded: `gen_model.py` needs `vela` on `PATH` at CMake
+configure time, which no workflow installs yet (tracked as the
+`ethos-u-vela` follow-up the gate's own header comment already names).
+
 ### Fixed — `zephyr/patches.yml`'s two `hal_alif` patches never applied, silently, since the day they were added
 
 `west patch apply` resolves a patch's `module:` field against the target's
