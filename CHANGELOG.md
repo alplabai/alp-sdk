@@ -7,6 +7,19 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — completed the p.113→p.112 citation sweep for the M55-HP TCM-invalidation quote (#1081 follow-up)
+
+The "M55-HP core in FUSION REV_Bx devices" `SERVICES_boot_cpu` quote
+(`SE_Host_Services_API_v1.109.0.pdf`) is on printed p.112, not p.113 — p.112
+carries the whole `SERVICES_boot_cpu` description including that sentence;
+p.113 is only the continuation (the two-methods list and parameter table)
+and has no device-scope sentence at all. An earlier pass fixed this in most
+places but missed `src/backends/mproc/alif_se_boot.c` (which also
+self-contradicted, citing p.112 correctly a few lines below the p.113 typo),
+`zephyr/kconfigs/mproc-rpc-usb.kconfig`, `docs/aen-bench-bringup.md` (two
+sites), and this file's own `[v0.15.0]` entry. Citation-only; no behavior
+change.
+
 ## [v0.15.0] - 2026-07-31
 
 ### Added — documented `alp_mproc_boot_core()`'s image-residency precondition, and a direction-specific M55-HP erratum (#1070)
@@ -162,7 +175,7 @@ v2.3.0 module — no new hal_alif patch needed. New bench tooling
 `scripts/bench/aen/flash-run-dualcore.sh` emits + flashes the two-entry
 dual-core ATOC over the SE-UART. See `docs/aen-bench-bringup.md` § Flow A —
 Dual-core deferred-TOC boot for the full asymmetry table and the two SE Host
-Services API passages (p.112, p.113, p.115) this is built on.
+Services API passages (p.112, p.115) this is built on.
 
 ### Fixed — a scaffolded AEN Zephyr app linked at the MRAM base, so no flash flow accepted it (#1067)
 

@@ -143,7 +143,7 @@ on which recipe is "correct":
 **This is a vendor-documented asymmetry, not a general defect in the plain
 recipe.** Alif's SE Host Services API docs (`SE_Host_Services_API_v1.109.0.pdf`):
 
-- p.113, `SERVICES_boot_cpu` (service 501): *"For the M55 cores, there are
+- p.112, `SERVICES_boot_cpu` (service 501): *"For the M55 cores, there are
   cases in which this service does not work. The currently known case is
   the **M55-HP core in FUSION REV_Bx devices**, where resetting the core
   also invalidates its TCM content."*
@@ -164,7 +164,7 @@ recipe.** Alif's SE Host Services API docs (`SE_Host_Services_API_v1.109.0.pdf`)
   boot time (i.e., no boot or load) and wait for a service request at
   runtime."*
 
-The two vendor passages disagree with each other on scope (p.113 says
+The two vendor passages disagree with each other on scope (p.112 says
 "FUSION REV_Bx devices", p.115 says "Ensemble devices" with no qualifier)
 — quoted verbatim rather than resolved; E8 is an Ensemble part, so p.115
 covers it either way. **The mechanism**: the ATOC's `["load","boot"]` entry
