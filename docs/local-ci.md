@@ -20,7 +20,7 @@ iteration cycle for the same checks.
 | System gcc + g++               | `native_sim/native/64` builds use host gcc (CI does the same). |
 | `dtc` (devicetree compiler)    | Preprocesses board `.dts` files.                    |
 | `gperf`                        | Kconfig hash tables.                                |
-| Python 3.10+                   | `west`, twister, project loader, pytest tests.      |
+| Python (3.12+ to actually build; 3.10+ runs `west`/project loader/pytest) | Zephyr v4.4.1's own `cmake/modules/python.cmake` hardcodes a 3.12 floor -- twister and any real `west build` configure through it and refuse below that, independent of `metadata/bootstrap.json`'s `prerequisites.pythonMinVersion` (still 3.10 -- see [`docs/cross-platform-setup.md`](cross-platform-setup.md) §1.1 for why it isn't raised to match). |
 | `west` (`pip install west`)    | Manifest tool that owns the workspace.              |
 
 The SDK supports two host layouts:
@@ -116,8 +116,12 @@ This is the path for cross-compiled builds only (Alif Ensemble,
 Renesas V2N, NXP i.MX 93 targets via arm-zephyr-eabi).  Native_sim
 builds are not supported on Windows by upstream Zephyr.
 
-1. **Install Python 3.10+** from python.org (the Microsoft Store
-   variant works but the launcher has worse PATH ergonomics).
+1. **Install Python 3.12+** from python.org (the Microsoft Store
+   variant works but the launcher has worse PATH ergonomics).  A
+   cross-compiled `west build` configures through Zephyr's own
+   `cmake/modules/python.cmake` the same as `native_sim` does, so it
+   needs the same 3.12 floor -- see [`docs/cross-platform-setup.md`](cross-platform-setup.md)
+   §1.1.
 
 2. **`pip install west`** in your user site-packages:
    ```pwsh
