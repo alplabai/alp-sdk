@@ -37,6 +37,23 @@ to compile against vanilla Zephyr v4.4.1; a long-lived dev workspace already
 carries that patch applied, uncommitted, which is exactly why this was
 invisible until a genuinely clean CI checkout ran the job.)
 
+### Fixed — `zephyr/patches.yml`'s two `hal_alif` patches never applied, silently, since the day they were added
+
+`west patch apply` resolves a patch's `module:` field against the target's
+own `zephyr/module.yml` `name:` — not the west manifest project name. `hal_alif`
+(the west project) declares itself `alif` in `modules/hal/alif/zephyr/module.yml`,
+so `module: hal_alif` on `hal_alif/0001-se-service-add-boot-cpu.patch` and
+`hal_alif/0002-se-service-add-public-send-request.patch` matched nothing and
+both were silently skipped by every `west patch apply` run — with no warning,
+because `west patch` treats an unresolvable module as "nothing to do", not an
+error. This was invisible until now because nothing in CI ever ran
+`west patch apply` before `pr-twister-aen` (#1076): `se_service_boot_cpu()`
+and `se_service_send_request()` only exist via those two patches, and the
+symbols they add were an implicit-function-declaration build error waiting
+to happen the moment anything tried to build `aen-dualcore-master` or
+`se_cryptocell.c` against a workspace that hadn't had them hand-applied out
+of band. Fixed by pointing both entries at `module: alif`.
+
 ### Fixed — four pre-existing AEN build errors surfaced by the new twister-on-real-hardware gate (#1076, #1085)
 
 `examples/aen/**` had never actually been compiled in CI (the `alp-build`
