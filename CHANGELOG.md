@@ -9,6 +9,44 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [v0.15.0] - 2026-07-31
 
+### Added — documented `alp_mproc_boot_core()`'s image-residency precondition, and a direction-specific M55-HP erratum (#1070)
+
+`alp_mproc_boot_core()` (Alif SE backend: `se_service_boot_cpu()`, service
+501) releases a peer M55 at `entry_addr` -- per the vendor manual
+(`SE_Host_Services_API_v1.109.0.pdf` p.112) it "does not perform image
+loading, verification, etc., it just boots the core"; residency is the
+caller's responsibility. Bench-measured on E8 silicon (`AE822FA0E5597LS0`,
+2026-07-31): a plain `"flags": ["load"]` ATOC entry works in the
+**HP-master → HE-peer** direction (`uLV`, Dest Addr `0x58000000` populated,
+bytes verified matching, 16/16 PING/PONG) but the same recipe **fails** in
+the **HE-master → HP-peer** direction -- the ATOC still reports `uLV`, but
+the HP peer's ITCM reads as uninitialized SRAM and releasing it locks up
+(`CFSR = 0x00000101`, `PC = 0xEFFFFFFE`).
+
+Root cause is vendor-documented: the SES does place the bytes at
+ATOC-processing time in both directions, but M55-HP's TCM is separately
+invalidated by the reset `SERVICES_boot_cpu()` issues before release. Two
+vendor passages describe this and disagree on device scope -- p.112
+(`SERVICES_boot_cpu`) names "M55-HP core in FUSION REV_Bx devices"; p.115
+(`SERVICES_boot_release_cpu`) names "M55-HP core in Ensemble devices" (E8 is
+Ensemble, so p.115 applies here). The fix for the failing direction is
+deferred ATOC processing -- `"flags": ["load", "boot", "deferred"]`, which
+defers the SES release and lets the host reload + release at runtime with
+`SERVICES_boot_process_toc_entry` (service 500) -- proven with an RPMsg link
+carrying 495 consecutive PING/PONG round-trips over 4m11s; tracked on
+`feat/aen-mproc-deferred-toc-boot`. Every shipped AEN dual-core example uses
+the working HP-master → HE-peer direction, so this backend still rides
+service 501 as-is.
+
+The precondition and the erratum are now documented as `@pre` on the public
+API (`include/alp/mproc.h`, kept vendor-neutral), as a full bench writeup
+with both vendor-doc quotes on the backend
+(`src/backends/mproc/alif_se_boot.c`), and in `docs/aen-se-services.md`
+§2.2. No call-shape or behavior change -- documentation only. Left open:
+whether `entry_addr` is honoured by service 501 at all was not isolated by
+either bench run, since the working entry point came from the ATOC itself
+in both cases.
+
 ### Fixed — five AEN examples treated ALP_ERR_NOSUPPORT as an unreachable-in-practice skip (#1071)
 
 `aen-alp-rpc`, `aen-dualcore-doorbell`, `aen-dualcore-ipc`, `aen-dualcore-master`,
