@@ -7,6 +7,38 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Changed — `CONFIG_DCACHE=n` now emits for any cross-core `raw_shmem` carve-out, not only the Ethos-U inference path (#1080 follow-up)
+
+PR #1080 found the hazard but scoped the fix to hand-written `prj.conf`
+lines; `scripts/alp_orchestrate/kconfig.py` still only emitted
+`CONFIG_DCACHE=n` from `_emit_inference`'s Ethos-U branch, so a
+non-inference cross-core project got no help from the generator and had to
+carry the setting by hand — exactly `examples/multicore/mproc-mailbox`'s
+situation, called out in that entry as an artifact of the missing
+`inference:` block. A new `_emit_cross_core_shmem_cache` reads the existing
+`ipc:` schema field instead: any core named as an endpoint of an
+`ipc[].kind: raw_shmem` entry (the low-level `<alp/mproc.h>` shmem+mailbox
+primitive, which has no automatic cache-maintenance layer) gets
+`CONFIG_DCACHE=n`, unless the entry opts in to `cacheable: true` (the app
+declaring it will do its own cache ops). `kind: rpmsg` is deliberately
+excluded — `<alp/rpc.h>` auto-generates cache-maintenance calls in
+`alp_rpc_*` (see `docs/heterogeneous-builds.md` §10), so forcing the whole
+core's D-cache off there would be an unrelated regression — and so is
+`kind: mailbox_only` (no shared memory, nothing to keep coherent). Verified
+board-agnostic and non-regressing: `check_emit_snapshots.py`'s 35 fixtures
+(including the AEN/V2N/i.MX93 `rpmsg`/`hetero-offload` projects) stay
+byte-identical, and an existing Ethos-U inference project's emitted
+Kconfig is unchanged.
+
+`examples/multicore/mproc-mailbox/board.yaml` now declares the carve-out
+it always had (`ipc: [{kind: raw_shmem, endpoints: [m55_hp, m55_he], ...}]`
+plus the `m55_he` core it references), so the generated `alp.conf` for both
+cores now carries `CONFIG_DCACHE=n` too. The hand-written line in
+`prj.conf` / `peer/prj.conf` stays — removing it in the same change that
+adds the generator path would make a regression impossible to attribute to
+either side; that cleanup is a follow-up once the generator path is
+trusted.
+
 ### Added — `aen-dualcore-he-master`, the HE-master → HP-peer example (silicon-proven 2026-08-01)
 
 Every existing AEN dual-core example releases its peer HP-master → HE-peer.

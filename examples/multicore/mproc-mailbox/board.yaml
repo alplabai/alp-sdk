@@ -2,7 +2,12 @@
 # mproc-mailbox example (M55-HP side).
 #
 # Targets AEN-Zephyr; the peer-side (M55-HE) firmware lands
-# alongside the v0.4 dual-image build flow.
+# alongside the v0.4 dual-image build flow -- until then `peer/`
+# builds standalone (`west build` directly against it, see README),
+# but declaring it here as a real core lets the `ipc:` block below
+# name it as an endpoint, which is the correct, existing-schema way
+# to express "this is a cross-core shared-memory carve-out" (see
+# PR #1080 and its kconfig.py follow-up).
 som:
   sku: E1M-AEN801
 
@@ -10,6 +15,22 @@ preset: e1m-evk
 cores:
   m55_hp:
     app: ./src
+  m55_he:
+    app: ./peer
+
+# Cross-core shared SRAM (SRAM0, accessible from every E8 core) +
+# hardware mailbox used to signal the peer.  `raw_shmem`, not `rpmsg`:
+# this is the low-level <alp/mproc.h> shmem+mailbox primitive with no
+# OpenAMP framing and no automatic cache-maintenance layer, so the
+# carve-out stays at its non-cacheable default (kconfig.py's
+# `_emit_cross_core_shmem_cache` reads this block and emits
+# CONFIG_DCACHE=n for both m55_hp and m55_he accordingly -- see the
+# comment in prj.conf / peer/prj.conf for the hardware reasoning).
+ipc:
+  - kind: raw_shmem
+    endpoints: [m55_hp, m55_he]
+    carve_out_kb: 4
+    name: alp_mproc_shmem
 
 diagnostics:
   log_level: info

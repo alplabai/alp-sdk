@@ -1173,6 +1173,72 @@ def _emit_inference(
     return lines
 
 
+def _emit_cross_core_shmem_cache(
+    project: "BoardProject",
+    slice_: Slice,
+    existing_lines: list[str],
+) -> list[str]:
+    """CONFIG_DCACHE=n for a slice sharing a non-cacheable `raw_shmem` IPC
+    carve-out with a peer core -- the hardware fact this symbol encodes
+    (each core has its own D-cache; shared SRAM is cross-core incoherent
+    unless the cache is off, or the app does explicit cache maintenance)
+    is NOT specific to Ethos-U inference.  Before this, the only place
+    that emitted it was the Ethos-U branch of `_emit_inference`, so a
+    non-inference cross-core project (e.g. `examples/multicore/
+    mproc-mailbox`, an M55-HP<->M55-HE mailbox+shmem roundtrip with no
+    `inference:` block) got no help from the generator and had to
+    hand-write the line in `prj.conf` -- see PR #1080, which found three
+    examples silently reporting `RESULT SKIP` while the debug AP watched
+    their beacons advance: the hardware worked, the stale D-cache just
+    hid it from the software.
+
+    Board-agnostic and keyed off the existing `ipc:` schema field (board-
+    yaml §3.9), not a SoC/vendor check, so it fires for any silicon that
+    declares a matching carve-out:
+
+      - `kind: rpmsg` is excluded -- `<alp/rpc.h>` auto-generates the
+        cache-maintenance calls in `alp_rpc_*` (docs/heterogeneous-builds.md
+        §10 "Cache coherency on AEN"), so forcing DCACHE=n there would
+        needlessly disable caching for the whole core.
+      - `kind: mailbox_only` is excluded -- it carries no shared memory
+        (doorbell + signal only), so there is nothing to keep coherent.
+      - `kind: raw_shmem` is the one that needs it: `<alp/mproc.h>`'s raw
+        shmem+mailbox primitives have no automatic cache-maintenance layer
+        (docs/heterogeneous-builds.md: "reach for these only if you're
+        building a custom framing layer... you have to call the right
+        cache ops yourself"), so the SDK's zero-effort-safe default is to
+        turn the D-cache off -- unless the entry opts out with an explicit
+        `cacheable: true`, which is the app declaring it will do its own
+        cache ops instead (board.schema.json `ipc_entry.cacheable`).
+
+    Skips emission if a line asserting the same symbol is already present
+    (the Ethos-U inference branch, run earlier in `_slice_alp_conf`, may
+    have already asserted it for this slice) -- kept as an independent
+    check rather than threading a bool out of `_emit_inference`, since the
+    two triggers (Ethos-U NPU coherence vs. mproc shmem coherence) are
+    unrelated hardware facts that happen to share one Kconfig symbol.
+    """
+    if any("CONFIG_DCACHE=n" in line for line in existing_lines):
+        return []
+    needs_dcache_off = any(
+        entry.kind == "raw_shmem"
+        and slice_.core_id in entry.endpoints
+        and not entry.cacheable
+        for entry in project.ipc
+    )
+    if not needs_dcache_off:
+        return []
+    return [
+        "# Cross-core shared-memory carve-out (board.yaml ipc[].kind: "
+        "raw_shmem) naming this core -- each core has its own D-cache and "
+        "the carve-out is non-cacheable, so the D-cache must stay off for "
+        "both sides to see each other's writes without explicit cache "
+        "maintenance (PR #1080).",
+        "CONFIG_DCACHE=n",
+        "",
+    ]
+
+
 def _emit_memory(slice_: Slice) -> list[str]:
     """Per-slice memory tuning (board.yaml `cores.<id>.memory:`)."""
     lines: list[str] = []
@@ -1444,6 +1510,7 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
         lines.extend(hw_backend_lines)
         lines.append("")
     lines.extend(_emit_inference(project, slice_, silicon))
+    lines.extend(_emit_cross_core_shmem_cache(project, slice_, lines))
     lines.extend(_emit_memory(slice_))
     lines.extend(_emit_power(slice_))
     lines.extend(_emit_storage(project))

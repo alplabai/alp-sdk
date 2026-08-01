@@ -574,6 +574,15 @@ the right calls differ between V2N and AEN.  Setting `cacheable: true`
 in `ipc:` explicitly makes the orchestrator emit matching hooks on
 both sides.
 
+That auto-generated cache-maintenance is an `rpmsg`-only benefit.
+`ipc[].kind: raw_shmem` — the low-level `<alp/mproc.h>` shmem+mailbox
+primitives `<alp/rpc.h>` sits on — has no equivalent, so the orchestrator
+falls back to the zero-effort-safe default instead: any core named in a
+`raw_shmem` entry's `endpoints:` gets `CONFIG_DCACHE=n` in its generated
+`alp.conf` unless the entry sets `cacheable: true` (which is you declaring
+you'll do the cache ops yourself, same as above). `kind: mailbox_only`
+carries no shared memory, so it never triggers this.
+
 **Mailbox-channel collisions.**  The SoM preset declares which
 controller channels the SDK reserves vs. leaves free for apps:
 
