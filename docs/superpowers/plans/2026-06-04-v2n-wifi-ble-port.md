@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-06-04-v2n-wifi-ble-port-design.md`
 
-**Cross-session coordination (read first):** another session is concurrently editing `firmware/gd32-bridge/` (LCD sideband work; fw moved v0.2.3→v0.2.8, protocol may move past 0.6.0). **LAYOUT CHANGE 2026-06-05 (fw v0.2.8 refactor):** the monolithic `hal/bridge_hw_gd32.c` was split move-only into per-peripheral TUs under `hal/gd32/` — `gpio_pad_map[]` + GPIO bodies now live in `hal/gd32/gpio.c`, boot bring-up in `hal/gd32/init.c`, shared decls in `hal/gd32/gd32_common.h` (note: `GPIO_PAD_MAP_COUNT` is now a literal there — adding pad rows means bumping it + the `_Static_assert` keeps you honest). ALL work happens in a separate worktree branched from **latest** `dev`; before flashing the GD32 or merging, re-check `git -C E:\GitHub\alp-sdk log dev -3` and renumber the protocol bump / re-sequence J-Link use if needed.
+**Cross-session coordination (read first):** another session is concurrently editing `firmware/gd32-bridge/` (LCD sideband work; fw moved v0.2.3→v0.2.8, protocol may move past 0.6.0). **LAYOUT CHANGE 2026-06-05 (fw v0.2.8 refactor):** the monolithic `hal/bridge_hw_gd32.c` was split move-only into per-peripheral TUs under `hal/gd32/` — `gpio_pad_map[]` + GPIO bodies now live in `hal/gd32/gpio.c`, boot bring-up in `hal/gd32/init.c`, shared decls in `hal/gd32/gd32_common.h` (note: `GPIO_PAD_MAP_COUNT` is now a literal there — adding pad rows means bumping it + the `_Static_assert` keeps you honest). ALL work happens in a separate worktree branched from **latest** `dev`; before flashing the GD32 or merging, re-check `git -C <alp-sdk> log dev -3` and renumber the protocol bump / re-sequence J-Link use if needed.
 
 ---
 
@@ -45,26 +45,26 @@ Branch: `feat/v2n-wifi-ble` worktree. Bench artifacts (`.ko`, dtb, blobs) are de
 
 **Files:** none (infrastructure)
 
-- [ ] **Step 1:** REQUIRED SUB-SKILL `superpowers:using-git-worktrees`: create worktree `feat/v2n-wifi-ble` from **latest** `dev` (e.g. `E:\GitHub\alp-sdk-worktrees\v2n-wifi-ble`). Verify: `git -C <worktree> log --oneline -1` shows the current dev tip (≥ `47209d3`).
+- [ ] **Step 1:** REQUIRED SUB-SKILL `superpowers:using-git-worktrees`: create worktree `feat/v2n-wifi-ble` from **latest** `dev` (e.g. `<repo-root>\alp-sdk-worktrees\v2n-wifi-ble`). Verify: `git -C <worktree> log --oneline -1` shows the current dev tip (≥ `47209d3`).
 - [ ] **Step 2:** Confirm the spec + this plan exist on the branch (they were committed to dev): `git -C <worktree> log --oneline -3 -- docs/superpowers` shows the spec commit.
 
 ### Task 2: Pin ground truth (SDHI1 pins, BT UART instance)
 
 Resolves spec §9 rows 2–3. No code; produces facts used by Tasks 7/8 and 13.
 
-**Files:** read-only: WSL `~/projects/rzv2n/repos/rz_linux-cip`, `E:\GitHub\V2N-Yocto\dtbwork\cur.dts`
+**Files:** read-only: WSL `~/projects/rzv2n/repos/rz_linux-cip`, `<v2n-yocto>\dtbwork\cur.dts`
 
 - [ ] **Step 1: SD1 pin names.** The EVK dts proves SDHI1 uses dedicated pinctrl pins, not GPIO mux:
   `cur.dts:307-326`: group `sd1` = `sd1-cd { pinmux = <0xe004c>; }` + `sd1-clk { pins = "SD1CLK"; }` + `sd1-dat-cmd { pins = "SD1DAT0…3","SD1CMD"; }`.
   Confirm the pinctrl driver knows these names:
   ```bash
-  wsl -d Ubuntu-22.04 -e bash -lc 'grep -rn "SD1CLK\|SD1DAT0" /home/caner/projects/rzv2n/repos/rz_linux-cip/drivers/pinctrl/renesas/ | head'
+  wsl -d Ubuntu-22.04 -e bash -lc 'grep -rn "SD1CLK\|SD1DAT0" /home/<user>/projects/rzv2n/repos/rz_linux-cip/drivers/pinctrl/renesas/ | head'
   ```
   Expected: hits in the RZ/V2H(P)-family pinctrl data (`pinctrl-rzg2l.c` or `pinctrl-rzv2h.c`) listing `SD1CLK`, `SD1DAT0..3`, `SD1CMD` as dedicated pins.
 - [ ] **Step 2: cross-check ball naming.** Confirm the schematic's `PB0–PB5` are the SD1CLK/CMD/DATx package balls: in the R9A09G056 HW manual pin-function table (internal docs) or the SoC pin chart in `rz_linux-cip` Documentation/bindings, find SD1CLK↔ball. Record the mapping sentence for Task 13's metadata note. If the manual contradicts (SD1 ≠ PB0–PB5 balls), STOP and re-check the schematic nets before touching the DT (the metadata + schematic agreed, so this is confirmation, not discovery).
 - [ ] **Step 3: BT UART instance.** Find which `serial@…` muxes P40–P43:
   ```bash
-  wsl -d Ubuntu-22.04 -e bash -lc 'grep -rn "P40\|RSCI" /home/caner/projects/rzv2n/repos/rz_linux-cip/arch/arm64/boot/dts/renesas/r9a09g056*.dtsi | head -30'
+  wsl -d Ubuntu-22.04 -e bash -lc 'grep -rn "P40\|RSCI" /home/<user>/projects/rzv2n/repos/rz_linux-cip/arch/arm64/boot/dts/renesas/r9a09g056*.dtsi | head -30'
   # then decode: which sciN/rsciN node's pinmux group covers port 4 pins 0-3
   ```
   Also check the one flow-control-ready node already in the EVK dts (`patched.dts:1166 uart-has-rtscts`, alias `serial1` = `/soc/serial@12800c00`) — decode its `pinctrl-0` pinmux values (RZG2L encoding `((port*8+pin) | func<<16)`) to see if it IS the P40–P43 instance. Record: node path, label, pinmux encodings for P40–P43 with the UART function number.
@@ -348,7 +348,7 @@ grep . /sys/bus/sdio/devices/*/vendor 2>/dev/null   # EXPECTED: 0x02d0 (Broadcom
 ```
 
 This is the **REG_ON + LPO + pinmux proof** (spec §9 rows 1/2/4 all collapse here). If nothing enumerates: check REG_ON via J-Link (Task 5 Step 3), then scope LPO_IN per spec §9.
-- [ ] **Step 5:** Save the exact dts delta used as a draft for Task 11 (keep the worktree diff: `git -C /tmp/n48wt2 diff > /mnt/e/GitHub/V2N-Yocto/dtbwork/wifi-bt-draft.diff`).
+- [ ] **Step 5:** Save the exact dts delta used as a draft for Task 11 (keep the worktree diff: `git -C /tmp/n48wt2 diff > <v2n-yocto>/dtbwork/wifi-bt-draft.diff`).
 
 ### Task 8: cyw-fmac backports build + firmware + wlan0
 
@@ -428,8 +428,8 @@ Throughput: `iperf3 -s` on the board, client from WSL (`iperf3 -c <wlan0-ip> -t 
 
 **Files:**
 - Create (WSL): `…/meta-renesas/meta-rz-bsp/recipes-kernel/linux/files/0014-arm64-dts-renesas-rzv2n-evk-murata-wifi-sdhi1-on-e1m-x.patch` and `0015-…-murata-bt-hci-uart-on-e1m-x.patch`
-- Create: `E:\GitHub\V2N-Yocto\dtbwork\staging\wifi-bt.cfg`
-- Modify: `E:\GitHub\V2N-Yocto\dtbwork\staging\linux-renesas_%.bbappend`
+- Create: `<v2n-yocto>\dtbwork\staging\wifi-bt.cfg`
+- Modify: `<v2n-yocto>\dtbwork\staging\linux-renesas_%.bbappend`
 
 - [ ] **Step 1:** In the kernel worktree (patches 0006–0013 applied), commit the Task-7 dts delta as two commits (SDHI1/regulators/wifi-node; BT UART/serdev) with `Alp Lab AB` attribution (NO personal name/email — set `git config user.name "Alp Lab AB"`, `user.email` the SDK contact), then `git format-patch -2` and place as 0014/0015 in the patch dir.
 - [ ] **Step 2:** `wifi-bt.cfg` (kernel fragment, mirrors Task 6 exactly):
@@ -469,7 +469,7 @@ SRC_URI:append:e1m-v2n101 = " \
 - Create: `meta-alp-sdk/recipes-kernel/cyw-fmac/cyw-fmac_git.bb`
 - Create: `meta-alp-sdk/recipes-bsp/cyw-fmac-firmware/cyw-fmac-firmware_git.bb`
 - Modify: `meta-alp-sdk/conf/machine/e1m-v2n101-a55.conf` (and the v2n102/v2m101/v2m102 siblings — same PCB, same lines)
-- Modify: `E:\GitHub\V2N-Yocto\dtbwork\staging\e1m-v2n.yml` (kas)
+- Modify: `<v2n-yocto>\dtbwork\staging\e1m-v2n.yml` (kas)
 
 - [ ] **Step 1:** `cyw-fmac_git.bb` (pin SRCREV/branch to what Task 8 validated):
 

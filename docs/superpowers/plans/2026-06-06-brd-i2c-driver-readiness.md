@@ -72,12 +72,12 @@ In `tests/zephyr/chips/boards/native_sim_native_64.overlay`, replace the comment
 - [ ] **Step 3: Build + run the chips suite**
 
 ```
-wsl -d Ubuntu -- bash -lc 'cd /home/alplab/zephyrproject && \
-  export ZEPHYR_BASE=/home/alplab/zephyrproject/zephyr && \
-  export EXTRA_ZEPHYR_MODULES=/mnt/c/Users/caner/Documents/GitHub/alp-sdk && \
+wsl -d Ubuntu -- bash -lc 'cd /home/<user>/zephyrproject && \
+  export ZEPHYR_BASE=/home/<user>/zephyrproject/zephyr && \
+  export EXTRA_ZEPHYR_MODULES=/mnt/c/Users/<user>/Documents/GitHub/alp-sdk && \
   export ZEPHYR_TOOLCHAIN_VARIANT=host && \
   python3 zephyr/scripts/twister \
-    --testsuite-root /mnt/c/Users/caner/Documents/GitHub/alp-sdk/tests/zephyr/chips \
+    --testsuite-root /mnt/c/Users/<user>/Documents/GitHub/alp-sdk/tests/zephyr/chips \
     -p native_sim/native/64 -O /tmp/tw-chips'
 ```
 
@@ -1880,14 +1880,14 @@ git commit -q -m "docs: changelog + status sweep for the BRD_I2C driver-readines
 - [ ] **Step 1: Full twister scope** (all three roots — never a subset):
 
 ```
-wsl -d Ubuntu -- bash -lc 'cd /home/alplab/zephyrproject && \
-  export ZEPHYR_BASE=/home/alplab/zephyrproject/zephyr && \
-  export EXTRA_ZEPHYR_MODULES=/mnt/c/Users/caner/Documents/GitHub/alp-sdk && \
+wsl -d Ubuntu -- bash -lc 'cd /home/<user>/zephyrproject && \
+  export ZEPHYR_BASE=/home/<user>/zephyrproject/zephyr && \
+  export EXTRA_ZEPHYR_MODULES=/mnt/c/Users/<user>/Documents/GitHub/alp-sdk && \
   export ZEPHYR_TOOLCHAIN_VARIANT=host && \
   python3 zephyr/scripts/twister \
-    --testsuite-root /mnt/c/Users/caner/Documents/GitHub/alp-sdk/tests/zephyr \
-    --testsuite-root /mnt/c/Users/caner/Documents/GitHub/alp-sdk/tests/unit \
-    --testsuite-root /mnt/c/Users/caner/Documents/GitHub/alp-sdk/examples \
+    --testsuite-root /mnt/c/Users/<user>/Documents/GitHub/alp-sdk/tests/zephyr \
+    --testsuite-root /mnt/c/Users/<user>/Documents/GitHub/alp-sdk/tests/unit \
+    --testsuite-root /mnt/c/Users/<user>/Documents/GitHub/alp-sdk/examples \
     -p native_sim/native/64 -O /tmp/tw-full'
 ```
 
@@ -1902,7 +1902,7 @@ py -3.14 -m pytest tests/scripts -q
 - [ ] **Step 3: clang-format diff-only check** (WSL, CI-faithful):
 
 ```
-wsl -d Ubuntu -- bash -lc 'cd /mnt/c/Users/caner/Documents/GitHub/alp-sdk && git diff -U0 origin/dev -- "*.c" "*.h" | clang-format-diff-14 -p1 -binary /usr/bin/clang-format-14'
+wsl -d Ubuntu -- bash -lc 'cd /mnt/c/Users/<user>/Documents/GitHub/alp-sdk && git diff -U0 origin/dev -- "*.c" "*.h" | clang-format-diff-14 -p1 -binary /usr/bin/clang-format-14'
 ```
 
 Empty output = clean. Non-empty: `clang-format-14 -style=file -i <file>` the offenders and amend via a follow-up commit (never `--amend`).

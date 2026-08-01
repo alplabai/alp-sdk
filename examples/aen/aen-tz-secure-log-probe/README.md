@@ -35,6 +35,9 @@ The SES hands the M55 to the app in **Secure** state. The probe (Secure):
 
 ## Pass criterion (bench)
 
+`CONFIG_DCACHE=n` (`prj.conf`) is what makes this SWD read valid — a cached
+beacon write would sit in the core's D-cache, unseen by the AXI-AP read.
+
 Read the SRAM0 beacon at `0x02001100` over SWD:
 
 | Word | Meaning | Pass value |

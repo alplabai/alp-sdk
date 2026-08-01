@@ -34,6 +34,9 @@ app's request on the return — the single-core equivalent of the two-core mailb
 
 ## Pass criterion (bench)
 
+`CONFIG_DCACHE=n` (`prj.conf`) is what makes this SWD read valid — a cached
+beacon write would sit in the core's D-cache, unseen by the AXI-AP read.
+
 Read the SRAM0 beacon at `0x02001100`:
 
 | Word | Meaning | Pass value |

@@ -7,7 +7,373 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Added — an AEN801 twister gate: `examples/aen`'s AEN-only scenarios finally build in CI (#1076)
+
+25 of `examples/aen`'s `testcase.yaml` files name an AEN801 board target in
+`platform_allow`, and `pr-twister.yml` runs `-p native_sim/native/64` only
+(by design — that gate deliberately skips the Zephyr SDK), so every one of
+those scenarios was statically filtered out of every PR. Nothing else
+compiled them either: the `alp-build · E1M-AEN801` jobs only emit a
+system-manifest. A new `pr-twister-aen` workflow runs twister against both
+`alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he` and
+`alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp`, scoped to `examples/aen`,
+path-gated to that tree plus the AEN801 board trees and the mproc/SE
+backends. A local run selected 29 scenarios (58 configurations, 19 left
+after platform filtering) and surfaced 6 pre-existing build errors this is
+the first thing to ever compile far enough to see — so the gate ships
+**advisory**, not required, until those are fixed and it has run clean
+across a handful of AEN PRs. The `aen-npu-inference*` family (needs
+`ethos-u-vela` on `PATH`) and `aen-mcuboot-smoke` (needs `sysbuild: true`)
+have no `testcase.yaml` yet, so neither is selected today — tracked for the
+separate follow-on that adds the remaining 42 examples' metadata. (The
+workflow installs `zephyr/scripts/requirements.txt`, not just
+`requirements-base.txt` — twister itself needs `requirements-run-test.txt`'s
+`natsort`, which a plain `west build` doesn't; a fresh CI runner has none of
+it preinstalled, unlike the shared dev workspace this was first measured on.
+It also runs `west patch apply` — `zephyr/patches.yml`'s
+`0002-ipm-add-poll-out-poll-in.patch` is required for the mproc/SE-boot
+examples' `hal_alif` `se_service.c` → `ipm_poll_out`/`ipm_poll_in` call chain
+to compile against vanilla Zephyr v4.4.1; a long-lived dev workspace already
+carries that patch applied, uncommitted, which is exactly why this was
+invisible until a genuinely clean CI checkout ran the job.)
+
+### Fixed — `zephyr/patches.yml`'s two `hal_alif` patches never applied, silently, since the day they were added
+
+`west patch apply` resolves a patch's `module:` field against the target's
+own `zephyr/module.yml` `name:` — not the west manifest project name. `hal_alif`
+(the west project) declares itself `alif` in `modules/hal/alif/zephyr/module.yml`,
+so `module: hal_alif` on `hal_alif/0001-se-service-add-boot-cpu.patch` and
+`hal_alif/0002-se-service-add-public-send-request.patch` matched nothing and
+both were silently skipped by every `west patch apply` run — with no warning,
+because `west patch` treats an unresolvable module as "nothing to do", not an
+error. This was invisible until now because nothing in CI ever ran
+`west patch apply` before `pr-twister-aen` (#1076): `se_service_boot_cpu()`
+and `se_service_send_request()` only exist via those two patches, and the
+symbols they add were an implicit-function-declaration build error waiting
+to happen the moment anything tried to build `aen-dualcore-master` or
+`se_cryptocell.c` against a workspace that hadn't had them hand-applied out
+of band. Fixed by pointing both entries at `module: alif`.
+
+### Changed — `CONFIG_DCACHE=n` now emits for any cross-core `raw_shmem` carve-out, not only the Ethos-U inference path (#1080 follow-up)
+
+PR #1080 found the hazard but scoped the fix to hand-written `prj.conf`
+lines; `scripts/alp_orchestrate/kconfig.py` still only emitted
+`CONFIG_DCACHE=n` from `_emit_inference`'s Ethos-U branch, so a
+non-inference cross-core project got no help from the generator and had to
+carry the setting by hand — exactly `examples/multicore/mproc-mailbox`'s
+situation, called out in that entry as an artifact of the missing
+`inference:` block. A new `_emit_cross_core_shmem_cache` reads the existing
+`ipc:` schema field instead (`ipc[].kind` / `endpoints` / `cacheable` are
+all pre-existing in `board.schema.json`, no schema change): any core named
+as an endpoint of an `ipc[].kind: raw_shmem` entry (the low-level
+`<alp/mproc.h>` shmem+mailbox primitive, which has no cache-maintenance
+layer) gets `CONFIG_DCACHE=n`, unless the entry opts in to
+`cacheable: true` (the app declaring it will do its own cache ops).
+`kind: mailbox_only` is excluded (no shared memory, nothing to keep
+coherent).
+
+`kind: rpmsg` is excluded too, but **not** because `<alp/rpc.h>` handles
+cache maintenance for it — it doesn't. `cfg->cacheable` is stored on the
+backend struct (`src/backends/rpc/{zephyr,yocto}_drv.c`) and never read
+again; there is no `sys_cache_*`/`arch_dcache_*` call anywhere under `src/`
+or `include/`. A `cacheable: true` rpmsg channel on AEN (e.g.
+`examples/multicore/rpmsg-aen`, `a32_cluster` ↔ `m55_hp`) carries the exact
+same #1080-class hazard today — tracked separately as **#1088**, since
+forcing every rpmsg slice's D-cache off in *this* change would be an
+unreviewed fix for a different code path than the one #1080 root-caused.
+
+Verified non-regressing: `check_emit_snapshots.py`'s fixtures (35 pre-existing
++ 2 new, see below) stay byte-identical for every project that doesn't
+declare a `raw_shmem` entry, and an existing Ethos-U inference project's
+emitted Kconfig is unchanged.
+
+`examples/multicore/mproc-mailbox/board.yaml` now declares the carve-out
+it always had: `ipc: [{kind: raw_shmem, endpoints: [m55_hp, m55_he],
+name: alp_shmem0, carve_out_kb: 4}]` (`alp_shmem0` — not a free-form
+label — is the name `src/backends/mproc/zephyr_drv.c`'s DT-alias lookup
+and both `main.c`s hardcode). `m55_he` is not otherwise overridden in
+`cores:`; the SoM preset's `topology.m55_he` already resolves it to a
+slice for every project regardless (`app: alp-stock-shim`, unchanged —
+`tan build`'s `m55_he` behaviour is not affected by this PR). This carve-out
+resolves `status: blocked` today via `--emit system-manifest` — E1M-AEN801
+has no `memory_map:` base yet, same as every other AEN `ipc:` entry in this
+repo (`rpmsg-aen` is blocked identically) — pending real AEN memory-map
+addresses. The block doesn't affect this example: `main.c`/`peer/main.c`
+open `"alp_shmem0"` by its DT alias wired directly in the board overlay,
+not by the orchestrator's resolved address, and the new Kconfig path reads
+the raw `ipc:` declaration, not the resolved carve-out. Added
+`mproc-mailbox.{system-manifest,build-plan}` to `check_emit_snapshots.py`'s
+fixture set so this path — the only one exercising `raw_shmem` — has
+regression coverage; `build-plan` pins the blocked `<alp/system_ipc.h>`
+stub too.
+
+The hand-written line in `prj.conf` / `peer/prj.conf` stays — removing it
+in the same change that adds the generator path would make a regression
+impossible to attribute to either side; that cleanup is a follow-up once
+the generator path is trusted. Note for that follow-up: `peer/CMakeLists.txt`
+never invokes `alp_project.py` (the peer image builds standalone, per
+README, pending the v0.4 dual-image flow), so deleting `peer/prj.conf`'s
+`CONFIG_DCACHE=n` would silently re-enable the D-cache on that path — the
+generator's `CONFIG_DCACHE=n` only reaches `m55_he` today through the
+orchestrator-driven `tan build` flow (which still targets `alp-stock-shim`,
+not `peer/`), not through the documented standalone `west build peer/`.
+
+### Fixed — four pre-existing AEN build errors surfaced by the new twister-on-real-hardware gate (#1076, #1085)
+
+`examples/aen/**` had never actually been compiled in CI (the `alp-build`
+matrix only emits a manifest; `pr-twister.yml` is `native_sim`-only), so these
+four defects were latent since they were authored. #1085's first
+`--testsuite-root examples/aen` run against the real AEN801 board targets
+errored 6 of 19 built configurations; fixing all four brings that to 0:
+
+- `zephyr/drivers/misc/alif_hwsem/hwsem_alif.c:11` — a stray `/*` inside the
+  file header's block comment (`drivers/misc/*`) tripped `-Werror=comment`.
+  Build-time only; never reachable at runtime. This is the one that mattered
+  most: it blocked `aen-dualcore-he-master` (merged, silicon-proven
+  2026-08-01) from ever building under warnings-as-errors, even though it
+  built fine under a plain `west build`.
+- `examples/aen/aen-dualcore-he-master/src/main.c:84` — the SAME class of bug
+  (a literal `/*` inside a comment, `boards/*.conf`) in a second, unrelated
+  file. This one was masked in the original run: it errors both
+  `dualcore_he_master` roles independently of the hwsem driver above (this
+  example doesn't even compile the hwsem driver), so the initial 6-error count
+  reflects 4 distinct root causes, not 3, even though it arithmetically
+  reconciles either way. Build-time only; never reachable at runtime.
+- `examples/aen/aen-ethernet-link/src/main.c` — `printf("...rx_bytes=%u...")`
+  against `iface->stats.bytes.received`, a `uint64_t` in current Zephyr
+  (`net_stats_bytes`). Fixed with `%" PRIu64 "` (`<inttypes.h>`) rather than a
+  narrowing cast, since the counter is a genuine 64-bit running total. This
+  was a real behavioral bug, not just a build nit: the format/argument-size
+  mismatch is undefined behavior and would have printed a garbage byte count
+  on any build that got far enough to run (masked so far only because the
+  build itself never succeeded). Hits both `ethernet_link` test scenarios
+  (`aen` and `aen.mdio_managed`), which share the same `src/main.c`.
+- `examples/aen/aen-mram-flash-validate/src/main.c` — used the deprecated
+  `FIXED_PARTITION_DEVICE`/`FIXED_PARTITION_OFFSET`/`FIXED_PARTITION_SIZE`
+  macros (`zephyr/include/zephyr/storage/flash_map.h`), which now assert
+  `__DEPRECATED_MACRO` under `-Werror`. Replaced with their current
+  `PARTITION_DEVICE`/`PARTITION_OFFSET`/`PARTITION_SIZE` equivalents.
+  Build-time only.
+
+`python3 zephyr/scripts/twister -p alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he -p alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp --testsuite-root examples/aen`:
+before `0 of 19 executed test configurations passed (0.00%), 13 built (not run), 0 failed, 6 errored`;
+after `0 of 19 executed test configurations passed (0.00%), 19 built (not run), 0 failed, 0 errored`.
+
+### Removed — the HE-master → HP-peer overlap in `aen-dualcore-master`'s docs (superseded by `aen-dualcore-he-master`)
+
+`aen-dualcore-master` is a symmetric app: both boards build the same source,
+and until now its `README.md` also carried the reverse direction's own build
+recipe (a `-DCONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_PEER_IS_HP=y`
+override, hand-paired with `aen-dualcore-probe`'s HP build) and its
+`testcase.yaml` carried a matching `he_role_deferred_hp_peer` scenario. That
+direction now has its own self-contained, silicon-proven example
+(`aen-dualcore-he-master`, added below), which makes the hand-paired recipe a
+second, worse answer to a question the new example already answers -- a
+reader hitting `aen-dualcore-master` first had no signal the dedicated
+example existed (#1082 added a `Related` pointer as a stopgap). The README's
+reverse-direction section and the `he_role_deferred_hp_peer` scenario are
+removed and replaced with a single pointer to `aen-dualcore-he-master`;
+`aen-dualcore-master`'s own direction (HP-master → HE-peer, bench-proven) is
+untouched, as is the app's `main.c`, which is genuinely symmetric and not
+duplicated documentation.
+
+### Added — `aen-dualcore-he-master`, the HE-master → HP-peer example (silicon-proven 2026-08-01)
+
+Every existing AEN dual-core example releases its peer HP-master → HE-peer.
+The reverse direction — HE releases HP — was until now only reachable by
+hand-pairing `aen-dualcore-master`'s HE build with `aen-dualcore-probe`'s HP
+build; this adds it as its own self-contained example. It defaults
+`CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_PEER_IS_HP=y` on the HE board
+target so the deferred-TOC release path (service 500, `["load","boot",
+"deferred"]`) — the only proven way to release an HP peer, per Alif's SE Host
+Services API docs (v1.109.0 p.112/p.115) — is on by construction, not an
+opt-in `-D` flag. `CONFIG_DCACHE=n` ships from the start (PR #1080's finding
+on three sibling dual-core examples: a stale cross-core D-cache line made a
+genuinely advancing peer beacon read as flat).
+
+Silicon-proven on E8 (2026-08-01, `AE822FA0E5597LS0`, cold power-cycle --
+**a J-Link reset-pin reset is not a valid first-light for this app**: on that
+path the SES table read correctly but the HE image never executed,
+`ram_console_buf` stayed uninitialized, beacon all zeros, `CFSR = 0x00000000`,
+no fault): at SES-boot time global HP ITCM `0x50000000` held un-loaded junk
+(`FE8C1E42 7184989D ...`) while HE's `0x58000000` byte-matched its `.bin` --
+direct evidence the SES genuinely skips a deferred entry and service 500
+genuinely places it at runtime. Peer beacon `0x02000010` advanced
+(`B1B10090 000027A6` → `B1B10090 00002CDF`, +8s), `RESULT PASS`. The bench
+runner found no prebuilt artefacts and rebuilt both roles from source,
+reproducing the authoring build's `zephyr.bin` md5s bit-exactly
+(`3023a9d8d2e7d730c41804840f22a291` HE, `359f9618751d4e00bb2682dd8c34f670`
+HP).
+
+### Fixed — completed the p.113→p.112 citation sweep for the M55-HP TCM-invalidation quote (#1081 follow-up)
+
+The "M55-HP core in FUSION REV_Bx devices" `SERVICES_boot_cpu` quote
+(`SE_Host_Services_API_v1.109.0.pdf`) is on printed p.112, not p.113 — p.112
+carries the whole `SERVICES_boot_cpu` description including that sentence;
+p.113 is only the continuation (the two-methods list and parameter table)
+and has no device-scope sentence at all. An earlier pass fixed this in most
+places but missed `src/backends/mproc/alif_se_boot.c` (which also
+self-contradicted, citing p.112 correctly a few lines below the p.113 typo),
+`zephyr/kconfigs/mproc-rpc-usb.kconfig`, `docs/aen-bench-bringup.md` (two
+sites), and this file's own `[v0.15.0]` entry. Citation-only; no behavior
+change.
+
 ## [v0.15.0] - 2026-07-31
+
+### Added — documented `alp_mproc_boot_core()`'s image-residency precondition, and a direction-specific M55-HP erratum (#1070)
+
+`alp_mproc_boot_core()` (Alif SE backend: `se_service_boot_cpu()`, service
+501) releases a peer M55 at `entry_addr` -- per the vendor manual
+(`SE_Host_Services_API_v1.109.0.pdf` p.112) it "does not perform image
+loading, verification, etc., it just boots the core"; residency is the
+caller's responsibility. Bench-measured on E8 silicon (`AE822FA0E5597LS0`,
+2026-07-31): a plain `"flags": ["load"]` ATOC entry works in the
+**HP-master → HE-peer** direction (`uLV`, Dest Addr `0x58000000` populated,
+bytes verified matching, 16/16 PING/PONG) but the same recipe **fails** in
+the **HE-master → HP-peer** direction -- the ATOC still reports `uLV`, but
+the HP peer's ITCM reads as uninitialized SRAM and releasing it locks up
+(`CFSR = 0x00000101`, `PC = 0xEFFFFFFE`).
+
+Root cause is vendor-documented: the SES does place the bytes at
+ATOC-processing time in both directions, but M55-HP's TCM is separately
+invalidated by the reset `SERVICES_boot_cpu()` issues before release. Two
+vendor passages describe this and disagree on device scope -- p.112
+(`SERVICES_boot_cpu`) names "M55-HP core in FUSION REV_Bx devices"; p.115
+(`SERVICES_boot_release_cpu`) names "M55-HP core in Ensemble devices" (E8 is
+Ensemble, so p.115 applies here). The fix for the failing direction is
+deferred ATOC processing -- `"flags": ["load", "boot", "deferred"]`, which
+defers the SES release and lets the host reload + release at runtime with
+`SERVICES_boot_process_toc_entry` (service 500) -- proven with an RPMsg link
+carrying 495 consecutive PING/PONG round-trips over 4m11s; tracked on
+`feat/aen-mproc-deferred-toc-boot`. Every shipped AEN dual-core example uses
+the working HP-master → HE-peer direction, so this backend still rides
+service 501 as-is.
+
+The precondition and the erratum are now documented as `@pre` on the public
+API (`include/alp/mproc.h`, kept vendor-neutral), as a full bench writeup
+with both vendor-doc quotes on the backend
+(`src/backends/mproc/alif_se_boot.c`), and in `docs/aen-se-services.md`
+§2.2. No call-shape or behavior change -- documentation only. Left open:
+whether `entry_addr` is honoured by service 501 at all was not isolated by
+either bench run, since the working entry point came from the ATOC itself
+in both cases.
+
+### Fixed — three AEN dual-core examples SKIPped on E8, and five more were silently exposed to the same D-cache hazard, because they didn't set `CONFIG_DCACHE=n` on their own
+
+A bench sweep of all seven `examples/aen/*` dual-core apps on E8 found an
+exact 4/7-PASS split along one config symbol: `aen-dualcore-doorbell`,
+`aen-dualcore-master`, and `aen-dualcore-probe` were the only three that did
+not set `CONFIG_DCACHE=n`, and all three `RESULT SKIP`, always with the
+peer's counter/beacon provably advancing over SWD while software on the
+other core never saw the update — textbook cross-core D-cache incoherence on
+the shared global-SRAM0 mailbox/beacon, the same class this repo already
+documents for the eth/NPU SRAM0 carve-outs. The other four
+(`aen-rpc-pingpong`, `aen-dualcore-ipc`, `aen-alp-rpc`, `aen-hp-core-smoke`)
+already carried `CONFIG_DCACHE=n` and already passed. Adding the same line to
+the remaining three `prj.conf`s took the suite from 4/7 to 7/7 on silicon,
+with no app-logic change — the apps were correct all along; the D-cache was
+hiding the peer's write from software while the debug AP, which bypasses the
+cache, saw it advancing the whole time.
+
+Review turned up five more examples exposed to the identical hazard, just not
+yet caught by the sweep because they only pass today when built through
+`scripts/bench/aen/aen-bench-shared.conf`, which layers `CONFIG_DCACHE=n` in
+via `-DEXTRA_CONF_FILE` — a plain `west build` of any of them leaves the
+hazard live: `examples/multicore/mproc-mailbox` (a real M55-HP↔HE mailbox
+over `<alp/mproc.h>`, `prj.conf` intentionally empty — its `board.yaml` has no
+inference block, so `scripts/alp_orchestrate/kconfig.py` never emits the
+setting for it), and four SRAM0-beacon apps read raw over the AXI-AP
+(`aen-power-smoke`, `aen-power-iwic`, `aen-tz-secure-log-probe`,
+`aen-tz-secure-log-append`) — the same "cached beacon write unseen by the
+AXI-AP read" hazard `aen-hp-core-smoke/prj.conf` already names. All five now
+set `CONFIG_DCACHE=n` in their own `prj.conf`, making the setting
+flow-independent instead of an artifact of one bench script.
+
+Also corrected: all three dual-core apps' `RESULT SKIP` text used to assert
+the peer "never ran" / "no evidence HP is running" / "peer image
+absent/not running" — measurably false per this sweep, the peer was running
+every time and its beacon genuinely advancing; only the D-cache was hiding
+it from this core's own read. Each message now states what was locally
+observed (the beacon/count never advanced within the bound) without
+asserting the wrong cause. `aen-dualcore-probe`'s README/comment claim that
+its result "matches the single-core-boot finding" is likewise corrected —
+that finding is overturned by this same sweep (both `["load","boot"]` ATOC
+entries reported `uLVB`, both cores ran, both beacons advanced) — and marked
+**SUPERSEDED 2026-08-01** with the prior finding kept as dated history
+rather than deleted.
+
+### Fixed — five AEN examples treated ALP_ERR_NOSUPPORT as an unreachable-in-practice skip (#1071)
+
+`aen-alp-rpc`, `aen-dualcore-doorbell`, `aen-dualcore-ipc`, `aen-dualcore-master`,
+and `aen-rpc-pingpong` each gated `RESULT SKIP` on `alp_mproc_boot_core()`
+returning `ALP_ERR_NOSUPPORT` (`rc=-6`) and told the reader, in the README and
+in a `main.c` comment, that the Secure Enclave boot authority itself was
+refusing to release the peer M55 -- a bench/silicon limitation, not a bug in
+the app. That was wrong twice over. First, the mechanism: `se_rc_to_alp()`
+(`src/backends/mproc/alif_se_boot.c`) never maps a real SE error to `-6` for
+`ALP_CORE_M55_HE`, and the SE boot path itself is bench-proven working on E8
+silicon -- a peer M55 started and ran an RPMsg link for 495 consecutive
+PING/PONG round-trips. Second, and more importantly: in a build of these five
+examples specifically, `ALP_ERR_NOSUPPORT` isn't just unlikely, it's
+unreachable. All five set `CONFIG_HAS_ALIF_SE_SERVICES=y` and ship no
+`native_sim` overlay; `CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE` defaults `y` under
+that Kconfig; and `sw_fallback.c`'s wildcard `mproc_boot` backend -- the only
+other source of `-6` on a Zephyr build, since it's compiled in unconditionally
+and matches every `silicon_ref` at priority 0 -- is always beaten by the SE
+backend's exact `alif:ensemble:e8` match at priority 100. So `-6` on these
+boards, in a correct build, cannot happen: a `-6` actually observed on a bench
+means the boot path fell out of the build (SE backend delinked, or the
+silicon-ref stopped matching) -- exactly the regression #1071 is about, and
+exactly what a SKIP-and-pass verdict was hiding.
+
+Each `main.c` deletes the `ALP_ERR_NOSUPPORT` branch outright: any nonzero
+`alp_mproc_boot_core` rc now falls through the existing `!= ALP_OK` check and
+reports `RESULT FAIL`, matching what the public `<alp/mproc.h>` contract
+already documents `ALP_ERR_NOSUPPORT` as ("no boot authority for `core` in
+this build") without asserting an untrue single cause. Each README's
+Verdicts section drops the `RESULT SKIP` bullet for `ALP_ERR_NOSUPPORT`
+accordingly and explains why it's unreachable in this configuration, citing
+the `<alp/mproc.h>` contract rather than internal backend source paths.
+
+### Added — a deferred-TOC release path for the AEN SE peer-core boot backend, the only way to release an M55-HP peer
+
+`alp_mproc_boot_core()`'s default release (`se_service_boot_cpu()`, service
+501) only starts a core at an address; the image has to already be in TCM
+from the ATOC's power-on `["load","boot"]` step. Alif's own SE Host Services
+API docs document that for the M55-HP core specifically, the reset this
+release performs invalidates the TCM the power-on load had already filled —
+load-then-reset is the failing order; their own remedy is reset → reload →
+release. Bench-measured on E8 (2026-07-31, HE master releasing an HP peer
+via 501): `CFSR=0x00000101` (IACCVIOL+IBUSERR), `PC=0xEFFFFFFE`. The same
+501 release is bench-proven fine for an M55-HE peer, in two independent
+sessions (2026-06-17, 2026-08-01) — the defect is directional, not general.
+
+Two new Kconfig symbols in `zephyr/kconfigs/mproc-rpc-usb.kconfig`:
+`CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_PEER_IS_HP` names which core
+a build's `alp_mproc_boot_core()` releases; when the peer is HP it now
+defaults ON (no working legacy HP-peer deployment exists to preserve) and
+routes the release through `se_service_process_toc_entry()` (service 500)
+against an ATOC entry flagged `["load","boot","deferred"]` instead — per the
+SETOOLS guide, deferred means no load at boot time at all, so service 500
+does the load itself at runtime, strictly AFTER the reset its own release
+performs, which is why the image survives it.
+`CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_ENTRY_ID` names the ATOC
+entry key (default `"ALP-HP"`/`"ALP-HE"` matching the peer). When the peer
+is HE the default stays OFF (501 already proven fine there; flipping it
+would require every existing HE-peer ATOC to be reflashed with the
+`"deferred"` flag). `alp_mproc_boot_core()`'s signature and every other
+default are unchanged. `src/backends/mproc/alif_se_boot.c` rejects a call
+naming any core other than the configured peer with `ALP_ERR_NOSUPPORT`
+(the documented meaning of "a core the platform boots by other means")
+instead of silently releasing the configured entry regardless of which core
+was asked for.
+
+`se_service_process_toc_entry()` ships unpatched in the west-pinned hal_alif
+v2.3.0 module — no new hal_alif patch needed. New bench tooling
+`scripts/bench/aen/flash-run-dualcore.sh` emits + flashes the two-entry
+dual-core ATOC over the SE-UART. See `docs/aen-bench-bringup.md` § Flow A —
+Dual-core deferred-TOC boot for the full asymmetry table and the two SE Host
+Services API passages (p.112, p.115) this is built on.
 
 ### Fixed — a scaffolded AEN Zephyr app linked at the MRAM base, so no flash flow accepted it (#1067)
 

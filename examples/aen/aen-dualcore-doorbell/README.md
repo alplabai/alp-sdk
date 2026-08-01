@@ -40,6 +40,17 @@ This is the working substrate for HE↔HP IPC / a dual-core RPC.
 Recipe: dual ATOC with HP-APP `["load","boot"]` @0x50000000 + HE-APP `["load"]`
 @0x58000000; `app-gen-toc` + `app-write-mram`. Restore the canonical slot0 after.
 
+## One correctness requirement (bench-found)
+
+**`CONFIG_DCACHE=n`.** `DB_BEACON`/`PEER_DB_BEACON` are read/written by both
+cores, each with its own D-cache → cross-core reads saw stale lines (the
+verdict window saw HP's received-count and HE's sent-count as equal and
+advancing over SWD while the app itself never observed the update, i.e.
+`RESULT SKIP`). Disabling the D-cache makes the shared SRAM0 region coherent
+(the AEN-SRAM precedent). A cache-on variant would `sys_cache_data_flush_range`
+on the writer + `invd_range` on the reader, on silicon where the D-cache can be
+enabled at all.
+
 ## Verdicts, timeouts, and the HE↔HP boot block on this bench
 
 Both HP and HE hold their verdict to a bounded window rather than looping
@@ -50,18 +61,24 @@ before dropping into its trailing idle/ring loop:
   doorbell actually received on MHU-1 @`0x400A0000` (or, on HE, HP's
   cross-read received-count was observed to advance after a ring).
 - `RESULT SKIP: dualcore-doorbell -- ...` — the peer never showed within a
-  bounded window: the boot authority reported `ALP_ERR_NOSUPPORT` and HE was
-  never released, HE released but never rang, HE's own MHU-1 sender link
-  never came ready (`ACCESS_READY`), or HP never saw HE's ring — states what
-  was locally proven, not a failure of this app's code.
+  bounded window: no doorbell arrived within the window, HE's own MHU-1
+  sender link never came ready (`ACCESS_READY`), or HP never saw HE's ring —
+  states what was locally proven, not a failure of this app's code.
 - `RESULT FAIL: alp_mproc_boot_core rc=%d` — HP only: a real local error,
-  `alp_mproc_boot_core` returned an unexpected rc (neither `ALP_OK` nor
-  `ALP_ERR_NOSUPPORT`).
+  `alp_mproc_boot_core` returned an unexpected rc (`ALP_ERR_NOSUPPORT`
+  included -- see below).
 
-On THIS bench the HE↔HP release path is known-blocked and
-`alp_mproc_boot_core` returns `ALP_ERR_NOSUPPORT` (`rc=-6`) — HP reports that
-as `RESULT SKIP`, not `RESULT FAIL`: the boot authority itself says it can't
-release HE here, which is a bench/silicon limitation, not a bug in this app.
+This build ships `CONFIG_HAS_ALIF_SE_SERVICES=y` and no `native_sim` overlay,
+so `alp_mproc_boot_core()` always resolves to the E8 SE backend for
+`ALP_CORE_M55_HE` — the `<alp/mproc.h>` contract's `ALP_ERR_NOSUPPORT` case
+("no boot authority for `core` in this build: wrong SoM, `native_sim`, or a
+core the platform boots by other means") is not reachable in this
+configuration. So HP treats *any* nonzero `alp_mproc_boot_core` rc, including
+`ALP_ERR_NOSUPPORT`, as `RESULT FAIL`, not a skip: on these boards a `-6`
+here would mean the boot path fell out of the build (e.g. the SE backend lost
+the link, or the silicon-ref stopped matching) — a regression this app must
+surface, not paper over.
+
 Every wait (HP's receive verdict window: 3000 ms; HE's MHU-1 sender-link-ready
 wait: 3000 ms; HE's ring-and-cross-check window: 3000 ms, all polled every
 20 ms) is bounded, so a genuinely absent peer or a sender link that never

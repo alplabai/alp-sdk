@@ -4,7 +4,7 @@
 before repointing reader-1 / v2 migration / retirement. Emit-parity held at
 OK 40/40 through every landed commit. Golden was NOT edited.**
 
-## Commits (branch feat/610-ws6c-phase23, on worktree /home/caner/alp-ws6c-p23-wt)
+## Commits (branch feat/610-ws6c-phase23, on worktree /home/<user>/alp-ws6c-p23-wt)
 
 - `ed485d06` — schema: library-v1 carries `integration.zephyr.hw_backends` (item a)
 - `c5fae03e` — fold: 23 `library-profiles/<token>/hw-backends.yaml` → manifest

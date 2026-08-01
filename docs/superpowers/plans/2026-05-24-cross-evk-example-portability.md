@@ -84,7 +84,7 @@ def test_board_dac0_is_present() -> None:
 
 - [ ] **Step 2: Run it; verify it fails**
 
-Run: `cd /mnt/c/Users/caner/Documents/GitHub/alp-sdk && PYTHONPATH=$PWD/scripts python3 -m pytest tests/scripts/test_board_alias_parity.py -v`
+Run: `cd /mnt/c/Users/<user>/Documents/GitHub/alp-sdk && PYTHONPATH=$PWD/scripts python3 -m pytest tests/scripts/test_board_alias_parity.py -v`
 Expected: FAIL — `no BOARD_* aliases found` (the generator emits none yet).
 
 - [ ] **Step 3: Teach `gen_board_header.py` to emit the alias block**
@@ -165,7 +165,7 @@ In `metadata/boards/e1m-evk.yaml`, add the **same** `board_alias:` values to the
 
 - [ ] **Step 5: Regenerate the headers**
 
-Run: `cd /mnt/c/Users/caner/Documents/GitHub/alp-sdk && python3 scripts/gen_board_header.py`
+Run: `cd /mnt/c/Users/<user>/Documents/GitHub/alp-sdk && python3 scripts/gen_board_header.py`
 Expected: `wrote include/alp/boards/alp_e1m_evk_routes.h ...` and `... alp_e1m_x_evk_routes.h ...`. The two headers gain the "Portable cross-EVK aliases" block.
 
 - [ ] **Step 6: Run the parity test; verify it passes**
@@ -409,7 +409,7 @@ tests:
 
 Run the full twister gate (WSL; do NOT pipe through `tail`):
 ```
-wsl -d Ubuntu -- bash -lc 'cd /home/alplab/zephyrproject && export ZEPHYR_BASE=/home/alplab/zephyrproject/zephyr EXTRA_ZEPHYR_MODULES=/mnt/c/Users/caner/Documents/GitHub/alp-sdk ZEPHYR_TOOLCHAIN_VARIANT=host && python3 zephyr/scripts/twister --testsuite-root /mnt/c/Users/caner/Documents/GitHub/alp-sdk/examples -p native_sim/native/64 -s alp_sdk.example.dac_waveform.e1m_x_evk -s alp_sdk.example.dac_waveform.e1m_evk -O /tmp/tw_dac'
+wsl -d Ubuntu -- bash -lc 'cd /home/<user>/zephyrproject && export ZEPHYR_BASE=/home/<user>/zephyrproject/zephyr EXTRA_ZEPHYR_MODULES=/mnt/c/Users/<user>/Documents/GitHub/alp-sdk ZEPHYR_TOOLCHAIN_VARIANT=host && python3 zephyr/scripts/twister --testsuite-root /mnt/c/Users/<user>/Documents/GitHub/alp-sdk/examples -p native_sim/native/64 -s alp_sdk.example.dac_waveform.e1m_x_evk -s alp_sdk.example.dac_waveform.e1m_evk -O /tmp/tw_dac'
 ```
 Expected in `/tmp/tw_dac/twister.json`: both scenarios `passed` (build_only), 0 errored. Both prove `BOARD_DAC0` resolves under each board define.
 

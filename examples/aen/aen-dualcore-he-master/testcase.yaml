@@ -1,0 +1,53 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# MANUAL-INVOCATION regression, not a CI gate: pr-twister.yml is the only
+# twister job any alp-sdk workflow runs, and it passes -p native_sim/native/64
+# only -- no workflow ever invokes twister with an AEN board platform, so BOTH
+# scenarios below are always statically filtered out of every automated run
+# (like every other examples/aen/*/testcase.yaml in the tree). Run them by
+# hand:
+#   west twister -p alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
+#     -s alp_sdk.examples.aen.dualcore_he_master.he_master
+#   west twister -p alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp \
+#     -s alp_sdk.examples.aen.dualcore_he_master.hp_peer
+#
+# Issue #1076 tracks the broader gap (no AEN board is ever twister-discovered
+# by CI).
+#
+# NOTE: the platform id below MUST match the board .yaml `identifier` exactly
+# or twister silently skips the scenario.
+
+sample:
+  name: aen-dualcore-he-master
+  description: |
+    HE-master -> HP-peer direction of B1 Option B, self-contained (unlike
+    aen-dualcore-master, which needs aen-dualcore-probe hand-paired in for
+    this direction). Both boards build this SAME app; role is picked by
+    CONFIG_BOARD_* (see main.c). The HE build is the only in-tree example
+    that defaults CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_PEER_IS_HP=y
+    from its own board .conf rather than an ad hoc extra_configs override.
+
+tests:
+  alp_sdk.examples.aen.dualcore_he_master.he_master:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - multicore
+      - rtss-he
+      - mproc-deferred-toc
+    build_only: true   # release-at-runtime is a Flow-A ATOC flash, not a CI run.
+
+  alp_sdk.examples.aen.dualcore_he_master.hp_peer:
+    platform_allow:
+      - alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - multicore
+      - rtss-hp
+      - mproc-deferred-toc
+    build_only: true   # this role never boots until the HE master un-defers it.

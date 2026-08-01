@@ -80,6 +80,13 @@ CASES = [
     ("rpmsg-imx93.build-plan",      ORCH, "examples/multicore/rpmsg-imx93/board.yaml",          "build-plan"),
     ("hetero-offload.system-manifest", ORCH, "examples/multicore/heterogeneous-offload/board.yaml", "system-manifest"),
     ("hetero-offload.build-plan",      ORCH, "examples/multicore/heterogeneous-offload/board.yaml", "build-plan"),
+    # `raw_shmem` ipc[] coverage (kconfig.py's `_emit_cross_core_shmem_cache`,
+    # #1080 follow-up) -- build-plan embeds each slice's rendered alp.conf, so
+    # this is the one fixture that would catch a regression on the
+    # CONFIG_DCACHE=n-for-raw_shmem path; every other CASES entry above
+    # declares only `rpmsg`/no `ipc:` at all.
+    ("mproc-mailbox.system-manifest", ORCH, "examples/multicore/mproc-mailbox/board.yaml", "system-manifest"),
+    ("mproc-mailbox.build-plan",      ORCH, "examples/multicore/mproc-mailbox/board.yaml", "build-plan"),
     # The remaining two tests/parity/oracle/*.build-plan.json fixtures
     # (seam-1's frozen 97ad481b oracle) that weren't otherwise covered by a
     # build-plan case above -- added so the seam-1 retune (dropping

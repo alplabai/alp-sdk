@@ -33,7 +33,7 @@
 
 **Pre-flight (run once before Task 1):**
 ```bash
-cd "E:/GitHub/alp-sdk"
+cd "<alp-sdk>"
 git rev-parse --abbrev-ref HEAD     # expect: feat/gd32-flash-release
 git status --short                  # expect: clean
 git submodule status vendors/gd32_firmware_library/upstream   # expect: a commit + (v1.5.0)
@@ -58,7 +58,7 @@ git submodule status vendors/gd32_firmware_library/upstream   # expect: a commit
 
 Run:
 ```bash
-cd "E:/GitHub/alp-sdk"
+cd "<alp-sdk>"
 git fetch origin
 git merge-base dev origin/feat/gd32-transport-bringup
 git diff --stat 0977435..dev -- firmware/gd32-bridge/ docs/gd32-bridge.md

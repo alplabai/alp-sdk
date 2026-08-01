@@ -242,7 +242,7 @@ Tier 1 sx1262), `nrf24l01`, `dhtxx`, `pcf8574`, `ssd1351`,
     the scope.
 
   - **No local paths or SoM design leaks.**  Never write
-    `OneDrive/...` or `C:\Users\caner\...` paths into
+    `OneDrive/...` or `C:\Users\<user>\...` paths into
     tracked files.  Minimise SoM schematic-level integration
     detail in public docs; route detail-rich content into
     the private `e1m-som-metadata` repo.

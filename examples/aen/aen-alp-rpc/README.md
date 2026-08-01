@@ -73,18 +73,25 @@ Both HP and HE always print exactly one `RESULT` line before `main()` returns
   on HE, every ping received was queued back to HP -- `alp_rpc_send()`
   returning `ALP_OK` only means the frame reached the local vring, HE never
   observes whether HP actually accepted it).
-- `RESULT SKIP: alp-rpc -- ...` — the peer never showed within a bounded
-  window (boot never happened, or the channel opened/subscribed locally but
-  the peer never sent anything) — states what was locally proven, not a
-  failure of this app's code.
+- `RESULT SKIP: alp-rpc -- ...` — HE was released but the peer never showed
+  within a bounded window (the channel opened/subscribed locally but the
+  peer never sent anything) — states what was locally proven, not a failure
+  of this app's code.
 - `RESULT FAIL: alp-rpc -- ...` — a real local error: `alp_mproc_boot_core`
   (HP) returned an unexpected rc, `alp_rpc_open`/`alp_rpc_subscribe` failed,
   or every local `alp_rpc_send` failed.
 
-On THIS bench the HE<->HP release path is known-blocked and
-`alp_mproc_boot_core` returns `ALP_ERR_NOSUPPORT` (`rc=-6`) — HP reports that
-as `RESULT SKIP`, not `RESULT FAIL`: the boot authority itself says it can't
-release HE here, which is a bench/silicon limitation, not a bug in this app.
+This build ships `CONFIG_HAS_ALIF_SE_SERVICES=y` and no `native_sim` overlay,
+so `alp_mproc_boot_core()` always resolves to the E8 SE backend for
+`ALP_CORE_M55_HE` — the `<alp/mproc.h>` contract's `ALP_ERR_NOSUPPORT` case
+("no boot authority for `core` in this build: wrong SoM, `native_sim`, or a
+core the platform boots by other means") is not reachable in this
+configuration. So HP treats *any* nonzero `alp_mproc_boot_core` rc, including
+`ALP_ERR_NOSUPPORT`, as `RESULT FAIL`, not a skip: on these boards a `-6`
+here would mean the boot path fell out of the build (e.g. the SE backend lost
+the link, or the silicon-ref stopped matching) — a regression this app must
+surface, not paper over.
+
 Every wait (the NS-bind settle window: 1500 ms; HP's round-drive grace window:
 5 extra heartbeats; HE's serve window: 3000 ms) is bounded so a genuinely
 absent peer produces a verdict instead of a hang. The verdict is also

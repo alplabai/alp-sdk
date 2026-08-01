@@ -1,0 +1,226 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# AEN801 real-silicon twister gate (issue #1076).
+#
+# The problem this closes: 25 of examples/aen/**'s testcase.yaml files
+# name AEN board targets in platform_allow (alp_e1m_aen801_m55_he/... and
+# /_hp/...). pr-twister.yml's shards run `-p native_sim/native/64` only
+# (by design -- see that file's own header comment: it deliberately skips
+# the Zephyr SDK to dodge a disk-space failure mode), so every AEN-only
+# scenario is statically filtered out of that gate on every PR. Nothing
+# else picks up the slack: pr-alp-build.yml's AEN jobs only emit a
+# system-manifest (continue-on-error, no west build/cmake/ninja), and the
+# only real AEN-board compile in CI was one path-gated example
+# (pr-renode-aen-smoke.yml). This job runs twister itself against the two
+# AEN801 board targets so those 25 scenarios actually build.
+#
+# New workflow, not a pr-twister.yml shard: that file's shards are
+# ZEPHYR_TOOLCHAIN_VARIANT=host / native_sim-only on purpose (see its
+# header comment) precisely to avoid installing the ~1.5 GB Zephyr SDK.
+# An AEN801 build is a real arm-zephyr-eabi cross-compile -- adding that
+# to a twister-shard job would reintroduce the exact disk-budget risk
+# that design note exists to avoid, for every PR, not just AEN ones.
+# A sibling job is the wrong shape for a toolchain the other shards must
+# never carry. The Zephyr SDK install recipe below is copied verbatim
+# from pr-renode-aen-smoke.yml / pr-getting-started-aen801.yml (the two
+# workflows that already do a real AEN801 cross-compile in CI) rather
+# than re-invented here.
+#
+# ADVISORY, not required: a local run of the exact command below (see
+# issue #1076) selected 29 scenarios (58 configurations), with 19 left
+# after platform_allow filtering -- 13 built clean, 6 errored on
+# PRE-EXISTING bugs this gate is the first thing to ever compile far
+# enough to see (a "/*" within a comment in
+# zephyr/drivers/misc/alif_hwsem/hwsem_alif.c, a %u/uint64_t format
+# mismatch in aen-ethernet-link, and a deprecated-macro error in
+# aen-mram-flash-validate -- see the linked issue for the full list).
+# A brand-new gate over previously-unbuilt code cannot be required from
+# its first PR without instantly reddening unrelated work; promote it
+# once those pre-existing failures are fixed and it has run clean across
+# a handful of AEN-touching PRs (same graduation criteria as
+# pr-renode-aen-smoke.yml).
+#
+# Two known gaps this job does NOT paper over (tracked, not fixed here --
+# neither currently has a testcase.yaml, so neither is selected today):
+#   - aen-npu-inference* (the tflite-micro/Ethos-U family) will need
+#     `ethos-u-vela` on PATH once it gains a testcase.yaml -- tflite-micro
+#     and hal_ethos_u are already unconditional west.yml groups, so no
+#     manifest change, just a `pip install ethos-u-vela` step here.
+#   - aen-mcuboot-smoke will need `sysbuild: true` in its own
+#     testcase.yaml entry to build at all (a sysbuild property, not
+#     something this workflow can supply).
+# Both belong to the separate 42-missing-testcase.yaml follow-on this
+# gate exists to make worth doing, not to this PR.
+
+name: pr-twister-aen
+
+on:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - 'examples/aen/**'
+      - 'zephyr/boards/alp/e1m_aen801_m55_he/**'
+      - 'zephyr/boards/alp/e1m_aen801_m55_hp/**'
+      - 'src/backends/mproc/**'
+      - 'src/backends/soc_info/alif_se.c'
+      - 'west.yml'
+      - 'metadata/toolchains.json'
+      - '.github/workflows/pr-twister-aen.yml'
+  push:
+    branches: [main, dev]
+    paths:
+      - 'examples/aen/**'
+      - 'zephyr/boards/alp/e1m_aen801_m55_he/**'
+      - 'zephyr/boards/alp/e1m_aen801_m55_hp/**'
+      - 'src/backends/mproc/**'
+      - 'src/backends/soc_info/alif_se.c'
+      - 'west.yml'
+      - 'metadata/toolchains.json'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  twister-aen:
+    name: twister · AEN801 (M55-HE + M55-HP)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      ZEPHYR_TOOLCHAIN_VARIANT: zephyr
+
+    steps:
+      - name: Checkout alp-sdk
+        uses: actions/checkout@v6
+        with:
+          path: alp-sdk
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          # Repo is checked out under alp-sdk/ (path:), but setup-python (a
+          # uses: step) resolves python-version-file from GITHUB_WORKSPACE.
+          python-version-file: alp-sdk/.python-version
+
+      - name: Install host build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+              ninja-build gperf ccache dfu-util device-tree-compiler \
+              python3-dev python3-pip python3-setuptools python3-wheel \
+              libffi-dev libssl-dev xz-utils file make gcc \
+              ca-certificates curl gnupg
+
+      - name: Install west + Python deps
+        run: pip3 install west jsonschema pyyaml
+
+      # Zephyr workspace lives next to alp-sdk.  bootstrap.sh is
+      # idempotent -- mirrors pr-renode-aen-smoke.yml / pr-alp-build.yml /
+      # pr-twister.yml.  Unlike pr-twister.yml's temp `west init` (plain
+      # Zephyr only, no hal_alif -- native_sim doesn't need it), this uses
+      # alp-sdk's own manifest so hal_alif (an AEN801 cross-build
+      # dependency) lands as a sibling module too.
+      - name: Bootstrap Zephyr workspace
+        working-directory: ${{ github.workspace }}/alp-sdk
+        run: bash scripts/bootstrap.sh
+
+      # bootstrap.sh does NOT apply zephyr/patches.yml (`west patch apply` is
+      # a separate, documented manual step -- see docs/aen-bench-bringup.md
+      # §3). The mproc/SE-boot examples this job builds pull in hal_alif's
+      # se_service.c, which calls ipm_poll_out()/ipm_poll_in() -- fields
+      # zephyr/patches/zephyr/0002-ipm-add-poll-out-poll-in.patch adds to
+      # upstream Zephyr's ipm_driver_api; vanilla v4.4.1 doesn't have them.
+      # Skipping this step is what a clean-checkout CI run (unlike a
+      # long-lived dev workspace that already carries the patch applied,
+      # uncommitted, from earlier bring-up work) exposes: a build error on
+      # `.poll_out`/`.poll_in` with no member by that name.
+      - name: west patch apply (zephyr/patches.yml)
+        working-directory: ${{ github.workspace }}/alp-sdk
+        run: |
+          set -euo pipefail
+          west patch apply
+
+      # twister itself (not just `west build`) needs Zephyr's full Python
+      # dependency set under the runner's hosted interpreter -- e.g.
+      # requirements-run-test.txt's `natsort` (twisterlib/hardwaremap.py).
+      # requirements-base.txt (what pr-renode-aen-smoke.yml installs for its
+      # plain `west build`, no twister) is NOT enough here and fails at
+      # import before a single scenario is selected. pr-twister.yml already
+      # runs twister successfully in CI with this exact install -- copied
+      # verbatim rather than guessing a requirements file name.
+      - name: pip install Zephyr requirements
+        run: |
+          set -euo pipefail
+          pip3 install -r "${GITHUB_WORKSPACE}/zephyr/scripts/requirements.txt"
+
+      # metadata/toolchains.json (issue #949 item 3) is the single source
+      # for the pinned Zephyr SDK version/URL/sha256 -- scripts/
+      # check_toolchain_lock.py gates this file staying in lockstep with it.
+      - name: Read Zephyr SDK toolchain pin (metadata/toolchains.json)
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          python3 -c '
+          import json
+          d = json.load(open("alp-sdk/metadata/toolchains.json"))
+          sdk = d["zephyrSdk"]
+          art = next(a for a in sdk["artifacts"] if a["host"] == "linux-x86_64" and a["component"] == "minimal-sdk")
+          version = sdk["version"]
+          url = sdk["baseUrl"] + art["filename"]
+          sha256 = art["sha256"]
+          print(f"ZEPHYR_SDK_VERSION={version}")
+          print(f"ZEPHYR_SDK_URL={url}")
+          print(f"ZEPHYR_SDK_SHA256={sha256}")
+          ' >> "$GITHUB_ENV"
+
+      # Both AEN801 board targets (M55-HE and M55-HP) are real
+      # arm-zephyr-eabi cross builds, unlike the native_sim twister gate.
+      - name: Install Zephyr SDK (arm-zephyr-eabi)
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/zephyr-sdk.tar.xz "${ZEPHYR_SDK_URL}"
+          ACTUAL_SHA256="$(sha256sum /tmp/zephyr-sdk.tar.xz | awk '{print $1}')"
+          if [ "${ACTUAL_SHA256}" != "${ZEPHYR_SDK_SHA256}" ]; then
+            echo "::error::sha256 mismatch for zephyr-sdk-${ZEPHYR_SDK_VERSION}_linux-x86_64_minimal.tar.xz: expected ${ZEPHYR_SDK_SHA256}, got ${ACTUAL_SHA256}"
+            exit 1
+          fi
+          mkdir -p "$HOME/zephyr-sdk"
+          tar -xJf /tmp/zephyr-sdk.tar.xz -C "$HOME/zephyr-sdk" --strip-components=1
+          "$HOME/zephyr-sdk/setup.sh" -t arm-zephyr-eabi -c
+          echo "ZEPHYR_SDK_INSTALL_DIR=$HOME/zephyr-sdk" >> "$GITHUB_ENV"
+
+      # Run twister against both AEN801 board targets, scoped to
+      # examples/aen -- the 25 testcase.yaml files whose platform_allow
+      # names an AEN target are the entire point; nothing outside that
+      # tree is in scope for this job.
+      - name: twister · AEN801 (M55-HE + M55-HP) on examples/aen
+        working-directory: ${{ github.workspace }}
+        env:
+          ZEPHYR_BASE: ${{ github.workspace }}/zephyr
+          EXTRA_ZEPHYR_MODULES: ${{ github.workspace }}/alp-sdk
+        run: |
+          python3 zephyr/scripts/twister \
+            -p alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
+            -p alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/aen" \
+            --inline-logs \
+            --no-detailed-test-id
+
+      # Persist the twister REPORTS regardless of pass/fail, same
+      # rationale (and same NOT-the-whole-twister-out/-tree caveat) as
+      # pr-twister.yml.
+      - name: Upload twister reports artefact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: twister-out-aen
+          path: |
+            twister-out/*.json
+            twister-out/*.xml
+            twister-out/*.log
+          retention-days: 14
+          if-no-files-found: ignore
