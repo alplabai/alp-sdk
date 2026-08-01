@@ -5,7 +5,42 @@ All notable changes to the Alp SDK are documented here.  Format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
-## [Unreleased] - v0.15.0 candidate
+## [Unreleased] - v0.16.0 candidate
+
+## [v0.15.0] - 2026-07-31
+
+### Fixed — five AEN examples treated ALP_ERR_NOSUPPORT as an unreachable-in-practice skip (#1071)
+
+`aen-alp-rpc`, `aen-dualcore-doorbell`, `aen-dualcore-ipc`, `aen-dualcore-master`,
+and `aen-rpc-pingpong` each gated `RESULT SKIP` on `alp_mproc_boot_core()`
+returning `ALP_ERR_NOSUPPORT` (`rc=-6`) and told the reader, in the README and
+in a `main.c` comment, that the Secure Enclave boot authority itself was
+refusing to release the peer M55 -- a bench/silicon limitation, not a bug in
+the app. That was wrong twice over. First, the mechanism: `se_rc_to_alp()`
+(`src/backends/mproc/alif_se_boot.c`) never maps a real SE error to `-6` for
+`ALP_CORE_M55_HE`, and the SE boot path itself is bench-proven working on E8
+silicon -- a peer M55 started and ran an RPMsg link for 495 consecutive
+PING/PONG round-trips. Second, and more importantly: in a build of these five
+examples specifically, `ALP_ERR_NOSUPPORT` isn't just unlikely, it's
+unreachable. All five set `CONFIG_HAS_ALIF_SE_SERVICES=y` and ship no
+`native_sim` overlay; `CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE` defaults `y` under
+that Kconfig; and `sw_fallback.c`'s wildcard `mproc_boot` backend -- the only
+other source of `-6` on a Zephyr build, since it's compiled in unconditionally
+and matches every `silicon_ref` at priority 0 -- is always beaten by the SE
+backend's exact `alif:ensemble:e8` match at priority 100. So `-6` on these
+boards, in a correct build, cannot happen: a `-6` actually observed on a bench
+means the boot path fell out of the build (SE backend delinked, or the
+silicon-ref stopped matching) -- exactly the regression #1071 is about, and
+exactly what a SKIP-and-pass verdict was hiding.
+
+Each `main.c` deletes the `ALP_ERR_NOSUPPORT` branch outright: any nonzero
+`alp_mproc_boot_core` rc now falls through the existing `!= ALP_OK` check and
+reports `RESULT FAIL`, matching what the public `<alp/mproc.h>` contract
+already documents `ALP_ERR_NOSUPPORT` as ("no boot authority for `core` in
+this build") without asserting an untrue single cause. Each README's
+Verdicts section drops the `RESULT SKIP` bullet for `ALP_ERR_NOSUPPORT`
+accordingly and explains why it's unreachable in this configuration, citing
+the `<alp/mproc.h>` contract rather than internal backend source paths.
 
 ### Added — a deferred-TOC release path for the AEN SE peer-core boot backend, the only way to release an M55-HP peer
 

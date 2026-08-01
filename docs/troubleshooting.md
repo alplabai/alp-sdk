@@ -46,7 +46,8 @@ Full schema reference: [`docs/board-config-schema.md`](board-config-schema.md).
 
 ### `west: command not found` / `pip install west` fails
 
-The Zephyr meta-tool needs Python 3.10+.  On macOS:
+Installing and running `west` itself needs Python 3.10+ (the SDK's own
+support floor).  On macOS:
 
 ```bash
 brew install python
@@ -63,6 +64,21 @@ pip install west
 
 See [`docs/getting-started.md`](getting-started.md) §1 for the
 full per-host walkthrough.
+
+### `west build` fails at CMake configure citing a Python version
+
+`west` itself runs fine on 3.10+, but *building* needs more: Zephyr
+v4.4.1's own `cmake/modules/python.cmake` hardcodes
+`PYTHON_MINIMUM_REQUIRED 3.12` and refuses `find_package(Python3)`
+below it, regardless of what `west`/`bootstrap.sh`/`bootstrap.ps1`
+accepted earlier.  Ubuntu 22.04 and Debian 12's system `python3`
+(3.10 and 3.11 respectively) can't reach 3.12 via `apt-get install
+python3` -- install a newer interpreter alongside the system one,
+e.g. the `deadsnakes` PPA (`sudo add-apt-repository
+ppa:deadsnakes/ppa && sudo apt-get install python3.12`) or `pyenv`,
+and point `west`/the venv at it.  See
+[`docs/cross-platform-setup.md`](cross-platform-setup.md) §1.1 for
+why this floor isn't (yet) enforced up front by bootstrap itself.
 
 ### `CMake Error: Could not find package configuration file Zephyr`
 

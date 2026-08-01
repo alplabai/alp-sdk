@@ -78,19 +78,39 @@ trailing heartbeat loop:
   accepted the request AND the peer's own heartbeat word was observed to
   advance within the bound below (the request being accepted, alone, does
   not prove the peer actually came up).
-- `RESULT SKIP: dualcore-master -- ...` — either the boot authority reported
-  `ALP_ERR_NOSUPPORT` (the request was never even accepted), or it was
-  accepted but the peer's heartbeat never advanced within the bound — states
-  what was locally proven, not a failure of this app's code.
+- `RESULT SKIP: dualcore-master -- ...` — the request was accepted but the
+  peer's heartbeat never advanced within the bound — states what was locally
+  proven, not a failure of this app's code.
 - `RESULT FAIL: alp_mproc_boot_core rc=%d` — a real local error: `boot_core`
-  returned an unexpected rc (neither `ALP_OK` nor `ALP_ERR_NOSUPPORT`).
+  returned an unexpected rc (`ALP_ERR_NOSUPPORT` included -- see below).
 
-With the DEFAULT config, an HE build releasing an HP peer is **accepted**
-(`rc=ALP_OK`) but the peer never comes up: Alif's SE Host Services API docs
-(v1.109.0 p.115) document that `se_service_boot_cpu()` (service 501)
-invalidates the HP core's TCM on release, so the peer locks up before it can
-advance its heartbeat, and this is reported as `RESULT SKIP` (accepted, peer
-never advanced) — not `RESULT FAIL`, since the local request path is fine.
+With the **default** config (`CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC`
+off), this build ships `CONFIG_HAS_ALIF_SE_SERVICES=y` and no `native_sim`
+overlay, so `alp_mproc_boot_core()` always resolves to the E8 SE backend's
+plain `se_service_boot_cpu()` path for either M55 core — the `<alp/mproc.h>`
+contract's `ALP_ERR_NOSUPPORT` case ("no boot authority for `core` in this
+build: wrong SoM, `native_sim`, or a core the platform boots by other means")
+is not reachable there. So the master treats *any* nonzero
+`alp_mproc_boot_core` rc as `RESULT FAIL`, not a skip: on these boards a
+nonzero rc here would mean the boot path fell out of the build (e.g. the SE
+backend lost the link, or the silicon-ref stopped matching) — a regression
+this app must surface, not paper over.
+
+That said, an HE build releasing an HP peer via this default config is
+**accepted** (`rc=ALP_OK`, not a nonzero rc, so the FAIL check above doesn't
+fire) but the peer never comes up: Alif's SE Host Services API docs (v1.109.0
+p.115) document that `se_service_boot_cpu()` (service 501) invalidates the HP
+core's TCM on release, so the peer locks up before it can advance its
+heartbeat, and this is reported as `RESULT SKIP` (accepted, peer never
+advanced) — not `RESULT FAIL`, since the local request path is fine.
+
+With the deferred-TOC path ON
+(`CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_PEER_IS_HP=y`, see above),
+`ALP_ERR_NOSUPPORT` DOES become reachable: a build whose `PEER_IS_HP` doesn't
+match which core this role's `TARGET_CORE` actually releases is a
+build-config bug, not a bench/silicon state, and now correctly falls into
+`RESULT FAIL` via the same nonzero-rc check as any other real local error.
+
 The peer-heartbeat wait (2000 ms, polled every 20 ms) is bounded, so an
 accepted request whose peer never actually comes up produces a verdict
 instead of a hang. To make the HE build actually release an HP peer, use the
