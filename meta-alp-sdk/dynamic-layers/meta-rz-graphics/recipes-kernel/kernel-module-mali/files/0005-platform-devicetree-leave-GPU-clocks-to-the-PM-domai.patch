@@ -7,7 +7,7 @@ The Renesas CPG genpd manages the GPU module clocks via pm_clk (GENPD_FLAG_PM_CL
 
 Upstream-Status: Pending
 
-Signed-off-by: Alp Lab AB
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  .../devicetree/mali_kbase_runtime_pm.c        | 40 ++++++++++++++-----
  1 file changed, 29 insertions(+), 11 deletions(-)

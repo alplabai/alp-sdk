@@ -30,7 +30,7 @@ fail gracefully (dev_warn) and begin working once the bridge answers.
 
 Upstream-Status: Inappropriate [Alp Lab SoM-specific supervisor MCU protocol]
 
-Signed-off-by: Alp Lab AB
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  drivers/gpio/Kconfig            |   9 ++
  drivers/gpio/Makefile           |   1 +

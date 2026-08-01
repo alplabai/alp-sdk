@@ -47,7 +47,7 @@ reports connected at 720x1280.
 
 Upstream-Status: Backport [v6.6 + RK055HDMIPI4MA0 ALP extension]
 
-Signed-off-by: Alp Lab AB
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  drivers/gpu/drm/panel/Kconfig              |  10 +
  drivers/gpu/drm/panel/Makefile             |   1 +

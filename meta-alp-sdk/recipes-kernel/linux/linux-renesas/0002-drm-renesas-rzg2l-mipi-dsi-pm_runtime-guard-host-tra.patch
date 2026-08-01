@@ -19,7 +19,7 @@ harmlessly when the link is down.
 
 Upstream-Status: Pending
 
-Signed-off-by: Alp Lab AB
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  drivers/gpu/drm/renesas/rz-du/rzg2l_mipi_dsi.c | 15 +++++++++++++++
  1 file changed, 15 insertions(+)

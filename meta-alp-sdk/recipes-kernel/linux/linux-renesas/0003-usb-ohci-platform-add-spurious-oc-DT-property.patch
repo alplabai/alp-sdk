@@ -21,7 +21,7 @@ it in generic-ohci.yaml like the generic-ehci.yaml entry.
 Upstream-Status: Inappropriate [board-specific OC policy; the generic
 binding addition would need to go through linux-usb]
 
-Signed-off-by: Alp Lab AB <gate@alp-lab.se>
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  Documentation/devicetree/bindings/usb/generic-ohci.yaml | 6 ++++++
  drivers/usb/host/ohci-hcd.c                             | 8 ++++++++

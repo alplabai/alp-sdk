@@ -43,7 +43,7 @@ Implementation notes:
 
 Upstream-Status: Pending [generic improvement; no SoM-specific code]
 
-Signed-off-by: Alp Lab AB
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  drivers/input/touchscreen/goodix.c | 39 ++++++++++++++++++++++++------
  1 file changed, 32 insertions(+), 7 deletions(-)

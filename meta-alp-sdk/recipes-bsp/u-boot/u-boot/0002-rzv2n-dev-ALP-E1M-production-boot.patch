@@ -27,7 +27,7 @@ than by editing the env block: that block is patched by optional
 vendor feature layers (meta-rz-drpai add-ether) and varies per build,
 so the stable CONFIG_BOOTCOMMAND line is the only patch-safe hook.
 
-Signed-off-by: Alp Lab AB <gate@alp-lab.se>
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  board/renesas/rzv2n-dev/Kconfig     | 24 ++++++++++++++++++++++++
  board/renesas/rzv2n-dev/rzv2n-dev.c | 11 +++++++++++
