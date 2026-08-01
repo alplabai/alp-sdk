@@ -111,7 +111,30 @@ int rc = se_service_set_run_cfg(&p);
 `se_service_clock_set_divider()` changes a PLL/bus divider directly — same
 brownout class.
 
-### 2.2 `se_service_update_stoc(u8 *img, u32 size)` — A/B secure-boot update
+### 2.2 `se_service_boot_cpu(cpu_id, entry_addr)` — peer-core release
+
+Backs `alp_mproc_boot_core()` (`<alp/mproc.h>`, `src/backends/mproc/alif_se_boot.c`).
+Asks the SES to release a peer M55 at `entry_addr` -- it does **not** place an
+image there; residency at `entry_addr` is a precondition, not something this
+call arranges.
+
+> **Bench-measured trap (E8, `AE822FA0E5597LS0`, 2026-07-31):** an ATOC entry
+> declared `"flags": ["load"]` reports `uLV` (Loaded, Verified) in the SES
+> boot table while the destination is still empty -- two independent debug
+> access ports read the peer's ITCM as uninitialized SRAM, never the staged
+> image. Releasing that core vectors from garbage and locks up immediately
+> (`CFSR = 0x00000101`, `PC = 0xEFFFFFFE`). The working declaration is
+> `"flags": ["load", "boot", "deferred"]` (`"deferred"` is a flags-array
+> member, not a sibling boolean key) -- it sets `TOC_IMAGE_DEFERRED`, the SES
+> skips the boot-time action, and the host un-defers at runtime with
+> `SERVICES_boot_process_toc_entry` (service 500), which performs load,
+> verify and release together. That combination carried an RPMsg link
+> through 495 consecutive PING/PONG round-trips over 4m11s. See the
+> precondition comment on `alif_se_boot_core()` for the full writeup.
+> **Open:** whether `entry_addr` is honoured by service 501 at all was not
+> isolated by this run -- the working entry point came from the ATOC itself.
+
+### 2.3 `se_service_update_stoc(u8 *img, u32 size)` — A/B secure-boot update
 
 Rewrites the **System TOC (STOC)** in MRAM — the customer secure-boot / A-B
 field-update path. This is the most destructive SE service: a malformed STOC
@@ -135,7 +158,7 @@ int rc = se_service_update_stoc(stoc_img, stoc_size);
 chain (§3) proven on that board first, (c) a known-good STOC image to roll back
 to. Until then it stays design-only.
 
-### 2.3 Also mutating (out of scope here)
+### 2.4 Also mutating (out of scope here)
 
 `se_service_boot_es0` / `shutdown_es0` (power a subsystem; needs an NVDS config
 blob), `se_service_se_sleep_req` (clears the SE-ready flag — next call
@@ -161,7 +184,8 @@ state; none are needed for the read-only characterisation.
 | --- | --- |
 | §1 read-only queries | **Yes** — zero risk, validated on E8 (#197) |
 | §2.1 `set_run_cfg` (real change) | No — needs power-cycle recovery on hand; idempotent re-assert is a cache no-op |
-| §2.2 `update_stoc` | No — sacrificial board + proven SETOOLS recovery required first |
+| §2.2 `boot_cpu` (peer-core release) | **Yes**, with a correct ATOC — bench-proven with `["load","boot","deferred"]`; a `["load"]`-only entry locks the peer up (see §2.2) |
+| §2.3 `update_stoc` | No — sacrificial board + proven SETOOLS recovery required first |
 
 See `examples/aen/aen-se-service-info` (vendor-scoped transport + LCS regcheck)
 and `aen-se-service-query` (the read-only surface via the portable `alp_*`

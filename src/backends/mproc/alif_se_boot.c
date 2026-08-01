@@ -55,6 +55,38 @@ static alp_status_t se_rc_to_alp(int rc)
 	}
 }
 
+/*
+ * PRECONDITION, bench-measured on E8 silicon (AE822FA0E5597LS0), 2026-07-31:
+ * se_service_boot_cpu() asks the SE to release @p core at @p entry_addr.
+ * It does NOT place an image there -- it assumes one is already resident
+ * at that address, and nothing in this call's return value says otherwise.
+ *
+ * On a bare-Zephyr repro, an ATOC entry declared `"flags": ["load"]`
+ * reported `uLV` (Loaded, Verified) in the SES boot table while the
+ * destination held no image: two independent debug access ports read the
+ * peer's ITCM as uninitialized SRAM from t+0.80s to t+60s, never the
+ * staged image's first words (`20002200 00002641`).  Releasing that core
+ * made it vector from empty memory and lock up immediately:
+ * CFSR = 0x00000101 (IACCVIOL + IBUSERR), PC = 0xEFFFFFFE.
+ *
+ * The working declaration is `"flags": ["load", "boot", "deferred"]`
+ * ("deferred" is a member of the flags array -- a sibling `"deferred":
+ * true` key is rejected).  It sets TOC_IMAGE_DEFERRED = 0x100 (the
+ * entry's flags word goes 0x00000022 -> 0x00000122) and prints `D` in
+ * the SES table; the SES then skips the boot-time action entirely
+ * (`uLs  D`, Dest Addr blank, Time 0.00 ms), and the host un-defers it
+ * at runtime with SERVICES_boot_process_toc_entry (service 500,
+ * services_host_boot.c:46-63), which performs load, verify and release
+ * together.  With that ATOC shape, se_service_boot_cpu() started the
+ * peer and carried an RPMsg link through 495 consecutive PING/PONG
+ * round-trips over 4m11s.
+ *
+ * Left open: whether service 501 (se_service_boot_cpu()) honours
+ * @p entry_addr at all was not isolated by this run -- the working
+ * entry point came from the ATOC itself, not from this call's
+ * argument.  Do not assume @p entry_addr is (or isn't) authoritative
+ * until that is bench-checked separately.
+ */
 static alp_status_t alif_se_boot_core(alp_core_id_t core, uintptr_t entry_addr)
 {
 	uint32_t cpu_id;

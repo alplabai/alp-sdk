@@ -153,6 +153,18 @@ typedef enum {
  * is the application's business (heartbeat/beacon, or open an IPC
  * channel via `<alp/rpc.h>`).
  *
+ * @pre The image for @p core must already be RESIDENT at @p
+ *      entry_addr before this call.  This API asks the boot authority
+ *      to start execution there -- it does not load, copy, or verify
+ *      any bytes.  Placing the image is the boot package / boot-time
+ *      loader's job, done before the peer is released.  On at least
+ *      one platform a loader can report an image entry as loaded and
+ *      verified while the destination is still empty (see the backend
+ *      implementation for the bench-measured case); a released core
+ *      whose image is not actually resident vectors from garbage and
+ *      locks up immediately.  This API has no way to detect that case
+ *      -- only the caller's boot-package configuration prevents it.
+ *
  * @param[in] core        Peer to start.  @ref ALP_CORE_SELF is
  *                        invalid.
  * @param[in] entry_addr  Entry point in the global address map.
