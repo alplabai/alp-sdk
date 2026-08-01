@@ -127,6 +127,22 @@ jobs:
         working-directory: ${{ github.workspace }}/alp-sdk
         run: bash scripts/bootstrap.sh
 
+      # bootstrap.sh does NOT apply zephyr/patches.yml (`west patch apply` is
+      # a separate, documented manual step -- see docs/aen-bench-bringup.md
+      # §3). The mproc/SE-boot examples this job builds pull in hal_alif's
+      # se_service.c, which calls ipm_poll_out()/ipm_poll_in() -- fields
+      # zephyr/patches/zephyr/0002-ipm-add-poll-out-poll-in.patch adds to
+      # upstream Zephyr's ipm_driver_api; vanilla v4.4.1 doesn't have them.
+      # Skipping this step is what a clean-checkout CI run (unlike a
+      # long-lived dev workspace that already carries the patch applied,
+      # uncommitted, from earlier bring-up work) exposes: a build error on
+      # `.poll_out`/`.poll_in` with no member by that name.
+      - name: west patch apply (zephyr/patches.yml)
+        working-directory: ${{ github.workspace }}/alp-sdk
+        run: |
+          set -euo pipefail
+          west patch apply
+
       # twister itself (not just `west build`) needs Zephyr's full Python
       # dependency set under the runner's hosted interpreter -- e.g.
       # requirements-run-test.txt's `natsort` (twisterlib/hardwaremap.py).

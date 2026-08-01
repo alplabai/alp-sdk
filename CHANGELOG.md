@@ -29,7 +29,13 @@ separate follow-on that adds the remaining 42 examples' metadata. (The
 workflow installs `zephyr/scripts/requirements.txt`, not just
 `requirements-base.txt` — twister itself needs `requirements-run-test.txt`'s
 `natsort`, which a plain `west build` doesn't; a fresh CI runner has none of
-it preinstalled, unlike the shared dev workspace this was first measured on.)
+it preinstalled, unlike the shared dev workspace this was first measured on.
+It also runs `west patch apply` — `zephyr/patches.yml`'s
+`0002-ipm-add-poll-out-poll-in.patch` is required for the mproc/SE-boot
+examples' `hal_alif` `se_service.c` → `ipm_poll_out`/`ipm_poll_in` call chain
+to compile against vanilla Zephyr v4.4.1; a long-lived dev workspace already
+carries that patch applied, uncommitted, which is exactly why this was
+invisible until a genuinely clean CI checkout ran the job.)
 
 ### Fixed — four pre-existing AEN build errors surfaced by the new twister-on-real-hardware gate (#1076, #1085)
 
