@@ -7,6 +7,31 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.15.0 candidate
 
+### Added — documented `alp_mproc_boot_core()`'s image-residency precondition (#1070)
+
+`alp_mproc_boot_core()` (Alif SE backend: `se_service_boot_cpu()`) releases a
+peer M55 at `entry_addr` -- it does not place an image there, and nothing in
+the call's signature or return value said so. Bench-measured on E8 silicon
+(`AE822FA0E5597LS0`, 2026-07-31): an ATOC entry declared `"flags": ["load"]`
+reports `uLV` (Loaded, Verified) in the SES boot table while the destination
+is still empty -- two independent debug access ports read the peer's ITCM as
+uninitialized SRAM, never the staged image. Releasing that core vectors from
+garbage and locks up immediately (`CFSR = 0x00000101`, `PC = 0xEFFFFFFE`).
+The working declaration is `"flags": ["load", "boot", "deferred"]`
+(`"deferred"` is a flags-array member, not a sibling boolean key); it sets
+`TOC_IMAGE_DEFERRED`, the SES skips the boot-time action, and the host
+un-defers at runtime with `SERVICES_boot_process_toc_entry` (service 500),
+which performs load, verify and release together -- proven with an RPMsg
+link carrying 495 consecutive PING/PONG round-trips over 4m11s.
+
+The residency precondition is now documented as `@pre` on the public API
+(`include/alp/mproc.h`), as a full bench writeup on the backend
+(`src/backends/mproc/alif_se_boot.c`), and in `docs/aen-se-services.md`
+§2.2. No call-shape or behavior change -- documentation only. Left open:
+whether `entry_addr` is honoured by service 501 at all was not isolated by
+this run, since the working entry point came from the ATOC itself, not the
+call's argument.
+
 ### Fixed — a scaffolded AEN Zephyr app linked at the MRAM base, so no flash flow accepted it (#1067)
 
 `tan init --from-example` + `tan build` for an AEN board produced an image
