@@ -8,7 +8,7 @@
  * per-core MASTER ID; it needs no shared-SRAM spin and survives the absence of
  * cache coherency between the cores. Exposes a tiny take/give API
  * (hwsem_alif.h) -- HWSEM has NO upstream Zephyr device class, so this is a
- * "misc" (no-class) driver, like drivers/misc/* upstream.
+ * "misc" (no-class) driver, like drivers/misc/ * upstream.
  *
  * ============================== STATUS ==============================
  * ADR-0017-ADJACENT (vendor-native custom): the Alif HWSEM IP has NO upstream
