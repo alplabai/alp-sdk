@@ -40,6 +40,7 @@
 
 #include <stdio.h>
 #include <errno.h>
+#include <inttypes.h>
 
 #include <zephyr/kernel.h>
 #include <zephyr/init.h>
@@ -257,7 +258,7 @@ int main(void)
 		}
 	}
 
-	printf("[eth] admin_up=%d carrier_ok=%d wire_link=%d rx_bytes=%u dhcp_bound=%d\n",
+	printf("[eth] admin_up=%d carrier_ok=%d wire_link=%d rx_bytes=%" PRIu64 " dhcp_bound=%d\n",
 	       net_if_is_admin_up(iface),
 	       net_if_is_carrier_ok(iface),
 	       link,
