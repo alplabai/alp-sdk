@@ -1197,27 +1197,35 @@ def _emit_cross_core_shmem_cache(
     yaml §3.9), not a SoC/vendor check, so it fires for any silicon that
     declares a matching carve-out:
 
-      - `kind: rpmsg` is excluded -- `<alp/rpc.h>` auto-generates the
-        cache-maintenance calls in `alp_rpc_*` (docs/heterogeneous-builds.md
-        §10 "Cache coherency on AEN"), so forcing DCACHE=n there would
-        needlessly disable caching for the whole core.
+      - `kind: rpmsg` is deliberately left alone here, NOT because
+        `<alp/rpc.h>` handles cache maintenance -- it doesn't.
+        `cfg->cacheable` is stored on the backend struct
+        (`src/backends/rpc/{zephyr,yocto}_drv.c`) and never read again;
+        there is no `sys_cache_*` call anywhere under `src/` or `include/`.
+        A `cacheable: true` rpmsg channel on AEN (e.g. `examples/multicore/
+        rpmsg-aen`) carries the same #1080-class hazard this function
+        closes for `raw_shmem` -- tracked separately as #1088, because
+        forcing every rpmsg slice's D-cache off here would be a blunt,
+        unreviewed fix for a different code path (`<alp/rpc.h>`, not
+        `<alp/mproc.h>`) than the one #1080 root-caused.
       - `kind: mailbox_only` is excluded -- it carries no shared memory
         (doorbell + signal only), so there is nothing to keep coherent.
-      - `kind: raw_shmem` is the one that needs it: `<alp/mproc.h>`'s raw
-        shmem+mailbox primitives have no automatic cache-maintenance layer
-        (docs/heterogeneous-builds.md: "reach for these only if you're
-        building a custom framing layer... you have to call the right
-        cache ops yourself"), so the SDK's zero-effort-safe default is to
-        turn the D-cache off -- unless the entry opts out with an explicit
+      - `kind: raw_shmem` is the one this function closes: `<alp/mproc.h>`'s
+        raw shmem+mailbox primitives have no cache-maintenance layer either
+        (same gap as rpmsg, just never suggested otherwise), so the SDK's
+        zero-effort-safe default is to turn the D-cache off for every
+        endpoint -- unless the entry opts out with an explicit
         `cacheable: true`, which is the app declaring it will do its own
         cache ops instead (board.schema.json `ipc_entry.cacheable`).
 
-    Skips emission if a line asserting the same symbol is already present
-    (the Ethos-U inference branch, run earlier in `_slice_alp_conf`, may
-    have already asserted it for this slice) -- kept as an independent
-    check rather than threading a bool out of `_emit_inference`, since the
-    two triggers (Ethos-U NPU coherence vs. mproc shmem coherence) are
-    unrelated hardware facts that happen to share one Kconfig symbol.
+    Must run after `_emit_inference` in `_slice_alp_conf` (the dedup below
+    depends on that order, it does not detect the reverse case): skips
+    emission if a line asserting the same symbol is already present, i.e.
+    the Ethos-U inference branch already asserted it for this slice --
+    kept as its own check rather than threading a bool out of
+    `_emit_inference`, since the two triggers (Ethos-U NPU coherence vs.
+    mproc shmem coherence) are unrelated hardware facts that happen to
+    share one Kconfig symbol.
     """
     if any("CONFIG_DCACHE=n" in line for line in existing_lines):
         return []
@@ -1230,11 +1238,11 @@ def _emit_cross_core_shmem_cache(
     if not needs_dcache_off:
         return []
     return [
-        "# Cross-core shared-memory carve-out (board.yaml ipc[].kind: "
-        "raw_shmem) naming this core -- each core has its own D-cache and "
-        "the carve-out is non-cacheable, so the D-cache must stay off for "
-        "both sides to see each other's writes without explicit cache "
-        "maintenance (PR #1080).",
+        "# board.yaml ipc[].kind: raw_shmem names this core as an",
+        "# endpoint.  <alp/mproc.h> has no cache-maintenance layer, so",
+        "# the D-cache must stay off (not just the carve-out's own",
+        "# region) for both sides to see each other's writes without",
+        "# explicit clean/invalidate (PR #1080).",
         "CONFIG_DCACHE=n",
         "",
     ]

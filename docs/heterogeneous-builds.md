@@ -195,18 +195,22 @@ ipc:
     name: alp_default_rpmsg
 ```
 
-- **`kind: rpmsg`** — the only supported value as of v0.6.  Future
-  kinds (raw shmem, virtio-net) are reserved.
+- **`kind`** — `rpmsg` (the framed RPC surface `<alp/rpc.h>` speaks,
+  point-to-point, exactly two endpoints), `raw_shmem` (the low-level
+  `<alp/mproc.h>` shmem+mailbox primitives, no framing), or
+  `mailbox_only` (doorbell + signal, no shared memory at all). All
+  three are real `board.schema.json` `ipc_entry.kind` values.
 - **`endpoints`** — the cores sharing this channel.  Both must have
-  `os: != off`.  Exactly two; RPMsg is point-to-point today.
+  `os: != off`.
 - **`carve_out_kb`** — shared-memory region size in kibibytes.  The
   orchestrator allocates it from the auto-derived region table
   (from `metadata/socs/.../<part>.json variants[].sram_banks_kb` +
   `mram_mb`) or from the explicit `memory_map:` override block if
-  the SoM preset defines one for non-stock partitioning.  Prefers
-  non-cacheable regions on SoMs with no M-class cache
-  (V2N) and cacheable regions with auto-generated cache-maintenance
-  hooks on SoMs that do (AEN).
+  the SoM preset defines one for non-stock partitioning.  The
+  allocator's default is non-cacheable on every SoM (`cacheable:`
+  unset or `false`) — `cacheable: true` is an explicit per-entry
+  opt-in, not a SoM-level default; see the cache-coherency note in
+  §10 for what it does and does not buy you today.
 - **`name`** — stable identifier.  Becomes the resource-table label
   on OpenAMP, the Linux DT `reserved-memory` node label, and the
   `#define` prefix in the generated header.  Stick to
@@ -564,24 +568,32 @@ you hardcode the strings instead, the runtime returns
 `ALP_ERR_NOSUPPORT` because no carve-out backs the name; check
 `alp_last_error()`.
 
-**Cache coherency on AEN.**  V2N's default carve-out is
-**non-cacheable** because the M33-SM has no data cache.  AEN's M55
-cores **do** have a cache, so the default flips to **cacheable** with
-auto-generated cache-maintenance points in `alp_rpc_*`.  Don't write
-cache ops by hand.  If you reach below the RPC surface to read shared
-memory directly, you have to call the right cache ops yourself — and
-the right calls differ between V2N and AEN.  Setting `cacheable: true`
-in `ipc:` explicitly makes the orchestrator emit matching hooks on
-both sides.
+**Cache coherency on AEN — read this before setting `cacheable: true`
+on an rpmsg channel.**  The allocator's default carve-out is
+non-cacheable on every SoM, V2N and AEN alike.  `cacheable: true` is an
+explicit per-entry opt-in that is supposed to mean "the orchestrator
+emits matching cache-maintenance hooks on both sides, don't write cache
+ops by hand" — **that emission does not exist yet.**
+`cfg->cacheable` is stored on the `<alp/rpc.h>` backend struct
+(`src/backends/rpc/zephyr_drv.c` / `yocto_drv.c`) and never read again;
+there is no `sys_cache_*` / `arch_dcache_*` call anywhere under `src/`
+or `include/`. A `cacheable: true` rpmsg channel on AEN today (e.g.
+`examples/multicore/rpmsg-aen`, `a32_cluster` ↔ `m55_hp`) is exactly the
+#1080 cross-core D-cache hazard with no mitigation — tracked as **#1088**.
+Until that lands: if you reach below the RPC surface to read shared
+memory directly, or you're on AEN at all, treat `cacheable: true` as
+"I will call the right cache ops myself" (`sys_cache_data_flush_range`
+on the writer + `sys_cache_data_invd_range` on the reader), not as a
+promise the SDK does it for you.
 
-That auto-generated cache-maintenance is an `rpmsg`-only benefit.
 `ipc[].kind: raw_shmem` — the low-level `<alp/mproc.h>` shmem+mailbox
-primitives `<alp/rpc.h>` sits on — has no equivalent, so the orchestrator
-falls back to the zero-effort-safe default instead: any core named in a
-`raw_shmem` entry's `endpoints:` gets `CONFIG_DCACHE=n` in its generated
-`alp.conf` unless the entry sets `cacheable: true` (which is you declaring
-you'll do the cache ops yourself, same as above). `kind: mailbox_only`
-carries no shared memory, so it never triggers this.
+primitives `<alp/rpc.h>` sits on — has the identical gap (no
+cache-maintenance layer, #1088 covers both), but the orchestrator does
+give it a zero-effort-safe default: any core named in a `raw_shmem`
+entry's `endpoints:` gets `CONFIG_DCACHE=n` in its generated `alp.conf`
+unless the entry sets `cacheable: true` (which is, again, you declaring
+you'll do the cache ops yourself). `kind: mailbox_only` carries no
+shared memory, so it never triggers this.
 
 **Mailbox-channel collisions.**  The SoM preset declares which
 controller channels the SDK reserves vs. leaves free for apps:

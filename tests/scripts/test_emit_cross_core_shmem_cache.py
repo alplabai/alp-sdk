@@ -10,11 +10,19 @@ and had to hand-write the line -- silently correct today, but a trap for
 the next example that forgets to.  These tests pin the widened behaviour:
 
   * a `raw_shmem` endpoint gets CONFIG_DCACHE=n,
-  * `rpmsg` and `mailbox_only` do NOT (rpc.h auto-generates cache
-    maintenance for rpmsg; mailbox_only carries no shared memory),
+  * `mailbox_only` does NOT (no shared memory to keep coherent),
+  * `rpmsg` does NOT either -- NOT because `<alp/rpc.h>` handles cache
+    maintenance (it doesn't; that gap is #1088, tracked separately) --
+    but because forcing every rpmsg slice's D-cache off here would be an
+    unreviewed fix for a different code path than the one this function
+    closes,
   * an explicit `cacheable: true` opts back out (the app owns cache ops),
   * a core that isn't a named endpoint is untouched,
-  * no duplicate line when the Ethos-U branch already asserted it.
+  * a project with BOTH an rpmsg entry and a raw_shmem entry on the same
+    core only fires for the raw_shmem one,
+  * no duplicate line when the Ethos-U branch already asserted it -- both
+    a hand-fed `existing_lines` case and a real end-to-end call through
+    `_emit_inference` first, the actual `_slice_alp_conf` call order.
 
 Run locally:
 
@@ -31,6 +39,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
 from alp_orchestrate import kconfig as K  # noqa: E402
 from alp_orchestrate.models import IpcEntry, Slice  # noqa: E402
+
+_MR = K.METADATA_ROOT
 
 
 def _project(ipc: list[IpcEntry]) -> types.SimpleNamespace:
@@ -62,11 +72,24 @@ def test_non_endpoint_core_untouched():
 
 
 def test_rpmsg_kind_excluded():
-    # rpc.h auto-generates cache-maintenance for rpmsg; forcing the whole
-    # core's D-cache off would be an unrelated, unwanted regression.
+    # Not because rpc.h handles cache maintenance for rpmsg -- it doesn't
+    # (#1088). Excluded because forcing the whole core's D-cache off here
+    # would be an unreviewed fix for a different code path than the one
+    # this function closes.
     ipc = [IpcEntry(name="alp_default_rpmsg", kind="rpmsg",
                      endpoints=["a32_cluster", "m55_hp"], carve_out_kb=256)]
     assert K._emit_cross_core_shmem_cache(_project(ipc), _slice("m55_hp"), []) == []
+
+
+def test_mixed_raw_shmem_and_rpmsg_only_fires_for_raw_shmem():
+    ipc = [
+        IpcEntry(name="alp_default_rpmsg", kind="rpmsg",
+                 endpoints=["a32_cluster", "m55_hp"], carve_out_kb=256),
+        IpcEntry(name="alp_shmem0", kind="raw_shmem",
+                 endpoints=["m55_hp", "m55_he"], carve_out_kb=4),
+    ]
+    assert "CONFIG_DCACHE=n" in K._emit_cross_core_shmem_cache(
+        _project(ipc), _slice("m55_hp"), [])
 
 
 def test_mailbox_only_kind_excluded():
@@ -93,3 +116,27 @@ def test_skips_when_already_asserted_by_inference_branch():
                      endpoints=["m55_hp", "m55_he"], carve_out_kb=4)]
     existing = ["CONFIG_ETHOS_U_DCACHE=y", "CONFIG_ETHOS_U55_256=y", "CONFIG_DCACHE=n"]
     assert K._emit_cross_core_shmem_cache(_project(ipc), _slice("m55_hp"), existing) == []
+
+
+def test_dedup_against_real_emit_inference_output():
+    # End-to-end: real E1M-AEN801/e8 metadata (an Ethos-U85 SoM), a slice
+    # that wants inference AND is a raw_shmem endpoint, called in
+    # `_slice_alp_conf`'s actual order -- `_emit_inference` first, its
+    # real output (not a hand-fed stand-in) fed to the dedup check.  Pins
+    # the real call-order dependency, not just the guard's own logic.
+    import json
+    import yaml
+
+    soc_spec = json.loads((_MR / "socs" / "alif" / "ensemble" / "e8.json").read_text())
+    som = yaml.safe_load((_MR / "e1m_modules" / "E1M-AEN801.yaml").read_text())
+    ipc = [IpcEntry(name="alp_shmem0", kind="raw_shmem",
+                     endpoints=["m55_hp", "m55_he"], carve_out_kb=4)]
+    project = types.SimpleNamespace(
+        soc_spec=soc_spec, som_preset=som, sku="E1M-AEN801", ipc=ipc)
+    slice_ = Slice(core_id="m55_hp", os="zephyr", inference={"default_arena_kib": 256})
+
+    inference_lines = K._emit_inference(project, slice_, som.get("silicon"))
+    assert inference_lines.count("CONFIG_DCACHE=n") == 1  # the Ethos-U branch fired
+
+    cache_lines = K._emit_cross_core_shmem_cache(project, slice_, inference_lines)
+    assert cache_lines == []  # deduped -- not a second CONFIG_DCACHE=n
