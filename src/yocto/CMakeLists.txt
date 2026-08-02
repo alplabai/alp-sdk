@@ -77,12 +77,16 @@ account-gated and NOT vendored.  Default OFF."
 
 option(ALP_SDK_DRPAI_REQUIRED
     "Treat a missing DRP-AI stack as a configure ERROR instead of warning and \
-disabling the backend.  OFF (the default) is the silicon-determined path: \
-scripts/alp_orchestrate/kconfig.py auto-emits ALP_SDK_USE_DRPAI_V2N=ON from \
-capabilities.drp_ai and the builder never asked for it, so an incomplete host \
-degrades cleanly.  meta-alp-sdk's alp-sdk recipe sets this ON alongside \
+disabling the backend.  OFF (the default) is the safe choice for a direct \
+plain-CMake build where a builder passes -DALP_SDK_USE_DRPAI_V2N=ON by hand \
+outside any recipe: an incomplete host degrades cleanly instead of failing \
+configure.  meta-alp-sdk's alp-sdk recipe sets this ON alongside \
 -DALP_SDK_USE_DRPAI_V2N=ON in PACKAGECONFIG[drpai], because there the builder \
-DID ask by name and a silently backend-less libalp_sdk.so is the wrong answer."
+DID ask by name through a named opt-in and a silently backend-less \
+libalp_sdk.so is the wrong answer.  (scripts/alp_orchestrate/kconfig.py's \
+capabilities.drp_ai auto-emit does NOT reach this option today -- see the \
+path (a)/(b) note below -- so it does not justify this default; OFF stands \
+on the plain-CMake case alone.)"
     OFF)
 
 target_sources(alp_sdk PRIVATE
@@ -622,13 +626,18 @@ endif()
 # ------------------------------------------------------------------ #
 if(ALP_SDK_USE_DRPAI_V2N)
     # Detect the WHOLE stack before enabling anything.  TWO DIFFERENT paths
-    # turn ALP_SDK_USE_DRPAI_V2N on and they want opposite failure modes, so
-    # ALP_SDK_DRPAI_REQUIRED (above) says which one is driving:
-    #   (a) silicon-determined, REQUIRED=OFF -- scripts/alp_orchestrate/
-    #       kconfig.py emits -DALP_SDK_USE_DRPAI_V2N=ON from capabilities.drp_ai
-    #       for every V2N/V2M A55 slice; the builder never asked for it, so a
-    #       FATAL_ERROR here would break every such build on a host without a
-    #       RUHMI checkout (a regression already caught once).  Warn + disable.
+    # can turn ALP_SDK_USE_DRPAI_V2N on and they want opposite failure modes,
+    # so ALP_SDK_DRPAI_REQUIRED (above) says which one is driving:
+    #   (a) direct plain-CMake, REQUIRED=OFF -- a builder passes
+    #       -DALP_SDK_USE_DRPAI_V2N=ON by hand with no packaging system
+    #       backing it, so a FATAL_ERROR here would break that build on any
+    #       host without a RUHMI checkout.  Warn + disable.
+    #       (NOT scripts/alp_orchestrate/kconfig.py's capabilities.drp_ai
+    #       auto-emit: that mechanism does not reach this file today for any
+    #       V2N/V2M A55 slice -- --emit cmake-args refuses os: yocto cores,
+    #       --emit yocto-conf never emits this flag, and the one core class
+    #       where kconfig.py DOES emit it, the M33 Zephyr slice, never runs
+    #       this listfile, which returns early on DEFINED ZEPHYR_BASE above.)
     #   (b) explicit opt-in, REQUIRED=ON -- meta-alp-sdk's alp-sdk recipe, where
     #       PACKAGECONFIG[drpai] flips the flag and pulls the deps together.
     #       Here a warning would ship a green bake whose libalp_sdk.so has no
@@ -659,22 +668,33 @@ if(ALP_SDK_USE_DRPAI_V2N)
     # through the gate and dies at compile -- exactly what this block exists
     # to prevent.
     find_path(DRPAI_UAPI_INCLUDE_DIR linux/drpai.h)
-    # The seventh input: MeraDrpRuntimeWrapper.h:11 hard-#includes
-    # <tvm/runtime/profiling.h>, which pulls in dlpack and dmlc-core headers in
-    # turn.  Those live in the RUHMI checkout's tvm SUBMODULE, not beside the
-    # wrapper -- and the submodules ship uninitialised, so a checkout whose libs
-    # are already built can still have an empty tvm/ tree.  Probing only the
-    # wrapper would pass detection and then die at compile on the tvm include,
-    # which is the failure this block exists to prevent.  meta-rz-drpai does NOT
-    # cover this: its lib-tvm recipe installs libtvm_runtime.so* and a LICENSE,
+    # The seventh, eighth and ninth inputs: MeraDrpRuntimeWrapper.h:11
+    # hard-#includes <tvm/runtime/profiling.h>, which pulls in dlpack and
+    # dmlc-core headers in turn.  Those live in the RUHMI checkout's tvm
+    # SUBMODULE, not beside the wrapper -- and the submodules ship
+    # uninitialised, so a checkout whose libs are already built can still
+    # have an empty tvm/ tree.  Probing only the wrapper would pass
+    # detection and then die at compile on the tvm include, which is the
+    # failure this block exists to prevent.  meta-rz-drpai does NOT cover
+    # this: its lib-tvm recipe installs libtvm_runtime.so* and a LICENSE,
     # no headers at all.  Fix on a bare checkout is
     # `git submodule update --init --recursive`.
+    #
+    # TRAP: this MUST resolve to the nested tvm/3rdparty/dlpack (and
+    # tvm/3rdparty/dmlc-core), not the top-level rzv_drp-ai_tvm/3rdparty/
+    # dlpack -- the top-level copy is pinned to an older dlpack (v0.5) that
+    # is missing kDLCUDAManaged/kDLROCMHost/kDLOneAPI/kDLWebGPU/kDLHexagon,
+    # which tvm/include/tvm/runtime/c_runtime_api.h references, so pointing
+    # here at the wrong dlpack fails at compile, not at this probe.  Same
+    # HINTS-from-env pattern as DRPAI_WRAPPER_INCLUDE_DIR above: reuse
+    # ALP_DRPAI_TVM_APPS (the checkout's apps/ dir) rather than a second env
+    # var, since tvm/ is apps/'s sibling in the same RUHMI checkout.
     find_path(DRPAI_TVM_INCLUDE_DIR tvm/runtime/profiling.h
-              HINTS $ENV{ALP_DRPAI_TVM_HOME}/tvm/include)
+              HINTS $ENV{ALP_DRPAI_TVM_APPS}/../tvm/include)
     find_path(DRPAI_DLPACK_INCLUDE_DIR dlpack/dlpack.h
-              HINTS $ENV{ALP_DRPAI_TVM_HOME}/tvm/3rdparty/dlpack/include)
+              HINTS $ENV{ALP_DRPAI_TVM_APPS}/../tvm/3rdparty/dlpack/include)
     find_path(DRPAI_DMLC_INCLUDE_DIR dmlc/logging.h
-              HINTS $ENV{ALP_DRPAI_TVM_HOME}/tvm/3rdparty/dmlc-core/include)
+              HINTS $ENV{ALP_DRPAI_TVM_APPS}/../tvm/3rdparty/dmlc-core/include)
     find_library(MERA2_RUNTIME_LIB mera2_runtime)
     find_library(MERA2_PLAN_IO_LIB mera2_plan_io)
     find_library(DRP_TVM_RT_LIB    drp_tvm_rt)
@@ -714,7 +734,7 @@ if(ALP_SDK_USE_DRPAI_V2N)
                 "recipe's PACKAGECONFIG \"drpai\"), so this is fatal rather "
                 "than a silent degrade to a DRP-AI-less libalp_sdk.")
         else()
-            # Path (a): silicon-determined auto-enable.  Degrade cleanly.
+            # Path (a): direct plain-CMake, flag set by hand.  Degrade cleanly.
             set(_drpai_level WARNING)
             set(_drpai_verdict
                 "inference_drpai.cpp is NOT compiled and ALP_SDK_USE_DRPAI_V2N "
