@@ -22,13 +22,13 @@
 - Unit test compiles the core `.c` directly via a relative path from the test dir, with `_GNU_SOURCE` in the test CMakeLists. `zassert_within` takes `double`; cast `float` args to `(double)`.
 - Twister gate (literal paths, NO `$VARS`, NO pipe issues; read `/tmp/tw-defect/twister.json`; keep build+result in ONE `wsl … bash -lc` invocation — WSL /tmp is unstable across separate calls):
   ```
-  wsl -d Ubuntu -- bash -lc 'cd /home/alplab/zephyrproject && \
-    export ZEPHYR_BASE=/home/alplab/zephyrproject/zephyr && \
-    export EXTRA_ZEPHYR_MODULES=/mnt/c/Users/caner/Documents/GitHub/alp-sdk && \
+  wsl -d Ubuntu -- bash -lc 'cd /home/<user>/zephyrproject && \
+    export ZEPHYR_BASE=/home/<user>/zephyrproject/zephyr && \
+    export EXTRA_ZEPHYR_MODULES=/mnt/c/Users/<user>/Documents/GitHub/alp-sdk && \
     export ZEPHYR_TOOLCHAIN_VARIANT=host && \
     python3 zephyr/scripts/twister \
-      --testsuite-root /mnt/c/Users/caner/Documents/GitHub/alp-sdk/tests/unit \
-      --testsuite-root /mnt/c/Users/caner/Documents/GitHub/alp-sdk/examples \
+      --testsuite-root /mnt/c/Users/<user>/Documents/GitHub/alp-sdk/tests/unit \
+      --testsuite-root /mnt/c/Users/<user>/Documents/GitHub/alp-sdk/examples \
       -p native_sim/native/64 -O /tmp/tw-defect'
   ```
 

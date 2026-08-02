@@ -75,7 +75,7 @@ Symbols use the chip's natural name (e.g. `lsm6dso_init`); the
 configuration profile.  V2N populates the **CMI 120.E1** variant.
 
 **Conformance suite** -- The data-driven ztest suite at
-`tests/zephyr/conformance/` (13 peripheral classes × 8 contract
+`tests/zephyr/conformance/` (14 peripheral classes × 8 contract
 cases) that every backend must pass; runs on `native_sim` as the
 `alp_sdk.conformance.portable_api` Twister scenario and is the
 proof gate for a new SoM port's backends (see

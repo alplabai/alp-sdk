@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the portable <alp/power.h> RUN/STANDBY
+# operating-point profile read (CPU clock Hz, DC-DC rail mV, domain/memory/
+# wake masks, flexible-IO rail) on the E1M-AEN801 (Ensemble E8, M55-HE), via
+# the proven SE aiPM read-only mailbox path.
+#
+# Compile-checks the app + DT node on the real E8 board target; filtered OUT
+# of the native_sim PR gate (platform_allow = the AEN801 HE board only).
+
+sample:
+  name: aen-aipm-read
+  description: |
+    Bench RAM-run read of the live RUN / STANDBY power+clock operating-point
+    profiles for the E1M-AEN801 (Alif Ensemble E8, Cortex-M55-HE) through the
+    portable alp_power_profile_get() surface.  Read-only: alp_power_profile_set
+    is deliberately never invoked.
+
+tests:
+  alp_sdk.examples.aen.aipm_read.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - power
+      - aipm
+    build_only: true   # the profile read is a bench flash, not a CI run.

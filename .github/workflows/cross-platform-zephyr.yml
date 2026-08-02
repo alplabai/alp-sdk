@@ -6,8 +6,9 @@
 # the Zephyr-on-M-class developer workflow is first-class on
 # Win + Mac + Linux.  This workflow is the mechanical CI proof
 # of that claim: every PR runs the metadata validator, the
-# cross-platform lint, public/private classifier, and a single-board native_sim build on
-# Ubuntu + macOS + Windows runners.
+# cross-platform lint, public/private classifier, a bash-3.2 parse
+# sweep of every shipped shell script, and a single-board native_sim
+# build on Ubuntu + macOS + Windows runners.
 #
 # Linux remains the canonical baseline (the shipped pr-twister.yml
 # + pr-metadata-validate.yml + pr-bitbake.yml gates stay on
@@ -16,9 +17,10 @@
 #
 # Operating mode:
 #
-#   - EVERY leg blocks the PR, Linux + macOS + Windows alike.
-#     A macOS-only or Windows-only failure is a REAL defect on a
-#     host ADR 0012 calls first-class, and it fails the PR.
+#   - EVERY leg fails the JOB, Linux + macOS + Windows alike, on
+#     its own defect -- see the NOTE below for whether that also
+#     fails the PR (it does not, yet).  A macOS-only or Windows-only
+#     failure is a REAL defect on a host ADR 0012 calls first-class.
 #
 #     This was scaffolding until 2026-07-29 (alp-sdk#1023): the Mac
 #     and Win legs carried `continue-on-error: true`, so a job-level
@@ -32,13 +34,23 @@
 #     30441032872) whose per-STEP conclusions -- not the job
 #     conclusions the override forged -- were 24/24 clean.
 #
-#   - check_cross_platform.py: STILL runs in default (soft-warn)
-#                               mode on every runner, deliberately.
-#                               Its --fail-on-warning flip waits on
-#                               the docs/* cleanup of the existing
-#                               Linux-only idioms (separate task) --
-#                               so this lint reports and does not
-#                               gate, even now that the legs do.
+#     NOTE: this workflow's jobs (python-smoke, loader-smoke) are not
+#     in dev's or main's required-status-check list (verified via
+#     `gh api repos/alplabai/alp-sdk/rulesets` -> `[]` and
+#     `.../branches/{dev,main}/protection/required_status_checks`,
+#     neither of which lists these six contexts), so a red run here
+#     is visible but does not block merge yet -- removing
+#     continue-on-error buys a real signal, not enforcement. Adding
+#     these six contexts (three OSes x two jobs) to branch protection
+#     is a separate follow-up requiring the maintainer's decision.
+#
+#   - check_cross_platform.py: runs with --fail-on-warning on every
+#                               runner. The existing-doc cleanup this
+#                               was waiting on is done (2 bash-shebang
+#                               findings in tests/yocto/*.sh, fixed by
+#                               whitelisting them with header notes --
+#                               see INTENTIONALLY_BASH_HELPERS in the
+#                               script); 0 findings as of this change.
 #
 # Twister + bitbake are NOT exercised here:
 #   - Twister is the load-bearing Zephyr coverage gate -- it lives
@@ -139,17 +151,114 @@ jobs:
 
       # ---------------------------------------------------------
       # 2. Cross-platform lint (this slice, ADR 0012).
-      #    Soft-warn today; flip to --fail-on-warning once the
-      #    existing-doc cleanup task lands.
+      #    --fail-on-warning: the existing-doc cleanup this was
+      #    waiting on is done (0 findings); a new Linux-only idiom
+      #    now fails the job instead of passing silently.
       # ---------------------------------------------------------
-      - name: check_cross_platform lint (soft-warn)
-        run: python scripts/check_cross_platform.py
+      - name: check_cross_platform lint
+        run: python scripts/check_cross_platform.py --fail-on-warning
 
       - name: check public/private classifier
         run: python scripts/check_public_private.py
 
       # ---------------------------------------------------------
-      # 3. Test sweep -- the same pytest battery the Linux PR
+      # 3. bash -n parse gate over every shell script the repo ships,
+      #    parsed with the runner's SYSTEM bash.  Runs BEFORE pytest
+      #    so a parse error is reported as bash's own file+line+token,
+      #    not buried 100+ lines deep in a pytest assertion repr.
+      #
+      #    macos-latest's SYSTEM bash is 3.2.57 (Apple has frozen it
+      #    on the last GPLv2 release since ~2007) -- that's real,
+      #    unmodified bash 3.2 coverage with no container needed on
+      #    this leg, BUT only because the step pins the interpreter to
+      #    /bin/bash there: `shell: bash` resolves via PATH and the
+      #    runner image ships a Homebrew bash 5.x ahead of the system
+      #    one, so a bare `bash -n` would quietly parse with 5.x and
+      #    cover nothing this gate exists for.  The step asserts the
+      #    macOS interpreter really reports 3.2 and fails loudly if a
+      #    future image moves it.  The step runs on every OS rather
+      #    than being macOS-only: a script that's actually valid
+      #    shell parses clean under any bash version, so there is no
+      #    reason to special-case which leg checks it, and Ubuntu +
+      #    Windows(Git Bash) catch the ordinary syntax-error class the
+      #    same way.
+      #
+      #    Why this matters (PR #1050, 2026-07): bash 3.2 has a real
+      #    parser quirk newer bash does not -- it keeps tracking
+      #    single-quote state ACROSS a heredoc body while scanning for
+      #    the closing `)` of an enclosing `$( )`, even though the
+      #    heredoc tag itself is quoted (`<<'PY'`). An ODD number of
+      #    apostrophes inside such a heredoc desyncs the parser, which
+      #    then fails much later at a token with nothing to do with
+      #    the real defect. scripts/bootstrap.sh:271's
+      #    `_facts="$(python3 - … <<'PY' … PY)"` hit exactly this: a
+      #    single added apostrophe in a comment inside the heredoc
+      #    (making the count 7 instead of 6) broke parsing 131 lines
+      #    later, at an unrelated `(` in a plain `ok "…"` call. Two
+      #    hypotheses were disproved and `bash -n` on bash 5.2 stayed
+      #    clean before the real cause was found -- shellcheck does
+      #    not catch this either (it doesn't parse under bash 3.2).
+      #    This step exists so the NEXT one is named directly instead
+      #    of re-derived by hand on a borrowed Mac.
+      #
+      #    (bash 3.2.57 itself cannot be rebuilt from source here for
+      #    local reproduction -- its shipped y.tab.c is stale against
+      #    parse.y and the build fails without `bison`. Use the
+      #    `docker.io/library/bash:3.2` container image instead, e.g.
+      #    `podman run --rm -v "$PWD":/w:ro docker.io/library/bash:3.2
+      #    bash -n /w/scripts/bootstrap.sh` -- see stage_bash32_parse
+      #    in scripts/test-all.sh for the local-CI equivalent of this
+      #    step.)
+      # ---------------------------------------------------------
+      - name: bash -n parse gate (bash 3.2 compat)
+        shell: bash
+        run: |
+          set -u
+          # PIN THE INTERPRETER ON macOS. `shell: bash` resolves via PATH,
+          # and the macos-latest runner image ships a Homebrew bash 5.x
+          # AHEAD of the system one -- so a bare `bash -n` here would parse
+          # with 5.x and this gate would silently stop covering the only
+          # thing it exists for. Apple's frozen 3.2.57 is at /bin/bash.
+          PARSER=bash
+          if [ "$(uname -s)" = "Darwin" ]; then
+              PARSER=/bin/bash
+          fi
+          PARSER_VERSION="$("${PARSER}" --version | head -1)"
+          echo "parsing with: ${PARSER} -- ${PARSER_VERSION}"
+          # On macOS, refuse to run rather than downgrade in silence: if a
+          # future runner image moves /bin/bash off 3.2, this gate stops
+          # being bash-3.2 coverage and must SAY SO, not pass quietly.
+          if [ "$(uname -s)" = "Darwin" ]; then
+              case "${PARSER_VERSION}" in
+                  *"version 3.2"*) ;;
+                  *)
+                      echo "::error::${PARSER} is '${PARSER_VERSION}', not bash 3.2 -- this leg is the repo's ONLY real bash-3.2 parse coverage (see the comment above and PR #1050). Point PARSER at a 3.2 interpreter or move this gate to the docker.io/library/bash:3.2 container before removing this check."
+                      exit 1
+                      ;;
+              esac
+          fi
+          count=0
+          rc=0
+          while IFS= read -r f; do
+            count=$((count + 1))
+            if ! "${PARSER}" -n "${f}"; then
+              echo "::error file=${f}::bash -n parse error under ${PARSER_VERSION} (see bash output above)"
+              rc=1
+            fi
+          done < <(git ls-files '*.sh')
+          # `git ls-files` failing (wrong cwd, not a checkout) discards its
+          # exit status through the pipe into `read` -- the loop body would
+          # just never run and this step would exit 0 having "parsed" zero
+          # files, the exact silent-empty-loop shape this gate exists to
+          # rule out one level down. Fail loudly instead.
+          if [ "${count}" -eq 0 ]; then
+            echo "::error::git ls-files '*.sh' returned NO files -- refusing to report a silent pass."
+            exit 1
+          fi
+          exit "${rc}"
+
+      # ---------------------------------------------------------
+      # 4. Test sweep -- the same pytest battery the Linux PR
       #    gate runs.  ~370 tests; <30 s on every OS.
       # ---------------------------------------------------------
       - name: pytest tests/scripts/

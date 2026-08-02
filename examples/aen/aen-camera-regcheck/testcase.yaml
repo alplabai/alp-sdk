@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the Alif CAMERA CAPTURE stack (zephyr/drivers/
+# video/video_alif.c "alif,cam" + the DesignWare CSI-2 bridge + D-PHY + the
+# ON Semi ARX3A0 sensor) on the E1M-AEN801 (Ensemble E8, M55-HE).  Live frame
+# capture is HW-blocked on this batch (no camera sensor wired); this proves
+# cam BINDS against the full csi->dphy->arx3a0 graph.
+#
+# Compile-checks the driver + DT node on the real E8 board target; filtered OUT
+# of the native_sim PR gate (platform_allow = the AEN801 HE board only).
+
+sample:
+  name: aen-camera-regcheck
+  description: |
+    Bench RAM-run camera-capture bind proof for the E1M-AEN801 (Alif Ensemble
+    E8, Cortex-M55-HE): binds the alif,cam node through its full csi->dphy->
+    arx3a0 graph.  Live frame capture is HW-blocked this batch (no sensor
+    wired).
+
+tests:
+  alp_sdk.examples.aen.camera_regcheck.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - camera
+      - video
+      - csi
+    build_only: true   # the camera bind check is a bench flash, not a CI run.

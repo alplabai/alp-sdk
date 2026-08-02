@@ -19,7 +19,7 @@ Public API:
     iter_buildable_slices(project) -> Iterator[Slice]
 
     BoardProject, Slice, ResolvedCarveOut, SystemManifest, OrchestratorError,
-    SdkRevisionUnsupported
+    SdkRevisionUnsupported, SdkRevisionUnknown
 
 ADR-0020 Phase 4 (preview) retired the SDK-side executor (`Orchestrator`/
 `fan_out`) -- this module is planner/emit-only; execution is an external
@@ -64,6 +64,7 @@ from .models import (  # noqa: E402
     OrchestratorError,  # noqa: F401  (re-export: alp_project's lazy imports + tests)
     ResolvedCarveOut,  # noqa: F401  (re-export; consumed by carveout.py now, not __init__)
     ResolvedPartition,  # noqa: F401  (re-export; consumed by partition.py + headers.py now)
+    SdkRevisionUnknown,  # noqa: F401  (re-export: validate_board_yaml maps it to its own exit code)
     SdkRevisionUnsupported,  # noqa: F401  (re-export: validate_board_yaml maps it to exit 3)
     Slice,  # noqa: F401  (re-export: public model surface)
     StorageEntry,  # noqa: F401  (re-export: public model surface; consumed by loader.py)

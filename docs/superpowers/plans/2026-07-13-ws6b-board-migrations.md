@@ -760,9 +760,9 @@ git commit -m "chore(migrate): stamp schemaVersion:1 on all board.yaml + regen c
 Run (from the west workspace, per the worktree-build recipe):
 
 ```bash
-cd /home/caner && ZEPHYR_BASE=/home/caner/zephyr ALP_SDK_ROOT=/home/caner/alp-ws6b-migrate-wt \
-  west twister -T /home/caner/alp-ws6b-migrate-wt/examples/peripheral-io/uart-hello-world \
-  -p native_sim/native/64 -x ZEPHYR_MODULES="/home/caner/alp-ws6b-migrate-wt" \
+cd /home/<user> && ZEPHYR_BASE=/home/<user>/zephyr ALP_SDK_ROOT=/home/<user>/alp-ws6b-migrate-wt \
+  west twister -T /home/<user>/alp-ws6b-migrate-wt/examples/peripheral-io/uart-hello-world \
+  -p native_sim/native/64 -x ZEPHYR_MODULES="/home/<user>/alp-ws6b-migrate-wt" \
   -O /tmp/tw-ws6b -j 4
 ```
 

@@ -4,7 +4,8 @@ The Alp SDK supports development on **Linux, macOS, native
 Windows, and Windows + WSL2**.  The Zephyr-on-M-class workflow
 (`board.yaml` → `west build` → flash) is first-class on every
 host OS — same source tree, same `west.yml`, same metadata,
-identical artefacts.
+identical artefacts — with one exception: real-silicon builds on
+macOS need Apple Silicon (see §1, §3).
 
 The Yocto-on-A-class workflow is Linux-only by upstream constraint
 (`bitbake` does not run on macOS or native Windows).  Mac /
@@ -20,7 +21,7 @@ Sections:
 
 - §1 Overview -- workflow vs host matrix
 - §2 Linux setup (Debian / Ubuntu / Fedora)
-- §3 macOS setup (13 Ventura+)
+- §3 macOS setup (13 Ventura+; real silicon is Apple Silicon only)
 - §4 Windows native setup (PowerShell)
 - §5 Windows + WSL2 setup (for Yocto targets)
 - §6 Verification -- hello-world per OS
@@ -56,8 +57,10 @@ PowerShell into the WSL filesystem
 **Intel Macs cannot cross-compile.**  The two "Apple silicon only"
 cells above are not a preference — the pinned Zephyr SDK
 (`metadata/toolchains.json`, version `1.0.1`) publishes host builds
-for `linux-aarch64`, `linux-x86_64`, `macos-aarch64` and
-`windows-x86_64` only.  Upstream shipped `macos-x86_64` through
+for `linux-x86_64`, `macos-aarch64` and `windows-x86_64` only
+(`linux-aarch64` exists upstream at this release too, but the
+manifest's own `_comment` records it as deliberately not listed —
+no current alp-sdk path runs or downloads it).  Upstream shipped `macos-x86_64` through
 `0.17.4` and dropped it in `1.0.0`, so there is no
 `arm-zephyr-eabi` cross toolchain for an Intel Mac at the version
 this SDK pins.  `macos-aarch64` is not a substitute: Rosetta
@@ -73,24 +76,49 @@ load-bearing decision behind this matrix.  ADR
 [0010](adr/0010-heterogeneous-os-orchestration.md) is why
 heterogeneous orchestration is its own row.
 
-### 1.1 Python version: floor vs pin
+### 1.1 Python version: floor vs pin vs Zephyr's own (unmirrored) floor
 
-Every host workflow needs Python.  Two numbers matter, and they
+Every host workflow needs Python.  Three numbers matter, and they
 are deliberately different:
 
 - **Support floor: 3.10.**  `pyproject.toml` declares
   `requires-python = ">=3.10"` — the SDK's Python tooling
-  (validators, orchestrator) runs on any 3.10+.  The `tan` CLI
-  itself is a standalone binary and isn't bound by this floor.
+  (validators, orchestrator, metadata-only work such as `--emit`
+  and `tan validate`) runs on any 3.10+.  This is also what
+  `metadata/bootstrap.json`'s `prerequisites.pythonMinVersion`
+  currently checks before `scripts/bootstrap.sh`/`scripts/bootstrap.ps1`
+  assemble a Zephyr workspace.  The `tan` CLI itself is a standalone
+  binary and isn't bound by this floor.
 - **Dev/CI pin: 3.12.**  The repo-root `.python-version` file is
   the single source; every CI workflow's `actions/setup-python`
   reads it via `python-version-file`, so CI always runs exactly
   the pinned version.
+- **Zephyr's own build floor: 3.12 — real, but not mirrored here.**
+  Zephyr v4.4.1's `cmake/modules/python.cmake` hardcodes
+  `set(PYTHON_MINIMUM_REQUIRED 3.12)` and
+  `find_package(Python3 3.12 REQUIRED)`, so a `west build`/CMake
+  configure of this workspace refuses below 3.12 no matter what the
+  support floor above accepted.  `prerequisites.pythonMinVersion`
+  deliberately still says 3.10, not 3.12, for two reasons: `tan`
+  reads that field host-universally, before branching on which
+  backend a project targets (every backend's build-plan emission
+  runs `alp_project.py`, not just Zephyr's), so raising it here would
+  also refuse a Yocto-only or metadata-only host that never touches
+  Zephyr; and 3.12 is unreachable via `apt-get install python3` on
+  the Ubuntu 22.04 / Debian 12 hosts this guide itself recommends
+  (system `python3` there is 3.10 / 3.11).  Until a Zephyr-only gate
+  lands, a host below 3.12 bootstraps fine and then fails later, at
+  `west build`'s CMake configure — install a newer interpreter
+  alongside the system one (`deadsnakes` PPA or `pyenv`) if you hit
+  that.  See [`docs/troubleshooting.md`](troubleshooting.md)'s
+  "`west build` fails at CMake configure citing a Python version".
 
 To reproduce CI byte-for-byte, match the pin locally — `pyenv`
 and `uv` pick `.python-version` up automatically.  `tan doctor`'s
 `python` check is a presence probe only, with no comparison against
-the pin; anything >= 3.10 remains supported.
+the pin; anything >= 3.10 remains supported for bootstrap and the
+tooling itself, though a Zephyr build still needs >= 3.12 per the
+third bullet above regardless of what bootstrap accepted.
 
 ### 1.2 Rust toolchain (only for building `tan` from source)
 
@@ -249,9 +277,11 @@ Persist `ZEPHYR_BASE` in your shell profile (typically
 
 ## 3. macOS setup (13 Ventura+)
 
-macOS is supported natively for the Zephyr-on-M workflow.  Mac
-users targeting Yocto reach for a Linux VM (UTM, Parallels,
-VirtualBox) — `bitbake` does not run on macOS.
+macOS is supported natively for the Zephyr-on-M `native_sim`
+workflow on both architectures; real-silicon builds are Apple
+Silicon only (see §1).  Mac users targeting Yocto reach for a
+Linux VM (UTM, Parallels, VirtualBox) — `bitbake` does not run on
+macOS.
 
 ### 3.1 Homebrew prerequisites
 
@@ -569,7 +599,7 @@ Two cross-edit patterns work well:
 
    ```text
    Template: \\wsl$\{distro}\home\{user}\...
-   Example : \\wsl$\Ubuntu-22.04\home\caner\dev\alp-workspace
+   Example : \\wsl$\Ubuntu-22.04\home\<user>\dev\alp-workspace
    ```
 
    VS Code with the *Remote -- WSL* extension handles this

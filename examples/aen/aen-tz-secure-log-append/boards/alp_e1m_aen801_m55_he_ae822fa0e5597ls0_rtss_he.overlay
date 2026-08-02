@@ -1,6 +1,17 @@
+/*
+ * ITCM retarget for a non-destructive Flow C RAM-run.
+ *
+ * BOTH lines belong INSIDE /chosen: `zephyr,flash = &itcm` moves the ROM
+ * region, and the /delete-property/ drops the board's
+ * `zephyr,code-partition = &slot0_partition`.  Deleting it from `&itcm`
+ * instead is a no-op -- the property lives on /chosen, not on the memory
+ * node -- and with the board _defconfig's CONFIG_USE_DT_CODE_PARTITION=y
+ * (alp-sdk#1067) that no-op relinks this app at FLASH_LOAD_OFFSET 0x10000
+ * inside a 256 KiB ITCM instead of 0x0.
+ */
 / {
 	chosen {
 		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
 	};
 };
-&itcm { /delete-property/ zephyr,code-partition; };

@@ -470,13 +470,25 @@ def test_cli_missing_path_exits_two(tmp_path: Path) -> None:
 
 
 def test_linter_runs_against_real_repo_without_crash() -> None:
-    """The default invocation against the live repo doesn't crash
-    and exits 0 (soft warn).  Findings are expected; the lint is
-    soft today per ADR 0012.  This regression-locks the
-    no-crash promise."""
+    """The default (no-flag) invocation against the live repo doesn't
+    crash and exits 0 -- this mode stays soft-warn even with findings,
+    by design (see the module docstring's Operating mode section).
+    This regression-locks the no-crash promise."""
     rv = _run()
     assert rv.returncode == 0, (
         f"linter crashed on real repo:\n{rv.stderr}\n{rv.stdout}"
+    )
+
+
+def test_linter_fail_on_warning_against_real_repo_passes() -> None:
+    """`--fail-on-warning` is what CI actually runs (alp-sdk#1032 A5,
+    cross-platform-zephyr.yml's python-smoke step) -- assert 0 findings
+    against the live repo here too, so a new Linux-only idiom is caught
+    locally instead of only on three legs of a non-required workflow."""
+    rv = _run("--fail-on-warning")
+    assert rv.returncode == 0, (
+        f"check_cross_platform --fail-on-warning found drift:\n"
+        f"{rv.stdout}\n{rv.stderr}"
     )
 
 

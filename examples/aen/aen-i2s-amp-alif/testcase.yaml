@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the vendored ADR 0017 Tier-2 DesignWare I2S driver
+# (drivers/i2s/i2s_dw.c, "snps,designware-i2s") on the E1M-AEN801 (Ensemble
+# E8, M55-HE): drives a tone out of i2s3 through the standard Zephyr I2S API.
+#
+# Compile-checks the driver + DT node on the real E8 board target; filtered OUT
+# of the native_sim PR gate (platform_allow = the AEN801 HE board only).
+
+sample:
+  name: aen-i2s-amp-alif
+  description: |
+    Bench RAM-run I2S (DesignWare i2s_dw, i2s3@49017000) tone-out proof for
+    the E1M-AEN801 (Alif Ensemble E8, Cortex-M55-HE): drives DT_ALIAS(alp_i2s0)
+    through i2s_configure/i2s_write/i2s_trigger.
+
+tests:
+  alp_sdk.examples.aen.i2s_amp_alif.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - i2s
+      - audio
+    build_only: true   # the I2S tone-out check is a bench flash, not a CI run.

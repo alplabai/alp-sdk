@@ -48,12 +48,23 @@
 # resolving.  A malformed bound is treated as absent rather than
 # refusing a build over a metadata typo.
 #
-# What is still NOT checked here: whether the requested hw_rev EXISTS,
-# or is `status: reserved`.  An unknown revision still resolves to
-# base-rev routing and emits normally -- that is a different failure
-# with a different message, tracked in #1025.
+# Whether the requested hw_rev EXISTS is ALSO enforced, as of #1025 (the
+# safe half): `sdk_compat.revision_known()` checks the resolved table
+# before the range comparison above ever runs, and `loader.py` raises
+# `SdkRevisionUnknown` -- a distinct error from `SdkRevisionUnsupported`,
+# since an unknown revision has no range to have been outside of.
+# `scripts/alp_project_loader.py`'s `--emit composed-route-table` /
+# `carrier-netlist` path resolves the SoM/board tables independently of
+# `load_board_yaml` and carries its own copy of the same gate.
+# `scripts/validate_board_yaml.py` maps that failure to exit code 4.
+#
+# What is still NOT checked here: whether an EXISTING hw_rev is `status:
+# reserved` (or carries no `status` at all) and whether that should
+# refuse a build.  That remains open -- see #1025's tracking notes; the
+# metadata itself disagrees across families on what `status:` even means
+# today, so this deliberately does not infer a rule from it.
 #
 # Bump in the same PR that lands the matching CHANGELOG.md entry.
 
-version: 0.14.0
+version: 0.15.0
 status:  released        # released | development | preview

@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for xHCI USB host enumeration on the E1M-AEN801
+# (Ensemble E8, M55-HE): brings up the CC3501E bridge to drive the USB2_SELECT
+# mux (U47, E1M IO11 = CC3501E GPIO pad 2) before uhc_init (DWC3 + xHCI first
+# light) + uhc_enable (Enable Slot, port reset, Address Device, EP0
+# GET_DESCRIPTOR).
+#
+# Compile-checks the app + CC3501E bridge glue on the real E8 board target;
+# filtered OUT of the native_sim PR gate (platform_allow = the AEN801 HE
+# board only).
+
+sample:
+  name: aen-usb-firstlight
+  description: |
+    Bench RAM-run xHCI USB host first-light proof for the E1M-AEN801 (Alif
+    Ensemble E8, Cortex-M55-HE): drives the CC3501E-owned USB2_SELECT mux,
+    then enumerates a device on CON_USB2 through uhc_init/uhc_enable.
+
+tests:
+  alp_sdk.examples.aen.usb_firstlight.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - usb
+      - cc3501e
+    build_only: true   # the xHCI enumeration proof is a bench flash, not a CI run.

@@ -13,15 +13,21 @@ Every released SoM family and every released board carries a
 `hw_revisions:` table.  The SDK uses it to detect "wrong firmware
 for this hardware" two ways:
 
-- **Build-time (declarative only)** -- each `hw_revisions:` entry
-  carries a `[min_sdk_version, max_sdk_version]` window as
-  human-readable compatibility data, but nothing in the SDK reads
-  or enforces it today: `scripts/alp_project.py` and
-  `scripts/validate_board_yaml.py` never open
-  [`metadata/sdk_version.yaml`](../metadata/sdk_version.yaml), and
-  there is no exit-3 path.  An unrecognised `hw_rev` value silently
-  falls back to base-revision overrides instead of failing --
-  tracked as [#1025](https://github.com/alplabai/alp-sdk/issues/1025).
+- **Build-time** -- each `hw_revisions:` entry carries a
+  `[min_sdk_version, max_sdk_version]` window; the loader compares it
+  against [`metadata/sdk_version.yaml`](../metadata/sdk_version.yaml)
+  and refuses (`SdkRevisionUnsupported`, exit code 3 from
+  `scripts/validate_board_yaml.py`) when the running SDK falls
+  outside it.  Separately, an `hw_rev` that isn't a key in the
+  resolved table at all -- a typo, or a revision newer than the
+  installed SDK -- refuses too (`SdkRevisionUnknown`, exit code 4),
+  rather than silently falling back to base-revision overrides.
+  Neither check is a usability question: a revision that EXISTS
+  resolves and builds regardless of `status:` -- `reserved`, `tbd`,
+  or no `status` key at all.  Whether an existing reserved/tbd
+  revision should also refuse a build is a separate, still-open
+  question tracked as
+  [#1025](https://github.com/alplabai/alp-sdk/issues/1025).
 - **Runtime** -- the SDK boots into a board-ID check that uses
   a single ADC pin per board (SoM-side and board-side) fed by a
   resistor divider from a 1.8 V rail.  Each `hw_rev` entry's

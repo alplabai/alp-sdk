@@ -28,6 +28,8 @@ try:
 except ImportError:
     sys.exit("alp_project: PyYAML is required.  Install via `pip install pyyaml`.")
 
+from sentinels import is_tbd
+
 
 REPO = Path(__file__).resolve().parent.parent
 METADATA_ROOT = REPO / "metadata"
@@ -231,26 +233,33 @@ def resolve_soc_path(silicon: str | None, metadata_root: Path) -> Path | None:
     `check_som_topology_parity.py`) down to this one helper, and folded a
     fourth in-module copy from `resolve_memory_map()` into it too.
 
-    Nine more hand-rolled copies remain outside this module (issue #1004).
-    Most differ in the shape they fail with, so a blind call-site swap would
-    change behaviour; one does not, and is the cheap migration:
+    Issue #1004 migrated the five sites that used to hand-roll this split
+    (`gen_zephyr_board.py::_load_soc_spec` + its generated-file-banner
+    string site, `validate_metadata.py`'s two soft-fail sites, and
+    `alp_orchestrate/loader.py::_silicon_to_soc_path`) onto this helper,
+    each behind a thin wrapper that preserves that site's original
+    exception type or soft-fail shape.
+
+    Four more hand-rolled copies remain outside this module (issue #1096).
+    Most differ in the shape they fail with, so a blind call-site swap
+    would change behaviour; one does not, and is the cheap migration:
 
       - `alp_cli/validator.py:351` (`_load_soc_caps`) -- same 3-part guard,
         same `None` on failure. Behaviourally identical to this helper, so
         it is the one site migratable with provably zero behaviour change.
-      - `gen_zephyr_board.py:88` (`_load_soc_spec`) -- raises
-        `ZephyrBoardEmitError`.
-      - `alp_orchestrate/loader.py:45` -- raises `OrchestratorError`.
       - `alp_model/targets.py:69` -- unguarded 3-tuple unpack (`ValueError`
         on a malformed ref), then raises `FileNotFoundError`.
-      - `validate_metadata.py:152` and `:217` -- soft-fail into a diagnostic
-        message list rather than raising at all.
-      - `gen_zephyr_board.py:807`, `alp_cli/new_som.py:199` -- build a `str`
-        path, not a `Path`.
+      - `alp_cli/new_som.py:199` -- builds a `str` path, not a `Path`.
       - `alp_cli/new_som.py:526` -- `Path`, but rooted at `output_root`
         rather than `metadata_root`.
 
-    Migrate one of those onto this helper -- don't add a tenth.
+    Migrate one of those onto this helper -- don't add a fifth. (A further
+    three `soc_ref.split(":")` sites in `alp_cli/new_som.py` -- :154, :339,
+    :503 -- are out of scope for this helper: they extract vendor/family/
+    part slugs to seed a *new* preset's scaffold content, not to resolve a
+    path to an existing SoC JSON, so there is no `resolve_soc_path()` call
+    to swap in. They'd still need re-deriving by hand if the ref format
+    ever widens past 3 parts.)
     """
     if not silicon:
         return None
@@ -286,7 +295,7 @@ def _resolve_silicon_variant(
     variants = soc_spec.get("variants") or []
 
     declared = sku_preset.get("silicon_variant")
-    if declared and declared != "TBD":
+    if declared and not is_tbd(declared):
         for v in variants:
             if v.get("order_code") == declared:
                 return v
@@ -354,6 +363,14 @@ def _hwrev_pad_route_overrides(
     ``--emit composed-route-table`` differ between revisions of one SKU --
     e.g. AEN ``r1`` restores IO8/IO10 to Alif GPIOs and IO21 to the CC3501E,
     the pre-2626-R2 routing.
+
+    Raises ``alp_orchestrate.models.SdkRevisionUnknown`` when ``hw_rev`` is
+    set but isn't a key in the family table.  Before #1025 an unrecognised
+    ``hw_rev`` fell through to ``{}`` here, so the composed table silently
+    emitted with base (production) pad routing instead of naming the
+    wrong-hardware problem -- this is the site that bug lived at, and this
+    emit path resolves its own SoM/board data independently of
+    ``alp_orchestrate.loader.load_board_yaml``, so it needs its own gate.
     """
     if not hw_rev:
         return []
@@ -365,6 +382,18 @@ def _hwrev_pad_route_overrides(
     if not path.is_file():
         return []
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+
+    # Lazy import: alp_orchestrate imports this module at load time (the
+    # resolve_memory_map edge -- see `_load_yaml` above), so the reverse
+    # import must happen at call time, not at module scope.
+    from alp_orchestrate.models import SdkRevisionUnknown
+    from alp_orchestrate.sdk_compat import revision_known
+    if revision_known(data, hw_rev) is False:
+        available = sorted((data.get("hw_revisions") or {}).keys())
+        raise SdkRevisionUnknown(
+            f"SoM {sku} hw_rev {hw_rev!r} is not a known hardware "
+            f"revision. Available hw_rev(s) for {sku}: {available}.")
+
     rev = (data.get("hw_revisions") or {}).get(hw_rev) or {}
     overrides = rev.get("pad_route_overrides") or []
     return [e for e in overrides

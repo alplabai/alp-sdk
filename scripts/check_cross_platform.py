@@ -67,13 +67,13 @@ Suppression mechanisms:
 
 Operating mode:
 
-  Default: warn-and-pass.  Exit 0 even when warnings exist.  This
-  is the bootstrap mode -- the goal is to surface drift to the
-  contributor without blocking PRs while the existing docs are
-  cleaned up.
+  Default: warn-and-pass.  Exit 0 even when warnings exist.  Kept
+  for local/ad-hoc runs (`python scripts/check_cross_platform.py`
+  with no flags) where a contributor wants to see drift without
+  the run failing out from under them.
 
-  --fail-on-warning: exit 1 if any warnings exist.  Use this in
-  CI once the existing-doc warnings are resolved.
+  --fail-on-warning: exit 1 if any warnings exist.  This is what
+  CI runs (see below) -- 0 findings as of alp-sdk#1032 A5.
 
   --quiet: suppress per-finding output, print the summary only.
 
@@ -114,11 +114,12 @@ Exit codes:
   1  findings + --fail-on-warning
   2  invocation error (bad --path, missing root, etc.)
 
-CI hook (future): once the existing-doc warnings are cleaned,
-.github/workflows/pr-metadata-validate.yml will add a step
-`python scripts/check_cross_platform.py --fail-on-warning`.
-The cross-platform-zephyr.yml workflow (this same slice) wires
-the soft-warn invocation today.
+CI hook (shipped): `.github/workflows/cross-platform-zephyr.yml`'s
+`python-smoke` job runs `--fail-on-warning` on every leg (Ubuntu +
+macOS + Windows) -- see that workflow for the required-status-check
+caveat (these legs are not yet in `dev`'s / `main`'s required list;
+see alp-sdk#1032). `pr-metadata-validate.yml` does not duplicate
+this step.
 
 Local invocation:
 
@@ -203,12 +204,19 @@ INTENTIONALLY_BASH_HELPERS: frozenset[str] = frozenset({
     "scripts/bench/aen/flash-jlink-mramxip.sh",
     "scripts/bench/aen/flash-jlink-hp.sh",
     "scripts/bench/aen/flash-run.sh",
+    "scripts/bench/aen/flash-run-dualcore.sh",
     "scripts/bench/aen/flash-update-log-dual.sh",
     "scripts/bench/aen/flash-update-log-firewall-probe.sh",
     "scripts/bench/aen/ram-run.sh",
     "scripts/bench/aen/read-update-log-proof.sh",
     "scripts/bench/aen/reread.sh",
     "scripts/bench/aen/flash-all-flowd.sh",
+    # RZ/V2N A55 Yocto-target RPC bench + sanitizer helpers.  Both
+    # cross-compile/run against an aarch64-linux-gnu Yocto sysroot;
+    # neither has a Mac/Windows equivalent to document.  Each carries
+    # a "Cross-platform scope:" header note.
+    "tests/yocto/build_rpc_uio_bench_aarch64.sh",
+    "tests/yocto/run_sanitized_rpc_tests.sh",
 })
 
 # Markdown files that, by their very topic, MUST mention Linux-only

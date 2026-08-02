@@ -21,7 +21,7 @@ boot:
   method: mcuboot
   signing:
     algorithm: ecdsa_p256
-    key_file:  keys/prod_ecdsa_p256.pub.pem
+    key_file:  keys/mcuboot_dev_ecdsa_p256.pem
   swap_algorithm: scratch
 ```
 

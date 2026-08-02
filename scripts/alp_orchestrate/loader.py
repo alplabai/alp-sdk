@@ -27,11 +27,13 @@ except ImportError:
     sys.exit("alp_orchestrate: jsonschema is required.  Install via `pip install jsonschema`.")
 
 from alp_cli.validator import iter_schema_errors
-from alp_project import resolve_memory_map
+from alp_project import resolve_memory_map, resolve_soc_path
+from sentinels import is_tbd
 
 from . import sdk_compat
 from .models import (BoardProject, IpcEntry, OrchestratorError,
-                     SdkRevisionUnsupported, Slice, StorageEntry)
+                     SdkRevisionUnknown, SdkRevisionUnsupported, Slice,
+                     StorageEntry)
 from .partition import _known_flash_devices
 from .paths import BOARD_SCHEMA, METADATA_ROOT, REPO
 from .topology import _default_os_from_core_type
@@ -44,12 +46,11 @@ from .validate import (
 
 def _silicon_to_soc_path(silicon: str, metadata_root: Path) -> Path:
     """`alif:ensemble:e7` -> metadata/socs/alif/ensemble/e7.json."""
-    parts = silicon.split(":")
-    if len(parts) != 3:
+    soc_path = resolve_soc_path(silicon, metadata_root)
+    if soc_path is None:
         raise OrchestratorError(
             f"silicon ref '{silicon}' is not a triple-colon string")
-    return (metadata_root / "socs" / parts[0] / parts[1] /
-            f"{parts[2]}.json")
+    return soc_path
 
 
 # ---------------------------------------------------------------------
@@ -177,10 +178,64 @@ def _resolve_topology_for_core(
     return None
 
 
+def _resolve_jlink_flash_device(
+    som_preset: dict[str, Any],
+    soc_spec: dict[str, Any],
+) -> Optional[str]:
+    """Resolve `variants[].debug.jlink_flash_device` for the SoC variant this
+    SoM preset declares.
+
+    Matches the SoM's `silicon_variant:` against `soc_spec["variants"][].
+    order_code`, falling back to `alp_module_skus` membership when
+    `silicon_variant:` is absent/"TBD" -- the same two-step match as the
+    canonical `alp_project_loader._resolve_silicon_variant` (re-exported as
+    `alp_project._resolve_silicon_variant`) and `gen_zephyr_board.
+    _resolve_variant`.  NOT delegated to that canonical helper -- unlike
+    `resolve_memory_map` (imported from `alp_project` two lines up in this
+    same file, so a cross-import is clearly not the obstacle), it takes
+    `(sku_preset, metadata_root)` and re-resolves the SoC-JSON path + reads
+    + re-parses it from disk itself.  By the time this function runs,
+    `_resolve_board_impl` has already loaded that exact JSON into the
+    `soc_spec` dict this function receives as a parameter, and this
+    function's sole caller (`_validate_topology_cores`) has no other use
+    for `metadata_root`.  Delegating would mean a second disk read + parse
+    of a file already in hand, purely to save this six-line match -- kept
+    independent instead, deliberately in lockstep with both of the above;
+    if either one grows a third fallback or drops the "TBD" sentinel,
+    update this one too.
+
+    `jlink_flash_device` is a single per-variant string (per
+    soc-spec-v1.schema.json:380-383: it "is not per-core... a single
+    per-variant string, not a jlink_device-shaped map"), unlike its sibling
+    `jlink_device` which IS keyed by core id -- so this returns one value
+    reused for every core's slice, not a per-core lookup.
+
+    None when the variant can't be resolved, or the resolved variant's
+    `debug:` block carries no `jlink_flash_device` key -- per
+    soc-spec-v1.schema.json:368, an absent key is the correct published
+    "unknown", never a value to invent from a naming convention.
+    """
+    variants = soc_spec.get("variants") or []
+    variant: Optional[dict[str, Any]] = None
+    declared = som_preset.get("silicon_variant")
+    if declared and not is_tbd(declared):
+        variant = next(
+            (v for v in variants if v.get("order_code") == declared), None)
+    if variant is None:
+        sku = som_preset.get("sku")
+        variant = next(
+            (v for v in variants if sku in (v.get("alp_module_skus") or [])),
+            None)
+    if variant is None:
+        return None
+    return (variant.get("debug") or {}).get("jlink_flash_device")
+
+
 def _slice_from_resolved(
     core_id: str,
     entry: dict[str, Any],
     soc_core_type: str = "",
+    jlink_flash_device: Optional[str] = None,
 ) -> Slice:
     """Build a Slice dataclass from the resolved per-core entry.
 
@@ -189,6 +244,10 @@ def _slice_from_resolved(
     zephyr, cortex-a* -> yocto, else "off").  Passing the empty
     string for `soc_core_type` preserves the historical default of
     "off".
+
+    `jlink_flash_device` is the caller's already-resolved
+    `_resolve_jlink_flash_device()` result (see that docstring) -- None
+    when this SoC variant publishes no J-Link flash-device profile.
     """
     return Slice(
         core_id=core_id,
@@ -209,6 +268,7 @@ def _slice_from_resolved(
         # Absent -> True (the core has a HW console); only a SoM preset's
         # `topology.<id>.hw_console: false` marks a headless core.
         hw_console=bool(entry.get("hw_console", True)),
+        jlink_flash_device=jlink_flash_device,
     )
 
 
@@ -241,6 +301,63 @@ def _resolve_board(
     return _resolve_board_impl(project, metadata_root)
 
 
+def _sku_family_dir(sku: str) -> Optional[str]:
+    """The SoM-family directory name for `sku`, or None when unrecognised.
+
+    Shared by `_check_hw_rev_exists` and `_check_sdk_supports_hw_rev`: an
+    unrecognised SKU is `_resolve_board`'s error to raise, not either
+    gate's to pre-empt with a worse message, so both stay quiet on
+    `ValueError` rather than failing here.
+    """
+    try:
+        from alp_project import _sku_family
+        return _sku_family(sku)
+    except (ImportError, ValueError):
+        return None
+
+
+def _check_hw_rev_exists(
+    metadata_root: Path,
+    *,
+    sku: str,
+    som_hw_rev: Optional[str],
+    board_name: Optional[str],
+    board_hw_rev: Optional[str],
+    board_preset: Optional[dict[str, Any]],
+) -> None:
+    """Refuse an hw_rev that isn't a key in its resolved `hw_revisions:` table.
+
+    An hw_rev absent from the table used to silently resolve to empty
+    overrides -- base-revision pad routing with a clean exit code, i.e. a
+    wrong-hardware emit (#1025, the safe half).  Runs BEFORE
+    `_check_sdk_supports_hw_rev`'s min/max comparison: an unknown revision
+    has no declared range to compare against, so reporting it as
+    out-of-range would name the wrong cause.
+
+    Existence-only, deliberately blind to `status:` -- a revision that
+    EXISTS passes regardless of being `status: reserved`, `status: tbd`,
+    or carrying no `status` key at all.  Skips a side entirely when that
+    side's table doesn't exist to check against (inline boards carry no
+    per-board `hw_revisions:` table).
+    """
+    family_dir = _sku_family_dir(sku)
+
+    known = sdk_compat.family_revision_known(metadata_root, family_dir, som_hw_rev)
+    if known is False:
+        available = sdk_compat.family_available_revisions(metadata_root, family_dir)
+        raise SdkRevisionUnknown(
+            f"SoM {sku} hw_rev {som_hw_rev!r} is not a known hardware "
+            f"revision. Available hw_rev(s) for {sku}: {available}.")
+
+    known = sdk_compat.revision_known(board_preset, board_hw_rev)
+    if known is False:
+        available = sorted((board_preset or {}).get("hw_revisions", {}).keys())
+        raise SdkRevisionUnknown(
+            f"board {board_name} hw_rev {board_hw_rev!r} is not a known "
+            f"hardware revision. Available hw_rev(s) for {board_name}: "
+            f"{available}.")
+
+
 def _check_sdk_supports_hw_rev(
     metadata_root: Path,
     *,
@@ -257,21 +374,14 @@ def _check_sdk_supports_hw_rev(
     nothing implemented it, so an upgraded SDK silently emitted for a
     revision it no longer supported (#1019).
 
-    Deliberately NOT a check that the revision exists or is usable: an
-    unknown or `status: reserved` revision is a different failure with a
-    different message, tracked at #1025.
+    Callers run `_check_hw_rev_exists` first: an unknown revision is that
+    gate's failure, not this one's -- it has no bounds to compare.
     """
     sdk_version = sdk_compat.read_sdk_version(metadata_root)
     if sdk_version is None:
         return
 
-    try:
-        from alp_project import _sku_family
-        family_dir = _sku_family(sku)
-    except (ImportError, ValueError):
-        # An unrecognised SKU is _resolve_board's error to raise, not
-        # this gate's to pre-empt with a worse message.
-        family_dir = None
+    family_dir = _sku_family_dir(sku)
 
     reason = sdk_compat.check(
         sdk_version,
@@ -402,6 +512,10 @@ def _validate_topology_cores(
         for c in (soc_spec.get("cores") or []) if "id" in c
     }
 
+    # SoC-variant fact (not per-core -- see `_resolve_jlink_flash_device`),
+    # resolved once and reused for every core's slice below.
+    jlink_flash_device = _resolve_jlink_flash_device(som_preset, soc_spec)
+
     cores: dict[str, Slice] = {}
     for core_id in soc_core_ids:
         resolved = _resolve_topology_for_core(
@@ -419,6 +533,7 @@ def _validate_topology_cores(
         slice_ = _slice_from_resolved(
             core_id, resolved,
             soc_core_type=soc_core_type_by_id.get(core_id, ""),
+            jlink_flash_device=jlink_flash_device,
         )
         _enforce_loader_rules(slice_)
         _enforce_os_matches_core_class(
@@ -726,6 +841,14 @@ def load_board_yaml(path: Path, *,
 
     (sku, hw_rev, som_preset, silicon, soc_spec, board_preset,
      board_name, board_hw_rev) = _resolve_board(project, metadata_root)
+
+    _check_hw_rev_exists(
+        metadata_root,
+        sku=sku,
+        som_hw_rev=hw_rev or som_preset.get("default_hw_rev"),
+        board_name=board_name,
+        board_hw_rev=board_hw_rev,
+        board_preset=board_preset)
 
     _check_sdk_supports_hw_rev(
         metadata_root,

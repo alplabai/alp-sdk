@@ -5,7 +5,7 @@
   "description": "Validates metadata/bootstrap.json -- the single source of truth for the Zephyr-workspace-assembly FACTS scripts/bootstrap.sh and scripts/bootstrap.ps1 both read today; tan (Rust, cross-platform) has read the same facts since tan-cli PR #55 (tan-core's parse_bootstrap_manifest / BootstrapFacts), not merely an INTENDED future consumer (issue #917). Facts only; control flow (ZEPHYR_BASE reuse/rejection, venv idempotency, .west branching) stays as CODE in each executor -- this schema deliberately has no step/action shape. scripts/check_bootstrap_manifest.py is the drift gate that keeps this file, west.yml's zephyr revision, and each CI workflow's own Zephyr pin in lockstep (see that script's own module docstring for the full list of checks it runs).",
   "type": "object",
   "additionalProperties": false,
-  "required": ["_comment", "schemaVersion", "zephyr", "venv", "prerequisites", "west", "pip", "env", "nativeLibHints", "manualInstallHints"],
+  "required": ["_comment", "schemaVersion", "zephyr", "venv", "prerequisites", "west", "pip", "verdict", "env", "nativeLibHints", "manualInstallHints"],
   "properties": {
     "_comment": {
       "type": "string",
@@ -55,7 +55,7 @@
           "type": "object",
           "additionalProperties": false,
           "required": ["linux", "macos", "windows"],
-          "description": "The single-source-of-truth install command for each prerequisites.* tool (issue #949) -- one shell command per tool, not per bare package name, so a doctor/doc/script site can print it verbatim. Deliberately keyed by linux/macos/windows -- NOT by a single `posix` key the way prerequisites.posix itself is -- because a `sudo apt-get install`-shaped command is Debian-family-specific and a `brew install`-shaped command is macOS-specific; one `posix` key cannot hold both without silently picking one distro's package manager as the de-facto POSIX standard, which is exactly why the issue #949 body itself already listed `posix` and `macos` separately rather than folding them together. These three OS keys instead mirror nativeLibHints' own OS key set immediately below, which hit the identical apt-vs-brew problem for the same reason. Each OS object's tool-name KEYS must exactly equal `prerequisites.posix` -- for BOTH install.linux and install.macos, deliberately, even though macOS only hard-*checks* the narrower `prerequisites.macos` subset at run time (see that key's own description): install.macos still carries a command for every posix tool, `xz`/`wget` included, so the hint text exists for the rare macOS user who needs one of them manually even though bootstrap.sh doesn't refuse without it. install.windows' keys instead equal prerequisites.windows. scripts/check_bootstrap_manifest.py's `_check_install_commands` is the drift gate for this whole subtree -- see that function's own docstring for the full, authoritative list of what it verifies; not restated here so it can't drift out of step a second time.",
+          "description": "The single-source-of-truth install command for each prerequisites.* tool (issue #949) -- one shell command per tool, not per bare package name, so a doctor/doc/script site can print it verbatim. Deliberately keyed by linux/macos/windows -- NOT by a single `posix` key the way prerequisites.posix itself is -- because a `sudo apt-get install`-shaped command is Debian-family-specific and a `brew install`-shaped command is macOS-specific; one `posix` key cannot hold both without silently picking one distro's package manager as the de-facto POSIX standard, which is exactly why the issue #949 body itself already listed `posix` and `macos` separately rather than folding them together. These three OS keys instead mirror nativeLibHints' own OS key set immediately below, which hit the identical apt-vs-brew problem for the same reason. Each OS object's tool-name KEYS must exactly equal `prerequisites.posix` -- for BOTH install.linux and install.macos, deliberately, even though macOS only hard-*checks* the narrower `prerequisites.macos` subset at run time (see that key's own description): install.macos still carries a command for every posix tool, `xz`/`wget` included, so the hint text exists for the rare macOS user who needs one of them manually even though bootstrap.sh doesn't refuse without it. install.windows' keys are NOT pinned by equality the way install.linux / install.macos are pinned to prerequisites.posix -- the completeness check is one-directional only: every prerequisites.windows tool needs an install.windows entry, but install.windows may ALSO carry an entry with no matching prerequisites.windows gate at all, PROVIDED it is named in scripts/check_bootstrap_manifest.py's own `_WINDOWS_INSTALL_ONLY_TOOLS` allowlist -- an entry that is neither gated nor allowlisted is rejected, so this is a bounded, not unbounded, superset (issue #1036's `7zip` is the first allowlisted case -- `west sdk install` on native Windows needs it on PATH since patoolib shells out to an external 7z/7za/7zr/7zz/7zzs/unar binary for .7z extraction with no pure-Python fallback, but bootstrap.ps1 itself never runs `west sdk install`, so 7-Zip must NOT gate bootstrap.ps1 -- see manualInstallHints.windows.note). Membership in `install.linux` / `install.macos` is exact-equality-pinned to prerequisites.posix -- a stray key there is always rejected, regardless of what a bootstrap script refuses without. An unallowlisted stray key in `install.windows` is likewise always rejected, not silently accepted -- scripts/check_bootstrap_manifest.py's `_check_install_commands` (issue #949, extended #1036) is the single check that enforces all of this. The two live superset cases today: install.macos's `xz`/`wget` (macOS's bsdtar decompresses .xz in-process, and the pinned Zephyr SDK's setup.sh only hard-checks for `wget` on its linux-* host branch, not darwin-*) and install.windows's `7zip` (gates `west sdk install`, a separate manual step bootstrap.ps1 deliberately never runs -- not bootstrap.ps1 itself). See that function's own docstring for the full, authoritative list of what it verifies; not restated here so it can't drift out of step a second time.",
           "properties": {
             "linux": {
               "type": "object",
@@ -70,7 +70,7 @@
             "windows": {
               "type": "object",
               "additionalProperties": { "type": "string", "minLength": 1 },
-              "description": "One `winget install -e --id <PackageId>` command per prerequisites.windows tool, copied VERBATIM from scripts/bootstrap.ps1's own hardcoded $Prereqs Hint= values -- those values remain the authority (bootstrap.ps1 cannot read this file to print its own prereq-missing hint; see prerequisites' own description above), and scripts/check_bootstrap_manifest.py asserts the two agree byte-for-byte."
+              "description": "One `winget install -e --id <PackageId>` command per prerequisites.windows tool, copied VERBATIM from scripts/bootstrap.ps1's own hardcoded $Prereqs Hint= values for that (GATED) tool -- those values remain the authority for a gated tool (bootstrap.ps1 cannot read this file to print its own prereq-missing hint; see prerequisites' own description above), and scripts/check_bootstrap_manifest.py asserts the two agree byte-for-byte. MAY also carry a command for a tool with no matching prerequisites.windows gate and no $Prereqs entry at all (issue #1036's `7zip`; see prerequisites.install's own description above for why) -- such a tool is exempt from the $Prereqs byte-for-byte check, since bootstrap.ps1 never prompts for it."
             }
           }
         }
@@ -129,6 +129,32 @@
         "editableInstall": {
           "type": "string",
           "description": "Target `pip install -e <target>` installs -- the ${SDK_ROOT}-tokened alp-sdk checkout (tan's Python backend, alp_cli)."
+        }
+      }
+    },
+    "verdict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["blockingPhases", "partialNoteTemplate", "incompleteMessageTemplate", "incompleteRemedy"],
+      "description": "The single source for the closing-verdict rule (issue #1038 / tan-cli#220): each pip-install phase below stays non-fatal in itself -- the workspace is left on disk regardless of which packages failed -- but a run that hit one of `blockingPhases` has NOT produced an environment that can do what it was bootstrapped for, and must not report unqualified success. Both scripts/bootstrap.sh and scripts/bootstrap.ps1 read this object (instead of each hardcoding the phase set and the wording a second time); tan-cli's own `WORKSPACE_BLOCKING` (crates/tan-cli/src/commands/bootstrap/steps.rs) declares the identical three phase IDs independently -- tan does not read this manifest key today, so keeping the two declarations in sync across repos is still a by-hand contract, not a mechanically-gated one.",
+      "properties": {
+        "blockingPhases": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "The `pip` sub-step identifiers (matching the `code` argument each script's warn-call site tags itself with -- `zephyr-requirements`, `sdk-extras`, `editable-install`) after which the closing verdict must not be an unqualified success. Deliberately excludes `pip-upgrade`: the pip already present still installs packages, so a failed pip/wheel self-upgrade is cosmetic, not blocking."
+        },
+        "partialNoteTemplate": {
+          "type": "string",
+          "description": "Printed as a second line under a still-successful 'Bootstrap complete.' when --allow-partial was passed and blockingPhases is non-empty. The literal token `{{PHASES}}` is replaced with the comma-joined list of the phases that actually failed this run (a subset of blockingPhases, not the whole list) -- substituted by each script itself, not by any token both scripts already share (${SDK_ROOT}/${WORKSPACE_DIR}), since this substitution is run-dependent, not a fixed path."
+        },
+        "incompleteMessageTemplate": {
+          "type": "string",
+          "description": "The closing message when blockingPhases is non-empty and --allow-partial was NOT passed -- the run exits non-zero. Same `{{PHASES}}` substitution as partialNoteTemplate."
+        },
+        "incompleteRemedy": {
+          "type": "string",
+          "description": "The remedy line printed alongside incompleteMessageTemplate, naming both ways out (fix the failed installs and re-run, or accept the workspace as-is with --allow-partial)."
         }
       }
     },

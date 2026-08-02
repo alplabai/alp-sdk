@@ -1,5 +1,5 @@
 From 023b67a44b2d0fed75c912c6685853a2f3b3a2e6 Mon Sep 17 00:00:00 2001
-From: Alp Lab AB <gate@alp-lab.se>
+From: Alp Lab AB <contact@alplab.ai>
 Date: Fri, 12 Jun 2026 13:47:22 +0200
 Subject: [PATCH] rzv2n-dev: ALP E1M production boot: eMMC 1.8 V rail + pinned
  console
@@ -27,7 +27,7 @@ than by editing the env block: that block is patched by optional
 vendor feature layers (meta-rz-drpai add-ether) and varies per build,
 so the stable CONFIG_BOOTCOMMAND line is the only patch-safe hook.
 
-Signed-off-by: Alp Lab AB <gate@alp-lab.se>
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  board/renesas/rzv2n-dev/Kconfig     | 24 ++++++++++++++++++++++++
  board/renesas/rzv2n-dev/rzv2n-dev.c | 11 +++++++++++

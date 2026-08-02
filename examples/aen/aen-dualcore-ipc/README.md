@@ -61,19 +61,26 @@ before dropping into its trailing idle/serve loop:
   request (or, on HE, all `ROUND_TRIPS` round-trips completed with 0 reply
   mismatches).
 - `RESULT SKIP: dualcore-ipc -- ...` — the peer never showed, or stopped
-  responding, within a bounded window: the boot authority reported
-  `ALP_ERR_NOSUPPORT` and HE was never released, either core's MHU-1 sender
-  link never came ready (`ACCESS_READY`), HP never saw a request, or HP never
-  replied to HE's first (or a later) round — states what was locally proven,
-  not a failure of this app's code.
+  responding, within a bounded window: either core's MHU-1 sender link never
+  came ready (`ACCESS_READY`), HP never saw a request, or HP never replied to
+  HE's first (or a later) round — states what was locally proven, not a
+  failure of this app's code.
 - `RESULT FAIL: dualcore-ipc -- ...` — a real local error: `alp_mproc_boot_core`
-  (HP) returned an unexpected rc, or a reply's payload did not match
-  `request.payload + 1` (a correctness bug, not an absent peer).
+  (HP) returned an unexpected rc (`ALP_ERR_NOSUPPORT` included -- see below),
+  or a reply's payload did not match `request.payload + 1` (a correctness
+  bug, not an absent peer).
 
-On THIS bench the HE↔HP release path is known-blocked and
-`alp_mproc_boot_core` returns `ALP_ERR_NOSUPPORT` (`rc=-6`) — HP reports that
-as `RESULT SKIP`, not `RESULT FAIL`: the boot authority itself says it can't
-release HE here, which is a bench/silicon limitation, not a bug in this app.
+This build ships `CONFIG_HAS_ALIF_SE_SERVICES=y` and no `native_sim` overlay,
+so `alp_mproc_boot_core()` always resolves to the E8 SE backend for
+`ALP_CORE_M55_HE` — the `<alp/mproc.h>` contract's `ALP_ERR_NOSUPPORT` case
+("no boot authority for `core` in this build: wrong SoM, `native_sim`, or a
+core the platform boots by other means") is not reachable in this
+configuration. So HP treats *any* nonzero `alp_mproc_boot_core` rc, including
+`ALP_ERR_NOSUPPORT`, as `RESULT FAIL`, not a skip: on these boards a `-6`
+here would mean the boot path fell out of the build (e.g. the SE backend lost
+the link, or the silicon-ref stopped matching) — a regression this app must
+surface, not paper over.
+
 Every wait for the peer (HP's/HE's MHU-1 sender-link-ready wait: 3000 ms; HP's
 request verdict window: 3000 ms; HE's per-round reply wait: 200 ms) is
 bounded, so a genuinely absent peer or a sender link that never comes ready

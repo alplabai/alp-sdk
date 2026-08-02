@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the Alif ISP-Pico (Verisilicon ISP Nano "Pico",
+# zephyr/drivers/video/isp_pico.c, "vsi,isp-pico") staging on the E1M-AEN801
+# (Ensemble E8, M55-HE).  Build-only proof: runtime stays bench-blocked
+# (no camera sensor wired this hardware batch).
+#
+# Compile-checks the driver + DT node on the real E8 board target; filtered OUT
+# of the native_sim PR gate (platform_allow = the AEN801 HE board only).
+
+sample:
+  name: aen-isp-regcheck
+  description: |
+    Bench RAM-run ISP-Pico (vsi,isp-pico) build proof for the E1M-AEN801
+    (Alif Ensemble E8, Cortex-M55-HE): compiles + links isp_pico.c against
+    hal_alif's vendored ISP headers.  Runtime bench-blocked (no camera
+    sensor wired).
+
+tests:
+  alp_sdk.examples.aen.isp_regcheck.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - isp
+      - video
+      - camera
+    build_only: true   # the ISP-Pico build check is a bench flash, not a CI run.

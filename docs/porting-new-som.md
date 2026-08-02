@@ -392,34 +392,44 @@ status:
 
 ## 6. Step 3 — Update the schema `sku` pattern
 
-**Edit:** `metadata/schemas/som-preset-v1.schema.json`
+**Edit:** `metadata/schemas/som-preset-v1.schema.json` **and**
+`metadata/schemas/board.schema.json` (`properties.som.properties.sku`) —
+the constraint is duplicated across both, by design (JSON Schema has
+no `$ref`-able cross-file pattern reuse here); a one-sided edit is
+exactly the bug #1089 fixed, and `tests/scripts/test_som_sku_pattern.py`
+pins the two copies equal so drifting them apart fails loudly.
 
-The current pattern accepts `E1M-AEN[3-8]01` — i.e. SKUs for the
-released parts E3..E8 only.  Adding **E1M-AEN901** widens the
-allowed range; without this edit, `validate_metadata.py` will reject
-the new YAML with:
+The current pattern accepts `E1M-AEN[3-8][0-9]{2}` — i.e. silicon
+tiers E3..E8 with any 2-digit per-configuration tail.  Adding a new
+family or widening the tier range further (e.g. **E1M-AEN901**) needs
+a pattern edit; without it, `validate_metadata.py` will reject the
+new YAML with:
 
 ```
 FAIL metadata/e1m_modules/E1M-AEN901.yaml
-  · sku: 'E1M-AEN901' does not match '^E1M-(AEN[3-8]01|V2N10[12]|V2M10[12]|NX9[0-9]{3})$'
+  · sku: 'E1M-AEN901' does not match '^E1M-(AEN[3-8][0-9]{2}|V2N[0-9]{3}|V2M[0-9]{3}|NX9[0-9]{3})$'
 ```
 
-Edit the pattern to accept `AEN[3-9]01`:
+Edit the pattern in **both** schema files to accept `AEN[3-9][0-9]{2}`:
 
 ```jsonc
 "sku": {
   "type": "string",
-  "pattern": "^E1M-(AEN[3-9]01|V2N10[12]|V2M10[12]|NX9[0-9]{3})$"
+  "pattern": "^E1M-(AEN[3-9][0-9]{2}|V2N[0-9]{3}|V2M[0-9]{3}|NX9[0-9]{3})$"
 }
 ```
 
-> **Note:** This is the *only* file outside `metadata/e1m_modules/`
-> and `metadata/socs/` you should need to touch for a new SoM
-> *within an existing family*.  If you are also extending an
-> existing family's SKU shape (e.g. adding a `-2P` suffix), expand
-> the pattern accordingly; for a brand-new family, add a fresh
-> alternation branch.  The pattern is the only schema-side
-> constraint specific to SKU strings; everything else is structural.
+> **Note:** These two files are the *only* ones outside
+> `metadata/e1m_modules/` and `metadata/socs/` you should need to
+> touch for a new SoM *within an existing family*. If you are also
+> extending an existing family's SKU shape (e.g. adding a `-2P`
+> suffix), expand the pattern accordingly in both files; for a
+> brand-new family, add a fresh alternation branch to both **and**
+> edit `metadata/schemas/som-release-bundle-v1.schema.json`, which
+> carries a third, looser SKU pattern plus a `family` enum — miss it
+> and provisioning rejects the new family's release bundle. Within an
+> existing family those two patterns are the only schema-side
+> constraints specific to SKU strings; everything else is structural.
 
 ---
 
@@ -670,7 +680,7 @@ SoM; the conformance suite proves its *backends*.
 every backend must pass — it mechanically exercises the uniform
 lifecycle contract of every portable peripheral class (GPIO / I²C /
 SPI / UART / ADC / DAC / PWM / CAN / RTC / WDT / counter / qenc /
-I²S, plus the I²C/SPI target modes) and the non-class v0.9
+I²S / I3C, plus the I²C/SPI target modes) and the non-class v0.9
 surfaces (`alp_init`/`alp_deinit` idempotency, the
 `alp_uart_rx_ringbuf_*` contract, I²C-target config validation):
 

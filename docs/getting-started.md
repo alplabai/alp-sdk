@@ -149,15 +149,25 @@ M33 core — the two paths coexist on one module.
 
 ## 1. Prerequisites
 
-The SDK is supported equally on **macOS**, **Windows**, and
-**Linux** -- pick whichever you already have.  Tooling versions
-are identical across hosts; the only platform-specific bit is how
-you install them.
+The SDK is supported on **macOS**, **Windows**, and **Linux** --
+pick whichever you already have.  Tooling versions are identical
+across hosts for `native_sim` and day-to-day iteration; real-silicon
+Zephyr builds are the one platform-specific exception, and only on
+Intel Macs (see below).
+
+**Intel Macs can build and run `native_sim`** (host-toolchain build,
+no Zephyr SDK involved) **but not real-silicon Zephyr images or
+`tan build`.**  The pinned Zephyr SDK ships no `macos-x86_64` host
+build (dropped in `1.0.0`; `macos-aarch64` is not a substitute --
+Rosetta translates x86_64 *for* Apple Silicon, not the reverse, and
+macOS has no WSL2 fallback).  Real-silicon builds need a Linux host
+instead -- see
+[`docs/cross-platform-setup.md`](cross-platform-setup.md).
 
 | Tool        | Version          | Notes                                                    |
 |-------------|------------------|----------------------------------------------------------|
 | Zephyr      | v4.4.1 (stable)  | Pinned by `west.yml`; see [`docs/zephyr-version-policy.md`](zephyr-version-policy.md). |
-| Python      | 3.10+ (dev/CI pin: 3.12) | 3.10 is the support **floor** (`pyproject.toml` `requires-python`); dev/CI standardise on the **pin** in the repo-root `.python-version` file. Match the pin to reproduce CI exactly -- `tan doctor`'s `python` check is a presence probe only (no pin comparison). |
+| Python      | 3.10+ to bootstrap; 3.12+ to actually build | 3.10 is `bootstrap.sh`/`.ps1`'s and `pyproject.toml`'s support **floor**. Zephyr v4.4.1's own `cmake/modules/python.cmake` separately hardcodes `PYTHON_MINIMUM_REQUIRED 3.12`, so a host below that gets through bootstrap but fails later, at `west build`'s CMake configure -- bootstrap doesn't raise its own floor to match today; see [`docs/cross-platform-setup.md`](cross-platform-setup.md) §1.1 for why. Dev/CI standardise on the repo-root `.python-version` **pin** (currently 3.12). |
 | Python deps | `pyyaml`, `jsonschema`, `imgtool` | All installed by `scripts/bootstrap.sh`; manual install: `pip install pyyaml jsonschema imgtool`. |
 | CMake       | 3.20+            | `find_package(Zephyr)` minimum.                          |
 | C compiler  | GCC 11+ / Clang 14+ | `native_sim` builds; cross-toolchain for real silicon. |
