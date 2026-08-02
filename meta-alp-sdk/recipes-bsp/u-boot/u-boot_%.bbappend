@@ -42,7 +42,7 @@ SRC_URI:append:rzv2n-family = " \
 # resolved defconfig by u-boot-configure.inc (find_cfgs() + merge_config.sh
 # pick up any *.cfg in SRC_URI) -- the same path prod-boot.cfg uses.
 
-# 0002 (production boot): three build-gated ALP additions to the same
+# 0002 (production boot): four build-gated ALP additions to the same
 # rzv2n-dev board files.
 #   CONFIG_ALP_E1M_EMMC_1V8 (default y in the patched defconfig):
 #     drive eMMC_V_SEL (PA0) high in board_init, BEFORE the first MMC
@@ -73,18 +73,39 @@ SRC_URI:append:rzv2n-family = " \
 #     e1m-x-evk.dtsi:88-89).  Both values are injected per-family below
 #     (alp-boot-v2n.cfg / alp-boot-v2m.cfg) and both Kconfig
 #     defaults are the VENDOR values, so a machine that gets no fragment
-#     (stock rzv2n-evk) keeps vendor behaviour.  The mmcblk1p2 root is
-#     NOT bench-confirmed (see the patch comment).
+#     (stock rzv2n-evk) keeps the vendor VALUES -- but NOT vendor
+#     BEHAVIOUR: the guard around the dtb reload is unconditional (it
+#     is part of CONFIG_BOOTCOMMAND itself, not build-gated), so a
+#     missing boot/r9a09g056n44-dev.dtb now hard-stops the boot instead
+#     of falling through silently, on every machine built with this
+#     defconfig, ALP fragment or not.  The mmcblk1p2 root is NOT
+#     bench-confirmed (see the patch comment).
 # VALIDATION: bitbake-built dev + prod with config asserts; the FIP
 # (BL2+BL31+u-boot, manual flow) was built 2026-06-12 with both ALP
 # patches and the u-boot binary content-verified (alp_root bootcmd +
 # pinned console). On-silicon FIP flash + boot is PENDING maintainer
 # authorization (a persistent bootloader write to the shared bench
-# board). The manual FIP flow (build_custom_fip_v630_deepx.sh, WSL)
-# was updated the same day to apply 0002 alongside the DEEPX patch and
-# to verify it (strings u-boot | grep 'setenv alp_root'). The boot-dtb
-# fix (CONFIG_ALP_FDT_FILE + CONFIG_ALP_SD_ROOT) has NOT been through
-# that flow yet -- it is UNVERIFIED beyond the hand-checked patch
+# board).
+#
+# OPERATIONAL TRAP -- READ BEFORE THE NEXT MANUAL FIP BUILD: the manual
+# FIP flow (build_custom_fip_v630_deepx.sh, WSL, outside this repo) has
+# no merge_config.sh step, so it builds off the Kconfig DEFAULTS --
+# CONFIG_ALP_FDT_FILE="r9a09g056n44-dev.dtb" (the vendor filename) and
+# CONFIG_ALP_SD_ROOT="/dev/mmcblk2p2" (the vendor root) -- not the
+# per-MACHINE ALP values. Before this change that wrong dtb name fell
+# through silently and the board limped along on whatever stale FDT
+# was already in RAM; after this change the reload guard is
+# unconditional, so the NEXT FIP that script builds hard-stops with
+# "refusing to boot a stale devicetree" and does not boot at all.
+# REQUIRED ACTION before the next FIP build: the script's .config must
+# set CONFIG_ALP_FDT_FILE and CONFIG_ALP_SD_ROOT to the per-MACHINE
+# values (see alp-boot-v2n.cfg / alp-boot-v2m.cfg for what to copy in)
+# -- this is the difference between a booting bootloader and one that
+# reads as bricked. The manual flow was updated the same day to apply
+# 0002 alongside the DEEPX patch and to verify it (strings u-boot |
+# grep 'setenv alp_root'), but that flow has NOT yet been run with the
+# corrected .config -- the boot-dtb fix (CONFIG_ALP_FDT_FILE +
+# CONFIG_ALP_SD_ROOT) is UNVERIFIED beyond the hand-checked patch
 # application (see the patch's own git-apply/patch --dry-run note).
 
 # CONFIG_ALP_FDT_FILE + CONFIG_ALP_SD_ROOT (issue #1175): the per-MACHINE
