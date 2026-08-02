@@ -16,8 +16,10 @@ malformed ref from a well-formed ref naming a missing file, and the naive
 migration collapses those two into one.
 """
 
+import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -147,12 +149,19 @@ def test_new_som_scaffold_still_writes_under_output_root(tmp_path):
     som-preset SKU pattern (#1089), hence E1M-NX9999 rather than a freeform
     name.
     """
+    # sys.executable, not "python3": the CLI needs `click`, which lives in
+    # whatever interpreter/venv is running pytest -- a bare "python3" picks
+    # up the system one on the macOS and Linux CI legs and dies with
+    # ModuleNotFoundError. Likewise inherit os.environ and override only
+    # PYTHONPATH; replacing the whole environment strips the venv's
+    # site-packages resolution along with it.
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(SCRIPTS)
     result = subprocess.run(
-        ["python3", "-m", "alp_cli", "new-som",
+        [sys.executable, "-m", "alp_cli", "new-som",
          "--sku", "E1M-NX9999", "--soc-ref", "testvendor:testfam:testpart",
          "--family", "testfam", "--output-root", str(tmp_path)],
-        cwd=REPO, capture_output=True, text=True,
-        env={"PYTHONPATH": str(SCRIPTS), "PATH": "/usr/bin:/bin"},
+        cwd=REPO, capture_output=True, text=True, env=env,
     )
     assert result.returncode == 0, (
         f"alp new-som failed (rc={result.returncode}):\n"
