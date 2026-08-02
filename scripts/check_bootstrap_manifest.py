@@ -154,6 +154,20 @@ are out of scope for a mechanical regex rewrite by design (see
 docs/zephyr-version-policy.md) -- only the `version:` field itself is a fix
 site.
 
+`zephyr.pythonMinVersion` (point 13) is deliberately NOT a --fix site, and
+the asymmetry is the point: every site above is one --fix WRITES, taking
+metadata/bootstrap.json as the source of truth and propagating OUT to
+machine pins. pythonMinVersion flows the other way -- it is derived FROM the
+pinned Zephyr's own cmake/modules/python.cmake, so "fixing" it would mean
+--fix reaching INTO the manifest it is elsewhere reading as authoritative.
+Making one field flow inbound while every other flows outbound is exactly
+the kind of two-directional pin map the paragraph above rules out. A Zephyr
+bump is therefore: edit zephyr.version, run --fix (propagates outward), then
+run the plain gate -- whose failure names the required value verbatim
+("... disagrees with the pinned Zephyr vX.Y.Z's own PYTHON_MINIMUM_REQUIRED
+'A.B'"), so the one manual edit is a copy of a value the gate just printed,
+not a lookup anyone has to perform.
+
 Run locally:
 
     python3 scripts/check_bootstrap_manifest.py
@@ -804,23 +818,29 @@ def _check_zephyr_python_min_version(manifest: dict) -> tuple[list[str], str | N
     pinned_floor = _zephyr_python_min_in_pinned_zephyr(zephyr_dir, pinned_zephyr_version)
 
     if pinned_floor is None:
-        reason = (
+        # Build the two messages independently. Slicing the skip reason to
+        # reuse it as the failure reason inverts it -- dropping the leading
+        # "no " asserts the checkout WAS resolved, and leaves the sentence
+        # claiming it is "skipping" while the function is hard-failing.
+        missing = (
             f"no Zephyr checkout resolved at {zephyr_dir} with "
             f"{pinned_zephyr_version} as a reachable git revision carrying a "
-            f"`set(PYTHON_MINIMUM_REQUIRED X.Y)` line in {_PYTHON_CMAKE_PATH} -- "
-            f"skipping the metadata/bootstrap.json zephyr.pythonMinVersion <-> "
-            f"Zephyr's own PYTHON_MINIMUM_REQUIRED cross-check"
+            f"`set(PYTHON_MINIMUM_REQUIRED X.Y)` line in {_PYTHON_CMAKE_PATH}"
         )
         if os.environ.get("ALP_REQUIRE_ZEPHYR_ORACLE") == "1":
             return (
                 [
-                    f"ALP_REQUIRE_ZEPHYR_ORACLE=1 but {reason[len('no '):]}"
-                    f" -- this job promised the oracle and did not deliver "
-                    f"it; fix the job's checkout, do not drop the flag"
+                    f"ALP_REQUIRE_ZEPHYR_ORACLE=1 but {missing} -- this job "
+                    f"promised the oracle and did not deliver it; fix the "
+                    f"job's checkout, do not drop the flag"
                 ],
                 None,
             )
-        return [], reason
+        return [], (
+            f"{missing} -- skipping the metadata/bootstrap.json "
+            f"zephyr.pythonMinVersion <-> Zephyr's own "
+            f"PYTHON_MINIMUM_REQUIRED cross-check"
+        )
 
     manifest_floor = manifest["zephyr"]["pythonMinVersion"]
     if pinned_floor != manifest_floor:
