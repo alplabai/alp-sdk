@@ -87,11 +87,68 @@ topology:
     toolchain: arm-zephyr-eabi
     zephyr_full_name: "E1M-AEN801 (Alif Ensemble E8) Cortex-M55 HE carrier"
 
-# Memory layout (SRAM banks + MRAM) is derived from the SoC variant
-# resolved via `silicon_variant:` -- see metadata/socs/<vendor>/<family>/<part>.json
-# `variants[].sram_banks_kb` + `mram_mb`. Declare a memory_map: block
-# here ONLY for non-stock partitioning (none of the current 11 SKUs
-# need one).
+# Memory layout (SRAM banks + MRAM) is normally derived from the SoC
+# variant resolved via `silicon_variant:` -- see
+# metadata/socs/<vendor>/<family>/<part>.json `variants[].sram_banks_kb`
+# + `mram_mb`. E1M-AEN801 is the one SKU (of 11) that overrides it: both
+# M55 cores boot from the SAME physical App MRAM, and a stock symmetric
+# two-slot partition map puts HE and HP slot0 at the SAME address
+# (0x80010000) -- flashing both cores then silently overwrites one image
+# (#1069, bench-confirmed on e1m-aen-evk-01).  This is SDK build policy,
+# not a silicon fact (see scripts/gen_zephyr_board.py's memory_map: vs
+# metadata/socs/ split), so the fix lives here rather than in the SoC JSON.
+#
+# DECIDED layout (maintainer, #1069): disjoint per-core slot0 windows,
+# OTA DEFERRED on both cores (CONFIG_SINGLE_APPLICATION_SLOT=y, no
+# secondary/scratch slot).  Keeping swap-OTA on both cores would force
+# slot0_HP + slot0_HE = 2688 KiB each, which breaks the ~2.6 MiB NPU
+# MRAM-model budget on at least one core; zephyr/sysbuild/aen/README.md
+# records CONFIG_SINGLE_APPLICATION_SLOT=y as the only silicon-proven
+# MCUboot chain on this part, so nothing proven is lost by dropping the
+# untested swap path.  HE keeps the low window (unchanged address)
+# because everything else canonical is HE: the runner's default core,
+# the factory MCUboot ATOC (cpu_id M55_HE), the canonical person_detect
+# slot0, and the MRAM-XIP NPU example overlays -- Alif's own DevKit-e8
+# dual-core example (`M55_HP_HE_mram_cfg.json`) also orders HE low.
+#
+#   region     offset      size      absolute      accessible_from
+#   mcuboot    0x000000    64 KiB    0x80000000    m55_he, m55_hp
+#   he_slot0   0x010000    2688 KiB  0x80010000    m55_he   (unchanged)
+#   hp_slot0   0x2b0000    2688 KiB  0x802b0000    m55_hp   (was slot1/OTA)
+#   reserved   0x550000    64 KiB    0x80550000    m55_he, m55_hp  (ex-scratch)
+#   storage    0x560000    128 KiB   0x80560000    m55_he, m55_hp
+#   64 + 2688 + 2688 + 64 + 128 = 5632 KiB == the full 5.5 MiB App MRAM.
+#
+# `mcuboot`/`he_slot0`/`hp_slot0` are marked `cacheable: true` (real XIP
+# code, matches the auto-derived `mram_main` region's default); `reserved`/
+# `storage` are left non-cacheable (NVS/settings-style access).  This
+# matters beyond documentation: an IPC `raw_shmem` carve-out (non-cacheable
+# by default, e.g. examples/multicore/mproc-mailbox/board.yaml) that
+# matches on `accessible_from: [m55_he, m55_hp]` ranks a cacheable-mismatch
+# region behind a matching one (scripts/alp_orchestrate/carveout.py), so it
+# prefers the unused `reserved` headroom over the live `mcuboot`/`storage`
+# regions.
+#
+# `mram_main` is kept alongside the five fine-grained regions above,
+# `base: TBD` and unchanged from the auto-derived shape it replaces
+# (whole-MRAM, all three cores, cacheable) -- this is the coarse
+# generic-storage-carve-out device name (`board.yaml storage[].flash_device:
+# mram_main`, e.g. examples/connectivity/production-deployment/board.yaml)
+# that predates this fine-grained MCUboot map and isn't part of the
+# sysbuild/aen boot chain.  Since `resolve_storage_partitions()` only reads
+# `size_kib` (never `base`) it keeps resolving; `base: TBD` deliberately
+# keeps it BLOCKED for `ipc:` carve-out allocation (which does read `base`)
+# so a raw_shmem/rpmsg entry can't silently land inside a real mcuboot/
+# slot0/reserved/storage region through this coarse alias -- giving it a
+# real base would let the carve-out allocator pick any address in the
+# full 5632 KiB span, including inside hp_slot0's live application code.
+memory_map:
+  - { name: mcuboot,   base: 0x80000000, size_kib: 64,   accessible_from: [m55_he, m55_hp], cacheable: true }
+  - { name: he_slot0,  base: 0x80010000, size_kib: 2688, accessible_from: [m55_he],          cacheable: true }
+  - { name: hp_slot0,  base: 0x802b0000, size_kib: 2688, accessible_from: [m55_hp],          cacheable: true }
+  - { name: reserved,  base: 0x80550000, size_kib: 64,   accessible_from: [m55_he, m55_hp] }
+  - { name: storage,   base: 0x80560000, size_kib: 128,  accessible_from: [m55_he, m55_hp] }
+  - { name: mram_main, base: "TBD",      size_kib: 5632, accessible_from: [a32_cluster, m55_he, m55_hp], cacheable: true }
 
 # Inter-core mailbox IP: ARM MHUv2.  Confirmed via the alifsemi/zephyr_alif
 # fork DTS (dts/arm/alif/ensemble/common/e1.dtsi plus ensemble_rtss_{hp,he}.dtsi),

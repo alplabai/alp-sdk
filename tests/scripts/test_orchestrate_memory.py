@@ -48,12 +48,14 @@ ipc:
 """
 
 
-# AEN701/AEN801 resolve their mailbox controller (alif_mhuv2), so they
-# sail past the controller-TBD guard -- but their memory map is derived
-# from the SoC variant JSON, which carries no per-region `base` yet.
-# Before the region.get("base") fix this crashed resolve_carve_outs
-# with `KeyError: 'base'`; it MUST instead land a clean blocked
-# carve-out.  Regression guard for that crash.
+# AEN701 resolves its mailbox controller (alif_mhuv2), so it sails past
+# the controller-TBD guard -- but its memory map is derived from the SoC
+# variant JSON, which carries no per-region `base` yet. Before the
+# region.get("base") fix this crashed resolve_carve_outs with `KeyError:
+# 'base'`; it MUST instead land a clean blocked carve-out.  Regression
+# guard for that crash.  (E1M-AEN801 used to share this fixture -- #1069
+# gave it a real `memory_map:`, so it now RESOLVES instead; see
+# test_resolve_carve_outs_aen801_resolves_after_1069_memory_map below.)
 AEN701_UNMAPPED = """
 som:
   sku: E1M-AEN701
@@ -74,7 +76,7 @@ ipc:
 """
 
 
-AEN801_UNMAPPED = """
+AEN801_MAPPED = """
 som:
   sku: E1M-AEN801
 
@@ -152,7 +154,6 @@ def test_resolve_carve_outs_blocks_on_tbd(tmp_path: Path) -> None:
     "body, sku",
     [
         (AEN701_UNMAPPED, "E1M-AEN701"),
-        (AEN801_UNMAPPED, "E1M-AEN801"),
     ],
 )
 def test_resolve_carve_outs_blocks_on_unmapped_base(
@@ -160,9 +161,9 @@ def test_resolve_carve_outs_blocks_on_unmapped_base(
 ) -> None:
     """AEN presets have a RESOLVED mailbox controller (alif_mhuv2), so
     they proceed past the controller-TBD guard into the region allocator.
-    Their stock memory maps are still base-unmapped, so resolve_carve_outs
-    MUST emit a blocked carve-out rather than crash with `KeyError:
-    'base'`."""
+    A stock (no memory_map:) AEN preset is still base-unmapped, so
+    resolve_carve_outs MUST emit a blocked carve-out rather than crash
+    with `KeyError: 'base'`."""
     path = _write_board(tmp_path, body)
     project = load_board_yaml(path)
     resolved = resolve_carve_outs(project)        # must not raise
@@ -172,6 +173,28 @@ def test_resolve_carve_outs_blocks_on_unmapped_base(
     assert entry.reason is not None
     assert sku in entry.reason
     assert "HW-mapped" in entry.reason
+
+
+def test_resolve_carve_outs_aen801_resolves_after_1069_memory_map(
+    tmp_path: Path,
+) -> None:
+    """#1069 gave E1M-AEN801 a real `memory_map:` (mcuboot/he_slot0/
+    hp_slot0/reserved/storage). An m55_hp+m55_he rpmsg carve-out is now
+    resolvable -- both-core-accessible regions (mcuboot/reserved/storage)
+    have real bases -- and lands in `reserved` (the ex-scratch headroom,
+    unused since OTA is deferred), NOT in the live `mcuboot`/`storage`
+    regions: `mcuboot` is marked cacheable (mismatches this entry's
+    default non-cacheable preference, see carveout.py's ranking) and
+    `reserved` (64 KiB) is smaller than `storage` (128 KiB)."""
+    path = _write_board(tmp_path, AEN801_MAPPED)
+    project = load_board_yaml(path)
+    resolved = resolve_carve_outs(project)
+    assert len(resolved) == 1
+    entry = resolved[0]
+    assert entry.status == "ok"
+    assert entry.region == "reserved"
+    assert entry.base == 0x80550000
+    assert entry.size == 64 * 1024
 
 
 # ---------------------------------------------------------------------

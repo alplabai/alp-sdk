@@ -28,17 +28,18 @@ cores:
 # `src/backends/mproc/zephyr_drv.c` and both main.c's hardcode --
 # it is NOT a free-form label like an rpmsg channel name.
 #
-# This carve-out resolves `status: blocked` today (`--emit
-# system-manifest`): E1M-AEN801 has no `memory_map:` base yet (same as
-# every other AEN `ipc:` entry in this repo, e.g. rpmsg-aen) -- pending
-# real AEN memory-map addresses, tracked in metadata/e1m_modules/
-# E1M-AEN801.yaml. The carve-out being blocked does not affect this
-# example: the generated `<alp/system_ipc.h>` / DTS reservation it
-# would drive aren't consumed here (main.c / peer/main.c open
-# "alp_shmem0" by its DT alias, wired by the board overlay directly,
-# not by the orchestrator's resolved address) -- only the
-# `_emit_cross_core_shmem_cache` Kconfig path this PR adds reads this
-# block, and that path doesn't need resolution to fire.
+# Since #1069 gave E1M-AEN801 a real `memory_map:` (metadata/e1m_modules/
+# E1M-AEN801.yaml), this carve-out now RESOLVES (`--emit system-manifest`)
+# into the `reserved` region (the ex-scratch 64 KiB headroom shared by
+# both cores, unused now that OTA is deferred) -- it no longer lands
+# `status: blocked`. That resolved address is still not consumed by this
+# example: the generated `<alp/system_ipc.h>` / DTS reservation it would
+# drive isn't wired in here (main.c / peer/main.c open "alp_shmem0" by
+# its DT alias, set directly by the board overlay, not by the
+# orchestrator's resolved address) -- only the `_emit_cross_core_shmem_cache`
+# Kconfig path reads this block, and that path doesn't need resolution to
+# fire. rpmsg-aen's `a32_cluster`-endpointed entry stays blocked (a32_cluster
+# isn't in any #1069 memory_map region's `accessible_from:`).
 ipc:
   - kind: raw_shmem
     endpoints: [m55_hp, m55_he]
