@@ -7,6 +7,29 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — no CI job ran `tan bootstrap`, `tan init`, or install.sh (#1024)
+
+`.github/workflows/onramp-clean-container.yml`'s `prereqs-and-bootstrap` job
+now shellchecks (`-S error`) both `scripts/bootstrap.sh` and tan-cli's own
+`install.sh`, then smoke-runs `install.sh` on the same bare `ubuntu:24.04`
+container, on every relevant PR. `install.sh` was previously exercised only
+by `full-quickstart-build`'s schedule/`workflow_dispatch`/labelled-PR trigger
+— a broken installer could sit uncaught for up to a week; `scripts/bootstrap.sh`
+was shellchecked only by `scripts/test-all.sh`'s `stage_shellcheck`, which no
+workflow in this repo actually invokes in CI.
+
+`full-quickstart-build` no longer assembles the workspace with a raw
+`bash scripts/bootstrap.sh` call — it now runs `tan bootstrap --sdk-root`,
+the actual command docs/getting-started.md's quickstart tells a customer to
+run, proving the Rust binary's own delegation into the script rather than
+assuming it. It also now runs `tan init` to scaffold a fresh project and
+builds *that* to a real `zephyr.elf`, separately from the existing curated
+`gpio-button-led` build — closing the last named gap, that `tan init`'s
+scaffolding path had never been exercised by any CI job in either repo.
+
+tan-cli's own CI has the companion half of this issue
+(alplabai/tan-cli#207); this PR is the alp-sdk side only.
+
 ### Changed — `silicon:` ref splitting finally has ONE implementation (#1096)
 
 #997 and #1004 each set out to collapse the hand-rolled `vendor:family:part`
