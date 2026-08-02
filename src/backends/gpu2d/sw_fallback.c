@@ -195,11 +195,17 @@ static uint32_t _blend_px(uint32_t src, uint32_t dst, alp_gpu2d_blend_mode_t mod
 		uint32_t og  = (sg * sa + dg * ia + 127u) / 255u;
 		uint32_t ob  = (sb * sa + db * ia + 127u) / 255u;
 		uint32_t oa  = sa + (da * ia + 127u) / 255u;
-		return (_u8(oa) << 24) | (_u8(or_) << 16) | (_u8(og) << 8) | _u8(ob);
+		/* _u8() returns uint8_t; integer promotion makes the << operand a
+		 * signed int, and a high-bit byte (e.g. 0xFF) shifted into bit 24
+		 * is not representable as int -- signed-shift UB (UBSan-caught,
+		 * #1134). Cast to uint32_t first so the shift is unsigned. */
+		return ((uint32_t)_u8(oa) << 24) | ((uint32_t)_u8(or_) << 16) | ((uint32_t)_u8(og) << 8) |
+		       (uint32_t)_u8(ob);
 	}
 
 	case ALP_GPU2D_BLEND_ADDITIVE: {
-		return (_u8(sa + da) << 24) | (_u8(sr + dr) << 16) | (_u8(sg + dg) << 8) | _u8(sb + db);
+		return ((uint32_t)_u8(sa + da) << 24) | ((uint32_t)_u8(sr + dr) << 16) |
+		       ((uint32_t)_u8(sg + dg) << 8) | (uint32_t)_u8(sb + db);
 	}
 
 	case ALP_GPU2D_BLEND_MULTIPLY: {
@@ -207,7 +213,8 @@ static uint32_t _blend_px(uint32_t src, uint32_t dst, alp_gpu2d_blend_mode_t mod
 		uint32_t og  = (sg * dg + 127u) / 255u;
 		uint32_t ob  = (sb * db + 127u) / 255u;
 		uint32_t oa  = (sa * da + 127u) / 255u;
-		return (_u8(oa) << 24) | (_u8(or_) << 16) | (_u8(og) << 8) | _u8(ob);
+		return ((uint32_t)_u8(oa) << 24) | ((uint32_t)_u8(or_) << 16) | ((uint32_t)_u8(og) << 8) |
+		       (uint32_t)_u8(ob);
 	}
 
 	default:
