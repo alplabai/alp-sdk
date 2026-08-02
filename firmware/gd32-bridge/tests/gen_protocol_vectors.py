@@ -727,7 +727,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"OK: {args.out} matches generator output.")
         return 0
 
-    args.out.write_text(rendered, encoding="utf-8")
+    args.out.write_text(rendered, encoding="utf-8", newline="")
     print(f"wrote {len(rendered)} bytes to {args.out}")
     return 0
 

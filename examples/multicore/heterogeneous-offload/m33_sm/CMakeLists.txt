@@ -29,7 +29,7 @@ if(NOT _alp_rv EQUAL 0)
         "stderr: ${_alp_stderr}")
 endif()
 
-list(APPEND OVERLAY_CONFIG ${_alp_generated})
+list(APPEND EXTRA_CONF_FILE ${_alp_generated})
 
 # Generate <alp/system_ipc.h> from the board.yaml `ipc:` block.  The
 # producer (src/main.c) opens RPC channels via the auto-emitted macros

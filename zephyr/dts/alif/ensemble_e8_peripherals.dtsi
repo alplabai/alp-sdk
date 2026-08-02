@@ -35,6 +35,7 @@
 #include <zephyr/dt-bindings/timer/alif_utimer.h>
 #include <zephyr/dt-bindings/i2c/i2c.h>
 #include <zephyr/dt-bindings/adc/adc_alif.h>
+#include <zephyr/dt-bindings/memory-attr/memory-attr-arm.h>
 
 &soc {
 	/*
@@ -167,6 +168,83 @@
 		status = "disabled";
 	};
 
+	/*
+	 * GPIO11..GPIO14 -- the ports this dtsi used to stop short of.
+	 *
+	 * The omission was not harmless.  The pinctrl bindings already
+	 * define GPIO alt-0 for these pads (`PIN_P12_6__GPIO` /
+	 * `PIN_P12_7__GPIO`, alif-ensemble-pinctrl.h:1177,1186), and the
+	 * E1M-EVK routes point the RGB LED's GREEN and BLUE channels at
+	 * P12_7 / P12_6 (`EVK_PIN_LED_GREEN` = ALP_E1M_GPIO_PWM0,
+	 * `EVK_PIN_LED_BLUE` = ALP_E1M_GPIO_PWM1, metadata/boards/
+	 * e1m-evk.yaml).  With no controller node above gpio10, those two
+	 * routes resolved to nothing: `alp_gpio_open()` could not reach a
+	 * port, so two of the three RGB channels were undriveable through
+	 * the portable API while looking perfectly well-formed in the
+	 * routes header.  Measured on an E1M-AEN801 r1 bench board
+	 * 2026-07-28: only the red channel (P2_4 -> gpio2) could be
+	 * driven at all.
+	 *
+	 * reg + interrupts transcribed from the Alif DFP for THIS part,
+	 * AE822FA0E5597 (Device/soc/AE822FA0E5597/include/rtss_he/soc.h):
+	 * GPIO11_BASE 0x4900B000 :3714, GPIO12_BASE 0x4900C000 :3715,
+	 * GPIO13_BASE 0x4900D000 :3716, GPIO14_BASE 0x4900E000 :3717;
+	 * IRQs GPIO11_IRQ0..7 = 267..274 (:367-374), GPIO12_IRQ0..7 =
+	 * 275..282 (:375-382), GPIO13_IRQ0..7 = 283..290 (:383-390),
+	 * GPIO14_IRQ0..7 = 291..298 (:391-398).  Priority 3 matches every
+	 * other node in this overlay.  No value here is inferred from the
+	 * gpio10 pattern -- each was read from the DFP enum.
+	 *
+	 * vendor-ext, BENCH-UNVERIFIED: the nodes are DFP-grounded but no
+	 * pad on ports 11..14 has been driven on silicon yet (the bench
+	 * run that found the gap could not, precisely because these nodes
+	 * were missing).  Driving P12_7 / P12_6 is the first thing that
+	 * will exercise them.
+	 */
+	gpio11: gpio@4900b000 {
+		compatible = "snps,designware-gpio";
+		reg = <0x4900b000 0x1000>;
+		ngpios = <8>;
+		interrupts = <267 3>, <268 3>, <269 3>, <270 3>,
+			     <271 3>, <272 3>, <273 3>, <274 3>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "disabled";
+	};
+
+	gpio12: gpio@4900c000 {
+		compatible = "snps,designware-gpio";
+		reg = <0x4900c000 0x1000>;
+		ngpios = <8>;
+		interrupts = <275 3>, <276 3>, <277 3>, <278 3>,
+			     <279 3>, <280 3>, <281 3>, <282 3>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "disabled";
+	};
+
+	gpio13: gpio@4900d000 {
+		compatible = "snps,designware-gpio";
+		reg = <0x4900d000 0x1000>;
+		ngpios = <8>;
+		interrupts = <283 3>, <284 3>, <285 3>, <286 3>,
+			     <287 3>, <288 3>, <289 3>, <290 3>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "disabled";
+	};
+
+	gpio14: gpio@4900e000 {
+		compatible = "snps,designware-gpio";
+		reg = <0x4900e000 0x1000>;
+		ngpios = <8>;
+		interrupts = <291 3>, <292 3>, <293 3>, <294 3>,
+			     <295 3>, <296 3>, <297 3>, <298 3>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "disabled";
+	};
+
 	lpgpio: gpio@42002000 {
 		compatible = "snps,designware-gpio";
 		reg = <0x42002000 0x1000>;
@@ -200,10 +278,15 @@
 	 * (see alif-ensemble-clocks-ext.h -- the fork's packed value would target
 	 * the wrong clock block).
 	 *
-	 * First bring-up uses a FIXED-LINK PHY: upstream Zephyr v4.4 ships no
-	 * snps,designware-mdio driver, so the on-SoM TI DP83825I (RMII, 100/full)
-	 * runs unmanaged.  A board enables this node (status="okay") + supplies
-	 * pinctrl_eth (the RMII pin group); the station MAC defaults to a random
+	 * First bring-up (BENCH-VERIFIED, see below) uses a FIXED-LINK PHY: the
+	 * on-SoM TI DP83825I (RMII, 100/full) runs unmanaged, since upstream
+	 * Zephyr v4.4 ships no snps,designware-mdio driver for the GMAC's
+	 * register layout.  alp-sdk now carries one (mdio_dwmac_alif.c,
+	 * BUILD-ONLY this batch -- see the disabled `mdio` child node below and
+	 * its header for the ADR 0017 tier note); a board overlay can switch to
+	 * it by enabling `mdio` + `eth_phy_managed` and repointing phy-handle.
+	 * A board enables this node (status="okay") + supplies pinctrl_eth (the
+	 * RMII pin group); the station MAC defaults to a random
 	 * locally-administered one (see the node property below).
 	 *
 	 * ADR 0017 Tier-1.5 (in-tree glue over the UPSTREAM core; kept, not
@@ -241,6 +324,38 @@
 			status = "okay";
 			default-speeds = "100BASE Full-Duplex";
 		};
+
+		/*
+		 * Managed-MDIO alternative to the fixed-link eth_phy above.
+		 * compatible "snps,designware-mdio" -- the GMAC's OWN embedded
+		 * Clause-22 MDIO controller (MAC_MDIO_Address/Data, MAC-relative
+		 * offsets 0x200/0x204), NOT a separate IP, so this node carries no
+		 * `reg` of its own (driver: mdio_dwmac_alif.c, resolves the base
+		 * from this node's parent). Disabled by default: fixed-link
+		 * (eth_phy above) stays the bring-up default, matching
+		 * &ethernet's phy-handle. An enabling overlay flips BOTH this node
+		 * and eth_phy_managed to "okay" and repoints &ethernet's
+		 * phy-handle to eth_phy_managed -- see the aen-ethernet-link
+		 * mdio-managed twister scenario. BUILD-ONLY this batch (ADR 0017
+		 * Tier-1.5, see mdio_dwmac_alif.c header) -- no MDIO-managed PHY
+		 * exercised on real E8 silicon yet.
+		 */
+		mdio: mdio {
+			compatible = "snps,designware-mdio";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+
+			/* On-SoM TI DP83825I at PHY address 1 (fork reference; the
+			 * fixed-link path above is the bench-verified one -- confirm
+			 * this address before relying on it for a real MDIO scan). */
+			eth_phy_managed: ethernet-phy@1 {
+				compatible = "ti,dp83825";
+				reg = <1>;
+				ti,interface-type = "rmii";
+				status = "disabled";
+			};
+		};
 	};
 
 	/*
@@ -270,6 +385,115 @@
 		clocks = <&clockctrl ALIF_SPI_CLK>;
 		dwc-ssi;
 		fifo-depth = <16>;
+		status = "disabled";
+	};
+
+	/*
+	 * OSPI/AES register window -- Device MPU region.
+	 *
+	 * Root-caused by alp-advisor 2026-07-28: no MPU region maps
+	 * 0x83000000.. as Device memory in this build, so the CPU reaches it
+	 * as NORMAL write-through memory via the ARMv8-M PRIVDEFENA default
+	 * map (0x8000_0000-0x9FFF_FFFF = External RAM, Normal). Under Normal
+	 * attributes the M55 store buffer may merge/reorder the driver's
+	 * ENR=0/ENR=1 write brackets (see flash_ospi_alif.c's "SECOND,
+	 * DISTINCT FAULT" block), letting a protected register write land
+	 * enabled -- which bus-faults on this silicon (bench-measured: a
+	 * debugger write to CTRLR0 with ENR=1 errors; the same write with
+	 * ENR=0 is accepted). Both reference SoC layers carve this window out
+	 * as Device (zephyr_alif fork mpu_regions.c:10-11,105-106, region
+	 * "OSPI_CTRL", KB(16); Alif CMSIS mpu.c:97-99,
+	 * MEMATTRIDX_DEVICE_nGnRE); the upstream-Zephyr-based v4.4 port this
+	 * repo builds against carries no such region -- this node is that
+	 * missing region, added the same way the SoC layer already declares
+	 * `peripheral_region` (ensemble_common.dtsi:34-39) for 0x1a000000.
+	 *
+	 * KB(16) covers all four registers behind this window, per the AE822
+	 * DFP (Device/soc/AE822FA0E5597/include/rtss_he/soc.h):
+	 *   OSPI0_BASE 0x83000000 :3778, AES0_BASE 0x83001000 :3779,
+	 *   OSPI1_BASE 0x83002000 :3780, AES1_BASE 0x83003000 :3781
+	 * (rtss_hp/soc.h carries the identical bases). Core-agnostic: this
+	 * node lives in the shared &soc block included by BOTH
+	 * alp_e1m_aen801_m55_he and ..._m55_hp, exactly like the ospi0 node
+	 * it protects below.
+	 *
+	 * AWAITING BENCH A/B: the region compiles + the generated zephyr.dts
+	 * carries it (see flash_ospi_alif.c header for the bring-up log), but
+	 * no write through the now-Device-mapped window has yet been
+	 * measured on silicon -- do not read this as bench-proven.
+	 */
+	ospi_reg_region: memory@83000000 {
+		compatible = "zephyr,memory-region";
+		reg = <0x83000000 DT_SIZE_K(16)>;
+		zephyr,memory-region = "OSPI_REG";
+		zephyr,memory-attr = <DT_MEM_ARM(ATTR_MPU_DEVICE)>;
+	};
+
+	/*
+	 * MRAM MPU split -- SUPERSEDED here, see
+	 * zephyr/soc-bridge/alif/mpu_regions_e8.c.
+	 *
+	 * commit 4ad5e941 first restored this split as two `zephyr,memory-region`
+	 * DT nodes (mram_exec_region / mram_device_region) processed by
+	 * mpu_configure_regions_from_dt(). That was UNSAFE on Flow D (production
+	 * MRAM boot) and has been reverted: mpu_configure_regions_from_dt()
+	 * (arch/arm/core/mpu/arm_mpu.c:110-183) APPENDS DT regions AFTER the
+	 * generic static table (arm_mpu_regions.c), it does not split overlaps
+	 * (arch/arm/core/mpu/arm_mpu_v8_internal.h:532-658 handles that only for
+	 * the app/kernel static-partition path) -- and PMSAv8-M
+	 * (CONFIG_MPU_REQUIRES_NON_OVERLAPPING_REGIONS=y in this build) treats an
+	 * address matching multiple enabled regions as an ACCESS VIOLATION, not
+	 * an ARMv7-M-style "higher index wins". Flow D's generic FLASH_0 already
+	 * covers the whole MRAM (`zephyr,flash = &mram_storage`, CONFIG_XIP), so
+	 * appending the two new regions on top triple-matched every MRAM
+	 * address, including the first slot0 instruction fetch -- a
+	 * self-bricking image. Root-caused by alp-advisor 2026-07-28.
+	 *
+	 * The fix REPLACES the generic table instead of appending to it:
+	 * zephyr/soc-bridge/alif/mpu_regions_e8.c defines MRAM_EXEC/MRAM_DEVICE
+	 * (same boundaries/arithmetic this file used to carry, now DT-derived at
+	 * compile time from the boot/slot0/storage partitions instead of
+	 * hand-computed literals) alongside ITCM/DTCM as a REPLACEMENT static
+	 * table (`select CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS`, wired from the
+	 * hand-maintained top-level zephyr/CMakeLists.txt + each board's
+	 * hand-maintained `Kconfig`), so no generic whole-MRAM FLASH_0 region
+	 * exists to collide with the split. See that file's header for the full
+	 * design + the flow-awareness BUILD_ASSERT.
+	 */
+
+	/*
+	 * Synopsys DesignWare OSPI/HexSPI -- the octal-SPI controller that also
+	 * drives HyperBus/HyperRAM-style parts in XiP mode, bound by the alp-sdk
+	 * Tier-1.5 driver flash_ospi_alif.c (compatible "snps,designware-ospi")
+	 * over the Apache-2.0 hal_alif drivers/ospi register library.  reg/aes-reg/
+	 * IRQ/bus-speed/xip-* transcribed VERBATIM from the fork's e1.dtsi
+	 * (ospi0@83000000; reg 0x83000000/0x1000; aes-reg 0x83001000/0x100; IRQ 96;
+	 * xip-base-address 0xA0000000/0x10000000).  `clocks = <&clockctrl
+	 * ALIF_OSPI0_ACLK_CLK>` from the fork node is DROPPED (no such id exists in
+	 * the upstream clock encoding this repo uses -- see
+	 * alif-ensemble-clocks-ext.h and the fork-vs-upstream clock-id-encoding
+	 * gotcha); the driver takes its core clock as a plain uint32 from
+	 * `clock-frequency` (falling back to `bus-speed`), not a clock-controller
+	 * phandle.
+	 *
+	 * HW-BLOCKED, BUILD-ONLY this batch: no octal-NOR/HyperBus part is
+	 * populated on the E1M-AEN801, so this proves the node BINDS + the
+	 * hal_alif init/XiP-enable entry points compile and link -- not a live
+	 * XiP read.  No pinctrl-0: the enabling board/example overlay supplies it
+	 * (the eth/isp precedent) -- see examples/aen/aen-ospi-regcheck.
+	 */
+	ospi0: ospi0@83000000 {
+		compatible = "snps,designware-ospi";
+		reg = <0x83000000 0x1000>;
+		interrupts = <96 3>;
+		aes-reg = <0x83001000 0x100>;
+		bus-speed = <100000000>;
+		cs-pin = <0>;
+		ddr-drive-edge = <1>;
+		rx-ds-delay = <11>;
+		tx-fifo-threshold = <0>;
+		xip-wait-cycles = <255>;
+		xip-base-address = <0xA0000000 0x10000000>;
 		status = "disabled";
 	};
 
@@ -546,6 +770,69 @@
 		clock-frequency = <I2C_BITRATE_STANDARD>;
 		fs-spike-len = <5>;
 		hs-spike-len = <1>;
+		status = "disabled";
+	};
+
+	/*
+	 * I3C (main, global peripheral space) -- Synopsys DesignWare I3C, bound by
+	 * UPSTREAM Zephyr's drivers/i3c/i3c_dw.c ("snps,designware-i3c"), pure
+	 * Tier-1 (upstream-native): no vendored/forked code, this node only
+	 * supplies reg/IRQ/clock/timing.  reg/IRQ transcribed from the Apache-2.0
+	 * zephyr_alif fork (zephyr_alif@3a2b84d9,
+	 * dts/arm/alif/ensemble/common/e1.dtsi: i3c0@0x49034000); the SoM routes
+	 * SDA/SCL to P7_6/P7_7 fn6 (I3C_SDA_D/I3C_SCL_D,
+	 * metadata/e1m_modules/aen/from-alif.tsv rows AH5/AG5).  This controller
+	 * also reaches P0_0/P0_1 (_A), P1_2/P1_3 (_B) and P3_2/P3_3 (_C); it
+	 * collides with the LP I3C below on P7_6/P7_7 ONLY.  So the two are
+	 * independently usable in general -- it is the E1M-AEN801 SoM, which
+	 * breaks out only that one pad pair, that forces a choice between them.
+	 * vendor-ext, BENCH-UNVERIFIED.
+	 */
+	i3c0: i3c@49034000 {
+		compatible = "snps,designware-i3c";
+		#address-cells = <3>;
+		#size-cells = <0>;
+		reg = <0x49034000 0x1000>;
+		interrupts = <136 0>;
+		clocks = <&clockctrl ALIF_I3C_CLK>;
+		i3c-scl-hz = <10000000>;
+		i2c-scl-hz = <400000>;
+		status = "disabled";
+	};
+
+	/*
+	 * LP I3C (M55-HE local domain) -- same upstream i3c_dw.c driver, a fully
+	 * INDEPENDENT second controller.  It reaches P6_2/P6_3 (_A), P7_6/P7_7
+	 * (_B) and P14_2/P14_3 (_C); the main i3c0 above reaches P0_0/P0_1,
+	 * P1_2/P1_3, P3_2/P3_3 and P7_6/P7_7.  The two overlap on P7_6/P7_7
+	 * ONLY, where the SoC exposes both PIN_P7_6__I3C_SDA_D/PIN_P7_7__I3C_SCL_D
+	 * (fn6) and PIN_P7_6__LPI3C_SDA_B/PIN_P7_7__LPI3C_SCL_B (fn3).
+	 *
+	 * On the E1M-AEN801 that overlap is the whole story: the SoM breaks out
+	 * only P7_6/P7_7, so exactly one of the two nodes may be enabled there.
+	 * A board routing them to non-overlapping pads can run BOTH at once --
+	 * do not read the AEN801 constraint as a silicon limit.
+	 *
+	 * Do NOT read that choice out of from-alif.tsv.  That table's
+	 * `alif_peripheral` column (rows AG5/AH5) names the MAIN-I3C fn6
+	 * functions, I3C_SCL_D/I3C_SDA_D, and the file contains no LPI3C row at
+	 * all -- so if anything it documents i3c0, not this node.  lpi3c0 is
+	 * preferred on E1M-AEN801 because it sits in the M55-HE local peripheral
+	 * domain, a firmware/domain decision the pinout table does not make.
+	 * reg/IRQ transcribed from the Apache-2.0 zephyr_alif fork
+	 * (zephyr_alif@3a2b84d9, dts/arm/alif/ensemble/e4_e6_e8.dtsi:
+	 * lpi3c0@0x43006000); od-thigh-min-ns/i3c-scl-hz carried over from the
+	 * same fork node.  vendor-ext, BENCH-UNVERIFIED.
+	 */
+	lpi3c0: i3c@43006000 {
+		compatible = "snps,designware-i3c";
+		#address-cells = <3>;
+		#size-cells = <0>;
+		reg = <0x43006000 0x1000>;
+		interrupts = <50 3>;
+		clocks = <&clockctrl ALIF_LPI3C_CLK>;
+		od-thigh-min-ns = <41>;
+		i3c-scl-hz = <12500000>;
 		status = "disabled";
 	};
 
@@ -997,6 +1284,23 @@
 		interrupts = <367 3>, <368 3>;
 		interrupt-names = "isp", "mi-isp";
 		status = "disabled";
+	};
+
+	/*
+	 * Alif Ensemble Hantro VC9000E JPEG encoder (Verisilicon IP, compatible
+	 * "verisilicon,hantro-vc9000e-jpeg"), driven by the ported v4.4 driver
+	 * zephyr/drivers/video/jpeg_hantro_vc9000e.c.  reg base + IRQ transcribed
+	 * VERBATIM from the fork e4_e6_e8.dtsi (jpeg@49044000, single IRQ 360).
+	 * ADR-0017 Tier-2 OPT-IN.  Left status="disabled": examples that want it
+	 * flip it on in their board overlay.
+	 */
+	jpeg0: jpeg@49044000 {
+		compatible       = "verisilicon,hantro-vc9000e-jpeg";
+		reg              = <0x49044000 0x1000>;
+		interrupts       = <360 0>;
+		max-burst-length = <64>;
+		quality-factor   = <75>;
+		status           = "disabled";
 	};
 
 	/*

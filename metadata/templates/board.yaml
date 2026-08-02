@@ -4,7 +4,7 @@
 # for your board.  scripts/alp_orchestrate/ reads this file,
 # resolves the SoM topology, fans out into per-core build slices
 # (Zephyr / Yocto / baremetal), and emits a system manifest that
-# `west alp-image` / `west alp-flash` / OTA consume.
+# `tan image` / `tan flash` / OTA consume.
 #
 # === This is the ONLY place to configure the firmware. ===
 #

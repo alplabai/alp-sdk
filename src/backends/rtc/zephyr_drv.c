@@ -22,7 +22,7 @@
 #include "rtc_ops.h"
 
 #define ALP_RTC_DEV_OR_NULL(idx) \
-	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_rtc, idx))), \
+	COND_CODE_1(DT_NODE_HAS_STATUS(DT_ALIAS(_CONCAT(alp_rtc, idx)), okay), \
 	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_rtc, idx)))), \
 	            (NULL))
 

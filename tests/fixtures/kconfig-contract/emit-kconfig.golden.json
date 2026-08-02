@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "board": "alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he",
+  "core": "m55_he",
+  "symbols": [
+    { "name": "LOG", "type": "bool", "prompt": "Logging", "depends": "", "default": "n", "help": "Enable the logging subsystem." },
+    { "name": "MAIN_STACK_SIZE", "type": "int", "prompt": "Size of stack for main thread", "depends": "MULTITHREADING", "default": "1024", "help": "" },
+    { "name": "FLASH_BASE_ADDRESS", "type": "hex", "prompt": "Flash base address", "depends": "FLASH", "default": "0x0", "help": "" },
+    { "name": "BT_DEVICE_NAME", "type": "string", "prompt": "Bluetooth device name", "depends": "BT", "default": "\"Zephyr\"", "help": "" },
+    { "name": "SOME_TRISTATE", "type": "tristate", "prompt": "A tristate symbol", "depends": "", "default": null, "help": "" }
+  ]
+}

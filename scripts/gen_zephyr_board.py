@@ -59,7 +59,8 @@ import re
 from pathlib import Path
 from typing import Any
 
-from alp_project_loader import _load_yaml, _resolve_sku
+from alp_project_loader import _load_yaml, _resolve_sku, resolve_soc_path
+from sentinels import is_tbd
 
 _COPYRIGHT_C = (
     "/*\n"
@@ -85,10 +86,9 @@ def _load_soc_spec(sku_preset: dict[str, Any], metadata_root: Path) -> dict[str,
     silicon = sku_preset.get("silicon")
     if not silicon:
         raise ZephyrBoardEmitError(f"SoM {sku_preset.get('sku')!r} declares no silicon:")
-    parts = silicon.split(":")
-    if len(parts) != 3:
+    soc_path = resolve_soc_path(silicon, metadata_root)
+    if soc_path is None:
         raise ZephyrBoardEmitError(f"silicon ref {silicon!r} is not a triple-colon string")
-    soc_path = metadata_root / "socs" / parts[0] / parts[1] / f"{parts[2]}.json"
     if not soc_path.is_file():
         raise ZephyrBoardEmitError(f"no SoC spec at {soc_path}")
     return json.loads(soc_path.read_text(encoding="utf-8"))
@@ -97,7 +97,7 @@ def _load_soc_spec(sku_preset: dict[str, Any], metadata_root: Path) -> dict[str,
 def _resolve_variant(sku_preset: dict[str, Any], soc_spec: dict[str, Any]) -> dict[str, Any]:
     declared = sku_preset.get("silicon_variant")
     variants = soc_spec.get("variants") or []
-    if declared and declared != "TBD":
+    if declared and not is_tbd(declared):
         for v in variants:
             if v.get("order_code") == declared:
                 return v
@@ -421,12 +421,63 @@ def _aen_pinctrl_dtsi(
     )
 
 
+def _aen_ethos_u(soc_spec: dict[str, Any]) -> tuple[str, str] | None:
+    """The Arm Ethos-U accelerator this SoC's silicon carries, as
+    ``(accelerator_config_kconfig, dt_node_label)`` -- or ``None`` when the
+    SoC has no NPU.
+
+    A SoC carrying more than one Ethos-U variant (the E8 has 2x U55 + 1x U85)
+    builds the core driver for its MOST capable NPU -- the U85 -- because the
+    upstream Arm Ethos-U driver compiles exactly one accelerator config per
+    image (``ETHOS_U_NPU_CONFIG`` is a Kconfig ``choice``).  Vela targets must
+    match (``--accelerator-config ethos-u85-256`` for the U85 case).
+
+    Used only to flip the (already-declared, disabled) NPU DT node to
+    ``status="okay"`` on the generated silicon board -- harmless on its own
+    (``CONFIG_ETHOS_U`` is ``default n``, so no driver binds until an inference
+    app selects it via ``ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN``).
+    """
+    caps = soc_spec.get("capabilities") or {}
+    if (caps.get("ethos_u85_count") or 0) > 0:
+        return ("ETHOS_U85_256", "ethosu85")
+    if (caps.get("ethos_u55_count") or 0) > 0:
+        return ("ETHOS_U55_256", "ethosu55")
+    return None
+
+
 def _aen_defconfig(uart_node: str) -> str:
+    # CONFIG_USE_DT_CODE_PARTITION is the Kconfig half of the very
+    # `zephyr,code-partition = &slot0_partition;` chosen that _aen_dts()
+    # (below) lays down for every board this function serves -- the two are
+    # emitted as a pair, from the same MRAM partition map, so the board can
+    # never carry the DT fact without the Kconfig that honours it.  Without
+    # it Zephyr leaves FLASH_LOAD_OFFSET at 0 and the image links at the MRAM
+    # base 0x80000000, on top of the boot partition: the reset vector comes
+    # out 0x8000xxxx, which `alif_flash` rejects ("unrecognised reset vector
+    # ... expected a slot0-XIP image") and which faults if it is written
+    # anyway.  Set here, in the board layer, rather than in each app's
+    # prj.conf, because the link offset is a property of THIS BOARD's flash
+    # map, not of any app -- so it reaches every consumer of the board
+    # equally (plain `west build`, twister, the board.yaml planner, `tan`).
+    # It is also where upstream Zephyr boards with a fixed bootloader slot
+    # set it (`grep -l USE_DT_CODE_PARTITION=y zephyr/boards/**/*_defconfig`).
+    #
+    # A Flow C ITCM RAM-run deliberately undoes it (a board defconfig is the
+    # lowest-precedence Kconfig layer): `scripts/bench/aen/aen-flowc-itcm.conf`
+    # + `aen-flowc-itcm.overlay`.  MCUboot's own image is unaffected -- it
+    # re-points the chosen at &boot_partition via mcuboot's app.overlay.
     return (
         _COPYRIGHT_HASH +
         "\n"
         "CONFIG_ARM_MPU=y\n"
         "CONFIG_HW_STACK_PROTECTION=y\n"
+        "\n"
+        "# Link the image into the board's `zephyr,code-partition`\n"
+        "# (slot0_partition, MRAM 0x80010000) instead of the MRAM base --\n"
+        "# without it the reset vector lands at 0x8000xxxx and no AEN flash\n"
+        "# flow accepts the image.  Flow C (ITCM RAM-run) overrides it via\n"
+        "# scripts/bench/aen/aen-flowc-itcm.conf.\n"
+        "CONFIG_USE_DT_CODE_PARTITION=y\n"
         "\n"
         f"# Console: Alif {uart_node.upper()} (E1M edge \"UART0\", "
         "P3_4/P3_5) -- NS16550-class UART.\n"
@@ -466,6 +517,7 @@ def _aen_kconfig_defconfig(dir_name: str, role: str) -> str:
 def _aen_dts(
     sku: str, core_id: str, soc_spec: dict[str, Any], variant: dict[str, Any],
     dir_name: str, basename: str, rx_row: dict[str, Any], tx_row: dict[str, Any],
+    ethos_u: tuple[str, str] | None = None,
 ) -> str:
     role = core_id.split("_")[-1]                     # "hp" / "he"
     role_u = role.upper()
@@ -706,6 +758,26 @@ def _aen_dts(
         "};",
         "",
     ]
+
+    if ethos_u is not None:
+        _accel, node = ethos_u
+        # Enable the Arm Ethos-U NPU node this SoC carries.  The full node
+        # (reg/interrupts/compatible/secure-enable) is already declared
+        # status="disabled" in the SoC peripherals dtsi
+        # (zephyr/dts/alif/ensemble_e8_peripherals.dtsi); a silicon board just
+        # flips it on.  Harmless on its own -- CONFIG_ETHOS_U is `default n`,
+        # so no driver binds until an inference app pulls it in via
+        # ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN (select ETHOS_U if
+        # DT_HAS_ARM_ETHOS_U_ENABLED).  A native_sim build uses the native_sim
+        # board (no such node) and so stays on the tflite-micro stub kernel.
+        lines += [
+            f"/* Arm Ethos-U NPU: enable the {node} node declared in the SoC "
+            "peripherals dtsi (see ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN). */",
+            f"&{node} {{",
+            '\tstatus = "okay";',
+            "};",
+            "",
+        ]
     return "\n".join(lines)
 
 
@@ -756,10 +828,18 @@ def emit_zephyr_board(
         files[f"{dir_name}/{basename}_defconfig"] = _aen_defconfig(uart_node)
         files[f"{dir_name}/Kconfig.defconfig"] = _aen_kconfig_defconfig(dir_name, role)
         files[f"{dir_name}/{basename}.dts"] = _aen_dts(
-            sku, core_id, soc_spec, variant, dir_name, basename, rx_row, tx_row)
+            sku, core_id, soc_spec, variant, dir_name, basename, rx_row, tx_row,
+            _aen_ethos_u(soc_spec))
 
-    silicon_parts = sku_preset["silicon"].split(":")
-    soc_json_rel = f"metadata/socs/{silicon_parts[0]}/{silicon_parts[1]}/{silicon_parts[2]}.json"
+    # `_load_soc_spec()` above already raised ZephyrBoardEmitError if
+    # `sku_preset["silicon"]` didn't resolve, so `soc_path` can't be None
+    # here -- but that's a dependency on call order, not a guarantee this
+    # function itself enforces, so don't drop the None-guard idiom.
+    soc_path = resolve_soc_path(sku_preset["silicon"], metadata_root)
+    if soc_path is None:
+        raise ZephyrBoardEmitError(
+            f"silicon ref {sku_preset['silicon']!r} is not a triple-colon string")
+    soc_json_rel = f"metadata/{soc_path.relative_to(metadata_root).as_posix()}"
     for relpath in list(files):
         style = "c" if relpath.endswith((".dts", "-pinctrl.dtsi")) else "hash"
         files[relpath] = _with_generated_banner(files[relpath], style, sku, soc_json_rel)

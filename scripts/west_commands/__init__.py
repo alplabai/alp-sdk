@@ -3,12 +3,12 @@
 Registered subcommands (each subclasses `west.commands.WestCommand`
 in its own file):
 
-- alp_build  — pre-flight board.yaml validation then delegate to west build
-- alp_clean  — clean per-slice build output trees
-- alp_flash  — dispatch helper-MCU flash flows + main-image flash
-- alp_image  — bundle per-slice outputs into a single deployable image
-- alp_renode — boot the system manifest in Renode (dual-OS smoke test)
+- alp-lock    — write or verify the project's alp.lock dependency lock
+- alp-migrate — version and migrate a project's board.yaml
+- alp-quality — run the quality-task registry for a profile (JSON/JUnit/SARIF)
+- alp-emit    — print a generated config artefact from board.yaml (no build)
 
 Each command is auto-discovered by west via the `west-commands:`
-entry in `zephyr/module.yml`.
+entry in `zephyr/module.yml` (see scripts/west-commands.yml, the
+authoritative registration list).
 """

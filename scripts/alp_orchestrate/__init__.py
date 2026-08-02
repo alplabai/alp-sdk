@@ -18,8 +18,12 @@ Public API:
     emit_build_plan(project, board_yaml=..., build_root=...) -> str
     iter_buildable_slices(project) -> Iterator[Slice]
 
-    BoardProject, Slice, ResolvedCarveOut, SystemManifest, Orchestrator,
-    OrchestratorError
+    BoardProject, Slice, ResolvedCarveOut, SystemManifest, OrchestratorError,
+    SdkRevisionUnsupported, SdkRevisionUnknown, SdkRevisionNotBuildable
+
+ADR-0020 Phase 4 (preview) retired the SDK-side executor (`Orchestrator`/
+`fan_out`) -- this module is planner/emit-only; execution is an external
+consumer's job.
 
 Reference: docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md
 """
@@ -60,6 +64,9 @@ from .models import (  # noqa: E402
     OrchestratorError,  # noqa: F401  (re-export: alp_project's lazy imports + tests)
     ResolvedCarveOut,  # noqa: F401  (re-export; consumed by carveout.py now, not __init__)
     ResolvedPartition,  # noqa: F401  (re-export; consumed by partition.py + headers.py now)
+    SdkRevisionNotBuildable,  # noqa: F401  (re-export: validate_board_yaml maps it to its own exit code)
+    SdkRevisionUnknown,  # noqa: F401  (re-export: validate_board_yaml maps it to its own exit code)
+    SdkRevisionUnsupported,  # noqa: F401  (re-export: validate_board_yaml maps it to exit 3)
     Slice,  # noqa: F401  (re-export: public model surface)
     StorageEntry,  # noqa: F401  (re-export: public model surface; consumed by loader.py)
     SystemManifest,  # noqa: F401  (re-export: public model surface)
@@ -126,13 +133,23 @@ from .buildplan import emit_build_plan  # noqa: E402,F401  (re-export: cli + tes
 
 
 # ---------------------------------------------------------------------
-# Orchestrator (fan-out)
+# --emit kconfig -- the board-scoped Kconfig symbol menu for the LSP (#893)
 # ---------------------------------------------------------------------
-# The Orchestrator class + the slice-command / flash-recipe cluster now live in
-# orchestrator.py (the #285 orchestrator seam -- the finale). Re-export
-# Orchestrator (cli + tests) and _slice_command (test).
+
+
+# The board-scoped Kconfig symbol-menu emitter lives in kconfig_symbols.py
+# (deliberately separate from kconfig.py, which is the alp.conf/local.conf
+# string-templater); re-exported for cli + tests.
+from .kconfig_symbols import emit_kconfig  # noqa: E402,F401  (re-export: cli + tests)
+
+
+# ---------------------------------------------------------------------
+# Slice-command resolution (planner-side; the executor was retired)
+# ---------------------------------------------------------------------
+# The slice-command / flash-recipe cluster lives in orchestrator.py.
+# Re-export _slice_command (tests) and iter_buildable_slices (ADR-0020
+# Phase 1 -- tests + buildplan.py).
 from .orchestrator import (  # noqa: E402,F401
-    Orchestrator,
     _slice_command,
     iter_buildable_slices,  # noqa: F401  (re-export: ADR-0020 Phase 1 -- tests + buildplan.py)
 )

@@ -27,17 +27,17 @@ manifest-driven **top-level** `libraries:` selection.
 | `cmsis-nn`  | A    | (west pin) | Apache-2.0 | zephyr    | Cortex-M |
 | `nanopb`    | A    | 0.4.9.1    | Zlib       | zephyr    | — |
 | `zcbor`     | A    | 0.9.1      | Apache-2.0 | zephyr    | — |
-| `modbus`    | A    | 4.4.0      | Apache-2.0 | zephyr    | Cortex-M; Zephyr in-tree subsys |
+| `modbus`    | A    | 4.4.1      | Apache-2.0 | zephyr    | Cortex-M; Zephyr in-tree subsys |
 | `micro-ros` | B    | humble     | Apache-2.0 | zephyr    | Cortex-M; west pin + CONFIG_MICROROS ‡ |
 | `ros2`      | B    | humble     | Apache-2.0 | yocto     | Cortex-A; meta-ros2-humble layer ‡ |
-| `lwm2m`     | B    | 4.4.0      | Apache-2.0 | zephyr    | Zephyr (in-tree subsys) |
-| `coap`      | B    | 4.4.0      | Apache-2.0 | zephyr    | Zephyr (in-tree subsys) |
+| `lwm2m`     | B    | 4.4.1      | Apache-2.0 | zephyr    | Zephyr (in-tree subsys) |
+| `coap`      | B    | 4.4.1      | Apache-2.0 | zephyr    | Zephyr (in-tree subsys) |
 | `aws-iot`   | B    | v3.1.5     | Apache-2.0 | zephyr    | Zephyr; west project pin § |
 | `azure-iot` | B    | 1.5.0      | MIT        | zephyr    | Zephyr; west project pin § |
 | `canopennode` | B  | dec12fa3f0d790cafa8414a4c2930ea71ab72ffd | Apache-2.0 | zephyr | Cortex-M; optional west pin; CAN controller |
 | `micropython` | B  | v1.24.1    | MIT        | zephyr    | Cortex-M; source pin; dedicated owner needed |
 
-`alp doctor` reports the selection for the project in scope (tier + licence +
+`python -m alp_cli doctor` reports the selection for the project in scope (tier + licence +
 compatibility), reading these same manifests — so the CLI and alp-studio's
 library picker can never disagree.
 
@@ -65,7 +65,7 @@ device-to-cloud story; all Tier B (recipe-only), split by grounding:
 - `lwm2m` / `coap` are **upstream Zephyr in-tree subsystems** — real enable
   symbols transcribed from the pinned v4.4.0 tree (`CONFIG_LWM2M`,
   `subsys/net/lib/lwm2m/Kconfig`; `CONFIG_COAP`, `subsys/net/lib/coap/Kconfig`),
-  version `4.4.0` (the Zephyr release the subsystem ships with),
+  version `4.4.1` (the Zephyr release the subsystem ships with),
   `integration.zephyr.module: null` (no separate west module — the `zephyr`
   project carries them). LwM2M `select COAP`, so `libraries: [lwm2m]` pulls its
   transport in. LwM2M could merit Tier A on strength, but the ADR groups
@@ -88,7 +88,7 @@ device-to-cloud story; all Tier B (recipe-only), split by grounding:
 remaining curation set without inventing capabilities or symbols:
 
 - `modbus` is a **Tier A Zephyr in-tree subsystem** (`CONFIG_MODBUS` from
-  `subsys/modbus/Kconfig`, version `4.4.0`, Apache-2.0).  The native_sim CI
+  `subsys/modbus/Kconfig`, version `4.4.1`, Apache-2.0).  The native_sim CI
   lane uses `CONFIG_MODBUS_RAW_ADU`; serial RTU/ASCII deployments need a UART
   plus a devicetree `zephyr,modbus-serial` node.
 - `canopennode` is **Tier B CAN**: Zephyr pins it as an optional west project
@@ -118,7 +118,7 @@ for the authoritative schema. A manifest declares:
 ```yaml
 schema_version: 1
 name: lvgl                     # must match the filename (<name>.yaml)
-description: "..."             # one-liner, surfaced in alp doctor
+description: "..."             # one-liner, surfaced in `python -m alp_cli doctor`
 tier: A                        # A (curated, CI-built) | B (recipe-only)
 version: "9.5.0"               # the pinned upstream version (never a range)
 license: MIT                   # SPDX id from the allowlist (below)
@@ -219,5 +219,5 @@ A library ships as **Tier A** only if it clears all of:
 
 Anything that can't yet meet that bar ships as **Tier B** (recipe-only): the
 wiring + compatibility metadata are maintained and emitted, but the library is
-not built in alp-sdk CI, and `alp doctor` labels it. Promotion B → A requires
+not built in alp-sdk CI, and `python -m alp_cli doctor` labels it. Promotion B → A requires
 a dedicated owner and a CI build lane.

@@ -21,7 +21,7 @@ boot:
   method: mcuboot
   signing:
     algorithm: ecdsa_p256
-    key_file:  keys/prod_ecdsa_p256.pub.pem
+    key_file:  keys/mcuboot_dev_ecdsa_p256.pem
   swap_algorithm: scratch
 ```
 
@@ -148,7 +148,7 @@ west build -t run
 ### Real silicon (AEN-Zephyr, requires a staged Mender server)
 
 ```bash
-west alp-build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples/connectivity/production-deployment
+tan build --board ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples/connectivity/production-deployment
 west flash
 ```
 

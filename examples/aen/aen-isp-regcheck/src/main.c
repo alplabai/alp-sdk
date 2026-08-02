@@ -22,43 +22,37 @@
  *        ("vsi,isp-pico"),
  *     2. the reg base + the two IRQs the node carries match the DFP / fork
  *        e4_e6_e8.dtsi (reg 0x49046000, ISP_IRQ_IRQn=367, ISP_MI_IRQ_IRQn=368),
- *     3. IF the isp_pico.c driver TU is built AND linked (CONFIG_VIDEO_ISP_VSI),
- *        the device INSTANTIATES and the portable v4.4 video API is exercised
+ *     3. the isp_pico.c driver TU is built AND LINKED against hal_alif v2.3.0
+ *        (CONFIG_VIDEO_ISP_VSI=y, this app's prj.conf) -- the device
+ *        INSTANTIATES and the portable v4.4 video API is exercised
  *        (video_get_caps).
  *
- *   ******************************************************************
- *   ** WHY THIS APP DOES NOT ENABLE CONFIG_VIDEO_ISP_VSI BY DEFAULT **
- *   ******************************************************************
+ *   ***********************************************************
+ *   ** WHY CONFIG_VIDEO_ISP_VSI IS ON HERE (build-only proof) **
+ *   ***********************************************************
  *   isp_pico.c links the hal_alif libisp wrapper (the Vivante ISP BLOB, opt-in
- *   via USE_ALIF_ISP_LIB).  The locally vendored 2025 hal_alif wrapper
- *   (modules/hal/alif/drivers/isp/isp_wrapper) is OLDER than this 2026
- *   isp_pico.c and is API-incompatible in two ways, so the driver does NOT
- *   even COMPILE against it:
- *     (a) isp_pico.c (and isp_pico.h) #include <zephyr/drivers/video/isp-vsi.h>,
- *         which the local wrapper does NOT ship -- it ships isp_conf.h /
- *         isp_param_conf.h instead.  So the TU fails to COMPILE.
- *     (b) the wrapper's isp_vsi_bottom_half() is 2-arg (init_cfg, mi_mis); this
- *         driver calls the 3-arg (dev, init_cfg, mi_mis) form, at isp_pico.c's
- *         isp_vsi_bottom_half() call site.
- *   (The wrapper also exports no isp_vsi_set_param / isp_vsi_get_param, but
- *   the v4.4 port dropped their only callers, so that is not a third
- *   incompatibility -- not referenced either way.)
- *   Fixing this is an EXTERNAL hal_alif change (bump the libisp wrapper), NOT an
- *   alp-sdk change -- so CONFIG_VIDEO_ISP_VSI stays default n and this regcheck
- *   keeps the build green.  The DT-bind PASS gate below is reachable WITHOUT the
- *   driver; the driver-instantiation lines are guarded so the link stays clean
- *   whether or not the wrapper is fixed.  Do NOT fabricate the missing hal_alif
- *   API.
+ *   via USE_ALIF_ISP_LIB).  west.yml now pins hal_alif v2.3.0, whose
+ *   isp_wrapper/src/isp_api_wrapper.c itself #includes
+ *   <zephyr/drivers/video/isp-vsi.h> (previously the only missing piece) and
+ *   ships a 3-arg isp_vsi_bottom_half(dev, init_cfg, mi_mis) matching this
+ *   driver's call site.  isp-vsi.h itself was never published by hal_alif, so
+ *   it -- plus its isp_ctrl_params.h dependency -- is vendored VERBATIM
+ *   (Apache-2.0) from alifsemi/zephyr_alif @ v2.3.0 into
+ *   zephyr/include/zephyr/drivers/video/ (see the driver's file-header note).
+ *   The wrapper exports no isp_vsi_set_param / isp_vsi_get_param, but the
+ *   v4.4 port dropped their only callers, so that is not a compile blocker.
+ *   Do NOT fabricate any hal_alif API.
  *
  * WHAT IS RUNTIME-BLOCKED ON THIS BATCH: actual ISP processing.  No camera
  * sensor is wired on this hardware batch, and the ISP only does useful work in a
  * camera->csi->isp->memory media-controller graph -- so this app NEVER attempts
- * a stream.  Even with the wrapper fixed, the live path is HW-blocked.
+ * a stream.  This is a COMPILE + LINK proof only; the live path stays
+ * BENCH-BLOCKED until a sensor is wired.
  *
  * The PASS gate here is BIND-based: the isp node binds to "vsi,isp-pico" at reg
  * 0x49046000 with IRQs 367/368.  Whether the driver TU was built+linked is
- * reported separately (it is expected NOT built on this batch -- the wrapper is
- * stale), and does NOT fail the bind-based PASS gate.
+ * reported separately (expected YES on this batch now that CONFIG_VIDEO_ISP_VSI=y
+ * compiles+links cleanly), and does NOT gate the bind-based PASS.
  */
 
 #include <stdbool.h>
@@ -97,18 +91,21 @@
 #define ISP_BOUND (DT_NODE_HAS_STATUS(ISP_NODE, okay) && DT_NODE_HAS_COMPAT(ISP_NODE, vsi_isp_pico))
 
 /*
- * The driver TU (isp_pico.c) is built only under CONFIG_VIDEO_ISP_VSI, which is
- * default n on this batch (the stale hal_alif libisp wrapper -- see the header).
+ * The driver TU (isp_pico.c) is built only under CONFIG_VIDEO_ISP_VSI, which
+ * this app's prj.conf sets to y (compiles + links against hal_alif v2.3.0 --
+ * see the header).  ISP_DEV stays gated on the Kconfig (not a bare
+ * DEVICE_DT_GET_OR_NULL) so this file keeps building cleanly for anyone who
+ * copies it with CONFIG_VIDEO_ISP_VSI=n.
  *
  * IMPORTANT: DEVICE_DT_GET_OR_NULL is NOT NULL-safe here.  It expands to
  * DEVICE_DT_GET when the node is merely status="okay" -- INDEPENDENT of whether
- * any driver actually instantiated a device for it (see device.h:382).  Because
- * this regcheck ENABLES the isp node (so it BINDS) but does NOT build isp_pico.c
- * (the link-blocked driver TU), DEVICE_DT_GET would emit a dangling reference to
- * a __device_dts_ord_* symbol that no TU defines -> a LINK error.  So we gate the
- * device fetch on CONFIG_VIDEO_ISP_VSI (the Kconfig that controls whether the
- * driver TU exists): when the driver is not built, ISP_DEV is a plain NULL and
- * nothing references the (non-existent) device object.
+ * any driver actually instantiated a device for it (see device.h:382).  If the
+ * isp node were enabled (so it BINDS) but isp_pico.c were NOT built, that
+ * expansion would emit a dangling reference to a __device_dts_ord_* symbol that
+ * no TU defines -> a LINK error.  So we gate the device fetch on
+ * CONFIG_VIDEO_ISP_VSI (the Kconfig that controls whether the driver TU
+ * exists): when the driver is not built, ISP_DEV is a plain NULL and nothing
+ * references the (non-existent) device object.
  */
 #if defined(CONFIG_VIDEO_ISP_VSI)
 #define ISP_DEV DEVICE_DT_GET_OR_NULL(ISP_NODE)
@@ -147,19 +144,20 @@ int main(void)
 	/*
 	 * Step 3: report whether the isp_pico.c driver TU was built+linked, and if so
 	 * exercise the portable v4.4 video API on the instantiated device.  On this
-	 * batch the driver is NOT built (CONFIG_VIDEO_ISP_VSI default n -- the stale
-	 * hal_alif libisp wrapper), so ISP_DEV is NULL: we report that and move on.
-	 * This never fails the bind-based PASS gate.
+	 * batch the driver IS built (CONFIG_VIDEO_ISP_VSI=y, compiles+links against
+	 * hal_alif v2.3.0).  device_is_ready() can still legitimately come back
+	 * false here: video_isp_init() requires either a camera controller or the
+	 * TPG enabled, and this build-only overlay wires neither (no sensor on this
+	 * batch) -- that is expected and does NOT fail the bind-based PASS gate
+	 * below.
 	 */
 	const struct device *isp_dev = ISP_DEV;
 
 	if (isp_dev == NULL) {
 		printk("driver: isp_pico.c NOT built/linked (CONFIG_VIDEO_ISP_VSI=n)\n");
-		printk("        BLOCKED on the hal_alif libisp wrapper bump: isp_pico.c needs\n");
-		printk("        <zephyr/drivers/video/isp-vsi.h> + a 3-arg isp_vsi_bottom_half();\n");
-		printk("        the local 2025 wrapper ships neither.  External hal_alif change.\n");
 	} else if (!device_is_ready(isp_dev)) {
-		printk("driver: isp_pico.c linked but device NOT ready (init/clock failed)\n");
+		printk("driver: isp_pico.c linked but device NOT ready (init needs a camera\n");
+		printk("        controller or TPG; neither is wired -- BENCH-BLOCKED, expected)\n");
 #if defined(CONFIG_VIDEO)
 	} else {
 		struct video_caps caps    = { .type = VIDEO_BUF_TYPE_OUTPUT };
@@ -173,16 +171,15 @@ int main(void)
 
 	/*
 	 * PASS gate: the ISP node BINDS -- isp@49046000 binds to "vsi,isp-pico" at
-	 * the DFP reg base with the two DFP IRQs.  This is a bind/staging check; the
-	 * driver TU is intentionally NOT built (stale hal_alif wrapper, reported
-	 * above) and that does NOT fail this gate.  Live ISP processing stays
-	 * HW-blocked on this batch (no sensor wired) AND link-blocked until the
-	 * hal_alif libisp wrapper is bumped.
+	 * the DFP reg base with the two DFP IRQs.  This is a bind/staging check;
+	 * the driver TU compile+link status is reported above and does NOT gate
+	 * this PASS.  Live ISP processing stays BENCH-BLOCKED on this batch (no
+	 * camera sensor wired) -- see the file header.
 	 */
 	if (node_ok) {
 		printk("RESULT PASS: ISP-Pico node BINDS -- isp@49046000 binds to vsi,isp-pico at "
-		       "the DFP reg base 0x49046000 with IRQs 367/368; driver TU build is "
-		       "hal_alif-wrapper-blocked (reported above), live processing HW-blocked "
+		       "the DFP reg base 0x49046000 with IRQs 367/368; driver TU compiles+links "
+		       "against hal_alif v2.3.0 (reported above); live processing BENCH-BLOCKED "
 		       "(no sensor wired)\n");
 	} else {
 		printk("RESULT FAIL: ISP-Pico node NOT staged "

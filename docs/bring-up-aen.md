@@ -158,12 +158,12 @@ against the SKU's `som.yaml` preset.
    west flash
    ```
 
-   One-liner alternative (manifest-driven -- builds every slice
+   One-liner alternative (manifest-driven -- `tan` builds every slice
    declared in the example's `board.yaml`, then flashes them in
    `boot_order:`; see [cli.md](cli.md)):
 
    ```bash
-   west alp-build examples/peripheral-io/gpio-button-led && west alp-flash examples/peripheral-io/gpio-button-led
+   tan --project examples/peripheral-io/gpio-button-led build && tan flash examples/peripheral-io/gpio-button-led
    ```
 
    Expected output on the UART: the
@@ -265,7 +265,7 @@ top of the per-subsystem checks.
 > AEN701 (E7) is deprioritised and may never be produced -- AEN801
 > supersedes it (it adds the Ethos-U85 on top of the U55 pair), so
 > bench bring-up centres on the **E8** part.  E8 is fully supported on
-> **alp-sdk's own upstream Zephyr base (v4.4.0)** -- no fork needed,
+> **alp-sdk's own upstream Zephyr base (v4.4.1)** -- no fork needed,
 > backed by the `hal_alif` module pinned in our `west.yml`.
 >
 > The **primary target is the Alp-Lab carrier board**, now authored +
@@ -288,11 +288,12 @@ top of the per-subsystem checks.
 > leads.)
 >
 > Per-core builds use plain `west build -b <target> <app>`.
-> (`west alp-build <app>` is the multi-core *orchestrator*: it fans a
-> board.yaml out into per-core slices using the SoM-preset board string,
-> which resolves to the `alp_e1m_aen801_m55_{he,hp}` carrier board --
-> **prefer it** once the carrier board boots, as it builds both M55
-> cores from the example's board.yaml with the EVK's actual routing.)
+> (`tan --project <app> build` is the multi-core *executor*: it consumes the SDK's
+> `--emit build-plan` and fans a board.yaml out into per-core slices using
+> the SoM-preset board string, which resolves to the
+> `alp_e1m_aen801_m55_{he,hp}` carrier board -- **prefer it** once the
+> carrier board boots, as it builds both M55 cores from the example's
+> board.yaml with the EVK's actual routing.)
 
 0. **Current-limited power-on + rail check.**  Bench supply at a
    **1 A** limit on V_IN (§1).  Power on, watch steady-state
@@ -341,8 +342,8 @@ top of the per-subsystem checks.
    wire frame in `firmware/cc3501e/DESIGN.md`):
    `PING` (opcode `0x00`) then `GET_VERSION` (opcode `0x01`).
    A standalone host-side helper for the M55 side is **TBD**
-   (only the device firmware + `flash.py` ship today), so drive
-   it from app code via the bridge dispatch for now.
+   (only the device firmware ships today), so drive it from app
+   code via the bridge dispatch for now.
 
    * `PING` must return `RESP_OK` with empty data -- the liveness
      signal.
@@ -413,15 +414,15 @@ top of the per-subsystem checks.
    reports the detected variant:
 
    ```bash
-   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/edgeai-vision-aen
+   west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/aen/edgeai-vision-aen
    west flash
    ```
 
    Expect the console to report the Ethos-U variant the SKU
-   preset declares (`u85` primary + dual `u55`
-   on AEN801 -- see the `inference.npu_population` block).  A
-   variant mismatch means the board DTS NPU node disagrees with
-   the SoC JSON `npus[]`.
+   carries (`u85` primary + dual `u55` on AEN801 -- the primary is
+   the preset's `ethos_u_variant`; the full set is derived from the
+   SoC JSON `npus[]`).  A variant mismatch means the board DTS NPU
+   node disagrees with the SoC JSON `npus[]`.
 
 8. **Load a host-pre-compiled `.alpmodel` + Vela walkthrough.**
    Final gate: prove the end-to-end model path.
@@ -432,7 +433,7 @@ top of the per-subsystem checks.
       `som.sku`):
 
       ```bash
-      alp model build --board board.yaml   # emits build/models/<name>.alpmodel
+      tan model build --board board.yaml   # emits build/models/<name>.alpmodel
       ```
 
    2. Bundle the `.alpmodel` with the app image, flash, and run

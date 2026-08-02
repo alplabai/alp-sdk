@@ -56,13 +56,23 @@ struct alp_mqtt {
 	 * src/common/alp_slot_claim.h (alp_handle_op_enter/leave/
 	 * begin_close, issue #629) -- placed before in_use so the atomic-
 	 * claim zeroing in the dispatcher (memset up to
-	 * offsetof(..., in_use)) resets both on every fresh claim.  NOTE:
-	 * alp_mqtt_connect()/alp_mqtt_loop() are NOT counted via
-	 * active_ops -- see the dispatcher's file comment -- so
-	 * active_ops only tracks alp_mqtt_publish()/alp_mqtt_subscribe(). */
-	uint8_t  lifecycle;
-	uint32_t active_ops;
-	bool     in_use;
+	 * offsetof(..., in_use)) resets both on every fresh claim.  EVERY
+	 * op (connect/publish/subscribe/loop) is counted via active_ops --
+	 * see the dispatcher's file comment.
+	 *
+	 * cb_thread/cb_active/close_pending (issue #756): alp_mqtt_loop()
+	 * invokes the subscribed message callback SYNCHRONOUSLY, inline,
+	 * before returning -- a callback that calls alp_mqtt_close() on its
+	 * own handle used to deadlock waiting for its own still-in-flight
+	 * loop() call to leave.  These three fields back the reentrant
+	 * self-close guard in src/common/alp_slot_claim.h; see
+	 * alp_mqtt_loop()/alp_mqtt_close() in src/mqtt_dispatch.c. */
+	uint8_t   lifecycle;
+	uint32_t  active_ops;
+	uintptr_t cb_thread;
+	bool      cb_active;
+	bool      close_pending;
+	bool      in_use;
 };
 
 #endif /* ALP_BACKENDS_MQTT_OPS_H */

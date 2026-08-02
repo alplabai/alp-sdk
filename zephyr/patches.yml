@@ -59,7 +59,15 @@ patches:
       API extension; drop once the Zephyr IPM pin gains a polling API.
   - path: hal_alif/0001-se-service-add-boot-cpu.patch
     sha256sum: cb456dbc41d51385539bd59cc221e7861547021a2abe882e2df9ac044dc8e86b
-    module: hal_alif
+    # `module:` must match the zephyr/module.yml `name:` the west-patch
+    # command resolves against (zephyr_module.parse_modules), NOT the west
+    # manifest project name -- hal_alif's own module.yml declares itself
+    # "alif" (modules/hal/alif/zephyr/module.yml), so "hal_alif" here never
+    # matched and both hal_alif patches were silently skipped by every
+    # `west patch apply` (issue #1076: only surfaced once pr-twister-aen.yml
+    # became the first CI job to ever call `west patch apply` and then
+    # actually compile hal_alif's se_service.c against the result).
+    module: alif
     author: Alp Lab AB
     email: contact@alplab.ai
     date: 2026-06-18
@@ -78,7 +86,8 @@ patches:
       aen-dualcore-master.
   - path: hal_alif/0002-se-service-add-public-send-request.patch
     sha256sum: af2d7f5eb065c4eb6dc6f2d1a12b01d7fcf43ed2e1c15bf8d7eb8ecf78dc63b6
-    module: hal_alif
+    # See the module-name note on the 0001 patch above.
+    module: alif
     author: Alp Lab AB
     email: contact@alplab.ai
     date: 2026-06-19

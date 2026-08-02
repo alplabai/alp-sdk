@@ -10,6 +10,8 @@ config ALP_SDK_BLE
 	bool "Real Bluetooth host stack via Zephyr bt"
 	default y if BT
 	depends on BT
+	select BT_GATT_DYNAMIC_DB
+	select BT_GATT_CLIENT
 	help
 	  Gates the real Zephyr bt-host body inside
 	  src/backends/ble/zephyr_drv.c.  When OFF, the registry
@@ -24,6 +26,13 @@ config ALP_SDK_BLE
 
 	  Requires CONFIG_BT=y plus CONFIG_BT_PERIPHERAL=y and/or
 	  CONFIG_BT_CENTRAL=y for the matching role.
+
+	  Selects BT_GATT_DYNAMIC_DB (issue #480: runtime
+	  bt_gatt_service_register()/unregister() in z_gatt_register_service()
+	  need it -- both are compiled out of upstream's gatt.c without it)
+	  and BT_GATT_CLIENT (the conn-side alp_ble_gatt_read()/
+	  alp_ble_gatt_write() ops call bt_gatt_read()/bt_gatt_write(), the
+	  GATT client procedures, which are compiled out without it).
 
 config ALP_SDK_BLE_CC3501E
 	bool "CC3501E BLE backend for <alp/ble.h>"
@@ -170,28 +179,6 @@ config ALP_SDK_SECURITY_SE_CRYPTOCELL_SEND_SEAM
 	  the SE declines (SHA-384/512, an over-ceiling single-shot input)
 	  returns ALP_ERR_NOSUPPORT and the dispatcher falls through to the PSA
 	  backend.  Turn OFF to force all crypto onto the M55 via PSA.
-
-config ALP_SDK_MPROC_BOOT_ALIF_SE
-	bool "Route alp_mproc_boot_core() to the Alif SE-service boot authority"
-	depends on ALP_SDK && HAS_ALIF_SE_SERVICES
-	default y
-	help
-	  Compiles the Alif SE-service peer-core boot backend
-	  (src/backends/mproc/alif_se_boot.c).  It registers at
-	  silicon_ref="alif:ensemble:e8" priority 100 in the "mproc_boot"
-	  class -- ahead of the silicon_ref="*" priority-0 NOSUPPORT
-	  fallback -- so on the E8 the portable alp_mproc_boot_core()
-	  (<alp/mproc.h>) releases the other M55 through
-	  se_service_boot_cpu() over the SE MHUv2 mailbox: the bench-proven
-	  "B1 Option B" dual-core route (a dual ATOC loads the peer image
-	  ["load"]-only; the master core starts it at runtime).
-
-	  se_service_boot_cpu() itself is added to hal_alif by
-	  zephyr/patches/hal_alif/0001-se-service-add-boot-cpu.patch.
-	  Needs the SE mailboxes (ARM_MHUV2 + the se_service DT node).
-	  With this OFF, or on non-E8 AEN SoMs without a matching
-	  silicon_ref registration, alp_mproc_boot_core() returns
-	  ALP_ERR_NOSUPPORT through the wildcard fallback.
 
 config ALP_SDK_SOC_INFO_ALIF_SE
 	bool "Route the <alp/hw_info.h> SoC identity to the Alif SE service"

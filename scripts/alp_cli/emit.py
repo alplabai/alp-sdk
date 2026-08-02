@@ -45,6 +45,7 @@ PROJECT_EMIT_MODES = [
     "composed-route-table",
     "carrier-netlist",
     "zephyr-board",
+    "scaffold",
 ]
 
 # Mirror the orchestrator's --emit choices (alp_orchestrate.cli) == the
@@ -58,7 +59,13 @@ ORCHESTRATOR_EMIT_MODES = [
     "storage-mounts-c",
     "tfm-sysbuild-conf",
     "build-plan",
+    "kconfig",
 ]
+
+# The one orchestrator-only mode that IS --core-scoped (every other
+# orchestrator mode iterates every core -- see `_emit_via_orchestrator`'s
+# --core-ignored warning, which stays correct for all of them but kconfig).
+_ORCHESTRATOR_CORE_SCOPED_MODES = frozenset({"kconfig"})
 
 # The full front-door mode set: alp_project.py's list plus every
 # orchestrator-only mode.  Overlapping modes (system-manifest,
@@ -82,8 +89,13 @@ EMIT_MODES = PROJECT_EMIT_MODES + [
 @click.option("--build-root", default=None, type=click.Path(path_type=Path),
               help="Build root used for build-plan slice paths "
                    "(default: build).")
+@click.option("--template", default=None,
+              help="Template catalog id (--emit scaffold only).")
+@click.option("--sku", default=None,
+              help="Target SoM SKU (--emit scaffold only).")
 def emit_cmd(mode: str, input_path: Path | None, output: Path | None,
-             core: str | None, build_root: Path | None) -> None:
+             core: str | None, build_root: Path | None,
+             template: str | None, sku: str | None) -> None:
     root = sdk_root()
     if root is None:
         click.echo(
@@ -92,6 +104,15 @@ def emit_cmd(mode: str, input_path: Path | None, output: Path | None,
             err=True,
         )
         raise SystemExit(1)
+
+    # scaffold materialises a NEW project -- there is no board.yaml to
+    # find yet, so it skips the project-discovery step every other mode
+    # needs.
+    if mode == "scaffold":
+        rc = _emit_scaffold(root, template, sku, output)
+        if rc != 0:
+            raise SystemExit(rc)
+        return
 
     if input_path is None:
         project = find_project(Path.cwd())
@@ -112,6 +133,39 @@ def emit_cmd(mode: str, input_path: Path | None, output: Path | None,
                                     build_root)
     if rc != 0:
         raise SystemExit(rc)
+
+
+def _emit_scaffold(root: Path, template: str | None, sku: str | None,
+                   output: Path | None) -> int:
+    """`--emit scaffold` -- `scripts/alp_project.py --emit scaffold
+    --template <id> --sku <SKU>`. Needs neither a project board.yaml
+    nor --core/--build-root (see `emit_cmd`'s early dispatch)."""
+    if not template or not sku:
+        click.echo("alp emit: --emit scaffold requires --template and --sku",
+                   err=True)
+        return 1
+    cmd = [python_exe(), str(root / "scripts" / "alp_project.py"),
+           "--emit", "scaffold", "--template", template, "--sku", sku]
+    if output is None:
+        return subprocess.run(cmd, env=subprocess_env(root)).returncode
+
+    # Same capture-then-write pattern as _emit_via_orchestrator's
+    # --output handling: alp_project.py prints the JSON envelope to
+    # stdout; --output is CLI plumbing on top of that.
+    proc = subprocess.run(cmd, env=subprocess_env(root),
+                          capture_output=True, text=True)
+    if proc.stderr:
+        click.echo(proc.stderr, err=True, nl=False)
+    if proc.returncode != 0:
+        return proc.returncode
+    output.parent.mkdir(parents=True, exist_ok=True)
+    # newline="": mirrors _emit_via_alp_project's own alp_project.py --output
+    # writer, which passes newline="" (scripts/alp_project.py:123) -- some
+    # scaffold modes generate committed-artefact shapes downstream.
+    output.write_text(proc.stdout, encoding="utf-8", newline="")
+    click.echo(f"alp emit: wrote {output} ({len(proc.stdout)} bytes)",
+               err=True)
+    return 0
 
 
 def _emit_via_alp_project(root: Path, mode: str, input_path: Path,
@@ -135,12 +189,14 @@ def _emit_via_orchestrator(root: Path, mode: str, input_path: Path,
                            build_root: Path | None) -> int:
     """Orchestrator-only modes: `python -m alp_orchestrate --emit <mode>`
     -- the exact invocation `west alp-emit` performs."""
-    if core:
+    if core and mode not in _ORCHESTRATOR_CORE_SCOPED_MODES:
         # Matches alp_project.py's behaviour for project-level emits.
         click.echo(f"alp emit: --core is ignored for {mode} "
                    f"(project-level emit)", err=True)
     cmd = [python_exe(), "-m", "alp_orchestrate",
            "--input", str(input_path), "--emit", mode]
+    if core and mode in _ORCHESTRATOR_CORE_SCOPED_MODES:
+        cmd += ["--core", core]
     if build_root:
         cmd += ["--build-root", str(build_root)]
 
@@ -156,7 +212,11 @@ def _emit_via_orchestrator(root: Path, mode: str, input_path: Path,
     if proc.returncode != 0:
         return proc.returncode
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(proc.stdout, encoding="utf-8")
+    # newline="": mirrors alp_project.py's own --output writer
+    # (scripts/alp_project.py:123, `_write_or_print`) -- modes routed here
+    # include storage-mounts-c (C source), dts-partitions (.dtsi) and
+    # tfm-sysbuild-conf, all generate-then-commit artefact shapes.
+    output.write_text(proc.stdout, encoding="utf-8", newline="")
     click.echo(f"alp emit: wrote {output} ({len(proc.stdout)} bytes)",
                err=True)
     return 0

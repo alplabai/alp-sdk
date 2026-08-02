@@ -31,6 +31,23 @@
  * on a genuinely long-running op instead of spinning the closer
  * thread for the whole handshake. A racing close/disconnect can no
  * longer tear down state while one of these ops is in flight.
+ *
+ * @par Issue #756 -- callback self-close inside alp_ble_scan_start()
+ * The CC3501E backend's scan_start op runs the scan to completion and
+ * then invokes the caller's scan callback SYNCHRONOUSLY, inline, once
+ * per result, before returning control here.  A callback that calls
+ * alp_ble_close() on its own radio handle used to deadlock the same
+ * way alp_mqtt_loop()'s message callback did (issue #756): the
+ * sleep-poll drain in alp_ble_close() waits for active_ops to reach 0,
+ * but that count is THIS very scan_start() call, on THIS very thread,
+ * which cannot decrement until the callback returns -- and it cannot
+ * return while asleep inside close().  alp_ble_scan_start() now
+ * brackets the backend call with alp_handle_cb_enter()/
+ * alp_handle_cb_leave() (src/common/alp_slot_claim.h) so
+ * alp_ble_close() can tell a reentrant self-close (defer teardown to
+ * this function's own post-op check) from a genuine cross-thread close
+ * (unchanged: block and drain, same as before).  Public re-entry
+ * guarantees are documented on alp_ble_scan_cb_t in include/alp/ble.h.
  */
 
 #include <stdbool.h>
@@ -139,18 +156,54 @@ alp_ble_t *alp_ble_open(void)
 void alp_ble_close(alp_ble_t *h)
 {
 	if (h == NULL) return;
-	/* Sleep-poll drain (issue #629): this pool counts alp_ble_connect(),
-	 * which can block up to its caller's timeout_ms, so the busy-spin
-	 * alp_handle_begin_close() would spin the closer for the whole
-	 * handshake -- alp_handle_begin_close_blocking() sleeps between polls
-	 * instead (same rationale as rpc_dispatch.c's _rpc_drain(), GHSA-xhm8).
-	 * Idempotent: a second/never-opened close no-ops. */
-	if (!alp_handle_begin_close_blocking(&h->lifecycle, &h->active_ops)) return;
+	/* Self-close-aware sleep-poll drain (issues #629/#756): this pool
+	 * counts alp_ble_connect(), which can block up to its caller's
+	 * timeout_ms, so a normal (external) close sleeps between polls
+	 * instead of busy-spinning (same rationale as rpc_dispatch.c's
+	 * _rpc_drain(), GHSA-xhm8).  A close triggered BY a scan callback
+	 * running inside this handle's own alp_ble_scan_start() is detected
+	 * instead and deferred to that call's own post-callback check (see
+	 * alp_ble_scan_start() below) -- draining here would deadlock on
+	 * this same thread's own in-flight count.  Idempotent either way: a
+	 * second/never-opened close no-ops. */
+	alp_handle_close_mode_t mode;
+	if (!alp_handle_begin_close_selfaware(&h->lifecycle,
+	                                      &h->active_ops,
+	                                      &h->cb_active,
+	                                      &h->cb_thread,
+	                                      &mode,
+	                                      &h->close_pending)) {
+		return;
+	}
+	if (mode == ALP_HANDLE_CLOSE_DEFERRED) {
+		return;
+	}
 	if (h->state.ops != NULL && h->state.ops->close != NULL) {
 		h->state.ops->close(&h->state);
 	}
 	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_UNOPENED);
 	_free_radio(h);
+}
+
+/* Legacy (non-extended) BT LE adv PDU budget: 31 bytes total, made up of AD
+ * structures -- Flags (always emitted) = 3, Complete Local Name (if
+ * cfg->name) = 2 + strlen(name), Service UUIDs (if any, all 128-bit UUIDs
+ * packed into one AD structure) = 2 + sizeof(alp_ble_uuid_t)*num_services.
+ * The portable alp_ble_adv_config_t has no extended-advertising field, so
+ * this cap applies to every backend today; enforced once here (not
+ * per-backend) so Zephyr and CC3501E can't drift out of sync (#480/#888). */
+#define ALP_BLE_ADV_LEGACY_MAX_LEN 31u
+
+static size_t alp_ble_adv_data_size(const alp_ble_adv_config_t *cfg)
+{
+	size_t size = 3u; /* Flags AD structure: always emitted. */
+	if (cfg->name != NULL && cfg->name[0] != '\0') {
+		size += 2u + strlen(cfg->name);
+	}
+	if (cfg->services != NULL && cfg->num_services > 0u) {
+		size += 2u + sizeof(alp_ble_uuid_t) * cfg->num_services;
+	}
+	return size;
 }
 
 alp_status_t alp_ble_advertise_start(alp_ble_t *h, const alp_ble_adv_config_t *cfg)
@@ -165,6 +218,8 @@ alp_status_t alp_ble_advertise_start(alp_ble_t *h, const alp_ble_adv_config_t *c
 	}
 	alp_status_t rc;
 	if (cfg == NULL) {
+		rc = ALP_ERR_INVAL;
+	} else if (alp_ble_adv_data_size(cfg) > ALP_BLE_ADV_LEGACY_MAX_LEN) {
 		rc = ALP_ERR_INVAL;
 	} else if (h->state.ops == NULL || h->state.ops->advertise_start == NULL) {
 		rc = ALP_ERR_NOT_IMPLEMENTED;
@@ -241,6 +296,12 @@ alp_status_t alp_ble_gatt_notify(alp_ble_t            *h,
 	return rc;
 }
 
+/* Test-only hook (dev-review follow-up on issue #756): fires right
+ * after alp_handle_op_leave() below -- mirrors
+ * src/mqtt_dispatch.c's g_mqtt_test_after_op_leave_hook (see its doc
+ * comment for the full rationale). NULL in production. */
+static void (*g_ble_test_after_op_leave_hook)(void) = NULL;
+
 alp_status_t alp_ble_scan_start(alp_ble_t *h, bool active, alp_ble_scan_cb_t cb, void *user)
 {
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
@@ -252,9 +313,40 @@ alp_status_t alp_ble_scan_start(alp_ble_t *h, bool active, alp_ble_scan_cb_t cb,
 	} else if (h->state.ops == NULL || h->state.ops->scan_start == NULL) {
 		rc = ALP_ERR_NOT_IMPLEMENTED;
 	} else {
+		/* Issue #756: the backend may synchronously invoke `cb` once per
+		 * scan result before returning, and `cb` may call alp_ble_close()
+		 * on THIS handle -- mark this thread as "inside the callback-
+		 * invoking op" first so close() can detect the reentrant
+		 * self-close and defer instead of deadlocking (see this file's
+		 * header comment). */
+		alp_handle_cb_enter(&h->cb_thread, &h->cb_active);
 		rc = h->state.ops->scan_start(&h->state, active, cb, user);
+		alp_handle_cb_leave(&h->cb_active);
 	}
+	/* Dev-review follow-up on issue #756: consume close_pending BEFORE
+	 * op_leave, while this thread still holds its own counted op -- `h`
+	 * cannot be freed by a concurrent EXTERNAL closer until active_ops
+	 * drains to 0, which cannot happen before the op_leave below runs.
+	 * Checking close_pending any later raced that external closer, which
+	 * is free to tear `h` down the instant this op leaves -- a
+	 * use-after-free/double-free window (see
+	 * alp_handle_take_deferred_close()'s doc comment). */
+	bool self_closed = alp_handle_take_deferred_close(&h->close_pending);
 	alp_handle_op_leave(&h->active_ops);
+	if (g_ble_test_after_op_leave_hook != NULL) {
+		g_ble_test_after_op_leave_hook();
+	}
+	if (self_closed) {
+		/* alp_handle_begin_close_selfaware()'s CAS already elected this
+		 * thread the unique owner of this handle's close -- safe to
+		 * drain (any OTHER concurrent op) and tear down now. */
+		alp_handle_drain_blocking(&h->active_ops);
+		if (h->state.ops != NULL && h->state.ops->close != NULL) {
+			h->state.ops->close(&h->state);
+		}
+		alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_UNOPENED);
+		_free_radio(h);
+	}
 	return rc;
 }
 

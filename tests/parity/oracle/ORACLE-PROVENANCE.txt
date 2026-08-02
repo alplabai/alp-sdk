@@ -1,0 +1,43 @@
+oracle SHA: 97ad481b94007eeb3439a21088c10c59aedc95ac  (feat(build-plan): publish envAppendPath + executionPolicy (ADR-0020 Phase 1, additive) (#847))
+captured from df312cec^ (parent of ADR-0020 Phase 4 #848); has fan_out + envAppendPath/executionPolicy
+
+Hand-reviewed field correction (alp-sdk#862, "Windows sysbuild paths" fix, H3/#596):
+`connectivity_iot-fleet-ota.build-plan.json` slices[0]/[1] `command.args`'
+`-DSB_CONF_FILE=...` second path segment was updated from
+`<root>/build/alp_sysbuild.conf` to
+`<root>/examples/connectivity/iot-fleet-ota/build/alp_sysbuild.conf` -- the
+project-relative `alp_sysbuild.conf` overlay path is now anchored on the
+resolved per-project `build_root`, not the emitting process's CWD, so the
+overlay path is CWD-independent per the plan contract. This is the only
+field touched by this correction; every other value in this fixture (and
+every other oracle fixture, aside from the alp-sdk#999 correction below) is
+untouched, still frozen at 97ad481b.
+
+Hand-reviewed field correction (alp-sdk#999, "planner refuses a boardless
+target"): `multicore_rpmsg-imx93.build-plan.json` slices[1] (coreId `m33`)
+`command` was updated from a `west build -b alp_e1m_nx9101_m33 ...` command
+to `null`, and `warnings` was updated from `[]` to carry one
+`board-tree-missing` warning for that slice. `E1M-NX9101`'s `topology.m33.
+board:` names `alp_e1m_nx9101_m33`, which has no tree under
+`zephyr/boards/alp/` -- the planner now refuses to emit a `west build -b
+<board>` command guaranteed to fail with Zephyr's own "No board named ...
+Invalid BOARD" error, blocking the command the same way `no-command`/
+`yocto-recipe-missing` already do, rather than continuing to hand a
+consumer a command frozen at 97ad481b that was never buildable. These two
+fields are the only ones touched by this correction; every other value in
+this fixture is untouched, still frozen at 97ad481b.
+
+Corpus removal, not a value correction (alp-sdk#1025, "hw_rev status gate"):
+`multicore_rpmsg-imx93.build-plan.json` is DELETED, not edited. `seam1_
+field_diff.py` auto-discovers its board corpus from every `*.build-plan.json`
+file in this directory (no hardcoded `--boards` list) and re-emits each
+fixture's `boardYaml` LIVE against the checkout under test; a corpus member
+whose live emit no longer succeeds at all fails the gate on every PR forever,
+not just once. `E1M-NX9101`'s only hw_rev (imx93 r1) is `status: tbd`, and
+the new hw_rev-buildable gate refuses any board.yaml that resolves to a
+non-buildable revision outright (`SdkRevisionNotBuildable`, exit 5) -- so
+`examples/multicore/rpmsg-imx93/board.yaml` can no longer be emitted at all,
+frozen oracle or not. This is a corpus-membership change (delete the file),
+not a re-capture of its frozen field values -- re-add the file (re-captured
+against a live emit, not restored from git history, since the shape may have
+moved since 97ad481b) once imx93 r1 carries a buildable status.

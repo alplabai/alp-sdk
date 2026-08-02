@@ -111,7 +111,72 @@ int rc = se_service_set_run_cfg(&p);
 `se_service_clock_set_divider()` changes a PLL/bus divider directly — same
 brownout class.
 
-### 2.2 `se_service_update_stoc(u8 *img, u32 size)` — A/B secure-boot update
+### 2.2 `se_service_boot_cpu(cpu_id, entry_addr)` — peer-core release
+
+Backs `alp_mproc_boot_core()` (`<alp/mproc.h>`, `src/backends/mproc/alif_se_boot.c`).
+Asks the SES to release a peer M55 at `entry_addr` -- per the vendor manual
+(`SE_Host_Services_API_v1.109.0.pdf` p.112, `SERVICES_boot_cpu`) it "does not
+perform image loading, verification, etc., it just boots the core"; residency
+at `entry_addr` is the caller's responsibility, arranged before this call.
+
+> **Direction-specific failure (E8, `AE822FA0E5597LS0`, 2026-07-31):** a plain
+> `"flags": ["load"]` ATOC entry + `se_service_boot_cpu()` **works** in the
+> HP-master → HE-peer direction -- `ALP-HE` read `uLV` (Loaded, Verified) with
+> Dest Addr `0x58000000` populated (28.52 ms load time), the bytes at
+> `0x58000000` matched the staged binary on a repeat read, and the link
+> carried 16/16 PING/PONG round-trips. The **same recipe fails** in the
+> HE-master → HP-peer direction: the ATOC still reported `uLV`, but two
+> independent debug access ports read the HP peer's ITCM as uninitialized
+> SRAM from t+0.80s to t+60s. Releasing that core vectors from garbage and
+> locks up immediately (`CFSR = 0x00000101`, `PC = 0xEFFFFFFE`).
+>
+> **Root cause is vendor-documented, not an inaccurate `uLV`.** The SES does
+> place the bytes at ATOC-processing time in both directions; M55-HP's TCM is
+> separately invalidated by the reset `SERVICES_boot_cpu()` issues before
+> release, so HP's TCM is empty again by release time even though the SES
+> table (correctly, as of load time) still says `uLV`. Two vendor passages
+> describe this and **disagree on device scope**:
+> - p.112, `SERVICES_boot_cpu`: "For the M55 cores, there are cases in which
+>   this service does not work. The currently known case is the **M55-HP
+>   core in FUSION REV_Bx devices**, where resetting the core also
+>   invalidates its TCM content."
+> - p.115, `SERVICES_boot_release_cpu`: "A known case is the **M55-HP core
+>   in Ensemble devices**. Because of that, after calling
+>   `SERVICES_boot_reset_cpu()` to stop the core, the image in the TCM must
+>   be reloaded, before calling `SERVICES_boot_release_cpu()`."
+>
+> E8 is Ensemble, so the second passage applies here. M55-HE is not
+> documented with this erratum, matching the working direction above.
+>
+> The fix for the HE-master → HP-peer direction is deferred ATOC processing
+> -- `"flags": ["load", "boot", "deferred"]` (`"deferred"` is a flags-array
+> member, not a sibling boolean key) sets `TOC_IMAGE_DEFERRED`, the SES skips
+> the boot-time release, and the host reloads + releases at runtime with
+> `SERVICES_boot_process_toc_entry` (service 500) -- the vendor manual
+> (p.112) calls 500 the "higher-level ... convenient way to boot a CPU core"
+> and recommends it over 501 for M55 cores generally. That combination
+> carried an RPMsg link through 495 consecutive PING/PONG round-trips over
+> 4m11s, and 16/16 on the in-tree `aen-rpc-pingpong` example. This backend
+> now implements that path too, gated by
+> `CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC` (default ON only when the
+> configured peer is HP -- `CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_PEER_IS_HP`,
+> see the Kconfig help in `zephyr/kconfigs/mproc-rpc-usb.kconfig`) -- but
+> every shipped example still rides service 501 as-is: all six that call
+> `alp_mproc_boot_core()` (`aen-alp-rpc`, `aen-rpc-pingpong`,
+> `aen-dualcore-ipc`, `aen-dualcore-doorbell`, `aen-dualcore-master`,
+> `firmware-update-log`) release **HE from an HP master**, the working
+> direction for the plain path, and none of them set `PEER_IS_HP`. The
+> `aen-dualcore-he-master` example is the in-tree consumer of the deferred
+> path (`examples/aen/aen-dualcore-he-master/testcase.yaml`), silicon-proven
+> releasing an HP peer via a cold-cycle bench run. Full writeup: the
+> precondition comment on `alif_se_boot_core()` and
+> `docs/aen-bench-bringup.md` § Flow A — Dual-core deferred-TOC boot.
+>
+> **Open:** whether `entry_addr` is honoured by service 501 at all was not
+> isolated by either run above -- the entry point came from the ATOC in
+> both cases.
+
+### 2.3 `se_service_update_stoc(u8 *img, u32 size)` — A/B secure-boot update
 
 Rewrites the **System TOC (STOC)** in MRAM — the customer secure-boot / A-B
 field-update path. This is the most destructive SE service: a malformed STOC
@@ -135,7 +200,7 @@ int rc = se_service_update_stoc(stoc_img, stoc_size);
 chain (§3) proven on that board first, (c) a known-good STOC image to roll back
 to. Until then it stays design-only.
 
-### 2.3 Also mutating (out of scope here)
+### 2.4 Also mutating (out of scope here)
 
 `se_service_boot_es0` / `shutdown_es0` (power a subsystem; needs an NVDS config
 blob), `se_service_se_sleep_req` (clears the SE-ready flag — next call
@@ -161,7 +226,8 @@ state; none are needed for the read-only characterisation.
 | --- | --- |
 | §1 read-only queries | **Yes** — zero risk, validated on E8 (#197) |
 | §2.1 `set_run_cfg` (real change) | No — needs power-cycle recovery on hand; idempotent re-assert is a cache no-op |
-| §2.2 `update_stoc` | No — sacrificial board + proven SETOOLS recovery required first |
+| §2.2 `boot_cpu` (peer-core release) | **Yes** for HP-master → HE-peer with plain `["load"]`; HE-master → HP-peer needs `["load","boot","deferred"]` — a plain `["load"]` entry locks the HP peer up (see §2.2) |
+| §2.3 `update_stoc` | No — sacrificial board + proven SETOOLS recovery required first |
 
 See `examples/aen/aen-se-service-info` (vendor-scoped transport + LCS regcheck)
 and `aen-se-service-query` (the read-only surface via the portable `alp_*`

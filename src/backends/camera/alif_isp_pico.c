@@ -67,7 +67,7 @@
 #endif
 
 #define ALP_ALIF_ISP_DEV_OR_NULL(idx) \
-	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_camera, idx))), \
+	COND_CODE_1(DT_NODE_HAS_STATUS(DT_ALIAS(_CONCAT(alp_camera, idx)), okay), \
 	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_camera, idx)))), \
 	            (NULL))
 

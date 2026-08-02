@@ -35,12 +35,24 @@
 extern "C" {
 #endif
 
-/** Pixel format shared by the display and camera APIs. */
+/**
+ * @brief Pixel format shared by the display, camera, and JPEG-encoder APIs.
+ *
+ * @ref ALP_PIXFMT_YUV420_PLANAR and @ref ALP_PIXFMT_NV12 were appended
+ * (new numeric values after @ref ALP_PIXFMT_ARGB8888) for <alp/jpeg.h>'s
+ * @c alp_jpeg_encode_req_t::format -- existing values are unchanged, so
+ * this stays ABI-safe for every display/camera caller already switching
+ * on this enum.
+ */
 typedef enum {
 	ALP_PIXFMT_MONO_VLSB = 0, /**< 1 bpp, vertical bytes (SSD1306 native). */
 	ALP_PIXFMT_RGB565    = 1,
 	ALP_PIXFMT_RGB888    = 2,
-	ALP_PIXFMT_ARGB8888  = 3
+	ALP_PIXFMT_ARGB8888  = 3,
+	ALP_PIXFMT_YUV420_PLANAR =
+	    4, /**< I420: separate Y, U, V planes, each its own base pointer + stride (4:2:0). */
+	ALP_PIXFMT_NV12 =
+	    5, /**< Semi-planar 4:2:0: one Y plane immediately followed by one interleaved U/V plane. */
 } alp_pixfmt_t;
 
 /** Status codes returned by ALP peripheral functions. */
@@ -288,8 +300,14 @@ alp_status_t alp_gpio_read(alp_gpio_t *pin, bool *level);
 /**
  * @brief Register an edge-triggered callback for @p pin.
  *
- * Callback runs in the IRQ context (ISR); keep work minimal +
- * defer to a thread / workqueue for anything substantive.
+ * Callback runs in the IRQ context (ISR) on Zephyr; keep work minimal
+ * + defer to a thread / workqueue for anything substantive.  On the
+ * Yocto backend the callback instead runs on a shared dispatcher
+ * thread, OUTSIDE any internal lock (issue #756): it is safe to call
+ * @ref alp_gpio_irq_disable or @ref alp_gpio_close on @p pin (a
+ * self-disable/self-close) -- or on any OTHER open pin -- from within
+ * this callback; neither re-locks anything the callback itself is
+ * still holding.
  *
  * @param[in] pin   Handle from @ref alp_gpio_open.
  * @param[in] edge  Edge polarity (RISING / FALLING / BOTH / NONE).
@@ -315,6 +333,10 @@ alp_status_t alp_gpio_irq_disable(alp_gpio_t *pin);
 
 /**
  * @brief Release the GPIO handle.  Idempotent on NULL.
+ *
+ * On the Yocto backend, safe to call from @p pin's own
+ * @ref alp_gpio_cb_t (a self-close, issue #756) or from a different
+ * pin's callback -- see @ref alp_gpio_irq_enable's doc comment.
  *
  * @param[in] pin  Handle from @ref alp_gpio_open, or NULL.
  */

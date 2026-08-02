@@ -25,7 +25,7 @@
 #
 # What this proves end-to-end:
 #   - The orchestrator's `cores.<id>.memory:` emit reaches alp.conf.
-#   - alp.conf is layered onto prj.conf via OVERLAY_CONFIG.
+#   - alp.conf is layered onto prj.conf via EXTRA_CONF_FILE.
 #   - The resulting CONFIG_MAIN_STACK_SIZE drives Zephyr's
 #     K_THREAD_STACK_SIZEOF -- i.e. the runtime stack matches the
 #     value declared in board.yaml (not some unrelated default).

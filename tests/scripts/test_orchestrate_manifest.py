@@ -121,8 +121,9 @@ def test_emit_system_manifest_round_trip(tmp_path: Path) -> None:
 
     # Helper-MCU registration: V2N101's Phase-3 `helper_firmware:`
     # block lists gd32_bridge (the GD32G553 supervisor firmware
-    # image).  The manifest carries the chip slug + firmware_path
-    # + flash_method verbatim.
+    # image).  The manifest carries the chip slug + flash_method
+    # verbatim; firmware_path is absent (#852/#936 review fix, see
+    # test_emit_system_manifest_populates_helper_mcus below).
     helper_names = [h["name"] for h in parsed["helper_mcus"]]
     assert "gd32_bridge" in helper_names
     gd32 = next(h for h in parsed["helper_mcus"]
@@ -177,8 +178,15 @@ def test_emit_system_manifest_populates_helper_mcus(tmp_path: Path) -> None:
     """Phase 3 helper-MCU population.
 
     V2N101's preset declares one helper_firmware entry (gd32_bridge);
-    the manifest must carry the chip slug + firmware_path + flash_method
-    verbatim.
+    the manifest must carry the chip slug + flash_method verbatim.
+    `firmware_path` is entirely ABSENT from the preset (#852 review fix,
+    2026-07): the old `firmware_path: TBD` sentinel wasn't actually treated
+    as a sentinel by tan-cli's flash planner
+    (`crates/tan-cli/src/commands/flash/mod.rs`) -- it became the artefact
+    string and a real flasher was spawned against a nonexistent `TBD`
+    path. Dropping the field entirely makes tan-cli's own clean-refusal
+    path fire instead ("has no output_artefact / firmware_path; can't
+    flash"). No `firmware_path` key means no TBD note either.
     """
     path = _write_board(tmp_path, V2N_HAPPY)
     project = load_board_yaml(path)
@@ -191,8 +199,8 @@ def test_emit_system_manifest_populates_helper_mcus(tmp_path: Path) -> None:
     assert "gd32_bridge" in by_name
     gd32 = by_name["gd32_bridge"]
     assert gd32["chip"] == "gd32g553"
-    assert gd32["firmware_path"] == \
-        "firmware/gd32-bridge/build/gd32/gd32-bridge.bin"
+    assert "firmware_path" not in gd32
+    assert "note" not in gd32
     assert gd32["flash_method"] == "swd_probe"
     assert isinstance(gd32["flash_args"], dict)
     assert gd32["flash_args"]["target"] == "gd32g553"
@@ -221,6 +229,82 @@ def test_emit_system_manifest_populates_flash_method(tmp_path: Path) -> None:
     m33 = by_core["m33_sm"]
     assert m33["flash_method"] == "zephyr_west_flash"
     assert isinstance(m33["flash_args"], dict)
-    assert m33["flash_args"]["runner"] == "openocd"
+    # No runner is forced: not every in-tree board registers openocd
+    # (e.g. AEN's board.cmake sets flash-runner: alif_flash), so the
+    # slice defers to the board.cmake default runner.
+    assert m33["flash_args"] == {}
+
+
+# ---------------------------------------------------------------------
+# `flash_args.jlink_flash_device` -- the AEN Flow D arming fact
+# ---------------------------------------------------------------------
+
+# Off-topology a32_cluster (nothing to build in these flash-recipe-only
+# tests, mirrors examples/aen/aen-analog-validate/board.yaml); m55_hp and
+# m55_he fall back to the SoM preset's `topology:` stock-shim defaults, so
+# no `app:` needs restating here.
+AEN_HAPPY = """
+som:
+  sku: E1M-AEN801
+
+cores:
+  a32_cluster:
+    os: "off"
+"""
+
+
+def test_emit_system_manifest_aen_flash_args_carries_jlink_flash_device(
+    tmp_path: Path,
+) -> None:
+    """E1M-AEN801's resolved SoC variant (silicon_variant:
+    AE822FA0E5597LS0) publishes `debug.jlink_flash_device:
+    AE822FA0E5597LS0_M55_HE` (metadata/socs/alif/ensemble/e8.json) -- the
+    J-Link part-number profile that arms Flow D's built-in MRAM loader.
+    Both M55 zephyr slices must carry it in `flash_args` so a downstream
+    consumer (tan) can pick that path over the SETOOLS/SE-UART fallback.
+    """
+    path = _write_board(tmp_path, AEN_HAPPY)
+    project = load_board_yaml(path)
+    parsed = yaml.safe_load(emit_system_manifest(project))
+
+    by_core = {s["core_id"]: s for s in parsed["slices"]}
+    for core_id in ("m55_hp", "m55_he"):
+        slice_ = by_core[core_id]
+        assert slice_["flash_method"] == "zephyr_west_flash"
+        assert slice_["flash_args"]["jlink_flash_device"] == \
+            "AE822FA0E5597LS0_M55_HE"
+
+
+# E1M-AEN701's resolved SoC variant (silicon_variant: AE722F80F55D5LS in
+# metadata/socs/alif/ensemble/e7.json) DOES publish a `debug:` block --
+# `jlink_device` -- but no `jlink_flash_device` key.  That's the branch that
+# actually needs coverage: V2N's n44.json has no `debug:` block at all, so
+# asserting against it only proves the all-absent case, not "variant
+# resolved, `debug:` present, key missing".
+AEN_NO_JLINK_FLASH_DEVICE = """
+som:
+  sku: E1M-AEN701
+
+cores:
+  a32_cluster:
+    os: "off"
+"""
+
+
+def test_emit_system_manifest_flash_args_omits_jlink_flash_device_when_absent(
+    tmp_path: Path,
+) -> None:
+    """`flash_args` must stay the tidy `{}` with NO `jlink_flash_device`
+    key, never a `null` placeholder (the schema's published-unknown
+    contract: an absent key IS the correct unknown state) -- even though
+    this variant's `debug:` block exists and carries its sibling
+    `jlink_device`."""
+    path = _write_board(tmp_path, AEN_NO_JLINK_FLASH_DEVICE)
+    project = load_board_yaml(path)
+    parsed = yaml.safe_load(emit_system_manifest(project))
+
+    by_core = {s["core_id"]: s for s in parsed["slices"]}
+    for core_id in ("m55_hp", "m55_he"):
+        assert by_core[core_id]["flash_args"] == {}
 
 

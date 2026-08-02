@@ -15,8 +15,9 @@ and [`aen-provisioning.md`](aen-provisioning.md).
 | **Production MRAM flash** | ✅ end-to-end | SETOOLS `app-gen-toc` + `app-write-mram` over the SE-UART; device auto-enters maintenance (no strap); SES loads + boots the ATOC (blink ran at `0x58000000`). |
 | **Zephyr boot (alp-sdk image)** | ✅ first light | Boots to the idle thread; "Hello World" read back via RAM console over SWD. |
 | **M55-HP core (second M55)** | ✅ first light (2026-06-17) | The HP core is held in reset at power-on (only the HE core's AP shows a CPUID); released by SES booting an **`M55_HP` ATOC** (`cpu_id=M55_HP`, `loadAddress=0x50000000` = HP ITCM global, vs HE's `0x58000000`). Proven alive by an advancing **SRAM0 liveness beacon** (`0x02000000`: magic `0xA11FE000` + CPUID `0x411FD220` + heartbeat that advances across a re-read) — read over the system/HE AP, not the HP AP. Example `examples/aen/aen-hp-core-smoke`; helper `scripts/bench/aen/flash-jlink-hp.sh`. Unblocks the HE↔HP MHUv2 doorbell. |
+| **Dual-core deferred-TOC release** | ✅ bench-proven on E8, both directions (2026-07-31, 2026-08-01) | Releasing a peer M55 has two working recipes and they are **not interchangeable by direction**: plain `["load","boot"]` + `se_service_boot_cpu()` (service 501) works HP-master→HE-peer (proven 2026-06-17 and re-confirmed 2026-08-01) but a real Alif silicon defect makes it fail HE-master→HP-peer (`CFSR=0x00000101` IACCVIOL+IBUSERR, `PC=0xEFFFFFFE` — Alif's SE Host Services API docs, v1.109.0 p.115, name "the M55-HP core in Ensemble devices" as a case where "resetting the core also invalidates its TCM content"). `["load","boot","deferred"]` + `se_service_process_toc_entry()` (service 500, loads at runtime AFTER the reset instead of before it, per p.115's own reset→reload→release remedy; ships unpatched in hal_alif v2.3.0) works **both** directions — bench-proven HP-master→HE-peer (2026-08-01, 16/16 pongs, `uLs  D`→released) and is the only proven way to do HE-master→HP-peer. Portable surface: `CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC` in `src/backends/mproc/alif_se_boot.c`, default **ON when the peer is HP** (501 is vendor-documented broken there) and **OFF when the peer is HE** (501 proven fine there, twice). See § Flow A — Dual-core deferred-TOC boot below for the full asymmetry table and vendor citations. |
 | **UTIMER counter** (Tier-1.5) | ✅ PASS *after a fix* | As-merged it never counted (read 0); fixed in **PR #158** (missing `alif_utimer_enable_soft_counter_ctrl`). Re-validated: counter advances. |
-| **GPIO** (`gpio_dw`, Tier-1) | ✅ PASS (controller) | DDR/DR set+readback correct via the Zephyr GPIO API (J-Link ground truth). Driving an actual **pad** needs the GPIO pad-mux (gpio_dw doesn't apply it). |
+| **GPIO** (`gpio_dw`, Tier-1) | ✅ PASS *(re-proven 2026-07-27 on silicon; earlier same-day CKEN theory REFUTED — see below)* | DDR/DR set+readback correct via the Zephyr GPIO API (J-Link ground truth) — but that alone is only the gpio_dw controller-register path: the original PASS criterion also read `EXT_PORTA` and treated it as pad-level proof, and on this controller `EXT_PORTA` mirrors `SWPORTA_DR` for an OUTPUT-direction pin (Synopsys DW_apb_gpio databook), so it could never independently fail and proved nothing beyond DR/DDR — **this half still stands.** Earlier the same day, `CLKCTL_PER_SLV->GPIO_CTRL[n]` bit 16 (`GPIO_CTRL_CKEN`, the per-port GPIO functional-clock enable) — clear on every port and never written by alp-sdk — was suspected as the reason a pad looked electrically dark, and a fix was added (`zephyr/drivers/gpio/gpio_clk_alif.c`, PR-tracked). **That theory is REFUTED, decisively, on the same bench**: after a cold reset with CKEN still clear, driving `SWPORTA_DDR`/`SWPORTA_DR` from the debugger moved the pad — `0x49002050 = 0x00000010` with `0x4902F088 = 0x00000100` (bit 16 unset). CKEN is not required for pad drive. The real explanation for "the LED was dark": the old `blink` example toggled ~10 times over ~2 s and returned with the pad left LOW — a window nobody was watching, not a pad that couldn't move. Once `blink` was changed to loop forever, the maintainer confirmed **by eye that the LED blinks** — GPIO output on the E8 pad is now proven on real silicon, with REN enabled at `0x1A603050`, `EXT_PORTA` following `SWPORTA_DR` 12/12 on P2_4 while `blink` ran. **Not yet proven:** the colour is wrong (`EVK_PIN_LED_RED` lights GREEN) — still being measured, no colour conclusion asserted here — and until `gpio11`–`gpio14` landed (§ this doc, dtsi), the green/blue RGB channels (P12_7/P12_6) had no controller to reach at all. `gpio_clk_alif.c`'s CKEN write is kept (it matches Alif's own documented `enable_gpio_clk()` init) but is no longer claimed to fix a dark pad. See `examples/aen/aen-gpio-bench/src/main.c`. |
 | **I2C2 + 24C128 EEPROM** (`i2c_dw`, Tier-1) | ✅ PASS | EEPROM ACKs at 0x50 and returns a **populated Alp manifest** (not blank) — magic `ALPH`, SKU, serial, mfg date, CRC-32 all decode; one of 12 devices on the bus — once the pinctrl carries the **pad config** Alif's reference uses — `input-enable` (REN) + `bias-pull-down` (DSC=2). See §3. |
 | **PWM** (Tier-1.5) | ✅ PASS | pwm_set_cycles reg readback matches (CNTR_PTR/COMPARE/CTRL), shares the hal_alif UTIMER start-path the counter fix validated. |
 | **SPI** (`alif,dwc-ssi-spi`, Tier-2) | ✅ PASS *after a fix* | DWC-SSI stayed in slave mode → `spi_transceive` -116 (TX FIFO full, no SCLK). The Alif SoC gates master mode behind `CLKCTRL_PER_SLV.SSI_CTRL` (`0x4902F028`), which upstream never sets. **PR #162** sets it in the driver. Re-validated: `rc=0`, internal-loopback `rx==tx`, CTRLR0=`0x80002007`. See §3. |
@@ -42,12 +43,21 @@ and [`aen-provisioning.md`](aen-provisioning.md).
 | **HWSEM** (`hwsem_alif` / `alif,hwsem`, Tier-1.5) | ✅ PASS (RAM-run, 2026-06-19) | `hwsem@4902e000` take/give/count over the in-tree driver: count `0→1→0` across `take_busy`/`give` (master_id `0x410fd222`). Example: `examples/aen/aen-hwsem-regcheck`. |
 | **LPTIMER** (`counter_alif_lptimer` / `alif,lptimer`, Tier-1.5) | ✅ PASS (RAM-run, 2026-06-19) | Always-on `lptimer@42001000` ch0 — 32768 Hz down-counter advances (3456 ticks / ~100 ms) via the portable `counter_*` API. Example: `examples/aen/aen-lptimer-regcheck`. |
 | **Comparator (HSCMP)** (`comparator_alif` / `alif,cmp`, Tier-2) | ✅ PASS (RAM-run, 2026-06-19) | `cmp0@49023000` driven via the portable `comparator_*` API (output 1/1, internal DAC6 reference; the connect-but-don't-enable init held — no ISR storm). External pin/threshold edge-trigger = bench TBD (no analog stimulus). Example: `examples/aen/aen-cmp-regcheck`. |
+| **Secure boot** (MCUboot ECDSA-P256 chain) | ✅ PASS (bench-proven at `0da1f1b4`) | SES → MCUboot (ITCM) → slot0 (MRAM XIP) → application boots with `CONFIG_BOOT_SIGNATURE_TYPE_ECDSA_P256=y` + `CONFIG_BOOT_VALIDATE_SLOT0=y` (read back from the built `mcuboot/zephyr/.config`): `PC=80012FBC`, `VTOR=80010800`, `CFSR=00000000`, `IPSR=000`. Verification proven live, not inferred from a boot: flipping one byte of the TLV `0x22` signature (offset `0x4a30`, `0xda`→`0xdb`, TLV `0x10`/SHA-256 and TLV `0x01`/key intact) produces `D: bootutil_verify_sig: ECDSA builtin key 0` then `E: Unable to find bootable image` — the check runs to completion. `SIGNATURE_TYPE_NONE` + `VALIDATE_SLOT0=y` boots in twelve seconds (watched ten minutes, CycleCnt advancing). This verification run was `CONFIG_SINGLE_APPLICATION_SLOT=y`. Verified backend is TinyCrypt (`CONFIG_BOOT_ECDSA_TINYCRYPT=y`), not PSA; `.config` confirms `CONFIG_SINGLE_APPLICATION_SLOT=y` + `CONFIG_FLASH_BASE_ADDRESS=0x0`. **Separately, a swap-using-scratch build boots and logs** `I: Bootloader chainload address offset: 0x10000` — **boot only; the swap/rollback path itself was not exercised `[UNTESTED]`.** Still requires `CONFIG_DCACHE=n`, `ROM_START_OFFSET=0x800`, and the `zephyr/patches/mcuboot` `do_boot` patch. **Customer path proven too (second session):** a plain-J-Link `loadbin` of an imgtool-signed image to slot0 `0x80010000` — no SETOOLS/ATOC/SE-UART — is verified + chainloaded and survives repeated cold power-cycles; **proven at `0x80010000` only** (ATOC region / erasing MCUboot untested); both refusal shapes (tampered sig, non-MCUboot image) leave the debug port alive (`Secure debug: enabled`, halts + single-steps cleanly). Single-slot result (`CONFIG_SINGLE_APPLICATION_SLOT=y`) — A/B swap / OTA untested. See `docs/aen-provisioning.md` §0.5 and `docs/secure-boot.md`. |
 
 The flow-D batch (17 aen-* apps) booted on real E8 at **15 PASS, 2 PARTIAL** (both
 hardware-gated). A 2026-06-19 Flow-C RAM-run pass then **reconfirmed** the SE-crypto
 offload + the CRC / HWSEM / LPTIMER / HSCMP driver bodies (rows above) and the LPRTC
 counter (§ below); the quadrature encoder stays PARTIAL (live count needs the encoder
-physically spun — not a code bug).
+physically spun — not a code bug). **That 15/2 tally predates the 2026-07-27
+GPIO re-classification above** — one of the 15 PASS entries was `gpio_dw`, whose
+original pass criterion is now known to have been unable to fail (see the GPIO
+row). GPIO has since been re-proven PASS by a different, decisive check (the
+maintainer's optical confirmation that `blink` blinks, plus 12/12 `EXT_PORTA`
+agreement while it ran) — the CKEN gate that this note used to say the tally
+was waiting on turned out not to be the blocker (see the GPIO row); the 15/2
+tally still has not been formally recomputed against the corrected GPIO
+criterion, but nothing in the correction moves GPIO out of the PASS column.
 
 ## 2. The four flashing / observation flows
 
@@ -71,6 +81,16 @@ console is not on USB — which is why flow B exists.
 > are now working on this bench** (flow D enabled 2026-06-17 after a probe swap —
 > see § Flow D). Flow D is the day-to-day default now: a burn is ~0.16 s over SWD
 > with no SE-UART maintenance-window race / power-cycle dance.
+>
+> **Both flows also provision the same two app shapes.** Bench-proven 2026-07-19
+> on real AE822 silicon: a single `app-write-mram -c <uart> -p` run over the
+> SE-UART (flow A) burns **both** the ITCM-load embedded ATOC and the slot0-XIP
+> two-blob variant (standalone app blob at `0x80010000` + the ATOC, two
+> `COMMAND_BURN_MRAM` phases, byte-exact read-back) — the `alif_flash` west
+> runner now auto-detects the shape from the app's own reset vector. Flow D's
+> `scripts/bench/aen/flash-jlink-mramxip.sh` two-blob helper (§ Flow D below)
+> is therefore a **speed / SE-UART-reset-race alternative**, not a capability
+> requirement — SE-UART was never limited to ATOC-only.
 
 > **Runnable helpers.** The shell helpers that drive all four flows below
 > (build, Flow A `flash-run.sh`, Flow C `ram-run.sh`, Flow D `flash-jlink.sh` +
@@ -97,10 +117,142 @@ cd <setools>/app-release-exec-linux
 
 A clean write ends `100% ... Done`; on reset the SES loads + boots the ATOC
 (M55-HE `loadAddress 0x58000000`). `west flash` on the carrier wraps this via the
-**`alif_flash`** runner — it does **not** use J-Link. Pre-provisioned Alp Lab
-modules ship a dev-signed MCUboot + self-test in slot0 (LCS=DM), so `west flash`
-works day-1; the manual path above is only for re-keying or recovering a bare
-module.
+**`alif_flash`** runner — it does **not** use J-Link, and auto-detects this
+ITCM-load shape vs. the slot0-XIP shape (§ Flow D) from the app's own reset
+vector, so both provision over the SE-UART with no flag. Pre-provisioned Alp
+Lab modules ship a dev-signed MCUboot + self-test in slot0 (LCS=DM), so
+`west flash` works day-1; the manual path above is only for re-keying or
+recovering a bare module. A pre-provisioned module also takes a plain
+J-Link `loadbin` straight to slot0 at `0x80010000` **only** (ATOC region
+/ erasing MCUboot untested) with no SETOOLS/ATOC/SE-UART at all — see
+the **Secure boot** row in §1 above and `docs/aen-provisioning.md`
+§0.5 for the exact sequence.
+
+### Flow A — Dual-core deferred-TOC boot
+
+Booting a **second, dependent** M55 image (a peer the master releases at
+runtime, not one that boots freestanding) has two working ATOC recipes, and
+which one to use **depends on which core is the peer being released**, not
+on which recipe is "correct":
+
+| Direction | plain `["load","boot"]` + `se_service_boot_cpu()` (service 501) | `["load","boot","deferred"]` + `se_service_process_toc_entry()` (service 500) |
+|---|---|---|
+| HP master → HE peer | **works** (2026-06-17, re-confirmed 2026-08-01: `uLV`, Dest Addr `0x58000000`, 28.52 ms load, 16/16 pongs) | **works** (2026-08-01, in-tree `aen-rpc-pingpong`: `uLs D`→released, 16/16 pongs) |
+| HE master → HP peer | **fails** — vectors from empty memory, lock up (see below) | **works** — only proven way to release an HP peer |
+
+**This is a vendor-documented asymmetry, not a general defect in the plain
+recipe.** Alif's SE Host Services API docs (`SE_Host_Services_API_v1.109.0.pdf`):
+
+- p.112, `SERVICES_boot_cpu` (service 501): *"For the M55 cores, there are
+  cases in which this service does not work. The currently known case is
+  the **M55-HP core in FUSION REV_Bx devices**, where resetting the core
+  also invalidates its TCM content."*
+- p.112, `SERVICES_boot_cpu`: *"This service does not perform image
+  loading, verification, etc., it just boots the core... You would need to
+  use an ATOC to achieve these."*
+- p.115, `SERVICES_boot_release_cpu`: *"in some cases, resetting the
+  core also invalidates its TCM. A known case is the **M55-HP core in
+  Ensemble devices**. Because of that, after calling
+  `SERVICES_boot_reset_cpu()` to stop the core, the image in the TCM must
+  be reloaded, before calling `SERVICES_boot_release_cpu()` to start the
+  core."*
+- p.112, `SERVICES_boot_process_toc_entry` (service 500): *"The TOC entry
+  should also be in a DEFERRED state... This SERVICE call will un-defer the
+  TOC entry. This is a higher-level function... a convenient way to boot a
+  CPU core."*
+- SETOOLS guide `AUGD0005` p.35: *"DEFERRED – The image will be skipped at
+  boot time (i.e., no boot or load) and wait for a service request at
+  runtime."*
+
+The two vendor passages disagree with each other on scope (p.112 says
+"FUSION REV_Bx devices", p.115 says "Ensemble devices" with no qualifier)
+— quoted verbatim rather than resolved; E8 is an Ensemble part, so p.115
+covers it either way. **The mechanism**: the ATOC's `["load","boot"]` entry
+places HP's image in its TCM **at power-on**; `boot_cpu`'s release later
+resets the core, and that reset invalidates the TCM the power-on load
+already filled — load-then-reset is the failing order. p.115's own
+documented remedy is **reset → reload → release**: reload strictly AFTER
+the reset, not before it. This matches every bit measured on E8
+(bare-Zephyr repro, 2026-07-31, HE master releasing an HP peer via 501):
+the SES table reported the HP entry `uLV` (Loaded, Verified), but the
+peer's ITCM read as uninitialized SRAM at every sample from t+0.80s to
+t+60s, and releasing it produced `CFSR = 0x00000101` (IACCVIOL + IBUSERR),
+`PC = 0xEFFFFFFE`. Not "Loaded is a lie" — the bytes were placed at
+power-on and then wiped by the release-time reset. Releasing an **HE**
+peer via 501 has no such defect documented or observed in either bring-up
+session (2026-06-17, 2026-08-01).
+
+The deferred recipe reorders load to AFTER the reset instead of avoiding
+the reset: flag the peer entry `"flags": ["load", "boot", "deferred"]`.
+`"deferred"` is a member of the `flags` **array** (a sibling `"deferred":
+true` key is rejected: `ERROR: Invalid key: "deferred"`). It sets
+`TOC_IMAGE_DEFERRED = 0x100` in the entry's flags word (`0x00000022` →
+`0x00000122`) and prints `D` in the SES table — per AUGD0005 p.35, deferred
+means **no boot-time load at all** (not "loaded but not released"): the SES
+table shows `uLs  D`, Dest Addr blank, Time `0.00 ms`, because nothing was
+placed in ITCM at power-on. The master image releases the peer at
+**runtime** with `se_service_process_toc_entry()` (service 500), which
+performs the load, verify AND release together, in the reset → reload →
+release order p.115 requires — the load happens strictly after whatever
+reset the release involves, so the image the core actually vectors from is
+never the one a reset just wiped. With this recipe (HP master → HE peer) an
+RPMsg link carried 495 consecutive PING/PONG round-trips over 4m11s in a
+bare-Zephyr repro (2026-07-31), and 16/16 in the in-tree `aen-rpc-pingpong`
+example (2026-08-01).
+
+A **third recipe exists and is not used here**: Alif's own DevKit-e8
+DualCore example
+(`Boards/DevKit-e8/Examples/DualCore/.alif/M55_HP_HE_mram_cfg.json`) gives
+both cores `mramAddress` + `flags: ["boot"]` only — no `"load"` at all, so
+both execute XIP straight from MRAM and no ITCM/TCM copy (and therefore no
+invalidation risk) is ever in play. alp-sdk's AEN examples link for ITCM by
+default; adopting MRAM-XIP for both cores simultaneously would be a bigger
+boot-model change than this backend's scope, but it's a real alternative
+worth evaluating if the deferred-TOC path ever proves awkward.
+
+`se_service_process_toc_entry()` ships **unpatched** in the west-pinned
+hal_alif v2.3.0 module (`services_lib_ids.h SERVICE_BOOT_PROCESS_TOC_ENTRY=500`,
+`se_services/zephyr/src/se_service.c`) — unlike `se_service_boot_cpu()`
+(hal_alif patch `0001-se-service-add-boot-cpu.patch`), no hal_alif patch is
+needed for this path. This is a property of that pinned module revision,
+not a general hal_alif guarantee — a separate `alif-dfp-ref` tree used for
+vendor-doc research does not carry either service-500 or service-501
+wrapper at all.
+
+The portable surface is
+[`CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC`](../zephyr/kconfigs/mproc-rpc-usb.kconfig)
+in `src/backends/mproc/alif_se_boot.c`: when ON, `alp_mproc_boot_core()`
+(`<alp/mproc.h>`) calls `se_service_process_toc_entry()` with the ATOC entry
+id from `CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_ENTRY_ID` instead of
+`se_service_boot_cpu()`. A companion
+`CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_PEER_IS_HP` names which core
+this build's entry id refers to; `alif_se_boot_core()` rejects any other
+core with `ALP_ERR_NOSUPPORT` (the documented meaning of "a core the
+platform boots by other means", `<alp/mproc.h>`) instead of silently
+un-deferring the configured entry regardless of which core was actually
+asked for. This guard is deferred-path-only: with `PEER_IS_HP` set but
+`DEFERRED_TOC` off, `boot_core()` still takes the plain 501 path for
+whichever core is asked, unguarded. **Default: ON when
+the peer is HP** (501 is vendor-documented broken there, and no working
+legacy HP-peer deployment exists to preserve), **OFF when the peer is HE**
+(501 is bench-proven fine there twice; flipping the default would demand
+every existing HE-peer ATOC be reflashed with the `"deferred"` flag or this
+path fails against it).
+
+Bench tooling: `scripts/bench/aen/flash-run-dualcore.sh <hp-build-dir>
+<he-build-dir>` emits and flashes the two-entry ATOC over the SE-UART (Flow
+A) — `ALP-HP` normal (`["load","boot"]`), `ALP-HE` deferred
+(`["load","boot","deferred"]`), i.e. the HP-master shape. It generalizes
+`flash-run.sh`'s single M55-HE entry; unlike `flash-run.sh` it does not
+auto-read a RAM console — prove both cores independently (HP via
+`reread.sh`, HE via your app's own IPC/beacon proof). An HE-master ATOC
+swaps which entry carries `"deferred"` and is not yet scripted.
+
+`flash-update-log-dual.sh` (`examples/connectivity/firmware-update-log`,
+Flow D) emits its HE-client entry as plain `"flags": ["load"]` with an
+HP-owner master — that is the HP-master→HE-peer direction, which the table
+above shows works fine with the plain recipe; it is not the broken
+pattern.
 
 ### Flow B — Seeing the console
 
@@ -129,8 +281,13 @@ same SWD link.
 
 ### Flow C — J-Link RAM-run (no MRAM write)
 
-The SoC `select`s XIP, so retarget the ROM region to ITCM in the app overlay —
-**use the path-reference form** (`<&itcm>` makes `FLASH_SIZE=0` → link overflow):
+The SoC `select`s XIP, so retarget the ROM region to ITCM — **as a bench-only
+overlay applied via `-DEXTRA_DTC_OVERLAY_FILE`, never by editing the app's own
+overlay** (the retarget is a bench concern; none of the six `aen-*` bench apps
+carries it in-tree). The shipped overlay,
+[`scripts/bench/aen/aen-flowc-itcm.overlay`](../scripts/bench/aen/aen-flowc-itcm.overlay),
+carries exactly this DTS — **use the path-reference form** (`<&itcm>` makes
+`FLASH_SIZE=0` → link overflow):
 
 ```dts
 / {
@@ -148,10 +305,76 @@ it) + the flow-B RAM console. Build with both module paths
 ```
 JLinkExe -device Cortex-M55 -if SWD -speed 4000 -nogui 1   # GENERIC device
 J-Link> halt
-J-Link> loadbin build/zephyr/zephyr.bin 0x0   # loadbin's implicit reset re-reads
-J-Link> halt                                  # our freshly-loaded ITCM vectors:
-J-Link> go                                    # core is already at our reset handler
+J-Link> loadbin build/zephyr/zephyr.bin <base>   # loadbin's implicit reset re-reads
+J-Link> halt                                     # our freshly-loaded ITCM vectors:
+J-Link> go                                       # core is already at our reset handler
 ```
+
+`<base>` is the app's link base, **not always `0x0`**: the overlay above only
+retargets the ROM *region* to ITCM, it does not reset a `prj.conf`'s own
+`CONFIG_FLASH_LOAD_OFFSET`. The retarget is really two independent, BOTH-required
+settings, each a committed artifact under `scripts/bench/aen/`:
+
+> **Since alp-sdk#1067 the ITCM retarget is required for EVERY Flow C RAM-run,
+> not just for the apps that hard-code the offset.** The AEN board `_defconfig`
+> now sets `CONFIG_USE_DT_CODE_PARTITION=y`, so a plain `west build` links into
+> MRAM slot0 (`FLASH_LOAD_OFFSET=0x10000`, reset vector `0x8001xxxx`) — which is
+> what Flow A/D and `alif_flash` need, and what Flow C must undo. `ram-run.sh`
+> refuses a slot0-linked image (exit 5) rather than mis-running it. An app whose
+> own `boards/*.overlay` already carries the two `chosen` lines below needs no
+> extra fragments; one that deletes `zephyr,code-partition` from `&itcm` instead
+> of from `/chosen` does **not** — that form is a no-op and now mislinks.
+
+- the devicetree half — [`aen-flowc-itcm.overlay`](../scripts/bench/aen/aen-flowc-itcm.overlay)
+  (`zephyr,flash = &itcm;`, path-ref not `<&itcm>`, +
+  `/delete-property/ zephyr,code-partition;`), which stops Zephyr from deriving
+  the link offset from a DT code-partition, applied via
+  `-DEXTRA_DTC_OVERLAY_FILE`, **and**
+- the Kconfig half — a **Flow-C-only** conf fragment
+  (`scripts/bench/aen/aen-flowc-itcm.conf`) that sets
+  `CONFIG_USE_DT_CODE_PARTITION=n` **and** `CONFIG_FLASH_LOAD_OFFSET=0x0`, layered
+  on top of the generic `scripts/bench/aen/aen-bench-shared.conf` (RAM-console
+  observability + `CONFIG_DCACHE=n`, no link-offset override — that fragment is
+  also used unmodified by Flow A/D, where overriding the link offset would be
+  wrong), applied via `-DEXTRA_CONF_FILE`.
+
+The conf half alone still links into MRAM (`CONFIG_FLASH_BASE_ADDRESS` stays
+`0x80000000`) — it only stops Zephyr *deriving* the offset from the DT
+code-partition; the overlay half is what moves the code-partition itself.
+Pass both together:
+```
+scripts/bench/aen/build.sh <app-dir> \
+    -DEXTRA_CONF_FILE="scripts/bench/aen/aen-bench-shared.conf;scripts/bench/aen/aen-flowc-itcm.conf" \
+    -DEXTRA_DTC_OVERLAY_FILE="scripts/bench/aen/aen-flowc-itcm.overlay"
+```
+
+Both `aen-flowc-itcm.conf` lines are needed because they undo two different
+things. `USE_DT_CODE_PARTITION=n` alone undoes the board `_defconfig`'s
+*derived* offset, but it does **not** touch a hard-coded literal
+`CONFIG_FLASH_LOAD_OFFSET=0x10000`. Seven examples hard-code that offset —
+redundant since #1067 (Kconfig resolves the same `0x10000` with no warning) but
+harmless, and they are still the reason the second line exists:
+the five `aen-cc3501e-*` apps (`aen-cc3501e-ble-gatt`, `aen-cc3501e-bringup`,
+`aen-cc3501e-companion-tour`, `aen-cc3501e-gatt-register`, `aen-cc3501e-gpio`)
+and `aen-eeprom-manifest`, all via their own `prj.conf`, plus
+`examples/peripheral-io/alp-console`, which sets it via a **BOARD-scoped**
+conf instead —
+`boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.conf`
+(see `examples/peripheral-io/alp-console/README.md`). For any of these, a
+Flow C RAM-run must ALSO carry the explicit `CONFIG_FLASH_LOAD_OFFSET=0x0`
+override, since a later `EXTRA_CONF_FILE` fragment wins over both an app's
+`prj.conf` and its board-scoped conf. Confirm the real link base from
+the build (`readelf -l build/*/zephyr/zephyr.elf` — the LOAD segment with the
+LOWEST `PhysAddr` among segments with a NONZERO `FileSiz`, **not** just the
+first LOAD segment: an ITCM-retargeted link's first LOAD segment is often a
+zero-FileSiz `.bss` segment in DTCM, and loading there corrupts live RAM), and
+pass that as `<base>` — `scripts/bench/aen/ram-run.sh` derives it this way
+automatically instead of assuming `0x0` or trusting segment order, refuses to
+run an ELF whose derived base is `>= 0x80000000` (slot0/MRAM-linked — Flow C
+cannot RAM-run that; rebuild with this retarget or use Flow D), and separately
+refuses (exit 6) any derived base that isn't `0x0`, the ITCM global alias
+(`0x50000000`/`0x58000000`), or SRAM (`0x02xxxxxx`) — a DTCM address slipping
+through is exactly the failure mode this whole section warns about.
 
 > **Reset caveat:** a J-Link reset asserts **SYSRESETREQ**, which reboots the
 > **SES** (not just the M55). Prefer `loadbin`/`go`; don't `reset` mid-loop.
@@ -262,9 +485,12 @@ secure-boot verification — always write both consistent blobs.
 > facts the bench pinned down: the app entry's `mramAddress` is the **full** address
 > `0x80010000` (the `0x10000` *offset* gives SETOOLS `Invalid Global Address`), and the
 > image needs **`CONFIG_USE_DT_CODE_PARTITION=y`** so it links at the slot0 offset
-> (`0x8001xxxx` reset vector) instead of the MRAM base (`0x8000xxxx`, which faults). Proven
+> (`0x8001xxxx` reset vector) instead of the MRAM base (`0x8000xxxx`, which faults) —
+> since #1067 the board `_defconfig` supplies that, so no app sets it. Proven
 > by `examples/aen/aen-npu-inference-person-mram` (the real `person_detect` MobileNet run
-> from MRAM → `RESULT PASS`).
+> from MRAM → `RESULT PASS`). The same shape provisions over the SE-UART with plain
+> `west flash` / `app-write-mram` too (§ above) — this script is the faster SWD-only path,
+> not the only path.
 
 ## 3. Board HW requirements found on the bench
 

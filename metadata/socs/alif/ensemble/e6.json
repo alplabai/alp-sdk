@@ -110,6 +110,7 @@
     {
       "type": "ethos-u55",
       "subtype": "high-perf",
+      "paired_core": "m55_hp",
       "mac_per_cycle": 256,
       "freq_mhz": 400,
       "gops": 204,
@@ -118,6 +119,7 @@
     {
       "type": "ethos-u55",
       "subtype": "high-efficiency",
+      "paired_core": "m55_he",
       "mac_per_cycle": 128,
       "freq_mhz": 160,
       "gops": 46,
@@ -130,9 +132,9 @@
   "always_on_sram_kb": 4,
   "peripherals": {
     "i2c": 4,
-    "i2c_lp": 1,
+    "i2c_lp": 2,
     "spi": 4,
-    "spi_lp": 1,
+    "spi_lp": 2,
     "uart": 8,
     "uart_lp": 1,
     "i2s": 4,
@@ -144,6 +146,7 @@
     "sdio": 1,
     "can_fd": 1,
     "i3c": 1,
+    "i3c_lp": 1,
     "mipi_csi2": 1,
     "mipi_dsi": 1,
     "cpi_parallel": 1,
@@ -154,17 +157,19 @@
     "dac_12bit": 2,
     "comparator_hs": 4,
     "comparator_lp": 1,
-    "gpio_18v": 120,
+    "gpio_18v": 136,
     "gpio_18v_or_33v": 8,
     "timer_32bit": 12,
-    "watchdog": 3,
+    "watchdog": 4,
     "timer_lp": 4,
+    "timer_lp_32bit": 3,
     "rtc": 1,
     "encoder_quadrature": 4,
     "dma_general_32ch": 3,
     "isp": 1,
     "jpeg_encoder": 1
   },
+  "peripherals_unverified": ["pdm", "pdm_lp"],
   "capabilities": {
     "ethos_u55_count": 2,
     "ethos_u85_count": 1,
@@ -200,10 +205,16 @@
       "sram_kb": 9984,
       "optional_features": { "npu_hg": true, "isp": true, "jpeg_encoder": true },
       "shipment_suffixes": ["-T", "-Y"],
-      "alp_module_skus": ["E1M-AEN601"]
+      "alp_module_skus": ["E1M-AEN601"],
+      "debug": {
+        "pyocd_target": "AE612FA0E5597LS0",
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" }
+      }
     }
   ],
   "notes": [
+    "The watchdog change drops the old one-per-core derivation: the DFP shows the A32 contributes TWO views (WDT_AP_CTRL + WDT_AP_S_CTRL), which is why E8 -- same three cores as E6 -- is 4 and not 3.  i3c_lp is corroborated by the vendor fork, which defines lpi3c0 in exactly one file: dts/arm/alif/ensemble/common/e4_e6_e8.dtsi, naming E4/E6/E8 (and no lpi3c0 exists under ensemble/e7/).",
+    "Peripheral counts RE-INGESTED 2026-07-25.  E6 (AE612FA0E5597LS0) has NO directory in the Alif DFP, so these are NOT read from it directly: they come from the FA0E5597 generation, whose two DFP-present members -- AE402FA0E5597 (E4) and AE822FA0E5597 (E8) -- agree on every value below.  This REPLACES values inherited from the E7 sibling, which is the older F80F55xx generation.  Corrected: i2c_lp 1->2, spi_lp 1->2, gpio_18v 120->136, i3c_lp added, timer_lp_32bit added, watchdog 3->4.",
     "Datasheet v1.0 released (Alif_E6_Datasheet_v1.0.pdf, 2026-05-11).  Digital-peripheral counts inherited from the E7 sibling (same A32+2x-M55 / OctalSPI family block).  `watchdog` derived as one-per-core (1x A32 + 2x M55 = 3).  `isp`/`jpeg_encoder` added per E6's own v1.0 variant optional_features (E6 ships ISP + JPEG + U85); external memory stays OctalSPI (not E8's HexSPI).  Pending a direct E6-datasheet re-ingest to confirm the inherited counts.",
     "Topology: 1× A32 (800 MHz) + 2× M55 (HP+HE) + 2× U55 + 1× U85, ISP/JPEG, 5.5 MB MRAM, up to 9.75 MB SRAM, 2× OctalSPI.  Confirmed by the v1.0 datasheet.  External-memory interface stays OctalSPI ×2 (E8 uses HexSPI instead -- the IO mix legitimately differs).",
     "HWRM v0.3 is Alif-confidential -- referenced here for traceability; the file itself stays out of git.",

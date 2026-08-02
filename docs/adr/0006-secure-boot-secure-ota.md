@@ -226,6 +226,54 @@ flow + decision-pending notes for both backends.  That doc is the
 operator-facing reference; this ADR is the historical decision
 record.
 
+## Amendment (2026-07-31)
+
+MCUboot's role in the AEN secure-boot chain (§ "Secure boot (per-SoM,
+vendor-native)" above) is now bench-proven rather than aspirational.
+
+**5. SES → MCUboot → slot0 verification is bench-proven.**
+
+On E1M-AEN801 (`AE822FA0E5597LS0` Rev A0, alp-sdk `0da1f1b4`) the chain
+SES -> MCUboot (ITCM) -> slot0 (MRAM XIP) -> application boots with
+`CONFIG_BOOT_SIGNATURE_TYPE_ECDSA_P256=y` and
+`CONFIG_BOOT_VALIDATE_SLOT0=y` (read back from the built
+`mcuboot/zephyr/.config`, not assumed).  Verification was proven live:
+flipping one byte of the TLV `0x22` ECDSA signature (file offset
+`0x4a30`, `0xda` -> `0xdb`) produces `bootutil_verify_sig: ECDSA
+builtin key 0` then `Unable to find bootable image` -- the failure
+path runs to completion rather than hanging.  Three previously
+recorded symptoms -- the software ECDSA-P256 verify hang at that same
+`bootutil_verify_sig` log line, the SES → MCUboot → slot0 chain
+failing to complete, and the resulting "not shippable for this part"
+verdict -- no longer reproduce at `0da1f1b4` (all three cleared
+together with no crypto/SHA/flash-driver change, which is consistent
+with -- but has not been confirmed by bisection against -- the MPU
+work in commit `a6ff095d` / PR #1014; causation is not established).
+A separate, two-slot swap-using-scratch build boots and logs
+`Bootloader chainload address offset: 0x10000` -- boot only; the
+swap/rollback path itself remains `[UNTESTED]`.  The verified backend
+is TinyCrypt (`CONFIG_BOOT_ECDSA_TINYCRYPT=y`), not MbedTLS PSA; the
+`.config` also confirms `CONFIG_SINGLE_APPLICATION_SLOT=y` and
+`CONFIG_FLASH_BASE_ADDRESS=0x0`.  Still required: `CONFIG_DCACHE=n`,
+the board's `ROM_START_OFFSET=0x800`, and the
+`zephyr/patches/mcuboot` `do_boot` flash-base patch (a candidate for
+upstreaming rather than carrying indefinitely).
+
+**6. Customer production path is now bench-proven too.**
+
+The above proves the *factory* path (Alp Lab's pre-provisioned MCUboot
++ signed app).  A second bench session proved the *customer* path as
+well: writing slot0 with a plain J-Link -- no ATOC, no SE-UART -- is
+verified by MCUboot and chainloaded, and survived three cold
+power-cycles.  **Proven at `0x80010000` (slot0) only** -- the ATOC
+region and erasing MCUboot itself were not tested.  Both refusal
+shapes (tampered signature, non-MCUboot image) leave the debug port
+alive, so a bad slot0 write does not brick J-Link access.  This is a
+**single-slot** result (`CONFIG_SINGLE_APPLICATION_SLOT=y`); A/B swap
+and OTA remain untested and this is not an upgrade-path guarantee.
+See [`docs/aen-provisioning.md`](../aen-provisioning.md) §0.5 and
+[`docs/secure-boot.md`](../secure-boot.md).
+
 ## See also
 
 - [ADR 0001](0001-wrapper-on-top-of-zephyr.md) -- the layering

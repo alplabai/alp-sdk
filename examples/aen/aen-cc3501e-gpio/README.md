@@ -141,7 +141,7 @@ hardware.
 The native_sim build mechanism mirrors aen-cc3501e-bringup:
 
 - `CMakeLists.txt` generates `${BINARY_DIR}/generated/alp.conf` from
-  `board.yaml` and appends it to `OVERLAY_CONFIG` (the `generated/` subdir
+  `board.yaml` and appends it to `EXTRA_CONF_FILE` (the `generated/` subdir
   dodges Zephyr's `${APPLICATION_BINARY_DIR}/*.conf` GLOB);
 - `boards/native_sim_native_64.conf` pulls in `CONFIG_EMUL` / `CONFIG_SPI_EMUL`;
 - `boards/native_sim_native_64.overlay` provides the emulated SPI controller

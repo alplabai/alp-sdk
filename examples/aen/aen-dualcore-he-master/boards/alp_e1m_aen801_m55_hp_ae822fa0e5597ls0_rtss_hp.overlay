@@ -1,0 +1,20 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-dualcore-he-master overlay for the E1M-AEN801 (Ensemble E8, M55-HP)
+ * PEER role RAM-run.
+ *
+ * The peer role never calls alp_mproc_boot_core() or any other SE service --
+ * it only stamps a beacon in global SRAM0 (see src/main.c) -- so unlike the HE
+ * master's overlay, no SE mailbox nodes and no itcm/dtcm global_base
+ * re-`compatible` are needed here (local_to_global() is never reached on this
+ * side). Just the ITCM link retarget, the same one aen-dualcore-probe uses for
+ * both boards via a single app.overlay.
+ */
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};

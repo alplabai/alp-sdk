@@ -9,9 +9,11 @@
  *        and the portable BLE backend attach.
  *
  * Thin wrappers over the firmware BLE handlers.  WIRE GAP: the protocol
- * header carries the BLE opcodes + alp_cc3501e_ble_adv_start_t, but has NO
- * payload struct for CONNECT (0x36) or the four GATT ops (0x38..0x3B); those
- * wire layouts are defined only by the firmware handlers
+ * header carries the BLE opcodes + alp_cc3501e_ble_adv_start_t +
+ * alp_cc3501e_ble_gatt_register_hdr_t/_reply_hdr_t (GATT_REGISTER, 0x38 --
+ * documented field-by-field, not a directly-castable struct), but has NO
+ * payload struct for CONNECT (0x36) or the other three GATT ops
+ * (0x39..0x3B); those wire layouts are defined only by the firmware handlers
  * (firmware/cc3501e/src/protocol.c handle_ble_*) and are documented
  * per-function + in cc3501e.c.  GATT async notifications
  * (EVT_BLE_GATT_WRITE_REQ, 0x3F) need the async-event path (not wired on
@@ -191,20 +193,44 @@ alp_status_t cc3501e_ble_disconnect(cc3501e_t *ctx, uint32_t timeout_ms);
  * @brief Register a GATT attribute table with the firmware (BLE_GATT_REGISTER, 0x38).
  *
  * The firmware @c handle_ble_gatt_register takes the payload as an OPAQUE
- * attribute-table descriptor (>= 1 byte): there is no host-side header struct
- * and no fixed UUID/handle layout on the wire, so the host ships the descriptor
- * bytes verbatim and the firmware parses them.
+ * attribute-table descriptor (>= 1 byte) laid out per the wire-format doc
+ * block in <alp/protocol/cc3501e.h>: the host ships the descriptor bytes
+ * verbatim and the firmware parses them.  On success, parses the reply
+ * (@c status | @c num_handles | @c attr_handle(LE16)*num_handles) and copies
+ * up to @p handles_cap handles into @p handles_out in declaration order.
  *
- * @param ctx         Initialised bridge handle (BLE must be enabled).
- * @param descriptor  Opaque attribute-table descriptor bytes (non-NULL).
- * @param len         Descriptor length (1..@ref ALP_CC3501E_MAX_PAYLOAD).
- * @param timeout_ms  Caller budget.
+ * @note Service registration must complete BEFORE advertising starts.  The
+ *       firmware's @c cc3501e_nimble_gatt_register re-runs NimBLE's
+ *       @c ble_gatts_start() (via @c ble_gatts_reset(), see
+ *       firmware/cc3501e/hal/ti/cc3501e_nimble_host.c), and NimBLE's own
+ *       @c ble_gatts_mutable() constraint refuses that while advertising,
+ *       scanning, or connected -- register the service, THEN call
+ *       @ref cc3501e_ble_adv_start.
+ *
+ * @param ctx              Initialised bridge handle (BLE must be enabled).
+ * @param descriptor       Opaque attribute-table descriptor bytes (non-NULL).
+ * @param len              Descriptor length (1..@ref ALP_CC3501E_MAX_PAYLOAD).
+ * @param handles_out      Receives up to @p handles_cap attribute handles, in
+ *                         declaration order (may be NULL only if
+ *                         @p handles_cap is 0).
+ * @param handles_cap      Capacity of @p handles_out.
+ * @param num_handles_out  Receives the number of characteristics the firmware
+ *                         registered (may be NULL).
+ * @param timeout_ms       Caller budget.
  * @return ALP_OK once registered; ALP_ERR_INVAL on a NULL/empty/oversized
- *         descriptor; otherwise the mapped error.
+ *         descriptor; ALP_ERR_BUSY if the firmware's NimBLE lifecycle guard
+ *         refused the register (advertising/scanning/connected -- see the
+ *         @note above) -- returned promptly, NOT after exhausting @p
+ *         timeout_ms (the guard's answer is deterministic, so it is not
+ *         retried); a real transport fault still surfaces as its own
+ *         ALP_ERR_IO / ALP_ERR_TIMEOUT; otherwise the mapped error.
  */
 alp_status_t cc3501e_ble_gatt_register(cc3501e_t     *ctx,
                                        const uint8_t *descriptor,
                                        size_t         len,
+                                       uint16_t      *handles_out,
+                                       size_t         handles_cap,
+                                       size_t        *num_handles_out,
                                        uint32_t       timeout_ms);
 
 /**

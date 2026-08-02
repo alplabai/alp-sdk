@@ -118,6 +118,7 @@
     {
       "type": "ethos-u55",
       "subtype": "high-perf",
+      "paired_core": "m55_hp",
       "mac_per_cycle": 256,
       "freq_mhz": 400,
       "gops": 204,
@@ -126,6 +127,7 @@
     {
       "type": "ethos-u55",
       "subtype": "high-efficiency",
+      "paired_core": "m55_he",
       "mac_per_cycle": 128,
       "freq_mhz": 160,
       "gops": 46,
@@ -140,7 +142,7 @@
     "i2c": 4,
     "i2c_lp": 2,
     "spi": 4,
-    "spi_lp": 1,
+    "spi_lp": 2,
     "uart": 8,
     "uart_lp": 1,
     "i2s": 4,
@@ -161,6 +163,7 @@
     "adc_12bit": 3,
     "adc_24bit": 1,
     "dac_12bit": 2,
+    "dma_general_32ch": 3,
     "comparator_hs": 4,
     "comparator_lp": 1,
     "gpio_18v": 136,
@@ -174,6 +177,7 @@
     "isp": 1,
     "jpeg_encoder": 1
   },
+  "peripherals_unverified": ["pdm", "pdm_lp"],
   "capabilities": {
     "ethos_u55_count": 2,
     "ethos_u85_count": 1,
@@ -223,7 +227,11 @@
       },
       "gpio_18v": 136,
       "optional_features": { "npu_hg": true, "isp": true, "jpeg_encoder": true },
-      "shipment_suffixes": ["-T", "-Y"]
+      "shipment_suffixes": ["-T", "-Y"],
+      "debug": {
+        "pyocd_target": "AE822FA0E5597BS0",
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" }
+      }
     },
     {
       "order_code": "AE822FA0E5597LS0",
@@ -239,10 +247,16 @@
       "gpio_18v": 120,
       "optional_features": { "npu_hg": true, "isp": true, "jpeg_encoder": true },
       "shipment_suffixes": ["-T", "-Y"],
-      "alp_module_skus": ["E1M-AEN801"]
+      "alp_module_skus": ["E1M-AEN801"],
+      "debug": {
+        "pyocd_target": "AE822FA0E5597LS0",
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" },
+        "jlink_flash_device": "AE822FA0E5597LS0_M55_HE"
+      }
     }
   ],
   "notes": [
+    "2026-07-25 DFP audit (Device/soc/AE822FA0E5597/include/), partially discharging the 'reconcile against v1.0' note above: spi_lp 1->2 (LPSPI0_BASE + LPSPI1_BASE -- the old 1 was wrong on the part we bench), and dma_general_32ch added as 3 (DMA0/DMA1/DMA2, each with _NS and _SEC views) -- the key was simply missing here while E4/E6 already carried it.  Every other count in this block was re-verified against the DFP base symbols and soc_features.h and is correct.",
     "Datasheet v1.0 released (Alif_E8_Datasheet_v1.0.pdf, ADTS0013, 2026-05-11) -- supersedes the prior v0.51 pre-release reference.  Peripheral counts above were ingested against v0.51 and remain provisional; reconcile against v1.0 in the next dedicated re-ingest pass.",
     "HWRM v0.3 is Alif-confidential -- referenced here for traceability; the file itself stays out of git.",
     "Errata AERR0012 v2.0 covers E4/E6/E8 jointly; individual `items` list is pending ingestion against the errata doc.",

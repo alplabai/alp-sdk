@@ -84,7 +84,17 @@ def _emit_library_hw_backends(libs: list[str], sku: str) -> list[str]:
     """
     from pathlib import Path
 
-    family       = _sku_family(sku)
+    # An unrecognised SKU pattern (a synthetic/test-only SKU, or a real SKU
+    # from a family this matcher doesn't know) resolves to "no HW backend
+    # applies" rather than raising -- this is an OPTIONAL accelerator-wiring
+    # enhancement layered on top of the required baseline Kconfig
+    # (`_slice_alp_conf` calls this unconditionally for every Zephyr slice,
+    # including test fixtures that intentionally use non-family SKUs like
+    # `E1M-TST002`), never a reason to fail the whole fragment emit.
+    try:
+        family = _sku_family(sku)
+    except ValueError:
+        return []
     soc_token    = _SOC_FAMILY_TOKEN.get(family)
     if soc_token is None:
         return []

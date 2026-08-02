@@ -66,6 +66,7 @@ _EMIT_MODES = [
     "storage-mounts-c",
     "tfm-sysbuild-conf",
     "build-plan",
+    "kconfig",
 ]
 
 
@@ -95,6 +96,10 @@ class AlpEmit(WestCommand):
         parser.add_argument(
             "--build-root", default=None,
             help="Build root used for build-plan slice paths (default: build).")
+        parser.add_argument(
+            "--core", default=None,
+            help="Core id (required by --emit kconfig; every other mode "
+                 "ignores it).")
         return parser
 
     def do_run(self, args, _unknown):            # type: ignore[no-untyped-def]
@@ -117,4 +122,6 @@ class AlpEmit(WestCommand):
         ]
         if args.build_root:
             cmd += ["--build-root", args.build_root]
+        if args.core:
+            cmd += ["--core", args.core]
         return subprocess.call(cmd, env=env_with_sdk(sdk_root))

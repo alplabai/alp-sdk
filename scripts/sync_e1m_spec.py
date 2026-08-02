@@ -150,7 +150,8 @@ def main() -> int:
             xv1_id=xv1["id"],
             xv1_version=xv1["version"],
             xv1_pads=len(xv1["pads"]),
-        )
+        ),
+        newline="",
     )
     print(f"  lock -> {LOCK_PATH.relative_to(REPO)}")
     print("done. Run `python3 scripts/check_e1m_pinout.py` to verify.")

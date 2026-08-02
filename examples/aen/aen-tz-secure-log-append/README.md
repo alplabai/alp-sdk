@@ -34,6 +34,9 @@ app's request on the return — the single-core equivalent of the two-core mailb
 
 ## Pass criterion (bench)
 
+`CONFIG_DCACHE=n` (`prj.conf`) is what makes this SWD read valid — a cached
+beacon write would sit in the core's D-cache, unseen by the AXI-AP read.
+
 Read the SRAM0 beacon at `0x02001100`:
 
 | Word | Meaning | Pass value |
@@ -58,8 +61,8 @@ scripts/bench/aen/build.sh   $PWD/examples/aen/aen-tz-secure-log-append
 scripts/bench/aen/ram-run.sh "$BENCH_ROOT/build/aen-tz-secure-log-append"
 # then read 0x02001100 over SWD (table above)
 
-# Or SES-boot it via Flow D: drop boards/*.overlay, add
-# CONFIG_USE_DT_CODE_PARTITION=y, then scripts/bench/aen/flash-jlink-mramxip.sh.
+# Or SES-boot it via Flow D: drop boards/*.overlay (the board _defconfig then
+# links it into slot0), then scripts/bench/aen/flash-jlink-mramxip.sh.
 ```
 
 Anti-rollback across a full reflash still needs a monotonic NV counter (#111).

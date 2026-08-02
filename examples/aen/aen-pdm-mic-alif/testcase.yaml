@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the vendored "alif,alif-pdm" DMIC driver on the
+# E1M-AEN801 (Alif Ensemble E8, M55-HE): captures PCM audio from the EVK's
+# PDM microphones (4x MP34DT05) through the HP PDM block (pdm@4902d000) via
+# the standard Zephyr DMIC API.
+#
+# Compile-checks the driver + DT node on the real E8 board target; filtered OUT
+# of the native_sim PR gate (platform_allow = the AEN801 HE board only).
+
+sample:
+  name: aen-pdm-mic-alif
+  description: |
+    Bench RAM-run PDM mic (alif,alif-pdm, pdm@4902d000) capture proof for the
+    E1M-AEN801 (Alif Ensemble E8, Cortex-M55-HE): drives DT_ALIAS(alp_pdm0)
+    through dmic_configure/dmic_trigger/dmic_read.
+
+tests:
+  alp_sdk.examples.aen.pdm_mic_alif.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - pdm
+      - audio
+      - mic
+    build_only: true   # the PDM capture check is a bench flash, not a CI run.

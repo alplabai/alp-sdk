@@ -13,12 +13,21 @@ Every released SoM family and every released board carries a
 `hw_revisions:` table.  The SDK uses it to detect "wrong firmware
 for this hardware" two ways:
 
-- **Build-time** -- the loader + validator read
-  [`metadata/sdk_version.yaml`](../metadata/sdk_version.yaml) and
-  fail-fast if the chosen `hw_rev`'s
-  `[min_sdk_version, max_sdk_version]` window doesn't cover the
-  current SDK version.  Validator exit code `3`; loader aborts the
-  CMake configure with a clear error.
+- **Build-time** -- each `hw_revisions:` entry carries a
+  `[min_sdk_version, max_sdk_version]` window; the loader compares it
+  against [`metadata/sdk_version.yaml`](../metadata/sdk_version.yaml)
+  and refuses (`SdkRevisionUnsupported`, exit code 3 from
+  `scripts/validate_board_yaml.py`) when the running SDK falls
+  outside it.  Separately, an `hw_rev` that isn't a key in the
+  resolved table at all -- a typo, or a revision newer than the
+  installed SDK -- refuses too (`SdkRevisionUnknown`, exit code 4),
+  rather than silently falling back to base-revision overrides.  A
+  revision that EXISTS but is declared `status: reserved`,
+  `status: tbd`, or carries no `status` key at all also refuses
+  (`SdkRevisionNotBuildable`, exit code 5) --
+  [#1025](https://github.com/alplabai/alp-sdk/issues/1025).  Every
+  other declared status (`production`, `preview`, `preliminary`,
+  `deprecated`) resolves and builds normally.
 - **Runtime** -- the SDK boots into a board-ID check that uses
   a single ADC pin per board (SoM-side and board-side) fed by a
   resistor divider from a 1.8 V rail.  Each `hw_rev` entry's

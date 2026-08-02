@@ -34,8 +34,9 @@
  * slot0 and SE-booted (bench flow D -- the SES boots the resident slot0 image
  * in preference to a Flow-C ITCM RAM-run), so slot0 briefly holds THIS app
  * instead of person_detect; the canonical person_detect slot0 is RESTORED after
- * the run (byte-exact, reset vector 0x80011F15).  No other MRAM region is
- * mutated by the test itself.
+ * the run (byte-exact, reset vector 0x80013225 -- bench-measured 2026-07-28,
+ * verified across three cold power cycles: 80010000 = 20004C60 80013225).
+ * No other MRAM region is mutated by the test itself.
  *
  * Console is the Alp UART console (see prj.conf): E1M edge UART0 = Alif UART5
  * (P3_4/P3_5, 115200 8N1), USB-routed to the labgrid `console` resource
@@ -54,15 +55,15 @@
 #include <zephyr/storage/flash_map.h>
 
 /* The safe scratch target: the `storage` fixed-partition under the MRAM
- * controller.  FIXED_PARTITION_* resolve the offset/size from DT so nothing is
- * hard-coded, and FIXED_PARTITION_DEVICE resolves the flash device the
+ * controller.  PARTITION_* resolve the offset/size from DT so nothing is
+ * hard-coded, and PARTITION_DEVICE resolves the flash device the
  * flash_mram_alif driver bound (the "alif,mram-flash-controller" node). */
 #define SCRATCH_PARTITION storage_partition
 
-static const struct device *const flash_dev = FIXED_PARTITION_DEVICE(SCRATCH_PARTITION);
+static const struct device *const flash_dev = PARTITION_DEVICE(SCRATCH_PARTITION);
 
-#define SCRATCH_OFF  FIXED_PARTITION_OFFSET(SCRATCH_PARTITION)
-#define SCRATCH_SIZE FIXED_PARTITION_SIZE(SCRATCH_PARTITION)
+#define SCRATCH_OFF  PARTITION_OFFSET(SCRATCH_PARTITION)
+#define SCRATCH_SIZE PARTITION_SIZE(SCRATCH_PARTITION)
 
 /* One erase block (1024 B, the node's erase-block-size) is enough to prove the
  * path; the written pattern is 256 B = 16 * 16-byte program units. */

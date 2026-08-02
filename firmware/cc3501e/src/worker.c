@@ -179,11 +179,29 @@ static void worker_execute(uint8_t cmd)
 		 * protocol handler).  Argless reply. */
 		rv = cc3501e_hw_ble_connect((uint8_t)job.req[0], (const uint8_t *)job.req + 1);
 		break;
-	case ALP_CC3501E_CMD_BLE_GATT_REGISTER:
-		/* Registers the attribute table + issues HCI (blocks), so it is worker-routed
-		 * off the SPI ISR.  Payload = the whole opaque descriptor (job.req_len bytes). */
-		rv = cc3501e_hw_ble_gatt_register((const uint8_t *)job.req, job.req_len);
+	case ALP_CC3501E_CMD_BLE_GATT_REGISTER: {
+		/* Registers the attribute table (blocks in ble_gatts_start), so it is worker-
+		 * routed off the SPI ISR.  Payload = the descriptor (job.req_len bytes, already
+		 * validated by protocol_ble.c).  Reply = status(1) | num_handles(1) |
+		 * attr_handle(LE16)*num_handles -- see the wire-format doc block in
+		 * <alp/protocol/cc3501e.h> and handle_worker_routed_payload_reply. */
+		uint16_t handles[ALP_CC3501E_BLE_GATT_MAX_CHARS];
+		uint16_t num_handles = 0u;
+		rv                   = cc3501e_hw_ble_gatt_register((const uint8_t *)job.req,
+		                                                    job.req_len,
+		                                                    handles,
+		                                                    ALP_CC3501E_BLE_GATT_MAX_CHARS,
+		                                                    &num_handles);
+		if (rv == CC3501E_HW_OK) {
+			buf[0] = 0u; /* status: OK (the frame-level resp is authoritative; this mirrors it) */
+			buf[1] = (uint8_t)num_handles;
+			for (uint16_t i = 0u; i < num_handles; i++) {
+				wk_put_le16(&buf[2u + 2u * i], handles[i]);
+			}
+			len = 2u + 2u * (size_t)num_handles;
+		}
 		break;
+	}
 	case ALP_CC3501E_CMD_BLE_GATT_NOTIFY: {
 		/* Pushes a notification (blocks on HCI over the shared HIF), so it is
 		 * worker-routed off the SPI ISR.  Payload = handle(LE16) | data[job.req_len-2]. */

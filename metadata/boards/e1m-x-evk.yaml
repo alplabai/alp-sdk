@@ -153,7 +153,15 @@ e1m_routes:
     # --- RGB LED pads driven as plain digital GPIOs (the GPIO-secondary
     #     of the PWM cluster -- same physical pads as the XEVK_PWM_LED_*
     #     entries in the `pwm:` section).  Open the PWM macro for
-    #     brightness/fade, the GPIO macro for on/off; never both at once. ---
+    #     brightness/fade, the GPIO macro for on/off; never both at once.
+    #
+    #     UNVERIFIED BY MEASUREMENT: RED/GREEN below are transcribed from
+    #     the internal netlist net names and have never been bench-checked
+    #     on real V2N hardware.  A 2026-07-28 bench measurement on the
+    #     E1M-EVK (E1M-AEN801 r1) found the analogous netlist-derived
+    #     RED/GREEN labels there were SWAPPED (see e1m-evk.yaml's
+    #     e1m_routes.gpio/pwm comments) -- don't assume this table is
+    #     correct by symmetry; measure before trusting it. ---
     - { e1m: E1M_X_GPIO_PWM5, macro: XEVK_PIN_LED_RED,
         board_alias: BOARD_PIN_LED_RED,
         doc: "RGB LED red -- the PWM5 pad driven as a digital GPIO." }

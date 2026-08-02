@@ -42,7 +42,7 @@ kconfig:
   yocto:          n/a
 
 families:
-  - nxp-imx9
+  - imx93
 
 verification:
   hil_silicon:    untested

@@ -11,10 +11,10 @@ project, and modify.
 
 ```bash
 cd alp-workspace
-west alp-build alp-sdk/examples/<category>/<name>   # e.g. examples/peripheral-io/gpio-button-led
+tan build --native alp-sdk/examples/<category>/<name>   # e.g. examples/peripheral-io/gpio-button-led
 ```
 
-`west alp-build` reads the example's `board.yaml` v2, resolves the
+`tan build` reads the example's `board.yaml` v2, resolves the
 SoM topology, and fans out per-core slices (Zephyr / Yocto /
 baremetal).  Single-OS examples fan out into one slice; heterogeneous
 examples fan out into multiple slices in parallel.  See
@@ -72,7 +72,8 @@ The portable bus + GPIO + analog surfaces.  Start here.
 | Directory                    | What it shows                                                            |
 |------------------------------|--------------------------------------------------------------------------|
 | `hello-world`                | Minimal "first program" -- no peripherals; just a printf heartbeat.       |
-| `gpio-button-led`            | GPIO open + configure (input + output); the canonical first build.       |
+| `blink`                      | Toggle the RGB-red LED pad as plain GPIO -- start here, before anything else. |
+| `gpio-button-led`            | GPIO open + configure (input + output); button + LED via the `button_led` block. |
 | `i2c-scanner`                | Walk an I2C bus + report every device that ACKs.                         |
 | `i2c-master`                 | Read a known I2C device (TMP112) at a known address.                     |
 | `i2c-slave`                  | I2C target (slave) mode -- register-file pattern over `alp_i2c_target_open` callbacks. |
@@ -195,7 +196,7 @@ its `cores:` keys.
 |--------------------------|----------------------------------------------------------------------------------------------|
 | `rpmsg-v2n`              | V2N flagship -- A55 Yocto consumer + M33-SM Zephyr producer, framed RPC over RPMsg. **(V2N)** |
 | `rpmsg-aen`              | AEN E8 -- A32 Yocto consumer + M55-HP Zephyr producer reading on-board IMU + barometer. **(AEN)** |
-| `rpmsg-imx93`            | iMX93 -- A55 Yocto consumer + M33 Zephyr producer (structural; build pending iMX93 HW map). **(iMX93)** |
+| `rpmsg-imx93`            | iMX93 -- A55 Yocto consumer + M33 Zephyr producer (structural; **not buildable** -- imx93 r1's `status: tbd` is refused by the hw_rev-buildable gate, [#1025](https://github.com/alplabai/alp-sdk/issues/1025)). **(iMX93)** |
 | `heterogeneous-offload`  | "Why heterogeneous compute?" -- A55 delegates a 1024-pt FFT to M33-SM via `alp_rpc_call`.     |
 | `mproc-mailbox`          | M55-HP ↔ M55-HE mailbox round-trip -- stage payload in shared SRAM, signal via HW mailbox, read the reply. **(AEN)** |
 
@@ -236,6 +237,7 @@ their filename (some of those internal dirs don't follow a
 |---------------------------------|--------------------------------------------------------------------------|
 | `aen/edgeai-vision-aen`         | EdgeAI vision pipeline -- CSI camera -> VeriSilicon ISP Pico (vsi,isp-pico) -> Ethos-U55 -> OLED. **v0.1 skeleton: camera + Ethos-U inference are stubbed today** (see its README's Status table). |
 | `aen/aen-analog-validate`       | DAC0 -> ADC loopback on-silicon analog validation via `<alp/dac.h>` + `<alp/adc.h>`, driven through the bench RAM-run + RAM-console flow. |
+| `aen/aen-cc3501e-ble-gatt`      | Bench proof of the CC3501E BLE GATT-SERVER path (#480) through the portable `<alp/ble.h>` surface: register/advertise/gatt read-write-notify, server-only with no live central peer. |
 | `aen/aen-cc3501e-bringup`       | Host (M55-HE) bring-up of the on-module TI CC3501E Wi-Fi 6 + BLE 5.4 coprocessor -- power, reset, `PING`/`GET_VERSION`/`GET_DIAG_INFO`. |
 | `aen/aen-cc3501e-companion-tour` | Capstone full-surface tour of the CC3501E coprocessor: the portable wireless checkpoint plus every companion surface `aen-cc3501e-bringup` doesn't exercise. |
 | `aen/aen-cc3501e-gpio`          | CC3501E GPIO proxy + camera-enable demo over the inter-chip SPI bridge. |
@@ -281,7 +283,7 @@ To adapt to your own project:
    * Heterogeneous projects: `ipc:` -- name a carve-out the
      orchestrator allocates from the SoM's `memory_map:`.
 3. Modify each core's `src/main.c` to whatever your app needs.
-4. `west alp-build .` from your project directory.
+4. `tan build .` from your project directory.
 
 ## See also
 

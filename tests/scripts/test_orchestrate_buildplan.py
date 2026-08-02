@@ -19,15 +19,13 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _orchestrate_support import REPO, V2N_HAPPY, _write_board  # noqa: E402
 
-from alp_orchestrate import (                       # noqa: E402
-    Orchestrator,
-    load_board_yaml,
-)
+from alp_orchestrate import load_board_yaml  # noqa: E402
 
 
 # ---------------------------------------------------------------------
@@ -106,9 +104,14 @@ def test_emit_build_plan_happy(tmp_path: Path) -> None:
     assert m33["buildDir"] == "build/m33_sm-zephyr"
     assert m33["command"]["tool"] == "west"
     assert m33["command"]["args"][:2] == ["build", "-b"]
-    assert m33["command"]["args"][-2:] == [
-        "--", f"-DPython3_EXECUTABLE={sys.executable.replace(chr(92), '/')}",
-    ]
+    assert m33["command"]["args"][-3] == "--"
+    # Issue #865: a literal ${PYTHON} token, not a baked-in sys.executable --
+    # tan-cli substitutes its own interpreter at materialise time.
+    assert m33["command"]["args"][-2] == "-DPython3_EXECUTABLE=${PYTHON}"
+    # Option A (#871): non-sysbuild Zephyr slices wire the per-core
+    # alp.conf via -DEXTRA_CONF_FILE (${PROJECT_ROOT}-tokened, #865).
+    assert m33["command"]["args"][-1].startswith("-DEXTRA_CONF_FILE=")
+    assert m33["command"]["args"][-1].endswith(f"/{m33['buildDir']}/alp.conf")
     assert m33["command"]["cwd"] == m33["buildDir"]
     assert m33["env"]["ALP_SDK_ROOT"]
     confs = {a["path"]: a["contents"] for a in m33["configArtefacts"]}
@@ -135,12 +138,13 @@ def test_emit_build_plan_happy(tmp_path: Path) -> None:
 def test_emit_build_plan_python_executable_uses_forward_slashes(
     tmp_path: Path, monkeypatch,
 ) -> None:
-    """The Zephyr slice bakes `-DPython3_EXECUTABLE=<sys.executable>`. On
-    Windows that is a backslash path (`C:\\Users\\...`), which CMake rejects
-    with `Invalid character escape '\\U'` when Zephyr expands it into a
-    custom-target command. Emit must forward-slash it (a no-op on posix,
-    where sys.executable has no backslashes). Found via the tan<->alp-sdk
-    e2e build."""
+    """Issue #865: the Zephyr slice bakes a literal `${PYTHON}` token, never
+    `sys.executable` -- the historical Windows backslash / CMake
+    `Invalid character escape '\\U'` bug (found via the tan<->alp-sdk e2e
+    build) is now tan-cli's problem to forward-slash when it substitutes
+    its own resolved interpreter, not the SDK's. Monkeypatching
+    `sys.executable` here must have NO effect on the emitted arg -- proof
+    the SDK never reads it for this field any more."""
     import sys as _sys
     import json as _json
     from alp_orchestrate import emit_build_plan
@@ -156,7 +160,7 @@ def test_emit_build_plan_python_executable_uses_forward_slashes(
     pyexe = next(a for a in m33["command"]["args"]
                  if a.startswith("-DPython3_EXECUTABLE="))
     assert "\\" not in pyexe
-    assert pyexe == "-DPython3_EXECUTABLE=C:/Users/x/.venv/Scripts/python.exe"
+    assert pyexe == "-DPython3_EXECUTABLE=${PYTHON}"
 
 
 def test_emit_build_plan_carries_sdk_provenance(tmp_path: Path) -> None:
@@ -240,8 +244,11 @@ cores:
         "-b",
         "alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33",
     ]
-    assert m33["command"]["args"][3] == str(
-        REPO / "firmware" / "alp-stock-shim")
+    # No explicit `-d`: west's default output (<cwd>/build) is reconciled by
+    # the consumer, so the app dir follows the board directly (finding M14).
+    # ${SDK_ROOT}-tokened (#865): the stock shim lives in the SDK checkout,
+    # not the project.
+    assert m33["command"]["args"][3] == "${SDK_ROOT}/firmware/alp-stock-shim"
     assert m33["command"]["cwd"] == "build/m33_sm-zephyr"
 
     stock_warns = [w for w in plan["warnings"]
@@ -278,36 +285,49 @@ def test_emit_build_plan_writes_nothing(
     assert [p.name for p in tmp_path.iterdir()] == ["board.yaml"]
 
 
-def test_emit_build_plan_matches_materialiser(
-    tmp_path: Path, monkeypatch
-) -> None:
+# test_emit_build_plan_matches_materialiser hangs indefinitely on
+# Windows-native py>=3.14 ONLY (#840) -- not reproducible on Windows
+# py3.11 or any CI runner (a py3.14-specific interpreter regression, not
+# a product bug: the compared path is pure Python, no subprocess). The
+# byte-parity contract it asserts still runs on every other runner
+# (Linux + Windows py<3.14 python-smoke), so coverage is unchanged.
+@pytest.mark.skipif(
+    sys.platform == "win32" and sys.version_info[:2] >= (3, 14),
+    reason="hangs on Windows-native py>=3.14 only; see #840",
+)
+def test_emit_build_plan_matches_materialiser(tmp_path: Path) -> None:
     """By-construction parity: every artefact the plan carries is
-    byte-identical to what the Orchestrator's materialise step writes
-    to disk (the contract promised to the CLI side)."""
+    byte-identical to `_shared_artefacts`/`_slice_config_artefact` --
+    the same pure helpers an external materialiser reads from (the
+    contract promised to the CLI side; ADR-0020 Phase 4 retired the
+    SDK-side materialiser itself, so this checks the shared source
+    functions directly instead of a real on-disk write)."""
     import json as _json
     from alp_orchestrate import emit_build_plan
-    import alp_orchestrate
+    from alp_orchestrate.buildplan import (_shared_artefacts,
+                                           _slice_config_artefact)
 
     path = _write_board(tmp_path, V2N_HAPPY)
     build_root = tmp_path / "build"
+    project = load_board_yaml(path)
 
     plan = _json.loads(emit_build_plan(
-        load_board_yaml(path), board_yaml=path, build_root=build_root))
+        project, board_yaml=path, build_root=build_root))
 
-    # Materialise via the real fan_out (dispatch skipped: no tools).
-    monkeypatch.setattr(alp_orchestrate.orchestrator.shutil, "which",
-                        lambda name: None)
-    orch = Orchestrator(load_board_yaml(path), build_root, board_yaml=path)
-    orch.fan_out(parallel=False)
+    want_shared = {p.as_posix(): c
+                   for p, c in _shared_artefacts(project, build_root)}
+    got_shared = {a["path"]: a["contents"] for a in plan["sharedArtefacts"]}
+    assert got_shared == want_shared
 
-    artefacts = list(plan["sharedArtefacts"])
     for s in plan["slices"]:
-        artefacts.extend(s["configArtefacts"])
-    assert artefacts
-    for entry in artefacts:
-        on_disk = Path(entry["path"]).read_text(encoding="utf-8")
-        assert on_disk == entry["contents"], \
-            f"{entry['path']} diverges from the materialiser"
+        slice_ = project.cores[s["coreId"]]
+        artefact = _slice_config_artefact(project, slice_)
+        want_confs = {}
+        if artefact is not None:
+            name, contents = artefact
+            want_confs[f"{s['buildDir']}/{name}"] = contents
+        got_confs = {a["path"]: a["contents"] for a in s["configArtefacts"]}
+        assert got_confs == want_confs
 
 
 def test_emit_build_plan_off_core_excluded_commandless_warns(
@@ -340,16 +360,95 @@ def test_emit_build_plan_off_core_excluded_commandless_warns(
     assert ("no-command", "m33_sm") in codes
 
 
-def test_emit_build_plan_carries_boot_sysbuild_conf(
-    tmp_path: Path, monkeypatch
+AEN701_NO_BOARD_TREE = """
+som:
+  sku: E1M-AEN701
+
+cores:
+  m55_hp:
+    app: ./src
+"""
+
+
+def test_emit_build_plan_missing_board_tree_blocks_command_not_dropped(
+    tmp_path: Path,
 ) -> None:
-    """A `boot:` block surfaces as the build/alp_sysbuild.conf shared
-    artefact -- and the materialiser writes the same file (this also
-    pins the fix for emit_sysbuild_conf never being wired into
-    _materialise_shared)."""
+    """`E1M-AEN701`'s `topology.m55_hp.board:` names
+    `alp_e1m_aen701_m55_hp`, which has no tree under `zephyr/boards/alp/`
+    (issue #999's own finding, one layer down at emit time): the plan
+    must never carry a `west build -b alp_e1m_aen701_m55_hp` command --
+    Zephyr's own board lookup is guaranteed to reject it with "No board
+    named ... Invalid BOARD". The slice is still carried (never dropped)
+    with `command: null` plus a `board-tree-missing` warning naming the
+    SKU, core, and the board it wanted -- the customer's own terms, not
+    just an internal code. The message deliberately does NOT enumerate
+    the boards that DO exist (issue #999 review finding): that would
+    make one SKU's plan text depend on every other SKU's board tree, so
+    an unrelated bring-up landing a new tree would redden this SKU's
+    frozen fixtures."""
     import json as _json
     from alp_orchestrate import emit_build_plan
-    import alp_orchestrate
+
+    path = _write_board(tmp_path, AEN701_NO_BOARD_TREE)
+    plan = _json.loads(emit_build_plan(
+        load_board_yaml(path), board_yaml=path, build_root=Path("build")))
+
+    m55_hp = next(s for s in plan["slices"] if s["coreId"] == "m55_hp")
+    assert m55_hp["command"] is None
+
+    warning = next(w for w in plan["warnings"] if w["coreId"] == "m55_hp")
+    assert warning["code"] == "board-tree-missing"
+    assert "E1M-AEN701" in warning["message"]
+    assert "m55_hp" in warning["message"]
+    assert "alp_e1m_aen701_m55_hp" in warning["message"]
+    # Not enumerated in the message text (still available on the raised
+    # exception's `.real_boards` attribute for a caller that wants it).
+    assert "alp_e1m_aen801_m55_hp" not in warning["message"]
+
+
+def test_real_zephyr_board_names_lists_every_shipped_tree() -> None:
+    """No test named the actual members of `_real_zephyr_board_names`,
+    only that ONE of them showed up in a warning message -- a regression
+    that dropped every board but one would still pass that check. Pin
+    the full set."""
+    from alp_orchestrate.orchestrator import REPO, _real_zephyr_board_names
+
+    assert _real_zephyr_board_names(REPO) == {
+        "alp_e1m_aen401_m55_hp", "alp_e1m_aen601_m55_hp",
+        "alp_e1m_aen801_m55_he", "alp_e1m_aen801_m55_hp",
+        "alp_e1m_v2m101_m33_sm", "alp_e1m_v2n101_m33_sm",
+    }
+
+
+def test_real_zephyr_board_names_raises_on_corrupt_board_yml(
+    tmp_path: Path,
+) -> None:
+    """A broken `board.yml` must crash loudly (matching
+    `check_board_target_tree_parity.py`'s `_load_real_board_names`,
+    which has no such guard), never silently drop that board from the
+    real set -- a swallowed `yaml.YAMLError` here would misreport a
+    board whose tree DOES exist (e.g. the lead part AEN801) as missing,
+    with the wrong root cause: 'bring-up hasn't happened yet' instead of
+    'this board.yml is broken'."""
+    from alp_orchestrate.orchestrator import _real_zephyr_board_names
+
+    board_dir = tmp_path / "zephyr" / "boards" / "alp" / "e1m_aen801_m55_hp"
+    board_dir.mkdir(parents=True)
+    (board_dir / "board.yml").write_text(
+        "board: [unclosed", encoding="utf-8")
+
+    with pytest.raises(yaml.YAMLError):
+        _real_zephyr_board_names(tmp_path)
+
+
+def test_emit_build_plan_carries_boot_sysbuild_conf(
+    tmp_path: Path,
+) -> None:
+    """A `boot:` block surfaces as the build/alp_sysbuild.conf shared
+    artefact (this also pins the fix for emit_sysbuild_conf never being
+    wired into the shared-artefacts list)."""
+    import json as _json
+    from alp_orchestrate import emit_build_plan
 
     path = _write_board(tmp_path, V2N_BOOT_MCUBOOT)
     build_root = tmp_path / "build"
@@ -360,13 +459,6 @@ def test_emit_build_plan_carries_boot_sysbuild_conf(
     sysbuild_path = (build_root / "alp_sysbuild.conf").as_posix()
     assert sysbuild_path in shared
     assert "SB_CONFIG_BOOTLOADER_MCUBOOT=y" in shared[sysbuild_path]
-
-    monkeypatch.setattr(alp_orchestrate.orchestrator.shutil, "which",
-                        lambda name: None)
-    orch = Orchestrator(load_board_yaml(path), build_root, board_yaml=path)
-    orch.fan_out(parallel=False)
-    assert (build_root / "alp_sysbuild.conf").read_text(
-        encoding="utf-8") == shared[sysbuild_path]
 
 
 def test_zephyr_slice_command_wires_sysbuild_overlay(tmp_path: Path) -> None:
@@ -392,16 +484,26 @@ def test_zephyr_slice_command_wires_sysbuild_overlay(tmp_path: Path) -> None:
     assert args[:2] == ["build", "-b"]
     assert "--sysbuild" in args
 
-    sb_conf = (Path("build") / "alp_sysbuild.conf").resolve()
+    # Anchored on the board.yaml's own directory (`base_dir`, #596), never
+    # the test-runner's CWD -- `_write_board` drops board.yaml straight
+    # into `tmp_path`, so that IS base_dir here. ${PROJECT_ROOT}-tokened
+    # (#865), not an absolute path.
     assert args[-3:] == [
         "--",
-        f"-DPython3_EXECUTABLE={sys.executable.replace(chr(92), '/')}",
-        f"-DSB_CONF_FILE={sb_conf}",
+        "-DPython3_EXECUTABLE=${PYTHON}",
+        "-DSB_CONF_FILE=${PROJECT_ROOT}/build/alp_sysbuild.conf",
     ]
     # The overlay define is a CMake define, never a west flag: it has to
-    # land AFTER `--`, and the path has to be absolute.
+    # land AFTER `--`, and (#849-class bug) forward-slashed even on
+    # Windows, since CMake's cmake_path() (which sysbuild_kconfig.cmake
+    # uses to split the `;`-joined list) only recognises `/`.
     assert args.index("--sysbuild") < args.index("--")
-    assert sb_conf.is_absolute()
+    assert "\\" not in args[-1]
+    # Option A (#871): a --sysbuild slice carries NO bare
+    # -DEXTRA_CONF_FILE -- it would land on the sysbuild image, not the
+    # app (silent OTA config-miss); the per-core alp.conf reaches the app
+    # via the --core-scoped CMakeLists.txt bridge (#870) instead.
+    assert not any(a.startswith("-DEXTRA_CONF_FILE=") for a in args)
 
     # Without boot: -> no sysbuild overlay -> no flag, bare command.
     path2 = _write_board(tmp_path, V2N_HAPPY, name="board-noboot.yaml")
@@ -412,9 +514,10 @@ def test_zephyr_slice_command_wires_sysbuild_overlay(tmp_path: Path) -> None:
     assert "--sysbuild" not in z2["command"]["args"]
     assert not any(a.startswith("-DSB_CONF_FILE=")
                    for a in z2["command"]["args"])
-    assert z2["command"]["args"][-2:] == [
-        "--", f"-DPython3_EXECUTABLE={sys.executable.replace(chr(92), '/')}",
-    ]
+    assert z2["command"]["args"][-3] == "--"
+    assert z2["command"]["args"][-2] == "-DPython3_EXECUTABLE=${PYTHON}"
+    assert z2["command"]["args"][-1].startswith("-DEXTRA_CONF_FILE=")
+    assert z2["command"]["args"][-1].endswith(f"/{z2['buildDir']}/alp.conf")
 
 
 # Every option the emitter is allowed to hand to `west build`: the exact set
@@ -520,10 +623,11 @@ def test_emit_build_plan_app_paths_independent_of_cwd(
 
     m33 = next(s for s in plan_other_dir["slices"] if s["coreId"] == "m33_sm")
     # Correctly anchored on the project dir -- NOT the unrelated CWD, and
-    # NOT the repo root (the historical parent-CMakeLists.txt fallback trap).
+    # NOT the repo root (the historical parent-CMakeLists.txt fallback
+    # trap). ${PROJECT_ROOT}-tokened (#865), not an absolute path.
     args = m33["command"]["args"]
-    assert args[args.index("--") - 1] == str(project_dir / "m33")
-    assert m33["appDir"] == (project_dir / "m33").as_posix()
+    assert args[args.index("--") - 1] == "${PROJECT_ROOT}/m33"
+    assert m33["appDir"] == "${PROJECT_ROOT}/m33"
 
 
 def test_slice_command_helpers_take_explicit_base_dir(tmp_path: Path) -> None:
@@ -545,45 +649,65 @@ def test_slice_command_helpers_take_explicit_base_dir(tmp_path: Path) -> None:
     assert _resolve_app_path(str(abs_dir), project_dir) == abs_dir
 
 
-def test_orchestrator_dispatch_anchors_on_board_yaml_not_cwd(
-    tmp_path: Path, monkeypatch
+# ---------------------------------------------------------------------
+# Issue #865 -- tokened paths; a path outside both roots blocks + warns
+# ---------------------------------------------------------------------
+
+
+def test_emit_build_plan_declares_planpathmode_tokened(tmp_path: Path) -> None:
+    """Every emit carries `planPathMode: "tokened"` (issue #865, additive
+    to schemaVersion 1) -- a refactor that silently drops the key or the
+    token substitution must fail this test, not just the schema/seam-1
+    gates."""
+    import json as _json
+    from alp_orchestrate import emit_build_plan
+
+    path = _write_board(tmp_path, V2N_HAPPY)
+    plan = _json.loads(emit_build_plan(
+        load_board_yaml(path), board_yaml=path, build_root=Path("build")))
+    assert plan["planPathMode"] == "tokened"
+
+
+def test_emit_build_plan_app_outside_both_roots_blocks_command(
+    tmp_path: Path,
 ) -> None:
-    """The real (non-emit) dispatch path -- `Orchestrator(..., board_yaml=)`
-    -- resolves the same way `emit_build_plan` does, so `west
-    alp-build`/`west alp-build --emit build-plan` never disagree on the
-    app path depending on which directory the shell happens to be in."""
-    import alp_orchestrate
+    """The split-brain safety net: an `app:` resolving outside BOTH
+    `${PROJECT_ROOT}` (board.yaml's own directory) and `${SDK_ROOT}`
+    (this checkout) must never leak a bare absolute path into
+    `command.args` on a plan tagged `planPathMode: tokened`.
+    `_slice_command`'s `_tokenize` call raises `UnrootedPathError`; the
+    emit catches it, blocks that slice's command (`command: null`), and
+    records a `command-unrooted` warning instead of silently emitting a
+    non-hermetic command. A refactor that drops the guard would instead
+    emit a real (non-null) command carrying the raw absolute `outside`
+    path -- this test fails on that regression."""
+    import json as _json
+    from alp_orchestrate import emit_build_plan
 
     project_dir = tmp_path / "project"
     project_dir.mkdir()
-    (project_dir / "m33").mkdir()
-    path = _write_board(project_dir, V2N_HAPPY)
+    outside = tmp_path / "outside"
+    outside.mkdir()
 
-    elsewhere = tmp_path / "elsewhere"
-    elsewhere.mkdir()
-    monkeypatch.chdir(elsewhere)
+    board = f"""
+name: split-brain-board
+som:
+  sku: E1M-V2N101
+  hw_rev: r1
 
-    monkeypatch.setattr(alp_orchestrate.orchestrator.shutil, "which",
-                        lambda name: None)
-    project = load_board_yaml(path)
-    build_root = tmp_path / "build"
-    orch = Orchestrator(project, build_root, board_yaml=path)
-    assert orch.base_dir == project_dir.resolve()
+cores:
+  m33_sm:
+    os: zephyr
+    app: {outside.as_posix()}
+"""
+    path = _write_board(project_dir, board)
+    plan = _json.loads(emit_build_plan(
+        load_board_yaml(path), board_yaml=path, build_root=Path("build")))
 
-
-def test_orchestrator_requires_board_yaml(tmp_path: Path) -> None:
-    """ADR-0020 Phase 1: `board_yaml` is a required argument -- the old
-    `Path.cwd()` fallback (dropped when this test was written) was a
-    live "same board.yaml, two answers" divergence between callers that
-    passed it and ones that didn't.  Every real in-repo caller already
-    has the path (`cli.py` always passes it), so omitting it is a bug,
-    not a legitimate use case, and now raises at construction time."""
-    path = _write_board(tmp_path, V2N_HAPPY)
-    project = load_board_yaml(path)
-    build_root = tmp_path / "build"
-
-    with pytest.raises(TypeError):
-        Orchestrator(project, build_root)  # type: ignore[call-arg]
+    m33 = next(s for s in plan["slices"] if s["coreId"] == "m33_sm")
+    assert m33["command"] is None
+    codes = [(w["code"], w["coreId"]) for w in plan["warnings"]]
+    assert ("command-unrooted", "m33_sm") in codes
 
 
 # ---------------------------------------------------------------------
@@ -633,8 +757,8 @@ def test_yocto_app_only_without_recipe_blocks_not_bitbake_path(
 
     a55 = next(s for s in plan["slices"] if s["coreId"] == "a55_cluster")
     assert a55["command"] is None
-    assert a55["appDir"] == str((tmp_path / "src").resolve()).replace(
-        "\\", "/")
+    # ${PROJECT_ROOT}-tokened (#865), not an absolute path.
+    assert a55["appDir"] == "${PROJECT_ROOT}/src"
     codes = [(w["code"], w.get("coreId")) for w in plan["warnings"]]
     assert ("yocto-recipe-missing", "a55_cluster") in codes
     # Never the historical bug shape.
@@ -662,7 +786,8 @@ def test_yocto_app_only_with_recipe_emits_valid_bitbake_target(
         "args": ["alp-my-app"],
         "cwd":  "build/a55_cluster-yocto",
     }
-    assert a55["appDir"] == (tmp_path / "src").resolve().as_posix()
+    # ${PROJECT_ROOT}-tokened (#865), not an absolute path.
+    assert a55["appDir"] == "${PROJECT_ROOT}/src"
     assert not [w for w in plan["warnings"]
                 if w["coreId"] == "a55_cluster"]
 
@@ -683,7 +808,8 @@ def test_yocto_image_and_app_both_set_image_wins_app_dir_retained(
 
     a55 = next(s for s in plan["slices"] if s["coreId"] == "a55_cluster")
     assert a55["command"]["args"] == ["alp-image-edge"]
-    assert a55["appDir"] == (tmp_path / "linux").resolve().as_posix()
+    # ${PROJECT_ROOT}-tokened (#865), not an absolute path.
+    assert a55["appDir"] == "${PROJECT_ROOT}/linux"
 
 
 def test_yocto_stock_image_app_token_still_resolves_without_recipe(
@@ -721,13 +847,10 @@ def test_yocto_stock_image_app_token_still_resolves_without_recipe(
 
 
 # ---------------------------------------------------------------------
-# ADR-0020 Phase 1 -- emit_build_plan() <-> Orchestrator.fan_out() must
-# enumerate the SAME slice set in the SAME order.  Before
-# `iter_buildable_slices()`, emit_build_plan sorted by core_id while
-# fan_out walked `project.cores.items()` (dict/insertion order); for a
-# project whose cores don't already land in sorted order (as this
-# fixture's SoC spec deliberately does not), the plan and the real
-# build silently disagreed on slice order.
+# ADR-0020 Phase 1 -- emit_build_plan() must enumerate slices via the
+# single `iter_buildable_slices()` source, sorted by core_id, never a
+# dict/insertion order that could silently diverge from it (as this
+# fixture's SoC spec deliberately is not already sorted).
 # ---------------------------------------------------------------------
 
 # `project.cores` dict order tracks `soc_spec["cores"]` list order (see
@@ -766,11 +889,11 @@ topology:
     os: 'off'
   alpha_zephyr:
     app: ./m33a
-    board: alp_e1m_tst002_alpha
+    board: alp_e1m_aen401_m55_hp
     toolchain: arm-zephyr-eabi
   bravo_zephyr:
     app: ./m33b
-    board: alp_e1m_tst002_bravo
+    board: alp_e1m_aen601_m55_hp
     toolchain: arm-zephyr-eabi
 default_hw_rev: r1
 default_board: E1M-EVK
@@ -808,9 +931,12 @@ def _write_multicore_fixture(tmp_path: Path) -> tuple[Path, Path]:
 
     bc_schema = _json.loads((REPO / "metadata" / "schemas"
                             / "board.schema.json").read_text(encoding="utf-8"))
-    bc_schema["properties"]["som"]["properties"]["sku"]["pattern"] = (
-        r"^E1M-(AEN[3-8]01|V2N10[12]|V2M10[12]|NX9[0-9]{3}|TST[0-9]{3})$"
-    )
+    sku_prop = bc_schema["properties"]["som"]["properties"]["sku"]
+    # Splice a TST[0-9]{3} branch into the *real* pattern (rather than
+    # hard-coding a copy) so this fixture can never drift back to a
+    # pre-#1089 literal when the schema's own pattern changes.
+    assert sku_prop["pattern"].endswith(")$")
+    sku_prop["pattern"] = sku_prop["pattern"][:-2] + "|TST[0-9]{3})$"
     (schemas / "board.schema.json").write_text(
         _json.dumps(bc_schema), encoding="utf-8")
 
@@ -855,74 +981,33 @@ def test_emit_build_plan_slice_order_matches_iter_buildable_slices(
     assert "delta_off" not in iter_core_ids
 
 
-def test_fan_out_dispatches_in_iter_buildable_slices_order(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """`fan_out` must dispatch buildable slices in `iter_buildable_slices`
-    order, NOT `project.cores` dict/insertion order -- the fan_out-side
-    half of the parity `test_emit_build_plan_slice_order_...` asserts for
-    emit.  The sorted manifest (step 7) and cache-persist (`.values()`)
-    would BOTH hide a dict-order dispatch regression, so this asserts the
-    dispatch sequence directly: the fixture's dict order (`zulu_yocto,
-    alpha_zephyr, bravo_zephyr`) differs from sorted order, so a regression
-    to `self.project.cores.items()` fails here."""
-    import alp_orchestrate
-    from alp_orchestrate import Orchestrator, iter_buildable_slices
-
-    # Tools absent -> every dispatch is a no-op skip, but fan_out still
-    # walks the full enumerate/materialise/dispatch/manifest path and
-    # calls `_dispatch_slice` once per buildable slice, in target order.
-    monkeypatch.setattr(alp_orchestrate.orchestrator.shutil, "which",
-                        lambda name: None)
-
-    path, meta = _write_multicore_fixture(tmp_path)
-    project = load_board_yaml(path, metadata_root=meta)
-    orch = Orchestrator(project, tmp_path / "build", board_yaml=path)
-
-    dispatched: list[str] = []
-    orig = orch._dispatch_slice
-
-    def _record(slice_):
-        dispatched.append(slice_.core_id)
-        return orig(slice_)
-
-    monkeypatch.setattr(orch, "_dispatch_slice", _record)
-
-    orch.fan_out(parallel=False)
-
-    assert dispatched == [s.core_id for s in iter_buildable_slices(project)]
-    assert dispatched == ["alpha_zephyr", "bravo_zephyr", "zulu_yocto"]
-
-
-def test_emit_build_plan_command_and_build_dir_match_orchestrator(
+def test_emit_build_plan_command_and_build_dir_match_slice_command(
     tmp_path: Path,
 ) -> None:
     """Per matching core, the plan's `command` (tool + args) and
-    `buildDir` must equal what the orchestrator itself would resolve for
-    that slice -- locks command/buildDir parity against future
-    divergence between the two enumeration sites."""
+    `buildDir` must equal what `_slice_command`/`_slice_build_dir`
+    themselves resolve for that slice -- locks command/buildDir parity
+    against future divergence between the two enumeration sites."""
     import json as _json
     from dataclasses import replace
-    from alp_orchestrate import Orchestrator, emit_build_plan
+    from alp_orchestrate import emit_build_plan
     from alp_orchestrate.buildplan import _slice_build_dir
     from alp_orchestrate.orchestrator import _slice_command
 
     path, meta = _write_multicore_fixture(tmp_path)
     build_root = Path("build")
     project = load_board_yaml(path, metadata_root=meta)
+    base_dir = Path(path).resolve().parent
 
     plan = _json.loads(emit_build_plan(
         project, board_yaml=path, build_root=build_root))
 
-    orch = Orchestrator(load_board_yaml(path, metadata_root=meta),
-                        build_root, board_yaml=path)
-
     for entry in plan["slices"]:
-        slice_ = orch.project.cores[entry["coreId"]]
+        slice_ = project.cores[entry["coreId"]]
         want_build_dir = _slice_build_dir(build_root, slice_)
         want_cmd = _slice_command(
-            orch.project, replace(slice_, build_dir=want_build_dir),
-            base_dir=orch.base_dir)
+            project, replace(slice_, build_dir=want_build_dir),
+            base_dir=base_dir)
 
         assert entry["buildDir"] == want_build_dir.as_posix()
         if want_cmd is None:
@@ -946,7 +1031,6 @@ def test_emit_build_plan_env_append_carries_extra_zephyr_modules(
     additive `envAppendPath` map, never in `env`."""
     import json as _json
     from alp_orchestrate import emit_build_plan
-    from alp_orchestrate.buildplan import REPO
 
     path, meta = _write_multicore_fixture(tmp_path)
     project = load_board_yaml(path, metadata_root=meta)
@@ -954,8 +1038,9 @@ def test_emit_build_plan_env_append_carries_extra_zephyr_modules(
         project, board_yaml=path, build_root=Path("build")))
 
     zephyr_slice = next(s for s in plan["slices"] if s["backend"] == "zephyr")
-    assert zephyr_slice["env"] == {"ALP_SDK_ROOT": str(REPO)}
-    assert str(REPO) in zephyr_slice["envAppendPath"]["EXTRA_ZEPHYR_MODULES"]
+    # ${SDK_ROOT}-tokened (#865), not an absolute path.
+    assert zephyr_slice["env"] == {"ALP_SDK_ROOT": "${SDK_ROOT}"}
+    assert "${SDK_ROOT}" in zephyr_slice["envAppendPath"]["EXTRA_ZEPHYR_MODULES"]
 
 
 def test_emit_build_plan_env_append_carries_pythonpath(
@@ -967,7 +1052,6 @@ def test_emit_build_plan_env_append_carries_pythonpath(
     stays exactly `{"ALP_SDK_ROOT": ...}` -- unchanged by this key."""
     import json as _json
     from alp_orchestrate import emit_build_plan
-    from alp_orchestrate.buildplan import REPO
 
     path, meta = _write_multicore_fixture(tmp_path)
     project = load_board_yaml(path, metadata_root=meta)
@@ -975,16 +1059,17 @@ def test_emit_build_plan_env_append_carries_pythonpath(
         project, board_yaml=path, build_root=Path("build")))
 
     zephyr_slice = next(s for s in plan["slices"] if s["backend"] == "zephyr")
-    assert zephyr_slice["env"] == {"ALP_SDK_ROOT": str(REPO)}
-    assert str(REPO / "scripts") in \
+    # ${SDK_ROOT}-tokened (#865), not an absolute path.
+    assert zephyr_slice["env"] == {"ALP_SDK_ROOT": "${SDK_ROOT}"}
+    assert "${SDK_ROOT}/scripts" in \
         zephyr_slice["envAppendPath"]["PYTHONPATH"]
 
 
 def test_emit_build_plan_publishes_execution_policy(tmp_path: Path) -> None:
     """The envelope's `executionPolicy` publishes the skip-vs-fail rules
-    `Orchestrator._dispatch_slice` actually applies (unknown os -> fail,
-    tool missing from PATH -> skip, command: null -> skip), so a plan
-    consumer stops hand-porting that policy. Additive, schemaVersion 1."""
+    the executor applies (unknown backend -> fail, tool missing from PATH
+    -> skip, command: null -> skip), so a plan consumer stops hand-porting
+    that policy. Additive, schemaVersion 1."""
     import json as _json
     from alp_orchestrate import emit_build_plan
 

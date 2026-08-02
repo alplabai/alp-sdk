@@ -23,6 +23,12 @@ source "$HERE/bench-env.sh"
 
 OBJNM="$(bench_tool_prefix)-nm" || exit $?
 JLINK="$(bench_jlink_exe)" || exit $?
+# See ram-run.sh for why the selector is conditional on JLINK_SN. The MRAM
+# write itself happens inside flash-jlink.sh (invoked below), which now
+# selects by the same JLINK_SN; this array is only for the read_console()
+# probe here.
+JLINK_ARGS=("$JLINK")
+[ -n "${JLINK_SN:-}" ] && JLINK_ARGS+=(-SelectEmuBySN "$JLINK_SN")
 SIZE=0xB00
 
 # App list: argv wins; otherwise read apps.txt (prefer the committed list).
@@ -50,7 +56,7 @@ connect
 mem8 $BUF, $SIZE
 exit
 EOF
-  $JLINK -nogui 1 -CommanderScript /tmp/rdc.jlink 2>/dev/null > /tmp/rdc.out || true
+  "${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/rdc.jlink 2>/dev/null > /tmp/rdc.out || true
   awk '/^[0-9A-Fa-f]+ = / { for (i=3;i<=NF;i++){ if ($i !~ /^[0-9A-Fa-f][0-9A-Fa-f]$/) continue; b=strtonum("0x"$i); if(b==0){nul++; if(nul>6)exit; next} nul=0; if(b==10||b==13){printf "\n";continue} if(b>=32&&b<127)printf "%c",b } }' /tmp/rdc.out
 }
 

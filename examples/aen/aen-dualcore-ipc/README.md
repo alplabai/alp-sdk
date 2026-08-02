@@ -50,3 +50,46 @@ alternative; see `aen-rpc-pingpong`).
 Recipe: dual ATOC HP `["load","boot"]` @0x50000000 + HE `["load"]` @0x58000000;
 `app-gen-toc` + `app-write-mram`; read the beacons over SWD; restore canonical
 slot0 after.
+
+## Verdicts, timeouts, and the HE↔HP boot block on this bench
+
+Both HP and HE hold their verdict to a bounded window rather than looping
+forever waiting for it, and each always prints exactly one `RESULT` line
+before dropping into its trailing idle/serve loop:
+
+- `RESULT PASS: dualcore-ipc -- ...` — real evidence: HP serviced >=1 HE
+  request (or, on HE, all `ROUND_TRIPS` round-trips completed with 0 reply
+  mismatches).
+- `RESULT SKIP: dualcore-ipc -- ...` — the peer never showed, or stopped
+  responding, within a bounded window: either core's MHU-1 sender link never
+  came ready (`ACCESS_READY`), HP never saw a request, or HP never replied to
+  HE's first (or a later) round — states what was locally proven, not a
+  failure of this app's code.
+- `RESULT FAIL: dualcore-ipc -- ...` — a real local error: `alp_mproc_boot_core`
+  (HP) returned an unexpected rc (`ALP_ERR_NOSUPPORT` included -- see below),
+  or a reply's payload did not match `request.payload + 1` (a correctness
+  bug, not an absent peer).
+
+This build ships `CONFIG_HAS_ALIF_SE_SERVICES=y` and no `native_sim` overlay,
+so `alp_mproc_boot_core()` always resolves to the E8 SE backend for
+`ALP_CORE_M55_HE` — the `<alp/mproc.h>` contract's `ALP_ERR_NOSUPPORT` case
+("no boot authority for `core` in this build: wrong SoM, `native_sim`, or a
+core the platform boots by other means") is not reachable in this
+configuration. So HP treats *any* nonzero `alp_mproc_boot_core` rc, including
+`ALP_ERR_NOSUPPORT`, as `RESULT FAIL`, not a skip: on these boards a `-6`
+here would mean the boot path fell out of the build (e.g. the SE backend lost
+the link, or the silicon-ref stopped matching) — a regression this app must
+surface, not paper over.
+
+Every wait for the peer (HP's/HE's MHU-1 sender-link-ready wait: 3000 ms; HP's
+request verdict window: 3000 ms; HE's per-round reply wait: 200 ms) is
+bounded, so a genuinely absent peer or a sender link that never comes ready
+produces a verdict instead of a hang.
+
+`REQ_MBOX`/`RPL_MBOX` are fixed absolute global-SRAM0 addresses, not `.bss` —
+Zephyr startup does NOT zero them. Both cores explicitly zero BOTH mailboxes
+at the top of `main()`, before any doorbell exchange: on a warm reset or a
+bench re-run without a full power cycle, leftover bytes from a PRIOR
+successful run would otherwise satisfy "seq changed and is nonzero" on the
+very first poll and produce a false PASS with the peer never having booted
+this time.

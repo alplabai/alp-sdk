@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: board-selftest
+  description: |
+    Board bring-up / self-test.  Reads the SoM + SoC identity, reads
+    the RUN operating-point profile, and scans the on-module I2C
+    management bus, then prints a pass/fail report.  Portable
+    <alp/*> APIs only -- no chip driver -- so the same source runs
+    on every E1M family.  On native_sim the identity/power checks
+    have no backend and report SKIP; the emul I2C bus scans clean.
+
+tests:
+  alp_sdk.example.board_selftest.e1m_x_evk:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_X_EVK"'
+    tags:
+      - alp-sdk
+      - example
+      - bringup
+      - selftest
+      - v2n
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[selftest\\] done"
+  alp_sdk.example.board_selftest.e1m_evk:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    extra_configs:
+      - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
+    tags:
+      - alp-sdk
+      - example
+      - bringup
+      - selftest
+      - aen
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[selftest\\] done"

@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for single-core TrustZone-M enforcement of the MRAM
+# audit-log window on the E1M-AEN801 (Ensemble E8, M55-HE): a negative proof
+# that the Non-Secure application is hardware-blocked from writing the MRAM
+# log window (ARMv8-M SAU + Alif TGU), with no second core / SES firewall
+# device config involved.  Single-M55 counterpart to the two-core route in
+# examples/connectivity/firmware-update-log.
+#
+# Uses CMSE intrinsics (-mcmse) for the single-core NS transition.
+# Compile-checks the app on the real E8 board target; filtered OUT of the
+# native_sim PR gate (platform_allow = the AEN801 HE board only).
+
+sample:
+  name: aen-tz-secure-log-probe
+  description: |
+    Bench RAM-run negative TrustZone-M proof for the E1M-AEN801 (Alif
+    Ensemble E8, Cortex-M55-HE): confirms the Non-Secure app is
+    hardware-blocked from writing the MRAM audit-log window directly.
+
+tests:
+  alp_sdk.examples.aen.tz_secure_log_probe.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - security
+      - trustzone
+      - tz
+    build_only: true   # the negative Secure-write proof is a bench flash, not a CI run.

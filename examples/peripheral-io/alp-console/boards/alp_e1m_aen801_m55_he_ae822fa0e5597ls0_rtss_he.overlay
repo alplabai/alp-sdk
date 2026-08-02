@@ -48,18 +48,21 @@
 		};
 	};
 
-	/* RGB-LED PWM outputs (from aen-rgb-led-fade): RED P2_4 = UT10_T0_A;
-	 * GREEN P12_7 = UT11_T1_C; BLUE P12_6 = UT11_T0_C.  Output pads -- no
-	 * input-enable/bias.  Distinct from the SPI1/I2C2 pads above (no conflict). */
+	/* RGB-LED PWM outputs (from aen-rgb-led-fade): P2_4 = UT10_T0_A
+	 * (physically GREEN, bench-measured 2026-07-28 -- the `led_r`/RED
+	 * label below is misnamed, see the rgb_leds node + src/main.c);
+	 * P12_7 = UT11_T1_C (physically RED); P12_6 = UT11_T0_C (BLUE,
+	 * correct).  Output pads -- no input-enable/bias.  Distinct from
+	 * the SPI1/I2C2 pads above (no conflict). */
 	pinctrl_pwm10: pinctrl_pwm10 {
 		group0 {
-			pinmux = <PIN_P2_4__UT10_T0_A>; /* RED  */
+			pinmux = <PIN_P2_4__UT10_T0_A>; /* physically GREEN */
 		};
 	};
 	pinctrl_pwm11: pinctrl_pwm11 {
 		group0 {
-			pinmux = <PIN_P12_7__UT11_T1_C>, /* GREEN */
-				 <PIN_P12_6__UT11_T0_C>; /* BLUE  */
+			pinmux = <PIN_P12_7__UT11_T1_C>, /* physically RED */
+				 <PIN_P12_6__UT11_T0_C>; /* BLUE (correct) */
 		};
 	};
 };
@@ -132,7 +135,14 @@
 	/* RGB "board alive" status LED.  Each pwm-leds child's `pwms` phandle is
 	 * what PWM_DT_SPEC_GET dereferences to reach the pwm10/pwm11 controller +
 	 * channel (never DEVICE_DT_GET on the controller node -- avoids the
-	 * "alif,pwm" #pwm-cells codegen phantom; see aen-rgb-led-fade). */
+	 * "alif,pwm" #pwm-cells codegen phantom; see aen-rgb-led-fade).
+	 *
+	 * NODE LABELS ARE MISNAMED relative to physical colour (bench-measured
+	 * 2026-07-28): `led_red` drives P2_4/PWM3, which is physically GREEN;
+	 * `led_green` drives P12_7/PWM0, which is physically RED.  Left as-is --
+	 * src/main.c's rgb_status_thread drives all three in a continuous
+	 * phase-shifted rainbow with no per-colour meaning, so the swap is
+	 * invisible; see the NOTE in src/main.c before renaming these. */
 	rgb_leds: pwm-leds {
 		compatible = "pwm-leds";
 

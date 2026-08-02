@@ -86,6 +86,7 @@
  *   counter    | x  | x | x | x  | must-open       | HW_TIMER (native-sim-counter)
  *   qenc       | x  | x | x | x  | degrade         | HW_QENC
  *   i2s        | x  | x | x | x  | degrade         | HW_I2S
+ *   i3c        | x  | x | x | x  | degrade         | HW_I3C
  *   i2c_target | x  | x | x | -- | degrade         | HW_I2C   (optional: NOSUPPORT ok)
  *   spi_target | x  | x | x | -- | opens (slave)   | HW_SPI   (optional: NOSUPPORT ok)
  *
@@ -120,6 +121,7 @@
 #include "alp/counter.h"
 #include "alp/dac.h"
 #include "alp/i2s.h"
+#include "alp/i3c.h"
 #include "alp/peripheral.h"
 #include "alp/pwm.h"
 #include "alp/rtc.h"
@@ -487,6 +489,42 @@ static alp_status_t dac_null_call_(void)
 static const alp_capabilities_t *dac_caps_(const void *h)
 {
 	return alp_dac_capabilities(h);
+}
+
+/* I3C
+ *
+ * Shape mirrors i2c: open a bus by form-factor id, then a blocking transfer
+ * against a target address.  `null_handle_call` uses write() because it is the
+ * simplest op that must reject a NULL handle without touching the bus.
+ *
+ * NOT sim-backed: Zephyr ships no i3c emulator, so open_valid() is expected to
+ * fail on native_sim exactly like dac/can/rtc below -- the suite treats
+ * sim_backed=false classes as "contract-checked, not exercised".
+ */
+static void *i3c_open_null_(void)
+{
+	return alp_i3c_open(NULL);
+}
+static void *i3c_open_invalid_(void)
+{
+	return alp_i3c_open(&(alp_i3c_config_t){ .bus_id = CONF_BAD_INSTANCE });
+}
+static void *i3c_open_valid_(void)
+{
+	return alp_i3c_open(&(alp_i3c_config_t){ .bus_id = 0 });
+}
+static void i3c_close_(void *h)
+{
+	alp_i3c_close(h);
+}
+static alp_status_t i3c_null_call_(void)
+{
+	const uint8_t byte = 0u;
+	return alp_i3c_write(NULL, 0x08u, &byte, 1u);
+}
+static const alp_capabilities_t *i3c_caps_(const void *h)
+{
+	return alp_i3c_capabilities(h);
 }
 
 /* PWM */
@@ -857,6 +895,17 @@ static const conf_class_t conf_classes[] = {
 	    .null_handle_call = i2s_null_call_,
 	    .cap              = ALP_CAP_ID_HW_I2S,
 	    .sim_backed       = false, /* no I2S controller on native_sim */
+	},
+	{
+	    .name             = "i3c",
+	    .open_null_cfg    = i3c_open_null_,
+	    .open_invalid     = i3c_open_invalid_,
+	    .open_valid       = i3c_open_valid_,
+	    .close            = i3c_close_,
+	    .capabilities     = i3c_caps_,
+	    .null_handle_call = i3c_null_call_,
+	    .cap              = ALP_CAP_ID_HW_I3C,
+	    .sim_backed       = false, /* no I3C emulator in Zephyr */
 	},
 	{
 	    .name             = "i2c_target",

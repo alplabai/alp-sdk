@@ -1,11 +1,11 @@
 # board.yaml -- per-app project configuration for the
 # iot-connected-camera reference application.
 #
-# Customer workflow: copy this directory, change `som.sku` to
+# Customer workflow: `tan init --from-example connectivity/iot-connected-camera`, change `som.sku` to
 # your V2N MPN, edit `preset:` if you fork the X-EVK, and
-# `west build`.  CMakeLists.txt invokes scripts/alp_project.py
+# `tan build`.  CMakeLists.txt invokes scripts/alp_project.py
 # at configure time and layers the generated alp.conf over
-# prj.conf via OVERLAY_CONFIG.
+# prj.conf via EXTRA_CONF_FILE.
 
 som:
   sku: E1M-V2N101          # Renesas RZ/V2N -- DRP-AI3 on-die NPU

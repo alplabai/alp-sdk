@@ -1,0 +1,41 @@
+# board.yaml -- per-app project configuration for aen-cc3501e-gatt-register.
+#
+# BENCH-VALIDATION app for the NEW CC3501E dynamic GATT registration path
+# (#480/#892): `alp_ble_gatt_register_service()` now really registers a
+# service on the CC3501E's NimBLE host and fills in the attribute handles,
+# instead of the old no-op stub. This app proves register-before-advertise
+# ordering on real silicon, peer-free (no BLE central on the bench) -- see
+# src/main.c for the numbered PASS contract.
+#
+# The inter-chip wiring (SPI1 on P14_6/5/4, WIFI_EN P15_5, E_WIFI.NRST
+# P15_1_FLEX -- metadata/e1m_modules/aen/inter-chip.tsv) lives in the
+# per-board overlay under boards/, mirrored verbatim from
+# aen-cc3501e-companion-tour since this app is the same SoM bring-up plus a
+# narrower BLE-only bench check.
+
+som:
+  sku: E1M-AEN801
+
+preset: e1m-evk
+
+cores:
+  a32_cluster:
+    os: "off"
+  m55_he:
+    app: ./src
+    # Portable peripheral subsystems this app opens (the bridge's SPI bus +
+    # its WIFI_EN/nRESET/READY control pins). The loader translates these to
+    # CONFIG_SPI=y / CONFIG_GPIO=y in the generated alp.conf.
+    peripherals:
+      - spi
+      - gpio
+
+chips:
+  - cc3501e               # on-module Wi-Fi 6 + BLE 5.4 coprocessor (host driver).
+
+diagnostics:
+  log_level: info
+  # No UART wired to USB on this bench rig -- read `ram_console_buf` over
+  # SWD instead of a serial console (see running-local-ci / the AEN bench
+  # recipe for the read-back procedure).
+  console: ram

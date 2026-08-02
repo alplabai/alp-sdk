@@ -1,4 +1,4 @@
-From: Alp Lab AB
+From: Alp Lab AB <contact@alplab.ai>
 Date: Thu, 4 Jun 2026 15:47:10 +0200
 Subject: [PATCH] input: goodix - fall back to polling when no IRQ is wired
 MIME-Version: 1.0
@@ -43,7 +43,7 @@ Implementation notes:
 
 Upstream-Status: Pending [generic improvement; no SoM-specific code]
 
-Signed-off-by: Alp Lab AB
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  drivers/input/touchscreen/goodix.c | 39 ++++++++++++++++++++++++------
  1 file changed, 32 insertions(+), 7 deletions(-)

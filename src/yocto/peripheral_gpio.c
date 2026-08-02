@@ -37,11 +37,23 @@
  * mutators (irq_enable / irq_disable / close) interrupt the
  * poll() so the dispatcher re-snapshots its slot table.
  *
- * Callbacks run on the dispatcher thread while the dispatcher
- * mutex is held -- callers MUST NOT call alp_gpio_irq_disable
- * or alp_gpio_close from within a callback (deadlock).  The
- * dispatcher starts lazily on the first alp_gpio_irq_enable
- * and runs for the lifetime of the process.
+ * Callbacks run on the dispatcher thread.  Prior to issue #756 the
+ * dispatcher mutex (g_irq.mu) was held for the ENTIRE duration of each
+ * callback, so calling alp_gpio_irq_disable() or alp_gpio_close() from
+ * within a callback (on this pin or any other -- g_irq.mu is one
+ * global lock shared by every handle) deadlocked re-locking that same
+ * mutex on the same thread.  The dispatcher now re-validates each
+ * ready line and snapshots its callback UNDER g_irq.mu, but invokes
+ * the callback itself AFTER releasing it (see irq_dispatcher()), so
+ * alp_gpio_irq_disable()/alp_gpio_close() -- including a self-close/
+ * self-disable from within the callback -- may freely re-take
+ * g_irq.mu.  There is no separate per-pin worker thread to join
+ * (the shared dispatcher thread is detached once, at first
+ * alp_gpio_irq_enable(), and never joined), so no self-join hazard
+ * exists here the way it does for a per-handle RX/worker thread (see
+ * src/backends/can/yocto_drv.c's analogous #756 fix).  The dispatcher
+ * starts lazily on the first alp_gpio_irq_enable and runs for the
+ * lifetime of the process.
  *
  * Compiled only on Linux hosts/targets.  Requires pthread (-lpthread
  * on glibc, link in src/yocto/CMakeLists.txt).
@@ -93,16 +105,38 @@ struct alp_gpio {
 
 static struct alp_gpio g_gpio_pool[ALP_SDK_YOCTO_MAX_GPIO_HANDLES];
 
+/* Declared here (ahead of the "IRQ dispatcher" section below, which
+ * documents the rest of this struct's fields) so pool_acquire()/
+ * pool_release() can guard their g_gpio_pool[] writes with the SAME
+ * lock irq_dispatcher() uses to scan/read that array -- issue #756's
+ * TSan coverage caught a real race here: alp_gpio_open()/
+ * alp_gpio_close() used to mutate in_use/line_fd with no lock at all,
+ * while the dispatcher thread (once started) reads those same fields
+ * for EVERY slot, not just ones with IRQs enabled. */
+static struct {
+	pthread_mutex_t mu;
+	pthread_t       thread;
+	int             wake_fd; /* eventfd, written by mutators */
+	bool            started;
+} g_irq = {
+	.mu      = PTHREAD_MUTEX_INITIALIZER,
+	.wake_fd = -1,
+	.started = false,
+};
+
 static struct alp_gpio *pool_acquire(void)
 {
+	pthread_mutex_lock(&g_irq.mu);
 	for (size_t i = 0; i < ARRAY_SIZE(g_gpio_pool); ++i) {
 		if (!g_gpio_pool[i].in_use) {
 			memset(&g_gpio_pool[i], 0, sizeof(g_gpio_pool[i]));
 			g_gpio_pool[i].in_use  = true;
 			g_gpio_pool[i].line_fd = -1;
+			pthread_mutex_unlock(&g_irq.mu);
 			return &g_gpio_pool[i];
 		}
 	}
+	pthread_mutex_unlock(&g_irq.mu);
 	return NULL;
 }
 
@@ -111,11 +145,13 @@ static void pool_release(struct alp_gpio *h)
 	if (h == NULL) {
 		return;
 	}
+	pthread_mutex_lock(&g_irq.mu);
 	if (h->line_fd >= 0) {
 		(void)close(h->line_fd);
 		h->line_fd = -1;
 	}
 	h->in_use = false;
+	pthread_mutex_unlock(&g_irq.mu);
 }
 
 static uint64_t pull_to_flags(alp_gpio_pull_t pull)
@@ -260,27 +296,24 @@ alp_status_t alp_gpio_read(alp_gpio_t *pin, bool *level)
 /* close() interrupt the poll() so the thread re-snapshots the slot    */
 /* table and picks up the change.                                      */
 /*                                                                     */
-/* Callbacks run on the dispatcher thread while the dispatcher mutex   */
-/* is held -- callers MUST NOT call alp_gpio_irq_disable or            */
-/* alp_gpio_close from within a callback (it would deadlock).          */
-/* Document this in the public alp_gpio_irq_enable contract.           */
+/* Callbacks run on the dispatcher thread, but OUTSIDE g_irq.mu (issue */
+/* #756) -- alp_gpio_irq_disable()/alp_gpio_close(), including a       */
+/* self-close/self-disable called from within a callback, may freely   */
+/* re-take g_irq.mu.  Each ready line is re-validated (in_use/          */
+/* irq_enabled/line_fd still match) and its callback snapshotted UNDER */
+/* the lock, then invoked AFTER releasing it -- see irq_dispatcher()'s  */
+/* per-index lock/unlock below.                                        */
 /*                                                                     */
 /* The thread is started lazily on first irq_enable and runs for the   */
 /* lifetime of the process -- no teardown plumbing is required for     */
 /* v0.4 since the slot count is small and the thread is mostly         */
-/* sleeping inside poll().                                             */
+/* sleeping inside poll().  It is detached at start and never joined,   */
+/* so unlike a per-handle RX/worker thread there is no self-join hazard */
+/* for close()/irq_disable() to avoid here.                             */
 /* ================================================================== */
-
-static struct {
-	pthread_mutex_t mu;
-	pthread_t       thread;
-	int             wake_fd; /* eventfd, written by mutators */
-	bool            started;
-} g_irq = {
-	.mu      = PTHREAD_MUTEX_INITIALIZER,
-	.wake_fd = -1,
-	.started = false,
-};
+/* (g_irq itself is declared earlier, just after g_gpio_pool, so
+ * pool_acquire()/pool_release() can use it too -- see that
+ * declaration's own comment.) */
 
 static void irq_wake(void)
 {
@@ -340,30 +373,38 @@ static void *irq_dispatcher(void *arg)
 			(void)read(g_irq.wake_fd, &drain, sizeof(drain));
 		}
 
-		/* Re-acquire the mutex to invoke callbacks safely against
-         * concurrent irq_disable / close.  Callers are documented as
-         * forbidden to call irq_disable / close from within a
-         * callback; with that contract the lock-during-callback
-         * pattern is deadlock-free. */
-		pthread_mutex_lock(&g_irq.mu);
+		/* Issue #756: re-validate + read the event UNDER g_irq.mu, but
+         * invoke the callback AFTER releasing it -- a callback that
+         * calls alp_gpio_irq_disable()/alp_gpio_close() on THIS pin (a
+         * self-close/self-disable) or on any OTHER pin (g_irq.mu is one
+         * global lock shared by every handle) must be able to re-take
+         * g_irq.mu without deadlocking on itself.  Re-locking PER INDEX
+         * (rather than once for the whole batch) means an earlier
+         * callback in this same wake-up that closed/disabled a LATER
+         * slot is observed by that slot's own re-validation before it
+         * is read/dispatched. */
 		for (size_t i = 1; i < nfds; ++i) {
 			if (!(fds[i].revents & POLLIN)) {
 				continue;
 			}
-			struct alp_gpio *p = slot_pins[i - 1];
-			if (!p->in_use || !p->irq_enabled || p->line_fd != fds[i].fd) {
-				/* Slot disabled while we were sleeping; skip. */
-				continue;
+			struct alp_gpio *p    = slot_pins[i - 1];
+			alp_gpio_cb_t    cb   = NULL;
+			void            *user = NULL;
+
+			pthread_mutex_lock(&g_irq.mu);
+			if (p->in_use && p->irq_enabled && p->line_fd == fds[i].fd) {
+				ssize_t r = read(p->line_fd, &ev, sizeof(ev));
+				if (r == (ssize_t)sizeof(ev)) {
+					cb   = p->irq_cb;
+					user = p->irq_user;
+				}
 			}
-			ssize_t r = read(p->line_fd, &ev, sizeof(ev));
-			if (r != (ssize_t)sizeof(ev)) {
-				continue;
-			}
-			if (p->irq_cb != NULL) {
-				p->irq_cb((alp_gpio_t *)p, p->irq_user);
+			pthread_mutex_unlock(&g_irq.mu);
+
+			if (cb != NULL) {
+				cb((alp_gpio_t *)p, user);
 			}
 		}
-		pthread_mutex_unlock(&g_irq.mu);
 	}
 }
 

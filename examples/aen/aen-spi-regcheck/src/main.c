@@ -92,11 +92,12 @@ int main(void)
 	}
 
 	/* 8-bit, MSB-first, SPI mode 0, master, INTERNAL loopback (SRL). */
+	/* No .cs: no cs-gpios, controller SER drives SS (HW SS0 on P5_2); the
+	 * field zero-initializes to that already. */
 	struct spi_config cfg = {
 		.frequency = TEST_FREQ_HZ,
 		.operation = SPI_OP_MODE_MASTER | SPI_TRANSFER_MSB | SPI_WORD_SET(8) | SPI_MODE_LOOP,
-		.slave     = 0,     /* HW SS0 (SS0_B on P5_2) */
-		.cs        = { 0 }, /* no cs-gpios; controller SER drives SS */
+		.slave     = 0, /* HW SS0 (SS0_B on P5_2) */
 	};
 
 	uint8_t tx[4] = { 0xA5, 0x5A, 0xC3, 0x3C };

@@ -28,6 +28,15 @@ except ImportError:
     sys.exit("validate_metadata: PyYAML is required.  Install via `pip install pyyaml`.")
 
 REPO = Path(__file__).resolve().parent.parent
+# Needed so `alp_orchestrate.sdk_compat` resolves against THIS checkout's
+# scripts/ even when an editable pip install (e.g. alp_sdk_cli) has
+# registered a meta-path finder that would otherwise redirect the package
+# import to a different alp-sdk checkout -- same idiom check_build_plan.py /
+# check_system_manifest.py / check_emit_snapshots.py already use.
+sys.path.insert(0, str(REPO / "scripts"))
+
+from alp_project_loader import _sku_family, resolve_soc_path  # noqa: E402
+from alp_orchestrate.sdk_compat import assert_exclusion_still_not_buildable  # noqa: E402
 
 # Power/ground nets are allowed as pin signals without a signals[] entry.
 _POWER_NETS = {"VDD", "VDDIO", "VCC", "GND", "VSS", "AVDD", "DVDD"}
@@ -83,6 +92,10 @@ def _emit_pending_warnings(rel: Path, doc) -> None:
     * pending_reference_manual_ingestion -- peripherals: {} on such SoCs means
       "unknown / TBD", so ALP_SOC_*_COUNT ceilings on derived SoMs will
       under-report until the RM has been ingested.
+    * peripherals_unverified (#936) -- a subset of `peripherals` keys this
+      file itself flags as uncited (e.g. `pdm`/`pdm_lp`, uniform across every
+      Alif Ensemble part with no datasheet/DFP citation).  Also catches a
+      typo'd key that doesn't match anything in `peripherals`.
     """
     if not isinstance(doc, dict):
         return
@@ -90,6 +103,16 @@ def _emit_pending_warnings(rel: Path, doc) -> None:
         print(f"WARN  {rel}: pending_reference_manual_ingestion -> "
               f"peripheral counts default to zero, ALP_SOC_*_COUNT ceilings "
               f"may under-report")
+    unverified = doc.get("peripherals_unverified")
+    if isinstance(unverified, list) and unverified:
+        peripherals = doc.get("peripherals") if isinstance(doc.get("peripherals"), dict) else {}
+        unknown = [k for k in unverified if k not in peripherals]
+        if unknown:
+            print(f"WARN  {rel}: peripherals_unverified references key(s) not present in "
+                  f"peripherals: {unknown} -- likely a typo")
+        print(f"WARN  {rel}: peripherals_unverified -> {sorted(unverified)} counts have no "
+              f"datasheet/DFP/HWRM citation; the matching ALP_SOC_*_COUNT macros are asserted, "
+              f"not confirmed")
 
 
 def _check_files(label, files, validator, loader, key_for_summary):
@@ -149,10 +172,7 @@ def _check_silicon_capability_restrictions(som_files) -> list:
         msgs: list[str] = []
         soc_caps: dict = {}
         silicon = str(doc.get("silicon", ""))
-        parts = silicon.split(":")
-        soc_path = None
-        if len(parts) == 3:
-            soc_path = SOCS / parts[0] / parts[1] / f"{parts[2]}.json"
+        soc_path = resolve_soc_path(silicon, SOCS.parent)
         if soc_path is None or not soc_path.is_file():
             msgs.append(f"silicon_capabilities: silicon ref `{silicon}` does not "
                         f"resolve to a metadata/socs/ spec, cannot validate "
@@ -214,11 +234,10 @@ def _check_silicon_kconfig() -> list:
             msgs.append(f"{loc}: {err.message}")
 
     for ref in data.get("knownSilicon", []):
-        parts = ref.split(":")
-        if len(parts) != 3:
+        soc_path = resolve_soc_path(ref, SOCS.parent)
+        if soc_path is None:
             msgs.append(f"knownSilicon[{ref}]: not a <vendor>:<family>:<part> ref")
             continue
-        soc_path = SOCS / parts[0] / parts[1] / f"{parts[2]}.json"
         if not soc_path.is_file():
             msgs.append(f"knownSilicon[{ref}]: no SoC spec at "
                         f"{soc_path.relative_to(REPO).as_posix()}")
@@ -291,6 +310,116 @@ def _check_chip_semantics(chip_files) -> list:
             msgs.append(
                 f"chip_id: `{chip_id}` must match the manifest filename `{path.stem}` "
                 f"-- chip_id lookups resolve by filename")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+    return failures
+
+
+def _check_soc_npu_pairing(soc_files) -> list:
+    """Cross-ref the SoC `npus[].paired_core` field against `cores[]`.
+
+    `paired_core` is the single source of truth for which CPU core drives an
+    NPU instance (the build emit sizes the accelerator per target core from
+    it -- scripts/alp_orchestrate/kconfig.py); JSON Schema cannot express the
+    cross-reference, so enforce it here:
+
+      1. every `npus[].paired_core` must name a real `cores[].id` in the same
+         SoC JSON (a typo would silently disable the per-core sizing);
+      2. when one NPU `type` appears with more than one distinct
+         `mac_per_cycle` (e.g. the Alif E3/E5/E7's 256-MAC + 128-MAC U55s),
+         every instance of that type MUST declare `paired_core` -- otherwise
+         the emit cannot tell the cores apart and a 256-MAC stream would error
+         a 128-MAC NPU at invoke (issue #909).
+
+    A single-MAC variant, or an instance on a shared non-core subsystem (the
+    E8 U85 on the HG subsystem), legitimately omits `paired_core`.
+    Returns a failure list shaped like `_check_files()`.
+    """
+    failures: list[tuple[Path, list[str]]] = []
+    for path in soc_files:
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        npus = doc.get("npus") or []
+        if not npus:
+            continue
+        rel = path.relative_to(REPO).as_posix()
+        core_ids = {c.get("id") for c in (doc.get("cores") or []) if c.get("id")}
+        msgs: list[str] = []
+
+        # (1) referential integrity of every declared paired_core.
+        for i, n in enumerate(npus):
+            pc = n.get("paired_core")
+            if pc is not None and pc not in core_ids:
+                msgs.append(
+                    f"npus[{i}] ({n.get('type')}/{n.get('subtype')}): "
+                    f"paired_core={pc!r} is not a cores[].id "
+                    f"(known: {sorted(core_ids)})")
+
+        # (2) multi-MAC variants must pair every instance to a core.
+        by_type: dict[str, list[dict]] = {}
+        for n in npus:
+            by_type.setdefault(str(n.get("type", "")), []).append(n)
+        for ntype, insts in by_type.items():
+            macs = {n.get("mac_per_cycle") for n in insts if n.get("mac_per_cycle")}
+            if len(macs) > 1:
+                unpaired = [n for n in insts if not n.get("paired_core")]
+                if unpaired:
+                    subs = ", ".join(str(n.get("subtype")) for n in unpaired)
+                    msgs.append(
+                        f"{ntype} appears with distinct MAC arrays {sorted(macs)} "
+                        f"but instance(s) [{subs}] omit paired_core -- the build "
+                        f"cannot size the accelerator per core (see #909)")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+    return failures
+
+
+def _check_soc_debug_probe_identity(soc_files) -> list:
+    """Cross-ref `variants[].debug.jlink_device` keys against `cores[].id`.
+
+    #987 publishes the debug-probe identity (J-Link device, pyOCD target)
+    per variant, with `jlink_device` keyed by core id since a J-Link attach
+    device can in principle differ per core class (a future non-M55 core
+    would need a different value, even though every Alif M55 core today
+    shares the generic `Cortex-M55` string).  JSON Schema can express that
+    `jlink_device` is an object of string values but not that its *keys*
+    are real cores on *this* SoC -- a typo (or a stale key surviving a core
+    rename) would silently point the extension's launch-config generator at
+    a core that does not exist.  Enforce it here.
+
+    Returns a failure list shaped like `_check_files()`.
+    """
+    failures: list[tuple[Path, list[str]]] = []
+    for path in soc_files:
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        variants = doc.get("variants") or []
+        if not variants:
+            continue
+        rel = path.relative_to(REPO).as_posix()
+        core_ids = {c.get("id") for c in (doc.get("cores") or []) if c.get("id")}
+        msgs: list[str] = []
+
+        for i, v in enumerate(variants):
+            jlink_device = ((v.get("debug") or {}).get("jlink_device")) or {}
+            for core_id in jlink_device:
+                if core_id not in core_ids:
+                    msgs.append(
+                        f"variants[{i}] ({v.get('order_code')}): "
+                        f"debug.jlink_device key {core_id!r} is not a "
+                        f"cores[].id (known: {sorted(core_ids)})")
 
         if msgs:
             print(f"FAIL {rel}")
@@ -520,6 +649,7 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
             som_docs[doc["sku"]] = doc
 
     families_seen: set[str] = set()
+    family_to_som: dict[str, str] = {}
     for idx, cell in enumerate(data.get("familyMatrix") or []):
         if not isinstance(cell, dict):
             continue
@@ -528,6 +658,8 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
         core = cell.get("core")
         if isinstance(family, str):
             families_seen.add(family)
+            if isinstance(som, str):
+                family_to_som[family] = som
         doc = som_docs.get(som)
         if doc is None:
             msgs.append(f"familyMatrix[{idx}]/som: `{som}` has no SoM preset")
@@ -552,6 +684,32 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
     if missing_families:
         msgs.append("familyMatrix: missing supported SoM families: "
                     + ", ".join(sorted(missing_families)))
+
+    # `excludedFamilies` RATCHET (#1025 round-2 review): each entry claims
+    # its family's SoM has no buildable hw_rev at all -- assert that against
+    # live metadata the same way `excludedLibraries` above is asserted to
+    # still be Tier A, instead of trusting the prose forever.
+    for family, _reason in sorted((data.get("excludedFamilies") or {}).items()):
+        som = family_to_som.get(family)
+        if som is None:
+            msgs.append(f"excludedFamilies[{family}]: no familyMatrix cell "
+                        f"for this family to check against")
+            continue
+        doc = som_docs.get(som)
+        hw_rev = doc.get("default_hw_rev") if doc else None
+        try:
+            family_dir = _sku_family(som) if doc else None
+        except ValueError:
+            family_dir = None
+        if not family_dir or not hw_rev:
+            msgs.append(f"excludedFamilies[{family}]: cannot resolve "
+                        f"family_dir/default_hw_rev for som `{som}`")
+            continue
+        stale = assert_exclusion_still_not_buildable(
+            REPO / "metadata", family_dir, hw_rev,
+            gate=f"tier-a-library-ci.json excludedFamilies[{family}]")
+        if stale:
+            msgs.append(stale)
 
     if msgs:
         print(f"FAIL {rel}")
@@ -611,10 +769,14 @@ def _check_board_targets(som_files) -> list:
         (guards against qualifying a SKU -- e.g. V2N102/V2M102 -- before its
         board tree is generated).
 
-    A bare board with no generated tree is left alone: it is either a
-    single-cluster target Zephyr resolves as-is, or a not-yet-generated
-    board that cannot build regardless.  Returns a failure list shaped like
-    _check_files().
+    A bare board with no generated tree is left alone HERE -- this check's
+    only job is qualification-form drift against a tree that exists, not
+    existence itself.  Whether that bare board should have a tree at all
+    (single-cluster target Zephyr resolves as-is, vs. a not-yet-generated
+    board that cannot build regardless) is `check_board_target_tree_parity.py`'s
+    job: it requires the gap be declared in its `_NOT_YET_SUPPORTED`
+    allowlist, with a reason, rather than silently unbuildable.  Returns a
+    failure list shaped like _check_files().
     """
     failures: list[tuple[Path, list[str]]] = []
     trees = _board_tree_identifiers()
@@ -684,6 +846,10 @@ def main() -> int:
         lambda p: json.loads(p.read_text(encoding="utf-8")),
         "ref",
     )
+    # Semantic cross-ref the schema can't express: npus[].paired_core -> cores[].
+    soc_failures += _check_soc_npu_pairing(soc_files)
+    # Semantic cross-ref the schema can't express: variants[].debug.jlink_device keys -> cores[].
+    soc_failures += _check_soc_debug_probe_identity(soc_files)
 
     # SoM preset files (YAML) against som-preset v1.
     som_validator = None

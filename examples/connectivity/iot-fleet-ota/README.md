@@ -16,7 +16,7 @@ boot:
   method: mcuboot
   signing:
     algorithm: ecdsa_p256
-    key_file:  keys/prod_ecdsa_p256.pub.pem
+    key_file:  keys/mcuboot_dev_ecdsa_p256.pem
   swap_algorithm: scratch
 
 ota:
@@ -39,7 +39,7 @@ config:
 - `boot:` -> sysbuild MCUboot child image. `scripts/alp_orchestrate/`
   emits `SB_CONFIG_BOOTLOADER_MCUBOOT=y`,
   `SB_CONFIG_MCUBOOT_SIGNATURE_TYPE_ECDSA_P256=y`,
-  `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE="keys/prod_ecdsa_p256.pub.pem"`,
+  `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE="keys/mcuboot_dev_ecdsa_p256.pem"`,
   and `SB_CONFIG_MCUBOOT_MODE_SWAP_USING_SCRATCH=y` into the
   sysbuild overlay.
 - `ota:` -> Mender wiring. On Yocto slices the orchestrator writes

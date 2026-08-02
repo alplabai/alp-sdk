@@ -78,8 +78,17 @@ single-source-of-truth for "what was this firmware intended for?"
 * A blank or corrupt module -- surfaced distinctly as
   `ALP_ERR_NOT_PROVISIONED` (never provisioned) vs `ALP_ERR_IO`
   (corrupt manifest), so production test can triage.
-* A schematic respin between hw_rev r1 and r2 -- the manifest's
-  `hw_rev` drives the `hw-revisions.yaml` `min_sdk_version` gate.
+* A schematic respin between hw_rev r1 and r2 -- caught by the
+  EEPROM manifest's `hw_rev` field failing the strict-equality
+  check in `alp_hw_info_assert_matches_build()` above against the
+  build-time `ALP_HW_BUILD_SOM_HW_REV` constant.  (The
+  `hw-revisions.yaml` `min_sdk_version` / `max_sdk_version` window is
+  separate, build-time-enforced data -- see
+  [`docs/board-config-hardware.md`](../board-config-hardware.md).
+  An *existing* revision declared `status: reserved`, `status: tbd`,
+  or carrying no `status` key at all also refuses a build
+  (`SdkRevisionNotBuildable`, exit code 5) -- see
+  [#1025](https://github.com/alplabai/alp-sdk/issues/1025).)
 
 ## See also
 

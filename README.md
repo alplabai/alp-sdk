@@ -5,7 +5,7 @@
 [![CI](https://github.com/alplabai/alp-sdk/actions/workflows/pr-twister.yml/badge.svg?branch=main)](https://github.com/alplabai/alp-sdk/actions/workflows/pr-twister.yml)
 [![Release](https://img.shields.io/github/v/release/alplabai/alp-sdk)](https://github.com/alplabai/alp-sdk/releases)
 [![License](https://img.shields.io/github/license/alplabai/alp-sdk)](LICENSE)
-[![Zephyr](https://img.shields.io/badge/Zephyr-v4.4.0-blue)](docs/zephyr-version-policy.md)
+[![Zephyr](https://img.shields.io/badge/Zephyr-v4.4.1-blue)](docs/zephyr-version-policy.md)
 
 > [!WARNING]
 > **Partially silicon-verified:** every chip driver, peripheral wrapper, and
@@ -39,24 +39,38 @@ issues at
 ## Quickstart
 
 ```bash
-# One-time per clone: stand up the west/Zephyr workspace + install the
-# CLI into it (scripts/bootstrap.ps1 on native Windows)
-bash scripts/bootstrap.sh
-source ../.venv/bin/activate
-export ZEPHYR_BASE="$PWD/../zephyr"
+# One-time: install the build executor and user command surface (no Rust
+# toolchain needed -- see below for a from-source alternative)
+curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"  # install.sh already made this permanent in your shell rc; needed once more in THIS shell
+
+# One-time per clone: stand up the west/Zephyr workspace + venv beside this
+# checkout. POSIX only (Linux/macOS) -- native Windows uses WSL2 or
+# scripts/bootstrap.ps1 directly, see docs/cross-platform-setup.md §4. Runs
+# the SDK's own scripts/bootstrap.sh, so the two cannot drift.
+tan bootstrap --sdk-root "$PWD"
 
 # Sanity-check the host -- catches a missing toolchain/HAL before it bites later
-alp doctor
+tan doctor --build
 
-# Scaffold + run a hello-world on native_sim — no hardware needed
-alp init my-app
+# One-time: the arm-zephyr-eabi cross toolchain a real-SoM build needs --
+# bootstrap.sh above got you west/Python, not this; see docs/getting-started.md
+( cd .. && west sdk install --gnu-toolchains arm-zephyr-eabi --no-hosttools \
+    --install-dir "$PWD/zephyr-sdk" )
+export ZEPHYR_SDK_INSTALL_DIR="$PWD/../zephyr-sdk"
+
+# Scaffold a hello-world (--sdk-root points it at this checkout); it
+# defaults to a real E1M SoM target, so this cross-builds and needs the
+# Zephyr SDK toolchain just installed above
+tan init --name my-app --sdk-root "$PWD" --non-interactive
 cd my-app
-alp run
+tan sdk switch ..   # one-time per project: pin the alp-sdk checkout my-app builds against
+tan build --native
 ```
 
-`bash scripts/bootstrap.sh` is what actually gets `west` (and everything else `alp build`/`alp run` shell out to) onto `PATH` — skipping it is the #1 way this Quickstart fails on a fresh clone; see [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md) for the per-OS manual equivalent. `alp init` walks you through SoM SKU + board preset + starter peripherals interactively, or accepts `--som`, `--preset`, `--peripherals` flags for CI. `alp run` builds for `native_sim` by default and prints the app's stdout straight through; pass `--board <name>` for a real-hardware build (`--flash` to chain flash).
+`tan bootstrap` is what stands up the workspace `tan build` needs — the west/Zephyr tree and the Python venv, one level up from `alp-sdk/` — and skipping it is the #1 way this Quickstart fails on a fresh clone. You do **not** activate that venv by hand: the SDK's build plan carries the `PATH` additions per slice, so `tan build` finds `west` on its own. Activate it (`source ../.venv/bin/activate`) only if you intend to run `west` yourself. `scripts/bootstrap.sh` (and `scripts/bootstrap.ps1` on native Windows) is the same setup as a shell script for CI and for hosts without `tan`; both read the same `metadata/bootstrap.json`, so they cannot drift apart. See [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md) for the per-OS manual equivalent. `west sdk install` and `tan sdk switch` are both one-time, per-checkout/per-project steps neither `tan bootstrap` nor `bootstrap.sh` do for you (no elevation, no silent re-pin) — skip either and `tan build`/`tan doctor --build` report a missing toolchain or `no SDK selected` respectively; see [`docs/getting-started.md`](docs/getting-started.md) for the full explanation. `tan` is not installed by either -- it's a separate public Rust binary from [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli); the `install.sh` one-liner above needs no Rust toolchain. Building from source instead needs Rust 1.86+ (get it from [rustup.rs](https://rustup.rs)) plus a system C toolchain (`build-essential` on Debian/Ubuntu, `gcc`/`gcc-c++` on Fedora/RHEL -- see [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md) §2.1): `git clone https://github.com/alplabai/tan-cli && cd tan-cli && cargo install --path crates/tan-cli --locked`. `tan init` walks you through SoM SKU + template + destination interactively, or accepts `--som`, `--template`, `--cores` (and friends) for CI -- see `tan init --help` for the full flag set. `tan build` (`--native` is the default, explicit-opt-in spelling) consumes the SDK's build plan, materialises it, and runs each slice's `west`/`bitbake`/`cmake` command directly for the real SoM `board.yaml` targets; it never runs the produced binary itself (that's `tan run`). Flashing real hardware is `tan flash`.
 
-`alp validate board.yaml` runs the diagnostic-rich validator standalone — try it on a fixture under `tests/fixtures/board_yaml_bad/` to see the format.  `alp doctor` triages the host environment (PASS/WARN/FAIL with fix hints) whenever a build machine misbehaves.  The full verb set — `build` / `flash` / `emit` / `size` / `image` / `clean` / `renode` / `monitor` / `new-som` / `model` and friends — is documented in [`docs/cli.md`](docs/cli.md).
+`tan validate board.yaml` runs the diagnostic-rich validator standalone — try it on a fixture under `tests/fixtures/board_yaml_bad/` to see the format.  `tan doctor --build` triages the host build environment (`[+]`/`[!]`/`[x]` lines with fix hints) whenever a build machine misbehaves.  alp-sdk is plans-only — it emits `build-plan` / `system-manifest`; the whole build / flash / size / image / clean / renode surface lives in the standalone [`tan` CLI](https://github.com/alplabai/tan-cli).  alp-sdk's own remaining verb set — `generate` / `validate` / `doctor` / `monitor` / `new-som` / `model` and friends — is documented in [`docs/cli.md`](docs/cli.md).
 
 ## Two consumer paths
 
@@ -184,7 +198,7 @@ Each entry under `cores:` maps one on-die programmable core to a
 runtime (`yocto`, `zephyr`, `baremetal`, or `off`) plus its app
 slice.  The loader (`scripts/alp_project.py`) fans out per-core:
 each Zephyr slice gets a Kconfig fragment layered onto its own
-`prj.conf` via `OVERLAY_CONFIG`; each Yocto slice gets a
+`prj.conf` via `EXTRA_CONF_FILE`; each Yocto slice gets a
 `local.conf` snippet consumed by bitbake.  Inside each
 `cores.<id>` block every field except `os:` + `app:` is optional;
 the [`gpio-button-led` example](examples/peripheral-io/gpio-button-led/) for
@@ -260,7 +274,7 @@ Two complementary surfaces:
   alp-sdk itself) adds schema-aware `board.yaml` editing (autocomplete
   on SKUs/boards/libraries, inline validator diagnostics in the Problems
   panel), a GUI configurator panel with dropdowns for supported SoM
-  presets and boards, west wrappers (build / flash / run native_sim),
+  presets and boards, `tan` wrappers (build / flash / run native_sim),
   per-OS dependency bootstrap, and a one-keypress "Generate all" for the
   emit modes.
 
@@ -268,9 +282,15 @@ Two complementary surfaces:
 
 First-class on **Linux**, **macOS**, and **Windows 11 / 10** (native
 PowerShell or WSL2).  The Zephyr-on-M-class developer workflow is
-fully cross-platform; only Yocto host builds require Linux (or WSL2)
-by upstream `bitbake` / OE-core constraint.  Codified in
-[ADR 0012](docs/adr/0012-cross-platform-developer-host.md).
+fully cross-platform on those hosts; only Yocto host builds require
+Linux (or WSL2) by upstream `bitbake` / OE-core constraint.  **Intel
+Macs can run `native_sim` but not real-silicon Zephyr builds or `tan
+build`** — the pinned Zephyr SDK dropped its `macos-x86_64` host
+build in `1.0.0` and `macos-aarch64` is not a substitute (Rosetta
+translates the other direction); real-silicon builds need a Linux
+host instead.  Codified in
+[ADR 0012](docs/adr/0012-cross-platform-developer-host.md); detail
+in [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md).
 
 - [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md) —
   per-OS quickstart (Linux + macOS + Windows native + WSL2),
@@ -281,10 +301,10 @@ by upstream `bitbake` / OE-core constraint.  Codified in
 - See the *Using with VS Code* section above for the in-repo
   `.vscode/` config and the separate VS Code extension.
 - `scripts/check_cross_platform.py` lints docs + scripts for
-  Linux-only idioms; CI matrix scaffolding at
-  `.github/workflows/cross-platform-zephyr.yml` runs the Python +
-  loader smoke tests on Ubuntu (strict), macOS, and Windows
-  (continue-on-error while runners prove out).
+  Linux-only idioms; `.github/workflows/cross-platform-zephyr.yml`
+  runs the Python + loader smoke tests on Ubuntu, macOS, and Windows
+  and goes red on any of the three on failure (not yet a required
+  check on `dev`/`main` — see the workflow's own header comment).
 - See [`docs/getting-started.md`](docs/getting-started.md) for
   per-host setup notes.
 
@@ -360,7 +380,7 @@ verification (`⏳`/`🟡`/`✅` rows) lives in
   - **Renesas DRP-AI3** — RZ/V2N (V2N family); supports YOLO v5 / v8 detection on top of classification + segmentation models.
   - **DEEPX DX-M1** — V2N + DX-M1 (V2M family); ONNX → DXNN compiler, model-family agnostic; first-class support for YOLO v5 / v8 / NAS detection backbones.
   - **CPU** — reference-kernel fallback on any target
-- **Portable model pipeline (`.alpmodel`)** — `alp model build` compiles a source model for **every** NPU back-end the SoM declares into one **fat multi-backend `.alpmodel`** package (CBOR manifest + per-backend blobs + a capability `requires` envelope). At runtime **`alp_inference_open_alpmodel()`** loads the package and a selection engine picks the matching blob (silicon ref + SRAM-fit + `preferred_backend` tiebreak; `ALP_ERR_NO_FIT` if none fits), then dispatches through the backend registry below. One model, portable across NPUs without source changes.
+- **Portable model pipeline (`.alpmodel`)** — `tan model build` compiles a source model for **every** NPU back-end the SoM declares into one **fat multi-backend `.alpmodel`** package (CBOR manifest + per-backend blobs + a capability `requires` envelope). At runtime **`alp_inference_open_alpmodel()`** loads the package and a selection engine picks the matching blob (silicon ref + SRAM-fit + `preferred_backend` tiebreak; `ALP_ERR_NO_FIT` if none fits), then dispatches through the backend registry below. One model, portable across NPUs without source changes.
 - Offline training (off-device) lives in TensorFlow / PyTorch.
 
 ### Dev tooling
@@ -369,7 +389,7 @@ verification (`⏳`/`🟡`/`✅` rows) lives in
 - **`scripts/alp_project.py`** — emits Zephyr Kconfig fragments, plain-CMake `-D` flags, Yocto `local.conf` snippets, DTS overlays, or the `<alp_hw_info_build.h>` companion header
 - **`scripts/validate_board_yaml.py`** — customer-side linter (exit 0 clean / 1 diagnostics-or-consistency failure)
 - **`scripts/program_eeprom.py`** — packs board.yaml + serial + mfg date into the 128-byte EEPROM manifest for production-test programming
-- **VS Code extension** ([`alplabai/alp-sdk-vscode`](https://github.com/alplabai/alp-sdk-vscode)) — schema-aware `board.yaml` editor, GUI configurator, west wrappers, per-OS bootstrap, inline validator diagnostics
+- **VS Code extension** ([`alplabai/alp-sdk-vscode`](https://github.com/alplabai/alp-sdk-vscode)) — schema-aware `board.yaml` editor, GUI configurator, `tan` wrappers, per-OS bootstrap, inline validator diagnostics
 
 ### Alp SDK (`<alp/...>`)
 
@@ -406,7 +426,7 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference bo
   ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────┐
   │ AI Models &   │ ─► │  Train (off-device):  TensorFlow · PyTorch  →  .tflite / .onnx         │
   │ Pipeline      │    │                                                                        │
-  │               │    │  Compile (host):  alp model build  →  one fat .alpmodel package        │
+  │               │    │  Compile (host):  tan model build  →  one fat .alpmodel package        │
   │               │    │     per-backend blobs:  Vela (Ethos-U) · DRP-AI · dxcom · CPU/TFLM     │
   │               │    │                                                                        │
   │               │    │  Model families:  classification · detection (YOLO v5/v8) ·            │
@@ -416,10 +436,11 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference bo
   └───────────────┘    └────────────────────────────────────────────────────────────────────────┘
           │
   ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────┐
-  │ Dev Tooling   │ ─► │  board.yaml · alp_project.py (per-core emit) · alp_orchestrate/        │
-  │               │    │  west alp-build / alp-image / alp-flash / alp-clean                    │
+  │ Dev Tooling   │ ─► │  board.yaml · alp_project.py (per-core emit) · alp_orchestrate         │
+  │               │    │  --emit build-plan/system-manifest  →  tan (executor)                  │
+  │               │    │  tan build / flash / image / size / renode / clean                     │
   │               │    │  validate_board_yaml.py · program_eeprom.py · VS Code extension        │
-  │               │    │  alp model build  →  .alpmodel   (the model-compile front-end)         │
+  │               │    │  tan model build  →  .alpmodel   (the model-compile front-end)         │
   └───────────────┘    └────────────────────────────────────────────────────────────────────────┘
           │
   ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────┐
@@ -578,10 +599,11 @@ cmake -B build -DALP_BUILD_TESTS=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
 
-# Zephyr (heterogeneous slice)
+# Zephyr (heterogeneous slice) -- tan is the executor; it consumes this
+# checkout's --emit build-plan output
 west init -m https://github.com/alplabai/alp-sdk --mr main alp-ws
 cd alp-ws && west update
-west alp-build examples/multicore/rpmsg-v2n
+tan --project examples/multicore/rpmsg-v2n build
 ```
 
 ## Repository layout

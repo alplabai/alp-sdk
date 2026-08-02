@@ -126,6 +126,17 @@ typedef struct {
  * SDK and reused after the callback returns; copy out anything you
  * need to keep.
  *
+ * @par Callback context and re-entry (issue #756)
+ * Runs on the handle's own RX worker thread, OUTSIDE any internal
+ * lock.  It is SAFE to call @ref alp_can_close or
+ * @ref alp_can_remove_filter on this handle from within this callback
+ * (a "self-close"/self-remove): the RX worker never joins itself, and
+ * a self-close defers its actual teardown to this same thread's own
+ * epilogue once the callback returns and the RX loop unwinds, so it
+ * neither deadlocks nor leaves the handle usable afterwards.  It is
+ * likewise safe to call @ref alp_can_close concurrently from a
+ * different thread while this callback is running.
+ *
  * @param[in] frame  Decoded incoming frame.
  * @param[in] user   Opaque pointer the caller passed into
  *                   @ref alp_can_add_filter.
@@ -216,6 +227,11 @@ alp_status_t alp_can_remove_filter(alp_can_t *can, int32_t filter_id);
 
 /**
  * @brief Stop the bus, release the handle.  NULL is a no-op.
+ *
+ * Idempotent: a second close on an already-closed handle is a safe
+ * no-op.  Safe to call from this handle's own @ref alp_can_rx_cb_t (a
+ * self-close -- see that typedef's doc comment, issue #756) and safe
+ * to call concurrently from a different thread than the RX worker.
  *
  * @param[in] can  Handle from @ref alp_can_open, or NULL.
  */

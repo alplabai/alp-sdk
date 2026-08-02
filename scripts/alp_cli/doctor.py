@@ -122,6 +122,56 @@ def _pin_mm() -> tuple[int, int]:
     return _parse_two(_zephyr_pin()) or (4, 4)
 
 
+def _bootstrap_manifest() -> dict | None:
+    """Load metadata/bootstrap.json -- the single source (issue #949) for the
+    per-tool prerequisite install command every check below used to hardcode
+    its own (drifted) copy of. Returns None on any read/parse problem --
+    including a file that isn't valid UTF-8, or one that parses but whose
+    top level isn't a JSON object -- so a check can fall back to a generic
+    hint instead of crashing `alp doctor` (a packaged install without the
+    repo checkout has no metadata/ at all; a truncated or bad-merge
+    bootstrap.json is exactly the broken workspace this command exists to
+    diagnose)."""
+    try:
+        text = (_repo_root() / "metadata" / "bootstrap.json").read_text(encoding="utf-8")
+        data = _json.loads(text)
+    except (OSError, ValueError):  # ValueError covers JSONDecodeError + UnicodeDecodeError
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _prereq_os_key() -> str:
+    if _is_windows():
+        return "windows"
+    if sys.platform == "darwin":
+        return "macos"
+    return "linux"
+
+
+def _prereq_install_hint(tool: str) -> str:
+    """The remediation string for a missing prerequisite `tool`, sourced from
+    metadata/bootstrap.json's prerequisites.install.<os> map -- the same
+    manifest scripts/bootstrap.sh and scripts/bootstrap.ps1 read (issue
+    #949). Falls back to a generic, package-manager-agnostic pointer when
+    the manifest is unreadable, when `tool` isn't tracked as an install
+    command on the current OS at all (e.g. a future prerequisite added to
+    only one OS's list -- printing an invented command here would just
+    reintroduce the drift this change removes), or when the manifest parses
+    but is shaped wrong at any of the four key hops (`prerequisites`,
+    `install`, `<os>`, `<tool>`) -- each hop is guarded with
+    `isinstance(node, dict)` before it is indexed, so a truncated/bad-merge
+    manifest degrades to the generic hint instead of raising."""
+    node: object = _bootstrap_manifest()
+    for key in ("prerequisites", "install", _prereq_os_key(), tool):
+        if not isinstance(node, dict):
+            node = None
+            break
+        node = node.get(key)
+    if isinstance(node, str) and node:
+        return f"Install it: {node}."
+    return f"Install {tool} via your OS package manager."
+
+
 def _python_pin() -> str | None:
     """The dev/CI interpreter pin, read live from the repo's .python-version.
 
@@ -212,10 +262,13 @@ def _check_python_deps() -> CheckResult:
 
 
 def _check_cmake() -> CheckResult:
+    # cmake is tracked in both prerequisites.posix and prerequisites.windows,
+    # so routing its two install/upgrade hints through _prereq_install_hint
+    # exercises all three prerequisites.install OS maps (linux/macos/windows)
+    # at run time (ninja, below, now covers the same three since #971).
     if shutil.which("cmake") is None:
         return CheckResult(
-            "cmake", FAIL, "cmake not found on PATH",
-            "Install CMake 3.20+ (find_package(Zephyr) minimum).",
+            "cmake", FAIL, "cmake not found on PATH", _prereq_install_hint("cmake"),
         )
     ver = _tool_version(["cmake", "--version"])
     if ver is None:
@@ -227,17 +280,19 @@ def _check_cmake() -> CheckResult:
         return CheckResult("cmake", PASS, f"cmake {ver[0]}.{ver[1]}")
     return CheckResult(
         "cmake", FAIL, f"cmake {ver[0]}.{ver[1]} is below the required 3.20",
-        "Upgrade CMake to 3.20+ (find_package(Zephyr) minimum).",
+        _prereq_install_hint("cmake"),
     )
 
 
 def _check_ninja() -> CheckResult:
-    # Zephyr's default CMake generator; every west build needs it.
+    # Zephyr's default CMake generator; every west build needs it. The
+    # remediation hint is sourced from metadata/bootstrap.json (issue #949)
+    # instead of a hardcoded per-OS string -- this used to hand out a
+    # winget ID missing `-e --id` and an apt package name matching no
+    # canonical command anywhere else.
     if shutil.which("ninja") is None:
         return CheckResult(
-            "ninja", FAIL, "ninja not found on PATH",
-            "Install it: apt install ninja-build / brew install ninja / "
-            "winget install Ninja-build.Ninja.",
+            "ninja", FAIL, "ninja not found on PATH", _prereq_install_hint("ninja"),
         )
     ver = _tool_version(["ninja", "--version"])
     label = f"ninja {ver[0]}.{ver[1]}" if ver else "ninja present"
@@ -252,7 +307,9 @@ def _check_dtc() -> CheckResult:
         return CheckResult(
             "dtc", WARN, "devicetree compiler (dtc) not found on PATH",
             "Install it: apt install device-tree-compiler / brew install dtc "
-            "(bundled with the Zephyr SDK on Windows).",
+            "-- on native Windows the Zephyr SDK bundle does not ship dtc, "
+            "so it needs a separate install (see docs/cross-platform-setup.md "
+            "for Windows steps).",
         )
     ver = _tool_version(["dtc", "--version"])
     label = f"dtc {ver[0]}.{ver[1]}" if ver else "dtc present"
@@ -266,7 +323,9 @@ def _check_gperf() -> CheckResult:
         return CheckResult(
             "gperf", WARN, "gperf not found on PATH",
             "Install it: apt install gperf / brew install gperf "
-            "(bundled with the Zephyr SDK on Windows).",
+            "-- on native Windows the Zephyr SDK bundle does not ship gperf "
+            "either, so it needs a separate install (see "
+            "docs/cross-platform-setup.md for Windows steps).",
         )
     ver = _tool_version(["gperf", "--version"])
     label = f"gperf {ver[0]}.{ver[1]}" if ver else "gperf present"
@@ -297,6 +356,22 @@ def _check_jlink() -> CheckResult:
         "Install J-Link Software & Documentation Pack if you flash/debug "
         "over SWD; not needed for native_sim or bootloader-based flashing.",
     )
+
+
+def _check_tan() -> CheckResult:
+    # tan is the standalone build executor (ADR 0020) -- alp-sdk itself is
+    # plans-only, so a plan-only user (CI validating board.yaml, no build)
+    # may not have it. WARN-only, never FAIL.
+    found = shutil.which("tan")
+    if found is None:
+        return CheckResult(
+            "tan", WARN, "tan (build executor) not found on PATH",
+            "Install it: cargo install --git https://github.com/alplabai/"
+            "tan-cli --bin tan (not needed if you only emit/validate plans).",
+        )
+    ver = _tool_version(["tan", "--version"])
+    label = f"tan {ver[0]}.{ver[1]} ({found})" if ver else f"tan present ({found})"
+    return CheckResult("tan", PASS, label)
 
 
 def _check_host_compiler() -> CheckResult:
@@ -440,10 +515,9 @@ def _check_west_workspace() -> CheckResult:
         )
     # A .west directory is necessary but NOT sufficient: if the workspace's
     # manifest repo isn't alp-sdk, west never discovers alp-sdk's
-    # `self.west-commands`, so `west alp-build` (and alp-flash/-image/-clean/
-    # -lock/-migrate/-quality/-renode/-emit/-size) stay "unknown command"
-    # (issue #769).  Checking only for `.west` reports a healthy workspace on
-    # exactly the layout #769 was filed about.
+    # `self.west-commands`, so `west alp-migrate` (and alp-lock/-quality/-emit)
+    # stay "unknown command" (issue #769).  Checking only for `.west` reports a
+    # healthy workspace on exactly the layout #769 was filed about.
     manifest = _manifest_dir(topdir)
     repo = _repo_root().resolve()
     if manifest is None:
@@ -456,7 +530,7 @@ def _check_west_workspace() -> CheckResult:
         return CheckResult(
             "west-workspace", FAIL,
             f"west workspace at {topdir} has manifest '{manifest}', not alp-sdk ({repo}) "
-            "-- 'west alp-build' will be an unknown command (#769)",
+            "-- 'west alp-migrate' will be an unknown command (#769)",
             "Re-bootstrap so alp-sdk is the manifest repo: scripts/bootstrap.sh "
             "(or scripts/bootstrap.ps1 on native Windows), which runs "
             "'west init -l <alp-sdk>'. An existing plain-Zephyr workspace is not reused.",
@@ -683,6 +757,7 @@ def _all_checks() -> list[CheckResult]:
         _check_hal_alif(),
         _check_zephyr_sdk(),
         _check_jlink(),
+        _check_tan(),
     ]
     # The pin check reads the repo's .python-version; skipped (None) on a
     # packaged install without the checkout.  Slot it beside the interpreter

@@ -309,5 +309,6 @@ rollback, which earlier bench runs misread as a dead secure element.
    validation.
 4. **OTA cold swap-boot** - repeat final swap validation on a correctly
    activated cold-bootable CC3501E unit.
-5. **`flash.py` real flashing** - replace manual SWD/J-Link when TI's
+5. **`flash.py` real flashing** - now Alp-internal tooling (moved to
+   `alp-sdk-internal`); replace manual SWD/J-Link when TI's
    `cc3501e-flasher` CLI becomes public.

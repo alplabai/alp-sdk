@@ -1,19 +1,54 @@
 """`alp run` -- build the current project + run it on native_sim.
 
-Reuses the shared build path from `alp_cli.build` (the same single-image
-helper `alp build --board ...` uses), then executes the produced binary.
-For heterogeneous multi-core projects, build with `alp build` and program
-hardware with `alp flash` instead -- native_sim is a single-image target.
+Plain `west build` single-image path (ADR-0020 Phase 4 preview: the
+fan-out `alp build`/`alp flash` commands were retired -- this is now the
+only in-repo build front door), then executes the produced binary.
 """
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 
 import click
 
-from alp_cli.build import build_single_image, resolve_app
+from alp_cli._workspace import find_project
+
+
+def resolve_app(app_path: str | None, prog: str = "alp run") -> Path:
+    """Resolve the app directory (argument, else walk up from cwd)."""
+    if app_path:
+        project = Path(app_path).resolve()
+        if not (project / "board.yaml").is_file():
+            click.echo(f"{prog}: no board.yaml in {project}", err=True)
+            raise SystemExit(1)
+        return project
+    project = find_project(Path.cwd())
+    if project is None:
+        click.echo(
+            f"{prog}: no board.yaml found in this directory or any parent",
+            err=True,
+        )
+        raise SystemExit(1)
+    return project
+
+
+def build_single_image(project_dir: Path, board: str,
+                       build_dir: Path | None = None) -> int:
+    """Plain `west build -b <board>` (single-image path)."""
+    if shutil.which("west") is None:
+        click.echo(
+            "alp run: `west` not found on PATH -- run scripts/bootstrap.sh "
+            "(or bootstrap.ps1) and activate the workspace venv",
+            err=True,
+        )
+        return 1
+    build = build_dir or project_dir / "build" / board.replace("/", "_")
+    build.mkdir(parents=True, exist_ok=True)
+    return subprocess.run(
+        ["west", "build", "-b", board, "-d", str(build), str(project_dir)]
+    ).returncode
 
 
 def _build_and_exec_native_sim(project_dir: Path) -> int:

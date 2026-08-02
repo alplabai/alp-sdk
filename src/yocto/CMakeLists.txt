@@ -92,6 +92,7 @@ target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_wdt.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_display.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_camera.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_jpeg.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_wifi.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_mqtt.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_audio.c
@@ -212,9 +213,15 @@ target_sources(alp_sdk PRIVATE
     # from libalp_sdk.a on Yocto despite being documented public API.
     # Same portable dispatcher + sw_fallback / wildcard-stub pair as
     # baremetal; none of these files touch a Zephyr or Linux-specific
-    # header, so they build unmodified here.
+    # header, so they build unmodified here.  Power is the exception:
+    # backends/power/yocto_drv.c (#613) is a REAL Linux backend and is
+    # added in the Linux-gated block below (it self-gates on __linux__,
+    # like the RTC/WDT/PWM real backends), registering above this
+    # wildcard stub at priority 100.
     ${CMAKE_CURRENT_SOURCE_DIR}/../dac_dispatch.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/dac/sw_fallback.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../i3c_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/i3c/sw_fallback.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../dsp_dispatch.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/dsp/sw_fallback.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../ahrs.c
@@ -225,6 +232,16 @@ target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/tmu/sw_fallback.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../camera_dispatch.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/camera/zephyr_stub.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../jpeg_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/jpeg/zephyr_stub.c
+    # Software baseline JPEG encoder (Task 2): unlike camera/display/power,
+    # JPEG has a fully portable CPU implementation (no OS or vendor HAL
+    # dependency), so it links unconditionally here exactly like the dac/
+    # dsp/gpu2d sw_fallback pairs above -- "*" priority 50 always outranks
+    # the zephyr_stub above it, so Yocto apps get a real encoder, not just
+    # NOT_IMPLEMENTED.
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/jpeg/sw_baseline.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/jpeg/vendor/toojpeg_baseline.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../display_dispatch.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/display/zephyr_stub.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../power_dispatch.c
@@ -298,6 +315,7 @@ target_compile_definitions(alp_sdk PRIVATE
     # classes above -- their dispatchers own the symbols regardless of
     # which silicon backend (if any) is linked underneath.
     ALP_VENDOR_OVERRIDES_CAMERA=1
+    ALP_VENDOR_OVERRIDES_JPEG=1
     ALP_VENDOR_OVERRIDES_DISPLAY=1
     ALP_VENDOR_OVERRIDES_POWER=1
 )
@@ -359,6 +377,14 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         # unconditionally above; these two files self-gate on __linux__.
         ${CMAKE_CURRENT_SOURCE_DIR}/../backends/rtc/yocto_drv.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../backends/wdt/yocto_drv.c
+        # <alp/power.h> gains a REAL Linux backend (#613):
+        # backends/power/yocto_drv.c drives /sys/power/state +
+        # /sys/class/rtc/rtc0/wakealarm, registering at priority 100
+        # (vendor "linux") above the wildcard stub
+        # (backends/power/zephyr_stub.c, priority 0, added
+        # unconditionally above) so request_sleep no longer returns
+        # ALP_ERR_NOSUPPORT on a Linux build.  Self-gates on __linux__.
+        ${CMAKE_CURRENT_SOURCE_DIR}/../backends/power/yocto_drv.c
         # <alp/rpc.h> is now a REAL registry backend (#33), not the old
         # rpc_yocto.c direct-impl: backends/rpc/yocto_drv.c is the
         # userspace RPMsg backend.  It self-gates on __linux__ and gates

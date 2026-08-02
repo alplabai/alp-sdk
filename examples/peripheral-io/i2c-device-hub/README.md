@@ -60,7 +60,7 @@ west build -t run
 
 # On real silicon: board.yaml targets the E1M-AEN801 (E8) SoM on
 # the e1m-evk preset, M55-HE core -- build via the SDK wrapper:
-west alp-build examples/peripheral-io/i2c-device-hub
+tan build examples/peripheral-io/i2c-device-hub
 ```
 
 (The `ALP_BOARD_E1M_EVK` define selects the EVK route table for

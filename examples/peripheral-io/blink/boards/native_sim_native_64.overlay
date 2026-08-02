@@ -1,0 +1,123 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Host-emulated alp,pin-array for blink under native_sim.
+ *
+ * The array is POSITIONAL: alp_z_gpio_resolve(pin_id) indexes it by
+ * the pin id an example opens with, so entry N must be pad N in the
+ * e1m_pinout.h canonical order (IO0..IO25 = 0..25, PWM0..PWM7 =
+ * 26..33, ...).  This example only ever opens one pin
+ * (BOARD_PIN_LED_RED), but the array is still positional from index
+ * 0 -- entries below the one actually used exist purely to keep the
+ * indexing contract, same as every other example's native_sim
+ * overlay.
+ *
+ *   - index 26 = ALP_E1M_GPIO_PWM0 -> the RGB-red pad, claimed as
+ *     GPIO.  This is BOARD_PIN_LED_RED on the E1M EVK
+ *     (ALP_BOARD_E1M_EVK).  Bench-measured 2026-07-28 -- PWM0 is
+ *     physically red, PWM3 is physically green; see
+ *     metadata/boards/e1m-evk.yaml's `e1m_routes:` comment.
+ *
+ * The array is indexed by PIN ID, and the two EVKs number their pads
+ * differently, so one entry can mean different pads per variant:
+ *
+ *   - index 26 = ALP_E1M_GPIO_PWM0   -> BOARD_PIN_LED_RED under
+ *     ALP_BOARD_E1M_EVK   (E1M: IO0..IO25 = 0..25, PWM0..PWM7 = 26..33)
+ *   - index 41 = ALP_E1M_X_GPIO_PWM5 -> BOARD_PIN_LED_RED under
+ *     ALP_BOARD_E1M_X_EVK (E1M-X: IO0..IO35 = 0..35, PWM0..PWM7 = 36..43)
+ *
+ * The array therefore runs to index 41 and spans TWO emulated
+ * controllers, because a zephyr,gpio-emul tops out at 32 pins.  Both
+ * variants resolve their LED and really toggle here.
+ *
+ * This matters more than it looks: an earlier draft stopped at index
+ * 29, so the E1M-X variant's alp_gpio_open() returned NULL, main.c
+ * took its failure path, and the twister harness -- keyed only on a
+ * "[blink] done" line that the failure path also printed -- went
+ * GREEN over a variant where nothing toggled.  main.c now prints
+ * "[blink] failed: ..." and returns non-zero on every failure path,
+ * so "[blink] done" cannot appear unless the LED was actually
+ * driven.  (examples/peripheral-io/gpio-button-led still has the
+ * original shape -- tracked separately.)
+ */
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/ {
+    gpio_emul0: gpio_emul0 {
+        compatible = "zephyr,gpio-emul";
+        status = "okay";
+        gpio-controller;
+        rising-edge;
+        falling-edge;
+        #gpio-cells = <2>;
+        ngpios = <32>;
+    };
+
+    /* A zephyr,gpio-emul controller tops out at 32 pins, and the
+     * E1M-X LED lives at index 41 (ALP_E1M_X_GPIO_PWM5).  A second
+     * controller carries indices 32.. so the E1M-X variant resolves
+     * its pin and really toggles under native_sim, instead of
+     * failing the open and still exiting cleanly. */
+    gpio_emul1: gpio_emul1 {
+        compatible = "zephyr,gpio-emul";
+        status = "okay";
+        gpio-controller;
+        rising-edge;
+        falling-edge;
+        #gpio-cells = <2>;
+        ngpios = <32>;
+    };
+
+    alp_pins: alp-pins {
+        compatible = "alp,pin-array";
+        gpios = <&gpio_emul0  0 GPIO_ACTIVE_HIGH>,   /* [ 0] ALP_E1M_GPIO_IO0  */
+                <&gpio_emul0  1 GPIO_ACTIVE_HIGH>,   /* [ 1] ALP_E1M_GPIO_IO1  */
+                <&gpio_emul0  2 GPIO_ACTIVE_HIGH>,   /* [ 2] ALP_E1M_GPIO_IO2  */
+                <&gpio_emul0  3 GPIO_ACTIVE_HIGH>,   /* [ 3] ALP_E1M_GPIO_IO3  */
+                <&gpio_emul0  4 GPIO_ACTIVE_HIGH>,   /* [ 4] ALP_E1M_GPIO_IO4  */
+                <&gpio_emul0  5 GPIO_ACTIVE_HIGH>,   /* [ 5] ALP_E1M_GPIO_IO5  */
+                <&gpio_emul0  6 GPIO_ACTIVE_HIGH>,   /* [ 6] ALP_E1M_GPIO_IO6  */
+                <&gpio_emul0  7 GPIO_ACTIVE_HIGH>,   /* [ 7] ALP_E1M_GPIO_IO7  */
+                <&gpio_emul0  8 GPIO_ACTIVE_HIGH>,   /* [ 8] ALP_E1M_GPIO_IO8  */
+                <&gpio_emul0  9 GPIO_ACTIVE_HIGH>,   /* [ 9] ALP_E1M_GPIO_IO9  */
+                <&gpio_emul0 10 GPIO_ACTIVE_HIGH>,   /* [10] ALP_E1M_GPIO_IO10 */
+                <&gpio_emul0 11 GPIO_ACTIVE_HIGH>,   /* [11] ALP_E1M_GPIO_IO11 */
+                <&gpio_emul0 12 GPIO_ACTIVE_HIGH>,   /* [12] ALP_E1M_GPIO_IO12 */
+                <&gpio_emul0 13 GPIO_ACTIVE_HIGH>,   /* [13] ALP_E1M_GPIO_IO13 */
+                <&gpio_emul0 14 GPIO_ACTIVE_HIGH>,   /* [14] ALP_E1M_GPIO_IO14 */
+                <&gpio_emul0 15 GPIO_ACTIVE_HIGH>,   /* [15] ALP_E1M_GPIO_IO15 */
+                <&gpio_emul0 16 GPIO_ACTIVE_HIGH>,   /* [16] ALP_E1M_GPIO_IO16 */
+                <&gpio_emul0 17 GPIO_ACTIVE_HIGH>,   /* [17] ALP_E1M_GPIO_IO17 */
+                <&gpio_emul0 18 GPIO_ACTIVE_HIGH>,   /* [18] ALP_E1M_GPIO_IO18 */
+                <&gpio_emul0 19 GPIO_ACTIVE_HIGH>,   /* [19] ALP_E1M_GPIO_IO19 */
+                <&gpio_emul0 20 GPIO_ACTIVE_HIGH>,   /* [20] ALP_E1M_GPIO_IO20 */
+                <&gpio_emul0 21 GPIO_ACTIVE_HIGH>,   /* [21] ALP_E1M_GPIO_IO21 */
+                <&gpio_emul0 22 GPIO_ACTIVE_HIGH>,   /* [22] ALP_E1M_GPIO_IO22 */
+                <&gpio_emul0 23 GPIO_ACTIVE_HIGH>,   /* [23] ALP_E1M_GPIO_IO23 */
+                <&gpio_emul0 24 GPIO_ACTIVE_HIGH>,   /* [24] ALP_E1M_GPIO_IO24 */
+                <&gpio_emul0 25 GPIO_ACTIVE_HIGH>,   /* [25] ALP_E1M_GPIO_IO25 */
+                <&gpio_emul0 26 GPIO_ACTIVE_HIGH>,   /* [26] ALP_E1M_GPIO_PWM0 -- LED on E1M EVK (BOARD_PIN_LED_RED) */
+                <&gpio_emul0 27 GPIO_ACTIVE_HIGH>,   /* [27] ALP_E1M_GPIO_PWM1 */
+                <&gpio_emul0 28 GPIO_ACTIVE_HIGH>,   /* [28] ALP_E1M_GPIO_PWM2 */
+                <&gpio_emul0 29 GPIO_ACTIVE_HIGH>,   /* [29] ALP_E1M_GPIO_PWM3 */
+                <&gpio_emul0 30 GPIO_ACTIVE_HIGH>,   /* [30] ALP_E1M_GPIO_PWM4 */
+                <&gpio_emul0 31 GPIO_ACTIVE_HIGH>,   /* [31] ALP_E1M_GPIO_PWM5 */
+                /* gpio_emul0 is full at 32 pins, so the E1M-X range
+                 * continues on a second emulated controller.  Indices
+                 * 32.. only ever resolve under ALP_BOARD_E1M_X_EVK,
+                 * whose pinout has 36 IO pads (IO0..IO35 = 0..35)
+                 * before its PWM block (PWM0..PWM7 = 36..43). */
+                <&gpio_emul1  0 GPIO_ACTIVE_HIGH>,   /* [32] ALP_E1M_X_GPIO_IO32 */
+                <&gpio_emul1  1 GPIO_ACTIVE_HIGH>,   /* [33] ALP_E1M_X_GPIO_IO33 */
+                <&gpio_emul1  2 GPIO_ACTIVE_HIGH>,   /* [34] ALP_E1M_X_GPIO_IO34 */
+                <&gpio_emul1  3 GPIO_ACTIVE_HIGH>,   /* [35] ALP_E1M_X_GPIO_IO35 */
+                <&gpio_emul1  4 GPIO_ACTIVE_HIGH>,   /* [36] ALP_E1M_X_GPIO_PWM0 */
+                <&gpio_emul1  5 GPIO_ACTIVE_HIGH>,   /* [37] ALP_E1M_X_GPIO_PWM1 */
+                <&gpio_emul1  6 GPIO_ACTIVE_HIGH>,   /* [38] ALP_E1M_X_GPIO_PWM2 */
+                <&gpio_emul1  7 GPIO_ACTIVE_HIGH>,   /* [39] ALP_E1M_X_GPIO_PWM3 */
+                <&gpio_emul1  8 GPIO_ACTIVE_HIGH>,   /* [40] ALP_E1M_X_GPIO_PWM4 */
+                <&gpio_emul1  9 GPIO_ACTIVE_HIGH>;   /* [41] ALP_E1M_X_GPIO_PWM5 -- LED on E1M-X EVK */
+    };
+};

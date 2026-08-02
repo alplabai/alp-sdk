@@ -64,7 +64,8 @@ uint32_t g_frames_err;
  *   - worker has DONE for @cmd -> copy the result bytes into the reply,
  *     reset the worker to IDLE, return RESP_OK.
  *   - worker has ERR for @cmd  -> reset, map the HAL code (NOTIMPL ->
- *     NOT_READY, INVAL -> INVALID, else RADIO).  The stub backend lands
+ *     NOT_READY, INVAL -> INVALID, STATE -> the distinct ERR_STATE -- see
+ *     <alp/protocol/cc3501e.h> -- else RADIO).  The stub backend lands
  *     here (NOT_READY).
  *   - worker IDLE              -> submit the job, return BUSY.
  *   - worker QUEUED/RUNNING, or busy with another cmd -> return BUSY.
@@ -99,6 +100,10 @@ alp_cc3501e_resp_t handle_worker_routed(alp_cc3501e_cmd_t cmd,
 		worker_reset();
 		if (err == CC3501E_HW_ERR_NOTIMPL) return ALP_CC3501E_RESP_ERR_NOT_READY;
 		if (err == CC3501E_HW_ERR_INVAL) return ALP_CC3501E_RESP_ERR_INVALID;
+		/* CC3501E_HW_ERR_STATE: today only cc3501e_hw_ble_gatt_register's NimBLE
+		 * ble_gatts_mutable() reject (BLE_HS_EBUSY) -- a deterministic, terminal
+		 * refusal, not the generic radio/protocol RESP_ERR_RADIO bucket below. */
+		if (err == CC3501E_HW_ERR_STATE) return ALP_CC3501E_RESP_ERR_STATE;
 		return ALP_CC3501E_RESP_ERR_RADIO;
 	case WORKER_IDLE:
 		/* No job in flight: queue one and ask the host to re-issue. */
@@ -133,6 +138,10 @@ alp_cc3501e_resp_t handle_worker_routed_payload(alp_cc3501e_cmd_t cmd,
 		worker_reset();
 		if (err == CC3501E_HW_ERR_NOTIMPL) return ALP_CC3501E_RESP_ERR_NOT_READY;
 		if (err == CC3501E_HW_ERR_INVAL) return ALP_CC3501E_RESP_ERR_INVALID;
+		/* CC3501E_HW_ERR_STATE: today only cc3501e_hw_ble_gatt_register's NimBLE
+		 * ble_gatts_mutable() reject (BLE_HS_EBUSY) -- a deterministic, terminal
+		 * refusal, not the generic radio/protocol RESP_ERR_RADIO bucket below. */
+		if (err == CC3501E_HW_ERR_STATE) return ALP_CC3501E_RESP_ERR_STATE;
 		return ALP_CC3501E_RESP_ERR_RADIO;
 	case WORKER_IDLE:
 		/* No job in flight: queue THIS one (with its payload) + return BUSY (the
@@ -183,6 +192,10 @@ alp_cc3501e_resp_t handle_worker_routed_payload_reply(alp_cc3501e_cmd_t cmd,
 		worker_reset();
 		if (err == CC3501E_HW_ERR_NOTIMPL) return ALP_CC3501E_RESP_ERR_NOT_READY;
 		if (err == CC3501E_HW_ERR_INVAL) return ALP_CC3501E_RESP_ERR_INVALID;
+		/* CC3501E_HW_ERR_STATE: today only cc3501e_hw_ble_gatt_register's NimBLE
+		 * ble_gatts_mutable() reject (BLE_HS_EBUSY) -- a deterministic, terminal
+		 * refusal, not the generic radio/protocol RESP_ERR_RADIO bucket below. */
+		if (err == CC3501E_HW_ERR_STATE) return ALP_CC3501E_RESP_ERR_STATE;
 		return ALP_CC3501E_RESP_ERR_RADIO;
 	case WORKER_IDLE:
 		/* No job in flight: queue THIS one (with its payload) + return BUSY. */

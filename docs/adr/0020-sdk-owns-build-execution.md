@@ -1,19 +1,262 @@
 # 0020. The SDK plans; a standalone `tan` CLI is the whole command surface (three repos, one executor)
 
-Status: Proposed
-Date: 2026-07-18
-Deciders: alpCaner (alp-sdk), Hakan (alp-sdk-vscode) — **awaiting Hakan's co-sign**
-Supersedes (on acceptance): [0014](0014-build-plan-emit-cli-contract.md) — its
+Status: Accepted — direction + alp-sdk Phase 1/4 code implemented on `dev`; the
+Amendment's release-blocking remediation is met on two of its three conditions
+(oracle frozen, both seams live), the cross-repo `repository_dispatch` trigger
+remains outstanding as a maintainer action, and the release train ran anyway
+(see **Amendment** points 1 and 7).
+Date: 2026-07-18 (Caner) · 2026-07-20 (Hakan co-sign, this commit)
+Deciders: alpCaner (alp-sdk), Hakan (alp-sdk-vscode)
+Supersedes: [0014](0014-build-plan-emit-cli-contract.md) — its
 mechanism clause **and** its 84-87 consequence (`west alp-build` stays native).
 Pairs with RFC #837 (`alp` → `tan`).
 
-> **Proposal for a joint decision — not accepted.** It retires the SDK-side
-> executor, `west alp-build`, and every SDK-side user command, and moves the
-> whole command surface into a new standalone `tan` CLI repo. It must not be
-> implemented until Hakan co-signs, and **nothing is deleted until the plan
-> contract is proven complete by a green parity window** (see *The one thing
-> that must hold*). Phase 2 (the extraction) is Hakan's repos and his to drive;
-> alp-sdk owns Phases 1 and 4.
+> **Implemented.** The SDK-side executor, `west alp-build`, and every SDK-side
+> user command are retired; the whole command surface now lives in the
+> standalone, public **`tan` CLI** ([`alplabai/tan-cli`](https://github.com/alplabai/tan-cli)).
+> alp-sdk is plans-only: `alp_orchestrate --emit build-plan` / `--emit
+> system-manifest` are the sole outputs `tan` consumes (`tan build --native`,
+> `tan build` / `flash` / `image` / `size` / `renode` / `clean` for
+> hardware/manifest-driven runs). Phase 2 (the extraction) was Hakan's repos
+> and his to drive; alp-sdk owned Phases 1 and 4. See *Migration* below for
+> the phase history and *The one thing that must hold* for the completeness
+> gate this satisfied before Phase 4 deleted the SDK-side executor.
+
+## Amendment (2026-07-20 — Hakan co-sign + corrections)
+
+Hakan ratifies the **direction** (end-state B) and the alp-sdk-side Phase 1/4
+code. Three points below correct or condition the record; the release train is
+blocked until the remediation is met. Tracked in #855.
+
+1. **The completeness gate this ADR mandates is not yet in place.** *The one thing
+   that must hold* + *Cross-repo oracle trigger* require an automatic
+   `repository_dispatch` from alp-sdk CI into `tan`'s build-validation on every
+   planner change, plus the two-seam comparator, **before** the irreversible
+   Phase 4. That trigger does not exist in `.github/workflows` yet — Phase 4 code
+   (fan_out deletion, #848) landed ahead of it. This is recoverable, not a
+   rollback: `df312cec^` (`97ad481b`) still carries both `fan_out` and the Phase-1
+   fields, so the oracle is reconstructed retroactively. **Remediation (blocks any
+   release/tag): freeze that oracle, stand up the two-seam gate + the cross-repo
+   trigger, then tag.** (Verified: the only `97ad481b`↔`df312cec` emit delta is
+   `debug.probe` `"openocd"→null`, hand-reviewed.)
+
+2. **"No `alp`-named command survives" is narrower than shipped.** Retired: the six
+   build verbs + `fan_out`. Surviving on `dev` **by design**: the `--emit`
+   planner surface, `west alp-migrate/alp-lock/alp-quality/alp-emit`, and the
+   Python `alp` console script with 11 non-build verbs
+   (`generate/validate/init/doctor/run/model/monitor/new_som/faultdecode/explain/emit`),
+   which `tan` forwards to. `docs/cli.md` already documents this real end-state;
+   §Decision-1/§Open-Q-4 overstate it. No surviving SDK verb shells out to `tan`
+   (dependency stays one-way, tan→SDK).
+
+3. **Contract fix owed to v0.12 (schema-`required` at unchanged version).** `#847`
+   made `executionPolicy` `required` in `build-plan-v1.schema.json` while
+   `schemaVersion` stayed `const: 1` — a breaking shape change without a bump.
+   Since the consumer pins `schemaVersion == 1`, do **not** bump to 2 (it would
+   strand `tan`); instead revert the two fields to **optional**, keep the emitter
+   always emitting explicit values (strict-producer / tolerant-consumer). `tan`
+   already honors + defaults both. This is the version-skew guard (§Decision-5)
+   applied correctly.
+
+4. **Second hand-reviewed seam-1 delta — the #863/#871 per-core config
+   wiring, superseded 2026-07-22 by a seam-1 SCOPE retune (#874 follow-up;
+   pending Hakan's re-ratification, see below).** The planner wires each
+   core's `alp.conf` into the plan: a `-DEXTRA_CONF_FILE=<build/<core>-
+   zephyr/alp.conf>` arg on every **non-sysbuild** Zephyr slice, plus the
+   `_emit_library_hw_backends` (`# ...lib.loader`) HW-accelerator Kconfig
+   block folded into each Zephyr slice's `configArtefacts`. Both post-date
+   the frozen `97ad481b` oracle. The command-arg addition is still a real
+   plan-SHAPE fact the comparator normalizes away (`_strip_863_extra_conf_
+   file_arg`, scoped to non-sysbuild slices — a sysbuild slice wrongly
+   gaining the arg still fails, see below). The `lib.loader` Kconfig block
+   was originally handled the same probe-delta way (a bespoke strip inside
+   the compared config-artefact CONTENT); that strip is now moot and
+   deleted, because **seam-1 no longer compares config-artefact content at
+   all** — see the retune paragraph below. **Sysbuild slices deliberately
+   carry NO `-DEXTRA_CONF_FILE`** (Option A): a bare top-level
+   `-DEXTRA_CONF_FILE` under `--sysbuild` lands on the sysbuild image, not
+   the application image, so it would silently drop the per-core config on
+   `boot:`/OTA projects; those slices get the per-core `alp.conf` via the
+   app's `--core`-scoped `CMakeLists.txt` bridge (#870), and a plan-native
+   per-image sysbuild wiring stays #866. The seam-2 real-build proof of the
+   sysbuild path (`iot-fleet-ota`) is the one deferred box on #871.
+
+   **Seam-1 scope retune (2026-07-22, #874 follow-up — narrows this
+   co-signed gate's contract, pending Hakan's re-ratification the same way
+   as this Amendment):** every intentional emitter content change (a
+   Kconfig dependency-gating fix, a new peripheral default) forced another
+   bespoke content strip into `normalize_plan`, eroding seam-1 into a
+   content-diff gate instead of the plan-SHAPE gate this Amendment
+   describes. Seam-1 (`tests/parity/seam1_field_diff.py`, and its tan-cli
+   vendored twin — keep in lockstep) now verifies **command, env, appDir,
+   skip/fail-decision SHAPE, and `debug.probe` only**; every artefact's
+   materialised `contents` (`configArtefacts[*].contents` /
+   `sharedArtefacts[*].contents`) is dropped before the diff runs
+   (`_drop_artefact_contents`), keeping only its `path` in the shape check
+   (an artefact appearing/vanishing/moving still fails the gate). Content
+   parity moved to `tests/fixtures/emit-snapshots/*.{build-plan,
+   zephyr-conf}.snap` (`scripts/check_emit_snapshots.py`) — confirmed
+   complete over every oracle fixture at retune time, see
+   `tests/parity/README.md`'s coverage table — and, eventually, seam-2's
+   real build.
+
+5. **Hermetic build plans (#865): the emit is now `planPathMode: tokened`.**
+   Every path this plan bakes anchored on the emitting checkout or project
+   (`env.ALP_SDK_ROOT`, `envAppendPath`, `slices[].appDir`, and each Zephyr/
+   baremetal command's app-dir/`-DPython3_EXECUTABLE=`/`-DSB_CONF_FILE=`/
+   `-DEXTRA_CONF_FILE=` args) is a literal `${SDK_ROOT}`/`${PROJECT_ROOT}`/
+   `${PYTHON}` token instead of an absolute path, so a plan produced on one
+   machine/checkout materialises correctly on another instead of silently
+   pinning the wrong tree. Consumer: `tan-cli` #24 (already merged), which
+   substitutes the tokens and requires `planPathMode: "tokened"`. The seam-1
+   comparator reconciles this like the #863/#871 additions above: a tokened
+   live plan maps `${SDK_ROOT}` -> `__SDKROOT__` and `${PROJECT_ROOT}` ->
+   `__SDKROOT__/<boardYaml's own directory>` (the harness fixtures live
+   under the SDK root, and `boardYaml` itself is deliberately left
+   un-tokened as that anchor) before diffing against the frozen absolute-path
+   `97ad481b` oracle.
+
+6. **(2026-07-27) Point 2 above is itself now stale, on two counts — corrected
+   here rather than edited in place, so the record shows what changed.**
+   First, "the Python `alp` console script" was never the right name for what
+   survives: `pyproject.toml`'s `[project.scripts]` registers only
+   `alp-mcp` — its own comment says so ("No `alp` console-script:
+   ... invoked as `python -m alp_cli <sub>` — never as a user-installed
+   `alp` binary"). What survives is the `alp_cli` **package**, run as
+   `python -m alp_cli <sub>`; `docs/cli.md` has always described it this
+   way, so point 2's phrasing drifted from the doc it cited as authoritative
+   even at the time it was written. Second, `emit` is no longer one of the
+   verbs `tan` forwards to: `tan` 0.3.1 has no `emit` subcommand at all
+   (`tan emit` → `error: unrecognized subcommand 'emit'`) — it was retired
+   and replaced by the narrower, differently-shaped
+   `tan generate --target` `<mode>` (6 of
+   `metadata/emit-registry-v1.json`'s 20 registered modes,
+   fixed output paths, no `--output`/`--core`/`--template`/`--sku`). Point
+   2's "11 non-build verbs" all still survive in the `alp_cli` package --
+   `scripts/alp_cli/main.py`'s 11 `cli.add_command(...)` registrations
+   (`doctor`, `emit`, `explain`, `faultdecode`, `generate`, `init`,
+   `model`, `monitor`, `new_som`, `run`, `validate`; NOT a raw
+   `ls scripts/alp_cli/*.py`, which also lists 8 non-verb modules --
+   `__init__.py`, `__main__.py`, `main.py` itself, `_workspace.py`,
+   `diagnostic.py`, `diagnostic_format.py`, `validator.py`,
+   `yaml_pos.py`); what narrowed is the *forwarded* set.
+
+   `tan` forwards 9 of them
+   (`generate/validate/init/run/model/monitor/new-som/faultdecode/explain`),
+   never `emit` (retired, per above) and never `doctor` (native Rust —
+   `docs/cli.md`'s forwarding table already reads
+   `tan doctor  native-host · none`).
+
+   This landed alongside the full 15-mode classification `docs/cli.md`'s
+   "Six modes, no front door: which ones are gaps?" now carries: of the
+   nine `alp_project.py`/orchestrator modes with no `tan` front door,
+   three (`system-manifest`, `dts-reservations`, `ipc-contract-h`) are
+   deliberately orchestrator-internal (`west alp-emit` already reaches
+   them, and `tan` consumes `system-manifest` indirectly); `scaffold` is
+   consumed by `tan` already, just not live (vendored into the binary at
+   release time, `tan-cli`#14 tracks finishing the vendored set);
+   `composed-route-table` is an intentional maintainer-only pad-route
+   regression/demonstrator tool with no product consumer; and the
+   remaining four (`hw-info-h`, `west-libraries`, `os-topology`,
+   `zephyr-board`) are real gaps with no design reason for the absence,
+   filed as `tan-cli`#113–#116.
+
+7. **(2026-07-28) Remediation status — point 1's gate is met on two of its
+   three conditions, and its "blocks any release/tag" clause was overtaken by
+   events.** Point 1 conditioned any release on *"freeze that oracle, stand up
+   the two-seam gate + the cross-repo trigger, then tag."* Re-verified against
+   the code rather than assumed:
+
+   - **Oracle frozen — done.** Six fixtures under `tests/parity/oracle/`,
+     provenance and every hand-reviewed field correction recorded in
+     `ORACLE-PROVENANCE.txt` (the #862 `-DSB_CONF_FILE` anchor, and the #999
+     `multicore_rpmsg-imx93` slices[1] `command`→`null` + `board-tree-missing`
+     correction).
+   - **Two-seam gate — done.** Seam 1 runs on both sides
+     (`.github/workflows/parity-seam1.yml` here; `seam1 -- plan-shape parity`
+     in tan against `PINNED_SDK_TAG`). Seam 2 is implemented and green —
+     `tan-cli`#146, merged `33fe9f5b` — materialise → a real cross-compile
+     *through* `tan` → ARM ELF → Renode boot, all asserted. **Scope caveat,
+     stated rather than glossed:** seam 2 covers ONE representative slice
+     (AEN801 M55-HP, `hello-world`), not all six oracle boards, and no
+     `--sysbuild` case; the `iot-fleet-ota` sysbuild proof remains the one
+     deferred box on #871.
+   - **Cross-repo trigger — NOT done, and it is the one real gap.** No
+     `repository_dispatch` from alp-sdk into `tan` exists anywhere in
+     `.github/workflows` (grep-verified; the only occurrence of the keyword is
+     an unrelated comment in `pr-bitbake.yml` about alp-sdk-internal). It
+     cannot be built from either repo's CI without a PAT/App secret, so it is a
+     **maintainer action**, not an implementation task. The consequence is
+     concrete: `PINNED_SDK_TAG` is bumped by hand and therefore **rots
+     silently** — both seams stay green against an alp-sdk that no longer
+     reflects this repo's planner. The token-free half is closed by
+     `tan-cli`#153, a warn-only freshness check that reports how far the pin is
+     behind counting only the contract surface (`scripts/alp_orchestrate`,
+     `metadata`, `tests/parity`), so a docs-only week does not cry wolf. That
+     makes the missing dispatch **visible instead of silent; it does not
+     replace it.**
+
+   **The tag gate did not hold.** Point 1 said the remediation blocks any
+   release; `v0.12.0` and then `v0.13.0` were both tagged with the trigger
+   still absent, `tan` released `v0.4.0` (validated by a `v0.4.0-rc1` first),
+   and the extension pinned `SUPPORTED_CLI_VERSION` to `0.4.0`
+   (`alp-sdk-vscode`#385). Recording that plainly: the release train ran on two
+   of the three conditions. Whether that was the right call is not re-litigated
+   here — what would be wrong is leaving a co-signed gate on the record as
+   though it had been satisfied.
+
+   Point 3's contract fix is **also done** and needs no further action:
+   `executionPolicy` is absent from `build-plan-v1.schema.json`'s top-level
+   `required` and its description reads *"Additive, schemaVersion 1"* — the
+   strict-producer / tolerant-consumer shape point 3 asked for. Its companion
+   clause, *"reconcile the stale #839 `schemaVersion: 2` fixture"*, is
+   satisfied in a way that must **not** be "fixed": the two surviving
+   `"schemaVersion": 2` occurrences are deliberate **negative tests**
+   (`tests/scripts/test_check_build_plan.py:90`, carrying the comment
+   `# locked const -- any other value must fail`, and
+   `tests/scripts/test_build_plan_schema.py:520`), asserting that a future
+   breaking bump the consumer has not been told about fails rather than
+   silently validating. Deleting them would delete a real assertion.
+
+   Two seam-1 weaknesses found while verifying the above, both in the
+   comparator rather than the contract, and both worth recording because a gate
+   that cannot fail is indistinguishable from one that passes:
+
+   - **Point 4's "keep in lockstep" had silently failed, and a tolerance grew
+     to cover for it.** When #999 landed here, this repo fixed it the way the
+     oracle's own discipline prescribes — by re-freezing
+     `multicore_rpmsg-imx93.build-plan.json` (`slices[1]` `command`→`null` plus
+     a `board-tree-missing` warning) and recording the hand-review in
+     `ORACLE-PROVENANCE.txt`, leaving `diff_plans` untouched. tan's **vendored
+     copy of that fixture was never re-synced.** Its live diff therefore showed
+     a command vanishing, and a `_ALLOWED_COMMAND_TO_NULL` tolerance was added
+     on that side instead — a permanent comparator allowance standing in for a
+     one-file sync. Five of the six fixtures were byte-identical across the two
+     repos; only that one had drifted, far enough that it still baked the
+     absolute scratch path of the machine it was first frozen on.
+   - **That tolerance was itself uncoupled.** `is_command_dropped` and
+     `is_warning_added` were independent `or` branches, so a `command`→`null`
+     delta passed **whether or not** an accompanying warning appeared — despite
+     the code's own comment calling the paired warning *"the guard's whole
+     point — to say why."* A slice could lose its command silently and seam 1
+     stay green.
+   - `tests/parity/test_seam1_field_diff.py` — the comparator's own
+     negative-matrix suite, on **both** sides — was executed by no workflow:
+     tan's `parity.yml` ran the parity scripts directly with no pytest step,
+     and this repo's `scripts/test-all.sh` pytest stage covers `tests/scripts/`
+     only. A gate that cannot fail is indistinguishable from one that passes,
+     and this one guarded the comparator that judges every planner change.
+
+   Resolved in `tan-cli`#156: the fixture is re-vendored from this repo at
+   `PINNED_SDK_TAG` (all six now verified byte-identical), the tolerance and
+   its three helpers are deleted so `debug.probe` is once again the only
+   allowed delta, and the negative-matrix suite runs in CI ahead of the live
+   comparator. The lesson is worth keeping even after the fix: **a vendored
+   oracle that drifts does not announce itself — it shows up as a plausible
+   diff, and the cheap response is to widen the comparator rather than re-sync
+   the fixture.** Point 4's lockstep note is a real constraint, not a
+   pleasantry; when the two copies disagree, re-vendor and record it, and treat
+   a new comparator allowance as evidence the sync was skipped.
 
 ## Context
 
@@ -59,8 +302,7 @@ survives anywhere (RFC #837).
    script — all in Phase 4, not before the contract is complete.
 
 2. **`tan` — a NEW standalone repo (Rust), the whole command surface.** Extracted
-   out of alp-sdk-vscode's `cli-rs/` and grown to own **`tan build / flash /
-   image / size / renode / clean / sdk / doctor / validate / …`**. It is the sole
+   out of alp-sdk-vscode's `cli-rs/` and grown to own **`tan build / flash / image / size / renode / clean / sdk / doctor / validate / …`**. It is the sole
    executor (runs `west` / `bitbake` / `cmake` per slice), owns skip-vs-fail, env
    application, scheduling, cancellation, progress UX, SDK lifecycle, **and both
    ends of the manifest** — it writes `system-manifest.yaml` + `.alp-build-state.json`
@@ -123,9 +365,13 @@ while `fan_out` still exists to prove it:
 
 ## Migration — the plan gains everything before anything is deleted
 
+**All four phases are complete.** `tan` (`alplabai/tan-cli`) is the sole
+executor and whole command surface; the SDK-side executor and every SDK-side
+user command are retired.
+
 1. **Phase 1 (alp-sdk):** complete the contract above; `fan_out` stays and ideally
    consumes the new fields (self-parity). Ship on an SDK tag; delete nothing.
-2. **Phase 2 (`tan`, Hakan):** extract `cli-rs` → the new `tan` repo and **grow it
+2. **Phase 2 (tan, Hakan):** extract `cli-rs` → the new `tan` repo and **grow it
    to the whole command surface** (build + flash/image/size/renode/clean + the
    manifest I/O those need). The executor conforms to the contract (deletes the
    hand-ported env / skip policy); add **build-validation CI** (SoM matrix,
@@ -137,22 +383,17 @@ while `fan_out` still exists to prove it:
    mark 0014:84-87 superseded; `tan` is the only surface. **No rollback, no
    in-repo oracle after this.**
 
-### Phase-3 parity gate — defined and runnable
+### Phase-3 parity gate — defined and runnable (satisfied before Phase 4)
 
 "Released `tan` output == `fan_out` output" is undefined and unrunnable as a
 slogan (no bitbake-capable CI runners exist; `fan_out` was never a real build
 oracle for A-core/yocto — `pr-alp-build.yml` runs the orchestrator with
 `continue-on-error`). Define it as:
 
-- **(in) command + env + skip/fail-decision equivalence** between `fan_out` and
-  `tan`'s dry-run of the same plan, over the **full SoM matrix**, captured
-  **toolchain-free** (this is exactly the drift that motivated the ADR, and it
-  compares without building);
-- **(out) manifest + state byte-parity** on what each writes;
-- **plus Zephyr-slice artefact parity** (buildable on today's runners —
-  `pr-renode-aen-smoke.yml` already builds via `west alp-build`);
-- **yocto/A-core artefact parity is explicitly OUT of scope** (no runner infra;
-  bitbake isn't byte-reproducible).
+- (in) **command + env + skip/fail-decision equivalence** between `fan_out` and `tan`'s dry-run of the same plan, over the full SoM matrix, captured toolchain-free (this is exactly the drift that motivated the ADR, and it compares without building);
+- (out) **manifest + state byte-parity** on what each writes;
+- plus **Zephyr-slice artefact parity** (buildable on today's runners — `pr-renode-aen-smoke.yml` already builds via `west alp-build`);
+- yocto/A-core artefact parity is explicitly **out of scope** (no runner infra; bitbake isn't byte-reproducible).
 
 ### In-repo consumers Phase 4 must migrate (grep-verified)
 
@@ -221,17 +462,15 @@ extension verifies the `tan` binary by pinned hash / signature before running it
 
 ## The one thing that must hold
 
-**Before Phase 4, the proven contract covers BOTH seams with a defined, runnable
-comparator** — (in) per-slice command + env + skip/fail equivalence over the full
+**Before Phase 4, the proven contract covers BOTH seams with a defined, runnable comparator** — (in) per-slice command + env + skip/fail equivalence over the full
 SoM matrix, runnable toolchain-free via dry-run capture; (out) manifest + state
-byte-parity — **and an automatic cross-repo trigger runs `tan`'s build validation
-on every alp-sdk planner change.** `fan_out` is the only thing that can validate
+byte-parity — **and an automatic cross-repo trigger runs `tan`'s build validation on every alp-sdk planner change.** `fan_out` is the only thing that can validate
 the contract from inside alp-sdk and it is the thing being removed, so
 completeness must be proven while it still exists. Green-but-hollow parity
 followed by Phase-4 deletion is the failure scenario (fan_out gone, flash/renode/CI
 broken, no rollback).
 
-## Open questions / asks for Hakan
+## Open questions / asks for Hakan (resolved — see Status)
 
 1. **`cli-rs` → standalone `tan` repo, grown to the whole command surface** —
    agreed in principle? This is materially larger than "extract the executor";

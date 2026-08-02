@@ -27,10 +27,10 @@ tests:
 
   # alp_sdk.example.edgeai_vision_aen.evk_aen — HW-in-loop variant
   # for the E1M EVK populated with an E1M-AEN801 SoM. The real board
-  # target, alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he, ships
+  # target, alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp, ships
   # in-tree under zephyr/boards/alp/ -- this scenario stays parked
   # pending HW-in-loop CI wiring, not a missing board file. The
   # overlay at
-  # boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay
+  # boards/alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay
   # (the fully-qualified board id -- required for Zephyr's
   # auto-apply-by-board-name to pick it up) is already in place.

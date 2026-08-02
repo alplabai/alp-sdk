@@ -6,6 +6,7 @@
   "part": "E5",
   "status": "preliminary",
   "pending_alif_datasheet": true,
+  "_pending_reason": "Every `peripherals` count below is inherited from the E7 sibling (E5 = E7 with one A32 depopulated per this file's own topology note), not independently ingested from an E5-specific datasheet/DFP/SVD -- no primary source for E5's own silicon is on file as of 2026-07-27 (issue #936). Clear `peripherals_unverified` below once the Alif E5 datasheet ships and the counts are re-ingested against it.",
   "datasheet": {
     "extracted_at": "2026-05-09",
     "source": "Alp Lab E1M-AEN - Datasheet Draft.pdf (Table 1, Table 11) — Alif primary datasheet not yet on file"
@@ -54,6 +55,7 @@
     {
       "type": "ethos-u55",
       "subtype": "high-perf",
+      "paired_core": "m55_hp",
       "mac_per_cycle": 256,
       "freq_mhz": 400,
       "gops": 204,
@@ -62,6 +64,7 @@
     {
       "type": "ethos-u55",
       "subtype": "high-efficiency",
+      "paired_core": "m55_he",
       "mac_per_cycle": 128,
       "freq_mhz": 160,
       "gops": 46,
@@ -97,7 +100,6 @@
     "adc_24bit": 1,
     "dac_12bit": 2,
     "comparator_hs": 4,
-    "comparator_lp": 1,
     "gpio_18v": 120,
     "gpio_18v_or_33v": 8,
     "timer_32bit": 12,
@@ -107,6 +109,14 @@
     "encoder_quadrature": 4,
     "dma_general_32ch": 3
   },
+  "peripherals_unverified": [
+    "i2c", "i2c_lp", "spi", "spi_lp", "uart", "uart_lp", "i2s", "i2s_lp",
+    "pdm", "pdm_lp", "ethernet", "usb_2", "sdio", "can_fd", "i3c",
+    "mipi_csi2", "mipi_dsi", "cpi_parallel", "cpi_lp", "dpi_parallel",
+    "adc_12bit", "adc_24bit", "dac_12bit", "comparator_hs", "gpio_18v",
+    "gpio_18v_or_33v", "timer_32bit", "watchdog", "timer_lp", "rtc",
+    "encoder_quadrature", "dma_general_32ch"
+  ],
   "capabilities": {
     "ethos_u55_count": 2,
     "helium_mve":      true,
@@ -138,10 +148,15 @@
       "mram_mb": 5.5,
       "sram_kb": 13824,
       "shipment_suffixes": ["-T", "-Y"],
-      "alp_module_skus": ["E1M-AEN501"]
+      "alp_module_skus": ["E1M-AEN501"],
+      "debug": {
+        "pyocd_target": "AE512F80F55D5LS",
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" }
+      }
     }
   ],
   "notes": [
+    "2026-07-25 DFP SVD audit (Debug/SVD/AE512F80F55D5LS_CM55_HE_View.svd): removed `comparator_lp` (was 1).  This part's SVD peripheral list carries CMP0..CMP3 but NO LPCMP, while the E8 SVD (AE822FA0E5597BS0) carries both -- the low-power comparator is a FA0E5597-generation block this part does not have.  Same defect and same fix as E7 in #932; E3/E5 were out of that pass's reach because the DFP ships no Device/soc/ directory for them, only an SVD.  Per the file convention an absent key means zero instances (no SoC JSON sets a peripheral to 0).  Also re-confirmed correct against the same SVD: i2c_lp 1, spi_lp 1, no i3c_lp, i2c 4, spi 4, uart 8, i2s 4, adc_12bit 3, dac_12bit 2, comparator_hs 4, can_fd 1, ethernet 1, usb_2 1, sdio 1, rtc 1.",
     "STUB — derived from Alp Lab E1M-AEN datasheet draft (Table 1: '2× M55, 1× A32 800 MHz, 2× U55, 5.5MB MRAM, up to 13.5MB SRAM, 2× OSPI'; Table 11: AEN501 → AE512F80F55D5LS).",
     "E5 silicon datasheet from Alif is STILL not on file as of 2026-05-11 -- E3 (v2.8), E4 (v1.0), E6 (v1.0), E7 (v2.9), and E8 (v1.0) have all been published; E5 alone remains pending.  Replace this stub when ADTS00xx for E5 is published.",
     "Topology assumed identical to E7 with one of the two Cortex-A32 cores depopulated.  NPU and external-memory interfaces match E7 (OctalSPI, U55+U55).",

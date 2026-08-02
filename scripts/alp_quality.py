@@ -123,11 +123,13 @@ def main(argv=None) -> int:
     rep = run_profile(args.profile)
     print(_summary(rep), file=sys.stderr)
     if args.json:
-        Path(args.json).write_text(json.dumps(to_json(rep), indent=2) + "\n")
+        Path(args.json).write_text(json.dumps(to_json(rep), indent=2) + "\n",
+                                   encoding="utf-8", newline="")
     if args.junit:
-        Path(args.junit).write_text(to_junit(rep))
+        Path(args.junit).write_text(to_junit(rep), encoding="utf-8", newline="")
     if args.sarif:
-        Path(args.sarif).write_text(json.dumps(to_sarif(rep), indent=2) + "\n")
+        Path(args.sarif).write_text(json.dumps(to_sarif(rep), indent=2) + "\n",
+                                    encoding="utf-8", newline="")
     return 0 if rep.ok() else 1
 
 

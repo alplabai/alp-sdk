@@ -35,6 +35,8 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 SNAP_DIR = REPO / "tests" / "fixtures" / "emit-snapshots"
+sys.path.insert(0, str(REPO / "scripts"))
+from alp_orchestrate.sdk_compat import assert_exclusion_still_not_buildable  # noqa: E402
 # The orchestrator is now a package; invoke it as a module.  scripts/ goes on
 # PYTHONPATH so the package + its `alp_project` sibling import both resolve
 # (replaces the old file-path call to scripts/alp_orchestrate.py).
@@ -76,10 +78,30 @@ CASES = [
     ("rpmsg-aen.build-plan",        ORCH, "examples/multicore/rpmsg-aen/board.yaml",            "build-plan"),
     ("rpmsg-v2n.system-manifest",   ORCH, "examples/multicore/rpmsg-v2n/board.yaml",            "system-manifest"),
     ("rpmsg-v2n.build-plan",        ORCH, "examples/multicore/rpmsg-v2n/board.yaml",            "build-plan"),
-    ("rpmsg-imx93.system-manifest", ORCH, "examples/multicore/rpmsg-imx93/board.yaml",          "system-manifest"),
-    ("rpmsg-imx93.build-plan",      ORCH, "examples/multicore/rpmsg-imx93/board.yaml",          "build-plan"),
+    # rpmsg-imx93 excluded (#1025): E1M-NX9101's only hw_rev (imx93 r1) is
+    # `status: tbd` -- refused outright by the hw_rev-buildable gate, so
+    # `--emit` can no longer run against it at all.  Re-add the two cases
+    # above (system-manifest, build-plan) plus `--update` once
+    # metadata/e1m_modules/imx93/hw-revisions.yaml:r1 carries a buildable
+    # status.  `main()` re-asserts that reason still holds every run
+    # (RATCHET -- see assert_exclusion_still_not_buildable).
     ("hetero-offload.system-manifest", ORCH, "examples/multicore/heterogeneous-offload/board.yaml", "system-manifest"),
     ("hetero-offload.build-plan",      ORCH, "examples/multicore/heterogeneous-offload/board.yaml", "build-plan"),
+    # `raw_shmem` ipc[] coverage (kconfig.py's `_emit_cross_core_shmem_cache`,
+    # #1080 follow-up) -- build-plan embeds each slice's rendered alp.conf, so
+    # this is the one fixture that would catch a regression on the
+    # CONFIG_DCACHE=n-for-raw_shmem path; every other CASES entry above
+    # declares only `rpmsg`/no `ipc:` at all.
+    ("mproc-mailbox.system-manifest", ORCH, "examples/multicore/mproc-mailbox/board.yaml", "system-manifest"),
+    ("mproc-mailbox.build-plan",      ORCH, "examples/multicore/mproc-mailbox/board.yaml", "build-plan"),
+    # The remaining two tests/parity/oracle/*.build-plan.json fixtures
+    # (seam-1's frozen 97ad481b oracle) that weren't otherwise covered by a
+    # build-plan case above -- added so the seam-1 retune (dropping
+    # config-artifact CONTENT from the comparator, #874 follow-up) has a
+    # byte-for-byte golden standing in for every oracle board's emitted
+    # alp.conf; see tests/parity/README.md.
+    ("audio-i2s-tone.build-plan",   ORCH, "examples/audio/i2s-tone/board.yaml",                 "build-plan"),
+    ("iot-fleet-ota.build-plan",    ORCH, "examples/connectivity/iot-fleet-ota/board.yaml",      "build-plan"),
 ]
 for _bid, _board in _PROJ_BOARDS:
     for _mode in _PROJ_MODES:
@@ -87,6 +109,44 @@ for _bid, _board in _PROJ_BOARDS:
     if _bid != "nsim":
         for _mode in _PROJ_CARRIER_MODES:
             CASES.append((f"proj-{_bid}.{_mode}", PROJ, _board, _mode))
+
+# --emit scaffold (issue #864): a render_to_envelope(template, sku) render is
+# a pure function of --template/--sku, not of a board.yaml -- `board` below
+# is unused (alp_project.py dispatches scaffold before --input is ever
+# read), kept as a real path only so `_emit`'s fixed `--input <board> --emit
+# <mode>` invocation shape needs no special-casing. Pins the minimal
+# template's E1M-V2N101 SKU-substitution (som.sku + preset) byte-for-byte.
+CASES.append((
+    "scaffold.minimal-v2n101", PROJ,
+    "examples/peripheral-io/hello-world/board.yaml", "scaffold",
+    ("--template", "minimal", "--sku", "E1M-V2N101"),
+))
+# peripheral's canonical board.yaml carries trailing inline comments on
+# BOTH its `sku:` and `preset:` lines describing the AEN801/e1m-evk
+# default (Fable review finding) -- this pins that the substitution
+# drops the stale comment along with the value, not just the token.
+# E1M-V2N101 is back in `peripheral`'s `supported.som_skus` (issue
+# #876: `_derive_pin_renames` re-derives the `pins:` block's
+# E1M-EVK-only pads to their E1M-X-EVK equivalents via the boards'
+# shared `board_alias:` join, so this is a buildable scaffold again,
+# not the dead-on-arrival one #864/#877 dropped this case for).
+CASES.append((
+    "scaffold.peripheral-v2n101", PROJ,
+    "examples/peripheral-io/gpio-button-led/board.yaml", "scaffold",
+    ("--template", "peripheral", "--sku", "E1M-V2N101"),
+))
+# sensor/edge-ai both re-derive a single `E1M_I2C0` -> `E1M_X_I2C0`
+# pin (issue #876) -- new golden coverage, no prior case existed.
+CASES.append((
+    "scaffold.sensor-v2n101", PROJ,
+    "examples/peripheral-io/i2c-master/board.yaml", "scaffold",
+    ("--template", "sensor", "--sku", "E1M-V2N101"),
+))
+CASES.append((
+    "scaffold.edge-ai-v2n101", PROJ,
+    "examples/ai/cold-chain-monitor/board.yaml", "scaffold",
+    ("--template", "edge-ai", "--sku", "E1M-V2N101"),
+))
 
 
 def _normalize_path(text: str, path: str, token: str) -> str:
@@ -152,8 +212,12 @@ def _normalize_host_paths(text: str, repo: str, python: str) -> str:
     return _normalize_token_tails(text)
 
 
-def _emit(tool: Path, board: str, mode: str) -> str:
-    """Run the emitter from the repo root; normalise the SDK-root path."""
+def _emit(tool: Path, board: str, mode: str, extra: tuple[str, ...] = ()) -> str:
+    """Run the emitter from the repo root; normalise the SDK-root path.
+
+    `extra` appends extra CLI args after `--emit <mode>` -- e.g.
+    scaffold's `--template <id> --sku <SKU>` (issue #864).
+    """
     env = {**os.environ}
     scripts_dir = str(REPO / "scripts")
     env["PYTHONPATH"] = (
@@ -161,7 +225,7 @@ def _emit(tool: Path, board: str, mode: str) -> str:
         if env.get("PYTHONPATH") else scripts_dir
     )
     rv = subprocess.run(
-        [*tool, "--input", board, "--emit", mode],
+        [*tool, "--input", board, "--emit", mode, *extra],
         capture_output=True, text=True, cwd=REPO, check=False, env=env)
     if rv.returncode != 0:
         raise SystemExit(f"check_emit_snapshots: emit failed for {board} "
@@ -176,12 +240,20 @@ def main() -> int:
     args = ap.parse_args()
     SNAP_DIR.mkdir(parents=True, exist_ok=True)
 
+    exclusion_stale = assert_exclusion_still_not_buildable(
+        REPO / "metadata", "imx93", "r1", gate="check_emit_snapshots.py")
+    if exclusion_stale:
+        print(f"FAIL {exclusion_stale}", file=sys.stderr)
+        return 1
+
     stale: list[str] = []
-    for snap_id, tool, board, mode in CASES:
-        got = _emit(tool, board, mode)
+    for case in CASES:
+        snap_id, tool, board, mode, *rest = case
+        extra: tuple[str, ...] = rest[0] if rest else ()
+        got = _emit(tool, board, mode, extra)
         golden = SNAP_DIR / f"{snap_id}.snap"
         if args.update:
-            golden.write_text(got, encoding="utf-8")
+            golden.write_text(got, encoding="utf-8", newline="")
             print(f"wrote {golden.relative_to(REPO)}")
             continue
         if not golden.is_file():

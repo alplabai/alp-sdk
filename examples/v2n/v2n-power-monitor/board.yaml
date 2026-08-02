@@ -26,7 +26,7 @@ cores:
     # driver) ahead of libalp_sdk.so (alp_i2c backend).
     #
     # No meta-alp-sdk recipe packages this app yet, so `--emit
-    # build-plan` / `west alp-build` block this slice with a
+    # build-plan` / `tan build` block this slice with a
     # `yocto-recipe-missing` warning rather than guess a bitbake
     # target -- add `recipe: <name>` here once one exists.
     peripherals:

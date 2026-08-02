@@ -109,7 +109,7 @@ def update_sdk_version_yaml(new_version: str, dry_run: bool) -> None:
     if new_text == text:
         raise SystemExit("bump_version: no change to sdk_version.yaml (already at target?)")
     if not dry_run:
-        SDK_VERSION_YAML.write_text(new_text, encoding="utf-8")
+        SDK_VERSION_YAML.write_text(new_text, encoding="utf-8", newline="")
     print(f"  updated {SDK_VERSION_YAML.relative_to(REPO)}: -> version: {new_version}")
 
 
@@ -131,7 +131,7 @@ def slice_changelog(new_version: str, dry_run: bool) -> None:
     fresh_unreleased = f"## [Unreleased] - v{_next_candidate(new_version)} candidate\n\n## [v{new_version}] - {today}"
     new_text = text[: m.start()] + fresh_unreleased + text[m.end():]
     if not dry_run:
-        CHANGELOG.write_text(new_text, encoding="utf-8")
+        CHANGELOG.write_text(new_text, encoding="utf-8", newline="")
     print(f"  sliced {CHANGELOG.relative_to(REPO)}: [Unreleased] -> [v{new_version}] - {today}")
 
 
@@ -166,7 +166,7 @@ def update_version_h(new_version: str, dry_run: bool) -> None:
         print(f"  unchanged {VERSION_H.relative_to(REPO)} (already at {new_version})")
         return
     if not dry_run:
-        VERSION_H.write_text(text, encoding="utf-8")
+        VERSION_H.write_text(text, encoding="utf-8", newline="")
     print(f"  updated {VERSION_H.relative_to(REPO)}: ALP_VERSION_* -> {new_version}")
 
 
@@ -186,7 +186,7 @@ def update_banner_c(new_version: str, dry_run: bool) -> None:
         print(f"  unchanged {BANNER_C.relative_to(REPO)} (already at {new_version})")
         return
     if not dry_run:
-        BANNER_C.write_text(new_text, encoding="utf-8")
+        BANNER_C.write_text(new_text, encoding="utf-8", newline="")
     print(f"  updated {BANNER_C.relative_to(REPO)}: sample banner -> \"Alp SDK {new_version}\"")
 
 
@@ -202,7 +202,7 @@ def update_pyproject(new_version: str, dry_run: bool) -> None:
         print(f"  unchanged {PYPROJECT.relative_to(REPO)} (already at {new_version})")
         return
     if not dry_run:
-        PYPROJECT.write_text(new_text, encoding="utf-8")
+        PYPROJECT.write_text(new_text, encoding="utf-8", newline="")
     print(f"  updated {PYPROJECT.relative_to(REPO)}: -> version = \"{new_version}\"")
 
 

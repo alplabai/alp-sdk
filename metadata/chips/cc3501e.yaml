@@ -30,9 +30,9 @@ spi:
                                    # CC3501E endpoint is its own SPI0 peripheral
   mode:           [0]
   word_bits:      8
-  max_clock_hz:   8000000          # current default per the header lifecycle
-                                   # example; SWRU626 §18 allows higher --
-                                   # final value pending signal-integrity sweep.
+  max_clock_hz:   15000000         # CC35 slave hardware ceiling (SWRU626 §18);
+                                   # the master's run rate is set per-example
+                                   # (14 MHz in cc3501e_bridge.h), not here.
 
 signals:
   # Side-channel control lines the Alif drives via alp_gpio_*.  The

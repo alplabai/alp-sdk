@@ -6,7 +6,7 @@
 # (linux/, m33_sm/) carries its own CMakeLists.txt and is dispatched
 # to the right build backend by the orchestrator:
 #
-#   * `west alp-build examples/multicore/rpmsg-v2n` -- the canonical way; reads
+#   * `tan build examples/multicore/rpmsg-v2n` -- the canonical way; reads
 #     board.yaml, fans out into per-core slices, emits the system
 #     manifest.
 #

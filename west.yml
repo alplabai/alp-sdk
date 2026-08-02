@@ -158,11 +158,41 @@ manifest:
   #                    this group's state.  Pinned here purely as
   #                    the audit trail / version source-of-truth;
   #                    see vendors/{etl,fmt,doctest}/README.md.
+  #
+  # `+optional`      - re-enables Zephyr's own "optional" group,
+  #                    which its west.yml disables by default
+  #                    (`group-filter: [-babblesim, -optional,
+  #                    -testing]`, submanifests/optional.yaml).
+  #                    tflite-micro lives in that group. The
+  #                    name-allowlist below selects tflite-micro by
+  #                    NAME, but name-allowlist and group-filter are
+  #                    independent gates -- being allowlisted does
+  #                    NOT activate a project sitting in an inactive
+  #                    group. Without this, `west update` never
+  #                    clones the actual TFLM library source (no
+  #                    `optional/modules/lib/tflite-micro`); the
+  #                    zephyr-tree-committed Kconfig glue
+  #                    (modules/tflite-micro/Kconfig) still sources
+  #                    fine either way, so CONFIG_TENSORFLOW_LITE_MICRO=y
+  #                    silently downgrades to n ("unsatisfied
+  #                    dependencies: 0 (=n)") instead of failing
+  #                    loudly at manifest time, and the build only
+  #                    dies later on a missing
+  #                    tensorflow/lite/micro/*.h header (#1076,
+  #                    surfaced by pr-twister-aen on aen-sim-vision).
+  #                    canopennode/chre/thrift/zephyr-lang-rust are
+  #                    the group's other members but aren't
+  #                    name-allowlisted, so this only pulls in
+  #                    tflite-micro -- it does not widen the fetch
+  #                    set. hal_ethos_u does NOT need this: it's in
+  #                    Zephyr's "hal" group, which is active by
+  #                    default.
   group-filter:
     - -extras-lwrb-nanopb
     - -extras-tier1
     - -extras-cpp
     - -vendor-sdks
+    - +optional
 
   projects:
     # hal_alif lands directly from Alif's GitHub at Apache-2.0
@@ -175,11 +205,11 @@ manifest:
     # tagged release; bumps coordinate with the Zephyr-LTS cycle.
     - name: hal_alif
       remote: alifsemi
-      revision: v2.2.0
+      revision: v2.3.0
       path: modules/hal/alif
 
     - name: zephyr
-      revision: v4.4.0        # Latest stable; see docs/zephyr-version-policy.md
+      revision: v4.4.1        # Latest stable; see docs/zephyr-version-policy.md
       west-commands: scripts/west-commands.yml
       import:
         # Pull in only the modules we actually need.  Filtering keeps
@@ -224,6 +254,20 @@ manifest:
           # CONFIG_ALP_SDK_INFERENCE_TFLM=y just work; the module
           # is small enough that the cost-of-presence is negligible.
           - tflite-micro
+          # hal_ethos_u is Arm's Ethos-U NPU driver (ethosu_driver +
+          # the arm,ethos-u Zephyr device).  Without it CONFIG_ETHOS_U
+          # is never DEFINED, so tflite-micro silently compiles its STUB
+          # Register_ETHOSU() (returns nullptr) instead of the real
+          # NPU kernel -- every Ethos-U inference then open()s fine but
+          # fails at invoke, never reaching the E8 NPU (and the raw
+          # DEVICE_DT_GET(ethosu_npu) apps fail to link on the absent
+          # __device_dts_ord_33).  Pulling it in makes CONFIG_ETHOS_U /
+          # CONFIG_ETHOS_U_ARM build for real so the Ethos-U55/U85 on
+          # the AEN family is actually dispatchable through the SDK.
+          # (An alp-sdk-topdir workspace set up before this entry needs
+          # a `west update` before it builds -- same as the littlefs
+          # note above.)
+          - hal_ethos_u
           # zcbor backs the `.alpmodel` container reader
           # (CONFIG_ALP_SDK_MODEL_READER selects CONFIG_ZCBOR).
           # Without this allowlist entry an alp-sdk-topdir workspace
@@ -498,7 +542,8 @@ manifest:
 
   self:
     path: alp-sdk
-    # Surface `west alp-build` to workspaces where alp-sdk is the
+    # Surface alp-sdk's west-extension commands (alp-lock, alp-migrate,
+    # alp-quality, alp-emit) to workspaces where alp-sdk is the
     # topdir.  Consumers who include alp-sdk as a project in their
     # own west.yml should add the same `west-commands:` line under
     # their `projects.alp-sdk` entry.

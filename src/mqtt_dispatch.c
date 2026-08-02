@@ -30,6 +30,24 @@
  * multi-second (or timeout_ms == forever) op instead of spinning the
  * closer thread.  A racing close() can no longer tear down state while
  * connect()/loop() is in flight.
+ *
+ * @par Issue #756 -- callback self-close inside alp_mqtt_loop()
+ * Both the Yocto Mosquitto and Zephyr MQTT backends invoke the
+ * subscribed message callback SYNCHRONOUSLY, inline, from inside their
+ * ops->loop() implementation, before returning control here.  A
+ * callback that calls alp_mqtt_close() on its OWN handle used to
+ * deadlock: alp_mqtt_close()'s sleep-poll drain waits for active_ops
+ * to reach 0, but the count it is waiting on is THIS very loop() call,
+ * on THIS very thread, which cannot decrement until the callback
+ * returns -- and it cannot return while it is asleep inside close().
+ * alp_mqtt_loop() now brackets the backend call with
+ * alp_handle_cb_enter()/alp_handle_cb_leave() (src/common/
+ * alp_slot_claim.h) so alp_mqtt_close() can tell a reentrant self-close
+ * (defer the actual teardown to this function's own post-op check)
+ * from a genuine cross-thread close (unchanged: block and drain, same
+ * as before). See alp_handle_begin_close_selfaware()'s doc comment for
+ * the full contract; public re-entry guarantees are documented on
+ * alp_mqtt_msg_cb_t in include/alp/iot.h.
  */
 
 #include <stdbool.h>
@@ -186,6 +204,19 @@ alp_status_t alp_mqtt_subscribe(alp_mqtt_t       *h,
 	return rc;
 }
 
+/* Test-only hook (dev-review follow-up on issue #756): fires right
+ * after alp_handle_op_leave() below -- the exact point from which this
+ * thread must never touch `h` again unless it uniquely owns the close
+ * (self_closed) -- so tests/yocto/mqtt_dispatch_self_close.c's
+ * cross-thread-close-vs-slot-reuse scenario can widen that window
+ * deterministically (a racing external closer's sleep-poll drain reacts
+ * on a millisecond cadence; this makes the reproduction of a regression
+ * to the pre-fix ordering independent of that cadence, instead of
+ * relying on raw thread-scheduling luck -- mirrors
+ * src/backends/rpc/yocto_drv.c's g_y_call_test_late_staging_hook idiom).
+ * NULL in production. */
+static void (*g_mqtt_test_after_op_leave_hook)(void) = NULL;
+
 alp_status_t alp_mqtt_loop(alp_mqtt_t *h, uint32_t timeout_ms)
 {
 	/* Counted via alp_handle_op_enter/leave -- same rationale as
@@ -194,23 +225,69 @@ alp_status_t alp_mqtt_loop(alp_mqtt_t *h, uint32_t timeout_ms)
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}
+	/* Issue #756: loop() may synchronously invoke the subscribed message
+	 * callback, which may call alp_mqtt_close() on THIS handle -- mark
+	 * this thread as "inside the callback-invoking op" first so that
+	 * close() can detect the reentrant self-close and defer instead of
+	 * deadlocking (see this file's header comment). */
+	alp_handle_cb_enter(&h->cb_thread, &h->cb_active);
 	alp_status_t rc = (h->state.ops == NULL || h->state.ops->loop == NULL)
 	                      ? ALP_ERR_NOT_IMPLEMENTED
 	                      : h->state.ops->loop(&h->state, timeout_ms);
+	alp_handle_cb_leave(&h->cb_active);
+	/* Dev-review follow-up on issue #756: consume close_pending BEFORE
+	 * op_leave, while this thread still holds its own counted op -- `h`
+	 * cannot be freed by a concurrent EXTERNAL closer until active_ops
+	 * drains to 0, which cannot happen before the op_leave below runs.
+	 * Checking close_pending any later raced that external closer, which
+	 * is free to tear `h` down the instant this op leaves -- a
+	 * use-after-free/double-free window (see
+	 * alp_handle_take_deferred_close()'s doc comment). */
+	bool self_closed = alp_handle_take_deferred_close(&h->close_pending);
 	alp_handle_op_leave(&h->active_ops);
+	if (g_mqtt_test_after_op_leave_hook != NULL) {
+		g_mqtt_test_after_op_leave_hook();
+	}
+	if (self_closed) {
+		/* alp_handle_begin_close_selfaware()'s CAS already elected this
+		 * thread the unique owner of this handle's close -- safe to
+		 * drain (any OTHER concurrent op) and tear down now. */
+		alp_handle_drain_blocking(&h->active_ops);
+		if (h->state.ops != NULL && h->state.ops->close != NULL) {
+			h->state.ops->close(&h->state);
+		}
+		alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_UNOPENED);
+		_free_mqtt(h);
+	}
 	return rc;
 }
 
 void alp_mqtt_close(alp_mqtt_t *h)
 {
 	if (h == NULL) return;
-	/* Sleep-poll drain (issue #629): this pool now counts
-	 * alp_mqtt_connect()/alp_mqtt_loop(), each of which can block for a
-	 * genuinely long time (a real broker round-trip / keepalive wait),
-	 * so alp_handle_begin_close_blocking() sleeps between polls instead
+	/* Self-close-aware sleep-poll drain (issues #629/#756): this pool
+	 * counts alp_mqtt_connect()/alp_mqtt_loop(), each of which can block
+	 * for a genuinely long time (a real broker round-trip / keepalive
+	 * wait), so a normal (external) close sleeps between polls instead
 	 * of busy-spinning (same rationale as rpc_dispatch.c's _rpc_drain(),
-	 * GHSA-xhm8). Idempotent: a second/never-opened close no-ops. */
-	if (!alp_handle_begin_close_blocking(&h->lifecycle, &h->active_ops)) return;
+	 * GHSA-xhm8).  A close triggered BY a message callback running
+	 * inside this handle's own alp_mqtt_loop() is detected instead and
+	 * deferred to that loop() call's own post-callback check (see
+	 * alp_mqtt_loop() above) -- draining here would deadlock on this
+	 * same thread's own in-flight count.  Idempotent either way: a
+	 * second/never-opened close no-ops. */
+	alp_handle_close_mode_t mode;
+	if (!alp_handle_begin_close_selfaware(&h->lifecycle,
+	                                      &h->active_ops,
+	                                      &h->cb_active,
+	                                      &h->cb_thread,
+	                                      &mode,
+	                                      &h->close_pending)) {
+		return;
+	}
+	if (mode == ALP_HANDLE_CLOSE_DEFERRED) {
+		return;
+	}
 	if (h->state.ops != NULL && h->state.ops->close != NULL) {
 		h->state.ops->close(&h->state);
 	}

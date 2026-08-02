@@ -243,16 +243,35 @@ int cc3501e_hw_ble_disconnect(void)
 	return (rc == 0) ? CC3501E_HW_OK : CC3501E_HW_ERR_IO;
 }
 
-/* BLE_GATT_REGISTER: confirm the fixed demo GATT service is live (the opaque
- * descriptor is not parsed this rev -- see cc3501e_nimble_gatt_register).  Pure
- * host-side attribute-table check: no HCI, so no bridge re-sync needed. */
-int cc3501e_hw_ble_gatt_register(const uint8_t *desc, uint16_t desc_len)
+/* BLE_GATT_REGISTER: parse the descriptor + register a dynamic GATT service
+ * via cc3501e_nimble_gatt_register (ble_gatts_count_cfg + ble_gatts_add_svcs
+ * + a re-run of ble_gatts_start -- see that function for the NimBLE lifecycle
+ * rationale).  No HCI of its own, but ble_gatts_start's attribute-table build
+ * runs synchronously here, so it stays worker-routed like the other GATT ops
+ * (no bridge re-sync needed -- it doesn't touch the shared HIF).
+ *
+ * cc3501e_nimble_gatt_register() already maps NimBLE's BLE_HS_EBUSY (the
+ * ble_gatts_mutable() ordering guard) to the distinct CC3501E_HW_ERR_STATE --
+ * pass that through unchanged instead of folding it into the generic
+ * CC3501E_HW_ERR_IO every OTHER NimBLE failure gets. */
+int cc3501e_hw_ble_gatt_register(const uint8_t *desc,
+                                 uint16_t       desc_len,
+                                 uint16_t      *handles_out,
+                                 uint16_t       handles_cap,
+                                 uint16_t      *num_handles_out)
 {
+	if (num_handles_out != 0) {
+		*num_handles_out = 0u;
+	}
 	if (!cc3501e_nimble_host_is_enabled()) {
 		return CC3501E_HW_ERR_NOTIMPL;
 	}
-	const int rc = cc3501e_nimble_gatt_register(desc, desc_len);
-	return (rc == 0) ? CC3501E_HW_OK : CC3501E_HW_ERR_IO;
+	const int rc =
+	    cc3501e_nimble_gatt_register(desc, desc_len, handles_out, handles_cap, num_handles_out);
+	if (rc == 0) {
+		return CC3501E_HW_OK;
+	}
+	return (rc == CC3501E_HW_ERR_STATE) ? CC3501E_HW_ERR_STATE : CC3501E_HW_ERR_IO;
 }
 
 /* BLE_GATT_NOTIFY: push a notification to the connected peer.  Blocks on HCI
@@ -358,10 +377,19 @@ int cc3501e_hw_ble_disconnect(void)
 	return CC3501E_HW_ERR_NOTIMPL;
 }
 
-int cc3501e_hw_ble_gatt_register(const uint8_t *desc, uint16_t desc_len)
+int cc3501e_hw_ble_gatt_register(const uint8_t *desc,
+                                 uint16_t       desc_len,
+                                 uint16_t      *handles_out,
+                                 uint16_t       handles_cap,
+                                 uint16_t      *num_handles_out)
 {
 	(void)desc;
 	(void)desc_len;
+	(void)handles_out;
+	(void)handles_cap;
+	if (num_handles_out != 0) {
+		*num_handles_out = 0u;
+	}
 	return CC3501E_HW_ERR_NOTIMPL;
 }
 

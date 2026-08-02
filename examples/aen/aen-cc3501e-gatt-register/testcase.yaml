@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: aen-cc3501e-gatt-register
+  description: |
+    Bench check for the CC3501E dynamic GATT registration path (#480/#892):
+    bring up the bridge -> open BLE -> register a 2-characteristic service
+    and confirm real (non-zero) attribute handles -> prove the bridge is
+    still alive post-register (the on-silicon double-ble_gatts_start() UAF
+    fix check) -> advertise -> register again while advertising and confirm
+    the NimBLE ble_gatts_mutable() ordering guard surfaces as ALP_ERR_BUSY.
+    Peer-free: no BLE central is needed on the bench.  Emits a single
+    RESULT PASS/FAIL line.
+
+tests:
+  alp_sdk.examples.aen.cc3501e_gatt_register.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - cc3501e
+      - ble
+      - gatt
+    build_only: true

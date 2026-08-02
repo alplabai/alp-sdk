@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only bind-only staging check of the Alif C2-MIPI-DSI DISPLAY chain
+# (cdc200 "tes,cdc-2.1" -> mipi_dsi "snps,designware-dsi" -> the shared D-PHY
+# "snps,designware-dphy") on the E1M-AEN801 (Ensemble E8, M55-HE).  The
+# CSI/RX twin of this app is aen-camera-regcheck; the live-pixels successor
+# is aen-dsi-display.
+#
+# Compile-checks the driver chain + DT nodes on the real E8 board target;
+# filtered OUT of the native_sim PR gate (platform_allow = the AEN801 HE
+# board only).
+
+sample:
+  name: aen-dsi-regcheck
+  description: |
+    Bench RAM-run MIPI-DSI bind-only staging proof for the E1M-AEN801 (Alif
+    Ensemble E8, Cortex-M55-HE): confirms cdc200/mipi_dsi/dphy bind at DT
+    level (no live pixels -- see aen-dsi-display for that).
+
+tests:
+  alp_sdk.examples.aen.dsi_regcheck.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - display
+      - dsi
+      - video
+    build_only: true   # the DSI bind check is a bench flash, not a CI run.

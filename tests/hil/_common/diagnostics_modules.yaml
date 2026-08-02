@@ -39,7 +39,7 @@
 #
 # What this proves end-to-end (once LOG_MODULE_REGISTER lands):
 #   - The orchestrator emits CONFIG_<MODULE>_LOG_LEVEL=<n> per entry.
-#   - alp.conf is layered onto prj.conf via OVERLAY_CONFIG.
+#   - alp.conf is layered onto prj.conf via EXTRA_CONF_FILE.
 #   - The Zephyr LOG subsystem respects the per-module level at
 #     link time (debug messages compile in; off-level modules emit
 #     nothing).

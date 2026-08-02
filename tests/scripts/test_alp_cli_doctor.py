@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from collections import namedtuple
 
+import pytest
 from click.testing import CliRunner
 
 from alp_cli import doctor
@@ -40,8 +41,14 @@ def _force_all_pass(monkeypatch, tmp_path):
 
     monkeypatch.setattr(doctor, "_tool_version", _ver)
 
-    # All Python deps importable (they really are in the test venv) -> leave
-    # _check_python_deps alone.
+    # Stub python-deps PASS directly rather than relying on the host venv
+    # actually having every optional dep (e.g. questionary) installed; the
+    # FAIL branch is covered hermetically by test_python_deps_missing_is_fail.
+    monkeypatch.setattr(
+        doctor,
+        "_check_python_deps",
+        lambda: doctor.CheckResult("python-deps", doctor.PASS, "all deps present"),
+    )
 
     # A real Zephyr workspace on disk.
     ws = tmp_path / "zephyrproject"
@@ -164,6 +171,48 @@ def test_cmake_old_is_fail(monkeypatch):
     assert doctor._check_cmake().status == doctor.FAIL
 
 
+def test_cmake_missing_hint_windows_sourced_from_bootstrap_manifest(monkeypatch):
+    """cmake is tracked in BOTH prerequisites.posix and prerequisites.windows
+    -- unlike ninja (windows-only), routing its hints through
+    _prereq_install_hint gives all three install.{linux,macos,windows} OS
+    maps a real run-time reader (issue #949 review, minor 5)."""
+    monkeypatch.setattr(doctor.shutil, "which", lambda _: None)
+    monkeypatch.setattr(doctor.sys, "platform", "win32")
+    result = doctor._check_cmake()
+    assert result.status == doctor.FAIL
+    assert result.hint == "Install it: winget install -e --id Kitware.CMake."
+
+
+def test_cmake_missing_hint_linux_sourced_from_bootstrap_manifest(monkeypatch):
+    monkeypatch.setattr(doctor.shutil, "which", lambda _: None)
+    monkeypatch.setattr(doctor.sys, "platform", "linux")
+    result = doctor._check_cmake()
+    assert result.status == doctor.FAIL
+    assert result.hint == "Install it: sudo apt-get install -y cmake."
+
+
+def test_cmake_missing_hint_macos_sourced_from_bootstrap_manifest(monkeypatch):
+    """`install.macos` had ZERO test coverage before this: `_prereq_os_key()`
+    does reach `prerequisites.install.macos` at run time on a real darwin
+    host, but no test ever monkeypatched `sys.platform = "darwin"`, so a
+    hostile value there (verified: `install.macos.cmake = "rm -rf /"`)
+    shipped green through the gate AND the doctor tests both."""
+    monkeypatch.setattr(doctor.shutil, "which", lambda _: None)
+    monkeypatch.setattr(doctor.sys, "platform", "darwin")
+    result = doctor._check_cmake()
+    assert result.status == doctor.FAIL
+    assert result.hint == "Install it: brew install cmake."
+
+
+def test_cmake_old_hint_sourced_from_bootstrap_manifest(monkeypatch):
+    monkeypatch.setattr(doctor.shutil, "which", lambda _: "/usr/bin/cmake")
+    monkeypatch.setattr(doctor, "_tool_version", lambda _: (3, 10))
+    monkeypatch.setattr(doctor.sys, "platform", "linux")
+    result = doctor._check_cmake()
+    assert result.status == doctor.FAIL
+    assert result.hint == "Install it: sudo apt-get install -y cmake."
+
+
 def test_python_deps_missing_is_fail(monkeypatch):
     monkeypatch.setattr(
         doctor.importlib.util,
@@ -233,10 +282,113 @@ def test_ninja_missing_is_fail(monkeypatch):
     assert doctor._check_ninja().status == doctor.FAIL
 
 
+def test_ninja_missing_hint_windows_sourced_from_bootstrap_manifest(monkeypatch):
+    """The remediation hint is read from metadata/bootstrap.json's
+    prerequisites.install (issue #949), not hardcoded -- regression for the
+    shipped drift (a winget ID missing `-e --id`, and an apt form matching
+    no canonical command anywhere else)."""
+    monkeypatch.setattr(doctor.shutil, "which", lambda _: None)
+    monkeypatch.setattr(doctor.sys, "platform", "win32")
+    result = doctor._check_ninja()
+    assert result.hint == "Install it: winget install -e --id Ninja-build.Ninja."
+
+
+def test_ninja_missing_hint_posix_has_real_command(monkeypatch):
+    """ninja is one of prerequisites.posix's tracked tools (issue #971) --
+    the hint must source the real apt/brew command from
+    metadata/bootstrap.json's prerequisites.install.linux, not fall back to
+    the generic pointer."""
+    monkeypatch.setattr(doctor.shutil, "which", lambda _: None)
+    monkeypatch.setattr(doctor.sys, "platform", "linux")
+    result = doctor._check_ninja()
+    assert result.hint == "Install it: sudo apt-get install -y ninja-build."
+
+
+# -------- malformed metadata/bootstrap.json: must degrade, never crash -------
+#
+# A truncated or bad-merge bootstrap.json is exactly the broken workspace
+# `alp doctor` gets run on -- these lock the read/parse contract
+# `_bootstrap_manifest`'s own docstring promises (issue #949 review): every
+# shape below used to raise AttributeError/UnicodeDecodeError out of
+# `_prereq_install_hint` instead of falling back to the generic hint.
+
+
+def _write_manifest(tmp_path, content_bytes):
+    (tmp_path / "metadata").mkdir()
+    (tmp_path / "metadata" / "bootstrap.json").write_bytes(content_bytes)
+
+
+def test_bootstrap_manifest_top_level_list_returns_none(monkeypatch, tmp_path):
+    _write_manifest(tmp_path, b"[]")
+    monkeypatch.setattr(doctor, "_repo_root", lambda: tmp_path)
+    assert doctor._bootstrap_manifest() is None
+
+
+def test_bootstrap_manifest_top_level_string_returns_none(monkeypatch, tmp_path):
+    _write_manifest(tmp_path, b'"nope"')
+    monkeypatch.setattr(doctor, "_repo_root", lambda: tmp_path)
+    assert doctor._bootstrap_manifest() is None
+
+
+def test_bootstrap_manifest_invalid_utf8_returns_none(monkeypatch, tmp_path):
+    _write_manifest(tmp_path, b"\xff\xfe\x00bad")
+    monkeypatch.setattr(doctor, "_repo_root", lambda: tmp_path)
+    assert doctor._bootstrap_manifest() is None
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        b"[]",
+        b'"nope"',
+        b'{"prerequisites": []}',
+        b'{"prerequisites": {"install": null}}',
+        b"\xff\xfe\x00bad",
+        # Every prior case bails out at one of the four dict hops
+        # (`prerequisites`/`install`/`<os>`/`<tool>`) BEFORE reaching a leaf
+        # -- none of them exercise `isinstance(node, str)` itself, so it
+        # survives mutation to the truthiness-only `if node:` (both 123 and
+        # {} are truthy, so a `123.` or `{'a': 1}.` non-string leaf would
+        # still print as though it were a real command instead of falling
+        # back). All three OS keys carry the same leaf value so this fires
+        # regardless of which OS runs the test.
+        b'{"prerequisites": {"install": {"linux": {"ninja": 123}, '
+        b'"macos": {"ninja": 123}, "windows": {"ninja": 123}}}}',
+        b'{"prerequisites": {"install": {"linux": {"ninja": {}}, '
+        b'"macos": {"ninja": {}}, "windows": {"ninja": {}}}}}',
+    ],
+    ids=[
+        "top-level-list",
+        "top-level-string",
+        "prerequisites-not-dict",
+        "install-null",
+        "invalid-utf8",
+        "leaf-int",
+        "leaf-dict",
+    ],
+)
+def test_prereq_install_hint_falls_back_on_malformed_manifest(monkeypatch, tmp_path, content):
+    _write_manifest(tmp_path, content)
+    monkeypatch.setattr(doctor, "_repo_root", lambda: tmp_path)
+    result = doctor._prereq_install_hint("ninja")
+    assert result == "Install ninja via your OS package manager."
+
+
 def test_dtc_and_gperf_missing_are_warn_only(monkeypatch):
     monkeypatch.setattr(doctor.shutil, "which", lambda _: None)
-    assert doctor._check_dtc().status == doctor.WARN
-    assert doctor._check_gperf().status == doctor.WARN
+    dtc_result = doctor._check_dtc()
+    gperf_result = doctor._check_gperf()
+    assert dtc_result.status == doctor.WARN
+    assert gperf_result.status == doctor.WARN
+    for result in (dtc_result, gperf_result):
+        # issue #949: this hint used to claim the tool was "bundled with the
+        # Zephyr SDK on Windows" -- false, and a customer following it would
+        # install the SDK and still not have the tool. Pin both the absence
+        # of the old false claim and the presence of the corrective text so
+        # a regression here fails a test instead of shipping silently.
+        assert "bundled with the Zephyr SDK on Windows" not in result.hint
+        assert "does not ship" in result.hint
+        assert "cross-platform-setup.md" in result.hint
 
 
 def test_jlink_missing_is_warn_only(monkeypatch):
@@ -250,6 +402,19 @@ def test_jlink_present_is_pass(monkeypatch):
         lambda name: "/usr/bin/JLinkExe" if name == "JLinkExe" else None,
     )
     assert doctor._check_jlink().status == doctor.PASS
+
+
+def test_tan_missing_is_warn_only(monkeypatch):
+    monkeypatch.setattr(doctor.shutil, "which", lambda _: None)
+    assert doctor._check_tan().status == doctor.WARN
+
+
+def test_tan_present_is_pass(monkeypatch):
+    monkeypatch.setattr(
+        doctor.shutil, "which",
+        lambda name: "/usr/bin/tan" if name == "tan" else None,
+    )
+    assert doctor._check_tan().status == doctor.PASS
 
 
 def test_zephyr_pin_read_live_from_west_yml(monkeypatch, tmp_path):

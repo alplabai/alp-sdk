@@ -72,7 +72,7 @@ as a slow link soak.
 suite passes `i2c = NULL`):
 
 ```bash
-west alp-build examples/v2n/v2n-gd32-bridge-functional
+tan build examples/v2n/v2n-gd32-bridge-functional
 ```
 
 The twister row is `build_only` on `native_sim/native/64` -- there

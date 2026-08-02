@@ -29,6 +29,7 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 |----------------------------------------------------|------------------------------------------------------------------------------|
 | [`aen-dualcore-probe`](aen-dualcore-probe/)        | **bench** -- the decisive B1 test: does a dual-entry ATOC boot BOTH M55 cores? Heartbeat stamps in global SRAM0. |
 | [`aen-dualcore-master`](aen-dualcore-master/)      | **bench** -- the SES-booted core starts the other M55 at runtime via the portable `alp_mproc_boot_core()` (SE boot service over the `seservice0` MHU on AEN). |
+| [`aen-dualcore-he-master`](aen-dualcore-he-master/) | **bench** -- the reverse direction: HE releases a *deferred* HP peer via `alp_mproc_boot_core()` (service 500), the only proven way to release an HP peer. |
 | [`aen-dualcore-doorbell`](aen-dualcore-doorbell/)  | **bench** -- HE->HP MHU-1 doorbell with both M55 cores live (the completion of B1). |
 | [`aen-dualcore-ipc`](aen-dualcore-ipc/)            | **bench** -- bidirectional HE<->HP shared-memory request/response over a global-SRAM0 mailbox. |
 | [`aen-rpc-pingpong`](aen-rpc-pingpong/)            | OpenAMP RPMsg (`ipc_service`) ping/pong between the two M55 cores over the `alif,mhuv2-mbox` MBOX driver. |
@@ -72,6 +73,7 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 | [`aen-ethernet-link`](aen-ethernet-link/)          | Bring up the E8 GMAC (`eth_dwmac` + the `alif,ethernet` glue) and report net-if state (Zephyr net-if API). |
 | [`aen-cc3501e-bringup`](aen-cc3501e-bringup/)      | Host (Alif M55-HE) side of the on-module TI CC3501E Wi-Fi 6 + BLE 5.4 coprocessor bring-up (power-gate, reset, control link). |
 | [`aen-cc3501e-companion-tour`](aen-cc3501e-companion-tour/) | **capstone** -- full-surface tour of the CC3501E companion API: init -> ping -> diag -> Wi-Fi scan/connect/IP -> TCP socket -> BLE enable/scan -> proxied-GPIO read. |
+| [`aen-cc3501e-ble-gatt`](aen-cc3501e-ble-gatt/)    | **bench** -- CC3501E BLE GATT-SERVER path (#480) through the portable `<alp/ble.h>` surface: register/advertise/gatt read-write-notify, server-only, no live central peer. |
 | [`aen-can-regcheck`](aen-can-regcheck/)            | **staging** -- Alif CAN-FD controller bind-only staging check (bus wiring HW-blocked). |
 | [`aen-sdcard-readout`](aen-sdcard-readout/)        | Probe a microSD over the E8 SD Host Controller (`snps,dwc-sdhc` + SDMMC disk) via the disk-access API. |
 | [`aen-spi-regcheck`](aen-spi-regcheck/)            | **bench** -- Alif DWC_ssi SPI driver (`alif,dwc-ssi-spi`, spi0 @ 0x48103000) register validation. |

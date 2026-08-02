@@ -49,13 +49,14 @@ core) come from the SoM preset under `metadata/e1m_modules/<MPN>.yaml` and are
 
 Two loaders fan `board.yaml` into per-core slices:
 
-- `scripts/alp_project.py --emit {zephyr-conf,cmake-args,yocto-conf,hw-info-h,dts-overlay,west-libraries,os-topology}`
+- `scripts/alp_project.py --emit {zephyr-conf,cmake-args,yocto-conf,hw-info-h,dts-overlay,west-libraries,os-topology,native-sim-overlay,system-manifest,dts-reservations,ipc-contract-h,composed-route-table,carrier-netlist,zephyr-board,scaffold}`
   — the per-slice build config.
-- `python -m alp_orchestrate --emit {system-manifest,build-plan,ipc-contract-h,dts-reservations,dts-partitions,storage-mounts-c,tfm-sysbuild-conf}`
+- `python -m alp_orchestrate --emit {system-manifest,build-plan,ipc-contract-h,dts-reservations,dts-partitions,storage-mounts-c,tfm-sysbuild-conf,kconfig}`
   — the cross-core / system artefacts.
 
-`west alp-build -b <board> <app-dir>` is the convenience wrapper: it validates
-`board.yaml`, generates the build-time config, then delegates to `west build`.
+`tan --project <app-dir> build` is the convenience wrapper: it consumes the
+SDK's `--emit build-plan`, materialises the per-slice config, then runs each
+slice's native build command.
 
 The `--emit` surface is the **machine-readable contract** other tools consume
 (ADR 0014, `docs/adr/0014-build-plan-emit-cli-contract.md`). When you need to
@@ -67,17 +68,22 @@ rather than guessing.
 An agent's loop here is: generate, then run the validators, then fix what they
 report.
 
-- `alp doctor` — HW-free environment preflight: checks the host toolchain,
-  `west`, the pinned Zephyr version, Python deps, etc., and prints a remediation
-  hint per failing check (`--json` for machine consumption). Run it first on a
-  fresh checkout to find why a build won't work before you build.
-- `alp validate board.yaml` — the diagnostic-rich `board.yaml` validator
-  (CLI entry `alp`; equivalently `python3 scripts/validate_board_yaml.py`).
+- `tan doctor --build` — HW-free build-readiness preflight: checks `west`,
+  `cmake`, `ninja`, the pinned Zephyr version, the Zephyr SDK, etc., and
+  prints a remediation hint per failing check (`--format json` for machine
+  consumption; there's no `--strict`). Run it first on a fresh checkout to
+  find why a build won't work before you build. (Plain `tan doctor`, no
+  `--build`, is a different debug-readiness preflight — see
+  [`docs/cli.md`](docs/cli.md).)
+- `tan validate board.yaml` — the diagnostic-rich `board.yaml` validator
+  (CLI entry `tan`, which forwards to `python -m alp_cli validate`;
+  equivalently `python3 scripts/validate_board_yaml.py`).
   Try it against a fixture under `tests/fixtures/board_yaml_bad/` to learn the
   output format. Exit code 1 on a hard validation or consistency failure;
   warnings return 0.
-- `west alp-build …` — does the same validation as a build pre-flight before
-  any compile work.
+- `tan validate board.yaml` / `python -m alp_orchestrate --input board.yaml
+  --emit build-plan` — the same validation as a build pre-flight before any
+  compile work.
 - CI gates — `scripts/check_*.py` (e.g. `check_doc_drift.py`,
   `check_example_portability.py`, `check_pin_conflicts.py`,
   `check_system_manifest.py`) plus **twister** for the Zephyr ztest + example

@@ -14,6 +14,7 @@ target_sources(app PRIVATE
     src/config_defaults.c
     src/i2c.c
     src/i2c_target.c
+    src/i3c.c
     src/spi.c
     src/spi_target.c
     src/gpio.c

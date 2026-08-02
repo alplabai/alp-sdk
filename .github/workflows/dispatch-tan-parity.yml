@@ -1,0 +1,197 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# ADR-0020 cross-repo trigger — SENDER half (alp-sdk → tan-cli).
+#
+# Fires a `repository_dispatch` at `alplabai/tan-cli` whenever this repo's
+# CONTRACT SURFACE moves, carrying the SHA that just landed so tan's parity
+# gate tests THAT ref instead of its hand-bumped `PINNED_SDK_TAG`.
+#
+# Why this exists, stated as the gap it closes rather than as the ADR line it
+# satisfies:
+#
+#   * `parity-seam1.yml` (this repo) diffs our own `--emit build-plan` against
+#     our OWN frozen oracle. It never runs tan. It cannot tell us that a
+#     planner change broke tan's ability to EXECUTE the plan.
+#   * tan's `parity.yml` on a pull_request tests against a PINNED alp-sdk ref,
+#     bumped by hand. Until someone bumps it, tan is green against an alp-sdk
+#     that no longer exists.
+#
+# So "alp-sdk changed and tan can no longer build from the plan" is invisible on
+# both sides. tan's seam2 -- materialise, cross-compile through `tan build`,
+# boot in Renode -- is exactly the check that sees it, and this is what points
+# it at the right commit.
+#
+# Security model, following pr-bitbake.yml (read its header; the argument is the
+# same one):
+#   * The token is minted at RUNTIME from the org's GitHub App
+#     (`actions/create-github-app-token`), scoped to tan-cli alone and valid
+#     ~1h. The only long-lived secret is the App's private key -- org-owned and
+#     revocable. A long-lived PAT was the alternative and is deliberately not
+#     used: it would contradict the model the neighbouring workflow argues for.
+#   * `repository_dispatch` needs Contents:write on the TARGET. That is the
+#     whole grant; the App holds nothing else on tan-cli.
+#   * Fork PRs receive no secrets, and this triggers on `push` to dev/main
+#     only, so a fork cannot reach it at all.
+
+name: dispatch-tan-parity
+
+on:
+  push:
+    branches: [dev, main]
+    # Kept in lockstep with parity-seam1.yml's path list ON PURPOSE: that job
+    # decides when OUR plan shape is re-checked, and this decides when TAN
+    # re-checks it. If the two lists drift, one side starts testing changes the
+    # other ignores, which is the silent-divergence this whole gate exists to
+    # prevent.
+    paths:
+      - "scripts/alp_orchestrate/**"
+      - "metadata/**"
+      - "examples/**/board.yaml"
+      - "tests/parity/**"
+  workflow_dispatch:
+
+concurrency:
+  # A burst of merges should leave tan testing the NEWEST contract surface, not
+  # queue one run per commit against refs that are already superseded. This
+  # does mean the "Confirm a run actually started" step's poll can itself get
+  # cancelled mid-flight by a fast-follow push -- see that step's poll-window
+  # comment in scripts/dispatch-confirm.sh for how that's kept in check
+  # (shorter window, backstopped by the self-calibrated staleness check
+  # rather than a long poll).
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # Needed only to list THIS workflow's own past runs on alp-sdk (the
+  # "Find this workflow's previous dispatch" step below) -- the baseline
+  # for dispatch-confirm.sh's self-calibrated staleness check. Scoped to
+  # read, and to this repo's default GITHUB_TOKEN only; it grants nothing
+  # on tan-cli, which still goes through the separately-minted App token.
+  actions: read
+
+jobs:
+  dispatch:
+    name: "dispatch · tan parity"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint a short-lived App token (scoped to tan-cli)
+        id: apptoken
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.ALP_CI_APP_ID }}
+          private-key: ${{ secrets.ALP_CI_APP_PRIVATE_KEY }}
+          owner: alplabai
+          repositories: tan-cli
+
+      - name: Dispatch planner-change to tan-cli
+        env:
+          GH_TOKEN: ${{ steps.apptoken.outputs.token }}
+        run: |
+          set -euo pipefail
+          # Captured HERE, immediately before the dispatch call, not in the
+          # later "Confirm a run actually started" step. dispatch-confirm.sh's
+          # contract requires DISPATCH_EPOCH to be the moment the dispatch
+          # call returned; capturing it a step later leaves a 1-3s step
+          # transition during which a fast, healthy dispatch's run can be
+          # created before DISPATCH_EPOCH, making the confirm step's strict
+          # `>` comparison miss it. Erring early is the safe direction.
+          echo "DISPATCH_EPOCH=$(date +%s)" >> "$GITHUB_ENV"
+          # `alp-sdk-planner-change` and `client_payload.sdk_ref` are the names
+          # tan's `tests/parity/README.md` specifies and its `parity.yml`
+          # listens for. Renaming either here silently stops the dispatch
+          # arriving -- GitHub accepts an unrecognised event_type with a 204,
+          # so the failure looks exactly like success from this side.
+          #
+          # NOTE (residual correlation gap, see dispatch-confirm.sh): the run
+          # this creates on tan-cli carries tan-cli's own default-branch
+          # head_sha, not ${{ github.sha }} -- repository_dispatch does not
+          # let the sender's SHA travel into the receiver's run ref. So
+          # nothing in this repo can filter tan-cli's run list down to "the
+          # run THIS dispatch caused" versus a concurrent alp-sdk push (or
+          # any other repository_dispatch sender to tan-cli); dispatch-confirm.sh
+          # can only correlate on event=repository_dispatch plus recency.
+          # Closing that gap needs a tan-cli-side change (e.g. tan's
+          # parity.yml naming its run from client_payload.sdk_ref so it's
+          # visible in the run list) -- tracked as follow-up, not done here.
+          gh api repos/alplabai/tan-cli/dispatches \
+            -f event_type=alp-sdk-planner-change \
+            -F "client_payload[sdk_ref]=${{ github.sha }}" \
+            -F "client_payload[branch]=${{ github.ref_name }}"
+          echo "::notice::dispatched alp-sdk-planner-change to tan-cli for ${{ github.sha }} (${{ github.ref_name }})"
+
+      - name: Find this workflow's previous dispatch (self-calibration baseline)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          # Baseline for dispatch-confirm.sh's self-calibrated staleness
+          # check: the created_at of THIS workflow's own previous run on
+          # alp-sdk (any status), i.e. roughly when we last dispatched to
+          # tan-cli before this push. Comparing tan-cli's most recent run
+          # against that, instead of a wall-clock constant, is immune to
+          # ordinary quiet periods by construction -- if alp-sdk itself went
+          # N hours without touching the contract surface, no tan-cli run is
+          # expected in those N hours either. Uses the default GITHUB_TOKEN
+          # (read-only, this repo only) -- deliberately NOT the App token,
+          # which is scoped to tan-cli and has no access to alp-sdk itself.
+          # If this can't be determined (the workflow's first-ever run, or
+          # the query fails), PREV_DISPATCH_EPOCH stays unset and the script
+          # falls back to its own documented wall-clock threshold.
+          prev_created="$(gh api "repos/${{ github.repository }}/actions/workflows/dispatch-tan-parity.yml/runs?per_page=5" \
+              -q "[.workflow_runs[] | select(.id != ${{ github.run_id }})][0].created_at // empty" 2>/dev/null)"
+          prev_epoch=""
+          if [ -n "${prev_created}" ]; then
+              prev_epoch="$(date -u -d "${prev_created}" +%s 2>/dev/null || echo "")"
+          fi
+          echo "PREV_DISPATCH_EPOCH=${prev_epoch}" >> "$GITHUB_ENV"
+
+      # The dispatch API answers 204 with no body whether or not anything is
+      # listening, so "the call succeeded" is not evidence a run started. Look
+      # for the run itself, and say plainly which of the two happened rather
+      # than leaving a green step to imply the good one.
+      #
+      # The polling + verdict logic lives in scripts/dispatch-confirm.sh (not
+      # inline) so it's runnable and testable outside CI -- see
+      # tests/scripts/test_dispatch_confirm.py, which stubs `gh` and proves
+      # PASS, WARN, and both FAIL transcripts. That test file is what caught
+      # the #194 failure mode this step used to have: its only FAIL condition
+      # was tan-cli's LIFETIME repository_dispatch total_count being exactly
+      # 0, which stops being reachable forever the moment the seam fires once
+      # (it now sits at 2) -- a gate that can only ever warn is a guard
+      # wearing a guard's name. The script's reachable failure is now
+      # self-calibrated (see PREV_DISPATCH_EPOCH, set by the previous step):
+      # it fails when tan-cli has produced NO repository_dispatch run at all
+      # since the last time THIS workflow itself dispatched, which is real
+      # evidence of a broken seam and, unlike a wall-clock constant, does not
+      # false-positive on this workflow's own ordinary quiet periods (up to
+      # 110.8h measured -- see the script's fallback-threshold comment).
+      #
+      # DISPATCH_EPOCH and PREV_DISPATCH_EPOCH are both already in
+      # $GITHUB_ENV from the two preceding steps -- not captured here, so
+      # this step's own 1-3s startup lag can't shrink either window.
+      # This job had no checkout before the verdict logic moved out of the
+      # workflow and into scripts/dispatch-confirm.sh -- it only ever called
+      # `gh api`, which needs no working tree. Extracting the script without
+      # adding this made every run die with
+      #   bash: scripts/dispatch-confirm.sh: No such file or directory
+      # (exit 127), because the runner's workspace was empty. Sparse, because
+      # the one file is all this job reads.
+      - name: Check out the confirm script
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          sparse-checkout: |
+            scripts/dispatch-confirm.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Confirm a run actually started
+        env:
+          GH_TOKEN: ${{ steps.apptoken.outputs.token }}
+        run: |
+          set -uo pipefail
+          test -f scripts/dispatch-confirm.sh || {
+            echo "::error::scripts/dispatch-confirm.sh missing from the runner workspace -- the checkout step above did not fetch it"
+            exit 1
+          }
+          bash scripts/dispatch-confirm.sh

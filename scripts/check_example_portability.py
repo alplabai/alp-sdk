@@ -161,6 +161,13 @@ _VENDOR_FAMILY_TO_SLUG = {
     "nxp-imx9": "imx93",
 }
 
+# SDK-level block helpers live under `blocks/<name>/`, not
+# `chips/<name>/`, so they don't have a metadata/chips/<name>.yaml.
+# Skip them in the families[] check -- block helpers are
+# SoM-family-agnostic by design (they're software abstractions
+# over GPIO / PDM, not third-party ICs).
+_BLOCK_SLUGS = {"button_led", "pdm_mic"}
+
 _SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".h", ".hh", ".hpp"}
 _SOURCE_SKIP_DIRS = {"build", ".git", ".west", "__pycache__"}
 _E1M_INCLUDE_RE = re.compile(r'^\s*#\s*include\s*[<"]alp/e1m_pinout\.h[>"]')
@@ -686,10 +693,19 @@ def classify(chip_families: dict[str, list[str]],
         return _no_chip_ring(family, supported_boards,
                              board_host_families or {})
 
+    # Block-slug pseudo-chips (button_led, pdm_mic, ...) have no
+    # metadata/chips/<slug>.yaml and carry no family constraint --
+    # drop them before computing the family intersection so they
+    # don't drag a resolvable example down to ring-unknown (#884).
+    real_chips = [c for c in example_chips if c not in _BLOCK_SLUGS]
+    if not real_chips:
+        return _no_chip_ring(family, supported_boards,
+                             board_host_families or {})
+
     # Collect the intersection of families across every chip the
     # example references.  An example runs on a family iff every
     # chip it lists supports that family.
-    family_sets = [set(chip_families.get(c, [])) for c in example_chips]
+    family_sets = [set(chip_families.get(c, [])) for c in real_chips]
     if not all(family_sets):
         # At least one chip we couldn't resolve -- treat as unknown ring.
         return "ring-unknown"
@@ -737,13 +753,6 @@ def check_example(example_dir: pathlib.Path,
             f"E1M/E1M-X pinout namespace; add the prefix to "
             f"_SKU_PINOUT_TABLE in {pathlib.Path(__file__).name}"
         )
-
-    # SDK-level block helpers live under `blocks/<name>/`, not
-    # `chips/<name>/`, so they don't have a metadata/chips/<name>.yaml.
-    # Skip them in the families[] check -- block helpers are
-    # SoM-family-agnostic by design (they're software abstractions
-    # over GPIO / PDM, not third-party ICs).
-    _BLOCK_SLUGS = {"button_led", "pdm_mic"}
 
     if family is not None:
         for chip in chips:

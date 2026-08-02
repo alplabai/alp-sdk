@@ -805,7 +805,11 @@ def main() -> int:
     payload = json.dumps(snapshot, indent=2, sort_keys=True) + "\n"
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(payload, encoding="utf-8")
+        # newline="": git normalizes CRLF back to LF on `git add`, so a
+        # plain write_text() here never reaches a commit or reds CI --
+        # it just leaves this file whole-file-dirty in every working
+        # tree on Windows, burying the one real line that changed.
+        args.output.write_text(payload, encoding="utf-8", newline="")
         print(f"wrote {args.output} ({len(snapshot['headers'])} headers)")
     else:
         sys.stdout.write(payload)

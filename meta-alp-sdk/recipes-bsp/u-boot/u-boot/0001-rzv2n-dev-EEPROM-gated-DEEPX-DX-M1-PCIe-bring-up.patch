@@ -1,5 +1,5 @@
 From 8ceab3bd106618015f41e76fb092a5a6f7759797 Mon Sep 17 00:00:00 2001
-From: Caner <alpcaner92@gmail.com>
+From: Alp Lab AB <contact@alplab.ai>
 Date: Fri, 29 May 2026 09:59:20 +0200
 Subject: [PATCH] rzv2n-dev: EEPROM-gated DEEPX DX-M1 PCIe bring-up
 
@@ -19,6 +19,8 @@ is required or board_late_init() is never called (LTO dead-strips it).
 
 PI3DBS12212A PD is ACTIVE-LOW: P80 must be driven LOW to enable the mux
 outputs (SEL=P95 low = DEEPX path_0; M1_RESET=PA6 high = released).
+
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  arch/arm/dts/rzv2n-dev.dts          |   8 ++
  board/renesas/rzv2n-dev/rzv2n-dev.c | 113 ++++++++++++++++++++++++++++

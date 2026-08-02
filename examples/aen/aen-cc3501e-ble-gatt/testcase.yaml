@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: aen-cc3501e-ble-gatt
+  description: |
+    Bench proof of the #480 CC3501E BLE GATT-SERVER path through the
+    portable <alp/ble.h> surface on the E1M-AEN801 (Alif Ensemble E8,
+    M55-HE): open the radio, register a service, advertise, then exercise
+    gatt read/write/notify with NO live central peer on this bench. Prints
+    a single RESULT PASS:/RESULT FAIL: line (RAM console -- see board.yaml
+    diagnostics.console: ram).
+
+tests:
+  alp_sdk.examples.aen.cc3501e_ble_gatt.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - cc3501e
+      - ble
+      - gatt
+    build_only: true
+    # Layer the native_sim console override AFTER the generated alp.conf
+    # (which sets CONFIG_RAM_CONSOLE=y from board.yaml diagnostics.console:
+    # ram). native_sim has no RAM console -> picolibc __stdout_hook_install
+    # link failure without this. See native_sim.conf.
+    extra_args: EXTRA_CONF_FILE=native_sim.conf

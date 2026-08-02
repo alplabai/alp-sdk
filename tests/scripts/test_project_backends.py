@@ -22,7 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _project_support import LOADER, _run_loader, _write_board  # noqa: E402
+from _project_support import LOADER, REPO, _run_loader, _write_board  # noqa: E402
 
 
 class TestHwBackendsLoader(unittest.TestCase):
@@ -152,20 +152,36 @@ class TestHwBackendsLoader(unittest.TestCase):
         self.assertEmitted    ("E1M-V2N101", "CONFIG_ALP_CMSIS_DSP_TMU_CORDIC=y")
         self.assertEmitted    ("E1M-V2N101", "CONFIG_ALP_CMSIS_DSP_TMU_FFT=y")
 
-    def test_nx9101_u65_resolves(self) -> None:
+    def test_nx9101_u65_wiring_refused_not_buildable(self) -> None:
         """NX9101: i.MX 93's Ethos-U65 must resolve via the
         ml_npu_primary class; the legacy preferred_backend handler
-        + the new loader hook must both contribute their gates."""
-        self.assertEmitted    ("E1M-NX9101", "CONFIG_ALP_TFLM_ETHOS_U65=y")
-        self.assertNotEmitted ("E1M-NX9101", "CONFIG_ALP_TFLM_ETHOS_U55=y")
-        self.assertNotEmitted ("E1M-NX9101", "CONFIG_ALP_TFLM_ETHOS_U85=y")
-        self.assertEmitted    ("E1M-NX9101", "CONFIG_ALP_TFLM_NEON=y")
+        + the new loader hook must both contribute their gates.
+
+        #1025: E1M-NX9101's only hw_rev (imx93 r1) is `status: tbd`,
+        refused outright by the hw_rev-buildable gate before emission
+        ever reaches this wiring -- pin that honest refusal instead of
+        the (still-correct, currently-unreachable) wiring below.
+        Restore the four calls once
+        metadata/e1m_modules/imx93/hw-revisions.yaml:r1 carries a
+        buildable status:
+            self.assertEmitted    ("E1M-NX9101", "CONFIG_ALP_TFLM_ETHOS_U65=y")
+            self.assertNotEmitted ("E1M-NX9101", "CONFIG_ALP_TFLM_ETHOS_U55=y")
+            self.assertNotEmitted ("E1M-NX9101", "CONFIG_ALP_TFLM_ETHOS_U85=y")
+            self.assertEmitted    ("E1M-NX9101", "CONFIG_ALP_TFLM_NEON=y")
+        """
+        out = self._emit("E1M-NX9101")
+        self.assertIn("hw_rev 'r1' exists but is not buildable", out)
 
     def test_universal_fallback_dma_always_emitted(self) -> None:
         """The unconditional DMA fallback (tensor_dma_copy /
         i2s_dma / spi_dma) must fire on every SKU because none of
-        them carries a `requires_cap:` matcher."""
-        for sku in ("E1M-AEN301", "E1M-AEN801", "E1M-V2N101", "E1M-NX9101"):
+        them carries a `requires_cap:` matcher.
+
+        E1M-NX9101 is skipped (#1025: its only hw_rev, imx93 r1, is
+        `status: tbd`, refused by the hw_rev-buildable gate before
+        this SKU's fallback wiring is even reachable) -- add it back
+        to the tuple once that status is buildable."""
+        for sku in ("E1M-AEN301", "E1M-AEN801", "E1M-V2N101"):
             with self.subTest(sku=sku):
                 self.assertEmitted (sku, "CONFIG_ALP_TFLM_DMA_COPY=y")
                 self.assertEmitted (sku, "CONFIG_ALP_MINIMP3_I2S_DMA=y")
@@ -173,11 +189,24 @@ class TestHwBackendsLoader(unittest.TestCase):
     def test_optiga_truth_cross_family(self) -> None:
         """OPTIGA Trust M is populated on AEN + V2N + NX9101, but the
         mbedTLS/BearSSL handshake integration is still planned.  The
-        loader must not emit active TLS offload claims for it."""
+        loader must not emit active TLS offload claims for it.
+
+        #1025: E1M-NX9101's only hw_rev (imx93 r1) is `status: tbd`,
+        refused outright by the hw_rev-buildable gate before emission
+        ever reaches this wiring -- pin that honest refusal instead of
+        the (still-correct, currently-unreachable) assertions below
+        (they were vacuous: a total build failure has zero CONFIG_
+        lines, so assertNotEmitted always passed regardless of what
+        the wiring actually does). Restore once
+        metadata/e1m_modules/imx93/hw-revisions.yaml:r1 carries a
+        buildable status:
+            self.assertNotEmitted ("E1M-NX9101", "CONFIG_ALP_MBEDTLS_OPTIGA=y")
+            self.assertNotEmitted ("E1M-NX9101", "CONFIG_ALP_MBEDTLS_CRYPTOCELL=y")
+        """
         self.assertNotEmitted ("E1M-AEN401", "CONFIG_ALP_MBEDTLS_CRYPTOCELL=y")
         self.assertNotEmitted ("E1M-AEN401", "CONFIG_ALP_MBEDTLS_OPTIGA=y")
-        self.assertNotEmitted ("E1M-NX9101", "CONFIG_ALP_MBEDTLS_OPTIGA=y")
-        self.assertNotEmitted ("E1M-NX9101", "CONFIG_ALP_MBEDTLS_CRYPTOCELL=y")
+        out = self._emit("E1M-NX9101")
+        self.assertIn("hw_rev 'r1' exists but is not buildable", out)
 
     def test_sw_fallback_always_emitted(self) -> None:
         """Each library's SW-fallback CONFIG_*=y is emitted
@@ -219,6 +248,14 @@ class TestInferenceFromSomCaps(unittest.TestCase):
     multi-accelerator SKUs (V2M101 = DRP-AI3 + DEEPX DX-M1); the
     build wires in EVERY backend the SoM has so the runtime pick
     always finds a compiled dispatcher.
+
+    `cores.<id>.inference: { default_arena_kib: ... }` is declared on
+    every slice below -- issue #874 gates the whole inference-backend
+    section on the slice actually requesting inference (this is *which
+    backend*, still silicon-determined and never customer-picked; it is
+    a different axis from *whether* this slice uses inference at all).
+    Every real inference example under examples/ai, examples/audio,
+    examples/camera-vision already declares this block.
     """
 
     def _v2_zephyr_slice(self, sku: str, core: str) -> tuple[int, str, str]:
@@ -229,6 +266,7 @@ class TestInferenceFromSomCaps(unittest.TestCase):
               {core}:
                 os: zephyr
                 app: ./src
+                inference: {{ default_arena_kib: 128 }}
         """
         with tempfile.TemporaryDirectory() as td:
             path = _write_board(Path(td), body)
@@ -330,15 +368,26 @@ class TestInferenceFromSomCaps(unittest.TestCase):
         self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55=y", out)
         self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85=y", out)
 
-    def test_nx9101_emits_u65_plus_n93(self) -> None:
+    def test_nx9101_u65_plus_n93_wiring_refused_not_buildable(self) -> None:
         """i.MX 93 carries a single Ethos-U65; the new U65 switch and
-        the legacy N93 PHY-side switch coexist (orthogonal selectors)."""
+        the legacy N93 PHY-side switch coexist (orthogonal selectors).
+
+        #1025: E1M-NX9101's only hw_rev (imx93 r1) is `status: tbd`,
+        refused outright by the hw_rev-buildable gate before emission
+        ever reaches this wiring -- pin that honest refusal instead of
+        the (still-correct, currently-unreachable) assertions below.
+        Restore once
+        metadata/e1m_modules/imx93/hw-revisions.yaml:r1 carries a
+        buildable status:
+            self.assertEqual(rc, 0, msg=err)
+            self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U65=y", out)
+            self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93=y", out)
+            self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55=y", out)
+            self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85=y", out)
+        """
         rc, out, err = self._v2_zephyr_slice("E1M-NX9101", "m33")
-        self.assertEqual(rc, 0, msg=err)
-        self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U65=y", out)
-        self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93=y", out)
-        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55=y", out)
-        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85=y", out)
+        self.assertNotEqual(rc, 0)
+        self.assertIn("hw_rev 'r1' exists but is not buildable", err)
 
     def test_v2n101_emits_no_ethos_variants(self) -> None:
         """V2N has no Ethos-U at all; none of the per-variant switches
@@ -367,13 +416,24 @@ class TestInferenceFromSomCaps(unittest.TestCase):
         self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_NEON=y", out)
         self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_HELIUM=y", out)
 
-    def test_nx9101_m33_emits_tflm_ref(self) -> None:
+    def test_nx9101_m33_tflm_ref_wiring_refused_not_buildable(self) -> None:
         """M33 on i.MX 93 -- baseline ARMv8-M, single-precision FPU,
-        no MVE -> REF."""
+        no MVE -> REF.
+
+        #1025: E1M-NX9101's only hw_rev (imx93 r1) is `status: tbd`,
+        refused outright by the hw_rev-buildable gate before emission
+        ever reaches this wiring -- pin that honest refusal instead of
+        the (still-correct, currently-unreachable) assertions below.
+        Restore once
+        metadata/e1m_modules/imx93/hw-revisions.yaml:r1 carries a
+        buildable status:
+            self.assertEqual(rc, 0, msg=err)
+            self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_REF=y", out)
+            self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_HELIUM=y", out)
+        """
         rc, out, err = self._v2_zephyr_slice("E1M-NX9101", "m33")
-        self.assertEqual(rc, 0, msg=err)
-        self.assertIn   ("CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_REF=y", out)
-        self.assertNotIn("CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_HELIUM=y", out)
+        self.assertNotEqual(rc, 0)
+        self.assertIn("hw_rev 'r1' exists but is not buildable", err)
 
     # --- cmake-args / Yocto emit: concurrent multi-NPU on V2M101 ------
 
@@ -443,6 +503,37 @@ class TestInferenceFromSomCaps(unittest.TestCase):
             path = _write_board(Path(td), body)
             rv = _run_loader(input_path=path, emit="system-manifest")
         self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+
+
+class TestInferenceRequestSignalCoversRealExamples(unittest.TestCase):
+    """issue #874 adversarial follow-up: two real examples call
+    `alp_inference_open()` from a Zephyr slice but declare no
+    `cores.<id>.inference:` block, so the item-4 gate's original
+    "declared `inference:`" signal alone false-negatived them (no
+    backend emitted at all). `_slice_wants_inference` also fires on a
+    `libraries:` pull of `tflite-micro`; `ai-object-detection-realtime`
+    is covered by that broadened signal, `v2n-m1-deepx-inference` (no
+    `libraries:` at all) was fixed at the metadata level instead (its
+    board.yaml now declares `inference:`) -- see kconfig.py's
+    `_slice_wants_inference` docstring for why both were needed."""
+
+    def test_ai_object_detection_realtime_gets_tflm_via_library_signal(
+        self,
+    ) -> None:
+        board = (REPO / "examples" / "camera-vision"
+                 / "ai-object-detection-realtime" / "board.yaml")
+        rv = _run_loader(input_path=board, emit="zephyr-conf", core="m33_sm")
+        self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+        self.assertIn("CONFIG_ALP_SDK_INFERENCE_BACKEND_TFLM=y", rv.stdout)
+
+    def test_v2n_m1_deepx_inference_gets_tflm_via_declared_inference(
+        self,
+    ) -> None:
+        board = (REPO / "examples" / "v2n" / "v2n-m1-deepx-inference"
+                  / "board.yaml")
+        rv = _run_loader(input_path=board, emit="zephyr-conf", core="m33_sm")
+        self.assertEqual(rv.returncode, 0, msg=rv.stderr)
+        self.assertIn("CONFIG_ALP_SDK_INFERENCE_BACKEND_TFLM=y", rv.stdout)
 
 
 if __name__ == "__main__":

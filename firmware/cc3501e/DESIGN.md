@@ -153,5 +153,9 @@ firmware redesigns:
    uses hardware SS0 + READY.
 3. **SDIO-device.** Implement the §21 register bring-up in
    `transport_hw_ti_sdio.c` if/when SDIO is needed (SPI is the default).
-4. **Flashing.** `flash.py` / the `cc3501e_usb_bootloader` backend wait
-   on TI's `cc3501e-flasher` CLI; until it ships, flash via SWD/J-Link.
+4. **Flashing.** The CC3501E is Alp-OTA-updated (`update_channel:
+   alp_ota_spi_otp`), never customer-flashed; bench units are
+   warm-programmed via SWD/J-Link (see `docs/cc3501e-production.md`).
+   The retired public `cc3501e_usb_bootloader` backend and
+   `flash.py` release/bench helper now live in `alp-sdk-internal`
+   as Alp-internal OTA-build tooling.

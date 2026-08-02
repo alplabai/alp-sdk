@@ -14,7 +14,7 @@ tests:
   alp_sdk.examples.iot_dashboard.native_sim:
     platform_allow: native_sim/native/64
     build_only: true
-    # native_sim.conf loads LAST (after alp.conf's OVERLAY_CONFIG
+    # native_sim.conf loads LAST (after alp.conf's EXTRA_CONF_FILE
     # emit) so it can flip CONFIG_MBEDTLS off -- works around the
     # Zephyr 4.4 / mbedtls 3.6 ssl_misc.h include-order bug; see
     # native_sim.conf for the full rationale.

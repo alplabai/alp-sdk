@@ -140,6 +140,12 @@
       "additionalProperties": { "type": "integer", "minimum": 0 }
     },
 
+    "peripherals_unverified": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Subset of THIS file's `peripherals` keys whose count has no datasheet/DFP/HWRM/SVD citation (inherited from a sibling, carried forward from an early ingestion pass, or otherwise asserted without a primary source). Distinct from `pending_reference_manual_ingestion`, which marks the WHOLE block unaudited on an otherwise-placeholder file; this field flags specific gaps on a file that IS mostly grounded (issue #936). `gen_soc_caps.py` surfaces the listed keys as a comment above the SoC's block in soc_caps.h; `validate_metadata.py` warns (non-fatal) if a listed key isn't actually present in `peripherals`."
+    },
+
     "capabilities": {
       "type": "object",
       "description": "Silicon-determined feature flags. SoM YAMLs may override or extend specific keys via their own capabilities: block (e.g., V2N declares cau: true because the on-module GD32 bridge provides CAU even though the host silicon does not).",
@@ -277,6 +283,7 @@
       "properties": {
         "type":            { "type": "string", "description": "e.g. ethos-u55, ethos-u85, drp-ai3, dx-m1." },
         "subtype":         { "type": "string", "description": "e.g. high-perf (NPU-HP), high-efficiency (NPU-HE), generative (NPU-HG)." },
+        "paired_core":     { "type": "string", "description": "`cores[].id` of the CPU core this NPU instance is wired to (Alif: the High-Efficiency M55 drives the 128-MAC high-efficiency Ethos-U55, the High-Performance M55 the 256-MAC high-perf one). Lets the build emit size the accelerator per target core instead of assuming the SoC's most-capable instance. Omit for a shared / non-core-paired NPU (e.g. the E8 U85 on the HG subsystem)." },
         "mac_per_cycle":   { "type": "integer" },
         "freq_mhz":        { "type": "integer" },
         "gops":            { "type": "number", "description": "Giga ops per second.  Provide either gops or tops (= gops × 1000)." },
@@ -354,6 +361,33 @@
         "zephyr_soc_variant": {
           "type": "string",
           "description": "Zephyr upstream SOC_* Kconfig / devicetree symbol this variant builds against, when it differs from `order_code` (e.g. a die upstream Zephyr doesn't model separately because it's devicetree-identical to a sibling it does model). `--emit zephyr-board` uses this in place of order_code for board filenames / Kconfig selects when present."
+        },
+        "debug": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Debug-probe identity for this variant (#987), consumed by alp-sdk-vscode to generate a working cortex-debug launch.json without human input. Every key is optional -- an absent key is a published 'unknown', not a guess, and must be copied verbatim from the owning tool's own list or a working in-tree invocation; a plausible-looking guess fails at the probe rather than at validation.",
+          "properties": {
+            "pyocd_target": {
+              "type": "string",
+              "minLength": 1,
+              "description": "pyOCD target id (cortex-debug `targetId` for servertype `pyocd`). For Alif Ensemble parts this is the variant's own `order_code` -- confirmed 1:1 against the CMSIS-Pack index (pack AlifSemiconductor.Ensemble 2.2.0)."
+            },
+            "jlink_device": {
+              "type": "object",
+              "description": "SEGGER J-Link **attach/debug** device name (cortex-debug `device` for servertype `jlink`) for a live core, keyed by `cores[].id`. On Alif Ensemble this is the GENERIC `Cortex-M55` for every M55 core, not a part-number profile: `scripts/bench/aen/bench-env.sh:99-111` documents two distinct J-Link identities and states the part-number profile 'will NOT connect to a live/running secure core' -- corroborated by `docs/_aen-runbook-section.md:251` (`Could not connect to the target device` when the part profile is used to attach) and `docs/aen-bench-bringup.md:14` (the generic profile is what is bench-proven to attach, CPUID `0x411FD220` / SW-DP IDR `0x4C013477`). The part-number profile is a *separate* fact -- see `jlink_flash_device`. Validated against cores[].id by scripts/validate_metadata.py::_check_soc_debug_probe_identity.",
+              "additionalProperties": { "type": "string", "minLength": 1 }
+            },
+            "jlink_flash_device": {
+              "type": "string",
+              "minLength": 1,
+              "description": "SEGGER J-Link **part-number device profile**, used ONLY to unlock J-Link's built-in Flow D MRAM loader (`scripts/bench/aen/bench-env.sh:99-102`) -- it cannot attach to a live/running core (use `jlink_device` for that) and is not per-core: both `scripts/bench/aen/flash-jlink-hp.sh` and `flash-jlink-mramxip.sh` select the SAME device string regardless of which core they flash, so this is a single per-variant string, not a jlink_device-shaped map. Populate only where an in-tree script proves the exact string -- do not derive it from a naming convention."
+            },
+            "openocd_config": {
+              "type": "string",
+              "minLength": 1,
+              "description": "OpenOCD board/target config file path relative to OpenOCD's own scripts/ tree (cortex-debug `configFiles[]` for servertype `openocd`). No SoC family in this repo has one today (verified absent from OpenOCD upstream master's tcl/target + tcl/board for Alif Ensemble and Renesas RZ/V2N as of this issue) -- schema-only until a vendor config exists; do not populate with a guess."
+            }
+          }
         }
       }
     }

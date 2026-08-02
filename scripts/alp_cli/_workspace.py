@@ -1,9 +1,9 @@
 """Shared project / SDK / west-workspace discovery for the `alp` CLI.
 
-The build / run / flash / emit / monitor verbs are thin wrappers over the
-same machinery the `west alp-*` extension commands drive (the orchestrator
-package, `scripts/alp_project.py`, the flash-backend dispatcher).  This
-module centralises the three questions every wrapper asks:
+The run / emit / monitor verbs are thin wrappers over the same machinery
+the `west alp-*` extension commands drive (the orchestrator package,
+`scripts/alp_project.py`).  This module centralises the three questions
+every wrapper asks:
 
   1. Where is the app?          (walk up from cwd until board.yaml)
   2. Where is the SDK checkout? (ALP_SDK_ROOT env, else this package's repo)
@@ -12,7 +12,7 @@ module centralises the three questions every wrapper asks:
 plus the sub-process env wiring (`ALP_SDK_ROOT`, `EXTRA_ZEPHYR_MODULES`,
 `PYTHONPATH=<sdk>/scripts`) that mirrors
 `scripts/west_commands/_alp_common.env_with_sdk()` so a CLI-invoked
-orchestrator run behaves identically to a `west alp-build` one.
+orchestrator run behaves identically to a `west alp-emit` one.
 """
 
 from __future__ import annotations
@@ -71,17 +71,22 @@ def subprocess_env(root: Path) -> dict[str, str]:
     resolves regardless of how the CLI itself was installed.
     """
     env = os.environ.copy()
-    sep = os.pathsep
+    # EXTRA_ZEPHYR_MODULES is a CMake list -- Zephyr's zephyr_module.py
+    # splits it on `;` on every platform, never os.pathsep (joining with
+    # `:` on Linux/WSL makes "is not a valid zephyr module" fail the
+    # configure step). PYTHONPATH is a real OS path list -- os.pathsep.
+    zsep = ";"
     existing = env.get("EXTRA_ZEPHYR_MODULES", "")
-    if str(root) not in existing.split(sep):
+    if str(root) not in existing.split(zsep):
         env["EXTRA_ZEPHYR_MODULES"] = (
-            existing + sep + str(root) if existing else str(root)
+            existing + zsep + str(root) if existing else str(root)
         )
     env["ALP_SDK_ROOT"] = str(root)
+    psep = os.pathsep
     pp = env.get("PYTHONPATH", "")
     sdk_scripts = str(root / "scripts")
-    if sdk_scripts not in pp.split(sep):
-        env["PYTHONPATH"] = (pp + sep + sdk_scripts) if pp else sdk_scripts
+    if sdk_scripts not in pp.split(psep):
+        env["PYTHONPATH"] = (pp + psep + sdk_scripts) if pp else sdk_scripts
     return env
 
 

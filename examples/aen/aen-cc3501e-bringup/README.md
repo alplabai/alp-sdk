@@ -39,7 +39,7 @@ software GPIO CS is installed; the SPI driver drives SS0 from the controller.
 ## What it does
 
 1. Opens `WIFI_EN` + `E_WIFI.NRST` GPIOs (output).
-2. Opens SPI1 (`bus_id = 1`, mode 0, 8 MHz, hardware SS0) — Alif is master.
+2. Opens SPI1 (`bus_id = 1`, mode 0, 14 MHz request / ~14.3 MHz derived SCLK, hardware SS0) — Alif is master.
 3. `cc3501e_reset()` — sequences `WIFI_EN` + `nRESET` (TI SWRU626) and
    blocks ~905 ms for the boot budget.
 4. Retries `PING` until the coprocessor answers.

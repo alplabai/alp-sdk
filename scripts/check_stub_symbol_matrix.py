@@ -75,7 +75,8 @@ PER_CLASS = [
     "ALP_VENDOR_OVERRIDES_COUNTER", "ALP_VENDOR_OVERRIDES_I2S",
     "ALP_VENDOR_OVERRIDES_CAN", "ALP_VENDOR_OVERRIDES_RTC",
     "ALP_VENDOR_OVERRIDES_WDT", "ALP_VENDOR_OVERRIDES_DISPLAY",
-    "ALP_VENDOR_OVERRIDES_CAMERA", "ALP_VENDOR_OVERRIDES_WIFI",
+    "ALP_VENDOR_OVERRIDES_CAMERA", "ALP_VENDOR_OVERRIDES_JPEG",
+    "ALP_VENDOR_OVERRIDES_WIFI",
     "ALP_VENDOR_OVERRIDES_MQTT", "ALP_VENDOR_OVERRIDES_AUDIO_IN",
     "ALP_VENDOR_OVERRIDES_AUDIO_OUT", "ALP_VENDOR_OVERRIDES_BLE",
     "ALP_VENDOR_OVERRIDES_SECURITY", "ALP_VENDOR_OVERRIDES_INFERENCE",
@@ -188,7 +189,7 @@ def main() -> int:
     GOLDEN.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(result, indent=2, sort_keys=True) + "\n"
     if args.update:
-        GOLDEN.write_text(text, encoding="utf-8")
+        GOLDEN.write_text(text, encoding="utf-8", newline="")
         print(f"wrote {GOLDEN.relative_to(REPO)} "
               f"({len(result)} combos, {len(base)} full symbols)")
         if errors:  # still surface structural breakage on --update

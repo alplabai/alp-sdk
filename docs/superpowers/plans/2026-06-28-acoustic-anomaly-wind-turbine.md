@@ -20,13 +20,13 @@
 - The unit tests compile each core `.c` directly via a relative path from the test dir, with `_GNU_SOURCE` defined in the test CMakeLists (for `M_PI` on the host) — same pattern as the rail example. `zassert_within` takes `double`; cast `float` args to `(double)` to avoid `-Werror=double-promotion`.
 - Twister gate (literal paths, NO `$VARS`, NO pipe; read `/tmp/tw-wtac/twister.json`):
   ```
-  wsl -d Ubuntu -- bash -lc 'cd /home/alplab/zephyrproject && \
-    export ZEPHYR_BASE=/home/alplab/zephyrproject/zephyr && \
-    export EXTRA_ZEPHYR_MODULES=/mnt/c/Users/caner/Documents/GitHub/alp-sdk && \
+  wsl -d Ubuntu -- bash -lc 'cd /home/<user>/zephyrproject && \
+    export ZEPHYR_BASE=/home/<user>/zephyrproject/zephyr && \
+    export EXTRA_ZEPHYR_MODULES=/mnt/c/Users/<user>/Documents/GitHub/alp-sdk && \
     export ZEPHYR_TOOLCHAIN_VARIANT=host && \
     python3 zephyr/scripts/twister \
-      --testsuite-root /mnt/c/Users/caner/Documents/GitHub/alp-sdk/tests/unit \
-      --testsuite-root /mnt/c/Users/caner/Documents/GitHub/alp-sdk/examples \
+      --testsuite-root /mnt/c/Users/<user>/Documents/GitHub/alp-sdk/tests/unit \
+      --testsuite-root /mnt/c/Users/<user>/Documents/GitHub/alp-sdk/examples \
       -p native_sim/native/64 -O /tmp/tw-wtac'
   ```
 
@@ -1124,7 +1124,7 @@ execute_process(
 if(NOT rc EQUAL 0)
     message(FATAL_ERROR "alp_project.py failed (rc=${rc})")
 endif()
-list(APPEND OVERLAY_CONFIG ${_alp_generated})
+list(APPEND EXTRA_CONF_FILE ${_alp_generated})
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(acoustic_anomaly_wind_turbine LANGUAGES C)

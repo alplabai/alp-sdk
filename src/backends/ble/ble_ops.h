@@ -83,10 +83,21 @@ struct alp_ble {
 	 * src/common/alp_slot_claim.h (alp_handle_op_enter/leave/
 	 * begin_close, issue #629) -- placed before in_use so the atomic-
 	 * claim zeroing in the dispatcher (memset up to
-	 * offsetof(..., in_use)) resets both on every fresh claim. */
-	uint8_t  lifecycle;
-	uint32_t active_ops;
-	bool     in_use;
+	 * offsetof(..., in_use)) resets both on every fresh claim.
+	 *
+	 * cb_thread/cb_active/close_pending (issue #756): alp_ble_scan_start()
+	 * invokes the scan callback SYNCHRONOUSLY, inline, before returning
+	 * -- a callback that calls alp_ble_close() on its own radio handle
+	 * used to deadlock waiting for its own still-in-flight scan_start()
+	 * call to leave.  These three fields back the reentrant self-close
+	 * guard in src/common/alp_slot_claim.h; see
+	 * alp_ble_scan_start()/alp_ble_close() in src/ble_dispatch.c. */
+	uint8_t   lifecycle;
+	uint32_t  active_ops;
+	uintptr_t cb_thread;
+	bool      cb_active;
+	bool      close_pending;
+	bool      in_use;
 };
 
 struct alp_ble_conn {

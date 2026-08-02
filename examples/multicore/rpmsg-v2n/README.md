@@ -75,7 +75,7 @@ The orchestrator resolves the `alp_default_rpmsg` carve-out
 deterministically from E1M-V2N101's `memory_map:` block.  The
 default non-cacheable region is `ocram_low` (512 KiB at
 `0x00010000`).  A 512 KiB carve-out reserves the entire region;
-re-runs of `west alp-build` produce byte-identical placements
+re-runs of `tan build` produce byte-identical placements
 (spec §6.1).
 
 | Range                       | Owner       | Notes                                                |
@@ -109,7 +109,7 @@ to `meta-alp-sdk` (spec §6.5).
 
 ```bash
 cd alp-workspace
-west alp-build alp-sdk/examples/multicore/rpmsg-v2n
+tan build alp-sdk/examples/multicore/rpmsg-v2n
 ```
 
 That single command:
@@ -131,14 +131,14 @@ Iteration:
 
 ```bash
 # Rebuild only the M33 slice (skips Yocto's hour-long rebuild):
-west alp-build alp-sdk/examples/multicore/rpmsg-v2n --core m33_sm
+tan build alp-sdk/examples/multicore/rpmsg-v2n --core m33_sm
 ```
 
 Image + flash:
 
 ```bash
-west alp-image     # -> build/image-bundle/alp-system.zip + .swu
-west alp-flash     # walks boot_order: from the manifest
+tan image     # -> build/image-bundle/alp-system.zip + .swu
+tan flash     # walks boot_order: from the manifest
 ```
 
 ## Reference

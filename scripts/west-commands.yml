@@ -4,32 +4,11 @@
 # workspace that imports this repo as a module.  See
 # zephyr/module.yml's `west-commands:` field for how it's surfaced.
 #
-# Phase 2 of the 2026-05-15 heterogeneous-OS redesign splits the
-# single `alp-build` command into five focused commands; see
-# docs/superpowers/specs/2026-05-15-heterogeneous-os-orchestration-design.md
-# §5.1.
+# ADR-0020 Phase 4 (preview, this branch): the SDK-side executor and its
+# build/flash/image/size/renode/clean commands were retired.  Only the
+# read-only planner/emit + lock/migrate/quality commands remain.
 
 west-commands:
-  - file: scripts/west_commands/alp_build.py
-    commands:
-      - name: alp-build
-        class: AlpBuild
-        help: Fan out a board.yaml project into per-core build slices
-  - file: scripts/west_commands/alp_image.py
-    commands:
-      - name: alp-image
-        class: AlpImage
-        help: Assemble a single flashable bundle from system-manifest.yaml
-  - file: scripts/west_commands/alp_flash.py
-    commands:
-      - name: alp-flash
-        class: AlpFlash
-        help: Walk system-manifest.yaml and program every slice
-  - file: scripts/west_commands/alp_clean.py
-    commands:
-      - name: alp-clean
-        class: AlpClean
-        help: Remove the per-project build dir + orchestrator cache
   - file: scripts/west_commands/alp_lock.py
     commands:
       - name: alp-lock
@@ -45,20 +24,9 @@ west-commands:
       - name: alp-quality
         class: AlpQuality
         help: Run the quality-task registry for a profile (JSON/JUnit/SARIF)
-  - file: scripts/west_commands/alp_renode.py
-    commands:
-      - name: alp-renode
-        class: AlpRenode
-        help: Boot the system manifest in Renode (headless smoke; --sim-mode for studio)
   # Read-only inspector for the orchestrator's --emit seam (no build).
   - file: scripts/west_commands/alp_emit.py
     commands:
       - name: alp-emit
         class: AlpEmit
         help: Print a generated config artefact from board.yaml (no build)
-  # Read-only memory-budget report: per-slice flash/RAM used vs SoM total.
-  - file: scripts/west_commands/alp_size.py
-    commands:
-      - name: alp-size
-        class: AlpSize
-        help: Report per-slice flash/RAM footprint against the SoM budget

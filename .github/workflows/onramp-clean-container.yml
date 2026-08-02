@@ -1,0 +1,661 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Clean-container onramp check (issue #949 addendum A7).
+#
+# pr-getting-started-aen801.yml already builds the AEN801 example on
+# every relevant PR, but it runs on `ubuntu-latest` -- a GitHub-hosted
+# runner image that ships git/curl/cmake/python3/ninja/xz-utils/wget out
+# of the box -- and it drives the build with a raw `west build` command,
+# never `tan`.  That combination means it could never have caught any
+# of #949's defects: a genuinely bare host failing `git clone` (no
+# git/curl), `scripts/bootstrap.sh` refusing without saying what to
+# install, nothing installing the Zephyr SDK toolchain, `tan sdk
+# switch` never being run, `west sdk install` dying on a missing `xz`
+# binary, or the pinned Zephyr SDK's own `setup.sh` dying on a missing
+# `wget` binary (found by this workflow's own first clean-container
+# acceptance run, one step past where the `xz` fix got it -- `wget` was
+# declared nowhere either).  This workflow closes that gap by running
+# the DOCUMENTED path (docs/getting-started.md's quickstart, verbatim,
+# `tan` and all) inside a genuinely bare `ubuntu:24.04` CONTAINER --
+# no apt package this job doesn't itself install first.
+#
+# Three jobs, deliberately different cost/frequency, per the addendum's
+# own ask to be honest about cost:
+#
+#   prereqs-and-bootstrap (every relevant PR, ~1-2 min): proves a bare
+#     host can go from nothing to an assembled west/Zephyr workspace
+#     following ONLY docs/getting-started.md §1's per-OS one-liner +
+#     `bash scripts/bootstrap.sh`.  No Zephyr SDK download -- catches
+#     defects 1, 2, 5 (git/curl, the bootstrap.sh refusal message, the
+#     missing `xz`/`wget` prerequisites) cheaply, on every PR that
+#     touches the onramp surface.
+#
+#     #1024 addition: this job also shellchecks scripts/bootstrap.sh AND
+#     tan-cli's own install.sh, then smoke-runs install.sh on this same
+#     bare container. Before this, install.sh was never shellchecked or
+#     smoke-run by any workflow in either repo -- full-quickstart-build
+#     below DOES run it, but only on schedule/dispatch/a labelled PR, so
+#     a broken installer would sit uncaught for up to a week. Sharing
+#     this job (rather than adding a fourth) costs nothing extra: the
+#     bare-container premise install.sh's smoke run needs is exactly the
+#     one this job already sets up.
+#
+#   prereqs-and-bootstrap-macos (every relevant PR, ~2-3 min, `macos-latest`
+#     -- GitHub bills macOS runner minutes at 10x Linux, so this is not free
+#     the way the job above is): the macOS half of the same coverage gap
+#     (issue #1033). `scripts/check_bootstrap_manifest.py`'s
+#     `_check_prerequisites_macos` already statically polices
+#     `scripts/bootstrap.sh`'s Darwin `REQUIRED_BINS` narrowing against
+#     `metadata/bootstrap.json`'s `prerequisites.macos` and runs on every OS
+#     leg of `python-smoke` -- so a ONE-SIDED edit to either file alone was
+#     already caught before this job existed; that part of #1033's "caught by
+#     reading source, not by any gate" was already stale by the time this PR
+#     opened. What genuinely had zero coverage, and what this job alone
+#     catches, is (a) EXECUTION -- proof the documented macOS quickstart step
+#     actually runs and succeeds, not just that two lists agree on paper
+#     (#1033's own framing: "enforcement of a list, not proof the journey
+#     works") -- and (b) a COORDINATED regression, where `bootstrap.sh:153`'s
+#     Darwin list and `bootstrap.json`'s `prerequisites.macos` are widened
+#     TOGETHER (e.g. both gain `xz` back) -- the static check passes by
+#     construction because the two sides still agree with each other, even
+#     though the effective macOS prerequisite set is now wrong. NOT a
+#     container job -- unlike the other two jobs in this file, GitHub ships
+#     no bare/minimal macOS runner image to run one in, and `macos-latest` is
+#     a real (non-containerized) VM with a large Homebrew tree already on
+#     PATH, so `xz` and `wget` are typically already resolvable there -- a
+#     bare `bootstrap.sh --no-west` run would pass whether or not the Darwin
+#     narrowing (scripts/bootstrap.sh:153) still excludes them, proving
+#     nothing. This job instead relocates any pre-existing `xz`/`wget`
+#     binaries out of PATH (and hard-fails if either is still resolvable
+#     afterwards -- see the job's own steps) before invoking bootstrap.sh, so
+#     a coordinated regression fails this job for real. This file's name
+#     (onramp-clean-container) predates this job and describes the other two,
+#     not this one -- kept here anyway because this IS the onramp's home and
+#     the coverage gap it closes is squarely an onramp gap (#1033), not
+#     because it runs in a container. This job is NOT in branch protection:
+#     a red run here is visible on the PR but does not block merge.
+#
+#   full-quickstart-build (weekly + workflow_dispatch + a labelled PR,
+#     ~10-15 min -- a real `west sdk install --gnu-toolchains
+#     arm-zephyr-eabi --no-hosttools` download, a few hundred MB per
+#     pr-twister.yml's own measurement): walks the REST of the
+#     documented quickstart -- installs `tan`, runs `tan bootstrap`,
+#     installs the toolchain, runs `tan sdk switch` + `tan --project
+#     ... build` against the curated gpio-button-led example, and
+#     asserts a real `zephyr.elf` came out the other end.  This is the
+#     expensive half (defects 3, 4) and does NOT run on every PR by
+#     default -- a doc-only PR that breaks this path normally waits for
+#     the weekly run, which is the cost/frequency trade the addendum
+#     asked to make explicit rather than silently skip.
+#
+#     #1024 addition: this job used to assemble the workspace with
+#     `bash scripts/bootstrap.sh` directly, same as prereqs-and-bootstrap
+#     above -- so nothing anywhere ever ran `tan bootstrap` itself, the
+#     Rust binary's own subcommand that docs/getting-started.md's
+#     quickstart actually tells a customer to run. `tan bootstrap` is
+#     documented as "a thin wrapper" around scripts/bootstrap.sh, not a
+#     separate implementation; this job now proves that delegation for
+#     real instead of assuming it. It also now runs `tan init` to
+#     scaffold a fresh project (the other forwarded verb #1024 named)
+#     and builds THAT, separately from the curated gpio-button-led
+#     build above -- the existing build only ever exercises a project
+#     that already existed in the repo, never one `tan init` produced.
+#
+#     IMPORTANT: `schedule` and `workflow_dispatch` both fire only from
+#     the copy of this file on the repo's DEFAULT branch, so a change to
+#     either trigger does not take effect until it lands there.  This
+#     file IS already on main (and on dev), so the weekly cron and the
+#     Run-workflow button both work today -- run 30741328235 is a real
+#     scheduled execution of it.  What they run is main's copy, NOT the
+#     version in this PR.  `pull_request`, by contrast, runs the workflow
+#     FROM THE PR's OWN BRANCH, so it is the only trigger that exercises
+#     changes made here before they merge.  The `run-full-quickstart` label (create
+#     it in the repo taxonomy if it doesn't exist yet) opts a specific
+#     PR into the expensive job without paying its cost on every PR that
+#     merely touches one of the `paths:` above.
+name: onramp-clean-container
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    # `labeled` is required: without it, adding `run-full-quickstart` to an
+    # already-open PR fires a `labeled` event this trigger's own default
+    # (`[opened, synchronize, reopened]`) never subscribes to, and
+    # full-quickstart-build's own `contains(...labels...)` condition below
+    # never gets a chance to run at all -- the job stays structurally
+    # unrunnable from label alone, only a new commit or a close/reopen would
+    # start it.
+    branches: [main, dev]
+    paths:
+      - 'docs/getting-started.md'
+      - 'README.md'
+      - 'scripts/bootstrap.sh'
+      - 'scripts/bootstrap.ps1'
+      - 'metadata/bootstrap.json'
+      - 'metadata/schemas/bootstrap-v1.schema.json'
+      - 'scripts/check_bootstrap_manifest.py'
+      - '.github/workflows/onramp-clean-container.yml'
+  schedule:
+    # Sunday 07:00 UTC -- the expensive full-build job only; cheap
+    # enough weekly that a stale toolchain/tan-flow regression surfaces
+    # within days, not silently forever. Currently inert until this
+    # file lands on the default branch (main) -- see the note above.
+    - cron: '0 7 * * 0'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prereqs-and-bootstrap:
+    name: onramp · bare container -- prereqs + bootstrap.sh (docs §1)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    container:
+      image: ubuntu:24.04
+    steps:
+      # A genuinely bare ubuntu:24.04 container has neither git nor
+      # curl -- actions/checkout's documented fallback (no git found ->
+      # download the ref as a tarball via the GitHub REST API) is what
+      # makes checkout possible here at all; this step ALSO proves the
+      # premise: if these ever stop being absent (a base-image change
+      # upstream), this job silently stops testing what it claims to.
+      - name: Assert the base image is actually bare (git/curl/cmake/python3/ninja/xz/wget absent)
+        shell: bash
+        run: |
+          set -uo pipefail
+          missing=0
+          for bin in git curl cmake python3 ninja xz wget; do
+            if command -v "${bin}" >/dev/null 2>&1; then
+              echo "::error::${bin} is already on PATH in ubuntu:24.04 -- this job's premise (a bare host) no longer holds; update this job or the base image pin"
+              missing=1
+            fi
+          done
+          exit "${missing}"
+
+      - name: Checkout alp-sdk
+        uses: actions/checkout@v6
+        with:
+          path: alp-sdk
+          fetch-depth: 1
+
+      # docs/getting-started.md's own prerequisite note above the
+      # quickstart -- `git`/`curl` first, since bootstrap.sh itself
+      # can't be fetched without them.
+      - name: Install git + curl (docs/getting-started.md's own prerequisite note)
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git curl ca-certificates
+
+      # scripts/bootstrap.sh should refuse HERE (cmake/python3/ninja/xz/wget
+      # still absent) with a curated per-tool install hint, not a bare
+      # tool-name list -- the exact defect #949 addendum item 2 fixes.
+      - name: bootstrap.sh refuses with an actionable per-tool hint (expect failure)
+        working-directory: alp-sdk
+        run: |
+          set +e
+          out="$(bash scripts/bootstrap.sh 2>&1)"
+          rc=$?
+          echo "${out}"
+          set -e
+          if [ "${rc}" -eq 0 ]; then
+            echo "::error::bootstrap.sh succeeded on a host missing cmake/python3/ninja/xz/wget -- it should have refused"
+            exit 1
+          fi
+          # Every missing tool's curated install command (from
+          # metadata/bootstrap.json's prerequisites.install.linux, via
+          # bootstrap.sh's drift-gated PREREQ_HINT_LINUX mirror) must
+          # actually appear -- a bare tool-name-only message is the
+          # pre-#978/#949 regression this asserts against.
+          for hint in \
+            "sudo apt-get install -y cmake" \
+            "sudo apt-get install -y python3" \
+            "sudo apt-get install -y ninja-build" \
+            "sudo apt-get install -y xz-utils" \
+            "sudo apt-get install -y wget"; do
+            case "${out}" in
+              *"${hint}"*) ;;
+              *) echo "::error::bootstrap.sh's refusal message is missing the hint: ${hint}"; exit 1 ;;
+            esac
+          done
+
+      # Install EXACTLY docs/getting-started.md:160's Debian/Ubuntu one-liner
+      # -- byte-for-byte, git/curl included even though the earlier step
+      # already installed them (apt no-ops on an already-installed package)
+      # -- so this step stays a mirror of the doc and any future divergence
+      # between the two reddens this job instead of silently installing a
+      # superset the doc never told a customer to install (this job used to
+      # install "plus the newly-declared xz/wget prerequisites" beyond the
+      # doc's own list, which is exactly how the doc fell behind in the
+      # first place -- see docs/getting-started.md:160 for the source of
+      # truth this must keep matching).
+      - name: Install prerequisites (docs/getting-started.md section 1's Debian/Ubuntu one-liner, verbatim)
+        run: |
+          apt-get install -y --no-install-recommends \
+              cmake ninja-build python3 python3-pip python3-venv git curl xz-utils wget
+
+      - name: bootstrap.sh succeeds once every prerequisite is installed
+        working-directory: alp-sdk
+        # --no-west here: this job is the cheap PRE-toolchain phase
+        # (addendum's own cost split) -- `west init`/`update` fetch
+        # Zephyr itself (~30 MB shallow) and belong in the full-build
+        # job below, which already pays for a much larger SDK
+        # download and can absorb it. This job's job is proving the
+        # venv + prerequisite layer alone, not re-proving west.yml
+        # resolves (pr-twister.yml already covers that on every PR).
+        run: |
+          # set -e (not set -euo pipefail) is deliberate here: the refusal
+          # step above (line ~131) captures rc/output BEFORE dying for the
+          # same reason -- `set -euo pipefail` with
+          # `out="$(bash scripts/bootstrap.sh --no-west)"` would kill this
+          # step at that line on a NONzero rc, before the `echo "${out}"`
+          # below ever ran, discarding every diagnostic bootstrap.sh printed
+          # right when this step needs them most (a bootstrap.sh regression
+          # here). Mirror the refusal step's own capture-then-check pattern.
+          set +e
+          out="$(bash scripts/bootstrap.sh --no-west 2>&1)"
+          rc=$?
+          echo "${out}"
+          set -e
+          if [ "${rc}" -ne 0 ]; then
+            echo "::error::bootstrap.sh --no-west failed after every documented prerequisite was installed (see output above)"
+            exit 1
+          fi
+          # Exit status alone doesn't prove the manual-install-hints section
+          # (metadata/bootstrap.json's manualInstallHints.posix.note, the
+          # #949 addendum A4 fix) actually rendered -- a script that quietly
+          # dropped that section entirely would still exit 0 here. Assert
+          # the heading substring shows up.
+          case "${out}" in
+            *"NOT auto-installed (manual, one-time):"*) ;;
+            *) echo "::error::bootstrap.sh succeeded but never printed the manual-install-hints heading (manualInstallHints.posix.note) -- see scripts/bootstrap.sh:641"; exit 1 ;;
+          esac
+
+      # #1024: shellcheck is CI tooling, not a customer prerequisite --
+      # kept out of the "Install prerequisites" step above so that step
+      # stays an honest mirror of docs/getting-started.md's own one-liner.
+      - name: Install shellcheck
+        run: apt-get install -y --no-install-recommends shellcheck
+
+      # #1024: scripts/bootstrap.sh IS already shellchecked -- but only by
+      # scripts/test-all.sh's stage_shellcheck, which no workflow in this
+      # repo actually invokes in CI (every `test-all.sh` reference under
+      # .github/workflows/ is a comment pointing at the local-CI
+      # equivalent, not a `run:` step). tan-cli's install.sh -- the
+      # `curl | sh` one-liner docs/getting-started.md's quickstart and
+      # the "Smoke-run install.sh" step below both use -- has never been
+      # shellchecked anywhere in either repo. `-S error` matches
+      # stage_shellcheck's own severity for non-test-all.sh scripts, so
+      # this does not diverge from the local gate's bar.
+      - name: Shellcheck scripts/bootstrap.sh + tan-cli's install.sh
+        working-directory: alp-sdk
+        shell: bash
+        run: |
+          set -euo pipefail
+          shellcheck -S error scripts/bootstrap.sh
+          curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh -o /tmp/tan-install.sh
+          # --shell=sh: install.sh's own shebang is `#!/usr/bin/env sh`
+          # (POSIX dash-compatible, not bash) -- shellcheck auto-detects
+          # this from the shebang line it just downloaded, but pinning it
+          # explicitly means a future edit that quietly drops the shebang
+          # cannot silently switch this to bash-dialect checking instead.
+          shellcheck --shell=sh -S error /tmp/tan-install.sh
+
+      # #1024: the "Install tan" step in full-quickstart-build below
+      # already runs this exact `curl | sh` one-liner -- but that job
+      # only runs on schedule/workflow_dispatch/a labelled PR, so a
+      # broken installer sits uncaught for up to a week. This job already
+      # is the bare-container premise install.sh's smoke run needs (only
+      # docs/getting-started.md's own prerequisites on PATH), so running
+      # it here too costs nothing extra and closes that window to every
+      # relevant PR.
+      - name: Smoke-run install.sh on this bare container (docs quickstart step 2)
+        shell: bash
+        run: |
+          set +e
+          out="$(curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh -s -- --dir /tmp/tan-smoke-bin --no-modify-path 2>&1)"
+          rc=$?
+          echo "${out}"
+          set -e
+          if [ "${rc}" -ne 0 ]; then
+            echo "::error::install.sh failed on a bare ubuntu:24.04 container with only docs/getting-started.md's own prerequisites installed (see output above)"
+            exit 1
+          fi
+          if [ ! -x /tmp/tan-smoke-bin/tan ]; then
+            echo "::error::install.sh exited 0 but /tmp/tan-smoke-bin/tan is not an executable file"
+            exit 1
+          fi
+          /tmp/tan-smoke-bin/tan --version
+
+  prereqs-and-bootstrap-macos:
+    name: onramp · macos-latest -- prereqs + bootstrap.sh --no-west (docs §1, #1033)
+    if: github.event_name != 'schedule'
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout alp-sdk
+        uses: actions/checkout@v6
+        with:
+          path: alp-sdk
+          fetch-depth: 1
+
+      # Only installs the FOUR tools scripts/bootstrap.sh actually requires
+      # on Darwin (metadata/bootstrap.json's prerequisites.macos) -- driven
+      # from the manifest, not a hardcoded brew line, so
+      # scripts/check_bootstrap_manifest.py stays the single place that can
+      # catch this drifting from bootstrap.sh's own REQUIRED_BINS narrowing.
+      # Deliberately NOT prerequisites.install.macos's keys: that map has SIX
+      # entries -- it also carries xz/wget's brew commands, for the rare user
+      # who wants either anyway (scripts/bootstrap.sh's own
+      # PREREQ_HINT_MACOS hint) -- and installing those two here would defeat
+      # the next step's entire point. `bash -e`, not a bare `bash`: the
+      # heredoc below has no `set -e` of its own (a heredoc body isn't code
+      # this script's own `set -euo pipefail` reaches into), so a bare `bash`
+      # grades the whole multi-line install only on its LAST line's exit
+      # status -- an early `brew install git` failure would be swallowed and
+      # only resurface later as a misattributed bootstrap.sh refusal.
+      - name: Install macOS prerequisites (metadata/bootstrap.json prerequisites.install.macos)
+        working-directory: alp-sdk
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' > /tmp/macos-prereq-install.sh
+          import json
+          d = json.load(open("metadata/bootstrap.json"))
+          install = d["prerequisites"]["install"]["macos"]
+          for tool in d["prerequisites"]["macos"]:
+              print(install[tool])
+          PY
+          cat /tmp/macos-prereq-install.sh
+          bash -e /tmp/macos-prereq-install.sh
+
+      # THE POINT OF THIS JOB: macos-latest carries a large Homebrew tree,
+      # so xz/wget are typically already on PATH -- a bare bootstrap.sh run
+      # would pass whether or not the Darwin REQUIRED_BINS narrowing
+      # (scripts/bootstrap.sh:153) still excludes them, proving nothing.
+      # Relocate (not delete -- an ephemeral runner, but no reason to be
+      # careless) EVERY copy of each tool on PATH -- a `while` loop, not a
+      # single `command -v`, because a second copy (e.g. a stray
+      # /usr/bin/xz alongside /opt/homebrew/bin/xz, or an Intel-prefix
+      # /usr/local/bin/wget) would otherwise survive the first `mv` and
+      # bootstrap.sh would still resolve the tool, passing this job whether
+      # or not the narrowing exists -- the exact unfailable-gate shape this
+      # job was written to avoid. Filtering PATH instead would also hide
+      # git/cmake/ninja, which live in the same directories -- so this moves
+      # the specific binaries instead. Ends with a hard post-condition: if
+      # either tool is STILL resolvable after the loop, fail loudly rather
+      # than silently degrading to a no-op on a runner image that moved
+      # Homebrew somewhere this loop doesn't check.
+      - name: Hide xz + wget (and prove neither remains resolvable)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for bin in xz wget; do
+            hidden_any=0
+            while :; do
+              p="$(command -v "${bin}" 2>/dev/null || true)"
+              [ -n "${p}" ] || break
+              echo "hiding ${bin}: ${p} -> ${p}.hidden-by-ci"
+              sudo mv "${p}" "${p}.hidden-by-ci"
+              hidden_any=1
+            done
+            if [ "${hidden_any}" -eq 0 ]; then
+              echo "${bin}: already absent from PATH (nothing to hide)"
+            fi
+          done
+          for bin in xz wget; do
+            if command -v "${bin}" >/dev/null 2>&1; then
+              echo "::error::${bin} is STILL resolvable at $(command -v "${bin}") after the hide loop -- a second PATH copy survived; this job cannot prove anything until it is gone"
+              exit 1
+            fi
+          done
+          echo "post-condition: neither xz nor wget resolves on PATH"
+
+      # scripts/bootstrap.sh:153 narrows REQUIRED_BINS to (git cmake
+      # python3 ninja) on Darwin -- this must succeed with xz/wget
+      # unreachable, and must not name either as missing.
+      - name: bootstrap.sh --no-west succeeds on macOS without xz/wget
+        working-directory: alp-sdk
+        shell: bash
+        run: |
+          set +e
+          out="$(bash scripts/bootstrap.sh --no-west 2>&1)"
+          rc=$?
+          echo "${out}"
+          set -e
+          # Check the MESSAGE before the generic `rc` check: scripts/bootstrap.sh's
+          # own `die()` (scripts/bootstrap.sh:111) exits 1 on ANY missing-tool
+          # refusal, so `rc` alone can't distinguish "the Darwin narrowing
+          # regressed" from "brew/pip broke on unrelated grounds" -- inspecting
+          # "${out}" first is what makes the failure message actually diagnostic.
+          # bootstrap.sh's missing-tools report prints "  <tool>" (with the
+          # curated hint appended, or bare if none) per scripts/bootstrap.sh:208-210
+          # -- either shape starts with two spaces and the bare tool name.
+          case "${out}" in
+            *"  xz"*)
+              echo "::error::bootstrap.sh reported xz as missing on macOS -- the Darwin REQUIRED_BINS narrowing (scripts/bootstrap.sh:153) is gone, OR it was widened together with metadata/bootstrap.json's prerequisites.macos (a coordinated edit scripts/check_bootstrap_manifest.py's _check_prerequisites_macos cannot catch alone, since the two sides still agree with each other)"
+              exit 1
+              ;;
+          esac
+          case "${out}" in
+            *"  wget"*)
+              echo "::error::bootstrap.sh reported wget as missing on macOS -- the Darwin REQUIRED_BINS narrowing (scripts/bootstrap.sh:153) is gone, OR it was widened together with metadata/bootstrap.json's prerequisites.macos (a coordinated edit scripts/check_bootstrap_manifest.py's _check_prerequisites_macos cannot catch alone, since the two sides still agree with each other)"
+              exit 1
+              ;;
+          esac
+          if [ "${rc}" -ne 0 ]; then
+            echo "::error::bootstrap.sh --no-west failed on macOS with xz/wget hidden, for a reason unrelated to the Darwin REQUIRED_BINS narrowing (see output above)"
+            exit 1
+          fi
+          case "${out}" in
+            *"Detected OS:     macos"*) ;;
+            *) echo "::error::bootstrap.sh did not report 'Detected OS:     macos' -- see scripts/bootstrap.sh:397"; exit 1 ;;
+          esac
+          case "${out}" in
+            *"Bootstrap complete."*) ;;
+            *) echo "::error::bootstrap.sh did not report 'Bootstrap complete.' -- it should have succeeded on this prerequisite set"; exit 1 ;;
+          esac
+
+  full-quickstart-build:
+    name: onramp · bare container -- full quickstart to a real ELF (docs §1-4)
+    # schedule/workflow_dispatch: see the trigger note in the file header --
+    # both are inert until this file reaches the default branch. The
+    # `run-full-quickstart` label lets a PR (on the branch that's actually
+    # introducing a regression) opt into this job's real toolchain download
+    # instead of waiting for that release.
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'run-full-quickstart'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      image: ubuntu:24.04
+    steps:
+      # git/curl/ca-certificates are needed to check out alp-sdk on this bare
+      # image at all -- NOT part of docs/getting-started.md section 1's own
+      # one-liner (ca-certificates in particular never appears there; the doc
+      # assumes a host that can already reach HTTPS). Kept as its own step,
+      # deliberately separate from the doc-exact install below, so that step
+      # stays an honest mirror of what the doc tells a customer to run --
+      # mirrors prereqs-and-bootstrap's own "Install git + curl" /
+      # "Install prerequisites" split above.
+      - name: Install checkout prerequisites (git/curl/ca-certificates -- not part of docs/getting-started.md section 1)
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git curl ca-certificates
+
+      - name: Checkout alp-sdk
+        uses: actions/checkout@v6
+        with:
+          path: alp-sdk
+          fetch-depth: 1
+
+      # Install EXACTLY docs/getting-started.md:160's Debian/Ubuntu one-liner
+      # -- byte-for-byte (git/curl already present from the step above, kept
+      # here anyway so this stays a mirror of the doc and any future
+      # divergence between the two reddens this job).
+      - name: Install prerequisites (docs/getting-started.md section 1's Debian/Ubuntu one-liner, verbatim)
+        run: |
+          apt-get install -y --no-install-recommends \
+              cmake ninja-build python3 python3-pip python3-venv git curl xz-utils wget
+
+      - name: Install tan (docs quickstart step 2 -- the documented install.sh one-liner)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # GHA's default shell is `bash -e {0}`, which does NOT set
+          # pipefail: on a 404, `curl -f` exits nonzero but `sh` reads
+          # empty stdin and exits 0, so the pipeline (graded on the LAST
+          # command) reports success and the real failure only surfaces
+          # two steps later as "tan: command not found". `set -o pipefail`
+          # makes the pipeline fail on curl's exit code instead.
+          curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh
+          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+
+      # #1024: this used to be a raw `bash scripts/bootstrap.sh` call,
+      # same as prereqs-and-bootstrap above -- which means no CI job
+      # anywhere ever ran `tan bootstrap` itself, the command
+      # docs/getting-started.md's quickstart actually tells a customer to
+      # run. Moved after "Install tan" above (was before it) so `tan` is
+      # on PATH here. `tan bootstrap` is documented as "a thin wrapper"
+      # around scripts/bootstrap.sh -- this proves the wrapper's own
+      # argument parsing and delegation, not just the script underneath.
+      - name: tan bootstrap (docs quickstart step 3 -- via the tan binary, not bash directly)
+        working-directory: alp-sdk
+        run: tan bootstrap --sdk-root "${PWD}"
+
+      # metadata/toolchains.json (issue #949 item 3) is the single
+      # source for the pinned SDK version -- read the same way
+      # pr-getting-started-aen801.yml and pr-twister.yml already do,
+      # so the cache key tracks the real pin.
+      - name: Read Zephyr SDK toolchain pin (metadata/toolchains.json)
+        working-directory: alp-sdk
+        shell: bash
+        run: |
+          set -euo pipefail
+          source ../.venv/bin/activate
+          # Heredoc, not `python3 -c '...'`: the script needs BOTH quote
+          # characters (double for the f-string, single for the dict keys), and
+          # a single-quoted -c argument cannot carry a nested `'` -- the shell
+          # ends the quote there and passes the key through unquoted, which
+          # Python then reads as a bare name (`NameError: name 'zephyrSdk' is
+          # not defined`).  Escaping them instead (`\"`) fails the other way:
+          # the backslash survives into the f-string expression and Python
+          # reads it as a line continuation (`SyntaxError: unexpected character
+          # after line continuation character`).  A quoted heredoc delimiter
+          # ('PY') disables shell expansion entirely, so the body is passed
+          # through byte-for-byte and both quote characters are safe.
+          python3 >> "$GITHUB_ENV" <<'PY'
+          import json
+          d = json.load(open("metadata/toolchains.json"))
+          print(f"ZEPHYR_SDK_VERSION={d['zephyrSdk']['version']}")
+          PY
+
+      - name: Cache Zephyr SDK (arm-zephyr-eabi only)
+        uses: actions/cache@v5
+        id: zephyr-sdk-cache
+        with:
+          path: zephyr-sdk
+          key: onramp-sdk-${{ env.ZEPHYR_SDK_VERSION }}-arm-zephyr-eabi-${{ runner.os }}
+
+      # The documented command itself (docs/getting-started.md quickstart
+      # + section 1) -- not pr-getting-started-aen801.yml's hand-rolled
+      # wget+sha256 shortcut, so a `west sdk install` regression (the
+      # patoolib/xz failure #949 reported) is exactly what this catches.
+      # Guarded on the cache step's own `cache-hit` (matches
+      # pr-twister.yml:215-221's pattern) -- without this the cache restore
+      # above bought nothing: a hit was unconditionally overwritten by a
+      # full re-download here, and `actions/cache@v5` skips its own save on
+      # a hit anyway, so the download happened on every run either way.
+      - name: west sdk install (docs quickstart -- the real toolchain install command)
+        if: steps.zephyr-sdk-cache.outputs.cache-hit != 'true'
+        # No working-directory override: this runs at GITHUB_WORKSPACE
+        # itself (alp-sdk's PARENT, i.e. bootstrap.sh's own WORKSPACE_DIR),
+        # where bootstrap.sh (run with `working-directory: alp-sdk` above)
+        # already left `.venv/` and `zephyr/` as siblings of `alp-sdk/`.
+        #
+        # shell: bash is load-bearing, not decoration -- `source` is a bash
+        # builtin and this container's /bin/sh is dash, which has `.` instead
+        # and answers `source: not found` with exit 127 before west is reached.
+        shell: bash
+        run: |
+          source .venv/bin/activate
+          west sdk install --gnu-toolchains arm-zephyr-eabi --no-hosttools \
+              --install-dir "${GITHUB_WORKSPACE}/zephyr-sdk"
+        env:
+          ZEPHYR_BASE: ${{ github.workspace }}/zephyr
+
+      - name: tan sdk switch + tan build (docs quickstart -- the documented per-project pin)
+        working-directory: alp-sdk
+        env:
+          ZEPHYR_SDK_INSTALL_DIR: ${{ github.workspace }}/zephyr-sdk
+          ZEPHYR_BASE: ${{ github.workspace }}/zephyr
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Each GHA step is a fresh shell -- the earlier `bootstrap.sh` step's
+          # own `source .venv/bin/activate` does not carry here, and
+          # bootstrap.sh writes nothing to GITHUB_PATH/GITHUB_ENV. Without
+          # this, `west` is off PATH and alp_orchestrate.py has no
+          # PyYAML/jsonschema, so `tan build` fails -- matches
+          # pr-getting-started-aen801.yml's own venv activation.
+          source ../.venv/bin/activate
+          tan --project examples/peripheral-io/gpio-button-led sdk switch "${PWD}"
+          tan --project examples/peripheral-io/gpio-button-led build
+
+      - name: Assert a real ELF came out the other end
+        working-directory: alp-sdk
+        shell: bash
+        run: |
+          set -euo pipefail
+          elf="$(find examples/peripheral-io/gpio-button-led/build -name zephyr.elf -print -quit)"
+          if [ -z "${elf}" ] || [ ! -s "${elf}" ]; then
+            echo "::error::no non-empty zephyr.elf under examples/peripheral-io/gpio-button-led/build -- the documented quickstart did not reach a real build output"
+            exit 1
+          fi
+          echo "Built: ${elf} ($(stat -c%s "${elf}") bytes)"
+
+      # #1024: the build above only ever exercises gpio-button-led, an
+      # example that already existed in the repo -- it never proves `tan
+      # init` (docs/getting-started.md's own forwarded-verb path for a
+      # first-time customer scaffolding THEIR OWN project) produces
+      # something `tan build` can actually build. `--sdk-root` here makes
+      # the scaffolded project resolve `sdk` readiness on its own --
+      # verified locally: `tan init --sdk-root <path>` writes
+      # `.alp/sdk-path` itself, and `tan build`'s own readiness report
+      # shows `[+] sdk` from that alone, no separate `tan sdk switch`
+      # call needed for a freshly-init'd project.
+      - name: tan init (docs' forwarded-verb onboarding path -- scaffold a fresh project)
+        working-directory: alp-sdk
+        run: |
+          tan init --sdk-root "${PWD}" --destination "${RUNNER_TEMP}/tan-init-smoke" \
+              --template zephyr-app --som E1M-AEN801 --ci
+
+      - name: tan build the tan-init-scaffolded project
+        working-directory: alp-sdk
+        env:
+          ZEPHYR_SDK_INSTALL_DIR: ${{ github.workspace }}/zephyr-sdk
+          ZEPHYR_BASE: ${{ github.workspace }}/zephyr
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Same reason as the "tan sdk switch + tan build" step above:
+          # each GHA step is a fresh shell, so `west` needs the venv
+          # re-activated here too.
+          source ../.venv/bin/activate
+          tan --project "${RUNNER_TEMP}/tan-init-smoke" build
+
+      - name: Assert the tan-init-scaffolded project produced a real ELF too
+        shell: bash
+        run: |
+          set -euo pipefail
+          elf="$(find "${RUNNER_TEMP}/tan-init-smoke/build" -name zephyr.elf -print -quit)"
+          if [ -z "${elf}" ] || [ ! -s "${elf}" ]; then
+            echo "::error::no non-empty zephyr.elf under the tan-init-scaffolded project's build dir -- tan init produced a project tan build cannot actually build"
+            exit 1
+          fi
+          echo "Built: ${elf} ($(stat -c%s "${elf}") bytes)"

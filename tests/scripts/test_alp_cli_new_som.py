@@ -120,7 +120,7 @@ def test_new_som_ethos_u_requires_variant(tmp_path: Path):
     assert "--ethos-u-variant" in result.output
 
 
-def test_new_som_ethos_u_populates_npu_table_with_tbd_pairings(tmp_path: Path):
+def test_new_som_ethos_u_populates_npu_table_with_variant_only(tmp_path: Path):
     result = _run(
         tmp_path, ["--inference-backend", "ethos_u", "--ethos-u-variant", "u65"]
     )
@@ -130,9 +130,9 @@ def test_new_som_ethos_u_populates_npu_table_with_tbd_pairings(tmp_path: Path):
         .read_text(encoding="utf-8")
     )
     assert doc["inference"]["ethos_u_variant"] == "u65"
-    assert doc["inference"]["npu_population"] == [
-        {"variant": "u65", "role": "TBD", "paired_with": "TBD"}
-    ]
+    # npu_population is deprecated + silicon-derived -- the scaffold no longer
+    # emits it (variants come from the SoC JSON npus[] / capability counts).
+    assert "npu_population" not in doc["inference"]
     errors = _validate(doc, SOM_SCHEMA)
     assert not errors, [e.message for e in errors]
 
@@ -296,8 +296,16 @@ def _clone_metadata_gates(repo_root: Path, tmp_repo: Path) -> None:
     """
     shutil.copytree(repo_root / "metadata", tmp_repo / "metadata")
     (tmp_repo / "scripts").mkdir(parents=True)
-    for script in ("validate_metadata.py", "check_inference_backend_parity.py"):
+    for script in ("validate_metadata.py", "check_inference_backend_parity.py",
+                   "alp_project_loader.py"):
         shutil.copy(repo_root / "scripts" / script, tmp_repo / "scripts" / script)
+    # validate_metadata.py's #1025 ratchet (assert_exclusion_still_not_
+    # buildable) needs the real alp_orchestrate package alongside it --
+    # without this, a machine with an editable `pip install -e` of a
+    # DIFFERENT alp-sdk checkout resolves `alp_orchestrate` from THAT
+    # checkout instead of this copy, silently testing stale code.
+    shutil.copytree(repo_root / "scripts" / "alp_orchestrate",
+                     tmp_repo / "scripts" / "alp_orchestrate")
     select_c = tmp_repo / "src" / "backends" / "inference" / "alp_model_select.c"
     select_c.parent.mkdir(parents=True)
     shutil.copy(

@@ -55,6 +55,60 @@ zephyr_sources_ifdef(CONFIG_DMA_ALIF_EVENT_ROUTER
 zephyr_sources_ifdef(CONFIG_DMA_PL330_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/dma/dma_alif_boot_latch.c)
 
+# Tier-1.5 glue: AE822 (E8) DW GPIO functional-clock enable (CLKCTL_PER_SLV->
+# GPIO_CTRL[n] bit 16) -- nothing in upstream gpio_dw or Zephyr's Alif SoC layer
+# writes it, so an enabled port's APB registers respond but the pad never
+# physically moves.  E7 has no such gate (SOC_FEAT_GPIO_HAS_CLOCK_ENABLE=0 in
+# the DFP), hence the CONFIG_SOC_SERIES_E8 gate below rather than the whole
+# Ensemble family.  Needed for any Ensemble-E8 build that uses a DW GPIO port,
+# not just alp-feature builds, so this is applied before the CONFIG_ALP_SDK
+# early-return (the soc-bridge / MRAM-flash precedent above).
+if(CONFIG_SOC_SERIES_E8)
+    zephyr_sources_ifdef(CONFIG_GPIO_DW
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/gpio/gpio_clk_alif.c)
+endif()
+
+# Tier-1.5 glue: silence hal_alif's OSPI_XIP_SER (offset 0x10C) register
+# touches on AE822 (E8) -- that register does not exist on this part
+# (AE822FA0E5597/include/soc_features.h:89 SOC_FEAT_OSPI_HAS_XIP_SER (0);
+# E7 has it (1) at AE722F80F55D5/soc_features.h:85, hence the
+# CONFIG_SOC_SERIES_E8 gate below rather than the whole Ensemble family,
+# mirroring the GPIO clock-enable gate above -- this repo's Zephyr port
+# carries no E7 SoC layer today, so this cannot reach an E7 build even
+# without the gate, but the gate is the correct scope regardless). hal_alif's
+# ospi_xip_enable()/_disable() (modules/hal/alif drivers/ospi/src/ospi.c:810,
+# :860) RMW that register unconditionally unless
+# CONFIG_FLASH_ADDRESS_IN_SINGLE_FIFO_LOCATION is defined -- a symbol
+# hal_alif never defines itself (it mirrors the vendor DFP's own
+# SOC_FEAT_OSPI_ADDR_IN_SINGLE_FIFO_LOCATION, which is (1) on AE822 and (0)
+# on E7 -- exactly complementary to SOC_FEAT_OSPI_HAS_XIP_SER on both parts).
+# Without it, the RMW bus-faults (BFAR 0x8300010c; the register is genuinely
+# absent from the AE822 SVD, not merely unmapped -- see
+# flash_ospi_alif.c's file-header FOURTH section for the full citation
+# chain). Applied for any Ensemble-E8 build that pulls in the hal_alif OSPI
+# library (CONFIG_USE_ALIF_HAL_OSPI), not just alp-feature builds, so this is
+# before the CONFIG_ALP_SDK early-return (the soc-bridge / MRAM-flash
+# precedent above). Whether XiP then functions in single-FIFO-address mode
+# on a populated AE822 is TBD -- out of scope; this only prevents the fault.
+if(CONFIG_SOC_SERIES_E8)
+    zephyr_compile_definitions(CONFIG_FLASH_ADDRESS_IN_SINGLE_FIFO_LOCATION)
+endif()
+
+# Custom fixed MPU region table for the Ensemble E8 (mpu_regions_e8.c),
+# REPLACING arm_mpu_regions.c's generic FLASH_0/SRAM_0 fallback -- restores
+# the fork's MRAM exec/device split without the DT-node-append overlap bug
+# (see the file header for the full root cause). Gated on
+# CONFIG_CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS, which the E8 HE/HP boards'
+# hand-maintained `Kconfig` (not the generated Kconfig.alp_<board> /
+# Kconfig.defconfig) selects. Needed for ANY Ensemble-E8 build -- including
+# MCUboot itself, which never sets CONFIG_ALP_SDK -- so this is applied
+# before the CONFIG_ALP_SDK early-return, mirroring the GPIO clock-enable /
+# OSPI_XIP_SER precedents above.
+if(CONFIG_SOC_SERIES_E8)
+    zephyr_sources_ifdef(CONFIG_CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/soc-bridge/alif/mpu_regions_e8.c)
+endif()
+
 if(NOT CONFIG_ALP_SDK)
     return()
 endif()
@@ -88,6 +142,34 @@ zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/camera/zephyr_stub.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/alif/camera.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/ext/renesas/camera.c
+    # JPEG-encoder class dispatcher + stub backend.  Task 1 of the
+    # encoder rollout: the JPEG class must exist on every board,
+    # defaulting to the NOT_IMPLEMENTED stub.  The software baseline
+    # (CONFIG_ALP_SDK_JPEG_SW_BASELINE, Task 2) and Alif Hantro VC9000E
+    # (CONFIG_ALP_SDK_JPEG_ALIF_HANTRO, Task 3/4) backends outrank it
+    # below once enabled.
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/jpeg_dispatch.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/jpeg/zephyr_stub.c
+)
+
+# JPEG software baseline fallback (Task 2): portable TooJpeg-derived
+# encoder, silicon_ref="*" priority 50 -- outranks the NOT_IMPLEMENTED
+# stub above on every board.  Default y (see zephyr/kconfigs/jpeg.kconfig)
+# so <alp/jpeg.h> encodes for real out of the box; opt out only to shave
+# the ROM if a board is guaranteed to always resolve the Task 3/4 Hantro
+# hardware backend instead.
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_JPEG_SW_BASELINE
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/jpeg/sw_baseline.c
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/jpeg/vendor/toojpeg_baseline.c
+)
+
+# Alif Ensemble E8 Hantro VC9000E hardware JPEG-encoder backend (Task 3/4):
+# silicon_ref="alif:ensemble:e8" priority 100 -- outranks both the stub and
+# the software baseline on AEN silicon once the jpeg0 DT node is enabled.
+# Drives the vendored+v4.4-ported zephyr/drivers/video/jpeg_hantro_vc9000e.c
+# (CONFIG_VIDEO_JPEG_HANTRO_VC9000E, wired further down this file).
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_JPEG_ALIF_HANTRO
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/jpeg/alif_hantro.c
 )
 
 # Boot-identity banner (CONFIG_ALP_SDK_BANNER, default y) -- one line at
@@ -261,6 +343,19 @@ if(CONFIG_ETH_DWMAC_ALIF)
     zephyr_include_directories(${ZEPHYR_BASE}/drivers/ethernet)
 endif()
 
+# Alif Ensemble GMAC embedded Clause-22 MDIO (compatible snps,designware-mdio);
+# driver: zephyr/drivers/ethernet/mdio/mdio_dwmac_alif.c, binding:
+# zephyr/dts/bindings/mdio/snps,designware-mdio.yaml.  Reuses eth_dwmac_priv.h's
+# MAC_MDIO_Address/Data field macros, so it needs the same drivers/ethernet
+# include dir as CONFIG_ETH_DWMAC_ALIF above (guarded separately since the mdio
+# node's own DT status doesn't formally imply its parent MAC node is enabled).
+# BUILD-ONLY this batch -- see ADR 0017 Tier-1.5 note in the driver header.
+zephyr_library_sources_ifdef(CONFIG_MDIO_DWMAC_ALIF
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/ethernet/mdio/mdio_dwmac_alif.c)
+if(CONFIG_MDIO_DWMAC_ALIF)
+    zephyr_include_directories(${ZEPHYR_BASE}/drivers/ethernet)
+endif()
+
 # Alif Ensemble DWC_ssi SPI (compatible alif,dwc-ssi-spi), vendored from the
 # Apache-2.0 zephyr_alif fork; distinct compatible so it doesn't collide with
 # upstream spi_dw.  The driver reuses upstream's private spi_context.h, so put
@@ -270,6 +365,17 @@ zephyr_library_sources_ifdef(CONFIG_SPI_DW_ALIF
 if(CONFIG_SPI_DW_ALIF)
     zephyr_include_directories(${ZEPHYR_BASE}/drivers/spi)
 endif()
+
+# Alif Ensemble OSPI/HexSPI (compatible "snps,designware-ospi"), an in-tree
+# thin driver over the Apache-2.0 hal_alif drivers/ospi register library
+# (CONFIG_USE_ALIF_HAL_OSPI, see the OSPI_ALIF Kconfig for the
+# add_subdirectory_ifdef precedent shared with USE_ALIF_HAL_UTIMER/_ANALOG).
+# hal_alif's own ospi CMakeLists is header-self-contained (its
+# zephyr_include_directories(include) fires when USE_ALIF_HAL_OSPI pulls the
+# subdirectory in), so no extra include path is needed here.  HW-BLOCKED /
+# BUILD-ONLY this batch: see the OSPI_ALIF Kconfig help + examples/aen/aen-ospi-regcheck.
+zephyr_library_sources_ifdef(CONFIG_OSPI_ALIF
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/flash/flash_ospi_alif.c)
 
 # Arm MHUv2 mailbox IPM driver (compatible "arm,mhuv2"), vendored from the
 # Apache-2.0 zephyr_alif fork (drivers/ipm/ipm_arm_mhuv2.c + ipm_arm_mhuv2.h).
@@ -446,7 +552,12 @@ endif()
 # resolve.  ADR 0017 Tier-2 (INTERIM).  The ISP (isp_pico.c, compatible
 # "vsi,isp-pico") rides on the same v4.4 video API + the hal_alif libisp wrapper;
 # it is Tier-2 opt-in (CONFIG_ALP_SDK_CAMERA_ALIF_ISP, default n).
-if(CONFIG_VIDEO_ALIF_CAM OR CONFIG_VIDEO_MIPI_CSI2_DW OR CONFIG_VIDEO_ARX3A0 OR CONFIG_MIPI_DPHY_DW OR CONFIG_VIDEO_ISP_VSI)
+# CONFIG_VIDEO_JPEG_HANTRO_VC9000E is included in this guard so the JPEG
+# encoder TU (jpeg_hantro_vc9000e.c, below) resolves the vendored
+# <zephyr/drivers/video/video_alif.h> (its VIDEO_CID_JPEG_INPUT_BUFFER cid) and
+# upstream's private drivers/video/{video_ctrls,video_device}.h (its v4.4
+# ctrl-registry port).  ADR 0017 Tier-2 (INTERIM).
+if(CONFIG_VIDEO_ALIF_CAM OR CONFIG_VIDEO_MIPI_CSI2_DW OR CONFIG_VIDEO_ARX3A0 OR CONFIG_MIPI_DPHY_DW OR CONFIG_VIDEO_ISP_VSI OR CONFIG_VIDEO_JPEG_HANTRO_VC9000E)
     zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/include)
 zephyr_include_directories(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/dma)
 if(DEFINED ZEPHYR_ALIF_MODULE_DIR)
@@ -457,12 +568,30 @@ endif()
     # for the CPI/ISP AXI buffer addresses).  hal_alif only puts its common/include
     # dir on the path under CONFIG_RTSS_HE/HP (common/CMakeLists.txt); add it here
     # explicitly so the CPI/ISP TUs resolve the header on any Ensemble RTSS build.
+    # (jpeg_hantro_vc9000e.c does NOT include soc_memory_map.h, so it stays out
+    # of this inner guard.)
     if(CONFIG_VIDEO_ALIF_CAM OR CONFIG_VIDEO_ISP_VSI)
         zephyr_include_directories(${ZEPHYR_ALIF_MODULE_DIR}/common/include)
     endif()
 endif()
-zephyr_library_sources_ifdef(CONFIG_VIDEO_ALIF_CAM
-    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/video/video_alif.c)
+# Alif Ensemble VeriSilicon Hantro VC9000E JPEG hardware encoder (compatible
+# "verisilicon,hantro-vc9000e-jpeg"), vendored from the Apache-2.0 zephyr_alif
+# fork (drivers/video/jpeg_hantro_vc9000e.c) @ d8eed1926407087dff150a1c4d25ba586d775746
+# (branch main) and PORTED to the v4.4 video API by Alp Lab AB.  Links the
+# hal_alif libjpeg_hantro_sw_gcc.a SW helper lib under CONFIG_USE_ALIF_JPEG_SW_LIB.
+# ADR 0017 Tier-2 (INTERIM).
+zephyr_library_sources_ifdef(CONFIG_VIDEO_JPEG_HANTRO_VC9000E
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/video/jpeg_hantro_vc9000e.c)
+# video_alif.c also DEFINES the fourcc_to_plane_size/fourcc_to_numplanes/
+# pix_fmt_bpp helpers that isp_pico.c calls (declared extern in
+# video_alif.h and used unconditionally, not only on the CPI capture path) --
+# so ISP-only builds (CONFIG_VIDEO_ISP_VSI, no alif,cam node) need this TU too,
+# not just CONFIG_VIDEO_ALIF_CAM.  DT_INST_FOREACH_STATUS_OKAY(CPI_DEFINE) at
+# the bottom of video_alif.c expands to nothing when no alif,cam node is
+# enabled, so building it in is a no-op for the CPI device itself.
+if(CONFIG_VIDEO_ALIF_CAM OR CONFIG_VIDEO_ISP_VSI)
+    zephyr_library_sources(${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/video/video_alif.c)
+endif()
 zephyr_library_sources_ifdef(CONFIG_VIDEO_MIPI_CSI2_DW
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/video/video_csi_dw.c)
 zephyr_library_sources_ifdef(CONFIG_VIDEO_ARX3A0
@@ -701,6 +830,19 @@ if(CONFIG_ALP_SDK_V2N_SUPERVISOR)
 endif()
 
 zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/dac/sw_fallback.c)
+
+# I3C class dispatcher.  Owns the alp_i3c_* API surface (alp_i3c_open /
+# write / read / write_read / close) and routes through the backend
+# registry.  Backends register under .alp_backends_i3c and ship from
+# src/backends/i3c/*.c.  The dispatcher compiles unconditionally (mirrors
+# dac_dispatch); the zephyr_drv backend guards its DT-alias body on
+# CONFIG_I3C internally.
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/i3c_dispatch.c)
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/i3c/zephyr_drv.c)
+zephyr_library_sources(        ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/i3c/sw_fallback.c)
+
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/rtc_dispatch.c)
 zephyr_library_sources_ifdef(CONFIG_RTC

@@ -150,18 +150,36 @@ int cc3501e_nimble_gatt_read(uint16_t handle, uint8_t *out, uint16_t cap, uint16
 int cc3501e_nimble_gatt_write(uint16_t handle, const uint8_t *data, uint16_t len);
 
 /**
- * @brief Confirm the (fixed demo) GATT server table is registered.
+ * @brief Register a dynamic GATT service from a parsed BLE_GATT_REGISTER
+ *        descriptor (see ALP_CC3501E_CMD_BLE_GATT_REGISTER in
+ *        <alp/protocol/cc3501e.h> for the exact byte layout; @p desc /
+ *        @p desc_len are already length/shape-validated by protocol_ble.c).
  *
- * v0.3 limitation: the opaque GATT_REGISTER descriptor has no wire format yet,
- * so the firmware exposes a fixed demo service (0xFFF0 / read-write-notify char
- * 0xFFF1) registered at BLE enable; this call validates it is live rather than
- * parsing @p desc.  See cc3501e_nimble_host.c for the full rationale.
+ * Builds a struct ble_gatt_svc_def / ble_gatt_chr_def table from static
+ * storage (NimBLE keeps referencing it for the service's lifetime, so it
+ * cannot be a stack local), then ble_gatts_count_cfg + ble_gatts_add_svcs +
+ * ble_gatts_start.  This ADDS to the fixed demo service registered at BLE
+ * enable (cc3501e_gatt_svr_init) -- it does not replace it.  v1 supports
+ * exactly ONE dynamic service; a second call is rejected.  See
+ * cc3501e_nimble_host.c for the full NimBLE-lifecycle rationale (the
+ * ble_gatts_start() re-run this needs is the vendor SDK's own documented way
+ * to add services after the first one, but is unverified on real silicon as
+ * of this rev -- author-only pass, no bench access).
  *
- * @param desc      Opaque descriptor (currently unused).
- * @param desc_len  Length of @p desc (currently unused).
- * @return 0 if the demo service is registered; negative otherwise.
+ * @param desc            Validated descriptor bytes (see the wire format).
+ * @param desc_len        Length of @p desc.
+ * @param handles_out     Receives one attribute VALUE handle per
+ *                        characteristic, in descriptor order.
+ * @param handles_cap     Capacity of @p handles_out.
+ * @param num_handles_out Receives the number of handles written (0 on error).
+ * @return 0 on success; negative on failure (bad descriptor, NimBLE error, a
+ *         service already registered, or the host not yet enabled).
  */
-int cc3501e_nimble_gatt_register(const uint8_t *desc, uint16_t desc_len);
+int cc3501e_nimble_gatt_register(const uint8_t *desc,
+                                 uint16_t       desc_len,
+                                 uint16_t      *handles_out,
+                                 uint16_t       handles_cap,
+                                 uint16_t      *num_handles_out);
 
 /**
  * @brief Send a GATT notification to the connected peer.

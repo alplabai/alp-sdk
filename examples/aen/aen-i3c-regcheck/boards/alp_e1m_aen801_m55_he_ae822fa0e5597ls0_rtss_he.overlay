@@ -1,0 +1,72 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-i3c-regcheck overlay for the E1M-AEN801 (Ensemble E8, M55-HE) RAM-run.
+ *
+ * Enables the LP I3C controller (snps,designware-i3c, lpi3c0 @0x43006000)
+ * that the E8 SoC overlay (zephyr/dts/alif/ensemble_e8_peripherals.dtsi)
+ * declares status=disabled, binds the alp-i3c0 portable alias to it, and
+ * supplies the pinctrl_lpi3c0 pad group.
+ *
+ * WHY LP I3C (not the main i3c0): the two controllers are INDEPENDENT on
+ * the E8 and overlap on exactly one pad pair -- P7_6/P7_7, where the SoC
+ * exposes PIN_P7_6__I3C_SDA_D/PIN_P7_7__I3C_SCL_D (fn6, i3c0) AND
+ * PIN_P7_6__LPI3C_SDA_B/PIN_P7_7__LPI3C_SCL_B (fn3, lpi3c0).  The
+ * E1M-AEN801 breaks out ONLY that pair (from-alif.tsv rows AH5/AG5), so on
+ * THIS SoM exactly one of the two nodes may be enabled and firmware decides
+ * which controller owns the pins.  That is a SoM routing constraint, not an
+ * E8 limit -- a board using i3c0 on P0_0/P0_1 and lpi3c0 on P6_2/P6_3 can
+ * run both at once.  LP I3C is chosen here because it sits in the M55-HE
+ * local peripheral domain, which is the core this example runs on.  The SoM pinout table does NOT make that choice for
+ * us: its `alif_peripheral` column names the MAIN-I3C fn6 functions
+ * (I3C_SCL_D/I3C_SDA_D) and it contains no LPI3C row at all -- selecting the
+ * main i3c0 instead would be equally valid electrically.  This is the same wiring the
+ * scripts/alp_project_emit/dts.py catalog emits for board.yaml `m55_he`
+ * slices declaring `peripherals: [i3c]` -- hand-written here since this
+ * app is a plain-prj.conf example (no alp_project.py board.yaml).
+ *
+ * lpi3c0 is the M55-HE local domain (IRQ 50) -- an M55-HP build gets no
+ * such node/alias; alp_i3c_open() there surfaces NOT_READY, never a dead
+ * IRQ (see include/alp/i3c.h).
+ */
+
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+
+/ {
+	/*
+	 * RAM-run: the SoC `select` puts code in XIP; retarget ROM to ITCM so the
+	 * image links + runs from RAM (J-Link loadbin+go, no reset). PATH-REFERENCE
+	 * form (&itcm) -- the phandle-array form makes FLASH_SIZE=0 and overflows
+	 * the link.
+	 */
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+
+	aliases {
+		alp-i3c0 = &lpi3c0;
+	};
+};
+
+&pinctrl {
+	pinctrl_lpi3c0: pinctrl_lpi3c0 {
+		group0 {
+			pinmux = <PIN_P7_6__LPI3C_SDA_B>;
+			input-enable; /* SDA pad: set the input buffer (REN bit) so the
+				       * controller can sense the open-drain bus. */
+		};
+		group1 {
+			pinmux = <PIN_P7_7__LPI3C_SCL_B>;
+			input-enable; /* SCL pad: same reasoning -- I3C clocks are
+				       * open-drain too (push-pull only during HDR). */
+		};
+	};
+};
+
+&lpi3c0 {
+	pinctrl-0     = <&pinctrl_lpi3c0>;
+	pinctrl-names = "default";
+	status        = "okay";
+};

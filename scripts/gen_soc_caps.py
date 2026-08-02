@@ -49,6 +49,8 @@ CAP_C_OUT = REPO / "src" / "cap.c"
 CAPS: list[tuple[str, callable]] = [
     ("I2C_COUNT",
         lambda p: (p.get("i2c", 0) or 0) + (p.get("i2c_lp", 0) or 0)),
+    ("I3C_COUNT",
+        lambda p: (p.get("i3c", 0) or 0) + (p.get("i3c_lp", 0) or 0)),
     ("SPI_COUNT",
         lambda p: (p.get("spi", 0) or 0) + (p.get("spi_lp", 0) or 0)),
     ("UART_COUNT",
@@ -163,6 +165,13 @@ CAP_ALIASES: list[tuple[str, str, str]] = [
     ("INLINE_AES", "INLINE_AES", "bool"),
     ("CAU", "CAU", "bool"),
     ("DMA2D", "DMA2D", "bool"),
+    # APPENDED, not grouped with the other *_COUNT rows above, on purpose:
+    # ALP_CAP_ID_* are implicit enum values, so this list's ORDER is their
+    # numbering, and those IDs are recorded in docs/abi/v*-snapshot.json.
+    # Inserting I3C_COUNT next to I2C_COUNT where it belongs alphabetically
+    # would renumber every ALP_CAP_ID_* after it -- an ABI change far larger
+    # than the one symbol being added. New capabilities go at the END.
+    ("I3C_COUNT", "HW_I3C", "count"),
 ]
 
 
@@ -405,14 +414,37 @@ def extract_bool_caps(soc: dict[str, Any]) -> dict[str, int]:
     return {key.upper(): (1 if caps.get(key) else 0) for key in BOOL_CAPS}
 
 
+def extract_unverified_peripherals(soc: dict[str, Any]) -> list[str]:
+    """Peripheral keys on this SoC whose count has no primary-source citation.
+
+    #936: an audited-but-incomplete file lists its gaps in
+    `peripherals_unverified` (e.g. `pdm`/`pdm_lp`, uncited on every Alif
+    Ensemble part).  A file whose peripherals block was never independently
+    ingested for this part at all (`pending_reference_manual_ingestion: true`,
+    e.g. E5 inheriting from E7) is treated as ALL of its `peripherals` keys
+    being unverified, so the header doesn't understate the gap -- UNLESS the
+    file carries its own `peripherals_unverified` (even `[]`), which means
+    the file itself already grounds its populated keys individually (e.g.
+    i.MX93: `pending_reference_manual_ingestion` covers the still-zero rest
+    of the block, but `mipi_dsi`/`lcdif` are cited in `notes` and so are
+    correctly declared with `peripherals_unverified: []`).  An explicit
+    per-file list always wins over the wholesale fallback.
+    """
+    if "peripherals_unverified" in soc:
+        return sorted(str(k) for k in (soc.get("peripherals_unverified") or []))
+    if soc.get("pending_reference_manual_ingestion"):
+        return sorted((soc.get("peripherals") or {}).keys())
+    return []
+
+
 def emit(meta_dir: Path = META_DIR, som_dir: Path = SOM_DIR) -> str:
-    socs: list[tuple[str, str, dict[str, int], dict[str, int], int]] = []
+    socs: list[tuple[str, str, dict[str, int], dict[str, int], int, list[str]]] = []
     for path in sorted(meta_dir.rglob("*.json")):
         soc = json.loads(path.read_text(encoding="utf-8"))
         ref = soc["ref"]
         arena_kib = int(soc.get("inference_arena_sram_kib", 0))
         socs.append((ref, kconfig_token(ref), extract_caps(soc), extract_bool_caps(soc),
-                     arena_kib))
+                     arena_kib, extract_unverified_peripherals(soc)))
 
     lines: list[str] = [
         "/**",
@@ -448,10 +480,20 @@ def emit(meta_dir: Path = META_DIR, som_dir: Path = SOM_DIR) -> str:
         "",
     ]
 
-    for i, (ref, kc, caps, bool_caps, arena_kib) in enumerate(socs):
+    for i, (ref, kc, caps, bool_caps, arena_kib, unverified) in enumerate(socs):
         keyword = "if" if i == 0 else "elif"
         lines.append(f"#{keyword} defined(CONFIG_ALP_SOC_{kc})")
         lines.append(f"/* {ref} */")
+        if unverified:
+            # #936: this SoC's own metadata file has no datasheet/DFP/HWRM
+            # citation backing the COUNT for these `peripherals` keys -- the
+            # ALP_SOC_*_COUNT macros derived from them (and thus ALP_HAS())
+            # are asserted, not confirmed.  This says nothing about whether
+            # the peripheral's mere EXISTENCE is cited (e.g. E4's pdm/pdm_lp:
+            # the instance is DFP-confirmed, only the channel count isn't --
+            # see `peripherals_unverified` in the source JSON under
+            # metadata/socs/).
+            lines.append(f"/* UNVERIFIED (count not backed by a primary source): {', '.join(unverified)} */")
         soc_defs: list[tuple[str, str]] = [("ALP_SOC_REF_STR", f"\"{ref}\"")]
         soc_defs += [(f"ALP_SOC_{cap}", str(caps[cap])) for cap, _ in CAPS]
         soc_defs += [(f"ALP_SOC_{key.upper()}", str(bool_caps[key.upper()])) for key in BOOL_CAPS]
@@ -506,18 +548,18 @@ def _clang_format(path: Path) -> None:
 def main() -> int:
     OUT.parent.mkdir(parents=True, exist_ok=True)
     out_text = emit()
-    OUT.write_text(out_text, encoding="utf-8")
+    OUT.write_text(out_text, encoding="utf-8", newline="")
     _clang_format(OUT)
     print(f"wrote {OUT.relative_to(REPO)} ({len(OUT.read_text().splitlines())} lines)")
 
     cap_h_text = _emit_cap_h()
-    CAP_H_OUT.write_text(cap_h_text, encoding="utf-8")
+    CAP_H_OUT.write_text(cap_h_text, encoding="utf-8", newline="")
     _clang_format(CAP_H_OUT)
     print(f"wrote {CAP_H_OUT.relative_to(REPO)} ({len(CAP_H_OUT.read_text().splitlines())} lines)")
 
     CAP_C_OUT.parent.mkdir(parents=True, exist_ok=True)
     cap_c_text = _emit_cap_c()
-    CAP_C_OUT.write_text(cap_c_text, encoding="utf-8")
+    CAP_C_OUT.write_text(cap_c_text, encoding="utf-8", newline="")
     _clang_format(CAP_C_OUT)
     print(f"wrote {CAP_C_OUT.relative_to(REPO)} ({len(CAP_C_OUT.read_text().splitlines())} lines)")
 

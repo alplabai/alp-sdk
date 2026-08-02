@@ -4,15 +4,18 @@ zephyr_west_flash -- invoke ``west flash`` on a Zephyr slice's build
 directory.
 
 Backend invoked by ``west alp-flash`` for every slice whose
-``flash_method`` is ``zephyr_west_flash``.  The orchestrator pre-fills
-``flash_args.runner`` from the slice's resolved toolchain (default
-``openocd``; ``jlink`` for SoCs that ship a Segger probe; ``pyocd``
-for CMSIS-DAP-only boards).
+``flash_method`` is ``zephyr_west_flash``.  The orchestrator does not
+force a runner: not every in-tree board registers one (e.g. AEN's
+board.cmake sets ``flash-runner: alif_flash``), so we defer to
+whatever the board.cmake default resolves to unless the caller
+explicitly asks for one.
 
 flash_args contract:
-  runner     str    Zephyr runner ID -- "openocd" | "jlink" | "pyocd" |
+  runner     str?   Zephyr runner ID -- "openocd" | "jlink" | "pyocd" |
                     "nrfjprog" | "stm32cubeprogrammer" | ...
-                    REQUIRED.  Passed through to ``--runner``.
+                    OPTIONAL.  Passed through to ``--runner`` when
+                    set; when absent, ``west flash`` uses the
+                    board.cmake default runner.
   build_dir  str?   Path to the Zephyr build directory.  When absent,
                     the dispatcher passes the slice's ``build_dir``
                     from the manifest.
@@ -20,6 +23,14 @@ flash_args contract:
   hex_file   str?   Override the binary west picks (rare; useful when
                     a slice produces both zephyr.elf + a signed
                     zephyr.signed.hex).
+
+  `jlink_flash_device` (the AEN SoC-variant's part-number J-Link MRAM-loader
+  profile, when the SoM preset publishes one) is a CONSUMER-SIDE-ONLY key:
+  this backend doesn't read it and takes no `--runner` from it, so a
+  west-flash run through this in-tree backend still defers to the
+  board.cmake default runner (AEN's is `flash-runner: alif_flash`, i.e. the
+  SETOOLS path) even when it's present in flash_args -- that's expected,
+  not a sign the key is broken.
 
 Tool requirement: ``west`` on PATH.  We rely on west's own runner
 plumbing (``west flash --runner X``) so each underlying runner's
@@ -39,7 +50,8 @@ from . import FlashBackend, FlashContext, FlashResult, register
 
 
 class ZephyrWestFlash:
-    """`west flash --runner <runner> --build-dir <dir>` wrapper."""
+    """`west flash --build-dir <dir> [--runner <runner>]` wrapper (runner
+    optional — omitted defers to the board.cmake default)."""
 
     name: str = "zephyr_west_flash"
     requires: list[str] = ["west"]
@@ -57,13 +69,6 @@ class ZephyrWestFlash:
             )
 
         runner = (ctx.flash_args or {}).get("runner")
-        if not runner:
-            return FlashResult(
-                ok=False,
-                elapsed_s=time.monotonic() - start,
-                message=("zephyr_west_flash: flash_args.runner is required "
-                         "(e.g. openocd, jlink, pyocd, nrfjprog)."),
-            )
 
         # Resolve build_dir from flash_args, falling back to the
         # artefact's parent dir (every slice's output_artefact lives
@@ -81,8 +86,9 @@ class ZephyrWestFlash:
         cmd: list[str] = [
             west, "flash",
             "--build-dir", str(build_dir),
-            "--runner",    str(runner),
         ]
+        if runner:
+            cmd.extend(["--runner", str(runner)])
         if (ctx.flash_args or {}).get("erase"):
             cmd.append("--erase")
         hex_file = (ctx.flash_args or {}).get("hex_file")
@@ -106,7 +112,8 @@ class ZephyrWestFlash:
                 ok=True,
                 elapsed_s=elapsed,
                 message=f"zephyr_west_flash[{ctx.core_id}]: programmed via "
-                        f"{runner} in {elapsed:.1f}s",
+                        f"{runner or 'board-default runner'} in "
+                        f"{elapsed:.1f}s",
                 command=list(cmd),
             )
         tail = (proc.stderr or proc.stdout or "").strip().splitlines()

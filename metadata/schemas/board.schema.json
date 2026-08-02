@@ -81,8 +81,8 @@
       "properties": {
         "sku": {
           "type": "string",
-          "pattern": "^E1M-(AEN[3-8]01|V2N10[12]|V2M10[12]|NX9[0-9]{3})$",
-          "description": "Stock SoM SKU (MPN).  Resolves to a preset at metadata/e1m_modules/<MPN>.yaml.  Recognised: E1M-AEN301/401/501/601/701/801 (Alif Ensemble), E1M-V2N101/V2N102 (Renesas RZ/V2N), E1M-V2M101/V2M102 (V2N + DEEPX), E1M-NX9xxx (NXP i.MX 93; E1M-NX9101 is a placeholder preset until the production MPN lands)."
+          "pattern": "^E1M-(AEN[3-8][0-9]{2}|V2N[0-9]{3}|V2M[0-9]{3}|NX9[0-9]{3})$",
+          "description": "Stock SoM SKU (MPN).  Resolves to a preset at metadata/e1m_modules/<MPN>.yaml.  Shape: E1M-AEN<tier 3-8><2-digit config> (Alif Ensemble, e.g. E1M-AEN301/AEN302), E1M-V2N<3-digit config> (Renesas RZ/V2N), E1M-V2M<3-digit config> (V2N + DEEPX), E1M-NX9xxx (NXP i.MX 93; E1M-NX9101 is a placeholder preset until the production MPN lands).  The config tail is a per-configuration increment allocated by the PLM; not every value in range has a shipped preset."
         },
         "hw_rev": {
           "type": "string",
@@ -609,13 +609,13 @@
         "peripherals": {
           "type": "array",
           "uniqueItems": true,
-          "description": "Peripheral subsystems this slice uses directly via the matching <alp/<class>.h> wrapper.  Each entry enables the corresponding Zephyr Kconfig / Yocto package at build time.",
+          "description": "Peripheral subsystems this slice uses directly through the portable <alp/*> API.  Most classes have a dedicated header (<alp/adc.h>, <alp/dac.h>, <alp/can.h>, ...); the bus and pin classes (gpio, i2c, spi, uart) live together in <alp/peripheral.h>, and a few (emmc, flash, ethernet, sensor) are reached through <alp/storage.h> / a chip driver rather than a class header of their own.  Each entry enables the corresponding Zephyr Kconfig / Yocto package at build time -- the token -> Kconfig mapping is single-sourced in metadata/registries/peripheral-kconfig.json, which a gate requires to cover this enum exactly.",
           "items": {
             "type": "string",
             "enum": [
-              "adc", "can", "counter", "emmc", "ethernet", "flash",
-              "gpio", "i2c", "i2s", "pwm", "rtc", "sensor", "spi",
-              "uart", "usb", "watchdog"
+              "adc", "can", "counter", "dac", "emmc", "ethernet",
+              "flash", "gpio", "i2c", "i2s", "i3c", "pwm", "rtc",
+              "sensor", "spi", "uart", "usb", "watchdog"
             ]
           }
         },

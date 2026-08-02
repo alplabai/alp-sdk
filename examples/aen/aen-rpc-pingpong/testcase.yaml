@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# aen-rpc-pingpong -- OpenAMP RPMsg ping/pong between the two E8 M55 cores over
+# the raw Zephyr ipc_service API (the alif,mhuv2-mbox MBOX driver + a shared
+# SRAM0 vring carve-out).  One app, role-by-board: the HP build is the host
+# (boots HE via alp_mproc_boot_core, registers the "pingpong" endpoint, sends
+# 16 "ping"s, counts "pong"s); the HE build is the remote (registers the same
+# endpoint, echoes each "ping" as a "pong").  BENCH-VERIFIED PASS on E8
+# (2026-06-18): 16/16 round-trips.
+#
+# Filtered OUT of the native_sim PR gate (platform_allow = AEN801 board
+# targets only, no native_sim overlay); build_only in the advisory
+# pr-twister-aen.yml gate -- the round-trip itself is a dual-ATOC bench flash,
+# not a CI run.
+
+sample:
+  name: aen-rpc-pingpong
+  description: |
+    Zephyr ipc_service / OpenAMP-RPMsg ping/pong between RTSS-HP and RTSS-HE
+    on the E1M-AEN801, over the alif,mhuv2-mbox MBOX driver + a shared SRAM0
+    vring carve-out.  HP hosts (boots HE, sends 16 "ping"s, counts "pong"s);
+    HE remotes (echoes each "ping" as a "pong").  BENCH-VERIFIED PASS on E8
+    (2026-06-18): 16/16.
+
+tests:
+  alp_sdk.examples.aen.rpc_pingpong.hp_host:
+    platform_allow:
+      - alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - multicore
+      - rpc
+      - rtss-hp
+    build_only: true   # the 16/16 ping/pong round-trip is a dual-ATOC bench flash, not a CI run.
+
+  alp_sdk.examples.aen.rpc_pingpong.he_remote:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - multicore
+      - rpc
+      - rtss-he
+    build_only: true   # this role never runs until the HP host releases it.

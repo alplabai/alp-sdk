@@ -1,21 +1,77 @@
 # Single source of truth for the Alp SDK release version.
 #
 # Read by:
-#   - scripts/alp_project.py        -- compared against the family /
-#                                       board hw_revisions tables
-#                                       when emitting any backend
-#                                       config; refuses to emit when
-#                                       the requested hw_rev is
-#                                       outside [min_sdk_version,
-#                                       max_sdk_version].
-#   - scripts/validate_board_yaml.py -- same check, exit code 3 on
-#                                       mismatch.
-#   - alplabai/alp-sdk-vscode        -- surfaces an incompat warning
-#                                       in the configurator panel
-#                                       (extension lives in its own
-#                                       repo since 2026-05-12).
+#   - scripts/alp_cli/__init__.py         -- the CLI's __version__,
+#                                            read from `version:` at
+#                                            import time.
+#   - scripts/alp_orchestrate/buildplan.py -- the `sdkVersion` field
+#                                            emitted in every build
+#                                            plan (`_sdk_version()`).
+#   - scripts/abi_snapshot.py             -- the vMAJOR.MINOR label
+#                                            the current ABI snapshot
+#                                            file must carry.
+#   - scripts/check_version_doc_sync.py   -- the version every other
+#                                            hand-written copy
+#                                            (version.h, pyproject.toml,
+#                                            alp_banner.c) is checked
+#                                            against.
+#   - scripts/alp_lock/__init__.py        -- baked into alp.lock's sdk
+#                                            identity.
+#   - scripts/bump_version.py             -- rewrites `version:` (and
+#                                            slices CHANGELOG.md's
+#                                            [Unreleased] section) on a
+#                                            release.
+#   - scripts/alp_template.py             -- pins a scaffolded
+#                                            README's doc links to
+#                                            `v<version>` when
+#                                            `status: released`.
+#   - alplabai/alp-sdk-vscode             -- reads `version:` to warn
+#                                            when a checkout is older
+#                                            than the extension's own
+#                                            MIN_SDK_VERSION floor
+#                                            (packages/alp-core/src/sdk/
+#                                            service.ts) -- unrelated to
+#                                            the per-rev bounds below.
+#
+# Per-hw_rev `[min_sdk_version, max_sdk_version]` bounds declared in the
+# board/family hw_revisions tables (metadata/boards/*.yaml,
+# metadata/e1m_modules/*/hw-revisions.yaml) ARE enforced, as of #1019:
+# `scripts/alp_orchestrate/sdk_compat.py` compares `version:` above
+# against the resolved SoM and board revisions, and `loader.py` raises
+# `SdkRevisionUnsupported` when it falls outside either -- so every
+# consumer of `load_board_yaml` refuses, including both of
+# `scripts/alp_project.py`'s emit paths.  `scripts/validate_board_yaml.py`
+# maps that one failure to exit code 3.
+#
+# Both bounds are INCLUSIVE.  An ABSENT bound is unbounded, not zero -- a
+# revision that declares no range at all keeps resolving on that axis (it
+# may still be refused on the `status:` axis below).  A malformed bound is
+# treated as absent rather than refusing a build over a metadata typo.
+#
+# Whether the requested hw_rev EXISTS is ALSO enforced, as of #1025 (the
+# safe half): `sdk_compat.revision_known()` checks the resolved table
+# before the range comparison above ever runs, and `loader.py` raises
+# `SdkRevisionUnknown` -- a distinct error from `SdkRevisionUnsupported`,
+# since an unknown revision has no range to have been outside of.
+# `scripts/alp_project_loader.py`'s `--emit composed-route-table` /
+# `carrier-netlist` path resolves the SoM/board tables independently of
+# `load_board_yaml` and carries its own copy of the same gate.
+# `scripts/validate_board_yaml.py` maps that failure to exit code 4.
+#
+# Whether an EXISTING hw_rev is buildable is ALSO enforced, as of #1025
+# (the status half): a revision that exists but is `status: reserved`,
+# `status: tbd`, or carries no `status` key at all is refused --
+# `sdk_compat.family_revision_buildable()` / `revision_buildable()` read
+# the resolved entry's `status:` (now a required key in
+# `hw-revisions-v1.schema.json`) after `revision_known()` above has
+# already confirmed the revision exists, and `loader.py` raises
+# `SdkRevisionNotBuildable` -- distinct from both `SdkRevisionUnknown`
+# above and `SdkRevisionUnsupported` below, since exists-but-not-buildable
+# is neither "doesn't exist" nor "out of range".  Every other declared
+# status (`production`, `preview`, `preliminary`, `deprecated`) passes.
+# `scripts/validate_board_yaml.py` maps that failure to exit code 5.
 #
 # Bump in the same PR that lands the matching CHANGELOG.md entry.
 
-version: 0.11.1
+version: 0.15.0
 status:  released        # released | development | preview

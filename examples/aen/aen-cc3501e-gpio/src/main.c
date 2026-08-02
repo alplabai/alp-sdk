@@ -219,11 +219,17 @@ int main(void)
 	cc3501e_t    fw;
 	alp_status_t s = cc3501e_bridge_bringup(&fw);
 	if (s == ALP_ERR_NOT_PRESENT_ON_THIS_SOC) {
-		/* The SPI bus / control pins are absent (wrong board overlay).
-		 * Nothing to drive -- report all steps FAIL so the bench script
-		 * still sees a complete contract, then bail. */
-		printf("[cc3501e-gpio] bridge bring-up failed (SPI bus %u / WIFI_EN+nRESET "
+		/* The backend authority itself says the SPI bus / control pins are
+		 * absent (wrong board overlay) -- a bench/board limitation, not a
+		 * bug in this app (same rule as an ALP_ERR_NOSUPPORT boot-authority
+		 * answer elsewhere in this diff: aen-alp-rpc/src/main.c,
+		 * aen-dualcore-doorbell/src/main.c). Nothing to drive -- bail. */
+		printf("[cc3501e-gpio] bridge bring-up skipped (SPI bus %u / WIFI_EN+nRESET "
 		       "absent? err=%d) -- check the board overlay\n",
+		       CC3501E_BRIDGE_SPI_BUS_ID,
+		       (int)alp_last_error());
+		printf("RESULT SKIP: cc3501e_bridge_bringup -> NOT_PRESENT_ON_THIS_SOC (SPI bus %u / "
+		       "WIFI_EN+nRESET absent? err=%d)\n",
 		       CC3501E_BRIDGE_SPI_BUS_ID,
 		       (int)alp_last_error());
 		return 0;
@@ -334,6 +340,21 @@ int main(void)
 	 * round-trip, is what the CI target proves.
 	 */
 	printf("GPIO_TEST: SUMMARY pass=%d fail=%d\n", (int)pass, (int)fail);
+
+	/* RESULT verdict, gated on the SUMMARY tally above -- report() is the
+	 * ONLY thing that increments pass/fail, and every one of the 8 steps
+	 * calls it, so fail==0 here means all 8 bridge ops genuinely returned
+	 * ALP_OK (not that main() merely reached this line: a dead link fails
+	 * every step via gpio_wait_for_link()'s own comment above, and native_sim
+	 * -- no CC3501E attached -- always lands here with fail=8). */
+	if (fail == 0u) {
+		printf("RESULT PASS: all %u cc3501e gpio/cam bridge ops ok\n", pass);
+	} else {
+		printf("RESULT FAIL: %u/%u cc3501e gpio/cam bridge op(s) failed -- see GPIO_TEST "
+		       "lines above\n",
+		       fail,
+		       pass + fail);
+	}
 
 	/* The bridge SPI + control pins are owned by cc3501e_bridge_bringup();
 	 * a real app that tears down would add a cc3501e_bridge_teardown(). */

@@ -103,12 +103,18 @@ def test_real_build_plan_conforms(tmp_path: Path):
     assert plan["sharedArtefacts"]
 
 
-# The same four multicore examples `scripts/check_emit_snapshots.py` pins a
+# The same multicore examples `scripts/check_emit_snapshots.py` pins a
 # byte-for-byte golden for (ADR 0014) -- validating their real emitted plans
 # here is the schema-side half of that same emitter <-> contract lockstep.
+#
+# rpmsg-imx93 excluded (#1025): E1M-NX9101's only hw_rev (imx93 r1) is
+# `status: tbd` -- refused outright by the hw_rev-buildable gate, so it
+# can no longer be emitted at all. Re-add
+# "examples/multicore/rpmsg-imx93/board.yaml" (and its
+# check_emit_snapshots.py CASES entries) once
+# metadata/e1m_modules/imx93/hw-revisions.yaml:r1 carries a buildable status.
 _PINNED_SNAPSHOT_BOARDS = [
     "examples/multicore/rpmsg-aen/board.yaml",
-    "examples/multicore/rpmsg-imx93/board.yaml",
     "examples/multicore/heterogeneous-offload/board.yaml",
     "examples/multicore/rpmsg-v2n/board.yaml",
 ]
@@ -301,9 +307,11 @@ def test_pinned_snapshot_slices_carry_toolchain_artifacts_debug():
     case: `toolchain.targetTriple`/`toolchain.compiler` are the real
     Zephyr SDK arm-zephyr-eabi triple (SoM preset `topology.m55_hp.
     toolchain`), `artifacts.elf`/`.map`/`.bin`/`.compileCommands`
-    follow Zephyr's own CMake output layout, and `debug.probe` is the
-    same `openocd` runner `system-manifest.yaml`'s `flash_method`
-    resolves to for a Zephyr slice."""
+    follow Zephyr's own CMake output layout, and `debug.probe` is null
+    for a Zephyr slice -- `system-manifest.yaml`'s `flash_method` no
+    longer forces a runner (not every in-tree board registers
+    `openocd`), so the resolved runner defers to the board.cmake
+    default and `probe` stays null unless a runner is explicitly set."""
     board_yaml = REPO / "examples/multicore/rpmsg-aen/board.yaml"
     project = load_board_yaml(board_yaml)
     plan = json.loads(emit_build_plan(
@@ -325,7 +333,7 @@ def test_pinned_snapshot_slices_carry_toolchain_artifacts_debug():
         "symbols":         "build/m55_hp-zephyr/zephyr/zephyr.symbols",
         "compileCommands": "build/m55_hp-zephyr/compile_commands.json",
     }
-    assert m55_hp["debug"] == {"console": "uart", "probe": "openocd"}
+    assert m55_hp["debug"] == {"console": "uart", "probe": None}
 
     # The A-class Yocto slice: no single predictable ELF/compileCommands
     # output under buildDir (real output lives in the Yocto build tree's
@@ -407,7 +415,7 @@ def test_missing_required_field_rejected():
                 "sizeReport": None, "symbols": None,
                 "compileCommands": None,
             },
-            "debug": {"console": "uart", "probe": "openocd"},
+            "debug": {"console": "uart", "probe": None},
             "command": None,
             # "env" deliberately omitted -- required by the schema.
         }],
@@ -417,6 +425,78 @@ def test_missing_required_field_rejected():
     validator = jsonschema.Draft202012Validator(_schema())
     errors = list(validator.iter_errors(bad))
     assert errors, "missing required 'env' should have been rejected"
+
+
+def test_execution_policy_absent_at_top_level_still_validates():
+    """Strict-producer / tolerant-consumer (#855, reverting #847's breaking
+    shape change): `executionPolicy` is no longer in the top-level
+    `required` array, so a plan that omits it entirely -- e.g. every
+    historical/v0.11.1 plan predating #847 -- still validates under
+    schemaVersion 1 rather than being rejected. The real emitter keeps
+    emitting it unconditionally on every plan regardless (see
+    test_emit_build_plan_publishes_execution_policy in
+    test_orchestrate_buildplan.py) -- this only relaxes what the SCHEMA
+    accepts, not what the SDK actually produces."""
+    ok = {
+        "schemaVersion": 1,
+        "generatedBy": "scripts/alp_orchestrate.py",
+        "boardYaml": "board.yaml",
+        "sku": "E1M-V2N101",
+        "buildRoot": "build",
+        # "executionPolicy" deliberately omitted -- optional per the schema.
+        "slices": [{
+            "coreId": "m33_sm",
+            "backend": "zephyr",
+            "buildDir": "build/m33_sm-zephyr",
+            "appDir": None,
+            "configArtefacts": [],
+            "toolchain": {
+                "targetTriple": "arm-zephyr-eabi",
+                "compiler": "arm-zephyr-eabi-gcc",
+                "sysroot": None,
+                "id": "arm-zephyr-eabi",
+            },
+            "artifacts": {
+                "elf": None, "map": None, "bin": None,
+                "sizeReport": None, "symbols": None,
+                "compileCommands": None,
+            },
+            "debug": {"console": "uart", "probe": None},
+            "command": None,
+            "env": {"ALP_SDK_ROOT": "/repo"},
+            "envAppendPath": {},
+        }],
+        "sharedArtefacts": [],
+        "warnings": [],
+    }
+    validator = jsonschema.Draft202012Validator(_schema())
+    errors = list(validator.iter_errors(ok))
+    assert errors == [], "\n".join(str(e) for e in errors)
+
+
+def test_execution_policy_still_validated_when_present():
+    """`executionPolicy` stays a KNOWN, VALIDATED key -- optional, not
+    schema-less. A plan that includes it with a malformed shape (missing
+    `nullCommand`) is still rejected, same as before #855; only the
+    top-level `required` entry was dropped."""
+    bad = {
+        "schemaVersion": 1,
+        "generatedBy": "scripts/alp_orchestrate.py",
+        "boardYaml": "board.yaml",
+        "sku": "E1M-V2N101",
+        "buildRoot": "build",
+        "executionPolicy": {
+            "unknownBackend": "fail",
+            "missingTool": "skip",
+            # "nullCommand" deliberately omitted -- required by the
+            # executionPolicy sub-schema whenever the key is present.
+        },
+        "slices": [],
+        "sharedArtefacts": [],
+        "warnings": [],
+    }
+    validator = jsonschema.Draft202012Validator(_schema())
+    assert list(validator.iter_errors(bad)) != []
 
 
 def test_unknown_top_level_key_rejected():

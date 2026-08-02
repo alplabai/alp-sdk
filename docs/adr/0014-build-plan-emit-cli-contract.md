@@ -1,6 +1,6 @@
 # 0014. The `alp` CLI consumes the orchestrator's emitted build plan
 
-Status: Accepted
+Status: Accepted — partially superseded by [0020](0020-sdk-owns-build-execution.md)
 Date: 2026-06-04
 Deciders: alpCaner (alp-sdk), Hakan (alp-sdk-vscode)
 
@@ -84,13 +84,26 @@ Contract properties (locked with the consumer):
 - `west alp-build` **stays native** (the shim-over-`alp build` idea is
   withdrawn): standalone `west` usage is a first-class consumer path,
   and an SDK west command must not depend on a binary from another
-  repo.
+  repo. **Superseded 2026-07-18 by [0020](0020-sdk-owns-build-execution.md)
+  Phase 4** — `west alp-build` itself was retired, not shimmed; see the
+  amendment below.
 - Wiring `emit_sysbuild_conf` into the shared-artefact set (it was
   emit-only before) means a `boot:` block now also materialises
   `build/alp_sysbuild.conf` during `west alp-build` — previously the
   overlay was only available via `--emit`.
 
 ## Amendments
+
+### 2026-07-18 — superseded by 0020's mechanism clause and its 84-87 consequence
+
+[0020](0020-sdk-owns-build-execution.md) supersedes this ADR's *mechanism*
+clause (the executor moves out of alp-sdk entirely, to the standalone `tan`
+CLI) and its Consequences 84-87 clause above (`west alp-build` does not "stay
+native" — it, and the other five `west alp-*` build/flash/image/size/renode/
+clean extensions, are retired in 0020 Phase 4). This ADR's contract
+properties (camelCase keys, `GeneratedFile {path, contents}`, additive-change
+rule, schema versioning) are unaffected and remain the live contract `tan`
+consumes.
 
 ### 2026-07-18 — envelope provenance keys + tooling-index camelCase fix
 
@@ -119,8 +132,11 @@ Contract properties (locked with the consumer):
   (`{"unknownBackend": "fail", "missingTool": "skip", "nullCommand":
   "skip"}`), publishing the skip-vs-fail rules
   `Orchestrator._dispatch_slice` itself applies so a plan consumer
-  stops hand-porting them. Unlike the provenance keys above,
-  `executionPolicy` is always emitted, so it is in the schema's
-  top-level `required` array (no existing fixture regenerates a plan
-  without it — `check_build_plan.py`'s corpus always calls the real
-  emitter).
+  stops hand-porting them. `executionPolicy` is **always emitted**
+  (strict producer) but is **optional** in the schema (tolerant
+  consumer), so a field-absent plan — e.g. a `v0.11.1` plan — still
+  validates and a consumer applies the documented default. (Corrected
+  2026-07-20: it was briefly `required`, which is a breaking shape
+  change at unchanged `schemaVersion 1`; reverted here — #856 amends
+  ADR-0020 with the matching record (tracked in #855). The consumer pins
+  `schemaVersion == 1`, so a bump was not the fix.)

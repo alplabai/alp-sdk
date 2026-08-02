@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# <alp/jpeg.h> encoder backends: the portable software baseline fallback and
+# the Alif Ensemble E8 Hantro VC9000E hardware encoder.
+
+config ALP_SDK_JPEG_SW_BASELINE
+	bool "Software baseline-JPEG encoder fallback"
+	default y
+	help
+	  Portable baseline-sequential JPEG encoder used on any SoM
+	  without a hardware JPEG backend.  4:2:0 and monochrome only.
+
+config ALP_SDK_JPEG_ALIF_HANTRO
+	bool "Alif Ensemble E8 Hantro VC9000E hardware JPEG encoder"
+	depends on VIDEO_JPEG_HANTRO_VC9000E
+	default n
+	help
+	  Hardware-accelerated JPEG encode on E1M-AEN801 (Alif E8).
+	  Tier-2 opt-in; requires the vendored Zephyr video driver and
+	  the hal_alif JPEG SW-helper library.

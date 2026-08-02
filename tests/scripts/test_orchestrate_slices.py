@@ -23,7 +23,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _orchestrate_support import REPO, _write_board  # noqa: E402
+from _orchestrate_support import (              # noqa: E402
+    REPO,
+    _synthetic_nx9101_root,
+    _write_board,
+)
 
 from alp_orchestrate import (                       # noqa: E402
     BoardProject,
@@ -160,9 +164,12 @@ def _make_som_only_project(tmp_path: Path, sku_yaml_content: str,
     bc_schema_text = (real_meta / "schemas" / "board.schema.json"
                       ).read_text(encoding="utf-8")
     bc_schema = _json.loads(bc_schema_text)
-    bc_schema["properties"]["som"]["properties"]["sku"]["pattern"] = (
-        r"^E1M-(AEN[3-8]01|V2N10[12]|V2M10[12]|NX9[0-9]{3}|TST[0-9]{3})$"
-    )
+    sku_prop = bc_schema["properties"]["som"]["properties"]["sku"]
+    # Splice a TST[0-9]{3} branch into the *real* pattern (rather than
+    # hard-coding a copy) so this fixture can never drift back to a
+    # pre-#1089 literal when the schema's own pattern changes.
+    assert sku_prop["pattern"].endswith(")$")
+    sku_prop["pattern"] = sku_prop["pattern"][:-2] + "|TST[0-9]{3})$"
     (schemas / "board.schema.json").write_text(
         _json.dumps(bc_schema), encoding="utf-8")
     shutil.copy(real_meta / "schemas" / "som-preset-v1.schema.json",
@@ -197,7 +204,6 @@ _SYNTHETIC_V2N_WITH_ON_MODULE = """\
     helper_firmware:
       - name: gd32_bridge
         chip: gd32g553
-        firmware_path: firmware/gd32-bridge/build/gd32/gd32-bridge.bin
         flash_method:  swd_probe
         flash_args:
           interface: cmsis-dap
@@ -269,9 +275,12 @@ def test_slice_alp_conf_deduplicate_som_vs_board(tmp_path: Path) -> None:
     bc_schema_text = (real_meta / "schemas" / "board.schema.json"
                       ).read_text(encoding="utf-8")
     bc_schema = _json2.loads(bc_schema_text)
-    bc_schema["properties"]["som"]["properties"]["sku"]["pattern"] = (
-        r"^E1M-(AEN[3-8]01|V2N10[12]|V2M10[12]|NX9[0-9]{3}|TST[0-9]{3})$"
-    )
+    sku_prop = bc_schema["properties"]["som"]["properties"]["sku"]
+    # Splice a TST[0-9]{3} branch into the *real* pattern (rather than
+    # hard-coding a copy) so this fixture can never drift back to a
+    # pre-#1089 literal when the schema's own pattern changes.
+    assert sku_prop["pattern"].endswith(")$")
+    sku_prop["pattern"] = sku_prop["pattern"][:-2] + "|TST[0-9]{3})$"
     (schemas / "board.schema.json").write_text(
         _json2.dumps(bc_schema), encoding="utf-8")
     shutil.copy(real_meta / "schemas" / "som-preset-v1.schema.json",
@@ -587,11 +596,193 @@ cores:
     assert "CONFIG_ALP_SDK_BLE=y" not in conf
 
 
-def test_slice_alp_conf_iot_unknown_provider_uses_generic_zephyr(
+def test_slice_alp_conf_iot_cc3501e_chip_off_no_backend_lines(
     tmp_path: Path,
 ) -> None:
+    """issue #874 item 2: the SoM's wireless provider is CC3501E, but this
+    board variant DNIs the chip (`populated: { cc3501e: false }`) -- the
+    CC3501E Wi-Fi/BLE bridge lines must not be emitted (they `depend on`
+    ALP_SDK_CHIP_CC3501E, which resolves off on this variant), and a clear
+    comment must explain why instead of a silently-dropped `=y` line."""
+    body = """
+som:
+  sku: E1M-AEN701
+
+name: cc3501e-dni-variant
+populated:
+  cc3501e: false
+
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+    iot: { wifi: true, ble: true }
+"""
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    conf = _slice_alp_conf(project, project.cores["m55_hp"])
+
+    assert "CONFIG_ALP_SDK_CHIP_CC3501E=n" in conf
+    assert "CONFIG_ALP_SDK_WIFI_CC3501E=y" not in conf
+    assert "CONFIG_ALP_SDK_BLE_CC3501E=y" not in conf
+    assert "does not populate the chip" in conf
+
+
+def test_slice_alp_conf_iot_cc3501e_triple_overlap_populated_wins(
+    tmp_path: Path,
+) -> None:
+    """issue #874 adversarial follow-up: on_module.wifi_ble: cc3501e (SoM-
+    intrinsic) + `populated: { cc3501e: false }` (board DNI) + top-level
+    `chips: [cc3501e]` (project-declared) all name the same chip.
+    `populated: false` is authoritative-OFF -- a project `chips:` entry
+    must NOT silently re-enable a chip the board just turned off.  The
+    emitted CHIP line and the WIFI/BLE gate must AGREE (both off);
+    `_resolve_chip_states` and `_emit_chips` must never independently
+    derive a different answer for the same chip."""
+    body = """
+som:
+  sku: E1M-AEN701
+
+name: cc3501e-triple-overlap
+populated:
+  cc3501e: false
+
+chips:
+  - cc3501e
+
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+    iot: { wifi: true, ble: true }
+"""
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    conf = _slice_alp_conf(project, project.cores["m55_hp"])
+
+    # Exactly one CHIP_CC3501E line, resolving off -- no y-then-n (or
+    # y-then-n-then-y) self-contradiction.
+    assert conf.count("CONFIG_ALP_SDK_CHIP_CC3501E=") == 1
+    assert "CONFIG_ALP_SDK_CHIP_CC3501E=n" in conf
+    assert "CONFIG_ALP_SDK_CHIP_CC3501E=y" not in conf
+
+    # The WIFI/BLE gate must agree with the chip line above.
+    assert "CONFIG_ALP_SDK_WIFI_CC3501E=y" not in conf
+    assert "CONFIG_ALP_SDK_BLE_CC3501E=y" not in conf
+
+
+def test_slice_alp_conf_iot_tls_only_emits_network_base(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """issue #874 item 1: `iot.tls: true` alone (no `wifi:`/`mqtt:`) must
+    still emit the networking base -- CONFIG_TLS_CREDENTIALS depends on
+    NETWORKING/NET_SOCKETS, which previously only the wifi/mqtt branches
+    emitted, so a TLS-only slice silently resolved TLS_CREDENTIALS to n.
+
+    Runs against `_synthetic_nx9101_root`'s scratch metadata root
+    (#1025: the real E1M-NX9101 is refused outright before this
+    slice-emission logic is ever reached -- see that helper's
+    docstring)."""
+    import alp_orchestrate
+
+    meta = _synthetic_nx9101_root(tmp_path, monkeypatch)
+    body = """
+som:
+  sku: E1M-NX9101
+
+libraries:
+  - name: mbedtls
+    cores: [m33]
+
+cores:
+  m33:
+    os: zephyr
+    app: ./m33
+    iot: { tls: true }
+"""
+    path = _write_board(tmp_path, body)
+    project = alp_orchestrate.load_board_yaml(path, metadata_root=meta)
+    conf = _slice_alp_conf(project, project.cores["m33"])
+
+    assert "CONFIG_NETWORKING=y" in conf
+    assert "CONFIG_NET_IPV4=y" in conf
+    assert "CONFIG_NET_SOCKETS=y" in conf
+    assert "CONFIG_TLS_CREDENTIALS=y" in conf
+    # No wifi/mqtt requested -- those gates must stay off.
+    assert "CONFIG_WIFI=y" not in conf
+    assert "CONFIG_ALP_SDK_IOT_WIFI=y" not in conf
+    assert "CONFIG_MQTT_LIB=y" not in conf
+
+
+def test_slice_alp_conf_no_inference_declared_emits_nothing(
+    tmp_path: Path,
+) -> None:
+    """issue #874 item 4: a slice that never declares `cores.<id>.inference:`
+    must not get any INFERENCE_* line -- BACKEND_TFLM's `depends on
+    TENSORFLOW_LITE_MICRO && CPP` previously resolved silently to n on
+    every such slice (e.g. a plain blinky/tone-generator example) with a
+    misleading `=y` line sitting in its alp.conf."""
+    body = """
+som:
+  sku: E1M-AEN701
+
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+"""
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    conf = _slice_alp_conf(project, project.cores["m55_hp"])
+
+    assert "INFERENCE" not in conf
+    assert "CONFIG_TENSORFLOW_LITE_MICRO" not in conf
+
+
+def test_slice_alp_conf_inference_declared_emits_tflm_plus_deps(
+    tmp_path: Path,
+) -> None:
+    """issue #874 items 4+5: `cores.<id>.inference:` (any key, e.g.
+    `default_arena_kib:` -- the same signal validate.py's Rule 4 already
+    keys its arena/heap OOM warning off of) turns the inference section
+    back on, and BACKEND_TFLM's genuinely-external deps (CONFIG_CPP,
+    CONFIG_TENSORFLOW_LITE_MICRO) are emitted alongside it since west.yml
+    pulls the tflite-micro module in unconditionally."""
+    body = """
+som:
+  sku: E1M-AEN701
+
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+    inference: { default_arena_kib: 128 }
+"""
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    conf = _slice_alp_conf(project, project.cores["m55_hp"])
+
+    assert "CONFIG_CPP=y" in conf
+    assert "CONFIG_TENSORFLOW_LITE_MICRO=y" in conf
+    assert "CONFIG_ALP_SDK_INFERENCE_BACKEND_TFLM=y" in conf
+    assert "CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN=y" in conf
+    assert "CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55=y" in conf
+
+
+def test_slice_alp_conf_iot_unknown_provider_uses_generic_zephyr(
+    tmp_path: Path, monkeypatch,
+) -> None:
     """A SoM whose wireless provider is still TBD emits the generic Zephyr
-    networking / MQTT / TLS / BLE gates rather than a false provider."""
+    networking / MQTT / TLS / BLE gates rather than a false provider.
+
+    Runs against `_synthetic_nx9101_root`'s scratch metadata root
+    (#1025: the real E1M-NX9101 is refused outright before this
+    slice-emission logic is ever reached -- see that helper's
+    docstring); the synthetic preset's `on_module.wifi_ble: TBD` is
+    what this test actually exercises, same as the real one's."""
+    import alp_orchestrate
+
+    meta = _synthetic_nx9101_root(tmp_path, monkeypatch)
     body = """
 som:
   sku: E1M-NX9101
@@ -607,7 +798,7 @@ cores:
     iot: { wifi: true, mqtt: true, tls: true, ble: true }
 """
     path = _write_board(tmp_path, body)
-    project = load_board_yaml(path)
+    project = alp_orchestrate.load_board_yaml(path, metadata_root=meta)
     conf = _slice_alp_conf(project, project.cores["m33"])
 
     for expected in (
