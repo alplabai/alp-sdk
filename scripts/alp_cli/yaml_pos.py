@@ -24,6 +24,12 @@ def _construct_mapping(loader: _PosLoader, node: yaml.MappingNode) -> dict[str, 
     keys: dict[str, dict[str, int]] = {}
     for key_node, value_node in node.value:
         key = loader.construct_object(key_node, deep=True)
+        if key in mapping:
+            mark = key_node.start_mark
+            raise ValueError(
+                f"duplicate key {key!r} at line {mark.line + 1}, "
+                f"column {mark.column + 1}"
+            )
         value = loader.construct_object(value_node, deep=True)
         mapping[key] = value
         keys[key] = {

@@ -29,6 +29,7 @@ except ImportError:
 from alp_cli.validator import iter_schema_errors
 from alp_project import resolve_memory_map, resolve_soc_path
 from sentinels import is_tbd
+from strict_loaders import DuplicateKeyError, strict_json_loads, strict_yaml_load
 
 from . import sdk_compat
 from .models import (BoardProject, IpcEntry, OrchestratorError,
@@ -62,8 +63,8 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     if not path.is_file():
         raise OrchestratorError(f"file not found: {path}")
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except yaml.YAMLError as e:
+        data = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+    except (yaml.YAMLError, DuplicateKeyError) as e:
         raise OrchestratorError(f"failed to parse {path}: {e}") from e
     if not isinstance(data, dict):
         raise OrchestratorError(
@@ -75,8 +76,8 @@ def _load_json(path: Path) -> dict[str, Any]:
     if not path.is_file():
         raise OrchestratorError(f"file not found: {path}")
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as e:
+        return strict_json_loads(path.read_text(encoding="utf-8"), source=path)
+    except (json.JSONDecodeError, DuplicateKeyError) as e:
         raise OrchestratorError(f"failed to parse {path}: {e}") from e
 
 
@@ -806,7 +807,7 @@ def _library_alias_table(metadata_root: Path) -> dict[str, str]:
     path = metadata_root / "library-aliases-v1.json"
     if not path.is_file():
         return {}
-    doc = json.loads(path.read_text(encoding="utf-8"))
+    doc = strict_json_loads(path.read_text(encoding="utf-8"), source=path)
     aliases = doc.get("aliases")
     return dict(aliases) if isinstance(aliases, dict) else {}
 
