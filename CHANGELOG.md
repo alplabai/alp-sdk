@@ -68,6 +68,42 @@ row in that block does), I3C has no portable `examples/peripheral-io/`
 example at all, and its only exercise — `examples/aen/aen-i3c-regcheck` —
 is not observable under a Flow C RAM-run (#935).
 
+### Fixed — the SDHC ADMA descriptor table linked into an orphan `""` section on every board enabling `CONFIG_SDHC_DWC` (#1097)
+
+`CONFIG_SDHC_DESCRIPTOR_SECTION` (`zephyr/kconfigs/vendor-alif-peripherals.kconfig`)
+defaults to `""`, and `zephyr/drivers/sdhc/sdhc_dwc.c` unconditionally placed the
+ADMA2 descriptor table with `Z_GENERIC_SECTION(CONFIG_SDHC_DESCRIPTOR_SECTION)`.
+With `CONFIG_SDHC_DWC_ADMA=y` (the default) that expands to a section literally
+named `""`, which `-Wl,--fatal-warnings` treats as a hard orphan-section link
+error — not board-specific, any board enabling `CONFIG_SDHC_DWC` hit it. Added a
+new `CONFIG_SDHC_DESCRIPTOR_USE_SECTION` bool (default off) gating whether the
+section attribute is applied at all; off, the descriptor table falls back to
+normal `.bss` placement, which always links. No board currently opts a named
+region in — inventing one without evidence of the AEN801's actual DMA-coherency
+requirements would have been worse than the bug it replaced, so this fix is the
+safe generic guard only.
+
+Opting in does not by itself supply a name, so `sdhc_dwc.c` now carries a
+`BUILD_ASSERT` that `CONFIG_SDHC_DESCRIPTOR_SECTION` is non-empty whenever
+`CONFIG_SDHC_DESCRIPTOR_USE_SECTION=y`. Without it the opt-in re-armed this
+exact bug behind one switch: setting `USE_SECTION=y` and leaving the shipped
+`default ""` reproduced the orphan-section link error bit for bit.
+
+Regression coverage: **added** `examples/aen/aen-sdcard-readout/testcase.yaml`
+— #1095 deliberately left this one example without metadata rather than ship a
+known-broken scenario, so the file is new here, not restored. Its HE-target
+twister build confirms the descriptor table lands in `.bss` rather than an
+orphan section. `pr-twister-aen.yml`'s `paths:` filters also grow
+`zephyr/drivers/sdhc/**` and `zephyr/kconfigs/vendor-alif-peripherals.kconfig`:
+without them a future regression in the very files that caused #1097 would not
+have triggered the job that is supposed to catch it.
+
+One caveat this fix does **not** address: `.bss` on the AEN801 boards resolves
+to DTCM (`zephyr,sram = &dtcm`), which is CPU-local, and
+`CONFIG_SDHC_DWC_DMA_ADDR_TRANSLATE=n` programs that same local address into
+`DWC_SDHC_ADMA_SA_LOW_R`. The example is `build_only`, so no gate exercises a
+real transfer. A board that actually moves data over ADMA must revisit both.
+
 ### Fixed — `metadata/bootstrap.json` declared one Python floor host-universally, lower than Zephyr's real one (#1078)
 
 `prerequisites.pythonMinVersion` ("3.10") is deliberately host-universal --

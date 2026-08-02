@@ -38,6 +38,34 @@
 #define SDHC_DMA_ADDR(p) ((mem_addr_t)(p))
 #endif
 
+/*
+ * ALP-SDK DELTA (#1097), not upstream: CONFIG_SDHC_DESCRIPTOR_SECTION ships
+ * `default ""`, and Z_GENERIC_SECTION("") is a hard link error under
+ * -Wl,--fatal-warnings -- `orphan section ''` -- not a silent fallback.  Any
+ * board enabling CONFIG_SDHC_DWC without naming a section hit it, so apply
+ * the attribute only when a board has explicitly opted in; otherwise the
+ * table takes normal .bss placement.
+ *
+ * Opting in does not by itself make the name non-empty, so assert it here:
+ * a compile error naming the Kconfig beats `orphan section ''` at link time,
+ * which says nothing about what to set.  sizeof a string literal counts the
+ * NUL, so "" is 1.
+ *
+ * NOTE on placement: .bss on the AEN801 boards resolves to DTCM
+ * (`zephyr,sram = &dtcm`), which is CPU-local.  With
+ * CONFIG_SDHC_DWC_DMA_ADDR_TRANSLATE=n the driver programs that same local
+ * address into DWC_SDHC_ADMA_SA_LOW_R, so a board that actually moves data
+ * over ADMA must revisit both this section and that translate symbol.
+ */
+#if defined(CONFIG_SDHC_DESCRIPTOR_USE_SECTION)
+BUILD_ASSERT(sizeof(CONFIG_SDHC_DESCRIPTOR_SECTION) > 1,
+	     "CONFIG_SDHC_DESCRIPTOR_USE_SECTION=y requires a non-empty "
+	     "CONFIG_SDHC_DESCRIPTOR_SECTION naming a real linker section");
+#define SDHC_DWC_ADMA_DESC_SECTION Z_GENERIC_SECTION(CONFIG_SDHC_DESCRIPTOR_SECTION)
+#else
+#define SDHC_DWC_ADMA_DESC_SECTION
+#endif
+
 LOG_MODULE_REGISTER(sdhc_dwc, CONFIG_SDHC_LOG_LEVEL);
 
 struct sdhc_dwc_config {
@@ -1314,7 +1342,7 @@ static void sdhc_dwc_wakeup_isr(const struct device *dev)
                                                                                    \
 	IF_ENABLED(CONFIG_SDHC_DWC_ADMA, (                                            \
 		static adma2_desc_t sdhc_adma_desc_tbl_##n[CONFIG_SDHC_DWC_ADMA_MAX_DESC]  \
-			Z_GENERIC_SECTION(CONFIG_SDHC_DESCRIPTOR_SECTION)                      \
+			SDHC_DWC_ADMA_DESC_SECTION                                    \
 			__aligned(CONFIG_SDHC_BUFFER_ALIGNMENT);                               \
 	))                                                                             \
 	static struct sdhc_dwc_data sdhc_dwc_data_##n = {                             \
