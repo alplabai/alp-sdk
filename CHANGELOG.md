@@ -59,6 +59,86 @@ building `alp_e1m_aen801_m55_he_firewall_probe.conf`, the profile
 `scripts/bench/aen/flash-update-log-firewall-probe.sh` actually requires
 and which stayed build-uncovered before.
 
+### Fixed — E1M-AEN801 M55-HP and M55-HE both linked to slot0 `0x80010000`, so flashing both cores silently overwrote one image (#1069, release-blocker)
+
+Both AEN801 per-core board files declared byte-identical MRAM partition
+maps over the SAME physical App MRAM (`mram_storage@80000000`,
+`slot0_partition` at offset `0x10000`), so a dual-core project's `west
+flash` (or a hand-assembled two-entry ATOC) wrote two images to one
+`mramAddress` and the second silently overwrote the first — bench-confirmed
+on `e1m-aen-evk-01`: an `m55_hp` build and an `m55_he` build both resolved
+to `mramAddress 0x80010000` in their staged ATOC. Decided layout (deferring
+OTA rather than shrinking either slot, since a swap-sized secondary slot on
+both cores would break the ~2.6 MiB NPU MRAM-model budget; every
+E8 measurement to date ran `CONFIG_SINGLE_APPLICATION_SLOT=y`, so nothing
+proven is lost):
+
+- **New disjoint slot0 windows** (`metadata/e1m_modules/E1M-AEN801.yaml`
+  `memory_map:`): `mcuboot` 64 KiB @ `0x80000000` (shared) · HE `slot0`
+  2688 KiB @ `0x80010000` (**unchanged**) · HP `slot0` 2688 KiB @
+  `0x802b0000` (**moved off** the old shared `0x80010000` window, onto
+  what used to be the OTA `slot1` window) · `reserved` 64 KiB @
+  `0x80550000` (ex-scratch, unused) · `storage` 128 KiB @ `0x80560000`.
+  64 + 2688 + 2688 + 64 + 128 = 5632 KiB, the full App MRAM. HE keeps the
+  low window because everything else canonical is HE (the runner's default
+  core, the factory MCUboot ATOC's `cpu_id M55_HE`, the canonical
+  `person_detect` slot0, the MRAM-XIP NPU example overlays); Alif's own
+  DevKit-e8 dual-core example orders HE low too.
+- **`scripts/gen_zephyr_board.py`'s `_aen_flash_partitions()` is now
+  role-aware**, sourced from the preset's `memory_map:` when a `<role>_slot0`
+  entry is declared; both `alp_e1m_aen801_m55_{he,hp}` board `.dts` files
+  are regenerated (byte-for-byte, `tests/scripts/test_gen_zephyr_board.py`).
+  The single-M55 SKUs (`aen401`, `aen601`) have no `memory_map:` override
+  and keep the stock symmetric two-slot swap-using-scratch layout unchanged.
+- **`zephyr/sysbuild/aen/sysbuild.conf`** switches from
+  `SB_CONFIG_MCUBOOT_MODE_SWAP_SCRATCH` to `SB_CONFIG_MCUBOOT_MODE_SINGLE_APP`
+  (no secondary/scratch slot), matching what was actually silicon-proven.
+- **`scripts/west_commands/runners/alif_flash.py`** no longer hard-codes
+  one `mramAddress` for both cores: it derives the ATOC `mramAddress` from
+  which disjoint window the build's own reset vector falls in, cross-checked
+  against `--device` (the same defence-in-depth the ITCM branch already
+  applied) — a build whose vector lands in the sibling core's window is
+  now a hard `RuntimeError`, not a silent burn.
+- **New shared guard, `scripts/aen_atoc.py`**, used by both
+  `alif_flash.py` and `scripts/bench/aen/flash-run-dualcore.sh`: rejects,
+  before `app-gen-toc` runs, an ATOC `mramAddress` entry outside its
+  `cpu_id`'s declared slot0 window, two entries at the same `mramAddress`,
+  or an entry past System MRAM (`0x80580000`). `loadAddress` (ITCM) entries
+  — what every current AEN dual-core *example* actually stages — are left
+  alone; they were already disjoint by construction.
+  `scripts/bench/aen/flash-jlink-mramxip.sh` (Flow D, HE-only slot0-XIP)
+  now calls the guard too, and its reset-vector sanity check gives an
+  explicit diagnostic for an HP-linked binary instead of a generic
+  "drop the itcm overlay" message.
+- **`examples/multicore/mproc-mailbox` / `examples/multicore/rpmsg-aen`
+  `board.yaml`** IPC carve-out comments updated. Both stay
+  `status: blocked` on E1M-AEN801: the five fine-grained MRAM regions
+  (`mcuboot`/`he_slot0`/`hp_slot0`/`reserved`/`storage`) are flash-class,
+  not RAM, so `metadata/schemas/som-preset-v1.schema.json` gains a
+  `memory_region.carveout` field and all five are marked
+  `carveout: false`, keeping `scripts/alp_orchestrate/carveout.py`
+  `resolve_carve_outs()` from ever placing a shared-memory ring inside
+  MRAM even though those regions now publish a real `base` (needed only
+  for `_aen_flash_partitions()`'s DTS partition table). `mproc-mailbox`'s
+  `raw_shmem` entry and `rpmsg-aen`'s `a32_cluster`-endpointed entry both
+  block on the remaining candidate, `mram_main`, whose `base: TBD` is
+  deliberate (see its comment in `E1M-AEN801.yaml`) so a coarse
+  whole-MRAM carve-out can't silently land inside a real
+  mcuboot/slot0/reserved/storage region either.
+  `tests/fixtures/emit-snapshots/{mproc-mailbox,rpmsg-aen}.*.snap`
+  regenerated to match.
+
+**Known limits, not closed by this fix:** a sequential single-core
+`west flash` writes a whole fresh TOC each run, so the previous core's
+entry is invisible to the assembly-time guard by the time the second
+`west flash` runs — catching that needs a pre-burn TOC read-back over the
+SE-UART, out of scope here. The J-Link customer path (`loadbin` straight
+to slot0) has no ATOC assembly step at all; for that path the disjoint DTS
+windows themselves are the guard, since the link address moves per core.
+
+**BENCH-GATED: this fix has NOT been run on real E8 silicon and must not
+merge without that run.**
+
 ### Fixed — `test-all.sh` ran 1 of 34 required gate scripts on Windows (#1109)
 
 `scripts/quality_tasks.py --gate-scripts` wrote CRLF line endings on
