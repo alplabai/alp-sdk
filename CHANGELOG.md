@@ -7,6 +7,38 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — flash-backend hardening: path traversal and script command injection (#1112, #1113)
+
+`scripts/flash_backends/yocto_wic.py` validated `flash_args.target` with a
+bare `str(target).startswith("/dev/")` check, so `/dev/../tmp/foo` passed
+straight through to `bmaptool`/`dd` — since flashing commonly runs elevated,
+that could overwrite an arbitrary regular file. The target is now
+canonicalized (`os.path.realpath`) and required to both resolve strictly
+beneath `/dev/` *after* traversal/symlink resolution and `stat` as a real
+block device; a regular file is rejected outright, with no silent fallback.
+Traversal and symlink escapes are rejected before any external tool runs.
+
+`scripts/flash_backends/swd_probe.py` interpolated the artefact path and
+base address raw into generated J-Link Commander (newline-separated) and
+OpenOCD Tcl (`-c` command string) scripts — a newline in the path injected
+additional J-Link commands, a Tcl separator in the address injected
+OpenOCD commands, and an ordinary path containing spaces simply parsed
+wrong. `base` is now parsed as a bounded 32-bit integer literal (decimal or
+`0x`-prefixed hex) and re-rendered canonically — the raw string is never
+passed through. The artefact path is validated for control characters/
+newlines and then quoted per the target script's own grammar: double-quoted
+for J-Link Commander, brace-quoted for Tcl — the two are not
+interchangeable, and either quoting fails closed (rejects) rather than
+attempting to escape an embedded quote/brace.
+
+`metadata/schemas/som-preset-v1.schema.json`'s `flash_args` stays
+deliberately open (per its own doc comment, the shape follows whichever
+backend `flash_method` names, which the schema can't enumerate without
+backend-conditional logic this schema doesn't otherwise use) — the address
+grammar is enforced at the one place that's authoritative for it, the
+backend itself, which also gives a precise error instead of a generic
+schema-pattern failure.
+
 ### Fixed — `test-all.sh` ran 1 of 34 required gate scripts on Windows (#1109)
 
 `scripts/quality_tasks.py --gate-scripts` wrote CRLF line endings on

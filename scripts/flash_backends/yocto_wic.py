@@ -13,13 +13,21 @@ Tool selection:
   * Fall back to ``dd`` (with ``gunzip -c`` / ``xz -dc`` pre-decompress
     when the artefact is compressed).
 
-Safety: refuses any ``target`` that doesn't start with ``/dev/`` so a
-stray ``flash_args.target: /tmp/spill.img`` never silently overwrites
-a developer's tmp file.  An explicit ``flash_args.confirm: true`` (or
-``ALP_FLASH_FORCE=1`` env override) is required to actually run the
-sub-process; without it, the backend dry-runs even when ``ctx.dry_run``
-is False -- protects against accidental ``west alp-flash`` against a
-mounted system disk.
+Safety: canonicalizes ``target`` (resolves ``..`` traversal and any
+symlink) and refuses anything that doesn't resolve strictly beneath
+``/dev/`` -- so a stray ``flash_args.target: /tmp/spill.img``, a
+``/dev/../tmp/spill.img`` traversal, or a ``/dev/foo`` symlink pointing
+outside ``/dev`` never silently overwrites a developer's file.  This
+root check runs unconditionally, including for a dry-run preview of a
+target that isn't plugged in yet.  Right before a tool is actually
+about to be invoked (i.e. not during a dry-run/planning-only preview),
+a second, stricter gate additionally requires the resolved target to
+``stat`` as a real block device -- regular files are never a valid
+flash target for this backend, and there is no silent fallback.  An
+explicit ``flash_args.confirm: true`` (or ``ALP_FLASH_FORCE=1`` env
+override) is required to actually run the sub-process; without it, the
+backend dry-runs even when ``ctx.dry_run`` is False -- protects against
+accidental ``west alp-flash`` against a mounted system disk.
 
 flash_args contract:
   target     str    Destination device path ("/dev/sdb", "/dev/mmcblk0").
@@ -37,6 +45,7 @@ from __future__ import annotations
 import os
 import shlex
 import shutil
+import stat
 import subprocess
 import tempfile
 import time
@@ -48,6 +57,73 @@ from . import FlashBackend, FlashContext, FlashResult, register
 
 _NAME = "yocto_wic_to_sd_or_emmc"
 _ALIAS = "yocto_wic"
+
+# The directory a flash target must resolve beneath.  A module-level
+# constant (rather than a hardcoded literal in the check) so tests can
+# point it at a tmp_path sandbox and exercise the real resolution logic
+# against real files/symlinks without touching the host's actual /dev.
+_DEV_ROOT = "/dev"
+
+
+def _resolve_dev_root(target: str) -> "tuple[Path | None, str | None]":
+    """Canonicalize ``target`` (resolve ``..`` traversal and any symlink
+    chain) and require the result to stay strictly beneath ``_DEV_ROOT``.
+
+    Fails closed against traversal and symlink escapes.  Does not touch
+    ``stat`` and does not require the target to exist -- ``os.path.
+    realpath`` normalizes lexically for path components that aren't
+    there, so this is safe to run unconditionally, including for a
+    dry-run preview of a target that isn't plugged in yet.  The
+    existence + block-device check is a separate, stricter gate (see
+    ``_require_block_device``) applied only right before a tool is
+    actually about to be invoked.
+
+    Returns ``(resolved_path, None)`` on success or ``(None, message)``
+    on rejection.
+    """
+    root = Path(_DEV_ROOT)
+    resolved = Path(os.path.realpath(target))
+    try:
+        resolved.relative_to(root)
+    except ValueError:
+        return None, (
+            f"yocto_wic: refusing target '{target}' -- resolves to "
+            f"'{resolved}', which is not beneath {root}/.  Set "
+            f"flash_args.target to a real block device under {root}/."
+        )
+    if resolved == root:
+        return None, (
+            f"yocto_wic: refusing target '{target}' -- resolves to "
+            f"{root} itself, not a device beneath it."
+        )
+    return resolved, None
+
+
+def _require_block_device(resolved: Path) -> "str | None":
+    """Require ``resolved`` (already root-checked by
+    ``_resolve_dev_root``) to ``stat`` as a real block device.
+
+    Regular files are never a valid flash target for this backend --
+    there is no silent fallback.  Called only when a tool is actually
+    about to be invoked (not during a dry-run/planning preview), so it
+    never blocks previewing a target that isn't physically present yet.
+
+    Returns ``None`` on success or an error message on rejection.
+    """
+    try:
+        mode = os.stat(resolved).st_mode
+    except OSError as exc:
+        return (
+            f"yocto_wic: refusing target '{resolved}' -- cannot stat "
+            f"it: {exc}."
+        )
+    if not stat.S_ISBLK(mode):
+        return (
+            f"yocto_wic: refusing target '{resolved}' -- not a block "
+            f"device.  Regular files are not a supported flash target "
+            f"for this backend."
+        )
+    return None
 
 
 @dataclass
@@ -124,15 +200,14 @@ class YoctoWicFlash:
                 message=("yocto_wic: flash_args.target is required "
                          "(e.g. /dev/sdb)"),
             )
-        if not str(target).startswith("/dev/"):
+        resolved_target, target_err = _resolve_dev_root(str(target))
+        if target_err:
             return FlashResult(
                 ok=False,
                 elapsed_s=time.monotonic() - start,
-                message=(f"yocto_wic: refusing target '{target}' -- must "
-                         f"start with /dev/ to avoid clobbering a regular "
-                         f"file.  Set flash_args.target to a real block "
-                         f"device."),
+                message=target_err,
             )
+        target = str(resolved_target)
 
         artefact = Path(ctx.artefact_path)
         compress = (ctx.flash_args or {}).get("compress")
@@ -212,6 +287,18 @@ class YoctoWicFlash:
                 elapsed_s=time.monotonic() - start,
                 message=f"yocto_wic[{ctx.core_id}]: would run {command_display} ({why})",
                 command=list(cmd),
+            )
+
+        # Fail closed right before touching real hardware: the target
+        # must actually be a block device beneath /dev/, not merely
+        # resolve there lexically.  Checked here (not up front) so a
+        # dry-run/planning preview of a not-yet-connected target still
+        # works.
+        block_err = _require_block_device(resolved_target)
+        if block_err:
+            return FlashResult(
+                ok=False, elapsed_s=time.monotonic() - start,
+                message=block_err,
             )
 
         if pipeline is not None:
