@@ -76,8 +76,12 @@ CASES = [
     ("rpmsg-aen.build-plan",        ORCH, "examples/multicore/rpmsg-aen/board.yaml",            "build-plan"),
     ("rpmsg-v2n.system-manifest",   ORCH, "examples/multicore/rpmsg-v2n/board.yaml",            "system-manifest"),
     ("rpmsg-v2n.build-plan",        ORCH, "examples/multicore/rpmsg-v2n/board.yaml",            "build-plan"),
-    ("rpmsg-imx93.system-manifest", ORCH, "examples/multicore/rpmsg-imx93/board.yaml",          "system-manifest"),
-    ("rpmsg-imx93.build-plan",      ORCH, "examples/multicore/rpmsg-imx93/board.yaml",          "build-plan"),
+    # rpmsg-imx93 excluded (#1025): E1M-NX9101's only hw_rev (imx93 r1) is
+    # `status: tbd` -- refused outright by the hw_rev-buildable gate, so
+    # `--emit` can no longer run against it at all.  Re-add the two cases
+    # above (system-manifest, build-plan) plus `--update` once
+    # metadata/e1m_modules/imx93/hw-revisions.yaml:r1 carries a buildable
+    # status.
     ("hetero-offload.system-manifest", ORCH, "examples/multicore/heterogeneous-offload/board.yaml", "system-manifest"),
     ("hetero-offload.build-plan",      ORCH, "examples/multicore/heterogeneous-offload/board.yaml", "build-plan"),
     # `raw_shmem` ipc[] coverage (kconfig.py's `_emit_cross_core_shmem_cache`,

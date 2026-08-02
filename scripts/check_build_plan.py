@@ -39,10 +39,14 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 # Representative projects exercising the multi-image (A+M) shape across all
 # three SoC families -- the same corpus check_system_manifest.py pins.
+#
+# rpmsg-imx93 excluded (#1025): E1M-NX9101's only hw_rev (imx93 r1) is
+# `status: tbd` -- refused outright by the hw_rev-buildable gate. Re-add
+# "examples/multicore/rpmsg-imx93/board.yaml" once
+# metadata/e1m_modules/imx93/hw-revisions.yaml:r1 carries a buildable status.
 _DEFAULT_PROJECTS = [
     "examples/multicore/rpmsg-v2n/board.yaml",
     "examples/multicore/rpmsg-aen/board.yaml",
-    "examples/multicore/rpmsg-imx93/board.yaml",
     "examples/multicore/heterogeneous-offload/board.yaml",
 ]
 

@@ -51,6 +51,20 @@ _INPUT_RE = re.compile(
 # UNSCOPED -- the cross-core Kconfig sum ADR-0020's addendum retired.
 _EMIT_RE = re.compile(r"--emit\s+zephyr-conf\b")
 
+# CMakeLists.txt whose `board.yaml` cannot load AT ALL right now, with the
+# reason -- same allowlist-with-reason shape as
+# check_cmake_chip_list_parity.py's CHIP_LIST_EXCLUDED_WITH_REASON. A gate
+# that can't even load a board.yaml has nothing to byte-diff; that's a
+# different, honest failure this gate isn't the one to report. RATCHET:
+# remove an entry the moment its reason stops holding.
+_EXCLUDED_WITH_REASON: dict[str, str] = {
+    "examples/multicore/rpmsg-imx93/m33/CMakeLists.txt":
+        "E1M-NX9101's only hw_rev (imx93 r1) is `status: tbd` -- refused "
+        "outright by the hw_rev-buildable gate (#1025). Remove this entry "
+        "once metadata/e1m_modules/imx93/hw-revisions.yaml:r1 carries a "
+        "buildable status.",
+}
+
 
 def _find_cases() -> list[tuple[Path, Path, str]]:
     """(CMakeLists.txt path, board.yaml path, core id) for every scoped
@@ -103,6 +117,9 @@ def main() -> int:
     failures: list[str] = []
     for cmakelists, board_yaml, core_id in cases:
         rel = cmakelists.relative_to(REPO).as_posix()
+        if rel in _EXCLUDED_WITH_REASON:
+            print(f"SKIP {rel}: {_EXCLUDED_WITH_REASON[rel]}")
+            continue
         if not board_yaml.is_file():
             failures.append(f"{rel}: board.yaml not found at {board_yaml}")
             continue
