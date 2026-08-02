@@ -105,12 +105,23 @@ not the distro.
 ## 4. Deploy the rootfs
 
 The bootloader's `bootcmd` (rzv2n-dev config + the Alp 0002 patch)
-loads `Image` + `boot/r9a09g056n44-dev.dtb` from the ext4 rootfs
-`/boot`, auto-detecting the boot medium **per boot**: if an SD card is
-present, root = `/dev/mmcblk2p2`, otherwise eMMC `/dev/mmcblk0p2`
-(`ALP_BOOT_DEVICE ?= "emmc"` names the provisioning default, not a
-build split). The kernel cmdline is rebuilt by the Alp override with
-`console=ttySC0,115200` pinned; dev builds keep `earlycon`.
+loads `Image` from the ext4 rootfs `/boot` and then **reloads the
+per-MACHINE board dtb** — `boot/e1m-v2n101-x-evk.dtb` on V2N101/V2N102,
+`boot/e1m-v2m101-x-evk.dtb` on V2M101/V2M102 (issue #1175). The vendor
+env's hardcoded `boot/r9a09g056n44-dev.dtb` is a filename **no Alp
+image builds**, on the eMMC branch as well as the SD one, which is why
+the reload exists. If the dtb is missing from `/boot`, the bootloader
+prints an error and **stops** — it does not fall through and boot
+whatever devicetree is left in RAM.
+
+The boot medium is auto-detected **per boot**: if an SD card is
+present, root = `/dev/mmcblk1p2` (the carrier microSD, `&sdhi1` — see
+`e1m-x-evk.dtsi`; **not bench-confirmed**, the microSD boot path has
+never been exercised on real hardware), otherwise eMMC
+`/dev/mmcblk0p2` (`ALP_BOOT_DEVICE ?= "emmc"` names the provisioning
+default, not a build split). The kernel cmdline is rebuilt by the Alp
+override with `console=ttySC0,115200` pinned; dev builds keep
+`earlycon`.
 
 **Production boot variant:** set `ALP_PROD_BOOT = "1"` for
 release-bundle builds only — quiet cmdline (`quiet loglevel=4`, no

@@ -147,6 +147,39 @@ no full `alp-image-edge` bake has ever completed on this host, with or without
 the backend enabled.** Everything above is code-complete and unverified on
 hardware.
 
+### Fixed — U-Boot loaded a devicetree filename no Alp image builds, on both boot media (#1175)
+
+The E1M-X EVK is strapped for xSPI boot with carrier Ethernet dead (errata
+E1), so a microSD card is the only way an image reaches the board — and a
+self-built image did not boot from it. The vendor `rzv2n-dev` environment
+hardcodes `boot/r9a09g056n44-dev.dtb` in **both** `sd2load` and `emmcload`,
+while every E1M MACHINE emits its own board dtb via `KERNEL_DEVICETREE`
+(`renesas/e1m-v2n101-x-evk.dtb`, `renesas/e1m-v2m101-x-evk.dtb`). eMMC — the
+`ALP_BOOT_DEVICE` default in all four machine confs — was broken in exactly
+the same way, so both branches are fixed, not just SD.
+
+`CONFIG_BOOTCOMMAND` now reloads the correct per-MACHINE dtb from whichever
+medium `bootcmd_check` selected, after the leading `env default -a` wipe. The
+reload is **guarded**: hush does not abort a `;`-separated list when a builtin
+fails (`common/cli_hush.c` `run_list_real` early-exits only on `rcode < -1`),
+so an unguarded miss would have fallen through to `booti` and, on a card still
+carrying a vendor `r9a09g056n44-dev.dtb`, silently booted the **vendor EVK
+devicetree on Alp hardware**. A miss now prints an error and does not boot.
+
+The microSD root device also moves from the vendor's `/dev/mmcblk2p2` to
+`/dev/mmcblk1p2` — the Alp board DT enables exactly two MMC hosts and states
+the carrier card is `mmcblk1p2` (`e1m-x-evk.dtsi`). **Not bench-confirmed:**
+the microSD boot path appears never to have been exercised on real hardware,
+and neither medium has been booted with a self-built image.
+
+Both values are Kconfig strings (`CONFIG_ALP_FDT_FILE`, `CONFIG_ALP_SD_ROOT`)
+whose **defaults are the vendor values**, injected per-SKU by `.cfg` fragments
+selected on the exact `MACHINE` rather than by `:append:<override>` — a V2M
+build inherits `e1m-v2n101-a55` in its `MACHINEOVERRIDES` chain, so an
+override-tagged append would have fired for both SKUs and handed V2M the V2N
+dtb name. The stock `rzv2n-evk` MACHINE gets no fragment and keeps vendor
+behaviour.
+
 ### Fixed — `do_generate_toolchain_file`'s stamp outlives the file it writes, so an `alp-sdk` reconfigure could never recover
 
 `cmake.bbclass` sequences its toolchain-file generator as
