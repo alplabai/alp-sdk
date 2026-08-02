@@ -34,6 +34,14 @@
 # MRAM. To flash ITCM-load (flow-C/flash-jlink.sh) apps afterwards, erase slot0
 # first over the SE-UART:  app-write-mram -c $SE_UART -e "0x80010000 0x60000".
 #
+# HE-ONLY: this script hard-codes cpu_id M55_HE / APP_ADDR 0x80010000 (the HE
+# slot0 window, see scripts/aen_atoc.py SLOT0_WINDOWS). There is no HP
+# MRAM-XIP flow today -- every HP image is ITCM-loaded (loadAddress
+# 0x50000000, see flash-jlink-hp.sh), so an HP-linked binary here is a
+# script-selection mistake, not a supported shape; step 0's reset-vector
+# check below diagnoses that case explicitly instead of guessing "itcm
+# overlay".
+#
 # SETOOLS is license-gated and is NOT redistributed by alp-sdk: export SETOOLS_DIR
 # (and obtain SETOOLS from Alif) before running this. See README.md.
 set -e
@@ -79,6 +87,11 @@ case "$RV" in
          echo "   The board _defconfig sets CONFIG_USE_DT_CODE_PARTITION=y, so"
          echo "   something overrode it -- drop any Flow C fragment/overlay"
          echo "   (aen-flowc-itcm.conf / .overlay) and rebuild pristine."
+         exit 3 ;;
+  802b*) echo "!! reset vector 0x$RV is HP-slot0-linked (0x802bxxxx), not HE."
+         echo "   flash-jlink-mramxip.sh is HE-only (cpu_id M55_HE, MRAM"
+         echo "   window 0x80010000..0x802b0000); there is no HP MRAM-XIP"
+         echo "   flow -- HP images are ITCM-loaded, use flash-jlink-hp.sh."
          exit 3 ;;
   *) echo "!! reset vector 0x$RV unexpected -- not a 0x8001xxxx slot0 image."
      echo "   Drop any &itcm overlay; let the board default link into MRAM slot0."
@@ -126,6 +139,12 @@ cat > "$SET/build/config/$NAME-slot0.json" <<JSON
                  "cpu_id": "M55_HE", "mramAddress": "0x80010000", "flags": ["boot"] }
 }
 JSON
+
+# #1069 window/overlap guard -- see scripts/aen_atoc.py. This config is
+# always the fixed HE/0x80010000 entry above (this script is HE-only, see
+# header), so the guard is a no-op today; it's here so this call site
+# can't silently drift from the shared check if the config ever changes.
+python3 "$ALP_SDK_DIR/scripts/aen_atoc.py" "$SET/build/config/$NAME-slot0.json" || exit 1
 
 cd "$SET"
 # 2. build the signed ATOC (app-gen-toc only) + read the ATOC MRAM placement.
