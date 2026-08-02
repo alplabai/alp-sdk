@@ -27,10 +27,16 @@ try:
 except ImportError:
     sys.exit("validate_metadata: PyYAML is required.  Install via `pip install pyyaml`.")
 
-from alp_project_loader import _sku_family, resolve_soc_path
-from alp_orchestrate.sdk_compat import assert_exclusion_still_not_buildable
-
 REPO = Path(__file__).resolve().parent.parent
+# Needed so `alp_orchestrate.sdk_compat` resolves against THIS checkout's
+# scripts/ even when an editable pip install (e.g. alp_sdk_cli) has
+# registered a meta-path finder that would otherwise redirect the package
+# import to a different alp-sdk checkout -- same idiom check_build_plan.py /
+# check_system_manifest.py / check_emit_snapshots.py already use.
+sys.path.insert(0, str(REPO / "scripts"))
+
+from alp_project_loader import _sku_family, resolve_soc_path  # noqa: E402
+from alp_orchestrate.sdk_compat import assert_exclusion_still_not_buildable  # noqa: E402
 
 # Power/ground nets are allowed as pin signals without a signals[] entry.
 _POWER_NETS = {"VDD", "VDDIO", "VCC", "GND", "VSS", "AVDD", "DVDD"}

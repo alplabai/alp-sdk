@@ -148,6 +148,17 @@ def test_revision_buildable_is_none_when_nothing_to_judge():
     assert sc.revision_buildable(table, "r99") is None
 
 
+def test_revision_buildable_is_false_for_a_malformed_present_entry():
+    """A key that EXISTS but isn't a dict (None, a bare string, ...) has no
+    `status` to read -- that's a malformed entry, not an absent one, so it
+    must be False (refused), not None (nothing to judge). #1025 round-2
+    review: this used to fall through to None (allowed)."""
+    table = {"hw_revisions": {"r1": None}}
+    assert sc.revision_buildable(table, "r1") is False
+    table = {"hw_revisions": {"r1": "not-a-dict"}}
+    assert sc.revision_buildable(table, "r1") is False
+
+
 @pytest.mark.parametrize("family,rev,expected", [
     ("aen", "r1", True),         # status: production
     ("aen", "r3", False),        # status: reserved
@@ -158,6 +169,37 @@ def test_revision_buildable_is_none_when_nothing_to_judge():
 ])
 def test_family_revision_buildable_matches_every_real_status_in_tree(family, rev, expected):
     assert sc.family_revision_buildable(METADATA_ROOT, family, rev) is expected
+
+
+# --------------------------------------------------------------------------
+# The RATCHET -- #1025 round-2 review.  Every rpmsg-imx93-shaped exclusion
+# (check_build_plan.py, check_system_manifest.py, check_emit_snapshots.py,
+# check_zephyr_conf_parity.py, tier-a-library-ci.json's excludedFamilies)
+# calls this instead of hand-rolling `if status == "tbd"`, so a status flip
+# turns every exclusion red instead of letting some silently keep skipping
+# forever.
+# --------------------------------------------------------------------------
+
+def test_assert_exclusion_still_not_buildable_is_quiet_while_honest():
+    """The real imx93 r1 is still `tbd` in the tree today -- the exclusion
+    every gate cites is honest, so the ratchet has nothing to say."""
+    assert sc.assert_exclusion_still_not_buildable(
+        METADATA_ROOT, "imx93", "r1", gate="test") is None
+
+
+def test_assert_exclusion_still_not_buildable_fires_once_the_reason_stops_holding(tmp_path):
+    """Mirrors the reviewer's proven experiment: flip the cited hw_rev to a
+    buildable status and the ratchet must fail loudly and actionably,
+    naming the gate, instead of staying silent."""
+    fam = tmp_path / "e1m_modules" / "imx93"
+    fam.mkdir(parents=True)
+    (fam / "hw-revisions.yaml").write_text(
+        "hw_revisions:\n  r1:\n    status: preliminary\n", encoding="utf-8")
+    msg = sc.assert_exclusion_still_not_buildable(
+        tmp_path, "imx93", "r1", gate="check_build_plan.py")
+    assert msg is not None
+    assert "check_build_plan.py" in msg
+    assert "remove the exclusion" in msg.lower()
 
 
 # --------------------------------------------------------------------------
