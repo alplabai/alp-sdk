@@ -21,13 +21,13 @@ for this hardware" two ways:
   outside it.  Separately, an `hw_rev` that isn't a key in the
   resolved table at all -- a typo, or a revision newer than the
   installed SDK -- refuses too (`SdkRevisionUnknown`, exit code 4),
-  rather than silently falling back to base-revision overrides.
-  Neither check is a usability question: a revision that EXISTS
-  resolves and builds regardless of `status:` -- `reserved`, `tbd`,
-  or no `status` key at all.  Whether an existing reserved/tbd
-  revision should also refuse a build is a separate, still-open
-  question tracked as
-  [#1025](https://github.com/alplabai/alp-sdk/issues/1025).
+  rather than silently falling back to base-revision overrides.  A
+  revision that EXISTS but is declared `status: reserved`,
+  `status: tbd`, or carries no `status` key at all also refuses
+  (`SdkRevisionNotBuildable`, exit code 5) --
+  [#1025](https://github.com/alplabai/alp-sdk/issues/1025).  Every
+  other declared status (`production`, `preview`, `preliminary`,
+  `deprecated`) resolves and builds normally.
 - **Runtime** -- the SDK boots into a board-ID check that uses
   a single ADC pin per board (SoM-side and board-side) fed by a
   resistor divider from a 1.8 V rail.  Each `hw_rev` entry's

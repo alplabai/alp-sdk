@@ -8,7 +8,16 @@
 # read this file, does not iterate `hw_revisions`, and does not
 # reference `metadata/sdk_version.yaml`.  The per-rev
 # `min_sdk_version`/`max_sdk_version` bounds below are declarative
-# only; see `metadata/sdk_version.yaml` and #1025.
+# only from the runtime reader's point of view -- see
+# `metadata/sdk_version.yaml` and #1025.
+#
+# Both bounds AND `status:` ARE build-time load-bearing, separately:
+# `scripts/alp_orchestrate/sdk_compat.py` refuses an out-of-range SDK
+# version (`SdkRevisionUnsupported`) and, distinctly, refuses a
+# revision whose `status:` is `reserved`, `tbd`, or missing
+# (`SdkRevisionNotBuildable`, #1025).  Every `status: reserved` entry
+# below is refused at build time for that reason, not merely
+# documentation of a future revision.
 
 family: v2n
 display_name: "E1M-X-V2N (Renesas RZ/V2N)"
@@ -27,21 +36,28 @@ hw_revisions:
   r2:
     min_sdk_version: ~
     max_sdk_version: ~
+    status: reserved
   r3:
     min_sdk_version: ~
     max_sdk_version: ~
+    status: reserved
   r4:
     min_sdk_version: ~
     max_sdk_version: ~
+    status: reserved
   r5:
     min_sdk_version: ~
     max_sdk_version: ~
+    status: reserved
   r6:
     min_sdk_version: ~
     max_sdk_version: ~
+    status: reserved
   r7:
     min_sdk_version: ~
     max_sdk_version: ~
+    status: reserved
   r8:
     min_sdk_version: ~
     max_sdk_version: ~
+    status: reserved

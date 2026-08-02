@@ -26,3 +26,18 @@ Invalid BOARD" error, blocking the command the same way `no-command`/
 consumer a command frozen at 97ad481b that was never buildable. These two
 fields are the only ones touched by this correction; every other value in
 this fixture is untouched, still frozen at 97ad481b.
+
+Corpus removal, not a value correction (alp-sdk#1025, "hw_rev status gate"):
+`multicore_rpmsg-imx93.build-plan.json` is DELETED, not edited. `seam1_
+field_diff.py` auto-discovers its board corpus from every `*.build-plan.json`
+file in this directory (no hardcoded `--boards` list) and re-emits each
+fixture's `boardYaml` LIVE against the checkout under test; a corpus member
+whose live emit no longer succeeds at all fails the gate on every PR forever,
+not just once. `E1M-NX9101`'s only hw_rev (imx93 r1) is `status: tbd`, and
+the new hw_rev-buildable gate refuses any board.yaml that resolves to a
+non-buildable revision outright (`SdkRevisionNotBuildable`, exit 5) -- so
+`examples/multicore/rpmsg-imx93/board.yaml` can no longer be emitted at all,
+frozen oracle or not. This is a corpus-membership change (delete the file),
+not a re-capture of its frozen field values -- re-add the file (re-captured
+against a live emit, not restored from git history, since the shape may have
+moved since 97ad481b) once imx93 r1 carries a buildable status.

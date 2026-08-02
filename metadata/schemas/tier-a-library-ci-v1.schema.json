@@ -62,6 +62,14 @@
           }
         }
       }
+    },
+    "excludedFamilies": {
+      "type": "object",
+      "description": "familyMatrix `family` values that stay listed (so scripts/validate_metadata.py still sees every SoM family covered) but are skipped by scripts/gen_tier_a_ci_matrix.py when deriving the actual CI build matrix, each with a required reason -- same shape as hostBuild.excludedLibraries.",
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
     }
   }
 }

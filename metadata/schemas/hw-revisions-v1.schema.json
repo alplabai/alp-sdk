@@ -23,6 +23,7 @@
     "hw_rev_entry": {
       "type": "object",
       "additionalProperties": false,
+      "required": ["status"],
       "properties": {
         "min_sdk_version": {
           "oneOf": [

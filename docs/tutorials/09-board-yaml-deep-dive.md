@@ -71,11 +71,15 @@ build (`SdkRevisionUnknown`) naming the revisions that ARE known,
 rather than silently falling back to the base revision's routing.
 Each entry's `min_sdk_version` / `max_sdk_version` window is also
 enforced against the running SDK version (`SdkRevisionUnsupported`).
-An *existing* revision resolves regardless of its `status:` --
-`reserved` / `tbd` / no `status` at all still builds; whether that
-should also refuse is a separate, still-open question (see
-[#1025](https://github.com/alplabai/alp-sdk/issues/1025)).  Always pin
-`hw_rev` for production; omit for bring-up convenience.
+An *existing* revision that is declared `status: reserved`,
+`status: tbd`, or carries no `status` key at all also refuses the
+build (`SdkRevisionNotBuildable`, exit code 5 from
+`scripts/validate_board_yaml.py`) -- see
+[`docs/board-config-hardware.md`](../board-config-hardware.md) and
+[#1025](https://github.com/alplabai/alp-sdk/issues/1025).  Every
+other declared status (`production`, `preview`, `preliminary`,
+`deprecated`) resolves and builds normally.  Always pin `hw_rev` for
+production; omit for bring-up convenience.
 
 ### Board declaration
 
