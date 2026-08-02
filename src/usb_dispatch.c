@@ -146,7 +146,7 @@ alp_usb_device_write(alp_usb_dev_t *h, const uint8_t *data, size_t len, uint32_t
 	 * block up to timeout_ms draining the transfer, so
 	 * alp_usb_device_close() drains this op with the sleep-poll
 	 * alp_handle_begin_close_blocking() (src/common/alp_slot_claim.c)
-	 * instead of the busy-spin alp_handle_begin_close() -- generalised
+	 * rather than the short-op alp_handle_begin_close() -- generalised
 	 * from rpc_dispatch.c's _rpc_op_enter()/_rpc_begin_close()/
 	 * _rpc_drain() (GHSA-xhm8). */
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {

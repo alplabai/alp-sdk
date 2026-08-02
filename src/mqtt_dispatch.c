@@ -24,7 +24,7 @@
  * a genuinely long time (a real broker round-trip / keepalive wait).
  * alp_mqtt_close() drains the pool with
  * alp_handle_begin_close_blocking() (src/common/alp_slot_claim.c)
- * instead of the busy-spin alp_handle_begin_close(): a sleep-poll
+ * rather than the short-op alp_handle_begin_close(): a sleep-poll
  * drain, generalised from rpc_dispatch.c's _rpc_op_enter()/
  * _rpc_begin_close()/_rpc_drain() (GHSA-xhm8), safe to wait on a
  * multi-second (or timeout_ms == forever) op instead of spinning the
@@ -142,8 +142,8 @@ alp_status_t alp_mqtt_connect(alp_mqtt_t *h, uint32_t timeout_ms)
 	/* Counted via alp_handle_op_enter/leave -- see this file's "Issue
 	 * #629" header comment: connect() can block up to timeout_ms on a
 	 * real broker handshake; alp_mqtt_close() now drains this op with
-	 * the sleep-poll alp_handle_begin_close_blocking() instead of the
-	 * busy-spin alp_handle_begin_close(). */
+	 * the sleep-poll alp_handle_begin_close_blocking() rather than the
+	 * short-op alp_handle_begin_close(). */
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}

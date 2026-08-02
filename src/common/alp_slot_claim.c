@@ -2,29 +2,40 @@
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * Sleep-poll close for handle pools that count a blocking op
- * (issue #629).
+ * Sleep-poll close for handle pools (issue #629, and issue #1114 for
+ * alp_handle_begin_close() specifically).
  *
- * alp_slot_claim.h's alp_handle_begin_close() is a documented,
- * deliberate busy-spin whose precondition is "every op it drains is a
- * short, synchronous backend call" -- fine for the controller-class
- * handles that only ever do that, but wrong for a handle that also
- * counts an op taking a caller `timeout_ms` (a real link-layer/
- * broker/transfer round-trip): busy-spinning a closer thread for the
- * whole timeout starves lower-priority threads on a single core,
- * exactly the deadlock class rpc_dispatch.c's _rpc_drain() doc
- * comment (GHSA-xhm8-7f87-93q5) already spells out.
+ * alp_handle_begin_close_blocking() below is a sleep-poll drain,
+ * generalised from rpc_dispatch.c's _rpc_begin_close()/_rpc_drain() to
+ * the shared open/op/close guard, for a handle that counts an op
+ * taking a caller `timeout_ms` (a real link-layer/broker/transfer
+ * round-trip): busy-spinning a closer thread for the whole timeout
+ * would starve lower-priority threads on a single core, exactly the
+ * deadlock class rpc_dispatch.c's _rpc_drain() doc comment
+ * (GHSA-xhm8-7f87-93q5) already spells out.
  *
- * alp_handle_begin_close_blocking() below is that same sleep-poll
- * drain, generalised from rpc_dispatch.c's _rpc_begin_close()/
- * _rpc_drain() to the shared open/op/close guard.  It lives in its
- * own .c TU (not inline in alp_slot_claim.h) because the sleep
- * primitive needs an OS header (k_sleep / nanosleep) that header
- * deliberately does not pull in -- see its file comment: it stays
- * header-only/OS-clean (compiler atomics only) so every OS backend's
- * dispatcher TUs can include it with no extra link dependency.  This
- * TU is the one place that trades that portability for an actual
- * sleep, and is only linked in by the dispatchers that need it.
+ * alp_handle_begin_close() (also below, issue #1114) used to be a
+ * busy-spin inline in alp_slot_claim.h, defended on the assumption
+ * that every op it drains is short so the spin could only ever run
+ * "a handful of instructions". That defence only accounted for op
+ * *duration*; it did not account for *priority*. A higher-priority
+ * closing thread that never blocks (a bare spin) never lets the
+ * scheduler run a strictly lower-priority op thread, no matter how
+ * few instructions that op thread needs to reach
+ * alp_handle_op_leave() -- so the spin is unsafe on a single-core
+ * preemptive-priority scheduler regardless of how short the op is.
+ * It is now a thin wrapper over the same sleep-poll drain
+ * alp_handle_begin_close_blocking() uses.
+ *
+ * Both are defined out-of-line here (not inline in alp_slot_claim.h)
+ * because the sleep primitive needs an OS header (k_sleep / nanosleep)
+ * that header deliberately does not pull in -- see its file comment:
+ * it stays header-only/OS-clean (compiler atomics only) so every OS
+ * backend's dispatcher TUs can include it with no extra link
+ * dependency. This TU is the one place that trades that portability
+ * for an actual sleep, and is linked in unconditionally alongside the
+ * header (see src/common/CMakeLists.txt and zephyr/CMakeLists.txt) so
+ * every dispatcher that includes alp_slot_claim.h can call either.
  */
 
 #include "alp_slot_claim.h"
@@ -66,6 +77,26 @@ bool alp_handle_begin_close_blocking(uint8_t *lifecycle, uint32_t *active_ops)
 	}
 	alp_handle_drain_blocking(active_ops);
 	return true;
+}
+
+bool alp_handle_begin_close(uint8_t *lifecycle, uint32_t *active_ops)
+{
+	/* issue #1114: this used to CAS then busy-spin inline in the header.
+	 * The spin's defence ("every op here is short, so it drains in a
+	 * handful of instructions") only holds for op *duration* -- it says
+	 * nothing about *priority*.  On a single-core preemptive-priority
+	 * scheduler a higher-priority closing thread that never blocks (a
+	 * bare spin) never lets the scheduler run a lower-priority op
+	 * thread, however few instructions that thread needs, so the spin
+	 * never ends.  Delegating to the same sleep-poll drain
+	 * alp_handle_begin_close_blocking() already uses for genuinely
+	 * blocking ops fixes that: _sleep_tick() actually removes this
+	 * thread from the ready queue, so the scheduler is free to run a
+	 * strictly lower-priority thread -- something neither a spin nor a
+	 * same-priority k_yield() can do. Short ops still close fast in
+	 * practice: the drain's first check usually already sees
+	 * active_ops back at 0. */
+	return alp_handle_begin_close_blocking(lifecycle, active_ops);
 }
 
 /* See alp_slot_claim.h's "Reentrant self-close guard (issue #756)"

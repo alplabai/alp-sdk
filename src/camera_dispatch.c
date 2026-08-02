@@ -126,7 +126,7 @@ alp_status_t alp_camera_capture(alp_camera_t *h, alp_camera_frame_t *out, uint32
 	 * block up to timeout_ms waiting for a frame, so alp_camera_close()
 	 * drains this op with the sleep-poll
 	 * alp_handle_begin_close_blocking() (src/common/alp_slot_claim.c)
-	 * instead of the busy-spin alp_handle_begin_close() -- generalised
+	 * rather than the short-op alp_handle_begin_close() -- generalised
 	 * from rpc_dispatch.c's _rpc_op_enter()/_rpc_begin_close()/
 	 * _rpc_drain() (GHSA-xhm8). A close() racing an in-flight capture()
 	 * can no longer tear down state underneath it. */

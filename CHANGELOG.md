@@ -7,6 +7,84 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — `alp_handle_begin_close()` busy-spin could deadlock under priority scheduling (#1114)
+
+`src/common/alp_slot_claim.h`'s `alp_handle_begin_close()` drained
+in-flight ops with a bare busy-spin, defended on op *duration* ("every op
+it drains is short, so it finishes in a handful of instructions"). That
+defence never considered *priority*: on Zephyr's single-core preemptive-
+priority scheduler, a higher-priority closing thread spinning in a tight
+loop never yields the core back to a lower-priority thread, however few
+instructions that thread needs to reach `alp_handle_op_leave()` — the
+spin runs forever. Reachable from ordinary public API `close()` calls
+across 20+ dispatchers (`adc`, `gpio`, `i2c`, `spi`, `security`,
+`update_log`, and more). `alp_handle_begin_close()` is now a thin
+wrapper over the same sleep-poll drain `alp_handle_begin_close_blocking()`
+already used for genuinely-blocking ops (`src/common/alp_slot_claim.c`):
+a real sleep removes the closing thread from the ready queue, letting
+the scheduler run a strictly lower-priority op thread — something a spin
+(or a same-priority-only `k_yield()`) cannot do. Short ops still close
+fast in practice (the drain's first check usually already sees
+`active_ops` back at 0). `tests/yocto/slot_claim_race.c`'s existing #629
+mechanism-level races (close-under-active-op, double-close) already
+exercise the new implementation and stay green; the ISR/non-preemptive
+paths are unaffected since no `close()` in this codebase is ever invoked
+from interrupt context.
+
+### Fixed — sidecar backend pools claimed non-atomically, aliasing concurrent handles (#1115)
+
+`src/backends/security/zephyr_drv.c`, `src/backends/security/
+se_cryptocell.c`, `src/backends/audio/zephyr_drv.c`, and `src/backends/
+dsp/sw_fallback.c` each scanned their static backend-object pool with a
+plain read-then-write `in_use` check, called from `ops->open()` — after
+only the *frontend* dispatcher slot was claimed atomically — so two
+threads opening concurrently could alias one backend object. In the
+security backends that's crypto cross-talk (a shared `psa_hash_operation_t`
+/ AES-GCM key); the DSP fallback's `acquire_be_slot()` was worse: it
+returned a pointer without setting `in_use` at all, leaving the entire
+`sw_open()` body (a full `memset` + per-stage validate/copy) as a TOCTOU
+window. Every pool now claims through the existing `alp_slot_try_claim()`
+(`src/common/alp_slot_claim.h`); the DSP fallback's claim moved to the
+point of acquisition instead of the end of `open()`. `zephyr_drv.c`'s
+`g_psa_inited` one-time-init flag had the same check-then-set race (two
+threads racing the first `alp_hash_open()`/`alp_aead_open()`/
+`alp_random_bytes()` call could both call `psa_crypto_init()`
+concurrently); it now elects exactly one initialiser via the same atomic
+claim, with every other caller sleep-waiting (not spinning, per #1114
+above) for it to publish.
+
+### Fixed — SHA-256 word assembly invoked signed left-shift UB (#1117)
+
+`src/update_log/sha256.c`'s `sha256_transform()` built each 32-bit
+message word as `(data[j] << 24) | ...` where `data[j]` is `BYTE`
+(`unsigned char`); integer promotion made every shift operand an `int`,
+and left-shifting a promoted byte ≥ 0x80 by 24 sets the sign bit of that
+`int` — undefined behaviour, routinely triggered by ordinary binary
+firmware payloads hashed by `ulog_sha256()` (`src/update_log/engine.c`).
+Each byte is now cast to `uint32_t` before shifting.
+
+### Fixed — repeated `alp_ble_open()` violated the documented singleton contract (#1118)
+
+`include/alp/ble.h` documents `alp_ble_open()` as returning the same
+pointer on every call (BLE is a system singleton) and `alp_ble_close()`
+as tearing the controller down only on the last matching close.
+`src/ble_dispatch.c`'s `_alloc_radio()` was a plain pool allocator with
+no notion of "already open"; with the default pool size of 1, a second
+`alp_ble_open()` found the one slot claimed and surfaced
+`ALP_ERR_NOMEM` instead of the same pointer — the CC3501E backend's own
+`refcount++`/`--` (`src/backends/ble/cc3501e.c`) was dead code, only
+ever reached on the single real `ops->open()`/`ops->close()` call.
+`alp_ble_open()` now first tries to join an already-open radio via an
+atomic increment-if-nonzero on a new `struct alp_ble::refcount`, falling
+back to `_alloc_radio()` only when no joinable radio exists;
+`alp_ble_close()` decrement-and-checks the same counter and only tears
+the controller down on the reference that observes the count reach 0.
+Deliberately not routed through the lifecycle-gated `alp_handle_op_enter`/
+`begin_close` machinery, which would let a joiner "resurrect" a handle a
+closer has already committed to tearing down — see the "Issue #1118"
+header comment in `src/ble_dispatch.c` for why increment-if-nonzero /
+decrement-and-check-last is race-free where that would not be.
+
 ### Fixed — `test-all.sh` ran 1 of 34 required gate scripts on Windows (#1109)
 
 `scripts/quality_tasks.py --gate-scripts` wrote CRLF line endings on

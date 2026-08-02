@@ -25,7 +25,7 @@
  * caller-supplied timeout_ms on a real link-layer round-trip.
  * alp_ble_close() / alp_ble_disconnect() therefore drain their pool
  * with alp_handle_begin_close_blocking() (src/common/alp_slot_claim.c)
- * instead of the busy-spin alp_handle_begin_close(): a sleep-poll
+ * rather than the short-op alp_handle_begin_close(): a sleep-poll
  * drain, generalised from rpc_dispatch.c's _rpc_op_enter()/
  * _rpc_begin_close()/_rpc_drain() (GHSA-xhm8), which is safe to wait
  * on a genuinely long-running op instead of spinning the closer
@@ -48,6 +48,28 @@
  * this function's own post-op check) from a genuine cross-thread close
  * (unchanged: block and drain, same as before).  Public re-entry
  * guarantees are documented on alp_ble_scan_cb_t in include/alp/ble.h.
+ *
+ * @par Issue #1118 -- repeated alp_ble_open() must join the singleton
+ * <alp/ble.h> documents alp_ble_open() as returning the SAME pointer on
+ * every call (BLE is a system singleton) and alp_ble_close() as only
+ * tearing the controller down on the last matching close.  _alloc_radio()
+ * is a plain pool allocator with no notion of "already open" -- with the
+ * default pool size of 1, a second open() used to find the slot claimed
+ * and surface ALP_ERR_NOMEM instead of the same pointer.  alp_ble_open()
+ * now first tries to JOIN an already-open radio via an atomic
+ * increment-if-nonzero on struct alp_ble::refcount, falling back to
+ * _alloc_radio() (a genuine first open) only when no joinable radio
+ * exists; alp_ble_close() decrement-and-checks the same counter and only
+ * runs ops->close()/frees the slot when it was the last reference.  The
+ * increment-if-nonzero / decrement-and-check-last pair is deliberately
+ * NOT gated through the lifecycle byte the way op_enter/op_leave are --
+ * doing that would let a joiner "resurrect" a handle a closer has
+ * already committed to tearing down (the closer decrements to 0, THEN
+ * transitions lifecycle to CLOSING; a lifecycle-gated joiner could slip
+ * in between and receive a pointer to a handle mid-teardown). A CAS-loop
+ * that only ever increments a refcount still visibly nonzero cannot
+ * succeed once a decrement to zero has already committed -- see
+ * alp_ble_open()/alp_ble_close() below.
  */
 
 #include <stdbool.h>
@@ -121,9 +143,36 @@ static void _free_conn(struct alp_ble_conn *h)
 /* Radio-side dispatch                                                 */
 /* ================================================================== */
 
+/* issue #1118: increment-if-nonzero join of an already-open singleton --
+ * see this file's "Issue #1118" header comment for why this is a
+ * standalone CAS-loop on refcount alone rather than routed through
+ * alp_handle_op_enter()'s lifecycle-gated counting. Returns true (h now
+ * holds one more reference) or false (refcount was already 0: h is
+ * unopened, or a close() has already committed to tearing it down --
+ * caller must not touch h and should try the next slot / open fresh). */
+static bool _radio_try_join(struct alp_ble *h)
+{
+	uint32_t cur = __atomic_load_n(&h->refcount, __ATOMIC_ACQUIRE);
+	do {
+		if (cur == 0u) return false;
+	} while (!__atomic_compare_exchange_n(
+	    &h->refcount, &cur, cur + 1u, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
+	return true;
+}
+
 alp_ble_t *alp_ble_open(void)
 {
 	alp_z_clear_last_error();
+
+	/* Issue #1118: BLE is a documented singleton -- try to join an
+	 * already-open radio before claiming a fresh pool slot. */
+	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_BLE_HANDLES; ++i) {
+		struct alp_ble *h = &_radio_pool[i];
+		if (__atomic_load_n(&h->in_use, __ATOMIC_ACQUIRE) && _radio_try_join(h)) {
+			return h;
+		}
+	}
+
 	const alp_backend_t *be = alp_backend_select("ble", ALP_SOC_REF_STR);
 	if (be == NULL) {
 		alp_z_set_last_error(ALP_ERR_NOT_PRESENT_ON_THIS_SOC);
@@ -149,6 +198,10 @@ alp_ble_t *alp_ble_open(void)
 		return NULL;
 	}
 	h->cached_caps = caps;
+	/* First (and, until now, only) reference. Publish refcount before
+	 * lifecycle so a racing joiner's increment-if-nonzero CAS can only
+	 * ever see a fully-populated handle once it observes refcount != 0. */
+	__atomic_store_n(&h->refcount, 1u, __ATOMIC_RELEASE);
 	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
 	return h;
 }
@@ -156,6 +209,18 @@ alp_ble_t *alp_ble_open(void)
 void alp_ble_close(alp_ble_t *h)
 {
 	if (h == NULL) return;
+	/* Issue #1118: decrement-and-check-last, the release half of
+	 * _radio_try_join() above -- see this file's "Issue #1118" header
+	 * comment. Any reference but the last just drops its count and
+	 * returns; only the caller that observes the count reaching 0 (prev
+	 * == 1) proceeds to actually tear the controller down. A stray
+	 * extra close() past the true last reference (prev already 0, or
+	 * wrapped from a prior such call) also reads != 1 here and returns,
+	 * preserving the existing "second/never-opened close no-ops"
+	 * contract. */
+	if (__atomic_fetch_sub(&h->refcount, 1u, __ATOMIC_ACQ_REL) != 1u) {
+		return;
+	}
 	/* Self-close-aware sleep-poll drain (issues #629/#756): this pool
 	 * counts alp_ble_connect(), which can block up to its caller's
 	 * timeout_ms, so a normal (external) close sleeps between polls
@@ -373,8 +438,8 @@ alp_status_t alp_ble_connect(alp_ble_t            *h,
 	/* Counted via alp_handle_op_enter/leave -- see this file's "Issue
 	 * #629" header comment. connect() can block up to timeout_ms on a
 	 * real link-layer handshake; alp_ble_close() now drains this op
-	 * with the sleep-poll alp_handle_begin_close_blocking() instead of
-	 * the busy-spin alp_handle_begin_close(), so counting a
+	 * with the sleep-poll alp_handle_begin_close_blocking() rather than
+	 * the short-op alp_handle_begin_close(), so counting a
 	 * long-running op here no longer risks spinning the closer thread
 	 * for the whole handshake. */
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {

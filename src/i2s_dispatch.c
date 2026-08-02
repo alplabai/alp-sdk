@@ -133,7 +133,7 @@ alp_status_t alp_i2s_write(alp_i2s_t *i2s, const void *block, size_t bytes, uint
 	/* Counted via alp_handle_op_enter/leave (issue #629): write() can
 	 * block up to timeout_ms draining the transfer, so alp_i2s_close()
 	 * drains this op with the sleep-poll alp_handle_begin_close_blocking()
-	 * (src/common/alp_slot_claim.c) instead of the busy-spin
+	 * (src/common/alp_slot_claim.c) rather than the short-op
 	 * alp_handle_begin_close() -- generalised from rpc_dispatch.c's
 	 * _rpc_op_enter()/_rpc_begin_close()/_rpc_drain() (GHSA-xhm8).
 	 * start/stop stay on the short, synchronous op_enter/leave path. */

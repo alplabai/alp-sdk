@@ -119,22 +119,35 @@ static inline void alp_lifecycle_set(uint8_t *state, uint8_t value)
  *   - alp_handle_begin_close() -- CAS OPEN -> CLOSING (false = already
  *     closing/closed/never-opened, caller's close() is then a no-op,
  *     matching every existing void-close idempotency contract), then
- *     spins until every op that entered before the CAS has left.
+ *     waits until every op that entered before the CAS has left.
  *
  * The count-then-check order in alp_handle_op_enter is what removes
  * the TOCTOU window: the increment always happens before the
  * lifecycle read, so an op that observes OPEN is guaranteed counted
- * before alp_handle_begin_close's spin can pass, and an op that loses
+ * before alp_handle_begin_close's wait can pass, and an op that loses
  * the race to a CLOSING transition backs its own count back out
  * before touching backend state.
  *
- * The close-side spin is a deliberate, bounded busy-wait (no OS
- * primitive is portable across baremetal/yocto/Zephyr from this
- * shared header) -- correct because every class using this helper
- * only ever calls short, synchronous backend ops (no blocking
- * transfer is left outstanding across an open/op boundary the way
- * the SPI target's transceive is), so active_ops always drains in a
- * handful of instructions, never an unbounded wait.
+ * alp_handle_begin_close() used to drain with a bare busy-spin here,
+ * defended on op *duration* ("every class using this helper only ever
+ * calls short, synchronous backend ops ... active_ops always drains in
+ * a handful of instructions"). That defence does not hold: it never
+ * considered *priority*. On a single-core preemptive-priority
+ * scheduler (Zephyr), a higher-priority thread in the spin never
+ * yields the core back to a lower-priority thread just because the
+ * lower-priority thread would only need a "handful of instructions" to
+ * finish -- the scheduler does not know that, and a plain spin never
+ * blocks, so the lower-priority op thread that must call
+ * alp_handle_op_leave() is never scheduled and the spin runs forever
+ * (issue #1114). alp_handle_begin_close() is now implemented
+ * out-of-line (src/common/alp_slot_claim.c) as a thin wrapper over the
+ * same sleep-poll drain alp_handle_begin_close_blocking() already used
+ * for genuinely-blocking ops -- a real sleep (not just a same-priority
+ * k_yield()) removes the closing thread from the ready queue so the
+ * scheduler can run a STRICTLY LOWER priority thread, which a spin (or
+ * a same-priority-only yield) cannot do. Short ops still drain fast in
+ * practice: the drain's first check usually already sees active_ops
+ * back at 0 before it ever sleeps.
  */
 #define ALP_HANDLE_LC_UNOPENED 0u
 #define ALP_HANDLE_LC_OPEN     1u
@@ -171,24 +184,20 @@ static inline void alp_handle_op_leave(uint32_t *active_ops)
 /**
  * @brief Begin closing a handle: gate out new ops, then drain in-flight ones.
  *
+ * Defined out-of-line (src/common/alp_slot_claim.c), not inline here, as a
+ * thin wrapper over the sleep-poll drain alp_handle_begin_close_blocking()
+ * uses -- see the "Generic open/op/close guard" block comment above
+ * (issue #1114) for why a plain busy-spin is unsafe here regardless of op
+ * duration: it never yields the core to a strictly lower-priority op
+ * thread on a single-core preemptive-priority scheduler.
+ *
  * @param[in,out] lifecycle   Handle lifecycle byte (ALP_HANDLE_LC_*).
  * @param[in]     active_ops  Handle's in-flight-op counter.
  * @return true if this caller won the OPEN -> CLOSING transition and
  *         may now tear the handle down; false if it was already
  *         closed/closing/never-opened (caller's close() is a no-op).
  */
-static inline bool alp_handle_begin_close(uint8_t *lifecycle, uint32_t *active_ops)
-{
-	if (!alp_lifecycle_cas(lifecycle, ALP_HANDLE_LC_OPEN, ALP_HANDLE_LC_CLOSING)) {
-		return false;
-	}
-	while (__atomic_load_n(active_ops, __ATOMIC_ACQUIRE) != 0u) {
-		/* Spin: every op gated by alp_handle_op_enter() is a short,
-		 * synchronous backend call, so this drains in a handful of
-		 * instructions -- see the block comment above. */
-	}
-	return true;
-}
+bool alp_handle_begin_close(uint8_t *lifecycle, uint32_t *active_ops);
 
 /**
  * @brief Begin closing a handle that also hosts blocking ops (issue #629).

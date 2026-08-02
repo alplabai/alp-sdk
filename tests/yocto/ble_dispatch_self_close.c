@@ -111,6 +111,11 @@ static void test_self_close_from_scan_callback(void)
 	struct alp_ble *h = _alloc_radio();
 	ALP_ASSERT_TRUE(h != NULL);
 	h->state.ops = &fake_ops_self_close;
+	/* issue #1118: alp_ble_close() now decrements-and-checks-last on
+	 * refcount before it does anything else -- give this hand-built
+	 * handle the same refcount==1 a real alp_ble_open() would publish,
+	 * or the single close() below no-ops instead of tearing down. */
+	h->refcount = 1u;
 	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
 	g_self_close_handle = h;
 
@@ -193,6 +198,7 @@ static void test_close_from_other_thread_while_scan_blocks(void)
 	struct alp_ble *h = _alloc_radio();
 	ALP_ASSERT_TRUE(h != NULL);
 	h->state.ops = &fake_ops_blocks;
+	h->refcount  = 1u; /* issue #1118: see test_self_close_from_scan_callback(). */
 	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
 	g_ext_close_handle = h;
 
@@ -317,6 +323,7 @@ static void test_close_from_other_thread_during_scan_vs_slot_reuse(void)
 	struct alp_ble *h = _alloc_radio();
 	ALP_ASSERT_TRUE(h != NULL);
 	h->state.ops = &fake_ops_reuse;
+	h->refcount  = 1u; /* issue #1118: see test_self_close_from_scan_callback(). */
 	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
 	g_reuse_handle = h;
 
@@ -344,8 +351,72 @@ static void test_close_from_other_thread_during_scan_vs_slot_reuse(void)
 	ALP_ASSERT_EQ_INT(atomic_load(&g_reuse_teardown_count), 1);
 }
 
+/* ------------------------------------------------------------------ */
+/* 4. Repeated alp_ble_open() must join the singleton (issue #1118),   */
+/*    and alp_ble_close() must only tear the controller down on the    */
+/*    LAST matching close.                                             */
+/* ------------------------------------------------------------------ */
+
+static atomic_int g_singleton_teardown_count;
+
+static void fake_close_count_singleton(alp_ble_radio_state_t *state)
+{
+	(void)state;
+	atomic_fetch_add(&g_singleton_teardown_count, 1);
+}
+
+static const alp_ble_ops_t fake_ops_singleton = {
+	.close = fake_close_count_singleton,
+};
+
+static void test_repeated_open_joins_singleton_and_close_tears_down_once(void)
+{
+	atomic_store(&g_singleton_teardown_count, 0);
+
+	/* Simulate a completed FIRST alp_ble_open(): claim the (single-
+	 * slot, CONFIG_ALP_SDK_MAX_BLE_HANDLES==1 above) radio pool by hand,
+	 * exactly as alp_ble_open()'s fresh-open path would have left it --
+	 * ops->open() itself is not under test here. */
+	struct alp_ble *h = _alloc_radio();
+	ALP_ASSERT_TRUE(h != NULL);
+	h->state.ops = &fake_ops_singleton;
+	h->refcount  = 1u;
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
+
+	/* THE join under test: <alp/ble.h> documents alp_ble_open() as
+	 * returning the SAME pointer on every call.  Pre-#1118, a second
+	 * open() against this single-slot pool found the slot already
+	 * claimed and surfaced ALP_ERR_NOMEM (NULL) instead -- see this
+	 * file's / src/ble_dispatch.c's issue #1118 header comment. */
+	alp_ble_t *h2 = alp_ble_open();
+	ALP_ASSERT_TRUE(h2 == h);
+	ALP_ASSERT_EQ_INT((int)h->refcount, 2);
+
+	/* First close: one of two references remains -- must NOT tear the
+	 * controller down (pre-#1118, close() had no refcount and would
+	 * have torn down right here, on the FIRST of two closes). */
+	alp_ble_close(h);
+	ALP_ASSERT_EQ_INT(atomic_load(&g_singleton_teardown_count), 0);
+	ALP_ASSERT_EQ_INT((int)h->refcount, 1);
+	ALP_ASSERT_TRUE(__atomic_load_n(&h->in_use, __ATOMIC_ACQUIRE));
+
+	/* Second (LAST) close: now it must tear down and free the slot. */
+	alp_ble_close(h2);
+	ALP_ASSERT_EQ_INT(atomic_load(&g_singleton_teardown_count), 1);
+	ALP_ASSERT_EQ_INT(alp_lifecycle_get(&h->lifecycle), ALP_HANDLE_LC_UNOPENED);
+
+	struct alp_ble *reclaimed = _alloc_radio();
+	ALP_ASSERT_TRUE(reclaimed != NULL);
+	_free_radio(reclaimed);
+}
+
 int main(void)
 {
+	/* Runs first, deliberately: scenario 3 below ends by permanently
+	 * pinning the pool's one physical slot claimed (by design -- see
+	 * its recycle_thread()'s freeze branch), so nothing after it can
+	 * _alloc_radio() again in this process. */
+	test_repeated_open_joins_singleton_and_close_tears_down_once();
 	test_self_close_from_scan_callback();
 	test_close_from_other_thread_while_scan_blocks();
 	test_close_from_other_thread_during_scan_vs_slot_reuse();

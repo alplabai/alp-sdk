@@ -166,20 +166,18 @@ alp_inference_get_output(alp_inference_t *inf, size_t index, alp_inference_tenso
 	return rc;
 }
 
-/* #629 NOTE (flagged for orchestrator review): invoke() runs the
- * backend's synchronous model executor (TFLM interpreter, optionally
- * with the Ethos-U op resolver) directly on the caller's thread --
- * bounded by model compute time (never an open-ended external wait
- * the way alp_rpc_call()'s timeout_ms can be), so it does not meet
- * this ticket's "blocks unboundedly" bar for the rpc-style sleep-
- * drain treatment and is bracketed like every other op below.
- * However, its duration is NOT "a handful of instructions" the way
- * alp_handle_begin_close()'s busy-spin assumes (src/common/
- * alp_slot_claim.h) -- a close() racing a large-model invoke() would
- * busy-spin the closing thread for the full inference latency.
- * Flagged rather than silently accepted; a future pass may want
- * invoke() on the rpc_dispatch.c sleep-poll drain instead of the
- * generic spin if that latency proves material. */
+/* #629 NOTE: invoke() runs the backend's synchronous model executor
+ * (TFLM interpreter, optionally with the Ethos-U op resolver) directly
+ * on the caller's thread -- bounded by model compute time (never an
+ * open-ended external wait the way alp_rpc_call()'s timeout_ms can
+ * be), so it does not meet this ticket's "blocks unboundedly" bar for
+ * the rpc-style sleep-drain treatment and is bracketed like every
+ * other op below. Its duration is NOT "a handful of instructions"
+ * the way a close() racing invoke() might once have implied a long
+ * spin; that concern is now moot regardless of duration --
+ * alp_handle_begin_close() (src/common/alp_slot_claim.c) sleep-polls
+ * rather than spins (issue #1114), so a close() racing a large-model
+ * invoke() sleeps, it does not peg the closing thread's core. */
 alp_status_t alp_inference_invoke(alp_inference_t *inf)
 {
 	if (inf == NULL || !alp_handle_op_enter(&inf->lifecycle, &inf->active_ops)) {
@@ -195,10 +193,9 @@ alp_status_t alp_inference_invoke(alp_inference_t *inf)
 void alp_inference_close(alp_inference_t *inf)
 {
 	if (inf == NULL) return;
-	/* begin_close CAS OPEN->CLOSING then spins until every op that
-	 * entered before the CAS has left (issue #629); see the invoke()
-	 * flag above re: worst-case spin duration. Idempotent: a second/
-	 * never-opened close no-ops. */
+	/* begin_close CAS OPEN->CLOSING then drains (sleep-poll, issue
+	 * #1114) until every op that entered before the CAS has left
+	 * (issue #629). Idempotent: a second/never-opened close no-ops. */
 	if (!alp_handle_begin_close(&inf->lifecycle, &inf->active_ops)) return;
 	if (inf->state.ops != NULL && inf->state.ops->close != NULL) {
 		inf->state.ops->close(&inf->state);

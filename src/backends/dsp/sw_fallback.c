@@ -37,6 +37,7 @@
 #include <alp/dsp.h>
 #include <alp/peripheral.h>
 
+#include "alp_slot_claim.h"
 #include "dsp_ops.h"
 
 #if defined(ALP_HAS_CMSIS_DSP) && (ALP_HAS_CMSIS_DSP == 1)
@@ -96,8 +97,12 @@ typedef struct {
 	} u;
 } dsp_stage_t;
 
+/* in_use is the LAST member (see alp_slot_claim.h): the winning claimant
+ * zeroes everything before it via offsetof (in sw_open() below), so no
+ * stage/window/FFT state from a prior open()/close() cycle -- or from
+ * another thread mid-populating this same slot -- can leak into a freshly
+ * claimed handle. */
 struct dsp_be {
-	bool        in_use;
 	bool        terminal_fft;
 	uint8_t     n_stages;
 	dsp_stage_t stages[ALP_DSP_MAX_STAGES];
@@ -112,6 +117,7 @@ struct dsp_be {
 	/* CMSIS rfft output scratch -- kept here, NOT on the stack (a
 	 * 1024-float / 4 KB stack array would overflow a default thread). */
 	float fft_scratch[ALP_DSP_MAX_FFT_POINTS];
+	bool  in_use;
 };
 
 /* Static backend-data pool.  Same shape + size as the legacy
@@ -121,10 +127,21 @@ struct dsp_be {
 #define DSP_BE_POOL_SIZE 2u
 static struct dsp_be g_be_pool[DSP_BE_POOL_SIZE];
 
+/* issue #1115: this used to be a plain `if (!in_use) return &slot;` scan
+ * that returned a pointer WITHOUT claiming it -- in_use was only set
+ * (non-atomically) at the very end of sw_open() below, after a full
+ * memset and per-stage copy/validate. That left the ENTIRE open() body a
+ * TOCTOU window: a second thread's concurrent sw_open() could scan the
+ * same pool, see the same slot still `in_use == false`, and get the
+ * SAME struct dsp_be* back while the first thread was still populating
+ * it -- much wider than the plain check-then-set in the other backends
+ * this issue also covers. Claim atomically here, at the point of
+ * acquisition, so a second opener can never observe this slot as free
+ * again until it is released. */
 static struct dsp_be *acquire_be_slot(void)
 {
 	for (size_t i = 0u; i < DSP_BE_POOL_SIZE; i++) {
-		if (!g_be_pool[i].in_use) {
+		if (alp_slot_try_claim(&g_be_pool[i].in_use)) {
 			return &g_be_pool[i];
 		}
 	}
@@ -135,7 +152,12 @@ static struct dsp_be *acquire_be_slot(void)
 /* Helpers                                                             */
 /* ================================================================== */
 
-static bool is_power_of_two(uint32_t v)
+/* Named dsp_-prefixed, not the bare `is_power_of_two`: pulling in
+ * "alp_slot_claim.h" (issue #1115) transitively includes
+ * <zephyr/kernel.h> on Zephyr builds (via alp_thread_token.h), which
+ * already declares an inline `is_power_of_two()` in
+ * <zephyr/sys/util.h> -- a same-named static here redefines it. */
+static bool dsp_is_power_of_two(uint32_t v)
 {
 	return (v != 0u) && ((v & (v - 1u)) == 0u);
 }
@@ -377,7 +399,7 @@ static alp_status_t validate_fft(const alp_dsp_fft_params_t *src, dsp_stage_t *d
 	if (src->n_points < ALP_DSP_MIN_FFT_POINTS || src->n_points > ALP_DSP_MAX_FFT_POINTS) {
 		return ALP_ERR_OUT_OF_RANGE;
 	}
-	if (!is_power_of_two((uint32_t)src->n_points)) {
+	if (!dsp_is_power_of_two((uint32_t)src->n_points)) {
 		return ALP_ERR_OUT_OF_RANGE;
 	}
 	if (src->output_format != ALP_DSP_FFT_OUTPUT_COMPLEX &&
@@ -444,9 +466,10 @@ static alp_status_t sw_open(const alp_dsp_stage_t   *stages,
 		return ALP_ERR_NOMEM;
 	}
 
-	/* Zero the slot fully so we don't carry over state from a prior
-     * open() / close() cycle. */
-	memset(be, 0, sizeof(*be));
+	/* Zero the slot (everything but in_use, already atomically claimed
+	 * above) so we don't carry over state from a prior open() / close()
+	 * cycle. */
+	memset(be, 0, offsetof(struct dsp_be, in_use));
 	be->n_stages     = (uint8_t)n_stages;
 	be->terminal_fft = (fft_idx >= 0);
 
@@ -472,7 +495,7 @@ static alp_status_t sw_open(const alp_dsp_stage_t   *stages,
 			break;
 		}
 		if (s != ALP_OK) {
-			be->in_use = false; /* hand the slot back */
+			alp_slot_release(&be->in_use); /* hand the slot back */
 			return s;
 		}
 	}
@@ -486,7 +509,8 @@ static alp_status_t sw_open(const alp_dsp_stage_t   *stages,
 		be->window_ready = true;
 	}
 
-	be->in_use     = true;
+	/* Already atomically claimed true by acquire_be_slot() -- nothing
+	 * further to publish here. */
 	state->be_data = be;
 	if (caps_out != NULL) {
 		caps_out->flags = 0u;
@@ -771,11 +795,11 @@ static void sw_close(alp_dsp_backend_state_t *state)
 {
 	struct dsp_be *be = (struct dsp_be *)state->be_data;
 	if (be == NULL) return;
-	be->in_use       = false;
 	be->n_stages     = 0u;
 	be->terminal_fft = false;
 	be->window_ready = false;
 	state->be_data   = NULL;
+	alp_slot_release(&be->in_use);
 }
 
 /* ---------- Registration ---------- */

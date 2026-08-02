@@ -185,7 +185,7 @@ alp_status_t alp_audio_in_read(alp_audio_in_t *in,
 	/* Counted via alp_handle_op_enter/leave (issue #629): read() can
 	 * block up to timeout_ms waiting on frames, so alp_audio_in_close()
 	 * drains this op with the sleep-poll alp_handle_begin_close_blocking()
-	 * (src/common/alp_slot_claim.c) instead of the busy-spin
+	 * (src/common/alp_slot_claim.c) rather than the short-op
 	 * alp_handle_begin_close() -- generalised from rpc_dispatch.c's
 	 * _rpc_op_enter()/_rpc_begin_close()/_rpc_drain() (GHSA-xhm8). */
 	if (in == NULL || !alp_handle_op_enter(&in->lifecycle, &in->active_ops)) {

@@ -136,9 +136,9 @@ void alp_uart_close(alp_uart_t *port)
 	/* Sleep-poll drain (issue #629 follow-up): this pool counts
 	 * alp_uart_read(), which can block up to its caller's timeout_ms, so
 	 * alp_handle_begin_close_blocking() sleeps between polls instead of
-	 * busy-spinning -- the busy-spin alp_handle_begin_close() would peg
-	 * a core (or hang outright at timeout_ms == UINT32_MAX) for the
-	 * whole read. See src/common/alp_slot_claim.c/.h. Idempotent: a
+	 * busy-spinning -- the short-op alp_handle_begin_close() is scoped
+	 * to ops that never hold a caller timeout_ms open across a close.
+	 * See src/common/alp_slot_claim.c/.h. Idempotent: a
 	 * second/never-opened close no-ops. */
 	if (!alp_handle_begin_close_blocking(&port->lifecycle, &port->active_ops)) return;
 	if (port->state.ops != NULL && port->state.ops->close != NULL) {

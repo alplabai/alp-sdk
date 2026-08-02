@@ -219,7 +219,7 @@ alp_status_t alp_mbox_send(alp_mbox_t *mb, const void *data, size_t len, uint32_
 	/* Counted via alp_handle_op_enter/leave (issue #629): send() can block
 	 * up to timeout_ms draining to the peer core, so alp_mbox_close()
 	 * drains this op with the sleep-poll alp_handle_begin_close_blocking()
-	 * (src/common/alp_slot_claim.c) instead of the busy-spin
+	 * (src/common/alp_slot_claim.c) rather than the short-op
 	 * alp_handle_begin_close() -- generalised from rpc_dispatch.c's
 	 * _rpc_op_enter()/_rpc_begin_close()/_rpc_drain() (GHSA-xhm8). */
 	if (mb == NULL || !alp_handle_op_enter(&mb->lifecycle, &mb->active_ops)) {
@@ -316,7 +316,7 @@ alp_status_t alp_hwsem_lock(alp_hwsem_t *sem, uint32_t timeout_ms)
 	 * block up to timeout_ms waiting on the peer core, so
 	 * alp_hwsem_close() drains this op with the sleep-poll
 	 * alp_handle_begin_close_blocking() (src/common/alp_slot_claim.c)
-	 * instead of the busy-spin alp_handle_begin_close() -- see
+	 * rather than the short-op alp_handle_begin_close() -- see
 	 * alp_mbox_send() above for the same rationale.
 	 * hwsem_try_lock/unlock stay short, synchronous ops. */
 	if (sem == NULL || !alp_handle_op_enter(&sem->lifecycle, &sem->active_ops)) {
