@@ -296,8 +296,14 @@ def _clone_metadata_gates(repo_root: Path, tmp_repo: Path) -> None:
     """
     shutil.copytree(repo_root / "metadata", tmp_repo / "metadata")
     (tmp_repo / "scripts").mkdir(parents=True)
+    # alp_project_loader.py imports `sentinels` (scripts/sentinels.py) --
+    # omitting it here used to pass anyway only because an editable
+    # `pip install -e .` puts the REAL scripts/ on sys.path, so the
+    # subprocess below silently fell through to that copy instead of this
+    # scaffolded one (alp-sdk#1110), defeating the isolation this helper
+    # exists to provide.
     for script in ("validate_metadata.py", "check_inference_backend_parity.py",
-                   "alp_project_loader.py"):
+                   "alp_project_loader.py", "sentinels.py"):
         shutil.copy(repo_root / "scripts" / script, tmp_repo / "scripts" / script)
     # validate_metadata.py's #1025 ratchet (assert_exclusion_still_not_
     # buildable) needs the real alp_orchestrate package alongside it --

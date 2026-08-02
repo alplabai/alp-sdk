@@ -93,8 +93,9 @@ are deliberately different:
   the single source; every CI workflow's `actions/setup-python`
   reads it via `python-version-file`, so CI always runs exactly
   the pinned version.
-- **Zephyr's own build floor: 3.12 — real, but not mirrored here.**
-  Zephyr v4.4.1's `cmake/modules/python.cmake` hardcodes
+- **Zephyr's own build floor: 3.12 — now mirrored in the manifest, not
+  yet enforced by any executor.**  Zephyr v4.4.1's
+  `cmake/modules/python.cmake` hardcodes
   `set(PYTHON_MINIMUM_REQUIRED 3.12)` and
   `find_package(Python3 3.12 REQUIRED)`, so a `west build`/CMake
   configure of this workspace refuses below 3.12 no matter what the
@@ -106,12 +107,20 @@ are deliberately different:
   also refuse a Yocto-only or metadata-only host that never touches
   Zephyr; and 3.12 is unreachable via `apt-get install python3` on
   the Ubuntu 22.04 / Debian 12 hosts this guide itself recommends
-  (system `python3` there is 3.10 / 3.11).  Until a Zephyr-only gate
-  lands, a host below 3.12 bootstraps fine and then fails later, at
-  `west build`'s CMake configure — install a newer interpreter
-  alongside the system one (`deadsnakes` PPA or `pyenv`) if you hit
-  that.  See [`docs/troubleshooting.md`](troubleshooting.md)'s
-  "`west build` fails at CMake configure citing a Python version".
+  (system `python3` there is 3.10 / 3.11).  The real 3.12 number is
+  instead recorded separately, as `metadata/bootstrap.json`'s
+  `zephyr.pythonMinVersion` (issue #1078) — derived from, and checked
+  against, the pinned Zephyr's own `cmake/modules/python.cmake` by
+  `scripts/check_bootstrap_manifest.py`, so a future Zephyr bump that
+  changes its own floor can't drift this field silently.  Neither
+  bootstrap script nor `tan` reads or refuses on it yet (that's the
+  still-outstanding consumer-side half of #1078, gated on tan
+  v0.6.0 / tan-cli#270) — until it lands, a host below 3.12 bootstraps
+  fine and then fails later, at `west build`'s CMake configure —
+  install a newer interpreter alongside the system one (`deadsnakes`
+  PPA or `pyenv`) if you hit that.  See
+  [`docs/troubleshooting.md`](troubleshooting.md)'s "`west build`
+  fails at CMake configure citing a Python version".
 
 To reproduce CI byte-for-byte, match the pin locally — `pyenv`
 and `uv` pick `.python-version` up automatically.  `tan doctor`'s

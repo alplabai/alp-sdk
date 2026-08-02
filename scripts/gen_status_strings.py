@@ -216,28 +216,39 @@ def emit(entries: list[Entry]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _clang_format(path: Path) -> None:
-    """Format the generated file in place to match the repo .clang-format.
+def _clang_format_exe() -> str:
+    """Resolve the pinned clang-format binary, or fail naming what's missing.
 
-    Pinned to clang-format-22 (the CI version).  No-op (with a warning) if
-    clang-format is absent; the CI in-sync gate then catches any drift.
+    Checked BEFORE any generated file is written -- formerly this
+    degraded to a warning after the write, leaving an unformatted file on
+    disk that the generated-files gate then misreported as tabs-vs-spaces
+    "drift" (alp-sdk#1109) instead of the real problem, clang-format
+    never having run.
     """
     exe = shutil.which("clang-format-22") or shutil.which("clang-format")
     if exe is None:
-        print(
-            f"  warning: clang-format not found; {path.name} left "
-            "unformatted (CI will flag any drift)",
-            file=sys.stderr,
+        raise SystemExit(
+            "error: clang-format not found on PATH; cannot format "
+            "status_strings.c to match the repo .clang-format (install "
+            "clang-format==22.* -- see docs/testing.md)"
         )
-        return
+    return exe
+
+
+def _clang_format(path: Path, exe: str) -> None:
+    """Format the generated file in place to match the repo .clang-format.
+
+    Pinned to clang-format-22 (the CI version).
+    """
     subprocess.run([exe, "-i", "--style=file", str(path)], check=True)
 
 
 def main() -> int:
+    exe = _clang_format_exe()
     entries = extract_entries(HEADER.read_text(encoding="utf-8"))
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(emit(entries), encoding="utf-8", newline="")
-    _clang_format(OUT)
+    _clang_format(OUT, exe)
     print(f"wrote {OUT.relative_to(REPO)} ({len(OUT.read_text().splitlines())} lines)")
     return 0
 

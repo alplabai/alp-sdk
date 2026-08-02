@@ -63,6 +63,12 @@
 #   --yocto-only      run only stage 1 + format + metadata
 #   --zephyr-only     run only stage 3 (requires ZEPHYR_BASE)
 #   --no-clean        keep build directories between runs (faster)
+#   --list-required-gate-scripts
+#                     print the scripts/check_*.py paths the
+#                     required-gate-scripts stage would run (one per line,
+#                     no execution) and exit -- a cheap probe for
+#                     alp-sdk#1109's regression: this list must always
+#                     match `quality_tasks.py --gate-scripts` 1:1.
 #
 # Examples:
 #
@@ -87,6 +93,7 @@ QUICK=0
 YOCTO_ONLY=0
 ZEPHYR_ONLY=0
 NO_CLEAN=0
+LIST_REQUIRED_GATE_SCRIPTS=0
 # TARGET selects a CI profile matching the branch a PR targets:
 #   dev  -- the FAST set a dev PR is graded on (skip the slow release-only
 #           full CMake builds + Doxygen); for rapid integration iteration.
@@ -108,6 +115,7 @@ while [ $# -gt 0 ]; do
         --target=*)     TARGET="${1#--target=}" ;;
         --dev)          TARGET=dev ;;
         --main)         TARGET=main ;;
+        --list-required-gate-scripts) LIST_REQUIRED_GATE_SCRIPTS=1 ;;
         -h|--help)
             sed -n '3,68p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
             exit 0
@@ -492,12 +500,34 @@ if command -v python3 >/dev/null 2>&1; then
         exit 1
     fi
     while IFS= read -r _qpath; do
+        # Defensive: quality_tasks.py now writes '\n' explicitly (alp-sdk#1109),
+        # but strip a trailing '\r' here too in case its output ever reaches
+        # this loop CRLF-terminated again (a stale/vendored copy, a Windows
+        # pipe upstream) -- `IFS= read -r` does not strip it on its own, and
+        # an unstripped '\r' makes every path below fail its `-f` existence
+        # check and skip silently.
+        _qpath="${_qpath%$'\r'}"
         [ -n "${_qpath}" ] && REQUIRED_GATE_SCRIPTS+=("${_qpath#scripts/}")
     done <<< "${_qgate_out}"
     if [ "${#REQUIRED_GATE_SCRIPTS[@]}" -eq 0 ]; then
         echo "FATAL: quality-tasks-v1.json yielded zero gate scripts" >&2
         exit 1
     fi
+fi
+
+# --list-required-gate-scripts: print exactly the paths
+# stage_required_gate_scripts()'s loop below would print a
+# "--- scripts/... ---" header for (same existence filter, zero
+# execution) and exit -- the cheap probe the alp-sdk#1109 regression
+# guard (tests/scripts/test_test_all_gate_coverage.py) diffs against
+# `quality_tasks.py --gate-scripts` to prove this stage still finds
+# every declared gate script.
+if [ "${LIST_REQUIRED_GATE_SCRIPTS}" -eq 1 ]; then
+    for _qscript in "${REQUIRED_GATE_SCRIPTS[@]}"; do
+        _qspath="scripts/${_qscript}"
+        [ -f "${_qspath}" ] && echo "${_qspath}"
+    done
+    exit 0
 fi
 
 stage_required_gate_scripts() {
@@ -517,7 +547,8 @@ stage_required_gate_scripts() {
 
     # board.yaml schema sweep -- canonical template + every
     # examples/*/board.yaml + tests/*/board.yaml, mirroring the
-    # pr-metadata-validate.yml "schema sweep" step.
+    # pr-metadata-validate.yml "schema sweep" step (including its
+    # rpmsg-imx93 exclusion -- see board-yaml-sweep-exclude.sh).
     if [ -f scripts/validate_board_yaml.py ]; then
         ran=1
         if [ -f metadata/templates/board.yaml.example ]; then
@@ -525,10 +556,13 @@ stage_required_gate_scripts() {
             python3 scripts/validate_board_yaml.py \
                 --input metadata/templates/board.yaml.example || failed=1
         fi
+        # shellcheck source=scripts/board-yaml-sweep-exclude.sh
+        source "${REPO_ROOT}/scripts/board-yaml-sweep-exclude.sh"
         while IFS= read -r f; do
             echo "--- validate_board_yaml.py ${f} ---"
             python3 scripts/validate_board_yaml.py --input "${f}" || failed=1
-        done < <(find examples tests -name board.yaml 2>/dev/null)
+        done < <(find examples tests -name board.yaml 2>/dev/null \
+                  | grep -v "${BOARD_YAML_SWEEP_EXCLUDE_PATTERN}")
     fi
 
     # gd32-bridge protocol vectors must not drift from the generator
