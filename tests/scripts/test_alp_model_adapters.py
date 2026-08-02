@@ -62,6 +62,21 @@ def test_deepx_adapter_detect_and_skip(monkeypatch):
         a.compile(Path("x.onnx"), accel_config="", out_dir=Path("."))
 
 
+def test_deepx_probe_does_not_spawn_dxcom(monkeypatch):
+    # `alp model doctor` calls probe() -> version() whenever dxcom is on PATH;
+    # version() must be a cheap, non-spawning lookup (like vela's), not a
+    # subprocess spawn of the vendor NPU binary.
+    monkeypatch.setattr("alp_model.adapters.deepx.shutil.which", lambda n: "/usr/bin/dxcom")
+
+    def _no_spawn(*a, **kw):
+        raise AssertionError("probe()/version() must not spawn a subprocess")
+
+    monkeypatch.setattr("alp_model.adapters.deepx.subprocess.run", _no_spawn)
+    result = DeepxAdapter().probe()
+    assert result["available"] is True
+    assert isinstance(result["version"], str) and result["version"]
+
+
 def test_vela_adapter_backend_and_accepts():
     a = VelaAdapter()
     assert a.backend == "ethos_u"
@@ -493,3 +508,25 @@ def test_deepx_real_compile_of_tiny_fixture(tmp_path):
     assert blob.format == "dxnn"
     assert blob.payload[:4] == b"DXNN"        # self-describing .dxnn flatbuffer magic
     assert blob.compiler_version.startswith("DX-COM")
+
+
+def test_probe_reports_unavailable_reason(monkeypatch):
+    import shutil as _shutil
+    from alp_model.adapters.ethos_u import VelaAdapter
+    monkeypatch.setattr(_shutil, "which", lambda _n: None)   # vela absent
+    p = VelaAdapter().probe()
+    assert p["backend"] == "ethos_u"
+    assert p["tool"] == "vela"
+    assert p["available"] is False
+    assert p["version"] is None
+    assert "vela" in p["reason"]
+
+
+def test_probe_reports_available_version(monkeypatch):
+    import shutil as _shutil
+    from alp_model.adapters.ethos_u import VelaAdapter
+    monkeypatch.setattr(_shutil, "which", lambda n: "/usr/bin/vela" if n == "vela" else None)
+    p = VelaAdapter().probe()
+    assert p["available"] is True
+    assert p["version"].startswith("vela")
+    assert p["reason"] is None

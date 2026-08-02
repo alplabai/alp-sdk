@@ -23,12 +23,6 @@ source "$HERE/bench-env.sh"
 
 OBJNM="$(bench_tool_prefix)-nm" || exit $?
 JLINK="$(bench_jlink_exe)" || exit $?
-# See ram-run.sh for why the selector is conditional on JLINK_SN. The MRAM
-# write itself happens inside flash-jlink.sh (invoked below), which now
-# selects by the same JLINK_SN; this array is only for the read_console()
-# probe here.
-JLINK_ARGS=("$JLINK")
-[ -n "${JLINK_SN:-}" ] && JLINK_ARGS+=(-SelectEmuBySN "$JLINK_SN")
 SIZE=0xB00
 
 # App list: argv wins; otherwise read apps.txt (prefer the committed list).
@@ -48,15 +42,19 @@ read_console() {
   local BD="$1"
   local BUF; BUF=0x$($OBJNM "$BD/zephyr/zephyr.elf" 2>/dev/null | awk '/ ram_console_buf$/{print $1}')
   [ "$BUF" = "0x" ] && { echo "(no ram_console_buf in elf)"; return; }
-  cat > /tmp/rdc.jlink <<EOF
-device $JLINK_DEVICE_READ
-si SWD
-speed $JLINK_SPEED
-connect
-mem8 $BUF, $SIZE
-exit
-EOF
-  "${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/rdc.jlink 2>/dev/null > /tmp/rdc.out || true
+  # chunk the mem8 read (bench_jlink_mem8_chunks): JLinkExe rejects a single
+  # read over 0x10000 and fails silently, and select the probe by serial
+  # (bench_jlink_select) -- unselected on a multi-probe host it fails the same way.
+  {
+    echo "device $JLINK_DEVICE_READ"
+    echo si SWD
+    echo "speed $JLINK_SPEED"
+    echo connect
+    bench_jlink_mem8_chunks "$BUF" "$SIZE"
+    echo exit
+  } > /tmp/rdc.jlink
+  # shellcheck disable=SC2046  # word-splitting bench_jlink_select is intentional
+  $JLINK $(bench_jlink_select) -nogui 1 -CommanderScript /tmp/rdc.jlink 2>/dev/null > /tmp/rdc.out || true
   awk '/^[0-9A-Fa-f]+ = / { for (i=3;i<=NF;i++){ if ($i !~ /^[0-9A-Fa-f][0-9A-Fa-f]$/) continue; b=strtonum("0x"$i); if(b==0){nul++; if(nul>6)exit; next} nul=0; if(b==10||b==13){printf "\n";continue} if(b>=32&&b<127)printf "%c",b } }' /tmp/rdc.out
 }
 

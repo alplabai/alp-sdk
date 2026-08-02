@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alplab.ai/schemas/model-zoo-v1.schema.json",
+  "title": "ALP model-zoo entry v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "task", "description", "source", "license", "validated_soms"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+    "task": {"type": "string", "minLength": 1},
+    "description": {"type": "string", "minLength": 1},
+    "license": {"type": "string", "minLength": 1},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "oneOf": [
+        {"required": ["url", "sha256"]},
+        {"required": ["bundled"]}
+      ],
+      "properties": {
+        "url": {"type": "string", "pattern": "^(https|file)://"},
+        "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "bundled": {"type": "string", "minLength": 1}
+      }
+    },
+    "validated_soms": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^E1M-[A-Z0-9]+$"}
+    },
+    "io_spec": {"type": "object"},
+    "perf_ref": {"type": "string"},
+    "compile": {"type": "object"},
+    "example_app": {"type": "string"}
+  }
+}

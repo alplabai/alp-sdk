@@ -22,6 +22,22 @@ class CompilerAdapter(ABC):
     # derive (DEEPX JSON+calibration, DRP-AI spec). build_model records a
     # "no compile config" coverage skip for these when no opts block is given.
     requires_compile_opts: bool = False
+    tool: str = ""              # console command probed for availability ("" = builtin, no tool)
+
+    def version(self) -> str:
+        """Best-effort tool version string; only meaningful when available."""
+        return ""
+
+    def reason(self) -> str:
+        """Why this backend is unavailable (empty when available)."""
+        return f"{self.tool or self.backend} not available"
+
+    def probe(self) -> dict:
+        """Read-only availability report for `alp model doctor`."""
+        avail = self.is_available()
+        return {"backend": self.backend, "tool": self.tool, "available": avail,
+                "version": self.version() if avail else None,
+                "reason": None if avail else self.reason()}
 
     @abstractmethod
     def is_available(self) -> bool:

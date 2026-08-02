@@ -129,6 +129,7 @@ def _python_hashes(root: Path) -> dict:
 _METADATA_DIGEST_GLOBS = (
     "**/*.yaml", "**/*.json", "**/*.tsv", "**/*.csv", "**/*.h",
     "**/*.proto", "**/*.resc", "**/*.repl", "**/*.lock", "**/*.example",
+    "**/*.tflite",
 )
 
 
@@ -138,7 +139,7 @@ def _dir_digest(root: Path, rel: str, globs: str | tuple[str, ...]) -> str:
     if isinstance(globs, str):
         globs = (globs,)
     # Gather into a set before sorting/hashing so a file matched by more
-    # than one glob in `globs` is hashed exactly once. All ten suffixes in
+    # than one glob in `globs` is hashed exactly once. All eleven suffixes in
     # `_METADATA_DIGEST_GLOBS` are disjoint today, so this never actually
     # fires there -- it's cheap insurance against a future overlapping
     # addition (e.g. a second glob that also matches `.json`), not a fix

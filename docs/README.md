@@ -15,8 +15,8 @@ into the topic-specific docs.
   only, `native_sim` works on Intel too).  *NEW — Codified in
   [ADR 0012](adr/0012-cross-platform-developer-host.md).*
 - [cli.md](cli.md) — the `tan` CLI verb reference
-  (init / build / flash / generate / validate / doctor / size /
-  image / clean / renode) + when to use `tan` vs `west alp-*`.
+  (init / build / flash / generate / model / validate / doctor /
+  size / image / clean / renode) + when to use `tan` vs `west alp-*`.
 - [firmware-quickstart.md](firmware-quickstart.md) — minimal "what
   does a board.yaml + main.c look like" walkthrough.
 - [troubleshooting.md](troubleshooting.md) — common failure modes
@@ -130,6 +130,28 @@ into the topic-specific docs.
 - [recommended-libraries.md](recommended-libraries.md) — curated
   third-party libraries (integrated / recommended / deferred) for
   what the SDK deliberately leaves out of `<alp/...>`.
+
+## Models / edge-AI
+
+- [cli.md](cli.md) — the `tan model` command family.  Pre-existing
+  `build` / `list` / `info` / `doctor` (compile `board.yaml`
+  `models:` entries into `.alpmodel`, list, decode, toolchains),
+  plus the lifecycle verbs: `check` (static OFFLINE pre-flight
+  fit/perf per SoM backend — a CONSERVATIVE estimate, verified on
+  silicon later), `zoo` / `add` (browse curated model-zoo entries
+  marked "runs on your SoM" + add to `board.yaml`), `prep`
+  (license-free INT8 quantize + fp32-vs-int8 accuracy report), and
+  `run` / `ab` (HOST reference run — functional + host latency +
+  accuracy, NOT the target SoM's performance; on-device SRAM/power
+  are HW-gated).
+- [measuring-inference-energy.md](measuring-inference-energy.md) — the
+  measured millijoules per inference on E1M-AEN801 silicon: the
+  method (rail scan, conversion-ready sampling, idle-subtracted
+  window integration), the whole-board PSU cross-check, a measured
+  error budget, and the explicit list of what the figure is NOT
+  (not NPU energy, not silicon energy, not vendor-comparable).
+- [tutorials/16-inference-mobilenet.md](tutorials/16-inference-mobilenet.md)
+  — end-to-end inference walkthrough on MobileNet.
 
 ## Security & release
 

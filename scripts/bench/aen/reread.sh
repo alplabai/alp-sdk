@@ -15,9 +15,6 @@ BD="$1"
 SIZE="${2:-0x500}"
 OBJ="$(bench_tool_prefix)" || exit $?
 JLINK="$(bench_jlink_exe)" || exit $?
-# See ram-run.sh for why the selector is conditional on JLINK_SN.
-JLINK_ARGS=("$JLINK")
-[ -n "${JLINK_SN:-}" ] && JLINK_ARGS+=(-SelectEmuBySN "$JLINK_SN")
 # See ram-run.sh (issue #935): if BUF_SYM is empty, do NOT fold it into BUF --
 # BUF would silently become the bare string "0x" and `mem8 $BUF, $SIZE` would
 # run as `mem8 0x, $SIZE`, printing an EMPTY "RAM console" block
@@ -28,12 +25,20 @@ if [ -z "$BUF_SYM" ]; then
   exit 3
 fi
 BUF=0x$BUF_SYM
-cat > /tmp/rr.jlink <<EOF
-connect
-halt
-mem8 $BUF, $SIZE
-qc
-EOF
-"${JLINK_ARGS[@]}" -device "$JLINK_DEVICE_READ" -if SWD -speed "$JLINK_SPEED" -nogui 1 -CommanderScript /tmp/rr.jlink 2>/dev/null > /tmp/rr.out || true
+{
+	echo connect
+	echo halt
+	bench_jlink_mem8_chunks "$BUF" "$SIZE"
+	echo qc
+} > /tmp/rr.jlink
+# shellcheck disable=SC2046  # word-splitting bench_jlink_select is intentional
+# "Cannot connect to the probe" can land on either stream -- stderr used to be
+# discarded (2>/dev/null), so a stderr-only failure never tripped the grep
+# below. Merge it in; the awk decoder only matches "<hex addr> = ..." lines so
+# the extra text is harmless.
+$JLINK $(bench_jlink_select) -device "$JLINK_DEVICE_READ" -if SWD -speed "$JLINK_SPEED" -nogui 1 -CommanderScript /tmp/rr.jlink > /tmp/rr.out 2>&1 || true
+if grep -qi "Cannot connect to the probe" /tmp/rr.out; then
+	echo "reread: J-Link probe not selected/reachable -- export JLINK_SN (multi-probe host)." >&2
+fi
 awk '/^[0-9A-Fa-f]+ = / { for (i=3;i<=NF;i++){ if ($i !~ /^[0-9A-Fa-f][0-9A-Fa-f]$/) continue; b=strtonum("0x"$i); if(b==0){nul++; if(nul>6)exit; next} nul=0; if(b==10||b==13){printf "\n";continue} if(b>=32&&b<127)printf "%c",b } }' /tmp/rr.out
 echo; echo "(buf=$BUF)"

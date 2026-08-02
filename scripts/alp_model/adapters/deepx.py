@@ -27,6 +27,7 @@ import os
 import re
 import shutil
 import subprocess
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from . import CompilerAdapter, Blob
 
@@ -48,6 +49,22 @@ def _dxcom_version() -> str:
 class DeepxAdapter(CompilerAdapter):
     backend = "deepx_dxm1"
     requires_compile_opts = True          # needs a per-model dxcom JSON config
+    tool = "dxcom"
+
+    def version(self) -> str:
+        # Non-spawning best-effort (mirrors ethos_u._vela_version()); probe()
+        # calls this on every `alp model doctor` run, so it must not shell out
+        # to the vendor NPU binary. _dxcom_version() (spawns dxcom -v) is still
+        # used by compile() for the on-compile banner.
+        for dist_name in ("dx-com", "dx_com"):
+            try:
+                return f"dx-com {version(dist_name)}"
+            except PackageNotFoundError:
+                continue
+        return "dxcom"
+
+    def reason(self) -> str:
+        return "dxcom not found (dx-com wheel not installed and ALP_DEEPX_SDK_HOME unset)"
 
     def is_available(self) -> bool:
         if shutil.which("dxcom"):            # the dx-com wheel's console script

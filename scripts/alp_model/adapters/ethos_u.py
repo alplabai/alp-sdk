@@ -53,6 +53,13 @@ def _parse_vela_summary(out_dir: Path, stem: str) -> tuple[int, int]:
 
 class VelaAdapter(CompilerAdapter):
     backend = "ethos_u"
+    tool = "vela"
+
+    def version(self) -> str:
+        return _vela_version()
+
+    def reason(self) -> str:
+        return "vela not on PATH (install the ethos-u-vela / model-compile extra)"
 
     def is_available(self) -> bool:
         return shutil.which("vela") is not None

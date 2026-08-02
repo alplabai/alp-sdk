@@ -1,0 +1,13 @@
+{
+  "backend": "ethos_u",
+  "version": "2026.07-seed",
+  "source": "Conservative subset of Ethos-U Vela SUPPORTED_OPS (public docs); refine from bench probing.",
+  "supported_ops": [
+    "CONV_2D", "DEPTHWISE_CONV_2D", "TRANSPOSE_CONV", "FULLY_CONNECTED",
+    "AVERAGE_POOL_2D", "MAX_POOL_2D", "MEAN",
+    "ADD", "MUL", "SUB", "CONCATENATION", "PAD", "RESHAPE",
+    "SOFTMAX", "LOGISTIC", "TANH", "RELU", "RELU6", "LEAKY_RELU", "HARD_SWISH",
+    "RESIZE_BILINEAR", "RESIZE_NEAREST_NEIGHBOR",
+    "SPLIT", "STRIDED_SLICE", "QUANTIZE", "DEQUANTIZE"
+  ]
+}

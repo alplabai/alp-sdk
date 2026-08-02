@@ -129,14 +129,16 @@ if [ -z "$BUF_SYM" ]; then
   echo "      the flash above still completed -- this is not a boot failure. Read the" >&2
   echo "      console via the labgrid 'console' resource instead." >&2
 else
-  cat > /tmp/flowd-read.jlink <<EOF
-device $JLINK_DEVICE_READ
-si SWD
-speed $JLINK_SPEED
-connect
-mem8 $BUF, $SIZE
-exit
-EOF
+  # SIZE is caller-supplied ($2); chunk the mem8 read (bench_jlink_mem8_chunks) --
+  # a single read over JLinkExe's 0x10000 cap fails silently (empty console).
+  {
+    echo "device $JLINK_DEVICE_READ"
+    echo si SWD
+    echo "speed $JLINK_SPEED"
+    echo connect
+    bench_jlink_mem8_chunks "$BUF" "$SIZE"
+    echo exit
+  } > /tmp/flowd-read.jlink
   "${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/flowd-read.jlink 2>/tmp/flowd-rd.err > /tmp/flowd-rd.out || true
   echo "----- $NAME RAM console (flow-D flashed, SE-booted) -----"
   awk '/^[0-9A-Fa-f]+ = / { for (i=3;i<=NF;i++){ if ($i !~ /^[0-9A-Fa-f][0-9A-Fa-f]$/) continue; b=strtonum("0x"$i); if(b==0){nul++; if(nul>6)exit; next} nul=0; if(b==10||b==13){printf "\n";continue} if(b>=32&&b<127)printf "%c",b } }' /tmp/flowd-rd.out
