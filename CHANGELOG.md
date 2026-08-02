@@ -147,6 +147,52 @@ no full `alp-image-edge` bake has ever completed on this host, with or without
 the backend enabled.** Everything above is code-complete and unverified on
 hardware.
 
+### Added — `mera2-drpai-tvm` closes the `PACKAGECONFIG[drpai]` packaging gap (#1145)
+
+`alp-sdk_0.6.bb`'s `PACKAGECONFIG[drpai]` supplied only `<linux/drpai.h>`
+(via `drpai`) and `libtvm_runtime.so` (via `lib-tvm`) — two of the nine
+inputs `src/yocto/CMakeLists.txt` probes for. The other seven —
+`MeraDrpRuntimeWrapper.h`, the `tvm/runtime/profiling.h` + `dlpack/dlpack.h`
++ `dmlc/logging.h` header tree it hard-includes, and `libmera2_runtime.so` /
+`libmera2_plan_io.so` / `libdrp_tvm_rt.so` — were packaged by no recipe
+anywhere, so an enabled bake linked `libalp_sdk.so` against DT_NEEDED
+entries no package in the image provided; the recipe's own RESIDUAL GAP
+comment already spelled out that the failure would surface as `ld.so`
+refusing to load the library on target.
+
+New recipe `meta-alp-sdk/recipes-renesas/mera2-drpai-tvm/mera2-drpai-tvm_2.7.0.bb`
+closes the gap without vendoring anything: the MERA2/TVM libraries and
+headers are Renesas/EdgeCortix account-gated prebuilts that must never land
+in this public repo, so the recipe has an empty `SRC_URI` and only *stages*
+them out of a built `rzv_drp-ai_tvm` (RUHMI) checkout the builder already
+has on disk, pointed to by a new `RUHMI_DRPAI_TVM_DIR` variable — the same
+"public shell over a local, licensed payload" shape `recipes-deepx/dx-rt`
+already uses for the DEEPX runtime, but staging-only rather than
+permanently `SKIP_RECIPE`d, since a builder who sets the variable can
+actually build it. `do_install` fails loudly (`bb.fatal`) rather than
+producing an empty package when the variable is unset, the checkout is
+missing the payload, or `tvm/` was left as an uninitialised submodule; it
+also refuses a `v2m` runtime build by construction, since it only ever
+reads `obj/build_runtime/v2h/lib` (RZ/V2N; `v2m` is the older, different
+Renesas RZ/V2M SoC). `LICENSE = "CLOSED"` — there is no redistributable
+license text this recipe could checksum — and `EXCLUDE_FROM_WORLD = "1"`
+keeps a bare `bitbake world` from tripping the fatal by default.
+
+The three libraries ship with no `DT_SONAME` (matching the "SONAMEs
+unversioned" the old RESIDUAL GAP comment named), so they package into the
+main `${PN}` package rather than `-dev` (`INSANE_SKIP += "dev-so"` covers
+the expected QA warning), which lets OE's automatic shlibs pass pick up
+`libalp_sdk.so`'s DT_NEEDED entries and record the RDEPENDS the shipped
+image needs — the same mechanism that already resolves `lib-tvm`'s
+`libtvm_runtime.so`. `alp-sdk_0.6.bb`'s `PACKAGECONFIG[drpai]` now adds
+`mera2-drpai-tvm` to both its build deps and its runtime deps, and its
+RESIDUAL GAP comment is rewritten to describe the closed state instead of
+the open one.
+
+**Still BENCH-UNVERIFIED and static-checked only**: no `bitbake` run
+against this recipe, and no `alp-image-edge` bake with `drpai` enabled, has
+ever completed on this host — nothing here claims DRP-AI works.
+
 ### Fixed — U-Boot loaded a devicetree filename no Alp image builds, on both boot media (#1175)
 
 The E1M-X EVK is strapped for xSPI boot with carrier Ethernet dead (errata

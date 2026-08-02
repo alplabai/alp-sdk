@@ -56,6 +56,9 @@ meta-alp-sdk/
 ├── recipes-deepx/
 │   └── dx-rt/
 │       └── dx-rt_2.4.bb                 # Pins the DEEPX runtime (vendor-licensed).
+├── recipes-renesas/
+│   └── mera2-drpai-tvm/
+│       └── mera2-drpai-tvm_2.7.0.bb     # Stages the MERA2/TVM runtime from a builder-supplied RUHMI checkout.
 ├── recipes-images/
 │   ├── alp-image-common.inc            # Shared runtime for both images below.
 │   ├── alp-image-edge.bb                # Dev image: common + debug-tweaks + bench tooling.
@@ -135,13 +138,17 @@ things:
 
 Everything else the alp-sdk DRP-AI3 backend compiles and links against
 — `MeraDrpRuntimeWrapper.h`, `mera2_runtime`, `mera2_plan_io`,
-`drp_tvm_rt` — exists in **no Yocto layer at all**.  Those come only
-from a built RUHMI / `rzv_drp-ai_tvm` checkout that the builder stages
-himself; see [Model compilation toolchain
-(RUHMI)](#model-compilation-toolchain-ruhmi--drp-ai-tvm) below.  There
-is no NDA gate on any of it (the `rzv_drp-ai_tvm` sources are
-Apache-2.0), but the prebuilt MERA2 libraries and the Translator are
-Renesas/EdgeCortix account-gated and are not vendored here.
+`drp_tvm_rt` — is packaged by `recipes-renesas/mera2-drpai-tvm`, a
+staging-only recipe in **this** layer: it fetches and vendors nothing,
+it only stages those headers and libraries out of a built RUHMI /
+`rzv_drp-ai_tvm` checkout that the builder points it at (see [Model
+compilation toolchain (RUHMI)](#model-compilation-toolchain-ruhmi--drp-ai-tvm)
+and [Making the RUHMI checkout visible to the
+bake](#making-the-ruhmi-checkout-visible-to-the-bake) below).  There is
+no NDA gate on any of it (the `rzv_drp-ai_tvm` sources are Apache-2.0),
+but the prebuilt MERA2 libraries and the Translator are
+Renesas/EdgeCortix account-gated and are not vendored here or anywhere
+else in this public repo.
 
 `meta-rz-drpai` is a **soft** dep of this layer
 (`LAYERRECOMMENDS_alp-sdk`, not `LAYERDEPENDS_alp-sdk`) — the AEN and
@@ -439,22 +446,24 @@ mechanism that does that differs by build path; do not mix them up:**
   (`STAGING_DIR_HOST`); a `HINTS` value pointing outside it is silently
   never tried, so `ALP_DRPAI_TVM_APPS` + `CMAKE_LIBRARY_PATH` have no
   effect on a bake and the probes just report the inputs missing.  What
-  actually works: **stage the checkout's headers and libraries into the
-  recipe's sysroot** before `do_configure` runs — e.g. an internal
-  recipe the `alp-sdk` recipe `DEPENDS` on that installs
-  `apps/MeraDrpRuntimeWrapper.h`, `tvm/include`,
-  `tvm/3rdparty/{dlpack,dmlc-core}/include`, and the four `.so` files
-  under `${STAGING_INCDIR}` / `${STAGING_LIBDIR}` — since that is the
-  root the unmodified probes already search by default.  Adding the
-  checkout as an extra `CMAKE_FIND_ROOT_PATH` entry (via
-  `EXTRA_OECMAKE:append`) is the other named escape hatch for this
-  restriction, but only helps if the checkout's on-disk layout lines up
-  with what each probe searches for once re-rooted; staging is the
-  unambiguous option, and the one this note recommends.  Neither is
-  packaged yet (see the `alp-sdk_0.6.bb` `RESIDUAL GAP` note), and
-  neither is bake-verified — no `alp-image-edge` bake has ever
-  completed with `drpai` enabled — so `PACKAGECONFIG[drpai]` alone is
-  not self-contained.
+  actually works, and what `recipes-renesas/mera2-drpai-tvm` now does:
+  **stage the checkout's headers and libraries into the recipe's own
+  sysroot** before `do_configure` runs — `apps/MeraDrpRuntimeWrapper.h`,
+  `tvm/include`, `tvm/3rdparty/{dlpack,dmlc-core}/include`, and the
+  three `.so` files (`libmera2_runtime.so`, `libmera2_plan_io.so`,
+  `libdrp_tvm_rt.so`; `libtvm_runtime.so` is `lib-tvm`'s, separately)
+  installed under `${STAGING_INCDIR}` / `${STAGING_LIBDIR}` — since
+  that is the root the unmodified probes already search by default.
+  Point the recipe's `RUHMI_DRPAI_TVM_DIR` variable at the checkout
+  root (its own SRC_URI is empty; it fetches and vendors nothing, only
+  stages) and add it to `alp-sdk_0.6.bb`'s `PACKAGECONFIG[drpai]`
+  build deps, which is already done.  Adding the checkout as an extra
+  `CMAKE_FIND_ROOT_PATH` entry (via `EXTRA_OECMAKE:append`) is the
+  other named escape hatch for this restriction, but only helps if the
+  checkout's on-disk layout lines up with what each probe searches for
+  once re-rooted; staging is the unambiguous option, and the one this
+  note recommends.  Static-checked only, and still not bake-verified —
+  no `alp-image-edge` bake has ever completed with `drpai` enabled.
 
 ## OTA via Mender (opt-in)
 
@@ -518,8 +527,11 @@ Apache-2.0 (umbrella).  Vendor-licensed components follow their
 upstream licences and are flagged as such in the matching recipes'
 `LICENSE` field: `dx-rt` is proprietary (DEEPX EULA); the
 `rzv_drp-ai_tvm` sources are Apache-2.0 but the prebuilt MERA2
-libraries and the Translator are Renesas/EdgeCortix account-gated.
-Neither is vendored in this repo.
+libraries and the Translator are Renesas/EdgeCortix account-gated
+(`mera2-drpai-tvm`'s `LICENSE = "CLOSED"` reflects that gap, not an
+assertion of a license this recipe could grant).  None of it is
+vendored in this repo — `mera2-drpai-tvm` only stages a builder-local
+checkout, it fetches nothing.
 
 ## What's deferred
 
@@ -534,9 +546,10 @@ Neither is vendored in this repo.
 - The DRP-AI3 backend (`PACKAGECONFIG[drpai]`) ships OFF and
   BENCH-UNVERIFIED: never run on DRP-AI silicon, never carried through
   a completed `alp-image-edge` bake.  Its three MERA2/TVM libraries and
-  `MeraDrpRuntimeWrapper.h` have no Yocto recipe at all — packaging a
-  RUHMI runtime so `PACKAGECONFIG[drpai]` is self-sufficient is open
-  work.
+  `MeraDrpRuntimeWrapper.h` are now packaged by `mera2-drpai-tvm`
+  (staged from a builder-supplied RUHMI checkout, nothing vendored),
+  but that recipe is static-checked only — enabling `drpai` and
+  running a full `alp-image-edge` bake through it is still open work.
 - `alp-image-edge.bb`'s minimal package set is documentary; the
   v1.0 sysbuild matrix in `docs/test-plan.md` adds the BLE
   provisioning layer + the certificate-pinning post-install hook.
