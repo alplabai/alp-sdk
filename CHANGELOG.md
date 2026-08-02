@@ -89,6 +89,21 @@ hit twice — once in `aen-i2s-amp-alif`'s `main.c`, once in the vendored
 `use_dma` in `zephyr/drivers/spi/spi_dw_alif.c`'s non-DMA build path. All
 59 configurations now build clean, 0 failed, 0 errored.
 
+### Fixed — SoM SKU schema pattern rejected newly allocated per-configuration tails (#1089)
+
+`som-preset-v1.schema.json:sku` and `board.schema.json:som.sku` pinned the
+AEN tail to `01` and enumerated the Renesas tails (`V2N10[12]`, `V2M10[12]`),
+so a newly allocated SKU like `E1M-AEN302` or `E1M-V2N103` -- valid the
+moment the PLM (`plm_alplab`) creates the configuration -- could not be
+referenced from a customer `board.yaml` or get an `e1m_modules/<SKU>.yaml`
+manifest until the SDK schema caught up. Widened both patterns to
+`AEN[3-8][0-9]{2}` / `V2N[0-9]{3}` / `V2M[0-9]{3}`, matching the PLM's own
+`SOM_SKU_RE`, while keeping the `E1M-` prefix, the family code, and the
+AEN silicon-tier restriction (3-8). `soc-spec-v1.schema.json`'s `ref`
+pattern is a separate `vendor:family:part` shape and is unaffected.
+Added `tests/scripts/test_som_sku_pattern.py` to pin the two schema
+patterns equal to each other so a future one-sided edit fails loudly.
+
 ### Fixed — `zephyr/patches.yml`'s two `hal_alif` patches never applied, silently, since the day they were added
 
 `west patch apply` resolves a patch's `module:` field against the target's

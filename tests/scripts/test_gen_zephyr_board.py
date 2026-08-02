@@ -33,7 +33,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "scripts"))
 
-from gen_zephyr_board import emit_zephyr_board  # noqa: E402
+from gen_zephyr_board import ZephyrBoardEmitError, _load_soc_spec, emit_zephyr_board  # noqa: E402
 
 BOARDS_ROOT = REPO / "zephyr" / "boards" / "alp"
 
@@ -116,6 +116,17 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
                 "alp_e1m_v2n101_m33_sm_r9a09g056n48gbg_cm33.yaml",
             },
         )
+
+
+class TestLoadSocSpecFailureShape(unittest.TestCase):
+    """`_load_soc_spec()` migrated onto resolve_soc_path() (issue #1004);
+    pins the ZephyrBoardEmitError shape that migration promised to keep."""
+
+    def test_rejects_malformed_silicon_ref(self) -> None:
+        with self.assertRaises(ZephyrBoardEmitError) as ctx:
+            _load_soc_spec({"sku": "E1M-TEST", "silicon": "acme:widget"}, METADATA_ROOT)
+        self.assertEqual(
+            str(ctx.exception), "silicon ref 'acme:widget' is not a triple-colon string")
 
 
 class TestZephyrBoardCli(unittest.TestCase):

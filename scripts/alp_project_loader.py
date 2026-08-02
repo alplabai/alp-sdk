@@ -231,26 +231,33 @@ def resolve_soc_path(silicon: str | None, metadata_root: Path) -> Path | None:
     `check_som_topology_parity.py`) down to this one helper, and folded a
     fourth in-module copy from `resolve_memory_map()` into it too.
 
-    Nine more hand-rolled copies remain outside this module (issue #1004).
-    Most differ in the shape they fail with, so a blind call-site swap would
-    change behaviour; one does not, and is the cheap migration:
+    Issue #1004 migrated the five sites that used to hand-roll this split
+    (`gen_zephyr_board.py::_load_soc_spec` + its generated-file-banner
+    string site, `validate_metadata.py`'s two soft-fail sites, and
+    `alp_orchestrate/loader.py::_silicon_to_soc_path`) onto this helper,
+    each behind a thin wrapper that preserves that site's original
+    exception type or soft-fail shape.
+
+    Four more hand-rolled copies remain outside this module (issue #1096).
+    Most differ in the shape they fail with, so a blind call-site swap
+    would change behaviour; one does not, and is the cheap migration:
 
       - `alp_cli/validator.py:351` (`_load_soc_caps`) -- same 3-part guard,
         same `None` on failure. Behaviourally identical to this helper, so
         it is the one site migratable with provably zero behaviour change.
-      - `gen_zephyr_board.py:88` (`_load_soc_spec`) -- raises
-        `ZephyrBoardEmitError`.
-      - `alp_orchestrate/loader.py:45` -- raises `OrchestratorError`.
       - `alp_model/targets.py:69` -- unguarded 3-tuple unpack (`ValueError`
         on a malformed ref), then raises `FileNotFoundError`.
-      - `validate_metadata.py:152` and `:217` -- soft-fail into a diagnostic
-        message list rather than raising at all.
-      - `gen_zephyr_board.py:807`, `alp_cli/new_som.py:199` -- build a `str`
-        path, not a `Path`.
+      - `alp_cli/new_som.py:199` -- builds a `str` path, not a `Path`.
       - `alp_cli/new_som.py:526` -- `Path`, but rooted at `output_root`
         rather than `metadata_root`.
 
-    Migrate one of those onto this helper -- don't add a tenth.
+    Migrate one of those onto this helper -- don't add a fifth. (A further
+    three `soc_ref.split(":")` sites in `alp_cli/new_som.py` -- :154, :339,
+    :503 -- are out of scope for this helper: they extract vendor/family/
+    part slugs to seed a *new* preset's scaffold content, not to resolve a
+    path to an existing SoC JSON, so there is no `resolve_soc_path()` call
+    to swap in. They'd still need re-deriving by hand if the ref format
+    ever widens past 3 parts.)
     """
     if not silicon:
         return None
