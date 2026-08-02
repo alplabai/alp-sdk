@@ -27,21 +27,28 @@ hw_revisions:
   r2:
     min_sdk_version: ~
     max_sdk_version: ~
+    status: reserved
   r3:
     min_sdk_version: ~
     max_sdk_version: ~
+    status: reserved
   r4:
     min_sdk_version: ~
     max_sdk_version: ~
+    status: reserved
   r5:
     min_sdk_version: ~
     max_sdk_version: ~
+    status: reserved
   r6:
     min_sdk_version: ~
     max_sdk_version: ~
+    status: reserved
   r7:
     min_sdk_version: ~
     max_sdk_version: ~
+    status: reserved
   r8:
     min_sdk_version: ~
     max_sdk_version: ~
+    status: reserved
