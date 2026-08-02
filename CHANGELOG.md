@@ -33,20 +33,35 @@ also `mkdir(parents=True)`s any missing intermediate directory, so it's a
 stronger primitive than the model-build bug — no pre-existing directory
 required). A new `_safe_join(root, rel)` helper resolves both `root` and
 `root / rel` and requires the resolved candidate stay beneath the resolved
-root before either `_rendered_bytes()`'s read or `render()`'s write touches
-disk — a fail-closed, resolve-then-contain check (not a `..`-pattern scan),
+root — a fail-closed, resolve-then-contain check (not a `..`-pattern scan),
 so it also catches an absolute `rel` and a symlink placed inside either
 root, not just literal traversal.
+
+The first pass wired `_safe_join()` around the *relative* part of every
+join but left the *root* itself trusted verbatim from the same catalog
+record — `base_dir / record["example"]` — so a catalog naming
+`"example": "../../../../tmp/evil"` still walked the root itself outside
+`base_dir` and the per-file check then faithfully contained everything
+*inside that escaped root*, i.e. contained nothing. `_safe_join()` is now
+applied to `record["example"]` itself, everywhere it's joined onto a base
+directory (`_rendered_bytes()`'s read, `default_sku()`, and
+`render_to_envelope()`'s board.yaml read) — the example root can no longer
+walk outside `base_dir` in the first place. `validate()`'s own
+`test.testcase_yaml` copy (catalog-controlled, not part of
+`files.user_owned`, so it wasn't touched by the first pass at all) gets
+the same `_safe_join()` treatment on both the read (`REPO`-relative
+source) and the write (temp-dir-relative destination) side.
 
 Both fixes are allowlist/containment checks, not denylists: `PathEscapeError`
 (alp_template.py) and a plain `ValueError` (`build_model()`) name exactly
 what escaped and where. New regression tests cover a traversal name, an
 absolute name, and (since `build_model()`'s `name` is a bare-filename
 allowlist with no `/` allowed at all) a valid in-root name for
-`build_model()`; `_safe_join()` -- shared by `_rendered_bytes()`'s read and
-`render()`'s write -- gets direct traversal / absolute-path / symlink-escape
-/ valid-in-root unit tests, plus an end-to-end `render()` test proving a
-malicious `--catalog` is rejected before either side touches disk.
+`build_model()`; `_safe_join()` -- shared by every read/write site above --
+gets direct traversal / absolute-path / symlink-escape / valid-in-root unit
+tests, plus end-to-end tests proving a malicious `--catalog` `example` root
+and a `..`-bearing `test.testcase_yaml` entry are both rejected before
+either side touches disk.
 
 ### Fixed — `test-all.sh` ran 1 of 34 required gate scripts on Windows (#1109)
 

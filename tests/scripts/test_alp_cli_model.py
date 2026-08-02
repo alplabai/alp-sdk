@@ -73,10 +73,11 @@ def test_alp_model_build_emits_alpmodel(tmp_path):
 
 
 def test_alp_model_build_rejects_a_traversal_model_name(tmp_path):
-    # #1125: `alp model build` must route board.yaml through schema
-    # validation (models[].name's `^[A-Za-z][A-Za-z0-9_-]*$` pattern)
-    # BEFORE build_model() ever sees the name -- a raw yaml.safe_load
-    # bypassed this check entirely.
+    # #1125: build_model() itself allowlists models[].name against
+    # `^[A-Za-z][A-Za-z0-9_-]*$` (board.schema.json's own pattern) before
+    # doing anything else -- the guard lives at the one write chokepoint
+    # every caller routes through, not in a separate schema-validation
+    # pass `alp model build` would have to remember to run first.
     (tmp_path / "models").mkdir()
     (tmp_path / "models" / "m.tflite").write_bytes(b"TFL3-DUMMY")
     (tmp_path / "board.yaml").write_text(

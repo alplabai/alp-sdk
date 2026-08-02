@@ -232,7 +232,7 @@ def _write_fixture_catalog(root: Path) -> Path:
                     }
                 ],
                 "test": {
-                    "testcase_yaml": [f"{example_rel}/testcase.yaml"],
+                    "testcase_yaml": [],
                     "native_sim_scenarios": [],
                     "cross_compile_matrix": [],
                 },
@@ -402,6 +402,46 @@ def test_render_rejects_absolute_path_in_user_owned(tmp_path):
         alp_template.render(
             "escape-app", tmp_path / "out",
             catalog_path=catalog_path, base_dir=tmp_path)
+
+
+def test_render_rejects_traversal_in_the_example_root_itself(tmp_path):
+    """Adversarial-review follow-up (#1126, blocker 1): the catalog's
+    `example` field is JUST AS untrusted as `files.user_owned` -- the
+    first pass wired `_safe_join()` around the RELATIVE part of every
+    join (`files.user_owned` entries) but still trusted `example` itself
+    verbatim (`base_dir / record["example"]`), so a catalog naming
+    `"example": "../outside"` walked the containment ROOT out of
+    `base_dir` and the per-file check then faithfully confined the read
+    to that escaped root -- containing nothing. Mirrors the reviewer's
+    production PoC (`base_dir == REPO`, `example` walking out to
+    `/tmp/X/outside`) with a hermetic `base_dir` instead."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("SECRET\n", encoding="utf-8")
+
+    base_dir = tmp_path / "base"
+    base_dir.mkdir()
+
+    catalog = {
+        "templates": [{
+            "id": "escape-root",
+            "example": "../outside",
+            "files": {"user_owned": ["secret.txt"], "generated": []},
+            "parameters": [],
+            "test": {"testcase_yaml": []},
+        }],
+    }
+    catalog_path = tmp_path / "catalog.json"
+    catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+
+    dest = tmp_path / "dest"
+    with pytest.raises(alp_template.PathEscapeError):
+        alp_template.render(
+            "escape-root", dest, catalog_path=catalog_path, base_dir=base_dir)
+
+    # Pre-fix, this is exactly the reviewer's PoC: render() returns clean
+    # and dest/secret.txt contains the exfiltrated file. It must not exist.
+    assert not dest.exists()
 
 
 # --------------------------------------------------------------------------
@@ -985,3 +1025,49 @@ def test_validate_skips_cleanly_without_zephyr_base():
     result = alp_template.validate("minimal", zephyr_base="")
     assert result.skipped
     assert "ZEPHYR_BASE" in result.reason
+
+
+def test_validate_rejects_traversal_in_testcase_yaml(tmp_path, monkeypatch):
+    """Adversarial-review follow-up (#1126, blocker 2): same class, same
+    file, but the helper was never applied at this site. `validate()`
+    derives `rel` from the catalog-controlled `test.testcase_yaml` by
+    STRING-stripping the example prefix (`tc[len(example_prefix):]`),
+    which preserves a `..` untouched, then joined it straight onto its
+    own tmp dir with no containment check. The reviewer's PoC (`tc =
+    "<example>/../ALP1126_LOOT.txt"`) lands a file as a *sibling* of the
+    twister tmpdir -- outside it -- before validate() ever shells out to
+    twister, let alone errors out. `zephyr_base` here is a nonexistent
+    path: the write-side bug fires before validate() would ever reach a
+    real twister invocation, so no real Zephyr checkout is needed to
+    prove it."""
+    controlled_tmp = tmp_path / "twister-tmp"
+    monkeypatch.setattr(
+        alp_template.tempfile, "mkdtemp", lambda *a, **k: str(controlled_tmp))
+
+    example = "examples/peripheral-io/hello-world"
+    catalog = {
+        "templates": [{
+            "id": "escape-testcase",
+            "example": example,
+            "files": {
+                "user_owned": ["board.yaml", "prj.conf", "CMakeLists.txt",
+                                "src/main.c", "README.md"],
+                "generated": [],
+            },
+            "parameters": [],
+            "test": {
+                "testcase_yaml": [f"{example}/../hello-world/testcase.yaml"],
+            },
+        }],
+    }
+    catalog_path = tmp_path / "catalog.json"
+    catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+
+    with pytest.raises(alp_template.PathEscapeError):
+        alp_template.validate(
+            "escape-testcase", catalog_path=catalog_path,
+            zephyr_base="/nonexistent-zephyr")
+
+    # The escape target is a sibling of the (deleted) tmpdir -- must never
+    # have been created.
+    assert not (tmp_path / "hello-world").exists()

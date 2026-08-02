@@ -40,7 +40,7 @@ def build_model(*, sku: str, name: str, source: Path, out_dir: Path,
                 metadata_root: Path,
                 adapters: list[CompilerAdapter] | None = None,
                 compile_opts: dict[str, dict] | None = None) -> Path:
-    if not _NAME_RE.match(name):
+    if not _NAME_RE.fullmatch(name):
         raise ValueError(f"invalid model name {name!r}: must match {_NAME_RE.pattern!r}")
     registry = list(_ADAPTERS if adapters is None else adapters)
     by_backend = {a.backend: a for a in registry}

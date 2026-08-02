@@ -336,7 +336,7 @@ def _rendered_bytes(
     render_to_envelope()'s in-memory capture -- the same bytes a
     customer gets from `alp_template.py render` are what `--emit
     scaffold` hands back as JSON `contents` (see the module docstring)."""
-    example = base_dir / record["example"]
+    example = _safe_join(base_dir, record["example"], what="template example directory")
     file_subs = _substitutions_for(record, resolved)
     out: list[tuple[str, bytes]] = []
     for rel in files:
@@ -444,7 +444,8 @@ def default_sku(record: dict[str, Any], *, base_dir: Path | None = None) -> str:
     scaffold --sku <that sku>` exactly rather than the two commands
     silently disagreeing on content."""
     base = base_dir or REPO
-    board_yaml = (base / record["example"] / "board.yaml").read_text(encoding="utf-8")
+    example = _safe_join(base, record["example"], what="template example directory")
+    board_yaml = (example / "board.yaml").read_text(encoding="utf-8")
     return yaml.safe_load(board_yaml)["som"]["sku"]
 
 
@@ -1268,7 +1269,8 @@ def render_to_envelope(
     metadata_root = metadata_root or METADATA_ROOT
     preset = _default_preset_for_sku(sku, metadata_root)
 
-    board_yaml_text = (base / record["example"] / "board.yaml").read_text(encoding="utf-8")
+    example_dir = _safe_join(base, record["example"], what="template example directory")
+    board_yaml_text = (example_dir / "board.yaml").read_text(encoding="utf-8")
     example_doc = yaml.safe_load(board_yaml_text) or {}
     original_core_ids = list((example_doc.get("cores") or {}).keys())
     example_sku = (example_doc.get("som") or {}).get("sku", "")
@@ -1420,9 +1422,10 @@ def validate(
         for tc in record["test"]["testcase_yaml"]:
             rel = (tc[len(example_prefix):] if tc.startswith(example_prefix)
                     else Path(tc).name)
-            dst = tmp / rel
+            src = _safe_join(REPO, tc, what="testcase source")
+            dst = _safe_join(tmp, rel, what="testcase destination")
             dst.parent.mkdir(parents=True, exist_ok=True)
-            dst.write_bytes((REPO / tc).read_bytes())
+            dst.write_bytes(src.read_bytes())
 
         outdir = tmp / "twister-out"
         env = os.environ.copy()
