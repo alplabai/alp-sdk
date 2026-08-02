@@ -71,6 +71,7 @@ on:
     branches: [main, dev]
     paths:
       - 'examples/aen/**'
+      - 'examples/connectivity/firmware-update-log/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_he/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_hp/**'
       - 'src/backends/mproc/**'
@@ -82,6 +83,7 @@ on:
     branches: [main, dev]
     paths:
       - 'examples/aen/**'
+      - 'examples/connectivity/firmware-update-log/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_he/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_hp/**'
       - 'src/backends/mproc/**'
@@ -208,8 +210,14 @@ jobs:
       # Run twister against both AEN801 board targets, scoped to
       # examples/aen -- the 52 testcase.yaml files whose platform_allow
       # names an AEN target are the entire point; nothing outside that
-      # tree is in scope for this job.
-      - name: twister · AEN801 (M55-HE + M55-HP) on examples/aen
+      # tree is in scope for this job. examples/connectivity/
+      # firmware-update-log is a second, bounded root (issue #1101): it
+      # is the one non-examples/aen example with AEN801 platform_allow
+      # entries, kept as its own --testsuite-root rather than widened to
+      # all of examples/ (this job's stated disk-budget concern, see the
+      # header comment) or moved under examples/aen (it is a portable
+      # <alp/update_log.h> demo, not AEN-only).
+      - name: twister · AEN801 (M55-HE + M55-HP) on examples/aen + firmware-update-log
         working-directory: ${{ github.workspace }}
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyr
@@ -219,6 +227,7 @@ jobs:
             -p alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
             -p alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/aen" \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/firmware-update-log" \
             --inline-logs \
             --no-detailed-test-id
 
