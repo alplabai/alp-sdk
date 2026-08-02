@@ -101,14 +101,15 @@
 #     build above -- the existing build only ever exercises a project
 #     that already existed in the repo, never one `tan init` produced.
 #
-#     IMPORTANT: `schedule` and `workflow_dispatch` BOTH only fire from
-#     the copy of this file already on the repo's DEFAULT branch --
-#     until a dev->main release lands this file, neither can run at all,
-#     which means the weekly cron above is currently a no-op and there
-#     is no Run-workflow button either.  `pull_request`, by contrast,
-#     runs the workflow version FROM THE PR's OWN BRANCH, so it is the
-#     only trigger that can exercise full-quickstart-build before this
-#     file ever reaches main.  The `run-full-quickstart` label (create
+#     IMPORTANT: `schedule` and `workflow_dispatch` both fire only from
+#     the copy of this file on the repo's DEFAULT branch, so a change to
+#     either trigger does not take effect until it lands there.  This
+#     file IS already on main (and on dev), so the weekly cron and the
+#     Run-workflow button both work today -- run 30741328235 is a real
+#     scheduled execution of it.  What they run is main's copy, NOT the
+#     version in this PR.  `pull_request`, by contrast, runs the workflow
+#     FROM THE PR's OWN BRANCH, so it is the only trigger that exercises
+#     changes made here before they merge.  The `run-full-quickstart` label (create
 #     it in the repo taxonomy if it doesn't exist yet) opts a specific
 #     PR into the expensive job without paying its cost on every PR that
 #     merely touches one of the `paths:` above.

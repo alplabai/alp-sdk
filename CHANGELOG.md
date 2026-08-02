@@ -30,6 +30,67 @@ scaffolding path had never been exercised by any CI job in either repo.
 tan-cli's own CI has the companion half of this issue
 (alplabai/tan-cli#207); this PR is the alp-sdk side only.
 
+### Changed — `silicon:` ref splitting finally has ONE implementation (#1096)
+
+#997 and #1004 each set out to collapse the hand-rolled `vendor:family:part`
+splits onto `resolve_soc_path()`, and each left copies behind. The reason is
+structural, not sloppiness: `resolve_soc_path()` returns a path rooted at a
+metadata root, but every site that survived rooted its result somewhere
+else — at a caller-injected `soc_dir`, at an `output_root`, or at no
+filesystem path at all (a repo-relative `str` for a generated banner). A
+path-returning helper could never absorb those, so they kept being re-found
+by grep.
+
+What they actually shared was the **split**. `split_silicon_ref()` is now
+that single source and `resolve_soc_path()` is one rooting convenience over
+it, so a site can reuse the arity rule while rooting its own way. All seven
+remaining copies are migrated — the four #1096 listed plus the three it
+scoped out (`alp_cli/new_som.py:154/339/503`), which extract slugs rather
+than paths but are the same three-part split and would have drifted
+identically.
+
+Each site keeps the shape it failed with, because the shapes are load-bearing:
+`alp_model/targets.py` still raises `ValueError` on a malformed ref and
+`FileNotFoundError` on a well-formed ref naming an absent spec — collapsing
+those into one would be a behaviour change, since `resolve_soc_path()`
+returns `None` for both. `alp_cli/validator.py::_load_soc_caps` still
+soft-fails to `None` and still roots at its injected `soc_dir`: rebuilding it
+as `resolve_soc_path(ref, soc_dir.parent)` is exact only while every caller
+passes a directory literally named `socs`, and a test now injects one that
+is not. `new_som.py:154` keeps its `_SOC_REF_RE` guard, which is strictly
+narrower than an arity check (it also demands lowercase slugs), so
+`Alif:ensemble:e8` still prefills empty rather than `Alif`.
+
+`tests/scripts/test_silicon_ref_single_source.py` greps the real tree for a
+reintroduced split, so a fourth round cannot be needed — verified by
+mutation. One encoding of "three colon-separated parts" is deliberately left
+outside the helper and named in its docstring: `new_som.py::_SOC_REF_RE`,
+a CLI input validator rather than a resolution site, which would also need
+widening if the format ever grows a fourth part.
+
+### Fixed — `docs/testing.md`'s per-header coverage table omitted `<alp/i3c.h>` and `<alp/dac.h>` (#1098)
+
+Both classes are enrolled in the conformance suite
+(`tests/zephyr/conformance/src/main.c`, `.cap = ALP_CAP_ID_HW_I3C` /
+`ALP_CAP_ID_HW_DAC`) and both ship a real public header and backends, but
+neither had a row in the per-header coverage table — so a reader checking
+whether either has portable-API coverage found the class count saying 16
+while the table silently listed neither. Same class of gap as #937, one
+table further down.
+
+`<alp/dac.h>` was not named in #1098; it was found by cross-checking every
+`.name` in the conformance array against the table rather than adding the
+one row the issue asked for. That check is now the standard for this table:
+all 16 classes are represented, counting the four `<alp/peripheral.h>`
+sub-rows (GPIO/I²C/SPI/UART), `qenc` folded into the counter row, and the
+two target modes named in the lifecycle row.
+
+Both new rows state what coverage actually exists rather than mirroring a
+sibling's shape: neither class has a `tests/unit/*_registry/` (every other
+row in that block does), I3C has no portable `examples/peripheral-io/`
+example at all, and its only exercise — `examples/aen/aen-i3c-regcheck` —
+is not observable under a Flow C RAM-run (#935).
+
 ### Fixed — `metadata/bootstrap.json` declared one Python floor host-universally, lower than Zephyr's real one (#1078)
 
 `prerequisites.pythonMinVersion` ("3.10") is deliberately host-universal --
