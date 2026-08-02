@@ -3,7 +3,8 @@
   "schemaVersion": 1,
   "zephyr": {
     "version": "v4.4.1",
-    "requirementsPath": "zephyr/scripts/requirements.txt"
+    "requirementsPath": "zephyr/scripts/requirements.txt",
+    "pythonMinVersion": "3.12"
   },
   "venv": {
     "dirName": ".venv",
