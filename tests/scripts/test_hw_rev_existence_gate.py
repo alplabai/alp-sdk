@@ -401,3 +401,21 @@ def test_validate_board_yaml_exits_with_the_not_buildable_code(tmp_path):
     assert EXIT_SDK_REVISION_NOT_BUILDABLE not in (
         EXIT_SDK_REVISION_UNKNOWN, EXIT_SDK_REVISION_UNSUPPORTED)
     assert proc.returncode == EXIT_SDK_REVISION_NOT_BUILDABLE, proc.stdout + proc.stderr
+
+
+def test_board_preset_status_enum_matches_hw_revisions_v1():
+    """board-preset.schema.json hand-duplicates hw-revisions-v1.schema.json's
+    `status:` enum (no cross-file `$ref` support in this repo's validators
+    -- see the schema's own comment) -- nothing else catches the two
+    drifting."""
+    import json
+
+    family_schema = json.loads(
+        (METADATA_ROOT / "schemas/hw-revisions-v1.schema.json").read_text())
+    preset_schema = json.loads(
+        (METADATA_ROOT / "schemas/board-preset.schema.json").read_text())
+
+    family_enum = family_schema["$defs"]["hw_rev_entry"]["properties"]["status"]["enum"]
+    preset_enum = preset_schema["properties"]["hw_revisions"]["additionalProperties"][
+        "properties"]["status"]["enum"]
+    assert set(preset_enum) == set(family_enum)

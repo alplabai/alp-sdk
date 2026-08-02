@@ -358,6 +358,18 @@ def _check_hw_rev_exists(
             f"{available}.")
 
 
+def _status_repr(status: Optional[str]) -> str:
+    """Render a `status:` value for an error message.
+
+    `status: None` reads as if the key were literally set to the word
+    "None" -- indistinguishable from a typo'd value.  A missing key gets
+    its own wording instead.
+    """
+    if status is None:
+        return "carries no `status:` key"
+    return f"status: {status!r}"
+
+
 def _check_hw_rev_buildable(
     metadata_root: Path,
     *,
@@ -384,14 +396,14 @@ def _check_hw_rev_buildable(
         status = sdk_compat.family_revision(metadata_root, family_dir, som_hw_rev).get("status")
         raise SdkRevisionNotBuildable(
             f"SoM {sku} hw_rev {som_hw_rev!r} exists but is not buildable "
-            f"(status: {status!r}).")
+            f"({_status_repr(status)}).")
 
     buildable = sdk_compat.revision_buildable(board_preset, board_hw_rev)
     if buildable is False:
         status = sdk_compat.board_revision(board_preset, board_hw_rev).get("status")
         raise SdkRevisionNotBuildable(
             f"board {board_name} hw_rev {board_hw_rev!r} exists but is not "
-            f"buildable (status: {status!r}).")
+            f"buildable ({_status_repr(status)}).")
 
 
 def _check_sdk_supports_hw_rev(

@@ -7,6 +7,27 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — an `hw_rev` that EXISTS but is `status: reserved`/`tbd`/status-less silently built anyway (#1025, the status half)
+
+The safe half (below) closed the "unknown `hw_rev`" hole; this closes the
+"known but not-yet-real `hw_rev`" one. `status:` is now a required key in
+`hw-revisions-v1.schema.json`, and the 14 status-less `v2n`/`v2n-m1` r2-r8
+placeholder revisions (unallocated, unreferenced by any `board.yaml`) got an
+explicit `status: reserved`. Both independent loaders (`load_board_yaml` and
+`alp_project_loader.py`'s `--emit composed-route-table`/`carrier-netlist`
+path) now refuse a revision that exists but is `status: reserved`,
+`status: tbd`, or carries no `status` key at all, via a new
+`SdkRevisionNotBuildable` -- distinct from `SdkRevisionUnknown`, since
+exists-but-not-buildable is a different failure than does-not-exist --
+mapped to a new exit code 5 in `scripts/validate_board_yaml.py`. Every other
+declared status (`production`, `preview`, `preliminary`, `deprecated`)
+still resolves and builds.
+
+Known fallout, by design: `E1M-NX9101`'s only revision (imx93 r1) is
+`status: tbd` and that SKU's default, so every gate/test that resolves an
+`E1M-NX9101` `board.yaml` without an explicit `hw_rev` override reds until
+the maintainer picks its real status -- see the PR for the candidates.
+
 ### Added — an AEN801 twister gate: `examples/aen`'s AEN-only scenarios finally build in CI (#1076)
 
 25 of `examples/aen`'s `testcase.yaml` files name an AEN801 board target in

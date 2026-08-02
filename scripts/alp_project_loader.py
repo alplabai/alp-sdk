@@ -404,9 +404,11 @@ def _hwrev_pad_route_overrides(
 
     if revision_buildable(data, hw_rev) is False:
         status = (data.get("hw_revisions") or {}).get(hw_rev, {}).get("status")
+        status_repr = f"status: {status!r}" if status is not None else \
+            "carries no `status:` key"
         raise SdkRevisionNotBuildable(
             f"SoM {sku} hw_rev {hw_rev!r} exists but is not buildable "
-            f"(status: {status!r}).")
+            f"({status_repr}).")
 
     rev = (data.get("hw_revisions") or {}).get(hw_rev) or {}
     overrides = rev.get("pad_route_overrides") or []
