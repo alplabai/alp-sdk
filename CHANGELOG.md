@@ -30,6 +30,24 @@ row in that block does), I3C has no portable `examples/peripheral-io/`
 example at all, and its only exercise — `examples/aen/aen-i3c-regcheck` —
 is not observable under a Flow C RAM-run (#935).
 
+### Fixed — the SDHC ADMA descriptor table linked into an orphan `""` section on every board enabling `CONFIG_SDHC_DWC` (#1097)
+
+`CONFIG_SDHC_DESCRIPTOR_SECTION` (`zephyr/kconfigs/vendor-alif-peripherals.kconfig`)
+defaults to `""`, and `zephyr/drivers/sdhc/sdhc_dwc.c` unconditionally placed the
+ADMA2 descriptor table with `Z_GENERIC_SECTION(CONFIG_SDHC_DESCRIPTOR_SECTION)`.
+With `CONFIG_SDHC_DWC_ADMA=y` (the default) that expands to a section literally
+named `""`, which `-Wl,--fatal-warnings` treats as a hard orphan-section link
+error — not board-specific, any board enabling `CONFIG_SDHC_DWC` hit it. Added a
+new `CONFIG_SDHC_DESCRIPTOR_USE_SECTION` bool (default off) gating whether the
+section attribute is applied at all; off, the descriptor table falls back to
+normal `.bss` placement, which always links. No board currently opts a named
+region in — inventing one without evidence of the AEN801's actual DMA-coherency
+requirements would have been worse than the bug it replaced, so this fix is the
+safe generic guard only. Regression coverage: restored
+`examples/aen/aen-sdcard-readout/testcase.yaml` (dropped build-only in #1095
+because the link was broken); its HE-target twister build now confirms the
+descriptor table lands in `.bss`, not an orphan section.
+
 ### Fixed — `metadata/bootstrap.json` declared one Python floor host-universally, lower than Zephyr's real one (#1078)
 
 `prerequisites.pythonMinVersion` ("3.10") is deliberately host-universal --

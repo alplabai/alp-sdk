@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the vendored DWC SDHC driver (Tier-2) on the
+# E1M-AEN801 (Ensemble E8, M55-HE): initializes the SoC SD Host Controller and
+# reads back the SDMMC disk over the ADMA2 descriptor path.
+#
+# Compile-checks the driver + DT node on the real E8 board target; filtered OUT
+# of the native_sim PR gate (platform_allow = the AEN801 HE board only -- the
+# SD "D" pad route in boards/*.overlay is HE-only, see the overlay header).
+#
+# This is the regression coverage for #1097: CONFIG_SDHC_DWC_ADMA=y (default)
+# used to place the ADMA descriptor table in an empty-named linker section
+# (CONFIG_SDHC_DESCRIPTOR_SECTION default ""), which is a hard orphan-section
+# link error under -Wl,--fatal-warnings. Building this scenario proves the
+# link succeeds.
+
+sample:
+  name: aen-sdcard-readout
+  description: |
+    Bench RAM-run SD Host Controller proof for the E1M-AEN801 (Alif Ensemble
+    E8, Cortex-M55-HE): brings up the DesignWare SDHC controller and the
+    SDMMC disk over ADMA2, printing a PASS/FAIL line.
+
+tests:
+  alp_sdk.examples.aen.sdcard_readout.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - sdhc
+      - sdmmc
+    build_only: true   # no card is reachable (EVK SD mux is CC3501E-side); bench flash, not a CI run.

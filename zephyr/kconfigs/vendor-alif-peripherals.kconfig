@@ -395,8 +395,19 @@ config SDHC_BUFFER_ALIGNMENT
 	int "SDHC buffer alignment"
 	default 512
 
+config SDHC_DESCRIPTOR_USE_SECTION
+	bool "Place the SDHC ADMA descriptor table in a named linker section"
+	help
+	  Off by default: the descriptor table lives in normal .bss.  Turn
+	  this on only if a board names a real region in
+	  CONFIG_SDHC_DESCRIPTOR_SECTION (e.g. for DMA-coherency or
+	  performance reasons) -- leaving it off with an empty section name
+	  is a hard link error (an orphan section literally named "") under
+	  -Wl,--fatal-warnings, not a silent no-op.
+
 config SDHC_DESCRIPTOR_SECTION
 	string "Linker section for SDHC DMA descriptors"
+	depends on SDHC_DESCRIPTOR_USE_SECTION
 	default ""
 
 config SDHC_DWC_SDMA
