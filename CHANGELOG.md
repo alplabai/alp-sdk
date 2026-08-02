@@ -45,6 +45,26 @@ outside the helper and named in its docstring: `new_som.py::_SOC_REF_RE`,
 a CLI input validator rather than a resolution site, which would also need
 widening if the format ever grows a fourth part.
 
+### Fixed — `metadata/bootstrap.json` declared one Python floor host-universally, lower than Zephyr's real one (#1078)
+
+`prerequisites.pythonMinVersion` ("3.10") is deliberately host-universal --
+every backend's build-plan emission runs `alp_project.py`, not just
+Zephyr's, so raising it to Zephyr's real floor would wrongly refuse a
+Yocto-only or metadata-only host. But that left the pinned Zephyr's actual
+build-time floor (`cmake/modules/python.cmake`'s `PYTHON_MINIMUM_REQUIRED
+3.12`) unrecorded anywhere in the manifest a consumer could read. Added a
+separate, Zephyr-scoped `zephyr.pythonMinVersion` key (Option A from the
+issue) rather than raising the shared key. The value is derived, not
+hand-typed: `scripts/check_bootstrap_manifest.py` now reads
+`PYTHON_MINIMUM_REQUIRED` straight out of the pinned Zephyr checkout via
+`git show <rev>:cmake/modules/python.cmake` and fails if the manifest
+disagrees, reusing `check_toolchain_lock.py`'s existing git-object-store
+technique and its `ALP_REQUIRE_ZEPHYR_ORACLE` skip-vs-fail escape hatch so
+a CI job with no bootstrapped Zephyr workspace gets a loud SKIP rather than
+a false pass or a false fail. Neither bootstrap script reads or enforces
+the new field yet -- that is `tan`'s still-outstanding half of this issue,
+gated on tan v0.6.0 (tan-cli#270).
+
 ### Fixed — the macOS and Windows CI legs can now fail the PR (ADR 0012 enforced, not just claimed)
 
 `cross-platform-zephyr.yml`'s `python-smoke` and `loader-smoke` jobs ran their
