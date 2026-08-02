@@ -24,8 +24,20 @@
  * docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
  * ==================================================================
  *
- * Vendored VERBATIM from the fork beyond this provenance header (no functional
- * edits).  Binds the soc-nv-flash child node by its `mram_storage` nodelabel.
+ * Vendored from the fork with this provenance header added, plus one
+ * documented divergence below.  Binds the soc-nv-flash child node by its
+ * `mram_storage` nodelabel.
+ *
+ * ------------------------- alp-sdk divergence -------------------------
+ * flash_range_is_valid() (issue #1119) was changed from the fork's
+ * `(offset + len) > size` end-calculation to the overflow-safe
+ * flash_mram_range_is_valid() helper (this driver's companion
+ * flash_mram_range.h, built on the shared alp_size_range_valid() from
+ * src/common/alp_checked_arith.h, #743).  The addition wraps on a 32-bit
+ * target when len is close to SIZE_MAX, which lets an out-of-range
+ * offset+len pair evade the bound and reach the MRAM read/write/erase path.
+ * Reapply this divergence if the file is ever re-synced from the fork.
+ * -------------------------------------------------------------------------
  */
 #define DT_DRV_COMPAT alif_mram_flash_controller
 
@@ -40,6 +52,7 @@
 #include <errno.h>
 #define LOG_LEVEL CONFIG_FLASH_LOG_LEVEL
 #include <zephyr/logging/log.h>
+#include "flash_mram_range.h"
 LOG_MODULE_REGISTER(flash_mram_alif);
 
 #define SOC_NV_FLASH_NODE      DT_NODELABEL(mram_storage)
@@ -145,10 +158,7 @@ static int flash_range_is_valid(const struct device *dev, off_t offset,
 				size_t len)
 {
 	ARG_UNUSED(dev);
-	if (((offset + len) > FLASH_MRAM_FLASH_SIZE) || (offset < 0x0)) {
-		return 0;
-	}
-	return 1;
+	return flash_mram_range_is_valid(offset, len, FLASH_MRAM_FLASH_SIZE) ? 1 : 0;
 }
 
 /**

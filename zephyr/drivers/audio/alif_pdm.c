@@ -30,6 +30,19 @@
  * reaches -O3. Reapply this divergence if the file is ever re-synced
  * from the fork.
  * -------------------------------------------------------------------------
+ *
+ * ------------------------- alp-sdk divergence (2) ----------------------
+ * alif_pdm_warning_isr()'s slab rollover (issue #1122) allocated exactly one
+ * replacement block and copied the whole remainder of the IRQ burst into it
+ * without checking the block was large enough -- a burst (up to
+ * MAX_DATA_ITEMS * MAX_NUM_CHANNELS * sizeof(uint16_t) = 128 bytes) can
+ * exceed a configured slab block_size, corrupting adjacent slab memory.
+ * Rewritten to split the remainder across as many fresh blocks as needed
+ * (never copying more than one block's worth per allocation), and
+ * dmic_alif_pdm_configure() now rejects a zero block_size so the split loop
+ * can never divide-by/against zero. Reapply this divergence if the file is
+ * ever re-synced from the fork.
+ * -------------------------------------------------------------------------
  */
 
 #define DT_DRV_COMPAT alif_alif_pdm
@@ -44,6 +57,17 @@
 #include <zephyr/pm/policy.h>
 #include <zephyr/drivers/clock_control.h>
 #include "alif_pdm_reg.h"
+#include "alif_pdm_burst_plan.h"
+
+/* Upper bound on how many slab blocks a single IRQ burst can be split
+ * across (#1122). A burst is at most MAX_DATA_ITEMS * MAX_NUM_CHANNELS *
+ * sizeof(uint16_t) = 128 bytes; this comfortably covers every block_size
+ * a real audio slab configures (down to single-digit bytes) while keeping
+ * the ISR's chunk-plan array small and stack-bounded. Configurations
+ * needing more chunks than this are rejected at runtime (burst dropped,
+ * logged) rather than risk an unbounded ISR stack allocation.
+ */
+#define MAX_PDM_BURST_CHUNKS 20
 
 LOG_MODULE_REGISTER(alif_pdm, LOG_LEVEL_INF);
 
@@ -94,6 +118,15 @@ static int dmic_alif_pdm_configure(const struct device *dev, struct dmic_cfg *co
 
 	if (config->channel.req_num_chan == 0 || config->channel.req_num_chan > MAX_NUM_CHANNELS) {
 		LOG_DBG("config invalid: number of channels not valid\n");
+		return -EINVAL;
+	}
+
+	/* A zero block_size would make the IRQ-burst rollover split loop
+	 * divide progress by zero (#1122) -- reject before capture can ever
+	 * start.
+	 */
+	if (config->streams[0].block_size == 0) {
+		LOG_DBG("config invalid: block size must be non-zero\n");
 		return -EINVAL;
 	}
 
@@ -443,7 +476,6 @@ static void alif_pdm_warning_isr(const struct device *dev)
 	uint32_t block_size;
 	uint32_t bytes_available;
 	uint32_t i;
-	uint32_t whole;
 	uint32_t audio_ch_0_1;
 	uint32_t audio_ch_2_3;
 	uint32_t audio_ch_4_5;
@@ -522,33 +554,75 @@ static void alif_pdm_warning_isr(const struct device *dev)
 
 	bytes_available = block_size - pdmdata->buf_index;
 
-	if (bytes_available >= data_bytes) {
-		memcpy((pdmdata->data_buffer + pdmdata->buf_index), pdmdata->data, data_bytes);
-		pdmdata->buf_index += data_bytes;
-	} else {
-		if (bytes_available > 0) {
-			memcpy((pdmdata->data_buffer + pdmdata->buf_index), pdmdata->data,
-			       bytes_available);
-		}
-		whole = data_bytes - bytes_available;
+	/*
+	 * Plan the split BEFORE touching any slab/queue state: a burst can
+	 * exceed not just bytes_available but the configured block_size
+	 * itself, so never assume a single replacement block is enough
+	 * (#1122). Each chunk after the first starts a fresh block and is
+	 * never larger than block_size, so no single memcpy can overrun a
+	 * block.
+	 */
+	{
+		uint32_t chunks[MAX_PDM_BURST_CHUNKS];
+		size_t nchunks;
+		uint32_t copied = 0;
+		size_t idx;
 
-		if (k_msgq_put(&pdmdata->buf_queue, &pdmdata->data_buffer, K_NO_WAIT) != 0) {
-			/* Queue full: drop oldest block to make room */
-			void *oldest = NULL;
-
-			if (k_msgq_get(&pdmdata->buf_queue, &oldest, K_NO_WAIT) == 0) {
-				k_mem_slab_free(pdmdata->mem_slab, oldest);
-				k_msgq_put(&pdmdata->buf_queue, &pdmdata->data_buffer, K_NO_WAIT);
-			}
-		}
-
-		pdmdata->data_buffer = get_slab(pdmdata);
-
-		if (pdmdata->data_buffer) {
-			memcpy(pdmdata->data_buffer, pdmdata->data + (bytes_available / 2), whole);
-			pdmdata->buf_index = whole;
-		} else {
+		nchunks = pdm_plan_burst_chunks(bytes_available, data_bytes, block_size, chunks,
+						 ARRAY_SIZE(chunks));
+		if (nchunks == 0) {
+			/* Cannot safely split this burst into MAX_PDM_BURST_CHUNKS
+			 * blocks (a pathologically small block_size) -- drop the
+			 * burst rather than risk writing past a block boundary.
+			 */
+			LOG_ERR("PDM burst too large to plan safely (data_bytes=%u "
+				"block_size=%u); dropping burst\n",
+				data_bytes, block_size);
 			pdmdata->buf_index = 0;
+			return;
+		}
+
+		for (idx = 0; idx < nchunks; idx++) {
+			uint32_t chunk = chunks[idx];
+
+			if (chunk > 0) {
+				memcpy(pdmdata->data_buffer + pdmdata->buf_index,
+				       (uint8_t *)pdmdata->data + copied, chunk);
+				pdmdata->buf_index += chunk;
+				copied += chunk;
+			}
+
+			if (idx + 1 >= nchunks) {
+				/* Last chunk: leave it in progress in the
+				 * current block, same as the fast path above.
+				 */
+				break;
+			}
+
+			/* This block is now full; queue it and start a fresh
+			 * one for the next chunk.
+			 */
+			if (k_msgq_put(&pdmdata->buf_queue, &pdmdata->data_buffer, K_NO_WAIT) !=
+			    0) {
+				/* Queue full: drop oldest block to make room */
+				void *oldest = NULL;
+
+				if (k_msgq_get(&pdmdata->buf_queue, &oldest, K_NO_WAIT) == 0) {
+					k_mem_slab_free(pdmdata->mem_slab, oldest);
+					k_msgq_put(&pdmdata->buf_queue, &pdmdata->data_buffer,
+						   K_NO_WAIT);
+				}
+			}
+
+			pdmdata->data_buffer = get_slab(pdmdata);
+			pdmdata->buf_index = 0;
+			if (pdmdata->data_buffer == NULL) {
+				/* Allocation failed mid-burst: drop the
+				 * remainder of this burst, same ownership/
+				 * error behavior as before (#1122).
+				 */
+				return;
+			}
 		}
 	}
 }

@@ -7,6 +7,58 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — five memory-safety defects in the AEN Zephyr drivers (#1119, #1120, #1121, #1122, #1124)
+
+`flash_mram_alif.c`'s `flash_range_is_valid()` computed `offset + len` in
+unsigned arithmetic; a `len` close to `SIZE_MAX` wrapped the sum past
+`FLASH_MRAM_FLASH_SIZE` and evaded the bound, reaching the MRAM
+read/write/erase path with an out-of-range request. Rewritten
+subtraction-based on the shared `alp_size_range_valid()` helper
+(`src/common/alp_checked_arith.h`, #743) (#1119).
+
+`adc_alif.c`'s `adc_start_read()` unconditionally dereferenced
+`sequence->options->user_data`, even though Zephyr's `adc_sequence` contract
+makes `options` optional (NULL is a normal one-shot read) — a NULL-options
+one-shot read faulted the driver. The sibling `adc_cmpa_irq_handler()` /
+`adc_cmpb_irq_handler()` shared the same unguarded dereference, reachable
+whenever devicetree `interrupt_en` has a comparator bit set regardless of
+the triggering read's `options`. All three sites now guard on the
+comparator pointer being non-NULL (#1120).
+
+`display_cdc200.c`'s four read/write entry points (`cdc200_generic_write`/
+`_read` and the indexed `cdc200_display_write`/`_read`) computed the
+framebuffer offset from `(x, y, desc)` with no validation — a rectangle
+extending past the layer's window, an undersized caller buffer, or a pitch
+narrower than the claimed width could over/under-run the framebuffer or the
+caller's buffer. All four now validate the rectangle, pitch, and buffer
+size (in a 64-bit intermediate, so the size computation itself cannot
+overflow) before touching memory (#1121).
+
+`alif_pdm.c`'s ISR slab rollover allocated exactly one replacement block
+and copied the *whole* remainder of an IRQ burst into it without checking
+the block was large enough — a burst (up to 128 bytes) could exceed a
+configured block size, corrupting adjacent slab memory. The rollover now
+splits the remainder across as many fresh blocks as needed, and
+`dmic_alif_pdm_configure()` rejects a zero `block_size` (#1122).
+
+`dma_pl330_alif.c`'s `dma_pl330_configure()` dereferenced `cfg->head_block`
+before its own NULL check further down, and copied exactly `block_count`
+pool entries from the caller's scatter-gather list without confirming the
+list actually had that many — a shorter list left a stale/zeroed pool entry
+linked into the chain as a phantom zero-address/zero-size block the ISR
+could try to start. All scatter-gather validation (head-block non-NULL,
+`block_count` bounds, exact chain-length match, address-adjustment support)
+now runs up front, before any channel state is mutated, so a rejected
+`configure()` call never publishes partial state (#1124).
+
+Each fix carries a hosted `tests/unit/` regression suite exercising the
+exact guard the driver runs (`flash_mram_range`, `adc_alif_comparator`,
+`display_cdc200_bounds`, `alif_pdm_burst_plan`, `dma_pl330_sg_validate`) —
+these drivers only build against a devicetree-instantiated AEN target, so
+the guard logic is split into small dependency-free headers the drivers and
+the native_sim tests both include, rather than relying on hardware-only
+coverage.
+
 ### Fixed — `test-all.sh` ran 1 of 34 required gate scripts on Windows (#1109)
 
 `scripts/quality_tasks.py --gate-scripts` wrote CRLF line endings on
