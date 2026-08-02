@@ -39,6 +39,26 @@ regression — it was `native_sim/native/64`-only before, the only reason
 neither `pr-twister.yml` nor the AEN-scoped `pr-twister-aen.yml` (scoped to
 `examples/aen/**`) ever saw this break.
 
+A follow-up review round decoded `mpu_regions` out of the built
+`zephyr.elf` (not DTS arithmetic) and found the dual-nodelabel fix alone
+still left `0x800A0000..0x8057FFFF` (4.875 MiB, including
+`atoc_reserved_partition@0x560000`, marked `read-only` in the same
+overlay) covered by no MPU region — privileged RW+exec by ARMv8-M's
+default `PRIVDEFENA` map. Root cause: the vendor model `mpu_regions_e8.c`
+mirrors assumes `storage_partition` is the last partition in
+`mram_storage`; this example's overlay isn't (ulog/storage sits at
+`0x90000`, below the SE-fixed ATOC package). Closed generically in
+`mpu_regions_e8.c` with a conditional fifth `MRAM_RESERVED` region
+spanning MRAM_DEVICE's top to the top of `mram_storage`, RO like
+MRAM_EXEC — it compiles out (size 0) on every other board/example, which
+already tile to top-of-flash. `pr-twister-aen.yml` also gained
+`zephyr/soc-bridge/**` and `src/backends/update_log/**` in its `paths:`
+blocks (both were previously unwatched, despite being exactly the files
+that caused this bug), and `testcase.yaml` gained a third scenario
+building `alp_e1m_aen801_m55_he_firewall_probe.conf`, the profile
+`scripts/bench/aen/flash-update-log-firewall-probe.sh` actually requires
+and which stayed build-uncovered before.
+
 ### Fixed — `west.yml` never actually fetched tflite-micro in a clean CI checkout, despite claiming to (#1076)
 
 `pr-twister-aen`'s first real CI run errored on `aen-sim-vision`'s HP build:
