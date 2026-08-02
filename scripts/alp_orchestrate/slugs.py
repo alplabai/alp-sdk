@@ -13,6 +13,7 @@ memregion.py move) ahead of the kconfig emitter.
 from __future__ import annotations
 
 from alp_registries import peripheral_kconfig
+from sentinels import is_tbd
 
 
 def _board_define_slug(name: str) -> str:
@@ -73,7 +74,7 @@ def _slugs_from_on_module(on_module: dict) -> list[str]:
     seen: set[str] = set()
 
     def _add(val: object) -> None:
-        if not val or val == "TBD":
+        if not val or is_tbd(val):
             return
         if not isinstance(val, str):
             return
@@ -117,7 +118,7 @@ def _slugs_from_helper_firmware(helper_firmware: list) -> list[str]:
         if not isinstance(entry, dict):
             continue
         chip = entry.get("chip")
-        if chip and chip != "TBD":
+        if chip and not is_tbd(chip):
             seen.add(chip)
     return sorted(seen)
 

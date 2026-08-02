@@ -45,6 +45,7 @@ from alp_project import (
     silicon_to_kconfig,
     som_unpopulated_capabilities,
 )
+from sentinels import is_tbd
 
 from . import libraries as _library_layer
 from .models import BoardProject, Slice
@@ -292,7 +293,7 @@ def _wireless_provider(project: BoardProject) -> Optional[str]:
     if not isinstance(provider, str):
         return None
     provider = provider.strip()
-    if not provider or provider == "TBD":
+    if not provider or is_tbd(provider):
         return None
     return provider
 
