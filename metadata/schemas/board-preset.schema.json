@@ -152,16 +152,18 @@
       "required": ["name", "values"],
       "description": "One `typedef enum { ... } <name>;` block.",
       "properties": {
-        "name": { "type": "string", "pattern": "^evk_[a-z0-9_]+_t$", "description": "Typedef name (e.g. evk_sdio_select_t)." },
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*_t$", "description": "Typedef name (e.g. evk_sdio_select_t). Deliberately NOT locked to an `evk_` prefix: this schema is generic across board presets, and an `^evk_` pattern would reject every non-EVK board outright." },
         "doc":  { "type": "string", "description": "One-line Doxygen `@brief` emitted immediately above the typedef (only for enums that had one hand-authored, e.g. evk_pcie_ioexp_pin_t). Omit for enums whose original prose comment lived several lines above the typedef instead." },
         "values": {
           "type": "array",
+          "minItems": 1,
+          "description": "At least one enumerator -- an empty list has no valid C rendering, and the emitter's column-alignment `max()` raises on it.",
           "items": {
             "type": "object",
             "additionalProperties": false,
             "required": ["name", "value"],
             "properties": {
-              "name":  { "type": "string", "pattern": "^EVK_[A-Z0-9_]+$" },
+              "name":  { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
               "value": { "type": "integer", "minimum": 0 },
               "doc":   { "type": "string", "description": "One-line Doxygen `@brief` (`/**< ... */`) trailing the enumerator." }
             }
@@ -174,17 +176,18 @@
       "additionalProperties": false,
       "required": ["base_macro", "base_value", "entries"],
       "properties": {
-        "base_macro": { "type": "string", "pattern": "^EVK_[A-Z0-9_]+$", "description": "Macro name for the overlay base index (e.g. EVK_PIN_OVERLAY_BASE)." },
-        "base_value": { "type": "string", "description": "C token the base macro expands to (e.g. ALP_E1M_GPIO_COUNT) -- not a literal, so the base tracks the pinout header automatically." },
+        "base_macro": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$", "description": "Macro name for the overlay base index (e.g. EVK_PIN_OVERLAY_BASE). Not board-prefix-locked -- see `mux_enum_entry.name`." },
+        "base_value": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$", "description": "C token the base macro expands to (e.g. ALP_E1M_GPIO_COUNT) -- not a literal, so the base tracks the pinout header automatically. Constrained to an identifier because it is spliced verbatim into the emitted `#define`." },
         "base_doc":   { "type": "string", "description": "One-line Doxygen @brief for the base macro." },
         "entries": {
           "type": "array",
+          "minItems": 1,
           "items": {
             "type": "object",
             "additionalProperties": false,
             "required": ["macro", "offset"],
             "properties": {
-              "macro":  { "type": "string", "pattern": "^EVK_[A-Z0-9_]+$" },
+              "macro":  { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
               "offset": { "type": "integer", "minimum": 0, "description": "Emitted as `(<base_macro> + <offset>u)`." },
               "doc":    { "type": "string", "description": "One-line Doxygen @brief documenting the repurposed pad." }
             }

@@ -179,6 +179,19 @@ def _emit_mux_enums(enums: list[dict[str, Any]]) -> list[str]:
         name = enum["name"]
         values = enum["values"]
         doc = enum.get("doc")
+        # Duplicate enumerator values emit silently and read as a typo
+        # in the header; the schema cannot express cross-item
+        # uniqueness, so enforce it here rather than shipping two names
+        # bound to the same selector.
+        seen: dict[int, str] = {}
+        for v in values:
+            prev = seen.get(v["value"])
+            if prev is not None:
+                raise ValueError(
+                    f"{name}: {v['name']} and {prev} both use value "
+                    f"{v['value']} -- enumerator values must be unique"
+                )
+            seen[v["value"]] = v["name"]
         if doc:
             out.append(f"/** {doc} */")
         out.append("typedef enum {")
@@ -220,6 +233,19 @@ def _emit_pad_indices(pad_indices: dict[str, Any] | None) -> list[str]:
     out.append("")
 
     if entries:
+        # Two macros on the same pad index is a silent hardware bug --
+        # both resolve, both compile, and they address the same pin.
+        # Not expressible in JSON Schema across array items, so it is
+        # enforced here.
+        seen_off: dict[int, str] = {}
+        for e in entries:
+            prev = seen_off.get(e["offset"])
+            if prev is not None:
+                raise ValueError(
+                    f"{base_macro}: {e['macro']} and {prev} both use offset "
+                    f"{e['offset']} -- pad indices must be unique"
+                )
+            seen_off[e["offset"]] = e["macro"]
         widest = max(len(e["macro"]) for e in entries)
         for e in entries:
             macro = e["macro"]
