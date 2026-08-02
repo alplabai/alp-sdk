@@ -371,6 +371,13 @@ def _hwrev_pad_route_overrides(
     wrong-hardware problem -- this is the site that bug lived at, and this
     emit path resolves its own SoM/board data independently of
     ``alp_orchestrate.loader.load_board_yaml``, so it needs its own gate.
+
+    Also raises ``alp_orchestrate.models.SdkRevisionNotBuildable`` when
+    ``hw_rev`` exists but its declared ``status:`` refuses a build
+    (``reserved``, ``tbd``, or no ``status`` key at all -- #1025's broad
+    reading).  Same rationale as the existence gate above: this emit path
+    is its own independent resolution, so the status gate needs its own
+    copy here too, not just in ``load_board_yaml``.
     """
     if not hw_rev:
         return []
@@ -386,13 +393,22 @@ def _hwrev_pad_route_overrides(
     # Lazy import: alp_orchestrate imports this module at load time (the
     # resolve_memory_map edge -- see `_load_yaml` above), so the reverse
     # import must happen at call time, not at module scope.
-    from alp_orchestrate.models import SdkRevisionUnknown
-    from alp_orchestrate.sdk_compat import revision_known
+    from alp_orchestrate.models import (SdkRevisionNotBuildable,
+                                        SdkRevisionUnknown)
+    from alp_orchestrate.sdk_compat import revision_buildable, revision_known
     if revision_known(data, hw_rev) is False:
         available = sorted((data.get("hw_revisions") or {}).keys())
         raise SdkRevisionUnknown(
             f"SoM {sku} hw_rev {hw_rev!r} is not a known hardware "
             f"revision. Available hw_rev(s) for {sku}: {available}.")
+
+    if revision_buildable(data, hw_rev) is False:
+        status = (data.get("hw_revisions") or {}).get(hw_rev, {}).get("status")
+        status_repr = f"status: {status!r}" if status is not None else \
+            "carries no `status:` key"
+        raise SdkRevisionNotBuildable(
+            f"SoM {sku} hw_rev {hw_rev!r} exists but is not buildable "
+            f"({status_repr}).")
 
     rev = (data.get("hw_revisions") or {}).get(hw_rev) or {}
     overrides = rev.get("pad_route_overrides") or []

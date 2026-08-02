@@ -241,10 +241,20 @@ jobs:
           python3 scripts/validate_board_yaml.py \
               --input metadata/templates/board.yaml.example
 
+      # examples/multicore/rpmsg-imx93/board.yaml is EXCLUDED from both
+      # sweeps below (#1025): E1M-NX9101's only hw_rev (imx93 r1) is
+      # `status: tbd`, refused outright by the hw_rev-buildable gate
+      # (exit 5) -- not a validation defect, the gate correctly refusing
+      # an unbuildable SoM. The example's source + README stay (see the
+      # README's own #1025 note); only the requirement that it VALIDATE
+      # cleanly is lifted. Remove `rpmsg-imx93/board.yaml` from both
+      # `grep -v` filters below once
+      # metadata/e1m_modules/imx93/hw-revisions.yaml:r1 carries a
+      # buildable status.
       - name: Validate every examples/*/board.yaml
         run: |
           set -e
-          for f in $(find examples -name board.yaml); do
+          for f in $(find examples -name board.yaml | grep -v '^examples/multicore/rpmsg-imx93/board\.yaml$'); do
               echo "--- $f ---"
               python3 scripts/validate_board_yaml.py --input "$f"
           done
@@ -253,14 +263,15 @@ jobs:
       # examples/ + tests/ and runs scripts/validate_board_yaml.py
       # against metadata/schemas/board.schema.json.  Hard gate: any
       # board.yaml that doesn't validate fails the PR here (not at
-      # twister / bitbake time).
+      # twister / bitbake time).  rpmsg-imx93 excluded -- see the
+      # #1025 comment above the previous step.
       - name: schema sweep across examples/ + tests/
         run: |
           set -euo pipefail
           while IFS= read -r f; do
               echo "--- v2-check: $f ---"
               python3 scripts/validate_board_yaml.py --input "$f"
-          done < <(find examples tests -name board.yaml 2>/dev/null)
+          done < <(find examples tests -name board.yaml 2>/dev/null | grep -v '^examples/multicore/rpmsg-imx93/board\.yaml$')
 
       # End-to-end: every E1M board route resolves to a function the SoM
       # capability table actually backs (or is a documented open pad).

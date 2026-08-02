@@ -32,8 +32,8 @@ from sentinels import is_tbd
 
 from . import sdk_compat
 from .models import (BoardProject, IpcEntry, OrchestratorError,
-                     SdkRevisionUnknown, SdkRevisionUnsupported, Slice,
-                     StorageEntry)
+                     SdkRevisionNotBuildable, SdkRevisionUnknown,
+                     SdkRevisionUnsupported, Slice, StorageEntry)
 from .partition import _known_flash_devices
 from .paths import BOARD_SCHEMA, METADATA_ROOT, REPO
 from .topology import _default_os_from_core_type
@@ -356,6 +356,54 @@ def _check_hw_rev_exists(
             f"board {board_name} hw_rev {board_hw_rev!r} is not a known "
             f"hardware revision. Available hw_rev(s) for {board_name}: "
             f"{available}.")
+
+
+def _status_repr(status: Optional[str]) -> str:
+    """Render a `status:` value for an error message.
+
+    `status: None` reads as if the key were literally set to the word
+    "None" -- indistinguishable from a typo'd value.  A missing key gets
+    its own wording instead.
+    """
+    if status is None:
+        return "carries no `status:` key"
+    return f"status: {status!r}"
+
+
+def _check_hw_rev_buildable(
+    metadata_root: Path,
+    *,
+    sku: str,
+    som_hw_rev: Optional[str],
+    board_name: Optional[str],
+    board_hw_rev: Optional[str],
+    board_preset: Optional[dict[str, Any]],
+) -> None:
+    """Refuse an hw_rev that EXISTS but whose declared `status:` refuses a
+    build (#1025, the maintainer's broad-reading decision on the status
+    half).
+
+    Runs AFTER `_check_hw_rev_exists`: a revision absent from the table is
+    that gate's failure to report, not this one's -- there is no status to
+    have read.  `status: reserved`, `status: tbd`, and a revision carrying
+    no `status` key at all are all refused; every other declared status
+    (`production`, `preview`, `preliminary`, `deprecated`) passes.
+    """
+    family_dir = _sku_family_dir(sku)
+
+    buildable = sdk_compat.family_revision_buildable(metadata_root, family_dir, som_hw_rev)
+    if buildable is False:
+        status = sdk_compat.family_revision(metadata_root, family_dir, som_hw_rev).get("status")
+        raise SdkRevisionNotBuildable(
+            f"SoM {sku} hw_rev {som_hw_rev!r} exists but is not buildable "
+            f"({_status_repr(status)}).")
+
+    buildable = sdk_compat.revision_buildable(board_preset, board_hw_rev)
+    if buildable is False:
+        status = sdk_compat.board_revision(board_preset, board_hw_rev).get("status")
+        raise SdkRevisionNotBuildable(
+            f"board {board_name} hw_rev {board_hw_rev!r} exists but is not "
+            f"buildable ({_status_repr(status)}).")
 
 
 def _check_sdk_supports_hw_rev(
@@ -843,6 +891,14 @@ def load_board_yaml(path: Path, *,
      board_name, board_hw_rev) = _resolve_board(project, metadata_root)
 
     _check_hw_rev_exists(
+        metadata_root,
+        sku=sku,
+        som_hw_rev=hw_rev or som_preset.get("default_hw_rev"),
+        board_name=board_name,
+        board_hw_rev=board_hw_rev,
+        board_preset=board_preset)
+
+    _check_hw_rev_buildable(
         metadata_root,
         sku=sku,
         som_hw_rev=hw_rev or som_preset.get("default_hw_rev"),

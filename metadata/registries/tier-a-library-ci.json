@@ -35,5 +35,8 @@
       "som": "E1M-NX9101",
       "core": "m33"
     }
-  ]
+  ],
+  "excludedFamilies": {
+    "nxp-imx9": "E1M-NX9101's only hw_rev (imx93 r1) is `status: tbd`, refused outright by the hw_rev-buildable gate (#1025), so no board.yaml for this family -- Tier-A synthetic fixture included -- can emit at all right now. The familyMatrix cell above stays (scripts/validate_metadata.py checks every SoM family is represented); gen_tier_a_ci_matrix.py skips it when deriving the CI build matrix. Remove this entry once metadata/e1m_modules/imx93/hw-revisions.yaml:r1 carries a buildable status."
+  }
 }
