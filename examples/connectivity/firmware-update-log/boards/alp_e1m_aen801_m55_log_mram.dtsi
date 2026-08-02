@@ -29,6 +29,18 @@
  * `memc: aps6408l:` for prior art in the pinned toolchain) and resolves both
  * consumers to the same physical node -- do not "simplify" this back to one
  * label.
+ *
+ * Unlike this board's own default partition map, `storage_partition` here
+ * is NOT the last partition in mram_storage -- atoc_reserved_partition sits
+ * above it, fixed at 0x560000 by the Alif SE ATOC package. That breaks the
+ * vendor model's implicit "storage tiles to top-of-flash" assumption:
+ * MRAM_EXEC (0x0..0x90000) + MRAM_DEVICE (0x90000..0xa0000) alone would
+ * leave 0xa0000..0x580000 -- ATOC included -- covered by no MPU region, i.e.
+ * privileged RW+exec by ARMv8-M default (PRIVDEFENA). mpu_regions_e8.c
+ * closes that generically with a conditional fifth "MRAM_RESERVED" RO
+ * region that appears only when boot/slot0/storage don't already tile
+ * mram_storage (zero-cost on every other board/example, which do tile it);
+ * see that file's comment on MRAM_RESERVED_SIZE for the full reasoning.
  */
 
 /delete-node/ &boot_partition;
