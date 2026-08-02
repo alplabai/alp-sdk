@@ -7,6 +7,44 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Changed — `silicon:` ref splitting finally has ONE implementation (#1096)
+
+#997 and #1004 each set out to collapse the hand-rolled `vendor:family:part`
+splits onto `resolve_soc_path()`, and each left copies behind. The reason is
+structural, not sloppiness: `resolve_soc_path()` returns a path rooted at a
+metadata root, but every site that survived rooted its result somewhere
+else — at a caller-injected `soc_dir`, at an `output_root`, or at no
+filesystem path at all (a repo-relative `str` for a generated banner). A
+path-returning helper could never absorb those, so they kept being re-found
+by grep.
+
+What they actually shared was the **split**. `split_silicon_ref()` is now
+that single source and `resolve_soc_path()` is one rooting convenience over
+it, so a site can reuse the arity rule while rooting its own way. All seven
+remaining copies are migrated — the four #1096 listed plus the three it
+scoped out (`alp_cli/new_som.py:154/339/503`), which extract slugs rather
+than paths but are the same three-part split and would have drifted
+identically.
+
+Each site keeps the shape it failed with, because the shapes are load-bearing:
+`alp_model/targets.py` still raises `ValueError` on a malformed ref and
+`FileNotFoundError` on a well-formed ref naming an absent spec — collapsing
+those into one would be a behaviour change, since `resolve_soc_path()`
+returns `None` for both. `alp_cli/validator.py::_load_soc_caps` still
+soft-fails to `None` and still roots at its injected `soc_dir`: rebuilding it
+as `resolve_soc_path(ref, soc_dir.parent)` is exact only while every caller
+passes a directory literally named `socs`, and a test now injects one that
+is not. `new_som.py:154` keeps its `_SOC_REF_RE` guard, which is strictly
+narrower than an arity check (it also demands lowercase slugs), so
+`Alif:ensemble:e8` still prefills empty rather than `Alif`.
+
+`tests/scripts/test_silicon_ref_single_source.py` greps the real tree for a
+reintroduced split, so a fourth round cannot be needed — verified by
+mutation. One encoding of "three colon-separated parts" is deliberately left
+outside the helper and named in its docstring: `new_som.py::_SOC_REF_RE`,
+a CLI input validator rather than a resolution site, which would also need
+widening if the format ever grows a fourth part.
+
 ### Fixed — an `hw_rev` that EXISTS but is `status: reserved`/`tbd`/status-less silently built anyway (#1025, the status half)
 
 The safe half (below) closed the "unknown `hw_rev`" hole; this closes the
