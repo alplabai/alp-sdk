@@ -7,6 +7,77 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — an alp-sdk-owned workspace couldn't build the nanopb example (#1136)
+
+`libraries: [nanopb]`'s west module was reachable in CI (`pr-twister.yml`
+inits its topdir straight from Zephyr's own `west.yml`, `west init -m
+zephyr`, where nanopb is unconditioned) but unreachable from a real
+alp-sdk-owned workspace (`west init -l alp-sdk` — what `tan bootstrap` and
+every customer runs): `nanopb` was missing from the Zephyr import's
+`name-allowlist`, so `west update` never fetched `modules/lib/nanopb` and
+`examples/connectivity/nanopb-encode-decode/CMakeLists.txt` — which has no
+stub fallback, unlike `lwrb` — `FATAL_ERROR`ed on the unset
+`ZEPHYR_NANOPB_MODULE_DIR`. A previous pass (#650) had allowlisted `nanopb`
+correctly, then reverted it as "dead weight": at the time, alp-sdk's own
+manifest ALSO defined a top-level project literally named `nanopb` (the
+dormant SDK-internal mproc-IPC-framing pin), and west's project-name dedup
+lets a directly-listed project permanently shadow a same-named import even
+from a disabled group. Fixed both halves: allowlisted `nanopb` again, and
+renamed the shadowing internal pin to `nanopb-mproc-pin` (`repo-path:
+nanopb` keeps its real upstream URL) so the two no longer collide. Verified
+against a real, from-scratch alp-sdk-owned workspace: `west manifest
+--resolve` now resolves `nanopb` as an active, unconditioned project, and
+`alp_sdk.examples.nanopb_encode_decode.native_sim` builds and PASSes under
+twister. `lwrb` shares the same disabled `extras-lwrb-nanopb` group but has
+no equivalent gap — its consumer compiles a working in-tree stub
+(`vendors/lwrb/src/lwrb_stub_impl.c`) whenever the upstream module isn't
+present, so the group being off-by-default is a real, harmless deferral
+there, not a hidden defect.
+
+Added `scripts/check_west_manifest_module_resolution.py` (wired into
+`pr-metadata-validate.yml`) so this class of drift can't recur silently: it
+statically proves every `libraries:`-selectable Zephyr module resolves to a
+reachable `west.yml` project, and that no Zephyr import `name-allowlist`
+entry is shadowed by a same-named top-level project. Running it for the
+first time caught a second, independent instance of the exact same shape:
+`libraries: [cmsis-nn]` (`metadata/libraries/cmsis-nn.yaml`) was never
+allowlisted despite sitting unconditioned right next to `cmsis-dsp` in
+Zephyr's own manifest — now fixed alongside nanopb. A first cut of the gate
+treated any top-level `projects:` entry as "reachable" regardless of its own
+`groups:` state, which missed the literal original shape (a module reachable
+*only* through a top-level pin sitting in a permanently-disabled group, no
+allowlist entry at all) and, when tightened bluntly, false-positived on the
+thirteen `tier: B` libraries that are legitimately, documentedly gated
+behind a disabled-by-default group (jsmn, Catch2, BearSSL, etc.). The gate
+now adds a third, `tier: A`-scoped check (ADR 0018: a curated/bundled
+library must resolve with no group-filter opt-in) that reproduces and fires
+on the original bug shape without disturbing tier B's legitimate deferrals.
+
+### Fixed — example READMEs documented rejected `tan build` syntax (#1137)
+
+`examples/multicore/heterogeneous-offload/README.md`,
+`examples/multicore/rpmsg-aen/README.md`, and
+`examples/multicore/rpmsg-v2n/README.md` showed `tan build <path> --core
+<core>` as the way to iterate on one multi-core slice. Verified against a
+real, installed `tan 0.3.1`: `tan build` takes no positional path argument
+(`error: unexpected argument '<path>' found`) and has no `--core` flag
+(`error: unexpected argument '--core' found`) — `tan build` always rebuilds
+every slice a project declares, with already-built slices short-circuiting
+near-instantly (`docs/heterogeneous-builds.md`'s existing "Iterating on one
+slice" section already documents this correctly). Rewrote all three to the
+real syntax (`tan --project <path> build`, or `cd <path> && tan build`) and
+corrected the "iterate on one core" guidance to match.
+`examples/multicore/rpmsg-imx93/README.md` had the identical positional-path
+shape (`tan build alp-sdk/examples/multicore/rpmsg-imx93`) and is fixed the
+same way. `examples/multicore/mproc-mailbox/README.md` also documents a
+rejected invocation (`tan build --board <qualifier> <path>` — `--board` is
+not a `tan build` flag at all), but its two commands are entangled with a
+"two halves build separately until the v0.4 dual-image flow lands" design
+that a syntax-only rewrite can't safely resolve (board.yaml declares only
+the `m55_hp` core; there's no `tan build` flag to select just one core, and
+the file's first code block appears to show a not-yet-supported combined
+future flow) — left unfixed, flagged for the doc's owner.
+
 ### Fixed — `test-all.sh` ran 1 of 34 required gate scripts on Windows (#1109)
 
 `scripts/quality_tasks.py --gate-scripts` wrote CRLF line endings on
