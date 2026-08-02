@@ -14,8 +14,14 @@ support is version-dependent -- see docs/gd32-flashing.md + scripts/openocd/).
 flash_args contract:
   interface    str   OpenOCD interface ID ("cmsis-dap" | "jlink" | "stlink").
                      Required for the openocd/pyocd path; ignored by J-Link.
+                     Must match ^[a-z0-9][a-z0-9_-]*$ -- it becomes a
+                     `-f interface/{value}.cfg` argument that OpenOCD
+                     sources as Tcl, so a path-shaped value is rejected
+                     rather than interpolated.
   target       str   OpenOCD target ID ("gd32g553"). Required for the
-                     openocd/pyocd path; ignored by J-Link.
+                     openocd/pyocd path; ignored by J-Link. Same
+                     ^[a-z0-9][a-z0-9_-]*$ constraint as `interface`, for
+                     the same `-f target/{value}.cfg` reason.
   base         str?  Flash base address (default "0x08000000"). Parsed as a
                      bounded decimal or 0x-prefixed hex integer literal and
                      re-rendered canonically -- the raw string is never
@@ -50,6 +56,13 @@ _JLINK_BINARIES = ("JLinkExe", "JLink")     # "JLinkExe" on Linux/macOS, "JLink"
 # only ever targets this one 32-bit Cortex-M part family.
 _MAX_ADDRESS = 0xFFFFFFFF
 _ADDRESS_RE = re.compile(r"^(0[xX][0-9a-fA-F]{1,8}|[0-9]{1,10})$")
+
+# `interface`/`target` become `-f <dir>/{value}.cfg` on the OpenOCD command
+# line, and OpenOCD *sources* a `-f` file as Tcl -- a traversal payload here
+# (e.g. "../../../../tmp/pwn") reaches arbitrary code execution, not just an
+# unexpected file read.  Both are config-file basenames, never paths: no
+# "/", no leading ".", no whitespace.  Fail closed -- reject, don't sanitize.
+_CONFIG_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
 # Control chars (incl. newline/CR, which is what turns one J-Link Commander
 # line into two commands) plus DEL -- refused in any string that ends up
@@ -128,11 +141,34 @@ def _tcl_quote(value: str) -> "str | None":
     Tcl's ``{...}`` grouping performs no substitution on its contents
     (no ``$``, ``[...]``, or ``;`` interpretation), but requires
     balanced braces.  Reject any embedded brace outright (fail closed)
-    rather than trying to escape it.
+    rather than trying to escape it.  A trailing backslash is rejected
+    too: inside a brace-quoted word Tcl still honors ``\\}`` as an
+    escaped (non-closing) brace, so ``{value\\}`` is one unbalanced word
+    -- not injectable (the embedded ``{``/``}`` check already blocks
+    anything that could re-close it), but it would surface as a
+    confusing "missing close-brace" parse error instead of this
+    function's clean rejection.
     """
-    if "{" in value or "}" in value:
+    if "{" in value or "}" in value or value.endswith("\\"):
         return None
     return "{" + value + "}"
+
+
+def _validate_config_name(value: str, *, what: str) -> "str | None":
+    """Reject ``value`` unless it is a bare OpenOCD config-name token.
+
+    Returns ``None`` when safe to interpolate into ``-f <dir>/{value}.cfg``;
+    an error message otherwise.  See ``_CONFIG_NAME_RE`` for why this is a
+    fail-closed reject, not a sanitize-and-continue.
+    """
+    if not _CONFIG_NAME_RE.match(value):
+        return (
+            f"swd_probe: flash_args.{what} {value!r} is not a valid "
+            f"config name (expected to match "
+            f"{_CONFIG_NAME_RE.pattern!r}) -- refusing to build an "
+            f"OpenOCD -f argument from it."
+        )
+    return None
 
 
 def _jlink_commander_script(
@@ -248,8 +284,8 @@ class SwdProbeFlash:
                 command=cmd)
 
         # ---- OpenOCD / pyOCD (alternative; need interface + target) ----
-        interface = fa.get("interface") or ""
-        target = fa.get("target") or ""
+        interface = str(fa.get("interface") or "")
+        target = str(fa.get("target") or "")
         if not interface or not target:
             return FlashResult(
                 ok=False, elapsed_s=time.monotonic() - start,
@@ -257,6 +293,17 @@ class SwdProbeFlash:
                          "flash_args.target are required for the openocd/pyocd "
                          "path (e.g. interface=cmsis-dap, target=gd32g553) -- "
                          "or install SEGGER J-Link for the primary path."))
+
+        interface_err = _validate_config_name(interface, what="interface")
+        if interface_err:
+            return FlashResult(
+                ok=False, elapsed_s=time.monotonic() - start,
+                message=interface_err)
+        target_err = _validate_config_name(target, what="target")
+        if target_err:
+            return FlashResult(
+                ok=False, elapsed_s=time.monotonic() - start,
+                message=target_err)
 
         openocd = None if force_pyocd else shutil.which("openocd")
         pyocd = shutil.which("pyocd")

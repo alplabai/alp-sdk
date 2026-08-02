@@ -13,10 +13,22 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 bare `str(target).startswith("/dev/")` check, so `/dev/../tmp/foo` passed
 straight through to `bmaptool`/`dd` — since flashing commonly runs elevated,
 that could overwrite an arbitrary regular file. The target is now
-canonicalized (`os.path.realpath`) and required to both resolve strictly
-beneath `/dev/` *after* traversal/symlink resolution and `stat` as a real
-block device; a regular file is rejected outright, with no silent fallback.
-Traversal and symlink escapes are rejected before any external tool runs.
+canonicalized (a lexical `..`-traversal collapse on every host, plus a
+symlink-chasing `os.path.realpath` pass on POSIX hosts only — a Windows host
+has no `/dev` tree to chase symlinks through) and required to resolve
+strictly beneath `/dev/`; right before a tool actually runs, a second gate
+additionally requires the resolved target to `stat` as a real block device.
+A regular file is rejected outright, with no silent fallback. Traversal and
+symlink escapes are rejected before any external tool runs. The command
+that actually executes always uses the caller's original `/dev/...` string,
+never the resolved form — the resolution is for validation and the
+block-device check only, so a device-name symlink still flashes under the
+name the caller gave it, and the emitted `dd`/`bmaptool` argv is never
+reinterpreted through Windows NT path semantics (which previously turned
+`/dev/sdb` into `\dev\sdb`). The `stat`-then-open-by-name pair is not
+atomic (TOCTOU); closing that needs root on the flashing host already, so
+it's named as a residual defense-in-depth gap in the backend's docstring
+rather than closed.
 
 `scripts/flash_backends/swd_probe.py` interpolated the artefact path and
 base address raw into generated J-Link Commander (newline-separated) and
@@ -29,7 +41,15 @@ passed through. The artefact path is validated for control characters/
 newlines and then quoted per the target script's own grammar: double-quoted
 for J-Link Commander, brace-quoted for Tcl — the two are not
 interchangeable, and either quoting fails closed (rejects) rather than
-attempting to escape an embedded quote/brace.
+attempting to escape an embedded quote/brace (a trailing backslash, which
+would otherwise escape Tcl's closing brace, is rejected too). A third sink
+in the same file went unfixed by the initial pass: `flash_args.interface`
+and `flash_args.target` were interpolated raw into `-f interface/{value}.cfg`
+/ `-f target/{value}.cfg` — OpenOCD *sources* a `-f` file as Tcl, so a
+traversal payload there reaches arbitrary code execution, not just an
+unexpected file read. Both are now constrained to
+`^[a-z0-9][a-z0-9_-]*$` before interpolation and rejected outright (not
+sanitized) if they don't match.
 
 `metadata/schemas/som-preset-v1.schema.json`'s `flash_args` stays
 deliberately open (per its own doc comment, the shape follows whichever

@@ -880,3 +880,73 @@ def test_parse_address_leading_zero_decimal_does_not_raise() -> None:
     assert err is None
     assert value == 123
 
+
+# ---------------------------------------------------------------------
+# 7. adversarial-review fixes: the third swd_probe sink + Tcl edge case
+# ---------------------------------------------------------------------
+
+
+def test_swd_probe_rejects_traversal_in_interface() -> None:
+    """The third injection sink: OpenOCD sources a `-f` file as Tcl, so
+    `interface`/`target` reaching `-f interface/{interface}.cfg` raw is
+    arbitrary Tcl execution, not just an unexpected file read. A
+    traversal payload here must be rejected before openocd ever runs --
+    this is the case that must fail on the pre-fix code and pass after."""
+    backend = SwdProbeFlash()
+    with patch("flash_backends.swd_probe.shutil.which",
+               side_effect=lambda t: f"/usr/bin/{t}"
+               if t == "openocd" else None), \
+         patch("flash_backends.swd_probe.subprocess.run") as run_mock:
+        result = backend.flash(_ctx(
+            {"interface": "../../../../tmp/pwn",
+             "target": "../../../../tmp/pwn2"},
+            artefact="/tmp/gd32.bin"))
+    assert result.ok is False
+    assert run_mock.call_count == 0
+    assert "not a valid config name" in result.message
+    # No argv was ever built from the traversal payload.
+    assert not any(
+        "../" in str(part) for call in run_mock.call_args_list
+        for part in (call.args[0] if call.args else [])
+    )
+
+
+def test_swd_probe_rejects_traversal_in_target() -> None:
+    backend = SwdProbeFlash()
+    with patch("flash_backends.swd_probe.shutil.which",
+               side_effect=lambda t: f"/usr/bin/{t}"
+               if t == "openocd" else None), \
+         patch("flash_backends.swd_probe.subprocess.run") as run_mock:
+        result = backend.flash(_ctx(
+            {"interface": "cmsis-dap", "target": "../../../../tmp/pwn2"},
+            artefact="/tmp/gd32.bin"))
+    assert result.ok is False
+    assert run_mock.call_count == 0
+    assert "not a valid config name" in result.message
+
+
+def test_swd_probe_accepts_ordinary_interface_and_target() -> None:
+    """The new config-name guard must not reject the ordinary values
+    the openocd/pyocd path is documented to take."""
+    backend = SwdProbeFlash()
+    with patch("flash_backends.swd_probe.shutil.which",
+               side_effect=lambda t: f"/usr/bin/{t}"
+               if t == "openocd" else None), \
+         patch("flash_backends.swd_probe.subprocess.run",
+               return_value=_proc(rc=0)) as run_mock:
+        result = backend.flash(_ctx(
+            {"interface": "cmsis-dap", "target": "gd32g553"},
+            artefact="/tmp/gd32.bin"))
+    assert result.ok is True
+    invoked_cmd = run_mock.call_args[0][0]
+    assert "interface/cmsis-dap.cfg" in invoked_cmd
+    assert "target/gd32g553.cfg" in invoked_cmd
+
+
+def test_tcl_quote_rejects_trailing_backslash() -> None:
+    """A trailing backslash escapes the closing brace Tcl would
+    otherwise see, producing an unbalanced word -- reject it rather
+    than emit a script that fails with a confusing parse error."""
+    assert swd_probe._tcl_quote("/tmp/a\\") is None
+    assert swd_probe._tcl_quote("/tmp/a") == "{/tmp/a}"
+
