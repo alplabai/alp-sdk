@@ -51,7 +51,14 @@ _FOLDED_INTO_ANOTHER_ROW = {
 
 def _conformance_class_names() -> list[str]:
     """The `.name = "..."` of every entry in the conformance class array."""
-    return re.findall(r'\.name\s*=\s*"([^"]+)"', CONFORMANCE_MAIN.read_text())
+    # encoding="utf-8" is mandatory, not decoration: Python defaults to the
+    # locale encoding, which is cp1252 on the Windows CI leg, and both files
+    # read here carry non-ASCII (docs/testing.md has `I²C` and `✅`). Without
+    # it this raises UnicodeDecodeError on Windows only -- caught by the
+    # python-smoke (windows-latest) leg that #1023/#1032 made able to fail.
+    return re.findall(
+        r'\.name\s*=\s*"([^"]+)"', CONFORMANCE_MAIN.read_text(encoding="utf-8")
+    )
 
 
 def test_conformance_array_is_readable():
@@ -68,7 +75,7 @@ def test_conformance_array_is_readable():
 
 def test_every_conformance_class_is_represented_in_the_coverage_table():
     """Fails when a class is enrolled in conformance but absent from docs/testing.md."""
-    doc = TESTING_DOC.read_text()
+    doc = TESTING_DOC.read_text(encoding="utf-8")
     missing = []
     for name in _conformance_class_names():
         if f"<alp/{name}.h>" in doc:
