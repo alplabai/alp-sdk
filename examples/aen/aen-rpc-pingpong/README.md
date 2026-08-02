@@ -23,11 +23,46 @@ data.
 [HP] boot_cpu rc=0
 [HP] register_endpoint rc=0
 [HP] bound=1
-RESULT: pingpong PASS -- pongs=16/16
+RESULT PASS: pingpong -- received 16/16 pong(s) after sending 16 ping(s)
 ```
 
 Both endpoints bind; all 16 ping/pong round-trips complete. (Beacons mirror
 `bound`/count to global SRAM0 since HE's console is in HE-local memory.)
+
+## Verdicts, timeouts, and the HE<->HP boot block on this bench
+
+Both HP and HE always print exactly one `RESULT` line before `main()` returns
+(no more idling forever with no verdict):
+
+- `RESULT PASS: pingpong -- ...` — real evidence: HP received all 16 pongs
+  (or, on HE, every ping received was queued back to HP -- `ipc_service_send()`
+  returning >= 0 only means the frame reached the local vring, HE never
+  observes whether HP actually accepted it).
+- `RESULT SKIP: pingpong -- ...` — HE was released but the endpoint never
+  bound, or it bound but sent nothing, within a bounded window — states what
+  was locally proven, not a failure of this app's code.
+- `RESULT FAIL: pingpong -- ...` — a real local error: `alp_mproc_boot_core`
+  (HP) returned an unexpected rc, `ipc0`/`register_endpoint` failed, or every
+  local send (`ipc_service_send`) failed.
+
+This build ships `CONFIG_HAS_ALIF_SE_SERVICES=y` and no `native_sim` overlay,
+so `alp_mproc_boot_core()` always resolves to the E8 SE backend for
+`ALP_CORE_M55_HE` — the `<alp/mproc.h>` contract's `ALP_ERR_NOSUPPORT` case
+("no boot authority for `core` in this build: wrong SoM, `native_sim`, or a
+core the platform boots by other means") is not reachable in this
+configuration. So HP treats *any* nonzero `alp_mproc_boot_core` rc, including
+`ALP_ERR_NOSUPPORT`, as `RESULT FAIL`, not a skip: on these boards a `-6`
+here would mean the boot path fell out of the build (e.g. the SE backend lost
+the link, or the silicon-ref stopped matching) — a regression this app must
+surface, not paper over.
+
+Every wait (register_endpoint retry: 4000 ms; endpoint bind: 5000 ms; HP's
+round-drive grace window: 5 extra heartbeats; HE's serve window: 3000 ms) is
+bounded so a genuinely absent peer produces a verdict instead of a hang. The
+verdict is also mirrored into a beacon word (`SELF_BEACON[2]`, right after the
+heartbeat word) before `main()` returns, so a bench SWD read can tell a
+completed run (word set to 1/2/3) apart from a crash (word still 0) even
+though the heartbeat itself stops moving once `main()` has exited.
 
 ## Three MBOX-driver fixes this bring-up required (all in `mbox_alif_mhuv2.c`)
 

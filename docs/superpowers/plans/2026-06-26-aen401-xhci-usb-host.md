@@ -16,7 +16,7 @@
 - "Alp Lab" spelling; no `Co-Authored-By: Claude`; `py -3.14`; no binaries in git; no OneDrive paths / confidential prose in the repo.
 - Branch `feat/aen401-usb-host` (off `dev`) → PR #268.
 - Grounded values (DFP): USB `reg = <0x48200000 …>`, `interrupts = <101 0>`; DWC3 `GCTL @ 0xC110`. E4: SRAM0 `0x02000000`/4 MB, SRAM1 `0x08000000`/4 MB, MRAM `0x80000000`/5.5 MB, HP-ITCM `0x50000000`/256 KB, HP-DTCM `0x50800000`/1 MB, USB 16 EP. E7: SRAM1 2.5 MB, USB 8 EP. E8: SRAM1 4 MB, USB 16 EP.
-- WSL Zephyr workspace `/home/alplab/zephyrproject` (4.4.0); drive west via a `.sh` through `MSYS_NO_PATHCONV=1 wsl bash /mnt/c/.../script.sh`.
+- WSL Zephyr workspace `/home/<user>/zephyrproject` (4.4.0); drive west via a `.sh` through `MSYS_NO_PATHCONV=1 wsl bash /mnt/c/.../script.sh`.
 
 ---
 
@@ -107,7 +107,7 @@ properties:
 
 Confirm the xHCI base + IRQ + the DWC3 global init from the DFP/HWRM (do NOT copy HWRM prose into code — extract the offset/step facts):
 ```
-MSYS_NO_PATHCONV=1 wsl bash -lc "grep -nE 'USB_BASE|USB_IRQ_IRQn|GCTL' /home/alplab/alif-bsp-ref/alif-usb-ref/alif_ensemble-cmsis-dfp/Device/soc/AE402FA0E5597/include/rtss_hp/soc.h | head"
+MSYS_NO_PATHCONV=1 wsl bash -lc "grep -nE 'USB_BASE|USB_IRQ_IRQn|GCTL' /home/<user>/alif-bsp-ref/alif-usb-ref/alif_ensemble-cmsis-dfp/Device/soc/AE402FA0E5597/include/rtss_hp/soc.h | head"
 ```
 Expected: `USB_BASE 0x48200000`, `USB_IRQ_IRQn = 101`, `GCTL @ 0xC110`. Record the DWC3 `G*` host-mode steps from HWRM §14.10.5.3 / Table 14-168 as code comments (which `G*` registers to program; `GCTL` PrtCapDir=host).
 
@@ -303,7 +303,7 @@ In `src/backends/usb/zephyr_drv.c`, change the host guard `DT_HAS_COMPAT_STATUS_
 - [ ] **Step 2: clang-format-22 the backend file** (it's under `src/**`)
 
 ```
-MSYS_NO_PATHCONV=1 wsl bash -lc "cd /mnt/c/Users/caner/Documents/GitHub/alp-sdk && ~/.local/bin/clang-format -i src/backends/usb/zephyr_drv.c && ~/.local/bin/clang-format --dry-run --Werror src/backends/usb/zephyr_drv.c && echo CLANGFMT-CLEAN"
+MSYS_NO_PATHCONV=1 wsl bash -lc "cd /mnt/c/Users/<user>/Documents/GitHub/alp-sdk && ~/.local/bin/clang-format -i src/backends/usb/zephyr_drv.c && ~/.local/bin/clang-format --dry-run --Werror src/backends/usb/zephyr_drv.c && echo CLANGFMT-CLEAN"
 ```
 Expected: `CLANGFMT-CLEAN`.
 
@@ -315,7 +315,7 @@ In `examples/peripheral-io/usb-host-storage/prj.conf`, replace `CONFIG_UHC_DWC2_
 
 `scratchpad/build_xhci.sh`:
 ```bash
-cd /mnt/c/Users/caner/Documents/GitHub/alp-sdk
+cd /mnt/c/Users/<user>/Documents/GitHub/alp-sdk
 export ALP_SDK_ROOT=$PWD
 west build -b alp_e1m_aen401_m55_hp examples/peripheral-io/usb-host-storage -d /tmp/xhci_host -p always 2>&1 | tail -30
 file /tmp/xhci_host/zephyr/zephyr.elf

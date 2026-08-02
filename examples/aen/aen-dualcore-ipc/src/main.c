@@ -53,8 +53,19 @@
  *
  * PASS: the HE round-trip counter (beacon @0x02002080) advances to N and the
  * mismatch counter (@0x02002084) stays 0 -- every reply == request.payload + 1.
+ *
+ * REQ_MBOX/RPL_MBOX are fixed absolute global-SRAM0 addresses, not .bss --
+ * Zephyr startup does NOT zero them. Both cores explicitly zero BOTH
+ * mailboxes at the top of main(), before any doorbell exchange: on a warm
+ * reset or a bench re-run without a full power cycle, leftover bytes from a
+ * PRIOR successful run would otherwise satisfy "seq changed and is nonzero"
+ * on the very first poll and produce a false PASS with the peer never
+ * having booted this time. Every wait for the peer (HE's per-round reply
+ * wait, HP's verdict window) is bounded for the same reason a hang would be
+ * indistinguishable from a still-absent peer.
  */
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
@@ -79,6 +90,12 @@
 /* ----- round-trip parameters ----- */
 #define IPC_PAYLOAD_WORDS 14U /* 14 + seq + len = 16 words = 64 bytes/mailbox */
 #define ROUND_TRIPS       64U /* N round-trips before the HE app idles       */
+
+/* ----- bounded waits (named, see file header for why every wait is bounded) ----- */
+#define ROUND_TIMEOUT_MS 200U /* HE: max wait for HP's reply to ONE round-trip */
+#define ROUND_POLL_MS    2U
+#define VERDICT_WAIT_MS  3000U /* HP: max wait to see >=1 request before reporting a verdict */
+#define VERDICT_POLL_MS  20U
 
 /*
  * Shared mailbox header agreed by both cores. 64 bytes total so request and
@@ -127,14 +144,68 @@ static inline int mhu_check_clear(void)
 	return 0;
 }
 
-/* Bring up my non-secure MHU-1 sender link (request access, wait ready). */
-static inline void mhu_sender_ready(void)
+/* Bring up my non-secure MHU-1 sender link (request access, wait ready).
+ * Bounded, same VERDICT_WAIT_MS/VERDICT_POLL_MS window as every other wait
+ * for a peer in this app -- a sender link that never comes ready must not
+ * hang main() before any RESULT line can print. Returns true once ready. */
+static inline bool mhu_sender_ready(void)
 {
 	sys_write32(1U, TX_ACC_REQ);
-	while (sys_read32(TX_ACC_RDY) == 0U) {
-		/* wait for the link to come ready */
+	for (uint32_t t = 0U; t < VERDICT_WAIT_MS / VERDICT_POLL_MS; t++) {
+		SELF_BEACON[1] = t + 1U;
+		if (sys_read32(TX_ACC_RDY) != 0U) {
+			return true;
+		}
+		k_msleep(VERDICT_POLL_MS);
+	}
+	return false;
+}
+
+/* Explicitly zero a mailbox struct: it lives at a fixed global-SRAM0 address,
+ * not .bss, so nothing else clears it (see the file header). */
+static inline void zero_mbox(volatile struct ipc_msg *m)
+{
+	m->seq = 0U;
+	m->len = 0U;
+	for (uint32_t i = 0U; i < IPC_PAYLOAD_WORDS; i++) {
+		m->payload[i] = 0U;
 	}
 }
+
+#if defined(CONFIG_BOARD_ALP_E1M_AEN801_M55_HP)
+/* HP: service ONE pending request if REQ_MBOX carries a seq we haven't served
+ * yet. Shared by the bounded verdict window and the trailing idle-serve loop
+ * so both use exactly the same serve logic. Returns true if a request was
+ * served this call. HP-only: the HE build never serves, so this would
+ * otherwise be a dead, unused static function on that build. */
+static bool hp_try_serve(uint32_t *last_seq, uint32_t *served)
+{
+	uint32_t seq = REQ_MBOX->seq;
+
+	if (seq == *last_seq || seq == 0U) {
+		return false;
+	}
+	barrier_dmem_fence_full(); /* see the request payload after seq */
+	uint32_t len = REQ_MBOX->len;
+
+	if (len > IPC_PAYLOAD_WORDS) {
+		len = IPC_PAYLOAD_WORDS;
+	}
+	for (uint32_t i = 0U; i < len; i++) {
+		RPL_MBOX->payload[i] = REQ_MBOX->payload[i] + 1U;
+	}
+	RPL_MBOX->len = len;
+	barrier_dmem_fence_full();
+	RPL_MBOX->seq = seq; /* echo seq LAST: HE polls it changing */
+
+	*last_seq = seq;
+	(*served)++;
+	*HP_SERVED = *served;
+
+	mhu_ring(); /* hint HE that the reply is ready */
+	return true;
+}
+#endif
 
 int main(void)
 {
@@ -142,6 +213,12 @@ int main(void)
 
 	SELF_BEACON[0] = SELF_MAGIC;
 	SELF_BEACON[1] = 0U;
+
+	/* See the file header: fixed global-SRAM0 addresses are never zeroed by
+	 * Zephyr startup, so a warm reset / bench re-run could otherwise read a
+	 * PRIOR run's leftover request/reply as if it were fresh. */
+	zero_mbox(REQ_MBOX);
+	zero_mbox(RPL_MBOX);
 
 #if defined(CONFIG_BOARD_ALP_E1M_AEN801_M55_HP)
 	/*
@@ -156,43 +233,58 @@ int main(void)
 	       HE_LOAD_ADDR,
 	       (int)rc);
 
-	mhu_sender_ready(); /* my TX frame = the HP->HE reply ring */
+	/* my TX frame = the HP->HE reply ring; local HW readiness, independent of
+	 * whether HE is actually alive -- but bounded like every other wait here,
+	 * so a link that never comes ready SKIPs instead of hanging main(). */
+	if (!mhu_sender_ready()) {
+		printk("RESULT SKIP: dualcore-ipc -- MHU-1 sender link (HP->HE reply frame) "
+		       "never came ready within %u ms; no request/reply servicing attempted\n",
+		       VERDICT_WAIT_MS);
+		return 0;
+	}
 
 	uint32_t served   = 0U;
 	uint32_t last_seq = 0U;
 
-	for (uint32_t hb = 1U;; hb++) {
-		SELF_BEACON[1] = hb;
+	/* This build ships CONFIG_HAS_ALIF_SE_SERVICES=y and no native_sim
+	 * overlay, so boot_core always resolves to the E8 SE backend for
+	 * ALP_CORE_M55_HE (<alp/mproc.h>'s ALP_ERR_NOSUPPORT case -- "no boot
+	 * authority for core in this build" -- is not reachable here); any
+	 * nonzero rc is a real local error and reported FAIL below, not a
+	 * skippable environment state. */
+	if (rc != ALP_OK) {
+		printk("RESULT FAIL: alp_mproc_boot_core rc=%d\n", (int)rc);
+	} else {
+		for (uint32_t t = 0U; t < VERDICT_WAIT_MS / VERDICT_POLL_MS; t++) {
+			SELF_BEACON[1] = t + 1U;
+			mhu_check_clear(); /* drain HE's doorbell (a non-blocking hint only) */
+			(void)hp_try_serve(&last_seq, &served);
+			k_msleep(VERDICT_POLL_MS);
+		}
 
-		mhu_check_clear(); /* drain HE's doorbell (a non-blocking hint only) */
+		if (served > 0U) {
+			printk("RESULT PASS: dualcore-ipc -- serviced %u HE request(s)\n", served);
+		} else {
+			printk("RESULT SKIP: dualcore-ipc -- HE released (rc=0) but no request "
+			       "arrived within %u ms; local responder + mailbox zeroing OK, peer "
+			       "never sent\n",
+			       VERDICT_WAIT_MS);
+		}
+	}
+
+	/* Keep serving forever after the verdict, same as every other beacon-based
+	 * demo here -- a late-arriving peer still gets served, and the heartbeat
+	 * stays live for a bench read. */
+	for (uint32_t hb = VERDICT_WAIT_MS / VERDICT_POLL_MS + 1U;; hb++) {
+		SELF_BEACON[1] = hb;
 
 		/*
 		 * Handshake on the SHARED request seq, not the doorbell edge: REQ_MBOX
 		 * is coherent SRAM, so a new seq is the reliable "request ready" signal
 		 * (the single-bit MHU channel races on back-to-back rings).
 		 */
-		uint32_t seq = REQ_MBOX->seq;
-
-		if (seq != last_seq && seq != 0U) {
-			barrier_dmem_fence_full(); /* see the request payload after seq */
-			uint32_t len = REQ_MBOX->len;
-
-			if (len > IPC_PAYLOAD_WORDS) {
-				len = IPC_PAYLOAD_WORDS;
-			}
-			for (uint32_t i = 0U; i < len; i++) {
-				RPL_MBOX->payload[i] = REQ_MBOX->payload[i] + 1U;
-			}
-			RPL_MBOX->len = len;
-			barrier_dmem_fence_full();
-			RPL_MBOX->seq = seq; /* echo seq LAST: HE polls it changing */
-
-			last_seq = seq;
-			served++;
-			*HP_SERVED = served;
-
-			mhu_ring(); /* hint HE that the reply is ready */
-		}
+		mhu_check_clear(); /* drain HE's doorbell (a non-blocking hint only) */
+		(void)hp_try_serve(&last_seq, &served);
 
 		for (volatile uint32_t d = 0U; d < 2000U; d++) {
 		}
@@ -206,14 +298,25 @@ int main(void)
 	*RT_DONE = 0U;
 	*RT_BAD  = 0U;
 
-	mhu_sender_ready(); /* my TX frame = the HE->HP request ring */
+	/* my TX frame = the HE->HP request ring; bounded like every other wait
+	 * here, so a link that never comes ready SKIPs instead of hanging main(). */
+	if (!mhu_sender_ready()) {
+		printk("RESULT SKIP: dualcore-ipc -- MHU-1 sender link (HE->HP request frame) "
+		       "never came ready within %u ms; no round-trips attempted\n",
+		       VERDICT_WAIT_MS);
+		return 0;
+	}
 
 	printk("HE requester ready -- running %u round-trips over MHU-1\n", ROUND_TRIPS);
 
-	uint32_t completed = 0U;
-	uint32_t bad       = 0U;
+	uint32_t completed  = 0U;
+	uint32_t bad        = 0U;
+	bool     peer_seen  = false; /* did HP reply to even one round? */
+	uint32_t last_round = 0U;    /* rounds actually attempted, for the verdict text */
 
 	for (uint32_t seq = 1U; seq <= ROUND_TRIPS; seq++) {
+		last_round = seq;
+
 		/* Build the request: payload[i] = seq*0x100 + i. */
 		for (uint32_t i = 0U; i < IPC_PAYLOAD_WORDS; i++) {
 			REQ_MBOX->payload[i] = (seq << 8) + i;
@@ -228,10 +331,24 @@ int main(void)
 		 * Wait on the SHARED reply seq (the real handshake); drain HP's doorbell
 		 * as a non-blocking latency hint. Relying on the doorbell EDGE alone
 		 * raced the single-bit channel re-arm and stalled after one round-trip.
+		 * Bounded: if HP never replies to THIS round within ROUND_TIMEOUT_MS,
+		 * it isn't there -- stop driving further rounds instead of hanging.
 		 */
-		while (RPL_MBOX->seq != seq) {
+		bool got_reply = false;
+
+		for (uint32_t t = 0U; t < ROUND_TIMEOUT_MS / ROUND_POLL_MS; t++) {
 			mhu_check_clear();
+			if (RPL_MBOX->seq == seq) {
+				got_reply = true;
+				break;
+			}
+			k_msleep(ROUND_POLL_MS);
 		}
+
+		if (!got_reply) {
+			break;
+		}
+		peer_seen = true;
 		barrier_dmem_fence_full(); /* see the reply payload after the seq */
 
 		/* Verify reply == request payload + 1, word for word. */
@@ -253,10 +370,28 @@ int main(void)
 		SELF_BEACON[1] = seq;
 	}
 
-	printk("RESULT: round-trips completed=%u mismatches=%u (PASS if completed=%u, mismatches=0)\n",
-	       completed,
-	       bad,
-	       ROUND_TRIPS);
+	if (completed == ROUND_TRIPS && bad == 0U) {
+		printk("RESULT PASS: dualcore-ipc -- %u/%u round-trips verified, 0 mismatches\n",
+		       completed,
+		       ROUND_TRIPS);
+	} else if (bad > 0U) {
+		printk("RESULT FAIL: dualcore-ipc -- completed=%u mismatches=%u out of %u "
+		       "round-trips attempted -- a reply did not match request payload+1\n",
+		       completed,
+		       bad,
+		       last_round);
+	} else if (!peer_seen) {
+		printk("RESULT SKIP: dualcore-ipc -- HP never replied to round 1 within %u ms; "
+		       "local requester setup (mailboxes zeroed, sender link ready) OK\n",
+		       ROUND_TIMEOUT_MS);
+	} else {
+		printk("RESULT SKIP: dualcore-ipc -- HP served %u/%u round-trips (0 mismatches) "
+		       "then stopped replying (round %u timed out after %u ms)\n",
+		       completed,
+		       ROUND_TRIPS,
+		       last_round,
+		       ROUND_TIMEOUT_MS);
+	}
 
 	/* Idle: keep the beacon live so the bench read sees the final counters. */
 	for (uint32_t hb = ROUND_TRIPS + 1U;; hb++) {

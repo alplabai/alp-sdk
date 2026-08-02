@@ -38,7 +38,7 @@
 #include <zephyr/drivers/dac.h>
 
 #define ALP_DAC_DEV_OR_NULL(idx) \
-	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_dac, idx))), \
+	COND_CODE_1(DT_NODE_HAS_STATUS(DT_ALIAS(_CONCAT(alp_dac, idx)), okay), \
 	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_dac, idx)))), \
 	            (NULL))
 
@@ -54,7 +54,12 @@ static const struct device *const alp_dac_devs[] = {
  * matching alif,reference-mv=750 / DAC12_VREF_CONT=0x4, carried in DT, see the
  * binding), so a hardcoded 3300 here would make every setpoint ~4.4x too low.  Channels whose
  * alias node lacks the property (e.g. the 3.3 V GD32/V2N DAC route) default to
- * 3300, preserving the historical rail-referenced behaviour for those SoCs. */
+ * 3300, preserving the historical rail-referenced behaviour for those SoCs.
+ *
+ * Deliberately still DT_NODE_EXISTS, not DT_NODE_HAS_STATUS: this feeds
+ * DT_PROP_OR, a compile-time property read, not a device get, and z_open()
+ * (below) checks dev == NULL and returns before alp_dac_ref_mv[] is ever
+ * read -- see ALP_DAC_DEV_OR_NULL above, which already gates on status. */
 #define ALP_DAC_REF_MV_OR_DEFAULT(idx) \
 	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_dac, idx))), \
 	            (DT_PROP_OR(DT_ALIAS(_CONCAT(alp_dac, idx)), alif_reference_mv, 3300)), \

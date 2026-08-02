@@ -37,10 +37,46 @@ SET="$SETOOLS_DIR"
 OBJ="$(bench_tool_prefix)" || exit $?
 JLINK="$(bench_jlink_exe)" || exit $?
 DEV="$JLINK_DEVICE_FLASH"
+# See ram-run.sh for why the selector is conditional on JLINK_SN.
+JLINK_ARGS=("$JLINK")
+[ -n "${JLINK_SN:-}" ] && JLINK_ARGS+=(-SelectEmuBySN "$JLINK_SN")
 NAME=$(basename "$BD")
 BIN="$BD/zephyr/zephyr.bin"
 ELF="$BD/zephyr/zephyr.elf"
-BUF=0x$($OBJ-nm "$ELF" | awk '/ ram_console_buf$/{print $1}')
+# See ram-run.sh (issue #935): if BUF_SYM is empty, do NOT fold it into BUF --
+# BUF would silently become the bare string "0x" and step 4's `mem8 $BUF,
+# $SIZE` would run as `mem8 0x, $SIZE`, printing an EMPTY "RAM console" block
+# indistinguishable from a boot failure. Step 4 below checks BUF_SYM directly.
+BUF_SYM=$($OBJ-nm "$ELF" | awk '/ ram_console_buf$/{print $1}')
+BUF=0x$BUF_SYM
+
+# 0. SAFETY GATE -- confirm we are talking to the AEN E8, not some other probe
+# on the bench, BEFORE any MRAM write. Same DPIDR gate as
+# flash-jlink-mramxip.sh (see that script for the full rationale): JLINK_SN
+# narrows probe choice but does not itself prove which board answered. Hard
+# ABORT, not a warning -- read-only connect first, no writes until confirmed.
+cat > /tmp/flowd-preflight.jlink <<EOF
+si SWD
+speed $JLINK_SPEED
+device $JLINK_DEVICE_READ
+connect
+exit
+EOF
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/flowd-preflight.jlink \
+  > /tmp/flowd-preflight.out 2>&1 || true
+if grep -qi "$GD32_DPIDR" /tmp/flowd-preflight.out; then
+  echo "!! ABORT: probe reports SW-DP IDR 0x$GD32_DPIDR -- that is the V2N-M1" >&2
+  echo "   GD32, NOT the AEN E8. Wrong probe selected (JLINK_SN='${JLINK_SN:-}')." >&2
+  echo "   Refusing to write MRAM. See /tmp/flowd-preflight.out." >&2
+  exit 4
+fi
+if ! grep -qi "$AEN_DPIDR" /tmp/flowd-preflight.out; then
+  echo "!! ABORT: expected AEN E8 SW-DP IDR 0x$AEN_DPIDR not seen on connect." >&2
+  echo "   Refusing to write MRAM -- check JLINK_SN / wiring / probe selection." >&2
+  cat /tmp/flowd-preflight.out >&2
+  exit 4
+fi
+echo ">>> DPIDR gate OK: probe confirmed AEN E8 (0x$AEN_DPIDR)" >&2
 
 # 1. stage the image + the per-app signed-ATOC config (same JSON flow-run.sh uses)
 cp -f "$BIN" "$SET/build/images/$NAME.bin"
@@ -53,7 +89,7 @@ cat > "$SET/build/config/$NAME.json" <<JSON
 JSON
 
 cd "$SET"
-echo ">>> FLOW-D J-Link flash $NAME  (ram_console_buf=$BUF)" >&2
+echo ">>> FLOW-D J-Link flash $NAME  (ram_console_buf=${BUF_SYM:-none (UART console)})" >&2
 # 2. build the signed ATOC package (app-gen-toc only -- NO SE-UART) + read its
 #    MRAM placement from the generated map (shifts per build/config -- never hardcode).
 ./app-gen-toc -f "build/config/$NAME.json" >/tmp/gentoc.log 2>&1 || { echo "gen-toc FAILED"; tail /tmp/gentoc.log; exit 1; }
@@ -76,8 +112,7 @@ r
 g
 exit
 EOF
-# shellcheck disable=SC2046  # word-splitting bench_jlink_select is intentional
-$JLINK $(bench_jlink_select) -nogui 1 -CommanderScript /tmp/flowd.jlink 2>&1 | tee /tmp/flowd.out | \
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/flowd.jlink 2>&1 | tee /tmp/flowd.out | \
   grep -iE "could not connect|fail|error|Verify|O\.K\.|Writing|Programming|Reset|Cortex|Found" | head -30
 echo "----- (full log: /tmp/flowd.out) -----"
 if grep -qi "Could not connect to the target device" /tmp/flowd.out; then
@@ -89,18 +124,23 @@ fi
 # 4. SES has re-booted the app; attach read-only with the GENERIC device and dump
 #    the RAM console (the part-number profile can't re-halt the running secure core).
 sleep 3
-# SIZE is caller-supplied ($2); chunk the mem8 read (bench_jlink_mem8_chunks) --
-# a single read over JLinkExe's 0x10000 cap fails silently (empty console).
-{
-	echo "device $JLINK_DEVICE_READ"
-	echo si SWD
-	echo "speed $JLINK_SPEED"
-	echo connect
-	bench_jlink_mem8_chunks "$BUF" "$SIZE"
-	echo exit
-} > /tmp/flowd-read.jlink
-# shellcheck disable=SC2046  # word-splitting bench_jlink_select is intentional
-$JLINK $(bench_jlink_select) -nogui 1 -CommanderScript /tmp/flowd-read.jlink 2>/tmp/flowd-rd.err > /tmp/flowd-rd.out || true
-echo "----- $NAME RAM console (flow-D flashed, SE-booted) -----"
-awk '/^[0-9A-Fa-f]+ = / { for (i=3;i<=NF;i++){ if ($i !~ /^[0-9A-Fa-f][0-9A-Fa-f]$/) continue; b=strtonum("0x"$i); if(b==0){nul++; if(nul>6)exit; next} nul=0; if(b==10||b==13){printf "\n";continue} if(b>=32&&b<127)printf "%c",b } }' /tmp/flowd-rd.out
-echo; echo "--------------------------------------------------------"
+if [ -z "$BUF_SYM" ]; then
+  echo "----- $NAME RAM console: no 'ram_console_buf' in this image (UART-console app) -----" >&2
+  echo "      the flash above still completed -- this is not a boot failure. Read the" >&2
+  echo "      console via the labgrid 'console' resource instead." >&2
+else
+  # SIZE is caller-supplied ($2); chunk the mem8 read (bench_jlink_mem8_chunks) --
+  # a single read over JLinkExe's 0x10000 cap fails silently (empty console).
+  {
+    echo "device $JLINK_DEVICE_READ"
+    echo si SWD
+    echo "speed $JLINK_SPEED"
+    echo connect
+    bench_jlink_mem8_chunks "$BUF" "$SIZE"
+    echo exit
+  } > /tmp/flowd-read.jlink
+  "${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/flowd-read.jlink 2>/tmp/flowd-rd.err > /tmp/flowd-rd.out || true
+  echo "----- $NAME RAM console (flow-D flashed, SE-booted) -----"
+  awk '/^[0-9A-Fa-f]+ = / { for (i=3;i<=NF;i++){ if ($i !~ /^[0-9A-Fa-f][0-9A-Fa-f]$/) continue; b=strtonum("0x"$i); if(b==0){nul++; if(nul>6)exit; next} nul=0; if(b==10||b==13){printf "\n";continue} if(b>=32&&b<127)printf "%c",b } }' /tmp/flowd-rd.out
+  echo; echo "--------------------------------------------------------"
+fi

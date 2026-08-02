@@ -65,10 +65,21 @@ for production SoMs plus placeholder presets for active bring-up:
 | RZ/V2N + DEEPX    | `E1M-V2M101`, `V2M102`                                                        |
 | NXP i.MX 93       | `E1M-NX9101` (placeholder MPN; production `E1M-NX9xxx` TBD pending HW config) |
 
-`hw_rev` cross-checks against the family's `hw-revisions.yaml`.
-If the customer's SDK version is older than the rev's
-`min_sdk_version`, the loader exits with code 3.  Always pin
-`hw_rev` for production; omit for bring-up convenience.
+`hw_rev` selects an entry from the family's `hw-revisions.yaml` to
+pick up its pad-routing overrides; an unrecognised value refuses the
+build (`SdkRevisionUnknown`) naming the revisions that ARE known,
+rather than silently falling back to the base revision's routing.
+Each entry's `min_sdk_version` / `max_sdk_version` window is also
+enforced against the running SDK version (`SdkRevisionUnsupported`).
+An *existing* revision that is declared `status: reserved`,
+`status: tbd`, or carries no `status` key at all also refuses the
+build (`SdkRevisionNotBuildable`, exit code 5 from
+`scripts/validate_board_yaml.py`) -- see
+[`docs/board-config-hardware.md`](../board-config-hardware.md) and
+[#1025](https://github.com/alplabai/alp-sdk/issues/1025).  Every
+other declared status (`production`, `preview`, `preliminary`,
+`deprecated`) resolves and builds normally.  Always pin `hw_rev` for
+production; omit for bring-up convenience.
 
 ### Board declaration
 

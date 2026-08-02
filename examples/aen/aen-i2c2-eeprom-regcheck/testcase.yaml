@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the upstream i2c_dw driver (Tier-1) on the
+# E1M-AEN801 (Ensemble E8, M55-HE): scans the SoC I2C2 DesignWare master bus
+# and reads the on-module 24C128 EEPROM @0x50.
+#
+# Compile-checks the driver + DT node on the real E8 board target; filtered OUT
+# of the native_sim PR gate (platform_allow = the AEN801 HE board only).
+
+sample:
+  name: aen-i2c2-eeprom-regcheck
+  description: |
+    Bench RAM-run I2C2 + EEPROM (i2c_dw) proof for the E1M-AEN801 (Alif
+    Ensemble E8, Cortex-M55-HE): scans the SoC I2C2 bus and reads the
+    on-module 24C128 EEPROM @0x50, printing a hexdump + PASS/FAIL line.
+
+tests:
+  alp_sdk.examples.aen.i2c2_eeprom_regcheck.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - i2c
+      - eeprom
+    build_only: true   # the I2C2/EEPROM read check is a bench flash, not a CI run.

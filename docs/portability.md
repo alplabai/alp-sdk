@@ -13,7 +13,9 @@ This cookbook ties three other docs together:
 
 - [`docs/portability-matrix.md`](portability-matrix.md) — the empirical
   guarantee.  Every cell is a SKU × example compile test;
-  21 / 21 cells green for E1M, 12 / 12 for E1M-X.
+  18 / 21 cells green for E1M (NX9101's only hw_rev is `status: tbd` --
+  refused outright by the hw_rev-buildable gate, #1025 --
+  so all 3 of its cells currently fail), 12 / 12 for E1M-X.
 - [`docs/adr/0011-intra-family-portability.md`](adr/0011-intra-family-portability.md)
   — the architectural decision record that ratifies the intra-family
   boundary, with the alternatives we considered and rejected.
@@ -171,9 +173,10 @@ on.  See the shared registry at
 [`metadata/registries/peripheral-kconfig.json`](../metadata/registries/peripheral-kconfig.json).)
 
 The `_U85=y` line is the visible footprint of fix G-1 (resolved
-2026-05-18 — see the matrix doc).  The orchestrator walks the SoM
-preset's `inference.npu_population[]` and emits one
-variant-specific switch per NPU present, so the TFLM driver can
+2026-05-18 — see the matrix doc).  The orchestrator reads the
+silicon capability counts (`ethos_u{55,65,85}_count`, from the SoC
+JSON `npus[]`) and emits one variant-specific switch per NPU
+present, so the TFLM driver can
 select Vela's TensorOptimized kernels at link time on E8 silicon
 without losing the U55 dispatch on the same SoM.
 
@@ -286,9 +289,11 @@ static alp_inference_t *load_my_model(const void *vela_bytes, size_t n)
 
 Two things make this work portably:
 
-1. The SoM preset declares which NPUs are physically present
-   (`inference.preferred_backend`, `inference.npu_population[]`,
-   `capabilities.*` in `metadata/e1m_modules/<SKU>.yaml`).  Per
+1. The SoM preset declares the preferred backend
+   (`inference.preferred_backend`) and any SoM-added
+   `capabilities.*` in `metadata/e1m_modules/<SKU>.yaml`; which NPUs
+   are physically present is silicon-determined (SoC JSON `npus[]` /
+   capability counts).  Per
    memory note [[silicon-determined-fields-not-customer-facing]],
    that declaration is the *single source of truth* — the customer
    does not pick the backend, the silicon does.

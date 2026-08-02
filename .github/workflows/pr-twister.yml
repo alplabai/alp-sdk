@@ -94,7 +94,7 @@ jobs:
           # Pin to the Zephyr release the v0.1 dependency matrix
           # documents (VERSIONS.md).  Bump intentionally; do not
           # track main.
-          west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.4.0 .
+          west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.4.1 .
           west update --narrow -o=--depth=1
           west zephyr-export
 
@@ -104,7 +104,7 @@ jobs:
           path: |
             ${{ github.workspace }}/zephyrproject/modules
             ${{ github.workspace }}/zephyrproject/zephyr
-          key: zephyr-v4.4.0-host-${{ runner.os }}
+          key: zephyr-v4.4.1-host-${{ runner.os }}
 
       # Persist ccache objects across runs, per shard.  The save key is
       # per-SHA so each run writes a fresh entry; restore-keys falls
@@ -161,7 +161,7 @@ jobs:
       # pure-Python checkouts, so the gate pytest.skip'd on every PR
       # and reported green while enforcing nothing.
       #
-      # This job already west-init'd the pinned v4.4.0 tree above, so
+      # This job already west-init'd the pinned v4.4.1 tree above, so
       # the oracle is free here -- run it on shard 1 only (the matrix
       # would otherwise run it 4x identically).  ALP_REQUIRE_ZEPHYR_ORACLE=1
       # turns the gate's skip into a hard failure: this job PROMISES
@@ -177,6 +177,24 @@ jobs:
           python3 -m pytest tests/scripts/test_hil_blocks_coverage.py -q \
             -k test_emitted_sb_config_symbols_exist_in_pinned_zephyr
 
+      # Same class, same oracle, same reason (#1078): bootstrap.json's
+      # `zephyr.pythonMinVersion` is cross-checked against the PINNED
+      # Zephyr's own cmake/modules/python.cmake PYTHON_MINIMUM_REQUIRED,
+      # which needs a real Zephyr tree to read.  Without a job that has
+      # one, check_bootstrap_manifest.py's Zephyr half SKIPs -- and its
+      # only other CI execution path (test_default_corpus_passes under
+      # cross-platform-zephyr.yml's python-smoke) is a bare checkout with
+      # no `west update`, where pytest swallows the SKIP and the job goes
+      # green.  That is precisely the #807/#814 failure the step above
+      # documents, so it gets the same treatment rather than a repeat.
+      - name: check · bootstrap.json agrees with pinned Zephyr's python floor (#1078)
+        if: matrix.shard == 1
+        working-directory: ${{ github.workspace }}/alp-sdk
+        env:
+          ZEPHYR_BASE: ${{ github.workspace }}/zephyrproject/zephyr
+          ALP_REQUIRE_ZEPHYR_ORACLE: '1'
+        run: python3 scripts/check_bootstrap_manifest.py
+
       # --emit kconfig (#893) is the SDK's first WORKSPACE-dependent emit
       # mode -- it needs a real board's Kconfig tree resolved by Zephyr's
       # own CMake, which (unlike native_sim) needs a real cross-toolchain.
@@ -187,13 +205,35 @@ jobs:
       # MB and doesn't touch the main twister-shard steps above (they stay
       # ZEPHYR_TOOLCHAIN_VARIANT=host, no SDK). Shard-1-only, same as the
       # SB_CONFIG oracle step above.
+      # metadata/toolchains.json (issue #949 item 3) is the single source
+      # for the pinned Zephyr SDK version -- scripts/check_toolchain_lock.py
+      # gates the cache key below staying keyed on it, not on the Zephyr
+      # checkout version (the two are different releases; conflating them
+      # let this cache key silently outlive an SDK bump).
+      - name: Read Zephyr SDK toolchain pin (metadata/toolchains.json)
+        if: matrix.shard == 1
+        working-directory: ${{ github.workspace }}/alp-sdk
+        run: |
+          set -euo pipefail
+          python3 -c '
+          import json
+          d = json.load(open("metadata/toolchains.json"))
+          version = d["zephyrSdk"]["version"]
+          print(f"ZEPHYR_SDK_VERSION={version}")
+          ' >> "$GITHUB_ENV"
+
+      # Cache key is keyed on the SDK VERSION (from metadata/toolchains.json),
+      # never the Zephyr checkout version above -- an SDK release and a
+      # Zephyr release are different things pinned independently; naming the
+      # wrong one here let an SDK bump silently reuse a stale cached
+      # toolchain forever.
       - name: Install ARM Zephyr SDK toolchain (for --emit kconfig contract)
         if: matrix.shard == 1
         uses: actions/cache@v5
         id: zephyr-sdk-cache
         with:
           path: ${{ github.workspace }}/zephyr-sdk
-          key: zephyr-sdk-arm-zephyr-eabi-v4.4.0-${{ runner.os }}
+          key: zephyr-sdk-arm-zephyr-eabi-${{ env.ZEPHYR_SDK_VERSION }}-${{ runner.os }}
 
       - name: west sdk install (arm-zephyr-eabi only)
         if: matrix.shard == 1 && steps.zephyr-sdk-cache.outputs.cache-hit != 'true'

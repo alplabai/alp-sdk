@@ -103,12 +103,18 @@ def test_real_build_plan_conforms(tmp_path: Path):
     assert plan["sharedArtefacts"]
 
 
-# The same four multicore examples `scripts/check_emit_snapshots.py` pins a
+# The same multicore examples `scripts/check_emit_snapshots.py` pins a
 # byte-for-byte golden for (ADR 0014) -- validating their real emitted plans
 # here is the schema-side half of that same emitter <-> contract lockstep.
+#
+# rpmsg-imx93 excluded (#1025): E1M-NX9101's only hw_rev (imx93 r1) is
+# `status: tbd` -- refused outright by the hw_rev-buildable gate, so it
+# can no longer be emitted at all. Re-add
+# "examples/multicore/rpmsg-imx93/board.yaml" (and its
+# check_emit_snapshots.py CASES entries) once
+# metadata/e1m_modules/imx93/hw-revisions.yaml:r1 carries a buildable status.
 _PINNED_SNAPSHOT_BOARDS = [
     "examples/multicore/rpmsg-aen/board.yaml",
-    "examples/multicore/rpmsg-imx93/board.yaml",
     "examples/multicore/heterogeneous-offload/board.yaml",
     "examples/multicore/rpmsg-v2n/board.yaml",
 ]

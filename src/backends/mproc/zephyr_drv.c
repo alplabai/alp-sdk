@@ -223,10 +223,12 @@ struct alp_shmem_region {
 };
 
 /* Build a const lookup table from DT_ALIAS(alp_shmemN).  IF_ENABLED
- * skips the entry when the alias isn't defined.  Up to 4 regions
- * supported -- raise the upper bound here if a SoM needs more. */
+ * skips the entry when the alias isn't defined OR isn't `okay` -- a
+ * present-but-disabled alp-shmemN drops out of the table rather than
+ * yielding a live region on an uninstantiated carve-out.  Up to 4
+ * regions supported -- raise the upper bound here if a SoM needs more. */
 #define ALP_SHMEM_REGION_ENTRY_IF(idx) \
-	IF_ENABLED(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_shmem, idx))), \
+	IF_ENABLED(DT_NODE_HAS_STATUS(DT_ALIAS(_CONCAT(alp_shmem, idx)), okay), \
 	           ({ \
 	                .name = "alp_shmem" #idx, \
 	                .base = (void *)DT_REG_ADDR(DT_ALIAS(_CONCAT(alp_shmem, idx))), \
@@ -303,7 +305,7 @@ static void z_shmem_close(alp_shmem_backend_state_t *state)
 #if defined(CONFIG_ALP_SDK_MPROC)
 
 #define ALP_MBOX_DEV_OR_NULL(idx) \
-	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_mbox, idx))), \
+	COND_CODE_1(DT_NODE_HAS_STATUS(DT_ALIAS(_CONCAT(alp_mbox, idx)), okay), \
 	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_mbox, idx)))), \
 	            (NULL))
 

@@ -2,6 +2,11 @@
 # Copyright 2026 Alp Lab AB
 # SPDX-License-Identifier: Apache-2.0
 #
+# Cross-platform scope: Linux-only bench helper.  It cross-compiles
+# for the RZ/V2N A55's aarch64-linux-gnu userspace and only runs
+# against a Linux-side sysroot; there is no Mac/Windows equivalent
+# to document because the artefact it builds never runs on either.
+#
 # alp-sdk #683 Path B, stage 5 -- cross-compile + statically link
 # tests/yocto/rpc_uio_bench_main.c for the RZ/V2N A55 (aarch64 Linux
 # userspace, no shared-lib deps) so a serial-only bench can transfer

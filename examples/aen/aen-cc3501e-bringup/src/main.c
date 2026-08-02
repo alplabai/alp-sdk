@@ -478,8 +478,16 @@ int main(void)
 	g_cc3501e_witness.reset_status = (uint32_t)s;
 	g_cc3501e_witness.phase        = CC3501E_PHASE_RESET;
 	if (s == ALP_ERR_NOT_PRESENT_ON_THIS_SOC) {
-		printf("[cc3501e-bringup] bridge bring-up failed (SPI bus %u / WIFI_EN+nRESET "
+		/* The backend authority itself says the part/pins are absent on this
+		 * SoC -- a bench/board limitation, not a bug in this app (same rule
+		 * as an ALP_ERR_NOSUPPORT boot-authority answer elsewhere in this
+		 * diff: aen-alp-rpc/src/main.c, aen-dualcore-doorbell/src/main.c). */
+		printf("[cc3501e-bringup] bridge bring-up skipped (SPI bus %u / WIFI_EN+nRESET "
 		       "absent? err=%d) -- check the board overlay\n",
+		       CC3501E_BRIDGE_SPI_BUS_ID,
+		       (int)alp_last_error());
+		printf("RESULT SKIP: cc3501e_bridge_bringup -> NOT_PRESENT_ON_THIS_SOC (SPI bus %u / "
+		       "WIFI_EN+nRESET absent? err=%d)\n",
 		       CC3501E_BRIDGE_SPI_BUS_ID,
 		       (int)alp_last_error());
 		return 0;
@@ -571,6 +579,14 @@ int main(void)
 #ifdef CC3501E_OTA_DEMO
 	bool ota_done = false;
 #endif
+	/* Bounded bench verdict, printed once -- same "checkpoint inside a
+	 * forever loop" shape as examples/peripheral-io/blink: the soak below
+	 * must never return (see the "not reached" note past the loop), so the
+	 * RESULT line has to fire from inside it instead of after it.  Gated on
+	 * the witness's OWN accumulated ping_ok/ping_fail counters (not on
+	 * merely reaching this line), so it is unreachable from a run that
+	 * never actually PINGed the coprocessor successfully. */
+	bool result_printed = false;
 	for (uint32_t i = 0u;; ++i) {
 		/*
 		 * Run-once FRAMED bulk-stream throughput benchmark.  Once the link is up,
@@ -633,6 +649,33 @@ int main(void)
 			g_cc3501e_witness.ping_fail++;
 		}
 		printf("[cc3501e-bringup] soak PING #%u -> %d\n", i, (int)s);
+
+		/* Fire once ping_ok reaches the same 20-PING stability bar the
+		 * MAC/scan/BLE gates below already use as "the link is solidly
+		 * up".  ping_fail is cumulative for the whole run, so a single
+		 * soak PING failure anywhere before this point permanently
+		 * flips the verdict to FAIL instead of PASS -- there is no
+		 * retroactive path back to PASS once it prints. The reverse is
+		 * also one-way and deliberate: once RESULT PASS has printed
+		 * (result_printed latches), a LATER ping_fail (a link that dies
+		 * at soak PING #21+) does not re-print FAIL -- PASS is a ceiling
+		 * on "20 consecutive-so-far PINGs were clean", not a claim about
+		 * the rest of the run. The per-PING ok/fail counters keep
+		 * accumulating in the witness struct for a bench SWD read either
+		 * way. */
+		if (!result_printed && g_cc3501e_witness.ping_ok >= 20u) {
+			if (g_cc3501e_witness.ping_fail == 0u) {
+				printf("RESULT PASS: cc3501e link stable over %u soak PINGs "
+				       "(ping_fail=0)\n",
+				       g_cc3501e_witness.ping_ok);
+			} else {
+				printf("RESULT FAIL: cc3501e link unstable -- %u soak PING "
+				       "failure(s) alongside %u ok\n",
+				       g_cc3501e_witness.ping_fail,
+				       g_cc3501e_witness.ping_ok);
+			}
+			result_printed = true;
+		}
 
 		/* Once the link is alive (PING ok), keep retrying GET_MAC until it
 		 * lands -- retrying here lands the worker-routed Wi-Fi identity read

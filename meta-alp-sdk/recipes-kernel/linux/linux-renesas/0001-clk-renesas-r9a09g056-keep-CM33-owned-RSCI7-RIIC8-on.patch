@@ -1,4 +1,4 @@
-From: Alp Lab AB
+From: Alp Lab AB <contact@alplab.ai>
 Date: Wed, 3 Jun 2026 20:00:00 +0200
 Subject: [PATCH] clk: renesas: r9a09g056: keep CM33-owned RSCI7/RIIC8 clocks
  and MSTOP gates on
@@ -43,7 +43,7 @@ Upstream-Status: Inappropriate [board-specific AMP ownership policy; a
 DT-driven (e.g. critical-clocks) representation would be the upstreamable
 form later]
 
-Signed-off-by: Alp Lab AB
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  drivers/clk/renesas/r9a09g056-cpg.c | 22 ++++++++++++++++------
  1 file changed, 16 insertions(+), 6 deletions(-)

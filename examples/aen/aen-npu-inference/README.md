@@ -12,11 +12,15 @@ the fused subgraph onto the Ethos-U85 (256-MAC) via the Arm Ethos-U core driver
 (`ethosu_invoke`). It is the inference follow-up to `aen-npu-ethosu-regcheck`
 (which proved the U85 is present + clocked).
 
-> **Looking for the bench-validated `RESULT PASS`?** This is the original
-> end-to-end wiring; the **matched-runtime** fix that resolved the residual
-> `ethosu_invoke=1` lives in the sibling `aen-npu-inference-alif` (a strong
-> in-app `ethosu_address_remap`/`ethosu_config_select`). The Vela-config
-> injection documented below is identical across all three NPU examples.
+> **Looking for the bench-validated `RESULT PASS`?** The residual
+> `ethosu_invoke=1` this app used to return is fixed by alp-sdk's AEN Ethos-U
+> backend (`src/backends/inference/ethos_u_aen.cpp`, enabled by
+> `CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN=y` in `prj.conf`), which
+> supplies the strong `ethosu_address_remap`/`ethosu_config_select` overrides
+> the Arm core driver needs for this board's all-in-SRAM0 layout. Measured
+> 2026-07-28: Vela's `--memory-mode Sram_Only` is NOT that fix by itself. The
+> Vela-config injection documented below is identical across all three NPU
+> examples.
 
 ## Build
 
@@ -38,7 +42,7 @@ west build -p always \
 
 | Var | Purpose |
 | --- | --- |
-| `AEN_NPU_VELA` | Vela executable (default: the `.venv-vela/bin/vela` scratch env). |
+| `AEN_NPU_VELA` | Vela executable (default: `vela` on `PATH`, falling back to the in-tree `.venv-vela/bin/vela` if `PATH` has none). |
 | `AEN_NPU_VELA_CONFIG` | **Alif-proprietary** `ensemble_vela.ini` — see *Vela system-config injection*. |
 | `AEN_NPU_MODEL` | Input `.tflite` (default: the repo `tiny_int8.tflite` fixture). |
 | `AEN_NPU_MODEL_NAME` | Embedded model identity string printed on the `RESULT` line. |

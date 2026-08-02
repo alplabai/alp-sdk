@@ -6,6 +6,7 @@
   "part": "E5",
   "status": "preliminary",
   "pending_alif_datasheet": true,
+  "_pending_reason": "Every `peripherals` count below is inherited from the E7 sibling (E5 = E7 with one A32 depopulated per this file's own topology note), not independently ingested from an E5-specific datasheet/DFP/SVD -- no primary source for E5's own silicon is on file as of 2026-07-27 (issue #936). Clear `peripherals_unverified` below once the Alif E5 datasheet ships and the counts are re-ingested against it.",
   "datasheet": {
     "extracted_at": "2026-05-09",
     "source": "Alp Lab E1M-AEN - Datasheet Draft.pdf (Table 1, Table 11) — Alif primary datasheet not yet on file"
@@ -108,6 +109,14 @@
     "encoder_quadrature": 4,
     "dma_general_32ch": 3
   },
+  "peripherals_unverified": [
+    "i2c", "i2c_lp", "spi", "spi_lp", "uart", "uart_lp", "i2s", "i2s_lp",
+    "pdm", "pdm_lp", "ethernet", "usb_2", "sdio", "can_fd", "i3c",
+    "mipi_csi2", "mipi_dsi", "cpi_parallel", "cpi_lp", "dpi_parallel",
+    "adc_12bit", "adc_24bit", "dac_12bit", "comparator_hs", "gpio_18v",
+    "gpio_18v_or_33v", "timer_32bit", "watchdog", "timer_lp", "rtc",
+    "encoder_quadrature", "dma_general_32ch"
+  ],
   "capabilities": {
     "ethos_u55_count": 2,
     "helium_mve":      true,
@@ -139,7 +148,11 @@
       "mram_mb": 5.5,
       "sram_kb": 13824,
       "shipment_suffixes": ["-T", "-Y"],
-      "alp_module_skus": ["E1M-AEN501"]
+      "alp_module_skus": ["E1M-AEN501"],
+      "debug": {
+        "pyocd_target": "AE512F80F55D5LS",
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" }
+      }
     }
   ],
   "notes": [

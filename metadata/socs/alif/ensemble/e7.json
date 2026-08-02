@@ -114,6 +114,7 @@
     "encoder_quadrature": 4,
     "dma_general_32ch": 3
   },
+  "peripherals_unverified": ["pdm", "pdm_lp"],
   "capabilities": {
     "ethos_u55_count": 2,
     "helium_mve":      true,
@@ -168,7 +169,11 @@
         "SRAM6": 2048, "SRAM7": 512, "SRAM8": 2048, "SRAM9": 768
       },
       "gpio_18v": 120,
-      "shipment_suffixes": ["-T", "-Y"]
+      "shipment_suffixes": ["-T", "-Y"],
+      "debug": {
+        "pyocd_target": "AE722F80F55D5AS",
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" }
+      }
     },
     {
       "order_code": "AE722F80F55D5LS",
@@ -184,7 +189,11 @@
       },
       "gpio_18v": 120,
       "shipment_suffixes": ["-T", "-Y"],
-      "alp_module_skus": ["E1M-AEN701"]
+      "alp_module_skus": ["E1M-AEN701"],
+      "debug": {
+        "pyocd_target": "AE722F80F55D5LS",
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" }
+      }
     }
   ],
   "notes": [

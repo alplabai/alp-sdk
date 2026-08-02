@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/toolchains-v1.schema.json",
+  "title": "ALP Toolchain Pins v1",
+  "description": "Validates metadata/toolchains.json -- the single source of truth for the pinned Zephyr SDK (cross-toolchain) release: its version, the per-artifact upstream URL + sha256 + size, and measured (not estimated) footprint numbers. A DECLARED, hand-maintained input (like metadata/bootstrap.json), never a step-execution DSL and never the resolved-identity concept metadata/schemas/alp-lock-v1.schema.json's reserved `toolchain` key is for. scripts/check_toolchain_lock.py is the drift gate that keeps this file, metadata/bootstrap.json's zephyr.version, and each CI workflow's own SDK reference in lockstep -- see that script's own module docstring for the full list of checks it runs; do not restate that list here, it will only drift again.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["_comment", "schemaVersion", "zephyrSdk", "measuredFootprint"],
+  "properties": {
+    "_comment": {
+      "type": "string",
+      "description": "The file's own contract statement: a declared pin, not a resolved-identity record, and not a step-execution DSL. Kept as a real JSON field (not a comment) since JSON has no native comment syntax."
+    },
+    "schemaVersion": {
+      "const": 1,
+      "description": "This manifest's own contract version, independent of bootstrap.json's schemaVersion or alp-lock's lockVersion."
+    },
+    "zephyrSdk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "versionDerivation", "baseUrl", "artifacts"],
+      "properties": {
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+          "description": "The pinned Zephyr SDK (sdk-ng) release, e.g. '1.0.1'. MUST equal the `SDK_VERSION` file at the Zephyr revision metadata/bootstrap.json's `zephyr.version` pins -- check_toolchain_lock.py enforces this by reading the pinned Zephyr checkout, not by trusting this field alone."
+        },
+        "versionDerivation": {
+          "type": "string",
+          "description": "Human-readable statement of where `version` comes from (Zephyr's own SDK_VERSION file at the pinned revision) -- the fact that makes a stale/invented value checkable rather than a silent copy-paste."
+        },
+        "baseUrl": {
+          "type": "string",
+          "pattern": "^https://github\\.com/zephyrproject-rtos/sdk-ng/releases/download/v[0-9]+\\.[0-9]+\\.[0-9]+/$",
+          "description": "Canonical upstream release directory for `version` -- every artifact's URL is this base plus its own `filename`. Never a rehosted/mirrored URL (see docs/adr/0021-toolchain-provisioning.md's Decision on why alp-sdk pins origin instead)."
+        },
+        "artifacts": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/artifact" },
+          "description": "One row per (host, component) pair this SDK release ships. Not required to be exhaustive -- only rows an actual alp-sdk path reads need to be listed (see this file's own top-level `_comment` on the omitted linux-aarch64 row)."
+        }
+      }
+    },
+    "measuredFootprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["notes", "compressedDownloadBytes", "extractedBytes"],
+      "description": "Measured (not estimated) install-size facts, replacing docs/adr/0021-toolchain-provisioning.md's unmeasured ~1 GB / ~17 GB figures. Deliberately does not resolve the hosttools/--no-hosttools trade-off it documents -- see `notes`.",
+      "properties": {
+        "notes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "Human-readable lines, safe to print or quote verbatim -- an ARRAY (the same convention metadata/bootstrap.json's nativeLibHints.*.note already uses) so a long measurement writeup doesn't collapse into one unwrapped paragraph."
+        },
+        "compressedDownloadBytes": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 },
+          "description": "Measured compressed download size in bytes, keyed by a human-readable label naming exactly which artifacts were summed (e.g. 'linux-x86_64-minimal-plus-arm-zephyr-eabi')."
+        },
+        "extractedBytes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["wholeSdk", "hosttools", "gnuArmZephyrEabi"],
+          "properties": {
+            "wholeSdk": { "type": "integer", "minimum": 0, "description": "Total on-disk bytes for the measured install (du -sb of the whole SDK root)." },
+            "hosttools": { "type": "integer", "minimum": 0, "description": "On-disk bytes under hosttools/ alone -- the optional host-tool bundle (carries dtc) `west sdk install` installs by default." },
+            "gnuArmZephyrEabi": { "type": "integer", "minimum": 0, "description": "On-disk bytes under gnu/arm-zephyr-eabi/ alone -- the cross-compiler itself." }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "component", "filename", "sizeBytes", "sha256"],
+      "properties": {
+        "host": {
+          "enum": ["linux-x86_64", "windows-x86_64", "macos-aarch64", "linux-aarch64"],
+          "description": "The host triple this artifact runs ON (not the target it cross-compiles for, which is always the embedded Cortex-M side). linux-aarch64 is a permitted value with no row required -- see this file's top-level `_comment`."
+        },
+        "component": {
+          "enum": ["minimal-sdk", "arm-zephyr-eabi-toolchain"],
+          "description": "'minimal-sdk' is the base zephyr-sdk-<version>_<host>_minimal archive (setup.sh + host tools, no cross-compilers); 'arm-zephyr-eabi-toolchain' is the individual arm-zephyr-eabi cross-toolchain archive setup.sh installs into it."
+        },
+        "filename": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Exact upstream release-asset filename, appended to zephyrSdk.baseUrl to form the download URL."
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Exact asset size in bytes, from the GitHub releases API `size` field -- a verified fact, not an estimate."
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "Lowercase hex sha256 of the exact asset, from upstream's own published sha256.sum for this release -- copied verbatim, never computed or retyped by hand."
+        }
+      }
+    }
+  }
+}

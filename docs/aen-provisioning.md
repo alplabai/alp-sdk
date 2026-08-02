@@ -67,8 +67,12 @@ So out of the box your module:
 - the M55 core is **already released**, so both `west flash` and SWD attach
   just work.
 
-That means your day-1 path is the normal Zephyr one — no hand-run SETOOLS,
-no SE-UART wiring of your own:
+That means your day-1 path needs **no hand-run SETOOLS and no SE-UART
+wiring of your own** — two proven ways to get your app into MCUboot's
+slot0:
+
+**Option A — `west flash` (alif_flash runner).**  Builds + signs your
+app, then writes it into slot0 for you over the SE-UART via SETOOLS:
 
 ```bash
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <your-app> \
@@ -77,7 +81,43 @@ west flash    # alif_flash runner: signs + writes your MCUboot-signed image
               # into slot0 via SETOOLS over the SE-UART (not SWD)
 ```
 
-You only need the SES/SE-UART flow in this guide if you are:
+**Option B — plain J-Link, no SETOOLS, no ATOC, no SE-UART.**  Proven
+on the bench: an `imgtool`-signed image `loadbin`'d straight to slot0
+is verified by MCUboot and chainloaded, and survived three cold
+power-cycles (`80010000 = 96F3B83D 00000000 00000800 000041B8`,
+matching the staged file).  Standard JLinkExe invocation below -- the
+`device AE822FA0E5597LS0_M55_HE` and `loadbin … 0x80010000` lines are
+the session's own; `si`/`speed`/`connect`/`verifybin`/`qc` are the
+surrounding boilerplate, not individually bench-quoted:
+
+```
+si SWD
+speed 4000
+device AE822FA0E5597LS0_M55_HE
+connect
+loadbin build/<app>/zephyr/zephyr.signed.bin 0x80010000
+verifybin build/<app>/zephyr/zephyr.signed.bin 0x80010000
+qc
+```
+
+Then power-cycle.  `device AE822FA0E5597LS0_M55_HE` is **required** --
+the bare `AE822FA0E5597LS0` hangs on the GUI device picker even with
+`-nogui 1`.
+
+> **Proven safe at `0x80010000` (slot0) only.**  Writing the ATOC
+> region, or erasing MCUboot itself, was **not** tested by this bench
+> session -- treat that as a different, unproven risk.  Rejection is
+> also safe: a tampered signature (`E: Unable to find bootable image`,
+> `VTOR = 0x00000000`) or a non-MCUboot image (`E: Bad image magic
+> 0x20004c60`) both leave the debug port alive -- `Secure debug:
+> enabled`, the core halts and single-steps through real instructions,
+> zero "could not be halted".  A bad slot0 write does not brick your
+> J-Link access.  This is a **single-slot** result
+> (`CONFIG_SINGLE_APPLICATION_SLOT=y`); it says nothing about A/B
+> swap or OTA, which remain untested -- don't read it as an
+> upgrade-path guarantee.
+
+You only need to hand-run the SETOOLS steps below if you are:
 
 1. **re-keying** to your own production signing key (replacing Alp's dev
    MCUboot — see [`secure-boot.md`](secure-boot.md)), or

@@ -73,7 +73,8 @@ def capture() -> int:
             print(f"skip (emit failed): {board.parent.name}/{core}", file=sys.stderr)
             skipped += 1
             continue
-        (GOLDEN / f"{_key(board, core)}.conf").write_text(emit, encoding="utf-8")
+        (GOLDEN / f"{_key(board, core)}.conf").write_text(emit, encoding="utf-8",
+                                                           newline="")
         n += 1
     print(f"captured {n} baseline(s), {skipped} skipped -> {GOLDEN.relative_to(ROOT)}")
     return 0

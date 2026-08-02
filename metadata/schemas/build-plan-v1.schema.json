@@ -179,7 +179,7 @@
         "properties": {
           "code": {
             "type": "string",
-            "description": "Stable machine-readable warning code. Known values as of schemaVersion 1: 'no-command' (missing app/board/image for the core's os), 'yocto-recipe-missing' (an app-only Yocto slice has app: but no recipe:, so there is no valid bitbake target), 'appdir-unrooted' (issue #865: a slice's `app:` resolves outside both `${PROJECT_ROOT}` and `${SDK_ROOT}`, so `appDir` is left as a genuine absolute path a consumer on a different checkout cannot re-root). New codes may be added without a schemaVersion bump -- consumers must not treat this as a closed enum."
+            "description": "Stable machine-readable warning code. Known values as of schemaVersion 1: 'no-command' (missing app/board/image for the core's os), 'yocto-recipe-missing' (an app-only Yocto slice has app: but no recipe:, so there is no valid bitbake target), 'appdir-unrooted' (issue #865: a slice's `app:` resolves outside both `${PROJECT_ROOT}` and `${SDK_ROOT}`, so `appDir` is left as a genuine absolute path a consumer on a different checkout cannot re-root), 'board-tree-missing' (issue #999: a zephyr slice's `board:` names no tree under `zephyr/boards/alp/`, so no `west build -b <board>` command can be valid). New codes may be added without a schemaVersion bump -- consumers must not treat this as a closed enum."
           },
           "coreId": {
             "type": "string",

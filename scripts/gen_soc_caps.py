@@ -414,14 +414,37 @@ def extract_bool_caps(soc: dict[str, Any]) -> dict[str, int]:
     return {key.upper(): (1 if caps.get(key) else 0) for key in BOOL_CAPS}
 
 
+def extract_unverified_peripherals(soc: dict[str, Any]) -> list[str]:
+    """Peripheral keys on this SoC whose count has no primary-source citation.
+
+    #936: an audited-but-incomplete file lists its gaps in
+    `peripherals_unverified` (e.g. `pdm`/`pdm_lp`, uncited on every Alif
+    Ensemble part).  A file whose peripherals block was never independently
+    ingested for this part at all (`pending_reference_manual_ingestion: true`,
+    e.g. E5 inheriting from E7) is treated as ALL of its `peripherals` keys
+    being unverified, so the header doesn't understate the gap -- UNLESS the
+    file carries its own `peripherals_unverified` (even `[]`), which means
+    the file itself already grounds its populated keys individually (e.g.
+    i.MX93: `pending_reference_manual_ingestion` covers the still-zero rest
+    of the block, but `mipi_dsi`/`lcdif` are cited in `notes` and so are
+    correctly declared with `peripherals_unverified: []`).  An explicit
+    per-file list always wins over the wholesale fallback.
+    """
+    if "peripherals_unverified" in soc:
+        return sorted(str(k) for k in (soc.get("peripherals_unverified") or []))
+    if soc.get("pending_reference_manual_ingestion"):
+        return sorted((soc.get("peripherals") or {}).keys())
+    return []
+
+
 def emit(meta_dir: Path = META_DIR, som_dir: Path = SOM_DIR) -> str:
-    socs: list[tuple[str, str, dict[str, int], dict[str, int], int]] = []
+    socs: list[tuple[str, str, dict[str, int], dict[str, int], int, list[str]]] = []
     for path in sorted(meta_dir.rglob("*.json")):
         soc = json.loads(path.read_text(encoding="utf-8"))
         ref = soc["ref"]
         arena_kib = int(soc.get("inference_arena_sram_kib", 0))
         socs.append((ref, kconfig_token(ref), extract_caps(soc), extract_bool_caps(soc),
-                     arena_kib))
+                     arena_kib, extract_unverified_peripherals(soc)))
 
     lines: list[str] = [
         "/**",
@@ -457,10 +480,20 @@ def emit(meta_dir: Path = META_DIR, som_dir: Path = SOM_DIR) -> str:
         "",
     ]
 
-    for i, (ref, kc, caps, bool_caps, arena_kib) in enumerate(socs):
+    for i, (ref, kc, caps, bool_caps, arena_kib, unverified) in enumerate(socs):
         keyword = "if" if i == 0 else "elif"
         lines.append(f"#{keyword} defined(CONFIG_ALP_SOC_{kc})")
         lines.append(f"/* {ref} */")
+        if unverified:
+            # #936: this SoC's own metadata file has no datasheet/DFP/HWRM
+            # citation backing the COUNT for these `peripherals` keys -- the
+            # ALP_SOC_*_COUNT macros derived from them (and thus ALP_HAS())
+            # are asserted, not confirmed.  This says nothing about whether
+            # the peripheral's mere EXISTENCE is cited (e.g. E4's pdm/pdm_lp:
+            # the instance is DFP-confirmed, only the channel count isn't --
+            # see `peripherals_unverified` in the source JSON under
+            # metadata/socs/).
+            lines.append(f"/* UNVERIFIED (count not backed by a primary source): {', '.join(unverified)} */")
         soc_defs: list[tuple[str, str]] = [("ALP_SOC_REF_STR", f"\"{ref}\"")]
         soc_defs += [(f"ALP_SOC_{cap}", str(caps[cap])) for cap, _ in CAPS]
         soc_defs += [(f"ALP_SOC_{key.upper()}", str(bool_caps[key.upper()])) for key in BOOL_CAPS]
@@ -491,43 +524,59 @@ def emit(meta_dir: Path = META_DIR, som_dir: Path = SOM_DIR) -> str:
     return "\n".join(lines)
 
 
-def _clang_format(path: Path) -> None:
+def _clang_format_exe() -> str:
+    """Resolve the pinned clang-format binary, or fail naming what's missing.
+
+    Pinned to clang-format-22 (the CI version; installed via the pip wheel
+    `clang-format==22.*`, which provides the unsuffixed `clang-format`).
+    Prefer a v22-named binary if present, else the pinned `clang-format`.
+
+    Formerly this degraded to a warning and left the file unformatted --
+    the caller (test-all.sh's generated-files gate) then diffed raw,
+    pre-aligned emitter output against the clang-formatted files already
+    committed and reported that as tabs-vs-spaces "drift" (alp-sdk#1109),
+    when the real problem was clang-format never having run at all.
+    """
+    exe = shutil.which("clang-format-22") or shutil.which("clang-format")
+    if exe is None:
+        raise SystemExit(
+            "error: clang-format not found on PATH; cannot format the "
+            "generated SoC-caps files to match the repo .clang-format "
+            "(install clang-format==22.* -- see docs/testing.md)"
+        )
+    return exe
+
+
+def _clang_format(path: Path, exe: str) -> None:
     """Format a generated file in place to match the repo .clang-format.
 
     The emitters above produce best-effort, pre-aligned output, but the canonical
     formatting (tab indentation, AlignConsecutive* columns) is owned by
     /.clang-format -- so run clang-format here to guarantee the generated file is
     byte-identical to what the CI diff-only gate expects, regardless of how this
-    script lays out whitespace.  No-op (with a warning) if clang-format is absent;
-    the CI gate then catches any drift.
+    script lays out whitespace.
     """
-    # Pinned to clang-format-22 (the CI version; installed via the pip wheel
-    # `clang-format==22.*`, which provides the unsuffixed `clang-format`).
-    # Prefer a v22-named binary if present, else the pinned `clang-format`.
-    exe = shutil.which("clang-format-22") or shutil.which("clang-format")
-    if exe is None:
-        print(f"  warning: clang-format not found; {path.name} left unformatted "
-              "(CI will flag any drift)", file=sys.stderr)
-        return
     subprocess.run([exe, "-i", "--style=file", str(path)], check=True)
 
 
 def main() -> int:
+    exe = _clang_format_exe()
+
     OUT.parent.mkdir(parents=True, exist_ok=True)
     out_text = emit()
-    OUT.write_text(out_text, encoding="utf-8")
-    _clang_format(OUT)
+    OUT.write_text(out_text, encoding="utf-8", newline="")
+    _clang_format(OUT, exe)
     print(f"wrote {OUT.relative_to(REPO)} ({len(OUT.read_text().splitlines())} lines)")
 
     cap_h_text = _emit_cap_h()
-    CAP_H_OUT.write_text(cap_h_text, encoding="utf-8")
-    _clang_format(CAP_H_OUT)
+    CAP_H_OUT.write_text(cap_h_text, encoding="utf-8", newline="")
+    _clang_format(CAP_H_OUT, exe)
     print(f"wrote {CAP_H_OUT.relative_to(REPO)} ({len(CAP_H_OUT.read_text().splitlines())} lines)")
 
     CAP_C_OUT.parent.mkdir(parents=True, exist_ok=True)
     cap_c_text = _emit_cap_c()
-    CAP_C_OUT.write_text(cap_c_text, encoding="utf-8")
-    _clang_format(CAP_C_OUT)
+    CAP_C_OUT.write_text(cap_c_text, encoding="utf-8", newline="")
+    _clang_format(CAP_C_OUT, exe)
     print(f"wrote {CAP_C_OUT.relative_to(REPO)} ({len(CAP_C_OUT.read_text().splitlines())} lines)")
 
     return 0

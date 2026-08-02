@@ -284,7 +284,11 @@ def emit_build_plan(
       * One slice per non-`off` core, sorted by coreId.  A slice this
         script cannot build yet (e.g. no `app:`) is carried with
         `command: null` plus a `no-command` warning -- never dropped,
-        so the consumer can still report the core.
+        so the consumer can still report the core.  Same treatment for
+        a zephyr slice whose `board:` target has no tree under
+        `zephyr/boards/alp/` (`board-tree-missing`, issue #999): the
+        plan never carries a `west build -b <board>` command that is
+        guaranteed to fail Zephyr's own board lookup.
       * Write-free: nothing is created on disk.  (Command resolution
         stats the app dir to pick the CMakeLists.txt convention --
         read-only, same as the build itself.)
@@ -311,6 +315,7 @@ def emit_build_plan(
     # a buildplan<->package import cycle.
     from .orchestrator import (
         STOCK_IMAGE_APP,
+        UnknownBoardTargetError,
         UnrootedPathError,
         _resolve_app_path,
         _slice_command,
@@ -354,6 +359,21 @@ def emit_build_plan(
                             f"({base_dir}) and the SDK checkout ({REPO}): "
                             f"'{e}' -- blocked rather than emit a "
                             f"non-hermetic command"),
+            })
+        except UnknownBoardTargetError as e:
+            # The SoM preset's topology named a Zephyr board with no
+            # tree under zephyr/boards/alp/ (issue #999 one layer down
+            # from the declaration gate, at emit time): block the
+            # command rather than ever hand a consumer (tan, or a
+            # customer's own `west build`) a `-b <board>` argument that
+            # is guaranteed to die with Zephyr's own "No board named
+            # ... Invalid BOARD" error -- same "carry the slice, never
+            # emit a broken command" convention as `no-command` below.
+            cmd = None
+            warnings.append({
+                "code":    "board-tree-missing",
+                "coreId":  slice_.core_id,
+                "message": str(e),
             })
         else:
             if cmd is None:

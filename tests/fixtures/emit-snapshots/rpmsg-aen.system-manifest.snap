@@ -24,7 +24,8 @@ slices:
   toolchain: arm-zephyr-eabi
   status: pending
   flash_method: zephyr_west_flash
-  flash_args: {}
+  flash_args:
+    jlink_flash_device: AE822FA0E5597LS0_M55_HE
 - core_id: m55_he
   os: zephyr
   app: alp-stock-shim
@@ -32,7 +33,8 @@ slices:
   toolchain: arm-zephyr-eabi
   status: pending
   flash_method: zephyr_west_flash
-  flash_args: {}
+  flash_args:
+    jlink_flash_device: AE822FA0E5597LS0_M55_HE
 ipc:
 - name: alp_default_rpmsg
   kind: rpmsg

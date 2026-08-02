@@ -11,10 +11,10 @@
 # (scripts/west_commands/alp_renode.py, no longer present in this
 # repo).  `tan renode` (github.com/alplabai/tan-cli) is the designated
 # successor but is still a stub there, so the actual dual-OS boot +
-# handshake assertion below is PENDING (tan-cli#674) -- kept as a
+# handshake assertion below is PENDING (tan-cli#77) -- kept as a
 # no-op notice, matching pr-renode-sim-mode.yml, rather than pulling
 # tan into alp-sdk CI.  Promotes to a required check in v0.6.1 once
-# the Phase 3 IPC contract lands and tan-cli#674 closes.
+# the Phase 3 IPC contract lands and tan-cli#77 closes.
 #
 # === Trigger chain choice ===
 #
@@ -129,15 +129,15 @@ jobs:
         # the artefact-name stabilisation above.
         continue-on-error: true
 
-      # PENDING (tan-cli#674): the dual-OS boot + "RPMsg handshake
+      # PENDING (tan-cli#77): the dual-OS boot + "RPMsg handshake
       # complete" assertion used to run via `tan renode --board
       # E1M-V2N101 --image-bundle ... --log ...` (ADR-0020 Phase 4
       # retired the SDK-side `west alp-renode` executor this workflow
       # used to drive before that).  `tan renode` is the designated
       # successor but is still a stub there, so this step is
-      # intentionally a no-op until tan-cli#674 closes -- both
+      # intentionally a no-op until tan-cli#77 closes -- both
       # downloaded artefacts above (bitbake image + M33-SM ELF) are
       # kept in place, ready to feed the real boot once it lands; do
       # not delete this step silently.
-      - name: V2N dual-OS Renode boot e2e [PENDING tan-cli#674]
-        run: echo "::notice::[PENDING tan-cli#674] tan renode e2e is covered in tan-cli CI"
+      - name: V2N dual-OS Renode boot e2e [PENDING tan-cli#77]
+        run: echo "::notice::[PENDING tan-cli#77] tan renode e2e is covered in tan-cli CI"

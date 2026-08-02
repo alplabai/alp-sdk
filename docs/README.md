@@ -10,8 +10,10 @@ into the topic-specific docs.
 - [getting-started.md](getting-started.md) — install + first build,
   cross-platform.
 - [cross-platform-setup.md](cross-platform-setup.md) — per-OS
-  quickstart (Linux + macOS + Windows native + WSL2).  *NEW —
-  Codified in [ADR 0012](adr/0012-cross-platform-developer-host.md).*
+  quickstart (Linux + macOS + Windows native + WSL2; macOS
+  real-silicon Zephyr builds and `tan build` are Apple Silicon
+  only, `native_sim` works on Intel too).  *NEW — Codified in
+  [ADR 0012](adr/0012-cross-platform-developer-host.md).*
 - [cli.md](cli.md) — the `tan` CLI verb reference
   (init / build / flash / generate / model / validate / doctor /
   size / image / clean / renode) + when to use `tan` vs `west alp-*`.
@@ -76,7 +78,8 @@ into the topic-specific docs.
   on-silicon bench bring-up: Flow A/C/D flashing, the validated
   peripheral matrix, and the NPU-from-MRAM path.
 - [aen-provisioning.md](aen-provisioning.md) — provisioning an
-  E1M-AEN SoM (SES → MCUboot → slot0 chain + the SoM-maker policy).
+  E1M-AEN SoM (SES → MCUboot → slot0 chain, bench-proven at
+  `0da1f1b4`, + the SoM-maker policy).
 - [aen-se-services.md](aen-se-services.md) — runtime `se_service_*`
   API (device/LCS/power queries + the gated DVFS / STOC-update path).
 - [debugging-aen.md](debugging-aen.md) — attaching a debugger to
@@ -152,7 +155,8 @@ into the topic-specific docs.
 
 ## Security & release
 
-- [secure-boot.md](secure-boot.md) — MCUboot + OPTIGA flow.
+- [secure-boot.md](secure-boot.md) — MCUboot + OPTIGA flow; the
+  MCUboot ECDSA-P256 chain is bench-proven on E1M-AEN801.
 - [som-release-signing.md](som-release-signing.md) — verifying SoM-release
   bundle provenance (ECDSA-P256; a separate concern from device secure-boot).
 - [threat-model.md](threat-model.md) — adversary classes, asset

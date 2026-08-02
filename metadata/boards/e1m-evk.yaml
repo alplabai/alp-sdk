@@ -143,12 +143,21 @@ e1m_routes:
     # the PWM cluster).  Same physical pads as EVK_PWM_LED_* in the
     # `pwm:` section -- open the PWM macro for brightness/fade, the GPIO
     # macro for plain on/off.  Don't open both functions of a pad at once.
-    - { e1m: E1M_GPIO_PWM3, macro: EVK_PIN_LED_RED,
-        board_alias: BOARD_PIN_LED_RED,
-        doc: "RGB LED red -- the PWM3 pad driven as a digital GPIO." }
-    - { e1m: E1M_GPIO_PWM0, macro: EVK_PIN_LED_GREEN,
+    #
+    # RED/GREEN bench-measured 2026-07-28 on an E1M-AEN801 r1 +
+    # E1M-EVK-2626-R2, driving one raw pin at a time with the colour
+    # observed directly on D19: PWM3/P2_4 lights GREEN, PWM0/P12_7
+    # lights RED (PWM1/P12_6 BLUE confirmed correct, ruling out an
+    # off-by-one).  The internal netlist labels these nets `LED_R`
+    # (on PWM3) / `LED_G` (on PWM0) -- that netlist label is WRONG;
+    # physical observation wins.  Do not "fix" this back toward the
+    # netlist without re-measuring on real hardware.
+    - { e1m: E1M_GPIO_PWM3, macro: EVK_PIN_LED_GREEN,
         board_alias: BOARD_PIN_LED_GREEN,
-        doc: "RGB LED green -- the PWM0 pad driven as a digital GPIO." }
+        doc: "RGB LED green -- the PWM3 pad driven as a digital GPIO." }
+    - { e1m: E1M_GPIO_PWM0, macro: EVK_PIN_LED_RED,
+        board_alias: BOARD_PIN_LED_RED,
+        doc: "RGB LED red -- the PWM0 pad driven as a digital GPIO." }
     - { e1m: E1M_GPIO_PWM1, macro: EVK_PIN_LED_BLUE,
         board_alias: BOARD_PIN_LED_BLUE,
         doc: "RGB LED blue -- the PWM1 pad driven as a digital GPIO." }
@@ -170,9 +179,13 @@ e1m_routes:
         board_alias: BOARD_UART_ARDUINO,
         doc: "Arduino UNO header UART (D0/D1); CK_RXD = UART1_TX, CK_TXD = UART1_RX." }
   pwm:
-    - { e1m: E1M_PWM0, macro: EVK_PWM_LED_GREEN,
-        board_alias: BOARD_PWM_LED_GREEN,
-        doc: "RGB LED green; schematic-wired via PWM0 (non-contiguous with R/B)." }
+    # RED/GREEN bench-measured 2026-07-28 on an E1M-AEN801 r1 +
+    # E1M-EVK-2626-R2 -- see the matching note on the `gpio:` entries
+    # above.  The internal netlist's `LED_R`/`LED_G` net names are
+    # wrong; physical observation wins.  Don't revert toward the netlist.
+    - { e1m: E1M_PWM0, macro: EVK_PWM_LED_RED,
+        board_alias: BOARD_PWM_LED_RED,
+        doc: "RGB LED red; schematic-wired via PWM0 (non-contiguous with G/B)." }
     - { e1m: E1M_PWM1, macro: EVK_PWM_LED_BLUE,
         board_alias: BOARD_PWM_LED_BLUE,
         doc: "RGB LED blue channel." }
@@ -181,9 +194,9 @@ e1m_routes:
         doc: "Arduino header CK_PWM1; shares E1M_PWM1 with LED_BLUE." }
     - { e1m: E1M_PWM2, macro: EVK_ARD_PWM4,
         doc: "Arduino header CK_PWM4 = E1M_PWM2." }
-    - { e1m: E1M_PWM3, macro: EVK_PWM_LED_RED,
-        board_alias: BOARD_PWM_LED_RED,
-        doc: "RGB LED red channel." }
+    - { e1m: E1M_PWM3, macro: EVK_PWM_LED_GREEN,
+        board_alias: BOARD_PWM_LED_GREEN,
+        doc: "RGB LED green channel." }
     - { e1m: E1M_PWM4, macro: EVK_ARD_PWM2,
         board_alias: BOARD_PWM_ARD2,
         doc: "Arduino header CK_PWM2 = E1M_PWM4." }
@@ -265,7 +278,7 @@ i2c_devices:
   - { macro: EVK_I2C_ADDR_TAS2563_LOW, part: tas2563, designator: U27, address: "0x4D",
       doc: "U27 smart amp (AD0 = 10k to GND)." }
   - { macro: EVK_I2C_ADDR_TAS2563_HIGH, part: tas2563, designator: U28, address: "0x4E",
-      doc: "U28 smart amp (AD0 = 10k to VDD). The TAS2563 broadcast address (0x48) is occupied on this EVK by U32 INA236B (+V_CAM0 rail, pre-respin) -- firmware that wants to write both amps must issue two targeted unit-address writes." }
+      doc: "U28 smart amp (AD0 = 10k to VDD). The TAS2563 broadcast address (0x48) was occupied on PRE-RESPIN boards by U32 INA236B (+V_CAM0 rail); the U32 re-strap to 0x4B from the next batch freed it -- firmware that supports both board revisions must still issue two targeted unit-address writes rather than a 0x48 broadcast." }
   - { macro: EVK_I2C_ADDR_INA236_3V3, part: ina236, designator: U21, address: "0x40",
       doc: "U21 INA236A, +3V3 rail (20 mOhm shunt, 4.0 A max). A0 = GND.",
       calibration: { shunt_macro: EVK_INA236_SHUNT_3V3_OHMS, shunt_ohms: "0.020",

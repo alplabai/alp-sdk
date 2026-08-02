@@ -165,14 +165,30 @@ jobs:
         run: >
           cmake -B build/strict-${{ matrix.name }} -S . ${{ matrix.args }}
           -DALP_SDK_STRICT_WARNINGS=ON -DALP_SDK_WERROR=ON
-      # -Werror already fails the build on any first-party warning; the
-      # grep below is a belt-and-braces check that the log is actually
-      # clean (e.g. a warning emitted by a build step other than the
-      # compiler proper wouldn't trip -Werror).
+      # -Werror already fails the build on any first-party COMPILER warning;
+      # the grep below is a belt-and-braces check for warnings that don't
+      # come from the compiler proper (a CMake deprecation notice, a linker
+      # warning) and so aren't turned into an -Werror build failure at all.
+      # Both checks need the build's real exit code, not `tee`'s: `| tee`
+      # alone makes the pipeline's exit status tee's (always 0), which
+      # swallows a failing `cmake --build` -- including one that failed
+      # BECAUSE -Werror promoted a warning to an error -- and let it read
+      # as green (issue #634 follow-up). PIPESTATUS[0] recovers the real
+      # exit code without needing `set -o pipefail` (which combined with
+      # this step's default `bash -e {0}` would abort the script on that
+      # line before the ::error:: below could ever run).
       - name: Build (warning-free)
         run: |
           cmake --build build/strict-${{ matrix.name }} --parallel 2>&1 | tee build.log
-          ! grep -q "warning:" build.log
+          build_rc=${PIPESTATUS[0]}
+          if [ "${build_rc}" -ne 0 ]; then
+            echo "::error::cmake --build failed (exit ${build_rc}) for strict-${{ matrix.name }}; see build.log above."
+            exit "${build_rc}"
+          fi
+          if grep -q "warning:" build.log; then
+            echo "::error::strict-${{ matrix.name }} build emitted a warning outside -Werror's reach; see build.log above."
+            exit 1
+          fi
 
   link-complete:
     # Issue #593: every public <alp/*.h> function must be a real symbol

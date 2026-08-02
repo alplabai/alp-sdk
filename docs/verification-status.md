@@ -6,11 +6,19 @@
 > section of [`docs/test-plan.md`](test-plan.md)).  The
 > **E1M-AEN801 (Alif Ensemble E8)** then ran an extensive on-silicon
 > bench campaign — Flow A/C/D flashing, the peripheral matrix, NPU
-> inference, dual-core RPC, and SE-crypto all `RESULT PASS` (see
-> [`docs/aen-bench-bringup.md`](aen-bench-bringup.md)).  The remaining
-> families (**i.MX 93, V2M/DEEPX**) remain `[UNTESTED]` on real
-> hardware, and the AEN **customer** production chain (full
-> MCUboot-slot0 OTA) is still bench-pending — see the ledger below.
+> inference, dual-core RPC, SE-crypto, and now the **SES → MCUboot →
+> slot0 secure-boot chain (single-slot boot + verify only)**, all
+> `RESULT PASS` (see [`docs/aen-bench-bringup.md`](aen-bench-bringup.md)
+> and [`docs/secure-boot.md`](secure-boot.md); the MCUboot rows in
+> [`docs/test-plan.md`](test-plan.md) still read `⏳ untested` and are
+> pending an update to match -- treat that file as stale on this topic
+> for now).  The remaining families
+> (**i.MX 93, V2M/DEEPX**) remain `[UNTESTED]` on real hardware.  A
+> second bench session proved the AEN **customer** path too: writing
+> slot0 directly with a plain J-Link, no SETOOLS/SE-UART/ATOC, at
+> `0x80010000` only (single-slot; `CONFIG_SINGLE_APPLICATION_SLOT=y`).
+> Full **MCUboot-slot0 OTA delivery** (A/B swap) is a separate concern
+> and remains untested; see the ledger below.
 
 This page is the single source of truth for "what's been silicon-
 verified in the Alp SDK as of today".  It complements:
@@ -35,7 +43,7 @@ verified in the Alp SDK as of today".  It complements:
 | Per-SoM `capabilities:` blocks | `[PARTIAL]` | Populated from datasheet readings; some fields marked `# TBD` for items pending datasheet verification |
 | Per-NPU TFLM driver gates (`CONFIG_ALP_TFLM_ETHOS_U85/U65/U55`) | `[UNTESTED]` | Kconfig-reachable; no Vela-compiled model has actually been dispatched yet |
 | Examples + reference apps | `[UNTESTED]` | Build clean on native_sim; HiL flash-and-run still TBD |
-| Portable-API conformance suite (`tests/zephyr/conformance/`) | ✅ green on native_sim | 13 classes × 8 cases, data-driven ztest (`alp_sdk.conformance.portable_api`); the porting gate for new-SoM backends — see [`docs/porting-new-som.md`](porting-new-som.md) "Conformance gate" |
+| Portable-API conformance suite (`tests/zephyr/conformance/`) | ✅ green on native_sim | 14 classes × 8 cases, data-driven ztest (`alp_sdk.conformance.portable_api`); the porting gate for new-SoM backends — see [`docs/porting-new-som.md`](porting-new-som.md) "Conformance gate" |
 | SE-backed portable surfaces (SoC identity / power profiles / peer-core boot, v0.9) | `[UNTESTED]` | Alif SE backends registered for `alif:ensemble:e8`; native_sim proves only the NOSUPPORT degrade paths — SE round-trips are bench-gated (see the v0.9 rows in [`docs/test-plan.md`](test-plan.md)) |
 | CI: pr-twister + pr-static-analysis + pr-doxygen | ✅ green on `main` | Build correctness, style, doc completeness |
 | CI: pr-twister with `--platform alif_*` | ✅ build-only | Cross-compiles to AEN target; doesn't flash silicon |
@@ -59,16 +67,24 @@ verified in the Alp SDK as of today".  It complements:
   [`docs/test-plan.md`](test-plan.md).
 - **The AEN801 (E8) stack is bench-validated.**  An extensive
   on-silicon campaign brought up the peripheral matrix, NPU
-  inference, dual-core RPC, and SE-crypto — all `RESULT PASS` (the
-  per-row evidence lives in
-  [`docs/aen-bench-bringup.md`](aen-bench-bringup.md)).  The
+  inference, dual-core RPC, SE-crypto, and the MCUboot secure-boot
+  chain (single-slot boot + verify) — all `RESULT PASS` (the per-row
+  evidence lives in [`docs/aen-bench-bringup.md`](aen-bench-bringup.md);
+  the MCUboot rows in [`docs/test-plan.md`](test-plan.md) are still
+  to be updated to match).  The
   **CC3501E companion OTA cold-swap cycle is silicon-proven** on the
   E1M-AEN801 EVK (2026-07-10): stream → STAGE → the CC35's own
   `psa_fwu_request_reboot()` swap → self-accept + persist across a true
   cold POR (`docs/cc3501e-production.md` § OTA).  The E8's **own**
-  secure-boot / OTA production chain (MCUboot-slot0) is a separate path
-  and is still bench-pending, so validate that on your own HiL before
-  shipping it.
+  secure-boot chain -- SES → MCUboot → slot0 -- is now measured
+  working (see [`docs/secure-boot.md`](secure-boot.md)), and so is the
+  **customer** side of it: a plain J-Link `loadbin` to slot0
+  (`0x80010000` only), no SETOOLS/SE-UART/ATOC, is verified by
+  MCUboot and chainloaded, surviving repeated cold power-cycles, with
+  the debug port staying alive even when it rejects a bad image.  That
+  is a **single-slot** result -- full MCUboot-slot0 **OTA** (A/B swap)
+  is a separate, still bench-pending concern, so validate that on
+  your own HiL before shipping it.
 - **You should NOT ship production firmware against the remaining
   families (i.MX 93, V2M) unless you've done your own HiL.**
   Their register addresses, timing values, init sequences have not

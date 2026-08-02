@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for single-core TrustZone-M enforced audit-log
+# append on the E1M-AEN801 (Ensemble E8, M55-HE): proves the Non-Secure
+# application can append to the audit log only through the Secure owner
+# (ARMv8-M SAU + Alif TGU), and cannot write the log store directly.
+# Single-M55 counterpart to the two-core HP-owner / HE-client flow in
+# examples/connectivity/firmware-update-log.
+#
+# Uses CMSE intrinsics (-mcmse) for the Secure<->Non-Secure call.
+# Compile-checks the app on the real E8 board target; filtered OUT of the
+# native_sim PR gate (platform_allow = the AEN801 HE board only).
+
+sample:
+  name: aen-tz-secure-log-append
+  description: |
+    Bench RAM-run single-core TrustZone-M proof for the E1M-AEN801 (Alif
+    Ensemble E8, Cortex-M55-HE): the Non-Secure app appends to the audit log
+    only through the Secure owner's CMSE entry, completing the owner/client
+    cycle the sibling probe only half-proves.
+
+tests:
+  alp_sdk.examples.aen.tz_secure_log_append.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - security
+      - trustzone
+      - tz
+    build_only: true   # the Secure-append proof is a bench flash, not a CI run.

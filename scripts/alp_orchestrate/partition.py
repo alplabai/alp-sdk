@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from alp_project import resolve_memory_map
+from sentinels import is_tbd
 
 from .memregion import _PAGE, _region_size_bytes
 from .models import BoardProject, ResolvedPartition, StorageEntry
@@ -100,7 +101,7 @@ def _resolve_flash_device(
     if isinstance(ospi, dict) and flash_device in ospi:
         entry = ospi[flash_device] or {}
         cap = entry.get("capacity_mbit")
-        if isinstance(cap, str) and cap.strip().upper() == "TBD":
+        if is_tbd(cap):
             return None, (
                 f"on_module.ospi_memories.{flash_device}.capacity_mbit "
                 f"is TBD on SoM {som_preset.get('sku', '<unknown>')}; "

@@ -7,8 +7,10 @@
 #
 # Plain prj.conf app (no alp_project.py board.yaml emit). HW-BLOCKED,
 # BUILD-ONLY this batch: no octal-NOR/HyperBus part is populated, so this
-# proves the ospi0 node BINDS + the hal_alif init/XiP-enable entry points
-# compile and link -- not a live XiP read. See src/main.c + the board overlay.
+# proves the ospi0 node BINDS + alif_hal_ospi_initialize() compiles, links,
+# and the register file reads back live -- not a live XiP read (XiP setup is
+# a deliberate SKIP: OSPI_XIP_SER does not exist on AE822). See src/main.c +
+# the board overlay.
 
 cmake_minimum_required(VERSION 3.20)
 

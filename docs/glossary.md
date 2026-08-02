@@ -75,7 +75,7 @@ Symbols use the chip's natural name (e.g. `lsm6dso_init`); the
 configuration profile.  V2N populates the **CMI 120.E1** variant.
 
 **Conformance suite** -- The data-driven ztest suite at
-`tests/zephyr/conformance/` (13 peripheral classes × 8 contract
+`tests/zephyr/conformance/` (14 peripheral classes × 8 contract
 cases) that every backend must pass; runs on `native_sim` as the
 `alp_sdk.conformance.portable_api` Twister scenario and is the
 proof gate for a new SoM port's backends (see
@@ -346,7 +346,7 @@ version-pinned, built in alp-sdk CI for at least one board per
 supported family, ships a teaching example -- breakage blocks
 release.  **Tier B (recipe-only):** wiring + compatibility metadata
 are maintained and emitted, but the library is not built in alp-sdk
-CI; `tan doctor` labels it.  Promotion B → A requires a dedicated
+CI; `python -m alp_cli doctor` labels it.  Promotion B → A requires a dedicated
 owner and a CI build lane.  (Distinct from the driver/library
 integration ladder in
 [ADR 0017](adr/0017-alp-sdk-over-the-vendor-sdk.md).)
@@ -386,5 +386,5 @@ the test plan.
 **Zephyr** -- The RTOS the SDK targets as a first-class backend
 (`cores.<id>.os: zephyr`, typically on M-class cores; the SoM
 topology supplies `zephyr` by default so customers usually omit
-the field).  Pinned to v4.4.0 per
+the field).  Pinned to v4.4.1 per
 [`docs/zephyr-version-policy.md`](zephyr-version-policy.md).

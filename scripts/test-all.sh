@@ -19,14 +19,18 @@
 #   2. Plain-CMake / baremetal build (compile-only -- no tests yet)
 #   3. Zephyr twister (skipped if ZEPHYR_BASE is unset)
 #   4. clang-format diff vs HEAD~1 (skipped if no clang-format)
-#   5. board.yaml metadata schema validate
-#   6. Public/private text classifier
-#   7. Required scripts/check_*.py gates (the same list
+#   5. shellcheck over scripts/*.sh (skipped if shellcheck isn't installed)
+#   6. bash -n parse of every shipped *.sh under REAL bash 3.2.57 in a
+#      container (skipped, loudly, if podman/docker isn't on PATH --
+#      cross-platform-zephyr.yml's macos-latest leg still covers it)
+#   7. board.yaml metadata schema validate
+#   8. Public/private text classifier
+#   9. Required scripts/check_*.py gates (the same list
 #      pr-metadata-validate.yml / pr-doc-drift.yml run as hard
 #      gates -- see REQUIRED_GATE_SCRIPTS below)
-#   8. Generated-files-in-sync (regenerate every single-sourced
+#  10. Generated-files-in-sync (regenerate every single-sourced
 #      artifact + fail on drift -- the pr-generated-files.yml gate)
-#   9. Doxygen zero-warnings build (generates the pr-doxygen.yml
+#  11. Doxygen zero-warnings build (generates the pr-doxygen.yml
 #      Doxyfile inline; finds doxygen on PATH or in ~/doxybin)
 #
 # Each stage prints `[stage] PASS` or `[stage] FAIL`; the script
@@ -59,6 +63,12 @@
 #   --yocto-only      run only stage 1 + format + metadata
 #   --zephyr-only     run only stage 3 (requires ZEPHYR_BASE)
 #   --no-clean        keep build directories between runs (faster)
+#   --list-required-gate-scripts
+#                     print the scripts/check_*.py paths the
+#                     required-gate-scripts stage would run (one per line,
+#                     no execution) and exit -- a cheap probe for
+#                     alp-sdk#1109's regression: this list must always
+#                     match `quality_tasks.py --gate-scripts` 1:1.
 #
 # Examples:
 #
@@ -83,6 +93,7 @@ QUICK=0
 YOCTO_ONLY=0
 ZEPHYR_ONLY=0
 NO_CLEAN=0
+LIST_REQUIRED_GATE_SCRIPTS=0
 # TARGET selects a CI profile matching the branch a PR targets:
 #   dev  -- the FAST set a dev PR is graded on (skip the slow release-only
 #           full CMake builds + Doxygen); for rapid integration iteration.
@@ -104,6 +115,7 @@ while [ $# -gt 0 ]; do
         --target=*)     TARGET="${1#--target=}" ;;
         --dev)          TARGET=dev ;;
         --main)         TARGET=main ;;
+        --list-required-gate-scripts) LIST_REQUIRED_GATE_SCRIPTS=1 ;;
         -h|--help)
             sed -n '3,68p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
             exit 0
@@ -257,6 +269,105 @@ stage_shellcheck() {
     return "${rc}"
 }
 
+stage_bash32_parse() {
+    # Parse every shell script the repo ships under REAL bash 3.2.57
+    # (macOS's frozen system bash) inside a container -- catches the
+    # class of defect shellcheck and `bash -n` on a modern bash both
+    # miss: bash 3.2 keeps tracking single-quote state ACROSS a
+    # heredoc body while scanning for the closing `)` of an enclosing
+    # `$( )`, even when the heredoc tag is quoted (<<'PY'). An ODD
+    # apostrophe count inside such a heredoc desyncs the parser and it
+    # fails much later at an unrelated token -- see PR #1050, where a
+    # single apostrophe added to a comment inside
+    # scripts/bootstrap.sh:271's `<<'PY'` heredoc broke parsing 131
+    # lines later. This is a REPRO, not a "second shellcheck": that
+    # gate already runs (stage_shellcheck) and did not catch #1050.
+    #
+    # cross-platform-zephyr.yml's python-smoke job runs this same
+    # `bash -n` sweep unconditionally on its macos-latest leg (real
+    # bash 3.2.57, no container), so a missing runtime here is a SKIP,
+    # not a gap: that CI leg still covers it.
+    #
+    # Never build bash 3.2.57 from source to avoid the container --
+    # its shipped y.tab.c is stale against parse.y and the build fails
+    # without `bison`.
+    local runtime
+    runtime=$(command -v podman 2>/dev/null || command -v docker 2>/dev/null || true)
+    if [ -z "${runtime}" ]; then
+        echo "stage_bash32_parse: no podman/docker on PATH -- SKIPPING the local bash-3.2 parse check."
+        echo "stage_bash32_parse: this is still covered unconditionally by cross-platform-zephyr.yml's"
+        echo "stage_bash32_parse: python-smoke job on its macos-latest leg (real bash 3.2.57, no container)."
+        return 99
+    fi
+    # One container run, not one per file -- the container itself
+    # (bash 3.2) loops the file list, since 24 separate `podman run`
+    # spins would be needlessly slow.
+    local -a files=()
+    local f
+    while IFS= read -r f; do
+        files+=("${f}")
+    done < <(git ls-files '*.sh')
+    # An empty file list must never read as "0 broken files == PASS" --
+    # that is a silent-empty-loop, the exact shape of gate this PR argues
+    # against, just one level up (wrong cwd, git ls-files broke, REPO_ROOT
+    # pointed somewhere without a .git). Fail loudly instead of parsing
+    # nothing and calling it clean.
+    if [ "${#files[@]}" -eq 0 ]; then
+        echo "stage_bash32_parse: 'git ls-files *.sh' returned NO files from ${REPO_ROOT} -- refusing to report a silent pass."
+        return 1
+    fi
+    # `"${files[@]}"` on a NON-empty array is fine, but this codepath must
+    # stay safe even if `files` were ever empty -- bash 3.2 (inside the
+    # container we're about to invoke, and on macOS outside it) trips
+    # `set -u` "unbound variable" expanding `"${arr[@]}"` on an EMPTY array;
+    # the `${arr[@]+"${arr[@]}"}` guard (already used at :211 above) expands
+    # to nothing instead. This is the exact #654/#658 bash-3.2 crash class.
+    "${runtime}" run --rm -v "${REPO_ROOT}:/w:ro" -w /w docker.io/library/bash:3.2 \
+        bash -c '
+            set -u
+            # Assert the pinned image really is bash 3.2, same as the CI
+            # step (cross-platform-zephyr.yml) asserts /bin/bash really is
+            # 3.2 on macOS. docker.io/library/bash:3.2 is a mutable
+            # Docker-official tag; if it ever moves off 3.2, this stage
+            # would otherwise silently stop proving anything.
+            ver=$(bash --version | head -1)
+            case "$ver" in
+                *"version 3.2"*) ;;
+                *)
+                    echo "stage_bash32_parse: container bash reports [$ver], not 3.2 -- the docker.io/library/bash:3.2 tag has drifted off real bash 3.2, so this stage no longer proves what it claims. Fix the pin before trusting it again."
+                    exit 3
+                    ;;
+            esac
+            rc=0
+            for f in "$@"; do
+                if ! bash -n "$f"; then
+                    echo "stage_bash32_parse: bash -n FAILED on $f (see error above)"
+                    rc=1
+                fi
+            done
+            exit "$rc"
+        ' _ ${files[@]+"${files[@]}"}
+    local rc=$?
+    # Distinguish a REAL result from this stage's own script (0 = clean,
+    # 1 = a genuine bash -n parse failure, 3 = the version-pin assertion
+    # above caught a drifted image) from a RUNTIME failure of the
+    # container invocation itself (offline image pull, an SELinux denial
+    # on the `-v ...:/w:ro` mount with no `,Z`, a rootless-docker
+    # permission error) -- those surface as some OTHER exit code from
+    # `podman run`/`docker run` and must never read as "a parse defect
+    # shipped"; they mean the local check couldn't run, and CI's
+    # macos-latest leg is still the unconditional backstop.
+    case "${rc}" in
+        0) return 0 ;;
+        1) return 1 ;;
+        3) return 1 ;;
+        *)
+            echo "stage_bash32_parse: '${runtime} run' itself failed (rc=${rc}) -- a container/runtime problem, NOT a parse defect. SKIPPING; cross-platform-zephyr.yml's python-smoke (macos-latest) leg still covers this unconditionally."
+            return 99
+            ;;
+    esac
+}
+
 stage_clang_format() {
     if ! command -v clang-format >/dev/null 2>&1; then
         return 99
@@ -315,6 +426,16 @@ stage_metadata_validate() {
     fi
 }
 
+stage_alp_lock() {
+    # Mirrors pr-metadata-validate.yml's `alp.lock --check` step (#1045) --
+    # previously the ONLY place that check ran, so a locally-green branch
+    # could still redden CI on lock drift it never saw. No "script missing"
+    # skip: this is a tracked repo file, so a missing/renamed script means
+    # the gate itself vanished and that must redden, not SKIP silently
+    # (same reasoning as stage_generated_files above).
+    python3 scripts/west_commands/alp_lock.py --workspace . --check || return 1
+}
+
 stage_doc_yaml_fragments() {
     # Lints ```yaml fenced blocks in *.md against board.schema.json.
     # Catches README + tutorial drift after schema changes.  Skips if
@@ -335,6 +456,14 @@ stage_public_private() {
     python3 scripts/check_public_private.py || return 1
 }
 
+stage_cross_platform_lint() {
+    # Mirrors cross-platform-zephyr.yml's python-smoke step (alp-sdk#1032
+    # A5) -- the ONLY place --fail-on-warning ran before this was three
+    # legs of a non-required workflow, so a repo drifting back to N
+    # findings had no local signal and no required check to catch it.
+    python3 scripts/check_cross_platform.py --fail-on-warning || return 1
+}
+
 stage_pytest_scripts() {
     # Runs the full pytest suite under tests/scripts/ -- linter,
     # silicon-determined-field rejection (a3cd4fd regression lock),
@@ -347,6 +476,14 @@ stage_pytest_scripts() {
         return 99
     fi
     python3 -m pytest tests/scripts/ -q || return 1
+
+    # tests/parity/ is NOT under tests/scripts/, so the seam-1 comparator's own
+    # 11 unit tests were excluded from this stage AND from parity-seam1.yml,
+    # which invoked only the comparator. Run them here too so a local
+    # `test-all.sh` green means the same thing CI's does.
+    if [ -f tests/parity/test_seam1_field_diff.py ]; then
+        python3 -m pytest tests/parity/test_seam1_field_diff.py -q || return 1
+    fi
 }
 
 # The hard-gate scripts/check_*.py list is the registry's gate set, read at
@@ -363,12 +500,34 @@ if command -v python3 >/dev/null 2>&1; then
         exit 1
     fi
     while IFS= read -r _qpath; do
+        # Defensive: quality_tasks.py now writes '\n' explicitly (alp-sdk#1109),
+        # but strip a trailing '\r' here too in case its output ever reaches
+        # this loop CRLF-terminated again (a stale/vendored copy, a Windows
+        # pipe upstream) -- `IFS= read -r` does not strip it on its own, and
+        # an unstripped '\r' makes every path below fail its `-f` existence
+        # check and skip silently.
+        _qpath="${_qpath%$'\r'}"
         [ -n "${_qpath}" ] && REQUIRED_GATE_SCRIPTS+=("${_qpath#scripts/}")
     done <<< "${_qgate_out}"
     if [ "${#REQUIRED_GATE_SCRIPTS[@]}" -eq 0 ]; then
         echo "FATAL: quality-tasks-v1.json yielded zero gate scripts" >&2
         exit 1
     fi
+fi
+
+# --list-required-gate-scripts: print exactly the paths
+# stage_required_gate_scripts()'s loop below would print a
+# "--- scripts/... ---" header for (same existence filter, zero
+# execution) and exit -- the cheap probe the alp-sdk#1109 regression
+# guard (tests/scripts/test_test_all_gate_coverage.py) diffs against
+# `quality_tasks.py --gate-scripts` to prove this stage still finds
+# every declared gate script.
+if [ "${LIST_REQUIRED_GATE_SCRIPTS}" -eq 1 ]; then
+    for _qscript in "${REQUIRED_GATE_SCRIPTS[@]}"; do
+        _qspath="scripts/${_qscript}"
+        [ -f "${_qspath}" ] && echo "${_qspath}"
+    done
+    exit 0
 fi
 
 stage_required_gate_scripts() {
@@ -388,7 +547,8 @@ stage_required_gate_scripts() {
 
     # board.yaml schema sweep -- canonical template + every
     # examples/*/board.yaml + tests/*/board.yaml, mirroring the
-    # pr-metadata-validate.yml "schema sweep" step.
+    # pr-metadata-validate.yml "schema sweep" step (including its
+    # rpmsg-imx93 exclusion -- see board-yaml-sweep-exclude.sh).
     if [ -f scripts/validate_board_yaml.py ]; then
         ran=1
         if [ -f metadata/templates/board.yaml.example ]; then
@@ -396,10 +556,13 @@ stage_required_gate_scripts() {
             python3 scripts/validate_board_yaml.py \
                 --input metadata/templates/board.yaml.example || failed=1
         fi
+        # shellcheck source=scripts/board-yaml-sweep-exclude.sh
+        source "${REPO_ROOT}/scripts/board-yaml-sweep-exclude.sh"
         while IFS= read -r f; do
             echo "--- validate_board_yaml.py ${f} ---"
             python3 scripts/validate_board_yaml.py --input "${f}" || failed=1
-        done < <(find examples tests -name board.yaml 2>/dev/null)
+        done < <(find examples tests -name board.yaml 2>/dev/null \
+                  | grep -v "${BOARD_YAML_SWEEP_EXCLUDE_PATTERN}")
     fi
 
     # gd32-bridge protocol vectors must not drift from the generator
@@ -444,41 +607,27 @@ stage_doxygen() {
     if [ -z "${dox}" ]; then
         return 99
     fi
-    # The repo ships NO committed Doxyfile -- pr-doxygen.yml generates one
-    # inline.  Reproduce that Doxyfile FAITHFULLY here so the full
-    # WARN_AS_ERROR build (which alone catches bad @ref / dead md links --
-    # the coverage script does NOT) runs locally before the PR.  Keep
-    # INPUT / EXCLUDE_PATTERNS / WARN_AS_ERROR identical to
-    # .github/workflows/pr-doxygen.yml.
-    local cfg warn_log
-    cfg=$(mktemp)
+    # docs/doxygen/Doxyfile is the single source shared with
+    # pr-doxygen.yml (#970) -- run the SAME full WARN_AS_ERROR build
+    # here (it alone catches bad @ref / dead md links -- the coverage
+    # script does NOT) instead of hand-maintaining a second Doxyfile
+    # that drifts.  Per-run values that must not collide across
+    # concurrent local runs (OUTPUT_DIRECTORY, WARN_LOGFILE) plus the
+    # commit-varying PROJECT_NUMBER are appended on stdin, mirroring
+    # the CI workflow's own stdin-override technique.
+    if [ ! -f docs/doxygen/Doxyfile ]; then
+        return 99
+    fi
+    local out_dir warn_log project_number
+    out_dir=$(mktemp -d)
     warn_log=$(mktemp)
-    cat > "${cfg}" <<EOF
-PROJECT_NAME           = "Alp SDK"
-OUTPUT_DIRECTORY       = $(mktemp -d)
-INPUT                  = include/alp
-RECURSIVE              = YES
-EXTRACT_ALL            = YES
-EXTRACT_STATIC         = NO
-GENERATE_HTML          = NO
-GENERATE_LATEX         = NO
-QUIET                  = YES
-WARN_AS_ERROR          = FAIL_ON_WARNINGS
-WARN_LOGFILE           = ${warn_log}
-OPTIMIZE_OUTPUT_FOR_C  = YES
-JAVADOC_AUTOBRIEF      = YES
-USE_MDFILE_AS_MAINPAGE = README.md
-INPUT                 += README.md VERSIONS.md CONTRIBUTING.md TRADEMARKS.md docs \
-                         chips/README.md vendors/alif/README.md \
-                         vendors/deepx-dxm1/README.md \
-                         vendors/gd32_firmware_library/README.md \
-                         firmware/cc3501e/README.md keys/README.md \
-                         meta-alp-sdk/README.md \
-                         metadata/library-profiles/README.md \
-                         zephyr/sysbuild/aen/README.md
-EXCLUDE_PATTERNS       = */superpowers/*
-EOF
-    "${dox}" "${cfg}" >/dev/null 2>&1 || true
+    project_number=$(git describe --tags --always 2>/dev/null || echo 0.1.0-pre)
+    {
+        cat docs/doxygen/Doxyfile
+        printf 'OUTPUT_DIRECTORY = %s\n' "${out_dir}"
+        printf 'WARN_LOGFILE = %s\n' "${warn_log}"
+        printf 'PROJECT_NUMBER = "%s"\n' "${project_number}"
+    } | "${dox}" - >/dev/null 2>&1 || true
     if [ -s "${warn_log}" ]; then
         cat "${warn_log}"
         return 1
@@ -631,6 +780,19 @@ else
         skip_stage "shellcheck" "shellcheck not installed (PATH or ~/.local/bin)"
     fi
 
+    # bash 3.2 parse gate -- catches the class of defect PR #1050 hit
+    # that shellcheck (above) and `bash -n` on a modern bash both miss
+    # (see stage_bash32_parse for the apostrophe/heredoc mechanism).
+    # Skips cleanly if neither podman nor docker is on PATH -- CI's
+    # macOS leg (cross-platform-zephyr.yml python-smoke) still runs
+    # this unconditionally with real bash 3.2.57, no container needed
+    # there.
+    if command -v podman >/dev/null 2>&1 || command -v docker >/dev/null 2>&1; then
+        run_stage "bash32-parse" stage_bash32_parse
+    else
+        skip_stage "bash32-parse" "neither podman nor docker on PATH -- CI's macos-latest python-smoke leg runs this unconditionally with real bash 3.2.57"
+    fi
+
     run_stage "metadata-validate" stage_metadata_validate
 
     # Documentation lint -- cheap, always runnable, no special tooling.
@@ -646,6 +808,15 @@ else
         skip_stage "public-private" "scripts/check_public_private.py missing"
     fi
 
+    # Mirrors cross-platform-zephyr.yml's python-smoke --fail-on-warning
+    # step (alp-sdk#1032 A5) so a repo drifting back to N findings is
+    # caught locally, not only on three legs of a non-required workflow.
+    if [ -f scripts/check_cross_platform.py ]; then
+        run_stage "cross-platform-lint" stage_cross_platform_lint
+    else
+        skip_stage "cross-platform-lint" "scripts/check_cross_platform.py missing"
+    fi
+
     # Required scripts/check_*.py gates -- see REQUIRED_GATE_SCRIPTS
     # above.  Keeps this wrapper's coverage aligned with the hard
     # gates pr-metadata-validate.yml / pr-doc-drift.yml run in CI.
@@ -655,6 +826,14 @@ else
     # artifact + fail on drift.  Catches the class of red that bit #623 /
     # #636 / #642 (new macro/symbol/gate without a committed regen).
     run_stage "generated-files" stage_generated_files
+
+    # alp.lock --check -- both the dev (fast) and main (release-grade)
+    # profiles run this unconditionally, same as metadata-validate above.
+    # MUST run after generated-files: that stage rewrites metadata/catalog.json
+    # and metadata/error-catalog.json in place, and both are now lock-covered
+    # (#1045) -- checking the lock first would pass on pre-regen bytes and
+    # leave a just-regenerated catalog unverified.
+    run_stage "alp-lock" stage_alp_lock
 
     # Main-only: the strict ABI-snapshot diff gate that pr-abi-snapshot.yml
     # runs on `main` + `release/**` only.  The `--target main` release-grade

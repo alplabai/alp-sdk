@@ -133,10 +133,24 @@ def test_remap_cores_ambiguous_target_fails():
 
 def test_known_pass_cells(generated):
     assert _cell(generated, "E1M-AEN801", "i2c-scanner") == gpm.PASS
-    # Cross-core-class swap (m55_hp -> m33) must also generate.
-    assert _cell(generated, "E1M-NX9101", "pwm-led-fade") == gpm.PASS
     # E1M-X family: the AEN-authored pwm-led-fade lands on m33_sm.
     assert _cell(generated, "E1M-V2M102", "pwm-led-fade") == gpm.PASS
+
+
+def test_nx9101_cells_fail_honestly_on_the_tbd_hw_rev(generated):
+    """E1M-NX9101 x every pinned example is FAIL, not a remap bug.
+
+    Was PASS (including the cross-core-class m55_hp -> m33 swap this
+    once anchored) until #1025's hw_rev-buildable gate: NX9101's only
+    hw_rev (imx93 r1) is `status: tbd`, so `--emit zephyr-conf` now
+    refuses the SoM outright before it ever reaches core-remap or
+    Kconfig generation. This is the gate doing its job, not a
+    portability regression -- flip these back to PASS only alongside
+    metadata/e1m_modules/imx93/hw-revisions.yaml:r1 gaining a buildable
+    status; `test_remap_cores_maps_unique_same_class_key` above still
+    covers the m55_hp -> m33 remap logic in isolation."""
+    for example in ("i2c-scanner", "gpio-button-led", "pwm-led-fade"):
+        assert _cell(generated, "E1M-NX9101", example) == gpm.FAIL, example
 
 
 def test_notes_derive_from_metadata(generated):

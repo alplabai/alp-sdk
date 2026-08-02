@@ -11,7 +11,7 @@
     V2N-M1 (DEEPX primary) by swapping the Yocto MACHINE.
   </description>
 
-  <maintainer email="alpcaner92@gmail.com">alpCaner</maintainer>
+  <maintainer email="contact@alplab.ai">Alp Lab AB</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>

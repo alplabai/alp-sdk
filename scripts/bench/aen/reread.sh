@@ -15,7 +15,16 @@ BD="$1"
 SIZE="${2:-0x500}"
 OBJ="$(bench_tool_prefix)" || exit $?
 JLINK="$(bench_jlink_exe)" || exit $?
-BUF=0x$($OBJ-nm "$BD/zephyr/zephyr.elf" | awk '/ ram_console_buf$/{print $1}')
+# See ram-run.sh (issue #935): if BUF_SYM is empty, do NOT fold it into BUF --
+# BUF would silently become the bare string "0x" and `mem8 $BUF, $SIZE` would
+# run as `mem8 0x, $SIZE`, printing an EMPTY "RAM console" block
+# indistinguishable from a boot failure.
+BUF_SYM=$($OBJ-nm "$BD/zephyr/zephyr.elf" | awk '/ ram_console_buf$/{print $1}')
+if [ -z "$BUF_SYM" ]; then
+  echo "reread: no 'ram_console_buf' in this image (UART-console app) -- read the console via the labgrid 'console' resource instead." >&2
+  exit 3
+fi
+BUF=0x$BUF_SYM
 {
 	echo connect
 	echo halt

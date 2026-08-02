@@ -15,7 +15,7 @@
 #      CONFIG_ALP_SDK_CHIP_<NAME>=y (or CONFIG_ALP_SDK_BLOCK_<NAME>=y
 #      for the SDK-level helpers `button_led` / `pdm_mic`; the loader
 #      picks the right symbol per slug).
-#   4. Build with `west build`.  The example's CMakeLists.txt
+#   4. Build with `tan build`.  The example's CMakeLists.txt
 #      invokes scripts/alp_project.py at configure time and layers
 #      the generated build/generated/alp.conf over prj.conf via
 #      Zephyr's EXTRA_CONF_FILE -- no hand-edited Kconfig.  (`rsource`
@@ -33,7 +33,9 @@ preset: e1m-evk            # 35x35 EVK -- reference board.  The EVK
                            # push switch (E1M_GPIO_IO4) and its only
                            # user LEDs to the RGB cluster on PWM; this
                            # demo claims the red channel's pad as a GPIO
-                           # (E1M_GPIO_PWM3, the E1M GPIO-secondary).
+                           # (E1M_GPIO_PWM0, the E1M GPIO-secondary --
+                           # bench-measured 2026-07-28, see
+                           # metadata/boards/e1m-evk.yaml).
 supported_boards:
   - e1m-evk
   - e1m-x-evk
@@ -41,7 +43,7 @@ supported_boards:
 # E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
 pins:
   - { e1m: E1M_GPIO_IO4, macro: EVK_PIN_ENCODER_SW, doc: "Rotary encoder push switch (PEC12R-4222F-S0024), 10k pull-up + 0.1uF debounce" }
-  - { e1m: E1M_GPIO_PWM3, macro: EVK_PIN_LED_RED, doc: "RGB LED red -- the PWM3 pad as a digital GPIO; the app opens it by the EVK_PIN_LED_RED macro" }
+  - { e1m: E1M_GPIO_PWM0, macro: EVK_PIN_LED_RED, doc: "RGB LED red -- the PWM0 pad as a digital GPIO; the app opens it by the EVK_PIN_LED_RED macro. PWM0 (not PWM3) is the red channel: bench-measured 2026-07-28, the netlist's LED_R/LED_G net names are swapped" }
 
 # Single-core slice: M55-HP runs the demo.  M55-HE inherits
 # the SoM topology default (stock-shim Zephyr image), keeping the

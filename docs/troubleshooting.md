@@ -44,19 +44,10 @@ third entry).  Common slip-ups:
 
 Full schema reference: [`docs/board-config-schema.md`](board-config-schema.md).
 
-### `alp_project: SDK <V> is older than SoM hw_rev '<R>' minimum <M>`
-
-Your `som.hw_rev` declares a rev that needs a newer SDK than this
-checkout.  Either:
-
-* Update the SDK (`west update`) to a version >= `<M>`, OR
-* Pick an older `som.hw_rev` whose `min_sdk_version` window covers
-  the current SDK.  The available revs for your family are listed
-  in `metadata/e1m_modules/<family>/hw-revisions.yaml`.
-
 ### `west: command not found` / `pip install west` fails
 
-The Zephyr meta-tool needs Python 3.10+.  On macOS:
+Installing and running `west` itself needs Python 3.10+ (the SDK's own
+support floor).  On macOS:
 
 ```bash
 brew install python
@@ -74,6 +65,21 @@ pip install west
 See [`docs/getting-started.md`](getting-started.md) §1 for the
 full per-host walkthrough.
 
+### `west build` fails at CMake configure citing a Python version
+
+`west` itself runs fine on 3.10+, but *building* needs more: Zephyr
+v4.4.1's own `cmake/modules/python.cmake` hardcodes
+`PYTHON_MINIMUM_REQUIRED 3.12` and refuses `find_package(Python3)`
+below it, regardless of what `west`/`bootstrap.sh`/`bootstrap.ps1`
+accepted earlier.  Ubuntu 22.04 and Debian 12's system `python3`
+(3.10 and 3.11 respectively) can't reach 3.12 via `apt-get install
+python3` -- install a newer interpreter alongside the system one,
+e.g. the `deadsnakes` PPA (`sudo add-apt-repository
+ppa:deadsnakes/ppa && sudo apt-get install python3.12`) or `pyenv`,
+and point `west`/the venv at it.  See
+[`docs/cross-platform-setup.md`](cross-platform-setup.md) §1.1 for
+why this floor isn't (yet) enforced up front by bootstrap itself.
+
 ### `CMake Error: Could not find package configuration file Zephyr`
 
 Either `ZEPHYR_BASE` is not set, or your workspace is malformed.
@@ -84,6 +90,39 @@ export ZEPHYR_BASE="$PWD/zephyr"
 # OR:
 west zephyr-export
 ```
+
+### `CMake Error: ... You probably need to select a different build tool` (missing `ninja`)
+
+```
+CMake Error: CMake was unable to find a build program corresponding to "Ninja".  CMAKE_MAKE_PROGRAM is not set.  You probably need to select a different build tool.
+CMake Error: CMAKE_C_COMPILER not set, after EnableLanguage
+CMake Error: CMAKE_CXX_COMPILER not set, after EnableLanguage
+```
+
+Despite what the first line suggests, the fix is not to pick a
+different build tool -- `ninja` is Zephyr's build generator on every
+host.  `scripts/bootstrap.sh` / `bootstrap.ps1` and `python -m alp_cli
+doctor` both check for it and FAIL with an install command when it's
+missing; if you hit the raw CMake error above instead, check whether
+you resolved a `[!] ninja` line from `tan doctor --build` -- it still
+rates a missing `ninja` a warning rather than a failure
+(`alplabai/tan-cli#103`), so it's easy to leave unresolved and hit
+this error anyway.  Installing it clears all three lines above (the
+two compiler errors are downstream of the same missing generator):
+
+```bash
+# Linux (Debian / Ubuntu)
+sudo apt install -y ninja-build
+
+# macOS
+brew install ninja
+
+# Windows (PowerShell)
+winget install -e --id Ninja-build.Ninja
+```
+
+See [`docs/cross-platform-setup.md`](cross-platform-setup.md) §2.1 /
+§3.2 / §4.1 for the base-toolchain block this belongs to.
 
 ### Compile error: `'alp_<thing>_t' undeclared`
 
@@ -230,7 +269,7 @@ bus id matching `ALP_E1M_I2C0` on your board.
 
 ### `pr-twister.yml` fails with `west-commands: invalid in module.yml`
 
-You're using a Zephyr release older than the SDK's pin.  Bump to v4.4.0 per
+You're using a Zephyr release older than the SDK's pin.  Bump to v4.4.1 per
 [`docs/zephyr-version-policy.md`](zephyr-version-policy.md).
 
 ### `clang-format` CI reports diffs you can't reproduce

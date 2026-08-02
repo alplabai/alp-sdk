@@ -61,12 +61,14 @@ BOOTSTRAP_JSON="${REPO_ROOT}/metadata/bootstrap.json"
 DO_PIP=1
 DO_WEST=1
 PRINT_ENV_ONLY=0
+ALLOW_PARTIAL=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --no-pip)       DO_PIP=0 ;;
         --no-west)      DO_WEST=0 ;;
         --print-env)    PRINT_ENV_ONLY=1 ;;
+        --allow-partial) ALLOW_PARTIAL=1 ;;
         -h|--help)
             # The SINGLE authoritative copy of the usage text (issue #917
             # review item 11): the header comment above deliberately does
@@ -87,6 +89,11 @@ Usage:
     bash scripts/bootstrap.sh --no-pip       # skip pip installs
     bash scripts/bootstrap.sh --no-west      # skip west init/update
     bash scripts/bootstrap.sh --print-env    # only print env-var lines
+    bash scripts/bootstrap.sh --allow-partial
+        # report success even if zephyr-requirements / sdk-extras /
+        # editable-install failed to install (issue #1038); the failures
+        # are still printed and the workspace is left on disk either way --
+        # this only changes the closing verdict
 
 After it runs:
 
@@ -110,6 +117,28 @@ ok()   { printf "\033[1;32m[bootstrap]\033[0m %s\n" "$*"; }
 warn() { printf "\033[1;33m[bootstrap]\033[0m %s\n" "$*" >&2; }
 die()  { printf "\033[1;31m[bootstrap]\033[0m %s\n" "$*" >&2; exit 1; }
 
+# Phase IDs (from metadata/bootstrap.json's verdict.blockingPhases, loaded
+# further down) whose pip install actually failed THIS run -- a subset of
+# VERDICT_BLOCKING_PHASES, filled in by record_phase_warning below as each
+# pip step in "-------- pip dependencies --------" below completes. Read by
+# the closing verdict logic in "-------- Done --------".
+BLOCKING_PHASES=()
+record_phase_warning() {
+    # $1 = the phase id this warn() call just reported. Appends to
+    # BLOCKING_PHASES only when VERDICT_BLOCKING_PHASES (metadata/
+    # bootstrap.json, not hardcoded here) names it -- issue #1038:
+    # pip-upgrade warns too (see the venv section below) but is deliberately
+    # NOT in that list, so it never reaches this function.
+    local phase="$1" p
+    for p in "${VERDICT_BLOCKING_PHASES[@]}"; do
+        if [ "${p}" = "${phase}" ]; then
+            BLOCKING_PHASES+=("${phase}")
+            return 0
+        fi
+    done
+    return 0
+}
+
 # -------- Prerequisite check --------------------------------------------------
 
 # Kept as ONE canonical hardcoded list (not read from the manifest: reading
@@ -119,12 +148,69 @@ die()  { printf "\033[1;31m[bootstrap]\033[0m %s\n" "$*" >&2; exit 1; }
 # `prerequisites.posix` is policed by scripts/check_bootstrap_manifest.py,
 # whose regex expects the full array assignment right below, not by this
 # script.
-REQUIRED_BINS=(git cmake python3)
+REQUIRED_BINS=(git cmake python3 ninja xz wget)
 # --print-env only reads metadata/bootstrap.json and prints -- it never
-# touches git/cmake, so it only needs python3 present.
+# touches git/cmake/ninja, so it only needs python3 present.
 if [ "${PRINT_ENV_ONLY}" -eq 1 ]; then
     REQUIRED_BINS=(python3)
+elif [ "$(uname -s 2>/dev/null)" = "Darwin" ]; then
+    # xz and wget are REQUIRED on Linux, not macOS -- both are proven-on-Linux,
+    # never-demonstrated-on-macOS failure modes, so blocking on them
+    # unconditionally would hard-refuse every macOS user's first `bash
+    # scripts/bootstrap.sh` -- the documented first command -- on a host
+    # where it previously worked.
+    #
+    # xz: GNU tar (what `west sdk install`'s `tar --xz` shells out to on
+    # Linux) execs a standalone `/usr/bin/xz` binary to unpack the SDK
+    # archive -- the failure issue #949 actually proved, on a bare
+    # ubuntu:24.04 container. macOS `tar` is bsdtar (libarchive), which
+    # decompresses .xz IN-PROCESS and needs no xz binary, and stock macOS
+    # ships no /usr/bin/xz.
+    #
+    # wget: the pinned Zephyr SDK's own `setup.sh` (metadata/toolchains.json
+    # zephyrSdk.version) only hard-checks for a system `wget` on the
+    # `linux-*` host branch (`[[ "${host}" =~ ^linux-.* ]] && check_command
+    # wget 91`) -- confirmed by inspecting a real extracted setup.sh at that
+    # exact pinned version. On `macos-*` it resolves a bundled wget from the
+    # SDK's own hosttools instead and never runs that check at all -- issue
+    # #949's clean-container acceptance run proved the Linux failure
+    # (`Zephyr SDK setup requires 'wget'`), never a macOS one.
+    #
+    # `prerequisites.install.macos.{xz,wget}` (metadata/bootstrap.json) and
+    # PREREQ_HINT_MACOS below stay as-is so the hint still exists for the
+    # rare case a user needs either; only the hard block is dropped.
+    REQUIRED_BINS=(git cmake python3 ninja)
 fi
+
+# Per-tool install hints for the missing-tools message below (issue #978) --
+# the POSIX-side analogue of bootstrap.ps1's own $Prereqs Name/Hint pairs,
+# and under the SAME bootstrap-of-the-bootstrap constraint as REQUIRED_BINS
+# above (this runs before python3 is confirmed present, so it can't read
+# metadata/bootstrap.json for the hint text either). A second hardcoded
+# copy, kept in lockstep with metadata/bootstrap.json's
+# prerequisites.install.linux / .macos by scripts/check_bootstrap_manifest.py.
+# Three PARALLEL arrays, not an associative array: bash 3.2 (the
+# macOS-shipped version) has no `declare -A` -- the same reason the
+# nativeLibHints print loop further down duplicates itself per OS instead of
+# using indirection. Matched up by POSITION, not by key.
+PREREQ_HINT_NAMES=(git cmake python3 ninja xz wget)
+PREREQ_HINT_LINUX=(
+    "sudo apt-get install -y git"
+    "sudo apt-get install -y cmake"
+    "sudo apt-get install -y python3"
+    "sudo apt-get install -y ninja-build"
+    "sudo apt-get install -y xz-utils"
+    "sudo apt-get install -y wget"
+)
+PREREQ_HINT_MACOS=(
+    "brew install git"
+    "brew install cmake"
+    "brew install python3"
+    "brew install ninja"
+    "brew install xz"
+    "brew install wget"
+)
+
 MISSING=()
 for bin in "${REQUIRED_BINS[@]}"; do
     if ! command -v "${bin}" >/dev/null 2>&1; then
@@ -132,7 +218,28 @@ for bin in "${REQUIRED_BINS[@]}"; do
     fi
 done
 if [ "${#MISSING[@]}" -gt 0 ]; then
-    die "Missing required tools: ${MISSING[*]}.  Install them and re-run."
+    warn "Missing required tools:"
+    UNAME_S="$(uname -s 2>/dev/null || echo unknown)"
+    for bin in "${MISSING[@]}"; do
+        hint=""
+        idx=0
+        for name in "${PREREQ_HINT_NAMES[@]}"; do
+            if [ "${name}" = "${bin}" ]; then
+                case "${UNAME_S}" in
+                    Darwin) hint="${PREREQ_HINT_MACOS[$idx]}" ;;
+                    *)      hint="${PREREQ_HINT_LINUX[$idx]}" ;;
+                esac
+                break
+            fi
+            idx=$((idx + 1))
+        done
+        if [ -n "${hint}" ]; then
+            warn "  ${bin}  ->  ${hint}"
+        else
+            warn "  ${bin}"
+        fi
+    done
+    die "Install the tools above and re-run."
 fi
 
 # -------- Load bootstrap facts (metadata/bootstrap.json, issue #917) ----------
@@ -191,11 +298,29 @@ emit("WEST_EXT_GUARD", d["west"]["extensionGuardCommand"])
 emit("PIP_BOOTSTRAP_UPGRADE", d["pip"]["bootstrapUpgrade"])
 emit("PIP_SDK_EXTRAS", d["pip"]["sdkExtras"])
 emit("PIP_EDITABLE_INSTALL", d["pip"]["editableInstall"])
+# verdict: the single source for which pip phases make the closing verdict
+# non-success, and the wording for it (issue #1038 / tan-cli#220) -- see
+# the verdict.* descriptions in metadata/schemas/bootstrap-v1.schema.json.
+# NOTE: no apostrophes, and no lone angle-bracket character, anywhere in
+# this heredoc. bash 3.2 (macOS) scans this whole body -- comments included
+# -- character by character while hunting for the closing paren of the
+# enclosing $( ), even though the quoted PY-tagged heredoc makes it inert
+# Python-only text to every other shell. An ODD apostrophe count opens a
+# quote state that runs until the parser hits something illegal in it
+# (#1050); a lone angle bracket (as in an angle-bracket-wrapped placeholder)
+# is misread as a redirection operator and desyncs the same scan -- both
+# surface as a syntax error at an unrelated line far below. Spell a
+# placeholder as plain "user", not a bracketed one, down here.
+# See #1050 and #1061.
+emit("VERDICT_BLOCKING_PHASES", d["verdict"]["blockingPhases"])
+emit("VERDICT_PARTIAL_NOTE_TEMPLATE", d["verdict"]["partialNoteTemplate"])
+emit("VERDICT_INCOMPLETE_MESSAGE_TEMPLATE", d["verdict"]["incompleteMessageTemplate"])
+emit("VERDICT_INCOMPLETE_REMEDY", d["verdict"]["incompleteRemedy"])
 # env: keys and RAW (untokenized) values as two parallel arrays (bash has
 # no portable ordered-map array type across the bash 3.2 macOS ships and
 # bash 4+). Token substitution happens in bash, not here: git-bash silently
-# rewrites a POSIX-style path argument (e.g. "/c/Users/x") into
-# "C:/Users/x" when handed to a native (non-MSYS) python.exe, which would
+# rewrites a POSIX-style path argument (e.g. "/c/Users/user") into
+# "C:/Users/user" when handed to a native (non-MSYS) python.exe, which would
 # make this same directory print two different ways depending on whether
 # it went through python's tok() or bash's own $WORKSPACE_DIR -- see
 # print_env_lines() below.
@@ -207,6 +332,11 @@ for os_key in ("linux", "macos", "windows"):
     hint = d["nativeLibHints"][os_key]
     emit("HINT_" + os_key.upper() + "_NOTE", hint["note"])
     emit("HINT_" + os_key.upper() + "_CMD", hint["command"] or "")
+# manualInstallHints.posix.note (issue #949 addendum A4): the Zephyr
+# SDK / Arm GNU Toolchain manual-install facts, POSIX's twin of
+# bootstrap.ps1's manualInstallHints.windows.note -- this key used to
+# carry only "windows", so no Linux/macOS hint could ever render here.
+emit("MANUAL_INSTALL_POSIX_NOTE", d["manualInstallHints"]["posix"]["note"])
 PY
 )" || die "failed to read ${BOOTSTRAP_JSON} (see scripts/check_bootstrap_manifest.py)"
 eval "${_facts}"
@@ -283,6 +413,32 @@ case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*) OS_LABEL="windows-bash" ;;
 esac
 
+# Intel Mac: this script's own steps (west init/update, Python deps) work
+# fine -- they're arch-independent -- and so does native_sim (host-toolchain
+# build, no Zephyr SDK involved). What does NOT work is `west sdk install`
+# for real-silicon builds: the pinned Zephyr SDK (metadata/toolchains.json)
+# ships macos-aarch64 only, no macos-x86_64 -- dropped upstream starting
+# sdk-ng v1.0.0 (see docs/adr/0012-cross-platform-developer-host.md's
+# 2026-07-29 Amendment, and the cross-platform setup guide's section 1).
+# Warn, don't refuse: bootstrap itself and native_sim both still work here.
+#
+# `uname -m` alone is not enough: an Apple Silicon Mac running this
+# script under Rosetta 2 (e.g. an x86_64 shell/terminal) also reports
+# "x86_64", which would wrongly warn a native macos-aarch64 host.
+# `sysctl -n sysctl.proc_translated` is the canonical discriminator --
+# "1" means the CURRENT process is translated, "0" means it is native;
+# the sysctl itself is macOS-only (absent on Linux, irrelevant there).
+IS_ROSETTA=0
+if [ "${OS_LABEL}" = "macos" ] && [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" = "1" ]; then
+    IS_ROSETTA=1
+fi
+if [ "${OS_LABEL}" = "macos" ] && [ "$(uname -m)" = "x86_64" ] && [ "${IS_ROSETTA}" -eq 0 ]; then
+    warn "Intel Mac detected: native_sim and this bootstrap work fine, but"
+    warn "  'west sdk install' will fail later -- the pinned Zephyr SDK ships"
+    warn "  no macos-x86_64 build. Real-silicon Zephyr builds and 'tan build'"
+    warn "  need a Linux host instead (VM, container, or remote builder)."
+fi
+
 info "Repo root:       ${REPO_ROOT}"
 info "Workspace dir:   ${WORKSPACE_DIR}"
 info "Detected OS:     ${OS_LABEL}"
@@ -325,6 +481,19 @@ fi
 
 VENV_DIR="${WORKSPACE_DIR}/${VENV_DIR_NAME}"
 
+# Refuse an empty or path-unsafe venv.dirName BEFORE it is ever used to
+# build a delete target: an empty value collapses VENV_DIR to
+# "${WORKSPACE_DIR}/", which the recreate-on-broken-venv path below then
+# `rm -rf`s -- taking out the whole workspace (zephyr/, modules/, .west/,
+# and the alp-sdk checkout itself if WORKSPACE_DIR is a parent of it).
+# metadata/schemas/bootstrap-v1.schema.json constrains this same field, but
+# a schema-drifted or hand-edited manifest must not reach the `rm -rf`
+# unchecked -- this is the last line of defense, not a duplicate of that
+# one.
+case "${VENV_DIR_NAME}" in
+    ""|.|..|*/*) die "metadata/bootstrap.json's venv.dirName is empty or path-unsafe (\"${VENV_DIR_NAME}\") -- refusing to build a workspace path (and a future 'rm -rf' target) from it." ;;
+esac
+
 # -------- workspace venv (hermetic west + Python deps) ------------------------
 
 # Everything -- west, the Zephyr requirements, the SDK extras -- installs into a
@@ -333,12 +502,66 @@ VENV_DIR="${WORKSPACE_DIR}/${VENV_DIR_NAME}"
 # and a global west couples the build to the host interpreter's state).
 # tan's Python backend (alp_cli) + the VS Code extension auto-discover
 # <workspace>/.venv, so this is backwards-compatible.  Idempotent: an
-# existing venv is reused.
+# existing WORKING venv is reused.
 if [ "${DO_WEST}" -eq 1 ] || [ "${DO_PIP}" -eq 1 ]; then
     mkdir -p "${WORKSPACE_DIR}"
-    if [ -x "${VENV_DIR}/${VENV_POSIX_BIN}/python" ] || [ -x "${VENV_DIR}/${VENV_WINDOWS_BIN}/python.exe" ]; then
+    # Reuse only a working venv (issue #985): `python3 -m venv` on a host
+    # missing python3-venv creates the directory tree and a `python`
+    # executable before failing at ensurepip, so the previous
+    # executable-exists-only probe treated that half-built, pip-less venv
+    # as valid and reused it forever -- every retry then died one step
+    # later on "No module named pip" with nothing pointing at the venv
+    # itself as the problem.  Probe the thing that actually broke: pip.
+    VENV_REUSABLE=0
+    for candidate in "${VENV_DIR}/${VENV_POSIX_BIN}/python" "${VENV_DIR}/${VENV_WINDOWS_BIN}/python.exe"; do
+        if [ -x "${candidate}" ] && "${candidate}" -m pip --version >/dev/null 2>&1; then
+            VENV_REUSABLE=1
+            break
+        fi
+    done
+    if [ "${VENV_REUSABLE}" -eq 1 ]; then
         ok "Workspace venv already present at ${VENV_DIR}"
     else
+        if [ -e "${VENV_DIR}" ]; then
+            warn "Workspace venv at ${VENV_DIR} exists but has no working pip -- recreating it"
+            rm -rf "${VENV_DIR}"
+        fi
+        # -------- venv capability check (issue #984) -------------------------
+        # `python3-venv` is a Debian/Ubuntu PACKAGE name, not a binary -- it
+        # can never be a `command -v`-checkable REQUIRED_BINS entry (see that
+        # array's comment above).  What actually breaks -- Debian/Ubuntu ship
+        # the `ensurepip`-bundled pip/setuptools wheels `python3 -m venv`
+        # needs in the separate `python3-venv` package, not in `python3`
+        # itself -- only shows up when a venv is actually built, so `import
+        # ensurepip` alone (importable even when the wheels are missing)
+        # would not catch it.  This is a CAPABILITY probe -- build a
+        # disposable throwaway venv and discard it -- not a presence probe,
+        # using the same curated warn/die treatment the missing-tools message
+        # above got in #978.  Runs only here, right before an actual venv
+        # build is about to happen (issue #985 review): `--no-pip --no-west`
+        # needs no venv at all, and an idempotent re-run of an already-healthy
+        # venv was otherwise paying a real `python3 -m venv` (~1.65s measured)
+        # for a probe nothing needed.
+        VENV_PROBE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/alp-bootstrap-venv-probe.XXXXXX" 2>/dev/null || true)"
+        if [ -z "${VENV_PROBE_DIR}" ]; then
+            # mktemp itself failing (full/read-only/noexec TMPDIR, routine on
+            # CI runners) is a DIFFERENT failure than python3-venv being
+            # missing (checked next) and must not share that message: telling
+            # the customer to install an already-installed package leaves
+            # them stuck on the identical failure after they do -- the #985
+            # misdiagnosis loop, reintroduced.
+            die "mktemp -d under \${TMPDIR:-/tmp} (${TMPDIR:-/tmp}) failed -- check free space and write permissions there, or set TMPDIR to a writable directory, and re-run."
+        fi
+        if ! python3 -m venv "${VENV_PROBE_DIR}" >/dev/null 2>&1; then
+            rm -rf "${VENV_PROBE_DIR}" 2>/dev/null || true
+            warn "python3 -m venv is not usable (ensurepip unavailable):"
+            case "${OS_LABEL}" in
+                macos) warn "  python3-venv  ->  brew install python3" ;;
+                *)     warn "  python3-venv  ->  sudo apt-get install -y python3-venv" ;;
+            esac
+            die "Install the package above and re-run."
+        fi
+        rm -rf "${VENV_PROBE_DIR}"
         info "Creating workspace venv at ${VENV_DIR}"
         python3 -m venv "${VENV_DIR}" || die "python3 -m venv ${VENV_DIR} failed"
     fi
@@ -406,21 +629,27 @@ if [ "${DO_PIP}" -eq 1 ]; then
         info "Installing Zephyr Python requirements into the venv"
         "${VPY}" -m pip install -q \
             -r "${WORKSPACE_DIR}/${ZEPHYR_REQUIREMENTS_PATH}" \
-            || warn "Zephyr requirements install reported a problem -- check manually"
+            || { warn "Zephyr requirements install reported a problem -- check manually"; record_phase_warning "zephyr-requirements"; }
     fi
     # SDK-side extras: alp_project.py needs jsonschema; the MCUboot
     # dev-key script needs imgtool.
     info "Installing alp-sdk Python extras into the venv (${PIP_SDK_EXTRAS[*]})"
     "${VPY}" -m pip install -q "${PIP_SDK_EXTRAS[@]}" \
-        || warn "alp-sdk extras install reported a problem -- check manually"
+        || { warn "alp-sdk extras install reported a problem -- check manually"; record_phase_warning "sdk-extras"; }
     # tan's Python backend (alp_cli: init / run / emit / validate / model /
     # doctor / monitor, invoked as `python -m alp_cli <sub>` by `tan`) --
     # editable install, so a `git pull` in the checkout updates the backend
-    # in place. `tan` itself is a separate Rust binary, installed via
-    # `cargo install --git https://github.com/alplabai/tan-cli --bin tan`.
+    # in place. `tan` itself is a separate Rust binary, installed
+    # separately:
+    #   curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh
+    # The from-source alternative is `git clone https://github.com/alplabai/
+    # tan-cli && cd tan-cli && cargo install --path crates/tan-cli --locked`
+    # -- that path is relative to a TAN-CLI checkout, not to this one. This
+    # comment used to name `crates/tan-cli` alone, which does not exist in
+    # alp-sdk, so anyone who followed it from here got "no such directory".
     info "Installing the tan CLI's Python backend into the venv (pip install -e ${PIP_EDITABLE_INSTALL})"
     "${VPY}" -m pip install -q -e "${PIP_EDITABLE_INSTALL}" \
-        || warn "alp_cli editable install reported a problem -- check manually"
+        || { warn "alp_cli editable install reported a problem -- check manually"; record_phase_warning "editable-install"; }
 else
     info "Skipping pip installs (--no-pip)"
 fi
@@ -431,8 +660,9 @@ fi
 # not hardcoded here; edit the manifest to change this text. This script is
 # the sole consumer of nativeLibHints today: bootstrap.ps1 has no "native
 # libraries" heading of its own (native Windows never installs the
-# Yocto-side native libs directly) -- see `manualInstallHints` for the
-# separate, Windows-only fact bootstrap.ps1 DOES print (review item 7).
+# Yocto-side native libs directly) -- see `manualInstallHints` below for the
+# separate fact bootstrap.ps1 ALSO prints, under its own OS key (review
+# item 7).
 echo
 info "Optional native libraries unlock the Yocto-side backends:"
 case "${OS_LABEL}" in
@@ -467,10 +697,62 @@ if [ -n "${HINT_CMD}" ]; then
     echo "  ${HINT_CMD}"
 fi
 
+# -------- Manual-install hints -------------------------------------------------
+
+# Rendered from metadata/bootstrap.json's `manualInstallHints.posix.note`
+# (issue #949 addendum A4) -- not hardcoded here; edit the manifest to
+# change this text.  bootstrap.ps1 prints the `windows` twin of this same
+# key under an identical heading; POSIX had no equivalent key to read
+# until this addendum, so a Linux/macOS customer never saw this at all.
+# Only for true POSIX (linux/macos) -- a git-bash/MSYS invocation on native
+# Windows is the unsupported combo the top-of-file header comment already
+# points elsewhere (WSL2 or bootstrap.ps1), so it gets neither this section
+# nor windows' bootstrap.ps1-only one.
+case "${OS_LABEL}" in
+    linux|macos)
+        echo
+        info "NOT auto-installed (manual, one-time):"
+        for line in "${MANUAL_INSTALL_POSIX_NOTE[@]}"; do echo "  ${line}"; done
+        ;;
+esac
+
 # -------- Done ----------------------------------------------------------------
 
 echo
-ok "Bootstrap complete."
+# The closing verdict (issue #1038 / tan-cli#220): every pip phase above
+# stays non-fatal in itself -- the workspace is left on disk regardless of
+# which packages failed -- but a run that hit one of
+# metadata/bootstrap.json's verdict.blockingPhases has NOT produced an
+# environment that can do what it was bootstrapped for, and must not report
+# unqualified success. BLOCKING_PHASES is populated by record_phase_warning
+# above; VERDICT_* comes from the manifest, not hardcoded here, so this
+# wording has exactly one declaration shared with scripts/bootstrap.ps1
+# (and, independently, tan-cli's WORKSPACE_BLOCKING).
+#
+# EXIT_CODE is set here but NOT acted on until the very end of this script
+# (matching tan-cli's `verdict()`/`finish()` split): the Next steps block
+# below -- including `tan doctor --build`, the tool that diagnoses exactly
+# this kind of failure -- must still print on the incomplete path. Exiting
+# here would take that away on the one run that needs it most.
+EXIT_CODE=0
+if [ "${#BLOCKING_PHASES[@]}" -eq 0 ]; then
+    ok "Bootstrap complete."
+elif [ "${ALLOW_PARTIAL}" -eq 1 ]; then
+    _phases_joined=""
+    for _p in "${BLOCKING_PHASES[@]}"; do
+        if [ -z "${_phases_joined}" ]; then _phases_joined="${_p}"; else _phases_joined="${_phases_joined}, ${_p}"; fi
+    done
+    ok "Bootstrap complete."
+    warn "  ${VERDICT_PARTIAL_NOTE_TEMPLATE//\{\{PHASES\}\}/${_phases_joined}}"
+else
+    _phases_joined=""
+    for _p in "${BLOCKING_PHASES[@]}"; do
+        if [ -z "${_phases_joined}" ]; then _phases_joined="${_p}"; else _phases_joined="${_phases_joined}, ${_p}"; fi
+    done
+    warn "${VERDICT_INCOMPLETE_MESSAGE_TEMPLATE//\{\{PHASES\}\}/${_phases_joined}}"
+    warn "  ${VERDICT_INCOMPLETE_REMEDY}"
+    EXIT_CODE=1
+fi
 # Split into two heredocs on purpose.  Only this first block has variables
 # left to expand, so only it gets an UNQUOTED tag.
 cat <<EOF
@@ -487,25 +769,56 @@ EOF
 print_env_lines "  "
 # QUOTED tag (<<'EOF') -- mandatory, not stylistic.  This block documents
 # shell commands, and an unquoted tag makes the shell treat the backtick'd
-# `cargo install ...` line below as a real command SUBSTITUTION: every
-# completed run of this script silently executed it, reinstalling tan from
-# git tip behind the user's back, and pasted its output here instead of the
-# text.  A quoted tag also means backslashes are literal, so the line
-# continuation and $PWD below are written plainly rather than escaped.
+# install command below as a real command SUBSTITUTION: every completed
+# run of this script silently executed it, reinstalling tan behind the
+# user's back, and pasted its output here instead of the text.  A quoted
+# tag also means backslashes are literal, so the line continuation and
+# $PWD below are written plainly rather than escaped.
+#
+# Everything between the EOF markers is PRINTED TO THE USER, so a '#' line in
+# there is output, not a source comment -- keep internal notes (like this one)
+# outside the heredoc. `check_bootstrap_manifest.py` enforces exactly that
+# distinction, and `tests/scripts/test_check_bootstrap_manifest.py`
+# ::test_hardcoded_literal_inside_heredoc_body_fails proves it by rewriting the
+# printed `  # Run the local test suite:` line to carry a version literal and
+# asserting the gate goes red. That test asserts its anchor exists and fails
+# loudly if it does not, so rewording that printed line breaks a real gate for
+# a non-reason. Reword the lines around it instead.
 cat <<'EOF'
 
-  # Sanity-check the host environment (needs tan on PATH -- see README.md
-  # for `cargo install --git https://github.com/alplabai/tan-cli --bin tan`):
-  tan doctor
+  # Sanity-check the host build environment (needs tan on PATH -- see
+  # README.md for the tan-cli `install.sh` one-liner): `tan doctor --build`
+  # is the host/build preflight; plain `tan doctor` is a different,
+  # debug-readiness check (lldb, codeLLDBExtension) -- see docs/cli.md.
+  tan doctor --build
+
+  # BUILDING YOUR OWN PROJECT -- the customer path. `tan` is the whole command
+  # surface (ADR-0020), and `tan build` resolves the board from the project's
+  # own board.yaml, so there is no -b to pass. `tan examples` lists what you
+  # can start from.
+  #
+  # Note `tan build` has NO native_sim option: board.yaml's `os:` is
+  # zephyr/yocto/baremetal/off, so it always targets the real SKU your
+  # board.yaml declares and a real toolchain is required. `tan doctor --build`
+  # reports whether you have one.
+  tan init --from-example peripheral-io/uart-echo --name my-app
+  cd my-app && tan build
+
+  # WORKING ON THE SDK ITSELF -- contributor commands, not part of building
+  # your firmware. native_sim is reachable only through west, for the same
+  # reason as above: it is not a SKU any board.yaml can declare.
+  west build -b native_sim/native/64 examples/peripheral-io/uart-echo       -- -DEXTRA_ZEPHYR_MODULES=$PWD
 
   # Run the local test suite:
   bash scripts/test-all.sh
-
-  # Or jump straight into building an example:
-  west build -b native_sim/native/64 examples/peripheral-io/uart-echo \
-      -- -DEXTRA_ZEPHYR_MODULES=$PWD
 
 References:
   - docs/testing.md          -- full test-coverage map + how to run from scratch
   - docs/test-plan.md        -- per-feature verification ledger (⏳ / 🟡 / ✅)
 EOF
+
+# EXIT_CODE was decided by the closing verdict above (1 only on the
+# INCOMPLETE path, i.e. --allow-partial was not passed) -- deferred until
+# here so the Next steps block always prints first, on every path (issue
+# #1038 / tan-cli#220).
+exit "${EXIT_CODE}"

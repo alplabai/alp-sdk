@@ -16,6 +16,8 @@ from pathlib import Path
 
 import click
 
+from alp_project_loader import resolve_soc_path, split_silicon_ref
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SOM_SCHEMA_PATH = REPO_ROOT / "metadata" / "schemas" / "som-preset-v1.schema.json"
 SOC_SCHEMA_PATH = REPO_ROOT / "metadata" / "schemas" / "soc-spec-v1.schema.json"
@@ -149,9 +151,14 @@ def _interactive(
             "Human-readable family slug (e.g. nxp-imx9):"
         ).unsafe_ask().strip()
     if vendor is None:
+        # Keep the _SOC_REF_RE guard, do not reduce it to the arity check
+        # split_silicon_ref() applies: the regex is strictly narrower (it
+        # also requires lowercase slugs), so `Alif:ensemble:e8` must still
+        # prefill "" here rather than "Alif" (#1096).
+        soc_parts = split_silicon_ref(soc_ref) if _SOC_REF_RE.match(soc_ref) else None
         vendor = questionary.text(
             "Vendor display name for the SoC JSON:",
-            default=soc_ref.split(":")[0] if _SOC_REF_RE.match(soc_ref) else "",
+            default=soc_parts[0] if soc_parts else "",
         ).unsafe_ask().strip()
     if display_name is None:
         display_name = questionary.text(
@@ -196,7 +203,14 @@ def _render_preset(
     default_board: str,
     default_hw_rev: str,
 ) -> str:
-    vendor_slug, family_slug, part_slug = soc_ref.split(":")
+    # A repo-relative display string for the generated banner, not a
+    # filesystem path -- so this splits and re-roots by hand rather than
+    # calling resolve_soc_path() (#1096). `_SOC_REF_RE` has already gated
+    # arity by the time any caller reaches here, so `parts` is never None;
+    # the assert documents that rather than inventing a failure path.
+    parts = split_silicon_ref(soc_ref)
+    assert parts is not None, f"unvalidated soc_ref reached _preset_skeleton: {soc_ref!r}"
+    vendor_slug, family_slug, part_slug = parts
     soc_rel = f"metadata/socs/{vendor_slug}/{family_slug}/{part_slug}.json"
 
     lines: list[str] = []
@@ -267,14 +281,11 @@ def _render_preset(
     a("inference:")
     a(f"  preferred_backend:    {inference_backend}")
     if inference_backend == "ethos_u":
+        # Primary variant only.  Which Ethos-U instances the part carries is
+        # silicon-determined -- the SDK derives it from the SoC JSON npus[] /
+        # capabilities.ethos_uNN_count -- so the preset does NOT enumerate them
+        # (the deprecated `npu_population` field is intentionally not scaffolded).
         a(f"  ethos_u_variant:      {ethos_u_variant}")
-        a("  npu_population:")
-        a("    # One row per populated NPU instance, naming only the variant.")
-        a("    # The instance count is authoritative from the SoC JSON")
-        a("    # capabilities.ethos_uNN_count; each instance's subtype, MAC size")
-        a("    # and paired host core are silicon facts sourced from the SoC")
-        a("    # JSON npus[] (subtype / mac_per_cycle / paired_core), not here.")
-        a(f"    - {{ variant: {ethos_u_variant} }}")
     a("")
     a("# capabilities: -- OPTIONAL, omitted in the skeleton.  Declare ONLY")
     a("# keys the SoM ADDS on top of the silicon capabilities (e.g. an")
@@ -339,7 +350,9 @@ def _render_preset(
 
 def _soc_skeleton(sku: str, soc_ref: str, vendor: str,
                   cores: tuple[str, ...]) -> dict:
-    _, family_slug, part_slug = soc_ref.split(":")
+    parts = split_silicon_ref(soc_ref)
+    assert parts is not None, f"unvalidated soc_ref reached _soc_skeleton: {soc_ref!r}"
+    _, family_slug, part_slug = parts
     core_rows = []
     for core in cores:
         # `count: 1` is the schema minimum, NOT a datasheet fact -- the
@@ -503,7 +516,11 @@ def new_som_cmd(
         _fail("--inference-backend ethos_u requires "
               "--ethos-u-variant (u55/u65/u85)")
     if vendor is None:
-        vendor = soc_ref.split(":")[0]
+        # _SOC_REF_RE was enforced at the top of this function, so None is
+        # unreachable here (#1096).
+        soc_parts = split_silicon_ref(soc_ref)
+        assert soc_parts is not None, f"unvalidated soc_ref: {soc_ref!r}"
+        vendor = soc_parts[0]
     if display_name is None:
         display_name = f"{sku} ({vendor} -- scaffold, silicon facts TBD)"
     if any(ord(ch) < 0x20 for ch in display_name):
@@ -526,9 +543,12 @@ def new_som_cmd(
                   f"{hwrev_path} (known: {', '.join(sorted(revs))})")
 
     preset_path = output_root / "metadata" / "e1m_modules" / f"{sku}.yaml"
-    vendor_slug, family_slug, part_slug = soc_ref.split(":")
-    soc_path = (output_root / "metadata" / "socs" / vendor_slug
-                / family_slug / f"{part_slug}.json")
+    # Same layout as a metadata root, just rooted under `output_root` --
+    # so this one IS a resolve_soc_path() site (#1096). `_SOC_REF_RE` at
+    # the top of this function already rejected a malformed ref, so None
+    # here is unreachable rather than a silent path.
+    soc_path = resolve_soc_path(soc_ref, output_root / "metadata")
+    assert soc_path is not None, f"unvalidated soc_ref reached _scaffold: {soc_ref!r}"
 
     if preset_path.exists() and not force:
         _fail(f"{preset_path} already exists (pass --force to overwrite)")

@@ -10,8 +10,9 @@
  * overlay covers indices 0..29 -- enough for the two pads this demo
  * uses:
  *   - index  4 = ALP_E1M_GPIO_IO4   -> the encoder push switch (button)
- *   - index 29 = ALP_E1M_GPIO_PWM3  -> the RGB-red pad, claimed as GPIO
- * The PWM3 pad as a plain GPIO is exactly the e1m-spec "GPIO secondary"
+ *   - index 26 = ALP_E1M_GPIO_PWM0  -> the RGB-red pad, claimed as GPIO
+ *     (bench-measured 2026-07-28; see metadata/boards/e1m-evk.yaml)
+ * The PWM0 pad as a plain GPIO is exactly the e1m-spec "GPIO secondary"
  * capability the example demonstrates.
  *
  * (gpio-emul controllers are limited to 32 pins, so a real 52-slot
@@ -23,6 +24,18 @@
 
 / {
     gpio_emul0: gpio_emul0 {
+        compatible = "zephyr,gpio-emul";
+        status = "okay";
+        gpio-controller;
+        rising-edge;
+        falling-edge;
+        #gpio-cells = <2>;
+        ngpios = <32>;
+    };
+
+    /* Second controller: a zephyr,gpio-emul is capped at 32 pins and the
+     * E1M-X EVK's LED sits at pin id 41 (ALP_E1M_X_GPIO_PWM5). */
+    gpio_emul1: gpio_emul1 {
         compatible = "zephyr,gpio-emul";
         status = "okay";
         gpio-controller;
@@ -60,9 +73,30 @@
                 <&gpio_emul0 23 GPIO_ACTIVE_HIGH>,   /* [23] ALP_E1M_GPIO_IO23 */
                 <&gpio_emul0 24 GPIO_ACTIVE_HIGH>,   /* [24] ALP_E1M_GPIO_IO24 */
                 <&gpio_emul0 25 GPIO_ACTIVE_HIGH>,   /* [25] ALP_E1M_GPIO_IO25 */
-                <&gpio_emul0 26 GPIO_ACTIVE_HIGH>,   /* [26] ALP_E1M_GPIO_PWM0 */
+                <&gpio_emul0 26 GPIO_ACTIVE_HIGH>,   /* [26] ALP_E1M_GPIO_PWM0 -- LED on E1M EVK (BOARD_PIN_LED_RED) */
                 <&gpio_emul0 27 GPIO_ACTIVE_HIGH>,   /* [27] ALP_E1M_GPIO_PWM1 */
                 <&gpio_emul0 28 GPIO_ACTIVE_HIGH>,   /* [28] ALP_E1M_GPIO_PWM2 */
-                <&gpio_emul0 29 GPIO_ACTIVE_HIGH>;   /* [29] ALP_E1M_GPIO_PWM3 -- LED (RGB-red pad as GPIO) */
+                <&gpio_emul0 29 GPIO_ACTIVE_HIGH>,   /* [29] ALP_E1M_GPIO_PWM3 */
+                <&gpio_emul0 30 GPIO_ACTIVE_HIGH>,   /* [30] ALP_E1M_GPIO_PWM4 */
+                <&gpio_emul0 31 GPIO_ACTIVE_HIGH>,   /* [31] ALP_E1M_GPIO_PWM5 */
+                /* The E1M-X EVK variant needs index 41
+                 * (ALP_E1M_X_GPIO_PWM5, its BOARD_PIN_LED_RED); its button
+                 * BOARD_PIN_ENCODER_SW is ALP_E1M_X_GPIO_IO28 = 28, already
+                 * covered above.  A zephyr,gpio-emul tops out at 32 pins, so
+                 * the range past 31 continues on a second controller.
+                 * Without these the E1M-X variant's alp_button_led_init()
+                 * returned status=-1 and the test still went GREEN, because
+                 * the failure path printed the harness's "[gpio] done"
+                 * marker -- fixed in src/main.c alongside this. */
+                <&gpio_emul1  0 GPIO_ACTIVE_HIGH>,   /* [32] ALP_E1M_X_GPIO_IO32 */
+                <&gpio_emul1  1 GPIO_ACTIVE_HIGH>,   /* [33] ALP_E1M_X_GPIO_IO33 */
+                <&gpio_emul1  2 GPIO_ACTIVE_HIGH>,   /* [34] ALP_E1M_X_GPIO_IO34 */
+                <&gpio_emul1  3 GPIO_ACTIVE_HIGH>,   /* [35] ALP_E1M_X_GPIO_IO35 */
+                <&gpio_emul1  4 GPIO_ACTIVE_HIGH>,   /* [36] ALP_E1M_X_GPIO_PWM0 */
+                <&gpio_emul1  5 GPIO_ACTIVE_HIGH>,   /* [37] ALP_E1M_X_GPIO_PWM1 */
+                <&gpio_emul1  6 GPIO_ACTIVE_HIGH>,   /* [38] ALP_E1M_X_GPIO_PWM2 */
+                <&gpio_emul1  7 GPIO_ACTIVE_HIGH>,   /* [39] ALP_E1M_X_GPIO_PWM3 */
+                <&gpio_emul1  8 GPIO_ACTIVE_HIGH>,   /* [40] ALP_E1M_X_GPIO_PWM4 */
+                <&gpio_emul1  9 GPIO_ACTIVE_HIGH>;   /* [41] ALP_E1M_X_GPIO_PWM5 -- LED on E1M-X EVK */
     };
 };

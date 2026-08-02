@@ -10,9 +10,10 @@
  *
  * SCOPE: this proves the ospi0 node BINDS (DT_HAS_SNPS_DESIGNWARE_OSPI_ENABLED
  * + the reg/irq match) and that the flash_ospi_alif.c driver's
- * alif_hal_ospi_initialize()/alif_hal_ospi_xip_enable() calls compile and
- * link.  HW-BLOCKED this batch: no octal-NOR/HyperBus part is populated on
- * the E1M-AEN801, so a live XiP read is NOT exercised.
+ * alif_hal_ospi_initialize() call compiles and links.  HW-BLOCKED this
+ * batch: no octal-NOR/HyperBus part is populated on the E1M-AEN801, so a
+ * live XiP read is NOT exercised; XiP setup itself is skipped outright
+ * (OSPI_XIP_SER does not exist on AE822 -- see flash_ospi_alif.c).
  *
  * Pinctrl group transcribed from the Apache-2.0 zephyr_alif fork's E4/E6/E8
  * pinctrl set (boards/alif/common/ensemble-e4-e6-e8-pinctrl.dtsi

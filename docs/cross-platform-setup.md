@@ -4,7 +4,8 @@ The Alp SDK supports development on **Linux, macOS, native
 Windows, and Windows + WSL2**.  The Zephyr-on-M-class workflow
 (`board.yaml` → `west build` → flash) is first-class on every
 host OS — same source tree, same `west.yml`, same metadata,
-identical artefacts.
+identical artefacts — with one exception: real-silicon builds on
+macOS need Apple Silicon (see §1, §3).
 
 The Yocto-on-A-class workflow is Linux-only by upstream constraint
 (`bitbake` does not run on macOS or native Windows).  Mac /
@@ -20,7 +21,7 @@ Sections:
 
 - §1 Overview -- workflow vs host matrix
 - §2 Linux setup (Debian / Ubuntu / Fedora)
-- §3 macOS setup (13 Ventura+)
+- §3 macOS setup (13 Ventura+; real silicon is Apple Silicon only)
 - §4 Windows native setup (PowerShell)
 - §5 Windows + WSL2 setup (for Yocto targets)
 - §6 Verification -- hello-world per OS
@@ -40,9 +41,9 @@ the OS".
 | Workflow | Linux | macOS | Win native | Win + WSL2 |
 |---|---|---|---|---|
 | **Zephyr-on-M (`native_sim`)** — examples, ztests, day-to-day iteration | yes | yes | no (use WSL2) | yes (via WSL) |
-| **Zephyr-on-M (real silicon)** — `west build` + `west flash` against EVK | yes | yes | yes | yes (via WSL) |
+| **Zephyr-on-M (real silicon)** — `west build` + `west flash` against EVK | yes | **Apple silicon only** | yes | yes (via WSL) |
 | **Yocto-on-A (`bitbake`)** — full Linux userland image build | yes | no | no | yes |
-| **Heterogeneous orchestrator (`tan build` fanning out across cores)** | yes | yes (Zephyr halves only) | yes (Zephyr halves only) | yes |
+| **Heterogeneous orchestrator (`tan build` fanning out across cores)** | yes | **Apple silicon only** (Zephyr halves) | yes (Zephyr halves only) | yes |
 
 Read: a Mac user can do everything on the host **except** build
 the Yocto half (use a Linux VM for that).  A Windows user runs the
@@ -53,29 +54,110 @@ has no native-Windows target.  Switching is `cd {project}` from
 PowerShell into the WSL filesystem
 (`\\wsl$\Ubuntu-22.04\home\{user}\...`).
 
+**Intel Macs cannot cross-compile.**  The two "Apple silicon only"
+cells above are not a preference — the pinned Zephyr SDK
+(`metadata/toolchains.json`, version `1.0.1`) publishes host builds
+for `linux-x86_64`, `macos-aarch64` and `windows-x86_64` only
+(`linux-aarch64` exists upstream at this release too, but the
+manifest's own `_comment` records it as deliberately not listed —
+no current alp-sdk path runs or downloads it).  Upstream shipped `macos-x86_64` through
+`0.17.4` and dropped it in `1.0.0`, so there is no
+`arm-zephyr-eabi` cross toolchain for an Intel Mac at the version
+this SDK pins.  `macos-aarch64` is not a substitute: Rosetta
+translates x86_64 *for* Apple silicon, not the reverse, and macOS
+has no WSL2 equivalent to fall back to.  What an Intel Mac *can*
+still do is everything that uses the host compiler — `native_sim`
+builds, ztests, `tan validate`, `tan doctor`, metadata work — and
+`tan` itself has a published `tan-x86_64-apple-darwin` binary and
+runs fine.  For real-silicon firmware, build on a Linux host.
+
 ADR [0012](adr/0012-cross-platform-developer-host.md) is the
 load-bearing decision behind this matrix.  ADR
 [0010](adr/0010-heterogeneous-os-orchestration.md) is why
 heterogeneous orchestration is its own row.
 
-### 1.1 Python version: floor vs pin
+### 1.1 Python version: floor vs pin vs Zephyr's own (unmirrored) floor
 
-Every host workflow needs Python.  Two numbers matter, and they
+Every host workflow needs Python.  Three numbers matter, and they
 are deliberately different:
 
 - **Support floor: 3.10.**  `pyproject.toml` declares
   `requires-python = ">=3.10"` — the SDK's Python tooling
-  (validators, orchestrator) runs on any 3.10+.  The `tan` CLI
-  itself is a standalone binary and isn't bound by this floor.
+  (validators, orchestrator, metadata-only work such as `--emit`
+  and `tan validate`) runs on any 3.10+.  This is also what
+  `metadata/bootstrap.json`'s `prerequisites.pythonMinVersion`
+  currently checks before `scripts/bootstrap.sh`/`scripts/bootstrap.ps1`
+  assemble a Zephyr workspace.  The `tan` CLI itself is a standalone
+  binary and isn't bound by this floor.
 - **Dev/CI pin: 3.12.**  The repo-root `.python-version` file is
   the single source; every CI workflow's `actions/setup-python`
   reads it via `python-version-file`, so CI always runs exactly
   the pinned version.
+- **Zephyr's own build floor: 3.12 — now mirrored in the manifest, not
+  yet enforced by any executor.**  Zephyr v4.4.1's
+  `cmake/modules/python.cmake` hardcodes
+  `set(PYTHON_MINIMUM_REQUIRED 3.12)` and
+  `find_package(Python3 3.12 REQUIRED)`, so a `west build`/CMake
+  configure of this workspace refuses below 3.12 no matter what the
+  support floor above accepted.  `prerequisites.pythonMinVersion`
+  deliberately still says 3.10, not 3.12, for two reasons: `tan`
+  reads that field host-universally, before branching on which
+  backend a project targets (every backend's build-plan emission
+  runs `alp_project.py`, not just Zephyr's), so raising it here would
+  also refuse a Yocto-only or metadata-only host that never touches
+  Zephyr; and 3.12 is unreachable via `apt-get install python3` on
+  the Ubuntu 22.04 / Debian 12 hosts this guide itself recommends
+  (system `python3` there is 3.10 / 3.11).  The real 3.12 number is
+  instead recorded separately, as `metadata/bootstrap.json`'s
+  `zephyr.pythonMinVersion` (issue #1078) — derived from, and checked
+  against, the pinned Zephyr's own `cmake/modules/python.cmake` by
+  `scripts/check_bootstrap_manifest.py`, so a future Zephyr bump that
+  changes its own floor can't drift this field silently.  Neither
+  bootstrap script nor `tan` reads or refuses on it yet (that's the
+  still-outstanding consumer-side half of #1078, gated on tan
+  v0.6.0 / tan-cli#270) — until it lands, a host below 3.12 bootstraps
+  fine and then fails later, at `west build`'s CMake configure —
+  install a newer interpreter alongside the system one (`deadsnakes`
+  PPA or `pyenv`) if you hit that.  See
+  [`docs/troubleshooting.md`](troubleshooting.md)'s "`west build`
+  fails at CMake configure citing a Python version".
 
 To reproduce CI byte-for-byte, match the pin locally — `pyenv`
-and `uv` pick `.python-version` up automatically.  `tan doctor`
-WARNs (never FAILs) when the running interpreter differs from
-the pin; anything >= 3.10 remains supported.
+and `uv` pick `.python-version` up automatically.  `tan doctor`'s
+`python` check is a presence probe only, with no comparison against
+the pin; anything >= 3.10 remains supported for bootstrap and the
+tooling itself, though a Zephyr build still needs >= 3.12 per the
+third bullet above regardless of what bootstrap accepted.
+
+### 1.2 Rust toolchain (only for building `tan` from source)
+
+`tan`, the standalone build executor
+([`alplabai/tan-cli`](https://github.com/alplabai/tan-cli)), ships
+prebuilt binaries and an `install.sh` / `install.ps1` one-liner --
+most users never need a Rust toolchain at all.  It's only a
+prerequisite for the from-source alternative documented alongside
+every `tan` install instruction in this repo
+(`cargo install --path crates/tan-cli --locked` from a clone).
+
+Get `rustup` from [rustup.rs](https://rustup.rs) (Rust 1.86+,
+edition 2024):
+
+```bash
+# Linux / macOS:
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+```powershell
+# Windows native (PowerShell):
+winget install -e --id Rustlang.Rustup
+```
+
+A from-source build also needs a system C linker (`rustup`'s own
+installer warns if one is missing).  On Linux, §2.1's `build-essential`
+covers it.  On macOS, the Homebrew install in §3.1 prompts to install
+the Xcode Command Line Tools, which include one.  On native Windows,
+`rustup`'s own installer offers to fetch the Visual Studio Build
+Tools C++ workload for you the first time it runs.
 
 ---
 
@@ -94,7 +176,7 @@ sudo apt install -y \
     git python3 python3-pip python3-venv \
     cmake ninja-build gperf ccache \
     device-tree-compiler \
-    build-essential file xz-utils \
+    build-essential file xz-utils wget \
     libffi-dev libssl-dev libsdl2-dev libmagic1 \
     dfu-util
 ```
@@ -106,7 +188,7 @@ sudo dnf install -y \
     git python3 python3-pip python3-virtualenv \
     cmake ninja-build gperf ccache \
     dtc \
-    gcc gcc-c++ make file xz \
+    gcc gcc-c++ make file xz wget \
     libffi-devel openssl-devel SDL2-devel file-libs \
     dfu-util
 ```
@@ -117,9 +199,42 @@ sudo dnf install -y \
 pip3 install --user west pyyaml jsonschema imgtool pytest
 ```
 
-### 2.3 Arm GNU Toolchain (real silicon)
+### 2.3 Arm GNU Toolchain (three opt-in paths, not the Zephyr-on-M default)
 
-For cross-builds against E1M / E1M-X SoMs:
+The Zephyr-on-M real-silicon path (`west build` + `west flash` against an
+E1M / E1M-X EVK) does **not** need this toolchain -- it cross-compiles
+with the Zephyr SDK's `arm-zephyr-eabi` (`west sdk install`;
+`ZEPHYR_TOOLCHAIN_VARIANT=zephyr`).  For a manual sdk-ng install instead
+of `west sdk install`, see [`docs/local-ci.md`](local-ci.md) Path A
+step 4.
+Ubuntu's own apt `gcc-arm-none-eabi` predates Cortex-M55/Helium support,
+which is why CI installs the Zephyr SDK toolchain instead of this one
+(`.github/workflows/pr-getting-started-aen801.yml`).
+
+The Arm GNU Toolchain below is needed by three opt-in paths, none of
+them the Zephyr-on-M default:
+
+- Rebuilding the **E1M-X V2N / V2N-M1 GD32 bridge firmware** --
+  pre-flashed by Alp Lab, so normal customers never touch it, but fully
+  open to rebuild (see [`docs/gd32-bridge.md`](gd32-bridge.md)):
+  custom-carrier bring-up ([`docs/bring-up-v2n.md`](bring-up-v2n.md)) or
+  bridge recovery
+  ([`docs/tutorials/07-recovering-a-bricked-bridge.md`](tutorials/07-recovering-a-bricked-bridge.md)).
+- Building the **CC3501E bridge firmware's silicon-free stub target**
+  ([`firmware/cc3501e/README.md`](../firmware/cc3501e/README.md) "Build")
+  -- the CC3501E's *production* image builds with TI's `ticlang`, not
+  this toolchain
+  ([`firmware/cc3501e/toolchain/arm-none-eabi.cmake`](../firmware/cc3501e/toolchain/arm-none-eabi.cmake));
+  only the stub / CI-compile-smoke target needs `arm-none-eabi-gcc`.
+- Hand-writing **bare-metal firmware for a real M-class core**
+  (`ALP_OS=baremetal`, no Zephyr -- see [`docs/architecture.md`](architecture.md)
+  "OS targets").  Caveat: the SDK does not ship a cross-compiled
+  bare-metal build recipe today -- the in-repo `ALP_OS=baremetal` CI job
+  (`.github/workflows/pr-plain-cmake.yml`) compiles with the **host**
+  toolchain as a compile smoke, not against real M-class silicon.  A
+  hand-written bare-metal firmware targeting real silicon needs this
+  toolchain; wiring the cross-compile yourself is on you until a recipe
+  ships.
 
 ```bash
 # Download the 13.x release from arm.com (no apt package tracks
@@ -171,9 +286,11 @@ Persist `ZEPHYR_BASE` in your shell profile (typically
 
 ## 3. macOS setup (13 Ventura+)
 
-macOS is supported natively for the Zephyr-on-M workflow.  Mac
-users targeting Yocto reach for a Linux VM (UTM, Parallels,
-VirtualBox) — `bitbake` does not run on macOS.
+macOS is supported natively for the Zephyr-on-M `native_sim`
+workflow on both architectures; real-silicon builds are Apple
+Silicon only (see §1).  Mac users targeting Yocto reach for a
+Linux VM (UTM, Parallels, VirtualBox) — `bitbake` does not run on
+macOS.
 
 ### 3.1 Homebrew prerequisites
 
@@ -202,7 +319,31 @@ brew install \
 pip3 install --user west pyyaml jsonschema imgtool pytest
 ```
 
-### 3.4 Arm GNU Toolchain
+### 3.4 Arm GNU Toolchain (three opt-in paths, not the Zephyr-on-M default)
+
+Same scoping as §2.3: the Zephyr-on-M real-silicon path uses the Zephyr
+SDK's `arm-zephyr-eabi` (`west sdk install`), not this toolchain.  The
+Arm GNU Toolchain below is needed by three opt-in paths, none of them
+the Zephyr-on-M default:
+
+- Rebuilding the **E1M-X V2N / V2N-M1 GD32 bridge firmware** --
+  pre-flashed by Alp Lab and optional to touch, but fully open (see
+  [`docs/gd32-bridge.md`](gd32-bridge.md)): custom-carrier bring-up
+  ([`docs/bring-up-v2n.md`](bring-up-v2n.md)) or bridge recovery
+  ([`docs/tutorials/07-recovering-a-bricked-bridge.md`](tutorials/07-recovering-a-bricked-bridge.md)).
+- Building the **CC3501E bridge firmware's silicon-free stub target**
+  ([`firmware/cc3501e/README.md`](../firmware/cc3501e/README.md) "Build")
+  -- the CC3501E's *production* image builds with TI's `ticlang`, not
+  this toolchain; only the stub / CI-compile-smoke target needs
+  `arm-none-eabi-gcc`.
+- Hand-writing **bare-metal firmware for a real M-class core**
+  (`ALP_OS=baremetal`, no Zephyr).  Caveat: the SDK does not ship a
+  cross-compiled bare-metal build recipe today -- the in-repo
+  `ALP_OS=baremetal` CI job (`.github/workflows/pr-plain-cmake.yml`)
+  compiles with the **host** toolchain as a compile smoke, not against
+  real M-class silicon.  A hand-written bare-metal firmware targeting
+  real silicon needs this toolchain; wiring the cross-compile yourself
+  is on you until a recipe ships.
 
 ```bash
 brew install --cask gcc-arm-embedded
@@ -298,11 +439,26 @@ winget install -e --id Git.Git
 winget install -e --id Python.Python.3.12
 winget install -e --id Kitware.CMake
 winget install -e --id Ninja-build.Ninja
-winget install -e --id GnuWin32.Make
 ```
 
 Close and reopen PowerShell after the installs so the updated
 `PATH` is picked up.
+
+Two more tools, listed separately because they are build-time and
+optional rather than part of the four required above:
+
+```powershell
+winget install -e --id oss-winget.dtc
+winget install -e --id oss-winget.gperf
+```
+
+Neither `dtc` nor `gperf` is in `prerequisites.windows`, and
+`bootstrap.ps1` does not require them.  `alp doctor`'s `_check_dtc` /
+`_check_gperf` are WARN-only: `edtlib` does the load-bearing devicetree
+parse in pure Python (a missing `dtc` never blocks a build), and plain
+kernel-mode apps build without `gperf`.  Install them if your build needs
+extra dts validation or kobject/userspace generation -- the Zephyr SDK's
+Windows bundle ships neither.
 
 ### 4.2 Python deps
 
@@ -313,7 +469,33 @@ pip install --user west pyyaml jsonschema imgtool pytest
 If `pip` is not on PATH after the Python install, run
 `python -m ensurepip --upgrade` and `python -m pip install --user west ...`.
 
-### 4.3 Arm GNU Toolchain (real silicon)
+### 4.3 Arm GNU Toolchain (three opt-in paths, not the Zephyr-on-M default)
+
+Same scoping as §2.3: the Zephyr-on-M real-silicon path uses the Zephyr
+SDK's `arm-zephyr-eabi` (`west sdk install`), not this toolchain.  For a
+manual sdk-ng install instead of `west sdk install`, see
+[`docs/local-ci.md`](local-ci.md) Path B step 5 (the Windows Zephyr-SDK
+walkthrough).  The Arm GNU Toolchain below is needed by three opt-in
+paths, none of them the Zephyr-on-M default:
+
+- Rebuilding the **E1M-X V2N / V2N-M1 GD32 bridge firmware** --
+  pre-flashed by Alp Lab and optional to touch, but fully open (see
+  [`docs/gd32-bridge.md`](gd32-bridge.md)): custom-carrier bring-up
+  ([`docs/bring-up-v2n.md`](bring-up-v2n.md)) or bridge recovery
+  ([`docs/tutorials/07-recovering-a-bricked-bridge.md`](tutorials/07-recovering-a-bricked-bridge.md)).
+- Building the **CC3501E bridge firmware's silicon-free stub target**
+  ([`firmware/cc3501e/README.md`](../firmware/cc3501e/README.md) "Build")
+  -- the CC3501E's *production* image builds with TI's `ticlang`, not
+  this toolchain; only the stub / CI-compile-smoke target needs
+  `arm-none-eabi-gcc`.
+- Hand-writing **bare-metal firmware for a real M-class core**
+  (`ALP_OS=baremetal`, no Zephyr).  Caveat: the SDK does not ship a
+  cross-compiled bare-metal build recipe today -- the in-repo
+  `ALP_OS=baremetal` CI job (`.github/workflows/pr-plain-cmake.yml`)
+  compiles with the **host** toolchain as a compile smoke, not against
+  real M-class silicon.  A hand-written bare-metal firmware targeting
+  real silicon needs this toolchain; wiring the cross-compile yourself
+  is on you until a recipe ships.
 
 The arm.com installer ships a Windows MSI:
 
@@ -426,7 +608,7 @@ Two cross-edit patterns work well:
 
    ```text
    Template: \\wsl$\{distro}\home\{user}\...
-   Example : \\wsl$\Ubuntu-22.04\home\caner\dev\alp-workspace
+   Example : \\wsl$\Ubuntu-22.04\home\<user>\dev\alp-workspace
    ```
 
    VS Code with the *Remote -- WSL* extension handles this
@@ -527,27 +709,29 @@ lint is soft initially.
 
 ### 6.3 Native_sim example build
 
-This is the cross-platform end-to-end smoke test.
+This is the cross-platform end-to-end smoke test.  `tan --project
+... build` follows `gpio-button-led`'s `board.yaml`, which targets a
+real SoM (`E1M-AEN801`) — it cross-compiles and needs the Zephyr SDK
+toolchain, it is not a `native_sim` build (`--native` selects how
+`tan` runs the build tooling, not the board target).  The actual
+`native_sim` build of this example runs through twister instead, the
+same way [`docs/testing.md`](testing.md)'s Zephyr suite does:
 
 ```bash
 # Linux / macOS / WSL2 (native_sim is Linux/macOS only; on Windows
 # run this inside WSL2 — there is no native-Windows native_sim target):
 cd ../alp-workspace
-tan --project alp-sdk/examples/peripheral-io/gpio-button-led build --native
+export ZEPHYR_BASE="$PWD/zephyr"
+python3 "$ZEPHYR_BASE/scripts/twister" \
+    -T alp-sdk/examples/peripheral-io/gpio-button-led \
+    -s alp_sdk.example.gpio_button_led.e1m_evk \
+    -p native_sim/native/64 \
+    --inline-logs --no-detailed-test-id
 ```
 
-Expected output:
-
-```
-*** Booting Zephyr OS build v4.4.0 ***
-[gpio] init button=EVK_PIN_ENCODER_SW, led=EVK_PIN_LED_RED
-[gpio] led=0 status=0
-...
-[gpio] done
-```
-
-If you see `[gpio] done`, the SDK is fully functional on your
-host.
+Its `testcase.yaml` looks for `[gpio] done` on the console as the
+pass condition — if twister reports the scenario PASSED, the SDK is
+fully functional on your host.
 
 ### 6.4 Run the test suite
 

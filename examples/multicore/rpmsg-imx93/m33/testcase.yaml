@@ -23,3 +23,10 @@ tests:
       - rpmsg
     build_only: true
     extra_args: CONFIG_ALP_SDK_RPC=y
+    # #1025: E1M-NX9101's only hw_rev (imx93 r1) is `status: tbd`,
+    # refused outright by the hw_rev-buildable gate, so board.yaml
+    # can no longer resolve at all.  Skip rather than delete this
+    # file so re-enabling is a one-line revert once
+    # metadata/e1m_modules/imx93/hw-revisions.yaml:r1 carries a
+    # buildable status.
+    skip: true

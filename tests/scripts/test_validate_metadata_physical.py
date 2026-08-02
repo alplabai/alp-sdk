@@ -101,6 +101,23 @@ def test_validate_metadata_passes_on_real_tree():
     assert r.returncode == 0, r.stdout + r.stderr
     assert "metadata/chips/" in r.stdout  # chips are now being checked
 
+def test_emit_pending_warnings_peripherals_unverified(capsys):
+    # #936: a listed key present in `peripherals` -> one WARN, no typo WARN.
+    import validate_metadata as vm
+    vm._emit_pending_warnings(Path("x.json"),
+                               {"peripherals": {"pdm": 4}, "peripherals_unverified": ["pdm"]})
+    out = capsys.readouterr().out
+    assert "peripherals_unverified -> ['pdm']" in out
+    assert "likely a typo" not in out
+
+def test_emit_pending_warnings_peripherals_unverified_typo(capsys):
+    # A listed key absent from `peripherals` -> the typo WARN fires too.
+    import validate_metadata as vm
+    vm._emit_pending_warnings(Path("x.json"),
+                               {"peripherals": {"pdm": 4}, "peripherals_unverified": ["pmd_lp"]})
+    out = capsys.readouterr().out
+    assert "references key(s) not present in peripherals: ['pmd_lp'] -- likely a typo" in out
+
 def test_reference_blocks_present_and_valid():
     for name in ("button_led", "pdm_mic"):
         assert (REPO / f"metadata/blocks/{name}.yaml").is_file()
@@ -183,3 +200,39 @@ def test_board_qualified_matching_tree_accepted(tmp_path):
         "m55_he": {"board": "alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he"},
         "a32_cluster": {"machine": "e1m-aen801-a32"}}}))  # yocto slice: no board, skipped
     assert vm._check_board_targets([p]) == []
+
+
+# --- issue #1004: two soft-fail sites migrated onto resolve_soc_path() ---
+
+def test_silicon_capability_restrictions_malformed_silicon_ref(tmp_path, monkeypatch):
+    """Pins the soft-fail message #1004's migration promised to keep: a
+    malformed `silicon:` ref still reports this diagnostic string, not a
+    crash or a silently-skipped check."""
+    vm = _load_vm("vm_scr1"); import yaml
+    # rel = path.relative_to(REPO) needs the fixture under REPO; SOCS (the
+    # metadata/socs root resolve_soc_path() resolves against) is unaffected
+    # -- it's a separate module constant already bound to the real tree.
+    monkeypatch.setattr(vm, "REPO", tmp_path)
+    p = tmp_path / "E1M-TEST.yaml"
+    p.write_text(yaml.safe_dump({
+        "silicon": "acme:widget",
+        "silicon_capabilities": {"unpopulated": ["camera"]},
+    }))
+    failures = vm._check_silicon_capability_restrictions([p])
+    assert failures and any(
+        "silicon ref `acme:widget` does not resolve to a metadata/socs/ spec" in m
+        for _, msgs in failures for m in msgs)
+
+def test_silicon_kconfig_null_known_silicon_rejected(tmp_path, monkeypatch):
+    """A JSON-null `knownSilicon` entry must not crash resolve_soc_path() --
+    it's reported as this soft-fail message, pinning the shape #1004's
+    migration promised to keep."""
+    vm = _load_vm("vm_sk1"); import json
+    monkeypatch.setattr(vm, "REPO", tmp_path)
+    registry = tmp_path / "silicon-kconfig.json"
+    registry.write_text(json.dumps({"socSymbolPrefix": "SOC_ALP_", "knownSilicon": [None]}))
+    monkeypatch.setattr(vm, "SILICON_KCONFIG_REGISTRY", registry)
+    monkeypatch.setattr(vm, "SILICON_KCONFIG_SCHEMA", tmp_path / "does-not-exist.json")
+    failures = vm._check_silicon_kconfig()
+    assert failures and any(
+        "not a <vendor>:<family>:<part> ref" in m for _, msgs in failures for m in msgs)

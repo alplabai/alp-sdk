@@ -13,6 +13,8 @@ from pathlib import Path
 
 import yaml
 
+from alp_project_loader import resolve_soc_path
+
 
 @dataclass(frozen=True)
 class TargetSpec:
@@ -66,8 +68,17 @@ def resolve_targets(sku: str, *, metadata_root: Path) -> list[TargetSpec]:
     preset = yaml.safe_load(preset_path.read_text(encoding="utf-8"))
 
     silicon = preset["silicon"]                                 # host SoC, e.g. "alif:ensemble:e7"
-    vendor, family, variant = silicon.split(":")
-    soc_path = metadata_root / "socs" / vendor / family / f"{variant}.json"
+    # resolve_soc_path() returns None where the old inline 3-tuple unpack
+    # raised ValueError, so re-raise it here: callers distinguish a
+    # malformed ref (ValueError) from a well-formed ref naming a spec that
+    # isn't on disk (FileNotFoundError, below), and collapsing the two
+    # would be a behaviour change, not a refactor (#1096).
+    soc_path = resolve_soc_path(silicon, metadata_root)
+    if soc_path is None:
+        raise ValueError(
+            f"malformed silicon ref {silicon!r} in {preset_path}: expected "
+            f"exactly 3 colon-separated parts (<vendor>:<family>:<part>)"
+        )
     if not soc_path.is_file():
         raise FileNotFoundError(f"no SoC spec for {silicon} at {soc_path}")
     host_soc = json.loads(soc_path.read_text(encoding="utf-8"))

@@ -434,7 +434,7 @@
         "name": "rpmsg-imx93",
         "path": "examples/multicore/rpmsg-imx93",
         "som": "E1M-NX9101",
-        "summary": "> `[UNTESTED]` -- v0.6 structural draft. Board.yaml + sources are > shape-correct; the build will fail at carve-out resolution until > the user supplies authoritative iMX93 memory-map values in > `metadata/e1m_modules/E1M-NX9101.yaml`. The metadata is TBD by > design (project memory note: don't invent HW values); the > declarative structural files are the contract that lets the > orchestrator land cleanly the moment those values are filled in."
+        "summary": "> `[UNTESTED]` -- v0.6 structural draft, targeting **E1M-NX9101** > (NXP i.MX 93), which is **not yet buildable**. Its only hw_rev, > `metadata/e1m_modules/imx93/hw-revisions.yaml`'s `r1`, is > `status: tbd` -- the hw_rev-buildable gate > ([#1025](https://github.com/alplabai/alp-sdk/issues/1025)) refuses > it outright, before the orchestrator ever reaches carve-out > resolution against the also-TBD iMX93 memory-map values in > `metadata/e1m_modules/E1M-NX9101.yaml`. Both are TBD by design > (project memory note: don't invent HW values) pending real NX9101 > silicon; this example is excluded from the build/emit-snapshot/ > build-plan/system-manifest/parity-oracle gates for the same reason > (see those gates' own `#1025` comments) but its source and this > README stay -- the declarative structural files are the contract > that lets the orchestrator land cleanly the moment a real hw_rev > status lands."
       },
       {
         "board": "e1m-x-evk",
@@ -458,6 +458,17 @@
         "path": "examples/peripheral-io/alp-console",
         "som": "E1M-AEN801",
         "summary": "<!-- SPDX-License-Identifier: Apache-2.0 -->"
+      },
+      {
+        "board": "e1m-evk",
+        "name": "blink",
+        "path": "examples/peripheral-io/blink",
+        "som": "E1M-AEN801",
+        "summary": "Toggle an LED. The canonical first program -- if you're new to the Alp SDK, start here before anything else in this repo.",
+        "supported_boards": [
+          "e1m-evk",
+          "e1m-x-evk"
+        ]
       },
       {
         "board": "e1m-evk",
@@ -577,7 +588,7 @@
         "name": "pwm-led-fade",
         "path": "examples/peripheral-io/pwm-led-fade",
         "som": "E1M-AEN801",
-        "summary": "Per-peripheral example for `<alp/pwm.h>`. Fades an LED on PWM channel `ALP_E1M_PWM0` from 0 % to 100 % and back, demonstrating the canonical open / set-duty / close pattern.",
+        "summary": "Per-peripheral example for `<alp/pwm.h>`. Fades an LED on PWM channel `ALP_E1M_PWM3` from 0 % to 100 % and back, demonstrating the canonical open / set-duty / close pattern.",
         "supported_boards": [
           "e1m-evk",
           "e1m-x-evk"
@@ -886,6 +897,10 @@
       "script": "scripts/check_board_schema_version.py"
     },
     {
+      "purpose": "CI gate: every `topology.<core>.board:` Zephyr target declared in a `metadata/e1m_modules/E1M-*.yaml` SoM preset must resolve to a real board tree under `zephyr/boards/alp/`, UNLESS the `(sku, core, board)` triple is explicitly named in `_NOT_YET_SUPPORTED` below.",
+      "script": "scripts/check_board_target_tree_parity.py"
+    },
+    {
       "purpose": "Keep metadata/bootstrap.json in lockstep with everything that copies it.",
       "script": "scripts/check_bootstrap_manifest.py"
     },
@@ -922,6 +937,10 @@
       "script": "scripts/check_doc_drift.py"
     },
     {
+      "purpose": "Guard: no second Doxyfile-shaped heredoc regrows next to docs/doxygen/Doxyfile.",
+      "script": "scripts/check_doxyfile_single_source.py"
+    },
+    {
       "purpose": "Doxygen-coverage audit -- walks include/alp/*.h and flags every public function declaration that lacks a `@brief` (or `\\brief`) tag in the preceding doc-comment block.",
       "script": "scripts/check_doxygen_coverage.py"
     },
@@ -944,6 +963,10 @@
     {
       "purpose": "Byte-for-byte `--emit` snapshot regression gate.",
       "script": "scripts/check_emit_snapshots.py"
+    },
+    {
+      "purpose": "CI gate: if an example ships >=1 board-qualified overlay/conf under `boards/`, then every core its `board.yaml` declares via `cores.<core>.app:` must have its OWN matching qualified overlay there too -- a declared core with no matching file, while qualified overlays exist for other core(s), means the core the app actually builds silently loses its overlay.",
+      "script": "scripts/check_example_board_overlay_parity.py"
     },
     {
       "purpose": "Cross-family portability lint for examples/*/{board.yaml,testcase.yaml}.",
@@ -994,6 +1017,10 @@
       "script": "scripts/check_som_bundle.py"
     },
     {
+      "purpose": "CI gate: every `id:` in every `metadata/socs/**/*.json` `cores[]` block must have a matching key in every consuming SoM preset's `topology:` block. Catches the case where a silicon update adds a new core (e.g. m33_sm) but the SoM preset's topology stops declaring an OS for it. Per design doc section 4.2 the topology key set is required to mirror the SoC's `cores[].id` set exactly.",
+      "script": "scripts/check_som_topology_parity.py"
+    },
+    {
       "purpose": "CI gate: every src/backends/**/*_stub.c file must reference an open GitHub issue in its top comment block, on a line of the form:",
       "script": "scripts/check_stub_issues.py"
     },
@@ -1010,6 +1037,10 @@
       "script": "scripts/check_system_manifest.py"
     },
     {
+      "purpose": "Fail when alp-sdk's documented `tan` surface no longer exists in real `tan`.",
+      "script": "scripts/check_tan_docs_surface.py"
+    },
+    {
       "purpose": "Validate metadata/templates/catalog-v1.json against the public template contract (metadata/schemas/template-catalog-v1.schema.json) AND drift-check every record against the real tree.",
       "script": "scripts/check_template_catalog.py"
     },
@@ -1018,12 +1049,20 @@
       "script": "scripts/check_test_coverage.py"
     },
     {
+      "purpose": "Keep metadata/toolchains.json (the Zephyr SDK pin) in lockstep with everything that copies it.",
+      "script": "scripts/check_toolchain_lock.py"
+    },
+    {
       "purpose": "CI gate: every function declaration under include/alp/ext/**/*.h whose name matches alp_<vendor>_<class>_<verb> must carry an @par Supported silicon: tag in its immediately-preceding Doxygen block.",
       "script": "scripts/check_vendor_ext_tags.py"
     },
     {
       "purpose": "Fail if any version copy drifts from the declared SDK version.",
       "script": "scripts/check_version_doc_sync.py"
+    },
+    {
+      "purpose": "Guard: every scripts/ and firmware/ write_text() of a repo-tree text artifact passes newline=\"\".",
+      "script": "scripts/check_write_text_newline.py"
     },
     {
       "purpose": "Byte-parity gate: a Zephyr example's own `CMakeLists.txt` (which shells `alp_project.py --emit zephyr-conf --core <id>` at configure time) and the planner's build-plan `configArtefacts` (`--emit build-plan`, consumed by `tan`) MUST materialise the identical `alp.conf` for the same core.",

@@ -24,7 +24,7 @@
 #include "i2c_ops.h"
 
 #define ALP_I2C_DEV_OR_NULL(idx) \
-	COND_CODE_1(DT_NODE_EXISTS(DT_ALIAS(_CONCAT(alp_i2c, idx))), \
+	COND_CODE_1(DT_NODE_HAS_STATUS(DT_ALIAS(_CONCAT(alp_i2c, idx)), okay), \
 	            (DEVICE_DT_GET(DT_ALIAS(_CONCAT(alp_i2c, idx)))), \
 	            (NULL))
 

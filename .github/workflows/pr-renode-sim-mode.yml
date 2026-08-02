@@ -9,7 +9,7 @@
 # aen-sim-vision (TFLM) image.  These still prove the firmware compiles
 # for the sim-mode targets.
 #
-# PENDING (tan-cli#674): the socket-contract e2e that used to boot each
+# PENDING (tan-cli#77): the socket-contract e2e that used to boot each
 # image in Renode via `west alp-renode --sim-mode --board E1M-V2N101` and
 # drive the published sockets exactly the way alp-studio's
 # RealRenodeAdapter will --
@@ -22,7 +22,7 @@
 # both retired, no longer present in this repo).  `tan renode --sim-mode`
 # (github.com/alplabai/tan-cli) is the designated successor but is still a
 # stub there -- see the PENDING steps below, kept as no-ops (not deleted)
-# until tan-cli#674 closes.
+# until tan-cli#77 closes.
 #
 # The renesas_rzv2n model boots the REAL V2N M33 firmware (faithful
 # SRAM@0x08003000 map + a coarse CPG stub for the FSP clock/reset
@@ -119,14 +119,36 @@ jobs:
           set -euo pipefail
           pip3 install -r "${GITHUB_WORKSPACE}/zephyr/scripts/requirements-base.txt"
 
+      # metadata/toolchains.json (issue #949 item 3) is the single source
+      # for the pinned Zephyr SDK version/URL/sha256 -- scripts/
+      # check_toolchain_lock.py gates this file staying in lockstep with it.
+      - name: Read Zephyr SDK toolchain pin (metadata/toolchains.json)
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          python3 -c '
+          import json
+          d = json.load(open("alp-sdk/metadata/toolchains.json"))
+          sdk = d["zephyrSdk"]
+          art = next(a for a in sdk["artifacts"] if a["host"] == "linux-x86_64" and a["component"] == "minimal-sdk")
+          version = sdk["version"]
+          url = sdk["baseUrl"] + art["filename"]
+          sha256 = art["sha256"]
+          print(f"ZEPHYR_SDK_VERSION={version}")
+          print(f"ZEPHYR_SDK_URL={url}")
+          print(f"ZEPHYR_SDK_SHA256={sha256}")
+          ' >> "$GITHUB_ENV"
+
       - name: Install Zephyr SDK (arm-zephyr-eabi)
         working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
-          # Pinned Zephyr v4.4.0 requires Zephyr SDK 1.0.1 (zephyr/SDK_VERSION).
-          SDK_VER=1.0.1
-          curl -fsSL -o /tmp/zephyr-sdk.tar.xz \
-            "https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${SDK_VER}/zephyr-sdk-${SDK_VER}_linux-x86_64_minimal.tar.xz"
+          curl -fsSL -o /tmp/zephyr-sdk.tar.xz "${ZEPHYR_SDK_URL}"
+          ACTUAL_SHA256="$(sha256sum /tmp/zephyr-sdk.tar.xz | awk '{print $1}')"
+          if [ "${ACTUAL_SHA256}" != "${ZEPHYR_SDK_SHA256}" ]; then
+            echo "::error::sha256 mismatch for zephyr-sdk-${ZEPHYR_SDK_VERSION}_linux-x86_64_minimal.tar.xz: expected ${ZEPHYR_SDK_SHA256}, got ${ACTUAL_SHA256}"
+            exit 1
+          fi
           mkdir -p "$HOME/zephyr-sdk"
           tar -xJf /tmp/zephyr-sdk.tar.xz -C "$HOME/zephyr-sdk" --strip-components=1
           "$HOME/zephyr-sdk/setup.sh" -t arm-zephyr-eabi -c
@@ -207,7 +229,7 @@ jobs:
                  -DEXTRA_DTC_OVERLAY_FILE="${GITHUB_WORKSPACE}/alp-sdk/tests/renode/aen_m55_itcm_run.overlay"
           test -f /tmp/aen-vision-build/zephyr/zephyr.elf
 
-      # PENDING (tan-cli#674): the deterministic sim-mode harness this used
+      # PENDING (tan-cli#77): the deterministic sim-mode harness this used
       # to drive -- scripts/west_commands/alp_renode.py +
       # tests/scripts/test_alp_renode_sim.py -- was the SDK-side executor
       # ADR-0020 Phase 4 retired; neither file exists in this repo any
@@ -216,14 +238,14 @@ jobs:
       # control-socket WriteBytes/ReadBytes/tmp112-inject contract isn't
       # ported yet).  The three ELF builds above are kept (they still prove
       # the firmware compiles) but the live socket-contract e2e below is
-      # intentionally a no-op until tan-cli#674 closes -- do not delete
+      # intentionally a no-op until tan-cli#77 closes -- do not delete
       # this block silently; flip each step back to a real
       # `tan renode --sim-mode ...` invocation once the stub lands.
-      - name: --sim-mode e2e (real V2N M33 firmware, ram_console) [PENDING tan-cli#674]
-        run: echo "::notice::sim-mode e2e (V2N M33 ram_console) skipped -- tan renode --sim-mode is a stub, see tan-cli#674"
+      - name: --sim-mode e2e (real V2N M33 firmware, ram_console) [PENDING tan-cli#77]
+        run: echo "::notice::sim-mode e2e (V2N M33 ram_console) skipped -- tan renode --sim-mode is a stub, see tan-cli#77"
 
-      - name: --sim-mode e2e (real AEN M55 firmware, UART5 console) [PENDING tan-cli#674]
-        run: echo "::notice::sim-mode e2e (AEN M55 UART5) skipped -- tan renode --sim-mode is a stub, see tan-cli#674"
+      - name: --sim-mode e2e (real AEN M55 firmware, UART5 console) [PENDING tan-cli#77]
+        run: echo "::notice::sim-mode e2e (AEN M55 UART5) skipped -- tan renode --sim-mode is a stub, see tan-cli#77"
 
-      - name: --sim-mode e2e (aen-sim-vision, real TFLM inference) [PENDING tan-cli#674]
-        run: echo "::notice::sim-mode e2e (aen-sim-vision TFLM) skipped -- tan renode --sim-mode is a stub, see tan-cli#674"
+      - name: --sim-mode e2e (aen-sim-vision, real TFLM inference) [PENDING tan-cli#77]
+        run: echo "::notice::sim-mode e2e (aen-sim-vision TFLM) skipped -- tan renode --sim-mode is a stub, see tan-cli#77"

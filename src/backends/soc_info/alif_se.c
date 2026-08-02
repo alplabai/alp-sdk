@@ -113,7 +113,13 @@ static alp_status_t alif_se_read(alp_soc_info_t *out)
 
 		out->revision_id = (uint32_t)dev.revision_id;
 		out->lifecycle   = (uint32_t)dev.LCS;
-		memcpy(out->serial, dev.SerialN, n);
+		/* dev.SerialN is `volatile uint8_t[8]` (hal_alif wire struct);
+		 * dev is a local, single-threaded, already fully populated by
+		 * the se_service_system_get_device_data() call above, so the
+		 * volatile is stale by the time we read it here -- cast it
+		 * away rather than dropping the qualifier implicitly (which
+		 * -Werror=discarded-qualifiers correctly flags). */
+		memcpy(out->serial, (const void *)dev.SerialN, n);
 		out->serial_len = (uint8_t)n;
 	}
 

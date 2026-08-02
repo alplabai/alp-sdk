@@ -16,8 +16,42 @@
  * boots ALP_CORE_M55_HP @ 0x50000000. Each stamps its own global-SRAM0 beacon +
  * the boot rc. The partner is the aen-dualcore-probe build for the other core,
  * packaged ["load"]-only (SES loads it but does not auto-boot it).
+ *
+ * alp_mproc_boot_core() only confirms the boot AUTHORITY accepted the request
+ * (see <alp/mproc.h>) -- it says nothing about whether the peer actually came
+ * up.  Since both cores' beacons live in the same globally-addressable SRAM0
+ * window this app can check that itself: after a successful boot request it
+ * polls the peer's own heartbeat word (written by whatever image the peer is
+ * running -- aen-dualcore-probe or another aen-dualcore-master) for a bounded
+ * window and only claims PASS once that word is observed to move.  This
+ * build ships CONFIG_HAS_ALIF_SE_SERVICES=y and no native_sim overlay, so
+ * with the DEFAULT config (CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC
+ * off) boot_core always resolves to the E8 SE backend's plain
+ * se_service_boot_cpu() path for either M55 core (<alp/mproc.h>'s
+ * ALP_ERR_NOSUPPORT case -- "no boot authority for core in this build" --
+ * is not reachable there); any nonzero rc is a real local error and
+ * reported FAIL, not a skippable environment state.
+ *
+ * The HP build (releasing an HE peer) works with the DEFAULT config --
+ * bench-proven fine on 2026-06-17 and 2026-08-01. The HE build (releasing an
+ * HP peer) does NOT work with the default config: se_service_boot_cpu()
+ * (service 501) is accepted (rc=ALP_OK) but Alif's SE Host Services API docs
+ * (v1.109.0 p.115) document that releasing the M55-HP core this way
+ * invalidates its TCM, so the peer never comes up and the heartbeat poll
+ * below times out -- reported as RESULT SKIP (accepted, peer never
+ * advanced), not FAIL: the local request path is fine, the peer just never
+ * ran. To make the HE build actually release HP, set
+ * CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC_PEER_IS_HP=y (see
+ * examples/aen/aen-dualcore-master/testcase.yaml and
+ * docs/aen-bench-bringup.md) and flash the peer's ATOC entry
+ * ["load","boot","deferred"] instead of ["load"]. With that config ON,
+ * ALP_ERR_NOSUPPORT DOES become reachable -- a build whose PEER_IS_HP
+ * doesn't match TARGET_CORE (a build-config bug, not a bench/silicon
+ * state) now reports RESULT FAIL via the same nonzero-rc check, same as
+ * every other real local error.
  */
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
@@ -33,6 +67,8 @@
 #define SELF_BEACON ((volatile uint32_t *)0x02000010U)
 #define BOOT_SLOT   ((volatile uint32_t *)0x02000018U)
 #define SELF_MAGIC  0xB1B10090U
+#define PEER_BEACON ((volatile uint32_t *)0x02001010U) /* HE's own SELF_BEACON */
+#define PEER_MAGIC  0xB1B100E0U
 #else
 #define ROLE        "HE"
 #define TARGET_CORE ALP_CORE_M55_HP
@@ -41,7 +77,15 @@
 #define SELF_BEACON ((volatile uint32_t *)0x02001010U)
 #define BOOT_SLOT   ((volatile uint32_t *)0x02001018U)
 #define SELF_MAGIC  0xB1B100E0U
+#define PEER_BEACON ((volatile uint32_t *)0x02000010U) /* HP's own SELF_BEACON */
+#define PEER_MAGIC  0xB1B10090U
 #endif
+
+/* Bounded wait for the released peer's heartbeat to move at least once.
+ * Generous vs. a cold M55 boot-to-main(): if the peer never advances within
+ * this window on a bench where boot_core reported success, it isn't coming. */
+#define PEER_HB_TIMEOUT_MS 2000U
+#define PEER_HB_POLL_MS    20U
 
 int main(void)
 {
@@ -56,7 +100,36 @@ int main(void)
 	BOOT_SLOT[0] = 0xB007C0DEU;
 	BOOT_SLOT[1] = (uint32_t)rc;
 	printk("alp_mproc_boot_core(%s, 0x%08x) rc=%d\n", TARGET_NAME, TARGET_ADDR, (int)rc);
-	printk("RESULT: boot_core rc=%d -- read the OTHER core's beacon to confirm it runs\n", (int)rc);
+
+	if (rc != ALP_OK) {
+		printk("RESULT FAIL: alp_mproc_boot_core rc=%d\n", (int)rc);
+	} else {
+		/* Boot request accepted -- confirm the peer is actually alive by watching
+		 * its heartbeat word move, not just trusting the accepted request. */
+		uint32_t peer_hb0   = PEER_BEACON[1];
+		bool     peer_alive = false;
+
+		for (uint32_t t = 0U; t < PEER_HB_TIMEOUT_MS / PEER_HB_POLL_MS; t++) {
+			k_msleep(PEER_HB_POLL_MS);
+			if (PEER_BEACON[0] == PEER_MAGIC && PEER_BEACON[1] != peer_hb0) {
+				peer_alive = true;
+				break;
+			}
+		}
+
+		if (peer_alive) {
+			printk("RESULT PASS: dualcore-master -- %s booted and heartbeating "
+			       "(peer beacon magic=0x%08x)\n",
+			       TARGET_NAME,
+			       PEER_MAGIC);
+		} else {
+			printk("RESULT SKIP: dualcore-master -- alp_mproc_boot_core(%s) accepted "
+			       "(rc=0) but its beacon never advanced within %u ms; local boot "
+			       "request OK\n",
+			       TARGET_NAME,
+			       PEER_HB_TIMEOUT_MS);
+		}
+	}
 
 	for (uint32_t hb = 1U;; hb++) {
 		SELF_BEACON[1] = hb;

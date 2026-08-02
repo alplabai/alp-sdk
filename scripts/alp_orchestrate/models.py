@@ -25,6 +25,48 @@ class OrchestratorError(RuntimeError):
     """
 
 
+class SdkRevisionUnsupported(OrchestratorError):
+    """The running SDK is outside a requested hw_rev's declared range.
+
+    A subclass rather than a flag so `scripts/validate_board_yaml.py` can
+    map exactly this failure to the **exit code 3** that
+    `metadata/sdk_version.yaml` documents, without string-matching a
+    message.  Every existing `except OrchestratorError` keeps catching it
+    (#1019).
+    """
+
+
+class SdkRevisionUnknown(OrchestratorError):
+    """The requested hw_rev is not a key in its resolved `hw_revisions:` table.
+
+    Distinct from `SdkRevisionUnsupported`: that one names a revision that
+    exists but whose declared SDK range excludes the running SDK.  This one
+    names a revision that doesn't exist at all -- there is no range to
+    compare against, so reporting it as out-of-range would name the wrong
+    cause.  A subclass (not a flag) for the same reason as
+    `SdkRevisionUnsupported`: `scripts/validate_board_yaml.py` maps exactly
+    this failure to its own exit code without string-matching a message,
+    and every existing `except OrchestratorError` keeps catching it (#1025,
+    the existence-only half).
+    """
+
+
+class SdkRevisionNotBuildable(OrchestratorError):
+    """The requested hw_rev exists but its declared `status:` refuses a build.
+
+    Distinct from `SdkRevisionUnknown`: that one names a revision that
+    isn't a key in its table at all.  This one names a revision that IS a
+    key -- it exists -- but is `status: reserved`, `status: tbd`, or
+    carries no `status` key at all (the maintainer's broad-reading decision
+    on #1025's status half).  Its own exit code in
+    `scripts/validate_board_yaml.py` for the same mechanical-action reason
+    as the other two: "exists but is not buildable" needs a different fix
+    ("pick a different revision" once one is buildable) than "does not
+    exist" ("pick a revision that exists") or "SDK out of range" ("pin a
+    different SDK").
+    """
+
+
 _E1M_I2C_BUS_RE = re.compile(r"^e1m(?:_x)?_i2c([0-9]+)$")
 
 
@@ -99,6 +141,16 @@ class Slice:
     # its console.  Consumed by the console emitter for `diagnostics.
     # sim_console:` (issue #686).
     hw_console: bool = True
+    # SEGGER J-Link **part-number flash-device** profile for this slice's
+    # SoC variant (soc-spec-v1 `variants[].debug.jlink_flash_device`) --
+    # unlocks the built-in Alif MRAM loader (Flow D), distinct from the
+    # generic attach/debug `jlink_device` profile.  A resolved SoC-variant
+    # fact, like `hw_console` above, NOT customer-overridable; None when
+    # the variant publishes no such profile -- a published "unknown", not
+    # a gap to guess at (see soc-spec-v1.schema.json's `jlink_flash_device`
+    # description).  Consumed by `_slice_flash_recipe`'s `zephyr` branch to
+    # arm the direct-flash path in `flash_args`.
+    jlink_flash_device: Optional[str] = None
 
     # Populated by Orchestrator.fan_out:
     build_dir: Optional[Path] = None

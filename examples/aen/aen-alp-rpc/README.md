@@ -57,12 +57,48 @@ in the pingpong README and live in `mbox_alif_mhuv2.c`.
 [HP] boot_cpu rc=0
 [HP] alp_rpc_open OK
 [HP] subscribe rc=0
-RESULT: alp-rpc PASS -- pongs=16/16
+RESULT PASS: alp-rpc -- received 16/16 pong(s) after sending 16 ping(s)
 ```
 
 The app UART is not on USB on this bench, so the console is the RAM console;
 liveness/result also mirror to global-SRAM0 beacons (read `ram_console_buf` and
 the beacons over SWD). HE's console is in HE-local memory, hence the beacons.
+
+## Verdicts, timeouts, and the HE<->HP boot block on this bench
+
+Both HP and HE always print exactly one `RESULT` line before `main()` returns
+(no more idling forever with no verdict):
+
+- `RESULT PASS: alp-rpc -- ...` — real evidence: HP received all 16 pongs (or,
+  on HE, every ping received was queued back to HP -- `alp_rpc_send()`
+  returning `ALP_OK` only means the frame reached the local vring, HE never
+  observes whether HP actually accepted it).
+- `RESULT SKIP: alp-rpc -- ...` — HE was released but the peer never showed
+  within a bounded window (the channel opened/subscribed locally but the
+  peer never sent anything) — states what was locally proven, not a failure
+  of this app's code.
+- `RESULT FAIL: alp-rpc -- ...` — a real local error: `alp_mproc_boot_core`
+  (HP) returned an unexpected rc, `alp_rpc_open`/`alp_rpc_subscribe` failed,
+  or every local `alp_rpc_send` failed.
+
+This build ships `CONFIG_HAS_ALIF_SE_SERVICES=y` and no `native_sim` overlay,
+so `alp_mproc_boot_core()` always resolves to the E8 SE backend for
+`ALP_CORE_M55_HE` — the `<alp/mproc.h>` contract's `ALP_ERR_NOSUPPORT` case
+("no boot authority for `core` in this build: wrong SoM, `native_sim`, or a
+core the platform boots by other means") is not reachable in this
+configuration. So HP treats *any* nonzero `alp_mproc_boot_core` rc, including
+`ALP_ERR_NOSUPPORT`, as `RESULT FAIL`, not a skip: on these boards a `-6`
+here would mean the boot path fell out of the build (e.g. the SE backend lost
+the link, or the silicon-ref stopped matching) — a regression this app must
+surface, not paper over.
+
+Every wait (the NS-bind settle window: 1500 ms; HP's round-drive grace window:
+5 extra heartbeats; HE's serve window: 3000 ms) is bounded so a genuinely
+absent peer produces a verdict instead of a hang. The verdict is also
+mirrored into a beacon word (`SELF_BEACON[2]`, right after the heartbeat word)
+before `main()` returns, so a bench SWD read can tell a completed run (word
+set to 1/2/3) apart from a crash (word still 0) even though the heartbeat
+itself stops moving once `main()` has exited.
 
 ## Build
 

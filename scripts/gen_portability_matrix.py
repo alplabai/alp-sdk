@@ -26,8 +26,8 @@ swap-test recipe (docs/portability-matrix.md § Method) for every
   3. Run `scripts/alp_project.py --input <tmp> --core <key> --emit
      zephyr-conf` for every app-carrying core.  The cell is PASS iff
      every emit exits 0.
-  4. Project per-SKU note tags straight from the preset metadata
-     (memory.dram_mbit, inference.npu_population, on_module.npu /
+  4. Project per-SKU note tags straight from the metadata
+     (memory.dram_mbit, the SoC JSON npus[], on_module.npu /
      pcie_mux, status.partial_hw_config) -- never hand-typed.
 
 Only the block between the BEGIN/END markers in the doc is rewritten;
@@ -336,6 +336,7 @@ def run_cell(example_dir: Path, sku: str, presets: dict[str, dict],
         raise CellError("no app-carrying core to emit for")
 
     tmp_yaml = tmpdir / f"{sku}--{example_dir.name}.board.yaml"
+    # write-text-newline-exempt: tmpdir board.yaml fed to alp_project.py
     tmp_yaml.write_text(yaml.safe_dump(doc, sort_keys=True), encoding="utf-8")
 
     for core in emit_cores:
@@ -357,8 +358,8 @@ def run_cell(example_dir: Path, sku: str, presets: dict[str, dict],
 def notes_for(preset: dict) -> str:
     """Project the Notes cell from preset metadata only (never hand-typed).
 
-    Tags, in a fixed order: DRAM density (memory.dram_mbit), on-SoC NPU
-    population (inference.npu_population[].variant), on-module NPU +
+    Tags, in a fixed order: DRAM density (memory.dram_mbit), on-SoC
+    Ethos-U variants (from the SoC JSON npus[]), on-module NPU +
     PCIe mux chips (on_module.npu / on_module.pcie_mux), and the
     status.partial_hw_config flag.
     """
@@ -371,11 +372,20 @@ def notes_for(preset: dict) -> str:
         else:
             tags.append(f"{dram} Mbit DRAM")
 
-    population = (preset.get("inference") or {}).get("npu_population") or []
-    variants = sorted({p.get("variant") for p in population
-                       if isinstance(p, dict) and p.get("variant")})
+    # On-SoC Ethos-U variants -- from the SoC JSON npus[] (the silicon truth),
+    # not restated in the SoM preset (its `inference.npu_population` is
+    # deprecated).  Map `ethos-uNN` -> `uNN`.
+    variants: set[str] = set()
+    silicon = preset.get("silicon") or ""
+    if silicon:
+        soc_path = _silicon_to_soc_path(silicon, METADATA)
+        if soc_path and soc_path.is_file():
+            for n in (_load_json(soc_path).get("npus") or []):
+                t = str(n.get("type") or "")
+                if t.startswith("ethos-u"):
+                    variants.add("u" + t[len("ethos-u"):])
     if variants:
-        tags.append("Ethos-U " + "+".join(v.upper() for v in variants))
+        tags.append("Ethos-U " + "+".join(v.upper() for v in sorted(variants)))
 
     on_module = preset.get("on_module") or {}
     if on_module.get("npu"):
@@ -705,7 +715,15 @@ def main() -> int:
         print(f"OK   {DOC.relative_to(REPO)}  (in sync)")
         return 0
 
-    DOC.write_text(text, encoding="utf-8")
+    # newline="" so the regenerated doc keeps the LF endings .gitattributes
+    # pins (`eol=lf`).  Without it write_text translates every '\n' to
+    # os.linesep, so regenerating on a Windows host rewrites all ~390 lines to
+    # CRLF.  `git add` normalizes that back (so it never reaches a commit or
+    # reds CI) and `--check` reads with universal newlines (so it still passes)
+    # -- which is exactly why it goes unnoticed: it just leaves the file
+    # permanently `M` in `git status` and whole-file-dirty in every editor
+    # diff, burying the one row that actually changed.
+    DOC.write_text(text, encoding="utf-8", newline="")
     print(f"wrote {DOC.relative_to(REPO)}")
     return 0
 

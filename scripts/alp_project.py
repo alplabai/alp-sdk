@@ -90,6 +90,7 @@ from alp_project_loader import (  # noqa: F401  (compat re-export)
     _validate_and_load,
     resolve_capabilities,
     resolve_memory_map,
+    resolve_soc_path,
     silicon_to_kconfig,
     som_unpopulated_capabilities,
 )
@@ -120,7 +121,7 @@ from alp_project_emit import (  # noqa: F401  (compat re-export)
 def _write_or_print(out: str, target: Path | None) -> int:
     if target is not None:
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(out, encoding="utf-8")
+        target.write_text(out, encoding="utf-8", newline="")
         try:
             rel = target.relative_to(Path.cwd())
         except ValueError:
@@ -290,7 +291,7 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
             _, fname = relpath.split("/", 1)
             target = args.output / fname
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(content, encoding="utf-8")
+            target.write_text(content, encoding="utf-8", newline="")
             print(f"alp_project: wrote {target} ({len(content)} bytes)",
                   file=sys.stderr)
         return 0
@@ -522,17 +523,22 @@ def main() -> int:
     # composed-route-table / carrier-netlist only need the SoM + board
     # definitions; they do not require the per-core slice machinery.
     if args.emit in ("composed-route-table", "carrier-netlist"):
-        sku_preset_rt = _resolve_sku(project["som"]["sku"], args.metadata_root)
-        board_preset_rt = _resolve_inline_or_preset_board(
-            project, args.metadata_root)
-        if args.emit == "composed-route-table":
-            out = _emit_composed_route_table(
-                project, sku_preset_rt, board_preset_rt, args.metadata_root
-            )
-        else:
-            out = _emit_carrier_netlist(
-                project, sku_preset_rt, board_preset_rt, args.metadata_root
-            )
+        from alp_orchestrate import OrchestratorError
+        try:
+            sku_preset_rt = _resolve_sku(project["som"]["sku"], args.metadata_root)
+            board_preset_rt = _resolve_inline_or_preset_board(
+                project, args.metadata_root)
+            if args.emit == "composed-route-table":
+                out = _emit_composed_route_table(
+                    project, sku_preset_rt, board_preset_rt, args.metadata_root
+                )
+            else:
+                out = _emit_carrier_netlist(
+                    project, sku_preset_rt, board_preset_rt, args.metadata_root
+                )
+        except OrchestratorError as e:
+            print(f"alp_project: {e}", file=sys.stderr)
+            return 1
         return _write_or_print(out, args.output)
 
     # board.yamls flow through the per-core / project-wide emit path

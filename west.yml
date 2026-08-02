@@ -158,11 +158,41 @@ manifest:
   #                    this group's state.  Pinned here purely as
   #                    the audit trail / version source-of-truth;
   #                    see vendors/{etl,fmt,doctest}/README.md.
+  #
+  # `+optional`      - re-enables Zephyr's own "optional" group,
+  #                    which its west.yml disables by default
+  #                    (`group-filter: [-babblesim, -optional,
+  #                    -testing]`, submanifests/optional.yaml).
+  #                    tflite-micro lives in that group. The
+  #                    name-allowlist below selects tflite-micro by
+  #                    NAME, but name-allowlist and group-filter are
+  #                    independent gates -- being allowlisted does
+  #                    NOT activate a project sitting in an inactive
+  #                    group. Without this, `west update` never
+  #                    clones the actual TFLM library source (no
+  #                    `optional/modules/lib/tflite-micro`); the
+  #                    zephyr-tree-committed Kconfig glue
+  #                    (modules/tflite-micro/Kconfig) still sources
+  #                    fine either way, so CONFIG_TENSORFLOW_LITE_MICRO=y
+  #                    silently downgrades to n ("unsatisfied
+  #                    dependencies: 0 (=n)") instead of failing
+  #                    loudly at manifest time, and the build only
+  #                    dies later on a missing
+  #                    tensorflow/lite/micro/*.h header (#1076,
+  #                    surfaced by pr-twister-aen on aen-sim-vision).
+  #                    canopennode/chre/thrift/zephyr-lang-rust are
+  #                    the group's other members but aren't
+  #                    name-allowlisted, so this only pulls in
+  #                    tflite-micro -- it does not widen the fetch
+  #                    set. hal_ethos_u does NOT need this: it's in
+  #                    Zephyr's "hal" group, which is active by
+  #                    default.
   group-filter:
     - -extras-lwrb-nanopb
     - -extras-tier1
     - -extras-cpp
     - -vendor-sdks
+    - +optional
 
   projects:
     # hal_alif lands directly from Alif's GitHub at Apache-2.0
@@ -179,7 +209,7 @@ manifest:
       path: modules/hal/alif
 
     - name: zephyr
-      revision: v4.4.0        # Latest stable; see docs/zephyr-version-policy.md
+      revision: v4.4.1        # Latest stable; see docs/zephyr-version-policy.md
       west-commands: scripts/west-commands.yml
       import:
         # Pull in only the modules we actually need.  Filtering keeps

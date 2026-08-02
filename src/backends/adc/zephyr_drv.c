@@ -37,42 +37,42 @@
 
 /* DT alias table.  Each alp-adcN alias resolves to an adc_dt_spec;
  * unwired aliases collapse to a zeroed spec (dev == NULL). */
-#if DT_NODE_EXISTS(DT_ALIAS(alp_adc0))
+#if DT_NODE_HAS_STATUS(DT_IO_CHANNELS_CTLR(DT_ALIAS(alp_adc0)), okay)
 #define ALP_Z_ADC_SPEC_0 ADC_DT_SPEC_GET(DT_ALIAS(alp_adc0))
 #else
 #define ALP_Z_ADC_SPEC_0 { 0 }
 #endif
-#if DT_NODE_EXISTS(DT_ALIAS(alp_adc1))
+#if DT_NODE_HAS_STATUS(DT_IO_CHANNELS_CTLR(DT_ALIAS(alp_adc1)), okay)
 #define ALP_Z_ADC_SPEC_1 ADC_DT_SPEC_GET(DT_ALIAS(alp_adc1))
 #else
 #define ALP_Z_ADC_SPEC_1 { 0 }
 #endif
-#if DT_NODE_EXISTS(DT_ALIAS(alp_adc2))
+#if DT_NODE_HAS_STATUS(DT_IO_CHANNELS_CTLR(DT_ALIAS(alp_adc2)), okay)
 #define ALP_Z_ADC_SPEC_2 ADC_DT_SPEC_GET(DT_ALIAS(alp_adc2))
 #else
 #define ALP_Z_ADC_SPEC_2 { 0 }
 #endif
-#if DT_NODE_EXISTS(DT_ALIAS(alp_adc3))
+#if DT_NODE_HAS_STATUS(DT_IO_CHANNELS_CTLR(DT_ALIAS(alp_adc3)), okay)
 #define ALP_Z_ADC_SPEC_3 ADC_DT_SPEC_GET(DT_ALIAS(alp_adc3))
 #else
 #define ALP_Z_ADC_SPEC_3 { 0 }
 #endif
-#if DT_NODE_EXISTS(DT_ALIAS(alp_adc4))
+#if DT_NODE_HAS_STATUS(DT_IO_CHANNELS_CTLR(DT_ALIAS(alp_adc4)), okay)
 #define ALP_Z_ADC_SPEC_4 ADC_DT_SPEC_GET(DT_ALIAS(alp_adc4))
 #else
 #define ALP_Z_ADC_SPEC_4 { 0 }
 #endif
-#if DT_NODE_EXISTS(DT_ALIAS(alp_adc5))
+#if DT_NODE_HAS_STATUS(DT_IO_CHANNELS_CTLR(DT_ALIAS(alp_adc5)), okay)
 #define ALP_Z_ADC_SPEC_5 ADC_DT_SPEC_GET(DT_ALIAS(alp_adc5))
 #else
 #define ALP_Z_ADC_SPEC_5 { 0 }
 #endif
-#if DT_NODE_EXISTS(DT_ALIAS(alp_adc6))
+#if DT_NODE_HAS_STATUS(DT_IO_CHANNELS_CTLR(DT_ALIAS(alp_adc6)), okay)
 #define ALP_Z_ADC_SPEC_6 ADC_DT_SPEC_GET(DT_ALIAS(alp_adc6))
 #else
 #define ALP_Z_ADC_SPEC_6 { 0 }
 #endif
-#if DT_NODE_EXISTS(DT_ALIAS(alp_adc7))
+#if DT_NODE_HAS_STATUS(DT_IO_CHANNELS_CTLR(DT_ALIAS(alp_adc7)), okay)
 #define ALP_Z_ADC_SPEC_7 ADC_DT_SPEC_GET(DT_ALIAS(alp_adc7))
 #else
 #define ALP_Z_ADC_SPEC_7 { 0 }

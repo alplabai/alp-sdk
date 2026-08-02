@@ -208,7 +208,7 @@ Run the twister script. Expected: `alp.xhci_core.unit` PASS (1 case).
 - [ ] **Step 6: clang-format-22 the test (tests/** is gated) + commit**
 
 ```
-MSYS_NO_PATHCONV=1 wsl bash -lc "cd /mnt/c/Users/caner/Documents/GitHub/alp-sdk && ~/.local/bin/clang-format -i tests/unit/xhci_core/src/test_xhci_core.c && ~/.local/bin/clang-format --dry-run --Werror tests/unit/xhci_core/src/test_xhci_core.c && echo CLEAN"
+MSYS_NO_PATHCONV=1 wsl bash -lc "cd /mnt/c/Users/<user>/Documents/GitHub/alp-sdk && ~/.local/bin/clang-format -i tests/unit/xhci_core/src/test_xhci_core.c && ~/.local/bin/clang-format --dry-run --Werror tests/unit/xhci_core/src/test_xhci_core.c && echo CLEAN"
 git add zephyr/drivers/usb/uhc/xhci_core.h zephyr/drivers/usb/uhc/xhci_core.c tests/unit/xhci_core/
 git commit -m "drivers(usb): xhci_core ring (enqueue/cycle/Link-wrap) + native_sim ztest"
 ```

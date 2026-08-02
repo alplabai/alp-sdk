@@ -72,7 +72,8 @@ The portable bus + GPIO + analog surfaces.  Start here.
 | Directory                    | What it shows                                                            |
 |------------------------------|--------------------------------------------------------------------------|
 | `hello-world`                | Minimal "first program" -- no peripherals; just a printf heartbeat.       |
-| `gpio-button-led`            | GPIO open + configure (input + output); the canonical first build.       |
+| `blink`                      | Toggle the RGB-red LED pad as plain GPIO -- start here, before anything else. |
+| `gpio-button-led`            | GPIO open + configure (input + output); button + LED via the `button_led` block. |
 | `i2c-scanner`                | Walk an I2C bus + report every device that ACKs.                         |
 | `i2c-master`                 | Read a known I2C device (TMP112) at a known address.                     |
 | `i2c-slave`                  | I2C target (slave) mode -- register-file pattern over `alp_i2c_target_open` callbacks. |
@@ -195,7 +196,7 @@ its `cores:` keys.
 |--------------------------|----------------------------------------------------------------------------------------------|
 | `rpmsg-v2n`              | V2N flagship -- A55 Yocto consumer + M33-SM Zephyr producer, framed RPC over RPMsg. **(V2N)** |
 | `rpmsg-aen`              | AEN E8 -- A32 Yocto consumer + M55-HP Zephyr producer reading on-board IMU + barometer. **(AEN)** |
-| `rpmsg-imx93`            | iMX93 -- A55 Yocto consumer + M33 Zephyr producer (structural; build pending iMX93 HW map). **(iMX93)** |
+| `rpmsg-imx93`            | iMX93 -- A55 Yocto consumer + M33 Zephyr producer (structural; **not buildable** -- imx93 r1's `status: tbd` is refused by the hw_rev-buildable gate, [#1025](https://github.com/alplabai/alp-sdk/issues/1025)). **(iMX93)** |
 | `heterogeneous-offload`  | "Why heterogeneous compute?" -- A55 delegates a 1024-pt FFT to M33-SM via `alp_rpc_call`.     |
 | `mproc-mailbox`          | M55-HP ↔ M55-HE mailbox round-trip -- stage payload in shared SRAM, signal via HW mailbox, read the reply. **(AEN)** |
 

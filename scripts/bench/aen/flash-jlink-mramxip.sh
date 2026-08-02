@@ -22,9 +22,12 @@
 # OFFSET gives SETOOLS "Invalid Global Address") + flags ["boot"] (NOT loadAddress),
 # so app-gen-toc signs the app where it sits in MRAM rather than embedding it.
 #
-# The app build MUST set CONFIG_USE_DT_CODE_PARTITION=y so it links at the slot0
-# offset (reset vector 0x8001xxxx). Without it FLASH_LOAD_OFFSET stays 0 and the
-# image links at the MRAM base (0x8000xxxx) and faults on an SE slot0 boot.
+# The image MUST link at the slot0 offset (reset vector 0x8001xxxx). Since
+# alp-sdk#1067 the board _defconfig supplies that (CONFIG_USE_DT_CODE_PARTITION=y),
+# so a plain build is already correct; a 0x8000xxxx vector now means something in
+# the build OVERRODE it (a Flow C fragment/overlay left layered on), not that the
+# app forgot to opt in. FLASH_LOAD_OFFSET back at 0 links the image at the MRAM
+# base and it faults on an SE slot0 boot.
 #
 # GOTCHA -- returning to ITCM apps: once a slot0 image is resident, the SE boots
 # it preferentially over an ITCM-load ATOC, and a J-Link `erase` does NOT clear
@@ -59,15 +62,24 @@ NAME=$(basename "$BD")
 BIN="$BD/zephyr/zephyr.bin"
 ELF="$BD/zephyr/zephyr.elf"
 APP_ADDR=0x80010000                 # MRAM base 0x80000000 + slot0 offset 0x10000
-BUF=0x$($OBJ-nm "$ELF" | awk '/ ram_console_buf$/{print $1}')
+# No 0x$BUF_SYM fallback here if BUF_SYM is empty: BUF would silently become
+# the bare string "0x", and step 4's `mem8 $BUF, $SIZE` would run as
+# `mem8 0x, $SIZE` -- a malformed address that reads back nothing and prints
+# an EMPTY "RAM console" block indistinguishable from a boot failure. See
+# ram-run.sh (issue #935) for the same guard. Step 4 below checks BUF_SYM
+# directly and skips the dump instead.
+BUF_SYM=$($OBJ-nm "$ELF" | awk '/ ram_console_buf$/{print $1}')
+BUF=0x$BUF_SYM
 
 # 0. SANITY: the image MUST be slot0-linked (reset-vector word reads 0x8001xxxx).
 RV=$(xxd -e -l 8 "$BIN" | awk '{print $3}')   # 2nd LE word = reset vector
-echo ">>> FLOW-D MRAM-XIP $NAME  (reset vector=0x$RV  ram_console_buf=$BUF)" >&2
+echo ">>> FLOW-D MRAM-XIP $NAME  (reset vector=0x$RV  ram_console_buf=${BUF_SYM:-none (UART console)})" >&2
 case "$RV" in
   8001*) : ;;  # good -- linked into slot0 (0x80010000 + reset-handler offset)
   8000*) echo "!! reset vector 0x$RV is BASE-linked (0x8000xxxx), not slot0."
-         echo "   Add CONFIG_USE_DT_CODE_PARTITION=y so FLASH_LOAD_OFFSET=0x10000."
+         echo "   The board _defconfig sets CONFIG_USE_DT_CODE_PARTITION=y, so"
+         echo "   something overrode it -- drop any Flow C fragment/overlay"
+         echo "   (aen-flowc-itcm.conf / .overlay) and rebuild pristine."
          exit 3 ;;
   *) echo "!! reset vector 0x$RV unexpected -- not a 0x8001xxxx slot0 image."
      echo "   Drop any &itcm overlay; let the board default link into MRAM slot0."
@@ -153,18 +165,24 @@ fi
 
 # 4. SES has re-booted the app; attach read-only (generic device) + dump RAM console.
 sleep 3
-# SIZE is caller-supplied ($2); chunk the mem8 read (bench_jlink_mem8_chunks) --
-# a single read over JLinkExe's 0x10000 cap fails silently (empty console).
-{
-	echo "device $JLINK_DEVICE_READ"
-	echo si SWD
-	echo "speed $JLINK_SPEED"
-	echo connect
-	bench_jlink_mem8_chunks "$BUF" "$SIZE"
-	echo exit
-} > /tmp/flowd-mramxip-read.jlink
-# shellcheck disable=SC2046  # word-splitting bench_jlink_select is intentional
-$JLINK $(bench_jlink_select) -nogui 1 -CommanderScript /tmp/flowd-mramxip-read.jlink 2>/tmp/flowd-mramxip-rd.err > /tmp/flowd-mramxip-rd.out || true
-echo "----- $NAME RAM console (flow-D MRAM-XIP flashed, SE-booted) -----"
-awk '/^[0-9A-Fa-f]+ = / { for (i=3;i<=NF;i++){ if ($i !~ /^[0-9A-Fa-f][0-9A-Fa-f]$/) continue; b=strtonum("0x"$i); if(b==0){nul++; if(nul>6)exit; next} nul=0; if(b==10||b==13){printf "\n";continue} if(b>=32&&b<127)printf "%c",b } }' /tmp/flowd-mramxip-rd.out
-echo; echo "--------------------------------------------------------"
+if [ -z "$BUF_SYM" ]; then
+  echo "----- $NAME RAM console: no 'ram_console_buf' in this image (UART-console app) -----" >&2
+  echo "      the flash above still completed -- this is not a boot failure. Read the" >&2
+  echo "      console via the labgrid 'console' resource instead." >&2
+else
+  # SIZE is caller-supplied ($2); chunk the mem8 read (bench_jlink_mem8_chunks) --
+  # a single read over JLinkExe's 0x10000 cap fails silently (empty console).
+  {
+    echo "device $JLINK_DEVICE_READ"
+    echo si SWD
+    echo "speed $JLINK_SPEED"
+    echo connect
+    bench_jlink_mem8_chunks "$BUF" "$SIZE"
+    echo exit
+  } > /tmp/flowd-mramxip-read.jlink
+  # shellcheck disable=SC2046  # word-splitting bench_jlink_select is intentional
+  $JLINK $(bench_jlink_select) -nogui 1 -CommanderScript /tmp/flowd-mramxip-read.jlink 2>/tmp/flowd-mramxip-rd.err > /tmp/flowd-mramxip-rd.out || true
+  echo "----- $NAME RAM console (flow-D MRAM-XIP flashed, SE-booted) -----"
+  awk '/^[0-9A-Fa-f]+ = / { for (i=3;i<=NF;i++){ if ($i !~ /^[0-9A-Fa-f][0-9A-Fa-f]$/) continue; b=strtonum("0x"$i); if(b==0){nul++; if(nul>6)exit; next} nul=0; if(b==10||b==13){printf "\n";continue} if(b>=32&&b<127)printf "%c",b } }' /tmp/flowd-mramxip-rd.out
+  echo; echo "--------------------------------------------------------"
+fi

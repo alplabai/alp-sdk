@@ -19,13 +19,13 @@
 - Format all new C (`examples/**` + `tests/**`) clang-format-22-clean.
 - Twister `native_sim/native/64` is the load-bearing gate. Local invocation (literal paths, no `$VARS`, no pipe):
   ```
-  wsl -d Ubuntu -- bash -lc 'cd /home/alplab/zephyrproject && \
-    export ZEPHYR_BASE=/home/alplab/zephyrproject/zephyr && \
-    export EXTRA_ZEPHYR_MODULES=/mnt/c/Users/caner/Documents/GitHub/alp-sdk && \
+  wsl -d Ubuntu -- bash -lc 'cd /home/<user>/zephyrproject && \
+    export ZEPHYR_BASE=/home/<user>/zephyrproject/zephyr && \
+    export EXTRA_ZEPHYR_MODULES=/mnt/c/Users/<user>/Documents/GitHub/alp-sdk && \
     export ZEPHYR_TOOLCHAIN_VARIANT=host && \
     python3 zephyr/scripts/twister \
-      --testsuite-root /mnt/c/Users/caner/Documents/GitHub/alp-sdk/tests/unit \
-      --testsuite-root /mnt/c/Users/caner/Documents/GitHub/alp-sdk/examples \
+      --testsuite-root /mnt/c/Users/<user>/Documents/GitHub/alp-sdk/tests/unit \
+      --testsuite-root /mnt/c/Users/<user>/Documents/GitHub/alp-sdk/examples \
       -p native_sim/native/64 -O /tmp/tw-rail'
   ```
 

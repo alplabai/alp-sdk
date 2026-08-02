@@ -1,5 +1,5 @@
 From 7cf9474931d9e4e2c867906bedd519296f0d3ddb Mon Sep 17 00:00:00 2001
-From: Alp Lab AB <gate@alp-lab.se>
+From: Alp Lab AB <contact@alplab.ai>
 Date: Thu, 11 Jun 2026 22:47:55 +0200
 Subject: [PATCH] platform/devicetree: leave GPU clocks to the PM domain
 
@@ -7,7 +7,7 @@ The Renesas CPG genpd manages the GPU module clocks via pm_clk (GENPD_FLAG_PM_CL
 
 Upstream-Status: Pending
 
-Signed-off-by: Alp Lab AB
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  .../devicetree/mali_kbase_runtime_pm.c        | 40 ++++++++++++++-----
  1 file changed, 29 insertions(+), 11 deletions(-)

@@ -45,7 +45,8 @@ tightening the schema sets `additionalProperties: false` and pins
 **one canonical shape** per fact family — `memory:` (module DRAM /
 flash capacities), `on_module:` (incl. `pmic_main` and the
 `i2c_devices` address map), and `inference:` (`preferred_backend`
-always; `ethos_u_variant` / `npu_population` where applicable) — so
+always; `ethos_u_variant` where applicable — the deprecated
+`npu_population` list is silicon-derived, not authored) — so
 a preset can no longer carry a misspelled or family-idiosyncratic
 key silently.  Unknown hardware facts stay explicit `TBD`s (values
 are never invented); `tan new-som` scaffolds a schema-valid preset
