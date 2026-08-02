@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# aen-dualcore-doorbell -- HE -> HP MHU-1 doorbell with both M55 cores live
+# (the completion of B1).  One app, role-by-board: the HP build is the
+# master + receiver (boots HE via alp_mproc_boot_core, then polls the MHU-1
+# receiver); the HE build is the sender (rings the MHU-1 sender).  MHU-1 is
+# the non-secure HE->HP pair -- no SESS / secure-MHU setup needed.
+# BENCH-VERIFIED PASS on E8 (2026-06-18): HE sent count == HP received count,
+# exactly.
+#
+# Filtered OUT of the native_sim PR gate (platform_allow = AEN801 board
+# targets only, no native_sim overlay); build_only in the advisory
+# pr-twister-aen.yml gate -- the doorbell-ring proof is a dual-ATOC bench
+# flash, not a CI run.
+
+sample:
+  name: aen-dualcore-doorbell
+  description: |
+    HE -> HP MHU-1 doorbell with both M55 cores live via the portable
+    alp_mproc_boot_core().  HP is master + receiver (boots HE, polls the
+    MHU-1 receiver); HE is the sender (rings the MHU-1 sender).
+    BENCH-VERIFIED PASS on E8 (2026-06-18): every doorbell HE rings is
+    received by HP.
+
+tests:
+  alp_sdk.examples.aen.dualcore_doorbell.hp_master_receiver:
+    platform_allow:
+      - alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - multicore
+      - mhu
+      - rtss-hp
+    build_only: true   # the doorbell-ring proof is a dual-ATOC bench flash, not a CI run.
+
+  alp_sdk.examples.aen.dualcore_doorbell.he_sender:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - multicore
+      - mhu
+      - rtss-he
+    build_only: true   # this role never runs until the HP master releases it.

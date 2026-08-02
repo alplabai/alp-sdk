@@ -1,11 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# MANUAL-INVOCATION regression, not a CI gate: pr-twister.yml is the only
-# twister job any alp-sdk workflow runs, and it passes -p native_sim/native/64
-# only -- no workflow ever invokes twister with an AEN board platform, so
-# this scenario is always statically filtered out of every automated run
-# (like every other examples/aen/*/testcase.yaml in the tree). Run it by
-# hand:
+# Filtered OUT of the native_sim pr-twister.yml gate (platform_allow = the
+# AEN801 HP board only), but pr-twister-aen.yml (issue #1076) DOES build this
+# scenario -- it runs twister against both real AEN801 board targets. Manual
+# invocation, for reference:
 #   west twister -p alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp \
 #     -s alp_sdk.examples.aen.dualcore_master.hp_role
 #

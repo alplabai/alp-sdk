@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for zephyr/drivers/pwm/pwm_alif_utimer.c on the
+# E1M-AEN801 (Ensemble E8, M55-HE).  The consumer-node variant of
+# aen-pwm-utimer-regcheck: obtains the PWM controller through a `pwm-leds`
+# consumer node + PWM_DT_SPEC_GET (sidesteps a phantom codegen reference from
+# DEVICE_DT_GET() directly on the pwm3 controller).
+#
+# Compile-checks the driver + DT node on the real E8 board target; filtered OUT
+# of the native_sim PR gate (platform_allow = the AEN801 HE board only).
+
+sample:
+  name: aen-pwm-utimer-pwmleds
+  description: |
+    Bench RAM-run PWM (alif,pwm via a pwm-leds consumer node) proof for the
+    E1M-AEN801 (Alif Ensemble E8, Cortex-M55-HE): resolves the pwm3
+    controller through PWM_DT_SPEC_GET and reads back UTIMER registers.
+
+tests:
+  alp_sdk.examples.aen.pwm_utimer_pwmleds.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - pwm
+      - utimer
+    build_only: true   # the PWM check is a bench flash, not a CI run.

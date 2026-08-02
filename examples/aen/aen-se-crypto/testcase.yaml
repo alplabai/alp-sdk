@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the portable <alp/security.h> compute surface
+# (SHA-256 known-answer + AES-128-GCM round-trip + TRNG) on the E1M-AEN801
+# (Ensemble E8, M55-HE), backed by the Secure Enclave's CryptoCell via the
+# SE-CryptoCell security backend (src/backends/security/se_cryptocell.c).
+# Companion to aen-se-service-query (the read-only SE surface).
+#
+# Compile-checks the app + DT node on the real E8 board target; filtered OUT
+# of the native_sim PR gate (platform_allow = the AEN801 HE board only).
+
+sample:
+  name: aen-se-crypto
+  description: |
+    Bench RAM-run SE-CryptoCell compute proof for the E1M-AEN801 (Alif
+    Ensemble E8, Cortex-M55-HE): SHA-256 known-answer, AES-128-GCM
+    round-trip, and TRNG through the portable <alp/security.h> surface, over
+    the same MHUv2 -> SE mailbox as aen-se-service-query.
+
+tests:
+  alp_sdk.examples.aen.se_crypto.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - security
+      - crypto
+      - se
+    build_only: true   # the SHA/AES/TRNG proof is a bench flash, not a CI run.
