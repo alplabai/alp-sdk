@@ -76,6 +76,16 @@ def _point_gate_at(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         tmp_path / ".github/workflows/nightly-aen-hil.yml",
         tmp_path / ".github/workflows/pr-getting-started-aen801.yml",
     ])
+    # The zephyr.pythonMinVersion <-> pinned-Zephyr cross-check (issue #1078)
+    # is exercised by its own dedicated tests below (with a throwaway fake
+    # Zephyr git repo); default it to "unresolvable" here so every other
+    # test isn't coupled to whatever real Zephyr checkout (if any -- and one
+    # genuinely does sit next to this repo on dev machines) happens to be on
+    # the machine running the suite, mirroring
+    # test_check_toolchain_lock.py's identical precaution for its own
+    # SDK/Zephyr cross-check.
+    monkeypatch.setattr(gate, "_resolve_zephyr_dir", lambda: tmp_path / "no-such-zephyr-checkout")
+    monkeypatch.delenv("ALP_REQUIRE_ZEPHYR_ORACLE", raising=False)
 
 
 def _edit_manifest(tmp_path: Path, mutate) -> None:
@@ -1396,3 +1406,138 @@ def test_short_leaf_fragment_duplicate_is_not_flagged(tmp_path, monkeypatch, cap
     rv = gate.main()
     out = capsys.readouterr().out
     assert rv == 0, out
+
+
+# ---------------------------------------------------------------------
+# 15. zephyr.pythonMinVersion <-> pinned Zephyr's own PYTHON_MINIMUM_REQUIRED
+#     (issue #1078)
+# ---------------------------------------------------------------------
+
+
+def _make_fake_zephyr_repo(tmp_path: Path, python_min_at_tag: str, tag: str) -> Path:
+    """A throwaway git repo standing in for a Zephyr checkout, with
+    `cmake/modules/python.cmake` carrying
+    `set(PYTHON_MINIMUM_REQUIRED <python_min_at_tag>)` committed and tagged
+    `tag` -- lets tests exercise
+    `git show <tag>:cmake/modules/python.cmake` without a real,
+    multi-hundred-MB Zephyr clone. Mirrors
+    test_check_toolchain_lock.py's `_make_fake_zephyr_repo` (same
+    technique, different file)."""
+    zephyr_dir = tmp_path / "fake-zephyr"
+    zephyr_dir.mkdir()
+    run = lambda *args: subprocess.run(  # noqa: E731
+        ["git", *args], cwd=zephyr_dir, check=True, capture_output=True, text=True,
+    )
+    run("init", "-q")
+    run("config", "user.email", "test@example.invalid")
+    run("config", "user.name", "test")
+    cmake_dir = zephyr_dir / "cmake" / "modules"
+    cmake_dir.mkdir(parents=True)
+    (cmake_dir / "python.cmake").write_text(
+        f"include_guard(GLOBAL)\n\nset(PYTHON_MINIMUM_REQUIRED {python_min_at_tag})\n",
+        encoding="utf-8",
+    )
+    run("add", "cmake/modules/python.cmake")
+    run("commit", "-q", "-m", "seed")
+    run("tag", tag)
+    return zephyr_dir
+
+
+def test_zephyr_python_min_version_matches_real_pin_passes(tmp_path, monkeypatch):
+    manifest = {"zephyr": {"version": "v4.4.1", "pythonMinVersion": "3.12"}}
+    fake_zephyr = _make_fake_zephyr_repo(tmp_path, "3.12", "v4.4.1")
+    monkeypatch.setattr(gate, "_resolve_zephyr_dir", lambda: fake_zephyr)
+    monkeypatch.delenv("ALP_REQUIRE_ZEPHYR_ORACLE", raising=False)
+    problems, skip_reason = gate._check_zephyr_python_min_version(manifest)
+    assert problems == []
+    assert skip_reason is None
+
+
+def test_zephyr_python_min_version_disagreement_with_real_pin_fails(tmp_path, monkeypatch):
+    """The exact regression issue #1078 exists for: a manifest
+    zephyr.pythonMinVersion that disagrees with the real
+    PYTHON_MINIMUM_REQUIRED at the pinned Zephyr revision."""
+    manifest = {"zephyr": {"version": "v4.4.1", "pythonMinVersion": "3.10"}}
+    fake_zephyr = _make_fake_zephyr_repo(tmp_path, "3.12", "v4.4.1")
+    monkeypatch.setattr(gate, "_resolve_zephyr_dir", lambda: fake_zephyr)
+    monkeypatch.delenv("ALP_REQUIRE_ZEPHYR_ORACLE", raising=False)
+    problems, skip_reason = gate._check_zephyr_python_min_version(manifest)
+    assert skip_reason is None
+    assert len(problems) == 1
+    assert "3.10" in problems[0]
+    assert "3.12" in problems[0]
+    assert "PYTHON_MINIMUM_REQUIRED" in problems[0]
+
+
+def test_zephyr_python_min_version_check_skips_with_no_zephyr_checkout(tmp_path, monkeypatch):
+    manifest = {"zephyr": {"version": "v4.4.1", "pythonMinVersion": "3.12"}}
+    monkeypatch.setattr(gate, "_resolve_zephyr_dir", lambda: tmp_path / "does-not-exist")
+    monkeypatch.delenv("ALP_REQUIRE_ZEPHYR_ORACLE", raising=False)
+    problems, skip_reason = gate._check_zephyr_python_min_version(manifest)
+    assert problems == []
+    assert skip_reason is not None
+    assert "no Zephyr checkout resolved" in skip_reason
+
+
+def test_zephyr_python_min_version_check_hard_fails_when_oracle_required_but_absent(
+    tmp_path, monkeypatch,
+):
+    manifest = {"zephyr": {"version": "v4.4.1", "pythonMinVersion": "3.12"}}
+    monkeypatch.setattr(gate, "_resolve_zephyr_dir", lambda: tmp_path / "does-not-exist")
+    monkeypatch.setenv("ALP_REQUIRE_ZEPHYR_ORACLE", "1")
+    problems, skip_reason = gate._check_zephyr_python_min_version(manifest)
+    assert skip_reason is None
+    assert len(problems) == 1
+    assert "ALP_REQUIRE_ZEPHYR_ORACLE=1" in problems[0]
+
+
+def test_zephyr_python_min_version_check_uses_git_show_not_working_tree_checkout(
+    tmp_path, monkeypatch,
+):
+    """The oracle reads the pinned revision via
+    `git show <rev>:cmake/modules/python.cmake` from the object store, NOT
+    the working tree's currently-checked-out ref -- a checkout currently
+    sitting on a different tag must still resolve correctly as long as the
+    pinned tag exists as a git object."""
+    manifest = {"zephyr": {"version": "v4.4.1", "pythonMinVersion": "3.12"}}
+    fake_zephyr = _make_fake_zephyr_repo(tmp_path, "3.12", "v4.4.1")
+    # Move HEAD to a second commit/tag so the working tree is NOT checked
+    # out at v4.4.1 any more, mirroring a stale local dev clone.
+    cmake_file = fake_zephyr / "cmake" / "modules" / "python.cmake"
+    cmake_file.write_text(
+        "include_guard(GLOBAL)\n\nset(PYTHON_MINIMUM_REQUIRED 3.13)\n", encoding="utf-8",
+    )
+    subprocess.run(
+        ["git", "add", "cmake/modules/python.cmake"],
+        cwd=fake_zephyr, check=True, capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "later"], cwd=fake_zephyr, check=True, capture_output=True,
+    )
+    subprocess.run(["git", "tag", "v4.5.0"], cwd=fake_zephyr, check=True, capture_output=True)
+    monkeypatch.setattr(gate, "_resolve_zephyr_dir", lambda: fake_zephyr)
+    monkeypatch.delenv("ALP_REQUIRE_ZEPHYR_ORACLE", raising=False)
+    problems, skip_reason = gate._check_zephyr_python_min_version(manifest)
+    assert problems == []
+    assert skip_reason is None
+
+
+def test_zephyr_python_min_version_leaf_is_gate_asserted_not_orphaned(tmp_path, monkeypatch, capsys):
+    """`zephyr.pythonMinVersion` is exempted from the generic per-leaf
+    orphan scan (`_GATE_ASSERTED_LEAVES`) -- neither bootstrap script reads
+    it, by design, so it must NOT trip `_check_no_orphaned_leaves` the way
+    an ordinary unread leaf would (only the SKIP note from the dedicated
+    cross-check, which `_point_gate_at` forces by pointing
+    `_resolve_zephyr_dir` at a nonexistent checkout, should mention it)."""
+    _scaffold(tmp_path)
+    assert 'd["zephyr"]["pythonMinVersion"]' not in (tmp_path / "scripts/bootstrap.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "$Manifest.zephyr.pythonMinVersion" not in (
+        tmp_path / "scripts/bootstrap.ps1"
+    ).read_text(encoding="utf-8")
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    out = capsys.readouterr().out
+    assert rv == 0, out
+    assert "is not read by" not in out
