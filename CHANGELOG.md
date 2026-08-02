@@ -7,6 +7,55 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — `test-all.sh` ran 1 of 34 required gate scripts on Windows (#1109)
+
+`scripts/quality_tasks.py --gate-scripts` wrote CRLF line endings on
+Windows; `test-all.sh`'s `IFS= read -r` loop doesn't strip `\r`, so every
+declared path but the alphabetically-last (unterminated) one failed its
+`-f` existence check and was silently skipped — the `required-gate-scripts`
+stage ran 1 of 34 declared `scripts/check_*.py` gates while still reporting
+`PASS`. `quality_tasks.py` now writes `\n` explicitly (fixing every
+consumer, not just this one); `test-all.sh` also strips a trailing `\r`
+defensively.
+
+Three more false signals in the same stage, all now fixed: the board.yaml
+schema sweep lacked the `rpmsg-imx93` exclusion `pr-metadata-validate.yml`
+carries, going red locally on a gate CI passes — both now read the pattern
+from one place, `scripts/board-yaml-sweep-exclude.sh`;
+`check_plain_cmake_link_complete.py` took CMake's platform-default
+generator (MSVC on Windows) against GCC-only builtins and now pins
+Ninja/Unix-Makefiles or skips cleanly naming the reason; `gen_soc_caps.py`
+/ `gen_status_strings.py` warned and continued when `clang-format` was
+absent, reporting the resulting unformatted output as tabs-vs-spaces
+drift, and now fail before writing anything, naming the missing tool.
+
+Added `tests/scripts/test_test_all_gate_coverage.py`, a regression guard
+asserting `test-all.sh --list-required-gate-scripts` always matches
+`quality_tasks.py --gate-scripts` 1:1.
+
+### Fixed — two `tests/scripts` tests were green for the wrong reason (#1110)
+
+`test_alp_cli_new_som.py::test_scaffold_passes_real_metadata_validate_and_
+parity_gates`'s `_clone_metadata_gates` isolation helper omitted
+`scripts/sentinels.py`, which `alp_project_loader.py` imports — the test
+passed only because an editable `pip install -e .` puts the real
+`scripts/` on `sys.path`, so the scaffolded copy's missing import silently
+resolved to the real file instead of failing, defeating the isolation the
+helper's own comment says it provides. Added `sentinels.py` to the copy
+tuple.
+
+`test_check_bootstrap_manifest.py::test_bootstrap_sh_refuses_unknown_
+schema_version` passed `subprocess.run(["bash", str(windows_path)])`,
+handing Git Bash a backslashed path it silently strips — the script never
+opened, and the test was asserting on a "No such file or directory" error
+rather than the `schemaVersion` refusal it claims to exercise. Now passes
+`.as_posix()`, and resolves `bash` via `shutil.which` rather than the bare
+name (an unqualified `"bash"` spawned from a native Python process on a
+Windows box with the WSL feature enabled can resolve to
+`C:\Windows\System32\bash.exe` — the WSL launcher stub — ahead of a real
+POSIX `bash.exe` on `%PATH%`, silently exercising a different interpreter
+with a different filesystem namespace).
+
 ### Fixed — no CI job ran `tan bootstrap`, `tan init`, or install.sh (#1024)
 
 `.github/workflows/onramp-clean-container.yml`'s `prereqs-and-bootstrap` job
