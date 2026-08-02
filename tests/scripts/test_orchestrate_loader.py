@@ -274,3 +274,19 @@ def test_partial_match_raises(tmp_path: Path) -> None:
     assert "E1M-NX9101" in msg
 
 
+# ---------------------------------------------------------------------
+# 5. _silicon_to_soc_path -- migrated onto resolve_soc_path() (issue #1004)
+# ---------------------------------------------------------------------
+
+
+def test_silicon_to_soc_path_rejects_malformed_ref(tmp_path: Path) -> None:
+    """Pins the OrchestratorError shape #1004's migration promised to
+    preserve: a malformed `silicon:` ref still raises OrchestratorError
+    with this exact message, not resolve_soc_path()'s bare `None`."""
+    from alp_orchestrate.loader import _silicon_to_soc_path
+
+    with pytest.raises(OrchestratorError) as excinfo:
+        _silicon_to_soc_path("acme:widget", tmp_path)
+    assert str(excinfo.value) == "silicon ref 'acme:widget' is not a triple-colon string"
+
+

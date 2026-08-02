@@ -27,6 +27,8 @@ try:
 except ImportError:
     sys.exit("validate_metadata: PyYAML is required.  Install via `pip install pyyaml`.")
 
+from alp_project_loader import resolve_soc_path
+
 REPO = Path(__file__).resolve().parent.parent
 
 # Power/ground nets are allowed as pin signals without a signals[] entry.
@@ -163,10 +165,7 @@ def _check_silicon_capability_restrictions(som_files) -> list:
         msgs: list[str] = []
         soc_caps: dict = {}
         silicon = str(doc.get("silicon", ""))
-        parts = silicon.split(":")
-        soc_path = None
-        if len(parts) == 3:
-            soc_path = SOCS / parts[0] / parts[1] / f"{parts[2]}.json"
+        soc_path = resolve_soc_path(silicon, SOCS.parent)
         if soc_path is None or not soc_path.is_file():
             msgs.append(f"silicon_capabilities: silicon ref `{silicon}` does not "
                         f"resolve to a metadata/socs/ spec, cannot validate "
@@ -228,11 +227,10 @@ def _check_silicon_kconfig() -> list:
             msgs.append(f"{loc}: {err.message}")
 
     for ref in data.get("knownSilicon", []):
-        parts = ref.split(":")
-        if len(parts) != 3:
+        soc_path = resolve_soc_path(ref, SOCS.parent)
+        if soc_path is None:
             msgs.append(f"knownSilicon[{ref}]: not a <vendor>:<family>:<part> ref")
             continue
-        soc_path = SOCS / parts[0] / parts[1] / f"{parts[2]}.json"
         if not soc_path.is_file():
             msgs.append(f"knownSilicon[{ref}]: no SoC spec at "
                         f"{soc_path.relative_to(REPO).as_posix()}")

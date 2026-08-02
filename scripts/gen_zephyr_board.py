@@ -59,7 +59,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from alp_project_loader import _load_yaml, _resolve_sku
+from alp_project_loader import _load_yaml, _resolve_sku, resolve_soc_path
 from sentinels import is_tbd
 
 _COPYRIGHT_C = (
@@ -86,10 +86,9 @@ def _load_soc_spec(sku_preset: dict[str, Any], metadata_root: Path) -> dict[str,
     silicon = sku_preset.get("silicon")
     if not silicon:
         raise ZephyrBoardEmitError(f"SoM {sku_preset.get('sku')!r} declares no silicon:")
-    parts = silicon.split(":")
-    if len(parts) != 3:
+    soc_path = resolve_soc_path(silicon, metadata_root)
+    if soc_path is None:
         raise ZephyrBoardEmitError(f"silicon ref {silicon!r} is not a triple-colon string")
-    soc_path = metadata_root / "socs" / parts[0] / parts[1] / f"{parts[2]}.json"
     if not soc_path.is_file():
         raise ZephyrBoardEmitError(f"no SoC spec at {soc_path}")
     return json.loads(soc_path.read_text(encoding="utf-8"))
@@ -832,8 +831,15 @@ def emit_zephyr_board(
             sku, core_id, soc_spec, variant, dir_name, basename, rx_row, tx_row,
             _aen_ethos_u(soc_spec))
 
-    silicon_parts = sku_preset["silicon"].split(":")
-    soc_json_rel = f"metadata/socs/{silicon_parts[0]}/{silicon_parts[1]}/{silicon_parts[2]}.json"
+    # `_load_soc_spec()` above already raised ZephyrBoardEmitError if
+    # `sku_preset["silicon"]` didn't resolve, so `soc_path` can't be None
+    # here -- but that's a dependency on call order, not a guarantee this
+    # function itself enforces, so don't drop the None-guard idiom.
+    soc_path = resolve_soc_path(sku_preset["silicon"], metadata_root)
+    if soc_path is None:
+        raise ZephyrBoardEmitError(
+            f"silicon ref {sku_preset['silicon']!r} is not a triple-colon string")
+    soc_json_rel = f"metadata/{soc_path.relative_to(metadata_root).as_posix()}"
     for relpath in list(files):
         style = "c" if relpath.endswith((".dts", "-pinctrl.dtsi")) else "hash"
         files[relpath] = _with_generated_banner(files[relpath], style, sku, soc_json_rel)

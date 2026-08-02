@@ -27,7 +27,7 @@ except ImportError:
     sys.exit("alp_orchestrate: jsonschema is required.  Install via `pip install jsonschema`.")
 
 from alp_cli.validator import iter_schema_errors
-from alp_project import resolve_memory_map
+from alp_project import resolve_memory_map, resolve_soc_path
 from sentinels import is_tbd
 
 from . import sdk_compat
@@ -46,12 +46,11 @@ from .validate import (
 
 def _silicon_to_soc_path(silicon: str, metadata_root: Path) -> Path:
     """`alif:ensemble:e7` -> metadata/socs/alif/ensemble/e7.json."""
-    parts = silicon.split(":")
-    if len(parts) != 3:
+    soc_path = resolve_soc_path(silicon, metadata_root)
+    if soc_path is None:
         raise OrchestratorError(
             f"silicon ref '{silicon}' is not a triple-colon string")
-    return (metadata_root / "socs" / parts[0] / parts[1] /
-            f"{parts[2]}.json")
+    return soc_path
 
 
 # ---------------------------------------------------------------------
