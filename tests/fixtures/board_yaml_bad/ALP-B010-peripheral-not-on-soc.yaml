@@ -1,8 +1,9 @@
 som:
-  sku: E1M-NX9101   # NXP i.MX 93 -- peripherals: {} in metadata/socs/nxp/imx9/imx93.json
-preset: e1m-evk     # (pending full RM ingestion; all counts remain 0)
+  sku: E1M-AEN801    # Alif Ensemble E8 -- metadata/socs/alif/ensemble/e8.json
+preset: e1m-evk      # carries no 'emmc'/'emmc_lp' key at all
 cores:
-  m33:
+  m55_hp:
     app: ./src
     peripherals:
-      - can           # triggers ALP-B010: 'can' not in i.MX 93 SoC caps (count=0)
+      - emmc          # triggers ALP-B010: emmc is board-side (I/O controller), not a direct E8 SoC cap
+

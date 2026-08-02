@@ -23,7 +23,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _orchestrate_support import REPO, _write_board  # noqa: E402
+from _orchestrate_support import (              # noqa: E402
+    REPO,
+    _synthetic_nx9101_root,
+    _write_board,
+)
 
 from alp_orchestrate import (                       # noqa: E402
     BoardProject,
@@ -667,11 +671,21 @@ cores:
     assert "CONFIG_ALP_SDK_BLE_CC3501E=y" not in conf
 
 
-def test_slice_alp_conf_iot_tls_only_emits_network_base(tmp_path: Path) -> None:
+def test_slice_alp_conf_iot_tls_only_emits_network_base(
+    tmp_path: Path, monkeypatch,
+) -> None:
     """issue #874 item 1: `iot.tls: true` alone (no `wifi:`/`mqtt:`) must
     still emit the networking base -- CONFIG_TLS_CREDENTIALS depends on
     NETWORKING/NET_SOCKETS, which previously only the wifi/mqtt branches
-    emitted, so a TLS-only slice silently resolved TLS_CREDENTIALS to n."""
+    emitted, so a TLS-only slice silently resolved TLS_CREDENTIALS to n.
+
+    Runs against `_synthetic_nx9101_root`'s scratch metadata root
+    (#1025: the real E1M-NX9101 is refused outright before this
+    slice-emission logic is ever reached -- see that helper's
+    docstring)."""
+    import alp_orchestrate
+
+    meta = _synthetic_nx9101_root(tmp_path, monkeypatch)
     body = """
 som:
   sku: E1M-NX9101
@@ -687,7 +701,7 @@ cores:
     iot: { tls: true }
 """
     path = _write_board(tmp_path, body)
-    project = load_board_yaml(path)
+    project = alp_orchestrate.load_board_yaml(path, metadata_root=meta)
     conf = _slice_alp_conf(project, project.cores["m33"])
 
     assert "CONFIG_NETWORKING=y" in conf
@@ -756,10 +770,19 @@ cores:
 
 
 def test_slice_alp_conf_iot_unknown_provider_uses_generic_zephyr(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch,
 ) -> None:
     """A SoM whose wireless provider is still TBD emits the generic Zephyr
-    networking / MQTT / TLS / BLE gates rather than a false provider."""
+    networking / MQTT / TLS / BLE gates rather than a false provider.
+
+    Runs against `_synthetic_nx9101_root`'s scratch metadata root
+    (#1025: the real E1M-NX9101 is refused outright before this
+    slice-emission logic is ever reached -- see that helper's
+    docstring); the synthetic preset's `on_module.wifi_ble: TBD` is
+    what this test actually exercises, same as the real one's."""
+    import alp_orchestrate
+
+    meta = _synthetic_nx9101_root(tmp_path, monkeypatch)
     body = """
 som:
   sku: E1M-NX9101
@@ -775,7 +798,7 @@ cores:
     iot: { wifi: true, mqtt: true, tls: true, ble: true }
 """
     path = _write_board(tmp_path, body)
-    project = load_board_yaml(path)
+    project = alp_orchestrate.load_board_yaml(path, metadata_root=meta)
     conf = _slice_alp_conf(project, project.cores["m33"])
 
     for expected in (
