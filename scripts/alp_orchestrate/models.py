@@ -51,6 +51,22 @@ class SdkRevisionUnknown(OrchestratorError):
     """
 
 
+class SdkRevisionNotBuildable(OrchestratorError):
+    """The requested hw_rev exists but its declared `status:` refuses a build.
+
+    Distinct from `SdkRevisionUnknown`: that one names a revision that
+    isn't a key in its table at all.  This one names a revision that IS a
+    key -- it exists -- but is `status: reserved`, `status: tbd`, or
+    carries no `status` key at all (the maintainer's broad-reading decision
+    on #1025's status half).  Its own exit code in
+    `scripts/validate_board_yaml.py` for the same mechanical-action reason
+    as the other two: "exists but is not buildable" needs a different fix
+    ("pick a different revision" once one is buildable) than "does not
+    exist" ("pick a revision that exists") or "SDK out of range" ("pin a
+    different SDK").
+    """
+
+
 _E1M_I2C_BUS_RE = re.compile(r"^e1m(?:_x)?_i2c([0-9]+)$")
 
 

@@ -52,10 +52,14 @@ documents:
 
 ## How to read this with `hw-revisions.yaml`
 
-The `min_sdk_version` / `max_sdk_version` window per rev in
-[`hw-revisions.yaml`](hw-revisions.yaml) is declarative compatibility
-data only -- nothing in the SDK reads or enforces it today (see
-[#1025](https://github.com/alplabai/alp-sdk/issues/1025)).
+The `min_sdk_version` / `max_sdk_version` window and the `status:`
+field per rev in [`hw-revisions.yaml`](hw-revisions.yaml) are both
+build-time enforced: the SDK refuses an out-of-window build
+(`SdkRevisionUnsupported`) and, separately, refuses a `reserved` /
+`tbd` / statusless revision (`SdkRevisionNotBuildable`) -- see
+[#1025](https://github.com/alplabai/alp-sdk/issues/1025). Every
+`r2..r8 -- reserved` rev above is refused at build time today for
+that reason.
 
 This file is the **human-readable explanation** of what each rev
 contains -- use it to decide whether a code change you're making
