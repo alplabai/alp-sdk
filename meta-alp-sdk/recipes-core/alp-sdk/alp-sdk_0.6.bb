@@ -84,20 +84,29 @@ PACKAGECONFIG[rpc]      = ",,open-amp libmetal"
 # move together, which is why they are routed through one PACKAGECONFIG
 # switch.
 #
-# What this switch supplies -- 2 of the 5 inputs src/yocto/CMakeLists.txt
+# What this switch supplies -- 2 of the 9 inputs src/yocto/CMakeLists.txt
 # looks for:
 #   drpai    -> ${includedir}/linux/drpai.h  (meta-rz-drpai, drpai_1.4.0)
 #   lib-tvm  -> libtvm_runtime.so            (meta-rz-drpai)
 #
 # RESIDUAL GAP -- do NOT read this switch as self-contained.  The other
-# three link inputs, libmera2_runtime.so / libmera2_plan_io.so /
-# libdrp_tvm_rt.so (and MeraDrpRuntimeWrapper.h itself), are packaged by NO
-# recipe -- not here, not in meta-rz-drpai.  They exist only inside a BUILT
-# rzv_drp-ai_tvm (RUHMI) checkout under obj/build_runtime/v2h/lib (RZ/V2N
-# consumes the v2h runtime build; obj/build_runtime/v2m is Renesas RZ/V2M,
-# a different and older SoC -- never ours), and the builder must hand-stage
-# them into the recipe sysroot, or point at them with ALP_DRPAI_TVM_APPS +
-# CMAKE_LIBRARY_PATH, before enabling this PACKAGECONFIG.
+# seven inputs -- MeraDrpRuntimeWrapper.h, the tvm/runtime/profiling.h +
+# dlpack/dlpack.h + dmlc/logging.h header tree it hard-includes, and
+# libmera2_runtime.so / libmera2_plan_io.so / libdrp_tvm_rt.so -- are
+# packaged by NO recipe -- not here, not in meta-rz-drpai.  They exist only
+# inside a BUILT rzv_drp-ai_tvm (RUHMI) checkout, headers under apps/ and
+# tvm/, libs under obj/build_runtime/v2h/lib (RZ/V2N consumes the v2h
+# runtime build; obj/build_runtime/v2m is Renesas RZ/V2M, a different and
+# older SoC -- never ours).  ALP_DRPAI_TVM_APPS + CMAKE_LIBRARY_PATH are a
+# plain-CMake-only escape hatch and do NOT work here: poky's
+# meta/classes-recipe/cmake.bbclass sets CMAKE_FIND_ROOT_PATH_MODE_LIBRARY
+# and CMAKE_FIND_ROOT_PATH_MODE_INCLUDE to ONLY, so find_path()/
+# find_library() re-root every search -- HINTS included -- under the
+# recipe's own sysroot and silently never try a path outside it.  The
+# builder must instead hand-stage the checkout's headers + libs into the
+# recipe sysroot (${STAGING_INCDIR} / ${STAGING_LIBDIR}) before enabling
+# this PACKAGECONFIG; see meta-alp-sdk/README.md's "Making the RUHMI
+# checkout visible to the bake".
 #
 # Consequence, spelled out because it is SILENT: an enabled bake links
 # libalp_sdk.so against those three, so the shipped ELF carries DT_NEEDED
@@ -118,10 +127,14 @@ PACKAGECONFIG[rpc]      = ",,open-amp libmetal"
 #
 # ALP_SDK_DRPAI_REQUIRED rides with the enable: this PACKAGECONFIG is an
 # EXPLICIT opt-in, so an unsatisfiable stack must fail do_configure instead
-# of warning and dropping the backend.  That warn-and-drop is the correct
-# behaviour only for the OTHER enable path -- scripts/alp_orchestrate/
-# kconfig.py auto-emits ALP_SDK_USE_DRPAI_V2N from capabilities.drp_ai,
-# where the builder never asked for DRP-AI at all.
+# of warning and dropping the backend.  ALP_SDK_DRPAI_REQUIRED defaults OFF
+# in src/yocto/CMakeLists.txt for the OTHER path that can set
+# ALP_SDK_USE_DRPAI_V2N -- a builder passing -DALP_SDK_USE_DRPAI_V2N=ON to a
+# direct plain-CMake configure by hand, where an incomplete host should
+# degrade cleanly rather than hard-fail.  (NOT scripts/alp_orchestrate/
+# kconfig.py's capabilities.drp_ai auto-emit: that mechanism does not reach
+# this option for any Yocto A55 build today -- see src/yocto/CMakeLists.txt's
+# ALP_SDK_DRPAI_REQUIRED option help for why.)
 PACKAGECONFIG[drpai]    = "-DALP_SDK_USE_DRPAI_V2N=ON -DALP_SDK_DRPAI_REQUIRED=ON,-DALP_SDK_USE_DRPAI_V2N=OFF -DALP_SDK_DRPAI_REQUIRED=OFF,drpai lib-tvm,"
 
 # Inference backends are NOT build-time dependencies of the SDK library

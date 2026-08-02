@@ -72,19 +72,27 @@ missing libraries — which is not a degrade at all, since the TU still
 `#include`s headers that may be absent and still references symbols nothing
 provides. It now probes the whole stack first — `MeraDrpRuntimeWrapper.h`,
 `<linux/drpai.h>` (previously unprobed, and reachable with no PACKAGECONFIG
-in play), `mera2_runtime`, `mera2_plan_io` (which the link needs and the old
-list omitted), `drp_tvm_rt`, `tvm_runtime` — and adds the source and the
-define only if all six resolve.
+in play), the `tvm/runtime/profiling.h` + `dlpack/dlpack.h` +
+`dmlc/logging.h` header tree `MeraDrpRuntimeWrapper.h` transitively
+hard-includes (previously unprobed too — a checkout with the wrapper header
+but an uninitialised `tvm` submodule sailed through the old gate and died at
+compile), `mera2_runtime`, `mera2_plan_io` (which the link needs and the old
+list omitted), `drp_tvm_rt`, `tvm_runtime` — nine inputs in all — and adds
+the source and the define only if all nine resolve.
 
 **What a miss costs depends on who asked for the backend**, and the new
-`ALP_SDK_DRPAI_REQUIRED` option says which. OFF, the default, is the
-silicon-determined path: `scripts/alp_orchestrate/kconfig.py` auto-emits
-`-DALP_SDK_USE_DRPAI_V2N=ON` from `capabilities.drp_ai` for every V2N/V2M
-A55 slice and the builder never asked for DRP-AI at all, so a `FATAL_ERROR`
-there would break every such build on a host without a RUHMI checkout — a
-regression already caught once. That path stays `message(WARNING)`, leaves
-the source out, leaves the define unset, and lets the dispatcher fall back
-to its other backends. ON is the explicit opt-in, and there a miss is a
+`ALP_SDK_DRPAI_REQUIRED` option says which. OFF, the default, is the safe
+choice for a builder who passes `-DALP_SDK_USE_DRPAI_V2N=ON` to a direct
+plain-CMake configure by hand, outside any recipe: an incomplete host
+degrades cleanly instead of hard-failing configure. (This is *not* about
+`scripts/alp_orchestrate/kconfig.py`'s `capabilities.drp_ai` auto-emit —
+that mechanism does not reach this option for any Yocto A55 build today:
+`alp_project.py --emit cmake-args` refuses `os: yocto` cores, `--emit
+yocto-conf` never emits the flag, and the one core class the auto-emit can
+reach, the M33 Zephyr slice, never runs this listfile at all. Earlier text
+in this repo cited that mechanism as the reason for the OFF default; it
+doesn't fire, so it wasn't a real reason, and the default now stands on the
+plain-CMake case alone.) ON is the explicit opt-in, and there a miss is a
 `FATAL_ERROR` naming every missing piece, because handing back a
 `libalp_sdk.so` that silently lacks the backend the builder named by hand is
 the wrong answer.
@@ -93,14 +101,22 @@ the wrong answer.
 the default `PACKAGECONFIG ??= "mqtt security audio"`, which passes
 `-DALP_SDK_USE_DRPAI_V2N=ON -DALP_SDK_DRPAI_REQUIRED=ON` and adds `drpai` +
 `lib-tvm` to `DEPENDS` in one switch, so the flags and the deps cannot drift
-apart. That covers two of the six inputs — `${includedir}/linux/drpai.h` and
-`libtvm_runtime.so`. The switch is **not** self-contained, and the recipe now
-says so: `MeraDrpRuntimeWrapper.h`, `mera2_runtime`, `mera2_plan_io` and
-`drp_tvm_rt` are packaged by no recipe in any layer. They exist only inside a
-built `rzv_drp-ai_tvm` (RUHMI) checkout under `obj/build_runtime/v2h/lib` —
-RZ/V2N consumes the v2h runtime build; `obj/build_runtime/v2m` is the older
-Renesas RZ/V2M and is never ours — and the builder hand-stages them or points
-`ALP_DRPAI_TVM_APPS` + `CMAKE_LIBRARY_PATH` at them. The consequence is
+apart. That covers two of the nine inputs — `${includedir}/linux/drpai.h`
+and `libtvm_runtime.so`. The switch is **not** self-contained, and the
+recipe now says so: `MeraDrpRuntimeWrapper.h`, the TVM header tree it
+hard-includes, and `mera2_runtime`, `mera2_plan_io`, `drp_tvm_rt` are
+packaged by no recipe in any layer. They exist only inside a built
+`rzv_drp-ai_tvm` (RUHMI) checkout under `obj/build_runtime/v2h/lib` and
+`apps/` + `tvm/` for the headers — RZ/V2N consumes the v2h runtime build;
+`obj/build_runtime/v2m` is the older Renesas RZ/V2M and is never ours — and
+the builder hand-stages them into the recipe sysroot before enabling this
+PACKAGECONFIG. `ALP_DRPAI_TVM_APPS` + `CMAKE_LIBRARY_PATH` do **not** work
+for this: poky's `cmake.bbclass` sets `CMAKE_FIND_ROOT_PATH_MODE_LIBRARY`
+and `CMAKE_FIND_ROOT_PATH_MODE_INCLUDE` to `ONLY`, so every `find_path()`/
+`find_library()` — hints included — is re-rooted under the recipe's own
+sysroot and a path outside it is never tried; that env-var pair is a
+plain-CMake-only hint (see `meta-alp-sdk/README.md`'s "Making the RUHMI
+checkout visible to the bake"). The consequence is
 spelled out in the recipe because it is silent: on the scarthgap poky in use
 (`DISTRO_VERSION 5.0.11`) an unresolvable `DT_NEEDED` is a `bb.note` and
 records no RDEPENDS, so the `file-rdeps` QA check has nothing to fire on, an

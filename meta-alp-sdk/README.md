@@ -210,10 +210,11 @@ MACHINE = "e1m-v2n101-a55"     # plain V2N
 MACHINE = "e1m-v2m101-a55"     # V2N + DEEPX
 
 # 7b. OPTIONAL: compile the DRP-AI3 NPU backend into libalp_sdk.so.
-#     Default OFF.  Only do this once a built RUHMI checkout is staged
-#     into the sysroot (or reachable via ALP_DRPAI_TVM_APPS +
-#     CMAKE_LIBRARY_PATH) -- see "Per-machine inference runtime" below.
-#     BENCH-UNVERIFIED: never run on DRP-AI silicon.
+#     Default OFF.  Only do this once a built RUHMI checkout's headers +
+#     libs are STAGED INTO THE RECIPE SYSROOT (ALP_DRPAI_TVM_APPS +
+#     CMAKE_LIBRARY_PATH are a plain-CMake-only hint; they do nothing
+#     under BitBake -- see "Making the RUHMI checkout visible to the
+#     bake" below).  BENCH-UNVERIFIED: never run on DRP-AI silicon.
 PACKAGECONFIG:append:pn-alp-sdk = " drpai"
 
 # 8. Build the image:
@@ -317,42 +318,71 @@ than silently routing elsewhere.
 ### Compiling the DRP-AI3 backend in
 
 The compile gate is the CMake option `ALP_SDK_USE_DRPAI_V2N`
-(`src/yocto/CMakeLists.txt`, default OFF).  **Two different mechanisms
-set it, and they behave differently — name which one you mean:**
+(`src/yocto/CMakeLists.txt`, default OFF), paired with a second option,
+`ALP_SDK_DRPAI_REQUIRED` (also default OFF), that decides what a missing
+runtime does to the configure step.  **Two different ways set
+`ALP_SDK_USE_DRPAI_V2N`, and only one of them is live today:**
 
 - **`PACKAGECONFIG[drpai]` in `alp-sdk_0.6.bb` — an explicit opt-in,
-  default OFF.**  Enabling it passes `-DALP_SDK_USE_DRPAI_V2N=ON` *and*
-  adds `drpai lib-tvm` to `DEPENDS` in the same switch, so the recipe
-  can never ask CMake for a backend whose header it did not stage:
+  default OFF.**  This is the mechanism that actually works today.
+  Enabling it passes `-DALP_SDK_USE_DRPAI_V2N=ON
+  -DALP_SDK_DRPAI_REQUIRED=ON` *and* adds `drpai lib-tvm` to `DEPENDS`
+  in the same switch, so the recipe can never ask CMake for a backend
+  whose header it did not stage:
 
   ```
   PACKAGECONFIG:append:pn-alp-sdk = " drpai"
   ```
 
-  It is OFF by default because `drpai` + `lib-tvm` only cover
-  `<linux/drpai.h>` and `libtvm_runtime.so`.  The other three libraries
-  the backend links — `mera2_runtime`, `mera2_plan_io`, `drp_tvm_rt` —
-  and `MeraDrpRuntimeWrapper.h` are in no Yocto layer; stage a built
-  RUHMI checkout into the sysroot, or point `ALP_DRPAI_TVM_APPS` at its
-  `apps/` dir and put its `obj/build_runtime/<soc>/lib` on
-  `CMAKE_LIBRARY_PATH`, *before* switching this on.
-- **`scripts/alp_orchestrate/kconfig.py` auto-emits the same
-  `-DALP_SDK_USE_DRPAI_V2N=ON`** from the SoM preset's
-  `capabilities.drp_ai` for every V2N/V2M A55 slice.  That path is
-  silicon-determined — the builder never asked for it — and it does not
-  go through this recipe, so it carries no `DEPENDS` and no staged
-  runtime.
+  `drpai` + `lib-tvm` only cover `<linux/drpai.h>` and
+  `libtvm_runtime.so`.  `MeraDrpRuntimeWrapper.h` and the TVM header
+  tree it hard-includes (`tvm/runtime/profiling.h`, `dlpack/dlpack.h`,
+  `dmlc/logging.h`), plus the three libraries `mera2_runtime`,
+  `mera2_plan_io`, `drp_tvm_rt`, are in no Yocto layer — see [Making the
+  RUHMI checkout visible to the
+  bake](#making-the-ruhmi-checkout-visible-to-the-bake) below for what
+  actually works to supply them, since the env-var hint this section
+  used to recommend does not reach a BitBake configure at all.
+- **`scripts/alp_orchestrate/kconfig.py`'s `capabilities.drp_ai`
+  auto-emit** produces the same `-DALP_SDK_USE_DRPAI_V2N=ON` in
+  `_slice_cmake_args()`, but it does **not** reach this option for any
+  Yocto build today: `alp_project.py --emit cmake-args` refuses any
+  `--core` whose slice has `os: yocto` (the emit mode only supports
+  `baremetal`/`zephyr`), `--emit yocto-conf` — the emit mode a `yocto`
+  slice *does* use — never includes a DRP-AI flag, and the one core
+  class the auto-emit can reach through `cmake-args`, the M33 Zephyr
+  slice, never runs `src/yocto/CMakeLists.txt` at all (it `return()`s
+  immediately on `DEFINED ZEPHYR_BASE`).  Treat this path as dormant
+  wiring for a future `os: baremetal` DRP-AI slice, not a live A55
+  enable path — do not rely on it, and do not cite it to explain why
+  `ALP_SDK_DRPAI_REQUIRED` defaults OFF (see next paragraph).
 
-Because of that second path, CMake does **not** treat a missing runtime
-as a hard error.  With `ALP_SDK_USE_DRPAI_V2N=ON` it probes for
-`MeraDrpRuntimeWrapper.h`, `mera2_runtime`, `mera2_plan_io`,
-`drp_tvm_rt` and `tvm_runtime`; if **any** of the five is missing it
-emits a `message(WARNING)` naming what it could not find, leaves
-`inference_drpai.cpp` out of the build, does not define
-`ALP_SDK_USE_DRPAI_V2N`, and lets the dispatcher fall back to its other
-backends.  A build can therefore go green with the DRP-AI3 backend
-silently absent — **read the configure log** rather than assuming the
-flag took effect.
+`ALP_SDK_DRPAI_REQUIRED` decides what a missing runtime does to
+configure, and it does not default OFF because of the (dormant)
+`kconfig.py` path above — it defaults OFF because that is the safe
+choice for a builder who passes `-DALP_SDK_USE_DRPAI_V2N=ON` to a
+direct plain-CMake configure by hand, outside any recipe: an incomplete
+host degrades cleanly instead of hard-failing.  `alp-sdk_0.6.bb`'s
+`PACKAGECONFIG[drpai]` overrides it to `ON` in the same switch that sets
+`ALP_SDK_USE_DRPAI_V2N=ON`, because there the builder asked for the
+backend by name and a silently DRP-AI-less `libalp_sdk.so` would be the
+wrong answer.
+
+With `ALP_SDK_USE_DRPAI_V2N=ON`, CMake probes **nine** inputs before
+compiling the backend in: the `MeraDrpRuntimeWrapper.h` header, the
+`<linux/drpai.h>` UAPI header, the three TVM headers
+`tvm/runtime/profiling.h` / `dlpack/dlpack.h` / `dmlc/logging.h`
+(the wrapper's transitive include tree), and the four libraries
+`mera2_runtime`, `mera2_plan_io`, `drp_tvm_rt`, `tvm_runtime`.  If
+**any** of the nine is missing, it names every missing one and either
+warns and drops the backend (`ALP_SDK_DRPAI_REQUIRED=OFF` — the direct
+plain-CMake case) or fails configure (`ALP_SDK_DRPAI_REQUIRED=ON` — the
+recipe's case, so an enabled `PACKAGECONFIG[drpai]` bake can never go
+green with the backend silently absent).  On the `OFF` path,
+`inference_drpai.cpp` is left out of the build, `ALP_SDK_USE_DRPAI_V2N`
+is not defined, and the dispatcher falls back to its other backends —
+**read the configure log** on that path rather than assuming the flag
+took effect.
 
 Runtime side, `/dev/drpai0` only appears when `meta-rz-drpai` is in
 `bblayers.conf` (it provides both the driver and the `drpai0` DT label
@@ -374,14 +404,57 @@ as a model asset.
 A built RUHMI checkout is **also** where the runtime libraries come
 from, so it is not purely a model-author concern: `meta-rz-drpai`
 supplies only `libtvm_runtime.so`, while `mera2_runtime`,
-`mera2_plan_io`, `drp_tvm_rt` and `MeraDrpRuntimeWrapper.h` come out of
-`rzv_drp-ai_tvm` itself (aarch64 objects under
-`obj/build_runtime/<soc>/lib`, header under `apps/`).  Any image build
-that compiles the DRP-AI3 backend in needs that checkout staged into
-the sysroot or reachable via `ALP_DRPAI_TVM_APPS` +
-`CMAKE_LIBRARY_PATH`.  RZ/V2N uses the **v2h** runtime build;
+`mera2_plan_io`, `drp_tvm_rt`, `MeraDrpRuntimeWrapper.h`, and the TVM
+header tree it hard-includes (`tvm/include`, `tvm/3rdparty/dlpack`,
+`tvm/3rdparty/dmlc-core`) come out of `rzv_drp-ai_tvm` itself
+(aarch64 objects under `obj/build_runtime/<soc>/lib`, headers under
+`apps/` and `tvm/`).  RZ/V2N uses the **v2h** runtime build;
 `obj/build_runtime/v2m` is the older Renesas RZ/V2M SoC and is not this
-one.
+one.  `tvm/` is a submodule of `rzv_drp-ai_tvm` and ships uninitialised
+on a bare clone — run `git submodule update --init --recursive` before
+pointing anything at the checkout, or the TVM headers will be missing
+even though the checkout "looks" built.
+
+### Making the RUHMI checkout visible to the bake
+
+Any image build that compiles the DRP-AI3 backend in needs that
+checkout's headers and libraries where `src/yocto/CMakeLists.txt`'s
+`find_path()` / `find_library()` probes can see them — and **the
+mechanism that does that differs by build path; do not mix them up:**
+
+- **Plain-CMake (the maintainer header-check, or any direct,
+  non-BitBake consumer of this repo's CMake).**  Point
+  `ALP_DRPAI_TVM_APPS` at the checkout's `apps/` dir (the probes also
+  derive the TVM header tree from `$ALP_DRPAI_TVM_APPS/../tvm/...`) and
+  put `obj/build_runtime/<soc>/lib` on `CMAKE_LIBRARY_PATH` before
+  configuring.  This works exactly as CMake's plain `HINTS`/
+  `CMAKE_LIBRARY_PATH` semantics promise.
+- **BitBake (`alp-sdk_0.6.bb`'s `PACKAGECONFIG[drpai]`).**  The
+  env-var hints above do **not** work here.  Poky's
+  `meta/classes-recipe/cmake.bbclass` sets
+  `CMAKE_FIND_ROOT_PATH_MODE_LIBRARY` and
+  `CMAKE_FIND_ROOT_PATH_MODE_INCLUDE` to `ONLY`, which restricts every
+  `find_path()`/`find_library()` call — including ones with explicit
+  `HINTS`/`PATHS` — to paths re-rooted under the recipe's own sysroot
+  (`STAGING_DIR_HOST`); a `HINTS` value pointing outside it is silently
+  never tried, so `ALP_DRPAI_TVM_APPS` + `CMAKE_LIBRARY_PATH` have no
+  effect on a bake and the probes just report the inputs missing.  What
+  actually works: **stage the checkout's headers and libraries into the
+  recipe's sysroot** before `do_configure` runs — e.g. an internal
+  recipe the `alp-sdk` recipe `DEPENDS` on that installs
+  `apps/MeraDrpRuntimeWrapper.h`, `tvm/include`,
+  `tvm/3rdparty/{dlpack,dmlc-core}/include`, and the four `.so` files
+  under `${STAGING_INCDIR}` / `${STAGING_LIBDIR}` — since that is the
+  root the unmodified probes already search by default.  Adding the
+  checkout as an extra `CMAKE_FIND_ROOT_PATH` entry (via
+  `EXTRA_OECMAKE:append`) is the other named escape hatch for this
+  restriction, but only helps if the checkout's on-disk layout lines up
+  with what each probe searches for once re-rooted; staging is the
+  unambiguous option, and the one this note recommends.  Neither is
+  packaged yet (see the `alp-sdk_0.6.bb` `RESIDUAL GAP` note), and
+  neither is bake-verified — no `alp-image-edge` bake has ever
+  completed with `drpai` enabled — so `PACKAGECONFIG[drpai]` alone is
+  not self-contained.
 
 ## OTA via Mender (opt-in)
 
