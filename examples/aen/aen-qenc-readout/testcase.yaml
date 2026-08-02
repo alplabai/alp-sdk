@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the vendored ADR 0017 Tier-2 quadrature-encoder
+# sensor driver (drivers/sensor/qdec_alif/qdec_alif_utimer.c,
+# "alif,utimer-qdec") on the E1M-AEN801 (Alif Ensemble E8, M55-HE), through
+# the standard Zephyr sensor API.
+#
+# Compile-checks the driver + DT node on the real E8 board target; filtered OUT
+# of the native_sim PR gate (platform_allow = the AEN801 HE board only).
+
+sample:
+  name: aen-qenc-readout
+  description: |
+    Bench RAM-run quadrature-encoder (alif,utimer-qdec) readout proof for the
+    E1M-AEN801 (Alif Ensemble E8, Cortex-M55-HE): drives DT_ALIAS(alp_qenc0)
+    through sensor_sample_fetch/sensor_channel_get -> SENSOR_CHAN_ROTATION.
+
+tests:
+  alp_sdk.examples.aen.qenc_readout.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - qenc
+      - sensor
+      - utimer
+    build_only: true   # the quadrature-encoder readout is a bench flash, not a CI run.

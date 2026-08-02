@@ -213,7 +213,7 @@
     "groupsEnabled": []
   },
   "sdk": {
-    "revision": "c07cbadc304850ea38f717c773b9d396e242a83c",
+    "revision": "e8750eaa912648991ff9daa42ca18add482f1bc2",
     "version": "0.15.0"
   },
   "west": {
@@ -221,7 +221,8 @@
       "-extras-lwrb-nanopb",
       "-extras-tier1",
       "-extras-cpp",
-      "-vendor-sdks"
+      "-vendor-sdks",
+      "+optional"
     ],
     "projects": [
       {

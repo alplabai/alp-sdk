@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the upstream Zephyr wdt_cmsdk_apb driver (Tier-1,
+# "arm,cmsdk-watchdog") on the E1M-AEN801 (Ensemble E8, M55-HE): installs a
+# timeout, feeds it a few times, then disables it -- the timeout is never
+# allowed to actually fire (a reset would tear down the bench RAM-console
+# read).
+#
+# Compile-checks the driver + DT node on the real E8 board target; filtered OUT
+# of the native_sim PR gate (platform_allow = the AEN801 HE board only).
+
+sample:
+  name: aen-wdt-feed
+  description: |
+    Bench RAM-run CMSDK watchdog (arm,cmsdk-watchdog, DT_ALIAS(alp_wdt0))
+    install/feed/disable proof for the E1M-AEN801 (Alif Ensemble E8,
+    Cortex-M55-HE) through the standard Zephyr watchdog API.
+
+tests:
+  alp_sdk.examples.aen.wdt_feed.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - watchdog
+      - wdt
+    build_only: true   # the install/feed/disable check is a bench flash, not a CI run.

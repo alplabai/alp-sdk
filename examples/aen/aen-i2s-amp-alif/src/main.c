@@ -88,12 +88,12 @@ int main(void)
 		.word_size = WORD_BITS,
 		.channels  = NUM_CHANNELS,
 		.format    = I2S_FMT_DATA_FORMAT_I2S,
-		/* Both MASTER flags: the i2s3 controller itself generates WS
+		/* Both CONTROLLER flags: the i2s3 controller itself generates WS
 		 * (frame clock) and SCLK (bit clock) from the 76.8 MHz audio
 		 * source, rather than expecting an external codec to drive them --
 		 * matches the EVK wiring, where i2s3 is the only clock source on
 		 * the SCLK/WS/SDO net. */
-		.options        = I2S_OPT_FRAME_CLK_MASTER | I2S_OPT_BIT_CLK_MASTER,
+		.options        = I2S_OPT_FRAME_CLK_CONTROLLER | I2S_OPT_BIT_CLK_CONTROLLER,
 		.frame_clk_freq = SAMPLE_RATE_HZ,
 		.mem_slab       = &i2s_slab,
 		.block_size     = BLOCK_BYTES,
