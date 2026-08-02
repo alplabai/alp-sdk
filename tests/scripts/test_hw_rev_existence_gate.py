@@ -403,6 +403,15 @@ def test_validate_board_yaml_exits_with_the_not_buildable_code(tmp_path):
     assert proc.returncode == EXIT_SDK_REVISION_NOT_BUILDABLE, proc.stdout + proc.stderr
 
 
+def test_missing_status_key_error_names_itself_not_none():
+    """A `status: None`-shaped message is indistinguishable from a typo'd
+    value; the missing-key case gets its own wording instead."""
+    from alp_orchestrate import loader
+
+    assert loader._status_repr(None) == "carries no `status:` key"
+    assert loader._status_repr("tbd") == "status: 'tbd'"
+
+
 def test_board_preset_status_enum_matches_hw_revisions_v1():
     """board-preset.schema.json hand-duplicates hw-revisions-v1.schema.json's
     `status:` enum (no cross-file `$ref` support in this repo's validators
