@@ -45,6 +45,8 @@ from pathlib import Path
 
 import yaml
 
+from sentinels import is_tbd
+
 try:
     import jsonschema
 except ImportError:  # pragma: no cover - dependency is in CI + dev env
@@ -160,7 +162,7 @@ def check_join(snapshots: dict[str, dict], errors: list[str]) -> None:
         total = joined = 0
         for row in doc.get("pads", []):
             pad = row.get("e1m_pad", "TBD")
-            if pad == "TBD":
+            if is_tbd(pad):
                 continue
             total += 1
             fn = row.get("e1m_function")

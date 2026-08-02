@@ -28,6 +28,7 @@ except ImportError:
 
 from alp_cli.validator import iter_schema_errors
 from alp_project import resolve_memory_map, resolve_soc_path
+from sentinels import is_tbd
 
 from . import sdk_compat
 from .models import (BoardProject, IpcEntry, OrchestratorError,
@@ -217,7 +218,7 @@ def _resolve_jlink_flash_device(
     variants = soc_spec.get("variants") or []
     variant: Optional[dict[str, Any]] = None
     declared = som_preset.get("silicon_variant")
-    if declared and declared != "TBD":
+    if declared and not is_tbd(declared):
         variant = next(
             (v for v in variants if v.get("order_code") == declared), None)
     if variant is None:
