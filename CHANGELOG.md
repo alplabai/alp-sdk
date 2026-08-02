@@ -41,6 +41,44 @@ still not true.
 
 [#1023]: https://github.com/alplabai/alp-sdk/issues/1023
 
+### Fixed — an `hw_rev` that EXISTS but is `status: reserved`/`tbd`/status-less silently built anyway (#1025, the status half)
+
+The safe half (below) closed the "unknown `hw_rev`" hole; this closes the
+"known but not-yet-real `hw_rev`" one. `status:` is now a required key in
+`hw-revisions-v1.schema.json`, and the 14 status-less `v2n`/`v2n-m1` r2-r8
+placeholder revisions (unallocated, unreferenced by any `board.yaml`) got an
+explicit `status: reserved`. Both independent loaders (`load_board_yaml` and
+`alp_project_loader.py`'s `--emit composed-route-table`/`carrier-netlist`
+path) now refuse a revision that exists but is `status: reserved`,
+`status: tbd`, or carries no `status` key at all, via a new
+`SdkRevisionNotBuildable` -- distinct from `SdkRevisionUnknown`, since
+exists-but-not-buildable is a different failure than does-not-exist --
+mapped to a new exit code 5 in `scripts/validate_board_yaml.py`. Every other
+declared status (`production`, `preview`, `preliminary`, `deprecated`)
+still resolves and builds.
+
+Known fallout, resolved: `E1M-NX9101`'s only revision (imx93 r1) is
+`status: tbd` -- NX9101 is paper-only, no real silicon exists yet -- and the
+maintainer's decision is that `tbd` stays `tbd`, not promoted just to turn
+CI green. `examples/multicore/rpmsg-imx93` keeps its source + README (a
+`#1025`-pointing note explains why it doesn't build yet) but is excluded,
+each site with its own `#1025` comment naming the re-enable condition, from
+every gate/test that required it to BUILD or produce a golden:
+`check_build_plan.py`/`check_system_manifest.py`'s default project corpora,
+`check_emit_snapshots.py`'s CASES + committed goldens, the seam-1 parity
+oracle (`tests/parity/oracle/`), `check_zephyr_conf_parity.py`'s
+per-`CMakeLists.txt` sweep (new `_EXCLUDED_WITH_REASON` allowlist, same
+shape as `check_cmake_chip_list_parity.py`'s), `pr-metadata-validate.yml`'s
+two `board.yaml` sweeps, the ADR-0018 Tier-A CI family matrix (new
+`excludedFamilies` registry key in `tier-a-library-ci.json`, same shape as
+`hostBuild.excludedLibraries`), `docs/portability-matrix.md`'s generated E1M
+row (now honestly 18/21, not 21/21), and every pytest case that resolved an
+`E1M-NX9101` `board.yaml` (a "wrong-reason" fixture swapped to a buildable
+SKU where the swap didn't lose test intent; NX9101-specific SoM-preset logic
+-- mailbox-controller-TBD carve-out blocking, `wifi_ble`-TBD IoT fallback --
+exercised via a scratch metadata root instead of the now-refused real
+preset, via a new shared `_synthetic_nx9101_root` test helper).
+
 ### Fixed — `west.yml` never actually fetched tflite-micro in a clean CI checkout, despite claiming to (#1076)
 
 `pr-twister-aen`'s first real CI run errored on `aen-sim-vision`'s HP build:

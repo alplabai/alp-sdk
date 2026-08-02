@@ -21,7 +21,12 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _orchestrate_support import REPO, V2N_HAPPY, _write_board  # noqa: E402
+from _orchestrate_support import (              # noqa: E402
+    REPO,
+    V2N_HAPPY,
+    _synthetic_nx9101_root,
+    _write_board,
+)
 
 from alp_orchestrate import (                       # noqa: E402
     load_board_yaml,
@@ -131,14 +136,28 @@ def test_resolve_carve_outs_happy(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------
 
 
-def test_resolve_carve_outs_blocks_on_tbd(tmp_path: Path) -> None:
+def test_resolve_carve_outs_blocks_on_tbd(tmp_path: Path, monkeypatch) -> None:
     """When the SoM preset still carries TBD metadata (mailbox /
     memory_map), resolve_carve_outs MUST return a `status: blocked`
     entry rather than raise.  The manifest stays emit-able so CI can
     see the gap; the actual slice-build step trips on the C header's
-    `#error` directive."""
+    `#error` directive.
+
+    This is the mailbox-controller-TBD placeholder (a genuinely
+    different `TBD` than #1025's hw_rev `status:` gate -- E1M-NX9101's
+    real `metadata/e1m_modules/E1M-NX9101.yaml` still carries both).
+    #1025 refuses the real E1M-NX9101 preset outright before
+    `resolve_carve_outs` is ever reached (its only hw_rev, imx93 r1,
+    is `status: tbd`), and there is no second hw_rev to pick and no
+    other SoM with this same mailbox-TBD placeholder to swap to -- so
+    this runs against `_synthetic_nx9101_root`'s scratch metadata root
+    (see its docstring for why the #1025 gate is a no-op there without
+    this being a claim about the real E1M-NX9101's buildability)."""
+    import alp_orchestrate
+
+    meta = _synthetic_nx9101_root(tmp_path, monkeypatch)
     path = _write_board(tmp_path, NX_TBD)
-    project = load_board_yaml(path)
+    project = alp_orchestrate.load_board_yaml(path, metadata_root=meta)
     resolved = resolve_carve_outs(project)
     assert len(resolved) == 1
     entry = resolved[0]

@@ -64,9 +64,9 @@ prose and survives regeneration.
 | E1M-AEN601 | `alif:ensemble:e6` | ✅ | ✅ | ✅ | 256 Mbit DRAM · Ethos-U U55+U85 · `partial_hw_config: true` |
 | E1M-AEN701 | `alif:ensemble:e7` | ✅ | ✅ | ✅ | 256 Mbit DRAM · Ethos-U U55 · `partial_hw_config: true` |
 | E1M-AEN801 | `alif:ensemble:e8` | ✅ | ✅ | ✅ | 256 Mbit DRAM · Ethos-U U55+U85 · `partial_hw_config: true` |
-| E1M-NX9101 | `nxp:imx9:imx93` | ✅ | ✅ | ✅ | Ethos-U U65 · `partial_hw_config: true` |
+| E1M-NX9101 | `nxp:imx9:imx93` | ❌ | ❌ | ❌ | Ethos-U U65 · `partial_hw_config: true` |
 
-**21 / 21 cells generate cleanly.**
+**18 / 21 cells generate cleanly (3 FAILING — see the ❌ cells; run `python3 scripts/gen_portability_matrix.py` locally for the per-cell diagnostics).**
 
 ## E1M-X family (Cortex-A55 + Cortex-M33)
 
@@ -202,10 +202,11 @@ Legend: ✅ `requires:` satisfied and wireable on the SoM · ❌ incompatible (t
 
 ## Hand-maintained analysis (expected diffs)
 
-The generated tables above prove every cell *generates* cleanly.  The
-analytical claims below — byte-identity of the emitted `alp.conf`
-across SKUs and the classification of legitimate diff lines — are
-hand-maintained against the swap-test evidence under
+The generated tables above prove every ✅ cell *generates* cleanly
+(as of #1025, that's 18 of the 21 E1M cells — NX9101's 3 are ❌; see
+below).  The analytical claims below — byte-identity of the emitted
+`alp.conf` across SKUs and the classification of legitimate diff
+lines — are hand-maintained against the swap-test evidence under
 `build/portability-test/` (gitignored), per the Method's step 4.
 
 ### E1M family
@@ -213,8 +214,12 @@ hand-maintained against the swap-test evidence under
 After stripping the `CONFIG_ALP_SOC_*=y` line and the one identity
 comment, **all 6 AEN SKUs produce byte-identical `alp.conf` for every
 example.**  That is the load-bearing intra-AEN portability proof.
-E1M-NX9101 is paper-correct (`partial_hw_config: true` — see the
-generated Notes column).  The U85-carrying SKUs (AEN401 / AEN601 /
+E1M-NX9101 is currently NOT buildable at all (`partial_hw_config: true`
+— see the generated Notes column — and, as of #1025, its only hw_rev,
+imx93 r1, is `status: tbd`, which the hw_rev-buildable gate refuses
+outright); the diff-family rows below describing its Kconfig lines
+document what its `alp.conf` looks like once a real hw_rev lands, not
+a cell that generates today. The U85-carrying SKUs (AEN401 / AEN601 /
 AEN801, visible as `Ethos-U U55+U85` in the Notes column) are the
 population that motivated Gap G-1 below.
 

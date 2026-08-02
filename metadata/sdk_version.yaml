@@ -43,10 +43,10 @@
 # `scripts/alp_project.py`'s emit paths.  `scripts/validate_board_yaml.py`
 # maps that one failure to exit code 3.
 #
-# Both bounds are INCLUSIVE.  An ABSENT bound is unbounded, not zero --
-# `status: reserved` revisions declare no range at all and must keep
-# resolving.  A malformed bound is treated as absent rather than
-# refusing a build over a metadata typo.
+# Both bounds are INCLUSIVE.  An ABSENT bound is unbounded, not zero -- a
+# revision that declares no range at all keeps resolving on that axis (it
+# may still be refused on the `status:` axis below).  A malformed bound is
+# treated as absent rather than refusing a build over a metadata typo.
 #
 # Whether the requested hw_rev EXISTS is ALSO enforced, as of #1025 (the
 # safe half): `sdk_compat.revision_known()` checks the resolved table
@@ -58,11 +58,18 @@
 # `load_board_yaml` and carries its own copy of the same gate.
 # `scripts/validate_board_yaml.py` maps that failure to exit code 4.
 #
-# What is still NOT checked here: whether an EXISTING hw_rev is `status:
-# reserved` (or carries no `status` at all) and whether that should
-# refuse a build.  That remains open -- see #1025's tracking notes; the
-# metadata itself disagrees across families on what `status:` even means
-# today, so this deliberately does not infer a rule from it.
+# Whether an EXISTING hw_rev is buildable is ALSO enforced, as of #1025
+# (the status half): a revision that exists but is `status: reserved`,
+# `status: tbd`, or carries no `status` key at all is refused --
+# `sdk_compat.family_revision_buildable()` / `revision_buildable()` read
+# the resolved entry's `status:` (now a required key in
+# `hw-revisions-v1.schema.json`) after `revision_known()` above has
+# already confirmed the revision exists, and `loader.py` raises
+# `SdkRevisionNotBuildable` -- distinct from both `SdkRevisionUnknown`
+# above and `SdkRevisionUnsupported` below, since exists-but-not-buildable
+# is neither "doesn't exist" nor "out of range".  Every other declared
+# status (`production`, `preview`, `preliminary`, `deprecated`) passes.
+# `scripts/validate_board_yaml.py` maps that failure to exit code 5.
 #
 # Bump in the same PR that lands the matching CHANGELOG.md entry.
 

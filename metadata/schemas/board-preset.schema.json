@@ -62,8 +62,19 @@
     },
     "hw_revisions": {
       "type": "object",
-      "additionalProperties": true,
-      "description": "Per-rev metadata (min/max SDK versions, board_id ADC channel + thresholds, status, notes)."
+      "description": "Per-rev metadata (min/max SDK versions, board_id ADC channel + thresholds, status, notes).",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["status"],
+        "additionalProperties": true,
+        "description": "Same `status:` shape as $defs/hw_rev_entry in hw-revisions-v1.schema.json (kept in lockstep by hand -- this file's validator loads standalone, with no cross-file $ref resolution).  additionalProperties stays true here (not false, unlike the family-level schema) because board presets carry extra per-rev keys the family schema doesn't (board_id, notes).",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["production", "preview", "preliminary", "reserved", "tbd", "deprecated"]
+          }
+        }
+      }
     },
     "status": {
       "type": "object",

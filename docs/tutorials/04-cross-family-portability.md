@@ -59,9 +59,11 @@ and `west build` does the rest.
 For the empirical proof that this generates a byte-identical
 `alp.conf` across every E1M family SKU (modulo documented
 silicon-determined deltas), see
-[`docs/portability-matrix.md`](../portability-matrix.md) -- 21
-of 21 E1M cells and 12 of 12 E1M-X cells generate cleanly
-today.
+[`docs/portability-matrix.md`](../portability-matrix.md) -- 18
+of 21 E1M cells (all 6 AEN SKUs; NX9101's 3 cells fail -- its only
+hw_rev, imx93 r1, is `status: tbd`, refused outright by the
+hw_rev-buildable gate, #1025) and 12 of 12 E1M-X cells generate
+cleanly today.
 
 ## What's *not* a `som.sku:` swap
 
