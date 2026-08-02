@@ -7,6 +7,38 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — `west.yml` never actually fetched tflite-micro in a clean CI checkout, despite claiming to (#1076)
+
+`pr-twister-aen`'s first real CI run errored on `aen-sim-vision`'s HP build:
+`TENSORFLOW_LITE_MICRO ... was assigned the value 'y' but got the value 'n'.
+Check these unsatisfied dependencies: 0 (=n)`, then a hard failure on a
+missing `tensorflow/lite/micro/micro_interpreter.h`. Root cause: Zephyr's
+own `west.yml` ships tflite-micro inside its `optional` group, which its
+own `group-filter: [-babblesim, -optional, -testing]` disables by default
+(`submanifests/optional.yaml`). `west.yml`'s `name-allowlist: [tflite-micro,
+...]` only selects the project by NAME for import -- it does not activate
+its group, so a clean `west update` never cloned the actual TFLM library
+source (no `optional/modules/lib/tflite-micro`). Zephyr's own
+zephyr-tree-committed Kconfig glue (`modules/tflite-micro/Kconfig`) still
+sources regardless, so `CONFIG_TENSORFLOW_LITE_MICRO=y` from
+`aen-sim-vision/prj.conf` silently downgraded to `n` instead of failing
+loudly at manifest time. This was invisible locally because the shared dev
+workspace's machine-local `~/.west/config` carries an uncommitted
+`group-filter = +optional` override from earlier NPU bring-up work -- the
+same "long-lived workspace hides a clean-checkout bug" pattern as the
+`west patch apply` gap #1076 already found. Added `+optional` to `west.yml`'s
+own `group-filter:` (the group's only other members --
+canopennode/chre/thrift/zephyr-lang-rust -- aren't name-allowlisted, so this
+doesn't widen the fetch set beyond tflite-micro). `hal_ethos_u` did not need
+this: it sits in Zephyr's `hal` group, which is active by default -- the
+`pr-twister-aen.yml` header comment's "tflite-micro and hal_ethos_u are
+already unconditional west.yml groups" was accurate for `hal_ethos_u` but
+wrong for `tflite-micro`. Reproduced the exact CI failure from a fully
+clean `west init`/`west update`/`west patch apply` (no local config), then
+confirmed the fix: a real (non-dry-run) twister run of both AEN801 targets
+now selects 69 scenarios (138 configurations), 59 left after
+`platform_allow` filtering, all 59 build clean -- 0 failed, 0 errored.
+
 ### Added — an AEN801 twister gate: `examples/aen`'s AEN-only scenarios finally build in CI (#1076)
 
 25 of `examples/aen`'s `testcase.yaml` files name an AEN801 board target in
