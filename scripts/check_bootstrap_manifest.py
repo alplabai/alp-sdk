@@ -113,6 +113,28 @@ when:
       agree entry-for-entry (matched up by array position, since bash 3.2
       has no associative arrays) with `install.linux` / `install.macos`; see
       `_check_bootstrap_sh_install_hints`.
+  13. `zephyr.pythonMinVersion` (issue #1078) -- the Zephyr-SCOPED Python
+      floor, deliberately separate from the host-universal
+      `prerequisites.pythonMinVersion` point 6 already polices (see that
+      key's own schema description for why the two must not be unified) --
+      disagrees with the REAL `PYTHON_MINIMUM_REQUIRED` the pinned Zephyr
+      revision's own `cmake/modules/python.cmake` hardcodes, read with
+      `git show <rev>:cmake/modules/python.cmake` from a Zephyr checkout
+      resolved the same way `scripts/check_toolchain_lock.py`'s
+      `_resolve_zephyr_dir` does (`$ZEPHYR_BASE`, falling back to the
+      west-workspace topdir's conventional `zephyr/` project directory) --
+      never the working tree's currently-checked-out ref, for the identical
+      stale-local-clone reason that check's own `SDK_VERSION` cross-check
+      already documents. Like that check, this is skip-not-fail when no such
+      checkout resolves (a bare `pip install` or a pure-Python CI job
+      legitimately has none) -- reusing the SAME `ALP_REQUIRE_ZEPHYR_ORACLE=1`
+      escape hatch to turn the skip into a hard failure for a job that
+      promises a Zephyr checkout, rather than inventing a second flag for
+      the same concept. See `_check_zephyr_python_min_version`'s own
+      docstring for the full policy. `zephyr.pythonMinVersion` is exempted
+      from point 7's generic orphan-leaf scan (`_GATE_ASSERTED_LEAVES`) the
+      same way `prerequisites.*` is -- neither bootstrap script reads or
+      enforces it; this cross-check is its gate instead.
 
 --fix propagates a changed `zephyr.version` OUT to every machine pin site
 this gate verifies above (points 2, 4, 5, 10 -- west.yml, the CI workflow
@@ -132,6 +154,20 @@ are out of scope for a mechanical regex rewrite by design (see
 docs/zephyr-version-policy.md) -- only the `version:` field itself is a fix
 site.
 
+`zephyr.pythonMinVersion` (point 13) is deliberately NOT a --fix site, and
+the asymmetry is the point: every site above is one --fix WRITES, taking
+metadata/bootstrap.json as the source of truth and propagating OUT to
+machine pins. pythonMinVersion flows the other way -- it is derived FROM the
+pinned Zephyr's own cmake/modules/python.cmake, so "fixing" it would mean
+--fix reaching INTO the manifest it is elsewhere reading as authoritative.
+Making one field flow inbound while every other flows outbound is exactly
+the kind of two-directional pin map the paragraph above rules out. A Zephyr
+bump is therefore: edit zephyr.version, run --fix (propagates outward), then
+run the plain gate -- whose failure names the required value verbatim
+("... disagrees with the pinned Zephyr vX.Y.Z's own PYTHON_MINIMUM_REQUIRED
+'A.B'"), so the one manual edit is a copy of a value the gate just printed,
+not a lookup anyone has to perform.
+
 Run locally:
 
     python3 scripts/check_bootstrap_manifest.py
@@ -141,7 +177,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -203,6 +241,14 @@ _README_BADGE_RE = re.compile(r"Zephyr-v(\d+\.\d+\.\d+)")
 # module docstring) -- policed by their own dedicated comparison checks
 # below instead of the generic orphan-leaf scan.
 _GATE_ASSERTED_LEAF_PREFIX = "prerequisites."
+# Individual leaves (as opposed to a whole `prerequisites.*` subtree) that
+# are ALSO gate-asserted-instead rather than read by either script -- see
+# point 13 in the module docstring. `zephyr.pythonMinVersion` is checked
+# against the pinned Zephyr's own PYTHON_MINIMUM_REQUIRED by
+# `_check_zephyr_python_min_version`, not read at run time by bootstrap.sh
+# or bootstrap.ps1 (neither enforces a Zephyr-scoped floor today; that is
+# tan-cli's still-outstanding half of issue #1078).
+_GATE_ASSERTED_LEAVES = {"zephyr.pythonMinVersion"}
 # Purely structural: the manifest's own self-description, never something a
 # script "reads" as a fact. (`schemaVersion` is NOT here -- both scripts
 # assert it at run time, see the orphan-leaf scan.)
@@ -694,6 +740,120 @@ def _check_python_min_version_windows(manifest: dict) -> list[str]:
         return [f"scripts/bootstrap.ps1 hardcodes Python floor {ps1_floor!r}, "
                  f"metadata/bootstrap.json declares prerequisites.pythonMinVersion {manifest_floor!r}"]
     return []
+
+
+# -------- zephyr.pythonMinVersion (issue #1078) -------------------------------
+#
+# Unlike prerequisites.pythonMinVersion above (checked against a hardcoded
+# copy inside each bootstrap script), zephyr.pythonMinVersion has no such
+# copy anywhere in THIS repo to check against -- its ground truth lives in
+# the pinned Zephyr checkout itself. Derived and verified the same way
+# scripts/check_toolchain_lock.py's own zephyrSdk.version <-> SDK_VERSION
+# cross-check is: `git show <pinned rev>:<path>` from a resolved Zephyr
+# checkout, never the working tree's currently-checked-out ref (a local dev
+# clone routinely sits on a different tag than the pin).
+
+_PYTHON_CMAKE_PATH = "cmake/modules/python.cmake"
+_ZEPHYR_PYTHON_MIN_RE = re.compile(r"set\(\s*PYTHON_MINIMUM_REQUIRED\s+(\d+\.\d+)\s*\)")
+
+
+def _resolve_zephyr_dir() -> Path:
+    """Same resolution order as `scripts/check_toolchain_lock.py`'s
+    `_resolve_zephyr_dir` (and `tests/scripts/test_hil_blocks_coverage.py`'s
+    `_pinned_zephyr_sysbuild_kconfig_symbols`): `$ZEPHYR_BASE` (the
+    convention every `west` command and `scripts/alp_cli/doctor.py` use),
+    falling back to the west-workspace topdir's conventional `zephyr/`
+    project directory (`scripts/bootstrap.sh` does `west init -l <alp-sdk>`,
+    so alp-sdk's parent is the topdir). Duplicated here rather than
+    imported from that sibling gate script -- each check_*.py gate stays a
+    standalone entry point, not cross-coupled to another gate's module."""
+    env_base = os.environ.get("ZEPHYR_BASE")
+    return Path(env_base) if env_base else REPO.parent / "zephyr"
+
+
+def _zephyr_python_min_in_pinned_zephyr(zephyr_dir: Path, pinned_version: str) -> str | None:
+    """Read `PYTHON_MINIMUM_REQUIRED` at `pinned_version` straight from
+    `zephyr_dir`'s git object store via
+    `git show <rev>:cmake/modules/python.cmake`, never from the working
+    tree's currently-checked-out files -- same technique and same rationale
+    as check_toolchain_lock.py's `_sdk_version_in_pinned_zephyr`. Returns
+    None (unresolvable, never a hard error) when `zephyr_dir` doesn't exist,
+    isn't a git checkout, doesn't have `pinned_version` as a reachable ref,
+    or the file at that revision has no `set(PYTHON_MINIMUM_REQUIRED X.Y)`
+    line to match -- any of these means "no oracle available", the same
+    single outcome `_check_zephyr_python_min_version` treats as skip-or-fail
+    depending on ALP_REQUIRE_ZEPHYR_ORACLE."""
+    if not (zephyr_dir / ".git").exists():
+        return None
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(zephyr_dir), "show", f"{pinned_version}:{_PYTHON_CMAKE_PATH}"],
+            capture_output=True, text=True, timeout=15, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    m = _ZEPHYR_PYTHON_MIN_RE.search(result.stdout)
+    return m.group(1) if m else None
+
+
+def _check_zephyr_python_min_version(manifest: dict) -> tuple[list[str], str | None]:
+    """Point 13 (module docstring). Returns (problems, skip_reason).
+
+    Skip-vs-fail policy, reused verbatim from check_toolchain_lock.py's
+    `_check_sdk_version_matches_zephyr_pin` (same escape hatch, same
+    reasoning -- see that function's own docstring for the full
+    justification): whether a pinned Zephyr checkout is resolvable at all
+    is an ENVIRONMENT FACT, not a manifest defect, so the default is
+    skip-with-reason. A job that DOES assemble a Zephyr workspace before
+    running this gate can set `ALP_REQUIRE_ZEPHYR_ORACLE=1` to turn that
+    skip into a hard failure -- there, an unresolvable checkout is a bug in
+    the job's own setup, not a fact of the environment.
+
+    A skip is always printed by `main()` (never silently swallowed) so it
+    cannot quietly become permanent -- exactly what issue #1078 asked for."""
+    pinned_zephyr_version = manifest["zephyr"]["version"]
+    zephyr_dir = _resolve_zephyr_dir()
+    pinned_floor = _zephyr_python_min_in_pinned_zephyr(zephyr_dir, pinned_zephyr_version)
+
+    if pinned_floor is None:
+        # Build the two messages independently. Slicing the skip reason to
+        # reuse it as the failure reason inverts it -- dropping the leading
+        # "no " asserts the checkout WAS resolved, and leaves the sentence
+        # claiming it is "skipping" while the function is hard-failing.
+        missing = (
+            f"no Zephyr checkout resolved at {zephyr_dir} with "
+            f"{pinned_zephyr_version} as a reachable git revision carrying a "
+            f"`set(PYTHON_MINIMUM_REQUIRED X.Y)` line in {_PYTHON_CMAKE_PATH}"
+        )
+        if os.environ.get("ALP_REQUIRE_ZEPHYR_ORACLE") == "1":
+            return (
+                [
+                    f"ALP_REQUIRE_ZEPHYR_ORACLE=1 but {missing} -- this job "
+                    f"promised the oracle and did not deliver it; fix the "
+                    f"job's checkout, do not drop the flag"
+                ],
+                None,
+            )
+        return [], (
+            f"{missing} -- skipping the metadata/bootstrap.json "
+            f"zephyr.pythonMinVersion <-> Zephyr's own "
+            f"PYTHON_MINIMUM_REQUIRED cross-check"
+        )
+
+    manifest_floor = manifest["zephyr"]["pythonMinVersion"]
+    if pinned_floor != manifest_floor:
+        return (
+            [
+                f"metadata/bootstrap.json zephyr.pythonMinVersion {manifest_floor!r} "
+                f"disagrees with the pinned Zephyr {pinned_zephyr_version}'s own "
+                f"PYTHON_MINIMUM_REQUIRED {pinned_floor!r} (git -C {zephyr_dir} show "
+                f"{pinned_zephyr_version}:{_PYTHON_CMAKE_PATH})"
+            ],
+            None,
+        )
+    return [], None
 
 
 # -------- prerequisites.install (issue #949) ---------------------------------
@@ -1252,7 +1412,8 @@ def _check_no_orphaned_leaves(manifest: dict) -> list[str]:
     ps1_scannable = list(_iter_scannable_lines(ps1_text))
     problems = []
     for leaf, value in _iter_leaf_paths(manifest):
-        if leaf in _STRUCTURAL_LEAVES or leaf.startswith(_GATE_ASSERTED_LEAF_PREFIX):
+        if (leaf in _STRUCTURAL_LEAVES or leaf.startswith(_GATE_ASSERTED_LEAF_PREFIX)
+                or leaf in _GATE_ASSERTED_LEAVES):
             continue
         sh_needle = _bash_needle(leaf)
         ps1_needle = _ps1_needle(leaf)
@@ -1377,12 +1538,18 @@ def main() -> int:
         problems += _check_ci_workflow(wf, manifest_version)
     problems += _check_library_versions(manifest_version)
 
+    zephyr_python_problems, zephyr_python_skip = _check_zephyr_python_min_version(manifest)
+    problems += zephyr_python_problems
+
     if problems:
         print(f"FAIL bootstrap manifest drift (metadata/bootstrap.json declares "
               f"zephyr.version {manifest_version!r}):", file=sys.stderr)
         for p in problems:
             print(f"  · {p}", file=sys.stderr)
         return 1
+
+    if zephyr_python_skip is not None:
+        print(f"check_bootstrap_manifest: SKIP -- {zephyr_python_skip}")
 
     print(f"check_bootstrap_manifest: OK -- metadata/bootstrap.json, west.yml, README.md, "
           f"scripts/bootstrap.sh, scripts/bootstrap.ps1, and {len(CI_WORKFLOWS)} "
