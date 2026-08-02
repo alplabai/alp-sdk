@@ -528,8 +528,8 @@ to the single named entry instead of all of them; an unknown NAME
 exits 1 instead of building everything.  See the model-pipeline docs
 under `docs/tutorials/` for the end-to-end inference flow.
 
-`tan model` fronts the whole model lifecycle -- `build` / `list` /
-`info` / `doctor` (compile `board.yaml` `models:` into `.alpmodel`,
+`tan model` fronts the whole model lifecycle -- `tan model build` /
+`tan model list` / `tan model info` / `tan model doctor` (compile `board.yaml` `models:` into `.alpmodel`,
 enumerate them, decode a built package, and report the compile
 toolchains), `check` (static pre-flight fit/perf), `zoo` / `add`
 (browse and pull curated model-zoo entries), and `prep` / `run` / `ab`
@@ -540,7 +540,7 @@ result is delivered in tan-cli's `{command, ok, exitCode, project,
 data, issues}` envelope, and the `--format json` payloads below are the
 model-specific `data` those envelopes carry.
 
-#### `tan model list` / `info` / `doctor` -- inspect models + toolchains
+#### `tan model list` / `tan model info` / `tan model doctor` -- inspect models + toolchains
 
 ```bash
 tan model list                           # enumerate the board.yaml `models:` entries
@@ -548,8 +548,8 @@ tan model info <model.alpmodel>          # decode a compiled `.alpmodel` package
 tan model doctor                         # report the model-compile toolchains present
 ```
 
-`list` enumerates the declared/compiled models, `info` decodes a built
-`.alpmodel` package, and `doctor` reports which model-compile toolchains
+`tan model list` enumerates the declared/compiled models, `tan model info` decodes a built
+`.alpmodel` package, and `tan model doctor` reports which model-compile toolchains
 (Vela, DRP-AI, ...) are available -- distinct from the host-wide `tan
 doctor` preflight below.
 
