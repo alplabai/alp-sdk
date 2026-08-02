@@ -159,6 +159,24 @@
 	(DT_REG_ADDR(DT_NODELABEL(mram_storage)) + DT_REG_SIZE(DT_NODELABEL(mram_storage)) - \
 	 MRAM_RESERVED_BASE_ADDR)
 
+/* RO *and* non-executable, which no stock `(base, size)` attr macro gives:
+ * REGION_FLASH_ATTR is RO under CONFIG_MPU_ALLOW_FLASH_WRITE=n but omits
+ * NOT_EXEC (arm_mpu_v8.h:325-331 -- `.rbar = RO_Msk | NON_SHAREABLE_Msk`),
+ * because for MRAM_EXEC/ITCM being executable is the whole point. Reusing it
+ * here would close the write hole and leave an execute hole: the ATOC package
+ * and any stale image bytes in this span would stay fetchable as code. There
+ * is a NOT_EXEC + RO pairing in the `(limit)`-form family
+ * (REGION_RAM_RO_ATTR, arm_mpu_v8.h:193-198) but not in the `(base, size)`
+ * form this table uses, so spell it out rather than reshape the table. MAIR
+ * stays MPU_MAIR_INDEX_FLASH: this span IS MRAM, and the index drives
+ * cache-ability, not permissions. */
+#define REGION_MRAM_RESERVED_ATTR(base, size)                                  \
+	{                                                                      \
+		.rbar = NOT_EXEC | RO_Msk | NON_SHAREABLE_Msk, /* AP, XN, SH */ \
+		.mair_idx = MPU_MAIR_INDEX_FLASH,             /* Cache-ability */ \
+		.r_limit = REGION_LIMIT_ADDR(base, size),     /* Region Limit */  \
+	}
+
 static const struct arm_mpu_region mpu_regions[] = {
 	/* Region 0: executable MRAM (boot + slot0, minus the MCUboot trailer
 	 * sector under CONFIG_BOOTLOADER_MCUBOOT). RO even for privileged
@@ -190,12 +208,13 @@ static const struct arm_mpu_region mpu_regions[] = {
 #if MRAM_RESERVED_SIZE > 0
 	/* Region 4 (conditional): the part of mram_storage above MRAM_DEVICE
 	 * that boot/slot0/storage don't already reach -- see the comment on
-	 * MRAM_RESERVED_SIZE above. RO like MRAM_EXEC (REGION_FLASH_ATTR is
-	 * RO unless CONFIG_MPU_ALLOW_FLASH_WRITE=y): nothing here is meant to
-	 * be written by this image, ATOC included. */
+	 * MRAM_RESERVED_SIZE above. RO *and* XN: nothing here is meant to be
+	 * written OR executed by this image, the ATOC package included. Note
+	 * this is deliberately NOT REGION_FLASH_ATTR, which would leave the
+	 * span executable -- see REGION_MRAM_RESERVED_ATTR above. */
 	MPU_REGION_ENTRY("MRAM_RESERVED",
 	                 MRAM_RESERVED_BASE_ADDR,
-	                 REGION_FLASH_ATTR(MRAM_RESERVED_BASE_ADDR, MRAM_RESERVED_SIZE)),
+	                 REGION_MRAM_RESERVED_ATTR(MRAM_RESERVED_BASE_ADDR, MRAM_RESERVED_SIZE)),
 #endif
 };
 
