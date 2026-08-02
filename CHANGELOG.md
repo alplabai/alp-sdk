@@ -45,6 +45,29 @@ outside the helper and named in its docstring: `new_som.py::_SOC_REF_RE`,
 a CLI input validator rather than a resolution site, which would also need
 widening if the format ever grows a fourth part.
 
+### Fixed — `docs/testing.md`'s per-header coverage table omitted `<alp/i3c.h>` and `<alp/dac.h>` (#1098)
+
+Both classes are enrolled in the conformance suite
+(`tests/zephyr/conformance/src/main.c`, `.cap = ALP_CAP_ID_HW_I3C` /
+`ALP_CAP_ID_HW_DAC`) and both ship a real public header and backends, but
+neither had a row in the per-header coverage table — so a reader checking
+whether either has portable-API coverage found the class count saying 16
+while the table silently listed neither. Same class of gap as #937, one
+table further down.
+
+`<alp/dac.h>` was not named in #1098; it was found by cross-checking every
+`.name` in the conformance array against the table rather than adding the
+one row the issue asked for. That check is now the standard for this table:
+all 16 classes are represented, counting the four `<alp/peripheral.h>`
+sub-rows (GPIO/I²C/SPI/UART), `qenc` folded into the counter row, and the
+two target modes named in the lifecycle row.
+
+Both new rows state what coverage actually exists rather than mirroring a
+sibling's shape: neither class has a `tests/unit/*_registry/` (every other
+row in that block does), I3C has no portable `examples/peripheral-io/`
+example at all, and its only exercise — `examples/aen/aen-i3c-regcheck` —
+is not observable under a Flow C RAM-run (#935).
+
 ### Fixed — `metadata/bootstrap.json` declared one Python floor host-universally, lower than Zephyr's real one (#1078)
 
 `prerequisites.pythonMinVersion` ("3.10") is deliberately host-universal --
