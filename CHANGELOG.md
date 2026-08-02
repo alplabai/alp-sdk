@@ -59,6 +59,229 @@ building `alp_e1m_aen801_m55_he_firewall_probe.conf`, the profile
 `scripts/bench/aen/flash-update-log-firewall-probe.sh` actually requires
 and which stayed build-uncovered before.
 
+### Fixed — `test-all.sh` ran 1 of 34 required gate scripts on Windows (#1109)
+
+`scripts/quality_tasks.py --gate-scripts` wrote CRLF line endings on
+Windows; `test-all.sh`'s `IFS= read -r` loop doesn't strip `\r`, so every
+declared path but the alphabetically-last (unterminated) one failed its
+`-f` existence check and was silently skipped — the `required-gate-scripts`
+stage ran 1 of 34 declared `scripts/check_*.py` gates while still reporting
+`PASS`. `quality_tasks.py` now writes `\n` explicitly (fixing every
+consumer, not just this one); `test-all.sh` also strips a trailing `\r`
+defensively.
+
+Three more false signals in the same stage, all now fixed: the board.yaml
+schema sweep lacked the `rpmsg-imx93` exclusion `pr-metadata-validate.yml`
+carries, going red locally on a gate CI passes — both now read the pattern
+from one place, `scripts/board-yaml-sweep-exclude.sh`;
+`check_plain_cmake_link_complete.py` took CMake's platform-default
+generator (MSVC on Windows) against GCC-only builtins and now pins
+Ninja/Unix-Makefiles or skips cleanly naming the reason; `gen_soc_caps.py`
+/ `gen_status_strings.py` warned and continued when `clang-format` was
+absent, reporting the resulting unformatted output as tabs-vs-spaces
+drift, and now fail before writing anything, naming the missing tool.
+
+Added `tests/scripts/test_test_all_gate_coverage.py`, a regression guard
+asserting `test-all.sh --list-required-gate-scripts` always matches
+`quality_tasks.py --gate-scripts` 1:1.
+
+### Fixed — two `tests/scripts` tests were green for the wrong reason (#1110)
+
+`test_alp_cli_new_som.py::test_scaffold_passes_real_metadata_validate_and_
+parity_gates`'s `_clone_metadata_gates` isolation helper omitted
+`scripts/sentinels.py`, which `alp_project_loader.py` imports — the test
+passed only because an editable `pip install -e .` puts the real
+`scripts/` on `sys.path`, so the scaffolded copy's missing import silently
+resolved to the real file instead of failing, defeating the isolation the
+helper's own comment says it provides. Added `sentinels.py` to the copy
+tuple.
+
+`test_check_bootstrap_manifest.py::test_bootstrap_sh_refuses_unknown_
+schema_version` passed `subprocess.run(["bash", str(windows_path)])`,
+handing Git Bash a backslashed path it silently strips — the script never
+opened, and the test was asserting on a "No such file or directory" error
+rather than the `schemaVersion` refusal it claims to exercise. Now passes
+`.as_posix()`, and resolves `bash` via `shutil.which` rather than the bare
+name (an unqualified `"bash"` spawned from a native Python process on a
+Windows box with the WSL feature enabled can resolve to
+`C:\Windows\System32\bash.exe` — the WSL launcher stub — ahead of a real
+POSIX `bash.exe` on `%PATH%`, silently exercising a different interpreter
+with a different filesystem namespace).
+
+### Fixed — no CI job ran `tan bootstrap`, `tan init`, or install.sh (#1024)
+
+`.github/workflows/onramp-clean-container.yml`'s `prereqs-and-bootstrap` job
+now shellchecks (`-S error`) both `scripts/bootstrap.sh` and tan-cli's own
+`install.sh`, then smoke-runs `install.sh` on the same bare `ubuntu:24.04`
+container, on every relevant PR. `install.sh` was previously exercised only
+by `full-quickstart-build`'s schedule/`workflow_dispatch`/labelled-PR trigger
+— a broken installer could sit uncaught for up to a week; `scripts/bootstrap.sh`
+was shellchecked only by `scripts/test-all.sh`'s `stage_shellcheck`, which no
+workflow in this repo actually invokes in CI.
+
+`full-quickstart-build` no longer assembles the workspace with a raw
+`bash scripts/bootstrap.sh` call — it now runs `tan bootstrap --sdk-root`,
+the actual command docs/getting-started.md's quickstart tells a customer to
+run, proving the Rust binary's own delegation into the script rather than
+assuming it. It also now runs `tan init` to scaffold a fresh project and
+builds *that* to a real `zephyr.elf`, separately from the existing curated
+`gpio-button-led` build — closing the last named gap, that `tan init`'s
+scaffolding path had never been exercised by any CI job in either repo.
+
+tan-cli's own CI has the companion half of this issue
+(alplabai/tan-cli#207); this PR is the alp-sdk side only.
+
+### Changed — `silicon:` ref splitting finally has ONE implementation (#1096)
+
+#997 and #1004 each set out to collapse the hand-rolled `vendor:family:part`
+splits onto `resolve_soc_path()`, and each left copies behind. The reason is
+structural, not sloppiness: `resolve_soc_path()` returns a path rooted at a
+metadata root, but every site that survived rooted its result somewhere
+else — at a caller-injected `soc_dir`, at an `output_root`, or at no
+filesystem path at all (a repo-relative `str` for a generated banner). A
+path-returning helper could never absorb those, so they kept being re-found
+by grep.
+
+What they actually shared was the **split**. `split_silicon_ref()` is now
+that single source and `resolve_soc_path()` is one rooting convenience over
+it, so a site can reuse the arity rule while rooting its own way. All seven
+remaining copies are migrated — the four #1096 listed plus the three it
+scoped out (`alp_cli/new_som.py:154/339/503`), which extract slugs rather
+than paths but are the same three-part split and would have drifted
+identically.
+
+Each site keeps the shape it failed with, because the shapes are load-bearing:
+`alp_model/targets.py` still raises `ValueError` on a malformed ref and
+`FileNotFoundError` on a well-formed ref naming an absent spec — collapsing
+those into one would be a behaviour change, since `resolve_soc_path()`
+returns `None` for both. `alp_cli/validator.py::_load_soc_caps` still
+soft-fails to `None` and still roots at its injected `soc_dir`: rebuilding it
+as `resolve_soc_path(ref, soc_dir.parent)` is exact only while every caller
+passes a directory literally named `socs`, and a test now injects one that
+is not. `new_som.py:154` keeps its `_SOC_REF_RE` guard, which is strictly
+narrower than an arity check (it also demands lowercase slugs), so
+`Alif:ensemble:e8` still prefills empty rather than `Alif`.
+
+`tests/scripts/test_silicon_ref_single_source.py` greps the real tree for a
+reintroduced split, so a fourth round cannot be needed — verified by
+mutation. One encoding of "three colon-separated parts" is deliberately left
+outside the helper and named in its docstring: `new_som.py::_SOC_REF_RE`,
+a CLI input validator rather than a resolution site, which would also need
+widening if the format ever grows a fourth part.
+
+### Fixed — `docs/testing.md`'s per-header coverage table omitted `<alp/i3c.h>` and `<alp/dac.h>` (#1098)
+
+Both classes are enrolled in the conformance suite
+(`tests/zephyr/conformance/src/main.c`, `.cap = ALP_CAP_ID_HW_I3C` /
+`ALP_CAP_ID_HW_DAC`) and both ship a real public header and backends, but
+neither had a row in the per-header coverage table — so a reader checking
+whether either has portable-API coverage found the class count saying 16
+while the table silently listed neither. Same class of gap as #937, one
+table further down.
+
+`<alp/dac.h>` was not named in #1098; it was found by cross-checking every
+`.name` in the conformance array against the table rather than adding the
+one row the issue asked for. That check is now the standard for this table:
+all 16 classes are represented, counting the four `<alp/peripheral.h>`
+sub-rows (GPIO/I²C/SPI/UART), `qenc` folded into the counter row, and the
+two target modes named in the lifecycle row.
+
+Both new rows state what coverage actually exists rather than mirroring a
+sibling's shape: neither class has a `tests/unit/*_registry/` (every other
+row in that block does), I3C has no portable `examples/peripheral-io/`
+example at all, and its only exercise — `examples/aen/aen-i3c-regcheck` —
+is not observable under a Flow C RAM-run (#935).
+
+### Fixed — the SDHC ADMA descriptor table linked into an orphan `""` section on every board enabling `CONFIG_SDHC_DWC` (#1097)
+
+`CONFIG_SDHC_DESCRIPTOR_SECTION` (`zephyr/kconfigs/vendor-alif-peripherals.kconfig`)
+defaults to `""`, and `zephyr/drivers/sdhc/sdhc_dwc.c` unconditionally placed the
+ADMA2 descriptor table with `Z_GENERIC_SECTION(CONFIG_SDHC_DESCRIPTOR_SECTION)`.
+With `CONFIG_SDHC_DWC_ADMA=y` (the default) that expands to a section literally
+named `""`, which `-Wl,--fatal-warnings` treats as a hard orphan-section link
+error — not board-specific, any board enabling `CONFIG_SDHC_DWC` hit it. Added a
+new `CONFIG_SDHC_DESCRIPTOR_USE_SECTION` bool (default off) gating whether the
+section attribute is applied at all; off, the descriptor table falls back to
+normal `.bss` placement, which always links. No board currently opts a named
+region in — inventing one without evidence of the AEN801's actual DMA-coherency
+requirements would have been worse than the bug it replaced, so this fix is the
+safe generic guard only.
+
+Opting in does not by itself supply a name, so `sdhc_dwc.c` now carries a
+`BUILD_ASSERT` that `CONFIG_SDHC_DESCRIPTOR_SECTION` is non-empty whenever
+`CONFIG_SDHC_DESCRIPTOR_USE_SECTION=y`. Without it the opt-in re-armed this
+exact bug behind one switch: setting `USE_SECTION=y` and leaving the shipped
+`default ""` reproduced the orphan-section link error bit for bit.
+
+Regression coverage: **added** `examples/aen/aen-sdcard-readout/testcase.yaml`
+— #1095 deliberately left this one example without metadata rather than ship a
+known-broken scenario, so the file is new here, not restored. Its HE-target
+twister build confirms the descriptor table lands in `.bss` rather than an
+orphan section. `pr-twister-aen.yml`'s `paths:` filters also grow
+`zephyr/drivers/sdhc/**` and `zephyr/kconfigs/vendor-alif-peripherals.kconfig`:
+without them a future regression in the very files that caused #1097 would not
+have triggered the job that is supposed to catch it.
+
+One caveat this fix does **not** address: `.bss` on the AEN801 boards resolves
+to DTCM (`zephyr,sram = &dtcm`), which is CPU-local, and
+`CONFIG_SDHC_DWC_DMA_ADDR_TRANSLATE=n` programs that same local address into
+`DWC_SDHC_ADMA_SA_LOW_R`. The example is `build_only`, so no gate exercises a
+real transfer. A board that actually moves data over ADMA must revisit both.
+
+### Fixed — `metadata/bootstrap.json` declared one Python floor host-universally, lower than Zephyr's real one (#1078)
+
+`prerequisites.pythonMinVersion` ("3.10") is deliberately host-universal --
+every backend's build-plan emission runs `alp_project.py`, not just
+Zephyr's, so raising it to Zephyr's real floor would wrongly refuse a
+Yocto-only or metadata-only host. But that left the pinned Zephyr's actual
+build-time floor (`cmake/modules/python.cmake`'s `PYTHON_MINIMUM_REQUIRED
+3.12`) unrecorded anywhere in the manifest a consumer could read. Added a
+separate, Zephyr-scoped `zephyr.pythonMinVersion` key (Option A from the
+issue) rather than raising the shared key. The value is derived, not
+hand-typed: `scripts/check_bootstrap_manifest.py` now reads
+`PYTHON_MINIMUM_REQUIRED` straight out of the pinned Zephyr checkout via
+`git show <rev>:cmake/modules/python.cmake` and fails if the manifest
+disagrees, reusing `check_toolchain_lock.py`'s existing git-object-store
+technique and its `ALP_REQUIRE_ZEPHYR_ORACLE` skip-vs-fail escape hatch so
+a CI job with no bootstrapped Zephyr workspace gets a loud SKIP rather than
+a false pass or a false fail. Neither bootstrap script reads or enforces
+the new field yet -- that is `tan`'s still-outstanding half of this issue,
+gated on tan v0.6.0 (tan-cli#270).
+
+### Fixed — the macOS and Windows CI legs can now fail the PR (ADR 0012 enforced, not just claimed)
+
+`cross-platform-zephyr.yml`'s `python-smoke` and `loader-smoke` jobs ran their
+macOS and Windows legs under a job-level `continue-on-error: true`, so those
+checks reported **success no matter what their steps did** ([#1023]). ADR 0012
+calls the Zephyr-on-M developer workflow first-class on Win + Mac + Linux; that
+commitment was documented and unenforced, and a host-specific regression landed
+green. Same defect class as #994, #995, #1002 and #1017 — a gate that exists but
+cannot fail. The `include:` overrides and the
+`continue-on-error: ${{ matrix.continue-on-error }}` lines are gone; all three
+legs of both jobs now gate, with `fail-fast: false` kept so a Windows break does
+not cancel the macOS leg that would show the same defect from another angle.
+
+Read the run history with care: while the override was in place a green tick on
+those legs proved nothing, so "they have always passed" was never evidence. The
+flip rests on the per-**step** conclusions of four consecutive runs
+(`30457062916`, `30455621379`, `30450805406`, `30441032872`), which were 24/24
+clean — not on the job conclusions the override forged.
+
+`scripts/check_cross_platform.py` deliberately **stays** in soft-warn mode: its
+`--fail-on-warning` flip waits on the separate `docs/*` cleanup of Linux-only
+idioms, so that lint still reports without gating.
+
+**This is half the fix, and the remaining half is a repo setting, not a file.**
+`dev`'s required status checks are `clang-format · diff-only`,
+`twister-shard 1/4`–`4/4` and `renode · V2N101 --sim-mode socket contract`.
+`python-smoke (macos-latest)` and `python-smoke (windows-latest)` are **not**
+among them, so a failing leg now reports red but still does not block the merge.
+Until those six contexts are added to branch protection on `dev` and `main`,
+[#1023]'s stated expectation — "a Windows or macOS failure blocks the PR" — is
+still not true.
+
+[#1023]: https://github.com/alplabai/alp-sdk/issues/1023
+
 ### Fixed — an `hw_rev` that EXISTS but is `status: reserved`/`tbd`/status-less silently built anyway (#1025, the status half)
 
 The safe half (below) closed the "unknown `hw_rev`" hole; this closes the
@@ -849,40 +1072,6 @@ the generated `soc_caps.h`, so the gap is visible where the macros are
 actually consumed, not just recorded in metadata nobody reads. This does
 not correct any count — the full re-audit against Alif's datasheets/DFP is
 tracked as follow-up work.
-### Fixed — the macOS and Windows CI legs can now fail the PR (ADR 0012 enforced, not just claimed)
-
-`cross-platform-zephyr.yml`'s `python-smoke` and `loader-smoke` jobs ran their
-macOS and Windows legs under a job-level `continue-on-error: true`, so those
-checks reported **success no matter what their steps did** ([#1023]). ADR 0012
-calls the Zephyr-on-M developer workflow first-class on Win + Mac + Linux; that
-commitment was documented and unenforced, and a host-specific regression landed
-green. Same defect class as #994, #995, #1002 and #1017 — a gate that exists but
-cannot fail. The `include:` overrides and the
-`continue-on-error: ${{ matrix.continue-on-error }}` lines are gone; all three
-legs of both jobs now gate, with `fail-fast: false` kept so a Windows break does
-not cancel the macOS leg that would show the same defect from another angle.
-
-Read the run history with care: while the override was in place a green tick on
-those legs proved nothing, so "they have always passed" was never evidence. The
-flip rests on the per-**step** conclusions of four consecutive runs
-(`30457062916`, `30455621379`, `30450805406`, `30441032872`), which were 24/24
-clean — not on the job conclusions the override forged.
-
-`scripts/check_cross_platform.py` deliberately **stays** in soft-warn mode: its
-`--fail-on-warning` flip waits on the separate `docs/*` cleanup of Linux-only
-idioms, so that lint still reports without gating.
-
-**This is half the fix, and the remaining half is a repo setting, not a file.**
-`dev`'s required status checks are `clang-format · diff-only`,
-`twister-shard 1/4`–`4/4` and `renode · V2N101 --sim-mode socket contract`.
-`python-smoke (macos-latest)` and `python-smoke (windows-latest)` are **not**
-among them, so a failing leg now reports red but still does not block the merge.
-Until those six contexts are added to branch protection on `dev` and `main`,
-[#1023]'s stated expectation — "a Windows or macOS failure blocks the PR" — is
-still not true.
-
-[#1023]: https://github.com/alplabai/alp-sdk/issues/1023
-
 ### Fixed — docs stopped advertising an `hw_rev` / SDK-version gate that has never existed
 
 `metadata/sdk_version.yaml` and `metadata/e1m_modules/v2n/hw-revisions.yaml`'s
@@ -2867,6 +3056,19 @@ CDC200), `<alp/dsp.h>` (CMSIS-DSP Helium is already the E8 path), `<alp/tmu.h>`
   `--runner` unless `flash_args.runner` is explicitly set, and `west flash`
   falls back to the board's own `board.cmake` default. `build-plan`'s
   `debug.probe` follows suit (null unless a runner is explicitly configured).
+
+### Added — Kconfig `.config-missing-deps.json` (prj.conf LSP support)
+
+- The Zephyr `scripts/kconfig/kconfig.py` west patch now writes
+  `.config-missing-deps.json` next to `.config-trace.json`, a
+  `{"CONFIG_X": ["DEP (=n)", ...]}` map of the unmet direct dependencies that
+  blocked each ignored `prj.conf` assignment. It reuses Zephyr v4.4.0's own
+  `missing_deps()` (Burelli/Arduino SA, `zephyrproject-rtos/zephyr#95808`),
+  gated on `--handwritten-input-configs` to match
+  `check_assigned_sym_values()`'s own stderr warning (empty `{}` otherwise).
+  The alp-sdk-vscode prj.conf language server consumes it to name the blocking
+  dependency instead of a "no prompt, or unmet deps" disjunction. Upstreamable
+  — propose to Zephyr, then drop the carry.
 
 ### Added — build-plan envelope `executionPolicy`
 

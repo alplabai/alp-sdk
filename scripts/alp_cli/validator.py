@@ -25,6 +25,7 @@ import yaml
 
 from alp_cli.diagnostic import Diagnostic, DiagnosticCollector
 from alp_cli.yaml_pos import load_with_positions, node_position
+from alp_project_loader import split_silicon_ref
 
 REPO = Path(__file__).resolve().parents[2]
 SCHEMA_PATH = REPO / "metadata" / "schemas" / "board.schema.json"
@@ -348,8 +349,13 @@ def _silicon_ref_for_sku(sku: str | None, *, som_dir: Path = SOM_DIR) -> str | N
 
 
 def _load_soc_caps(silicon_ref: str, *, soc_dir: Path = SOC_DIR) -> dict[str, int] | None:
-    parts = silicon_ref.split(":")
-    if len(parts) != 3:
+    # split_silicon_ref(), not resolve_soc_path(): this site roots at the
+    # caller-injected `soc_dir`, not at a metadata root. Rebuilding it as
+    # `resolve_soc_path(ref, soc_dir.parent)` happens to be exact today only
+    # because every caller passes `<root>/socs` -- it would silently resolve
+    # somewhere else the first time one didn't (#1096).
+    parts = split_silicon_ref(silicon_ref)
+    if parts is None:
         return None
     vendor, family, part = parts
     fp = soc_dir / vendor / family / f"{part}.json"

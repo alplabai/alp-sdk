@@ -48,6 +48,14 @@ def main(argv=None) -> int:
     if args.profile and args.profile not in {"quick", "pr", "full", "release"}:
         ap.error(f"unknown profile {args.profile!r} (quick|pr|full|release)")
     paths = gate_scripts() if args.gate_scripts else scripts_for_profile(args.profile)
+    # On Windows, sys.stdout's default text-mode translation turns each
+    # print()'s '\n' into '\r\n'. scripts/test-all.sh consumes this output
+    # with `IFS= read -r`, which does not strip '\r' -- every path then
+    # carries a trailing carriage return that fails the later `-f` existence
+    # check, silently skipping the gate script entirely (alp-sdk#1109: 33 of
+    # 34 declared gate scripts never ran). Force '\n' so every consumer,
+    # not just test-all.sh, gets a clean path.
+    sys.stdout.reconfigure(newline="\n")
     for p in paths:
         print(p)
     return 0

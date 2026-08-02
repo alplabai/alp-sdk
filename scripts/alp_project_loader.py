@@ -217,6 +217,42 @@ def _resolve_inline_or_preset_board(
     }
 
 
+def split_silicon_ref(silicon: str | None) -> tuple[str, str, str] | None:
+    """Split a `vendor:family:part` `silicon:` key into its three slugs.
+
+    Returns None when `silicon` is falsy or not exactly 3 colon-separated
+    parts -- the same guard `resolve_soc_path()` applies, because that
+    function is now a thin rooting convenience over this one.
+
+    This exists because the SPLIT, not the rooting, is what kept getting
+    hand-rolled (issues #997, #1004, #1096). Every site that re-derived it
+    rooted the result somewhere different -- at a caller-injected `soc_dir`,
+    at `metadata_root`, at an `output_root`, or at no filesystem path at all
+    (a repo-relative `str` for a generated comment) -- so a single
+    path-returning helper could never absorb them all, and four survived
+    two rounds of consolidation for exactly that reason.
+
+    Callers that want `<metadata_root>/socs/<vendor>/<family>/<part>.json`
+    should keep using `resolve_soc_path()`; callers that root elsewhere, or
+    want the slugs themselves, use this and root it their own way. Either
+    way there is ONE place that knows a `silicon:` ref is three
+    colon-separated parts.
+
+    Note the one remaining independent encoding of that fact:
+    `alp_cli/new_som.py::_SOC_REF_RE` (`^[a-z0-9-]+:[a-z0-9-]+:[a-z0-9-]+$`)
+    validates the arity up front for its own `--soc-ref` flag, and would
+    also need widening if the format ever grows a 4th part. It is a CLI
+    input validator rather than a resolution site, so it is deliberately
+    not folded in here -- but it is the other thing to change.
+    """
+    if not silicon:
+        return None
+    parts = silicon.split(":")
+    if len(parts) != 3:
+        return None
+    return parts[0], parts[1], parts[2]
+
+
 def resolve_soc_path(silicon: str | None, metadata_root: Path) -> Path | None:
     """Resolve a `vendor:family:part` `silicon:` key to the SoC-JSON path
     it names: `metadata/socs/<vendor>/<family>/<part>.json`.
@@ -240,33 +276,22 @@ def resolve_soc_path(silicon: str | None, metadata_root: Path) -> Path | None:
     each behind a thin wrapper that preserves that site's original
     exception type or soft-fail shape.
 
-    Four more hand-rolled copies remain outside this module (issue #1096).
-    Most differ in the shape they fail with, so a blind call-site swap
-    would change behaviour; one does not, and is the cheap migration:
+    Issue #1096 closed out the remaining hand-rolled copies. The two that
+    root at a metadata root now call this helper (`alp_model/targets.py`,
+    `alp_cli/new_som.py`'s preset-path site); the rest root elsewhere and
+    call `split_silicon_ref()` directly, including the three slug-extraction
+    sites in `alp_cli/new_som.py` that #1096 originally scoped out -- they
+    were the same three-part split, so leaving them would have left the
+    drift the issue exists to close.
 
-      - `alp_cli/validator.py:351` (`_load_soc_caps`) -- same 3-part guard,
-        same `None` on failure. Behaviourally identical to this helper, so
-        it is the one site migratable with provably zero behaviour change.
-      - `alp_model/targets.py:69` -- unguarded 3-tuple unpack (`ValueError`
-        on a malformed ref), then raises `FileNotFoundError`.
-      - `alp_cli/new_som.py:199` -- builds a `str` path, not a `Path`.
-      - `alp_cli/new_som.py:526` -- `Path`, but rooted at `output_root`
-        rather than `metadata_root`.
-
-    Migrate one of those onto this helper -- don't add a fifth. (A further
-    three `soc_ref.split(":")` sites in `alp_cli/new_som.py` -- :154, :339,
-    :503 -- are out of scope for this helper: they extract vendor/family/
-    part slugs to seed a *new* preset's scaffold content, not to resolve a
-    path to an existing SoC JSON, so there is no `resolve_soc_path()` call
-    to swap in. They'd still need re-deriving by hand if the ref format
-    ever widens past 3 parts.)
+    There is no remaining `silicon.split(":")` outside this module; a
+    regression test pins that.
     """
-    if not silicon:
+    parts = split_silicon_ref(silicon)
+    if parts is None:
         return None
-    parts = silicon.split(":")
-    if len(parts) != 3:
-        return None
-    return metadata_root / "socs" / parts[0] / parts[1] / f"{parts[2]}.json"
+    vendor, family, part = parts
+    return metadata_root / "socs" / vendor / family / f"{part}.json"
 
 
 def _resolve_silicon_variant(

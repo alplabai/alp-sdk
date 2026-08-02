@@ -191,6 +191,10 @@ INTENTIONALLY_BASH_HELPERS: frozenset[str] = frozenset({
     "scripts/bootstrap.sh",
     "scripts/test-all.sh",
     "scripts/setup-clang-format.sh",
+    # Sourced (not executed) by scripts/test-all.sh and
+    # pr-metadata-validate.yml's ubuntu-latest `run:` steps -- carries a
+    # "Cross-platform scope:" header note.
+    "scripts/board-yaml-sweep-exclude.sh",
     # CI-only helper for dispatch-tan-parity.yml, which runs solely on
     # ubuntu-latest; carries a "Cross-platform scope:" header note.
     "scripts/dispatch-confirm.sh",

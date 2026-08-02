@@ -177,6 +177,24 @@ jobs:
           python3 -m pytest tests/scripts/test_hil_blocks_coverage.py -q \
             -k test_emitted_sb_config_symbols_exist_in_pinned_zephyr
 
+      # Same class, same oracle, same reason (#1078): bootstrap.json's
+      # `zephyr.pythonMinVersion` is cross-checked against the PINNED
+      # Zephyr's own cmake/modules/python.cmake PYTHON_MINIMUM_REQUIRED,
+      # which needs a real Zephyr tree to read.  Without a job that has
+      # one, check_bootstrap_manifest.py's Zephyr half SKIPs -- and its
+      # only other CI execution path (test_default_corpus_passes under
+      # cross-platform-zephyr.yml's python-smoke) is a bare checkout with
+      # no `west update`, where pytest swallows the SKIP and the job goes
+      # green.  That is precisely the #807/#814 failure the step above
+      # documents, so it gets the same treatment rather than a repeat.
+      - name: check · bootstrap.json agrees with pinned Zephyr's python floor (#1078)
+        if: matrix.shard == 1
+        working-directory: ${{ github.workspace }}/alp-sdk
+        env:
+          ZEPHYR_BASE: ${{ github.workspace }}/zephyrproject/zephyr
+          ALP_REQUIRE_ZEPHYR_ORACLE: '1'
+        run: python3 scripts/check_bootstrap_manifest.py
+
       # --emit kconfig (#893) is the SDK's first WORKSPACE-dependent emit
       # mode -- it needs a real board's Kconfig tree resolved by Zephyr's
       # own CMake, which (unlike native_sim) needs a real cross-toolchain.
