@@ -13,7 +13,9 @@ This cookbook ties three other docs together:
 
 - [`docs/portability-matrix.md`](portability-matrix.md) — the empirical
   guarantee.  Every cell is a SKU × example compile test;
-  21 / 21 cells green for E1M, 12 / 12 for E1M-X.
+  18 / 21 cells green for E1M (NX9101's only hw_rev is `status: tbd` --
+  refused outright by the hw_rev-buildable gate, #1025 --
+  so all 3 of its cells currently fail), 12 / 12 for E1M-X.
 - [`docs/adr/0011-intra-family-portability.md`](adr/0011-intra-family-portability.md)
   — the architectural decision record that ratifies the intra-family
   boundary, with the alternatives we considered and rejected.

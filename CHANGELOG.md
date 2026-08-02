@@ -87,6 +87,76 @@ windows themselves are the guard, since the link address moves per core.
 **BENCH-GATED: this fix has NOT been run on real E8 silicon and must not
 merge without that run.**
 
+### Fixed — an `hw_rev` that EXISTS but is `status: reserved`/`tbd`/status-less silently built anyway (#1025, the status half)
+
+The safe half (below) closed the "unknown `hw_rev`" hole; this closes the
+"known but not-yet-real `hw_rev`" one. `status:` is now a required key in
+`hw-revisions-v1.schema.json`, and the 14 status-less `v2n`/`v2n-m1` r2-r8
+placeholder revisions (unallocated, unreferenced by any `board.yaml`) got an
+explicit `status: reserved`. Both independent loaders (`load_board_yaml` and
+`alp_project_loader.py`'s `--emit composed-route-table`/`carrier-netlist`
+path) now refuse a revision that exists but is `status: reserved`,
+`status: tbd`, or carries no `status` key at all, via a new
+`SdkRevisionNotBuildable` -- distinct from `SdkRevisionUnknown`, since
+exists-but-not-buildable is a different failure than does-not-exist --
+mapped to a new exit code 5 in `scripts/validate_board_yaml.py`. Every other
+declared status (`production`, `preview`, `preliminary`, `deprecated`)
+still resolves and builds.
+
+Known fallout, resolved: `E1M-NX9101`'s only revision (imx93 r1) is
+`status: tbd` -- NX9101 is paper-only, no real silicon exists yet -- and the
+maintainer's decision is that `tbd` stays `tbd`, not promoted just to turn
+CI green. `examples/multicore/rpmsg-imx93` keeps its source + README (a
+`#1025`-pointing note explains why it doesn't build yet) but is excluded,
+each site with its own `#1025` comment naming the re-enable condition, from
+every gate/test that required it to BUILD or produce a golden:
+`check_build_plan.py`/`check_system_manifest.py`'s default project corpora,
+`check_emit_snapshots.py`'s CASES + committed goldens, the seam-1 parity
+oracle (`tests/parity/oracle/`), `check_zephyr_conf_parity.py`'s
+per-`CMakeLists.txt` sweep (new `_EXCLUDED_WITH_REASON` allowlist, same
+shape as `check_cmake_chip_list_parity.py`'s), `pr-metadata-validate.yml`'s
+two `board.yaml` sweeps, the ADR-0018 Tier-A CI family matrix (new
+`excludedFamilies` registry key in `tier-a-library-ci.json`, same shape as
+`hostBuild.excludedLibraries`), `docs/portability-matrix.md`'s generated E1M
+row (now honestly 18/21, not 21/21), and every pytest case that resolved an
+`E1M-NX9101` `board.yaml` (a "wrong-reason" fixture swapped to a buildable
+SKU where the swap didn't lose test intent; NX9101-specific SoM-preset logic
+-- mailbox-controller-TBD carve-out blocking, `wifi_ble`-TBD IoT fallback --
+exercised via a scratch metadata root instead of the now-refused real
+preset, via a new shared `_synthetic_nx9101_root` test helper).
+
+### Fixed — `west.yml` never actually fetched tflite-micro in a clean CI checkout, despite claiming to (#1076)
+
+`pr-twister-aen`'s first real CI run errored on `aen-sim-vision`'s HP build:
+`TENSORFLOW_LITE_MICRO ... was assigned the value 'y' but got the value 'n'.
+Check these unsatisfied dependencies: 0 (=n)`, then a hard failure on a
+missing `tensorflow/lite/micro/micro_interpreter.h`. Root cause: Zephyr's
+own `west.yml` ships tflite-micro inside its `optional` group, which its
+own `group-filter: [-babblesim, -optional, -testing]` disables by default
+(`submanifests/optional.yaml`). `west.yml`'s `name-allowlist: [tflite-micro,
+...]` only selects the project by NAME for import -- it does not activate
+its group, so a clean `west update` never cloned the actual TFLM library
+source (no `optional/modules/lib/tflite-micro`). Zephyr's own
+zephyr-tree-committed Kconfig glue (`modules/tflite-micro/Kconfig`) still
+sources regardless, so `CONFIG_TENSORFLOW_LITE_MICRO=y` from
+`aen-sim-vision/prj.conf` silently downgraded to `n` instead of failing
+loudly at manifest time. This was invisible locally because the shared dev
+workspace's machine-local `~/.west/config` carries an uncommitted
+`group-filter = +optional` override from earlier NPU bring-up work -- the
+same "long-lived workspace hides a clean-checkout bug" pattern as the
+`west patch apply` gap #1076 already found. Added `+optional` to `west.yml`'s
+own `group-filter:` (the group's only other members --
+canopennode/chre/thrift/zephyr-lang-rust -- aren't name-allowlisted, so this
+doesn't widen the fetch set beyond tflite-micro). `hal_ethos_u` did not need
+this: it sits in Zephyr's `hal` group, which is active by default -- the
+`pr-twister-aen.yml` header comment's "tflite-micro and hal_ethos_u are
+already unconditional west.yml groups" was accurate for `hal_ethos_u` but
+wrong for `tflite-micro`. Reproduced the exact CI failure from a fully
+clean `west init`/`west update`/`west patch apply` (no local config), then
+confirmed the fix: a real (non-dry-run) twister run of both AEN801 targets
+now selects 69 scenarios (138 configurations), 59 left after
+`platform_allow` filtering, all 59 build clean -- 0 failed, 0 errored.
+
 ### Added — an AEN801 twister gate: `examples/aen`'s AEN-only scenarios finally build in CI (#1076)
 
 25 of `examples/aen`'s `testcase.yaml` files name an AEN801 board target in
@@ -116,6 +186,58 @@ examples' `hal_alif` `se_service.c` → `ipm_poll_out`/`ipm_poll_in` call chain
 to compile against vanilla Zephyr v4.4.1; a long-lived dev workspace already
 carries that patch applied, uncommitted, which is exactly why this was
 invisible until a genuinely clean CI checkout ran the job.)
+
+### Added — `testcase.yaml` for 36 of the 42 `examples/aen` dirs `pr-twister-aen` couldn't discover (#1076)
+
+The `pr-twister-aen` gate above only builds what has a `testcase.yaml` —
+so the 42 dirs without one were still invisible to it. Re-measured the gap
+against `origin/dev@d8d113fd`: 67 example dirs, 25 with metadata, 42
+without (confirms the `67/25/42` follow-up count, not the issue body's
+stale `43 of 66`). Adds `testcase.yaml` (`build_only`, `platform_allow`
+scoped per example's actual `boards/` overlay set — not blanket-assumed)
+for 36 of the 42, matching the shape of the existing 25. `aen-alp-rpc`,
+`aen-dualcore-doorbell`, `aen-dualcore-ipc`, `aen-dualcore-probe`, and
+`aen-rpc-pingpong` are role-by-board (HP host/master, HE remote/peer), so
+each gets two platform-scoped scenarios rather than one `platform_allow`
+list with both targets. `aen-sim-vision` is HP-only (its `CMakeLists.txt`
+hard-fails configure on any other board — its `SIM_*` buffers live in the
+HP core's DTCM) and gets only the HP scenario. `aen-mcuboot-smoke` gets
+`sysbuild: true`; its own `sysbuild.conf` deliberately ships no
+`SB_CONFIG_BOOT_SIGNATURE_KEY_FILE` (the documented invocation needs an
+absolute `-DSB_CONF_FILE=` neither `testcase.yaml` nor this gate can
+synthesize), but the build does NOT hard-fail without it — Zephyr's
+`bootloader/Kconfig` falls back to MCUboot's own bundled
+`root-ec-p256.pem`, so this scenario builds clean and proves the boot chain
+compiles, signed with mcuboot's upstream test key rather than the alp-sdk
+dev key. The remaining 6 are deliberately excluded: the `aen-npu-inference*`
+family (5 dirs) — `gen_model.py` needs `vela` on `PATH` at CMake configure
+time, which no workflow installs yet (tracked as the `ethos-u-vela`
+follow-up the gate's own header comment already names) — and
+`aen-sdcard-readout`, dropped after the real build surfaced that its driver
+(`zephyr/drivers/sdhc/sdhc_dwc.c`) expands
+`Z_GENERIC_SECTION(CONFIG_SDHC_DESCRIPTOR_SECTION)` to an empty linker
+section name on this board (`default ""` in
+`zephyr/kconfigs/vendor-alif-peripherals.kconfig`), which orphan-sections
+under `-Wl,--fatal-warnings`; giving the board a real descriptor section
+name is a design decision for a follow-up, not this sweep.
+
+A real (non-dry-run) twister build of all 36 new + 25 existing scenarios
+(69 test scenarios, 138 configurations, 59 left after `platform_allow`
+filtering) surfaced 5 real, pre-existing build breaks this gate was the
+first thing to ever compile far enough to see — fixed in this same PR
+rather than shipped broken: a missing-braces nested initializer in
+`aen-spi-regcheck`'s `main.c`, an uninitialized `psa_alg` in
+`src/backends/security/zephyr_drv.c`'s AEAD encrypt/decrypt paths (the
+return of `aead_alg_meta()` was discarded via `(void)`), two
+unused-function driver statics in `zephyr/drivers/video/video_alif.c`
+(`alif_video_cam_init`/`alif_video_cam_isr`, unreferenced when
+`CONFIG_VIDEO_ALIF_CAM` has no DT node but `CONFIG_VIDEO_ISP_VSI` still
+pulls the TU in for its shared fourcc helpers), and a deprecated I2S
+option macro (`I2S_OPT_*_MASTER`/`*_SLAVE` → `*_CONTROLLER`/`*_TARGET`)
+hit twice — once in `aen-i2s-amp-alif`'s `main.c`, once in the vendored
+`zephyr/drivers/i2s/i2s_dw.c` driver itself, plus an unused-variable
+`use_dma` in `zephyr/drivers/spi/spi_dw_alif.c`'s non-DMA build path. All
+59 configurations now build clean, 0 failed, 0 errored.
 
 ### Fixed — SoM SKU schema pattern rejected newly allocated per-configuration tails (#1089)
 

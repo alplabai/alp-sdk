@@ -77,8 +77,15 @@ uncovered content-check hole):
 | `connectivity_iot-fleet-ota` | `examples/connectivity/iot-fleet-ota/board.yaml` | `iot-fleet-ota.build-plan.snap` (also covers its sysbuild/TF-M `sharedArtefacts`) |
 | `multicore_heterogeneous-offload` | `examples/multicore/heterogeneous-offload/board.yaml` | `hetero-offload.build-plan.snap` |
 | `multicore_rpmsg-aen` | `examples/multicore/rpmsg-aen/board.yaml` | `rpmsg-aen.build-plan.snap` |
-| `multicore_rpmsg-imx93` | `examples/multicore/rpmsg-imx93/board.yaml` | `rpmsg-imx93.build-plan.snap` |
 | `multicore_rpmsg-v2n` | `examples/multicore/rpmsg-v2n/board.yaml` | `rpmsg-v2n.build-plan.snap` |
+
+`multicore_rpmsg-imx93` is REMOVED from the oracle corpus (#1025): `seam1_
+field_diff.py` re-emits every corpus member's `boardYaml` live, and
+`E1M-NX9101`'s only hw_rev (imx93 r1) is `status: tbd` -- refused outright
+by the hw_rev-buildable gate, so its live emit no longer succeeds at all.
+See `tests/parity/oracle/ORACLE-PROVENANCE.txt`'s #1025 entry. Re-add the
+fixture (a fresh capture, not a git-history restore) once imx93 r1 carries
+a buildable status.
 
 A future oracle fixture MUST get a matching emit-snapshot `build-plan` case
 in the same change, or this coverage table (and the content-check it

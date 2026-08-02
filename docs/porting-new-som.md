@@ -471,7 +471,9 @@ For a family that **does** need a new revision row, the row shape is
 r2:
   min_sdk_version: "0.7.0"   # earliest SDK release that recognises r2
   max_sdk_version: ~          # ~ = open-ended
-  status: production          # or `preliminary`, `reserved`, `eol`
+  status: production          # or `preview`, `preliminary`, `deprecated` --
+                               # `reserved`/`tbd` (or no `status:` at all)
+                               # make the revision refuse a build (#1025)
   summary: |
     One-paragraph rationale for the respin.
   changes:

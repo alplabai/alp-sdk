@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the Secure Enclave (SE) SERVICE transport (the
+# Arm MHUv2 mailboxes + the Apache-2.0 hal_alif se_services client) + a
+# zero-risk SoC lifecycle-state (LCS) read on the E1M-AEN801 (Ensemble E8,
+# M55-HE).  DELIBERATELY VENDOR-SPECIFIC: the sanctioned bring-up escape
+# hatch -- customer code uses the portable wrappers instead (see
+# aen-se-service-query).
+#
+# Compile-checks the app + DT node on the real E8 board target; filtered OUT
+# of the native_sim PR gate (platform_allow = the AEN801 HE board only).
+
+sample:
+  name: aen-se-service-info
+  description: |
+    Bench RAM-run SE SERVICE transport proof for the E1M-AEN801 (Alif
+    Ensemble E8, Cortex-M55-HE): drives the MHUv2 mailboxes + hal_alif
+    se_services client directly and reads back the SoC lifecycle state
+    (LCS).  vendor-ext, sanctioned bring-up escape hatch.
+
+tests:
+  alp_sdk.examples.aen.se_service_info.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - security
+      - se
+      - vendor-ext
+    build_only: true   # the SE transport + LCS read is a bench flash, not a CI run.

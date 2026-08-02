@@ -851,7 +851,7 @@ static DEVICE_API(video, cam_driver_api) = {
 #endif
 };
 
-static void alif_video_cam_isr(const struct device *dev)
+static void __maybe_unused alif_video_cam_isr(const struct device *dev)
 {
 	static bool is_not_corrupted_frame = true;
 	struct video_cam_data *data = dev->data;
@@ -1012,7 +1012,7 @@ static int alif_cam_enable_clocks(const struct device *dev)
 	return clock_control_on(config->clk_dev, config->cid);
 }
 
-static int alif_video_cam_init(const struct device *dev)
+static int __maybe_unused alif_video_cam_init(const struct device *dev)
 {
 	const struct video_cam_config *config = dev->config;
 	struct video_cam_data *data = dev->data;

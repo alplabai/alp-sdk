@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# aen-dualcore-probe -- the decisive B1 dual-core boot test: does a dual-entry
+# ATOC boot BOTH M55 cores?  One app, role-by-board: each build stamps its own
+# advancing global-SRAM0 heartbeat and waits (bounded, 2000 ms) to see the
+# peer's heartbeat advance.  BENCH-VERIFIED PASS on E8 (2026-08-01): both
+# cores observed each other advancing.
+#
+# Filtered OUT of the native_sim PR gate (platform_allow = AEN801 board
+# targets only, no native_sim overlay); build_only in the advisory
+# pr-twister-aen.yml gate -- the cross-core heartbeat read is a dual-entry
+# ATOC bench flash + SWD read, not a CI run.
+
+sample:
+  name: aen-dualcore-probe
+  description: |
+    Decisive dual-core boot test for the E1M-AEN801: built for BOTH the
+    RTSS-HE and RTSS-HP boards into a dual-entry ATOC, each core stamps a
+    global-SRAM0 beacon so a SWD read shows whether the SES booted both.
+    BENCH-VERIFIED PASS on E8 (2026-08-01): both cores advancing.
+
+tests:
+  alp_sdk.examples.aen.dualcore_probe.he:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - multicore
+      - rtss-he
+    build_only: true   # the cross-core heartbeat read is a dual-entry ATOC bench flash, not a CI run.
+
+  alp_sdk.examples.aen.dualcore_probe.hp:
+    platform_allow:
+      - alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - multicore
+      - rtss-hp
+    build_only: true   # the cross-core heartbeat read is a dual-entry ATOC bench flash, not a CI run.

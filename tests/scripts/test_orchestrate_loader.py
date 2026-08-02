@@ -210,12 +210,23 @@ def test_load_board_yaml_rejects_board_preset_family_mismatch(tmp_path: Path) ->
 
 
 # Customer kept the AEN-shaped `cores.m55_hp:` block but swapped
-# `som.sku:` to E1M-NX9101 (i.MX 93 topology: m33 + a55_cluster, no
+# `som.sku:` to E1M-V2N101 (E1M-X topology: m33_sm + a55_cluster, no
 # m55_hp).  Pre-fix the orchestrator silently dropped the m55_hp
 # entry; the customer got an empty slice with no diagnostic.
+#
+# Was E1M-NX9101 (an in-family, Cortex-M-class SoM with a genuinely
+# different topology shape from AEN's m55_hp/m55_he) until #1025:
+# NX9101's only hw_rev (imx93 r1) is `status: tbd`, so
+# `load_board_yaml` now refuses it outright (SdkRevisionNotBuildable)
+# before this test's cores:/topology: mismatch is ever reached --
+# there is no second hw_rev to pick instead. E1M-V2N101 (E1M-X family)
+# is the nearest buildable SoM with a topology that also has no
+# `m55_hp` key, so it still exercises the same "wrong-shaped cores:"
+# hard-fail; swap back to E1M-NX9101 once imx93 r1 carries a buildable
+# status, if an in-family repro is preferred.
 G4_CROSS_CLASS_SWAP = """
 som:
-  sku: E1M-NX9101
+  sku: E1M-V2N101
 
 cores:
   m55_hp:
@@ -225,19 +236,21 @@ cores:
 """
 
 
-# Customer remembered to rename one core (m33) but forgot the second
-# (m55_hp).  Pre-#603 this only soft-WARNed and silently dropped the
-# `m55_hp` slice while the file still validated "clean"; #603 makes
-# this a hard error like the all-unmatched case above -- there is no
-# compatibility policy that tolerates an unknown core key.
+# Customer remembered to rename one core (m33_sm) but forgot the
+# second (m55_hp).  Pre-#603 this only soft-WARNed and silently
+# dropped the `m55_hp` slice while the file still validated "clean";
+# #603 makes this a hard error like the all-unmatched case above --
+# there is no compatibility policy that tolerates an unknown core key.
+# See G4_CROSS_CLASS_SWAP's comment above for why this is E1M-V2N101,
+# not E1M-NX9101 (#1025).
 G4_PARTIAL_MATCH = """
 som:
-  sku: E1M-NX9101
+  sku: E1M-V2N101
 
 cores:
-  m33:
+  m33_sm:
     os: zephyr
-    app: ./m33
+    app: ./m33_sm
     peripherals: [i2c]
   m55_hp:
     os: zephyr
@@ -256,7 +269,7 @@ def test_unknown_cores_key_raises(tmp_path: Path) -> None:
     assert "did you mean" in msg.lower()
     assert "m33" in msg
     assert "a55_cluster" in msg
-    assert "E1M-NX9101" in msg
+    assert "E1M-V2N101" in msg
     assert "topology" in msg
 
 
@@ -271,7 +284,7 @@ def test_partial_match_raises(tmp_path: Path) -> None:
     assert "m55_hp" in msg
     assert "did you mean" in msg.lower()
     assert "m33" in msg
-    assert "E1M-NX9101" in msg
+    assert "E1M-V2N101" in msg
 
 
 # ---------------------------------------------------------------------

@@ -1,7 +1,7 @@
 {
   "digests": {
-    "metadata": "sha256:fa42acfeed8a06fa40cc1439f66825ee4d80da59e371a7bdd5d3ed87ad0fafe2",
-    "schemas": "sha256:08476c31d0bb3b09188ee1007bd1e5263ea8841219e136fe235a3dc3dcc49bd2"
+    "metadata": "sha256:4f139d269bbb321e049e8defae1077b62a7b01dbd23edccde939b42e74fe2844",
+    "schemas": "sha256:cc07c2d4a330dca7b9a1c0b8a0286d51013805fc2f2b393e5c088f9dfce1370d"
   },
   "generatedBy": "west alp-lock",
   "libraries": [
@@ -213,7 +213,7 @@
     "groupsEnabled": []
   },
   "sdk": {
-    "revision": "81ee41b8130640e5a2a179de8b80562685cb6046",
+    "revision": "e2b19e19ea2896055784127c96e19c80b3ad36b8",
     "version": "0.15.0"
   },
   "west": {
@@ -221,7 +221,8 @@
       "-extras-lwrb-nanopb",
       "-extras-tier1",
       "-extras-cpp",
-      "-vendor-sdks"
+      "-vendor-sdks",
+      "+optional"
     ],
     "projects": [
       {
