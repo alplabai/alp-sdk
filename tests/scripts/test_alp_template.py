@@ -232,7 +232,7 @@ def _write_fixture_catalog(root: Path) -> Path:
                     }
                 ],
                 "test": {
-                    "testcase_yaml": [],
+                    "testcase_yaml": [f"{example_rel}/testcase.yaml"],
                     "native_sim_scenarios": [],
                     "cross_compile_matrix": [],
                 },
@@ -280,6 +280,128 @@ def test_no_shipped_template_declares_a_substitution_target():
     for rec in _catalog()["templates"]:
         for spec in rec["parameters"]:
             assert "substitute" not in spec, (rec["id"], spec["name"])
+
+
+# --------------------------------------------------------------------------
+# Path containment (#1126) -- a catalog-declared files.user_owned entry
+# must never let render()/render_to_envelope() read outside the example
+# root or write outside the destination root, whether it tries via `..`
+# traversal, an absolute path, or a symlink placed inside either root.
+# `_safe_join` backs BOTH the read site (_rendered_bytes) and the write
+# site (render()'s write loop), so testing it directly covers both; the
+# render()-level test below additionally proves the wiring end-to-end.
+# --------------------------------------------------------------------------
+
+def test_safe_join_allows_a_normal_in_root_path(tmp_path):
+    root = tmp_path / "root"
+    (root / "sub").mkdir(parents=True)
+    (root / "sub" / "file.txt").write_text("ok", encoding="utf-8")
+    assert alp_template._safe_join(root, "sub/file.txt", what="x") == (
+        root / "sub" / "file.txt").resolve()
+
+
+def test_safe_join_rejects_parent_traversal(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    (tmp_path / "secret.txt").write_text("outside", encoding="utf-8")
+    with pytest.raises(alp_template.PathEscapeError):
+        alp_template._safe_join(root, "../secret.txt", what="x")
+
+
+def test_safe_join_rejects_absolute_path(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    with pytest.raises(alp_template.PathEscapeError):
+        alp_template._safe_join(root, "/etc/passwd", what="x")
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="os.symlink needs elevated privileges on Windows")
+def test_safe_join_rejects_symlink_escape(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("outside", encoding="utf-8")
+    (root / "escape_link").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(alp_template.PathEscapeError):
+        alp_template._safe_join(root, "escape_link/secret.txt", what="x")
+
+
+def _write_escape_catalog(root: Path, user_owned: list[str]) -> Path:
+    """Same shape as `_write_fixture_catalog`, minus the substitution
+    parameter -- lets each test declare its own (possibly malicious)
+    `files.user_owned` list without a real example tree behind it."""
+    example_rel = "examples/fixture/escape-app"
+    example_dir = root / example_rel
+    example_dir.mkdir(parents=True)
+    (example_dir / "board.yaml").write_text("name: escape\n", encoding="utf-8")
+
+    catalog = {
+        "schemaVersion": 1,
+        "description": "test fixture catalog",
+        "templates": [
+            {
+                "id": "escape-app",
+                "title": "Escape App",
+                "archetype": "minimal",
+                "example": example_rel,
+                "description": "fixture",
+                "supported": {
+                    "families": ["alif-ensemble"],
+                    "som_skus": ["E1M-AEN801"],
+                    "core_classes": ["m"],
+                    "runtimes": ["zephyr"],
+                },
+                "requires": {
+                    "portable_apis": [],
+                    "libraries": [],
+                    "chips": [],
+                    "routes": [],
+                    "generated_artifacts": [],
+                    "test_backend": ["native_sim"],
+                },
+                "files": {"user_owned": user_owned, "generated": []},
+                "parameters": [],
+                "test": {
+                    "testcase_yaml": [f"{example_rel}/testcase.yaml"],
+                    "native_sim_scenarios": [],
+                    "cross_compile_matrix": [],
+                },
+                "status": "preview",
+                "note": "fixture only, not a real template",
+            }
+        ],
+    }
+    catalog_path = root / "catalog.json"
+    catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+    return catalog_path
+
+
+def test_render_valid_in_root_user_owned_file_still_renders(tmp_path):
+    catalog_path = _write_escape_catalog(tmp_path, ["board.yaml"])
+    dest = tmp_path / "out"
+    result = alp_template.render(
+        "escape-app", dest, catalog_path=catalog_path, base_dir=tmp_path)
+    assert result.files == ("board.yaml",)
+    assert (dest / "board.yaml").read_text(encoding="utf-8") == "name: escape\n"
+
+
+def test_render_rejects_traversal_in_user_owned_path(tmp_path):
+    (tmp_path / "secret.txt").write_text("outside", encoding="utf-8")
+    catalog_path = _write_escape_catalog(tmp_path, ["../../../secret.txt"])
+    with pytest.raises(alp_template.PathEscapeError):
+        alp_template.render(
+            "escape-app", tmp_path / "out",
+            catalog_path=catalog_path, base_dir=tmp_path)
+
+
+def test_render_rejects_absolute_path_in_user_owned(tmp_path):
+    catalog_path = _write_escape_catalog(tmp_path, ["/etc/passwd"])
+    with pytest.raises(alp_template.PathEscapeError):
+        alp_template.render(
+            "escape-app", tmp_path / "out",
+            catalog_path=catalog_path, base_dir=tmp_path)
 
 
 # --------------------------------------------------------------------------
