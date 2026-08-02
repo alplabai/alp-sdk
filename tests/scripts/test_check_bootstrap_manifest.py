@@ -567,6 +567,18 @@ def test_bootstrap_sh_refuses_unknown_schema_version(tmp_path):
     doesn't understand, e.g. if check_bootstrap_manifest.py never ran)."""
     if not _bash_available_with_python3():
         pytest.skip("bash + python3 not both available on PATH")
+    # Resolve bash to a concrete path rather than passing the bare name
+    # "bash" -- on a Windows box with the WSL feature enabled, spawning an
+    # unqualified "bash" from a native (non-Bash) Python process can lose
+    # the PATH-order race to C:\Windows\System32\bash.exe (the WSL
+    # launcher stub) even when a real POSIX bash.exe sits earlier in
+    # %PATH%, silently testing a different interpreter -- with a
+    # different filesystem namespace ("C:/..." isn't the WSL root) -- than
+    # the one this test means to exercise. Same precedent as
+    # test_bootstrap_sh_darwin_excludes_xz_and_wget_from_refusal above.
+    bash_path = shutil.which("bash")
+    if bash_path is None:
+        pytest.skip("bash not available on PATH")
     scaffold_root = tmp_path / "sh-repo"
     (scaffold_root / "scripts").mkdir(parents=True)
     (scaffold_root / "metadata").mkdir(parents=True)
@@ -579,8 +591,13 @@ def test_bootstrap_sh_refuses_unknown_schema_version(tmp_path):
     # --print-env is the cheapest path that still reaches the schemaVersion
     # guard (it loads the manifest facts, just like the full run) without
     # needing git/cmake/ninja or actually touching the network.
+    # .as_posix() (not str()) -- on Windows, str() yields a backslashed
+    # path; Git Bash strips the backslashes, so bash tries to open a
+    # mangled filename and reports "No such file or directory" instead of
+    # ever reaching the schemaVersion guard this test asserts on
+    # (alp-sdk#1110).
     proc = subprocess.run(
-        ["bash", str(scaffold_root / "scripts" / "bootstrap.sh"), "--print-env"],
+        [bash_path, (scaffold_root / "scripts" / "bootstrap.sh").as_posix(), "--print-env"],
         capture_output=True, text=True, cwd=str(scaffold_root),
     )
     assert proc.returncode != 0, proc.stdout + proc.stderr
