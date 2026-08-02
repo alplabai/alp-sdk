@@ -45,6 +45,40 @@ outside the helper and named in its docstring: `new_som.py::_SOC_REF_RE`,
 a CLI input validator rather than a resolution site, which would also need
 widening if the format ever grows a fourth part.
 
+### Fixed — the macOS and Windows CI legs can now fail the PR (ADR 0012 enforced, not just claimed)
+
+`cross-platform-zephyr.yml`'s `python-smoke` and `loader-smoke` jobs ran their
+macOS and Windows legs under a job-level `continue-on-error: true`, so those
+checks reported **success no matter what their steps did** ([#1023]). ADR 0012
+calls the Zephyr-on-M developer workflow first-class on Win + Mac + Linux; that
+commitment was documented and unenforced, and a host-specific regression landed
+green. Same defect class as #994, #995, #1002 and #1017 — a gate that exists but
+cannot fail. The `include:` overrides and the
+`continue-on-error: ${{ matrix.continue-on-error }}` lines are gone; all three
+legs of both jobs now gate, with `fail-fast: false` kept so a Windows break does
+not cancel the macOS leg that would show the same defect from another angle.
+
+Read the run history with care: while the override was in place a green tick on
+those legs proved nothing, so "they have always passed" was never evidence. The
+flip rests on the per-**step** conclusions of four consecutive runs
+(`30457062916`, `30455621379`, `30450805406`, `30441032872`), which were 24/24
+clean — not on the job conclusions the override forged.
+
+`scripts/check_cross_platform.py` deliberately **stays** in soft-warn mode: its
+`--fail-on-warning` flip waits on the separate `docs/*` cleanup of Linux-only
+idioms, so that lint still reports without gating.
+
+**This is half the fix, and the remaining half is a repo setting, not a file.**
+`dev`'s required status checks are `clang-format · diff-only`,
+`twister-shard 1/4`–`4/4` and `renode · V2N101 --sim-mode socket contract`.
+`python-smoke (macos-latest)` and `python-smoke (windows-latest)` are **not**
+among them, so a failing leg now reports red but still does not block the merge.
+Until those six contexts are added to branch protection on `dev` and `main`,
+[#1023]'s stated expectation — "a Windows or macOS failure blocks the PR" — is
+still not true.
+
+[#1023]: https://github.com/alplabai/alp-sdk/issues/1023
+
 ### Fixed — an `hw_rev` that EXISTS but is `status: reserved`/`tbd`/status-less silently built anyway (#1025, the status half)
 
 The safe half (below) closed the "unknown `hw_rev`" hole; this closes the
@@ -835,40 +869,6 @@ the generated `soc_caps.h`, so the gap is visible where the macros are
 actually consumed, not just recorded in metadata nobody reads. This does
 not correct any count — the full re-audit against Alif's datasheets/DFP is
 tracked as follow-up work.
-### Fixed — the macOS and Windows CI legs can now fail the PR (ADR 0012 enforced, not just claimed)
-
-`cross-platform-zephyr.yml`'s `python-smoke` and `loader-smoke` jobs ran their
-macOS and Windows legs under a job-level `continue-on-error: true`, so those
-checks reported **success no matter what their steps did** ([#1023]). ADR 0012
-calls the Zephyr-on-M developer workflow first-class on Win + Mac + Linux; that
-commitment was documented and unenforced, and a host-specific regression landed
-green. Same defect class as #994, #995, #1002 and #1017 — a gate that exists but
-cannot fail. The `include:` overrides and the
-`continue-on-error: ${{ matrix.continue-on-error }}` lines are gone; all three
-legs of both jobs now gate, with `fail-fast: false` kept so a Windows break does
-not cancel the macOS leg that would show the same defect from another angle.
-
-Read the run history with care: while the override was in place a green tick on
-those legs proved nothing, so "they have always passed" was never evidence. The
-flip rests on the per-**step** conclusions of four consecutive runs
-(`30457062916`, `30455621379`, `30450805406`, `30441032872`), which were 24/24
-clean — not on the job conclusions the override forged.
-
-`scripts/check_cross_platform.py` deliberately **stays** in soft-warn mode: its
-`--fail-on-warning` flip waits on the separate `docs/*` cleanup of Linux-only
-idioms, so that lint still reports without gating.
-
-**This is half the fix, and the remaining half is a repo setting, not a file.**
-`dev`'s required status checks are `clang-format · diff-only`,
-`twister-shard 1/4`–`4/4` and `renode · V2N101 --sim-mode socket contract`.
-`python-smoke (macos-latest)` and `python-smoke (windows-latest)` are **not**
-among them, so a failing leg now reports red but still does not block the merge.
-Until those six contexts are added to branch protection on `dev` and `main`,
-[#1023]'s stated expectation — "a Windows or macOS failure blocks the PR" — is
-still not true.
-
-[#1023]: https://github.com/alplabai/alp-sdk/issues/1023
-
 ### Fixed — docs stopped advertising an `hw_rev` / SDK-version gate that has never existed
 
 `metadata/sdk_version.yaml` and `metadata/e1m_modules/v2n/hw-revisions.yaml`'s
