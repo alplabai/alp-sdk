@@ -659,6 +659,22 @@ if(ALP_SDK_USE_DRPAI_V2N)
     # through the gate and dies at compile -- exactly what this block exists
     # to prevent.
     find_path(DRPAI_UAPI_INCLUDE_DIR linux/drpai.h)
+    # The seventh input: MeraDrpRuntimeWrapper.h:11 hard-#includes
+    # <tvm/runtime/profiling.h>, which pulls in dlpack and dmlc-core headers in
+    # turn.  Those live in the RUHMI checkout's tvm SUBMODULE, not beside the
+    # wrapper -- and the submodules ship uninitialised, so a checkout whose libs
+    # are already built can still have an empty tvm/ tree.  Probing only the
+    # wrapper would pass detection and then die at compile on the tvm include,
+    # which is the failure this block exists to prevent.  meta-rz-drpai does NOT
+    # cover this: its lib-tvm recipe installs libtvm_runtime.so* and a LICENSE,
+    # no headers at all.  Fix on a bare checkout is
+    # `git submodule update --init --recursive`.
+    find_path(DRPAI_TVM_INCLUDE_DIR tvm/runtime/profiling.h
+              HINTS $ENV{ALP_DRPAI_TVM_HOME}/tvm/include)
+    find_path(DRPAI_DLPACK_INCLUDE_DIR dlpack/dlpack.h
+              HINTS $ENV{ALP_DRPAI_TVM_HOME}/tvm/3rdparty/dlpack/include)
+    find_path(DRPAI_DMLC_INCLUDE_DIR dmlc/logging.h
+              HINTS $ENV{ALP_DRPAI_TVM_HOME}/tvm/3rdparty/dmlc-core/include)
     find_library(MERA2_RUNTIME_LIB mera2_runtime)
     find_library(MERA2_PLAN_IO_LIB mera2_plan_io)
     find_library(DRP_TVM_RT_LIB    drp_tvm_rt)
@@ -670,6 +686,15 @@ if(ALP_SDK_USE_DRPAI_V2N)
     endif()
     if(NOT DRPAI_UAPI_INCLUDE_DIR)
         list(APPEND _drpai_missing "linux/drpai.h")
+    endif()
+    if(NOT DRPAI_TVM_INCLUDE_DIR)
+        list(APPEND _drpai_missing "tvm/runtime/profiling.h")
+    endif()
+    if(NOT DRPAI_DLPACK_INCLUDE_DIR)
+        list(APPEND _drpai_missing "dlpack/dlpack.h")
+    endif()
+    if(NOT DRPAI_DMLC_INCLUDE_DIR)
+        list(APPEND _drpai_missing "dmlc/logging.h")
     endif()
     foreach(_drpai_lib
             MERA2_RUNTIME_LIB MERA2_PLAN_IO_LIB DRP_TVM_RT_LIB TVM_RUNTIME_LIB)
@@ -711,7 +736,9 @@ if(ALP_SDK_USE_DRPAI_V2N)
             ALP_SDK_USE_DRPAI_V2N=1
         )
         target_include_directories(alp_sdk PRIVATE
-            ${DRPAI_WRAPPER_INCLUDE_DIR} ${DRPAI_UAPI_INCLUDE_DIR})
+            ${DRPAI_WRAPPER_INCLUDE_DIR} ${DRPAI_UAPI_INCLUDE_DIR}
+            ${DRPAI_TVM_INCLUDE_DIR} ${DRPAI_DLPACK_INCLUDE_DIR}
+            ${DRPAI_DMLC_INCLUDE_DIR})
         target_link_libraries(alp_sdk PRIVATE
             ${MERA2_RUNTIME_LIB} ${MERA2_PLAN_IO_LIB}
             ${DRP_TVM_RT_LIB} ${TVM_RUNTIME_LIB})
