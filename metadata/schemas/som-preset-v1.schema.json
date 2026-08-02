@@ -39,7 +39,7 @@
     },
     "sku": {
       "type": "string",
-      "pattern": "^E1M-(AEN[3-8]01|V2N10[12]|V2M10[12]|NX9[0-9]{3})$"
+      "pattern": "^E1M-(AEN[3-8][0-9]{2}|V2N[0-9]{3}|V2M[0-9]{3}|NX9[0-9]{3})$"
     },
     "family": {
       "type": "string"
