@@ -85,8 +85,9 @@ single-source-of-truth for "what was this firmware intended for?"
   `hw-revisions.yaml` `min_sdk_version` / `max_sdk_version` window is
   separate, build-time-enforced data -- see
   [`docs/board-config-hardware.md`](../board-config-hardware.md).
-  Whether an *existing* `status: reserved` / `status: tbd` revision
-  should also refuse a build remains open -- see
+  An *existing* revision declared `status: reserved`, `status: tbd`,
+  or carrying no `status` key at all also refuses a build
+  (`SdkRevisionNotBuildable`, exit code 5) -- see
   [#1025](https://github.com/alplabai/alp-sdk/issues/1025).)
 
 ## See also

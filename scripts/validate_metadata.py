@@ -27,7 +27,8 @@ try:
 except ImportError:
     sys.exit("validate_metadata: PyYAML is required.  Install via `pip install pyyaml`.")
 
-from alp_project_loader import resolve_soc_path
+from alp_project_loader import _sku_family, resolve_soc_path
+from alp_orchestrate.sdk_compat import assert_exclusion_still_not_buildable
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -642,6 +643,7 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
             som_docs[doc["sku"]] = doc
 
     families_seen: set[str] = set()
+    family_to_som: dict[str, str] = {}
     for idx, cell in enumerate(data.get("familyMatrix") or []):
         if not isinstance(cell, dict):
             continue
@@ -650,6 +652,8 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
         core = cell.get("core")
         if isinstance(family, str):
             families_seen.add(family)
+            if isinstance(som, str):
+                family_to_som[family] = som
         doc = som_docs.get(som)
         if doc is None:
             msgs.append(f"familyMatrix[{idx}]/som: `{som}` has no SoM preset")
@@ -674,6 +678,32 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
     if missing_families:
         msgs.append("familyMatrix: missing supported SoM families: "
                     + ", ".join(sorted(missing_families)))
+
+    # `excludedFamilies` RATCHET (#1025 round-2 review): each entry claims
+    # its family's SoM has no buildable hw_rev at all -- assert that against
+    # live metadata the same way `excludedLibraries` above is asserted to
+    # still be Tier A, instead of trusting the prose forever.
+    for family, _reason in sorted((data.get("excludedFamilies") or {}).items()):
+        som = family_to_som.get(family)
+        if som is None:
+            msgs.append(f"excludedFamilies[{family}]: no familyMatrix cell "
+                        f"for this family to check against")
+            continue
+        doc = som_docs.get(som)
+        hw_rev = doc.get("default_hw_rev") if doc else None
+        try:
+            family_dir = _sku_family(som) if doc else None
+        except ValueError:
+            family_dir = None
+        if not family_dir or not hw_rev:
+            msgs.append(f"excludedFamilies[{family}]: cannot resolve "
+                        f"family_dir/default_hw_rev for som `{som}`")
+            continue
+        stale = assert_exclusion_still_not_buildable(
+            REPO / "metadata", family_dir, hw_rev,
+            gate=f"tier-a-library-ci.json excludedFamilies[{family}]")
+        if stale:
+            msgs.append(stale)
 
     if msgs:
         print(f"FAIL {rel}")

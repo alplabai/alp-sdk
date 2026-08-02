@@ -37,6 +37,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 from alp_orchestrate import load_board_yaml, OrchestratorError  # noqa: E402
 from alp_orchestrate.kconfig import _slice_alp_conf  # noqa: E402
+from alp_orchestrate.sdk_compat import assert_exclusion_still_not_buildable  # noqa: E402
 
 # `--emit zephyr-conf ... --core <id>` -- tolerant of the flag order + the
 # `--input <path>` argument sitting on any adjacent line within the same
@@ -56,13 +57,20 @@ _EMIT_RE = re.compile(r"--emit\s+zephyr-conf\b")
 # check_cmake_chip_list_parity.py's CHIP_LIST_EXCLUDED_WITH_REASON. A gate
 # that can't even load a board.yaml has nothing to byte-diff; that's a
 # different, honest failure this gate isn't the one to report. RATCHET:
-# remove an entry the moment its reason stops holding.
+# `main()` re-asserts each entry's (family_dir, hw_rev) via
+# assert_exclusion_still_not_buildable every run, and fails loudly the
+# moment a reason stops holding -- this dict alone is not self-enforcing.
 _EXCLUDED_WITH_REASON: dict[str, str] = {
     "examples/multicore/rpmsg-imx93/m33/CMakeLists.txt":
         "E1M-NX9101's only hw_rev (imx93 r1) is `status: tbd` -- refused "
         "outright by the hw_rev-buildable gate (#1025). Remove this entry "
         "once metadata/e1m_modules/imx93/hw-revisions.yaml:r1 carries a "
         "buildable status.",
+}
+# (family_dir, hw_rev) each excluded path's reason cites, for the ratchet
+# assertion above -- keyed the same as _EXCLUDED_WITH_REASON.
+_EXCLUDED_FAMILY_HWREV: dict[str, tuple[str, str]] = {
+    "examples/multicore/rpmsg-imx93/m33/CMakeLists.txt": ("imx93", "r1"),
 }
 
 
@@ -118,7 +126,14 @@ def main() -> int:
     for cmakelists, board_yaml, core_id in cases:
         rel = cmakelists.relative_to(REPO).as_posix()
         if rel in _EXCLUDED_WITH_REASON:
-            print(f"SKIP {rel}: {_EXCLUDED_WITH_REASON[rel]}")
+            family_dir, hw_rev = _EXCLUDED_FAMILY_HWREV[rel]
+            stale = assert_exclusion_still_not_buildable(
+                REPO / "metadata", family_dir, hw_rev,
+                gate=f"check_zephyr_conf_parity.py ({rel})")
+            if stale:
+                failures.append(stale)
+            else:
+                print(f"SKIP {rel}: {_EXCLUDED_WITH_REASON[rel]}")
             continue
         if not board_yaml.is_file():
             failures.append(f"{rel}: board.yaml not found at {board_yaml}")

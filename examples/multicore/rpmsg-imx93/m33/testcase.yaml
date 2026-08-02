@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Lives under m33/ because rpmsg-imx93 is a multi-slice project
+# (A55 cluster Yocto + M33 Zephyr on i.MX 93).  Twister sees the
+# Zephyr slice only; the linux/ consumer is bitbake-tested.
+
+sample:
+  name: rpmsg-imx93-m33
+  description: |
+    Heterogeneous-compute on NXP i.MX 93: A55 cluster (Yocto) +
+    M33 (Zephyr) communicating via `<alp/rpc.h>` over RPMsg.
+    This testcase covers ONLY the M33 Zephyr half.
+
+tests:
+  alp_sdk.examples.rpmsg_imx93.native_sim:
+    platform_allow:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - imx93
+      - heterogeneous
+      - rpmsg
+    build_only: true
+    extra_args: CONFIG_ALP_SDK_RPC=y
+    # #1025: E1M-NX9101's only hw_rev (imx93 r1) is `status: tbd`,
+    # refused outright by the hw_rev-buildable gate, so board.yaml
+    # can no longer resolve at all.  Skip rather than delete this
+    # file so re-enabling is a one-line revert once
+    # metadata/e1m_modules/imx93/hw-revisions.yaml:r1 carries a
+    # buildable status.
+    skip: true

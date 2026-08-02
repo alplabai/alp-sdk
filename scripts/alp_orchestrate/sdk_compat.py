@@ -181,7 +181,10 @@ def revision_buildable(table: Any, hw_rev: Optional[str]) -> Optional[bool]:
         return None
     entry = revisions.get(hw_rev) if hw_rev else None
     if not isinstance(entry, dict):
-        return None
+        # A key present but not a dict (None, a bare string, ...) is a
+        # malformed entry, not an absent one -- it has no status, so it
+        # is not buildable.  Only an absent key stays None (unknown).
+        return False if hw_rev in revisions else None
     status = entry.get("status")
     if not isinstance(status, str) or status in _NOT_BUILDABLE_STATUSES:
         return False
@@ -250,6 +253,45 @@ def family_available_revisions(metadata_root: Path,
 def board_revision(board_preset: Any, hw_rev: Optional[str]) -> dict[str, Any]:
     """The board `hw_revisions:` entry for `hw_rev`, or {}."""
     return _revision(board_preset, hw_rev)
+
+
+def assert_exclusion_still_not_buildable(
+    metadata_root: Path,
+    family_dir: str,
+    hw_rev: str,
+    *,
+    gate: str,
+) -> Optional[str]:
+    """The shared #1025 ratchet every `rpmsg-imx93`-shaped exclusion cites.
+
+    `check_build_plan.py`, `check_system_manifest.py`,
+    `check_emit_snapshots.py`, `check_zephyr_conf_parity.py`, and
+    `tier-a-library-ci.json`'s `excludedFamilies` all carve out imx93 for
+    the same reason: its only `hw_rev` (r1) is `status: tbd`, so nothing
+    can `--emit` against it.  Five hand-rolled `if status == "tbd"` copies
+    would drift independently the day that stops being true; this is the
+    ONE assertion every site re-runs instead, so a status flip turns every
+    exclusion red with the same actionable message rather than letting
+    some silently keep skipping forever (round-2 review of issue #1025).
+
+    Mirrors `check_cmake_chip_list_parity.py`'s
+    `CHIP_LIST_EXCLUDED_WITH_REASON` precedent: an allowlist entry must
+    prove its own reason still holds, not just exist.
+
+    Returns None when the revision is still genuinely not buildable (the
+    exclusion is honest); otherwise an actionable message naming `gate`
+    and telling the reader to remove the exclusion.
+    """
+    buildable = family_revision_buildable(metadata_root, family_dir, hw_rev)
+    if buildable is False:
+        return None
+    return (
+        f"{gate}: the {family_dir} hw_rev {hw_rev!r} exclusion is stale -- "
+        f"family_revision_buildable() now returns {buildable!r}, not "
+        f"False, so this revision is no longer refused by the hw_rev-"
+        f"buildable gate.  Remove the exclusion and re-add the case(s) it "
+        f"was carved out for."
+    )
 
 
 def check(
