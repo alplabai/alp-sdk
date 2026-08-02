@@ -14,6 +14,8 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from alp_project_loader import resolve_soc_path
+
 from .targets import _npu_backend, resolve_targets
 from .tensorio import OpDesc, extract_ops
 
@@ -136,9 +138,15 @@ def _load_npu(spec, metadata_root: Path) -> tuple[dict | None, int]:
     """Re-read the SoC spec named by the resolved target's silicon_ref, and return
     (matching npu dict, arena KiB). Prefers the npu whose accel-config matches the
     target (a SoC may expose two Ethos-U configs)."""
-    vendor, family, variant = spec.silicon_ref.split(":")
-    soc = json.loads(
-        (metadata_root / "socs" / vendor / family / f"{variant}.json").read_text("utf-8"))
+    # resolve_targets() only ever hands a non-3-part ref ("*") to a "cpu"
+    # spec, which the caller above short-circuits before reaching here --
+    # so a None from a real NPU backend's ref would itself be the bug.
+    soc_path = resolve_soc_path(spec.silicon_ref, metadata_root)
+    if soc_path is None:
+        raise ValueError(
+            f"malformed silicon ref {spec.silicon_ref!r} on backend {spec.backend!r}: "
+            f"expected exactly 3 colon-separated parts (<vendor>:<family>:<part>)")
+    soc = json.loads(soc_path.read_text("utf-8"))
     arena = int(soc.get("inference_arena_sram_kib", 0))
     match = None
     for npu in soc.get("npus", []):

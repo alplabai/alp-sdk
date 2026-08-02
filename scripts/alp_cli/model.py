@@ -374,7 +374,7 @@ def add_cmd(zoo_id: str, board_path: Path, name: str | None, models_dir: str,
         new_entry["compile"] = entry.compile
     models.append(new_entry)
     board["models"] = models
-    board_path.write_text(yaml.safe_dump(board, sort_keys=False), encoding="utf-8")
+    board_path.write_text(yaml.safe_dump(board, sort_keys=False), encoding="utf-8", newline="")
     result = {"added": name, "source": rel, "from": entry.id}
     click.echo(json.dumps(result, indent=2) if fmt == "json" else f"added '{name}' ({rel}) from zoo '{entry.id}'")
 
