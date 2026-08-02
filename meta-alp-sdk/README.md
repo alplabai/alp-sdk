@@ -118,16 +118,47 @@ because V2N silicon support may not yet be on the corresponding
 | `meta-openembedded`                            | <https://github.com/openembedded/meta-openembedded>                            | Standard OE recipe collection.                             |
 | `meta-renesas`                                 | <https://github.com/renesas-rz/meta-renesas>                                   | Renesas RZ base BSP — provides `rzv2n-evk` MACHINE.        |
 | `meta-rz-features/meta-rz-graphics`            | (bundled in `meta-rz-features` under Renesas)                                  | Mali GPU drivers + Weston compositor wiring.               |
-| `meta-rz-features/meta-rz-drpai`               | (bundled in `meta-rz-features`)                                                | **DRP-AI userspace runtime + headers.**                    |
+| `meta-rz-features/meta-rz-drpai`               | (bundled in `meta-rz-features`)                                                | **DRP-AI kernel driver + `drpai0` DT label + `<linux/drpai.h>` + `libtvm_runtime.so`** (NOT the whole runtime — see below). |
 | `meta-rz-features/meta-rz-opencva`             | (bundled in `meta-rz-features`)                                                | OpenCV acceleration via DRP.                               |
 | `meta-rz-features/meta-rz-codecs`              | (bundled in `meta-rz-features`)                                                | Hardware video codec recipes.                              |
 | `meta-econsys`                                 | (bundled; vendored from e-con Systems)                                         | Camera drivers.  Contact e-con Systems for `e-CAM22_CURZH` patch. |
 
-DRP-AI is fully covered by `meta-rz-drpai` — there's no separate
-post-build tarball install for the runtime headers, and no NDA gate
-on it.  Only the e-con Systems MIPI camera patch requires a
-manufacturer contact, and it's optional (only needed if you
-populate `e-CAM22_CURZH` on the board).
+`meta-rz-drpai` does **not** cover all of DRP-AI.  It supplies four
+things:
+
+1. the DRP-AI kernel driver (its `0002-*` patch),
+2. the `drpai0` DT node + label in `r9a09g056.dtsi` (its
+   `0001-add-drpai-property-to-devicetree.patch`) — the label does
+   **not** exist in the pristine linux-renesas tree,
+3. the `<linux/drpai.h>` UAPI header (recipe `drpai`, 1.4.0), and
+4. `libtvm_runtime.so` (recipe `lib-tvm`).
+
+Everything else the alp-sdk DRP-AI3 backend compiles and links against
+— `MeraDrpRuntimeWrapper.h`, `mera2_runtime`, `mera2_plan_io`,
+`drp_tvm_rt` — exists in **no Yocto layer at all**.  Those come only
+from a built RUHMI / `rzv_drp-ai_tvm` checkout that the builder stages
+himself; see [Model compilation toolchain
+(RUHMI)](#model-compilation-toolchain-ruhmi--drp-ai-tvm) below.  There
+is no NDA gate on any of it (the `rzv_drp-ai_tvm` sources are
+Apache-2.0), but the prebuilt MERA2 libraries and the Translator are
+Renesas/EdgeCortix account-gated and are not vendored here.
+
+`meta-rz-drpai` is a **soft** dep of this layer
+(`LAYERRECOMMENDS_alp-sdk`, not `LAYERDEPENDS_alp-sdk`) — the AEN and
+NX91 machines have no DRP-AI silicon and must not be forced to carry an
+RZ/V-only vendor layer.  The `linux-renesas` bbappend therefore gates
+the `&drpai0` overlay on the layer being in `bblayers.conf`
+(`ALP_DRPAI_LAYER`): present → the real override in
+`recipes-kernel/linux/linux-renesas/e1m-v2n-drpai.dtsi` is installed;
+absent → a comment-only stub of the same filename, so the board dtb
+still compiles and the NPU is simply left unclaimed.  **Without the
+layer there is no `/dev/drpai0`**, and every
+`alp_inference_open(.backend = DRPAI)` fails regardless of how the SDK
+was built.
+
+Only the e-con Systems MIPI camera patch requires a manufacturer
+contact, and it's optional (only needed if you populate
+`e-CAM22_CURZH` on the board).
 
 Yocto release: **Scarthgap (5.0.11)**.  GCC 13.  Toolchain SDK:
 `bitbake core-image-weston -c populate_sdk` against the matching
@@ -177,6 +208,13 @@ bitbake-layers add-layer ../meta-deepx-m1
 MACHINE = "e1m-v2n101-a55"     # plain V2N
 # or
 MACHINE = "e1m-v2m101-a55"     # V2N + DEEPX
+
+# 7b. OPTIONAL: compile the DRP-AI3 NPU backend into libalp_sdk.so.
+#     Default OFF.  Only do this once a built RUHMI checkout is staged
+#     into the sysroot (or reachable via ALP_DRPAI_TVM_APPS +
+#     CMAKE_LIBRARY_PATH) -- see "Per-machine inference runtime" below.
+#     BENCH-UNVERIFIED: never run on DRP-AI silicon.
+PACKAGECONFIG:append:pn-alp-sdk = " drpai"
 
 # 8. Build the image:
 bitbake alp-image-edge                 # dev image (passwordless root, bench tooling)
@@ -242,37 +280,87 @@ Alif demotes E7 on scarthgap (only `devkit-e7.conf.orig` remains).
 
 ## Per-machine inference runtime
 
-The SDK's `<alp/inference.h>` compiles in the dispatcher for every
-backend the SoM preset's `capabilities:` block declares
-(silicon-determined), but the **vendor NPU runtimes are not build-time
-dependencies of the `alp-sdk` library** — the Yocto build links only
-the dispatcher + portable stubs.  Where a runtime userspace package
-exists, the **image** recipe installs it (e.g. `alp-image-edge`'s
-`IMAGE_INSTALL:append:e1m-v2m101 = "dx-rt"`); DRP-AI3 is driven through
-the in-kernel driver + UAPI headers from `meta-rz-drpai` (see below).
+The SDK's `<alp/inference.h>` always compiles in the dispatcher plus the
+portable stubs.  For most backends the **vendor NPU runtimes are not
+build-time dependencies of the `alp-sdk` library** — the Yocto build
+links the dispatcher only, and where a runtime userspace package exists
+the **image** recipe installs it (e.g. `alp-image-edge`'s
+`IMAGE_INSTALL:append:e1m-v2m101 = "dx-rt"`).  DEEPX DX-M1 keeps that
+shape: `ALP_SDK_USE_DEEPX_DXM1` compiles against an in-tree stub header,
+so it stays dep-free.
 
-| MACHINE              | NPU backend            | Runtime source                              |
-|----------------------|------------------------|---------------------------------------------|
-| `e1m-v2n101-a55`     | DRP-AI3                | in-kernel driver + `meta-rz-drpai` headers  |
-| `e1m-v2n102-a55`     | DRP-AI3                | Same as V2N101 (memory variant)             |
-| `e1m-v2m101-a55`     | DRP-AI3 + DEEPX DX-M1  | DRP-AI3 as above; `dx-rt` via the image     |
-| `e1m-v2m102-a55`     | Same as V2M101         | Same as V2M101 (memory variant)             |
-| `e1m-nx9101-a55`     | Ethos-U65              | NXP i.MX 93 Ethos-U userspace via the image |
-| `e1m-aen801-a32`     | Ethos-U85 + 2x U55     | Ethos-U path inside the alp-sdk library     |
-| `e1m-aen701-a32`     | 2x Ethos-U55           | Ethos-U path inside the alp-sdk library     |
+**DRP-AI3 is the exception.**  Its backend
+(`src/yocto/inference_drpai.cpp`) is real `MeraDrpRuntimeWrapper` code;
+when it is compiled in, the MERA2 / TVM runtime *is* a build-time
+dependency of `libalp_sdk.so`, and `<linux/drpai.h>` is a build-time
+dependency of the recipe.
 
-Customer apps pick the active backend per-handle at runtime via
-`alp_inference_open(.backend = ALP_INFERENCE_BACKEND_AUTO)` (or
-an explicit `ETHOS_U / DRPAI / DEEPX_DXM1` value for benchmarking).
-There is NO build-time pin -- silicon is the source of truth.
+| MACHINE              | NPU backend                          | Runtime source                                                        |
+|----------------------|--------------------------------------|-----------------------------------------------------------------------|
+| `e1m-v2n101-a55`     | DRP-AI3 — opt-in, BENCH-UNVERIFIED   | kernel driver + `<linux/drpai.h>` + `libtvm_runtime.so` from `meta-rz-drpai`; `mera2_runtime` / `mera2_plan_io` / `drp_tvm_rt` + `MeraDrpRuntimeWrapper.h` from a built RUHMI checkout |
+| `e1m-v2n102-a55`     | DRP-AI3 — opt-in, BENCH-UNVERIFIED   | Same as V2N101 (memory variant)                                       |
+| `e1m-v2m101-a55`     | DRP-AI3 + DEEPX DX-M1                | DRP-AI3 as above; `dx-rt` via the image                               |
+| `e1m-v2m102-a55`     | Same as V2M101                       | Same as V2M101 (memory variant)                                       |
+| `e1m-nx9101-a55`     | Ethos-U65                            | NXP i.MX 93 Ethos-U userspace via the image                           |
+| `e1m-aen801-a32`     | Ethos-U85 + 2x U55                   | Ethos-U path inside the alp-sdk library                               |
+| `e1m-aen701-a32`     | 2x Ethos-U55                         | Ethos-U path inside the alp-sdk library                               |
 
-### DRP-AI userspace headers
+Customer apps still pick the active backend per-handle at runtime via
+`alp_inference_open(.backend = ALP_INFERENCE_BACKEND_AUTO)` (or an
+explicit `ETHOS_U / DRPAI / DEEPX_DXM1` value for benchmarking) — the
+image does not pin one backend.  The one thing decided at build time is
+whether the DRP-AI3 backend is *present in the library at all*; when it
+is not, a `DRPAI`-requesting `alp_inference_open` returns `NULL` with
+`ALP_ERR_NOSUPPORT` (and on a plain V2N, `AUTO` does the same) rather
+than silently routing elsewhere.
 
-When `meta-rz-drpai` is in `bblayers.conf`, the DRP-AI userspace
-runtime + headers (`<linux/drpai.h>`, the `drpai_*` ioctls) appear
-in the target sysroot at standard paths.  The SDK's
-`<alp/inference.h>` Yocto backend picks them up through the sysroot
-include path — no per-app pkg-config plumbing needed.
+### Compiling the DRP-AI3 backend in
+
+The compile gate is the CMake option `ALP_SDK_USE_DRPAI_V2N`
+(`src/yocto/CMakeLists.txt`, default OFF).  **Two different mechanisms
+set it, and they behave differently — name which one you mean:**
+
+- **`PACKAGECONFIG[drpai]` in `alp-sdk_0.6.bb` — an explicit opt-in,
+  default OFF.**  Enabling it passes `-DALP_SDK_USE_DRPAI_V2N=ON` *and*
+  adds `drpai lib-tvm` to `DEPENDS` in the same switch, so the recipe
+  can never ask CMake for a backend whose header it did not stage:
+
+  ```
+  PACKAGECONFIG:append:pn-alp-sdk = " drpai"
+  ```
+
+  It is OFF by default because `drpai` + `lib-tvm` only cover
+  `<linux/drpai.h>` and `libtvm_runtime.so`.  The other three libraries
+  the backend links — `mera2_runtime`, `mera2_plan_io`, `drp_tvm_rt` —
+  and `MeraDrpRuntimeWrapper.h` are in no Yocto layer; stage a built
+  RUHMI checkout into the sysroot, or point `ALP_DRPAI_TVM_APPS` at its
+  `apps/` dir and put its `obj/build_runtime/<soc>/lib` on
+  `CMAKE_LIBRARY_PATH`, *before* switching this on.
+- **`scripts/alp_orchestrate/kconfig.py` auto-emits the same
+  `-DALP_SDK_USE_DRPAI_V2N=ON`** from the SoM preset's
+  `capabilities.drp_ai` for every V2N/V2M A55 slice.  That path is
+  silicon-determined — the builder never asked for it — and it does not
+  go through this recipe, so it carries no `DEPENDS` and no staged
+  runtime.
+
+Because of that second path, CMake does **not** treat a missing runtime
+as a hard error.  With `ALP_SDK_USE_DRPAI_V2N=ON` it probes for
+`MeraDrpRuntimeWrapper.h`, `mera2_runtime`, `mera2_plan_io`,
+`drp_tvm_rt` and `tvm_runtime`; if **any** of the five is missing it
+emits a `message(WARNING)` naming what it could not find, leaves
+`inference_drpai.cpp` out of the build, does not define
+`ALP_SDK_USE_DRPAI_V2N`, and lets the dispatcher fall back to its other
+backends.  A build can therefore go green with the DRP-AI3 backend
+silently absent — **read the configure log** rather than assuming the
+flag took effect.
+
+Runtime side, `/dev/drpai0` only appears when `meta-rz-drpai` is in
+`bblayers.conf` (it provides both the driver and the `drpai0` DT label
+that `e1m-v2n-drpai.dtsi` overrides to `status = "okay"`).  Compiling
+the backend in without that layer produces a library that opens nothing.
+
+> **BENCH-UNVERIFIED.** The DRP-AI3 backend has never run on silicon and
+> no full `alp-image-edge` bake has completed with it enabled.
 
 ### Model compilation toolchain (RUHMI / DRP-AI TVM)
 
@@ -281,8 +369,19 @@ DRP-AI TVM) toolchain on the build host — not at image build
 time.  It's a separate Apache-2.0 project at
 <https://github.com/renesas-rz/rzv_drp-ai_tvm>; model authors
 install it on their workstation and ship the compiled output
-as a model asset.  The image build only needs the runtime side,
-which is in `meta-rz-drpai`.
+as a model asset.
+
+A built RUHMI checkout is **also** where the runtime libraries come
+from, so it is not purely a model-author concern: `meta-rz-drpai`
+supplies only `libtvm_runtime.so`, while `mera2_runtime`,
+`mera2_plan_io`, `drp_tvm_rt` and `MeraDrpRuntimeWrapper.h` come out of
+`rzv_drp-ai_tvm` itself (aarch64 objects under
+`obj/build_runtime/<soc>/lib`, header under `apps/`).  Any image build
+that compiles the DRP-AI3 backend in needs that checkout staged into
+the sysroot or reachable via `ALP_DRPAI_TVM_APPS` +
+`CMAKE_LIBRARY_PATH`.  RZ/V2N uses the **v2h** runtime build;
+`obj/build_runtime/v2m` is the older Renesas RZ/V2M SoC and is not this
+one.
 
 ## OTA via Mender (opt-in)
 
@@ -342,9 +441,12 @@ updates ride the `.mender` artefact through the Mender server.
 
 ## Licence
 
-Apache-2.0 (umbrella).  Vendor-licensed components (`dx-rt`,
-`drp-ai-tvm`) follow their upstream licences and are flagged as
-such in the matching recipes' `LICENSE` field.
+Apache-2.0 (umbrella).  Vendor-licensed components follow their
+upstream licences and are flagged as such in the matching recipes'
+`LICENSE` field: `dx-rt` is proprietary (DEEPX EULA); the
+`rzv_drp-ai_tvm` sources are Apache-2.0 but the prebuilt MERA2
+libraries and the Translator are Renesas/EdgeCortix account-gated.
+Neither is vendored in this repo.
 
 ## What's deferred
 
@@ -356,6 +458,12 @@ such in the matching recipes' `LICENSE` field.
   `e1m-aen701-a32`) ships; the carrier DTB + TF-A memory map + full
   image-bake await the maintainer's AEN HW config (the
   `# TBD(alif-hw-config)` overrides in the machine confs).
+- The DRP-AI3 backend (`PACKAGECONFIG[drpai]`) ships OFF and
+  BENCH-UNVERIFIED: never run on DRP-AI silicon, never carried through
+  a completed `alp-image-edge` bake.  Its three MERA2/TVM libraries and
+  `MeraDrpRuntimeWrapper.h` have no Yocto recipe at all — packaging a
+  RUHMI runtime so `PACKAGECONFIG[drpai]` is self-sufficient is open
+  work.
 - `alp-image-edge.bb`'s minimal package set is documentary; the
   v1.0 sysbuild matrix in `docs/test-plan.md` adds the BLE
   provisioning layer + the certificate-pinning post-install hook.
@@ -365,8 +473,15 @@ such in the matching recipes' `LICENSE` field.
 **Partial.** `core-image-minimal` baked on the BSP v6.30 flow (WSL,
 2026-05-26): the carrier DT patches apply and the kernel + carrier dtb
 + image build.  Still pending: a full `alp-image-edge` bake (ROS 2 +
-DEEPX + Mender recipes) and on-bench boot — the v0.7 V2N HiL gate.  The
+DEEPX + Mender recipes) and on-bench boot — the v0.7 V2N HiL gate.  **No
+full `alp-image-edge` bake has ever completed on any host.**  The
 i.MX 93 path remains unbaked.
+
+DRP-AI3 specifically: **never run on silicon.**  The `&drpai0` overlay,
+the `drpai` PACKAGECONFIG and `src/yocto/inference_drpai.cpp` are
+code-complete and compile-gated; nothing in this layer has been observed
+to probe `/dev/drpai0`, load a model, or run an inference on DRP-AI
+hardware.
 
 ## See also
 

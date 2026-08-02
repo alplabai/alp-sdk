@@ -7,6 +7,156 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Added — the RZ/V2N on-die DRP-AI3 NPU backend, opt-in and BENCH-UNVERIFIED (#1145)
+
+`src/yocto/inference_drpai.cpp` existed but could not have worked: it passed
+`LoadModel()` a hard-coded working-memory base of `0x80000000`, which on the
+E1M-V2N SoM is `mmp_reserved` — the mmngr video buffer pool — not the DRP-AI
+carve-out at `0xd0000000`. That is a memory-corruption class bug, not a
+failed-open: the NPU DMAs against that base directly, so a wrong value
+scribbles over the video pipeline silently. `_drpai_mem_start()` now asks the
+driver via `DRPAI_GET_DRPAI_AREA` on a fresh `/dev/drpai0` fd, so the address
+tracks board DT instead of duplicating it. Fresh per call is deliberate: the
+region cursor is per-fd state (`get_drpai_area_count`, zeroed in
+`drpai_open()`) and alternates once `drpai_region2_size != 0`, so only a
+fresh fd reliably yields region 1. It is also not free — `drpai_open()` takes
+a 1000 ms `down_timeout()` and the matching `close()` resets the DRP-AI when
+it is the sole opener — so this runs once at open() time and never per
+inference.
+
+Driver failures are mapped rather than flattened, so a caller can tell "no
+DRP-AI on this board" from "busy, retry": `ETIMEDOUT` → `ALP_ERR_TIMEOUT`
+(the driver semaphore expired), `EINPROGRESS` and `EADDRNOTAVAIL` →
+`ALP_ERR_BUSY` (the V2N shared-memory exclusion lock is contended or already
+held), and everything else → `ALP_ERR_IO` — including the `ENOENT` of an
+absent `/dev/drpai0`, and a successful ioctl reporting a zero-sized area,
+which is treated as a hard failure rather than a DMA at 0.
+
+**The shipped dtb changes only when `meta-rz-drpai` is in `bblayers.conf`**,
+and that conditional is the load-bearing decision in the DT work. The
+pristine linux-renesas tree has no `drpai0` label at all: the node, the
+label and the driver behind them are created by that layer's
+`0001-add-drpai-property-to-devicetree.patch` against `r9a09g056.dtsi`,
+which ships the node `status = "disabled"`. The layer is a soft dep
+(`LAYERRECOMMENDS_alp-sdk`) on purpose — the AEN and NX91 machines have no
+DRP-AI silicon and must not be forced to carry an RZ/V-only vendor layer —
+so an unconditional `&drpai0` override would abort `dtc` for every board
+that includes the SoM dtsi, taking the V2M dtb down with the V2N one.
+
+So `e1m-v2n-som.dtsi` gains an unconditional
+`#include "e1m-v2n-drpai.dtsi"`, and the `linux-renesas` bbappend decides
+what that filename contains: layer present → the real override
+(`memory-region = <&drp_reserved>`,
+`memory-shared-for-drpai-ext-cont = <&shared_drp_reserved>`,
+`status = "okay"`); layer absent → a comment-only stub, and the dtb is
+byte-unchanged from before. The gate is `ALP_DRPAI_LAYER`, read from
+`BBFILE_COLLECTIONS` but reduced to `0`/`1` before it reaches the signature
+(`vardepvalue`), so adding an unrelated layer does not re-run the kernel
+configure; `do_configure:prepend()` branches on that variable rather than on
+the unpacked file, because dropping the layer from `bblayers.conf` does not
+scrub a previously-unpacked `${WORKDIR}`.
+
+The reserved regions themselves were already in `e1m-v2n-som.dtsi` and
+bought nothing on their own — nothing claimed them, `/dev/drpai0` never
+appeared, and every `alp_inference_open(.backend = DRPAI)` failed before it
+reached the runtime. Both memory properties are set, not just
+`memory-region`: `drpai-if.c` defines `ENABLE_DRP_SUPPORT_SHARED_MEMORY`
+inside its `CONFIG_ARCH_R9A09G056` branch, so on V2N a probe without
+`memory-shared-for-drpai-ext-cont` hard-fails `-ENOMEM` instead of degrading
+to a single-region mode.
+
+A build that cannot supply the stack now behaves like one.
+`src/yocto/CMakeLists.txt` used to add `inference_drpai.cpp` and define
+`ALP_SDK_USE_DRPAI_V2N=1` up front and only then `message(WARNING)` about
+missing libraries — which is not a degrade at all, since the TU still
+`#include`s headers that may be absent and still references symbols nothing
+provides. It now probes the whole stack first — `MeraDrpRuntimeWrapper.h`,
+`<linux/drpai.h>` (previously unprobed, and reachable with no PACKAGECONFIG
+in play), `mera2_runtime`, `mera2_plan_io` (which the link needs and the old
+list omitted), `drp_tvm_rt`, `tvm_runtime` — and adds the source and the
+define only if all six resolve.
+
+**What a miss costs depends on who asked for the backend**, and the new
+`ALP_SDK_DRPAI_REQUIRED` option says which. OFF, the default, is the
+silicon-determined path: `scripts/alp_orchestrate/kconfig.py` auto-emits
+`-DALP_SDK_USE_DRPAI_V2N=ON` from `capabilities.drp_ai` for every V2N/V2M
+A55 slice and the builder never asked for DRP-AI at all, so a `FATAL_ERROR`
+there would break every such build on a host without a RUHMI checkout — a
+regression already caught once. That path stays `message(WARNING)`, leaves
+the source out, leaves the define unset, and lets the dispatcher fall back
+to its other backends. ON is the explicit opt-in, and there a miss is a
+`FATAL_ERROR` naming every missing piece, because handing back a
+`libalp_sdk.so` that silently lacks the backend the builder named by hand is
+the wrong answer.
+
+`alp-sdk_0.6.bb` is that opt-in: a new `PACKAGECONFIG[drpai]`, absent from
+the default `PACKAGECONFIG ??= "mqtt security audio"`, which passes
+`-DALP_SDK_USE_DRPAI_V2N=ON -DALP_SDK_DRPAI_REQUIRED=ON` and adds `drpai` +
+`lib-tvm` to `DEPENDS` in one switch, so the flags and the deps cannot drift
+apart. That covers two of the six inputs — `${includedir}/linux/drpai.h` and
+`libtvm_runtime.so`. The switch is **not** self-contained, and the recipe now
+says so: `MeraDrpRuntimeWrapper.h`, `mera2_runtime`, `mera2_plan_io` and
+`drp_tvm_rt` are packaged by no recipe in any layer. They exist only inside a
+built `rzv_drp-ai_tvm` (RUHMI) checkout under `obj/build_runtime/v2h/lib` —
+RZ/V2N consumes the v2h runtime build; `obj/build_runtime/v2m` is the older
+Renesas RZ/V2M and is never ours — and the builder hand-stages them or points
+`ALP_DRPAI_TVM_APPS` + `CMAKE_LIBRARY_PATH` at them. The consequence is
+spelled out in the recipe because it is silent: on the scarthgap poky in use
+(`DISTRO_VERSION 5.0.11`) an unresolvable `DT_NEEDED` is a `bb.note` and
+records no RDEPENDS, so the `file-rdeps` QA check has nothing to fire on, an
+enabled bake goes green, and `ld.so` refuses `libalp_sdk.so` on target. No
+`INSANE_SKIP` was added — none is required today, and one would suppress the
+single diagnostic that exists.
+
+The stale "DRP-AI3 is a `NOT_IMPLEMENTED` stub today — issue #58" claim, and
+its neighbours in the same family, are corrected in all six places that
+carried them: `alp-sdk_0.6.bb`, the four RZ/V machine confs
+(`e1m-v2n101-a55.conf`, `e1m-v2n102-a55.conf`, `e1m-v2m101-a55.conf`,
+`e1m-v2m102-a55.conf`) and `meta-alp-sdk/README.md`. The V2M pair carried a
+different falsehood — that the build "compiles in dispatchers for both" and
+offers DRP-AI3 "as a fallback for ops the NPU doesn't accelerate", when the
+recipe passes no `ALP_SDK_USE_DEEPX_DXM1` either — and `e1m-v2n102-a55.conf`
+cited a `DEPENDS:append:e1m-v2n102` that has never existed in the recipe. The
+README's "DRP-AI is fully covered by `meta-rz-drpai`" is replaced by the four
+things that layer actually supplies (driver, `drpai0` DT label, UAPI header,
+`libtvm_runtime.so`), and its "vendor NPU runtimes are not build-time
+dependencies of the `alp-sdk` library" is scoped: still true for DEEPX, which
+compiles against an in-tree stub header, false for DRP-AI3, the one backend
+with real build-time deps. Every corrected site now names **which** of the two
+enable paths — the `kconfig.py` auto-emit or the recipe PACKAGECONFIG — it
+means.
+
+Honest in the other direction as well: **DRP-AI has never run on silicon, and
+no full `alp-image-edge` bake has ever completed on this host, with or without
+the backend enabled.** Everything above is code-complete and unverified on
+hardware.
+
+### Fixed — `do_generate_toolchain_file`'s stamp outlives the file it writes, so an `alp-sdk` reconfigure could never recover
+
+`cmake.bbclass` sequences its toolchain-file generator as
+`addtask generate_toolchain_file after do_patch before do_configure`, and
+`do_patch` is that task's only dependency. CI bakes this recipe under
+`INHERIT += "externalsrc"`, which `deltask`s `do_patch` — and `deltask` also
+strips the deleted task out of every other task's deps, so
+`do_generate_toolchain_file` keeps its `before do_configure` ordering edge and
+ends up with no task dependencies at all. `WORKDIR` sits in
+`basehash_ignore_vars`, so its stamp becomes a pure function of toolchain
+variables that never change: once stamped, it can never go stale. There is no
+sstate to restore `${WORKDIR}` from either, since `externalsrc` sets
+`SSTATE_SKIP_CREATION = "1"`. `do_configure`, meanwhile, is forced to re-run
+on every source change by `externalsrc`'s `do_configure[file-checksums]`. So
+the moment anything removes `${WORKDIR}/toolchain.cmake` the pair
+desynchronises permanently and every subsequent configure dies with
+`Could not find toolchain file`, then `CMAKE_C_COMPILER not set, after
+EnableLanguage`.
+
+`alp-sdk_0.6.bb` now sets
+`do_configure[prefuncs] += "do_generate_toolchain_file"`, rewriting the file
+immediately before the task that reads it — idempotent, self-healing, and
+poky's own idiom for materialising a `${WORKDIR}` input at configure time
+(`autotools.bbclass`, `waf.bbclass`, `recipes-kernel/perf/perf.bb`).
+Unrelated to the DRP-AI work above; it is simply where it surfaced.
+
 ### Fixed — `test-all.sh` ran 1 of 34 required gate scripts on Windows (#1109)
 
 `scripts/quality_tasks.py --gate-scripts` wrote CRLF line endings on

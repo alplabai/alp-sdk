@@ -5,6 +5,10 @@
 #
 #   e1m-v2n-som.dtsi    on-module V2N: dual GbE PHYs, eMMC, xSPI NOR,
 #                       DRP-AI reserved memory, core rails.
+#   e1m-v2n-drpai.dtsi  the &drpai0 enable that claims that reserved memory.
+#                       Installed ONLY when meta-rz-drpai is in bblayers
+#                       (it creates the label); stubbed out otherwise --
+#                       see the ALP_DRPAI_LAYER block below.
 #   e1m-v2m-deepx.dtsi  V2M delta: DEEPX DXM1 NPU on PCIe + the on-module
 #                       lane mux + NPU reset release (gpio-hogs).
 #   e1m-x-evk.dtsi      E1M-X-EVK carrier: eth/i2c/usb/console enables,
@@ -99,6 +103,40 @@ SRC_URI:append = " \
 # spurious-oc in e1m-x-evk.dtsi.  Cold-boot-verified 2026-06-12 on
 # E1M-V2M101: zero over-current lines.
 
+# DRP-AI3 NPU overlay -- CONDITIONAL on the OPTIONAL meta-rz-drpai layer.
+#
+# e1m-v2n-som.dtsi #includes e1m-v2n-drpai.dtsi unconditionally; this block
+# decides which body that filename gets:
+#
+#   meta-rz-drpai in bblayers.conf -> the real `&drpai0` override
+#   layer absent                   -> a comment-only stub (no node touched)
+#
+# The `drpai0` LABEL does not exist in the pristine linux-renesas tree.  It
+# is CREATED by meta-rz-drpai's
+# recipes-kernel/linux/linux-renesas/0001-add-drpai-property-to-devicetree.patch,
+# which adds `drpai0: drpai@16800000 { ... status = "disabled"; }` to
+# r9a09g056.dtsi; that layer's 0002 patch adds the driver behind it.
+# meta-rz-drpai is only LAYERRECOMMENDS_alp-sdk -- a SOFT dep -- so without
+# this guard a bake that drops it dies in dtc on an unresolved reference,
+# and it takes the V2M dtb down with the V2N one (both board dts include
+# e1m-v2n-som.dtsi).
+#
+# Chosen over promoting meta-rz-drpai to LAYERDEPENDS_alp-sdk: a hard dep
+# would make an RZ/V-only vendor layer mandatory for EVERY meta-alp-sdk
+# consumer, including the e1m-aen801-a32 / e1m-nx9101-a55 machines that have
+# no DRP-AI silicon at all and never build linux-renesas.  This keeps the
+# blast radius inside the one recipe that actually compiles the node.
+#
+# Guarded on the LAYER, not on a MACHINE override, because the layer is what
+# supplies both the label and the driver -- every V2N/V2M SKU carries the
+# same DRP-AI3, so there is no per-SKU axis here.
+ALP_DRPAI_LAYER = "${@bb.utils.contains('BBFILE_COLLECTIONS', 'rz-drpai', '1', '0', d)}"
+# Hash on the resolved 0/1, not on BBFILE_COLLECTIONS: bb.utils.contains makes
+# bitbake add the whole collection list to do_configure's signature otherwise,
+# so adding ANY unrelated layer would re-run the kernel configure.
+ALP_DRPAI_LAYER[vardepvalue] = "${ALP_DRPAI_LAYER}"
+SRC_URI += "${@' file://e1m-v2n-drpai.dtsi' if d.getVar('ALP_DRPAI_LAYER') == '1' else ''}"
+
 # Drop the ALP board dts + dtsi into the kernel DT source dir so they
 # compile next to the upstream Renesas dts (the board dts #include the
 # SoC r9a09g056.dtsi and these dtsi by relative path).
@@ -111,6 +149,26 @@ do_configure:prepend() {
         "${WORKDIR}/e1m-v2n101-x-evk.dts" \
         "${WORKDIR}/e1m-v2m101-x-evk.dts" \
         "${ALP_DTS_DST}/"
+
+    # Branch on the bitbake variable, not on the presence of the unpacked
+    # file: dropping meta-rz-drpai from bblayers.conf does not scrub a
+    # previously-unpacked ${WORKDIR}, so a file test would keep emitting the
+    # real override into a tree that no longer has the label.
+    if [ "${ALP_DRPAI_LAYER}" = "1" ]; then
+        install -m 0644 "${WORKDIR}/e1m-v2n-drpai.dtsi" "${ALP_DTS_DST}/"
+    else
+        printf '%s\n' \
+            '/* meta-rz-drpai not in bblayers.conf: no &drpai0 label exists' \
+            ' * in this kernel tree, so the DRP-AI3 NPU stays unclaimed.' \
+            ' * Add the layer to enable it -- see e1m-v2n-drpai.dtsi in' \
+            ' * meta-alp-sdk/recipes-kernel/linux/linux-renesas/.' \
+            ' */' \
+            > "${ALP_DTS_DST}/e1m-v2n-drpai.dtsi"
+        # A shell redirect takes its mode from the builder's umask, unlike
+        # the `install -m 0644` that lands every other file here; pin it so
+        # both branches drop the same 0644 into the kernel DT source dir.
+        chmod 0644 "${ALP_DTS_DST}/e1m-v2n-drpai.dtsi"
+    fi
 }
 
 # Production kernel-config trims (linux-renesas is kernel-yocto based,
