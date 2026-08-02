@@ -43,9 +43,26 @@ def _portable_functions() -> set[str]:
     return funcs
 
 
-def _configure_and_build(os_backend: str, build_dir: Path) -> Path:
+def _gcc_compatible_generator() -> str | None:
+    """A CMake generator that drives a GCC/Clang-compatible toolchain.
+
+    With no explicit `-G`, CMake defaults to the platform's "native"
+    generator -- on Windows that's MSVC, which rejects the GCC-only
+    `__atomic_*` builtins / `__attribute__` this codebase uses (alp-sdk
+    #1109: `__ATOMIC_RELEASE`/`__attribute__` errors from `cl.exe`). Ninja
+    and Unix Makefiles both drive `cc`, so pin to whichever is on PATH;
+    neither is required on Linux/macOS where the default already matches.
+    """
+    for generator, tool in (("Ninja", "ninja"), ("Unix Makefiles", "make")):
+        if shutil.which(tool):
+            return generator
+    return None
+
+
+def _configure_and_build(os_backend: str, build_dir: Path, generator: str) -> Path:
     subprocess.run(
-        ["cmake", "-B", str(build_dir), "-S", str(REPO), f"-DALP_OS={os_backend}"],
+        ["cmake", "-B", str(build_dir), "-S", str(REPO), "-G", generator,
+         f"-DALP_OS={os_backend}"],
         check=True,
         capture_output=True,
         text=True,
@@ -96,6 +113,17 @@ def main() -> int:
         print(f"error: no portable_api functions found in {CATALOG}", file=sys.stderr)
         return 2
 
+    generator = _gcc_compatible_generator()
+    if generator is None:
+        print(
+            "skipping plain-cmake link-completeness check: neither ninja nor "
+            "make is on PATH, so no GCC-compatible CMake generator is "
+            "available (CMake's platform default may select MSVC, which "
+            "this codebase's GCC/Clang-only builtins don't build under)",
+            file=sys.stderr,
+        )
+        return 0
+
     tmp_owned = args.build_dir is None
     build_root = args.build_dir or Path(tempfile.mkdtemp(prefix="alp-link-complete-"))
     build_root.mkdir(parents=True, exist_ok=True)
@@ -105,7 +133,7 @@ def main() -> int:
         for os_backend in ("baremetal", "yocto"):
             build_dir = build_root / os_backend
             try:
-                archive = _configure_and_build(os_backend, build_dir)
+                archive = _configure_and_build(os_backend, build_dir, generator)
             except subprocess.CalledProcessError as exc:
                 print(f"{os_backend} build FAILED:\n{exc.stdout}\n{exc.stderr}", file=sys.stderr)
                 return 1
