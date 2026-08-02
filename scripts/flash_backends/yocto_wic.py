@@ -104,11 +104,19 @@ def _resolve_dev_root(target: str) -> "tuple[Path | None, str | None]":
        both in the "not beneath /dev/" error text and, far worse, in
        the argv actually handed to ``dd``/``bmaptool``).
     2. Real filesystem resolution (``os.path.realpath``), which
-       additionally chases symlinks -- run only on POSIX hosts
-       (``os.name == "posix"``).  A Windows host has no ``/dev`` tree to
-       chase symlinks through, and its own realpath semantics (drive
-       letters, no symlinks without elevated privilege) don't apply to
-       a Linux device path.
+       additionally chases symlinks -- run only when the target
+       actually EXISTS on this host (``os.path.lexists``), on any OS.
+
+       Existence, not ``os.name``, is the discriminator: ``realpath`` of
+       a path that isn't there tells us nothing and actively harms, because
+       on Windows it drive-anchors the result (``/dev/sdb`` becomes
+       ``D:\\dev\\sdb``) which would then fail the beneath-root check and
+       reject a legitimate target -- including the eMMC ``--dry-run``
+       preview, whose whole point is that the device need not be plugged in
+       yet.  Conversely, gating on ``os.name == "posix"`` failed OPEN: a
+       symlink escape inside a real, existing tree went unresolved on
+       Windows.  ``lexists`` rather than ``exists`` so a dangling symlink is
+       still followed instead of being treated as absent.
 
     Fails closed against traversal and symlink escapes.  Does not
     require the target to exist -- safe to run unconditionally,
@@ -125,7 +133,21 @@ def _resolve_dev_root(target: str) -> "tuple[Path | None, str | None]":
     """
     root = _to_posix(_DEV_ROOT).rstrip("/") or "/"
     normalized = posixpath.normpath(_to_posix(target))
-    if os.name == "posix":
+    # Chase symlinks only when the path actually EXISTS on this host --
+    # not when `os.name == "posix"`.  Keying on the OS was too coarse in
+    # both directions: on Windows it skipped symlink resolution even for
+    # a tree that genuinely exists (so a symlink escape went undetected,
+    # which is failing OPEN), while on any host `os.path.realpath` of a
+    # NON-existent `/dev/sdb` drive-anchors it (`D:\dev\sdb` on Windows),
+    # which would then fail the beneath-root check and reject a perfectly
+    # legitimate target -- breaking the eMMC `--dry-run` preview whose
+    # whole point is that the device need not be plugged in yet.
+    #
+    # Existence is the property that actually decides whether realpath
+    # can tell us anything, and it is host-independent.  `lexists` (not
+    # `exists`) so a symlink pointing at a missing target is still
+    # followed rather than silently treated as absent.
+    if os.path.lexists(target):
         resolved_str = os.path.realpath(target)
     else:
         resolved_str = normalized
