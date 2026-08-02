@@ -39,15 +39,28 @@
 #endif
 
 /*
- * CONFIG_SDHC_DESCRIPTOR_SECTION defaults to "" (no board opts a named
- * region in) -- Z_GENERIC_SECTION("") is a hard link error under
- * -Wl,--fatal-warnings (an orphan section literally named ""), not a
- * silent fallback.  Only apply the section attribute when a board has
- * explicitly opted in via CONFIG_SDHC_DESCRIPTOR_USE_SECTION; otherwise
- * the descriptor table falls back to normal .bss placement, which is
- * always link-safe.
+ * ALP-SDK DELTA (#1097), not upstream: CONFIG_SDHC_DESCRIPTOR_SECTION ships
+ * `default ""`, and Z_GENERIC_SECTION("") is a hard link error under
+ * -Wl,--fatal-warnings -- `orphan section ''` -- not a silent fallback.  Any
+ * board enabling CONFIG_SDHC_DWC without naming a section hit it, so apply
+ * the attribute only when a board has explicitly opted in; otherwise the
+ * table takes normal .bss placement.
+ *
+ * Opting in does not by itself make the name non-empty, so assert it here:
+ * a compile error naming the Kconfig beats `orphan section ''` at link time,
+ * which says nothing about what to set.  sizeof a string literal counts the
+ * NUL, so "" is 1.
+ *
+ * NOTE on placement: .bss on the AEN801 boards resolves to DTCM
+ * (`zephyr,sram = &dtcm`), which is CPU-local.  With
+ * CONFIG_SDHC_DWC_DMA_ADDR_TRANSLATE=n the driver programs that same local
+ * address into DWC_SDHC_ADMA_SA_LOW_R, so a board that actually moves data
+ * over ADMA must revisit both this section and that translate symbol.
  */
 #if defined(CONFIG_SDHC_DESCRIPTOR_USE_SECTION)
+BUILD_ASSERT(sizeof(CONFIG_SDHC_DESCRIPTOR_SECTION) > 1,
+	     "CONFIG_SDHC_DESCRIPTOR_USE_SECTION=y requires a non-empty "
+	     "CONFIG_SDHC_DESCRIPTOR_SECTION naming a real linker section");
 #define SDHC_DWC_ADMA_DESC_SECTION Z_GENERIC_SECTION(CONFIG_SDHC_DESCRIPTOR_SECTION)
 #else
 #define SDHC_DWC_ADMA_DESC_SECTION
@@ -1309,58 +1322,53 @@ static void sdhc_dwc_wakeup_isr(const struct device *dev)
 		(DEVICE_DT_GET(DT_PHANDLE(node_id, prop))), \
 		(NULL))
 
-#define SDHC_DWC_INIT(n) \
-	PINCTRL_DT_INST_DEFINE(n); \
-\
-	static void sdhc_dwc_irq_config_func_##n(const struct device *dev) \
-	{ \
-		IRQ_CONNECT(DT_INST_IRQ_BY_NAME(n, sdmmc, irq), \
-		            DT_INST_IRQ_BY_NAME(n, sdmmc, priority), \
-		            sdhc_dwc_isr, \
-		            DEVICE_DT_INST_GET(n), \
-		            0); \
-		irq_enable(DT_INST_IRQ_BY_NAME(n, sdmmc, irq)); \
-\
-		if (DT_INST_IRQ_HAS_NAME(n, sdmmc_wakeup)) { \
-			IRQ_CONNECT(DT_INST_IRQ_BY_NAME(n, sdmmc_wakeup, irq), \
-			            DT_INST_IRQ_BY_NAME(n, sdmmc_wakeup, priority), \
-			            sdhc_dwc_wakeup_isr, \
-			            DEVICE_DT_INST_GET(n), \
-			            0); \
-			irq_enable(DT_INST_IRQ_BY_NAME(n, sdmmc_wakeup, irq)); \
-		} \
-	} \
-\
-	IF_ENABLED( \
-	    CONFIG_SDHC_DWC_ADMA, \
-	    (static adma2_desc_t \
-	             sdhc_adma_desc_tbl_##n[CONFIG_SDHC_DWC_ADMA_MAX_DESC] SDHC_DWC_ADMA_DESC_SECTION \
-	             __aligned(CONFIG_SDHC_BUFFER_ALIGNMENT);)) \
-	static struct sdhc_dwc_data sdhc_dwc_data_##n = { IF_ENABLED( \
-		CONFIG_SDHC_DWC_ADMA, (.adma_desc = sdhc_adma_desc_tbl_##n, )) }; \
-\
-	static const struct sdhc_dwc_config sdhc_dwc_config_##n = { \
-		.regs            = (struct dwc_sdhc_regs *)DT_INST_REG_ADDR(n), \
-		.pcfg            = PINCTRL_DT_INST_DEV_CONFIG_GET(n), \
-		.irq_config_func = sdhc_dwc_irq_config_func_##n, \
-		.max_bus_freq    = DT_INST_PROP_OR(n, max_bus_freq, 50000000), \
-		.min_bus_freq    = DT_INST_PROP_OR(n, min_bus_freq, 400000), \
-		.power_delay_ms  = DT_INST_PROP_OR(n, power_delay_ms, 500), \
-		.bus_width       = DT_INST_PROP_OR(n, bus_width, 4), \
-		.no_1_8_v        = DT_INST_PROP_OR(n, no_1_8_v, false), \
-		IF_ENABLED(CONFIG_REGULATOR, \
-		           (.vmmc  = SDHC_DWC_REGULATOR_GET_OR_NULL(DT_DRV_INST(n), vmmc_supply), \
-		            .vqmmc = SDHC_DWC_REGULATOR_GET_OR_NULL(DT_DRV_INST(n), vqmmc_supply), )) \
-		    .cd_gpio = SDHC_DWC_GPIO_OR_ZERO(n, cd_gpios), \
-	}; \
-\
-	DEVICE_DT_INST_DEFINE(n, \
-	                      sdhc_dwc_init, \
-	                      NULL, \
-	                      &sdhc_dwc_data_##n, \
-	                      &sdhc_dwc_config_##n, \
-	                      POST_KERNEL, \
-	                      CONFIG_SDHC_INIT_PRIORITY, \
-	                      &sdhc_dwc_api);
+#define SDHC_DWC_INIT(n)                                                           \
+	PINCTRL_DT_INST_DEFINE(n);                                                     \
+                                                                                   \
+	static void sdhc_dwc_irq_config_func_##n(const struct device *dev)            \
+	{                                                                              \
+		IRQ_CONNECT(DT_INST_IRQ_BY_NAME(n, sdmmc, irq),                            \
+			    DT_INST_IRQ_BY_NAME(n, sdmmc, priority),                           \
+			    sdhc_dwc_isr, DEVICE_DT_INST_GET(n), 0);                          \
+		irq_enable(DT_INST_IRQ_BY_NAME(n, sdmmc, irq));                            \
+                                                                                   \
+		if (DT_INST_IRQ_HAS_NAME(n, sdmmc_wakeup)) {                               \
+			IRQ_CONNECT(DT_INST_IRQ_BY_NAME(n, sdmmc_wakeup, irq),                 \
+				    DT_INST_IRQ_BY_NAME(n, sdmmc_wakeup, priority),              \
+				    sdhc_dwc_wakeup_isr, DEVICE_DT_INST_GET(n), 0);              \
+			irq_enable(DT_INST_IRQ_BY_NAME(n, sdmmc_wakeup, irq));                 \
+		}                                                                          \
+	}                                                                              \
+                                                                                   \
+	IF_ENABLED(CONFIG_SDHC_DWC_ADMA, (                                            \
+		static adma2_desc_t sdhc_adma_desc_tbl_##n[CONFIG_SDHC_DWC_ADMA_MAX_DESC]  \
+			SDHC_DWC_ADMA_DESC_SECTION                                    \
+			__aligned(CONFIG_SDHC_BUFFER_ALIGNMENT);                               \
+	))                                                                             \
+	static struct sdhc_dwc_data sdhc_dwc_data_##n = {                             \
+		IF_ENABLED(CONFIG_SDHC_DWC_ADMA, (                                         \
+			.adma_desc = sdhc_adma_desc_tbl_##n,                                   \
+		))                                                                         \
+	};                               \
+                                                                                   \
+	static const struct sdhc_dwc_config sdhc_dwc_config_##n = {                    \
+		.regs = (struct dwc_sdhc_regs *)DT_INST_REG_ADDR(n),                       \
+		.pcfg = PINCTRL_DT_INST_DEV_CONFIG_GET(n),                                 \
+		.irq_config_func = sdhc_dwc_irq_config_func_##n,                           \
+		.max_bus_freq = DT_INST_PROP_OR(n, max_bus_freq, 50000000),                \
+		.min_bus_freq = DT_INST_PROP_OR(n, min_bus_freq, 400000),                  \
+		.power_delay_ms = DT_INST_PROP_OR(n, power_delay_ms, 500),                 \
+		.bus_width = DT_INST_PROP_OR(n, bus_width, 4),                             \
+		.no_1_8_v = DT_INST_PROP_OR(n, no_1_8_v, false),                           \
+		IF_ENABLED(CONFIG_REGULATOR, (                                            \
+			.vmmc = SDHC_DWC_REGULATOR_GET_OR_NULL(DT_DRV_INST(n), vmmc_supply),   \
+			.vqmmc = SDHC_DWC_REGULATOR_GET_OR_NULL(DT_DRV_INST(n), vqmmc_supply),\
+		))                                                                         \
+		.cd_gpio = SDHC_DWC_GPIO_OR_ZERO(n, cd_gpios),                             \
+	};                                                                             \
+                                                                                   \
+	DEVICE_DT_INST_DEFINE(n, sdhc_dwc_init, NULL, &sdhc_dwc_data_##n,             \
+			      &sdhc_dwc_config_##n, POST_KERNEL, CONFIG_SDHC_INIT_PRIORITY,   \
+			      &sdhc_dwc_api);
 
 DT_INST_FOREACH_STATUS_OKAY(SDHC_DWC_INIT)
