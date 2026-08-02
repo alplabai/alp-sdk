@@ -74,8 +74,25 @@ the old shared `0x80010000` window) · reserved `0x80550000` (64 KiB,
 ex-scratch, unused -- OTA deferred) · storage `0x80560000` (128 KiB).
 Each per-core board DT only carries ITS OWN slot0 partition entry (plus
 the shared mcuboot/reserved/storage entries) -- the sibling core's slot0
-is a disjoint physical window this board never touches.  This is also
-the **SoM-maker provisioning model** — Alp Lab pre-provisions this
+is a disjoint physical window this board never touches.
+
+**Why one shared `mcuboot` window is safe even though each core needs a
+differently-linked MCUboot binary:** `metadata/e1m_modules/E1M-AEN801.yaml`
+keeps `mcuboot` as a single 64 KiB region (`accessible_from: [m55_he,
+m55_hp]`), and both boards' generated DTs declare the same
+`boot_partition: partition@0`.  That's benign, not an oversight: MCUboot
+is loaded via the ATOC to ITCM (`loadAddress 0x58000000` for the HE
+provisioning flow above) and never resident at the MRAM `mcuboot`
+address itself -- the `boot_partition` DT node exists to anchor the
+`soc-nv-flash` child's offset-0 origin for `_aen_flash_partitions()`
+(see `scripts/gen_zephyr_board.py`), not to describe where MCUboot's
+code actually executes from.  Each core's own MCUboot build links for
+that core's ITCM regardless of what the shared MRAM `mcuboot` entry says,
+so the two cores never contend for the region.  Add this to the bench
+checklist before flashing HP's MCUboot: confirm the HP MCUboot build
+was linked/signed for `cpu_id M55_HP`, not copied from the HE ATOC.
+
+This is also the **SoM-maker provisioning model** — Alp Lab pre-provisions this
 MCUboot as the factory ATOC, once per module, over the SE-UART:
 
 ```bash

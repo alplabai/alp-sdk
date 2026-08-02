@@ -121,13 +121,22 @@ topology:
 #
 # `mcuboot`/`he_slot0`/`hp_slot0` are marked `cacheable: true` (real XIP
 # code, matches the auto-derived `mram_main` region's default); `reserved`/
-# `storage` are left non-cacheable (NVS/settings-style access).  This
-# matters beyond documentation: an IPC `raw_shmem` carve-out (non-cacheable
-# by default, e.g. examples/multicore/mproc-mailbox/board.yaml) that
-# matches on `accessible_from: [m55_he, m55_hp]` ranks a cacheable-mismatch
-# region behind a matching one (scripts/alp_orchestrate/carveout.py), so it
-# prefers the unused `reserved` headroom over the live `mcuboot`/`storage`
-# regions.
+# `storage` are left non-cacheable (NVS/settings-style access).
+#
+# All five fine-grained regions are MRAM (behind `alif,mram-flash-controller`
+# -- 16-byte program granularity, finite write endurance), not RAM, even
+# though `mcuboot`/`reserved`/`storage` publish a real `base` (needed so
+# scripts/gen_zephyr_board.py's `_aen_flash_partitions()` can lay out the
+# DTS partition table).  A real `base` alone would make them look like
+# legitimate IPC carve-out candidates to scripts/alp_orchestrate/carveout.py
+# resolve_carve_outs() -- an `ipc: raw_shmem`/`rpmsg` entry ranks a
+# cacheable-mismatch region behind a matching one, so a non-cacheable
+# carve-out (e.g. examples/multicore/mproc-mailbox/board.yaml) would prefer
+# the smaller `reserved` region over `storage`/`mcuboot` and silently place
+# a shared-memory ring inside non-volatile flash.  `carveout: false` marks
+# all five as ineligible for that allocator (schema field, see
+# metadata/schemas/som-preset-v1.schema.json `memory_region.carveout`)
+# while leaving their `base` available for the DTS/partition-table use above.
 #
 # `mram_main` is kept alongside the five fine-grained regions above,
 # `base: TBD` and unchanged from the auto-derived shape it replaces
@@ -138,16 +147,15 @@ topology:
 # sysbuild/aen boot chain.  Since `resolve_storage_partitions()` only reads
 # `size_kib` (never `base`) it keeps resolving; `base: TBD` deliberately
 # keeps it BLOCKED for `ipc:` carve-out allocation (which does read `base`)
-# so a raw_shmem/rpmsg entry can't silently land inside a real mcuboot/
-# slot0/reserved/storage region through this coarse alias -- giving it a
-# real base would let the carve-out allocator pick any address in the
-# full 5632 KiB span, including inside hp_slot0's live application code.
+# too, belt-and-suspenders alongside `carveout: false` above.  Bottom line:
+# every `ipc:` entry on this SoM stays `status: blocked` until a real SRAM
+# region with a real `base` exists in this table.
 memory_map:
-  - { name: mcuboot,   base: 0x80000000, size_kib: 64,   accessible_from: [m55_he, m55_hp], cacheable: true }
-  - { name: he_slot0,  base: 0x80010000, size_kib: 2688, accessible_from: [m55_he],          cacheable: true }
-  - { name: hp_slot0,  base: 0x802b0000, size_kib: 2688, accessible_from: [m55_hp],          cacheable: true }
-  - { name: reserved,  base: 0x80550000, size_kib: 64,   accessible_from: [m55_he, m55_hp] }
-  - { name: storage,   base: 0x80560000, size_kib: 128,  accessible_from: [m55_he, m55_hp] }
+  - { name: mcuboot,   base: 0x80000000, size_kib: 64,   accessible_from: [m55_he, m55_hp], cacheable: true, carveout: false }
+  - { name: he_slot0,  base: 0x80010000, size_kib: 2688, accessible_from: [m55_he],          cacheable: true, carveout: false }
+  - { name: hp_slot0,  base: 0x802b0000, size_kib: 2688, accessible_from: [m55_hp],          cacheable: true, carveout: false }
+  - { name: reserved,  base: 0x80550000, size_kib: 64,   accessible_from: [m55_he, m55_hp],                  carveout: false }
+  - { name: storage,   base: 0x80560000, size_kib: 128,  accessible_from: [m55_he, m55_hp],                  carveout: false }
   - { name: mram_main, base: "TBD",      size_kib: 5632, accessible_from: [a32_cluster, m55_he, m55_hp], cacheable: true }
 
 # Inter-core mailbox IP: ARM MHUv2.  Confirmed via the alifsemi/zephyr_alif

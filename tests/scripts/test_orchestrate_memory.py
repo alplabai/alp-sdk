@@ -175,26 +175,27 @@ def test_resolve_carve_outs_blocks_on_unmapped_base(
     assert "HW-mapped" in entry.reason
 
 
-def test_resolve_carve_outs_aen801_resolves_after_1069_memory_map(
+def test_resolve_carve_outs_aen801_stays_blocked_after_1069_memory_map(
     tmp_path: Path,
 ) -> None:
     """#1069 gave E1M-AEN801 a real `memory_map:` (mcuboot/he_slot0/
-    hp_slot0/reserved/storage). An m55_hp+m55_he rpmsg carve-out is now
-    resolvable -- both-core-accessible regions (mcuboot/reserved/storage)
-    have real bases -- and lands in `reserved` (the ex-scratch headroom,
-    unused since OTA is deferred), NOT in the live `mcuboot`/`storage`
-    regions: `mcuboot` is marked cacheable (mismatches this entry's
-    default non-cacheable preference, see carveout.py's ranking) and
-    `reserved` (64 KiB) is smaller than `storage` (128 KiB)."""
+    hp_slot0/reserved/storage/mram_main), but an m55_hp+m55_he rpmsg
+    carve-out MUST still land `status: blocked`: the five fine-grained
+    regions are MRAM (flash-class), not RAM, and are marked
+    `carveout: false` so resolve_carve_outs() can't silently place a
+    shared-memory ring inside non-volatile flash just because the region
+    has a real `base` (needed only for the board generator's DTS
+    partition table, see metadata/e1m_modules/E1M-AEN801.yaml). The only
+    other both-core-accessible region, `mram_main`, deliberately keeps
+    `base: TBD`, so the entry blocks there instead."""
     path = _write_board(tmp_path, AEN801_MAPPED)
     project = load_board_yaml(path)
     resolved = resolve_carve_outs(project)
     assert len(resolved) == 1
     entry = resolved[0]
-    assert entry.status == "ok"
-    assert entry.region == "reserved"
-    assert entry.base == 0x80550000
-    assert entry.size == 64 * 1024
+    assert entry.status == "blocked"
+    assert entry.reason is not None
+    assert "mram_main" in entry.reason
 
 
 # ---------------------------------------------------------------------

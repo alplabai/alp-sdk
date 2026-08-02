@@ -5,14 +5,22 @@
 
 Every AEN801 flash path assembles a signed ATOC config (a JSON object of
 ``{entry_name: {cpu_id, [mramAddress|loadAddress], flags, ...}}``) and
-hands it to SETOOLS' ``app-gen-toc``. Two independent tools build that
-config -- ``scripts/west_commands/runners/alif_flash.py`` (single-entry,
-``west flash``) and ``scripts/bench/aen/flash-run-dualcore.sh``
-(two-entry, the bench dual-core recipe) -- and before #1069 both trusted
-a single shared ``mramAddress`` constant that was actually the same
-address for both M55 cores (the bug this issue fixes). This module is
-the ONE place that validates an assembled ATOC config before
-``app-gen-toc`` runs, so the two callers can't drift back apart.
+hands it to SETOOLS' ``app-gen-toc``. Several independent tools build
+that config (``grep -rln app-gen-toc scripts/`` finds every call site);
+before #1069 the ones that stage an ``mramAddress`` (slot0-XIP) entry --
+``scripts/west_commands/runners/alif_flash.py`` (single-entry, ``west
+flash``) and ``scripts/bench/aen/flash-run-dualcore.sh`` (two-entry, the
+bench dual-core recipe) -- trusted a single shared ``mramAddress``
+constant that was actually the same address for both M55 cores (the bug
+this issue fixes). This module is the ONE place that validates an
+assembled ATOC config before ``app-gen-toc`` runs, so those callers
+can't drift back apart. ``scripts/bench/aen/flash-jlink-mramxip.sh``
+(Flow D, HE-only slot0-XIP) also calls it as of the #1100 review fix.
+The remaining call sites (``flash-jlink.sh``, ``flash-jlink-hp.sh``,
+``flash-run.sh``, ``flash-update-log-dual.sh``,
+``flash-update-log-firewall-probe.sh``) stage ``loadAddress`` (ITCM)
+entries only -- this guard is a deliberate no-op for those (see
+``validate_atoc_entries`` below), so they don't call it.
 
 Per-core App-MRAM slot0 windows (disjoint since #1069) -- mirrors the
 `memory_map:` block in metadata/e1m_modules/E1M-AEN801.yaml. These are

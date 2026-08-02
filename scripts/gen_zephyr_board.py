@@ -517,7 +517,7 @@ def _aen_ethos_u(soc_spec: dict[str, Any]) -> tuple[str, str] | None:
     return None
 
 
-def _aen_defconfig(uart_node: str) -> str:
+def _aen_defconfig(uart_node: str, slot0_base: int = 0x80010000) -> str:
     # CONFIG_USE_DT_CODE_PARTITION is the Kconfig half of the very
     # `zephyr,code-partition = &slot0_partition;` chosen that _aen_dts()
     # (below) lays down for every board this function serves -- the two are
@@ -545,7 +545,7 @@ def _aen_defconfig(uart_node: str) -> str:
         "CONFIG_HW_STACK_PROTECTION=y\n"
         "\n"
         "# Link the image into the board's `zephyr,code-partition`\n"
-        "# (slot0_partition, MRAM 0x80010000) instead of the MRAM base --\n"
+        f"# (slot0_partition, MRAM 0x{slot0_base:08x}) instead of the MRAM base --\n"
         "# without it the reset vector lands at 0x8000xxxx and no AEN flash\n"
         "# flow accepts the image.  Flow C (ITCM RAM-run) overrides it via\n"
         "# scripts/bench/aen/aen-flowc-itcm.conf.\n"
@@ -937,13 +937,21 @@ def emit_zephyr_board(
         rx_row, tx_row = _aen_console_pinmux_rows(metadata_root)
         role = core_id.split("_")[-1]
         uart_node = _uart_node_label(rx_row)
+        memory_map = sku_preset.get("memory_map")
+        # This role's own disjoint slot0 base (#1069), falling back to the
+        # stock symmetric-layout address (0x80010000, same for every
+        # single-M55 AEN SKU and for AEN801 boards with no memory_map
+        # override) when this SoM declares no per-role `<role>_slot0`
+        # region -- see _aen_role_slot0_map / _aen_flash_partitions.
+        slot0_region = _aen_role_slot0_map(memory_map, role)
+        slot0_base = slot0_region["base"] if slot0_region else 0x80010000
         files[f"{dir_name}/{dir_name}-pinctrl.dtsi"] = _aen_pinctrl_dtsi(
             role, sku, rx_row, tx_row)
-        files[f"{dir_name}/{basename}_defconfig"] = _aen_defconfig(uart_node)
+        files[f"{dir_name}/{basename}_defconfig"] = _aen_defconfig(uart_node, slot0_base)
         files[f"{dir_name}/Kconfig.defconfig"] = _aen_kconfig_defconfig(dir_name, role)
         files[f"{dir_name}/{basename}.dts"] = _aen_dts(
             sku, core_id, soc_spec, variant, dir_name, basename, rx_row, tx_row,
-            _aen_ethos_u(soc_spec), sku_preset.get("memory_map"))
+            _aen_ethos_u(soc_spec), memory_map)
 
     # `_load_soc_spec()` above already raised ZephyrBoardEmitError if
     # `sku_preset["silicon"]` didn't resolve, so `soc_path` can't be None

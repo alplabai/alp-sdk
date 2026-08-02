@@ -54,18 +54,29 @@ proven is lost):
   or an entry past System MRAM (`0x80580000`). `loadAddress` (ITCM) entries
   — what every current AEN dual-core *example* actually stages — are left
   alone; they were already disjoint by construction.
+  `scripts/bench/aen/flash-jlink-mramxip.sh` (Flow D, HE-only slot0-XIP)
+  now calls the guard too, and its reset-vector sanity check gives an
+  explicit diagnostic for an HP-linked binary instead of a generic
+  "drop the itcm overlay" message.
 - **`examples/multicore/mproc-mailbox` / `examples/multicore/rpmsg-aen`
-  `board.yaml`** IPC carve-out comments updated: `mproc-mailbox`'s
-  `raw_shmem` entry now resolves (into the unused `reserved` region)
-  instead of landing `status: blocked`, now that E1M-AEN801 has a real
-  `memory_map:`; `rpmsg-aen`'s `a32_cluster`-endpointed entry stays blocked
-  on purpose (deliberately kept `base: TBD` — see the `mram_main` region's
-  own comment in `E1M-AEN801.yaml` — so a coarse whole-MRAM carve-out can't
-  silently land inside a real mcuboot/slot0/reserved/storage region).
+  `board.yaml`** IPC carve-out comments updated. Both stay
+  `status: blocked` on E1M-AEN801: the five fine-grained MRAM regions
+  (`mcuboot`/`he_slot0`/`hp_slot0`/`reserved`/`storage`) are flash-class,
+  not RAM, so `metadata/schemas/som-preset-v1.schema.json` gains a
+  `memory_region.carveout` field and all five are marked
+  `carveout: false`, keeping `scripts/alp_orchestrate/carveout.py`
+  `resolve_carve_outs()` from ever placing a shared-memory ring inside
+  MRAM even though those regions now publish a real `base` (needed only
+  for `_aen_flash_partitions()`'s DTS partition table). `mproc-mailbox`'s
+  `raw_shmem` entry and `rpmsg-aen`'s `a32_cluster`-endpointed entry both
+  block on the remaining candidate, `mram_main`, whose `base: TBD` is
+  deliberate (see its comment in `E1M-AEN801.yaml`) so a coarse
+  whole-MRAM carve-out can't silently land inside a real
+  mcuboot/slot0/reserved/storage region either.
   `tests/fixtures/emit-snapshots/{mproc-mailbox,rpmsg-aen}.*.snap`
   regenerated to match.
 
-**Two known limits, not closed by this fix:** a sequential single-core
+**Known limits, not closed by this fix:** a sequential single-core
 `west flash` writes a whole fresh TOC each run, so the previous core's
 entry is invisible to the assembly-time guard by the time the second
 `west flash` runs — catching that needs a pre-burn TOC read-back over the

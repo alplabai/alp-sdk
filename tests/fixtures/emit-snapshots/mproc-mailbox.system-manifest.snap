@@ -40,14 +40,11 @@ ipc:
   endpoints:
   - m55_hp
   - m55_he
-  carve_out_base: '0x8055f000'
-  carve_out_size: '0x00001000'
-  carve_out_region: reserved
-  cacheable: false
-  rpmsg_endpoint_ids:
-    src: '0x000004a9'
-    dst: '0x000004aa'
-  mailbox_channel: 0
+  status: blocked
+  reason: memory_map.base is TBD for region 'mram_main' in SoM E1M-AEN801; this SoM
+    hasn't been HW-mapped yet so IPC carve-outs cannot be allocated.  Add a `memory_map:`
+    block to metadata/e1m_modules/E1M-AEN801.yaml (or per-region `base`) or remove
+    the matching ipc entry from board.yaml.
 helper_mcus:
 - name: cc3501e_otp
   chip: cc3501e
