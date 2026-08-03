@@ -52,6 +52,33 @@ the NULL-handle guard, identity restoration after filter drift, and
 post-reset filter usability (a reset filter converges identically to a
 freshly-initialised one under the same input) (#1138).
 
+**Round 2 (PR #1177 review):** each round-1 fix above was correct where
+applied and absent one site over.
+
+- `scripts/test-all.sh`'s `stage_generated_files` — the LOCAL mirror of
+  `pr-generated-files.yml`'s `git diff --exit-code` step — had the exact
+  same blind-to-a-new-untracked-file shape the CI copy was fixed for, but
+  never got its own `git add -N`. Since local-first CI is this repo's
+  documented flow, the sink developers actually hit stayed blind: proven
+  by `printf 'x\n' > include/alp/boards/alp_untracked_routes.h` then the
+  old `git diff --quiet …` → rc=0 (green over a missing generated file).
+  Added the same `git add -N` before the diff, and reconciled its path
+  list against CI's (it was missing `metadata/error-catalog.json` and
+  `docs/peripheral-support-matrix.md`).
+- `scripts/gen_board_header.py`'s slug-collision guard only fired when
+  `slug_owners[slug] != name` — so the more probable instance of the
+  clobber it names, two board YAMLs with the **identical** `name:` (a
+  preset copied and never renamed), stayed silent: `wrote
+  .../alp_e1m_x_evk_routes.h` printed twice, rc=0. Reworked to key on the
+  slug alone and report both source YAML *paths*, not both names.
+- `scripts/strict_loaders.py`'s duplicate-key scan ran on
+  `flatten_mapping()`'s OUTPUT, so a spec-legal `<<: *anchor` merge-key
+  override (an explicit sibling key overriding the anchor's value for the
+  same key) was misreported as a duplicate. The scan now runs on the
+  node's own explicit pairs before `flatten_mapping()` splices the anchor
+  in. Latent only — no committed `metadata/**` document uses YAML anchors
+  today — fixed ahead of the first one that does.
+
 ### Fixed — `firmware-update-log` failed to link on both AEN801 board targets (#1101)
 
 `zephyr/soc-bridge/alif/mpu_regions_e8.c` unconditionally reads

@@ -389,3 +389,35 @@ def test_main_rejects_slug_collision(gen_module, tmp_path, monkeypatch):
 
     rc = gen_module.main()
     assert rc == 1
+
+
+def test_main_rejects_identical_board_names(gen_module, tmp_path, monkeypatch):
+    """#1128(c) follow-up: the ORIGINAL guard only fired when the two
+    slug owners' `name:` strings differed (`slug_owners[slug] != name`),
+    so the more probable instance of the clobber it names -- a preset
+    YAML copy-pasted to a new file and the `name:` field never edited --
+    stayed silent: both boards' `name:` is byte-identical, so the
+    inequality check never tripped and the second write clobbered the
+    first with rc=0. The guard must key on the slug alone."""
+    boards_dir = tmp_path / "boards"
+    boards_dir.mkdir()
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    (boards_dir / "a.yaml").write_text(
+        "name: SAME-NAME\n"
+        "e1m_routes:\n"
+        "  gpio:\n"
+        "    - {e1m: E1M_GPIO_IO0, macro: A_PIN, doc: t}\n"
+    )
+    (boards_dir / "b.yaml").write_text(
+        "name: SAME-NAME\n"
+        "e1m_routes:\n"
+        "  gpio:\n"
+        "    - {e1m: E1M_GPIO_IO1, macro: B_PIN, doc: t}\n"
+    )
+    monkeypatch.setattr(gen_module, "BOARDS_DIR", boards_dir)
+    monkeypatch.setattr(gen_module, "OUT_DIR", out_dir)
+    monkeypatch.setattr(gen_module, "REPO", tmp_path)
+
+    rc = gen_module.main()
+    assert rc == 1

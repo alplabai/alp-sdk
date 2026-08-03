@@ -30,6 +30,23 @@ def test_strict_yaml_load_error_includes_source():
         strict_yaml_load("som: a\nsom: b\n", source="board.yaml")
 
 
+def test_strict_yaml_load_accepts_merge_key_override():
+    """A `<<: *anchor` merge key's value merged with an explicit sibling
+    key of the same name is spec-legal YAML -- the explicit key wins.
+    `flatten_mapping()` splices the anchor's pairs in ahead of the node's
+    own explicit pairs, so a naive "have I seen this key" scan (run
+    AFTER flattening) sees the same key twice and misreports a legal
+    override as a duplicate. The duplicate scan must run on the node's
+    own pairs BEFORE flatten_mapping() merges the anchor in."""
+    doc = strict_yaml_load("base: &b\n  a: 1\nderived:\n  <<: *b\n  a: 9\n")
+    assert doc == {"base": {"a": 1}, "derived": {"a": 9}}
+
+
+def test_strict_yaml_load_still_rejects_duplicate_alongside_merge_key():
+    with pytest.raises(DuplicateKeyError, match="duplicate key 'a'"):
+        strict_yaml_load("base: &b\n  a: 1\nderived:\n  <<: *b\n  a: 9\n  a: 10\n")
+
+
 def test_strict_json_loads_accepts_normal_document():
     assert strict_json_loads('{"som": "a", "preset": "b"}') == {
         "som": "a",

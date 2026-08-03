@@ -290,12 +290,14 @@ def main() -> int:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     written = 0
     expected: set[Path] = set()
-    # slug -> board `name:` that claimed it.  `_board_slug()` lossily
-    # folds case + `-`/`_`, so two schema-legal distinct names (e.g.
-    # `FOO-BAR` and `foo_bar`) can collapse onto the same output path;
-    # without this check the second write would silently clobber the
-    # first with no error (#1128).
-    slug_owners: dict[str, str] = {}
+    # slug -> source YAML path that claimed it.  Keyed on the slug ALONE:
+    # two board YAMLs with the identical `name:` (a preset copy-pasted
+    # and never renamed -- the realistic path) collapse onto the same
+    # slug just as surely as two distinct names that `_board_slug()`'s
+    # lossy case/`-`/`_` fold happens to collide on (e.g. `FOO-BAR` and
+    # `foo_bar`); without this check the second write would silently
+    # clobber the first with no error (#1128).
+    slug_owners: dict[str, Path] = {}
     for preset_path in sorted(BOARDS_DIR.glob("*.yaml")):
         doc = yaml.safe_load(preset_path.read_text(encoding="utf-8"))
         if not isinstance(doc, dict):
@@ -306,17 +308,18 @@ def main() -> int:
             continue
 
         slug = _board_slug(name)
-        if slug in slug_owners and slug_owners[slug] != name:
+        if slug in slug_owners:
             print(
-                f"gen_board_header: board names {slug_owners[slug]!r} and "
-                f"{name!r} both slugify to {slug!r} -- "
+                f"gen_board_header: {slug_owners[slug].relative_to(REPO)} "
+                f"and {preset_path.relative_to(REPO)} both slugify to "
+                f"{slug!r} -- "
                 f"{OUT_DIR.relative_to(REPO)}/alp_{slug}_routes.h would be "
                 f"silently overwritten by whichever board is processed "
                 f"last.  Rename one of them.",
                 file=sys.stderr,
             )
             return 1
-        slug_owners[slug] = name
+        slug_owners[slug] = preset_path
 
         out_path = OUT_DIR / f"alp_{slug}_routes.h"
         out_path.write_text(out_text, encoding="utf-8", newline="")
