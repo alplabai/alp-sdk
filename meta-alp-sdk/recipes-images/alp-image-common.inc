@@ -28,6 +28,40 @@ IMAGE_INSTALL = " \
     alp-watchdog-policy            \
 "
 
+# meta-rz-drpai vendor payload (DRP-AI3 NPU userspace runtime + kernel
+# driver): lib-tvm + kernel-module-mmngr. Unlike meta-rz-codecs /
+# meta-rz-opencva (below in alp-image-edge.bb / alp-image-prod.bb), this
+# is NOT camera/display-tied -- DRP-AI3 is the SoC's core NPU
+# accelerator, reachable through <alp/inference.h> independent of any
+# camera or display pipeline, so it belongs alongside alp-sdk in the
+# core runtime every Alp image ships (this file's own header already
+# promised as much: "the Alp SDK + the silicon's NPU runtime ...
+# machine-gated"). Wired here ONCE rather than repeated in
+# alp-image-base.bb / alp-image-prod.bb / alp-image-edge.bb (issue
+# #1176: the vendor payload was previously wired into alp-image-edge.bb
+# only, silently omitted from base/prod).
+#
+# mmngr-user-module / mmngrbuf-user-module ride in via lib-tvm's own
+# RDEPENDS. Deliberately NOT ported from meta-rz-drpai's own vendor
+# core-image-%.bbappend: its opencv/python3/sudo stack (serves the
+# vendor's Python demos; the Alp path is C through <alp/inference.h>),
+# its update_issue() ROOTFS_POSTPROCESS_COMMAND (case-matches only
+# MACHINE rzv2n-evk/rzv2n-dev, so it would append empty BOARD:/LSI:
+# lines to /etc/issue on an e1m-* machine), and its enable_sudo() (a
+# NOPASSWD sudoers entry for the weston user -- a security-posture
+# decision not to inherit silently, least of all into alp-image-base).
+#
+# Gated on the meta-rz-drpai LAYER being present (soft
+# LAYERRECOMMENDS_alp-sdk dep), never on MACHINE: naming the package
+# unconditionally would break recipe parsing for every consumer that
+# legitimately drops the RZ/V feature layers (e.g. the AEN and NX91
+# machines, which never build linux-renesas at all).
+ALP_RZ_DRPAI_INSTALL = "${@bb.utils.contains('BBFILE_COLLECTIONS', 'rz-drpai', \
+    'lib-tvm kernel-module-mmngr', '', d)}"
+ALP_RZ_DRPAI_INSTALL[vardepvalue] = "${ALP_RZ_DRPAI_INSTALL}"
+
+IMAGE_INSTALL += " ${ALP_RZ_DRPAI_INSTALL}"
+
 # Composable feature groups -- the customer-facing composition surface. Each
 # maps to an IMAGE_FEATURES token so an image pulls only what it needs:
 #   IMAGE_FEATURES += "alp-camera"   -> libcamera + GStreamer
