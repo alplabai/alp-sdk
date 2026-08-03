@@ -53,6 +53,78 @@ returned `ALP_OK` with PORF still latched. The write's status is now
 propagated; a failure returns early, leaving the instance uninitialised
 (#1135).
 
+### Fixed — five "gate exists but cannot fail" defects across dev-review (#1127, #1128, #1129, #1130, #1138)
+
+`yaml.safe_load`/`json.loads` silently keep only the LAST value of a
+duplicated mapping key with no error — a duplicated `som:`/route key in a
+hand-edited `board.yaml` (or a SoM/chip/SoC/library manifest) dropped
+hardware configuration invisibly in a diff. Added `scripts/strict_loaders.py`
+(a duplicate-key-rejecting YAML loader + a `json.loads(object_pairs_hook=…)`
+wrapper) and routed every metadata ingestion boundary through it:
+`scripts/alp_cli/yaml_pos.py`'s position-aware mapping constructor,
+`scripts/alp_orchestrate/loader.py`'s `_load_yaml`/`_load_json` (+ the
+library-alias table load), and every board/SoM/hw-revisions/chip/block/
+library/SoC document load in `scripts/validate_metadata.py` (#1127).
+
+`pr-generated-files.yml`'s `git diff --exit-code` step is blind to a
+brand-new untracked file — a newly-needed generated board header could
+land un-committed and the gate would still report green. The step now
+`git add -N`s (intent-to-add) every generated path before diffing, so a
+new file shows up as an addition. `scripts/gen_board_header.py` also
+gained a reconciliation pass that deletes an orphaned
+`alp_<slug>_routes.h` whose source board YAML was renamed/deleted, and a
+slug-collision guard that fails closed when two distinct board `name:`s
+fold onto the same `_board_slug()` output path instead of silently
+letting the second write clobber the first (#1128).
+
+`check_example_portability.py`'s `check_no_zephyr_driver_includes()`
+allowlist check ran before the per-line scan, so allowlisting ONE
+`zephyr/drivers/*` include for an example silently exempted that example
+from every OTHER driver include too. `_ZEPHYR_DRIVER_INCLUDE_ALLOWLIST`
+is now keyed per `(example_key, driver)` and the allowlist check moved
+inside the loop (#1129).
+
+`check_supported_board_testcases()` joined every scalar string anywhere
+in `testcase.yaml` (descriptions, tags, names included) and did a bare
+substring check for `ALP_BOARD_<NAME>` — a `description:` merely
+mentioning the define satisfied `supported_boards:` with no real build
+scenario. It now parses the `tests:` scenario structure and checks only
+`extra_configs`/`extra_args` for an exact `-D<define>` compiler flag
+(#1130).
+
+`alp_ahrs_reset()` was the last untested portable-core API
+(`check_test_coverage.py --fail-on-gaps` HARD FAIL). Added ztests for
+the NULL-handle guard, identity restoration after filter drift, and
+post-reset filter usability (a reset filter converges identically to a
+freshly-initialised one under the same input) (#1138).
+
+**Round 2 (PR #1177 review):** each round-1 fix above was correct where
+applied and absent one site over.
+
+- `scripts/test-all.sh`'s `stage_generated_files` — the LOCAL mirror of
+  `pr-generated-files.yml`'s `git diff --exit-code` step — had the exact
+  same blind-to-a-new-untracked-file shape the CI copy was fixed for, but
+  never got its own `git add -N`. Since local-first CI is this repo's
+  documented flow, the sink developers actually hit stayed blind: proven
+  by `printf 'x\n' > include/alp/boards/alp_untracked_routes.h` then the
+  old `git diff --quiet …` → rc=0 (green over a missing generated file).
+  Added the same `git add -N` before the diff, and reconciled its path
+  list against CI's (it was missing `metadata/error-catalog.json` and
+  `docs/peripheral-support-matrix.md`).
+- `scripts/gen_board_header.py`'s slug-collision guard only fired when
+  `slug_owners[slug] != name` — so the more probable instance of the
+  clobber it names, two board YAMLs with the **identical** `name:` (a
+  preset copied and never renamed), stayed silent: `wrote
+  .../alp_e1m_x_evk_routes.h` printed twice, rc=0. Reworked to key on the
+  slug alone and report both source YAML *paths*, not both names.
+- `scripts/strict_loaders.py`'s duplicate-key scan ran on
+  `flatten_mapping()`'s OUTPUT, so a spec-legal `<<: *anchor` merge-key
+  override (an explicit sibling key overriding the anchor's value for the
+  same key) was misreported as a duplicate. The scan now runs on the
+  node's own explicit pairs before `flatten_mapping()` splices the anchor
+  in. Latent only — no committed `metadata/**` document uses YAML anchors
+  today — fixed ahead of the first one that does.
+
 ### Fixed — two path-traversal bugs: `tan model build` and untrusted template catalogs (#1125, #1126)
 
 `tan model build` (`scripts/alp_model/build.py`) wrote its packaged model to

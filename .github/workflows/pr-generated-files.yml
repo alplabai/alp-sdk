@@ -218,6 +218,24 @@ jobs:
           ABI_VERSION: ${{ steps.abi.outputs.version }}
           ABI_SNAPSHOT: ${{ steps.abi.outputs.snapshot }}
         run: |
+          # `git diff` alone is blind to a brand-new file the regen step
+          # just created (a not-yet-tracked board header, an added
+          # pinmux table, ...) -- `git status --porcelain` would show it
+          # as `??`, but a plain diff -- exit-code reports 0 and the gate
+          # stays green even though a newly-needed generated file is
+          # missing from the PR (#1128a).  `git add -N` (intent-to-add)
+          # marks each path as tracked-but-empty so the diff below picks
+          # up new files as additions too, without staging real content.
+          git add -N -- include/alp/soc_caps.h "$ABI_SNAPSHOT" \
+                        include/alp/cap.h \
+                        src/cap.c \
+                        src/status_strings.c \
+                        include/alp/boards/ \
+                        metadata/pinmux/ \
+                        metadata/catalog.json \
+                        metadata/error-catalog.json \
+                        docs/peripheral-support-matrix.md \
+                        docs/portability-matrix.md
           # Allow the snapshot's "generated" date to differ; everything
           # else must match.
           if ! git diff --exit-code \

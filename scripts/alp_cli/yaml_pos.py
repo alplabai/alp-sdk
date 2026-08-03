@@ -19,11 +19,38 @@ class _PosLoader(yaml.SafeLoader):
 
 
 def _construct_mapping(loader: _PosLoader, node: yaml.MappingNode) -> dict[str, Any]:
+    # Detect duplicates against the node's OWN keys, BEFORE flatten_mapping().
+    #
+    # flatten_mapping() splices the merged mapping's keys into node.value, so
+    # a spec-legal override of a merged key --
+    #
+    #     base: &b {a: 1}
+    #     derived: {<<: *b, a: 9}
+    #
+    # -- would appear as `a` twice afterwards and be rejected. Overriding a
+    # merged key is the entire point of the merge construct (YAML 1.1 merge:
+    # the explicit key wins), and `dev` accepts it, so rejecting it here would
+    # refuse customer board.yaml files that build fine today.
+    seen: set[Any] = set()
+    for key_node, _value_node in node.value:
+        if key_node.tag == "tag:yaml.org,2002:merge":
+            continue
+        key = loader.construct_object(key_node, deep=True)
+        if key in seen:
+            mark = key_node.start_mark
+            raise ValueError(
+                f"duplicate key {key!r} at line {mark.line + 1}, "
+                f"column {mark.column + 1}"
+            )
+        seen.add(key)
+
     loader.flatten_mapping(node)
     mapping: dict[str, Any] = {}
     keys: dict[str, dict[str, int]] = {}
     for key_node, value_node in node.value:
         key = loader.construct_object(key_node, deep=True)
+        # Last-wins is correct AFTER flattening: PyYAML prepends the merged
+        # keys, so an explicit key encountered later overrides the merged one.
         value = loader.construct_object(value_node, deep=True)
         mapping[key] = value
         keys[key] = {

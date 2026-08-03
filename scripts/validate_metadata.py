@@ -37,6 +37,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 from alp_project_loader import _sku_family, resolve_soc_path  # noqa: E402
 from alp_orchestrate.sdk_compat import assert_exclusion_still_not_buildable  # noqa: E402
+from strict_loaders import strict_json_loads, strict_yaml_load  # noqa: E402
 
 # Power/ground nets are allowed as pin signals without a signals[] entry.
 _POWER_NETS = {"VDD", "VDDIO", "VCC", "GND", "VSS", "AVDD", "DVDD"}
@@ -157,7 +158,7 @@ def _check_silicon_capability_restrictions(som_files) -> list:
     for path in som_files:
         rel = path.relative_to(REPO).as_posix()
         try:
-            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
         except Exception:
             continue  # parse errors already reported by the schema pass
         if not isinstance(doc, dict):
@@ -297,7 +298,7 @@ def _check_chip_semantics(chip_files) -> list:
     for path in chip_files:
         rel = path.relative_to(REPO).as_posix()
         try:
-            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
         except Exception:
             continue  # parse errors already reported by the schema pass
         if not isinstance(doc, dict):
@@ -342,7 +343,7 @@ def _check_soc_npu_pairing(soc_files) -> list:
     failures: list[tuple[Path, list[str]]] = []
     for path in soc_files:
         try:
-            doc = json.loads(path.read_text(encoding="utf-8"))
+            doc = strict_json_loads(path.read_text(encoding="utf-8"), source=path)
         except Exception:
             continue  # parse errors already reported by the schema pass
         npus = doc.get("npus") or []
@@ -402,7 +403,7 @@ def _check_soc_debug_probe_identity(soc_files) -> list:
     failures: list[tuple[Path, list[str]]] = []
     for path in soc_files:
         try:
-            doc = json.loads(path.read_text(encoding="utf-8"))
+            doc = strict_json_loads(path.read_text(encoding="utf-8"), source=path)
         except Exception:
             continue  # parse errors already reported by the schema pass
         variants = doc.get("variants") or []
@@ -445,7 +446,7 @@ def _check_chip_physical(chip_files) -> list:
         except ValueError:
             rel = path.as_posix()  # out-of-tree (e.g. a test fixture); report as-is
         try:
-            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
         except Exception:
             continue  # parse errors already reported by the schema pass
         if not isinstance(doc, dict):
@@ -492,7 +493,7 @@ def _check_block_realizations(block_files, chip_files) -> list:
         except ValueError:
             rel = path.as_posix()  # out-of-tree (e.g. a test fixture); report as-is
         try:
-            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
         except Exception:
             continue  # parse errors already reported by the schema pass
         if not isinstance(doc, dict):
@@ -541,7 +542,7 @@ def _check_library_semantics(library_files) -> list:
         except ValueError:
             rel = path.as_posix()  # out-of-tree (e.g. a test fixture); report as-is
         try:
-            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
         except Exception:
             continue  # parse / schema errors already reported by the schema pass
         if not isinstance(doc, dict):
@@ -607,7 +608,7 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
     library_docs: dict[str, dict] = {}
     for path in library_files:
         try:
-            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
         except Exception:
             continue
         if isinstance(doc, dict) and isinstance(doc.get("name"), str):
@@ -642,7 +643,7 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
     som_docs: dict[str, dict] = {}
     for path in som_files:
         try:
-            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
         except Exception:
             continue
         if isinstance(doc, dict) and isinstance(doc.get("sku"), str):
@@ -740,7 +741,7 @@ def _board_tree_identifiers() -> dict[str, set[str]]:
         return trees
     for path in sorted(ZEPHYR_ALP_BOARDS.glob("*/*.yaml")):
         try:
-            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
         except Exception:
             continue
         if not isinstance(doc, dict):
@@ -788,7 +789,7 @@ def _check_board_targets(som_files) -> list:
         except ValueError:
             rel = path.as_posix()
         try:
-            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
         except Exception:
             continue  # schema pass already reported the parse failure
         if not isinstance(doc, dict):
@@ -843,7 +844,7 @@ def main() -> int:
         return 1
     soc_failures = _check_files(
         "JSON", soc_files, soc_validator,
-        lambda p: json.loads(p.read_text(encoding="utf-8")),
+        lambda p: strict_json_loads(p.read_text(encoding="utf-8"), source=p),
         "ref",
     )
     # Semantic cross-ref the schema can't express: npus[].paired_core -> cores[].
@@ -863,7 +864,7 @@ def main() -> int:
             print()
             som_failures = _check_files(
                 "YAML", som_files, som_validator,
-                lambda p: yaml.safe_load(p.read_text(encoding="utf-8")),
+                lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
                 "sku",
             )
 
@@ -878,7 +879,7 @@ def main() -> int:
             print()
             hwrev_failures = _check_files(
                 "YAML", hwrev_files, hwrev_validator,
-                lambda p: yaml.safe_load(p.read_text(encoding="utf-8")),
+                lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
                 "family",
             )
 
@@ -896,7 +897,7 @@ def main() -> int:
             print()
             board_failures = _check_files(
                 "YAML", board_files, board_validator,
-                lambda p: yaml.safe_load(p.read_text(encoding="utf-8")),
+                lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
                 "name",
             )
 
@@ -911,7 +912,7 @@ def main() -> int:
             print()
             chip_failures = _check_files(
                 "YAML", chip_files, chip_validator,
-                lambda p: yaml.safe_load(p.read_text(encoding="utf-8")),
+                lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
                 "chip_id",
             )
             chip_failures += _check_chip_semantics(chip_files)
@@ -928,7 +929,7 @@ def main() -> int:
             print()
             block_failures = _check_files(
                 "YAML", block_files, block_validator,
-                lambda p: yaml.safe_load(p.read_text(encoding="utf-8")),
+                lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
                 "block_id",
             )
             block_failures += _check_block_realizations(block_files, chip_files)
@@ -945,7 +946,7 @@ def main() -> int:
             print()
             library_failures = _check_files(
                 "YAML", library_files, library_validator,
-                lambda p: yaml.safe_load(p.read_text(encoding="utf-8")),
+                lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
                 "name",
             )
             library_semantic_failures = _check_library_semantics(library_files)
