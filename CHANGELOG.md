@@ -7,6 +7,20 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — bring-up guide claimed `tps628640_set_voltage_mv` was unimplemented (#1166)
+
+`docs/bring-up-v2n-m1.md` told readers to reach for the
+"(currently-`NOSUPPORT`) `tps628640_set_voltage_mv` helper once the
+datasheet drop unblocks the VSET decode TODO".  The decode landed in
+`07755ca4` on 2026-05-12, one hour after `4a0b294a` added that line, and
+the doc was never updated: `chips/tps628640/tps628640.c:85-96` has
+range-checked the input against `TPS628640_VOUT_BASE_MV`/`_MAX_MV`,
+encoded `(mv - 400) / 5` and written `TPS628640_REG_VOUT1` ever since,
+returning `ALP_ERR_OUT_OF_RANGE`/`ALP_ERR_NOT_READY` and never
+`ALP_ERR_NOSUPPORT`.  The guide now describes the real behaviour, and
+records the gap that *is* still open: nothing in-tree calls the helper at
+boot, so the four instances come up on their factory OTP voltages.
+
 ### Fixed — MHU-B mailbox verification claim overstated the send path (#1169)
 
 `mbox_renesas_rz_mhu_b.c` and the four V2N/V2M SoM presets said `SILICON-PROVEN`
