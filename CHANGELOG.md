@@ -7,6 +7,58 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — `firmware-update-log` failed to link on both AEN801 board targets (#1101)
+
+`zephyr/soc-bridge/alif/mpu_regions_e8.c` unconditionally reads
+`DT_NODELABEL(storage_partition)` to size its non-MCUboot MRAM_DEVICE MPU
+window, but `examples/connectivity/firmware-update-log`'s own
+`boards/alp_e1m_aen801_m55_log_mram.dtsi` deleted that nodelabel without
+replacing it, so both `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he` and
+`alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp` failed at CMake configure
+(`DT_N_NODELABEL_storage_partition... undeclared`) — breaking
+`scripts/bench/aen/flash-update-log-dual.sh` and
+`flash-update-log-firewall-probe.sh`. Fixed by adding `storage_partition`
+as a SECOND nodelabel on the existing `alp_ulog_partition` node (not a
+rename): the SDK's own `update_log` sw_tier binds by the
+`alp_ulog_partition` nodelabel (`src/backends/update_log/sw_tier.c`), so a
+plain rename would have kept the example linking while silently degrading
+`HW_ENFORCED` to the RAM tier. Two nodelabels on one DT node is legal and
+already has prior art in the pinned Zephyr toolchain
+(`boards/st/b_u585i_iot02a/b_u585i_iot02a-common.dtsi`'s `memc:
+aps6408l:`). Verified both AEN801 targets now link clean via a local
+worktree twister build (`west twister -p
+alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he -p
+alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp --build-only`, 0 failed / 0
+errored) and confirmed the computed MPU windows from the generated
+`devicetree_generated.h` match the non-MCUboot branch's intent: MRAM_EXEC
+`0x80000000..0x8008ffff` (RO, flash-attr), MRAM_DEVICE
+`0x80090000..0x8009ffff` (the NVS window the HP owner actually writes,
+device-attr). Also gave the example real `platform_allow` scenarios
+(`he_client.aen` / `hp_owner.aen`, `build_only: true`) so twister catches a
+regression — it was `native_sim/native/64`-only before, the only reason
+neither `pr-twister.yml` nor the AEN-scoped `pr-twister-aen.yml` (scoped to
+`examples/aen/**`) ever saw this break.
+
+A follow-up review round decoded `mpu_regions` out of the built
+`zephyr.elf` (not DTS arithmetic) and found the dual-nodelabel fix alone
+still left `0x800A0000..0x8057FFFF` (4.875 MiB, including
+`atoc_reserved_partition@0x560000`, marked `read-only` in the same
+overlay) covered by no MPU region — privileged RW+exec by ARMv8-M's
+default `PRIVDEFENA` map. Root cause: the vendor model `mpu_regions_e8.c`
+mirrors assumes `storage_partition` is the last partition in
+`mram_storage`; this example's overlay isn't (ulog/storage sits at
+`0x90000`, below the SE-fixed ATOC package). Closed generically in
+`mpu_regions_e8.c` with a conditional fifth `MRAM_RESERVED` region
+spanning MRAM_DEVICE's top to the top of `mram_storage`, RO like
+MRAM_EXEC — it compiles out (size 0) on every other board/example, which
+already tile to top-of-flash. `pr-twister-aen.yml` also gained
+`zephyr/soc-bridge/**` and `src/backends/update_log/**` in its `paths:`
+blocks (both were previously unwatched, despite being exactly the files
+that caused this bug), and `testcase.yaml` gained a third scenario
+building `alp_e1m_aen801_m55_he_firewall_probe.conf`, the profile
+`scripts/bench/aen/flash-update-log-firewall-probe.sh` actually requires
+and which stayed build-uncovered before.
+
 ### Fixed — E1M-AEN801 M55-HP and M55-HE both linked to slot0 `0x80010000`, so flashing both cores silently overwrote one image (#1069, release-blocker)
 
 Both AEN801 per-core board files declared byte-identical MRAM partition
