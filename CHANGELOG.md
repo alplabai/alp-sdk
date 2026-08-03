@@ -22,19 +22,27 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   (`ALP_BOOT_DEVICE ?= "emmc"`), so this is the path most consumers hit.
   `meta-alp-sdk/recipes-bsp/u-boot/u-boot/0002-rzv2n-dev-ALP-E1M-production-boot.patch`
   now re-loads the correct dtb from `CONFIG_BOOTCOMMAND` on **both**
-  branches, same load address `sd2load` already uses; the vendor
-  `emmcload` body itself is not visible in this patch's diff context
-  (fetched at build time, not vendored), so its own address/mmc-spec
-  could not be read directly — the eMMC `mmc 0:2` re-load instead
-  targets the address forced by the single shared `bootimage` step that
-  already consumes the SD fix's address, and the partition already
-  proven correct via `alp_root=/dev/mmcblk0p2`. The SD branch also
-  rooted at `/dev/mmcblk2p2`; `e1m-x-evk.dtsi:88-89` names the carrier
-  microSD `/dev/mmcblk1p2` (SDHI1, alias `mmc1`) — no third MMC
-  controller exists on this SoM. Both fixed; the eMMC branch's root
-  (`mmc0` → `mmcblk0p2`) was already correct. `docs/build-yocto-v2n.md`
-  updated to match. **Unverified on hardware** — this is a boot-path
-  change and no bitbake build/flash was run to confirm it.
+  branches, same load address + partition each vendor env already uses
+  (0x48000000, partition 2). The vendor `emmcload` body itself is not
+  visible in *this* patch's diff context (fetched at build time, not
+  vendored), but its address/mmc-spec (`mmc 0:2`, `0x48000000`) is
+  confirmed against the unpatched vendor default in the RZ/V AI SDK BSP
+  source package
+  (`meta-rz-features/meta-rz-codecs/.../0001-Add-OpenCVA-and-Codec-for-V2N.patch`,
+  quoted in the 0002 patch comment). The SD branch also rooted at
+  `/dev/mmcblk2p2`; `e1m-x-evk.dtsi:88-89` names the carrier microSD
+  `/dev/mmcblk1p2` (SDHI1, alias `mmc1`) — no third MMC controller
+  exists on this SoM. Both fixed; the eMMC branch's root (`mmc0` →
+  `mmcblk0p2`) was already correct. V2N101 and V2N102 currently build
+  the *same* dtb filename (`e1m-v2n101-x-evk.dtb` — V2N102's machine
+  conf inherits V2N101's `KERNEL_DEVICETREE` via `MACHINEOVERRIDES`
+  rather than overriding it), so the hardcoded name in the patch covers
+  both SKUs today; this is not a bug to "fix" per SKU until that
+  inheritance changes. V2M SKUs build a different dtb and remain
+  out of scope (see the patch's "FUTURE (V2M / per-SKU dtb)" note).
+  `docs/build-yocto-v2n.md` updated to match. **Unverified on real
+  silicon** — this is a boot-path change and no bitbake build, FIP
+  rebuild, reflash, or on-board boot was run to confirm it.
 - **`alp-image-edge` silently omitted all `meta-rz-*` vendor payload
   (#1176).** `meta-rz-drpai`, `meta-rz-codecs`, and `meta-rz-opencva`
   each ship their runtime payload through their own
