@@ -283,6 +283,168 @@ def test_no_shipped_template_declares_a_substitution_target():
 
 
 # --------------------------------------------------------------------------
+# Path containment (#1126) -- a catalog-declared files.user_owned entry
+# must never let render()/render_to_envelope() read outside the example
+# root or write outside the destination root, whether it tries via `..`
+# traversal, an absolute path, or a symlink placed inside either root.
+# `_safe_join` backs BOTH the read site (_rendered_bytes) and the write
+# site (render()'s write loop), so testing it directly covers both; the
+# render()-level test below additionally proves the wiring end-to-end.
+# --------------------------------------------------------------------------
+
+def test_safe_join_allows_a_normal_in_root_path(tmp_path):
+    root = tmp_path / "root"
+    (root / "sub").mkdir(parents=True)
+    (root / "sub" / "file.txt").write_text("ok", encoding="utf-8")
+    assert alp_template._safe_join(root, "sub/file.txt", what="x") == (
+        root / "sub" / "file.txt").resolve()
+
+
+def test_safe_join_rejects_parent_traversal(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    (tmp_path / "secret.txt").write_text("outside", encoding="utf-8")
+    with pytest.raises(alp_template.PathEscapeError):
+        alp_template._safe_join(root, "../secret.txt", what="x")
+
+
+def test_safe_join_rejects_absolute_path(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    with pytest.raises(alp_template.PathEscapeError):
+        alp_template._safe_join(root, "/etc/passwd", what="x")
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="os.symlink needs elevated privileges on Windows")
+def test_safe_join_rejects_symlink_escape(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("outside", encoding="utf-8")
+    (root / "escape_link").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(alp_template.PathEscapeError):
+        alp_template._safe_join(root, "escape_link/secret.txt", what="x")
+
+
+def _write_escape_catalog(root: Path, user_owned: list[str]) -> Path:
+    """Same shape as `_write_fixture_catalog`, minus the substitution
+    parameter -- lets each test declare its own (possibly malicious)
+    `files.user_owned` list without a real example tree behind it."""
+    example_rel = "examples/fixture/escape-app"
+    example_dir = root / example_rel
+    example_dir.mkdir(parents=True)
+    (example_dir / "board.yaml").write_text("name: escape\n", encoding="utf-8")
+
+    catalog = {
+        "schemaVersion": 1,
+        "description": "test fixture catalog",
+        "templates": [
+            {
+                "id": "escape-app",
+                "title": "Escape App",
+                "archetype": "minimal",
+                "example": example_rel,
+                "description": "fixture",
+                "supported": {
+                    "families": ["alif-ensemble"],
+                    "som_skus": ["E1M-AEN801"],
+                    "core_classes": ["m"],
+                    "runtimes": ["zephyr"],
+                },
+                "requires": {
+                    "portable_apis": [],
+                    "libraries": [],
+                    "chips": [],
+                    "routes": [],
+                    "generated_artifacts": [],
+                    "test_backend": ["native_sim"],
+                },
+                "files": {"user_owned": user_owned, "generated": []},
+                "parameters": [],
+                "test": {
+                    "testcase_yaml": [f"{example_rel}/testcase.yaml"],
+                    "native_sim_scenarios": [],
+                    "cross_compile_matrix": [],
+                },
+                "status": "preview",
+                "note": "fixture only, not a real template",
+            }
+        ],
+    }
+    catalog_path = root / "catalog.json"
+    catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+    return catalog_path
+
+
+def test_render_valid_in_root_user_owned_file_still_renders(tmp_path):
+    catalog_path = _write_escape_catalog(tmp_path, ["board.yaml"])
+    dest = tmp_path / "out"
+    result = alp_template.render(
+        "escape-app", dest, catalog_path=catalog_path, base_dir=tmp_path)
+    assert result.files == ("board.yaml",)
+    assert (dest / "board.yaml").read_text(encoding="utf-8") == "name: escape\n"
+
+
+def test_render_rejects_traversal_in_user_owned_path(tmp_path):
+    (tmp_path / "secret.txt").write_text("outside", encoding="utf-8")
+    catalog_path = _write_escape_catalog(tmp_path, ["../../../secret.txt"])
+    with pytest.raises(alp_template.PathEscapeError):
+        alp_template.render(
+            "escape-app", tmp_path / "out",
+            catalog_path=catalog_path, base_dir=tmp_path)
+
+
+def test_render_rejects_absolute_path_in_user_owned(tmp_path):
+    catalog_path = _write_escape_catalog(tmp_path, ["/etc/passwd"])
+    with pytest.raises(alp_template.PathEscapeError):
+        alp_template.render(
+            "escape-app", tmp_path / "out",
+            catalog_path=catalog_path, base_dir=tmp_path)
+
+
+def test_render_rejects_traversal_in_the_example_root_itself(tmp_path):
+    """Adversarial-review follow-up (#1126, blocker 1): the catalog's
+    `example` field is JUST AS untrusted as `files.user_owned` -- the
+    first pass wired `_safe_join()` around the RELATIVE part of every
+    join (`files.user_owned` entries) but still trusted `example` itself
+    verbatim (`base_dir / record["example"]`), so a catalog naming
+    `"example": "../outside"` walked the containment ROOT out of
+    `base_dir` and the per-file check then faithfully confined the read
+    to that escaped root -- containing nothing. Mirrors the reviewer's
+    production PoC (`base_dir == REPO`, `example` walking out to
+    `/tmp/X/outside`) with a hermetic `base_dir` instead."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("SECRET\n", encoding="utf-8")
+
+    base_dir = tmp_path / "base"
+    base_dir.mkdir()
+
+    catalog = {
+        "templates": [{
+            "id": "escape-root",
+            "example": "../outside",
+            "files": {"user_owned": ["secret.txt"], "generated": []},
+            "parameters": [],
+            "test": {"testcase_yaml": []},
+        }],
+    }
+    catalog_path = tmp_path / "catalog.json"
+    catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+
+    dest = tmp_path / "dest"
+    with pytest.raises(alp_template.PathEscapeError):
+        alp_template.render(
+            "escape-root", dest, catalog_path=catalog_path, base_dir=base_dir)
+
+    # Pre-fix, this is exactly the reviewer's PoC: render() returns clean
+    # and dest/secret.txt contains the exfiltrated file. It must not exist.
+    assert not dest.exists()
+
+
+# --------------------------------------------------------------------------
 # render_to_envelope() -- --emit scaffold's in-memory capture (issue #864)
 # --------------------------------------------------------------------------
 
@@ -863,3 +1025,49 @@ def test_validate_skips_cleanly_without_zephyr_base():
     result = alp_template.validate("minimal", zephyr_base="")
     assert result.skipped
     assert "ZEPHYR_BASE" in result.reason
+
+
+def test_validate_rejects_traversal_in_testcase_yaml(tmp_path, monkeypatch):
+    """Adversarial-review follow-up (#1126, blocker 2): same class, same
+    file, but the helper was never applied at this site. `validate()`
+    derives `rel` from the catalog-controlled `test.testcase_yaml` by
+    STRING-stripping the example prefix (`tc[len(example_prefix):]`),
+    which preserves a `..` untouched, then joined it straight onto its
+    own tmp dir with no containment check. The reviewer's PoC (`tc =
+    "<example>/../ALP1126_LOOT.txt"`) lands a file as a *sibling* of the
+    twister tmpdir -- outside it -- before validate() ever shells out to
+    twister, let alone errors out. `zephyr_base` here is a nonexistent
+    path: the write-side bug fires before validate() would ever reach a
+    real twister invocation, so no real Zephyr checkout is needed to
+    prove it."""
+    controlled_tmp = tmp_path / "twister-tmp"
+    monkeypatch.setattr(
+        alp_template.tempfile, "mkdtemp", lambda *a, **k: str(controlled_tmp))
+
+    example = "examples/peripheral-io/hello-world"
+    catalog = {
+        "templates": [{
+            "id": "escape-testcase",
+            "example": example,
+            "files": {
+                "user_owned": ["board.yaml", "prj.conf", "CMakeLists.txt",
+                                "src/main.c", "README.md"],
+                "generated": [],
+            },
+            "parameters": [],
+            "test": {
+                "testcase_yaml": [f"{example}/../hello-world/testcase.yaml"],
+            },
+        }],
+    }
+    catalog_path = tmp_path / "catalog.json"
+    catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+
+    with pytest.raises(alp_template.PathEscapeError):
+        alp_template.validate(
+            "escape-testcase", catalog_path=catalog_path,
+            zephyr_base="/nonexistent-zephyr")
+
+    # The escape target is a sibling of the (deleted) tmpdir -- must never
+    # have been created.
+    assert not (tmp_path / "hello-world").exists()
