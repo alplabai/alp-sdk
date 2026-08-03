@@ -201,7 +201,7 @@ void alp_storage_close(alp_storage_t *storage)
 	/* begin_close CAS OPEN->CLOSING then spins until every op that
 	 * entered before the CAS has left -- so teardown never races an
 	 * in-flight op. Idempotent: a second/never-opened close no-ops. #629 */
-	if (!alp_handle_begin_close(&storage->lifecycle, &storage->active_ops)) return;
+	if (!alp_handle_begin_close_blocking(&storage->lifecycle, &storage->active_ops)) return;
 	if (storage->state.ops != NULL && storage->state.ops->close != NULL) {
 		storage->state.ops->close(&storage->state);
 	}

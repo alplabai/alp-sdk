@@ -28,6 +28,7 @@
 #include "alp/adc.h"
 #include "alp/dsp.h"
 #include "alp/soc_caps.h"
+#include "alp_slot_claim.h"
 #include "handles.h"
 #include "v2n_supervisor.h"
 
@@ -256,10 +257,19 @@ struct alp_adc_filter {
 
 static struct alp_adc_filter alp_adc_filter_pool[ALP_ADC_FILTER_POOL_SIZE];
 
+/* issue #1115 round-2 dev review: this used to be a plain
+ * `if (!in_use) return &slot;` scan that returned a pointer WITHOUT
+ * claiming it -- in_use was only set at the very end of
+ * alp_adc_filter_open() below, so the whole open() body (DSP chain
+ * open + ADC stream open) was a TOCTOU window a second concurrent
+ * open() could scan into and get the same slot back. Same shape as
+ * dsp/sw_fallback.c's acquire_be_slot(): claim atomically here so a
+ * second opener can never observe this slot as free again until it is
+ * released. */
 static struct alp_adc_filter *alp_adc_filter_pool_acquire(void)
 {
 	for (size_t i = 0u; i < ALP_ADC_FILTER_POOL_SIZE; i++) {
-		if (!alp_adc_filter_pool[i].in_use) {
+		if (alp_slot_try_claim(&alp_adc_filter_pool[i].in_use)) {
 			return &alp_adc_filter_pool[i];
 		}
 	}
@@ -269,9 +279,9 @@ static struct alp_adc_filter *alp_adc_filter_pool_acquire(void)
 static void alp_adc_filter_pool_release(struct alp_adc_filter *f)
 {
 	if (f == NULL) return;
-	f->in_use = false;
 	f->stream = NULL;
 	f->chain  = NULL;
+	alp_slot_release(&f->in_use);
 }
 
 alp_adc_filter_t *alp_adc_filter_open(const alp_adc_filter_config_t *cfg)
@@ -324,9 +334,11 @@ alp_adc_filter_t *alp_adc_filter_open(const alp_adc_filter_config_t *cfg)
 		return NULL;
 	}
 
+	/* alp_slot_try_claim() in alp_adc_filter_pool_acquire() already set
+	 * in_use=true; no re-store needed (and doing a plain, non-atomic
+	 * store here would race a concurrent reader of in_use). */
 	f->stream = stream;
 	f->chain  = chain;
-	f->in_use = true;
 	return f;
 }
 
@@ -438,10 +450,13 @@ struct alp_adc_spectrum {
 
 static struct alp_adc_spectrum alp_adc_spectrum_pool[ALP_ADC_SPECTRUM_POOL_SIZE];
 
+/* issue #1115 round-2 dev review: same unclaimed-acquire TOCTOU shape
+ * as alp_adc_filter_pool_acquire() above -- claim atomically at
+ * acquisition, not with a plain scan-then-set-at-the-end-of-open(). */
 static struct alp_adc_spectrum *alp_adc_spectrum_pool_acquire(void)
 {
 	for (size_t i = 0u; i < ALP_ADC_SPECTRUM_POOL_SIZE; i++) {
-		if (!alp_adc_spectrum_pool[i].in_use) {
+		if (alp_slot_try_claim(&alp_adc_spectrum_pool[i].in_use)) {
 			return &alp_adc_spectrum_pool[i];
 		}
 	}
@@ -451,10 +466,10 @@ static struct alp_adc_spectrum *alp_adc_spectrum_pool_acquire(void)
 static void alp_adc_spectrum_pool_release(struct alp_adc_spectrum *s)
 {
 	if (s == NULL) return;
-	s->in_use      = false;
 	s->stream      = NULL;
 	s->chain       = NULL;
 	s->accumulated = 0u;
+	alp_slot_release(&s->in_use);
 }
 
 alp_adc_spectrum_t *alp_adc_spectrum_open(const alp_adc_spectrum_config_t *cfg)
@@ -502,12 +517,13 @@ alp_adc_spectrum_t *alp_adc_spectrum_open(const alp_adc_spectrum_config_t *cfg)
 		return NULL;
 	}
 
+	/* alp_slot_try_claim() in alp_adc_spectrum_pool_acquire() already set
+	 * in_use=true; no re-store needed. */
 	s->stream       = stream;
 	s->chain        = chain;
 	s->fft_n_points = last->u.fft.n_points;
 	s->fft_output   = last->u.fft.output_format;
 	s->accumulated  = 0u;
-	s->in_use       = true;
 	return s;
 }
 

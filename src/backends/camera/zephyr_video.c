@@ -34,6 +34,7 @@
  */
 
 #include <errno.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -48,6 +49,7 @@
 #include <alp/peripheral.h>
 
 #include "camera_ops.h"
+#include "alp_slot_claim.h"
 
 #ifndef CONFIG_ALP_SDK_CAMERA_ZEPHYR_VIDEO_VBUF_COUNT
 #define CONFIG_ALP_SDK_CAMERA_ZEPHYR_VIDEO_VBUF_COUNT 2
@@ -84,12 +86,14 @@ typedef struct {
 
 static alp_z_video_state_t _state_pool[CONFIG_ALP_SDK_MAX_CAMERA_HANDLES];
 
+/* issue #1115 round-2 dev review: claim atomically (in_use is the LAST
+ * member; memset only the bytes ahead of it) instead of the previous
+ * plain check-then-set scan. */
 static alp_z_video_state_t *_alloc_state(void)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(_state_pool); ++i) {
-		if (!_state_pool[i].in_use) {
-			memset(&_state_pool[i], 0, sizeof(_state_pool[i]));
-			_state_pool[i].in_use = true;
+		if (alp_slot_try_claim(&_state_pool[i].in_use)) {
+			memset(&_state_pool[i], 0, offsetof(alp_z_video_state_t, in_use));
 			return &_state_pool[i];
 		}
 	}
@@ -99,7 +103,7 @@ static alp_z_video_state_t *_alloc_state(void)
 static void _free_state(alp_z_video_state_t *s)
 {
 	if (s != NULL) {
-		s->in_use = false;
+		alp_slot_release(&s->in_use);
 	}
 }
 

@@ -13,6 +13,7 @@
 *********************************************************************/
 
 /*************************** HEADER FILES ***************************/
+#include <stdint.h>
 #include <stdlib.h>
 #include <memory.h>
 #include "sha256.h"
@@ -49,8 +50,16 @@ static void sha256_transform(SHA256_CTX *ctx, const BYTE data[])
 {
 	WORD a, b, c, d, e, f, g, h, i, j, t1, t2, m[64];
 
+	/* issue #1117: data[j] is BYTE (unsigned char); integer promotion
+	 * makes each operand of `<<` an `int`, and left-shifting a promoted
+	 * byte >= 0x80 by 24 sets the sign bit of that `int` -- undefined
+	 * behaviour, routinely triggered by ordinary binary firmware bytes
+	 * (see ulog_sha256() callers in src/update_log/engine.c). Cast each
+	 * byte to uint32_t first so the shift is well-defined unsigned
+	 * arithmetic throughout. */
 	for (i = 0, j = 0; i < 16; ++i, j += 4)
-		m[i] = (data[j] << 24) | (data[j + 1] << 16) | (data[j + 2] << 8) | (data[j + 3]);
+		m[i] = ((uint32_t)data[j] << 24) | ((uint32_t)data[j + 1] << 16) |
+		       ((uint32_t)data[j + 2] << 8) | ((uint32_t)data[j + 3]);
 	for (; i < 64; ++i)
 		m[i] = SIG1(m[i - 2]) + m[i - 7] + SIG0(m[i - 15]) + m[i - 16];
 

@@ -154,6 +154,24 @@ def test_load_board_yaml_rejects_unknown_core(tmp_path: Path) -> None:
     assert "did you mean" in msg.lower()
 
 
+def test_load_board_yaml_rejects_duplicate_top_level_key(tmp_path: Path) -> None:
+    """#1127: a repeated `som:` key must FAIL the load, not silently keep
+    only the last value (`yaml.safe_load` does that with no error)."""
+    path = _write_board(tmp_path, """
+som:
+  sku: E1M-AEN801
+som:
+  sku: E1M-V2N101
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./src
+""")
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    assert "duplicate key" in str(excinfo.value).lower()
+
+
 def test_load_board_yaml_rejects_unknown_features_key(tmp_path: Path) -> None:
     path = _write_board(tmp_path, """
 som:
