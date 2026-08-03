@@ -498,9 +498,26 @@ EXCLUDE_FROM_WORLD = "1"
 # but the FINAL LINK against the real (ARM aarch64) obj/build_runtime/v2h
 # libraries could not be exercised on that x86_64 host ("skipping
 # incompatible ... when searching for -lmera2_runtime" is an
-# architecture mismatch, not a symbol error), and no bitbake run of this
-# recipe, with or without the new do_compile step, has happened at all. A
-# full alp-image-edge bake HAS completed on this host with `drpai` OFF (the
-# base image). Treat the do_compile logic as fixed-on-paper, proven only at
-# the source-compiles-cleanly level, until the next `drpai`-enabled bake on
-# the real aarch64 Yocto cross-toolchain confirms the link + packaging.
+# architecture mismatch, not a symbol error).
+#
+# UPDATE -- that final step has now been taken; this recipe is no longer
+# fixed-on-paper. A `drpai`-ENABLED alp-image-edge bake completed on the real
+# aarch64 Yocto cross-toolchain (12118 tasks, all succeeded, with
+# PACKAGECONFIG:append:pn-alp-sdk = " drpai" and RUHMI_DRPAI_TVM_DIR set;
+# this recipe ran 18 tasks in it). It settles all three open questions:
+#   - do_compile cross-compiles apps/MeraDrpRuntimeWrapper.cpp to aarch64 and
+#     the link against obj/build_runtime/v2h/lib succeeds;
+#   - packaging passes do_package_qa, after the FILES:${PN}-dev redefinition
+#     and the narrowly-scoped INSANE_SKIP ldflags above;
+#   - the symbols resolve. libalp_sdk.so's DT_NEEDED now names
+#     libmera_drpai_wrapper.so, libmera2_runtime.so, libmera2_plan_io.so and
+#     libtvm_runtime.so, and all 9 MeraDrpRuntimeWrapper symbols it imports
+#     match definitions the wrapper exports (26 exported, 9 matched, 0
+#     unresolved). All ten libraries ship in the rootfs.
+#
+# What remains unproven is everything ABOVE the link: no model has been
+# compiled to a drpai_dir bundle (that needs the account-gated DRP-AI
+# Translator i8), and no inference has run on silicon. The kernel side IS
+# proven independently -- /dev/drpai0 probes clean on a real board and
+# DRPAI_GET_DRPAI_AREA returns the correct 0xD0000000 / 512 MiB arena -- but
+# that is the vendor driver, not this recipe's payload.

@@ -90,8 +90,9 @@ into the topic-specific docs.
 - [bring-up-v2n-m1.md](bring-up-v2n-m1.md) — V2N + DEEPX.
 - [bring-up-drpai-v2n.md](bring-up-drpai-v2n.md) — the RZ/V2N on-die
   DRP-AI3 NPU: host toolchain, the DT override the driver needs,
-  image wiring, model compile and microSD deploy. Not yet run on
-  silicon.
+  image wiring, model compile and microSD deploy. Kernel driver
+  proven on silicon and userspace packaging fixed; no model compiled
+  and no inference run yet.
 - [bring-up-imx93.md](bring-up-imx93.md) — NXP i.MX 93.
 - [e1m-x-v2n-sdk-integration.md](e1m-x-v2n-sdk-integration.md) —
   landing the bench-validated V2N-M1 / E1M-X-EVK carrier bring-up
