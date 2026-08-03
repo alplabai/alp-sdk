@@ -72,6 +72,32 @@ def test_alp_model_build_emits_alpmodel(tmp_path):
     assert (tmp_path / "out" / "demo.alpmodel").is_file()
 
 
+def test_alp_model_build_rejects_a_traversal_model_name(tmp_path):
+    # #1125: build_model() itself allowlists models[].name against
+    # `^[A-Za-z][A-Za-z0-9_-]*$` (board.schema.json's own pattern) before
+    # doing anything else -- the guard lives at the one write chokepoint
+    # every caller routes through, not in a separate schema-validation
+    # pass `alp model build` would have to remember to run first.
+    (tmp_path / "models").mkdir()
+    (tmp_path / "models" / "m.tflite").write_bytes(b"TFL3-DUMMY")
+    (tmp_path / "board.yaml").write_text(
+        "name: demo\n"
+        "som:\n  sku: E1M-AEN801\n"
+        "cores: {}\n"
+        "models:\n"
+        "  - name: '../../../../tmp/evil'\n"
+        "    source: models/m.tflite\n",
+        encoding="utf-8")
+    result = CliRunner().invoke(cli, [
+        "model", "build",
+        "--board", str(tmp_path / "board.yaml"),
+        "--out", str(tmp_path / "out"),
+        "--metadata-root", str(_ROOT / "metadata"),
+    ])
+    assert result.exit_code != 0
+    assert not (tmp_path / "out").exists()
+
+
 def test_alp_model_help_is_registered():
     result = CliRunner().invoke(cli, ["model", "--help"])
     assert result.exit_code == 0

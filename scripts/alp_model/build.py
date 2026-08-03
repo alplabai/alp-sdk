@@ -8,6 +8,7 @@ is recorded as a `coverage` skip; a source format no adapter accepts is
 with zero runnable blobs is broken."""
 from __future__ import annotations
 import hashlib
+import re
 from pathlib import Path
 
 from .adapters import CompilerAdapter
@@ -24,6 +25,12 @@ from .tensorio import extract_io
 # its tool is absent); vela (ethos_u) skips on hosts without the ethos-u-vela package.
 _ADAPTERS: list[CompilerAdapter] = [CpuAdapter(), VelaAdapter(), DrpaiAdapter(), DeepxAdapter()]
 
+# #1125: mirrors metadata/schemas/board.schema.json's `models[].name` pattern.
+# build_model() is called directly by non-CLI callers (tests, future tooling),
+# not just alp_cli.model's schema-validated path -- an allowlist here is the
+# root-cause guard, independent of whether the caller validated board.yaml.
+_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
+
 
 def _src_format(source: Path) -> str:
     return source.suffix.lstrip(".").lower()        # "tflite" | "onnx"
@@ -33,6 +40,8 @@ def build_model(*, sku: str, name: str, source: Path, out_dir: Path,
                 metadata_root: Path,
                 adapters: list[CompilerAdapter] | None = None,
                 compile_opts: dict[str, dict] | None = None) -> Path:
+    if not _NAME_RE.fullmatch(name):
+        raise ValueError(f"invalid model name {name!r}: must match {_NAME_RE.pattern!r}")
     registry = list(_ADAPTERS if adapters is None else adapters)
     by_backend = {a.backend: a for a in registry}
     specs = resolve_targets(sku, metadata_root=metadata_root)
@@ -82,5 +91,12 @@ def build_model(*, sku: str, name: str, source: Path, out_dir: Path,
                    inputs=inputs, outputs=outputs,
                    targets=targets, coverage=coverage)
     out_path = out_dir / f"{name}.alpmodel"
+    # Belt-and-suspenders: the name allowlist above already makes escape
+    # impossible for a bare filename, but fail closed on containment too --
+    # a resolved-path check catches this even if the join expression above
+    # ever grows a second path segment.
+    resolved_out_dir = out_dir.resolve()
+    if not out_path.resolve().is_relative_to(resolved_out_dir):
+        raise ValueError(f"refusing to write outside out_dir: {out_path}")
     out_path.write_bytes(write_package(mft, blobs))
     return out_path
