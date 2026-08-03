@@ -178,20 +178,73 @@ Renesas RZ/V2M SoC). `LICENSE = "CLOSED"` — there is no redistributable
 license text this recipe could checksum — and `EXCLUDE_FROM_WORLD = "1"`
 keeps a bare `bitbake world` from tripping the fatal by default.
 
-The three libraries ship with no `DT_SONAME` (matching the "SONAMEs
-unversioned" the old RESIDUAL GAP comment named), so they package into the
-main `${PN}` package rather than `-dev` (`INSANE_SKIP += "dev-so"` covers
-the expected QA warning), which lets OE's automatic shlibs pass pick up
-`libalp_sdk.so`'s DT_NEEDED entries and record the RDEPENDS the shipped
-image needs — the same mechanism that already resolves `lib-tvm`'s
-`libtvm_runtime.so`. `alp-sdk_0.6.bb`'s `PACKAGECONFIG[drpai]` now adds
-`mera2-drpai-tvm` to both its build deps and its runtime deps, and its
-RESIDUAL GAP comment is rewritten to describe the closed state instead of
-the open one.
+**First cut of this recipe staged only three of the eight libraries the
+runtime actually needs, and shipped even those into the wrong package —
+a real `bitbake` run with `drpai` enabled hit both bugs as `do_package_qa`
+failures, not just static inspection.** The two-line takeaway this
+CHANGELOG entry previously carried (three libraries, gap closed) was
+wrong on both counts:
 
-**Still BENCH-UNVERIFIED and static-checked only**: no `bitbake` run
-against this recipe, and no `alp-image-edge` bake with `drpai` enabled, has
-ever completed on this host — nothing here claims DRP-AI works.
+- **Runtime closure is eight libraries, not three.**
+  `obj/build_runtime/v2h/lib/` in a built RUHMI checkout holds exactly
+  eight `.so` files. `src/yocto/inference_drpai.cpp` links three of them
+  directly (`libmera2_runtime.so`, `libmera2_plan_io.so`,
+  `libdrp_tvm_rt.so`), but those three in turn DT_NEED the other five
+  (`libdrp_rt.so`, `libacl_rt.so`, `libarm_compute.so`,
+  `libarm_compute_core.so`, `libarm_compute_graph.so`) — Arm Compute
+  Library plus the DRP runtime shim. Omitting them passes `do_configure`
+  and `do_compile` (the link line only names three) but fails
+  `do_package_qa`'s `file-rdeps` check with `no providers found in
+  RDEPENDS` for each missing `.so`. The recipe now stages all eight.
+  `obj/build_runtime/v2h/lib/` also carries three non-library files
+  (`log_out.bin`, `softmax_out.bin`, `split_out.bin`) — RUHMI's own
+  sample-output fixtures, referenced by no DT_NEEDED entry or CMake
+  probe — which the recipe deliberately leaves unstaged.
+- **Two more runtime deps live outside RUHMI entirely.**
+  `libmmngr.so.1` / `libmmngrbuf.so.1`, DT_NEEDED by two of the eight
+  libraries, are provided by meta-rz-drpai's `mmngr-user-module` /
+  `mmngrbuf-user-module` recipes, not by RUHMI. `mera2-drpai-tvm` now
+  carries `RDEPENDS:${PN} += "mmngr-user-module mmngrbuf-user-module
+  kernel-module-mmngr"` — the third because the two user-space libraries
+  are ioctl wrappers around `/dev/mmngr`, which only that kernel module
+  provides; `file-rdeps` cannot ask for it on its own since a kernel
+  module never shows up as a DT_NEEDED entry, but it is required all the
+  same. `alp-image-edge.bb` was already installing `kernel-module-mmngr`
+  explicitly (worked around the fact that meta-rz-drpai's DRP-AI payload
+  only hooks `core-image-%`, which `alp-image-edge` doesn't match); the
+  new recipe-level RDEPENDS is a harmless duplicate for that image and
+  makes the recipe correct standalone for any other image that pulls it
+  in.
+- **The three originally-staged libraries were landing in `-dev`, not
+  the main package, regardless of `FILES:${PN} += ...`.** Bitbake's
+  default `PACKAGES` order lists `${PN}-dev` ahead of `${PN}`, and
+  `${PN}-dev`'s own built-in `FILES` default already globs
+  `${libdir}/*.so` — so every unversioned `.so` this recipe staged was
+  claimed by `-dev` before `FILES:${PN}` was ever consulted. That is
+  exactly the `do_package_qa` error a real bake hit: `-dev package
+  mera2-drpai-tvm-dev contains non-symlink .so '/usr/lib/libmera2_runtime.so'`,
+  followed by `file-rdeps` failures on that same misplaced package. The
+  fix redefines (does not append to) `FILES:${PN}-dev = "${includedir}"`
+  — this recipe never ships a `.la`/`.a`/`.pc`/cmake file, so
+  headers-only is a complete definition — which drops the default `.so`
+  glob and lets `FILES:${PN}` claim the libraries as intended. With
+  nothing left for `-dev` to misclassify, `insane.bbclass`'s `dev-so`
+  QA check no longer fires, so the `INSANE_SKIP:${PN} += "dev-so"` this
+  entry previously added (on the wrong package suffix besides — that
+  skip targets `${PN}`, and the QA check runs against `${PN}-dev`) is
+  removed rather than kept as an unneeded, mis-scoped suppression.
+
+`alp-sdk_0.6.bb`'s RESIDUAL GAP comment and `meta-alp-sdk/README.md` are
+both corrected to describe this real, eight-library-plus-three-RDEPENDS
+closure — both previously said "three libraries, gap closed," which
+overstated it the same way this entry did.
+
+**Still BENCH-UNVERIFIED**: DRP-AI has never run on silicon. A full
+`alp-image-edge` bake HAS completed on this host with `drpai` OFF (the
+base image); the packaging fix above is code-complete but has not yet
+been proven by a green `drpai`-enabled bake — the bugs it fixes were
+found by an actual `bitbake` run, not by inspection, so it stays
+fixed-on-paper until the next `drpai`-enabled bake confirms it.
 
 ### Fixed — U-Boot loaded a devicetree filename no Alp image builds, on both boot media (#1175)
 

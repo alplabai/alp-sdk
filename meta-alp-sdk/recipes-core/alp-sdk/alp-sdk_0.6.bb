@@ -115,10 +115,23 @@ PACKAGECONFIG[rpc]      = ",,open-amp libmetal"
 # The DT_NEEDED consequence that used to be silent -- libalp_sdk.so
 # carrying libmera2_runtime.so / libmera2_plan_io.so / libdrp_tvm_rt.so
 # (all three SONAMEs unversioned) with no package in the image
-# providing them -- is now closed too: mera2-drpai-tvm packages all
-# three in its main package, so OE's automatic shlibs pass picks up the
-# DT_NEEDED entries and records the RDEPENDS libalp_sdk needs, the same
-# way it already did for the lib-tvm-provided libtvm_runtime.so.
+# providing them -- is now closed, but it took more than those three
+# libraries: they in turn DT_NEED five more (libdrp_rt.so, libacl_rt.so,
+# libarm_compute.so, libarm_compute_core.so, libarm_compute_graph.so,
+# all also present in RUHMI's obj/build_runtime/v2h/lib/) plus
+# libmmngr.so.1 / libmmngrbuf.so.1, which are not RUHMI's to ship at all
+# -- they come from meta-rz-drpai's mmngr-user-module /
+# mmngrbuf-user-module recipes. mera2-drpai-tvm now stages all eight
+# RUHMI libraries in its main package (so OE's automatic shlibs pass
+# picks up their DT_NEEDED entries, the same way it already did for the
+# lib-tvm-provided libtvm_runtime.so) and RDEPENDS on the two mmngr
+# packages explicitly, since nothing DEPENDS-time links against them for
+# shlibs to infer the RDEPENDS on its own. A first cut of this recipe
+# staged only the three libraries named above and shipped them into the
+# wrong package besides (bitbake's default ${PN}-dev file-glob claims
+# unversioned *.so before an appended FILES:${PN} sees them) -- a real
+# `bitbake -c package_qa` with this PACKAGECONFIG enabled is what caught
+# both gaps; static inspection alone had missed them.
 #
 # ALP_SDK_DRPAI_REQUIRED rides with the enable: this PACKAGECONFIG is an
 # EXPLICIT opt-in, so an unsatisfiable stack must fail do_configure instead

@@ -449,11 +449,21 @@ mechanism that does that differs by build path; do not mix them up:**
   actually works, and what `recipes-renesas/mera2-drpai-tvm` now does:
   **stage the checkout's headers and libraries into the recipe's own
   sysroot** before `do_configure` runs — `apps/MeraDrpRuntimeWrapper.h`,
-  `tvm/include`, `tvm/3rdparty/{dlpack,dmlc-core}/include`, and the
-  three `.so` files (`libmera2_runtime.so`, `libmera2_plan_io.so`,
-  `libdrp_tvm_rt.so`; `libtvm_runtime.so` is `lib-tvm`'s, separately)
-  installed under `${STAGING_INCDIR}` / `${STAGING_LIBDIR}` — since
-  that is the root the unmodified probes already search by default.
+  `tvm/include`, `tvm/3rdparty/{dlpack,dmlc-core}/include`, and all
+  eight `.so` files under `obj/build_runtime/v2h/lib/`
+  (`libmera2_runtime.so`, `libmera2_plan_io.so`, `libdrp_tvm_rt.so`,
+  `libdrp_rt.so`, `libacl_rt.so`, `libarm_compute.so`,
+  `libarm_compute_core.so`, `libarm_compute_graph.so`;
+  `libtvm_runtime.so` is `lib-tvm`'s, separately) installed under
+  `${STAGING_INCDIR}` / `${STAGING_LIBDIR}` — since that is the root
+  the unmodified probes already search by default. The three libraries
+  `src/yocto/CMakeLists.txt` links directly DT_NEED the other five;
+  omitting them (an earlier cut of this recipe did) passes configure
+  but fails a real `bitbake -c package_qa` with `file-rdeps` errors.
+  `libmmngr.so.1` / `libmmngrbuf.so.1`, DT_NEEDED by two of the eight,
+  are not RUHMI's to stage at all — they come from meta-rz-drpai's
+  `mmngr-user-module` / `mmngrbuf-user-module` recipes, which
+  `mera2-drpai-tvm` RDEPENDS on explicitly instead.
   Point the recipe's `RUHMI_DRPAI_TVM_DIR` variable at the checkout
   root (its own SRC_URI is empty; it fetches and vendors nothing, only
   stages) and add it to `alp-sdk_0.6.bb`'s `PACKAGECONFIG[drpai]`
@@ -545,11 +555,18 @@ checkout, it fetches nothing.
   `# TBD(alif-hw-config)` overrides in the machine confs).
 - The DRP-AI3 backend (`PACKAGECONFIG[drpai]`) ships OFF and
   BENCH-UNVERIFIED: never run on DRP-AI silicon, never carried through
-  a completed `alp-image-edge` bake.  Its three MERA2/TVM libraries and
-  `MeraDrpRuntimeWrapper.h` are now packaged by `mera2-drpai-tvm`
-  (staged from a builder-supplied RUHMI checkout, nothing vendored),
-  but that recipe is static-checked only — enabling `drpai` and
-  running a full `alp-image-edge` bake through it is still open work.
+  a completed `alp-image-edge` bake with `drpai` enabled (a `drpai`-off
+  bake of `alp-image-edge` has completed on this host).  Its eight
+  MERA2/TVM libraries and `MeraDrpRuntimeWrapper.h` are packaged by
+  `mera2-drpai-tvm` (staged from a builder-supplied RUHMI checkout,
+  nothing vendored), which also `RDEPENDS` on meta-rz-drpai's
+  `mmngr-user-module` / `mmngrbuf-user-module` / `kernel-module-mmngr`
+  for the two libraries the RUHMI checkout doesn't carry. A
+  `do_package_qa` run against this PACKAGECONFIG did fail once, on
+  three libraries the recipe originally staged (missing five more
+  DT_NEEDED libraries and both mmngr RDEPENDS, plus landing what it did
+  stage in the wrong package); that fix is code-complete but a green
+  `drpai`-enabled bake through it is still open work.
 - `alp-image-edge.bb`'s minimal package set is documentary; the
   v1.0 sysbuild matrix in `docs/test-plan.md` adds the BLE
   provisioning layer + the certificate-pinning post-install hook.

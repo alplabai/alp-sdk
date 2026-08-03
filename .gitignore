@@ -148,3 +148,8 @@ meta-alp-sdk/recipes-bsp/trusted-firmware-a/trusted-firmware-a/ddr_param_def_lpd
 ensemble_vela.ini
 **/ensemble_vela.ini
 firmware/cc3501e/hal/ti/cc3501e_ota_candidate.c
+
+# Yocto externalsrc drops these symlinks into S (the source tree) on every
+# build; they point into the build directory and must never be committed.
+oe-logs
+oe-workdir
