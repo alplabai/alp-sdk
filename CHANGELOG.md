@@ -24,8 +24,10 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   — not required yet, so it cannot block anyone's merge to `dev` while the
   poll-a-log-for-a-string pattern proves itself. Mutation-tested locally:
   deleting the `sci0` node from `renesas_rzv2n.repl` fails the boot e2e
-  (`sysbus: ReadByte from non existing peripheral at 0x42800c00`, no boot
-  banner); desyncing the overlay's `chosen` node fails the build step
+  (observed: `sysbus: [cpu: 0x8006624] ReadByte from non existing
+  peripheral at 0x42800C1C` — CESR, offset `0x1C`, the first register
+  `R_SCI_B_UART_Open()` reads — no boot banner); desyncing the overlay's
+  `chosen` node fails the build step
   itself (`devicetree error: undefined node label`). The existing
   required `renode · V2N101 --sim-mode socket contract` context is
   untouched — it still posts `skipping` for most PRs and its e2e steps

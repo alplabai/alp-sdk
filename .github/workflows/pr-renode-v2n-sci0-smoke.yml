@@ -165,9 +165,14 @@ jobs:
       # header comment for why: sci0 output needs real virtual run time,
       # not just the synchronous vector-table seed pr-renode-aen-smoke.yml
       # checks). Polls the log for the boot banner + app line every 2s, up
-      # to 90s, then pauses and quits -- whether or not it found them, so a
+      # to 260s (comfortably below this step's own 5-minute timeout
+      # backstop -- a slow shared runner shouldn't red a working model),
+      # then pauses and quits -- whether or not it found them, so a
       # genuine hang still terminates instead of running past the job
-      # timeout.
+      # timeout. The verdict itself is a FRESH re-grep of the log after
+      # Renode exits (below), not the in-loop FOUND flag -- output that
+      # lands after the last poll, or that Renode block-buffers until
+      # process exit, must not read as a false red.
       - name: V2N101 M33-SM sci0 Renode boot e2e
         timeout-minutes: 5
         working-directory: ${{ github.workspace }}/alp-sdk
@@ -192,8 +197,17 @@ jobs:
           }
           trap cleanup EXIT
 
+          # stdbuf -oL cannot reach a .NET process's own internal
+          # buffering (it only wraps libc stdio), so it does NOT make the
+          # verdict below depend on Renode's flush timing -- kept anyway
+          # since it's free and correct for the wrapper's own output.
           stdbuf -oL "$HOME/renode/renode" --console --disable-xwt --plain \
               < "${FIFO}" > "${LOG}" 2>&1 &
+          # $! here is stdbuf's PID (the renode shell wrapper it execs),
+          # not the underlying dotnet process -- fine on ephemeral
+          # ubuntu-latest (the whole cgroup is torn down with the job),
+          # but a self-hosted runner would want `set -m` + `kill -- -$PID`
+          # (process-group kill) so a stray dotnet child can't outlive this.
           RENODE_PID=$!
 
           printf '$repl=@metadata/renode/renesas_rzv2n.repl\n' >&3
@@ -203,12 +217,13 @@ jobs:
           # Poll for the two lines the sci0 Python peripheral logs once the
           # CPU actually reaches main() -- confirmed locally to appear
           # within ~10-15s of real time on a v1.16.1 build (2026-08-03).
-          FOUND=0
-          for _ in $(seq 1 45); do
+          # This loop is an EARLY-EXIT ONLY: it lets a fast/normal run
+          # finish well under the 260s ceiling. It is NOT the verdict --
+          # see the fresh re-grep after Renode exits, below.
+          for _ in $(seq 1 130); do
             sleep 2
             if grep -q "sci0 TX: \*\*\* Booting Zephyr OS build" "${LOG}" \
                 && grep -q "sci0 TX: Hello World!" "${LOG}"; then
-              FOUND=1
               break
             fi
             kill -0 "${RENODE_PID}" 2>/dev/null || break
@@ -229,18 +244,31 @@ jobs:
           trap - EXIT
           rm -f "${FIFO}"
 
+          # Verdict is a FRESH re-grep of the log, not the loop's early-exit
+          # flag: the loop can exit on its last iteration a moment before
+          # Renode actually writes the line (or before it flushes a
+          # block-buffered write), and that must not read as a false red
+          # when the line is sitting in the log by the time we check.
           FAIL=0
-          if [ "${FOUND}" -ne 1 ]; then
-            echo "::error::V2N101 M33-SM sci0 Renode boot e2e: sci0 boot banner + app console line never appeared within 90s. See the renode-v2n-sci0-boot-log artifact."
+          if ! grep -q "sci0 TX: \*\*\* Booting Zephyr OS build" "${LOG}" \
+              || ! grep -q "sci0 TX: Hello World!" "${LOG}"; then
+            echo "::error::V2N101 M33-SM sci0 Renode boot e2e: sci0 boot banner + app console line never appeared. See the renode-v2n-sci0-boot-log artifact."
             FAIL=1
           fi
           if grep -q "CPU was halted" "${LOG}"; then
-            echo "::error::V2N101 M33-SM sci0 Renode boot e2e: 'CPU was halted' found -- the boot never progressed. See the renode-v2n-sci0-boot-log artifact."
+            if grep -q "Guessing VectorTableOffset value to be 0x" "${LOG}"; then
+              echo "::error::V2N101 M33-SM sci0 Renode boot e2e: 'CPU was halted' found, with 'Guessing VectorTableOffset value to be 0x' also present -- likely #958 (this descriptor deliberately does not seed \$vtor, unlike alif_ensemble_e8.resc/#947, so a bad guess is reachable here). See the renode-v2n-sci0-boot-log artifact."
+            else
+              echo "::error::V2N101 M33-SM sci0 Renode boot e2e: 'CPU was halted' found -- the boot never progressed. See the renode-v2n-sci0-boot-log artifact."
+            fi
             FAIL=1
           fi
-          if grep -q "ReadByte from non existing peripheral at 0x42800" "${LOG}" \
-              || grep -q "WriteByte to non existing peripheral at 0x42800" "${LOG}"; then
-            echo "::error::V2N101 M33-SM sci0 Renode boot e2e: sysbus reported no peripheral at the sci0 base 0x42800c00 -- the sci0 node is missing or moved in renesas_rzv2n.repl. See the renode-v2n-sci0-boot-log artifact."
+          # Read*/Write* (not just ReadByte/WriteByte): CSR (offset 0x48) is
+          # a 32-bit register, so a first-touch access to a deleted sci0
+          # window can surface as ReadDoubleWord/ReadWord instead.
+          if grep -Eq "Read[A-Za-z]* from non existing peripheral at 0x42800" "${LOG}" \
+              || grep -Eq "Write[A-Za-z]* to non existing peripheral at 0x42800" "${LOG}"; then
+            echo "::error::V2N101 M33-SM sci0 Renode boot e2e: sysbus reported no peripheral in the sci0 window (base 0x42800c00) -- the sci0 node is missing or moved in renesas_rzv2n.repl. See the renode-v2n-sci0-boot-log artifact."
             FAIL=1
           fi
 
