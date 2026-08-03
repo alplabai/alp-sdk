@@ -64,9 +64,12 @@ outright (`error: unexpected argument ... found`) — and left
 residual, plus asserted (wrongly) that this was the complete set.
 
 **Round 2** found the round-1 sweep had checked only the files its issue
-named, not the shape itself, and fixed the rest — thirteen more sites across
-seven additional files, plus two genuinely different rejected shapes the same
-under-scoped sweep missed entirely:
+named, not the shape itself, and fixed the rest — ten more `tan build`
+positional/`--board` sites (two of them `mproc-mailbox`'s own previously-
+flagged residual) across eight files, plus two genuinely different rejected
+shapes (six `tan validate <path>` sites, two `tan explain <code>` sites) the
+same under-scoped sweep missed entirely because it only ever grepped for
+`tan build`:
 
 - `examples/README.md` (×2), `examples/peripheral-io/i2c-device-hub/README.md`,
   `examples/peripheral-io/vendor-ext-composability/README.md`,
@@ -100,6 +103,11 @@ under-scoped sweep missed entirely:
   current mechanism is the `see: docs/diagnostics/ALP-Bxxx.md` hint line
   `tan validate`'s own output already carries. Rewrote both `docs/cli.md`
   mentions and the "You are..." front-door table row accordingly.
+- `docs/v0.6-tbd-and-assumptions.md` named a fourth: `` `tan build --emit
+  system-manifest` `` — `--emit` is not a `tan build` flag (`tan build` has
+  `--target`/`--manifest`, never `--emit`); reworded to name the actual SDK
+  call (`alp_orchestrate --emit system-manifest`) `tan build` consumes
+  internally.
 
 **Root cause of the round-1 miss and the fix**:
 `scripts/check_tan_docs_surface.py`'s `DOC_SOURCES` never included example
