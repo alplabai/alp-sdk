@@ -36,6 +36,11 @@ def model_group() -> None:
 @click.option("--metadata-root", type=click.Path(exists=True, path_type=Path),
               default=_DEFAULT_META, help="Path to the metadata/ root.")
 def build_cmd(board_path: Path, out_dir: Path, metadata_root: Path) -> None:
+    # #1125: models[].name flows straight into build_model()'s
+    # `out_dir / f"{name}.alpmodel"` -- the name allowlist + out_dir
+    # containment check now enforced there (the single write chokepoint,
+    # shared by every caller incl. tests) is what closes the traversal;
+    # a bad name surfaces as build_model()'s own ValueError.
     board = yaml.safe_load(board_path.read_text(encoding="utf-8"))
     sku = board["som"]["sku"]
     models = board.get("models", [])

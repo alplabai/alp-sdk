@@ -121,3 +121,38 @@ def test_build_model_passes_compile_opts_to_adapter(tmp_path):
                 metadata_root=_META, adapters=[CpuAdapter(), _Capture()],
                 compile_opts={"drpai": {"spec": "/abs/p.yaml"}})
     assert seen["opts"] == {"spec": "/abs/p.yaml"}
+
+
+# --------------------------------------------------------------------------
+# #1125: `name` reaches `out_dir / f"{name}.alpmodel"` directly -- build_model
+# is called by non-CLI callers too (this file), so the guard lives here, not
+# only behind the CLI's board.schema.json validation.
+# --------------------------------------------------------------------------
+
+def test_build_model_rejects_traversal_in_name(tmp_path):
+    src = tmp_path / "m.tflite"
+    src.write_bytes(b"TFL3-DUMMY")
+    out_dir = tmp_path / "out"
+    with pytest.raises(ValueError, match="invalid model name"):
+        build_model(sku="E1M-AEN801", name="../../../../tmp/evil", source=src,
+                    out_dir=out_dir, metadata_root=_META, adapters=[CpuAdapter()])
+    assert not out_dir.exists()
+
+
+def test_build_model_rejects_absolute_name(tmp_path):
+    src = tmp_path / "m.tflite"
+    src.write_bytes(b"TFL3-DUMMY")
+    out_dir = tmp_path / "out"
+    with pytest.raises(ValueError, match="invalid model name"):
+        build_model(sku="E1M-AEN801", name="/etc/passwd", source=src,
+                    out_dir=out_dir, metadata_root=_META, adapters=[CpuAdapter()])
+
+
+def test_build_model_valid_name_still_writes_in_out_dir(tmp_path):
+    src = tmp_path / "m.tflite"
+    src.write_bytes(b"TFL3-DUMMY")
+    out_dir = tmp_path / "out"
+    out = build_model(sku="E1M-AEN801", name="demo-model_1", source=src,
+                      out_dir=out_dir, metadata_root=_META, adapters=[CpuAdapter()])
+    assert out == out_dir / "demo-model_1.alpmodel"
+    assert out.is_file()
