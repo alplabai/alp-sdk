@@ -102,7 +102,7 @@ diff --git a/include/configs/rzv2n-dev.h b/include/configs/rzv2n-dev.h
 index ad8f46a..ac562a9 100644
 --- a/include/configs/rzv2n-dev.h
 +++ b/include/configs/rzv2n-dev.h
-@@ -70,7 +70,31 @@
+@@ -70,7 +70,48 @@
  	"sd2load=ext4load mmc 1:2 0x48080000 boot/Image;ext4load mmc 1:2 0x48000000 boot/r9a09g056n44-dev.dtb;run prodsdbootargs \0" \
  	"bootcmd_check=if mmc dev 1; then run sd2load; else run emmcload; fi \0"
  
@@ -123,13 +123,30 @@ index ad8f46a..ac562a9 100644
 + * vendor prodsd/prodemmcbootargs still run inside *load but are
 + * deliberately overridden (left untouched for patch safety).  The
 + * sd-vs-emmc root choice mirrors bootcmd_check.
-+ * FUTURE (per-SKU dtb): any EEPROM-manifest-derived fdtfile must be
-+ * set AFTER the leading "env default -a" wipe (i.e. from within this
-+ * override), and the dtb load will move out of bootcmd_check into
-+ * here, with the name injected per-MACHINE via a Kconfig string +
-+ * .cfg fragment (same channel as prod-boot.cfg). */
++ *
++ * SD dtb: the vendor sd2load env (above, untouched for patch safety)
++ * loads "boot/r9a09g056n44-dev.dtb" -- a name none of our KERNEL_DEVICETREE
++ * builds ever produce (V2N101/V2N102 build renesas/e1m-v2n101-x-evk.dtb,
++ * see meta-alp-sdk/conf/machine/e1m-v2n10{1,2}-a55.conf); that load
++ * silently fails (";"-chained, non-fatal) and bootimage would then boot
++ * the stale/garbage dtb already in RAM.  Re-load the correct dtb here,
++ * same address + mmc spec sd2load already uses (0x48000000, "mmc 1:2"),
++ * overwriting it before bootimage runs.  alp_root for the SD branch is
++ * also corrected: mmc1 is the carrier microSD (SDHI1, alias mmc1 in
++ * e1m-x-evk.dtsi) -> Linux /dev/mmcblk1, not mmcblk2 (no third
++ * controller exists on this SoM).  mmc0 (SDHI0 eMMC) -> mmcblk0 was
++ * already correct.
++ * FUTURE (V2M / per-SKU dtb): V2M SKUs build e1m-v2m101-x-evk.dtb
++ * instead (same shared u-boot binary) -- true per-SKU selection needs
++ * an EEPROM-manifest-derived fdtfile, set AFTER the leading
++ * "env default -a" wipe, injected per-MACHINE via a Kconfig string +
++ * .cfg fragment (same channel as prod-boot.cfg). The eMMC path's own
++ * dtb load (vendor emmcload, not visible in this patch's diff context)
++ * is out of this fix's scope. */
 +#define CONFIG_BOOTCOMMAND	"env default -a;run bootcmd_check;" \
-+	"if mmc dev 1; then setenv alp_root /dev/mmcblk2p2; else setenv alp_root /dev/mmcblk0p2; fi;" \
++	"if mmc dev 1; then " \
++	"ext4load mmc 1:2 0x48000000 boot/e1m-v2n101-x-evk.dtb;" \
++	"setenv alp_root /dev/mmcblk1p2; else setenv alp_root /dev/mmcblk0p2; fi;" \
 +	"setenv bootargs " ALP_BOOTARGS_BASE " root=${alp_root};" \
 +	"run bootimage"
  
