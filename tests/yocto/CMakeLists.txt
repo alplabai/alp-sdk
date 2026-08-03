@@ -185,6 +185,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
     target_link_libraries(alp_test_dispatch_cache_race PRIVATE alp::sdk Threads::Threads)
     target_include_directories(alp_test_dispatch_cache_race PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
         ${CMAKE_CURRENT_SOURCE_DIR}
     )
     target_compile_features(alp_test_dispatch_cache_race PRIVATE c_std_99)
@@ -592,6 +593,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         )
         target_link_libraries(alp_test_iot_mqtt PRIVATE alp::sdk)
         target_include_directories(alp_test_iot_mqtt PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
             ${CMAKE_CURRENT_SOURCE_DIR}
         )
         target_compile_features(alp_test_iot_mqtt PRIVATE c_std_99)
@@ -617,6 +619,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         )
         target_link_libraries(alp_test_audio_alsa PRIVATE alp::sdk)
         target_include_directories(alp_test_audio_alsa PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
             ${CMAKE_CURRENT_SOURCE_DIR}
         )
         target_compile_features(alp_test_audio_alsa PRIVATE c_std_99)
@@ -643,6 +646,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         )
         target_link_libraries(alp_test_security_openssl PRIVATE alp::sdk)
         target_include_directories(alp_test_security_openssl PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
             ${CMAKE_CURRENT_SOURCE_DIR}
         )
         target_compile_features(alp_test_security_openssl PRIVATE c_std_99)
@@ -667,6 +671,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
     target_link_libraries(alp_test_registry_sw_fallback PRIVATE alp::sdk)
     target_include_directories(alp_test_registry_sw_fallback PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
         ${CMAKE_CURRENT_SOURCE_DIR}
     )
     target_compile_features(alp_test_registry_sw_fallback PRIVATE c_std_99)
