@@ -2,7 +2,11 @@
 #
 # Renesas RZ/V2N MHU-B inter-core mailbox -- vendor+adapted FSP driver.
 
-# Renesas RZ MHU-B mailbox driver -- vendor-ext, BENCH-UNVERIFIED (alp-sdk #683).
+# Renesas RZ MHU-B mailbox driver -- vendor-ext (alp-sdk #683).  #697 (E1M-X
+# V2N-M1 silicon): init/attach and the A55->M33 receive path are
+# silicon-proven; mbox_send() (M33->A55) is unexercised and does not reach the
+# A55 on this topology -- see mbox_renesas_rz_mhu_b.c's header for the full
+# status.
 # RZ/V2N's MHU is the newer "MHU-B" IP: a non-linear 42-slot register crossbar
 # (hal_renesas drivers/rz/fsp/src/rzv/bsp/mcu/rzv2n/bsp_mhu_b.h) with only
 # channels {5, 11, 17, 23} valid, NOT the plain linear MHU upstream Zephyr's
@@ -15,17 +19,20 @@
 # zephyr/drivers/mbox/mbox_renesas_rz_mhu_b.c; binding:
 # zephyr/dts/bindings/mbox/renesas,rz-mhu-b-mbox.yaml.
 config MBOX_RENESAS_RZ_MHU_B
-	bool "Renesas RZ MHU-B mailbox (vendor-ext, BENCH-UNVERIFIED)"
+	bool "Renesas RZ MHU-B mailbox (vendor-ext, partial silicon proof)"
 	default y
 	depends on MBOX
 	depends on DT_HAS_RENESAS_RZ_MHU_B_MBOX_ENABLED
 	select USE_RZ_FSP_MHU_B
 	help
-	  Enable the Renesas RZ/V2N MHU-B mailbox driver. vendor-ext,
-	  BENCH-UNVERIFIED -- structurally adapted from the FSP plain-MHU
-	  r_mhu_ns module against the MHU-B register crossbar (bsp_mhu_b.h);
-	  Renesas has not shipped an r_mhu_b_ns FSP module for any part as of
-	  this port. Not yet validated against real MHU-B traffic on silicon.
+	  Enable the Renesas RZ/V2N MHU-B mailbox driver. vendor-ext --
+	  structurally adapted from the FSP plain-MHU r_mhu_ns module against
+	  the MHU-B register crossbar (bsp_mhu_b.h); Renesas has not shipped
+	  an r_mhu_b_ns FSP module for any part as of this port. #697 (E1M-X
+	  V2N-M1 silicon): init/attach and the A55->M33 receive path are
+	  silicon-proven; mbox_send() (M33->A55) is unexercised and does not
+	  reach the A55 on this topology -- see mbox_renesas_rz_mhu_b.c's
+	  header for the full status.
 
 config MBOX_BUSY_WAIT_TIMEOUT_US
 	int "MHU-B send busy-wait timeout (us) before returning -EBUSY"

@@ -101,7 +101,9 @@ topology:
 mailbox:
   # Renesas MHU-B. ADR 0017 Tier-1.5 (thin Zephyr glue over the vendored
   # r_mhu_b_ns FSP module) -- zephyr/drivers/mbox/mbox_renesas_rz_mhu_b.c.
-  # Silicon-proven end-to-end (attach + echo round-trip, A55<->M33): #697.
+  # #697 (E1M-X V2N-M1 silicon): init/attach and the A55->M33 receive path are
+  # silicon-proven. mbox_send() (M33->A55) is UNEXERCISED and does not reach the A55 on
+  # this topology -- see zephyr/drivers/mbox/mbox_renesas_rz_mhu_b.c for the full status.
   controller: renesas_mhu
   channels:
     - { id: 0, reserved_for: alp_default_rpmsg }

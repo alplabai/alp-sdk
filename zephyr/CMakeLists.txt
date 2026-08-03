@@ -291,8 +291,11 @@ endif()
 # zephyr/drivers/mbox/r_mhu_b_ns/, gated by USE_RZ_FSP_MHU_B; the Zephyr glue
 # (distinct compatible `renesas,rz-mhu-b-mbox`, NOT a patch of
 # mbox_renesas_rz_mhu.c) is zephyr/drivers/mbox/mbox_renesas_rz_mhu_b.c, gated
-# by MBOX_RENESAS_RZ_MHU_B.  vendor-ext, BENCH-UNVERIFIED -- see
-# r_mhu_b_ns.c's file header for the register-semantic notes.
+# by MBOX_RENESAS_RZ_MHU_B.  vendor-ext.  #697 (E1M-X V2N-M1 silicon):
+# init/attach and the A55->M33 receive path are silicon-proven; mbox_send()
+# (M33->A55) is unexercised and does not reach the A55 on this topology -- see
+# mbox_renesas_rz_mhu_b.c's header for the full status and r_mhu_b_ns.c's file
+# header for the register-semantic notes.
 zephyr_library_sources_ifdef(CONFIG_MBOX_RENESAS_RZ_MHU_B
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mbox/mbox_renesas_rz_mhu_b.c)
 if(CONFIG_USE_RZ_FSP_MHU_B)

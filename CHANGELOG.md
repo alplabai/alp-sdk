@@ -64,6 +64,52 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
     guard against a malformed value that doesn't depend on `--check`
     having run at all.
 
+### Fixed — MHU-B mailbox verification claim overstated the send path (#1169)
+
+`mbox_renesas_rz_mhu_b.c` and the four V2N/V2M SoM presets said `SILICON-PROVEN`
+for the driver as a whole; #697 only silicon-proved init/attach and the
+A55->M33 receive path (`R_MHU_NS5.MSG` -> M33 NVIC IRQ 293). `mbox_send()`
+(M33->A55) is unexercised and does not reach the A55 on this topology — the
+NS-channel RSP interrupt it raises (`R_MHU_NS5.RSP`) routes to no A55 GIC line;
+only the MHU-B CA55-routed SWINT units 12-15 (INTID 436-439 / GIC_SPI 404-407)
+do. `examples/multicore/rpmsg-v2n/m33_sm/src/main.c` already works around this
+by writing SWINT unit 12's SET register directly instead of calling
+`mbox_send()`. Bounded the claim to what #697 actually proved across all eight
+sites that describe this driver: the `mbox_renesas_rz_mhu_b.c` header, the four
+V2N/V2M SoM presets, the `renesas,rz-mhu-b-mbox.yaml` binding, the M33 board DTS
+comment, the `zephyr/CMakeLists.txt` build comment, and
+`zephyr/kconfigs/vendor-renesas-mhu.kconfig`'s prompt string and help text —
+the prompt being the one a reader meets in `menuconfig`. A repo-wide
+`git grep -i BENCH-UNVERIFIED | grep -iE 'mhu.b|mhu_b|rz-mhu'` now returns
+nothing. The Alif MHUv2, HWSEM, ADC, PDM and comparator drivers keep their own
+`BENCH-UNVERIFIED` markings, which remain accurate.
+
+### Added — enforce the V2N Renode sci0 console model (#1158 remainder)
+
+- **#1182 added a real sci0 UART model to `metadata/renode/renesas_rzv2n.repl`
+  and the opt-in `tests/renode/v2n_m33_sci0_console.{conf,overlay}`, but
+  nothing executed any of it.** The required `renode · V2N101 --sim-mode
+  socket contract` context (`pr-renode-sim-mode.yml`) only builds the
+  M33-SM image — with the default headless `ram_console` overlay, not the
+  sci0 one — and never boots it; its e2e steps are no-op `echo`s pending
+  tan-cli#77. So the sci0 model could regress silently. New advisory job
+  `pr-renode-v2n-sci0-smoke.yml` (`renode · V2N101 M33-SM sci0 console`)
+  builds the M33-SM `hello_world` WITH the sci0 overlay/conf and boots it
+  under the pinned Renode v1.16.1, polling the log for the real boot
+  banner + app console line the sci0 Python peripheral emits. Mirrors
+  `pr-renode-aen-smoke.yml`'s advisory-then-graduate pattern (issue #974)
+  — not required yet, so it cannot block anyone's merge to `dev` while the
+  poll-a-log-for-a-string pattern proves itself. Mutation-tested locally:
+  deleting the `sci0` node from `renesas_rzv2n.repl` fails the boot e2e
+  (observed: `sysbus: [cpu: 0x8006624] ReadByte from non existing
+  peripheral at 0x42800C1C` — CESR, offset `0x1C`, the first register
+  `R_SCI_B_UART_Open()` reads — no boot banner); desyncing the overlay's
+  `chosen` node fails the build step
+  itself (`devicetree error: undefined node label`). The existing
+  required `renode · V2N101 --sim-mode socket contract` context is
+  untouched — it still posts `skipping` for most PRs and its e2e steps
+  are still no-ops; that remains open, tracked in #1158.
+
 ### Fixed — three V2N build/boot defects (#1175, #1176, #1158)
 
 - **microSD *and* eMMC boot loaded a dtb the image never builds; microSD
@@ -112,11 +158,65 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   bbappends never fired and the bake still "succeeded" with none of
   that payload. Verified against each vendor layer's own
   `core-image-%.bbappend` + `layer.conf` `BBFILE_COLLECTIONS` name in a
-  BSP v6.30 Source Code checkout. `alp-image-edge.bb` now installs each
-  layer's payload explicitly, gated on the layer's collection being
-  present (`rz-drpai` → `lib-tvm kernel-module-mmngr`, `meta-rz-codecs`
-  → `drp-fw`, `rz-opencva` → `opencv oca`) so a build that legitimately
-  drops an RZ/V feature layer still parses.
+  BSP v6.30 Source Code checkout. `alp-image-edge.bb` initially installed
+  each layer's payload explicitly, gated on the layer's collection —
+  since superseded by the follow-up below, which relocates that wiring
+  to a shared, single-source home instead of an image-recipe block.
+- **`alp-image-prod` and `alp-image-base` had the identical #1176 silent
+  omission, and the fix above still left a second, one-level-deeper copy
+  of the same defect in the SDK sysroot task.** Closed by what each
+  piece of payload is actually for, not by copy-pasting the edge block
+  everywhere: DRP-AI3's runtime (`meta-rz-drpai`: `lib-tvm
+  kernel-module-mmngr`) is the SoC's core NPU accelerator, not
+  camera/display-tied, so it now lives once in `alp-image-common.inc`
+  and every image (`base`/`prod`/`edge`) installs it from there.
+  `meta-rz-codecs` (`drp-fw`) and `meta-rz-opencva` (`opencv oca`) exist
+  to feed a GStreamer/vision pipeline, so they ride the `alp-camera`
+  FEATURE itself — `packagegroup-alp-camera.bb`'s `RDEPENDS`, gated the
+  same way — rather than any image recipe: `alp-image-prod` and
+  `alp-image-edge` (both already `alp-camera`-enabled) get the identical
+  payload through that one shared gate, and a customer's own
+  `alp-image-base`-derived image that turns `alp-camera` on gets it too,
+  automatically, with no per-image or per-customer copy needed.
+  Additionally ported the vendor bbappends' `TOOLCHAIN_TARGET_TASK`
+  entries (`drpai` from `meta-rz-drpai`, `drp` from `meta-rz-codecs` /
+  `meta-rz-opencva`) into `alp-image-common.inc`, so `bitbake
+  alp-image-* -c populate_sdk` now actually produces `<linux/drpai.h>` /
+  `<linux/drp.h>` in the SDK sysroot — `meta-alp-sdk/README.md`
+  previously (and incorrectly) documented those headers as appearing
+  automatically from layer presence alone, which was the same silent-
+  omission belief that caused #1176 in the first place; corrected.
+- **Review pass on the above: the feature-gated `packagegroup-alp-camera`
+  RDEPENDS could abort `do_rootfs` on a non-RZ MACHINE.** `drp-fw` carries
+  `COMPATIBLE_MACHINE = "(rzv2h-family|rzv2n-family)"`; a tree that keeps
+  `meta-rz-codecs` in `bblayers.conf` (as `conf/layer.conf`'s
+  `LAYERRECOMMENDS_alp-sdk` recommends) while building `MACHINE=e1m-aen801-a32`
+  or `e1m-nx9101-a55` would skip that recipe, leaving the packagegroup's
+  hard `RDEPENDS` with no provider — a `do_rootfs` abort, not a graceful
+  skip, since `packagegroup-alp-camera` defaulted to `allarch`
+  (`packagegroup.bbclass`'s own comment: `PACKAGE_ARCH` must move to
+  `MACHINE_ARCH` before `inherit packagegroup` whenever content varies by
+  `MACHINE_FEATURES`, which this now does). Fixed by setting
+  `PACKAGE_ARCH = "${MACHINE_ARCH}"` and AND-ing a `MACHINE_FEATURES`
+  `v2n` check alongside the existing `BBFILE_COLLECTIONS` gate (same fix
+  applied to `alp-image-common.inc`'s DRP-AI `RDEPENDS`, since
+  `kernel-module-mmngr` has no `COMPATIBLE_MACHINE` guard of its own to
+  fall back on). Also: corrected `LAYERRECOMMENDS_alp-sdk` (it named
+  `meta-rz-drpai`/`meta-rz-opencva` by directory, but their real
+  `BBFILE_COLLECTIONS` names are `rz-drpai`/`rz-opencva` — matched
+  nothing); corrected `alp-sdk_0.6.bb`'s comment repeating the same
+  "headers appear from layer presence alone" belief and its stale
+  `alp-image-edge` `dx-rt` cross-reference; scoped the "opencv
+  deliberately not ported" comment in `alp-image-common.inc` to the
+  DRP-AI vendor bbappend's own python3-demo-chain copy — `opencv` itself
+  does ship, via `meta-rz-opencva`. Settled by inspection of the vendor
+  sources only; nobody in this environment can run `bitbake
+  alp-image-prod` for a non-RZ MACHINE to confirm `do_rootfs` succeeds.
+  Also established (not merely left unfixed) that `meta-rz-graphics`,
+  which #1176's Impact list named as a fourth affected layer, was never
+  affected: it wires through a conf-level `IMAGE_INSTALL:append:mali-family`
+  with no `core-image-%.bbappend` at all, so the recipe-name-matching
+  defect the other three layers had never applied to it.
 - **The V2N Renode model had no UART, so `tan renode` produced no
   console output at all (#1158).** The M33-SM stays headless in
   production (no Pmod USB-UART populated on the SoM), so
@@ -158,9 +258,11 @@ say so explicitly in the four V2N/V2M SoM presets, rather than staying silent.
 The MHU mailbox already carries an ADR 0017 Tier-1.5 declaration in
 `zephyr/drivers/mbox/mbox_renesas_rz_mhu_b.c`, just an aspirational
 `BENCH-UNVERIFIED` one — the DT node it backs is the exact one
-`examples/multicore/rpmsg-v2n/m33_sm` exercises silicon-proven under #697, so
-the header now says `SILICON-PROVEN` and cites the evidence. All four SoM
-presets now cross-reference this from their `mailbox:` block.
+`examples/multicore/rpmsg-v2n/m33_sm` exercises under #697, so the header now
+cites that evidence: init/attach and the A55->M33 receive path are
+silicon-proven, while `mbox_send()` (M33->A55) remains unexercised (see the
+correction below). All four SoM presets now cross-reference this from their
+`mailbox:` block.
 
 **"Nine" SoC peripheral instances had routed pads but no SoM-level
 declaration (#1170).** `metadata/e1m_modules/v2n/renesas-peripheral-map.tsv`
