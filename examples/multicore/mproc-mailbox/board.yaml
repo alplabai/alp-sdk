@@ -28,17 +28,20 @@ cores:
 # `src/backends/mproc/zephyr_drv.c` and both main.c's hardcode --
 # it is NOT a free-form label like an rpmsg channel name.
 #
-# This carve-out resolves `status: blocked` today (`--emit
-# system-manifest`): E1M-AEN801 has no `memory_map:` base yet (same as
-# every other AEN `ipc:` entry in this repo, e.g. rpmsg-aen) -- pending
-# real AEN memory-map addresses, tracked in metadata/e1m_modules/
-# E1M-AEN801.yaml. The carve-out being blocked does not affect this
-# example: the generated `<alp/system_ipc.h>` / DTS reservation it
-# would drive aren't consumed here (main.c / peer/main.c open
-# "alp_shmem0" by its DT alias, wired by the board overlay directly,
-# not by the orchestrator's resolved address) -- only the
-# `_emit_cross_core_shmem_cache` Kconfig path this PR adds reads this
-# block, and that path doesn't need resolution to fire.
+# #1069 gave E1M-AEN801 a real `memory_map:` (metadata/e1m_modules/
+# E1M-AEN801.yaml), but this carve-out still resolves `status: blocked`
+# (`--emit system-manifest`): the five fine-grained regions
+# (mcuboot/he_slot0/hp_slot0/reserved/storage) are MRAM, not RAM, and are
+# marked `carveout: false` so the allocator can't silently place this
+# raw_shmem ring inside flash-class memory; `mram_main` (the only other
+# region accessible from both m55_hp and m55_he) deliberately keeps
+# `base: TBD`. The carve-out being blocked does not affect this example:
+# the generated `<alp/system_ipc.h>` / DTS reservation it would drive
+# aren't consumed here (main.c / peer/main.c open "alp_shmem0" by its DT
+# alias, wired by the board overlay directly, not by the orchestrator's
+# resolved address) -- only the `_emit_cross_core_shmem_cache` Kconfig path
+# this PR adds reads this block, and that path doesn't need resolution to
+# fire.
 ipc:
   - kind: raw_shmem
     endpoints: [m55_hp, m55_he]
