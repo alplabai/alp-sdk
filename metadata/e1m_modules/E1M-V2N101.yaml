@@ -26,8 +26,13 @@ on_module:
   supervisor_mcu:       gd32g553
   ethernet_phy:         rtl8211fdi
   ethernet_phy_count:   2
-  nor_flash:            xspi                   # on-module via Renesas xSPI0
-  emmc:                 sd0                    # on-module via Renesas SD0
+  # nor_flash / emmc are routing annotations (SoC controller the on-module
+  # storage is wired to), not chip slugs -- no chips/<part>/ driver exists
+  # for either (see scripts/alp_orchestrate/slugs.py
+  # _ON_MODULE_NON_CHIP_FIELDS). ADR 0017: no tier -- there is no driver to
+  # tier yet, not an aspirational one. #1169.
+  nor_flash:            xspi                   # on-module via Renesas xSPI0; no alp-sdk driver yet
+  emmc:                 sd0                    # on-module via Renesas SD0; no alp-sdk driver yet
 
   i2c_devices:
     brd_i2c:
@@ -94,12 +99,39 @@ topology:
 # need one).
 
 mailbox:
+  # Renesas MHU-B. ADR 0017 Tier-1.5 (thin Zephyr glue over the vendored
+  # r_mhu_b_ns FSP module) -- zephyr/drivers/mbox/mbox_renesas_rz_mhu_b.c.
+  # Silicon-proven end-to-end (attach + echo round-trip, A55<->M33): #697.
   controller: renesas_mhu
   channels:
     - { id: 0, reserved_for: alp_default_rpmsg }
     - { id: 1, reserved_for: app }
     - { id: 2, reserved_for: app }
     - { id: 3, reserved_for: power_mgmt }
+
+# Renesas on-die peripheral instances with pads routed at the module edge
+# (metadata/e1m_modules/v2n/renesas-peripheral-map.tsv) but no dedicated
+# on_module: role -- bus/interface instances, not populated parts, so no
+# chips/*.yaml manifest applies.  Declared here so the instance is VISIBLE
+# to the SoM model (#1170); DT/pinctrl generation from this layer is #655,
+# not yet built, so `driver_status: none` is accurate for all of them.
+# i2s_ssiu0/1 each cover a paired SSIU channel group (SSIU1+SSIU2 share
+# BCK/WS with only SSIU2 adding a second SDATA line, same for SSIU3+SSIU4)
+# -- two logical I2S instances, matching ALP_E1M_X_I2S_COUNT in
+# include/alp/e1m_x_pinout.h, not four independent ones.
+soc_peripheral_instances:
+  - { instance: i3c30,     class: i3c,  silicon_peripheral: "I3C_SCL30/SDA30",              driver_status: none }
+  - { instance: riic1,     class: i2c,  silicon_peripheral: "RIIC1_SCL1/SDA1",               driver_status: none }
+  - { instance: riic2,     class: i2c,  silicon_peripheral: "RIIC2_SCL2/SDA2",               driver_status: none }
+  - { instance: rspi0,     class: spi,  silicon_peripheral: "RSPI0_*",                       driver_status: none }
+  - { instance: sci_spi2,  class: spi,  silicon_peripheral: "SCI_SPI2_*",                    driver_status: none }
+  - { instance: sci_spi3,  class: spi,  silicon_peripheral: "SCI_SPI3_*",                    driver_status: none }
+  - { instance: pdm0,      class: pdm,  silicon_peripheral: "PDM0_PDMCLK0x/PDMDAT0x",         driver_status: none }
+  - { instance: canfd2,    class: can,  silicon_peripheral: "CANFD2_CRX2/CTX2",               driver_status: none }
+  - { instance: canfd3,    class: can,  silicon_peripheral: "CANFD3_CRX3/CTX3",               driver_status: none }
+  - { instance: uart1,     class: uart, silicon_peripheral: "UART1_RXD1/TXD1",                driver_status: none }
+  - { instance: i2s_ssiu0, class: i2s,  silicon_peripheral: "SSIU1_SSI1_*/SSIU2_SSI2_SDATA",  driver_status: none }
+  - { instance: i2s_ssiu1, class: i2s,  silicon_peripheral: "SSIU3_SSI3_*/SSIU4_SSI4_SDATA",  driver_status: none }
 
 # E1M pads / instances that route through the on-module GD32G553
 # IO MCU (the V2N family's peripheral bridge).  RZ/V2N silicon

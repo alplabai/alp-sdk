@@ -7,6 +7,48 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — three V2N/V2M metadata-declaration gaps (#1155, #1169, #1170)
+
+**`catalog.json` had no key for PDM, SD1, WIFI_SDIO or xSPI (#1155).** PDM was
+already correctly projected; the real gaps were xSPI/OSPI (structurally
+recorded in `external_memory_interfaces`, never read by `gen_catalog.py`) and
+SD1/WIFI_SDIO (both fold into n44.json's single `sdio: 2` count, so the two
+routed instances were indistinguishable from the class boolean alone).
+`scripts/gen_support_matrix.py` gained an `xSPI/OSPI` peripheral class
+(matches any `external_memory_interfaces` entry whose `kind` contains "spi",
+vendor-normalised across xSPI/OctalSPI/HexSPI/FlexSPI); `scripts/gen_catalog.py`
+gained a named-instance projection sourced from the SoM's routed pin-mux table
+(`metadata/pinmux/<family>.yaml`) for the two instances the SoC-level count
+can't split. Regenerated `metadata/catalog.json` and
+`docs/peripheral-support-matrix.md`.
+
+**eMMC, xSPI and the MHU mailbox had no chip metadata or driver tier (#1169).**
+`nor_flash`/`emmc` are on-die routing annotations with no `chips/*.yaml`
+manifest and, confirmed by grep, no alp-sdk driver anywhere in the tree — now
+say so explicitly in the four V2N/V2M SoM presets, rather than staying silent.
+The MHU mailbox already carries an ADR 0017 Tier-1.5 declaration in
+`zephyr/drivers/mbox/mbox_renesas_rz_mhu_b.c`, just an aspirational
+`BENCH-UNVERIFIED` one — the DT node it backs is the exact one
+`examples/multicore/rpmsg-v2n/m33_sm` exercises silicon-proven under #697, so
+the header now says `SILICON-PROVEN` and cites the evidence. All four SoM
+presets now cross-reference this from their `mailbox:` block.
+
+**"Nine" SoC peripheral instances had routed pads but no SoM-level
+declaration (#1170).** `metadata/e1m_modules/v2n/renesas-peripheral-map.tsv`
+routes I3C ch30, RIIC1, RIIC2, RSPI0, SCI_SPI2, SCI_SPI3, PDM0, CANFD2,
+CANFD3, UART1, and two paired SSIU channel groups — verified line-by-line
+against the TSV, all genuine. The issue's own body table already runs to ten
+row-groups, not nine: `CANFD2`/`CANFD3` is one row for two distinct
+channel-numbered instances, and `SSIU1-4` reads as one row but is two paired
+I2S instances (SSIU1+SSIU2 share BCK/WS, SSIU3+SSIU4 likewise — matching
+`ALP_E1M_X_I2S_COUNT == 2` in `include/alp/e1m_x_pinout.h`, not one merged
+instance or four independent ones). A new `soc_peripheral_instances:` block
+(schema: `metadata/schemas/som-preset-v1.schema.json`) declares all twelve
+individual instances this resolves to, each with its class, its TSV
+`silicon_peripheral` name for traceability, and an honest `driver_status:
+none` (no DT node targets any of them yet; DT/pinctrl generation from this
+layer is #655, not this change).
+
 ### Fixed — five memory-safety defects in the AEN Zephyr drivers (#1119, #1120, #1121, #1122, #1124)
 
 `flash_mram_alif.c`'s `flash_range_is_valid()` computed `offset + len` in
