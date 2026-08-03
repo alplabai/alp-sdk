@@ -91,15 +91,9 @@ static int mhuv2_send(const struct device *dev, int wait, uint32_t ch_id,
 	int ret = 0;
 
 	ARG_UNUSED(wait);
+	ARG_UNUSED(size);
 
 	if ((dev == NULL) || (pdata == NULL) || ch_id >= data->max_ch) {
-		return -EINVAL;
-	}
-	/* CH_SET is a single 32-bit register: every transfer is exactly
-	 * sizeof(uint32_t) bytes.  Reject anything else instead of always
-	 * reading/writing 4 bytes regardless of what the caller declared --
-	 * a short buffer read past its end is out-of-bounds. */
-	if (size != (int)sizeof(uint32_t)) {
 		return -EINVAL;
 	}
 
@@ -155,19 +149,6 @@ static uint32_t mhuv2_max_ch_val_get(const struct device *dev)
 	struct mhuv2_device_data *drv_data = DRV_MHUV2_DATA(dev);
 
 	return drv_data->max_ch;
-}
-
-/**
- * @fn      static int mhuv2_max_data_size_get(const struct device *dev)
- * @brief   Report the max payload size of one MHUV2 transfer
- * @param[in] dev : pointer to Runtime device structure
- * @return  sizeof(uint32_t) -- CH_SET/CH_ST is a single 32-bit register.
- */
-static int mhuv2_max_data_size_get(const struct device *dev)
-{
-	ARG_UNUSED(dev);
-
-	return (int)sizeof(uint32_t);
 }
 
 /**
@@ -381,15 +362,13 @@ static int mhuv2_poll_out(const struct device *dev, uint32_t ch_id,
 	bool prev_irq_en_sts = false;
 	int ret;
 
+	ARG_UNUSED(size);
+
 	if (!config->irq_type) {
 		return -ENOTSUP;
 	}
 
 	if ((dev == NULL) || (pdata == NULL) || ch_id >= data->max_ch) {
-		return -EINVAL;
-	}
-	/* CH_SET is a single 32-bit register -- see mhuv2_send(). */
-	if (size != (int)sizeof(uint32_t)) {
 		return -EINVAL;
 	}
 
@@ -469,15 +448,13 @@ static int mhuv2_poll_in(const struct device *dev, uint32_t ch_id,
 	struct mhuv2_device_data *data = DRV_MHUV2_DATA(dev);
 	uint64_t usec_timeout;
 
+	ARG_UNUSED(size);
+
 	if (config->irq_type) {
 		return -ENOTSUP;
 	}
 
 	if ((dev == NULL) || (pdata == NULL) || ch_id >= data->max_ch) {
-		return -EINVAL;
-	}
-	/* CH_ST is a single 32-bit register -- see mhuv2_send(). */
-	if (size != (int)sizeof(uint32_t)) {
 		return -EINVAL;
 	}
 
@@ -496,16 +473,34 @@ static int mhuv2_poll_in(const struct device *dev, uint32_t ch_id,
 	return -EAGAIN;
 }
 
-static struct ipm_driver_api mhuv2_driver_api = { .send              = mhuv2_send,
-	                                              .register_callback = mhuv2_register_cb,
-	                                              .max_data_size_get = mhuv2_max_data_size_get,
-	                                              .max_id_val_get    = mhuv2_max_ch_val_get,
-	                                              .set_enabled       = mhuv2_set_enabled,
+/**
+ * @fn      static int mhuv2_max_data_size_get(const struct device *dev)
+ * @brief   Report the maximum payload size of a single MHUV2 transfer.
+ * @param[in] dev : pointer to Runtime device structure
+ * @return  sizeof(uint32_t) -- CH_SET/CH_ST is a single 32-bit register.
+ *
+ * Mandatory in struct ipm_driver_api: ipm_max_data_size_get() dereferences it
+ * unconditionally, so leaving it NULL faults any caller that asks.
+ */
+static int mhuv2_max_data_size_get(const struct device *dev)
+{
+	ARG_UNUSED(dev);
+
+	return (int)sizeof(uint32_t);
+}
+
+static struct ipm_driver_api mhuv2_driver_api = {
+	.send			= mhuv2_send,
+	.register_callback	= mhuv2_register_cb,
+	.max_data_size_get	= mhuv2_max_data_size_get,
+	.max_id_val_get		= mhuv2_max_ch_val_get,
+	.set_enabled		= mhuv2_set_enabled,
 #ifdef CONFIG_IPM_CALLBACK_ASYNC
-	                                              .complete = NULL,
+	.complete		= NULL,
 #endif
-	                                              .poll_out = mhuv2_poll_out,
-	                                              .poll_in  = mhuv2_poll_in };
+	.poll_out		= mhuv2_poll_out,
+	.poll_in		= mhuv2_poll_in
+};
 
 #if defined(CONFIG_ARM_MHUV2)
 #define ARM_MHUV2_DATA_INST(n)						\
