@@ -1,4 +1,4 @@
-"""Top-level click group for the `alp` CLI."""
+"""Top-level click group for alp-sdk's internal/reference CLI."""
 
 from __future__ import annotations
 

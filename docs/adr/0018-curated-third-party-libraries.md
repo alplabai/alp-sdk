@@ -3,6 +3,10 @@
 Status: Accepted
 Date: 2026-07-03
 
+> **CLI note (2026-08-03):** The dated body uses the then-current `alp doctor`
+> name. The user command surface has since moved to Python Tan (ADR 0020); the
+> library ownership, capability, and no-fork decisions here are unchanged.
+
 alp-sdk's next developer-experience step after backend completeness is
 letting customers pull common third-party libraries (GUI, DSP, cloud,
 robotics, scripting) into a project with **one declaration** — without

@@ -359,15 +359,15 @@ def _check_jlink() -> CheckResult:
 
 
 def _check_tan() -> CheckResult:
-    # tan is the standalone build executor (ADR 0020) -- alp-sdk itself is
-    # plans-only, so a plan-only user (CI validating board.yaml, no build)
-    # may not have it. WARN-only, never FAIL.
+    # Tan is the standalone Python planner/executor (ADR 0020). SDK-reference
+    # emit/validation work may intentionally run without it. WARN-only.
     found = shutil.which("tan")
     if found is None:
         return CheckResult(
             "tan", WARN, "tan (build executor) not found on PATH",
-            "Install it: cargo install --git https://github.com/alplabai/"
-            "tan-cli --bin tan (not needed if you only emit/validate plans).",
+            "See docs/cli.md: use tan-cli/dev during the v0.5 port, then the "
+            "release installer from v0.5 onward (not needed for direct SDK "
+            "reference emit/validation work).",
         )
     ver = _tool_version(["tan", "--version"])
     label = f"tan {ver[0]}.{ver[1]} ({found})" if ver else f"tan present ({found})"

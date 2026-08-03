@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/bootstrap-v1.schema.json",
   "title": "ALP Bootstrap Facts v1",
-  "description": "Validates metadata/bootstrap.json -- the single source of truth for the Zephyr-workspace-assembly FACTS scripts/bootstrap.sh and scripts/bootstrap.ps1 both read today; tan (Rust, cross-platform) has read the same facts since tan-cli PR #55 (tan-core's parse_bootstrap_manifest / BootstrapFacts), not merely an INTENDED future consumer (issue #917). Facts only; control flow (ZEPHYR_BASE reuse/rejection, venv idempotency, .west branching) stays as CODE in each executor -- this schema deliberately has no step/action shape. scripts/check_bootstrap_manifest.py is the drift gate that keeps this file, west.yml's zephyr revision, and each CI workflow's own Zephyr pin in lockstep (see that script's own module docstring for the full list of checks it runs).",
+  "description": "Validates metadata/bootstrap.json -- the single source of truth for the Zephyr-workspace-assembly FACTS scripts/bootstrap.sh, scripts/bootstrap.ps1, and Python Tan read today (issue #917). Facts only; control flow (ZEPHYR_BASE reuse/rejection, venv idempotency, .west branching) stays as CODE in each executor -- this schema deliberately has no step/action shape. scripts/check_bootstrap_manifest.py is the drift gate that keeps this file, west.yml's zephyr revision, and each CI workflow's own Zephyr pin in lockstep (see that script's own module docstring for the full list of checks it runs).",
   "type": "object",
   "additionalProperties": false,
   "required": ["_comment", "schemaVersion", "zephyr", "venv", "prerequisites", "west", "pip", "verdict", "env", "nativeLibHints", "manualInstallHints"],
@@ -32,7 +32,7 @@
         "pythonMinVersion": {
           "type": "string",
           "pattern": "^[0-9]+\\.[0-9]+$",
-          "description": "Zephyr's REAL build-time Python floor -- the `PYTHON_MINIMUM_REQUIRED` this pinned Zephyr revision's own `cmake/modules/python.cmake` hardcodes, which `west build`'s CMake configure enforces regardless of what bootstrap accepted. Deliberately a SEPARATE key from `prerequisites.pythonMinVersion`, not a replacement for it (issue #1078): that key is host-universal -- every backend's build-plan emission runs `alp_project.py`, not just Zephyr's, so raising it to 3.12 would refuse a Yocto-only or metadata-only host that never touches Zephyr, and 3.12 is unreachable via `apt-get install python3` on the Ubuntu 22.04 / Debian 12 hosts this repo's own docs recommend. This key exists so the SDK -- not a hand-typed constant in a consumer -- stays the single source of truth for the Zephyr-scoped number: `scripts/check_bootstrap_manifest.py` derives the real value straight from the pinned Zephyr checkout's `cmake/modules/python.cmake` (`git show <rev>:cmake/modules/python.cmake`) and fails if this field disagrees, so a Zephyr version bump that changes its own floor cannot drift silently the way a hand-typed copy would. Neither `scripts/bootstrap.sh` nor `scripts/bootstrap.ps1` reads or enforces this value today -- both still gate only on `prerequisites.pythonMinVersion` (a bootstrap-of-the-bootstrap floor check has to run before Zephyr's own CMake ever does); a project-aware executor enforcing this Zephyr-scoped floor (e.g. tan, once it reads this field) is the still-outstanding consumer-side half of issue #1078, gated on tan v0.6.0 (tan-cli#270)."
+          "description": "Zephyr's REAL build-time Python floor -- the `PYTHON_MINIMUM_REQUIRED` this pinned Zephyr revision's own `cmake/modules/python.cmake` hardcodes. Deliberately separate from the SDK tooling floor in `prerequisites.pythonMinVersion` (issue #1078). `scripts/check_bootstrap_manifest.py` derives the real value from the pinned Zephyr revision and fails on drift; Python Tan's bootstrap and doctor combine this value with the manifest floor and enforce the effective maximum for a Zephyr workspace."
         }
       }
     },
@@ -133,7 +133,7 @@
         },
         "editableInstall": {
           "type": "string",
-          "description": "Target `pip install -e <target>` installs -- the ${SDK_ROOT}-tokened alp-sdk checkout (tan's Python backend, alp_cli)."
+          "description": "Target `pip install -e <target>` installs -- the ${SDK_ROOT}-tokened alp-sdk checkout, including the SDK's internal/reference alp_cli tools used by maintenance and surviving west commands."
         }
       }
     },
@@ -141,7 +141,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["blockingPhases", "partialNoteTemplate", "incompleteMessageTemplate", "incompleteRemedy"],
-      "description": "The single source for the closing-verdict rule (issue #1038 / tan-cli#220): each pip-install phase below stays non-fatal in itself -- the workspace is left on disk regardless of which packages failed -- but a run that hit one of `blockingPhases` has NOT produced an environment that can do what it was bootstrapped for, and must not report unqualified success. Both scripts/bootstrap.sh and scripts/bootstrap.ps1 read this object (instead of each hardcoding the phase set and the wording a second time); tan-cli's own `WORKSPACE_BLOCKING` (crates/tan-cli/src/commands/bootstrap/steps.rs) declares the identical three phase IDs independently -- tan does not read this manifest key today, so keeping the two declarations in sync across repos is still a by-hand contract, not a mechanically-gated one.",
+      "description": "The single source for the closing-verdict rule (issue #1038 / tan-cli#220): each pip-install phase below stays non-fatal in itself -- the workspace is left on disk regardless of which packages failed -- but a run that hit one of `blockingPhases` has NOT produced an environment that can do what it was bootstrapped for, and must not report unqualified success. Both SDK bootstrap scripts read this object; Python Tan mirrors the phase IDs in `python/tan/commands/bootstrap_cmd.py::WORKSPACE_BLOCKING`, with parity asserted in tan-cli's tests.",
       "properties": {
         "blockingPhases": {
           "type": "array",

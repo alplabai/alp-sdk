@@ -54,9 +54,13 @@ Two loaders fan `board.yaml` into per-core slices:
 - `python -m alp_orchestrate --emit {system-manifest,build-plan,ipc-contract-h,dts-reservations,dts-partitions,storage-mounts-c,tfm-sysbuild-conf,kconfig}`
   — the cross-core / system artefacts.
 
-`tan --project <app-dir> build` is the convenience wrapper: it consumes the
-SDK's `--emit build-plan`, materialises the per-slice config, then runs each
-slice's native build command.
+`tan build --project <app-dir>` is the customer wrapper. The current Python
+implementation carries a relocated in-process planner, reads the selected
+alp-sdk checkout's metadata/schemas, materialises the per-slice config, then
+runs each slice's native build command. The SDK's own `--emit build-plan` and
+`--emit system-manifest` remain the inspectable parity/reference producer while
+the port settles; emit them directly when reviewing what a `board.yaml`
+resolves to.
 
 The `--emit` surface is the **machine-readable contract** other tools consume
 (ADR 0014, `docs/adr/0014-build-plan-emit-cli-contract.md`). When you need to
@@ -68,22 +72,20 @@ rather than guessing.
 An agent's loop here is: generate, then run the validators, then fix what they
 report.
 
-- `tan doctor --build` — HW-free build-readiness preflight: checks `west`,
+- `tan doctor` — HW-free build/flash-readiness preflight: checks `west`,
   `cmake`, `ninja`, the pinned Zephyr version, the Zephyr SDK, etc., and
   prints a remediation hint per failing check (`--format json` for machine
   consumption; there's no `--strict`). Run it first on a fresh checkout to
-  find why a build won't work before you build. (Plain `tan doctor`, no
-  `--build`, is a different debug-readiness preflight — see
-  [`docs/cli.md`](docs/cli.md).)
-- `tan validate --board-yaml board.yaml` — the diagnostic-rich `board.yaml`
-  validator (CLI entry `tan`, which forwards to `python -m alp_cli validate`;
-  equivalently `python3 scripts/validate_board_yaml.py`).
-  Try it against a fixture under `tests/fixtures/board_yaml_bad/` to learn the
-  output format. Exit code 1 on a hard validation or consistency failure;
-  warnings return 0.
-- `tan validate --board-yaml board.yaml` / `python -m alp_orchestrate --input
-  board.yaml --emit build-plan` — the same validation as a build pre-flight
-  before any compile work.
+  find why a build won't work before you build. `--build` remains accepted
+  for v0.4 compatibility but no longer changes the check list.
+- `tan validate --offline --board-yaml board.yaml` — Python Tan's bundled
+  structural checks. The SDK-backed subprocess is not yet ported; use
+  `python3 scripts/validate_board_yaml.py --board-yaml board.yaml` for the
+  full diagnostic-rich schema/preset/capability/consistency validator. Try it
+  against a fixture under `tests/fixtures/board_yaml_bad/` to learn the output
+  format.
+- `python -m alp_orchestrate --input board.yaml --emit build-plan` — the SDK
+  reference validation/planning path used for parity before compile work.
 - CI gates — `scripts/check_*.py` (e.g. `check_doc_drift.py`,
   `check_example_portability.py`, `check_pin_conflicts.py`,
   `check_system_manifest.py`) plus **twister** for the Zephyr ztest + example

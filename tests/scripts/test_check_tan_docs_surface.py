@@ -123,9 +123,10 @@ def _install_tan_stub(bin_dir: Path, body: str) -> Path:
     resolves names ending in a `PATHEXT` extension (.exe/.bat/.cmd/...) --
     an extensionless `tan` is invisible to it (alp-sdk#993). So on Windows
     we ship the same body as `tan.py` plus a `tan.bat` shim that PATHEXT
-    picks up, mirroring how a real `cargo install`'d `tan.exe` would be
-    found. `body` never itself contains OS-specific logic; only this
-    installer branches."""
+    picks up, mirroring how a real `tan.exe` release is found. `body` never
+    itself contains OS-specific logic; only this
+    installer branches. A real Tan release may be a frozen Python archive or
+    the older Rust executable; executable discovery is identical here."""
     bin_dir.mkdir(parents=True, exist_ok=True)
     if os.name == "nt":
         script_path = bin_dir / "tan.py"
@@ -1186,6 +1187,62 @@ _NEW_SOM_HELP = (
     "          Arguments forwarded verbatim to the underlying command\n"
 )
 
+_RICH_BUILD_HELP = """\
+ Usage: tan build [OPTIONS]
+
+╭─ Options ─────────────────────────────────────────────────────────╮
+│ --project        PATH    Project root.                            │
+│ --sdk-root       PATH    alp-sdk checkout root.                   │
+│ --native                 Use the native executor.                 │
+│ --format         FORMAT  Output format: text or json.             │
+│ --help                   Show this message and exit.              │
+╰───────────────────────────────────────────────────────────────────╯
+"""
+
+_RICH_FLASH_HELP = """\
+ Usage: tan flash [OPTIONS] [APP_PATH]
+
+╭─ Options ─────────────────────────────────────────────────────────╮
+│ --helper         NAME    Flash one helper.                        │
+│ --dry-run                Print commands without spawning.         │
+╰───────────────────────────────────────────────────────────────────╯
+"""
+
+
+def test_typer_rich_help_option_arity_is_parsed():
+    """The Python port renders box-drawing tables, not Clap's `Options:` rows."""
+    assert _mod._parse_option_arity(_RICH_BUILD_HELP) == {
+        "--project": True,
+        "--sdk-root": True,
+        "--native": False,
+        "--format": True,
+        "--help": False,
+    }
+
+
+def test_typer_rich_help_usage_preserves_positional_contract():
+    assert _mod._usage_line(_RICH_BUILD_HELP) == "Usage: tan build [OPTIONS]"
+    assert not _mod._verb_accepts_positional(_mod._usage_line(_RICH_BUILD_HELP))
+    assert _mod._verb_accepts_positional(_mod._usage_line(_RICH_FLASH_HELP))
+
+
+def test_typer_rich_help_drives_full_invocation_check():
+    cache = {"build": _RICH_BUILD_HELP}
+    assert (
+        _mod._check_one_invocation(
+            "tan build --project examples/widget --sdk-root /sdk --native",
+            {},
+            cache,
+            "unused",
+        )
+        is None
+    )
+    problem = _mod._check_one_invocation(
+        "tan build examples/widget", {}, cache, "unused"
+    )
+    assert problem is not None
+    assert "takes no positional argument" in problem
+
 
 def test_example_readme_positional_argument_on_build_fails(tmp_path):
     """The exact alp-sdk#1137 round-1 residual shape: `tan build <path>` in
@@ -1281,10 +1338,10 @@ def test_verb_with_a_real_positional_accepts_one(tmp_path):
 
 
 def test_forwarding_verb_shape_is_never_checked(tmp_path):
-    """A FORWARDING verb's `[ARGS]...` catch-all (see
-    `_forwards_to_python_backend`) means ANYTHING after it is legal by
-    design -- `tan new-som` forwards verbatim to the Python backend, whose
-    own flags (`--sku`, `--dry-run`, ...) never appear in its own --help.
+    """A legacy Rust FORWARDING verb's `[ARGS]...` catch-all (see
+    `_has_legacy_passthrough_args`) means ANYTHING after it is legal by
+    design -- v0.4 `tan new-som` forwarded verbatim to the SDK CLI, whose own
+    flags (`--sku`, `--dry-run`, ...) never appeared in its own --help.
     This must never be reported as an unrecognised-flag or stray-positional
     problem."""
     doc_root = tmp_path / "repo"

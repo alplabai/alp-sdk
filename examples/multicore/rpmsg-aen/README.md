@@ -67,7 +67,7 @@ cd alp-workspace/alp-sdk/examples/multicore/rpmsg-aen
 tan build
 ```
 
-The orchestrator fans out:
+Tan's relocated planner fans out:
 
 - `build/a32_cluster-yocto/` (bitbake against `MACHINE = e1m-aen801-a32`).
 - `build/m55_hp-zephyr/` (Zephyr against `BOARD = alp_e1m_aen801_m55_hp`).

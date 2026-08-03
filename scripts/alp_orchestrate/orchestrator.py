@@ -6,9 +6,9 @@
 ADR-0020 Phase 4 (preview) retired the SDK-side executor -- the
 `Orchestrator` class that fanned build sub-processes out and materialised
 artefacts to disk.  What remains here is pure, side-effect-free: resolving
-what a slice's build command WOULD be, so `emit_build_plan` can describe it
-to an external consumer (`tan`, alplabai/tan-cli, / alp-studio) that owns
-execution.
+what a slice's build command WOULD be, so `emit_build_plan` can describe the
+SDK reference plan to parity tooling, Alp Studio, or Python Tan's explicit
+`--plan-from` path. Normal Tan builds use the relocated equivalent in process.
 """
 
 from __future__ import annotations
@@ -162,7 +162,7 @@ class UnknownBoardTargetError(ValueError):
 def _tokenize(path: Path, base_dir: Path, repo: Path) -> str:
     """Render an absolute path as a portable `${PROJECT_ROOT}`/`${SDK_ROOT}`
     token (issue #865) instead of baking in THIS checkout's absolute path.
-    tan-cli (PR #24) substitutes both tokens at materialise time, so a plan
+    tan-cli's plan reader substitutes both tokens at materialise time, so a plan
     emitted on one machine/checkout can be materialised faithfully on
     another -- the split-brain risk a baked-in absolute path invites.
 
@@ -250,7 +250,7 @@ def _slice_command(
         # emitted once by whichever Python ran the planner, but may be
         # materialised on a different host/checkout than that -- baking in
         # a concrete interpreter path here would pin THIS run's Python, not
-        # the consumer's. tan-cli (PR #24) substitutes ${PYTHON} with its
+        # the consumer's. tan-cli's `--plan-from` path substitutes ${PYTHON} with its
         # own resolved interpreter (forward-slashed for the same CMake
         # backslash-escape reason issue #787/#849 fixed: CMake parses
         # `\U`/`\N` etc. in a Windows path as an invalid character escape)

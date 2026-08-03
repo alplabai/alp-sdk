@@ -44,7 +44,7 @@ inference offload.  The decision is captured in
 see ADR 0010 for the broader cross-core trust-boundary discussion.
 
 The auditor reviews the TF-M build flow (`board.yaml`
-`security.psa.tfm: true` -> orchestrator emits
+`security.psa.tfm: true` -> planner emits
 `build/sysbuild/tfm/tfm.conf` -> sysbuild builds the TF-M secure
 image as a child image) and the PSA <-> OPTIGA Trust M bridge driver
 at `chips/optiga_trust_m/optiga_trust_m.c`.

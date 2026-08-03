@@ -14,13 +14,10 @@
 #      §6.1 "Determinism" clause requires re-running the build to
 #      produce identical layouts so CI can diff.
 #
-# ADR-0020 Phase 4: the SDK-side executor (`west alp-build` et al.)
-# was retired -- alp-sdk is plans-only now.  This workflow only ever
-# exercised plan/manifest generation (real slice compilation was
-# always `continue-on-error` -- see the step below), so it verifies
-# `alp_orchestrate --emit system-manifest` directly.  Actual slice
-# compilation is `tan build`'s job (github.com/alplabai/tan-cli),
-# exercised elsewhere.
+# ADR-0020 Phase 4 retired the SDK-side executor (`west alp-build` et al.).
+# Python Tan now carries the normal relocated planner and executor; this job
+# deliberately verifies alp-sdk's reference `alp_orchestrate --emit
+# system-manifest` producer. Real slice compilation is exercised in tan-cli.
 #
 # v0.6 examples referenced below (`examples/rpmsg-<som-short>/`,
 # `examples/connectivity/iot-connected-camera/`, `examples/peripheral-io/gpio-button-led/`)
@@ -175,11 +172,11 @@ jobs:
 
       # ----- Steps below run only when the example exists ---------
 
-      # ADR-0020 Phase 4: alp_orchestrate is plans-only -- there is no
-      # SDK-side executor to bypass west for any more (the wrapper at
+      # ADR-0020 Phase 4: alp_orchestrate is the SDK reference planner -- there
+      # is no SDK-side executor (the wrapper at
       # scripts/west_commands/alp_build.py this comment used to
       # reference was deleted with the executor).  Invoke the
-      # orchestrator's surviving `--emit system-manifest` planner
+      # reference orchestrator's `--emit system-manifest` path
       # directly and capture its stdout at the same path the old
       # build-executor used to write.
       - name: alp-build (primary verification, orchestrator-direct)

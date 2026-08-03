@@ -1,8 +1,8 @@
 """`python -m alp_cli` entry point.
 
-Same front door as the installed `alp` console script -- useful straight
-from a checkout (with `scripts/` on `sys.path` / `PYTHONPATH`) before
-`pip install -e .` has run.
+SDK-internal/reference CLI, useful straight from a checkout with `scripts/` on
+`sys.path` / `PYTHONPATH`. The user-facing command surface is Python Tan; this
+package deliberately has no installed `alp` console script.
 """
 
 from __future__ import annotations

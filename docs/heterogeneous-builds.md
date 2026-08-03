@@ -4,7 +4,7 @@ This guide walks through writing your first **dual-app project** for
 E1M-V2N101: Yocto Linux on the four Cortex-A55 cores plus Zephyr on
 the Cortex-M33 system-manager, the two halves talking over RPMsg.
 You'll declare both halves in a single `board.yaml`, let `tan build`
-fan out into per-core slices (planned by alp-sdk's `alp_orchestrate`),
+fan out into per-core slices with Tan's relocated in-process planner,
 and end up with a flashable bundle that covers Linux + Zephyr + the
 on-module GD32 helper MCU.
 
@@ -216,7 +216,7 @@ ipc:
   `#define` prefix in the generated header.  Stick to
   `[a-z][a-z0-9_]+`.
 
-For each `ipc:` entry, `tan build` (via alp-sdk's `alp_orchestrate`)
+For each `ipc:` entry, `tan build`
 emits a header both halves `#include`:
 
 For a channel named `alp_default_rpmsg`, the stem is its
@@ -244,7 +244,7 @@ between the Linux DT and the Zephyr overlay becomes impossible.
 
 **Blocked carve-outs.**  When a SoM preset still carries TBD
 `mailbox.controller` or TBD `memory_map.base` / `size` (the common
-case while the SoM is being HW-mapped), the orchestrator emits the
+case while the SoM is being HW-mapped), the planner emits the
 manifest entry as `status: blocked` + `reason: ...` instead of
 aborting.  The generated `<alp/system_ipc.h>` carries an `#error`
 directive for the blocked channel so the slice build trips at compile
@@ -256,13 +256,13 @@ unblock.
 ## 6. Building
 
 ```bash
-tan --project examples/multicore/rpmsg-v2n build
+tan build --project examples/multicore/rpmsg-v2n
 ```
 
-`tan build` plans first, then executes (ADR 0020: alp-sdk plans,
-`tan` is the sole executor):
+`tan build` plans and executes in Python Tan (ADR 0020). alp-sdk keeps the
+original planner as the reference/parity producer:
 
-1. The SDK's planner (`alp_orchestrate`) loads + validates
+1. Tan's relocated planner loads + validates
    `board.yaml` against the board.yaml schema.
 2. The planner resolves the SoM preset → topology defaults →
    effective per-core mapping.
@@ -275,8 +275,7 @@ tan --project examples/multicore/rpmsg-v2n build
    plan registers.
 6. `tan` dispatches slice builds in parallel (`west` / `bitbake` /
    `cmake` per slice).
-7. `tan` writes `build/system-manifest.yaml`, seeded from the
-   planner's `--emit system-manifest`, joining everything together.
+7. `tan` writes `build/system-manifest.yaml`, joining everything together.
 
 Output layout:
 
@@ -304,7 +303,7 @@ or the Zephyr CMakeLists.
 
 **Manifest determinism.**  `system-manifest.yaml` is byte-stable
 across rebuilds — re-running `alp_orchestrate --emit system-manifest`
-(what `tan build` / `tan clean` drive under the hood) yields an
+(the SDK reference path mirrored by Python Tan) yields an
 identical manifest, which `pr-alp-build.yml` enforces by calling the
 orchestrator directly.  Wall-clock fields (per-slice `duration_s`)
 live on the runtime Slice dataclass but never land in the manifest;
@@ -341,9 +340,8 @@ This pairs with the build plan below: the **manifest** is the *result*
 build/run/debug/flash; the **build plan** is the *write-free recipe* to
 drive the build itself.
 
-**Machine-readable build plan.**  Tooling that wants to drive the
-build itself — the `tan` CLI / IDE extension does — consumes the plan
-instead of re-deriving it:
+**Machine-readable SDK reference plan.** The published plan contract remains a
+parity and interoperability seam. Generate the SDK reference form with:
 
 ```bash
 PYTHONPATH=scripts python3 -m alp_orchestrate --input board.yaml --emit build-plan
@@ -352,7 +350,10 @@ PYTHONPATH=scripts python3 -m alp_orchestrate --input board.yaml --emit build-pl
 The JSON carries one entry per non-`off` core (build dir, the resolved
 app source dir, the exact tool command, env) plus every generated
 artefact **with its contents**, so a consumer materialises files and
-runs commands without any planner logic of its own.  Every relative
+runs commands without planner logic of its own. Python Tan normally creates
+the equivalent plan in process; `tan build --plan-from <file>` can consume a
+saved reference plan, with writes opt-in through `--materialise` or `--execute`.
+Every relative
 path resolves against the input `board.yaml`'s own directory, never the
 CLI's CWD, so the plan is deterministic, write-free, and versioned by
 its own `schemaVersion` — see
@@ -418,7 +419,7 @@ Zephyr slice rebuilds incrementally in seconds while the already-built
 Yocto slice is reused (west/bitbake short-circuit an up-to-date tree):
 
 ```bash
-tan --project examples/multicore/rpmsg-v2n build --native
+tan build --project examples/multicore/rpmsg-v2n --native
 ```
 
 (There is no per-slice `--core` flag on `tan build`; it runs every
@@ -635,10 +636,10 @@ as the build argument:
 
 ```bash
 # good
-tan --project examples/multicore/rpmsg-v2n build
+tan build --project examples/multicore/rpmsg-v2n
 ```
 
-The orchestrator writes `build/` next to the project's `board.yaml`.
+Tan materialises `build/` next to the project's `board.yaml`.
 
 ## 11. Next steps
 

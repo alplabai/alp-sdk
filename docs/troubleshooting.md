@@ -77,8 +77,8 @@ python3` -- install a newer interpreter alongside the system one,
 e.g. the `deadsnakes` PPA (`sudo add-apt-repository
 ppa:deadsnakes/ppa && sudo apt-get install python3.12`) or `pyenv`,
 and point `west`/the venv at it.  See
-[`docs/cross-platform-setup.md`](cross-platform-setup.md) §1.1 for
-why this floor isn't (yet) enforced up front by bootstrap itself.
+[`docs/cross-platform-setup.md`](cross-platform-setup.md) §1.1 for how Python
+Tan enforces the effective floor during bootstrap and doctor.
 
 ### `CMake Error: Could not find package configuration file Zephyr`
 
@@ -104,10 +104,8 @@ different build tool -- `ninja` is Zephyr's build generator on every
 host.  `scripts/bootstrap.sh` / `bootstrap.ps1` and `python -m alp_cli
 doctor` both check for it and FAIL with an install command when it's
 missing; if you hit the raw CMake error above instead, check whether
-you resolved a `[!] ninja` line from `tan doctor --build` -- it still
-rates a missing `ninja` a warning rather than a failure
-(`alplabai/tan-cli#103`), so it's easy to leave unresolved and hit
-this error anyway.  Installing it clears all three lines above (the
+you resolved the `hostPrerequisites` finding from `tan doctor`. Installing it
+clears all three lines above (the
 two compiler errors are downstream of the same missing generator):
 
 ```bash
@@ -280,8 +278,8 @@ file but a misconfigured global setting can override that.
 
 ## Where to file bugs
 
-* SDK bug (planner/emit/validate): [`github.com/alplabai/alp-sdk/issues`](https://github.com/alplabai/alp-sdk/issues)
-* `tan build` executor bug: [`github.com/alplabai/tan-cli`](https://github.com/alplabai/tan-cli) instead -- alp-sdk is plans-only for the multi-slice build/flash/size/image/clean/Renode surface (ADR [0020](adr/0020-sdk-owns-build-execution.md)); `tan run` is the one forwarded single-image escape hatch that still shells `west build`/`west flash` itself.
+* SDK metadata, schema, portable API, or reference-emitter bug: [`github.com/alplabai/alp-sdk/issues`](https://github.com/alplabai/alp-sdk/issues)
+* Tan planner, executor, or command bug: [`github.com/alplabai/tan-cli`](https://github.com/alplabai/tan-cli). Python Tan owns build/run/flash/size/image/clean/Renode and the relocated planner; only `migrate`, `lock`, and `quality` still forward to west.
 * Chip driver bug: file against alp-sdk; include the `driver_status` from the
   chip's metadata yaml.
 

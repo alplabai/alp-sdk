@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Advisory: alp-sdk deliberately tracks tan-cli's `latest` (docs/cli.md
-# explains why) -- a tan release changes documented CLI behaviour with no
-# version pin to buffer alp-sdk's own docs from it. This installs `tan` by
-# the EXACT path docs/cli.md itself documents (proving that path still
-# works too), then asserts every `tan` subcommand + docs/cli.md-tabulated
-# flag alp-sdk's docs name still exists and is listed in that real binary's
-# `--help` output -- see scripts/check_tan_docs_surface.py's docstring for
+# Advisory: alp-sdk `dev` tracks tan-cli `dev` during the coordinated Python
+# port. The latest stable release remains the frozen Rust v0.4.1 line until
+# v0.5 is cut, so installing `releases/latest` here would compare forward-
+# looking port docs to the intentionally old oracle. This checks out the real
+# Python source from tan-cli `dev`, installs it, then asserts every documented
+# subcommand/flag/invocation exists in that binary's help grammar. See
+# scripts/check_tan_docs_surface.py's docstring for
 # the exact extraction rules and everything this deliberately does NOT check
 # (whether a flag actually parses, output text, exit codes, semantic
 # behaviour, Windows).
@@ -51,22 +51,26 @@ concurrency:
 
 jobs:
   tan-docs-drift:
-    name: "tan-docs-drift · subcommand + flag existence (advisory)"
+    name: "tan-docs-drift · Python Tan surface (advisory)"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Checkout tan-cli Python port
+        uses: actions/checkout@v6
+        with:
+          repository: alplabai/tan-cli
+          ref: dev
+          path: .tan-cli
 
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version-file: .python-version
 
-      - name: Install tan (docs/cli.md's own documented install.sh path)
-        run: |
-          curl -fsSL -o /tmp/tan-install.sh https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh
-          sh /tmp/tan-install.sh
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Install Python Tan from source
+        run: python3 -m pip install ./.tan-cli/python
 
       - name: Sanity-check tan is really on PATH
         run: tan --version

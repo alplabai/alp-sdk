@@ -7,6 +7,17 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Changed — documentation and drift gates follow the Python Tan port
+
+- Swept current guides, examples, ADR indexes/amendments, metadata commentary,
+  and onboarding workflows to describe Python Tan's relocated in-process
+  planner, native command surface, the explicit `tan-cli/dev` source-install
+  transition before v0.5 release archives exist, SDK-resolution ladder, and
+  single `tan doctor` checklist.
+- Updated the Tan documentation-surface gate to parse both the frozen
+  Rust/Clap v0.4 help format and the Python/Typer Rich help format during the
+  release transition.
+
 ### Fixed — bring-up guide claimed `tps628640_set_voltage_mv` was unimplemented (#1166)
 
 `docs/bring-up-v2n-m1.md` told readers to reach for the
