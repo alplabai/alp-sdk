@@ -7,6 +7,30 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Added — enforce the V2N Renode sci0 console model (#1158 remainder)
+
+- **#1182 added a real sci0 UART model to `metadata/renode/renesas_rzv2n.repl`
+  and the opt-in `tests/renode/v2n_m33_sci0_console.{conf,overlay}`, but
+  nothing executed any of it.** The required `renode · V2N101 --sim-mode
+  socket contract` context (`pr-renode-sim-mode.yml`) only builds the
+  M33-SM image — with the default headless `ram_console` overlay, not the
+  sci0 one — and never boots it; its e2e steps are no-op `echo`s pending
+  tan-cli#77. So the sci0 model could regress silently. New advisory job
+  `pr-renode-v2n-sci0-smoke.yml` (`renode · V2N101 M33-SM sci0 console`)
+  builds the M33-SM `hello_world` WITH the sci0 overlay/conf and boots it
+  under the pinned Renode v1.16.1, polling the log for the real boot
+  banner + app console line the sci0 Python peripheral emits. Mirrors
+  `pr-renode-aen-smoke.yml`'s advisory-then-graduate pattern (issue #974)
+  — not required yet, so it cannot block anyone's merge to `dev` while the
+  poll-a-log-for-a-string pattern proves itself. Mutation-tested locally:
+  deleting the `sci0` node from `renesas_rzv2n.repl` fails the boot e2e
+  (`sysbus: ReadByte from non existing peripheral at 0x42800c00`, no boot
+  banner); desyncing the overlay's `chosen` node fails the build step
+  itself (`devicetree error: undefined node label`). The existing
+  required `renode · V2N101 --sim-mode socket contract` context is
+  untouched — it still posts `skipping` for most PRs and its e2e steps
+  are still no-ops; that remains open, tracked in #1158.
+
 ### Fixed — three V2N build/boot defects (#1175, #1176, #1158)
 
 - **microSD boot loaded a dtb the image never builds, and rooted at the

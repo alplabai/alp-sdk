@@ -1,0 +1,259 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Renode V2N101 M33-SM sci0-console smoke test (issue #1158 remainder).
+#
+# #1182 added a real (if coarse) sci0 UART model to
+# metadata/renode/renesas_rzv2n.repl/.resc plus the opt-in
+# tests/renode/v2n_m33_sci0_console.{conf,overlay} that enable it -- but
+# nothing executed any of it: the required `renode · V2N101 --sim-mode
+# socket contract` job (pr-renode-sim-mode.yml) only BUILDS the M33-SM
+# image (with the default headless ramconsole overlay, not this one) and
+# never boots it -- its e2e steps are no-op `echo`s pending tan-cli#77.
+# So the sci0 model could regress -- lose the node, drift out of sync with
+# the overlay/conf, silently stop producing console output -- and no gate
+# would notice.
+#
+# This job actually boots the real M33-SM hello_world ELF, built with the
+# sci0 overlay/conf, under the pinned Renode v1.16.1, and asserts the sci0
+# Python peripheral logged the real boot banner + app console (mirrors
+# pr-renode-aen-smoke.yml's pattern for the AEN M55-HP: issue #974).
+#
+# Why this can't just be `-e "pause" -e "quit"` right after `start`, the
+# way pr-renode-aen-smoke.yml's e2e does it: that gate asserts on the
+# vector-table seed, which CortexM.cs logs SYNCHRONOUSLY inside `start`
+# itself, so no virtual run time is needed. sci0 output only appears once
+# the CPU has actually executed far enough to reach main() and call
+# printk() -- real emulated run time, not just a seed -- so this e2e feeds
+# Renode's monitor through a FIFO and polls the log for the expected
+# strings instead of pausing immediately.
+#
+# !! ADVISORY, not required -- same reasoning and same graduation path as
+#    pr-renode-aen-smoke.yml (issue #974): this is a new, less-proven
+#    emulator-driving pattern (poll-a-log-for-a-string vs. the AEN job's
+#    synchronous seed check), so it must not be able to block anyone's
+#    merge to `dev` until it has run green across a handful of PRs that
+#    touch a renode/V2N path. Do NOT fold this into the required `renode ·
+#    V2N101 --sim-mode socket contract` context without that track record
+#    -- see the hard-constraint note in issue #1158's tracking comment.
+
+name: pr-renode-v2n-sci0-smoke
+
+on:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - 'metadata/renode/renesas_rzv2n.repl'
+      - 'metadata/renode/renesas_rzv2n.resc'
+      - 'tests/renode/v2n_m33_sci0_console.conf'
+      - 'tests/renode/v2n_m33_sci0_console.overlay'
+      - 'zephyr/boards/alp/e1m_v2n101_m33_sm/**'
+      - '.github/workflows/pr-renode-v2n-sci0-smoke.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  renode-v2n-sci0-smoke:
+    name: renode · V2N101 M33-SM sci0 console
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      ZEPHYR_TOOLCHAIN_VARIANT: zephyr
+
+    steps:
+      - name: Checkout alp-sdk
+        uses: actions/checkout@v6
+        with:
+          path: alp-sdk
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: alp-sdk/.python-version
+
+      - name: Install host build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+              ninja-build gperf ccache dfu-util device-tree-compiler \
+              python3-dev python3-pip python3-setuptools python3-wheel \
+              libffi-dev libssl-dev xz-utils file make gcc \
+              ca-certificates curl gnupg
+
+      - name: Install west + Python deps
+        run: pip3 install west jsonschema pyyaml
+
+      - name: Bootstrap Zephyr workspace
+        working-directory: ${{ github.workspace }}/alp-sdk
+        run: bash scripts/bootstrap.sh
+
+      - name: Install Zephyr build requirements
+        run: |
+          set -euo pipefail
+          pip3 install -r "${GITHUB_WORKSPACE}/zephyr/scripts/requirements-base.txt"
+
+      # metadata/toolchains.json (issue #949 item 3) is the single source
+      # for the pinned Zephyr SDK version/URL/sha256.
+      - name: Read Zephyr SDK toolchain pin (metadata/toolchains.json)
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          python3 -c '
+          import json
+          d = json.load(open("alp-sdk/metadata/toolchains.json"))
+          sdk = d["zephyrSdk"]
+          art = next(a for a in sdk["artifacts"] if a["host"] == "linux-x86_64" and a["component"] == "minimal-sdk")
+          version = sdk["version"]
+          url = sdk["baseUrl"] + art["filename"]
+          sha256 = art["sha256"]
+          print(f"ZEPHYR_SDK_VERSION={version}")
+          print(f"ZEPHYR_SDK_URL={url}")
+          print(f"ZEPHYR_SDK_SHA256={sha256}")
+          ' >> "$GITHUB_ENV"
+
+      - name: Install Zephyr SDK (arm-zephyr-eabi)
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/zephyr-sdk.tar.xz "${ZEPHYR_SDK_URL}"
+          ACTUAL_SHA256="$(sha256sum /tmp/zephyr-sdk.tar.xz | awk '{print $1}')"
+          if [ "${ACTUAL_SHA256}" != "${ZEPHYR_SDK_SHA256}" ]; then
+            echo "::error::sha256 mismatch for zephyr-sdk-${ZEPHYR_SDK_VERSION}_linux-x86_64_minimal.tar.xz: expected ${ZEPHYR_SDK_SHA256}, got ${ACTUAL_SHA256}"
+            exit 1
+          fi
+          mkdir -p "$HOME/zephyr-sdk"
+          tar -xJf /tmp/zephyr-sdk.tar.xz -C "$HOME/zephyr-sdk" --strip-components=1
+          "$HOME/zephyr-sdk/setup.sh" -t arm-zephyr-eabi -c
+          echo "ZEPHYR_SDK_INSTALL_DIR=$HOME/zephyr-sdk" >> "$GITHUB_ENV"
+
+      # Same v1.16.1 pin as the other Renode gates.
+      - name: Install Renode
+        run: |
+          set -euo pipefail
+          curl -fsSL https://github.com/renode/renode/releases/download/v1.16.1/renode-1.16.1.linux-portable-dotnet.tar.gz \
+              -o /tmp/renode.tar.gz
+          mkdir -p "$HOME/renode"
+          tar -xzf /tmp/renode.tar.gz -C "$HOME/renode" --strip-components=1
+          echo "$HOME/renode" >> "$GITHUB_PATH"
+          "$HOME/renode/renode" --version
+
+      # Build the M33-SM slice WITH the sci0 opt-in overlay/conf (issue
+      # #1158) -- deliberately NOT the same headless ramconsole build
+      # pr-renode-sim-mode.yml produces; that one has sci0 left disabled
+      # (same as real hardware) and would never exercise this model.
+      - name: Build M33-SM hello_world (sci0 console image)
+        id: build_fw
+        working-directory: ${{ github.workspace }}/alp-sdk
+        env:
+          ZEPHYR_BASE: ${{ github.workspace }}/zephyr
+        run: |
+          set -euo pipefail
+          west build -p always \
+              -b alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33 \
+              "${ZEPHYR_BASE}/samples/hello_world" \
+              -d /tmp/v2n-sci0-build \
+              -- -DEXTRA_ZEPHYR_MODULES="${GITHUB_WORKSPACE}/alp-sdk" \
+                 -DEXTRA_CONF_FILE="${GITHUB_WORKSPACE}/alp-sdk/tests/renode/v2n_m33_sci0_console.conf" \
+                 -DEXTRA_DTC_OVERLAY_FILE="${GITHUB_WORKSPACE}/alp-sdk/tests/renode/v2n_m33_sci0_console.overlay"
+          test -f /tmp/v2n-sci0-build/zephyr/zephyr.elf
+
+      # Boot the ELF under Renode via a FIFO-fed monitor session (see the
+      # header comment for why: sci0 output needs real virtual run time,
+      # not just the synchronous vector-table seed pr-renode-aen-smoke.yml
+      # checks). Polls the log for the boot banner + app line every 2s, up
+      # to 90s, then pauses and quits -- whether or not it found them, so a
+      # genuine hang still terminates instead of running past the job
+      # timeout.
+      - name: V2N101 M33-SM sci0 Renode boot e2e
+        timeout-minutes: 5
+        working-directory: ${{ github.workspace }}/alp-sdk
+        run: |
+          set -uo pipefail
+          ELF=/tmp/v2n-sci0-build/zephyr/zephyr.elf
+          LOG="${RUNNER_TEMP:-/tmp}/renode-v2n-sci0-boot.log"
+          FIFO="${RUNNER_TEMP:-/tmp}/renode-v2n-sci0.fifo"
+          if [ ! -f "${ELF}" ]; then
+            echo "::error::V2N101 M33-SM sci0 Renode boot e2e: ${ELF} is missing -- the build step did not produce it."
+            exit 1
+          fi
+
+          rm -f "${FIFO}"
+          mkfifo "${FIFO}"
+          exec 3<>"${FIFO}"
+          RENODE_PID=""
+          cleanup() {
+            [ -n "${RENODE_PID}" ] && kill -KILL "${RENODE_PID}" 2>/dev/null || true
+            exec 3>&- 2>/dev/null || true
+            rm -f "${FIFO}"
+          }
+          trap cleanup EXIT
+
+          stdbuf -oL "$HOME/renode/renode" --console --disable-xwt --plain \
+              < "${FIFO}" > "${LOG}" 2>&1 &
+          RENODE_PID=$!
+
+          printf '$repl=@metadata/renode/renesas_rzv2n.repl\n' >&3
+          printf '$elf=@%s\n' "${ELF}" >&3
+          printf 'i @metadata/renode/renesas_rzv2n.resc\n' >&3
+
+          # Poll for the two lines the sci0 Python peripheral logs once the
+          # CPU actually reaches main() -- confirmed locally to appear
+          # within ~10-15s of real time on a v1.16.1 build (2026-08-03).
+          FOUND=0
+          for _ in $(seq 1 45); do
+            sleep 2
+            if grep -q "sci0 TX: \*\*\* Booting Zephyr OS build" "${LOG}" \
+                && grep -q "sci0 TX: Hello World!" "${LOG}"; then
+              FOUND=1
+              break
+            fi
+            kill -0 "${RENODE_PID}" 2>/dev/null || break
+          done
+
+          printf 'pause\n' >&3
+          sleep 0.5
+          printf 'quit\n' >&3
+          sleep 1
+          exec 3>&-
+
+          # Give Renode a moment to exit cleanly, then force it if not.
+          for _ in $(seq 1 10); do
+            kill -0 "${RENODE_PID}" 2>/dev/null || break
+            sleep 1
+          done
+          kill -KILL "${RENODE_PID}" 2>/dev/null || true
+          trap - EXIT
+          rm -f "${FIFO}"
+
+          FAIL=0
+          if [ "${FOUND}" -ne 1 ]; then
+            echo "::error::V2N101 M33-SM sci0 Renode boot e2e: sci0 boot banner + app console line never appeared within 90s. See the renode-v2n-sci0-boot-log artifact."
+            FAIL=1
+          fi
+          if grep -q "CPU was halted" "${LOG}"; then
+            echo "::error::V2N101 M33-SM sci0 Renode boot e2e: 'CPU was halted' found -- the boot never progressed. See the renode-v2n-sci0-boot-log artifact."
+            FAIL=1
+          fi
+          if grep -q "ReadByte from non existing peripheral at 0x42800" "${LOG}" \
+              || grep -q "WriteByte to non existing peripheral at 0x42800" "${LOG}"; then
+            echo "::error::V2N101 M33-SM sci0 Renode boot e2e: sysbus reported no peripheral at the sci0 base 0x42800c00 -- the sci0 node is missing or moved in renesas_rzv2n.repl. See the renode-v2n-sci0-boot-log artifact."
+            FAIL=1
+          fi
+
+          if [ "${FAIL}" -ne 0 ]; then
+            exit 1
+          fi
+          echo "::notice::V2N101 M33-SM sci0 Renode boot e2e: sci0 logged the real boot banner + app console line."
+
+      - name: Upload Renode boot log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: renode-v2n-sci0-boot-log
+          path: ${{ runner.temp }}/renode-v2n-sci0-boot.log
+          retention-days: 14
+          if-no-files-found: ignore
