@@ -100,12 +100,20 @@ add_test(NAME alp_test_gpu2d_dispatcher
 # shift itself is checked, mirroring the RPC suite's
 # run_sanitized_rpc_tests.sh (GHSA-xhm8-7f87-93q5 defect 3) rather than
 # inventing a second sanitizer-runner script.
+# -fno-sanitize-recover=undefined is NOT decoration. Plain
+# -fsanitize=undefined RECOVERS: it prints "runtime error: left shift of 255
+# by 24 places cannot be represented in type 'int'" and then carries on, so
+# the process still exits 0 and ctest passes. Measured directly:
+#   gcc -fsanitize=undefined                              -> exit 0
+#   gcc -fsanitize=undefined -fno-sanitize-recover=undefined -> exit 1
+# both printing the identical diagnostic. Without the second flag this gate
+# detects the defect it exists for and reports success anyway.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_gpu2d_ubsan
              COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/run_sanitized_rpc_tests.sh
                      ${CMAKE_SOURCE_DIR}
                      ${CMAKE_CURRENT_BINARY_DIR}/sanitizer-gpu2d-ubsan
-                     "-fsanitize=undefined"
+                     "-fsanitize=undefined -fno-sanitize-recover=undefined"
                      alp_test_gpu2d_dispatcher)
     set_tests_properties(alp_test_gpu2d_ubsan PROPERTIES TIMEOUT 600)
 endif()
