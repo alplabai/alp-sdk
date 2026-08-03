@@ -202,8 +202,8 @@ static uint32_t _blend_px(uint32_t src, uint32_t dst, alp_gpu2d_blend_mode_t mod
 		 * the opaque-alpha common case): the shift sets bit 31 of a
 		 * 32-bit signed int, which doesn't fit. Same class of bug
 		 * already fixed in src/update_log/sha256.c's ulog_sha256(). */
-		return ((uint32_t)_u8(oa) << 24) | ((uint32_t)_u8(or_) << 16) |
-		       ((uint32_t)_u8(og) << 8) | (uint32_t)_u8(ob);
+		return ((uint32_t)_u8(oa) << 24) | ((uint32_t)_u8(or_) << 16) | ((uint32_t)_u8(og) << 8) |
+		       (uint32_t)_u8(ob);
 	}
 
 	case ALP_GPU2D_BLEND_ADDITIVE: {
@@ -216,8 +216,8 @@ static uint32_t _blend_px(uint32_t src, uint32_t dst, alp_gpu2d_blend_mode_t mod
 		uint32_t og  = (sg * dg + 127u) / 255u;
 		uint32_t ob  = (sb * db + 127u) / 255u;
 		uint32_t oa  = (sa * da + 127u) / 255u;
-		return ((uint32_t)_u8(oa) << 24) | ((uint32_t)_u8(or_) << 16) |
-		       ((uint32_t)_u8(og) << 8) | (uint32_t)_u8(ob);
+		return ((uint32_t)_u8(oa) << 24) | ((uint32_t)_u8(or_) << 16) | ((uint32_t)_u8(og) << 8) |
+		       (uint32_t)_u8(ob);
 	}
 
 	default:

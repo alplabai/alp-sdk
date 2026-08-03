@@ -167,16 +167,15 @@ static void test_waiter_survives_a_failed_initialiser(void)
 
 	const int watchdog_iters = 2000; /* 2000 * 5ms = 10s ceiling */
 	int       i              = 0;
-	while (i < watchdog_iters &&
-	       !(__atomic_load_n(&g_a_done, __ATOMIC_ACQUIRE) &&
-	         __atomic_load_n(&g_b_done, __ATOMIC_ACQUIRE))) {
+	while (i < watchdog_iters && !(__atomic_load_n(&g_a_done, __ATOMIC_ACQUIRE) &&
+	                               __atomic_load_n(&g_b_done, __ATOMIC_ACQUIRE))) {
 		struct timespec ts = { .tv_sec = 0, .tv_nsec = 5 * 1000 * 1000L }; /* 5ms */
 		nanosleep(&ts, NULL);
 		++i;
 	}
 
 	bool both_finished = __atomic_load_n(&g_a_done, __ATOMIC_ACQUIRE) &&
-	                      __atomic_load_n(&g_b_done, __ATOMIC_ACQUIRE);
+	                     __atomic_load_n(&g_b_done, __ATOMIC_ACQUIRE);
 	ALP_ASSERT_TRUE(both_finished);
 	if (!both_finished) {
 		/* Mutation present (pre-fix wait-on-flag-only shape): at least
