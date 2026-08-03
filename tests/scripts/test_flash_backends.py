@@ -814,7 +814,14 @@ def test_swd_probe_jlink_handles_whitespace_bearing_path() -> None:
             artefact="/tmp/dir with spaces/gd32-bridge.hex"))
     assert result.ok is True
     assert run_mock.call_count == 0
-    assert '"/tmp/dir with spaces/gd32-bridge.hex"' in result.message
+    # Derive the expectation from the same Path the backend renders, instead
+    # of hardcoding the POSIX spelling.  On Windows `str(Path(...))` yields
+    # backslashes, and emitting a native path into the generated probe script
+    # on a Windows host is CORRECT -- the probe tool is native there.
+    # Asserting a literal "/tmp/..." tested the host's path flavour, not the
+    # quoting this case exists to check.
+    expected = '"' + str(Path("/tmp/dir with spaces/gd32-bridge.hex")) + '"'
+    assert expected in result.message
 
 
 def test_swd_probe_openocd_rejects_control_char_in_artefact_path() -> None:
@@ -856,7 +863,10 @@ def test_swd_probe_openocd_handles_whitespace_bearing_path() -> None:
             artefact="/tmp/dir with spaces/gd32.bin"))
     assert result.ok is True
     assert run_mock.call_count == 0
-    assert "{/tmp/dir with spaces/gd32.bin}" in " ".join(result.command)
+    # Host-derived for the same reason as the case above; the assertion still
+    # pins the Tcl brace-quoting, which is the actual subject of this test.
+    expected = "{" + str(Path("/tmp/dir with spaces/gd32.bin")) + "}"
+    assert expected in " ".join(result.command)
 
 
 def test_parse_address_accepts_hex_and_decimal() -> None:
