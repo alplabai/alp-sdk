@@ -7,6 +7,52 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — five driver defects from the 2026-08-02 whole-codebase review (#1131, #1132, #1133, #1134, #1135)
+
+`mbox_alif_mhuv2.c`'s `mhuv2_send()` spun for the receiver's `ACCESS_READY`
+handshake, discarded the outcome, and rang `CH0_SET` + returned 0 regardless
+— so a dead/absent peer looked like a delivered message to OpenAMP/RPMsg
+callers. `mhuv2_set_enabled()` in the same file already returns `-EIO` on the
+identical timeout; `mhuv2_send()` now does too, before ringing the doorbell
+(#1131).
+
+The legacy `ipm_arm_mhuv2.c` IPM driver (a separate driver/file/Zephyr
+subsystem from the mbox one above, not the same defect) left the mandatory
+`max_data_size_get` op `NULL` — a call through it null-derefs — and ignored
+caller-supplied sizes in `send`/`poll_out`/`poll_in`, always transferring the
+CH_SET/CH_ST register's 4 bytes regardless of what the caller declared, so a
+shorter buffer could be read/written out of bounds. This driver is not dead
+code to delete outright: `zephyr/dts/alif/ensemble_e8_peripherals.dtsi`'s
+`seservice0s`/`seservice0r` nodes wire it to the Secure Enclave services path
+consumed by `examples/aen/aen-se-service-info`, `aen-aipm-read`,
+`aen-se-crypto`, and `aen-se-service-query` — repaired in place, not removed.
+`max_data_size_get` now reports `sizeof(uint32_t)`, and all three transfer
+paths reject any size other than 4 with `-EINVAL`.
+
+The CC3501E TI SPI transport's `arm_transfer()` already left READY low
+(rather than lying about it) when `SPI_transfer()` refused to queue a
+descriptor, but nothing then re-armed the slave — a permanent stall with the
+host waiting forever, not a transient one. A new arm-failure counter
+(`g_arm_fail_count`, mirroring the existing `g_resync_count` self-heal) is
+now polled by `cc3501e_hw_tick()`, which drives the same proven full
+SPI re-open recovery a radio-op reinit already uses (#1133).
+
+`gpu2d`'s software-fallback pixel packer shifted a `uint8_t` (promoted to
+signed `int`) left by 24 bits; a component at/above `0x80` — reachable, since
+alpha legitimately spans 0..255 — is not representable in `int` at that
+shift, which is undefined behaviour (real, UBSan-only-detectable; the plain
+build's output is bit-identical on this two's-complement toolchain so it did
+not corrupt output here, but a build that traps or optimizes on it could).
+All three blend modes now cast each packed component to `uint32_t` before
+shifting (#1134).
+
+`rv3028c7_init()` cleared the RTC's power-on-reset flag with the write
+result cast to `(void)` — genuinely discarded, not merely logged — so a
+failed clear was invisible and a later successful register write still
+returned `ALP_OK` with PORF still latched. The write's status is now
+propagated; a failure returns early, leaving the instance uninitialised
+(#1135).
+
 ### Fixed — five memory-safety defects in the AEN Zephyr drivers (#1119, #1120, #1121, #1122, #1124)
 
 `flash_mram_alif.c`'s `flash_range_is_valid()` computed `offset + len` in
