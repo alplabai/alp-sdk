@@ -494,6 +494,21 @@ peripheral, and runs a name-service ping/pong.  CI uses the same
 uses the generated endpoint constants — apps don't type addresses,
 endpoint IDs, or mailbox channels by hand.
 
+> **This section shows the general, symmetric `<alp/rpc.h>` shape.**
+> `examples/multicore/rpmsg-v2n`'s actual `m33_sm/src/main.c` does
+> **not** follow it: for this V2N phase (alp-sdk #683) the M33 side
+> deliberately speaks raw OpenAMP instead of `<alp/rpc.h>`, and its
+> endpoint address is a fixed constant rather than the generated
+> `ALP_IPC_..._SRC_EPT`/`_DST_EPT` pair the producer snippet below
+> uses.  The real Linux side (`linux/src/main.c`) is written against
+> that raw-OpenAMP reality — see its file header and
+> `examples/multicore/rpmsg-v2n/README.md`'s status note (alp-sdk
+> #1167) rather than this section's snippets for the working code.
+> The producer/consumer shape below applies as-is on boards whose
+> M-class side uses the standard `<alp/rpc.h>` backend -- see
+> `examples/multicore/rpmsg-aen` (AEN M55-HP → A32, method
+> `imu_sample`) for a working matched pair.
+
 ### Producer (M33-SM)
 
 ```c

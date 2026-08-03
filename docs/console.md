@@ -218,7 +218,7 @@ On V2N:
 
 ```
 uart:~$ alp companion ver
-GD32 supervisor fw v0.2.6
+GD32 supervisor fw v0.2.11
 ```
 
 On Alif / CC3501E:

@@ -178,5 +178,12 @@ families:
   - v2n-m1
 
 verification:
-  hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
+  hil_silicon:    verified         # V2N bench: 1526-cycle HIL soak, 13/13 healthy
+                                    # surfaces clean (counter 1525/1526, one
+                                    # recovered transient), zero link wedges --
+                                    # see examples/v2n/v2n-gd32-bridge-hil-soak/README.md.
+                                    # Also the v0.6.0 functional suite (26/26) +
+                                    # A/B OTA + Tier-B analog loopback -- see
+                                    # docs/test-plan.md "v0.6.0 -- V2N GD32-bridge
+                                    # silicon campaign" and docs/verification-status.md.
   smoke_tests:    null_arg_guard
