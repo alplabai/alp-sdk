@@ -100,8 +100,9 @@ gd32_swd_reset_and_run(&swd);
 ```
 
 Driver status is `partial` until exercised on real silicon (see
-[`docs/test-plan.md`](test-plan.md)); pin assignments on V2N are
-TBD pending the next schematic revision.
+[`docs/test-plan.md`](test-plan.md)); the pin assignments above are
+resolved (maintainer-confirmed 2026-05-12), not pending a schematic
+revision -- see `metadata/chips/gd32_swd.yaml`.
 
 ### 2c. In-system upgrade over the bridge
 
