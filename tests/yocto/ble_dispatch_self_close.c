@@ -405,6 +405,106 @@ static void test_repeated_open_joins_singleton_and_close_tears_down_once(void)
 	ALP_ASSERT_EQ_INT(atomic_load(&g_singleton_teardown_count), 1);
 	ALP_ASSERT_EQ_INT(alp_lifecycle_get(&h->lifecycle), ALP_HANDLE_LC_UNOPENED);
 
+	/* Issue #1118 round-2 dev review: a THIRD, stray close on the same
+	 * (now fully torn-down) pointer must stay a true no-op -- not just
+	 * "no extra teardown call" (that already held even with the old
+	 * unconditional __atomic_fetch_sub(), since teardown is gated on
+	 * refcount reaching exactly 1->0, and a fetch_sub off an already-0
+	 * counter also reads != 1) but the refcount itself must NOT
+	 * underflow to ~0u. A corrupted h->refcount would make a
+	 * concurrent alp_ble_open()'s _radio_try_join() (nonzero =
+	 * joinable) wrongly "join" this handle while in_use is still true
+	 * from a still-in-progress teardown window -- see
+	 * src/ble_dispatch.c's _radio_try_leave() doc comment. */
+	alp_ble_close(h);
+	ALP_ASSERT_EQ_INT((int)h->refcount, 0);
+	ALP_ASSERT_EQ_INT(atomic_load(&g_singleton_teardown_count), 1);
+
+	struct alp_ble *reclaimed = _alloc_radio();
+	ALP_ASSERT_TRUE(reclaimed != NULL);
+	_free_radio(reclaimed);
+}
+
+/* ------------------------------------------------------------------ */
+/* 4b. #1118 round-2 dev review: a genuinely CONCURRENT alp_ble_open()  */
+/*     must join an in-flight opener instead of reading the size-1      */
+/*     pool as full. Scenario 4 above only ever hand-built the FIRST    */
+/*     handle and called alp_ble_open() single-threaded for the join -- */
+/*     it never exercised a second thread racing INTO alp_ble_open()'s  */
+/*     own TOCTOU window (in_use claimed, refcount not yet published),  */
+/*     which is exactly where the round-1 fix still returned NOMEM.     */
+/* ------------------------------------------------------------------ */
+
+static void fake_close_noop_concurrent(alp_ble_radio_state_t *state)
+{
+	(void)state;
+}
+
+static const alp_ble_ops_t fake_ops_concurrent_open = {
+	.close = fake_close_noop_concurrent,
+};
+
+struct concurrent_open_ctx {
+	pthread_barrier_t start;
+	alp_ble_t        *joiner_result;
+};
+
+static void *concurrent_joiner_thread(void *arg)
+{
+	struct concurrent_open_ctx *ctx = (struct concurrent_open_ctx *)arg;
+	pthread_barrier_wait(&ctx->start);
+	/* THE call under test: the real, fixed alp_ble_open(). */
+	ctx->joiner_result = alp_ble_open();
+	return NULL;
+}
+
+static void test_concurrent_open_joins_in_flight_opener(void)
+{
+	/* Simulate the exact TOCTOU window a real alp_ble_open()'s
+	 * fresh-open path leaves open between _alloc_radio() (in_use ->
+	 * true) and publishing refcount: claim the slot by hand but leave
+	 * refcount at its freshly-claimed default of 0. */
+	struct alp_ble *h = _alloc_radio();
+	ALP_ASSERT_TRUE(h != NULL);
+	h->state.ops = &fake_ops_concurrent_open;
+
+	struct concurrent_open_ctx ctx;
+	ctx.joiner_result = NULL;
+	ALP_ASSERT_EQ_INT(pthread_barrier_init(&ctx.start, NULL, 2), 0);
+
+	pthread_t joiner;
+	ALP_ASSERT_EQ_INT(pthread_create(&joiner, NULL, concurrent_joiner_thread, &ctx), 0);
+	pthread_barrier_wait(&ctx.start);
+
+	/* Give the joiner thread real wall-clock time to land inside its
+	 * retry-scan loop (alp_slot_sleep_tick() sleeps ~1ms per attempt)
+	 * BEFORE this simulated opener publishes, so this deterministically
+	 * exercises the wait-then-join path rather than a lucky ordering
+	 * where the joiner's very first scan already sees a published
+	 * refcount. */
+	struct timespec ts = { .tv_sec = 0, .tv_nsec = 20 * 1000 * 1000L }; /* 20ms */
+	nanosleep(&ts, NULL);
+
+	/* NOW the simulated opener publishes -- the second half of a real
+	 * alp_ble_open()'s fresh-open path (src/ble_dispatch.c). */
+	__atomic_store_n(&h->refcount, 1u, __ATOMIC_RELEASE);
+	alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_OPEN);
+
+	ALP_ASSERT_EQ_INT(pthread_join(joiner, NULL), 0);
+	pthread_barrier_destroy(&ctx.start);
+
+	/* THE assertion: the joiner must have JOINED the singleton (same
+	 * pointer, refcount incremented) -- pre-round-2-fix, this read
+	 * in_use==true / refcount==0, declined to join, found the size-1
+	 * pool's only slot already claimed, and returned NULL (ALP_ERR_NOMEM
+	 * on a real, backend-registered build; here alp_backend_select()
+	 * also fails since no ble backend is linked into this test binary --
+	 * either way NULL, never a fresh handle, and never == h). */
+	ALP_ASSERT_TRUE(ctx.joiner_result == h);
+	ALP_ASSERT_EQ_INT((int)h->refcount, 2);
+
+	alp_ble_close(h);
+	alp_ble_close(ctx.joiner_result);
 	struct alp_ble *reclaimed = _alloc_radio();
 	ALP_ASSERT_TRUE(reclaimed != NULL);
 	_free_radio(reclaimed);
@@ -417,6 +517,7 @@ int main(void)
 	 * its recycle_thread()'s freeze branch), so nothing after it can
 	 * _alloc_radio() again in this process. */
 	test_repeated_open_joins_singleton_and_close_tears_down_once();
+	test_concurrent_open_joins_in_flight_opener();
 	test_self_close_from_scan_callback();
 	test_close_from_other_thread_while_scan_blocks();
 	test_close_from_other_thread_during_scan_vs_slot_reuse();
