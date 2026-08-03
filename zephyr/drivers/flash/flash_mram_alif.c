@@ -29,14 +29,25 @@
  * `mram_storage` nodelabel.
  *
  * ------------------------- alp-sdk divergence -------------------------
- * flash_range_is_valid() (issue #1119) was changed from the fork's
- * `(offset + len) > size` end-calculation to the overflow-safe
+ * The fork's flash_range_is_valid(dev, offset, len) end-calculation
+ * (`(offset + len) > size`, issue #1119) was replaced by a direct call, at
+ * all three read/write/erase call sites, to the overflow-safe
  * flash_mram_range_is_valid() helper (this driver's companion
- * flash_mram_range.h, built on the shared alp_size_range_valid() from
- * src/common/alp_checked_arith.h, #743).  The addition wraps on a 32-bit
- * target when len is close to SIZE_MAX, which lets an out-of-range
- * offset+len pair evade the bound and reach the MRAM read/write/erase path.
- * Reapply this divergence if the file is ever re-synced from the fork.
+ * flash_mram_range.h; a local subtraction-based check mirroring, but not
+ * including, the shared alp_size_range_valid() from
+ * src/common/alp_checked_arith.h, #743 -- this file is compiled before
+ * CMakeLists.txt's CONFIG_ALP_SDK early-return for images such as MCUboot
+ * that never set CONFIG_ALP_SDK, and src/common is not on the include path
+ * that early, see flash_mram_range.h's banner).  There is deliberately no
+ * driver-local flash_range_is_valid() wrapper any more (round-2 #1119
+ * follow-up): a wrapper is a second place the check could silently regress
+ * back to the wrapping arithmetic while tests/unit/flash_mram_range, which
+ * only exercises the header, stayed green -- calling the tested header
+ * function directly at each call site removes that gap structurally. The
+ * addition wraps on a 32-bit target when len is close to SIZE_MAX, which
+ * lets an out-of-range offset+len pair evade the bound and reach the MRAM
+ * read/write/erase path. Reapply this divergence if the file is ever
+ * re-synced from the fork.
  * -------------------------------------------------------------------------
  */
 #define DT_DRV_COMPAT alif_mram_flash_controller
@@ -146,22 +157,6 @@ static int mram_erase_16bytes(volatile void *dst)
 }
 
 /**
- * @brief check if offset and len are in valid range.
- *
- * @param dev Pointer to device driver instance
- * @param offset Flash offset address for read/write operation.
- * @param len Number of bytes to read/write from offset address.
- *
- * @return 1 if range is valid, 0 otherwise.
- */
-static int flash_range_is_valid(const struct device *dev, off_t offset,
-				size_t len)
-{
-	ARG_UNUSED(dev);
-	return flash_mram_range_is_valid(offset, len, FLASH_MRAM_FLASH_SIZE) ? 1 : 0;
-}
-
-/**
  * @brief read aligned data from the MRAM from the given address.
  *
  * @param dst Pointer to the void buffer to store read data.
@@ -219,7 +214,7 @@ static int flash_mram_read(const struct device *dev, const off_t offset,
 {
 	struct mram_flash_data *dev_data = dev->data;
 
-	if (!flash_range_is_valid(dev, offset, len)) {
+	if (!flash_mram_range_is_valid(offset, len, FLASH_MRAM_FLASH_SIZE)) {
 		LOG_ERR("mram_read: Invalid range offset: %ld len: %d\n",
 			(long)offset, len);
 		return -EINVAL;
@@ -258,7 +253,7 @@ static int flash_mram_write(const struct device *dev, const off_t offset,
 {
 	struct mram_flash_data *dev_data = dev->data;
 
-	if (!flash_range_is_valid(dev, offset, len)) {
+	if (!flash_mram_range_is_valid(offset, len, FLASH_MRAM_FLASH_SIZE)) {
 		LOG_ERR("mram_write: Invalid range offset: %ld len: %d\n",
 			(long)offset, len);
 		return -EINVAL;
@@ -378,7 +373,7 @@ static int flash_mram_erase(const struct device *dev, off_t offset,
 	uint32_t mram_unit_start;
 	uint32_t i;
 
-	if (!flash_range_is_valid(dev, offset, len)) {
+	if (!flash_mram_range_is_valid(offset, len, FLASH_MRAM_FLASH_SIZE)) {
 		LOG_ERR("mram_erase: Invalid range offset: %ld len :%d\n",
 			(long)offset, len);
 		return -EINVAL;

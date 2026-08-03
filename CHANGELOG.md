@@ -13,8 +13,55 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 unsigned arithmetic; a `len` close to `SIZE_MAX` wrapped the sum past
 `FLASH_MRAM_FLASH_SIZE` and evaded the bound, reaching the MRAM
 read/write/erase path with an out-of-range request. Rewritten
-subtraction-based on the shared `alp_size_range_valid()` helper
-(`src/common/alp_checked_arith.h`, #743) (#1119).
+subtraction-based, in a new companion header `flash_mram_range.h`, and
+called directly at all three read/write/erase call sites — there is no
+longer a driver-local `flash_range_is_valid()` wrapper to silently regress
+back to the wrapping arithmetic while a header-only test stayed green
+(#1119).
+
+**Round-2 dev-review fixes to the above (both release-blockers):**
+
+- `flash_mram_range.h` initially `#include`d the shared
+  `src/common/alp_checked_arith.h` helper. `flash_mram_alif.c` is compiled
+  by `zephyr/CMakeLists.txt` *before* the `if(NOT CONFIG_ALP_SDK) return()`
+  early-return (`zephyr/Kconfig:52-60` — MCUboot is exactly such an image),
+  and `src/common` is only added to the include path *after* that
+  early-return, so the include was unresolvable in any image that never
+  sets `CONFIG_ALP_SDK` — `fatal error: alp_checked_arith.h: No such file
+  or directory` building MCUboot for
+  `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he`. No CI job builds
+  MCUboot, so nothing caught it. Fixed by duplicating the four-line
+  subtraction check inline in `flash_mram_range.h` instead of including the
+  shared helper. Verified with a real `west build .../mcuboot/boot/zephyr
+  -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he -- \
+  -DCONFIG_SINGLE_APPLICATION_SLOT=y` (the `SB_CONFIG_MCUBOOT_MODE_SINGLE_APP`
+  the AEN sysbuild config now requires post-#1069/#1103): `rc=1` with the
+  pre-fix header restored, `rc=0` with the fix, confirmed both ways.
+- `tests/unit/flash_mram_range` and the sibling `display_cdc200_bounds` /
+  `dma_pl330_sg_validate` suites only exercised each driver's extracted
+  header helper, never the driver's own call site — proven in review by
+  reverting `flash_range_is_valid()` to the wrapping arithmetic, deleting
+  all four `cdc200_validate_transfer()` calls from `display_cdc200.c`, and
+  neutering the `dma_pl330_sg_chain_matches()` call to `if (false)`: all
+  three still passed 3/3 twister configurations, 10/10 test cases. Closed
+  for flash_mram by removing the driver-local wrapper (above — there is no
+  longer a second place to regress) and for CDC200 by a new
+  `tests/unit/display_cdc200_entrypoints` suite that links the *actual*
+  `display_cdc200.c` under `native_sim` (no `<soc.h>`/hardware-register
+  dependency in its read/write entry points) and calls
+  `cdc200_generic_write`/`_read` and `cdc200_display_write`/`_read`
+  directly — mutation-proven: deleting the four `cdc200_validate_transfer()`
+  calls turns 5 of its 9 cases red, restoring the calls turns them green
+  again. **Not closed for PL330**: `dma_pl330_alif.c` unconditionally
+  `#include`s the Alif `hal_alif` module's `<soc.h>`/`<soc_memory_map.h>`
+  (for `local_to_global()`), a west module not present in this environment
+  and not buildable under `native_sim` without vendoring a stand-in that
+  risks masking a real hal_alif integration break — see
+  `tests/unit/dma_pl330_sg_validate/CMakeLists.txt` for the residual-gap
+  note. The `dma_pl330_configure()` call site already calls
+  `dma_pl330_sg_chain_matches()` directly (no wrapper indirection to strip,
+  unlike flash_mram), so the remaining exposure is narrower than before,
+  but a call-site regression there is still undetected by CI.
 
 `adc_alif.c`'s `adc_start_read()` unconditionally dereferenced
 `sequence->options->user_data`, even though Zephyr's `adc_sequence` contract
@@ -51,13 +98,21 @@ could try to start. All scatter-gather validation (head-block non-NULL,
 now runs up front, before any channel state is mutated, so a rejected
 `configure()` call never publishes partial state (#1124).
 
-Each fix carries a hosted `tests/unit/` regression suite exercising the
-exact guard the driver runs (`flash_mram_range`, `adc_alif_comparator`,
+Each fix carries a hosted `tests/unit/` regression suite for its extracted
+guard header (`flash_mram_range`, `adc_alif_comparator`,
 `display_cdc200_bounds`, `alif_pdm_burst_plan`, `dma_pl330_sg_validate`) —
-these drivers only build against a devicetree-instantiated AEN target, so
-the guard logic is split into small dependency-free headers the drivers and
-the native_sim tests both include, rather than relying on hardware-only
-coverage.
+most of these drivers only build against a devicetree-instantiated AEN
+target, so the guard logic is split into small dependency-free headers the
+drivers and the native_sim tests both include. As of the round-2 review
+above, `flash_mram` (by construction) and CDC200 (by a new
+`display_cdc200_entrypoints` suite) additionally prove the *driver's own
+call site* still invokes the guard, mutation-tested by deleting the call
+and watching the suite go red. ADC (#1120) and PDM (#1122) remain at
+header-only coverage — round 2 did not demonstrate a call-site regression
+for either, but that also means neither claim is stronger than "the guard
+logic is correct", not "the driver still calls it". PL330 (#1124) remains
+header-only for a documented reason (see above): its driver file needs the
+`hal_alif` west module, unavailable here.
 
 ### Fixed — `firmware-update-log` failed to link on both AEN801 board targets (#1101)
 
