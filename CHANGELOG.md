@@ -53,6 +53,190 @@ returned `ALP_OK` with PORF still latched. The write's status is now
 propagated; a failure returns early, leaving the instance uninitialised
 (#1135).
 
+### Fixed — flash-backend hardening: path traversal and script command injection (#1112, #1113)
+
+`scripts/flash_backends/yocto_wic.py` validated `flash_args.target` with a
+bare `str(target).startswith("/dev/")` check, so `/dev/../tmp/foo` passed
+straight through to `bmaptool`/`dd` — since flashing commonly runs elevated,
+that could overwrite an arbitrary regular file. The target is now
+canonicalized (a lexical `..`-traversal collapse on every host, plus a
+symlink-chasing `os.path.realpath` pass on POSIX hosts only — a Windows host
+has no `/dev` tree to chase symlinks through) and required to resolve
+strictly beneath `/dev/`; right before a tool actually runs, a second gate
+additionally requires the resolved target to `stat` as a real block device.
+A regular file is rejected outright, with no silent fallback. Traversal and
+symlink escapes are rejected before any external tool runs. The command
+that actually executes always uses the caller's original `/dev/...` string,
+never the resolved form — the resolution is for validation and the
+block-device check only, so a device-name symlink still flashes under the
+name the caller gave it, and the emitted `dd`/`bmaptool` argv is never
+reinterpreted through Windows NT path semantics (which previously turned
+`/dev/sdb` into `\dev\sdb`). The `stat`-then-open-by-name pair is not
+atomic (TOCTOU); closing that needs root on the flashing host already, so
+it's named as a residual defense-in-depth gap in the backend's docstring
+rather than closed.
+
+`scripts/flash_backends/swd_probe.py` interpolated the artefact path and
+base address raw into generated J-Link Commander (newline-separated) and
+OpenOCD Tcl (`-c` command string) scripts — a newline in the path injected
+additional J-Link commands, a Tcl separator in the address injected
+OpenOCD commands, and an ordinary path containing spaces simply parsed
+wrong. `base` is now parsed as a bounded 32-bit integer literal (decimal or
+`0x`-prefixed hex) and re-rendered canonically — the raw string is never
+passed through. The artefact path is validated for control characters/
+newlines and then quoted per the target script's own grammar: double-quoted
+for J-Link Commander, brace-quoted for Tcl — the two are not
+interchangeable, and either quoting fails closed (rejects) rather than
+attempting to escape an embedded quote/brace (a trailing backslash, which
+would otherwise escape Tcl's closing brace, is rejected too). A third sink
+in the same file went unfixed by the initial pass: `flash_args.interface`
+and `flash_args.target` were interpolated raw into `-f interface/{value}.cfg`
+/ `-f target/{value}.cfg` — OpenOCD *sources* a `-f` file as Tcl, so a
+traversal payload there reaches arbitrary code execution, not just an
+unexpected file read. Both are now constrained to
+`^[a-z0-9][a-z0-9_-]*$` before interpolation and rejected outright (not
+sanitized) if they don't match.
+
+`metadata/schemas/som-preset-v1.schema.json`'s `flash_args` stays
+deliberately open (per its own doc comment, the shape follows whichever
+backend `flash_method` names, which the schema can't enumerate without
+backend-conditional logic this schema doesn't otherwise use) — the address
+grammar is enforced at the one place that's authoritative for it, the
+backend itself, which also gives a precise error instead of a generic
+schema-pattern failure.
+
+### Fixed — `firmware-update-log` failed to link on both AEN801 board targets (#1101)
+
+`zephyr/soc-bridge/alif/mpu_regions_e8.c` unconditionally reads
+`DT_NODELABEL(storage_partition)` to size its non-MCUboot MRAM_DEVICE MPU
+window, but `examples/connectivity/firmware-update-log`'s own
+`boards/alp_e1m_aen801_m55_log_mram.dtsi` deleted that nodelabel without
+replacing it, so both `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he` and
+`alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp` failed at CMake configure
+(`DT_N_NODELABEL_storage_partition... undeclared`) — breaking
+`scripts/bench/aen/flash-update-log-dual.sh` and
+`flash-update-log-firewall-probe.sh`. Fixed by adding `storage_partition`
+as a SECOND nodelabel on the existing `alp_ulog_partition` node (not a
+rename): the SDK's own `update_log` sw_tier binds by the
+`alp_ulog_partition` nodelabel (`src/backends/update_log/sw_tier.c`), so a
+plain rename would have kept the example linking while silently degrading
+`HW_ENFORCED` to the RAM tier. Two nodelabels on one DT node is legal and
+already has prior art in the pinned Zephyr toolchain
+(`boards/st/b_u585i_iot02a/b_u585i_iot02a-common.dtsi`'s `memc:
+aps6408l:`). Verified both AEN801 targets now link clean via a local
+worktree twister build (`west twister -p
+alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he -p
+alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp --build-only`, 0 failed / 0
+errored) and confirmed the computed MPU windows from the generated
+`devicetree_generated.h` match the non-MCUboot branch's intent: MRAM_EXEC
+`0x80000000..0x8008ffff` (RO, flash-attr), MRAM_DEVICE
+`0x80090000..0x8009ffff` (the NVS window the HP owner actually writes,
+device-attr). Also gave the example real `platform_allow` scenarios
+(`he_client.aen` / `hp_owner.aen`, `build_only: true`) so twister catches a
+regression — it was `native_sim/native/64`-only before, the only reason
+neither `pr-twister.yml` nor the AEN-scoped `pr-twister-aen.yml` (scoped to
+`examples/aen/**`) ever saw this break.
+
+A follow-up review round decoded `mpu_regions` out of the built
+`zephyr.elf` (not DTS arithmetic) and found the dual-nodelabel fix alone
+still left `0x800A0000..0x8057FFFF` (4.875 MiB, including
+`atoc_reserved_partition@0x560000`, marked `read-only` in the same
+overlay) covered by no MPU region — privileged RW+exec by ARMv8-M's
+default `PRIVDEFENA` map. Root cause: the vendor model `mpu_regions_e8.c`
+mirrors assumes `storage_partition` is the last partition in
+`mram_storage`; this example's overlay isn't (ulog/storage sits at
+`0x90000`, below the SE-fixed ATOC package). Closed generically in
+`mpu_regions_e8.c` with a conditional fifth `MRAM_RESERVED` region
+spanning MRAM_DEVICE's top to the top of `mram_storage`, RO like
+MRAM_EXEC — it compiles out (size 0) on every other board/example, which
+already tile to top-of-flash. `pr-twister-aen.yml` also gained
+`zephyr/soc-bridge/**` and `src/backends/update_log/**` in its `paths:`
+blocks (both were previously unwatched, despite being exactly the files
+that caused this bug), and `testcase.yaml` gained a third scenario
+building `alp_e1m_aen801_m55_he_firewall_probe.conf`, the profile
+`scripts/bench/aen/flash-update-log-firewall-probe.sh` actually requires
+and which stayed build-uncovered before.
+
+### Fixed — E1M-AEN801 M55-HP and M55-HE both linked to slot0 `0x80010000`, so flashing both cores silently overwrote one image (#1069, release-blocker)
+
+Both AEN801 per-core board files declared byte-identical MRAM partition
+maps over the SAME physical App MRAM (`mram_storage@80000000`,
+`slot0_partition` at offset `0x10000`), so a dual-core project's `west
+flash` (or a hand-assembled two-entry ATOC) wrote two images to one
+`mramAddress` and the second silently overwrote the first — bench-confirmed
+on `e1m-aen-evk-01`: an `m55_hp` build and an `m55_he` build both resolved
+to `mramAddress 0x80010000` in their staged ATOC. Decided layout (deferring
+OTA rather than shrinking either slot, since a swap-sized secondary slot on
+both cores would break the ~2.6 MiB NPU MRAM-model budget; every
+E8 measurement to date ran `CONFIG_SINGLE_APPLICATION_SLOT=y`, so nothing
+proven is lost):
+
+- **New disjoint slot0 windows** (`metadata/e1m_modules/E1M-AEN801.yaml`
+  `memory_map:`): `mcuboot` 64 KiB @ `0x80000000` (shared) · HE `slot0`
+  2688 KiB @ `0x80010000` (**unchanged**) · HP `slot0` 2688 KiB @
+  `0x802b0000` (**moved off** the old shared `0x80010000` window, onto
+  what used to be the OTA `slot1` window) · `reserved` 64 KiB @
+  `0x80550000` (ex-scratch, unused) · `storage` 128 KiB @ `0x80560000`.
+  64 + 2688 + 2688 + 64 + 128 = 5632 KiB, the full App MRAM. HE keeps the
+  low window because everything else canonical is HE (the runner's default
+  core, the factory MCUboot ATOC's `cpu_id M55_HE`, the canonical
+  `person_detect` slot0, the MRAM-XIP NPU example overlays); Alif's own
+  DevKit-e8 dual-core example orders HE low too.
+- **`scripts/gen_zephyr_board.py`'s `_aen_flash_partitions()` is now
+  role-aware**, sourced from the preset's `memory_map:` when a `<role>_slot0`
+  entry is declared; both `alp_e1m_aen801_m55_{he,hp}` board `.dts` files
+  are regenerated (byte-for-byte, `tests/scripts/test_gen_zephyr_board.py`).
+  The single-M55 SKUs (`aen401`, `aen601`) have no `memory_map:` override
+  and keep the stock symmetric two-slot swap-using-scratch layout unchanged.
+- **`zephyr/sysbuild/aen/sysbuild.conf`** switches from
+  `SB_CONFIG_MCUBOOT_MODE_SWAP_SCRATCH` to `SB_CONFIG_MCUBOOT_MODE_SINGLE_APP`
+  (no secondary/scratch slot), matching what was actually silicon-proven.
+- **`scripts/west_commands/runners/alif_flash.py`** no longer hard-codes
+  one `mramAddress` for both cores: it derives the ATOC `mramAddress` from
+  which disjoint window the build's own reset vector falls in, cross-checked
+  against `--device` (the same defence-in-depth the ITCM branch already
+  applied) — a build whose vector lands in the sibling core's window is
+  now a hard `RuntimeError`, not a silent burn.
+- **New shared guard, `scripts/aen_atoc.py`**, used by both
+  `alif_flash.py` and `scripts/bench/aen/flash-run-dualcore.sh`: rejects,
+  before `app-gen-toc` runs, an ATOC `mramAddress` entry outside its
+  `cpu_id`'s declared slot0 window, two entries at the same `mramAddress`,
+  or an entry past System MRAM (`0x80580000`). `loadAddress` (ITCM) entries
+  — what every current AEN dual-core *example* actually stages — are left
+  alone; they were already disjoint by construction.
+  `scripts/bench/aen/flash-jlink-mramxip.sh` (Flow D, HE-only slot0-XIP)
+  now calls the guard too, and its reset-vector sanity check gives an
+  explicit diagnostic for an HP-linked binary instead of a generic
+  "drop the itcm overlay" message.
+- **`examples/multicore/mproc-mailbox` / `examples/multicore/rpmsg-aen`
+  `board.yaml`** IPC carve-out comments updated. Both stay
+  `status: blocked` on E1M-AEN801: the five fine-grained MRAM regions
+  (`mcuboot`/`he_slot0`/`hp_slot0`/`reserved`/`storage`) are flash-class,
+  not RAM, so `metadata/schemas/som-preset-v1.schema.json` gains a
+  `memory_region.carveout` field and all five are marked
+  `carveout: false`, keeping `scripts/alp_orchestrate/carveout.py`
+  `resolve_carve_outs()` from ever placing a shared-memory ring inside
+  MRAM even though those regions now publish a real `base` (needed only
+  for `_aen_flash_partitions()`'s DTS partition table). `mproc-mailbox`'s
+  `raw_shmem` entry and `rpmsg-aen`'s `a32_cluster`-endpointed entry both
+  block on the remaining candidate, `mram_main`, whose `base: TBD` is
+  deliberate (see its comment in `E1M-AEN801.yaml`) so a coarse
+  whole-MRAM carve-out can't silently land inside a real
+  mcuboot/slot0/reserved/storage region either.
+  `tests/fixtures/emit-snapshots/{mproc-mailbox,rpmsg-aen}.*.snap`
+  regenerated to match.
+
+**Known limits, not closed by this fix:** a sequential single-core
+`west flash` writes a whole fresh TOC each run, so the previous core's
+entry is invisible to the assembly-time guard by the time the second
+`west flash` runs — catching that needs a pre-burn TOC read-back over the
+SE-UART, out of scope here. The J-Link customer path (`loadbin` straight
+to slot0) has no ATOC assembly step at all; for that path the disjoint DTS
+windows themselves are the guard, since the link address moves per core.
+
+**BENCH-GATED: this fix has NOT been run on real E8 silicon and must not
+merge without that run.**
+
 ### Fixed — `test-all.sh` ran 1 of 34 required gate scripts on Windows (#1109)
 
 `scripts/quality_tasks.py --gate-scripts` wrote CRLF line endings on

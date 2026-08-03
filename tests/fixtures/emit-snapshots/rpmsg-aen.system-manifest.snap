@@ -42,7 +42,7 @@ ipc:
   - a32_cluster
   - m55_hp
   status: blocked
-  reason: memory_map.base is unset for region 'sram0' in SoM E1M-AEN801; this SoM
+  reason: memory_map.base is TBD for region 'mram_main' in SoM E1M-AEN801; this SoM
     hasn't been HW-mapped yet so IPC carve-outs cannot be allocated.  Add a `memory_map:`
     block to metadata/e1m_modules/E1M-AEN801.yaml (or per-region `base`) or remove
     the matching ipc entry from board.yaml.
