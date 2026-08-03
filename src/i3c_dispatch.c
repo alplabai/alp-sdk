@@ -166,7 +166,7 @@ void alp_i3c_close(alp_i3c_t *bus)
 	 * bounded wait instead of a use-after-free (issue #629).  Losing
 	 * the CAS (already closed/closing/never-opened) makes this a
 	 * no-op, matching the existing void-close idempotency contract. */
-	if (!alp_handle_begin_close(&bus->lifecycle, &bus->active_ops)) return;
+	if (!alp_handle_begin_close_blocking(&bus->lifecycle, &bus->active_ops)) return;
 	if (bus->state.ops != NULL && bus->state.ops->close != NULL) {
 		bus->state.ops->close(&bus->state);
 	}

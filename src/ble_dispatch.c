@@ -24,13 +24,14 @@
  * alp_ble_gatt_write() (conn-side), each of which can block up to a
  * caller-supplied timeout_ms on a real link-layer round-trip.
  * alp_ble_close() / alp_ble_disconnect() therefore drain their pool
- * with alp_handle_begin_close_blocking() (src/common/alp_slot_claim.c)
- * rather than the short-op alp_handle_begin_close(): a sleep-poll
- * drain, generalised from rpc_dispatch.c's _rpc_op_enter()/
- * _rpc_begin_close()/_rpc_drain() (GHSA-xhm8), which is safe to wait
- * on a genuinely long-running op instead of spinning the closer
- * thread for the whole handshake. A racing close/disconnect can no
- * longer tear down state while one of these ops is in flight.
+ * with alp_handle_begin_close_blocking() (src/common/alp_slot_claim.c):
+ * a sleep-poll drain (never busy-spins -- issue #1114: unsafe
+ * unconditionally, not just for a long-running op), generalised from
+ * rpc_dispatch.c's _rpc_op_enter()/_rpc_begin_close()/_rpc_drain()
+ * (GHSA-xhm8), which is safe to wait on a genuinely long-running op
+ * instead of spinning the closer thread for the whole handshake. A
+ * racing close/disconnect can no longer tear down state while one of
+ * these ops is in flight.
  *
  * @par Issue #756 -- callback self-close inside alp_ble_scan_start()
  * The CC3501E backend's scan_start op runs the scan to completion and
@@ -511,11 +512,10 @@ alp_status_t alp_ble_connect(alp_ble_t            *h,
 {
 	/* Counted via alp_handle_op_enter/leave -- see this file's "Issue
 	 * #629" header comment. connect() can block up to timeout_ms on a
-	 * real link-layer handshake; alp_ble_close() now drains this op
-	 * with the sleep-poll alp_handle_begin_close_blocking() rather than
-	 * the short-op alp_handle_begin_close(), so counting a
-	 * long-running op here no longer risks spinning the closer thread
-	 * for the whole handshake. */
+	 * real link-layer handshake; alp_ble_close() drains this op with
+	 * the sleep-poll alp_handle_begin_close_blocking() (never a
+	 * busy-spin), so counting a long-running op here does not risk
+	 * spinning the closer thread for the whole handshake. */
 	if (h == NULL || !alp_handle_op_enter(&h->lifecycle, &h->active_ops)) {
 		return ALP_ERR_NOT_READY;
 	}

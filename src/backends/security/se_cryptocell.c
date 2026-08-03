@@ -186,7 +186,11 @@ static alp_status_t se_rc_to_alp(int rc)
  * the winning claimant zeroes everything before it via offsetof, and every
  * release below wipes that same region (sensitive key/plaintext material)
  * before atomically releasing the slot with alp_slot_release() -- see
- * se_hash_acquire()/se_aead_acquire() (issue #1115).
+ * se_hash_acquire()/se_aead_acquire() (issue #1115). Round-2 dev review:
+ * every op's `!be->in_use` guard below now reads it with
+ * __atomic_load_n(__ATOMIC_ACQUIRE) too, not a plain load -- mixing a
+ * plain read with the atomic claim/release RMW/store on the same object
+ * is a data race in the C memory model.
  */
 struct se_hash_be {
 	/*
@@ -430,7 +434,7 @@ se_hash_open(alp_hash_alg_t alg, alp_hash_backend_state_t *state, alp_capabiliti
 static alp_status_t se_hash_update(alp_hash_backend_state_t *state, const uint8_t *data, size_t len)
 {
 	struct se_hash_be *be = (struct se_hash_be *)state->be_data;
-	if (be == NULL || !be->in_use) {
+	if (be == NULL || !__atomic_load_n(&be->in_use, __ATOMIC_ACQUIRE)) {
 		return ALP_ERR_NOT_READY;
 	}
 	if (data == NULL && len != 0u) {
@@ -467,7 +471,7 @@ static alp_status_t se_hash_finish(alp_hash_backend_state_t *state,
                                    size_t                   *digest_len)
 {
 	struct se_hash_be *be = (struct se_hash_be *)state->be_data;
-	if (be == NULL || !be->in_use) {
+	if (be == NULL || !__atomic_load_n(&be->in_use, __ATOMIC_ACQUIRE)) {
 		return ALP_ERR_NOT_READY;
 	}
 
@@ -551,7 +555,7 @@ static alp_status_t se_hash_finish(alp_hash_backend_state_t *state,
 static void se_hash_close(alp_hash_backend_state_t *state)
 {
 	struct se_hash_be *be = (struct se_hash_be *)state->be_data;
-	if (be == NULL || !be->in_use) {
+	if (be == NULL || !__atomic_load_n(&be->in_use, __ATOMIC_ACQUIRE)) {
 		return;
 	}
 	/* Tear down the delegated PSA context before wiping our slot. */
@@ -644,7 +648,7 @@ static alp_status_t se_aead_encrypt(alp_aead_backend_state_t *state,
                                     size_t                    tag_len)
 {
 	struct se_aead_be *be = (struct se_aead_be *)state->be_data;
-	if (be == NULL || !be->in_use) {
+	if (be == NULL || !__atomic_load_n(&be->in_use, __ATOMIC_ACQUIRE)) {
 		return ALP_ERR_NOT_READY;
 	}
 
@@ -763,7 +767,7 @@ static alp_status_t se_aead_decrypt(alp_aead_backend_state_t *state,
                                     uint8_t                  *plain_out)
 {
 	struct se_aead_be *be = (struct se_aead_be *)state->be_data;
-	if (be == NULL || !be->in_use) {
+	if (be == NULL || !__atomic_load_n(&be->in_use, __ATOMIC_ACQUIRE)) {
 		return ALP_ERR_NOT_READY;
 	}
 
@@ -853,7 +857,7 @@ static alp_status_t se_aead_decrypt(alp_aead_backend_state_t *state,
 static void se_aead_close(alp_aead_backend_state_t *state)
 {
 	struct se_aead_be *be = (struct se_aead_be *)state->be_data;
-	if (be == NULL || !be->in_use) {
+	if (be == NULL || !__atomic_load_n(&be->in_use, __ATOMIC_ACQUIRE)) {
 		return;
 	}
 	/* Wipe key material before releasing the slot. */

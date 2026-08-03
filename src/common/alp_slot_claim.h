@@ -136,39 +136,33 @@ static inline void alp_lifecycle_set(uint8_t *state, uint8_t value)
  *   - alp_handle_op_leave()  -- call after, unconditionally, on every
  *     exit path (including the false branch is NOT needed there --
  *     op_enter already backed the counter out).
- *   - alp_handle_begin_close() -- CAS OPEN -> CLOSING (false = already
- *     closing/closed/never-opened, caller's close() is then a no-op,
- *     matching every existing void-close idempotency contract), then
- *     waits until every op that entered before the CAS has left.
+ *   - alp_handle_begin_close_blocking() -- CAS OPEN -> CLOSING (false =
+ *     already closing/closed/never-opened, caller's close() is then a
+ *     no-op, matching every existing void-close idempotency contract),
+ *     then sleep-poll waits until every op that entered before the CAS
+ *     has left.
  *
  * The count-then-check order in alp_handle_op_enter is what removes
  * the TOCTOU window: the increment always happens before the
  * lifecycle read, so an op that observes OPEN is guaranteed counted
- * before alp_handle_begin_close's wait can pass, and an op that loses
- * the race to a CLOSING transition backs its own count back out
- * before touching backend state.
+ * before alp_handle_begin_close_blocking's wait can pass, and an op
+ * that loses the race to a CLOSING transition backs its own count back
+ * out before touching backend state.
  *
- * alp_handle_begin_close() used to drain with a bare busy-spin here,
- * defended on op *duration* ("every class using this helper only ever
- * calls short, synchronous backend ops ... active_ops always drains in
- * a handful of instructions"). That defence does not hold: it never
- * considered *priority*. On a single-core preemptive-priority
- * scheduler (Zephyr), a higher-priority thread in the spin never
- * yields the core back to a lower-priority thread just because the
- * lower-priority thread would only need a "handful of instructions" to
- * finish -- the scheduler does not know that, and a plain spin never
- * blocks, so the lower-priority op thread that must call
- * alp_handle_op_leave() is never scheduled and the spin runs forever
- * (issue #1114). alp_handle_begin_close() is now implemented
- * out-of-line (src/common/alp_slot_claim.c) as a thin wrapper over the
- * same sleep-poll drain alp_handle_begin_close_blocking() already used
- * for genuinely-blocking ops -- a real sleep (not just a same-priority
- * k_yield()) removes the closing thread from the ready queue so the
- * scheduler can run a STRICTLY LOWER priority thread, which a spin (or
- * a same-priority-only yield) cannot do. Short ops still drain fast in
- * practice: the drain's first check usually already sees active_ops
- * back at 0 before it ever sleeps.
- */
+ * Round-2 dev review: this drain used to have TWO entry points -- a
+ * short-op alp_handle_begin_close() that busy-spun the wait, and
+ * alp_handle_begin_close_blocking() that sleep-polled it, picked per
+ * call site on whether the ops behind that handle were "always short"
+ * or could genuinely block on a caller `timeout_ms`. Issue #1114 found
+ * the busy-spin unsafe UNCONDITIONALLY (a higher-priority closing
+ * thread spinning never yields the core to a lower-priority op thread
+ * on Zephyr's preemptive scheduler, regardless of how short that op
+ * "should" be), so alp_handle_begin_close() became a pure wrapper over
+ * the sleep-poll drain -- at which point the two names described
+ * IDENTICAL behaviour. Every call site has been repointed at
+ * alp_handle_begin_close_blocking() directly and the short-op name
+ * removed, so there is now exactly one close-drain entry point (plus
+ * the self-aware variant below for the callback-reentrancy case). */
 #define ALP_HANDLE_LC_UNOPENED 0u
 #define ALP_HANDLE_LC_OPEN     1u
 #define ALP_HANDLE_LC_CLOSING  2u
@@ -202,45 +196,24 @@ static inline void alp_handle_op_leave(uint32_t *active_ops)
 }
 
 /**
- * @brief Begin closing a handle: gate out new ops, then drain in-flight ones.
+ * @brief Begin closing a handle: gate out new ops, then sleep-poll drain
+ *        in-flight ones.
  *
- * Defined out-of-line (src/common/alp_slot_claim.c), not inline here, as a
- * thin wrapper over the sleep-poll drain alp_handle_begin_close_blocking()
- * uses -- see the "Generic open/op/close guard" block comment above
- * (issue #1114) for why a plain busy-spin is unsafe here regardless of op
- * duration: it never yields the core to a strictly lower-priority op
- * thread on a single-core preemptive-priority scheduler.
- *
- * @param[in,out] lifecycle   Handle lifecycle byte (ALP_HANDLE_LC_*).
- * @param[in]     active_ops  Handle's in-flight-op counter.
- * @return true if this caller won the OPEN -> CLOSING transition and
- *         may now tear the handle down; false if it was already
- *         closed/closing/never-opened (caller's close() is a no-op).
- */
-bool alp_handle_begin_close(uint8_t *lifecycle, uint32_t *active_ops);
-
-/**
- * @brief Begin closing a handle that also hosts blocking ops (issue #629).
- *
- * Same CAS-then-drain contract as alp_handle_begin_close() above --
- * OPEN -> CLOSING, then wait for every op counted before the CAS to
- * leave -- but the drain SLEEPS between polls instead of busy-spinning,
- * so it is safe to use on a handle that counts an op taking a caller
- * `timeout_ms` (a real link-layer/broker/transfer round-trip that can
- * run far longer than "a handful of instructions").  This is the
- * generalisation of rpc_dispatch.c's _rpc_begin_close()/_rpc_drain()
- * (GHSA-xhm8-7f87-93q5) to the shared handle-pool helpers: same
- * sleep-poll-never-spin rationale, same portable sleep-tick primitive
- * (see src/common/alp_slot_claim.c). Defined out-of-line in
- * src/common/alp_slot_claim.c (not inline here) because the sleep
- * primitive needs an OS header (k_sleep / nanosleep) this header
- * deliberately does not pull in -- see the file comment at the top of
- * this header.
- *
- * A handle whose pool mixes short-sync ops with a blocking one (e.g.
- * BLE's advertise/gatt-notify alongside connect()) can use this
- * sleep-poll close uniformly: it drains the short ops just as
- * correctly, just via a sleep-poll loop instead of a spin.
+ * CAS OPEN -> CLOSING, then wait for every op counted before the CAS to
+ * leave. The drain SLEEPS between polls (never busy-spins -- issue
+ * #1114: a spinning closer thread never yields the core to a strictly
+ * lower-priority op thread on a single-core preemptive-priority
+ * scheduler, no matter how short that op is), so this is equally safe
+ * for a handle whose ops are always short AND one that counts an op
+ * taking a caller `timeout_ms` (a real link-layer/broker/transfer
+ * round-trip). This is the generalisation of rpc_dispatch.c's
+ * _rpc_begin_close()/_rpc_drain() (GHSA-xhm8-7f87-93q5) to the shared
+ * handle-pool helpers: same sleep-poll-never-spin rationale, same
+ * portable sleep-tick primitive (see src/common/alp_slot_claim.c).
+ * Defined out-of-line in src/common/alp_slot_claim.c (not inline here)
+ * because the sleep primitive needs an OS header (k_sleep / nanosleep)
+ * this header deliberately does not pull in -- see the file comment at
+ * the top of this header.
  *
  * @param[in,out] lifecycle   Handle lifecycle byte (ALP_HANDLE_LC_*).
  * @param[in,out] active_ops  Handle's in-flight-op counter.

@@ -238,7 +238,7 @@ void alp_dsp_chain_close(alp_dsp_chain_t *chain)
 	/* begin_close CAS OPEN->CLOSING then spins until every op that
 	 * entered before the CAS has left -- so teardown never races an
 	 * in-flight op. Idempotent: a second/never-opened close no-ops. #629 */
-	if (!alp_handle_begin_close(&chain->lifecycle, &chain->active_ops)) {
+	if (!alp_handle_begin_close_blocking(&chain->lifecycle, &chain->active_ops)) {
 		return;
 	}
 	if (chain->state.ops != NULL && chain->state.ops->close != NULL) {

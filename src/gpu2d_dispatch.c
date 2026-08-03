@@ -252,7 +252,7 @@ void alp_gpu2d_close(alp_gpu2d_t *h)
 	 * bounded wait instead of a use-after-free (issue #629).  Losing
 	 * the CAS (already closed/closing/never-opened) makes this a
 	 * no-op, matching the existing void-close idempotency contract. */
-	if (!alp_handle_begin_close(&h->lifecycle, &h->active_ops)) {
+	if (!alp_handle_begin_close_blocking(&h->lifecycle, &h->active_ops)) {
 		return;
 	}
 	if (h->state.ops != NULL && h->state.ops->close != NULL) {

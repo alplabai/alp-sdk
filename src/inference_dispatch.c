@@ -175,9 +175,10 @@ alp_inference_get_output(alp_inference_t *inf, size_t index, alp_inference_tenso
  * other op below. Its duration is NOT "a handful of instructions"
  * the way a close() racing invoke() might once have implied a long
  * spin; that concern is now moot regardless of duration --
- * alp_handle_begin_close() (src/common/alp_slot_claim.c) sleep-polls
- * rather than spins (issue #1114), so a close() racing a large-model
- * invoke() sleeps, it does not peg the closing thread's core. */
+ * alp_handle_begin_close_blocking() (src/common/alp_slot_claim.c)
+ * sleep-polls rather than spins (issue #1114), so a close() racing a
+ * large-model invoke() sleeps, it does not peg the closing thread's
+ * core. */
 alp_status_t alp_inference_invoke(alp_inference_t *inf)
 {
 	if (inf == NULL || !alp_handle_op_enter(&inf->lifecycle, &inf->active_ops)) {
@@ -196,7 +197,7 @@ void alp_inference_close(alp_inference_t *inf)
 	/* begin_close CAS OPEN->CLOSING then drains (sleep-poll, issue
 	 * #1114) until every op that entered before the CAS has left
 	 * (issue #629). Idempotent: a second/never-opened close no-ops. */
-	if (!alp_handle_begin_close(&inf->lifecycle, &inf->active_ops)) return;
+	if (!alp_handle_begin_close_blocking(&inf->lifecycle, &inf->active_ops)) return;
 	if (inf->state.ops != NULL && inf->state.ops->close != NULL) {
 		inf->state.ops->close(&inf->state);
 	}

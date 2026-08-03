@@ -218,7 +218,7 @@ void alp_i2c_regfile_close(alp_i2c_regfile_t *rf)
 	/* Drain in-flight ops, then stop the wrapped target (guarantees no
 	 * callback fires afterward) before releasing the slot -- so neither a
 	 * synchronous op nor an ISR callback touches a recycled slot. #629 */
-	if (!alp_handle_begin_close(&rf->lifecycle, &rf->active_ops)) {
+	if (!alp_handle_begin_close_blocking(&rf->lifecycle, &rf->active_ops)) {
 		return;
 	}
 	alp_i2c_target_close(rf->tgt); /* no callback fires after this */

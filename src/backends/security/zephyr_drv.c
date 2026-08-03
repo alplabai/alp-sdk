@@ -86,7 +86,13 @@
 
 /* in_use is the LAST member (see alp_slot_claim.h): the winning claimant
  * zeroes everything before it via offsetof, so lifecycle-relevant fields
- * never carry a prior tenant's stale value into a freshly claimed slot. */
+ * never carry a prior tenant's stale value into a freshly claimed slot.
+ * Round-2 dev review: every op's `!be->in_use` guard below now reads it
+ * with __atomic_load_n(__ATOMIC_ACQUIRE) too, not a plain load -- it is
+ * always written via alp_slot_try_claim()/alp_slot_release(), and mixing
+ * a plain read with an atomic RMW/store on the same object is a data
+ * race in the C memory model even though no real hardware miscompiles a
+ * bool this way. */
 struct hash_be {
 	psa_hash_operation_t op;
 	bool                 in_use;
@@ -300,7 +306,7 @@ static alp_status_t z_hash_update(alp_hash_backend_state_t *state, const uint8_t
 {
 #if defined(CONFIG_ALP_SDK_SECURITY)
 	struct hash_be *be = (struct hash_be *)state->be_data;
-	if (be == NULL || !be->in_use) return ALP_ERR_NOT_READY;
+	if (be == NULL || !__atomic_load_n(&be->in_use, __ATOMIC_ACQUIRE)) return ALP_ERR_NOT_READY;
 	return psa_to_alp(psa_hash_update(&be->op, data, len));
 #else
 	(void)state;
@@ -317,7 +323,7 @@ static alp_status_t z_hash_finish(alp_hash_backend_state_t *state,
 {
 #if defined(CONFIG_ALP_SDK_SECURITY)
 	struct hash_be *be = (struct hash_be *)state->be_data;
-	if (be == NULL || !be->in_use) return ALP_ERR_NOT_READY;
+	if (be == NULL || !__atomic_load_n(&be->in_use, __ATOMIC_ACQUIRE)) return ALP_ERR_NOT_READY;
 
 	const size_t required = alp_hash_digest_len(state->alg);
 	if (digest_out == NULL || digest_cap < required) {
@@ -352,7 +358,7 @@ static void z_hash_close(alp_hash_backend_state_t *state)
 {
 #if defined(CONFIG_ALP_SDK_SECURITY)
 	struct hash_be *be = (struct hash_be *)state->be_data;
-	if (be == NULL || !be->in_use) return;
+	if (be == NULL || !__atomic_load_n(&be->in_use, __ATOMIC_ACQUIRE)) return;
 	(void)psa_hash_abort(&be->op);
 	state->be_data = NULL;
 	alp_slot_release(&be->in_use);
@@ -423,7 +429,7 @@ static alp_status_t z_aead_encrypt(alp_aead_backend_state_t *state,
 {
 #if defined(CONFIG_ALP_SDK_SECURITY)
 	struct aead_be *be = (struct aead_be *)state->be_data;
-	if (be == NULL || !be->in_use) return ALP_ERR_NOT_READY;
+	if (be == NULL || !__atomic_load_n(&be->in_use, __ATOMIC_ACQUIRE)) return ALP_ERR_NOT_READY;
 
 	/* tag_len must be exactly 16 B -- the only length every backend
      * (this one, yocto_drv.c, se_cryptocell.c) round-trips.  Check
@@ -535,7 +541,7 @@ static alp_status_t z_aead_decrypt(alp_aead_backend_state_t *state,
 {
 #if defined(CONFIG_ALP_SDK_SECURITY)
 	struct aead_be *be = (struct aead_be *)state->be_data;
-	if (be == NULL || !be->in_use) return ALP_ERR_NOT_READY;
+	if (be == NULL || !__atomic_load_n(&be->in_use, __ATOMIC_ACQUIRE)) return ALP_ERR_NOT_READY;
 
 	/* tag_len must be exactly 16 B -- see z_aead_encrypt. */
 	if (tag_len != 16u) return ALP_ERR_INVAL;
@@ -636,7 +642,7 @@ static void z_aead_close(alp_aead_backend_state_t *state)
 {
 #if defined(CONFIG_ALP_SDK_SECURITY)
 	struct aead_be *be = (struct aead_be *)state->be_data;
-	if (be == NULL || !be->in_use) return;
+	if (be == NULL || !__atomic_load_n(&be->in_use, __ATOMIC_ACQUIRE)) return;
 	(void)psa_destroy_key(be->key_id);
 	state->be_data = NULL;
 	alp_slot_release(&be->in_use);

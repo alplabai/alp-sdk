@@ -101,7 +101,10 @@ typedef struct {
  * zeroes everything before it via offsetof (in sw_open() below), so no
  * stage/window/FFT state from a prior open()/close() cycle -- or from
  * another thread mid-populating this same slot -- can leak into a freshly
- * claimed handle. */
+ * claimed handle. Round-2 dev review: every op's `!be->in_use` guard
+ * below now reads it with __atomic_load_n(__ATOMIC_ACQUIRE) too, not a
+ * plain load -- mixing a plain read with the atomic claim/release
+ * RMW/store on the same object is a data race in the C memory model. */
 struct dsp_be {
 	bool        terminal_fft;
 	uint8_t     n_stages;
@@ -526,7 +529,7 @@ static alp_status_t sw_apply_samples(alp_dsp_backend_state_t *state,
                                      size_t                  *got)
 {
 	struct dsp_be *be = (struct dsp_be *)state->be_data;
-	if (be == NULL || !be->in_use) {
+	if (be == NULL || !__atomic_load_n(&be->in_use, __ATOMIC_ACQUIRE)) {
 		return ALP_ERR_INVAL;
 	}
 	if (be->terminal_fft) {
@@ -585,7 +588,7 @@ static alp_status_t sw_apply_samples_f32(alp_dsp_backend_state_t *state,
                                          size_t                  *got)
 {
 	struct dsp_be *be = (struct dsp_be *)state->be_data;
-	if (be == NULL || !be->in_use) {
+	if (be == NULL || !__atomic_load_n(&be->in_use, __ATOMIC_ACQUIRE)) {
 		return ALP_ERR_INVAL;
 	}
 	if (be->terminal_fft) {
@@ -744,7 +747,7 @@ static alp_status_t sw_apply_bins(alp_dsp_backend_state_t *state,
                                   size_t                  *got)
 {
 	struct dsp_be *be = (struct dsp_be *)state->be_data;
-	if (be == NULL || !be->in_use) {
+	if (be == NULL || !__atomic_load_n(&be->in_use, __ATOMIC_ACQUIRE)) {
 		return ALP_ERR_INVAL;
 	}
 	if (!be->terminal_fft) {
@@ -772,7 +775,7 @@ static alp_status_t sw_apply_bins_f32(alp_dsp_backend_state_t *state,
                                       size_t                  *got)
 {
 	struct dsp_be *be = (struct dsp_be *)state->be_data;
-	if (be == NULL || !be->in_use) {
+	if (be == NULL || !__atomic_load_n(&be->in_use, __ATOMIC_ACQUIRE)) {
 		return ALP_ERR_INVAL;
 	}
 	if (!be->terminal_fft) {
