@@ -75,15 +75,15 @@ report.
   find why a build won't work before you build. (Plain `tan doctor`, no
   `--build`, is a different debug-readiness preflight — see
   [`docs/cli.md`](docs/cli.md).)
-- `tan validate board.yaml` — the diagnostic-rich `board.yaml` validator
-  (CLI entry `tan`, which forwards to `python -m alp_cli validate`;
+- `tan validate --board-yaml board.yaml` — the diagnostic-rich `board.yaml`
+  validator (CLI entry `tan`, which forwards to `python -m alp_cli validate`;
   equivalently `python3 scripts/validate_board_yaml.py`).
   Try it against a fixture under `tests/fixtures/board_yaml_bad/` to learn the
   output format. Exit code 1 on a hard validation or consistency failure;
   warnings return 0.
-- `tan validate board.yaml` / `python -m alp_orchestrate --input board.yaml
-  --emit build-plan` — the same validation as a build pre-flight before any
-  compile work.
+- `tan validate --board-yaml board.yaml` / `python -m alp_orchestrate --input
+  board.yaml --emit build-plan` — the same validation as a build pre-flight
+  before any compile work.
 - CI gates — `scripts/check_*.py` (e.g. `check_doc_drift.py`,
   `check_example_portability.py`, `check_pin_conflicts.py`,
   `check_system_manifest.py`) plus **twister** for the Zephyr ztest + example

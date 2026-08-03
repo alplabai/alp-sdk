@@ -90,7 +90,7 @@ before building.
 ## Build
 
 ```bash
-tan build alp-sdk/examples/multicore/rpmsg-imx93
+tan --project examples/multicore/rpmsg-imx93 build
 ```
 
 The orchestrator fans out:

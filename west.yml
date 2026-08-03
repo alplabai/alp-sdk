@@ -246,6 +246,14 @@ manifest:
           # Required by the RZ/V2N + i.MX93 M33/M-class cores.
           - cmsis_6
           - cmsis-dsp
+          # cmsis-nn (modules/lib/cmsis-nn) is CMSIS-DSP's Cortex-M
+          # inference-kernel companion, `libraries: [cmsis-nn]`
+          # (metadata/libraries/cmsis-nn.yaml, CONFIG_CMSIS_NN). Sits
+          # right beside cmsis-dsp in Zephyr's own west.yml, same
+          # unconditioned (default-active) shape -- was simply missed when
+          # cmsis-dsp was added. Caught by
+          # scripts/check_west_manifest_module_resolution.py (#1136).
+          - cmsis-nn
           - lvgl
           - mbedtls
           - mcuboot
@@ -289,25 +297,41 @@ manifest:
           # backend's MbedTLS-PSA fallthrough, examples/aen/aen-se-crypto)
           # resolves on `west update` without the bench-side symlink.
           - tf-psa-crypto
-          # NOTE: nanopb is intentionally NOT allowlisted here. It backs
-          # `libraries: [nanopb]` (metadata/libraries/nanopb.yaml,
-          # CONFIG_NANOPB) and examples/connectivity/nanopb-encode-decode,
-          # and Zephyr's own west.yml carries an unconditioned
-          # `modules/lib/nanopb` project -- but alp-sdk's own manifest
-          # ALSO defines a project named `nanopb` at that same path
-          # (below, under the disabled-by-default `extras-lwrb-nanopb`
-          # group, SDK-internal mproc IPC framing). West's import
-          # resolution lets a same-named top-level project shadow an
-          # imported one regardless of the name-allowlist, so adding
-          # `nanopb` here has no effect either way: the disabled group
-          # always wins and the import entry is dead weight. CI
-          # (pr-twister.yml) doesn't go through this manifest at all --
-          # it inits its topdir straight from Zephyr's own west.yml
-          # (`west init -m zephyr`), so nanopb already resolves there
-          # via Zephyr's unconditioned project, independent of this
-          # file. See littlefs's allowlist entry above for the pattern
-          # that DOES work (no colliding top-level project of the same
-          # name to shadow it).
+          # nanopb (modules/lib/nanopb, unconditioned -- default-active --
+          # in Zephyr's own west.yml) backs `libraries: [nanopb]`
+          # (metadata/libraries/nanopb.yaml, CONFIG_NANOPB) and
+          # examples/connectivity/nanopb-encode-decode/CMakeLists.txt,
+          # which FATAL_ERRORs at configure time if
+          # ZEPHYR_NANOPB_MODULE_DIR isn't set -- unlike lwrb below (which
+          # has a working in-tree stub covering the group-disabled case,
+          # vendors/lwrb/src/lwrb_stub_impl.c), nanopb's vendor stub is
+          # pure ABI scaffolding with no functional fallback.
+          #
+          # #1136: a previous pass (#650) reverted this exact allowlist
+          # entry as "dead weight", because at the time alp-sdk's own
+          # manifest ALSO defined a top-level project literally named
+          # `nanopb` (below, under the disabled-by-default
+          # `extras-lwrb-nanopb` group, pinned for the SDK-internal mproc
+          # IPC framing rewrite). West's project-name dedup lets a
+          # directly-listed project suppress a same-named imported one
+          # even while sitting in an inactive group -- confirmed with
+          # `west manifest --resolve` against both states of this file --
+          # so the allowlist entry alone truly was inert. The fix is
+          # both halves: allowlist `nanopb` here AND rename the
+          # SDK-internal pin below to `nanopb-mproc-pin` so it no longer
+          # shadows the name. That internal pin is genuine dead code
+          # today regardless (src/common/proto/alp_mproc_frame.c
+          # hand-rolls the wire format and never calls pb_encode/
+          # pb_decode -- see vendors/nanopb/README.md), so renaming it
+          # costs nothing.
+          #
+          # pr-twister.yml never caught this gap because it inits its
+          # topdir straight from Zephyr's own west.yml
+          # (`west init -m zephyr`), never consulting this manifest at
+          # all -- see scripts/check_west_manifest_module_resolution.py,
+          # which resolves THIS manifest's own module set for every
+          # scenario Kconfig actually selects, to catch the next one.
+          - nanopb
 
     # SDK-internal dependencies pinned ahead of their consumers landing
     # for real.  Behind the `extras-lwrb-nanopb` group (disabled above)
@@ -322,10 +346,19 @@ manifest:
       path: modules/lib/lwrb
       groups:
         - extras-lwrb-nanopb
-    - name: nanopb
+    # Named `nanopb-mproc-pin`, not `nanopb` (#1136): this is a SEPARATE
+    # pin (its own revision, for the not-yet-landed mproc IPC framing
+    # generator swap) from the upstream `nanopb` project allowlisted
+    # above for examples/connectivity/nanopb-encode-decode. Giving both
+    # the same west project name would let this one (even disabled)
+    # silently shadow that one -- see the allowlist comment above.
+    # `repo-path` keeps the real upstream URL (github.com/nanopb/nanopb)
+    # under the renamed local project name.
+    - name: nanopb-mproc-pin
       remote: nanopb
+      repo-path: nanopb
       revision: nanopb-0.4.9
-      path: modules/lib/nanopb
+      path: modules/lib/nanopb-mproc-pin
       groups:
         - extras-lwrb-nanopb
 

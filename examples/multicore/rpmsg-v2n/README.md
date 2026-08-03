@@ -108,8 +108,8 @@ to `meta-alp-sdk` (spec §6.5).
 ## Build
 
 ```bash
-cd alp-workspace
-tan build alp-sdk/examples/multicore/rpmsg-v2n
+cd alp-workspace/alp-sdk/examples/multicore/rpmsg-v2n
+tan build
 ```
 
 That single command:
@@ -129,9 +129,14 @@ That single command:
 
 Iteration:
 
+`tan build` has no per-slice `--core` flag -- it rebuilds every slice
+on each invocation.  Just re-run it from the project directory: the
+already-built Yocto slice is reused (bitbake short-circuits an
+up-to-date tree) while the Zephyr M33 slice rebuilds incrementally in
+seconds, skipping Yocto's hour-long rebuild:
+
 ```bash
-# Rebuild only the M33 slice (skips Yocto's hour-long rebuild):
-tan build alp-sdk/examples/multicore/rpmsg-v2n --core m33_sm
+tan build
 ```
 
 Image + flash:

@@ -91,7 +91,7 @@ Two front doors, two different jobs -- pick by what you're doing:
 
 | You are... | Use |
 |---|---|
-| Scaffolding a project, validating `board.yaml`, compiling a model, checking your host, opening a serial console, decoding a diagnostic/fault, or running a quick single-image native_sim/single-board loop | `tan init` / `tan new-som` / `tan validate` / `tan model` / `tan doctor --build` / `tan monitor` / `tan explain` / `tan faultdecode` / `tan run` |
+| Scaffolding a project, validating `board.yaml`, compiling a model, checking your host, opening a serial console, explaining a template/generation target, decoding a fault, or running a quick single-image native_sim/single-board loop | `tan init` / `tan new-som` / `tan validate` / `tan model` / `tan doctor --build` / `tan monitor` / `tan explain` / `tan faultdecode` / `tan run` |
 | Inspecting a board-derived Zephyr/CMake/Yocto/DTS config artefact without building (`zephyr-conf`, `dts-overlay`, `cmake-args`, `yocto-conf`, `native-sim-overlay`, `carrier-netlist`) | `tan generate --target <mode>` |
 | Inspecting an orchestrator-owned artefact without building (system manifest, build plan, Kconfig menu, IPC contract header, DTS reservations/partitions, storage mounts, TF-M sysbuild overlay) | `west alp-emit <mode>` from a west workspace |
 | Building, flashing, sizing, bundling, cleaning, or Renode-booting a project | `tan build` / `tan flash` / `tan size` / `tan image` / `tan clean` / `tan renode` -- see [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli) |
@@ -479,10 +479,10 @@ here.
 ### `tan validate` -- check a board.yaml
 
 ```bash
-tan validate                             # ./board.yaml, human output
-tan validate path/to/board.yaml
-tan validate --format json path/to/board.yaml    # IDE/LSP/CI-facing
-tan validate --format sarif path/to/board.yaml   # SARIF 2.1.0 (code scanning)
+tan validate                                        # ./board.yaml, human output
+tan validate --board-yaml path/to/board.yaml
+tan validate --format json --board-yaml path/to/board.yaml    # IDE/LSP/CI-facing
+tan validate --format sarif --board-yaml path/to/board.yaml   # SARIF 2.1.0 (code scanning)
 ```
 
 Runs the rich diagnostic validator (JSON-Schema pass, SoM/preset
@@ -494,7 +494,8 @@ return 0.  Hard schema/xref/consistency errors return 1.
 `--format` selects the rendering:
 
 - `human` (default) -- the Rust-style block with an `ALP-Bxxx` code
-  -- decode any code with `tan explain ALP-B001`.
+  -- decode any code via its own `see: docs/diagnostics/ALP-Bxxx.md`
+  hint line (`tan explain` does not take a diagnostic code).
 - `json` -- the versioned machine document
   (`metadata/schemas/diagnostic-v1.schema.json`): `schemaVersion` is
   a version/capability handshake a consumer must check before
@@ -620,14 +621,18 @@ Opens pyserial's miniterm (Ctrl+] to quit).  Baud defaults to 115200
 doesn't exist, it lists every serial port on the host and exits
 non-zero instead of hanging on a wrong device.
 
-### `tan explain` -- decode a diagnostic code
+### `tan explain` -- explain a project/module template or generation target
 
 ```bash
-tan explain ALP-B001
+tan explain                          # list every topic (templates + targets)
+tan explain --template sensor-driver # explain one project/module template
+tan explain --target dts-overlay     # explain one generation target
 ```
 
-Prints the cause, fix, and doc link for any `ALP-Bxxx` validator
-diagnostic (the codes `tan validate` emits).
+`tan explain` has no positional code-lookup argument -- an `ALP-Bxxx`
+validator diagnostic (the codes `tan validate` emits) is decoded by its
+own `see: docs/diagnostics/ALP-Bxxx.md` hint line in `tan validate`'s
+human-mode output, not by `tan explain`.
 
 ### `tan faultdecode` -- decode a Cortex-M fault dump
 

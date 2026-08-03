@@ -125,6 +125,15 @@ volatile uint32_t g_resync_count;
  * recovery (bridge_transport_spi_hw_reinit).  Observable for link-health. */
 volatile uint32_t g_spi_reopen_count;
 
+/* Count of SPI_transfer() arm failures (#1133): SPI_transfer() itself refused
+ * to queue the DMA descriptor -- the slave is left un-armed and READY low
+ * (see arm_transfer below).  Nothing else re-arms that phase, so left alone
+ * this is a PERMANENT stall, not a transient one.  cc3501e_hw_tick() polls
+ * this counter (the same burst-detection shape as g_resync_count) and drives
+ * a full SPI re-open to recover -- the same proven reinit path a radio op
+ * already relies on. */
+volatile uint32_t g_arm_fail_count;
+
 /* Arm one SS0-framed phase transfer.  For RX, tx is the 0xA5 marker (header) or
  * NULL (payload -> 0x00 default fill on MISO); for TX, rx is NULL (the host's
  * MOSI dummies are discarded).  Non-blocking in SPI_MODE_CALLBACK: the DMA
@@ -148,7 +157,13 @@ static void arm_transfer(void *rx, const void *tx, size_t count)
 		 * host's desync walk (cc3501e_sync()).  Leaving READY LOW here
 		 * instead gives the host a real, visible stall (its READY-gate wait
 		 * times out) that its poll-by-repeat retries against, rather than a
-		 * silently corrupted frame. */
+		 * silently corrupted frame.
+		 *
+		 * READY-low alone does not self-heal: nothing else re-attempts this
+		 * arm, so without more the stall is PERMANENT (#1133).  Bump the
+		 * fail counter so cc3501e_hw_tick() drives a full SPI re-open
+		 * recovery (bridge_transport_spi_hw_reinit) -- see g_arm_fail_count. */
+		g_arm_fail_count++;
 		return;
 	}
 	/* Slave is now armed -> raise READY so the host may clock THIS transfer.  Paired

@@ -63,8 +63,8 @@ ships the authoritative `boot_order:` block.)
 ## Build
 
 ```bash
-cd alp-workspace
-tan build alp-sdk/examples/multicore/rpmsg-aen
+cd alp-workspace/alp-sdk/examples/multicore/rpmsg-aen
+tan build
 ```
 
 The orchestrator fans out:
@@ -72,11 +72,12 @@ The orchestrator fans out:
 - `build/a32_cluster-yocto/` (bitbake against `MACHINE = e1m-aen801-a32`).
 - `build/m55_hp-zephyr/` (Zephyr against `BOARD = alp_e1m_aen801_m55_hp`).
 
-Iterate on the M-side only:
-
-```bash
-tan build alp-sdk/examples/multicore/rpmsg-aen --core m55_hp
-```
+`tan build` has no per-slice `--core` flag -- it rebuilds every slice
+on each invocation.  To iterate on the M-side only, just re-run the
+same command: the already-built Yocto slice is reused (bitbake
+short-circuits an up-to-date tree) while the Zephyr slice rebuilds
+incrementally in seconds. See
+[`docs/heterogeneous-builds.md`](../../../docs/heterogeneous-builds.md#iterating-on-one-slice).
 
 ## Reference
 
