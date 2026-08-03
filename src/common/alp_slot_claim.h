@@ -57,6 +57,26 @@ static inline void alp_slot_release(bool *in_use)
 }
 
 /**
+ * @brief Sleep one scheduler tick -- the portable "wait, don't spin"
+ *        primitive backing every sleep-poll wait in this header (issue
+ *        #1114: a caller that instead busy-spins waiting on another
+ *        thread's in-flight claim can starve that thread on a
+ *        single-core preemptive-priority scheduler regardless of how
+ *        short the wait "should" be).  Defined out-of-line in
+ *        src/common/alp_slot_claim.c (needs an OS sleep header this
+ *        header deliberately does not pull in -- see the file comment
+ *        at the top of this header).
+ *
+ * Callers: a dispatcher that must poll-wait on ANOTHER thread's
+ * in-progress claim before it can decide join-vs-allocate (e.g.
+ * ble_dispatch.c's alp_ble_open(), issue #1118 round-2 dev review: a
+ * second alp_ble_open() racing the first must not read the size-1 pool
+ * as "full" just because the first opener has claimed the slot but not
+ * yet published its refcount).
+ */
+void alp_slot_sleep_tick(void);
+
+/**
  * @brief Atomically step a one-byte handle lifecycle state machine.
  *
  * Compare-exchange @p from -> @p to.  The dispatchers use this to make

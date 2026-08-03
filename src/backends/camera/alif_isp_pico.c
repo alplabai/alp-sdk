@@ -46,6 +46,7 @@
  */
 
 #include <errno.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -61,6 +62,7 @@
 
 #include "camera_ops.h"
 #include "alif_isp_pico.h"
+#include "alp_slot_claim.h"
 
 #ifndef CONFIG_ALP_SDK_MAX_CAMERA_HANDLES
 #define CONFIG_ALP_SDK_MAX_CAMERA_HANDLES 2
@@ -80,12 +82,14 @@ static const struct device *const _devs[] = {
 
 static alp_alif_isp_pico_state_t _state_pool[CONFIG_ALP_SDK_MAX_CAMERA_HANDLES];
 
+/* issue #1115 round-2 dev review: claim atomically (in_use is the LAST
+ * member; memset only the bytes ahead of it -- see alif_isp_pico.h)
+ * instead of the previous plain check-then-set. */
 static alp_alif_isp_pico_state_t *_alloc_state(void)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(_state_pool); ++i) {
-		if (!_state_pool[i].in_use) {
-			memset(&_state_pool[i], 0, sizeof(_state_pool[i]));
-			_state_pool[i].in_use = true;
+		if (alp_slot_try_claim(&_state_pool[i].in_use)) {
+			memset(&_state_pool[i], 0, offsetof(alp_alif_isp_pico_state_t, in_use));
 			return &_state_pool[i];
 		}
 	}
@@ -95,7 +99,7 @@ static alp_alif_isp_pico_state_t *_alloc_state(void)
 static void _free_state(alp_alif_isp_pico_state_t *s)
 {
 	if (s != NULL) {
-		s->in_use = false;
+		alp_slot_release(&s->in_use);
 	}
 }
 

@@ -90,6 +90,26 @@ target_compile_features(alp_test_gpu2d_dispatcher PRIVATE c_std_99)
 add_test(NAME alp_test_gpu2d_dispatcher
          COMMAND alp_test_gpu2d_dispatcher)
 
+# issue #1117 round-2 dev review: _blend_px()'s `_u8(x) << 24` shift
+# (src/backends/gpu2d/sw_fallback.c) is signed-integer-overflow UB for
+# any opaque alpha (>= 0x80) -- gpu2d_dispatcher.c's
+# test_blend_additive_and_multiply_opaque_alpha() exercises the exact
+# values, but a plain build doesn't discriminate pre-/post-fix (every
+# mainstream two's-complement compiler already produces the "right" bit
+# pattern un-instrumented). Run the same test binary under UBSan so the
+# shift itself is checked, mirroring the RPC suite's
+# run_sanitized_rpc_tests.sh (GHSA-xhm8-7f87-93q5 defect 3) rather than
+# inventing a second sanitizer-runner script.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_test(NAME alp_test_gpu2d_ubsan
+             COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/run_sanitized_rpc_tests.sh
+                     ${CMAKE_SOURCE_DIR}
+                     ${CMAKE_CURRENT_BINARY_DIR}/sanitizer-gpu2d-ubsan
+                     "-fsanitize=undefined"
+                     alp_test_gpu2d_dispatcher)
+    set_tests_properties(alp_test_gpu2d_ubsan PROPERTIES TIMEOUT 600)
+endif()
+
 # GPU2D static handle-pool race regression (#629): the exact
 # duplicate-slot / op-vs-close reproduction from the issue, against
 # the real sw_fallback backend.  Needs pthreads on every host this
@@ -125,6 +145,25 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 
     add_test(NAME alp_test_slot_claim_race
              COMMAND alp_test_slot_claim_race)
+
+    # Mechanism-level regression for issue #1114's round-2 dev-review
+    # finding: src/backends/security/zephyr_drv.c's ensure_psa() elect-once-
+    # init algorithm must not hang a losing waiter when the elected
+    # initialiser FAILS (Zephyr/PSA-specific, so mirrored here rather
+    # than exercised directly -- see the file header comment).
+    add_executable(alp_test_elect_once_init_race
+        ${CMAKE_CURRENT_SOURCE_DIR}/elect_once_init_race.c
+    )
+    target_link_libraries(alp_test_elect_once_init_race PRIVATE alp::sdk Threads::Threads)
+    target_include_directories(alp_test_elect_once_init_race PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_elect_once_init_race PRIVATE c_std_99)
+
+    add_test(NAME alp_test_elect_once_init_race
+             COMMAND alp_test_elect_once_init_race)
+    set_tests_properties(alp_test_elect_once_init_race PROPERTIES TIMEOUT 60)
 
     # Stateless dispatcher ops-cache race regression (#628): concurrent
     # cold first calls into TMU / SoC-info / security.  Recompiles the

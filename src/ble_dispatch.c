@@ -160,17 +160,91 @@ static bool _radio_try_join(struct alp_ble *h)
 	return true;
 }
 
+/* issue #1118 round-2 dev review: decrement-if-nonzero, the release
+ * half of _radio_try_join() above. alp_ble_close() used to
+ * unconditionally __atomic_fetch_sub() refcount, which underflows to
+ * ~0u on a double/stray close (against <alp/ble.h>'s "second close on
+ * an already-closed handle is a safe no-op" contract) -- and a
+ * corrupted, large-nonzero refcount is exactly what could let a
+ * concurrent alp_ble_open()'s _radio_try_join() "join" a handle that
+ * is mid-teardown (in_use still true, real refcount already 0), the
+ * resurrection this file's #1118 header comment says the
+ * increment-if-nonzero design must prevent. Mirroring _radio_try_join()
+ * as a CAS loop means a close on an already-0 refcount touches nothing
+ * and simply reports "not mine to tear down".
+ * @return true if THIS call was the one that decremented refcount from
+ *         1 to 0 (caller now owns the teardown); false if refcount was
+ *         already 0 (no-op) or is still >0 after decrementing (another
+ *         reference is still live). */
+static bool _radio_try_leave(struct alp_ble *h)
+{
+	uint32_t cur = __atomic_load_n(&h->refcount, __ATOMIC_ACQUIRE);
+	do {
+		if (cur == 0u) return false;
+	} while (!__atomic_compare_exchange_n(
+	    &h->refcount, &cur, cur - 1u, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
+	return cur == 1u;
+}
+
 alp_ble_t *alp_ble_open(void)
 {
 	alp_z_clear_last_error();
 
 	/* Issue #1118: BLE is a documented singleton -- try to join an
-	 * already-open radio before claiming a fresh pool slot. */
-	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_BLE_HANDLES; ++i) {
-		struct alp_ble *h = &_radio_pool[i];
-		if (__atomic_load_n(&h->in_use, __ATOMIC_ACQUIRE) && _radio_try_join(h)) {
-			return h;
+	 * already-open radio before claiming a fresh pool slot.
+	 *
+	 * Round-2 dev review: the first cut of this fix stopped here after
+	 * one scan, so a SECOND alp_ble_open() racing the FIRST one's
+	 * in-flight open() saw the exact TOCTOU window this function's
+	 * own opener creates -- _alloc_radio() below claims the slot
+	 * (in_use = true) before ops->open() runs, and refcount is not
+	 * published until ops->open() succeeds. A racing scan in that
+	 * window reads in_use == true (so it can't _alloc_radio() a "free"
+	 * slot) and refcount == 0 (so _radio_try_join() declines) -- with
+	 * the default size-1 pool that is every slot, so the racer fell
+	 * through to _alloc_radio() and got NULL / ALP_ERR_NOMEM instead of
+	 * the singleton pointer <alp/ble.h> documents. The same in_use==true
+	 * / refcount==0 shape also occurs, briefly, while alp_ble_close()
+	 * below is mid-teardown (refcount already decremented to 0, in_use
+	 * not yet released) -- a slot in THAT window must not be joined
+	 * (the closer already committed to tearing it down) but a fresh
+	 * alp_ble_open() must still eventually succeed once the close
+	 * finishes and releases the slot.
+	 *
+	 * Retry the scan with a real sleep between attempts (not a busy
+	 * spin -- same #1114 rationale: a spinning racer at equal-or-higher
+	 * priority than the opener/closer thread could starve it on
+	 * Zephyr's preemptive scheduler) until no slot is left in that
+	 * ambiguous "claimed but refcount says nothing yet" state, then
+	 * fall through to the normal join-scan-once-more/allocate path
+	 * below. With the default 1-entry pool this always resolves the
+	 * single slot one way or the other; a larger pool may wait on a
+	 * pending slot even when a different slot is already free to
+	 * allocate -- correct, just not maximally concurrent (not worth the
+	 * added complexity for a pool this SDK only ever configures to 1
+	 * today). */
+	for (;;) {
+		bool pending = false;
+		for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_BLE_HANDLES; ++i) {
+			struct alp_ble *h = &_radio_pool[i];
+			if (!__atomic_load_n(&h->in_use, __ATOMIC_ACQUIRE)) {
+				continue;
+			}
+			if (_radio_try_join(h)) {
+				return h;
+			}
+			/* in_use but refcount==0: either another thread's open() is
+			 * still running (will publish refcount, or release in_use
+			 * on failure) or another thread's close() is mid-teardown
+			 * (will release in_use). Either way, this slot's state is
+			 * not final yet -- keep waiting on it rather than treating
+			 * the pool as full. */
+			pending = true;
 		}
+		if (!pending) {
+			break;
+		}
+		alp_slot_sleep_tick();
 	}
 
 	const alp_backend_t *be = alp_backend_select("ble", ALP_SOC_REF_STR);
@@ -209,16 +283,16 @@ alp_ble_t *alp_ble_open(void)
 void alp_ble_close(alp_ble_t *h)
 {
 	if (h == NULL) return;
-	/* Issue #1118: decrement-and-check-last, the release half of
-	 * _radio_try_join() above -- see this file's "Issue #1118" header
-	 * comment. Any reference but the last just drops its count and
-	 * returns; only the caller that observes the count reaching 0 (prev
-	 * == 1) proceeds to actually tear the controller down. A stray
-	 * extra close() past the true last reference (prev already 0, or
-	 * wrapped from a prior such call) also reads != 1 here and returns,
-	 * preserving the existing "second/never-opened close no-ops"
-	 * contract. */
-	if (__atomic_fetch_sub(&h->refcount, 1u, __ATOMIC_ACQ_REL) != 1u) {
+	/* Issue #1118: decrement-and-check-last via _radio_try_leave()
+	 * (round-2 dev review: NOT a plain unconditional fetch_sub -- see
+	 * that function's doc comment for why an unconditional decrement
+	 * underflows on a double/stray close). Any reference but the last
+	 * just drops its count and returns; only the caller that observes
+	 * the count reaching 0 proceeds to actually tear the controller
+	 * down. A stray extra close() past the true last reference reads
+	 * refcount already 0 and no-ops without touching it, preserving the
+	 * existing "second/never-opened close no-ops" contract. */
+	if (!_radio_try_leave(h)) {
 		return;
 	}
 	/* Self-close-aware sleep-poll drain (issues #629/#756): this pool

@@ -146,6 +146,54 @@ static void test_blend_src_over_opaque_and_transparent(void)
 	alp_gpu2d_close(g);
 }
 
+/* issue #1117 round-2 dev review: _blend_px()'s ADDITIVE/MULTIPLY arms
+ * (src/backends/gpu2d/sw_fallback.c) OR each per-channel _u8() result
+ * into the output word with `_u8(x) << 24`. _u8() returns uint8_t,
+ * which integer-promotes to (signed) int before the shift -- for any
+ * OPAQUE alpha (>= 0x80, the common case: both fixtures below use
+ * 0xFF) that shift sets bit 31 of a 32-bit signed int, which is
+ * signed-overflow UB. In practice every mainstream two's-complement
+ * compiler still produces the "obviously correct" bit pattern
+ * un-instrumented, so this test only DISCRIMINATES pre-/post-fix under
+ * -fsanitize=undefined (see the alp_test_gpu2d_ubsan CTest entry in
+ * CMakeLists.txt, mirroring the RPC suite's
+ * run_sanitized_rpc_tests.sh) -- a plain build of this exact test
+ * passes both before and after the fix, so it does NOT discriminate on
+ * its own. Kept as an un-instrumented functional check (the arithmetic
+ * itself must still be right) plus the UBSan CTest entry that actually
+ * proves the shift is now well-defined. */
+static void test_blend_additive_and_multiply_opaque_alpha(void)
+{
+	static uint32_t     src_buf[W * H];
+	alp_gpu2d_t        *g = alp_gpu2d_open();
+	alp_gpu2d_surface_t src;
+	alp_gpu2d_surface_t dst = argb_surface();
+
+	ALP_ASSERT_TRUE(g != NULL);
+	src      = argb_surface();
+	src.base = src_buf;
+
+	/* ADDITIVE, both opaque (sa=da=0xFF, clamps to 0xFF, not the UB
+	 * shift's would-be-negative bit pattern):
+	 *   sa+da=0x1FE->0xFF, sr+dr=0x55, sg+dg=0x77, sb+db=0x99. */
+	for (int i = 0; i < W * H; ++i) {
+		src_buf[i] = 0xFF112233u;
+	}
+	fb_clear(0xFF445566u);
+	ALP_ASSERT_EQ_INT(
+	    alp_gpu2d_blend(g, &src, 0u, 0u, &dst, 0u, 0u, 1u, 1u, ALP_GPU2D_BLEND_ADDITIVE), ALP_OK);
+	ALP_ASSERT_EQ_INT(fb[0], 0xFF557799u);
+
+	/* MULTIPLY, both opaque: oa=(255*255+127)/255=255 (0xFF, the exact
+	 * boundary the sign-bit shift bug hits), or_=5, og=11, ob=20. */
+	fb_clear(0xFF445566u);
+	ALP_ASSERT_EQ_INT(
+	    alp_gpu2d_blend(g, &src, 0u, 0u, &dst, 0u, 0u, 1u, 1u, ALP_GPU2D_BLEND_MULTIPLY), ALP_OK);
+	ALP_ASSERT_EQ_INT(fb[0], 0xFF050B14u);
+
+	alp_gpu2d_close(g);
+}
+
 int main(void)
 {
 	test_open_succeeds_with_sw_fallback();
@@ -153,5 +201,6 @@ int main(void)
 	test_fill_rect_exact_pixels_and_clip();
 	test_undersized_stride_rejected();
 	test_blend_src_over_opaque_and_transparent();
+	test_blend_additive_and_multiply_opaque_alpha();
 	ALP_TEST_SUMMARY();
 }

@@ -192,31 +192,48 @@ static alp_status_t psa_to_alp(psa_status_t st)
  * profile does not enable -- so on this build two unsynchronised callers
  * really do race the same mutable global state.  Elect exactly one
  * initialiser with the same atomic claim the sidecar pools above use;
- * every other caller waits for it to publish g_psa_inited. */
+ * every other caller waits for it to publish g_psa_inited.
+ *
+ * issue #1114 round-2 dev review: the first liveness fix waited on
+ * `while (!g_psa_inited) k_sleep(...)`, but the elected initialiser's
+ * FAILURE path releases g_psa_init_claimed and returns its error
+ * WITHOUT ever setting g_psa_inited -- so every thread that lost the
+ * race hung in that loop forever, a worse hang than the pre-fix
+ * behaviour (which simply returned the error to each caller). Loop the
+ * whole elect-or-wait attempt instead of waiting on a flag the failure
+ * path never sets: once the failed initialiser releases its claim, one
+ * waiter re-wins alp_slot_try_claim() and retries psa_crypto_init()
+ * itself (matching the existing "let a later caller retry" contract),
+ * so every caller's wait terminates in either success or a real PSA
+ * error -- never a permanent hang. */
 static alp_status_t ensure_psa(void)
 {
-	if (__atomic_load_n(&g_psa_inited, __ATOMIC_ACQUIRE)) {
-		return ALP_OK;
-	}
-	if (alp_slot_try_claim(&g_psa_init_claimed)) {
-		psa_status_t st = psa_crypto_init();
-		if (st != PSA_SUCCESS) {
-			/* Let a later caller retry the one-time init. */
-			alp_slot_release(&g_psa_init_claimed);
-			return psa_to_alp(st);
+	for (;;) {
+		if (__atomic_load_n(&g_psa_inited, __ATOMIC_ACQUIRE)) {
+			return ALP_OK;
 		}
-		__atomic_store_n(&g_psa_inited, true, __ATOMIC_RELEASE);
-		return ALP_OK;
-	}
-	/* Lost the race: another thread is running psa_crypto_init() right
-	 * now. Wait for it with a real sleep, not a spin (issue #1114) --
-	 * this backend runs under Zephyr's preemptive-priority scheduler, so
-	 * a spinning loser at equal-or-higher priority than the initialiser
-	 * could never let the scheduler run the initialiser back. */
-	while (!__atomic_load_n(&g_psa_inited, __ATOMIC_ACQUIRE)) {
+		if (alp_slot_try_claim(&g_psa_init_claimed)) {
+			psa_status_t st = psa_crypto_init();
+			if (st != PSA_SUCCESS) {
+				/* Let a later caller (this thread or a waiter that
+				 * re-wins the claim below) retry the one-time init. */
+				alp_slot_release(&g_psa_init_claimed);
+				return psa_to_alp(st);
+			}
+			__atomic_store_n(&g_psa_inited, true, __ATOMIC_RELEASE);
+			return ALP_OK;
+		}
+		/* Lost the race: another thread is running psa_crypto_init() (or
+		 * just failed it and released the claim) right now. Wait for it
+		 * with a real sleep, not a spin (issue #1114) -- this backend
+		 * runs under Zephyr's preemptive-priority scheduler, so a
+		 * spinning loser at equal-or-higher priority than the
+		 * initialiser could never let the scheduler run the initialiser
+		 * back. Loop back to re-check g_psa_inited AND re-attempt the
+		 * claim (not just re-check the flag) so a failed initialiser's
+		 * released claim gets picked up. */
 		k_sleep(K_TICKS(1));
 	}
-	return ALP_OK;
 }
 
 static alp_status_t aead_alg_meta(alp_aead_alg_t   a,

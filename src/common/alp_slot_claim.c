@@ -63,6 +63,14 @@ static void _sleep_tick(void)
 #endif
 }
 
+/* Public wrapper over _sleep_tick() -- see the doc comment on the
+ * declaration in alp_slot_claim.h for why callers outside this TU need
+ * it (issue #1118 round-2 dev review). */
+void alp_slot_sleep_tick(void)
+{
+	_sleep_tick();
+}
+
 void alp_handle_drain_blocking(uint32_t *active_ops)
 {
 	while (__atomic_load_n(active_ops, __ATOMIC_ACQUIRE) != 0u) {

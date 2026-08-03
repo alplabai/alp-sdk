@@ -48,6 +48,7 @@
 #include "alp/peripheral.h"
 #include "alp_internal.h"
 #include "common/alp_errno.h"
+#include "common/alp_slot_claim.h"
 
 #ifndef ALP_SDK_YOCTO_MAX_SPI_HANDLES
 #define ALP_SDK_YOCTO_MAX_SPI_HANDLES 4
@@ -57,24 +58,29 @@
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #endif
 
+/* in_use is the LAST member (issue #1115 round-2 dev review, mirrors
+ * dsp/sw_fallback.c's struct dsp_be): pool_acquire() below memsets only
+ * the bytes ahead of it, so the atomic claim is never transiently
+ * undone by the reset. */
 struct alp_spi {
-	bool     in_use;
 	int      fd;
 	uint32_t bus_id;
 	uint32_t cs_pin_id;
 	uint32_t freq_hz;
 	uint8_t  bits_per_word;
+	bool     in_use;
 };
 
 static struct alp_spi g_spi_pool[ALP_SDK_YOCTO_MAX_SPI_HANDLES];
 
+/* issue #1115 round-2 dev review: claim atomically instead of the
+ * previous plain check-then-set scan. */
 static struct alp_spi *pool_acquire(void)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(g_spi_pool); ++i) {
-		if (!g_spi_pool[i].in_use) {
-			memset(&g_spi_pool[i], 0, sizeof(g_spi_pool[i]));
-			g_spi_pool[i].in_use = true;
-			g_spi_pool[i].fd     = -1;
+		if (alp_slot_try_claim(&g_spi_pool[i].in_use)) {
+			memset(&g_spi_pool[i], 0, offsetof(struct alp_spi, in_use));
+			g_spi_pool[i].fd = -1;
 			return &g_spi_pool[i];
 		}
 	}
@@ -90,7 +96,7 @@ static void pool_release(struct alp_spi *h)
 		(void)close(h->fd);
 		h->fd = -1;
 	}
-	h->in_use = false;
+	alp_slot_release(&h->in_use);
 }
 
 alp_spi_t *alp_spi_open(const alp_spi_config_t *cfg)
