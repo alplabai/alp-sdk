@@ -246,6 +246,109 @@ been proven by a green `drpai`-enabled bake — the bugs it fixes were
 found by an actual `bitbake` run, not by inspection, so it stays
 fixed-on-paper until the next `drpai`-enabled bake confirms it.
 
+### Fixed — `mera2-drpai-tvm` staged a header with no library behind it; `libalp_sdk.so` now fails its OWN link instead of a downstream consumer's (#1145)
+
+**Third correction to this closure, and this one was not caught by
+`do_package_qa` at all — it took a downstream consumer's own link.** A real
+bake with `PACKAGECONFIG[drpai]` enabled produced a `libalp_sdk.so` that
+linked cleanly and passed packaging QA, but a separate recipe
+(`alp-perception`) linking against it hit:
+
+```
+libalp_sdk.so: undefined reference to `MeraDrpRuntimeWrapper::MeraDrpRuntimeWrapper()'
+libalp_sdk.so: undefined reference to `MeraDrpRuntimeWrapper::Run()'
+libalp_sdk.so: undefined reference to `MeraDrpRuntimeWrapper::SetInput(int, float const*)'
+libalp_sdk.so: undefined reference to `MeraDrpRuntimeWrapper::GetInputInfo[abi:cxx11]()'
+```
+
+**Root cause: `MeraDrpRuntimeWrapper` was never a prebuilt library at all.**
+`mera2-drpai-tvm` staged `MeraDrpRuntimeWrapper.h` — the declarations — and
+the eight `obj/build_runtime/v2h/lib/*.so` files, and `nm -D
+--defined-only` across all eight confirms the class's own symbols are in
+none of them. They are application-side glue *source*
+(`apps/MeraDrpRuntimeWrapper.cpp`, 18506 bytes in a real RUHMI checkout)
+that every RUHMI sample app compiles for itself
+(`apps/CMakeLists.txt` lists the `.cpp` directly in every executable's
+`SRC`). `src/yocto/inference_drpai.cpp` `#include`s the header and calls
+the class, but nothing compiled the `.cpp` — and a shared library permits
+undefined symbols at link time by default, so `libalp_sdk.so` built
+"successfully" while shipping unusable.
+
+**Fix chosen: compile the glue once, in the recipe, not per consumer.**
+`mera2-drpai-tvm` gets a real `do_compile` (previously `noexec`, prebuilt
+payload only) that builds `apps/MeraDrpRuntimeWrapper.cpp` into a ninth
+library, `libmera_drpai_wrapper.so`, packaged alongside the other eight;
+`src/yocto/CMakeLists.txt`'s `ALP_SDK_USE_DRPAI_V2N` block gains a tenth
+probe (`find_library(MERA_DRPAI_WRAPPER_LIB mera_drpai_wrapper)`) and links
+it. This was the preferred of two options (over adding the `.cpp` straight
+to `src/yocto/CMakeLists.txt`'s own `target_sources`): it is a
+library-packaging concern, keeps one copy of the vendor glue instead of
+every consumer recompiling it, and the recipe already stages everything
+else this same source needs from `RUHMI_DRPAI_TVM_DIR`.
+
+**Compiling the class body needs substantially more than the four include
+dirs a header-only consumer of `MeraDrpRuntimeWrapper.h` needs**
+(`apps/`, `tvm/include`, the nested `tvm/3rdparty/dlpack/include`,
+`tvm/3rdparty/dmlc-core/include`). The `.cpp` itself hard-includes
+`apps/include/mera_runtime.h` → `apps/include/rt.h` +
+`apps/include/mera2_runtime_plan/plan_io.h` (the MERA2 in-process runtime
+API — previously unstaged), `<spdlog/spdlog.h>` + `<asio.hpp>` +
+`<asio/io_context.hpp>` (new build-time `DEPENDS = "spdlog asio"`, both
+reachable through meta-oe, already a hard layer dep — no `bblayers.conf`
+change needed), and `tvm/3rdparty/compiler-rt/builtin_fp16.h`. On top of
+that, the constructor's `int device_type_{kDLDrpAi};` default member
+initialiser needs `kDLDrpAi`, an enum value RUHMI's own *upstream*
+`tvm/include/tvm/runtime/c_runtime_api.h` does not define — it is a
+Renesas extension that RUHMI's `setup/README.md` installs with `cp
+${TVM_ROOT}/setup/include/*.h ${TVM_ROOT}/tvm/include/tvm/runtime/` as a
+manual install-time step, not a submodule pin, so a checkout whose
+libraries are already built can still carry the pristine header. `git
+status` on the checkout would never flag this as missing. `do_compile`
+never mutates the builder's own checkout in place (`RUHMI_DRPAI_TVM_DIR`
+may be reused across bakes) — it copies `tvm/include` into a private
+`WORKDIR` tree and overlays `setup/include/*.h` onto that copy before
+compiling, mirroring RUHMI's own install step without touching the
+source checkout. `do_install` applies the same overlay to the SHIPPED
+headers, so a consumer of this package's sysroot sees the patched
+`tvm/runtime/*.h` too, not the pristine one still on disk in the
+checkout.
+
+**THE DURABLE FIX**, so this entire class of bug fails loudly at
+`alp-sdk`'s own link from here on, not a downstream consumer's:
+`libalp_sdk.so`'s link (`CMakeLists.txt`, the top-level `add_library(alp_sdk
+SHARED)` branch) now carries `-Wl,--no-undefined` (via
+`target_link_options`, GNU ld / lld only — guarded on `UNIX AND NOT APPLE`).
+Checked first whether anything in this tree legitimately relies on
+undefined symbols being tolerated (a `dlopen()` pattern, a weak *reference*
+left intentionally unresolved): grepping `dlopen` and
+`__attribute__((weak))` across `src/` turns up none — every weak symbol
+present (`cc3501e_proxy.c`'s GPIO route table, `zephyr_drv.c`'s
+`alp_z_gpio_resolve` fallback, `update_log`'s TF-M secure-service seam) is
+a weak *definition* with a real fallback body, not an unresolved weak
+reference, so none is affected by the flag; nothing needed scoping the fix
+to just the DRP-AI configuration. Verified with a real local build:
+`cmake -DALP_OS=yocto -DALP_SDK_BUILD_SHARED=ON` (the same configuration
+`pr-plain-cmake.yml`'s `find-package-consumer` job runs in CI) links clean
+with the flag active and the default backend set (no DRP-AI/DEEPX), and
+`readelf`/`link.txt` confirm `--no-undefined` actually reached the linker
+invocation.
+
+**Proof level, stated precisely because this closure has been overstated
+twice already:** a real (non-BitBake) `g++` compile of
+`apps/MeraDrpRuntimeWrapper.cpp` was run by hand against a real RUHMI
+checkout's headers (plus Ubuntu's `libspdlog-dev`/`libasio-dev` standing in
+for meta-oe's) and produced a valid object file; `nm` confirms
+`MeraDrpRuntimeWrapper::{ctor,Run,SetInput,GetInputInfo}` as defined
+global `T` symbols in it — the exact four the bug report named as
+undefined. The FINAL LINK against the real `obj/build_runtime/v2h/lib`
+libraries could not be exercised on that x86_64 dev host (`ld: skipping
+incompatible ... -lmera2_runtime` — an architecture mismatch against the
+real aarch64 RUHMI libraries, not a symbol error), and no `bitbake` run of
+this recipe, with or without the new `do_compile` step, has happened at
+all. **This entry is unverified until the next `drpai`-enabled bake**;
+treat it as proven only at the "source compiles cleanly against the real
+vendor headers" level, nothing further.
+
 ### Fixed — U-Boot loaded a devicetree filename no Alp image builds, on both boot media (#1175)
 
 The E1M-X EVK is strapped for xSPI boot with carrier Ethernet dead (errata

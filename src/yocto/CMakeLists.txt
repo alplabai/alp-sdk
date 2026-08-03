@@ -699,6 +699,19 @@ if(ALP_SDK_USE_DRPAI_V2N)
     find_library(MERA2_PLAN_IO_LIB mera2_plan_io)
     find_library(DRP_TVM_RT_LIB    drp_tvm_rt)
     find_library(TVM_RUNTIME_LIB   tvm_runtime)
+    # The tenth input (#1145's third correction): MeraDrpRuntimeWrapper's own
+    # symbols (ctor, Run, SetInput, GetInputInfo, ...) are NOT in any of the
+    # four libraries above -- they are application-side glue source
+    # (apps/MeraDrpRuntimeWrapper.cpp) that RUHMI ships expecting every
+    # consumer to compile for itself.  A first cut of this block treated the
+    # header find above as sufficient, which let a link-line-complete
+    # libalp_sdk.so ship with unresolved MeraDrpRuntimeWrapper::* symbols --
+    # invisible here (a shared library permits undefined symbols by
+    # default) until a downstream consumer's own link failed on them.
+    # mera2-drpai-tvm's do_compile now COMPILES that source into
+    # libmera_drpai_wrapper.so and packages it alongside the other eight;
+    # find + link it exactly like them, not just the header.
+    find_library(MERA_DRPAI_WRAPPER_LIB mera_drpai_wrapper)
 
     set(_drpai_missing "")
     if(NOT DRPAI_WRAPPER_INCLUDE_DIR)
@@ -717,7 +730,8 @@ if(ALP_SDK_USE_DRPAI_V2N)
         list(APPEND _drpai_missing "dmlc/logging.h")
     endif()
     foreach(_drpai_lib
-            MERA2_RUNTIME_LIB MERA2_PLAN_IO_LIB DRP_TVM_RT_LIB TVM_RUNTIME_LIB)
+            MERA2_RUNTIME_LIB MERA2_PLAN_IO_LIB DRP_TVM_RT_LIB TVM_RUNTIME_LIB
+            MERA_DRPAI_WRAPPER_LIB)
         if(NOT ${_drpai_lib})
             list(APPEND _drpai_missing "${_drpai_lib}")
         endif()
@@ -747,7 +761,10 @@ if(ALP_SDK_USE_DRPAI_V2N)
             "directory of a built rzv_drp-ai_tvm (RUHMI) checkout and add its "
             "obj/build_runtime/<soc>/lib to CMAKE_LIBRARY_PATH; tvm_runtime "
             "comes from meta-rz-drpai's lib-tvm recipe and linux/drpai.h from "
-            "its drpai recipe, both on the Yocto sysroot.  ${_drpai_verdict}")
+            "its drpai recipe, both on the Yocto sysroot; mera_drpai_wrapper "
+            "is COMPILED (not just staged) by meta-alp-sdk/recipes-renesas/"
+            "mera2-drpai-tvm from that same RUHMI checkout's "
+            "apps/MeraDrpRuntimeWrapper.cpp.  ${_drpai_verdict}")
     else()
         target_sources(alp_sdk PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/inference_drpai.cpp
@@ -760,6 +777,7 @@ if(ALP_SDK_USE_DRPAI_V2N)
             ${DRPAI_TVM_INCLUDE_DIR} ${DRPAI_DLPACK_INCLUDE_DIR}
             ${DRPAI_DMLC_INCLUDE_DIR})
         target_link_libraries(alp_sdk PRIVATE
+            ${MERA_DRPAI_WRAPPER_LIB}
             ${MERA2_RUNTIME_LIB} ${MERA2_PLAN_IO_LIB}
             ${DRP_TVM_RT_LIB} ${TVM_RUNTIME_LIB})
     endif()

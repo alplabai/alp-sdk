@@ -80,18 +80,24 @@ PACKAGECONFIG[rpc]      = ",,open-amp libmetal"
 # above this one is NOT a silent degrade and NOT dep-free: when
 # ALP_SDK_USE_DRPAI_V2N=ON, src/yocto/inference_drpai.cpp is added to the
 # target, #includes <linux/drpai.h> + MeraDrpRuntimeWrapper.h and links
-# four vendor libraries.  The -D flags and the build deps therefore have to
+# five vendor libraries.  The -D flags and the build deps therefore have to
 # move together, which is why they are routed through one PACKAGECONFIG
 # switch.
 #
-# What this switch supplies -- all 9 inputs src/yocto/CMakeLists.txt
+# What this switch supplies -- all 10 inputs src/yocto/CMakeLists.txt
 # looks for, across two recipes:
 #   drpai            -> ${includedir}/linux/drpai.h  (meta-rz-drpai, drpai_1.4.0)
 #   lib-tvm          -> libtvm_runtime.so            (meta-rz-drpai)
 #   mera2-drpai-tvm  -> MeraDrpRuntimeWrapper.h, the tvm/runtime/profiling.h +
 #                       dlpack/dlpack.h + dmlc/logging.h header tree it
-#                       hard-includes, and libmera2_runtime.so /
-#                       libmera2_plan_io.so / libdrp_tvm_rt.so
+#                       hard-includes, libmera2_runtime.so / libmera2_plan_io.so /
+#                       libdrp_tvm_rt.so, AND libmera_drpai_wrapper.so --
+#                       COMPILED (not staged) by that recipe from the same
+#                       checkout's apps/MeraDrpRuntimeWrapper.cpp, since
+#                       MeraDrpRuntimeWrapper's own symbols (ctor, Run,
+#                       SetInput, GetInputInfo, ...) are application-side
+#                       glue source RUHMI ships with no prebuilt library at
+#                       all, not one of the eight vendor .so's
 #                       (meta-alp-sdk/recipes-renesas/mera2-drpai-tvm)
 #
 # `mera2-drpai-tvm` closes what used to be a RESIDUAL GAP here: those
@@ -106,8 +112,8 @@ PACKAGECONFIG[rpc]      = ",,open-amp libmetal"
 # and CMAKE_FIND_ROOT_PATH_MODE_INCLUDE to ONLY, so find_path()/
 # find_library() re-root every search -- HINTS included -- under the
 # recipe's own sysroot and silently never try a path outside it.  What
-# actually works, and what mera2-drpai-tvm does, is stage the checkout's
-# headers + libs into ITS OWN sysroot (${STAGING_INCDIR} /
+# actually works, and what mera2-drpai-tvm does, is stage/compile the
+# checkout's headers + libs into ITS OWN sysroot (${STAGING_INCDIR} /
 # ${STAGING_LIBDIR}) so the unmodified probes find them there; see
 # meta-alp-sdk/README.md's "Making the RUHMI checkout visible to the
 # bake" and mera2-drpai-tvm's RUHMI_DRPAI_TVM_DIR variable.
@@ -132,6 +138,23 @@ PACKAGECONFIG[rpc]      = ",,open-amp libmetal"
 # unversioned *.so before an appended FILES:${PN} sees them) -- a real
 # `bitbake -c package_qa` with this PACKAGECONFIG enabled is what caught
 # both gaps; static inspection alone had missed them.
+#
+# THIRD correction, from a real downstream-consumer link failure (not
+# `package_qa` this time -- link-complete but symbol-incomplete gets past
+# it): staging MeraDrpRuntimeWrapper.h was never enough. Its symbols are
+# not in any of the eight libraries above; they are RUHMI's own
+# application-side glue SOURCE (apps/MeraDrpRuntimeWrapper.cpp), which
+# every RUHMI sample compiles for itself.  libalp_sdk.so linked
+# "successfully" with PACKAGECONFIG[drpai] enabled while carrying
+# unresolved `MeraDrpRuntimeWrapper::*` references -- invisible at ITS OWN
+# link (a shared library permits undefined symbols by default) -- and the
+# break only surfaced when alp-perception linked against it downstream.
+# mera2-drpai-tvm's do_compile now compiles that source into a ninth
+# library, libmera_drpai_wrapper.so, and this file's CMakeLists.txt
+# find_library()s + links it exactly like the other four.  THE DURABLE
+# FIX rides alongside it: alp-sdk's top-level CMakeLists.txt now links
+# libalp_sdk.so with `-Wl,--no-undefined`, so a future gap in this shape
+# fails loudly at alp-sdk's OWN link step, not a downstream consumer's.
 #
 # ALP_SDK_DRPAI_REQUIRED rides with the enable: this PACKAGECONFIG is an
 # EXPLICIT opt-in, so an unsatisfiable stack must fail do_configure instead
