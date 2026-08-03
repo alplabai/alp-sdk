@@ -59,6 +59,259 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   boot path is unchanged (regression-checked: no `sci0` bus traffic, no
   faults).
 
+### Fixed — three V2N/V2M metadata-declaration gaps (#1155, #1169, #1170)
+
+**`catalog.json` had no key for PDM, SD1, WIFI_SDIO or xSPI (#1155).** PDM was
+already correctly projected; the real gaps were xSPI/OSPI (structurally
+recorded in `external_memory_interfaces`, never read by `gen_catalog.py`) and
+SD1/WIFI_SDIO (both fold into n44.json's single `sdio: 2` count, so the two
+routed instances were indistinguishable from the class boolean alone).
+`scripts/gen_support_matrix.py` gained an `xSPI/OSPI` peripheral class
+(matches any `external_memory_interfaces` entry whose `kind` contains "spi",
+vendor-normalised across xSPI/OctalSPI/HexSPI/FlexSPI); `scripts/gen_catalog.py`
+gained a named-instance projection sourced from the SoM's routed pin-mux table
+(`metadata/pinmux/<family>.yaml`) for the two instances the SoC-level count
+can't split. Regenerated `metadata/catalog.json` and
+`docs/peripheral-support-matrix.md`.
+
+**eMMC, xSPI and the MHU mailbox had no chip metadata or driver tier (#1169).**
+`nor_flash`/`emmc` are on-die routing annotations with no `chips/*.yaml`
+manifest and, confirmed by grep, no alp-sdk driver anywhere in the tree — now
+say so explicitly in the four V2N/V2M SoM presets, rather than staying silent.
+The MHU mailbox already carries an ADR 0017 Tier-1.5 declaration in
+`zephyr/drivers/mbox/mbox_renesas_rz_mhu_b.c`, just an aspirational
+`BENCH-UNVERIFIED` one — the DT node it backs is the exact one
+`examples/multicore/rpmsg-v2n/m33_sm` exercises silicon-proven under #697, so
+the header now says `SILICON-PROVEN` and cites the evidence. All four SoM
+presets now cross-reference this from their `mailbox:` block.
+
+**"Nine" SoC peripheral instances had routed pads but no SoM-level
+declaration (#1170).** `metadata/e1m_modules/v2n/renesas-peripheral-map.tsv`
+routes I3C ch30, RIIC1, RIIC2, RSPI0, SCI_SPI2, SCI_SPI3, PDM0, CANFD2,
+CANFD3, UART1, and two paired SSIU channel groups — verified line-by-line
+against the TSV, all genuine. The issue's own body table already runs to ten
+row-groups, not nine: `CANFD2`/`CANFD3` is one row for two distinct
+channel-numbered instances, and `SSIU1-4` reads as one row but is two paired
+I2S instances (SSIU1+SSIU2 share BCK/WS, SSIU3+SSIU4 likewise — matching
+`ALP_E1M_X_I2S_COUNT == 2` in `include/alp/e1m_x_pinout.h`, not one merged
+instance or four independent ones). A new `soc_peripheral_instances:` block
+(schema: `metadata/schemas/som-preset-v1.schema.json`) declares all twelve
+individual instances this resolves to, each with its class, its TSV
+`silicon_peripheral` name for traceability, and an honest `driver_status:
+none` (no DT node targets any of them yet; DT/pinctrl generation from this
+layer is #655, not this change).
+
+### Fixed — an alp-sdk-owned workspace couldn't build the nanopb example (#1136)
+
+`libraries: [nanopb]`'s west module was reachable in CI (`pr-twister.yml`
+inits its topdir straight from Zephyr's own `west.yml`, `west init -m
+zephyr`, where nanopb is unconditioned) but unreachable from a real
+alp-sdk-owned workspace (`west init -l alp-sdk` — what `tan bootstrap` and
+every customer runs): `nanopb` was missing from the Zephyr import's
+`name-allowlist`, so `west update` never fetched `modules/lib/nanopb` and
+`examples/connectivity/nanopb-encode-decode/CMakeLists.txt` — which has no
+stub fallback, unlike `lwrb` — `FATAL_ERROR`ed on the unset
+`ZEPHYR_NANOPB_MODULE_DIR`. A previous pass (#650) had allowlisted `nanopb`
+correctly, then reverted it as "dead weight": at the time, alp-sdk's own
+manifest ALSO defined a top-level project literally named `nanopb` (the
+dormant SDK-internal mproc-IPC-framing pin), and west's project-name dedup
+lets a directly-listed project permanently shadow a same-named import even
+from a disabled group. Fixed both halves: allowlisted `nanopb` again, and
+renamed the shadowing internal pin to `nanopb-mproc-pin` (`repo-path:
+nanopb` keeps its real upstream URL) so the two no longer collide. Verified
+against a real, from-scratch alp-sdk-owned workspace: `west manifest
+--resolve` now resolves `nanopb` as an active, unconditioned project, and
+`alp_sdk.examples.nanopb_encode_decode.native_sim` builds and PASSes under
+twister. `lwrb` shares the same disabled `extras-lwrb-nanopb` group but has
+no equivalent gap — its consumer compiles a working in-tree stub
+(`vendors/lwrb/src/lwrb_stub_impl.c`) whenever the upstream module isn't
+present, so the group being off-by-default is a real, harmless deferral
+there, not a hidden defect.
+
+Added `scripts/check_west_manifest_module_resolution.py` (wired into
+`pr-metadata-validate.yml`) so this class of drift can't recur silently: it
+statically proves every `libraries:`-selectable Zephyr module resolves to a
+reachable `west.yml` project, and that no Zephyr import `name-allowlist`
+entry is shadowed by a same-named top-level project. Running it for the
+first time caught a second, independent instance of the exact same shape:
+`libraries: [cmsis-nn]` (`metadata/libraries/cmsis-nn.yaml`) was never
+allowlisted despite sitting unconditioned right next to `cmsis-dsp` in
+Zephyr's own manifest — now fixed alongside nanopb. A first cut of the gate
+treated any top-level `projects:` entry as "reachable" regardless of its own
+`groups:` state, which missed the literal original shape (a module reachable
+*only* through a top-level pin sitting in a permanently-disabled group, no
+allowlist entry at all) and, when tightened bluntly, false-positived on the
+thirteen `tier: B` libraries that are legitimately, documentedly gated
+behind a disabled-by-default group (jsmn, Catch2, BearSSL, etc.). The gate
+now adds a third, `tier: A`-scoped check (ADR 0018: a curated/bundled
+library must resolve with no group-filter opt-in) that reproduces and fires
+on the original bug shape without disturbing tier B's legitimate deferrals.
+
+### Fixed — example READMEs documented rejected `tan build` syntax (#1137)
+
+**Round 1** fixed `examples/multicore/heterogeneous-offload/README.md`,
+`examples/multicore/rpmsg-aen/README.md`, `examples/multicore/rpmsg-v2n/README.md`,
+and `examples/multicore/rpmsg-imx93/README.md` — all showed `tan build <path>
+[--core <core>]`, a positional path and/or `--core` flag `tan build` rejects
+outright (`error: unexpected argument ... found`) — and left
+`examples/multicore/mproc-mailbox/README.md` flagged as a real, unfixed
+residual, plus asserted (wrongly) that this was the complete set.
+
+**Round 2** found the round-1 sweep had checked only the files its issue
+named, not the shape itself, and fixed the rest — ten more `tan build`
+positional/`--board` sites (two of them `mproc-mailbox`'s own previously-
+flagged residual) across eight files, plus two genuinely different rejected
+shapes (six `tan validate <path>` sites, two `tan explain <code>` sites) the
+same under-scoped sweep missed entirely because it only ever grepped for
+`tan build`:
+
+- `examples/README.md` (×2), `examples/peripheral-io/i2c-device-hub/README.md`,
+  `examples/peripheral-io/vendor-ext-composability/README.md`,
+  `examples/v2n/v2n-gd32-bridge-functional/README.md` — the same bare-
+  positional-path shape (`tan build <path>` / `tan build --native <path>`),
+  rewritten to `tan build --project <path>` (or `--native --project <path>`).
+- `examples/power-timing/power-managed-sensor/README.md`,
+  `examples/v2n/v2n-m1-deepx-inference/README.md`,
+  `examples/connectivity/production-deployment/README.md` — `tan build
+  --board <sku> <path>`; `--board` is not a `tan build` flag at all (it
+  exists on `tan size`/`tan renode`, never `build`) and board.yaml already
+  pins the SoM, so both the flag and the positional are simply dropped.
+- `examples/multicore/mproc-mailbox/README.md` — the round-1 residual, now
+  actually fixed rather than re-flagged: `tan build` has no per-core
+  selector at all (confirmed against a real `tan build --help`), so the
+  doc's "build HP alone via `--board rtss_hp`" framing was never achievable
+  either way; rewritten to state plainly that `tan build` produces the HP
+  app plus the topology-default HE `alp-stock-shim` placeholder until the
+  v0.4 dual-image flow lands, and the real peer image is still built by
+  hand via `west build`.
+- A **second, distinct rejected shape** found by grepping the wider corpus,
+  not just `tan build`: `tan validate <path>` (bare positional) in
+  `README.md`, `AGENTS.md` (×2), and `docs/cli.md` (×3) — `tan validate` has
+  no positional argument either; the real flag is `--board-yaml <path>`.
+- A **third**, deeper issue in `docs/cli.md`'s `tan explain` section:
+  `tan explain ALP-B001` ("decode a diagnostic code") is not merely
+  mis-syntaxed, the CAPABILITY is gone from `tan explain` in the installed
+  `tan 0.3.1` (`tan explain` only explains project/module templates and
+  generation targets now, confirmed against `tan-cli`'s own `validate.rs`
+  and a real `tan explain`/`tan explain --template ...` run) — the real,
+  current mechanism is the `see: docs/diagnostics/ALP-Bxxx.md` hint line
+  `tan validate`'s own output already carries. Rewrote both `docs/cli.md`
+  mentions and the "You are..." front-door table row accordingly.
+- `docs/v0.6-tbd-and-assumptions.md` named a fourth: `` `tan build --emit
+  system-manifest` `` — `--emit` is not a `tan build` flag (`tan build` has
+  `--target`/`--manifest`, never `--emit`); reworded to name the actual SDK
+  call (`alp_orchestrate --emit system-manifest`) `tan build` consumes
+  internally.
+
+**Root cause of the round-1 miss and the fix**:
+`scripts/check_tan_docs_surface.py`'s `DOC_SOURCES` never included example
+project READMEs at all (only four top-level docs), and even where it did
+scan a file, it only checked that a verb NAME still existed — never what
+came after it. Extended the gate two ways: `EXAMPLE_README_GLOB` now folds
+every `examples/**/README.md` into the scanned surface, and a new
+`check_invocation_shapes` pass extracts every full `tan ...` invocation
+(fenced `bash`/`sh`/`shell`/`console`/`zsh` blocks + inline spans — sample-
+OUTPUT blocks like `tan doctor`'s own untagged-fence report header are
+deliberately excluded, see that function's docstring) and statically
+validates it against that verb's real `--help` grammar: an unrecognised
+flag, or a positional argument on a verb whose Usage line takes none. Proven
+by mutation against the real repo (`git stash` each fixed file, re-run the
+gate, see it fail naming the exact rejected invocation; `git stash pop`,
+green again) and by a new pytest suite
+(`tests/scripts/test_check_tan_docs_surface.py`) covering the positional-arg
+rejection, the unrecognised-flag rejection, the `tan --project <path> build`
+global-flag-before-subcommand ordering, a verb that DOES accept a real
+positional (`tan flash`), a forwarding verb's anything-goes grammar, and the
+sample-output/fence-language exclusion.
+
+### Fixed — five driver defects from the 2026-08-02 whole-codebase review (#1131, #1132, #1133, #1134, #1135)
+
+`mbox_alif_mhuv2.c`'s `mhuv2_send()` spun for the receiver's `ACCESS_READY`
+handshake, discarded the outcome, and rang `CH0_SET` + returned 0 regardless
+— so a dead/absent peer looked like a delivered message to OpenAMP/RPMsg
+callers. `mhuv2_set_enabled()` in the same file already returns `-EIO` on the
+identical timeout; `mhuv2_send()` now does too, before ringing the doorbell
+(#1131).
+
+The legacy `ipm_arm_mhuv2.c` IPM driver (a separate driver/file/Zephyr
+subsystem from the mbox one above, not the same defect) left the mandatory
+`max_data_size_get` op `NULL` — a call through it null-derefs — and ignored
+caller-supplied sizes in `send`/`poll_out`/`poll_in`, always transferring the
+CH_SET/CH_ST register's 4 bytes regardless of what the caller declared, so a
+shorter buffer could be read/written out of bounds. This driver is not dead
+code to delete outright: `zephyr/dts/alif/ensemble_e8_peripherals.dtsi`'s
+`seservice0s`/`seservice0r` nodes wire it to the Secure Enclave services path
+consumed by `examples/aen/aen-se-service-info`, `aen-aipm-read`,
+`aen-se-crypto`, and `aen-se-service-query` — repaired in place, not removed.
+`max_data_size_get` now reports `sizeof(uint32_t)`, and all three transfer
+paths reject any size other than 4 with `-EINVAL`.
+
+The CC3501E TI SPI transport's `arm_transfer()` already left READY low
+(rather than lying about it) when `SPI_transfer()` refused to queue a
+descriptor, but nothing then re-armed the slave — a permanent stall with the
+host waiting forever, not a transient one. A new arm-failure counter
+(`g_arm_fail_count`, mirroring the existing `g_resync_count` self-heal) is
+now polled by `cc3501e_hw_tick()`, which drives the same proven full
+SPI re-open recovery a radio-op reinit already uses (#1133).
+
+`gpu2d`'s software-fallback pixel packer shifted a `uint8_t` (promoted to
+signed `int`) left by 24 bits; a component at/above `0x80` — reachable, since
+alpha legitimately spans 0..255 — is not representable in `int` at that
+shift, which is undefined behaviour (real, UBSan-only-detectable; the plain
+build's output is bit-identical on this two's-complement toolchain so it did
+not corrupt output here, but a build that traps or optimizes on it could).
+All three blend modes now cast each packed component to `uint32_t` before
+shifting (#1134).
+
+`rv3028c7_init()` cleared the RTC's power-on-reset flag with the write
+result cast to `(void)` — genuinely discarded, not merely logged — so a
+failed clear was invisible and a later successful register write still
+returned `ALP_OK` with PORF still latched. The write's status is now
+propagated; a failure returns early, leaving the instance uninitialised
+(#1135).
+
+### Fixed — three V2N metadata/docs/example contradictions against their own recorded evidence (#1161, #1167, #1168)
+
+- **`metadata/chips/gd32g553.yaml`** (#1161): `verification.hil_silicon` flipped
+  `untested` -> `verified`. `examples/v2n/v2n-gd32-bridge-hil-soak/README.md`
+  records a 1526-cycle / ~50 min bench soak (13/13 healthy surfaces clean,
+  zero link wedges) plus the v0.6.0 functional suite (26/26) and A/B OTA
+  e2e documented in `docs/test-plan.md` / `docs/verification-status.md`.
+  Every other V2N-family chip (`clk_5l35023b`, `gd32_swd`, `deepx_dxm1`, …)
+  stays `untested` — none has an equivalent recorded silicon result;
+  `gd32_swd` in particular is still `driver_status: partial` pending its
+  own first-silicon exercise.
+- **`docs/bring-up-v2n.md`** + **`examples/v2n/v2n-gd32-swd-flash/src/main.c`**
+  (#1168, SWD pin status): both said the GD32 SWD pin assignments
+  (SWDIO/SWCLK/NRST -> Renesas P70/P71/P74) are resolved in one paragraph,
+  then called them "TBD pending the next schematic revision" two sentences
+  later. The pads are maintainer-confirmed 2026-05-12 and consistently
+  recorded everywhere else (`metadata/chips/gd32_swd.yaml`,
+  `metadata/chips/gd32g553.yaml`, `metadata/e1m_modules/v2n/renesas-peripheral-map.csv`,
+  `CHANGELOG.md`) — the `TBD` claim was the stale side; removed.
+- **`docs/console.md`** (#1168, expected bridge firmware version): the
+  `alp companion ver` example output showed `GD32 supervisor fw v0.2.6`.
+  `firmware/gd32-bridge/firmware-version.txt` (the firmware's own version
+  string) is `0.2.11`, matching `docs/verification-status.md`'s "the bridge
+  has since moved to fw v0.2.11 / protocol v0.9". Updated the example
+  output to match.
+- **`examples/multicore/rpmsg-v2n/linux/src/main.c`** (#1167): rewritten so
+  the two halves of the example are an actual matched pair. Changed the
+  **Linux side**, not the M33 side: `m33_sm/src/main.c` is a bench-proven
+  (#683/#697) raw-OpenAMP echo responder that deliberately bypasses
+  `<alp/rpc.h>` and publishes no `temperature` method — the Linux side
+  previously subscribed to that method regardless, so the pair never
+  actually talked (per the example's own README status note). Rewriting
+  the M33 side to publish a `temperature` reading would mean inventing a
+  sensor result with no silicon backing, so instead the Linux side now
+  drives `src/backends/rpc/yocto_uio_drv.c` (the `<alp/rpc.h>` backend
+  already built to attach to this exact M33 firmware, `silicon_ref
+  "renesas:rzv2n:n44"`) against the M33's real fixed endpoint address
+  (`APP_EPT_ADDR` = 1024) and round-trips an `echo_test` request via
+  `alp_rpc_call`, verifying the exact bytes come back — matching what the
+  M33 firmware actually implements. `board.yaml` / `README.md` updated to
+  match; `m33_sm/src/main.c`'s transport code is unchanged.
+
 ### Fixed — five memory-safety defects in the AEN Zephyr drivers (#1119, #1120, #1121, #1122, #1124)
 
 `flash_mram_alif.c`'s `flash_range_is_valid()` computed `offset + len` in

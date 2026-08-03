@@ -19,9 +19,32 @@ path.
 
 Sources scanned (the set the task names):
   README.md, docs/cli.md, docs/getting-started.md, docs/troubleshooting.md,
-  and scripts/bootstrap.sh's printed next-steps block (both heredoc bodies
-  near the end of that script -- the only place in bootstrap.sh a customer
-  sees a literal `tan` invocation printed at them).
+  scripts/bootstrap.sh's printed next-steps block (both heredoc bodies near
+  the end of that script -- the only place in bootstrap.sh a customer sees a
+  literal `tan` invocation printed at them), and every `examples/**/README.md`
+  (glob'd via EXAMPLE_README_GLOB, not hand-listed -- a new example directory
+  is covered the moment it exists). The example-README glob was ADDED by
+  alp-sdk#1137 round 2: round 1 fixed the three READMEs its issue named and
+  missed six more of the identical shape sitting in example directories this
+  script never looked at (see `check_invocation_shapes`'s docstring).
+
+Two independent checks run over that surface:
+  1. Subcommand + docs/cli.md-tabulated-flag EXISTENCE (`check_surface`,
+     original design -- see below).
+  2. Full-invocation SHAPE (`check_invocation_shapes`, added alongside the
+     example-README glob): does `tan <verb> <these args>` actually parse
+     against `tan <verb> --help`'s own grammar -- catches an unrecognised
+     flag OR a positional argument on a verb whose Usage line takes none,
+     the exact shape of every one of the nine broken example-README
+     invocations (`tan build <path>`, `tan build --board <sku> <path>`).
+     Check 1 alone never caught these: `build` exists (passes existence),
+     and `--board` was never tabulated in docs/cli.md for `build` (so there
+     was nothing for check 1 to compare against) -- check 1 structurally
+     cannot see what comes after a verb in a source outside docs/cli.md's
+     own flag tables. Deliberately still narrower than a real clap parser --
+     see `check_invocation_shapes`'s own docstring for what it doesn't
+     model (`tan sdk`'s nested subcommands, short flags, quoted values that
+     themselves contain `--`-looking substrings).
 
 Extraction is mechanical, not a hand-maintained list:
   - A `tan <subcommand>` mention only counts if it appears INSIDE markdown
@@ -152,6 +175,16 @@ positive each rule still catches):
     retired verb narrated with more structure than that still needs the
     old prose reworded to a form this check doesn't treat as reference
     quality, or accepted as a known false positive when it lands.
+  - check_invocation_shapes only looks inside a ```-fenced block (further
+    narrowed to a `bash`/`sh`/`shell`/`console`/`zsh` language tag -- see
+    `extract_tan_invocations`'s own docstring) or an inline code span --
+    never a 4-space-indented Markdown code block. The corpus has exactly one
+    of these (`examples/aen/aen-sim-vision/README.md`'s `tan renode --board
+    E1M-AEN801 --image-bundle build`) and it is correct (verified by hand
+    against a real `tan renode --help`, which genuinely lists both
+    `--board <SKU>` and `--image-bundle <DIR>`), so there is nothing to
+    prove the extraction is missing today -- flagged here as a real gap
+    that would matter the moment an indented-block invocation is wrong.
 
 Deliberately OUT of scope (log it here, don't let silence read as coverage):
   - Output TEXT and semantic behaviour (the "Reusing compatible ... workspace"
@@ -184,6 +217,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -198,6 +232,16 @@ DOC_SOURCES = (
     "docs/troubleshooting.md",
 )
 BOOTSTRAP_SCRIPT = "scripts/bootstrap.sh"
+# Every example project's own README -- glob'd, not hand-listed, so a NEW
+# example directory is covered the moment it exists. This is what round-1 of
+# alp-sdk#1137 missed entirely: the four DOC_SOURCES above never included
+# these, so `tan build --board <sku> <path>` (rejected: no such flag, no
+# positional) sat undetected in nine example READMEs while the subcommand-
+# existence check happily passed (`build` still exists as a verb -- the old
+# check never looked at what came AFTER the verb). See
+# `check_invocation_shapes` below for the shape check this scope expansion
+# feeds.
+EXAMPLE_README_GLOB = "examples/**/README.md"
 
 _TAN_INVOCATION_RE = re.compile(r"\btan[ \t]+([a-z][a-z0-9-]+)\b")
 # English words that can immediately follow the literal word "tan" in a
@@ -424,6 +468,8 @@ def collect_documented_surface(
         if rel == "docs/cli.md":
             continue
         subcommands |= extract_subcommands((repo_root / rel).read_text(encoding="utf-8"))
+    for readme in sorted(repo_root.glob(EXAMPLE_README_GLOB)):
+        subcommands |= extract_subcommands(readme.read_text(encoding="utf-8"))
 
     bootstrap_text = (repo_root / BOOTSTRAP_SCRIPT).read_text(encoding="utf-8")
     heredoc_body = _strip_shell_comment_tails(extract_heredoc_bodies(bootstrap_text))
@@ -447,6 +493,247 @@ def _forwards_to_python_backend(help_text: str) -> bool:
         if line.startswith("Usage:"):
             return line.rstrip().endswith("[ARGS]...")
     return False
+
+
+# --- Invocation-SHAPE checking (positional args + unrecognised flags) ------
+#
+# `check_surface` above only proves a verb EXISTS and that docs/cli.md's own
+# tabulated flags for it are spelled right -- it never looks at what a doc
+# actually tells a customer to TYPE. That gap is exactly how alp-sdk#1137
+# round 1 shipped nine broken `tan build <path>` / `tan build --board <sku>
+# <path>` invocations in example READMEs: `build` genuinely exists (passes
+# the existence check) and no docs/cli.md flag table mentions `--board` for
+# it (so there was nothing to compare against) -- but a real `tan` rejects
+# both the bare positional and the flag outright. The checks below extract
+# the FULL invocation (every token after `tan`), not just the verb, and
+# statically validate it against that verb's own `--help` grammar -- no
+# `west`, no network, no real build -- the same non-executing spirit as
+# `check_surface`'s `--help`-only approach.
+_OPTION_LINE_RE = re.compile(r"^\s{2,}(?:-\w,\s+)?(--[a-zA-Z][a-zA-Z0-9-]*)(\s+<[^>]+>)?\s*$")
+# A shell chain/pipe operator that separates two independent commands on one
+# doc line (`cd my-app && tan build`, `tan flash --dry-run; tan flash`). Never
+# a `|` that isn't doubled -- a single pipe rarely appears in these docs, but
+# splitting on it too is harmless (it can only isolate MORE candidate `tan
+# ...` segments, never merge two into one and hide a real invocation).
+_SHELL_CHAIN_RE = re.compile(r"&&|\|\||;|\|")
+_VERB_TOKEN_RE = re.compile(r"\A[a-z][a-z0-9-]*\Z")
+# Verbs whose grammar this static check does not model: `sdk` nests its OWN
+# subcommands (`tan sdk switch <path>`, `tan sdk install <ver>`) behind a
+# second dispatch this script has no reason to duplicate -- getting it wrong
+# would be a false positive, worse than the under-checking this set trades
+# for (same trade-off `check_surface` already makes for forwarding verbs).
+_UNMODELLED_VERBS = {"sdk"}
+
+
+def _parse_option_arity(help_text: str) -> dict[str, bool]:
+    """Map every `--flag` clap lists in HELP_TEXT's `Options:` section to
+    whether it takes a value (`--flag <VALUE>`, True) or is a bare boolean
+    switch (`--flag` alone, False). Used both for the top-level `tan --help`
+    (the GLOBAL flags valid before or after the subcommand token, e.g.
+    `tan --project <path> build`) and for a single verb's own `--help`
+    (which repeats the same globals plus its own flags -- verified by hand:
+    every non-forwarding verb's --help lists `--project`/`--board-yaml`/
+    `--sdk-root`/... again, so there is no separate "local-only" arity to
+    maintain)."""
+    arity: dict[str, bool] = {}
+    in_options = False
+    for line in help_text.splitlines():
+        if line.strip() == "Options:":
+            in_options = True
+            continue
+        if in_options and line.strip() and not line.startswith(" "):
+            break  # a later top-level section (there is none today, but stay honest)
+        m = _OPTION_LINE_RE.match(line)
+        if m:
+            arity[m.group(1)] = m.group(2) is not None
+    return arity
+
+
+def _usage_line(help_text: str) -> str:
+    for line in help_text.splitlines():
+        if line.startswith("Usage:"):
+            return line.rstrip()
+    return ""
+
+
+def _verb_accepts_positional(usage_line: str) -> bool:
+    """True when USAGE_LINE names something positional beyond `[OPTIONS]`
+    (`Usage: tan flash [OPTIONS] [APP_PATH]`) -- False when it's
+    `[OPTIONS]`-only (`Usage: tan build [OPTIONS]`). Only meaningful for a
+    non-forwarding verb (see `_forwards_to_python_backend`); a forwarding
+    verb's `[ARGS]...` catch-all is handled separately, before this is ever
+    called, and always accepts anything."""
+    _before, _sep, tail = usage_line.partition("[OPTIONS]")
+    return bool(tail.strip())
+
+
+def _split_shell_commands(line: str) -> list[str]:
+    return [seg.strip() for seg in _SHELL_CHAIN_RE.split(line) if seg.strip()]
+
+
+_INVOCATION_FENCE_LANGS = {"bash", "sh", "shell", "console", "zsh"}
+
+
+def extract_tan_invocations(markdown_text: str) -> list[str]:
+    """Every candidate FULL `tan ...` command line -- not just the verb --
+    found in a shell-tagged fence's lines (chain-split on `&&`/`;`/`|`,
+    comment tails already stripped by `_strip_shell_comment_tails`) and
+    inline code spans. A candidate must start with the literal word `tan`
+    followed by whitespace or end of string (`tan-cli`, a different word,
+    never matches).
+
+    UNLIKE every other extraction in this file, this one DOES gate on a
+    fence-language allowlist (`_INVOCATION_FENCE_LANGS`) -- a deliberate
+    divergence from the comment-stripping rule's "no allowlist" reasoning
+    documented at the top of this file, not an oversight. That rule's safety
+    argument is one-directional: stripping only ever REMOVES text, so a
+    missed fence tag under-checks (a known, accepted blind spot) but can
+    never fabricate a fake subcommand. Extracting a full INVOCATION from an
+    untagged fence has the opposite risk: docs/cli.md and
+    docs/getting-started.md both show real `tan doctor` SAMPLE OUTPUT in
+    untagged ``` fences (`tan doctor  native-host · none`, the tool's own
+    report header, not a command) -- treating that as an invocation to parse
+    manufactures a false `tan doctor` positional-argument failure that has
+    nothing to do with what a customer types. Restricting to conventionally-
+    commandy fence tags trades a small, accepted under-check (a `tan`
+    command shown in a fence this repo happens to leave untagged) for
+    eliminating that guaranteed false-positive class; inline code spans
+    carry no such risk (a span is never a full terminal transcript) and are
+    scanned unconditionally, same as every other extraction here."""
+    candidates: list[str] = []
+    for lang, body in _FENCE_RE.findall(markdown_text):
+        if lang.strip().lower() not in _INVOCATION_FENCE_LANGS:
+            continue
+        for line in _strip_shell_comment_tails(body).splitlines():
+            for seg in _split_shell_commands(line):
+                if seg == "tan" or seg.startswith("tan "):
+                    candidates.append(seg)
+    prose_minus_fences = _FENCE_STRIP_RE.sub("", markdown_text)
+    for span in _INLINE_CODE_RE.findall(prose_minus_fences):
+        span = span.strip()
+        for seg in _split_shell_commands(span):
+            if seg == "tan" or seg.startswith("tan "):
+                candidates.append(seg)
+    return candidates
+
+
+def _find_verb(tokens: list[str], global_arity: dict[str, bool]) -> tuple[str | None, int]:
+    """TOKENS is everything after the leading `tan`. Global options may
+    appear BEFORE the subcommand (`tan --project <path> build` parses on a
+    real `tan`, proven by hand) -- walk past any of those to find the actual
+    verb token and its index in TOKENS. Returns (None, -1) if TOKENS never
+    reaches a bare, verb-shaped token (`tan --version`, `tan --help`)."""
+    i = 0
+    while i < len(tokens):
+        t = tokens[i]
+        if t.startswith("--"):
+            flag = t.split("=", 1)[0]
+            takes_value = global_arity.get(flag, False)
+            i += 1
+            if takes_value and "=" not in t and i < len(tokens):
+                i += 1
+            continue
+        if _VERB_TOKEN_RE.match(t):
+            return t, i
+        return None, -1  # a bare non-flag, non-verb-shaped token -- give up, not a real invocation
+    return None, -1
+
+
+def _check_one_invocation(
+    invocation: str,
+    global_arity: dict[str, bool],
+    verb_help_cache: dict[str, str | None],
+    tan_bin: str,
+) -> str | None:
+    """Validate one candidate `tan ...` string against a real, installed
+    `tan`'s own `--help` grammar for the verb it names. Returns a problem
+    string, or None if the invocation is fine (or not a real invocation --
+    e.g. `tan --version` -- or names an unmodelled/forwarding verb, both of
+    which are deliberate no-checks, not false negatives)."""
+    try:
+        tokens = shlex.split(invocation)
+    except ValueError:
+        return None  # unbalanced quote in a prose fragment, not a real command line
+    if not tokens or tokens[0] != "tan":
+        return None
+    verb, idx = _find_verb(tokens[1:], global_arity)
+    if verb is None or verb in _UNMODELLED_VERBS:
+        return None
+
+    if verb not in verb_help_cache:
+        proc = subprocess.run(
+            [tan_bin, verb, "--help"], capture_output=True, text=True, timeout=20,
+        )
+        verb_help_cache[verb] = proc.stdout if proc.returncode == 0 else None
+    help_text = verb_help_cache[verb]
+    if help_text is None:
+        return None  # nonexistent verb -- already reported by check_surface
+
+    if _forwards_to_python_backend(help_text):
+        return None  # verbatim-forwarded verb -- anything after it is legal by design
+
+    local_arity = {**global_arity, **_parse_option_arity(help_text)}
+    accepts_positional = _verb_accepts_positional(_usage_line(help_text))
+
+    rest = tokens[2 + idx :]
+    i = 0
+    positionals: list[str] = []
+    unknown_flags: list[str] = []
+    while i < len(rest):
+        t = rest[i]
+        if t.startswith("--"):
+            flag = t.split("=", 1)[0]
+            if flag not in local_arity:
+                unknown_flags.append(flag)
+                i += 1
+                continue
+            takes_value = local_arity[flag]
+            i += 1
+            if takes_value and "=" not in t and i < len(rest):
+                i += 1
+            continue
+        positionals.append(t)
+        i += 1
+
+    problems = []
+    for flag in unknown_flags:
+        problems.append(f"`{flag}` is not a recognised flag of `tan {verb}`")
+    if positionals and not accepts_positional:
+        problems.append(
+            f"`tan {verb}` takes no positional argument, but this invocation "
+            f"has one ({positionals[0]!r})"
+        )
+    if not problems:
+        return None
+    return f"`{invocation}` -- " + "; ".join(problems)
+
+
+def check_invocation_shapes(repo_root: Path, tan_bin: str) -> list[str]:
+    """Scan every DOC_SOURCES file plus every `examples/**/README.md` (see
+    `EXAMPLE_README_GLOB`) for a full `tan ...` invocation and statically
+    validate its shape (unrecognised flag, or a positional argument on a
+    verb whose `--help` Usage line shows none) against a real, installed
+    `tan`. Deliberately narrower than a real shell/clap parser -- see the
+    module docstring's blind-spots section for what this still misses
+    (quoted multi-word values with embedded `--`-looking substrings, `tan
+    sdk`'s nested subcommand grammar, short flags)."""
+    global_proc = subprocess.run(
+        [tan_bin, "--help"], capture_output=True, text=True, timeout=20,
+    )
+    global_arity = _parse_option_arity(global_proc.stdout)
+
+    sources = [repo_root / rel for rel in DOC_SOURCES]
+    sources += sorted(repo_root.glob(EXAMPLE_README_GLOB))
+
+    verb_help_cache: dict[str, str | None] = {}
+    problems: list[str] = []
+    for path in sources:
+        text = path.read_text(encoding="utf-8")
+        for invocation in extract_tan_invocations(text):
+            problem = _check_one_invocation(invocation, global_arity, verb_help_cache, tan_bin)
+            if problem:
+                problems.append(f"{path.relative_to(repo_root)}: {problem}")
+    return problems
 
 
 def check_surface(
@@ -523,6 +810,7 @@ def main() -> int:
 
     repo_root = Path(args.repo_root).resolve()
     problems, skipped_forwarding, skipped_front_door_rows = check_surface(repo_root, tan_path)
+    problems += check_invocation_shapes(repo_root, tan_path)
     if problems:
         version_proc = subprocess.run(
             [tan_path, "--version"], capture_output=True, text=True, timeout=10,
@@ -552,8 +840,10 @@ def main() -> int:
     skip_note = f" ({'; '.join(skip_notes)})" if skip_notes else ""
     print(
         "check_tan_docs_surface: OK -- every `tan` subcommand alp-sdk's docs name "
-        "still exists, and every flag docs/cli.md tabulates for a non-forwarding "
-        f"verb is listed in `tan <verb> --help` output in {tan_path}{skip_note}."
+        "still exists, every flag docs/cli.md tabulates for a non-forwarding verb "
+        "is listed in `tan <verb> --help` output, and every full `tan ...` "
+        "invocation in DOC_SOURCES + examples/**/README.md parses against that "
+        f"verb's own --help grammar, in {tan_path}{skip_note}."
     )
     return 0
 

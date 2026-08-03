@@ -143,6 +143,7 @@ static void mhuv2_rx_dispatch(const struct device *dev);
  * @retval 0         On success.
  * @retval -EINVAL   channel_id out of range, or frame is not tx.
  * @retval -EMSGSIZE msg is non-NULL (doorbell mode carries no payload).
+ * @retval -EIO      the receiver never reported ACCESS_READY (wake timeout).
  */
 static int mhuv2_send(const struct device *dev, mbox_channel_id_t channel_id,
                       const struct mbox_msg *msg)
@@ -168,16 +169,24 @@ static int mhuv2_send(const struct device *dev, mbox_channel_id_t channel_id,
      * Matches the proven raw-MHU path in examples/aen/aen-dualcore-ipc.
      */
     sys_write32(1U, cfg->base + MHUV2_TX_ACCESS_REQUEST);
-    for (uint32_t i = 0U; i < MHUV2_ACCESS_READY_SPINS; i++) {
-        if (sys_read32(cfg->base + MHUV2_TX_ACCESS_READY) != 0U) {
-            break;
-        }
-    }
+	bool ready = false;
+	for (uint32_t i = 0U; i < MHUV2_ACCESS_READY_SPINS; i++) {
+		if (sys_read32(cfg->base + MHUV2_TX_ACCESS_READY) != 0U) {
+			ready = true;
+			break;
+		}
+	}
+	if (!ready) {
+		/* Same readiness timeout mhuv2_set_enabled() already treats as -EIO:
+         * ringing the doorbell now would tell the caller delivery succeeded
+         * when the receiver never woke to observe it. */
+		return -EIO;
+	}
 
-    /* Window 0, CH0_SET is write-1-to-set: assert the doorbell bit. */
-    sys_write32(BIT(channel_id), cfg->base + MHUV2_TX_CH0_SET);
+	/* Window 0, CH0_SET is write-1-to-set: assert the doorbell bit. */
+	sys_write32(BIT(channel_id), cfg->base + MHUV2_TX_CH0_SET);
 
-    return 0;
+	return 0;
 }
 
 /**

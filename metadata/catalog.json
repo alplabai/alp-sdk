@@ -441,7 +441,7 @@
         "name": "rpmsg-v2n",
         "path": "examples/multicore/rpmsg-v2n",
         "som": "E1M-V2N101",
-        "summary": "> **Status: the raw A55↔M33 transport is bench-proven; this example's > own two halves are not a matched pair.** > > - **Proven (#697), on E1M-X V2N-M1 silicon:** the raw OpenAMP > transport that `m33_sm/src/main.c` implements -- resource table, > vrings, MHU mailbox doorbell, rpmsg endpoint -- against real > RZ/V2N devicetree. Attach + echo round-trip (1/4/16/64 B) and > the GHSA-xhm8 concurrent-close case all pass end-to-end, with > Renesas's `rpmsg_sample_client` over UIO as the Linux peer. > - **Not proven:** the `linux/` + `m33_sm/` pairing *in this > directory*. `linux/src/main.c` subscribes to a `temperature` > method that the M33 echo responder never publishes, so the two > slices as shipped do not talk to each other. `m33_sm` is > `build_only: true` in CI (no native_sim: it needs real V2N > devicetree + the Renesas MHU/FSP/OpenAMP modules). > - **By design:** the M33 slice **deliberately bypasses > `<alp/rpc.h>`** and uses raw OpenAMP (alp-sdk #683 \"Path B, > Phase 1\"). Its verified peer is Renesas's licence-gated > Multi-OS Package sample, which dials a resource table shaped > exactly like `resource_table.c` -- not whatever Zephyr's > `ipc_service` would generate. See `m33_sm/src/main.c`'s file > header. A v2n-specific `<alp/rpc.h>` backend is follow-up work."
+        "summary": "> **Status: the raw A55↔M33 transport is bench-proven; the two halves > in this directory are now a matched pair (alp-sdk #1167).** > > - **Proven (#697), on E1M-X V2N-M1 silicon:** the raw OpenAMP > transport that `m33_sm/src/main.c` implements -- resource table, > vrings, MHU mailbox doorbell, rpmsg endpoint -- against real > RZ/V2N devicetree. Attach + echo round-trip (1/4/16/64 B) and > the GHSA-xhm8 concurrent-close case all pass end-to-end, with > Renesas's `rpmsg_sample_client` over UIO as the reference Linux > peer. `m33_sm` is `build_only: true` in CI (no native_sim: it > needs real V2N devicetree + the Renesas MHU/FSP/OpenAMP modules); > its transport code is unchanged by #1167. > - **By design, the M33 slice still bypasses `<alp/rpc.h>`'s framed > convention** and speaks raw OpenAMP (alp-sdk #683 \"Path B, Phase > 1\"): it echoes whatever bytes land on its fixed endpoint rather > than publishing a named method. What changed in #1167 is the > **Linux side**: `linux/src/main.c` now drives that fixed endpoint > through `src/backends/rpc/yocto_uio_drv.c` -- the `<alp/rpc.h>` > backend that already targets this exact firmware (see that > backend's file header) -- and round-trips an `echo_test` request > instead of subscribing to a `temperature` push the M33 never > sent. See `m33_sm/src/main.c`'s file header and > `linux/src/main.c`'s file header for the full rationale."
       }
     ],
     "peripheral-io": [
@@ -1061,6 +1061,10 @@
       "script": "scripts/check_version_doc_sync.py"
     },
     {
+      "purpose": "Prove every `libraries:`-selectable Zephyr module actually resolves in west.yml -- the alp-sdk-OWNED workspace (`west init -l alp-sdk`, what `tan bootstrap` and every customer runs), not the Zephyr-owned one pr-twister.yml happens to init from (`west init -m zephyr`) instead.",
+      "script": "scripts/check_west_manifest_module_resolution.py"
+    },
+    {
       "purpose": "Guard: every scripts/ and firmware/ write_text() of a repo-tree text artifact passes newline=\"\".",
       "script": "scripts/check_write_text_newline.py"
     },
@@ -1605,12 +1609,15 @@
         "pwm": false,
         "quadrature_encoder": true,
         "rtc": true,
+        "sd1": false,
         "sdio_emmc": true,
         "spi": true,
         "timer": true,
         "uart": true,
         "usb": true,
-        "watchdog": true
+        "watchdog": true,
+        "wifi_sdio": false,
+        "xspi_ospi": true
       },
       "silicon": "alif:ensemble:e3",
       "sku": "E1M-AEN301",
@@ -1657,12 +1664,15 @@
         "pwm": false,
         "quadrature_encoder": true,
         "rtc": true,
+        "sd1": false,
         "sdio_emmc": true,
         "spi": true,
         "timer": true,
         "uart": true,
         "usb": true,
-        "watchdog": true
+        "watchdog": true,
+        "wifi_sdio": false,
+        "xspi_ospi": true
       },
       "silicon": "alif:ensemble:e4",
       "sku": "E1M-AEN401",
@@ -1709,12 +1719,15 @@
         "pwm": false,
         "quadrature_encoder": true,
         "rtc": true,
+        "sd1": false,
         "sdio_emmc": true,
         "spi": true,
         "timer": true,
         "uart": true,
         "usb": true,
-        "watchdog": true
+        "watchdog": true,
+        "wifi_sdio": false,
+        "xspi_ospi": true
       },
       "silicon": "alif:ensemble:e5",
       "sku": "E1M-AEN501",
@@ -1770,12 +1783,15 @@
         "pwm": false,
         "quadrature_encoder": true,
         "rtc": true,
+        "sd1": false,
         "sdio_emmc": true,
         "spi": true,
         "timer": true,
         "uart": true,
         "usb": true,
-        "watchdog": true
+        "watchdog": true,
+        "wifi_sdio": false,
+        "xspi_ospi": true
       },
       "silicon": "alif:ensemble:e6",
       "sku": "E1M-AEN601",
@@ -1831,12 +1847,15 @@
         "pwm": false,
         "quadrature_encoder": true,
         "rtc": true,
+        "sd1": false,
         "sdio_emmc": true,
         "spi": true,
         "timer": true,
         "uart": true,
         "usb": true,
-        "watchdog": true
+        "watchdog": true,
+        "wifi_sdio": false,
+        "xspi_ospi": true
       },
       "silicon": "alif:ensemble:e7",
       "sku": "E1M-AEN701",
@@ -1892,12 +1911,15 @@
         "pwm": false,
         "quadrature_encoder": true,
         "rtc": true,
+        "sd1": false,
         "sdio_emmc": true,
         "spi": true,
         "timer": true,
         "uart": true,
         "usb": true,
-        "watchdog": true
+        "watchdog": true,
+        "wifi_sdio": false,
+        "xspi_ospi": true
       },
       "silicon": "alif:ensemble:e8",
       "sku": "E1M-AEN801",
@@ -1946,12 +1968,15 @@
         "pwm": false,
         "quadrature_encoder": false,
         "rtc": false,
+        "sd1": false,
         "sdio_emmc": false,
         "spi": false,
         "timer": false,
         "uart": false,
         "usb": false,
-        "watchdog": false
+        "watchdog": false,
+        "wifi_sdio": false,
+        "xspi_ospi": true
       },
       "silicon": "nxp:imx9:imx93",
       "sku": "E1M-NX9101",
@@ -1994,12 +2019,15 @@
         "pwm": false,
         "quadrature_encoder": false,
         "rtc": true,
+        "sd1": true,
         "sdio_emmc": true,
         "spi": true,
         "timer": true,
         "uart": true,
         "usb": true,
-        "watchdog": true
+        "watchdog": true,
+        "wifi_sdio": true,
+        "xspi_ospi": true
       },
       "silicon": "renesas:rzv2n:n44",
       "sku": "E1M-V2M101",
@@ -2042,12 +2070,15 @@
         "pwm": false,
         "quadrature_encoder": false,
         "rtc": true,
+        "sd1": true,
         "sdio_emmc": true,
         "spi": true,
         "timer": true,
         "uart": true,
         "usb": true,
-        "watchdog": true
+        "watchdog": true,
+        "wifi_sdio": true,
+        "xspi_ospi": true
       },
       "silicon": "renesas:rzv2n:n44",
       "sku": "E1M-V2M102",
@@ -2090,12 +2121,15 @@
         "pwm": false,
         "quadrature_encoder": false,
         "rtc": true,
+        "sd1": true,
         "sdio_emmc": true,
         "spi": true,
         "timer": true,
         "uart": true,
         "usb": true,
-        "watchdog": true
+        "watchdog": true,
+        "wifi_sdio": true,
+        "xspi_ospi": true
       },
       "silicon": "renesas:rzv2n:n44",
       "sku": "E1M-V2N101",
@@ -2138,12 +2172,15 @@
         "pwm": false,
         "quadrature_encoder": false,
         "rtc": true,
+        "sd1": true,
         "sdio_emmc": true,
         "spi": true,
         "timer": true,
         "uart": true,
         "usb": true,
-        "watchdog": true
+        "watchdog": true,
+        "wifi_sdio": true,
+        "xspi_ospi": true
       },
       "silicon": "renesas:rzv2n:n44",
       "sku": "E1M-V2N102",

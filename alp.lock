@@ -1,7 +1,7 @@
 {
   "digests": {
-    "metadata": "sha256:a1e58f93a090480f01bc077361df2842ce35037caabf9ebe7fed6598f360fcd6",
-    "schemas": "sha256:3eac9463c0404a059753a9bc09f708047bbb8478a705fa634a59aba7547960d2"
+    "metadata": "sha256:3dab5f1219ffc14a698cbaf52ba499fc7d5d32616a79c216fbca7c930980ac6e",
+    "schemas": "sha256:edde5d8b5129e8741d0a8a497b72d15f5f781b55e9dfbe4c051f047f82c6f216"
   },
   "generatedBy": "west alp-lock",
   "libraries": [
@@ -213,7 +213,7 @@
     "groupsEnabled": []
   },
   "sdk": {
-    "revision": "13791e550ca92b2eb65506e0eda641325d7c5e66",
+    "revision": "43a4a15518f2d35f4c1630d27cfd6103982671bb",
     "version": "0.15.0"
   },
   "west": {
@@ -351,7 +351,7 @@
         "groups": [
           "extras-lwrb-nanopb"
         ],
-        "name": "nanopb",
+        "name": "nanopb-mproc-pin",
         "revision": "nanopb-0.4.9"
       },
       {

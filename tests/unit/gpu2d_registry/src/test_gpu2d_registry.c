@@ -402,3 +402,52 @@ ZTEST(alp_gpu2d_registry, test_blend_replace_and_src_over_and_additive_and_multi
 
 	alp_gpu2d_close(g);
 }
+
+ZTEST(alp_gpu2d_registry, test_blend_high_bit_alpha_no_signed_shift_ub)
+{
+	/* Regression for #1134: _blend_px's `_u8(component) << 24` packing
+	 * shifts a uint8_t that integer-promotes to (signed) int; any
+	 * component landing at/above 0x80 (bit 7 set) then shifts a value
+	 * not representable in int at bit 24 -- formally UB (C11 6.5.7p4),
+	 * reachable here since alpha legitimately spans the full 0..255
+	 * byte range including 0xFF.
+	 *
+	 * Regression proof, plain build (the gate CI actually runs -- no
+	 * --enable-ubsan): on this two's-complement toolchain the signed
+	 * and unsigned shifts produce the identical truncated-to-uint32_t
+	 * bit pattern, so this vector's numeric result does NOT discriminate
+	 * pre/post-fix here -- it only pins the packing stays correct.
+	 *
+	 * Regression proof, UBSan build: `west twister -p native_sim/native/64
+	 * --enable-ubsan` on the pre-fix `_u8(x) << 24` reports "left shift of
+	 * ... cannot be represented in type 'int'" for these exact high-bit
+	 * vectors; the (uint32_t) cast removes it. */
+	alp_gpu2d_t *g = alp_gpu2d_open();
+	zassert_not_null(g);
+	alp_gpu2d_surface_t src = _argb(_fb_a);
+	alp_gpu2d_surface_t dst = _argb(_fb_b);
+
+	/* REPLACE: every component (incl. alpha) at the sign-bit boundary. */
+	_clear(_fb_a, 0xFFFFFFFFu);
+	_clear(_fb_b, 0x00000000u);
+	zassert_equal(alp_gpu2d_blend(g, &src, 0u, 0u, &dst, 0u, 0u, 1u, 1u, ALP_GPU2D_BLEND_REPLACE),
+	              ALP_OK);
+	zassert_equal(_fb_b[0], 0xFFFFFFFFu);
+
+	/* ADDITIVE saturates every channel to 0xFF (bit 7 set on all four
+	 * _u8() results feeding a << 24 / << 16 / << 8). */
+	_clear(_fb_a, 0xFFFFFFFFu);
+	_clear(_fb_b, 0xFFFFFFFFu);
+	zassert_equal(alp_gpu2d_blend(g, &src, 0u, 0u, &dst, 0u, 0u, 1u, 1u, ALP_GPU2D_BLEND_ADDITIVE),
+	              ALP_OK);
+	zassert_equal(_fb_b[0], 0xFFFFFFFFu);
+
+	/* MULTIPLY with both operands at 0xFF also saturates to 0xFF. */
+	_clear(_fb_a, 0xFFFFFFFFu);
+	_clear(_fb_b, 0xFFFFFFFFu);
+	zassert_equal(alp_gpu2d_blend(g, &src, 0u, 0u, &dst, 0u, 0u, 1u, 1u, ALP_GPU2D_BLEND_MULTIPLY),
+	              ALP_OK);
+	zassert_equal(_fb_b[0], 0xFFFFFFFFu);
+
+	alp_gpu2d_close(g);
+}

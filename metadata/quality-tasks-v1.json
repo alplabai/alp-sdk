@@ -571,6 +571,20 @@
       "ci": "pr-doc-drift.yml:doc-drift"
     },
     {
+      "id": "west-manifest-module-resolution",
+      "description": "Prove every libraries:-selectable Zephyr module resolves to a reachable west.yml project in an alp-sdk-owned workspace, and that no name-allowlist entry is shadowed by a same-named top-level project (#1136).",
+      "runner": "check-script",
+      "script": "scripts/check_west_manifest_module_resolution.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "write-text-newline",
       "description": "Every scripts/ and firmware/ write_text() of a repo-tree text artifact passes newline=\"\" (else Windows CRLF-rewrites it silently on write).",
       "runner": "check-script",

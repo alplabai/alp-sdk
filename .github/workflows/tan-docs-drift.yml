@@ -31,6 +31,12 @@ on:
       - "docs/cli.md"
       - "docs/getting-started.md"
       - "docs/troubleshooting.md"
+      # check_tan_docs_surface.py scans examples/**/README.md for full `tan ...`
+      # invocations, so a rejected invocation added there must be able to
+      # trigger this gate. Without this entry the scan existed and could never
+      # fire on the files it covers -- which is how nine rejected `tan build`
+      # spellings accumulated across the example READMEs unnoticed.
+      - "examples/**/README.md"
       - "scripts/bootstrap.sh"
       - "scripts/check_tan_docs_surface.py"
       - ".github/workflows/tan-docs-drift.yml"

@@ -1002,7 +1002,14 @@ def test_retired_verb_bare_prose_mention_does_not_misparse_as_live(tmp_path):
         encoding="utf-8",
     )
 
-    recognized = {"generate": set()}
+    # `--target` must be RECOGNIZED (not an empty set): the fixture's own
+    # fenced `tan generate --target zephyr-conf` line is now also walked by
+    # check_invocation_shapes (added alongside the example-README glob --
+    # see that function's docstring), so an empty flag set here would fail
+    # this test for an unrelated reason (a fabricated "`--target` unknown"
+    # shape problem) and mask what this test actually exercises: the
+    # retired-verb bare-prose-mention rule below.
+    recognized = {"generate": {"--target"}}
     tan_bin = _write_fake_tan(tmp_path / "bin", recognized=recognized, missing={"emit"})
 
     proc = _run(doc_root, tmp_path / "bin")
@@ -1094,3 +1101,231 @@ def test_multitoken_invocation_in_prose_with_no_heading_still_catches_drift(tmp_
     assert proc.returncode != 0
     assert "`tan kconfig`" in proc.stderr
     assert "no longer a recognised subcommand" in proc.stderr
+
+
+# --- check_invocation_shapes: the alp-sdk#1137-round-2 regression coverage -
+#
+# Round 1 fixed the three example READMEs its issue named and missed six
+# more of the identical `tan build <path>` / `tan build --board <sku> <path>`
+# shape sitting in OTHER example READMEs -- files check_tan_docs_surface
+# never scanned (DOC_SOURCES only ever listed four top-level docs) and whose
+# bug shape (positional arg / unrecognised flag) the existence-only check
+# structurally cannot see. These tests exercise the fix for both halves:
+# EXAMPLE_README_GLOB widening what gets scanned, and check_invocation_shapes
+# widening what gets checked once scanned.
+
+_MINIMAL_TAN_HELP = "Usage: tan [OPTIONS] <COMMAND>\n\nOptions:\n      --project <PATH>\n"
+
+
+def _write_minimal_docroot(root: Path, example_readme_body: str) -> Path:
+    """The smallest doc tree `check_invocation_shapes` (and the
+    `check_surface` existence pass that always runs alongside it in `main`)
+    both need: the four DOC_SOURCES files (near-empty, no verb of their own,
+    so they don't add noise to the checked surface) plus ONE example
+    project's README carrying whatever `tan ...` invocation a test wants to
+    exercise. Returns the example README's path."""
+    (root / "docs").mkdir(parents=True)
+    (root / "scripts").mkdir(parents=True)
+    # A bare `tan build` mention keeps `collect_documented_surface` (the
+    # existence pass check_surface always runs alongside the shape check)
+    # from tripping its own "extraction is broken" guard: `_TAN_INVOCATION_RE`
+    # requires a lowercase-letter token right after `tan `, so a shape test
+    # whose ONLY invocation is `tan --project <path> build` (the flag comes
+    # first) contributes nothing to that regex and would otherwise leave the
+    # existence surface empty -- a test-fixture edge case, not a real-corpus
+    # one (the real docs always have a simpler `tan build` mention elsewhere
+    # too).
+    (root / "README.md").write_text("`tan build` builds a project.\n", encoding="utf-8")
+    (root / "docs" / "cli.md").write_text("# The `tan` CLI\n", encoding="utf-8")
+    (root / "docs" / "getting-started.md").write_text("No commands here.\n", encoding="utf-8")
+    (root / "docs" / "troubleshooting.md").write_text("No commands here.\n", encoding="utf-8")
+    (root / "scripts" / "bootstrap.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    example_dir = root / "examples" / "peripheral-io" / "widget-blink"
+    example_dir.mkdir(parents=True)
+    readme = example_dir / "README.md"
+    readme.write_text(example_readme_body, encoding="utf-8")
+    return readme
+
+
+def _write_shape_fake_tan(bin_dir: Path, help_by_verb: dict[str, str]) -> Path:
+    """A stub `tan` that returns CALLER-SUPPLIED full `--help` text (a real
+    `Usage:` line plus a real `Options:` block) per verb -- gives shape
+    tests control over a verb's positional marker and per-flag arity, which
+    `_write_fake_tan`'s generic recognized/missing dict cannot express (it
+    never prints a `Usage:` line, so every verb it stubs looks positional-
+    less regardless of what's being tested)."""
+    lines = [
+        "import sys",
+        f"HELP = {help_by_verb!r}",
+        f"GLOBAL_HELP = {_MINIMAL_TAN_HELP!r}",
+        "argv = sys.argv[1:]",
+        "if argv == ['--version']:",
+        "    print('tan 0.0.0-test'); sys.exit(0)",
+        "if argv == ['--help']:",
+        "    print(GLOBAL_HELP); sys.exit(0)",
+        "verb = argv[0] if argv else ''",
+        "if verb in HELP:",
+        "    print(HELP[verb]); sys.exit(0)",
+        "print(f\"error: unrecognized subcommand {verb!r}\", file=sys.stderr)",
+        "sys.exit(2)",
+    ]
+    return _install_tan_stub(bin_dir, "\n".join(lines) + "\n")
+
+
+_BUILD_HELP = (
+    "Usage: tan build [OPTIONS]\n\n"
+    "Options:\n      --project <PATH>\n      --native\n"
+)
+_FLASH_HELP = (
+    "Usage: tan flash [OPTIONS] [APP_PATH]\n\n"
+    "Options:\n      --project <PATH>\n      --helper <NAME>\n"
+)
+_NEW_SOM_HELP = (
+    "Usage: tan new-som [OPTIONS] [ARGS]...\n\n"
+    "Arguments:\n  [ARGS]...\n"
+    "          Arguments forwarded verbatim to the underlying command\n"
+)
+
+
+def test_example_readme_positional_argument_on_build_fails(tmp_path):
+    """The exact alp-sdk#1137 round-1 residual shape: `tan build <path>` in
+    an example project's own README -- a file EXAMPLE_README_GLOB now scans
+    that the four original DOC_SOURCES entries never covered. `build`'s real
+    Usage line takes no positional, so this must fail, naming the file and
+    the rejected invocation."""
+    doc_root = tmp_path / "repo"
+    readme = _write_minimal_docroot(
+        doc_root,
+        "# widget-blink\n\n```bash\ntan build examples/peripheral-io/widget-blink\n```\n",
+    )
+    tan_bin = _write_shape_fake_tan(tmp_path / "bin", {"build": _BUILD_HELP})
+
+    proc = _run(doc_root, tmp_path / "bin")
+    assert proc.returncode != 0
+    assert str(readme.relative_to(doc_root)) in proc.stderr
+    assert "takes no positional argument" in proc.stderr
+
+
+def test_example_readme_project_flag_fixes_it(tmp_path):
+    """The proven fix for the case above: `--project <path>` instead of a
+    bare positional. Nearest-true-negative pair to the failing test above --
+    same doc content shape, same fake `tan`, only the invocation's syntax
+    changes; must now pass, proving the check isn't just failing on every
+    example README unconditionally."""
+    doc_root = tmp_path / "repo"
+    _write_minimal_docroot(
+        doc_root,
+        "# widget-blink\n\n"
+        "```bash\ntan build --project examples/peripheral-io/widget-blink\n```\n",
+    )
+    tan_bin = _write_shape_fake_tan(tmp_path / "bin", {"build": _BUILD_HELP})
+
+    proc = _run(doc_root, tmp_path / "bin")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_unrecognised_flag_on_build_fails(tmp_path):
+    """The other alp-sdk#1137 round-1 residual shape: `tan build --board
+    <sku>` -- `--board` is real on some OTHER verbs (`tan size`/`tan
+    renode`) but never `tan build`. Proves the flag check is genuinely
+    per-verb, not "the flag exists somewhere in tan"."""
+    doc_root = tmp_path / "repo"
+    _write_minimal_docroot(
+        doc_root,
+        "# widget-blink\n\n```bash\ntan build --board alp_e1m_aen301_m55_he\n```\n",
+    )
+    tan_bin = _write_shape_fake_tan(tmp_path / "bin", {"build": _BUILD_HELP})
+
+    proc = _run(doc_root, tmp_path / "bin")
+    assert proc.returncode != 0
+    assert "`--board` is not a recognised flag of `tan build`" in proc.stderr
+
+
+def test_global_project_flag_before_the_subcommand_passes(tmp_path):
+    """`tan --project <path> build` -- a real, live-`tan`-proven ordering
+    (the global `--project` flag before the subcommand token). Proves
+    `_find_verb` correctly walks past a leading global flag+value pair to
+    find the actual verb, rather than misreading `--project`'s VALUE token
+    as the verb (which would falsely resolve to a nonexistent `examples/...`
+    subcommand and report a spurious "no longer recognised" problem)."""
+    doc_root = tmp_path / "repo"
+    _write_minimal_docroot(
+        doc_root,
+        "# widget-blink\n\n"
+        "```bash\ntan --project examples/peripheral-io/widget-blink build\n```\n",
+    )
+    tan_bin = _write_shape_fake_tan(tmp_path / "bin", {"build": _BUILD_HELP})
+
+    proc = _run(doc_root, tmp_path / "bin")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_verb_with_a_real_positional_accepts_one(tmp_path):
+    """`tan flash`'s own `--help` genuinely carries `[APP_PATH]` after
+    `[OPTIONS]` (verified by hand against a real, installed tan) -- a bare
+    positional path is legal there, unlike `build`. Proves the check reads
+    the per-verb Usage line rather than assuming every verb is positional-
+    less."""
+    doc_root = tmp_path / "repo"
+    _write_minimal_docroot(
+        doc_root,
+        "# widget-blink\n\n"
+        "```bash\ntan flash examples/peripheral-io/widget-blink --helper gd32_bridge\n```\n",
+    )
+    tan_bin = _write_shape_fake_tan(
+        tmp_path / "bin", {"build": _BUILD_HELP, "flash": _FLASH_HELP}
+    )
+
+    proc = _run(doc_root, tmp_path / "bin")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_forwarding_verb_shape_is_never_checked(tmp_path):
+    """A FORWARDING verb's `[ARGS]...` catch-all (see
+    `_forwards_to_python_backend`) means ANYTHING after it is legal by
+    design -- `tan new-som` forwards verbatim to the Python backend, whose
+    own flags (`--sku`, `--dry-run`, ...) never appear in its own --help.
+    This must never be reported as an unrecognised-flag or stray-positional
+    problem."""
+    doc_root = tmp_path / "repo"
+    _write_minimal_docroot(
+        doc_root,
+        "# widget-blink\n\n```bash\ntan new-som --sku E1M-WIDGET99 somepath\n```\n",
+    )
+    tan_bin = _write_shape_fake_tan(
+        tmp_path / "bin", {"build": _BUILD_HELP, "new-som": _NEW_SOM_HELP}
+    )
+
+    proc = _run(doc_root, tmp_path / "bin")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_sample_output_in_an_untagged_fence_is_not_treated_as_an_invocation(tmp_path):
+    """`docs/cli.md`'s real shape: `tan doctor`'s OWN printed report header
+    (`  tan doctor  native-host . none`) sits in an UNTAGGED ``` fence
+    showing sample OUTPUT, not a command to type. Without the fence-language
+    allowlist in `extract_tan_invocations`, this reads as `tan doctor
+    native-host . none` -- a positional on a verb (`doctor`) that takes
+    none -- and manufactures a false failure with nothing to do with what a
+    customer types. Direct unit test of the pure extractor (not the full
+    `main()` path) -- proves the untagged block contributes NOTHING, not
+    just that some other passing thing outweighs it."""
+    untagged_output_block = (
+        "# doctor\n\n"
+        "```\n"
+        "  tan doctor  native-host . none\n\n"
+        "  [+]  workspaceRoot   /work/alp-sdk\n"
+        "```\n"
+    )
+    assert _mod.extract_tan_invocations(untagged_output_block) == []
+
+
+def test_bash_tagged_fence_invocation_is_still_extracted(tmp_path):
+    """Sibling of the untagged-fence test above: a ```bash-tagged fence
+    (the real, consistent convention every example README + docs/cli.md's
+    own runnable snippets use) must still be scanned -- proves the fence-
+    language allowlist narrows correctly rather than accidentally emptying
+    the whole extractor."""
+    tagged_block = "```bash\ntan build --project examples/peripheral-io/widget-blink\n```\n"
+    found = _mod.extract_tan_invocations(tagged_block)
+    assert found == ["tan build --project examples/peripheral-io/widget-blink"]

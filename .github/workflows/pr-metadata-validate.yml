@@ -356,6 +356,16 @@ jobs:
       - name: Gate — chip driver <-> metadata manifest parity
         run: python3 scripts/check_chip_manifest_parity.py
 
+      # #1136: pr-twister.yml inits its topdir from Zephyr's OWN west.yml
+      # (`west init -m zephyr`), so it never notices a Zephyr module that's
+      # unreachable from alp-sdk's OWN manifest (`west init -l alp-sdk` --
+      # what `tan bootstrap` and every customer runs). This is the gate
+      # that resolves THIS repo's west.yml instead: every libraries:
+      # module must be reachable, and no name-allowlist entry may be
+      # shadowed by a same-named top-level project.
+      - name: Gate — west.yml module resolution (alp-sdk-owned workspace)
+        run: python3 scripts/check_west_manifest_module_resolution.py
+
       - name: "Gate — SoM preset board: targets resolve to a real board tree"
         run: python3 scripts/check_board_target_tree_parity.py
 
