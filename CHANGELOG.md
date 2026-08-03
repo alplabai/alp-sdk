@@ -55,11 +55,65 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   bbappends never fired and the bake still "succeeded" with none of
   that payload. Verified against each vendor layer's own
   `core-image-%.bbappend` + `layer.conf` `BBFILE_COLLECTIONS` name in a
-  BSP v6.30 Source Code checkout. `alp-image-edge.bb` now installs each
-  layer's payload explicitly, gated on the layer's collection being
-  present (`rz-drpai` → `lib-tvm kernel-module-mmngr`, `meta-rz-codecs`
-  → `drp-fw`, `rz-opencva` → `opencv oca`) so a build that legitimately
-  drops an RZ/V feature layer still parses.
+  BSP v6.30 Source Code checkout. `alp-image-edge.bb` initially installed
+  each layer's payload explicitly, gated on the layer's collection —
+  since superseded by the follow-up below, which relocates that wiring
+  to a shared, single-source home instead of an image-recipe block.
+- **`alp-image-prod` and `alp-image-base` had the identical #1176 silent
+  omission, and the fix above still left a second, one-level-deeper copy
+  of the same defect in the SDK sysroot task.** Closed by what each
+  piece of payload is actually for, not by copy-pasting the edge block
+  everywhere: DRP-AI3's runtime (`meta-rz-drpai`: `lib-tvm
+  kernel-module-mmngr`) is the SoC's core NPU accelerator, not
+  camera/display-tied, so it now lives once in `alp-image-common.inc`
+  and every image (`base`/`prod`/`edge`) installs it from there.
+  `meta-rz-codecs` (`drp-fw`) and `meta-rz-opencva` (`opencv oca`) exist
+  to feed a GStreamer/vision pipeline, so they ride the `alp-camera`
+  FEATURE itself — `packagegroup-alp-camera.bb`'s `RDEPENDS`, gated the
+  same way — rather than any image recipe: `alp-image-prod` and
+  `alp-image-edge` (both already `alp-camera`-enabled) get the identical
+  payload through that one shared gate, and a customer's own
+  `alp-image-base`-derived image that turns `alp-camera` on gets it too,
+  automatically, with no per-image or per-customer copy needed.
+  Additionally ported the vendor bbappends' `TOOLCHAIN_TARGET_TASK`
+  entries (`drpai` from `meta-rz-drpai`, `drp` from `meta-rz-codecs` /
+  `meta-rz-opencva`) into `alp-image-common.inc`, so `bitbake
+  alp-image-* -c populate_sdk` now actually produces `<linux/drpai.h>` /
+  `<linux/drp.h>` in the SDK sysroot — `meta-alp-sdk/README.md`
+  previously (and incorrectly) documented those headers as appearing
+  automatically from layer presence alone, which was the same silent-
+  omission belief that caused #1176 in the first place; corrected.
+- **Review pass on the above: the feature-gated `packagegroup-alp-camera`
+  RDEPENDS could abort `do_rootfs` on a non-RZ MACHINE.** `drp-fw` carries
+  `COMPATIBLE_MACHINE = "(rzv2h-family|rzv2n-family)"`; a tree that keeps
+  `meta-rz-codecs` in `bblayers.conf` (as `conf/layer.conf`'s
+  `LAYERRECOMMENDS_alp-sdk` recommends) while building `MACHINE=e1m-aen801-a32`
+  or `e1m-nx9101-a55` would skip that recipe, leaving the packagegroup's
+  hard `RDEPENDS` with no provider — a `do_rootfs` abort, not a graceful
+  skip, since `packagegroup-alp-camera` defaulted to `allarch`
+  (`packagegroup.bbclass`'s own comment: `PACKAGE_ARCH` must move to
+  `MACHINE_ARCH` before `inherit packagegroup` whenever content varies by
+  `MACHINE_FEATURES`, which this now does). Fixed by setting
+  `PACKAGE_ARCH = "${MACHINE_ARCH}"` and AND-ing a `MACHINE_FEATURES`
+  `v2n` check alongside the existing `BBFILE_COLLECTIONS` gate (same fix
+  applied to `alp-image-common.inc`'s DRP-AI `RDEPENDS`, since
+  `kernel-module-mmngr` has no `COMPATIBLE_MACHINE` guard of its own to
+  fall back on). Also: corrected `LAYERRECOMMENDS_alp-sdk` (it named
+  `meta-rz-drpai`/`meta-rz-opencva` by directory, but their real
+  `BBFILE_COLLECTIONS` names are `rz-drpai`/`rz-opencva` — matched
+  nothing); corrected `alp-sdk_0.6.bb`'s comment repeating the same
+  "headers appear from layer presence alone" belief and its stale
+  `alp-image-edge` `dx-rt` cross-reference; scoped the "opencv
+  deliberately not ported" comment in `alp-image-common.inc` to the
+  DRP-AI vendor bbappend's own python3-demo-chain copy — `opencv` itself
+  does ship, via `meta-rz-opencva`. Settled by inspection of the vendor
+  sources only; nobody in this environment can run `bitbake
+  alp-image-prod` for a non-RZ MACHINE to confirm `do_rootfs` succeeds.
+  Also established (not merely left unfixed) that `meta-rz-graphics`,
+  which #1176's Impact list named as a fourth affected layer, was never
+  affected: it wires through a conf-level `IMAGE_INSTALL:append:mali-family`
+  with no `core-image-%.bbappend` at all, so the recipe-name-matching
+  defect the other three layers had never applied to it.
 - **The V2N Renode model had no UART, so `tan renode` produced no
   console output at all (#1158).** The M33-SM stays headless in
   production (no Pmod USB-UART populated on the SoM), so
