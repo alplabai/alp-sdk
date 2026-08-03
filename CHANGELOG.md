@@ -7,6 +7,58 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — three V2N build/boot defects (#1175, #1176, #1158)
+
+- **microSD boot loaded a dtb the image never builds, and rooted at the
+  wrong device (#1175).** The vendor `sd2load` U-Boot env (pinned
+  renesas-u-boot-cip, `include/configs/rzv2n-dev.h`) loads
+  `boot/r9a09g056n44-dev.dtb` — a filename none of our
+  `KERNEL_DEVICETREE` builds ever produce (V2N101/V2N102 build
+  `renesas/e1m-v2n101-x-evk.dtb`, confirmed against
+  `meta-alp-sdk/conf/machine/e1m-v2n10{1,2}-a55.conf` and
+  `docs/build-yocto-v2n.md`). The load silently fails (`;`-chained, not
+  fatal) and `bootimage` would boot whatever stale dtb was already in
+  RAM. `meta-alp-sdk/recipes-bsp/u-boot/u-boot/0002-rzv2n-dev-ALP-E1M-production-boot.patch`
+  now re-loads the correct dtb from `CONFIG_BOOTCOMMAND`, same address +
+  mmc spec `sd2load` already uses. The SD branch also rooted at
+  `/dev/mmcblk2p2`; `e1m-x-evk.dtsi:88-89` names the carrier microSD
+  `/dev/mmcblk1p2` (SDHI1, alias `mmc1`) — no third MMC controller
+  exists on this SoM. Both fixed; the eMMC branch (`mmc0` → `mmcblk0p2`)
+  was already correct. `docs/build-yocto-v2n.md` updated to match.
+- **`alp-image-edge` silently omitted all `meta-rz-*` vendor payload
+  (#1176).** `meta-rz-drpai`, `meta-rz-codecs`, and `meta-rz-opencva`
+  each ship their runtime payload through their own
+  `recipes-core/images/core-image-%.bbappend` — a `core-image-%`
+  bbappend filename does not match `alp-image-edge` (bitbake matches a
+  `.bbappend` to its exact target recipe base name), so adding the
+  layers to `bblayers.conf` was necessary but not sufficient: the
+  bbappends never fired and the bake still "succeeded" with none of
+  that payload. Verified against each vendor layer's own
+  `core-image-%.bbappend` + `layer.conf` `BBFILE_COLLECTIONS` name in a
+  BSP v6.30 Source Code checkout. `alp-image-edge.bb` now installs each
+  layer's payload explicitly, gated on the layer's collection being
+  present (`rz-drpai` → `lib-tvm kernel-module-mmngr`, `meta-rz-codecs`
+  → `drp-fw`, `rz-opencva` → `opencv oca`) so a build that legitimately
+  drops an RZ/V feature layer still parses.
+- **The V2N Renode model had no UART, so `tan renode` produced no
+  console output at all (#1158).** The M33-SM stays headless in
+  production (no Pmod USB-UART populated on the SoM), so
+  `metadata/renode/renesas_rzv2n.repl` deliberately modelled no UART —
+  but that meant a sim gate could not fail on anything the console
+  would show. Added a coarse `sci0` register model (real M33-visible
+  base `0x42800c00`, Zephyr SoC dtsi `arm/renesas/rz/rzv/r9a09g056.dtsi`;
+  offsets from the vendor FSP `R_SCI_B0_Type` register header) that
+  unblocks `R_SCI_B_UART_Open()` and `uart_rz_sci_poll_out()` and logs
+  transmitted lines — verified booting a real
+  `alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33` `hello_world` build under
+  Renode v1.16.1 and observing `*** Booting Zephyr OS build v4.4.1 ***`
+  / `Hello World! ...` on the Renode log. Opt-in only, via new
+  `tests/renode/v2n_m33_sci0_console.{overlay,conf}` (mirrors the AEN
+  M55 sim's own Renode-only overlay pattern) — the production board
+  `.dts` keeps `sci0` disabled, and the default headless/`ram_console`
+  boot path is unchanged (regression-checked: no `sci0` bus traffic, no
+  faults).
+
 ### Fixed — five memory-safety defects in the AEN Zephyr drivers (#1119, #1120, #1121, #1122, #1124)
 
 `flash_mram_alif.c`'s `flash_range_is_valid()` computed `offset + len` in
