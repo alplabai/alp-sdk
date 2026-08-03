@@ -11,7 +11,7 @@ project, and modify.
 
 ```bash
 cd alp-workspace
-tan build --native alp-sdk/examples/<category>/<name>   # e.g. examples/peripheral-io/gpio-button-led
+tan build --project alp-sdk/examples/<category>/<name>   # e.g. examples/peripheral-io/gpio-button-led
 ```
 
 `tan build` reads the example's `board.yaml` v2, resolves the
@@ -283,7 +283,7 @@ To adapt to your own project:
    * Heterogeneous projects: `ipc:` -- name a carve-out the
      orchestrator allocates from the SoM's `memory_map:`.
 3. Modify each core's `src/main.c` to whatever your app needs.
-4. `tan build .` from your project directory.
+4. `tan build` from your project directory.
 
 ## See also
 

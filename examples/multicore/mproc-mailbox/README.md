@@ -43,23 +43,23 @@ Expected output:
 
 ### Real silicon (AEN dual-core, requires the peer firmware)
 
-```bash
-tan build --board ensemble_e8_dk/ae402fa0e5597le0/rtss_he examples/multicore/mproc-mailbox
-west flash
-```
-
 The peer-side firmware lives at
 [`examples/multicore/mproc-mailbox/peer/main.c`](peer/main.c) -- HE-side
 image that waits on the same mbox, reads the staged shmem
 payload, and writes back an echo via reverse send.
 
-Until the v0.4 dual-image build flow in
-`alplabai/alp-zephyr-modules` lands, the two halves build
-separately:
+`tan build` has no per-core `--board`/`--core` selector -- it always
+builds every slice the topology defines. Until the v0.4 dual-image
+build flow in `alplabai/alp-zephyr-modules` lands, that means `tan
+build` produces the HP-side application plus the topology-default HE
+`alp-stock-shim` placeholder, not the real peer -- so the peer image
+still has to be built by hand:
 
 ```bash
-# HP side -- builds + runs the application.
-tan build --board ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples/multicore/mproc-mailbox
+# HP side -- builds + runs the application (HE gets the topology's
+# stock-shim placeholder, not `peer/`, until v0.4 lands).
+tan build --project examples/multicore/mproc-mailbox
+west flash
 
 # HE side -- builds the peer image manually.  Sysbuild picks
 # this up automatically once the v0.4 dual-image flow ships.
