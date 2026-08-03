@@ -34,3 +34,45 @@ tests:
       type: one_line
       regex:
         - "HW_ENFORCED required, but no secure owner/firewall-backed backend is active"
+
+  alp_sdk.examples.connectivity.firmware_update_log.he_client.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - update_log
+      - security
+      - rtss-he
+    build_only: true   # HW_ENFORCED needs the SE/device firewall; proven on the bench, not CI.
+
+  alp_sdk.examples.connectivity.firmware_update_log.hp_owner.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - update_log
+      - security
+      - rtss-hp
+    build_only: true   # HW_ENFORCED needs the SE/device firewall; proven on the bench, not CI.
+
+  alp_sdk.examples.connectivity.firmware_update_log.he_client.firewall_probe.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    extra_args: EXTRA_CONF_FILE=boards/alp_e1m_aen801_m55_he_firewall_probe.conf
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - update_log
+      - security
+      - rtss-he
+    # scripts/bench/aen/flash-update-log-firewall-probe.sh requires this
+    # exact profile (CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROBE=y);
+    # the he_client.aen scenario above never builds it, so a config-only
+    # regression here was invisible to CI. Build-only: the probe itself is
+    # a negative bench proof, not a CI-console assertion.
+    build_only: true
