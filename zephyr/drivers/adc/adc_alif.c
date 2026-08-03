@@ -31,12 +31,26 @@
  * register block layout, IRQ scheme, and clock/VREF sequencing are the fork's.
  * vendor-ext, BENCH-UNVERIFIED (compiles + links on the E8 he target; the
  * single-shot conversion / VREF / clock programming are bench follow-ups).
+ *
+ * ------------------------- alp-sdk divergence -------------------------
+ * adc_start_read() (issue #1120) unconditionally dereferenced
+ * `sequence->options->user_data`, even though Zephyr's adc_sequence contract
+ * makes `options` optional (NULL for an ordinary one-shot read). The
+ * comparator-IRQ handlers (adc_cmpa_irq_handler/adc_cmpb_irq_handler) shared
+ * the same unguarded dereference of the resulting data->comparator, reachable
+ * whenever DT `interrupt_en` has a comparator bit set regardless of whether
+ * the triggering read supplied options. All three sites now guard on
+ * data->comparator being non-NULL via adc_alif_sequence_comparator()
+ * (adc_alif_comparator.h). Reapply this divergence if the file is ever
+ * re-synced from the fork.
+ * -------------------------------------------------------------------------
  */
 
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/adc.h>
 #include <zephyr/logging/log.h>
+#include "adc_alif_comparator.h"
 LOG_MODULE_REGISTER(ADC);
 
 #include <stddef.h>
@@ -604,6 +618,16 @@ void adc_cmpa_irq_handler(const struct device *dev)
 	/* Clearing CMPA interrupt */
 	sys_write32(ADC_INTR_COMPA_CLEAR, regs + ADC_INTERRUPT);
 
+	/* data->comparator is only set when the read that started this
+	 * conversion supplied sequence->options (#1120); the CMPA interrupt
+	 * itself is gated by DT `interrupt_en`, independent of that, so a
+	 * NULL-options one-shot read with CMPA enabled in DT must not
+	 * dereference it here.
+	 */
+	if (!data->comparator) {
+		return;
+	}
+
 	value = sys_read32(regs + ADC_CONTROL);
 	value &= ADC_THRSHLD_CMP_MASK_BIT;
 	value >>= ADC_SHIFT_BIT;
@@ -629,6 +653,11 @@ void adc_cmpb_irq_handler(const struct device *dev)
 
 	/* Clearing CMPB interrupt */
 	sys_write32(ADC_INTR_COMPB_CLEAR, regs + ADC_INTERRUPT);
+
+	/* See the matching comment in adc_cmpa_irq_handler() (#1120). */
+	if (!data->comparator) {
+		return;
+	}
 
 	value = sys_read32(regs + ADC_CONTROL);
 	value &= ADC_THRSHLD_CMP_MASK_BIT;
@@ -725,7 +754,7 @@ static int adc_start_read(const struct device *dev, const struct adc_sequence *s
 	data->buffer_size = sequence->buffer_size;
 	data->channels = sequence->channels;
 	data->channels_count = POPCOUNT(data->channels);
-	data->comparator = sequence->options->user_data;
+	data->comparator = adc_alif_sequence_comparator(sequence);
 
 	adc_sequencer_msk_ch_control(regs, sequence->channels);
 

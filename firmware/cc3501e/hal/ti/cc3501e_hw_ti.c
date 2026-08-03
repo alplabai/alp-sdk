@@ -52,6 +52,14 @@
  * FIFO likely holds residue -- cc3501e_hw_tick() flushes via a full SPI re-open. */
 extern volatile uint32_t g_resync_count;
 
+/* Bridge SPI arm-failure counter (transport_hw_ti_spi.c, #1133): bumped every
+ * time SPI_transfer() refuses to queue the DMA descriptor for the next
+ * phase.  That leaves the slave un-armed + READY low with nothing else to
+ * re-attempt it -- a PERMANENT stall unless something drives a fresh
+ * SPI_close/open.  cc3501e_hw_tick() below does exactly that, same as the
+ * g_resync_count self-heal just above. */
+extern volatile uint32_t g_arm_fail_count;
+
 /* Deferred-reset latch: CMD_RESET sets this; cc3501e_hw_tick() performs
  * the reboot on the next idle wakeup, but ONLY after reply_drained
  * confirms the OK ack has fully clocked back to the host. */
@@ -278,6 +286,19 @@ void cc3501e_hw_tick(void)
 		last_resync = 0u;                 /* reinit zeroes g_resync_count */
 	} else {
 		last_resync = rc;
+	}
+
+	/* === Bridge SPI arm-failure recovery (#1133) ===
+	 * Unlike a desync (which can self-clear once the host's byte-walk lands
+	 * on a boundary), a failed SPI_transfer() arm leaves NOTHING pending --
+	 * no callback will ever fire to retry it, so even ONE failure is a
+	 * permanent wedge.  Recover on the very next tick rather than waiting
+	 * for a burst. */
+	static uint32_t last_arm_fail;
+	const uint32_t  af = g_arm_fail_count;
+	if (af != last_arm_fail) {
+		bridge_transport_spi_hw_reinit(); /* fresh SPI_close/open, re-arm clean */
+		last_arm_fail = af;
 	}
 
 	/* Deferred self-reset, gated on reply_drained so the CMD_RESET ack has
