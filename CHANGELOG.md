@@ -43,9 +43,12 @@ back to the wrapping arithmetic while a header-only test stayed green
   reverting `flash_range_is_valid()` to the wrapping arithmetic, deleting
   all four `cdc200_validate_transfer()` calls from `display_cdc200.c`, and
   neutering the `dma_pl330_sg_chain_matches()` call to `if (false)`: all
-  three still passed 3/3 twister configurations, 10/10 test cases. Closed
-  for flash_mram by removing the driver-local wrapper (above — there is no
-  longer a second place to regress) and for CDC200 by a new
+  three still passed 3/3 twister configurations, 10/10 test cases. NOT closed
+  for flash_mram: removing the driver-local wrapper deleted a location, not
+  the detectability — re-review reintroduced the exact wrapping arithmetic at
+  all three call sites in `flash_mram_alif.c` and still saw 63/63
+  configurations, 550/550 cases pass, rc=0, because no suite compiles that
+  driver. Closed for CDC200 by a new
   `tests/unit/display_cdc200_entrypoints` suite that links the *actual*
   `display_cdc200.c` under `native_sim` (no `<soc.h>`/hardware-register
   dependency in its read/write entry points) and calls
@@ -104,10 +107,16 @@ guard header (`flash_mram_range`, `adc_alif_comparator`,
 most of these drivers only build against a devicetree-instantiated AEN
 target, so the guard logic is split into small dependency-free headers the
 drivers and the native_sim tests both include. As of the round-2 review
-above, `flash_mram` (by construction) and CDC200 (by a new
-`display_cdc200_entrypoints` suite) additionally prove the *driver's own
-call site* still invokes the guard, mutation-tested by deleting the call
-and watching the suite go red. ADC (#1120) and PDM (#1122) remain at
+above, CDC200 (by a new `display_cdc200_entrypoints` suite) additionally
+proves the *driver's own call site* still invokes the guard, mutation-tested
+by deleting the call and watching the suite go red.
+
+`flash_mram` does NOT have call-site coverage, despite an earlier claim here
+that it did "by construction". Disproven in review: reintroducing the exact
+#1119 wrapping arithmetic at all three call sites in `flash_mram_alif.c`
+left 63/63 configurations and 550/550 cases passing, rc=0. No suite compiles
+that driver, so deleting the wrapper removed a location, not the
+detectability. It sits with ADC and PDM below. ADC (#1120) and PDM (#1122) remain at
 header-only coverage — round 2 did not demonstrate a call-site regression
 for either, but that also means neither claim is stronger than "the guard
 logic is correct", not "the driver still calls it". PL330 (#1124) remains
