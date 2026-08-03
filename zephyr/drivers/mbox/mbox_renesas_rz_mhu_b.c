@@ -11,7 +11,11 @@
  * never collides with a real `renesas,rz-mhu-mbox` node and stays a clean `west update`.
  * It is otherwise a structural copy of mbox_renesas_rz_mhu.c: same MBOX class API shape,
  * same tx-mask/rx-mask/channels-count channel model, same busy-wait-before-send behaviour.
- * BENCH-UNVERIFIED. See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
+ * SILICON-PROVEN: bench-proven end-to-end (attach + echo round-trip, CA55<->CM33) on
+ * E1M-X V2N-M1 silicon via this exact driver + DT node, alp-sdk #697 -- see
+ * examples/multicore/rpmsg-v2n/m33_sm/src/main.c and the board DTS
+ * (zephyr/boards/alp/e1m_v2n101_m33_sm/*_cm33.dts) that exercise it.
+ * See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
  * ============================================================================
  */
 

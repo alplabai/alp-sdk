@@ -221,6 +221,11 @@
       "description": "E1M pads / peripheral instances that route through a SoM-side mediator chip (e.g., CC3501E coprocessor on AEN, GD32G553 IO MCU on V2N). Pads NOT listed here are assumed to route directly to the main silicon's GPIO / peripheral. The SDK loader composes this list with the board's `e1m_routes:` block at codegen time: when an E1M pad appears in both blocks, the board supplies the role (e.g., `bmi323_int1`) and the SoM supplies the dispatch path (e.g., CC3501E GPIO 14).",
       "items": { "$ref": "#/$defs/pad_route_entry" }
     },
+    "soc_peripheral_instances": {
+      "type": "array",
+      "description": "On-die SoC peripheral instances with pads routed on the module's edge (metadata/e1m_modules/<family>/*.tsv) but no dedicated `on_module:` role -- they are bus/interface instances, not populated parts (no MPN, no chips/*.yaml manifest). Declared here purely so the instance is VISIBLE to the SoM model (a prerequisite for #655's DT/pinctrl generation and for board.yaml requests to bind to) -- this block does NOT itself generate anything and does NOT duplicate the pad list, which stays single-sourced in the TSV. `driver_status: none` is the honest default for an instance with no alp-sdk driver behind it yet; do not mark a tier here that the driver files don't back.",
+      "items": { "$ref": "#/$defs/soc_peripheral_instance" }
+    },
     "helper_firmware": {
       "type": "array",
       "description": "On-module helper MCUs whose firmware images the orchestrator registers into the system manifest.  These are NOT heterogeneous-compute peers (they don't appear in `topology:`).  Each entry is EITHER a customer-flashable helper MCU -- carries `flash_method`/`flash_args` (e.g. `gd32_bridge` via `swd_probe`), independently flashed via `tan flash` -- OR a vendor-OTA-updated coprocessor -- carries `update_channel` (e.g. AEN's `cc3501e_otp` via `alp_ota_spi_otp`), whose firmware is Alp-released and applied over the bridge link programming the chip's own OTP, and is NEVER customer-flashed.  See `$defs/helper_firmware_entry`.",
@@ -508,6 +513,36 @@
           "type": "string",
           "enum": ["alp_ota_spi_otp"],
           "description": "Marks this helper as a vendor-OTA-updated coprocessor rather than a customer-flash target (e.g. AEN's `cc3501e_otp`): firmware is Alp-released and applied over the bridge SPI link, programming the chip's own OTP -- the customer never flashes it directly.  Mutually exclusive with `flash_method` -- an entry carries exactly one of the two."
+        }
+      }
+    },
+    "soc_peripheral_instance": {
+      "type": "object",
+      "required": ["instance", "class", "silicon_peripheral"],
+      "additionalProperties": false,
+      "properties": {
+        "instance": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Instance slug local to this SoM, e.g. `riic1`, `i3c30`, `rspi0`, `canfd2`."
+        },
+        "class": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Peripheral class, matching a `metadata/socs/**.json` `peripherals:` key family (e.g. `i2c`, `i3c`, `spi`, `pdm`, `can`, `uart`, `i2s`)."
+        },
+        "silicon_peripheral": {
+          "type": "string",
+          "description": "The pad-route source's `silicon_peripheral` name/prefix this instance corresponds to (e.g. `RIIC1_`), for traceability back to metadata/e1m_modules/<family>/*.tsv."
+        },
+        "driver_status": {
+          "type": "string",
+          "enum": ["none", "planned", "partial", "complete"],
+          "description": "alp-sdk driver maturity for this instance. `none` (the default assumption) is the honest value while no zephyr/drivers/** node targets it -- do not write an aspirational tier."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Free-form one-line note."
         }
       }
     },
