@@ -53,6 +53,62 @@ returned `ALP_OK` with PORF still latched. The write's status is now
 propagated; a failure returns early, leaving the instance uninitialised
 (#1135).
 
+### Fixed — two path-traversal bugs: `tan model build` and untrusted template catalogs (#1125, #1126)
+
+`tan model build` (`scripts/alp_model/build.py`) wrote its packaged model to
+`out_dir / f"{name}.alpmodel"` with `name` taken straight from `board.yaml`'s
+`models[].name` and no containment check — a name like
+`../../../../tmp/evil` wrote outside the requested `--out` directory.
+`build_model()` now rejects any `name` that doesn't match
+`^[A-Za-z][A-Za-z0-9_-]*$` (the same pattern `board.schema.json` already
+declares) before doing anything else, and asserts the resolved output path
+stays beneath the resolved `out_dir` as a second, independent check. The
+guard lives in `build_model()` itself — the one write chokepoint every
+caller (the `alp model build` CLI, and every direct test caller) routes
+through, not just the CLI's own board.yaml parsing.
+
+`scripts/alp_template.py` (`alp_template.py render`, `--emit scaffold`, and
+any future `--catalog` caller) joined a catalog record's
+`files.user_owned` entries onto the example dir (read) and the destination
+dir (write) with no path-shape check at all —
+`metadata/schemas/template-catalog-v1.schema.json`'s `user_owned` items are
+plain, unconstrained strings, so a `--catalog`-supplied doc naming an entry
+with `..`, an absolute path, or a path through a symlink could read outside
+the example tree or write outside the chosen destination (the write side
+also `mkdir(parents=True)`s any missing intermediate directory, so it's a
+stronger primitive than the model-build bug — no pre-existing directory
+required). A new `_safe_join(root, rel)` helper resolves both `root` and
+`root / rel` and requires the resolved candidate stay beneath the resolved
+root — a fail-closed, resolve-then-contain check (not a `..`-pattern scan),
+so it also catches an absolute `rel` and a symlink placed inside either
+root, not just literal traversal.
+
+The first pass wired `_safe_join()` around the *relative* part of every
+join but left the *root* itself trusted verbatim from the same catalog
+record — `base_dir / record["example"]` — so a catalog naming
+`"example": "../../../../tmp/evil"` still walked the root itself outside
+`base_dir` and the per-file check then faithfully contained everything
+*inside that escaped root*, i.e. contained nothing. `_safe_join()` is now
+applied to `record["example"]` itself, everywhere it's joined onto a base
+directory (`_rendered_bytes()`'s read, `default_sku()`, and
+`render_to_envelope()`'s board.yaml read) — the example root can no longer
+walk outside `base_dir` in the first place. `validate()`'s own
+`test.testcase_yaml` copy (catalog-controlled, not part of
+`files.user_owned`, so it wasn't touched by the first pass at all) gets
+the same `_safe_join()` treatment on both the read (`REPO`-relative
+source) and the write (temp-dir-relative destination) side.
+
+Both fixes are allowlist/containment checks, not denylists: `PathEscapeError`
+(alp_template.py) and a plain `ValueError` (`build_model()`) name exactly
+what escaped and where. New regression tests cover a traversal name, an
+absolute name, and (since `build_model()`'s `name` is a bare-filename
+allowlist with no `/` allowed at all) a valid in-root name for
+`build_model()`; `_safe_join()` -- shared by every read/write site above --
+gets direct traversal / absolute-path / symlink-escape / valid-in-root unit
+tests, plus end-to-end tests proving a malicious `--catalog` `example` root
+and a `..`-bearing `test.testcase_yaml` entry are both rejected before
+either side touches disk.
+
 ### Fixed — flash-backend hardening: path traversal and script command injection (#1112, #1113)
 
 `scripts/flash_backends/yocto_wic.py` validated `flash_args.target` with a
