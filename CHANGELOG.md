@@ -218,6 +218,48 @@ returned `ALP_OK` with PORF still latched. The write's status is now
 propagated; a failure returns early, leaving the instance uninitialised
 (#1135).
 
+### Fixed — three V2N metadata/docs/example contradictions against their own recorded evidence (#1161, #1167, #1168)
+
+- **`metadata/chips/gd32g553.yaml`** (#1161): `verification.hil_silicon` flipped
+  `untested` -> `verified`. `examples/v2n/v2n-gd32-bridge-hil-soak/README.md`
+  records a 1526-cycle / ~50 min bench soak (13/13 healthy surfaces clean,
+  zero link wedges) plus the v0.6.0 functional suite (26/26) and A/B OTA
+  e2e documented in `docs/test-plan.md` / `docs/verification-status.md`.
+  Every other V2N-family chip (`clk_5l35023b`, `gd32_swd`, `deepx_dxm1`, …)
+  stays `untested` — none has an equivalent recorded silicon result;
+  `gd32_swd` in particular is still `driver_status: partial` pending its
+  own first-silicon exercise.
+- **`docs/bring-up-v2n.md`** + **`examples/v2n/v2n-gd32-swd-flash/src/main.c`**
+  (#1168, SWD pin status): both said the GD32 SWD pin assignments
+  (SWDIO/SWCLK/NRST -> Renesas P70/P71/P74) are resolved in one paragraph,
+  then called them "TBD pending the next schematic revision" two sentences
+  later. The pads are maintainer-confirmed 2026-05-12 and consistently
+  recorded everywhere else (`metadata/chips/gd32_swd.yaml`,
+  `metadata/chips/gd32g553.yaml`, `metadata/e1m_modules/v2n/renesas-peripheral-map.csv`,
+  `CHANGELOG.md`) — the `TBD` claim was the stale side; removed.
+- **`docs/console.md`** (#1168, expected bridge firmware version): the
+  `alp companion ver` example output showed `GD32 supervisor fw v0.2.6`.
+  `firmware/gd32-bridge/firmware-version.txt` (the firmware's own version
+  string) is `0.2.11`, matching `docs/verification-status.md`'s "the bridge
+  has since moved to fw v0.2.11 / protocol v0.9". Updated the example
+  output to match.
+- **`examples/multicore/rpmsg-v2n/linux/src/main.c`** (#1167): rewritten so
+  the two halves of the example are an actual matched pair. Changed the
+  **Linux side**, not the M33 side: `m33_sm/src/main.c` is a bench-proven
+  (#683/#697) raw-OpenAMP echo responder that deliberately bypasses
+  `<alp/rpc.h>` and publishes no `temperature` method — the Linux side
+  previously subscribed to that method regardless, so the pair never
+  actually talked (per the example's own README status note). Rewriting
+  the M33 side to publish a `temperature` reading would mean inventing a
+  sensor result with no silicon backing, so instead the Linux side now
+  drives `src/backends/rpc/yocto_uio_drv.c` (the `<alp/rpc.h>` backend
+  already built to attach to this exact M33 firmware, `silicon_ref
+  "renesas:rzv2n:n44"`) against the M33's real fixed endpoint address
+  (`APP_EPT_ADDR` = 1024) and round-trips an `echo_test` request via
+  `alp_rpc_call`, verifying the exact bytes come back — matching what the
+  M33 firmware actually implements. `board.yaml` / `README.md` updated to
+  match; `m33_sm/src/main.c`'s transport code is unchanged.
+
 ### Fixed — five memory-safety defects in the AEN Zephyr drivers (#1119, #1120, #1121, #1122, #1124)
 
 `flash_mram_alif.c`'s `flash_range_is_valid()` computed `offset + len` in
