@@ -71,7 +71,7 @@ def test_extract_instances_grounds_reg_and_interrupts():
 
     assert list(by_key["i2c"]) == [
         {
-            "index": 0, "label": "i2c0", "base": 0x44400400, "size": 1024,
+            "index": 0, "label": "i2c0", "base": "0x44400400", "size": "0x400",
             "interrupts": [
                 {"irq": 174, "priority": 1, "name": "tei"},
                 {"irq": 175, "priority": 1, "name": "naki"},
@@ -83,7 +83,7 @@ def test_extract_instances_grounds_reg_and_interrupts():
     ]
     assert by_key["timer_32bit_gpt"] == [
         {
-            "index": 0, "label": "gpt0", "base": 0x43010000, "size": 0x100,
+            "index": 0, "label": "gpt0", "base": "0x43010000", "size": "0x100",
             "interrupts": [
                 {"irq": 406, "priority": 1, "name": "ccmpa"},
                 {"irq": 407, "priority": 1, "name": "ccmpb"},
@@ -150,6 +150,25 @@ def test_size_macro_and_literal_both_resolve():
     assert gspi._parse_size("DT_SIZE_K(garbage)") is None
 
 
+def test_hex_formats_lowercase_0x_prefixed():
+    assert gspi._hex(0x41C01000) == "0x41c01000"
+    assert gspi._hex(0) == "0x0"
+
+
+def test_parse_node_emits_hex_strings_not_decimal_ints():
+    """base/size must be hex strings (reviewable against the DTSI at a
+    glance); index/irq/priority stay decimal ints, matching how the DTSI
+    and Zephyr itself write them (`channel = <0>`, `interrupts = <406 1>`).
+    """
+    by_key, _skips = gspi._extract_instances(_FIXTURE_DTSI, _CLASSES, {})
+    inst = by_key["i2c"][0]
+    assert isinstance(inst["base"], str) and inst["base"] == "0x44400400"
+    assert isinstance(inst["size"], str) and inst["size"] == "0x400"
+    assert isinstance(inst["index"], int)
+    assert isinstance(inst["interrupts"][0]["irq"], int)
+    assert isinstance(inst["interrupts"][0]["priority"], int)
+
+
 # ---- Integration against the real committed metadata (needs Zephyr) ------
 
 def _zephyr_available() -> bool:
@@ -175,12 +194,35 @@ def test_check_mode_fails_when_an_instance_is_corrupted(tmp_path, monkeypatch):
     soc_json = gspi._TARGETS[0]["soc_json"]
     corrupted = tmp_path / soc_json.name
     text = soc_json.read_text(encoding="utf-8")
-    needle = '"base": 1103106048'
+    needle = '"base": "0x41c01000"'  # i2c8 / RIIC8 / BRD_I2C
     assert needle in text, "fixture assumption stale -- re-check i2c8's base"
-    corrupted.write_text(text.replace(needle, '"base": 1103106049', 1), encoding="utf-8")
+    corrupted.write_text(text.replace(needle, '"base": "0x41c01001"', 1), encoding="utf-8")
 
     fake_target = dict(gspi._TARGETS[0])
     fake_target["soc_json"] = corrupted
     monkeypatch.setattr(gspi, "_TARGETS", [fake_target])
     monkeypatch.setattr(sys, "argv", ["gen_soc_peripheral_instances.py", "--check"])
     assert gspi.main() == 1
+
+
+def test_committed_n44_json_rejects_decimal_or_uppercase_base(monkeypatch):
+    """Schema mutation proof (PR review, #1154): a decimal int or an
+    uppercase-hex string in `peripheral_instances[*][*].base` must fail
+    `metadata/schemas/soc-spec-v1.schema.json` validation -- this is the
+    guard that stops the next transposed-digit address from being silently
+    accepted, independent of whether `--check` itself ran."""
+    jsonschema = pytest.importorskip("jsonschema")
+    schema = json.loads(
+        (REPO / "metadata" / "schemas" / "soc-spec-v1.schema.json").read_text(encoding="utf-8"))
+    doc = json.loads(
+        (REPO / "metadata" / "socs" / "renesas" / "rzv2n" / "n44.json").read_text(encoding="utf-8"))
+    validator = jsonschema.Draft202012Validator(schema)
+    assert validator.is_valid(doc)
+
+    decimal = json.loads(json.dumps(doc))
+    decimal["peripheral_instances"]["i2c"][8]["base"] = 1103106048
+    assert not validator.is_valid(decimal)
+
+    uppercase = json.loads(json.dumps(doc))
+    uppercase["peripheral_instances"]["i2c"][8]["base"] = "0x41C01000"
+    assert not validator.is_valid(uppercase)

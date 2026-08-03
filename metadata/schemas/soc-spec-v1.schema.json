@@ -159,8 +159,8 @@
             "index":       { "type": "integer", "minimum": 0, "description": "Instance/channel number, taken from the devicetree node's own `channel` cell (never inferred from array position)." },
             "label":       { "type": "string", "description": "Devicetree node label, e.g. \"i2c8\"." },
             "compatible":  { "type": "string", "description": "Devicetree `compatible` string the instance was matched on, e.g. \"renesas,rz-riic\"." },
-            "base":        { "type": "integer", "minimum": 0, "description": "Register window base address (decimal), from the devicetree node's `reg` property." },
-            "size":        { "type": "integer", "minimum": 0, "description": "Register window size in bytes, from the same `reg` property." },
+            "base":        { "type": "string", "pattern": "^0x[0-9a-f]+$", "description": "Register window base address, lowercase 0x-prefixed hex (matching the devicetree's own `i2c@44400400` literal style), from the devicetree node's `reg` property. A decimal or uppercase-hex value fails this pattern rather than being silently accepted -- see issue #1154's PR review." },
+            "size":        { "type": "string", "pattern": "^0x[0-9a-f]+$", "description": "Register window size in bytes, lowercase 0x-prefixed hex, from the same `reg` property." },
             "interrupts": {
               "type": "array",
               "description": "One entry per devicetree `interrupts` cell pair, in source order.",

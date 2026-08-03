@@ -79,6 +79,15 @@ node, compatible `renesas,rz-intc-v2`) is deliberately left alone -- it
 is not a `peripherals:` key, and retiring the repl's hand-placement onto
 generated data is scoped as separate follow-up work, not this change.
 
+**Number formatting.** `base` / `size` are hex STRINGS (`"0x44400400"`,
+lowercase, matching the DTSI's own `i2c@44400400` literal style) -- JSON
+has no hex literal, and a decimal int hides a transposed digit a hex
+string makes visible on sight. `index` / `irq` / `priority` stay decimal
+ints, because that is how the DTSI itself writes `channel = <0>` and
+`interrupts = <406 1>`, and how Zephyr writes IRQ numbers everywhere else
+in this SDK -- the rule is "match the source's own representation", not
+"hex everything".
+
 Usage:
 
     python3 scripts/gen_soc_peripheral_instances.py            # regenerate in place
@@ -87,10 +96,16 @@ Usage:
 Needs a resolvable Zephyr checkout (same convention as
 `scripts/check_toolchain_lock.py`'s `_resolve_zephyr_dir`): `$ZEPHYR_BASE`,
 falling back to the west-workspace topdir's conventional `zephyr/`
-directory. Skips cleanly (prints `skipped: ...`, exit 0) in both modes
-when neither resolves to a real checkout -- this must stay a no-op on a
-machine that has never run `west init`, exactly like
-`check_emit_kconfig_contract.py`.
+directory. Skips cleanly (prints a `skipped: ...` line naming exactly
+what did not run and why, exit 0) in both modes when neither resolves to
+a real checkout -- this must stay a no-op on a machine that has never run
+`west init`, exactly like `check_emit_kconfig_contract.py`. THIS MEANS A
+LOCAL `test-all.sh` RUN WITHOUT `$ZEPHYR_BASE` EXITS GREEN WITHOUT HAVING
+CHECKED ANYTHING -- read the printed skip line, don't infer coverage from
+the exit code alone. The real, blocking check runs in CI on
+`pr-twister.yml`'s `matrix.shard == 1` leg, which IS a required context on
+`dev` branch protection (`twister-shard 1/4`) -- so a stale
+`peripheral_instances` block blocks every PR to `dev`, not only V2N ones.
 """
 from __future__ import annotations
 
@@ -162,10 +177,20 @@ def _parse_int(token: str) -> int:
     return int(token, 16) if token.lower().startswith("0x") else int(token)
 
 
+def _hex(value: int) -> str:
+    """Lowercase `0x`-prefixed hex string, matching the DTSI's own literal
+    style (`i2c@44400400`) and every other address already in this repo's
+    metadata. JSON has no hex literal, so this is the only representation
+    a reviewer can check against the source at a glance -- a decimal int
+    hides a transposed digit that a hex string makes visible."""
+    return f"0x{value:x}"
+
+
 def _parse_size(token: str) -> int | None:
-    """Return a byte size from a `reg` cell's second field, or None if it
-    is neither a bare literal nor a recognised `DT_SIZE_K(n)` macro (a
-    macro this script doesn't know stays unresolved rather than guessed)."""
+    """Return a byte size (as a plain int -- callers hex-format it) from a
+    `reg` cell's second field, or None if it is neither a bare literal nor
+    a recognised `DT_SIZE_K(n)` macro (a macro this script doesn't know
+    stays unresolved rather than guessed)."""
     token = token.strip()
     m = _SIZE_MACRO_RE.fullmatch(token)
     if m:
@@ -203,9 +228,15 @@ def _parse_node(label: str, body: str) -> dict | None:
                 entry["name"] = names[i]
             interrupts.append(entry)
 
-    instance: dict = {"index": index if index is not None else 0, "label": label, "base": base}
+    # index/irq/priority stay decimal ints -- that is how the DTSI itself
+    # writes them (`channel = <0>`, `interrupts = <406 1>`) and how Zephyr
+    # writes them everywhere. base/size are hex STRINGS -- the DTSI writes
+    # those in hex (`i2c@44400400`) and a decimal int hides a transposed
+    # digit that hex makes visible at a glance; see `_hex`'s docstring.
+    instance: dict = {"index": index if index is not None else 0, "label": label,
+                      "base": _hex(base)}
     if size is not None:
-        instance["size"] = size
+        instance["size"] = _hex(size)
     if interrupts:
         instance["interrupts"] = interrupts
     return instance
@@ -373,9 +404,14 @@ def main() -> int:
 
     zephyr_dir = _resolve_zephyr_dir()
     if not zephyr_dir.is_dir():
-        print(f"skipped: gen_soc_peripheral_instances needs a Zephyr checkout "
-              f"(resolved {zephyr_dir}, not a directory) -- set $ZEPHYR_BASE "
-              f"or run from a bootstrapped west workspace")
+        targets = ", ".join(str(t["soc_json"].name) for t in _TARGETS)
+        print(f"skipped: gen_soc_peripheral_instances did NOT check or "
+              f"regenerate peripheral_instances for [{targets}] -- no Zephyr "
+              f"checkout resolved (looked for {zephyr_dir}, not a directory). "
+              f"Set $ZEPHYR_BASE or run from a bootstrapped west workspace. "
+              f"A green exit here is a SKIP, not a PASS -- it proves nothing "
+              f"about whether the committed metadata matches the DTSI; the "
+              f"real gate runs in pr-twister.yml (matrix.shard == 1).")
         return 0
 
     ok = True

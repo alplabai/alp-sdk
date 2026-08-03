@@ -26,24 +26,43 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   `gen_support_matrix.py`, `validate_metadata.py`, the studio compat
   pass) is unaffected. `metadata/schemas/soc-spec-v1.schema.json` gains
   the matching optional `peripheral_instances` property.
+  - **`base`/`size` are lowercase `0x`-prefixed hex STRINGS** (e.g.
+    `"base": "0x41c01000"`), constrained by a `^0x[0-9a-f]+$` schema
+    pattern — matching the DTSI's own `i2c@44400400` literal style and
+    every other address already in this repo's metadata; JSON has no hex
+    literal, and a decimal int hides a transposed digit a hex string
+    makes visible on sight. `index`/`irq`/`priority` stay decimal ints,
+    matching how the DTSI writes `channel = <0>` / `interrupts = <406 1>`
+    and how Zephyr writes IRQ numbers everywhere else.
   - Coverage is deliberately partial: of n44.json's 27 `peripherals:`
     keys, only the four above are projected (their DTSI node count is an
     exact match for the `peripherals:` count). `adc_12bit` and `gpio`
     ARE modelled in the DTSI (3 ADC units, 12 GPIO ports) but at a
     different instance granularity than their count (24 channels, 86
     pins), so they are deliberately left unprojected rather than emit a
-    count-mismatched list. The DTSI carries no `clocks = <&cpg ...>`
-    reference at all, so no `clocks` field is emitted anywhere. The
-    remaining 21 keys have no node in this devicetree at all. Every skip
-    is printed on every run. `metadata/renode/renesas_rzv2n.repl` is
-    intentionally untouched — retiring its hand-placement onto this data
-    is separate follow-up work.
+    count-mismatched list. The DTSI carries **no `clocks` property at
+    all** — confirmed by grep, not even a raw `<&cpg ...>` phandle — so
+    no `clocks` field is emitted anywhere; treat this as "absent", not
+    merely "not covered". The remaining 21 keys have no node in this
+    devicetree at all. Every skip is printed on every run.
+    `metadata/renode/renesas_rzv2n.repl` is intentionally untouched —
+    retiring its hand-placement onto this data is separate follow-up
+    work.
   - `--check` runs from `pr-twister.yml`'s `matrix.shard == 1` leg (the
     only CI job that checks out the Zephyr module), mirroring
-    `check_emit_kconfig_contract.py`'s precedent; it is not wired into
+    `check_emit_kconfig_contract.py`'s precedent — **`twister-shard 1/4`
+    is a required context on `dev` branch protection, so a stale
+    `peripheral_instances` block blocks every PR to `dev`, not only V2N
+    ones**; this was a deliberate placement choice (it is the only job
+    with `ZEPHYR_BASE`), not an accident. Not wired into
     `pr-generated-files.yml`, which never checks out Zephyr. Both modes
-    skip cleanly (`skipped: ...`, exit 0) when no Zephyr checkout
-    resolves, so a plain `west init`-less clone stays unaffected.
+    skip cleanly when no Zephyr checkout resolves (a plain `west
+    init`-less clone stays unaffected), but the skip line says plainly
+    that nothing was checked — a local `test-all.sh` run without
+    `$ZEPHYR_BASE` is a SKIP, not proof of sync; the schema's
+    `^0x[0-9a-f]+$` pattern on `base`/`size` is a second, independent
+    guard against a malformed value that doesn't depend on `--check`
+    having run at all.
 
 ### Fixed — three V2N build/boot defects (#1175, #1176, #1158)
 
