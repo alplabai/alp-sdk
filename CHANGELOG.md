@@ -34,11 +34,13 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   `/dev/mmcblk1p2` (SDHI1, alias `mmc1`) — no third MMC controller
   exists on this SoM. Both fixed; the eMMC branch's root (`mmc0` →
   `mmcblk0p2`) was already correct. V2N101 and V2N102 currently build
-  the *same* dtb filename (`e1m-v2n101-x-evk.dtb` — V2N102's machine
-  conf inherits V2N101's `KERNEL_DEVICETREE` via `MACHINEOVERRIDES`
-  rather than overriding it), so the hardcoded name in the patch covers
-  both SKUs today; this is not a bug to "fix" per SKU until that
-  inheritance changes. V2M SKUs build a different dtb and remain
+  the *same* dtb filename (`e1m-v2n101-x-evk.dtb`) — not via inheritance;
+  V2N102's own conf **hardcodes** this filename at
+  `e1m-v2n102-a55.conf:36`, alongside a TODO to create a V2N102-specific
+  dts once its DDR map is confirmed and a note that this bootcmd must
+  change in lockstep if that TODO ever lands — so the hardcoded name in
+  the patch covers both SKUs today but is a real tripwire, not a
+  structural guarantee. V2M SKUs build a different dtb and remain
   out of scope (see the patch's "FUTURE (V2M / per-SKU dtb)" note).
   `docs/build-yocto-v2n.md` updated to match. **Unverified on real
   silicon** — this is a boot-path change and no bitbake build, FIP
