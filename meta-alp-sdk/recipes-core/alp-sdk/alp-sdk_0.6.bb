@@ -58,12 +58,21 @@ PACKAGECONFIG[rpc]      = ",,open-amp libmetal"
 # today -- issue #58; the DEEPX DX-M1 backend is behind
 # ALP_SDK_USE_DEEPX_DXM1 and compiles against an in-tree stub header).
 # Where a per-machine NPU userspace runtime package exists it is
-# installed by the *image* recipe (see alp-image-edge's
-# IMAGE_INSTALL:append:e1m-v2m101 = "dx-rt"), and the DRP-AI3 userspace
-# headers come from meta-rz-drpai via the sysroot -- neither is pulled
-# as an SDK build dep.  There is NO build-time backend pinning;
-# silicon is the source of truth and apps pick per-handle at runtime
-# via alp_inference_open(.backend = ...).
+# installed by the *image* recipe (DEEPX's dx-rt is opted in per the
+# e1m-v2m10{1,2}-a55 MACHINE confs, gated on ALP_ENABLE_DEEPX_DXM1 --
+# see alp-image-common.inc's DEEPX note); this recipe pulls neither it
+# nor a DRP-AI3 build dep.  The DRP-AI3 userspace HEADERS
+# (<linux/drpai.h>) do NOT "come from meta-rz-drpai via the sysroot"
+# merely by that layer being in bblayers.conf -- meta-rz-drpai ships
+# them through its own core-image-%.bbappend's TOOLCHAIN_TARGET_TASK
+# entry, which (like its RDEPENDS payload) never matches an alp-image-*
+# recipe name (issue #1176). alp-image-common.inc ports that
+# TOOLCHAIN_TARGET_TASK entry explicitly so `populate_sdk` actually
+# produces the header; this recipe still does not DEPENDS on it (the
+# Yocto build links only the dispatcher + portable stubs, so no build
+# dep is needed here regardless). There is NO build-time backend
+# pinning; silicon is the source of truth and apps pick per-handle at
+# runtime via alp_inference_open(.backend = ...).
 
 FILES:${PN}     += "${libdir}/libalp_sdk.so.*"
 FILES:${PN}-dev += "${libdir}/libalp_sdk.so    \

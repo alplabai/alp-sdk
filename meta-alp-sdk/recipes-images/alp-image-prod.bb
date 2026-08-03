@@ -57,3 +57,12 @@ BAD_RECOMMENDATIONS += " \
     ofono \
     rpcbind \
 "
+
+# meta-rz-drpai / meta-rz-codecs / meta-rz-opencva vendor payload (DRP-AI
+# NPU runtime, hardware video codec, OpenCV-DRP accel) is NOT wired here.
+# DRP-AI (+ the SDK sysroot headers for all three) is core payload wired
+# once in alp-image-common.inc; the codecs/opencva RDEPENDS payload this
+# image's camera feature needs rides the alp-camera FEATURE (enabled
+# above) via packagegroup-alp-camera.bb's own RDEPENDS -- see those two
+# files for the full rationale (issue #1176) and the vendor-bbappend
+# exclusions.

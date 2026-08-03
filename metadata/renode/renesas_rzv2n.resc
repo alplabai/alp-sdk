@@ -11,18 +11,24 @@
 #
 #     renode metadata/renode/renesas_rzv2n.resc
 #
-# The M33-SM is HEADLESS -- no UART console (see the .repl header), so
-# there is no `showAnalyzer` here; the firmware's console lives in the
-# `ram_console_buf` RAM ring.  The `--sim-mode` gateway generates its
-# OWN boot .resc and streams that RAM console to a TCP socket; this
-# file just boots.  NB the gateway is NOT ported yet (tan-cli#77) --
-# its Python helpers went with the west command in ADR-0020 Phase 4,
-# so nothing in any repo generates that boot .resc today.
+# The M33-SM is HEADLESS in production -- no UART console (see the .repl
+# header); the firmware's console lives in the `ram_console_buf` RAM
+# ring.  The `--sim-mode` gateway generates its OWN boot .resc and
+# streams that RAM console to a TCP socket; this file just boots.  NB
+# the gateway is NOT ported yet (tan-cli#77) -- its Python helpers went
+# with the west command in ADR-0020 Phase 4, so nothing in any repo
+# generates that boot .resc today.
 #
-# NOTE: because this core is headless, the plain (non --sim-mode)
-# `tan renode` path produces NO console output on V2N -- its --log
-# will be empty and `--expect`/log-grep won't match.  Use --sim-mode to
-# observe the ram_console.
+# The default $elf here (a plain hello-world build) still produces NO
+# console output: it is a normal board build with sci0 left disabled,
+# same as real hardware. The .repl now models sci0 (issue #1158) so a
+# firmware built with tests/renode/v2n_m33_sci0_console.overlay + .conf
+# DOES get a real, observable boot banner + app console under this same
+# platform descriptor -- there is still no `showAnalyzer` call here
+# because a Python peripheral doesn't implement IUART; its output goes
+# to the Renode log instead (`sci0: sci0 TX: ...` lines), visible on
+# stdout the same way `showAnalyzer` output is under `--console`. Use
+# --sim-mode for the ram_console path instead if that's what you need.
 #
 # NOTE: this descriptor does NOT seed `cpu VectorTableOffset`, unlike
 # alif_ensemble_e8.resc (#947).  `alif_ensemble_e8.repl` notes the RZ/V2N

@@ -12,16 +12,32 @@
 // FAITHFUL to the real M33-SM address map -- it boots the actual
 // V2N M33 Zephyr image (SRAM-linked at 0x08003000) headless.
 //
-// The M33-SM is a HEADLESS core: its board defconfig sets
-// CONFIG_CONSOLE=n and sci0 is NOT wired as a CM33 console ("the only
-// console is the A55's").  So there is deliberately no UART model here.
-// Its console is observed the same way alp-sdk observes it on the bench
-// -- Zephyr's `ram_console` backend writes to a RAM ring buffer
-// (`ram_console_buf`), which the `--sim-mode` gateway polls out of SRAM
-// and streams to the studio UART socket.  That polling/streaming half
-// is NOT ported yet (tan-cli#77) -- the Python `RamConsoleStreamer`
-// went with the west command, so no such helper exists in any repo
-// today; this line describes the contract, not shipping code.
+// The M33-SM is a HEADLESS core in production: its board defconfig sets
+// CONFIG_CONSOLE=n, and sci0 -- the EVK "Pmod USB-UART" header, not
+// populated on the SoM -- is NOT wired as a CM33 console ("the only
+// console is the A55's"; see the board .dts header for why: opening it
+// enables RX onto a floating RXD pin, and the resulting receive-error
+// interrupt escalates to a Zephyr fatal before main() runs on real
+// silicon).  The `--sim-mode` gateway's designed path is unaffected by
+// any of this: Zephyr's `ram_console` backend writes to a RAM ring
+// buffer (`ram_console_buf`), which that gateway polls out of SRAM and
+// streams to the studio UART socket.  That polling/streaming half is
+// NOT ported yet (tan-cli#77) -- the Python `RamConsoleStreamer` went
+// with the west command, so no such helper exists in any repo today;
+// this paragraph describes the contract, not shipping code.
+//
+// sci0 IS modelled below (issue #1158): the plain (non --sim-mode)
+// `tan renode` boot had NO observable console at all -- a sim gate that
+// produces no output can't fail on anything the console would show.
+// Renode never drives a floating-pin receive-error the way real
+// silicon's unpopulated Pmod header does, so enabling sci0 is safe in
+// simulation only; the production board .dts keeps it disabled, and a
+// firmware build only reaches this model at all if it opts in via
+// tests/renode/v2n_m33_sci0_console.overlay + .conf (mirrors the AEN
+// M55 sim's own Renode-only overlay pattern).  Boots real firmware
+// through it and prints the boot banner + app output -- verified
+// against a real `alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33` hello_world
+// build under Renode v1.16.1.
 //
 // The one bit of RZ/V2N IP that stock Renode v1.16.1 lacks and that the
 // firmware needs to BOOT is the clock/reset + interrupt-monitor window
@@ -38,6 +54,14 @@
 //     compatible "renesas,rz-riic".  tmp112 sits on it at 0x48.
 //   - CPG/ICU window base 0x40400000: r9a09g056.dtsi (rz-intc-v2 reg +
 //     the CPG module-monitor registers the FSP BSP polls).
+//   - sci0 base 0x42800c00 (M33-visible; NOT the A55-visible aperture,
+//     which is a different address on this SoC): Zephyr's vendored SoC
+//     dtsi arm/renesas/rz/rzv/r9a09g056.dtsi, sci0@42800c00, compatible
+//     "renesas,rz-sci-b" / "renesas,rz-sci-b-uart" -- the same node the
+//     M33-SM board .dts disables.  Register offsets (RDR/TDR/CCR0/CESR/
+//     CSR/CFCLR) are R_SCI_B0_Type from the vendor FSP register header
+//     (hal_renesas drivers/rz/fsp/src/rzv/bsp/cmsis/Device/RENESAS/
+//     Include/R9A09G056N/iodefines/sci_b_iodefine.h).
 
 nvic: IRQControllers.NVIC @ sysbus 0xE000E000
     priorityMask: 0xF0
@@ -71,3 +95,46 @@ syscon: Python.PythonPeripheral @ sysbus 0x40400000
 iic8: I2C.RenesasRA_IIC @ sysbus 0x41c01000
 
 i2c_tmp112: Sensors.TMP103 @ iic8 0x48
+
+// sci0 UART (issue #1158 -- see the header for scope/safety).  Coarse
+// TX-only stub, same "not cycle-faithful, minimum to unblock the real
+// driver" spirit as the syscon stub above: CESR always reports RIST=1/
+// TIST=0 and CSR always reports TDRE/TEND ready, so R_SCI_B_UART_Open()
+// and uart_rz_sci_poll_out() (zephyr/drivers/serial/uart_renesas_rz_sci.c)
+// never block; RX, baud generation, interrupts and errors are not
+// modelled. Renode's stock UART classes aren't register-compatible with
+// this Renesas SCI-B IP (Renode ships a SCIFA model for the older RZ/G2L
+// SCI family, a different register layout), and a Python peripheral
+// can't implement IUART for `showAnalyzer` -- so TDR writes are instead
+// line-buffered and flushed to the Renode log on '\n' via self.Log,
+// which is visible on stdout the same way `showAnalyzer` output is under
+// `--console` (confirmed: both are plain Renode INFO log lines).
+sci0: Python.PythonPeripheral @ sysbus 0x42800c00
+    size: 0x400
+    initable: true
+    script: '''
+if request.IsInit:
+    line = ""
+
+if request.IsWrite:
+    if request.Offset == 0x04:
+        # TDR (TDAT[8:0], offset 0x04).
+        b = request.Value & 0xFF
+        if b == 0x0A:
+            self.Log(LogLevel.Info, "sci0 TX: %s" % line)
+            line = ""
+        elif b != 0x0D:
+            line += chr(b) if 0x20 <= b < 0x7F else "?"
+    request.Value = 0
+elif request.IsRead:
+    if request.Offset == 0x48:
+        # CSR (offset 0x48): TDRE = bit29, TEND = bit30 -- always ready.
+        request.Value = (1 << 29) | (1 << 30)
+    elif request.Offset == 0x1C:
+        # CESR (offset 0x1C, 1 byte): RIST = bit0 (always 1), TIST =
+        # bit4 (always 0) -- satisfies both R_SCI_B_UART_Open()'s wait
+        # for RIST==1 and the close/other paths' wait for TIST==0.
+        request.Value = 0x1
+    else:
+        request.Value = 0
+'''
