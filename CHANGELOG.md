@@ -7,6 +7,20 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — MHU-B mailbox verification claim overstated the send path (#1169)
+
+`mbox_renesas_rz_mhu_b.c` and the four V2N/V2M SoM presets said `SILICON-PROVEN`
+for the driver as a whole; #697 only silicon-proved init/attach and the
+A55->M33 receive path (`R_MHU_NS5.MSG` -> M33 NVIC IRQ 293). `mbox_send()`
+(M33->A55) is unexercised and does not reach the A55 on this topology — the
+NS-channel RSP interrupt it raises (`R_MHU_NS5.RSP`) routes to no A55 GIC line;
+only the MHU-B CA55-routed SWINT units 12-15 (INTID 436-439 / GIC_SPI 404-407)
+do. `examples/multicore/rpmsg-v2n/m33_sm/src/main.c` already works around this
+by writing SWINT unit 12's SET register directly instead of calling
+`mbox_send()`. Bounded the claim to what #697 actually proved in the driver
+header, the four SoM presets, the `renesas,rz-mhu-b-mbox.yaml` binding, and the
+M33 board DTS comment across all sites.
+
 ### Fixed — three V2N/V2M metadata-declaration gaps (#1155, #1169, #1170)
 
 **`catalog.json` had no key for PDM, SD1, WIFI_SDIO or xSPI (#1155).** PDM was
@@ -29,9 +43,11 @@ say so explicitly in the four V2N/V2M SoM presets, rather than staying silent.
 The MHU mailbox already carries an ADR 0017 Tier-1.5 declaration in
 `zephyr/drivers/mbox/mbox_renesas_rz_mhu_b.c`, just an aspirational
 `BENCH-UNVERIFIED` one — the DT node it backs is the exact one
-`examples/multicore/rpmsg-v2n/m33_sm` exercises silicon-proven under #697, so
-the header now says `SILICON-PROVEN` and cites the evidence. All four SoM
-presets now cross-reference this from their `mailbox:` block.
+`examples/multicore/rpmsg-v2n/m33_sm` exercises under #697, so the header now
+cites that evidence: init/attach and the A55->M33 receive path are
+silicon-proven, while `mbox_send()` (M33->A55) remains unexercised (see the
+correction below). All four SoM presets now cross-reference this from their
+`mailbox:` block.
 
 **"Nine" SoC peripheral instances had routed pads but no SoM-level
 declaration (#1170).** `metadata/e1m_modules/v2n/renesas-peripheral-map.tsv`
