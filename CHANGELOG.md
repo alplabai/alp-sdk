@@ -40,6 +40,19 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   present (`rz-drpai` → `lib-tvm kernel-module-mmngr`, `meta-rz-codecs`
   → `drp-fw`, `rz-opencva` → `opencv oca`) so a build that legitimately
   drops an RZ/V feature layer still parses.
+- **`alp-image-prod` and `alp-image-base` had the identical #1176 silent
+  omission — untouched by the first pass above.** Fixed by what each
+  image is actually for rather than copy-pasting the edge block twice
+  more: DRP-AI3 (`meta-rz-drpai`: `lib-tvm kernel-module-mmngr`) is the
+  SoC's core NPU accelerator, not camera/display-tied, so it moved into
+  `alp-image-common.inc` as the one shared source every image
+  (`base`/`prod`/`edge`) now installs it from; `meta-rz-codecs`
+  (`drp-fw`) and `meta-rz-opencva` (`opencv oca`) exist to feed a
+  GStreamer/vision pipeline under the `alp-camera`/`alp-display`
+  feature groups, so they stay per-image — mirrored into
+  `alp-image-prod.bb` (which enables both groups) and deliberately left
+  out of `alp-image-base.bb` (headless, enables neither), with a
+  comment recording that the absence there is intentional.
 - **The V2N Renode model had no UART, so `tan renode` produced no
   console output at all (#1158).** The M33-SM stays headless in
   production (no Pmod USB-UART populated on the SoM), so
