@@ -561,7 +561,10 @@ hide. Display/LVGL apps route through `<alp/display.h>` +
 A short, explicit allowlist in `check_example_portability.py`
 (`_ZEPHYR_DRIVER_INCLUDE_ALLOWLIST`) covers the handful of examples
 that genuinely have no portable surface to route through yet (raw AMP
-mailbox transport, MDIO PHY diagnostics, flash) -- each entry names
+mailbox transport, MDIO PHY diagnostics, flash) -- keyed per example
+AND per driver header, so allowlisting one driver (e.g. `mdio.h`)
+never exempts that example from a *different*
+`#include <zephyr/drivers/...>` it picks up later; each entry names
 the include and why. Zephyr-specific register/bench tools with no
 `board.yaml` (e.g. `examples/aen/*-regcheck/`) are outside this
 check's scope by construction.
