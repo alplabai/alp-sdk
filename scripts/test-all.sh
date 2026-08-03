@@ -693,6 +693,22 @@ stage_generated_files() {
         [ -f "scripts/${g}.py" ] || continue
         python3 "scripts/${g}.py" >/dev/null 2>&1 || { echo "scripts/${g}.py failed"; return 1; }
     done
+    # gen_soc_peripheral_instances.py is NOT in the array above: unlike
+    # every other generator here, it needs a resolvable Zephyr checkout
+    # (the vendored SoC devicetree) and skips cleanly (exit 0, a
+    # `skipped: ...` line) without one -- the other seven have no such
+    # prerequisite and would silently swallow that line under the loop's
+    # `>/dev/null 2>&1`.  Run it separately, unsuppressed, so the skip is
+    # visible instead of a contributor seeing 16/16 PASS with no signal
+    # that this specific fact went unchecked (#1154 PR review). When
+    # $ZEPHYR_BASE (or the west-topdir zephyr/ fallback) DOES resolve --
+    # the common case on a bootstrapped dev machine -- this actually
+    # regenerates metadata/socs/renesas/rzv2n/n44.json in place, and the
+    # diff check below catches real drift, same as every other generator.
+    if [ -f scripts/gen_soc_peripheral_instances.py ]; then
+        python3 scripts/gen_soc_peripheral_instances.py \
+            || { echo "scripts/gen_soc_peripheral_instances.py failed"; return 1; }
+    fi
     # ABI snapshot -- current working snapshot is derived from
     # metadata/sdk_version.yaml (older snapshots are frozen).
     if [ -f scripts/abi_snapshot.py ]; then
@@ -732,18 +748,26 @@ stage_generated_files() {
     git add -N -- \
         include/alp docs/abi src/cap.c src/status_strings.c \
         metadata/catalog.json metadata/error-catalog.json metadata/pinmux \
+        metadata/socs/renesas/rzv2n/n44.json \
         docs/portability-matrix.md docs/peripheral-support-matrix.md \
         docs/diagnostics 2>/dev/null
     # Ignore only the snapshot's "generated" date line, like the CI gate.
+    # metadata/socs/renesas/rzv2n/n44.json only actually moves above when
+    # gen_soc_peripheral_instances.py found a resolvable Zephyr checkout
+    # (see the comment above its invocation) -- when it didn't, this path
+    # is untouched and simply contributes no diff, same as any other
+    # unaffected path in this list.
     if ! git diff --quiet --ignore-matching-lines='"generated":' -- \
             include/alp docs/abi src/cap.c src/status_strings.c \
             metadata/catalog.json metadata/error-catalog.json metadata/pinmux \
+            metadata/socs/renesas/rzv2n/n44.json \
             docs/portability-matrix.md docs/peripheral-support-matrix.md \
             docs/diagnostics 2>/dev/null; then
         echo "generated files are OUT OF SYNC -- regenerated in place; git add + commit:"
         git --no-pager diff --stat --ignore-matching-lines='"generated":' -- \
             include/alp docs/abi src/cap.c src/status_strings.c \
             metadata/catalog.json metadata/error-catalog.json metadata/pinmux \
+            metadata/socs/renesas/rzv2n/n44.json \
             docs/portability-matrix.md docs/peripheral-support-matrix.md \
             docs/diagnostics 2>/dev/null | tail -20
         return 1

@@ -263,20 +263,17 @@ jobs:
         run: |
           python3 scripts/check_emit_kconfig_contract.py
 
-      # gen_soc_peripheral_instances.py --check (#1154) -- same
-      # workspace-dependent-gate precedent as the --emit kconfig contract
-      # step above: it reads the vendored Zephyr SoC devicetree
-      # (dts/arm/renesas/rz/rzv/r9a09g056.dtsi) this job (and only this
-      # job) checks out, to verify metadata/socs/renesas/rzv2n/n44.json's
-      # `peripheral_instances` block stays in sync with it.  Deliberately
-      # NOT in pr-generated-files.yml, which never checks out Zephyr.
-      - name: check · SoC peripheral-instances DTSI projection (#1154)
-        if: matrix.shard == 1
-        working-directory: ${{ github.workspace }}/alp-sdk
-        env:
-          ZEPHYR_BASE: ${{ github.workspace }}/zephyrproject/zephyr
-        run: |
-          python3 scripts/gen_soc_peripheral_instances.py --check
+      # gen_soc_peripheral_instances.py's --check does NOT run in this
+      # job (moved out in PR review on #1212): this job's Zephyr pin
+      # (`--mr v4.4.1` above) is the FULL twister oracle -- any future
+      # bump that happens to touch dts/arm/renesas/rz/rzv/r9a09g056.dtsi
+      # would make `--check` go STALE here, failing `twister-shard 1/4`,
+      # which fails the required aggregator `twister ·
+      # native_sim/native/64` and blocks every PR to `dev`, not just V2N
+      # ones, under a context name that says nothing about metadata. See
+      # pr-metadata-peripheral-instances.yml, which checks the same thing
+      # with a seconds-long sparse checkout of just the one DTSI, under
+      # its own honestly-named (and, for now, non-required) context.
 
       # Persist the twister REPORTS (json/xml/log) regardless of
       # pass/fail.  Do NOT upload the whole twister-out/ tree: the

@@ -82,6 +82,8 @@ def fake_git_repo(tmp_path):
     (tmp_path / "metadata" / "pinmux" / "existing.tsv").write_text("x\n")
     (tmp_path / "metadata" / "catalog.json").write_text("{}\n")
     (tmp_path / "metadata" / "error-catalog.json").write_text("{}\n")
+    (tmp_path / "metadata" / "socs" / "renesas" / "rzv2n").mkdir(parents=True)
+    (tmp_path / "metadata" / "socs" / "renesas" / "rzv2n" / "n44.json").write_text("{}\n")
     subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
     subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=tmp_path, check=True)
 

@@ -48,21 +48,42 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
     `metadata/renode/renesas_rzv2n.repl` is intentionally untouched —
     retiring its hand-placement onto this data is separate follow-up
     work.
-  - `--check` runs from `pr-twister.yml`'s `matrix.shard == 1` leg (the
-    only CI job that checks out the Zephyr module), mirroring
-    `check_emit_kconfig_contract.py`'s precedent — **`twister-shard 1/4`
-    is a required context on `dev` branch protection, so a stale
-    `peripheral_instances` block blocks every PR to `dev`, not only V2N
-    ones**; this was a deliberate placement choice (it is the only job
-    with `ZEPHYR_BASE`), not an accident. Not wired into
-    `pr-generated-files.yml`, which never checks out Zephyr. Both modes
-    skip cleanly when no Zephyr checkout resolves (a plain `west
-    init`-less clone stays unaffected), but the skip line says plainly
-    that nothing was checked — a local `test-all.sh` run without
-    `$ZEPHYR_BASE` is a SKIP, not proof of sync; the schema's
-    `^0x[0-9a-f]+$` pattern on `base`/`size` is a second, independent
-    guard against a malformed value that doesn't depend on `--check`
-    having run at all.
+  - **`--check` runs in its own advisory CI job**,
+    `.github/workflows/pr-metadata-peripheral-instances.yml` — moved out
+    of `pr-twister.yml`'s `matrix.shard == 1` leg in a second review
+    round: that job's Zephyr pin is the FULL twister oracle, so a future
+    version bump touching `r9a09g056.dtsi` would fail the required
+    `twister-shard 1/4` → `twister · native_sim/native/64` aggregator and
+    block every PR to `dev`, not only V2N ones, under a context name that
+    says nothing about metadata. The dedicated job sparse-checks-out just
+    the one DTSI file at the pinned tag (derived from
+    `metadata/bootstrap.json` at run time, never a second hardcoded
+    literal) and runs in seconds. It is advisory (non-required) while the
+    pattern proves itself, same graduation path as `pr-renode-aen-smoke.yml`
+    (#974) / `pr-renode-v2n-sci0-smoke.yml` (#1187).
+    `ALP_REQUIRE_ZEPHYR_ORACLE=1` (same escape hatch
+    `check_bootstrap_manifest.py` / `check_toolchain_lock.py` use) turns
+    an unresolvable checkout in that job into a hard failure instead of a
+    skip — that job PROMISES the oracle, so an unresolvable one there is
+    a bug in its own setup.
+  - Both modes still skip cleanly (exit 0) on a machine with no Zephyr
+    checkout, but `scripts/test-all.sh`'s `generated-files` stage now
+    DOES run this generator (plain, unsuppressed, unlike the other seven
+    `gens`) specifically so a contributor sees the `skipped: ...` line
+    instead of every stage reading PASS with no signal that this one
+    fact went unchecked; when `$ZEPHYR_BASE` resolves locally, that stage
+    actually regenerates + diffs `n44.json`, catching real drift the same
+    way CI does. The schema's `^0x[0-9a-f]+$` pattern on `base`/`size` is
+    a further, independent guard that doesn't depend on `--check` having
+    run at all.
+  - Three more silent-degradation classes escalate to a hard failure now
+    (none of them change the emitted instance COUNT, so the existing
+    count-vs-`peripherals:` guard could not catch any of them alone): an
+    unresolved `reg` size macro (e.g. a future `DT_SIZE_M(n)`), a node
+    with no `channel` cell (previously defaulted `"index": 0` silently,
+    contradicting the schema's own "never inferred from array position"),
+    and a multi-cell `reg` property (previously silently truncated to
+    its first cell).
 
 ### Fixed — MHU-B mailbox verification claim overstated the send path (#1169)
 
