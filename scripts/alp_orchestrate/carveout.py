@@ -198,18 +198,37 @@ def resolve_carve_outs(
         prefers_cacheable = bool(entry.cacheable) if entry.cacheable is not None else False
         endpoint_set = set(entry.endpoints)
 
-        # Filter candidates: accessibility covers every endpoint.
+        # Filter candidates: accessibility covers every endpoint, and the
+        # region isn't marked non-allocatable for IPC carve-outs
+        # (`carveout: false` -- e.g. a flash-class MRAM sub-region that
+        # must publish a real `base` for the board generator's partition
+        # table but isn't byte-addressable shared memory a raw_shmem/
+        # rpmsg carve-out can safely land in).
         candidates: list[dict[str, Any]] = []
+        excluded_names: list[str] = []
         for region in memory_map:
             af = set(region.get("accessible_from") or [])
             if not endpoint_set.issubset(af):
                 continue
+            if region.get("carveout") is False:
+                excluded_names.append(region["name"])
+                continue
             candidates.append(region)
         if not candidates:
-            resolved.append(_blocked_carve_out(entry, (
-                f"ipc entry '{entry.name}' endpoints {entry.endpoints} "
-                f"have no matching memory_map region in SoM "
-                f"{project.sku}")))
+            if excluded_names:
+                resolved.append(_blocked_carve_out(entry, (
+                    f"ipc entry '{entry.name}' endpoints {entry.endpoints} "
+                    f"only match memory_map region(s) {excluded_names} in "
+                    f"SoM {project.sku}, and all of them are marked "
+                    f"`carveout: false` (flash-class, not safe as shared "
+                    f"memory); add an allocatable region (`carveout: true` "
+                    f"or omitted) to metadata/e1m_modules/{project.sku}.yaml "
+                    f"or remove the matching ipc entry from board.yaml.")))
+            else:
+                resolved.append(_blocked_carve_out(entry, (
+                    f"ipc entry '{entry.name}' endpoints {entry.endpoints} "
+                    f"have no matching memory_map region in SoM "
+                    f"{project.sku}")))
             continue
 
         # Prefer the region whose `cacheable:` flag matches the entry's
