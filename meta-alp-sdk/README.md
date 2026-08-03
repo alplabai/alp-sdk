@@ -268,11 +268,31 @@ There is NO build-time pin -- silicon is the source of truth.
 
 ### DRP-AI userspace headers
 
-When `meta-rz-drpai` is in `bblayers.conf`, the DRP-AI userspace
-runtime + headers (`<linux/drpai.h>`, the `drpai_*` ioctls) appear
-in the target sysroot at standard paths.  The SDK's
-`<alp/inference.h>` Yocto backend picks them up through the sysroot
-include path — no per-app pkg-config plumbing needed.
+Adding `meta-rz-drpai` (or `meta-rz-codecs` / `meta-rz-opencva`) to
+`bblayers.conf` is **not**, by itself, enough to get their payload —
+this was issue #1176: each of these vendor layers ships its runtime
+packages and its `TOOLCHAIN_TARGET_TASK` SDK-sysroot entries through
+its own `recipes-core/images/core-image-%.bbappend`, and a
+`core-image-%` bbappend filename does not match any `alp-image-*`
+recipe name (bitbake matches a `.bbappend` to its exact target recipe
+base name; `%` only wildcards the version suffix). Both halves of the
+payload have to be ported explicitly on the `meta-alp-sdk` side —
+which is what `alp-image-common.inc` / `packagegroup-alp-camera.bb` do,
+gated on the layer's `BBFILE_COLLECTIONS` name (not on `MACHINE`, so
+builds that legitimately drop the RZ/V feature layers still parse):
+
+- **Runtime (target rootfs):** `alp-image-common.inc` installs
+  `lib-tvm` + `kernel-module-mmngr` into every `alp-image-*` build —
+  the DRP-AI3 userspace runtime the `<alp/inference.h>` Yocto backend
+  dispatches into at runtime.
+- **SDK sysroot headers (`populate_sdk`):** `alp-image-common.inc`
+  also ports the vendor bbappends' `TOOLCHAIN_TARGET_TASK:append`
+  entries (`drpai` from `meta-rz-drpai`, `drp` — shared — from
+  `meta-rz-codecs` / `meta-rz-opencva`), so `bitbake alp-image-* -c
+  populate_sdk` actually produces `<linux/drpai.h>` / `<linux/drp.h>`
+  (the `drpai_*` / `drp_*` ioctls) at standard sysroot paths. Without
+  that port, `populate_sdk` silently produces an SDK missing both
+  headers even with the layer present and the image built cleanly.
 
 ### Model compilation toolchain (RUHMI / DRP-AI TVM)
 

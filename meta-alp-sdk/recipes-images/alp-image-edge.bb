@@ -33,52 +33,10 @@ IMAGE_INSTALL += " \
 # only the example package is edge-specific.
 IMAGE_INSTALL += " alp-lvgl-dashboard"
 
-# meta-rz-codecs / meta-rz-opencva vendor payload (hardware video codec,
-# OpenCV-DRP accel). The DRP-AI NPU runtime (meta-rz-drpai) is NOT wired
-# here -- it's core payload common to every Alp image and lives once in
-# alp-image-common.inc; see that file for the DRP-AI rationale + the
-# vendor-bbappend exclusions it documents.
-#
-# meta-rz-codecs and meta-rz-opencva ARE camera/display-pipeline extras
-# (HW video decode + DRP-accelerated OpenCV feed GStreamer/vision under
-# alp-camera / alp-display), so unlike DRP-AI they stay per-image rather
-# than folding into alp-image-common.inc: alp-image-base enables neither
-# alp-camera nor alp-display and deliberately carries none of this.
-# alp-image-prod carries the identical block below (it enables both
-# alp-camera and alp-display too).
-#
-# Each of these vendor layers ships its runtime payload through its own
-# recipes-core/images/core-image-%.bbappend (a `require`d *_packages.inc)
-# -- and a `core-image-%` bbappend filename does NOT match `alp-image-edge`
-# / `alp-image-prod` (bitbake matches a .bbappend to its exact target
-# recipe base name; `%` only wildcards the version suffix). So merely
-# adding these layers to bblayers.conf is necessary but not sufficient:
-# their bbappends never fire, the image comes out with none of that
-# payload, and the bake still succeeds -- a silent omission (issue
-# #1176). Verified against each layer's own core-image-%.bbappend (+ its
-# layer.conf BBFILE_COLLECTIONS name) in the RZ/V2N AI SDK BSP v6.30
-# Source Code package (see README.md for how to obtain it).
-#
-# Gated on each LAYER being present (soft LAYERRECOMMENDS_alp-sdk deps),
-# not on MACHINE: naming these packages unconditionally would break
-# recipe parsing for every consumer that legitimately drops the RZ/V
-# feature layers (e.g. the AEN and NX91 machines, which never build
-# linux-renesas at all).
-#
-# meta-rz-codecs (collection "meta-rz-codecs"): hardware video codec
-# firmware (drp-fw), for GStreamer HW-accelerated decode under
-# alp-camera/alp-display.
-ALP_RZ_CODECS_INSTALL = "${@bb.utils.contains('BBFILE_COLLECTIONS', 'meta-rz-codecs', \
-    'drp-fw', '', d)}"
-ALP_RZ_CODECS_INSTALL[vardepvalue] = "${ALP_RZ_CODECS_INSTALL}"
-
-# meta-rz-opencva (collection "rz-opencva"): OpenCV + the DRP-accelerated
-# "oca" library.
-ALP_RZ_OPENCVA_INSTALL = "${@bb.utils.contains('BBFILE_COLLECTIONS', 'rz-opencva', \
-    'opencv oca', '', d)}"
-ALP_RZ_OPENCVA_INSTALL[vardepvalue] = "${ALP_RZ_OPENCVA_INSTALL}"
-
-IMAGE_INSTALL += " \
-    ${ALP_RZ_CODECS_INSTALL}                   \
-    ${ALP_RZ_OPENCVA_INSTALL}                  \
-"
+# meta-rz-drpai / meta-rz-codecs / meta-rz-opencva vendor payload (DRP-AI
+# NPU runtime, hardware video codec, OpenCV-DRP accel) is NOT wired here.
+# DRP-AI (+ the SDK sysroot headers for all three) is core payload wired
+# once in alp-image-common.inc; the codecs/opencva RDEPENDS payload rides
+# the alp-camera FEATURE (enabled above) via
+# packagegroup-alp-camera.bb's own RDEPENDS -- see those two files for
+# the full rationale (issue #1176) and the vendor-bbappend exclusions.

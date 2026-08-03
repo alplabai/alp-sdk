@@ -58,27 +58,11 @@ BAD_RECOMMENDATIONS += " \
     rpcbind \
 "
 
-# meta-rz-codecs / meta-rz-opencva vendor payload (hardware video codec,
-# OpenCV-DRP accel): the vision-appliance camera+display feature set this
-# image enables (above) needs the vendor's HW decode firmware + DRP-accel
-# OpenCV to actually use them -- identical block to alp-image-edge.bb,
-# same rationale (issue #1176: adding meta-rz-codecs / meta-rz-opencva to
-# bblayers.conf is not enough on its own -- their bbappends target
-# `core-image-%`, which does not match `alp-image-prod`, so the payload
-# silently never installs). See alp-image-edge.bb for the full BBFILE_
-# COLLECTIONS-vs-bbappend-matching explanation and the vendor-exclusion
-# notes. The DRP-AI NPU runtime (meta-rz-drpai) is NOT repeated here --
-# it's core payload, wired once in alp-image-common.inc for every image
-# including the headless alp-image-base.
-ALP_RZ_CODECS_INSTALL = "${@bb.utils.contains('BBFILE_COLLECTIONS', 'meta-rz-codecs', \
-    'drp-fw', '', d)}"
-ALP_RZ_CODECS_INSTALL[vardepvalue] = "${ALP_RZ_CODECS_INSTALL}"
-
-ALP_RZ_OPENCVA_INSTALL = "${@bb.utils.contains('BBFILE_COLLECTIONS', 'rz-opencva', \
-    'opencv oca', '', d)}"
-ALP_RZ_OPENCVA_INSTALL[vardepvalue] = "${ALP_RZ_OPENCVA_INSTALL}"
-
-IMAGE_INSTALL += " \
-    ${ALP_RZ_CODECS_INSTALL}                   \
-    ${ALP_RZ_OPENCVA_INSTALL}                  \
-"
+# meta-rz-drpai / meta-rz-codecs / meta-rz-opencva vendor payload (DRP-AI
+# NPU runtime, hardware video codec, OpenCV-DRP accel) is NOT wired here.
+# DRP-AI (+ the SDK sysroot headers for all three) is core payload wired
+# once in alp-image-common.inc; the codecs/opencva RDEPENDS payload this
+# image's camera feature needs rides the alp-camera FEATURE (enabled
+# above) via packagegroup-alp-camera.bb's own RDEPENDS -- see those two
+# files for the full rationale (issue #1176) and the vendor-bbappend
+# exclusions.

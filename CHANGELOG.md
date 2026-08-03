@@ -35,24 +35,34 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   bbappends never fired and the bake still "succeeded" with none of
   that payload. Verified against each vendor layer's own
   `core-image-%.bbappend` + `layer.conf` `BBFILE_COLLECTIONS` name in a
-  BSP v6.30 Source Code checkout. `alp-image-edge.bb` now installs each
-  layer's payload explicitly, gated on the layer's collection being
-  present (`rz-drpai` → `lib-tvm kernel-module-mmngr`, `meta-rz-codecs`
-  → `drp-fw`, `rz-opencva` → `opencv oca`) so a build that legitimately
-  drops an RZ/V feature layer still parses.
+  BSP v6.30 Source Code checkout. `alp-image-edge.bb` initially installed
+  each layer's payload explicitly, gated on the layer's collection —
+  since superseded by the follow-up below, which relocates that wiring
+  to a shared, single-source home instead of an image-recipe block.
 - **`alp-image-prod` and `alp-image-base` had the identical #1176 silent
-  omission — untouched by the first pass above.** Fixed by what each
-  image is actually for rather than copy-pasting the edge block twice
-  more: DRP-AI3 (`meta-rz-drpai`: `lib-tvm kernel-module-mmngr`) is the
-  SoC's core NPU accelerator, not camera/display-tied, so it moved into
-  `alp-image-common.inc` as the one shared source every image
-  (`base`/`prod`/`edge`) now installs it from; `meta-rz-codecs`
-  (`drp-fw`) and `meta-rz-opencva` (`opencv oca`) exist to feed a
-  GStreamer/vision pipeline under the `alp-camera`/`alp-display`
-  feature groups, so they stay per-image — mirrored into
-  `alp-image-prod.bb` (which enables both groups) and deliberately left
-  out of `alp-image-base.bb` (headless, enables neither), with a
-  comment recording that the absence there is intentional.
+  omission, and the fix above still left a second, one-level-deeper copy
+  of the same defect in the SDK sysroot task.** Closed by what each
+  piece of payload is actually for, not by copy-pasting the edge block
+  everywhere: DRP-AI3's runtime (`meta-rz-drpai`: `lib-tvm
+  kernel-module-mmngr`) is the SoC's core NPU accelerator, not
+  camera/display-tied, so it now lives once in `alp-image-common.inc`
+  and every image (`base`/`prod`/`edge`) installs it from there.
+  `meta-rz-codecs` (`drp-fw`) and `meta-rz-opencva` (`opencv oca`) exist
+  to feed a GStreamer/vision pipeline, so they ride the `alp-camera`
+  FEATURE itself — `packagegroup-alp-camera.bb`'s `RDEPENDS`, gated the
+  same way — rather than any image recipe: `alp-image-prod` and
+  `alp-image-edge` (both already `alp-camera`-enabled) get the identical
+  payload through that one shared gate, and a customer's own
+  `alp-image-base`-derived image that turns `alp-camera` on gets it too,
+  automatically, with no per-image or per-customer copy needed.
+  Additionally ported the vendor bbappends' `TOOLCHAIN_TARGET_TASK`
+  entries (`drpai` from `meta-rz-drpai`, `drp` from `meta-rz-codecs` /
+  `meta-rz-opencva`) into `alp-image-common.inc`, so `bitbake
+  alp-image-* -c populate_sdk` now actually produces `<linux/drpai.h>` /
+  `<linux/drp.h>` in the SDK sysroot — `meta-alp-sdk/README.md`
+  previously (and incorrectly) documented those headers as appearing
+  automatically from layer presence alone, which was the same silent-
+  omission belief that caused #1176 in the first place; corrected.
 - **The V2N Renode model had no UART, so `tan renode` produced no
   console output at all (#1158).** The M33-SM stays headless in
   production (no Pmod USB-UART populated on the SoM), so
