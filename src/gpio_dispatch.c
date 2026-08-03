@@ -198,7 +198,7 @@ void alp_gpio_close(alp_gpio_t *pin)
 	 * state.ops (issue #629). Losing the CAS (already closed/closing/
 	 * never-opened) makes this a no-op, matching the existing
 	 * void-close idempotency contract. */
-	if (!alp_handle_begin_close(&pin->lifecycle, &pin->active_ops)) return;
+	if (!alp_handle_begin_close_blocking(&pin->lifecycle, &pin->active_ops)) return;
 	if (pin->state.ops != NULL && pin->state.ops->close != NULL) {
 		pin->state.ops->close(&pin->state);
 	}

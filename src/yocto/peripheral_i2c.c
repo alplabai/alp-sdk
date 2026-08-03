@@ -55,6 +55,7 @@
 #include "alp/peripheral.h"
 #include "alp_internal.h"
 #include "common/alp_errno.h"
+#include "common/alp_slot_claim.h"
 
 #ifndef ALP_SDK_YOCTO_MAX_I2C_HANDLES
 #define ALP_SDK_YOCTO_MAX_I2C_HANDLES 4
@@ -64,23 +65,29 @@
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #endif
 
+/* in_use is the LAST member (issue #1115 round-2 dev review, mirrors
+ * dsp/sw_fallback.c's struct dsp_be): pool_acquire() below memsets only
+ * the bytes ahead of it, so the atomic claim is never transiently
+ * undone by the reset. */
 struct alp_i2c {
-	bool     in_use;
 	int      fd; /* /dev/i2c-N file descriptor */
 	uint32_t bus_id;
 	uint8_t  cached_addr; /* last addr passed to I2C_SLAVE ioctl */
 	bool     addr_cached;
+	bool     in_use;
 };
 
 static struct alp_i2c g_i2c_pool[ALP_SDK_YOCTO_MAX_I2C_HANDLES];
 
+/* issue #1115 round-2 dev review: claim atomically instead of the
+ * previous plain check-then-set scan -- two threads racing
+ * alp_i2c_open() could otherwise win the same slot. */
 static struct alp_i2c *pool_acquire(void)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(g_i2c_pool); ++i) {
-		if (!g_i2c_pool[i].in_use) {
-			memset(&g_i2c_pool[i], 0, sizeof(g_i2c_pool[i]));
-			g_i2c_pool[i].in_use = true;
-			g_i2c_pool[i].fd     = -1;
+		if (alp_slot_try_claim(&g_i2c_pool[i].in_use)) {
+			memset(&g_i2c_pool[i], 0, offsetof(struct alp_i2c, in_use));
+			g_i2c_pool[i].fd = -1;
 			return &g_i2c_pool[i];
 		}
 	}
@@ -96,7 +103,7 @@ static void pool_release(struct alp_i2c *h)
 		(void)close(h->fd);
 		h->fd = -1;
 	}
-	h->in_use = false;
+	alp_slot_release(&h->in_use);
 }
 
 static alp_status_t ensure_slave(struct alp_i2c *h, uint8_t addr)

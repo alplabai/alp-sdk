@@ -47,6 +47,7 @@
 #include "alp/inference.h"
 
 #include "alp_internal.h"
+#include "common/alp_slot_claim.h"
 
 #ifndef ALP_SDK_MAX_INFERENCE_HANDLES
 #define ALP_SDK_MAX_INFERENCE_HANDLES 2
@@ -65,20 +66,25 @@
 /* inference_drpai.c.                                                  */
 /* ------------------------------------------------------------------ */
 
+/* in_use is the LAST member (issue #1115 round-2 dev review, mirrors
+ * dsp/sw_fallback.c's struct dsp_be): pool_acquire() below memsets only
+ * the bytes ahead of it, so the atomic claim is never transiently
+ * undone by the reset. */
 struct alp_inference {
-	bool                    in_use;
 	alp_inference_backend_t backend;
 	void                   *be_state;
+	bool                    in_use;
 };
 
 static struct alp_inference g_inference_pool[ALP_SDK_MAX_INFERENCE_HANDLES];
 
+/* issue #1115 round-2 dev review: claim atomically instead of the
+ * previous plain check-then-set scan. */
 static struct alp_inference *pool_acquire(void)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(g_inference_pool); ++i) {
-		if (!g_inference_pool[i].in_use) {
-			memset(&g_inference_pool[i], 0, sizeof(g_inference_pool[i]));
-			g_inference_pool[i].in_use = true;
+		if (alp_slot_try_claim(&g_inference_pool[i].in_use)) {
+			memset(&g_inference_pool[i], 0, offsetof(struct alp_inference, in_use));
 			return &g_inference_pool[i];
 		}
 	}
@@ -87,7 +93,7 @@ static struct alp_inference *pool_acquire(void)
 
 static void pool_release(struct alp_inference *h)
 {
-	if (h != NULL) h->in_use = false;
+	if (h != NULL) alp_slot_release(&h->in_use);
 }
 
 /* ------------------------------------------------------------------ */

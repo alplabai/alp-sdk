@@ -37,6 +37,7 @@
 #include <alp/peripheral.h>
 
 #include "gpio_ops.h"
+#include "alp_slot_claim.h"
 
 /* GPIO is fast (no worker / no radio bring-up) in the CC3501E firmware, but the
  * bridge link is briefly down if a radio op overlaps; the per-request helper
@@ -65,22 +66,26 @@ alp_status_t alp_gpio_cc3501e_attach(cc3501e_t *ctx)
 }
 
 /* Per-handle side-state: either a bridge pin (raw index) or a delegated pin
- * whose real backend state lives in `inner`. */
+ * whose real backend state lives in `inner`.  in_use is the LAST member
+ * (issue #1115 round-2 dev review, mirrors dsp/sw_fallback.c's struct
+ * dsp_be): the atomic claimant in _alloc_side() below memsets only the
+ * bytes ahead of it, so the claim is never transiently undone. */
 typedef struct {
-	bool                     in_use;
 	bool                     is_bridge;
 	uint8_t                  cc35_raw;
 	alp_gpio_backend_state_t inner; /* delegated platform-backend state */
+	bool                     in_use;
 } proxy_side_t;
 
 static proxy_side_t _sides[CONFIG_ALP_SDK_MAX_GPIO_HANDLES];
 
+/* issue #1115 round-2 dev review: claim atomically instead of the
+ * previous plain check-then-set scan. */
 static proxy_side_t *_alloc_side(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_MAX_GPIO_HANDLES; ++i) {
-		if (!_sides[i].in_use) {
-			memset(&_sides[i], 0, sizeof(_sides[i]));
-			_sides[i].in_use = true;
+		if (alp_slot_try_claim(&_sides[i].in_use)) {
+			memset(&_sides[i], 0, offsetof(proxy_side_t, in_use));
 			return &_sides[i];
 		}
 	}
@@ -89,7 +94,7 @@ static proxy_side_t *_alloc_side(void)
 
 static void _free_side(proxy_side_t *s)
 {
-	s->in_use = false;
+	alp_slot_release(&s->in_use);
 }
 
 /* Look up a portable pin_id in the board route table.  Returns true + the raw

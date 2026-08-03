@@ -21,6 +21,7 @@
  */
 
 #include <errno.h>
+#include <stddef.h>
 #include <string.h>
 
 #include <zephyr/device.h>
@@ -33,6 +34,7 @@
 #include <alp/soc_caps.h>
 
 #include "can_ops.h"
+#include "alp_slot_claim.h"
 
 #define ALP_CAN_DEV_OR_NULL(idx) \
 	COND_CODE_1(DT_NODE_HAS_STATUS(DT_ALIAS(_CONCAT(alp_can, idx)), okay), \
@@ -68,12 +70,15 @@ typedef struct {
 
 static alp_z_can_side_t _sides[CONFIG_ALP_SDK_MAX_CAN_HANDLES];
 
+/* issue #1115 round-2 dev review: claim atomically (in_use is the LAST
+ * member; memset only the bytes ahead of it, since the previous
+ * `(alp_z_can_side_t){0}` whole-struct reset would zero the just-won
+ * in_use flag back to false and race a concurrent claimant). */
 static alp_z_can_side_t *_alloc_side(void)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(_sides); ++i) {
-		if (!_sides[i].in_use) {
-			_sides[i]        = (alp_z_can_side_t){ 0 };
-			_sides[i].in_use = true;
+		if (alp_slot_try_claim(&_sides[i].in_use)) {
+			memset(&_sides[i], 0, offsetof(alp_z_can_side_t, in_use));
 			return &_sides[i];
 		}
 	}
@@ -82,7 +87,7 @@ static alp_z_can_side_t *_alloc_side(void)
 
 static void _free_side(alp_z_can_side_t *s)
 {
-	if (s != NULL) s->in_use = false;
+	if (s != NULL) alp_slot_release(&s->in_use);
 }
 
 static alp_status_t _errno_to_alp(int err)

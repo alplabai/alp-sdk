@@ -120,7 +120,7 @@ void alp_wdt_close(alp_wdt_t *h)
 	/* begin_close CAS OPEN->CLOSING then spins until every op that
 	 * entered before the CAS has left -- so teardown never races an
 	 * in-flight op. Idempotent: a second/never-opened close no-ops. #629 */
-	if (!alp_handle_begin_close(&h->lifecycle, &h->active_ops)) {
+	if (!alp_handle_begin_close_blocking(&h->lifecycle, &h->active_ops)) {
 		return;
 	}
 	if (h->state.ops != NULL && h->state.ops->close != NULL) {
