@@ -195,10 +195,18 @@ static uint32_t _blend_px(uint32_t src, uint32_t dst, alp_gpu2d_blend_mode_t mod
 		uint32_t og  = (sg * sa + dg * ia + 127u) / 255u;
 		uint32_t ob  = (sb * sa + db * ia + 127u) / 255u;
 		uint32_t oa  = sa + (da * ia + 127u) / 255u;
-		/* _u8() returns uint8_t; integer promotion makes the << operand a
-		 * signed int, and a high-bit byte (e.g. 0xFF) shifted into bit 24
-		 * is not representable as int -- signed-shift UB (UBSan-caught,
-		 * #1134). Cast to uint32_t first so the shift is unsigned. */
+		/* Cast each _u8() result to uint32_t BEFORE shifting. _u8() returns
+		 * uint8_t, which integer-promotes to (signed) int, so
+		 * `_u8(oa) << 24` is signed-int UB whenever oa clamps to >= 0x80 --
+		 * alpha >= 128, the opaque-alpha common case: the shift sets bit 31
+		 * of a 32-bit signed int, which is not representable. Same class of
+		 * bug already fixed in src/update_log/sha256.c's ulog_sha256().
+		 *
+		 * Reported twice, independently: #1117 (the whole-tree signed-shift
+		 * sweep) and #1134 (the gpu2d-specific report). Both land here.
+		 * UBSan-caught -- see tests/yocto/CMakeLists.txt, which must pass
+		 * -fno-sanitize-recover=undefined or the diagnostic prints and the
+		 * process still exits 0. */
 		return ((uint32_t)_u8(oa) << 24) | ((uint32_t)_u8(or_) << 16) | ((uint32_t)_u8(og) << 8) |
 		       (uint32_t)_u8(ob);
 	}

@@ -297,7 +297,7 @@ alp_hash_finish(alp_hash_t *h, uint8_t *digest_out, size_t digest_cap, size_t *d
      * same begin_close() guard as alp_hash_close() so a racing
      * explicit close() and this implicit one can't both release the
      * slot (issue #629). */
-	if (rc == ALP_OK && alp_handle_begin_close(&h->lifecycle, &h->active_ops)) {
+	if (rc == ALP_OK && alp_handle_begin_close_blocking(&h->lifecycle, &h->active_ops)) {
 		alp_lifecycle_set(&h->lifecycle, ALP_HANDLE_LC_UNOPENED);
 		alp_slot_release(&h->in_use);
 	}
@@ -307,10 +307,10 @@ alp_hash_finish(alp_hash_t *h, uint8_t *digest_out, size_t digest_cap, size_t *d
 void alp_hash_close(alp_hash_t *h)
 {
 	if (h == NULL) return;
-	/* alp_handle_begin_close() gates out any new op and drains any
-	 * in-flight one before we touch state.ops -- and CASes out a
+	/* alp_handle_begin_close_blocking() gates out any new op and drains
+	 * any in-flight one before we touch state.ops -- and CASes out a
 	 * concurrent alp_hash_finish()'s implicit close (issue #629). */
-	if (!alp_handle_begin_close(&h->lifecycle, &h->active_ops)) return;
+	if (!alp_handle_begin_close_blocking(&h->lifecycle, &h->active_ops)) return;
 	if (h->state.ops != NULL && h->state.ops->hash_close != NULL) {
 		h->state.ops->hash_close(&h->state);
 	}
@@ -448,7 +448,7 @@ alp_status_t alp_aead_decrypt(alp_aead_t    *a,
 void alp_aead_close(alp_aead_t *a)
 {
 	if (a == NULL) return;
-	if (!alp_handle_begin_close(&a->lifecycle, &a->active_ops)) return;
+	if (!alp_handle_begin_close_blocking(&a->lifecycle, &a->active_ops)) return;
 	if (a->state.ops != NULL && a->state.ops->aead_close != NULL) {
 		a->state.ops->aead_close(&a->state);
 	}

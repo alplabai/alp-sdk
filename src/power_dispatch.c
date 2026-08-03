@@ -155,7 +155,7 @@ void alp_power_close(alp_power_t *h)
 	/* begin_close CAS OPEN->CLOSING then spins until every op that
 	 * entered before the CAS has left -- see alp_slot_claim.h (#629).
 	 * Idempotent: a second/never-opened close no-ops. */
-	if (!alp_handle_begin_close(&h->lifecycle, &h->active_ops)) {
+	if (!alp_handle_begin_close_blocking(&h->lifecycle, &h->active_ops)) {
 		return;
 	}
 	if (h->state.ops != NULL && h->state.ops->close != NULL) {

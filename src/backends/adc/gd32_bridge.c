@@ -31,6 +31,7 @@
 #include <alp/peripheral.h>
 
 #include "adc_ops.h"
+#include "alp_slot_claim.h"
 
 /* Internal SDK headers — NOT customer-facing.  Provide:
  *   alp_z_v2n_supervisor_acquire / _release  (via v2n_supervisor.h)
@@ -50,12 +51,15 @@ typedef struct gd32_bridge_state {
 
 static gd32_bridge_state_t _state_pool[CONFIG_ALP_SDK_ADC_HANDLE_POOL];
 
+/* issue #1115 round-2 dev review: this used to be a plain check-then-set
+ * scan -- claim atomically so two racing alp_adc_open() calls can never
+ * win the same slot (in_use is the LAST member; memset only the bytes
+ * ahead of it, mirroring dsp/sw_fallback.c's acquire_be_slot()). */
 static gd32_bridge_state_t *_alloc_state(void)
 {
 	for (size_t i = 0; i < (size_t)CONFIG_ALP_SDK_ADC_HANDLE_POOL; ++i) {
-		if (!_state_pool[i].in_use) {
-			memset(&_state_pool[i], 0, sizeof(_state_pool[i]));
-			_state_pool[i].in_use = true;
+		if (alp_slot_try_claim(&_state_pool[i].in_use)) {
+			memset(&_state_pool[i], 0, offsetof(gd32_bridge_state_t, in_use));
 			return &_state_pool[i];
 		}
 	}
@@ -64,7 +68,7 @@ static gd32_bridge_state_t *_alloc_state(void)
 
 static void _free_state(gd32_bridge_state_t *s)
 {
-	s->in_use = false;
+	alp_slot_release(&s->in_use);
 }
 
 static alp_status_t
