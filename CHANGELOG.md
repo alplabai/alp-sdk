@@ -55,28 +55,204 @@ on the original bug shape without disturbing tier B's legitimate deferrals.
 
 ### Fixed — example READMEs documented rejected `tan build` syntax (#1137)
 
-`examples/multicore/heterogeneous-offload/README.md`,
-`examples/multicore/rpmsg-aen/README.md`, and
-`examples/multicore/rpmsg-v2n/README.md` showed `tan build <path> --core
-<core>` as the way to iterate on one multi-core slice. Verified against a
-real, installed `tan 0.3.1`: `tan build` takes no positional path argument
-(`error: unexpected argument '<path>' found`) and has no `--core` flag
-(`error: unexpected argument '--core' found`) — `tan build` always rebuilds
-every slice a project declares, with already-built slices short-circuiting
-near-instantly (`docs/heterogeneous-builds.md`'s existing "Iterating on one
-slice" section already documents this correctly). Rewrote all three to the
-real syntax (`tan --project <path> build`, or `cd <path> && tan build`) and
-corrected the "iterate on one core" guidance to match.
-`examples/multicore/rpmsg-imx93/README.md` had the identical positional-path
-shape (`tan build alp-sdk/examples/multicore/rpmsg-imx93`) and is fixed the
-same way. `examples/multicore/mproc-mailbox/README.md` also documents a
-rejected invocation (`tan build --board <qualifier> <path>` — `--board` is
-not a `tan build` flag at all), but its two commands are entangled with a
-"two halves build separately until the v0.4 dual-image flow lands" design
-that a syntax-only rewrite can't safely resolve (board.yaml declares only
-the `m55_hp` core; there's no `tan build` flag to select just one core, and
-the file's first code block appears to show a not-yet-supported combined
-future flow) — left unfixed, flagged for the doc's owner.
+**Round 1** fixed `examples/multicore/heterogeneous-offload/README.md`,
+`examples/multicore/rpmsg-aen/README.md`, `examples/multicore/rpmsg-v2n/README.md`,
+and `examples/multicore/rpmsg-imx93/README.md` — all showed `tan build <path>
+[--core <core>]`, a positional path and/or `--core` flag `tan build` rejects
+outright (`error: unexpected argument ... found`) — and left
+`examples/multicore/mproc-mailbox/README.md` flagged as a real, unfixed
+residual, plus asserted (wrongly) that this was the complete set.
+
+**Round 2** found the round-1 sweep had checked only the files its issue
+named, not the shape itself, and fixed the rest — thirteen more sites across
+seven additional files, plus two genuinely different rejected shapes the same
+under-scoped sweep missed entirely:
+
+- `examples/README.md` (×2), `examples/peripheral-io/i2c-device-hub/README.md`,
+  `examples/peripheral-io/vendor-ext-composability/README.md`,
+  `examples/v2n/v2n-gd32-bridge-functional/README.md` — the same bare-
+  positional-path shape (`tan build <path>` / `tan build --native <path>`),
+  rewritten to `tan build --project <path>` (or `--native --project <path>`).
+- `examples/power-timing/power-managed-sensor/README.md`,
+  `examples/v2n/v2n-m1-deepx-inference/README.md`,
+  `examples/connectivity/production-deployment/README.md` — `tan build
+  --board <sku> <path>`; `--board` is not a `tan build` flag at all (it
+  exists on `tan size`/`tan renode`, never `build`) and board.yaml already
+  pins the SoM, so both the flag and the positional are simply dropped.
+- `examples/multicore/mproc-mailbox/README.md` — the round-1 residual, now
+  actually fixed rather than re-flagged: `tan build` has no per-core
+  selector at all (confirmed against a real `tan build --help`), so the
+  doc's "build HP alone via `--board rtss_hp`" framing was never achievable
+  either way; rewritten to state plainly that `tan build` produces the HP
+  app plus the topology-default HE `alp-stock-shim` placeholder until the
+  v0.4 dual-image flow lands, and the real peer image is still built by
+  hand via `west build`.
+- A **second, distinct rejected shape** found by grepping the wider corpus,
+  not just `tan build`: `tan validate <path>` (bare positional) in
+  `README.md`, `AGENTS.md` (×2), and `docs/cli.md` (×3) — `tan validate` has
+  no positional argument either; the real flag is `--board-yaml <path>`.
+- A **third**, deeper issue in `docs/cli.md`'s `tan explain` section:
+  `tan explain ALP-B001` ("decode a diagnostic code") is not merely
+  mis-syntaxed, the CAPABILITY is gone from `tan explain` in the installed
+  `tan 0.3.1` (`tan explain` only explains project/module templates and
+  generation targets now, confirmed against `tan-cli`'s own `validate.rs`
+  and a real `tan explain`/`tan explain --template ...` run) — the real,
+  current mechanism is the `see: docs/diagnostics/ALP-Bxxx.md` hint line
+  `tan validate`'s own output already carries. Rewrote both `docs/cli.md`
+  mentions and the "You are..." front-door table row accordingly.
+
+**Root cause of the round-1 miss and the fix**:
+`scripts/check_tan_docs_surface.py`'s `DOC_SOURCES` never included example
+project READMEs at all (only four top-level docs), and even where it did
+scan a file, it only checked that a verb NAME still existed — never what
+came after it. Extended the gate two ways: `EXAMPLE_README_GLOB` now folds
+every `examples/**/README.md` into the scanned surface, and a new
+`check_invocation_shapes` pass extracts every full `tan ...` invocation
+(fenced `bash`/`sh`/`shell`/`console`/`zsh` blocks + inline spans — sample-
+OUTPUT blocks like `tan doctor`'s own untagged-fence report header are
+deliberately excluded, see that function's docstring) and statically
+validates it against that verb's real `--help` grammar: an unrecognised
+flag, or a positional argument on a verb whose Usage line takes none. Proven
+by mutation against the real repo (`git stash` each fixed file, re-run the
+gate, see it fail naming the exact rejected invocation; `git stash pop`,
+green again) and by a new pytest suite
+(`tests/scripts/test_check_tan_docs_surface.py`) covering the positional-arg
+rejection, the unrecognised-flag rejection, the `tan --project <path> build`
+global-flag-before-subcommand ordering, a verb that DOES accept a real
+positional (`tan flash`), a forwarding verb's anything-goes grammar, and the
+sample-output/fence-language exclusion.
+
+### Fixed — `firmware-update-log` failed to link on both AEN801 board targets (#1101)
+
+`zephyr/soc-bridge/alif/mpu_regions_e8.c` unconditionally reads
+`DT_NODELABEL(storage_partition)` to size its non-MCUboot MRAM_DEVICE MPU
+window, but `examples/connectivity/firmware-update-log`'s own
+`boards/alp_e1m_aen801_m55_log_mram.dtsi` deleted that nodelabel without
+replacing it, so both `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he` and
+`alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp` failed at CMake configure
+(`DT_N_NODELABEL_storage_partition... undeclared`) — breaking
+`scripts/bench/aen/flash-update-log-dual.sh` and
+`flash-update-log-firewall-probe.sh`. Fixed by adding `storage_partition`
+as a SECOND nodelabel on the existing `alp_ulog_partition` node (not a
+rename): the SDK's own `update_log` sw_tier binds by the
+`alp_ulog_partition` nodelabel (`src/backends/update_log/sw_tier.c`), so a
+plain rename would have kept the example linking while silently degrading
+`HW_ENFORCED` to the RAM tier. Two nodelabels on one DT node is legal and
+already has prior art in the pinned Zephyr toolchain
+(`boards/st/b_u585i_iot02a/b_u585i_iot02a-common.dtsi`'s `memc:
+aps6408l:`). Verified both AEN801 targets now link clean via a local
+worktree twister build (`west twister -p
+alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he -p
+alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp --build-only`, 0 failed / 0
+errored) and confirmed the computed MPU windows from the generated
+`devicetree_generated.h` match the non-MCUboot branch's intent: MRAM_EXEC
+`0x80000000..0x8008ffff` (RO, flash-attr), MRAM_DEVICE
+`0x80090000..0x8009ffff` (the NVS window the HP owner actually writes,
+device-attr). Also gave the example real `platform_allow` scenarios
+(`he_client.aen` / `hp_owner.aen`, `build_only: true`) so twister catches a
+regression — it was `native_sim/native/64`-only before, the only reason
+neither `pr-twister.yml` nor the AEN-scoped `pr-twister-aen.yml` (scoped to
+`examples/aen/**`) ever saw this break.
+
+A follow-up review round decoded `mpu_regions` out of the built
+`zephyr.elf` (not DTS arithmetic) and found the dual-nodelabel fix alone
+still left `0x800A0000..0x8057FFFF` (4.875 MiB, including
+`atoc_reserved_partition@0x560000`, marked `read-only` in the same
+overlay) covered by no MPU region — privileged RW+exec by ARMv8-M's
+default `PRIVDEFENA` map. Root cause: the vendor model `mpu_regions_e8.c`
+mirrors assumes `storage_partition` is the last partition in
+`mram_storage`; this example's overlay isn't (ulog/storage sits at
+`0x90000`, below the SE-fixed ATOC package). Closed generically in
+`mpu_regions_e8.c` with a conditional fifth `MRAM_RESERVED` region
+spanning MRAM_DEVICE's top to the top of `mram_storage`, RO like
+MRAM_EXEC — it compiles out (size 0) on every other board/example, which
+already tile to top-of-flash. `pr-twister-aen.yml` also gained
+`zephyr/soc-bridge/**` and `src/backends/update_log/**` in its `paths:`
+blocks (both were previously unwatched, despite being exactly the files
+that caused this bug), and `testcase.yaml` gained a third scenario
+building `alp_e1m_aen801_m55_he_firewall_probe.conf`, the profile
+`scripts/bench/aen/flash-update-log-firewall-probe.sh` actually requires
+and which stayed build-uncovered before.
+
+### Fixed — E1M-AEN801 M55-HP and M55-HE both linked to slot0 `0x80010000`, so flashing both cores silently overwrote one image (#1069, release-blocker)
+
+Both AEN801 per-core board files declared byte-identical MRAM partition
+maps over the SAME physical App MRAM (`mram_storage@80000000`,
+`slot0_partition` at offset `0x10000`), so a dual-core project's `west
+flash` (or a hand-assembled two-entry ATOC) wrote two images to one
+`mramAddress` and the second silently overwrote the first — bench-confirmed
+on `e1m-aen-evk-01`: an `m55_hp` build and an `m55_he` build both resolved
+to `mramAddress 0x80010000` in their staged ATOC. Decided layout (deferring
+OTA rather than shrinking either slot, since a swap-sized secondary slot on
+both cores would break the ~2.6 MiB NPU MRAM-model budget; every
+E8 measurement to date ran `CONFIG_SINGLE_APPLICATION_SLOT=y`, so nothing
+proven is lost):
+
+- **New disjoint slot0 windows** (`metadata/e1m_modules/E1M-AEN801.yaml`
+  `memory_map:`): `mcuboot` 64 KiB @ `0x80000000` (shared) · HE `slot0`
+  2688 KiB @ `0x80010000` (**unchanged**) · HP `slot0` 2688 KiB @
+  `0x802b0000` (**moved off** the old shared `0x80010000` window, onto
+  what used to be the OTA `slot1` window) · `reserved` 64 KiB @
+  `0x80550000` (ex-scratch, unused) · `storage` 128 KiB @ `0x80560000`.
+  64 + 2688 + 2688 + 64 + 128 = 5632 KiB, the full App MRAM. HE keeps the
+  low window because everything else canonical is HE (the runner's default
+  core, the factory MCUboot ATOC's `cpu_id M55_HE`, the canonical
+  `person_detect` slot0, the MRAM-XIP NPU example overlays); Alif's own
+  DevKit-e8 dual-core example orders HE low too.
+- **`scripts/gen_zephyr_board.py`'s `_aen_flash_partitions()` is now
+  role-aware**, sourced from the preset's `memory_map:` when a `<role>_slot0`
+  entry is declared; both `alp_e1m_aen801_m55_{he,hp}` board `.dts` files
+  are regenerated (byte-for-byte, `tests/scripts/test_gen_zephyr_board.py`).
+  The single-M55 SKUs (`aen401`, `aen601`) have no `memory_map:` override
+  and keep the stock symmetric two-slot swap-using-scratch layout unchanged.
+- **`zephyr/sysbuild/aen/sysbuild.conf`** switches from
+  `SB_CONFIG_MCUBOOT_MODE_SWAP_SCRATCH` to `SB_CONFIG_MCUBOOT_MODE_SINGLE_APP`
+  (no secondary/scratch slot), matching what was actually silicon-proven.
+- **`scripts/west_commands/runners/alif_flash.py`** no longer hard-codes
+  one `mramAddress` for both cores: it derives the ATOC `mramAddress` from
+  which disjoint window the build's own reset vector falls in, cross-checked
+  against `--device` (the same defence-in-depth the ITCM branch already
+  applied) — a build whose vector lands in the sibling core's window is
+  now a hard `RuntimeError`, not a silent burn.
+- **New shared guard, `scripts/aen_atoc.py`**, used by both
+  `alif_flash.py` and `scripts/bench/aen/flash-run-dualcore.sh`: rejects,
+  before `app-gen-toc` runs, an ATOC `mramAddress` entry outside its
+  `cpu_id`'s declared slot0 window, two entries at the same `mramAddress`,
+  or an entry past System MRAM (`0x80580000`). `loadAddress` (ITCM) entries
+  — what every current AEN dual-core *example* actually stages — are left
+  alone; they were already disjoint by construction.
+  `scripts/bench/aen/flash-jlink-mramxip.sh` (Flow D, HE-only slot0-XIP)
+  now calls the guard too, and its reset-vector sanity check gives an
+  explicit diagnostic for an HP-linked binary instead of a generic
+  "drop the itcm overlay" message.
+- **`examples/multicore/mproc-mailbox` / `examples/multicore/rpmsg-aen`
+  `board.yaml`** IPC carve-out comments updated. Both stay
+  `status: blocked` on E1M-AEN801: the five fine-grained MRAM regions
+  (`mcuboot`/`he_slot0`/`hp_slot0`/`reserved`/`storage`) are flash-class,
+  not RAM, so `metadata/schemas/som-preset-v1.schema.json` gains a
+  `memory_region.carveout` field and all five are marked
+  `carveout: false`, keeping `scripts/alp_orchestrate/carveout.py`
+  `resolve_carve_outs()` from ever placing a shared-memory ring inside
+  MRAM even though those regions now publish a real `base` (needed only
+  for `_aen_flash_partitions()`'s DTS partition table). `mproc-mailbox`'s
+  `raw_shmem` entry and `rpmsg-aen`'s `a32_cluster`-endpointed entry both
+  block on the remaining candidate, `mram_main`, whose `base: TBD` is
+  deliberate (see its comment in `E1M-AEN801.yaml`) so a coarse
+  whole-MRAM carve-out can't silently land inside a real
+  mcuboot/slot0/reserved/storage region either.
+  `tests/fixtures/emit-snapshots/{mproc-mailbox,rpmsg-aen}.*.snap`
+  regenerated to match.
+
+**Known limits, not closed by this fix:** a sequential single-core
+`west flash` writes a whole fresh TOC each run, so the previous core's
+entry is invisible to the assembly-time guard by the time the second
+`west flash` runs — catching that needs a pre-burn TOC read-back over the
+SE-UART, out of scope here. The J-Link customer path (`loadbin` straight
+to slot0) has no ATOC assembly step at all; for that path the disjoint DTS
+windows themselves are the guard, since the link address moves per core.
+
+**BENCH-GATED: this fix has NOT been run on real E8 silicon and must not
+merge without that run.**
 
 ### Fixed — `test-all.sh` ran 1 of 34 required gate scripts on Windows (#1109)
 
