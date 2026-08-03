@@ -9,22 +9,32 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ### Fixed — three V2N build/boot defects (#1175, #1176, #1158)
 
-- **microSD boot loaded a dtb the image never builds, and rooted at the
-  wrong device (#1175).** The vendor `sd2load` U-Boot env (pinned
-  renesas-u-boot-cip, `include/configs/rzv2n-dev.h`) loads
-  `boot/r9a09g056n44-dev.dtb` — a filename none of our
-  `KERNEL_DEVICETREE` builds ever produce (V2N101/V2N102 build
-  `renesas/e1m-v2n101-x-evk.dtb`, confirmed against
-  `meta-alp-sdk/conf/machine/e1m-v2n10{1,2}-a55.conf` and
+- **microSD *and* eMMC boot loaded a dtb the image never builds; microSD
+  also rooted at the wrong device (#1175).** The vendor `sd2load` and
+  `emmcload` U-Boot envs (pinned renesas-u-boot-cip,
+  `include/configs/rzv2n-dev.h`) both load `boot/r9a09g056n44-dev.dtb` —
+  a filename none of our `KERNEL_DEVICETREE` builds ever produce
+  (V2N101/V2N102 both build `renesas/e1m-v2n101-x-evk.dtb`, confirmed
+  against `meta-alp-sdk/conf/machine/e1m-v2n10{1,2}-a55.conf` and
   `docs/build-yocto-v2n.md`). The load silently fails (`;`-chained, not
   fatal) and `bootimage` would boot whatever stale dtb was already in
-  RAM. `meta-alp-sdk/recipes-bsp/u-boot/u-boot/0002-rzv2n-dev-ALP-E1M-production-boot.patch`
-  now re-loads the correct dtb from `CONFIG_BOOTCOMMAND`, same address +
-  mmc spec `sd2load` already uses. The SD branch also rooted at
-  `/dev/mmcblk2p2`; `e1m-x-evk.dtsi:88-89` names the carrier microSD
-  `/dev/mmcblk1p2` (SDHI1, alias `mmc1`) — no third MMC controller
-  exists on this SoM. Both fixed; the eMMC branch (`mmc0` → `mmcblk0p2`)
-  was already correct. `docs/build-yocto-v2n.md` updated to match.
+  RAM — the eMMC path is the provisioning default
+  (`ALP_BOOT_DEVICE ?= "emmc"`), so this is the path most consumers hit.
+  `meta-alp-sdk/recipes-bsp/u-boot/u-boot/0002-rzv2n-dev-ALP-E1M-production-boot.patch`
+  now re-loads the correct dtb from `CONFIG_BOOTCOMMAND` on **both**
+  branches, same load address `sd2load` already uses; the vendor
+  `emmcload` body itself is not visible in this patch's diff context
+  (fetched at build time, not vendored), so its own address/mmc-spec
+  could not be read directly — the eMMC `mmc 0:2` re-load instead
+  targets the address forced by the single shared `bootimage` step that
+  already consumes the SD fix's address, and the partition already
+  proven correct via `alp_root=/dev/mmcblk0p2`. The SD branch also
+  rooted at `/dev/mmcblk2p2`; `e1m-x-evk.dtsi:88-89` names the carrier
+  microSD `/dev/mmcblk1p2` (SDHI1, alias `mmc1`) — no third MMC
+  controller exists on this SoM. Both fixed; the eMMC branch's root
+  (`mmc0` → `mmcblk0p2`) was already correct. `docs/build-yocto-v2n.md`
+  updated to match. **Unverified on hardware** — this is a boot-path
+  change and no bitbake build/flash was run to confirm it.
 - **`alp-image-edge` silently omitted all `meta-rz-*` vendor payload
   (#1176).** `meta-rz-drpai`, `meta-rz-codecs`, and `meta-rz-opencva`
   each ship their runtime payload through their own
