@@ -45,24 +45,41 @@ IMAGE_INSTALL = " \
 # base/prod).
 #
 # mmngr-user-module / mmngrbuf-user-module ride in via lib-tvm's own
-# RDEPENDS. Deliberately NOT ported from meta-rz-drpai's own vendor
-# core-image-%.bbappend: its opencv/python3/sudo stack + libjpeg-turbo-dev
-# (all serve the vendor's Python demos; the Alp path is C through
-# <alp/inference.h>, and a -dev headers package has no business on a
-# target rootfs regardless), its update_issue() ROOTFS_POSTPROCESS_COMMAND
-# (case-matches only MACHINE rzv2n-evk/rzv2n-dev, so it would append
-# empty BOARD:/LSI: lines to /etc/issue on an e1m-* machine), and its
-# enable_sudo() (a NOPASSWD sudoers entry for the weston user -- a
-# security-posture decision not to inherit silently, least of all into
-# alp-image-base).
+# RDEPENDS. NOT ported from meta-rz-drpai's own vendor
+# core-image-%.bbappend: its python3-modules/-pip/-wheel/.../-opencv/
+# -pybind11 + sudo stack + libjpeg-turbo-dev (all serve the vendor's
+# Python demos; the Alp path is C through <alp/inference.h>, and a -dev
+# headers package has no business on a target rootfs regardless), its
+# update_issue() ROOTFS_POSTPROCESS_COMMAND (case-matches only MACHINE
+# rzv2n-evk/rzv2n-dev, so it would append empty BOARD:/LSI: lines to
+# /etc/issue on an e1m-* machine), and its enable_sudo() (a NOPASSWD
+# sudoers entry for the weston user -- a security-posture decision not
+# to inherit silently, least of all into alp-image-base). This excludes
+# meta-rz-drpai's OWN copy of `opencv`/`opencv-dev` specifically (the
+# ones paired with its python3-opencv demo chain) -- it does NOT mean
+# opencv is unavailable: meta-rz-opencva's `opencv` + `oca` ship
+# separately, RDEPENDS of packagegroup-alp-camera.bb, on any
+# alp-camera-enabled image (see that file). Two different vendor layers
+# happen to want the same package name for different reasons; only the
+# DRP-AI demo-chain route is excluded.
 #
 # Gated on the meta-rz-drpai LAYER being present (soft
-# LAYERRECOMMENDS_alp-sdk dep), never on MACHINE: naming the package
-# unconditionally would break recipe parsing for every consumer that
-# legitimately drops the RZ/V feature layers (e.g. the AEN and NX91
-# machines, which never build linux-renesas at all).
+# LAYERRECOMMENDS_alp-sdk dep -- its BBFILE_COLLECTIONS name, "rz-drpai",
+# not its directory name; see conf/layer.conf) AND MACHINE_FEATURES
+# containing "v2n" (set on all four V2N/V2M machine confs): a build can
+# legitimately carry this layer in bblayers.conf while building a
+# different MACHINE in the same tree (AEN, NX91 -- neither ever builds
+# linux-renesas), and kernel-module-mmngr has no COMPATIBLE_MACHINE guard
+# of its own to fall back on, so an unconditional RDEPENDS here would be
+# a hard `do_rootfs` dependency with no guaranteed provider on those
+# machines. Never gated on MACHINE alone (that would break parsing when
+# the layer itself is dropped). Same two-gate reasoning as
+# packagegroup-alp-camera.bb's ALP_RZ_CODECS_RDEPENDS -- see that file
+# for the full explanation, including the drp-fw COMPATIBLE_MACHINE
+# citation that is the concrete failure this closes. Settled by
+# inspection only; unverified by an actual `bitbake` run.
 ALP_RZ_DRPAI_INSTALL = "${@bb.utils.contains('BBFILE_COLLECTIONS', 'rz-drpai', \
-    'lib-tvm kernel-module-mmngr', '', d)}"
+    bb.utils.contains('MACHINE_FEATURES', 'v2n', 'lib-tvm kernel-module-mmngr', '', d), '', d)}"
 ALP_RZ_DRPAI_INSTALL[vardepvalue] = "${ALP_RZ_DRPAI_INSTALL}"
 
 IMAGE_INSTALL += " ${ALP_RZ_DRPAI_INSTALL}"

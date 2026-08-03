@@ -129,6 +129,17 @@ on it.  Only the e-con Systems MIPI camera patch requires a
 manufacturer contact, and it's optional (only needed if you
 populate `e-CAM22_CURZH` on the board).
 
+`meta-rz-graphics` does **not** have the #1176 defect the three layers
+above did (or the `alp-image-edge`-only fix): it carries no
+`core-image-%.bbappend` at all. Its `conf/layer.conf` `include`s
+`include/rz-graphics.inc` → `include/mali-graphics.inc`, which sets
+`IMAGE_INSTALL:append:mali-family` — a conf-level override, not a
+recipe-name-matched bbappend, so it reaches `alp-image-*` (or any other
+image recipe) normally regardless of what the image is called. Its
+Mali/Weston wiring was never affected; issue #1176's "Impact" list
+naming it alongside the other three was inaccurate, not merely unfixed
+— see the closing comment on #1176.
+
 Yocto release: **Scarthgap (5.0.11)**.  GCC 13.  Toolchain SDK:
 `bitbake core-image-weston -c populate_sdk` against the matching
 MACHINE.
