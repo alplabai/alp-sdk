@@ -303,7 +303,7 @@ def _clone_metadata_gates(repo_root: Path, tmp_repo: Path) -> None:
     # scaffolded one (alp-sdk#1110), defeating the isolation this helper
     # exists to provide.
     for script in ("validate_metadata.py", "check_inference_backend_parity.py",
-                   "alp_project_loader.py", "sentinels.py"):
+                   "alp_project_loader.py", "sentinels.py", "strict_loaders.py"):
         shutil.copy(repo_root / "scripts" / script, tmp_repo / "scripts" / script)
     # validate_metadata.py's #1025 ratchet (assert_exclusion_still_not_
     # buildable) needs the real alp_orchestrate package alongside it --

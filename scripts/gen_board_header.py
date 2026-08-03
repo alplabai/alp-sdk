@@ -289,6 +289,15 @@ def main() -> int:
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     written = 0
+    expected: set[Path] = set()
+    # slug -> source YAML path that claimed it.  Keyed on the slug ALONE:
+    # two board YAMLs with the identical `name:` (a preset copy-pasted
+    # and never renamed -- the realistic path) collapse onto the same
+    # slug just as surely as two distinct names that `_board_slug()`'s
+    # lossy case/`-`/`_` fold happens to collide on (e.g. `FOO-BAR` and
+    # `foo_bar`); without this check the second write would silently
+    # clobber the first with no error (#1128).
+    slug_owners: dict[str, Path] = {}
     for preset_path in sorted(BOARDS_DIR.glob("*.yaml")):
         doc = yaml.safe_load(preset_path.read_text(encoding="utf-8"))
         if not isinstance(doc, dict):
@@ -297,13 +306,41 @@ def main() -> int:
         out_text = emit_board(name, doc)
         if out_text is None:
             continue
-        out_path = OUT_DIR / f"alp_{_board_slug(name)}_routes.h"
+
+        slug = _board_slug(name)
+        if slug in slug_owners:
+            print(
+                f"gen_board_header: {slug_owners[slug].relative_to(REPO)} "
+                f"and {preset_path.relative_to(REPO)} both slugify to "
+                f"{slug!r} -- "
+                f"{OUT_DIR.relative_to(REPO)}/alp_{slug}_routes.h would be "
+                f"silently overwritten by whichever board is processed "
+                f"last.  Rename one of them.",
+                file=sys.stderr,
+            )
+            return 1
+        slug_owners[slug] = preset_path
+
+        out_path = OUT_DIR / f"alp_{slug}_routes.h"
         out_path.write_text(out_text, encoding="utf-8", newline="")
+        expected.add(out_path)
         print(
             f"wrote {out_path.relative_to(REPO)} "
             f"({len(out_text.splitlines())} lines)"
         )
         written += 1
+
+    # Reconciliation pass: a board YAML that was renamed or deleted must
+    # take its generated header with it -- otherwise the stale header
+    # stays committed (and the diff-only CI gate stays green, since it
+    # only ever compares files this script still touches) forever (#1128).
+    for existing in sorted(OUT_DIR.glob("alp_*_routes.h")):
+        if existing not in expected:
+            existing.unlink()
+            print(
+                f"removed orphaned {existing.relative_to(REPO)} "
+                f"(no matching board YAML)"
+            )
 
     if written == 0:
         print(

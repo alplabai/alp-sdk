@@ -721,15 +721,30 @@ stage_generated_files() {
             return 1
         fi
     fi
+    # `git diff` alone is blind to a brand-new file the regen step just
+    # created (a not-yet-tracked board header, an added pinmux table,
+    # ...) -- a plain diff --exit-code reports 0 and this stage stays
+    # green even though a newly-needed generated file is missing from
+    # the commit (#1128a, mirrors pr-generated-files.yml's own `git add
+    # -N` step).  Mark every generated path intent-to-add so a new file
+    # shows up as an addition in the diff below, without staging real
+    # content.
+    git add -N -- \
+        include/alp docs/abi src/cap.c src/status_strings.c \
+        metadata/catalog.json metadata/error-catalog.json metadata/pinmux \
+        docs/portability-matrix.md docs/peripheral-support-matrix.md \
+        docs/diagnostics 2>/dev/null
     # Ignore only the snapshot's "generated" date line, like the CI gate.
     if ! git diff --quiet --ignore-matching-lines='"generated":' -- \
             include/alp docs/abi src/cap.c src/status_strings.c \
-            metadata/catalog.json metadata/pinmux docs/portability-matrix.md \
+            metadata/catalog.json metadata/error-catalog.json metadata/pinmux \
+            docs/portability-matrix.md docs/peripheral-support-matrix.md \
             docs/diagnostics 2>/dev/null; then
         echo "generated files are OUT OF SYNC -- regenerated in place; git add + commit:"
         git --no-pager diff --stat --ignore-matching-lines='"generated":' -- \
             include/alp docs/abi src/cap.c src/status_strings.c \
-            metadata/catalog.json metadata/pinmux docs/portability-matrix.md \
+            metadata/catalog.json metadata/error-catalog.json metadata/pinmux \
+            docs/portability-matrix.md docs/peripheral-support-matrix.md \
             docs/diagnostics 2>/dev/null | tail -20
         return 1
     fi

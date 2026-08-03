@@ -130,6 +130,78 @@ global-flag-before-subcommand ordering, a verb that DOES accept a real
 positional (`tan flash`), a forwarding verb's anything-goes grammar, and the
 sample-output/fence-language exclusion.
 
+### Fixed — five "gate exists but cannot fail" defects across dev-review (#1127, #1128, #1129, #1130, #1138)
+
+`yaml.safe_load`/`json.loads` silently keep only the LAST value of a
+duplicated mapping key with no error — a duplicated `som:`/route key in a
+hand-edited `board.yaml` (or a SoM/chip/SoC/library manifest) dropped
+hardware configuration invisibly in a diff. Added `scripts/strict_loaders.py`
+(a duplicate-key-rejecting YAML loader + a `json.loads(object_pairs_hook=…)`
+wrapper) and routed every metadata ingestion boundary through it:
+`scripts/alp_cli/yaml_pos.py`'s position-aware mapping constructor,
+`scripts/alp_orchestrate/loader.py`'s `_load_yaml`/`_load_json` (+ the
+library-alias table load), and every board/SoM/hw-revisions/chip/block/
+library/SoC document load in `scripts/validate_metadata.py` (#1127).
+
+`pr-generated-files.yml`'s `git diff --exit-code` step is blind to a
+brand-new untracked file — a newly-needed generated board header could
+land un-committed and the gate would still report green. The step now
+`git add -N`s (intent-to-add) every generated path before diffing, so a
+new file shows up as an addition. `scripts/gen_board_header.py` also
+gained a reconciliation pass that deletes an orphaned
+`alp_<slug>_routes.h` whose source board YAML was renamed/deleted, and a
+slug-collision guard that fails closed when two distinct board `name:`s
+fold onto the same `_board_slug()` output path instead of silently
+letting the second write clobber the first (#1128).
+
+`check_example_portability.py`'s `check_no_zephyr_driver_includes()`
+allowlist check ran before the per-line scan, so allowlisting ONE
+`zephyr/drivers/*` include for an example silently exempted that example
+from every OTHER driver include too. `_ZEPHYR_DRIVER_INCLUDE_ALLOWLIST`
+is now keyed per `(example_key, driver)` and the allowlist check moved
+inside the loop (#1129).
+
+`check_supported_board_testcases()` joined every scalar string anywhere
+in `testcase.yaml` (descriptions, tags, names included) and did a bare
+substring check for `ALP_BOARD_<NAME>` — a `description:` merely
+mentioning the define satisfied `supported_boards:` with no real build
+scenario. It now parses the `tests:` scenario structure and checks only
+`extra_configs`/`extra_args` for an exact `-D<define>` compiler flag
+(#1130).
+
+`alp_ahrs_reset()` was the last untested portable-core API
+(`check_test_coverage.py --fail-on-gaps` HARD FAIL). Added ztests for
+the NULL-handle guard, identity restoration after filter drift, and
+post-reset filter usability (a reset filter converges identically to a
+freshly-initialised one under the same input) (#1138).
+
+**Round 2 (PR #1177 review):** each round-1 fix above was correct where
+applied and absent one site over.
+
+- `scripts/test-all.sh`'s `stage_generated_files` — the LOCAL mirror of
+  `pr-generated-files.yml`'s `git diff --exit-code` step — had the exact
+  same blind-to-a-new-untracked-file shape the CI copy was fixed for, but
+  never got its own `git add -N`. Since local-first CI is this repo's
+  documented flow, the sink developers actually hit stayed blind: proven
+  by `printf 'x\n' > include/alp/boards/alp_untracked_routes.h` then the
+  old `git diff --quiet …` → rc=0 (green over a missing generated file).
+  Added the same `git add -N` before the diff, and reconciled its path
+  list against CI's (it was missing `metadata/error-catalog.json` and
+  `docs/peripheral-support-matrix.md`).
+- `scripts/gen_board_header.py`'s slug-collision guard only fired when
+  `slug_owners[slug] != name` — so the more probable instance of the
+  clobber it names, two board YAMLs with the **identical** `name:` (a
+  preset copied and never renamed), stayed silent: `wrote
+  .../alp_e1m_x_evk_routes.h` printed twice, rc=0. Reworked to key on the
+  slug alone and report both source YAML *paths*, not both names.
+- `scripts/strict_loaders.py`'s duplicate-key scan ran on
+  `flatten_mapping()`'s OUTPUT, so a spec-legal `<<: *anchor` merge-key
+  override (an explicit sibling key overriding the anchor's value for the
+  same key) was misreported as a duplicate. The scan now runs on the
+  node's own explicit pairs before `flatten_mapping()` splices the anchor
+  in. Latent only — no committed `metadata/**` document uses YAML anchors
+  today — fixed ahead of the first one that does.
+
 ### Fixed — two path-traversal bugs: `tan model build` and untrusted template catalogs (#1125, #1126)
 
 `tan model build` (`scripts/alp_model/build.py`) wrote its packaged model to
@@ -369,6 +441,180 @@ windows themselves are the guard, since the link address moves per core.
 
 **BENCH-GATED: this fix has NOT been run on real E8 silicon and must not
 merge without that run.**
+
+### Fixed — `alp_handle_begin_close()` busy-spin could deadlock under priority scheduling (#1114)
+
+`src/common/alp_slot_claim.h`'s `alp_handle_begin_close()` drained
+in-flight ops with a bare busy-spin, defended on op *duration* ("every op
+it drains is short, so it finishes in a handful of instructions"). That
+defence never considered *priority*: on Zephyr's single-core preemptive-
+priority scheduler, a higher-priority closing thread spinning in a tight
+loop never yields the core back to a lower-priority thread, however few
+instructions that thread needs to reach `alp_handle_op_leave()` — the
+spin runs forever. Reachable from ordinary public API `close()` calls
+across 20+ dispatchers (`adc`, `gpio`, `i2c`, `spi`, `security`,
+`update_log`, and more). `alp_handle_begin_close()` is now a thin
+wrapper over the same sleep-poll drain `alp_handle_begin_close_blocking()`
+already used for genuinely-blocking ops (`src/common/alp_slot_claim.c`):
+a real sleep removes the closing thread from the ready queue, letting
+the scheduler run a strictly lower-priority op thread — something a spin
+(or a same-priority-only `k_yield()`) cannot do. Short ops still close
+fast in practice (the drain's first check usually already sees
+`active_ops` back at 0). `tests/yocto/slot_claim_race.c`'s existing #629
+mechanism-level races (close-under-active-op, double-close) already
+exercise the new implementation and stay green; the ISR/non-preemptive
+paths are unaffected since no `close()` in this codebase is ever invoked
+from interrupt context.
+
+**Round 2 (dev review):** the fix above shipped a NEW unbounded hang.
+`ensure_psa()` in `src/backends/security/zephyr_drv.c` — the one-time
+`psa_crypto_init()` election #1115 below also describes — waited with
+`while (!g_psa_inited) k_sleep(...)`, but the elected initialiser's
+FAILURE path only releases its claim and returns the error to itself;
+it never sets `g_psa_inited`. Every thread that lost the race then hung
+in that loop forever, worse than the pre-#1114 behaviour (which simply
+returned the error to each caller). Fixed by looping the whole
+elect-or-wait attempt instead of waiting on a flag the failure path
+never sets: once the failed initialiser releases its claim, a waiter
+re-wins `alp_slot_try_claim()` and retries `psa_crypto_init()` itself.
+Added `tests/yocto/elect_once_init_race.c`, a mechanism-level regression
+mirroring the algorithm shape (the real function is Zephyr/mbedtls-PSA
+locked and can't run host-side); mutation-proved by reverting to the
+wait-on-flag-only shape (the watchdog-bounded test then fails cleanly
+instead of hanging the run) and restoring (green).
+
+Also, `alp_handle_begin_close()` (the "short-op" name) had become a
+pure one-line alias for `alp_handle_begin_close_blocking()` once the
+busy-spin was removed, leaving two names for identical behaviour and
+~12 stale comment blocks across 9 dispatchers (plus `rpc_dispatch.c`
+and `src/update_log/engine.c`) that still described a distinction that
+no longer existed. Collapsed: every call site now calls
+`alp_handle_begin_close_blocking()` directly, the alias is gone, and
+the misleading comments were corrected.
+
+### Fixed — sidecar backend pools claimed non-atomically, aliasing concurrent handles (#1115)
+
+`src/backends/security/zephyr_drv.c`, `src/backends/security/
+se_cryptocell.c`, `src/backends/audio/zephyr_drv.c`, and `src/backends/
+dsp/sw_fallback.c` each scanned their static backend-object pool with a
+plain read-then-write `in_use` check, called from `ops->open()` — after
+only the *frontend* dispatcher slot was claimed atomically — so two
+threads opening concurrently could alias one backend object. In the
+security backends that's crypto cross-talk (a shared `psa_hash_operation_t`
+/ AES-GCM key); the DSP fallback's `acquire_be_slot()` was worse: it
+returned a pointer without setting `in_use` at all, leaving the entire
+`sw_open()` body (a full `memset` + per-stage validate/copy) as a TOCTOU
+window. Every pool now claims through the existing `alp_slot_try_claim()`
+(`src/common/alp_slot_claim.h`); the DSP fallback's claim moved to the
+point of acquisition instead of the end of `open()`. `zephyr_drv.c`'s
+`g_psa_inited` one-time-init flag had the same check-then-set race (two
+threads racing the first `alp_hash_open()`/`alp_aead_open()`/
+`alp_random_bytes()` call could both call `psa_crypto_init()`
+concurrently); it now elects exactly one initialiser via the same atomic
+claim, with every other caller sleep-waiting (not spinning, per #1114
+above) for it to publish.
+
+**Round 2 (dev review):** the round-1 fix covered exactly four files by
+name; the same unclaimed-acquire shape was found by grep in two more
+places, including one identical-in-kind to the DSP fallback's
+whole-open()-body TOCTOU window:
+`src/zephyr/peripheral_adc.c`'s `alp_adc_filter_pool_acquire()` /
+`alp_adc_spectrum_pool_acquire()` returned a pointer with `in_use` set
+only at the very end of `alp_adc_filter_open()` /
+`alp_adc_spectrum_open()`. Plus a plain check-then-set sweep across
+every other backend pool named in the follow-up review:
+`src/backends/adc/{alif_e7,alif_e8,gd32_bridge,zephyr_drv}.c`,
+`src/backends/camera/{alif_isp_pico,v2n_n44_isp,zephyr_video}.c`,
+`src/backends/can/zephyr_drv.c`, `src/backends/dac/gd32_bridge.c`,
+`src/backends/gpio/cc3501e_proxy.c`, `src/backends/i2s/zephyr_drv.c`,
+`src/backends/jpeg/alif_hantro.c`, `src/backends/mqtt/yocto_drv.c`,
+`src/backends/pwm/gd32_bridge.c`, `src/yocto/{peripheral_i2c,
+peripheral_spi,peripheral_uart,inference_yocto}.c` — all now claim
+through `alp_slot_try_claim()`, with `in_use` moved to the last struct
+member where it wasn't already (so a partial `memset`/reset can zero
+every other field without ever transiently un-claiming the slot).
+`src/yocto/peripheral_gpio.c` was reviewed and left unchanged: its pool
+is already fully serialised by a real mutex (`g_irq.mu`), not a plain
+check-then-set — converting it to the atomic-flag primitive would have
+been no-op busywork on top of an already-correct design.
+
+Also closed the "no regression test at all" gap: every `in_use` read
+across the three round-1 files (`zephyr_drv.c`, `se_cryptocell.c`,
+`dsp/sw_fallback.c`) now goes through `__atomic_load_n(__ATOMIC_ACQUIRE)`
+instead of a plain load, so no access to the flag mixes atomic and
+non-atomic operations on the same object.
+
+### Fixed — SHA-256 word assembly invoked signed left-shift UB (#1117)
+
+`src/update_log/sha256.c`'s `sha256_transform()` built each 32-bit
+message word as `(data[j] << 24) | ...` where `data[j]` is `BYTE`
+(`unsigned char`); integer promotion made every shift operand an `int`,
+and left-shifting a promoted byte ≥ 0x80 by 24 sets the sign bit of that
+`int` — undefined behaviour, routinely triggered by ordinary binary
+firmware payloads hashed by `ulog_sha256()` (`src/update_log/engine.c`).
+Each byte is now cast to `uint32_t` before shifting.
+
+**Round 2 (dev review):** the round-1 fix covered `sha256.c` only;
+`src/backends/gpu2d/sw_fallback.c`'s `_blend_px()` has the identical
+shape in its `ADDITIVE`/`MULTIPLY` blend arms (`SRC_OVER` was already
+correct) — `_u8()` returns `uint8_t`, which integer-promotes to
+`(signed) int`, so `_u8(x) << 24` is signed-overflow UB whenever the
+clamped byte is >= 0x80 (an opaque alpha channel, the common case).
+Every `_u8()` result is now cast to `uint32_t` before the shift. Added
+an opaque-alpha `ADDITIVE`/`MULTIPLY` case to
+`tests/yocto/gpu2d_dispatcher.c` plus a new `alp_test_gpu2d_ubsan` CTest
+entry that runs the same binary under `-fsanitize=undefined` (mirroring
+the RPC suite's `run_sanitized_rpc_tests.sh`) — a plain build does not
+discriminate pre-/post-fix here, since every mainstream two's-complement
+compiler already emits the "obviously correct" bit pattern
+un-instrumented; only UBSan catches the shift itself.
+
+### Fixed — repeated `alp_ble_open()` violated the documented singleton contract (#1118)
+
+`include/alp/ble.h` documents `alp_ble_open()` as returning the same
+pointer on every call (BLE is a system singleton) and `alp_ble_close()`
+as tearing the controller down only on the last matching close.
+`src/ble_dispatch.c`'s `_alloc_radio()` was a plain pool allocator with
+no notion of "already open"; with the default pool size of 1, a second
+`alp_ble_open()` found the one slot claimed and surfaced
+`ALP_ERR_NOMEM` instead of the same pointer — the CC3501E backend's own
+`refcount++`/`--` (`src/backends/ble/cc3501e.c`) was dead code, only
+ever reached on the single real `ops->open()`/`ops->close()` call.
+`alp_ble_open()` now first tries to join an already-open radio via an
+atomic increment-if-nonzero on a new `struct alp_ble::refcount`, falling
+back to `_alloc_radio()` only when no joinable radio exists;
+`alp_ble_close()` decrement-and-checks the same counter and only tears
+the controller down on the reference that observes the count reach 0.
+Deliberately not routed through the lifecycle-gated `alp_handle_op_enter`/
+`begin_close` machinery, which would let a joiner "resurrect" a handle a
+closer has already committed to tearing down — see the "Issue #1118"
+header comment in `src/ble_dispatch.c` for why increment-if-nonzero /
+decrement-and-check-last is race-free where that would not be.
+
+**Round 2 (dev review):** the round-1 fix still broke under a genuinely
+CONCURRENT `alp_ble_open()`. `_alloc_radio()` sets `in_use` before
+`ops->open()` runs, and `refcount` is not published until `ops->open()`
+succeeds — a second thread's `alp_ble_open()` landing in that window saw
+`in_use == true` / `refcount == 0`, declined to join (refcount says
+nothing to join yet), found the size-1 pool's only slot already
+claimed, and returned `NULL`/`ALP_ERR_NOMEM` — the original #1118
+symptom, reintroduced by the join-on-open fix itself. `alp_ble_open()`
+now retries the join scan with a real sleep (`alp_slot_sleep_tick()`,
+newly exposed from `src/common/alp_slot_claim.c`) between attempts
+instead of falling straight through to allocate-and-fail, until every
+`in_use && refcount == 0` slot resolves one way or the other (a
+publish, or a release from a failed open/an in-progress close).
+Separately, `alp_ble_close()`'s unconditional `__atomic_fetch_sub()` on
+`refcount` underflowed to `~0u` on a double/stray close — against
+`<alp/ble.h>`'s documented "second close is a safe no-op" contract, and
+a corrupted large-nonzero refcount is exactly what could let a
+concurrent `alp_ble_open()` wrongly "join" a handle mid-teardown.
+Replaced with a decrement-if-nonzero CAS (`_radio_try_leave()`) mirroring
+the existing `_radio_try_join()`. Added a genuinely concurrent-open
+regression to `tests/yocto/ble_dispatch_self_close.c` (the round-1 test
+only ever hand-built the first handle and called `alp_ble_open()`
+single-threaded) plus a stray-third-close underflow check; both
+mutation-proved against the round-1 shapes (fail) and the fix (pass).
 
 ### Fixed — `test-all.sh` ran 1 of 34 required gate scripts on Windows (#1109)
 
