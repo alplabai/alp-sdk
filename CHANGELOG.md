@@ -7,6 +7,44 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Added — per-instance RZ/V2N peripheral data (#1154)
+
+- **`metadata/socs/renesas/rzv2n/n44.json` gains a `peripheral_instances`
+  block: per-instance register base/size + interrupts for `i2c` (RIIC0-8),
+  `uart` (SCI0-9), `timer_32bit_gpt` (GPT0-15) and `timer_32bit_gtm`
+  (GTM0-7).** `peripherals:` was previously counts only (`"i2c": 9`), so
+  the two consumers that needed a real address —
+  `metadata/renode/renesas_rzv2n.repl:61` (CPG/ICU) and `:71` (RIIC8 /
+  BRD_I2C) — hand-transcribed it. New generator
+  `scripts/gen_soc_peripheral_instances.py` (`--check` mode included)
+  mechanically projects `reg`/`interrupts` from the vendored Zephyr SoC
+  devicetree the M33 board `.dts` already `#include`s
+  (`dts/arm/renesas/rz/rzv/r9a09g056.dtsi`) — the same file the repl's
+  hand-placed RIIC8 base (`0x41c01000`) was manually copied from, now
+  regenerated instead. `peripheral_instances` is additive: `peripherals:`
+  is untouched and every existing consumer (`gen_soc_caps.py`,
+  `gen_support_matrix.py`, `validate_metadata.py`, the studio compat
+  pass) is unaffected. `metadata/schemas/soc-spec-v1.schema.json` gains
+  the matching optional `peripheral_instances` property.
+  - Coverage is deliberately partial: of n44.json's 27 `peripherals:`
+    keys, only the four above are projected (their DTSI node count is an
+    exact match for the `peripherals:` count). `adc_12bit` and `gpio`
+    ARE modelled in the DTSI (3 ADC units, 12 GPIO ports) but at a
+    different instance granularity than their count (24 channels, 86
+    pins), so they are deliberately left unprojected rather than emit a
+    count-mismatched list. The DTSI carries no `clocks = <&cpg ...>`
+    reference at all, so no `clocks` field is emitted anywhere. The
+    remaining 21 keys have no node in this devicetree at all. Every skip
+    is printed on every run. `metadata/renode/renesas_rzv2n.repl` is
+    intentionally untouched — retiring its hand-placement onto this data
+    is separate follow-up work.
+  - `--check` runs from `pr-twister.yml`'s `matrix.shard == 1` leg (the
+    only CI job that checks out the Zephyr module), mirroring
+    `check_emit_kconfig_contract.py`'s precedent; it is not wired into
+    `pr-generated-files.yml`, which never checks out Zephyr. Both modes
+    skip cleanly (`skipped: ...`, exit 0) when no Zephyr checkout
+    resolves, so a plain `west init`-less clone stays unaffected.
+
 ### Fixed — three V2N build/boot defects (#1175, #1176, #1158)
 
 - **microSD *and* eMMC boot loaded a dtb the image never builds; microSD
