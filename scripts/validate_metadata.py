@@ -208,6 +208,56 @@ def _check_silicon_capability_restrictions(som_files) -> list:
     return failures
 
 
+def _check_som_peripheral_instance_uniqueness(som_files) -> list:
+    """Reject duplicate `instance` slugs within one preset's `soc_peripheral_instances`.
+
+    The schema has no per-key uniqueness constraint for this array -- JSON
+    Schema `uniqueItems` only rejects two byte-identical objects, so two
+    entries naming the same `instance` slug with a different `class` /
+    `driver_status` validate cleanly today.  #655's DT/pinctrl generation
+    binds nodes by this slug, so a duplicate is a real generation hazard,
+    not an editorial nit.  Returns a failure list shaped like
+    `_check_files()`.  Presets without the block are skipped.
+    """
+    failures: list[tuple[Path, list[str]]] = []
+    for path in som_files:
+        rel = path.relative_to(REPO).as_posix()
+        try:
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue
+        entries = doc.get("soc_peripheral_instances")
+        if not isinstance(entries, list):
+            continue
+
+        counts: dict[str, int] = {}
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            inst = entry.get("instance")
+            if isinstance(inst, str):
+                counts[inst] = counts.get(inst, 0) + 1
+
+        msgs = [
+            f"soc_peripheral_instances: instance `{inst}` declared {count} "
+            f"times -- slugs must be unique within a preset (#655 binds DT "
+            f"nodes by this name)"
+            for inst, count in sorted(counts.items()) if count > 1
+        ]
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+        else:
+            print(f"OK   {rel}  (soc_peripheral_instances: {len(entries)} "
+                  f"unique instance slug(s))")
+    return failures
+
+
 def _check_silicon_kconfig() -> list:
     """Validate the silicon->Kconfig registry and its socs/ correspondence.
 
@@ -963,6 +1013,12 @@ def main() -> int:
         print()
         restriction_failures = _check_silicon_capability_restrictions(som_files)
 
+    # SoM `soc_peripheral_instances[].instance` slug uniqueness.
+    instance_uniqueness_failures: list = []
+    if som_files:
+        print()
+        instance_uniqueness_failures = _check_som_peripheral_instance_uniqueness(som_files)
+
     # Silicon -> Kconfig registry + socs/ correspondence.
     print()
     silicon_kconfig_failures = _check_silicon_kconfig()
@@ -979,6 +1035,7 @@ def main() -> int:
                       + len(library_failures) + len(library_semantic_failures)
                       + len(board_target_failures)
                       + len(restriction_failures)
+                      + len(instance_uniqueness_failures)
                       + len(silicon_kconfig_failures)
                       + len(peripheral_kconfig_failures)
                       + len(tier_a_library_ci_failures))

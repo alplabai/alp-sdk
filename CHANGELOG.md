@@ -17,6 +17,147 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 - Updated the Tan documentation-surface gate to parse both the frozen
   Rust/Clap v0.4 help format and the Python/Typer Rich help format during the
   release transition.
+- Restored honest hedging the sweep above over-confidently dropped: the
+  `bootstrap-v1.schema.json` `verdict` description no longer claims a
+  tan-cli test asserts `WORKSPACE_BLOCKING` parity (none does —
+  `parse_bootstrap_manifest` never reads the `verdict` key at all);
+  `toolchains.json`'s `_comment` regains the historical `SDK_VER=0.16.8`
+  anti-example and the #1012 CI-scope caveat; and `zephyr.pythonMinVersion`'s
+  description now correctly says `tan bootstrap`/`tan doctor` enforce the
+  effective floor (tan-cli#270) by reading the pinned Zephyr checkout's own
+  `cmake/modules/python.cmake` directly, not this manifest field.
+
+### Fixed — V2N/V2M SoC-internal IP maturity was comments-only, and further routed nets stayed undeclared (#1169, #1170)
+
+#1183 closed both issues prematurely: it added a `driver_status` enum
+(`metadata/schemas/som-preset-v1.schema.json`) but applied it only to its
+own new `soc_peripheral_instances` entries, leaving `nor_flash`, `emmc` and
+the MHU mailbox tracked by YAML comment only (#1169's actual ask), and it
+declared twelve `soc_peripheral_instances` while the TSV routed several
+more nets the issue named that stayed neither declared nor excluded
+(#1170).
+
+**#1169.** `on_module.nor_flash` / `on_module.emmc` each gained a sibling
+`nor_flash_driver_status` / `emmc_driver_status` field (`none` on all four
+presets — both name a SoC controller, not a chip slug, so there is no
+`chips/<part>/` driver to tier per ADR 0017). `mailbox:` gained
+`driver_status` + `notes`: `driver_status: partial` is the closest single
+enum value for the MHU-B link (PR #1189 bounded it precisely — A55->M33
+receive is silicon-proven under #697, `mbox_send()`/M33->A55 is unexercised
+and does not reach the A55 GIC on this topology), and since one enum value
+can't express *which* direction, `notes` carries the exact split verbatim
+from `zephyr/drivers/mbox/mbox_renesas_rz_mhu_b.c`. The three new fields
+share `$defs/driver_status` with `soc_peripheral_instance.driver_status`
+so the vocabulary can't drift apart per field.
+
+**#1170.** Verified every net the issue named against
+`metadata/e1m_modules/v2n/renesas-peripheral-map.tsv` line by line:
+- `sd1` (SD1CLK/CMD/DAT0-3, tsv:103-108) is now a declared
+  `soc_peripheral_instances` entry (`class: sdio` — distinct from SD0's
+  `sdio_emmc`); its card-detect/power-enable pads (tsv:109-110) and the
+  microSD socket's control GPIOs (`SDCARD_RST` tsv:111, `µSD1_V_SEL`
+  tsv:2) are recorded on that entry's `notes`, not as separate instances.
+- `BT_UART` (tsv:12-15) and `BT_I2S` (tsv:8-11) are explicitly excluded
+  (documented in a preset comment): their pad names carry no channel
+  number, so binding them to one of the SoC's 10 UART / 10 I2S instances
+  would mean inventing which channel; they are also already the
+  populated `wifi_ble: murata_lbee5hy2fy` combo chip's dedicated
+  HCI-UART/PCM-audio interface, not a free/spare instance.
+- `Audio_CLKB`/`Audio_CLKB_OE`/`Audio_CLKC` (tsv:3-5) and `BL_PWM`
+  (tsv:6) are explicitly excluded: clock-output/PWM pins, not a
+  bus/interface peripheral — no class in the SoC JSON's `peripherals:`
+  block names a clock or PWM family.
+
+Also fixed two review findings from the same block: `i2s_ssiu0`/`1`
+(SSIU0 doesn't exist on this pad map) renamed to `i2s0`/`i2s1`, matching
+`ALP_E1M_X_I2S0`/`I2S1` in `include/alp/e1m_x_pinout.h` and the existing
+`ssiu_to_i2s0` alias in `scripts/check_e1m_route_capability.py`; and
+`soc_peripheral_instances[].instance` now has a real uniqueness check
+(`scripts/validate_metadata.py`, `_check_som_peripheral_instance_uniqueness`)
+since JSON Schema `uniqueItems` only rejects two byte-identical entries,
+not two entries sharing a slug with a different `class`/`driver_status` —
+exactly the shape #655's DT/pinctrl generation binds nodes by.
+
+The shared `mailbox:` + `soc_peripheral_instances:` block stays
+byte-identical across all four V2N/V2M presets (verified by checksum).
+
+### Added — per-instance RZ/V2N peripheral data (#1154)
+
+- **`metadata/socs/renesas/rzv2n/n44.json` gains a `peripheral_instances`
+  block: per-instance register base/size + interrupts for `i2c` (RIIC0-8),
+  `uart` (SCI0-9), `timer_32bit_gpt` (GPT0-15) and `timer_32bit_gtm`
+  (GTM0-7).** `peripherals:` was previously counts only (`"i2c": 9`), so
+  the two consumers that needed a real address —
+  `metadata/renode/renesas_rzv2n.repl:61` (CPG/ICU) and `:71` (RIIC8 /
+  BRD_I2C) — hand-transcribed it. New generator
+  `scripts/gen_soc_peripheral_instances.py` (`--check` mode included)
+  mechanically projects `reg`/`interrupts` from the vendored Zephyr SoC
+  devicetree the M33 board `.dts` already `#include`s
+  (`dts/arm/renesas/rz/rzv/r9a09g056.dtsi`) — the same file the repl's
+  hand-placed RIIC8 base (`0x41c01000`) was manually copied from, now
+  regenerated instead. `peripheral_instances` is additive: `peripherals:`
+  is untouched and every existing consumer (`gen_soc_caps.py`,
+  `gen_support_matrix.py`, `validate_metadata.py`, the studio compat
+  pass) is unaffected. `metadata/schemas/soc-spec-v1.schema.json` gains
+  the matching optional `peripheral_instances` property.
+  - **`base`/`size` are lowercase `0x`-prefixed hex STRINGS** (e.g.
+    `"base": "0x41c01000"`), constrained by a `^0x[0-9a-f]+$` schema
+    pattern — matching the DTSI's own `i2c@44400400` literal style and
+    every other address already in this repo's metadata; JSON has no hex
+    literal, and a decimal int hides a transposed digit a hex string
+    makes visible on sight. `index`/`irq`/`priority` stay decimal ints,
+    matching how the DTSI writes `channel = <0>` / `interrupts = <406 1>`
+    and how Zephyr writes IRQ numbers everywhere else.
+  - Coverage is deliberately partial: of n44.json's 27 `peripherals:`
+    keys, only the four above are projected (their DTSI node count is an
+    exact match for the `peripherals:` count). `adc_12bit` and `gpio`
+    ARE modelled in the DTSI (3 ADC units, 12 GPIO ports) but at a
+    different instance granularity than their count (24 channels, 86
+    pins), so they are deliberately left unprojected rather than emit a
+    count-mismatched list. The DTSI carries **no `clocks` property at
+    all** — confirmed by grep, not even a raw `<&cpg ...>` phandle — so
+    no `clocks` field is emitted anywhere; treat this as "absent", not
+    merely "not covered". The remaining 21 keys have no node in this
+    devicetree at all. Every skip is printed on every run.
+    `metadata/renode/renesas_rzv2n.repl` is intentionally untouched —
+    retiring its hand-placement onto this data is separate follow-up
+    work.
+  - **`--check` runs in its own advisory CI job**,
+    `.github/workflows/pr-metadata-peripheral-instances.yml` — moved out
+    of `pr-twister.yml`'s `matrix.shard == 1` leg in a second review
+    round: that job's Zephyr pin is the FULL twister oracle, so a future
+    version bump touching `r9a09g056.dtsi` would fail the required
+    `twister-shard 1/4` → `twister · native_sim/native/64` aggregator and
+    block every PR to `dev`, not only V2N ones, under a context name that
+    says nothing about metadata. The dedicated job sparse-checks-out just
+    the one DTSI file at the pinned tag (derived from
+    `metadata/bootstrap.json` at run time, never a second hardcoded
+    literal) and runs in seconds. It is advisory (non-required) while the
+    pattern proves itself, same graduation path as `pr-renode-aen-smoke.yml`
+    (#974) / `pr-renode-v2n-sci0-smoke.yml` (#1187).
+    `ALP_REQUIRE_ZEPHYR_ORACLE=1` (same escape hatch
+    `check_bootstrap_manifest.py` / `check_toolchain_lock.py` use) turns
+    an unresolvable checkout in that job into a hard failure instead of a
+    skip — that job PROMISES the oracle, so an unresolvable one there is
+    a bug in its own setup.
+  - Both modes still skip cleanly (exit 0) on a machine with no Zephyr
+    checkout, but `scripts/test-all.sh`'s `generated-files` stage now
+    DOES run this generator (plain, unsuppressed, unlike the other seven
+    `gens`) specifically so a contributor sees the `skipped: ...` line
+    instead of every stage reading PASS with no signal that this one
+    fact went unchecked; when `$ZEPHYR_BASE` resolves locally, that stage
+    actually regenerates + diffs `n44.json`, catching real drift the same
+    way CI does. The schema's `^0x[0-9a-f]+$` pattern on `base`/`size` is
+    a further, independent guard that doesn't depend on `--check` having
+    run at all.
+  - Three more silent-degradation classes escalate to a hard failure now
+    (none of them change the emitted instance COUNT, so the existing
+    count-vs-`peripherals:` guard could not catch any of them alone): an
+    unresolved `reg` size macro (e.g. a future `DT_SIZE_M(n)`), a node
+    with no `channel` cell (previously defaulted `"index": 0` silently,
+    contradicting the schema's own "never inferred from array position"),
+    and a multi-cell `reg` property (previously silently truncated to
+    its first cell).
 
 ### Fixed — bring-up guide claimed `tps628640_set_voltage_mv` was unimplemented (#1166)
 

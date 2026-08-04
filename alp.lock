@@ -1,7 +1,7 @@
 {
   "digests": {
-    "metadata": "sha256:86c244b336f6f8747328b3178a4756b41b2ac7d6c7d86d73300a6453f5d238d6",
-    "schemas": "sha256:9ca09b02560b7db085681956e6d0901c2ff9f99a74f2698a53fb64c15725f99c"
+    "metadata": "sha256:e69e9fd96c311e1b9e103d90f8f0bd7c8062c425d78987494c3709168667dc81",
+    "schemas": "sha256:77f214496477866d2211f74ea14b20c9eda281362dd0ef4b3302402197521d58"
   },
   "generatedBy": "west alp-lock",
   "libraries": [
@@ -213,7 +213,7 @@
     "groupsEnabled": []
   },
   "sdk": {
-    "revision": "c1c7f674154c61919c6a682b4a0cb1e711dc2891",
+    "revision": "ec405f68ee88a755192f11653c29826eb98b91c5",
     "version": "0.15.0"
   },
   "west": {
