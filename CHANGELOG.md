@@ -55,12 +55,17 @@ the `raw_shmem` mechanism rather than inventing a parallel one: any core
 named as an rpmsg endpoint with no `cacheable: true` gets
 `CONFIG_DCACHE=n`. Because the function is board/SoC-agnostic (keyed off
 `ipc:`, not a vendor check — same as `raw_shmem` already was), this also
-reaches `examples/multicore/rpmsg-v2n` and
-`examples/multicore/heterogeneous-offload`'s rpmsg entries, which carried
-the same implicit-non-cacheable shape with no `CONFIG_DCACHE=n` before
-either; on V2N's CM33 this is expected to be a no-op (no D-cache to turn
-off) rather than a behaviour change, but it wasn't specifically
-re-verified as part of this change.
+reaches `examples/multicore/rpmsg-v2n`,
+`examples/multicore/heterogeneous-offload` and
+`examples/multicore/rpmsg-imx93`, which carried the same
+implicit-non-cacheable shape with no `CONFIG_DCACHE=n` before either.
+Verified rather than assumed: Zephyr's
+`arch/arm/core/cortex_m/Kconfig` does not `select CPU_HAS_DCACHE` for
+`CPU_CORTEX_M33`, so the emission is a genuine no-op on V2N's `m33_sm`,
+NX9101's `m33` and i.MX 93's `m33`; `CPU_CORTEX_M55` does select it, so
+AEN's `m55_hp` is the one core where this is a real (and intended)
+behaviour change. The Linux-side cores cannot be reached at all —
+`_slice_alp_conf` runs only for `os: zephyr` slices.
 
 `cacheable: true` is now actively dangerous for `kind: rpmsg`, not merely
 unused: after this change it selects the branch that skips
@@ -78,10 +83,16 @@ Real fix — `sys_cache_data_flush_range()` on the writer and
 `sys_cache_data_invd_range()` on the reader in `<alp/rpc.h>` — is
 explicitly NOT implemented here. That needs the same kind of AEN bench
 sweep #1080 ran to prove it actually eliminates stale lines under
-D-cache-on, and this change ships no such proof; `docs/heterogeneous-
+D-cache-on, and this change ships no such proof.
+
+Three documentation sites described the OLD contract and are corrected
+here, since this change is what made them false: `docs/heterogeneous-
 builds.md` §10 and `docs/v0.6-tbd-and-assumptions.md`'s open-items table
-already track that gap against #1088 and are unchanged here — they were
-already accurate.
+both still presented `cacheable: true` as a legal per-entry opt-in, and
+`examples/multicore/rpmsg-aen/README.md` still described its own
+carve-out as cacheable — contradicting the `board.yaml` in the same
+example that this change edits. All three now state that the opt-in is
+rejected and that `CONFIG_DCACHE=n` is emitted instead.
 
 Added `test_load_board_yaml_rejects_rpmsg_cacheable_true`
 (`tests/scripts/test_orchestrate_loader.py`) and widened
