@@ -181,8 +181,11 @@ blocked until the remediation is met. Tracked in #855.
    `composed-route-table` is an intentional maintainer-only pad-route
    regression/demonstrator tool with no product consumer; and the
    remaining four (`hw-info-h`, `west-libraries`, `os-topology`,
-   `zephyr-board`) are real gaps with no design reason for the absence,
-   filed as `tan-cli`#113–#116.
+   `zephyr-board`) were real gaps with no design reason for the absence,
+   filed as `tan-cli`#113–#116 -- all four CLOSED, all four targets now
+   present in Python Tan's `--target` set
+   (`python/tan/commands/generate_cmd.py:139-160`), so this row of
+   `docs/cli.md`'s gap table is stale and should be dropped.
 
 7. **(2026-07-28) Remediation status — point 1's gate is met on two of its
    three conditions, and its "blocks any release/tag" clause was overtaken by

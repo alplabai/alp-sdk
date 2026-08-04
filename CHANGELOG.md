@@ -20,12 +20,29 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 - Restored honest hedging the sweep above over-confidently dropped: the
   `bootstrap-v1.schema.json` `verdict` description no longer claims a
   tan-cli test asserts `WORKSPACE_BLOCKING` parity (none does —
-  `parse_bootstrap_manifest` never reads the `verdict` key at all);
-  `toolchains.json`'s `_comment` regains the historical `SDK_VER=0.16.8`
-  anti-example and the #1012 CI-scope caveat; and `zephyr.pythonMinVersion`'s
-  description now correctly says `tan bootstrap`/`tan doctor` enforce the
-  effective floor (tan-cli#270) by reading the pinned Zephyr checkout's own
-  `cmake/modules/python.cmake` directly, not this manifest field.
+  `parse_bootstrap_manifest` never reads the `verdict` key at all), and
+  `zephyr.pythonMinVersion`'s description is back to its original wording:
+  no consumer reads this key today; a project-aware executor enforcing it
+  is still the outstanding half of issue #1078 (tan-cli#270).
+  `metadata/toolchains.json`'s `_comment` is left byte-identical to `dev` —
+  a shortening was considered, but tan-cli vendors this file byte-for-byte
+  (`contract/fixtures/toolchains/toolchains.json`) and hard-fails on any
+  difference with no "predates the feature" branch, so any edit here breaks
+  a required cross-repo gate on merge.
+- Fixed `scripts/check_tan_docs_surface.py`'s `_OPTION_LINE_RE`: it rejected
+  two shapes real Python Tan's Rich-rendered `--help` actually produces — a
+  long `<a|b|c>` choice metavar wrapped across the option's own continuation
+  row, and two long flag names comma-joined with no space
+  (`--board,--board-yaml`) — false-failing `tan-docs-drift` against a real
+  `tan 0.5.0`. Added regression tests pinned to real `tan --help` captures
+  for both shapes.
+- `VERSIONS.md`'s v0.15.0 row claimed "released 2026-07-31"; only
+  `v0.15.0-rc1` is tagged (`v0.14.0` remains GitHub's Latest release) —
+  corrected to "candidate". `docs/adr/0020-sdk-owns-build-execution.md`'s
+  `tan-cli`#113–#116 gap list is stale: all four issues are CLOSED and
+  their `--target` values (`hw-info-h`/`west-libraries`/`os-topology`/
+  `zephyr-board`) are live in `python/tan/commands/generate_cmd.py`,
+  already reflected correctly in `docs/cli.md`.
 
 ### Fixed — V2N/V2M SoC-internal IP maturity was comments-only, and further routed nets stayed undeclared (#1169, #1170)
 

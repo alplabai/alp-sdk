@@ -509,9 +509,23 @@ def _has_legacy_passthrough_args(help_text: str) -> bool:
 # `west`, no network, no real build -- the same non-executing spirit as
 # `check_surface`'s `--help`-only approach.
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+# `flags`: one or more `-x`/`--long-name` tokens, comma-joined. Typer/Rich
+# renders a multi-name option as `--board,--board-yaml` (NO space after the
+# comma) when both names are long; the classic Clap/Click `-w, --flag` short-
+# alias form (WITH a space) still has to keep matching too, so the separator
+# is `,\s*` (zero or more spaces), not a fixed one or the other.
+# `metavar`: `<[^>]*>?` deliberately allows a MISSING closing `>` -- Rich
+# wraps a long `<a|b|c>` choice metavar across the option's own continuation
+# row when the terminal/COLUMNS width is narrow (e.g. `<text|json|
+# diagnostic-v1|sa` on one row, `rif>` on the next, tan-cli's real
+# `tan validate --help`). The continuation row never starts with `--`, so it
+# never matches this regex on its own pass and is silently skipped -- the
+# only thing that matters here is "some value slot follows the flag", which
+# the still-unclosed `<...` on the first row already proves; the exact
+# wrapped choices are not otherwise used by this script.
 _OPTION_LINE_RE = re.compile(
-    r"^(?:-\w,\s+)?(?P<flag>--[a-zA-Z][a-zA-Z0-9-]*)"
-    r"(?:\s+(?P<metavar><[^>]+>|\[[^]]+\]|[A-Z][A-Z0-9_-]*))?"
+    r"^(?P<flags>(?:-\w|--[a-zA-Z][a-zA-Z0-9-]*)(?:,\s*(?:-\w|--[a-zA-Z][a-zA-Z0-9-]*))*)"
+    r"(?:\s+(?P<metavar><[^>]*>?|\[[^]]+\]|[A-Z][A-Z0-9_-]*))?"
     r"(?:\s{2,}.*)?$"
 )
 # A shell chain/pipe operator that separates two independent commands on one
@@ -553,7 +567,15 @@ def _parse_option_arity(help_text: str) -> dict[str, bool]:
     for line in help_text.splitlines():
         m = _OPTION_LINE_RE.match(_clean_help_line(line))
         if m:
-            arity[m.group("flag")] = m.group("metavar") is not None
+            takes_value = m.group("metavar") is not None
+            # A single row can declare more than one long name for the same
+            # option (`--board,--board-yaml`) -- both must resolve to the
+            # SAME arity, or whichever alias a doc happens to use would be
+            # misjudged.
+            for name in m.group("flags").split(","):
+                name = name.strip()
+                if name.startswith("--"):
+                    arity[name] = takes_value
     return arity
 
 

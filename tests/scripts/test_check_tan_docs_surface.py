@@ -1188,36 +1188,223 @@ _NEW_SOM_HELP = (
 )
 
 _RICH_BUILD_HELP = """\
- Usage: tan build [OPTIONS]
-
-╭─ Options ─────────────────────────────────────────────────────────╮
-│ --project        PATH    Project root.                            │
-│ --sdk-root       PATH    alp-sdk checkout root.                   │
-│ --native                 Use the native executor.                 │
-│ --format         FORMAT  Output format: text or json.             │
-│ --help                   Show this message and exit.              │
-╰───────────────────────────────────────────────────────────────────╯
+                                                                                
+ Usage: tan build [OPTIONS]                                                     
+                                                                                
+ Build every slice of the project's build plan.                                 
+                                                                                
+╭─ Options ────────────────────────────────────────────────────────────────────╮
+│ --plan-from                FILE         Read the build plan from a JSON file │
+│                                         instead of invoking the SDK planner. │
+│                                         Implies --plan: shows the plan and   │
+│                                         exits unless --materialise or        │
+│                                         --execute is given.                  │
+│ --materialise                           Write the plan's generated files     │
+│                                         (shared artefacts + per-slice        │
+│                                         config) under the build root and     │
+│                                         stop, instead of just showing the    │
+│                                         plan.                                │
+│ --native                                Build natively: materialise the      │
+│                                         plan, then run each slice's command. │
+│                                         The default when no plan-mode flag   │
+│                                         is given. Like v0.4.1, this does NOT │
+│                                         override the --plan implied by       │
+│                                         --plan-from -- use --execute for     │
+│                                         that.                                │
+│ --execute                               Materialise the plan AND run each    │
+│                                         slice's command, even when the plan  │
+│                                         came from --plan-from -- run a       │
+│                                         pinned, reviewed plan file           │
+│                                         reproducibly. Implies --materialise  │
+│                                         (nothing can run that was never      │
+│                                         written); reports the ordinary build │
+│                                         result. ADDED BY THIS PORT, not a    │
+│                                         v0.4.1 flag: there --plan-from       │
+│                                         implies --plan and outranks          │
+│                                         --native, so a file-supplied plan    │
+│                                         cannot be dispatched at all.         │
+│                                         Deliberate, not a parity gap.        │
+│ --build-root               DIR          Project tree the slices run under    │
+│                                         and artefacts are written below      │
+│                                         (default: the board.yaml's           │
+│                                         directory, else the current          │
+│                                         directory).                          │
+│ --sdk-root                 PATH         alp-sdk checkout root.               │
+│ --board-yaml               PATH         Explicit board.yaml path.            │
+│ --project                  PATH         Project root (defaults to '.').      │
+│ --format                   <text|json>  Output format. [default: text]       │
+│ --plan                                  Deferred, not implemented in this    │
+│                                         build (tan-cli#427).                 │
+│ --target                   EMIT         Deferred, not implemented in this    │
+│                                         build (tan-cli#427).                 │
+│ --all                                   Deferred, not implemented in this    │
+│                                         build (tan-cli#427).                 │
+│ --manifest                              Deferred, not implemented in this    │
+│                                         build (tan-cli#427).                 │
+│ --manifest-from            FILE         Deferred, not implemented in this    │
+│                                         build (tan-cli#427).                 │
+│ --no-auto-bootstrap                     Deferred, not implemented in this    │
+│                                         build (tan-cli#427).                 │
+│ --pristine                              Deferred, not implemented in this    │
+│                                         build (tan-cli#427).                 │
+│ --verbose                               Deferred, not implemented in this    │
+│                                         build (tan-cli#427).                 │
+│ --quiet                                 Deferred, not implemented in this    │
+│                                         build (tan-cli#427).                 │
+│ --no-color                              Deferred, not implemented in this    │
+│                                         build (tan-cli#427).                 │
+│ --non-interactive                       Deferred, not implemented in this    │
+│                                         build (tan-cli#427).                 │
+│ --ci                                    Deferred, not implemented in this    │
+│                                         build (tan-cli#427).                 │
+│ --help                                  Show this message and exit.          │
+╰──────────────────────────────────────────────────────────────────────────────╯
 """
 
 _RICH_FLASH_HELP = """\
- Usage: tan flash [OPTIONS] [APP_PATH]
-
-╭─ Options ─────────────────────────────────────────────────────────╮
-│ --helper         NAME    Flash one helper.                        │
-│ --dry-run                Print commands without spawning.         │
-╰───────────────────────────────────────────────────────────────────╯
+                                                                                
+ Usage: tan flash [OPTIONS] [APP_PATH]                                          
+                                                                                
+ Program every slice + helper MCU in the project's system manifest.             
+                                                                                
+╭─ Arguments ──────────────────────────────────────────────────────────────────╮
+│   APP_PATH      <str>  Application source directory (default: the current    │
+│                        directory). `build_root` defaults to                  │
+│                        <APP_PATH>/build.                                     │
+│                        [default: .]                                          │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────╮
+│ --project                   PATH         Project root (defaults to '.').     │
+│ --build-root                PATH         Override the build root holding     │
+│                                          system-manifest.yaml (default:      │
+│                                          <APP_PATH>/build).                  │
+│ --sdk-root                  PATH         alp-sdk checkout root.              │
+│ --board-yaml                PATH         Explicit board.yaml path.           │
+│ --core                      CORE_ID      Flash only the slice with this      │
+│                                          core_id (skips every other slice    │
+│                                          AND all helpers).                   │
+│ --helper                    NAME         Flash only the helper MCU with this │
+│                                          name (skips ALL slices and every    │
+│                                          other helper).                      │
+│ --dry-run                                Print the flash command each        │
+│                                          backend WOULD run and return ok     │
+│                                          without spawning; also bypasses the │
+│                                          required-tool PATH gate.            │
+│ --skip-missing-tools                     When a backend's required tools are │
+│                                          all absent from PATH, warn + skip   │
+│                                          the entry instead of failing it. No │
+│                                          effect under --dry-run.             │
+│ --setools-dir               PATH         Alif SETOOLS install used to        │
+│                                          auto-sign a Flow D slot0 ATOC       │
+│                                          (license-gated; obtained from Alif, │
+│                                          never redistributed by tan).        │
+│                                          Precedence: this flag, then the     │
+│                                          SETOOLS_DIR environment variable,   │
+│                                          then flash_args.setools_dir in the  │
+│                                          manifest (lowest -- and rebuilt     │
+│                                          over by the next `tan build`, see   │
+│                                          docs/setools.md).                   │
+│ --format                    <text|json>  Output format.                      │
+│ --help                                   Show this message and exit.         │
+╰──────────────────────────────────────────────────────────────────────────────╯
 """
 
 
 def test_typer_rich_help_option_arity_is_parsed():
-    """The Python port renders box-drawing tables, not Clap's `Options:` rows."""
+    """The Python port renders box-drawing tables, not Clap's `Options:` rows.
+    `_RICH_BUILD_HELP` is a VERBATIM capture of a real `tan build --help` at
+    `COLUMNS=80` (`v0.5.0`), not a hand-composed, artificially tidy box --
+    a hand-composed fixture with a narrower box and no multi-line HELP-TEXT
+    wrapping passed while the real, wider, longer-description output tripped
+    the parser (tan-cli's real Rich renderer wraps a flag's own DESCRIPTION
+    across multiple continuation rows for a long one, e.g. `--plan-from` /
+    `--execute` below -- none of those continuation rows start with `--`, so
+    they must be silently skipped rather than mis-parsed as a second flag)."""
     assert _mod._parse_option_arity(_RICH_BUILD_HELP) == {
-        "--project": True,
-        "--sdk-root": True,
+        "--plan-from": True,
+        "--materialise": False,
         "--native": False,
+        "--execute": False,
+        "--build-root": True,
+        "--sdk-root": True,
+        "--board-yaml": True,
+        "--project": True,
         "--format": True,
+        "--plan": False,
+        "--target": True,
+        "--all": False,
+        "--manifest": False,
+        "--manifest-from": True,
+        "--no-auto-bootstrap": False,
+        "--pristine": False,
+        "--verbose": False,
+        "--quiet": False,
+        "--no-color": False,
+        "--non-interactive": False,
+        "--ci": False,
         "--help": False,
     }
+
+
+# Real capture, `COLUMNS=80`, `tan validate --help` (`v0.5.0`): Rich wraps a
+# long `<a|b|c|d>` choice metavar itself across the option's own continuation
+# row (`<text|json|diagnostic-v1|sa` / `rif>`) when the box is too narrow for
+# it -- the ORIGINAL, narrower-box `_RICH_BUILD_HELP` fixture never had a
+# metavar long enough to wrap, so this exact shape had no regression coverage
+# until now. `check_tan_docs_surface: OK` against a real `tan 0.5.0` depends
+# on `--format` still registering `takes_value=True` here.
+_RICH_WRAPPED_METAVAR_HELP = """\
+ Usage: tan validate [OPTIONS]
+
+╭─ Options ────────────────────────────────────────────────────────────────────╮
+│ --offline                                        Run only the structural     │
+│                                                  checks that ship in tan.    │
+│ --project           PATH                         Project root (defaults to   │
+│                                                  '.').                       │
+│ --board-yaml        PATH                         Explicit board.yaml path.   │
+│ --sdk-root          PATH                         alp-sdk checkout root.      │
+│ --format            <text|json|diagnostic-v1|sa  Output format.              │
+│                     rif>                         [default: text]             │
+│ --help                                           Show this message and exit. │
+╰──────────────────────────────────────────────────────────────────────────────╯
+"""
+
+
+def test_wrapped_metavar_option_still_registers_as_taking_a_value():
+    arity = _mod._parse_option_arity(_RICH_WRAPPED_METAVAR_HELP)
+    assert arity["--format"] is True
+    assert arity["--offline"] is False
+
+
+# Real capture, `COLUMNS=80`, `tan model --help` (`v0.5.0`): Typer/Rich joins
+# two long names for the SAME option with a bare comma and NO space
+# (`--board,--board-yaml`) -- distinct from the `-w, --flag` short-alias
+# comma-SPACE form the original regex modelled. Both names must resolve to
+# the identical arity, or a doc using whichever alias the regex missed would
+# be misjudged (this exact shape is why `tan model build --board
+# path/to/board.yaml --out build/models` in docs/cli.md false-failed).
+_RICH_COMMA_JOINED_ALIASES_HELP = """\
+ Usage: tan model [OPTIONS] [SUBCOMMAND]
+
+╭─ Options ────────────────────────────────────────────────────────────────────╮
+│ --board,--board-yaml        PATH         Path to board.yaml.                 │
+│                                          [default: board.yaml]               │
+│ --out                       PATH         Output directory.                   │
+│                                          [default: build/models]             │
+│ --metadata-root             PATH         Path to the metadata/ root          │
+│                                          (default: <sdk-root>/metadata).     │
+│ --project                   PATH         Project root (defaults to '.').     │
+│ --sdk-root                  PATH         alp-sdk checkout root.              │
+│ --format                    <text|json>  Output format. [default: text]      │
+│ --help                                   Show this message and exit.         │
+╰──────────────────────────────────────────────────────────────────────────────╯
+"""
+
+
+def test_comma_joined_long_aliases_both_register_the_same_arity():
+    arity = _mod._parse_option_arity(_RICH_COMMA_JOINED_ALIASES_HELP)
+    assert arity["--board"] is True
+    assert arity["--board-yaml"] is True
 
 
 def test_typer_rich_help_usage_preserves_positional_contract():

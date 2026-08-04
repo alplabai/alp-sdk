@@ -43,7 +43,7 @@ the old plan to this one:
 | v0.12.0 | **released 2026-07-22** | ADR 0020 cutover: the standalone `tan` CLI became the user command surface and sole executor; SDK build west extensions and the `alp` console script were retired, while deterministic/tokened build-plan and scaffold contracts remained. See CHANGELOG [v0.12.0]. |
 | v0.13.0 | **released 2026-07-24** | Portable JPEG encoder surface with a software baseline and silicon-proven Alif Hantro backend, plus associated pixel formats and DMA-reachability contract. See CHANGELOG [v0.13.0]. |
 | v0.14.0 | **released 2026-07-29** | Hardware-metadata and helper-firmware accuracy sweep, including clean refusal for absent GD32 bridge images and provenance for unverified peripheral counts. See CHANGELOG [v0.14.0]. |
-| v0.15.0 | **released 2026-07-31** | AEN multicore boot/residency and coherency documentation/fixes, plus the other hardware-validation work recorded in CHANGELOG [v0.15.0]. |
+| v0.15.0 | **candidate (`v0.15.0-rc1` tagged 2026-07-31)** | AEN multicore boot/residency and coherency documentation/fixes, plus the other hardware-validation work recorded in CHANGELOG [v0.15.0]. Not yet promoted to a release: `v0.14.0` remains GitHub's Latest release. |
 | v0.16.0 | **candidate (Unreleased)** | Current development: Python Tan architecture/documentation reconciliation, additional verification gates, and the fixes recorded under CHANGELOG [Unreleased]. |
 | **Backlog** | (cherry-pick into future tags) | See "Backlog -- cherry-pick into future tags" section below.  No per-version commitments for future items; releases tag whatever's ready at the time. |
 
