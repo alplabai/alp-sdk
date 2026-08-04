@@ -688,10 +688,24 @@ stage_generated_files() {
     local gens=(gen_soc_caps gen_status_strings gen_board_header
                 gen_pinmux_capability gen_support_matrix
                 gen_portability_matrix gen_catalog gen_error_catalog)
-    local g
+    local g rc
+    local gen_total=0 gen_skipped=0
     for g in "${gens[@]}"; do
         [ -f "scripts/${g}.py" ] || continue
-        python3 "scripts/${g}.py" >/dev/null 2>&1 || { echo "scripts/${g}.py failed"; return 1; }
+        gen_total=$((gen_total + 1))
+        python3 "scripts/${g}.py" >/dev/null 2>&1
+        rc=$?
+        if [ "${rc}" -eq 99 ]; then
+            # 99 = the generator refused for lack of a tool (clang-format;
+            # see gen_soc_caps.py / gen_status_strings.py), not a
+            # generator defect -- count it, don't fail the stage over it
+            # (alp-sdk#1221). The files it would have written are simply
+            # left as committed, so the diff check below stays honest.
+            gen_skipped=$((gen_skipped + 1))
+        elif [ "${rc}" -ne 0 ]; then
+            echo "scripts/${g}.py failed"
+            return 1
+        fi
     done
     # gen_soc_peripheral_instances.py is NOT in the array above: unlike
     # every other generator here, it needs a resolvable Zephyr checkout
@@ -771,6 +785,14 @@ stage_generated_files() {
             docs/portability-matrix.md docs/peripheral-support-matrix.md \
             docs/diagnostics 2>/dev/null | tail -20
         return 1
+    fi
+
+    # Every generator ran clean and nothing drifted -- but if one or more
+    # skipped for lack of clang-format, that coverage gap is real and must
+    # stay visible, not collapse into a plain PASS: SKIP, named (#1221).
+    if [ "${gen_skipped}" -gt 0 ]; then
+        echo "generated-files SKIP (${gen_skipped} of ${gen_total} generators need clang-format)"
+        return 99
     fi
 }
 

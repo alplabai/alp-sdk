@@ -7,6 +7,33 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — `test-all.sh` reported a missing formatter as FAIL, and a stale i.MX 93 Kconfig symbol survived two more sites (#1221, #1222)
+
+- `stage_generated_files()` in `scripts/test-all.sh` reported `FAIL exit=1`,
+  not `SKIP`, on any host without `clang-format` on PATH: `gen_soc_caps.py`
+  and `gen_status_strings.py` both refused via `raise SystemExit("error:
+  ...")`, which always exits 1, and the stage's `>/dev/null 2>&1 || return 1`
+  loop swallowed the message and treated the missing tool as a generator
+  failure. Both generators now print the same error to stderr and exit
+  **99** for a missing-tool refusal (the existing "prerequisite unavailable"
+  convention `run_stage()` already maps to SKIP everywhere else in this
+  script); a genuine generator defect still exits nonzero-and-not-99 and
+  still FAILs the stage exactly as before. `stage_generated_files()` now
+  tracks each of the 8 looped generators' exit status individually: a 99 is
+  counted, not failed; if any generator skipped and none failed, the stage
+  reports `generated-files SKIP (N of 8 generators need clang-format)` and
+  returns 99 instead of a silent PASS or a false FAIL (#1221).
+- `include/alp/inference.h`, `zephyr/Kconfig.alp-libraries`, and
+  `vendors/nxp-imx93/README.md` all referenced a Kconfig symbol,
+  `ALP_SDK_INFERENCE_ETHOS_U_N93`, that is not defined anywhere in the tree;
+  the real symbol is `ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93` (note
+  `_BACKEND_`), defined at `zephyr/kconfigs/iot-audio-inference.kconfig`
+  and consumed at `zephyr/CMakeLists.txt`. The `vendors/nxp-imx93/README.md`
+  table row was stale a second way too: it named a source file,
+  `src/zephyr/inference_ethosu_n93.c`, that has never existed in this tree;
+  corrected to the file that actually implements the backend,
+  `src/backends/inference/ethos_u_n93.cpp` (#1222).
+
 ### Changed — documentation and drift gates follow the Python Tan port
 
 - Swept current guides, examples, ADR indexes/amendments, metadata commentary,

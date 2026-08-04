@@ -80,7 +80,7 @@ through two Kconfigs:
 | Kconfig                                | Meaning                                                                       |
 |----------------------------------------|-------------------------------------------------------------------------------|
 | `ALP_SDK_INFERENCE_ETHOS_U`            | Enable Ethos-U dispatch path at all.  Auto-on for AEN-E7 and i.MX 93.         |
-| `ALP_SDK_INFERENCE_ETHOS_U_N93`        | Compile the i.MX 93 per-variant config layer (`src/zephyr/inference_ethosu_n93.c`). Auto-on when the SoC choice is i.MX 93. |
+| `ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93` | Compile the i.MX 93 per-variant inference backend (`src/backends/inference/ethos_u_n93.cpp`), registered at priority 100 so it wins over the portable TFLM backend. Auto-on when the SoC choice is i.MX 93 (emitted by `scripts/alp_orchestrate/kconfig.py`). |
 
 The per-variant file is a thin anchor today: it exposes
 `alp_ethosu_n93_register` (no-op until v0.4 wires the NPU attach
