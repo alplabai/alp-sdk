@@ -34,6 +34,51 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   corrected to the file that actually implements the backend,
   `src/backends/inference/ethos_u_n93.cpp` (#1222).
 
+### Fixed — HIL runner comments no longer claim specs that don't exist (#1160)
+
+- `tests/hil/v2n101-x-evk/_runner.yaml` claimed Ethernet, eMMC, xSPI, EEPROM,
+  and OPTIGA HIL specs "live alongside in this dir"; none of those five files
+  exist. Reworded to name the two specs that actually exist
+  (`v2n-gd32-bridge-ping.yaml`, `v2n-temp-sensor.yaml`) and list the five
+  missing topics as an explicit `TODO(#1160)`, not a claim of presence.
+- `tests/hil/v2m101-x-evk/_runner.yaml` had the same defect for DEEPX specs
+  (`v2n-m1-deepx-inference`, the DEEPX 0.75 V rail); the directory holds only
+  `_runner.yaml`. Same fix: state plainly that no SoM-specific specs exist yet
+  and list the two as a `TODO(#1160)`.
+- `tests/hil/v2n102-x-evk/_runner.yaml` and `tests/hil/v2m102-x-evk/_runner.yaml`
+  were checked and do not overclaim — they inherit only the portable
+  `tests/hil/_common/` spec set and name nothing SoM-specific.
+- True HIL coverage as of this fix: v2n101-x-evk has 2 SoM-specific specs
+  (`v2n-gd32-bridge-ping`, `v2n-temp-sensor`) against 18 `examples/v2n/`
+  directories (16 of which have a `testcase.yaml`, all `build_only: true`,
+  so CI proves compile/link only, never real hardware); v2n102-x-evk,
+  v2m101-x-evk, and v2m102-x-evk have 0 SoM-specific specs each.
+- `examples/v2n/README.md`'s table was missing three directories present on
+  disk (`v2n-m1-deepx-inference`, `v2n-m1-ros-perception`, `v2n-power-monitor`).
+  Added rows; `v2n-m1-ros-perception` and `v2n-power-monitor` have no
+  `testcase.yaml` and the new rows say so rather than implying CI coverage.
+- Investigated whether any `check_*.py` gate or workflow step would catch a
+  `_runner.yaml` comment naming a spec file that doesn't exist: none does.
+  `pr-metadata-validate.yml`'s `tests/hil/run_smoke.py --validate` step
+  schema-checks the actual `*.yaml` spec files present in a board dir; YAML
+  comments are stripped before it ever sees them. No gate was added in this
+  change, but not because a mechanical one could never fire: the smallest
+  candidate (extract kebab-case tokens in the spec-filename convention from
+  `_runner.yaml` comments, assert `<token>.yaml` exists in that dir) was
+  built and run against the pre-fix content of both files. On
+  `v2n101-x-evk` it finds zero tokens and stays silent, because that comment
+  named topics in prose ("Ethernet, eMMC, ...") with no filename-shaped
+  tokens. On `v2m101-x-evk` it finds `v2n-m1-deepx-inference`, finds no
+  matching `.yaml`, and fails — so such a gate *would* have caught one of
+  the two real overclaims.
+  What blocks it is a different problem: the same naive gate still flags
+  that token in the new `TODO(#1160): not yet written` line, so it needs an
+  explicit TODO carve-out to avoid failing on an honest, accurate comment.
+  Catching this class properly wants a structured spec-manifest field
+  (e.g. `specs_present:` / `specs_todo:` lists in `_runner.yaml`, cross-checked
+  against the directory listing) rather than free-text-comment parsing plus
+  an exception list; left as a follow-up, not implemented here.
+
 ### Changed — documentation and drift gates follow the Python Tan port
 
 - Swept current guides, examples, ADR indexes/amendments, metadata commentary,
