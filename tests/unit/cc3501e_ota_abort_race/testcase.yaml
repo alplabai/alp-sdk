@@ -1,0 +1,13 @@
+tests:
+  alp.unit.cc3501e_ota_abort_race:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim
+      - native_sim/native/64
+    tags:
+      - alp
+      - cc3501e
+      - ota
+      - unit

@@ -221,6 +221,55 @@ of this change.
 
 ### Changed — documentation and drift gates follow the Python Tan port
 
+### Fixed — CC3501E OTA abort could race a deferred FINISH into installing + rebooting anyway (#1123)
+
+`cc3501e_hw_ota_abort()` unconditionally zeroed the OTA session state
+without checking whether a deferred FINISH was queued or already running
+on `cc3501e_hw_ota_pump()` (a separate execution context — the bring-up
+task — from the SPI-dispatch context `abort()` runs in). `ota_do_finish()`
+then ran the entire flash burst (`psa_fwu_start` + every `psa_fwu_write` +
+`psa_fwu_finish` + `psa_fwu_install`) as one non-preemptible call and
+unconditionally published `STAGED` + armed the swap-reboot latch at the
+end, silently overwriting whatever `abort()` had written in the meantime —
+an update the host was told was aborted could still install and reboot
+into the cancelled image.
+
+Fixed by chunking the FINISH flash burst across `cc3501e_hw_ota_pump()`
+calls (`ota_finish_step()`, one bounded step — start / one flash block /
+finalize+install — per tick), mirroring gd32-bridge's `ota_erase_tick()`
+(`firmware/gd32-bridge/src/ota.c:429-445`). `cc3501e_hw_ota_abort()` now
+defers to an `abort_requested` flag instead of racing the publish when a
+BEGIN or FINISH is in flight; `ota_finish_step()` re-checks the flag before
+every phase AND immediately before publishing `STAGED`/the reboot latch, so
+an abort is bounded to, at worst, the single non-chunked
+`psa_fwu_finish()`+`psa_fwu_install()` pair — which itself re-checks
+immediately after. The mid-burst `bridge_transport_spi_hw_reinit()` call
+was not literally concurrent with an in-flight flash op (`psa_fwu_write`
+is synchronous), so it was not a data-race hazard in the classic sense; the
+per-tick chunking subsumes it anyway — `cc3501e_hw_ota_pump()`'s existing
+single reinit-after-every-op call now naturally fires once per chunk
+instead of once per whole burst, so the old internal `since_rearm`
+2-block counter was deleted as redundant.
+
+All PSA-FWU access in `cc3501e_hw_ti_ota.c` now goes through a new
+plain-C seam (`cc3501e_hw_ti_ota_psa.h` / `.c`, mirroring gd32-bridge's
+`ota_fmc_*` weak-seam pattern) instead of `<ti/utils/FWU/psa_fwu.h>`
+directly, so the abort-vs-FINISH state machine is host-testable for the
+first time — previously this file was bench-only (`CC3501E_HAL_BACKEND=ti`,
+against a vendored SDK CI never links). A new `native_sim` suite,
+`tests/unit/cc3501e_ota_abort_race`, links the real production
+`cc3501e_hw_ti_ota.c` against an in-memory PSA-FWU mock and drives the
+abort-vs-FINISH interleaving directly, including re-entering
+`cc3501e_hw_ota_abort()` from inside the mocked `psa_fwu_install()` to
+exercise the tightest window (abort landing after the flash commit,
+before the state publish). Mutation-proven: reverting only the fix's three
+`abort_requested` guard checks reproduces the exact defect (2 of 4 cases
+fail — a cancelled FINISH still calls `psa_fwu_finish`/`_install` and
+still arms the reboot latch); restoring the guards passes all 4 again.
+**Not bench-verified** — the `ti` backend build (the actual PSA-FWU
+sequencing on real CC3501E silicon) still needs a bench pass; this change
+is proven on host only.
+
 - Swept current guides, examples, ADR indexes/amendments, metadata commentary,
   and onboarding workflows to describe Python Tan's relocated in-process
   planner, native command surface, the explicit `tan-cli/dev` source-install
