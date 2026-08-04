@@ -193,6 +193,18 @@ of this change.
 
 ### Fixed — CC3501E Wi-Fi/BLE/GPIO/OTA backends shared one unlocked transport (#1116)
 
+**ABI: `sizeof(cc3501e_t)` changes.**  The fix adds a `bool request_lock`
+field to the public `struct cc3501e` (`include/alp/chips/cc3501e/core.h`),
+so `docs/abi/v0.15-snapshot.json`'s hash for that type moves from
+`f21bf2fc8bd4f83d` to `41bef4a1f9e78117`.  Callers allocate the struct by
+value (e.g. `cc3501e_t fw;` in `examples/aen/aen-cc3501e-bringup`,
+`aen-cc3501e-gpio`, `aen-usb-firstlight` and three more), so anything
+compiled against the previous layout must be rebuilt.  Everything in-tree
+is rebuilt from source and the SDK ships no binary compatibility promise
+before v1.0, so this is accepted rather than worked around — noted here
+because a silent struct-layout change is exactly what an ABI snapshot
+exists to surface.
+
 `cc3501e_request()` ran its 4-phase SPI exchange (request header / payload /
 reply header / reply payload) with no locking, reading and writing the
 per-context `tx_scratch`/`rx_scratch` scratch buffers a `struct cc3501e` has
