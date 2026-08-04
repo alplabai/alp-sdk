@@ -7,6 +7,60 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — V2N/V2M SoC-internal IP maturity was comments-only, and further routed nets stayed undeclared (#1169, #1170)
+
+#1183 closed both issues prematurely: it added a `driver_status` enum
+(`metadata/schemas/som-preset-v1.schema.json`) but applied it only to its
+own new `soc_peripheral_instances` entries, leaving `nor_flash`, `emmc` and
+the MHU mailbox tracked by YAML comment only (#1169's actual ask), and it
+declared twelve `soc_peripheral_instances` while the TSV routed several
+more nets the issue named that stayed neither declared nor excluded
+(#1170).
+
+**#1169.** `on_module.nor_flash` / `on_module.emmc` each gained a sibling
+`nor_flash_driver_status` / `emmc_driver_status` field (`none` on all four
+presets — both name a SoC controller, not a chip slug, so there is no
+`chips/<part>/` driver to tier per ADR 0017). `mailbox:` gained
+`driver_status` + `notes`: `driver_status: partial` is the closest single
+enum value for the MHU-B link (PR #1189 bounded it precisely — A55->M33
+receive is silicon-proven under #697, `mbox_send()`/M33->A55 is unexercised
+and does not reach the A55 GIC on this topology), and since one enum value
+can't express *which* direction, `notes` carries the exact split verbatim
+from `zephyr/drivers/mbox/mbox_renesas_rz_mhu_b.c`. The three new fields
+share `$defs/driver_status` with `soc_peripheral_instance.driver_status`
+so the vocabulary can't drift apart per field.
+
+**#1170.** Verified every net the issue named against
+`metadata/e1m_modules/v2n/renesas-peripheral-map.tsv` line by line:
+- `sd1` (SD1CLK/CMD/DAT0-3, tsv:103-108) is now a declared
+  `soc_peripheral_instances` entry (`class: sdio` — distinct from SD0's
+  `sdio_emmc`); its card-detect/power-enable pads (tsv:109-110) and the
+  microSD socket's control GPIOs (`SDCARD_RST` tsv:111, `µSD1_V_SEL`
+  tsv:2) are recorded on that entry's `notes`, not as separate instances.
+- `BT_UART` (tsv:12-15) and `BT_I2S` (tsv:8-11) are explicitly excluded
+  (documented in a preset comment): their pad names carry no channel
+  number, so binding them to one of the SoC's 10 UART / 10 I2S instances
+  would mean inventing which channel; they are also already the
+  populated `wifi_ble: murata_lbee5hy2fy` combo chip's dedicated
+  HCI-UART/PCM-audio interface, not a free/spare instance.
+- `Audio_CLKB`/`Audio_CLKB_OE`/`Audio_CLKC` (tsv:3-5) and `BL_PWM`
+  (tsv:6) are explicitly excluded: clock-output/PWM pins, not a
+  bus/interface peripheral — no class in the SoC JSON's `peripherals:`
+  block names a clock or PWM family.
+
+Also fixed two review findings from the same block: `i2s_ssiu0`/`1`
+(SSIU0 doesn't exist on this pad map) renamed to `i2s0`/`i2s1`, matching
+`ALP_E1M_X_I2S0`/`I2S1` in `include/alp/e1m_x_pinout.h` and the existing
+`ssiu_to_i2s0` alias in `scripts/check_e1m_route_capability.py`; and
+`soc_peripheral_instances[].instance` now has a real uniqueness check
+(`scripts/validate_metadata.py`, `_check_som_peripheral_instance_uniqueness`)
+since JSON Schema `uniqueItems` only rejects two byte-identical entries,
+not two entries sharing a slug with a different `class`/`driver_status` —
+exactly the shape #655's DT/pinctrl generation binds nodes by.
+
+The shared `mailbox:` + `soc_peripheral_instances:` block stays
+byte-identical across all four V2N/V2M presets (verified by checksum).
+
 ### Fixed — bring-up guide claimed `tps628640_set_voltage_mv` was unimplemented (#1166)
 
 `docs/bring-up-v2n-m1.md` told readers to reach for the

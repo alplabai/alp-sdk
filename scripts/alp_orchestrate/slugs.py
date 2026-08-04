@@ -54,6 +54,11 @@ _ON_MODULE_NON_CHIP_FIELDS: frozenset[str] = frozenset({
     # warning (no CONFIG_ALP_SDK_CHIP_XSPI / SD0 declaration exists).
     "nor_flash",
     "emmc",
+    # driver_status: none/planned/partial/complete is a maturity tier, not
+    # a chip slug -- walking it as a scalar field would leak the literal
+    # string "none" into the CONFIG_ALP_SDK_CHIP_* enable set (#1169).
+    "nor_flash_driver_status",
+    "emmc_driver_status",
 })
 
 

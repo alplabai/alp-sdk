@@ -26,9 +26,12 @@ on_module:
   # storage is wired to), not chip slugs -- no chips/<part>/ driver exists
   # for either (see scripts/alp_orchestrate/slugs.py
   # _ON_MODULE_NON_CHIP_FIELDS). ADR 0017: no tier -- there is no driver to
-  # tier yet, not an aspirational one. #1169.
-  nor_flash:            xspi                   # on-module via Renesas xSPI0; no alp-sdk driver yet
-  emmc:                 sd0                    # on-module via Renesas SD0; no alp-sdk driver yet
+  # tier yet, not an aspirational one, expressed machine-readably via the
+  # *_driver_status fields below rather than left to this comment (#1169).
+  nor_flash:               xspi                # on-module via Renesas xSPI0; no alp-sdk driver yet
+  nor_flash_driver_status: none
+  emmc:                    sd0                 # on-module via Renesas SD0; no alp-sdk driver yet
+  emmc_driver_status:      none
   npu:                  deepx_dxm1
   pcie_mux:             pi3dbs12212
 
@@ -96,7 +99,12 @@ mailbox:
   # #697 (E1M-X V2N-M1 silicon): init/attach and the A55->M33 receive path are
   # silicon-proven. mbox_send() (M33->A55) is UNEXERCISED and does not reach the A55 on
   # this topology -- see zephyr/drivers/mbox/mbox_renesas_rz_mhu_b.c for the full status.
+  # `driver_status: partial` is the closest single enum value (some of the
+  # link is silicon-proven, some is not) -- it cannot itself express WHICH
+  # direction, so `notes` carries the exact split (#1169).
   controller: renesas_mhu
+  driver_status: partial
+  notes: "A55->M33 receive path is silicon-proven under #697 (R_MHU_NS5.MSG -> M33 NVIC IRQ 293). mbox_send() (M33->A55) is unexercised and does not reach the A55 GIC on this topology (R_MHU_NS5.RSP routes to no A55 GIC line) -- see zephyr/drivers/mbox/mbox_renesas_rz_mhu_b.c for the full status."
   channels:
     - { id: 0, reserved_for: alp_default_rpmsg }
     - { id: 1, reserved_for: app }
@@ -109,10 +117,38 @@ mailbox:
 # chips/*.yaml manifest applies.  Declared here so the instance is VISIBLE
 # to the SoM model (#1170); DT/pinctrl generation from this layer is #655,
 # not yet built, so `driver_status: none` is accurate for all of them.
-# i2s_ssiu0/1 each cover a paired SSIU channel group (SSIU1+SSIU2 share
+# i2s0/i2s1 each cover a paired SSIU channel group (SSIU1+SSIU2 share
 # BCK/WS with only SSIU2 adding a second SDATA line, same for SSIU3+SSIU4)
-# -- two logical I2S instances, matching ALP_E1M_X_I2S_COUNT in
-# include/alp/e1m_x_pinout.h, not four independent ones.
+# -- two logical I2S instances, matching ALP_E1M_X_I2S0/I2S1 in
+# include/alp/e1m_x_pinout.h.  Named `i2s0`/`i2s1`, not `i2s_ssiu0`/`1`:
+# SSIU0 does not exist on this pad map (the first channel is SSIU1), and
+# scripts/check_e1m_route_capability.py's `ssiu_to_i2s0` table already
+# aliases this exact SSIU1+SSIU2 pair to the E1M-X I2S0 function, so this
+# name matches an existing convention instead of inventing a new one.
+#
+# #1170 remainder -- disposition of every further routed net the issue
+# names, verified against the TSV cited above:
+#   - SD1 (SD1CLK/CMD/DAT0-3, tsv:103-108) is declared below as `sd1`
+#     (class: sdio -- the SoC JSON's `sdio` count is separate from
+#     `sdio_emmc`, which SD0/eMMC uses).  Its card-detect / power-enable
+#     pads (SD1_SD1CD tsv:109, SD1_SD1PWEN tsv:110) and the microSD
+#     socket's control GPIOs (SDCARD_RST tsv:111, µSD1_V_SEL tsv:2) are
+#     noted on that entry -- control lines for the same slot, not a
+#     separate bus/interface class this block enumerates (and this block
+#     does not enumerate individual GPIOs; the SoC has 86 of them).
+#   - BT_UART (tsv:12-15) and BT_I2S (tsv:8-11) are EXCLUDED: their pad
+#     names carry no channel number (unlike RIIC1/RIIC2/UART1/...), so
+#     they cannot be tied to one of the SoC's 10 UART or 10 I2S instances
+#     without inventing which channel -- forbidden by the no-inventing-
+#     values rule.  They are also already the dedicated HCI-UART / PCM-
+#     audio interface to the populated `wifi_ble: murata_lbee5hy2fy`
+#     combo chip declared under on_module: above, not a free/spare
+#     instance like the twelve below.
+#   - Audio_CLKB / Audio_CLKB_OE / Audio_CLKC (tsv:3-5) and BL_PWM (tsv:6)
+#     are EXCLUDED: clock-output / PWM pins, not a bus/interface
+#     peripheral -- none of the SoC JSON's `peripherals:` classes (i2c,
+#     i3c, spi, uart, i2s, pdm, can_fd, sdio, sdio_emmc, ...) names a
+#     clock or PWM family, so `class:` has nothing honest to point at.
 soc_peripheral_instances:
   - { instance: i3c30,     class: i3c,  silicon_peripheral: "I3C_SCL30/SDA30",              driver_status: none }
   - { instance: riic1,     class: i2c,  silicon_peripheral: "RIIC1_SCL1/SDA1",               driver_status: none }
@@ -124,8 +160,9 @@ soc_peripheral_instances:
   - { instance: canfd2,    class: can,  silicon_peripheral: "CANFD2_CRX2/CTX2",               driver_status: none }
   - { instance: canfd3,    class: can,  silicon_peripheral: "CANFD3_CRX3/CTX3",               driver_status: none }
   - { instance: uart1,     class: uart, silicon_peripheral: "UART1_RXD1/TXD1",                driver_status: none }
-  - { instance: i2s_ssiu0, class: i2s,  silicon_peripheral: "SSIU1_SSI1_*/SSIU2_SSI2_SDATA",  driver_status: none }
-  - { instance: i2s_ssiu1, class: i2s,  silicon_peripheral: "SSIU3_SSI3_*/SSIU4_SSI4_SDATA",  driver_status: none }
+  - { instance: i2s0,      class: i2s,  silicon_peripheral: "SSIU1_SSI1_*/SSIU2_SSI2_SDATA",  driver_status: none }
+  - { instance: i2s1,      class: i2s,  silicon_peripheral: "SSIU3_SSI3_*/SSIU4_SSI4_SDATA",  driver_status: none }
+  - { instance: sd1,       class: sdio, silicon_peripheral: "SD1CLK/SD1CMD/SD1DATx",          driver_status: none, notes: "SD1_SD1CD (tsv:109) + SD1_SD1PWEN (tsv:110) are this slot's control lines; SDCARD_RST (tsv:111) + µSD1_V_SEL (tsv:2) are the microSD socket's reset/voltage-select GPIOs, not a separate instance. #1170." }
 
 # E1M pads / instances that route through the on-module GD32G553
 # IO MCU (the V2N family's peripheral bridge).  RZ/V2N silicon

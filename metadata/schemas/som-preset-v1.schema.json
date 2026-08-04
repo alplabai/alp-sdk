@@ -86,7 +86,15 @@
           "description": "Number of populated Ethernet PHY instances.  Only meaningful alongside `ethernet_phy:`; families with a single PHY (or none) omit it."
         },
         "nor_flash":          { "$ref": "#/$defs/chip_ref", "description": "SoC controller / peripheral name that reaches the on-module NOR flash (routing annotation, not a chip slug -- e.g. `xspi`)." },
+        "nor_flash_driver_status": {
+          "$ref": "#/$defs/driver_status",
+          "description": "alp-sdk driver maturity for the on-module NOR flash reached via `nor_flash:`. `nor_flash:` names the SoC controller, not a chip slug, so there is no `chips/<part>/` driver to tier -- `none` is the honest (not aspirational) value per ADR 0017 (#1169)."
+        },
         "emmc":               { "$ref": "#/$defs/chip_ref", "description": "SoC controller / peripheral name that reaches the on-module eMMC (routing annotation -- e.g. `sd0`)." },
+        "emmc_driver_status": {
+          "$ref": "#/$defs/driver_status",
+          "description": "alp-sdk driver maturity for the on-module eMMC reached via `emmc:`. `emmc:` names the SoC controller, not a chip slug, so there is no `chips/<part>/` driver to tier -- `none` is the honest (not aspirational) value per ADR 0017 (#1169)."
+        },
         "npu":                { "$ref": "#/$defs/chip_ref", "description": "Discrete on-module NPU chip (V2M's DEEPX DX-M1).  On-die NPUs (Ethos-U, DRP-AI) are silicon facts and do NOT appear here." },
         "pcie_mux":           { "$ref": "#/$defs/chip_ref" },
         "ospi_memories": {
@@ -213,6 +221,14 @@
         "channels": {
           "type": "array",
           "items": { "$ref": "#/$defs/mailbox_channel" }
+        },
+        "driver_status": {
+          "$ref": "#/$defs/driver_status",
+          "description": "alp-sdk driver maturity for the mailbox controller. A directional link (e.g. RX proven, TX unexercised) is a single value short of what this enum can express on its own -- pair it with `notes` when the two directions differ (#1169)."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Free-form maturity note -- e.g. recording which direction of a bidirectional link is silicon-proven when `driver_status` alone can't capture the split."
         }
       }
     },
@@ -223,7 +239,7 @@
     },
     "soc_peripheral_instances": {
       "type": "array",
-      "description": "On-die SoC peripheral instances with pads routed on the module's edge (metadata/e1m_modules/<family>/*.tsv) but no dedicated `on_module:` role -- they are bus/interface instances, not populated parts (no MPN, no chips/*.yaml manifest). Declared here purely so the instance is VISIBLE to the SoM model (a prerequisite for #655's DT/pinctrl generation and for board.yaml requests to bind to) -- this block does NOT itself generate anything and does NOT duplicate the pad list, which stays single-sourced in the TSV. `driver_status: none` is the honest default for an instance with no alp-sdk driver behind it yet; do not mark a tier here that the driver files don't back.",
+      "description": "On-die SoC peripheral instances with pads routed on the module's edge (metadata/e1m_modules/<family>/*.tsv) but no dedicated `on_module:` role -- they are bus/interface instances, not populated parts (no MPN, no chips/*.yaml manifest). Declared here purely so the instance is VISIBLE to the SoM model (a prerequisite for #655's DT/pinctrl generation and for board.yaml requests to bind to) -- this block does NOT itself generate anything and does NOT duplicate the pad list, which stays single-sourced in the TSV. `driver_status: none` is the honest default for an instance with no alp-sdk driver behind it yet; do not mark a tier here that the driver files don't back. `instance` slugs must be unique within a preset -- `uniqueItems` on this array only catches two byte-identical entries, so the real check (same slug, differing class/driver_status) is a semantic cross-check in scripts/validate_metadata.py, not this schema (#1170).",
       "items": { "$ref": "#/$defs/soc_peripheral_instance" }
     },
     "helper_firmware": {
@@ -255,6 +271,11 @@
     }
   },
   "$defs": {
+    "driver_status": {
+      "type": "string",
+      "enum": ["none", "planned", "partial", "complete"],
+      "description": "Shared alp-sdk driver-maturity vocabulary, reused wherever a preset tracks it (`soc_peripheral_instance.driver_status`, `mailbox.driver_status`, `on_module.nor_flash_driver_status`, `on_module.emmc_driver_status`) so the tiers can't drift apart per field. `none` is the honest default absent a matching driver; do not write an aspirational tier (#1169)."
+    },
     "chip_ref": {
       "oneOf": [
         {
@@ -536,8 +557,7 @@
           "description": "The pad-route source's `silicon_peripheral` name/prefix this instance corresponds to (e.g. `RIIC1_`), for traceability back to metadata/e1m_modules/<family>/*.tsv."
         },
         "driver_status": {
-          "type": "string",
-          "enum": ["none", "planned", "partial", "complete"],
+          "$ref": "#/$defs/driver_status",
           "description": "alp-sdk driver maturity for this instance. `none` (the default assumption) is the honest value while no zephyr/drivers/** node targets it -- do not write an aspirational tier."
         },
         "notes": {
