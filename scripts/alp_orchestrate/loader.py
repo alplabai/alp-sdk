@@ -675,11 +675,12 @@ def _resolve_storage(
     storage_raw = project.get("storage") or []
     storage_entries: list[StorageEntry] = []
     for idx, item in enumerate(storage_raw):
-        # `raw: true` is the legacy alias for `fs: raw`; the schema
-        # accepts both, the loader normalises.
+        # `fs` defaults to `raw` when omitted. The legacy `raw: true` alias is
+        # gone: `board.schema.json` no longer declares the property and sets
+        # `additionalProperties: false` on storage items, so a board carrying it
+        # is rejected at validation rather than normalised here. Measured before
+        # removal: zero tracked `board.yaml` files used it.
         fs = item.get("fs")
-        if fs is None and item.get("raw") is True:
-            fs = "raw"
         if fs is None:
             fs = "raw"
         storage_entries.append(StorageEntry(

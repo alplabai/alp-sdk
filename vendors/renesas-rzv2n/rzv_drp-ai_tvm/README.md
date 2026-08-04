@@ -18,7 +18,7 @@ Two distinct pieces, easy to confuse:
 | Component                                      | Where it runs | Source                                                |
 |------------------------------------------------|---------------|-------------------------------------------------------|
 | **RUHMI compiler** (this anchor)               | Host (build)  | <https://github.com/renesas-rz/rzv_drp-ai_tvm>, Apache-2.0. |
-| **DRP-AI runtime** (`libdrpai`, ioctls)        | Target (V2N)  | `meta-rz-drpai` sublayer of Renesas's BSP -- see `meta-alp-sdk/README.md`. |
+| **DRP-AI runtime** (EdgeCortix MERA2 + DRP-AI TVM: `mera2_runtime` / `drp_tvm_rt` / `tvm_runtime`) | Target (V2N)  | `meta-rz-drpai` sublayer of Renesas's BSP -- see `meta-alp-sdk/README.md`. |
 
 The Alp SDK's `<alp/inference.h>` Yocto backend links against the
 *runtime*; it never invokes the *compiler*.  Model authors run
@@ -27,18 +27,33 @@ model asset alongside their app.
 
 ## Status
 
-**v0.3 anchor (no source vendored).**  This directory exists to:
+**Anchor directory -- no RUHMI source vendored here** (RUHMI is a
+CLI / Python toolchain that doesn't expose a C ABI the SDK could
+mirror; apps that want it as a build-step pull it from the upstream
+repo directly).  That's only the *compiler* side, though.  The
+*runtime* side this compiler's output targets already has a real,
+implemented backend in the SDK:
 
-- Give the v0.4 implementation pass a fixed place to add build-time
-  hooks if we ship a "compile this model with RUHMI as a CMake
-  custom-command" helper for app authors.
+- Host-side model conversion: `scripts/alp_model/adapters/drpai.py`
+  packages a DRP-AI TVM compiler output directory into the portable
+  `.alpmodel` blob format (`blob_format "drpai_dir"`).
+- Target-side dispatch: `src/yocto/inference_drpai.cpp` links the
+  real `MeraDrpRuntimeWrapper` API (`LoadModel`/`SetInput`/`Run`/
+  `GetOutput`) when built with `ALP_SDK_USE_DRPAI_V2N=ON` (default
+  off).  The source marks this **BENCH-UNVERIFIED**: it header-checks
+  against the real wrapper surface but has not run on silicon, and
+  the MERA2/DRP-AI TVM runtime libs (`mera2_runtime`, `drp_tvm_rt`,
+  `tvm_runtime`) only exist on the RZ/V Yocto SDK sysroot, not on a
+  plain dev host.
+
+This directory's own remaining purpose:
+
+- Give a future pass a fixed place to add build-time hooks if we ship
+  a "compile this model with RUHMI as a CMake custom-command" helper
+  for app authors.
 - Document the toolchain version we recommend pinning against so
   Vela / RUHMI / DRP-AI binary compatibility stays consistent
   across the SDK's reference apps.
-
-No header stub here today -- RUHMI is a CLI / Python toolchain
-that doesn't expose a C ABI the SDK could mirror.  Apps that want
-RUHMI as a build-step pull it from the upstream repo directly.
 
 ## Recommended pin
 

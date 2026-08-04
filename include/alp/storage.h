@@ -7,25 +7,40 @@
  * @file storage.h
  * @brief Alp SDK persistent-storage abstraction (QSPI / OSPI / SD).
  *
- * v0.4 deliverable.  v0.1 ships the public surface as a stub;
- * every entry point returns ALP_ERR_NOSUPPORT and `*_open` returns
- * NULL.  Apps that target `<alp/storage.h>` can compile today and
- * the implementations slot in per-OS:
- *
- *   - **Zephyr**   : `flash_*` driver class for QSPI/OSPI; `disk_access_*`
- *                    for SD/MMC.  Lands v0.4 alongside the V2N + i.MX 93
- *                    Yocto first-class work (the same Yocto cycle bumps
- *                    Zephyr's own flash story).
- *   - **Yocto**    : `/dev/mtd*` for raw flash; `/dev/mmcblk*p*` for SD.
- *   - **Baremetal**: Vendor HAL flash drivers (Alif HAL OSPI, Renesas
- *                    FSP QSPI, NXP MCUXpresso flash).
+ * Backends registered on Zephyr:
+ *   - **zephyr_flash** (silicon_ref `"*"`, priority 100): real
+ *     `<zephyr/storage/flash_map.h>` `flash_area_*` backing for
+ *     INTERNAL_FLASH/QSPI_FLASH/OSPI_FLASH (`kind`); `instance_id`
+ *     maps to a flash-area ID.  Returns ALP_ERR_NOSUPPORT for
+ *     `kind == ALP_STORAGE_KIND_SD_MMC` (no flash_area backing for
+ *     SD/MMC; `alp_storage_open` fails outright -- there is no
+ *     fallback to a second backend) and for `configure_inline_aes`
+ *     (no inline-AES path on plain Zephyr flash -- a higher-priority
+ *     vendor backend implements it once one lands).
+ *   - **zephyr_littlefs** (silicon_ref `"*"`, priority 90): real
+ *     littlefs-file-backed device
+ *     (`/lfs<instance_id>/alp_storage.bin`) for
+ *     INTERNAL_FLASH/QSPI_FLASH/OSPI_FLASH; erase is emulated by
+ *     overwriting the region with 0xFF.  Same SD_MMC /
+ *     `configure_inline_aes` ALP_ERR_NOSUPPORT posture as
+ *     zephyr_flash.
+ *   - **sw_fallback** (priority 0): every op past open/close
+ *     returns ALP_ERR_NOSUPPORT; wins only when neither Zephyr
+ *     backend links (e.g. a trimmed `native_sim` image).
+ *   - **alp_testing** (file `testing_drv.c`; priority 255,
+ *     `CONFIG_ALP_SDK_TESTING_STORAGE`): fault-injectable test
+ *     double for host/unit tests -- not present in a shipping
+ *     build.
+ *   - **Yocto / baremetal**: no backend has landed yet -- the class
+ *     is an unconditional stub (`alp_storage_open` returns NULL,
+ *     every other call returns ALP_ERR_NOSUPPORT).
  *
  * The shape is deliberately small — the SDK's storage surface is
  * "block-oriented read / write / erase," not a filesystem.  Apps
  * stack ZephyrFS, LittleFS, or ext4 on top per their own choice.
  *
  * @par ABI status: [ABI-EXPERIMENTAL]
- *      v0.5 added alp_storage_configure_inline_aes (SecAES on OSPI / HexSPI) -- surface tentative.  Base storage placeholders are still stubs.
+ *      v0.5 added alp_storage_configure_inline_aes (SecAES on OSPI / HexSPI) -- surface tentative, ALP_ERR_NOSUPPORT until a vendor pack implements it.  Base read/write/erase are real on Zephyr (zephyr_flash / zephyr_littlefs).
  *      See docs/abi-markers.md for the convention.
  */
 
@@ -89,8 +104,18 @@ typedef struct {
  * @brief Acquire a storage handle.
  *
  * @param[in] cfg  Configuration; @c kind selects the backend.
- * @return Open handle, or NULL with `alp_last_error()` set to the
- *         specific failure reason.
+ * @return Open handle, or NULL with `alp_last_error()` set to one of
+ *         ALP_ERR_INVAL (NULL cfg), ALP_ERR_NOT_PRESENT_ON_THIS_SOC
+ *         (no backend registered for the active silicon),
+ *         ALP_ERR_NOT_IMPLEMENTED (registered backend has no open
+ *         hook), ALP_ERR_NOMEM (handle-pool or backend-state
+ *         allocation failure), ALP_ERR_NOSUPPORT (@c kind ==
+ *         ALP_STORAGE_KIND_SD_MMC -- neither zephyr_flash nor
+ *         zephyr_littlefs backs SD/MMC today), or a backend I/O
+ *         failure (ALP_ERR_NOT_READY / ALP_ERR_BUSY /
+ *         ALP_ERR_TIMEOUT / ALP_ERR_IO / ALP_ERR_OUT_OF_RANGE)
+ *         translated from the underlying flash-area / littlefs
+ *         error.
  */
 alp_storage_t *alp_storage_open(const alp_storage_config_t *cfg);
 

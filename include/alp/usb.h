@@ -7,16 +7,23 @@
  * @file usb.h
  * @brief Alp SDK USB abstraction (device and host).
  *
- * v0.3 deliverable.  v0.1 ships the public surface as a stub;
- * every entry point returns ALP_ERR_NOSUPPORT and `*_open` returns
- * NULL.
- *
  * Backends:
- *   - **Zephyr**   : USB device stack (`usb_dc_*`, USB-C if applicable);
- *                    USB host stack (`usbh_*`).  Lands v0.3.
- *   - **Yocto**    : `/dev/usb*` userspace via `libusb`; gadget mode
- *                    via configfs.
- *   - **Baremetal**: Vendor HAL USB peripheral driver.
+ *   - **zephyr_drv** (silicon_ref `"*"`, priority 100): device role
+ *     -- `alp_usb_device_enable`/`disable` drive Zephyr's real
+ *     `usb_enable`/`usb_disable` (gated `CONFIG_ALP_SDK_USB`);
+ *     `alp_usb_device_write`/`read` are still ALP_ERR_NOSUPPORT
+ *     pending the per-class (CDC-ACM/MSC/HID) endpoint wiring.
+ *     Host role -- wired to Zephyr's `usbh_*` stack when
+ *     `CONFIG_USB_HOST_STACK` is set and the board carries an
+ *     `alif,xhci-uhc` DT node (`zephyr_uhc0`); otherwise every host
+ *     call returns ALP_ERR_NOSUPPORT.
+ *   - **sw_fallback** (priority 0): open succeeds for both device
+ *     and host; every I/O op returns ALP_ERR_NOT_IMPLEMENTED.  Lets
+ *     `native_sim` / trimmed images compile against and exercise
+ *     the dispatcher with no real controller.
+ *   - **Yocto / baremetal**: no backend has landed yet -- the class
+ *     is an unconditional stub (`*_open` returns NULL, every other
+ *     call returns ALP_ERR_NOSUPPORT).
  *
  * The shape splits along the device/host boundary, but most
  * embedded apps only ever do one role.  We expose both because
@@ -24,12 +31,13 @@
  * of the standard USB-C device role.
  *
  * Only the most-common device classes are wrapped at the SDK
- * surface (CDC-ACM virtual COM, MSC mass storage, HID).  Other
- * classes go through the vendor escape hatch at
- * `<alp/vendors/.../usb.h>`.
+ * surface (CDC-ACM virtual COM, MSC mass storage, HID).
  *
  * @par ABI status: [ABI-EXPERIMENTAL]
- *      v0.3 placeholder; surface skeleton only.
+ *      Surface skeleton; device enable/disable is real on Zephyr,
+ *      host lifecycle routes to `usbh_*`/`uhc_xhci_alif` but is
+ *      BENCH-UNVERIFIED (the UHC driver is a TODO(aen401-bench)
+ *      skeleton), endpoint I/O is not yet wired.
  *      See docs/abi-markers.md for the convention.
  */
 
@@ -102,7 +110,13 @@ typedef struct {
  * @param[in] cfg  Device class + VID/PID + strings.  Must be non-NULL.
  *
  * @return Open handle on success; NULL with @ref alp_last_error set
- *         to @ref ALP_ERR_INVAL / @ref ALP_ERR_NOSUPPORT.
+ *         to one of ALP_ERR_INVAL (NULL cfg or out-of-range
+ *         @c device_class), ALP_ERR_NOT_PRESENT_ON_THIS_SOC (no
+ *         backend registered for the active silicon),
+ *         ALP_ERR_NOT_IMPLEMENTED (registered backend has no
+ *         dev_open hook), ALP_ERR_NOMEM (handle pool exhausted), or
+ *         ALP_ERR_NOSUPPORT (backend built without USB device-stack
+ *         support, e.g. CONFIG_ALP_SDK_USB=n).
  */
 alp_usb_dev_t *alp_usb_device_open(const alp_usb_device_config_t *cfg);
 
@@ -175,9 +189,14 @@ typedef struct alp_usb_host alp_usb_host_t;
 /**
  * @brief Acquire the USB host singleton.
  *
- * @return Open handle on success; NULL with @ref alp_last_error
- *         set to @ref ALP_ERR_NOSUPPORT (no host stack wired) or
- *         @ref ALP_ERR_BUSY (already opened).
+ * @return Open handle on success; NULL with @ref alp_last_error set
+ *         to one of ALP_ERR_NOT_PRESENT_ON_THIS_SOC (no backend
+ *         registered for the active silicon), ALP_ERR_NOT_IMPLEMENTED
+ *         (registered backend has no host_open hook), ALP_ERR_NOMEM
+ *         (the single host handle slot is already open),
+ *         ALP_ERR_NOSUPPORT (no host stack wired -- needs
+ *         CONFIG_USB_HOST_STACK plus an alif,xhci-uhc DT node), or
+ *         ALP_ERR_IO (usbh_init failed).
  */
 alp_usb_host_t *alp_usb_host_open(void);
 

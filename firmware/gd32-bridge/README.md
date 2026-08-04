@@ -75,14 +75,15 @@ Development flashing uses an external SWD probe on `GD32_SWDIO` /
 > `BRIDGE_OTA_PARTITIONED`).  The fw v0.2.3–v0.2.7 campaign cleared
 > the soak-quarantined HAL defects (`pwm_capture`, `adc_stream`,
 > `qenc`, `tmu` — silicon-validated; the analog subsystem additionally
-> needed the v0.2.6 internal-VREF bring-up).  Remaining gap: ADC
-> DSP-chain runtime dispatch degrades to error statuses.  The stub
-> backend stays HW-free for host protocol round-trip tests.
+> needed the v0.2.6 internal-VREF bring-up).  The ADC DSP-chain runtime
+> dispatch (FIR/IIR via the FAC, FFT via `CMD_ADC_SPECTRUM_READ`) is
+> wired in `hal/gd32/adc_stream.c`.  The stub backend stays HW-free for
+> host protocol round-trip tests.
 
 ## Protocol majorset
 
 The firmware ships with a build-time `PROTOCOL_VERSION_MAJOR`
-constant in [`src/protocol.c`](src/protocol.c).  Bumping the major
+constant in [`src/protocol.h`](src/protocol.h).  Bumping the major
 breaks every host that has not been rebuilt against the matching
 [`<alp/chips/gd32g553.h>`](../include/alp/chips/gd32g553.h) -- treat
 it as a wire-incompatible change and stage carefully.
