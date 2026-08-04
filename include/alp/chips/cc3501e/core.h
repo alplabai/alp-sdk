@@ -91,6 +91,19 @@ struct cc3501e {
 	bool    wifi_scan_busy;
 	bool    ble_scan_busy;
 	bool    evt_busy;
+	/* Transport-transaction lock (issue #1116): serialises the whole
+	 * cc3501e_request() 4-phase exchange (and therefore tx_scratch /
+	 * rx_scratch above) across every caller sharing this ctx -- the
+	 * Wi-Fi / BLE / GPIO-proxy backends, the console companion, and the
+	 * OTA path.  A plain flag guarded by compiler-builtin atomics
+	 * (__atomic_* in cc3501e_core.c), not an OS mutex: this driver core
+	 * is OS-agnostic (chips/cc3501e/cc3501e_core.c links into the
+	 * Zephyr module AND the plain-CMake / Yocto libalp_chips.a build,
+	 * per CMakeLists.txt's ALP_SDK_CHIP_LIST comment), so it cannot call
+	 * k_mutex_*.  Same rationale as src/common/alp_slot_claim.h's
+	 * lock-free slot claim.  Never touch directly -- go through
+	 * cc3501e_request(). */
+	bool request_lock;
 };
 
 /**
@@ -165,7 +178,21 @@ alp_status_t cc3501e_get_version(cc3501e_t *ctx, uint16_t *version_out);
  */
 alp_status_t cc3501e_stream_write(cc3501e_t *ctx, const uint8_t *data, size_t len);
 
-/** Issue a synchronous command + wait for the response.
+/**
+ * @brief Issue a synchronous command + wait for the response.
+ *
+ * Thread-safe (issue #1116): the whole 4-phase request/reply exchange --
+ * and the @c tx_scratch / @c rx_scratch it reads and writes -- runs under
+ * @p ctx's internal transport lock, so concurrent callers on the same
+ * @p ctx (Wi-Fi, BLE, GPIO proxy, console, OTA, ...) serialise instead of
+ * interleaving frames on the CS-less SPI link.  The lock acquire itself is
+ * BOUNDED (@c CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS, default
+ * 100 ms on Zephyr): a caller stuck behind another transaction gets @ref
+ * ALP_ERR_BUSY back rather than blocking forever.  Not re-entrant -- do
+ * not call this (directly or via a wrapper) from inside a callback this
+ * same call chain invokes; no current caller does (the async event
+ * callback runs only after cc3501e_poll_events()'s own call has already
+ * returned and released the lock).
  *
  *  @param ctx         CC3501E driver context (must be initialised first).
  *  @param cmd         Command opcode (one of @c ALP_CC3501E_CMD_* ).
@@ -175,7 +202,10 @@ alp_status_t cc3501e_stream_write(cc3501e_t *ctx, const uint8_t *data, size_t le
  *                     frame header).  Truncated to @p rx_cap.
  *  @param rx_cap      Capacity of @p rx_buf in bytes.
  *  @param rx_len      Receives bytes copied (may be NULL).
- *  @param timeout_ms  Max wait. */
+ *  @param timeout_ms  Max wait.
+ *  @return ALP_OK on success; ALP_ERR_BUSY if the transport lock was not
+ *          acquired within the bounded timeout; otherwise the mapped
+ *          firmware status or a transport error. */
 alp_status_t cc3501e_request(cc3501e_t        *ctx,
                              alp_cc3501e_cmd_t cmd,
                              const uint8_t    *tx_payload,

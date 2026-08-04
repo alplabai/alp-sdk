@@ -39,16 +39,6 @@ void alp_console_companion_set(cc3501e_t *ctx)
 	companion_cc3501e = ctx;
 }
 
-#if !IS_ENABLED(CONFIG_ALP_SDK_V2N_SUPERVISOR)
-/* Bridge-bus serialisation (Alif CC3501E).  The shell thread (companion command
- * bodies) and the async-connect result thread BOTH drive the inter-chip bridge,
- * and cc3501e_request is not internally locked -- two concurrent transactions
- * would interleave on the SPI bus and desync the link.  Every bridge
- * access from this split (each command body + the result thread's status poll)
- * takes this mutex. */
-K_MUTEX_DEFINE(companion_bus_lock);
-#endif
-
 static int cmd_companion_ver(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc);
@@ -80,9 +70,7 @@ static int cmd_companion_ver(const struct shell *sh, size_t argc, char **argv)
 	}
 
 	uint16_t ver = 0;
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
 	alp_status_t s = cc3501e_get_version(companion_cc3501e, &ver);
-	k_mutex_unlock(&companion_bus_lock);
 
 	if (s != ALP_OK) {
 		shell_error(sh, "get_version failed (%d)", (int)s);
@@ -116,9 +104,7 @@ static int cmd_companion_ping(const struct shell *sh, size_t argc, char **argv)
 		shell_warn(sh, "companion not registered (call alp_console_companion_set)");
 		return -ENODEV;
 	}
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
 	alp_status_t s = cc3501e_ping(companion_cc3501e);
-	k_mutex_unlock(&companion_bus_lock);
 	shell_print(sh, "ping %s", s == ALP_OK ? "OK" : "FAIL");
 	return s == ALP_OK ? 0 : -EIO;
 #endif
@@ -138,8 +124,11 @@ static int cmd_companion_ping(const struct shell *sh, size_t argc, char **argv)
 #define ALP_COMPANION_EVENT_POLL_MS 500
 
 /* Runs on the driver's RX/poll context (here: the event-poll thread or the IRQ
- * workqueue) while the bridge bus lock is held.  Print-only -- printk goes to
- * the active console backend, so it is safe off the shell thread. */
+ * workqueue), AFTER cc3501e_poll_events()'s own cc3501e_request() call has
+ * returned and released ctx's transport lock -- so this callback may itself
+ * drive another request (e.g. reading a status register in response to an
+ * event) without self-deadlocking.  Print-only -- printk goes to the active
+ * console backend, so it is safe off the shell thread. */
 static void companion_event_cb(uint8_t opcode, const uint8_t *payload, size_t len, void *user)
 {
 	ARG_UNUSED(payload);
@@ -166,23 +155,33 @@ static void companion_event_cb(uint8_t opcode, const uint8_t *payload, size_t le
 	}
 }
 
-/* Drain + dispatch pending events under the bridge bus lock.  Shared by the
- * timer-poll thread and the opt-in IRQ workqueue.  No-op until a companion is
- * registered (the cb is attached lazily on first poll). */
+/* Drain + dispatch pending events.  Shared by the timer-poll thread and the
+ * opt-in IRQ workqueue -- the ONLY two callers of companion_drain_events(),
+ * both in this file, so this lock stays file-local (issue #1116: unlike
+ * every OTHER companion_bus_lock use this split used to have, this one is
+ * NOT redundant against cc3501e_request()'s new internal transport lock --
+ * that lock covers only the single cc3501e_request() call inside
+ * cc3501e_poll_events(); the evt_busy check + the evt_buf walk-and-dispatch
+ * loop around it are a SEPARATE critical section evt_busy alone does not
+ * make safe against a genuinely concurrent second caller, per
+ * cc3501e_poll_events()'s own @warning in <alp/chips/cc3501e/events.h>).
+ * No-op until a companion is registered (the cb is attached lazily on first
+ * poll). */
 static bool companion_event_cb_set;
+K_MUTEX_DEFINE(companion_events_lock);
 
 static void companion_drain_events(void)
 {
 	if (companion_cc3501e == NULL) {
 		return;
 	}
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
+	k_mutex_lock(&companion_events_lock, K_FOREVER);
 	if (!companion_event_cb_set) {
 		(void)cc3501e_set_event_callback(companion_cc3501e, companion_event_cb, NULL);
 		companion_event_cb_set = true;
 	}
 	(void)cc3501e_poll_events(companion_cc3501e);
-	k_mutex_unlock(&companion_bus_lock);
+	k_mutex_unlock(&companion_events_lock);
 }
 
 static void companion_event_thread(void *a, void *b, void *c)
@@ -271,7 +270,6 @@ static int cmd_companion_bench(const struct shell *sh, size_t argc, char **argv)
 	}
 	uint16_t     ver   = 0;
 	unsigned int fails = 0;
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
 	int64_t t0 = k_uptime_get();
 	for (unsigned long i = 0; i < n; i++) {
 		if (cc3501e_get_version(companion_cc3501e, &ver) != ALP_OK) {
@@ -279,7 +277,6 @@ static int cmd_companion_bench(const struct shell *sh, size_t argc, char **argv)
 		}
 	}
 	int64_t dt = k_uptime_get() - t0;
-	k_mutex_unlock(&companion_bus_lock);
 	if (dt <= 0) {
 		dt = 1;
 	}
@@ -304,9 +301,7 @@ static int cmd_companion_reset(const struct shell *sh, size_t argc, char **argv)
 	}
 	/* Soft reset: the firmware acks then DEFERRED-reboots.  The bridge link drops
 	 * afterwards -- the app must cc3501e_reset()/sync + re-register to talk again. */
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
 	alp_status_t s = cc3501e_soft_reset(companion_cc3501e);
-	k_mutex_unlock(&companion_bus_lock);
 
 	if (s != ALP_OK) {
 		shell_error(sh, "soft reset failed (%d)", (int)s);

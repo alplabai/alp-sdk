@@ -5,8 +5,8 @@
  * `alp companion diag` -- CC3501E diagnostics (info / stats / loglevel),
  * Alif companion only.  Command-group TU of the alp_console_companion.c
  * split (#673 Phase 2): registers onto the (alp, companion) dynamic
- * subcommand set the core TU declares.  Shared companion context +
- * bridge-bus mutex come from alp_console_companion_internal.h.
+ * subcommand set the core TU declares.  Shared companion context comes
+ * from alp_console_companion_internal.h.
  */
 #include <errno.h>
 #include <stdint.h>
@@ -76,9 +76,7 @@ static int cmd_companion_diag_info(const struct shell *sh, size_t argc, char **a
 	}
 
 	alp_cc3501e_diag_info_t di = { 0 };
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
 	alp_status_t s = cc3501e_diag_info(companion_cc3501e, &di);
-	k_mutex_unlock(&companion_bus_lock);
 
 	if (s != ALP_OK) {
 		shell_error(sh, "diag info failed (%d)", (int)s);
@@ -110,9 +108,7 @@ static int cmd_companion_diag_stats(const struct shell *sh, size_t argc, char **
 	}
 
 	uint32_t frames_ok = 0, frames_err = 0;
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
 	alp_status_t s = cc3501e_diag_stats(companion_cc3501e, &frames_ok, &frames_err);
-	k_mutex_unlock(&companion_bus_lock);
 
 	if (s != ALP_OK) {
 		shell_error(sh, "diag stats failed (%d)", (int)s);
@@ -134,9 +130,7 @@ static int cmd_companion_diag_loglevel(const struct shell *sh, size_t argc, char
 		shell_error(sh, "usage: alp companion diag loglevel <0..255>");
 		return -EINVAL;
 	}
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
 	alp_status_t s = cc3501e_diag_log_level(companion_cc3501e, (uint8_t)level);
-	k_mutex_unlock(&companion_bus_lock);
 
 	if (s != ALP_OK) {
 		shell_error(sh, "diag loglevel failed (%d)", (int)s);

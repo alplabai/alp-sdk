@@ -25,15 +25,13 @@
  * registers one. */
 extern cc3501e_t *companion_cc3501e;
 
-/* Bridge-bus serialisation (Alif CC3501E), defined in
- * alp_console_companion.c.  The shell thread (every companion command
- * body across this split) and the async worker threads (the wifi
- * connect worker, the event-poll thread) all drive the inter-chip
- * bridge, and cc3501e_request is not internally locked -- two
- * concurrent transactions would interleave on the SPI bus and desync
- * the link.  Every bridge access from any companion TU takes this
- * mutex. */
-extern struct k_mutex companion_bus_lock;
+/* NOTE (issue #1116): this split used to also declare a shared
+ * `companion_bus_lock` k_mutex here so every command TU could serialise
+ * its own cc3501e_request() calls against the others.  That is now
+ * redundant -- cc3501e_request() itself takes ctx's internal transport
+ * lock for the whole 4-phase exchange (chips/cc3501e/cc3501e_core.c) --
+ * and has been removed rather than kept as a second, always-uncontended
+ * lock around the first. */
 
 #endif /* !CONFIG_ALP_SDK_V2N_SUPERVISOR */
 

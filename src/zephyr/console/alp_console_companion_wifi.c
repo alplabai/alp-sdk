@@ -6,7 +6,7 @@
  * ap-stop / status), Alif companion only.  Command-group TU of the
  * alp_console_companion.c split (#673 Phase 2): registers onto the
  * (alp, companion) dynamic subcommand set the core TU declares.  Shared
- * companion context + bridge-bus mutex come from
+ * companion context comes from
  * alp_console_companion_internal.h.
  */
 #include <errno.h>
@@ -57,16 +57,12 @@ static void companion_conn_thread(void *a, void *b, void *c)
 		/* Run the BLOCKING connect on this worker thread (dev cc3501e_wifi_connect
 		 * blocks until the firmware reports the association result); the shell
 		 * thread runs above this one, so the prompt stays responsive throughout. */
-		k_mutex_lock(&companion_bus_lock, K_FOREVER);
 		alp_status_t s = cc3501e_wifi_connect(
 		    companion_cc3501e, conn_ssid, conn_sec, conn_pass, ALP_COMPANION_WIFI_CONN_MS);
-		k_mutex_unlock(&companion_bus_lock);
 
 		if (s == ALP_OK) {
 			int8_t rssi = 0;
-			k_mutex_lock(&companion_bus_lock, K_FOREVER);
 			(void)cc3501e_wifi_rssi(companion_cc3501e, &rssi);
-			k_mutex_unlock(&companion_bus_lock);
 			shell_print(conn_sh, "wifi connected \"%s\"  rssi=%d dBm", conn_ssid, (int)rssi);
 		} else if (s == ALP_ERR_TIMEOUT) {
 			shell_warn(conn_sh, "wifi connect to \"%s\": timed out", conn_ssid);
@@ -92,10 +88,8 @@ static int cmd_companion_wifi_scan(const struct shell *sh, size_t argc, char **a
 
 	static cc3501e_scan_record_t recs[ALP_COMPANION_WIFI_SCAN_MAX];
 	size_t                       n = 0;
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
 	alp_status_t s = cc3501e_wifi_scan(
 	    companion_cc3501e, recs, ALP_COMPANION_WIFI_SCAN_MAX, &n, ALP_COMPANION_WIFI_SCAN_MS);
-	k_mutex_unlock(&companion_bus_lock);
 
 	if (s != ALP_OK) {
 		shell_error(sh, "scan failed (%d)", (int)s);
@@ -155,9 +149,7 @@ static int cmd_companion_wifi_disconnect(const struct shell *sh, size_t argc, ch
 		shell_warn(sh, "companion not registered");
 		return -ENODEV;
 	}
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
 	alp_status_t s = cc3501e_wifi_disconnect(companion_cc3501e);
-	k_mutex_unlock(&companion_bus_lock);
 
 	if (s != ALP_OK) {
 		shell_error(sh, "disconnect failed (%d)", (int)s);
@@ -184,10 +176,8 @@ static int cmd_companion_wifi_ap(const struct shell *sh, size_t argc, char **arg
 
 	/* AP bring-up blocks for seconds in the firmware; run it under the bus
 	 * lock so a concurrent BLE/GPIO op can't interleave on the bridge. */
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
 	alp_status_t s =
 	    cc3501e_wifi_ap_start(companion_cc3501e, ssid, sec, pass, ALP_COMPANION_WIFI_CONN_MS);
-	k_mutex_unlock(&companion_bus_lock);
 
 	if (s != ALP_OK) {
 		shell_error(sh, "ap start \"%s\" failed (%d)", ssid, (int)s);
@@ -206,9 +196,7 @@ static int cmd_companion_wifi_ap_stop(const struct shell *sh, size_t argc, char 
 		shell_warn(sh, "companion not registered");
 		return -ENODEV;
 	}
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
 	alp_status_t s = cc3501e_wifi_ap_stop(companion_cc3501e);
-	k_mutex_unlock(&companion_bus_lock);
 
 	if (s != ALP_OK) {
 		shell_error(sh, "ap stop failed (%d)", (int)s);
@@ -245,9 +233,7 @@ static int cmd_companion_wifi_status(const struct shell *sh, size_t argc, char *
 	}
 
 	alp_cc3501e_wifi_status_t st = { 0 };
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
 	alp_status_t s = cc3501e_wifi_status(companion_cc3501e, &st);
-	k_mutex_unlock(&companion_bus_lock);
 
 	if (s != ALP_OK) {
 		shell_error(sh, "status failed (%d)", (int)s);
@@ -260,9 +246,7 @@ static int cmd_companion_wifi_status(const struct shell *sh, size_t argc, char *
 		 * query (WIFI_GET_IP) -- print it only if the firmware has a lease. */
 		shell_print(sh, "rssi:  %d dBm", (int)st.rssi_dbm);
 		uint8_t ip[4] = { 0 };
-		k_mutex_lock(&companion_bus_lock, K_FOREVER);
 		alp_status_t ips = cc3501e_wifi_get_ip(companion_cc3501e, ip);
-		k_mutex_unlock(&companion_bus_lock);
 		if (ips == ALP_OK) {
 			shell_print(sh, "ip:    %u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
 		}
