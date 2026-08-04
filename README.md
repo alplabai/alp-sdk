@@ -81,12 +81,12 @@ refuse, so select an SDK with `--sdk-root`, a project `.alp/sdk-path` written by
 
 `tan` is independently released from
 [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli). The current
-development implementation is Python 3.12+. Until v0.5 is cut, the published
-installer still resolves the frozen Rust v0.4.1 release, so alp-sdk `dev` uses
-the `tan-cli/dev` source install shown above. From v0.5, release archives are
-PyInstaller freezes and bundle their Python runtime; no Rust toolchain is
-needed. PyPI publication is not enabled yet. The old `crates/` tree is a
-v0.4.1 behaviour oracle, not the development path. Python Tan owns the
+implementation is Python 3.12+. From v0.5.0 the release assets are archives of
+PyInstaller freezes and bundle their own Python runtime; no Rust toolchain is
+needed, and the published installer resolves them. Before v0.5.0 the installer
+resolved the frozen Rust v0.4.1 release, which is why alp-sdk `dev` used the
+`tan-cli/dev` source install shown above. PyPI publication is not enabled yet.
+The old `crates/` tree is a v0.4.1 behaviour oracle, not the development path. Python Tan owns the
 in-process planner and executor: it reads the selected SDK's metadata and
 schemas, produces the build plan internally, materialises the per-slice config,
 and runs each slice's `west`/`bitbake`/`cmake` command. The SDK's original

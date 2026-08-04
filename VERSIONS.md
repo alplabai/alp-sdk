@@ -654,7 +654,6 @@ target — porting across all four SoMs is additive.
 - Eclipse + CLion plugins (medium each; depends on customer ask).
 - Docker dev container + GitHub Codespaces template (small).
 - One-command device provisioning UI — `alp provision` wizard for first-time setup (medium).
-- Renode emulation for CI on every SoM — supplements HiL with model-based testing (medium per SoM).
 - Trace viewer (perfetto / chrome://tracing format) for runtime profiling (medium).
 - Memory analyzer — heap + stack high-water marks across runs (small).
 - Power profiler — per-API energy budget + sleep state introspection (medium; pairs with `<alp/power.h>`).

@@ -477,17 +477,14 @@ jumps straight to the right log on a failure.
   with `printk("ept=%u\n", ALP_IPC_ALP_DEFAULT_RPMSG_SRC_EPT)` — they
   should match the manifest's `ipc[].rpmsg_endpoint_ids` field.
 
-### Renode smoke test
+### Verifying without a board
 
-You don't need a board to verify the heterogeneous handshake:
-
-```bash
-tan renode
-```
-
-Renode loads both slice images, simulates RPMsg over its mailbox
-peripheral, and runs a name-service ping/pong.  CI uses the same
-`tan renode` invocation in `pr-renode-dual-os.yml`.
+Renode-based simulation (`tan renode`) is retired — see
+[ADR 0022](adr/0022-python-executor-renode-retirement.md). There is no
+simulated substitute today for the cross-core RPMsg handshake itself:
+verify it with `tan build` + `tan flash` on real hardware. A single
+core's own logic, if it has no cross-core dependency, can still be
+smoke-tested headless with `tan run` under `native_sim`.
 
 ## 9. Cross-core API
 
