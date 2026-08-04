@@ -113,9 +113,9 @@ alp-sdk/
 │   └── cc3501e/                     # TI CC3501E Wi-Fi bridge firmware (AEN)
 ├── cmake/                           # find_package + Zephyr module helpers
 │   └── alp-sdk-config.cmake.in
-├── scripts/                         # CODEGEN + ORCHESTRATION
-│   ├── alp_orchestrate/             # board.yaml → per-core slice fan-out + manifest
-│   ├── alp_project.py               # per-slice Kconfig / cmake-args / DTS overlay emit
+├── scripts/                         # REFERENCE CODEGEN + ORCHESTRATION
+│   ├── alp_orchestrate/             # reference board.yaml → per-core planner
+│   ├── alp_project.py               # reference per-slice config/overlay emit
 │   ├── gen_soc_caps.py              # SoC JSONs → include/alp/soc_caps.h
 │   ├── gen_board_header.py        # board YAML → include/alp/boards/<board>_routes.h
 │   ├── validate_board_yaml.py       # board.yaml schema check
@@ -190,8 +190,10 @@ canonical core IDs of the active SoM's SoC (`a55_cluster`,
 `m33_sm`, `m55_hp`, `m55_he`, …).  Each entry declares the runtime,
 app source, peripherals, libraries, inference, iot, plus the new
 `memory:` and `power:` sub-blocks for stack/heap sizing and
-sleep-mode wake sources.  `scripts/alp_orchestrate/` loads the file, resolves
-each entry against the SoM preset's `topology:` defaults, and emits
+sleep-mode wake sources. Python Tan's relocated planner is the normal user
+path. The SDK's `scripts/alp_orchestrate/` reference implementation loads the
+same file, resolves each entry against the SoM preset's `topology:` defaults,
+and emits
 one **slice** per non-`off` core:
 
 ```
@@ -204,10 +206,10 @@ board.yaml (`cores:`)
    {core_id: Slice}               # one Slice per non-off core
         │
         ▼
-   --emit build-plan              # plan JSON: per-slice command + generated files (ADR 0014)
+   Tan planner / SDK reference    # plan JSON: per-slice command + generated files
         │
         ▼
-   tan materialise                # writes alp.conf / local.conf / cmake-args per slice
+   tan build                      # writes alp.conf / local.conf / cmake-args per slice
                                    # under build/<core>-<os>/, then runs each slice's build
 ```
 
@@ -216,7 +218,7 @@ default to Zephyr, Cortex-A cores default to Yocto Linux.  The
 customer writes an explicit `os:` only when overriding the default
 (`os: off` to skip a peer core, `os: baremetal` on a Cortex-M that
 normally takes Zephyr).  Yocto-on-A55 + Zephyr-on-M33 on a single
-V2N SoM is one `alp_orchestrate/` invocation, not two.  Full
+V2N SoM is one planner invocation, not two. Full
 walkthrough: [`docs/heterogeneous-builds.md`](heterogeneous-builds.md).
 
 ### Sparse capabilities flow
@@ -281,7 +283,7 @@ The active generators are:
 
 | Script                                  | Reads                                                | Writes                                                                         |
 |-----------------------------------------|------------------------------------------------------|--------------------------------------------------------------------------------|
-| `scripts/alp_orchestrate/`            | `board.yaml` + SoM preset + SoC JSON + board preset| Emits (via `--emit`; `tan` materialises to disk -- ADR 0020): `build/system-manifest.yaml`, `build/generated/alp/system_ipc.h`, `build/generated/dts-reservations.dtsi`, `build/alp_sysbuild.conf` (when `boot:` declared), per-slice `alp.conf` / `local.conf` / `cmake-args.txt`; also `--emit build-plan` — the machine-readable plan JSON `tan` consumes as its sole build input (ADR 0014 contract, ADR 0020 executor) |
+| `scripts/alp_orchestrate/`            | `board.yaml` + SoM preset + SoC JSON + board preset| Reference/parity producer for `system-manifest`, IPC/reservation/sysbuild artefacts, per-slice configuration, and `--emit build-plan`. Normal `tan build` uses Tan's relocated in-process equivalent; `--plan-from` can still exercise the published plan seam (ADRs 0014 and 0020). |
 | `scripts/alp_project.py`                | same inputs as orchestrator                          | Per-slice emits: `--emit zephyr-conf`, `--emit yocto-conf`, `--emit cmake-args`, `--emit dts-overlay`, `--emit hw-info-h`, `--emit west-libraries`; also `--emit composed-route-table` (JSON SoM × board route-table demonstrator), `--emit carrier-netlist` (Studio-facing carrier nets + BOM handoff, not PCB layout), and `--emit zephyr-board` (per-core Zephyr board tree -- see below) |
 | `scripts/gen_soc_caps.py`               | `metadata/socs/**/*.json`                            | `include/alp/soc_caps.h` (per-SoC `ALP_SOC_*_COUNT` + `ALP_SOC_*_MAX_*` macros) |
 | `scripts/gen_soc_peripheral_instances.py` | vendored Zephyr SoC devicetree (`dts/arm/renesas/rz/rzv/r9a09g056.dtsi` today) | `metadata/socs/renesas/rzv2n/n44.json`'s `peripheral_instances` block (per-instance `reg`/`interrupts`, issue #1154) |

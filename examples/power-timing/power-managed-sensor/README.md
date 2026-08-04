@@ -11,7 +11,7 @@ example of sleep-mode selection + multi-source wakeup.
 > "re-entering deep sleep" lines below are literal `printf` string
 > constants that frame where a real node's `alp_*` calls would go.
 > What is real and worth copying is the **declarative half**: the
-> `power:` block and the `CONFIG_PM_*` set the orchestrator emits
+> `power:` block and the `CONFIG_PM_*` set the planner emits
 > from it. Despite the example's name, no BME280 or IMU is driven
 > here (the SDK does ship a BME280 driver -- see
 > [`<alp/chips/bme280.h>`](../../../include/alp/chips/bme280.h) --

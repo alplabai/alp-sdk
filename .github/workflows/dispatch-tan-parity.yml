@@ -3,21 +3,23 @@
 # ADR-0020 cross-repo trigger — SENDER half (alp-sdk → tan-cli).
 #
 # Fires a `repository_dispatch` at `alplabai/tan-cli` whenever this repo's
-# CONTRACT SURFACE moves, carrying the SHA that just landed so tan's parity
-# gate tests THAT ref instead of its hand-bumped `PINNED_SDK_TAG`.
+# REFERENCE PLANNER / CONTRACT SURFACE moves, carrying the SHA that just landed
+# so Python Tan's relocated planner parity gate tests THAT ref instead of its
+# hand-bumped `PINNED_SDK_TAG`.
 #
 # Why this exists, stated as the gap it closes rather than as the ADR line it
 # satisfies:
 #
 #   * `parity-seam1.yml` (this repo) diffs our own `--emit build-plan` against
 #     our OWN frozen oracle. It never runs tan. It cannot tell us that a
-#     planner change broke tan's ability to EXECUTE the plan.
+#     reference-planner change broke Tan's relocated producer parity or its
+#     ability to EXECUTE the plan.
 #   * tan's `parity.yml` on a pull_request tests against a PINNED alp-sdk ref,
 #     bumped by hand. Until someone bumps it, tan is green against an alp-sdk
 #     that no longer exists.
 #
-# So "alp-sdk changed and tan can no longer build from the plan" is invisible on
-# both sides. tan's seam2 -- materialise, cross-compile through `tan build`,
+# So "alp-sdk changed and Tan no longer produces/executes an equivalent plan"
+# is invisible on both sides. Tan's seam2 -- materialise, cross-compile through `tan build`,
 # boot in Renode -- is exactly the check that sees it, and this is what points
 # it at the right commit.
 #

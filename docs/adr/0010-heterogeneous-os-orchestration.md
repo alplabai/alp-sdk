@@ -5,6 +5,11 @@ Status: Accepted — superseded by ADR-0020 (build execution moved to
 Date: 2026-05-15
 Deciders: alpCaner
 
+> **Python-port note (2026-08-03):** Tan now carries the normal in-process
+> planner as well as the executor. alp-sdk's orchestrator is retained as the
+> reference/parity producer. This changes the repository boundary, not this
+> ADR's single-`board.yaml`, per-core-slice, or peer-OS decisions.
+
 ## Context
 
 The SDK presents Zephyr and Yocto as mutually exclusive build targets

@@ -2,8 +2,8 @@
 :description: Boot a single headless Cortex-M33 (M33-SM) Zephyr slice, no hardware.
 
 # ---------------------------------------------------------------------
-# Non-sim headless boot.  `tan renode` (tan-cli, crates/tan-core/src/
-# renode.rs -> build_renode_argv) injects `$elf` (the resolved
+# Non-sim headless boot. `tan renode` (tan-cli,
+# python/tan/core/renode_plan.py -> build_renode_argv) injects `$elf` (the resolved
 # zephyr.elf) and `$repl` (this platform descriptor) via
 # `renode -e "$elf=@..."` BEFORE this script runs; the `?=` defaults
 # only apply when still unset, so the wrapper's values win and the

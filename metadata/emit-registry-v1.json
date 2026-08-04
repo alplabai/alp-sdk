@@ -419,7 +419,7 @@
         "media": "json",
         "schema_id": "build-plan-v1",
         "path": null,
-        "consumer_hint": "alp CLI / alp-sdk-vscode -- machine-readable build plan (Wave C consumer contract)"
+        "consumer_hint": "Python Tan --plan-from / alp-sdk-vscode / parity CI -- reference machine-readable build plan"
       }
     },
     {

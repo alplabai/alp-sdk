@@ -64,7 +64,7 @@ Backend selection:
 | `_CPU` | TFLM reference / Helium / NEON kernels; always available. |
 
 The `ETHOS_U` token is a single customer-facing handle that
-covers every Arm Ethos NPU variant.  The orchestrator emits
+covers every Arm Ethos NPU variant. The planner emits
 per-variant `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U{55,65,85}=y`
 gates from the silicon capability counts (`ethos_u{55,65,85}_count`,
 resolved from the SoC JSON `npus[]`) (G-1
@@ -205,7 +205,7 @@ an explicit value).
 ## 5. Build + flash
 
 ```bash
-tan --project examples/aen/edgeai-vision-aen build
+tan build --project examples/aen/edgeai-vision-aen
 west flash
 ```
 

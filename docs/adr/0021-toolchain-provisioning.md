@@ -6,6 +6,18 @@ correction, and the item-2 injection-set / dtc-gperf corrections.
 Date: 2026-07-25
 Deciders: alpCaner
 
+## Amendment (2026-08-03 — Python Tan owns the active host checks)
+
+The provisioning policy is unchanged, but exact Tan implementation paths in
+the historical body now refer to the frozen v0.4.1 Rust oracle. The active
+Python consumers are `python/tan/commands/doctor_cmd.py` (including
+`ZEPHYR_SDK_INSTALL_VERSION` and the effective Python-floor checks) and
+`python/tan/commands/bootstrap_cmd.py` (including `WORKSPACE_BLOCKING`). Keep
+their tan-cli tests in parity with alp-sdk's `metadata/toolchains.json` and
+`metadata/bootstrap.json` when either contract changes. The active structured
+spelling is `tan doctor --format json`; `tan doctor --json` in the historical
+body below names the superseded v0.4 surface.
+
 ## Amendment (2026-07-26 — answer the Arm GNU Toolchain open-evidence question)
 
 "Open evidence"'s second bullet below asks whether the Arm GNU Toolchain is
@@ -453,6 +465,7 @@ Bad / costs:
 
 - [ADR 0012](0012-cross-platform-developer-host.md) — cross-platform developer
   host; Linux required only for Yocto.  This ADR automates what 0012 documented.
-- [ADR 0020](0020-sdk-owns-build-execution.md) — the SDK plans, tan executes.
+- [ADR 0020](0020-sdk-owns-build-execution.md) — Python Tan owns the normal
+  relocated planner and executor; alp-sdk retains the reference producer.
 - [ADR 0010](0010-heterogeneous-os-orchestration.md) — why Lane 2 is Linux-only.
 - `docs/cross-platform-setup.md` — the manual per-OS steps this replaces.

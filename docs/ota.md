@@ -62,7 +62,7 @@ if a developer wants to override per-tree.
 
 ### Underlying layer
 
-The orchestrator output drives
+The planner output drives
 [`meta-alp-sdk/conf/distro/include/mender.inc`](../meta-alp-sdk/conf/distro/include/mender.inc),
 which `meta-alp-sdk` pulls in via the generated `INHERIT +=` line.
 See the [`meta-alp-sdk` README](../meta-alp-sdk/README.md#ota-via-mender)

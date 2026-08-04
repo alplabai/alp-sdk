@@ -181,10 +181,11 @@ def test_emit_system_manifest_populates_helper_mcus(tmp_path: Path) -> None:
     the manifest must carry the chip slug + flash_method verbatim.
     `firmware_path` is entirely ABSENT from the preset (#852 review fix,
     2026-07): the old `firmware_path: TBD` sentinel wasn't actually treated
-    as a sentinel by tan-cli's flash planner
+    as a sentinel by the frozen v0.4.1 Rust flash planner
     (`crates/tan-cli/src/commands/flash/mod.rs`) -- it became the artefact
     string and a real flasher was spawned against a nonexistent `TBD`
-    path. Dropping the field entirely makes tan-cli's own clean-refusal
+    path. Dropping the field entirely makes both the oracle and Python Tan's
+    `python/tan/commands/flash_cmd.py` clean-refusal
     path fire instead ("has no output_artefact / firmware_path; can't
     flash"). No `firmware_path` key means no TBD note either.
     """
@@ -306,5 +307,4 @@ def test_emit_system_manifest_flash_args_omits_jlink_flash_device_when_absent(
     by_core = {s["core_id"]: s for s in parsed["slices"]}
     for core_id in ("m55_hp", "m55_he"):
         assert by_core[core_id]["flash_args"] == {}
-
 

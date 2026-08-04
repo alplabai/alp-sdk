@@ -39,10 +39,13 @@ issues at
 ## Quickstart
 
 ```bash
-# One-time: install the build executor and user command surface (no Rust
-# toolchain needed -- see below for a from-source alternative)
-curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh
-export PATH="$HOME/.local/bin:$PATH"  # install.sh already made this permanent in your shell rc; needed once more in THIS shell
+# During the v0.5 Python-port transition, install tan-cli/dev in its own
+# Python 3.12+ venv.
+# (After v0.5 is released, install.sh returns to being the shortest path.)
+git clone --branch dev https://github.com/alplabai/tan-cli ../tan-cli
+python3 -m venv ../tan-cli/.venv
+../tan-cli/.venv/bin/python -m pip install ../tan-cli/python
+export PATH="$PWD/../tan-cli/.venv/bin:$PATH"
 
 # One-time per clone: stand up the west/Zephyr workspace + venv beside this
 # checkout. POSIX only (Linux/macOS) -- native Windows uses WSL2 or
@@ -51,7 +54,7 @@ export PATH="$HOME/.local/bin:$PATH"  # install.sh already made this permanent i
 tan bootstrap --sdk-root "$PWD"
 
 # Sanity-check the host -- catches a missing toolchain/HAL before it bites later
-tan doctor --build
+tan doctor
 
 # One-time: the arm-zephyr-eabi cross toolchain a real-SoM build needs --
 # bootstrap.sh above got you west/Python, not this; see docs/getting-started.md
@@ -59,18 +62,45 @@ tan doctor --build
     --install-dir "$PWD/zephyr-sdk" )
 export ZEPHYR_SDK_INSTALL_DIR="$PWD/../zephyr-sdk"
 
-# Scaffold a hello-world (--sdk-root points it at this checkout); it
-# defaults to a real E1M SoM target, so this cross-builds and needs the
-# Zephyr SDK toolchain just installed above
-tan init --name my-app --sdk-root "$PWD" --non-interactive
-cd my-app
-tan sdk switch ..   # one-time per project: pin the alp-sdk checkout my-app builds against
-tan build --native
+# Scaffold a sibling hello-world project. --sdk-root records this checkout in
+# my-app/.alp/sdk-path; sdk install/switch are not ported in Python tan yet.
+tan init --name my-app --destination .. --sdk-root "$PWD"
+cd ../my-app
+tan build
 ```
 
-`tan bootstrap` is what stands up the workspace `tan build` needs — the west/Zephyr tree and the Python venv, one level up from `alp-sdk/` — and skipping it is the #1 way this Quickstart fails on a fresh clone. You do **not** activate that venv by hand: the SDK's build plan carries the `PATH` additions per slice, so `tan build` finds `west` on its own. Activate it (`source ../.venv/bin/activate`) only if you intend to run `west` yourself. `scripts/bootstrap.sh` (and `scripts/bootstrap.ps1` on native Windows) is the same setup as a shell script for CI and for hosts without `tan`; both read the same `metadata/bootstrap.json`, so they cannot drift apart. See [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md) for the per-OS manual equivalent. `west sdk install` and `tan sdk switch` are both one-time, per-checkout/per-project steps neither `tan bootstrap` nor `bootstrap.sh` do for you (no elevation, no silent re-pin) — skip either and `tan build`/`tan doctor --build` report a missing toolchain or `no SDK selected` respectively; see [`docs/getting-started.md`](docs/getting-started.md) for the full explanation. `tan` is not installed by either -- it's a separate public Rust binary from [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli); the `install.sh` one-liner above needs no Rust toolchain. Building from source instead needs Rust 1.86+ (get it from [rustup.rs](https://rustup.rs)) plus a system C toolchain (`build-essential` on Debian/Ubuntu, `gcc`/`gcc-c++` on Fedora/RHEL -- see [`docs/cross-platform-setup.md`](docs/cross-platform-setup.md) §2.1): `git clone https://github.com/alplabai/tan-cli && cd tan-cli && cargo install --path crates/tan-cli --locked`. `tan init` walks you through SoM SKU + template + destination interactively, or accepts `--som`, `--template`, `--cores` (and friends) for CI -- see `tan init --help` for the full flag set. `tan build` (`--native` is the default, explicit-opt-in spelling) consumes the SDK's build plan, materialises it, and runs each slice's `west`/`bitbake`/`cmake` command directly for the real SoM `board.yaml` targets; it never runs the produced binary itself (that's `tan run`). Flashing real hardware is `tan flash`.
+`tan bootstrap` stands up the west/Zephyr tree and workspace venv beside the
+SDK checkout. You do **not** activate that venv for ordinary `tan` commands;
+activate it only when invoking `west` or the SDK's Python tools directly.
+`scripts/bootstrap.sh` (and `scripts/bootstrap.ps1` on native Windows) is the
+same metadata-driven setup for CI and hosts without `tan`. The Zephyr SDK is a
+separate one-time install; Python Tan's `sdk install` and `sdk switch` currently
+refuse, so select an SDK with `--sdk-root`, a project `.alp/sdk-path` written by
+`tan init --sdk-root`, or a sibling `alp-sdk/` checkout. See
+[`docs/getting-started.md`](docs/getting-started.md) for the complete flow.
 
-`tan validate --board-yaml board.yaml` runs the diagnostic-rich validator standalone — try it on a fixture under `tests/fixtures/board_yaml_bad/` to see the format.  `tan doctor --build` triages the host build environment (`[+]`/`[!]`/`[x]` lines with fix hints) whenever a build machine misbehaves.  alp-sdk is plans-only — it emits `build-plan` / `system-manifest`; the whole build / flash / size / image / clean surface lives in the standalone [`tan` CLI](https://github.com/alplabai/tan-cli).  alp-sdk's own remaining verb set — `generate` / `validate` / `doctor` / `monitor` / `new-som` / `model` and friends — is documented in [`docs/cli.md`](docs/cli.md).
+`tan` is independently released from
+[`alplabai/tan-cli`](https://github.com/alplabai/tan-cli). The current
+implementation is Python 3.12+. From v0.5.0 the release assets are archives of
+PyInstaller freezes and bundle their own Python runtime; no Rust toolchain is
+needed, and the published installer resolves them. Before v0.5.0 the installer
+resolved the frozen Rust v0.4.1 release, which is why alp-sdk `dev` used the
+`tan-cli/dev` source install shown above. PyPI publication is not enabled yet.
+The old `crates/` tree is a v0.4.1 behaviour oracle, not the development path. Python Tan owns the
+in-process planner and executor: it reads the selected SDK's metadata and
+schemas, produces the build plan internally, materialises the per-slice config,
+and runs each slice's `west`/`bitbake`/`cmake` command. The SDK's original
+`--emit build-plan` implementation remains the inspectable parity producer while
+the port settles. `tan build` never runs the produced binary (use `tan run`);
+real-hardware programming is `tan flash`.
+
+`tan validate --offline --board-yaml board.yaml` runs Tan's bundled structural
+checks. During the port, use `python3 scripts/validate_board_yaml.py
+--board-yaml board.yaml` for the SDK's full diagnostic-rich validator. `tan
+doctor` checks build and flash readiness and prints a remediation for each
+warning/failure (`--build` remains accepted only for v0.4 compatibility and no
+longer changes the check list). The complete command and SDK-maintainer surface
+is documented in [`docs/cli.md`](docs/cli.md).
 
 ## Two consumer paths
 
@@ -436,9 +466,9 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference bo
   └───────────────┘    └────────────────────────────────────────────────────────────────────────┘
           │
   ┌───────────────┐    ┌────────────────────────────────────────────────────────────────────────┐
-  │ Dev Tooling   │ ─► │  board.yaml · alp_project.py (per-core emit) · alp_orchestrate         │
-  │               │    │  --emit build-plan/system-manifest  →  tan (executor)                  │
-  │               │    │  tan build / flash / image / size / clean                              │
+  │ Dev Tooling   │ ─► │  board.yaml → Python tan (in-process planner + executor)               │
+  │               │    │  SDK reference emits: alp_project.py · alp_orchestrate                 │
+  │               │    │  tan build / flash / image / size / renode / clean                     │
   │               │    │  validate_board_yaml.py · program_eeprom.py · VS Code extension        │
   │               │    │  tan model build  →  .alpmodel   (the model-compile front-end)         │
   └───────────────┘    └────────────────────────────────────────────────────────────────────────┘
@@ -599,11 +629,11 @@ cmake -B build -DALP_BUILD_TESTS=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
 
-# Zephyr (heterogeneous slice) -- tan is the executor; it consumes this
-# checkout's --emit build-plan output
+# Zephyr (heterogeneous slice) -- Python tan plans in process from this
+# checkout's metadata, then executes the resulting per-core plan
 west init -m https://github.com/alplabai/alp-sdk --mr main alp-ws
 cd alp-ws && west update
-tan --project examples/multicore/rpmsg-v2n build
+tan build --project alp-sdk/examples/multicore/rpmsg-v2n --sdk-root "$PWD/alp-sdk"
 ```
 
 ## Repository layout

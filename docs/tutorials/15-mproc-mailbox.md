@@ -275,11 +275,11 @@ above does not change; the framing is transparent inside
 
 ```bash
 # HP-side:
-tan --project examples/multicore/mproc-mailbox build
+tan build --project examples/multicore/mproc-mailbox
 # Outputs build/zephyr/zephyr.bin for HP.
 
 # HE-side (TBD, dual-image flow):
-# tan --project examples/multicore/mproc-mailbox build \
+# tan build --project examples/multicore/mproc-mailbox \
 #     --sysbuild --domain m55-he
 # Outputs build/m55-he/zephyr/zephyr.bin for HE.
 

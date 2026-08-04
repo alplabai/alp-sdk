@@ -1,10 +1,11 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # ADR-0020 parity gate
 
-`tan` (this repo) is the sole executor for the Alp Lab build (ADR-0020, end-state
-B). alp-sdk's planner is the fast-moving half of that split, so a planner
-change that emits fine but builds wrong must be caught before it reaches a
-release, not discovered on a bench. This directory seeds the gate ADR-0020's
+Python `tan` (the separate `alplabai/tan-cli` repo) owns the normal relocated
+planner and executor (ADR-0020's 2026-08-03 amendment). alp-sdk's reference
+planner and contracts remain the parity source, so a change that emits fine
+but builds wrong must be caught before it reaches a release, not discovered on
+a bench. This directory seeds the gate ADR-0020's
 2026-07-20 Amendment (alp-sdk#855) says is release-blocking: a **two-seam
 parity gate** plus a **cross-repo trigger** so alp-sdk CI can drive it on
 every planner change.

@@ -1,7 +1,7 @@
 # `board.yaml` build-artefact emission
 
-How `scripts/alp_project.py` compiles a resolved `board.yaml` into
-the per-backend native config: the `tan build` entry point, the
+How Python Tan and alp-sdk's reference `scripts/alp_project.py` compile a
+resolved `board.yaml` into the per-backend native config: the `tan build` entry point, the
 Zephyr `alp.conf` overlay, plain-CMake `-D` args, the Yocto
 `local.conf` snippet, `west.yml` library auto-pinning, the
 build-time `hw-info-h` identifier header, and the DTS overlay for
@@ -17,23 +17,25 @@ and emits the requested build artifacts.  Common workflows below.
 
 ### `tan` -- validate, generate, and build
 
-alp-sdk is plans-only (ADR [0020](adr/0020-sdk-owns-build-execution.md));
-the standalone [`tan` CLI](https://github.com/alplabai/tan-cli) is the
-executor.  The usual application build entry point is:
+The standalone Python [`tan` CLI](https://github.com/alplabai/tan-cli) owns the
+normal in-process planner and executor (ADR
+[0020](adr/0020-sdk-owns-build-execution.md)). The usual application build
+entry point is:
 
 ```bash
-tan --project <app-dir> build
+tan build --project <app-dir>
 ```
 
-`tan build` validates `<app-dir>/board.yaml` (via alp-sdk's
-`alp_orchestrate --emit build-plan`), materialises the generated
+`tan build` validates `<app-dir>/board.yaml` with its relocated planner,
+materialises the generated
 per-slice configuration and system manifest, then dispatches the
 underlying Zephyr / Yocto / baremetal build steps for the enabled
 cores.  Companion `tan` verbs (`tan image`, `tan flash`, `tan clean`,
-and `tan size`) consume the same build state for bundle, flash, and
-sizing workflows.  The SDK's own surviving `west alp-emit` remains
-for read-only, west-centric artefact inspection with no build
-attached.
+`tan size`, and `tan renode`) consume the same build state for
+bundle, flash, sizing, and simulation workflows. The SDK's
+`alp_project.py`, `alp_orchestrate --emit ...`, and `west alp-emit` surfaces
+remain the reference implementations for parity, direct SDK maintenance, and
+west-centric artefact inspection.
 
 ### Zephyr -- generated `alp.conf` appended to `prj.conf`
 
@@ -234,4 +236,3 @@ the same rule.
   validate that requested features (e.g. 16-bit ADC) match the
   SoC's documented caps.  The `<alp/soc_caps.h>` runtime check
   catches mismatches at `_open` time today.
-
