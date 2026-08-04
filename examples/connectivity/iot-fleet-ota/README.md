@@ -42,7 +42,7 @@ config:
   `SB_CONFIG_BOOT_SIGNATURE_KEY_FILE="keys/mcuboot_dev_ecdsa_p256.pem"`,
   and `SB_CONFIG_MCUBOOT_MODE_SWAP_USING_SCRATCH=y` into the
   sysbuild overlay.
-- `ota:` -> Mender wiring. On Yocto slices the orchestrator writes
+- `ota:` -> Mender wiring. On Yocto slices the planner writes
   `INHERIT += "mender-full"`, `MENDER_ARTIFACT_NAME`,
   `MENDER_SERVER_URL`, `MENDER_TENANT_TOKEN`,
   `MENDER_STORAGE_DEVICE_BASE`, `MENDER_BOOT_PART_SIZE_MB`,

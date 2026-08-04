@@ -1077,7 +1077,7 @@
       "script": "scripts/check_write_text_newline.py"
     },
     {
-      "purpose": "Byte-parity gate: a Zephyr example's own `CMakeLists.txt` (which shells `alp_project.py --emit zephyr-conf --core <id>` at configure time) and the planner's build-plan `configArtefacts` (`--emit build-plan`, consumed by `tan`) MUST materialise the identical `alp.conf` for the same core.",
+      "purpose": "Byte-parity gate: a Zephyr example's own `CMakeLists.txt` (which shells `alp_project.py --emit zephyr-conf --core <id>` at configure time) and the SDK reference build-plan `configArtefacts` MUST materialise the identical `alp.conf` for the same core; Python Tan tests its relocated producer against the same contract.",
       "script": "scripts/check_zephyr_conf_parity.py"
     }
   ],

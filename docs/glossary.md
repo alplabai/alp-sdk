@@ -63,7 +63,7 @@ auto-derived region table (from `metadata/socs/.../<part>.json
 variants[].sram_banks_kb` + `mram_mb`, computed by
 `_resolve_memory_map()`); SoM presets may override this with an
 explicit `memory_map:` block for non-stock partitioning.  The
-orchestrator emits matching reservations into both kernels' device
+planner emits matching reservations into both kernels' device
 trees so neither side maps the region as ordinary memory.
 
 **Chip driver** -- A non-OS-specific C module under `chips/<part>/`
@@ -191,7 +191,7 @@ Declares its per-OS `integration:` wiring (Zephyr Kconfig / Yocto
 `IMAGE_INSTALL` / baremetal CMake), `requires:` compatibility
 constraints, curation `tier:`, pinned `version:`, and SPDX `license:`.
 Selected project-wide via the top-level `libraries: [<name>, ...]` key
-in `board.yaml`; the orchestrator emits the wiring and rejects an
+in `board.yaml`; the planner emits the wiring and rejects an
 incompatible selection at emit time.  See
 [`metadata/libraries/README.md`](../metadata/libraries/).
 
@@ -323,9 +323,9 @@ each preset is distinguishable in a directory listing.
 V2N modules.  Owns peripherals that don't fit on the main SoC's
 pinmux.  See [`docs/gd32-bridge.md`](gd32-bridge.md).
 
-**System manifest** -- `build/system-manifest.yaml`, the generated
-artefact produced by `tan build` (seeded by the SDK's `alp_orchestrate
---emit system-manifest`) that captures every slice's output binary,
+**System manifest** -- `build/system-manifest.yaml`, the generated artefact
+produced by Python Tan's relocated planner (and by the SDK's reference
+`alp_orchestrate --emit system-manifest`) that captures every slice's output binary,
 every IPC carve-out's resolved address, the boot order, and pointers
 to helper-MCU firmware.  The single source of truth consumed by `tan
 image`, `tan flash`, the OTA bundler, and (eventually) alp-studio.
@@ -365,12 +365,10 @@ E1M-X form factor.  See [`docs/soms/v2n.md`](soms/v2n.md).
 SKUs `E1M-V2M101` / `E1M-V2M102`.  See
 [`docs/soms/v2n-m1.md`](soms/v2n-m1.md).
 
-**west** -- Zephyr's meta-tool for workspace management +
-sub-commands.  alp-sdk is plans-only (ADR
-[0020](adr/0020-sdk-owns-build-execution.md)) and no longer ships a
-build-executing west extension; building goes through the standalone
-`tan` CLI (`tan build`), which pre-flights `board.yaml` validation
-before delegating to `west build`.  The SDK still ships the
+**west** -- Zephyr's meta-tool for workspace management + sub-commands. Python
+Tan owns the normal in-process planner and build executor (ADR
+[0020](adr/0020-sdk-owns-build-execution.md)); alp-sdk retains metadata,
+schemas, and reference emitters but no build-executing west extension. The SDK still ships the
 non-build west extension commands `west alp-migrate` (board.yaml
 schema migration), `west alp-lock` (dependency lockfile), `west
 alp-quality` (quality-task registry), and `west alp-emit` (artefact

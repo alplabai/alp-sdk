@@ -129,14 +129,14 @@ police one repo's workflows.
 
 The live counter-example is a different repo. `alplabai/tan-cli` consumes the
 same fact -- `tan doctor`'s `zephyrSdk` check names the exact
-`west sdk install --version <..>` remedy a customer runs -- from a hand-ported
-Rust constant (`ZEPHYR_SDK_INSTALL_VERSION` in
-`crates/tan-core/src/host_env.rs`) that has to track `zephyrSdk.version` here
+`west sdk install --version <..>` remedy a customer runs -- from
+`ZEPHYR_SDK_INSTALL_VERSION` in `python/tan/commands/doctor_cmd.py`, which has
+to track `zephyrSdk.version` here
 by hand. This script cannot see that checkout, so a bump here could leave tan
 printing a stale install command with nothing red on either side. tan-cli
 issue #172, closed by its PR #173, covers that half from the other end: it
 vendors `metadata/toolchains.json` into `contract/fixtures/toolchains/` and
-asserts byte-parity against the constant in tan's own required `cargo test` --
+asserts byte-parity against the constant in Tan's required Python tests --
 the same shape its bootstrap-manifest fallback already uses. So the pair is
 covered TODAY, by a gate on the other side of the seam, not by this one.
 

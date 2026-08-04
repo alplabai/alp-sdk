@@ -57,7 +57,7 @@ firmware → both sides discover `alp_default_rpmsg`.
 ## Build
 
 ```bash
-tan --project examples/multicore/heterogeneous-offload build
+tan build --project examples/multicore/heterogeneous-offload
 ```
 
 Fan-out:

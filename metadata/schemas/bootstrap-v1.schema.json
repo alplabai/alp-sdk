@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/bootstrap-v1.schema.json",
   "title": "ALP Bootstrap Facts v1",
-  "description": "Validates metadata/bootstrap.json -- the single source of truth for the Zephyr-workspace-assembly FACTS scripts/bootstrap.sh and scripts/bootstrap.ps1 both read today; tan (Rust, cross-platform) has read the same facts since tan-cli PR #55 (tan-core's parse_bootstrap_manifest / BootstrapFacts), not merely an INTENDED future consumer (issue #917). Facts only; control flow (ZEPHYR_BASE reuse/rejection, venv idempotency, .west branching) stays as CODE in each executor -- this schema deliberately has no step/action shape. scripts/check_bootstrap_manifest.py is the drift gate that keeps this file, west.yml's zephyr revision, and each CI workflow's own Zephyr pin in lockstep (see that script's own module docstring for the full list of checks it runs).",
+  "description": "Validates metadata/bootstrap.json -- the single source of truth for the Zephyr-workspace-assembly FACTS scripts/bootstrap.sh, scripts/bootstrap.ps1, and Python Tan read today (issue #917). Facts only; control flow (ZEPHYR_BASE reuse/rejection, venv idempotency, .west branching) stays as CODE in each executor -- this schema deliberately has no step/action shape. scripts/check_bootstrap_manifest.py is the drift gate that keeps this file, west.yml's zephyr revision, and each CI workflow's own Zephyr pin in lockstep (see that script's own module docstring for the full list of checks it runs).",
   "type": "object",
   "additionalProperties": false,
   "required": ["_comment", "schemaVersion", "zephyr", "venv", "prerequisites", "west", "pip", "verdict", "env", "nativeLibHints", "manualInstallHints"],
@@ -133,7 +133,7 @@
         },
         "editableInstall": {
           "type": "string",
-          "description": "Target `pip install -e <target>` installs -- the ${SDK_ROOT}-tokened alp-sdk checkout (tan's Python backend, alp_cli)."
+          "description": "Target `pip install -e <target>` installs -- the ${SDK_ROOT}-tokened alp-sdk checkout, including the SDK's internal/reference alp_cli tools used by maintenance and surviving west commands."
         }
       }
     },
@@ -141,7 +141,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["blockingPhases", "partialNoteTemplate", "incompleteMessageTemplate", "incompleteRemedy"],
-      "description": "The single source for the closing-verdict rule (issue #1038 / tan-cli#220): each pip-install phase below stays non-fatal in itself -- the workspace is left on disk regardless of which packages failed -- but a run that hit one of `blockingPhases` has NOT produced an environment that can do what it was bootstrapped for, and must not report unqualified success. Both scripts/bootstrap.sh and scripts/bootstrap.ps1 read this object (instead of each hardcoding the phase set and the wording a second time); tan-cli's own `WORKSPACE_BLOCKING` (crates/tan-cli/src/commands/bootstrap/steps.rs) declares the identical three phase IDs independently -- tan does not read this manifest key today, so keeping the two declarations in sync across repos is still a by-hand contract, not a mechanically-gated one.",
+      "description": "The single source for the closing-verdict rule (issue #1038 / tan-cli#220): each pip-install phase below stays non-fatal in itself -- the workspace is left on disk regardless of which packages failed -- but a run that hit one of `blockingPhases` has NOT produced an environment that can do what it was bootstrapped for, and must not report unqualified success. Both SDK bootstrap scripts read this object; Python Tan mirrors the identical three phase IDs independently in `python/tan/commands/bootstrap_cmd.py::WORKSPACE_BLOCKING` -- tan does not read this manifest key, so keeping the declarations in sync across repos remains a by-hand contract, not a mechanically-gated one.",
       "properties": {
         "blockingPhases": {
           "type": "array",

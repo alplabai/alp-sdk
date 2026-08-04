@@ -2,20 +2,23 @@
 # SPDX-License-Identifier: Apache-2.0
 """Fail when alp-sdk's documented `tan` surface no longer exists in real `tan`.
 
-alp-sdk deliberately tracks tan-cli's `latest` (docs/cli.md's own install
-instructions pin nothing) -- a tan release changes customer-visible CLI
-behaviour immediately, with no version pin to buffer alp-sdk's docs from it.
+During the coordinated Python port, alp-sdk `dev` tracks tan-cli `dev`; after a
+release, the same check can target the installed stable binary. A Tan change
+can therefore change customer-visible CLI behaviour without an alp-sdk edit.
 This check extracts every `tan <subcommand>` alp-sdk's docs show a customer
 typing, plus every flag docs/cli.md tabulates for a given subcommand, and
 proves each one still exists against a REAL, installed `tan` binary
-(`tan <subcommand> --help`, exit 0) and, for a native (non-forwarding) verb,
+(`tan <subcommand> --help`, exit 0) and, for a self-describing verb,
 that the documented flag STRING appears somewhere in that verb's --help
 text. That flag check only proves the string is present in --help output --
-it is not proof the flag actually parses on a real command line (clap could
+it is not proof the flag actually parses on a real command line (Clap/Typer could
 list it and still reject it for an unrelated reason). It never invokes a
-network `tan` install itself -- the caller (CI step or a human) is expected
-to have put `tan` on PATH first, by docs/cli.md's own documented install
-path.
+network `tan` install itself -- the caller (CI step or a human) must put the
+chosen Tan build on PATH first.
+
+The installed binary may expose either Rust/Clap plain-text help or
+Python/Typer Rich table help. Both formats are parsed deliberately; tests pin
+both grammars even when CI targets the Python development line.
 
 Sources scanned (the set the task names):
   README.md, docs/cli.md, docs/getting-started.md, docs/troubleshooting.md,
@@ -114,7 +117,7 @@ Extraction is mechanical, not a hand-maintained list:
     (`test_getting_started_only_subcommand_is_checked`), so tightening
     extraction there would be a straight regression, not a fix.
   - A verb whose `tan <verb> --help` `Usage:` line ends `[ARGS]...` is a
-    FORWARDING verb (`new-som`, `monitor`, `model`, `faultdecode` today) --
+    legacy FORWARDING verb (the frozen Rust line used this shape) --
     clap never lists its real flags there, it only prints a generic
     "Arguments forwarded verbatim ..." blurb naming a few EXAMPLE flags
     (`--core`, `-b`, ...) that happen to belong to other forwarding verbs.
@@ -479,20 +482,16 @@ def collect_documented_surface(
     return subcommands, verb_flags, skipped_front_door_rows
 
 
-def _forwards_to_python_backend(help_text: str) -> bool:
+def _has_legacy_passthrough_args(help_text: str) -> bool:
     """True when `tan <verb> --help`'s own `Usage:` line ends in a bare
-    `[ARGS]...` positional catch-all -- tan's marker for a verb that
-    forwards straight to the legacy Python backend (`new-som`, `monitor`,
-    `model`, `faultdecode` as of tan 0.3.1) and never lists its real flags
+    `[ARGS]...` positional catch-all -- the frozen Rust line's marker for a
+    verb that forwards to the legacy SDK CLI and never lists its real flags
     in its own --help output; it prints a generic "Arguments forwarded
     verbatim ..." blurb instead. Verified by hand against a real, installed
     tan: every `[OPTIONS]`-only verb (`init`/`validate`/`run`/`explain`/
     `doctor`/`build`) lists its flags directly; every verb whose Usage line
     also carries `[ARGS]...` does not."""
-    for line in help_text.splitlines():
-        if line.startswith("Usage:"):
-            return line.rstrip().endswith("[ARGS]...")
-    return False
+    return _usage_line(help_text).endswith("[ARGS]...")
 
 
 # --- Invocation-SHAPE checking (positional args + unrecognised flags) ------
@@ -509,7 +508,26 @@ def _forwards_to_python_backend(help_text: str) -> bool:
 # statically validate it against that verb's own `--help` grammar -- no
 # `west`, no network, no real build -- the same non-executing spirit as
 # `check_surface`'s `--help`-only approach.
-_OPTION_LINE_RE = re.compile(r"^\s{2,}(?:-\w,\s+)?(--[a-zA-Z][a-zA-Z0-9-]*)(\s+<[^>]+>)?\s*$")
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+# `flags`: one or more `-x`/`--long-name` tokens, comma-joined. Typer/Rich
+# renders a multi-name option as `--board,--board-yaml` (NO space after the
+# comma) when both names are long; the classic Clap/Click `-w, --flag` short-
+# alias form (WITH a space) still has to keep matching too, so the separator
+# is `,\s*` (zero or more spaces), not a fixed one or the other.
+# `metavar`: `<[^>]*>?` deliberately allows a MISSING closing `>` -- Rich
+# wraps a long `<a|b|c>` choice metavar across the option's own continuation
+# row when the terminal/COLUMNS width is narrow (e.g. `<text|json|
+# diagnostic-v1|sa` on one row, `rif>` on the next, tan-cli's real
+# `tan validate --help`). The continuation row never starts with `--`, so it
+# never matches this regex on its own pass and is silently skipped -- the
+# only thing that matters here is "some value slot follows the flag", which
+# the still-unclosed `<...` on the first row already proves; the exact
+# wrapped choices are not otherwise used by this script.
+_OPTION_LINE_RE = re.compile(
+    r"^(?P<flags>(?:-\w|--[a-zA-Z][a-zA-Z0-9-]*)(?:,\s*(?:-\w|--[a-zA-Z][a-zA-Z0-9-]*))*)"
+    r"(?:\s+(?P<metavar><[^>]*>?|\[[^]]+\]|[A-Z][A-Z0-9_-]*))?"
+    r"(?:\s{2,}.*)?$"
+)
 # A shell chain/pipe operator that separates two independent commands on one
 # doc line (`cd my-app && tan build`, `tan flash --dry-run; tan flash`). Never
 # a `|` that isn't doubled -- a single pipe rarely appears in these docs, but
@@ -525,8 +543,18 @@ _VERB_TOKEN_RE = re.compile(r"\A[a-z][a-z0-9-]*\Z")
 _UNMODELLED_VERBS = {"sdk"}
 
 
+def _clean_help_line(line: str) -> str:
+    """Remove ANSI and Rich's table edge so one parser handles both help UIs."""
+    clean = _ANSI_ESCAPE_RE.sub("", line).strip()
+    if clean.startswith("│"):
+        clean = clean[1:].strip()
+    if clean.endswith("│"):
+        clean = clean[:-1].rstrip()
+    return clean
+
+
 def _parse_option_arity(help_text: str) -> dict[str, bool]:
-    """Map every `--flag` clap lists in HELP_TEXT's `Options:` section to
+    """Map every `--flag` Clap or Typer/Rich lists to
     whether it takes a value (`--flag <VALUE>`, True) or is a bare boolean
     switch (`--flag` alone, False). Used both for the top-level `tan --help`
     (the GLOBAL flags valid before or after the subcommand token, e.g.
@@ -536,23 +564,26 @@ def _parse_option_arity(help_text: str) -> dict[str, bool]:
     `--sdk-root`/... again, so there is no separate "local-only" arity to
     maintain)."""
     arity: dict[str, bool] = {}
-    in_options = False
     for line in help_text.splitlines():
-        if line.strip() == "Options:":
-            in_options = True
-            continue
-        if in_options and line.strip() and not line.startswith(" "):
-            break  # a later top-level section (there is none today, but stay honest)
-        m = _OPTION_LINE_RE.match(line)
+        m = _OPTION_LINE_RE.match(_clean_help_line(line))
         if m:
-            arity[m.group(1)] = m.group(2) is not None
+            takes_value = m.group("metavar") is not None
+            # A single row can declare more than one long name for the same
+            # option (`--board,--board-yaml`) -- both must resolve to the
+            # SAME arity, or whichever alias a doc happens to use would be
+            # misjudged.
+            for name in m.group("flags").split(","):
+                name = name.strip()
+                if name.startswith("--"):
+                    arity[name] = takes_value
     return arity
 
 
 def _usage_line(help_text: str) -> str:
     for line in help_text.splitlines():
-        if line.startswith("Usage:"):
-            return line.rstrip()
+        clean = _clean_help_line(line)
+        if clean.startswith("Usage:"):
+            return clean
     return ""
 
 
@@ -560,7 +591,7 @@ def _verb_accepts_positional(usage_line: str) -> bool:
     """True when USAGE_LINE names something positional beyond `[OPTIONS]`
     (`Usage: tan flash [OPTIONS] [APP_PATH]`) -- False when it's
     `[OPTIONS]`-only (`Usage: tan build [OPTIONS]`). Only meaningful for a
-    non-forwarding verb (see `_forwards_to_python_backend`); a forwarding
+    non-forwarding verb (see `_has_legacy_passthrough_args`); a forwarding
     verb's `[ARGS]...` catch-all is handled separately, before this is ever
     called, and always accepts anything."""
     _before, _sep, tail = usage_line.partition("[OPTIONS]")
@@ -669,7 +700,7 @@ def _check_one_invocation(
     if help_text is None:
         return None  # nonexistent verb -- already reported by check_surface
 
-    if _forwards_to_python_backend(help_text):
+    if _has_legacy_passthrough_args(help_text):
         return None  # verbatim-forwarded verb -- anything after it is legal by design
 
     local_arity = {**global_arity, **_parse_option_arity(help_text)}
@@ -713,7 +744,7 @@ def check_invocation_shapes(repo_root: Path, tan_bin: str) -> list[str]:
     `EXAMPLE_README_GLOB`) for a full `tan ...` invocation and statically
     validate its shape (unrecognised flag, or a positional argument on a
     verb whose `--help` Usage line shows none) against a real, installed
-    `tan`. Deliberately narrower than a real shell/clap parser -- see the
+    `tan`. Deliberately narrower than a real shell/CLI parser -- see the
     module docstring's blind-spots section for what this still misses
     (quoted multi-word values with embedded `--`-looking substrings, `tan
     sdk`'s nested subcommand grammar, short flags)."""
@@ -741,7 +772,7 @@ def check_surface(
 ) -> tuple[list[str], list[str], dict[str, int]]:
     """Run `tan <verb> --help` for every documented verb and confirm every
     docs/cli.md-tabulated flag for that verb is listed in its output --
-    except a FORWARDING verb (see `_forwards_to_python_backend`), whose flag
+    except a legacy FORWARDING verb (see `_has_legacy_passthrough_args`), whose flag
     check is skipped entirely rather than matched against its generic
     "forwarded verbatim" blurb (that blurb names a few EXAMPLE flags from
     OTHER forwarding verbs, so matching it produces both false positives --
@@ -774,13 +805,23 @@ def check_surface(
                 f"(exit {proc.returncode}): {first_err}"
             )
             continue
-        if _forwards_to_python_backend(proc.stdout):
+        if _has_legacy_passthrough_args(proc.stdout):
             if verb in verb_flags:
                 skipped_forwarding.append(verb)
             continue
+        # Typer force-colours --help under CI (`typer.rich_utils.FORCE_TERMINAL`
+        # checks `GITHUB_ACTIONS`/`FORCE_COLOR`/`PY_COLORS` regardless of
+        # whether stdout is a real terminal), splitting a flag's own two
+        # dashes across separate ANSI SGR runs, e.g. `--template` renders as
+        # `\x1b[1;36m-\x1b[0m\x1b[1;36m-template\x1b[0m` -- an exact literal
+        # substring search over the raw text then finds NOTHING for ANY
+        # flag of a verb whose --help happens to colour its options table,
+        # which is every verb, only some of which docs/cli.md tabulates
+        # individually here (tan-cli, `dev`, GITHUB_ACTIONS=true; measured).
+        clean_stdout = _ANSI_ESCAPE_RE.sub("", proc.stdout)
         for flag in sorted(verb_flags.get(verb, ())):
             pattern = re.compile(rf"(?<![\w-]){re.escape(flag)}(?![\w-])")
-            if not pattern.search(proc.stdout):
+            if not pattern.search(clean_stdout):
                 problems.append(
                     f"`tan {verb} {flag}` -- docs/cli.md documents this flag but it "
                     f"is not listed in `tan {verb} --help`"
@@ -801,7 +842,7 @@ def main() -> int:
         print(
             f"FAIL tan-docs-drift: `{args.tan_bin}` is not on PATH.\n"
             "  This gate needs a real, installed `tan` to check alp-sdk's docs against "
-            "-- install it via docs/cli.md's own documented install.sh path and put it "
+            "-- install the selected release or Python development checkout and put it "
             "on PATH, then re-run. `tan` being unavailable is a hard failure here, "
             "never a silent skip.",
             file=sys.stderr,
@@ -825,9 +866,9 @@ def main() -> int:
     if skipped_forwarding:
         plural = "s" if len(skipped_forwarding) != 1 else ""
         skip_notes.append(
-            f"flag check skipped for forwarding verb{plural} "
+            f"flag check skipped for legacy pass-through verb{plural} "
             f"{', '.join(sorted(skipped_forwarding))} -- their `--help` forwards "
-            "to the Python backend and never lists their real flags"
+            "arguments verbatim and never lists their real flags"
         )
     if skipped_front_door_rows:
         rows = ", ".join(
@@ -840,7 +881,7 @@ def main() -> int:
     skip_note = f" ({'; '.join(skip_notes)})" if skip_notes else ""
     print(
         "check_tan_docs_surface: OK -- every `tan` subcommand alp-sdk's docs name "
-        "still exists, every flag docs/cli.md tabulates for a non-forwarding verb "
+        "still exists, every flag docs/cli.md tabulates for a self-describing verb "
         "is listed in `tan <verb> --help` output, and every full `tan ...` "
         "invocation in DOC_SOURCES + examples/**/README.md parses against that "
         f"verb's own --help grammar, in {tan_path}{skip_note}."

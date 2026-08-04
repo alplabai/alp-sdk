@@ -90,10 +90,10 @@ before building.
 ## Build
 
 ```bash
-tan --project examples/multicore/rpmsg-imx93 build
+tan build --project examples/multicore/rpmsg-imx93
 ```
 
-The orchestrator fans out:
+Tan's relocated planner fans out:
 
 - `build/a55_cluster-yocto/` (bitbake against `MACHINE = e1m-nx9101-a55`).
 - `build/m33-zephyr/` (Zephyr against `BOARD = alp_e1m_nx9101_m33`).

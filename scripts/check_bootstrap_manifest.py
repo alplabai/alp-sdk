@@ -3,9 +3,8 @@
 """Keep metadata/bootstrap.json in lockstep with everything that copies it.
 
 metadata/bootstrap.json (issue #917) is the single source of truth for the
-Zephyr-workspace-assembly FACTS scripts/bootstrap.sh and scripts/bootstrap.ps1
-both read today; tan (Rust, cross-platform) is the INTENDED future consumer
-of the same facts, not a current reader. Without a drift gate the manifest is
+Zephyr-workspace-assembly FACTS scripts/bootstrap.sh, scripts/bootstrap.ps1,
+and Python Tan read today. Without a drift gate the manifest is
 just a copy of facts that already lived elsewhere. This check fails loudly
 when:
 
