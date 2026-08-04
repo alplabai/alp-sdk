@@ -27,15 +27,23 @@ ONLY**:
   `ALP_OK` on success).
 - Name instances with the portable IDs from `<alp/e1m_pinout.h>`
   (`ALP_E1M_I2C0`, `ALP_E1M_PWM3`, `ALP_E1M_GPIO_IO15`, …) or, for E1M-X, the `ALP_E1M_X_*`
-  IDs from `<alp/e1m_x_pinout.h>`. (There is no `ALP_E1M_*` prefix.)
-- **Never include a chip driver in app/example code** — symbols like
-  `gd32g553_*`, `alif_*`, `lsm6dso_*` are **SDK backends and bridge demos**,
-  not application API. Pulling them into an app breaks portability and trips
-  `scripts/check_example_portability.py`.
+  IDs from `<alp/e1m_x_pinout.h>`.
+- **A Ring-1 (cross-family, general/peripheral-agnostic) example never
+  includes a chip driver** — symbols like `gd32g553_*`, `alif_*`, `lsm6dso_*`
+  are SDK backends, not portable API, and pulling one into a Ring-1 example
+  breaks its cross-family build and trips
+  `scripts/check_example_portability.py`. Ring-2 (chip-bound) and Ring-3
+  (SoM-bound) examples are an accepted, intentional category, not
+  portability debt: a chip bring-up demo or single-sensor/single-display
+  tutorial is *supposed* to `#include <alp/chips/<chip>.h>` directly and
+  declare that chip in `board.yaml`'s `chips:` list — that's how the example
+  teaches the specific part. See `docs/portability.md` §4.4 /
+  `examples/README.md` for the customer-facing statement of this contract.
 
 The only board-side names an app references are the C macros generated from
 `board.yaml`'s `e1m_routes:` (e.g. `EVK_PIN_LED_RED`, `I2C_BUS_SENSORS`), each
-of which resolves to an `E1M_*` ID.
+of which resolves to an `ALP_E1M_*` ID (`ALP_E1M_X_*` for an E1M-X board) —
+see `scripts/gen_board_header.py`'s `_c_token()`.
 
 ## The board.yaml → orchestrator flow
 
@@ -98,9 +106,12 @@ report.
 - **No legacy compat.** There are no active external customers; delete removed
   code cleanly. No ABI shims, no tombstones, no deprecation aliases. Update
   dependent code (dispatch, backends, examples, tests, docs) in the same change.
-- **Examples are documentation.** Each `examples/*/src/main.c` is a teaching
-  artefact (~50% comments) for hand-written firmware — keep that density; don't
-  strip the explanatory comments.
+- **Examples are documentation.** Each example's `src/main.c` — nearly always
+  nested under a family directory (`examples/<family>/<name>/src/main.c`,
+  e.g. `examples/v2n/v2n-temp-sensor/src/main.c`), not directly under
+  `examples/<name>/src/main.c` — is a teaching artefact (~50% comments) for
+  hand-written firmware — keep that density; don't strip the explanatory
+  comments.
 - **Metadata is single-source.** Every hardware fact has exactly one home under
   `metadata/`. Don't duplicate it into headers, docs, or code — duplicated
   truth is a bug. Downstream files are generated from `metadata/`.

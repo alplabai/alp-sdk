@@ -9,9 +9,11 @@ wiring.
 
 ## What it teaches
 
-* How to open an `alp_i2c_t` against the board's primary I²C bus.
-* The "ACK probe" idiom -- a zero-byte write whose ACK answers
-  "is something at this address?"
+* How to open an `alp_i2c_t` against the board's primary I²C bus,
+  addressed portably through `<alp/board.h>`'s `BOARD_I2C_SENSORS`
+  alias rather than a hardcoded bus number.
+* The "ACK probe" idiom -- a 1-byte read whose ACK answers "is
+  something at this address?"  (Not a zero-byte write -- see below.)
 * Why the SDK doesn't try to identify the chip at each address
   (use the chip driver's `_init` for that -- the scanner just
   reports addresses, not identities).
@@ -20,18 +22,25 @@ wiring.
 
 ```c
 #include "alp/peripheral.h"
+#include "alp/board.h"     /* BOARD_I2C_SENSORS cross-EVK alias */
 
 int main(void) {
+    (void)alp_init();
+
     alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
-        .bus_id     = 0u,   /* primary I²C */
+        .bus_id     = BOARD_I2C_SENSORS,   /* E1M EVK: ALP_E1M_I2C0 */
         .bitrate_hz = 100000u,
     });
     if (!bus) return -1;
 
-    for (uint8_t addr = 0x08; addr <= 0x77; ++addr) {
-        /* Zero-byte write.  Backend translates to a START + ADDR + R/W=0
-         * + STOP.  ACK = device present; NAK = nothing there. */
-        if (alp_i2c_write(bus, addr, NULL, 0) == ALP_OK) {
+    for (uint8_t addr = 0x08; addr < 0x78; ++addr) {
+        /* 1-byte read, not a zero-byte write: some controllers --
+         * e.g. the DesignWare i2c_dw on Alif Ensemble -- put nothing
+         * on the bus for a zero-length transfer, so no device ever
+         * ACKs and the scan finds nothing.  A 1-byte read (data
+         * discarded) is the portable probe across backends. */
+        uint8_t scratch;
+        if (alp_i2c_read(bus, addr, &scratch, 1) == ALP_OK) {
             printf("0x%02X ACK\n", addr);
         }
     }
@@ -54,7 +63,7 @@ int main(void) {
 Same code, swap `som.sku` to `E1M-V2N101`, rebuild.  Expected:
 
 ```
-0x1C ACK   -- DA9292 PMIC
+0x1E ACK   -- DA9292 PMIC
 0x25 ACK   -- ACT88760 page 0
 0x26 ACK   -- ACT88760 page 1
 0x30 ACK   -- OPTIGA Trust M

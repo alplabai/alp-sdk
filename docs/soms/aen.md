@@ -51,7 +51,11 @@ Boot model + architecture: [`docs/cc3501e-bridge.md`](../cc3501e-bridge.md).
 
 ## Boot + identification
 
-Same two-stage flow as V2N: EEPROM manifest + BOARD_ID ADC.  See
+The SoM's identity comes solely from the on-module EEPROM manifest
+(family / SKU / hw_rev / serial / mfg date) — there is no SoM-side
+ADC cross-check.  A carrier-board BOARD_ID resistor divider, where
+present, identifies the *carrier* revision and is independent of the
+SoM revision; it is not yet wired into `alp_hw_info_read()`.  See
 [`docs/board-id.md`](../board-id.md).
 
 ## Bring-up

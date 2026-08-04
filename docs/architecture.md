@@ -435,10 +435,10 @@ fronts that Zephyr does *not* cover:
 
 1. **OS portability, not just vendor portability.**  The SDK pivots
    across **three OS targets** (Zephyr / Yocto / baremetal).  An app
-   that targets `<alp/i2c.h>` recompiles unchanged on AEN-Zephyr and
-   V2N-Yocto.  An app written against `i2c_*` does not — Yocto
-   doesn't have `i2c_*`, it has `/dev/i2c-N`.  This is the central
-   justification for the wrapper.
+   that targets `<alp/peripheral.h>` (`alp_i2c_open` et al.)
+   recompiles unchanged on AEN-Zephyr and V2N-Yocto.  An app written
+   against `i2c_*` does not — Yocto doesn't have `i2c_*`, it has
+   `/dev/i2c-N`.  This is the central justification for the wrapper.
 2. **Studio codegen target.**  alp-studio's pin allocator emits C
    that calls a fixed API regardless of which OS the SoM uses.
    Without the Alp wrapper, studio codegen would fork per-OS.

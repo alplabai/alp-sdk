@@ -59,8 +59,11 @@ into the topic-specific docs.
   `board.yaml` build-system integration knobs (`boot:`, `ota:`,
   `storage:`, `security.psa:`, ...).
 - [e1m-pinout.md](e1m-pinout.md) — E1M form-factor pinout reference.
-- [board-id.md](board-id.md) — boot-time board identification:
-  SoM EEPROM manifest + BOARD_ID ADC cross-check.
+- [board-id.md](board-id.md) — boot-time board identification: the
+  on-module EEPROM manifest is the sole authoritative source of SoM
+  hardware revision (no SoM-side ADC cross-check); a carrier board's
+  own BOARD_ID resistor-divider ADC, where wired, is a separate,
+  independent board-side revision path.
 - [aen-accelerator-backends-design.md](aen-accelerator-backends-design.md)
   — integration design for the Alif Ensemble accelerator surfaces
   (GPU2D / VeriSilicon ISP Pico (vsi,isp-pico) / SecAES / aiPM), each
@@ -186,10 +189,16 @@ into the topic-specific docs.
 
 ## V1.0 readiness
 
-- [v1.0-readiness.md](v1.0-readiness.md) — living checklist of
-  everything between today and the v1.0.0 tag.
+- [v1.0-readiness.md](v1.0-readiness.md) — a 2026-05-14 execution-plan
+  snapshot toward the v1.0.0 tag.  Not maintained current past the
+  session that wrote it (the SDK has since shipped through v0.15.0) —
+  cross-check any status claim against `VERSIONS.md` and
+  `CHANGELOG.md`, which are.
 - [v0.6-tbd-and-assumptions.md](v0.6-tbd-and-assumptions.md) —
-  in-flight v0.6 caveats.
+  historical: the TBDs + implementation-assumptions log from the
+  v0.6 heterogeneous-OS-orchestration wave (v0.6.0 released
+  2026-06-06), kept for context on the calls made at the time, not
+  as a current tracker.
 - [vendor-partnerships.md](vendor-partnerships.md) — tracker for
   the vendor relationships gating Pillar 9 (ecosystem) of v1.0.
 

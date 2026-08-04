@@ -2,7 +2,7 @@
 
 How the SDK detects "wrong firmware for this hardware": the
 build-time `hw_revisions:` / SDK-version window check, the runtime
-BOARD_ID ADC + EEPROM manifest check, and the per-chip `assembled:`
+on-module EEPROM manifest check, and the per-chip `assembled:`
 flag that lets one SoM SKU cover multiple BOM populations.
 
 See [`docs/board-config.md`](board-config.md) for the landing page.

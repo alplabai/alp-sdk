@@ -101,10 +101,14 @@ should be able to write by hand.
 ## Portability promise — swap-and-run within a family
 
 Change `som.sku:` in `board.yaml`, rebuild, ship — **within a SoM
-family**.  Empirically proven across the 6 released E1M AEN SKUs,
-the placeholder N93 bring-up preset (`E1M-NX9101`), and all 4
-E1M-X SKUs (V2N101, V2N102, V2M101, V2M102) for the canonical
-portable examples; matrix at
+family**.  Measured against the generated swap-test matrix: the 6
+released E1M AEN SKUs pass all three canonical examples (18 / 21
+E1M cells; the remaining 3 belong to `E1M-NX9101`, a placeholder
+MPN whose only hw_rev is `status: tbd` and is refused outright by
+the hw_rev-buildable gate, so it is not yet buildable at all); the
+4 E1M-X SKUs (V2N101, V2N102, V2M101, V2M102) pass two of three
+canonical examples (8 / 12 cells — `adc-voltmeter` currently fails
+on all four).  Matrix at
 [`docs/portability-matrix.md`](docs/portability-matrix.md).
 
 Cross-form-factor portability between E1M and E1M-X is intentionally
@@ -401,7 +405,7 @@ verification (`⏳`/`🟡`/`✅` rows) lives in
 | DSP / graphics / power | `dsp.h` (FFT / FAC / IIR chain), `tmu.h` (trig-/math-unit offload), `gpu2d.h` (2D blit/fill), `power.h` (sleep + wake sources) — HW-accelerated where the SoC provides it, SW fallback (CMSIS-DSP / libm / Zephyr PM) otherwise |
 | Inference dispatcher | `inference.h` — portable models load via **`alp_inference_open_alpmodel()`** (the `.alpmodel` package + selection engine — see *AI framework* above), which dispatches to the registry-backed backend selector + tensor-arena management.  Backends registered today: `tflm` (CPU reference kernels, portable), `ethos_u_aen` (Ethos-U on Alif Ensemble — U55 every SKU, U85 on E4/E6/E8 Transformer-capable), `ethos_u_n93` (Ethos-U U65 on i.MX 93), `sw_fallback` (NOSUPPORT floor).  DRP-AI3 and DEEPX DX-M1 are A55/Linux-side engines (`src/yocto/inference_{drpai,deepx}.cpp` — MERA runtime / `libdxrt` over PCIe) dispatched by the Yocto inference dispatcher, deliberately absent from the M-class registry (#58/#59).  Selector picks the highest-priority backend matching the SoM's silicon ref; exact match beats `*` wildcard at equal priority. |
 | Multi-proc / IPC | `mproc.h` (mailbox + shared memory + hardware semaphore) + `rpc.h` (framed RPC over RPMsg / OpenAMP) — the heterogeneous Zephyr↔Yocto path |
-| Hardware info | `hw_info.h` — 128-byte EEPROM manifest + BOARD_ID ADC + `assert_matches_build()` |
+| Hardware info | `hw_info.h` — 128-byte on-module EEPROM manifest (the SoM's identity; there is no SoM-side ADC cross-check) + `assert_matches_build()`; a carrier-side BOARD_ID divider is a separate, board-only path |
 | Vendor escape hatches | `ext/<vendor>/…` — Alif / Renesas / NXP / DEEPX surfaces for capabilities the portable `<alp/*>` API can't express (camera, inference, ADC, storage, power) |
 | Chip drivers | **80+** under `chips/` — LSM6DSO, BMI323, ICM-42670, BMP581, INA236, TMP112, RV-3028-C7, 24C128, CC3501E, TCAL9538, button-LED helper, … |
 | User libraries (via `libraries:` in board.yaml) | ETL · fmt · nlohmann_json · doctest · LVGL · MbedTLS · CMSIS-DSP · LittleFS |
@@ -460,7 +464,7 @@ E1M (35×35 mm) and E1M-X (45×65 mm) SoMs · E1M-EVK and E1M-X-EVK reference bo
   │               │    │                                                                        │
   │               │    │  Display / GUI           HW Info                DSP / Power            │
   │               │    │  ─ SSD1306 / 1331        ─ EEPROM manifest      ─ alp_dsp_* FFT/FAC/IIR│
-  │               │    │  ─ LVGL · GPU2D/Dave2D   ─ BOARD_ID ADC         ─ <alp/tmu.h> · power  │
+  │               │    │  ─ LVGL · GPU2D/Dave2D   ─ EEPROM hw_info      ─ <alp/tmu.h> · power  │
   │               │    │                                                                        │
   │               │    │  Heterogeneous IPC:  <alp/rpc.h> · <alp/system_ipc.h> · <alp/mproc.h>  │
   │               │    │     framed RPMsg/OpenAMP · auto endpoint IDs · mailbox/shmem/hwsem     │
@@ -515,7 +519,7 @@ All consumer-facing headers live under `include/alp/`:
 | `alp/gpu2d.h`        | Portable 2D-GPU blit/fill shim (Dave2D / GPU2D; SW fallback) |
 | `alp/power.h`        | Low-power: sleep modes + wake-source management |
 | `alp/mproc.h` / `rpc.h` | Heterogeneous IPC — mailbox / shared mem / hwsem + framed RPC over RPMsg (OpenAMP) |
-| `alp/hw_info.h`      | EEPROM manifest + BOARD_ID ADC             |
+| `alp/hw_info.h`      | On-module EEPROM manifest (SoM identity); carrier BOARD_ID is separate |
 | `alp/soc_caps.h`     | (generated) active-SoC capability constants |
 | `alp/e1m_pinout.h` / `e1m_x_pinout.h` | E1M + E1M-X instance IDs + portability bounds (separate namespaces) |
 | `alp/ext/<vendor>/…`  | Vendor escape-hatch extensions (Alif / Renesas / NXP / DEEPX) for capabilities the portable API can't express |

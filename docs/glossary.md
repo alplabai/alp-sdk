@@ -150,7 +150,9 @@ the HiL rig plan in the internal `alp-sdk-internal` repo.
 Distinguishes board respins of the same SKU.
 
 **hw_info** -- Runtime structure populated from the on-module
-EEPROM manifest + BOARD_ID ADC.  See
+EEPROM manifest, which is the SoM's identity (no SoM-side ADC
+cross-check).  A carrier BOARD_ID divider, where wired, is a
+separate board-side path.  See
 [`<alp/hw_info.h>`](../include/alp/hw_info.h).
 
 **Inline AES** -- On-the-fly encryption of external flash traffic by
