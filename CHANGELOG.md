@@ -62,15 +62,22 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   `pr-metadata-validate.yml`'s `tests/hil/run_smoke.py --validate` step
   schema-checks the actual `*.yaml` spec files present in a board dir; YAML
   comments are stripped before it ever sees them. No gate was added in this
-  change — the smallest mechanical candidate (regex-scan comments for
-  `*.yaml` tokens and assert each exists) would not have caught the original
-  defect, since the original comment named topics in prose
-  ("Ethernet, eMMC, ...") with no `.yaml` filenames to match against, so it
-  cannot be shown to fail on the unfixed content. A gate that cannot fail is
-  worse than no gate. A real fix needs a structured spec-manifest field
+  change, but not because a mechanical one could never fire: the smallest
+  candidate (extract kebab-case tokens in the spec-filename convention from
+  `_runner.yaml` comments, assert `<token>.yaml` exists in that dir) was
+  built and run against the pre-fix content of both files. On
+  `v2n101-x-evk` it finds zero tokens and stays silent, because that comment
+  named topics in prose ("Ethernet, eMMC, ...") with no filename-shaped
+  tokens. On `v2m101-x-evk` it finds `v2n-m1-deepx-inference`, finds no
+  matching `.yaml`, and fails — so such a gate *would* have caught one of
+  the two real overclaims.
+  What blocks it is a different problem: the same naive gate still flags
+  that token in the new `TODO(#1160): not yet written` line, so it needs an
+  explicit TODO carve-out to avoid failing on an honest, accurate comment.
+  Catching this class properly wants a structured spec-manifest field
   (e.g. `specs_present:` / `specs_todo:` lists in `_runner.yaml`, cross-checked
-  against the directory listing) rather than free-text-comment parsing; left
-  as a follow-up, not implemented here.
+  against the directory listing) rather than free-text-comment parsing plus
+  an exception list; left as a follow-up, not implemented here.
 
 ### Changed — documentation and drift gates follow the Python Tan port
 
