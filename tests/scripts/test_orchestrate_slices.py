@@ -65,6 +65,10 @@ def test_slugs_from_on_module_v2n101() -> None:
     assert "tps628640" not in slugs, "optional assembled device must be excluded"
     assert "renesas:rzv2n:n44" not in slugs, "silicon field must be excluded"
     assert "TBD" not in slugs, "TBD values must be excluded"
+    # nor_flash_driver_status / emmc_driver_status carry a maturity tier
+    # ("none"), not a chip slug -- pin the exclusion so it can't silently
+    # regress into a bogus CONFIG_ALP_SDK_CHIP_NONE=y (#1169).
+    assert "none" not in slugs, "*_driver_status value must be excluded"
 
 
 def test_slugs_from_on_module_aen701() -> None:
