@@ -256,6 +256,70 @@ of this change.
   `zephyr-board`) are live in `python/tan/commands/generate_cmd.py`,
   already reflected correctly in `docs/cli.md`.
 
+### Fixed — CC3501E Wi-Fi/BLE/GPIO/OTA backends shared one unlocked transport (#1116)
+
+**ABI: `sizeof(cc3501e_t)` changes.**  The fix adds a `bool request_lock`
+field to the public `struct cc3501e` (`include/alp/chips/cc3501e/core.h`),
+so `docs/abi/v0.15-snapshot.json`'s hash for that type moves from
+`f21bf2fc8bd4f83d` to `41bef4a1f9e78117`.  Callers allocate the struct by
+value (e.g. `cc3501e_t fw;` in `examples/aen/aen-cc3501e-bringup`,
+`aen-cc3501e-gpio`, `aen-usb-firstlight` and three more), so anything
+compiled against the previous layout must be rebuilt.  Everything in-tree
+is rebuilt from source and the SDK ships no binary compatibility promise
+before v1.0, so this is accepted rather than worked around — noted here
+because a silent struct-layout change is exactly what an ABI snapshot
+exists to surface.
+
+`cc3501e_request()` ran its 4-phase SPI exchange (request header / payload /
+reply header / reply payload) with no locking, reading and writing the
+per-context `tx_scratch`/`rx_scratch` scratch buffers a `struct cc3501e` has
+no mutex or semaphore field to protect. Five independent callers share one
+`cc3501e_t *` on E1M-AEN (the Wi-Fi backend, the BLE backend, the GPIO
+proxy backend, the `alp companion` console, and the OTA path); only the
+console self-protected with its own `companion_bus_lock`, leaving the other
+four free to interleave frames on the CS-less 3-wire link or read back each
+other's replies.
+
+- `cc3501e_request()` now serialises the whole exchange itself (the lock
+  belongs with the shared transport, not each consumer) via a bounded
+  acquire (`ALP_ERR_BUSY` on timeout, never `K_FOREVER`) using
+  compiler-builtin atomics on a plain flag — not a Zephyr `k_mutex` —
+  because this driver core is OS-agnostic and also builds into the
+  plain-CMake / Yocto `libalp_chips.a`. A new Kconfig knob,
+  `CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS` (default 100 ms,
+  mirroring the V2N supervisor singleton's own bounded-acquire pattern),
+  bounds it on Zephyr; non-Zephyr backends fall back to the same 100 ms
+  compiled-in default.
+- Removed the now-redundant `companion_bus_lock` from every `alp companion`
+  console command body — each one already wraps a single (or short
+  sequential) `cc3501e_request()` call the driver itself now serialises.
+  Kept a narrower, still-needed `companion_events_lock` around
+  `companion_drain_events()`: the timer-poll thread and the opt-in
+  `CONFIG_ALP_SDK_CC3501E_EVENT_IRQ` workqueue both drive the `evt_busy` +
+  `evt_buf` walk-and-dispatch loop wrapped around (not just the single
+  request inside) `cc3501e_poll_events()`, which the transport lock does
+  not cover.
+- `poll_by_repeat()`'s own `ctx->rx_scratch[0]` sentinel write and post-call
+  peek (used to disambiguate a retryable transport `BUSY` from a terminal
+  firmware `RESP_ERR_STATE` reject) sat OUTSIDE `cc3501e_request()`'s
+  per-call lock, so a second caller's request could still land between the
+  sentinel write and this attempt's own request, or between the request
+  and the peek. Split `cc3501e_request()` into a public locked wrapper and
+  an internal `cc3501e_request_locked()`; `poll_by_repeat()` now takes
+  ctx's lock once per attempt and brackets the sentinel write, the
+  request, and the peek all under it.
+- Not re-entrant: verified no call path invokes `cc3501e_request()` from
+  inside another already-in-flight `cc3501e_request()` call on the same
+  `cc3501e_t` (the async event callback runs only after
+  `cc3501e_poll_events()`'s own request has already returned and released
+  the lock).
+- New `tests/zephyr/cc3501e_transport_lock` native_sim regression test
+  forces a deterministic concurrent PING + GET_VERSION interleave against
+  a shared context and asserts neither call cross-talks or desyncs; it
+  fails against the pre-fix driver (`ALP_ERR_IO` from the reply-header
+  cmd-echo mismatch) and passes with the fix. Proven on host/native_sim
+  only — not bench/silicon-verified.
+
 ### Fixed — V2N/V2M SoC-internal IP maturity was comments-only, and further routed nets stayed undeclared (#1169, #1170)
 
 #1183 closed both issues prematurely: it added a `driver_status` enum

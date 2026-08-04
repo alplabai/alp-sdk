@@ -183,6 +183,66 @@ static alp_status_t resp_to_status(uint8_t resp)
 	}
 }
 
+/* ---- transport-transaction lock (issue #1116) -----------------------------
+ *
+ * cc3501e_request() is the ONLY place the 4-phase SPI exchange runs, and
+ * five independent callers (Wi-Fi, BLE, GPIO proxy, the console companion,
+ * the OTA path) share one cc3501e_t.  Without serialisation here, two
+ * concurrent transactions interleave on the CS-less link and desync it, or
+ * one caller reads back another caller's reply -- see the tx_scratch /
+ * rx_scratch fields cc3501e_request reads and writes with no protection
+ * before this fix.
+ *
+ * Compiler-builtin atomics on a plain bool, not an OS mutex: this TU is
+ * OS-agnostic (chips/cc3501e/cc3501e_core.c builds into both the Zephyr
+ * module and the plain-CMake / Yocto libalp_chips.a -- see CMakeLists.txt's
+ * ALP_SDK_CHIP_LIST comment: "none of the chips/<id>/<id>.c cores include a
+ * Zephyr/vendor header"), so it cannot call k_mutex_lock.  Same rationale
+ * and the same __atomic_* primitives as src/common/alp_slot_claim.h, which
+ * the dispatcher pools use for the identical portability reason.
+ *
+ * The acquire is BOUNDED, mirroring src/zephyr/v2n_supervisor.c's
+ * alp_z_v2n_supervisor_acquire() for the structurally identical "one
+ * shared transport, many portable backends" problem: a caller stuck behind
+ * a wedged transaction gets ALP_ERR_BUSY back instead of hanging forever.
+ * CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS is a real Kconfig knob on
+ * Zephyr (zephyr/kconfigs/chips.kconfig) -- the Zephyr build injects every
+ * CONFIG_* symbol as a compiler macro for every TU in the zephyr_library,
+ * including this OS-agnostic core, so no <zephyr/...> include is needed to
+ * see it.  Non-Zephyr backends have no Kconfig, so they fall back to the
+ * #ifndef default below (same "portable constant, Zephyr-overridable"
+ * shape already used by CC3501E_PHASE_SETTLE_US etc. in this file). */
+#ifndef CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS
+#define CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS 100u
+#endif
+
+static bool cc3501e_lock_try(cc3501e_t *ctx)
+{
+	bool expected = false;
+	return __atomic_compare_exchange_n(
+	    &ctx->request_lock, &expected, true, false, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED);
+}
+
+/* Bounded acquire: try once (the common uncontended case costs nothing),
+ * then poll once per millisecond via the portable alp_delay_ms (which
+ * yields the CPU on every OS backend, unlike alp_delay_us's busy-wait --
+ * needed so a contending thread actually gets scheduled) until the
+ * Kconfig-bounded budget elapses. */
+static alp_status_t cc3501e_lock_acquire(cc3501e_t *ctx)
+{
+	if (cc3501e_lock_try(ctx)) return ALP_OK;
+	for (uint32_t waited_ms = 0u; waited_ms < CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS;
+	     waited_ms++) {
+		alp_delay_ms(1u);
+		if (cc3501e_lock_try(ctx)) return ALP_OK;
+	}
+	return ALP_ERR_BUSY;
+}
+
+static void cc3501e_lock_release(cc3501e_t *ctx)
+{
+	__atomic_store_n(&ctx->request_lock, false, __ATOMIC_RELEASE);
+}
 alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
@@ -201,19 +261,46 @@ alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms)
 	const uint32_t run_need = 2u * (uint32_t)ALP_CC3501E_HEADER_BYTES;
 	const uint32_t attempts = (timeout_ms > 0u) ? timeout_ms : 1u;
 
-	for (uint32_t a = 0u; a < attempts; a++) {
+	/* Serialise against cc3501e_request() (issue #1116).  This walk clocks
+	 * the SAME CS-less bus, one byte at a time, up to walk_max times -- a
+	 * concurrent 4-phase request would interleave with it and desync the
+	 * link exactly as two concurrent requests would.  cc3501e_request()'s
+	 * doxygen now advertises thread-safety, so a caller may legitimately
+	 * re-sync from a second thread; that has to be safe.
+	 *
+	 * Held across the WHOLE walk, not per attempt: re-aligning to the
+	 * slave's header boundary is only meaningful if nothing else moves the
+	 * bus underneath us.  A request that lands mid-sync therefore gets
+	 * ALP_ERR_BUSY from its own bounded acquire rather than corrupting the
+	 * recovery -- which is the honest answer, since the link is by
+	 * definition not usable until the sync completes. */
+	alp_status_t lrc = cc3501e_lock_acquire(ctx);
+	if (lrc != ALP_OK) return lrc;
+
+	alp_status_t rc = ALP_ERR_TIMEOUT;
+	for (uint32_t a = 0u; a < attempts && rc == ALP_ERR_TIMEOUT; a++) {
 		uint32_t run = 0u;
 		for (uint32_t w = 0u; w < walk_max; w++) {
-			if (alp_spi_transceive(ctx->bus, &tx, &rx, 1u) != ALP_OK) return ALP_ERR_IO;
+			if (alp_spi_transceive(ctx->bus, &tx, &rx, 1u) != ALP_OK) {
+				rc = ALP_ERR_IO;
+				break;
+			}
 			if (rx == ALP_CC3501E_SYNC_IDLE) {
-				if (++run >= run_need) return ALP_OK; /* aligned at a clean header boundary */
+				if (++run >= run_need) { /* aligned at a clean header boundary */
+					rc = ALP_OK;
+					break;
+				}
 			} else {
 				run = 0u;
 			}
 		}
-		alp_delay_ms(1u); /* let the slave drain any in-flight frame + re-arm header phase */
+		if (rc == ALP_ERR_TIMEOUT) {
+			alp_delay_ms(1u); /* let the slave drain any in-flight frame + re-arm header phase */
+		}
 	}
-	return ALP_ERR_TIMEOUT;
+
+	cc3501e_lock_release(ctx);
+	return rc;
 }
 
 /* Inter-phase settle (CS-less lockstep): time given to the CC3501E SPI-slave ISR
@@ -230,6 +317,7 @@ alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms)
  * no longer need a conservative fixed delay.  Opt-in + degrades safely: a NULL
  * ready_pin (CS-less r1 boards) or a line that never asserts falls back to the
  * fixed gap.  See project_cc3501e_link_topology. */
+
 static void cc3501e_reply_gate(const cc3501e_t *ctx, uint32_t fallback_us)
 {
 	if (ctx->ready_pin != NULL) {
@@ -248,20 +336,23 @@ static void cc3501e_reply_gate(const cc3501e_t *ctx, uint32_t fallback_us)
 	alp_delay_us(fallback_us);
 }
 
-alp_status_t cc3501e_request(cc3501e_t        *ctx,
-                             alp_cc3501e_cmd_t cmd,
-                             const uint8_t    *tx_payload,
-                             size_t            tx_len,
-                             uint8_t          *rx_buf,
-                             size_t            rx_cap,
-                             size_t           *rx_len,
-                             uint32_t          timeout_ms)
+/* The actual 4-phase exchange, WITHOUT taking ctx's transport lock -- the
+ * caller must already hold it.  Split out of cc3501e_request() (issue
+ * #1116 follow-up) so poll_by_repeat() below can bracket its OWN extra
+ * ctx->rx_scratch[0] sentinel write/peek in the SAME lock acquisition as
+ * the request itself, instead of leaving them either side of a
+ * lock-acquire-per-call boundary where a second caller's request could
+ * interleave with the sentinel write/peek even though every individual
+ * cc3501e_request() call is itself now atomic. */
+static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
+                                           alp_cc3501e_cmd_t cmd,
+                                           const uint8_t    *tx_payload,
+                                           size_t            tx_len,
+                                           uint8_t          *rx_buf,
+                                           size_t            rx_cap,
+                                           size_t           *rx_len)
 {
-	(void)timeout_ms; /* Reserved for a future IRQ-driven wait (next HW rev). */
-	if (rx_len != NULL) *rx_len = 0;
-	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
-	if (tx_len > ALP_CC3501E_MAX_PAYLOAD) return ALP_ERR_INVAL;
-	if (tx_payload == NULL && tx_len > 0) return ALP_ERR_INVAL;
+	alp_status_t s;
 
 	/*
      * 3-wire deterministic framing (this HW rev wires only SCLK/MOSI/MISO
@@ -284,9 +375,8 @@ alp_status_t cc3501e_request(cc3501e_t        *ctx,
 	 * other phases use. */
 	cc3501e_reply_gate(ctx, CC3501E_PHASE_SETTLE_US);
 	encode_header(ctx->tx_scratch, cmd, ALP_CC3501E_FLAG_RESP_REQUIRED, (uint16_t)tx_len);
-	alp_status_t s =
-	    alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, ALP_CC3501E_HEADER_BYTES);
-	if (s != ALP_OK) return s;
+	s = alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, ALP_CC3501E_HEADER_BYTES);
+	if (s != ALP_OK) goto out;
 	if (tx_len > 0) {
 		/* Inter-phase settle (CS-less lockstep): the slave arms the request-PAYLOAD
 		 * transfer in its SPI ISR only AFTER the header transfer completes.  Clocking
@@ -297,7 +387,7 @@ alp_status_t cc3501e_request(cc3501e_t        *ctx,
 		 * OTA streaming timed out per-chunk without it). */
 		alp_delay_us(CC3501E_PHASE_SETTLE_US);
 		s = alp_spi_transceive(ctx->bus, tx_payload, ctx->rx_scratch, tx_len);
-		if (s != ALP_OK) return s;
+		if (s != ALP_OK) goto out;
 	}
 
 	/* Wait for the slave to dispatch + arm its reply before we read: the
@@ -309,7 +399,7 @@ alp_status_t cc3501e_request(cc3501e_t        *ctx,
 
 	/* 3. Reply header -> learn the reply payload length. */
 	s = alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, ALP_CC3501E_HEADER_BYTES);
-	if (s != ALP_OK) return s;
+	if (s != ALP_OK) goto out;
 	uint16_t resp_payload_len = decode_header_payload_len(ctx->rx_scratch);
 	/* Desync detection (no CS to recover on): a valid reply header ECHOES the
      * request opcode (protocol_build_reply sets reply[0]=cmd) and declares a
@@ -324,7 +414,8 @@ alp_status_t cc3501e_request(cc3501e_t        *ctx,
 		 * the 1-byte walk PARKS the slave (proven on silicon -- reply_hdr stuck at
 		 * 0xA5A5A5A5, link never recovers).  Return IO so the caller re-issues a
 		 * clean 4-byte transaction instead (re-aligns when the slave is aligned). */
-		return ALP_ERR_IO;
+		s = ALP_ERR_IO;
+		goto out;
 	}
 
 	/* Same READY gate before the reply PAYLOAD phase (the slave re-arms it in
@@ -332,16 +423,48 @@ alp_status_t cc3501e_request(cc3501e_t        *ctx,
 	cc3501e_reply_gate(ctx, CC3501E_PHASE_SETTLE_US);
 	/* 4. Reply payload: status byte followed by the response data. */
 	s = alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, resp_payload_len);
-	if (s != ALP_OK) return s;
+	if (s != ALP_OK) goto out;
 
-	const uint8_t resp     = ctx->rx_scratch[0];
-	const size_t  data_len = (size_t)resp_payload_len - 1u;
-	if (data_len > 0u && rx_buf != NULL) {
-		const size_t n = (data_len > rx_cap) ? rx_cap : data_len;
-		memcpy(rx_buf, &ctx->rx_scratch[1], n);
-		if (rx_len != NULL) *rx_len = n;
+	{
+		const uint8_t resp     = ctx->rx_scratch[0];
+		const size_t  data_len = (size_t)resp_payload_len - 1u;
+		if (data_len > 0u && rx_buf != NULL) {
+			const size_t n = (data_len > rx_cap) ? rx_cap : data_len;
+			memcpy(rx_buf, &ctx->rx_scratch[1], n);
+			if (rx_len != NULL) *rx_len = n;
+		}
+		s = resp_to_status(resp);
 	}
-	return resp_to_status(resp);
+
+out:
+	return s;
+}
+
+alp_status_t cc3501e_request(cc3501e_t        *ctx,
+                             alp_cc3501e_cmd_t cmd,
+                             const uint8_t    *tx_payload,
+                             size_t            tx_len,
+                             uint8_t          *rx_buf,
+                             size_t            rx_cap,
+                             size_t           *rx_len,
+                             uint32_t          timeout_ms)
+{
+	(void)timeout_ms; /* Reserved for a future IRQ-driven wait (next HW rev). */
+	if (rx_len != NULL) *rx_len = 0;
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (tx_len > ALP_CC3501E_MAX_PAYLOAD) return ALP_ERR_INVAL;
+	if (tx_payload == NULL && tx_len > 0) return ALP_ERR_INVAL;
+
+	/* Serialise the whole exchange (issue #1116): every phase in
+	 * cc3501e_request_locked() reads or writes ctx->tx_scratch /
+	 * ctx->rx_scratch, shared by every caller of this ctx.  Acquired AFTER
+	 * the pure param checks above (so a bad call fails fast without
+	 * touching the lock). */
+	alp_status_t s = cc3501e_lock_acquire(ctx);
+	if (s != ALP_OK) return s;
+	s = cc3501e_request_locked(ctx, cmd, tx_payload, tx_len, rx_buf, rx_cap, rx_len);
+	cc3501e_lock_release(ctx);
+	return s;
 }
 
 alp_status_t cc3501e_get_version(cc3501e_t *ctx, uint16_t *version_out)
@@ -382,19 +505,42 @@ alp_status_t poll_by_repeat(cc3501e_t        *ctx,
                             size_t           *rx_len,
                             uint32_t          timeout_ms)
 {
+	/* Same param checks cc3501e_request() runs, done ONCE here (cmd/
+	 * tx_payload/tx_len are fixed across every retry below, unlike the
+	 * transport lock which is per-attempt) rather than calling the public
+	 * wrapper per iteration -- see the sentinel-race comment below. */
+	if (rx_len != NULL) *rx_len = 0;
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (tx_len > ALP_CC3501E_MAX_PAYLOAD) return ALP_ERR_INVAL;
+	if (tx_payload == NULL && tx_len > 0) return ALP_ERR_INVAL;
+
 	/* Budget is coarse-grained in CC3501E_POLL_GAP_MS slices; always make at
 	 * least one attempt even with a zero timeout. */
 	uint32_t     remaining = (timeout_ms > 0u) ? timeout_ms : 1u;
 	alp_status_t s;
 	for (;;) {
+		/* Sentinel + peek bracketed in the SAME lock hold as the request
+		 * itself (issue #1116 follow-up): both touch the shared
+		 * ctx->rx_scratch[0] this ctx's other callers can also write, so
+		 * lock-acquire-per-cc3501e_request()-call alone isn't enough --
+		 * a second caller's request could still land between this
+		 * sentinel write and this attempt's own request, or between this
+		 * request and the peek below, corrupting the disambiguation this
+		 * retry loop depends on. */
+		s = cc3501e_lock_acquire(ctx);
+		if (s != ALP_OK) return s;
+		/* Re-zero per attempt, not just once before the loop: an attempt
+		 * that copied out n bytes and then mapped to BUSY/IO would
+		 * otherwise leave that stale count visible to a caller who reads
+		 * *rx_len after this function finally returns TIMEOUT. */
+		if (rx_len != NULL) *rx_len = 0;
 		/* Sentinel: pre-set rx_scratch[0] to a byte the peek below never
 		 * matches (0xFF).  Only a real reply payload overwrites it with the
 		 * resp byte; a BUSY that comes from the transport (alp_spi_transceive
 		 * -EBUSY) rather than resp_to_status() then leaves the sentinel, so it
 		 * can never masquerade as RESP_ERR_STATE. */
 		ctx->rx_scratch[0] = 0xFFu;
-		s                  = cc3501e_request(
-		    ctx, cmd, tx_payload, tx_len, rx_buf, rx_cap, rx_len, CC3501E_REQ_TMO_MS);
+		s = cc3501e_request_locked(ctx, cmd, tx_payload, tx_len, rx_buf, rx_cap, rx_len);
 		/* resp_to_status() maps BOTH RESP_ERR_BUSY (worker still running --
 		 * genuinely retryable) and RESP_ERR_STATE (a deterministic firmware
 		 * reject -- e.g. BLE_GATT_REGISTER's NimBLE ordering guard) to the
@@ -404,8 +550,12 @@ alp_status_t poll_by_repeat(cc3501e_t        *ctx,
 		 * (register-while-advertising must fail promptly, not after burning
 		 * the whole poll window).  Only a RESP_ERR_STATE reply writes 0x09
 		 * into rx_scratch[0] (the sentinel above rules out a transport BUSY),
-		 * so the peek disambiguates safely. */
-		if (s == ALP_ERR_BUSY && ctx->rx_scratch[0] == ALP_CC3501E_RESP_ERR_STATE) {
+		 * so the peek disambiguates safely -- read here, still under the
+		 * lock, not after release. */
+		const bool terminal_reject =
+		    (s == ALP_ERR_BUSY && ctx->rx_scratch[0] == ALP_CC3501E_RESP_ERR_STATE);
+		cc3501e_lock_release(ctx);
+		if (terminal_reject) {
 			return s; /* terminal reject -- do not retry */
 		}
 		if (s != ALP_ERR_BUSY && s != ALP_ERR_IO) {
