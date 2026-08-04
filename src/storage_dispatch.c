@@ -30,6 +30,10 @@
 #include "backends/storage/storage_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(storage);
+/* Pull the storage registry section into a static-archive link (#368,
+ * needed once #1140 wires this dispatcher into the Yocto plain-CMake
+ * build). */
+ALP_BACKEND_ANCHOR(storage);
 
 #include "alp_z_last_error.h"
 

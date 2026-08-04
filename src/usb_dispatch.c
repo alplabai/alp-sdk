@@ -26,6 +26,10 @@
 #include "backends/usb/usb_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(usb);
+/* Pull the usb registry section into a static-archive link (#368,
+ * needed once #1141 wires this dispatcher into the Yocto plain-CMake
+ * build). */
+ALP_BACKEND_ANCHOR(usb);
 
 #include "alp_z_last_error.h"
 

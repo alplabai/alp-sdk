@@ -154,6 +154,43 @@ of this change.
   against the directory listing) rather than free-text-comment parsing plus
   an exception list; left as a follow-up, not implemented here.
 
+### Added — real Yocto backends for `<alp/storage.h>` and `<alp/usb.h>` on the V2N A55 (#1140, #1141)
+
+- `src/backends/storage/yocto_drv.c`: routes `alp_storage_*` through
+  `/dev/mmcblk<instance_id>` (SD/MMC, via `BLKGETSIZE64`/`BLKSSZGET`/
+  `BLKDISCARD`) and `/dev/mtd<instance_id>` (xSPI/QSPI/OSPI/internal NOR, via
+  `MEMGETINFO`/`MEMERASE`) instead of falling through to the stub's
+  `ALP_ERR_NOSUPPORT`. `alp_storage_configure_inline_aes` stays
+  `ALP_ERR_NOSUPPORT` — no Linux userspace ABI exposes inline XIP-AES
+  key/IV programming for a block or MTD chardev.
+- `src/backends/usb/yocto_drv.c`: routes the USB **host** role
+  (`alp_usb_host_open/enable/disable/close`) through the kernel USB core's
+  `/sys/bus/usb/devices/usbN/authorized_default` sysfs knob. The USB
+  **device**/gadget role stays `ALP_ERR_NOSUPPORT` — the V2N X-EVK device
+  tree this issue targets brings up only host-role controllers
+  (`ehci0`/`ohci0`/`hsusb`/`xhci0`), no UDC/gadget node, and no libusb
+  dependency was added (sysfs + usbfs cover every op `<alp/usb.h>`
+  actually declares).
+- `src/yocto/CMakeLists.txt`: wires `storage_dispatch.c`/`usb_dispatch.c` +
+  their `sw_fallback.c` into the same unconditional block as every other
+  migrated class, mutes the split stub backend via
+  `ALP_VENDOR_OVERRIDES_STORAGE`/`ALP_VENDOR_OVERRIDES_USB`, and adds the
+  two `yocto_drv.c` files to the `__linux__`-gated block.
+- `src/common/stub/stub_storage.c`, `src/common/stub/stub_usb.c`: gained the
+  `#if !defined(ALP_VENDOR_OVERRIDES_*)` guard every other migrated class's
+  stub already carries (these two were previously unguarded — no vendor
+  backend had ever overridden them before now).
+- `src/backends/storage/sw_fallback.c`, `src/backends/usb/sw_fallback.c`,
+  `src/storage_dispatch.c`, `src/usb_dispatch.c`: added the
+  `ALP_BACKEND_ANCHOR_DEFINE`/`ALP_BACKEND_ANCHOR` pair (#368) the
+  plain-CMake static-archive link needs now that these two classes are
+  reachable from that path.
+- **Bench-unverified**: neither backend has been exercised against real
+  V2N SDHI/xSPI/xHCI/EHCI/OHCI silicon. Both compile, link, and pass the
+  existing registry/dispatcher test suite on a Linux host with no real
+  `/dev/mmcblk*`, `/dev/mtd*`, or `/sys/bus/usb/devices` root hubs present
+  — that is the only path exercised so far.
+
 ### Changed — documentation and drift gates follow the Python Tan port
 
 - Swept current guides, examples, ADR indexes/amendments, metadata commentary,
