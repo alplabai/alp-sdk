@@ -2,23 +2,34 @@
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * Real Linux/Yocto usb_* driver-class backend -- HOST side only
- * (issue #1141).  Binds alp_usb_host_open/enable/disable/close to the
- * kernel USB core's sysfs ABI: root hubs enumerate under
- * /sys/bus/usb/devices/usbN/, and each one's `authorized_default`
- * attribute (Documentation/ABI/testing/sysfs-bus-usb) is the real
- * per-bus knob for "let newly-attached devices enumerate" -- exactly
- * what alp_usb_host_enable/disable document ("enables enumeration of
- * attached devices" / pair with enable).
+ * Real Linux/Yocto usb_* driver-class backend -- HOST *presence
+ * check* only (issue #1141).  alp_usb_host_open() enumerates root
+ * hubs under /sys/bus/usb/devices/usbN/ (Documentation/ABI/testing/
+ * sysfs-bus-usb) to answer "is a USB host stack live under this
+ * kernel", matching the documented ALP_ERR_NOSUPPORT ("no host stack
+ * wired") open() failure case.
+ *
+ * alp_usb_host_enable() / alp_usb_host_disable() are ALP_ERR_NOSUPPORT
+ * -- see y_host_enable() / y_host_disable()'s own doxygen for why:
+ * the only real sysfs knob available (authorized_default) does not
+ * start or stop a controller, so writing to it and returning ALP_OK
+ * would be a FAKED success -- worse than an honest NOSUPPORT.  An
+ * earlier version of this file did exactly that; #1141 review caught
+ * it (blockers 4+5): host_disable() left the controller running with
+ * every already-enumerated device still authorized (nothing detaches
+ * -- authorized_default only gates NEWLY attached devices), and
+ * host_enable() was normally a literal no-op (authorized_default
+ * already defaults to 1) that also could not re-authorize a device
+ * that attached while deauthorized, so enable-after-disable was not
+ * even the inverse of disable.
  *
  * No libusb, no usbfs claim/transfer: <alp/usb.h>'s host surface is
  * intentionally minimal (open/enable/disable/close only -- no device
- * enumeration or transfer calls are declared), so sysfs alone covers
- * every op this backend needs to implement.  Per the task brief: if a
- * declared op genuinely needed libusb, that would be a stop-and-ask;
- * it doesn't.
+ * enumeration or transfer calls are declared), so sysfs discovery
+ * alone is enough for the one op (open) this backend actually
+ * implements for real.
  *
- * @par Device (gadget) role: NOT implemented here -- see dev_open()
+ * @par Device (gadget) role: NOT implemented here -- see y_dev_open()
  *      below for why.
  *
  * Registered at priority 100 with vendor "linux"; the sw_fallback
@@ -26,29 +37,26 @@
  * where this TU compiles to an empty object.  Selected on any
  * silicon (silicon_ref "*") because the USB core sysfs ABI is
  * SoC-agnostic -- the device tree decides which physical controllers
- * (xhci0/ehci0/ohci0 per issue #1141's e1m-x-evk.dtsi) back the
- * enumerated usbN root hubs.
+ * back the enumerated usbN root hubs.
  *
- * @par Status: REAL implementation for the host role.
- *      BENCH-UNVERIFIED -- no /sys/bus/usb/devices tree with real
- *      root hubs exists in this build environment, so open() finding
- *      zero buses (and therefore returning ALP_ERR_NOSUPPORT) is the
- *      only path exercised here.  The authorized_default write path
- *      has not been run against real V2N xHCI/EHCI/OHCI hardware.
- *      Do not read anything in this file as silicon-proven.
+ * @par Status: REAL implementation for host_open()/host_close() (a
+ *      presence check only).  host_enable()/host_disable() are an
+ *      honest NOSUPPORT, not a stand-in real implementation -- see
+ *      above.  BENCH-UNVERIFIED -- no /sys/bus/usb/devices tree with
+ *      real root hubs exists in this build environment, so open()
+ *      finding zero buses (and therefore returning ALP_ERR_NOSUPPORT)
+ *      is the only path exercised here.  Do not read anything in
+ *      this file as silicon-proven.
  */
 
 #if defined(__linux__)
 
 #include <dirent.h>
 #include <errno.h>
-#include <fcntl.h>
 #include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 #include <alp/backend.h>
 #include <alp/cap_instance.h>
@@ -65,13 +73,22 @@
 #define Y_USB_MAX_BUSES 16u
 
 /* Per-host-handle backend data: the USB bus numbers discovered at
- * open() time (one per root hub / physical host controller), reused
- * by enable()/disable() to target every controller's
- * authorized_default attribute. */
+ * open() time (one per root hub / physical host controller). */
 typedef struct {
 	unsigned buses[Y_USB_MAX_BUSES];
 	size_t   n_buses;
 } y_usb_host_data_t;
+
+/* Test-only seam: overrides the sysfs directory _discover_buses()
+ * scans, so a test can point it at a fixture directory instead of the
+ * real /sys/bus/usb/devices.  Default NULL means "use the real
+ * path". */
+static const char *g_usb_test_sysfs_root_hook = NULL;
+
+static const char *_sysfs_root(void)
+{
+	return (g_usb_test_sysfs_root_hook != NULL) ? g_usb_test_sysfs_root_hook : Y_USB_SYSFS_ROOT;
+}
 
 /**
  * @brief True iff @p name is a bare root-hub node name ("usb" + one
@@ -83,53 +100,42 @@ static bool _is_roothub_name(const char *name, unsigned *bus_out)
 	if (strncmp(name, "usb", 3) != 0) return false;
 	const char *digits = name + 3;
 	if (*digits == '\0') return false;
-	char         *end = NULL;
-	unsigned long v   = strtoul(digits, &end, 10);
-	if (end == digits || *end != '\0') return false; /* trailing junk -> not "usbN" */
+	char *end       = NULL;
+	errno           = 0;
+	unsigned long v = strtoul(digits, &end, 10);
+	if (end == digits || *end != '\0' || errno == ERANGE) return false;
 	*bus_out = (unsigned)v;
 	return true;
 }
 
 /**
- * @brief Write @p val to a single sysfs attribute file.
- *
- * Every attribute this backend touches (authorized_default) goes
- * through this one chokepoint, matching the shared idiom the other
- * sysfs-driven backends (pwm/adc/wdt) already use.
- */
-static alp_status_t _write_attr(const char *path, const char *val)
-{
-	int fd = open(path, O_WRONLY | O_CLOEXEC);
-	if (fd < 0) return alp_status_from_posix_errno(errno);
-
-	size_t  len = strlen(val);
-	ssize_t n   = write(fd, val, len);
-	int     e   = errno;
-	close(fd);
-	if (n < 0) return alp_status_from_posix_errno(e);
-	if ((size_t)n != len) return ALP_ERR_IO;
-	return ALP_OK;
-}
-
-/**
- * @brief Enumerate every root hub under /sys/bus/usb/devices into
- *        @p d.  Returns ALP_ERR_NOSUPPORT if none are found -- no
- *        USB host controller is live under this kernel, matching
+ * @brief Enumerate every root hub under the sysfs USB device tree
+ *        into @p d.  Returns ALP_ERR_NOSUPPORT if none are found --
+ *        no USB host controller is live under this kernel, matching
  *        alp_usb_host_open's documented "no host stack wired" case.
+ *
+ * Returns ALP_ERR_NOMEM if more than Y_USB_MAX_BUSES root hubs are
+ * found -- a fixed-capacity array that silently tracked only the
+ * first Y_USB_MAX_BUSES would still report ALP_OK while enable/
+ * disable (were they implemented) applied to just a subset of the
+ * real controllers; reporting the overflow is the honest option.
  */
 static alp_status_t _discover_buses(y_usb_host_data_t *d)
 {
 	d->n_buses = 0;
 
-	DIR *dir = opendir(Y_USB_SYSFS_ROOT);
+	DIR *dir = opendir(_sysfs_root());
 	if (dir == NULL) return alp_status_from_posix_errno(errno);
 
 	struct dirent *ent;
 	while ((ent = readdir(dir)) != NULL) {
 		unsigned bus;
-		if (_is_roothub_name(ent->d_name, &bus) && d->n_buses < Y_USB_MAX_BUSES) {
-			d->buses[d->n_buses++] = bus;
+		if (!_is_roothub_name(ent->d_name, &bus)) continue;
+		if (d->n_buses >= Y_USB_MAX_BUSES) {
+			closedir(dir);
+			return ALP_ERR_NOMEM;
 		}
+		d->buses[d->n_buses++] = bus;
 	}
 	closedir(dir);
 
@@ -137,33 +143,9 @@ static alp_status_t _discover_buses(y_usb_host_data_t *d)
 }
 
 /**
- * @brief Write @p enable ("1"/"0") to authorized_default on every
- *        discovered bus.  Fails fast on the first write error --
- *        on a multi-controller board this can leave some buses
- *        toggled and others not; the caller sees the real error
- *        from whichever bus failed rather than a silently-averaged
- *        success.
- */
-static alp_status_t _set_authorized_default(const y_usb_host_data_t *d, bool enable)
-{
-	char path[80];
-	for (size_t i = 0; i < d->n_buses; ++i) {
-		int n =
-		    snprintf(path, sizeof(path), Y_USB_SYSFS_ROOT "/usb%u/authorized_default", d->buses[i]);
-		if (n < 0 || (size_t)n >= sizeof(path)) return ALP_ERR_INVAL;
-
-		alp_status_t rc = _write_attr(path, enable ? "1" : "0");
-		if (rc != ALP_OK) return rc;
-	}
-	return ALP_OK;
-}
-
-/**
- * @brief Discover the live root hubs and stash them for enable/disable.
- *
- * No per-bus state beyond the bus-number list is meaningful at open
- * time -- authorized_default is a write-only policy knob, not
- * something worth caching a read-back of.
+ * @brief Discover the live root hubs -- a presence check, nothing
+ *        more.  See the file header for why enable()/disable() don't
+ *        act on the discovered list.
  */
 static alp_status_t y_host_open(alp_usb_host_state_t *st, alp_capabilities_t *caps_out)
 {
@@ -183,18 +165,40 @@ static alp_status_t y_host_open(alp_usb_host_state_t *st, alp_capabilities_t *ca
 	return ALP_OK;
 }
 
+/**
+ * @brief NOT implemented -- see the file-header note (#1141 review,
+ *        blockers 4+5).  By the time host_open() can find root hubs
+ *        under /sys/bus/usb/devices, the kernel has already bound
+ *        and started xhci-hcd/ehci-hcd/ohci-hcd; there is no Linux
+ *        userspace ABI this backend can drive to "start" a controller
+ *        that isn't already running.  Faking ALP_OK here (as a prior
+ *        version of this file did, by writing authorized_default's
+ *        already-default value) would be worse than this honest
+ *        NOSUPPORT.
+ */
 static alp_status_t y_host_enable(alp_usb_host_state_t *st)
 {
-	y_usb_host_data_t *d = (y_usb_host_data_t *)st->be_data;
-	if (d == NULL) return ALP_ERR_NOT_READY;
-	return _set_authorized_default(d, true);
+	(void)st;
+	return ALP_ERR_NOSUPPORT;
 }
 
+/**
+ * @brief NOT implemented -- see the file-header note (#1141 review,
+ *        blockers 4+5).  authorized_default gates only NEWLY attached
+ *        devices: writing "0" to it (as a prior version of this file
+ *        did) does not stop the controller and does not detach any
+ *        device already enumerated, so returning ALP_OK would claim
+ *        "stopped" while nothing stopped.  A real implementation
+ *        would need controller bind/unbind via
+ *        /sys/bus/platform/drivers/<xhci-hcd|ehci-*-hcd|ohci-*-hcd>/
+ *        {bind,unbind}, which needs the exact per-SoC platform device
+ *        name -- a board-integration decision this generic sysfs
+ *        backend does not have enough information to make safely.
+ */
 static alp_status_t y_host_disable(alp_usb_host_state_t *st)
 {
-	y_usb_host_data_t *d = (y_usb_host_data_t *)st->be_data;
-	if (d == NULL) return ALP_ERR_NOT_READY;
-	return _set_authorized_default(d, false);
+	(void)st;
+	return ALP_ERR_NOSUPPORT;
 }
 
 static void y_host_close(alp_usb_host_state_t *st)

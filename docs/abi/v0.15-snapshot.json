@@ -1,5 +1,5 @@
 {
-  "generated": "2026-08-03",
+  "generated": "2026-08-04",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -12652,8 +12652,8 @@
       },
       "macros": {
         "ALP_STORAGE_CONFIG_DEFAULT": {
-          "hash": "75268ef3c004fc9c",
-          "value": "(id) ((alp_storage_config_t){ .kind = (id), .instance_id = 0u, .freq_hz = 0u, .read_only = false })"
+          "hash": "31d9f999bb2c9004",
+          "value": "(id) ((alp_storage_config_t){ .kind = (id), .instance_id = 0u, .freq_hz = 0u, .read_only = false, .allow_unsafe_write = false })"
         }
       },
       "typedefs": {
@@ -12681,14 +12681,15 @@
           "kind": "enum"
         },
         "alp_storage_config_t": {
-          "definition": "typedef struct { alp_storage_kind_t kind; uint32_t instance_id; uint32_t freq_hz; bool read_only; } alp_storage_config_t;",
+          "definition": "typedef struct { alp_storage_kind_t kind; uint32_t instance_id; uint32_t freq_hz; bool read_only; bool allow_unsafe_write; } alp_storage_config_t;",
           "fields": [
             "alp_storage_kind_t kind",
             "uint32_t instance_id",
             "uint32_t freq_hz",
-            "bool read_only"
+            "bool read_only",
+            "bool allow_unsafe_write"
           ],
-          "hash": "680d93f98d11c484",
+          "hash": "2f5b4264a748c408",
           "kind": "struct"
         },
         "alp_storage_info_t": {

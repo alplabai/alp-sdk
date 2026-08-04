@@ -156,21 +156,51 @@ of this change.
 
 ### Added — real Yocto backends for `<alp/storage.h>` and `<alp/usb.h>` on the V2N A55 (#1140, #1141)
 
-- `src/backends/storage/yocto_drv.c`: routes `alp_storage_*` through
-  `/dev/mmcblk<instance_id>` (SD/MMC, via `BLKGETSIZE64`/`BLKSSZGET`/
-  `BLKDISCARD`) and `/dev/mtd<instance_id>` (xSPI/QSPI/OSPI/internal NOR, via
-  `MEMGETINFO`/`MEMERASE`) instead of falling through to the stub's
-  `ALP_ERR_NOSUPPORT`. `alp_storage_configure_inline_aes` stays
-  `ALP_ERR_NOSUPPORT` — no Linux userspace ABI exposes inline XIP-AES
-  key/IV programming for a block or MTD chardev.
-- `src/backends/usb/yocto_drv.c`: routes the USB **host** role
-  (`alp_usb_host_open/enable/disable/close`) through the kernel USB core's
-  `/sys/bus/usb/devices/usbN/authorized_default` sysfs knob. The USB
-  **device**/gadget role stays `ALP_ERR_NOSUPPORT` — the V2N X-EVK device
-  tree this issue targets brings up only host-role controllers
-  (`ehci0`/`ohci0`/`hsusb`/`xhci0`), no UDC/gadget node, and no libusb
-  dependency was added (sysfs + usbfs cover every op `<alp/usb.h>`
-  actually declares).
+### Added — real Yocto backends for `<alp/storage.h>` and `<alp/usb.h>` (#1140, #1141)
+
+- `src/backends/storage/yocto_drv.c`: routes `alp_storage_get_info`/`read`
+  through `/dev/mmcblk<instance_id>` (SD/MMC, via `BLKGETSIZE64`/
+  `BLKSSZGET`/discard-granularity sysfs) and `/dev/mtd<instance_id>`
+  (xSPI/QSPI/OSPI/internal NOR, via `MEMGETINFO`) instead of falling
+  through to the stub's `ALP_ERR_NOSUPPORT`. `write`/`erase` route the
+  same way but additionally require `alp_storage_config_t.allow_unsafe_write
+  = true` — new field, defaults `false` — because `/dev/mmcblk<N>` is the
+  whole-disk node (GPT/MBR + bootloader at offset 0) and on some boards
+  `/dev/mtd0` is itself the bootloader/FIP partition; a caller using
+  `ALP_STORAGE_CONFIG_DEFAULT` verbatim cannot write or erase through this
+  backend. `alp_storage_configure_inline_aes` stays `ALP_ERR_NOSUPPORT` —
+  no Linux userspace ABI exposes inline XIP-AES key/IV programming for a
+  block or MTD chardev. MTD writes are a raw `pwrite()` with no
+  erase-before-write (NOR write-after-erase is still the caller's
+  responsibility on this backend); SD/MMC `erase()` issues `BLKDISCARD`,
+  a best-effort TRIM hint that does not guarantee a zeroed/erased
+  readback. Both caveats are now documented at the `<alp/storage.h>` call
+  site, not only in the backend.
+- `src/backends/usb/yocto_drv.c`: `alp_usb_host_open` enumerates root hubs
+  under `/sys/bus/usb/devices` as a presence check (Linux already binds +
+  starts the host controllers by the time this runs).
+  `alp_usb_host_enable`/`alp_usb_host_disable` are honest
+  `ALP_ERR_NOSUPPORT` — no Linux userspace ABI starts/stops an
+  already-bound controller or detaches already-authorized devices; an
+  earlier draft of this backend faked `ALP_OK` here via the
+  `authorized_default` sysfs attribute, which review caught and this
+  change removes. The USB **device**/gadget role stays
+  `ALP_ERR_NOSUPPORT` — the V2N X-EVK device tree this issue targets
+  brings up only host-role controllers (`ehci0`/`ohci0`/`hsusb`/`xhci0`),
+  no UDC/gadget node. No libusb dependency was added or needed for the
+  host role's minimal open/enable/disable/close surface.
+- `include/alp/storage.h`, `include/alp/usb.h`: document the
+  `allow_unsafe_write` safety gate, the MTD-no-RMW write caveat, the
+  BLKDISCARD non-zeroed-readback erase caveat, and the real Yocto
+  host-enable/disable/device-role behaviour at the public call sites.
+- `tests/yocto/peripheral_storage.c`, `tests/yocto/peripheral_usb.c`: new
+  regression suites (`alp_test_peripheral_storage`,
+  `alp_test_peripheral_usb`) exercising the two backends' actual
+  file-local logic — the write/erase safety gate against a real temporary
+  file, the discard-granularity geometry fix, the MTD 32-bit erase-length
+  truncation guard, the honest host-enable/disable NOSUPPORT, and the
+  root-hub-enumeration edge cases — not just linking against the sw
+  fallback.
 - `src/yocto/CMakeLists.txt`: wires `storage_dispatch.c`/`usb_dispatch.c` +
   their `sw_fallback.c` into the same unconditional block as every other
   migrated class, mutes the split stub backend via
@@ -186,10 +216,10 @@ of this change.
   plain-CMake static-archive link needs now that these two classes are
   reachable from that path.
 - **Bench-unverified**: neither backend has been exercised against real
-  V2N SDHI/xSPI/xHCI/EHCI/OHCI silicon. Both compile, link, and pass the
-  existing registry/dispatcher test suite on a Linux host with no real
-  `/dev/mmcblk*`, `/dev/mtd*`, or `/sys/bus/usb/devices` root hubs present
-  — that is the only path exercised so far.
+  V2N SDHI/xSPI/xHCI/EHCI/OHCI silicon — nothing in this change has run on
+  V2N. Both compile, link, and pass their new unit tests plus the existing
+  registry/dispatcher test suite on a Linux host with no real
+  `/dev/mmcblk*`, `/dev/mtd*`, or `/sys/bus/usb/devices` root hubs present.
 
 ### Changed — documentation and drift gates follow the Python Tan port
 

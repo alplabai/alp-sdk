@@ -543,6 +543,65 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_peripheral_wdt
              COMMAND alp_test_peripheral_wdt)
 
+    # #1140 review regression (Yocto storage backend): write()/erase()
+    # must refuse with ALP_ERR_INVAL, before touching the device fd,
+    # unless alp_storage_config_t.allow_unsafe_write was set at open()
+    # -- a caller using ALP_STORAGE_CONFIG_DEFAULT must never be able
+    # to damage the whole-disk mmcblk node or an unvalidated MTD
+    # partition (blockers 1+2).  Also covers the discard_granularity
+    # geometry fix and the MTD 32-bit erase-length truncation guard.
+    # peripheral_storage.c #includes the real
+    # src/backends/storage/yocto_drv.c directly (see the test's own
+    # header comment) to drive y_write()/y_read()/y_erase() against a
+    # real temporary regular file -- never a real /dev/mmcblk*/mtd*
+    # node.  Deliberately NOT linked against alp::sdk -- same ODR
+    # rationale as alp_test_rpc_yocto_self_close above.
+    add_executable(alp_test_peripheral_storage
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_storage.c
+    )
+    target_include_directories(alp_test_peripheral_storage PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/storage
+        # storage_ops.h #includes "alp_checked_arith.h" unprefixed,
+        # relying on src/common being on the include path the way
+        # src/common/CMakeLists.txt adds it for the alp_sdk target
+        # itself -- this standalone test binary needs the same.
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_peripheral_storage PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_storage
+             COMMAND alp_test_peripheral_storage)
+
+    # #1141 review regression (Yocto USB backend): host_enable()/
+    # host_disable() must be honest ALP_ERR_NOSUPPORT, never a faked
+    # ALP_OK (blockers 4+5); dev_open() stays ALP_ERR_NOSUPPORT (no
+    # UDC/gadget path); _is_roothub_name() rejects a strtoul() ERANGE
+    # overflow; _discover_buses() reports an error instead of silently
+    # truncating when more root hubs exist than its fixed-capacity
+    # array can track.  peripheral_usb.c #includes the real
+    # src/backends/usb/yocto_drv.c directly (see the test's own header
+    # comment) to drive these against a real temporary directory via
+    # g_usb_test_sysfs_root_hook instead of the real
+    # /sys/bus/usb/devices tree.  Deliberately NOT linked against
+    # alp::sdk -- same ODR rationale as alp_test_rpc_yocto_self_close
+    # above.
+    add_executable(alp_test_peripheral_usb
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_usb.c
+    )
+    target_include_directories(alp_test_peripheral_usb PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/usb
+    )
+    target_compile_features(alp_test_peripheral_usb PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_usb
+             COMMAND alp_test_peripheral_usb)
+
     # /sys/power/state + RTC wakealarm mapping regression for issue #613
     # (Yocto power backend): each alp_power_mode_t must write the exact
     # kernel sysfs token, a timed wake must clear-then-program the
