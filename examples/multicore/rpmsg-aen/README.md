@@ -33,9 +33,15 @@ examples/multicore/rpmsg-aen/
 
 The AEN801 preset resolves the mailbox controller and derives the
 memory envelope from the E8 SoC variant.  The `alp_default_rpmsg`
-carve-out lands in `mram_main` (cacheable, accessible from all three
-cores). Spec §6.8 dictates AEN defaults to cacheable carve-outs
-because the M55 cores have caches enabled.
+carve-out lands in `mram_main`, accessible from all three cores.
+
+Spec §6.8 says AEN defaults to cacheable carve-outs because the M55
+cores have caches enabled — but the SDK emits no cache maintenance to
+make that safe, so this example does **not** take that path.  The
+`cacheable: true` opt-in is rejected on `kind: rpmsg` entries, and the
+orchestrator emits `CONFIG_DCACHE=n` for the `m55_hp` slice instead, so
+both sides see each other's writes without explicit clean/invalidate.
+Tracked as #1088; see `docs/heterogeneous-builds.md`.
 
 | Range                     | Owner                  | Notes                                                |
 |---------------------------|------------------------|------------------------------------------------------|

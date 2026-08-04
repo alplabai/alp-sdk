@@ -55,14 +55,18 @@ cores:
 # metadata/e1m_modules/E1M-AEN801.yaml) so this carve-out still lands
 # `status: blocked` rather than resolving into a coarse whole-MRAM
 # address that could overlap the real mcuboot/slot0/reserved/storage
-# regions.  spec §6.8 flips to cacheable: true on AEN by default
-# because the M55 cache is on.
+# regions.  spec §6.8 flips to cacheable: true on AEN by default because
+# the M55 cache is on -- but <alp/rpc.h> has no cache-maintenance layer
+# behind that flag (#1088), so it is deliberately left unset here: the
+# orchestrator now forces CONFIG_DCACHE=n for this core instead (the
+# same conservative posture V2N already has) and the loader rejects an
+# explicit `cacheable: true` on a rpmsg entry until real cache
+# maintenance ships.
 ipc:
   - kind: rpmsg
     endpoints: [a32_cluster, m55_hp]
     carve_out_kb: 256
     name: alp_default_rpmsg
-    cacheable: true
 
 diagnostics:
   log_level: info

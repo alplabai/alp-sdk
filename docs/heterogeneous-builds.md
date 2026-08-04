@@ -581,23 +581,39 @@ you hardcode the strings instead, the runtime returns
 `ALP_ERR_NOSUPPORT` because no carve-out backs the name; check
 `alp_last_error()`.
 
-**Cache coherency on AEN — read this before setting `cacheable: true`
-on an rpmsg channel.**  The allocator's default carve-out is
-non-cacheable on every SoM, V2N and AEN alike.  `cacheable: true` is an
-explicit per-entry opt-in that is supposed to mean "the orchestrator
-emits matching cache-maintenance hooks on both sides, don't write cache
-ops by hand" — **that emission does not exist yet.**
-`cfg->cacheable` is stored on the `<alp/rpc.h>` backend struct
-(`src/backends/rpc/zephyr_drv.c` / `yocto_drv.c`) and never read again;
-there is no `sys_cache_*` / `arch_dcache_*` call anywhere under `src/`
-or `include/`. A `cacheable: true` rpmsg channel on AEN today (e.g.
-`examples/multicore/rpmsg-aen`, `a32_cluster` ↔ `m55_hp`) is exactly the
-#1080 cross-core D-cache hazard with no mitigation — tracked as **#1088**.
-Until that lands: if you reach below the RPC surface to read shared
-memory directly, or you're on AEN at all, treat `cacheable: true` as
-"I will call the right cache ops myself" (`sys_cache_data_flush_range`
-on the writer + `sys_cache_data_invd_range` on the reader), not as a
-promise the SDK does it for you.
+**Cache coherency on AEN — `cacheable: true` is rejected on rpmsg
+channels.**  The allocator's default carve-out is non-cacheable on every
+SoM, V2N and AEN alike.  `cacheable: true` was once an explicit
+per-entry opt-in, meant to say "the orchestrator emits matching
+cache-maintenance hooks on both sides, don't write cache ops by hand" —
+**that emission was never built.**  `cfg->cacheable` is stored on the
+`<alp/rpc.h>` backend struct (`src/backends/rpc/zephyr_drv.c` /
+`yocto_drv.c`) and never read again; there is no `sys_cache_*` /
+`arch_dcache_*` call anywhere under `src/` or `include/`.
+
+Rather than leave a flag that selects an unimplemented safety path,
+`load_board_yaml` now **hard-rejects** `cacheable: true` on any
+`kind: rpmsg` entry with an `OrchestratorError` naming #1088, and the
+orchestrator emits `CONFIG_DCACHE=n` for every Zephyr core named as an
+rpmsg endpoint — the same treatment `kind: raw_shmem` has had since
+#1080/#1086.  Remove the flag (or set it to `false`); there is nothing
+to opt into yet.
+
+This is a mitigation, not the feature.  Real per-carve-out cache
+maintenance (`sys_cache_data_flush_range` on the writer,
+`sys_cache_data_invd_range` on the reader) plus a `cacheable: true` path
+that honours it remains open as **#1088**.
+
+Scope, so nobody assumes more than is true: `CONFIG_DCACHE` is a Zephyr
+symbol, and `_slice_alp_conf` only runs for `os: zephyr` slices, so the
+Linux-side cores never receive it.  They do not need it — the A55/A32
+side of an rpmsg carve-out is already uncached, whether it is UIO-mapped
+as Device memory (`src/backends/rpc/yocto_uio_drv.c`) or kernel-managed
+through the standard rpmsg/virtio DMA-coherent path
+(`src/backends/rpc/yocto_drv.c`).  Practically the emission only changes
+behaviour on Cortex-M55 (AEN's `m55_hp`); Cortex-M33 does not select
+`CPU_HAS_DCACHE`, so it is a no-op on V2N's `m33_sm`, NX9101's `m33`,
+and i.MX 93's `m33`.
 
 `ipc[].kind: raw_shmem` — the low-level `<alp/mproc.h>` shmem+mailbox
 primitives `<alp/rpc.h>` sits on — has the identical gap (no

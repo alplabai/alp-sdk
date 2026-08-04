@@ -306,6 +306,35 @@ def test_partial_match_raises(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------
+# 4c. #1088: `cacheable: true` on a `kind: rpmsg` entry has no
+#     cache-maintenance implementation behind it -- reject at load time
+# ---------------------------------------------------------------------
+
+
+def test_load_board_yaml_rejects_rpmsg_cacheable_true(tmp_path: Path) -> None:
+    """`cfg->cacheable` is stored on the rpc backend struct
+    (src/backends/rpc/{zephyr,yocto}_drv.c) and never read again -- no
+    `sys_cache_*` call exists anywhere under src/ or include/.  A
+    `cacheable: true` rpmsg entry would therefore select a code path
+    that promises coherency it can't deliver, which is worse than no
+    flag at all, so the loader refuses it outright rather than
+    silently honouring it."""
+    body = V2N_HAPPY.replace(
+        "    name: alp_default_rpmsg\n",
+        "    name: alp_default_rpmsg\n    cacheable: true\n",
+    )
+    assert "cacheable: true" in body  # guard against a silent no-op replace
+    path = _write_board(tmp_path, body)
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    msg = str(excinfo.value)
+    assert "alp_default_rpmsg" in msg
+    assert "rpmsg" in msg
+    assert "cacheable: true" in msg
+    assert "1088" in msg
+
+
+# ---------------------------------------------------------------------
 # 5. _silicon_to_soc_path -- migrated onto resolve_soc_path() (issue #1004)
 # ---------------------------------------------------------------------
 

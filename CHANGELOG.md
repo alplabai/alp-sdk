@@ -33,6 +33,81 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   `src/zephyr/inference_ethosu_n93.c`, that has never existed in this tree;
   corrected to the file that actually implements the backend,
   `src/backends/inference/ethos_u_n93.cpp` (#1222).
+### Fixed — AEN `rpmsg` carve-outs default to non-cacheable; `cacheable: true` now rejected until real cache maintenance ships (#1088)
+
+Conservative mitigation, not the real fix. #1080 root-caused a cross-core
+D-cache incoherence hazard on `ipc[].kind: raw_shmem` and closed it with
+`_emit_cross_core_shmem_cache` (`scripts/alp_orchestrate/kconfig.py`):
+force `CONFIG_DCACHE=n` for any core named as an endpoint, unless the
+entry opts in with `cacheable: true`. That function's own docstring
+deliberately excluded `kind: rpmsg`, tracking the identical hazard there
+as #1088 — this is that issue. `cfg->cacheable` is stored on the rpc
+backend struct (`src/backends/rpc/{zephyr,yocto}_drv.c:~630`) and never
+read again; there is no `sys_cache_*`/`arch_dcache_*`/`SCB_Clean`/
+`SCB_Invalidate` call anywhere under `src/` or `include/`. AEN's own
+example, `examples/multicore/rpmsg-aen/board.yaml`, declared
+`cacheable: true` on its `alp_default_rpmsg` entry (`a32_cluster` writer,
+`m55_hp` reader, M55 D-cache on) — the exact shape #1080 bench-proved
+stale under D-cache-on, just not yet proven for this specific rpmsg path.
+
+`_emit_cross_core_shmem_cache` now also matches `kind: rpmsg`, mirroring
+the `raw_shmem` mechanism rather than inventing a parallel one: any core
+named as an rpmsg endpoint with no `cacheable: true` gets
+`CONFIG_DCACHE=n`. Because the function is board/SoC-agnostic (keyed off
+`ipc:`, not a vendor check — same as `raw_shmem` already was), this also
+reaches `examples/multicore/rpmsg-v2n`,
+`examples/multicore/heterogeneous-offload` and
+`examples/multicore/rpmsg-imx93`, which carried the same
+implicit-non-cacheable shape with no `CONFIG_DCACHE=n` before either.
+Verified rather than assumed: Zephyr's
+`arch/arm/core/cortex_m/Kconfig` does not `select CPU_HAS_DCACHE` for
+`CPU_CORTEX_M33`, so the emission is a genuine no-op on V2N's `m33_sm`,
+NX9101's `m33` and i.MX 93's `m33`; `CPU_CORTEX_M55` does select it, so
+AEN's `m55_hp` is the one core where this is a real (and intended)
+behaviour change. The Linux-side cores cannot be reached at all —
+`_slice_alp_conf` runs only for `os: zephyr` slices.
+
+`cacheable: true` is now actively dangerous for `kind: rpmsg`, not merely
+unused: after this change it selects the branch that skips
+`CONFIG_DCACHE=n`, i.e. the one unsafe path with no maintenance behind
+it. `load_board_yaml` (`scripts/alp_orchestrate/loader.py`) now rejects
+`cacheable: true` on a `kind: rpmsg` entry outright with an
+`OrchestratorError` naming #1088, rather than silently honouring a flag
+that selects unimplemented behaviour.
+`examples/multicore/rpmsg-aen/board.yaml`'s `alp_default_rpmsg` entry
+drops `cacheable: true` accordingly (the emitted `CONFIG_DCACHE=n` now
+covers it instead) — this is `raw_shmem`-only going forward; `rpmsg` has
+no cacheable opt-out until real cache maintenance exists.
+
+Real fix — `sys_cache_data_flush_range()` on the writer and
+`sys_cache_data_invd_range()` on the reader in `<alp/rpc.h>` — is
+explicitly NOT implemented here. That needs the same kind of AEN bench
+sweep #1080 ran to prove it actually eliminates stale lines under
+D-cache-on, and this change ships no such proof.
+
+Three documentation sites described the OLD contract and are corrected
+here, since this change is what made them false: `docs/heterogeneous-
+builds.md` §10 and `docs/v0.6-tbd-and-assumptions.md`'s open-items table
+both still presented `cacheable: true` as a legal per-entry opt-in, and
+`examples/multicore/rpmsg-aen/README.md` still described its own
+carve-out as cacheable — contradicting the `board.yaml` in the same
+example that this change edits. All three now state that the opt-in is
+rejected and that `CONFIG_DCACHE=n` is emitted instead.
+
+Added `test_load_board_yaml_rejects_rpmsg_cacheable_true`
+(`tests/scripts/test_orchestrate_loader.py`) and widened
+`tests/scripts/test_emit_cross_core_shmem_cache.py` (renamed
+`test_rpmsg_kind_excluded` → `test_rpmsg_endpoint_gets_dcache_off`; mixed
+raw_shmem+rpmsg now pins a single deduped `CONFIG_DCACHE=n`, not "only
+raw_shmem fires"). Regenerated the four `check_emit_snapshots.py` goldens
+this touches (`rpmsg-aen`, `rpmsg-v2n`, `hetero-offload`,
+`mproc-mailbox` — the last only for updated comment wording, not new
+behaviour).
+
+Not bench-verified: this closes the hazard by turning the D-cache off,
+the same class of mitigation #1080 bench-proved works for `raw_shmem`,
+but the rpmsg-specific path itself was not re-run on E8 silicon as part
+of this change.
 
 ### Fixed — HIL runner comments no longer claim specs that don't exist (#1160)
 
