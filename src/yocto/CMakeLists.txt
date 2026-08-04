@@ -34,6 +34,10 @@
 #   - rpc          OpenAMP userland RPMsg (gated on open-amp/libmetal)
 #   - mqtt         libmosquitto (gated on libmosquitto)
 #   - security     OpenSSL EVP (gated on libssl/libcrypto)
+#   - storage/usb  /dev/mmcblk*+/dev/mtd* ioctls / /sys/bus/usb sysfs (#1140/#1141)
+#   - power        /sys/power/state + RTC wakealarm (#613)
+#   - i3c          /sys/bus/i3c presence check only -- no raw-transfer ABI (#1147)
+#   - display      DRM/KMS dumb buffers over /dev/dri/card* (#1143)
 # Wi-Fi + BLE carry dispatchers + sw_fallback only (system-config
 # concern on Linux -- see the note at their target_sources block).
 # All backends are compile-verified on a Linux host where the gating
@@ -228,13 +232,21 @@ target_sources(alp_sdk PRIVATE
     # from libalp_sdk.a on Yocto despite being documented public API.
     # Same portable dispatcher + sw_fallback / wildcard-stub pair as
     # baremetal; none of these files touch a Zephyr or Linux-specific
-    # header, so they build unmodified here.  Power is the exception:
-    # backends/power/yocto_drv.c (#613) is a REAL Linux backend and is
-    # added in the Linux-gated block below (it self-gates on __linux__,
-    # like the RTC/WDT/PWM real backends), registering above this
-    # wildcard stub at priority 100.
+    # header, so they build unmodified here.  Power / Display are the
+    # exceptions: backends/power/yocto_drv.c (#613) and
+    # backends/display/yocto_drv.c (#1143) are REAL Linux backends and
+    # are added in the Linux-gated block below (they self-gate on
+    # __linux__, like the RTC/WDT/PWM real backends), registering above
+    # their respective wildcard stub at priority 100.
     ${CMAKE_CURRENT_SOURCE_DIR}/../dac_dispatch.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/dac/sw_fallback.c
+    # I3C (#1147): the dispatcher + portable sw_fallback are wired
+    # unconditionally like every other class here; the real Linux
+    # backend (backends/i3c/yocto_drv.c -- a bus PRESENCE check only,
+    # see that file's own header for why write/read/write_read stay
+    # NOSUPPORT on every mainline kernel) is added in the Linux-gated
+    # block below, self-gated on __linux__, registering above this
+    # sw_fallback at priority 100.
     ${CMAKE_CURRENT_SOURCE_DIR}/../i3c_dispatch.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/i3c/sw_fallback.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../dsp_dispatch.c
@@ -415,6 +427,27 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         # BENCH-UNVERIFIED (see each file's own Status note).
         ${CMAKE_CURRENT_SOURCE_DIR}/../backends/storage/yocto_drv.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../backends/usb/yocto_drv.c
+        # I3C (#1147): backends/i3c/yocto_drv.c is a bus PRESENCE check
+        # only -- confirms /sys/bus/i3c/devices/i3c-<bus_id> exists.
+        # Mainline Linux has no userspace raw-transfer ABI for I3C at
+        # all (see the file's own header comment), so write()/read()/
+        # write_read() stay ALP_ERR_NOSUPPORT on every kernel; nothing
+        # here reaches a broadcast CCC or DAA op, so there is no
+        # storage-style allow_unsafe_write gate to add. Self-gates on
+        # __linux__ and registers at priority 100 (vendor "linux");
+        # the dispatcher + sw_fallback + backend.c are pulled in
+        # unconditionally above. BENCH-UNVERIFIED.
+        ${CMAKE_CURRENT_SOURCE_DIR}/../backends/i3c/yocto_drv.c
+        # Display (#1143): backends/display/yocto_drv.c drives the DU/
+        # DSI (or any KMS-capable) output over DRM/KMS dumb buffers via
+        # direct ioctls against <drm/drm.h>+<drm/drm_mode.h>+
+        # <drm/drm_fourcc.h> -- no libdrm link, same class of
+        # dependency as storage's <linux/fs.h>/<mtd/mtd-abi.h>. Self-
+        # gates on __linux__ and registers at priority 100 (vendor
+        # "linux") above the zephyr_stub wildcard (priority 0, added
+        # unconditionally above); the dispatcher is pulled in
+        # unconditionally above too. BENCH-UNVERIFIED.
+        ${CMAKE_CURRENT_SOURCE_DIR}/../backends/display/yocto_drv.c
         # <alp/power.h> gains a REAL Linux backend (#613):
         # backends/power/yocto_drv.c drives /sys/power/state +
         # /sys/class/rtc/rtc0/wakealarm, registering at priority 100

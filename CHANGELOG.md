@@ -7,6 +7,54 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Added — real Yocto backends for `<alp/display.h>` and `<alp/i3c.h>` (#1143, #1147)
+
+- `src/backends/display/yocto_drv.c`: `alp_display_open` drives the DU/DSI
+  (or any KMS-capable) output over DRM/KMS dumb buffers via direct ioctls
+  against `<drm/drm.h>`/`<drm/drm_mode.h>`/`<drm/drm_fourcc.h>` — no libdrm
+  dependency added. Modeset flow: `GETRESOURCES` → the first `CONNECTED`
+  connector with a mode → `GETENCODER` → `CREATE_DUMB` + `ADDFB2`
+  (`DRM_FORMAT_ARGB8888`, byte-identical to `ALP_PIXFMT_ARGB8888`) +
+  `MAP_DUMB` + `mmap()` → `SETCRTC`. `alp_display_blit`/`alp_display_clear`
+  write straight into the mapped dumb buffer, honouring the kernel-reported
+  scanline pitch. No new safety-gate field was added (unlike storage's
+  `allow_unsafe_write`): writing pixels is this API's entire declared
+  purpose, not an incidental side effect a default-config caller could
+  stumble into: see the backend's own file-header note for the full
+  reasoning, including why `DRM_IOCTL_SET_MASTER`'s own kernel-side
+  exclusivity is the meaningful guard against fighting a running
+  compositor for the screen.
+- `src/backends/i3c/yocto_drv.c`: `alp_i3c_open` is a bus PRESENCE check
+  only, confirming `/sys/bus/i3c/devices/i3c-<bus_id>` exists.
+  `alp_i3c_write`/`alp_i3c_read`/`alp_i3c_write_read` stay honest
+  `ALP_ERR_NOSUPPORT` on every call: mainline Linux (`drivers/i3c/`) has no
+  generic userspace raw-transfer ABI for I3C at all — unlike I2C's
+  `ioctl(I2C_RDWR)`, there is no `/dev/i3c-*` chardev and no uapi header;
+  the subsystem is kernel-driver-bind-only. Because no raw-transfer path
+  exists, nothing in this backend can reach a broadcast CCC or a
+  dynamic-address-assignment op, so there is no storage-style
+  `allow_unsafe_write` gate to add.
+- `include/alp/display.h`, `include/alp/i3c.h`: doc comments no longer
+  describe the Yocto path as stub-only; corrected to describe the real
+  backends above and their honest NOSUPPORT boundaries.
+- `tests/yocto/peripheral_display.c`, `tests/yocto/peripheral_i3c.c`: new
+  regression suites (`alp_test_peripheral_display`,
+  `alp_test_peripheral_i3c`) exercising each backend's file-local logic —
+  the pitch-aware blit/clear range checks (against a plain heap buffer
+  standing in for the real mmap'd dumb buffer) and CRTC-selection helper
+  for display; the sysfs presence check and the always-NOSUPPORT transfer
+  ops for I3C — not just linking against the sw fallback.
+- `src/yocto/CMakeLists.txt`: adds the two `yocto_drv.c` files to the
+  `__linux__`-gated block, registering at priority 100 above the existing
+  `zephyr_stub`(display)/`sw_fallback`(i3c) backends; `i3c_dispatch.c` and
+  its `sw_fallback.c` were already wired unconditionally, so only the real
+  backend needed adding there.
+- **Bench-unverified**: neither backend has been exercised against real
+  V2N DU/DSI/Mali-DRM or I3C silicon — nothing in this change has run on
+  V2N. Both compile, link, and pass their new unit tests plus the existing
+  registry/dispatcher test suite on a Linux host with no real
+  `/dev/dri/card*` or `/sys/bus/i3c/devices` tree present.
+
 ### Fixed — `test-all.sh` reported a missing formatter as FAIL, and a stale i.MX 93 Kconfig symbol survived two more sites (#1221, #1222)
 
 - `stage_generated_files()` in `scripts/test-all.sh` reported `FAIL exit=1`,
