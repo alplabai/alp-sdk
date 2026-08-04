@@ -263,6 +263,18 @@ jobs:
         run: |
           python3 scripts/check_emit_kconfig_contract.py
 
+      # gen_soc_peripheral_instances.py's --check does NOT run in this
+      # job (moved out in PR review on #1212): this job's Zephyr pin
+      # (`--mr v4.4.1` above) is the FULL twister oracle -- any future
+      # bump that happens to touch dts/arm/renesas/rz/rzv/r9a09g056.dtsi
+      # would make `--check` go STALE here, failing `twister-shard 1/4`,
+      # which fails the required aggregator `twister ·
+      # native_sim/native/64` and blocks every PR to `dev`, not just V2N
+      # ones, under a context name that says nothing about metadata. See
+      # pr-metadata-peripheral-instances.yml, which checks the same thing
+      # with a seconds-long sparse checkout of just the one DTSI, under
+      # its own honestly-named (and, for now, non-required) context.
+
       # Persist the twister REPORTS (json/xml/log) regardless of
       # pass/fail.  Do NOT upload the whole twister-out/ tree: the
       # per-test build directories grew past 2 GB with the v0.6

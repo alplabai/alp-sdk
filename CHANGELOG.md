@@ -7,6 +7,84 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Added — per-instance RZ/V2N peripheral data (#1154)
+
+- **`metadata/socs/renesas/rzv2n/n44.json` gains a `peripheral_instances`
+  block: per-instance register base/size + interrupts for `i2c` (RIIC0-8),
+  `uart` (SCI0-9), `timer_32bit_gpt` (GPT0-15) and `timer_32bit_gtm`
+  (GTM0-7).** `peripherals:` was previously counts only (`"i2c": 9`), so
+  the two consumers that needed a real address —
+  `metadata/renode/renesas_rzv2n.repl:61` (CPG/ICU) and `:71` (RIIC8 /
+  BRD_I2C) — hand-transcribed it. New generator
+  `scripts/gen_soc_peripheral_instances.py` (`--check` mode included)
+  mechanically projects `reg`/`interrupts` from the vendored Zephyr SoC
+  devicetree the M33 board `.dts` already `#include`s
+  (`dts/arm/renesas/rz/rzv/r9a09g056.dtsi`) — the same file the repl's
+  hand-placed RIIC8 base (`0x41c01000`) was manually copied from, now
+  regenerated instead. `peripheral_instances` is additive: `peripherals:`
+  is untouched and every existing consumer (`gen_soc_caps.py`,
+  `gen_support_matrix.py`, `validate_metadata.py`, the studio compat
+  pass) is unaffected. `metadata/schemas/soc-spec-v1.schema.json` gains
+  the matching optional `peripheral_instances` property.
+  - **`base`/`size` are lowercase `0x`-prefixed hex STRINGS** (e.g.
+    `"base": "0x41c01000"`), constrained by a `^0x[0-9a-f]+$` schema
+    pattern — matching the DTSI's own `i2c@44400400` literal style and
+    every other address already in this repo's metadata; JSON has no hex
+    literal, and a decimal int hides a transposed digit a hex string
+    makes visible on sight. `index`/`irq`/`priority` stay decimal ints,
+    matching how the DTSI writes `channel = <0>` / `interrupts = <406 1>`
+    and how Zephyr writes IRQ numbers everywhere else.
+  - Coverage is deliberately partial: of n44.json's 27 `peripherals:`
+    keys, only the four above are projected (their DTSI node count is an
+    exact match for the `peripherals:` count). `adc_12bit` and `gpio`
+    ARE modelled in the DTSI (3 ADC units, 12 GPIO ports) but at a
+    different instance granularity than their count (24 channels, 86
+    pins), so they are deliberately left unprojected rather than emit a
+    count-mismatched list. The DTSI carries **no `clocks` property at
+    all** — confirmed by grep, not even a raw `<&cpg ...>` phandle — so
+    no `clocks` field is emitted anywhere; treat this as "absent", not
+    merely "not covered". The remaining 21 keys have no node in this
+    devicetree at all. Every skip is printed on every run.
+    `metadata/renode/renesas_rzv2n.repl` is intentionally untouched —
+    retiring its hand-placement onto this data is separate follow-up
+    work.
+  - **`--check` runs in its own advisory CI job**,
+    `.github/workflows/pr-metadata-peripheral-instances.yml` — moved out
+    of `pr-twister.yml`'s `matrix.shard == 1` leg in a second review
+    round: that job's Zephyr pin is the FULL twister oracle, so a future
+    version bump touching `r9a09g056.dtsi` would fail the required
+    `twister-shard 1/4` → `twister · native_sim/native/64` aggregator and
+    block every PR to `dev`, not only V2N ones, under a context name that
+    says nothing about metadata. The dedicated job sparse-checks-out just
+    the one DTSI file at the pinned tag (derived from
+    `metadata/bootstrap.json` at run time, never a second hardcoded
+    literal) and runs in seconds. It is advisory (non-required) while the
+    pattern proves itself, same graduation path as `pr-renode-aen-smoke.yml`
+    (#974) / `pr-renode-v2n-sci0-smoke.yml` (#1187).
+    `ALP_REQUIRE_ZEPHYR_ORACLE=1` (same escape hatch
+    `check_bootstrap_manifest.py` / `check_toolchain_lock.py` use) turns
+    an unresolvable checkout in that job into a hard failure instead of a
+    skip — that job PROMISES the oracle, so an unresolvable one there is
+    a bug in its own setup.
+  - Both modes still skip cleanly (exit 0) on a machine with no Zephyr
+    checkout, but `scripts/test-all.sh`'s `generated-files` stage now
+    DOES run this generator (plain, unsuppressed, unlike the other seven
+    `gens`) specifically so a contributor sees the `skipped: ...` line
+    instead of every stage reading PASS with no signal that this one
+    fact went unchecked; when `$ZEPHYR_BASE` resolves locally, that stage
+    actually regenerates + diffs `n44.json`, catching real drift the same
+    way CI does. The schema's `^0x[0-9a-f]+$` pattern on `base`/`size` is
+    a further, independent guard that doesn't depend on `--check` having
+    run at all.
+  - Three more silent-degradation classes escalate to a hard failure now
+    (none of them change the emitted instance COUNT, so the existing
+    count-vs-`peripherals:` guard could not catch any of them alone): an
+    unresolved `reg` size macro (e.g. a future `DT_SIZE_M(n)`), a node
+    with no `channel` cell (previously defaulted `"index": 0` silently,
+    contradicting the schema's own "never inferred from array position"),
+    and a multi-cell `reg` property (previously silently truncated to
+    its first cell).
+
 ### Fixed — bring-up guide claimed `tps628640_set_voltage_mv` was unimplemented (#1166)
 
 `docs/bring-up-v2n-m1.md` told readers to reach for the
