@@ -149,11 +149,20 @@ alp_status_t cc3501e_hard_reset(cc3501e_t *ctx);
  * desync the request path detects (reply header that doesn't echo the
  * command).
  *
+ * Thread-safe (issue #1116): the byte-walk clocks the same CS-less bus as
+ * @ref cc3501e_request, so it runs under the same transport lock and holds
+ * it for the whole walk — re-aligning to the slave's header boundary is
+ * only meaningful if nothing else moves the bus underneath it.  A request
+ * issued concurrently therefore gets @ref ALP_ERR_BUSY from its own bounded
+ * acquire, which is the honest answer: the link is by definition unusable
+ * until the re-sync completes.
+ *
  * @param ctx         Initialised driver context.
  * @param timeout_ms  Coarse upper bound on re-sync effort (each ~ms covers
  *                    one full-frame byte-walk attempt).
  * @return ALP_OK once aligned; ALP_ERR_TIMEOUT if the slave never parked
- *         (e.g. unpowered / not running its firmware).
+ *         (e.g. unpowered / not running its firmware); ALP_ERR_BUSY if the
+ *         transport lock was not acquired within its bounded timeout.
  */
 alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms);
 

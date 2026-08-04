@@ -25,14 +25,6 @@
  * registers one. */
 extern cc3501e_t *companion_cc3501e;
 
-/* NOTE (issue #1116): this split used to also declare a shared
- * `companion_bus_lock` k_mutex here so every command TU could serialise
- * its own cc3501e_request() calls against the others.  That is now
- * redundant -- cc3501e_request() itself takes ctx's internal transport
- * lock for the whole 4-phase exchange (chips/cc3501e/cc3501e_core.c) --
- * and has been removed rather than kept as a second, always-uncontended
- * lock around the first. */
-
 #endif /* !CONFIG_ALP_SDK_V2N_SUPERVISOR */
 
 #endif /* ALP_INTERNAL_ZEPHYR_CONSOLE_ALP_CONSOLE_COMPANION_INTERNAL_H_ */

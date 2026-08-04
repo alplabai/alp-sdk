@@ -174,8 +174,13 @@ static int cmd_companion_wifi_ap(const struct shell *sh, size_t argc, char **arg
 		sec = 2u;
 	}
 
-	/* AP bring-up blocks for seconds in the firmware; run it under the bus
-	 * lock so a concurrent BLE/GPIO op can't interleave on the bridge. */
+	/* AP bring-up blocks for seconds in the firmware.  Each cc3501e_request()
+	 * inside is individually serialised by the transport lock (issue #1116),
+	 * but the multi-request bring-up as a whole is NOT held exclusively --
+	 * a BLE/GPIO op can land between its requests.  That is intended: the
+	 * firmware's AP sequence tolerates interleaved commands; what it cannot
+	 * tolerate is two transactions overlapping on the wire, which is exactly
+	 * what the transport lock prevents. */
 	alp_status_t s =
 	    cc3501e_wifi_ap_start(companion_cc3501e, ssid, sec, pass, ALP_COMPANION_WIFI_CONN_MS);
 

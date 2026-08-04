@@ -183,53 +183,6 @@ static alp_status_t resp_to_status(uint8_t resp)
 	}
 }
 
-alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms)
-{
-	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
-
-	/* MOSI is don't-care while syncing; 0xFF reads as a reserved-range
-	 * ("no-op probe") header on the slave, which re-arms its header phase
-	 * (firmware P0-2) so it keeps driving the 0xA5 marker -- making this walk
-	 * non-destructive. */
-	uint8_t tx = 0xFFu;
-	uint8_t rx = 0u;
-
-	/* Worst case, clock through one full in-flight request+reply frame to
-	 * reach the slave's parked header boundary; "parked" = a run of two
-	 * header-widths of 0xA5 (rejects a stray 0xA5 byte inside reply data). */
-	const uint32_t walk_max = 2u * (uint32_t)(ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD);
-	const uint32_t run_need = 2u * (uint32_t)ALP_CC3501E_HEADER_BYTES;
-	const uint32_t attempts = (timeout_ms > 0u) ? timeout_ms : 1u;
-
-	for (uint32_t a = 0u; a < attempts; a++) {
-		uint32_t run = 0u;
-		for (uint32_t w = 0u; w < walk_max; w++) {
-			if (alp_spi_transceive(ctx->bus, &tx, &rx, 1u) != ALP_OK) return ALP_ERR_IO;
-			if (rx == ALP_CC3501E_SYNC_IDLE) {
-				if (++run >= run_need) return ALP_OK; /* aligned at a clean header boundary */
-			} else {
-				run = 0u;
-			}
-		}
-		alp_delay_ms(1u); /* let the slave drain any in-flight frame + re-arm header phase */
-	}
-	return ALP_ERR_TIMEOUT;
-}
-
-/* Inter-phase settle (CS-less lockstep): time given to the CC3501E SPI-slave ISR
- * to arm the next fixed-count transfer (request payload, reply payload) before
- * the host clocks it.  ~µs is enough; 200 µs is comfortably safe and negligible
- * vs the per-request budget.  The r2 bridge (CS + host-IRQ) removes the need. */
-#define CC3501E_PHASE_SETTLE_US 200u
-
-/* READY gate for the r2 SS0 + host-IRQ bridge.  When ctx->ready_pin is
- * populated (the CC35 GPIO17 -> Alif P2_6 line is wired + opened as an input),
- * wait for it HIGH -- the slave drives it HIGH when its SPI slave is armed+idle
- * -- before clocking a reply phase, instead of a fixed settle gap.  This tracks
- * the slave's actual re-arm rather than guessing, so slow (Wi-Fi/BLE) replies
- * no longer need a conservative fixed delay.  Opt-in + degrades safely: a NULL
- * ready_pin (CS-less r1 boards) or a line that never asserts falls back to the
- * fixed gap.  See project_cc3501e_link_topology. */
 /* ---- transport-transaction lock (issue #1116) -----------------------------
  *
  * cc3501e_request() is the ONLY place the 4-phase SPI exchange runs, and
@@ -290,6 +243,80 @@ static void cc3501e_lock_release(cc3501e_t *ctx)
 {
 	__atomic_store_n(&ctx->request_lock, false, __ATOMIC_RELEASE);
 }
+alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+
+	/* MOSI is don't-care while syncing; 0xFF reads as a reserved-range
+	 * ("no-op probe") header on the slave, which re-arms its header phase
+	 * (firmware P0-2) so it keeps driving the 0xA5 marker -- making this walk
+	 * non-destructive. */
+	uint8_t tx = 0xFFu;
+	uint8_t rx = 0u;
+
+	/* Worst case, clock through one full in-flight request+reply frame to
+	 * reach the slave's parked header boundary; "parked" = a run of two
+	 * header-widths of 0xA5 (rejects a stray 0xA5 byte inside reply data). */
+	const uint32_t walk_max = 2u * (uint32_t)(ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD);
+	const uint32_t run_need = 2u * (uint32_t)ALP_CC3501E_HEADER_BYTES;
+	const uint32_t attempts = (timeout_ms > 0u) ? timeout_ms : 1u;
+
+	/* Serialise against cc3501e_request() (issue #1116).  This walk clocks
+	 * the SAME CS-less bus, one byte at a time, up to walk_max times -- a
+	 * concurrent 4-phase request would interleave with it and desync the
+	 * link exactly as two concurrent requests would.  cc3501e_request()'s
+	 * doxygen now advertises thread-safety, so a caller may legitimately
+	 * re-sync from a second thread; that has to be safe.
+	 *
+	 * Held across the WHOLE walk, not per attempt: re-aligning to the
+	 * slave's header boundary is only meaningful if nothing else moves the
+	 * bus underneath us.  A request that lands mid-sync therefore gets
+	 * ALP_ERR_BUSY from its own bounded acquire rather than corrupting the
+	 * recovery -- which is the honest answer, since the link is by
+	 * definition not usable until the sync completes. */
+	alp_status_t lrc = cc3501e_lock_acquire(ctx);
+	if (lrc != ALP_OK) return lrc;
+
+	alp_status_t rc = ALP_ERR_TIMEOUT;
+	for (uint32_t a = 0u; a < attempts && rc == ALP_ERR_TIMEOUT; a++) {
+		uint32_t run = 0u;
+		for (uint32_t w = 0u; w < walk_max; w++) {
+			if (alp_spi_transceive(ctx->bus, &tx, &rx, 1u) != ALP_OK) {
+				rc = ALP_ERR_IO;
+				break;
+			}
+			if (rx == ALP_CC3501E_SYNC_IDLE) {
+				if (++run >= run_need) { /* aligned at a clean header boundary */
+					rc = ALP_OK;
+					break;
+				}
+			} else {
+				run = 0u;
+			}
+		}
+		if (rc == ALP_ERR_TIMEOUT) {
+			alp_delay_ms(1u); /* let the slave drain any in-flight frame + re-arm header phase */
+		}
+	}
+
+	cc3501e_lock_release(ctx);
+	return rc;
+}
+
+/* Inter-phase settle (CS-less lockstep): time given to the CC3501E SPI-slave ISR
+ * to arm the next fixed-count transfer (request payload, reply payload) before
+ * the host clocks it.  ~µs is enough; 200 µs is comfortably safe and negligible
+ * vs the per-request budget.  The r2 bridge (CS + host-IRQ) removes the need. */
+#define CC3501E_PHASE_SETTLE_US 200u
+
+/* READY gate for the r2 SS0 + host-IRQ bridge.  When ctx->ready_pin is
+ * populated (the CC35 GPIO17 -> Alif P2_6 line is wired + opened as an input),
+ * wait for it HIGH -- the slave drives it HIGH when its SPI slave is armed+idle
+ * -- before clocking a reply phase, instead of a fixed settle gap.  This tracks
+ * the slave's actual re-arm rather than guessing, so slow (Wi-Fi/BLE) replies
+ * no longer need a conservative fixed delay.  Opt-in + degrades safely: a NULL
+ * ready_pin (CS-less r1 boards) or a line that never asserts falls back to the
+ * fixed gap.  See project_cc3501e_link_topology. */
 
 static void cc3501e_reply_gate(const cc3501e_t *ctx, uint32_t fallback_us)
 {
@@ -502,6 +529,11 @@ alp_status_t poll_by_repeat(cc3501e_t        *ctx,
 		 * retry loop depends on. */
 		s = cc3501e_lock_acquire(ctx);
 		if (s != ALP_OK) return s;
+		/* Re-zero per attempt, not just once before the loop: an attempt
+		 * that copied out n bytes and then mapped to BUSY/IO would
+		 * otherwise leave that stale count visible to a caller who reads
+		 * *rx_len after this function finally returns TIMEOUT. */
+		if (rx_len != NULL) *rx_len = 0;
 		/* Sentinel: pre-set rx_scratch[0] to a byte the peek below never
 		 * matches (0xFF).  Only a real reply payload overwrites it with the
 		 * resp byte; a BUSY that comes from the transport (alp_spi_transceive
