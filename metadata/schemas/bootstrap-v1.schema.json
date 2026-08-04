@@ -32,7 +32,7 @@
         "pythonMinVersion": {
           "type": "string",
           "pattern": "^[0-9]+\\.[0-9]+$",
-          "description": "Zephyr's REAL build-time Python floor -- the `PYTHON_MINIMUM_REQUIRED` this pinned Zephyr revision's own `cmake/modules/python.cmake` hardcodes. Deliberately separate from the SDK tooling floor in `prerequisites.pythonMinVersion` (issue #1078). `scripts/check_bootstrap_manifest.py` derives the real value from the pinned Zephyr revision and fails on drift; Python Tan's bootstrap and doctor combine this value with the manifest floor and enforce the effective maximum for a Zephyr workspace."
+          "description": "Zephyr's REAL build-time Python floor -- the `PYTHON_MINIMUM_REQUIRED` this pinned Zephyr revision's own `cmake/modules/python.cmake` hardcodes. Deliberately separate from `prerequisites.pythonMinVersion` (issue #1078): that key is host-universal -- every backend's build-plan emission runs `alp_project.py`, not just Zephyr's, so raising it to 3.12 would refuse a Yocto-only or metadata-only host that never touches Zephyr, and 3.12 is not reachable via `apt-get install python3` on the Ubuntu 22.04 / Debian 12 hosts this repo's own docs recommend. `scripts/check_bootstrap_manifest.py` derives the real value from the pinned Zephyr revision and fails on drift. `tan bootstrap`/`tan doctor` now enforce the effective max of a Zephyr-scoped floor and `prerequisites.pythonMinVersion` (`python/tan/commands/doctor_cmd.py:353` `zephyr_python_floor`, `bootstrap_cmd.py:446` `resolve_python_floor`; tan-cli#270) -- but derive the Zephyr number by reading the pinned Zephyr checkout's own `cmake/modules/python.cmake` directly, not this field; tan does not read `zephyr.pythonMinVersion` itself."
         }
       }
     },
@@ -141,7 +141,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["blockingPhases", "partialNoteTemplate", "incompleteMessageTemplate", "incompleteRemedy"],
-      "description": "The single source for the closing-verdict rule (issue #1038 / tan-cli#220): each pip-install phase below stays non-fatal in itself -- the workspace is left on disk regardless of which packages failed -- but a run that hit one of `blockingPhases` has NOT produced an environment that can do what it was bootstrapped for, and must not report unqualified success. Both SDK bootstrap scripts read this object; Python Tan mirrors the phase IDs in `python/tan/commands/bootstrap_cmd.py::WORKSPACE_BLOCKING`, with parity asserted in tan-cli's tests.",
+      "description": "The single source for the closing-verdict rule (issue #1038 / tan-cli#220): each pip-install phase below stays non-fatal in itself -- the workspace is left on disk regardless of which packages failed -- but a run that hit one of `blockingPhases` has NOT produced an environment that can do what it was bootstrapped for, and must not report unqualified success. Both SDK bootstrap scripts read this object; Python Tan mirrors the identical three phase IDs independently in `python/tan/commands/bootstrap_cmd.py::WORKSPACE_BLOCKING` -- tan does not read this manifest key, so keeping the declarations in sync across repos remains a by-hand contract, not a mechanically-gated one.",
       "properties": {
         "blockingPhases": {
           "type": "array",
