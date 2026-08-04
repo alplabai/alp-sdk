@@ -152,11 +152,30 @@ mailbox:
 #     audio interface to the populated `wifi_ble: murata_lbee5hy2fy`
 #     combo chip declared under on_module: above, not a free/spare
 #     instance like the twelve below.
-#   - Audio_CLKB / Audio_CLKB_OE / Audio_CLKC (tsv:3-5) and BL_PWM (tsv:6)
-#     are EXCLUDED: clock-output / PWM pins, not a bus/interface
-#     peripheral -- none of the SoC JSON's `peripherals:` classes (i2c,
-#     i3c, spi, uart, i2s, pdm, can_fd, sdio, sdio_emmc, ...) names a
-#     clock or PWM family, so `class:` has nothing honest to point at.
+#   - Audio_CLKB / Audio_CLKB_OE / Audio_CLKC (tsv:3-5) are EXCLUDED:
+#     clock-output pins, not a bus/interface peripheral -- none of the
+#     SoC JSON's `peripherals:` classes (i2c, i3c, spi, uart, i2s, pdm,
+#     can_fd, sdio, sdio_emmc, ...) names a clock family, so `class:`
+#     has nothing honest to point at.
+#   - BL_PWM (tsv:6) is EXCLUDED for a different reason: it IS a real
+#     class -- Renesas GPT ("General PWM Timer", n44.json peripherals:
+#     `timer_32bit_gpt: 16`, instances gpt0..gpt15) -- but the TSV names
+#     no GPT channel number for this pad, and this block only declares
+#     instances traceable to a specific numbered instance (see
+#     `silicon_peripheral:` on every entry below); there is none here.
+#   - BT_HOST_WAKE (tsv:7, P05) is already declared: a GPIO sideband on
+#     the populated `wifi_ble: murata_lbee5hy2fy` combo chip
+#     (metadata/chips/murata_lbee5hy2fy.yaml side_channel_lines,
+#     v2n_route: "Renesas P05", alongside WL_HOST_WAKE) -- not a
+#     free/spare bus/interface instance like the twelve below.
+#   - UART0 (UART0_RXD0/TXD0, tsv:120-121, P51/P50) is already declared:
+#     the generated M33 board trees (e1m_v2n101_m33_sm, e1m_v2m101_m33_sm)
+#     bind it as `&sci0`, the EVK's Pmod USB-UART console header,
+#     disabled by default (not wired on the production board -- see
+#     the boards' -pinctrl.dtsi + *_cm33.dts comments). V2N102/V2M102
+#     share this SoM family's pad map and inherit the same disposition
+#     once their board trees generate; it does not need a
+#     soc_peripheral_instances entry to become visible.
 soc_peripheral_instances:
   - { instance: i3c30,     class: i3c,  silicon_peripheral: "I3C_SCL30/SDA30",              driver_status: none }
   - { instance: riic1,     class: i2c,  silicon_peripheral: "RIIC1_SCL1/SDA1",               driver_status: none }

@@ -230,7 +230,19 @@
           "type": "string",
           "description": "Free-form maturity note -- e.g. recording which direction of a bidirectional link is silicon-proven when `driver_status` alone can't capture the split."
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "driver_status": { "const": "partial" } },
+            "required": ["driver_status"]
+          },
+          "then": {
+            "required": ["notes"],
+            "properties": { "notes": { "minLength": 1 } }
+          }
+        }
+      ]
     },
     "pad_routes": {
       "type": "array",

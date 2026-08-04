@@ -54,12 +54,16 @@ _ON_MODULE_NON_CHIP_FIELDS: frozenset[str] = frozenset({
     # warning (no CONFIG_ALP_SDK_CHIP_XSPI / SD0 declaration exists).
     "nor_flash",
     "emmc",
-    # driver_status: none/planned/partial/complete is a maturity tier, not
-    # a chip slug -- walking it as a scalar field would leak the literal
-    # string "none" into the CONFIG_ALP_SDK_CHIP_* enable set (#1169).
-    "nor_flash_driver_status",
-    "emmc_driver_status",
 })
+
+# Any `<x>_driver_status` field (nor_flash_driver_status, emmc_driver_status,
+# and whatever the next one is) is a maturity tier -- none/planned/partial/
+# complete -- never a chip slug.  A denylist entry per field re-opens this
+# leak every time a new one is added (it did once already: the literal
+# string "none" reached CONFIG_ALP_SDK_CHIP_NONE=y before this suffix check
+# existed).  Matched by suffix, not enumerated by name, so it can't miss the
+# next one (#1169).
+_DRIVER_STATUS_SUFFIX = "_driver_status"
 
 
 def _slugs_from_on_module(on_module: dict) -> list[str]:
@@ -86,9 +90,9 @@ def _slugs_from_on_module(on_module: dict) -> list[str]:
         seen.add(val)
 
     # 1. Scalar fields — every key whose value is a plain string and
-    #    is not in the exclusion list.
+    #    is not in the exclusion list (or a `*_driver_status` field).
     for key, val in on_module.items():
-        if key in _ON_MODULE_NON_CHIP_FIELDS:
+        if key in _ON_MODULE_NON_CHIP_FIELDS or key.endswith(_DRIVER_STATUS_SUFFIX):
             continue
         if isinstance(val, str):
             _add(val)
