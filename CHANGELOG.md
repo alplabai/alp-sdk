@@ -154,8 +154,6 @@ of this change.
   against the directory listing) rather than free-text-comment parsing plus
   an exception list; left as a follow-up, not implemented here.
 
-### Added — real Yocto backends for `<alp/storage.h>` and `<alp/usb.h>` on the V2N A55 (#1140, #1141)
-
 ### Added — real Yocto backends for `<alp/storage.h>` and `<alp/usb.h>` (#1140, #1141)
 
 - `src/backends/storage/yocto_drv.c`: routes `alp_storage_get_info`/`read`

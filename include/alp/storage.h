@@ -176,9 +176,9 @@ alp_status_t alp_storage_read(alp_storage_t *storage, uint64_t offset, void *dat
  *                     @p len > 0.
  * @param[in] len      Number of bytes to write.
  *
- * @return ALP_OK / ALP_ERR_INVAL (read_only, or the Yocto safety gate
- *         above) / ALP_ERR_NOT_READY (device not present) /
- *         ALP_ERR_OUT_OF_RANGE (offset + len past device end) /
+ * @return ALP_OK / ALP_ERR_NOT_READY (device not present, or the handle
+ *         was opened @c read_only) / ALP_ERR_INVAL (the Yocto safety gate
+ *         above) / ALP_ERR_OUT_OF_RANGE (offset + len past device end) /
  *         ALP_ERR_NOSUPPORT / ALP_ERR_IO.
  */
 alp_status_t

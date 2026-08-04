@@ -238,7 +238,16 @@ static alp_status_t y_open(const alp_storage_config_t  *cfg,
 	alp_status_t rc = _resolve_path(cfg->kind, cfg->instance_id, &devtype, path, sizeof(path));
 	if (rc != ALP_OK) return rc;
 
-	int fd = open(path, (cfg->read_only ? O_RDONLY : O_RDWR) | O_CLOEXEC);
+	/* Open read-only unless the caller BOTH wants writes and has taken
+	 * the safety gate off.  Without the second half we would hand out a
+	 * kernel-writable fd on a whole-disk boot node to exactly the caller
+	 * this file promises "can never write or erase" -- the gate would be
+	 * one C-level `if` per op with nothing behind it.  It also avoids a
+	 * pointless writable open of a mounted block device, which some
+	 * kernels refuse outright, which would cost the default-config
+	 * caller its get_info()/read() too. */
+	const bool want_write = (!cfg->read_only && cfg->allow_unsafe_write);
+	int        fd         = open(path, (want_write ? O_RDWR : O_RDONLY) | O_CLOEXEC);
 	if (fd < 0) return alp_status_from_posix_errno(errno);
 
 	y_storage_data_t *d = (y_storage_data_t *)malloc(sizeof(*d));

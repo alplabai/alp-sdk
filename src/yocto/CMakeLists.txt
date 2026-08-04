@@ -403,10 +403,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         # Storage + USB(host) are now REAL registry backends (#1140 /
         # #1141), not stubs: backends/storage/yocto_drv.c drives
         # /dev/mmcblk* (SD/MMC) + /dev/mtd* (xSPI NOR) via block/MTD
-        # ioctls; backends/usb/yocto_drv.c drives the USB core's
-        # /sys/bus/usb/devices/usbN/authorized_default host-enumeration
-        # knob (device/gadget role stays NOSUPPORT -- see that file's
-        # y_dev_open() doxygen).  Both self-gate on __linux__ and
+        # ioctls; backends/usb/yocto_drv.c enumerates host controllers
+        # by reading /sys/bus/usb/devices/ (host enable/disable and the
+        # device/gadget role all stay NOSUPPORT -- see that file's own
+        # doxygen for why sysfs cannot honestly implement them).  Note
+        # storage write/erase additionally require an explicit
+        # allow_unsafe_write opt-in; the default config cannot reach a
+        # mutating syscall.  Both self-gate on __linux__ and
         # register at priority 100 (vendor "linux"); the dispatchers +
         # sw_fallback + backend.c are pulled in unconditionally above.
         # BENCH-UNVERIFIED (see each file's own Status note).
