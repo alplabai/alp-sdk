@@ -134,6 +134,21 @@ target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../wdt_dispatch.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/rtc/sw_fallback.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../backends/wdt/sw_fallback.c
+    # Storage / USB join the registry migration (#1140 / #1141): both
+    # dispatchers own the public alp_storage_*/alp_usb_* symbols (the
+    # split stub backend is muted below via
+    # ALP_VENDOR_OVERRIDES_STORAGE/USB).  Deliberately wired in the SAME
+    # unconditional block as every other class here -- both issues land
+    # in one branch precisely because they touch this block together.
+    # The sw_fallback backends are the portable priority-0 catch-alls;
+    # the real Linux backends (/dev/mmcblk*+/dev/mtd* for storage,
+    # /sys/bus/usb host sysfs for usb) live in backends/<class>/yocto_drv.c
+    # and are added in the Linux block below (they self-gate on
+    # __linux__, like the RTC/WDT/PWM real backends).
+    ${CMAKE_CURRENT_SOURCE_DIR}/../storage_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../usb_dispatch.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/storage/sw_fallback.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../backends/usb/sw_fallback.c
     # CAN / PWM / ADC / I2S / Counter migrate onto the same registry /
     # dispatcher pattern (Yocto first-class peripheral slice).  The
     # dispatchers own the public alp_{can,pwm,adc,i2s,counter}_* symbols
@@ -318,6 +333,14 @@ target_compile_definitions(alp_sdk PRIVATE
     ALP_VENDOR_OVERRIDES_JPEG=1
     ALP_VENDOR_OVERRIDES_DISPLAY=1
     ALP_VENDOR_OVERRIDES_POWER=1
+    # Storage / USB dispatchers are also added unconditionally above
+    # (#1140/#1141); same same-scope rule as every override above --
+    # the split stub backend's storage/usb blocks are muted here so a
+    # non-Linux plain-CMake cross-build still links (the dispatchers
+    # own the symbols regardless of which silicon backend, if any, is
+    # linked underneath).
+    ALP_VENDOR_OVERRIDES_STORAGE=1
+    ALP_VENDOR_OVERRIDES_USB=1
 )
 
 # v0.4: real Yocto peripheral wrappers binding against Linux
@@ -377,6 +400,21 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         # unconditionally above; these two files self-gate on __linux__.
         ${CMAKE_CURRENT_SOURCE_DIR}/../backends/rtc/yocto_drv.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../backends/wdt/yocto_drv.c
+        # Storage + USB(host) are now REAL registry backends (#1140 /
+        # #1141), not stubs: backends/storage/yocto_drv.c drives
+        # /dev/mmcblk* (SD/MMC) + /dev/mtd* (xSPI NOR) via block/MTD
+        # ioctls; backends/usb/yocto_drv.c enumerates host controllers
+        # by reading /sys/bus/usb/devices/ (host enable/disable and the
+        # device/gadget role all stay NOSUPPORT -- see that file's own
+        # doxygen for why sysfs cannot honestly implement them).  Note
+        # storage write/erase additionally require an explicit
+        # allow_unsafe_write opt-in; the default config cannot reach a
+        # mutating syscall.  Both self-gate on __linux__ and
+        # register at priority 100 (vendor "linux"); the dispatchers +
+        # sw_fallback + backend.c are pulled in unconditionally above.
+        # BENCH-UNVERIFIED (see each file's own Status note).
+        ${CMAKE_CURRENT_SOURCE_DIR}/../backends/storage/yocto_drv.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../backends/usb/yocto_drv.c
         # <alp/power.h> gains a REAL Linux backend (#613):
         # backends/power/yocto_drv.c drives /sys/power/state +
         # /sys/class/rtc/rtc0/wakealarm, registering at priority 100

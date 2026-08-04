@@ -16,7 +16,13 @@
  *                    for SD/MMC.  Lands v0.4 alongside the V2N + i.MX 93
  *                    Yocto first-class work (the same Yocto cycle bumps
  *                    Zephyr's own flash story).
- *   - **Yocto**    : `/dev/mtd*` for raw flash; `/dev/mmcblk*p*` for SD.
+ *   - **Yocto**    : `/dev/mtd*` for raw flash; `/dev/mmcblk*` (the
+ *                    WHOLE-DISK block node, not a partition) for SD/MMC.
+ *                    `write()`/`erase()` refuse with `ALP_ERR_INVAL`
+ *                    unless `alp_storage_config_t.allow_unsafe_write`
+ *                    is explicitly set -- see that field's doxygen.
+ *                    `read()`/`get_info()` work with the plain default
+ *                    config.  See `src/backends/storage/yocto_drv.c`.
  *   - **Baremetal**: Vendor HAL flash drivers (Alif HAL OSPI, Renesas
  *                    FSP QSPI, NXP MCUXpresso flash).
  *
@@ -57,6 +63,20 @@ typedef struct {
 	uint32_t           instance_id; /**< 0 for the primary device. */
 	uint32_t           freq_hz;     /**< Bus clock; 0 = backend default. */
 	bool               read_only;   /**< Refuses writes / erases. */
+	/**
+	 * Must be explicitly set `true` to permit @ref alp_storage_write /
+	 * @ref alp_storage_erase on the Yocto backend (ignored elsewhere).
+	 * `instance_id` alone does not tell that backend whether it is
+	 * addressing user data or the boot medium: `/dev/mmcblk<N>` is the
+	 * WHOLE-DISK node (GPT/MBR + bootloader at offset 0), and on some
+	 * boards `/dev/mtd0` IS the bootloader/FIP partition.  Left `false`
+	 * (the default from @ref ALP_STORAGE_CONFIG_DEFAULT),
+	 * `alp_storage_write`/`alp_storage_erase` return `ALP_ERR_INVAL`
+	 * before touching the device, on every instance_id, no exceptions.
+	 * `alp_storage_read`/`alp_storage_get_info` are unaffected -- a
+	 * read cannot damage the boot medium.
+	 */
+	bool allow_unsafe_write;
 } alp_storage_config_t;
 
 /**
@@ -68,7 +88,9 @@ typedef struct {
  * the caller must always name one); canonical defaults for the rest:
  * @c instance_id = 0 (documented as "the primary device"), @c freq_hz
  * = 0 (documented as "backend default"), @c read_only = false (the
- * common writable case).
+ * common writable case), @c allow_unsafe_write = false (the SAFE
+ * default -- see that field's doxygen; a caller using this macro
+ * verbatim cannot write or erase through the Yocto backend).
  *
  * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
  *       SDK's toolchains; standard through C23).  Usable as an initializer
@@ -76,7 +98,11 @@ typedef struct {
  *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
 #define ALP_STORAGE_CONFIG_DEFAULT(id) \
-	((alp_storage_config_t){ .kind = (id), .instance_id = 0u, .freq_hz = 0u, .read_only = false })
+	((alp_storage_config_t){ .kind               = (id), \
+	                         .instance_id        = 0u, \
+	                         .freq_hz            = 0u, \
+	                         .read_only          = false, \
+	                         .allow_unsafe_write = false })
 
 /** Block geometry, populated by @ref alp_storage_get_info. */
 typedef struct {
@@ -128,10 +154,21 @@ alp_status_t alp_storage_read(alp_storage_t *storage, uint64_t offset, void *dat
 /**
  * @brief Write @p len bytes from @p data starting at @p offset.
  *
- * NOR flash requires the target region to be erased first; SD/MMC
- * and the Yocto backend handle this transparently, so app code that
- * doesn't care about the underlying medium can ignore the
- * write-after-erase rule.
+ * NOR flash requires the target region to be erased first.  SD/MMC's
+ * block layer handles this transparently, so app code targeting
+ * SD/MMC can ignore the write-after-erase rule -- but NOT every
+ * backend does: the Yocto backend's MTD (NOR) path issues a raw
+ * write with no read-erase-modify-write, so a NOR target on Yocto
+ * still needs an explicit @ref alp_storage_erase first, exactly like
+ * bare-metal NOR.  Writing over an unerased NOR region here silently
+ * only clears bits and still returns ALP_OK -- this is real NOR
+ * physics, not a bug, so verify erase state yourself for NOR targets.
+ *
+ * @par Yocto safety gate
+ *      Returns ALP_ERR_INVAL immediately, before touching the device,
+ *      unless @ref alp_storage_config_t.allow_unsafe_write was set
+ *      `true` at @ref alp_storage_open -- see that field's doxygen.
+ *      `ALP_STORAGE_CONFIG_DEFAULT` leaves it `false`.
  *
  * @param[in] storage  Handle from @ref alp_storage_open.
  * @param[in] offset   Byte offset from device start.
@@ -139,10 +176,10 @@ alp_status_t alp_storage_read(alp_storage_t *storage, uint64_t offset, void *dat
  *                     @p len > 0.
  * @param[in] len      Number of bytes to write.
  *
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY (handle is
- *         read_only or device not present) / ALP_ERR_OUT_OF_RANGE
- *         (offset + len past device end) / ALP_ERR_NOSUPPORT /
- *         ALP_ERR_IO.
+ * @return ALP_OK / ALP_ERR_NOT_READY (device not present, or the handle
+ *         was opened @c read_only) / ALP_ERR_INVAL (the Yocto safety gate
+ *         above) / ALP_ERR_OUT_OF_RANGE (offset + len past device end) /
+ *         ALP_ERR_NOSUPPORT / ALP_ERR_IO.
  */
 alp_status_t
 alp_storage_write(alp_storage_t *storage, uint64_t offset, const void *data, size_t len);
@@ -154,12 +191,28 @@ alp_storage_write(alp_storage_t *storage, uint64_t offset, const void *data, siz
  * @ref alp_storage_get_info); misaligned bounds reject with
  * ALP_ERR_INVAL rather than partially erasing.
  *
+ * @par Post-erase state is medium-specific
+ *      A true NOR erase (MTD/MEMERASE) leaves the region reading as
+ *      all-0xFF.  The Yocto backend's SD/MMC path has no NOR-style
+ *      erase primitive on the generic block layer; it issues
+ *      BLKDISCARD, a best-effort TRIM hint that the range is no
+ *      longer needed.  BLKDISCARD is NOT guaranteed to make the
+ *      region read back as zeroed or any other fixed pattern -- do
+ *      not assume 0xFF (or 0x00) after erase() on an SD/MMC target;
+ *      only NOR targets get that guarantee.
+ *
+ * @par Yocto safety gate
+ *      Returns ALP_ERR_INVAL immediately, before touching the device,
+ *      unless @ref alp_storage_config_t.allow_unsafe_write was set
+ *      `true` at @ref alp_storage_open -- see that field's doxygen.
+ *      `ALP_STORAGE_CONFIG_DEFAULT` leaves it `false`.
+ *
  * @param[in] storage  Handle from @ref alp_storage_open.
  * @param[in] offset   Byte offset from device start; @c erase_size-aligned.
  * @param[in] len      Region length; @c erase_size-aligned.
  *
- * @return ALP_OK / ALP_ERR_INVAL (alignment or read_only) /
- *         ALP_ERR_NOT_READY / ALP_ERR_OUT_OF_RANGE /
+ * @return ALP_OK / ALP_ERR_INVAL (alignment, read_only, or the Yocto
+ *         safety gate above) / ALP_ERR_NOT_READY / ALP_ERR_OUT_OF_RANGE /
  *         ALP_ERR_NOSUPPORT / ALP_ERR_IO.
  */
 alp_status_t alp_storage_erase(alp_storage_t *storage, uint64_t offset, uint64_t len);
