@@ -174,6 +174,51 @@ def _write_fake_tan(bin_dir: Path, *, recognized: dict[str, set[str]], missing: 
     return _install_tan_stub(bin_dir, "\n".join(lines) + "\n")
 
 
+def _write_ansi_colored_fake_tan(bin_dir: Path, *, recognized: dict[str, set[str]]) -> Path:
+    """A stub `tan` that prints each flag's two leading dashes split across
+    separate ANSI SGR escape runs -- exactly how real Typer/Rich renders
+    `--help` when `typer.rich_utils.FORCE_TERMINAL` is true (it checks
+    `GITHUB_ACTIONS`/`FORCE_COLOR`/`PY_COLORS`, unconditionally on whether
+    stdout is an actual terminal). `--template` becomes
+    `\\x1b[1;36m-\\x1b[0m\\x1b[1;36m-template\\x1b[0m`: a literal substring
+    search for `--template` over the raw text finds nothing, which is
+    exactly the tan-docs-drift false-failure this stub reproduces."""
+    lines = [
+        "import sys",
+        f"RECOGNIZED = {recognized!r}",
+        "verb = sys.argv[1] if len(sys.argv) > 1 else ''",
+        "if verb == '--version':",
+        "    print('tan 0.0.0-test')",
+        "    sys.exit(0)",
+        "if verb in RECOGNIZED:",
+        "    print('Options:')",
+        "    for f in sorted(RECOGNIZED[verb]):",
+        r"        colored = '\x1b[1;36m' + f[:1] + '\x1b[0m\x1b[1;36m' + f[1:] + '\x1b[0m'",
+        "        print(f'      {colored} <VALUE>')",
+        "    sys.exit(0)",
+        "print(f\"error: unrecognized subcommand {verb!r}\", file=sys.stderr)",
+        "sys.exit(2)",
+    ]
+    return _install_tan_stub(bin_dir, "\n".join(lines) + "\n")
+
+
+def test_ansi_colored_help_flags_are_still_matched(tmp_path):
+    """tan-cli `dev`, real Typer, `GITHUB_ACTIONS=1` -- force-coloured
+    `--help` split every flag's own two dashes across separate ANSI runs
+    and the raw-stdout substring check in `check_surface` found NOTHING for
+    ANY docs/cli.md-tabulated flag of `init`, reporting the whole
+    documented surface as missing. This is the exact false-failure, pinned
+    against a fake `tan` shaped like the real one rather than the real
+    binary, so it runs everywhere with no installed `tan`."""
+    doc_root = tmp_path / "repo"
+    _write_docroot(doc_root)
+    tan_bin = _write_ansi_colored_fake_tan(tmp_path / "bin", recognized=_ALL_RECOGNIZED)
+
+    proc = _run(doc_root, tmp_path / "bin")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "OK" in proc.stdout
+
+
 def test_install_tan_stub_takes_the_windows_branch_when_forced(tmp_path, monkeypatch):
     """This host is Linux -- a `.bat` cannot actually be executed here, so
     this only proves branch SELECTION and the shim's shape (a PATHEXT-

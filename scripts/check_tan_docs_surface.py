@@ -809,9 +809,19 @@ def check_surface(
             if verb in verb_flags:
                 skipped_forwarding.append(verb)
             continue
+        # Typer force-colours --help under CI (`typer.rich_utils.FORCE_TERMINAL`
+        # checks `GITHUB_ACTIONS`/`FORCE_COLOR`/`PY_COLORS` regardless of
+        # whether stdout is a real terminal), splitting a flag's own two
+        # dashes across separate ANSI SGR runs, e.g. `--template` renders as
+        # `\x1b[1;36m-\x1b[0m\x1b[1;36m-template\x1b[0m` -- an exact literal
+        # substring search over the raw text then finds NOTHING for ANY
+        # flag of a verb whose --help happens to colour its options table,
+        # which is every verb, only some of which docs/cli.md tabulates
+        # individually here (tan-cli, `dev`, GITHUB_ACTIONS=true; measured).
+        clean_stdout = _ANSI_ESCAPE_RE.sub("", proc.stdout)
         for flag in sorted(verb_flags.get(verb, ())):
             pattern = re.compile(rf"(?<![\w-]){re.escape(flag)}(?![\w-])")
-            if not pattern.search(proc.stdout):
+            if not pattern.search(clean_stdout):
                 problems.append(
                     f"`tan {verb} {flag}` -- docs/cli.md documents this flag but it "
                     f"is not listed in `tan {verb} --help`"
