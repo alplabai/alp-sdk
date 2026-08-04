@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * cc3501e-bridge HAL: TI backend -- OTA firmware update (over-the-bridge
- * PSA-FWU streaming, v0.3).
+ * PSA-FWU streaming, v0.4).
  *
  * Split by hardware subsystem out of cc3501e_hw_ti.c (issue #703, #461
  * Phase B).  This is the host-driven streaming OTA session (BEGIN / WRITE /
@@ -39,7 +39,7 @@
 #include "transport.h"              /* bridge_transport_spi_hw_reinit */
 
 /* ===================================================================== */
-/* OTA firmware update (over-the-bridge PSA-FWU streaming) -- v0.3.       */
+/* OTA firmware update (over-the-bridge PSA-FWU streaming) -- v0.4.       */
 /*                                                                       */
 /* The Alif host streams a signed GPE vendor image into the non-primary  */
 /* vendor slot (BEGIN -> WRITE* -> FINISH), then FINISH installs + arms a */
@@ -62,7 +62,8 @@
  * (each step already tore the DMA down, so pump()'s single reinit call after every
  * op now fires once per chunk instead of once per whole burst) AND gives
  * cc3501e_hw_ota_abort() a checkpoint between every block instead of racing one
- * monolithic multi-KB burst.) */
+ * monolithic multi-KB burst.  "pump() runs once per tick" is a convenience label,
+ * not a timing guarantee -- see cc3501e_hw_ota_pump()'s header. */
 #define CC3501E_OTA_IMAGE_MAX (64u * 1024u) /* max staged image; begin rejects larger */
 /* FINISH flash block for the OTA-over-bridge path (distinct from the SELFTEST
  * installer's CC3501E_OTA_WRITE_CHUNK; a --ota-selftest build compiles both, so
@@ -93,18 +94,49 @@ static struct {
 	volatile uint8_t op;       /* OTA_OP_* currently queued/running */
 	volatile int8_t  op_rc;    /* OTA_OP_INFLIGHT while pending; else result */
 	uint32_t         op_total; /* BEGIN arg */
-	/* FINISH chunking (issue #1123): finish_phase/finish_off step the flash
-	 * burst across pump() calls -- both are touched ONLY from pump()/
-	 * ota_finish_step() (task context), never from cc3501e_hw_ota_abort()
-	 * (dispatch context), so they need no volatile.  abort_requested IS
-	 * written from the dispatch context while pump() is mid-op: it is the
-	 * ONLY channel abort() uses to influence an in-flight BEGIN/FINISH --
-	 * see cc3501e_hw_ota_abort() and cc3501e_hw_ota_pump(). */
-	uint8_t       finish_phase;
-	uint32_t      finish_off;
-	volatile bool abort_requested;
-	uint8_t       image_buf[CC3501E_OTA_IMAGE_MAX]; /* full image staged in RAM */
+	/* FINISH chunking (issue #1123): touched ONLY from pump()/ota_finish_step()
+	 * (task context), never from cc3501e_hw_ota_abort() (dispatch context), so
+	 * neither needs atomics -- the abort<->pump handoff itself is the separate
+	 * ota_op_gen/ota_abort_gen pair below. */
+	uint8_t  finish_phase;
+	uint32_t finish_off;
+	uint8_t  image_buf[CC3501E_OTA_IMAGE_MAX]; /* full image staged in RAM */
 } ota;
+
+/* Cross-context abort handoff (issue #1123 round 2).  A single `abort_requested`
+ * bool raced two ways against pump()'s publish: (a) abort() could set it AFTER
+ * pump() had already read it false for this tick but BEFORE pump() finished
+ * publishing, so the flag survived, unconsumed, into whatever op was submitted
+ * NEXT; (b) within pump()'s own unwind branch, a fresh cc3501e_hw_ota_abort()
+ * call landing between the flag-clear and the op_rc-clear re-armed it for an op
+ * that had already finished unwinding.  Either way the result was the same
+ * silent failure: a LATER, unrelated BEGIN/FINISH got cancelled behind a
+ * CC3501E_HW_OK the host never expected to mean "ignored".
+ *
+ * Fixed with a generation counter instead of a flag: ota_submit() bumps
+ * ota_op_gen for every NEW op; cc3501e_hw_ota_abort() -- only when it observes
+ * an op genuinely in flight -- records the generation IT SAW into
+ * ota_abort_gen.  Everywhere that used to check `abort_requested` now checks
+ * "does the CURRENT generation match the one an abort targeted" instead.  A
+ * request that arrives too late to affect the op it targeted (case (a) above)
+ * still remains STAMPED with that op's now-superseded generation, so it can
+ * never falsely match a LATER op's generation -- no clear is needed for
+ * correctness, unlike a boolean.  ota_submit()/cc3501e_hw_ota_abort() are both
+ * only ever called from the single-threaded SPI dispatch context (see
+ * cc3501e_hw_ota_write()'s header), so they never race each other -- only
+ * pump() (the bring-up task) races either of them, which is exactly what these
+ * two fields need to survive.  __atomic_* (not plain `volatile`) because this
+ * is a genuine read-modify-decide handoff across that ISR/task seam, not just
+ * a single flag flip. */
+static volatile uint32_t ota_op_gen; /* current op's generation; 0 before the first ever op */
+static volatile uint32_t
+    ota_abort_gen; /* generation cc3501e_hw_ota_abort() last targeted; 0 = none yet */
+
+static bool ota_this_op_aborted(void)
+{
+	return __atomic_load_n(&ota_abort_gen, __ATOMIC_ACQUIRE) ==
+	       __atomic_load_n(&ota_op_gen, __ATOMIC_ACQUIRE);
+}
 
 /* Enqueue op @o (args already staged) and return BUSY: an op is in flight while
  * op_rc == OTA_OP_INFLIGHT.  The pump publishes the result + frees the slot
@@ -115,12 +147,30 @@ static struct {
 static int ota_submit(uint8_t o)
 {
 	if (ota.op_rc == OTA_OP_INFLIGHT) return CC3501E_HW_BUSY; /* an op is running */
+	__atomic_add_fetch(
+	    &ota_op_gen, 1u, __ATOMIC_RELEASE); /* new generation before INFLIGHT is visible */
 	ota.op    = o;
 	ota.op_rc = OTA_OP_INFLIGHT;
 	return CC3501E_HW_BUSY;
 }
 
 /* ---- slow bodies (run ONLY from ota_pump, off the SPI ISR) ----------------- */
+
+/* Walk the target slot back to READY regardless of which PSA-FWU state an
+ * abort caught it in -- WRITING/CANDIDATE from a partial FINISH, or STAGED
+ * from one that reached psa_fwu_install() before the cancel landed.  This is
+ * the exact 3-call recovery ota_do_begin() already runs for ANY stuck state
+ * (cancel/reject/clean each no-op when the slot isn't in the matching state),
+ * factored out so it can also run from cc3501e_hw_ota_abort() and
+ * ota_finish_step() -- an aborted session must never leave a promotable image
+ * behind (issue #1123 blocker: the first round of this fix skipped this and
+ * only gated the two RAM writes, leaving the flash-committed image armed). */
+static void ota_release_slot(uint8_t slot)
+{
+	(void)cc3501e_ota_psa_cancel(slot);
+	(void)cc3501e_ota_psa_reject();
+	(void)cc3501e_ota_psa_clean(slot);
+}
 
 static int ota_do_begin(void)
 {
@@ -144,29 +194,24 @@ static int ota_do_begin(void)
 		 * bridge) until a CC35 reset (#611).  Instead walk BOTH slots back to READY,
 		 * re-query, and pick the non-primary as target (default slot 2). */
 		(void)cc3501e_ota_psa_reject(); /* any STAGED -> FAILED (global) */
-		(void)cc3501e_ota_psa_cancel(CC3501E_OTA_PSA_SLOT_1);
-		(void)cc3501e_ota_psa_clean(CC3501E_OTA_PSA_SLOT_1);
-		(void)cc3501e_ota_psa_cancel(CC3501E_OTA_PSA_SLOT_2);
-		(void)cc3501e_ota_psa_clean(CC3501E_OTA_PSA_SLOT_2);
+		ota_release_slot(CC3501E_OTA_PSA_SLOT_1);
+		ota_release_slot(CC3501E_OTA_PSA_SLOT_2);
 		if (cc3501e_ota_psa_query_primary(CC3501E_OTA_PSA_SLOT_2, &primary2) && primary2) {
 			target = CC3501E_OTA_PSA_SLOT_1;
 		} else {
 			target = CC3501E_OTA_PSA_SLOT_2;
 		}
 	}
-	bool target_queryable = false;
-	if (!cc3501e_ota_psa_query_primary(target, &target_queryable)) return CC3501E_HW_ERR_IO;
+	bool target_is_primary =
+	    false; /* discarded -- this call is a fail-fast reachability check only */
+	if (!cc3501e_ota_psa_query_primary(target, &target_is_primary)) return CC3501E_HW_ERR_IO;
+	(void)target_is_primary;
 	/* Walk ANY stuck state back to READY so a fresh stage always succeeds -- the
 	 * common jam is a prior STAGED image the swap-reboot never promoted (e.g. a
-	 * downgrade BL2 refused), and STAGED needs reject(->FAILED) BEFORE clean, not
-	 * clean alone.  Mirror ota_finish_step's START phase (same order); each result
-	 * is ignored when N/A.  This lets a new (forward) OTA replace a stuck pending
-	 * image instead of returning BAD_STATE forever.  (`target_queryable` kept only
-	 * for the fail-fast query above.) */
-	(void)target_queryable;
-	(void)cc3501e_ota_psa_cancel(target); /* WRITING/CANDIDATE -> FAILED */
-	(void)cc3501e_ota_psa_reject();       /* STAGED           -> FAILED */
-	(void)cc3501e_ota_psa_clean(target);  /* FAILED/UPDATED   -> READY  */
+	 * downgrade BL2 refused).  Mirrors ota_finish_step's START phase and the abort
+	 * walk-back above; this lets a new (forward) OTA replace a stuck pending image
+	 * instead of returning BAD_STATE forever. */
+	ota_release_slot(target);
 	ota.target    = target;
 	ota.total_len = ota.op_total;
 	ota.cursor    = 0u;
@@ -180,19 +225,25 @@ static int ota_do_begin(void)
  * finalize + install), then arm the swap-reboot.  All the OTA flash (hence all
  * bridge-DMA disruption) happens across these steps.
  *
- * Called from cc3501e_hw_ota_pump() ONCE PER TICK (issue #1123): returns
- * CC3501E_HW_BUSY while more of the sequence remains (pump() re-invokes on the
- * next tick), CC3501E_HW_OK once STAGED + the reboot latch are armed, or an
- * error.  Re-checks ota.abort_requested at the top of every call AND
- * immediately before publishing STAGED/ota_reboot_pending, so
- * cc3501e_hw_ota_abort() racing from the SPI dispatch context always gets
- * observed before either write -- the exact race issue #1123 reported (an
- * aborted session installing + rebooting anyway) is now bounded to, at worst,
- * the single non-chunked psa_fwu_finish()+psa_fwu_install() pair in the
- * INSTALL phase, which itself re-checks immediately after. */
+ * Called from cc3501e_hw_ota_pump() (issue #1123): returns CC3501E_HW_BUSY
+ * while more of the sequence remains (pump() re-invokes on a later call),
+ * CC3501E_HW_OK once STAGED + the reboot latch are armed, or an error.
+ * Re-checks ota_this_op_aborted() at the top of every call (covers an abort
+ * landing during START or WRITE -- the slot there is at most WRITING, not
+ * yet a candidate image, so ota_do_begin()'s existing walk-back on the NEXT
+ * session is sufficient and no immediate release is needed), again between
+ * psa_fwu_finish() and psa_fwu_install() (the slot IS a candidate image
+ * here -- CANDIDATE, still fully unwindable -- so THIS checkpoint calls
+ * ota_release_slot() before returning), and a third time immediately after
+ * psa_fwu_install() succeeds (STAGED -- same walk-back).  The one call this
+ * can never wrap a check around is psa_fwu_install() itself (a single
+ * vendor call, not decomposable further); even there, the walk-back
+ * immediately after means an abort landing during that call still leaves
+ * the slot at READY, not STAGED -- there is no longer any window where a
+ * cancelled session can end up promotable. */
 static int ota_finish_step(void)
 {
-	if (ota.abort_requested) {
+	if (ota_this_op_aborted()) {
 		return CC3501E_HW_ERR_STATE; /* cancelled; pump() unwinds to IDLE, rc is discarded */
 	}
 
@@ -206,16 +257,10 @@ static int ota_finish_step(void)
 		 * psa_fwu_start.  A prior failed/partial OTA leaves the flash flow-state stuck
 		 * (set inside psa_fwu_start / _install), and psa_fwu_start's own flow_check then
 		 * returns PSA_ERROR_BAD_STATE(-137) forever -- the RAM ComponentInfo.state can
-		 * still read READY, so this must NOT be gated on it (silicon 2026-06-19).  Walk
-		 * every stuck state back to READY (ignore each result -- they no-op when N/A):
-		 *   cancel  WRITING/CANDIDATE -> FAILED
-		 *   reject  STAGED            -> FAILED   (an install that never swap-booted)
-		 *   clean   FAILED/UPDATED    -> READY
+		 * still read READY, so this must NOT be gated on it (silicon 2026-06-19).
 		 * (STAGED is the common stuck case here: a finish reached psa_fwu_install but
 		 * the cold swap-reboot could not complete -- see project-cc3501e-firmware-bringup.) */
-		(void)cc3501e_ota_psa_cancel(ota.target);
-		(void)cc3501e_ota_psa_reject();
-		(void)cc3501e_ota_psa_clean(ota.target);
+		ota_release_slot(ota.target);
 		if (!cc3501e_ota_psa_start(ota.target, ota.image_buf, manifest_len)) {
 			return CC3501E_HW_ERR_IO;
 		}
@@ -225,11 +270,9 @@ static int ota_finish_step(void)
 	}
 
 	case OTA_FINISH_PHASE_WRITE: {
-		if (ota.finish_off >= ota.total_len) {
-			ota.finish_phase = OTA_FINISH_PHASE_INSTALL;
-			return CC3501E_HW_BUSY; /* one more tick before finalize+install */
-		}
-		uint32_t n = ota.total_len - ota.finish_off;
+		uint32_t n = ota.total_len - ota.finish_off; /* > 0: guaranteed by START's total_len check
+		                                               * and by only ever re-entering WRITE below
+		                                               * finish_off < total_len */
 		if (n > CC3501E_OTA_FINISH_FLASH_BLOCK) {
 			n = CC3501E_OTA_FINISH_FLASH_BLOCK;
 		}
@@ -237,6 +280,11 @@ static int ota_finish_step(void)
 			return CC3501E_HW_ERR_IO;
 		}
 		ota.finish_off += n;
+		if (ota.finish_off >= ota.total_len) {
+			ota.finish_phase = OTA_FINISH_PHASE_INSTALL; /* fold the transition into this
+			                                               * step instead of burning an
+			                                               * extra tick just to flip it */
+		}
 		return CC3501E_HW_BUSY; /* more blocks (or INSTALL) remain */
 	}
 
@@ -244,19 +292,25 @@ static int ota_finish_step(void)
 		if (!cc3501e_ota_psa_finish(ota.target)) {
 			return CC3501E_HW_ERR_IO;
 		}
+		if (ota_this_op_aborted()) {
+			/* Slot is CANDIDATE here (finish() ran, install() has not) --
+			 * still fully unwindable, same as the START-phase walk-back. */
+			ota_release_slot(ota.target);
+			return CC3501E_HW_ERR_STATE;
+		}
 		/* psa_fwu_install stages the swap (CANDIDATE -> STAGED); TI's
 		 * PSA_SUCCESS_REBOOT return ("reboot to complete the swap") is folded into
 		 * cc3501e_ota_psa_install()'s bool -- see cc3501e_hw_ti_ota_psa.c. */
 		if (!cc3501e_ota_psa_install()) {
 			return CC3501E_HW_ERR_IO;
 		}
-		if (ota.abort_requested) {
-			/* Landed between the last WRITE block and here: the image already
-			 * committed to flash (psa_fwu cannot unwind past install), but the
-			 * two writes abort() actually promised never to race -- ota.state and
-			 * the swap-reboot latch -- are still ungated at this point.  Skip
-			 * them: a cancelled session must not report STAGED and must not
-			 * reboot into the image the host asked to cancel (#1123). */
+		if (ota_this_op_aborted()) {
+			/* Landed during psa_fwu_install() itself -- the one vendor call this
+			 * loop can't wrap a check around.  The image is now committed
+			 * (CANDIDATE -> STAGED); walk it straight back to READY (reject
+			 * before clean, same order as everywhere else) so a cancelled
+			 * session never leaves a promotable image in the slot (#1123). */
+			ota_release_slot(ota.target);
 			return CC3501E_HW_ERR_STATE;
 		}
 		ota.state = ALP_CC3501E_OTA_STATE_STAGED;
@@ -279,6 +333,14 @@ static int ota_finish_step(void)
 
 /* Run a queued OTA op (bring-up task, NOT the SPI ISR).  Called from hw_tick.
  * The slow psa_fwu flash work runs HERE, never in the SPI ISR.
+ *
+ * "Called once per tick" is a convenience label, not a scheduling guarantee:
+ * worker_run_pending() (main.c) can itself block for seconds on a radio op
+ * before cc3501e_hw_tick() (and so this pump) runs again, so a FINISH can now
+ * sit mid-sequence -- a half-written slot -- for an unbounded stretch.  That
+ * is not a new timeout risk (the host's own poll-by-repeat budget already has
+ * to tolerate BUSY for however long FINISH takes), just a state this pre-#1123
+ * single-shot ota_do_finish() could never be caught in.
  *
  * The psa_fwu flash op writes the external xSPI image store, which shares the
  * CC35 HIF/DMA controller with the bridge SPI -- exactly like a radio op (see
@@ -308,25 +370,26 @@ void cc3501e_hw_ota_pump(void)
 	}
 	bridge_transport_spi_hw_reinit(); /* this step tore the bridge DMA down -- re-open + re-arm */
 	if (rc == CC3501E_HW_BUSY) {
-		/* FINISH still chunking (ota_finish_step): stay INFLIGHT so the next tick
+		/* FINISH still chunking (ota_finish_step): stay INFLIGHT so a later call
 		 * resumes where it left off, and so cc3501e_hw_ota_abort() gets a fresh
 		 * checkpoint between every block instead of racing one monolithic burst. */
 		return;
 	}
-	if (ota.abort_requested) {
+	if (ota_this_op_aborted()) {
 		/* Cancelled while BEGIN/FINISH was in flight -- cc3501e_hw_ota_abort()
-		 * deferred the state clear to us instead of racing this publish.  Unwind
-		 * to IDLE regardless of rc: an aborted session must not surface as
-		 * WRITING/STAGED/ERROR from a run it asked to cancel, and FINISH must not
-		 * arm the swap-reboot latch (issue #1123). */
-		ota.abort_requested = false;
-		ota.finish_phase    = OTA_FINISH_PHASE_START;
-		ota.finish_off      = 0u;
-		ota.state           = ALP_CC3501E_OTA_STATE_IDLE;
-		ota.cursor          = 0u;
-		ota.total_len       = 0u;
-		ota.op              = OTA_OP_IDLE;
-		ota.op_rc           = 0;
+		 * deferred the state clear to us instead of racing this publish.  Any
+		 * flash the FINISH path committed was already walked back inside
+		 * ota_finish_step() itself; this just resets the RAM session so it
+		 * doesn't surface as WRITING/STAGED/ERROR from a run it asked to cancel,
+		 * and does not touch ota_reboot_pending (ota_finish_step never set it on
+		 * this path -- see its INSTALL-phase abort checks). */
+		ota.finish_phase = OTA_FINISH_PHASE_START;
+		ota.finish_off   = 0u;
+		ota.state        = ALP_CC3501E_OTA_STATE_IDLE;
+		ota.cursor       = 0u;
+		ota.total_len    = 0u;
+		ota.op           = OTA_OP_IDLE;
+		ota.op_rc        = 0;
 		return;
 	}
 	if (rc != CC3501E_HW_OK) {
@@ -369,10 +432,13 @@ int cc3501e_hw_ota_begin(uint32_t total_len)
  * Runs from the same single-threaded SPI dispatch context as
  * cc3501e_hw_ota_abort() (see main.c), so the two can never race each other
  * directly (issue #1123's "define the result of abort racing WRITE"): a WRITE
- * that lands after an abort simply sees ota.state != WRITING (abort always
- * clears it, whether synchronously here or via cc3501e_hw_ota_pump()'s
- * deferred unwind) and is rejected by the check below, same as any WRITE
- * without an open session. */
+ * that lands after an abort HAS ALREADY BEEN PUBLISHED sees ota.state !=
+ * WRITING and is rejected below, same as any WRITE without an open session.
+ * But a DEFERRED abort (BEGIN/FINISH was mid-flight) does not flip
+ * ota.state until cc3501e_hw_ota_pump() next runs -- ota.state is still
+ * WRITING until then, so a WRITE that lands in that window is accepted (and,
+ * for an already-staged byte range, replies CC3501E_HW_OK without touching
+ * memory) even though the session is on its way to being cancelled. */
 int cc3501e_hw_ota_write(uint32_t offset, const uint8_t *data, uint32_t len)
 {
 	if (ota.state != ALP_CC3501E_OTA_STATE_WRITING) return CC3501E_HW_ERR_INVAL;
@@ -403,24 +469,34 @@ int cc3501e_hw_ota_abort(void)
 {
 	if (ota.op_rc == OTA_OP_INFLIGHT) {
 		/* A deferred BEGIN or FINISH is queued or mid-flight on the pump (task
-		 * context) -- do NOT stomp its state out from under it: the old
+		 * context) -- do NOT stomp its state out from under it: the pre-#1123
 		 * unconditional clear here raced ota_do_finish()'s STAGED/reboot_pending
-		 * publish and could let an "aborted" update install and reboot anyway
-		 * (issue #1123).  Request cancellation instead; cc3501e_hw_ota_pump()
-		 * checks this flag before every FINISH chunk (ota_finish_step()) and
-		 * before publishing either op's result, and unwinds to IDLE itself once
-		 * the in-flight step finishes.  (gd32-bridge's CMD_OTA_ABORT --
-		 * firmware/gd32-bridge/src/ota.c:473-477 -- gets away with a synchronous
-		 * clear only because its erase is already chunked to a single page/tick
-		 * with nothing left to race by the time ABORT can be dispatched; we chunk
-		 * FINISH the same way here but still fence the seam with this flag rather
-		 * than assume the timing works out.) */
-		ota.abort_requested = true;
+		 * publish and could let an "aborted" update install and reboot anyway.
+		 * Record the generation this call observed in flight; pump()/
+		 * ota_finish_step() compare it against the CURRENT generation at each of
+		 * their own checkpoints (ota_this_op_aborted()) rather than trusting a
+		 * flag this call could have set a moment too late to matter -- see the
+		 * ota_op_gen/ota_abort_gen comment above for why that closes the
+		 * round-2 leak a plain bool had. */
+		__atomic_store_n(
+		    &ota_abort_gen, __atomic_load_n(&ota_op_gen, __ATOMIC_ACQUIRE), __ATOMIC_RELEASE);
 		return CC3501E_HW_OK;
 	}
-	/* Nothing running (BEGIN/FINISH not in flight): no psa_fwu_cancel needed
-	 * either -- FINISH is the only thing that ever touches the target slot, and
-	 * it never got there.  Safe to clear synchronously. */
+	/* Nothing in flight.  BEGIN/WRITE never touch the target slot's persistent
+	 * flash state, so no walk-back is owed for those.  But a FINISH may have
+	 * already completed (state == STAGED, not racing THIS call at all) and
+	 * armed the swap-reboot -- issue #1123's blocker: an abort must never
+	 * leave a promotable image behind, whether it raced the FINISH or simply
+	 * arrived after it.  BRINGUP_STATUS.md documented this exact bench gap
+	 * ("OTA_ABORT ... does not clear a committed STAGED image") before this
+	 * fix; walk the slot back here the same way ota_finish_step() now does for
+	 * the racing case, and disarm the latch that FINISH's own (unraced)
+	 * success already set (ota_finish_step never gets a chance to gate this
+	 * one -- it already published OK before this call ran). */
+	if (ota.state == ALP_CC3501E_OTA_STATE_STAGED) {
+		ota_release_slot(ota.target);
+		ota_reboot_pending = false;
+	}
 	ota.state     = ALP_CC3501E_OTA_STATE_IDLE;
 	ota.cursor    = 0u;
 	ota.total_len = 0u;
@@ -443,7 +519,18 @@ int cc3501e_hw_ota_promote(void)
 	 * the slot (a fresh FINISH is unreachable while a slot is occupied).  The tick
 	 * fires psa_fwu_request_reboot() once this reply drains; BL2/MCUboot then swaps
 	 * the pending slot to primary (TRIAL).  If nothing is pending the reboot is a
-	 * clean no-op. */
+	 * clean no-op.
+	 *
+	 * Deliberately left ungated on ota.state (issue #1123 review): gating this on
+	 * state == STAGED would defeat the one scenario it exists for -- a bare reset
+	 * that wipes ota.state to IDLE while flash still legitimately holds a
+	 * committed image.  What matters is that a CANCELLED session can no longer
+	 * leave a promotable image behind in the first place: every path that could
+	 * reach psa_fwu_install() now also walks the slot back (ota_release_slot())
+	 * whenever the caller asked to cancel -- see cc3501e_hw_ota_abort() and
+	 * ota_finish_step()'s INSTALL phase.  So by the time PROMOTE can be reached
+	 * with something genuinely pending, that pending image was never cancelled;
+	 * PROMOTE booting it is the intended recovery, not the #1123 bug. */
 	reply_drained      = false;
 	ota_reboot_pending = true;
 	return CC3501E_HW_OK;

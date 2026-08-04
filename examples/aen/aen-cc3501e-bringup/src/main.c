@@ -312,9 +312,14 @@ static void cc3501e_wifi_probe(cc3501e_t *fw)
  *       + cc3501e_ota_write(off, chunk, n)  stream the image in page-aligned
  *                                           (256 B) chunks; the firmware RAM-
  *                                           stages each chunk (no flash yet)
- *       + cc3501e_ota_finish()              ONE flash burst: psa_fwu_start +
- *                                           write + install -> STAGED, then a
- *                                           deferred swap-reboot
+ *       + cc3501e_ota_finish()              the device chunks its flash burst
+ *                                           (psa_fwu_start, one write per
+ *                                           flash block, finalize + install)
+ *                                           across several internal ticks --
+ *                                           poll_by_repeat here just sees
+ *                                           BUSY until it lands on STAGED,
+ *                                           which then arms a deferred
+ *                                           swap-reboot
  *
  * `cc3501e_ota_status()` can be polled at any point for the session state
  * (idle / writing / staged) and the running byte cursor.

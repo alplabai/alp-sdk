@@ -112,11 +112,19 @@ alp_status_t cc3501e_ota_finish(cc3501e_t *ctx, uint32_t timeout_ms);
 /**
  * @brief Cancel an in-flight OTA session (OTA_ABORT, opcode 0x43).
  *
- * Resets the device-side session back to IDLE, discarding streamed bytes.
+ * Requests cancellation and returns as soon as the device ACKs the request --
+ * it does not wait for the device-side session to actually reach IDLE.  If a
+ * FINISH was mid-flight (queued or streaming its flash burst), the device
+ * unwinds over its own next few internal ticks: any WRITING/CANDIDATE flash
+ * state is walked back immediately, and even an image already committed to
+ * the slot (STAGED) at the moment this landed is walked back too -- the
+ * device never boots into a cancelled image.  Poll cc3501e_ota_status() for
+ * state == IDLE to confirm the unwind has actually finished before assuming
+ * the slot is free for a new BEGIN.
  *
  * @param ctx         Initialised bridge handle.
  * @param timeout_ms  Per-request poll-by-repeat budget.
- * @return ALP_OK once the session is cancelled; otherwise the mapped error.
+ * @return ALP_OK once the cancel request is acked; otherwise the mapped error.
  */
 alp_status_t cc3501e_ota_abort(cc3501e_t *ctx, uint32_t timeout_ms);
 

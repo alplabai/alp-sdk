@@ -236,20 +236,54 @@ into the cancelled image.
 
 Fixed by chunking the FINISH flash burst across `cc3501e_hw_ota_pump()`
 calls (`ota_finish_step()`, one bounded step — start / one flash block /
-finalize+install — per tick), mirroring gd32-bridge's `ota_erase_tick()`
-(`firmware/gd32-bridge/src/ota.c:429-445`). `cc3501e_hw_ota_abort()` now
-defers to an `abort_requested` flag instead of racing the publish when a
-BEGIN or FINISH is in flight; `ota_finish_step()` re-checks the flag before
-every phase AND immediately before publishing `STAGED`/the reboot latch, so
-an abort is bounded to, at worst, the single non-chunked
-`psa_fwu_finish()`+`psa_fwu_install()` pair — which itself re-checks
-immediately after. The mid-burst `bridge_transport_spi_hw_reinit()` call
-was not literally concurrent with an in-flight flash op (`psa_fwu_write`
-is synchronous), so it was not a data-race hazard in the classic sense; the
-per-tick chunking subsumes it anyway — `cc3501e_hw_ota_pump()`'s existing
-single reinit-after-every-op call now naturally fires once per chunk
-instead of once per whole burst, so the old internal `since_rearm`
-2-block counter was deleted as redundant.
+finalize+install — per call), mirroring gd32-bridge's `ota_erase_tick()`
+(`firmware/gd32-bridge/src/ota.c:429-445`), with a checkpoint before every
+step. Two defects surfaced in review of the first round and are folded into
+this same fix rather than tracked separately:
+
+- **The checkpoints gated two RAM writes (`ota.state`, `ota_reboot_pending`)
+  but never the flash commit itself.** `psa_fwu_install()` had already
+  moved the target slot from CANDIDATE to STAGED in persistent flash by the
+  time the last checkpoint ran; skipping the two RAM writes left that
+  commit standing — `OTA_STATUS` read `IDLE`, but the slot was still
+  promotable, and `cc3501e_hw_ota_promote()` (by design, ungated on
+  `ota.state` — see its updated comment) would boot straight into it.
+  `BRINGUP_STATUS.md` already documented this exact bench gap for the
+  pre-existing, non-racing "abort after a completed FINISH" case. Every
+  checkpoint that can observe an abort after flash has moved now calls a
+  new `ota_release_slot()` (the same cancel→reject→clean walk-back
+  `ota_do_begin()` already used for any stuck state) before returning, and
+  `cc3501e_hw_ota_abort()`'s no-op-in-flight path does the same when it
+  finds `ota.state == STAGED` already committed by an unraced FINISH. A
+  third checkpoint was added between `psa_fwu_finish()` and
+  `psa_fwu_install()` (the slot is CANDIDATE and still fully unwindable
+  there) — the only step left with no checkpoint immediately around it is
+  `psa_fwu_install()` itself, a single non-decomposable vendor call, and
+  even that is walked back immediately after if it raced. There is no
+  longer any window where an aborted session can end up promotable.
+- **The single `abort_requested` bool could leak into the next, unrelated
+  session.** `cc3501e_hw_ota_abort()` reading `op_rc == INFLIGHT` and
+  setting the flag could land after `cc3501e_hw_ota_pump()` had already
+  checked it false for the current op but before that op finished
+  publishing, or land inside `pump()`'s own unwind branch between its flag
+  clear and its `op_rc` clear — either way the flag survived, unconsumed,
+  and silently cancelled whatever BEGIN/FINISH was submitted next (host
+  sees `CC3501E_HW_OK`, then every subsequent `OTA_WRITE` fails). Replaced
+  with a generation counter (`ota_op_gen`, bumped per submitted op;
+  `ota_abort_gen`, the generation an abort targeted): a request that
+  arrives too late for the op it targeted stays stamped with that op's
+  now-superseded generation and can never match a later one, closing the
+  leak without needing an explicit clear. Both fields use `__atomic_*`
+  (this is a genuine cross-context handoff, not just a single flag flip
+  the file's existing plain-`volatile` fields already relied on).
+
+The mid-burst `bridge_transport_spi_hw_reinit()` call was not literally
+concurrent with an in-flight flash op (`psa_fwu_write` is synchronous), so
+it was not a data-race hazard in the classic sense; the per-tick chunking
+subsumes it anyway — `cc3501e_hw_ota_pump()`'s existing single
+reinit-after-every-op call now naturally fires once per chunk instead of
+once per whole burst, so the old internal `since_rearm` 2-block counter was
+deleted as redundant.
 
 All PSA-FWU access in `cc3501e_hw_ti_ota.c` now goes through a new
 plain-C seam (`cc3501e_hw_ti_ota_psa.h` / `.c`, mirroring gd32-bridge's
@@ -258,14 +292,19 @@ directly, so the abort-vs-FINISH state machine is host-testable for the
 first time — previously this file was bench-only (`CC3501E_HAL_BACKEND=ti`,
 against a vendored SDK CI never links). A new `native_sim` suite,
 `tests/unit/cc3501e_ota_abort_race`, links the real production
-`cc3501e_hw_ti_ota.c` against an in-memory PSA-FWU mock and drives the
-abort-vs-FINISH interleaving directly, including re-entering
+`cc3501e_hw_ti_ota.c` against an in-memory PSA-FWU mock (now also counting
+cancel/reject/clean calls, which the first round's mock did not) and drives
+the abort-vs-FINISH interleaving directly, including re-entering
 `cc3501e_hw_ota_abort()` from inside the mocked `psa_fwu_install()` to
-exercise the tightest window (abort landing after the flash commit,
-before the state publish). Mutation-proven: reverting only the fix's three
-`abort_requested` guard checks reproduces the exact defect (2 of 4 cases
-fail — a cancelled FINISH still calls `psa_fwu_finish`/`_install` and
-still arms the reboot latch); restoring the guards passes all 4 again.
+exercise the tightest window. Mutation-proven both rounds: reverting only
+the original three abort-gate checks reproduces the original defect;
+reverting only the new `ota_release_slot()` walk-back calls reproduces the
+blocker (a cancelled FINISH still ends the run with the slot walked-back
+call count at zero and the flash left committed); restoring either passes
+the full suite again. The generation-counter fix for the leak is not
+independently mutation-tested — reproducing it needs genuine ISR-vs-task
+preemption timing a sequential host harness cannot manufacture; the fix is
+verified by design/reasoning in code comments instead.
 **Not bench-verified** — the `ti` backend build (the actual PSA-FWU
 sequencing on real CC3501E silicon) still needs a bench pass; this change
 is proven on host only.

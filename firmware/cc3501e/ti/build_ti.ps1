@@ -156,7 +156,7 @@ $sources = @(
     "$fw\hal\ti\cc3501e_hw_ti.c",
     "$fw\hal\ti\cc3501e_hw_ti_wifi.c", "$fw\hal\ti\cc3501e_hw_ti_ble.c", "$fw\hal\ti\cc3501e_hw_ti_sock.c",
     "$fw\hal\ti\cc3501e_hw_ti_gpio.c", "$fw\hal\ti\cc3501e_hw_ti_power.c", "$fw\hal\ti\cc3501e_hw_ti_ota.c",
-    "$fw\hal\ti\cc3501e_hw_ti_log.c",
+    "$fw\hal\ti\cc3501e_hw_ti_ota_psa.c", "$fw\hal\ti\cc3501e_hw_ti_log.c",
     "$fw\hal\ti\transport_hw_ti_spi.c", "$fw\hal\ti\transport_hw_ti_sdio.c",
     # SysConfig unity aggregates (bundle the FreeRTOS kernel + dpl) + drivers config.
     # ti_freertos_config.c ALSO provides the device startup: it #includes

@@ -61,9 +61,12 @@ bool cc3501e_ota_psa_cancel(uint8_t slot);
 bool cc3501e_ota_psa_reject(void);
 bool cc3501e_ota_psa_clean(uint8_t slot);
 
-/* FINISH's flash burst -- start the manifest, write one block, finalize +
- * install.  See ota_finish_step(); collapses PSA_SUCCESS/PSA_SUCCESS_REBOOT
- * (both success, never distinguished elsewhere in this file) into `true`. */
+/* FINISH's flash burst -- start the manifest, write one block, finalize,
+ * install.  See ota_finish_step().  Only cc3501e_ota_psa_finish() and
+ * cc3501e_ota_psa_install() can return PSA_SUCCESS_REBOOT from the vendor
+ * API; both collapse it into `true` alongside plain PSA_SUCCESS (never
+ * distinguished elsewhere in this file).  start()/write() only ever see
+ * PSA_SUCCESS on success. */
 bool cc3501e_ota_psa_start(uint8_t slot, const uint8_t *manifest, uint32_t manifest_len);
 bool cc3501e_ota_psa_write(uint8_t slot, uint32_t offset, const uint8_t *data, uint32_t len);
 bool cc3501e_ota_psa_finish(uint8_t slot);
