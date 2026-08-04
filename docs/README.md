@@ -16,7 +16,7 @@ into the topic-specific docs.
   [ADR 0012](adr/0012-cross-platform-developer-host.md).*
 - [cli.md](cli.md) — the `tan` CLI verb reference
   (init / build / flash / generate / validate / doctor / size /
-  image / clean / renode) + when to use `tan` vs `west alp-*`.
+  image / clean) + when to use `tan` vs `west alp-*`.
 - [firmware-quickstart.md](firmware-quickstart.md) — minimal "what
   does a board.yaml + main.c look like" walkthrough.
 - [troubleshooting.md](troubleshooting.md) — common failure modes

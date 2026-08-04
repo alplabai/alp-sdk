@@ -6,8 +6,7 @@ a project, inspecting the generated configuration, validating
 `board.yaml`, compiling AI models, sanity-checking the host
 environment, opening a serial console, decoding a diagnostic code or a
 fault dump, scaffolding the metadata for porting a new SoM, and
-building / flashing / sizing / bundling / cleaning / Renode-booting a
-project.
+building / flashing / sizing / bundling / cleaning a project.
 
 `tan` is a standalone, independently-versioned, public Rust binary
 ([`alplabai/tan-cli`](https://github.com/alplabai/tan-cli)); install it
@@ -48,7 +47,7 @@ release is the point until a project needs otherwise.
 
 Two execution paths live behind the one binary:
 
-* **Build / flash / size / image / clean / renode** -- `tan`'s own
+* **Build / flash / size / image / clean** -- `tan`'s own
   primary build executor.  Per ADR
   [0020](adr/0020-sdk-owns-build-execution.md), alp-sdk is
   **plans-only** for this surface: `tan` consumes
@@ -94,7 +93,7 @@ Two front doors, two different jobs -- pick by what you're doing:
 | Scaffolding a project, validating `board.yaml`, compiling a model, checking your host, opening a serial console, explaining a template/generation target, decoding a fault, or running a quick single-image native_sim/single-board loop | `tan init` / `tan new-som` / `tan validate` / `tan model` / `tan doctor --build` / `tan monitor` / `tan explain` / `tan faultdecode` / `tan run` |
 | Inspecting a board-derived Zephyr/CMake/Yocto/DTS config artefact without building (`zephyr-conf`, `dts-overlay`, `cmake-args`, `yocto-conf`, `native-sim-overlay`, `carrier-netlist`) | `tan generate --target <mode>` |
 | Inspecting an orchestrator-owned artefact without building (system manifest, build plan, Kconfig menu, IPC contract header, DTS reservations/partitions, storage mounts, TF-M sysbuild overlay) | `west alp-emit <mode>` from a west workspace |
-| Building, flashing, sizing, bundling, cleaning, or Renode-booting a project | `tan build` / `tan flash` / `tan size` / `tan image` / `tan clean` / `tan renode` -- see [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli) |
+| Building, flashing, sizing, bundling, or cleaning a project | `tan build` / `tan flash` / `tan size` / `tan image` / `tan clean` -- see [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli) |
 | Scripting the surviving west-centric maintenance commands | `west alp-migrate` (board.yaml schema migration) / `west alp-lock` (dependency lockfile) / `west alp-quality` (quality-task registry) / `west alp-emit` (generated-artefact subset) |
 
 Rules of thumb:
@@ -230,7 +229,7 @@ Omit `--sku` / `--soc-ref` / `--family` to be prompted interactively
 (requires a terminal; in a pipe or CI the command fails fast naming
 the missing flags).
 
-### `tan build` / `flash` / `size` / `image` / `clean` / `renode` -- build execution
+### `tan build` / `flash` / `size` / `image` / `clean` -- build execution
 
 Before ADR [0020](adr/0020-sdk-owns-build-execution.md) these were
 `alp build` / `alp flash` / `alp size` / `alp image` / `alp clean` /
@@ -240,7 +239,7 @@ hatch survivor (see the verb reference below).  ADR-0020 Phase 4
 retired the SDK-side fan-out executor (`Orchestrator.fan_out()`,
 `_dispatch_slice()`, and the
 `west alp-{build,image,flash,clean,size,renode}` extensions).  The
-multi-slice build/flash/size/image/clean/renode surface moved to the
+multi-slice build/flash/size/image/clean surface moved to the
 standalone, public **`tan` CLI**:
 
 ```bash
@@ -251,8 +250,14 @@ tan flash                          # program every slice + helper MCU
 tan size --fail-over-budget        # footprint vs the SoM memory budget
 tan image                          # assemble a flashable bundle
 tan clean                          # remove build outputs
-tan renode                         # headless smoke boot in Renode
 ```
+
+Renode (`tan renode`, and the SDK-side `alp renode` / `west alp-renode`
+before it) is **retired** -- see [ADR 0022](adr/0022-python-executor-renode-retirement.md).
+Verify a heterogeneous or multi-slice build the same way you'd verify
+any other build: `tan build` + `tan flash` onto real hardware, or, for
+a single-image target with no board on hand, `tan run` under
+`native_sim`.
 
 `tan` consumes `alp_orchestrate --emit build-plan` (the machine-readable,
 write-free build recipe -- one entry per non-`off` core, with the
@@ -692,4 +697,4 @@ see [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli).
   isn't enough.
 - [`alplabai/tan-cli`](https://github.com/alplabai/tan-cli) -- the
   standalone executor's own docs (`tan build` / `flash` / `size` /
-  `image` / `clean` / `renode`).
+  `image` / `clean`).
