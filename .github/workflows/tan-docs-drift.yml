@@ -75,18 +75,5 @@ jobs:
       - name: Sanity-check tan is really on PATH
         run: tan --version
 
-      - name: TEMP-DEBUG dump raw help bytes
-        run: |
-          echo "=== env ==="
-          env | sort
-          echo "=== locale ==="
-          locale
-          echo "=== tan init --help (repr) ==="
-          python3 -c "import subprocess; p = subprocess.run(['tan','init','--help'], capture_output=True, text=True); print('returncode', p.returncode); print(repr(p.stdout[:2000])); print('STDERR', repr(p.stderr[:2000]))"
-          echo "=== tan init --help (hexdump head) ==="
-          tan init --help | head -c 400 | xxd
-          echo "=== tan build --help (repr, control) ==="
-          python3 -c "import subprocess; p = subprocess.run(['tan','build','--help'], capture_output=True, text=True); print('returncode', p.returncode); print(repr(p.stdout[:500]))"
-
       - name: Documented tan surface still exists and is listed in --help
         run: python3 scripts/check_tan_docs_surface.py
