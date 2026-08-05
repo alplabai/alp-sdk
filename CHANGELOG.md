@@ -7,6 +7,28 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — the Doxygen build was red on `dev` itself (#1245)
+
+Two ordinary GitHub-Markdown links in `README.md` were unresolvable `\ref`
+targets for Doxygen: `[Status](#status)` (Doxygen's heading-anchor scheme
+does not yield `status` for `## Status`) and `` [`CHANGELOG.md`](CHANGELOG.md) ``
+(`CHANGELOG.md` is not in the Doxyfile `INPUT`). Since the Doxyfile runs
+`WARN_AS_ERROR`, the `pr-doxygen` gate and `scripts/test-all.sh`'s `doxygen`
+stage failed on **every** branch cut from `dev`, including branches touching
+no documentation.
+
+The links now point at `README.md#status` and at the changelog's canonical
+URL under `/blob/HEAD/`, which follows the default branch instead of pinning
+one. Both still resolve on GitHub, and the Doxygen warning log is empty.
+
+Two tidier-looking fixes were tested and rejected: adding `CHANGELOG.md` to
+the Doxyfile `INPUT` trades one error for thirty from the changelog's own
+prose, and `MARKDOWN_ID_STYLE = GITHUB` needs Doxygen 1.10+ while this repo
+builds on 1.9.8, where setting it raises a different error instead.
+
+The reason it reached `dev` at all is that `pr-doxygen` is not a required
+status check on `dev` or on `main`.
+
 ### Added — the RZ/V2N on-die DRP-AI3 NPU is reachable from `<alp/inference.h>`, opt-in (#1145)
 
 DRP-AI3 was dark: the CMake option defaulted OFF, no kernel driver bound the
