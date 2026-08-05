@@ -8,7 +8,7 @@
  * Mainline Linux (drivers/i3c/, upstream since v5.0) has NO generic
  * userspace raw-transfer ABI for I3C.  Unlike i2c-dev's
  * ioctl(I2C_RDWR), there is no "/dev/i3c-N" chardev and no uapi
- * header under include/uapi/linux/i3c/*.  Checked directly against a
+ * header anywhere under include/uapi/linux/i3c/.  Checked directly against a
  * stock kernel headers tree (6.8/6.17): include/linux/i3c/ only ships
  * ccc.h, device.h, master.h -- KERNEL-DRIVER-side headers that pull in
  * <linux/module.h> and cannot be compiled from userspace at all.  The
