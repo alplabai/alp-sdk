@@ -163,9 +163,17 @@ PACKAGECONFIG[rpc]      = ",,open-amp libmetal"
 # ALP_SDK_USE_DRPAI_V2N -- a builder passing -DALP_SDK_USE_DRPAI_V2N=ON to a
 # direct plain-CMake configure by hand, where an incomplete host should
 # degrade cleanly rather than hard-fail.  (NOT scripts/alp_orchestrate/
-# kconfig.py's capabilities.drp_ai auto-emit: that mechanism does not reach
-# this option for any Yocto A55 build today -- see src/yocto/CMakeLists.txt's
-# ALP_SDK_DRPAI_REQUIRED option help for why.)
+# kconfig.py's capabilities.drp_ai auto-emit: that mechanism DOES reach a
+# real, gate-tested slice today -- buildplan.py calls _slice_cmake_args
+# only for os == "baremetal", and test_project_backends.py already
+# asserts E1M-V2M101 / E1M-V2N101 a55_cluster baremetal emitting
+# -DALP_SDK_USE_DRPAI_V2N=ON.  What keeps THIS recipe's Yocto CMakeLists.txt
+# out of that path is simpler: the top-level CMakeLists.txt does
+# add_subdirectory(src/${ALP_OS}), so an os: baremetal slice parses
+# src/baremetal/CMakeLists.txt and never opens src/yocto/CMakeLists.txt at
+# all -- and separately, ALP_SDK_DRPAI_REQUIRED itself is emitted by
+# NOTHING in the tree (kconfig.py emits only the USE flag), so REQUIRED
+# can never be auto-flipped ON regardless of which slice is building.)
 PACKAGECONFIG[drpai]    = "-DALP_SDK_USE_DRPAI_V2N=ON -DALP_SDK_DRPAI_REQUIRED=ON,-DALP_SDK_USE_DRPAI_V2N=OFF -DALP_SDK_DRPAI_REQUIRED=OFF,drpai lib-tvm mera2-drpai-tvm,mera2-drpai-tvm"
 
 # Inference backends are NOT build-time dependencies of the SDK library
@@ -178,9 +186,17 @@ PACKAGECONFIG[drpai]    = "-DALP_SDK_USE_DRPAI_V2N=ON -DALP_SDK_DRPAI_REQUIRED=O
 # above flips the flag and adds the deps in the same switch.
 # src/yocto/inference_drpai.cpp is real MeraDrpRuntimeWrapper code -- the
 # "NOT_IMPLEMENTED stub / issue #58" description this comment used to
-# carry is no longer true -- but it has never run on DRP-AI silicon and
-# no full alp-image-edge bake has completed with it enabled, so treat the
-# backend as BENCH-UNVERIFIED.
+# carry is no longer true, and neither is "never carried through a
+# completed bake": a drpai-enabled alp-image-edge bake now completes (12118
+# tasks, all succeeded), and libalp_sdk.so's DT_NEEDED on
+# libmera_drpai_wrapper.so resolves clean (9 symbols matched, 0
+# unresolved) -- build, link and packaging are proven.  What is NOT
+# proven is on-silicon inference: the image has never booted on a board,
+# and the compiled YOLOX-S/VOC model was quantised against 8 random
+# frames, not RUHMI's real calibration set (its 200 images ship as
+# 129-byte Git LFS pointer stubs in this checkout), so quantisation
+# accuracy is unvalidated.  Treat the backend as BENCH-UNVERIFIED on
+# those two grounds, not on packaging.
 # Where a per-machine NPU userspace runtime package exists it is
 # installed by the *image* recipe (see alp-image-edge's
 # IMAGE_INSTALL:append:e1m-v2m101 = "dx-rt").  There is still NO

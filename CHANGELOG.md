@@ -239,12 +239,16 @@ both corrected to describe this real, eight-library-plus-three-RDEPENDS
 closure — both previously said "three libraries, gap closed," which
 overstated it the same way this entry did.
 
-**Still BENCH-UNVERIFIED**: DRP-AI has never run on silicon. A full
-`alp-image-edge` bake HAS completed on this host with `drpai` OFF (the
-base image); the packaging fix above is code-complete but has not yet
-been proven by a green `drpai`-enabled bake — the bugs it fixes were
-found by an actual `bitbake` run, not by inspection, so it stays
-fixed-on-paper until the next `drpai`-enabled bake confirms it.
+**Packaging is now bake-confirmed, not just fixed-on-paper**: a
+`drpai`-enabled `alp-image-edge` bake has completed on this host (12118
+tasks, all succeeded), and `libalp_sdk.so`'s `DT_NEEDED` on
+`libmera_drpai_wrapper.so` resolves clean (9 symbols matched, 0
+unresolved) — the full MERA2 runtime closure (ten libraries) stages
+correctly. **Still BENCH-UNVERIFIED**: on-silicon inference has never
+run — the image has not booted on a board — and the compiled
+YOLOX-S/VOC model was quantised against 8 random frames, not RUHMI's
+real calibration set (its 200 images ship as 129-byte Git LFS pointer
+stubs in this checkout), so quantisation accuracy is unvalidated.
 
 ### Fixed — `mera2-drpai-tvm` staged a header with no library behind it; `libalp_sdk.so` now fails its OWN link instead of a downstream consumer's (#1145)
 

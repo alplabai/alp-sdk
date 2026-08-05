@@ -446,16 +446,46 @@ FILES:${PN}-dev = " \
 # exactly libarm_compute.so, libarm_compute_core.so and
 # libarm_compute_graph.so ship without .gnu.hash (they are ARM Compute
 # Library prebuilts); the other five copied libraries do have it. So
-# packaging is not mangling them; they arrive this way. The ninth library,
-# libmera_drpai_wrapper.so, IS one of OUR builds (do_compile does append
-# ${LDFLAGS} to its link line), so it is not expected to need this skip --
-# but the check is package-wide, not per-file, so this stays in place
-# regardless.
+# packaging is not mangling them; they arrive this way.
 #
 # Consequence, stated because it is not free: without .gnu.hash those three
 # fall back to the older SysV .hash chain, which makes symbol lookup slower at
 # load time. That is a vendor property of the binaries, not something this
 # recipe can fix, and it does not affect correctness.
+#
+# WHAT ELSE THIS GIVES UP, AND WHY THAT'S ACCEPTED: INSANE_SKIP is
+# package-wide, not per-file. libmera_drpai_wrapper.so -- the one library in
+# this recipe we actually COMPILE (do_compile, above) -- ships in this same
+# ${PN}, so this line also silences the ldflags/GNU_HASH check for the one
+# artefact where a dropped ${LDFLAGS} would be a genuine defect, not a
+# vendor property we can't touch.
+#
+# Verified this is not currently a live gap: do_compile's link command
+# unconditionally appends `d.getVar("LDFLAGS")` to `cmd` (the
+# `cmd += (d.getVar("LDFLAGS") or "").split()` line, before the -L/-l
+# flags) -- no conditional path skips it -- and the confirmed real aarch64
+# bake referenced at the bottom of this file did produce a
+# libmera_drpai_wrapper.so alongside the five .gnu.hash-bearing copied
+# libraries, not the three hash-less ones.
+#
+# Considered and rejected: splitting PACKAGES so the eight vendor prebuilts
+# carry this skip in a sub-package while libmera_drpai_wrapper.so ships
+# skip-free in another, so QA would keep actively checking the one library
+# we build. Rejected because none of these nine libraries carries a
+# DT_SONAME (see the FILES:${PN} comment above) -- the same reason the
+# mmngr libraries below need an explicit RDEPENDS instead of relying on
+# do_package_qa's automatic shlibs resolution. Splitting the wrapper into
+# its own package would need a fourth manual RDEPENDS entry (wrapper ->
+# prebuilts, for libmera2_runtime/libmera2_plan_io/libdrp_tvm_rt) purely to
+# recreate, across a package boundary, a within-package relationship that
+# already works for free today -- to protect a check that reading
+# do_compile already confirms is not being violated. Not worth it for a
+# recipe this small.
+#
+# REVISIT IF: do_compile's link line ever drops or reorders the ${LDFLAGS}
+# append (this comment's evidence goes stale then), or this recipe grows
+# enough unrelated packages that a split starts paying for itself on its
+# own merits regardless of this one check.
 INSANE_SKIP:${PN} += "ldflags"
 
 # libmmngr.so.1 / libmmngrbuf.so.1 are DT_NEEDED by libdrp_rt.so /
@@ -472,11 +502,12 @@ INSANE_SKIP:${PN} += "ldflags"
 # against it (kernel modules never show up as a DT_NEEDED entry, so QA
 # never asks for it): mmngr-user-module / mmngrbuf-user-module are thin
 # ioctl wrappers around /dev/mmngr, which that kernel module provides,
-# so the userspace libs are inert without it at runtime. alp-image-edge.bb
-# also installs it explicitly (ALP_DRPAI_IMAGE_INSTALL, worked around
-# because meta-rz-drpai only hooks core-image-% images) -- listing it
-# here too is a harmless duplicate for that image and makes this recipe
-# runtime-correct standalone, for any other image that pulls it in.
+# so the userspace libs are inert without it at runtime. The rzv2n-family
+# machine confs also install it explicitly when ALP_ENABLE_DRPAI = "1"
+# (worked around because meta-rz-drpai only hooks core-image-% images,
+# never alp-image-edge) -- listing it here too is a harmless duplicate
+# for that image and makes this recipe runtime-correct standalone, for
+# any other image that pulls it in.
 RDEPENDS:${PN} += "mmngr-user-module mmngrbuf-user-module kernel-module-mmngr"
 
 # Excluded from `bitbake world`: this recipe only builds successfully

@@ -363,21 +363,29 @@ runtime does to the configure step.  **Two different ways set
   it from `apps/MeraDrpRuntimeWrapper.cpp` in the same checkout.
 - **`scripts/alp_orchestrate/kconfig.py`'s `capabilities.drp_ai`
   auto-emit** produces the same `-DALP_SDK_USE_DRPAI_V2N=ON` in
-  `_slice_cmake_args()`, but it does **not** reach this option for any
-  Yocto build today: `alp_project.py --emit cmake-args` refuses any
-  `--core` whose slice has `os: yocto` (the emit mode only supports
-  `baremetal`/`zephyr`), `--emit yocto-conf` — the emit mode a `yocto`
-  slice *does* use — never includes a DRP-AI flag, and the one core
-  class the auto-emit can reach through `cmake-args`, the M33 Zephyr
-  slice, never runs `src/yocto/CMakeLists.txt` at all (it `return()`s
-  immediately on `DEFINED ZEPHYR_BASE`).  Treat this path as dormant
-  wiring for a future `os: baremetal` DRP-AI slice, not a live A55
-  enable path — do not rely on it, and do not cite it to explain why
-  `ALP_SDK_DRPAI_REQUIRED` defaults OFF (see next paragraph).
+  `_slice_cmake_args()`, and this path is real and gate-tested today —
+  `buildplan.py` calls `_slice_cmake_args()` for every `os: baremetal`
+  slice, and `test_project_backends.py` already asserts `E1M-V2M101` /
+  `E1M-V2N101` `a55_cluster` **baremetal** emitting
+  `-DALP_SDK_USE_DRPAI_V2N=ON`.  It still never reaches *this*
+  `src/yocto/CMakeLists.txt`, though, for a simpler reason: the
+  top-level `CMakeLists.txt` does `add_subdirectory(src/${ALP_OS})`, so
+  an `os: baremetal` slice parses `src/baremetal/CMakeLists.txt` and
+  never opens `src/yocto/CMakeLists.txt` at all — this listfile only
+  runs for `os: yocto`, a slice kind the auto-emit never reaches
+  (`--emit cmake-args` refuses `os: yocto` cores; `--emit yocto-conf`,
+  the emit mode a `yocto` slice does use, never includes a DRP-AI
+  flag).  Separately, `ALP_SDK_DRPAI_REQUIRED` itself is emitted by
+  nothing in the tree — `kconfig.py` emits only the `USE` flag — so
+  `REQUIRED` can never be auto-flipped ON regardless of which slice is
+  building; do not cite the baremetal slice's existence to explain why
+  `ALP_SDK_DRPAI_REQUIRED` defaults OFF (see next paragraph) — the real
+  reason is that nothing ever emits it.
 
 `ALP_SDK_DRPAI_REQUIRED` decides what a missing runtime does to
-configure, and it does not default OFF because of the (dormant)
-`kconfig.py` path above — it defaults OFF because that is the safe
+configure, and it does not default OFF because of the `kconfig.py` path
+above (that path is real, not dormant — it just never reaches this
+option, see above) — it defaults OFF because that is the safe
 choice for a builder who passes `-DALP_SDK_USE_DRPAI_V2N=ON` to a
 direct plain-CMake configure by hand, outside any recipe: an incomplete
 host degrades cleanly instead of hard-failing.  `alp-sdk_0.6.bb`'s
@@ -413,8 +421,16 @@ Runtime side, `/dev/drpai0` only appears when `meta-rz-drpai` is in
 that `e1m-v2n-drpai.dtsi` overrides to `status = "okay"`).  Compiling
 the backend in without that layer produces a library that opens nothing.
 
-> **BENCH-UNVERIFIED.** The DRP-AI3 backend has never run on silicon and
-> no full `alp-image-edge` bake has completed with it enabled.
+> **Builds, links and packages; unproven on silicon.** A `drpai`-enabled
+> `alp-image-edge` bake completes (12118 tasks, all succeeded), and
+> `libalp_sdk.so`'s `DT_NEEDED` on `libmera_drpai_wrapper.so` resolves
+> clean (9 symbols matched, 0 unresolved) — the full MERA2 runtime
+> closure (ten libraries) stages correctly.  What is still
+> **BENCH-UNVERIFIED**: the DRP-AI3 backend has never run on silicon —
+> the image has not booted on a board — and the compiled YOLOX-S/VOC
+> model was quantised against 8 random frames rather than RUHMI's real
+> calibration set (its 200 images ship as 129-byte Git LFS pointer
+> stubs in this checkout), so quantisation accuracy is unvalidated.
 
 ### Model compilation toolchain (RUHMI / DRP-AI TVM)
 
@@ -599,10 +615,16 @@ checkout, it fetches nothing.
   `e1m-aen701-a32`) ships; the carrier DTB + TF-A memory map + full
   image-bake await the maintainer's AEN HW config (the
   `# TBD(alif-hw-config)` overrides in the machine confs).
-- The DRP-AI3 backend (`PACKAGECONFIG[drpai]`) ships OFF and
-  BENCH-UNVERIFIED: never run on DRP-AI silicon, never carried through
-  a completed `alp-image-edge` bake with `drpai` enabled (a `drpai`-off
-  bake of `alp-image-edge` has completed on this host).  Its nine
+- The DRP-AI3 backend (`PACKAGECONFIG[drpai]`) ships OFF.  Build side it
+  is proven: a `drpai`-enabled `alp-image-edge` bake has completed on
+  this host (12118 tasks, all succeeded), and `libalp_sdk.so`'s
+  `DT_NEEDED` on `libmera_drpai_wrapper.so` resolves clean (9 symbols
+  matched, 0 unresolved).  It stays BENCH-UNVERIFIED for what build
+  alone can't prove: it has never run on DRP-AI silicon — the image has
+  not booted on a board — and the compiled YOLOX-S/VOC model was
+  quantised against 8 random frames, not RUHMI's real calibration set
+  (its 200 images ship as 129-byte Git LFS pointer stubs in this
+  checkout), so quantisation accuracy is unvalidated.  Its nine
   MERA2/TVM libraries and `MeraDrpRuntimeWrapper.h` are packaged by
   `mera2-drpai-tvm`: eight staged verbatim from a builder-supplied RUHMI
   checkout, nothing vendored, plus a ninth (`libmera_drpai_wrapper.so`)
