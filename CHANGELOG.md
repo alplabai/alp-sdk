@@ -143,16 +143,20 @@ enable paths — the `kconfig.py` auto-emit or the recipe PACKAGECONFIG — it
 means.
 
 Honest in the other direction as well: **DRP-AI has never run on silicon.**
-A `drpai`-enabled `alp-image-edge` bake HAS completed on this host — see the
-`mera2-drpai-tvm` packaging entry below — but only via the manual
-`PACKAGECONFIG:append:pn-alp-sdk = " drpai"` override in `local.conf`; the
-machine-conf `ALP_ENABLE_DRPAI` opt-in this branch introduces did not exist
-yet at that bake. It is now parse-verified and expansion-verified instead —
-`bitbake -e` resolves both halves of the opt-in from `ALP_ENABLE_DRPAI` alone,
-in the enabled and the missing-layer directions (see
-`docs/bring-up-drpai-v2n.md` §4 for the figures) — but not itself
-bake-verified: no image has been produced through it. Everything above is
-code-complete; on-silicon execution remains unverified.
+A `drpai`-enabled `alp-image-edge` bake HAS completed on this host twice —
+see the `mera2-drpai-tvm` packaging entry below for the first, via the
+manual `PACKAGECONFIG:append:pn-alp-sdk = " drpai"` override in
+`local.conf`, before the machine-conf `ALP_ENABLE_DRPAI` opt-in this branch
+introduces existed. It is now bake-verified in its own right: with that
+manual override commented out so `ALP_ENABLE_DRPAI = "1"` was the only
+source of the enable, a second bake completed (12118 tasks attempted,
+11223 already satisfied and not rerun, all succeeded), producing
+`alp-image-edge-e1m-v2m101-a55.rootfs-20260805211027.wic.gz` (716220145
+bytes) with the DRP-AI payload in the rootfs manifest and `libalp_sdk.so`
+linked against the DRP-AI wrapper library (see `docs/bring-up-drpai-v2n.md`
+§4 for the manifest rows and the `readelf -d` output). Everything above is
+code-complete and now bake-verified; on-silicon execution remains
+unverified.
 
 ### Added — `mera2-drpai-tvm` closes the `PACKAGECONFIG[drpai]` packaging gap (#1145)
 

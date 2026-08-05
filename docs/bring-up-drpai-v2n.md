@@ -3,23 +3,23 @@
 How to get the RZ/V2N's on-die DRP-AI3 NPU running a real model through
 `<alp/inference.h>` on an E1M-X V2N SoM.
 
-> **Status: KERNEL DRIVER PROVEN ON SILICON, PACKAGING FIXED, INFERENCE NOT YET
-> RUN.** A full `alp-image-edge` bake now completes on this host (12118 tasks,
-> all succeeded, a 716 MB `.wic.gz`) — the first ever; previously nothing had
-> baked. That run had `drpai` OFF (the base image); see §4 for what is and
-> isn't proven about the `drpai`-enabled path. `PACKAGECONFIG[drpai]` now
-> resolves the whole MERA2 runtime closure, and the `MeraDrpRuntimeWrapper::*`
-> symbols alp-sdk needs all match what the wrapper exports (26 exported, 9
-> referenced, 0 unresolved) — confirmed at the compile/symbol level, not yet
-> through a `drpai`-enabled bake on the real aarch64 Yocto cross-toolchain. On
-> real E1M-X V2N-M1 silicon the DRP-AI **kernel** driver stack is proven
-> working: `/dev/drpai0` probes clean and the memory-base ioctl returns the
-> correct arena (§3, §7) — but that silicon runs its own current image, not
-> one built from this branch. A model has now been compiled (§5) — YOLOX-S
-> VOC, fully NPU-offloaded per its deploy graph — but it was quantised
-> without the vendor calibration set, so its accuracy is unvalidated, and no
-> inference has run on silicon. Treat this as the procedure to execute and
-> verify to completion, not a report of a working system. `docs/test-plan.md`
+> **Status: KERNEL DRIVER PROVEN ON SILICON, DRP-AI OPT-IN BAKE-VERIFIED,
+> INFERENCE NOT YET RUN.** A `drpai`-enabled `alp-image-edge` bake through the
+> `ALP_ENABLE_DRPAI` opt-in alone — no other switch — has completed (12118
+> tasks attempted, 11223 already satisfied, all succeeded), producing a 716 MB
+> `.wic.gz` whose rootfs manifest carries the DRP-AI userspace payload and
+> whose `libalp-sdk0` links against the DRP-AI wrapper library; see §4 for the
+> measurement. `PACKAGECONFIG[drpai]` resolves the whole MERA2 runtime
+> closure, and the `MeraDrpRuntimeWrapper::*` symbols alp-sdk needs all match
+> what the wrapper exports (26 exported, 9 referenced, 0 unresolved). On real
+> E1M-X V2N-M1 silicon the DRP-AI **kernel** driver stack is proven working:
+> `/dev/drpai0` probes clean and the memory-base ioctl returns the correct
+> arena (§3, §7) — but that silicon runs its own current image, not one built
+> from this branch, and no inference has run on it. A model has now been
+> compiled (§5) — YOLOX-S VOC, fully NPU-offloaded per its deploy graph — but
+> it was quantised without the vendor calibration set, so its accuracy is
+> unvalidated. Treat this as the procedure to execute and verify to
+> completion on silicon, not a report of a working system. `docs/test-plan.md`
 > carries the verification rows this gates.
 
 For the base V2N board bring-up see [bring-up-v2n.md](bring-up-v2n.md); for the
@@ -175,8 +175,8 @@ without it) — opting in without the layer is caught by an anonymous-Python
 guard in `alp-image-edge.bb` that fails the parse loudly, naming the cause,
 instead of an obscure missing-recipe error at build time.
 
-**Status: `ALP_ENABLE_DRPAI` is parse-verified and expansion-verified, not yet
-bake-verified.** In an isolated build dir (own `TMPDIR`/`SSTATE_DIR`,
+**Status: `ALP_ENABLE_DRPAI` is bake-verified.** In an isolated build dir
+(own `TMPDIR`/`SSTATE_DIR`,
 `EXTERNALSRC:pn-alp-sdk` pointed at the checkout, the manual
 `PACKAGECONFIG:append:pn-alp-sdk` override below commented out so
 `ALP_ENABLE_DRPAI` was the only possible source of the enable), with
@@ -199,20 +199,34 @@ its intended text:
 ERROR: meta-alp-sdk/recipes-images/alp-image-edge.bb: ALP_ENABLE_DRPAI = "1" but the rz-drpai layer (meta-rz-drpai) is not in bblayers.conf -- lib-tvm and kernel-module-mmngr do not exist without it. Add meta-rz-drpai to bblayers.conf or set ALP_ENABLE_DRPAI = "0".
 ```
 
-**Not yet bake-verified: no image has been built through the
-`ALP_ENABLE_DRPAI` path.** The bake this document's "confirmed"/"proven"
-claims are measured against used the older, manual route instead, set
-directly in `local.conf` alongside `RUHMI_DRPAI_TVM_DIR` pointed at a built
-RUHMI checkout:
+**The same configuration was then baked to completion.** Build dir with
+`MACHINE = "e1m-v2m101-a55"`, the manual `PACKAGECONFIG:append:pn-alp-sdk = "
+drpai"` override commented out so `ALP_ENABLE_DRPAI = "1"` was the only
+source of the enable, and `EXTERNALSRC:pn-alp-sdk` pointed at this checkout:
 
 ```
-PACKAGECONFIG:append:pn-alp-sdk = " drpai"
+Tasks Summary: Attempted 12118 tasks of which 11223 didn't need to be rerun and all succeeded.
 ```
 
-That manual route is what actually produced a completed image (MACHINE
-`e1m-v2m101-a55`, 12118 tasks attempted, all succeeded). No image has been
-produced through `ALP_ENABLE_DRPAI` yet — re-verify with a real bake before
-relying on it to the same degree.
+producing `alp-image-edge-e1m-v2m101-a55.rootfs-20260805211027.wic.gz`
+(716220145 bytes). The DRP-AI payload is present in the rootfs manifest,
+pulled by the opt-in alone:
+
+```
+kernel-module-mmngr      e1m_v2m101_a55  1.0
+kernel-module-mmngrbuf   e1m_v2m101_a55  1.0
+lib-tvm                  cortexa55       1.0
+libalp-sdk0              cortexa55       0.6.0
+libmmngr1                e1m_v2m101_a55  1.0
+libmmngrbuf1             e1m_v2m101_a55  1.0
+mera2-drpai-tvm          cortexa55       2.7.0
+```
+
+and `readelf -d` on the built `libalp_sdk.so.0.15.0` shows `DT_NEEDED`
+entries for `libmera_drpai_wrapper.so`, `libmera2_runtime.so`,
+`libmera2_plan_io.so` and `libtvm_runtime.so`. Still not proven: nothing has
+run on DRP-AI silicon, and the model's quantisation (§5) used random frames
+rather than the vendor calibration set, so accuracy is unvalidated.
 
 **The RUHMI libraries and wrapper header are now packaged**, closing the gap
 the earlier revision of this doc left as a manual staging step.
@@ -233,19 +247,21 @@ fetches and vendors nothing: point the single variable **`RUHMI_DRPAI_TVM_DIR`**
 `drpai` — an unset or incomplete checkout fails `do_compile`/`do_install`
 loudly, naming the exact missing path.
 
-**Verified, at the symbol level:** with `RUHMI_DRPAI_TVM_DIR` pointed at a real
-checkout, the previously-undefined `MeraDrpRuntimeWrapper::*` symbols alp-sdk
-needs all match what the compiled wrapper exports — 26 symbols exported, 9
-referenced by alp-sdk, all 9 match, 0 unresolved. **Not yet verified:** the
-recipe's own `do_compile` has been proven only compiling the wrapper source
-cleanly against a real RUHMI checkout's headers on an x86_64 dev host (system
-spdlog/asio standing in for meta-oe's); the final link against the real
-aarch64 `obj/build_runtime/v2h` libraries has not been exercised, and no
-`bitbake` run of this recipe — with or without `do_compile` — has happened at
-all. A full `alp-image-edge` bake has completed on this host (12118 tasks,
-producing a 716 MB `.wic.gz`, the first ever here) but with `drpai` OFF (the
-base image); a `drpai`-enabled bake on the real aarch64 Yocto cross-toolchain
-is the step that would confirm the link and packaging end to end.
+**Verified, at the symbol level and now again post-link:** with
+`RUHMI_DRPAI_TVM_DIR` pointed at a real checkout, the previously-undefined
+`MeraDrpRuntimeWrapper::*` symbols alp-sdk needs all match what the compiled
+wrapper exports — 26 symbols exported, 9 referenced by alp-sdk, all 9 match,
+0 unresolved. That figure is re-derivable from a build, not a one-time
+snapshot: `nm -D --undefined-only` on the built `libalp_sdk.so.0.15.0`
+yields 9 `MeraDrpRuntimeWrapper` symbols, `nm -D --defined-only` on the
+built `libmera_drpai_wrapper.so` yields 26, and the set difference
+(imported but not provided) is empty. The recipe has now been bitbake-run
+end to end — `do_compile` and the final link against the real
+`obj/build_runtime/v2h` libraries both completed — as part of the
+`drpai`-enabled `alp-image-edge` bake on the real aarch64 Yocto
+cross-toolchain described in §4, and `readelf -d` on the resulting
+`libalp_sdk.so.0.15.0` confirms the `DT_NEEDED` entries. Still not proven:
+nothing has run on DRP-AI silicon (§7).
 
 **`meta-rz-drpai` on `bblayers.conf` is necessary but not sufficient for the
 image.** That layer ships its payload through a `core-image-%.bbappend`, and
