@@ -146,8 +146,28 @@ static void test_pick_crtc_no_match_is_not_ready(void)
 	ALP_ASSERT_EQ_INT((int)out, 999); /* untouched on failure */
 }
 
+/* The modeset gate is the whole point of this backend's safety posture,
+ * and until this case existed nothing exercised it: config_defaults.c
+ * pins the MACRO's value, not the backend's behaviour, so deleting
+ * `if (!cfg->allow_modeset)` from y_open() left every gate green.
+ *
+ * y_open() refuses before it opens anything, so this needs no
+ * /dev/dri/card* node and no DRM master -- a default-config call must
+ * come back ALP_ERR_INVAL on any host. */
+static void test_open_refuses_without_allow_modeset(void)
+{
+	alp_display_config_t        cfg   = ALP_DISPLAY_CONFIG_DEFAULT(0);
+	alp_display_backend_state_t state = { 0 };
+	alp_capabilities_t          caps  = { 0 };
+
+	ALP_ASSERT_EQ_INT(y_open(&cfg, &state, &caps), ALP_ERR_INVAL);
+	/* Refused before touching the device: nothing was published. */
+	ALP_ASSERT_TRUE(state.be_data == NULL);
+}
+
 int main(void)
 {
+	test_open_refuses_without_allow_modeset();
 	test_blit_copy_rejects_zero_area();
 	test_blit_copy_rejects_out_of_range();
 	test_blit_copy_rejects_null();

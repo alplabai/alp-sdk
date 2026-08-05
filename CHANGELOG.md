@@ -62,13 +62,12 @@ behaviour change for anyone who relied on the open succeeding.
   (`DRM_FORMAT_ARGB8888`, byte-identical to `ALP_PIXFMT_ARGB8888`) +
   `MAP_DUMB` + `mmap()` → `SETCRTC`. `alp_display_blit`/`alp_display_clear`
   write straight into the mapped dumb buffer, honouring the kernel-reported
-  scanline pitch. No new safety-gate field was added (unlike storage's
-  `allow_unsafe_write`): writing pixels is this API's entire declared
-  purpose, not an incidental side effect a default-config caller could
-  stumble into: see the backend's own file-header note for the full
-  reasoning, including why `DRM_IOCTL_SET_MASTER`'s own kernel-side
-  exclusivity is the meaningful guard against fighting a running
-  compositor for the screen.
+  scanline pitch. `alp_display_open` requires
+  `alp_display_config_t.allow_modeset` (default `false`) and returns
+  `ALP_ERR_INVAL` without it — see the ABI-and-behaviour note at the top of
+  this entry, and the backend's own file header, for why
+  `DRM_IOCTL_SET_MASTER`'s kernel-side exclusivity is NOT sufficient on its
+  own.
 - `src/backends/i3c/yocto_drv.c`: `alp_i3c_open` is a bus PRESENCE check
   only, confirming `/sys/bus/i3c/devices/i3c-<bus_id>` exists.
   `alp_i3c_write`/`alp_i3c_read`/`alp_i3c_write_read` stay honest

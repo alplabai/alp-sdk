@@ -53,13 +53,16 @@
  *      <alp/display.h>'s contract, so the gate lives on open() rather
  *      than on the individual ops.
  *
- * @par Error mapping, corrected: SET_MASTER's failure is checked
- *      immediately rather than carried in a flag.  drm_setmaster_ioctl
- *      returns -EBUSY when another process holds master (SETCRTC's
- *      later refusal is -EACCES, which alp_status_from_posix_errno()
- *      does not map and would fall through to ALP_ERR_IO).  EBUSY is
- *      surfaced as ALP_ERR_BUSY; anything else takes the errno's own
- *      mapping.  Failing here also avoids allocating and mapping a
+ * @par Error mapping, corrected: SET_MASTER's failure is now checked
+ *      immediately rather than carried in a flag, so it reaches the
+ *      caller at all.  drm_setmaster_ioctl returns -EBUSY when another
+ *      process holds master, which alp_status_from_posix_errno()
+ *      already maps to ALP_ERR_BUSY -- no special case needed here.
+ *      What the previous version got wrong was WHERE it detected the
+ *      failure: it let SETCRTC be the test, and SETCRTC refuses with
+ *      -EACCES, which that mapper does NOT carry, so the documented
+ *      ALP_ERR_BUSY was unreachable and callers saw ALP_ERR_IO.
+ *      Failing at SET_MASTER also avoids allocating and mapping a
  *      full-screen scanout buffer (~8 MB at 1080p) before finding out.
  *
  * @par What close() DOES do: it blanks the panel, and that is not a
@@ -352,7 +355,10 @@ static alp_status_t y_open(const alp_display_config_t  *cfg,
 	 * in alp_status_from_posix_errno()'s switch so it lands on
 	 * ALP_ERR_IO. */
 	if (ioctl(d->fd, DRM_IOCTL_SET_MASTER, NULL) != 0) {
-		alp_status_t rc = (errno == EBUSY) ? ALP_ERR_BUSY : alp_status_from_posix_errno(errno);
+		/* alp_status_from_posix_errno() already maps EBUSY -> ALP_ERR_BUSY
+		 * (src/common/alp_errno.h:57-59); EACCES is the one it lacks, and
+		 * that is SETCRTC's refusal, not this call's. */
+		alp_status_t rc = alp_status_from_posix_errno(errno);
 		_teardown(d);
 		return rc;
 	}
@@ -383,16 +389,39 @@ static alp_status_t y_open(const alp_display_config_t  *cfg,
 	res.connector_id_ptr = (uint64_t)(uintptr_t)connectors;
 	res.count_crtcs      = n_crtcs;
 	res.crtc_id_ptr      = (uint64_t)(uintptr_t)crtcs;
-	/* Same hotplug re-check as the connector walk below: a count that grew
-	 * between the two calls means the kernel skipped the copy and these
-	 * arrays are still all-zero. */
-	if (ioctl(d->fd, DRM_IOCTL_MODE_GETRESOURCES, &res) < 0 ||
-	    res.count_connectors > n_connectors || res.count_crtcs > n_crtcs) {
-		alp_status_t rc = (errno != 0) ? alp_status_from_posix_errno(errno) : ALP_ERR_IO;
+	/* Hotplug between the two calls, both directions.  If the count GREW
+	 * the kernel skipped the copy entirely and only wrote back the new
+	 * count, leaving these arrays all-zero -- so refuse.  Keep errno's own
+	 * mapping only for a genuine ioctl failure: on the count-mismatch
+	 * branch the ioctl SUCCEEDED, errno is whatever an unrelated earlier
+	 * libc call left behind (nothing in src/ ever clears it), and mapping
+	 * that would report e.g. ALP_ERR_NOT_READY for a hotplug race. */
+	if (ioctl(d->fd, DRM_IOCTL_MODE_GETRESOURCES, &res) < 0) {
+		alp_status_t rc = alp_status_from_posix_errno(errno);
 		free(connectors);
 		free(crtcs);
 		_teardown(d);
 		return rc;
+	}
+	if (res.count_connectors > n_connectors || res.count_crtcs > n_crtcs) {
+		free(connectors);
+		free(crtcs);
+		_teardown(d);
+		return ALP_ERR_IO;
+	}
+	/* If the count SHRANK the kernel copied fewer ids and the tail of each
+	 * array is still calloc-zero.  Walking the pre-call length would hand
+	 * object id 0 to GETCONNECTOR, and could return crtc_id = 0 into
+	 * SETCRTC -- safe today only because the kernel rejects id 0, which is
+	 * exactly the reliance the growth branch above refuses to make.  Use
+	 * what the kernel actually reported. */
+	n_connectors = res.count_connectors;
+	n_crtcs      = res.count_crtcs;
+	if (n_connectors == 0u || n_crtcs == 0u) {
+		free(connectors);
+		free(crtcs);
+		_teardown(d);
+		return ALP_ERR_NOT_READY;
 	}
 
 	uint32_t                 connector_id = 0, encoder_id = 0;
