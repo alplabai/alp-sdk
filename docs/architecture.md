@@ -76,6 +76,8 @@ alp-sdk/
 │   ├── e1m_x_pinout.h               # E1M-X-family portable pad constants
 │   ├── chips/                       # one <alp/chips/<part>.h> per chip driver
 │   ├── blocks/                      # <alp/blocks/<name>.h> for SDK-level block helpers
+│   ├── ext/<vendor>/                # vendor escape-hatch headers (alif/renesas/nxp/deepx)
+│   │                                 # for capabilities the portable <alp/*> API can't express
 │   └── boards/                      # GENERATED: per-board route headers
 ├── src/
 │   ├── <class>_dispatch.c           # per-peripheral-class dispatcher (i2c_dispatch.c, …)
@@ -312,6 +314,31 @@ runner args) stays hand-authored for every family -- its prose is a
 documentation choice (which sibling board's file carries the full
 bring-up runbook), not a hardware fact derivable from metadata.
 
+**Not in the inventory above -- a standalone dev tool, not a build-time
+generator.** `scripts/gen_rzv2n_cm33_svd.py` (issue #1029 step 2) projects a
+CMSIS-SVD 1.3 register-view file for the RZ/V2N CM33 out of the vendored
+`hal_renesas` west module's FSP headers (`iodefines/` register structs
+cross-checked field-for-field against `iobitmasks/` `_Pos`/`_Msk` constants
+-- Renesas ships no SVD for this part at all -- except for 15 fields, of
+~9200 against the real corpus, where the two vendor headers disagree with
+each other (plus 7 further `iobitmasks/`-side macros with no `iodefine`
+counterpart at all); those are named individually in the script and still
+emit, either at a position corroborated by other evidence or carrying an
+explicit "not cross-validated" note, never silently). It differs from every
+generator above in three ways, all deliberate: **its output is never
+committed** (there is no `docs/svd/*.svd` in this tree and there will not
+be); **it is not wired into any CI gate** (`pr-generated-files` or
+otherwise); and it **requires a west workspace with `hal_renesas` checked
+out** to run at all (`--fsp-include-dir` to point at one explicitly, or
+automatic discovery via the west topdir). The reasoning: every developer who
+wants this SVD is mid-CM33-debug and therefore already has exactly such a
+workspace -- the one that built the firmware they are debugging. Committing
+the generated file would serve nobody and would force a second, CI-visible
+`hal_renesas` pin that drifts from the real one (which already resolves
+transitively through Zephyr's own `west.yml`) -- a contract-drift trap the
+"generators inventory" pattern above exists to avoid, not invite. Run it
+locally: `python3 scripts/gen_rzv2n_cm33_svd.py --output <path>`.
+
 ## Library design
 
 ### Peripheral primitives
@@ -358,6 +385,21 @@ not others.
 | Inference        | `alp/inference.h` / `backend.h` | Registry-backed dispatcher + the backend-registration seam, fronted by the **`.alpmodel`** runtime loader: `alp_inference_open_alpmodel()` → a pure selection engine (silicon-ref availability + SRAM-fit `requires` check + `preferred_backend` tiebreak, `ALP_ERR_NO_FIT`/`NO_BACKEND` otherwise) → the existing `alp_inference_open`.  Host side: `scripts/alp_model/` (`tan model build`) compiles the fat multi-backend package (CBOR manifest + per-backend blobs).  Registered backends (M-class registry): `tflm` (CPU), `ethos_u_aen` / `ethos_u_n93` (Arm Ethos-U), `sw_fallback`; DRP-AI3 + DEEPX DX-M1 are A55/Linux-side only (`src/yocto/inference_{drpai,deepx}.cpp`, #58/#59).  Selector picks the highest-priority match for the SoM's silicon ref. | v0.5 registry + `.alpmodel` loader/selection (Stages 1a–1c); real per-NPU compiles + runtime = Stage 2, gate on licensed tools + HiL |
 | Storage          | `alp/storage.h`      | Block + filesystem (LittleFS) on Zephyr; standard FS on Yocto.  | v0.5 surface |
 | 2D graphics      | `alp/gpu2d.h`        | Portable blit/fill shim (Alif Dave2D / GPU2D); SW fallback.     | v0.5 surface; see [ADR 0008](adr/0008-gpu2d-portable-shim.md) |
+
+### AI / inference pipeline (off-device → on-device)
+
+Training stays off-device, in TensorFlow / PyTorch, producing a
+`.tflite` / `.onnx` source model.  `tan model build` (host-side,
+`scripts/alp_model/`) compiles that source model for **every** NPU
+backend the target SoM declares and packs the results into one fat,
+multi-backend **`.alpmodel`** package (CBOR manifest + per-backend
+blobs).  The per-backend compiler differs by silicon: Arm **Vela**
+for Ethos-U (AEN, i.MX 93), the **DRP-AI translator** for Renesas
+RZ/V2N, **dxcom** for DEEPX DX-M1, plus a portable CPU/TFLM blob as
+the universal fallback.  At runtime, `alp_inference_open_alpmodel()`
+loads the package and its selection engine picks the matching blob
+(silicon-ref + SRAM-fit + `preferred_backend` tiebreak); see the
+*Inference* row above for the dispatcher detail.
 
 ### Peripherals: how a block resolves to a backend
 
@@ -634,6 +676,20 @@ CONFIG_ALP_SDK_CHIP_LSM6DSO=y
 #include <alp/peripheral.h>
 #include <alp/chips/lsm6dso.h>
 ```
+
+### Plain CMake consumption (bare-metal, Yocto, host tests)
+
+For a non-west consumer, `add_subdirectory()` the SDK directly:
+
+```cmake
+add_subdirectory(third_party/alp-sdk)
+target_link_libraries(my_app PRIVATE alp::sdk)
+```
+
+`ALP_OS` picks the backend (`zephyr`, `baremetal`, or `yocto`): the top-level
+`CMakeLists.txt` defaults it to `zephyr` when `ZEPHYR_BASE` is defined in the
+including build, else `baremetal`.  Set it explicitly for a Yocto consumer
+(`-DALP_OS=yocto`).
 
 ### Yocto consumption (v0.4+)
 

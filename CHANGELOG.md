@@ -7,6 +7,172 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Added — ADR 0024: V2N/V2M analog and counter classes stay on the GD32 bridge (#1150)
+
+Design decision only, no code:
+`docs/adr/0024-v2n-analog-and-counter-classes-stay-on-the-gd32-bridge.md`
+records that ADC, PWM, DAC, counter, and qenc stay served exclusively
+by the GD32 IO-MCU bridge on V2N/V2M — no native RZ/V2N leg is added.
+No SoC pin reaches an E1M-standard analog or counter pad on this
+family (verified at the `gd32-io-mcu-map.tsv` / `renesas-peripheral-map.tsv`
+source), so a priority-selected fallback leg would have nothing to
+attach to and could only fail silently. Also records that the
+six-surface 2026-06-04 HiL quarantine #1150 cites has mostly moved
+on — four of the six are firmware-cleared and a fifth is mitigated,
+per a later 253/253 20-row soak at fw v0.2.9; the real single point
+of failure is the shared supervisor/transport, which is a
+bridge-firmware quality question, not a backend-priority one.
+
+### Added — ADR 0023: Ethernet stays out of the `<alp/*>` surface (#1144)
+
+Design decision only, no code: `docs/adr/0023-ethernet-out-of-the-alp-surface.md`
+records that Ethernet's control and data planes stay outside
+`<alp/*>` — the portable contract is the compile-time capability
+(`ALP_SOC_ETHERNET_COUNT`), the form-factor port identity
+(`ALP_E1M_ETH0`/`ALP_E1M_X_ETH0`/`ALP_E1M_X_ETH1`), and the
+ring-2 `rtl8211fdi` PHY chip driver, not a new `<alp/net.h>`. Narrowly
+supersedes `docs/adr/0003-peripheral-coverage.md`'s "Ethernet folds
+into `<alp/iot.h>`" row, which never happened.
+
+### Added — `scripts/gen_rzv2n_cm33_svd.py`: a CMSIS-SVD register view for the RZ/V2N CM33 (#1029)
+
+Renesas ships no CMSIS-SVD for the RZ/V2N, so a debugger's peripheral view
+has had nothing to load. This generator mechanically projects one from the
+vendored `hal_renesas` west module's FSP headers, cross-validating each
+bitfield it emits between the two independent vendor projections
+(`iodefines/`'s C register structs and `iobitmasks/`'s `_Pos`/`_Msk`
+macros) so a mismatch fails loudly instead of rendering a wrong value in a
+debugger. 15 fields (of ~9200, against the real corpus) are exempt — real,
+itemised disagreements between the two vendor projections themselves,
+listed with evidence in `FIELD_CROSS_CHECK_SKIPS` (a further 7
+`iobitmasks/`-side macros with no `iodefine` counterpart at all are
+tracked separately in `IOBITMASK_ORPHAN_SKIPS`). Each of the 15 either
+emits with the position/width the OTHER evidence agrees on
+(`FIELD_POSITION_OVERRIDES`) or with an explicit `NOT CROSS-VALIDATED`
+`<description>`, never as an indistinguishable plain field. Deliberately
+**not committed and not a CI gate** — every consumer is mid-CM33-debug and
+already has the west workspace this reads from; see
+`docs/architecture.md`'s generators section for the full reasoning. Run
+locally: `python3 scripts/gen_rzv2n_cm33_svd.py --output <path>`. The test
+fixture's header excerpts join `vendors/**` and `zephyr/**` on the
+clang-format gate's exclusion list, in both `pr-static-analysis.yml` and
+`scripts/test-all.sh`'s local mirror — they are verbatim vendor content
+whose byte-identity with the real headers the tests assert, so
+reformatting them would break the fixture.
+
+### Fixed — `ALP_CAP_HW_ETHERNET` read false on V2N/V2M despite two 1 GbE ports (#1240)
+
+`scripts/gen_soc_caps.py`'s `ETHERNET_COUNT` matched only the `ethernet` key.
+RZ/V2N's `metadata/socs/renesas/rzv2n/n44.json` publishes `ethernet_1g`
+instead, so `ALP_SOC_ETHERNET_COUNT` emitted `0` for the family with the most
+Ethernet on it and `ALP_CAP_HW_ETHERNET` — the compile-time gate a customer is
+meant to key off — reported the opposite of the silicon. It now sums every
+Ethernet-flavoured key, mirroring how `USB_COUNT` already sums `usb_2` +
+`usb_3` two entries below, and `include/alp/soc_caps.h` is regenerated: one
+line moves, `:373` from `0` to `2`.
+
+The guard against a recurrence is the substance of the fix, not a courtesy.
+Its first form hardcoded its own copy of the key list, so reverting the
+generator left it green — the same defect wearing a test's clothes. It now
+probes the real `ETHERNET_COUNT` lambda out of `gen_soc_caps.CAPS`, which
+fails in both directions: a SoC key the generator ignores, and a generator
+that stops consuming a key already in the tree. Key matching is
+case-insensitive because `metadata/schemas/soc-spec-v1.schema.json` puts no
+pattern on peripherals key names.
+
+Two things worth recording. The sibling generator
+`scripts/gen_support_matrix.py` already read this correctly, via
+`_has_prefix(s, "ethernet")` — the two generators disagreed about the same
+metadata, and only one of them feeds `ALP_CAP_HW_ETHERNET` (#1243). And
+`ALP_CAP_HW_ETHERNET` stays false for `nxp:imx9:imx93` after this change, for
+an unrelated reason: that SoC declares its peripheral counts pending
+reference-manual ingestion, so there is no key to sum and none may be
+inferred from the absence.
+
+### Fixed — the Doxygen build was red on `dev` itself (#1245)
+
+Two ordinary GitHub-Markdown links in `README.md` were unresolvable `\ref`
+targets for Doxygen: `[Status](#status)` (Doxygen's heading-anchor scheme
+does not yield `status` for `## Status`) and `` [`CHANGELOG.md`](CHANGELOG.md) ``
+(`CHANGELOG.md` is not in the Doxyfile `INPUT`). Since the Doxyfile runs
+`WARN_AS_ERROR`, the `pr-doxygen` gate and `scripts/test-all.sh`'s `doxygen`
+stage failed on **every** branch cut from `dev`, including branches touching
+no documentation.
+
+The links now point at `README.md#status` and at the changelog's canonical
+URL under `/blob/HEAD/`, which follows the default branch instead of pinning
+one. Both still resolve on GitHub, and the Doxygen warning log is empty.
+
+Two tidier-looking fixes were tested and rejected: adding `CHANGELOG.md` to
+the Doxyfile `INPUT` trades one error for thirty from the changelog's own
+prose, and `MARKDOWN_ID_STYLE = GITHUB` needs Doxygen 1.10+ while this repo
+builds on 1.9.8, where setting it raises a different error instead.
+
+The reason it reached `dev` at all is that `pr-doxygen` is not a required
+status check on `dev` or on `main`.
+
+### Added — the RZ/V2N on-die DRP-AI3 NPU is reachable from `<alp/inference.h>`, opt-in (#1145)
+
+DRP-AI3 was dark: the CMake option defaulted OFF, no kernel driver bound the
+reserved carve-out, and `src/yocto/inference_drpai.cpp` was a stub, so 4 TOPS
+of on-die NPU had no path from the portable inference surface.
+
+**Two independent switches, both default OFF, deliberately not merged into
+one.** `PACKAGECONFIG[drpai]` on the `alp-sdk` recipe compiles the backend in;
+`ALP_ENABLE_DRPAI = "1"` installs the devicetree override that claims the
+carve-out. The backend without the node fails at `open()` with a clear error;
+the node without the backend is an idle device. Neither silently half-works.
+
+The DT switch is separate from layer presence on purpose. `meta-rz-drpai`
+ships bundled in the RZ/V2N AI SDK BSP v6.30, so gating only on its presence —
+as an earlier revision of this change did — would have taken `&drpai0` from
+`disabled` to `okay` on **every** existing V2N/V2M image, making the driver
+probe and `/dev/drpai0` appear on boards whose owners never asked for an NPU.
+That is a behaviour change wearing an opt-in's clothes.
+
+- `e1m-v2n-drpai.dtsi` overrides `&drpai0` with `memory-region = <&drp_reserved>`
+  (`0xd0000000`, `0x20000000`) and `memory-shared-for-drpai-ext-cont =
+  <&shared_drp_reserved>` (`0xafcff000`, `0x1000`), matching the vendor's own
+  EVK override. Both properties are mandatory: on V2N the driver defines
+  `ENABLE_DRP_SUPPORT_SHARED_MEMORY`, so a probe missing the second hard-fails
+  with `-ENOMEM` rather than degrading.
+- `mera2-drpai-tvm_2.7.0.bb` packages the EdgeCortix MERA2 + DRP-AI TVM
+  runtime, staged from a builder-supplied `RUHMI_DRPAI_TVM_DIR`. It vendors
+  nothing. Now scoped with `COMPATIBLE_MACHINE` to the four V2N/V2M machines
+  and pinned to `PACKAGE_ARCH = "${MACHINE_ARCH}"` — `EXCLUDE_FROM_WORLD`
+  alone would not have stopped an image pulling SoC-specific prebuilts into an
+  unrelated aarch64 build.
+- `src/yocto/inference_drpai.cpp` becomes real `MeraDrpRuntimeWrapper` code.
+
+### Changed — `libalp_sdk`'s own link now refuses undefined symbols (#1145)
+
+`LINKER:--no-undefined` on GNU ld / lld. A shared library tolerates undefined
+symbols by default, and that is how `libalp_sdk.so` once linked *successfully*
+with the DRP-AI backend compiled in while `MeraDrpRuntimeWrapper`'s symbols
+were nowhere on the link line — the break surfaced later, in a downstream
+consumer, via the direct plain-CMake path.
+
+Every optional Linux/Yocto backend was audited for a legitimate
+`dlopen()`/weak-external pattern that needs undefined symbols tolerated; none
+exists. The weak symbols in this tree (`cc3501e_proxy`, `zephyr_drv`
+`gpio_resolve`, `update_log`'s TF-M seam) are weak **definitions** with real
+fallback bodies, not unresolved weak references.
+
+This makes an existing latent DEEPX bug fatal, so that is fixed in the same
+change: the DEEPX block added `inference_deepx.cpp` before probing and only
+warned when `find_library(DXRT_LIB dxrt)` missed. There is no in-tree
+`dxrt/dxrt_api.h` stub, so a sysroot carrying `dx-rt-dev` headers without
+`libdxrt` compiled fine and would now fail the SDK's own link. It now probes
+first and skips the backend rather than compiling a translation unit whose
+symbols cannot resolve, with `ALP_SDK_DEEPX_REQUIRED` to turn that into a hard
+error where a recipe opted in by name — mirroring `ALP_SDK_DRPAI_REQUIRED`.
+
+**Not bench-verified.** None of this has run on DRP-AI silicon, and no
+`alp-image-edge` bake has completed with `drpai` enabled. The kernel driver is
+proven independently on real V2N-M1 silicon (`/dev/drpai0` probes clean,
+`DRPAI_GET_DRPAI_AREA` returns the `0xD0000000` / 512 MiB arena) but that is
+the vendor driver, not this change's payload.
+
 ### Added — real Yocto backends for `<alp/display.h>` and `<alp/i3c.h>` (#1143, #1147)
 
 **ABI + behaviour change, both deliberate.** `alp_display_config_t` gains
@@ -2157,6 +2323,22 @@ self-contradicted, citing p.112 correctly a few lines below the p.113 typo),
 `zephyr/kconfigs/mproc-rpc-usb.kconfig`, `docs/aen-bench-bringup.md` (two
 sites), and this file's own `[v0.15.0]` entry. Citation-only; no behavior
 change.
+### Added — three Arm curated third-party libraries (ADR 0018, Tier B)
+
+`metadata/libraries/cmsis-stream.yaml`, `cmsis-cv.yaml`, and `arm-2d.yaml`
+formalise `libraries: [cmsis-stream]` / `[cmsis-cv]` / `[arm-2d]`, all
+recipe-only (Tier B, not built in alp-sdk CI). `west.yml` gains an
+`arm-software` remote and three `extras-tier1` project pins:
+`cmsisstream` (repo `CMSIS-Stream`) at tag `v3.2.0` (upstream ships its own
+`zephyr/module.yml`,
+module `cmsisstream`, umbrella symbol `CONFIG_CMSISSTREAM`), `CMSIS-CV`
+SHA-pinned at `25c6c111ee04dcfb0ae9093fd6dee4586872982c` (upstream has cut
+no tags and ships no Zephyr module glue — self-described "work in
+progress"), and `Arm-2D` at tag `v1.2.6` (mature tagged release, likewise
+no upstream Zephyr module glue; LVGL v9's `LV_USE_DRAW_ARM2D_SYNC` draw
+path exists upstream but Zephyr v4.4's `modules/lvgl/Kconfig` does not
+expose it, so only Arm-2D's standalone Helium API is usable today). None
+of the three is vendored in-tree.
 
 ## [v0.15.0] - 2026-07-31
 

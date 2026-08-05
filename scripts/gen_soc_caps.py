@@ -94,7 +94,7 @@ CAPS: list[tuple[str, callable]] = [
         # bound until we get a more specific field.
         lambda p: p.get("pwm", p.get("timer_32bit", 0) or 0)),
     ("ETHERNET_COUNT",
-        lambda p: p.get("ethernet", 0) or 0),
+        lambda p: (p.get("ethernet", 0) or 0) + (p.get("ethernet_1g", 0) or 0)),
     ("USB_COUNT",
         lambda p: (p.get("usb_2", 0) or 0) + (p.get("usb_3", 0) or 0)),
     ("MIPI_CSI_COUNT",

@@ -216,6 +216,22 @@
 	};
 };
 
+/*
+ * On-die DRP-AI3 NPU enable (claims drp_reserved + shared_drp_reserved
+ * above, and flips the node to "okay").
+ *
+ * Kept in its own file because it can only be compiled when the OPTIONAL
+ * meta-rz-drpai layer is in bblayers.conf: that layer's
+ * 0001-add-drpai-property-to-devicetree.patch is what CREATES the `drpai0`
+ * label in r9a09g056.dtsi -- the pristine linux-renesas tree has no such
+ * node, so an unconditional `&drpai0` here aborts dtc for every board that
+ * includes this SoM dtsi (V2N and V2M alike).  The linux-renesas bbappend
+ * installs the real override when the layer is present and a comment-only
+ * stub when it is not; the rationale, the mandatory-second-property rule and
+ * the mmp_reserved warning all live in that file.
+ */
+#include "e1m-v2n-drpai.dtsi"
+
 /* On-module eMMC on SDHI0 (8-bit, HS200, non-removable). */
 &sdhi0 {
 	pinctrl-0 = <&sdhi0_emmc_pins>;
