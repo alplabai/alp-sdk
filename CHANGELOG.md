@@ -1816,6 +1816,14 @@ real git server at `https://bearssl.org/git/BearSSL`.
   `extras-tier1` group may pin one either — a floating branch pin is a
   supply-chain hole (non-reproducible build, silent upstream force-push)
   and, as minimp3 showed, can also simply not exist.
+- `.github/workflows/nightly-extras-tier1-pins.yml` now derives its
+  `extras-tier1` roster from `west.yml` at run time instead of hardcoding
+  it: PR #1237 added three libraries (`cmsisstream`, `CMSIS-CV`,
+  `Arm-2D`) to `west.yml`'s `extras-tier1` group without updating this
+  workflow's then-hardcoded library list, so those three were fetched and
+  verified by nothing — a pin nothing checked. A third regression guard,
+  `test_nightly_extras_tier1_workflow_does_not_hardcode_the_library_list`,
+  fails the build if the roster is ever re-hardcoded.
 
 ### Added — real Yocto backends for `<alp/display.h>` and `<alp/i3c.h>` (#1143, #1147)
 
