@@ -788,3 +788,19 @@ def test_new_m_class_libraries_reject_a_only_soc() -> None:
             liblayer._check_requires(name, manifest, project, liblayer.METADATA_ROOT)
         assert name in str(exc.value)
         assert "core_class" in str(exc.value)
+
+
+# ---------------------------------------------------------------------
+# ONNX Runtime -- the A55 CPU inference floor (yocto-only, tier B)
+# ---------------------------------------------------------------------
+
+def test_onnxruntime_is_yocto_only_and_a_class():
+    """ORT targets the A55 Linux side only. A zephyr section would imply an
+    M-class build we do not ship."""
+    manifest = yaml.safe_load(
+        (REPO / "metadata" / "libraries" / "onnxruntime.yaml").read_text(encoding="utf-8")
+    )
+    assert manifest["tier"] == "B"
+    assert "yocto" in manifest["integration"]
+    assert "zephyr" not in manifest["integration"]
+    assert manifest["requires"]["core_class"] == "a"
