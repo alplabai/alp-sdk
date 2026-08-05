@@ -7,6 +7,22 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Added — ADR 0024: V2N/V2M analog and counter classes stay on the GD32 bridge (#1150)
+
+Design decision only, no code:
+`docs/adr/0024-v2n-analog-and-counter-classes-stay-on-the-gd32-bridge.md`
+records that ADC, PWM, DAC, counter, and qenc stay served exclusively
+by the GD32 IO-MCU bridge on V2N/V2M — no native RZ/V2N leg is added.
+No SoC pin reaches an E1M-standard analog or counter pad on this
+family (verified at the `gd32-io-mcu-map.tsv` / `renesas-peripheral-map.tsv`
+source), so a priority-selected fallback leg would have nothing to
+attach to and could only fail silently. Also records that the
+six-surface 2026-06-04 HiL quarantine #1150 cites has mostly moved
+on — four of the six are firmware-cleared and a fifth is mitigated,
+per a later 253/253 20-row soak at fw v0.2.9; the real single point
+of failure is the shared supervisor/transport, which is a
+bridge-firmware quality question, not a backend-priority one.
+
 ### Added — ADR 0023: Ethernet stays out of the `<alp/*>` surface (#1144)
 
 Design decision only, no code: `docs/adr/0023-ethernet-out-of-the-alp-surface.md`

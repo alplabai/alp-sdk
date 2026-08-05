@@ -214,3 +214,7 @@ address 1 while the E8 bench log reads it at address 0).
   `metadata/chips/rtl8211fdi.yaml` — the V2N/V2M PHY chip driver.
 - `examples/aen/aen-ethernet-link/` — the silicon-proven Zephyr
   `net_if` reference this decision rests on.
+- `docs/adr/0024-v2n-analog-and-counter-classes-stay-on-the-gd32-bridge.md`
+  — opposite polarity: this ADR removes a class from `<alp/*>`; 0024
+  keeps five classes in `<alp/*>` while fixing which die serves
+  them.
