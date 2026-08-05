@@ -70,8 +70,15 @@ jobs:
           # their UPSTREAM project's style (GigaDevice firmware library,
           # Zephyr/Renesas-FSP drivers) so they stay diffable against
           # their sources -- our .clang-format does not govern them.
+          # tests/scripts/fixtures/rzv2n_svd/** is excluded for the same
+          # reason and one more: those headers are verbatim BSD-3-Clause
+          # excerpts of the Renesas FSP iodefines/iobitmasks, and
+          # test_gen_rzv2n_cm33_svd.py asserts they stay byte-identical
+          # to the real module headers.  Reformatting them would break
+          # the very property the fixture exists to hold.
           git diff -U0 ${{ steps.base.outputs.ref }} -- '*.c' '*.h' \
               ':!vendors/**' ':!zephyr/**' \
+              ':!tests/scripts/fixtures/rzv2n_svd/**' \
               | python3 "$DIFF_TOOL" -p1 \
               | tee clang-format-diff.txt
           if [ -s clang-format-diff.txt ]; then
