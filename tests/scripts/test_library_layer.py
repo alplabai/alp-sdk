@@ -788,3 +788,36 @@ def test_new_m_class_libraries_reject_a_only_soc() -> None:
             liblayer._check_requires(name, manifest, project, liblayer.METADATA_ROOT)
         assert name in str(exc.value)
         assert "core_class" in str(exc.value)
+
+
+# --- floating version pins are a supply-chain hole --------------------
+
+
+def test_no_library_manifest_tracks_a_floating_branch() -> None:
+    """A floating `main`/`master` pin is a supply-chain hole: the build is not
+    reproducible and an upstream force-push silently changes what we ship."""
+    floating = {"main", "master", "HEAD", "trunk", ""}
+    offenders = []
+    for path in sorted((REPO / "metadata" / "libraries").glob("*.yaml")):
+        manifest = yaml.safe_load(path.read_text(encoding="utf-8"))
+        version = str(manifest.get("version", "")).strip()
+        if version in floating or version.lower().startswith("unpinned"):
+            offenders.append(path.name)
+    assert offenders == [], f"floating version pins: {offenders}"
+
+
+def test_no_west_manifest_extras_tier1_tracks_a_floating_branch() -> None:
+    """Same hole, at the west.yml source of truth: a project in the
+    ``extras-tier1`` group must pin a tag or commit SHA, never a branch --
+    a floating branch pin can also silently not exist at all (minimp3's
+    prior ``main`` pin: the branch never existed on lieff/minimp3)."""
+    floating = {"main", "master", "HEAD", "trunk", ""}
+    doc = yaml.safe_load((REPO / "west.yml").read_text(encoding="utf-8"))
+    offenders = []
+    for project in doc["manifest"]["projects"]:
+        if "extras-tier1" not in (project.get("groups") or []):
+            continue
+        revision = str(project.get("revision", "")).strip()
+        if revision in floating:
+            offenders.append(f"{project['name']}: {revision!r}")
+    assert offenders == [], f"floating extras-tier1 revisions: {offenders}"

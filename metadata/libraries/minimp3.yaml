@@ -15,9 +15,16 @@
 #     against an out-of-workspace worktree. The `extras-tier1` west.yml
 #     pin (remote lieff, repo-path minimp3, path modules/lib/minimp3)
 #     remains the audit-trail / version source-of-truth per that README.
-#   * upstream version: `master` -- no tagged upstream release exists;
-#     vendored copy fetched 2026-07-10 (vendors/minimp3/README.md
-#     "What's here"). Tracked in
+#   * upstream version: pinned to master HEAD commit
+#     ea99364f61c14656440e8d77e9c233ccf3124633 (2026-07-27) -- no tagged
+#     upstream release exists. The west.yml pin previously read
+#     `revision: main`, which is BROKEN: lieff/minimp3 has no `main`
+#     branch (`gh api repos/lieff/minimp3/commits/main` -> HTTP 422 "No
+#     commit found for SHA: main"); the default branch is `master`. `west
+#     update --group-filter +extras-tier1` could not fetch this project
+#     at all under the old pin. Vendored copy fetched 2026-07-10
+#     (vendors/minimp3/README.md "What's here"); re-verify against the
+#     new SHA when next refreshed. Tracked in
 #     `.github/workflows/nightly-extras-tier1-pins.yml` as a "TBD"
 #     library (WARN, not FAIL, on nightly fetch breakage).
 #   * licence CC0-1.0 -- confirmed verbatim from the vendored
@@ -50,7 +57,7 @@ schema_version: 1
 name: minimp3
 description: "minimp3 -- single-header, portable, pure-C MP3 decoder."
 tier: B
-version: "master"
+version: "ea99364f61c14656440e8d77e9c233ccf3124633"
 license: CC0-1.0
 
 integration:
