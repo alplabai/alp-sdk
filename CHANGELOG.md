@@ -34,6 +34,27 @@ ring-2 `rtl8211fdi` PHY chip driver, not a new `<alp/net.h>`. Narrowly
 supersedes `docs/adr/0003-peripheral-coverage.md`'s "Ethernet folds
 into `<alp/iot.h>`" row, which never happened.
 
+### Added — `scripts/gen_rzv2n_cm33_svd.py`: a CMSIS-SVD register view for the RZ/V2N CM33 (#1029)
+
+Renesas ships no CMSIS-SVD for the RZ/V2N, so a debugger's peripheral view
+has had nothing to load. This generator mechanically projects one from the
+vendored `hal_renesas` west module's FSP headers, cross-validating each
+bitfield it emits between the two independent vendor projections
+(`iodefines/`'s C register structs and `iobitmasks/`'s `_Pos`/`_Msk`
+macros) so a mismatch fails loudly instead of rendering a wrong value in a
+debugger. 15 fields (of ~9200, against the real corpus) are exempt — real,
+itemised disagreements between the two vendor projections themselves,
+listed with evidence in `FIELD_CROSS_CHECK_SKIPS` (a further 7
+`iobitmasks/`-side macros with no `iodefine` counterpart at all are
+tracked separately in `IOBITMASK_ORPHAN_SKIPS`). Each of the 15 either
+emits with the position/width the OTHER evidence agrees on
+(`FIELD_POSITION_OVERRIDES`) or with an explicit `NOT CROSS-VALIDATED`
+`<description>`, never as an indistinguishable plain field. Deliberately
+**not committed and not a CI gate** — every consumer is mid-CM33-debug and
+already has the west workspace this reads from; see
+`docs/architecture.md`'s generators section for the full reasoning. Run
+locally: `python3 scripts/gen_rzv2n_cm33_svd.py --output <path>`.
+
 ### Fixed — `ALP_CAP_HW_ETHERNET` read false on V2N/V2M despite two 1 GbE ports (#1240)
 
 `scripts/gen_soc_caps.py`'s `ETHERNET_COUNT` matched only the `ethernet` key.

@@ -314,6 +314,31 @@ runner args) stays hand-authored for every family -- its prose is a
 documentation choice (which sibling board's file carries the full
 bring-up runbook), not a hardware fact derivable from metadata.
 
+**Not in the inventory above -- a standalone dev tool, not a build-time
+generator.** `scripts/gen_rzv2n_cm33_svd.py` (issue #1029 step 2) projects a
+CMSIS-SVD 1.3 register-view file for the RZ/V2N CM33 out of the vendored
+`hal_renesas` west module's FSP headers (`iodefines/` register structs
+cross-checked field-for-field against `iobitmasks/` `_Pos`/`_Msk` constants
+-- Renesas ships no SVD for this part at all -- except for 15 fields, of
+~9200 against the real corpus, where the two vendor headers disagree with
+each other (plus 7 further `iobitmasks/`-side macros with no `iodefine`
+counterpart at all); those are named individually in the script and still
+emit, either at a position corroborated by other evidence or carrying an
+explicit "not cross-validated" note, never silently). It differs from every
+generator above in three ways, all deliberate: **its output is never
+committed** (there is no `docs/svd/*.svd` in this tree and there will not
+be); **it is not wired into any CI gate** (`pr-generated-files` or
+otherwise); and it **requires a west workspace with `hal_renesas` checked
+out** to run at all (`--fsp-include-dir` to point at one explicitly, or
+automatic discovery via the west topdir). The reasoning: every developer who
+wants this SVD is mid-CM33-debug and therefore already has exactly such a
+workspace -- the one that built the firmware they are debugging. Committing
+the generated file would serve nobody and would force a second, CI-visible
+`hal_renesas` pin that drifts from the real one (which already resolves
+transitively through Zephyr's own `west.yml`) -- a contract-drift trap the
+"generators inventory" pattern above exists to avoid, not invite. Run it
+locally: `python3 scripts/gen_rzv2n_cm33_svd.py --output <path>`.
+
 ## Library design
 
 ### Peripheral primitives
