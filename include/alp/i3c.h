@@ -42,7 +42,13 @@
  * Backends:
  *   - Zephyr   : upstream `i3c_*` driver class (Synopsys DesignWare
  *                i3c_dw.c, "snps,designware-i3c") via DT alias alp-i3c0.
- *   - Yocto    : none yet; sw_fallback (open succeeds, ops NOSUPPORT).
+ *   - Yocto    : a bus PRESENCE check only (src/backends/i3c/yocto_drv.c,
+ *                issue #1147) -- confirms the controller exists under
+ *                /sys/bus/i3c/devices/i3c-N (N == bus_id).  write() / read() /
+ *                write_read() stay ALP_ERR_NOSUPPORT on every mainline
+ *                kernel: unlike I2C's ioctl(I2C_RDWR), Linux has NO
+ *                generic userspace raw-transfer ABI for I3C at all --
+ *                the subsystem is kernel-driver-bind-only.
  *   - Baremetal: none yet; sw_fallback.
  *
  * Typical usage:

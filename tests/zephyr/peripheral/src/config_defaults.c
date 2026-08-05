@@ -173,7 +173,15 @@ ZTEST(alp_peripheral, test_camera_config_default)
 ZTEST(alp_peripheral, test_display_config_default)
 {
 	alp_display_config_t cfg = ALP_DISPLAY_CONFIG_DEFAULT(2u);
-	zassert_equal(cfg.display_id, 2u, "identity-only config");
+	zassert_equal(cfg.display_id, 2u, "names the instance");
+	/* The safe default, and the only thing pinning it.  On Yocto/Linux,
+	 * opening a display means becoming DRM master and reprogramming the
+	 * live output -- which the kernel permits whenever master is merely
+	 * unheld (idle fbcon, VT-switched-away session, headless SSH on a
+	 * board with a panel).  If this flips to true, a default-constructed
+	 * config can blank someone's screen and nothing else would notice
+	 * (#1143). */
+	zassert_false(cfg.allow_modeset, "safe default -- see <alp/display.h>");
 }
 
 ZTEST(alp_peripheral, test_i2c_target_config_default)
