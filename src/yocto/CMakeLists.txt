@@ -93,6 +93,15 @@ path (a)/(b) note below -- so it does not justify this default; OFF stands \
 on the plain-CMake case alone.)"
     OFF)
 
+option(ALP_SDK_DEEPX_REQUIRED
+    "Treat a missing DEEPX dx_rt stack as a configure ERROR instead of \
+warning and disabling the backend.  Same rationale and same default as \
+ALP_SDK_DRPAI_REQUIRED above: OFF lets a plain-CMake builder who passed \
+-DALP_SDK_USE_DEEPX_DXM1=ON by hand degrade cleanly, while a recipe that \
+opts in by name should set this ON so a silently backend-less \
+libalp_sdk.so is not the answer."
+    OFF)
+
 target_sources(alp_sdk PRIVATE
     # Split stub backend (#673) -- one TU per API class plus the
     # shared stub_core.c (last-error slot + delay primitives).
@@ -649,37 +658,51 @@ endif()
 # BENCH-UNVERIFIED: compiles/header-checks; not run on silicon.        #
 # ------------------------------------------------------------------ #
 if(ALP_SDK_USE_DEEPX_DXM1)
-    target_sources(alp_sdk PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/inference_deepx.cpp
-    )
-    target_compile_definitions(alp_sdk PRIVATE
-        ALP_SDK_USE_DEEPX_DXM1=1
-    )
-
-    # Resolve the dx_rt headers + libdxrt.  Inside the Yocto cross-build
-    # the sysroot already carries them at the standard prefix; for an
-    # out-of-Yocto build (maintainer header-check) point ALP_DEEPX_DXRT_HOME
-    # at a dx_rt clone/install.
+    # PROBE FIRST, then decide whether to compile the backend in.
+    #
+    # This block used to add inference_deepx.cpp unconditionally and merely
+    # warn when libdxrt was missing.  That was survivable while a shared
+    # libalp_sdk tolerated undefined symbols -- the break surfaced later, in
+    # a downstream consumer's link.  #1145 adds LINKER:--no-undefined to
+    # this library's own link, which turns that warning into a hard failure
+    # of the SDK build itself.  There is no in-tree dxrt/dxrt_api.h stub, so
+    # a sysroot carrying dx-rt-dev headers WITHOUT libdxrt compiles the
+    # translation unit fine and then fails at link.  Same find-first shape
+    # as the DRP-AI block below.
     if(DEFINED ENV{ALP_DEEPX_DXRT_HOME})
-        target_include_directories(alp_sdk PRIVATE
-            $ENV{ALP_DEEPX_DXRT_HOME}/lib/include)
+        set(_alp_deepx_inc $ENV{ALP_DEEPX_DXRT_HOME}/lib/include)
         find_library(DXRT_LIB dxrt PATHS $ENV{ALP_DEEPX_DXRT_HOME}/lib)
     else()
         find_path(DXRT_INCLUDE_DIR dxrt/dxrt_api.h)
-        if(DXRT_INCLUDE_DIR)
-            target_include_directories(alp_sdk PRIVATE ${DXRT_INCLUDE_DIR})
-        endif()
+        set(_alp_deepx_inc ${DXRT_INCLUDE_DIR})
         find_library(DXRT_LIB dxrt)
     endif()
 
-    if(DXRT_LIB)
+    if(DXRT_LIB AND _alp_deepx_inc)
+        target_sources(alp_sdk PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/inference_deepx.cpp
+        )
+        target_compile_definitions(alp_sdk PRIVATE
+            ALP_SDK_USE_DEEPX_DXM1=1
+        )
+        target_include_directories(alp_sdk PRIVATE ${_alp_deepx_inc})
         target_link_libraries(alp_sdk PRIVATE ${DXRT_LIB})
+    elseif(ALP_SDK_DEEPX_REQUIRED)
+        message(FATAL_ERROR
+            "alp-sdk yocto: ALP_SDK_USE_DEEPX_DXM1=ON and "
+            "ALP_SDK_DEEPX_REQUIRED=ON, but the dx_rt headers and/or libdxrt "
+            "were not found.  Install the meta-deepx-m1 dx-rt recipe on the "
+            "Yocto sysroot, or set ALP_DEEPX_DXRT_HOME.")
     else()
+        # Skip the backend rather than compile a translation unit whose
+        # symbols cannot resolve.  The dispatcher's own NOT_IMPLEMENTED path
+        # still answers alp_inference_open(.backend = DEEPX) honestly.
         message(WARNING
-            "alp-sdk yocto: ALP_SDK_USE_DEEPX_DXM1=ON but libdxrt not found. "
-            "Install the meta-deepx-m1 dx-rt recipe on the Yocto sysroot, or "
-            "set ALP_DEEPX_DXRT_HOME.  The DEEPX backend will not link until "
-            "then (BENCH-UNVERIFIED until V2N-M1 HIL bring-up).")
+            "alp-sdk yocto: ALP_SDK_USE_DEEPX_DXM1=ON but the dx_rt headers "
+            "and/or libdxrt were not found -- the DEEPX backend is NOT "
+            "compiled in.  Install the meta-deepx-m1 dx-rt recipe on the "
+            "Yocto sysroot, or set ALP_DEEPX_DXRT_HOME.  "
+            "(BENCH-UNVERIFIED until V2N-M1 HIL bring-up.)")
     endif()
 endif()
 

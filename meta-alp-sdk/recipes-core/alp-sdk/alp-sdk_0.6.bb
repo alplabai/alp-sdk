@@ -45,18 +45,25 @@ EXTRA_OECMAKE = "-DALP_SDK_BUILD_SHARED=ON      \
 #   audio    -> alsa-lib   (oe-core; also enables the I2S backend)
 #   rpc      -> open-amp + libmetal (meta-openamp; default OFF because
 #               the layer is not in the standard alp bblayers set yet)
+#   drpai    -> mera2-drpai-tvm (RZ/V2N on-die DRP-AI3 NPU; default OFF.
+#               Requires meta-rz-drpai in bblayers.conf for the runtime's
+#               own build inputs.  Turning this on is what makes
+#               src/yocto/inference_drpai.cpp compile in -- see #1145.)
 PACKAGECONFIG ??= "mqtt security audio"
 PACKAGECONFIG[mqtt]     = ",,mosquitto"
 PACKAGECONFIG[security] = ",,openssl"
 PACKAGECONFIG[audio]    = ",,alsa-lib"
 PACKAGECONFIG[rpc]      = ",,open-amp libmetal"
+PACKAGECONFIG[drpai]    = "-DALP_SDK_USE_DRPAI_V2N=ON -DALP_SDK_DRPAI_REQUIRED=ON,-DALP_SDK_USE_DRPAI_V2N=OFF,mera2-drpai-tvm,"
 
 # Inference backends are NOT build-time dependencies of the SDK
 # library.  The Yocto build (src/yocto/) links only the
 # <alp/inference.h> dispatcher + the portable stubs; the vendor NPU
-# backends are gated/aspirational (DRP-AI3 is a NOT_IMPLEMENTED stub
-# today -- issue #58; the DEEPX DX-M1 backend is behind
-# ALP_SDK_USE_DEEPX_DXM1 and compiles against an in-tree stub header).
+# backends are gated (the DRP-AI3 backend is real MeraDrpRuntimeWrapper
+# code since #1145, but compiles in only under the `drpai` PACKAGECONFIG
+# above and has never run on DRP-AI silicon; the DEEPX DX-M1 backend is
+# behind ALP_SDK_USE_DEEPX_DXM1 and compiles against an in-tree stub
+# header).
 # Where a per-machine NPU userspace runtime package exists it is
 # installed by the *image* recipe (DEEPX's dx-rt is opted in per the
 # e1m-v2m10{1,2}-a55 MACHINE confs, gated on ALP_ENABLE_DEEPX_DXM1 --

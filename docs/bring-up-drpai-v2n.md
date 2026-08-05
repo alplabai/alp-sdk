@@ -3,8 +3,8 @@
 How to get the RZ/V2N's on-die DRP-AI3 NPU running a real model through
 `<alp/inference.h>` on an E1M-X V2N SoM.
 
-> **Status: KERNEL DRIVER PROVEN ON SILICON, PACKAGING FIXED, INFERENCE NOT YET
-> RUN.** A full `alp-image-edge` bake now completes on this host (12118 tasks,
+> **Status: KERNEL DRIVER PROVEN ON SILICON, PACKAGING WRITTEN BUT NEVER BAKED,
+> INFERENCE NOT YET RUN.** A full `alp-image-edge` bake now completes on this host (12118 tasks,
 > all succeeded, a 716 MB `.wic.gz`) — the first ever; previously nothing had
 > baked. That run had `drpai` OFF (the base image); see §4 for what is and
 > isn't proven about the `drpai`-enabled path. `PACKAGECONFIG[drpai]` now
@@ -36,7 +36,7 @@ this is fiddly.
 | `drpai0` DT node + label | `meta-rz-drpai`, `0001-add-drpai-property-to-devicetree.patch` | **Creates** the label; it does not exist in the pristine tree |
 | `<linux/drpai.h>` UAPI header | `meta-rz-drpai` recipe `drpai` (1.4.0) | Headers only |
 | `libtvm_runtime.so` | `meta-rz-drpai` recipe `lib-tvm` | |
-| The MERA2 runtime closure: headers + **ten** libraries, not three | `meta-alp-sdk/recipes-renesas/mera2-drpai-tvm/mera2-drpai-tvm_2.7.0.bb`, staged/compiled from a builder-supplied **`RUHMI_DRPAI_TVM_DIR`** checkout | Apache-2.0, not NDA-gated; the recipe vendors nothing — see §4 |
+| The MERA2 runtime closure: headers + **ten** libraries, not three | `meta-alp-sdk/recipes-renesas/mera2-drpai-tvm/mera2-drpai-tvm_2.7.0.bb`, staged/compiled from a builder-supplied **`RUHMI_DRPAI_TVM_DIR`** checkout | The recipe vendors nothing — see §4. Note its `LICENSE = "CLOSED"`: the `rzv_drp-ai_tvm` **sources** are Apache-2.0, but the prebuilt MERA2 libraries staged alongside them are account-gated, so the package as a whole is not redistributable. Tracked as a licence-manifest gap. |
 
 Baseline this was worked against: **AI SDK platform 7.1 on BSP v6.30**
 (`RTK0EF0189F06300SJ`, linux-renesas `6.1.141-cip43`).
@@ -116,6 +116,9 @@ not the SoC by default. Separately: the **kernel** half of the stack is
 already proven working on this silicon — `/dev/drpai0` exists on that board's
 current image and the driver probes clean (`drpai-rz 17000000.drpai: DRP-AI
 Driver version : 1.40 rel.3 V2N`, correct memory-region prints, zero errors).
+The `17000000` there is the device name Linux derives from the node's FIRST
+`reg` entry; the vendor names the node itself `drpai@16800000` after its
+second. Both are right — see the note in `e1m-v2n-drpai.dtsi`.
 What's missing there is the userspace (`ls /usr/lib/libdrpai*` finds nothing
 on that board) — the gap this branch's packaging (§4) closes.
 
@@ -198,7 +201,7 @@ is the step that would confirm the link and packaging end to end.
 image.** That layer ships its payload through a `core-image-%.bbappend`, and
 that wildcard does not match `alp-image-edge`, so the bbappend never fires and
 the image comes out with no DRP-AI userspace at all — silently.
-`alp-image-edge.bb` therefore installs `lib-tvm` and `kernel-module-mmngr`
+`alp-image-common.inc` therefore installs `lib-tvm` and `kernel-module-mmngr`
 explicitly, gated on the layer being present. See issue #1176; the same trap
 applies to the other `meta-rz-*` feature layers.
 
@@ -246,32 +249,36 @@ Auto-MDIX behaviour; see [errata-e1m-x-v2n.md](errata-e1m-x-v2n.md)) — so
 serial at 115200 is the only channel and there is no `scp` route for an image
 this size.
 
-Two things had to be fixed for a self-built image to boot this way, and both
-live in `meta-alp-sdk/recipes-bsp/u-boot/`:
+Two things had to be fixed for a self-built image to boot this way. Both are
+issue #1175, and **the fix is not part of this change** — it lives on `dev`
+already, via the `CONFIG_BOOTCOMMAND` override in
+`meta-alp-sdk/recipes-bsp/u-boot/u-boot/0002-rzv2n-dev-ALP-E1M-production-boot.patch`
+(#1186):
 
 - The vendor env loads `boot/r9a09g056n44-dev.dtb`, a filename no ALP image
-  builds, on **both** the SD and eMMC paths. `CONFIG_ALP_FDT_FILE` supplies the
-  per-SKU name and `CONFIG_BOOTCOMMAND` reloads it after the leading
-  `env default -a`. A miss now refuses to boot rather than pressing on with a
-  stale devicetree — hush does not abort a `;` list on a failed builtin, so
-  without the guard `booti` would run against whatever sat at `0x48000000`.
-- `CONFIG_ALP_SD_ROOT` sets the microSD root device. **Now confirmed:**
-  `mmcblk2` doesn't exist on this silicon at all — the board has exactly two
-  SDHI controllers, `15c00000.mmc` -> `mmc0` -> eMMC (with `boot0`/`boot1`/
-  `rpmb` partitions) and `15c10000.mmc` -> `mmc1` -> the SDHC slot — so eMMC is
-  always `mmcblk0` and microSD is always `mmcblk1`. The vendor env's
-  `alp_root=/dev/mmcblk2p2` names a device that can't exist; `mmcblk1p2` (what
-  `CONFIG_ALP_SD_ROOT` in `alp-boot-v2n.cfg` sets) is the fix.
+  builds, on **both** the SD and eMMC paths. `CONFIG_BOOTCOMMAND` re-loads the
+  correct dtb after the leading `env default -a` on both branches.
+- The microSD root device was wrong. **Confirmed on hardware:** `mmcblk2`
+  does not exist on this silicon at all — the board has exactly two SDHI
+  controllers, `15c00000.mmc` -> `mmc0` -> eMMC (with `boot0`/`boot1`/`rpmb`
+  partitions) and `15c10000.mmc` -> `mmc1` -> the SDHC slot. So eMMC is always
+  `mmcblk0` and microSD is always `mmcblk1`; the vendor env's
+  `alp_root=/dev/mmcblk2p2` names a device that cannot exist.
+
+> **Neither fix has booted a board.** `dev`'s version is code-complete and its
+> own CHANGELOG says so; a second, independent implementation exists unmerged
+> on `feat/1145-drpai-v2n-bringup` using per-MACHINE `CONFIG_ALP_FDT_FILE` /
+> `CONFIG_ALP_SD_ROOT` Kconfig strings, which would also close the V2M gap
+> `dev`'s hardcoded filename leaves open. See #1175 before relying on either.
 
 > **Operational trap.** The manual FIP flow has no `merge_config.sh` step, so it
-> builds from the Kconfig defaults — which are the vendor values. With the guard
-> in place, a FIP built that way will hard-stop instead of booting. Set
-> `CONFIG_ALP_FDT_FILE` and `CONFIG_ALP_SD_ROOT` in that flow's `.config` before
-> the next FIP build. Recoverable by reflashing a known-good FIP, but it costs a
-> bench session.
+> builds from the Kconfig defaults — the vendor values — and will boot the
+> wrong dtb. Build the FIP through the Yocto path, or check the resulting
+> `.config` before flashing. Recoverable by reflashing a known-good FIP, but it
+> costs a bench session.
 
-> **Flash-plan warning.** Don't assume a file written under the
-> `CONFIG_ALP_FDT_FILE` name is what a board will actually boot. On
+> **Flash-plan warning.** Don't assume the dtb your image built is the one a
+> board will actually boot. On
 > `e1mx-v2n-m1-01`, the running kernel's `bootargs` carry
 > `uio_pdrv_genirq.of_id=generic-uio` — a string that appears nowhere in the
 > `bootcmd` currently stored in `mtd1`. That means the live kernel/dtb/cmdline

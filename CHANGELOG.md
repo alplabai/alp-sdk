@@ -7,6 +7,68 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Added — the RZ/V2N on-die DRP-AI3 NPU is reachable from `<alp/inference.h>`, opt-in (#1145)
+
+DRP-AI3 was dark: the CMake option defaulted OFF, no kernel driver bound the
+reserved carve-out, and `src/yocto/inference_drpai.cpp` was a stub, so 4 TOPS
+of on-die NPU had no path from the portable inference surface.
+
+**Two independent switches, both default OFF, deliberately not merged into
+one.** `PACKAGECONFIG[drpai]` on the `alp-sdk` recipe compiles the backend in;
+`ALP_ENABLE_DRPAI = "1"` installs the devicetree override that claims the
+carve-out. The backend without the node fails at `open()` with a clear error;
+the node without the backend is an idle device. Neither silently half-works.
+
+The DT switch is separate from layer presence on purpose. `meta-rz-drpai`
+ships bundled in the RZ/V2N AI SDK BSP v6.30, so gating only on its presence —
+as an earlier revision of this change did — would have taken `&drpai0` from
+`disabled` to `okay` on **every** existing V2N/V2M image, making the driver
+probe and `/dev/drpai0` appear on boards whose owners never asked for an NPU.
+That is a behaviour change wearing an opt-in's clothes.
+
+- `e1m-v2n-drpai.dtsi` overrides `&drpai0` with `memory-region = <&drp_reserved>`
+  (`0xd0000000`, `0x20000000`) and `memory-shared-for-drpai-ext-cont =
+  <&shared_drp_reserved>` (`0xafcff000`, `0x1000`), matching the vendor's own
+  EVK override. Both properties are mandatory: on V2N the driver defines
+  `ENABLE_DRP_SUPPORT_SHARED_MEMORY`, so a probe missing the second hard-fails
+  with `-ENOMEM` rather than degrading.
+- `mera2-drpai-tvm_2.7.0.bb` packages the EdgeCortix MERA2 + DRP-AI TVM
+  runtime, staged from a builder-supplied `RUHMI_DRPAI_TVM_DIR`. It vendors
+  nothing. Now scoped with `COMPATIBLE_MACHINE` to the four V2N/V2M machines
+  and pinned to `PACKAGE_ARCH = "${MACHINE_ARCH}"` — `EXCLUDE_FROM_WORLD`
+  alone would not have stopped an image pulling SoC-specific prebuilts into an
+  unrelated aarch64 build.
+- `src/yocto/inference_drpai.cpp` becomes real `MeraDrpRuntimeWrapper` code.
+
+### Changed — `libalp_sdk`'s own link now refuses undefined symbols (#1145)
+
+`LINKER:--no-undefined` on GNU ld / lld. A shared library tolerates undefined
+symbols by default, and that is how `libalp_sdk.so` once linked *successfully*
+with the DRP-AI backend compiled in while `MeraDrpRuntimeWrapper`'s symbols
+were nowhere on the link line — the break surfaced later, in a downstream
+consumer.
+
+Every optional Linux/Yocto backend was audited for a legitimate
+`dlopen()`/weak-external pattern that needs undefined symbols tolerated; none
+exists. The weak symbols in this tree (`cc3501e_proxy`, `zephyr_drv`
+`gpio_resolve`, `update_log`'s TF-M seam) are weak **definitions** with real
+fallback bodies, not unresolved weak references.
+
+This makes an existing latent DEEPX bug fatal, so that is fixed in the same
+change: the DEEPX block added `inference_deepx.cpp` before probing and only
+warned when `find_library(DXRT_LIB dxrt)` missed. There is no in-tree
+`dxrt/dxrt_api.h` stub, so a sysroot carrying `dx-rt-dev` headers without
+`libdxrt` compiled fine and would now fail the SDK's own link. It now probes
+first and skips the backend rather than compiling a translation unit whose
+symbols cannot resolve, with `ALP_SDK_DEEPX_REQUIRED` to turn that into a hard
+error where a recipe opted in by name — mirroring `ALP_SDK_DRPAI_REQUIRED`.
+
+**Not bench-verified.** None of this has run on DRP-AI silicon, and no
+`alp-image-edge` bake has completed with `drpai` enabled. The kernel driver is
+proven independently on real V2N-M1 silicon (`/dev/drpai0` probes clean,
+`DRPAI_GET_DRPAI_AREA` returns the `0xD0000000` / 512 MiB arena) but that is
+the vendor driver, not this change's payload.
+
 ### Added — real Yocto backends for `<alp/display.h>` and `<alp/i3c.h>` (#1143, #1147)
 
 **ABI + behaviour change, both deliberate.** `alp_display_config_t` gains

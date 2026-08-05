@@ -472,8 +472,8 @@ INSANE_SKIP:${PN} += "ldflags"
 # against it (kernel modules never show up as a DT_NEEDED entry, so QA
 # never asks for it): mmngr-user-module / mmngrbuf-user-module are thin
 # ioctl wrappers around /dev/mmngr, which that kernel module provides,
-# so the userspace libs are inert without it at runtime. alp-image-edge.bb
-# also installs it explicitly (ALP_DRPAI_IMAGE_INSTALL, worked around
+# so the userspace libs are inert without it at runtime. alp-image-common.inc
+# also installs it explicitly (ALP_RZ_DRPAI_INSTALL, worked around
 # because meta-rz-drpai only hooks core-image-% images) -- listing it
 # here too is a harmless duplicate for that image and makes this recipe
 # runtime-correct standalone, for any other image that pulls it in.
@@ -484,6 +484,19 @@ RDEPENDS:${PN} += "mmngr-user-module mmngrbuf-user-module kernel-module-mmngr"
 # same posture as recipes-deepx/dx-rt for the other license-gated NPU
 # runtime in this layer.
 EXCLUDE_FROM_WORLD = "1"
+
+# EXCLUDE_FROM_WORLD only keeps this out of `bitbake world`.  It does NOT
+# stop an image, or a PACKAGECONFIG DEPENDS, pulling it into a machine that
+# has no DRP-AI at all -- so scope it explicitly.  The payload staged here
+# is the RZ/V2N `obj/build_runtime/v2h` prebuilt set; on an AEN or NX9101
+# build it is not merely useless, it is wrong.
+COMPATIBLE_MACHINE = "(e1m-v2n101-a55|e1m-v2n102-a55|e1m-v2m101-a55|e1m-v2m102-a55)"
+
+# Pin to MACHINE_ARCH.  With the default TUNE_PKGARCH this recipe's output
+# would share an sstate/feed slot with every other aarch64 machine, so a
+# V2N-specific prebuilt could be served to an unrelated aarch64 build.  The
+# staged libraries are SoC-specific, not tune-specific.
+PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 # BENCH-UNVERIFIED, and more unverified than the packaging fix this entry
 # previously described: that one was static staging (copy files, fix
@@ -500,24 +513,33 @@ EXCLUDE_FROM_WORLD = "1"
 # incompatible ... when searching for -lmera2_runtime" is an
 # architecture mismatch, not a symbol error).
 #
-# UPDATE -- that final step has now been taken; this recipe is no longer
-# fixed-on-paper. A `drpai`-ENABLED alp-image-edge bake completed on the real
-# aarch64 Yocto cross-toolchain (12118 tasks, all succeeded, with
-# PACKAGECONFIG:append:pn-alp-sdk = " drpai" and RUHMI_DRPAI_TVM_DIR set;
-# this recipe ran 18 tasks in it). It settles all three open questions:
-#   - do_compile cross-compiles apps/MeraDrpRuntimeWrapper.cpp to aarch64 and
-#     the link against obj/build_runtime/v2h/lib succeeds;
-#   - packaging passes do_package_qa, after the FILES:${PN}-dev redefinition
-#     and the narrowly-scoped INSANE_SKIP ldflags above;
-#   - the symbols resolve. libalp_sdk.so's DT_NEEDED now names
-#     libmera_drpai_wrapper.so, libmera2_runtime.so, libmera2_plan_io.so and
-#     libtvm_runtime.so, and all 9 MeraDrpRuntimeWrapper symbols it imports
-#     match definitions the wrapper exports (26 exported, 9 matched, 0
-#     unresolved). All ten libraries ship in the rootfs.
+# THAT FINAL STEP HAS NOT BEEN TAKEN.  This recipe is correct on paper and
+# nothing more.
 #
-# What remains unproven is everything ABOVE the link: no model has been
-# compiled to a drpai_dir bundle (that needs the account-gated DRP-AI
-# Translator i8), and no inference has run on silicon. The kernel side IS
-# proven independently -- /dev/drpai0 probes clean on a real board and
-# DRPAI_GET_DRPAI_AREA returns the correct 0xD0000000 / 512 MiB arena -- but
-# that is the vendor driver, not this recipe's payload.
+# An earlier revision of this comment claimed a `drpai`-ENABLED
+# alp-image-edge bake had completed (12118 tasks, DT_NEEDED resolved, 0
+# unresolved symbols, ten libraries in the rootfs).  That claim was removed
+# rather than softened, for two reasons:
+#
+#   1. docs/bring-up-drpai-v2n.md, in the same change, states that no
+#      bitbake run of this recipe -- with or without do_compile -- has
+#      happened at all, and that the 12118-task bake it refers to ran with
+#      `drpai` OFF.  Same task count, opposite verdict.  Both cannot be
+#      true.
+#   2. The bake it described could not have run: it names
+#      `PACKAGECONFIG:append:pn-alp-sdk = " drpai"`, and until #1145 no
+#      PACKAGECONFIG[drpai] existed in alp-sdk_0.6.bb.  OE errors out on an
+#      append naming an undefined flag.
+#
+# So what is actually established, and nothing beyond it: do_compile
+# cross-compiles apps/MeraDrpRuntimeWrapper.cpp on an x86_64 host up to the
+# final link, where it stops with "skipping incompatible ... when searching
+# for -lmera2_runtime" -- an architecture mismatch against the aarch64
+# obj/build_runtime/v2h libraries, not a symbol error.  Whether packaging
+# passes do_package_qa, and whether the symbols resolve against the real
+# aarch64 payload, are both UNTESTED.
+#
+# The kernel side is proven independently of this recipe: /dev/drpai0 probes
+# clean on a real board and DRPAI_GET_DRPAI_AREA returns the 0xD0000000 /
+# 512 MiB arena.  That is the vendor driver, not this recipe's payload, and
+# it says nothing about the userspace runtime packaged here.

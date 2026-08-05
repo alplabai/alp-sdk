@@ -15,6 +15,16 @@
  *
  *     drpai0: drpai@16800000 {
  *             compatible = "renesas,rzv2n-drpai";
+ *             reg = <0 0x17000000 0 0x1000000>,
+ *                   <0 0x16800000 0 0x400000>;
+ *
+ * NOTE, so nobody "corrects" one of these into the other: the node NAME
+ * (drpai@16800000) matches the vendor's SECOND reg entry, while Linux names
+ * the platform device from the FIRST -- which is why dmesg reads
+ * "drpai-rz 17000000.drpai" and not "16800000.drpai".  The vendor's node
+ * name violates the usual convention of matching reg[0]; both strings are
+ * nevertheless correct, they just name different things.  Verified against
+ * meta-rz-drpai's own 0001-add-drpai-property-to-devicetree.patch.
  *             ...
  *             status = "disabled";
  *     };
