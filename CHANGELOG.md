@@ -7,6 +7,35 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — `ALP_CAP_HW_ETHERNET` read false on V2N/V2M despite two 1 GbE ports (#1240)
+
+`scripts/gen_soc_caps.py`'s `ETHERNET_COUNT` matched only the `ethernet` key.
+RZ/V2N's `metadata/socs/renesas/rzv2n/n44.json` publishes `ethernet_1g`
+instead, so `ALP_SOC_ETHERNET_COUNT` emitted `0` for the family with the most
+Ethernet on it and `ALP_CAP_HW_ETHERNET` — the compile-time gate a customer is
+meant to key off — reported the opposite of the silicon. It now sums every
+Ethernet-flavoured key, mirroring how `USB_COUNT` already sums `usb_2` +
+`usb_3` two entries below, and `include/alp/soc_caps.h` is regenerated: one
+line moves, `:373` from `0` to `2`.
+
+The guard against a recurrence is the substance of the fix, not a courtesy.
+Its first form hardcoded its own copy of the key list, so reverting the
+generator left it green — the same defect wearing a test's clothes. It now
+probes the real `ETHERNET_COUNT` lambda out of `gen_soc_caps.CAPS`, which
+fails in both directions: a SoC key the generator ignores, and a generator
+that stops consuming a key already in the tree. Key matching is
+case-insensitive because `metadata/schemas/soc-spec-v1.schema.json` puts no
+pattern on peripherals key names.
+
+Two things worth recording. The sibling generator
+`scripts/gen_support_matrix.py` already read this correctly, via
+`_has_prefix(s, "ethernet")` — the two generators disagreed about the same
+metadata, and only one of them feeds `ALP_CAP_HW_ETHERNET` (#1243). And
+`ALP_CAP_HW_ETHERNET` stays false for `nxp:imx9:imx93` after this change, for
+an unrelated reason: that SoC declares its peripheral counts pending
+reference-manual ingestion, so there is no key to sum and none may be
+inferred from the absence.
+
 ### Fixed — the Doxygen build was red on `dev` itself (#1245)
 
 Two ordinary GitHub-Markdown links in `README.md` were unresolvable `\ref`
