@@ -219,8 +219,6 @@ of this change.
   registry/dispatcher test suite on a Linux host with no real
   `/dev/mmcblk*`, `/dev/mtd*`, or `/sys/bus/usb/devices` root hubs present.
 
-### Changed — documentation and drift gates follow the Python Tan port
-
 ### Fixed — CC3501E OTA abort could race a deferred FINISH into installing + rebooting anyway (#1123)
 
 `cc3501e_hw_ota_abort()` unconditionally zeroed the OTA session state
@@ -308,6 +306,9 @@ verified by design/reasoning in code comments instead.
 **Not bench-verified** — the `ti` backend build (the actual PSA-FWU
 sequencing on real CC3501E silicon) still needs a bench pass; this change
 is proven on host only.
+
+### Changed — documentation and drift gates follow the Python Tan port
+
 
 - Swept current guides, examples, ADR indexes/amendments, metadata commentary,
   and onboarding workflows to describe Python Tan's relocated in-process
