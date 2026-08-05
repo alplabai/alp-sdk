@@ -7,6 +7,17 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Added — ADR 0023: Ethernet stays out of the `<alp/*>` surface (#1144)
+
+Design decision only, no code: `docs/adr/0023-ethernet-out-of-the-alp-surface.md`
+records that Ethernet's control and data planes stay outside
+`<alp/*>` — the portable contract is the compile-time capability
+(`ALP_SOC_ETHERNET_COUNT`), the form-factor port identity
+(`ALP_E1M_ETH0`/`ALP_E1M_X_ETH0`/`ALP_E1M_X_ETH1`), and the
+ring-2 `rtl8211fdi` PHY chip driver, not a new `<alp/net.h>`. Narrowly
+supersedes `docs/adr/0003-peripheral-coverage.md`'s "Ethernet folds
+into `<alp/iot.h>`" row, which never happened.
+
 ### Fixed — `ALP_CAP_HW_ETHERNET` read false on V2N/V2M despite two 1 GbE ports (#1240)
 
 `scripts/gen_soc_caps.py`'s `ETHERNET_COUNT` matched only the `ethernet` key.

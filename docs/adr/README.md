@@ -39,7 +39,7 @@ Bad / costs: ...
 |------|-------------------------------------------------------------|----------|
 | [0001](0001-wrapper-on-top-of-zephyr.md) | Why Alp SDK wraps Zephyr (and why the wrapper stays thin) | Accepted |
 | [0002](0002-error-mechanism.md)          | `alp_last_error()` + compile-time SoC capability validation | Accepted |
-| [0003](0003-peripheral-coverage.md)      | Wrap 12 peripheral classes at v0.2, not just I2C/SPI/GPIO/UART | Accepted |
+| [0003](0003-peripheral-coverage.md)      | Wrap 12 peripheral classes at v0.2, not just I2C/SPI/GPIO/UART | Accepted — partially superseded by 0023 (Ethernet-into-`<alp/iot.h>` row only) |
 | [0004](0004-e1m-portability-bound.md)    | E1M-spec instance counts as the portability bound | Accepted |
 | [0005](0005-alp-sdk-vs-alp-studio-boundary.md) | alp-sdk vs alp-studio repo boundary (dual-use acid test) | Accepted |
 | [0006](0006-secure-boot-secure-ota.md)   | Secure boot (vendor-native) + secure OTA (MCUboot + Mender) | Accepted, partially superseded (2026-05-11 amendment: Mender replaces RAUC on Linux side; AEN-Zephyr OTA client choice pending) |
@@ -59,6 +59,7 @@ Bad / costs: ...
 | [0020](0020-sdk-owns-build-execution.md) | A standalone `tan` CLI owns the command surface and execution; Python Tan now also carries the relocated in-process planner, while alp-sdk retains the reference emitters; the six `west alp-{build,flash,image,size,renode,clean}` extensions + `fan_out` retired (read-only `west alp-emit` remains); supersedes 0014 mechanism + 84-87 | Accepted — amended 2026-08-03 for the Python port; only `migrate`, `lock`, and `quality` still forward to west; the cross-repo `repository_dispatch` trigger stays outstanding as a maintainer action (see ADR Amendment 7) — partially superseded by 0022 (Rust-executor language clause + every `renode` command-surface entry only; the plans-vs-executes split, three-repo boundary, and contract still live) |
 | [0021](0021-toolchain-provisioning.md) | Toolchain provisioning: pin upstream URLs + `sha256` rather than rehosting binaries, key `~/.alp/toolchains/` by artifact not SDK version, signed package manager for small host tools + hermetic archives for the large compilers, absolute-path injection instead of PATH mutation, tiered consent (A no-elevation / B elevation / C licence-gated), and per-lane onboarding (prebuilt-blink ‖ Zephyr-on-M ‖ Yocto container); automates what 0012 documented | Proposed |
 | [0022](0022-python-executor-renode-retirement.md) | `tan` ships as Python (PyInstaller freeze of `alp-tan`), not Rust, from v0.5.0; Renode is retired from the command surface, no replacement simulator; narrowly supersedes 0020's Rust-executor language clause + its `renode` command-surface entries only | Accepted — implemented |
+| [0023](0023-ethernet-out-of-the-alp-surface.md) | Ethernet stays out of the `<alp/*>` surface — compile-time capability + form-factor port identity + ring-2 PHY chip drivers is the whole contract; no `<alp/net.h>`; link state may return additively if alp-studio needs it; narrowly supersedes ADR 0003's Ethernet-into-`<alp/iot.h>` row | Proposed |
 
 ## When to write an ADR
 
