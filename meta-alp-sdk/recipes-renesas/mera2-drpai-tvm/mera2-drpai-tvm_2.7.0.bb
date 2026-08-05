@@ -18,8 +18,8 @@
 # executable target lists the .cpp directly in its own `SRC`).  `nm -D
 # --defined-only` across all eight `obj/build_runtime/v2h/lib/*.so` files
 # confirms the symbol is in none of them.  A first cut of this recipe staged
-# only `MeraDrpRuntimeWrapper.h` -- the DECLARATIONS -- and a real bake with
-# a downstream consumer (alp-perception) surfaced the gap as unresolved
+# only `MeraDrpRuntimeWrapper.h` -- the DECLARATIONS -- and the gap surfaced
+# in a downstream consumer (alp-perception) as unresolved
 # `MeraDrpRuntimeWrapper::*` symbols in `libalp_sdk.so`, which had built
 # "successfully" only because a shared library permits undefined symbols by
 # default (see the durable fix: alp-sdk's own CMakeLists.txt now links with
@@ -44,8 +44,8 @@
 #
 # A first cut of this recipe staged only three libraries
 # (libmera2_runtime.so, libmera2_plan_io.so, libdrp_tvm_rt.so) and
-# failed a real `bitbake -c package_qa` with PACKAGECONFIG[drpai]
-# enabled: those three DT_NEED five more libraries this recipe never
+# would fail do_package_qa's file-rdeps check: those three DT_NEED five
+# more libraries this recipe never
 # staged (libdrp_rt.so, libacl_rt.so, libarm_compute.so,
 # libarm_compute_core.so, libarm_compute_graph.so -- all present in
 # the same RUHMI obj/build_runtime/v2h/lib/ directory) and two more
@@ -72,8 +72,8 @@
 # builder already has on disk (RUHMI is itself Apache-2.0 -- <https://
 # github.com/renesas-rz/rzv_drp-ai_tvm> -- only the prebuilt MERA2 libs +
 # Translator inside a built tree are gated), pointed to by the
-# RUHMI_DRPAI_TVM_DIR variable. See meta-alp-sdk/README.md's "Making the
-# RUHMI checkout visible to the bake" for how to set it.
+# RUHMI_DRPAI_TVM_DIR variable. See docs/bring-up-drpai-v2n.md section 4 for how
+# to set it.
 #
 # RZ/V2N consumes the checkout's v2h runtime build
 # (obj/build_runtime/v2h/lib); obj/build_runtime/v2m is Renesas
@@ -155,8 +155,7 @@ def _drpai_ruhmi_dir(d):
         bb.fatal(
             "RUHMI_DRPAI_TVM_DIR is unset. Point it at a BUILT "
             "rzv_drp-ai_tvm (RUHMI) checkout's root -- see "
-            "meta-alp-sdk/README.md's 'Making the RUHMI checkout "
-            "visible to the bake' -- before building mera2-drpai-tvm "
+            "docs/bring-up-drpai-v2n.md section 4"
             "or enabling alp-sdk's PACKAGECONFIG[drpai]."
         )
     return os.path.abspath(ruhmi_dir)
@@ -255,7 +254,7 @@ python do_compile() {
         # branch unless the CONSUMER defines this too, giving
         #     spdlog/fmt/fmt.h:28:14: fatal error:
         #     spdlog/fmt/bundled/core.h: No such file or directory
-        # on a real bake.  Defining it selects the "#include <fmt/core.h>"
+        # on a bake without it.  Defining it selects the "#include <fmt/core.h>"
         # branch instead, which fmt (already in the sysroot via spdlog's own
         # DEPENDS) provides.  RUHMI's apps/CMakeLists.txt does not need this
         # because it builds against a vendored spdlog with fmt bundled in.
@@ -409,7 +408,7 @@ python do_install() {
 # ${PN}-dev's own built-in FILES default already globs "${libdir}/*.so"
 # ahead of anything FILES:${PN} claims, so every one of these libraries
 # was landing in mera2-drpai-tvm-dev regardless -- exactly the
-# do_package_qa "non-symlink .so ... in ... -dev" error a real bake hit.
+# do_package_qa "non-symlink .so ... in ... -dev" error that produces.
 # Redefining (not appending to) FILES:${PN}-dev below drops that default
 # glob; this recipe never ships a .la/.a/.pc/cmake file, so headers-only
 # is a complete definition, not a narrowed one. With no .so left for
@@ -463,7 +462,7 @@ INSANE_SKIP:${PN} += "ldflags"
 # meta-rz-drpai's mmngr-user-module / mmngrbuf-user-module recipes.
 # do_package_qa's file-rdeps check has no way to infer that on its own
 # (nothing in this recipe DEPENDS on them at build time), so it has to
-# be said explicitly or the QA errors from the real bake recur.  (This
+# be said explicitly or those QA errors recur.  (This
 # does NOT apply to libmera_drpai_wrapper.so's own runtime deps -- spdlog
 # is a real DEPENDS, so shlibs infers that RDEPENDS automatically; see the
 # DEPENDS comment above.)
@@ -490,7 +489,7 @@ EXCLUDE_FROM_WORLD = "1"
 # has no DRP-AI at all -- so scope it explicitly.  The payload staged here
 # is the RZ/V2N `obj/build_runtime/v2h` prebuilt set; on an AEN or NX9101
 # build it is not merely useless, it is wrong.
-COMPATIBLE_MACHINE = "(e1m-v2n101-a55|e1m-v2n102-a55|e1m-v2m101-a55|e1m-v2m102-a55)"
+COMPATIBLE_MACHINE = "^(e1m-v2n101-a55|e1m-v2n102-a55|e1m-v2m101-a55|e1m-v2m102-a55)$"
 
 # Pin to MACHINE_ARCH.  With the default TUNE_PKGARCH this recipe's output
 # would share an sstate/feed slot with every other aarch64 machine, so a
@@ -500,8 +499,8 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 # BENCH-UNVERIFIED, and more unverified than the packaging fix this entry
 # previously described: that one was static staging (copy files, fix
-# FILES:/RDEPENDS), caught wrong twice already by a REAL `bitbake` run and
-# corrected both times from that evidence, not from inspection. This one
+# FILES:/RDEPENDS), corrected twice from build evidence rather than from
+# inspection alone. This one
 # ADDS A COMPILE STEP -- a real g++ invocation against RUHMI's real headers
 # was run by hand on a dev host to prove apps/MeraDrpRuntimeWrapper.cpp
 # actually compiles to a valid .o with every one of the previously-missing

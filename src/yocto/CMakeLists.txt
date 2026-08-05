@@ -756,11 +756,11 @@ if(ALP_SDK_USE_DRPAI_V2N)
     # The sixth input: inference_drpai.cpp also hard-#includes the DRP-AI
     # driver uapi header, which comes from meta-rz-drpai's drpai_1.4.0 recipe
     # (${includedir}/linux/drpai.h) -- a DIFFERENT source from the RUHMI
-    # checkout above.  On path (b) PACKAGECONFIG[drpai]'s `drpai` DEPENDS
-    # happens to stage it, but path (a) has no PACKAGECONFIG at all, so
-    # without this probe a host with the RUHMI libs but no uapi header sails
-    # through the gate and dies at compile -- exactly what this block exists
-    # to prevent.
+    # checkout above.  On path (b) PACKAGECONFIG[drpai] names `drpai` in its
+    # DEPENDS explicitly, so the header is staged; but path (a) has no
+    # PACKAGECONFIG at all, so without this probe a host with the RUHMI libs
+    # but no uapi header sails through the gate and dies at compile --
+    # exactly what this block exists to prevent.
     find_path(DRPAI_UAPI_INCLUDE_DIR linux/drpai.h)
     # The seventh, eighth and ninth inputs: MeraDrpRuntimeWrapper.h:11
     # hard-#includes <tvm/runtime/profiling.h>, which pulls in dlpack and

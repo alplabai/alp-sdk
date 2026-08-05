@@ -36,7 +36,7 @@ this is fiddly.
 | `drpai0` DT node + label | `meta-rz-drpai`, `0001-add-drpai-property-to-devicetree.patch` | **Creates** the label; it does not exist in the pristine tree |
 | `<linux/drpai.h>` UAPI header | `meta-rz-drpai` recipe `drpai` (1.4.0) | Headers only |
 | `libtvm_runtime.so` | `meta-rz-drpai` recipe `lib-tvm` | |
-| The MERA2 runtime closure: headers + **ten** libraries, not three | `meta-alp-sdk/recipes-renesas/mera2-drpai-tvm/mera2-drpai-tvm_2.7.0.bb`, staged/compiled from a builder-supplied **`RUHMI_DRPAI_TVM_DIR`** checkout | The recipe vendors nothing — see §4. Note its `LICENSE = "CLOSED"`: the `rzv_drp-ai_tvm` **sources** are Apache-2.0, but the prebuilt MERA2 libraries staged alongside them are account-gated, so the package as a whole is not redistributable. Tracked as a licence-manifest gap. |
+| The MERA2 runtime closure: headers + **nine** staged libraries (a tenth, `libtvm_runtime.so`, comes from `lib-tvm` above) | `meta-alp-sdk/recipes-renesas/mera2-drpai-tvm/mera2-drpai-tvm_2.7.0.bb`, staged/compiled from a builder-supplied **`RUHMI_DRPAI_TVM_DIR`** checkout | The recipe vendors nothing — see §4. Note its `LICENSE = "CLOSED"`: the `rzv_drp-ai_tvm` **sources** are Apache-2.0, but the prebuilt MERA2 libraries staged alongside them are account-gated, so the package as a whole is not redistributable. Tracked as a licence-manifest gap. |
 
 Baseline this was worked against: **AI SDK platform 7.1 on BSP v6.30**
 (`RTK0EF0189F06300SJ`, linux-renesas `6.1.141-cip43`).
@@ -102,17 +102,22 @@ shared_drp_reserved: shareddrp@afcff000 reg = <0x0 0xafcff000 0x0 0x00001000>   
 
 Declaring them is **not sufficient** — something has to claim them.
 `e1m-v2n-drpai.dtsi` carries the override, and the kernel bbappend installs it
-only when `meta-rz-drpai` is in `bblayers.conf` (that layer creates the `drpai0`
+only when **both** `meta-rz-drpai` is in `bblayers.conf` **and**
+`ALP_ENABLE_DRPAI = "1"` is set (default `"0"`).  The layer alone is
+deliberately not enough: it ships bundled in the AI SDK BSP, so keying off its
+presence would turn the NPU on for every V2N/V2M image.  Set it in
+`local.conf`. Without it the build installs a comment-only stub and the node
+stays `disabled`.  The bbappend gate is (that layer creates the `drpai0`
 label, so referencing it without the layer fails in dtc — and the same SoM dtsi
 is included by the V2M board dts, so it would take that dtb down too).
 
 **Silicon confirms the node is not on by default.** `e1mx-v2n-m1-01`'s current
 dtb, `/boot/r9a09g056n44-dev.dtb`, carries **zero** `drpai` nodes — the
 enablement on that board comes from a different, already-loaded
-`/boot/uio-683.dtb`, not from anything this repo builds. Our own dtb,
-`e1m-v2n101-x-evk.dtb`, does carry the node enabled, via the `&drpai0`
-overlay in `e1m-v2n-drpai.dtsi` above; that overlay is what makes it present,
-not the SoC by default. Separately: the **kernel** half of the stack is
+`/boot/uio-683.dtb`, not from anything this repo builds. Our own dtb, `e1m-v2n101-x-evk.dtb`, carries the node enabled **only when
+`ALP_ENABLE_DRPAI = "1"` was set for that build**; by default it carries the
+stub and the node stays `disabled`.  The overlay is what makes it present,
+never the SoC by default. Separately: the **kernel** half of the stack is
 already proven working on this silicon — `/dev/drpai0` exists on that board's
 current image and the driver probes clean (`drpai-rz 17000000.drpai: DRP-AI
 Driver version : 1.40 rel.3 V2N`, correct memory-region prints, zero errors).
@@ -160,7 +165,7 @@ Enable the backend through the SDK recipe's PACKAGECONFIG:
 PACKAGECONFIG:append:pn-alp-sdk = " drpai"
 ```
 
-That switch flips `-DALP_SDK_USE_DRPAI_V2N=ON` and
+That switch (whose DEPENDS names `mera2-drpai-tvm`, `drpai` and `lib-tvm`) flips `-DALP_SDK_USE_DRPAI_V2N=ON` and
 `-DALP_SDK_DRPAI_REQUIRED=ON`, and adds the `drpai` and `lib-tvm` build deps
 together.
 
@@ -183,7 +188,7 @@ fetches and vendors nothing: point the single variable **`RUHMI_DRPAI_TVM_DIR`**
 `drpai` — an unset or incomplete checkout fails `do_compile`/`do_install`
 loudly, naming the exact missing path.
 
-**Verified, at the symbol level:** with `RUHMI_DRPAI_TVM_DIR` pointed at a real
+**Checked at the symbol level, against the compiled objects rather than a completed link:** with `RUHMI_DRPAI_TVM_DIR` pointed at a real
 checkout, the previously-undefined `MeraDrpRuntimeWrapper::*` symbols alp-sdk
 needs all match what the compiled wrapper exports — 26 symbols exported, 9
 referenced by alp-sdk, all 9 match, 0 unresolved. **Not yet verified:** the
@@ -291,8 +296,10 @@ already, via the `CONFIG_BOOTCOMMAND` override in
 
 In order:
 
-1. `ls /dev/drpai0` — absent means the DT override did not land or
-   `meta-rz-drpai` was not in `bblayers.conf`. Nothing else will work. (This
+1. `ls /dev/drpai0` — absent means one of three things, in the order worth
+   checking: `ALP_ENABLE_DRPAI` was not set to `"1"` (the default, and now the
+   most likely cause); `meta-rz-drpai` was not in `bblayers.conf`; or the DT
+   override otherwise did not land. Nothing else will work. (This
    node already exists on `e1mx-v2n-m1-01`'s current, non-ALP-built image, so
    its presence alone doesn't prove *this* image's DT override worked — check
    the dtb in use, per §3.)

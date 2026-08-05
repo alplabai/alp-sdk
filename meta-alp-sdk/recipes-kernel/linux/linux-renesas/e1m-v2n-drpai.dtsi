@@ -3,9 +3,10 @@
  * ALP E1M-V2N SoM — on-die DRP-AI3 NPU enable.
  *
  * Split out of e1m-v2n-som.dtsi because it is CONDITIONAL on the optional
- * meta-rz-drpai layer; the linux-renesas bbappend installs this file when
- * that layer is in bblayers.conf and a comment-only stub of the same name
- * when it is not.  See the ALP_DRPAI_LAYER block in
+ * meta-rz-drpai layer AND on an explicit opt-in.  The linux-renesas
+ * bbappend installs this file only when that layer is in bblayers.conf
+ * AND ALP_ENABLE_DRPAI is "1"; otherwise it installs a comment-only stub
+ * of the same name.  See the ALP_DRPAI_DT_ENABLE block in
  * meta-alp-sdk/recipes-kernel/linux/linux-renesas_%.bbappend.
  *
  * WHY CONDITIONAL: the `drpai0` label does NOT exist in the pristine

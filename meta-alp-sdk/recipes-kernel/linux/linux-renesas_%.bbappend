@@ -8,7 +8,7 @@
 #   e1m-v2n-drpai.dtsi  the &drpai0 enable that claims that reserved memory.
 #                       Installed ONLY when meta-rz-drpai is in bblayers
 #                       (it creates the label); stubbed out otherwise --
-#                       see the ALP_DRPAI_LAYER block below.
+#                       see the ALP_DRPAI_DT_ENABLE block below.
 #   e1m-v2m-deepx.dtsi  V2M delta: DEEPX DXM1 NPU on PCIe + the on-module
 #                       lane mux + NPU reset release (gpio-hogs).
 #   e1m-x-evk.dtsi      E1M-X-EVK carrier: eth/i2c/usb/console enables,
@@ -108,8 +108,13 @@ SRC_URI:append = " \
 # e1m-v2n-som.dtsi #includes e1m-v2n-drpai.dtsi unconditionally; this block
 # decides which body that filename gets:
 #
-#   meta-rz-drpai in bblayers.conf -> the real `&drpai0` override
-#   layer absent                   -> a comment-only stub (no node touched)
+#   layer in bblayers.conf AND ALP_ENABLE_DRPAI = "1"
+#                                  -> the real `&drpai0` override
+#   either condition unmet         -> a comment-only stub (no node touched)
+#
+# Both are required.  meta-rz-drpai ships bundled in the RZ/V2N AI SDK BSP,
+# so keying off its presence alone would flip the NPU on for every V2N/V2M
+# image whether or not the owner asked for one.
 #
 # The `drpai0` LABEL does not exist in the pristine linux-renesas tree.  It
 # is CREATED by meta-rz-drpai's
