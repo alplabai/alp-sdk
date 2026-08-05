@@ -569,6 +569,31 @@ the include and why. Zephyr-specific register/bench tools with no
 `board.yaml` (e.g. `examples/aen/*-regcheck/`) are outside this
 check's scope by construction.
 
+### 4.5  V2N/V2M analog and counter classes (bridge-served, no native leg)
+
+On V2N/V2M, `alp_adc_*`, `alp_pwm_*`, `alp_dac_*`, `alp_counter_*`,
+and `alp_qenc_*` are served entirely by the GD32 IO-MCU bridge. No
+SoC-native RZ/V2N leg exists: the wildcard `zephyr_drv` leg
+(`src/backends/{adc,pwm,dac,counter,qenc}/zephyr_drv.c`) is compiled
+on a V2N build but never selected, because an exact `silicon_ref`
+match beats the wildcard at equal backend priority. This is a
+routing fact, not a preference: no SoC pin reaches an E1M-standard
+analog or counter pad on this family, so a native leg would have
+nothing to attach to even if it were selected
+(`docs/adr/0024-v2n-analog-and-counter-classes-stay-on-the-gd32-bridge.md`).
+
+Capability deltas to plan around at the portable surface: the ADC
+backend advertises `base_caps = 0u` — an SDK-side gap at SDK v0.7,
+not a bridge hardware limit — so no oversample or trigger support is
+exposed yet; counter has no alarm support, because there is no IRQ
+line from the GD32 back to the RZ/V2N SoC. The bridge also accepts
+only `counter_id 0` (`src/backends/counter/gd32_bridge.c:22`) even
+though `include/alp/e1m_x_pinout.h:162-165` publishes
+`ALP_E1M_X_COUNTER0..3` — size for one counter instance, not four,
+on V2N/V2M today (issue #1242). Every call also crosses the SPI/I2C
+bridge transport under a shared supervisor mutex, adding bridge-hop
+latency that a same-die peripheral would not have.
+
 ---
 
 ## 5. Capability validation — runtime, not `#ifdef`

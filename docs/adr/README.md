@@ -60,6 +60,7 @@ Bad / costs: ...
 | [0021](0021-toolchain-provisioning.md) | Toolchain provisioning: pin upstream URLs + `sha256` rather than rehosting binaries, key `~/.alp/toolchains/` by artifact not SDK version, signed package manager for small host tools + hermetic archives for the large compilers, absolute-path injection instead of PATH mutation, tiered consent (A no-elevation / B elevation / C licence-gated), and per-lane onboarding (prebuilt-blink ‖ Zephyr-on-M ‖ Yocto container); automates what 0012 documented | Proposed |
 | [0022](0022-python-executor-renode-retirement.md) | `tan` ships as Python (PyInstaller freeze of `alp-tan`), not Rust, from v0.5.0; Renode is retired from the command surface, no replacement simulator; narrowly supersedes 0020's Rust-executor language clause + its `renode` command-surface entries only | Accepted — implemented |
 | [0023](0023-ethernet-out-of-the-alp-surface.md) | Ethernet stays out of the `<alp/*>` surface — compile-time capability + form-factor port identity + ring-2 PHY chip drivers is the whole contract; no `<alp/net.h>`; link state may return additively if alp-studio needs it; narrowly supersedes ADR 0003's Ethernet-into-`<alp/iot.h>` row | Proposed |
+| [0024](0024-v2n-analog-and-counter-classes-stay-on-the-gd32-bridge.md) | V2N/V2M ADC, PWM, DAC, counter, and qenc stay served exclusively by the GD32 bridge — no native RZ/V2N leg, because no SoC pin reaches an E1M-standard analog/counter pad; the six-surface HiL quarantine has mostly moved on and is not the driving concern | Proposed |
 
 ## When to write an ADR
 
