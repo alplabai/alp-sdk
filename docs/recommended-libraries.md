@@ -212,22 +212,26 @@ symbol.  This keeps generated `alp.conf` files from claiming
 hardware acceleration that would still run through the library's
 software path.
 
-**Coverage status (v0.6).**  All 25 libraries in the schema enum
-ship a per-library `hw-backends.yaml`:
+**Coverage status (v0.6).**  The accelerator-binding table lives as an
+optional `integration.zephyr.hw_backends:` block inside each library's
+own manifest under `metadata/libraries/*.yaml` -- not as a separate
+`hw-backends.yaml` file.  23 of the 35 manifests declare one; the
+libraries below are grouped by accelerator class:
 
-| Class                 | Libraries                                                            |
-|-----------------------|----------------------------------------------------------------------|
-| Crypto / TLS          | `mbedtls`, `bearssl`                                                 |
-| ML inference          | `tflite_micro`                                                       |
-| DSP / math            | `cmsis_dsp`                                                          |
-| Filesystem            | `littlefs`                                                           |
-| Graphics              | `lvgl`, `u8g2`, `gfx_compat`                                         |
-| Sensor fusion / control | `madgwick_ahrs`, `pid`                                             |
-| Industrial bus        | `modbus`                                                             |
-| IoT / networking      | `coremqtt_sn`, `libcoap`, `libwebsockets`, `nanopb`, `jsmn`          |
-| Audio codecs          | `minimp3`, `opus`                                                    |
-| Header-only utility   | `etl`, `fmt`, `nlohmann_json`, `doctest`                             |
-| Test framework        | `catch2`                                                             |
+| Class                   | Libraries                                                   |
+|-------------------------|-------------------------------------------------------------|
+| Crypto / TLS            | `mbedtls`, `bearssl`                                        |
+| ML inference            | `tflite_micro`                                              |
+| DSP / math              | `cmsis_dsp`                                                 |
+| Filesystem              | `littlefs`                                                  |
+| Graphics / vision       | `lvgl`, `u8g2`, `gfx_compat`, `arm-2d`, `cmsis-cv`          |
+| Dataflow / scheduling   | `cmsis-stream`                                              |
+| Sensor fusion / control | `madgwick_ahrs`, `pid`                                      |
+| Industrial bus          | `modbus`                                                    |
+| IoT / networking        | `coremqtt_sn`, `libcoap`, `libwebsockets`, `nanopb`, `jsmn` |
+| Audio codecs            | `minimp3`, `opus`                                           |
+| Header-only utility     | `etl`, `fmt`, `nlohmann_json`, `doctest`                    |
+| Test framework          | `catch2`                                                    |
 
 Seven libraries declare an empty `accelerators:` list -- the four
 header-only utility libraries (`etl`, `fmt`, `nlohmann_json`,

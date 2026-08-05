@@ -463,7 +463,8 @@ python -m alp_cli doctor    # a "libraries" line reports tier + licence + fit
 ```
 
 The curated set today: `lvgl`, `cmsis-dsp`, `cmsis-nn`, `nanopb`,
-`zcbor` (all Tier A).  See
+`zcbor`, `modbus` (all Tier A), plus a growing Tier B (recipe-only) set
+including `cmsis-stream`, `cmsis-cv`, and `arm-2d`.  See
 [`metadata/libraries/README.md`](../metadata/libraries/) for
 the full list and how to add one.
 

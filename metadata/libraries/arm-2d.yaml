@@ -1,0 +1,57 @@
+# Arm-2D -- Arm's 2D graphics library optimised for Cortex-M, with Helium
+# (MVE) acceleration (ADR 0018 library manifest).
+#
+# Formalises `libraries: [arm-2d]`.
+#
+# Grounding (github.com/ARM-software/Arm-2D):
+#   * licence Apache-2.0.
+#   * latest tag v1.2.6 = commit e1a0284e8c4e5ad95a4a878c80a650237fd3dd5a
+#     (2026-03-18). Stable v1.2.x series (v1.2.1 .. v1.2.6 all tagged) --
+#     noticeably more mature than CMSIS-CV's tagless upstream.
+#   * repo layout at v1.2.6: CMakeLists.txt, Library, Helper, Acceleration,
+#     examples, tools, Scripts, documentation, ARM.Arm-2D.pdsc, gen_pack.sh
+#     -- there is NO zephyr/ directory, no zephyr/module.yml, and no
+#     Kconfig anywhere in the tree. Same integration situation as
+#     cmsis-cv.yaml: no upstream Zephyr module glue exists to consume.
+#   * upstream carries ONE git submodule,
+#     examples/common/loader/freetype_loader/freetype ->
+#     https://github.com/freetype/freetype.git, scoped under examples/
+#     only -- the west.yml pin does NOT set `submodules: true` (see the
+#     west.yml comment on the project entry).
+#
+# VERIFIED LVGL FINDING -- record this because it is the thing a reader
+# will otherwise assume wrongly. LVGL v9 DOES contain an Arm-2D accelerated
+# software draw path, gated by CONFIG-equivalent `LV_USE_DRAW_ARM2D_SYNC`
+# (note the `_SYNC` suffix): LVGL's lv_conf_template.h line 198, default 0,
+# implemented under LVGL's src/draw/sw/arm2d/ and src/draw/sw/blend/arm2d/.
+# BUT Zephyr v4.4's LVGL glue does NOT expose that symbol:
+# $ZEPHYR_BASE/modules/lvgl/Kconfig declares LV_USE_DRAW_DMA2D (line 195)
+# and LV_USE_DRAW_DAVE2D (line 204) and has no ARM2D entry. So Arm-2D
+# CANNOT be enabled as an LVGL draw unit through the Zephyr Kconfig path as
+# shipped in this checkout -- that would require an upstream Zephyr
+# contribution to modules/lvgl/Kconfig, not an alp-sdk change. The
+# supported use today is Arm-2D's standalone 2D API (Helium-accelerated on
+# the Cortex-M55, i.e. the E1M-AEN family), NOT a drop-in LVGL accelerator
+# -- do not imply an LVGL speedup this checkout cannot deliver.
+#
+# `integration.zephyr.module: null` -- no west module exists for this
+# library (same shape as nlohmann-json.yaml / cmsis-cv.yaml: "no west
+# module exists"). No `kconfig:` -- there is no Kconfig symbol to
+# transcribe; inventing one would be exactly the fabrication ADR 0018
+# forbids.
+#
+# NOT vendored: no vendors/arm-2d/ directory, no zephyr/CMakeLists.txt
+# edit, no synthetic CONFIG_ALP_SDK_*_VENDORED symbol, not added to
+# metadata/registries/tier-a-library-ci.json (Tier A only). ADR 0018's
+# non-goals forbid in-tree vendored library sources; the u8g2/catch2
+# vendoring exception is not widened here.
+schema_version: 1
+name: arm-2d
+description: "Arm-2D -- 2D graphics library optimised for Cortex-M with Helium (MVE) acceleration."
+tier: B
+version: "v1.2.6"
+license: Apache-2.0
+
+integration:
+  zephyr:
+    module: null
