@@ -2157,6 +2157,21 @@ self-contradicted, citing p.112 correctly a few lines below the p.113 typo),
 `zephyr/kconfigs/mproc-rpc-usb.kconfig`, `docs/aen-bench-bringup.md` (two
 sites), and this file's own `[v0.15.0]` entry. Citation-only; no behavior
 change.
+### Added — three Arm curated third-party libraries (ADR 0018, Tier B)
+
+`metadata/libraries/cmsis-stream.yaml`, `cmsis-cv.yaml`, and `arm-2d.yaml`
+formalise `libraries: [cmsis-stream]` / `[cmsis-cv]` / `[arm-2d]`, all
+recipe-only (Tier B, not built in alp-sdk CI). `west.yml` gains an
+`arm-software` remote and three `extras-tier1` project pins:
+`CMSIS-Stream` at tag `v3.2.0` (upstream ships its own `zephyr/module.yml`,
+module `cmsisstream`, umbrella symbol `CONFIG_CMSISSTREAM`), `CMSIS-CV`
+SHA-pinned at `25c6c111ee04dcfb0ae9093fd6dee4586872982c` (upstream has cut
+no tags and ships no Zephyr module glue — self-described "work in
+progress"), and `Arm-2D` at tag `v1.2.6` (mature tagged release, likewise
+no upstream Zephyr module glue; LVGL v9's `LV_USE_DRAW_ARM2D_SYNC` draw
+path exists upstream but Zephyr v4.4's `modules/lvgl/Kconfig` does not
+expose it, so only Arm-2D's standalone Helium API is usable today). None
+of the three is vendored in-tree.
 
 ## [v0.15.0] - 2026-07-31
 

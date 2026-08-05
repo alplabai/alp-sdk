@@ -212,16 +212,16 @@ symbol.  This keeps generated `alp.conf` files from claiming
 hardware acceleration that would still run through the library's
 software path.
 
-**Coverage status (v0.6).**  All 25 libraries in the schema enum
+**Coverage status (v0.6).**  All 35 libraries under `metadata/libraries/`
 ship a per-library `hw-backends.yaml`:
 
 | Class                 | Libraries                                                            |
 |-----------------------|----------------------------------------------------------------------|
 | Crypto / TLS          | `mbedtls`, `bearssl`                                                 |
-| ML inference          | `tflite_micro`                                                       |
-| DSP / math            | `cmsis_dsp`                                                          |
+| ML inference          | `tflite_micro`, `cmsis-cv`                                           |
+| DSP / math            | `cmsis_dsp`, `cmsis-stream`                                          |
 | Filesystem            | `littlefs`                                                           |
-| Graphics              | `lvgl`, `u8g2`, `gfx_compat`                                         |
+| Graphics              | `lvgl`, `u8g2`, `gfx_compat`, `arm-2d`                                |
 | Sensor fusion / control | `madgwick_ahrs`, `pid`                                             |
 | Industrial bus        | `modbus`                                                             |
 | IoT / networking      | `coremqtt_sn`, `libcoap`, `libwebsockets`, `nanopb`, `jsmn`          |

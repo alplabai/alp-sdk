@@ -36,6 +36,9 @@ manifest-driven **top-level** `libraries:` selection.
 | `azure-iot` | B    | 1.5.0      | MIT        | zephyr    | Zephyr; west project pin § |
 | `canopennode` | B  | dec12fa3f0d790cafa8414a4c2930ea71ab72ffd | Apache-2.0 | zephyr | Cortex-M; optional west pin; CAN controller |
 | `micropython` | B  | v1.24.1    | MIT        | zephyr    | Cortex-M; source pin; dedicated owner needed |
+| `cmsis-stream` | B | v3.2.0     | Apache-2.0 | zephyr    | west module `cmsisstream`; app must override `CONFIG_CMSISSTREAM_POOL_SECTION` off-AEN |
+| `cmsis-cv`  | B    | (SHA pin, no upstream tags) | Apache-2.0 | zephyr | no upstream Zephyr module glue yet; recipe-only |
+| `arm-2d`    | B    | v1.2.6     | Apache-2.0 | zephyr    | no upstream Zephyr module glue yet; recipe-only |
 
 `python -m alp_cli doctor` reports the selection for the project in scope (tier + licence +
 compatibility), reading these same manifests — so the CLI and alp-studio's
@@ -99,6 +102,37 @@ remaining curation set without inventing capabilities or symbols:
   `modules/lib/micropython` checkout, so the manifest is an enable-by-presence
   source pin to upstream `micropython/micropython` at `v1.24.1` with no
   invented Kconfig.  Tier-A promotion needs a dedicated owner (ADR 0018).
+
+**The Arm CMSIS/CV/2D Cortex-M batch.** Three manifests pin `github.com/
+ARM-software` repos, all Tier B (recipe-only):
+
+- `cmsis-stream` ships its **own** upstream Zephyr module glue at the pinned
+  tag `v3.2.0` (`zephyr/module.yml`, module name `cmsisstream`,
+  `zephyr/Kconfig`'s `menuconfig CMSISSTREAM`), so its `integration.zephyr`
+  names a real module and a real `CONFIG_CMSISSTREAM=y` symbol. Its
+  `CMSISSTREAM_POOL_SECTION` Kconfig defaults to `.alif_sram0.evt_pool`, a
+  linker section that exists only on Alif Ensemble (E1M-AEN); apps on the
+  Renesas RZ/V2N or NXP i.MX 93 M33 cores MUST override it with a real
+  section from their own memory map or the link fails — the manifest does
+  not re-emit that default and invents no replacement.
+- `cmsis-cv` has **no upstream tags or releases** (pinned to a `main` SHA)
+  and **no upstream Zephyr module glue at all** — upstream's own README
+  says it "is a work in progress and has just started". `module: null`,
+  no `kconfig:`; promotion to Tier A needs a real `zephyr/module.yml`
+  upstream plus a CI build lane and example.
+- `arm-2d` has a mature tagged `v1.2.x` release series but likewise ships
+  **no** `zephyr/` directory, `zephyr/module.yml`, or Kconfig — `module:
+  null`, no `kconfig:`. LVGL v9 does carry an Arm-2D accelerated draw path
+  (`LV_USE_DRAW_ARM2D_SYNC`), but Zephyr v4.4's `modules/lvgl/Kconfig`
+  does not expose that symbol (only `LV_USE_DRAW_DMA2D` /
+  `LV_USE_DRAW_DAVE2D`), so Arm-2D cannot be wired in as an LVGL
+  accelerator through this checkout's Kconfig tree today — only its
+  standalone Helium-accelerated 2D API is usable, on the Cortex-M55
+  (E1M-AEN family).
+
+None of the three is vendored in-tree (no `vendors/<lib>/` directory, no
+`zephyr/CMakeLists.txt` edit, no synthetic `CONFIG_ALP_SDK_*_VENDORED`
+symbol) — the existing u8g2/catch2 vendoring exception is not widened here.
 
 **Memfault — deliberately NOT shipped.** Memfault's `memfault-firmware-sdk` is
 not pinned in `west.yml`, and its licence is the proprietary **Memfault SDK

@@ -174,6 +174,26 @@ cores:
     app: ./m33
 """
 
+_V2N_CMSIS_STREAM = """
+som:
+  sku: E1M-V2N101
+libraries: [cmsis-stream]
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./m33
+"""
+
+_V2N_CMSIS_CV = """
+som:
+  sku: E1M-V2N101
+libraries: [cmsis-cv]
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./m33
+"""
+
 
 def test_emit_lvgl_zephyr_kconfig(tmp_path: Path) -> None:
     project = load_board_yaml(_write_board(tmp_path, _V2N_LVGL))
@@ -188,6 +208,26 @@ def test_emit_cmsis_dsp_zephyr_kconfig(tmp_path: Path) -> None:
     out = _slice_alp_conf(project, project.cores["m33_sm"])
     assert "CONFIG_CMSIS_DSP=y" in out
     assert "CONFIG_CMSIS_DSP_TRANSFORM=y" in out
+
+
+def test_emit_cmsis_stream_zephyr_kconfig(tmp_path: Path) -> None:
+    """cmsis-stream names a real upstream west module (`cmsisstream`, its own
+    zephyr/module.yml at the pinned v3.2.0 tag) and its umbrella Kconfig."""
+    project = load_board_yaml(_write_board(tmp_path, _V2N_CMSIS_STREAM))
+    out = _slice_alp_conf(project, project.cores["m33_sm"])
+    assert "CONFIG_CMSISSTREAM=y" in out
+    assert "cmsis-stream v3.2.0" in out  # version transcribed from the manifest
+
+
+def test_emit_cmsis_cv_module_only_no_kconfig(tmp_path: Path) -> None:
+    """cmsis-cv has no upstream Zephyr module glue (no zephyr/module.yml, no
+    Kconfig at the pinned SHA) -- `module: null`, so emit must not fabricate
+    a CONFIG line."""
+    project = load_board_yaml(_write_board(tmp_path, _V2N_CMSIS_CV))
+    out = _slice_alp_conf(project, project.cores["m33_sm"])
+    assert "ADR 0018" in out
+    assert "CONFIG_CMSIS_CV" not in out  # nothing invented
+    assert "CONFIG_CMSISCV" not in out
 
 
 def test_emit_zero_diff_without_libraries(tmp_path: Path) -> None:
