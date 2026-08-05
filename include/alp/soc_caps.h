@@ -370,7 +370,7 @@
 #define ALP_SOC_QENC_COUNT              0
 #define ALP_SOC_TIMER_COUNT             0
 #define ALP_SOC_PWM_COUNT               0
-#define ALP_SOC_ETHERNET_COUNT          0
+#define ALP_SOC_ETHERNET_COUNT          2
 #define ALP_SOC_USB_COUNT               1
 #define ALP_SOC_MIPI_CSI_COUNT          2
 #define ALP_SOC_MIPI_DSI_COUNT          1
