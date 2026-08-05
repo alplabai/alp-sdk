@@ -135,8 +135,8 @@ manifest:
   #                    tree (u8g2, libcoap, libwebsockets,
   #                    jsmn, bearssl, minimp3, opus,
   #                    catch2, libmodbus, madgwick_ahrs,
-  #                    coremqtt_sn, CMSIS-Stream, CMSIS-CV,
-  #                    Arm-2D).  Disabled by default so v0.5
+  #                    coremqtt_sn, cmsisstream (repo CMSIS-Stream),
+  #                    CMSIS-CV, Arm-2D).  Disabled by default so v0.5
   #                    workspaces stay light; customers flip via
   #                    `west update --group-filter +extras-tier1`
   #                    when they list any of those libraries in
@@ -471,7 +471,15 @@ manifest:
     # DSP/AI/audio/video. Ships its OWN Zephyr module glue AT this tag
     # (zephyr/module.yml -> module name `cmsisstream`, zephyr/Kconfig,
     # zephyr/CMakeLists.txt); pinned to the latest tagged release.
-    - name: CMSIS-Stream
+    # The project NAME must be the Zephyr module name `cmsisstream` (not the
+    # GitHub repo name) so that metadata/libraries/cmsis-stream.yaml's
+    # `integration.zephyr.module: cmsisstream` resolves against a real
+    # top-level project -- otherwise an alp-sdk-owned workspace
+    # (`west init -l alp-sdk`) can never fetch it in ANY group-filter
+    # configuration, the #1136 shape that
+    # scripts/check_west_manifest_module_resolution.py gates.  `repo-path`
+    # carries the actual GitHub repo name.
+    - name: cmsisstream
       remote: arm-software
       repo-path: CMSIS-Stream
       revision: v3.2.0            # Apr 2026; matches metadata/libraries/cmsis-stream.yaml.

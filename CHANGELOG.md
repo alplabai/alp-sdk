@@ -2163,7 +2163,8 @@ change.
 formalise `libraries: [cmsis-stream]` / `[cmsis-cv]` / `[arm-2d]`, all
 recipe-only (Tier B, not built in alp-sdk CI). `west.yml` gains an
 `arm-software` remote and three `extras-tier1` project pins:
-`CMSIS-Stream` at tag `v3.2.0` (upstream ships its own `zephyr/module.yml`,
+`cmsisstream` (repo `CMSIS-Stream`) at tag `v3.2.0` (upstream ships its own
+`zephyr/module.yml`,
 module `cmsisstream`, umbrella symbol `CONFIG_CMSISSTREAM`), `CMSIS-CV`
 SHA-pinned at `25c6c111ee04dcfb0ae9093fd6dee4586872982c` (upstream has cut
 no tags and ships no Zephyr module glue — self-described "work in

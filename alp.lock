@@ -1,6 +1,6 @@
 {
   "digests": {
-    "metadata": "sha256:7d6ae9ad869c310866b1f83f1fe9b5d570eb6f87319c17132b629aa0b8f74899",
+    "metadata": "sha256:bbfc15dffc264405fb18d16cdfde6e810d068c44aeecd76373b915fa0ad5f5c3",
     "schemas": "sha256:d22dda73224281bbd71ab4f1ccc2baa2119d222d8235536db38070b912aeba3b"
   },
   "generatedBy": "west alp-lock",
@@ -231,7 +231,7 @@
     "groupsEnabled": []
   },
   "sdk": {
-    "revision": "faca78b036fea358682167d5aee2d2f4a231a0c7",
+    "revision": "ba4e3a960919f91171df447eb860adc8e2bd0dea",
     "version": "0.15.0"
   },
   "west": {
@@ -268,13 +268,6 @@
         "groups": [
           "extras-tier1"
         ],
-        "name": "CMSIS-Stream",
-        "revision": "v3.2.0"
-      },
-      {
-        "groups": [
-          "extras-tier1"
-        ],
         "name": "Catch2",
         "revision": "v3.7.1"
       },
@@ -291,6 +284,13 @@
         ],
         "name": "alif_image-processing-lib",
         "revision": "b4444c0504be3a1eed4a0655c9a95fe343706dcb"
+      },
+      {
+        "groups": [
+          "extras-tier1"
+        ],
+        "name": "cmsisstream",
+        "revision": "v3.2.0"
       },
       {
         "groups": [

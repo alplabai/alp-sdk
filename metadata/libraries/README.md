@@ -36,7 +36,7 @@ manifest-driven **top-level** `libraries:` selection.
 | `azure-iot` | B    | 1.5.0      | MIT        | zephyr    | Zephyr; west project pin § |
 | `canopennode` | B  | dec12fa3f0d790cafa8414a4c2930ea71ab72ffd | Apache-2.0 | zephyr | Cortex-M; optional west pin; CAN controller |
 | `micropython` | B  | v1.24.1    | MIT        | zephyr    | Cortex-M; source pin; dedicated owner needed |
-| `cmsis-stream` | B | v3.2.0     | Apache-2.0 | zephyr    | west module `cmsisstream`; app must override `CONFIG_CMSISSTREAM_POOL_SECTION` off-AEN |
+| `cmsis-stream` | B | v3.2.0     | Apache-2.0 | zephyr    | west module `cmsisstream`; app must override `CONFIG_CMSISSTREAM_POOL_SECTION` off-AEN; app must also set `CONFIG_CPP=y` + a C++ stdlib choice |
 | `cmsis-cv`  | B    | (SHA pin, no upstream tags) | Apache-2.0 | zephyr | no upstream Zephyr module glue yet; recipe-only |
 | `arm-2d`    | B    | v1.2.6     | Apache-2.0 | zephyr    | no upstream Zephyr module glue yet; recipe-only |
 
@@ -114,7 +114,13 @@ ARM-software` repos, all Tier B (recipe-only):
   linker section that exists only on Alif Ensemble (E1M-AEN); apps on the
   Renesas RZ/V2N or NXP i.MX 93 M33 cores MUST override it with a real
   section from their own memory map or the link fails — the manifest does
-  not re-emit that default and invents no replacement.
+  not re-emit that default and invents no replacement. Separately,
+  `CONFIG_CMSISSTREAM=y` unconditionally compiles two C++ translation
+  units (upstream's `zephyr/CMakeLists.txt`), so a C-only application
+  slice pulling in `cmsis-stream` MUST also set `CONFIG_CPP=y` plus a C++
+  standard-library choice in its own `prj.conf` — the manifest does not
+  add `CONFIG_CPP=y` itself, to avoid silently imposing a C++ runtime on
+  every consumer.
 - `cmsis-cv` has **no upstream tags or releases** (pinned to a `main` SHA)
   and **no upstream Zephyr module glue at all** — upstream's own README
   says it "is a work in progress and has just started". `module: null`,
