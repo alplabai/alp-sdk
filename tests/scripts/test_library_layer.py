@@ -839,3 +839,57 @@ def test_no_west_manifest_extras_tier1_tracks_a_floating_branch() -> None:
         if revision in floating:
             offenders.append(f"{project['name']}: {revision!r}")
     assert offenders == [], f"floating extras-tier1 revisions: {offenders}"
+
+
+def test_nightly_extras_tier1_workflow_does_not_hardcode_the_library_list() -> None:
+    """`.github/workflows/nightly-extras-tier1-pins.yml` must DERIVE its
+    extras-tier1 roster from west.yml at run time, not hardcode it as a
+    literal list of project names / `modules/lib/` path basenames in a
+    step's `run:` body.
+
+    This is not hypothetical: PR #1237 added three libraries to west.yml's
+    extras-tier1 group (cmsisstream, CMSIS-CV, Arm-2D) and did NOT update
+    this workflow's then-hardcoded `west update` argument list or verify-loop
+    library list -- so those three were fetched and checked by nothing. That
+    is exactly the "a pin nothing checks" failure class this workflow exists
+    to close. If this test fails, someone re-hardcoded the roster here --
+    derive it from west.yml's `extras-tier1` group in a workflow step
+    instead of re-adding names/paths as literal tokens.
+    """
+    west_doc = yaml.safe_load((REPO / "west.yml").read_text(encoding="utf-8"))
+    known_tokens = set()
+    for project in west_doc["manifest"]["projects"]:
+        if "extras-tier1" not in (project.get("groups") or []):
+            continue
+        known_tokens.add(project["name"])
+        known_tokens.add(project["path"].rsplit("/", 1)[-1])
+
+    workflow_path = REPO / ".github" / "workflows" / "nightly-extras-tier1-pins.yml"
+    workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+
+    offenders = []
+    for step in workflow["jobs"]["fetch-and-verify"]["steps"]:
+        run = step.get("run")
+        if not run:
+            continue
+        # Fold backslash line-continuations -- both original hardcoded
+        # lists were spread across several continuation lines -- so a
+        # re-hardcoded list still reads as one run of tokens.
+        folded = run.replace("\\\n", " ")
+        run_len = 0
+        for token in folded.split():
+            token = token.strip(",;")
+            if token in known_tokens:
+                run_len += 1
+                if run_len == 3:
+                    offenders.append((step.get("name"), token))
+            else:
+                run_len = 0
+    assert offenders == [], (
+        "nightly-extras-tier1-pins.yml hardcodes 3+ extras-tier1 library "
+        f"names/paths again: {offenders}. This is the PR #1237 recurrence "
+        "(three libraries added to west.yml's extras-tier1 group were "
+        "never fetched or verified because the workflow's list was "
+        "hardcoded) -- derive the roster from west.yml in a workflow step "
+        "instead of hardcoding it."
+    )
