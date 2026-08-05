@@ -20,7 +20,7 @@ vendor's SDK on top of ARM CMSIS. Change `som.sku:` in a project's
 > v0.6) and **E1M-AEN801** (peripheral matrix + NPU inference + CC3501E
 > bridge, verified v0.8). The rest (i.MX 93, V2M/DEEPX, AEN301/401/501/601/701)
 > remain pre-silicon. Per-feature status: [`docs/test-plan.md`](docs/test-plan.md);
-> full caveats: [Status](#status) below.
+> full caveats: [Status](README.md#status) below.
 
 Rendered docs: [**docs.alplab.ai/sdk/introduction**](https://docs.alplab.ai/sdk/introduction) ·
 community: [**community.alplab.ai**](https://community.alplab.ai/) ·
@@ -236,7 +236,7 @@ enablement, FreeRTOS/ThreadX/NuttX backends.
 
 - Doc navigation hub: [`docs/README.md`](docs/README.md)
 - Per-(library × OS × SoM) status: [`docs/os-support-matrix.md`](docs/os-support-matrix.md)
-- What changed when: [`CHANGELOG.md`](CHANGELOG.md)
+- What changed when: [`CHANGELOG.md`](https://github.com/alplabai/alp-sdk/blob/HEAD/CHANGELOG.md)
 - Architecture + design: [`docs/architecture.md`](docs/architecture.md);
   decision records: [`docs/adr/`](docs/adr/)
 - Full local verification (`bash scripts/test-all.sh`) and what a green run
