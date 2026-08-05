@@ -69,7 +69,7 @@ alp_status_t alp_inference_deepx_open(struct alp_inference *h, const alp_inferen
 {
 	(void)cfg;
 	static fake_be_t st;
-	st.magic   = FAKE_MAGIC;
+	st.magic    = FAKE_MAGIC;
 	h->be_state = &st;
 	return ALP_OK;
 }
