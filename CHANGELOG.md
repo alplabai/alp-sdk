@@ -9,6 +9,51 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ### Added — real Yocto backends for `<alp/display.h>` and `<alp/i3c.h>` (#1143, #1147)
 
+**ABI + behaviour change, both deliberate.** `alp_display_config_t` gains
+`bool allow_modeset` (default `false`), so `sizeof()` changes and the type's
+hash in `docs/abi/v0.15-snapshot.json` moves. Opening a display on
+Yocto/Linux now requires setting it explicitly, and `alp_display_open`
+returns `ALP_ERR_INVAL` otherwise.
+
+The first draft argued no gate was needed, on the grounds that
+`DRM_IOCTL_SET_MASTER`'s kernel-side exclusivity was guard enough. That was
+wrong in the way that matters: `SET_MASTER` only fails while another process
+*currently* holds master. When master is merely unheld — an idle framebuffer
+console, a Wayland/X session VT-switched away or on an inactive logind seat
+(both `DROP_MASTER`), a headless SSH login on a board with a panel attached —
+`drm_master_open()` hands us master and `SETCRTC` reprograms the live output.
+`alp_display_open()` with the documented default `display_id = 0` reaches
+every one of those, so a default-constructed config could have blanked a
+screen it did not own. Same posture as `alp_storage_config_t`'s
+`allow_unsafe_write` (#1140). The six in-tree examples that drive a panel now
+opt in explicitly, which also makes the model visible where people read it.
+
+Two claims in that first draft were false and are corrected rather than
+softened: `SET_MASTER`'s result was stored in a `bool` and never surfaced, so
+open() continued through `CREATE_DUMB`/`MAP_DUMB`/`mmap` — allocating a
+full-screen scanout buffer, ~8 MB at 1080p — before `SETCRTC` refused; and
+the promised `ALP_ERR_BUSY` was unreachable, since `drm_setmaster_ioctl`
+returns `-EBUSY` while `SETCRTC` returns `-EACCES`, which
+`alp_status_from_posix_errno()` does not map and lands on `ALP_ERR_IO`.
+`close()` also does **not** leave the last frame on screen as documented: it
+`RMFB`s the framebuffer still being scanned out, and the DRM ABI requires the
+kernel to disable any CRTC still using a removed framebuffer.
+
+Also hardened: the two-call `GETCONNECTOR`/`GETRESOURCES` idiom now re-checks
+the kernel's returned counts against what was allocated for. A hotplug
+between the two calls makes the kernel skip the copy and write back only the
+new count, leaving the arrays all-zero while the count reads non-zero —
+`modes[0].hdisplay == 0` would then reach `create.width`, failing safe today
+only because `drm_mode_create_dumb` rejects `width == 0`.
+
+`alp_i3c_open()` on Yocto changes from always-succeeds to can-fail. It
+previously resolved to `sw_fallback` (priority 0, open succeeds and every op
+returns NOSUPPORT); the new backend registers at priority 100, and
+`alp_backend_select()` picks exactly one backend without falling back when
+its `open()` fails. On a Linux board with no `/sys/bus/i3c/devices/i3c-N`,
+the call now returns NULL with `ALP_ERR_NOT_READY` — more honest, but it is a
+behaviour change for anyone who relied on the open succeeding.
+
 - `src/backends/display/yocto_drv.c`: `alp_display_open` drives the DU/DSI
   (or any KMS-capable) output over DRM/KMS dumb buffers via direct ioctls
   against `<drm/drm.h>`/`<drm/drm_mode.h>`/`<drm/drm_fourcc.h>` — no libdrm

@@ -1,5 +1,5 @@
 {
-  "generated": "2026-08-04",
+  "generated": "2026-08-05",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -8186,8 +8186,8 @@
       },
       "macros": {
         "ALP_DISPLAY_CONFIG_DEFAULT": {
-          "hash": "73c74079692a36e5",
-          "value": "(id) ((alp_display_config_t){ .display_id = (id) })"
+          "hash": "a02c498f6d3317c9",
+          "value": "(id) ((alp_display_config_t){ .display_id = (id), .allow_modeset = false })"
         }
       },
       "typedefs": {
@@ -8202,11 +8202,12 @@
           "kind": "struct"
         },
         "alp_display_config_t": {
-          "definition": "typedef struct { uint32_t display_id; } alp_display_config_t;",
+          "definition": "typedef struct { uint32_t display_id; bool allow_modeset; } alp_display_config_t;",
           "fields": [
-            "uint32_t display_id"
+            "uint32_t display_id",
+            "bool allow_modeset"
           ],
-          "hash": "61ccc1403c6a27f2",
+          "hash": "bc0fa13b0c678721",
           "kind": "struct"
         },
         "alp_display_t": {

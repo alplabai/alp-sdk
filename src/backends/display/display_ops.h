@@ -6,12 +6,15 @@
  * sees this struct.  Layout may change between SDK versions.
  *
  * Backends in this directory: zephyr_stub.c (wildcard priority-0
- * NOT_IMPLEMENTED fallback) and zephyr_drv.c (wildcard priority-50
- * wrapper over Zephyr's drivers/display.h class, issue #23).
- * Vendor-specific V2N DSI / parallel-RGB and Alif LCD-IF backends
- * land per the tracking issue on the stub source file.  No vendor
- * extensions exist for display, so the first-member-aliasing
- * pattern the ADC vtable uses is not required here.
+ * NOT_IMPLEMENTED fallback), zephyr_drv.c (wildcard priority-50
+ * wrapper over Zephyr's drivers/display.h class, issue #23), and
+ * yocto_drv.c (priority-100 DRM/KMS dumb-buffer backend on Linux,
+ * issue #1143 -- which covers the V2N DU/DSI path through the
+ * generic KMS uAPI, so no vendor-specific V2N backend is owed).
+ * An Alif LCD-IF backend still lands per the tracking issue on the
+ * stub source file.  No vendor extensions exist for display, so the
+ * first-member-aliasing pattern the ADC vtable uses is not required
+ * here.
  */
 
 #ifndef ALP_BACKENDS_DISPLAY_OPS_H

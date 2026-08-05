@@ -35,32 +35,43 @@
  *      the new framebuffer to the chosen CRTC/connector/mode -- this
  *      IS the act of lighting the panel.
  *
- * @par Why no write/erase-style safety gate (#1147 sibling review
- *      question, asked here too): storage's allow_unsafe_write exists
- *      because a caller using the documented DEFAULT config could
- *      otherwise destroy the boot partition table by ACCIDENT --
- *      writing pixels is this API's entire declared purpose, not an
- *      incidental side effect a default-config caller could stumble
- *      into.  The one genuinely destructive step, SETCRTC, IS
- *      alp_display_open() -- there is no lesser "read-only" open that
- *      would still satisfy <alp/display.h>'s contract (get_caps()
- *      itself only reports geometry+format from A the display, which
- *      requires modesetting to know for certain).  The one guard that
- *      IS meaningful -- not fighting an already-running compositor for
- *      the screen -- is DRM_IOCTL_SET_MASTER's own kernel-side
- *      exclusivity: if X11/Wayland/weston already holds master, our
- *      SET_MASTER (and therefore the whole open()) fails with EACCES,
- *      surfaced honestly as ALP_ERR_BUSY rather than silently
- *      stealing the display.
+ * @par Safety gate: alp_display_config_t.allow_modeset, default false.
+ *      An earlier version of this file argued no gate was needed,
+ *      reasoning that DRM_IOCTL_SET_MASTER's kernel-side exclusivity
+ *      was guard enough.  That was wrong, in the way that matters.
+ *      SET_MASTER only fails while ANOTHER PROCESS CURRENTLY HOLDS
+ *      master.  When master is simply unheld -- an idle framebuffer
+ *      console, a Wayland/X session VT-switched away or on an inactive
+ *      logind seat (both DROP_MASTER), a headless SSH login on a board
+ *      with a panel attached -- drm_master_open() hands US master and
+ *      SETCRTC reprograms the live output.  alp_display_open() with the
+ *      documented default display_id = 0 reaches every one of those.
+ *      So opening now requires an explicit allow_modeset, exactly as
+ *      storage requires allow_unsafe_write (#1140): a default-
+ *      constructed config cannot take over a screen.  There is no
+ *      lesser "read-only" open that would still satisfy
+ *      <alp/display.h>'s contract, so the gate lives on open() rather
+ *      than on the individual ops.
  *
- * @par What close() does NOT do: restore the pre-open CRTC state.
- *      Every minimal KMS example (weston's simple-kms client,
- *      libdrm's modeset-vsync.c, drm_hello) leaves the last frame on
- *      screen after exit rather than un-setting the mode -- there is
- *      no "idle" CRTC state to restore to on a board with no
- *      compositor. (ponytail: if a future customer needs blank-on-
- *      close, add it then -- it is a single extra SETCRTC with
- *      fb_id=0.)
+ * @par Error mapping, corrected: SET_MASTER's failure is checked
+ *      immediately rather than carried in a flag.  drm_setmaster_ioctl
+ *      returns -EBUSY when another process holds master (SETCRTC's
+ *      later refusal is -EACCES, which alp_status_from_posix_errno()
+ *      does not map and would fall through to ALP_ERR_IO).  EBUSY is
+ *      surfaced as ALP_ERR_BUSY; anything else takes the errno's own
+ *      mapping.  Failing here also avoids allocating and mapping a
+ *      full-screen scanout buffer (~8 MB at 1080p) before finding out.
+ *
+ * @par What close() DOES do: it blanks the panel, and that is not a
+ *      choice this file makes -- _teardown() issues RMFB on the
+ *      framebuffer still being scanned out, and the DRM ABI requires
+ *      the kernel to disable any CRTC or plane still using a removed
+ *      framebuffer (drm_framebuffer_remove() ->
+ *      atomic_remove_fb()/legacy_remove_fb()).  The minimal KMS
+ *      examples that leave the last frame up do so precisely because
+ *      they never RMFB; they just exit and let last-close reclaim it.
+ *      It does NOT restore the pre-open CRTC state -- there is no
+ *      recorded "previous mode" to go back to.
  *
  * Registered at priority 100 with vendor "linux"; the zephyr_stub
  * wildcard (priority 0) still wins on non-Linux native_sim builds
@@ -189,7 +200,7 @@ static void _teardown(y_display_data_t *d)
 		struct drm_mode_destroy_dumb destroy = { .handle = d->dumb_handle };
 		ioctl(d->fd, DRM_IOCTL_MODE_DESTROY_DUMB, &destroy);
 	}
-	if (d->have_master) ioctl(d->fd, DRM_IOCTL_DROP_MASTER, 0);
+	if (d->have_master) ioctl(d->fd, DRM_IOCTL_DROP_MASTER, NULL);
 	if (d->fd >= 0) close(d->fd);
 	free(d);
 }
@@ -246,7 +257,16 @@ static alp_status_t _find_connected_connector(int                       fd,
 		conn.count_modes    = n_modes;
 		conn.modes_ptr      = (uint64_t)(uintptr_t)modes;
 		int rc              = ioctl(fd, DRM_IOCTL_MODE_GETCONNECTOR, &conn);
-		if (rc < 0 || conn.count_modes == 0u) {
+		/* Re-check the kernel's counts against what we sized for.  If a
+		 * hotplug grew them between the two calls, drm_mode_getconnector
+		 * skips the copy entirely and only writes back the new count --
+		 * leaving these calloc'd arrays all-zero while count_modes reads
+		 * non-zero, so modes[0] would be an all-zero drm_mode_modeinfo
+		 * and mode.hdisplay == 0 would propagate into create.width.
+		 * (Today that fails safe only because drm_mode_create_dumb
+		 * rejects width == 0 with EINVAL -- not something to rely on.) */
+		if (rc < 0 || conn.count_modes == 0u || conn.count_modes > n_modes ||
+		    conn.count_encoders > n_encoders) {
 			free(encoders);
 			free(modes);
 			continue;
@@ -298,6 +318,17 @@ static alp_status_t y_open(const alp_display_config_t  *cfg,
 {
 	if (cfg == NULL || state == NULL || caps_out == NULL) return ALP_ERR_INVAL;
 
+	/* Opening a display here MEANS taking it over: we become DRM master
+	 * and SETCRTC reprograms the physical output.  The kernel only stops
+	 * that when another process is *currently* master -- it does not stop
+	 * it when master is merely unheld, which is the common case on an
+	 * idle fbcon, a VT-switched-away Wayland/X session, or a headless SSH
+	 * login on a machine with a panel attached.  A default-constructed
+	 * config must not be able to blank someone's screen, so require the
+	 * caller to say so.  Same posture as alp_storage_config_t's
+	 * allow_unsafe_write (#1140). */
+	if (!cfg->allow_modeset) return ALP_ERR_INVAL;
+
 	char path[Y_DISPLAY_PATH_MAX];
 	int  n = snprintf(path, sizeof(path), "/dev/dri/card%u", (unsigned)cfg->display_id);
 	if (n < 0 || (size_t)n >= sizeof(path)) return ALP_ERR_INVAL;
@@ -311,12 +342,21 @@ static alp_status_t y_open(const alp_display_config_t  *cfg,
 		return rc;
 	}
 
-	/* Best-effort: on many embedded images we are already the sole/
-	 * primary opener and the kernel auto-grants master, so a failure
-	 * here is not fatal by itself -- the later SETCRTC is the real,
-	 * unambiguous test of whether we actually hold master (see the
-	 * file-header safety note). */
-	d->have_master = (ioctl(d->fd, DRM_IOCTL_SET_MASTER, 0) == 0);
+	/* Fail here, not five ioctls later.  A previous version stored this
+	 * in a bool and carried on through GETRESOURCES / GETCONNECTOR /
+	 * CREATE_DUMB / ADDFB2 / MAP_DUMB / mmap -- allocating and mapping a
+	 * full-screen scanout buffer (~8 MB at 1080p) before SETCRTC finally
+	 * refused.  Worse, it advertised that refusal as ALP_ERR_BUSY, which
+	 * it never was: drm_setmaster_ioctl returns -EBUSY when another
+	 * process holds master, SETCRTC returns -EACCES, and EACCES is not
+	 * in alp_status_from_posix_errno()'s switch so it lands on
+	 * ALP_ERR_IO. */
+	if (ioctl(d->fd, DRM_IOCTL_SET_MASTER, NULL) != 0) {
+		alp_status_t rc = (errno == EBUSY) ? ALP_ERR_BUSY : alp_status_from_posix_errno(errno);
+		_teardown(d);
+		return rc;
+	}
+	d->have_master = true;
 
 	struct drm_mode_card_res res;
 	memset(&res, 0, sizeof(res));
@@ -343,8 +383,12 @@ static alp_status_t y_open(const alp_display_config_t  *cfg,
 	res.connector_id_ptr = (uint64_t)(uintptr_t)connectors;
 	res.count_crtcs      = n_crtcs;
 	res.crtc_id_ptr      = (uint64_t)(uintptr_t)crtcs;
-	if (ioctl(d->fd, DRM_IOCTL_MODE_GETRESOURCES, &res) < 0) {
-		alp_status_t rc = alp_status_from_posix_errno(errno);
+	/* Same hotplug re-check as the connector walk below: a count that grew
+	 * between the two calls means the kernel skipped the copy and these
+	 * arrays are still all-zero. */
+	if (ioctl(d->fd, DRM_IOCTL_MODE_GETRESOURCES, &res) < 0 ||
+	    res.count_connectors > n_connectors || res.count_crtcs > n_crtcs) {
+		alp_status_t rc = (errno != 0) ? alp_status_from_posix_errno(errno) : ALP_ERR_IO;
 		free(connectors);
 		free(crtcs);
 		_teardown(d);

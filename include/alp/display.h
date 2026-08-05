@@ -33,6 +33,7 @@
 #ifndef ALP_DISPLAY_H
 #define ALP_DISPLAY_H
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
 #include "alp/cap_instance.h"
@@ -49,21 +50,46 @@ typedef struct alp_display alp_display_t;
 
 typedef struct {
 	uint32_t display_id; /**< Studio-resolved display instance. */
+	/**
+	 * @brief Permit taking over and reprogramming a display this process
+	 *        does not already own.  Defaults to @c false.
+	 *
+	 * Only the Yocto/Linux backend consults this; it is ignored elsewhere,
+	 * where a display is a dedicated panel the app owns by construction.
+	 *
+	 * On Linux the SDK drives KMS directly: it becomes DRM master and
+	 * issues @c DRM_IOCTL_MODE_SETCRTC, which reprograms the physical
+	 * output.  The kernel only refuses that when another process is
+	 * *currently* master.  It does NOT refuse when master is merely
+	 * unheld -- an idle framebuffer console, a Wayland or X session that
+	 * has been VT-switched away, or a headless SSH login on a machine
+	 * with a panel attached.  In all of those, opening the display would
+	 * silently take the screen over.
+	 *
+	 * So @ref alp_display_open returns @c ALP_ERR_INVAL unless the caller
+	 * sets this explicitly.  Taking over a display is a deliberate act,
+	 * not something a default-constructed config should do.
+	 */
+	bool allow_modeset;
 } alp_display_config_t;
 
 /**
  * @brief Default-initialize an @ref alp_display_config_t for display @p id.
  *
- * The display config has no tunable fields beyond its identity, so the
- * default simply names the instance: @code alp_display_config_t cfg =
+ * Names the instance and leaves @ref alp_display_config_t::allow_modeset
+ * @c false -- the safe default: @code alp_display_config_t cfg =
  * ALP_DISPLAY_CONFIG_DEFAULT(0); @endcode
+ *
+ * On the Yocto/Linux backend a config built this way cannot take over a
+ * display; see that field's documentation for why.
  *
  * @note Expands to a compound literal (a GCC/Clang extension in C++ -- the
  *       SDK's toolchains; standard through C23).  Usable as an initializer
  *       or an expression.  On a compiler that rejects compound literals in
  *       C++ (e.g. MSVC), initialize the config's fields individually.
  */
-#define ALP_DISPLAY_CONFIG_DEFAULT(id) ((alp_display_config_t){ .display_id = (id) })
+#define ALP_DISPLAY_CONFIG_DEFAULT(id) \
+	((alp_display_config_t){ .display_id = (id), .allow_modeset = false })
 
 typedef struct {
 	uint16_t     width;
