@@ -1,10 +1,16 @@
 {
   "digests": {
-    "metadata": "sha256:4bf0f302637fa2f2c934ea6e6fa9ae92f923fcee04bb744871f5d4231df90863",
+    "metadata": "sha256:c4509b862beeaf073b101f2246c4f380fd1d72b1f1fe4c3dfffbe4907cecdef9",
     "schemas": "sha256:bc87ca026175de7a8481c069fb1da1d8b8f317ae2bff6b3d61d2c548c5da142a"
   },
   "generatedBy": "west alp-lock",
   "libraries": [
+    {
+      "license": "Apache-2.0",
+      "name": "arm-2d",
+      "revision": null,
+      "version": "v1.2.6"
+    },
     {
       "license": "Apache-2.0",
       "name": "aws-iot",
@@ -37,6 +43,12 @@
     },
     {
       "license": "Apache-2.0",
+      "name": "cmsis-cv",
+      "revision": null,
+      "version": "25c6c111ee04dcfb0ae9093fd6dee4586872982c"
+    },
+    {
+      "license": "Apache-2.0",
       "name": "cmsis-dsp",
       "revision": null,
       "version": "97512610ec92058f0119450b9e743eeb7e95b5c8"
@@ -46,6 +58,12 @@
       "name": "cmsis-nn",
       "revision": null,
       "version": "d20117c9e88cf9018d6fa06744dddac700c3e3a1"
+    },
+    {
+      "license": "Apache-2.0",
+      "name": "cmsis-stream",
+      "revision": null,
+      "version": "v3.2.0"
     },
     {
       "license": "Apache-2.0",
@@ -213,7 +231,7 @@
     "groupsEnabled": []
   },
   "sdk": {
-    "revision": "b587a4a52ad170fd84d6559f3ce1c15cc5964c64",
+    "revision": "8c8d11c79835dfa37cceb22e1ef7363dc002e0a3",
     "version": "0.15.0"
   },
   "west": {
@@ -229,8 +247,22 @@
         "groups": [
           "extras-tier1"
         ],
+        "name": "Arm-2D",
+        "revision": "v1.2.6"
+      },
+      {
+        "groups": [
+          "extras-tier1"
+        ],
         "name": "BearSSL",
         "revision": "master"
+      },
+      {
+        "groups": [
+          "extras-tier1"
+        ],
+        "name": "CMSIS-CV",
+        "revision": "25c6c111ee04dcfb0ae9093fd6dee4586872982c"
       },
       {
         "groups": [
@@ -252,6 +284,13 @@
         ],
         "name": "alif_image-processing-lib",
         "revision": "b4444c0504be3a1eed4a0655c9a95fe343706dcb"
+      },
+      {
+        "groups": [
+          "extras-tier1"
+        ],
+        "name": "cmsisstream",
+        "revision": "v3.2.0"
       },
       {
         "groups": [
