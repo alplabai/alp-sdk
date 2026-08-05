@@ -602,6 +602,63 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_peripheral_usb
              COMMAND alp_test_peripheral_usb)
 
+    # #1147 regression (Yocto I3C backend): _bus_present() must find a
+    # real "i3c-<N>" sysfs directory and reject a missing one / a
+    # same-named regular file; y_open() must mirror that presence
+    # check exactly (never a fabricated ALP_OK for a bus that was
+    # never confirmed to exist); write()/read()/write_read() must stay
+    # honest ALP_ERR_NOSUPPORT on every call -- mainline Linux has no
+    # raw-transfer ABI for I3C at all (see the backend's own file
+    # header).  peripheral_i3c.c #includes the real
+    # src/backends/i3c/yocto_drv.c directly (see the test's own header
+    # comment) to drive these against a real temporary directory via
+    # g_i3c_test_sysfs_root_hook instead of the real
+    # /sys/bus/i3c/devices tree.  Deliberately NOT linked against
+    # alp::sdk -- same ODR rationale as alp_test_rpc_yocto_self_close
+    # above.
+    add_executable(alp_test_peripheral_i3c
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_i3c.c
+    )
+    target_include_directories(alp_test_peripheral_i3c PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/i3c
+    )
+    target_compile_features(alp_test_peripheral_i3c PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_i3c
+             COMMAND alp_test_peripheral_i3c)
+
+    # #1143 regression (Yocto display backend): _blit_copy()/
+    # _clear_fill() must honour fb_pitch (which can exceed fb_w * 4 --
+    # the kernel pads scanlines) rather than assuming a tight stride,
+    # must reject a zero-area or out-of-bounds rect before touching
+    # the buffer, and must never write past the requested rect/rows.
+    # _pick_crtc() must select the first CRTC the encoder's bitmask
+    # allows and must not misbehave on a mask with no match.  The real
+    # y_open()/y_close() drive DRM/KMS ioctls against a real
+    # /dev/dri/card* node this build environment does not have (see
+    # the backend's own Status note), so this test targets only the
+    # pure logic factored out of the ops -- see peripheral_display.c's
+    # own header comment.  #includes the real
+    # src/backends/display/yocto_drv.c directly, same ODR rationale as
+    # alp_test_rpc_yocto_self_close above -- deliberately NOT linked
+    # against alp::sdk.
+    add_executable(alp_test_peripheral_display
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_display.c
+    )
+    target_include_directories(alp_test_peripheral_display PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/display
+    )
+    target_compile_features(alp_test_peripheral_display PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_display
+             COMMAND alp_test_peripheral_display)
+
     # /sys/power/state + RTC wakealarm mapping regression for issue #613
     # (Yocto power backend): each alp_power_mode_t must write the exact
     # kernel sysfs token, a timed wake must clear-then-program the

@@ -7,6 +7,98 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Added — real Yocto backends for `<alp/display.h>` and `<alp/i3c.h>` (#1143, #1147)
+
+**ABI + behaviour change, both deliberate.** `alp_display_config_t` gains
+`bool allow_modeset` (default `false`), so `sizeof()` changes and the type's
+hash in `docs/abi/v0.15-snapshot.json` moves. Opening a display on
+Yocto/Linux now requires setting it explicitly, and `alp_display_open`
+returns `ALP_ERR_INVAL` otherwise.
+
+The first draft argued no gate was needed, on the grounds that
+`DRM_IOCTL_SET_MASTER`'s kernel-side exclusivity was guard enough. That was
+wrong in the way that matters: `SET_MASTER` only fails while another process
+*currently* holds master. When master is merely unheld — an idle framebuffer
+console, a Wayland/X session VT-switched away or on an inactive logind seat
+(both `DROP_MASTER`), a headless SSH login on a board with a panel attached —
+`drm_master_open()` hands us master and `SETCRTC` reprograms the live output.
+`alp_display_open()` with the documented default `display_id = 0` reaches
+every one of those, so a default-constructed config could have blanked a
+screen it did not own. Same posture as `alp_storage_config_t`'s
+`allow_unsafe_write` (#1140). The six in-tree examples that drive a panel now
+opt in explicitly, which also makes the model visible where people read it.
+
+Two claims in that first draft were false and are corrected rather than
+softened: `SET_MASTER`'s result was stored in a `bool` and never surfaced, so
+open() continued through `CREATE_DUMB`/`MAP_DUMB`/`mmap` — allocating a
+full-screen scanout buffer, ~8 MB at 1080p — before `SETCRTC` refused; and
+the promised `ALP_ERR_BUSY` was unreachable, since `drm_setmaster_ioctl`
+returns `-EBUSY` while `SETCRTC` returns `-EACCES`, which
+`alp_status_from_posix_errno()` does not map and lands on `ALP_ERR_IO`.
+`close()` also does **not** leave the last frame on screen as documented: it
+`RMFB`s the framebuffer still being scanned out, and the DRM ABI requires the
+kernel to disable any CRTC still using a removed framebuffer.
+
+Also hardened: the two-call `GETCONNECTOR`/`GETRESOURCES` idiom now re-checks
+the kernel's returned counts against what was allocated for. A hotplug
+between the two calls makes the kernel skip the copy and write back only the
+new count, leaving the arrays all-zero while the count reads non-zero —
+`modes[0].hdisplay == 0` would then reach `create.width`, failing safe today
+only because `drm_mode_create_dumb` rejects `width == 0`.
+
+`alp_i3c_open()` on Yocto changes from always-succeeds to can-fail. It
+previously resolved to `sw_fallback` (priority 0, open succeeds and every op
+returns NOSUPPORT); the new backend registers at priority 100, and
+`alp_backend_select()` picks exactly one backend without falling back when
+its `open()` fails. On a Linux board with no `/sys/bus/i3c/devices/i3c-N`,
+the call now returns NULL with `ALP_ERR_NOT_READY` — more honest, but it is a
+behaviour change for anyone who relied on the open succeeding.
+
+- `src/backends/display/yocto_drv.c`: `alp_display_open` drives the DU/DSI
+  (or any KMS-capable) output over DRM/KMS dumb buffers via direct ioctls
+  against `<drm/drm.h>`/`<drm/drm_mode.h>`/`<drm/drm_fourcc.h>` — no libdrm
+  dependency added. Modeset flow: `GETRESOURCES` → the first `CONNECTED`
+  connector with a mode → `GETENCODER` → `CREATE_DUMB` + `ADDFB2`
+  (`DRM_FORMAT_ARGB8888`, byte-identical to `ALP_PIXFMT_ARGB8888`) +
+  `MAP_DUMB` + `mmap()` → `SETCRTC`. `alp_display_blit`/`alp_display_clear`
+  write straight into the mapped dumb buffer, honouring the kernel-reported
+  scanline pitch. `alp_display_open` requires
+  `alp_display_config_t.allow_modeset` (default `false`) and returns
+  `ALP_ERR_INVAL` without it — see the ABI-and-behaviour note at the top of
+  this entry, and the backend's own file header, for why
+  `DRM_IOCTL_SET_MASTER`'s kernel-side exclusivity is NOT sufficient on its
+  own.
+- `src/backends/i3c/yocto_drv.c`: `alp_i3c_open` is a bus PRESENCE check
+  only, confirming `/sys/bus/i3c/devices/i3c-<bus_id>` exists.
+  `alp_i3c_write`/`alp_i3c_read`/`alp_i3c_write_read` stay honest
+  `ALP_ERR_NOSUPPORT` on every call: mainline Linux (`drivers/i3c/`) has no
+  generic userspace raw-transfer ABI for I3C at all — unlike I2C's
+  `ioctl(I2C_RDWR)`, there is no `/dev/i3c-*` chardev and no uapi header;
+  the subsystem is kernel-driver-bind-only. Because no raw-transfer path
+  exists, nothing in this backend can reach a broadcast CCC or a
+  dynamic-address-assignment op, so there is no storage-style
+  `allow_unsafe_write` gate to add.
+- `include/alp/display.h`, `include/alp/i3c.h`: doc comments no longer
+  describe the Yocto path as stub-only; corrected to describe the real
+  backends above and their honest NOSUPPORT boundaries.
+- `tests/yocto/peripheral_display.c`, `tests/yocto/peripheral_i3c.c`: new
+  regression suites (`alp_test_peripheral_display`,
+  `alp_test_peripheral_i3c`) exercising each backend's file-local logic —
+  the pitch-aware blit/clear range checks (against a plain heap buffer
+  standing in for the real mmap'd dumb buffer) and CRTC-selection helper
+  for display; the sysfs presence check and the always-NOSUPPORT transfer
+  ops for I3C — not just linking against the sw fallback.
+- `src/yocto/CMakeLists.txt`: adds the two `yocto_drv.c` files to the
+  `__linux__`-gated block, registering at priority 100 above the existing
+  `zephyr_stub`(display)/`sw_fallback`(i3c) backends; `i3c_dispatch.c` and
+  its `sw_fallback.c` were already wired unconditionally, so only the real
+  backend needed adding there.
+- **Bench-unverified**: neither backend has been exercised against real
+  V2N DU/DSI/Mali-DRM or I3C silicon — nothing in this change has run on
+  V2N. Both compile, link, and pass their new unit tests plus the existing
+  registry/dispatcher test suite on a Linux host with no real
+  `/dev/dri/card*` or `/sys/bus/i3c/devices` tree present.
+
 ### Fixed — `test-all.sh` reported a missing formatter as FAIL, and a stale i.MX 93 Kconfig symbol survived two more sites (#1221, #1222)
 
 - `stage_generated_files()` in `scripts/test-all.sh` reported `FAIL exit=1`,
