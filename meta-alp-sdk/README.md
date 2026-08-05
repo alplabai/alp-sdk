@@ -300,10 +300,11 @@ The SDK's `<alp/inference.h>` always compiles in the dispatcher plus the
 portable stubs.  For most backends the **vendor NPU runtimes are not
 build-time dependencies of the `alp-sdk` library** — the Yocto build
 links the dispatcher only, and where a runtime userspace package exists
-the **image** recipe installs it (e.g. `alp-image-edge`'s
-`IMAGE_INSTALL:append:e1m-v2m101 = "dx-rt"`).  DEEPX DX-M1 keeps that
-shape: `ALP_SDK_USE_DEEPX_DXM1` compiles against an in-tree stub header,
-so it stays dep-free.
+the **machine conf** installs it (e.g. `e1m-v2m101-a55.conf`'s
+`IMAGE_INSTALL:append`, gated on `ALP_ENABLE_DEEPX_DXM1`, which pulls in
+`dx-rt` + `kernel-module-dx-rt-npu`).  DEEPX DX-M1 keeps that shape:
+`ALP_SDK_USE_DEEPX_DXM1` compiles against an in-tree stub header, so it
+stays dep-free.
 
 **DRP-AI3 is the exception.**  Its backend
 (`src/yocto/inference_drpai.cpp`) is real `MeraDrpRuntimeWrapper` code;
@@ -313,9 +314,9 @@ dependency of the recipe.
 
 | MACHINE              | NPU backend                          | Runtime source                                                        |
 |----------------------|--------------------------------------|-----------------------------------------------------------------------|
-| `e1m-v2n101-a55`     | DRP-AI3 — opt-in, BENCH-UNVERIFIED   | kernel driver + `<linux/drpai.h>` + `libtvm_runtime.so` from `meta-rz-drpai`; `mera2_runtime` / `mera2_plan_io` / `drp_tvm_rt` (staged) + `mera_drpai_wrapper` (compiled from `apps/MeraDrpRuntimeWrapper.cpp`) from a built RUHMI checkout |
-| `e1m-v2n102-a55`     | DRP-AI3 — opt-in, BENCH-UNVERIFIED   | Same as V2N101 (memory variant)                                       |
-| `e1m-v2m101-a55`     | DRP-AI3 + DEEPX DX-M1                | DRP-AI3 as above; `dx-rt` via the image                               |
+| `e1m-v2n101-a55`     | DRP-AI3 — opt-in (`ALP_ENABLE_DRPAI`), BENCH-UNVERIFIED | kernel driver + `<linux/drpai.h>` + `libtvm_runtime.so` from `meta-rz-drpai`; `mera2_runtime` / `mera2_plan_io` / `drp_tvm_rt` (staged) + `mera_drpai_wrapper` (compiled from `apps/MeraDrpRuntimeWrapper.cpp`) from a built RUHMI checkout |
+| `e1m-v2n102-a55`     | DRP-AI3 — opt-in (`ALP_ENABLE_DRPAI`), BENCH-UNVERIFIED | Same as V2N101 (memory variant)                                       |
+| `e1m-v2m101-a55`     | DRP-AI3 + DEEPX DX-M1                | DRP-AI3 as above; `dx-rt` via the machine conf (`ALP_ENABLE_DEEPX_DXM1`) |
 | `e1m-v2m102-a55`     | Same as V2M101                       | Same as V2M101 (memory variant)                                       |
 | `e1m-nx9101-a55`     | Ethos-U65                            | NXP i.MX 93 Ethos-U userspace via the image                           |
 | `e1m-aen801-a32`     | Ethos-U85 + 2x U55                   | Ethos-U path inside the alp-sdk library                               |
@@ -424,8 +425,9 @@ the backend in without that layer produces a library that opens nothing.
 > **Builds, links and packages; unproven on silicon.** A `drpai`-enabled
 > `alp-image-edge` bake completes (12118 tasks, all succeeded), and
 > `libalp_sdk.so`'s `DT_NEEDED` on `libmera_drpai_wrapper.so` resolves
-> clean (9 symbols matched, 0 unresolved) — the full MERA2 runtime
-> closure (ten libraries) stages correctly.  What is still
+> clean — see `mera2-drpai-tvm_2.7.0.bb` for the symbol-resolution
+> figures — the full MERA2 runtime closure (ten libraries) stages
+> correctly.  What is still
 > **BENCH-UNVERIFIED**: the DRP-AI3 backend has never run on silicon —
 > the image has not booted on a board — and the compiled YOLOX-S/VOC
 > model was quantised against 8 random frames rather than RUHMI's real
@@ -618,8 +620,9 @@ checkout, it fetches nothing.
 - The DRP-AI3 backend (`PACKAGECONFIG[drpai]`) ships OFF.  Build side it
   is proven: a `drpai`-enabled `alp-image-edge` bake has completed on
   this host (12118 tasks, all succeeded), and `libalp_sdk.so`'s
-  `DT_NEEDED` on `libmera_drpai_wrapper.so` resolves clean (9 symbols
-  matched, 0 unresolved).  It stays BENCH-UNVERIFIED for what build
+  `DT_NEEDED` on `libmera_drpai_wrapper.so` resolves clean — see
+  `mera2-drpai-tvm_2.7.0.bb` for the symbol-resolution figures.  It
+  stays BENCH-UNVERIFIED for what build
   alone can't prove: it has never run on DRP-AI silicon — the image has
   not booted on a board — and the compiled YOLOX-S/VOC model was
   quantised against 8 random frames, not RUHMI's real calibration set

@@ -546,9 +546,16 @@ EXCLUDE_FROM_WORLD = "1"
 #     match definitions the wrapper exports (26 exported, 9 matched, 0
 #     unresolved). All ten libraries ship in the rootfs.
 #
-# What remains unproven is everything ABOVE the link: no model has been
-# compiled to a drpai_dir bundle (that needs the account-gated DRP-AI
-# Translator i8), and no inference has run on silicon. The kernel side IS
-# proven independently -- /dev/drpai0 probes clean on a real board and
+# A model DOES now compile to a drpai_dir bundle -- YOLOX-S/VOC, compiled
+# with the account-gated DRP-AI Translator i8 v1.12; deploy.json carries
+# exactly two nodes, a `null` input `images` and one fused `tvm_op`
+# (tvmgen_default_tvmgen_default_mera_drp_main_0), so the graph is fully
+# offloaded, nothing falls back to CPU. What remains unproven is on-silicon
+# execution: no inference has run on a real board yet. The model's
+# quantisation is ALSO unvalidated -- it was compiled without the vendor
+# calibration set, because all 200 images under the Translator's
+# drpAI_Quantizer/calibrate_images are 129-byte Git LFS pointer stubs, not
+# real images -- so accuracy against real inputs is unknown. The kernel side
+# IS proven independently -- /dev/drpai0 probes clean on a real board and
 # DRPAI_GET_DRPAI_AREA returns the correct 0xD0000000 / 512 MiB arena -- but
 # that is the vendor driver, not this recipe's payload.

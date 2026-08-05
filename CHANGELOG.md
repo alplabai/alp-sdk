@@ -142,10 +142,17 @@ with real build-time deps. Every corrected site now names **which** of the two
 enable paths — the `kconfig.py` auto-emit or the recipe PACKAGECONFIG — it
 means.
 
-Honest in the other direction as well: **DRP-AI has never run on silicon, and
-no full `alp-image-edge` bake has ever completed on this host, with or without
-the backend enabled.** Everything above is code-complete and unverified on
-hardware.
+Honest in the other direction as well: **DRP-AI has never run on silicon.**
+A `drpai`-enabled `alp-image-edge` bake HAS completed on this host — see the
+`mera2-drpai-tvm` packaging entry below — but only via the manual
+`PACKAGECONFIG:append:pn-alp-sdk = " drpai"` override in `local.conf`; the
+machine-conf `ALP_ENABLE_DRPAI` opt-in this branch introduces did not exist
+yet at that bake. It is now parse-verified and expansion-verified instead —
+`bitbake -e` resolves both halves of the opt-in from `ALP_ENABLE_DRPAI` alone,
+in the enabled and the missing-layer directions (see
+`docs/bring-up-drpai-v2n.md` §4 for the figures) — but not itself
+bake-verified: no image has been produced through it. Everything above is
+code-complete; on-silicon execution remains unverified.
 
 ### Added — `mera2-drpai-tvm` closes the `PACKAGECONFIG[drpai]` packaging gap (#1145)
 
@@ -242,9 +249,10 @@ overstated it the same way this entry did.
 **Packaging is now bake-confirmed, not just fixed-on-paper**: a
 `drpai`-enabled `alp-image-edge` bake has completed on this host (12118
 tasks, all succeeded), and `libalp_sdk.so`'s `DT_NEEDED` on
-`libmera_drpai_wrapper.so` resolves clean (9 symbols matched, 0
-unresolved) — the full MERA2 runtime closure (ten libraries) stages
-correctly. **Still BENCH-UNVERIFIED**: on-silicon inference has never
+`libmera_drpai_wrapper.so` resolves clean — see
+`mera2-drpai-tvm_2.7.0.bb` for the symbol-resolution figures — the full
+MERA2 runtime closure (ten libraries) stages correctly. **Still
+BENCH-UNVERIFIED**: on-silicon inference has never
 run — the image has not booted on a board — and the compiled
 YOLOX-S/VOC model was quantised against 8 random frames, not RUHMI's
 real calibration set (its 200 images ship as 129-byte Git LFS pointer

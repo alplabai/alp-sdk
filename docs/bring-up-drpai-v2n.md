@@ -15,10 +15,12 @@ How to get the RZ/V2N's on-die DRP-AI3 NPU running a real model through
 > real E1M-X V2N-M1 silicon the DRP-AI **kernel** driver stack is proven
 > working: `/dev/drpai0` probes clean and the memory-base ioctl returns the
 > correct arena (§3, §7) — but that silicon runs its own current image, not
-> one built from this branch. No model has been compiled and no inference has
-> run. Treat this as the procedure to execute and verify to completion, not a
-> report of a working system. `docs/test-plan.md` carries the verification
-> rows this gates.
+> one built from this branch. A model has now been compiled (§5) — YOLOX-S
+> VOC, fully NPU-offloaded per its deploy graph — but it was quantised
+> without the vendor calibration set, so its accuracy is unvalidated, and no
+> inference has run on silicon. Treat this as the procedure to execute and
+> verify to completion, not a report of a working system. `docs/test-plan.md`
+> carries the verification rows this gates.
 
 For the base V2N board bring-up see [bring-up-v2n.md](bring-up-v2n.md); for the
 DEEPX DX-M1 delta on V2N-M1 see [bring-up-v2n-m1.md](bring-up-v2n-m1.md).
@@ -151,15 +153,66 @@ no-op on hardware seen so far, not as validated for that case.
 
 ## 4. Image
 
-Enable the backend through the SDK recipe's PACKAGECONFIG:
+Enable the backend with the single opt-in switch, in `local.conf`:
+
+```
+ALP_ENABLE_DRPAI = "1"
+```
+
+The four rzv2n-family machine confs (`e1m-v2n101-a55.conf`,
+`e1m-v2n102-a55.conf`, `e1m-v2m101-a55.conf`, `e1m-v2m102-a55.conf`) read that
+one variable and drive both sides of the hardware fact from it, so they
+cannot diverge:
+
+- `IMAGE_INSTALL:append` adds `lib-tvm kernel-module-mmngr` (the userspace
+  runtime payload).
+- `PACKAGECONFIG:append:pn-alp-sdk` adds `drpai`, which flips
+  `-DALP_SDK_USE_DRPAI_V2N=ON` and `-DALP_SDK_DRPAI_REQUIRED=ON` in
+  `src/yocto/CMakeLists.txt` and adds the `drpai` and `lib-tvm` build deps.
+
+It still needs `meta-rz-drpai` in `bblayers.conf` (`lib-tvm` doesn't exist
+without it) — opting in without the layer is caught by an anonymous-Python
+guard in `alp-image-edge.bb` that fails the parse loudly, naming the cause,
+instead of an obscure missing-recipe error at build time.
+
+**Status: `ALP_ENABLE_DRPAI` is parse-verified and expansion-verified, not yet
+bake-verified.** In an isolated build dir (own `TMPDIR`/`SSTATE_DIR`,
+`EXTERNALSRC:pn-alp-sdk` pointed at the checkout, the manual
+`PACKAGECONFIG:append:pn-alp-sdk` override below commented out so
+`ALP_ENABLE_DRPAI` was the only possible source of the enable), with
+`meta-rz-drpai` in `bblayers.conf`:
+
+```
+Parsing of 5447 .bb files complete (0 cached, 5447 parsed). 8037 targets, 387 skipped, 70 masked, 0 errors.
+
+bitbake -e alp-sdk        ->  PACKAGECONFIG="mqtt security audio drpai"
+bitbake -e alp-image-edge ->  IMAGE_INSTALL contains lib-tvm and kernel-module-mmngr
+```
+
+Both halves of the opt-in resolve from `ALP_ENABLE_DRPAI` alone, and the
+recipe's weak defaults (`mqtt security audio`) survive the append rather than
+being replaced. With `meta-rz-drpai` removed from `bblayers.conf` (same
+config otherwise), the parse halts (rc=1) and the guard fires with exactly
+its intended text:
+
+```
+ERROR: meta-alp-sdk/recipes-images/alp-image-edge.bb: ALP_ENABLE_DRPAI = "1" but the rz-drpai layer (meta-rz-drpai) is not in bblayers.conf -- lib-tvm and kernel-module-mmngr do not exist without it. Add meta-rz-drpai to bblayers.conf or set ALP_ENABLE_DRPAI = "0".
+```
+
+**Not yet bake-verified: no image has been built through the
+`ALP_ENABLE_DRPAI` path.** The bake this document's "confirmed"/"proven"
+claims are measured against used the older, manual route instead, set
+directly in `local.conf` alongside `RUHMI_DRPAI_TVM_DIR` pointed at a built
+RUHMI checkout:
 
 ```
 PACKAGECONFIG:append:pn-alp-sdk = " drpai"
 ```
 
-That switch flips `-DALP_SDK_USE_DRPAI_V2N=ON` and
-`-DALP_SDK_DRPAI_REQUIRED=ON`, and adds the `drpai` and `lib-tvm` build deps
-together.
+That manual route is what actually produced a completed image (MACHINE
+`e1m-v2m101-a55`, 12118 tasks attempted, all succeeded). No image has been
+produced through `ALP_ENABLE_DRPAI` yet — re-verify with a real bake before
+relying on it to the same degree.
 
 **The RUHMI libraries and wrapper header are now packaged**, closing the gap
 the earlier revision of this doc left as a manual staging step.
@@ -197,10 +250,12 @@ is the step that would confirm the link and packaging end to end.
 **`meta-rz-drpai` on `bblayers.conf` is necessary but not sufficient for the
 image.** That layer ships its payload through a `core-image-%.bbappend`, and
 that wildcard does not match `alp-image-edge`, so the bbappend never fires and
-the image comes out with no DRP-AI userspace at all — silently.
-`alp-image-edge.bb` therefore installs `lib-tvm` and `kernel-module-mmngr`
-explicitly, gated on the layer being present. See issue #1176; the same trap
-applies to the other `meta-rz-*` feature layers.
+the image comes out with no DRP-AI userspace at all — silently. The fix is
+`ALP_ENABLE_DRPAI = "1"` (above): the four rzv2n-family machine confs install
+`lib-tvm` and `kernel-module-mmngr` explicitly, gated on that variable, not on
+layer presence. `alp-image-edge.bb` itself installs neither — it only carries
+the loud-failure guard for opting in with the layer absent. See issue #1176;
+the same trap applies to the other `meta-rz-*` feature layers.
 
 ## 5. Model compile
 
@@ -215,15 +270,20 @@ environment. It needs an input shape and name, and calibration images; the
 tutorial falls back to random calibration data, which is enough to prove the
 pipeline but not enough for a demo's accuracy.
 
-**No compiled model exists yet — an ONNX source does.** RUHMI ships a real
-model, `how-to/sample_app_v2h/app_yolox_cam/yolox-S_VOC.onnx` (35 MB,
-YOLOX-S on VOC), but there is no pre-compiled `drpai_dir` output anywhere in a
-fresh checkout — searching for `drp_desc.bin`, `weight.bin`, `addr_map.txt`
-and `deploy.json` finds none. `tutorials/README.md` documents the alternative
-public source instead: `wget` a public ONNX
-(`resnet18-v1-7.onnx` from the `onnx/models` repo) and run
-`compile_onnx_model.py` against it. Either way, compiling still requires the
-account-gated DRP-AI Translator (§1) —
+**A compiled model bundle now exists.** RUHMI's own
+`how-to/sample_app_v2h/app_yolox_cam/yolox-S_VOC.onnx` sample (35 MB, YOLOX-S
+on VOC) has been compiled with DRP-AI Translator i8 v1.12. Its
+`sub_0000__CPU_DRP_TVM/deploy.json` has two nodes — a `null` input node named
+`images`, and one fused `tvm_op` node,
+`tvmgen_default_tvmgen_default_mera_drp_main_0` — so the whole graph is
+offloaded to the NPU, not split with a CPU fallback. **Its accuracy is
+unvalidated**: it was quantised without the vendor calibration set — all 200
+images under the Translator's `drpAI_Quantizer/calibrate_images` are 129-byte
+Git LFS pointer stubs, not real image data. No inference has been run on
+silicon with this model yet. `tutorials/README.md` also documents an
+alternative public source, `resnet18-v1-7.onnx` from the `onnx/models` repo
+via `compile_onnx_model.py`, for anyone compiling a different model. Either
+way, compiling still requires the account-gated DRP-AI Translator (§1) —
 `tutorials/compile_onnx_model_quant.py:314` shells out to it via
 `opts["drp_compiler_dir"]` / `drp_compiler_version`, not optionally.
 
@@ -316,8 +376,12 @@ In order:
 5. Run the model. `alp_inference_open(.backend = ALP_INFERENCE_BACKEND_DRPAI)`
    returning `NULL` with `ALP_ERR_NOSUPPORT` means the backend was not compiled
    in; `ALP_ERR_TIMEOUT` means the driver semaphore expired; `ALP_ERR_BUSY` means
-   the shared-memory exclusion lock is contended. **Not yet reachable: no model
-   has been compiled (§5).**
+   the shared-memory exclusion lock is contended. **Not yet run:** a compiled
+   model now exists (§5) and the backend cross-links (the symbol measurement
+   is recorded in
+   `meta-alp-sdk/recipes-renesas/mera2-drpai-tvm/mera2-drpai-tvm_2.7.0.bb`),
+   but no inference has been run on silicon and the model's accuracy is
+   unvalidated (§5).
 
 ## Related
 

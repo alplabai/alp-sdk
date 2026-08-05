@@ -189,19 +189,21 @@ PACKAGECONFIG[drpai]    = "-DALP_SDK_USE_DRPAI_V2N=ON -DALP_SDK_DRPAI_REQUIRED=O
 # carry is no longer true, and neither is "never carried through a
 # completed bake": a drpai-enabled alp-image-edge bake now completes (12118
 # tasks, all succeeded), and libalp_sdk.so's DT_NEEDED on
-# libmera_drpai_wrapper.so resolves clean (9 symbols matched, 0
-# unresolved) -- build, link and packaging are proven.  What is NOT
-# proven is on-silicon inference: the image has never booted on a board,
-# and the compiled YOLOX-S/VOC model was quantised against 8 random
-# frames, not RUHMI's real calibration set (its 200 images ship as
-# 129-byte Git LFS pointer stubs in this checkout), so quantisation
+# libmera_drpai_wrapper.so resolves clean -- build, link and packaging are
+# proven; see mera2-drpai-tvm_2.7.0.bb for the symbol-resolution figures.
+# What is NOT proven is on-silicon inference: the image has never booted
+# on a board, and the compiled YOLOX-S/VOC model was quantised against 8
+# random frames, not RUHMI's real calibration set (its 200 images ship
+# as 129-byte Git LFS pointer stubs in this checkout), so quantisation
 # accuracy is unvalidated.  Treat the backend as BENCH-UNVERIFIED on
 # those two grounds, not on packaging.
 # Where a per-machine NPU userspace runtime package exists it is
-# installed by the *image* recipe (see alp-image-edge's
-# IMAGE_INSTALL:append:e1m-v2m101 = "dx-rt").  There is still NO
-# build-time backend pinning; silicon is the source of truth and apps
-# pick per-handle at runtime via alp_inference_open(.backend = ...).
+# installed by the *machine* conf, not this recipe (see
+# meta-alp-sdk/conf/machine/e1m-v2m101-a55.conf's IMAGE_INSTALL:append,
+# gated on ALP_ENABLE_DEEPX_DXM1, which pulls in dx-rt +
+# kernel-module-dx-rt-npu).  There is still NO build-time backend
+# pinning; silicon is the source of truth and apps pick per-handle at
+# runtime via alp_inference_open(.backend = ...).
 
 FILES:${PN}     += "${libdir}/libalp_sdk.so.*"
 FILES:${PN}-dev += "${libdir}/libalp_sdk.so    \
