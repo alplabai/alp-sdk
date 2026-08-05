@@ -375,6 +375,9 @@ jobs:
       - name: Gate — chip header driver-status labels match metadata
         run: python3 scripts/check_chip_header_status.py
 
+      - name: Gate — driver_status claims outside metadata/chips/*.yaml are backed by a real driver
+        run: python3 scripts/check_driver_status_backing.py
+
       - name: Gate — quality-task registry matches scripts/check_*.py on disk
         run: python3 scripts/check_quality_registry.py
 

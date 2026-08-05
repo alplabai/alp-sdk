@@ -27,9 +27,9 @@ SPI. The signature is ECDSA-P256, not Ed25519 (the placeholder note in
 earlier drafts was wrong — the VALIDATION vendor key is a P-256 EC key).
 
 The AEN SoM presets' `helper_firmware.cc3501e_otp` now point
-`firmware_path` at this blob and `flash_method` at `cc3501e_usb_bootloader`;
-`flash_args.device`/`mode` stay TBD until the public cc3501e-flasher CLI
-ships (they are bench/host-specific, not SoM properties).
+`firmware_path` at this blob; the CC3501E is never customer-flashed, so
+there is no `flash_method` -- `update_channel: alp_ota_spi_otp` is the
+whole story (see `metadata/e1m_modules/README.md`).
 
 **Full OTA cycle validated on hardware (2026-07-10):** stream → FINISH →
 STAGED → the CC35's own `psa_fwu_request_reboot()` swap (the bridge drops,

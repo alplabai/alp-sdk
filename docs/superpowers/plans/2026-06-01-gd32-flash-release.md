@@ -1,5 +1,10 @@
 # GD32 Bridge — Lean Flashable Release + Flashing SOP — Implementation Plan
 
+> **STATUS — LANDED.** `scripts/flash_backends/swd_probe.py` exists
+> (the `swd_v2n_host` rename this plan calls for); the GD32 bridge
+> firmware has shipped several further releases since (see
+> `CHANGELOG.md`).  Kept for implementation-history context.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Integrate the unmerged GD32 transport firmware as the release foundation, build a v0.1.0-candidate flashable image, make the SWD flash tooling actually work via J-Link, and publish a flashing SOP in `alp-sdk`.

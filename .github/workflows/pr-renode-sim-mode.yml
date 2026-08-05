@@ -6,13 +6,15 @@
 # Builds a headless V2N M33 Zephyr image (samples/hello_world +
 # tests/renode/v2n_m33_ramconsole.conf -- the ram_console backend, since
 # the M33-SM has no UART console), plus an AEN M55-HP image and the
-# aen-sim-vision (TFLM) image.  These still prove the firmware compiles
-# for the sim-mode targets.
+# aen-sim-vision (TFLM) image.  These three `west build -p always` steps are
+# REAL builds, not stubs -- they still prove the firmware compiles for the
+# sim-mode targets, and are why this job keeps its place as a required
+# status check even with the e2e steps below dormant.
 #
-# PENDING (tan-cli#77): the socket-contract e2e that used to boot each
-# image in Renode via `west alp-renode --sim-mode --board E1M-V2N101` and
-# drive the published sockets exactly the way alp-studio's
-# RealRenodeAdapter will --
+# DORMANT (maintainer decision, docs/adr/0022-python-executor-renode-
+# retirement.md): the socket-contract e2e that used to boot each image in
+# Renode via `west alp-renode --sim-mode --board E1M-V2N101` and drive the
+# published sockets exactly the way alp-studio's RealRenodeAdapter will --
 #   - the UART socket must stream the firmware console (polled out of the
 #     ram_console_buf RAM ring), and
 #   - the control socket must round-trip WriteBytes -> ReadBytes (in M33
@@ -20,14 +22,24 @@
 # -- was ADR-0020 Phase 4's SDK-side executor
 # (scripts/west_commands/alp_renode.py + tests/scripts/test_alp_renode_sim.py,
 # both retired, no longer present in this repo).  `tan renode --sim-mode`
-# (github.com/alplabai/tan-cli) is the designated successor but is still a
-# stub there -- see the PENDING steps below, kept as no-ops (not deleted)
-# until tan-cli#77 closes.
+# (github.com/alplabai/tan-cli) is NOT a stub any more -- it shipped a full
+# port of the socket contract in tan v0.5.0, closing tan-cli#77 on
+# 2026-08-03.  The steps below stay no-ops anyway: tan-cli#448 has the
+# `tan renode` command surface itself scheduled to go support-paused right
+# after the v0.5.0 tag.  That is a `tan`-VERB decision only: alp-sdk's own
+# Renode CI is NOT disabled -- pr-renode-aen-smoke, pr-renode-dual-os,
+# pr-renode-v2n-sci0-smoke and this job's own three `west build -p always`
+# steps all still run, and pr-renode-aen-smoke boots the pinned Renode
+# v1.16.1 directly (`renode --console --disable-xwt --plain`, no `tan`
+# involved).  Only these three `--sim-mode` steps are no-ops, because they
+# are the only ones that would go through the `tan renode` verb -- do not
+# delete this block silently; flip each step back to a real
+# `tan renode --sim-mode ...` invocation if that verb is un-paused.
 #
 # The renesas_rzv2n model boots the REAL V2N M33 firmware (faithful
 # SRAM@0x08003000 map + a coarse CPG stub for the FSP clock/reset
-# handshakes + iic8/tmp112) -- this gate is meant to be the end-to-end
-# proof once the pending steps are un-stubbed.
+# handshakes + iic8/tmp112) -- retained for whenever these steps are wired
+# back to a live `tan renode --sim-mode` run.
 
 name: pr-renode-sim-mode
 
@@ -229,23 +241,30 @@ jobs:
                  -DEXTRA_DTC_OVERLAY_FILE="${GITHUB_WORKSPACE}/alp-sdk/tests/renode/aen_m55_itcm_run.overlay"
           test -f /tmp/aen-vision-build/zephyr/zephyr.elf
 
-      # PENDING (tan-cli#77): the deterministic sim-mode harness this used
-      # to drive -- scripts/west_commands/alp_renode.py +
+      # DORMANT (maintainer decision, docs/adr/0022-python-executor-renode-
+      # retirement.md): the deterministic sim-mode harness this used to
+      # drive -- scripts/west_commands/alp_renode.py +
       # tests/scripts/test_alp_renode_sim.py -- was the SDK-side executor
       # ADR-0020 Phase 4 retired; neither file exists in this repo any
-      # more.  `tan renode --sim-mode` (github.com/alplabai/tan-cli) is the
-      # designated successor but is still a STUB there (the UART-poll +
-      # control-socket WriteBytes/ReadBytes/tmp112-inject contract isn't
-      # ported yet).  The three ELF builds above are kept (they still prove
-      # the firmware compiles) but the live socket-contract e2e below is
-      # intentionally a no-op until tan-cli#77 closes -- do not delete
-      # this block silently; flip each step back to a real
-      # `tan renode --sim-mode ...` invocation once the stub lands.
-      - name: --sim-mode e2e (real V2N M33 firmware, ram_console) [PENDING tan-cli#77]
-        run: echo "::notice::sim-mode e2e (V2N M33 ram_console) skipped -- tan renode --sim-mode is a stub, see tan-cli#77"
+      # more.  `tan renode --sim-mode` (github.com/alplabai/tan-cli) is NOT
+      # a stub any more -- it shipped a full port of the socket contract
+      # (UART-poll + control-socket WriteBytes/ReadBytes/tmp112-inject) in
+      # tan v0.5.0, closing tan-cli#77 on 2026-08-03.  The three ELF builds
+      # above are kept (they still prove the firmware compiles); the live
+      # socket-contract e2e below stays a no-op because tan-cli#448 has
+      # `tan renode` itself scheduled to go support-paused right after the
+      # v0.5.0 tag.  That is a `tan`-VERB decision only -- alp-sdk's Renode
+      # CI is NOT disabled; pr-renode-aen-smoke boots the pinned Renode
+      # v1.16.1 directly and this job's own builds above still run.  These
+      # three steps are dormant only because they are the ones that would
+      # go through the `tan renode` verb -- do not delete this block
+      # silently; flip each step back to a real
+      # `tan renode --sim-mode ...` invocation if that verb is un-paused.
+      - name: --sim-mode e2e (real V2N M33 firmware, ram_console) [DORMANT -- tan renode verb support-paused]
+        run: echo "::notice::sim-mode e2e (V2N M33 ram_console) skipped -- the tan renode VERB is support-paused (tan-cli#448); alp-sdk Renode CI itself still runs -- see docs/adr/0022"
 
-      - name: --sim-mode e2e (real AEN M55 firmware, UART5 console) [PENDING tan-cli#77]
-        run: echo "::notice::sim-mode e2e (AEN M55 UART5) skipped -- tan renode --sim-mode is a stub, see tan-cli#77"
+      - name: --sim-mode e2e (real AEN M55 firmware, UART5 console) [DORMANT -- tan renode verb support-paused]
+        run: echo "::notice::sim-mode e2e (AEN M55 UART5) skipped -- the tan renode VERB is support-paused (tan-cli#448); alp-sdk Renode CI itself still runs -- see docs/adr/0022"
 
-      - name: --sim-mode e2e (aen-sim-vision, real TFLM inference) [PENDING tan-cli#77]
-        run: echo "::notice::sim-mode e2e (aen-sim-vision TFLM) skipped -- tan renode --sim-mode is a stub, see tan-cli#77"
+      - name: --sim-mode e2e (aen-sim-vision, real TFLM inference) [DORMANT -- tan renode verb support-paused]
+        run: echo "::notice::sim-mode e2e (aen-sim-vision TFLM) skipped -- the tan renode VERB is support-paused (tan-cli#448); alp-sdk Renode CI itself still runs -- see docs/adr/0022"

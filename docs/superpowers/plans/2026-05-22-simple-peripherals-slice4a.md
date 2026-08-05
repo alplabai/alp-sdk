@@ -1,5 +1,9 @@
 # Simple Peripherals Registry Migration (Slice 4a) Implementation Plan
 
+> **STATUS — LANDED.** `src/backends/{rtc,wdt,counter,qenc}/` all
+> exist on the registry pattern. Kept for implementation-history
+> context.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to dispatch ONE subagent per peripheral. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Migrate RTC, WDT, Counter, and QEnc from the legacy `peripheral_<x>.c` pattern to the linker-section backend registry. Four parallelisable peripherals, four sequential subagents, one PR.

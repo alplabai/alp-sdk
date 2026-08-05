@@ -36,17 +36,17 @@ struct definition lives in `<alp/hw_info.h>`:
 ```c
 typedef struct {
     uint32_t magic;             /* "ALPH" -- 0x41 0x4C 0x50 0x48 */
-    uint16_t schema_version;    /* currently 1 */
+    uint32_t schema_version;    /* currently 1 */
     char     family[16];        /* e.g. "v2n", "v2n-m1", "aen" */
     char     sku[24];           /* e.g. "E1M-V2N101"            */
     char     hw_rev[8];         /* e.g. "r1"                    */
-    char     serial[32];        /* free-form, vendor-defined    */
+    char     serial[24];        /* factory-assigned             */
     uint16_t mfg_year;
     uint8_t  mfg_month;
     uint8_t  mfg_day;
-    uint8_t  reserved[__];
+    uint8_t  reserved[40];
     uint32_t crc32;             /* ISO-3309 over offset 0..crc32 */
-} alp_hw_info_eeprom_t;
+} alp_hw_info_eeprom_t;          /* 128 bytes total */
 ```
 
 The CRC32 polynomial matches Python's `zlib.crc32` (poly
@@ -60,25 +60,30 @@ runtime reader cannot disagree.
 production tool                          on-module EEPROM
 ─────────────────                        ────────────────
 $ python scripts/program_eeprom.py \
-      --bus /dev/i2c-N \
-      --addr 0x50 \
-      --family v2n \
-      --sku E1M-V2N101 \
-      --hw-rev r1 \
+      --board-yaml board.yaml \
       --serial ALP-V2N101-26W19-00042 \
-      --mfg-date 2026-05-09
+      --mfg-date 2026-05-09 \
+      --output build/eeprom-manifest.bin
         │
+        ├── read som.sku (+ hw_rev) from board.yaml
+        ├── resolve family from the SKU's metadata/e1m_modules preset
         ├── pack 128 bytes per <alp/hw_info.h>
         ├── append zlib.crc32 over offset 0..(crc32-1)
-        └── i2c write to offset 0
+        └── write the 128-byte blob to --output
                                           ┌──────────────┐
                                           │ offset 0:    │
                                           │  ALPH..CRC32 │
                                           └──────────────┘
+                                          A separate production-test
+                                          fixture writes --output's
+                                          bytes to the EEPROM over
+                                          I²C -- program_eeprom.py
+                                          itself never touches hardware.
 ```
 
-The maintainer runs this script during board assembly QC.  Failed
-boards (CRC mismatch on read-back) are quarantined for rework.
+The maintainer runs this script during board assembly QC, then the
+test fixture writes its output to the module.  Failed boards (CRC
+mismatch on read-back) are quarantined for rework.
 
 ## Runtime read flow
 

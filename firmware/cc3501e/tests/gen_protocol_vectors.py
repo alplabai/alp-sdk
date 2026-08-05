@@ -29,7 +29,36 @@ from __future__ import annotations
 
 import argparse
 import pathlib
+import re
 import sys
+
+# Repo root, derived from this file's path (firmware/cc3501e/tests/ -> repo root).
+_REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+_HEADER = _REPO_ROOT / "include" / "alp" / "protocol" / "cc3501e.h"
+_PROTOCOL_VERSION_TXT = pathlib.Path(__file__).parent.parent / "protocol-version.txt"
+
+_DEFINE_RE = re.compile(r"^#define\s+ALP_CC3501E_PROTOCOL_VERSION\s+(\d+)", re.MULTILINE)
+
+
+def _read_protocol_version() -> int:
+    """Single source of truth: parse ALP_CC3501E_PROTOCOL_VERSION out of the
+    wire-protocol header instead of hardcoding it here, so a version bump
+    that forgets this file fails --check instead of silently drifting.
+    Also cross-checks protocol-version.txt against the same value."""
+    match = _DEFINE_RE.search(_HEADER.read_text(encoding="utf-8"))
+    if not match:
+        sys.exit(f"cannot find #define ALP_CC3501E_PROTOCOL_VERSION in {_HEADER}")
+    header_version = int(match.group(1))
+
+    txt_version = _PROTOCOL_VERSION_TXT.read_text(encoding="utf-8").strip()
+    if txt_version != str(header_version):
+        sys.exit(
+            f"DRIFT: {_PROTOCOL_VERSION_TXT} says {txt_version!r} but "
+            f"{_HEADER} defines ALP_CC3501E_PROTOCOL_VERSION {header_version} -- "
+            "update protocol-version.txt to match."
+        )
+    return header_version
+
 
 # --- Opcodes / codes -- keep aligned with include/alp/protocol/cc3501e.h.
 CMD_PING = 0x00
@@ -54,7 +83,8 @@ RESP_ERR_NOT_READY = 0x05
 RESP_ERR_PROTOCOL = 0x07
 
 # Wire-protocol version GET_VERSION reports (ALP_CC3501E_PROTOCOL_VERSION).
-PROTOCOL_VERSION = 3
+# Sourced from the header, not hardcoded -- see _read_protocol_version().
+PROTOCOL_VERSION = _read_protocol_version()
 
 
 def frame(cmd: int, flags: int, payload: bytes = b"") -> bytes:

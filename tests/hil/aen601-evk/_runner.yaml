@@ -6,7 +6,6 @@
 
 schema_version: 1
 board: alp_e1m_aen601_m55_hp
-serial_port: /dev/ttyACM0
 flash_method: westflash
 defaults:
   serial:

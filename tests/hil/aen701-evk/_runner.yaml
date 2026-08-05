@@ -18,9 +18,12 @@ schema_version: 1
 # (alp_e1m_aen701_m55_he) or the A32 cluster.
 board: alp_e1m_aen701_m55_hp
 
-# Serial port the EVK's USB-C exposes the UART on.  Linux default.
-# Windows runners override to COM<N>; macOS to /dev/cu.usbmodem*.
-serial_port: /dev/ttyACM0
+# No serial_port default here on purpose: the bench fronts UART
+# devices with labgrid, which allocates a ser2net port fresh per
+# reservation -- a fixed device path (Linux /dev/ttyUSB*/ttyACM*,
+# macOS /dev/cu.usbmodem*, Windows COM<N>) would be wrong the moment
+# a different session runs this spec.  Pass --serial-port or set
+# ALP_HIL_SERIAL_PORT at run time; see docs/ci/HW-IN-LOOP.md.
 
 # Flash command pattern.  `westflash` uses the SDK's existing
 # `west flash` wrapper.  `pyocd-flash` is the J-Link / DAPLink path.

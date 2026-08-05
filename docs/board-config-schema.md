@@ -160,10 +160,11 @@ som:
                             # `default_hw_rev`.  Validated at build
                             # time against the family hw_revisions
                             # table (see board-config-hardware.md);
-                            # at runtime the SDK reads the
-                            # rev from the on-module BOARD_ID ADC +
-                            # resistor divider and aborts boot on
-                            # mismatch.
+                            # at runtime the SDK reads the rev from
+                            # the on-module EEPROM manifest and
+                            # aborts boot on mismatch.  There is no
+                            # SoM-side ADC cross-check; a carrier
+                            # BOARD_ID divider is a separate path.
 
   overrides:                # rare -- only for custom SoM variants
     secure_element: none    # custom AEN without the OPTIGA Trust M
