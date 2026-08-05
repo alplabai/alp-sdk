@@ -633,11 +633,22 @@ if(ALP_SDK_USE_DRPAI_V2N)
     #       backing it, so a FATAL_ERROR here would break that build on any
     #       host without a RUHMI checkout.  Warn + disable.
     #       (NOT scripts/alp_orchestrate/kconfig.py's capabilities.drp_ai
-    #       auto-emit: that mechanism does not reach this file today for any
-    #       V2N/V2M A55 slice -- --emit cmake-args refuses os: yocto cores,
-    #       --emit yocto-conf never emits this flag, and the one core class
-    #       where kconfig.py DOES emit it, the M33 Zephyr slice, never runs
-    #       this listfile, which returns early on DEFINED ZEPHYR_BASE above.)
+    #       auto-emit: that mechanism DOES reach a real, gate-tested slice
+    #       today -- buildplan.py's _slice_config_artefact calls
+    #       _slice_cmake_args only for os == "baremetal", and
+    #       test_project_backends.py already asserts E1M-V2M101 / E1M-V2N101
+    #       a55_cluster baremetal emitting -DALP_SDK_USE_DRPAI_V2N=ON.  What
+    #       keeps THIS file out of that path is simpler: the top-level
+    #       CMakeLists.txt does add_subdirectory(src/${ALP_OS}), so an
+    #       os: baremetal slice parses src/baremetal/CMakeLists.txt and
+    #       never even opens src/yocto/CMakeLists.txt -- this listfile only
+    #       runs for os: yocto, which kconfig.py's capabilities.drp_ai
+    #       auto-emit never reaches (--emit cmake-args refuses os: yocto
+    #       cores; --emit yocto-conf never emits this flag).  And
+    #       separately, ALP_SDK_DRPAI_REQUIRED itself is emitted by NOTHING
+    #       in the tree -- kconfig.py emits only the USE flag -- so
+    #       REQUIRED can never be auto-flipped ON to hard-fail a build
+    #       nobody asked to fail.)
     #   (b) explicit opt-in, REQUIRED=ON -- meta-alp-sdk's alp-sdk recipe, where
     #       PACKAGECONFIG[drpai] flips the flag and pulls the deps together.
     #       Here a warning would ship a green bake whose libalp_sdk.so has no
@@ -743,14 +754,14 @@ if(ALP_SDK_USE_DRPAI_V2N)
             # Path (b): the builder named this backend.  Refuse to hand back a
             # library that silently lacks it.
             set(_drpai_level FATAL_ERROR)
-            set(_drpai_verdict
+            string(CONCAT _drpai_verdict
                 "ALP_SDK_DRPAI_REQUIRED=ON (explicit opt-in, e.g. the alp-sdk "
                 "recipe's PACKAGECONFIG \"drpai\"), so this is fatal rather "
                 "than a silent degrade to a DRP-AI-less libalp_sdk.")
         else()
             # Path (a): direct plain-CMake, flag set by hand.  Degrade cleanly.
             set(_drpai_level WARNING)
-            set(_drpai_verdict
+            string(CONCAT _drpai_verdict
                 "inference_drpai.cpp is NOT compiled and ALP_SDK_USE_DRPAI_V2N "
                 "is NOT defined; the dispatcher falls back to its other "
                 "backends.")
