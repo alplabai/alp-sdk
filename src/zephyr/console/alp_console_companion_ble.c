@@ -7,7 +7,7 @@
  * notify), Alif companion only.  Command-group TU of the
  * alp_console_companion.c split (#673 Phase 2): registers onto the
  * (alp, companion) dynamic subcommand set the core TU declares.  Shared
- * companion context + bridge-bus mutex come from
+ * companion context comes from
  * alp_console_companion_internal.h.
  *
  * NOTE: GATT async notifications (the CC3501E's inbound write-req events,
@@ -45,9 +45,7 @@ static int cmd_companion_ble_enable(const struct shell *sh, size_t argc, char **
 		shell_warn(sh, "companion not registered");
 		return -ENODEV;
 	}
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
 	alp_status_t s = cc3501e_ble_enable(companion_cc3501e, ALP_COMPANION_BLE_MS);
-	k_mutex_unlock(&companion_bus_lock);
 
 	if (s == ALP_ERR_NOT_READY) {
 		shell_warn(sh, "BLE not built into the CC3501E firmware (needs the -Ble image)");
@@ -72,10 +70,8 @@ static int cmd_companion_ble_scan(const struct shell *sh, size_t argc, char **ar
 
 	static cc3501e_ble_scan_record_t recs[ALP_COMPANION_BLE_SCAN_MAX];
 	size_t                           n = 0;
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
 	alp_status_t s = cc3501e_ble_scan(
 	    companion_cc3501e, recs, ALP_COMPANION_BLE_SCAN_MAX, &n, ALP_COMPANION_BLE_MS);
-	k_mutex_unlock(&companion_bus_lock);
 
 	if (s == ALP_ERR_NOT_READY) {
 		shell_warn(sh, "BLE not enabled -- run `alp companion ble enable` first");
@@ -150,9 +146,7 @@ static int cmd_companion_ble_disable(const struct shell *sh, size_t argc, char *
 		shell_warn(sh, "companion not registered");
 		return -ENODEV;
 	}
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
 	alp_status_t s = cc3501e_ble_disable(companion_cc3501e, ALP_COMPANION_BLE_MS);
-	k_mutex_unlock(&companion_bus_lock);
 	if (s != ALP_OK) {
 		shell_error(sh, "ble disable failed (%d)", (int)s);
 		return -EIO;
@@ -171,7 +165,6 @@ static int cmd_companion_ble_adv(const struct shell *sh, size_t argc, char **arg
 	}
 	/* Start connectable advertising at a fixed interval with no adv-data; a
 	 * richer adv-data payload is left to a firmware profile, not the CLI. */
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
 	alp_status_t s = cc3501e_ble_adv_start(companion_cc3501e,
 	                                       true,
 	                                       ALP_COMPANION_BLE_ADV_INTERVAL_MS,
@@ -179,7 +172,6 @@ static int cmd_companion_ble_adv(const struct shell *sh, size_t argc, char **arg
 	                                       NULL,
 	                                       0u,
 	                                       ALP_COMPANION_BLE_MS);
-	k_mutex_unlock(&companion_bus_lock);
 	if (s != ALP_OK) {
 		shell_error(sh, "ble adv start failed (%d)", (int)s);
 		return -EIO;
@@ -196,9 +188,7 @@ static int cmd_companion_ble_adv_stop(const struct shell *sh, size_t argc, char 
 		shell_warn(sh, "companion not registered");
 		return -ENODEV;
 	}
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
 	alp_status_t s = cc3501e_ble_adv_stop(companion_cc3501e, ALP_COMPANION_BLE_MS);
-	k_mutex_unlock(&companion_bus_lock);
 	if (s != ALP_OK) {
 		shell_error(sh, "ble adv stop failed (%d)", (int)s);
 		return -EIO;
@@ -215,9 +205,7 @@ static int cmd_companion_ble_scan_stop(const struct shell *sh, size_t argc, char
 		shell_warn(sh, "companion not registered");
 		return -ENODEV;
 	}
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
 	alp_status_t s = cc3501e_ble_scan_stop(companion_cc3501e, ALP_COMPANION_BLE_MS);
-	k_mutex_unlock(&companion_bus_lock);
 	if (s != ALP_OK) {
 		shell_error(sh, "ble scan stop failed (%d)", (int)s);
 		return -EIO;
@@ -238,9 +226,7 @@ static int cmd_companion_ble_connect(const struct shell *sh, size_t argc, char *
 		return -EINVAL;
 	}
 	uint8_t addr_type = (argc >= 3 && strcmp(argv[2], "random") == 0) ? 1u : 0u;
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
 	alp_status_t s = cc3501e_ble_connect(companion_cc3501e, addr, addr_type, ALP_COMPANION_BLE_MS);
-	k_mutex_unlock(&companion_bus_lock);
 	if (s != ALP_OK) {
 		shell_error(sh, "ble connect failed (%d)", (int)s);
 		return -EIO;
@@ -257,9 +243,7 @@ static int cmd_companion_ble_disconnect(const struct shell *sh, size_t argc, cha
 		shell_warn(sh, "companion not registered");
 		return -ENODEV;
 	}
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
 	alp_status_t s = cc3501e_ble_disconnect(companion_cc3501e, ALP_COMPANION_BLE_MS);
-	k_mutex_unlock(&companion_bus_lock);
 	if (s != ALP_OK) {
 		shell_error(sh, "ble disconnect failed (%d)", (int)s);
 		return -EIO;
@@ -283,7 +267,6 @@ static int cmd_companion_ble_gatt_register(const struct shell *sh, size_t argc, 
 	}
 	uint16_t handles[ALP_CC3501E_BLE_GATT_MAX_CHARS];
 	size_t   num_handles = 0;
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
 	alp_status_t s = cc3501e_ble_gatt_register(companion_cc3501e,
 	                                           desc,
 	                                           len,
@@ -291,7 +274,6 @@ static int cmd_companion_ble_gatt_register(const struct shell *sh, size_t argc, 
 	                                           ARRAY_SIZE(handles),
 	                                           &num_handles,
 	                                           ALP_COMPANION_BLE_MS);
-	k_mutex_unlock(&companion_bus_lock);
 	if (s != ALP_OK) {
 		shell_error(sh, "ble gatt register failed (%d)", (int)s);
 		return -EIO;
@@ -319,10 +301,8 @@ static int cmd_companion_ble_gatt_read(const struct shell *sh, size_t argc, char
 	}
 	uint8_t val[ALP_COMPANION_BLE_GATT_MAX];
 	size_t  got = 0;
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
 	alp_status_t s = cc3501e_ble_gatt_read(
 	    companion_cc3501e, (uint16_t)handle, val, sizeof(val), &got, ALP_COMPANION_BLE_MS);
-	k_mutex_unlock(&companion_bus_lock);
 	if (s != ALP_OK) {
 		shell_error(sh, "ble gatt read failed (%d)", (int)s);
 		return -EIO;
@@ -359,13 +339,11 @@ static int companion_ble_gatt_send(const struct shell *sh, char **argv, bool not
 		            notify ? "notify" : "write");
 		return -EINVAL;
 	}
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
 	alp_status_t s = notify
 	                     ? cc3501e_ble_gatt_notify(
 	                           companion_cc3501e, (uint16_t)handle, val, len, ALP_COMPANION_BLE_MS)
 	                     : cc3501e_ble_gatt_write(
 	                           companion_cc3501e, (uint16_t)handle, val, len, ALP_COMPANION_BLE_MS);
-	k_mutex_unlock(&companion_bus_lock);
 	if (s != ALP_OK) {
 		shell_error(sh, "ble gatt %s failed (%d)", notify ? "notify" : "write", (int)s);
 		return -EIO;

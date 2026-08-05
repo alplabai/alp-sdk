@@ -17,13 +17,23 @@
  *     `CONFIG_USB_HOST_STACK` is set and the board carries an
  *     `alif,xhci-uhc` DT node (`zephyr_uhc0`); otherwise every host
  *     call returns ALP_ERR_NOSUPPORT.
+ *   - **yocto_drv** (silicon_ref `"*"`, priority 100, vendor `linux`,
+ *     v0.16 #1141): host role only -- `alp_usb_host_open` is a real
+ *     `/sys/bus/usb/devices` root-hub presence check;
+ *     `alp_usb_host_enable`/`alp_usb_host_disable` are
+ *     ALP_ERR_NOSUPPORT (no Linux userspace ABI starts/stops an
+ *     already-bound controller -- see `src/backends/usb/yocto_drv.c`).
+ *     Device/gadget role: NOT implemented (would need a UDC bound
+ *     into a configfs composition; no libusb dependency was added or
+ *     is needed for the host role's minimal
+ *     open/enable/disable/close surface).
  *   - **sw_fallback** (priority 0): open succeeds for both device
  *     and host; every I/O op returns ALP_ERR_NOT_IMPLEMENTED.  Lets
  *     `native_sim` / trimmed images compile against and exercise
  *     the dispatcher with no real controller.
- *   - **Yocto / baremetal**: no backend has landed yet -- the class
- *     is an unconditional stub (`*_open` returns NULL, every other
- *     call returns ALP_ERR_NOSUPPORT).
+ *   - **Baremetal**: no backend has landed yet -- the class is an
+ *     unconditional stub (`*_open` returns NULL, every other call
+ *     returns ALP_ERR_NOSUPPORT).
  *
  * The shape splits along the device/host boundary, but most
  * embedded apps only ever do one role.  We expose both because
@@ -203,6 +213,12 @@ alp_usb_host_t *alp_usb_host_open(void);
 /**
  * @brief Start the host-role controller (enables enumeration of attached devices).
  *
+ * @par Yocto: always ALP_ERR_NOSUPPORT
+ *      No Linux userspace ABI starts a USB host controller that isn't
+ *      already bound + running by the time this backend can observe
+ *      it -- see `src/backends/usb/yocto_drv.c`'s y_host_enable() for
+ *      the full reasoning.  Honest NOSUPPORT, not a stand-in success.
+ *
  * @param[in] host  Handle from @ref alp_usb_host_open.
  *
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOSUPPORT / ALP_ERR_IO.
@@ -211,6 +227,13 @@ alp_status_t alp_usb_host_enable(alp_usb_host_t *host);
 
 /**
  * @brief Stop the host-role controller.  Pair with @ref alp_usb_host_enable.
+ *
+ * @par Yocto: always ALP_ERR_NOSUPPORT
+ *      The only sysfs knob this backend could reach (authorized_default)
+ *      gates newly-attached devices only; it does not stop the
+ *      controller or detach already-enumerated devices -- see
+ *      `src/backends/usb/yocto_drv.c`'s y_host_disable() for the full
+ *      reasoning.  Honest NOSUPPORT, not a stand-in success.
  *
  * @param[in] host  Handle from @ref alp_usb_host_open.
  *

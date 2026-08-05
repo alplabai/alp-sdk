@@ -3,8 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * USB device + host NOSUPPORT stubs -- <alp/usb.h>.  Split out of
- * the former src/common/stub_backend.c monolith (issue #673).
- * Unguarded: no vendor backend has ever overridden this class.
+ * the former src/common/stub_backend.c monolith (issue #673).  Was
+ * unguarded (no vendor backend had ever overridden this class) until
+ * #1141 wired usb_dispatch.c into the Yocto build -- now gated
+ * behind ALP_VENDOR_OVERRIDES_USB so the two TUs don't double-define
+ * every alp_usb_* symbol on that build.
  */
 
 #include <stddef.h>
@@ -13,6 +16,9 @@
 #include "alp/peripheral.h"
 #include "alp/usb.h"
 
+#include "stub_internal.h"
+
+#if !defined(ALP_VENDOR_OVERRIDES_USB)
 alp_usb_dev_t *alp_usb_device_open(const alp_usb_device_config_t *cfg)
 {
 	(void)cfg;
@@ -72,3 +78,4 @@ void alp_usb_host_close(alp_usb_host_t *h)
 {
 	(void)h;
 }
+#endif /* !ALP_VENDOR_OVERRIDES_USB */

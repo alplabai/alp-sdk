@@ -280,6 +280,13 @@ ZTEST(alp_peripheral, test_storage_config_default)
 	zassert_equal(cfg.instance_id, 0u, "primary device");
 	zassert_equal(cfg.freq_hz, 0u, "0 = backend default");
 	zassert_false(cfg.read_only, "common writable case");
+	/* The SAFE default, and the only thing pinning it.  The Yocto backend
+	 * resolves whole-disk /dev/mmcblk<N> and raw /dev/mtd<N> nodes, so a
+	 * caller using this macro verbatim must not be able to write or erase
+	 * -- offset 0 there is the partition table and the bootloader.  If
+	 * this flips to true, that protection is gone repo-wide and nothing
+	 * else would notice (#1140). */
+	zassert_false(cfg.allow_unsafe_write, "safe default -- see <alp/storage.h>");
 }
 
 ZTEST(alp_peripheral, test_usb_device_config_default)

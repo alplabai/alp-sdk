@@ -7,6 +7,218 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — `test-all.sh` reported a missing formatter as FAIL, and a stale i.MX 93 Kconfig symbol survived two more sites (#1221, #1222)
+
+- `stage_generated_files()` in `scripts/test-all.sh` reported `FAIL exit=1`,
+  not `SKIP`, on any host without `clang-format` on PATH: `gen_soc_caps.py`
+  and `gen_status_strings.py` both refused via `raise SystemExit("error:
+  ...")`, which always exits 1, and the stage's `>/dev/null 2>&1 || return 1`
+  loop swallowed the message and treated the missing tool as a generator
+  failure. Both generators now print the same error to stderr and exit
+  **99** for a missing-tool refusal (the existing "prerequisite unavailable"
+  convention `run_stage()` already maps to SKIP everywhere else in this
+  script); a genuine generator defect still exits nonzero-and-not-99 and
+  still FAILs the stage exactly as before. `stage_generated_files()` now
+  tracks each of the 8 looped generators' exit status individually: a 99 is
+  counted, not failed; if any generator skipped and none failed, the stage
+  reports `generated-files SKIP (N of 8 generators need clang-format)` and
+  returns 99 instead of a silent PASS or a false FAIL (#1221).
+- `include/alp/inference.h`, `zephyr/Kconfig.alp-libraries`, and
+  `vendors/nxp-imx93/README.md` all referenced a Kconfig symbol,
+  `ALP_SDK_INFERENCE_ETHOS_U_N93`, that is not defined anywhere in the tree;
+  the real symbol is `ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93` (note
+  `_BACKEND_`), defined at `zephyr/kconfigs/iot-audio-inference.kconfig`
+  and consumed at `zephyr/CMakeLists.txt`. The `vendors/nxp-imx93/README.md`
+  table row was stale a second way too: it named a source file,
+  `src/zephyr/inference_ethosu_n93.c`, that has never existed in this tree;
+  corrected to the file that actually implements the backend,
+  `src/backends/inference/ethos_u_n93.cpp` (#1222).
+### Fixed — AEN `rpmsg` carve-outs default to non-cacheable; `cacheable: true` now rejected until real cache maintenance ships (#1088)
+
+Conservative mitigation, not the real fix. #1080 root-caused a cross-core
+D-cache incoherence hazard on `ipc[].kind: raw_shmem` and closed it with
+`_emit_cross_core_shmem_cache` (`scripts/alp_orchestrate/kconfig.py`):
+force `CONFIG_DCACHE=n` for any core named as an endpoint, unless the
+entry opts in with `cacheable: true`. That function's own docstring
+deliberately excluded `kind: rpmsg`, tracking the identical hazard there
+as #1088 — this is that issue. `cfg->cacheable` is stored on the rpc
+backend struct (`src/backends/rpc/{zephyr,yocto}_drv.c:~630`) and never
+read again; there is no `sys_cache_*`/`arch_dcache_*`/`SCB_Clean`/
+`SCB_Invalidate` call anywhere under `src/` or `include/`. AEN's own
+example, `examples/multicore/rpmsg-aen/board.yaml`, declared
+`cacheable: true` on its `alp_default_rpmsg` entry (`a32_cluster` writer,
+`m55_hp` reader, M55 D-cache on) — the exact shape #1080 bench-proved
+stale under D-cache-on, just not yet proven for this specific rpmsg path.
+
+`_emit_cross_core_shmem_cache` now also matches `kind: rpmsg`, mirroring
+the `raw_shmem` mechanism rather than inventing a parallel one: any core
+named as an rpmsg endpoint with no `cacheable: true` gets
+`CONFIG_DCACHE=n`. Because the function is board/SoC-agnostic (keyed off
+`ipc:`, not a vendor check — same as `raw_shmem` already was), this also
+reaches `examples/multicore/rpmsg-v2n`,
+`examples/multicore/heterogeneous-offload` and
+`examples/multicore/rpmsg-imx93`, which carried the same
+implicit-non-cacheable shape with no `CONFIG_DCACHE=n` before either.
+Verified rather than assumed: Zephyr's
+`arch/arm/core/cortex_m/Kconfig` does not `select CPU_HAS_DCACHE` for
+`CPU_CORTEX_M33`, so the emission is a genuine no-op on V2N's `m33_sm`,
+NX9101's `m33` and i.MX 93's `m33`; `CPU_CORTEX_M55` does select it, so
+AEN's `m55_hp` is the one core where this is a real (and intended)
+behaviour change. The Linux-side cores cannot be reached at all —
+`_slice_alp_conf` runs only for `os: zephyr` slices.
+
+`cacheable: true` is now actively dangerous for `kind: rpmsg`, not merely
+unused: after this change it selects the branch that skips
+`CONFIG_DCACHE=n`, i.e. the one unsafe path with no maintenance behind
+it. `load_board_yaml` (`scripts/alp_orchestrate/loader.py`) now rejects
+`cacheable: true` on a `kind: rpmsg` entry outright with an
+`OrchestratorError` naming #1088, rather than silently honouring a flag
+that selects unimplemented behaviour.
+`examples/multicore/rpmsg-aen/board.yaml`'s `alp_default_rpmsg` entry
+drops `cacheable: true` accordingly (the emitted `CONFIG_DCACHE=n` now
+covers it instead) — this is `raw_shmem`-only going forward; `rpmsg` has
+no cacheable opt-out until real cache maintenance exists.
+
+Real fix — `sys_cache_data_flush_range()` on the writer and
+`sys_cache_data_invd_range()` on the reader in `<alp/rpc.h>` — is
+explicitly NOT implemented here. That needs the same kind of AEN bench
+sweep #1080 ran to prove it actually eliminates stale lines under
+D-cache-on, and this change ships no such proof.
+
+Three documentation sites described the OLD contract and are corrected
+here, since this change is what made them false: `docs/heterogeneous-
+builds.md` §10 and `docs/v0.6-tbd-and-assumptions.md`'s open-items table
+both still presented `cacheable: true` as a legal per-entry opt-in, and
+`examples/multicore/rpmsg-aen/README.md` still described its own
+carve-out as cacheable — contradicting the `board.yaml` in the same
+example that this change edits. All three now state that the opt-in is
+rejected and that `CONFIG_DCACHE=n` is emitted instead.
+
+Added `test_load_board_yaml_rejects_rpmsg_cacheable_true`
+(`tests/scripts/test_orchestrate_loader.py`) and widened
+`tests/scripts/test_emit_cross_core_shmem_cache.py` (renamed
+`test_rpmsg_kind_excluded` → `test_rpmsg_endpoint_gets_dcache_off`; mixed
+raw_shmem+rpmsg now pins a single deduped `CONFIG_DCACHE=n`, not "only
+raw_shmem fires"). Regenerated the four `check_emit_snapshots.py` goldens
+this touches (`rpmsg-aen`, `rpmsg-v2n`, `hetero-offload`,
+`mproc-mailbox` — the last only for updated comment wording, not new
+behaviour).
+
+Not bench-verified: this closes the hazard by turning the D-cache off,
+the same class of mitigation #1080 bench-proved works for `raw_shmem`,
+but the rpmsg-specific path itself was not re-run on E8 silicon as part
+of this change.
+
+### Fixed — HIL runner comments no longer claim specs that don't exist (#1160)
+
+- `tests/hil/v2n101-x-evk/_runner.yaml` claimed Ethernet, eMMC, xSPI, EEPROM,
+  and OPTIGA HIL specs "live alongside in this dir"; none of those five files
+  exist. Reworded to name the two specs that actually exist
+  (`v2n-gd32-bridge-ping.yaml`, `v2n-temp-sensor.yaml`) and list the five
+  missing topics as an explicit `TODO(#1160)`, not a claim of presence.
+- `tests/hil/v2m101-x-evk/_runner.yaml` had the same defect for DEEPX specs
+  (`v2n-m1-deepx-inference`, the DEEPX 0.75 V rail); the directory holds only
+  `_runner.yaml`. Same fix: state plainly that no SoM-specific specs exist yet
+  and list the two as a `TODO(#1160)`.
+- `tests/hil/v2n102-x-evk/_runner.yaml` and `tests/hil/v2m102-x-evk/_runner.yaml`
+  were checked and do not overclaim — they inherit only the portable
+  `tests/hil/_common/` spec set and name nothing SoM-specific.
+- True HIL coverage as of this fix: v2n101-x-evk has 2 SoM-specific specs
+  (`v2n-gd32-bridge-ping`, `v2n-temp-sensor`) against 18 `examples/v2n/`
+  directories (16 of which have a `testcase.yaml`, all `build_only: true`,
+  so CI proves compile/link only, never real hardware); v2n102-x-evk,
+  v2m101-x-evk, and v2m102-x-evk have 0 SoM-specific specs each.
+- `examples/v2n/README.md`'s table was missing three directories present on
+  disk (`v2n-m1-deepx-inference`, `v2n-m1-ros-perception`, `v2n-power-monitor`).
+  Added rows; `v2n-m1-ros-perception` and `v2n-power-monitor` have no
+  `testcase.yaml` and the new rows say so rather than implying CI coverage.
+- Investigated whether any `check_*.py` gate or workflow step would catch a
+  `_runner.yaml` comment naming a spec file that doesn't exist: none does.
+  `pr-metadata-validate.yml`'s `tests/hil/run_smoke.py --validate` step
+  schema-checks the actual `*.yaml` spec files present in a board dir; YAML
+  comments are stripped before it ever sees them. No gate was added in this
+  change, but not because a mechanical one could never fire: the smallest
+  candidate (extract kebab-case tokens in the spec-filename convention from
+  `_runner.yaml` comments, assert `<token>.yaml` exists in that dir) was
+  built and run against the pre-fix content of both files. On
+  `v2n101-x-evk` it finds zero tokens and stays silent, because that comment
+  named topics in prose ("Ethernet, eMMC, ...") with no filename-shaped
+  tokens. On `v2m101-x-evk` it finds `v2n-m1-deepx-inference`, finds no
+  matching `.yaml`, and fails — so such a gate *would* have caught one of
+  the two real overclaims.
+  What blocks it is a different problem: the same naive gate still flags
+  that token in the new `TODO(#1160): not yet written` line, so it needs an
+  explicit TODO carve-out to avoid failing on an honest, accurate comment.
+  Catching this class properly wants a structured spec-manifest field
+  (e.g. `specs_present:` / `specs_todo:` lists in `_runner.yaml`, cross-checked
+  against the directory listing) rather than free-text-comment parsing plus
+  an exception list; left as a follow-up, not implemented here.
+
+### Added — real Yocto backends for `<alp/storage.h>` and `<alp/usb.h>` (#1140, #1141)
+
+- `src/backends/storage/yocto_drv.c`: routes `alp_storage_get_info`/`read`
+  through `/dev/mmcblk<instance_id>` (SD/MMC, via `BLKGETSIZE64`/
+  `BLKSSZGET`/discard-granularity sysfs) and `/dev/mtd<instance_id>`
+  (xSPI/QSPI/OSPI/internal NOR, via `MEMGETINFO`) instead of falling
+  through to the stub's `ALP_ERR_NOSUPPORT`. `write`/`erase` route the
+  same way but additionally require `alp_storage_config_t.allow_unsafe_write
+  = true` — new field, defaults `false` — because `/dev/mmcblk<N>` is the
+  whole-disk node (GPT/MBR + bootloader at offset 0) and on some boards
+  `/dev/mtd0` is itself the bootloader/FIP partition; a caller using
+  `ALP_STORAGE_CONFIG_DEFAULT` verbatim cannot write or erase through this
+  backend. `alp_storage_configure_inline_aes` stays `ALP_ERR_NOSUPPORT` —
+  no Linux userspace ABI exposes inline XIP-AES key/IV programming for a
+  block or MTD chardev. MTD writes are a raw `pwrite()` with no
+  erase-before-write (NOR write-after-erase is still the caller's
+  responsibility on this backend); SD/MMC `erase()` issues `BLKDISCARD`,
+  a best-effort TRIM hint that does not guarantee a zeroed/erased
+  readback. Both caveats are now documented at the `<alp/storage.h>` call
+  site, not only in the backend.
+- `src/backends/usb/yocto_drv.c`: `alp_usb_host_open` enumerates root hubs
+  under `/sys/bus/usb/devices` as a presence check (Linux already binds +
+  starts the host controllers by the time this runs).
+  `alp_usb_host_enable`/`alp_usb_host_disable` are honest
+  `ALP_ERR_NOSUPPORT` — no Linux userspace ABI starts/stops an
+  already-bound controller or detaches already-authorized devices; an
+  earlier draft of this backend faked `ALP_OK` here via the
+  `authorized_default` sysfs attribute, which review caught and this
+  change removes. The USB **device**/gadget role stays
+  `ALP_ERR_NOSUPPORT` — the V2N X-EVK device tree this issue targets
+  brings up only host-role controllers (`ehci0`/`ohci0`/`hsusb`/`xhci0`),
+  no UDC/gadget node. No libusb dependency was added or needed for the
+  host role's minimal open/enable/disable/close surface.
+- `include/alp/storage.h`, `include/alp/usb.h`: document the
+  `allow_unsafe_write` safety gate, the MTD-no-RMW write caveat, the
+  BLKDISCARD non-zeroed-readback erase caveat, and the real Yocto
+  host-enable/disable/device-role behaviour at the public call sites.
+- `tests/yocto/peripheral_storage.c`, `tests/yocto/peripheral_usb.c`: new
+  regression suites (`alp_test_peripheral_storage`,
+  `alp_test_peripheral_usb`) exercising the two backends' actual
+  file-local logic — the write/erase safety gate against a real temporary
+  file, the discard-granularity geometry fix, the MTD 32-bit erase-length
+  truncation guard, the honest host-enable/disable NOSUPPORT, and the
+  root-hub-enumeration edge cases — not just linking against the sw
+  fallback.
+- `src/yocto/CMakeLists.txt`: wires `storage_dispatch.c`/`usb_dispatch.c` +
+  their `sw_fallback.c` into the same unconditional block as every other
+  migrated class, mutes the split stub backend via
+  `ALP_VENDOR_OVERRIDES_STORAGE`/`ALP_VENDOR_OVERRIDES_USB`, and adds the
+  two `yocto_drv.c` files to the `__linux__`-gated block.
+- `src/common/stub/stub_storage.c`, `src/common/stub/stub_usb.c`: gained the
+  `#if !defined(ALP_VENDOR_OVERRIDES_*)` guard every other migrated class's
+  stub already carries (these two were previously unguarded — no vendor
+  backend had ever overridden them before now).
+- `src/backends/storage/sw_fallback.c`, `src/backends/usb/sw_fallback.c`,
+  `src/storage_dispatch.c`, `src/usb_dispatch.c`: added the
+  `ALP_BACKEND_ANCHOR_DEFINE`/`ALP_BACKEND_ANCHOR` pair (#368) the
+  plain-CMake static-archive link needs now that these two classes are
+  reachable from that path.
+- **Bench-unverified**: neither backend has been exercised against real
+  V2N SDHI/xSPI/xHCI/EHCI/OHCI silicon — nothing in this change has run on
+  V2N. Both compile, link, and pass their new unit tests plus the existing
+  registry/dispatcher test suite on a Linux host with no real
+  `/dev/mmcblk*`, `/dev/mtd*`, or `/sys/bus/usb/devices` root hubs present.
+
 ### Changed — documentation and drift gates follow the Python Tan port
 
 - Swept current guides, examples, ADR indexes/amendments, metadata commentary,
@@ -43,6 +255,70 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
   their `--target` values (`hw-info-h`/`west-libraries`/`os-topology`/
   `zephyr-board`) are live in `python/tan/commands/generate_cmd.py`,
   already reflected correctly in `docs/cli.md`.
+
+### Fixed — CC3501E Wi-Fi/BLE/GPIO/OTA backends shared one unlocked transport (#1116)
+
+**ABI: `sizeof(cc3501e_t)` changes.**  The fix adds a `bool request_lock`
+field to the public `struct cc3501e` (`include/alp/chips/cc3501e/core.h`),
+so `docs/abi/v0.15-snapshot.json`'s hash for that type moves from
+`f21bf2fc8bd4f83d` to `41bef4a1f9e78117`.  Callers allocate the struct by
+value (e.g. `cc3501e_t fw;` in `examples/aen/aen-cc3501e-bringup`,
+`aen-cc3501e-gpio`, `aen-usb-firstlight` and three more), so anything
+compiled against the previous layout must be rebuilt.  Everything in-tree
+is rebuilt from source and the SDK ships no binary compatibility promise
+before v1.0, so this is accepted rather than worked around — noted here
+because a silent struct-layout change is exactly what an ABI snapshot
+exists to surface.
+
+`cc3501e_request()` ran its 4-phase SPI exchange (request header / payload /
+reply header / reply payload) with no locking, reading and writing the
+per-context `tx_scratch`/`rx_scratch` scratch buffers a `struct cc3501e` has
+no mutex or semaphore field to protect. Five independent callers share one
+`cc3501e_t *` on E1M-AEN (the Wi-Fi backend, the BLE backend, the GPIO
+proxy backend, the `alp companion` console, and the OTA path); only the
+console self-protected with its own `companion_bus_lock`, leaving the other
+four free to interleave frames on the CS-less 3-wire link or read back each
+other's replies.
+
+- `cc3501e_request()` now serialises the whole exchange itself (the lock
+  belongs with the shared transport, not each consumer) via a bounded
+  acquire (`ALP_ERR_BUSY` on timeout, never `K_FOREVER`) using
+  compiler-builtin atomics on a plain flag — not a Zephyr `k_mutex` —
+  because this driver core is OS-agnostic and also builds into the
+  plain-CMake / Yocto `libalp_chips.a`. A new Kconfig knob,
+  `CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS` (default 100 ms,
+  mirroring the V2N supervisor singleton's own bounded-acquire pattern),
+  bounds it on Zephyr; non-Zephyr backends fall back to the same 100 ms
+  compiled-in default.
+- Removed the now-redundant `companion_bus_lock` from every `alp companion`
+  console command body — each one already wraps a single (or short
+  sequential) `cc3501e_request()` call the driver itself now serialises.
+  Kept a narrower, still-needed `companion_events_lock` around
+  `companion_drain_events()`: the timer-poll thread and the opt-in
+  `CONFIG_ALP_SDK_CC3501E_EVENT_IRQ` workqueue both drive the `evt_busy` +
+  `evt_buf` walk-and-dispatch loop wrapped around (not just the single
+  request inside) `cc3501e_poll_events()`, which the transport lock does
+  not cover.
+- `poll_by_repeat()`'s own `ctx->rx_scratch[0]` sentinel write and post-call
+  peek (used to disambiguate a retryable transport `BUSY` from a terminal
+  firmware `RESP_ERR_STATE` reject) sat OUTSIDE `cc3501e_request()`'s
+  per-call lock, so a second caller's request could still land between the
+  sentinel write and this attempt's own request, or between the request
+  and the peek. Split `cc3501e_request()` into a public locked wrapper and
+  an internal `cc3501e_request_locked()`; `poll_by_repeat()` now takes
+  ctx's lock once per attempt and brackets the sentinel write, the
+  request, and the peek all under it.
+- Not re-entrant: verified no call path invokes `cc3501e_request()` from
+  inside another already-in-flight `cc3501e_request()` call on the same
+  `cc3501e_t` (the async event callback runs only after
+  `cc3501e_poll_events()`'s own request has already returned and released
+  the lock).
+- New `tests/zephyr/cc3501e_transport_lock` native_sim regression test
+  forces a deterministic concurrent PING + GET_VERSION interleave against
+  a shared context and asserts neither call cross-talks or desyncs; it
+  fails against the pre-fix driver (`ALP_ERR_IO` from the reply-header
+  cmd-echo mismatch) and passes with the fix. Proven on host/native_sim
+  only — not bench/silicon-verified.
 
 ### Fixed — V2N/V2M SoC-internal IP maturity was comments-only, and further routed nets stayed undeclared (#1169, #1170)
 

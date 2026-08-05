@@ -71,9 +71,14 @@ alp_status_t cc3501e_set_event_callback(cc3501e_t *ctx, cc3501e_event_cb_t cb, v
  *          around cc3501e_poll_events()) -- this is exactly what the SDK's
  *          own in-tree caller does: companion_drain_events() (src/zephyr/
  *          console/alp_console_companion.c) wraps every cc3501e_poll_events()
- *          call in @c k_mutex_lock(&companion_bus_lock, K_FOREVER), which is
- *          what makes the CONFIG_ALP_SDK_CC3501E_EVENT_IRQ workqueue coexisting
- *          with the timer-poll thread safe.
+ *          call in @c k_mutex_lock(&companion_events_lock, K_FOREVER), which
+ *          is what makes the CONFIG_ALP_SDK_CC3501E_EVENT_IRQ workqueue
+ *          coexisting with the timer-poll thread safe.  (This is separate
+ *          from -- and still needed alongside -- @ref cc3501e_request's own
+ *          internal transport lock added for issue #1116, which serialises
+ *          only the single request/reply exchange inside each
+ *          cc3501e_poll_events() call, not the evt_busy/evt_buf walk around
+ *          it.)
  *
  * @param ctx  Initialised driver context.
  * @return ALP_OK once the queue was drained + dispatched (even with zero

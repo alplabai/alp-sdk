@@ -602,6 +602,23 @@ def _validate_topology_cores(
             address=entry.get("address"),
         ))
 
+    # #1088: `kind: rpmsg` has no cache-maintenance layer.  `cfg->cacheable`
+    # is stored on the backend struct (src/backends/rpc/{zephyr,yocto}_drv.c)
+    # and never read again -- no `sys_cache_*` call exists anywhere under
+    # src/ or include/.  `cacheable: true` on a rpmsg entry would therefore
+    # select a code path that promises coherency it can't deliver, which is
+    # worse than no flag at all -- reject it here rather than silently
+    # honouring it.  Real fix (sys_cache_data_flush_range /
+    # sys_cache_data_invd_range in <alp/rpc.h>) remains open; see #1088.
+    for e in ipc_entries:
+        if e.kind == "rpmsg" and e.cacheable:
+            raise OrchestratorError(
+                f"ipc entry '{e.name}': kind: rpmsg does not support "
+                f"cacheable: true -- <alp/rpc.h> has no cache-maintenance "
+                f"implementation yet (#1088).  The D-cache is forced off "
+                f"for this carve-out's endpoints instead; remove "
+                f"`cacheable: true` (or set it to false).")
+
     # Loader rule §4.5.6: every ipc endpoint must be a core with
     # os != off.
     for e in ipc_entries:

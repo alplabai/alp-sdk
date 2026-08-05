@@ -227,11 +227,17 @@ def _clang_format_exe() -> str:
     """
     exe = shutil.which("clang-format-22") or shutil.which("clang-format")
     if exe is None:
-        raise SystemExit(
+        # Exit 99, not the default 1: this is a missing-tool refusal, not
+        # a generator failure, and test-all.sh's stage_generated_files
+        # maps 99 to SKIP (same contract as every other prerequisite
+        # check in that script) rather than FAIL (alp-sdk#1221).
+        print(
             "error: clang-format not found on PATH; cannot format "
             "status_strings.c to match the repo .clang-format (install "
-            "clang-format==22.* -- see docs/testing.md)"
+            "clang-format==22.* -- see docs/testing.md)",
+            file=sys.stderr,
         )
+        raise SystemExit(99)
     return exe
 
 

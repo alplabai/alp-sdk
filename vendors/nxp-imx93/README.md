@@ -89,7 +89,7 @@ selection happens through two Kconfigs:
 | Kconfig symbol                                     | Meaning                                                                       |
 |---------------------------------------------------|-------------------------------------------------------------------------------|
 | `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U65`     | Select the U65 kernel set for the shared TFLM/Ethos-U body (`tflm.cpp`).      |
-| `CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93`     | Compile the i.MX 93 per-variant config layer (`src/backends/inference/ethos_u_n93.cpp`). Auto-on when the SoC choice is i.MX 93. |
+| `CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93`     | Compile the i.MX 93 per-variant inference backend (`src/backends/inference/ethos_u_n93.cpp`), registered at priority 100 so it wins over the portable TFLM backend. Auto-on when the SoC choice is i.MX 93 (emitted by `scripts/alp_orchestrate/kconfig.py`). |
 
 The per-variant file shares the model-execution body with the AEN
 Ethos-U backend.  `alp_ethosu_variant_name` already works

@@ -52,7 +52,7 @@ config ALP_TFLM_ETHOS_U65
 	  Compile TFLite-Micro kernels against the Ethos-U65 NPU
 	  embedded in i.MX 93.  Same TFLM op-resolver as U55 / U85;
 	  Vela's `--accelerator-config ethos-u65-256` target.  The
-	  legacy `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_N93=y` knob is the
+	  legacy `CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93=y` knob is the
 	  N93-specific driver shim that complements this kernel-level
 	  knob.
 
