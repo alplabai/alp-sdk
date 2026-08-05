@@ -63,13 +63,24 @@ as the contract, is three layers:
 
 1. **Compile-time capability** — `ALP_SOC_ETHERNET_COUNT` /
    `ALP_CAP_HW_ETHERNET` (`include/alp/soc_caps.h:48,455`, mirrored
-   per SoC block). **This layer is currently broken on the 2-port
-   family this ADR is about**: `ALP_SOC_ETHERNET_COUNT` is 0 on
-   V2N/V2M (`include/alp/soc_caps.h:373`) and on NX91
-   (`include/alp/soc_caps.h:333`), so `ALP_CAP_HW_ETHERNET` reports
-   false where V2N/V2M silicon has two 1GbE MACs — tracked as
-   **#1240** (`gen_soc_caps.py` reads the `ethernet` key while
-   `n44.json` declares `ethernet_1g`), not fixed by this ADR.
+   per SoC block). **Researching this ADR found that layer broken on
+   the 2-port family the ADR is about**: `gen_soc_caps.py` read only
+   the `ethernet` key while `n44.json` declares `ethernet_1g`, so
+   `ALP_SOC_ETHERNET_COUNT` was 0 on V2N/V2M and `ALP_CAP_HW_ETHERNET`
+   reported false on silicon with two 1GbE MACs. Fixed separately in
+   **#1240**; `include/alp/soc_caps.h:373` now reads 2.
+
+   That is worth recording rather than quietly repairing, because it
+   is the failure mode this whole ADR guards against: a surface that
+   exists, is documented and generated, and reports the opposite of
+   the hardware. Ratifying a layer is not the same as the layer
+   working, and nothing in the tree had noticed for as long as the
+   `ethernet_1g` spelling had existed.
+
+   One case remains false and is **not** a defect: NX91
+   (`include/alp/soc_caps.h:333`), because `imx93.json` declares its
+   peripheral counts pending reference-manual ingestion, so there is
+   no key to sum and none may be inferred from the absence.
 2. **Form-factor port identity** — `ALP_E1M_ETH0` with
    `ALP_E1M_ETH_COUNT 1u` (`include/alp/e1m_pinout.h:100,204`), and
    `ALP_E1M_X_ETH0` / `ALP_E1M_X_ETH1` with `ALP_E1M_X_ETH_COUNT 2u`
@@ -176,11 +187,20 @@ Open questions, left open rather than papered over:
    not own the MACs today, and M33 bring-up is blocked upstream.
    Nothing in this tree supports designing for it now.
 
-Follow-up, not part of this ADR (already forward-referenced from the
-Decision section above, layer 1): `scripts/gen_soc_caps.py` maps only
-the `ethernet` key (`scripts/gen_soc_caps.py:97`) while `n44.json`
-uses `ethernet_1g`, so V2N emits `ALP_SOC_ETHERNET_COUNT 0` despite
-having two ports — **#1240**, not fixed by this change.
+Found while researching this ADR, fixed separately rather than here
+(and forward-referenced from the Decision section above, layer 1):
+`scripts/gen_soc_caps.py` matched only the `ethernet` key while
+`n44.json` declares `ethernet_1g`, so V2N emitted
+`ALP_SOC_ETHERNET_COUNT 0` despite having two ports — **#1240**. Its
+guard is worth knowing about: the test that stops a third key spelling
+recurring probes the real `ETHERNET_COUNT` lambda rather than a copy
+of the key list, because the first version hardcoded that copy and
+stayed green when the generator was reverted.
+
+Also filed from this ADR's research, both open: **#1241** (the AEN801
+preset omits `ethernet_phy`, and no `metadata/chips/dp83825` manifest
+exists) and **#1244** (the devicetree puts the DP83825I at MDIO
+address 1 while the E8 bench log reads it at address 0).
 
 ## See also
 
