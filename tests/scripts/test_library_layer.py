@@ -855,6 +855,14 @@ def test_nightly_extras_tier1_workflow_does_not_hardcode_the_library_list() -> N
     to close. If this test fails, someone re-hardcoded the roster here --
     derive it from west.yml's `extras-tier1` group in a workflow step
     instead of re-adding names/paths as literal tokens.
+
+    Tokenizing splits on commas as well as whitespace: a re-hardcoded list
+    disguised as a single comma-joined token (e.g. ``for lib in $(echo
+    "u8g2,libcoap,...,arm-2d" | tr , " ")``) must still be caught. The
+    3-in-a-row threshold below is deliberately low: re-hardcoding only 1-2
+    library names/paths (a one-off example in a comment, an unrelated
+    coincidental match) does NOT trip this guard -- 3 is the line between
+    "coincidence" and "someone pasted the roster back in".
     """
     west_doc = yaml.safe_load((REPO / "west.yml").read_text(encoding="utf-8"))
     known_tokens = set()
@@ -874,8 +882,11 @@ def test_nightly_extras_tier1_workflow_does_not_hardcode_the_library_list() -> N
             continue
         # Fold backslash line-continuations -- both original hardcoded
         # lists were spread across several continuation lines -- so a
-        # re-hardcoded list still reads as one run of tokens.
-        folded = run.replace("\\\n", " ")
+        # re-hardcoded list still reads as one run of tokens. Also split
+        # on commas: a comma-joined roster (e.g. piped through `tr , " "`
+        # at runtime) is a single whitespace token but must tokenize the
+        # same as a space-separated one.
+        folded = run.replace("\\\n", " ").replace(",", " ")
         run_len = 0
         for token in folded.split():
             token = token.strip(",;")
@@ -892,4 +903,52 @@ def test_nightly_extras_tier1_workflow_does_not_hardcode_the_library_list() -> N
         "never fetched or verified because the workflow's list was "
         "hardcoded) -- derive the roster from west.yml in a workflow step "
         "instead of hardcoding it."
+    )
+
+
+def test_nightly_extras_tier1_workflow_verify_step_fails_closed_on_empty_roster() -> (
+    None
+):
+    """The "Derive extras-tier1 library list from west.yml" step
+    (``id: extras-tier1``) must exist, and both steps that consume its
+    outputs must actually reference ``steps.extras-tier1.outputs.*``.
+
+    Not hypothetical: ``bash -c 'set -euo pipefail; status=0; for lib in
+    ; do echo "$lib"; done; exit $status'`` exits 0 -- an empty
+    ``${{ steps.extras-tier1.outputs.paths }}`` (the derive step deleted,
+    renamed, or its ``id:`` typo'd) makes the "Verify pins populated
+    content" step's `for` loop iterate zero times and pass, gating on
+    having checked nothing. Asserting the id: exists and is wired into
+    both consumer steps catches that at review time; the workflow's own
+    `[ -n "$libs" ] || exit 1` guard catches it at run time.
+    """
+    workflow_path = REPO / ".github" / "workflows" / "nightly-extras-tier1-pins.yml"
+    workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["fetch-and-verify"]["steps"]
+
+    derive_steps = [s for s in steps if s.get("id") == "extras-tier1"]
+    assert len(derive_steps) == 1, (
+        "nightly-extras-tier1-pins.yml is missing the `id: extras-tier1` "
+        "derive step (or it was renamed) -- the west-update and verify "
+        "steps below depend on steps.extras-tier1.outputs.{names,paths} "
+        "existing, and an empty output there makes the verify loop pass "
+        "having checked nothing."
+    )
+
+    update_step = next(
+        s
+        for s in steps
+        if s.get("name") == "West init + update with extras-tier1 enabled"
+    )
+    verify_step = next(
+        s for s in steps if s.get("name") == "Verify pins populated content"
+    )
+
+    update_refs = " ".join(str(v) for v in (update_step.get("env") or {}).values())
+    verify_refs = " ".join(str(v) for v in (verify_step.get("env") or {}).values())
+    assert "steps.extras-tier1.outputs.names" in update_refs, (
+        "the west-update step must reference steps.extras-tier1.outputs.names"
+    )
+    assert "steps.extras-tier1.outputs.paths" in verify_refs, (
+        "the verify step must reference steps.extras-tier1.outputs.paths"
     )
