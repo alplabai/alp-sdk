@@ -29,12 +29,12 @@ own quickstart.
 
 ## 1. Pick a target
 
-| If your hardware is...                      | `som.sku` to declare | Board default     | One-pager                                         |
-|---------------------------------------------|----------------------|---------------------|---------------------------------------------------|
-| E1M-AEN3..801 SoM on E1M EVK                | `E1M-AEN801` (etc.)  | `E1M-EVK`           | [`docs/soms/aen.md`](soms/aen.md)                 |
-| E1M-X V2N101 / V2N102 SoM on E1M-X-EVK      | `E1M-V2N101`         | `E1M-X-EVK`         | [`docs/soms/v2n.md`](soms/v2n.md)                 |
-| E1M-X V2N-M1 (V2M101 / V2M102) SoM          | `E1M-V2M101`         | `E1M-X-EVK`         | [`docs/soms/v2n-m1.md`](soms/v2n-m1.md)           |
-| E1M-NX9101 (NXP i.MX 93)                    | `E1M-NX9101`         | `E1M-EVK`           | [`docs/soms/imx93.md`](soms/imx93.md)             |
+| If your hardware is...                      | `som.sku` to declare | Board default     | One-pager                                         | Bring-up doc | Reference examples |
+|---------------------------------------------|----------------------|---------------------|---------------------------------------------------|--------------|---------------------|
+| E1M-AEN3..801 SoM on E1M EVK                | `E1M-AEN801` (etc.)  | `E1M-EVK`           | [`docs/soms/aen.md`](soms/aen.md)                 | [`docs/bring-up-aen.md`](bring-up-aen.md) | `examples/peripheral-io/gpio-button-led`, `i2c-scanner`, `rtc-clock`, `hello-world` |
+| E1M-X V2N101 / V2N102 SoM on E1M-X-EVK      | `E1M-V2N101`         | `E1M-X-EVK`         | [`docs/soms/v2n.md`](soms/v2n.md)                 | [`docs/bring-up-v2n.md`](bring-up-v2n.md) | `examples/v2n/v2n-gd32-bridge-ping`, `v2n-board-id-readout`, `v2n-ethernet-dual`, `dac-waveform` |
+| E1M-X V2N-M1 (V2M101 / V2M102) SoM          | `E1M-V2M101`         | `E1M-X-EVK`         | [`docs/soms/v2n-m1.md`](soms/v2n-m1.md)           | [`docs/bring-up-v2n-m1.md`](bring-up-v2n-m1.md) | DEEPX bring-up delta on top of V2N |
+| E1M-NX9101 (NXP i.MX 93)                    | `E1M-NX9101`         | `E1M-EVK`           | [`docs/soms/imx93.md`](soms/imx93.md)             | [`docs/getting-started.md`](getting-started.md) §4-5 | same cross-family examples as AEN |
 
 The per-SoM one-pager covers what's populated, which examples
 target it, the bring-up flow, and common gotchas.  The full

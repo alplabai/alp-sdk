@@ -16,6 +16,19 @@ The same pattern generalises to **E1M-AEN801** (A32 + M55-HP + M55-HE),
 > instead.  The orchestrator handles single-slice fan-outs too, but
 > you don't need the cross-core machinery this guide focuses on.
 
+Which SoM families are heterogeneous in the first place:
+
+| SoM family | A-class cores | M-class cores | Heterogeneous? |
+|---|---|---|---|
+| E1M-AEN E3/E4 | — | M55-HP, M55-HE (both Zephyr) | No — RTOS-only silicon |
+| E1M-AEN E5..E8 | A32 cluster (Yocto) | M55-HP, M55-HE (Zephyr) | Yes |
+| E1M-X V2N / V2N-M1 | A55 cluster (Yocto) | M33-SM (Zephyr) | Yes |
+| E1M-N93 (iMX93) | A55 cluster (Yocto) | M33 (Zephyr) | Yes |
+
+A bare `som: { sku: <MPN> }` produces a working dual-image build for every
+heterogeneous SoM — the per-core OS defaults come from the SoM preset's
+`topology:` block; override per-core via the project's `cores:` block.
+
 ## 1. What this guide covers
 
 By the end you'll have:
