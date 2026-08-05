@@ -76,6 +76,8 @@ alp-sdk/
 │   ├── e1m_x_pinout.h               # E1M-X-family portable pad constants
 │   ├── chips/                       # one <alp/chips/<part>.h> per chip driver
 │   ├── blocks/                      # <alp/blocks/<name>.h> for SDK-level block helpers
+│   ├── ext/<vendor>/                # vendor escape-hatch headers (alif/renesas/nxp/deepx)
+│   │                                 # for capabilities the portable <alp/*> API can't express
 │   └── boards/                      # GENERATED: per-board route headers
 ├── src/
 │   ├── <class>_dispatch.c           # per-peripheral-class dispatcher (i2c_dispatch.c, …)
@@ -359,6 +361,21 @@ not others.
 | Storage          | `alp/storage.h`      | Block + filesystem (LittleFS) on Zephyr; standard FS on Yocto.  | v0.5 surface |
 | 2D graphics      | `alp/gpu2d.h`        | Portable blit/fill shim (Alif Dave2D / GPU2D); SW fallback.     | v0.5 surface; see [ADR 0008](adr/0008-gpu2d-portable-shim.md) |
 
+### AI / inference pipeline (off-device → on-device)
+
+Training stays off-device, in TensorFlow / PyTorch, producing a
+`.tflite` / `.onnx` source model.  `tan model build` (host-side,
+`scripts/alp_model/`) compiles that source model for **every** NPU
+backend the target SoM declares and packs the results into one fat,
+multi-backend **`.alpmodel`** package (CBOR manifest + per-backend
+blobs).  The per-backend compiler differs by silicon: Arm **Vela**
+for Ethos-U (AEN, i.MX 93), the **DRP-AI translator** for Renesas
+RZ/V2N, **dxcom** for DEEPX DX-M1, plus a portable CPU/TFLM blob as
+the universal fallback.  At runtime, `alp_inference_open_alpmodel()`
+loads the package and its selection engine picks the matching blob
+(silicon-ref + SRAM-fit + `preferred_backend` tiebreak); see the
+*Inference* row above for the dispatcher detail.
+
 ### Peripherals: how a block resolves to a backend
 
 Each block in `alplabai/alp-studio` declares the SDK API it needs in
@@ -634,6 +651,20 @@ CONFIG_ALP_SDK_CHIP_LSM6DSO=y
 #include <alp/peripheral.h>
 #include <alp/chips/lsm6dso.h>
 ```
+
+### Plain CMake consumption (bare-metal, Yocto, host tests)
+
+For a non-west consumer, `add_subdirectory()` the SDK directly:
+
+```cmake
+add_subdirectory(third_party/alp-sdk)
+target_link_libraries(my_app PRIVATE alp::sdk)
+```
+
+`ALP_OS` picks the backend (`zephyr`, `baremetal`, or `yocto`): the top-level
+`CMakeLists.txt` defaults it to `zephyr` when `ZEPHYR_BASE` is defined in the
+including build, else `baremetal`.  Set it explicitly for a Yocto consumer
+(`-DALP_OS=yocto`).
 
 ### Yocto consumption (v0.4+)
 

@@ -79,14 +79,20 @@ tan build --project examples/peripheral-io/gpio-button-led --sdk-root "$PWD"
 #   [gpio] done
 ```
 
-`tan bootstrap` is the canonical fresh-clone setup on POSIX hosts --
-Linux and macOS. On native Windows it refuses outright
-(`bootstrap.sh` is POSIX-only); use WSL2 (Ubuntu) or follow the
-native steps in [`docs/cross-platform-setup.md`](cross-platform-setup.md)
-§4. On the hosts it supports, Python Tan performs the bootstrap phases from
-the SDK's `metadata/bootstrap.json`: it creates the Zephyr workspace one level
-up from `alp-sdk/`, runs `west update --narrow`, installs the Zephyr Python
-dependencies and SDK extras, and reports any missing host prerequisites.
+`tan bootstrap` is the canonical fresh-clone setup and runs natively on
+Linux, macOS, **and Windows** (PowerShell) for the Zephyr-on-M workflow this
+walkthrough uses -- it no longer shells out to `bootstrap.sh` (that POSIX-only
+refusal was retired; see tan-cli's `bootstrap.windows-unsupported` issue code,
+now reserved-but-unused). Only the Yocto/A-class path needs WSL2 (Ubuntu); see
+[`docs/cross-platform-setup.md`](cross-platform-setup.md) §4/§5 for the native
+Windows walkthrough and the Yocto/WSL2 split. Python Tan performs the
+bootstrap phases from the SDK's `metadata/bootstrap.json` on every host: it
+creates the Zephyr workspace one level up from `alp-sdk/` (or under
+`--workspace <dir>`, relocating the checkout there first if needed), runs
+`west update --narrow`, installs the Zephyr Python dependencies and SDK
+extras, and reports any missing host prerequisites -- native Windows gets
+Windows-specific guidance (7-Zip on PATH for `west sdk install`, the
+`arm-zephyr-eabi` toolchain stays a separate manual step everywhere).
 
 `scripts/bootstrap.sh` (and its PowerShell twin `scripts/bootstrap.ps1`
 -- see [`docs/cross-platform-setup.md`](cross-platform-setup.md) §4)
