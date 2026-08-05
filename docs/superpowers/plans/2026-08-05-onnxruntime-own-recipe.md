@@ -52,7 +52,45 @@ single `version:` field stays true. The E1M ↔ E1M-X swap promise is **not**
 affected either way — per `docs/adr/0011-intra-family-portability.md` those are
 separate families and were never mutually swappable. A per-family version split
 is contract-legal; it is a product/CX compromise, not a doctrine violation.
-Record that decision in the ADR trail rather than leaving it implicit.
+
+---
+
+## DECIDED 2026-08-05 — own recipe, not vendor layers
+
+The maintainer chose the own-recipe path. This section records **why**, so a
+future reader does not relitigate it from the cost side alone.
+
+**The scaling argument (the maintainer's).** Alp Lab ships more SoCs over time.
+Vendor layers are **O(families)** to manage: every new SoC family adds a layer
+dependency, a version, and a licensing review, and the version skew compounds —
+today it is already 1.8.0 (`meta-renesas-ai`) versus 1.24.3 (`nxp-imx`) across
+two families. An own recipe is **O(1)**: a new family is one more
+`COMPATIBLE_MACHINE` against the same version.
+
+**The architectural argument, which matters more.** Vendor ORT forks exist
+largely to add **execution providers** — NXP's `neutron` and `vsinpu`, and the
+equivalents elsewhere. **alp-sdk does not consume ORT's EP mechanism at all.**
+NPU dispatch happens one level above, in `src/yocto/inference_yocto.c`'s
+`resolve_auto()`, routing to the Ethos-U, DRP-AI and DEEPX backends. So the
+capability the forks exist to deliver is precisely the one this SDK bypasses by
+design. Inheriting a fork would mean accepting its version skew to gain a feature
+our own dispatch layer replaces. ORT's job here is the **CPU floor**, and upstream
+serves that as well as any fork.
+
+This is also the ADR 0017 posture read correctly: "ride over the vendor SDK" bars
+*reimplementing* vendor drivers. Packaging an upstream project's own sources in a
+`.bb` is ordinary Yocto integration — we consume upstream, we do not fork it. The
+vendor forks are the thing that would put a fork in our tree.
+
+**The accepted cost, stated plainly.** We own the bumps. `cmake/deps.txt` carries
+~45 pinned dependencies and every ORT upgrade re-pins them. That is real recurring
+maintenance and it is the price of the O(1) property above. It is accepted, not
+overlooked.
+
+**Consequences for this plan:** the fallback above is now the fallback *only* for
+a Task 2 failure — and Task 2 has already passed (see below), so it is not
+expected to fire. Task 4's manifest carries one `version:` true on every family we
+enable.
 
 ---
 
