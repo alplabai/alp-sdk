@@ -102,7 +102,7 @@
               "type": "array",
               "uniqueItems": true,
               "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
-              "description": "Curated library tokens the board.yaml `libraries:`/`cores.<id>.libraries:` selects (ADR 0018 vocabulary -- scripts/alp_project_emit.py's _LIBRARY_KCONFIG union metadata/libraries/*.yaml). Drift-checked against that real vocabulary."
+              "description": "Curated library tokens the board.yaml `libraries:`/`cores.<id>.libraries:` selects (ADR 0018 vocabulary -- the metadata/libraries/*.yaml manifest names, globbed by scripts/alp_orchestrate/libraries.py's available_libraries(); the _LIBRARY_KCONFIG dict this description used to name was retired when the library layer became manifest-driven). Drift-checked against that real vocabulary."
             },
             "chips": {
               "type": "array",
