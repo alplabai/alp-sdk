@@ -462,8 +462,8 @@ Once §6's runbook passes:
 1. Use [`scripts/program_eeprom.py`](../scripts/program_eeprom.py)
    to write the production manifest (real serial, real mfg
    date, real SKU).  See
-   [`docs/board-id.md`](board-id.md) for the BOARD_ID ADC
-   companion path.
+   [`docs/board-id.md`](board-id.md) for the separate, carrier-side
+   BOARD_ID divider path.
 2. Sign the application image with MCUboot via
    [`zephyr/sysbuild/aen/sysbuild.conf`](../zephyr/sysbuild/aen/sysbuild.conf).
    Dev key under [`keys/`](../keys/); production key never

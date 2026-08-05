@@ -63,9 +63,10 @@ static alp_status_t z_open(const alp_storage_config_t  *cfg,
                            alp_storage_backend_state_t *st,
                            alp_capabilities_t          *caps_out)
 {
-	/* SD/MMC isn't a flash_area abstraction -- defer to a different
-     * backend.  Returning NOSUPPORT lets the dispatcher's selector
-     * fall through to the next match. */
+	/* SD/MMC isn't a flash_area abstraction.  alp_storage_open()
+     * calls alp_backend_select() once (no retry loop -- that's
+     * alp_backend_select_next(), used by security/update_log, not
+     * storage), so this NOSUPPORT surfaces straight to the caller. */
 	if (cfg->kind == ALP_STORAGE_KIND_SD_MMC) return ALP_ERR_NOSUPPORT;
 
 	const struct flash_area *fa  = NULL;

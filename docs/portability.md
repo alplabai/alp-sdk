@@ -15,7 +15,11 @@ This cookbook ties three other docs together:
   guarantee.  Every cell is a SKU × example compile test;
   18 / 21 cells green for E1M (NX9101's only hw_rev is `status: tbd` --
   refused outright by the hw_rev-buildable gate, #1025 --
-  so all 3 of its cells currently fail), 12 / 12 for E1M-X.
+  so all 3 of its cells currently fail), 8 / 12 for E1M-X (the
+  `adc-voltmeter` example fails on all four E1M-X presets --
+  V2N101, V2N102, V2M101, V2M102; the other two pinned examples,
+  `pwm-led-fade` and `v2n-pwm-fan-control`, are green on all four --
+  see the matrix for the per-cell diagnostics).
 - [`docs/adr/0011-intra-family-portability.md`](adr/0011-intra-family-portability.md)
   — the architectural decision record that ratifies the intra-family
   boundary, with the alternatives we considered and rejected.
@@ -822,30 +826,31 @@ catalogue, and the open gaps — lives in
 when you're picking SKUs or when you suspect the SDK isn't keeping
 its promise.
 
-Headline numbers as of 2026-05-18:
+Headline numbers, measured against the generated block in
+`docs/portability-matrix.md` (re-run `python3
+scripts/gen_portability_matrix.py` to reproduce):
 
-- **E1M family.**  21 / 21 (SKU × example) cells generate cleanly.
+- **E1M family.**  18 / 21 (SKU × example) cells generate cleanly.
   All 6 AEN SKUs produce byte-identical `alp.conf` for every
-  example, after stripping the SoC identity comment.  NX9101
-  participates with its own Ethos-U65 dispatcher.
-- **E1M-X family.**  12 / 12 cells generate cleanly.  V2M SKUs
+  example, after stripping the SoC identity comment.  The other
+  3 cells all belong to E1M-NX9101 — a placeholder MPN whose only
+  hw_rev (imx93 r1) is `status: tbd`, which the hw_rev-buildable
+  gate refuses outright, so none of its cells currently pass.
+- **E1M-X family.**  8 / 12 cells generate cleanly.  V2M SKUs
   add three on-module chip-driver enables (DEEPX DX-M1, PCIe
   mux, DEEPX rail buck) but otherwise produce the same
-  generated config as V2N within each example.
+  generated config as V2N within each example.  The 4 failing
+  cells are `adc-voltmeter` on all four E1M-X presets (V2N101,
+  V2N102, V2M101, V2M102) — see the matrix for the per-cell
+  diagnostics.
 
-Two open gaps in the matrix today (both metadata-level, both
-flagged):
+The A2-1 (V2M102 pad-route namespace) and A2-2 (V2M missing
+extension-GPIO routes) metadata gaps that used to show up as
+matrix drift are resolved (2026-05-18) — see
+[`docs/portability-matrix.md`](portability-matrix.md) for the
+fix detail.
 
-- **A2-1** — `E1M-V2M102.yaml` declares its pad routes in the
-  `E1M_*` namespace instead of `E1M_X_*`.  Apps using
-  `<alp/e1m_x_pinout.h>` symbols resolve on V2N101 / V2N102 /
-  V2M101 but miss on V2M102.  Single-file fix queued.
-- **A2-2** — V2M101 + V2M102 are missing pad routes for
-  `E1M_X_GPIO_IO27..IO35` (V2N101 / V2N102 carry them).  Awaits
-  maintainer input per [[pending-hw-configs]] — we don't invent
-  pin assignments.
-
-Two recently-resolved gaps (the per-variant NPU and CPU-class
+Two other resolved gaps (the per-variant NPU and CPU-class
 selectors):
 
 - **G-1** — Ethos-U variant (U55 / U65 / U85) is now visible to
@@ -857,19 +862,17 @@ selectors):
   emit `_HELIUM=y`, A55 slices emit `_NEON=y`, M33 slices
   emit `_REF=y`.
 
-### Future work — CI enforcement
+### CI enforcement
 
-The matrix is currently maintained **by hand** against the
-evidence under `build/portability-test/` (gitignored).  Each
-release cycle re-runs `scripts/alp_project.py` for every (SKU ×
-example) cell and diffs the generated `alp.conf` to confirm the
-matrix is still green.
-
-Phase E.3 (future work, no release commitment) will land
-`scripts/gen_portability_matrix.py` and a CI job that produces
-the matrix mechanically per commit.  Until then, the matrix and
-this cookbook are the customer-facing guarantee; the
-implementation is verified each release against the matrix.
+Phase E.3 has landed: `scripts/gen_portability_matrix.py`
+re-runs the swap-test sweep for every (SKU × example) cell on
+every invocation and rewrites the generated block in
+`docs/portability-matrix.md`; the `pr-generated-files` CI gate
+fails any PR whose metadata / example / emit-pipeline change
+leaves that block stale.  The matrix is no longer hand-maintained
+against `build/portability-test/` evidence — it is mechanically
+regenerated per commit, and this cookbook's headline numbers above
+are read straight from that generated block.
 
 ---
 

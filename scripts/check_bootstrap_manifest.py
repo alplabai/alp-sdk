@@ -199,9 +199,15 @@ LIBRARIES_DIR = REPO / "metadata" / "libraries"
 CI_WORKFLOWS = [
     REPO / ".github" / "workflows" / "pr-twister.yml",
     REPO / ".github" / "workflows" / "pr-tier-a-libraries.yml",
-    REPO / ".github" / "workflows" / "nightly-aen-hil.yml",
     REPO / ".github" / "workflows" / "pr-getting-started-aen801.yml",
 ]
+# `nightly-aen-hil.yml` was listed here until it was deleted (#968): CI no
+# longer drives the AEN bench, because the bench is labgrid-reservation-gated
+# and strictly serial and SETOOLS is licence-gated and not redistributable.
+# This list is a hardcoded set of paths, so a deleted workflow does not drop
+# out of it -- it becomes `missing .github/workflows/<name>` and hard-fails.
+# `pr-twister.yml` runs this gate and is a REQUIRED context, so a stale entry
+# here reds every PR.
 
 # Every top-level manifest key MUST be listed here -- main()'s unknown-key
 # check below fails loudly if a key is added without anyone deciding how it

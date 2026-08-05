@@ -43,12 +43,18 @@ new chip id:
 
 ## Boot + identification
 
-Two-stage flow identical to the AEN + V2N families: EEPROM manifest
-+ BOARD_ID ADC.  See [`docs/board-id.md`](../board-id.md).
+Identical to the AEN + V2N families: the SoM's identity comes solely
+from the on-module EEPROM manifest — there is no SoM-side ADC
+cross-check.  A carrier-board BOARD_ID resistor divider, where
+present, identifies the *carrier* revision and is independent of the
+SoM revision; it is not yet wired into `alp_hw_info_read()`.  See
+[`docs/board-id.md`](../board-id.md).
 
 ## Bring-up
 
-i.MX 93 support lands in the v0.3 cycle.  The cross-family
+i.MX 93 support has no committed version: `VERSIONS.md` Tier 3
+("deferred indefinitely past v1.0") lists NXP NX9101 silicon
+enablement, revisited on customer pull.  The cross-family
 examples (GPIO, I2C, PWM, ADC, UART, RTC, …) target it through
 the same `<alp/...>` API as the AEN family.
 

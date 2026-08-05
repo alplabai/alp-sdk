@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/template-catalog-v1.schema.json",
   "title": "ALP Template Catalog v1",
-  "description": "Validates metadata/templates/catalog-v1.json -- the declarative catalog of project templates (app archetypes) a frontend (alp-sdk-vscode, Alp Studio, `alp new`) reads to discover 'what starter projects exist + what each needs' instead of ad-hoc example copying. Each record maps to a CANONICAL existing example under examples/ (never a copy -- the example IS the template's rendered form) and declares its support matrix, required portable-API/library/chip surface, user-owned vs SDK-generated files, tunable parameters, and test wiring. scripts/check_template_catalog.py validates the catalog against this schema AND drift-checks that every referenced example/testcase.yaml/library/chip is real, so a template can never point at a path or dependency that doesn't exist. This is the catalog + schema + drift-validation FOUNDATION (epic #610 SS3); the deterministic render/preview API (materialising a template into a fresh directory and running its test) is a separate, deliberately-scoped follow-up -- NOT part of this contract. Stability: schemaVersion 1 is additive-only (new optional fields only); a breaking change to the shape ships as schemaVersion 2.",
+  "description": "Validates metadata/templates/catalog-v1.json -- the declarative catalog of project templates (app archetypes) a frontend (alp-sdk-vscode, Alp Studio, `alp generate`) reads to discover 'what starter projects exist + what each needs' instead of ad-hoc example copying. Each record maps to a CANONICAL existing example under examples/ (never a copy -- the example IS the template's rendered form) and declares its support matrix, required portable-API/library/chip surface, user-owned vs SDK-generated files, tunable parameters, and test wiring. scripts/check_template_catalog.py validates the catalog against this schema AND drift-checks that every referenced example/testcase.yaml/library/chip is real, so a template can never point at a path or dependency that doesn't exist. This is the catalog + schema + drift-validation FOUNDATION (epic #610 SS3); the deterministic render/preview API (materialising a template into a fresh directory, substituting parameters) is implemented and exposed as `alp generate <id> <dest>` -- a separate `scripts/alp_template.py` `validate()` gate exists too, but stays a library/test entry point (it needs ZEPHYR_BASE + twister) and is not reached from that CLI path. Stability: schemaVersion 1 is additive-only (new optional fields only); a breaking change to the shape ships as schemaVersion 2.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schemaVersion", "description", "templates"],
@@ -29,7 +29,7 @@
         "id": {
           "type": "string",
           "pattern": "^[a-z][a-z0-9-]*$",
-          "description": "Stable catalog key a frontend selects a template by (e.g. `alp new --template <id>`, once the render follow-up exists)."
+          "description": "Stable catalog key a frontend selects a template by (e.g. `alp generate <id> <dest>`)."
         },
         "title": {
           "type": "string",
@@ -102,7 +102,7 @@
               "type": "array",
               "uniqueItems": true,
               "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
-              "description": "Curated library tokens the board.yaml `libraries:`/`cores.<id>.libraries:` selects (ADR 0018 vocabulary -- scripts/alp_project_emit.py's _LIBRARY_KCONFIG union metadata/libraries/*.yaml). Drift-checked against that real vocabulary."
+              "description": "Curated library tokens the board.yaml `libraries:`/`cores.<id>.libraries:` selects (ADR 0018 vocabulary -- metadata/library-aliases-v1.json's alias keys and values, which map onto metadata/libraries/*.yaml manifests). Drift-checked against that real vocabulary."
             },
             "chips": {
               "type": "array",
@@ -247,7 +247,7 @@
         "constraints": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Validation bounds for the render follow-up. Optional; only the bounds that genuinely apply to this knob.",
+          "description": "Validation bounds enforced by `alp generate`'s parameter substitution (scripts/alp_template.py's `_check_constraints`). Optional; only the bounds that genuinely apply to this knob.",
           "properties": {
             "minimum": { "type": "integer" },
             "maximum": { "type": "integer" },

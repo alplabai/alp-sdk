@@ -9,36 +9,51 @@
  *
  * Lifts compiled-model loaders + dispatch into a single uniform
  * surface so apps don't need to know which NPU is bonded out on
- * the active SoM.  Backends:
+ * the active SoM.  Registry backends (Zephyr, via
+ * ALP_BACKEND_REGISTER) plus Yocto-side hooks -- DRP-AI3 and
+ * DEEPX DX-M1 are A55/Linux-only and dispatch through
+ * `inference_yocto.c` instead of the Zephyr registry:
  *
- *   - **Ethos-U** (Alif Ensemble E3/E4/E7/E8 NPUs, NXP i.MX 93)
- *     via TensorFlow Lite Micro + Vela compiler.  Lands in v0.2
- *     for AEN-Zephyr; the i.MX 93 path follows in v0.4.
- *   - **DRP-AI3** (Renesas RZ/V2N) via Renesas's DRP-AI translator
- *     toolchain.  Lands in v0.3 alongside the V2N-Zephyr work.
- *   - **DEEPX DX-M1** via the DEEPX SDK adapter (proprietary).
- *     Lands in v0.4 for V2N-M1.
- *   - **CPU fallback** via TFLM's reference kernels.  Lands in v0.2;
- *     useful for development and for parts of a model that don't
- *     map to the NPU's supported op set.
+ *   - **CPU** (`tflm`, silicon_ref `"*"`, priority 50): real, via
+ *     TFLM's reference kernels.  Useful for development and for
+ *     model parts that don't map to an NPU's supported op set.
+ *   - **Ethos-U**: real, via the same TFLM executor plus the
+ *     Ethos-U op resolver against a Vela-compiled model --
+ *     registered per-part on Alif Ensemble E3/E4/E5/E6/E7/E8
+ *     (`ethos_u_aen_e3`..`ethos_u_aen_e8`, priority 100 each) and
+ *     NXP i.MX 93 (`ethos_u_n93`, priority 100).
+ *   - **DRP-AI3** (Renesas RZ/V2N N44): real A55/Yocto-side backend
+ *     (`src/yocto/inference_drpai.cpp`) against the real
+ *     `MeraDrpRuntimeWrapper` DRP-AI TVM runtime -- an M-class
+ *     (Zephyr) handle can never be DRP-AI-backed.  Gated
+ *     `ALP_SDK_USE_DRPAI_V2N` (default OFF); BENCH-UNVERIFIED
+ *     (issue #58).
+ *   - **DEEPX DX-M1**: real A55/Yocto-side backend
+ *     (`src/yocto/inference_deepx.cpp`) against the real
+ *     `dxrt::InferenceEngine` runtime.  Gated
+ *     `ALP_SDK_USE_DEEPX_DXM1` (default OFF); BENCH-UNVERIFIED
+ *     (issue #59).
+ *   - **sw_fallback** (priority 0): every call returns
+ *     ALP_ERR_NOSUPPORT; wins only when no other backend links for
+ *     the active silicon.
  *
- * v0.1 ships the surface as a stub (everything returns
- * ALP_ERR_NOSUPPORT, *_open returns NULL) so apps that target
- * `<alp/inference.h>` can compile against the full v1.0-shape
- * surface today.  Same contract as `<alp/iot.h>` shipped in v0.1.
- *
- * Vendor-specific accelerator paths (`<alp/vendors/alif/ethosu.h>`,
- * `<alp/vendors/renesas/drpai.h>`, `<alp/vendors/deepx/dxm1.h>`)
+ * Vendor-specific accelerator paths -- `<alp/ext/renesas/inference.h>`
+ * (DRP-AI3 pipeline-stage + AI-SRAM pinning) and
+ * `<alp/ext/deepx/inference.h>` (DX-M1 slot + DRAM-tile pinning) --
  * remain available as escape hatches when the unified API can't
- * express what the vendor SDK offers.  The unification stance is
- * "best-effort, not absolute".
+ * express what the vendor SDK offers.  Both currently return
+ * ALP_ERR_NOSUPPORT on every call past the vendor-handle gate: the
+ * Zephyr registry ships no DRP-AI/DEEPX inference backend for those
+ * knobs to bind to (DRP-AI3 and DX-M1 are A55/Linux-only engines),
+ * and wiring them through to the Yocto handle is follow-up work
+ * (issues #58/#59).  The unification stance is "best-effort, not
+ * absolute".
  *
  * @par ABI status: [ABI-STABLE]
- *      Shape is frozen; per-backend implementations land per the
- *      v0.3 dispatcher (auto/cpu/ethos_u/drpai/deepx_dx) and the
- *      v0.4+ NPU integrations.  Stub returns of ALP_ERR_NOSUPPORT
- *      (until a backend lands for a given target) are part of the
- *      stable contract — callers handle them via @ref alp_last_error.
+ *      Shape is frozen.  ALP_ERR_NOSUPPORT -- for a target/backend
+ *      combination that hasn't landed, or a vendor knob still
+ *      pending its HAL integration -- is part of the stable
+ *      contract; callers handle it via @ref alp_last_error.
  *      See docs/abi-markers.md for the convention.
  */
 
@@ -180,12 +195,17 @@ typedef struct {
  * selected backend.
  *
  * @param[in] cfg  Configuration; @c model_data must be non-NULL.
- * @return Open handle, or NULL on:
- *         - bad magic / unsupported model format
- *         - backend not available (e.g. ETHOS_U requested on V2N)
- *         - arena too small (caller must provide more bytes)
- *         - allocation failure
- *         Read @ref alp_last_error for the precise reason.
+ * @return Open handle, or NULL with @ref alp_last_error set to one
+ *         of ALP_ERR_INVAL (NULL cfg/model_data, model_size 0, bad
+ *         magic / unsupported model format, or an Ethos-U model
+ *         opened with @c arena == NULL), ALP_ERR_NOT_PRESENT_ON_THIS_SOC
+ *         (no backend registered for the active silicon),
+ *         ALP_ERR_NOT_IMPLEMENTED (registered backend has no open
+ *         hook), ALP_ERR_NOSUPPORT (a pinned @c backend the selected
+ *         backend can't serve, e.g. ETHOS_U pinned on a CPU-only
+ *         build), ALP_ERR_NOMEM (handle-pool or arena allocation
+ *         failure), or ALP_ERR_IO (backend's tensor-arena allocation
+ *         failed).
  */
 alp_inference_t *alp_inference_open(const alp_inference_config_t *cfg);
 

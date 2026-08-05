@@ -6,7 +6,6 @@
 
 schema_version: 1
 board: alp_e1m_nx9101_m33            # NX9 has Cortex-M33 (no _sm suffix).
-serial_port: /dev/ttyACM0
 flash_method: westflash
 defaults:
   serial:
