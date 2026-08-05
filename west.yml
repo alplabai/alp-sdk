@@ -235,8 +235,10 @@ manifest:
           # `depends on ZEPHYR_LITTLEFS_MODULE`, auto-set by Zephyr's
           # module-resolution pass once this module is present) --
           # was missing from the allowlist, so `libraries: [littlefs]`
-          # emitted the right CONFIG_* lines (see _LIBRARY_KCONFIG in
-          # scripts/alp_project.py) but `west update` never actually
+          # emitted the right CONFIG_* lines (the manifest's own
+          # `integration.zephyr.kconfig` array, transcribed by
+          # scripts/alp_orchestrate/libraries.py's zephyr_kconfig_lines)
+          # but `west update` never actually
           # fetched the module a real Kconfig solve needs (#3p-lib-examples
           # Task 0). NOTE: as of this fix, any <zephyr-workspace> topdir
           # this SDK is verified against that was set up before this

@@ -795,7 +795,16 @@ def test_new_m_class_libraries_reject_a_only_soc() -> None:
 
 def test_no_library_manifest_tracks_a_floating_branch() -> None:
     """A floating `main`/`master` pin is a supply-chain hole: the build is not
-    reproducible and an upstream force-push silently changes what we ship."""
+    reproducible and an upstream force-push silently changes what we ship.
+
+    This is a DENYLIST of the specific floating refs seen in this repo
+    (`main`, `master`, `HEAD`, `trunk`, empty string) -- it does not catch
+    every moving branch a manifest could pin to. `micro-ros.yaml` and
+    `ros2.yaml` both legitimately pin `version: humble`, a Zephyr/ROS 2
+    release-codename branch that keeps moving; it is a known
+    moving-branch pin that intentionally passes this guard. Tightening
+    this to a shape rule (e.g. requiring a semver tag or full SHA) is a
+    separate decision -- micro-ros/ros2 would need re-pinning first."""
     floating = {"main", "master", "HEAD", "trunk", ""}
     offenders = []
     for path in sorted((REPO / "metadata" / "libraries").glob("*.yaml")):
@@ -810,7 +819,16 @@ def test_no_west_manifest_extras_tier1_tracks_a_floating_branch() -> None:
     """Same hole, at the west.yml source of truth: a project in the
     ``extras-tier1`` group must pin a tag or commit SHA, never a branch --
     a floating branch pin can also silently not exist at all (minimp3's
-    prior ``main`` pin: the branch never existed on lieff/minimp3)."""
+    prior ``main`` pin: the branch never existed on lieff/minimp3).
+
+    Like its manifest-layer sibling above, this is a DENYLIST of the
+    specific floating refs seen in this repo (`main`, `master`, `HEAD`,
+    `trunk`, empty string), not a shape rule -- it does not catch every
+    moving branch a west revision could name (a release codename like
+    `humble` would pass here too, same as it does for the manifest-layer
+    `version:` field checked above -- see that test's docstring).
+    Tightening this to a shape rule is a separate decision that would
+    require re-pinning micro-ros/ros2 first."""
     floating = {"main", "master", "HEAD", "trunk", ""}
     doc = yaml.safe_load((REPO / "west.yml").read_text(encoding="utf-8"))
     offenders = []
