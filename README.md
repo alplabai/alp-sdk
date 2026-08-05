@@ -11,7 +11,7 @@
 built on the **E1M open-standard form factor**. It gives you one C/C++ API
 — `<alp/...>` — that works across every E1M-\* SoM variant by wrapping each
 vendor's SDK on top of ARM CMSIS. Change `som.sku:` in a project's
-`board.yaml`, rebuild, ship, within a SoM family — no source changes.
+`board.yaml`, rebuild, ship — within a SoM family, no source changes.
 
 > [!WARNING]
 > **Partially silicon-verified.** Every chip driver, peripheral wrapper, and
