@@ -8,7 +8,8 @@
 #     `integration.zephyr.kconfig` array below, spliced verbatim into a
 #     Zephyr slice's alp.conf.  (A prior version of this header cited
 #     scripts/alp_project_emit/__init__.py:247 / `_LIBRARY_KCONFIG`; that
-#     module and symbol no longer exist in this repo -- corrected here.)
+#     symbol is gone, but the alp_project_emit package itself does still
+#     exist -- corrected here.)
 #   * west.yml:464-474 -- west module `madgwick_ahrs`, remote
 #     xio-technologies, repo-path Fusion ("the maintained successor lib --
 #     Madgwick reference + Fusion are bundled"), path

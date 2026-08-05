@@ -24,9 +24,10 @@
 #     update --group-filter +extras-tier1` could not fetch this project
 #     at all under the old pin. Vendored copy fetched 2026-07-10
 #     (vendors/minimp3/README.md "What's here"); re-verify against the
-#     new SHA when next refreshed. Tracked in
-#     `.github/workflows/nightly-extras-tier1-pins.yml` as a "TBD"
-#     library (WARN, not FAIL, on nightly fetch breakage).
+#     new SHA when next refreshed. Gated (FAIL, not WARN) in
+#     `.github/workflows/nightly-extras-tier1-pins.yml` alongside the
+#     other ten pinned libraries -- the warn-only "TBD" exemption this
+#     library previously carried is gone now that it has a real pin.
 #   * licence CC0-1.0 -- confirmed verbatim from the vendored
 #     `vendors/minimp3/LICENSE` file (Creative Commons CC0 1.0 Universal
 #     public-domain dedication).
