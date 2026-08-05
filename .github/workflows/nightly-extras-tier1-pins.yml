@@ -4,21 +4,29 @@
 #
 # The §D.lib batch added upstream library pins to `west.yml`
 # behind the `extras-tier1` group (default off).  This workflow:
-#   1. Runs `west init -l . && west update --group-filter +extras-tier1`
+#   1. Derives the group's member project names + `modules/lib/`
+#      path basenames directly from `west.yml` (the "Derive
+#      extras-tier1 library list" step below) -- `west.yml` is the
+#      single source of truth; nothing here hardcodes the roster.
+#   2. Runs `west init -l . && west update --group-filter +extras-tier1`
 #      with `--narrow --depth 1` to grab just the pinned revisions.
-#   2. Asserts each expected library directory under `modules/lib/`
+#   3. Asserts each derived library directory under `modules/lib/`
 #      ends up populated.
 #
 # Status policy:
-#   - All 11 libraries (u8g2, libcoap, libwebsockets, jsmn, opus,
-#     Catch2, libmodbus, coreMQTT-SN, minimp3, BearSSL,
-#     madgwick_ahrs) are pinned to tagged releases or full commit
-#     SHAs and FAIL the workflow if the pin breaks.  minimp3 and
-#     BearSSL pin a full SHA; madgwick_ahrs pins tag `v1.3.2`.
+#   - Every extras-tier1 project is pinned to a tagged release or a
+#     full commit SHA and FAILs the workflow if the pin breaks.
 #     There is no warn-only exemption: a warn-only fetch check is
 #     indistinguishable from no check, and this workflow is the
 #     only place a dead remote or an unreachable SHA can surface
-#     (the pytest guards are static and can't detect that).
+#     (the pytest guards are static and can't detect that). The
+#     same logic applies to the roster itself: PR #1237 added three
+#     libraries (cmsisstream, CMSIS-CV, Arm-2D) to west.yml's
+#     extras-tier1 group without updating this workflow's
+#     (formerly hardcoded) library list, so those three were never
+#     fetched or verified -- a pin nothing checked.  Deriving the
+#     list from west.yml at run time is what closes that hole for
+#     good; a hardcoded count here would only reopen it.
 #
 # Runs nightly (06:00 UTC Mondays) + on PRs that touch west.yml or
 # any library-profile YAML + manually via workflow_dispatch.
@@ -61,6 +69,42 @@ jobs:
       - name: Install west
         run: pip3 install --user west
 
+      - name: Derive extras-tier1 library list from west.yml
+        id: extras-tier1
+        working-directory: alp-sdk
+        run: |
+          set -e
+          python3 - <<'PY'
+          import os
+          import sys
+
+          import yaml
+
+          with open("west.yml", encoding="utf-8") as f:
+              manifest = yaml.safe_load(f)
+
+          names = []
+          paths = []
+          for project in manifest["manifest"]["projects"]:
+              if "extras-tier1" not in (project.get("groups") or []):
+                  continue
+              names.append(project["name"])
+              paths.append(project["path"].rsplit("/", 1)[-1])
+
+          if not names:
+              print(
+                  "::error::extras-tier1 group in west.yml derived to an "
+                  "EMPTY list of projects -- this gate would silently pass "
+                  "while fetching and checking nothing. Refusing to run.",
+              )
+              sys.exit(1)
+
+          print(f"Derived {len(names)} extras-tier1 projects: {names}")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"names={' '.join(names)}\n")
+              out.write(f"paths={' '.join(paths)}\n")
+          PY
+
       - name: West init + update with extras-tier1 enabled
         working-directory: alp-sdk
         run: |
@@ -68,14 +112,21 @@ jobs:
           west init -l .
           # `--narrow --depth 1` keeps the fetch under a minute and
           # the runner disk under 1 GB.  Only fetches the project
-          # tips at the pinned revision; no history.
+          # tips at the pinned revision; no history.  The library
+          # names come from the "Derive extras-tier1 library list"
+          # step above, not a hardcoded list -- see the header
+          # comment for why that matters.
+          #
+          # `|| echo ... ; continue-on-error: true` is deliberate: it
+          # lets the per-library "Verify pins populated content" step
+          # report WHICH library failed to fetch, rather than dying
+          # here on the first bad project and hiding the rest.
           west update \
             --group-filter +extras-tier1 \
             --narrow \
             -o=--depth=1 \
-            zephyr u8g2 libcoap libwebsockets jsmn opus \
-            Catch2 libmodbus coreMQTT-SN minimp3 BearSSL \
-            madgwick_ahrs || echo "west update returned non-zero"
+            zephyr ${{ steps.extras-tier1.outputs.names }} \
+            || echo "west update returned non-zero"
         continue-on-error: true
 
       # NB: no `working-directory: alp-sdk`.  `west init -l .` (run in
@@ -87,17 +138,18 @@ jobs:
         run: |
           set -euo pipefail
           status=0
-          # All 11 libraries now carry a real pin (tag or full SHA), so
-          # all 11 gate here.  A warn-only fetch check is indistinguishable
-          # from no check at all, and this workflow is the only place a
-          # dead remote or an unreachable SHA can surface -- the static
-          # pytest guards can't detect that.  (This FAIL loop previously
-          # exempted minimp3/bearssl/madgwick_ahrs as "TBD"; that exemption
-          # is exactly why minimp3's dead `main`-branch pin and BearSSL's
-          # 404ing remote went undetected.)
-          for lib in u8g2 libcoap libwebsockets jsmn opus \
-                    catch2 libmodbus coremqtt_sn minimp3 bearssl \
-                    madgwick_ahrs; do
+          # Every extras-tier1 project (derived from west.yml above, not
+          # hardcoded here) now carries a real pin (tag or full SHA), so
+          # every one of them gates here.  A warn-only fetch check is
+          # indistinguishable from no check at all, and this workflow is
+          # the only place a dead remote or an unreachable SHA can surface
+          # -- the static pytest guards can't detect that.  (This FAIL
+          # loop previously exempted minimp3/bearssl/madgwick_ahrs as
+          # "TBD"; that exemption is exactly why minimp3's dead
+          # `main`-branch pin and BearSSL's 404ing remote went undetected.
+          # Separately, the list itself used to be hardcoded here and
+          # drifted from west.yml -- see the header comment.)
+          for lib in ${{ steps.extras-tier1.outputs.paths }}; do
             if [ ! -d "modules/lib/${lib}" ]; then
               echo "::error::FAIL: modules/lib/${lib} missing after west update"
               status=1
