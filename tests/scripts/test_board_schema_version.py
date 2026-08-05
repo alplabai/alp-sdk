@@ -51,3 +51,19 @@ def test_gate_delegates_to_plan(tmp_path, monkeypatch):
     b.mkdir(parents=True)
     (b / "board.yaml").write_text("som:\n  sku: X\n")  # v1, below new LATEST
     assert gate.find_drift(tmp_path) == [b / "board.yaml"]
+
+
+def test_board_yaml_files_prunes_build_output_dirs(tmp_path):
+    """A raw root.rglob("board.yaml") also descends into twister-out/ /
+    build/; the gate must skip those (same defect class as
+    check_library_registry.py's #1197 followup)."""
+    real = tmp_path / "examples" / "x" / "board.yaml"
+    real.parent.mkdir(parents=True)
+    real.write_text("som:\n  sku: X\n")
+    junk = tmp_path / "twister-out" / "x" / "board.yaml"
+    junk.parent.mkdir(parents=True)
+    junk.write_text("schemaVersion: 999\nsom:\n  sku: X\n")  # would be drift
+    found = gate._board_yaml_files(tmp_path)
+    assert real in found
+    assert junk not in found
+    assert gate.find_drift(tmp_path) == []  # the drifted junk file is never seen

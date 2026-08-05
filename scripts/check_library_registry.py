@@ -35,6 +35,8 @@ stdlib + jsonschema + PyYAML.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -44,6 +46,13 @@ import yaml
 _HERE = Path(__file__).resolve()
 ROOT = _HERE.parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
+
+# Fallback-only: dirs to prune when `root` isn't a git worktree (see
+# `_board_yaml_files`).  git itself needs no such list -- `--exclude-
+# standard` already reads `.gitignore`, the one source of truth for
+# "this is build output, not a source". Widen if a future build tool
+# lands a new output dir AND git is ever genuinely unavailable here.
+_FALLBACK_SKIP_DIRS = frozenset({".git", ".west", "build", "twister-out"})
 
 
 def _manifest_names(root: Path) -> set[str]:
@@ -55,7 +64,36 @@ def _manifest_names(root: Path) -> set[str]:
 
 
 def _board_yaml_files(root: Path) -> list[Path]:
-    return sorted(root.rglob("board.yaml"))
+    """Every board.yaml under `root` -- tracked *or* newly-created-but-
+    not-yet-`git add`ed, since `--others --exclude-standard` includes
+    untracked files while still honouring `.gitignore`.
+
+    A prior version did `root.rglob("board.yaml")`: an unbounded walk from
+    repo root that also descends into build output (`twister-out/`,
+    `build/`) with no notion of `.gitignore` at all -- measured at 160k+
+    files of build artefacts against ~100 real board.yaml, and slow/hanging
+    on some filesystems. `git ls-files` prunes whole directories
+    matched by `.gitignore` (`twister-out/`, `build/`, ...) without
+    descending into them, so this is fast regardless of how much build
+    output happens to be sitting in the tree.
+
+    Falls back to a directory-pruned walk only when `root` isn't a git
+    worktree at all (this gate's own test scaffolds under tmp_path, which
+    have no build output to prune in the first place)."""
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "--cached", "--others",
+             "--exclude-standard", "--", "*board.yaml"],
+            check=True, capture_output=True, text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        found: list[Path] = []
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if d not in _FALLBACK_SKIP_DIRS]
+            if "board.yaml" in filenames:
+                found.append(Path(dirpath) / "board.yaml")
+        return sorted(found)
+    return sorted(root / line for line in proc.stdout.splitlines() if line)
 
 
 def _top_level_library_names(board_yaml: Path) -> list[str]:

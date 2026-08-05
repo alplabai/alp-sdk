@@ -216,3 +216,25 @@ def test_top_level_library_names_ignores_malformed_yaml(tmp_path):
     by = tmp_path / "board.yaml"
     by.write_text("libraries: [unterminated\n", encoding="utf-8")
     assert gate._top_level_library_names(by) == []
+
+
+# ---------------------------------------------------------------------
+# _board_yaml_files must not walk build output (the #1197-followup hang:
+# root.rglob("board.yaml") from repo root also descended into
+# twister-out/ / build/ -- 160k+ files of build artefacts).
+# ---------------------------------------------------------------------
+
+def test_board_yaml_files_prunes_build_output_dirs(tmp_path):
+    """Same proof for the fallback (non-git) walk this gate's tmp_path
+    scaffolds all exercise: a real board.yaml is found, a same-named file
+    sitting under a build-output dir is not."""
+    real = tmp_path / "examples" / "widget" / "board.yaml"
+    real.parent.mkdir(parents=True)
+    real.write_text("som:\n  sku: X\n")
+    for junk_dir in ("twister-out", "build"):
+        junk = tmp_path / junk_dir / "widget" / "board.yaml"
+        junk.parent.mkdir(parents=True)
+        junk.write_text("not a real source file\n")
+    found = gate._board_yaml_files(tmp_path)
+    assert real in found
+    assert len(found) == 1
