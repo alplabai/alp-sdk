@@ -53,7 +53,12 @@ emits with the position/width the OTHER evidence agrees on
 **not committed and not a CI gate** — every consumer is mid-CM33-debug and
 already has the west workspace this reads from; see
 `docs/architecture.md`'s generators section for the full reasoning. Run
-locally: `python3 scripts/gen_rzv2n_cm33_svd.py --output <path>`.
+locally: `python3 scripts/gen_rzv2n_cm33_svd.py --output <path>`. The test
+fixture's header excerpts join `vendors/**` and `zephyr/**` on the
+clang-format gate's exclusion list, in both `pr-static-analysis.yml` and
+`scripts/test-all.sh`'s local mirror — they are verbatim vendor content
+whose byte-identity with the real headers the tests assert, so
+reformatting them would break the fixture.
 
 ### Fixed — `ALP_CAP_HW_ETHERNET` read false on V2N/V2M despite two 1 GbE ports (#1240)
 
