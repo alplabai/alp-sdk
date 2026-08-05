@@ -7,6 +7,111 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Added — real ONNX Runtime CPU inference backend for the Cortex-A55 / Yocto peer
+
+Closes the `ALP_INFERENCE_BACKEND_CPU` slot in `src/yocto/inference_yocto.c`,
+whose header comment had read "Wiring deferred to v0.4" since v0.4. New
+`src/yocto/inference_ort.cpp` implements the seven `alp_inference_ort_*`
+hooks against the real upstream ONNX Runtime C API, wired into all seven of
+`inference_yocto.c`'s dispatch switches. Gated behind the new CMake option
+`ALP_SDK_USE_ORT_CPU` (default **OFF**), which probes first
+(`find_path(onnxruntime_c_api.h)` + `find_library(onnxruntime)`) and either
+compiles the backend in, hard-fails if the new `ALP_SDK_ORT_REQUIRED` is also
+set, or emits a `WARNING` and skips the backend — the same probe-then-degrade
+shape as the existing DEEPX/DRP-AI blocks. `resolve_auto()` places CPU
+strictly last, after DEEPX and DRP-AI: an NPU-bearing SoM never silently
+falls back to the CPU floor, which would otherwise be a 10-100x throughput
+cliff the caller did not ask for.
+
+New own-recipe `meta-alp-sdk/recipes-devtools/onnxruntime/onnxruntime_1.28.0.bb`
+builds upstream `microsoft/onnxruntime` at tag `v1.28.0`
+(SRCREV `da9b5e364c465de65c49d91e696cd6485270757f`) rather than depending on
+either vendor's fork — `nxp-imx/meta-imx` and `meta-renesas-ai` both ship an
+ONNX Runtime recipe, but at incompatible fork versions (1.24.3 and 1.8.0
+respectively), which would make the new library manifest's single `version:`
+field untrue on whichever family didn't supply it. Neither
+`openembedded-core` nor `meta-openembedded` ships an ONNX Runtime recipe at
+all.
+
+New Tier B manifest `metadata/libraries/onnxruntime.yaml`, selectable via
+`libraries: [onnxruntime]` in `board.yaml`. Its `license:` field is the new
+compound SPDX expression `MIT & Apache-2.0` (`metadata/schemas/library-v1.schema.json`'s
+`license` enum extended by 2026-08-05 maintainer legal sign-off): upstream's
+own licence is MIT, but the shipped `libonnxruntime.so` genuinely contains
+Apache-2.0 code — `onnx/onnx` (the model-format parser) is a required build
+dependency with no CPU-only build that excludes it. The same extension
+unblocks Arm Compute Library, KleidiAI, and ncnn, which are all
+compound-licensed. `onnx` is also now an accepted `blob_format`;
+`scripts/alp_model/manifest.py` gained an enforced `VALID_BLOB_FORMATS`
+constant, replacing a trailing comment, so a new backend cannot silently
+invent a format string.
+
+**Verification status — BUILD-verified, NOT bench-verified. This has not run
+on silicon.** `ALP_SDK_USE_ORT_CPU` defaults OFF.
+
+The recipe builds. `bitbake onnxruntime` completes against the `E1M-V2N101`
+layer stack (MACHINE `e1m-v2n101-a55`, DISTRO `alp`) — "Attempted 997 tasks
+... all succeeded", exit 0 — producing `libonnxruntime.so.1.28.0` for
+`cortexa55` plus `usr/include/onnxruntime/onnxruntime_c_api.h`. That build is
+what settled the recipe's dependency set empirically rather than by
+inference, and it found five real defects on the way: a `SRCREV` that is not
+an ancestor of `main` (fixed with `nobranch=1`), twelve missing
+`sha256sum` entries, four wrong `FETCHCONTENT_SOURCE_DIR_*` names, an
+upstream-injected bare `-Werror`, and a `dlopen`'d runtime plugin being
+packaged into `-dev` where it would have been absent from the image at run
+time. One `[buildpaths]` QA warning remains and is recorded in the recipe.
+
+What is still NOT verified: **no SKU has run ORT on silicon.** A green build
+is not a working inference. `requires:` in the manifest is `os: [yocto]` +
+`core_class: a`, so the portability matrix marks every Yocto A-class SKU as
+capability-compatible — a capability claim, not a verification claim. Only
+`E1M-V2N101` has been built at all; `E1M-NX9101` cannot be built yet (needs
+`meta-imx`/`meta-freescale`, which no Alp build host carries). See #1255
+(V2N101 bench), #1256 (NX9101), #1259 (V2M/V2N102).
+
+There is also no `.alpmodel` -> ORT route on the A55, and that is not a
+missing flag: `alp_model.c` decodes the manifest via zcbor, which has no
+Yocto build (`metadata/libraries/zcbor.yaml` carries only a `zephyr:`
+integration, and no recipe exists), so `alp_model_parse()` resolves to the
+always-`ALP_ERR_NOSUPPORT` stub on both Yocto and bare-metal by deliberate
+precedent. The ORT backend is therefore reachable only via a hand-built
+`alp_inference_config_t`. Tracked as #1254.
+
+### Fixed — `_fmt_enum()` silently mis-decoded every unrecognised `blob_format` as TFLite
+
+`src/backends/inference/alp_model_select.c`'s `_fmt_enum()` defaulted any
+string it didn't recognise to `ALP_INFERENCE_MODEL_TFLITE`.
+`ALP_INFERENCE_MODEL_EXECUTORCH` had been in the public enum with no matching
+case, so every ExecuTorch blob had been silently mis-decoded as TFLite since
+that enum value was added — undebuggable from a customer's side, since
+nothing on the wire said "decoded as the wrong format". `_fmt_enum()` now
+returns a `bool` and `alp_model_select()` returns `ALP_ERR_INVAL` when the
+chosen target's `blob_format` string has no decoder case, instead of
+silently defaulting. Every format `scripts/alp_model/manifest.py`'s new
+`VALID_BLOB_FORMATS` constant can emit — `tflite`, `vela_tflite`,
+`drpai_dir`, `dxnn`, `executorch`, `onnx` — now has an explicit case.
+
+### Fixed — use-after-free between `alp_inference_close()` and a blocking `invoke()`
+
+Same defect class as #629 ("Make static handle pools and operation/close
+lifetimes race-safe"), which hardened the registry dispatcher but did not
+reach the Yocto backend arms. This closes those. #629 stays closed; the gap
+was in coverage, not in its fix.
+
+
+`alp_inference_close()` freed backend state (`be_state`) while a blocking
+`alp_inference_invoke()` was still reading/writing it, because both gated on
+a bare `in_use` check with no coordination between them. Affected all three
+Yocto backend arms — ORT, DEEPX_DXM1, and DRP-AI — the latter two were
+pre-existing on `dev`. Now gated with `alp_handle_op_enter` /
+`alp_handle_begin_close_blocking`, the same mechanism
+`src/inference_dispatch.c` already used. New regression
+`tests/yocto/inference_invoke_close_race.c` drives the real
+`alp_inference_open()`/`invoke()`/`close()` path through a faked backend
+invoke (a poison check wrapped around a sleep standing in for a real
+model executor's hundreds-of-ms run) and asserts close() never observes
+invoke's poison window.
+
 ### Added — ADR 0024: V2N/V2M analog and counter classes stay on the GD32 bridge (#1150)
 
 Design decision only, no code:

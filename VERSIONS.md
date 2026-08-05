@@ -44,7 +44,7 @@ the old plan to this one:
 | v0.13.0 | **released 2026-07-24** | Portable JPEG encoder surface with a software baseline and silicon-proven Alif Hantro backend, plus associated pixel formats and DMA-reachability contract. See CHANGELOG [v0.13.0]. |
 | v0.14.0 | **released 2026-07-29** | Hardware-metadata and helper-firmware accuracy sweep, including clean refusal for absent GD32 bridge images and provenance for unverified peripheral counts. See CHANGELOG [v0.14.0]. |
 | v0.15.0 | **candidate (`v0.15.0-rc1` tagged 2026-07-31)** | AEN multicore boot/residency and coherency documentation/fixes, plus the other hardware-validation work recorded in CHANGELOG [v0.15.0]. Not yet promoted to a release: `v0.14.0` remains GitHub's Latest release. |
-| v0.16.0 | **candidate (Unreleased)** | Current development: Python Tan architecture/documentation reconciliation, additional verification gates, and the fixes recorded under CHANGELOG [Unreleased]. |
+| v0.16.0 | **candidate (Unreleased)** | Current development: Python Tan architecture/documentation reconciliation, additional verification gates, a real ONNX Runtime CPU inference backend for the Cortex-A55/Yocto peer (`ALP_INFERENCE_BACKEND_CPU`, default off, not yet run on silicon), and the fixes recorded under CHANGELOG [Unreleased]. |
 | **Backlog** | (cherry-pick into future tags) | See "Backlog -- cherry-pick into future tags" section below.  No per-version commitments for future items; releases tag whatever's ready at the time. |
 
 > **Note on v0.2 sequencing.**  The original v0.2 plan in this file
@@ -579,7 +579,7 @@ target — porting across all four SoMs is additive.
 **ML / AI ecosystem** (the SDK's headline differentiator):
 
 - TensorFlow Lite Micro full integration + per-NPU optimizer hooks (Vela for Ethos-U, DRP-AI converter, DEEPX DX-COM compiler) (medium).
-- ONNX runtime backend — cross-NPU portability so customer models trained in PyTorch run anywhere (large).
+- ONNX runtime backend — cross-NPU portability so customer models trained in PyTorch run anywhere (large).  **CPU floor landed 2026-08** as the A55/Yocto `ALP_INFERENCE_BACKEND_CPU` backend (`src/yocto/inference_ort.cpp`, own `meta-alp-sdk` recipe against upstream `onnxruntime` v1.28.0) — see CHANGELOG [Unreleased]; default off (`ALP_SDK_USE_ORT_CPU`), not yet run on silicon, no `.alpmodel` route yet.  Cross-NPU execution-provider dispatch remains future work.
 - LiteRT (TFLite rebrand) tracking — keep current as Google ships (small ongoing).
 - Model zoo — pre-quantized vision (YOLO-NAS / DETR / EfficientNet) + audio (KWS / VAD / Wake-Word) + anomaly (autoencoder family) per NPU (medium per family).
 - One-command quantize-and-deploy CLI — `tan model deploy model.onnx --target aen701` does the full chain (medium).
