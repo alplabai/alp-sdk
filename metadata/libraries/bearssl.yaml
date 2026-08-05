@@ -8,17 +8,19 @@
 #
 # Grounding (pinned Zephyr v4.4.0 workspace):
 #   * west module `BearSSL` (west.yml `extras-tier1` group, remote
-#     bearssl-mirror -- upstream bearssl.org is tarball-only, so west
-#     pins the community git mirror), path modules/lib/bearssl -- NOT in
-#     Zephyr's own west manifest; disabled by default, consumers flip via
-#     `west update --group-filter +extras-tier1`.
-#   * upstream version: `master` -- west.yml pins the mirror's `master`
-#     branch with a "TBD: confirm + pin SHA" maintainer note (no tagged
-#     release exists to pin to instead); not a floating alp-sdk-owned
-#     `west:` project entry (that field is unused here -- this is a
-#     documentation-only `module:` reference to the west.yml pin, which
-#     the schema's `west.revision` no-`main`/`master` pattern does not
-#     apply to). Tracked in
+#     bearssl-upstream -- upstream bearssl.org runs a real git server at
+#     https://bearssl.org/git/BearSSL; west pins that directly), path
+#     modules/lib/bearssl -- NOT in Zephyr's own west manifest; disabled
+#     by default, consumers flip via
+#     `west update --group-filter +extras-tier1`. The prior pin (remote
+#     `bearssl-mirror`, github.com/bearsslmirror/BearSSL) is BROKEN: that
+#     repository does not exist (`git ls-remote` -> "remote: Repository
+#     not found."; API -> 404). The former "upstream is tarball-only"
+#     claim in this repo's comments was also false -- corrected.
+#   * upstream version: pinned to master HEAD commit
+#     7bea48e5e850ab4cafbe68d3765cdaba13a86d6f (`refs/heads/master` on
+#     https://bearssl.org/git/BearSSL) -- no tagged release exists to pin
+#     to instead. Tracked in
 #     `.github/workflows/nightly-extras-tier1-pins.yml` as a "TBD" library
 #     (WARN, not FAIL, on nightly fetch breakage).
 #   * licence MIT -- bearssl.org's stated licence; source files carry the
@@ -45,7 +47,7 @@ schema_version: 1
 name: bearssl
 description: "BearSSL -- small-footprint TLS/crypto library for embedded targets."
 tier: B
-version: "master"
+version: "7bea48e5e850ab4cafbe68d3765cdaba13a86d6f"
 license: MIT
 
 integration:

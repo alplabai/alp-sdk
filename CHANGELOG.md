@@ -1782,6 +1782,40 @@ error where a recipe opted in by name — mirroring `ALP_SDK_DRPAI_REQUIRED`.
 proven independently on real V2N-M1 silicon (`/dev/drpai0` probes clean,
 `DRPAI_GET_DRPAI_AREA` returns the `0xD0000000` / 512 MiB arena) but that is
 the vendor driver, not this change's payload.
+### Fixed — two `extras-tier1` library pins were unfetchable, not merely unpinned; a third floated a branch
+
+Two of the three curated-library pins in `west.yml` were broken outright,
+not just non-reproducible: `minimp3` pinned `revision: main`, but
+`lieff/minimp3` has no `main` branch (the default branch is `master`) —
+`west update --group-filter +extras-tier1` could not fetch the project at
+all. `BearSSL` pinned remote `bearssl-mirror`
+(`github.com/bearsslmirror/BearSSL`), which does not exist (`git
+ls-remote` returns "Repository not found"); the manifest's own comment
+also falsely claimed upstream bearssl.org was tarball-only, when it runs a
+real git server at `https://bearssl.org/git/BearSSL`.
+
+- `minimp3` now pins `master` HEAD, `ea99364f61c14656440e8d77e9c233ccf3124633`
+  (2026-07-27, no tagged releases upstream).
+- `BearSSL`'s remote is repointed from the dead `bearssl-mirror` to
+  upstream `bearssl-upstream` (`https://bearssl.org/git`), pinned to
+  `7bea48e5e850ab4cafbe68d3765cdaba13a86d6f` (`refs/heads/master`).
+- `madgwick-ahrs` (`xioTechnologies/Fusion`) previously floated
+  `revision: main` with "TBD: pin SHA after maintainer audit"; now pinned
+  to the tagged release `v1.3.2`
+  (`015d68494274b479b5996bff2530ecbcfdc266f2`, 2026-07-20). Its licence
+  (MIT) is now verified from source (`LICENSE.md` at that ref) rather than
+  cited best-effort from upstream's published licence; the manifest's
+  stale grounding citation to a removed `_LIBRARY_KCONFIG` symbol is also
+  corrected to the real mechanism, `scripts/alp_orchestrate/libraries.py`'s
+  `zephyr_kconfig_lines()`.
+- `metadata/libraries/{minimp3,bearssl,madgwick-ahrs}.yaml` and `alp.lock`
+  updated to match.
+- New regression guards in `tests/scripts/test_library_layer.py`: no
+  `metadata/libraries/*.yaml` manifest may declare a floating
+  `main`/`master`/`HEAD`/`trunk` version, and no `west.yml` project in the
+  `extras-tier1` group may pin one either — a floating branch pin is a
+  supply-chain hole (non-reproducible build, silent upstream force-push)
+  and, as minimp3 showed, can also simply not exist.
 
 ### Added — real Yocto backends for `<alp/display.h>` and `<alp/i3c.h>` (#1143, #1147)
 
