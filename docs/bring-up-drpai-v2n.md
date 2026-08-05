@@ -4,7 +4,8 @@ How to get the RZ/V2N's on-die DRP-AI3 NPU running a real model through
 `<alp/inference.h>` on an E1M-X V2N SoM.
 
 > **Status: KERNEL DRIVER PROVEN ON SILICON, PACKAGING WRITTEN BUT NEVER BAKED,
-> INFERENCE NOT YET RUN.** A full `alp-image-edge` bake now completes on this host (12118 tasks,
+> INFERENCE NOT YET RUN.** A full `alp-image-edge` bake now completes on this
+> host (12118 tasks,
 > all succeeded, a 716 MB `.wic.gz`) — the first ever; previously nothing had
 > baked. That run had `drpai` OFF (the base image); see §4 for what is and
 > isn't proven about the `drpai`-enabled path. `PACKAGECONFIG[drpai]` now
@@ -105,16 +106,20 @@ Declaring them is **not sufficient** — something has to claim them.
 only when **both** `meta-rz-drpai` is in `bblayers.conf` **and**
 `ALP_ENABLE_DRPAI = "1"` is set (default `"0"`).  The layer alone is
 deliberately not enough: it ships bundled in the AI SDK BSP, so keying off its
-presence would turn the NPU on for every V2N/V2M image.  Set it in
-`local.conf`. Without it the build installs a comment-only stub and the node
-stays `disabled`.  The bbappend gate is (that layer creates the `drpai0`
-label, so referencing it without the layer fails in dtc — and the same SoM dtsi
-is included by the V2M board dts, so it would take that dtb down too).
+presence would turn the NPU on for every V2N/V2M image.  It is declared
+`ALP_ENABLE_DRPAI ?= "0"` in all four V2N/V2M machine confs; set it to
+`"1"` in `local.conf` to opt in. Without it the build installs a comment-only stub and the node
+stays `disabled`.
+
+The layer half of the gate exists because that layer creates the `drpai0`
+label: referencing it without the layer fails in dtc, and the same SoM dtsi
+is included by the V2M board dts, so it would take that dtb down too.
 
 **Silicon confirms the node is not on by default.** `e1mx-v2n-m1-01`'s current
 dtb, `/boot/r9a09g056n44-dev.dtb`, carries **zero** `drpai` nodes — the
 enablement on that board comes from a different, already-loaded
-`/boot/uio-683.dtb`, not from anything this repo builds. Our own dtb, `e1m-v2n101-x-evk.dtb`, carries the node enabled **only when
+`/boot/uio-683.dtb`, not from anything this repo builds. Our own dtb,
+`e1m-v2n101-x-evk.dtb`, carries the node enabled **only when
 `ALP_ENABLE_DRPAI = "1"` was set for that build**; by default it carries the
 stub and the node stays `disabled`.  The overlay is what makes it present,
 never the SoC by default. Separately: the **kernel** half of the stack is
@@ -165,19 +170,19 @@ Enable the backend through the SDK recipe's PACKAGECONFIG:
 PACKAGECONFIG:append:pn-alp-sdk = " drpai"
 ```
 
-That switch (whose DEPENDS names `mera2-drpai-tvm`, `drpai` and `lib-tvm`) flips `-DALP_SDK_USE_DRPAI_V2N=ON` and
+That switch (whose DEPENDS names `mera2-drpai-tvm`, `drpai` and `lib-tvm`)
+flips `-DALP_SDK_USE_DRPAI_V2N=ON` and
 `-DALP_SDK_DRPAI_REQUIRED=ON`, and adds the `drpai` and `lib-tvm` build deps
 together.
 
 **The RUHMI libraries and wrapper header are now packaged**, closing the gap
 the earlier revision of this doc left as a manual staging step.
 `meta-alp-sdk/recipes-renesas/mera2-drpai-tvm/mera2-drpai-tvm_2.7.0.bb` stages
-headers plus the closure — **ten** libraries, not three: eight copied verbatim
+headers plus the closure — **nine** libraries, not three: eight copied verbatim
 out of a builder-supplied, already-built `rzv_drp-ai_tvm` checkout's
 `obj/build_runtime/v2h/lib` (libmera2_runtime, libmera2_plan_io, libdrp_tvm_rt,
 libdrp_rt, libacl_rt, libarm_compute, libarm_compute_core,
-libarm_compute_graph), `libtvm_runtime.so` separately via `meta-rz-drpai`'s
-`lib-tvm`, and a ninth the recipe **compiles itself**,
+libarm_compute_graph), and a ninth the recipe **compiles itself**,
 `libmera_drpai_wrapper.so`, from the checkout's `apps/MeraDrpRuntimeWrapper.cpp`
 — that class ships as application-side glue source with no prebuilt library at
 all, so the recipe compiles it once rather than leaving every consumer to
@@ -188,7 +193,8 @@ fetches and vendors nothing: point the single variable **`RUHMI_DRPAI_TVM_DIR`**
 `drpai` — an unset or incomplete checkout fails `do_compile`/`do_install`
 loudly, naming the exact missing path.
 
-**Checked at the symbol level, against the compiled objects rather than a completed link:** with `RUHMI_DRPAI_TVM_DIR` pointed at a real
+**Checked at the symbol level, against the compiled objects rather than a
+completed link:** with `RUHMI_DRPAI_TVM_DIR` pointed at a real
 checkout, the previously-undefined `MeraDrpRuntimeWrapper::*` symbols alp-sdk
 needs all match what the compiled wrapper exports — 26 symbols exported, 9
 referenced by alp-sdk, all 9 match, 0 unresolved. **Not yet verified:** the

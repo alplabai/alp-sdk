@@ -46,7 +46,7 @@ That is a behaviour change wearing an opt-in's clothes.
 symbols by default, and that is how `libalp_sdk.so` once linked *successfully*
 with the DRP-AI backend compiled in while `MeraDrpRuntimeWrapper`'s symbols
 were nowhere on the link line — the break surfaced later, in a downstream
-consumer.
+consumer, via the direct plain-CMake path.
 
 Every optional Linux/Yocto backend was audited for a legitimate
 `dlopen()`/weak-external pattern that needs undefined symbols tolerated; none

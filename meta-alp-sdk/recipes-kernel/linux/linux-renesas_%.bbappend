@@ -151,9 +151,11 @@ ALP_DRPAI_LAYER[vardepvalue] = "${ALP_DRPAI_LAYER}"
 # whose owners never asked for it.  That is a behaviour change disguised as
 # an opt-in feature.
 #
-# So require an explicit ALP_ENABLE_DRPAI too, defaulting to 0, matching the
-# ALP_ENABLE_DEEPX_DXM1 posture the V2M machine confs already use for the
-# other license-gated NPU in this layer.  Turning the SDK backend on
+# So require an explicit ALP_ENABLE_DRPAI too, defaulting to 0.  It is
+# DECLARED in all four V2N/V2M machine confs (`ALP_ENABLE_DRPAI ?= "0"`)
+# next to ALP_ENABLE_DEEPX_DXM1, so a builder reading the conf for their
+# MACHINE finds it -- the `??=` here is only the fallback for a consumer
+# that uses this bbappend without one of those confs.  Turning the SDK backend on
 # (PACKAGECONFIG "drpai") and turning the kernel node on are deliberately
 # separate switches: the backend without the node fails at open() with a
 # clear error, whereas the node without the backend is simply an idle

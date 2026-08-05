@@ -19,7 +19,8 @@
 # --defined-only` across all eight `obj/build_runtime/v2h/lib/*.so` files
 # confirms the symbol is in none of them.  A first cut of this recipe staged
 # only `MeraDrpRuntimeWrapper.h` -- the DECLARATIONS -- and the gap surfaced
-# in a downstream consumer (alp-perception) as unresolved
+# via the direct plain-CMake path (-DALP_SDK_USE_DRPAI_V2N=ON, which predates
+# this recipe) in a downstream consumer (alp-perception) as unresolved
 # `MeraDrpRuntimeWrapper::*` symbols in `libalp_sdk.so`, which had built
 # "successfully" only because a shared library permits undefined symbols by
 # default (see the durable fix: alp-sdk's own CMakeLists.txt now links with
@@ -154,9 +155,9 @@ def _drpai_ruhmi_dir(d):
     if not ruhmi_dir:
         bb.fatal(
             "RUHMI_DRPAI_TVM_DIR is unset. Point it at a BUILT "
-            "rzv_drp-ai_tvm (RUHMI) checkout's root -- see "
-            "docs/bring-up-drpai-v2n.md section 4"
-            "or enabling alp-sdk's PACKAGECONFIG[drpai]."
+            "rzv_drp-ai_tvm (RUHMI) checkout's root before building "
+            "mera2-drpai-tvm or enabling alp-sdk's PACKAGECONFIG[drpai] "
+            "-- see docs/bring-up-drpai-v2n.md section 4."
         )
     return os.path.abspath(ruhmi_dir)
 
@@ -499,8 +500,8 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 # BENCH-UNVERIFIED, and more unverified than the packaging fix this entry
 # previously described: that one was static staging (copy files, fix
-# FILES:/RDEPENDS), corrected twice from build evidence rather than from
-# inspection alone. This one
+# FILES:/RDEPENDS), corrected twice by inspection against the real
+# checkout's contents. This one
 # ADDS A COMPILE STEP -- a real g++ invocation against RUHMI's real headers
 # was run by hand on a dev host to prove apps/MeraDrpRuntimeWrapper.cpp
 # actually compiles to a valid .o with every one of the previously-missing
