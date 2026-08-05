@@ -312,8 +312,18 @@ DRP-AI TVM) toolchain on the build host — not at image build
 time.  It's a separate Apache-2.0 project at
 <https://github.com/renesas-rz/rzv_drp-ai_tvm>; model authors
 install it on their workstation and ship the compiled output
-as a model asset.  The image build only needs the runtime side,
-which is in `meta-rz-drpai`.
+as a model asset.
+
+The image build needs more than `meta-rz-drpai` alone.  That layer
+supplies `<linux/drpai.h>` (recipe `drpai`) and `libtvm_runtime.so`
+(recipe `lib-tvm`), but the rest of the MERA2 runtime closure is
+staged by `recipes-renesas/mera2-drpai-tvm`, which reads it out of a
+BUILT `rzv_drp-ai_tvm` (RUHMI) checkout the builder points at with
+`RUHMI_DRPAI_TVM_DIR`.  That recipe fetches and vendors nothing.  All
+three are pulled in together by the `alp-sdk` recipe's
+`PACKAGECONFIG[drpai]`; see `docs/bring-up-drpai-v2n.md` section 4 for
+the full procedure and section 3 for the separate `ALP_ENABLE_DRPAI`
+switch that enables the kernel-side node.
 
 ## OTA via Mender (opt-in)
 

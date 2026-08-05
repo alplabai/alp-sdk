@@ -79,6 +79,29 @@ tvm_runtime) located via the RZ/V Yocto SDK sysroot; the prebuilt libs are \
 account-gated and NOT vendored.  Default OFF."
     OFF)
 
+option(ALP_SDK_DRPAI_REQUIRED
+    "Treat a missing DRP-AI stack as a configure ERROR instead of warning and \
+disabling the backend.  OFF (the default) is the safe choice for a direct \
+plain-CMake build where a builder passes -DALP_SDK_USE_DRPAI_V2N=ON by hand \
+outside any recipe: an incomplete host degrades cleanly instead of failing \
+configure.  meta-alp-sdk's alp-sdk recipe sets this ON alongside \
+-DALP_SDK_USE_DRPAI_V2N=ON in PACKAGECONFIG[drpai], because there the builder \
+DID ask by name through a named opt-in and a silently backend-less \
+libalp_sdk.so is the wrong answer.  (scripts/alp_orchestrate/kconfig.py's \
+capabilities.drp_ai auto-emit does NOT reach this option today -- see the \
+path (a)/(b) note below -- so it does not justify this default; OFF stands \
+on the plain-CMake case alone.)"
+    OFF)
+
+option(ALP_SDK_DEEPX_REQUIRED
+    "Treat a missing DEEPX dx_rt stack as a configure ERROR instead of \
+warning and disabling the backend.  Same rationale and same default as \
+ALP_SDK_DRPAI_REQUIRED above: OFF lets a plain-CMake builder who passed \
+-DALP_SDK_USE_DEEPX_DXM1=ON by hand degrade cleanly, while a recipe that \
+opts in by name should set this ON so a silently backend-less \
+libalp_sdk.so is not the answer."
+    OFF)
+
 target_sources(alp_sdk PRIVATE
     # Split stub backend (#673) -- one TU per API class plus the
     # shared stub_core.c (last-error slot + delay primitives).
@@ -635,37 +658,51 @@ endif()
 # BENCH-UNVERIFIED: compiles/header-checks; not run on silicon.        #
 # ------------------------------------------------------------------ #
 if(ALP_SDK_USE_DEEPX_DXM1)
-    target_sources(alp_sdk PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/inference_deepx.cpp
-    )
-    target_compile_definitions(alp_sdk PRIVATE
-        ALP_SDK_USE_DEEPX_DXM1=1
-    )
-
-    # Resolve the dx_rt headers + libdxrt.  Inside the Yocto cross-build
-    # the sysroot already carries them at the standard prefix; for an
-    # out-of-Yocto build (maintainer header-check) point ALP_DEEPX_DXRT_HOME
-    # at a dx_rt clone/install.
+    # PROBE FIRST, then decide whether to compile the backend in.
+    #
+    # This block used to add inference_deepx.cpp unconditionally and merely
+    # warn when libdxrt was missing.  That was survivable while a shared
+    # libalp_sdk tolerated undefined symbols -- the break surfaced later, in
+    # a downstream consumer's link.  #1145 adds LINKER:--no-undefined to
+    # this library's own link, which turns that warning into a hard failure
+    # of the SDK build itself.  There is no in-tree dxrt/dxrt_api.h stub, so
+    # a sysroot carrying dx-rt-dev headers WITHOUT libdxrt compiles the
+    # translation unit fine and then fails at link.  Same find-first shape
+    # as the DRP-AI block below.
     if(DEFINED ENV{ALP_DEEPX_DXRT_HOME})
-        target_include_directories(alp_sdk PRIVATE
-            $ENV{ALP_DEEPX_DXRT_HOME}/lib/include)
+        set(_alp_deepx_inc $ENV{ALP_DEEPX_DXRT_HOME}/lib/include)
         find_library(DXRT_LIB dxrt PATHS $ENV{ALP_DEEPX_DXRT_HOME}/lib)
     else()
         find_path(DXRT_INCLUDE_DIR dxrt/dxrt_api.h)
-        if(DXRT_INCLUDE_DIR)
-            target_include_directories(alp_sdk PRIVATE ${DXRT_INCLUDE_DIR})
-        endif()
+        set(_alp_deepx_inc ${DXRT_INCLUDE_DIR})
         find_library(DXRT_LIB dxrt)
     endif()
 
-    if(DXRT_LIB)
+    if(DXRT_LIB AND _alp_deepx_inc)
+        target_sources(alp_sdk PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/inference_deepx.cpp
+        )
+        target_compile_definitions(alp_sdk PRIVATE
+            ALP_SDK_USE_DEEPX_DXM1=1
+        )
+        target_include_directories(alp_sdk PRIVATE ${_alp_deepx_inc})
         target_link_libraries(alp_sdk PRIVATE ${DXRT_LIB})
+    elseif(ALP_SDK_DEEPX_REQUIRED)
+        message(FATAL_ERROR
+            "alp-sdk yocto: ALP_SDK_USE_DEEPX_DXM1=ON and "
+            "ALP_SDK_DEEPX_REQUIRED=ON, but the dx_rt headers and/or libdxrt "
+            "were not found.  Install the meta-deepx-m1 dx-rt recipe on the "
+            "Yocto sysroot, or set ALP_DEEPX_DXRT_HOME.")
     else()
+        # Skip the backend rather than compile a translation unit whose
+        # symbols cannot resolve.  The dispatcher's own NOT_IMPLEMENTED path
+        # still answers alp_inference_open(.backend = DEEPX) honestly.
         message(WARNING
-            "alp-sdk yocto: ALP_SDK_USE_DEEPX_DXM1=ON but libdxrt not found. "
-            "Install the meta-deepx-m1 dx-rt recipe on the Yocto sysroot, or "
-            "set ALP_DEEPX_DXRT_HOME.  The DEEPX backend will not link until "
-            "then (BENCH-UNVERIFIED until V2N-M1 HIL bring-up).")
+            "alp-sdk yocto: ALP_SDK_USE_DEEPX_DXM1=ON but the dx_rt headers "
+            "and/or libdxrt were not found -- the DEEPX backend is NOT "
+            "compiled in.  Install the meta-deepx-m1 dx-rt recipe on the "
+            "Yocto sysroot, or set ALP_DEEPX_DXRT_HOME.  "
+            "(BENCH-UNVERIFIED until V2N-M1 HIL bring-up.)")
     endif()
 endif()
 
@@ -682,34 +719,160 @@ endif()
 # BENCH-UNVERIFIED + needs the sysroot to cross-link.                  #
 # ------------------------------------------------------------------ #
 if(ALP_SDK_USE_DRPAI_V2N)
-    target_sources(alp_sdk PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/inference_drpai.cpp
-    )
-    target_compile_definitions(alp_sdk PRIVATE
-        ALP_SDK_USE_DRPAI_V2N=1
-    )
-
-    if(DEFINED ENV{ALP_DRPAI_TVM_APPS})
-        target_include_directories(alp_sdk PRIVATE $ENV{ALP_DRPAI_TVM_APPS})
-    else()
-        find_path(DRPAI_WRAPPER_INCLUDE_DIR MeraDrpRuntimeWrapper.h)
-        if(DRPAI_WRAPPER_INCLUDE_DIR)
-            target_include_directories(alp_sdk PRIVATE ${DRPAI_WRAPPER_INCLUDE_DIR})
-        endif()
-    endif()
-
-    # The MERA2 + DRP-AI TVM runtime stack from the RZ/V Yocto SDK sysroot.
+    # Detect the WHOLE stack before enabling anything.  TWO DIFFERENT paths
+    # can turn ALP_SDK_USE_DRPAI_V2N on and they want opposite failure modes,
+    # so ALP_SDK_DRPAI_REQUIRED (above) says which one is driving:
+    #   (a) direct plain-CMake, REQUIRED=OFF -- a builder passes
+    #       -DALP_SDK_USE_DRPAI_V2N=ON by hand with no packaging system
+    #       backing it, so a FATAL_ERROR here would break that build on any
+    #       host without a RUHMI checkout.  Warn + disable.
+    #       (NOT scripts/alp_orchestrate/kconfig.py's capabilities.drp_ai
+    #       auto-emit: that mechanism does not reach this file today for any
+    #       V2N/V2M A55 slice -- --emit cmake-args refuses os: yocto cores,
+    #       --emit yocto-conf never emits this flag, and the one core class
+    #       where kconfig.py DOES emit it, the M33 Zephyr slice, never runs
+    #       this listfile, which returns early on DEFINED ZEPHYR_BASE above.)
+    #   (b) explicit opt-in, REQUIRED=ON -- meta-alp-sdk's alp-sdk recipe, where
+    #       PACKAGECONFIG[drpai] flips the flag and pulls the deps together.
+    #       Here a warning would ship a green bake whose libalp_sdk.so has no
+    #       DRP-AI backend at all, with the reason buried in a bake log.  Fail.
+    # Either way, adding the source + define first and only warning about the
+    # missing stack is not a degrade -- inference_drpai.cpp #includes
+    # <linux/drpai.h> + MeraDrpRuntimeWrapper.h (compile error) and calls the
+    # runtime (unresolved symbols).  So: find first, and enable ONLY if
+    # complete; otherwise warn/error and leave the dispatcher's other backends
+    # to it.
+    #
+    # Only tvm_runtime comes from a Yocto layer (meta-rz-drpai's lib-tvm
+    # recipe ships libtvm_runtime.so.2.5.1); mera2_runtime, drp_tvm_rt and
+    # mera2_plan_io exist ONLY in a built RUHMI / rzv_drp-ai_tvm checkout
+    # (obj/build_runtime/<soc>/lib), as does MeraDrpRuntimeWrapper.h.  Point
+    # ALP_DRPAI_TVM_APPS at that checkout's apps/ dir and put its lib/ on
+    # CMAKE_LIBRARY_PATH.  One find_path for both cases: the env var is only a
+    # HINT, so a stale or empty ALP_DRPAI_TVM_APPS fails detection here rather
+    # than at compile time.
+    find_path(DRPAI_WRAPPER_INCLUDE_DIR MeraDrpRuntimeWrapper.h
+              HINTS $ENV{ALP_DRPAI_TVM_APPS})
+    # The sixth input: inference_drpai.cpp also hard-#includes the DRP-AI
+    # driver uapi header, which comes from meta-rz-drpai's drpai_1.4.0 recipe
+    # (${includedir}/linux/drpai.h) -- a DIFFERENT source from the RUHMI
+    # checkout above.  On path (b) PACKAGECONFIG[drpai] names `drpai` in its
+    # DEPENDS explicitly, so the header is staged; but path (a) has no
+    # PACKAGECONFIG at all, so without this probe a host with the RUHMI libs
+    # but no uapi header sails through the gate and dies at compile --
+    # exactly what this block exists to prevent.
+    find_path(DRPAI_UAPI_INCLUDE_DIR linux/drpai.h)
+    # The seventh, eighth and ninth inputs: MeraDrpRuntimeWrapper.h:11
+    # hard-#includes <tvm/runtime/profiling.h>, which pulls in dlpack and
+    # dmlc-core headers in turn.  Those live in the RUHMI checkout's tvm
+    # SUBMODULE, not beside the wrapper -- and the submodules ship
+    # uninitialised, so a checkout whose libs are already built can still
+    # have an empty tvm/ tree.  Probing only the wrapper would pass
+    # detection and then die at compile on the tvm include, which is the
+    # failure this block exists to prevent.  meta-rz-drpai does NOT cover
+    # this: its lib-tvm recipe installs libtvm_runtime.so* and a LICENSE,
+    # no headers at all.  Fix on a bare checkout is
+    # `git submodule update --init --recursive`.
+    #
+    # TRAP: this MUST resolve to the nested tvm/3rdparty/dlpack (and
+    # tvm/3rdparty/dmlc-core), not the top-level rzv_drp-ai_tvm/3rdparty/
+    # dlpack -- the top-level copy is pinned to an older dlpack (v0.5) that
+    # is missing kDLCUDAManaged/kDLROCMHost/kDLOneAPI/kDLWebGPU/kDLHexagon,
+    # which tvm/include/tvm/runtime/c_runtime_api.h references, so pointing
+    # here at the wrong dlpack fails at compile, not at this probe.  Same
+    # HINTS-from-env pattern as DRPAI_WRAPPER_INCLUDE_DIR above: reuse
+    # ALP_DRPAI_TVM_APPS (the checkout's apps/ dir) rather than a second env
+    # var, since tvm/ is apps/'s sibling in the same RUHMI checkout.
+    find_path(DRPAI_TVM_INCLUDE_DIR tvm/runtime/profiling.h
+              HINTS $ENV{ALP_DRPAI_TVM_APPS}/../tvm/include)
+    find_path(DRPAI_DLPACK_INCLUDE_DIR dlpack/dlpack.h
+              HINTS $ENV{ALP_DRPAI_TVM_APPS}/../tvm/3rdparty/dlpack/include)
+    find_path(DRPAI_DMLC_INCLUDE_DIR dmlc/logging.h
+              HINTS $ENV{ALP_DRPAI_TVM_APPS}/../tvm/3rdparty/dmlc-core/include)
     find_library(MERA2_RUNTIME_LIB mera2_runtime)
+    find_library(MERA2_PLAN_IO_LIB mera2_plan_io)
     find_library(DRP_TVM_RT_LIB    drp_tvm_rt)
     find_library(TVM_RUNTIME_LIB   tvm_runtime)
-    if(MERA2_RUNTIME_LIB AND DRP_TVM_RT_LIB AND TVM_RUNTIME_LIB)
-        target_link_libraries(alp_sdk PRIVATE
-            ${MERA2_RUNTIME_LIB} ${DRP_TVM_RT_LIB} ${TVM_RUNTIME_LIB})
+    # The tenth input (#1145's third correction): MeraDrpRuntimeWrapper's own
+    # symbols (ctor, Run, SetInput, GetInputInfo, ...) are NOT in any of the
+    # four libraries above -- they are application-side glue source
+    # (apps/MeraDrpRuntimeWrapper.cpp) that RUHMI ships expecting every
+    # consumer to compile for itself.  A first cut of this block treated the
+    # header find above as sufficient, which let a link-line-complete
+    # libalp_sdk.so ship with unresolved MeraDrpRuntimeWrapper::* symbols --
+    # invisible here (a shared library permits undefined symbols by
+    # default) until a downstream consumer's own link failed on them.
+    # mera2-drpai-tvm's do_compile now COMPILES that source into
+    # libmera_drpai_wrapper.so and packages it alongside the other eight;
+    # find + link it exactly like them, not just the header.
+    find_library(MERA_DRPAI_WRAPPER_LIB mera_drpai_wrapper)
+
+    set(_drpai_missing "")
+    if(NOT DRPAI_WRAPPER_INCLUDE_DIR)
+        list(APPEND _drpai_missing "MeraDrpRuntimeWrapper.h")
+    endif()
+    if(NOT DRPAI_UAPI_INCLUDE_DIR)
+        list(APPEND _drpai_missing "linux/drpai.h")
+    endif()
+    if(NOT DRPAI_TVM_INCLUDE_DIR)
+        list(APPEND _drpai_missing "tvm/runtime/profiling.h")
+    endif()
+    if(NOT DRPAI_DLPACK_INCLUDE_DIR)
+        list(APPEND _drpai_missing "dlpack/dlpack.h")
+    endif()
+    if(NOT DRPAI_DMLC_INCLUDE_DIR)
+        list(APPEND _drpai_missing "dmlc/logging.h")
+    endif()
+    foreach(_drpai_lib
+            MERA2_RUNTIME_LIB MERA2_PLAN_IO_LIB DRP_TVM_RT_LIB TVM_RUNTIME_LIB
+            MERA_DRPAI_WRAPPER_LIB)
+        if(NOT ${_drpai_lib})
+            list(APPEND _drpai_missing "${_drpai_lib}")
+        endif()
+    endforeach()
+
+    if(_drpai_missing)
+        list(JOIN _drpai_missing ", " _drpai_missing_txt)
+        if(ALP_SDK_DRPAI_REQUIRED)
+            # Path (b): the builder named this backend.  Refuse to hand back a
+            # library that silently lacks it.
+            set(_drpai_level FATAL_ERROR)
+            set(_drpai_verdict
+                "ALP_SDK_DRPAI_REQUIRED=ON (explicit opt-in, e.g. the alp-sdk "
+                "recipe's PACKAGECONFIG \"drpai\"), so this is fatal rather "
+                "than a silent degrade to a DRP-AI-less libalp_sdk.")
+        else()
+            # Path (a): direct plain-CMake, flag set by hand.  Degrade cleanly.
+            set(_drpai_level WARNING)
+            set(_drpai_verdict
+                "inference_drpai.cpp is NOT compiled and ALP_SDK_USE_DRPAI_V2N "
+                "is NOT defined; the dispatcher falls back to its other "
+                "backends.")
+        endif()
+        message(${_drpai_level}
+            "alp-sdk yocto: DRP-AI backend DISABLED -- not found: "
+            "${_drpai_missing_txt}.  Set ALP_DRPAI_TVM_APPS to the apps/ "
+            "directory of a built rzv_drp-ai_tvm (RUHMI) checkout and add its "
+            "obj/build_runtime/<soc>/lib to CMAKE_LIBRARY_PATH; tvm_runtime "
+            "comes from meta-rz-drpai's lib-tvm recipe and linux/drpai.h from "
+            "its drpai recipe, both on the Yocto sysroot; mera_drpai_wrapper "
+            "is COMPILED (not just staged) by meta-alp-sdk/recipes-renesas/"
+            "mera2-drpai-tvm from that same RUHMI checkout's "
+            "apps/MeraDrpRuntimeWrapper.cpp.  ${_drpai_verdict}")
     else()
-        message(WARNING
-            "alp-sdk yocto: ALP_SDK_USE_DRPAI_V2N=ON but the MERA2/DRP-AI TVM "
-            "runtime (mera2_runtime/drp_tvm_rt/tvm_runtime) was not found.  "
-            "Build inside the RZ/V Yocto SDK so the sysroot carries them.  "
-            "The DRP-AI backend will not link until then (BENCH-UNVERIFIED).")
+        target_sources(alp_sdk PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/inference_drpai.cpp
+        )
+        target_compile_definitions(alp_sdk PRIVATE
+            ALP_SDK_USE_DRPAI_V2N=1
+        )
+        target_include_directories(alp_sdk PRIVATE
+            ${DRPAI_WRAPPER_INCLUDE_DIR} ${DRPAI_UAPI_INCLUDE_DIR}
+            ${DRPAI_TVM_INCLUDE_DIR} ${DRPAI_DLPACK_INCLUDE_DIR}
+            ${DRPAI_DMLC_INCLUDE_DIR})
+        target_link_libraries(alp_sdk PRIVATE
+            ${MERA_DRPAI_WRAPPER_LIB}
+            ${MERA2_RUNTIME_LIB} ${MERA2_PLAN_IO_LIB}
+            ${DRP_TVM_RT_LIB} ${TVM_RUNTIME_LIB})
     endif()
 endif()
