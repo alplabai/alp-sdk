@@ -21,6 +21,15 @@ PV      = "0.6.0"
 
 S = "${WORKDIR}/git"
 
+# zcbor is a hard build dependency, not a PACKAGECONFIG opt-in like mqtt/
+# security/audio above: src/yocto/CMakeLists.txt's zcbor find_path/
+# find_library block (#1254) is a FATAL_ERROR, not a warn-and-degrade, on
+# a sysroot that doesn't have it -- there is no NOSUPPORT fallback left
+# for alp_model_parse to degrade to on Yocto (stub_model.c was dropped
+# from that file's source list in the same change).  Provided by this
+# layer's own recipes-devtools/zcbor/zcbor_0.9.1.bb.
+DEPENDS += "zcbor"
+
 inherit cmake
 
 # alp-sdk's repo-root CMakeLists.txt builds the plain-CMake

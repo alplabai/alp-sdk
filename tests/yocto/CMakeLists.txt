@@ -75,6 +75,26 @@ target_compile_features(alp_test_inference_dispatcher PRIVATE c_std_99)
 add_test(NAME alp_test_inference_dispatcher
          COMMAND alp_test_inference_dispatcher)
 
+# Issue #1254 end-to-end regression: an "onnx" blob_format .alpmodel,
+# decoded by the REAL zcbor-backed alp_model_parse() (src/common/
+# alp_model.c, now compiled unconditionally above instead of the
+# ALP_ERR_NOSUPPORT stub), selects ALP_INFERENCE_BACKEND_CPU through
+# alp_model_select() -- see alpmodel_onnx_cpu.c's own header comment for
+# the fixture provenance. Portable pure C (alp_model.c + alp_model_select.c
+# have no OS-specific surface once zcbor is on the include/link path,
+# same as alp_test_inference_dispatcher above), so this runs ungated.
+add_executable(alp_test_alpmodel_onnx_cpu
+    ${CMAKE_CURRENT_SOURCE_DIR}/alpmodel_onnx_cpu.c
+)
+target_link_libraries(alp_test_alpmodel_onnx_cpu PRIVATE alp::sdk)
+target_include_directories(alp_test_alpmodel_onnx_cpu PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_compile_features(alp_test_alpmodel_onnx_cpu PRIVATE c_std_99)
+
+add_test(NAME alp_test_alpmodel_onnx_cpu
+         COMMAND alp_test_alpmodel_onnx_cpu)
+
 # GPU2D dispatcher + portable sw_fallback on the plain-CMake Yocto
 # build (#24): proves Linux apps get the REAL CPU fill/blit/blend,
 # not the old NOSUPPORT stub.  Portable pure C -- no Linux gate.

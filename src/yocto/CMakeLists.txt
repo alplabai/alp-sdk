@@ -132,7 +132,13 @@ target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_power.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_gpu2d.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_rpc.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_model.c
+    # stub_model.c is intentionally NOT listed here (issue #1254): the
+    # real alp_model_parse() body (src/common/alp_model.c) is added
+    # below, unconditionally, alongside its zcbor dependency -- leaving
+    # the stub in this list would let it re-win the link the same way
+    # it silently did before #1254 (the stub and the real body export
+    # the same alp_model_parse symbol; whichever TU compiles in here
+    # is authoritative, and only one may be present).
     # SDK lifecycle (alp_init / alp_deinit) -- OS-agnostic.
     ${CMAKE_CURRENT_SOURCE_DIR}/../init.c
     # Register-file I2C target helper (<alp/i2c_regfile.h>) -- pure
@@ -308,6 +314,38 @@ target_sources(alp_sdk PRIVATE
     # static and no undefined reference on the Yocto link.
     ${CMAKE_CURRENT_SOURCE_DIR}/dispatch_last_error_shim.c
 )
+
+# alp_model.c (#1254): the real .alpmodel CBOR-manifest reader behind
+# <alp/model.h>.  REQUIRED, not optional-with-graceful-degrade like the
+# DEEPX/DRP-AI vendor-ext blocks further down -- stub_model.c (the
+# ALP_ERR_NOSUPPORT body) was removed from the split stub backend's
+# source list above for exactly this class, so there is no fallback left
+# to degrade to: a Yocto sysroot without zcbor must fail configure, not
+# silently ship a link-complete library whose alp_model_parse always
+# returns NOSUPPORT again (the exact no-op this issue exists to fix).
+#
+# zcbor ships no CMake package config or pkgconfig .pc file of its own
+# (find_path/find_library, not find_package/pkg_check_modules, matching
+# how the DXRT/DRPAI libraries below are found -- none of these upstream
+# projects hand CMake a discovery file). meta-alp-sdk's own zcbor recipe
+# (recipes-devtools/zcbor/zcbor_0.9.1.bb) stages
+# ${includedir}/zcbor_decode.h + ${libdir}/libzcbor.so on the target
+# sysroot; a direct plain-CMake build against a Yocto sysroot needs the
+# matching zcbor-dev package installed by hand.
+find_path(ZCBOR_INCLUDE_DIR zcbor_decode.h)
+find_library(ZCBOR_LIB zcbor)
+if(NOT (ZCBOR_INCLUDE_DIR AND ZCBOR_LIB))
+    message(FATAL_ERROR
+        "alp-sdk yocto: zcbor not found (zcbor_decode.h / libzcbor) -- "
+        "src/common/alp_model.c needs it to implement alp_model_parse, "
+        "and Yocto carries no NOSUPPORT fallback for that symbol (#1254). "
+        "Add meta-alp-sdk's zcbor recipe (recipes-devtools/zcbor/"
+        "zcbor_0.9.1.bb) to the sysroot.")
+endif()
+target_sources(alp_sdk PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../common/alp_model.c)
+target_compile_definitions(alp_sdk PRIVATE CONFIG_ALP_SDK_MODEL_READER=1)
+target_include_directories(alp_sdk PRIVATE ${ZCBOR_INCLUDE_DIR})
+target_link_libraries(alp_sdk PRIVATE ${ZCBOR_LIB})
 
 # Stop the split stub backend from emitting its own alp_inference_* symbols --
 # inference_yocto.c is the sole owner on Yocto so the dispatcher can
