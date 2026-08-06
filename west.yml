@@ -57,8 +57,8 @@
 # When upgrading the Zephyr pin: change `revision:` below, rerun
 # `west update`, verify the modules/hal/{renesas,nxp} revs that
 # ship with the new Zephyr tag still satisfy the SoMs we target
-# (see docs/os-support-matrix.md), bump pr-twister.yml +
-# nightly-aen-hil.yml's `--mr` to match, and add a CHANGELOG entry.
+# (see docs/os-support-matrix.md), bump pr-twister.yml's `--mr` to
+# match, and add a CHANGELOG entry.
 
 manifest:
   defaults:

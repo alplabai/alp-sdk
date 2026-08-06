@@ -247,24 +247,35 @@ the host reads the reply.  See
 for the timing window.  The host driver returns `ALP_ERR_IO` and
 the caller can retry (commands are idempotent).
 
-### `alp_hw_info_read` returns `ALP_ERR_IO`
+### `alp_hw_info_read` returns `ALP_ERR_NOT_PROVISIONED`
 
-CRC mismatch in the EEPROM manifest -- factory programming hasn't
-run on this module, or the manifest is corrupt.  Inspect with:
+The EEPROM reads back blank/unprogrammed -- no `ALPH` magic at
+offset 0.  Factory programming hasn't run on this module yet.
+Inspect with:
 
 ```c
 uint8_t raw[128];
 eeprom_24c128_read(&ee, 0, raw, sizeof(raw));
-// Dump raw bytes; expect "ALPH" (0x41 0x4C 0x50 0x48) at offset 0.
+// Dump raw bytes; expect wire bytes 0x48 0x50 0x4C 0x41 ("HPLA"
+// in a hexdump) at offset 0 on a programmed module.
 ```
 
-Re-run `scripts/program_eeprom.py` against the module.
+Run `scripts/program_eeprom.py` against the module.
+
+### `alp_hw_info_read` returns `ALP_ERR_IO`
+
+The manifest's magic is present but `schema_version` or the
+CRC-32 disagrees -- the manifest is corrupt (partial write, bit
+flip). Re-run `scripts/program_eeprom.py` against the module.
 
 ### `alp_hw_info_read` returns `ALP_ERR_NOSUPPORT`
 
 The EEPROM-side hw_info reader isn't configured.  Set
-`CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID` in `prj.conf` to the
-bus id matching `ALP_E1M_I2C0` on your board.
+`CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID` in `prj.conf` to the bus
+id carrying the on-module 24C128.  On V2N / V2N-M1 this is the bus
+matching `ALP_E1M_I2C0` (Renesas RIIC0, `P31`/`P30`); on AEN it's
+SoC I2C2 (DesignWare `i2c_dw`, `P5_6`/`P5_7`, bridge/DNP-selected --
+NOT the slave-only LPI2C0 / BRD_I2C).
 
 ## CI / tooling issues
 

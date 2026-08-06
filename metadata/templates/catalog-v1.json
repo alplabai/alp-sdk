@@ -538,7 +538,7 @@
         "cross_compile_matrix": []
       },
       "status": "preview",
-      "note": "AEN-only + preview: (1) the E1M-V2N101 Wi-Fi transport does not exist yet -- its Murata murata_lbee5hy2fy radio is hil_silicon: untested and its Linux data path is an unmerged design -- so this template supports only E1M-AEN801, whose CC3501E bridge transport is silicon-validated (2026-06-24, nightly-aen-hil). (2) The mqtts:// TLS path is wired through <alp/iot.h> + libraries: [mbedtls], but CONFIG_MBEDTLS is held off in the build (Zephyr 4.4 / mbedtls 3.6 ssl_misc.h include-order bug; full tf-psa-crypto integration is a v0.6 work item), so the native_sim scenario exercises the SDK framing + the documented alp_wifi_open/alp_mqtt_open NULL (NOT_READY) degradation, not a live TLS round-trip."
+      "note": "AEN-only + preview: (1) the E1M-V2N101 Wi-Fi transport does not exist yet -- its Murata murata_lbee5hy2fy radio is hil_silicon: untested and its Linux data path is an unmerged design -- so this template supports only E1M-AEN801, whose CC3501E bridge transport is silicon-validated (2026-06-24, bench-verified -- not via CI; see #968). (2) The mqtts:// TLS path is wired through <alp/iot.h> + libraries: [mbedtls], but CONFIG_MBEDTLS is held off in the build (Zephyr 4.4 / mbedtls 3.6 ssl_misc.h include-order bug; full tf-psa-crypto integration is a v0.6 work item), so the native_sim scenario exercises the SDK framing + the documented alp_wifi_open/alp_mqtt_open NULL (NOT_READY) degradation, not a live TLS round-trip."
     }
   ]
 }

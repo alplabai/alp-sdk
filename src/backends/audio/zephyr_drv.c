@@ -20,8 +20,7 @@
  * struct alp_audio_in / struct alp_audio_out pools; this backend
  * carries only the Zephyr-specific per-handle blobs.
  *
- * The portable-HW-offload audit rule (memory/feedback_portable_hw_
- * offload_with_sw_fallback.md) is satisfied because the chip-
+ * The portable-HW-offload audit rule is satisfied because the chip-
  * specific dispatch happens inside Zephyr's audio_dmic / I2S driver
  * classes -- application code never sees a vendor name in
  * <alp/audio.h>.
