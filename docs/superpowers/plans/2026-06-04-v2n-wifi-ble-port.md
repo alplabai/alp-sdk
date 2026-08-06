@@ -14,7 +14,7 @@
 
 **Architecture:** GD32 bridge gains pad-map bits 18/19 (BT/WL_REG_ON on PE14/PE15, boot default-on). Linux gets a kernel config fragment (kernel cfg80211 OUT, BT stack IN), DT patches 0014/0015 (SDHI1→WLAN on the dedicated SD1 pins; RSCI BT UART), the Murata `cyw-fmac` backports kmod, and murata-wireless firmware blobs. Bench-proof first (hand-built artifacts over ssh), then productionize (Yocto recipes in meta-alp-sdk + patch series), then V2M.
 
-**Tech Stack:** GD32 firmware (gd32 + stub HALs), Zephyr twister (native_sim) for host-side smokes, WSL kernel build (`kbuild-cip43`, 6.1.141), backports/cyw-fmac, dtc, Yocto/kas, bench over COM24 + ssh (`root@192.168.1.198`) + J-Link.
+**Tech Stack:** GD32 firmware (gd32 + stub HALs), Zephyr twister (native_sim) for host-side smokes, WSL kernel build (`kbuild-cip43`, 6.1.141), backports/cyw-fmac, dtc, Yocto/kas, bench over COM24 + ssh (`root@<bench-host>`) + J-Link.
 
 **Spec:** `docs/superpowers/specs/2026-06-04-v2n-wifi-ble-port-design.md`
 

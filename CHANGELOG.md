@@ -4216,8 +4216,8 @@ mixed I3C/I2C bus depends on the slowest device populated.
 - `aen-i3c-regcheck` re-based off the raw-DT bind-proof staged on
   `feat/aen-soc-peripheral-coverage` to drive the portable API instead:
   opens `ALP_E1M_I3C0`, reads back capabilities, and issues a probe write.
-  **SILICON-PROVEN (controller init)** on E1M-AEN801, labgrid place
-  `e1m-aen-evk-01`, Flow C ITCM RAM-run, 2026-07-25, reproduced twice:
+  **SILICON-PROVEN (controller init)** on E1M-AEN801, Flow C ITCM
+  RAM-run, 2026-07-25, reproduced twice:
 
   ```
   bus: ALP_E1M_I3C0 = 0 (alp-i3c0 alias -> lpi3c0@0x43006000)
@@ -10698,8 +10698,7 @@ Deferred from this batch:
 - **`<alp/tmu.h>` -- portable CORDIC math accelerator surface (with libm fallback) (2026-05-14).**
   Wires a customer-facing math primitive set (sin / cos / tan / atan /
   atan2 / sqrt / log / exp / sinh / cosh / tanh / hypot) without
-  exposing the GD32 name to application code (per
-  `memory/feedback_portable_hw_offload_with_sw_fallback.md`).  Three
+  exposing the GD32 name to application code.  Three
   pieces:
   - New wire opcode `CMD_TMU_COMPUTE` (0x90) on the bridge protocol;
     bumps `PROTOCOL_VERSION_MINOR` 3 -> 4.  Request payload is 12 B
@@ -10741,8 +10740,7 @@ Deferred from this batch:
 
 - **`<alp/pwm.h>` -- portable per-channel PWM tuning surface (2026-05-14).**
   Wires the customer-facing path for the v0.3 `CMD_PWM_CONFIGURE`
-  opcode without exposing the GD32 name to application code (per
-  `memory/feedback_portable_hw_offload_with_sw_fallback.md`).
+  opcode without exposing the GD32 name to application code.
   Three additions:
   - `alp_pwm_align_t` enum mirrors the four advanced-timer counter
     shapes (edge, center-aligned-up, center-aligned-down,
@@ -10770,7 +10768,7 @@ Deferred from this batch:
   in the protocol-v0.3 commit) into MbedTLS's platform entropy
   callback, so the portable `alp_random_bytes()` transparently picks
   up true randomness on V2N without app code mentioning the GD32
-  name (per `memory/feedback_portable_hw_offload_with_sw_fallback.md`).
+  name.
   The SDK's mbedtls profile already sets `MBEDTLS_NO_PLATFORM_ENTROPY`,
   which makes mbedtls request a `mbedtls_hardware_poll()` from the
   integrator; the new implementation in `src/zephyr/security_zephyr.c`
@@ -10795,8 +10793,7 @@ Deferred from this batch:
 - **`<alp/adc.h>` -- portable streaming ADC surface + v0.3 configure knobs (2026-05-14).**
   Wires the customer-facing path for the v0.3 wire opcodes the prior
   commit shipped on the GD32 side, with no `gd32g553_*` symbols
-  visible to application code (per
-  `memory/feedback_portable_hw_offload_with_sw_fallback.md`).  Two
+  visible to application code.  Two
   additions:
   - `alp_adc_config_t` grows `oversampling_ratio` (1..256, rounded
     down to power-of-two) and `sample_cycles` (rounded down to the
@@ -10950,7 +10947,6 @@ Deferred from this batch:
   opcode plus a `STATUS_NOSUPPORT` reply envelope.
 
 - **`<alp/adc.h>` -- portable DAC surface (2026-05-14).**
-  Per the portability memo (`memory/feedback_portable_peripheral_api.md`),
   DAC sits alongside ADC in the same header.  Adds `alp_dac_t`,
   `alp_dac_open(cfg)` (`channel_id` + `initial_mv`), `alp_dac_write_mv`,
   `alp_dac_read_mv`, `alp_dac_close`.  Backend wiring lands in the
@@ -11009,9 +11005,7 @@ Deferred from this batch:
   identity IIR; DC + sinusoid + impulse FFT verification).
   Wave-2 bridge-wired counterparts (`alp_adc_filter_t` /
   `alp_adc_spectrum_t` in `<alp/adc.h>`) land in the v0.5.x (b)
-  and (c) follow-ups -- see
-  `memory/project_wave2_dsp_pipeline_design.md` for the design
-  intent and bridge wire-format split.
+  and (c) follow-ups.
 
 - **`gd32-bridge` protocol v0.5 -- reserves
   `CMD_ADC_STREAM_CONFIGURE_DSP` (opcode `0x36`) for the wave-2
@@ -11697,7 +11691,7 @@ Deferred from this batch:
   discovery tools.  §10 reserves OTA opcodes `0xF0..0xFF` for the
   planned application-bootloader path; §10 also documents the
   V2N→GD32 BOOT0 reroute the maintainer has committed to (pad
-  selection TBD per `memory/project_gd32_boot0_to_v2n_planned.md`).
+  selection TBD).
 
 - **`chips/gd32g553/` host-side bridge driver (2026-05-12).**
   Renesas-side driver that speaks the bridge protocol over either
