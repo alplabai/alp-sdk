@@ -12,10 +12,9 @@
  *   - Renesas RZ/V2N RSIP -- same story via the V2N driver wrapper.
  *   - Everything else -- MbedTLS reference software implementations.
  *
- * The portable-HW-offload audit rule (memory/feedback_portable_hw_
- * offload_with_sw_fallback.md) is satisfied because the chip-specific
- * dispatch happens inside MbedTLS -- application code never sees a
- * vendor name in <alp/security.h>.
+ * The portable-HW-offload audit rule is satisfied because the
+ * chip-specific dispatch happens inside MbedTLS -- application code
+ * never sees a vendor name in <alp/security.h>.
  *
  * V2N TRNG entropy source.  The mbedtls profile (under
  * metadata/library-profiles/mbedtls/) sets MBEDTLS_NO_PLATFORM_ENTROPY,
@@ -24,8 +23,7 @@
  * route that callback through the supervisor's GD32G553 TRNG so the
  * portable alp_random_bytes() transparently picks up true randomness
  * the first time PSA's DRBG seeds itself.  The wire-level chip name
- * stays hidden behind the supervisor singleton (per
- * memory/feedback_portable_hw_offload_with_sw_fallback.md).
+ * stays hidden behind the supervisor singleton.
  *
  * Backend-owned state moved into module-static pools indexed via
  * state->be_data:

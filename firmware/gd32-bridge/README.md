@@ -104,4 +104,3 @@ translates internally.
 * Host-side driver public API: [`../include/alp/chips/gd32g553.h`](../include/alp/chips/gd32g553.h).
 * Host-side driver implementation: [`../chips/gd32g553/gd32g553.c`](../chips/gd32g553/gd32g553.c).
 * GD32 pad map: [`../metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv`](../metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv).
-* Hybrid bridge memory note: [`../memory/project_gd32_bridge_hybrid_spi_i2c.md`](../memory/project_gd32_bridge_hybrid_spi_i2c.md).

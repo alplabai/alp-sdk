@@ -40,7 +40,7 @@
  *
  * Console is the Alp UART console (see prj.conf): E1M edge UART0 = Alif UART5
  * (P3_4/P3_5, 115200 8N1), USB-routed to the labgrid `console` resource
- * (/dev/ttyUSB2) since 2026-07-03, so the RESULT PASS/FAIL line streams live as
+ * since 2026-07-03, so the RESULT PASS/FAIL line streams live as
  * the SES boots this slot0 image.  Independently, the human reads mem32
  * 0x80560000 over J-Link after the program step -- silicon ground truth for the
  * written pattern (first word 0xA5A5A5A5), independent of any printk.
