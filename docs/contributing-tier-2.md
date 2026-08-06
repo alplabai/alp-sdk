@@ -15,7 +15,7 @@ to "customers can drop it into their workspace."
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │ Tier 1: alp-sdk (this repo)                                      │
-│   80 chips, 25 libraries.  Maintainer-curated, Apache-2.0,       │
+│   80 chips, 35 libraries.  Maintainer-curated, Apache-2.0,       │
 │   portability-tested, doxygen-clean, ABI-tracked, CHANGELOG'd.   │
 └──────────────────────────────────────────────────────────────────┘
 ┌──────────────────────────────────────────────────────────────────┐
@@ -30,6 +30,18 @@ to "customers can drop it into their workspace."
 │   consumed via EXTRA_ZEPHYR_MODULES or your own west.yml.        │
 └──────────────────────────────────────────────────────────────────┘
 ```
+
+Both counts move as drivers/libraries are added or retired; recount
+before trusting them: `find chips -mindepth 1 -maxdepth 1 -type d |
+wc -l` (chips) and `ls metadata/libraries/*.yaml | wc -l` (libraries,
+the curated `metadata/libraries/<name>.yaml` manifests a board.yaml's
+`libraries:` entries name; `metadata/schemas/board.schema.json` only
+pattern-validates the name shape, `scripts/check_library_registry.py`
+is what actually resolves each name against these manifests).
+
+On Windows (PowerShell), the same counts:
+`(Get-ChildItem chips -Directory).Count` and
+`(Get-ChildItem metadata/libraries -Filter *.yaml).Count`.
 
 Tier 2's quality bar is intentionally lower than Tier 1 -- the
 goal is to let customers reach hundreds of community chip drivers

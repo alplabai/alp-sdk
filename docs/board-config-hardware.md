@@ -28,28 +28,50 @@ for this hardware" two ways:
   [#1025](https://github.com/alplabai/alp-sdk/issues/1025).  Every
   other declared status (`production`, `preview`, `preliminary`,
   `deprecated`) resolves and builds normally.
-- **Runtime** -- the SDK boots into a board-ID check that uses
-  a single ADC pin per board (SoM-side and board-side) fed by a
-  resistor divider from a 1.8 V rail.  Each `hw_rev` entry's
-  `board_id:` sub-block fixes the divider resistor values and the
-  nominal mV reading the SDK looks for.  A second, finer-grained
-  check reads the SoM's on-module 24C128 EEPROM (the AEN family
-  populates one by default) for an authoritative MPN string +
-  serial + mfg date -- the production-test flow writes the
-  manifest, the SDK matches it against `board.yaml`'s
-  `som.sku`.  Mismatch on either tier halts boot.
+- **Runtime** -- the on-module EEPROM manifest is the SDK's one
+  authoritative runtime identity check: `alp_hw_info_read()` reads
+  the SoM's on-module 24C128 EEPROM (the AEN family populates one by
+  default) for an authoritative MPN string + `hw_rev` + serial + mfg
+  date -- the production-test flow writes the manifest; the SDK
+  itself only reads and integrity-checks it (magic + schema_version +
+  CRC32).  Matching it against the firmware build (`board.yaml`'s
+  `som.sku` / `hw_rev`, via the generated `ALP_HW_BUILD_SOM_SKU` /
+  `ALP_HW_BUILD_SOM_HW_REV`) is an explicit call the application
+  makes, not something the SDK does automatically -- see below.
+  There is no SoM-side ADC cross-check (`<alp/hw_info.h>`).  A
+  carrier/EVK board may
+  separately encode its own revision on a board-side BOARD_ID
+  resistor divider read over one ADC pin -- the `board_id:` sub-block
+  lives under the *board* preset's `hw_revisions:` entry
+  (`metadata/boards/<preset>.yaml`, not the SoM's
+  `metadata/e1m_modules/` family file).  That carrier path is
+  separate, optional, and independent of the SoM's identity; its
+  runtime ADC decode is not implemented yet (`board_hw_rev` /
+  `board_id_mv` in `alp_hw_info_t` are reserved for it -- see
+  `include/alp/hw_info.h`).  Mismatch on the EEPROM check is the
+  application's to act on (`alp_hw_info_assert_matches_build()` --
+  typically halt); see [`docs/board-id.md`](board-id.md) for the
+  manifest layout and read flow.
 
-### Why one ADC pin (instead of GPIO straps)
+### Why one ADC pin on the carrier (instead of GPIO straps)
 
-The E1M form factor has no spare GPIO pads for board-ID resistor
-straps -- every pad is allocated by the spec.  A single ADC
-channel with a resistor divider distinguishes up to ~8 revisions
-at +/-100 mV bin radius (with 1 % resistors on a 1.8 V rail);
-that is enough for many family respins and leaves the rest of the
-GPIOs free for the application.  Per-rev resistor + voltage
-choices are documented in each family file's `board_id:` block;
-the canonical math lives at
-[`metadata/e1m_modules/aen/hw-revisions.yaml`](../metadata/e1m_modules/aen/hw-revisions.yaml).
+The E1M form factor has no spare GPIO pads for a carrier-side
+board-ID resistor strap -- every pad is allocated by the spec.  A
+single ADC channel with a resistor divider distinguishes up to ~8
+carrier-board revisions at +/-100 mV bin radius (with 1 % resistors
+on a 1.8 V rail); that is enough for many carrier respins and leaves
+the rest of the GPIOs free for the application.  This is a
+carrier/EVK-board mechanism only -- it says nothing about which SoM
+is populated; the SoM's own identity is the EEPROM manifest above.
+Per-rev resistor + voltage choices are documented in each *board*
+preset's `board_id:` block; see
+[`metadata/boards/e1m-evk.yaml`](../metadata/boards/e1m-evk.yaml) for
+the E1M EVK's (channel still `TBD` pending the schematic's BOARD_ID
+net assignment) and
+[`metadata/boards/e1m-x-evk.yaml`](../metadata/boards/e1m-x-evk.yaml)
+for the E1M-X EVK's (`adc_channel: E1M_X_ADC7`; divider resistor
+values held in the private `alp-sdk-internal` repo per the
+public/private split policy -- determined, not TBD).
 
 ### How the data is laid out
 
@@ -59,17 +81,23 @@ metadata/
 ├── e1m_modules/
 │   ├── aen/hw-revisions.yaml                   # family-level revs (AEN family
 │   │                                            #  shares one PCB; SKUs differ
-│   │                                            #  by silicon only).
-│   ├── v2n/hw-revisions.yaml                   # V2N family revs (board_id.adc_channel TBD)
+│   │                                            #  by silicon only).  SoM
+│   │                                            #  identity is EEPROM-only --
+│   │                                            #  no `board_id:` block here.
+│   ├── v2n/hw-revisions.yaml                   # V2N family revs (same: no board_id)
 │   ├── v2n-m1/hw-revisions.yaml                # V2N-M1 family revs (mirrors V2N + DEEPX)
-│   ├── imx93/hw-revisions.yaml                 # i.MX 93 family revs (adc_channel TBD)
+│   ├── imx93/hw-revisions.yaml                 # i.MX 93 family revs (same: no board_id)
 │   └── E1M-AEN801.yaml                     # MPN preset; `default_hw_rev: r2`
 │                                                #  points into the family table.
 └── boards/
-    ├── e1m-evk.yaml                            # board preset; carries its own
-    │                                            #  hw_revisions + default_hw_rev.
-    ├── e1m-x-evk.yaml                          # V2N / V2N-M1 board
-    │                                            #  (board_id.adc_channel TBD).
+    ├── e1m-evk.yaml                            # board preset; carries the
+    │                                            #  carrier's own hw_revisions +
+    │                                            #  default_hw_rev + `board_id:`
+    │                                            #  (adc_channel TBD).
+    ├── e1m-x-evk.yaml                          # V2N / V2N-M1 carrier board
+    │                                            #  (`board_id.adc_channel:
+    │                                            #  E1M_X_ADC7`; divider values
+    │                                            #  TBD in alp-sdk-internal).
     └── custom-example.yaml                     # copy-friendly template
 ```
 

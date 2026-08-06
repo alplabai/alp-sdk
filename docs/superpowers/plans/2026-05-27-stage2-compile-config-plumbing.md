@@ -1,6 +1,13 @@
 # Stage 2 Step 1 — `models: compile:` config/calibration plumbing — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development. Steps use checkbox (`- [ ]`) syntax.
+> **Historical transcript.** Implementation plan dated 2026-05-27. The
+> SDK has since shipped through the v0.15.0 release candidate
+> (`v0.15.0-rc1`; no plain `v0.15.0` tag exists) and into the ongoing
+> v0.16.0 development cycle (see `VERSIONS.md`, `CHANGELOG.md`) --
+> cross-check the current tree before treating anything below as a
+> live task list; kept for implementation-history rationale only.
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development. Steps use checkbox (`- [ ]`) syntax. (Superseded by the status banner above -- do not execute without reading it first.)
 
 **Goal:** Thread a per-backend, per-model **compile config** (DEEPX JSON+calibration, DRP-AI spec) from `board.yaml` `models[].compile:` through `build_model` into each adapter's `compile()`, and skip backends that *require* a config but have none with a clear `coverage: skipped ("no compile config")` — instead of guessing. Pure host Python; no vendor tools needed; fully testable now. (Step 2 = real `DeepxAdapter.compile()`, gated on the `dx-com` wheel; Steps 3-4 = runtime backends, bench-gated.)
 

@@ -941,6 +941,10 @@
       "script": "scripts/check_doc_drift.py"
     },
     {
+      "purpose": "CI gate: no dead relative-path links in customer-facing documentation.",
+      "script": "scripts/check_doc_links.py"
+    },
+    {
       "purpose": "Guard: no second Doxyfile-shaped heredoc regrows next to docs/doxygen/Doxyfile.",
       "script": "scripts/check_doxyfile_single_source.py"
     },

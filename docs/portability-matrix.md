@@ -4,12 +4,14 @@ Empirical proof of the alp-sdk's load-bearing customer promise:
 
 > Change `som.sku:` in `board.yaml`, rebuild, ship — **within a SoM family**.
 
-Cross-family portability between E1M (Cortex-M-class, Alif Ensemble / NXP
-i.MX 93) and E1M-X (Cortex-A55 + Cortex-M33, Renesas RZ/V2N) is
-intentionally NOT a goal — they are separate product lines with
-different power envelopes, different SoCs, and a separate `<alp/*_pinout.h>`
-namespace.  See
-[`docs/adr/0011-intra-family-portability.md`](adr/0011-intra-family-portability.md).
+Cross-family portability between E1M (35×35 mm, Alif Ensemble / NXP
+i.MX 93) and E1M-X (45×65 mm, Cortex-A55 + Cortex-M33, Renesas RZ/V2N)
+is intentionally NOT a goal — they are separate product lines with
+different form factors, different power envelopes, different SoCs, and
+a separate `<alp/*_pinout.h>` namespace.  See
+[`docs/adr/0011-intra-family-portability.md`](adr/0011-intra-family-portability.md)
+for the per-SKU core-class breakdown (E1M's core mix is per-SKU, not
+uniform).
 
 ## Method
 
@@ -54,7 +56,7 @@ prose and survives regeneration.
      PR if this block drifts from what the swap-test produces.
 -->
 
-## E1M family (Cortex-M-class)
+## E1M family
 
 | SKU \ Example | Silicon | i2c-scanner | gpio-button-led | pwm-led-fade | Notes (from metadata) |
 | --- | --- | :---: | :---: | :---: | --- |
@@ -119,7 +121,7 @@ reports before a build.
          python3 scripts/gen_portability_matrix.py
 -->
 
-### E1M family (Cortex-M-class)
+### E1M family
 
 | Library | Tier | Version | License | E1M-AEN301 | E1M-AEN401 | E1M-AEN501 | E1M-AEN601 | E1M-AEN701 | E1M-AEN801 | E1M-NX9101 |
 | --- | :---: | --- | --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |

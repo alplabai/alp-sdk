@@ -1,5 +1,13 @@
 # Secure firmware-update log — design (unified surface + hardware seam)
 
+> **Active.** Design spec dated 2026-06-11; still current design intent,
+> not settled history. Tracked by #111 (implement the hardware-backed,
+> Alif TF-M `update_log` backend). `src/backends/update_log/tfm_psa.c`
+> exists and forwards to the secure-service seam, but
+> `docs/abi-markers.md` keeps `update_log.h` `[ABI-EXPERIMENTAL]` until
+> that backend is silicon-proven. Cross-check the tree, but this is the
+> grounded design and should not be discarded.
+
 Status: Approved (brainstorming) — 2026-06-11; hardware-seam update — 2026-07-06
 Author: alpCaner
 Scope: portable surface, software tier, and TF-M secure-service hardware seam.

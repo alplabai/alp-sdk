@@ -1,6 +1,14 @@
 # Secure Firmware-Update Log — Implementation Plan (slice 1)
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Active.** Implementation plan dated 2026-06-11; the work below is not
+> finished. Tracked by #111 (implement the hardware-backed, Alif TF-M
+> `update_log` backend). `src/backends/update_log/tfm_psa.c` exists and
+> forwards to the secure-service seam, but `docs/abi-markers.md` keeps
+> `update_log.h` `[ABI-EXPERIMENTAL]` until that backend is
+> silicon-proven. Cross-check the current tree before treating a step
+> as done, but do not discard this as history.
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. (Superseded by the status banner above -- do not execute without reading it first.)
 
 **Goal:** Ship the portable `<alp/update_log.h>` unification surface with a working, software-tamper-evident tier (hash-chain + monotonic-counter binding), a queryable assurance level, and a defined stub seam for the future Alif TF-M/OPTIGA hardware backend.
 

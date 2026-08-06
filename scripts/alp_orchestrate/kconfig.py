@@ -52,6 +52,7 @@ from .models import BoardProject, Slice
 from .paths import METADATA_ROOT, REPO
 from .partition import resolve_storage_partitions
 from .slugs import (
+    _BLOCK_SLUGS,
     _PERIPHERAL_KCONFIG,
     _board_define_slug,
     _slugs_from_helper_firmware,
@@ -619,13 +620,6 @@ def _emit_som_caps(
         lines.append("")
 
     return lines
-
-
-# Slugs that map to BLOCK_ Kconfig symbols rather than CHIP_.
-# These live under blocks/ + <alp/blocks/*.h> because they are
-# SDK-level *block* utilities (`alp_button_led_*`, `alp_pdm_mic_*`)
-# rather than third-party-IC chip drivers; see blocks/README.md.
-_BLOCK_SLUGS = frozenset({"button_led", "pdm_mic"})
 
 
 def _slug_kconfig(slug: str) -> str:

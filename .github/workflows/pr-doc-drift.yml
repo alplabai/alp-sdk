@@ -2,9 +2,13 @@
 #
 # Doc-drift gate: fails a PR when customer docs reference SDK
 # identifiers that no longer exist in any SDK source layer (public +
-# internal headers, Kconfig, CMake, generators, schemas, Yocto), or
-# when a top-level docs/*.md isn't linked from the docs index.  Mirrors
-# scripts/check_doc_drift.py, which is runnable locally (see the
+# internal headers, Kconfig, CMake, generators, schemas, Yocto), when a
+# top-level docs/*.md isn't linked from the docs index, when a relative
+# doc-to-doc link is dead, when VERSIONS.md carries no row for the
+# released version, or when an ALP-Bxxx diagnostic landing page is
+# still a placeholder.  Mirrors scripts/check_doc_drift.py +
+# scripts/check_doc_links.py + scripts/check_diagnostic_narratives.py +
+# scripts/check_version_doc_sync.py, all runnable locally (see the
 # running-local-ci skill + docs/local-ci.md).
 name: pr-doc-drift
 
@@ -13,16 +17,20 @@ on:
     branches: [main, dev]
     paths:
       - 'README.md'
+      - 'VERSIONS.md'
       - 'docs/**'
       - 'include/**'
       - 'metadata/sdk_version.yaml'
       - 'scripts/check_doc_drift.py'
+      - 'scripts/check_doc_links.py'
+      - 'scripts/check_diagnostic_narratives.py'
       - 'scripts/check_version_doc_sync.py'
       - '.github/workflows/pr-doc-drift.yml'
   push:
     branches: [main, dev]
     paths:
       - 'README.md'
+      - 'VERSIONS.md'
       - 'docs/**'
       - 'include/**'
       - 'metadata/sdk_version.yaml'
@@ -49,5 +57,11 @@ jobs:
       - name: Doc-drift check (dead symbols + docs index)
         run: python3 scripts/check_doc_drift.py
 
-      - name: Version-doc sync (README labels vs sdk_version.yaml)
+      - name: Doc links (dead relative doc-to-doc paths)
+        run: python3 scripts/check_doc_links.py
+
+      - name: Diagnostic landing pages (no placeholder-only ALP-B pages)
+        run: python3 scripts/check_diagnostic_narratives.py
+
+      - name: Version-doc sync (README labels + VERSIONS.md vs sdk_version.yaml)
         run: python3 scripts/check_version_doc_sync.py

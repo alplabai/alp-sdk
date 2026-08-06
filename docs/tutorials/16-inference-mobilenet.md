@@ -27,8 +27,9 @@ time).
 > silicon: a TFLM + Ethos-U85 fixture runs to completion (RESULT
 > PASS, flashed via J-Link direct MRAM).  The full 224x224
 > MobileNet artefact in this tutorial is not yet HiL-exercised;
-> the matching `docs/test-plan.md` row stays 🟡 until the
-> nightly-aen-hil runner runs that model end-to-end.
+> the matching `docs/test-plan.md` row stays 🟡 until someone runs
+> that model end-to-end on the AEN bench (`docs/ci/HW-IN-LOOP.md`)
+> and attaches the result.
 
 ---
 

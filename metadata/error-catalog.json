@@ -56,6 +56,14 @@
       "kind": "runtime-diagnostic",
       "summary": "The selected board preset does not list the selected SoM preset's `family:` in `hosts_som_families:`."
     },
+    "ALP-B008": {
+      "cause": "- A typo in the chip name (e.g. `bme208` for `bme280`). - A chip driver that was renamed or retired since the `board.yaml` was written. - A part that genuinely has no Alp SDK driver yet -- see [`chips/README.md`](../../chips/README.md) for the shape a new driver takes, or file an issue. - The manifest exists but is `driver_status: planned` -- the part is on the roadmap, but no `chips/<id>/` driver or `ALP_SDK_CHIP_<NAME>` Kconfig symbol has shipped for it yet, so naming it in `chips:` would emit an undeclared symbol the same way a typo would.",
+      "code": "ALP-B008",
+      "doc": "docs/diagnostics/ALP-B008.md",
+      "fix": "Correct the `chips:` entry to a real manifest name under `metadata/chips/` (the filename stem, e.g. `metadata/chips/bme280.yaml` -> `bme280`), or to one of the SDK block helpers (`button_led`, `pdm_mic`) if that's what was meant. If the manifest exists but is `driver_status: planned`, there is no alternate manifest to switch to -- the chip isn't buildable yet. Drop it from `chips:` until a driver ships, or track the part on its tracking issue.",
+      "kind": "runtime-diagnostic",
+      "summary": "unknown chip in `chips:`"
+    },
     "ALP-B010": {
       "cause": "- The core declares a peripheral kind the SoC JSON's `peripherals:` block either omits or lists with a zero count. - The SoC's peripheral-count ingestion from the vendor reference manual is still incomplete for that part (a known gap on some SoCs). - The peripheral is genuinely board-side (e.g. eMMC / flash / Ethernet reached through an I/O controller) rather than a SoC-internal block, so it was never going to show up in the SoC's own capability table.",
       "code": "ALP-B010",

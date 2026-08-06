@@ -72,8 +72,10 @@ on `E1M-V2N101` and vice versa, by design:
 
 - different physical pinouts (the board-side spec differs);
 - different power envelopes (mW-class M-only vs W-class A+M);
-- different SoC architecture (Cortex-M-only vs heterogeneous
-  Cortex-A55 + Cortex-M33);
+- different SoC architecture (E1M-X is uniformly heterogeneous
+  Cortex-A55 + Cortex-M33 on every SKU; E1M's core mix is
+  SKU-dependent, from Cortex-M-only to heterogeneous
+  Cortex-A32/A55 + Cortex-M);
 - different NPU choices (Ethos-U / DRP-AI / DEEPX);
 - and most visibly to your source code, **different header
   namespaces** — `<alp/e1m_pinout.h>` exports `ALP_E1M_PWM0` etc., while
@@ -328,7 +330,7 @@ pinout namespaces, one per form factor.
 | Concern | E1M family | E1M-X family |
 | --- | --- | --- |
 | Mechanical | 35 × 35 mm | 45 × 65 mm |
-| SoC class | Cortex-M only (Alif Ensemble, NXP i.MX 93 RT core) | Heterogeneous Cortex-A55 + Cortex-M33 (Renesas RZ/V2N) |
+| SoC class | Per-SKU: Cortex-M only (AEN301/401) to heterogeneous Cortex-A32 + Cortex-M55 (AEN501..AEN801) or Cortex-A55 + Cortex-M33 (NX9101) | Uniform heterogeneous Cortex-A55 + Cortex-M33 (Renesas RZ/V2N) |
 | Power envelope | mW-class | W-class |
 | NPU options | Ethos-U55 / U65 / U85 | DRP-AI3 (V2N), DRP-AI3 + DEEPX DX-M1 (V2M) |
 | Board | `E1M-EVK` or compatible | `E1M-X-EVK` or compatible |

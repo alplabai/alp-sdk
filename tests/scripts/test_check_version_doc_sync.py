@@ -1,7 +1,8 @@
 """Unit tests for scripts/check_version_doc_sync.py.
 
-The gate checks only the machine-read version copies (version.h, pyproject.toml,
-the alp_banner.c sample line).  README/docs prose is de-versioned and
+The gate checks the machine-read version copies (version.h, pyproject.toml,
+the alp_banner.c sample line) plus VERSIONS.md's roadmap-table row for the
+declared version (#1213/#1199).  README/docs status prose is de-versioned and
 scripts/alp_cli/__init__.py derives its __version__ from sdk_version.yaml, so
 neither is synced here.
 """
@@ -47,6 +48,13 @@ def _scaffold(root: Path, version: str = "0.9.0", *, banner_version: str = None)
         f" *   Alp SDK {banner_version}  |  E1M-AEN801  |  (c) Alp Lab AB\n */\n",
         encoding="utf-8")
 
+    (root / "VERSIONS.md").write_text(
+        "# Alp SDK Versions\n\n"
+        "| Version | Status   | Target |\n"
+        "|---------|----------|--------|\n"
+        f"| v{version} | released | test row |\n",
+        encoding="utf-8")
+
 
 def test_all_in_sync_passes(tmp_path):
     _scaffold(tmp_path)
@@ -80,3 +88,28 @@ def test_stale_pyproject_fails(tmp_path):
     proc = _run("--root", str(tmp_path))
     assert proc.returncode == 1
     assert "pyproject.toml" in proc.stdout + proc.stderr
+
+
+def test_versions_md_missing_row_fails(tmp_path):
+    """#1213/#1199: a version bump with no matching VERSIONS.md roadmap
+    row used to stay green here -- the gate only checked version.h /
+    pyproject.toml / alp_banner.c."""
+    _scaffold(tmp_path)
+    (tmp_path / "VERSIONS.md").write_text(
+        "# Alp SDK Versions\n\n"
+        "| Version | Status   | Target |\n"
+        "|---------|----------|--------|\n"
+        "| v0.8.0  | released | old row, no v0.9.0 row |\n",
+        encoding="utf-8")
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 1
+    assert "VERSIONS.md" in proc.stdout + proc.stderr
+    assert "v0.9.0" in proc.stdout + proc.stderr
+
+
+def test_versions_md_missing_file_fails(tmp_path):
+    _scaffold(tmp_path)
+    (tmp_path / "VERSIONS.md").unlink()
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 1
+    assert "VERSIONS.md" in proc.stdout + proc.stderr

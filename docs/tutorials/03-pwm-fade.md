@@ -1,4 +1,7 @@
-<!-- Last verified: 2026-05-18 against slice-3b state. -->
+<!-- Last verified: 2026-08-05 against alp-sdk (examples/peripheral-io/pwm-led-fade/src/main.c
+     and BOARD_PWM_LED_GREEN's ALP_E1M_PWM3 / ALP_E1M_X_PWM7 resolution
+     re-checked against include/alp/boards/alp_e1m_evk_routes.h and
+     alp_e1m_x_evk_routes.h; content unchanged, still accurate). -->
 
 # 03 -- PWM fade
 

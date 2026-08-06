@@ -7,10 +7,13 @@ core, packages images and models, runs Renode, opens a serial console, and
 provides the inspection/debugging commands used by Alp IDE.
 
 The current implementation is Python and is independently versioned in
-[`alplabai/tan-cli`](https://github.com/alplabai/tan-cli). During the
-coordinated v0.5 port, alp-sdk `dev` tracks `tan-cli/dev`; the latest published
-release remains the frozen Rust v0.4.1 behaviour oracle. Install the Python
-development line into an isolated Python 3.12+ environment:
+[`alplabai/tan-cli`](https://github.com/alplabai/tan-cli). As of
+[v0.5.0](https://github.com/alplabai/tan-cli/releases/tag/v0.5.0) (current
+release: [v0.5.1](https://github.com/alplabai/tan-cli/releases/tag/v0.5.1)),
+the published release installs the real Python `tan` directly -- it no
+longer resolves the frozen Rust v0.4.1 release. alp-sdk `dev` tracks
+`tan-cli/dev` instead, to stay ahead of the last tagged release; install the
+Python development line into an isolated Python 3.12+ environment:
 
 ```bash
 git clone --branch dev https://github.com/alplabai/tan-cli
@@ -43,9 +46,13 @@ For manual asset selection, checksum/provenance verification, system-wide
 installation, and the measured Linux glibc floor, use tan-cli's own
 [installation reference](https://github.com/alplabai/tan-cli#install). Do not
 copy a raw-binary URL from the pre-v0.5 layout: the Python release is an archive
-containing `tan` plus its `_internal/` runtime. `alp-tan` is reserved as the
-distribution name but is not published on PyPI yet. `cargo install` installs
-the stale v0.4.1 program and is not a supported way to get current Tan.
+containing `tan` plus its `_internal/` runtime. Alp's `tan` is not distributed
+on PyPI, and the bare name `tan` there belongs to an unrelated project (the
+PyPI JSON API returns `200` for it: `tan` v23.7.0, "The compromising code
+formatter") -- `pip install tan` does not get you this tool. `alp-tan` is not
+registered there either (`404` for it, not a reservation placeholder).
+`cargo install` installs the stale v0.4.1 program and is not a supported way
+to get current Tan.
 
 ## Where planning and commands live
 
@@ -78,6 +85,57 @@ No `alp` console script is installed (`pyproject.toml` registers only
 ```bash
 PYTHONPATH=scripts python3 -m alp_cli --help
 ```
+
+### `tan` vs `python -m alp_cli` -- five verb names collide, contracts differ
+
+`scripts/alp_cli` (this repo's internal reference/parity package) and `tan`
+register several identically-named verbs that do **different jobs**. Do not
+read `python -m alp_cli <verb> --help` as documentation for `tan <verb>`, or
+vice versa -- five names collide with an incompatible contract
+(alp-sdk#1193):
+
+| Verb | `python -m alp_cli` contract (measured) | `tan` contract |
+|---|---|---|
+| `generate` | `generate TEMPLATE_ID DEST [--dry-run] [--force] [--param name=value]` -- materialises a **catalog template** into a directory (`scripts/alp_cli/generate.py:67-90`) | `tan generate --target <mode>` (also `--all`, `--core`, `--output`, `--force`) -- emits a **board-derived config artefact**; no positional `TEMPLATE_ID`/`DEST` (see [`#tan-generate`](#tan-generate) below) |
+| `init` | `init NAME [--som] [--preset] [--peripherals]` -- positional project name (`scripts/alp_cli/init.py:76-90`) | `tan init` -- **options only**, no positional `NAME` (see "`tan init`" below) |
+| `doctor` | `doctor [--json] [--strict] [--no-color]` (`scripts/alp_cli/doctor.py:789-793`) | `tan doctor` (also `--format json`, `--build`) -- `--json` is spelled `--format json`; `--strict` has no `tan` equivalent (see "`tan doctor`" below) |
+| `explain` | `explain CODE [--json] [--no-color]` -- looks up an `ALP_ERR_*`/`ALP-Bxxx` **diagnostic code** (`scripts/alp_cli/explain.py:68-74`) | `tan explain [--template] [--target]` -- describes a **project/module template or generation target**; also takes an optional positional `[TEMPLATE]` (`python/tan/commands/explain_cmd.py`), but never a diagnostic `CODE` lookup (see "`tan explain`" below) |
+| `run` | `run [--board] [--flash]` -- one direct `west build` + optional flash, single image (`scripts/alp_cli/run.py:76-79`) | `tan run` (also `--flash`, `--core`) -- a **distinct command**, not an alias for `tan build`/`tan flash`: builds the full multi-slice plan, then for a `native_sim` target executes the produced binary, or for a hardware target (with `--flash`) flashes it (`python/tan/commands/run_cmd.py`) |
+
+Four more `alp_cli` verbs (`model`, `monitor`, `new-som`, `faultdecode`)
+share a name with a `tan` verb too but were not found to diverge in shape on
+inspection -- they are not re-verified field-by-field here, so do not treat
+"same option list" as a proven-identical envelope either. `emit` is the one
+`alp_cli` verb with no `tan` namesake (`tan` reaches the same ground via
+`tan generate --target <mode>`). `alp_cli` registers 11 verbs today
+(`scripts/alp_cli/main.py:27-37`: `doctor`, `emit`, `explain`, `faultdecode`,
+`generate`, `init`, `model`, `monitor`, `new-som`, `run`, `validate`) --
+`build` is not one of them; ADR 0020 retired the SDK-side fan-out executor
+and no `build.py` remains in `scripts/alp_cli/` to collide with `tan build`.
+
+None of the five is planned to become a console-script front door under its
+current contract -- `scripts/alp_cli/__main__.py`'s own docstring names this
+issue and refuses the `alp` binary framing. That is the only part of
+alp-sdk#1193 this table closes. The rest of #1193's required work is still
+open: a per-verb port/rename/delete disposition for every `alp_cli` verb (not
+just these five), removing the `alp`-prefixed front-door language that
+`__main__.py` disclaims but the other modules still carry (e.g.
+`main.py`'s `prog_name="alp"`, `init.py`'s scaffolded "Generated by `alp
+init`." README text, and the `alp <verb>:` message prefixes across
+`doctor.py`/`emit.py`/`generate.py`/`init.py`/`monitor.py`/`new_som.py`/
+`run.py`), and parity tests. This table exists so no one assumes name parity
+as documentation in the meantime; the disposition and cleanup remain a
+separate, not-yet-started piece of work.
+
+A sixth verb, `validate`, also diverges on inspection though it is not one
+of the five alp-sdk#1193 names: `python -m alp_cli validate` takes an
+**optional** positional `PATH` (default `board.yaml`, so a bare invocation
+works) and `--format human|json|sarif` (`scripts/alp_cli/validate.py:16-20`),
+while `tan validate` is options-only (`--board-yaml`, `--offline`) with
+`--format text|json|diagnostic-v1|sarif` (see "`tan validate`" below) --
+different vocabulary, different flag names, and `alp_cli` accepts the
+positional form `tan` does not. Flagged here for the same disposition work;
+not added to alp-sdk#1193's own five-name scope.
 
 ## `tan` vs `west alp-*` -- which one do I use?
 

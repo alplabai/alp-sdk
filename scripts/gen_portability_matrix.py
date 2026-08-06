@@ -108,7 +108,11 @@ LIB_END_MARK = "<!-- END GENERATED: gen_portability_matrix_libraries -->"
 # product lines per docs/adr/0011-intra-family-portability.md.
 FAMILIES: list[dict] = [
     {
-        "title": "E1M family (Cortex-M-class)",
+        # Not "(Cortex-M-class)": the family's core mix is per-SKU, not
+        # uniform -- AEN301/AEN401 are Cortex-M-only, AEN501..AEN801 add
+        # a Cortex-A32 cluster, and NX9101 is Cortex-A55 + Cortex-M33
+        # (see docs/adr/0011-intra-family-portability.md).
+        "title": "E1M family",
         "sku_prefixes": ("E1M-AEN", "E1M-NX9"),
         "examples": (
             ("i2c-scanner", "examples/peripheral-io/i2c-scanner"),
