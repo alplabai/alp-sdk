@@ -35,7 +35,7 @@ struct definition lives in `<alp/hw_info.h>`:
 
 ```c
 typedef struct {
-    uint32_t magic;             /* "ALPH" -- 0x41 0x4C 0x50 0x48 */
+    uint32_t magic;             /* "ALPH" -- 0x414C5048, little-endian */
     uint32_t schema_version;    /* currently 1 */
     char     family[16];        /* e.g. "v2n", "v2n-m1", "aen" */
     char     sku[24];           /* e.g. "E1M-V2N101"            */
@@ -95,7 +95,8 @@ mismatch on read-back) are quarantined for rework.
                                                     │ I2C read
                                                     ▼
 alp_hw_info_read(out)
-   ├── eeprom_24c128_init(...) on ALP_E1M_I2C0 (V2N) / Alif LPI2C (AEN)
+   ├── eeprom_24c128_init(...) on ALP_E1M_I2C0 (V2N) / SoC I2C2,
+   │     DesignWare i2c_dw (AEN -- bridge/DNP-selected, NOT LPI2C0)
    ├── eeprom_24c128_read(0, &manifest, 128)
    ├── verify manifest.magic == "ALPH"
    ├── verify manifest.schema_version == 1
