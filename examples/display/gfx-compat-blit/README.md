@@ -52,8 +52,9 @@ signal for a console-only example. It moves if you change any of
 
 `gfx_compat`'s pure-C `CONFIG_ALP_GFX_COMPAT_SW` path (what this
 example exercises) is the only backend implemented today. Alif GPU2D,
-generic DMA2D, and SPI-DMA-push backends are metadata-tracked in
-`metadata/library-profiles/gfx_compat/hw-backends.yaml` as
+generic DMA2D, and SPI-DMA-push backends are metadata-tracked in the
+`integration.zephyr.hw_backends:` block of
+`metadata/libraries/gfx-compat.yaml` as
 `status: planned` -- see `src/lib/gfx_compat/Kconfig` for the reserved
 `CONFIG_ALP_GFX_COMPAT_GPU2D` / `_DMA2D` / `_SPI_DMA` knobs. This
 example's `board.yaml` doesn't need to change when those land: the

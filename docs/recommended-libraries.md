@@ -196,8 +196,10 @@ table is the source of truth that
 each SoM preset's `capabilities:` matrix to emit the right
 accelerator-binding `CONFIG_*` lines into the slice's `alp.conf`.
 
-The shape mirrors `metadata/library-profiles/mbedtls/hw-backends.yaml`:
-a list of `accelerators:` (one block per accelerator class --
+The shape mirrors the `integration.zephyr.hw_backends:` block in
+`metadata/libraries/mbedtls.yaml` (see the v0.6 coverage note below
+for where this data concretely lives today): a list of
+`accelerators:` (one block per accelerator class --
 `crypto`, `gpu_2d`, `dma`, `simd`, `cordic`, `fft`, `ml_npu_primary`,
 ...) where each entry pairs a `requires_cap:` (capability flag
 declared in the SoM preset) with the Kconfig that lights up that
@@ -242,13 +244,13 @@ to bind.  The other 18 libraries each carry at least one
 `requires_cap:`-gated backend entry.
 
 Regression-tested by
-[`tests/scripts/test_library_profiles.py`](../tests/scripts/test_library_profiles.py):
-the test fails if a library is added to the schema enum without a
-matching `hw-backends.yaml`, if a profile's `library:` slug drifts
-from the directory name, or if any emitted `kconfig:` line is not a
-real-looking `CONFIG_<NAME>=<value>` token.  The test does NOT
-validate that each emitted symbol exists in the pinned Zephyr's
-Kconfig tree -- that's a build-time concern.
+[`tests/scripts/test_project_backends.py`](../tests/scripts/test_project_backends.py)'s
+`TestHwBackendsLoader`: locks in the per-SKU `CONFIG_ALP_*=y` wiring
+`scripts/alp_project.py` emits from each library's
+`integration.zephyr.hw_backends:` block against the SoM preset's
+`capabilities:` matrix, so a metadata change can't silently drop a
+binding.  The test does NOT validate that each emitted symbol exists
+in the pinned Zephyr's Kconfig tree -- that's a build-time concern.
 
 ## Tier 2 — deferred to v0.5+
 

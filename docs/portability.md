@@ -439,7 +439,7 @@ Two introspection helpers ship today to help validate the chain:
   actually engaged.
 
 Both are exported as `extern "C"` from
-`src/zephyr/inference_tflm.cpp` for Zephyr builds; both return
+`src/backends/inference/tflm.cpp` for Zephyr builds; both return
 static string-literal pointers, callers must not free.
 
 ### 4.2  Form-factor differences (the namespace error)

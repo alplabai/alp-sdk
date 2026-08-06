@@ -45,7 +45,7 @@ RPi CSI │  (e.g. ARX3A0    │ →  │  (vsi,       │ →  │  inference  
 | v0.1    | skeleton | Compiles under `native_sim/native/64` and on the EVK (`alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp`, in-tree).  Init flow is real (I²C, OLED, IMU init); camera + Ethos-U inference are stubbed. |
 | v0.2    | target   | Real ARX3A0 (ON Semi MIPI sensor) capture via `<alp/camera.h>`, Vela-compiled MobileNetV2 inference on Ethos-U55-HP, results overlay on OLED. **Acceptance ≥ 10 fps.** |
 
-The full pipeline is the v0.2 [EdgeAI Application Example](../../../VERSIONS.md#v020--richer-blocks--v2n-intro--6-weeks-after-v01)
+The full pipeline is the v0.2 [EdgeAI Application Example](../../../VERSIONS.md#v020--richer-blocks--v2n-intro-6-weeks-after-v01)
 deliverable from the original quarterly roadmap.
 
 ## Layout
@@ -75,8 +75,8 @@ edgeai-vision-aen/
 
 ```bash
 ZEPHYR_BASE=~/zephyrproject/zephyr \
-EXTRA_ZEPHYR_MODULES=$(pwd)/../.. \
-west build -b native_sim/native/64 .
+west build -b native_sim/native/64 examples/aen/edgeai-vision-aen \
+    -- -DEXTRA_ZEPHYR_MODULES=$(pwd)
 ```
 
 The app prints which v0.1 SDK pieces it successfully initialised

@@ -340,7 +340,7 @@ line per variant present.  AEN401/601/801 now emit BOTH `_U55=y` and
 `_U55=y`; NX9101 emits `_U65=y`; the existing N93 PHY switch coexists.
 Matching Kconfig entries live at `zephyr/kconfigs/iot-audio-inference.kconfig`
 § *Per-variant Ethos-U silicon switches*; the TFLM driver source
-(`src/zephyr/inference_tflm.cpp`) reads the per-variant macros via
+(`src/backends/inference/tflm.cpp`) reads the per-variant macros via
 `alp_inference_tflm_npu_variant_name()` and logs the active variant
 once per boot.
 

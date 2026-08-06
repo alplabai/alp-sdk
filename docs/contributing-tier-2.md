@@ -177,7 +177,9 @@ Promotion lands as an alp-sdk PR that:
 
 - Copies the contribution from `alp-sdk-community/chips/<name>/`
   to `alp-sdk/chips/<name>/`.
-- Adds the chip to `metadata/chip-registry.yaml`.
+- Adds the chip's manifest at `metadata/chips/<name>.yaml`
+  (`scripts/check_chip_manifest_parity.py` gates the driver <->
+  manifest correspondence -- there is no separate registry file).
 - Adds a CHANGELOG entry.
 - The original alp-sdk-community entry stays but its
   `registry.yaml` row gains `promoted_to: alp-sdk` to redirect

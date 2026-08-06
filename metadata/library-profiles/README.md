@@ -45,7 +45,7 @@ app code
 internally pulls #include "etl_profile.h"
    |
    v
-metadata/library-profiles/etl/alp-embedded.h    <-- our profile
+metadata/library-profiles/etl/etl_profile.h     <-- our profile
                                                     sets ETL_NO_STL,
                                                     pool sizes, etc.
 ```

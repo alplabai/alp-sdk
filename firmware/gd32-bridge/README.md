@@ -3,12 +3,12 @@
 Firmware that runs on the **GigaDevice GD32G553MEY7TR** supervisor
 MCU on the E1M-X V2N / V2N-M1 SoMs.  Serves the Renesas RZ/V2N host
 over the **hybrid SPI + I2C bridge** documented in
-[`../docs/gd32-bridge-protocol.md`](../docs/gd32-bridge-protocol.md).
+[`../../docs/gd32-bridge-protocol.md`](../../docs/gd32-bridge-protocol.md).
 
 This tree is a **separate compile artifact** with its own toolchain
 (ARM-GCC for Cortex-M33) and its own flash binary.  It is **not**
 linked into the Zephyr-side `alp-sdk` library; the matching
-host-side driver lives at [`chips/gd32g553/`](../chips/gd32g553/).
+host-side driver lives at [`chips/gd32g553/`](../../chips/gd32g553/).
 
 ## Tree layout
 
@@ -62,7 +62,7 @@ needs the factory A/B metadata record —
 [`tools/gen_ota_metadata.py`](tools/gen_ota_metadata.py) generates it
 (flash to `0x08008000`); without it the bootloader idles in its
 recovery loop.  The full Path-A wire contract is
-[`../docs/gd32-bridge-protocol.md`](../docs/gd32-bridge-protocol.md) §10.
+[`../../docs/gd32-bridge-protocol.md`](../../docs/gd32-bridge-protocol.md) §10.
 
 Development flashing uses an external SWD probe on `GD32_SWDIO` /
 `GD32_SWCLK` (J-Link, ST-Link, OpenOCD).
@@ -85,7 +85,7 @@ Development flashing uses an external SWD probe on `GD32_SWDIO` /
 The firmware ships with a build-time `PROTOCOL_VERSION_MAJOR`
 constant in [`src/protocol.h`](src/protocol.h).  Bumping the major
 breaks every host that has not been rebuilt against the matching
-[`<alp/chips/gd32g553.h>`](../include/alp/chips/gd32g553.h) -- treat
+[`<alp/chips/gd32g553.h>`](../../include/alp/chips/gd32g553.h) -- treat
 it as a wire-incompatible change and stage carefully.
 
 ## GPIO + PWM channel maps
@@ -94,13 +94,13 @@ The wire-side **logical** ids that the protocol uses do **not**
 match GD32 silicon pad indices.  The mapping lives in
 [`src/protocol.c`](src/protocol.c) in the `pwm_channel_map[]` /
 `gpio_pad_map[]` tables, sourced from
-[`../metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv`](../metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv).
+[`../../metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv`](../../metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv).
 Host code reaches a channel by its logical id; the firmware
 translates internally.
 
 ## Cross-link
 
-* Protocol wire spec: [`../docs/gd32-bridge-protocol.md`](../docs/gd32-bridge-protocol.md).
-* Host-side driver public API: [`../include/alp/chips/gd32g553.h`](../include/alp/chips/gd32g553.h).
-* Host-side driver implementation: [`../chips/gd32g553/gd32g553.c`](../chips/gd32g553/gd32g553.c).
-* GD32 pad map: [`../metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv`](../metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv).
+* Protocol wire spec: [`../../docs/gd32-bridge-protocol.md`](../../docs/gd32-bridge-protocol.md).
+* Host-side driver public API: [`../../include/alp/chips/gd32g553.h`](../../include/alp/chips/gd32g553.h).
+* Host-side driver implementation: [`../../chips/gd32g553/gd32g553.c`](../../chips/gd32g553/gd32g553.c).
+* GD32 pad map: [`../../metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv`](../../metadata/e1m_modules/v2n/gd32-io-mcu-map.tsv).

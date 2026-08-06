@@ -16,8 +16,8 @@ reality" below.
 
 `board.yaml` declares `libraries: [coremqtt_sn]`, which is enough for
 `scripts/alp_project.py` to emit `CONFIG_ALP_MQTTSN_NO_TLS=y` (the
-SW-fallback default from
-`metadata/library-profiles/coremqtt_sn/hw-backends.yaml`). It is
+SW-fallback default from the `integration.zephyr.hw_backends:` block
+in `metadata/libraries/coremqtt-sn.yaml`). It is
 **not** enough to get the real library's headers onto the include
 path, for two compounding reasons:
 
@@ -46,8 +46,10 @@ To swap in the real library once `west update --group-filter
 `MQTTSNPublishInfo_t` from the same `topic_id`/`msg_id`/`qos`/
 `retain`/`payload` locals used here (coreMQTT-SN mirrors its sibling
 coreMQTT library's `core_<lib>_serializer.h` / `<Lib>Status_t`
-naming convention -- see
-[github.com/FreeRTOS/coreMQTT-SN](https://github.com/FreeRTOS/coreMQTT-SN)).
+naming convention -- `github.com/FreeRTOS/coreMQTT-SN` has since been
+removed from GitHub entirely, so the naming convention above is
+carried over from before the repo went away and can no longer be
+cross-checked upstream).
 Confirm the exact struct field names and function signatures against
 the fetched `modules/lib/coremqtt_sn/source/include/*.h` headers --
 they are **not** verified against a local checkout in this repo, only
@@ -96,7 +98,11 @@ encode/decode calls above stay the same regardless of SoM family.
 ## Reference
 
 - [`docs/firmware-quickstart.md`](../../../docs/firmware-quickstart.md)
-- [OASIS MQTT-SN v1.2 specification](https://www.oasis-open.org/committees/documents.php?wg_abbrev=mqtt) --
-  section 5.4.12 documents the PUBLISH message this example encodes.
-- [github.com/FreeRTOS/coreMQTT-SN](https://github.com/FreeRTOS/coreMQTT-SN) --
-  the pinned upstream library (`west.yml`, `extras-tier1` group).
+- [MQTT-SN v1.2 specification](https://github.com/njh/mqtt-sn-tools/blob/main/doc/MQTT-SN_spec_v1.2.pdf) --
+  section 5.4.12 documents the PUBLISH message this example encodes
+  (mirrored here; the original oasis-open.org committee-documents
+  page that used to host it no longer resolves to the spec).
+- `github.com/FreeRTOS/coreMQTT-SN` -- the pinned upstream library
+  (`west.yml`, `extras-tier1` group) has been removed from GitHub
+  entirely; `west update --group-filter +extras-tier1` cannot fetch
+  it any more (see "Integration reality" above).

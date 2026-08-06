@@ -1034,7 +1034,7 @@ The per-opcode wire vectors (SPI `PING` round-trip, I2C `PING`
 round-trip, `GET_VERSION` reply for the firmware's declared
 version) are generated at firmware build time and stored in
 `firmware/gd32-bridge/tests/protocol_vectors.txt`.  Both the host-side
-driver tests under `tests/zephyr/chips/gd32g553/` and the
+driver tests under `tests/zephyr/chips/` (`src/test_gd32_bridge.c`) and the
 firmware-side unit tests under `firmware/gd32-bridge/tests/` consume
 that file so the two implementations cannot diverge.
 

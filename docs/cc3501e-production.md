@@ -92,7 +92,7 @@ runs the same cold chain via BL2, cannot complete).
 ## OTA
 
 OTA-over-the-bridge (host streams a signed vendor image → `psa_fwu` → MCUboot swap) is
-implemented and **silicon-validated end-to-end** (`chips/cc3501e/cc3501e.c`,
+implemented and **silicon-validated end-to-end** (`chips/cc3501e/cc3501e_ota.c`,
 `firmware/cc3501e/hal/ti/cc3501e_hw_ti.c`). Each OTA payload is itself a signed vendor
 image (same FIB+sign recipe) whose version must **exceed** the running primary — monotonic
 anti-rollback: a downgrade is refused at `psa_fwu` install (`OTA_STATUS state=3` ERROR), a

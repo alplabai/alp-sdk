@@ -27,7 +27,7 @@ RPi CSI │  (e.g. OV5640    │ →  │  classifier  │ →  │  payload    
 | v0.2    | partial  | Camera capture (Zephyr `video_*`), local SSD1306 overlay.  No connectivity yet.                     |
 | v0.3    | target   | Wi-Fi-station provisioning, MQTT-over-TLS publish/subscribe, LVGL widget pack.  **Acceptance: app runs 60 s on a real V2N EVK + broker, publishes ≥ 1 inference/s, no leaks.** |
 
-The full pipeline is the v0.3 [IoT Application Example](../../../VERSIONS.md#v030--iot--display-polish--6-weeks-after-v02)
+The full pipeline is the v0.3 [IoT Application Example](../../../VERSIONS.md#v030--iot--display-polish-6-weeks-after-v02)
 deliverable from the original quarterly roadmap.
 
 ## Layout
@@ -53,8 +53,8 @@ iot-connected-camera/
 
 ```bash
 ZEPHYR_BASE=~/zephyrproject/zephyr \
-EXTRA_ZEPHYR_MODULES=$(pwd)/../.. \
-west build -b native_sim/native/64 .
+west build -b native_sim/native/64 examples/connectivity/iot-connected-camera \
+    -- -DEXTRA_ZEPHYR_MODULES=$(pwd)
 ```
 
 The app prints which v0.1 SDK pieces it successfully initialised and
