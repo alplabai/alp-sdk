@@ -86,7 +86,7 @@ No `alp` console script is installed (`pyproject.toml` registers only
 PYTHONPATH=scripts python3 -m alp_cli --help
 ```
 
-### `python -m alp_cli` is not `tan` -- five verb names collide, contracts differ
+### `tan` vs `python -m alp_cli` -- five verb names collide, contracts differ
 
 `scripts/alp_cli` (this repo's internal reference/parity package) and `tan`
 register several identically-named verbs that do **different jobs**. Do not
@@ -96,11 +96,11 @@ vice versa -- five names collide with an incompatible contract
 
 | Verb | `python -m alp_cli` contract (measured) | `tan` contract |
 |---|---|---|
-| `generate` | `generate TEMPLATE_ID DEST [--dry-run] [--force] [--param name=value]` -- materialises a **catalog template** into a directory (`scripts/alp_cli/generate.py:67-90`) | `tan generate --target <mode> [--all] [--core] [--output] [--force]` -- emits a **board-derived config artefact**; no positional `TEMPLATE_ID`/`DEST` (see [`#tan-generate`](#tan-generate) below) |
+| `generate` | `generate TEMPLATE_ID DEST [--dry-run] [--force] [--param name=value]` -- materialises a **catalog template** into a directory (`scripts/alp_cli/generate.py:67-90`) | `tan generate --target <mode>` (also `--all`, `--core`, `--output`, `--force`) -- emits a **board-derived config artefact**; no positional `TEMPLATE_ID`/`DEST` (see [`#tan-generate`](#tan-generate) below) |
 | `init` | `init NAME [--som] [--preset] [--peripherals]` -- positional project name (`scripts/alp_cli/init.py:76-90`) | `tan init` -- **options only**, no positional `NAME` (see "`tan init`" below) |
-| `doctor` | `doctor [--json] [--strict] [--no-color]` (`scripts/alp_cli/doctor.py:789-793`) | `tan doctor [--format json] [--build]` -- `--json` is spelled `--format json`; `--strict` has no `tan` equivalent (see "`tan doctor`" below) |
+| `doctor` | `doctor [--json] [--strict] [--no-color]` (`scripts/alp_cli/doctor.py:789-793`) | `tan doctor` (also `--format json`, `--build`) -- `--json` is spelled `--format json`; `--strict` has no `tan` equivalent (see "`tan doctor`" below) |
 | `explain` | `explain CODE [--json] [--no-color]` -- looks up an `ALP_ERR_*`/`ALP-Bxxx` **diagnostic code** (`scripts/alp_cli/explain.py:68-74`) | `tan explain [--template] [--target]` -- describes a **project/module template or generation target**; also takes an optional positional `[TEMPLATE]` (`python/tan/commands/explain_cmd.py`), but never a diagnostic `CODE` lookup (see "`tan explain`" below) |
-| `run` | `run [--board] [--flash]` -- one direct `west build` + optional flash, single image (`scripts/alp_cli/run.py:76-79`) | `tan run [--flash] [--core]` -- a **distinct command**, not an alias for `tan build`/`tan flash`: builds the full multi-slice plan, then for a `native_sim` target executes the produced binary, or for a hardware target (with `--flash`) flashes it (`python/tan/commands/run_cmd.py`) |
+| `run` | `run [--board] [--flash]` -- one direct `west build` + optional flash, single image (`scripts/alp_cli/run.py:76-79`) | `tan run` (also `--flash`, `--core`) -- a **distinct command**, not an alias for `tan build`/`tan flash`: builds the full multi-slice plan, then for a `native_sim` target executes the produced binary, or for a hardware target (with `--flash`) flashes it (`python/tan/commands/run_cmd.py`) |
 
 Four more `alp_cli` verbs (`model`, `monitor`, `new-som`, `faultdecode`)
 share a name with a `tan` verb too but were not found to diverge in shape on
