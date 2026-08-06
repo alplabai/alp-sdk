@@ -7,6 +7,17 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Added — a redistributed zcbor Yocto recipe: `<alp/model.h>` becomes real on Linux for the first time (#1254)
+
+**First non-Zephyr `.alpmodel` reader.** `meta-alp-sdk/recipes-devtools/zcbor/zcbor_0.9.1.bb`
+packages zcbor (Apache-2.0, canonical `NordicSemiconductor/zcbor` remote,
+tag `0.9.1`) as a Yocto shared library, so `src/common/alp_model.c`'s real
+CBOR-manifest parser now compiles on the A55/Linux side of every
+V2N/V2M/NX91 SoM instead of the `ALP_ERR_NOSUPPORT` stub. `src/yocto/
+CMakeLists.txt` degrades cleanly (warn + stub) on a sysroot with no zcbor
+and fails configure only when meta-alp-sdk's own recipe — which DEPENDS on
+it unconditionally — is the one asking.
+
 ### Added — ADR 0024: V2N/V2M analog and counter classes stay on the GD32 bridge (#1150)
 
 Design decision only, no code:

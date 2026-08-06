@@ -4,6 +4,12 @@
  */
 #include "alp/model.h"
 #include <string.h>
+#ifdef ALP_SDK_ZCBOR_YOCTO_ABI_PIN
+/* Yocto only (defined by src/yocto/CMakeLists.txt) -- #error-guards the
+ * ZCBOR_* struct-layout macro set against the one libzcbor.so was built
+ * with.  See that header for the full reasoning. */
+#include <zcbor_abi_pin.h>
+#endif
 #include <zcbor_decode.h>
 
 #define HDR_SIZE 24u
