@@ -106,7 +106,14 @@ typedef enum {
 	ALP_INFERENCE_MODEL_VELA       = 1, /**< Vela-compiled `.tflite`. */
 	ALP_INFERENCE_MODEL_DRPAI      = 2, /**< Renesas DRP-AI binary. */
 	ALP_INFERENCE_MODEL_DXNN       = 3, /**< DEEPX DXNN binary. */
-	ALP_INFERENCE_MODEL_EXECUTORCH = 4, /**< ExecuTorch program. */
+	ALP_INFERENCE_MODEL_EXECUTORCH = 4, /**< ExecuTorch program.  RESERVED --
+					     *   no adapter produces this format
+					     *   and no backend consumes it, so a
+					     *   blob claiming it is rejected with
+					     *   @ref ALP_ERR_INVAL -- the value
+					     *   is kept rather than removed to
+					     *   avoid renumbering; see issue
+					     *   #1260. */
 	ALP_INFERENCE_MODEL_ONNX       = 5  /**< Raw `.onnx` graph (ONNX Runtime CPU backend). */
 } alp_inference_model_format_t;
 

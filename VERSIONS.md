@@ -452,7 +452,14 @@ target verification still parked behind the `hil-yocto` runner.
 - **IoT:** Wi-Fi station on Yocto (NetworkManager / wpa_supplicant
   glue); HTTP/HTTPS client; time-series buffering helpers.
 - **Camera:** `alp_camera_v4l2` wrapper, GStreamer pipeline helpers.
-- **Signal:** ARM Compute Library bindings.
+- **Signal:** ARM Compute Library as an ONNX Runtime **execution provider**,
+  not standalone bindings.  Rescoped once the A55 CPU floor became ORT: an EP
+  slots under the existing `alp_inference_*` dispatch with no new public API,
+  where standalone bindings would mean a second inference entry point to
+  build, document and keep portable alongside the one we already ship.
+  Sequence it with the KleidiAI EP (#1258) so both Arm CPU paths are measured
+  in one bench pass rather than landing two unmeasured perf claims.  See
+  #1261.
 - **Secure boot:** HIL verification of the secure-boot chain on the
   in-tree `alp_e1m_aen801_m55_he` board file (signed boot, tamper
   rollback, mid-swap power loss) + production OPTIGA Trust M
