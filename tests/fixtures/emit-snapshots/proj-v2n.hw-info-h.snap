@@ -30,7 +30,15 @@
  * --core -- as the project-wide recipe in docs/board-config-emit.md does -- it
  * names the project's primary core (first M-class core alphabetically),
  * which on a multi-core project is not necessarily the one you are
- * building. */
+ * building.
+ *
+ * Zephyr's own CONFIG_BOARD and CONFIG_BOARD_TARGET differ per slice too --
+ * the board name and the board/soc/cpucluster target passed to `west build
+ * -b` -- and do so no matter how this header was emitted.  E.g. on E1M-AEN801,
+ * the HE slice's CONFIG_BOARD is "alp_e1m_aen801_m55_he" and its
+ * CONFIG_BOARD_TARGET ends ".../rtss_he"; the HP slice's end "_hp" and
+ * ".../rtss_hp".  Prefer them over PRIMARY_CORE where that portability
+ * matters. */
 #define ALP_HW_BUILD_HAS_A55_CLUSTER  "yocto"
 #define ALP_HW_BUILD_HAS_M33_SM       "zephyr"
 

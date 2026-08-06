@@ -142,8 +142,12 @@ def _emit_hw_info_h(
     if os_choice:
         lines.append(f'#define ALP_HW_BUILD_OS              "{os_choice}"')
     if v2_cores is not None:
-        # Per-core topology surface for `#ifdef ALP_HW_BUILD_HAS_<id>`
-        # conditional compilation.  Primary-core selection rule:
+        # `active` and the loop below range over every non-off core in the
+        # PROJECT, not the compiling slice, so this block's output --
+        # `CORES` and the `HAS_<id>` macros -- is identical in every
+        # slice's copy of the header.  `PRIMARY_CORE` is the one
+        # exception: it tracks --core when the caller passes one.
+        # Primary-core selection rule (used when --core is not given):
         #   1. First M-class core (alphabetical by id), if any non-off.
         #   2. Else first A-class core (alphabetical by id), if any non-off.
         #   3. Else first non-off core (alphabetical by id).
@@ -175,7 +179,21 @@ def _emit_hw_info_h(
                          "alphabetically),")
             lines.append(" * which on a multi-core project is not necessarily the one "
                          "you are")
-            lines.append(" * building. */")
+            lines.append(" * building.")
+            lines.append(" *")
+            lines.append(" * Zephyr's own CONFIG_BOARD and CONFIG_BOARD_TARGET differ "
+                         "per slice too --")
+            lines.append(" * the board name and the board/soc/cpucluster target "
+                         "passed to `west build")
+            lines.append(" * -b` -- and do so no matter how this header was emitted.  "
+                         "E.g. on E1M-AEN801,")
+            lines.append(" * the HE slice's CONFIG_BOARD is "
+                         "\"alp_e1m_aen801_m55_he\" and its")
+            lines.append(" * CONFIG_BOARD_TARGET ends \".../rtss_he\"; the HP "
+                         "slice's end \"_hp\" and")
+            lines.append(" * \".../rtss_hp\".  Prefer them over PRIMARY_CORE where "
+                         "that portability")
+            lines.append(" * matters. */")
             for cid in active:
                 lines.append(
                     f'#define ALP_HW_BUILD_HAS_{cid.upper():<12} "{v2_cores[cid]}"'
