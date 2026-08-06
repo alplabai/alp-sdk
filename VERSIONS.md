@@ -355,7 +355,8 @@ v0.3 cycle.  Each is gated so a workspace that doesn't need the
 v0.4 deliverable falls back cleanly to the v0.3 stubs.  Each also
 has a corresponding row in [`docs/test-plan.md`](docs/test-plan.md);
 most rows are 🟡 partial -- failure paths covered by CI ctest, real
-target verification still parked behind the `hil-yocto` runner.
+target verification still gated on an explicit Yocto bench run
+(there is no automated HIL runner -- see `docs/ci/HW-IN-LOOP.md`).
 
 **Peripherals + IoT (Yocto):**
 

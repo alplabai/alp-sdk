@@ -46,7 +46,7 @@ verified in the Alp SDK as of today".  It complements:
 | SE-backed portable surfaces (SoC identity / power profiles / peer-core boot, v0.9) | `[UNTESTED]` | Alif SE backends registered for `alif:ensemble:e8`; native_sim proves only the NOSUPPORT degrade paths — SE round-trips are bench-gated (see the v0.9 rows in [`docs/test-plan.md`](test-plan.md)) |
 | CI: pr-twister + pr-static-analysis + pr-doxygen | ✅ green on `main` | Build correctness, style, doc completeness |
 | CI: pr-twister with `--platform alif_*` | ✅ build-only | Cross-compiles to AEN target; doesn't flash silicon |
-| HiL runners | ❌ not online | `nightly-aen-hil.yml` is a skeleton waiting for a self-hosted runner |
+| HiL runners | n/a — none exist | No automated HIL runner, self-hosted or otherwise, will run here (license-gated tooling + a serial reservation-gated bench make it unworkable, not just unbuilt); verification is an explicit bench run — see [`docs/ci/HW-IN-LOOP.md`](ci/HW-IN-LOOP.md) |
 
 ## What this means for customers
 
