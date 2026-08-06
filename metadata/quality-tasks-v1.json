@@ -115,6 +115,20 @@
       "ci": null
     },
     {
+      "id": "core-cmakelists-mapping",
+      "description": "Every enabled Zephyr core's board.yaml app: must resolve to a CMakeLists.txt baked with that SAME core's --core literal, and no two distinct cores may resolve to the same CMakeLists.txt (issue #1275: a dual-core SKU can silently share one core's Kconfig fragment with another).",
+      "runner": "check-script",
+      "script": "scripts/check_core_cmakelists_mapping.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "cross-platform",
       "description": "Lint repo content for Linux-only idioms in customer-facing surfaces.",
       "runner": "check-script",
