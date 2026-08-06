@@ -40,5 +40,5 @@ unofficial build.
 
 Open an issue in this repository, or contact Alp Lab AB at
 [contact@alplab.ai](mailto:contact@alplab.ai) (the same address
-[`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) uses) or via
+`CODE_OF_CONDUCT.md` uses) or via
 [alplab.ai](https://alplab.ai), the project's official page.
