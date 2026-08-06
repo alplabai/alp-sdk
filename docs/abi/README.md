@@ -10,8 +10,8 @@ changes between releases without diffing every header by hand.
 ## Exactly one snapshot is CURRENT; every other one is FROZEN
 
 At any time exactly one file in this directory -- the one named for
-the release `metadata/sdk_version.yaml` currently declares (`0.11.0`
--> `v0.11-snapshot.json`) -- is the *working* snapshot: it tracks
+the release `metadata/sdk_version.yaml` currently declares (`0.15.0`
+-> `v0.15-snapshot.json`) -- is the *working* snapshot: it tracks
 `HEAD` and gets regenerated (`generated` date bumps, symbols change)
 as the SDK's public headers evolve between releases.
 

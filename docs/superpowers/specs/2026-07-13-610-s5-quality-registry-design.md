@@ -1,6 +1,9 @@
 # #610 §5 slice 1 — quality-task registry + drift gate
 
-**Status:** design 2026-07-13
+**Status:** **Implemented.** `metadata/quality-tasks-v1.json` + `scripts/check_quality_registry.py`
+(the drift gate) exist; `scripts/test-all.sh` reads gate scripts from
+`scripts/quality_tasks.py --gate-scripts` (single source of truth) rather than
+a hardcoded list.
 **Scope:** the *single source of truth for the SDK's quality gates* —
 `metadata/quality-tasks-v1.json` + schema, a pure loader, a drift gate, and
 **rewiring `scripts/test-all.sh` to read the registry** instead of its

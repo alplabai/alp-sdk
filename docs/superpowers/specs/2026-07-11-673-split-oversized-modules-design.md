@@ -1,5 +1,12 @@
 # Design — #673: split oversized orchestration, backend, console, and test modules
 
+> **Historical transcript.** Design spec dated 2026-07-11. The SDK
+> has since shipped through the v0.15.0 release candidate
+> (`v0.15.0-rc1`; no plain `v0.15.0` tag exists) and into the ongoing
+> v0.16.0 development cycle (see `VERSIONS.md`, `CHANGELOG.md`) --
+> cross-check the current tree before treating anything below as
+> current design intent; kept for design-rationale only.
+
 - **Issue:** alplabai/alp-sdk#673
 - **Baseline:** `origin/dev` (review baseline `be80d54d`; work branch forks `origin/dev@8e9f1996`)
 - **Work branch:** `refactor/673-split-oversized-modules`

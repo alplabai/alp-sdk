@@ -1,6 +1,14 @@
 # V2N/V2M Wi-Fi + BLE Port Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Active.** Implementation plan dated 2026-06-04; the work below is not
+> finished. Tracked by #479 (V2N/V2M Murata CYW55513 Wi-Fi/BLE Yocto
+> stack is missing). Only the side-channel GPIO driver
+> (`include/alp/chips/murata_lbee5hy2fy.h`, `[UNTESTED]`) exists today --
+> the SDIO/brcmfmac Wi-Fi stack, BT UART/BlueZ stack and Yocto DT/kernel
+> wiring below have not been built. Cross-check the current tree before
+> treating a step as done, but do not discard this as history.
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. (Superseded by the status banner above -- do not execute without reading it first.)
 
 **Goal:** Bring the Murata LBEE5HY2FY-922 (Infineon CYW55513) Wi-Fi 6 + BT 5.4 module up on V2N/V2M: `wlan0` (SDIO/brcmfmac backports) + `hci0` (HCI UART/BlueZ) on Linux/A55, GD32-owned REG_ON power path, validated on silicon.
 
