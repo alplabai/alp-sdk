@@ -697,7 +697,8 @@ stage_generated_files() {
     command -v python3 >/dev/null 2>&1 || return 99
     local gens=(gen_soc_caps gen_status_strings gen_board_header
                 gen_pinmux_capability gen_support_matrix
-                gen_portability_matrix gen_catalog gen_error_catalog)
+                gen_portability_matrix gen_catalog gen_error_catalog
+                gen_verification_status)
     local g rc
     local gen_total=0 gen_skipped=0
     for g in "${gens[@]}"; do
@@ -774,6 +775,7 @@ stage_generated_files() {
         metadata/catalog.json metadata/error-catalog.json metadata/pinmux \
         metadata/socs/renesas/rzv2n/n44.json \
         docs/portability-matrix.md docs/peripheral-support-matrix.md \
+        docs/verification-status.md \
         docs/diagnostics 2>/dev/null
     # Ignore only the snapshot's "generated" date line, like the CI gate.
     # metadata/socs/renesas/rzv2n/n44.json only actually moves above when
@@ -786,6 +788,7 @@ stage_generated_files() {
             metadata/catalog.json metadata/error-catalog.json metadata/pinmux \
             metadata/socs/renesas/rzv2n/n44.json \
             docs/portability-matrix.md docs/peripheral-support-matrix.md \
+            docs/verification-status.md \
             docs/diagnostics 2>/dev/null; then
         echo "generated files are OUT OF SYNC -- regenerated in place; git add + commit:"
         git --no-pager diff --stat --ignore-matching-lines='"generated":' -- \
@@ -793,6 +796,7 @@ stage_generated_files() {
             metadata/catalog.json metadata/error-catalog.json metadata/pinmux \
             metadata/socs/renesas/rzv2n/n44.json \
             docs/portability-matrix.md docs/peripheral-support-matrix.md \
+            docs/verification-status.md \
             docs/diagnostics 2>/dev/null | tail -20
         return 1
     fi
