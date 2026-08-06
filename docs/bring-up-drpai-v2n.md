@@ -398,6 +398,10 @@ In order:
    `meta-alp-sdk/recipes-renesas/mera2-drpai-tvm/mera2-drpai-tvm_2.7.0.bb`),
    but no inference has been run on silicon and the model's accuracy is
    unvalidated (§5).
+   [`examples/v2n/v2n-drpai-inference`](../examples/v2n/v2n-drpai-inference/)
+   is the exhibition-booth demo that exercises this call end-to-end (given a
+   §5 model bundle and §6-deployed frames); its README's "What actually ran"
+   section tracks the same not-yet-on-silicon status as this doc.
 
 ## Related
 
@@ -406,4 +410,6 @@ In order:
 - [build-yocto-v2n.md](build-yocto-v2n.md) — kernel + rootfs build and deploy
 - [errata-e1m-x-v2n.md](errata-e1m-x-v2n.md) — carrier errata, including the
   Ethernet MDI mirror that makes microSD the only deployment path
+- [`examples/v2n/v2n-drpai-inference`](../examples/v2n/v2n-drpai-inference/) —
+  the exhibition-booth demo this whole bring-up exists to run
 - `docs/test-plan.md` — the verification rows this bring-up gates

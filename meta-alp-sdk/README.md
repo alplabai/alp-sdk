@@ -51,8 +51,12 @@ meta-alp-sdk/
 │           ├── 80-alp-wired-dhcp.network
 │           └── alp-remoteproc-start.sh
 ├── recipes-examples/
-│   └── alp-edgeai/
-│       └── alp-edgeai_0.6.bb            # End-to-end EdgeAI demo (camera → NPU → display).
+│   ├── alp-edgeai/
+│   │   └── alp-edgeai_0.6.bb            # End-to-end EdgeAI demo (camera → NPU → display).
+│   ├── alp-lvgl-dashboard/
+│   │   └── alp-lvgl-dashboard_0.6.bb    # LVGL dashboard on the X-EVK MIPI-DSI panel.
+│   └── alp-drpai-inference/
+│       └── alp-drpai-inference_0.6.bb   # DRP-AI3 still-frame inference exhibition demo.
 ├── recipes-deepx/
 │   └── dx-rt/
 │       └── dx-rt_2.4.bb                 # Pins the DEEPX runtime (vendor-licensed).

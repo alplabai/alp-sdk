@@ -262,6 +262,28 @@ YOLOX-S/VOC model was quantised against 8 random frames, not RUHMI's
 real calibration set (its 200 images ship as 129-byte Git LFS pointer
 stubs in this checkout), so quantisation accuracy is unvalidated.
 
+### Added — `v2n-drpai-inference`, the exhibition-booth DRP-AI3 demo, and its Yocto packaging (#1145, #1268)
+
+`examples/v2n/v2n-drpai-inference` runs a compiled `drpai_dir` model bundle
+through `<alp/inference.h>` (`backend = ALP_INFERENCE_BACKEND_DRPAI`) against
+one or more raw pre-processed 640x640x3 float32 NHWC frames given on argv,
+and prints per-frame timing plus the top-5 largest raw output values (see the
+README's "Output: raw scores, not decoded detections" -- the compiled
+YOLOX-S/VOC bundle is fully NPU-fused, so there is no decoded detection to
+print, only the documented raw-tensor fallback). Same NOSUPPORT-on-missing-
+backend contract shape as the `v2n-m1-deepx-inference` sibling.
+
+The new `alp-drpai-inference_0.6.bb` recipe (`meta-alp-sdk/recipes-examples/`)
+builds it and packages the binary as `alp-drpai-inference`, `IMAGE_INSTALL`ed
+into `alp-image-edge` on every RZ/V2N-family machine (`e1m-v2n101-a55`,
+`e1m-v2n102-a55`, `e1m-v2m101-a55`, `e1m-v2m102-a55`) by the SAME
+`ALP_ENABLE_DRPAI = "1"` opt-in that already gates the `drpai` PACKAGECONFIG
+and the `lib-tvm kernel-module-mmngr` payload -- one switch, so the demo
+binary cannot drift out of sync with the backend it needs. Like
+`alp-lvgl-dashboard_0.6.bb`, the recipe's `SRC_URI` tracks alp-sdk's `dev`
+branch (this example is not on `main` yet); flip `branch=dev` to
+`branch=main` at the next promotion.
+
 ### Fixed — `mera2-drpai-tvm` staged a header with no library behind it; `libalp_sdk.so` now fails its OWN link instead of a downstream consumer's (#1145)
 
 **Third correction to this closure, and this one was not caught by

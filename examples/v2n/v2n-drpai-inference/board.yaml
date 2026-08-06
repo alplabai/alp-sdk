@@ -1,0 +1,35 @@
+# board.yaml -- DRP-AI3 still-image / raw-frame inference demo on V2N.
+#
+# Customer workflow: copy this dir, build the alp-image-edge image with
+# ALP_ENABLE_DRPAI = "1" in local.conf (meta-alp-sdk/recipes-examples/
+# alp-drpai-inference packages this app the same way alp-edgeai and
+# alp-lvgl-dashboard package theirs), boot, run
+# `v2n-drpai-inference <model.tar> <frame0.bin> [frame1.bin ...]`.
+#
+# DRP-AI3 is on-die in every RZ/V2N-family SKU (V2N101/102 AND V2M101/102
+# -- DEEPX is an addition on V2M, not a replacement, per
+# docs/bring-up-drpai-v2n.md Sec 0).  E1M-V2N101 is the plain base SKU, so
+# it is the narrowest board.yaml that still reaches the on-die NPU; any
+# V2x SKU runs the same binary unchanged.
+som:
+  sku: E1M-V2N101
+
+preset: e1m-x-evk
+
+cores:
+  a55_cluster:
+    app: ./src                   # Linux userspace app -- <alp/inference.h> only
+    recipe: alp-drpai-inference  # meta-alp-sdk/recipes-examples/alp-drpai-inference
+                                  # packages `app:` above -- a source path is never
+                                  # a valid bitbake target on its own (issue #597).
+  m33_sm:
+    os: "off"                    # DRP-AI3 inference is wholly A55/Linux-owned;
+                                  # the M33 slice carries no app here.
+
+# No `chips:` entry: DRP-AI3 is the RZ/V2N SoC's on-die NPU, not a discrete
+# board-populated IC -- same reasoning v2n-m1-deepx-inference/board.yaml
+# uses for not listing a "drpai" chip (only the DEEPX DX-M1 add-on, which
+# genuinely is a separate populated part, gets a chips: entry there).
+
+diagnostics:
+  log_level: info

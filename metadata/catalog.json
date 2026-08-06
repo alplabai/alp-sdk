@@ -779,6 +779,13 @@
       },
       {
         "board": "e1m-x-evk",
+        "name": "v2n-drpai-inference",
+        "path": "examples/v2n/v2n-drpai-inference",
+        "som": "E1M-V2N101",
+        "summary": "Run a compiled model through the RZ/V2N's on-die **DRP-AI3** NPU via `<alp/inference.h>`, on one or more still frames given on the command line, and print per-image results plus timing -- the demo the exhibition booth runs (issue #1268)."
+      },
+      {
+        "board": "e1m-x-evk",
         "name": "v2n-eeprom-manifest-dump",
         "path": "examples/v2n/v2n-eeprom-manifest-dump",
         "som": "E1M-V2N101",
