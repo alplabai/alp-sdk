@@ -788,3 +788,167 @@ def test_new_m_class_libraries_reject_a_only_soc() -> None:
             liblayer._check_requires(name, manifest, project, liblayer.METADATA_ROOT)
         assert name in str(exc.value)
         assert "core_class" in str(exc.value)
+
+
+# --- floating version pins are a supply-chain hole --------------------
+
+
+def test_no_library_manifest_tracks_a_floating_branch() -> None:
+    """A floating `main`/`master` pin is a supply-chain hole: the build is not
+    reproducible and an upstream force-push silently changes what we ship.
+
+    This is a DENYLIST of the specific floating refs seen in this repo
+    (`main`, `master`, `HEAD`, `trunk`, empty string) -- it does not catch
+    every moving branch a manifest could pin to. `micro-ros.yaml` and
+    `ros2.yaml` both legitimately pin `version: humble`, a Zephyr/ROS 2
+    release-codename branch that keeps moving; it is a known
+    moving-branch pin that intentionally passes this guard. Tightening
+    this to a shape rule (e.g. requiring a semver tag or full SHA) is a
+    separate decision -- micro-ros/ros2 would need re-pinning first."""
+    floating = {"main", "master", "HEAD", "trunk", ""}
+    offenders = []
+    for path in sorted((REPO / "metadata" / "libraries").glob("*.yaml")):
+        manifest = yaml.safe_load(path.read_text(encoding="utf-8"))
+        version = str(manifest.get("version", "")).strip()
+        if version in floating or version.lower().startswith("unpinned"):
+            offenders.append(path.name)
+    assert offenders == [], f"floating version pins: {offenders}"
+
+
+def test_no_west_manifest_extras_tier1_tracks_a_floating_branch() -> None:
+    """Same hole, at the west.yml source of truth: a project in the
+    ``extras-tier1`` group must pin a tag or commit SHA, never a branch --
+    a floating branch pin can also silently not exist at all (minimp3's
+    prior ``main`` pin: the branch never existed on lieff/minimp3).
+
+    Like its manifest-layer sibling above, this is a DENYLIST of the
+    specific floating refs seen in this repo (`main`, `master`, `HEAD`,
+    `trunk`, empty string), not a shape rule -- it does not catch every
+    moving branch a west revision could name (a release codename like
+    `humble` would pass here too, same as it does for the manifest-layer
+    `version:` field checked above -- see that test's docstring).
+    Tightening this to a shape rule is a separate decision that would
+    require re-pinning micro-ros/ros2 first."""
+    floating = {"main", "master", "HEAD", "trunk", ""}
+    doc = yaml.safe_load((REPO / "west.yml").read_text(encoding="utf-8"))
+    offenders = []
+    for project in doc["manifest"]["projects"]:
+        if "extras-tier1" not in (project.get("groups") or []):
+            continue
+        revision = str(project.get("revision", "")).strip()
+        if revision in floating:
+            offenders.append(f"{project['name']}: {revision!r}")
+    assert offenders == [], f"floating extras-tier1 revisions: {offenders}"
+
+
+def test_nightly_extras_tier1_workflow_does_not_hardcode_the_library_list() -> None:
+    """`.github/workflows/nightly-extras-tier1-pins.yml` must DERIVE its
+    extras-tier1 roster from west.yml at run time, not hardcode it as a
+    literal list of project names / `modules/lib/` path basenames in a
+    step's `run:` body.
+
+    This is not hypothetical: PR #1237 added three libraries to west.yml's
+    extras-tier1 group (cmsisstream, CMSIS-CV, Arm-2D) and did NOT update
+    this workflow's then-hardcoded `west update` argument list or verify-loop
+    library list -- so those three were fetched and checked by nothing. That
+    is exactly the "a pin nothing checks" failure class this workflow exists
+    to close. If this test fails, someone re-hardcoded the roster here --
+    derive it from west.yml's `extras-tier1` group in a workflow step
+    instead of re-adding names/paths as literal tokens.
+
+    Tokenizing splits on commas as well as whitespace: a re-hardcoded list
+    disguised as a single comma-joined token (e.g. ``for lib in $(echo
+    "u8g2,libcoap,...,arm-2d" | tr , " ")``) must still be caught. The
+    3-in-a-row threshold below is deliberately low: re-hardcoding only 1-2
+    library names/paths (a one-off example in a comment, an unrelated
+    coincidental match) does NOT trip this guard -- 3 is the line between
+    "coincidence" and "someone pasted the roster back in".
+    """
+    west_doc = yaml.safe_load((REPO / "west.yml").read_text(encoding="utf-8"))
+    known_tokens = set()
+    for project in west_doc["manifest"]["projects"]:
+        if "extras-tier1" not in (project.get("groups") or []):
+            continue
+        known_tokens.add(project["name"])
+        known_tokens.add(project["path"].rsplit("/", 1)[-1])
+
+    workflow_path = REPO / ".github" / "workflows" / "nightly-extras-tier1-pins.yml"
+    workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+
+    offenders = []
+    for step in workflow["jobs"]["fetch-and-verify"]["steps"]:
+        run = step.get("run")
+        if not run:
+            continue
+        # Fold backslash line-continuations -- both original hardcoded
+        # lists were spread across several continuation lines -- so a
+        # re-hardcoded list still reads as one run of tokens. Also split
+        # on commas: a comma-joined roster (e.g. piped through `tr , " "`
+        # at runtime) is a single whitespace token but must tokenize the
+        # same as a space-separated one.
+        folded = run.replace("\\\n", " ").replace(",", " ")
+        run_len = 0
+        for token in folded.split():
+            token = token.strip(",;")
+            if token in known_tokens:
+                run_len += 1
+                if run_len == 3:
+                    offenders.append((step.get("name"), token))
+            else:
+                run_len = 0
+    assert offenders == [], (
+        "nightly-extras-tier1-pins.yml hardcodes 3+ extras-tier1 library "
+        f"names/paths again: {offenders}. This is the PR #1237 recurrence "
+        "(three libraries added to west.yml's extras-tier1 group were "
+        "never fetched or verified because the workflow's list was "
+        "hardcoded) -- derive the roster from west.yml in a workflow step "
+        "instead of hardcoding it."
+    )
+
+
+def test_nightly_extras_tier1_workflow_verify_step_fails_closed_on_empty_roster() -> (
+    None
+):
+    """The "Derive extras-tier1 library list from west.yml" step
+    (``id: extras-tier1``) must exist, and both steps that consume its
+    outputs must actually reference ``steps.extras-tier1.outputs.*``.
+
+    Not hypothetical: ``bash -c 'set -euo pipefail; status=0; for lib in
+    ; do echo "$lib"; done; exit $status'`` exits 0 -- an empty
+    ``${{ steps.extras-tier1.outputs.paths }}`` (the derive step deleted,
+    renamed, or its ``id:`` typo'd) makes the "Verify pins populated
+    content" step's `for` loop iterate zero times and pass, gating on
+    having checked nothing. Asserting the id: exists and is wired into
+    both consumer steps catches that at review time; the workflow's own
+    `[ -n "$libs" ] || exit 1` guard catches it at run time.
+    """
+    workflow_path = REPO / ".github" / "workflows" / "nightly-extras-tier1-pins.yml"
+    workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["fetch-and-verify"]["steps"]
+
+    derive_steps = [s for s in steps if s.get("id") == "extras-tier1"]
+    assert len(derive_steps) == 1, (
+        "nightly-extras-tier1-pins.yml is missing the `id: extras-tier1` "
+        "derive step (or it was renamed) -- the west-update and verify "
+        "steps below depend on steps.extras-tier1.outputs.{names,paths} "
+        "existing, and an empty output there makes the verify loop pass "
+        "having checked nothing."
+    )
+
+    update_step = next(
+        s
+        for s in steps
+        if s.get("name") == "West init + update with extras-tier1 enabled"
+    )
+    verify_step = next(
+        s for s in steps if s.get("name") == "Verify pins populated content"
+    )
+
+    update_refs = " ".join(str(v) for v in (update_step.get("env") or {}).values())
+    verify_refs = " ".join(str(v) for v in (verify_step.get("env") or {}).values())
+    assert "steps.extras-tier1.outputs.names" in update_refs, (
+        "the west-update step must reference steps.extras-tier1.outputs.names"
+    )
+    assert "steps.extras-tier1.outputs.paths" in verify_refs, (
+        "the verify step must reference steps.extras-tier1.outputs.paths"
+    )

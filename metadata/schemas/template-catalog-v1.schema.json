@@ -102,7 +102,7 @@
               "type": "array",
               "uniqueItems": true,
               "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
-              "description": "Curated library tokens the board.yaml `libraries:`/`cores.<id>.libraries:` selects (ADR 0018 vocabulary -- metadata/library-aliases-v1.json's alias keys and values, which map onto metadata/libraries/*.yaml manifests). Drift-checked against that real vocabulary."
+              "description": "Curated library tokens the board.yaml `libraries:`/`cores.<id>.libraries:` selects (ADR 0018 vocabulary -- metadata/library-aliases-v1.json's alias keys and values, which map onto metadata/libraries/*.yaml manifests; the _LIBRARY_KCONFIG dict this description used to name was retired when the library layer became manifest-driven). Drift-checked against that real vocabulary."
             },
             "chips": {
               "type": "array",
