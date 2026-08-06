@@ -20,7 +20,7 @@ vendor's SDK on top of ARM CMSIS. Change `som.sku:` in a project's
 > v0.6) and **E1M-AEN801** (peripheral matrix + NPU inference + CC3501E
 > bridge, verified v0.8). The rest (i.MX 93, V2M/DEEPX, AEN301/401/501/601/701)
 > remain pre-silicon. Per-feature status: [`docs/test-plan.md`](docs/test-plan.md);
-> full caveats: [Status](#status) below.
+> full caveats: [Status](README.md#status) below.
 
 Rendered docs: [**docs.alplab.ai/sdk/introduction**](https://docs.alplab.ai/sdk/introduction) ·
 community: [**community.alplab.ai**](https://community.alplab.ai/) ·
@@ -113,7 +113,7 @@ without rewriting the layer above.
   │               │    │                                                                        │
   │               │    │  Display / GUI           HW Info                DSP / Power            │
   │               │    │  ─ SSD1306 / 1331        ─ EEPROM manifest      ─ alp_dsp_* FFT/FAC/IIR│
-  │               │    │  ─ LVGL · GPU2D/Dave2D   ─ BOARD_ID ADC         ─ <alp/tmu.h> · power  │
+  │               │    │  ─ LVGL · GPU2D/Dave2D   ─ EEPROM hw_info      ─ <alp/tmu.h> · power  │
   │               │    │                                                                        │
   │               │    │  Heterogeneous IPC:  <alp/rpc.h> · <alp/system_ipc.h> · <alp/mproc.h>  │
   │               │    │     framed RPMsg/OpenAMP · auto endpoint IDs · mailbox/shmem/hwsem     │
@@ -163,9 +163,13 @@ See [ADR 0001](docs/adr/0001-wrapper-on-top-of-zephyr.md) and
 
 ## Portability
 
-Swap-and-run is proven **within** a SoM family (all 6 released E1M-AEN
-SKUs, the placeholder N93 preset, and all 4 E1M-X SKUs) for the pinned
-portable examples — matrix at
+Swap-and-run is measured **within** a SoM family, against the generated
+swap-test matrix: the 6 released E1M-AEN SKUs pass all three canonical
+examples (18 / 21 E1M cells — the remaining 3 are `E1M-NX9101`, a
+placeholder MPN whose only hw_rev is `status: tbd`, refused by the
+hw_rev-buildable gate and so not yet buildable at all), and the 4 E1M-X
+SKUs pass two of three (8 / 12 cells — `adc-voltmeter` fails on all
+four). Matrix at
 [`docs/portability-matrix.md`](docs/portability-matrix.md). Crossing
 between E1M and E1M-X is intentionally out of scope: they're separate
 product lines with separate pinout namespaces
@@ -236,7 +240,7 @@ enablement, FreeRTOS/ThreadX/NuttX backends.
 
 - Doc navigation hub: [`docs/README.md`](docs/README.md)
 - Per-(library × OS × SoM) status: [`docs/os-support-matrix.md`](docs/os-support-matrix.md)
-- What changed when: [`CHANGELOG.md`](CHANGELOG.md)
+- What changed when: [`CHANGELOG.md`](https://github.com/alplabai/alp-sdk/blob/HEAD/CHANGELOG.md)
 - Architecture + design: [`docs/architecture.md`](docs/architecture.md);
   decision records: [`docs/adr/`](docs/adr/)
 - Full local verification (`bash scripts/test-all.sh`) and what a green run

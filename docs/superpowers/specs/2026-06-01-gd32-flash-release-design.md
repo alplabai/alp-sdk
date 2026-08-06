@@ -1,7 +1,11 @@
 # GD32 Bridge — Lean Flashable Release + Flashing SOP — Design
 
 **Date:** 2026-06-01
-**Status:** Approved design; pending implementation plan.
+**Status:** **LANDED.** `scripts/flash_backends/swd_probe.py` exists
+(the rename this design calls for from `swd_v2n_host`), and the
+GD32 bridge firmware has shipped multiple further protocol/OTA
+revisions since (see `CHANGELOG.md`, e.g. "gd32-bridge v0.2.9 /
+protocol v0.7").  Kept for the design rationale.
 **Scope:** `firmware/gd32-bridge/` build/release wrapper, `scripts/flash_backends/`
 + `scripts/openocd/`, and `docs/`. No change to the transport HAL *logic* —
 the `feat/gd32-transport-bringup` firmware is integrated as-is and treated as

@@ -1,7 +1,10 @@
 # Comms Registry Migration (Slice 4b) Design
 
 **Date:** 2026-05-22
-**Status:** Draft — pending implementation
+**Status:** **LANDED.** `src/backends/{usb,ble,wifi,mqtt}/` all exist
+with real Zephyr-drv / sw-fallback bodies (`ble` and `wifi` also carry
+a `cc3501e.c` backend), matching this slice's four-class-dispatcher
+scope.  Kept for the migration-pattern rationale.
 **Owner:** alpCaner
 **Predecessor:** Slice 4a (`feat/backend-registry-simple-peripherals`) — proved the multi-peripheral one-PR pattern
 **Foundation:** Slice 1 ADC pilot (PR #18)

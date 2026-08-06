@@ -402,8 +402,18 @@ stage_clang_format() {
     # (GigaDevice/Zephyr/Renesas-FSP), our .clang-format does not govern
     # them, and CI never flags them -- so neither should the local mirror.
     # (Without this, a vendored .c drift produced a FALSE local failure.)
+    # tests/scripts/fixtures/rzv2n_svd/** is excluded on the same grounds:
+    # verbatim BSD-3-Clause Renesas FSP header excerpts that
+    # test_gen_rzv2n_cm33_svd.py asserts stay byte-identical to the real
+    # module headers, so reformatting them would break the fixture.
+    #
+    # NOTE: this stage diffs against a COMMIT, so it cannot see untracked
+    # files.  A brand-new .c/.h shows up here only once it is staged or
+    # committed -- run it again after `git add`, or the gate passes on a
+    # file it never read.
     local out
     out=$(git diff -U0 "${base}" -- '*.c' '*.h' ':!vendors/**' ':!zephyr/**' \
+          ':!tests/scripts/fixtures/rzv2n_svd/**' \
           | python3 "${diff_tool}" -p1 || true)
     if [ -n "${out}" ]; then
         echo "${out}"

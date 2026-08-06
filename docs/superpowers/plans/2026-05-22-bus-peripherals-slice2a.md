@@ -1,5 +1,8 @@
 # Slice 2 Session A — Bus Peripherals Registry Migration (i2c / spi / uart)
 
+> **STATUS — LANDED.** `src/backends/{i2c,spi,uart}/` all exist on the
+> registry pattern.  Kept for implementation-history context.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Each peripheral block (Task A / B / C) is the unit of subagent dispatch — dispatch ONE subagent per peripheral, sequentially.
 
 **Goal:** Migrate the three bus peripherals — `alp_i2c_*`, `alp_spi_*`, `alp_uart_*` — onto the backend registry shipped in Slice 0 (PR #17), following the canonical 8-commit handle-based template proven across RTC/WDT/Counter/QEnc in Slice 4a (PR #19) and Counter/QEnc in particular.

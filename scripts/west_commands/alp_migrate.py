@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -26,12 +27,39 @@ except ImportError:
 
 REPO = _HERE.parent.parent.parent
 
+# Fallback-only: dirs to prune when REPO isn't a git worktree (see
+# `_all_board_yaml_files`). git itself needs no such list -- `--exclude-
+# standard` already reads `.gitignore`, the one source of truth for
+# "this is build output, not a source".
+_FALLBACK_SKIP_DIRS = frozenset({".git", ".west", "build", "twister-out"})
+
+
+def _all_board_yaml_files(root: Path) -> list[Path]:
+    """Every board.yaml under `root` for `--all`. Same fix as
+    check_library_registry.py's `_board_yaml_files`, same defect class: a
+    raw `root.rglob("board.yaml")` here also walked `twister-out/`/`build/`
+    unbounded from repo root."""
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "--cached", "--others",
+             "--exclude-standard", "--", "*board.yaml"],
+            check=True, capture_output=True, text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        found: list[Path] = []
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if d not in _FALLBACK_SKIP_DIRS]
+            if "board.yaml" in filenames:
+                found.append(Path(dirpath) / "board.yaml")
+        return sorted(found)
+    return sorted(root / line for line in proc.stdout.splitlines() if line)
+
 
 def _targets(args) -> list[Path]:
     if args.board:
         return [Path(args.board).resolve()]
     if args.all:
-        return sorted(REPO.rglob("board.yaml"))
+        return _all_board_yaml_files(REPO)
     return [Path("board.yaml").resolve()]
 
 

@@ -42,7 +42,6 @@ _CORPUS_RELPATHS = [
     "README.md",
     ".github/workflows/pr-twister.yml",
     ".github/workflows/pr-tier-a-libraries.yml",
-    ".github/workflows/nightly-aen-hil.yml",
     ".github/workflows/pr-getting-started-aen801.yml",
 ]
 
@@ -73,7 +72,6 @@ def _point_gate_at(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(gate, "CI_WORKFLOWS", [
         tmp_path / ".github/workflows/pr-twister.yml",
         tmp_path / ".github/workflows/pr-tier-a-libraries.yml",
-        tmp_path / ".github/workflows/nightly-aen-hil.yml",
         tmp_path / ".github/workflows/pr-getting-started-aen801.yml",
     ])
     # The zephyr.pythonMinVersion <-> pinned-Zephyr cross-check (issue #1078)
@@ -645,9 +643,6 @@ def test_fix_propagates_bumped_version_to_every_site(tmp_path, monkeypatch, caps
     tier_a = (tmp_path / ".github/workflows/pr-tier-a-libraries.yml").read_text(encoding="utf-8")
     assert "--mr v4.10.0" in tier_a
     assert "key: zephyr-v4.10.0-tier-a-${{ runner.os }}" in tier_a
-
-    nightly = (tmp_path / ".github/workflows/nightly-aen-hil.yml").read_text(encoding="utf-8")
-    assert "--mr v4.10.0" in nightly
 
     getting_started = (tmp_path / ".github/workflows/pr-getting-started-aen801.yml").read_text(
         encoding="utf-8")

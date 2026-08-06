@@ -1,7 +1,16 @@
 # 0022. `tan` ships as Python, not Rust; Renode is retired from the command surface
 
 Status: Accepted — implemented (`tan` v0.5.0 ships as a PyInstaller freeze of
-the Python package `alp-tan`; Renode is retired, no replacement simulator).
+the Python package `alp-tan`; the `tan renode` command-surface verb is
+retired from the documented architecture, no replacement simulator verb).
+This retires the `tan renode` VERB only. alp-sdk's own Renode CI is untouched
+and still runs: `pr-renode-aen-smoke`, `pr-renode-dual-os`, `pr-renode-sim-mode`
+and `pr-renode-v2n-sci0-smoke` are all active workflows, and
+`pr-renode-aen-smoke` installs the pinned Renode v1.16.1 and boots a real image
+with `renode --console --disable-xwt --plain` — no `tan renode` involved, which
+is exactly why retiring the verb costs alp-sdk no simulator coverage. The models
+under `metadata/renode/*.repl` / `*.resc` are retained for the same reason. Only
+the three `--sim-mode` e2e STEPS inside `pr-renode-sim-mode` are no-ops.
 Date: 2026-08-04 (Caner)
 Deciders: alpCaner (alp-sdk)
 Supersedes: [0020](0020-sdk-owns-build-execution.md) — narrowly, two clauses

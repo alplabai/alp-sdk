@@ -216,7 +216,7 @@
         "name": "audio-wake-word",
         "path": "examples/audio/audio-wake-word",
         "som": "E1M-AEN801",
-        "summary": "> ![status: UNTESTED](https://img.shields.io/badge/status-%5BUNTESTED%5D-orange) > v0.5 paper-correct. Builds clean on `native_sim/native/64`; real > PDM mic capture + Ethos-U55 dispatch + Vela-compiled model land > in v0.6 AEN HiL."
+        "summary": "Always-on \"Hey Alp\" keyword spotting on the **E1M-AEN** family's low-power AI subsystem. Targets the Cortex-M55 HE (\"High Efficiency\") core at ~50 MHz with the on-die Ethos-U55 NPU bursting the convolutions on demand."
       },
       {
         "board": "e1m-evk",
@@ -929,6 +929,10 @@
       "script": "scripts/check_cross_platform.py"
     },
     {
+      "purpose": "Reject a placeholder-only ALP-Bxxx diagnostic landing page (issue #1207).",
+      "script": "scripts/check_diagnostic_narratives.py"
+    },
+    {
       "purpose": "Validate the versioned machine diagnostics contract (metadata/schemas/diagnostic-v1.schema.json) two ways:",
       "script": "scripts/check_diagnostic_schema.py"
     },
@@ -943,6 +947,10 @@
     {
       "purpose": "Doxygen-coverage audit -- walks include/alp/*.h and flags every public function declaration that lacks a `@brief` (or `\\brief`) tag in the preceding doc-comment block.",
       "script": "scripts/check_doxygen_coverage.py"
+    },
+    {
+      "purpose": "CI gate: driver_status declarations outside metadata/chips/*.yaml are bound to the artefact they claim to describe (issue #1216).",
+      "script": "scripts/check_driver_status_backing.py"
     },
     {
       "purpose": "Validate the vendored e1m-spec pinout snapshot and cross-check it against the per-SoM pin-mux tables -- fully **offline** (no network).",
@@ -981,7 +989,7 @@
       "script": "scripts/check_inference_backend_parity.py"
     },
     {
-      "purpose": "Assert the library alias table covers every curated token and resolves to real manifests (WS6-c #610 §6).",
+      "purpose": "Assert the curated-library registry is self-consistent (WS6-c #610 §6).",
       "script": "scripts/check_library_registry.py"
     },
     {

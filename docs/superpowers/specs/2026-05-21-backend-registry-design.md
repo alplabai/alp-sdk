@@ -1,7 +1,15 @@
 # Backend Registry + Capability Negotiation Architecture
 
 **Date:** 2026-05-21
-**Status:** Draft — pending implementation
+**Status:** **LANDED.** Verified against the tree: `include/alp/backend.h`
++ `src/backend.c` (the registry + selector) exist, and every
+peripheral class enumerated in this spec's slices now has a
+`src/backends/<class>/` directory with real per-silicon backends
+(confirmed for adc, i2c, spi, uart, rtc, wdt, counter, qenc, usb,
+ble, wifi, mqtt, camera, power, display, gpu2d and more) — well past
+the scaffolding-only slices this design describes.  Kept for the
+architectural rationale; do not read "Draft — pending implementation"
+below as current.
 **Owner:** alpCaner
 **Predecessor work:** PR #14 (`ALP_HAS` capability macros), PR #15 (rich diagnostics), PR #16 (`alp` CLI subcommands)
 

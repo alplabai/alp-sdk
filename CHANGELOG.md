@@ -7,6 +7,110 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Added — ADR 0024: V2N/V2M analog and counter classes stay on the GD32 bridge (#1150)
+
+Design decision only, no code:
+`docs/adr/0024-v2n-analog-and-counter-classes-stay-on-the-gd32-bridge.md`
+records that ADC, PWM, DAC, counter, and qenc stay served exclusively
+by the GD32 IO-MCU bridge on V2N/V2M — no native RZ/V2N leg is added.
+No SoC pin reaches an E1M-standard analog or counter pad on this
+family (verified at the `gd32-io-mcu-map.tsv` / `renesas-peripheral-map.tsv`
+source), so a priority-selected fallback leg would have nothing to
+attach to and could only fail silently. Also records that the
+six-surface 2026-06-04 HiL quarantine #1150 cites has mostly moved
+on — four of the six are firmware-cleared and a fifth is mitigated,
+per a later 253/253 20-row soak at fw v0.2.9; the real single point
+of failure is the shared supervisor/transport, which is a
+bridge-firmware quality question, not a backend-priority one.
+
+### Added — ADR 0023: Ethernet stays out of the `<alp/*>` surface (#1144)
+
+Design decision only, no code: `docs/adr/0023-ethernet-out-of-the-alp-surface.md`
+records that Ethernet's control and data planes stay outside
+`<alp/*>` — the portable contract is the compile-time capability
+(`ALP_SOC_ETHERNET_COUNT`), the form-factor port identity
+(`ALP_E1M_ETH0`/`ALP_E1M_X_ETH0`/`ALP_E1M_X_ETH1`), and the
+ring-2 `rtl8211fdi` PHY chip driver, not a new `<alp/net.h>`. Narrowly
+supersedes `docs/adr/0003-peripheral-coverage.md`'s "Ethernet folds
+into `<alp/iot.h>`" row, which never happened.
+
+### Added — `scripts/gen_rzv2n_cm33_svd.py`: a CMSIS-SVD register view for the RZ/V2N CM33 (#1029)
+
+Renesas ships no CMSIS-SVD for the RZ/V2N, so a debugger's peripheral view
+has had nothing to load. This generator mechanically projects one from the
+vendored `hal_renesas` west module's FSP headers, cross-validating each
+bitfield it emits between the two independent vendor projections
+(`iodefines/`'s C register structs and `iobitmasks/`'s `_Pos`/`_Msk`
+macros) so a mismatch fails loudly instead of rendering a wrong value in a
+debugger. 15 fields (of ~9200, against the real corpus) are exempt — real,
+itemised disagreements between the two vendor projections themselves,
+listed with evidence in `FIELD_CROSS_CHECK_SKIPS` (a further 7
+`iobitmasks/`-side macros with no `iodefine` counterpart at all are
+tracked separately in `IOBITMASK_ORPHAN_SKIPS`). Each of the 15 either
+emits with the position/width the OTHER evidence agrees on
+(`FIELD_POSITION_OVERRIDES`) or with an explicit `NOT CROSS-VALIDATED`
+`<description>`, never as an indistinguishable plain field. Deliberately
+**not committed and not a CI gate** — every consumer is mid-CM33-debug and
+already has the west workspace this reads from; see
+`docs/architecture.md`'s generators section for the full reasoning. Run
+locally: `python3 scripts/gen_rzv2n_cm33_svd.py --output <path>`. The test
+fixture's header excerpts join `vendors/**` and `zephyr/**` on the
+clang-format gate's exclusion list, in both `pr-static-analysis.yml` and
+`scripts/test-all.sh`'s local mirror — they are verbatim vendor content
+whose byte-identity with the real headers the tests assert, so
+reformatting them would break the fixture.
+
+### Fixed — `ALP_CAP_HW_ETHERNET` read false on V2N/V2M despite two 1 GbE ports (#1240)
+
+`scripts/gen_soc_caps.py`'s `ETHERNET_COUNT` matched only the `ethernet` key.
+RZ/V2N's `metadata/socs/renesas/rzv2n/n44.json` publishes `ethernet_1g`
+instead, so `ALP_SOC_ETHERNET_COUNT` emitted `0` for the family with the most
+Ethernet on it and `ALP_CAP_HW_ETHERNET` — the compile-time gate a customer is
+meant to key off — reported the opposite of the silicon. It now sums every
+Ethernet-flavoured key, mirroring how `USB_COUNT` already sums `usb_2` +
+`usb_3` two entries below, and `include/alp/soc_caps.h` is regenerated: one
+line moves, `:373` from `0` to `2`.
+
+The guard against a recurrence is the substance of the fix, not a courtesy.
+Its first form hardcoded its own copy of the key list, so reverting the
+generator left it green — the same defect wearing a test's clothes. It now
+probes the real `ETHERNET_COUNT` lambda out of `gen_soc_caps.CAPS`, which
+fails in both directions: a SoC key the generator ignores, and a generator
+that stops consuming a key already in the tree. Key matching is
+case-insensitive because `metadata/schemas/soc-spec-v1.schema.json` puts no
+pattern on peripherals key names.
+
+Two things worth recording. The sibling generator
+`scripts/gen_support_matrix.py` already read this correctly, via
+`_has_prefix(s, "ethernet")` — the two generators disagreed about the same
+metadata, and only one of them feeds `ALP_CAP_HW_ETHERNET` (#1243). And
+`ALP_CAP_HW_ETHERNET` stays false for `nxp:imx9:imx93` after this change, for
+an unrelated reason: that SoC declares its peripheral counts pending
+reference-manual ingestion, so there is no key to sum and none may be
+inferred from the absence.
+
+### Fixed — the Doxygen build was red on `dev` itself (#1245)
+
+Two ordinary GitHub-Markdown links in `README.md` were unresolvable `\ref`
+targets for Doxygen: `[Status](#status)` (Doxygen's heading-anchor scheme
+does not yield `status` for `## Status`) and `` [`CHANGELOG.md`](CHANGELOG.md) ``
+(`CHANGELOG.md` is not in the Doxyfile `INPUT`). Since the Doxyfile runs
+`WARN_AS_ERROR`, the `pr-doxygen` gate and `scripts/test-all.sh`'s `doxygen`
+stage failed on **every** branch cut from `dev`, including branches touching
+no documentation.
+
+The links now point at `README.md#status` and at the changelog's canonical
+URL under `/blob/HEAD/`, which follows the default branch instead of pinning
+one. Both still resolve on GitHub, and the Doxygen warning log is empty.
+
+Two tidier-looking fixes were tested and rejected: adding `CHANGELOG.md` to
+the Doxyfile `INPUT` trades one error for thirty from the changelog's own
+prose, and `MARKDOWN_ID_STYLE = GITHUB` needs Doxygen 1.10+ while this repo
+builds on 1.9.8, where setting it raises a different error instead.
+
+The reason it reached `dev` at all is that `pr-doxygen` is not a required
+status check on `dev` or on `main`.
+
 ### Added — the RZ/V2N on-die DRP-AI3 NPU is reachable from `<alp/inference.h>`, opt-in (#1145)
 
 DRP-AI3 was dark: the CMake option defaulted OFF, no kernel driver bound the
