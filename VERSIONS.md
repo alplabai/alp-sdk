@@ -130,7 +130,7 @@ v0.1 ships first-class support for the **E1M Development Board**
 
 The Zephyr **board file** for `alp_e1m_aen801_m55_he` /
 `alp_e1m_aen801_m55_hp` ships in-tree, under
-[`zephyr/boards/alp/`](../zephyr/boards/alp/) — there is no separate
+[`zephyr/boards/alp/`](zephyr/boards/alp/) — there is no separate
 board-file repo.  The overlay above re-aliases what that board file
 exposes.
 

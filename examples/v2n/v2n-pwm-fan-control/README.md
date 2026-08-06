@@ -59,5 +59,5 @@ across the full ramp is straightforward.
 * [`<alp/pwm.h>`](../../../include/alp/pwm.h) -- portable PWM surface.
 * [`<alp/e1m_pinout.h>`](../../../include/alp/e1m_pinout.h) -- the
   E1M-standard `ALP_E1M_PWM*` instance IDs.
-* [`examples/peripheral-io/pwm-led-fade/`](../pwm-led-fade/) -- companion
+* [`examples/peripheral-io/pwm-led-fade/`](../../peripheral-io/pwm-led-fade/) -- companion
   example using the same API on a single LED.

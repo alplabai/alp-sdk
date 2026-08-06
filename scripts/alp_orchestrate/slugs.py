@@ -133,3 +133,14 @@ def _slugs_from_helper_firmware(helper_firmware: list) -> list[str]:
 
 
 _PERIPHERAL_KCONFIG: dict[str, tuple[str, ...]] = peripheral_kconfig()
+
+# Slugs that map to BLOCK_ Kconfig symbols rather than CHIP_.
+# These live under blocks/ + <alp/blocks/*.h> because they are
+# SDK-level *block* utilities (`alp_button_led_*`, `alp_pdm_mic_*`)
+# rather than third-party-IC chip drivers; see blocks/README.md.
+#
+# Single source of truth -- kconfig.py's emitter, check_example_portability.py
+# and alp_cli/validator.py's ALP-B008 chip-token check all consult this same
+# set rather than each carrying its own copy (a prior state that had drifted
+# into three independent copies).
+_BLOCK_SLUGS = frozenset({"button_led", "pdm_mic"})
