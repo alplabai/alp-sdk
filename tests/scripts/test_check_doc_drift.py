@@ -193,6 +193,81 @@ def test_forward_looking_tbd_doc_excluded(tmp_path):
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
 
+def test_matrix_total_matches_passes(tmp_path):
+    _scaffold(tmp_path, docs={
+        "portability-matrix.md": (
+            "## E1M family\n\n"
+            "**18 / 21 cells generate cleanly (3 FAILING).**\n\n"
+            "## E1M-X family\n\n"
+            "**8 / 12 cells generate cleanly (4 FAILING).**\n"
+        ),
+        "v1.0-readiness.md": (
+            "The matrix records 18/21 cells green for E1M and 8 of 12 "
+            "for E1M-X.\n"
+        ),
+    })
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_matrix_total_mismatch_fails(tmp_path):
+    _scaffold(tmp_path, docs={
+        "portability-matrix.md": (
+            "## E1M family\n\n"
+            "**18 / 21 cells generate cleanly (3 FAILING).**\n\n"
+            "## E1M-X family\n\n"
+            "**8 / 12 cells generate cleanly (4 FAILING).**\n"
+        ),
+        "v1.0-readiness.md": (
+            "The matrix records 12/12 cells green for E1M-X now.\n"
+        ),
+    })
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 1
+    assert "12/12" in proc.stdout + proc.stderr
+    assert "8/12" in proc.stdout + proc.stderr  # the expected value
+
+
+def test_matrix_total_readme_mismatch_fails(tmp_path):
+    # README.md hand-quotes both totals too (root-relative, not under
+    # docs/) -- it must be covered by _MATRIX_TOTAL_QUOTING_DOCS same as
+    # the docs/ trio.
+    _scaffold(tmp_path, docs={
+        "portability-matrix.md": (
+            "## E1M family\n\n"
+            "**18 / 21 cells generate cleanly (3 FAILING).**\n\n"
+            "## E1M-X family\n\n"
+            "**8 / 12 cells generate cleanly (4 FAILING).**\n"
+        ),
+    })
+    (tmp_path / "README.md").write_text(
+        "The matrix: 18 / 21 E1M cells, 12 / 12 E1M-X cells.\n",
+        encoding="utf-8",
+    )
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 1
+    assert "12 / 12" in proc.stdout + proc.stderr
+    assert "8/12" in proc.stdout + proc.stderr  # the expected value
+
+
+def test_matrix_total_unrelated_fraction_not_flagged(tmp_path):
+    # A denominator that isn't one of the matrix's own totals (e.g. a
+    # tutorial-count fraction) must not be treated as a stale total.
+    _scaffold(tmp_path, docs={
+        "portability-matrix.md": (
+            "## E1M family\n\n"
+            "**18 / 21 cells generate cleanly (3 FAILING).**\n\n"
+            "## E1M-X family\n\n"
+            "**8 / 12 cells generate cleanly (4 FAILING).**\n"
+        ),
+        "v1.0-readiness.md": (
+            "Tutorial count: 16 of 16 planned for v1.0 shipped.\n"
+        ),
+    })
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
 def test_yocto_machine_var_is_known(tmp_path):
     # A Yocto MACHINE variable defined in meta-alp-sdk is a real identifier.
     _scaffold(tmp_path, docs={"build-yocto-v2n.md": "Set `ALP_BOOT_DEVICE`.\n"})

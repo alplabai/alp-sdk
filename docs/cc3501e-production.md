@@ -87,8 +87,7 @@ already-activated part rejects it (`-1141`).
 **Activate with `vendor_sbl_container_enable=0`** (or ship a TI vendor SBL). The bench
 unit was activated with that fuse set but with **no** vendor SBL, which breaks the cold
 Chain-of-Trust → the image never launches on a cold POR (and the OTA swap-boot, which
-runs the same cold chain via BL2, cannot complete). See
-`memory/project-cc3501e-firmware-bringup` and `project-cc3501e-ota-bridge-rootcause`.
+runs the same cold chain via BL2, cannot complete).
 
 ## OTA
 

@@ -190,8 +190,7 @@ typedef enum {
      * dispatch returns STATUS_NOSUPPORT until the bridge_hw_adc_dsp_*
      * HAL bodies land in the GD32 firmware tree.  Host helpers in
      * chips/gd32g553/ honour the same NOSUPPORT contract by routing
-     * the wire dispatch through cmd_send unchanged.  See
-     * memory/project_wave2_dsp_pipeline_design.md for design context. */
+     * the wire dispatch through cmd_send unchanged. */
 	CMD_ADC_DSP_CHAIN_OPEN = 0x37,
 	CMD_ADC_DSP_STAGE_PUSH = 0x38,
 	CMD_ADC_DSP_CHAIN_BIND = 0x39,

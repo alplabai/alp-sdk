@@ -220,7 +220,7 @@ jobs:
             esac
           done
 
-      # Install EXACTLY docs/getting-started.md:160's Debian/Ubuntu one-liner
+      # Install EXACTLY docs/getting-started.md:194's Debian/Ubuntu one-liner
       # -- byte-for-byte, git/curl included even though the earlier step
       # already installed them (apt no-ops on an already-installed package)
       # -- so this step stays a mirror of the doc and any future divergence
@@ -228,7 +228,7 @@ jobs:
       # superset the doc never told a customer to install (this job used to
       # install "plus the newly-declared xz/wget prerequisites" beyond the
       # doc's own list, which is exactly how the doc fell behind in the
-      # first place -- see docs/getting-started.md:160 for the source of
+      # first place -- see docs/getting-started.md:194 for the source of
       # truth this must keep matching).
       - name: Install prerequisites (docs/getting-started.md section 1's Debian/Ubuntu one-liner, verbatim)
         run: |
@@ -499,7 +499,7 @@ jobs:
           path: tan-cli
           fetch-depth: 1
 
-      # Install EXACTLY docs/getting-started.md:160's Debian/Ubuntu one-liner
+      # Install EXACTLY docs/getting-started.md:194's Debian/Ubuntu one-liner
       # -- byte-for-byte (git/curl already present from the step above, kept
       # here anyway so this stays a mirror of the doc and any future
       # divergence between the two reddens this job).

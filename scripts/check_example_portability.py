@@ -129,6 +129,9 @@ except ImportError:  # pragma: no cover -- CI always has pyyaml
 
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+
+from alp_orchestrate.slugs import _BLOCK_SLUGS  # noqa: E402
 
 # Map som.sku prefix -> family name as stored in chip metadata.
 # E1M-AEN... -> aen
@@ -166,7 +169,9 @@ _VENDOR_FAMILY_TO_SLUG = {
 # Skip them in the families[] check -- block helpers are
 # SoM-family-agnostic by design (they're software abstractions
 # over GPIO / PDM, not third-party ICs).
-_BLOCK_SLUGS = {"button_led", "pdm_mic"}
+# `_BLOCK_SLUGS` itself now comes from `alp_orchestrate/slugs.py` (imported
+# above) -- the shared leaf kconfig.py's emitter and alp_cli/validator.py's
+# ALP-B008 check also consult, so the set can't drift into a third copy.
 
 _SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".h", ".hh", ".hpp"}
 _SOURCE_SKIP_DIRS = {"build", ".git", ".west", "__pycache__"}

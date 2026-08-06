@@ -1,4 +1,4 @@
-<!-- Last verified: 2026-08-04 against alp-sdk (manifest layout + program_eeprom.py --help output re-checked against include/alp/hw_info.h and the script's real CLI). -->
+<!-- Last verified: 2026-08-06 against alp-sdk (manifest layout, incl. magic wire-byte order, re-checked against include/alp/hw_info.h; program_eeprom.py --help output re-checked against the script's real CLI; production-rig I2C bus corrected per-SoM-family against docs/bring-up-aen.md, examples/aen/aen-eeprom-manifest/README.md and metadata/e1m_modules/*.yaml -- issue #1195, wave-4 review fixes). -->
 
 # Tutorial 13: EEPROM manifest provisioning
 
@@ -10,7 +10,8 @@ date programming flow.
 
 - A populated E1M module with an unprogrammed 24C128 EEPROM
   (factory state).
-- The board exposing BRD_I²C with a suitable USB-I²C adapter
+- The board exposing the EEPROM's I²C bus test points (family-
+  specific -- see §1 below) with a suitable USB-I²C adapter
   (Aardvark, MCP2221, FT232H).
 - Python 3.10+, `pip install pyyaml`.
 
@@ -32,7 +33,7 @@ authoritative C struct):
 ```
 offset  size  field          description
 ──────────────────────────────────────────────────────────────────
-   0     4    magic           'ALPH' (0x41 0x4C 0x50 0x48)
+   0     4    magic           0x414C5048, little-endian uint32 ('ALPH'; wire bytes 0x48 0x50 0x4C 0x41 = 'HPLA')
    4     4    schema_version  0x00000001 (little-endian)
    8    16    family          ASCII, NUL-padded (e.g. "aen", "v2n")
   24    24    sku             ASCII, NUL-padded (e.g. "E1M-AEN801")
@@ -54,9 +55,20 @@ CRC doesn't match.
 
 Hardware:
 
-- USB-I²C adapter wired to the board's BRD_I²C test points
-  (SCL + SDA + GND).  Standard 1.8 V or 3.3 V level shifter on
-  the adapter, matching the SoM family.
+- USB-I²C adapter wired to the EEPROM's actual I²C bus test
+  points (SCL + SDA + GND).  Standard 1.8 V or 3.3 V level
+  shifter on the adapter, matching the SoM family.
+  **This is family-specific -- don't assume BRD_I²C:** on AEN
+  the EEPROM is bridge/DNP-selected onto its own **SoC I2C2**
+  (`P5_6 SCL_C` / `P5_7 SDA_C`), separate from BRD_I²C -- BRD_I²C
+  on AEN **is** the slave-only LPI2C0 (`P7_4`/`P7_5`) and carries
+  the RTC/TMP112/OPTIGA instead, a bus the silicon can only be a
+  slave on (see `docs/bring-up-aen.md` §5.1 and
+  `examples/aen/aen-eeprom-manifest/README.md`); on V2N / V2N-M1
+  the EEPROM sits on its own `e1m_i2c0` bus, separate from
+  BRD_I²C (which carries the PMICs/RTC/OPTIGA/GD32 instead) --
+  see `metadata/e1m_modules/E1M-V2N101.yaml:56-59` /
+  `metadata/e1m_modules/E1M-V2M101.yaml:61-64`.
 - Board in factory-test mode (no application running --
   either powered through the USB-I²C alone, or running a
   factory-test firmware that gives I²C bus access to the

@@ -1,6 +1,13 @@
 # #610 §5 slice 1 — quality-task registry Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax.
+> **Historical transcript.** Implementation plan dated 2026-07-13. The
+> SDK has since shipped through the v0.15.0 release candidate
+> (`v0.15.0-rc1`; no plain `v0.15.0` tag exists) and into the ongoing
+> v0.16.0 development cycle (see `VERSIONS.md`, `CHANGELOG.md`) --
+> cross-check the current tree before treating anything below as a
+> live task list; kept for implementation-history rationale only.
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax. (Superseded by the status banner above -- do not execute without reading it first.)
 
 **Goal:** Make `metadata/quality-tasks-v1.json` the single source of truth for the SDK's `check_*.py` quality gates, drift-gated against what's on disk, and rewire `scripts/test-all.sh` to read its gate list from it (deleting the hand-maintained `REQUIRED_GATE_SCRIPTS` array — the drift #608 flagged).
 

@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Advisory: alp-sdk `dev` tracks tan-cli `dev` during the coordinated Python
-# port. The latest stable release remains the frozen Rust v0.4.1 line until
-# v0.5 is cut, so installing `releases/latest` here would compare forward-
-# looking port docs to the intentionally old oracle. This checks out the real
-# Python source from tan-cli `dev`, installs it, then asserts every documented
+# Advisory: alp-sdk `dev` tracks tan-cli `dev` for continuous drift
+# detection. tan-cli v0.5.0 cut the frozen-Rust-to-Python transition and
+# v0.5.1 followed with fixes on top -- this gate deliberately still builds
+# from tan-cli's `dev` branch rather than `releases/latest`, so a
+# subcommand/flag rename lands here as caught drift before the next tag,
+# not after. This checks out the real Python source from tan-cli `dev`,
+# installs it, then asserts every documented
 # subcommand/flag/invocation exists in that binary's help grammar. See
 # scripts/check_tan_docs_surface.py's docstring for
 # the exact extraction rules and everything this deliberately does NOT check

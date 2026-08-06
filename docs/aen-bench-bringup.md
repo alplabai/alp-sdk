@@ -453,10 +453,10 @@ ISP-window race entirely.
 secure-boot verification — always write both consistent blobs.
 
 > **Verified state on *this* Linux bench (alplab-gw, 2026-06-17): flow D WORKS.** The
-> original probe (J-Link PLUS S/N 600107451, old firmware) could not connect with
+> original probe (J-Link PLUS, old firmware) could not connect with
 > `-device AE822FA0E5597LS0_M55_HE` — it only worked with the generic `-device
 > Cortex-M55` (reads/RAM-run). Swapping to a probe on **J-Link V13 firmware (May 2026,
-> matched to DLL V9.50; S/N 603000869)** fixed it: the AE822 profile now connects
+> matched to DLL V9.50)** fixed it: the AE822 profile now connects
 > (`Connecting to J-Link ...O.K.` → `Found Cortex-M55 r1p0`), the built-in MRAM loader
 > programs + verifies the ATOC over SWD (`Verify successful.`, ~0.16 s @ ~200 KB/s), and
 > `RSetType 2` (nRESET pin) re-runs the SE boot ROM so the app boots from MRAM. Bench

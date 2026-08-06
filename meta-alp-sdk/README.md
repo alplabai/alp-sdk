@@ -373,7 +373,8 @@ updates ride the `.mender` artefact through the Mender server.
 
 - Recipe wiring lands in v0.6 (this revision).
 - Real artefact generation + on-device install + rollback test
-  parked behind the `hil-yocto` HIL runner per
+  parked behind an explicit Yocto bench run -- there is no automated
+  HIL runner -- per
   [`docs/ci/HW-IN-LOOP.md`](../docs/ci/HW-IN-LOOP.md).
 - The Mender-server side (deployment orchestration, fleet
   monitoring) is out of scope for `meta-alp-sdk`; consumers stand

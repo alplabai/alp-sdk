@@ -1,5 +1,17 @@
 # Plan: intra-family portability proof + remaining cleanups + doc push
 
+> **Historical transcript.** Session brief dated 2026-05-18. Landed as
+> part of v0.6.0 (2026-06-06) -- intra-family portability is proven
+> (`docs/portability-matrix.md`, `docs/portability.md`, ADR 0011); see
+> `VERSIONS.md`'s v0.6.0 row and `CHANGELOG.md` for what actually
+> shipped. Kept for the session-handoff rationale, not as a live task
+> list.
+>
+> Command examples below use this session's original Windows/WSL
+> checkout paths (e.g. `C:\Users\<user>\...`) verbatim -- treat them as
+> historical record, not copy-paste-ready commands for today's
+> checkout.
+
 Authoritative plan for the next session. Self-contained — designed
 to brief a fresh agent (or human) with no conversation history.
 

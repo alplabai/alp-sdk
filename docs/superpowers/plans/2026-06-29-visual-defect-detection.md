@@ -1,6 +1,18 @@
 # Visual-Defect Detection Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Historical transcript.** Implementation plan dated 2026-06-29. The
+> SDK has since shipped through the v0.15.0 release candidate
+> (`v0.15.0-rc1`; no plain `v0.15.0` tag exists) and into the ongoing
+> v0.16.0 development cycle (see `VERSIONS.md`, `CHANGELOG.md`) --
+> cross-check the current tree before treating anything below as a
+> live task list; kept for implementation-history rationale only.
+>
+> Command examples below use this session's original Windows/WSL
+> checkout paths (e.g. `/mnt/c/Users/<user>/...`) verbatim -- treat
+> them as historical record, not copy-paste-ready commands for
+> today's checkout.
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. (Superseded by the status banner above -- do not execute without reading it first.)
 
 **Goal:** A camera-fed surface-inspection example that flags manufacturing defects as unsupervised anomalies — an autoencoder reconstructs the "normal" surface and high reconstruction error = defect — tiling the frame to localize the worst region with a PASS/FAIL verdict, severity, and defect-coverage %.
 

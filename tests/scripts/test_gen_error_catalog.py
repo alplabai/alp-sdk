@@ -100,13 +100,13 @@ def test_section_parsing_lifts_cause_and_fix(tmp_path, monkeypatch):
     diag = tmp_path / "ALP-B999.md"
     diag.write_text(
         "# ALP-B999: pad route conflict\n\n"
-        "Two pads claim the same SoC ball.\n\n"
-        "## Cause\n\nThe board.yaml assigns one ball twice.\n\n"
+        "Two pads claim the same pin.\n\n"
+        "## Cause\n\nThe board.yaml assigns one pin twice.\n\n"
         "## Fix\n\nDrop the duplicate pad entry.\n",
         encoding="utf-8",
     )
     entry = gec.parse_runtime_diagnostic(diag)
     assert entry["code"] == "ALP-B999"
     assert entry["summary"] == "pad route conflict"
-    assert entry["cause"] == "The board.yaml assigns one ball twice."
+    assert entry["cause"] == "The board.yaml assigns one pin twice."
     assert entry["fix"] == "Drop the duplicate pad entry."

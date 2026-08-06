@@ -63,7 +63,7 @@
  *
  * @par ABI status: [ABI-EXPERIMENTAL]
  *      New class.  Controller init is BENCH-PROVEN on E1M-AEN801 silicon
- *      (labgrid place e1m-aen-evk-01, Flow C ITCM RAM-run, 2026-07-25):
+ *      (Flow C ITCM RAM-run, 2026-07-25):
  *      lpi3c0 binds, `device_is_ready()` passes, and `alp_i3c_open()`
  *      returns a handle -- so the `ALIF_LPI3C_CLK` clock-id and the
  *      P7_6/P7_7 fn3 pinctrl are confirmed correct, which was the risk
