@@ -139,6 +139,17 @@ class Rule:
     # planning prose either, and docs/superpowers is where they've actually
     # leaked.
     scan_superpowers: bool = False
+    # Whether a match is exempt when the enclosing bullet/paragraph itself
+    # states that the cited artifact left the public tree (see
+    # _describes_removal below).  Default False.  PRIVATE_AUDIT_REFERENCE is
+    # the only rule that opts in: a paragraph that says "X removed from the
+    # public SDK ... moved to <private-repo>" is the audit trail of a scrub,
+    # not a leak -- it reproduces no audit content, only records that a
+    # relocation happened.  Scoped to one rule, not global, so this can never
+    # quietly relax LOCAL_MAINTAINER_PATH, PRIVATE_DESIGN_REFERENCE, or the
+    # SoM/PCB detail rules, whose matches are never legitimate to explain
+    # away this way.
+    exempt_if_describes_removal: bool = False
 
 
 @dataclass(frozen=True)
@@ -173,6 +184,192 @@ def _is_known_pending(rel: str, category: str, line_no: int) -> bool:
     )
 
 
+@dataclass(frozen=True)
+class ReviewedAcceptedEntry:
+    """One (path, line, category) finding a human read and accepted as
+    permanently fine -- distinct from KNOWN_PENDING above, which means "a
+    decision is outstanding".  This means "reviewed, and it is legitimately
+    fine, forever": a citation of a private artifact's name that reproduces
+    none of its content (e.g. the CHANGELOG recording that a doc was
+    relocated, or a historical cross-reference to its since-moved filename).
+
+    Anchored on `line` AND a short verbatim `excerpt` of that line's text,
+    not the line number alone: CHANGELOG.md line numbers drift as entries
+    are prepended, so a bare-line-number anchor would silently re-point at
+    whatever unrelated content later occupies that line, exempting the
+    wrong thing instead of failing loud.  `excerpt` must be a substring of
+    the actual line at `line` for the exemption to apply (see
+    _is_reviewed_accepted) -- if the file is edited and the excerpt no
+    longer matches, the finding reappears and the gate fails closed rather
+    than exempting silently.  To re-anchor after a drift: grep the file for
+    `excerpt`, find its new line number, and update `line`.
+
+    `reason` is required and non-empty (enforced by
+    _validate_reviewed_accepted at import time) so nobody can land a silent
+    exemption -- every entry below carries the reviewer's own words for why
+    it is not a leak.
+    """
+    path: str
+    line: int
+    category: str
+    excerpt: str
+    reason: str
+
+
+def _validate_reviewed_accepted(entries: tuple[ReviewedAcceptedEntry, ...]) -> None:
+    for e in entries:
+        if not e.reason or not e.reason.strip():
+            raise SystemExit(
+                f"check_public_private: REVIEWED_ACCEPTED entry "
+                f"{e.path}:{e.line} {e.category} has no reason -- refusing "
+                f"to start rather than silently exempt it."
+            )
+        if not e.excerpt or not e.excerpt.strip():
+            raise SystemExit(
+                f"check_public_private: REVIEWED_ACCEPTED entry "
+                f"{e.path}:{e.line} {e.category} has no excerpt -- refusing "
+                f"to start rather than anchor a permanent exemption on a "
+                f"bare line number."
+            )
+
+
+# Findings a human reviewed and signed off as permanently fine.  Issue #524:
+# these are the audit trail of a past privacy action (the CHANGELOG entries
+# recording that two artifacts -- an Ensemble peripheral-coverage audit doc
+# and a carrier errata note -- left the public tree) or a historical
+# citation of the audit doc's since-relocated filename -- never a
+# reproduction of the private content itself.  Do not add an entry here to
+# make a NEW finding go away; that is what this list is not for -- take it
+# to the maintainer first.
+REVIEWED_ACCEPTED: tuple[ReviewedAcceptedEntry, ...] = (
+    ReviewedAcceptedEntry(
+        path="CHANGELOG.md",
+        line=6870,
+        category="SOM_PHYSICAL_DESIGN_DETAIL",
+        # Split so this source line does not itself trip
+        # SOM_PHYSICAL_DESIGN_DETAIL -- the runtime value is unchanged
+        # (adjacent literals concatenate with no glue character); see the
+        # NOTE ON FIXTURE STRINGS in tests/scripts/test_check_public_private.py.
+        excerpt="see the internal" " carrier errata",
+        reason=(
+            "Names the private carrier-errata document as a pointer only, "
+            "explaining why the loopback example taps the raw DAC0 net "
+            "instead of the buffered path -- reproduces none of the "
+            "errata's content."
+        ),
+    ),
+    ReviewedAcceptedEntry(
+        path="CHANGELOG.md",
+        line=8128,
+        category="PRIVATE_AUDIT_REFERENCE",
+        # Split so this source line does not itself trip
+        # PRIVATE_AUDIT_REFERENCE -- runtime value unchanged; see the NOTE ON
+        # FIXTURE STRINGS in tests/scripts/test_check_public_private.py.
+        excerpt="docs/aen-feature-au" "dit-2026-05.md",
+        reason=(
+            "Historical citation of the (since-relocated) audit filename, "
+            "in the entry explaining why AEN/iMX93 SoM presets carry TBD "
+            "hardware-fact fields.  Predates the relocation, so this "
+            "paragraph carries no removed/moved-to language of its own for "
+            "the PRIVATE_AUDIT_REFERENCE removal-description exemption to "
+            "catch -- reviewed by hand instead.  No audit content "
+            "reproduced, only the filename."
+        ),
+    ),
+    ReviewedAcceptedEntry(
+        path="CHANGELOG.md",
+        line=10957,
+        category="PRIVATE_AUDIT_REFERENCE",
+        excerpt="docs/aen-feature-au" "dit-2026-05.md",
+        reason=(
+            "The CHANGELOG entry recording the audit doc's original "
+            "addition to the tree (2026-05-14) -- a filename citation in "
+            "the historical record of a real internal review that shaped a "
+            "real public change.  Predates the relocation entry, so it "
+            "carries no removed/moved-to language of its own.  No audit "
+            "content reproduced."
+        ),
+    ),
+    ReviewedAcceptedEntry(
+        path="CHANGELOG.md",
+        line=11119,
+        category="PRIVATE_AUDIT_REFERENCE",
+        excerpt="docs/aen-feature-au" "dit-2026-05.md",
+        reason=(
+            "Cites the audit filename as the source of the gpu2d.h "
+            "portability gap it closed.  Predates the relocation entry, so "
+            "it carries no removed/moved-to language of its own.  No audit "
+            "content reproduced, only the filename."
+        ),
+    ),
+)
+
+_validate_reviewed_accepted(REVIEWED_ACCEPTED)
+
+
+def _is_reviewed_accepted(rel: str, category: str, line_no: int, line_text: str) -> bool:
+    return any(
+        rel == e.path
+        and category == e.category
+        and line_no == e.line
+        and e.excerpt in line_text
+        for e in REVIEWED_ACCEPTED
+    )
+
+
+# Phrases that, appearing anywhere in the bullet/paragraph a
+# PRIVATE_AUDIT_REFERENCE match sits in, mark that paragraph as *describing*
+# a removal/relocation rather than disclosing content -- e.g. "removed from
+# the public SDK ... Moved to alplabai/e1m-som-metadata".
+_REMOVAL_PHRASE = re.compile(r"removed from the public|\bmoved to\b", re.IGNORECASE)
+
+
+def _block_range(lines: list[str], idx: int) -> tuple[int, int]:
+    """0-indexed [start, end] of the CHANGELOG-style bullet/paragraph
+    containing lines[idx].
+
+    CHANGELOG.md entries are markdown list items: a line starting with
+    "- " at column 0 opens one, 2-space-indented lines continue it, and a
+    blank line or the next "- " ends it.  This is deliberately not a
+    general markdown parser -- it exists only to scope the narrow
+    removal-description check below to the one paragraph a match sits in,
+    so it can never reach into an unrelated bullet earlier or later in the
+    file.
+    """
+    if lines[idx].startswith("- "):
+        start = idx
+    else:
+        start = idx
+        while start > 0:
+            start -= 1
+            if lines[start].startswith("- "):
+                break
+            if lines[start].strip() == "":
+                start += 1
+                break
+        else:
+            start = 0
+    end = start
+    while end + 1 < len(lines):
+        nxt = lines[end + 1]
+        if nxt.strip() == "" or nxt.startswith("- "):
+            break
+        end += 1
+    return start, end
+
+
+def _describes_removal(lines: list[str], line_no: int) -> bool:
+    """True if the paragraph containing 1-indexed line_no itself records
+    that the cited artifact left the public repo (see _REMOVAL_PHRASE) --
+    e.g. the CHANGELOG entry documenting a scrub.  Only ever consulted for
+    rules with exempt_if_describes_removal=True (PRIVATE_AUDIT_REFERENCE):
+    it suppresses a citation of a filename/phrase inside the very paragraph
+    that says that file left the public tree, never a reproduction of
+    content."""
+    start, end = _block_range(lines, line_no - 1)
+    return bool(_REMOVAL_PHRASE.search("\n".join(lines[start:end + 1])))
+
+
 RULES: tuple[Rule, ...] = (
     Rule(
         "LOCAL_MAINTAINER_PATH",
@@ -191,6 +388,7 @@ RULES: tuple[Rule, ...] = (
             re.IGNORECASE,
         ),
         "Replace private audit/report citations with public SDK support docs or neutral rationale.",
+        exempt_if_describes_removal=True,
     ),
     Rule(
         "PRIVATE_DESIGN_REFERENCE",
@@ -397,7 +595,8 @@ def scan(paths: Iterable[Path], *, base: Path) -> list[Finding]:
             continue
         rel = _rel(path, base)
         in_superpowers = _under_superpowers(rel)
-        for line_no, line in enumerate(text.splitlines(), start=1):
+        lines = text.splitlines()
+        for line_no, line in enumerate(lines, start=1):
             for rule in RULES:
                 if in_superpowers and not rule.scan_superpowers:
                     continue
@@ -405,6 +604,10 @@ def scan(paths: Iterable[Path], *, base: Path) -> list[Finding]:
                 if not match:
                     continue
                 if _is_known_pending(rel, rule.category, line_no):
+                    continue
+                if _is_reviewed_accepted(rel, rule.category, line_no, line):
+                    continue
+                if rule.exempt_if_describes_removal and _describes_removal(lines, line_no):
                     continue
                 findings.append(Finding(
                     path=rel,

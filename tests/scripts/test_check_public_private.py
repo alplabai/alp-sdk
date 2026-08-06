@@ -9,6 +9,8 @@ import sys
 import textwrap
 from pathlib import Path
 
+import pytest
+
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts" / "check_public_private.py"
@@ -286,33 +288,154 @@ def test_json_output(tmp_path: Path) -> None:
     assert payload["path"] == "README.md"
 
 
-# Findings the live repo carries today, all explicit maintainer-tracked
-# publication calls from issue #524 -- NOT scrub targets.  Six CHANGELOG.md
-# entries: one internal-carrier-errata mention (6870) and five historical
-# citations of the aen feature audit doc (8128, 10191, 10195, 10957, 11119),
-# each a citation of a real past internal review that shaped a real public
-# change -- rewriting them would falsify the history.  This test pins the
-# KNOWN set so the gate still fails loudly on anything NEW.  Update this set
-# only in the same commit as an explicit maintainer ruling on one of the
-# items below (see issue #524).
-KNOWN_LIVE_REPO_FINDINGS: frozenset[tuple[str, int, str]] = frozenset({
-    ("CHANGELOG.md", 6870, "SOM_PHYSICAL_DESIGN_DETAIL"),
-    ("CHANGELOG.md", 8128, "PRIVATE_AUDIT_REFERENCE"),
-    ("CHANGELOG.md", 10191, "PRIVATE_AUDIT_REFERENCE"),
-    ("CHANGELOG.md", 10195, "PRIVATE_AUDIT_REFERENCE"),
-    ("CHANGELOG.md", 10957, "PRIVATE_AUDIT_REFERENCE"),
-    ("CHANGELOG.md", 11119, "PRIVATE_AUDIT_REFERENCE"),
-})
+def test_live_repo_is_clean() -> None:
+    # Issue #524's six long-standing findings are now closed: two (the
+    # CHANGELOG's audit-doc removal/relocation bullet) are exempt because
+    # the PRIVATE_AUDIT_REFERENCE rule recognises the paragraph itself as
+    # describing that removal (see
+    # test_private_audit_reference_exempt_when_paragraph_describes_removal);
+    # the remaining four (a plain carrier-errata pointer and three
+    # historical audit-filename citations that predate the relocation) are
+    # REVIEWED_ACCEPTED, each with its own maintainer-reviewed reason.  Any
+    # NEW finding fails this gate loudly.
+    proc = _run("--root", str(REPO))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
 
 
-def test_live_repo_findings_are_the_known_tracked_set() -> None:
-    proc = _run("--root", str(REPO), "--json")
-    got = {
-        (obj["path"], obj["line"], obj["category"])
-        for obj in (json.loads(line) for line in proc.stdout.splitlines() if line)
-    }
-    assert got == KNOWN_LIVE_REPO_FINDINGS, (
-        "live-repo findings drifted from the tracked set -- fix the scrub, "
-        "add a maintainer-reviewed allowlist entry, or update this test\n"
-        + proc.stdout
+def test_reviewed_accepted_requires_reason() -> None:
+    # Requirement: a missing/empty reason must refuse to start, not exempt
+    # silently.
+    bad = (
+        classifier.ReviewedAcceptedEntry(
+            path="docs/example.md",
+            line=1,
+            category="LOCAL_MAINTAINER_PATH",
+            excerpt="something",
+            reason="",
+        ),
     )
+    with pytest.raises(SystemExit):
+        classifier._validate_reviewed_accepted(bad)
+
+
+def test_reviewed_accepted_requires_excerpt() -> None:
+    # Requirement: a bare line-number anchor (no excerpt) must also refuse
+    # to start -- a REVIEWED_ACCEPTED entry has to be re-derivable from real
+    # file content, not just a number that can silently drift onto the
+    # wrong line.
+    bad = (
+        classifier.ReviewedAcceptedEntry(
+            path="docs/example.md",
+            line=1,
+            category="LOCAL_MAINTAINER_PATH",
+            excerpt="",
+            reason="a real reason",
+        ),
+    )
+    with pytest.raises(SystemExit):
+        classifier._validate_reviewed_accepted(bad)
+
+
+def test_reviewed_accepted_is_narrowly_line_anchored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Same shape as KNOWN_PENDING before it: exempts exactly one (path,
+    # line, category), not the category anywhere in the file.
+    monkeypatch.setattr(
+        classifier,
+        "REVIEWED_ACCEPTED",
+        (
+            classifier.ReviewedAcceptedEntry(
+                path="docs/example.md",
+                line=1,
+                category="LOCAL_MAINTAINER_PATH",
+                excerpt="/home/" "caner",
+                reason="test fixture: the allowlisted line itself.",
+            ),
+        ),
+    )
+    exempted = _write(tmp_path, "docs/example.md", "Use /home/" "caner/ti/sdk here.\n")
+    assert classifier.scan([exempted], base=tmp_path) == []
+
+    # RED-THEN-GREEN proof: the identical phrase, same category, one line
+    # later -- not the allowlisted line -- still produces a finding.
+    # (`_write` dedents and strips *leading* blank lines, so a non-blank
+    # filler line pushes the trigger to line 2 -- a bare "\n" prefix would
+    # be stripped and land back on line 1.)
+    drifted = _write(
+        tmp_path,
+        "docs/example.md",
+        "Filler line so the trigger below lands on line 2.\n"
+        "Use /home/" "caner/ti/sdk here.\n",
+    )
+    findings = classifier.scan([drifted], base=tmp_path)
+    assert len(findings) == 1
+    assert findings[0].line == 2
+    assert findings[0].category == "LOCAL_MAINTAINER_PATH"
+
+
+def test_reviewed_accepted_excerpt_must_match_actual_line_content(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # If the anchored excerpt is no longer a substring of the line at the
+    # anchored line number (CHANGELOG.md prepended, content reflowed), the
+    # exemption does not apply -- the finding must reappear rather than stay
+    # silently exempted forever.
+    monkeypatch.setattr(
+        classifier,
+        "REVIEWED_ACCEPTED",
+        (
+            classifier.ReviewedAcceptedEntry(
+                path="docs/example.md",
+                line=1,
+                category="LOCAL_MAINTAINER_PATH",
+                excerpt="this excerpt does not appear on the real line",
+                reason="test fixture: deliberately stale excerpt.",
+            ),
+        ),
+    )
+    path = _write(tmp_path, "docs/example.md", "Use /home/" "caner/ti/sdk here.\n")
+    findings = classifier.scan([path], base=tmp_path)
+    assert len(findings) == 1
+    assert findings[0].category == "LOCAL_MAINTAINER_PATH"
+
+
+def test_private_audit_reference_exempt_when_paragraph_describes_removal(
+    tmp_path: Path,
+) -> None:
+    # The generalised half of the fix: PRIVATE_AUDIT_REFERENCE does not fire
+    # inside a bullet that itself records the cited artifact leaving the
+    # public tree -- CHANGELOG.md's actual shape for this (issue #524).
+    path = _write(
+        tmp_path,
+        "CHANGELOG.md",
+        "Preamble text.\n"
+        "\n"
+        "- **`docs/aen-feature-au" "dit-2026-05.md` removed from the public\n"
+        "  SDK.**  Internal product-coverage roadmap.  Moved to\n"
+        "  `alplabai/e1m-som-metadata` as `AEN-FEATURE-AU" "DIT-2026-05.md`.\n"
+        "\n"
+        "Trailer text.\n",
+    )
+    assert classifier.scan([path], base=tmp_path) == []
+
+
+def test_private_audit_reference_not_exempt_without_removal_language(
+    tmp_path: Path,
+) -> None:
+    # Narrowness proof for the generalisation: the identical filename
+    # citation, one paragraph over, with no removal/relocation language in
+    # its own block, still fails -- the rule understands the *distinction*,
+    # it does not stop checking the category.
+    path = _write(
+        tmp_path,
+        "CHANGELOG.md",
+        "Preamble text.\n"
+        "\n"
+        "- **`docs/aen-feature-au" "dit-2026-05.md` is cited here.**\n"
+        "  No relocation language anywhere in this paragraph.\n"
+        "\n"
+        "Trailer text.\n",
+    )
+    findings = classifier.scan([path], base=tmp_path)
+    assert {f.category for f in findings} == {"PRIVATE_AUDIT_REFERENCE"}
