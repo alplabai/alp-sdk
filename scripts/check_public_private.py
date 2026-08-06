@@ -157,22 +157,13 @@ class PendingExemption:
 # Known-pending items under active maintainer review.  Do not add an entry
 # here to make a NEW finding go away -- fix the finding, or take it to the
 # maintainer and cite the issue/PR that is actually deciding it.
-KNOWN_PENDING: tuple[PendingExemption, ...] = (
-    PendingExemption(
-        path="CHANGELOG.md",
-        category="PCB_ROUTING_DETAIL",
-        line_start=11962,
-        line_end=11985,
-        reason=(
-            "issue #524: the Renesas Ethernet/eMMC/uSD/xSPI pin-assignment "
-            "changelog entry documents real schematic length-matching, "
-            "series-resistor IDs, and BGA-style pad designators supplied by the "
-            "maintainer.  Whether that level of PCB detail belongs in public "
-            "CHANGELOG prose is a maintainer publication call, not an "
-            "implementor scrub -- out of scope here by explicit instruction."
-        ),
-    ),
-)
+#
+# Empty right now: the one entry this ever held (CHANGELOG.md's Renesas
+# Ethernet/eMMC/uSD/xSPI pin-assignment paragraph, PCB_ROUTING_DETAIL,
+# issue #524) was resolved by maintainer ruling -- redact -- and the
+# paragraph was rewritten to drop the routing detail outright, so the
+# exemption is gone rather than converted into a permanent allowlist entry.
+KNOWN_PENDING: tuple[PendingExemption, ...] = ()
 
 
 def _is_known_pending(rel: str, category: str, line_no: int) -> bool:
@@ -266,6 +257,51 @@ RULES: tuple[Rule, ...] = (
         # which are customer-facing placeholder / mDNS forms and stay clean.
         re.compile(r"\broot@\d{1,3}(?:\.\d{1,3}){3}\b"),
         "Generalise to a placeholder (e.g. root@<bench-host>); do not substitute a different real address.",
+        scan_superpowers=True,
+    ),
+    Rule(
+        "LAB_INFRA_HOSTNAME",
+        # `<label>.alplab.ai` where <label> isn't one of the customer-facing
+        # subdomains this repo already publishes (docs.alplab.ai,
+        # community.alplab.ai) or the `*.example.alplab.ai` placeholder used
+        # in example code (examples/connectivity/*) -- verified against every
+        # alplab.ai mention in the tree before this rule landed.  A new,
+        # unlisted label is exactly the shape issue #524 found: `erp.alplab
+        # .ai`, an internal ops host (Hostinger VPS), sitting in a design
+        # spec.  Widen the allowlist the day a legitimate new public
+        # subdomain trips this.
+        re.compile(
+            r"\b(?!(?:www|community|docs|status|forum|blog|example)\.alplab\.ai\b)"
+            r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.alplab\.ai\b",
+            re.IGNORECASE,
+        ),
+        "Generalise the internal host to a placeholder (e.g. <ops-host>.alplab.ai) or drop it.",
+        scan_superpowers=True,
+    ),
+    Rule(
+        "LAB_INFRA_IP",
+        # A backtick-quoted (Markdown code-span) IPv4 literal.  Anchored to
+        # backticks specifically because this tree's spec/clause citations
+        # (`IEEE 802.3 clause 22.2.4.1`, `HWRM section 14.10.5.3`) and
+        # dotted version strings (`0.4.9.1`) are dotted-quad-shaped but are
+        # never backtick-quoted -- verified against every IPv4-shaped
+        # literal in the tree before this rule landed; revisit if a future
+        # backtick'd spec/version number ever trips it.  Reserved/private/
+        # loopback/link-local/documentation ranges (RFC 1918, RFC 5737) are
+        # excluded because this repo legitimately cites those in bench and
+        # driver text (`192.168.10.137` DHCP leases, `192.0.2.0/24` docs
+        # examples).  `93.184.216.34` -- example.com's long-documented public
+        # IP, used in two examples as a stable public TCP-reachability
+        # target -- is excluded by name for the same reason: a real,
+        # intentional, non-lab public address.
+        re.compile(
+            r"`(?!0\.|10\.|127\.|169\.254\.|172\.(?:1[6-9]|2\d|3[01])\.|"
+            r"192\.168\.|192\.0\.2\.|198\.51\.100\.|203\.0\.113\.|"
+            r"(?:22[4-9]|2[3-4]\d|25[0-5])\.|93\.184\.216\.34\b)"
+            r"(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}"
+            r"(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)`"
+        ),
+        "Generalise the address to a placeholder; do not substitute a different real one.",
         scan_superpowers=True,
     ),
     Rule(

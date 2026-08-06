@@ -11953,45 +11953,12 @@ Deferred from this batch:
   directory; per-chip manifests for the other V2N populated parts
   land alongside their drivers).
 
-- **Renesas Ethernet + eMMC + uSD + xSPI NOR-flash pin assignments (2026-05-11).**
-  Maintainer supplied four additional schematic excerpts.  63 new
-  rows added to `metadata/e1m_modules/v2n/renesas-peripheral-map.tsv`:
-  - **30 Ethernet rows** — RGMII to two on-module
-    `RTL8211FDI-VD-CG` PHYs (ET0 + ET1).  Each PHY: 15 pins
-    (TX_CTL/CLK + 4× TXD, RX_CTL/CLK + 4× RXD, MDIO/MDC,
-    PHY_INTR).  22 Ω series resistors documented per data line;
-    MDIO/MDC pull-ups to VDD_1V8 via 1 kΩ 1%; layout constraints
-    (single 50 Ω ±10%, GND guard trace on TX/RX clocks; 5 mm
-    length matching on RX_CTL relative to RX_CLK) preserved in
-    the notes column.
-  - **11 eMMC rows** — `SD0CLK` / `SD0CMD` / `SD0DAT0..7` /
-    `SD0RSTN` for the on-module eMMC.  22 Ω series on each line,
-    1 MΩ pull-up to `VDD_eMMC_3V3_1V8`, ±1.27 mm length matching
-    on `eMMC_CLK`.
-  - **6 uSD-card rows** — `SD1CLK` / `SD1CMD` / `SD1DAT0..3` for
-    the on-module microSD card slot.  22 Ω series, 10 kΩ pull-ups
-    to `µSD1_1833V` (1.8 V), ESD protection via `PUSB3FR6Z` (D28).
-  - **16 xSPI rows** — `XSPI0_*` to the on-module xSPI NOR flash
-    (CK ± / CS / 8× IO / DS / ECS / INT / RSTO / RESET).  22 Ω
-    series on CK + IO0..IO3 (x4 data path), 10 kΩ pull-downs on
-    IO4..IO7 + DS, 10 kΩ pull-ups on ECS / INT / RSTO to 0V.
-    Series resistor IDs (R143..R376) preserved in notes for
-    board-engineering cross-reference.
-
-  These pads use **BGA designators** (J26, AC27, AJ18, etc.)
-  rather than port-pin names because they're dedicated-function
-  pads outside the GPIO bank.  The `renesas_pad` column carries
-  either convention depending on the pin -- header comment block
-  documents the dual-convention explicitly.  Three of the new
-  pads happen to start with `P` followed by digits (P24, P25, P29
-  on ET1) -- those are BGA pads, not port pins; the peripheral
-  column makes the distinction unambiguous.
-
-  Renesas peripheral map now totals **146 data rows** (was 83);
-  CSV regenerated.
-
-  Pad-uniqueness check after the additions: **all 146 Renesas pads
-  are unique**.  No collisions introduced by the new rows.
+- **Renesas Ethernet + eMMC + uSD + xSPI NOR-flash pin assignments documented (2026-05-11).**
+  Maintainer supplied the schematic-derived pin assignments for the two
+  on-module Ethernet PHYs, the on-module eMMC, the microSD card slot, and
+  the on-module xSPI NOR flash; 63 rows added to
+  `metadata/e1m_modules/v2n/renesas-peripheral-map.tsv` (146 data rows
+  total, was 83; all pads unique after the additions; CSV regenerated).
 
 ### Changed
 

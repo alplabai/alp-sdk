@@ -146,6 +146,64 @@ def test_lab_ssh_endpoint_ignores_placeholder_and_hostname(tmp_path: Path) -> No
     assert classifier.scan([path], base=tmp_path) == []
 
 
+def test_detects_lab_infra_hostname(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        "docs/example.md",
+        "Ops host: `erp" ".alplab.ai` runs the VPS.\n",
+    )
+    findings = classifier.scan([path], base=tmp_path)
+    assert {f.category for f in findings} == {"LAB_INFRA_HOSTNAME"}
+
+
+def test_lab_infra_hostname_ignores_known_public_subdomains(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        "docs/example.md",
+        "See `community.alplab.ai` and `docs.alplab.ai`, or the placeholder\n"
+        "`broker.example.alplab.ai` used in example code.\n",
+    )
+    assert classifier.scan([path], base=tmp_path) == []
+
+
+def test_detects_lab_infra_ip(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        "docs/example.md",
+        "VPS address: `31.97" ".73.18` is reachable directly.\n",
+    )
+    findings = classifier.scan([path], base=tmp_path)
+    assert {f.category for f in findings} == {"LAB_INFRA_IP"}
+
+
+def test_lab_infra_ip_ignores_reserved_and_documentation_ranges(tmp_path: Path) -> None:
+    # Reserved/private/loopback/link-local (RFC 1918) and documentation
+    # (RFC 5737) ranges are legitimate in bench/driver text; example.com's
+    # own long-documented public IP is a legitimate stable ping/TCP target,
+    # not a lab endpoint.
+    path = _write(
+        tmp_path,
+        "docs/example.md",
+        "Loopback `127.0.0.1`, unspecified `0.0.0.0`, link-local `169.254.1.1`,\n"
+        "private `10.1.2.3`, `172.20.0.5`, `192.168.1.1`, documentation\n"
+        "`192.0.2.10`, `198.51.100.10`, `203.0.113.10`, and example.com's\n"
+        "`93.184.216.34` are all fine here.\n",
+    )
+    assert classifier.scan([path], base=tmp_path) == []
+
+
+def test_lab_infra_ip_ignores_non_backticked_spec_numbers(tmp_path: Path) -> None:
+    # Dotted-quad-shaped spec/clause and version citations are common in
+    # this tree and are never backtick-quoted -- only a code-span IPv4
+    # literal is a finding.
+    path = _write(
+        tmp_path,
+        "docs/example.md",
+        "IEEE 802.3 clause 22.2.4.1 and nanopb version 0.4.9.1" " (no backticks).\n",
+    )
+    assert classifier.scan([path], base=tmp_path) == []
+
+
 def test_detects_pcb_routing_detail(tmp_path: Path) -> None:
     path = _write(
         tmp_path,
@@ -168,18 +226,19 @@ def test_pcb_routing_detail_ignores_bare_numerics(tmp_path: Path) -> None:
     assert classifier.scan([path], base=tmp_path) == []
 
 
-def test_known_pending_exempts_only_its_named_range(tmp_path: Path) -> None:
-    pending = classifier.KNOWN_PENDING[0]
-    assert pending.category == "PCB_ROUTING_DETAIL"
-    trigger = "length" " matching noted here.\n"
-    lines = ["filler\n"] * (pending.line_start - 1)
-    lines.append(trigger)  # lands exactly at line_start -- exempted
-    lines += ["filler\n"] * (pending.line_end - pending.line_start)
-    lines.append(trigger)  # lands one line past line_end -- NOT exempted
-    path = _write(tmp_path, pending.path, "".join(lines))
+def test_known_pending_is_empty(tmp_path: Path) -> None:
+    # The CHANGELOG.md PCB_ROUTING_DETAIL exemption this tuple held was
+    # resolved by maintainer ruling (redact) -- nothing should be exempted
+    # from any rule any more.  A `PCB_ROUTING_DETAIL` trigger on any line of
+    # any file is a real finding now.
+    assert classifier.KNOWN_PENDING == ()
+    path = _write(
+        tmp_path,
+        "CHANGELOG.md",
+        "Routing note: 5 mm length" " matching applied here.\n",
+    )
     findings = classifier.scan([path], base=tmp_path)
-    assert len(findings) == 1
-    assert findings[0].line == pending.line_end + 1
+    assert {f.category for f in findings} == {"PCB_ROUTING_DETAIL"}
 
 
 def test_normal_internal_language_is_not_flagged(tmp_path: Path) -> None:
@@ -227,14 +286,15 @@ def test_json_output(tmp_path: Path) -> None:
     assert payload["path"] == "README.md"
 
 
-# Findings the live repo carries today beyond the CHANGELOG-PCB allowlist in
-# scripts/check_public_private.py -- catalogued as maintainer-pending scrub /
-# publication calls by issue #524 (see the implementor's report on that
-# issue), deliberately NOT fixed here because Part 1 of that task scoped
-# specific file:line targets and these fell outside every one of them.  This
-# test pins the KNOWN set so the gate still fails loudly on anything NEW
-# while these are triaged.  Update this set in the same commit that resolves
-# (fixes, or adds a reviewed allowlist entry for) one of the items below.
+# Findings the live repo carries today, all explicit maintainer-tracked
+# publication calls from issue #524 -- NOT scrub targets.  Six CHANGELOG.md
+# entries: one internal-carrier-errata mention (6870) and five historical
+# citations of the aen feature audit doc (8128, 10191, 10195, 10957, 11119),
+# each a citation of a real past internal review that shaped a real public
+# change -- rewriting them would falsify the history.  This test pins the
+# KNOWN set so the gate still fails loudly on anything NEW.  Update this set
+# only in the same commit as an explicit maintainer ruling on one of the
+# items below (see issue #524).
 KNOWN_LIVE_REPO_FINDINGS: frozenset[tuple[str, int, str]] = frozenset({
     ("CHANGELOG.md", 6870, "SOM_PHYSICAL_DESIGN_DETAIL"),
     ("CHANGELOG.md", 8128, "PRIVATE_AUDIT_REFERENCE"),
@@ -242,10 +302,6 @@ KNOWN_LIVE_REPO_FINDINGS: frozenset[tuple[str, int, str]] = frozenset({
     ("CHANGELOG.md", 10195, "PRIVATE_AUDIT_REFERENCE"),
     ("CHANGELOG.md", 10957, "PRIVATE_AUDIT_REFERENCE"),
     ("CHANGELOG.md", 11119, "PRIVATE_AUDIT_REFERENCE"),
-    ("docs/aen-bench-bringup.md", 459, "PROBE_SERIAL"),
-    ("docs/superpowers/plans/2026-06-04-v2n-wifi-ble-port.md", 259, "LAB_SSH_ENDPOINT"),
-    ("docs/superpowers/plans/2026-06-04-v2n-wifi-ble-port.md", 266, "LAB_SSH_ENDPOINT"),
-    ("examples/peripheral-io/alp-console/src/main.c", 82, "DANGLING_PRIVATE_NOTES_LINK"),
 })
 
 
