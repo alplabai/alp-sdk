@@ -52,9 +52,13 @@ you a `alp-workspace/` with `alp-sdk/`, `zephyr/`, and the standard
 modules.
 
 You'll also need `tan`, the standalone Python planner and build executor -- a
-separate public repo, not installed by `bootstrap.sh`. During the coordinated
-v0.5 port, install `tan-cli/dev` into a Python 3.12+ venv; the latest published
-installer still resolves the frozen Rust v0.4.1 release:
+separate public repo, not installed by `bootstrap.sh`. As of `tan-cli`
+[v0.5.0](https://github.com/alplabai/tan-cli/releases/tag/v0.5.0) (current
+release: [v0.5.1](https://github.com/alplabai/tan-cli/releases/tag/v0.5.1)),
+the published installer (`install.sh`/`install.ps1`) installs the real Python
+`tan` directly -- it no longer resolves the frozen Rust v0.4.1 release. This
+guide instead installs from `tan-cli`'s `dev` branch in a Python 3.12+ venv,
+to track fixes ahead of the last tagged release:
 
 ```bash
 git clone --branch dev https://github.com/alplabai/tan-cli
@@ -63,9 +67,14 @@ tan-cli/.venv/bin/python -m pip install ./tan-cli/python
 export PATH="$PWD/tan-cli/.venv/bin:$PATH"
 ```
 
-From v0.5, `install.sh`/`install.ps1` install PyInstaller archives that bundle
-their Python runtime. The `alp-tan` PyPI distribution is reserved but not yet
-published; the old `crates/` implementation remains the v0.4.1 oracle.
+The release installer's PyInstaller archives bundle their own Python
+runtime, so release users do not install Python separately. Alp's `tan`
+is not distributed on PyPI, and the bare name `tan` there belongs to an
+unrelated project (`200` for it: `tan` v23.7.0, "The compromising code
+formatter") -- `pip install tan` does not get you this tool. `alp-tan` is
+not registered there either (`404` for it, not a reservation placeholder).
+The old `crates/` implementation remains the frozen v0.4.1 behaviour
+oracle.
 
 For the rest of this doc, all paths are relative to `alp-workspace/`.
 

@@ -1,8 +1,10 @@
 # #610 WS6-c — library-model consolidation
 
-**Status:** design 2026-07-13 (full consolidation authorized). **Phased — high
-build-break risk; native_sim + representative cross-compile verification is a
-gate on the risky phase.**
+**Status:** **Implemented.** `metadata/schemas/board.schema.json` now declares
+exactly one `libraries` key (project-wide, ADR 0018) -- the old per-core
+`cores.<id>.libraries:` enum and the hardcoded `_LIBRARY_KCONFIG` /
+`_LIBRARY_WEST_MODULES` Python dicts are gone from `scripts/alp_project.py`
+(verified: neither name appears in the file).
 
 ## Problem
 

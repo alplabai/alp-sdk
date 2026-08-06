@@ -25,11 +25,27 @@ firmware as a first-class consumer.
 >   SoM `board.yaml` names; there is no separate `--board`/`--core`
 >   selector, the target comes from the project itself.  This is the headline
 >   [README Quickstart](../README.md#quickstart) — if you just want
->   a hello-world running in two minutes, start there. During the v0.5 port,
->   install `tan-cli/dev` in a Python 3.12+ venv as shown below; the published
->   installer still resolves the frozen Rust v0.4.1 release. From v0.5, the
->   release installer bundles its Python runtime. The `alp-tan` PyPI name is
->   reserved but is not yet published.
+>   a hello-world running in two minutes, start there. As of `tan-cli`
+>   [v0.5.0](https://github.com/alplabai/tan-cli/releases/tag/v0.5.0) (current
+>   release: [v0.5.1](https://github.com/alplabai/tan-cli/releases/tag/v0.5.1)),
+>   the published release installer (`curl -fsSL
+>   https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh`
+>   on Linux/macOS, `irm
+>   https://raw.githubusercontent.com/alplabai/tan-cli/main/install.ps1 | iex`
+>   on Windows) installs the real
+>   Python `tan` directly — it no longer resolves the frozen Rust v0.4.1
+>   release. Four prebuilt archives ship (Windows x64, Linux x64 glibc, macOS
+>   x64/arm64); other hosts install from source. Most users should just run
+>   the release installer above and skip the "fastest path" block below —
+>   this walkthrough's own source-build steps exist to exercise the exact
+>   clone-and-build path this repo's own CI validates (and are how you'd
+>   pick up a `tan-cli` fix that hasn't been tagged yet), not because the
+>   release is behind. Alp's `tan` is
+>   not distributed on PyPI, and the bare name `tan` there belongs to an
+>   unrelated project (`200` for it: `tan` v23.7.0, "The compromising code
+>   formatter") -- `pip install tan` does not get you this tool. `alp-tan`
+>   is not registered there either (`404` for it, not a reservation
+>   placeholder).
 > - **Native Python commands** — `tan
 >   init` scaffolds a project, `tan validate` checks a `board.yaml`,
 >   `tan generate --target zephyr-conf` (one of twelve supported targets
@@ -45,11 +61,12 @@ firmware as a first-class consumer.
 > alp-migrate`, `west alp-lock`, `west alp-quality`, `west alp-emit`)
 > are unaffected by the build-executor move.
 
-If you'd rather skim, the fastest path is:
+If you'd rather skim, here's the source-build path in one block (the
+release installer above is the faster route if you just want the tool —
+this is the clone-and-build path CI itself exercises):
 
-> Needs `git` and Python 3.12+ already on PATH during the v0.5 source-install
-> transition -- a from-scratch host (a bare container, a fresh VM) needs
-> those installed first; see the
+> Needs `git` and Python 3.12+ already on PATH -- a from-scratch host (a
+> bare container, a fresh VM) needs those installed first; see the
 > per-platform one-liners under "1. Prerequisites" below
 > (`sudo apt install -y git curl` on Debian/Ubuntu).
 
@@ -388,7 +405,7 @@ not this one) — flash it and open a serial monitor to see illustrative
 output like this (exact ordering/timing may vary):
 
 ```
-*** Booting Zephyr OS build v4.4.0 ***
+*** Booting Zephyr OS build v4.4.1 ***
 [gpio] init button=EVK_PIN_ENCODER_SW, led=EVK_PIN_LED_RED
 [gpio] led=0 status=0
 [gpio] led=1 status=0
@@ -462,11 +479,22 @@ Each name resolves to a manifest under
 right wiring per OS (Zephyr `CONFIG_LVGL=y` in `alp.conf`, Yocto
 `IMAGE_INSTALL` for the A-cores, …) and refuses a library the target
 can't run, naming the failing constraint.  Check what's selected and
-whether it's compatible:
+whether it's compatible — run this from *your project's* directory
+(the one containing the `board.yaml` above), not from the SDK
+checkout: the `libraries` line only appears when `doctor` is run
+where it can find that `board.yaml`, and `PYTHONPATH` has to reach
+the checkout's `scripts/` from wherever that project lives:
 
 ```bash
-python -m alp_cli doctor    # a "libraries" line reports tier + licence + fit
+cd <your-project-dir>   # contains the board.yaml you just edited
+PYTHONPATH=<path-to-alp-sdk>/scripts python3 -m alp_cli doctor   # a "libraries" line reports tier + licence + fit
 ```
+
+`doctor`'s library check only handles the bare-string `libraries: [name,
+...]` form shown above today; the dict form (`- name: lvgl` / `cores:
+[...]`, also schema-valid and what several in-tree examples use) currently
+makes it abort with an uncaught error instead of reporting — a `doctor.py`
+fix, not a docs one, tracked separately.
 
 The curated set today: `lvgl`, `cmsis-dsp`, `cmsis-nn`, `nanopb`,
 `zcbor`, `modbus` (all Tier A), plus a growing Tier B (recipe-only) set

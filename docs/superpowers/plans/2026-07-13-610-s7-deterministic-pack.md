@@ -1,6 +1,13 @@
 # #610 §7 slice 2 — deterministic release: SBOM + reproducible tarball + receipt wiring
 
-> REQUIRED SUB-SKILL: subagent-driven-development / executing-plans.
+> **Historical transcript.** Implementation plan dated 2026-07-13. The
+> SDK has since shipped through the v0.15.0 release candidate
+> (`v0.15.0-rc1`; no plain `v0.15.0` tag exists) and into the ongoing
+> v0.16.0 development cycle (see `VERSIONS.md`, `CHANGELOG.md`) --
+> cross-check the current tree before treating anything below as a
+> live task list; kept for implementation-history rationale only.
+
+> REQUIRED SUB-SKILL: subagent-driven-development / executing-plans. (Superseded by the status banner above -- do not execute without reading it first.)
 
 **Goal:** Close the §7 acceptance criterion ("release artifacts + build receipts are reproducible"): a deterministic CycloneDX **SBOM** from `alp.lock`, a **byte-reproducible** source tarball, and the **build receipt** (#763) + SBOM wired into `release.yml` (receipt `provenance.sbomRef` → the SBOM).
 

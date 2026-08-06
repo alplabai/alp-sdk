@@ -1,5 +1,12 @@
 # Design: teaching example per missing 3rd-party library
 
+> **Historical transcript.** Design spec dated 2026-07-10. The SDK
+> has since shipped through the v0.15.0 release candidate
+> (`v0.15.0-rc1`; no plain `v0.15.0` tag exists) and into the ongoing
+> v0.16.0 development cycle (see `VERSIONS.md`, `CHANGELOG.md`) --
+> cross-check the current tree before treating anything below as
+> current design intent; kept for design-rationale only.
+
 Date: 2026-07-10
 Branch: `feat/3p-library-examples` (off `origin/dev`)
 Worktree: `/tmp/alp-3p-lib-examples`

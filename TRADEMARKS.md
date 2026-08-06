@@ -38,6 +38,7 @@ unofficial build.
 
 ## Questions / permission requests
 
-Open an issue in this repository, or contact Alp Lab AB through the channel
-listed on the project's official page. (Maintainers: replace this line with the
-canonical contact/legal address.)
+Open an issue in this repository, or contact Alp Lab AB at
+[contact@alplab.ai](mailto:contact@alplab.ai) (the same address
+`CODE_OF_CONDUCT.md` uses) or via
+[alplab.ai](https://alplab.ai), the project's official page.

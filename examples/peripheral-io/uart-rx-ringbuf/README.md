@@ -35,5 +35,5 @@ west build -t run
 
 - [`<alp/peripheral.h>`](../../../include/alp/peripheral.h) — the
   `alp_uart_rx_ringbuf_*` API surface.
-- [`vendors/lwrb/`](../../vendors/lwrb/) — the ring-buffer
+- [`vendors/lwrb/`](../../../vendors/lwrb/) — the ring-buffer
   library the helper is built on.

@@ -1,9 +1,13 @@
 # ABI stability markers
 
-Every public header in `include/alp/` carries an `@par ABI status:`
-tag classifying it as **`[ABI-STABLE]`** or **`[ABI-EXPERIMENTAL]`**.
-This doc explains what each marker means + lists the current
-classification per header.
+Every public header in `include/alp/` that declares an ABI symbol carries an
+`@par ABI status:` tag classifying it as **`[ABI-STABLE]`** or
+**`[ABI-EXPERIMENTAL]`**. Two top-level headers are symbol-less facades and
+carry no tag at all -- `board.h` (`#include`s the active board's generated
+routes header; declares no symbols of its own) and `console.h` (the portable
+shell command group self-registers; no exported symbols) -- see their rows
+in the table below. This doc explains what each marker means + lists the
+current classification per header.
 
 Paired with [`docs/release-policy.md`](release-policy.md) (the SemVer
 contract) and `.github/workflows/pr-abi-snapshot.yml` (the post-1.0

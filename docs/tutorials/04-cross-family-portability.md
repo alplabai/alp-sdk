@@ -19,8 +19,10 @@ The SDK has two product lines.  Picking the right one is a
 product-line decision (power envelope, perf, cost), not a
 within-product-line option flip:
 
-- **E1M** (35×35 mm) -- mW-class single-die SoCs.  Today: Alif
-  Ensemble (`E1M-AEN301..AEN801`, Cortex-M-only) and NXP i.MX 93
+- **E1M** (35×35 mm) -- mW-class single-die SoCs.  Core mix is
+  per-SKU, not uniform: Cortex-M-only on AEN301/AEN401,
+  heterogeneous Cortex-A32 + Cortex-M55 on AEN501..AEN801.  Today:
+  Alif Ensemble (`E1M-AEN301..AEN801`) and NXP i.MX 93
   (`E1M-NX9101`, a heterogeneous 2x Cortex-A55 + Cortex-M33 part --
   the E1M-side app targets its M33 RT core only, per
   `topology.m33:` in `metadata/e1m_modules/E1M-NX9101.yaml`).
@@ -76,8 +78,10 @@ are not interchangeable, by design:
 
 - Different mechanical footprint.
 - Different power envelopes (mW-class vs W-class).
-- Different SoC architecture (single-die M-class vs
-  heterogeneous A+M).
+- Different SoC architecture (E1M-X is uniformly heterogeneous
+  Cortex-A55 + Cortex-M33 on every SKU; E1M's core mix is
+  SKU-dependent, from Cortex-M-only to heterogeneous
+  Cortex-A32/A55 + Cortex-M).
 - Different NPU choices (Ethos-U / DEEPX DX-M1 / DRP-AI).
 - Different board connector pinout
   (`pinout/v1.json` vs `pinout/x-v1.json` in the e1m-spec

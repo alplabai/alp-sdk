@@ -1,7 +1,14 @@
 # CX Improvements: `alp` CLI, rich diagnostics, capability API
 
 **Date:** 2026-05-20
-**Status:** Draft — pending implementation
+**Status:** **Implemented, then partly superseded.** All three features shipped
+together in v0.9.0 (2026-07-06, CHANGELOG [v0.9.0]: "`alp` CLI as the single
+front door... and the validator collapse onto one diagnostic-rich
+implementation"; "Capability-layer adoption in examples"). Feature 1 (the
+`alp` CLI single front door) was then retired in v0.12.0 (2026-07-22, ADR
+0020) in favour of the standalone `tan` CLI -- do not rebuild it. Features 2
+(rich schema diagnostics) and 3 (the portable `alp_capabilities_t` /
+`alp_*_capabilities()` surface, e.g. `include/alp/adc.h`) remain live.
 **Owner:** alpCaner
 
 ## Motivation
