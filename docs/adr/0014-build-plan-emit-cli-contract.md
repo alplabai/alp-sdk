@@ -38,7 +38,7 @@ The settlement is recorded on their side in
 
 ## Decision
 
-`scripts/alp_orchestrate/` grows `--emit build-plan`: deterministic,
+`scripts/alp_orchestrate.py` grows `--emit build-plan`: deterministic,
 write-free, schema-versioned JSON carrying everything the consumer
 needs to materialise + run the build itself.
 

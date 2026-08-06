@@ -22,15 +22,16 @@
 #     permissive Apache-2.0 option per the schema's copyleft-free
 #     allowlist (ADR 0018 non-goal).
 #
-# HW-backends: metadata/library-profiles/mbedtls/hw-backends.yaml carries
-# per-accelerator priority binding (CryptoCell, inline-AES, CAU via the
-# GD32 bridge, OPTIGA Trust M handshake offload -- all currently
-# `status: planned`); folded in WS6-c Phase 3 (needs library-v1 schema
-# extension).
+# HW-backends: this manifest's own `integration.zephyr.hw_backends:`
+# block below carries per-accelerator priority binding (CryptoCell,
+# inline-AES, CAU via the GD32 bridge, OPTIGA Trust M handshake
+# offload -- all currently `status: planned`); folded in from the
+# retired standalone metadata/library-profiles/mbedtls/hw-backends.yaml
+# in WS6-c Phase 3.
 #
 # No `requires:` -- CONFIG_ALP_MBEDTLS_PURE_C=y is the always-available
 # floor on every target this manifest's `integration.zephyr` section
-# supports; the HW crypto accelerators named in hw-backends.yaml above are
+# supports; the HW crypto accelerators named in `hw_backends:` above are
 # all still `status: planned`, so none is a real, satisfiable hard
 # requirement yet.
 #

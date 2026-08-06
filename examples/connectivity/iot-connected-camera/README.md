@@ -52,7 +52,6 @@ iot-connected-camera/
 ## Build (v0.1, host smoke)
 
 ```bash
-ZEPHYR_BASE=~/zephyrproject/zephyr \
 west build -b native_sim/native/64 examples/connectivity/iot-connected-camera \
     -- -DEXTRA_ZEPHYR_MODULES=$(pwd)
 ```

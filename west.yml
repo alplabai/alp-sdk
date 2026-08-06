@@ -142,8 +142,9 @@ manifest:
   #                    when they list any of those libraries in
   #                    `board.yaml` `libraries:`.  Revisions below
   #                    are maintainer-verified-as-of 2026-05-14;
-  #                    bumps land alongside the library knob in
-  #                    `metadata/library-profiles/<name>/hw-backends.yaml`.
+  #                    bumps land alongside the library knob in that
+  #                    library's `integration.zephyr.hw_backends:` block
+  #                    in `metadata/libraries/<name>.yaml`.
   # `vendor-sdks`    - public vendor SDK repos pinned to the
   #                    verified tags (Alif sdk-alif, Renesas
   #                    rzv-fsp, NXP mcuxsdk-manifests).  Carries

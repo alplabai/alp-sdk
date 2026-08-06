@@ -83,7 +83,6 @@ metadata/library-profiles/
 │   └── mbedtls_config.h               (MbedTLS.  Set MBEDTLS_CONFIG_FILE
 │                                       to this when including.)
 └── cmsis_dsp/
-    ├── hw-backends.yaml               (SIMD/CORDIC/FFT/DMA backend bindings)
     └── README.md
 ```
 

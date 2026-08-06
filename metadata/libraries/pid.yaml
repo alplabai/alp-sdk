@@ -7,11 +7,12 @@
 #   * include/alp/pid.h, src/pid.c -- "Copyright 2026 Alp Lab AB,
 #     SPDX-License-Identifier: Apache-2.0"; header docs it as "pure C
 #     (no vendor dependency)", gated by CONFIG_ALP_SDK_PID.
-#   * metadata/library-profiles/pid/hw-backends.yaml -- `upstream_source:
-#     "maintainer-written thin C library"`; accelerators: fpu
-#     (CONFIG_ALP_PID_FPU=y, class simd) and timer_tick
-#     (CONFIG_ALP_PID_TIMER=y, class timing), sw_fallback
-#     CONFIG_ALP_PID_INT_MATH=y.
+#   * this manifest's own `integration.zephyr.hw_backends:` block below
+#     -- `upstream_source: "maintainer-written thin C library"`;
+#     accelerators: fpu (CONFIG_ALP_PID_FPU=y, class simd) and
+#     timer_tick (CONFIG_ALP_PID_TIMER=y, class timing), sw_fallback
+#     CONFIG_ALP_PID_INT_MATH=y (retired standalone
+#     metadata/library-profiles/pid/hw-backends.yaml folded in here).
 #   * tests/zephyr/pid/testcase.yaml -- built on native_sim.
 #
 # CONCERN (see ws6c-batchA-report.md): unlike the other 6 tokens in this

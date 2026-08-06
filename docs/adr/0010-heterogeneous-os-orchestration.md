@@ -190,9 +190,9 @@ and remains the live architecture.
 - [OpenAMP project](https://www.openampproject.org/) — upstream
   reference for the RPMsg + virtio framing.
 - Zephyr [IPC service](https://docs.zephyrproject.org/latest/services/ipc/ipc_service/ipc_service.html)
-  documentation (the `subsys/ipc/rpmsg_service` doc page this used to
-  cite is gone from current Zephyr docs; the module's source still
-  lives at `subsys/ipc/rpmsg_service` but the icmsg/icbmsg backends
-  are what the current IPC service documents).
+  documentation for the icmsg/icbmsg backends, and the
+  [RPMsg service sample](https://docs.zephyrproject.org/latest/samples/subsys/ipc/rpmsg_service/README.html)
+  for the `subsys/ipc/rpmsg_service` module this ADR's OpenAMP path
+  builds on.
 - Linux [remoteproc + RPMsg subsystem](https://docs.kernel.org/staging/remoteproc.html)
   documentation.

@@ -11,12 +11,13 @@
 #     vendors/doctest/README.md).
 #   * vendors/doctest/README.md -- MIT licence (LICENSE.txt upstream
 #     text unmodified); upstream https://github.com/doctest/doctest.
-#   * metadata/library-profiles/doctest/hw-backends.yaml -- pure-SW,
-#     no accelerator binding.
 #   * examples/testing/doctest-selftest/testcase.yaml -- built + run
 #     green on native_sim/native_sim/native/64.
 #
-# HW-backends: see metadata/library-profiles/doctest/ (folded in WS6-c Phase 3)
+# HW-backends: pure-SW, no accelerator binding -- see this manifest's
+# own `integration.zephyr.hw_backends:` block below (retired standalone
+# metadata/library-profiles/doctest/hw-backends.yaml folded in here in
+# WS6-c Phase 3; that directory still holds doctest_config.h).
 #
 # No `kconfig:` -- header-only, wired via the v0.4 CMake include-path
 # loader hook (doctest_config.h), not a CONFIG_ symbol; `module: doctest`

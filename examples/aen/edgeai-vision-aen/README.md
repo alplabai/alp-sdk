@@ -74,7 +74,6 @@ edgeai-vision-aen/
 ## Build (v0.1, host smoke)
 
 ```bash
-ZEPHYR_BASE=~/zephyrproject/zephyr \
 west build -b native_sim/native/64 examples/aen/edgeai-vision-aen \
     -- -DEXTRA_ZEPHYR_MODULES=$(pwd)
 ```

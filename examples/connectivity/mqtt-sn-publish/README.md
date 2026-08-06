@@ -98,10 +98,11 @@ encode/decode calls above stay the same regardless of SoM family.
 ## Reference
 
 - [`docs/firmware-quickstart.md`](../../../docs/firmware-quickstart.md)
-- [MQTT-SN v1.2 specification](https://github.com/njh/mqtt-sn-tools/blob/main/doc/MQTT-SN_spec_v1.2.pdf) --
+- [MQTT-SN v1.2 specification](https://www.oasis-open.org/committees/download.php/66091/MQTT-SN_spec_v1.2.pdf) --
   section 5.4.12 documents the PUBLISH message this example encodes
-  (mirrored here; the original oasis-open.org committee-documents
-  page that used to host it no longer resolves to the spec).
+  (the old oasis-open.org `documents.php?wg_abbrev=mqtt` committee
+  page still returns 200 but no longer lists the spec among its
+  rows; this `download.php` link serves the PDF directly).
 - `github.com/FreeRTOS/coreMQTT-SN` -- the pinned upstream library
   (`west.yml`, `extras-tier1` group) has been removed from GitHub
   entirely; `west update --group-filter +extras-tier1` cannot fetch

@@ -69,10 +69,10 @@ inference:
 
 # §D.lib.loader -- per-SoM hardware-accelerator capabilities.  Loader
 # (scripts/alp_project.py) reads this against each enabled library's
-# metadata/library-profiles/<name>/hw-backends.yaml to pick the
-# highest-priority matching CONFIG_* per accelerator class.  Counts
-# are populated where the silicon has multiple instances of the same
-# accelerator; booleans elsewhere.
+# `integration.zephyr.hw_backends:` block in metadata/libraries/<name>.yaml
+# to pick the highest-priority matching CONFIG_* per accelerator class.
+# Counts are populated where the silicon has multiple instances of the
+# same accelerator; booleans elsewhere.
 capabilities:
   optiga_trust_m:       true       # Populated on every E1M-AEN module.
 
