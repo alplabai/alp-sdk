@@ -115,9 +115,13 @@ To reproduce CI byte-for-byte, match the pin locally — `pyenv` and `uv` pick
 
 ### 1.2 Installing Tan from source
 
-During the coordinated v0.5 port, alp-sdk `dev` tracks `tan-cli/dev`; the
-published installer still resolves the frozen Rust v0.4.1 release. Install the
-current Python source in an isolated Python 3.12+ environment:
+As of `tan-cli` [v0.5.0](https://github.com/alplabai/tan-cli/releases/tag/v0.5.0)
+(current release: [v0.5.1](https://github.com/alplabai/tan-cli/releases/tag/v0.5.1)),
+the published installer (`install.sh`/`install.ps1`) installs the real Python
+`tan` directly -- it no longer resolves the frozen Rust v0.4.1 release.
+alp-sdk `dev` tracks `tan-cli/dev` instead, to stay ahead of the last tagged
+release; install the current Python source in an isolated Python 3.12+
+environment:
 
 ```bash
 git clone --branch dev https://github.com/alplabai/tan-cli
@@ -125,10 +129,13 @@ python3 -m venv tan-cli/.venv
 tan-cli/.venv/bin/python -m pip install ./tan-cli/python
 ```
 
-From v0.5, PyInstaller release archives and `install.sh`/`install.ps1` bundle
-the Python runtime, so release users do not install Python separately. The
-`alp-tan` PyPI distribution is reserved but not yet published. The old
-`crates/` tree remains the v0.4.1 behaviour oracle.
+The release installer's PyInstaller archives bundle their own Python
+runtime, so release users do not install Python separately. Alp's `tan`
+is not distributed on PyPI, and the bare name `tan` there belongs to an
+unrelated project (`200` for it: `tan` v23.7.0, "The compromising code
+formatter") -- `pip install tan` does not get you this tool. `alp-tan` is
+not registered there either (`404` for it, not a reservation placeholder).
+The old `crates/` tree remains the frozen v0.4.1 behaviour oracle.
 
 ---
 

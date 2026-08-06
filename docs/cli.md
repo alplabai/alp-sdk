@@ -7,10 +7,13 @@ core, packages images and models, runs Renode, opens a serial console, and
 provides the inspection/debugging commands used by Alp IDE.
 
 The current implementation is Python and is independently versioned in
-[`alplabai/tan-cli`](https://github.com/alplabai/tan-cli). During the
-coordinated v0.5 port, alp-sdk `dev` tracks `tan-cli/dev`; the latest published
-release remains the frozen Rust v0.4.1 behaviour oracle. Install the Python
-development line into an isolated Python 3.12+ environment:
+[`alplabai/tan-cli`](https://github.com/alplabai/tan-cli). As of
+[v0.5.0](https://github.com/alplabai/tan-cli/releases/tag/v0.5.0) (current
+release: [v0.5.1](https://github.com/alplabai/tan-cli/releases/tag/v0.5.1)),
+the published release installs the real Python `tan` directly -- it no
+longer resolves the frozen Rust v0.4.1 release. alp-sdk `dev` tracks
+`tan-cli/dev` instead, to stay ahead of the last tagged release; install the
+Python development line into an isolated Python 3.12+ environment:
 
 ```bash
 git clone --branch dev https://github.com/alplabai/tan-cli
@@ -43,9 +46,13 @@ For manual asset selection, checksum/provenance verification, system-wide
 installation, and the measured Linux glibc floor, use tan-cli's own
 [installation reference](https://github.com/alplabai/tan-cli#install). Do not
 copy a raw-binary URL from the pre-v0.5 layout: the Python release is an archive
-containing `tan` plus its `_internal/` runtime. `alp-tan` is reserved as the
-distribution name but is not published on PyPI yet. `cargo install` installs
-the stale v0.4.1 program and is not a supported way to get current Tan.
+containing `tan` plus its `_internal/` runtime. Alp's `tan` is not distributed
+on PyPI, and the bare name `tan` there belongs to an unrelated project (the
+PyPI JSON API returns `200` for it: `tan` v23.7.0, "The compromising code
+formatter") -- `pip install tan` does not get you this tool. `alp-tan` is not
+registered there either (`404` for it, not a reservation placeholder).
+`cargo install` installs the stale v0.4.1 program and is not a supported way
+to get current Tan.
 
 ## Where planning and commands live
 
