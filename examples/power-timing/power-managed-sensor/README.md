@@ -165,7 +165,7 @@ stays the same.
 
 - [`docs/board-config-features.md`](../../../docs/board-config-features.md)
   "Per-slice power-management profile" -- the schema reference.
-- [`examples/connectivity/production-deployment`](../production-deployment/)
+- [`examples/connectivity/production-deployment`](../../connectivity/production-deployment/)
   -- the application-core counterpart (sleep_mode: standby with
   wake-on-network for the Mender poll thread).
 - [`docs/portability.md`](../../../docs/portability.md) -- which

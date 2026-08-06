@@ -2,9 +2,10 @@
 
 `alp-sdk` is a **public** repository. GitHub's own guidance is to never
 attach a self-hosted runner to a public repo: a fork pull request would
-run untrusted code on your hardware. But the Yocto **bitbake** build and
-the Alif **hardware-in-loop (HiL)** flash both need self-hosted runners
-(a Yocto host with the licensed RZ BSP; a lab box with a board on USB).
+run untrusted code on your hardware. The Yocto **bitbake** build needs
+a self-hosted runner (a Yocto host with the licensed RZ BSP). Real-silicon
+hardware-in-the-loop (HiL) verification does **not** — it is never CI at
+all, self-hosted or otherwise; see [`HW-IN-LOOP.md`](HW-IN-LOOP.md).
 
 We resolve this with a **dispatch bridge**: the public repo never hosts a
 runner. It dispatches the heavy work to the **private** `alp-sdk-internal`
@@ -89,7 +90,12 @@ Labels must match the private workflow's `runs-on`:
 | Job | Labels | Host |
 |-----|--------|------|
 | bitbake (Yocto) | `self-hosted, linux, x64, alp-bitbake` | i9 Ubuntu box w/ the RZ BSP v6.30 tree |
-| AEN HiL | `self-hosted, linux, hil-aen` | lab box with an Alif dev kit on USB |
+
+Bitbake is the only self-hosted job today. There is no AEN (or any
+other) HiL runner, on this repo or on `alp-sdk-internal` — on-silicon
+verification is a manually-invoked bench run instead, not CI at all;
+see [`HW-IN-LOOP.md`](HW-IN-LOOP.md) for why a HiL runner (public or
+private) is unlawful/unworkable here, not just unbuilt.
 
 Register against the **private** repo:
 
@@ -109,9 +115,11 @@ Runner environment (in `~/actions-runner/.env`):
 
 Run **ephemeral or containerized** (fresh per job) for defense-in-depth.
 
-## Adding a new self-hosted job (e.g. AEN HiL)
+## Adding a new self-hosted job
 
-Follow the same shape: a GitHub-hosted bridge in `alp-sdk` (guarded,
-internal-only) that dispatches to `alp-sdk-internal`, whose self-hosted
-job runs the work and posts a commit status back. Never add a
-`runs-on: [self-hosted, …]` job directly to the public repo.
+Follow the same shape as bitbake: a GitHub-hosted bridge in `alp-sdk`
+(guarded, internal-only) that dispatches to `alp-sdk-internal`, whose
+self-hosted job runs the work and posts a commit status back. Never
+add a `runs-on: [self-hosted, …]` job directly to the public repo.
+Hardware-in-the-loop is explicitly **not** a candidate for this
+pattern — see [`HW-IN-LOOP.md`](HW-IN-LOOP.md).

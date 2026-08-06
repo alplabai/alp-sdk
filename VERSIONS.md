@@ -130,7 +130,7 @@ v0.1 ships first-class support for the **E1M Development Board**
 
 The Zephyr **board file** for `alp_e1m_aen801_m55_he` /
 `alp_e1m_aen801_m55_hp` ships in-tree, under
-[`zephyr/boards/alp/`](../zephyr/boards/alp/) — there is no separate
+[`zephyr/boards/alp/`](zephyr/boards/alp/) — there is no separate
 board-file repo.  The overlay above re-aliases what that board file
 exposes.
 
@@ -355,7 +355,8 @@ v0.3 cycle.  Each is gated so a workspace that doesn't need the
 v0.4 deliverable falls back cleanly to the v0.3 stubs.  Each also
 has a corresponding row in [`docs/test-plan.md`](docs/test-plan.md);
 most rows are 🟡 partial -- failure paths covered by CI ctest, real
-target verification still parked behind the `hil-yocto` runner.
+target verification still gated on an explicit Yocto bench run
+(there is no automated HIL runner -- see `docs/ci/HW-IN-LOOP.md`).
 
 **Peripherals + IoT (Yocto):**
 

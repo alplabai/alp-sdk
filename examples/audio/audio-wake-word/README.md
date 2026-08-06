@@ -21,12 +21,15 @@ bursting the convolutions on demand.
 > `ethosu_utils/inference_process.cpp` calling `ethosu_invoke`
 > directly, bypassing `<alp/inference.h>` -- and on the Ethos-U85 (a
 > different NPU/core); the Ethos-U55-HE this example targets has only
-> had an ID readback on silicon (`0x10104201`, same doc). Per
-> [`docs/verification-status.md`](../../../docs/verification-status.md),
+> had an ID readback on silicon (`0x10104201`, same doc). Per the
+> "`<alp/inference.h>` Ethos-U on AEN" row of
+> [`docs/verification-status.md`](../../../docs/verification-status.md)
+> (generated from [`docs/test-plan.md`](../../../docs/test-plan.md)),
 > the SDK's own per-NPU TFLM driver gates
-> (`CONFIG_ALP_TFLM_ETHOS_U85/U65/U55`) remain `[UNTESTED]` --
-> Kconfig-reachable, no Vela-compiled model dispatched through them
-> yet. This example's own MFCC feature extraction and wake-word decode
+> (`CONFIG_ALP_TFLM_ETHOS_U85/U65/U55`) are Kconfig-reachable, but no
+> Vela-compiled model has been dispatched THROUGH this portable
+> backend yet -- only through the vendor-direct examples named above,
+> which bypass it. This example's own MFCC feature extraction and wake-word decode
 > (`extract_mfcc`/`decode_wake` in `src/main.c`) are still stubs, and
 > the model bytes (`s_model[]`) are still a placeholder.
 

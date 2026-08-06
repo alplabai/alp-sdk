@@ -72,7 +72,7 @@ into the topic-specific docs.
   doc's *Silicon scope — which E-part has what* section).
 - [glossary.md](glossary.md) — terms.
 - [adr/README.md](adr/README.md) — Architecture Decision Records
-  index (17 ADRs).
+  index (24 ADRs; recount with `ls docs/adr/[0-9]*.md | wc -l`).
 
 ## Per-SoM bring-up
 
@@ -169,12 +169,19 @@ into the topic-specific docs.
 
 ## Testing & verification
 
-- [test-plan.md](test-plan.md) — authoritative status of every
-  ABI claim.
+- [test-plan.md](test-plan.md) — the SDK's primary verification
+  ledger; every claimed feature's silicon-evidence status lives
+  here, hand-maintained.  Three other hand-maintained views of "is X
+  verified" exist -- [os-support-matrix.md](os-support-matrix.md)'s
+  GA labels, `metadata/chips/<name>.yaml` `verification:` blocks,
+  and `@par Verification status` Doxygen tags on public headers --
+  none is generated from this file or gated against it, so any can
+  still disagree with it; this ledger wins when they do.
 - [testing.md](testing.md) — test harness overview.
 - [test-coverage-audit.md](test-coverage-audit.md) — gap audit.
 - [verification-status.md](verification-status.md) — per-feature
-  verification matrix.
+  verification matrix, GENERATED from test-plan.md
+  (`scripts/gen_verification_status.py`); do not hand-edit.
 - [local-ci.md](local-ci.md) — running CI checks locally.
 
 ## Tutorials

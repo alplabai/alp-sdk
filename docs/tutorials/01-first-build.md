@@ -1,4 +1,4 @@
-<!-- Last verified: 2026-07-17 (real board target, in-tree). -->
+<!-- Last verified: 2026-08-05 (Step 4 `tan flash` needs the project path -- bare `tan flash` defaults to the current directory, not the built example). -->
 
 # 01 -- First build: GPIO + LED
 
@@ -132,8 +132,13 @@ west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/peripheral
 ## Step 4 -- Flash + run
 
 ```bash
-tan flash
+tan flash examples/peripheral-io/gpio-button-led
 ```
+
+(the `APP_PATH` positional -- `tan flash` bare defaults to the current
+directory, so it must name the same project Step 3 built if you're still at
+the repo root; `--project examples/peripheral-io/gpio-button-led` is
+equivalent.)
 
 Watch the console: the LED blinks four times over ~200 ms (the init
 smoke test), then the app samples the button once and reports

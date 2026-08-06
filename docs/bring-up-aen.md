@@ -461,9 +461,11 @@ Once §6's runbook passes:
 
 1. Use [`scripts/program_eeprom.py`](../scripts/program_eeprom.py)
    to write the production manifest (real serial, real mfg
-   date, real SKU).  See
-   [`docs/board-id.md`](board-id.md) for the separate, carrier-side
-   BOARD_ID divider path.
+   date, real SKU).  This is the SoM's identity; the E1M EVK's
+   separate, carrier-side BOARD_ID divider path is documented in
+   [`metadata/boards/e1m-evk.yaml`](../metadata/boards/e1m-evk.yaml)'s
+   `board_id:` block (not `docs/board-id.md`, which is EEPROM-only
+   and explicitly out of scope for the carrier path).
 2. Sign the application image with MCUboot via
    [`zephyr/sysbuild/aen/sysbuild.conf`](../zephyr/sysbuild/aen/sysbuild.conf).
    Dev key under [`keys/`](../keys/); production key never

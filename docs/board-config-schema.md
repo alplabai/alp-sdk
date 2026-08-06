@@ -160,11 +160,14 @@ som:
                             # `default_hw_rev`.  Validated at build
                             # time against the family hw_revisions
                             # table (see board-config-hardware.md);
-                            # at runtime the SDK reads the rev from
-                            # the on-module EEPROM manifest and
-                            # aborts boot on mismatch.  There is no
-                            # SoM-side ADC cross-check; a carrier
-                            # BOARD_ID divider is a separate path.
+                            # at runtime the app can compare it
+                            # against the on-module EEPROM manifest
+                            # via `alp_hw_info_assert_matches_build()`
+                            # -- mismatch handling (typically halt)
+                            # is the app's call, not automatic.
+                            # There is no SoM-side ADC cross-check; a
+                            # carrier BOARD_ID divider is a separate
+                            # path.
 
   overrides:                # rare -- only for custom SoM variants
     secure_element: none    # custom AEN without the OPTIGA Trust M
@@ -384,8 +387,10 @@ or not-yet-final SKUs carry `partial_hw_config: true` so
 the loader knows to expect SKU-specific overrides from the
 consumer's `board.yaml`.  Per the project memory note, values
 not in the silicon datasheet stay `TBD` (e.g.
-`board_id.adc_channel` in family-level `hw-revisions.yaml`)
-until the user supplies them authoritatively.
+`board_id.adc_channel` in the *board* preset's `hw_revisions:`
+entry -- `metadata/boards/e1m-evk.yaml`, not the SoM's
+`metadata/e1m_modules/` family file) until the user supplies them
+authoritatively.
 
 ### `libraries` block (user-facing, no wrapper)
 
