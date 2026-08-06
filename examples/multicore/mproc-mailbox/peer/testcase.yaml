@@ -18,6 +18,6 @@ sample:
 tests:
   alp_sdk.examples.mproc_mailbox.peer.aen:
     platform_allow:
-      - ensemble_e8_dk/ae402fa0e5597le0/rtss_he
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
     extra_args: CONFIG_ALP_SDK_MPROC=y
     build_only: true   # roundtrip verification is HiL (dual-ATOC bench flash), not a CI run.

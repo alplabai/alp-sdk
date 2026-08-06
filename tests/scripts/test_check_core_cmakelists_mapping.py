@@ -149,6 +149,44 @@ def test_shared_cmakelists_flagged_assertion_2(tmp_path):
     assert "2 distinct Zephyr cores" in sharing[0]
 
 
+def test_shared_cmakelists_with_no_core_literal_flagged_assertion_2_only(
+        tmp_path):
+    # Assertion 2 standalone (see the gate's module docstring): the
+    # shared CMakeLists.txt bakes NO `--core` literal at all, so
+    # `_CORE_RE.search` returns None and assertion 1 structurally
+    # cannot fire -- only assertion 2 can catch this sharing. No such
+    # file exists in the real corpus today, so this is the one shape
+    # nothing else exercises.
+    ex = tmp_path / "examples" / "demo"
+    _write(ex / "board.yaml", """
+        som:
+          sku: E1M-AEN801
+        preset: e1m-evk
+        cores:
+          a32_cluster:
+            os: "off"
+          m55_he:
+            app: ./src
+          m55_hp:
+            app: ./src
+        diagnostics:
+          log_level: info
+        """)
+    _write(ex / "CMakeLists.txt", """
+        cmake_minimum_required(VERSION 3.20)
+        find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+        project(demo LANGUAGES C)
+        target_sources(app PRIVATE src/main.c)
+        """)
+
+    problems = gate.find_problems(tmp_path)
+    assert not any("literal agreement violated" in p for p in problems), problems
+    sharing = [p for p in problems if "shared by" in p]
+    assert len(sharing) == 1, problems
+    assert "m55_he" in sharing[0] and "m55_hp" in sharing[0]
+    assert "2 distinct Zephyr cores" in sharing[0]
+
+
 def test_real_corpus_clean():
     # The real repo, audited (issue #1275: not pre-verified before this
     # gate shipped) -- 100 examples/**/board.yaml, ~96 real per-example

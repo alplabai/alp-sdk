@@ -82,8 +82,7 @@ compiler licence + DA9292 OTP confirmation.
 ## Alif Semiconductor (AEN family)
 
 **Surface impact**: `examples/aen/` flagships +
-`chips/aen-isp` /`<alp/gpu2d.h>` AEN backends + the dual-
-image build flow for `mproc-mailbox`.
+`chips/aen-isp` /`<alp/gpu2d.h>` AEN backends.
 
 **Status update 2026-05-14 (verified against upstream)**:
 
@@ -370,11 +369,11 @@ live; nothing depends on it.
 
 **Open items**:
 
-- 📋 **v0.4 dual-image build flow.**  The `mproc-mailbox`
-  HE-side peer (§C.30) builds via single-target invocation
-  today; the dual-image sysbuild glue (under
-  `zephyr/sysbuild/aen/`) is an in-tree v0.4 gap, not gated
-  on any external repo.
+- ✅ **v0.4 dual-image build flow** (closed 2026-08-06, #1275).
+  `board.yaml` now declares both `m55_hp` and `m55_he` as real
+  project cores, so `tan build` builds the `mproc-mailbox`
+  HE-side peer (§C.30) alongside the HP side from one project --
+  no sysbuild glue, not gated on any external repo.
 - 📋 **Per-SoM HW baselines.**  Pillar 5 wants per-(SoM, OS)
   bench baselines under `tests/bench/baselines/`.  Those
   files have to be captured against real silicon, using the
