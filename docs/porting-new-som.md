@@ -721,10 +721,10 @@ twister --testsuite-root tests/zephyr/conformance \
 
 The qualified in-repo boards (`zephyr/boards/alp/`) are in the
 scenario's `platform_allow` too, so the same gate builds — and, on
-the bench or the nightly HIL, runs — with the real backend
-selected.  Per-board `boards/<board>.conf` fragments pin the
-matching `CONFIG_ALP_SOC_*` capability profile.  E.g. a build-only
-smoke for the AEN801 HE core:
+an explicitly-invoked bench run (`docs/ci/HW-IN-LOOP.md`), runs —
+with the real backend selected.  Per-board `boards/<board>.conf`
+fragments pin the matching `CONFIG_ALP_SOC_*` capability profile.
+E.g. a build-only smoke for the AEN801 HE core:
 
 ```bash
 twister --testsuite-root tests/zephyr/conformance \

@@ -190,8 +190,10 @@ Expected: PHYID1 reads `0x001C` (Realtek OUI).  After ~3-5 s with a
   command set is v0.3.x follow-up).
 * **TMP112**: read the temperature; should be within
   ±5 °C of ambient.
-* **24C128 EEPROM**: read first 8 bytes; should be the manifest
-  header magic `ALPH` (`0x41 0x4C 0x50 0x48`).
+* **24C128 EEPROM**: read first 4 bytes; should be the manifest
+  header magic, wire bytes `0x48 0x50 0x4C 0x41` (`HPLA` in a
+  hexdump; decodes as the little-endian uint32 `0x414C5048`,
+  `ALPH`).
 * **DA9292 status**: `da9292_get_status()` -- expect CH1 PG=1,
   CH2 PG=0 (CH2 is the V2N-M1-only DEEPX rail), no fault bits.
 * **ACT88760 status**: `act8760_get_status()` -- expect no
