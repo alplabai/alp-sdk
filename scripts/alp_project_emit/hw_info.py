@@ -158,11 +158,24 @@ def _emit_hw_info_h(
                     f'#define ALP_HW_BUILD_PRIMARY_CORE    "{primary_core_id}"'
                 )
             lines.append("")
-            lines.append("/* Per-core presence flags -- `#ifdef "
-                         "ALP_HW_BUILD_HAS_<id>` to compile slice-")
-            lines.append(" * specific code.  Each macro's value is the "
-                         "slice's OS string, useful for")
-            lines.append(" * `#if defined(...)`-style runtime selection. */")
+            lines.append("/* Per-core presence flags: `ALP_HW_BUILD_HAS_<id>` means "
+                         "core <id> exists in")
+            lines.append(" * the project; its value is that core's OS string.  Defined "
+                         "for EVERY active")
+            lines.append(" * core in EVERY slice -- it cannot say which core is "
+                         "compiling.")
+            lines.append(" *")
+            lines.append(" * `ALP_HW_BUILD_PRIMARY_CORE` names the compiling slice ONLY "
+                         "when this header")
+            lines.append(" * was emitted --core-scoped (the per-slice build path).  "
+                         "Emitted without")
+            lines.append(" * --core -- as the project-wide recipe in "
+                         "docs/board-config-emit.md does -- it")
+            lines.append(" * names the project's primary core (first M-class core "
+                         "alphabetically),")
+            lines.append(" * which on a multi-core project is not necessarily the one "
+                         "you are")
+            lines.append(" * building. */")
             for cid in active:
                 lines.append(
                     f'#define ALP_HW_BUILD_HAS_{cid.upper():<12} "{v2_cores[cid]}"'
