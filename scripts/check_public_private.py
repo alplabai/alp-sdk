@@ -244,7 +244,7 @@ def _validate_reviewed_accepted(entries: tuple[ReviewedAcceptedEntry, ...]) -> N
 REVIEWED_ACCEPTED: tuple[ReviewedAcceptedEntry, ...] = (
     ReviewedAcceptedEntry(
         path="CHANGELOG.md",
-        line=6870,
+        line=6912,
         category="SOM_PHYSICAL_DESIGN_DETAIL",
         # Split so this source line does not itself trip
         # SOM_PHYSICAL_DESIGN_DETAIL -- the runtime value is unchanged
@@ -260,7 +260,7 @@ REVIEWED_ACCEPTED: tuple[ReviewedAcceptedEntry, ...] = (
     ),
     ReviewedAcceptedEntry(
         path="CHANGELOG.md",
-        line=8128,
+        line=8170,
         category="PRIVATE_AUDIT_REFERENCE",
         # Split so this source line does not itself trip
         # PRIVATE_AUDIT_REFERENCE -- runtime value unchanged; see the NOTE ON
@@ -278,7 +278,7 @@ REVIEWED_ACCEPTED: tuple[ReviewedAcceptedEntry, ...] = (
     ),
     ReviewedAcceptedEntry(
         path="CHANGELOG.md",
-        line=10957,
+        line=10999,
         category="PRIVATE_AUDIT_REFERENCE",
         excerpt="docs/aen-feature-au" "dit-2026-05.md",
         reason=(
@@ -292,7 +292,7 @@ REVIEWED_ACCEPTED: tuple[ReviewedAcceptedEntry, ...] = (
     ),
     ReviewedAcceptedEntry(
         path="CHANGELOG.md",
-        line=11119,
+        line=11161,
         category="PRIVATE_AUDIT_REFERENCE",
         excerpt="docs/aen-feature-au" "dit-2026-05.md",
         reason=(
