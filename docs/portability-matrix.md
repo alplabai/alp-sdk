@@ -154,6 +154,7 @@ reports before a build.
 | `modbus` | A | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `nanopb` | A | `0.4.9.1` | Zlib | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `nlohmann-json` | B | `3.11.3` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `onnxruntime` | B | `1.28.0` | MIT & Apache-2.0 | ❌ core_class `a` | ❌ core_class `a` | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `opus` | B | `v1.5.2` | BSD-3-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `pid` | B | `0.9.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `ros2` | B | `humble` | Apache-2.0 | ❌ core_class `a` | ❌ core_class `a` | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -161,7 +162,7 @@ reports before a build.
 | `u8g2` | B | `2.36.5` | BSD-2-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `zcbor` | A | `0.9.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
-**243 / 245 (library × SKU) cells compatible (2 incompatible, 0 n/a).**
+**248 / 252 (library × SKU) cells compatible (4 incompatible, 0 n/a).**
 
 ### E1M-X family (Cortex-A55 + Cortex-M33)
 
@@ -196,6 +197,7 @@ reports before a build.
 | `modbus` | A | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `nanopb` | A | `0.4.9.1` | Zlib | ✅ | ✅ | ✅ | ✅ |
 | `nlohmann-json` | B | `3.11.3` | MIT | ✅ | ✅ | ✅ | ✅ |
+| `onnxruntime` | B | `1.28.0` | MIT & Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `opus` | B | `v1.5.2` | BSD-3-Clause | ✅ | ✅ | ✅ | ✅ |
 | `pid` | B | `0.9.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `ros2` | B | `humble` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
@@ -203,7 +205,7 @@ reports before a build.
 | `u8g2` | B | `2.36.5` | BSD-2-Clause | ✅ | ✅ | ✅ | ✅ |
 | `zcbor` | A | `0.9.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 
-**140 / 140 (library × SKU) cells compatible.**
+**144 / 144 (library × SKU) cells compatible.**
 
 Legend: ✅ `requires:` satisfied and wireable on the SoM · ❌ incompatible (the named `requires:` constraint fails) · — not applicable (no `integration:` for any OS this SoM runs).
 <!-- END GENERATED: gen_portability_matrix_libraries -->

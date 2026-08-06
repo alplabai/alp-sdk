@@ -49,8 +49,8 @@
  * Dispatcher contract
  *   Mirrors the 7-symbol hook shape the Yocto dispatcher in
  *   inference_yocto.c calls (open/num_inputs/num_outputs/get_input/
- *   get_output/invoke/close).  The handle layout below MUST match
- *   inference_yocto.c's `struct alp_inference` exactly.
+ *   get_output/invoke/close).  The handle layout (struct alp_inference)
+ *   is the shared definition in inference_yocto_internal.h (issue #1257).
  */
 
 #include <cstddef>
@@ -73,15 +73,7 @@ extern "C" {
 #include "alp/inference.h"
 }
 
-/* Mirror of the yocto dispatcher's struct alp_inference layout so we can
- * read/write be_state without exposing the type.  MUST match
- * inference_yocto.c exactly -- keep in sync if the dispatcher's fields
- * change. */
-struct alp_inference_handle_layout {
-	bool                    in_use;
-	alp_inference_backend_t backend;
-	void                   *be_state;
-};
+#include "inference_yocto_internal.h"
 
 namespace
 {
@@ -170,7 +162,7 @@ void fill_tensor_descriptor(dxrt::Tensor &t, void *data, alp_inference_tensor_t 
 extern "C" alp_status_t alp_inference_deepx_open(struct alp_inference         *h_,
                                                  const alp_inference_config_t *cfg)
 {
-	auto *h = reinterpret_cast<alp_inference_handle_layout *>(h_);
+	auto *h = h_;
 
 	auto *st = new (std::nothrow) DeepxState();
 	if (st == nullptr) {
@@ -214,14 +206,14 @@ extern "C" alp_status_t alp_inference_deepx_open(struct alp_inference         *h
 
 extern "C" std::size_t alp_inference_deepx_num_inputs(struct alp_inference *h_)
 {
-	auto *h  = reinterpret_cast<alp_inference_handle_layout *>(h_);
+	auto *h  = h_;
 	auto *st = static_cast<DeepxState *>(h->be_state);
 	return (st != nullptr) ? st->inputs.size() : 0u;
 }
 
 extern "C" std::size_t alp_inference_deepx_num_outputs(struct alp_inference *h_)
 {
-	auto *h  = reinterpret_cast<alp_inference_handle_layout *>(h_);
+	auto *h  = h_;
 	auto *st = static_cast<DeepxState *>(h->be_state);
 	return (st != nullptr) ? st->outputs.size() : 0u;
 }
@@ -230,7 +222,7 @@ extern "C" alp_status_t alp_inference_deepx_get_input(struct alp_inference   *h_
                                                       std::size_t             index,
                                                       alp_inference_tensor_t *out)
 {
-	auto *h  = reinterpret_cast<alp_inference_handle_layout *>(h_);
+	auto *h  = h_;
 	auto *st = static_cast<DeepxState *>(h->be_state);
 	if (st == nullptr) {
 		return ALP_ERR_NOT_READY;
@@ -248,7 +240,7 @@ extern "C" alp_status_t alp_inference_deepx_get_output(struct alp_inference   *h
                                                        std::size_t             index,
                                                        alp_inference_tensor_t *out)
 {
-	auto *h  = reinterpret_cast<alp_inference_handle_layout *>(h_);
+	auto *h  = h_;
 	auto *st = static_cast<DeepxState *>(h->be_state);
 	if (st == nullptr) {
 		return ALP_ERR_NOT_READY;
@@ -273,7 +265,7 @@ extern "C" alp_status_t alp_inference_deepx_get_output(struct alp_inference   *h
 
 extern "C" alp_status_t alp_inference_deepx_invoke(struct alp_inference *h_)
 {
-	auto *h  = reinterpret_cast<alp_inference_handle_layout *>(h_);
+	auto *h  = h_;
 	auto *st = static_cast<DeepxState *>(h->be_state);
 	if (st == nullptr || st->engine == nullptr) {
 		return ALP_ERR_NOT_READY;
@@ -295,7 +287,7 @@ extern "C" alp_status_t alp_inference_deepx_invoke(struct alp_inference *h_)
 
 extern "C" void alp_inference_deepx_close(struct alp_inference *h_)
 {
-	auto *h  = reinterpret_cast<alp_inference_handle_layout *>(h_);
+	auto *h  = h_;
 	auto *st = static_cast<DeepxState *>(h->be_state);
 	if (st == nullptr) {
 		return;
