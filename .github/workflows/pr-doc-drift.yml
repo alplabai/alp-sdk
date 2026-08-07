@@ -7,7 +7,8 @@
 # doc-to-doc link is dead, when VERSIONS.md carries no row for the
 # released version, when an ALP-Bxxx diagnostic landing page is still a
 # placeholder, or when docs/board-id.md's alp_hw_info_eeprom_t struct
-# disagrees with include/alp/hw_info.h (#1231).  Mirrors
+# or scripts/program_eeprom.py's pack-format length constants disagree
+# with include/alp/hw_info.h (#1231).  Mirrors
 # scripts/check_doc_drift.py + scripts/check_doc_links.py +
 # scripts/check_diagnostic_narratives.py +
 # scripts/check_version_doc_sync.py +
@@ -29,6 +30,7 @@ on:
       - 'scripts/check_diagnostic_narratives.py'
       - 'scripts/check_version_doc_sync.py'
       - 'scripts/check_board_id_doc_parity.py'
+      - 'scripts/program_eeprom.py'
       - '.github/workflows/pr-doc-drift.yml'
   push:
     branches: [main, dev]
@@ -43,6 +45,7 @@ on:
       - 'scripts/check_diagnostic_narratives.py'
       - 'scripts/check_version_doc_sync.py'
       - 'scripts/check_board_id_doc_parity.py'
+      - 'scripts/program_eeprom.py'
       - '.github/workflows/pr-doc-drift.yml'
   workflow_dispatch:
 
