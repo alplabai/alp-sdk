@@ -193,16 +193,42 @@ class ReviewedAcceptedEntry:
     none of its content (e.g. the CHANGELOG recording that a doc was
     relocated, or a historical cross-reference to its since-moved filename).
 
-    Anchored on `line` AND a short verbatim `excerpt` of that line's text,
-    not the line number alone: CHANGELOG.md line numbers drift as entries
-    are prepended, so a bare-line-number anchor would silently re-point at
-    whatever unrelated content later occupies that line, exempting the
-    wrong thing instead of failing loud.  `excerpt` must be a substring of
-    the actual line at `line` for the exemption to apply (see
-    _is_reviewed_accepted) -- if the file is edited and the excerpt no
-    longer matches, the finding reappears and the gate fails closed rather
-    than exempting silently.  To re-anchor after a drift: grep the file for
-    `excerpt`, find its new line number, and update `line`.
+    Matched on `path` + `category` + `excerpt` (see _is_reviewed_accepted)
+    -- deliberately NOT on `line`.  CHANGELOG.md line numbers drift as
+    entries are prepended, so anchoring on a bare line number silently
+    re-points the exemption at whatever unrelated content later occupies
+    that line, exempting the wrong thing instead of failing loud (measured:
+    one new top-of-file CHANGELOG.md entry shifted every entry below off
+    its true line and turned all four back into findings).  `line` is kept
+    only as a human-facing hint for where the reviewer originally found the
+    text -- it plays no part in matching, and does not need to be updated
+    when the file shifts.
+
+    `excerpt` must be a substring of the matching line for the exemption to
+    apply, AND it must match EXACTLY ONE line of the file it names --
+    enforced by `scan()` itself (see the per-file `active_entries` filter
+    there), not merely hoped for.  Matching by content with no positional
+    bound would be unsafe on its own: the relocated AEN feature-coverage
+    audit doc's bare filename, on its own, matches FOUR distinct
+    CHANGELOG.md lines -- three of them the real PRIVATE_AUDIT_REFERENCE
+    entries below -- not the one each entry was reviewed against, so an
+    entry signed off on one specific sentence would silently exempt every
+    other line citing that filename too, including a brand-new bullet no
+    reviewer had ever seen.  "Long and specific" is not a bound; a repeated
+    citation of the same artifact is exactly the shape this file
+    legitimately has more than once.
+
+    An entry whose excerpt matches nowhere at all in the file it names is a
+    dead exemption -- the reviewed content was deleted, not just moved or
+    reworded.  An entry whose excerpt matches more than one line is an
+    ambiguous exemption -- content nobody reviewed would otherwise inherit
+    the sign-off, silently, including future content.  `scan()` suppresses
+    nothing for either case (the ordinary finding reappears on every
+    matching line), and `_reviewed_accepted_integrity_messages`, called
+    from `main()` after `scan()` returns -- never from inside `scan()`
+    itself, so a stale or ambiguous entry can never discard the real
+    findings the same run also collected -- prints why, whenever the run's
+    root is this actual checkout.
 
     `reason` is required and non-empty (enforced by
     _validate_reviewed_accepted at import time) so nobody can land a silent
@@ -244,7 +270,7 @@ def _validate_reviewed_accepted(entries: tuple[ReviewedAcceptedEntry, ...]) -> N
 REVIEWED_ACCEPTED: tuple[ReviewedAcceptedEntry, ...] = (
     ReviewedAcceptedEntry(
         path="CHANGELOG.md",
-        line=6870,
+        line=6899,
         category="SOM_PHYSICAL_DESIGN_DETAIL",
         # Split so this source line does not itself trip
         # SOM_PHYSICAL_DESIGN_DETAIL -- the runtime value is unchanged
@@ -260,12 +286,16 @@ REVIEWED_ACCEPTED: tuple[ReviewedAcceptedEntry, ...] = (
     ),
     ReviewedAcceptedEntry(
         path="CHANGELOG.md",
-        line=8128,
+        line=8157,
         category="PRIVATE_AUDIT_REFERENCE",
-        # Split so this source line does not itself trip
-        # PRIVATE_AUDIT_REFERENCE -- runtime value unchanged; see the NOTE ON
-        # FIXTURE STRINGS in tests/scripts/test_check_public_private.py.
-        excerpt="docs/aen-feature-au" "dit-2026-05.md",
+        # Lengthened to the surrounding sentence, not just the bare
+        # filename: the filename alone matches four distinct CHANGELOG.md
+        # lines (see the uniqueness bound in ReviewedAcceptedEntry's
+        # docstring), so this must be long enough to be the ONLY line it
+        # matches.  Split so this source line does not itself trip
+        # PRIVATE_AUDIT_REFERENCE -- runtime value unchanged; see the NOTE
+        # ON FIXTURE STRINGS in tests/scripts/test_check_public_private.py.
+        excerpt="docs/aen-feature-au" "dit-2026-05.md` and the iMX93 reference",
         reason=(
             "Historical citation of the (since-relocated) audit filename, "
             "in the entry explaining why AEN/iMX93 SoM presets carry TBD "
@@ -278,9 +308,10 @@ REVIEWED_ACCEPTED: tuple[ReviewedAcceptedEntry, ...] = (
     ),
     ReviewedAcceptedEntry(
         path="CHANGELOG.md",
-        line=10957,
+        line=10986,
         category="PRIVATE_AUDIT_REFERENCE",
-        excerpt="docs/aen-feature-au" "dit-2026-05.md",
+        # Lengthened for the same uniqueness reason as the PRIVATE_AUDIT_REFERENCE entry above.
+        excerpt="docs/aen-feature-au" "dit-2026-05.md` -- Alif Ensemble peripheral",
         reason=(
             "The CHANGELOG entry recording the audit doc's original "
             "addition to the tree (2026-05-14) -- a filename citation in "
@@ -292,9 +323,10 @@ REVIEWED_ACCEPTED: tuple[ReviewedAcceptedEntry, ...] = (
     ),
     ReviewedAcceptedEntry(
         path="CHANGELOG.md",
-        line=11119,
+        line=11148,
         category="PRIVATE_AUDIT_REFERENCE",
-        excerpt="docs/aen-feature-au" "dit-2026-05.md",
+        # Lengthened for the same uniqueness reason as the PRIVATE_AUDIT_REFERENCE entry above.
+        excerpt="docs/aen-feature-au" "dit-2026-05.md): customers migrating from",
         reason=(
             "Cites the audit filename as the source of the gpu2d.h "
             "portability gap it closed.  Predates the relocation entry, so "
@@ -307,14 +339,97 @@ REVIEWED_ACCEPTED: tuple[ReviewedAcceptedEntry, ...] = (
 _validate_reviewed_accepted(REVIEWED_ACCEPTED)
 
 
-def _is_reviewed_accepted(rel: str, category: str, line_no: int, line_text: str) -> bool:
-    return any(
-        rel == e.path
-        and category == e.category
-        and line_no == e.line
-        and e.excerpt in line_text
-        for e in REVIEWED_ACCEPTED
-    )
+def _is_reviewed_accepted(
+    entries: Iterable[ReviewedAcceptedEntry], category: str, line_text: str
+) -> bool:
+    """`entries` is the caller's pre-filtered, per-file `active_entries` --
+    see `scan()` -- already narrowed to this file's `path` AND to entries
+    whose `excerpt` matches exactly one line of it.  This function only
+    decides `category` + content; the uniqueness bound lives at the call
+    site because it needs every line of the file, not just the one being
+    tested."""
+    return any(category == e.category and e.excerpt in line_text for e in entries)
+
+
+def _reviewed_accepted_integrity_messages(root: Path, paths: Iterable[Path]) -> list[str]:
+    """Return one diagnostic string per REVIEWED_ACCEPTED entry that is no
+    longer safe to trust against real file content -- never raises, so a
+    caller can print these ALONGSIDE a run's real findings instead of in
+    place of them (see the call site in main()).
+
+    Called from main() after scan() returns, not from inside scan() itself:
+    a leak scanner that raised out of the scan loop the moment one exemption
+    went stale would discard every genuine finding that run had already
+    collected -- worse than the drift bug the exemption exists to tolerate.
+    Two conditions, both worth a loud printed line instead of a silent
+    pass:
+
+      * stale (0 matches) -- the excerpt appears nowhere in the file any
+        more.  The reviewed content was deleted, not just moved or
+        reworded; the exemption exempts nothing and is dead weight.
+      * ambiguous (>1 matches) -- the excerpt appears on more than one
+        line.  scan()'s own per-file `active_entries` filter already
+        refuses to suppress ANY of those lines for this reason (matching
+        is by content, not position, so a non-unique excerpt would
+        silently exempt lines nobody reviewed); this is the loud
+        explanation for why those findings came back, not the mechanism
+        that brings them back.
+
+    Only ever meaningful for the actual repo checkout this script lives
+    in -- REVIEWED_ACCEPTED's excerpts are a snapshot of alp-sdk's own
+    CHANGELOG.md at specific points in its history, reviewed by a human
+    against that specific content.  The caller (main()) only invokes this
+    when `root == REPO`; a --root pointed at a historical branch, a
+    release worktree, a fork, or an unrelated clean tree has no
+    relationship to these entries and must not be asked to satisfy them:
+    without this scoping, a private-clean tree under a different --root
+    would exit 1 for a reason having nothing to do with its own content.
+
+    Not run at import time alongside _validate_reviewed_accepted, and not
+    because there is no tree to read yet -- REPO is a module-level constant,
+    available at import.  The real constraint is that this module is
+    imported directly by the test suite (`import check_public_private as
+    classifier`), before any test has written its tmp_path fixtures --
+    reading the real repo's CHANGELOG.md at import time would pull live
+    content into every test process instead of leaving each test's fixture
+    tree isolated, and would run before argparse has resolved which root
+    and which paths this particular invocation actually wants checked.
+    """
+    scanned_rels = {_rel(p, root) for p in paths}
+    messages: list[str] = []
+    for e in REVIEWED_ACCEPTED:
+        if e.path not in scanned_rels:
+            continue
+        try:
+            text = (root / e.path).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        match_count = sum(1 for line in text.splitlines() if e.excerpt in line)
+        if match_count == 0:
+            # No ":{e.line}" here -- `line` is a human hint only (see the
+            # ReviewedAcceptedEntry docstring), not maintained against file
+            # drift, so rendering it as a file:line locator would send a
+            # reader to unrelated content.
+            messages.append(
+                f"check_public_private: REVIEWED_ACCEPTED entry for "
+                f"{e.path} ({e.category}) has a stale excerpt -- "
+                f"{e.excerpt!r} no longer appears anywhere in {e.path}. "
+                f"The content it was reviewed against was deleted or "
+                f"reworded away; remove this entry or re-derive `excerpt` "
+                f"from the current text."
+            )
+        elif match_count > 1:
+            messages.append(
+                f"check_public_private: REVIEWED_ACCEPTED entry for "
+                f"{e.path} ({e.category}) has an ambiguous excerpt -- "
+                f"{e.excerpt!r} matches {match_count} lines in {e.path}, "
+                f"not exactly one, so it exempts none of them.  Tighten "
+                f"`excerpt` to a substring unique to the reviewed line; if "
+                f"the colliding lines are byte-identical, no substring can "
+                f"be unique -- edit one of the lines' surrounding text "
+                f"instead so they no longer read the same."
+            )
+    return messages
 
 
 # Phrases that, appearing anywhere in the bullet/paragraph a
@@ -596,6 +711,30 @@ def scan(paths: Iterable[Path], *, base: Path) -> list[Finding]:
         rel = _rel(path, base)
         in_superpowers = _under_superpowers(rel)
         lines = text.splitlines()
+        # A REVIEWED_ACCEPTED entry only suppresses a finding when its
+        # excerpt matches EXACTLY ONE line of this file -- see the
+        # uniqueness bound documented on ReviewedAcceptedEntry.  Zero
+        # matches (stale) or more than one (ambiguous) both leave the
+        # entry out of `active_entries` entirely, so the ordinary finding
+        # goes through unsuppressed on every matching line;
+        # _reviewed_accepted_integrity_messages explains why, separately --
+        # but only when the run's root is this actual checkout (root ==
+        # REPO in main()).  This filter itself has no such guard and runs
+        # for every --root: a stale/ambiguous entry still fails closed
+        # under a foreign tree (the finding surfaces), it just does so
+        # without the printed explanation.  That is intentional, not an
+        # oversight -- REVIEWED_ACCEPTED's excerpts are a snapshot of
+        # alp-sdk's own CHANGELOG.md and say nothing true about someone
+        # else's tree, so the diagnostic is scoped to root == REPO on
+        # purpose.  It can only matter in practice if a foreign tree has a
+        # file at the same relative `path` whose content happens to
+        # collide with one of these excerpts -- vanishingly unlikely for a
+        # private-design/maintainer-path/audit-reference phrase this
+        # specific.
+        active_entries = [
+            e for e in REVIEWED_ACCEPTED
+            if e.path == rel and sum(1 for ln in lines if e.excerpt in ln) == 1
+        ]
         for line_no, line in enumerate(lines, start=1):
             for rule in RULES:
                 if in_superpowers and not rule.scan_superpowers:
@@ -605,7 +744,7 @@ def scan(paths: Iterable[Path], *, base: Path) -> list[Finding]:
                     continue
                 if _is_known_pending(rel, rule.category, line_no):
                     continue
-                if _is_reviewed_accepted(rel, rule.category, line_no, line):
+                if _is_reviewed_accepted(active_entries, rule.category, line):
                     continue
                 if rule.exempt_if_describes_removal and _describes_removal(lines, line_no):
                     continue
@@ -660,6 +799,16 @@ def main(argv: list[str] | None = None) -> int:
 
     findings = scan(paths, base=root)
 
+    # REVIEWED_ACCEPTED's excerpts are a snapshot of THIS repo's own
+    # CHANGELOG.md content, reviewed by a human against specific text at
+    # specific points in alp-sdk's history -- meaningless against a --root
+    # pointed anywhere else (a historical branch, a release worktree, a
+    # fork, an unrelated clean tree).  Only ever run against the actual
+    # checkout this script lives in.
+    integrity_messages: list[str] = (
+        _reviewed_accepted_integrity_messages(root, paths) if root == REPO else []
+    )
+
     if args.json:
         for finding in findings:
             print(json.dumps(asdict(finding), sort_keys=True))
@@ -667,8 +816,14 @@ def main(argv: list[str] | None = None) -> int:
         for finding in findings:
             print(_format_finding(finding))
 
-    if findings:
-        if not args.json:
+    # Printed regardless of --json/--quiet: these are gate-integrity
+    # failures (a stale or ambiguous exemption), not findings, and must
+    # never be silently dropped alongside -- or instead of -- real ones.
+    for msg in integrity_messages:
+        print(msg, file=sys.stderr)
+
+    if findings or integrity_messages:
+        if not args.json and findings:
             plural = "" if len(findings) == 1 else "s"
             print(f"public-private: {len(findings)} finding{plural} -- failing.",
                   file=sys.stderr)

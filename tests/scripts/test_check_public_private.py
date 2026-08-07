@@ -336,11 +336,17 @@ def test_reviewed_accepted_requires_excerpt() -> None:
         classifier._validate_reviewed_accepted(bad)
 
 
-def test_reviewed_accepted_is_narrowly_line_anchored(
+def test_reviewed_accepted_survives_line_shift_from_prepended_content(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Same shape as KNOWN_PENDING before it: exempts exactly one (path,
-    # line, category), not the category anywhere in the file.
+    # REGRESSION TEST for the measured defect: REVIEWED_ACCEPTED matches on
+    # (path, category, excerpt) -- NOT on `line` (see _is_reviewed_accepted).
+    # `line` is a human-facing hint only now.  Content inserted ABOVE an
+    # accepted finding shifts every later line number -- exactly what
+    # prepending a CHANGELOG.md entry does in the real repo (one new
+    # `## [Unreleased]` entry shifted all four REVIEWED_ACCEPTED entries off
+    # their true lines and turned them back into findings) -- the exemption
+    # must still apply after the shift.
     monkeypatch.setattr(
         classifier,
         "REVIEWED_ACCEPTED",
@@ -357,30 +363,67 @@ def test_reviewed_accepted_is_narrowly_line_anchored(
     exempted = _write(tmp_path, "docs/example.md", "Use /home/" "caner/ti/sdk here.\n")
     assert classifier.scan([exempted], base=tmp_path) == []
 
-    # RED-THEN-GREEN proof: the identical phrase, same category, one line
-    # later -- not the allowlisted line -- still produces a finding.
-    # (`_write` dedents and strips *leading* blank lines, so a non-blank
-    # filler line pushes the trigger to line 2 -- a bare "\n" prefix would
-    # be stripped and land back on line 1.)
-    drifted = _write(
+    # `line=1` in the entry above no longer matches where the text actually
+    # lives once a filler line is prepended -- still exempt, because
+    # matching is by content, not position.  (`_write` dedents and strips
+    # *leading* blank lines, so a non-blank filler line pushes the trigger
+    # to line 2 -- a bare "\n" prefix would be stripped and land back on
+    # line 1.)
+    shifted = _write(
         tmp_path,
         "docs/example.md",
-        "Filler line so the trigger below lands on line 2.\n"
+        "Filler line inserted above, shifting the trigger to line 2.\n"
         "Use /home/" "caner/ti/sdk here.\n",
     )
-    findings = classifier.scan([drifted], base=tmp_path)
-    assert len(findings) == 1
-    assert findings[0].line == 2
-    assert findings[0].category == "LOCAL_MAINTAINER_PATH"
+    findings = classifier.scan([shifted], base=tmp_path)
+    assert findings == []
 
 
-def test_reviewed_accepted_excerpt_must_match_actual_line_content(
+def test_reviewed_accepted_ambiguous_excerpt_exempts_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # If the anchored excerpt is no longer a substring of the line at the
-    # anchored line number (CHANGELOG.md prepended, content reflowed), the
-    # exemption does not apply -- the finding must reappear rather than stay
-    # silently exempted forever.
+    # Matching a REVIEWED_ACCEPTED excerpt is by content, not line position,
+    # so an excerpt that isn't unique in its file must not silently exempt
+    # every line it happens to match -- including a brand-new line nobody
+    # reviewed.  scan()'s per-file `active_entries` filter (see its
+    # docstring on ReviewedAcceptedEntry) refuses to suppress ANY line for
+    # an entry whose excerpt matches more than one -- both lines below come
+    # back as real findings, not zero.
+    monkeypatch.setattr(
+        classifier,
+        "REVIEWED_ACCEPTED",
+        (
+            classifier.ReviewedAcceptedEntry(
+                path="docs/example.md",
+                line=1,
+                category="LOCAL_MAINTAINER_PATH",
+                excerpt="/home/" "caner",
+                reason="test fixture: deliberately broad (non-unique) excerpt.",
+            ),
+        ),
+    )
+    path = _write(
+        tmp_path,
+        "docs/example.md",
+        "Use /home/" "caner/ti/sdk here.\n"
+        "A second, unrelated mention of /home/" "caner/elsewhere too.\n",
+    )
+    findings = classifier.scan([path], base=tmp_path)
+    assert len(findings) == 2
+    assert {f.line for f in findings} == {1, 2}
+    assert {f.category for f in findings} == {"LOCAL_MAINTAINER_PATH"}
+
+
+def test_reviewed_accepted_integrity_messages_reports_stale_excerpt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # An entry whose excerpt appears NOWHERE in the file it names (the
+    # reviewed content was deleted, not just moved) must be reported, not
+    # silently exempt nothing -- but as a returned message, never a raise:
+    # _reviewed_accepted_integrity_messages is a separate, non-raising
+    # function called from main() after scan() returns (see its own
+    # docstring), so this diagnostic can never discard a run's real
+    # findings; scan() itself is never involved in producing it.
     monkeypatch.setattr(
         classifier,
         "REVIEWED_ACCEPTED",
@@ -395,8 +438,178 @@ def test_reviewed_accepted_excerpt_must_match_actual_line_content(
         ),
     )
     path = _write(tmp_path, "docs/example.md", "Use /home/" "caner/ti/sdk here.\n")
+    messages = classifier._reviewed_accepted_integrity_messages(tmp_path, [path])
+    assert len(messages) == 1
+    assert "stale excerpt" in messages[0]
+    assert "docs/example.md (LOCAL_MAINTAINER_PATH)" in messages[0]
+
+
+def test_reviewed_accepted_integrity_messages_reports_ambiguous_excerpt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The diagnostic counterpart to
+    # test_reviewed_accepted_ambiguous_excerpt_exempts_nothing above: the
+    # >1-match case is reported by name too, not just silently un-suppressed.
+    monkeypatch.setattr(
+        classifier,
+        "REVIEWED_ACCEPTED",
+        (
+            classifier.ReviewedAcceptedEntry(
+                path="docs/example.md",
+                line=1,
+                category="LOCAL_MAINTAINER_PATH",
+                excerpt="/home/" "caner",
+                reason="test fixture: deliberately broad (non-unique) excerpt.",
+            ),
+        ),
+    )
+    path = _write(
+        tmp_path,
+        "docs/example.md",
+        "Use /home/" "caner/ti/sdk here.\n"
+        "A second, unrelated mention of /home/" "caner/elsewhere too.\n",
+    )
+    messages = classifier._reviewed_accepted_integrity_messages(tmp_path, [path])
+    assert len(messages) == 1
+    assert "ambiguous excerpt" in messages[0]
+    assert "matches 2 lines" in messages[0]
+
+
+def test_reviewed_accepted_integrity_messages_skips_paths_outside_this_runs_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # An entry for a file outside the current run's selection is skipped by
+    # the `e.path not in scanned_rels` filter itself -- not merely because
+    # the file happens not to exist (that would go through `except OSError:
+    # continue` instead and prove nothing about the filter).  So
+    # docs/not-scanned.md is written for real, with content that WOULD
+    # produce a stale-excerpt message if the filter were missing; only the
+    # filter is what keeps it out.
+    _write(
+        tmp_path,
+        "docs/not-scanned.md",
+        "Real content on disk, but this run never selects this file.\n",
+    )
+    monkeypatch.setattr(
+        classifier,
+        "REVIEWED_ACCEPTED",
+        (
+            classifier.ReviewedAcceptedEntry(
+                path="docs/not-scanned.md",
+                line=1,
+                category="LOCAL_MAINTAINER_PATH",
+                excerpt="this excerpt does not appear on the real line",
+                reason="test fixture: file outside this run's --path selection.",
+            ),
+        ),
+    )
+    other = _write(tmp_path, "docs/example.md", "Unrelated content.\n")
+    assert classifier._reviewed_accepted_integrity_messages(tmp_path, [other]) == []
+
+
+def test_stale_excerpt_does_not_discard_real_findings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # End to end through main(): a run with BOTH a stale REVIEWED_ACCEPTED
+    # entry AND a real finding in the same file must still print and fail
+    # on the real finding -- the integrity diagnostic is additive, never a
+    # substitute for scan()'s own findings.
+    monkeypatch.setattr(classifier, "REPO", tmp_path.resolve())
+    monkeypatch.setattr(
+        classifier,
+        "REVIEWED_ACCEPTED",
+        (
+            classifier.ReviewedAcceptedEntry(
+                path="CHANGELOG.md",
+                line=1,
+                category="LOCAL_MAINTAINER_PATH",
+                excerpt="this excerpt does not appear anywhere in the file",
+                reason="test fixture: deliberately stale excerpt.",
+            ),
+        ),
+    )
+    _write(tmp_path, "CHANGELOG.md", "Use /home/" "caner/ti/sdk here.\n")
+    rc = classifier.main(["--root", str(tmp_path), "--path", "CHANGELOG.md"])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "LOCAL_MAINTAINER_PATH" in captured.out
+    assert "stale excerpt" in captured.err
+
+
+def test_integrity_message_alone_fails_the_run_with_zero_findings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A stale/ambiguous REVIEWED_ACCEPTED entry must fail the run on its
+    # own, even when scan() finds no ordinary leak in the content -- rc=1
+    # here has no findings to point to (main()'s `findings or
+    # integrity_messages` gate, not `findings` alone).
+    monkeypatch.setattr(classifier, "REPO", tmp_path.resolve())
+    monkeypatch.setattr(
+        classifier,
+        "REVIEWED_ACCEPTED",
+        (
+            classifier.ReviewedAcceptedEntry(
+                path="CHANGELOG.md",
+                line=1,
+                category="LOCAL_MAINTAINER_PATH",
+                excerpt="this excerpt does not appear anywhere in the file",
+                reason="test fixture: deliberately stale excerpt.",
+            ),
+        ),
+    )
+    _write(tmp_path, "CHANGELOG.md", "Nothing private here at all.\n")
+    rc = classifier.main(["--root", str(tmp_path), "--path", "CHANGELOG.md"])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert captured.out == ""
+    assert "stale excerpt" in captured.err
+
+
+def test_clean_tree_under_different_root_exits_zero(tmp_path: Path) -> None:
+    # REVIEWED_ACCEPTED's excerpts are a snapshot of THIS repo's own
+    # CHANGELOG.md and must never be asked of an unrelated tree's
+    # CHANGELOG.md: the integrity check only runs when `--root` resolves to
+    # this actual checkout (`root == REPO`), so a private-clean tree under
+    # any other root exits 0 regardless of what REVIEWED_ACCEPTED contains.
+    _write(
+        tmp_path,
+        "CHANGELOG.md",
+        "# Changelog\n\nNothing private here at all.\n",
+    )
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_reviewed_accepted_fail_closed_when_line_no_longer_carries_excerpt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Fail-closed property still holds: if the specific line's text changes
+    # so the excerpt no longer matches THAT line, the finding on it comes
+    # back -- even though the excerpt phrase (and so the entry) survives
+    # elsewhere in the same file, so this is not the stale-excerpt case
+    # above (which fails loudly instead of returning a finding).
+    monkeypatch.setattr(
+        classifier,
+        "REVIEWED_ACCEPTED",
+        (
+            classifier.ReviewedAcceptedEntry(
+                path="docs/example.md",
+                line=1,
+                category="LOCAL_MAINTAINER_PATH",
+                excerpt="reference note: /home/" "caner/ti/sdk",
+                reason="test fixture: fail-closed on a reworded line.",
+            ),
+        ),
+    )
+    path = _write(
+        tmp_path,
+        "docs/example.md",
+        "Reworded, no longer matching the excerpt: /home/" "caner/elsewhere/path.\n"
+        "Historical " "reference note: /home/" "caner/ti/sdk lives on in this unrelated paragraph.\n",
+    )
     findings = classifier.scan([path], base=tmp_path)
     assert len(findings) == 1
+    assert findings[0].line == 1
     assert findings[0].category == "LOCAL_MAINTAINER_PATH"
 
 
@@ -406,6 +619,10 @@ def test_private_audit_reference_exempt_when_paragraph_describes_removal(
     # The generalised half of the fix: PRIVATE_AUDIT_REFERENCE does not fire
     # inside a bullet that itself records the cited artifact leaving the
     # public tree -- CHANGELOG.md's actual shape for this (issue #524).
+    # Uses the bare filename as its excerpt-shaped text, not one of the
+    # real REVIEWED_ACCEPTED entries' now-lengthened sentence excerpts (see
+    # ReviewedAcceptedEntry's uniqueness bound), so this fixture cannot
+    # collide with the real tuple even though it is untouched here.
     path = _write(
         tmp_path,
         "CHANGELOG.md",
