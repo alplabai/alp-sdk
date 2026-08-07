@@ -398,6 +398,15 @@ enforces for the manifest above.  Validate a real plan with:
 python3 scripts/check_build_plan.py --plan build-plan.json
 ```
 
+`--plan` validates only against the schema above (tolerant consumer): a
+slice's `command.tool` is documented as a bare executable identity
+('west', 'bitbake', …), never a location, but the schema itself accepts
+any string there — a `--plan`-supplied file, e.g. one an IDE resolved a
+tool path into itself, may legitimately carry one. The bare-identity
+convention is instead asserted only over plans the SDK emits itself
+(the default no-`--plan` corpus check), never against a `--plan` file
+(issue #1286).
+
 ### Build receipts (`build-receipt-v1`)
 
 A **build receipt** is deterministic provenance for a release build: given

@@ -905,7 +905,7 @@
       "script": "scripts/check_bootstrap_manifest.py"
     },
     {
-      "purpose": "Validate a build plan against the public alp CLI / alp-sdk-vscode contract (metadata/schemas/build-plan-v1.schema.json).",
+      "purpose": "Validate a build plan against the public alp CLI / alp-sdk-vscode contract (metadata/schemas/build-plan-v1.schema.json), plus, for a plan the SDK emits itself, the `command.tool` bare-identity convention the shared schema deliberately does not assert (#1286).",
       "script": "scripts/check_build_plan.py"
     },
     {
