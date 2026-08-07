@@ -317,4 +317,8 @@ def test_duplicate_struct_block_in_doc_fails_loudly(tmp_path):
     _write(tmp_path, _HEADER_OK, duplicated_doc)
     problems = gate.find_problems(tmp_path)
     assert problems, "a duplicated struct block in the doc must be a reported failure"
-    assert any("docs/board-id.md" in p and "could not locate" in p for p in problems)
+    # The message must name the DUPLICATE, not report it as a missing
+    # block: the two need opposite fixes, and "could not locate" sends
+    # the reader hunting for a block that is in fact present twice.
+    assert any("docs/board-id.md" in p and "found 2 copies of the" in p for p in problems)
+    assert not any("could not locate" in p for p in problems)
