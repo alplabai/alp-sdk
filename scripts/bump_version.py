@@ -107,7 +107,16 @@ def update_sdk_version_yaml(new_version: str, dry_run: bool) -> None:
     text = SDK_VERSION_YAML.read_text(encoding="utf-8")
     new_text = re.sub(r"^version:\s*\S+", f"version: {new_version}", text, count=1, flags=re.MULTILINE)
     if new_text == text:
-        raise SystemExit("bump_version: no change to sdk_version.yaml (already at target?)")
+        # Already at the target -- report and continue, the same way
+        # update_version_h() below treats an already-current version.h.
+        # Refusing here blocks a legitimate cut: a version can be bumped
+        # here in one PR and tagged in a later one (v0.15.0 was bumped
+        # 2026-07-31 by 4d0f4aae and only ever tagged v0.15.0-rc1), and
+        # this raise made the GA cut impossible without hand-editing the
+        # file back first.  The duplicate-section hazard it was guarding
+        # against is caught precisely in slice_changelog() instead.
+        print(f"  unchanged {SDK_VERSION_YAML.relative_to(REPO)} (already at version: {new_version})")
+        return
     if not dry_run:
         SDK_VERSION_YAML.write_text(new_text, encoding="utf-8", newline="")
     print(f"  updated {SDK_VERSION_YAML.relative_to(REPO)}: -> version: {new_version}")
@@ -119,15 +128,28 @@ def slice_changelog(new_version: str, dry_run: bool) -> None:
     `## [vX] - YYYY-MM-DD` and seed a fresh empty Unreleased above it.
 
     No-op if Unreleased section doesn't exist (mid-cycle bumps).
+
+    Refuses outright if a `## [vX]` section already exists, because a
+    second one is unrecoverable downstream: release.yml slices the body
+    by `## \\[v{VERSION}\\]` and takes the FIRST match, so the older
+    section -- the one describing what actually shipped -- is silently
+    orphaned from the published release notes.
     """
     text = CHANGELOG.read_text(encoding="utf-8")
     today = dt.date.today().isoformat()
+    existing = re.compile(rf"^## \[v{re.escape(new_version)}\][^\n]*$", re.MULTILINE).search(text)
+    if existing:
+        raise SystemExit(
+            f"bump_version: {CHANGELOG.relative_to(REPO)} already has a "
+            f"'{existing.group(0)}' section; slicing would create a second one "
+            f"and release.yml would publish only the first. Retitle or remove "
+            f"the existing section before cutting v{new_version}."
+        )
     pattern = re.compile(r"^## \[Unreleased\][^\n]*$", re.MULTILINE)
     m = pattern.search(text)
     if not m:
         print(f"  skipped {CHANGELOG.relative_to(REPO)}: no [Unreleased] section to slice")
         return
-    sliced_header = f"## [v{new_version}] - {today}"
     fresh_unreleased = f"## [Unreleased] - v{_next_candidate(new_version)} candidate\n\n## [v{new_version}] - {today}"
     new_text = text[: m.start()] + fresh_unreleased + text[m.end():]
     if not dry_run:
