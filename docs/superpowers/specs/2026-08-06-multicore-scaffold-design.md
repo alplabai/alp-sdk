@@ -202,23 +202,95 @@ artifacts differ enormously in size, so the check is cheap and unambiguous.
 **Size gate.** The peer's ITCM build is checked against **256 KiB** at plan time
 and fails with a real number rather than a link error.
 
-## MRAM reconciliation — blocking, decision required
+## MRAM reconciliation — RESOLVED
 
 Two shipped layouts, both internally consistent, both filling 5632 KiB exactly:
 
 | layout | reserved | HE | HP | tail |
 |---|---|---|---|---|
-| Alif DevKit-e8 | — | 2048 KiB @ `0x80000000` | 3584 KiB @ `0x80200000` | — |
+| Alif DevKit-e8 | — | 2048 KiB @ `0x80000000` | 2048 KiB @ `0x80200000` (+1536 KiB `MRAM_USER` @ `0x80400000`) | — |
 | alp-sdk #1069 | 64 | **2688 KiB** @ `0x80010000` | **2688 KiB** @ `0x802b0000` | 64 + 128 |
 | dualcore-demo | 64 | **3008 KiB** @ `0x80010000` | **2432 KiB** @ `0x80300000` | 128 |
 
-This is not a defect in either repo — it is a choice made twice. But an image
-built against one and flashed under the other overlaps: a host image between
-2688 KiB and 3008 KiB is legal under the demo's map and lands on top of
+An image built against one and flashed under the other overlaps: a host image
+between 2688 KiB and 3008 KiB is legal under the demo's map and lands on top of
 alp-sdk's `hp_slot0`.
 
-**TBD-1: pick one split.** Alif's own layout is not a drop-in (no MCUboot
-reservation; HE starts at `0x80000000` itself). Both repos must then agree.
+### What the DFP fixes, and what it leaves free
+
+Grounded in `alifsemi/alif_ensemble-cmsis-dfp`:
+
+- **MRAM window** — `AlifSemiconductor.Ensemble.pdsc:248`, E8 subFamily:
+  `start="0x80000000" size="0x00580000"` (5632 KiB). Both maps respect it.
+- **Write granularity — 16 bytes, hard.** `drivers/include/mram.h:23-24`:
+  `MRAM_SECTOR_SIZE (0x10)`, `MRAM_ADDR_ALIGN_MASK 0xFFFFFFF0`. Corroborated at
+  the tooling level by `app-write-mram`'s "NOT multiple of 16 bytes" warning.
+  Both maps use 64 KiB multiples and satisfy it trivially.
+- **HE is always low.** Every DevKit-e8 `.alif/*_mram_cfg.json` — Blinky_HE,
+  Blinky_HP, Hello_World, DualCore, single-core and combined — puts `HE_APP` at
+  `mramAddress 0x80000000` and `HP_APP` at `0x80200000`. HP does not move down
+  even when it is the only core. Both our maps already order HE low.
+- **The split point is NOT fixed by the vendor.** Alif's linker sizes
+  (`APP_MRAM_HE_SIZE`/`APP_MRAM_HP_SIZE` = `0x00200000`, `APP_MRAM_USER_SIZE` =
+  `0x00180000`) are CMSIS Configuration-Wizard boilerplate, copy-pasted
+  verbatim across AE302/AE402/AE512/AE722/AE822. They are not per-SoC computed
+  and validate neither of our splits.
+
+### Decision — adopt alp-sdk's 2688 / 2688 KiB
+
+1. **Symmetric is the only split consistent with role being a `board.yaml`
+   choice** (D4). Under 3008/2432 the core you nominate as host silently changes
+   how much flash your application gets. Under 2688/2688 it does not.
+2. **alp-sdk's split has a recorded rationale** — the ~2.6 MiB NPU MRAM-model
+   budget and deferred OTA on both cores. The demo's 3008/2432 has **no recorded
+   rationale for the split point**; its docs explain only why HE is low.
+3. **The demo's HP MRAM window was never exercised.** Its bench-proven flow
+   loads the REMOTE into ITCM (`loadAddress 0x50000000`) and never writes
+   `0x300000`, so changing it costs nothing that was ever proven. Its
+   `docs/BENCH-DUALCORE.md:332-338` additionally records an unreconciled
+   contradiction about which slot map was in effect.
+4. **Blast radius is small.** `tan-cli`'s `python/tan/planner/zephyr_board.py`
+   (`_aen_role_slot0_map` / `_aen_flash_partitions`) carries **no hardcoded byte
+   values**; it reads `base`/`size_kib` from the SoM preset for `mcuboot`,
+   `<role>_slot0`, `reserved` and `storage`. Tan renders whatever alp-sdk
+   declares, provided those four region names survive — it raises
+   `ZephyrBoardEmitError` if any is missing.
+
+The dual-core demo repo changes to match; alp-sdk's `memory_map:` stands.
+
+## Hazard found while grounding the split: `storage` is where the ATOC lands
+
+**This is separate from the split, more dangerous than it, and not yet fixed.**
+
+Alif's tooling does not place the ATOC at a fixed address. `app-gen-toc` /
+`app-write-mram` write it immediately **below the top of the MRAM window**,
+sized to the generated package — the DFP's own SETOOLS transcript
+(`docs/Overview.md:193-224`) shows a 13,552-byte package landing at
+**`0x8057cb10`**, against a window top of `0x80580000`.
+
+alp-sdk's map declares a region named **`storage`** at `0x80560000`, 128 KiB,
+spanning `0x80560000`–`0x8057FFFF`. **`0x8057cb10` falls inside it.** The
+dual-core demo labels the same window "ATOC application table", which is the
+accurate description of what occupies it.
+
+So a region whose name invites treating it as writable user data is where the
+boot table actually lives. Writing user storage there corrupts the ATOC;
+re-flashing the ATOC destroys the user data. Either direction leaves an
+unbootable part, and nothing today prevents either.
+
+Neither repo cites a DFP source for the 128 KiB figure — the actual package
+measured 13,552 bytes.
+
+**Actions, before anything ships a two-image project:**
+
+- Rename the region to reflect what it holds, and stop describing it as storage.
+- Add a gate asserting no emitted partition table hands that window to an
+  application as writable storage.
+- Decide whether 128 KiB is the right reservation now that the real package
+  size is known, remembering the package grows with the number of ATOC entries
+  and a dual-core project has more of them than a single-core one.
+
+## Open questions
 
 ## Verification
 
@@ -247,7 +319,10 @@ bench proves it runs.
 
 ## Open questions
 
-- **TBD-1 — the MRAM split.** Above. Blocking.
+- **TBD-1 — the MRAM split. RESOLVED**: adopt alp-sdk's 2688 / 2688 KiB; the
+  dual-core demo repo changes to match. Reasoning in the section above.
+- **TBD-4 — the `storage` / ATOC collision.** New, from the DFP grounding pass.
+  See the hazard section above. Blocking for any two-image project.
 - **TBD-2 — `alif-se-boot` verification status.** That module's README says
   "This has never been run on hardware. UNVERIFIED ON SILICON", while the same
   repo's bench records document dated silicon runs exercising exactly its
