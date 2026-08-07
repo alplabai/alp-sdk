@@ -485,6 +485,71 @@ that `libraries: [u8g2]` always compiles the vendored core with no
 SDK-level switch to the full upstream tree, replacing the stale
 `ALP_U8G2_MODULE_DIR` override claim.
 
+### Added — `E1M-AEN801.yaml`'s `ethernet_phy:` + `metadata/chips/dp83825.yaml` (#1241)
+
+The AEN SoM preset declared no `ethernet_phy:` at all, reading as "no PHY on
+this module" when the on-module TI DP83825 is real, silicon-proven hardware
+(`examples/aen/aen-ethernet-link` records a RESULT PASS on real E8 silicon --
+link up, DHCP lease acquired). `metadata/e1m_modules/E1M-AEN801.yaml` now
+declares `ethernet_phy: dp83825`; no `ethernet_phy_count:` is added, matching
+the schema's "families with a single PHY omit it" convention
+(`metadata/socs/alif/ensemble/e8.json` declares one `"ethernet"` MAC).
+
+`metadata/chips/dp83825.yaml` is new, following `rtl8211fdi.yaml`'s shape.
+Its `driver_status: none` is honest, not aspirational: no `chips/dp83825/`
+driver exists (ADR 0023's "AEN has no layer-3 chip driver" gap) -- the
+bench-proven path reaches the PHY through the upstream
+`eth_dwmac_alif_ensemble` MAC glue and raw MDIO register reads in
+application code, not a PHY driver; the managed-MDIO alternative
+(`MDIO_DWMAC_ALIF` + upstream `phy_ti_dp83825`) is BUILD-ONLY, not exercised
+on real E8 silicon. `scripts/check_chip_manifest_parity.py`'s
+`KNOWN_MANIFEST_NO_DRIVER` allowlist gained the corresponding entry.
+
+The exact order code is **left `TBD`, deliberately**: the sources in this
+tree disagree on precision (the CHANGELOG's own `metadata/e1m_modules/aen/CHANGELOG.md:16`
+says "TI DP83825", the devicetree says `DP83825I`), and the devicetree's own
+label self-flags as an unverified "fork reference" one
+(`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:349-353`). The MDIO
+`PHYID1+PHYID2` bench readback (`id=2000a140`,
+`examples/aen/aen-ethernet-link/README.md:39`) confirms the DP83825 die/OUI
+identity but not the temperature/package order-code suffix, so it cannot
+settle the question either. Resolving it needs the netlist/BOM, per #1241's
+own "Blocked on" section; `docs/soms/aen.md`'s on-module table is corrected
+to say so instead of the unsourced `DP83825IRMQR` it previously carried.
+
+### Added — `on_module.i2c_devices` block on every AEN SoM preset + a doc/example bus-name consistency gate (#1270)
+
+`metadata/e1m_modules/E1M-V2N101.yaml` and `E1M-V2M101.yaml` have long
+split their on-module I2C devices per bus, machine-readably; the six AEN
+presets (`E1M-AEN301`..`E1M-AEN801`) had no `i2c_devices:` block at all, so
+"which bus is this part on" existed only in prose -- and four consecutive
+wave-4 doc passes each corrected one AEN bus assignment while breaking
+another, because nothing could check any of them against a source of truth.
+
+Every AEN preset now declares the same two buses, values transcribed from
+ADR 0017:74-79, `docs/bring-up-aen.md` Section 5.1's bench-verified table,
+and `examples/aen/aen-secure-element-sign/README.md:14-15` (never
+re-derived): `brd_i2c` (Alif LPI2C0, `P7_4`/`P7_5`, slave-only,
+SE-mastered) carries the RV-3028-C7 RTC (`0x52`), OPTIGA Trust M
+(`0x30`), and TMP112 (`0x48`); `e1m_i2c0` (SoC I2C2, `P5_6 SCL_C` /
+`P5_7 SDA_C`) carries the 24C128 EEPROM (`0x50`). `brd_i2c` omits
+`bus_master:` per the schema's own documented convention for a bus no
+on-module silicon masters. Both buses' `bus_pads:` record the physical pad
+spelling docs use, so a future cross-check has a machine-readable alias to
+read instead of re-deriving one from prose.
+
+`scripts/check_i2c_bus_doc_consistency.py` is new: it flags a doc or
+example-source line that names a known on-module I2C part next to a bus
+name that disagrees with the `i2c_devices` ground truth, the same way
+`check_pin_conflicts.py` cross-checks silicon pads. It is deliberately
+narrow -- ground truth excludes any chip whose bus assignment disagrees
+across presets, a line naming two buses at once is treated as a contrast
+and skipped, and board-side (carrier) parts are out of scope -- but it
+would have caught every wave-4 defect this issue names. `docs/bring-up-aen.md`'s
+stale "the AEN presets have no `i2c_devices:` block" line is corrected to
+point at the new block. Registered in `metadata/quality-tasks-v1.json` and
+wired into `pr-metadata-validate.yml`.
+
 ## [v0.15.0] - 2026-08-07
 
 ### Fixed — the v0.15.0 cut was blocked, and the CHANGELOG claimed a GA that only ever shipped as an rc1 (#1292)

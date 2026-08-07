@@ -1005,6 +1005,10 @@
       "script": "scripts/check_example_storage_claims.py"
     },
     {
+      "purpose": "CI gate: doc/example prose that names a known on-module I2C part next to an I2C bus name must agree with that part's bus in the owning SoM preset's `on_module.i2c_devices:` block -- the machine-readable source of truth `metadata/e1m_modules/E1M-AEN801.yaml` (and its five AEN siblings) gained in #1270.",
+      "script": "scripts/check_i2c_bus_doc_consistency.py"
+    },
+    {
       "purpose": "Inference backend/format <-> dispatcher canonicalisation gate.",
       "script": "scripts/check_inference_backend_parity.py"
     },

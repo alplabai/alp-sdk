@@ -393,6 +393,20 @@
       "ci": null
     },
     {
+      "id": "i2c-bus-doc-consistency",
+      "description": "Doc/example prose naming an on-module I2C part next to a bus name must agree with metadata/e1m_modules/*.yaml's on_module.i2c_devices.",
+      "runner": "check-script",
+      "script": "scripts/check_i2c_bus_doc_consistency.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "inference-backend-parity",
       "description": "Inference backend/format <-> dispatcher canonicalisation gate.",
       "runner": "check-script",

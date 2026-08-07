@@ -231,9 +231,9 @@ scannable from the host:
 A missing slave that's *expected* is a real fault.  The on-module
 set is authoritative in
 [`E1M-AEN801.yaml`](../metadata/e1m_modules/E1M-AEN801.yaml)'s
-scalar `on_module:` keys (the AEN presets have no `i2c_devices:`
-block -- that's a V2N/V2M-only convention); the carrier-side parts
-are authoritative in
+`on_module.i2c_devices:` block (same shape V2N/V2M use -- see
+`brd_i2c:` for the trio, `e1m_i2c0:` for the EEPROM); the
+carrier-side parts are authoritative in
 [`metadata/boards/e1m-evk.yaml`](../metadata/boards/e1m-evk.yaml)'s
 `populated:` block, where individual parts can be flipped off for
 DNI variants.

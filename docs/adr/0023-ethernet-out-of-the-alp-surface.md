@@ -105,10 +105,10 @@ as the contract, is three layers:
    `rtl8211fdi_read_page_reg`/`rtl8211fdi_write_page_reg`,
    `include/alp/chips/rtl8211fdi.h:232-244`). AEN — the only family
    with silicon-proven Ethernet in this tree — has no layer-3 chip
-   driver: there is no `chips/dp83825/` and no
-   `metadata/chips/dp83825.yaml`, tracked as **#1241** (the AEN801
-   preset omits `ethernet_phy` and no `metadata/chips/dp83825`
-   manifest exists, despite the DP83825 being on-module).
+   driver: there is no `chips/dp83825/`. **#1241** closed the metadata
+   half of that gap (`metadata/e1m_modules/E1M-AEN801.yaml`'s
+   `ethernet_phy: dp83825` + `metadata/chips/dp83825.yaml`,
+   `driver_status: none`); the C driver itself remains unwritten.
 
 The refusal list, with the reason each operation is refused:
 
@@ -197,10 +197,12 @@ recurring probes the real `ETHERNET_COUNT` lambda rather than a copy
 of the key list, because the first version hardcoded that copy and
 stayed green when the generator was reverted.
 
-Also filed from this ADR's research, both open: **#1241** (the AEN801
-preset omits `ethernet_phy`, and no `metadata/chips/dp83825` manifest
-exists) and **#1244** (the devicetree puts the DP83825I at MDIO
-address 1 while the E8 bench log reads it at address 0).
+Also filed from this ADR's research: **#1241** (the AEN801 preset
+omitted `ethernet_phy`, and no `metadata/chips/dp83825` manifest
+existed -- the metadata is now in place; the exact order code stays
+TBD pending the netlist/BOM) and **#1244**, still open (the
+devicetree puts the DP83825I at MDIO address 1 while the E8 bench log
+reads it at address 0).
 
 ## See also
 
@@ -212,6 +214,8 @@ address 1 while the E8 bench log reads it at address 0).
   identity covers V2N ↔ V2M and not E1M ↔ E1M-X.
 - `include/alp/chips/rtl8211fdi.h`,
   `metadata/chips/rtl8211fdi.yaml` — the V2N/V2M PHY chip driver.
+- `metadata/chips/dp83825.yaml` — the AEN PHY manifest (no chip
+  driver yet, `driver_status: none`, #1241).
 - `examples/aen/aen-ethernet-link/` — the silicon-proven Zephyr
   `net_if` reference this decision rests on.
 - `docs/adr/0024-v2n-analog-and-counter-classes-stay-on-the-gd32-bridge.md`
