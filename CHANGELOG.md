@@ -7,6 +7,35 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — `check_public_private.py`'s `REVIEWED_ACCEPTED` exemptions broke on every CHANGELOG-editing PR (#524)
+
+`REVIEWED_ACCEPTED` matched an exemption on an exact `CHANGELOG.md` line
+number (`_is_reviewed_accepted` required `line_no == e.line`). New entries
+are prepended at the top of the file, so every `[Unreleased]` insertion
+shifted the four existing exemptions off their anchors -- the reviewed
+line no longer matched, the finding reappeared, and the gate failed.
+Because the PR template requires a CHANGELOG entry, this fired on
+essentially every PR that touched one: measured, the pre-fix script
+against the current `CHANGELOG.md` reports four findings, at lines 6897,
+8155, 10984, and 11146 -- the SoM carrier-errata pointer and the three
+audit-doc citations reviewed and accepted under #524.
+
+`scan()` now matches a `REVIEWED_ACCEPTED` excerpt by content instead of
+line position, and only treats it as active when the excerpt appears on
+EXACTLY ONE line of the file it names. Zero matches (the reviewed text was
+deleted) or more than one (a looser excerpt would silently exempt a line
+nobody reviewed) both leave the exemption inactive, so the ordinary
+finding stands instead of being suppressed by accident; the three affected
+`PRIVATE_AUDIT_REFERENCE` entries are lengthened to the reviewed sentence
+so each is unique again. `line` is now kept only as a human-facing hint
+for where a reviewer originally found the text -- it plays no part in
+matching, so a later `CHANGELOG.md` insertion can no longer break the
+exemption. `main()` also now prints one diagnostic line per stale or
+ambiguous exemption -- scoped to the actual checkout this script lives in
+(`root == REPO`), since the excerpts are a snapshot of alp-sdk's own
+history -- so a gate-integrity problem is visible on its own line instead
+of being read as an ordinary leak finding.
+
 ### Added — ADR 0024: V2N/V2M analog and counter classes stay on the GD32 bridge (#1150)
 
 Design decision only, no code:
