@@ -807,6 +807,21 @@ Separately, there is no `alp` binary to run any of it with:
 maintenance, never a user-installed `alp` binary." Every invocation in the
 document is now the module form that actually runs --
 `python3 -m alp_cli model build --board <path>/board.yaml` from `scripts/`.
+### Added — an ExecuTorch adapter closes the write side of a decode gap the enum had carried unused (#1260)
+
+`ALP_INFERENCE_MODEL_EXECUTORCH` had sat in the public
+`alp_inference_model_format_t` enum with no matching case in `_fmt_enum()`
+(`src/backends/inference/alp_model_select.c`), so a `blob_format` string of
+`"executorch"` silently decoded as `ALP_INFERENCE_MODEL_TFLITE` -- the wrong
+parser, reported as `ALP_OK` -- and no host-side adapter could produce that
+string in the first place. `_fmt_enum()` now has an explicit `"executorch"`
+case, and `scripts/alp_model/adapters/executorch.py` packages an exported
+`.pte` program into an `.alpmodel` blob the same way `CpuAdapter` passes a
+`.tflite` through untouched.
+
+This closes the write-side gap only; there is still no on-device ExecuTorch
+*runtime* backend, so a package built this way has nothing to
+`alp_inference_invoke()` it yet (`docs/recommended-libraries.md` Tier 4).
 
 ## [v0.15.0] - 2026-08-07
 
