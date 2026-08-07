@@ -154,6 +154,19 @@ _ALLOWLIST: set[str] = {
     # (see #1175) -- real on that branch, not yet on this one.
     "ALP_FDT_FILE",
     "ALP_SD_ROOT",
+    # docs/board-config-features.md's PSA-attestation section names the
+    # exact Kconfig line and driver-path comment
+    # scripts/alp_orchestrate/secure.py emits for `attestation_root:
+    # optiga_trust_m` -- the doc accurately describes the generator's
+    # output, but no zephyr/kconfigs/*.kconfig defines a bare `config
+    # ALP_SDK_PSA_ATTESTATION_OPTIGA`, and the
+    # `src/security/optiga_trust_m_bridge.c` the emitted comment cites
+    # does not exist (only the probe-only `chips/optiga_trust_m/
+    # optiga_trust_m.c` chip driver is real, see #1164). A real, separate
+    # gap from #1228's imx93 table -- allowlisted rather than silently
+    # re-widening the harvest, pending a maintainer decision to finish
+    # the PSA<->OPTIGA wiring or mark it not-yet-implemented in the doc.
+    "ALP_SDK_PSA_ATTESTATION_OPTIGA",
 }
 
 # Identifier shapes we treat as SDK symbols.  The optional `CONFIG_`
@@ -163,7 +176,29 @@ _ALLOWLIST: set[str] = {
 # to the scan entirely (#1228).  Kconfig source spells the same symbol
 # bare (`config ALP_SDK_FOO`), so stripping the prefix here is what
 # lets a doc's `CONFIG_ALP_SDK_FOO` match a harvested `ALP_SDK_FOO`.
+# Used for DOC SCANNING only (find_dead_symbols) -- see _BARE_SYMBOL_RE
+# for why known-symbol harvesting must not do this same stripping.
 _SYMBOL_RE = re.compile(r"\b(?:CONFIG_)?(ALP_[A-Z0-9_]+|alp_[a-z0-9_]+)\b")
+
+# Same identifier shapes WITHOUT the CONFIG_-prefix stripping, used only
+# when harvesting known symbols (collect_known_symbols).  A `CONFIG_ALP_*`
+# occurrence in a header, C source, CMake file, generator, or Kconfig
+# help text is always a REFERENCE to an already-existing Kconfig symbol
+# (`#ifdef CONFIG_ALP_SDK_FOO`, `if(CONFIG_ALP_SDK_FOO)`, prose) -- never
+# itself the point where the bare symbol ALP_SDK_FOO is defined.
+# Stripping the prefix during harvest (like _SYMBOL_RE does for docs) let
+# a stale `#ifdef`/`#elif defined(CONFIG_...)` re-confirm a symbol whose
+# real Kconfig definition had been renamed out from under it -- the
+# `src/**/*.c`+`.cpp` layer went blind to a renamed-away Kconfig symbol
+# as long as one stale reference to the old name remained in a source
+# file (mutation-proven: renaming `config
+# ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U65` out of Kconfig left the gate
+# green because src/backends/inference/tflm.cpp's `#elif
+# defined(CONFIG_...)` still matched).  A real Kconfig `config ALP_SDK_FOO`
+# line has no `CONFIG_` glued in front, so it still matches this bare
+# form; only a same-file *reference* to the generated macro spelling
+# stops counting as proof of existence.
+_BARE_SYMBOL_RE = re.compile(r"\b(ALP_[A-Z0-9_]+|alp_[a-z0-9_]+)\b")
 
 # Real Zephyr board target names are harvested from the `board: name:`
 # field of each in-tree zephyr/boards/alp/<dir>/board.yml (see
@@ -305,7 +340,7 @@ def collect_known_symbols(root: pathlib.Path) -> set[str]:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             return
-        symbols.update(m.group(1) for m in _SYMBOL_RE.finditer(text))
+        symbols.update(m.group(1) for m in _BARE_SYMBOL_RE.finditer(text))
 
     def harvest_tree(base: pathlib.Path, pattern: str, *, exclude=None) -> None:
         if base.is_dir():
@@ -321,7 +356,7 @@ def collect_known_symbols(root: pathlib.Path) -> set[str]:
         # shape against the filename text itself.
         if base.is_dir():
             for path in base.rglob(pattern):
-                symbols.update(m.group(1) for m in _SYMBOL_RE.finditer(path.name))
+                symbols.update(m.group(1) for m in _BARE_SYMBOL_RE.finditer(path.name))
 
     # C-API: public + internal headers, plus .c/.cpp sources -- some
     # symbols (e.g. the per-variant inference backend entry points) are

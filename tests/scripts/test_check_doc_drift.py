@@ -403,3 +403,28 @@ def test_release_signing_key_filename_is_known(tmp_path):
     (keys / "alp_release_signing_ecdsa_p256.pub.pem").write_text("", encoding="utf-8")
     proc = _run("--root", str(tmp_path))
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+# --- #1228: a stale #ifdef reference is not a Kconfig definition ---
+
+
+def test_config_ifdef_reference_in_c_source_does_not_confirm_symbol(tmp_path):
+    # A `#elif defined(CONFIG_ALP_SDK_FOO)` in a .c/.cpp source is a
+    # REFERENCE to a Kconfig symbol, not a DEFINITION of the bare
+    # ALP_SDK_FOO identifier.  If nothing defines the Kconfig symbol any
+    # more (renamed/removed), a doc that names it is dead -- even though a
+    # stale #ifdef of the old name still sits in the source.  Mutation on
+    # the real tree: renaming `config ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U65`
+    # out of zephyr/kconfigs/iot-audio-inference.kconfig left
+    # src/backends/inference/tflm.cpp's `#elif defined(CONFIG_...)`
+    # unchanged, and the known-symbol harvest treated that reference as
+    # proof the doc's mention was real -- the exact #1228 drift shape,
+    # now passing green.
+    _scaffold(tmp_path, docs={"kconfig-table.md": "Enable `ALP_SDK_FOO`.\n"})
+    src = tmp_path / "src" / "backends"
+    src.mkdir(parents=True)
+    (src / "thing.cpp").write_text(
+        "#elif defined(CONFIG_ALP_SDK_FOO)\n", encoding="utf-8")
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 1
+    assert "ALP_SDK_FOO" in proc.stdout + proc.stderr

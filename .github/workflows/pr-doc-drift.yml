@@ -19,11 +19,23 @@
 # scripts/check_agents_md_generators.py +
 # scripts/check_doc_inventory.py, all runnable locally (see the
 # running-local-ci skill + docs/local-ci.md).
+#
+# Deliberately no `paths:` filter (like pr-static-analysis.yml): these
+# five scripts' known-symbol / cross-reference harvests read from over a
+# dozen directories across the tree (headers, Kconfig, CMake, generators,
+# schemas, Yocto, vendor docs, board overlays, keys/, ...), so a paths
+# list here is a second copy of that surface that silently drifts out of
+# sync with the scripts every time a harvest input is added -- which is
+# exactly how a PR that renamed a Kconfig symbol by touching only
+# zephyr/kconfigs/*.kconfig shipped merged-green twice (#1222, #1228).
+# The job itself is a few seconds of Python; always running it is cheaper
+# than maintaining that second list.
 name: pr-doc-drift
 
 on:
   pull_request:
     branches: [main, dev]
+<<<<<<< HEAD
     paths:
       - 'AGENTS.md'
       - 'README.md'
@@ -80,6 +92,10 @@ on:
       - 'scripts/alp_orchestrate/**'
       - 'scripts/program_eeprom.py'
       - '.github/workflows/**'
+=======
+  push:
+    branches: [main, dev]
+>>>>>>> 309fa009 (fix(docs): treat a stale #ifdef as a reference, not a Kconfig definition (#1228))
   workflow_dispatch:
 
 concurrency:

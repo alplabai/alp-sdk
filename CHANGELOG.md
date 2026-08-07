@@ -306,9 +306,23 @@ The dead-symbol regex, `\b(ALP_[A-Z0-9_]+|alp_[a-z0-9_]+)\b`, never matched
 inside a `CONFIG_ALP_SDK_FOO=y` line: `\b` does not fire between `CONFIG_`
 and `ALP_` (both are `\w`), so the token was invisible to the scan, not
 merely "known" -- a dead `CONFIG_ALP_*` Kconfig reference in a doc could
-drift silently forever. The regex now consumes an optional `CONFIG_` prefix
-without capturing it, so `CONFIG_ALP_SDK_FOO=y` resolves against the bare
-`ALP_SDK_FOO` Kconfig source spells.
+drift silently forever. Scanning a doc now consumes an optional `CONFIG_`
+prefix without capturing it, so `CONFIG_ALP_SDK_FOO=y` resolves against the
+bare `ALP_SDK_FOO` Kconfig source spells.
+
+Harvesting known symbols is a separate match that deliberately does NOT
+strip that prefix. A `CONFIG_ALP_SDK_FOO` occurrence inside a header, C
+source, CMake file, generator, or Kconfig help text is always a
+*reference* to an already-existing Kconfig symbol (`#ifdef
+CONFIG_ALP_SDK_FOO`, `if(CONFIG_ALP_SDK_FOO)`, prose) -- never itself the
+point where the bare `ALP_SDK_FOO` identifier is defined. Stripping the
+prefix on the harvest side too let a Kconfig symbol stay "known" after its
+`config ALP_SDK_FOO` stanza was renamed or removed, as long as one stale
+`#ifdef`/`#elif defined(CONFIG_...)` of the old name remained in a
+`.c`/`.cpp` file -- defeating the exact drift class this gate exists to
+catch. A real `config ALP_SDK_FOO` line has no `CONFIG_` glued in front,
+so it still resolves the symbol; only a same-file reference to the
+generated macro spelling stops counting as proof of existence.
 
 `vendors/**/*.md` is now a scanned surface (previously unscanned, so a
 vendored library's README could reference a removed symbol -- e.g. the
@@ -329,9 +343,26 @@ rationale without ever declaring or generating one, so leaving any of
 them in let a symbol they merely discussed self-confirm as "known" and
 hide the exact class of drift this gate exists to catch.
 
-`.github/workflows/pr-doc-drift.yml` now triggers on `vendors/**`,
-`src/**`, `examples/**`, and `keys/**` to match the gate's new scanned
-surface and known-symbol harvest inputs.
+`docs/board-config-features.md`'s PSA-attestation paragraph names
+`CONFIG_ALP_SDK_PSA_ATTESTATION_OPTIGA` -- an accurate description of what
+`scripts/alp_orchestrate/secure.py` emits for `attestation_root:
+optiga_trust_m`, but no Kconfig source defines that bare symbol and the
+`src/security/optiga_trust_m_bridge.c` its emitted comment cites does not
+exist (only the probe-only `chips/optiga_trust_m/optiga_trust_m.c` chip
+driver is real). The stricter harvest above correctly surfaces this as a
+second, independent instance of the class #1228 named; it is allowlisted
+rather than fixed here pending a maintainer decision on the PSA <-> OPTIGA
+attestation wiring itself.
+
+`.github/workflows/pr-doc-drift.yml` drops its `paths:` filter and now
+runs on every PR/push to `main`/`dev`, matching `pr-static-analysis.yml`'s
+precedent. These five scripts' harvests span over a dozen directories
+across the tree; a `paths:` list is a second copy of that surface that
+drifts out of sync with the scripts every time a harvest input is added --
+which is how a PR touching only `zephyr/kconfigs/*.kconfig` shipped
+merged-green twice (#1222, #1228) despite the paths filter's most recent
+edit. The job itself is a few seconds of Python, so always running it is
+cheaper than maintaining that second list.
 
 Separately, `docs/portability-matrix.md`,
 `docs/tutorials/04-cross-family-portability.md`, and
