@@ -7,6 +7,30 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — ADR 0022 claimed a `tan renode` retirement that never shipped
+
+ADR 0022 was recorded as "Accepted — implemented" for both of its clauses. Only
+one shipped. `tan` is indeed Python (PyInstaller freeze of `alp-tan`) from
+v0.5.0, but the `tan renode` verb was never removed: at `tan-cli` tag `v0.5.1`
+`python/tan/cli.py` still runs `app.command("renode")(renode)` against a real
+`python/tan/commands/renode_cmd.py`. The issue the ADR named as its tracking
+work, `tan-cli`#448, is still open and has since been re-scoped from removal to
+"emit a support-paused warning; retain the command, modules, fixtures and CI
+models" — retention, not removal.
+
+The ADR's Status is amended to "Accepted in part", Decision points 2 and 3 are
+withdrawn, and the index rows for 0020 and 0022 no longer claim that 0020's
+`renode` command-surface entries are superseded. The Decision body is preserved
+verbatim per `docs/adr/README.md`'s append-only rule; the correction is an
+appended Amendment.
+
+This left the doc surface inconsistent — `a39d73e5` stripped `renode` on the
+strength of the ADR, `2b817532` restored it in three files but not the rest, so
+`docs/cli.md`, `docs/heterogeneous-builds.md` and `docs/board-config-emit.md`
+document the live verb while `README.md`, `docs/README.md`,
+`docs/troubleshooting.md` and `VERSIONS.md` still omit it. Restoring those four
+is tracked separately.
+
 ## [v0.15.0] - 2026-08-07
 
 ### Fixed — the v0.15.0 cut was blocked, and the CHANGELOG claimed a GA that only ever shipped as an rc1 (#1292)
