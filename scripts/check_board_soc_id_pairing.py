@@ -58,8 +58,13 @@ ALLOWLIST: dict[str, str] = {
 
 
 def _scanned_files(root: Path) -> list[Path]:
-    """docs/**, examples/**/README.md + testcase.yaml, and the template
-    /example catalogs -- the exact surface issue #1266's instances hit."""
+    """docs/**, examples/**/README.md + testcase.yaml + C sources
+    (a `src/main.c` build-matrix teaching comment carries the same
+    board/SoC target string a README does --
+    examples/display/lvgl-widgets-demo/src/main.c did, in this issue),
+    tests/hil/**/*.md (the HIL per-board target table), .github/
+    workflows/** (a CI matrix step can name the same target), and the
+    template/example catalogs."""
     out: list[Path] = []
     docs = root / "docs"
     if docs.is_dir():
@@ -68,6 +73,15 @@ def _scanned_files(root: Path) -> list[Path]:
     if examples.is_dir():
         out.extend(sorted(examples.rglob("README.md")))
         out.extend(sorted(examples.rglob("testcase.yaml")))
+        out.extend(sorted(examples.rglob("*.c")))
+        out.extend(sorted(examples.rglob("*.h")))
+    hil = root / "tests" / "hil"
+    if hil.is_dir():
+        out.extend(sorted(hil.rglob("*.md")))
+    workflows = root / ".github" / "workflows"
+    if workflows.is_dir():
+        out.extend(sorted(workflows.rglob("*.yml")))
+        out.extend(sorted(workflows.rglob("*.yaml")))
     for rel in ("metadata/catalog.json", "metadata/templates/catalog-v1.json"):
         p = root / rel
         if p.is_file():

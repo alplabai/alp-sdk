@@ -222,10 +222,13 @@ board/SoC mismatch. Every instance is retagged with the E8's own id across
 template) documents and tests the in-tree carrier board,
 `alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp` -- the qualified form
 `scripts/alp_template.py`'s cross-family scaffold substitution keys off.
-Every other affected example documents and tests the upstream fallback
-board, `ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp`, in both its README and
-its `testcase.yaml`, so the build command a reader is told to run and the
-one CI exercises are the same target.
+`metadata/templates/catalog-v1.json`'s `edge-ai` template record matches:
+its `cross_compile_matrix` now names that same qualified board, not the
+upstream `ensemble_e8_dk` fallback the rest of the catalog uses. Every
+other affected example documents and tests the upstream fallback board,
+`ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp`, in both its README and its
+`testcase.yaml`, so the build command a reader is told to run and the one
+CI exercises are the same target.
 
 `scripts/alp_template.py`'s scaffold README substitution runs its short
 board-id-prefix fallback alongside the exact qualified-string match
@@ -241,9 +244,11 @@ carried over from an AEN801 (JLink) source README can't reach it.
 `metadata/quality-tasks-v1.json`, run from
 `.github/workflows/pr-metadata-validate.yml`): it fails when
 `ensemble_e8_dk` is paired with any SoC id other than `ae822fa0e5597ls0`
-under `docs/`, `examples/*/README.md`, `examples/*/testcase.yaml`, or the
-example catalogs, so this mismatch can't recur silently the way it did
-across 29 files.
+under `docs/`, `examples/*/README.md`, `examples/*/testcase.yaml`,
+`examples/**/*.c` and `*.h` (the antipattern also reached a `west build -b
+...` teaching comment in `examples/display/lvgl-widgets-demo/src/main.c`),
+`tests/hil/**/*.md`, `.github/workflows/**`, or the example catalogs, so
+this mismatch can't recur silently the way it did across 29 files.
 
 `examples/peripheral-io/pwm-led-fade` and
 `examples/peripheral-io/vendor-ext-composability` build against

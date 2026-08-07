@@ -53,3 +53,70 @@ def test_changelog_is_not_scanned(tmp_path):
         "- fixed ensemble_e8_dk/ae402fa0e5597le0/rtss_hp -> ae822fa0e5597ls0\n"
     )
     assert find_problems(tmp_path) == []
+
+
+def test_example_c_source_is_scanned(tmp_path):
+    """The antipattern reaches a `west build -b ...` teaching comment in
+    an example C source just as easily as a README
+    (examples/display/lvgl-widgets-demo/src/main.c:49, issue #1266)."""
+    src = tmp_path / "examples" / "display" / "widget" / "src"
+    src.mkdir(parents=True)
+    (src / "main.c").write_text(
+        "/*\n"
+        " *   `west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp "
+        "examples/display/widget`\n"
+        " */\n"
+    )
+    problems = find_problems(tmp_path)
+    assert len(problems) == 1
+    assert "src/main.c" in problems[0]
+    assert "ensemble_e8_dk/ae402fa0e5597le0" in problems[0]
+
+
+def test_example_header_is_scanned(tmp_path):
+    inc = tmp_path / "examples" / "display" / "widget" / "src"
+    inc.mkdir(parents=True)
+    (inc / "widget.h").write_text(
+        "// west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp\n"
+    )
+    problems = find_problems(tmp_path)
+    assert len(problems) == 1
+    assert "widget.h" in problems[0]
+
+
+def test_hil_readme_is_scanned(tmp_path):
+    """tests/hil/README.md documents the per-board HIL target table."""
+    hil = tmp_path / "tests" / "hil"
+    hil.mkdir(parents=True)
+    (hil / "README.md").write_text(
+        "| aen801-evk | ensemble_e8_dk/ae402fa0e5597le0/rtss_hp |\n"
+    )
+    problems = find_problems(tmp_path)
+    assert len(problems) == 1
+    assert "tests/hil/README.md" in problems[0]
+
+
+def test_workflow_yaml_is_scanned(tmp_path):
+    """.github/workflows/** can carry a `west build -b ...` matrix
+    entry."""
+    wf = tmp_path / ".github" / "workflows"
+    wf.mkdir(parents=True)
+    (wf / "pr-example.yml").write_text(
+        "run: west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp .\n"
+    )
+    problems = find_problems(tmp_path)
+    assert len(problems) == 1
+    assert ".github/workflows/pr-example.yml" in problems[0]
+
+
+def test_bare_board_mention_without_soc_id_is_not_flagged(tmp_path):
+    """Prose that merely names the board (no `/<soc_id>` suffix) is not
+    a pairing claim and must not be flagged, in any scanned location --
+    including the newly-added C-source surface."""
+    src = tmp_path / "examples" / "aen" / "widget" / "src"
+    src.mkdir(parents=True)
+    (src / "main.c").write_text(
+        "/* Matches Alif's ensemble_e8_dk board layout for the HE/HP "
+        "core split. */\n"
+    )
+    assert find_problems(tmp_path) == []
