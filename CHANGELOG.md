@@ -40,6 +40,29 @@ only artefact asserting a GA. The working heading is relabelled
 it becomes accurate the moment the tag is pushed, and flipping it back for
 the interim would churn `alp.lock` and every consumer that reads it.
 
+### Fixed — `docs/board-id.md`'s EEPROM manifest struct is now pinned to `include/alp/hw_info.h`, with a gate (#1231)
+
+`docs/board-id.md`'s `alp_hw_info_eeprom_t` typedef block now cites the
+header's `ALP_HW_INFO_*_LEN` macro values it transcribes
+(`ALP_HW_INFO_FAMILY_LEN` = 16, `ALP_HW_INFO_SKU_LEN` = 24,
+`ALP_HW_INFO_HW_REV_LEN` = 8, `ALP_HW_INFO_SERIAL_LEN` = 24, from
+`include/alp/hw_info.h:82-85`), so a reader decoding raw manifest bytes
+can trace every width back to its source instead of trusting a
+hand-copied number.
+
+A new gate, `scripts/check_board_id_doc_parity.py`, parses the
+`alp_hw_info_eeprom_t` typedef struct out of both `docs/board-id.md`
+and `include/alp/hw_info.h`, resolves the header's length macros, and
+diffs field names, order, and widths between the two sides.
+Generation (`@include`-ing the header into the doc) was rejected:
+Markdown has no such directive, and the doc's block carries per-field
+explanatory prose a generator would strip. The gate fails loudly --
+never silently OK -- if either struct block cannot be located at all,
+matching the fail-open fix landing in three other doc gates tonight
+(#1264, #1265). It is registered in `metadata/quality-tasks-v1.json`
+and wired into `pr-doc-drift.yml`, whose existing `docs/**` +
+`include/**` path filters already cover both files it reads.
+
 ### Fixed — `check_public_private.py`'s `REVIEWED_ACCEPTED` exemptions broke on every CHANGELOG-editing PR (#524)
 
 `REVIEWED_ACCEPTED` matched an exemption on an exact `CHANGELOG.md` line

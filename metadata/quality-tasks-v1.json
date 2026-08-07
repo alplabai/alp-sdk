@@ -3,6 +3,20 @@
   "description": "Single source of truth for the SDK's quality tasks: which check_*.py gates exist, whether each is a hard CI gate or informational, and which profiles (quick/pr/full/release) run it. check_quality_registry.py keeps it == scripts/check_*.py on disk. Additive-only within schemaVersion 1.",
   "tasks": [
     {
+      "id": "board-id-doc-parity",
+      "description": "docs/board-id.md's alp_hw_info_eeprom_t typedef struct (field names, order, widths) must match include/alp/hw_info.h, macros resolved (#1231).",
+      "runner": "check-script",
+      "script": "scripts/check_board_id_doc_parity.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-doc-drift.yml:doc-drift"
+    },
+    {
       "id": "board-schema-version",
       "description": "Fail if any repo board.yaml has an outstanding schema migration.",
       "runner": "check-script",

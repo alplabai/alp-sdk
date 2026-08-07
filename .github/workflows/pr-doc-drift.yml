@@ -5,10 +5,13 @@
 # internal headers, Kconfig, CMake, generators, schemas, Yocto), when a
 # top-level docs/*.md isn't linked from the docs index, when a relative
 # doc-to-doc link is dead, when VERSIONS.md carries no row for the
-# released version, or when an ALP-Bxxx diagnostic landing page is
-# still a placeholder.  Mirrors scripts/check_doc_drift.py +
-# scripts/check_doc_links.py + scripts/check_diagnostic_narratives.py +
-# scripts/check_version_doc_sync.py, all runnable locally (see the
+# released version, when an ALP-Bxxx diagnostic landing page is still a
+# placeholder, or when docs/board-id.md's alp_hw_info_eeprom_t struct
+# disagrees with include/alp/hw_info.h (#1231).  Mirrors
+# scripts/check_doc_drift.py + scripts/check_doc_links.py +
+# scripts/check_diagnostic_narratives.py +
+# scripts/check_version_doc_sync.py +
+# scripts/check_board_id_doc_parity.py, all runnable locally (see the
 # running-local-ci skill + docs/local-ci.md).
 name: pr-doc-drift
 
@@ -25,6 +28,7 @@ on:
       - 'scripts/check_doc_links.py'
       - 'scripts/check_diagnostic_narratives.py'
       - 'scripts/check_version_doc_sync.py'
+      - 'scripts/check_board_id_doc_parity.py'
       - '.github/workflows/pr-doc-drift.yml'
   push:
     branches: [main, dev]
@@ -65,3 +69,6 @@ jobs:
 
       - name: Version-doc sync (README labels + VERSIONS.md vs sdk_version.yaml)
         run: python3 scripts/check_version_doc_sync.py
+
+      - name: Board-ID struct parity (docs/board-id.md vs include/alp/hw_info.h)
+        run: python3 scripts/check_board_id_doc_parity.py
