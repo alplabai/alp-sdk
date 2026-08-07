@@ -285,16 +285,13 @@ both deferred out of the wave-3 docs-inventory slice because a new
 `scripts/check_*.py` gate needs the `adding-a-ci-gate` four-site lockstep,
 not a docs edit.
 
-An earlier attempt at this pair of gates went through three review rounds
-without converging: the design parsed doc prose looking for a
-section/anchor and silently skipped the check whenever the anchor wasn't
-found, and each fix closed one such fail-open shape while leaving or
-creating another. Both new gates are built the other way around: every
-extraction step that can't find what it's looking for is a hard failure,
-never a silent skip, and each checks only claims with a genuine ground
-truth to compare against (real `#define`s, a real `argparse choices=` list
-read via `ast`, or a real `[`file`](path)` markdown link) rather than
-open-ended prose. `check_doc_inventory.py`'s docstring explains, with the
+Both new gates are built so that every extraction step that can't find
+what it's looking for is a hard failure, never a silent skip, and each
+checks only claims with a genuine ground truth to compare against (real
+`#define`s, a real `argparse choices=` list read via `ast`, or a real
+`[`file`](path)` markdown link) rather than open-ended prose, with every
+occurrence of a count claim checked, not just the first.
+`check_doc_inventory.py`'s docstring explains, with the
 counter-examples the tree already contains (`docs/ci/HW-IN-LOOP.md`'s
 historical `nightly-aen-hil.yml` mention, `docs/test-plan.md`'s link to
 `alp-sdk-vscode`'s own `ci.yml`), why a blanket "every workflow filename

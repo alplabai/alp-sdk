@@ -9,14 +9,10 @@ generators, so a pinout rename or an `--emit` choice-list change can leave
 AGENTS.md naming something that no longer compiles or runs, with no gate to
 catch it (issue #1264).
 
-Scope is deliberately narrow.  Two earlier attempts at this pair of gates
-(#1264 + #1265) went through three review rounds without converging: each
-fix closed one fail-open shape (an "anchor" the parser looks for, then
-silently skips the check if the anchor isn't found) and left or created
-another.  This gate has no such skip path -- every extraction step that
-can't find what it's looking for is a hard FAILURE (see the `problems.append`
-calls below), never a silent pass.  It also checks only what has a genuine
-ground truth to compare against:
+Scope is deliberately narrow.  This gate has no anchor-missing skip path --
+every extraction step that can't find what it's looking for is a hard
+FAILURE (see the `problems.append` calls below), never a silent pass.  It
+also checks only what has a genuine ground truth to compare against:
 
   (a) Identifiers.  Every `ALP_E1M_[A-Z0-9_]*` token appearing anywhere in
       AGENTS.md must be a real `#define` in `include/alp/e1m_pinout.h` or
@@ -25,7 +21,13 @@ ground truth to compare against:
       route naming (`_c_token()`) draws its tokens from.  A
       trailing-underscore token (a family wildcard like `ALP_E1M_X_*`,
       captured as `ALP_E1M_X_`) is valid if it's a real PREFIX of some
-      defined macro, mirroring `check_doc_drift.py`'s `_is_known()`.
+      defined macro.  This "known or a real prefix of known" test is
+      `check_doc_drift.py`'s own `_is_known()`, imported and reused
+      directly rather than re-implemented here -- a second, narrower copy
+      of the same rule is exactly how the two would silently drift apart.
+      `_ALLOWLIST` below is that function's escape hatch for a deliberate
+      non-real identifier AGENTS.md cites as a counter-example (mirrors
+      `check_doc_drift.py`'s own `_ALLOWLIST`; justify every entry).
 
   (b) `--emit` choice lists.  AGENTS.md documents `scripts/alp_project.py`'s
       and `python -m alp_orchestrate`'s `--emit {a,b,c,...}` choice sets
@@ -64,7 +66,19 @@ import re
 import sys
 from pathlib import Path
 
+# Reuse check_doc_drift.py's known/allow/trailing-underscore-prefix rule
+# (_is_known()) rather than a second, narrower copy of it -- both scripts
+# live in scripts/, which every caller (direct `python3 scripts/...` and
+# tests/scripts/conftest.py) already puts on sys.path.
+import check_doc_drift as _doc_drift
+
 ROOT = Path(__file__).resolve().parent.parent
+
+# Deliberately non-real ALP_E1M_*/ALP_E1M_X_* identifiers AGENTS.md cites
+# as a counter-example (e.g. "`ALP_E1M_UART9` does not exist") -- the
+# escape hatch _is_known() gives every allowlisted token, mirroring
+# check_doc_drift.py's own _ALLOWLIST.  Justify every entry.
+_ALLOWLIST: set[str] = set()
 
 # The two generator invocations AGENTS.md documents inline: (anchor text,
 # script path relative to root, human label).  Resolved against the
@@ -89,7 +103,7 @@ def _harvest_pinout_defines(path: Path) -> set[str]:
 def find_identifier_drift(root: Path) -> list[str]:
     """Every ALP_E1M_*/ALP_E1M_X_* token in AGENTS.md must be a real
     #define (or, trailing-underscore, a real prefix) in the pinout
-    headers."""
+    headers, or listed in _ALLOWLIST as a deliberate counter-example."""
     agents = root / "AGENTS.md"
     if not agents.is_file():
         return ["AGENTS.md: not found -- cannot verify its ALP_E1M_* identifiers"]
@@ -108,12 +122,13 @@ def find_identifier_drift(root: Path) -> list[str]:
     for line_no, line in enumerate(text.splitlines(), 1):
         for m in _IDENTIFIER_RE.finditer(line):
             tok = m.group(0)
+            if _doc_drift._is_known(tok, known, _ALLOWLIST):
+                continue
             if tok.endswith("_"):
-                if not any(sym.startswith(tok) for sym in known):
-                    problems.append(
-                        f"AGENTS.md:{line_no}: `{tok}` -- no real identifier in "
-                        f"e1m_pinout.h / e1m_x_pinout.h starts with this prefix")
-            elif tok not in known:
+                problems.append(
+                    f"AGENTS.md:{line_no}: `{tok}` -- no real identifier in "
+                    f"e1m_pinout.h / e1m_x_pinout.h starts with this prefix")
+            else:
                 problems.append(
                     f"AGENTS.md:{line_no}: `{tok}` -- not a real #define in "
                     f"include/alp/e1m_pinout.h or include/alp/e1m_x_pinout.h")

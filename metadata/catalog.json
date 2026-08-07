@@ -893,6 +893,10 @@
   },
   "gates": [
     {
+      "purpose": "AGENTS.md hand-writes two kinds of generator-derived fact: concrete `ALP_E1M_*` / `ALP_E1M_X_*` pinout identifiers (its worked examples) and the `--emit` choice lists for `scripts/alp_project.py` and `python -m alp_orchestrate`. Nothing checks either against the real generators, so a pinout rename or an `--emit` choice-list change can leave AGENTS.md naming something that no longer compiles or runs, with no gate to catch it (issue #1264).",
+      "script": "scripts/check_agents_md_generators.py"
+    },
+    {
       "purpose": "Board-ID manifest struct-parity gate -- fails (exit 1) when the `alp_hw_info_eeprom_t` typedef struct documented in docs/board-id.md, or the pack-format constants `scripts/program_eeprom.py` transcribes from the same struct, disagree with the shipping definition in include/alp/hw_info.h on field names, field order, or field widths.",
       "script": "scripts/check_board_id_doc_parity.py"
     },
@@ -947,6 +951,10 @@
     {
       "purpose": "Doc-drift gate -- fails (exit 1) when customer-facing documentation references SDK identifiers that no longer exist, when a top-level doc isn't linked from the docs index, or when CC3501E docs/examples describe the current bridge as the obsolete CS-less design.",
       "script": "scripts/check_doc_drift.py"
+    },
+    {
+      "purpose": "Doc-inventory gate -- fails (exit 1) when a hand-maintained inventory count or workflow-table entry in the docs drifts from the tree it describes (issue #1265, following up on #1209's fifth required-work item).",
+      "script": "scripts/check_doc_inventory.py"
     },
     {
       "purpose": "CI gate: no dead relative-path links in customer-facing documentation.",
