@@ -149,6 +149,19 @@ def extract_struct_block(text: str) -> Optional[str]:
     return matches[0].group(1)
 
 
+def _block_count_phrase(text: str) -> str:
+    """Say WHICH way extract_struct_block() refused.
+
+    It returns None for both "no block" and "more than one block", and
+    those need different fixes -- reporting a duplicate as "could not
+    locate" sends the reader hunting for a missing block.
+    """
+    n = len(_STRUCT_BLOCK_RE.findall(text))
+    if n == 0:
+        return "could not locate a"
+    return f"found {n} copies of the"
+
+
 def collect_len_macros(header_text: str) -> dict[str, int]:
     """Resolve every `ALP_HW_INFO_*` #define in the header to an int."""
     macros: dict[str, int] = {}
@@ -232,7 +245,7 @@ def find_problems(root: pathlib.Path) -> list[str]:
     header_block = extract_struct_block(header_text)
     if header_block is None:
         return [
-            f"{_HEADER_REL}: could not locate "
+            f"{_HEADER_REL}: {_block_count_phrase(header_text)} "
             f"'typedef struct {_STRUCT_NAME} {{ ... }} {_STRUCT_NAME};' -- "
             f"cannot verify the doc against it (failing loudly, not skipping)"
         ]
@@ -240,7 +253,7 @@ def find_problems(root: pathlib.Path) -> list[str]:
     doc_block = extract_struct_block(doc_text)
     if doc_block is None:
         return [
-            f"{_DOC_REL}: could not locate a "
+            f"{_DOC_REL}: {_block_count_phrase(doc_text)} "
             f"'typedef struct {{ ... }} {_STRUCT_NAME};' code block -- "
             f"cannot verify it against the header (failing loudly, not skipping)"
         ]
