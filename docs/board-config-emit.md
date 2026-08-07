@@ -99,14 +99,27 @@ input to a Zephyr tree built from a different one. A clean cross-version skew
 error (rather than a Kconfig "assign to undefined symbol" abort) is #855's
 version-detection work, not this loader's.
 
-### Plain CMake (baremetal / yocto) -- generated `-D` args
+### Plain CMake (baremetal / yocto) -- generated `-D` args (reference / inspection)
+
+`--emit cmake-args` renders a slice's would-be `-D` arguments as text: an
+on-request surface for inspecting what a baremetal build needs, or for a
+build system that parses the lines itself. It is **not** a directly
+shell-pipeable recipe -- `cmake -B build $(... --emit cmake-args) .` fails
+CMake's own argument parser today, for two independent reasons: the CLI's
+leading `# --- core: <id> (<os>) ---` section marker
+(`scripts/alp_project.py:442-444` prepends it unconditionally for
+`cmake-args`, unlike the `zephyr-conf` branch, which only adds it in the
+unscoped multi-core sum case), and the board-facade selector's bare
+`-DALP_BOARD_<SLUG>` (a compile-time `#if defined(...)` guard consumed by
+`include/alp/board.h`, not a `VAR=value` CMake cache entry -- CMake rejects
+a `-D` with no `=value`). Write the output to a file and adapt the lines
+into your own CMakeLists.txt / toolchain file instead:
 
 ```bash
-# Pipe the generated args straight into your configure step:
-ARGS=$(python3 $ALP_SDK/scripts/alp_project.py \
+python3 $ALP_SDK/scripts/alp_project.py \
     --input board.yaml \
-    --emit cmake-args)
-cmake -B build $ARGS .
+    --emit cmake-args \
+    --output build/generated/alp-cmake-args.txt
 ```
 
 Or wire the loader into a `CMakeUserPresets.json` writer if your

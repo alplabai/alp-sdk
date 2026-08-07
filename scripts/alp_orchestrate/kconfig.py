@@ -1599,7 +1599,7 @@ def _slice_local_conf(project: BoardProject, slice_: Slice) -> str:
 
 
 def _slice_cmake_args(project: BoardProject, slice_: Slice) -> str:
-    """Per-core cmake -D args for a baremetal / yocto slice.
+    """Per-core cmake -D args for a baremetal / zephyr slice.
 
     NPU-dispatch enables (DRP-AI, DEEPX) are driven from the SoM
     preset's `capabilities:` matrix -- never from board.yaml.  On

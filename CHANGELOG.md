@@ -57,6 +57,55 @@ drop their now-redundant `--ignore-matching-lines='"generated":'` diff mask,
 since the write-skip guard is what keeps a no-op regen from touching that line
 at all — a real content change still fails on its content lines regardless of
 the mask.
+### Removed — dead `cmake-args.txt` materialisation from the baremetal build-plan slice (#1278)
+
+`emit_build_plan`'s `configArtefacts` no longer carries a `cmake-args.txt`
+entry for `os: baremetal` slices
+(`scripts/alp_orchestrate/buildplan.py::_slice_config_artefact`). The
+artefact was dead on both sides of the contract: nothing in this repo's own
+`_slice_command` (baremetal branch) ever read it back — the `cmake -S ... -B
+...` argv is built independently — and tan-cli's materialise step writes
+`configArtefacts` to disk without ever reading them back either. #1278 gave
+two ways to close the gap -- route the args into the cmake invocation, or
+drop the dead emit -- and this takes the second: the standalone `--emit
+cmake-args` mode (`_slice_cmake_args`) remains as an on-request,
+manually-wired reference surface (`docs/board-config-emit.md`), but no
+automatic path threads `-DALP_CORE_ID` or any of its sibling `-D` args into
+a baremetal build any more; that was never true before this change either
+(the args were computed and written, not read back), so nothing that
+previously worked stops working.
+
+- `metadata/schemas/build-plan-v1.schema.json`'s `configArtefacts`
+  description and `docs/architecture.md`'s pipeline diagram both stop naming
+  `cmake-args` among what a build-plan consumer materialises.
+  `metadata/emit-registry-v1.json`'s `cmake-args` mode entry drops its
+  `path` to `null` -- no fixed build/materialise-flow location remains for
+  it; the standalone `--emit cmake-args` mode itself is unchanged and stays
+  a caller-chosen `--output`.
+- `docs/board-config-emit.md`'s "Plain CMake" recipe no longer claims
+  `--emit cmake-args`'s output is directly pipeable into `cmake -B build
+  $ARGS .`, and instead documents `--output` to a file for manual/tooling
+  consumption; `--emit cmake-args` itself is unchanged and still valid.
+- No `schemaVersion` bump: ADR-0020 Amendment (2026-07-20) item 3 sets the
+  precedent for a build-plan shape change against `tan-cli`'s pinned
+  `schemaVersion == 1` -- don't bump (it would strand the pin), keep
+  strict-producer/tolerant-consumer instead. No committed fixture (pinned
+  oracle or `tests/fixtures/emit-snapshots/*`) exercises a baremetal slice
+  today -- neither fixture tree has an `"os": "baremetal"` entry -- so this
+  shape change trips no gate yet.
+- Not fixed here: this repo's `_slice_config_artefact`
+  (`scripts/alp_orchestrate/buildplan.py`) has a byte-identical twin at
+  tan-cli's `python/tan/planner/buildplan.py:51-69`, whose baremetal branch
+  (lines 67-68) still returns a `cmake-args.txt` entry -- this change makes
+  the two planners disagree on that shape. tan-cli issue #492 (item 2,
+  `python/tan/planner/buildplan.py:68`) already tracks the dead-materialise
+  side of this on tan-cli's own code; it needs to land the matching drop
+  before the two repos re-agree. ADR-0020 Amendment item 4 governs exactly
+  this: seam-1 (`tests/parity/seam1_field_diff.py` and tan-cli's vendored
+  twin) diffs `configArtefacts[*].path` after dropping `contents`, and an
+  artefact "appearing/vanishing/moving still fails the gate" -- so once
+  either repo's parity suite gains a baremetal-slice fixture, seam-1 fails
+  until tan-cli's twin drops the same branch.
 
 ## [v0.15.0] - 2026-08-07
 

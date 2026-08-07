@@ -211,9 +211,16 @@ board.yaml (`cores:`)
    Tan planner / SDK reference    # plan JSON: per-slice command + generated files
         │
         ▼
-   tan build                      # writes alp.conf / local.conf / cmake-args per slice
-                                   # under build/<core>-<os>/, then runs each slice's build
+   tan build                      # writes alp.conf / local.conf per slice under
+                                   # build/<core>-<os>/, then runs each slice's build
 ```
+
+The SDK's own reference emitter no longer materialises a `cmake-args.txt` for a
+baremetal slice: nothing consumed it (#1278). The shipping `tan` executor still
+writes one — `python/tan/planner/buildplan.py` returns it per baremetal slice, so
+`tan build --materialise` produces `build/<core>-baremetal/cmake-args.txt` — and
+dropping it there is tracked as tan-cli#492. Until that lands, a baremetal build
+directory carries the file even though no build step reads it.
 
 OS inference defaults are silicon-class driven: Cortex-M cores
 default to Zephyr, Cortex-A cores default to Yocto Linux.  The
