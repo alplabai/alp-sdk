@@ -432,7 +432,7 @@
             "pyocd_target": {
               "type": "string",
               "minLength": 1,
-              "description": "pyOCD target id (cortex-debug `targetId` for servertype `pyocd`). For Alif Ensemble parts this is the variant's own `order_code` -- confirmed 1:1 against the CMSIS-Pack index (pack AlifSemiconductor.Ensemble 2.2.0)."
+              "description": "pyOCD target id (cortex-debug `targetId` for servertype `pyocd`). For Alif Ensemble parts this is the variant's own `order_code` -- confirmed 1:1 against the CMSIS-Pack index (pack AlifSemiconductor.Ensemble 2.2.0, released 2026-06-30, github.com/alifsemi/alif_ensemble-cmsis-dfp tag v2.2.0). Note: the DFP checkout used elsewhere in this repo for order-code/core spelling is pinned at v2.1.0 (2025-12-19) -- 2.1.0 is simply older than this citation, not a mismatch; the order-code spelling itself is unchanged between the two (both list AE822FA0E5597BS0 / LS0 identically)."
             },
             "jlink_device": {
               "type": "object",

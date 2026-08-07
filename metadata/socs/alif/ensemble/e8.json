@@ -228,6 +228,7 @@
       "gpio_18v": 136,
       "optional_features": { "npu_hg": true, "isp": true, "jpeg_encoder": true },
       "shipment_suffixes": ["-T", "-Y"],
+      "notes": "debug.jlink_flash_device is deliberately TBD/absent, not an oversight: the Alif DFP (AlifSemiconductor.Ensemble.pdsc:304) confirms the order-code spelling AE822FA0E5597BS0 but the DFP carries no SEGGER/J-Link material at all (no .jlink, no JLinkDevices.xml, no --device= string) -- the part-number J-Link profile is SEGGER's own database entry, external to the pack. The `<order_code>_M55_HE` pattern seen on LS0 (AE822FA0E5597LS0_M55_HE) is a plausible guess, not a fact -- do not copy it here. Confirming the real string needs a live J-Link installation's device XML/DB (`JLinkExe -device AE822FA0E5597BS0_M55_HE` against a real probe) or an Alif-published J-Link device list naming BS0 explicitly. Until then, tan-cli Flow D (Alif MRAM burn) refuses on this order code; Flow D is proven working on LS0 only.",
       "debug": {
         "pyocd_target": "AE822FA0E5597BS0",
         "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" }
