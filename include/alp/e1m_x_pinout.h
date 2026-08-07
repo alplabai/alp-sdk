@@ -163,6 +163,32 @@ extern "C" {
 #define ALP_E1M_X_COUNTER1  1u
 #define ALP_E1M_X_COUNTER2  2u
 #define ALP_E1M_X_COUNTER3  3u
+/* Counter is padless -- no e1m-spec connector pad backs these ids
+ * (metadata/e1m/pinout-x-v1.json carries no counter entry, unlike
+ * the pinned classes above), so this is an E1M-X namespace
+ * convention rather than a claim tied to the file's `N <
+ * ALP_E1M_X_<CLASS>_COUNT` portability-bound block below -- counter
+ * has no such bound macro.  These four ids are not a per-SoM
+ * promise either: a different SoM in this family may serve all
+ * four.  A published id this SoM does not serve never reports
+ * ALP_ERR_INVAL -- a published id is not a bad argument -- but the
+ * status it DOES report is per-backend, so branch on "open failed",
+ * not on one code:
+ *   - src/backends/counter/gd32_bridge.c: ALP_ERR_NOSUPPORT for an id
+ *     at or beyond GD32G553_BRIDGE_COUNTER_CHANNELS.  This is the
+ *     V2N/V2M path, which serves ALP_E1M_X_COUNTER0 only.
+ *   - src/backends/counter/zephyr_drv.c: its `alp-counter<N>` alias
+ *     table is a fixed four entries, so every published identity is
+ *     inside it and a board with no alias for one reports
+ *     ALP_ERR_NOT_READY (alias unresolved), not NOSUPPORT.
+ *   - src/backends/counter/yocto_drv.c: no id range of its own -- it
+ *     probes /sys/bus/counter and maps the POSIX errno.
+ * Only gd32_bridge.c populates alp_counter_capabilities()->channel_count
+ * today; the others leave it zero, so read a zero as "not reported",
+ * not as "serves none".
+ * V2N/V2M serve COUNTER0 only, via the GD32 bridge
+ * (src/backends/counter/gd32_bridge.c); see docs/portability.md
+ * §4.5 (alp-sdk#1242). */
 
 /* Watchdog instance IDs. */
 #define ALP_E1M_X_WDT0      0u

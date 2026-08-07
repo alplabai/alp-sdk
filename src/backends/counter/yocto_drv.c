@@ -161,10 +161,12 @@ static alp_status_t y_open(const alp_counter_config_t  *cfg,
 		return alp_status_from_posix_errno(e);
 	}
 
-	st->dev         = NULL;
-	st->counter_id  = cfg->counter_id;
-	st->be_data     = d;
-	caps_out->flags = 0u;
+	st->dev                 = NULL;
+	st->counter_id          = cfg->counter_id;
+	st->be_data             = d;
+	caps_out->flags         = 0u;
+	caps_out->channel_count = 0u; /* Counter sysfs exposes no device-count
+	                               * attribute to read this from -- alp-sdk#1242 */
 	return ALP_OK;
 }
 

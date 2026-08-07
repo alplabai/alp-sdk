@@ -592,13 +592,21 @@ Capability deltas to plan around at the portable surface: the ADC
 backend advertises `base_caps = 0u` — an SDK-side gap at SDK v0.7,
 not a bridge hardware limit — so no oversample or trigger support is
 exposed yet; counter has no alarm support, because there is no IRQ
-line from the GD32 back to the RZ/V2N SoC. The bridge also accepts
-only `counter_id 0` (`src/backends/counter/gd32_bridge.c:22`) even
+line from the GD32 back to the RZ/V2N SoC. The bridge also serves
+only `counter_id 0` (`src/backends/counter/gd32_bridge.c:33`) even
 though `include/alp/e1m_x_pinout.h:162-165` publishes
-`ALP_E1M_X_COUNTER0..3` — size for one counter instance, not four,
-on V2N/V2M today (issue #1242). Every call also crosses the SPI/I2C
-bridge transport under a shared supervisor mutex, adding bridge-hop
-latency that a same-die peripheral would not have.
+`ALP_E1M_X_COUNTER0..3` — one counter instance, not four, on V2N/V2M
+today. `ALP_E1M_X_COUNTER1..3` are still valid E1M-X connector
+identities (a different SoM may serve all four), so
+`alp_counter_open()` on them returns `ALP_ERR_NOSUPPORT`, not
+`ALP_ERR_INVAL`. The served count is discoverable only *after*
+`ALP_E1M_X_COUNTER0` opens successfully, via
+`alp_counter_capabilities()->channel_count` on that handle -- and that
+open itself needs the GD32 supervisor bus configured, so on a build
+where COUNTER0 cannot open, the served count cannot be queried at all
+(issue #1242). Every call also crosses the SPI/I2C bridge transport
+under a shared supervisor mutex, adding bridge-hop latency that a
+same-die peripheral would not have.
 
 ---
 

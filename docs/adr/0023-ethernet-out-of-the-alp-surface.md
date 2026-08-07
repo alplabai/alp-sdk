@@ -84,7 +84,7 @@ as the contract, is three layers:
 2. **Form-factor port identity** — `ALP_E1M_ETH0` with
    `ALP_E1M_ETH_COUNT 1u` (`include/alp/e1m_pinout.h:100,204`), and
    `ALP_E1M_X_ETH0` / `ALP_E1M_X_ETH1` with `ALP_E1M_X_ETH_COUNT 2u`
-   (`include/alp/e1m_x_pinout.h:98-99,192`). This is **not** what a
+   (`include/alp/e1m_x_pinout.h:98-99,208`). This is **not** what a
    customer moving between a 2-port and a 1-port SoM keys off — the
    only 1-port SoM is E1M (AEN) and the only 2-port is E1M-X
    (V2N/V2M), so that swap is a cross-form-factor move, and
