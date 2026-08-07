@@ -392,38 +392,10 @@ def test_missing_required_field_rejected():
     """A plan missing a required field (here, a slice's `env`) fails
     validation -- the schema actually enforces its `required` arrays,
     it isn't just documentation."""
-    bad = {
-        "schemaVersion": 1,
-        "generatedBy": "scripts/alp_orchestrate.py",
-        "boardYaml": "board.yaml",
-        "sku": "E1M-V2N101",
-        "buildRoot": "build",
-        "slices": [{
-            "coreId": "m33_sm",
-            "backend": "zephyr",
-            "buildDir": "build/m33_sm-zephyr",
-            "appDir": None,
-            "configArtefacts": [],
-            "toolchain": {
-                "targetTriple": "arm-zephyr-eabi",
-                "compiler": "arm-zephyr-eabi-gcc",
-                "sysroot": None,
-                "id": "arm-zephyr-eabi",
-            },
-            "artifacts": {
-                "elf": None, "map": None, "bin": None,
-                "sizeReport": None, "symbols": None,
-                "compileCommands": None,
-            },
-            "debug": {"console": "uart", "probe": None},
-            "command": None,
-            # "env" deliberately omitted -- required by the schema.
-        }],
-        "sharedArtefacts": [],
-        "warnings": [],
-    }
+    p = _plan_with_tool("west")
+    del p["slices"][0]["env"]
     validator = jsonschema.Draft202012Validator(_schema())
-    errors = list(validator.iter_errors(bad))
+    errors = list(validator.iter_errors(p))
     assert errors, "missing required 'env' should have been rejected"
 
 
@@ -516,6 +488,66 @@ def test_unknown_top_level_key_rejected():
     }
     validator = jsonschema.Draft202012Validator(_schema())
     assert list(validator.iter_errors(bad)) != []
+
+
+def _plan_with_tool(tool: str) -> dict:
+    """A minimal otherwise-valid plan whose single slice's `command.tool`
+    is the given string -- used to probe the `command.tool` identity
+    convention (issue #1286) in isolation from every other field. Also
+    reused as a minimal valid-plan base by tests that need one (e.g.
+    test_missing_required_field_rejected)."""
+    return {
+        "schemaVersion": 1,
+        "generatedBy": "scripts/alp_orchestrate.py",
+        "boardYaml": "board.yaml",
+        "sku": "E1M-V2N101",
+        "buildRoot": "build",
+        "slices": [{
+            "coreId": "m33_sm",
+            "backend": "zephyr",
+            "buildDir": "build/m33_sm-zephyr",
+            "appDir": None,
+            "configArtefacts": [],
+            "toolchain": {
+                "targetTriple": "arm-zephyr-eabi",
+                "compiler": "arm-zephyr-eabi-gcc",
+                "sysroot": None,
+                "id": "arm-zephyr-eabi",
+            },
+            "artifacts": {
+                "elf": None, "map": None, "bin": None,
+                "sizeReport": None, "symbols": None,
+                "compileCommands": None,
+            },
+            "debug": {"console": "uart", "probe": None},
+            "command": {"tool": tool, "args": [], "cwd": "build/m33_sm-zephyr"},
+            "env": {"ALP_SDK_ROOT": "${SDK_ROOT}"},
+            "envAppendPath": {},
+        }],
+        "sharedArtefacts": [],
+        "warnings": [],
+    }
+
+
+def test_command_tool_schema_stays_tolerant_of_paths():
+    """#847 precedent (also applied to `executionPolicy` above): the
+    SHARED schema must not tighten a field's accepted shape at unchanged
+    `schemaVersion: const 1`, or a consumer already holding a valid plan
+    (e.g. one carrying a real path -- an IDE resolving `command.tool`
+    itself before #1286's convention existed) gets rejected with no
+    version signal. Every one of these was a valid `command.tool` before
+    the #1286 change and must stay valid against the schema after it;
+    the identity convention is enforced elsewhere (see the
+    test_command_tool_*_gate tests in test_check_build_plan.py), never
+    here."""
+    validator = jsonschema.Draft202012Validator(_schema())
+    for tool in (
+        "west", "bitbake", "cmake",
+        "/usr/bin/west", r"C:\x\west.exe", "${WEST}", "./west",
+        ".venv/bin/west", "C:/tools/west.exe", "~/bin/west",
+    ):
+        errors = list(validator.iter_errors(_plan_with_tool(tool)))
+        assert errors == [], f"{tool!r}: {[str(e) for e in errors]}"
 
 
 def test_wrong_schema_version_rejected():

@@ -46,7 +46,7 @@
     },
     {
       "id": "build-plan",
-      "description": "Validate a build plan against the public alp CLI / alp-sdk-vscode contract.",
+      "description": "Validate a build plan against the public alp CLI / alp-sdk-vscode contract, plus (for SDK-generated plans) the command.tool bare-identity convention the schema itself deliberately does not assert.",
       "runner": "check-script",
       "script": "scripts/check_build_plan.py",
       "gate": true,

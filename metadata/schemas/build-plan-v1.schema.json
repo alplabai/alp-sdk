@@ -131,7 +131,7 @@
             "additionalProperties": false,
             "required": ["tool", "args", "cwd"],
             "properties": {
-              "tool": { "type": "string", "description": "Executable to invoke (e.g. 'west', 'bitbake')." },
+              "tool": { "type": "string", "examples": ["west", "bitbake", "cmake"], "description": "The executable's identity (e.g. 'west', 'bitbake', 'cmake') -- never a location; resolving it to a concrete path is the executor's job, not the plan's. No `pattern` is asserted here by design -- see the CHANGELOG and issue #1286." },
               "args": { "type": "array", "items": { "type": "string" }, "description": "Positional/flag arguments to `tool`, in order." },
               "cwd": { "type": "string", "description": "POSIX-style working directory to run `tool` from; always equal to this slice's buildDir." }
             }

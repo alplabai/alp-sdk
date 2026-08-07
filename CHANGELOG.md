@@ -35,6 +35,23 @@ ambiguous exemption -- scoped to the actual checkout this script lives in
 (`root == REPO`), since the excerpts are a snapshot of alp-sdk's own
 history -- so a gate-integrity problem is visible on its own line instead
 of being read as an ordinary leak finding.
+### Changed — build-plan `command.tool`: bare-identity convention documented and gated (#1286)
+
+- `command.tool`'s (`metadata/schemas/build-plan-v1.schema.json`)
+  description is clarified to state it is an executable identity
+  ('west', 'bitbake', 'cmake'), never a location — resolving it to a
+  concrete path is the executor's job, not the plan's. A
+  non-asserting `"examples": ["west", "bitbake", "cmake"]` annotation
+  is added; no `pattern` is asserted, so the shared schema stays
+  deliberately tolerant of a path-shaped value (the #847 precedent:
+  tightening a shared shape at unchanged `schemaVersion: const 1`
+  breaks a consumer already holding a valid plan, with no version
+  signal — see ADR-0020, Amendment (2026-07-20), item 3).
+- The bare-identity convention is instead enforced only over plans
+  the SDK emits itself, in a new
+  `check_build_plan.py::_tool_identity_violations` check scoped to
+  the `_validate_generated` branch — never against an
+  externally-supplied `--plan` file.
 
 ### Added — ADR 0024: V2N/V2M analog and counter classes stay on the GD32 bridge (#1150)
 
