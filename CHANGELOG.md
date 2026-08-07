@@ -864,6 +864,49 @@ Issue #1260 ask 2 ("add `executorch` to `VALID_BLOB_FORMATS` in the same
 change") is not done here: that constant does not exist on this branch --
 it arrives only with the unmerged `origin/feat/ort-cpu-a55-inference`,
 whose format set omits `executorch` -- so ask 2 stays open.
+### Fixed — `tier-a-libraries · E1M-V2N101` timing out looked like a build regression when it was an apt-get stall (#1274)
+
+`#1272` hit the `pr-tier-a-libraries.yml` job's 30-minute `timeout-minutes`
+(the workflow's own setting, not a runner default) on the `E1M-V2N101` shard,
+cancelled mid-"Build Tier-A library smoke on native_sim". The suspected cause
+— the curated Tier-A set growing with Arm-2D, CMSIS-CV, and cmsisstream — does
+not hold: those three are Tier B (`metadata/libraries/arm-2d.yaml`,
+`cmsis-cv.yaml`, `cmsis-stream.yaml`), never part of
+`tier-a-library-ci.json`'s `hostBuild.libraries` (unchanged since Modbus
+joined it on 2026-07-07), so they never reach this job's build at all.
+
+The real cause, read from the run's own logs (run 31100778339): `apt-get
+update`/`install` stalled 25m37s on the `E1M-V2N101` shard (job 92613574776,
+`Install host build tools`, 12:27:37Z→12:53:14Z) while the sibling
+`E1M-AEN801`/`E1M-V2M101` shards in the same run ran that same step in 19s
+(job 92613574774, 12:20:16Z→12:20:35Z) and 26s (job 92613574765,
+12:25:47Z→12:26:13Z) respectively — a runner/mirror hiccup, not library
+content. ccache was cold in all three shards that run (`Cache not found` for
+every one), so it was not a warm/cold-cache effect either; the actual `west
+build` step, once it started, compiled its ~1200 objects in 1-2 minutes in
+every run inspected. The library set does not need sharding the way
+`twister` shards its suite — the per-library build time was never the
+bottleneck; setup (apt-get, `west update`) was, and stays constant regardless
+of library count.
+
+`.github/workflows/pr-tier-a-libraries.yml`'s `tier-a-library-build` job now
+carries `timeout-minutes` on every step that does real network/install/
+compile work (`Install host build tools`: 4, `Install west`: 2, `west init
+Zephyr workspace`: 8, `Cache Zephyr modules`: 2, `Cache ccache objects`: 2,
+`pip install Zephyr + alp-sdk requirements`: 3, `Build Tier-A library smoke
+on native_sim`: 6), so a future stall in any one of them fails fast and
+names itself, instead of silently spending the whole job's 30-minute budget
+and reporting a timeout on whichever step happened to be running when the
+ceiling hit. Those per-step caps sum to 27 minutes, strictly under the
+unchanged 30-minute job ceiling, so a step running late in the job can still
+be killed by its own cap first rather than by the job-level one --
+`tests/scripts/test_tier_a_workflow_step_timeouts.py` enforces both
+properties: every network/compile step (derived from its `run:`/`uses:`
+body, not a hardcoded name list) carries a timeout under the ceiling, and
+the caps' sum stays under the ceiling. The job-level 30-minute ceiling
+itself is unchanged — successful runs finish in 5-6 minutes, so raising it
+would only have moved the cliff without addressing what actually caused
+#1272 to hit it.
 
 ## [v0.15.0] - 2026-08-07
 

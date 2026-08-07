@@ -8,10 +8,11 @@
 # library_knobs smoke app with those real emitted CONFIG lines.
 #
 # native_sim can only prove the Tier-A libraries whose Zephyr Kconfig
-# can build on the host architecture: lvgl, cmsis-dsp, nanopb, and
-# zcbor.  cmsis-nn is still Tier A, but upstream Zephyr gates it with
-# `depends on CPU_CORTEX_M`; its metadata and emission stay covered by
-# the Python tests until a real Cortex-M board build lane is available.
+# can build on the host architecture: lvgl, cmsis-dsp, nanopb, zcbor,
+# and modbus.  cmsis-nn is still Tier A, but upstream Zephyr gates it
+# with `depends on CPU_CORTEX_M`; its metadata and emission stay
+# covered by the Python tests until a real Cortex-M board build lane
+# is available.
 
 name: pr-tier-a-libraries
 
@@ -109,7 +110,18 @@ jobs:
         with:
           python-version-file: alp-sdk/.python-version
 
+      # #1274: apt-get stalled here long enough to consume the whole job's
+      # 30-minute budget in one run, while sibling shards ran this same
+      # step in under 30s (exact run/job IDs and timings: CHANGELOG.md's
+      # #1274 entry). That's a runner/mirror hiccup, not this repo's
+      # content -- left uncapped, the eventual timeout landed on the build
+      # step instead of naming the actual stall. Every step below that does
+      # real network/install/compile work now carries its own timeout,
+      # short enough to fail fast but with headroom over what it costs on
+      # a healthy run; the sum stays under the job's 30-minute ceiling so a
+      # step running late can still be killed by its own timeout first.
       - name: Install host build tools
+        timeout-minutes: 4
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -118,11 +130,19 @@ jobs:
               libffi-dev libssl-dev xz-utils file make gcc gcc-multilib \
               g++-multilib libsdl2-dev libmagic1
 
+      # #1274: same failure class as "Install host build tools" above
+      # (PyPI/mirror stall), same job, and it runs before the build.
       - name: Install west
+        timeout-minutes: 2
         run: pip3 install west
 
+      # #1274: `west update` fetches every Zephyr module over the network,
+      # so a slow mirror can hang here the same way. Cap it well short of
+      # the job's ceiling so a network stall here is legible as this step,
+      # not as the build.
       - name: west init Zephyr workspace
         working-directory: ${{ github.workspace }}
+        timeout-minutes: 8
         run: |
           mkdir -p zephyrproject
           cd zephyrproject
@@ -130,8 +150,12 @@ jobs:
           west update --narrow -o=--depth=1
           west zephyr-export
 
+      # #1274: actions/cache@ makes its own network round trip to the
+      # cache service and can hang on a backend issue -- same class as the
+      # steps above.
       - name: Cache Zephyr modules
         uses: actions/cache@v5
+        timeout-minutes: 2
         with:
           path: |
             ${{ github.workspace }}/zephyrproject/modules
@@ -140,6 +164,7 @@ jobs:
 
       - name: Cache ccache objects
         uses: actions/cache@v5
+        timeout-minutes: 2
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache-${{ runner.os }}-tier-a-${{ matrix.som }}-${{ github.sha }}
@@ -148,6 +173,7 @@ jobs:
 
       - name: pip install Zephyr + alp-sdk requirements
         working-directory: ${{ github.workspace }}/zephyrproject
+        timeout-minutes: 3
         run: |
           pip3 install -r zephyr/scripts/requirements.txt
           pip3 install jsonschema pyyaml
@@ -190,8 +216,17 @@ jobs:
             tests/zephyr/library_knobs/prj_tier_a_native_sim.conf \
             > "$RUNNER_TEMP/tier-a/tier-a-extra.conf"
 
+      # #1274: this is the step a job-level timeout lands on if an earlier
+      # setup step stalls, so it inherited the blame for a slow apt-get
+      # that had nothing to do with the build (see CHANGELOG.md's #1274
+      # entry). The `library_knobs` app itself (5 Tier-A libraries --
+      # metadata/registries/tier-a-library-ci.json hostBuild.libraries)
+      # built in 1-2 minutes even on a cold ccache in every run inspected;
+      # this timeout leaves headroom for growth while naming itself, not a
+      # setup step, as the slow part if it ever is one.
       - name: Build Tier-A library smoke on native_sim
         working-directory: ${{ github.workspace }}/zephyrproject
+        timeout-minutes: 6
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyrproject/zephyr
           EXTRA_ZEPHYR_MODULES: ${{ github.workspace }}/alp-sdk
