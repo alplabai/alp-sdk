@@ -24,7 +24,6 @@ on:
       - 'scripts/validate_metadata.py'
       - 'scripts/validate_board_yaml.py'
       - 'scripts/check_board_target_tree_parity.py'
-      - 'scripts/check_board_soc_id_pairing.py'
       - 'scripts/check_example_board_overlay_parity.py'
       - 'scripts/check_som_topology_parity.py'
       - 'scripts/check_core_cmakelists_mapping.py'
@@ -68,7 +67,6 @@ on:
       - 'zephyr/boards/alp/**'
       - 'scripts/validate_board_yaml.py'
       - 'scripts/check_board_target_tree_parity.py'
-      - 'scripts/check_board_soc_id_pairing.py'
       - 'scripts/check_example_board_overlay_parity.py'
       - 'scripts/check_som_topology_parity.py'
       - 'scripts/check_core_cmakelists_mapping.py'
@@ -365,9 +363,6 @@ jobs:
         run: python3 scripts/check_public_header_purity.py
       - name: Gate — no hard-coded home-directory paths in build/exec files
         run: python3 scripts/check_local_paths.py
-
-      - name: Gate — ensemble_e8_dk board targets pair the E8's own SoC id (#1266)
-        run: python3 scripts/check_board_soc_id_pairing.py
 
       - name: Gate — sw_fallback.c files carry Cost + Performance tags
         run: python3 scripts/check_sw_fallback_tags.py

@@ -210,10 +210,17 @@ Docs and example READMEs that build against Alif's upstream `ensemble_e8_dk`
 Zephyr board (the exact E1M-AEN801 / Ensemble E8 part) paired it with
 `ae402fa0e5597le0`, the E1M-AEN401 (Ensemble E4)'s own SoC id
 (`zephyr/boards/alp/e1m_aen401_m55_hp/board.yml`), instead of the E8's own
-`ae822fa0e5597ls0` (`zephyr/boards/alp/e1m_aen801_m55_hp/board.yml`). A
-customer copy-pasting the documented `west build -b
-ensemble_e8_dk/ae402fa0e5597le0/rtss_hp` line onto a real E8 dev kit hit a
-board/SoC mismatch. Every instance is retagged with the E8's own id across
+`ae822fa0e5597ls0` (`zephyr/boards/alp/e1m_aen801_m55_hp/board.yml`).
+
+That target is **not** a build error. Upstream `ensemble_e8_dk` legitimately
+declares three SoC variants — `zephyr/boards/alif/ensemble_e8_dk/board.yml`
+lists `ae402fa0e5597le0`, `ae612fa0e5597ls0` and `ae822fa0e5597ls0`, each
+with its own `.dts` / `.yaml` / `_defconfig` on disk — so
+`ensemble_e8_dk/ae402fa0e5597le0/rtss_hp` builds cleanly. That is precisely
+what makes it dangerous: a customer copy-pasting the documented line onto a
+real E8 dev kit gets a **silently wrong silicon-variant image**, an E4 die
+configuration flashed onto E8 hardware, with no error to notice. Every
+instance is retagged with the E8's own id across
 `testcase.yaml`, `README.md`, `docs/local-ci.md`,
 `docs/vendor-partnerships.md`, `docs/superpowers/plans/*.md`,
 `metadata/catalog.json`, and `metadata/templates/catalog-v1.json`.
@@ -227,8 +234,16 @@ its `cross_compile_matrix` now names that same qualified board, not the
 upstream `ensemble_e8_dk` fallback the rest of the catalog uses. Every
 other affected example documents and tests the upstream fallback board,
 `ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp`, in both its README and its
-`testcase.yaml`, so the build command a reader is told to run and the one
-CI exercises are the same target.
+`testcase.yaml`, so a reader's `west build` line and that example's own
+`testcase.yaml` name the same target.
+
+No CI job builds `ensemble_e8_dk` at all — `pr-twister-aen.yml` builds
+`alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he` and
+`alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp`, and `pr-twister.yml` is
+`native_sim/native/64` only. The upstream-board lines in these READMEs are
+documentation for a dev kit the repo does not build in CI, so nothing
+mechanically holds them correct; that is why they drifted, and it stays
+true after this change.
 
 `scripts/alp_template.py`'s scaffold README substitution runs its short
 board-id-prefix fallback alongside the exact qualified-string match
