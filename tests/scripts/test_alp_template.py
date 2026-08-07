@@ -613,6 +613,65 @@ def test_scaffold_readme_upgrades_bare_board_id_even_for_the_passthrough_sku():
     assert "alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp" in readme
 
 
+def test_scaffold_readme_rewrites_bare_mention_alongside_qualified_one():
+    """Issue #1266 review MINOR: a README naming the source board BOTH
+    ways -- a qualified `west build` line AND a separate bare mention
+    (e.g. lvgl-widgets-demo's README:36 `west build -b
+    alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp` vs :59's bare
+    "target board (`alp_e1m_aen801_m55_hp`)") -- used to only get the
+    qualified one rewritten; the bare one silently kept naming the
+    source family inside a cross-family scaffold."""
+    source_board = "alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp"
+    target_board = "alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33"
+    text = (
+        "west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp ex\n"
+        "west flash\n"
+        "\n"
+        "this app's target board (`alp_e1m_aen801_m55_hp`) has no alias yet\n"
+    )
+    out = alp_template._scaffold_readme(
+        text, "examples/display/widget", "main",
+        source_board=source_board, target_board=target_board,
+    )
+    assert "alp_e1m_aen801_m55_hp" not in out
+    assert out.count(target_board) == 2
+
+
+def test_scaffold_readme_passthrough_does_not_duplicate_qualified_suffix():
+    """The same-sku (source_board == target_board) case must not run the
+    short-prefix fallback over a mention the exact-match step already
+    left correctly qualified -- that would append the `/<soc>/<core>`
+    suffix a second time (`.../rtss_hp/ae822fa0e5597ls0/rtss_hp`)."""
+    board = "alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp"
+    text = f"west build -b {board} examples/display/widget\n"
+    out = alp_template._scaffold_readme(
+        text, "examples/display/widget", "main",
+        source_board=board, target_board=board,
+    )
+    assert out.count("ae822fa0e5597ls0/rtss_hp") == 1
+
+
+def test_scaffold_readme_rewrites_west_flash_after_every_m33_sm_board_line():
+    """A two-core V2N/V2M scaffold README can carry more than one
+    `<board target>\\nwest flash` pair (one per core) -- every one of
+    them needs `--host <board-ip>` appended, not just the first."""
+    target_board = "alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33"
+    text = (
+        f"west build -b {target_board} ex/core0\n"
+        "west flash\n"
+        "\n"
+        f"west build -b {target_board} ex/core1\n"
+        "west flash\n"
+    )
+    out = alp_template._scaffold_readme(
+        text, "examples/multicore/widget", "main",
+        source_board="alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp",
+        target_board=target_board,
+    )
+    assert out.count("west flash --host <board-ip>") == 2
+    assert "\nwest flash\n" not in out
+
+
 def test_substitute_board_yaml_sku_rejects_ambiguous_sku_line():
     """More than one line matching the `sku:` pattern is unresolvable --
     which one is the real `som.sku:`? -- so it must hard-error rather

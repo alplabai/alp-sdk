@@ -55,7 +55,7 @@ tacholess estimate has not converged.
 ## Build
 
 ```sh
-west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp \
     examples/audio/acoustic-anomaly-wind-turbine
 west flash
 ```

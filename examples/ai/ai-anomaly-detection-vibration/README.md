@@ -39,7 +39,7 @@ Three customer questions get one answer:
 ## Build
 
 ```
-west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/ai/ai-anomaly-detection-vibration
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/ai/ai-anomaly-detection-vibration
 west flash
 ```
 

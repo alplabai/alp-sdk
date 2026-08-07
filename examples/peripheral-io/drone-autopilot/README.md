@@ -55,7 +55,7 @@ motor mixer → ESCs.
 ## Build
 
 ```
-west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/peripheral-io/drone-autopilot
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/peripheral-io/drone-autopilot
 west flash
 ```
 

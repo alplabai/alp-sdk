@@ -204,6 +204,55 @@ mirroring the field the ADC gd32_bridge backend already populates.
 Documented at `include/alp/counter.h`, `include/alp/e1m_x_pinout.h`,
 and `docs/portability.md` §4.5. Does not change which die serves the
 counter class — that is `docs/adr/0024`, unaffected by this fix.
+### Fixed — `ensemble_e8_dk` board-target lines paired the E8 upstream board with the E4's SoC id (#1266)
+
+Docs and example READMEs that build against Alif's upstream `ensemble_e8_dk`
+Zephyr board (the exact E1M-AEN801 / Ensemble E8 part) paired it with
+`ae402fa0e5597le0`, the E1M-AEN401 (Ensemble E4)'s own SoC id
+(`zephyr/boards/alp/e1m_aen401_m55_hp/board.yml`), instead of the E8's own
+`ae822fa0e5597ls0` (`zephyr/boards/alp/e1m_aen801_m55_hp/board.yml`). A
+customer copy-pasting the documented `west build -b
+ensemble_e8_dk/ae402fa0e5597le0/rtss_hp` line onto a real E8 dev kit hit a
+board/SoC mismatch. Every instance is retagged with the E8's own id across
+`testcase.yaml`, `README.md`, `docs/local-ci.md`,
+`docs/vendor-partnerships.md`, `docs/superpowers/plans/*.md`,
+`metadata/catalog.json`, and `metadata/templates/catalog-v1.json`.
+
+`examples/ai/cold-chain-monitor` (source example of the `edge-ai` scaffold
+template) documents and tests the in-tree carrier board,
+`alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp` -- the qualified form
+`scripts/alp_template.py`'s cross-family scaffold substitution keys off.
+Every other affected example documents and tests the upstream fallback
+board, `ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp`, in both its README and
+its `testcase.yaml`, so the build command a reader is told to run and the
+one CI exercises are the same target.
+
+`scripts/alp_template.py`'s scaffold README substitution runs its short
+board-id-prefix fallback alongside the exact qualified-string match
+unconditionally, so a README naming the source board both ways (a
+qualified `west build` line plus a separate bare mention) gets both
+rewritten. `_m33_sm` (RZ/V2N system-manager) scaffold targets get
+`--host <board-ip>` appended to every `west flash` line that follows one of
+the scaffold's own board-target lines, not just the first -- that board
+family's default flasher is SSH-to-the-booted-A55, and a bare `west flash`
+carried over from an AEN801 (JLink) source README can't reach it.
+
+`scripts/check_board_soc_id_pairing.py` is a new CI gate (registered in
+`metadata/quality-tasks-v1.json`, run from
+`.github/workflows/pr-metadata-validate.yml`): it fails when
+`ensemble_e8_dk` is paired with any SoC id other than `ae822fa0e5597ls0`
+under `docs/`, `examples/*/README.md`, `examples/*/testcase.yaml`, or the
+example catalogs, so this mismatch can't recur silently the way it did
+across 29 files.
+
+`examples/peripheral-io/pwm-led-fade` and
+`examples/peripheral-io/vendor-ext-composability` build against
+`alp_e1m_aen801_m55_hp` (their own `board.yaml` declares `m55_hp`, not
+`m55_he`). `examples/multicore/mproc-mailbox`'s `src/main.c` / `peer/main.c`
+build-matrix comments describe `tan build`'s existing multi-slice path
+(`board.yaml` already declares both `m55_hp` and `m55_he` as project
+cores) instead of a sysbuild dual-image flow that
+`alplabai/alp-zephyr-modules` -- an empty scaffold today -- doesn't provide.
 
 ## [v0.15.0] - 2026-08-07
 

@@ -901,6 +901,10 @@
       "script": "scripts/check_board_schema_version.py"
     },
     {
+      "purpose": "CI gate: every mention of an upstream Alif Zephyr dev-kit board target must pair the board with ITS OWN SoC id -- never a different AEN family member's.",
+      "script": "scripts/check_board_soc_id_pairing.py"
+    },
+    {
       "purpose": "CI gate: every `topology.<core>.board:` Zephyr target declared in a `metadata/e1m_modules/E1M-*.yaml` SoM preset must resolve to a real board tree under `zephyr/boards/alp/`, UNLESS the `(sku, core, board)` triple is explicitly named in `_NOT_YET_SUPPORTED` below.",
       "script": "scripts/check_board_target_tree_parity.py"
     },

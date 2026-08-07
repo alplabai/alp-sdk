@@ -1470,7 +1470,7 @@ tests:
       - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
     platform_allow:
       - native_sim/native/64
-      - ensemble_e8_dk/ae402fa0e5597le0/rtss_hp
+      - ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp
     integration_platforms:
       - native_sim/native/64
     tags:
@@ -1566,7 +1566,7 @@ RAIL,100.0,59.334591,18.062400,6.2,CORRUGATION,0.81,120.0,0.0517,1
 ## Build
 
 ```
-west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples/ai/rail-predictive-maintenance
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/ai/rail-predictive-maintenance
 west flash
 ```
 

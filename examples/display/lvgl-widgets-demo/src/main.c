@@ -46,7 +46,7 @@
  *
  * ── Build matrix ───────────────────────────────────────────────
  *
- *   `west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/display/lvgl-widgets-demo`
+ *   `west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/display/lvgl-widgets-demo`
  *   `west build -b native_sim/native/64 examples/display/lvgl-widgets-demo`
  *
  *   native_sim runs the demo against the dummy display driver --
