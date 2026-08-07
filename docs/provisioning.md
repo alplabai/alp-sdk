@@ -6,14 +6,25 @@ bundle (see the bundle manifest schema `metadata/schemas/som-release-bundle-v1.s
 It runs a linear, stop-on-first-failure sequence:
 
 1. **validate** the bundle (`check_som_bundle.py`)
-2. **flash** `bl2`/`fip` to xSPI (`xspi_flashwriter`, Flash Writer SCIF) and the
+2. **HiL spec check** — if `--hil-spec` (or a `--carrier`-derived path; a relative
+   `--hil-spec` resolves against `--alp-sdk-root`, or the repo root, not the working
+   directory) is given, the directory must exist. This is checked here, before any
+   flashing or serial allocation below, so a mis-derived `--carrier` **fails the run**
+   (exit 1) before it can burn a manufacturing serial or write to the board. With
+   neither flag, no test is wanted and this step is a no-op.
+3. **flash** `bl2`/`fip` to xSPI (`xspi_flashwriter`, Flash Writer SCIF) and the
    system image to eMMC (`yocto_wic`) — the image is skipped for a
    `bootloader-only:image-pending-hw` bundle
-3. **EEPROM** — allocate a serial, build the 128-byte manifest (`program_eeprom.py`),
-   write it to RIIC0 @0x50 and **read it back to verify**
-4. **power-on test** — `tests/hil/run_smoke.py` for the board (gated on the firmware's
-   `alp_hw_info_read()` succeeding first)
-5. **record** the unit to the ledger (`som_ledger.py record`)
+4. **EEPROM** — allocate a serial, build the 128-byte manifest (`program_eeprom.py`).
+   The RIIC0 @0x50 write + read-back-verify is HW-gated (see below) — this step only
+   plans it, even under `--execute`.
+5. **power-on test** — runs `tests/hil/run_smoke.py` for the board (gated on the
+   firmware's `alp_hw_info_read()` succeeding first) if a HiL spec was given in step 2;
+   a no-op (reported as skipped) otherwise.
+6. **record** the unit to the ledger (`som_ledger.py record`) — `--test-result pass`
+   only when the test ran and passed; `pending-hw` for everything else (dry-run, no
+   test configured, a skipped test under `--execute`, or a configured test that ran
+   and failed).
 
 ## Safety: dry-run by default
 

@@ -123,6 +123,45 @@ regardless of `executionPolicy.missingTool` (tan-cli#505 item 3, measured).
 Adds a dated Amendment to ADR 0021 recording this and leaves #1286's
 env-injection producer half correctly un-landed, now for the reason that is
 actually true.
+### Fixed — `provision_som.py` reported success it did not earn (#1276)
+
+Two related defects in `scripts/provision_som.py`, both the same "reports
+success it did not earn" class. First, `--carrier` derived its HiL spec
+path from the bundle's `sku` (e.g. `E1M-V2N101`) without stripping the
+`E1M-` prefix, pointing at a `tests/hil/e1m-v2n101-x-evk` directory that
+never exists — the real directories are unprefixed (`tests/hil/v2n101-x-evk`).
+The HiL spec dir (derived or given) is now validated right after the
+derive, before any xSPI flashing or manufacturing-serial allocation
+happens — a miss fails the run loudly instead of silently reporting
+`ok=True`, and, because the check now runs first, can no longer allocate a
+serial with nothing recorded against it. Second, on the no-spec path
+(`--execute` with neither `--hil-spec` nor `--carrier`), `_power_on_test`
+correctly treats the skip as a non-failure of the step, but `_record` was
+reading that `ok=True` as "the power-on test passed" and recording a
+ledger `pass` for a test that never ran. `_power_on_test` now returns
+whether the test actually ran, and `_record` only credits a `pass` when it
+did — a skipped test, a dry run, and a configured test that ran and failed
+all record `pending-hw`, keeping to the two `--test-result` values this repo
+has ever emitted (`pass`/`pending-hw`). `som_ledger.py` lives in
+alp-sdk-internal, so whether it would accept a third value cannot be checked
+from here; the consequence is that a test which ran and FAILED stays
+indistinguishable in the ledger from a unit never tested, which needs a
+vocabulary change on the private side rather than a workaround here.
+
+Sweeping the file for the same class surfaced a third, smaller instance:
+`_eeprom`'s message tagged the planned RIIC0 write `(execute)` under
+`--execute`, implying the write happened, when the i2c write is HW-gated
+and this script never performs it, in either mode. The message no longer
+varies with `--execute` -- it always states the write is planned only.
+
+A relative `--hil-spec` (docs/provisioning.md's bench example passes one)
+now resolves against `--alp-sdk-root`, or the repo root, instead of the
+process's current working directory -- matching how the `--carrier`-derived
+path and the smoke-test runner itself already resolve.
+
+`docs/provisioning.md`'s HiL spec and power-on test steps are rewritten to
+describe all of this: the spec dir is checked up front, before flashing or
+serial allocation, and only `pass`/`pending-hw` are ever recorded.
 
 ### Fixed — ADR 0022 claimed a `tan renode` retirement that never shipped
 
