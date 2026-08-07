@@ -37,7 +37,6 @@ parsed field lists (name / type / width, in order) disagree.
 
 from __future__ import annotations
 
-import argparse
 import pathlib
 import re
 import sys
@@ -108,9 +107,16 @@ def collect_len_macros(header_text: str) -> dict[str, int]:
 
 def parse_fields(
     block: str, macros: dict[str, int]
-) -> list[tuple[str, str, Optional[int]]]:
-    """Return [(name, type, resolved_array_len_or_None)] in source order."""
-    fields: list[tuple[str, str, Optional[int]]] = []
+) -> list[tuple[str, str, Optional[int], bool]]:
+    """Return [(name, type, resolved_array_len_or_None, unresolved)] in
+    source order. `unresolved` is True only when the field declared an
+    array (`arr is not None`) but its length token parsed as neither an
+    int literal nor a known macro -- as opposed to a scalar field, which
+    legitimately carries `width is None` with nothing wrong. Callers
+    must not treat `width is None` alone as "no width to check": two
+    unresolved tokens compare equal to each other, which would
+    otherwise silently skip the width check instead of flagging it."""
+    fields: list[tuple[str, str, Optional[int], bool]] = []
     for line in block.splitlines():
         m = _FIELD_RE.match(line)
         if not m:
@@ -121,7 +127,8 @@ def parse_fields(
             width = _parse_int(arr)
             if width is None:
                 width = macros.get(arr)
-        fields.append((m.group("name"), m.group("type"), width))
+        unresolved = arr is not None and width is None
+        fields.append((m.group("name"), m.group("type"), width, unresolved))
     return fields
 
 
@@ -182,8 +189,8 @@ def find_problems(root: pathlib.Path) -> list[str]:
         )
 
     for i, (doc_f, hdr_f) in enumerate(zip(doc_fields, header_fields)):
-        doc_name, doc_type, doc_width = doc_f
-        hdr_name, hdr_type, hdr_width = hdr_f
+        doc_name, doc_type, doc_width, doc_unresolved = doc_f
+        hdr_name, hdr_type, hdr_width, hdr_unresolved = hdr_f
         if doc_name != hdr_name:
             problems.append(
                 f"field {i}: name '{doc_name}' ({_DOC_REL}) != "
@@ -200,28 +207,32 @@ def find_problems(root: pathlib.Path) -> list[str]:
                 f"field '{doc_name}': width {doc_width} ({_DOC_REL}) != "
                 f"{hdr_width} ({_HEADER_REL})"
             )
+        elif doc_unresolved or hdr_unresolved:
+            # Both sides carry an array-length token that didn't resolve
+            # to an int (an unresolvable macro name, an indented or
+            # `#ifndef`-wrapped #define _DEFINE_RE missed, ...), so the
+            # widths compared equal only because both are None -- a
+            # false consensus, not a verified match.
+            sides = ((_DOC_REL, doc_unresolved), (_HEADER_REL, hdr_unresolved))
+            where = [rel for rel, unresolved in sides if unresolved]
+            problems.append(
+                f"field '{doc_name}': array-length token did not resolve "
+                f"to an int in {' and '.join(where)} -- width not verified"
+            )
 
-    for extra_name, _, _ in doc_fields[len(header_fields):]:
+    for extra_name, _, _, _ in doc_fields[len(header_fields):]:
         problems.append(f"field '{extra_name}': in {_DOC_REL}, not in {_HEADER_REL}")
-    for extra_name, _, _ in header_fields[len(doc_fields):]:
+    for extra_name, _, _, _ in header_fields[len(doc_fields):]:
         problems.append(f"field '{extra_name}': in {_HEADER_REL}, not in {_DOC_REL}")
 
     return problems
 
 
-def main(argv: Optional[list[str]] = None) -> int:
-    parser = argparse.ArgumentParser(
-        description=__doc__,
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    parser.add_argument(
-        "--root", default=str(ROOT),
-        help="repo root to scan (default: the alp-sdk checkout)",
-    )
-    args = parser.parse_args(argv)
-
-    root = pathlib.Path(args.root).resolve()
-    problems = find_problems(root)
+def main() -> int:
+    # No --root/argv: CI always runs this bare against the checkout it's
+    # in, and tests exercise find_problems() directly against a tmp_path
+    # -- an argv-parsed root nothing ever passed was dead weight.
+    problems = find_problems(ROOT)
 
     if problems:
         print(

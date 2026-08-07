@@ -144,16 +144,26 @@ def test_missing_header_block_fails_loudly(tmp_path):
 
 def test_field_reordered_fails(tmp_path):
     """A field moved out of position (not just a width change) must
-    also be caught -- the gate diffs order, not just a name/width set."""
+    also be caught -- the gate diffs order, not just a name/width set.
+
+    Swaps `mfg_month`/`mfg_day`: same type (uint8_t), same width (both
+    scalar, no array), so the ONLY signal that can catch this is the
+    name/order check at check_board_id_doc_parity.py:187 -- unlike
+    swapping two differently-sized fields (e.g. family[16]/sku[24]),
+    where a width mismatch would still fire even with the name check
+    disabled, silently proxying for a check that never actually ran."""
     reordered_doc = _DOC_OK.replace(
-        "    char     family[16];        /* family */\n"
-        "    char     sku[24];           /* sku */\n",
-        "    char     sku[24];           /* sku */\n"
-        "    char     family[16];        /* family */\n",
+        "    uint8_t  mfg_month;\n"
+        "    uint8_t  mfg_day;\n",
+        "    uint8_t  mfg_day;\n"
+        "    uint8_t  mfg_month;\n",
     )
     _write(tmp_path, _HEADER_OK, reordered_doc)
     problems = gate.find_problems(tmp_path)
     assert problems, problems
+    assert any(
+        "mfg_month" in p and "mfg_day" in p and "name" in p for p in problems
+    ), problems
 
 
 def test_missing_field_fails(tmp_path):
@@ -166,3 +176,39 @@ def test_missing_field_fails(tmp_path):
     problems = gate.find_problems(tmp_path)
     assert problems, problems
     assert any("field count" in p for p in problems)
+
+
+def test_missing_header_file_fails_loudly(tmp_path):
+    """The header file itself missing (not just its struct block, e.g.
+    a rename/move) must fail, never silently pass -- covers the guard
+    at check_board_id_doc_parity.py:136."""
+    doc = tmp_path / "docs" / "board-id.md"
+    doc.parent.mkdir(parents=True, exist_ok=True)
+    doc.write_text(_DOC_OK, encoding="utf-8")
+    problems = gate.find_problems(tmp_path)
+    assert problems, "missing header file must be a reported failure, not a silent pass"
+    assert any("include/alp/hw_info.h" in p and "not found" in p for p in problems)
+
+
+def test_missing_doc_file_fails_loudly(tmp_path):
+    """Same guarantee when the doc file itself is missing/renamed --
+    covers the guard at check_board_id_doc_parity.py:138."""
+    header = tmp_path / "include" / "alp" / "hw_info.h"
+    header.parent.mkdir(parents=True, exist_ok=True)
+    header.write_text(_HEADER_OK, encoding="utf-8")
+    problems = gate.find_problems(tmp_path)
+    assert problems, "missing doc file must be a reported failure, not a silent pass"
+    assert any("docs/board-id.md" in p and "not found" in p for p in problems)
+
+
+def test_empty_struct_body_fails(tmp_path):
+    """A struct block that parses (braces matched) but declares zero
+    fields must fail -- an empty body is not "nothing to check", it's
+    a parse that silently found nothing. Covers the two
+    `if not *_fields:` guards at check_board_id_doc_parity.py:164-173."""
+    empty_header = "typedef struct alp_hw_info_eeprom_t {\n} alp_hw_info_eeprom_t;\n"
+    empty_doc = "```c\ntypedef struct {\n} alp_hw_info_eeprom_t;\n```\n"
+    _write(tmp_path, empty_header, empty_doc)
+    problems = gate.find_problems(tmp_path)
+    assert problems, "an empty struct body must be a reported failure, not a silent pass"
+    assert any("no field declarations" in p for p in problems), problems

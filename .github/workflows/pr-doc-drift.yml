@@ -38,6 +38,12 @@ on:
       - 'docs/**'
       - 'include/**'
       - 'metadata/sdk_version.yaml'
+      - 'scripts/check_doc_drift.py'
+      - 'scripts/check_doc_links.py'
+      - 'scripts/check_diagnostic_narratives.py'
+      - 'scripts/check_version_doc_sync.py'
+      - 'scripts/check_board_id_doc_parity.py'
+      - '.github/workflows/pr-doc-drift.yml'
   workflow_dispatch:
 
 concurrency:
