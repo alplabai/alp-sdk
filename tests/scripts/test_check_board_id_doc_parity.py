@@ -2,15 +2,16 @@
 """Unit tests for scripts/check_board_id_doc_parity.py.
 
 The gate parses the `alp_hw_info_eeprom_t` typedef struct out of
-docs/board-id.md and include/alp/hw_info.h and diffs field names,
-order, and widths (resolving the header's ALP_HW_INFO_*_LEN macros so
-the two sides are comparable). #1231's own repro -- a doc that says
-`uint16_t schema_version` / `char serial[32]` / `reserved[__]` against
-a header that ships `uint32_t schema_version` / `char serial[24]` /
-`reserved[40]` -- is planted here byte-for-byte as the seeded-violation
-case, plus the two find-the-block failure modes: the gate must fail
-loudly (never silently OK) when the doc's or the header's struct block
-can't be located at all.
+docs/board-id.md and include/alp/hw_info.h, and the pack-format length
+constants out of scripts/program_eeprom.py, and diffs field/constant
+names, order, and widths (resolving the header's ALP_HW_INFO_*_LEN
+macros so the sides are comparable). #1231's own repro -- a doc that
+says `uint16_t schema_version` / `char serial[32]` / `reserved[__]`
+against a header that ships `uint32_t schema_version` / `char
+serial[24]` / `reserved[40]` -- is planted here byte-for-byte as the
+seeded-violation case, plus the two find-the-block failure modes: the
+gate must fail loudly (never silently OK) when the doc's or the
+header's struct block can't be located at all.
 
 Run locally:
 
@@ -88,14 +89,32 @@ typedef struct {
 ```
 """
 
+# program_eeprom.py's length constants matching _HEADER_OK's macros --
+# the third transcription the gate now also pins to the header.
+_PROGRAM_EEPROM_OK = """\
+FAMILY_LEN = 16
+SKU_LEN = 24
+HW_REV_LEN = 8
+SERIAL_LEN = 24
+RESERVED_LEN = 40
+"""
 
-def _write(root: Path, header_text: str, doc_text: str) -> None:
+
+def _write(
+    root: Path,
+    header_text: str,
+    doc_text: str,
+    program_text: str = _PROGRAM_EEPROM_OK,
+) -> None:
     header = root / "include" / "alp" / "hw_info.h"
     header.parent.mkdir(parents=True, exist_ok=True)
     header.write_text(header_text, encoding="utf-8")
     doc = root / "docs" / "board-id.md"
     doc.parent.mkdir(parents=True, exist_ok=True)
     doc.write_text(doc_text, encoding="utf-8")
+    program = root / "scripts" / "program_eeprom.py"
+    program.parent.mkdir(parents=True, exist_ok=True)
+    program.write_text(program_text, encoding="utf-8")
 
 
 def test_default_corpus_passes():
@@ -147,8 +166,8 @@ def test_field_reordered_fails(tmp_path):
     also be caught -- the gate diffs order, not just a name/width set.
 
     Swaps `mfg_month`/`mfg_day`: same type (uint8_t), same width (both
-    scalar, no array), so the ONLY signal that can catch this is the
-    name/order check at check_board_id_doc_parity.py:187 -- unlike
+    scalar, no array), so the ONLY signal that can catch this is
+    `find_problems`'s `doc_name != hdr_name` check -- unlike
     swapping two differently-sized fields (e.g. family[16]/sku[24]),
     where a width mismatch would still fire even with the name check
     disabled, silently proxying for a check that never actually ran."""
@@ -180,8 +199,8 @@ def test_missing_field_fails(tmp_path):
 
 def test_missing_header_file_fails_loudly(tmp_path):
     """The header file itself missing (not just its struct block, e.g.
-    a rename/move) must fail, never silently pass -- covers the guard
-    at check_board_id_doc_parity.py:136."""
+    a rename/move) must fail, never silently pass -- covers
+    `find_problems`'s `header_path.is_file()` guard."""
     doc = tmp_path / "docs" / "board-id.md"
     doc.parent.mkdir(parents=True, exist_ok=True)
     doc.write_text(_DOC_OK, encoding="utf-8")
@@ -192,7 +211,7 @@ def test_missing_header_file_fails_loudly(tmp_path):
 
 def test_missing_doc_file_fails_loudly(tmp_path):
     """Same guarantee when the doc file itself is missing/renamed --
-    covers the guard at check_board_id_doc_parity.py:138."""
+    covers `find_problems`'s `doc_path.is_file()` guard."""
     header = tmp_path / "include" / "alp" / "hw_info.h"
     header.parent.mkdir(parents=True, exist_ok=True)
     header.write_text(_HEADER_OK, encoding="utf-8")
@@ -205,10 +224,97 @@ def test_empty_struct_body_fails(tmp_path):
     """A struct block that parses (braces matched) but declares zero
     fields must fail -- an empty body is not "nothing to check", it's
     a parse that silently found nothing. Covers the two
-    `if not *_fields:` guards at check_board_id_doc_parity.py:164-173."""
+    `find_problems`'s `if not header_fields` / `if not doc_fields`
+    guards."""
     empty_header = "typedef struct alp_hw_info_eeprom_t {\n} alp_hw_info_eeprom_t;\n"
     empty_doc = "```c\ntypedef struct {\n} alp_hw_info_eeprom_t;\n```\n"
     _write(tmp_path, empty_header, empty_doc)
     problems = gate.find_problems(tmp_path)
     assert problems, "an empty struct body must be a reported failure, not a silent pass"
     assert any("no field declarations" in p for p in problems), problems
+
+
+def test_unparseable_field_line_fails_loudly(tmp_path):
+    """A struct-body line `_FIELD_RE` can't parse (a two-token type
+    like `unsigned char`, here) must be reported, not silently dropped
+    from both sides' field lists -- otherwise a real width drift on
+    that exact line (reserved[40] vs reserved[8], planted here) never
+    gets compared at all and the two sides fall out of zip() in step,
+    hiding the drift instead of catching it."""
+    header = _HEADER_OK.replace(
+        "\tuint8_t  reserved[40];                   /**< reserved. */\n",
+        "\tunsigned char reserved[40];               /**< reserved. */\n",
+    )
+    doc = _DOC_OK.replace(
+        "    uint8_t  reserved[40];\n",
+        "    unsigned char reserved[8];\n",
+    )
+    assert header != _HEADER_OK and doc != _DOC_OK
+    _write(tmp_path, header, doc)
+    problems = gate.find_problems(tmp_path)
+    assert problems, "an unparseable field-declaration line must be a reported failure"
+    joined = "\n".join(problems)
+    assert "reserved[40]" in joined and "include/alp/hw_info.h" in joined, joined
+    assert "reserved[8]" in joined and "docs/board-id.md" in joined, joined
+
+
+def test_program_eeprom_len_mismatch_fails(tmp_path):
+    """#1231's third transcription: a zero-sum edit to two of
+    program_eeprom.py's length constants (one grows, one shrinks by
+    the same amount) leaves the manifest's total size unchanged -- the
+    only thing that can catch it is comparing each constant to its own
+    header macro, which is what this asserts."""
+    _write(
+        tmp_path,
+        _HEADER_OK,
+        _DOC_OK,
+        program_text=(
+            "FAMILY_LEN = 16\n"
+            "SKU_LEN = 32\n"
+            "HW_REV_LEN = 8\n"
+            "SERIAL_LEN = 16\n"
+            "RESERVED_LEN = 40\n"
+        ),
+    )
+    problems = gate.find_problems(tmp_path)
+    assert problems, problems
+    joined = "\n".join(problems)
+    assert "SKU_LEN = 32" in joined and "ALP_HW_INFO_SKU_LEN = 24" in joined, joined
+    assert "SERIAL_LEN = 16" in joined and "ALP_HW_INFO_SERIAL_LEN = 24" in joined, joined
+
+
+def test_unresolved_array_length_both_sides_fails(tmp_path):
+    """An array-length token that resolves to neither an int literal
+    nor a known macro, on BOTH sides at once, must fail as "width not
+    verified" -- the two None widths would otherwise compare equal to
+    each other, a false consensus, not a verified match. This is the
+    entire fix for a prior finding and had zero test coverage: mutating
+    `elif doc_unresolved or hdr_unresolved:` to `elif False:` left
+    every other test in this file green."""
+    header = _HEADER_OK.replace(
+        "\tchar     sku[ALP_HW_INFO_SKU_LEN];       /**< sku. */\n",
+        "\tchar     sku[ALP_HW_INFO_BOGUS_LEN];     /**< sku. */\n",
+    )
+    doc = _DOC_OK.replace(
+        "    char     sku[24];           /* sku */\n",
+        "    char     sku[ALP_HW_INFO_BOGUS_LEN];  /* sku */\n",
+    )
+    assert header != _HEADER_OK and doc != _DOC_OK
+    _write(tmp_path, header, doc)
+    problems = gate.find_problems(tmp_path)
+    assert problems, "an unresolvable array-length token on both sides must fail"
+    assert any(
+        "sku" in p and "width not verified" in p for p in problems
+    ), problems
+
+
+def test_duplicate_struct_block_in_doc_fails_loudly(tmp_path):
+    """A second, drifted `typedef struct { ... } alp_hw_info_eeprom_t;`
+    block appended later in the doc must not be silently ignored just
+    because `re.search` found a clean first match -- `extract_struct_block`
+    must fail unless the struct block appears exactly once."""
+    duplicated_doc = _DOC_OK + "\n" + _DOC_1231_DRIFT
+    _write(tmp_path, _HEADER_OK, duplicated_doc)
+    problems = gate.find_problems(tmp_path)
+    assert problems, "a duplicated struct block in the doc must be a reported failure"
+    assert any("docs/board-id.md" in p and "could not locate" in p for p in problems)
