@@ -30,7 +30,14 @@ on:
       - 'VERSIONS.md'
       - 'docs/**'
       - 'include/**'
+<<<<<<< HEAD
       - 'chips/**'
+=======
+      - 'src/**'
+      - 'examples/**'
+      - 'vendors/**'
+      - 'keys/**'
+>>>>>>> 8e72b3dc (fix(docs): catch CONFIG_-prefixed and vendor-doc Kconfig symbol drift (#1228))
       - 'metadata/sdk_version.yaml'
       - 'metadata/libraries/**'
       - 'scripts/check_doc_drift.py'
@@ -52,7 +59,14 @@ on:
       - 'VERSIONS.md'
       - 'docs/**'
       - 'include/**'
+<<<<<<< HEAD
       - 'chips/**'
+=======
+      - 'src/**'
+      - 'examples/**'
+      - 'vendors/**'
+      - 'keys/**'
+>>>>>>> 8e72b3dc (fix(docs): catch CONFIG_-prefixed and vendor-doc Kconfig symbol drift (#1228))
       - 'metadata/sdk_version.yaml'
       - 'metadata/libraries/**'
       - 'scripts/check_doc_drift.py'

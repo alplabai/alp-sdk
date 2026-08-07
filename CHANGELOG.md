@@ -300,6 +300,56 @@ flag legitimate prose, which is worse than no gate at all.
 
 Both gates are wired into `pr-doc-drift.yml`'s existing `doc-drift` job
 alongside `check_doc_drift.py` / `check_doc_links.py`.
+### Fixed — `check_doc_drift.py` missed `CONFIG_`-prefixed dead symbols and vendor-doc drift (#1228)
+
+The dead-symbol regex, `\b(ALP_[A-Z0-9_]+|alp_[a-z0-9_]+)\b`, never matched
+inside a `CONFIG_ALP_SDK_FOO=y` line: `\b` does not fire between `CONFIG_`
+and `ALP_` (both are `\w`), so the token was invisible to the scan, not
+merely "known" -- a dead `CONFIG_ALP_*` Kconfig reference in a doc could
+drift silently forever. The regex now consumes an optional `CONFIG_` prefix
+without capturing it, so `CONFIG_ALP_SDK_FOO=y` resolves against the bare
+`ALP_SDK_FOO` Kconfig source spells.
+
+`vendors/**/*.md` is now a scanned surface (previously unscanned, so a
+vendored library's README could reference a removed symbol -- e.g. the
+stale `ALP_U8G2_MODULE_DIR` override `vendors/u8g2/README.md` claimed --
+with no gate catching it), and `vendors/**/CMakeLists.txt` is a new
+known-symbol source layer (a vendor integration anchor like
+`ALP_HAS_RENESAS_FSP` can be declared ONLY there). The known-symbol
+harvest also now reads `src/**/*.c`, `src/**/*.cpp`, per-core
+`examples/**/boards/*.conf` / `examples/**/boards/*.overlay` filenames
+(the full board+SoC+core target identity, not just the bare board name,
+bounded to `examples/` so this stays a directory-scoped harvest rather
+than a whole-tree walk), and `keys/*.pem` filenames.
+
+Every `scripts/check_*.py` gate script is now excluded, as a class, from
+the `scripts/**/*.py` known-symbol harvest: a gate script narrates
+`ALP_*`/`alp_*` tokens by name in comments, docstrings, and allowlist
+rationale without ever declaring or generating one, so leaving any of
+them in let a symbol they merely discussed self-confirm as "known" and
+hide the exact class of drift this gate exists to catch.
+
+`.github/workflows/pr-doc-drift.yml` now triggers on `vendors/**`,
+`src/**`, `examples/**`, and `keys/**` to match the gate's new scanned
+surface and known-symbol harvest inputs.
+
+Separately, `docs/portability-matrix.md`,
+`docs/tutorials/04-cross-family-portability.md`, and
+`docs/tutorials/16-inference-mobilenet.md` still named the old
+`CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U{55,65,85}` /
+`CONFIG_ALP_SDK_INFERENCE_TFLM_{NEON,HELIUM,REF}` spellings; they now
+match what the orchestrator actually emits
+(`CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_{U55,U65,U85}` /
+`CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_{NEON,HELIUM,REF}`).
+`docs/porting-new-som.md`'s worked-example stdout excerpt is corrected
+to match real `alp_project.py --emit zephyr-conf` output (drops the
+invented `CONFIG_ALP_OS_ZEPHYR` line, fixes `CONFIG_ALP_PERIPHERAL_I2C`
+to `CONFIG_I2C`, transcribes the real generator header line).
+`vendors/u8g2/README.md` and
+`examples/display/u8g2-oled-draw/CMakeLists.txt` are corrected to state
+that `libraries: [u8g2]` always compiles the vendored core with no
+SDK-level switch to the full upstream tree, replacing the stale
+`ALP_U8G2_MODULE_DIR` override claim.
 
 ## [v0.15.0] - 2026-08-07
 

@@ -276,3 +276,130 @@ def test_yocto_machine_var_is_known(tmp_path):
     (conf / "e1m.conf").write_text('ALP_BOOT_DEVICE = "mmc"\n', encoding="utf-8")
     proc = _run("--root", str(tmp_path))
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+# --- #1228: CONFIG_-prefixed symbols must be resolved, not skipped ---
+#
+# Before the fix, `\b` never fires between "CONFIG_" and "ALP_" (both are
+# \w), so `_SYMBOL_RE` never matched inside a `CONFIG_ALP_SDK_FOO=y` line
+# at all -- the token was invisible to the scan, not merely "known": a
+# dead `CONFIG_ALP_*` Kconfig line in a doc could drift silently forever.
+
+
+def test_config_prefixed_dead_symbol_fails(tmp_path):
+    _scaffold(tmp_path, docs={"kconfig-table.md": "Enable `CONFIG_ALP_DEAD_SYMBOL=y`.\n"})
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 1
+    assert "ALP_DEAD_SYMBOL" in proc.stdout + proc.stderr
+
+
+def test_config_prefixed_known_symbol_passes(tmp_path):
+    # The CONFIG_ prefix must be stripped before the known-symbol check
+    # (Kconfig source spells the same symbol bare) -- not just "any
+    # CONFIG_-prefixed token is flagged". Paired with
+    # test_config_prefixed_dead_symbol_fails above: on its own this test
+    # passes whether or not CONFIG_-prefixed tokens are scanned at all, so
+    # the dead-symbol test is what actually proves the scan runs.
+    _scaffold(tmp_path, docs={"kconfig-table.md": "Enable `CONFIG_ALP_REAL_SYMBOL=y`.\n"})
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+# --- #1228: vendors/**/*.md is a scanned surface, vendors/**/CMakeLists.txt
+# is a known-symbol source layer ---
+
+
+def test_vendors_readme_dead_symbol_fails(tmp_path):
+    _scaffold(tmp_path, docs={})
+    readme = tmp_path / "vendors" / "somelib" / "README.md"
+    readme.parent.mkdir(parents=True)
+    readme.write_text("Override with `ALP_SOMELIB_DEAD_OVERRIDE`.\n", encoding="utf-8")
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 1
+    assert "ALP_SOMELIB_DEAD_OVERRIDE" in proc.stdout + proc.stderr
+
+
+def test_vendors_cmakelists_symbol_is_known(tmp_path):
+    # A vendor integration anchor (e.g. option(ALP_HAS_SOMELIB ...)) can be
+    # the ONLY place its own vendors/<lib>/README.md-documented symbol is
+    # declared -- not under include/ or src/. Paired with
+    # test_vendors_readme_dead_symbol_fails above: on its own this test
+    # passes whether or not vendors/**/*.md is even scanned, so the
+    # dead-symbol test is what actually proves the surface is scanned.
+    _scaffold(tmp_path, docs={})
+    vdir = tmp_path / "vendors" / "somelib"
+    vdir.mkdir(parents=True)
+    (vdir / "README.md").write_text("Enable with `ALP_HAS_SOMELIB`.\n", encoding="utf-8")
+    (vdir / "CMakeLists.txt").write_text("option(ALP_HAS_SOMELIB \"\" ON)\n", encoding="utf-8")
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_gate_script_comments_do_not_self_confirm_symbols(tmp_path):
+    # collect_known_symbols() harvests scripts/**/*.py as a "generators /
+    # tooling" source layer.  Every scripts/check_*.py gate script is
+    # excluded from it as a class (this file included): a gate script
+    # narrates ALP_*/alp_* tokens by name in comments, docstrings, and
+    # allowlist rationale without ever declaring or generating one.  Uses
+    # a controlled fixture, not the live tree, so this exercises the
+    # class-based exclusion mechanism directly, independent of what
+    # check_doc_drift.py's own comments happen to say at the time (#1228).
+    _scaffold(tmp_path, docs={"kconfig-table.md": "Uses `ALP_ONLY_MENTIONED_IN_COMMENT`.\n"})
+    other_gate = tmp_path / "scripts" / "check_something_else.py"
+    other_gate.parent.mkdir(parents=True, exist_ok=True)
+    other_gate.write_text(
+        "# Discusses ALP_ONLY_MENTIONED_IN_COMMENT in prose; never declares it.\n",
+        encoding="utf-8",
+    )
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 1
+    assert "ALP_ONLY_MENTIONED_IN_COMMENT" in proc.stdout + proc.stderr
+
+
+# --- #1228: filename-existence layers the check_*.py exclusion newly
+# depends on (real docs referenced tokens only a laundering check_*.py
+# comment used to confirm) ---
+
+
+def test_board_scoped_conf_filename_is_known(tmp_path):
+    # The full board+SoC+core target identity (not just the bare board
+    # name collect_real_board_names() returns) is real by the EXISTENCE of
+    # its boards/<target>.conf file, e.g.
+    # docs/aen-bench-bringup.md's `boards/<target>.conf` reference.
+    _scaffold(tmp_path, docs={
+        "bench.md": "See `boards/alp_e1m_som_target_variant.conf`.\n",
+    })
+    conf = tmp_path / "examples" / "demo" / "boards" / "alp_e1m_som_target_variant.conf"
+    conf.parent.mkdir(parents=True)
+    conf.write_text("CONFIG_ALP_REAL_SYMBOL=y\n", encoding="utf-8")
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_board_scoped_conf_outside_examples_is_not_known(tmp_path):
+    # The boards/*.conf / boards/*.overlay filename harvest is bounded to
+    # examples/ (a directory-scoped harvest, not a whole-tree walk) -- a
+    # boards/<target>.conf living outside examples/ must NOT make the
+    # target identity it encodes "known".
+    _scaffold(tmp_path, docs={
+        "bench.md": "See `boards/alp_e1m_other_target_variant.conf`.\n",
+    })
+    conf = tmp_path / "tests" / "zephyr" / "boards" / "alp_e1m_other_target_variant.conf"
+    conf.parent.mkdir(parents=True)
+    conf.write_text("CONFIG_ALP_REAL_SYMBOL=y\n", encoding="utf-8")
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 1
+    assert "alp_e1m_other_target_variant" in proc.stdout + proc.stderr
+
+
+def test_release_signing_key_filename_is_known(tmp_path):
+    # keys/*.pem is real by filename existence, e.g.
+    # docs/som-release-signing.md's `alp_release_signing_ecdsa_p256`.
+    _scaffold(tmp_path, docs={
+        "signing.md": "Verify with `alp_release_signing_ecdsa_p256`.\n",
+    })
+    keys = tmp_path / "keys"
+    keys.mkdir()
+    (keys / "alp_release_signing_ecdsa_p256.pub.pem").write_text("", encoding="utf-8")
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr

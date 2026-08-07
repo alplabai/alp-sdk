@@ -10,14 +10,22 @@ describe the current bridge as the obsolete CS-less design.
 Five independent checks:
 
   (a) Dead-symbol references.  Every `ALP_[A-Z0-9_]+` and
-      `alp_[a-z0-9_]+` token mentioned in a customer doc must exist as
-      a token in one of the SDK's authoritative sources of truth:
-        * C-API public headers    include/**/*.h
+      `alp_[a-z0-9_]+` token mentioned in a customer doc -- including a
+      `CONFIG_`-prefixed one (`CONFIG_ALP_SDK_FOO=y`); the prefix is
+      stripped before the known-symbol check, since Kconfig source
+      spells the same symbol bare -- must exist as a token in one of
+      the SDK's authoritative sources of truth:
+        * C-API public + internal headers, sources
+                                   include/**/*.h, src/**/*.h,
+                                 src/**/*.c, src/**/*.cpp
         * Kconfig config symbols   zephyr/Kconfig[.alp-libraries],
                                  zephyr/kconfigs/*.kconfig
         * generated identifiers    scripts/alp_project.py + scripts/gen_*.py
           (the alp_hw_info_build CMake helper, ALP_HW_BUILD_* / ALP_SOC_*
            macros)
+        * vendor integration anchors  vendors/**/CMakeLists.txt (e.g.
+          ALP_HAS_RENESAS_FSP) -- a symbol a vendors/<lib>/README.md
+          documents can be declared ONLY here, not under include/ or src/
         * real board targets       zephyr/boards/alp/<dir>/board.yml's
           `board: name:` field (e.g. alp_e1m_aen801_m55_he) -- EXISTENCE,
           not naming shape, is what makes a board name real; a token
@@ -32,12 +40,21 @@ Five independent checks:
 
       Scanned surfaces (customer-facing only):
         README.md, docs/*.md (top-level), docs/tutorials/**,
-        docs/soms/**, docs/boards/**
+        docs/soms/**, docs/boards/**, vendors/**/*.md
       Deliberately NOT scanned:
         * historical / generated / internal: CHANGELOG.md,
           docs/superpowers/**, docs/abi/**, docs/adr/**
         * forward-looking design/proposal docs that document not-yet-
           shipped APIs by intent (see _SCAN_EXCLUDE_DOCS)
+      Not yet in scope (narrower than the sibling check_doc_links.py,
+      which additionally covers docs/{diagnostics,ci}/** and
+      examples/**/README.md): docs/ci/**, docs/diagnostics/**,
+      docs/architecture/**, docs/metadata/**, examples/**/README.md.
+      Widening this needs its own pass -- a spot-check of those
+      directories turns up several ALP_*-shaped tokens that are CI/env
+      var names, not SDK symbols (e.g. ALP_CI_APP_ID), so naively adding
+      them would need new allowlist curation, not just a scan-surface
+      flip.
 
   (b) Docs-index integrity.  Every top-level docs/*.md (except
       README.md itself) must be linked from docs/README.md.  This is
@@ -115,10 +132,38 @@ _ALLOWLIST: set[str] = {
     # zephyr/boards/alp/, so collect_real_board_names() will never find them.
     "alp_e1m_aen901_m55_he",
     "alp_e1m_aen901_m55_hp",
+    # The rest of docs/porting-new-som.md Sec 3's hypothetical E1M-AEN901 /
+    # Alif Ensemble "E9" worked example -- the illustrative `alp_project.py
+    # --emit zephyr-conf` stdout excerpt it walks through.  Same rationale
+    # as the two board names above: each follows a real, documented
+    # *computed* naming pattern (`ALP_SOC_` + ref.upper(), `ALP_SDK_CHIP_`
+    # + chip name) for a SoC/chip that doesn't exist yet, so it never lands
+    # in a harvested source by design.
+    "ALP_SOC_ALIF_ENSEMBLE_E9",
+    "ALP_SDK_CHIP_CC3511E",
+    # Genuinely removed in the v0.3 cleanup.  vendors/lwrb/README.md and
+    # vendors/nanopb/README.md each name it once, in "no Kconfig flag for
+    # this any more -- the previous X was removed" historical wording, not
+    # as live guidance; docs/board-config.md:165's "Pre-`board.yaml`"
+    # table row names ALP_SDK_USE_LWRB the same way, describing what the
+    # OLD per-file config looked like before board.yaml replaced it.
+    "ALP_SDK_USE_LWRB",
+    "ALP_SDK_USE_NANOPB",
+    # docs/bring-up-drpai-v2n.md names the per-MACHINE Kconfig strings an
+    # independent, still-unmerged fix on `feat/1145-drpai-v2n-bringup` uses
+    # (see #1175) -- real on that branch, not yet on this one.
+    "ALP_FDT_FILE",
+    "ALP_SD_ROOT",
 }
 
-# Identifier shapes we treat as SDK symbols.
-_SYMBOL_RE = re.compile(r"\b(ALP_[A-Z0-9_]+|alp_[a-z0-9_]+)\b")
+# Identifier shapes we treat as SDK symbols.  The optional `CONFIG_`
+# prefix is consumed but NOT captured -- `\b` never fires between
+# "CONFIG_" and "ALP_" (both are \w, so there's no boundary there), so
+# without this every `CONFIG_ALP_SDK_*=y` line in a doc was invisible
+# to the scan entirely (#1228).  Kconfig source spells the same symbol
+# bare (`config ALP_SDK_FOO`), so stripping the prefix here is what
+# lets a doc's `CONFIG_ALP_SDK_FOO` match a harvested `ALP_SDK_FOO`.
+_SYMBOL_RE = re.compile(r"\b(?:CONFIG_)?(ALP_[A-Z0-9_]+|alp_[a-z0-9_]+)\b")
 
 # Real Zephyr board target names are harvested from the `board: name:`
 # field of each in-tree zephyr/boards/alp/<dir>/board.yml (see
@@ -233,16 +278,25 @@ def collect_known_symbols(root: pathlib.Path) -> set[str]:
 
     Source layers harvested (each bounded to a specific directory -- never
     a whole-tree walk, so this stays fast and skips build artefacts):
-      * C-API headers           include/**/*.h, src/**/*.h
+      * C-API headers + sources  include/**/*.h, src/**/*.h,
+                                 src/**/*.c, src/**/*.cpp
       * Kconfig config symbols   zephyr/Kconfig[.alp-libraries],
                                  zephyr/kconfigs/*.kconfig
       * CMake options / helpers  CMakeLists.txt, src/**/CMakeLists.txt,
-                                 cmake/**/*.cmake  (ALP_OS, ALP_SDK*,
-                                 alp_hw_info_build, ...)
-      * generators / tooling     scripts/**/*.py  (board names,
+                                 cmake/**/*.cmake, vendors/**/CMakeLists.txt
+                                 (ALP_OS, ALP_SDK*, alp_hw_info_build,
+                                 ALP_HAS_RENESAS_FSP, ...)
+      * generators / tooling     scripts/**/*.py, excluding scripts/check_*.py
+                                 gate scripts (board names,
                                  ALP_HW_BUILD_* / ALP_SOC_* macros,
                                  board.yaml field identifiers)
       * config schemas           metadata/schemas/*.json (board.yaml fields)
+      * board-scoped app overlays  examples/**/boards/*.conf,
+                                 examples/**/boards/*.overlay -- the full
+                                 per-core board+SoC+core target identity
+                                 (collect_real_board_names() only returns
+                                 the bare board name)
+      * release-signing keys      keys/*.pem
     """
     symbols: set[str] = set()
 
@@ -253,14 +307,29 @@ def collect_known_symbols(root: pathlib.Path) -> set[str]:
             return
         symbols.update(m.group(1) for m in _SYMBOL_RE.finditer(text))
 
-    def harvest_tree(base: pathlib.Path, pattern: str) -> None:
+    def harvest_tree(base: pathlib.Path, pattern: str, *, exclude=None) -> None:
         if base.is_dir():
             for path in base.rglob(pattern):
+                if exclude is not None and exclude(path):
+                    continue
                 harvest(path)
 
-    # C-API: public + internal headers.
+    def harvest_filenames(base: pathlib.Path, pattern: str) -> None:
+        # Some real identifiers are proven by a filename's EXISTENCE on
+        # disk, not by a declaration inside a source file -- same
+        # principle as collect_real_board_names().  Match the symbol
+        # shape against the filename text itself.
+        if base.is_dir():
+            for path in base.rglob(pattern):
+                symbols.update(m.group(1) for m in _SYMBOL_RE.finditer(path.name))
+
+    # C-API: public + internal headers, plus .c/.cpp sources -- some
+    # symbols (e.g. the per-variant inference backend entry points) are
+    # declared only in the .cpp that defines them, not a header.
     harvest_tree(root / "include", "*.h")
     harvest_tree(root / "src", "*.h")
+    harvest_tree(root / "src", "*.c")
+    harvest_tree(root / "src", "*.cpp")
     # Kconfig config namespace (ALP_SDK_*).  zephyr/Kconfig only sources the
     # per-subsystem fragments under zephyr/kconfigs/ (issue #458 split) plus a
     # couple of driver-tree Kconfig files, so harvest those directly too.
@@ -268,14 +337,41 @@ def collect_known_symbols(root: pathlib.Path) -> set[str]:
         harvest(root / kconfig)
     harvest_tree(root / "zephyr" / "kconfigs", "*.kconfig")
     # CMake options / helper functions (ALP_OS, ALP_SDK*, alp_hw_info_build).
+    # vendors/**/CMakeLists.txt is its own layer: a vendor integration
+    # anchor (e.g. vendors/renesas-rzv2n/CMakeLists.txt's
+    # option(ALP_HAS_RENESAS_FSP ...)) can be the ONLY place a symbol its
+    # own vendors/<lib>/README.md documents is declared.
     harvest(root / "CMakeLists.txt")
     harvest_tree(root / "src", "CMakeLists.txt")
     harvest_tree(root / "cmake", "*.cmake")
+    harvest_tree(root / "vendors", "CMakeLists.txt")
     # Generators / orchestrator / project tooling -- emit board target
     # names, ALP_HW_BUILD_* / ALP_SOC_* macros, board.yaml field identifiers.
-    harvest_tree(root / "scripts", "*.py")
+    # Every scripts/check_*.py gate script (this file included) is
+    # excluded from this harvest as a class, not just by name: a
+    # gate script narrates ALP_*/alp_* tokens in comments, docstrings, and
+    # allowlist rationale without ever declaring or generating one.  Left
+    # in, any one of them can let a symbol it merely discusses
+    # self-confirm as "known" and hide real drift forever; the actual
+    # generators (alp_project.py, gen_*.py, alp_orchestrate/**) stay
+    # harvested.
+    harvest_tree(root / "scripts", "*.py",
+                exclude=lambda p: p.name.startswith("check_"))
     # Config schemas -- board.yaml field names.
     harvest_tree(root / "metadata" / "schemas", "*.json")
+    # Board-scoped app CONFIG/DT overlays: Zephyr's boards/<board_target>.conf
+    # / boards/<board_target>.overlay convention, keyed by the full
+    # board+SoC+core target identity (e.g. docs/aen-bench-bringup.md's
+    # `boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.conf`).  Bounded
+    # to examples/ (where every customer-doc-referenced target identity
+    # lives) rather than the whole tree, so this doesn't also walk
+    # tests/**/boards/ fixtures or pick up build/west-managed dirs.
+    harvest_filenames(root / "examples", "boards/*.conf")
+    harvest_filenames(root / "examples", "boards/*.overlay")
+    # Release-signing key filenames under keys/ (e.g.
+    # keys/alp_release_signing_ecdsa_p256.pub.pem, documented by
+    # docs/som-release-signing.md).
+    harvest_filenames(root / "keys", "*.pem")
     # Yocto layer -- MACHINE / image variables (ALP_BOOT_DEVICE, ...).
     for pat in ("*.conf", "*.bb", "*.bbappend", "*.inc"):
         harvest_tree(root / "meta-alp-sdk", pat)
@@ -320,6 +416,9 @@ def doc_files_for_symbol_scan(root: pathlib.Path) -> list[pathlib.Path]:
             d = docs / sub
             if d.is_dir():
                 out.extend(sorted(d.rglob("*.md")))      # recursive
+    vendors = root / "vendors"
+    if vendors.is_dir():
+        out.extend(sorted(vendors.rglob("*.md")))         # recursive
     return out
 
 
