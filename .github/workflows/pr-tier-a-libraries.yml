@@ -88,7 +88,7 @@ jobs:
     name: tier-a-libraries · ${{ matrix.som }}
     needs: compute-family-matrix
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 33
 
     strategy:
       fail-fast: false
@@ -99,14 +99,20 @@ jobs:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
 
     steps:
+      # #1274: every `uses:` step below is its own network round trip
+      # (fetch the action, then do its job) and can stall the same way
+      # `apt-get`/`pip`/`west` can -- same failure class as the run: steps
+      # this job already caps.
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
+        timeout-minutes: 2
         with:
           path: alp-sdk
           fetch-depth: 1
 
       - name: Set up Python
         uses: actions/setup-python@v6
+        timeout-minutes: 2
         with:
           python-version-file: alp-sdk/.python-version
 
@@ -255,7 +261,11 @@ jobs:
         with:
           python-version-file: alp-sdk/.python-version
 
+      # #1274: same failure class as the tier-a-library-build job's own
+      # pip/apt/west steps -- an uncapped install here can still eat this
+      # job's 10-minute ceiling and land the timeout on the pytest step below.
       - name: Install Python deps
+        timeout-minutes: 2
         run: pip install click jsonschema pyyaml pytest
 
       - name: Validate Tier-A library metadata and emit tests

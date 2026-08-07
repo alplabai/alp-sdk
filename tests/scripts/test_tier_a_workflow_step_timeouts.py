@@ -1,19 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
 """Regression test for #1274.
 
-`pr-tier-a-libraries.yml`'s `tier-a-library-build` job carries a 30-minute
-job-level `timeout-minutes`, but until #1274 none of its individual steps
-did. When one setup step stalls (see CHANGELOG.md's #1274 entry for the
-observed numbers), the eventual timeout lands on whichever step happens to
-be running when the job-level ceiling hits -- usually the build step --
-which reads exactly like a slow/broken build even when the build itself was
+`pr-tier-a-libraries.yml`'s `tier-a-library-build` job carries a job-level
+`timeout-minutes`, but until #1274 none of its individual steps did. When
+one setup step stalls (see CHANGELOG.md's #1274 entry for the observed
+numbers), the eventual timeout lands on whichever step happens to be
+running when the job-level ceiling hits -- usually the build step -- which
+reads exactly like a slow/broken build even when the build itself was
 never slow.
 
 Which steps "need" their own timeout is derived from each step's `run:`/
-`uses:` body (network-fetch/install/compile commands, or an
-`actions/cache@` round trip), not from a hardcoded list of step names -- a
-name allowlist stays green when a newly added step does real network or
-compile work but nobody remembered to add its name to the list.
+`uses:` body (network-fetch/install/compile commands, or any marketplace
+`uses:` action -- those always make their own network round trip), not
+from a hardcoded list of step names -- a name allowlist stays green when a
+newly added step does real network or compile work but nobody remembered
+to add its name to the list.
 
 Also asserts the per-step timeouts stay strictly under the job's own
 ceiling, both individually and summed -- otherwise a step running late in
@@ -51,13 +52,15 @@ _NETWORK_OR_COMPILE_MARKERS = (
 
 def _needs_own_timeout(step: dict) -> bool:
     """True if `step` does real network or compile work: its `run:` body
-    invokes a known fetch/install/compile tool, or it `uses:` an action
-    that itself makes a network round trip (actions/cache)."""
+    invokes a known fetch/install/compile tool, or it `uses:` a marketplace
+    action (which always makes its own network round trip to fetch the
+    action and usually to do its actual job -- checkout, cache, download,
+    ...). A local composite action (`uses: ./...`) does no such fetch."""
     run = step.get("run") or ""
     if any(marker in run for marker in _NETWORK_OR_COMPILE_MARKERS):
         return True
     uses = step.get("uses") or ""
-    return uses.startswith("actions/cache@")
+    return bool(uses) and not uses.startswith("./")
 
 
 def _load_build_job() -> dict:
