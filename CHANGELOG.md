@@ -58,8 +58,8 @@ Generation (`@include`-ing the header into the doc) was rejected:
 Markdown has no such directive, and the doc's block carries per-field
 explanatory prose a generator would strip. The gate fails loudly --
 never silently OK -- if either struct block cannot be located at all,
-matching the fail-open fix landing in three other doc gates tonight
-(#1264, #1265). It is registered in `metadata/quality-tasks-v1.json`
+so renaming or moving either file cannot silently disarm it. It is
+registered in `metadata/quality-tasks-v1.json`
 and wired into `pr-doc-drift.yml`, whose existing `docs/**` +
 `include/**` path filters already cover both files it reads.
 
