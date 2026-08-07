@@ -70,11 +70,13 @@ PMIC's `EVENT_00` status register over BRD_I2C.
    (SWDIO/SWCLK/nRST/GND).  Power the board (probe stays
    unpowered; standard 1.8/3.3 V level convention applies).
 2. With the probe plugged in, attach with J-Link Commander. **Use the
-   generic `Cortex-M55` device, _not_ the Alif part number** — on the E8
-   bench the part-specific device (`AE822FA0E5597LS0_M55_HE`) connect
-   sequence fails post-boot ("Could not connect to the target device"),
-   while the generic core device scans the APs and finds the core
-   directly (BENCH-VERIFIED on the E1M-AEN801, 2026-06-15):
+   generic `Cortex-M55` device, _not_ the Alif part number**, for this
+   attach — on a J-Link DLL older than V9.46 the part-specific device
+   (`AE822FA0E5597LS0_M55_HE`) connect sequence fails post-boot ("Could
+   not connect to the target device"); on V9.46+ it also connects, but
+   the generic core device is the documented one for scanning the APs
+   and finding the core directly regardless (BENCH-VERIFIED on the
+   E1M-AEN801, 2026-06-15; see [`aen-bench-bringup.md`](aen-bench-bringup.md) §1):
 
    ```bash
    JLinkExe -device Cortex-M55 -if SWD -speed 4000 -nogui 1
@@ -336,7 +338,10 @@ top of the per-subsystem checks.
 
 1. **SWD/J-Link attach + CPUID read.**  Wire the probe (§2),
    then (use the **generic `Cortex-M55` device**, not the Alif part
-   number — the part-specific device connect fails post-boot):
+   number, for this attach/RAM-run flow — on a J-Link DLL older than
+   V9.46 the part-specific device connect fails post-boot; V9.46+ also
+   connects, but the generic profile stays the documented device here
+   regardless — see [`aen-bench-bringup.md`](aen-bench-bringup.md) §1):
 
    ```bash
    JLinkExe -device Cortex-M55 -if SWD -speed 4000 -nogui 1
