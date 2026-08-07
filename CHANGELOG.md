@@ -40,6 +40,58 @@ only artefact asserting a GA. The working heading is relabelled
 it becomes accurate the moment the tag is pushed, and flipping it back for
 the interim would churn `alp.lock` and every consumer that reads it.
 
+### Added — `scripts/check_board_id_doc_parity.py`: a struct-parity gate pinning `docs/board-id.md` and `scripts/program_eeprom.py` to `include/alp/hw_info.h` (#1231)
+
+The `alp_hw_info_eeprom_t` struct-width drift #1231 reported
+(`docs/board-id.md` disagreeing with `include/alp/hw_info.h` on
+`schema_version` / `serial` / `reserved`) was already corrected by
+#1223. This delivers the issue's remaining "worth doing properly"
+ask: a gate that catches the next drift instead of relying on another
+manual doc pass.
+
+`docs/board-id.md`'s prose paragraph below the `alp_hw_info_eeprom_t`
+typedef block now cites the header's `ALP_HW_INFO_*_LEN` macro names
+each width was transcribed from, so a reader decoding raw manifest
+bytes can trace every width back to its source instead of trusting a
+hand-copied number. The typedef block itself still spells widths as
+plain integers -- deliberate, per the doc's own explanation -- and
+the gate parses that block, not this citation paragraph, which the
+doc labels unenforced prose.
+
+A new gate, `scripts/check_board_id_doc_parity.py`, parses the
+`alp_hw_info_eeprom_t` typedef struct out of both `docs/board-id.md`
+and `include/alp/hw_info.h`, resolves the header's length macros, and
+diffs field names, order, and widths between the two sides. It also
+resolves `scripts/program_eeprom.py`'s own `FAMILY_LEN` / `SKU_LEN` /
+`HW_REV_LEN` / `SERIAL_LEN` / `RESERVED_LEN` constants -- the
+manifest's third transcription, after the header and the doc -- and
+checks each against its header macro (or, for `RESERVED_LEN`, against
+the header's `reserved` field width, which has no macro). A
+same-total-size zero-sum edit to two of those constants (one grows,
+one shrinks by the same amount) would otherwise pass every existing
+size check while moving every field after the swap to a new byte
+offset, silently mis-programming production EEPROMs at the old
+offsets. Generation (`@include`-ing the header into the doc) was
+rejected: Markdown has no such directive, and the doc's block carries
+per-field explanatory prose a generator would strip. The gate fails
+loudly -- never silently OK -- if a struct block or length constant
+cannot be located at all, so renaming or moving any of the three files
+cannot silently disarm it; a struct-body line that doesn't parse as a
+field declaration (e.g. a two-token type like `unsigned char`, or a
+comma-list declaration) is now also a reported failure on whichever
+side(s) it appears, rather than being silently dropped from both
+sides' field lists and comparing "equal" by omission.
+
+It is registered in `metadata/quality-tasks-v1.json` and wired into
+`pr-doc-drift.yml`. The `pull_request` filter's `docs/**` +
+`include/**` entries already covered the doc and the header, but the
+gate script and `scripts/program_eeprom.py` are two more inputs it
+reads, so both got their own filter entries. The `push` filter had no
+per-script entries at all before this change -- not just missing this
+gate's -- so it is brought to parity with `pull_request` outright:
+`push`'s path list is now identical to `pull_request`'s, not just
+missing one more line appended to whatever it already had.
+
 ### Fixed — `check_public_private.py`'s `REVIEWED_ACCEPTED` exemptions broke on every CHANGELOG-editing PR (#524)
 
 `REVIEWED_ACCEPTED` matched an exemption on an exact `CHANGELOG.md` line

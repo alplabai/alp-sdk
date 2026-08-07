@@ -49,6 +49,17 @@ typedef struct {
 } alp_hw_info_eeprom_t;          /* 128 bytes total */
 ```
 
+The field widths above are plain integers, not the header's
+`ALP_HW_INFO_*_LEN` macro names, because this doc's audience is
+decoding raw manifest bytes off an EEPROM, not compiling C -- but the
+numbers themselves are transcribed straight from those macros, not
+independently chosen: `ALP_HW_INFO_FAMILY_LEN`, `ALP_HW_INFO_SKU_LEN`,
+`ALP_HW_INFO_HW_REV_LEN`, and `ALP_HW_INFO_SERIAL_LEN`.
+`scripts/check_board_id_doc_parity.py` resolves those macros and
+re-checks the typedef block above against them on every PR; it does
+not parse this paragraph, which is unenforced prose -- the typedef
+block above is the one the gate actually holds in sync.
+
 The CRC32 polynomial matches Python's `zlib.crc32` (poly
 `0xEDB88320`, init `0xFFFFFFFF`, xor-out `0xFFFFFFFF`) so the
 production-test programmer (`scripts/program_eeprom.py`) and the

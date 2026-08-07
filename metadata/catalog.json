@@ -893,6 +893,10 @@
   },
   "gates": [
     {
+      "purpose": "Board-ID manifest struct-parity gate -- fails (exit 1) when the `alp_hw_info_eeprom_t` typedef struct documented in docs/board-id.md, or the pack-format constants `scripts/program_eeprom.py` transcribes from the same struct, disagree with the shipping definition in include/alp/hw_info.h on field names, field order, or field widths.",
+      "script": "scripts/check_board_id_doc_parity.py"
+    },
+    {
       "purpose": "Fail if any repo board.yaml has an outstanding schema migration.",
       "script": "scripts/check_board_schema_version.py"
     },
