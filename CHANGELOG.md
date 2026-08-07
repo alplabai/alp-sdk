@@ -38,6 +38,25 @@ renders a genuine Rich options table, under `PYTHONUTF8=0` plus
 `LC_ALL=C`/`LANG=C`. Every other stub in that file prints plain ASCII,
 which both codecs round-trip unharmed, so none of them could see this
 class of defect.
+### Fixed — `scripts/test-all.sh` dirtied the current ABI snapshot with a same-day, zero-substance `generated` date bump (#1232)
+
+Every full `scripts/test-all.sh` run regenerated `docs/abi/<current>-snapshot.json`
+unconditionally, so an otherwise-clean local run that touched no public header
+still stamped today's date and dirtied the file, and that same-day-clean bump
+rode along into the next commit. `pr-generated-files.yml`'s own diff check
+never caught it: it masked the `"generated":` line with
+`--ignore-matching-lines='"generated":'`, so CI stayed green regardless —
+training reviewers to expect (and ignore) an ABI-diff-free date churn on the
+one file whose entire purpose is to be diffed for real ABI drift.
+`scripts/abi_snapshot.py --output` now skips the write entirely when
+re-serializing the snapshot would come out byte-identical to what's already
+committed, once the existing file's own `generated` date is substituted back
+in; the CI and local gates match, so neither rewrites the file on a no-op
+rerun. Both `.github/workflows/pr-generated-files.yml` and `scripts/test-all.sh`
+drop their now-redundant `--ignore-matching-lines='"generated":'` diff mask,
+since the write-skip guard is what keeps a no-op regen from touching that line
+at all — a real content change still fails on its content lines regardless of
+the mask.
 
 ## [v0.15.0] - 2026-08-07
 
