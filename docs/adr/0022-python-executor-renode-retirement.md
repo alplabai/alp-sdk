@@ -1,9 +1,12 @@
 # 0022. `tan` ships as Python, not Rust; Renode is retired from the command surface
 
-Status: Accepted — implemented (`tan` v0.5.0 ships as a PyInstaller freeze of
-the Python package `alp-tan`; the `tan renode` command-surface verb is
-retired from the documented architecture, no replacement simulator verb).
-This retires the `tan renode` VERB only. alp-sdk's own Renode CI is untouched
+Status: Accepted in part — amended 2026-08-07. The Python-executor clause
+SHIPPED and stands (`tan` v0.5.0+ is a PyInstaller freeze of the Python
+package `alp-tan`). **The Renode-retirement clause did NOT ship and is
+WITHDRAWN** — see "Amendment 1" immediately below the Status block.
+`tan renode` is still a live, registered verb; Decision points 2 and 3 below
+are withdrawn, and the doc removals they authorised are being reverted.
+This ADR retired the `tan renode` VERB only. alp-sdk's own Renode CI is untouched
 and still runs: `pr-renode-aen-smoke`, `pr-renode-dual-os`, `pr-renode-sim-mode`
 and `pr-renode-v2n-sci0-smoke` are all active workflows, and
 `pr-renode-aen-smoke` installs the pinned Renode v1.16.1 and boots a real image
@@ -24,6 +27,57 @@ Everything else in 0020 is unchanged and still governs: the plans-vs-executes
 split (end-state B), the three-repo boundary (alp-sdk / `tan` / alp-sdk-vscode),
 the plan/manifest contract, the version-skew guard, and the parity-gate
 machinery in `tests/parity/`.
+
+## Amendment 1 — 2026-08-07: the Renode-retirement clause is withdrawn
+
+The record below is preserved verbatim per `docs/adr/README.md`'s append-only
+rule. This amendment states what is no longer true, and why.
+
+**`tan renode` was never removed.** At `tan-cli` tag `v0.5.1` — the current
+release, cut after this ADR was accepted — the verb is still registered:
+
+```
+python/tan/cli.py:        from tan.commands.renode_cmd import renode
+python/tan/cli.py:        app.command("renode")(renode)
+python/tan/commands/renode_cmd.py    (the implementation, present)
+```
+
+**The tracking issue was re-scoped away from removal.** `tan-cli`#448, which
+Context point 2 and the Related section name as "the `tan renode` command
+removal", is **open** and now reads: *"tan renode: emit a support-paused
+warning; retain the command, modules, fixtures and CI models."* Retention with
+a warning is the opposite of the removal this ADR assumed would follow.
+
+Consequently:
+
+- The Status banner's "implemented" claim was wrong for this half of the ADR.
+  Half of it shipped (Python), half never did (Renode).
+- **Context point 2's "There is no `tan renode` verb, and no replacement
+  simulator" is false as written** and should be read as withdrawn.
+- **Decision point 2 is withdrawn.** `renode` should NOT be stripped from live
+  "supported command" listings, because the command is live. The removal it
+  authorised was applied in `a39d73e5` and then partially reverted in
+  `2b817532`, which is why the doc surface is currently inconsistent:
+  `docs/cli.md`, `docs/heterogeneous-builds.md` and `docs/board-config-emit.md`
+  document the verb, while `README.md`, `docs/README.md`,
+  `docs/troubleshooting.md` and `VERSIONS.md` still omit it. Restoring the
+  four is tracked separately rather than folded in here, to keep this change
+  bounded to the ADR record — the same bounded-scope discipline the original
+  Decision point 1 applied to the `cargo install` paragraphs.
+- **Decision point 3 is withdrawn.** A reader who reaches for `tan renode`
+  should not be redirected to "build + flash to real hardware" as though the
+  verb were gone. The genuine caveat is narrower and survives: there is no
+  simulated substitute for the cross-core RPMsg handshake specifically.
+- Decision point 4 stands, and its premise improves: `examples/aen/aen-sim-vision`
+  is no longer internally incoherent, because the `tan renode` run path it
+  depends on still exists.
+- The Consequences section's "the accepted architecture record matches what a
+  reader can actually install and run" did not hold for the Renode half — this
+  amendment is what makes it hold.
+
+What still stands unamended: the Python-executor clause in full, and this ADR's
+narrow supersession of ADR 0020's Rust-executor **language** claim. Only the
+`renode` command-surface supersession of 0020 is withdrawn.
 
 ## Context
 
