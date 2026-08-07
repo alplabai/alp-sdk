@@ -147,6 +147,20 @@ CASES.append((
     "examples/ai/cold-chain-monitor/board.yaml", "scaffold",
     ("--template", "edge-ai", "--sku", "E1M-V2N101"),
 ))
+# multicore-mailbox (issue #1275): the first dual-Zephyr-core template --
+# `supported.som_skus` is E1M-AEN801 ONLY (the one SKU with two Zephyr M
+# cores), so this is a passthrough render, not a cross-family rename; pins
+# the per-core CMakeLists.txt map (`_cmake_core_map`) leaving BOTH the
+# root `CMakeLists.txt` (m55_hp, `./src` has no CMakeLists.txt of its own
+# so it falls back to the project root) and `peer/CMakeLists.txt`
+# (m55_he, self-contained) with their OWN `--core` literal untouched,
+# rather than one rename applied blindly to every `*CMakeLists.txt` the
+# template owns.
+CASES.append((
+    "scaffold.multicore-mailbox-aen801", PROJ,
+    "examples/multicore/mproc-mailbox/board.yaml", "scaffold",
+    ("--template", "multicore-mailbox", "--sku", "E1M-AEN801"),
+))
 
 
 def _normalize_path(text: str, path: str, token: str) -> str:

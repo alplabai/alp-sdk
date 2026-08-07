@@ -24,6 +24,8 @@ on:
       - 'scripts/check_board_target_tree_parity.py'
       - 'scripts/check_example_board_overlay_parity.py'
       - 'scripts/check_som_topology_parity.py'
+      - 'scripts/check_core_cmakelists_mapping.py'
+      - 'examples/**/CMakeLists.txt'
       - 'scripts/alp_project_loader.py'
       - 'scripts/alp_project.py'
       - 'scripts/alp_orchestrate/**'
@@ -63,6 +65,8 @@ on:
       - 'scripts/check_board_target_tree_parity.py'
       - 'scripts/check_example_board_overlay_parity.py'
       - 'scripts/check_som_topology_parity.py'
+      - 'scripts/check_core_cmakelists_mapping.py'
+      - 'examples/**/CMakeLists.txt'
       - 'scripts/alp_project_loader.py'
       - 'scripts/alp_project.py'
       - 'scripts/check_stub_symbol_matrix.py'
@@ -318,6 +322,15 @@ jobs:
       # tested and runnable locally.
       - name: Gate — SoM preset topology keys match resolved SoC cores[].id
         run: python3 scripts/check_som_topology_parity.py
+
+      # Issue #1275: a dual-Zephyr-core SKU can silently share one core's
+      # baked CMakeLists.txt --core literal with a sibling core (the newly
+      # added core inherits the wrong Kconfig fragment while the
+      # orchestrator materialises the correct one for it separately).
+      # Catches both the literal-agreement drift and the actual trap --
+      # two distinct cores resolving app: to the same CMakeLists.txt.
+      - name: Gate — Zephyr core app: <-> CMakeLists.txt --core mapping
+        run: python3 scripts/check_core_cmakelists_mapping.py
 
       # Unit-test the loader contract -- schema pass/fail, missing-
       # preset error, override merge, all four emit modes produce

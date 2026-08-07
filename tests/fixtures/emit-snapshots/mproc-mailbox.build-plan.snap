@@ -65,7 +65,7 @@
       "coreId": "m55_he",
       "backend": "zephyr",
       "buildDir": "build/m55_he-zephyr",
-      "appDir": "${SDK_ROOT}/firmware/alp-stock-shim",
+      "appDir": "${PROJECT_ROOT}/peer",
       "configArtefacts": [
         {
           "path": "build/m55_he-zephyr/alp.conf",
@@ -96,7 +96,7 @@
           "build",
           "-b",
           "alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he",
-          "${SDK_ROOT}/firmware/alp-stock-shim",
+          "${PROJECT_ROOT}/peer",
           "--",
           "-DPython3_EXECUTABLE=${PYTHON}",
           "-DEXTRA_CONF_FILE=${PROJECT_ROOT}/build/m55_he-zephyr/alp.conf"

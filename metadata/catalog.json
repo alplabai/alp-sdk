@@ -925,6 +925,10 @@
       "script": "scripts/check_cmake_chip_list_parity.py"
     },
     {
+      "purpose": "Core-to-CMakeLists mapping gate: fails (exit 1) when an example's baked `--emit zephyr-conf --core <id>` literal disagrees with the board.yaml core whose `app:` resolves to it, or when two distinct Zephyr cores resolve to the same CMakeLists.txt.",
+      "script": "scripts/check_core_cmakelists_mapping.py"
+    },
+    {
       "purpose": "Lint repo content for Linux-only idioms in customer-facing surfaces.",
       "script": "scripts/check_cross_platform.py"
     },

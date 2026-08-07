@@ -429,8 +429,8 @@ top of the per-subsystem checks.
    `alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp`.
 
    ```bash
-   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/multicore/mproc-mailbox
-   # peer image: -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
+   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/multicore/mproc-mailbox/peer
+   # peer image: -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/multicore/mproc-mailbox
    west flash
    ```
 
