@@ -144,6 +144,48 @@ per-script entries at all before this change -- not just missing this
 gate's -- so it is brought to parity with `pull_request` outright:
 `push`'s path list is now identical to `pull_request`'s, not just
 missing one more line appended to whatever it already had.
+### Removed — dead `cmake-args.txt` materialisation from the baremetal build-plan slice (#1278)
+
+`emit_build_plan`'s `configArtefacts` no longer carries a `cmake-args.txt`
+entry for `os: baremetal` slices
+(`scripts/alp_orchestrate/buildplan.py::_slice_config_artefact`). The
+artefact was dead on both sides of the contract: nothing in this repo's own
+`_slice_command` (baremetal branch) ever read it back — the `cmake -S ... -B
+...` argv is built independently — and tan-cli's materialise step writes
+`configArtefacts` to disk without ever reading them back either. The
+core-identity need behind the original issue is now served by #1275's
+per-core `--core` literal baked into each generated tree, gated separately
+— this artefact answered a capability it never actually delivered.
+
+- `metadata/schemas/build-plan-v1.schema.json`'s `configArtefacts`
+  description and `docs/architecture.md`'s pipeline diagram both stop naming
+  `cmake-args` among what a build-plan consumer materialises.
+  `metadata/emit-registry-v1.json`'s `cmake-args` mode entry drops its
+  `path` to `null` -- no fixed build/materialise-flow location remains for
+  it; the standalone `--emit cmake-args` mode itself is unchanged and stays
+  a caller-chosen `--output`.
+- `docs/board-config-emit.md`'s "Plain CMake" recipe no longer claims
+  `--emit cmake-args`'s output is directly pipeable into `cmake -B build
+  $ARGS .`, and instead documents `--output` to a file for manual/tooling
+  consumption; `--emit cmake-args` itself is unchanged and still valid.
+- No `schemaVersion` bump: ADR-0020 Amendment (2026-07-20) item 3 sets the
+  precedent for a build-plan shape change against `tan-cli`'s pinned
+  `schemaVersion == 1` -- don't bump (it would strand the pin), keep
+  strict-producer/tolerant-consumer instead. No committed fixture (pinned
+  oracle or `tests/fixtures/emit-snapshots/*`) exercises a baremetal slice
+  today -- neither fixture tree has an `"os": "baremetal"` entry -- so this
+  shape change trips no gate yet.
+- Not fixed here, needs a paired tan-cli issue: this repo's
+  `_slice_config_artefact` (`scripts/alp_orchestrate/buildplan.py`) has a
+  byte-identical twin at tan-cli's `python/tan/planner/buildplan.py:51-69`,
+  whose baremetal branch (lines 67-68) still returns a `cmake-args.txt`
+  entry -- this change makes the two planners disagree on that shape.
+  ADR-0020 Amendment item 4 governs exactly this: seam-1
+  (`tests/parity/seam1_field_diff.py` and tan-cli's vendored twin) diffs
+  `configArtefacts[*].path` after dropping `contents`, and an artefact
+  "appearing/vanishing/moving still fails the gate" -- so once either
+  repo's parity suite gains a baremetal-slice fixture, seam-1 fails until
+  tan-cli's twin drops the same branch.
 
 ### Fixed — `check_public_private.py`'s `REVIEWED_ACCEPTED` exemptions broke on every CHANGELOG-editing PR (#524)
 

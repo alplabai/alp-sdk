@@ -211,8 +211,9 @@ board.yaml (`cores:`)
    Tan planner / SDK reference    # plan JSON: per-slice command + generated files
         │
         ▼
-   tan build                      # writes alp.conf / local.conf / cmake-args per slice
-                                   # under build/<core>-<os>/, then runs each slice's build
+   tan build                      # writes alp.conf / local.conf per slice (baremetal
+                                   # has none) under build/<core>-<os>/, then runs
+                                   # each slice's build
 ```
 
 OS inference defaults are silicon-class driven: Cortex-M cores

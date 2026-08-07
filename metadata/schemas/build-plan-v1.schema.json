@@ -78,7 +78,7 @@
           },
           "configArtefacts": {
             "type": "array",
-            "description": "This slice's own generated config artefact(s) (alp.conf / local.conf / cmake-args.txt), or an empty array when the slice's os has none. Byte-identical to what the Orchestrator's own materialise step writes to buildDir.",
+            "description": "This slice's own generated config artefact(s) (alp.conf / local.conf), or an empty array when the slice's os has none -- `baremetal` always has none; its `-D` args are available on request via the standalone `--emit cmake-args` mode instead. Byte-identical to what a consumer's own materialise step writes to buildDir.",
             "items": {
               "type": "object",
               "additionalProperties": false,
