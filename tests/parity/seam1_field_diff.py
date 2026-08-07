@@ -13,7 +13,7 @@ runner -- see `tests/parity/README.md` and the `seam2` placeholder job in
 
 Seam-1 deliberately does NOT compare the materialised config-artefact
 CONTENT (`slices[*].configArtefacts[*].contents` / `sharedArtefacts[*].
-contents` -- the rendered alp.conf/local.conf/cmake-args.txt/DTS-overlay/
+contents` -- the rendered alp.conf/local.conf/DTS-overlay/
 sysbuild-conf bytes each slice carries): that content is covered
 byte-for-byte by `tests/fixtures/emit-snapshots/*.{build-plan,zephyr-conf}.
 snap` (every oracle board has a corresponding emit-snapshot case -- see
