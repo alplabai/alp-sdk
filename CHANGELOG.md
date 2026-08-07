@@ -358,11 +358,17 @@ attestation wiring itself.
 runs on every PR/push to `main`/`dev`, matching `pr-static-analysis.yml`'s
 precedent. These five scripts' harvests span over a dozen directories
 across the tree; a `paths:` list is a second copy of that surface that
-drifts out of sync with the scripts every time a harvest input is added --
-which is how a PR touching only `zephyr/kconfigs/*.kconfig` shipped
-merged-green twice (#1222, #1228) despite the paths filter's most recent
-edit. The job itself is a few seconds of Python, so always running it is
+drifts out of sync with the scripts every time a harvest input is added.
+The job itself is a few seconds of Python, so always running it is
 cheaper than maintaining that second list.
+
+This is robustness, not the root cause of #1222/#1228. Injecting a symbol
+that exists nowhere in the tree into `vendors/nxp-imx93/README.md` on a
+clean `origin/dev` export still gives `check_doc_drift.py` exit `0`, so
+the gate was blind to that doc/symbol shape whether or not the trigger
+fired. Dropping the filter prevents a *future* harvest input from
+escaping the trigger; it would not have caught either of those two. The
+blindness itself is what the rest of this entry fixes.
 
 Separately, `docs/portability-matrix.md`,
 `docs/tutorials/04-cross-family-portability.md`, and
