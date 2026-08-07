@@ -45,7 +45,7 @@ CURR,5.12,STALL,3.10,37.2,0.0,0.90
 ## Build
 
 ```
-west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples/ai/motor-current-signature
+west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/ai/motor-current-signature
 west flash
 ```
 

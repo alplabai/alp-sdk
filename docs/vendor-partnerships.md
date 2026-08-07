@@ -117,7 +117,7 @@ Alif boards at all, and Alif's own
 [`alifsemi/zephyr_alif`](https://github.com/alifsemi/zephyr_alif)
 fork was the only path to stock board files.  With v4.4 the
 upstream coverage is enough for SDK CI -- our example twister
-scenarios target `ensemble_e8_dk/ae402fa0e5597le0/rtss_hp` as
+scenarios target `ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp` as
 the AEN proxy.  Customers wanting the **full** Alif EVK board
 catalogue (the older 8-board set under `alif_e7_*` naming) still
 fall back to `sdk-alif` (zas-v2.0.0-rc1) in the

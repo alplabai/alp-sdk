@@ -1222,18 +1222,19 @@ def _scaffold_readme(
 
     * MAJOR C -- the canonical example's own SoM label ("# Example for
       E1M-AEN801:") and qualified Zephyr board target
-      (`alp_e1m_aen801_m55_hp`) otherwise survive a cross-family sku
-      swap untouched (a V2N101 scaffold shipping `-b
-      alp_e1m_aen801_m55_hp`; the real
+      (`alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp`) otherwise
+      survive a cross-family sku swap untouched (a V2N101 scaffold
+      shipping `-b alp_e1m_aen801_m55_hp/...`; the real
       `alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33` appears nowhere).
       `source_board`/`target_board` are the qualified board id
       (`_core_board`) for the example's own sku / the requested sku's
-      re-derived app core respectively; only the SHORT board-id prefix
-      (before the first `/`) needs to match literally in the README, so
-      the whole qualified `target_board` is substituted in its place --
-      upgrading even the passthrough case to the fully-qualified id
-      Zephyr 4.4 actually requires (issue #720; the source README's own
-      bare `alp_e1m_aen801_m55_hp` is itself ambiguous/unresolvable).
+      re-derived app core respectively; the exact qualified
+      `source_board` string is matched first (issue #720 required
+      every source README to carry the full `/<soc>/<core>` suffix,
+      not the bare, ambiguous short form this pass used to key off),
+      falling back to a SHORT board-id-prefix (before the first `/`)
+      word-boundary match for any mention that names only the board
+      directory (no soc/core).
 
     `pin_renames` (issue #876 review MINOR 4) is `_derive_pin_renames`'s
     map -- see `_substitute_readme_pins`.
@@ -1248,8 +1249,39 @@ def _scaffold_readme(
     text = text.replace(
         "-DEXTRA_ZEPHYR_MODULES=$(pwd)", "-DEXTRA_ZEPHYR_MODULES=$ALP_SDK_ROOT")
     if source_board and target_board:
-        source_marker = source_board.split("/", 1)[0]
-        text = re.sub(rf"\b{re.escape(source_marker)}\b", target_board, text)
+        # The source READMEs are fully qualified (issue #1266)
+        # (`alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/
+        # rtss_hp`, not the bare, ambiguous short form the fallback
+        # below was written for). Try the exact qualified string
+        # first so its `/<soc>/<core>` suffix is consumed along with
+        # the short prefix -- otherwise only the prefix gets replaced
+        # and the OLD soc/core suffix is left dangling after the NEW
+        # (already fully qualified) `target_board`, e.g.
+        # `alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33/ae822fa0e5597ls0/rtss_hp`.
+        # The short-prefix fallback stays for any source mention that
+        # names only the board directory (no soc/core), e.g. a
+        # `zephyr/boards/alp/<board>/` doc link.
+        if source_board in text:
+            text = text.replace(source_board, target_board)
+        else:
+            source_marker = source_board.split("/", 1)[0]
+            text = re.sub(rf"\b{re.escape(source_marker)}\b", target_board, text)
+        # The `_m33_sm` (RZ/V2N system-
+        # manager) board family's DEFAULT flasher is `rzv2n_mtd_flash`
+        # (zephyr/boards/alp/e1m_v2n101_m33_sm/board.cmake,
+        # e1m_v2m101_m33_sm/board.cmake), which is SSH-to-the-booted-A55
+        # and always needs `--host`/`ALP_V2N_SSH_HOST` -- a bare `west
+        # flash` carried over verbatim from an AEN801 (JLink) source
+        # README silently can't reach the board. Only the flash line
+        # immediately following THIS scaffold's own board target is
+        # rewritten, so an unrelated `west flash` elsewhere in the
+        # prose is left alone.
+        if target_board.split("/", 1)[0].endswith("_m33_sm"):
+            marker = re.escape(target_board)
+            text = re.sub(
+                rf"({marker}[^\n]*\n)west flash\b",
+                r"\1west flash --host <board-ip>",
+                text, count=1)
     if example_sku and sku and example_sku != sku:
         text = text.replace(example_sku, sku)
     text = _substitute_readme_pins(text, pin_renames or {})

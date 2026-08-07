@@ -72,7 +72,7 @@ WIC (mic activity)  ──▶  M55 HE wakes from STOP
 ## Build
 
 ```
-west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples/audio/audio-wake-word
+west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/audio/audio-wake-word
 west flash
 ```
 

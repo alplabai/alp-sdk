@@ -427,7 +427,7 @@
           "alp_sdk.example.cold_chain_monitor.e1m_x_evk"
         ],
         "cross_compile_matrix": [
-          { "platform": "ensemble_e8_dk/ae402fa0e5597le0/rtss_hp", "build_only": true }
+          { "platform": "ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp", "build_only": true }
         ]
       },
       "status": "stable"

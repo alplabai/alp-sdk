@@ -62,11 +62,11 @@ Each core can also be built standalone with `west build` directly
 
 ```bash
 # HP side.
-west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples/multicore/mproc-mailbox
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/multicore/mproc-mailbox
 west flash
 
 # HE side.
-west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_he examples/multicore/mproc-mailbox/peer
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_he examples/multicore/mproc-mailbox/peer
 west flash
 ```
 
