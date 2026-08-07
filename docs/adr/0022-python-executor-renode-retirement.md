@@ -3,7 +3,7 @@
 Status: Accepted in part — amended 2026-08-07. The Python-executor clause
 SHIPPED and stands (`tan` v0.5.0+ is a PyInstaller freeze of the Python
 package `alp-tan`). **The Renode-retirement clause did NOT ship and is
-WITHDRAWN** — see [Amendment 1](#amendment-1--2026-08-07-the-renode-retirement-clause-is-withdrawn).
+WITHDRAWN** — see "Amendment 1" immediately below the Status block.
 `tan renode` is still a live, registered verb; Decision points 2 and 3 below
 are withdrawn, and the doc removals they authorised are being reverted.
 This ADR retired the `tan renode` VERB only. alp-sdk's own Renode CI is untouched
