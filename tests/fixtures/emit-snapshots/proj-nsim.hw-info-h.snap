@@ -21,9 +21,24 @@
 #define ALP_HW_BUILD_CORES           "a32_cluster,m55_he,m55_hp"
 #define ALP_HW_BUILD_PRIMARY_CORE    "m55_he"
 
-/* Per-core presence flags -- `#ifdef ALP_HW_BUILD_HAS_<id>` to compile slice-
- * specific code.  Each macro's value is the slice's OS string, useful for
- * `#if defined(...)`-style runtime selection. */
+/* Per-core presence flags: `ALP_HW_BUILD_HAS_<id>` means core <id> exists in
+ * the project; its value is that core's OS string.  Defined for EVERY active
+ * core in EVERY slice -- it cannot say which core is compiling.
+ *
+ * `ALP_HW_BUILD_PRIMARY_CORE` names the compiling slice ONLY when this header
+ * was emitted --core-scoped (the per-slice build path).  Emitted without
+ * --core -- as the project-wide recipe in docs/board-config-emit.md does -- it
+ * names the project's primary core (first M-class core alphabetically),
+ * which on a multi-core project is not necessarily the one you are
+ * building.
+ *
+ * Zephyr's own CONFIG_BOARD and CONFIG_BOARD_TARGET differ per slice too --
+ * the board name and the board/soc/cpucluster target passed to `west build
+ * -b` -- and do so no matter how this header was emitted.  E.g. on E1M-AEN801,
+ * the HE slice's CONFIG_BOARD is "alp_e1m_aen801_m55_he" and its
+ * CONFIG_BOARD_TARGET ends ".../rtss_he"; the HP slice's end "_hp" and
+ * ".../rtss_hp".  Prefer them over PRIMARY_CORE where that portability
+ * matters. */
 #define ALP_HW_BUILD_HAS_A32_CLUSTER  "yocto"
 #define ALP_HW_BUILD_HAS_M55_HE       "zephyr"
 #define ALP_HW_BUILD_HAS_M55_HP       "zephyr"
