@@ -8,11 +8,16 @@
 # released version, when an ALP-Bxxx diagnostic landing page is still a
 # placeholder, or when docs/board-id.md's alp_hw_info_eeprom_t struct
 # or scripts/program_eeprom.py's pack-format length constants disagree
-# with include/alp/hw_info.h (#1231).  Mirrors
-# scripts/check_doc_drift.py + scripts/check_doc_links.py +
+# with include/alp/hw_info.h (#1231), when AGENTS.md names an
+# ALP_E1M_*/ALP_E1M_X_* identifier or --emit choice the real generators
+# don't produce (#1264), or when a doc-stated workflow name/count,
+# ADR count, or chip/library count disagrees with the tree (#1265).
+# Mirrors scripts/check_doc_drift.py + scripts/check_doc_links.py +
 # scripts/check_diagnostic_narratives.py +
 # scripts/check_version_doc_sync.py +
-# scripts/check_board_id_doc_parity.py, all runnable locally (see the
+# scripts/check_board_id_doc_parity.py +
+# scripts/check_agents_md_generators.py +
+# scripts/check_doc_inventory.py, all runnable locally (see the
 # running-local-ci skill + docs/local-ci.md).
 name: pr-doc-drift
 
@@ -20,33 +25,47 @@ on:
   pull_request:
     branches: [main, dev]
     paths:
+      - 'AGENTS.md'
       - 'README.md'
       - 'VERSIONS.md'
       - 'docs/**'
       - 'include/**'
+      - 'chips/**'
       - 'metadata/sdk_version.yaml'
+      - 'metadata/libraries/**'
       - 'scripts/check_doc_drift.py'
       - 'scripts/check_doc_links.py'
       - 'scripts/check_diagnostic_narratives.py'
       - 'scripts/check_version_doc_sync.py'
       - 'scripts/check_board_id_doc_parity.py'
+      - 'scripts/check_agents_md_generators.py'
+      - 'scripts/check_doc_inventory.py'
+      - 'scripts/alp_project.py'
+      - 'scripts/alp_orchestrate/**'
       - 'scripts/program_eeprom.py'
-      - '.github/workflows/pr-doc-drift.yml'
+      - '.github/workflows/**'
   push:
     branches: [main, dev]
     paths:
+      - 'AGENTS.md'
       - 'README.md'
       - 'VERSIONS.md'
       - 'docs/**'
       - 'include/**'
+      - 'chips/**'
       - 'metadata/sdk_version.yaml'
+      - 'metadata/libraries/**'
       - 'scripts/check_doc_drift.py'
       - 'scripts/check_doc_links.py'
       - 'scripts/check_diagnostic_narratives.py'
       - 'scripts/check_version_doc_sync.py'
       - 'scripts/check_board_id_doc_parity.py'
+      - 'scripts/check_agents_md_generators.py'
+      - 'scripts/check_doc_inventory.py'
+      - 'scripts/alp_project.py'
+      - 'scripts/alp_orchestrate/**'
       - 'scripts/program_eeprom.py'
-      - '.github/workflows/pr-doc-drift.yml'
+      - '.github/workflows/**'
   workflow_dispatch:
 
 concurrency:
@@ -81,3 +100,9 @@ jobs:
 
       - name: Board-ID struct parity (docs/board-id.md vs include/alp/hw_info.h)
         run: python3 scripts/check_board_id_doc_parity.py
+
+      - name: AGENTS.md generator parity (ALP_E1M_* identifiers + --emit choices)
+        run: python3 scripts/check_agents_md_generators.py
+
+      - name: Doc inventory (workflow names/counts, ADR count, chip/library counts)
+        run: python3 scripts/check_doc_inventory.py
