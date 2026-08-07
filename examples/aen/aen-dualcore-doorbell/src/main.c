@@ -25,11 +25,12 @@
  * forever waiting for it: HP checks its OWN received-count; HE cross-reads
  * HP's DB_BEACON (globally addressable, same trick the doc above uses for
  * a human SWD read) so it can report the SAME propagation verdict locally
- * instead of blindly claiming "sent" proves anything reached the peer. On
- * this bench boot_core is known to report ALP_ERR_NOSUPPORT for the HE
- * release (the HE<->HP boot path is blocked), which HP reports as SKIP, not
- * FAIL -- a boot authority that says "unsupported" is a bench/silicon
- * limit, not a bug in this app.
+ * instead of blindly claiming "sent" proves anything reached the peer. This
+ * build ships CONFIG_HAS_ALIF_SE_SERVICES=y and no native_sim overlay, so
+ * boot_core always resolves to the E8 SE backend for ALP_CORE_M55_HE
+ * (<alp/mproc.h>'s ALP_ERR_NOSUPPORT case -- "no boot authority for core in
+ * this build" -- is not reachable here); any nonzero rc is a real local
+ * error and reported FAIL below, not a skippable environment state.
  */
 
 #include <stdbool.h>
@@ -100,12 +101,7 @@ int main(void)
 	       HE_LOAD_ADDR,
 	       (int)rc);
 
-	if (rc == ALP_ERR_NOSUPPORT) {
-		printk("RESULT SKIP: dualcore-doorbell -- boot authority has no support for "
-		       "releasing HE on this bench (alp_mproc_boot_core rc=%d); HE never released, "
-		       "no doorbell possible\n",
-		       (int)rc);
-	} else if (rc != ALP_OK) {
+	if (rc != ALP_OK) {
 		printk("RESULT FAIL: alp_mproc_boot_core rc=%d\n", (int)rc);
 	} else {
 		uint32_t received = 0U;
@@ -134,7 +130,7 @@ int main(void)
 			       received);
 		} else {
 			printk("RESULT SKIP: dualcore-doorbell -- HE released (rc=0) but no doorbell "
-			       "received within %u ms; local receiver poll OK, peer never rang\n",
+			       "received within %u ms; local receiver poll OK\n",
 			       VERDICT_WAIT_MS);
 		}
 	}
@@ -196,8 +192,7 @@ int main(void)
 		       sent);
 	} else {
 		printk("RESULT SKIP: dualcore-doorbell -- rang HP %u time(s) but its received-count "
-		       "never advanced within %u ms; local sender link OK, no evidence HP is "
-		       "running\n",
+		       "never advanced within %u ms; local sender link OK\n",
 		       sent,
 		       VERDICT_WAIT_MS);
 	}

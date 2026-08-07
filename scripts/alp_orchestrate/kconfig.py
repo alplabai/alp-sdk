@@ -13,7 +13,8 @@ Kconfig is read from each library's manifest via `_per_core_library_kconfig`.
 
 `_slice_alp_conf` itself is a thin composer over a set of `_emit_*` section
 helpers (console / SoM capability / chip driver / subsystem / library /
-inference / memory / power / storage / OTA / diagnostics), each returning
+inference / cross-core shmem cache / memory / power / storage / OTA /
+diagnostics), each returning
 that section's `list[str]` fragment. Split out mechanically as the #673
 Phase-1 kconfig split -- behavior-preserving, byte-identical emit output;
 see `check_emit_snapshots.py`.
@@ -44,12 +45,14 @@ from alp_project import (
     silicon_to_kconfig,
     som_unpopulated_capabilities,
 )
+from sentinels import is_tbd
 
 from . import libraries as _library_layer
 from .models import BoardProject, Slice
 from .paths import METADATA_ROOT, REPO
 from .partition import resolve_storage_partitions
 from .slugs import (
+    _BLOCK_SLUGS,
     _PERIPHERAL_KCONFIG,
     _board_define_slug,
     _slugs_from_helper_firmware,
@@ -291,7 +294,7 @@ def _wireless_provider(project: BoardProject) -> Optional[str]:
     if not isinstance(provider, str):
         return None
     provider = provider.strip()
-    if not provider or provider == "TBD":
+    if not provider or is_tbd(provider):
         return None
     return provider
 
@@ -617,13 +620,6 @@ def _emit_som_caps(
         lines.append("")
 
     return lines
-
-
-# Slugs that map to BLOCK_ Kconfig symbols rather than CHIP_.
-# These live under blocks/ + <alp/blocks/*.h> because they are
-# SDK-level *block* utilities (`alp_button_led_*`, `alp_pdm_mic_*`)
-# rather than third-party-IC chip drivers; see blocks/README.md.
-_BLOCK_SLUGS = frozenset({"button_led", "pdm_mic"})
 
 
 def _slug_kconfig(slug: str) -> str:
@@ -1173,6 +1169,83 @@ def _emit_inference(
     return lines
 
 
+def _emit_cross_core_shmem_cache(
+    project: "BoardProject",
+    slice_: Slice,
+    existing_lines: list[str],
+) -> list[str]:
+    """CONFIG_DCACHE=n for a slice sharing a non-cacheable `raw_shmem` or
+    `rpmsg` IPC carve-out with a peer core -- the hardware fact this symbol
+    encodes (each core has its own D-cache; shared SRAM is cross-core
+    incoherent unless the cache is off, or the app does explicit cache
+    maintenance) is NOT specific to Ethos-U inference.  Before this, the
+    only place that emitted it was the Ethos-U branch of `_emit_inference`,
+    so a non-inference cross-core project (e.g. `examples/multicore/
+    mproc-mailbox`, an M55-HP<->M55-HE mailbox+shmem roundtrip with no
+    `inference:` block) got no help from the generator and had to
+    hand-write the line in `prj.conf` -- see PR #1080, which found three
+    examples silently reporting `RESULT SKIP` while the debug AP watched
+    their beacons advance: the hardware worked, the stale D-cache just
+    hid it from the software.
+
+    Board-agnostic and keyed off the existing `ipc:` schema field (board-
+    yaml §3.9), not a SoC/vendor check, so it fires for any silicon that
+    declares a matching carve-out:
+
+      - `kind: rpmsg` is covered too (#1088's conservative fix), for the
+        identical reason `raw_shmem` is: `cfg->cacheable` is stored on the
+        backend struct (`src/backends/rpc/{zephyr,yocto}_drv.c`) and never
+        read again -- there is no `sys_cache_*` call anywhere under `src/`
+        or `include/`.  A `cacheable: true` rpmsg channel would therefore
+        select a code path with no maintenance behind it, so the loader
+        (`loader.py`) rejects `cacheable: true` on a `rpmsg` entry outright
+        rather than silently honouring it -- any entry that reaches this
+        function is already non-cacheable, and the D-cache goes off
+        unconditionally for its endpoints.  The real fix --
+        `sys_cache_data_flush_range` / `sys_cache_data_invd_range` in
+        `<alp/rpc.h>` -- remains open; see #1088.
+      - `kind: mailbox_only` is excluded -- it carries no shared memory
+        (doorbell + signal only), so there is nothing to keep coherent.
+      - `kind: raw_shmem` closes the original #1080 case: `<alp/mproc.h>`'s
+        raw shmem+mailbox primitives have no cache-maintenance layer either,
+        so the SDK's zero-effort-safe default is to turn the D-cache off for
+        every endpoint -- unless the entry opts out with an explicit
+        `cacheable: true`, which is the app declaring it will do its own
+        cache ops instead (board.schema.json `ipc_entry.cacheable`).  This
+        opt-out is `raw_shmem`-only; `rpmsg` has no opt-out (see above).
+
+    Must run after `_emit_inference` in `_slice_alp_conf` (the dedup below
+    depends on that order, it does not detect the reverse case): skips
+    emission if a line asserting the same symbol is already present, i.e.
+    the Ethos-U inference branch already asserted it for this slice --
+    kept as its own check rather than threading a bool out of
+    `_emit_inference`, since the two triggers (Ethos-U NPU coherence vs.
+    mproc shmem coherence) are unrelated hardware facts that happen to
+    share one Kconfig symbol.
+    """
+    if any("CONFIG_DCACHE=n" in line for line in existing_lines):
+        return []
+    needs_dcache_off = any(
+        entry.kind in ("raw_shmem", "rpmsg")
+        and slice_.core_id in entry.endpoints
+        and not entry.cacheable
+        for entry in project.ipc
+    )
+    if not needs_dcache_off:
+        return []
+    return [
+        "# board.yaml ipc[].kind: raw_shmem or rpmsg names this core as",
+        "# an endpoint with no explicit cacheable: true opt-out.",
+        "# <alp/mproc.h> (raw_shmem) and <alp/rpc.h> (rpmsg) both have no",
+        "# cache-maintenance layer, so the D-cache must stay off (not",
+        "# just the carve-out's own region) for both sides to see each",
+        "# other's writes without explicit clean/invalidate (PR #1080,",
+        "# #1088).",
+        "CONFIG_DCACHE=n",
+        "",
+    ]
+
+
 def _emit_memory(slice_: Slice) -> list[str]:
     """Per-slice memory tuning (board.yaml `cores.<id>.memory:`)."""
     lines: list[str] = []
@@ -1390,11 +1463,12 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
 
     This is a thin composer: each section below is delegated to a
     dedicated ``_emit_*`` helper (console / SoM capability / chip driver
-    / subsystem / library / inference / memory / power / storage / OTA /
-    diagnostics), called in the exact fixed order the fragment has
-    always used. Split out mechanically as the #673 Phase-1 kconfig
-    split -- behavior-preserving; emit output is byte-identical to the
-    pre-split monolith (see ``check_emit_snapshots.py``).
+    / subsystem / library / inference / cross-core shmem cache / memory /
+    power / storage / OTA / diagnostics), called in the exact fixed order
+    the fragment has always used. Split out mechanically as the #673
+    Phase-1 kconfig split -- behavior-preserving for every section that
+    predates this one; ``check_emit_snapshots.py``'s fixtures (none of
+    which declare a ``raw_shmem`` ``ipc:`` entry) stay byte-identical.
     """
     silicon = project.som_preset.get("silicon")
     kconfig = silicon_to_kconfig(silicon)
@@ -1444,6 +1518,7 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
         lines.extend(hw_backend_lines)
         lines.append("")
     lines.extend(_emit_inference(project, slice_, silicon))
+    lines.extend(_emit_cross_core_shmem_cache(project, slice_, lines))
     lines.extend(_emit_memory(slice_))
     lines.extend(_emit_power(slice_))
     lines.extend(_emit_storage(project))

@@ -1,9 +1,16 @@
 # Heterogeneous OS orchestration — Zephyr + Yocto as peers, not alternatives
 
-**Status:** Design approved 2026-05-15 · Pre-implementation
+**Status:** **Implemented.** Landed in v0.6.0 (released 2026-06-06, VERSIONS.md):
+`board.yaml` v2's per-core `cores:` block + cross-core `ipc:` carve-outs replaced
+the v1 single-OS model; `<alp/rpc.h>` (in the tree) + the generated
+`<alp/system_ipc.h>` give apps the framed RPC surface. `scripts/alp_orchestrate.py`
+is now the package `scripts/alp_orchestrate/` (`orchestrator.py`, `buildplan.py`,
+`carveout.py`, ...) -- still live, and per ADR 0020 (v0.12.0) it now emits
+`--emit build-plan` / `--emit system-manifest` for the standalone `tan` CLI to
+execute, rather than driving `west` directly.
 **Owner:** alpCaner
-**Replaces:** `board.yaml` v1 single-OS model
-**Lands in:** v0.6 (target 2026-Q3)
+**Replaced:** `board.yaml` v1 single-OS model
+**Landed in:** v0.6.0 (2026-06-06)
 
 ---
 

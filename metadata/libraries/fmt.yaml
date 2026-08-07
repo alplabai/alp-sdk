@@ -10,10 +10,11 @@
 #     build resolves against the vendored copy -- see vendors/fmt/README.md).
 #   * vendors/fmt/README.md -- MIT licence (LICENSE upstream text
 #     unmodified); upstream https://github.com/fmtlib/fmt.
-#   * metadata/library-profiles/fmt/hw-backends.yaml -- pure-SW,
-#     no accelerator binding.
 #
-# HW-backends: see metadata/library-profiles/fmt/ (folded in WS6-c Phase 3)
+# HW-backends: pure-SW, no accelerator binding -- see this manifest's
+# own `integration.zephyr.hw_backends:` block below (retired standalone
+# metadata/library-profiles/fmt/hw-backends.yaml folded in here in
+# WS6-c Phase 3; that directory still holds fmt_config.h).
 #
 # No `kconfig:` -- header-only, wired via the v0.4 CMake include-path
 # loader hook (fmt_config.h), not a CONFIG_ symbol; `module: fmt`

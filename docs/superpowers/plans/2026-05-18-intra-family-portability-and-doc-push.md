@@ -1,11 +1,23 @@
 # Plan: intra-family portability proof + remaining cleanups + doc push
 
+> **Historical transcript.** Session brief dated 2026-05-18. Landed as
+> part of v0.6.0 (2026-06-06) -- intra-family portability is proven
+> (`docs/portability-matrix.md`, `docs/portability.md`, ADR 0011); see
+> `VERSIONS.md`'s v0.6.0 row and `CHANGELOG.md` for what actually
+> shipped. Kept for the session-handoff rationale, not as a live task
+> list.
+>
+> Command examples below use this session's original Windows/WSL
+> checkout paths (e.g. `C:\Users\<user>\...`) verbatim -- treat them as
+> historical record, not copy-paste-ready commands for today's
+> checkout.
+
 Authoritative plan for the next session. Self-contained — designed
 to brief a fresh agent (or human) with no conversation history.
 
 ## Context (1-minute orientation)
 
-Working dir: `C:\Users\caner\Documents\GitHub\alp-sdk` (branch:
+Working dir: `C:\Users\<user>\Documents\GitHub\alp-sdk` (branch:
 `main`).  6 commits on 2026-05-18 landed slice 3a + 3b metadata
 unification + 22 tracked audit tasks + the SoM-intrinsic chip
 auto-enable wiring.  Current test state: **357 passed / 5 skipped /
@@ -16,7 +28,7 @@ Run `git log --oneline -10` to see the recent commits.  Run
 (this file) for the plan.
 
 **Auto-loaded memory** (you'll see these at session start; if not,
-read `~/.claude/projects/C--Users-caner-Documents-GitHub-alp-sdk/memory/MEMORY.md`):
+read `~/.claude/projects/C--Users-<user>-Documents-GitHub-alp-sdk/memory/MEMORY.md`):
 
 Load-bearing principles for this work:
 - `[[som-swappable-without-board-changes]]` — intra-family portability

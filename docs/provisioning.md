@@ -40,7 +40,7 @@ Real provisioning on the bench (HW-gated; needs the SCIF port + Flash Writer):
 python scripts/provision_som.py --execute \
     --bundle <bundle> --port COM24 \
     --flash-writer <Flash_Writer_SCIF_RZV2N_DEV_LPDDR4X.mot> \
-    --emmc-device /dev/sdX --hil-spec tests/hil/e1m-v2n101-x-evk \
+    --emmc-device /dev/sdX --hil-spec tests/hil/v2n101-x-evk \
     --ledger-root <ledger> --som-ledger <som_ledger.py> --station bench1 --by you
 ```
 

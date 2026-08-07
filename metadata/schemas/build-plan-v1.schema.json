@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/build-plan-v1.schema.json",
   "title": "ALP Build Plan v1",
-  "description": "The machine-readable build plan `scripts/alp_orchestrate/buildplan.py::emit_build_plan` renders for a resolved board.yaml project (the 'Wave C' consumer contract, settled 2026-06-04 with the alp-sdk-vscode team; the real consumer today is `tan`, alplabai/tan-cli). One entry per non-`off` core slice, each carrying its build command, config artefact contents, and app source dir, plus the shared (cross-slice) generated artefacts and any non-fatal planning warnings. Every artefact carries its full `contents` so the consumer's materialise step stays pure IO -- the plan and the Orchestrator's own on-disk materialise step are written from the same `_shared_artefacts`/`_slice_config_artefact` helpers and MUST agree byte-for-byte. camelCase keys (this is a CLI-consumer contract, not an in-repo YAML). Stability: schemaVersion 1 is locked with the tan-cli consumer -- bump schemaVersion and record the change in the CHANGELOG before altering this shape; do not add breaking changes silently.",
+  "description": "The reference machine-readable build plan `scripts/alp_orchestrate/buildplan.py::emit_build_plan` renders for a resolved board.yaml project. Python Tan normally creates the equivalent plan in process and accepts this form through `--plan-from`; it remains the parity/interoperability contract settled with alp-sdk-vscode and tan-cli. One entry per non-`off` core slice carries its command, config artefact contents, app source dir, shared generated artefacts, and planning warnings. Every artefact carries full `contents` so materialisation stays pure IO. camelCase keys form a CLI-consumer contract, not in-repo YAML. Stability: schemaVersion 1 is locked with tan-cli; bump it and record the change in CHANGELOG before a breaking change.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schemaVersion", "generatedBy", "boardYaml", "sku", "buildRoot", "slices", "sharedArtefacts", "warnings"],
@@ -131,7 +131,7 @@
             "additionalProperties": false,
             "required": ["tool", "args", "cwd"],
             "properties": {
-              "tool": { "type": "string", "description": "Executable to invoke (e.g. 'west', 'bitbake')." },
+              "tool": { "type": "string", "examples": ["west", "bitbake", "cmake"], "description": "The executable's identity (e.g. 'west', 'bitbake', 'cmake') -- never a location; resolving it to a concrete path is the executor's job, not the plan's. No `pattern` is asserted here by design -- see the CHANGELOG and issue #1286." },
               "args": { "type": "array", "items": { "type": "string" }, "description": "Positional/flag arguments to `tool`, in order." },
               "cwd": { "type": "string", "description": "POSIX-style working directory to run `tool` from; always equal to this slice's buildDir." }
             }

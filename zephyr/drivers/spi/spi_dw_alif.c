@@ -827,7 +827,9 @@ static int transceive(const struct device *dev,
 #ifdef CONFIG_SPI_DW_ALIF_USE_DMA
 	const bool use_dma = spi_dw_should_dma(info, tx_bufs, rx_bufs);
 #else
-	const bool use_dma = false;
+	/* Every use is itself #ifdef CONFIG_SPI_DW_ALIF_USE_DMA below, so this
+	 * constant is otherwise unread when the option is off. */
+	const bool use_dma __maybe_unused = false;
 #endif
 	uint32_t tmod = DW_SPI_CTRLR0_TMOD_TX_RX;
 	uint32_t dw_spi_rxftlr_dflt = (info->fifo_depth * 1) / 2;

@@ -3,6 +3,10 @@
 Status: Accepted
 Date: 2026-07-03
 
+> **CLI note (2026-08-03):** The dated body uses the then-current `alp doctor`
+> name. The user command surface has since moved to Python Tan (ADR 0020); the
+> library ownership, capability, and no-fork decisions here are unchanged.
+
 alp-sdk's next developer-experience step after backend completeness is
 letting customers pull common third-party libraries (GUI, DSP, cloud,
 robotics, scripting) into a project with **one declaration** — without
@@ -66,10 +70,26 @@ libraries: [lvgl, cmsis-dsp, nanopb]
      maintained and emitted, but the library is not built in alp-sdk
      CI; the manifest says so, and `alp doctor` labels it.
 5. **ADR 0017 extends to libraries verbatim**: alp-sdk pins and
-   integrates upstream releases. No forks, no vendored copies of
-   library sources in-tree, no alp-sdk-only patches beyond build-glue
-   that upstream would reject. A library that cannot be consumed that
-   way is not integrated.
+   integrates upstream releases. No forks, no alp-sdk-only patches
+   beyond build-glue that upstream would reject. A library that cannot
+   be consumed that way is not integrated.
+
+   **Exception — vendoring under `vendors/<name>/`, documented per
+   library.** A small number of libraries are vendored rather than
+   pinned, each with a `vendors/<name>/README.md` stating what was
+   taken and why. Two live cases, and they are different shapes:
+   `vendors/u8g2/` carries a *documented minimal subset* of upstream's
+   `csrc/` (11 `.c` files of upstream tag `2.36.5`, whose full tree is
+   ~120 files), and `vendors/nanopb/` carries *stub headers only*
+   (`pb.h`, `pb_encode.h`, `pb_decode.h`) mirroring the upstream public
+   ABI as of v0.4.9 — scaffolding, not upstream source, and licensed
+   Apache-2.0 where upstream nanopb is zlib.
+
+   This clause exists because the rule above was being asserted while
+   `vendors/` already contradicted it, so `library-v1.schema.json` had
+   no ADR to cite for the exception it documents. Vendoring stays the
+   exception and still requires the per-library README; it is not a
+   licence to fork.
 
 ### Initial curation (priority order)
 

@@ -21,3 +21,15 @@
 SUMMARY = "Alp SDK headless base image (core runtime + OTA, no feature groups)"
 
 require alp-image-common.inc
+
+# DRP-AI (meta-rz-drpai's lib-tvm + kernel-module-mmngr, + the SDK sysroot
+# headers for all three meta-rz-* layers) IS installed here via
+# alp-image-common.inc -- core SoC capability, not camera/display-tied;
+# this file's own header above already documented that promise, and base
+# not shipping it was the #1176 defect in a second place, now closed.
+#
+# meta-rz-codecs / meta-rz-opencva's RDEPENDS payload (drp-fw, opencv,
+# oca) rides the alp-camera FEATURE (packagegroup-alp-camera.bb), which
+# this headless image doesn't enable -- so it ships neither today, and a
+# base-derived image only needs `IMAGE_FEATURES += "alp-camera"` to get
+# both automatically, no custom recipe required.

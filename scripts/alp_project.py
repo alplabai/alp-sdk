@@ -90,6 +90,7 @@ from alp_project_loader import (  # noqa: F401  (compat re-export)
     _validate_and_load,
     resolve_capabilities,
     resolve_memory_map,
+    resolve_soc_path,
     silicon_to_kconfig,
     som_unpopulated_capabilities,
 )
@@ -143,8 +144,8 @@ def _run_scaffold_emit(args: argparse.Namespace) -> int:
     write to disk, so a scaffold a customer gets via this CLI and one
     written by `alp_template.py render --param ...` can never disagree
     on a byte. This is the single source of the scaffold's build-
-    integration conventions tan-cli vendors at release instead of
-    hand-porting a per-SKU Rust generator.
+    integration conventions Python Tan's relocated scaffold renderer keeps in
+    parity with this SDK reference.
     """
     if not args.template:
         print("alp_project: --emit scaffold requires --template <id>",
@@ -425,7 +426,7 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
             # the same function; `_emit_library_hw_backends` is folded
             # inside it now, not appended here) -- so a `west build`
             # driven by this file's CMakeLists.txt and a `west build`
-            # driven by `tan` off `--emit build-plan` can never silently
+            # driven from this SDK reference plan can never silently
             # diverge on Kconfig (docs/adr/0020-sdk-owns-build-execution.md
             # addendum). The unscoped, sum-across-cores case (`--core`
             # omitted) still needs the `# --- core: ... ---` section

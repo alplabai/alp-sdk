@@ -2,11 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """Build-plan emission -- the Wave C consumer contract.
 
-`emit_build_plan` renders the machine-readable JSON build plan `tan`
-(alplabai/tan-cli) materialises; the shared helpers `_slice_build_dir` /
+`emit_build_plan` renders alp-sdk's reference machine-readable JSON build plan.
+Python Tan normally creates the equivalent plan in process and can consume a
+saved SDK plan through `--plan-from`; the shared helpers `_slice_build_dir` /
 `_slice_config_artefact` / `_shared_artefacts` are the single source the
-Orchestrator's materialise path and the plan MUST agree on byte-for-byte
-(tan reads what the Orchestrator writes).
+Orchestrator's materialise path and the plan MUST agree on byte-for-byte.
 Extracted as the #285 build-plan emit seam. The per-slice config emitters come
 from kconfig.py, the header/secure artefacts from headers.py / secure.py; the
 orchestrator-side slice-command bits (_slice_command, STOCK_SHIM_APP) are
@@ -261,12 +261,13 @@ def emit_build_plan(
 ) -> str:
     """Emit the machine-readable build plan as JSON (Wave C contract).
 
-    Consumed by `tan` (alplabai/tan-cli), which materialises the plan's
-    files, runs each slice's command, and owns scheduling / caching /
-    progress UX on top -- instead of re-implementing this planner.  The
+    This remains the reference/parity producer and the explicit input to
+    Python Tan's `--plan-from` path. Tan's normal path uses its relocated
+    in-process planner, then materialises files, runs commands, and owns
+    scheduling/caching/progress UX. The
     Wave C contract was settled 2026-06-04 with the alp-sdk-vscode team
     (docs/PROPOSAL-alp-build-core.md records that settlement); the real
-    parser today is tan-cli, not the alp-sdk-vscode extension itself.
+    parser lives in tan-cli, not the alp-sdk-vscode extension itself.
 
     Contract notes (locked with the consumer -- bump `schemaVersion`
     and flag in the CHANGELOG before changing the shape):
@@ -483,10 +484,10 @@ def emit_build_plan(
         # Additive to schemaVersion 1 (issue #865): every path in this plan
         # that anchors on THIS checkout or THIS project is now emitted as
         # a `${SDK_ROOT}`/`${PROJECT_ROOT}`/`${PYTHON}` token rather than a
-        # baked-in absolute path -- tan-cli (PR #24) requires this literal
+        # baked-in absolute path -- tan-cli's plan reader requires this literal
         # value before it will substitute them. `boardYaml` is deliberately
         # NOT tokenized (kept repo-relative as-passed) -- it is the anchor
-        # both this plan's own comparator and tan use to locate
+        # both this plan's own comparator and a plan consumer use to locate
         # PROJECT_ROOT in the first place.
         "planPathMode":    "tokened",
         "generatedBy":     "scripts/alp_orchestrate.py",

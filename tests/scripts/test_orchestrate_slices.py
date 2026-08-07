@@ -23,7 +23,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _orchestrate_support import REPO, _write_board  # noqa: E402
+from _orchestrate_support import (              # noqa: E402
+    REPO,
+    _synthetic_nx9101_root,
+    _write_board,
+)
 
 from alp_orchestrate import (                       # noqa: E402
     BoardProject,
@@ -61,6 +65,10 @@ def test_slugs_from_on_module_v2n101() -> None:
     assert "tps628640" not in slugs, "optional assembled device must be excluded"
     assert "renesas:rzv2n:n44" not in slugs, "silicon field must be excluded"
     assert "TBD" not in slugs, "TBD values must be excluded"
+    # nor_flash_driver_status / emmc_driver_status carry a maturity tier
+    # ("none"), not a chip slug -- pin the exclusion so it can't silently
+    # regress into a bogus CONFIG_ALP_SDK_CHIP_NONE=y (#1169).
+    assert "none" not in slugs, "*_driver_status value must be excluded"
 
 
 def test_slugs_from_on_module_aen701() -> None:
@@ -160,9 +168,12 @@ def _make_som_only_project(tmp_path: Path, sku_yaml_content: str,
     bc_schema_text = (real_meta / "schemas" / "board.schema.json"
                       ).read_text(encoding="utf-8")
     bc_schema = _json.loads(bc_schema_text)
-    bc_schema["properties"]["som"]["properties"]["sku"]["pattern"] = (
-        r"^E1M-(AEN[3-8]01|V2N10[12]|V2M10[12]|NX9[0-9]{3}|TST[0-9]{3})$"
-    )
+    sku_prop = bc_schema["properties"]["som"]["properties"]["sku"]
+    # Splice a TST[0-9]{3} branch into the *real* pattern (rather than
+    # hard-coding a copy) so this fixture can never drift back to a
+    # pre-#1089 literal when the schema's own pattern changes.
+    assert sku_prop["pattern"].endswith(")$")
+    sku_prop["pattern"] = sku_prop["pattern"][:-2] + "|TST[0-9]{3})$"
     (schemas / "board.schema.json").write_text(
         _json.dumps(bc_schema), encoding="utf-8")
     shutil.copy(real_meta / "schemas" / "som-preset-v1.schema.json",
@@ -268,9 +279,12 @@ def test_slice_alp_conf_deduplicate_som_vs_board(tmp_path: Path) -> None:
     bc_schema_text = (real_meta / "schemas" / "board.schema.json"
                       ).read_text(encoding="utf-8")
     bc_schema = _json2.loads(bc_schema_text)
-    bc_schema["properties"]["som"]["properties"]["sku"]["pattern"] = (
-        r"^E1M-(AEN[3-8]01|V2N10[12]|V2M10[12]|NX9[0-9]{3}|TST[0-9]{3})$"
-    )
+    sku_prop = bc_schema["properties"]["som"]["properties"]["sku"]
+    # Splice a TST[0-9]{3} branch into the *real* pattern (rather than
+    # hard-coding a copy) so this fixture can never drift back to a
+    # pre-#1089 literal when the schema's own pattern changes.
+    assert sku_prop["pattern"].endswith(")$")
+    sku_prop["pattern"] = sku_prop["pattern"][:-2] + "|TST[0-9]{3})$"
     (schemas / "board.schema.json").write_text(
         _json2.dumps(bc_schema), encoding="utf-8")
     shutil.copy(real_meta / "schemas" / "som-preset-v1.schema.json",
@@ -661,11 +675,21 @@ cores:
     assert "CONFIG_ALP_SDK_BLE_CC3501E=y" not in conf
 
 
-def test_slice_alp_conf_iot_tls_only_emits_network_base(tmp_path: Path) -> None:
+def test_slice_alp_conf_iot_tls_only_emits_network_base(
+    tmp_path: Path, monkeypatch,
+) -> None:
     """issue #874 item 1: `iot.tls: true` alone (no `wifi:`/`mqtt:`) must
     still emit the networking base -- CONFIG_TLS_CREDENTIALS depends on
     NETWORKING/NET_SOCKETS, which previously only the wifi/mqtt branches
-    emitted, so a TLS-only slice silently resolved TLS_CREDENTIALS to n."""
+    emitted, so a TLS-only slice silently resolved TLS_CREDENTIALS to n.
+
+    Runs against `_synthetic_nx9101_root`'s scratch metadata root
+    (#1025: the real E1M-NX9101 is refused outright before this
+    slice-emission logic is ever reached -- see that helper's
+    docstring)."""
+    import alp_orchestrate
+
+    meta = _synthetic_nx9101_root(tmp_path, monkeypatch)
     body = """
 som:
   sku: E1M-NX9101
@@ -681,7 +705,7 @@ cores:
     iot: { tls: true }
 """
     path = _write_board(tmp_path, body)
-    project = load_board_yaml(path)
+    project = alp_orchestrate.load_board_yaml(path, metadata_root=meta)
     conf = _slice_alp_conf(project, project.cores["m33"])
 
     assert "CONFIG_NETWORKING=y" in conf
@@ -750,10 +774,19 @@ cores:
 
 
 def test_slice_alp_conf_iot_unknown_provider_uses_generic_zephyr(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch,
 ) -> None:
     """A SoM whose wireless provider is still TBD emits the generic Zephyr
-    networking / MQTT / TLS / BLE gates rather than a false provider."""
+    networking / MQTT / TLS / BLE gates rather than a false provider.
+
+    Runs against `_synthetic_nx9101_root`'s scratch metadata root
+    (#1025: the real E1M-NX9101 is refused outright before this
+    slice-emission logic is ever reached -- see that helper's
+    docstring); the synthetic preset's `on_module.wifi_ble: TBD` is
+    what this test actually exercises, same as the real one's."""
+    import alp_orchestrate
+
+    meta = _synthetic_nx9101_root(tmp_path, monkeypatch)
     body = """
 som:
   sku: E1M-NX9101
@@ -769,7 +802,7 @@ cores:
     iot: { wifi: true, mqtt: true, tls: true, ble: true }
 """
     path = _write_board(tmp_path, body)
-    project = load_board_yaml(path)
+    project = alp_orchestrate.load_board_yaml(path, metadata_root=meta)
     conf = _slice_alp_conf(project, project.cores["m33"])
 
     for expected in (

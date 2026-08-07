@@ -53,6 +53,7 @@ scripts/bench/aen/ram-run.sh     "$BENCH_ROOT/build/aen-gpio-bench"   # Flow C
 | `flash-jlink.sh <build-dir> [read-bytes]` | **D** | J-Link **direct MRAM flash** (no SE-UART). `app-gen-toc` builds the signed ATOC, the part-number device profile unlocks the built-in Alif MRAM loader, `loadbin`/`verifybin` write the package at its per-build start address (parsed from `app-package-map.txt`), `RSetType 2`/`r`/`g` pin-resets so the SE reloads it, then a generic-device RAM-console read-back. |
 | `flash-jlink-mramxip.sh <build-dir> [read-bytes]` | **D** | J-Link **MRAM-XIP / slot0 two-blob** flash for an app linked into MRAM slot0 (a real NPU model that overflows ITCM). Writes the app → `0x80010000` + the signed ATOC → its parsed address; the slot0 link comes from the board `_defconfig` (`CONFIG_USE_DT_CODE_PARTITION=y`), so a plain build already qualifies — a `0x8000xxxx` vector means a Flow C fragment/overlay is still layered. See the script header for the gotcha on returning to ITCM apps afterwards. |
 | `flash-run.sh <build-dir> [read-bytes]` | **A** | **Production MRAM flash** over the SE-UART. Stages the signed-ATOC JSON, `app-gen-toc` + `app-write-mram` burn over `$SE_UART` (SES auto-enters maintenance, resets + boots), then a J-Link read-back of the RAM console. |
+| `flash-run-dualcore.sh <hp-build-dir> <he-build-dir>` | **A** | **Dual-core deferred-TOC** two-entry ATOC over the SE-UART: `ALP-HP` boots normally (`["load","boot"]`), `ALP-HE` is flagged `["load","boot","deferred"]` so the SES skips its boot-time release and the HP image un-defers + releases it at runtime with `se_service_process_toc_entry()` (service 500) via `CONFIG_ALP_SDK_MPROC_BOOT_ALIF_SE_DEFERRED_TOC`. Fixes the `["load"]`-only pattern, which reports "Loaded, Verified" while the ITCM destination holds no image and locks up the peer on release — see the script header and `docs/aen-bench-bringup.md`. |
 | `flash-update-log-firewall-probe.sh [--package-only] <he-build-dir>` | **D** | Firmware-update-log HE direct-write MRAM firewall probe. Builds an app-only ATOC by default so any already-provisioned DEVICE/firewall policy is preserved; set `ALP_AEN_INCLUDE_DEVICE_CONFIG=yes` only for deliberate DEVICE replacement, and `ALP_AEN_DEVICE_CONFIG_JSON=<file>` to name a board-specific config already staged under SETOOLS `build/config`. |
 | `flash-update-log-dual.sh [--package-only] <hp-build-dir> <he-build-dir>` | **D** | Firmware-update-log dual-M55 package: HP owner boots first and releases HE client. Builds an app-only ATOC by default for the same firewall-policy reason as the probe helper. |
 | `read-update-log-proof.sh [--expect-hw\|--expect-firewall-probe]` | (B) | Re-read the firmware-update-log SRAM0 proof beacons without reflashing. Use this after the probe or dual-M55 run to prove what the silicon actually did; the firewall mode decodes PASS/FAIL and exits non-zero if HE changed the MRAM log partition. |
@@ -111,8 +112,11 @@ flasher, so `west flash` runs the **same** `app-gen-toc` + `app-write-mram`
 recipe as `flash-run.sh`. The runner auto-detects the ATOC shape from the
 build's own reset vector: an ITCM-linked app stages the `loadAddress
 0x58000000` (M55-HE) config `flash-run.sh` uses; a slot0-XIP app (below)
-stages a standalone `mramAddress 0x80010000` config instead. `jlink` stays
-the debug/attach runner.
+stages a standalone `mramAddress` config at its OWN core's disjoint
+slot0 window instead (#1069: M55-HE `0x80010000`, unchanged; M55-HP
+`0x802b0000`, moved off the old shared window -- see
+[`scripts/aen_atoc.py`](../../aen_atoc.py)). `jlink` stays the
+debug/attach runner.
 
 ```sh
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <your-app> --sysbuild
@@ -123,9 +127,11 @@ west flash                                        # -> alif_flash -> SETOOLS
 
 The runner reads `SETOOLS_DIR` / `SE_UART` (the same env vars these helpers
 use), or takes `--setools-dir` / `--se-uart`. A slot0-linked app that overflows
-ITCM (mramAddress `0x80010000`) provisions the same way — bench-proven
-2026-07-19, a single `app-write-mram -p` run over the SE-UART burns both the
-standalone app blob at `0x80010000` and the signed ATOC in one pass. The
+ITCM (mramAddress `0x80010000` on M55-HE, `0x802b0000` on M55-HP since #1069)
+provisions the same way — bench-proven 2026-07-19 on the M55-HE window (both
+cores shared it then), a single `app-write-mram -p` run over the SE-UART
+burns both the standalone app blob at its slot0 address and the signed ATOC
+in one pass. The
 two-blob `scripts/bench/aen/flash-jlink-mramxip.sh` (Flow D) helper remains
 available as a faster SWD-only alternative that skips the SE-UART reset
 race, not a requirement.

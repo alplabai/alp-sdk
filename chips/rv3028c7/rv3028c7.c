@@ -121,7 +121,8 @@ alp_status_t rv3028c7_init(rv3028c7_t *ctx, alp_i2c_t *bus)
      * init -- they can read it via rv3028_read_status() once the
      * v0.3.x diagnostic helpers land. */
 	if (status & RV3028_STATUS_PORF) {
-		(void)rv3028_write_reg(ctx, RV3028_REG_STATUS, status & ~RV3028_STATUS_PORF);
+		s = rv3028_write_reg(ctx, RV3028_REG_STATUS, status & ~RV3028_STATUS_PORF);
+		if (s != ALP_OK) return s;
 	}
 
 	/* Force 24-hour mode (bit 6 of CONTROL_2). */

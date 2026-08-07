@@ -1,15 +1,38 @@
 # 0020. The SDK plans; a standalone `tan` CLI is the whole command surface (three repos, one executor)
 
-Status: Accepted — direction + alp-sdk Phase 1/4 code implemented on `dev`; the
-Amendment's release-blocking remediation is met on two of its three conditions
-(oracle frozen, both seams live), the cross-repo `repository_dispatch` trigger
-remains outstanding as a maintainer action, and the release train ran anyway
-(see **Amendment** points 1 and 7).
+Status: Accepted — amended 2026-08-03 for the Python Tan port; the original
+Rust/plans-only mechanism below remains the historical Phase 1/4 record.
 Date: 2026-07-18 (Caner) · 2026-07-20 (Hakan co-sign, this commit)
 Deciders: alpCaner (alp-sdk), Hakan (alp-sdk-vscode)
 Supersedes: [0014](0014-build-plan-emit-cli-contract.md) — its
 mechanism clause **and** its 84-87 consequence (`west alp-build` stays native).
 Pairs with RFC #837 (`alp` → `tan`).
+
+## Amendment (2026-08-03 — Python Tan relocates the planner)
+
+The command-surface and single-executor decision stands, but the repository
+boundary changed during the Python port:
+
+1. The current Tan development implementation is Python. Until v0.5 is cut,
+   alp-sdk `dev` installs `tan-cli/dev` with Python 3.12+; from v0.5, release
+   archives are PyInstaller freezes. The old `crates/` tree is frozen at v0.4.1
+   as a behaviour oracle, not the active implementation.
+2. Normal `tan build` no longer spawns alp-sdk's planner. Tan owns a relocated
+   in-process planner and executor that read alp-sdk metadata, schemas, examples,
+   and selected tooling contracts.
+3. The `build-plan-v1` shape remains the internal planner/executor seam and a
+   public parity/interoperability contract. alp-sdk's
+   `alp_orchestrate --emit build-plan` and other emitters remain the reference
+   producer; `tan build --plan-from <file>` can exercise that seam explicitly.
+4. Most commands are now native Python implementations. Only `migrate`, `lock`,
+   and `quality` forward to the surviving west extensions.
+5. During the port, `tan sdk list/current` work but `sdk install/switch` refuse
+   with `sdk.not-ported`; select an SDK with `--sdk-root`, `.alp/sdk-path`, a
+   sibling checkout, or `ALP_SDK_ROOT`.
+
+This amendment supersedes current-state statements below that call alp-sdk
+"plans-only", describe Rust as the executor, or say Tan consumes the SDK plan as
+its sole input. Those statements remain as the dated migration record.
 
 > **Implemented.** The SDK-side executor, `west alp-build`, and every SDK-side
 > user command are retired; the whole command surface now lives in the
@@ -158,8 +181,11 @@ blocked until the remediation is met. Tracked in #855.
    `composed-route-table` is an intentional maintainer-only pad-route
    regression/demonstrator tool with no product consumer; and the
    remaining four (`hw-info-h`, `west-libraries`, `os-topology`,
-   `zephyr-board`) are real gaps with no design reason for the absence,
-   filed as `tan-cli`#113–#116.
+   `zephyr-board`) were real gaps with no design reason for the absence,
+   filed as `tan-cli`#113–#116 -- all four CLOSED, all four targets now
+   present in Python Tan's `--target` set
+   (`python/tan/commands/generate_cmd.py:139-160`), so this row of
+   `docs/cli.md`'s gap table is stale and should be dropped.
 
 7. **(2026-07-28) Remediation status — point 1's gate is met on two of its
    three conditions, and its "blocks any release/tag" clause was overtaken by

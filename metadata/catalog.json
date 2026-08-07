@@ -216,7 +216,7 @@
         "name": "audio-wake-word",
         "path": "examples/audio/audio-wake-word",
         "som": "E1M-AEN801",
-        "summary": "> ![status: UNTESTED](https://img.shields.io/badge/status-%5BUNTESTED%5D-orange) > v0.5 paper-correct. Builds clean on `native_sim/native/64`; real > PDM mic capture + Ethos-U55 dispatch + Vela-compiled model land > in v0.6 AEN HiL."
+        "summary": "Always-on \"Hey Alp\" keyword spotting on the **E1M-AEN** family's low-power AI subsystem. Targets the Cortex-M55 HE (\"High Efficiency\") core at ~50 MHz with the on-die Ethos-U55 NPU bursting the convolutions on demand."
       },
       {
         "board": "e1m-evk",
@@ -434,14 +434,14 @@
         "name": "rpmsg-imx93",
         "path": "examples/multicore/rpmsg-imx93",
         "som": "E1M-NX9101",
-        "summary": "> `[UNTESTED]` -- v0.6 structural draft. Board.yaml + sources are > shape-correct; the build will fail at carve-out resolution until > the user supplies authoritative iMX93 memory-map values in > `metadata/e1m_modules/E1M-NX9101.yaml`. The metadata is TBD by > design (project memory note: don't invent HW values); the > declarative structural files are the contract that lets the > orchestrator land cleanly the moment those values are filled in."
+        "summary": "> `[UNTESTED]` -- v0.6 structural draft, targeting **E1M-NX9101** > (NXP i.MX 93), which is **not yet buildable**. Its only hw_rev, > `metadata/e1m_modules/imx93/hw-revisions.yaml`'s `r1`, is > `status: tbd` -- the hw_rev-buildable gate > ([#1025](https://github.com/alplabai/alp-sdk/issues/1025)) refuses > it outright, before the orchestrator ever reaches carve-out > resolution against the also-TBD iMX93 memory-map values in > `metadata/e1m_modules/E1M-NX9101.yaml`. Both are TBD by design > (project memory note: don't invent HW values) pending real NX9101 > silicon; this example is excluded from the build/emit-snapshot/ > build-plan/system-manifest/parity-oracle gates for the same reason > (see those gates' own `#1025` comments) but its source and this > README stay -- the declarative structural files are the contract > that lets the orchestrator land cleanly the moment a real hw_rev > status lands."
       },
       {
         "board": "e1m-x-evk",
         "name": "rpmsg-v2n",
         "path": "examples/multicore/rpmsg-v2n",
         "som": "E1M-V2N101",
-        "summary": "> **Status: the raw A55↔M33 transport is bench-proven; this example's > own two halves are not a matched pair.** > > - **Proven (#697), on E1M-X V2N-M1 silicon:** the raw OpenAMP > transport that `m33_sm/src/main.c` implements -- resource table, > vrings, MHU mailbox doorbell, rpmsg endpoint -- against real > RZ/V2N devicetree. Attach + echo round-trip (1/4/16/64 B) and > the GHSA-xhm8 concurrent-close case all pass end-to-end, with > Renesas's `rpmsg_sample_client` over UIO as the Linux peer. > - **Not proven:** the `linux/` + `m33_sm/` pairing *in this > directory*. `linux/src/main.c` subscribes to a `temperature` > method that the M33 echo responder never publishes, so the two > slices as shipped do not talk to each other. `m33_sm` is > `build_only: true` in CI (no native_sim: it needs real V2N > devicetree + the Renesas MHU/FSP/OpenAMP modules). > - **By design:** the M33 slice **deliberately bypasses > `<alp/rpc.h>`** and uses raw OpenAMP (alp-sdk #683 \"Path B, > Phase 1\"). Its verified peer is Renesas's licence-gated > Multi-OS Package sample, which dials a resource table shaped > exactly like `resource_table.c` -- not whatever Zephyr's > `ipc_service` would generate. See `m33_sm/src/main.c`'s file > header. A v2n-specific `<alp/rpc.h>` backend is follow-up work."
+        "summary": "> **Status: the raw A55↔M33 transport is bench-proven; the two halves > in this directory are now a matched pair (alp-sdk #1167).** > > - **Proven (#697), on E1M-X V2N-M1 silicon:** the raw OpenAMP > transport that `m33_sm/src/main.c` implements -- resource table, > vrings, MHU mailbox doorbell, rpmsg endpoint -- against real > RZ/V2N devicetree. Attach + echo round-trip (1/4/16/64 B) and > the GHSA-xhm8 concurrent-close case all pass end-to-end, with > Renesas's `rpmsg_sample_client` over UIO as the reference Linux > peer. `m33_sm` is `build_only: true` in CI (no native_sim: it > needs real V2N devicetree + the Renesas MHU/FSP/OpenAMP modules); > its transport code is unchanged by #1167. > - **By design, the M33 slice still bypasses `<alp/rpc.h>`'s framed > convention** and speaks raw OpenAMP (alp-sdk #683 \"Path B, Phase > 1\"): it echoes whatever bytes land on its fixed endpoint rather > than publishing a named method. What changed in #1167 is the > **Linux side**: `linux/src/main.c` now drives that fixed endpoint > through `src/backends/rpc/yocto_uio_drv.c` -- the `<alp/rpc.h>` > backend that already targets this exact firmware (see that > backend's file header) -- and round-trips an `echo_test` request > instead of subscribing to a `temperature` push the M33 never > sent. See `m33_sm/src/main.c`'s file header and > `linux/src/main.c`'s file header for the full rationale."
       }
     ],
     "peripheral-io": [
@@ -893,6 +893,10 @@
   },
   "gates": [
     {
+      "purpose": "Board-ID manifest struct-parity gate -- fails (exit 1) when the `alp_hw_info_eeprom_t` typedef struct documented in docs/board-id.md, or the pack-format constants `scripts/program_eeprom.py` transcribes from the same struct, disagree with the shipping definition in include/alp/hw_info.h on field names, field order, or field widths.",
+      "script": "scripts/check_board_id_doc_parity.py"
+    },
+    {
       "purpose": "Fail if any repo board.yaml has an outstanding schema migration.",
       "script": "scripts/check_board_schema_version.py"
     },
@@ -905,7 +909,7 @@
       "script": "scripts/check_bootstrap_manifest.py"
     },
     {
-      "purpose": "Validate a build plan against the public alp CLI / alp-sdk-vscode contract (metadata/schemas/build-plan-v1.schema.json).",
+      "purpose": "Validate a build plan against the public alp CLI / alp-sdk-vscode contract (metadata/schemas/build-plan-v1.schema.json), plus, for a plan the SDK emits itself, the `command.tool` bare-identity convention the shared schema deliberately does not assert (#1286).",
       "script": "scripts/check_build_plan.py"
     },
     {
@@ -925,8 +929,16 @@
       "script": "scripts/check_cmake_chip_list_parity.py"
     },
     {
+      "purpose": "Core-to-CMakeLists mapping gate: fails (exit 1) when an example's baked `--emit zephyr-conf --core <id>` literal disagrees with the board.yaml core whose `app:` resolves to it, or when two distinct Zephyr cores resolve to the same CMakeLists.txt.",
+      "script": "scripts/check_core_cmakelists_mapping.py"
+    },
+    {
       "purpose": "Lint repo content for Linux-only idioms in customer-facing surfaces.",
       "script": "scripts/check_cross_platform.py"
+    },
+    {
+      "purpose": "Reject a placeholder-only ALP-Bxxx diagnostic landing page (issue #1207).",
+      "script": "scripts/check_diagnostic_narratives.py"
     },
     {
       "purpose": "Validate the versioned machine diagnostics contract (metadata/schemas/diagnostic-v1.schema.json) two ways:",
@@ -937,12 +949,20 @@
       "script": "scripts/check_doc_drift.py"
     },
     {
+      "purpose": "CI gate: no dead relative-path links in customer-facing documentation.",
+      "script": "scripts/check_doc_links.py"
+    },
+    {
       "purpose": "Guard: no second Doxyfile-shaped heredoc regrows next to docs/doxygen/Doxyfile.",
       "script": "scripts/check_doxyfile_single_source.py"
     },
     {
       "purpose": "Doxygen-coverage audit -- walks include/alp/*.h and flags every public function declaration that lacks a `@brief` (or `\\brief`) tag in the preceding doc-comment block.",
       "script": "scripts/check_doxygen_coverage.py"
+    },
+    {
+      "purpose": "CI gate: driver_status declarations outside metadata/chips/*.yaml are bound to the artefact they claim to describe (issue #1216).",
+      "script": "scripts/check_driver_status_backing.py"
     },
     {
       "purpose": "Validate the vendored e1m-spec pinout snapshot and cross-check it against the per-SoM pin-mux tables -- fully **offline** (no network).",
@@ -981,7 +1001,7 @@
       "script": "scripts/check_inference_backend_parity.py"
     },
     {
-      "purpose": "Assert the library alias table covers every curated token and resolves to real manifests (WS6-c #610 §6).",
+      "purpose": "Assert the curated-library registry is self-consistent (WS6-c #610 §6).",
       "script": "scripts/check_library_registry.py"
     },
     {
@@ -1061,11 +1081,15 @@
       "script": "scripts/check_version_doc_sync.py"
     },
     {
+      "purpose": "Prove every `libraries:`-selectable Zephyr module actually resolves in west.yml -- the alp-sdk-OWNED workspace (`west init -l alp-sdk`, what `tan bootstrap` and every customer runs), not the Zephyr-owned one pr-twister.yml happens to init from (`west init -m zephyr`) instead.",
+      "script": "scripts/check_west_manifest_module_resolution.py"
+    },
+    {
       "purpose": "Guard: every scripts/ and firmware/ write_text() of a repo-tree text artifact passes newline=\"\".",
       "script": "scripts/check_write_text_newline.py"
     },
     {
-      "purpose": "Byte-parity gate: a Zephyr example's own `CMakeLists.txt` (which shells `alp_project.py --emit zephyr-conf --core <id>` at configure time) and the planner's build-plan `configArtefacts` (`--emit build-plan`, consumed by `tan`) MUST materialise the identical `alp.conf` for the same core.",
+      "purpose": "Byte-parity gate: a Zephyr example's own `CMakeLists.txt` (which shells `alp_project.py --emit zephyr-conf --core <id>` at configure time) and the SDK reference build-plan `configArtefacts` MUST materialise the identical `alp.conf` for the same core; Python Tan tests its relocated producer against the same contract.",
       "script": "scripts/check_zephyr_conf_parity.py"
     }
   ],
@@ -1605,12 +1629,15 @@
         "pwm": false,
         "quadrature_encoder": true,
         "rtc": true,
+        "sd1": false,
         "sdio_emmc": true,
         "spi": true,
         "timer": true,
         "uart": true,
         "usb": true,
-        "watchdog": true
+        "watchdog": true,
+        "wifi_sdio": false,
+        "xspi_ospi": true
       },
       "silicon": "alif:ensemble:e3",
       "sku": "E1M-AEN301",
@@ -1657,12 +1684,15 @@
         "pwm": false,
         "quadrature_encoder": true,
         "rtc": true,
+        "sd1": false,
         "sdio_emmc": true,
         "spi": true,
         "timer": true,
         "uart": true,
         "usb": true,
-        "watchdog": true
+        "watchdog": true,
+        "wifi_sdio": false,
+        "xspi_ospi": true
       },
       "silicon": "alif:ensemble:e4",
       "sku": "E1M-AEN401",
@@ -1709,12 +1739,15 @@
         "pwm": false,
         "quadrature_encoder": true,
         "rtc": true,
+        "sd1": false,
         "sdio_emmc": true,
         "spi": true,
         "timer": true,
         "uart": true,
         "usb": true,
-        "watchdog": true
+        "watchdog": true,
+        "wifi_sdio": false,
+        "xspi_ospi": true
       },
       "silicon": "alif:ensemble:e5",
       "sku": "E1M-AEN501",
@@ -1770,12 +1803,15 @@
         "pwm": false,
         "quadrature_encoder": true,
         "rtc": true,
+        "sd1": false,
         "sdio_emmc": true,
         "spi": true,
         "timer": true,
         "uart": true,
         "usb": true,
-        "watchdog": true
+        "watchdog": true,
+        "wifi_sdio": false,
+        "xspi_ospi": true
       },
       "silicon": "alif:ensemble:e6",
       "sku": "E1M-AEN601",
@@ -1831,12 +1867,15 @@
         "pwm": false,
         "quadrature_encoder": true,
         "rtc": true,
+        "sd1": false,
         "sdio_emmc": true,
         "spi": true,
         "timer": true,
         "uart": true,
         "usb": true,
-        "watchdog": true
+        "watchdog": true,
+        "wifi_sdio": false,
+        "xspi_ospi": true
       },
       "silicon": "alif:ensemble:e7",
       "sku": "E1M-AEN701",
@@ -1892,12 +1931,15 @@
         "pwm": false,
         "quadrature_encoder": true,
         "rtc": true,
+        "sd1": false,
         "sdio_emmc": true,
         "spi": true,
         "timer": true,
         "uart": true,
         "usb": true,
-        "watchdog": true
+        "watchdog": true,
+        "wifi_sdio": false,
+        "xspi_ospi": true
       },
       "silicon": "alif:ensemble:e8",
       "sku": "E1M-AEN801",
@@ -1946,12 +1988,15 @@
         "pwm": false,
         "quadrature_encoder": false,
         "rtc": false,
+        "sd1": false,
         "sdio_emmc": false,
         "spi": false,
         "timer": false,
         "uart": false,
         "usb": false,
-        "watchdog": false
+        "watchdog": false,
+        "wifi_sdio": false,
+        "xspi_ospi": true
       },
       "silicon": "nxp:imx9:imx93",
       "sku": "E1M-NX9101",
@@ -1994,12 +2039,15 @@
         "pwm": false,
         "quadrature_encoder": false,
         "rtc": true,
+        "sd1": true,
         "sdio_emmc": true,
         "spi": true,
         "timer": true,
         "uart": true,
         "usb": true,
-        "watchdog": true
+        "watchdog": true,
+        "wifi_sdio": true,
+        "xspi_ospi": true
       },
       "silicon": "renesas:rzv2n:n44",
       "sku": "E1M-V2M101",
@@ -2042,12 +2090,15 @@
         "pwm": false,
         "quadrature_encoder": false,
         "rtc": true,
+        "sd1": true,
         "sdio_emmc": true,
         "spi": true,
         "timer": true,
         "uart": true,
         "usb": true,
-        "watchdog": true
+        "watchdog": true,
+        "wifi_sdio": true,
+        "xspi_ospi": true
       },
       "silicon": "renesas:rzv2n:n44",
       "sku": "E1M-V2M102",
@@ -2090,12 +2141,15 @@
         "pwm": false,
         "quadrature_encoder": false,
         "rtc": true,
+        "sd1": true,
         "sdio_emmc": true,
         "spi": true,
         "timer": true,
         "uart": true,
         "usb": true,
-        "watchdog": true
+        "watchdog": true,
+        "wifi_sdio": true,
+        "xspi_ospi": true
       },
       "silicon": "renesas:rzv2n:n44",
       "sku": "E1M-V2N101",
@@ -2138,12 +2192,15 @@
         "pwm": false,
         "quadrature_encoder": false,
         "rtc": true,
+        "sd1": true,
         "sdio_emmc": true,
         "spi": true,
         "timer": true,
         "uart": true,
         "usb": true,
-        "watchdog": true
+        "watchdog": true,
+        "wifi_sdio": true,
+        "xspi_ospi": true
       },
       "silicon": "renesas:rzv2n:n44",
       "sku": "E1M-V2N102",

@@ -4,12 +4,14 @@ Empirical proof of the alp-sdk's load-bearing customer promise:
 
 > Change `som.sku:` in `board.yaml`, rebuild, ship — **within a SoM family**.
 
-Cross-family portability between E1M (Cortex-M-class, Alif Ensemble / NXP
-i.MX 93) and E1M-X (Cortex-A55 + Cortex-M33, Renesas RZ/V2N) is
-intentionally NOT a goal — they are separate product lines with
-different power envelopes, different SoCs, and a separate `<alp/*_pinout.h>`
-namespace.  See
-[`docs/adr/0011-intra-family-portability.md`](adr/0011-intra-family-portability.md).
+Cross-family portability between E1M (35×35 mm, Alif Ensemble / NXP
+i.MX 93) and E1M-X (45×65 mm, Cortex-A55 + Cortex-M33, Renesas RZ/V2N)
+is intentionally NOT a goal — they are separate product lines with
+different form factors, different power envelopes, different SoCs, and
+a separate `<alp/*_pinout.h>` namespace.  See
+[`docs/adr/0011-intra-family-portability.md`](adr/0011-intra-family-portability.md)
+for the per-SKU core-class breakdown (E1M's core mix is per-SKU, not
+uniform).
 
 ## Method
 
@@ -54,7 +56,7 @@ prose and survives regeneration.
      PR if this block drifts from what the swap-test produces.
 -->
 
-## E1M family (Cortex-M-class)
+## E1M family
 
 | SKU \ Example | Silicon | i2c-scanner | gpio-button-led | pwm-led-fade | Notes (from metadata) |
 | --- | --- | :---: | :---: | :---: | --- |
@@ -64,9 +66,9 @@ prose and survives regeneration.
 | E1M-AEN601 | `alif:ensemble:e6` | ✅ | ✅ | ✅ | 256 Mbit DRAM · Ethos-U U55+U85 · `partial_hw_config: true` |
 | E1M-AEN701 | `alif:ensemble:e7` | ✅ | ✅ | ✅ | 256 Mbit DRAM · Ethos-U U55 · `partial_hw_config: true` |
 | E1M-AEN801 | `alif:ensemble:e8` | ✅ | ✅ | ✅ | 256 Mbit DRAM · Ethos-U U55+U85 · `partial_hw_config: true` |
-| E1M-NX9101 | `nxp:imx9:imx93` | ✅ | ✅ | ✅ | Ethos-U U65 · `partial_hw_config: true` |
+| E1M-NX9101 | `nxp:imx9:imx93` | ❌ | ❌ | ❌ | Ethos-U U65 · `partial_hw_config: true` |
 
-**21 / 21 cells generate cleanly.**
+**18 / 21 cells generate cleanly (3 FAILING — see the ❌ cells; run `python3 scripts/gen_portability_matrix.py` locally for the per-cell diagnostics).**
 
 ## E1M-X family (Cortex-A55 + Cortex-M33)
 
@@ -119,17 +121,20 @@ reports before a build.
          python3 scripts/gen_portability_matrix.py
 -->
 
-### E1M family (Cortex-M-class)
+### E1M family
 
 | Library | Tier | Version | License | E1M-AEN301 | E1M-AEN401 | E1M-AEN501 | E1M-AEN601 | E1M-AEN701 | E1M-AEN801 | E1M-NX9101 |
 | --- | :---: | --- | --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| `arm-2d` | B | `v1.2.6` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `aws-iot` | B | `v3.1.5` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `azure-iot` | B | `1.5.0` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `bearssl` | B | `master` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `canopennode` | B | `dec12fa3f0d790cafa8414a4c2930ea71ab72ffd` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `catch2` | B | `3.7.1` | BSL-1.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `cmsis-cv` | B | `25c6c111ee04dcfb0ae9093fd6dee4586872982c` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `cmsis-dsp` | A | `97512610ec92058f0119450b9e743eeb7e95b5c8` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `cmsis-nn` | A | `d20117c9e88cf9018d6fa06744dddac700c3e3a1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `cmsis-stream` | B | `v3.2.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `coap` | B | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `coremqtt-sn` | B | `v1.0.1` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `doctest` | B | `2.4.11` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -156,19 +161,22 @@ reports before a build.
 | `u8g2` | B | `2.36.5` | BSD-2-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `zcbor` | A | `0.9.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
-**222 / 224 (library × SKU) cells compatible (2 incompatible, 0 n/a).**
+**243 / 245 (library × SKU) cells compatible (2 incompatible, 0 n/a).**
 
 ### E1M-X family (Cortex-A55 + Cortex-M33)
 
 | Library | Tier | Version | License | E1M-V2M101 | E1M-V2M102 | E1M-V2N101 | E1M-V2N102 |
 | --- | :---: | --- | --- | :---: | :---: | :---: | :---: |
+| `arm-2d` | B | `v1.2.6` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `aws-iot` | B | `v3.1.5` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `azure-iot` | B | `1.5.0` | MIT | ✅ | ✅ | ✅ | ✅ |
 | `bearssl` | B | `master` | MIT | ✅ | ✅ | ✅ | ✅ |
 | `canopennode` | B | `dec12fa3f0d790cafa8414a4c2930ea71ab72ffd` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `catch2` | B | `3.7.1` | BSL-1.0 | ✅ | ✅ | ✅ | ✅ |
+| `cmsis-cv` | B | `25c6c111ee04dcfb0ae9093fd6dee4586872982c` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `cmsis-dsp` | A | `97512610ec92058f0119450b9e743eeb7e95b5c8` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `cmsis-nn` | A | `d20117c9e88cf9018d6fa06744dddac700c3e3a1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
+| `cmsis-stream` | B | `v3.2.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `coap` | B | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `coremqtt-sn` | B | `v1.0.1` | MIT | ✅ | ✅ | ✅ | ✅ |
 | `doctest` | B | `2.4.11` | MIT | ✅ | ✅ | ✅ | ✅ |
@@ -195,17 +203,18 @@ reports before a build.
 | `u8g2` | B | `2.36.5` | BSD-2-Clause | ✅ | ✅ | ✅ | ✅ |
 | `zcbor` | A | `0.9.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 
-**128 / 128 (library × SKU) cells compatible.**
+**140 / 140 (library × SKU) cells compatible.**
 
 Legend: ✅ `requires:` satisfied and wireable on the SoM · ❌ incompatible (the named `requires:` constraint fails) · — not applicable (no `integration:` for any OS this SoM runs).
 <!-- END GENERATED: gen_portability_matrix_libraries -->
 
 ## Hand-maintained analysis (expected diffs)
 
-The generated tables above prove every cell *generates* cleanly.  The
-analytical claims below — byte-identity of the emitted `alp.conf`
-across SKUs and the classification of legitimate diff lines — are
-hand-maintained against the swap-test evidence under
+The generated tables above prove every ✅ cell *generates* cleanly
+(as of #1025, that's 18 of the 21 E1M cells — NX9101's 3 are ❌; see
+below).  The analytical claims below — byte-identity of the emitted
+`alp.conf` across SKUs and the classification of legitimate diff
+lines — are hand-maintained against the swap-test evidence under
 `build/portability-test/` (gitignored), per the Method's step 4.
 
 ### E1M family
@@ -213,8 +222,12 @@ hand-maintained against the swap-test evidence under
 After stripping the `CONFIG_ALP_SOC_*=y` line and the one identity
 comment, **all 6 AEN SKUs produce byte-identical `alp.conf` for every
 example.**  That is the load-bearing intra-AEN portability proof.
-E1M-NX9101 is paper-correct (`partial_hw_config: true` — see the
-generated Notes column).  The U85-carrying SKUs (AEN401 / AEN601 /
+E1M-NX9101 is currently NOT buildable at all (`partial_hw_config: true`
+— see the generated Notes column — and, as of #1025, its only hw_rev,
+imx93 r1, is `status: tbd`, which the hw_rev-buildable gate refuses
+outright); the diff-family rows below describing its Kconfig lines
+document what its `alp.conf` looks like once a real hw_rev lands, not
+a cell that generates today. The U85-carrying SKUs (AEN401 / AEN601 /
 AEN801, visible as `Ethos-U U55+U85` in the Notes column) are the
 population that motivated Gap G-1 below.
 
@@ -327,7 +340,7 @@ line per variant present.  AEN401/601/801 now emit BOTH `_U55=y` and
 `_U55=y`; NX9101 emits `_U65=y`; the existing N93 PHY switch coexists.
 Matching Kconfig entries live at `zephyr/kconfigs/iot-audio-inference.kconfig`
 § *Per-variant Ethos-U silicon switches*; the TFLM driver source
-(`src/zephyr/inference_tflm.cpp`) reads the per-variant macros via
+(`src/backends/inference/tflm.cpp`) reads the per-variant macros via
 `alp_inference_tflm_npu_variant_name()` and logs the active variant
 once per boot.
 

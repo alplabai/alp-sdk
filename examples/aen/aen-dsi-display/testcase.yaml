@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the full Alif Ensemble E8 C2-MIPI-DSI DISPLAY
+# chain (cdc200 -> mipi_dsi -> the shared D-PHY -> the RK055HDMIPI4MA0/HX8394
+# panel) on the E1M-AEN801 (Ensemble E8, M55-HE).  Pixels-on-glass successor
+# to the bind-only aen-dsi-regcheck.
+#
+# Compile-checks the driver chain + DT nodes on the real E8 board target;
+# filtered OUT of the native_sim PR gate (platform_allow = the AEN801 HE
+# board only).
+
+sample:
+  name: aen-dsi-display
+  description: |
+    Bench RAM-run MIPI-DSI display-chain proof for the E1M-AEN801 (Alif
+    Ensemble E8, Cortex-M55-HE): drives the RK055HDMIPI4MA0 (Himax HX8394)
+    panel through cdc200 -> mipi_dsi -> the shared D-PHY, with the L1
+    framebuffer pinned in global SRAM0.
+
+tests:
+  alp_sdk.examples.aen.dsi_display.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - display
+      - dsi
+      - video
+    build_only: true   # the pixels-on-glass proof is a bench flash, not a CI run.

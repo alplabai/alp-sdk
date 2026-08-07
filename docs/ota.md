@@ -62,10 +62,10 @@ if a developer wants to override per-tree.
 
 ### Underlying layer
 
-The orchestrator output drives
+The planner output drives
 [`meta-alp-sdk/conf/distro/include/mender.inc`](../meta-alp-sdk/conf/distro/include/mender.inc),
 which `meta-alp-sdk` pulls in via the generated `INHERIT +=` line.
-See the [`meta-alp-sdk` README](../meta-alp-sdk/README.md#ota-via-mender)
+See the [`meta-alp-sdk` README](../meta-alp-sdk/README.md#ota-via-mender-opt-in)
 for the layer-level walk-through if you're working below the
 `board.yaml` surface.
 
@@ -123,7 +123,7 @@ is open between two viable options:
 ### Option A — Mender Zephyr client (preferred)
 
 Mender's Zephyr support is upstream as the
-[`mender-mcu-client`](https://github.com/mendersoftware/mender-mcu-client)
+[`mender-mcu-client`](https://github.com/mendersoftware/mender-mcu)
 library (Apache-2.0).  It targets Zephyr v3.6+ + MCUboot + LwM2M
 or HTTPs transport; the v0.4-final integration:
 
@@ -144,7 +144,7 @@ Caveats:
 ### Option B — Hawkbit + bespoke wire
 
 Eclipse Hawkbit is a Mender-alternative deployment server with a
-mature Zephyr client ([`zephyr/subsys/mgmt/hawkbit`](https://docs.zephyrproject.org/latest/services/device_mgmt/hawkbit.html)).
+mature Zephyr client ([`zephyr/subsys/mgmt/hawkbit`](https://docs.zephyrproject.org/latest/services/device_mgmt/ota.html)).
 Trade-off: smaller footprint, more bespoke server-side ops.
 Picked only if Mender's Zephyr client misses a hard requirement.
 

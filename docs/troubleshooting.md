@@ -46,7 +46,8 @@ Full schema reference: [`docs/board-config-schema.md`](board-config-schema.md).
 
 ### `west: command not found` / `pip install west` fails
 
-The Zephyr meta-tool needs Python 3.10+.  On macOS:
+Installing and running `west` itself needs Python 3.10+ (the SDK's own
+support floor).  On macOS:
 
 ```bash
 brew install python
@@ -63,6 +64,21 @@ pip install west
 
 See [`docs/getting-started.md`](getting-started.md) §1 for the
 full per-host walkthrough.
+
+### `west build` fails at CMake configure citing a Python version
+
+`west` itself runs fine on 3.10+, but *building* needs more: Zephyr
+v4.4.1's own `cmake/modules/python.cmake` hardcodes
+`PYTHON_MINIMUM_REQUIRED 3.12` and refuses `find_package(Python3)`
+below it, regardless of what `west`/`bootstrap.sh`/`bootstrap.ps1`
+accepted earlier.  Ubuntu 22.04 and Debian 12's system `python3`
+(3.10 and 3.11 respectively) can't reach 3.12 via `apt-get install
+python3` -- install a newer interpreter alongside the system one,
+e.g. the `deadsnakes` PPA (`sudo add-apt-repository
+ppa:deadsnakes/ppa && sudo apt-get install python3.12`) or `pyenv`,
+and point `west`/the venv at it.  See
+[`docs/cross-platform-setup.md`](cross-platform-setup.md) §1.1 for how Python
+Tan enforces the effective floor during bootstrap and doctor.
 
 ### `CMake Error: Could not find package configuration file Zephyr`
 
@@ -88,10 +104,8 @@ different build tool -- `ninja` is Zephyr's build generator on every
 host.  `scripts/bootstrap.sh` / `bootstrap.ps1` and `python -m alp_cli
 doctor` both check for it and FAIL with an install command when it's
 missing; if you hit the raw CMake error above instead, check whether
-you resolved a `[!] ninja` line from `tan doctor --build` -- it still
-rates a missing `ninja` a warning rather than a failure
-(`alplabai/tan-cli#103`), so it's easy to leave unresolved and hit
-this error anyway.  Installing it clears all three lines above (the
+you resolved the `hostPrerequisites` finding from `tan doctor`. Installing it
+clears all three lines above (the
 two compiler errors are downstream of the same missing generator):
 
 ```bash
@@ -170,8 +184,11 @@ The chip isn't ACKing on its expected address.  Causes:
 
 * Wrong I2C bus -- check the SoM preset (`E1M-<MPN>.yaml`) for which bus the chip is on
   (e.g. V2N's PMICs are on `brd_i2c`, not `e1m_i2c0`).
-* Wrong slave address -- confirm against
-  `metadata/e1m_modules/<SKU>.yaml` `i2c_devices` block.
+* Wrong slave address -- confirm against the SoM preset's
+  `metadata/e1m_modules/<SKU>.yaml` `i2c_devices:` block (V2N/V2M family;
+  each entry carries its own `address_7bit`), or, for the AEN family
+  (which has no `i2c_devices:` block), the chip's own
+  `metadata/chips/<chip>.yaml` `i2c: addresses:` field.
 * Power not yet on the chip -- some chips need their REG_ON pin
   pulled high first (e.g. Murata Wi-Fi/BT module).
 
@@ -230,24 +247,35 @@ the host reads the reply.  See
 for the timing window.  The host driver returns `ALP_ERR_IO` and
 the caller can retry (commands are idempotent).
 
-### `alp_hw_info_read` returns `ALP_ERR_IO`
+### `alp_hw_info_read` returns `ALP_ERR_NOT_PROVISIONED`
 
-CRC mismatch in the EEPROM manifest -- factory programming hasn't
-run on this module, or the manifest is corrupt.  Inspect with:
+The EEPROM reads back blank/unprogrammed -- no `ALPH` magic at
+offset 0.  Factory programming hasn't run on this module yet.
+Inspect with:
 
 ```c
 uint8_t raw[128];
 eeprom_24c128_read(&ee, 0, raw, sizeof(raw));
-// Dump raw bytes; expect "ALPH" (0x41 0x4C 0x50 0x48) at offset 0.
+// Dump raw bytes; expect wire bytes 0x48 0x50 0x4C 0x41 ("HPLA"
+// in a hexdump) at offset 0 on a programmed module.
 ```
 
-Re-run `scripts/program_eeprom.py` against the module.
+Run `scripts/program_eeprom.py` against the module.
+
+### `alp_hw_info_read` returns `ALP_ERR_IO`
+
+The manifest's magic is present but `schema_version` or the
+CRC-32 disagrees -- the manifest is corrupt (partial write, bit
+flip). Re-run `scripts/program_eeprom.py` against the module.
 
 ### `alp_hw_info_read` returns `ALP_ERR_NOSUPPORT`
 
 The EEPROM-side hw_info reader isn't configured.  Set
-`CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID` in `prj.conf` to the
-bus id matching `ALP_E1M_I2C0` on your board.
+`CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID` in `prj.conf` to the bus
+id carrying the on-module 24C128.  On V2N / V2N-M1 this is the bus
+matching `ALP_E1M_I2C0` (Renesas RIIC0, `P31`/`P30`); on AEN it's
+SoC I2C2 (DesignWare `i2c_dw`, `P5_6`/`P5_7`, bridge/DNP-selected --
+NOT the slave-only LPI2C0 / BRD_I2C).
 
 ## CI / tooling issues
 
@@ -264,8 +292,8 @@ file but a misconfigured global setting can override that.
 
 ## Where to file bugs
 
-* SDK bug (planner/emit/validate): [`github.com/alplabai/alp-sdk/issues`](https://github.com/alplabai/alp-sdk/issues)
-* `tan build` executor bug: [`github.com/alplabai/tan-cli`](https://github.com/alplabai/tan-cli) instead -- alp-sdk is plans-only for the multi-slice build/flash/size/image/clean/Renode surface (ADR [0020](adr/0020-sdk-owns-build-execution.md)); `tan run` is the one forwarded single-image escape hatch that still shells `west build`/`west flash` itself.
+* SDK metadata, schema, portable API, or reference-emitter bug: [`github.com/alplabai/alp-sdk/issues`](https://github.com/alplabai/alp-sdk/issues)
+* Tan planner, executor, or command bug: [`github.com/alplabai/tan-cli`](https://github.com/alplabai/tan-cli). Python Tan owns build/run/flash/size/image/clean/Renode and the relocated planner; only `migrate`, `lock`, and `quality` still forward to west.
 * Chip driver bug: file against alp-sdk; include the `driver_status` from the
   chip's metadata yaml.
 

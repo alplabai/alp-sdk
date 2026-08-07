@@ -1,12 +1,20 @@
 # rpmsg-imx93
 
-> `[UNTESTED]` -- v0.6 structural draft.  Board.yaml + sources are
-> shape-correct; the build will fail at carve-out resolution until
-> the user supplies authoritative iMX93 memory-map values in
-> `metadata/e1m_modules/E1M-NX9101.yaml`.  The metadata is TBD by
-> design (project memory note: don't invent HW values); the
-> declarative structural files are the contract that lets the
-> orchestrator land cleanly the moment those values are filled in.
+> `[UNTESTED]` -- v0.6 structural draft, targeting **E1M-NX9101**
+> (NXP i.MX 93), which is **not yet buildable**.  Its only hw_rev,
+> `metadata/e1m_modules/imx93/hw-revisions.yaml`'s `r1`, is
+> `status: tbd` -- the hw_rev-buildable gate
+> ([#1025](https://github.com/alplabai/alp-sdk/issues/1025)) refuses
+> it outright, before the orchestrator ever reaches carve-out
+> resolution against the also-TBD iMX93 memory-map values in
+> `metadata/e1m_modules/E1M-NX9101.yaml`.  Both are TBD by design
+> (project memory note: don't invent HW values) pending real NX9101
+> silicon; this example is excluded from the build/emit-snapshot/
+> build-plan/system-manifest/parity-oracle gates for the same reason
+> (see those gates' own `#1025` comments) but its source and this
+> README stay -- the declarative structural files are the contract
+> that lets the orchestrator land cleanly the moment a real hw_rev
+> status lands.
 
 Heterogeneous compute on **E1M-NX9101** (NXP i.MX 93):
 
@@ -50,8 +58,18 @@ Both regions are reachable from both cores, but the orchestrator
 prefers the non-cacheable region (`ocram`) for the default carve-out
 because the iMX93's M33 has no cache (spec §6.8).
 
-Until the user supplies real addresses + sizes, `tan build`
-exits with:
+Today `tan build` never even reaches this carve-out check: #1025's
+hw_rev-buildable gate refuses `som.hw_rev: r1`'s `status: tbd` first
+(see this file's top note), and exits with:
+
+```
+alp_project: SoM E1M-NX9101 hw_rev 'r1' exists but is not buildable
+(status: 'tbd').
+```
+
+Once imx93 `r1` carries a real, buildable status, resolution reaches
+this carve-out check next, and -- until the user also supplies real
+memory_map addresses + sizes -- fails with:
 
 ```
 OrchestratorError: ipc 'alp_default_rpmsg': memory_map.base is TBD
@@ -72,10 +90,10 @@ before building.
 ## Build
 
 ```bash
-tan build alp-sdk/examples/multicore/rpmsg-imx93
+tan build --project examples/multicore/rpmsg-imx93
 ```
 
-The orchestrator fans out:
+Tan's relocated planner fans out:
 
 - `build/a55_cluster-yocto/` (bitbake against `MACHINE = e1m-nx9101-a55`).
 - `build/m33-zephyr/` (Zephyr against `BOARD = alp_e1m_nx9101_m33`).

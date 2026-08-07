@@ -80,10 +80,23 @@ V2N-M1 adds:
 
 ## Status
 
-v0.1: **stub only**.  Surface lands in v0.2 along with the MIPI CSI-2
-camera implementation.  The directory exists now so the porting guide
-(`docs/porting-new-som.md`) has a concrete worked example, and so the
-SoM column in `docs/os-support-matrix.md` has somewhere to point.
+This directory's own bare-metal FSP wrappers (`gpio.c`, `i2c.c`, `spi.c`,
+`uart.c`) are **stub only**.  Only `i2c.c` has a real body, gated
+behind `ALP_HAS_RENESAS_FSP` (default off); `gpio.c`, `spi.c`, and
+`uart.c` are empty translation units either way -- each is just the
+matching FSP header include behind the same flag, with the real body
+still pending v0.4.  That is not the whole V2N story, though: the MIPI CSI-2
+camera path has a real registered backend elsewhere in the SDK
+(`src/backends/camera/v2n_n44_isp.c`, `silicon_ref="renesas:rzv2n:n44"`
+-- the sensor open/start/stop/capture/release/close calls route through
+Zephyr's real `video_*` API; only the N44 ISP's AE/AWB/AF/gain/LSC
+fine-tuning knobs are latch-only pending the register map), and the
+GD32 supervisor-bridge + Yocto Linux boot stack is silicon-verified on
+the V2N EVK bench (see
+[`docs/verification-status.md`](../../docs/verification-status.md)).
+The directory exists so the porting guide (`docs/porting-new-som.md`)
+has a concrete worked example, and so the SoM column in
+`docs/os-support-matrix.md` has somewhere to point.
 
 ## Yocto BSP integration
 
@@ -109,8 +122,15 @@ different licenses.
   binaries.  Apache-2.0.  Anchor at
   [`vendors/renesas-rzv2n/rzv_drp-ai_tvm/`](rzv_drp-ai_tvm/);
   upstream <https://github.com/renesas-rz/rzv_drp-ai_tvm>.
-- **Runtime (`libdrpai`)** -- runs on the V2N, shipped by the
+- **Runtime (EdgeCortix MERA2 + DRP-AI TVM: `mera2_runtime` /
+  `drp_tvm_rt` / `tvm_runtime`)** -- runs on the V2N, shipped by the
   `meta-rz-drpai` sublayer in the Renesas AI SDK BSP v6.30.  The
-  alp-sdk's `<alp/inference.h>` Yocto backend (planned for v0.4)
-  links against this via the target sysroot; no separate
-  per-app pkg-config plumbing.
+  alp-sdk's `<alp/inference.h>` Yocto backend
+  (`src/yocto/inference_drpai.cpp`) already links against these via
+  the target sysroot when built with `ALP_SDK_USE_DRPAI_V2N=ON`
+  (default off); no separate per-app pkg-config plumbing.  The
+  backend is header-checked against the real
+  `MeraDrpRuntimeWrapper.h` surface but is explicitly marked
+  **BENCH-UNVERIFIED** in-source -- it has not run on silicon, and
+  the MERA2/DRP-AI TVM runtime libs only exist on the RZ/V Yocto SDK
+  sysroot, not on a plain dev host.

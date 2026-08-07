@@ -59,7 +59,8 @@ import re
 from pathlib import Path
 from typing import Any
 
-from alp_project_loader import _load_yaml, _resolve_sku
+from alp_project_loader import _load_yaml, _resolve_sku, resolve_soc_path
+from sentinels import is_tbd
 
 _COPYRIGHT_C = (
     "/*\n"
@@ -85,10 +86,9 @@ def _load_soc_spec(sku_preset: dict[str, Any], metadata_root: Path) -> dict[str,
     silicon = sku_preset.get("silicon")
     if not silicon:
         raise ZephyrBoardEmitError(f"SoM {sku_preset.get('sku')!r} declares no silicon:")
-    parts = silicon.split(":")
-    if len(parts) != 3:
+    soc_path = resolve_soc_path(silicon, metadata_root)
+    if soc_path is None:
         raise ZephyrBoardEmitError(f"silicon ref {silicon!r} is not a triple-colon string")
-    soc_path = metadata_root / "socs" / parts[0] / parts[1] / f"{parts[2]}.json"
     if not soc_path.is_file():
         raise ZephyrBoardEmitError(f"no SoC spec at {soc_path}")
     return json.loads(soc_path.read_text(encoding="utf-8"))
@@ -97,7 +97,7 @@ def _load_soc_spec(sku_preset: dict[str, Any], metadata_root: Path) -> dict[str,
 def _resolve_variant(sku_preset: dict[str, Any], soc_spec: dict[str, Any]) -> dict[str, Any]:
     declared = sku_preset.get("silicon_variant")
     variants = soc_spec.get("variants") or []
-    if declared and declared != "TBD":
+    if declared and not is_tbd(declared):
         for v in variants:
             if v.get("order_code") == declared:
                 return v
@@ -315,8 +315,80 @@ _AEN_BENCH_KNOWN_ITCM = {"hp": False, "he": True}
 _AEN_FAMILY_DISPLAY = "Alif Ensemble E8"
 
 
-def _aen_flash_partitions(total_kib: int) -> "list[tuple[str, int, int]]":
-    """Return [(label, offset_bytes, size_kib), ...] for the AEN layout."""
+def _aen_role_slot0_map(
+    memory_map: "list[dict[str, Any]] | None", role: str,
+) -> "dict[str, Any] | None":
+    """Return this role's disjoint-slot0 memory_map entry, or None.
+
+    Non-stock AEN SKUs (#1069: dual-M55 SoMs that boot both cores from
+    the same physical App MRAM) declare a `memory_map:` block in their
+    SoM preset with one region per core named `<role>_slot0`
+    (`accessible_from: [m55_<role>]` only). Every other AEN SKU
+    (single-M55 aen401/aen601, or an AEN801-shaped preset with no
+    override) has no such region and keeps the stock symmetric
+    two-slot layout -- see _aen_flash_partitions below.
+    """
+    if not memory_map:
+        return None
+    core_id = f"m55_{role}"
+    for region in memory_map:
+        if region.get("accessible_from") == [core_id] and \
+                region.get("name") == f"{role}_slot0":
+            return region
+    return None
+
+
+def _aen_flash_partitions(
+    total_kib: int, role: str | None = None,
+    memory_map: "list[dict[str, Any]] | None" = None,
+) -> "list[tuple[str, int, int]]":
+    """Return [(label, offset_bytes, size_kib), ...] for the AEN layout.
+
+    Stock layout (no per-role memory_map entry for *role*): the
+    original symmetric two-slot MCUboot swap-using-scratch map --
+    mcuboot, image-0 (primary/code-partition), image-1 (secondary,
+    OTA), scratch, storage -- unchanged, and still what every
+    single-M55 AEN SKU (aen401, aen601) generates.
+
+    Disjoint-slot0 layout (*role*'s `<role>_slot0` memory_map entry is
+    declared, #1069): mcuboot, this role's own slot0 (labelled
+    "image-0" so downstream label maps / the `image_kib` lookup in
+    _aen_dts don't need a second code path), reserved (the ex-scratch
+    headroom, unused -- OTA is deferred since a swap-sized second slot
+    on both cores no longer fits the MRAM budget), storage. No
+    image-1: this is CONFIG_SINGLE_APPLICATION_SLOT=y (see
+    zephyr/sysbuild/aen/README.md), the only silicon-proven MCUboot
+    mode on this part. The OTHER role's slot0 lives outside this
+    table entirely (a disjoint physical window this board never
+    touches) -- see metadata/e1m_modules/E1M-AEN801.yaml `memory_map:`
+    for the full 5-region physical map.
+    """
+    slot0_region = _aen_role_slot0_map(memory_map, role) if role else None
+    if slot0_region is not None:
+        by_name = {r["name"]: r for r in memory_map}
+        mcuboot_region = by_name.get("mcuboot")
+        if mcuboot_region is None or not isinstance(mcuboot_region.get("base"), int):
+            raise ZephyrBoardEmitError(
+                "AEN disjoint-slot0 memory_map is missing an integer-`base` "
+                "'mcuboot' region -- its base anchors the soc-nv-flash "
+                "child's offset-0 origin")
+        mram_base = mcuboot_region["base"]
+        out: list[tuple[str, int, int]] = []
+        for label, region_name in (
+            ("mcuboot", "mcuboot"),
+            ("image-0", f"{role}_slot0"),
+            ("reserved", "reserved"),
+            ("storage", "storage"),
+        ):
+            region = by_name.get(region_name)
+            if region is None or not isinstance(region.get("base"), int):
+                raise ZephyrBoardEmitError(
+                    f"AEN disjoint-slot0 memory_map is missing an integer-"
+                    f"`base` region named {region_name!r} (needed for "
+                    f"{label!r})")
+            out.append((label, region["base"] - mram_base, region["size_kib"]))
+        return out
+
     reserved = _AEN_MCUBOOT_KIB + _AEN_SCRATCH_KIB + _AEN_STORAGE_KIB
     remaining = total_kib - reserved
     if remaining <= 0 or remaining % 2:
@@ -445,7 +517,7 @@ def _aen_ethos_u(soc_spec: dict[str, Any]) -> tuple[str, str] | None:
     return None
 
 
-def _aen_defconfig(uart_node: str) -> str:
+def _aen_defconfig(uart_node: str, slot0_base: int = 0x80010000) -> str:
     # CONFIG_USE_DT_CODE_PARTITION is the Kconfig half of the very
     # `zephyr,code-partition = &slot0_partition;` chosen that _aen_dts()
     # (below) lays down for every board this function serves -- the two are
@@ -473,7 +545,7 @@ def _aen_defconfig(uart_node: str) -> str:
         "CONFIG_HW_STACK_PROTECTION=y\n"
         "\n"
         "# Link the image into the board's `zephyr,code-partition`\n"
-        "# (slot0_partition, MRAM 0x80010000) instead of the MRAM base --\n"
+        f"# (slot0_partition, MRAM 0x{slot0_base:08x}) instead of the MRAM base --\n"
         "# without it the reset vector lands at 0x8000xxxx and no AEN flash\n"
         "# flow accepts the image.  Flow C (ITCM RAM-run) overrides it via\n"
         "# scripts/bench/aen/aen-flowc-itcm.conf.\n"
@@ -518,6 +590,7 @@ def _aen_dts(
     sku: str, core_id: str, soc_spec: dict[str, Any], variant: dict[str, Any],
     dir_name: str, basename: str, rx_row: dict[str, Any], tx_row: dict[str, Any],
     ethos_u: tuple[str, str] | None = None,
+    memory_map: "list[dict[str, Any]] | None" = None,
 ) -> str:
     role = core_id.split("_")[-1]                     # "hp" / "he"
     role_u = role.upper()
@@ -538,8 +611,9 @@ def _aen_dts(
     uart_node = _uart_node_label(rx_row)
 
     total_kib = round(float(variant["mram_mb"]) * 1024)
-    partitions = _aen_flash_partitions(total_kib)
+    partitions = _aen_flash_partitions(total_kib, role, memory_map)
     image_kib = dict((label, size) for label, _off, size in partitions)["image-0"]
+    disjoint_slot0 = _aen_role_slot0_map(memory_map, role) is not None
 
     bench_known = _AEN_BENCH_KNOWN_ITCM[role]
     itcm_known_suffix = "  (also bench-known)" if bench_known else ""
@@ -561,7 +635,18 @@ def _aen_dts(
         " *     on the current batch, so there is no external XIP / flash device;",
         " *   - lays down a production MCUboot partition map in MRAM.",
     ]
-    if role == "hp":
+    if disjoint_slot0:
+        lines += [
+            " *",
+            f" * NOTE (AMP, #1069): {role_u}'s slot0 lives in its OWN disjoint MRAM window,",
+            f" * physically separate from {other_role_u}'s -- both cores' images can be",
+            " * resident in MRAM at once (see the partition map below and",
+            f" * metadata/e1m_modules/{sku}.yaml `memory_map:`).  OTA is DEFERRED",
+            " * (CONFIG_SINGLE_APPLICATION_SLOT=y, no secondary/scratch slot) so both",
+            " * 2688 KiB code slots fit the 5632 KiB App MRAM alongside the ~2.6 MiB NPU",
+            " * MRAM-model budget; see zephyr/sysbuild/aen/README.md.",
+        ]
+    elif role == "hp":
         lines += [
             " *",
             " * NOTE (AMP): this per-core board takes the full MRAM view for single-image",
@@ -656,40 +741,67 @@ def _aen_dts(
         " * difference is we reuse the upstream `mram` nodelabel as the controller rather",
         " * than declaring a fresh `mram_flash` node, since upstream owns the node.",
     ]
-    if role == "hp":
+    partitions_total_kib = sum(size for _label, _off, size in partitions)
+    if disjoint_slot0:
         lines += [
-            f" * Kept byte-for-byte identical to the {other_role_u}-sibling board so a future HE+HP AMP",
-            " * sysbuild sees one MRAM partition map.",
+            " *",
+            f" * MRAM partition map (this {role_u} core's {partitions_total_kib} KiB view of the",
+            f" * {total_kib} KiB App MRAM) for the sysbuild/aen MCUboot profile (MCUboot + a",
+            " * signed application image, CONFIG_SINGLE_APPLICATION_SLOT=y -- no OTA/swap",
+            " * slot, deferred per #1069).  Offsets are relative to the soc-nv-flash child",
+            f" * base (MRAM 0x80000000).  {other_role_u}'s disjoint slot0 window is NOT a",
+            " * partition in this table (it's outside this core's own view); see",
+            f" * metadata/e1m_modules/{sku}.yaml `memory_map:` for the full physical map:",
+            " *",
         ]
-    lines += [
-        " *",
-        f" * MRAM partition map ({total_kib} KiB total) for the sysbuild/aen MCUboot profile",
-        " * (MCUboot + a signed application image, swap-using-scratch).  Offsets are",
-        " * relative to the soc-nv-flash child base (MRAM 0x80000000):",
-        " *",
-    ]
+    else:
+        if role == "hp":
+            lines += [
+                f" * Kept byte-for-byte identical to the {other_role_u}-sibling board so a future HE+HP AMP",
+                " * sysbuild sees one MRAM partition map.",
+            ]
+        lines += [
+            " *",
+            f" * MRAM partition map ({total_kib} KiB total) for the sysbuild/aen MCUboot profile",
+            " * (MCUboot + a signed application image, swap-using-scratch).  Offsets are",
+            " * relative to the soc-nv-flash child base (MRAM 0x80000000):",
+            " *",
+        ]
     labels_display = {
         "mcuboot": "mcuboot ",
         "image-0": "image-0 ",
         "image-1": "image-1 ",
         "image-scratch": "scratch ",
+        "reserved": "reserved",
         "storage": "storage ",
     }
     trailers = {
         "image-0": "   (primary slot, code-partition)",
         "image-1": "   (secondary slot for OTA)",
+        "reserved": "   (ex-scratch; unused, OTA deferred)",
         "storage": "    (settings / NVS)",
     }
     for label, off, size in partitions:
         lines.append(
             f" *   {labels_display[label]} 0x{off:06x}  {size} KiB{trailers.get(label, '')}"
         )
+    if disjoint_slot0:
+        lines += [
+            f" *                      = {partitions_total_kib} KiB (of {total_kib} KiB App MRAM total)",
+            " *",
+            " * MRAM-only: the SoM OSPI NOR + HyperRAM are not populated on this batch, so",
+            f" * boot, this core's own slot0, reserved headroom, and storage all live in MRAM.",
+            " */",
+        ]
+    else:
+        lines += [
+            f" *                      = {total_kib} KiB",
+            " *",
+            " * MRAM-only: the SoM OSPI NOR + HyperRAM are not populated on this batch, so",
+            " * all of boot, both image slots, scratch, and storage live in MRAM.",
+            " */",
+        ]
     lines += [
-        f" *                      = {total_kib} KiB",
-        " *",
-        " * MRAM-only: the SoM OSPI NOR + HyperRAM are not populated on this batch, so",
-        " * all of boot, both image slots, scratch, and storage live in MRAM.",
-        " */",
         "&mram {",
         '\tcompatible = "alif,mram-flash-controller";',
         "\t#address-cells = <1>;",
@@ -722,6 +834,7 @@ def _aen_dts(
         "image-0": "slot0_partition",
         "image-1": "slot1_partition",
         "image-scratch": "scratch_partition",
+        "reserved": "reserved_partition",
         "storage": "storage_partition",
     }
     partition_dt_labels = {
@@ -729,6 +842,7 @@ def _aen_dts(
         "image-0": "image-0",
         "image-1": "image-1",
         "image-scratch": "image-scratch",
+        "reserved": "reserved",
         "storage": "storage",
     }
     for i, (label, off, size) in enumerate(partitions):
@@ -823,16 +937,31 @@ def emit_zephyr_board(
         rx_row, tx_row = _aen_console_pinmux_rows(metadata_root)
         role = core_id.split("_")[-1]
         uart_node = _uart_node_label(rx_row)
+        memory_map = sku_preset.get("memory_map")
+        # This role's own disjoint slot0 base (#1069), falling back to the
+        # stock symmetric-layout address (0x80010000, same for every
+        # single-M55 AEN SKU and for AEN801 boards with no memory_map
+        # override) when this SoM declares no per-role `<role>_slot0`
+        # region -- see _aen_role_slot0_map / _aen_flash_partitions.
+        slot0_region = _aen_role_slot0_map(memory_map, role)
+        slot0_base = slot0_region["base"] if slot0_region else 0x80010000
         files[f"{dir_name}/{dir_name}-pinctrl.dtsi"] = _aen_pinctrl_dtsi(
             role, sku, rx_row, tx_row)
-        files[f"{dir_name}/{basename}_defconfig"] = _aen_defconfig(uart_node)
+        files[f"{dir_name}/{basename}_defconfig"] = _aen_defconfig(uart_node, slot0_base)
         files[f"{dir_name}/Kconfig.defconfig"] = _aen_kconfig_defconfig(dir_name, role)
         files[f"{dir_name}/{basename}.dts"] = _aen_dts(
             sku, core_id, soc_spec, variant, dir_name, basename, rx_row, tx_row,
-            _aen_ethos_u(soc_spec))
+            _aen_ethos_u(soc_spec), memory_map)
 
-    silicon_parts = sku_preset["silicon"].split(":")
-    soc_json_rel = f"metadata/socs/{silicon_parts[0]}/{silicon_parts[1]}/{silicon_parts[2]}.json"
+    # `_load_soc_spec()` above already raised ZephyrBoardEmitError if
+    # `sku_preset["silicon"]` didn't resolve, so `soc_path` can't be None
+    # here -- but that's a dependency on call order, not a guarantee this
+    # function itself enforces, so don't drop the None-guard idiom.
+    soc_path = resolve_soc_path(sku_preset["silicon"], metadata_root)
+    if soc_path is None:
+        raise ZephyrBoardEmitError(
+            f"silicon ref {sku_preset['silicon']!r} is not a triple-colon string")
+    soc_json_rel = f"metadata/{soc_path.relative_to(metadata_root).as_posix()}"
     for relpath in list(files):
         style = "c" if relpath.endswith((".dts", "-pinctrl.dtsi")) else "hash"
         files[relpath] = _with_generated_banner(files[relpath], style, sku, soc_json_rel)

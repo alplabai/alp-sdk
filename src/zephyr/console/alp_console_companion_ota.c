@@ -6,7 +6,7 @@
  * abort), Alif companion only.  Command-group TU of the
  * alp_console_companion.c split (#673 Phase 2): registers onto the
  * (alp, companion) dynamic subcommand set the core TU declares.  Shared
- * companion context + bridge-bus mutex come from
+ * companion context comes from
  * alp_console_companion_internal.h.
  *
  * Inspect + drive the over-the-bridge PSA-FWU session (host wrappers
@@ -57,9 +57,7 @@ static int cmd_companion_ota_status(const struct shell *sh, size_t argc, char **
 	}
 
 	alp_cc3501e_ota_status_t st = { 0 };
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
 	alp_status_t s = cc3501e_ota_status(companion_cc3501e, &st, ALP_COMPANION_OTA_MS);
-	k_mutex_unlock(&companion_bus_lock);
 
 	if (s == ALP_ERR_NOT_READY) {
 		shell_warn(sh, "OTA not available (no PSA-FWU in this CC3501E image)");
@@ -88,10 +86,8 @@ static int cmd_companion_ota_begin(const struct shell *sh, size_t argc, char **a
 		shell_error(sh, "usage: alp companion ota begin <total_len_bytes>");
 		return -EINVAL;
 	}
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
 	alp_status_t s =
 	    cc3501e_ota_begin(companion_cc3501e, (uint32_t)total_len, ALP_COMPANION_OTA_MS);
-	k_mutex_unlock(&companion_bus_lock);
 
 	if (s == ALP_ERR_NOT_READY) {
 		shell_warn(sh, "OTA not available (no PSA-FWU in this CC3501E image)");
@@ -116,9 +112,7 @@ static int cmd_companion_ota_abort(const struct shell *sh, size_t argc, char **a
 		shell_warn(sh, "companion not registered");
 		return -ENODEV;
 	}
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
 	alp_status_t s = cc3501e_ota_abort(companion_cc3501e, ALP_COMPANION_OTA_MS);
-	k_mutex_unlock(&companion_bus_lock);
 
 	if (s != ALP_OK) {
 		shell_error(sh, "ota abort failed (%d)", (int)s);

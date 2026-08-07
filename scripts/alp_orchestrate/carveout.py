@@ -9,8 +9,9 @@ resolve (missing mailbox metadata / no memory_map) becomes a blocked
 ResolvedCarveOut carrying the reason. Extracted from alp_orchestrate as the #285
 carve-out seam.
 
-Depends only downward -- models (dataclasses), paths (METADATA_ROOT), and
-alp_project.resolve_memory_map; nothing calls back into the package __init__.
+Depends only downward -- models (dataclasses), paths (METADATA_ROOT),
+alp_project.resolve_memory_map and sentinels.is_tbd; nothing calls back into
+the package __init__.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from alp_project import resolve_memory_map
+from sentinels import is_tbd
 
 from .models import BoardProject, IpcEntry, ResolvedCarveOut
 from .memregion import _PAGE, _region_size_bytes
@@ -121,7 +123,7 @@ def resolve_carve_outs(
     rpmsg_block_reason: Optional[str] = None
     if has_rpmsg_entry:
         controller = mailbox.get("controller")
-        if controller is None or controller == "TBD":
+        if controller is None or is_tbd(controller):
             rpmsg_block_reason = (
                 f"SoM {project.sku} mailbox controller is "
                 f"{'unset' if controller is None else 'TBD'}; "
@@ -161,10 +163,7 @@ def resolve_carve_outs(
         # carve-out instead of crashing with KeyError: 'base'.
         base = region.get("base")
         size_bytes = _region_size_bytes(region)
-        base_is_unmapped = (
-            base is None
-            or (isinstance(base, str) and base.strip().upper() == "TBD")
-        )
+        base_is_unmapped = base is None or is_tbd(base)
         if base_is_unmapped:
             return None, (
                 f"memory_map.base is {'unset' if base is None else 'TBD'} "
@@ -199,18 +198,37 @@ def resolve_carve_outs(
         prefers_cacheable = bool(entry.cacheable) if entry.cacheable is not None else False
         endpoint_set = set(entry.endpoints)
 
-        # Filter candidates: accessibility covers every endpoint.
+        # Filter candidates: accessibility covers every endpoint, and the
+        # region isn't marked non-allocatable for IPC carve-outs
+        # (`carveout: false` -- e.g. a flash-class MRAM sub-region that
+        # must publish a real `base` for the board generator's partition
+        # table but isn't byte-addressable shared memory a raw_shmem/
+        # rpmsg carve-out can safely land in).
         candidates: list[dict[str, Any]] = []
+        excluded_names: list[str] = []
         for region in memory_map:
             af = set(region.get("accessible_from") or [])
             if not endpoint_set.issubset(af):
                 continue
+            if region.get("carveout") is False:
+                excluded_names.append(region["name"])
+                continue
             candidates.append(region)
         if not candidates:
-            resolved.append(_blocked_carve_out(entry, (
-                f"ipc entry '{entry.name}' endpoints {entry.endpoints} "
-                f"have no matching memory_map region in SoM "
-                f"{project.sku}")))
+            if excluded_names:
+                resolved.append(_blocked_carve_out(entry, (
+                    f"ipc entry '{entry.name}' endpoints {entry.endpoints} "
+                    f"only match memory_map region(s) {excluded_names} in "
+                    f"SoM {project.sku}, and all of them are marked "
+                    f"`carveout: false` (flash-class, not safe as shared "
+                    f"memory); add an allocatable region (`carveout: true` "
+                    f"or omitted) to metadata/e1m_modules/{project.sku}.yaml "
+                    f"or remove the matching ipc entry from board.yaml.")))
+            else:
+                resolved.append(_blocked_carve_out(entry, (
+                    f"ipc entry '{entry.name}' endpoints {entry.endpoints} "
+                    f"have no matching memory_map region in SoM "
+                    f"{project.sku}")))
             continue
 
         # Prefer the region whose `cacheable:` flag matches the entry's

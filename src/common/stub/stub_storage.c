@@ -4,8 +4,11 @@
  *
  * Storage (+ inline-AES extension) NOSUPPORT stubs --
  * <alp/storage.h>.  Split out of the former
- * src/common/stub_backend.c monolith (issue #673).  Unguarded: no
- * vendor backend has ever overridden this class.
+ * src/common/stub_backend.c monolith (issue #673).  Was unguarded
+ * (no vendor backend had ever overridden this class) until #1140
+ * wired storage_dispatch.c into the Yocto build -- now gated behind
+ * ALP_VENDOR_OVERRIDES_STORAGE so the two TUs don't double-define
+ * every alp_storage_* symbol on that build.
  */
 
 #include <stddef.h>
@@ -14,6 +17,9 @@
 #include "alp/peripheral.h"
 #include "alp/storage.h"
 
+#include "stub_internal.h"
+
+#if !defined(ALP_VENDOR_OVERRIDES_STORAGE)
 alp_storage_t *alp_storage_open(const alp_storage_config_t *cfg)
 {
 	(void)cfg;
@@ -74,3 +80,4 @@ alp_status_t alp_storage_configure_inline_aes(alp_storage_t                  *st
 	(void)storage;
 	return ALP_ERR_NOSUPPORT;
 }
+#endif /* !ALP_VENDOR_OVERRIDES_STORAGE */

@@ -127,10 +127,19 @@ static bool fake_op(struct fake_handle *h, bool *saw_poison)
 	return true;
 }
 
-/* Returns true if this caller won the close and tore the handle down. */
+/* Returns true if this caller won the close and tore the handle down.
+ * Round-2 dev review: alp_handle_begin_close() (the busy-spin/short-op
+ * name) was collapsed into alp_handle_begin_close_blocking() once it
+ * became a pure wrapper over it (issue #1114) -- every real call site
+ * was repointed at the _blocking() name directly, including this one.
+ * fake_close() (scenarios 1-3, short synchronous ops) and
+ * fake_close_blocking() (scenario 4 below, a genuinely blocking op) are
+ * kept as separate test helpers because the SCENARIOS they drive are
+ * still distinct interleavings worth proving separately, even though
+ * both now call the same underlying primitive. */
 static bool fake_close(struct fake_handle *h)
 {
-	if (!alp_handle_begin_close(&h->lifecycle, &h->active_ops)) {
+	if (!alp_handle_begin_close_blocking(&h->lifecycle, &h->active_ops)) {
 		return false;
 	}
 	h->backend_state = 0u; /* poison: any op still reading this is a UAF */

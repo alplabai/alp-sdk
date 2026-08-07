@@ -53,7 +53,7 @@ The host waits for READY before the reply header and reply payload
 phases.  Firmware side: `hal/ti/transport_hw_ti_spi.c` (a `SPI_SLAVE` +
 `SPI_MODE_CALLBACK` state machine that replays the captured frame through
 the silicon-free byte seams and advances on transfer completion).  Host
-side: `chips/cc3501e/cc3501e.c` `cc3501e_request()` (matching four-phase
+side: `chips/cc3501e/cc3501e_core.c` `cc3501e_request()` (matching four-phase
 sequence + `resp_to_status()` on `payload[0]`).  Host + firmware are
 reconciled to each other and to the header, and this hardware-SS0 bridge
 has been bench-validated on E1M-AEN801.
@@ -71,7 +71,7 @@ different thing and they must not be conflated:
 | Version | Source of truth | Surfaced by | Gates |
 |---|---|---|---|
 | **App SemVer** | `firmware-version.txt` (e.g. `0.2.0`) | `GET_DIAG_INFO.fw_version` (u16) | firmware release identity — human-facing "what's running" |
-| **Wire protocol version** | `ALP_CC3501E_PROTOCOL_VERSION` in `<alp/protocol/cc3501e.h>` (currently `3`) | `GET_VERSION` (0x01) | host↔firmware wire compatibility (host refuses a mismatch) |
+| **Wire protocol version** | `ALP_CC3501E_PROTOCOL_VERSION` in `<alp/protocol/cc3501e.h>` (currently `4`) | `GET_VERSION` (0x01) | host↔firmware wire compatibility (host refuses a mismatch) |
 | **GPE flash/image version** | `--version` in `ti/deploy_validate.sh` (date-derived) | — (programmer only) | CC35 vendor-RoT anti-rollback (unit rejects `<=` the programmed value) |
 
 **App SemVer → `fw_version` marker.** The runtime u16 is *derived* from

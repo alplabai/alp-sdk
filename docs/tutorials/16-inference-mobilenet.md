@@ -27,8 +27,9 @@ time).
 > silicon: a TFLM + Ethos-U85 fixture runs to completion (RESULT
 > PASS, flashed via J-Link direct MRAM).  The full 224x224
 > MobileNet artefact in this tutorial is not yet HiL-exercised;
-> the matching `docs/test-plan.md` row stays 🟡 until the
-> nightly-aen-hil runner runs that model end-to-end.
+> the matching `docs/test-plan.md` row stays 🟡 until someone runs
+> that model end-to-end on the AEN bench (`docs/ci/HW-IN-LOOP.md`)
+> and attaches the result.
 
 ---
 
@@ -64,7 +65,7 @@ Backend selection:
 | `_CPU` | TFLM reference / Helium / NEON kernels; always available. |
 
 The `ETHOS_U` token is a single customer-facing handle that
-covers every Arm Ethos NPU variant.  The orchestrator emits
+covers every Arm Ethos NPU variant. The planner emits
 per-variant `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U{55,65,85}=y`
 gates from the silicon capability counts (`ethos_u{55,65,85}_count`,
 resolved from the SoC JSON `npus[]`) (G-1
@@ -205,7 +206,7 @@ an explicit value).
 ## 5. Build + flash
 
 ```bash
-tan --project examples/aen/edgeai-vision-aen build
+tan build --project examples/aen/edgeai-vision-aen
 west flash
 ```
 
@@ -405,8 +406,10 @@ provisioned.
   public API.
 - [`examples/aen/edgeai-vision-aen/`](../../examples/aen/edgeai-vision-aen/)
   -- end-to-end demo: camera → ISP → inference → OLED overlay.
-- [Vela docs](https://github.com/ARM-software/ethos-u-vela) --
-  the Ethos-U pre-compiler.
+- [Vela docs](https://gitlab.arm.com/artificial-intelligence/ethos-u/ethos-u-vela) --
+  the Ethos-U pre-compiler (the `ARM-software/ethos-u-vela` GitHub
+  mirror this used to cite is gone; ARM develops Vela on its own
+  GitLab).
 - [`scripts/alp_orchestrate/`](../../scripts/alp_orchestrate/)
   § *Per-variant Ethos-U selector* + § *CPU-class TFLM kernel
   selector* -- the G-1 / G-2 emit logic for advanced readers.

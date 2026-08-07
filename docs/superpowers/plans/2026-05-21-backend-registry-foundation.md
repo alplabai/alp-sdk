@@ -1,5 +1,10 @@
 # Backend Registry Foundation (Slice 0) Implementation Plan
 
+> **STATUS — LANDED.** `include/alp/backend.h` + `src/backend.c` exist
+> in the tree today, and the registry pattern this slice scaffolded
+> has since been adopted by every peripheral class under
+> `src/backends/`. Kept for implementation-history context.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Ship the foundation for the backend-registry architecture (Slice 0 of `docs/superpowers/specs/2026-05-21-backend-registry-design.md`): the public macro + selector, instance-capability types, three new error codes, a sentinel-backed linker-section visibility test, a toy-class end-to-end demo, and three CI gates — without migrating any real subsystem yet.

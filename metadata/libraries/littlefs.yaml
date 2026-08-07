@@ -25,14 +25,15 @@
 #     BSD text, including the "neither the name of ARM nor the names of
 #     its contributors" clause).
 #
-# HW-backends: metadata/library-profiles/littlefs/hw-backends.yaml carries
-# per-accelerator priority binding (xSPI/HexSPI/eMMC/QuadSPI DMA flavours);
-# folded in WS6-c Phase 3 (needs library-v1 schema extension).
+# HW-backends: this manifest's own `integration.zephyr.hw_backends:`
+# block below carries per-accelerator priority binding (xSPI/HexSPI/
+# eMMC/QuadSPI DMA flavours); folded in from the retired standalone
+# metadata/library-profiles/littlefs/hw-backends.yaml in WS6-c Phase 3.
 #
 # No `requires:` -- CONFIG_ALP_LITTLEFS_SYNC_IO=y (synchronous I/O) is the
 # always-available floor on every target this manifest's
 # `integration.zephyr` section supports; the DMA flavours named in
-# hw-backends.yaml above are opportunistic per-SoM storage bus, never a
+# `hw_backends:` above are opportunistic per-SoM storage bus, never a
 # hard requirement (the underlying flash/eMMC device itself is board
 # wiring, not a SoC capability key).
 #

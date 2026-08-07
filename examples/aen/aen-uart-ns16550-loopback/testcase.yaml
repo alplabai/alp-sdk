@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the spare ns16550 UART (Alif uart3 @0x4901b000,
+# IRQ 127) on the E1M-AEN801 (Ensemble E8, M55-HE): a real end-to-end byte
+# round-trip via the ns16550 MCR LOOP bit -- no jumper wire required, and no
+# console path disturbed (uart3 is neither the E1M carrier console uart5 nor
+# the DevKit console uart2).
+#
+# Compile-checks the driver + DT node on the real E8 board target; filtered OUT
+# of the native_sim PR gate (platform_allow = the AEN801 HE board only).
+
+sample:
+  name: aen-uart-ns16550-loopback
+  description: |
+    Bench RAM-run ns16550 UART (uart3@4901b000) loopback proof for the
+    E1M-AEN801 (Alif Ensemble E8, Cortex-M55-HE): uses uart_poll_out/
+    uart_poll_in against the controller's internal MCR LOOP bit.
+
+tests:
+  alp_sdk.examples.aen.uart_ns16550_loopback.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - uart
+    build_only: true   # the UART loopback check is a bench flash, not a CI run.

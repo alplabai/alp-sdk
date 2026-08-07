@@ -1,7 +1,11 @@
 # ADC Registry Pilot (Slice 1) Design
 
 **Date:** 2026-05-22
-**Status:** Draft — pending implementation
+**Status:** **LANDED.** `src/backends/adc/` exists with `adc_ops.h` +
+`alif_e7.c` / `alif_e8.c` / `gd32_bridge.c` / `sw_fallback.c` /
+`testing_drv.c` / `yocto_drv.c` / `zephyr_drv.c` — the three backends
+this pilot describes and more.  Kept for the migration-pattern
+rationale.
 **Owner:** alpCaner
 **Spec depth:** Single-subsystem migration (one PR / one plan)
 **Predecessor:** `docs/superpowers/specs/2026-05-21-backend-registry-design.md` Section 6 → Slice 1

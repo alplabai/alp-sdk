@@ -395,8 +395,27 @@ config SDHC_BUFFER_ALIGNMENT
 	int "SDHC buffer alignment"
 	default 512
 
+config SDHC_DESCRIPTOR_USE_SECTION
+	bool "Place the SDHC ADMA descriptor table in a named linker section"
+	help
+	  Off by default: the descriptor table lives in normal .bss.  Turn
+	  this on only if a board names a real region in
+	  CONFIG_SDHC_DESCRIPTOR_SECTION (e.g. for DMA-coherency or
+	  performance reasons) -- applying the attribute with an empty section
+	  name is a hard link error (an orphan section literally named "")
+	  under -Wl,--fatal-warnings, not a silent no-op.  Turning this on
+	  without also setting a non-empty section name is a BUILD_ASSERT
+	  failure in sdhc_dwc.c, deliberately, rather than that link error.
+
+	  Note .bss is not automatically DMA-reachable: on the AEN801 boards
+	  `zephyr,sram = &dtcm` puts it in CPU-local DTCM, and with
+	  CONFIG_SDHC_DWC_DMA_ADDR_TRANSLATE=n the driver programs that same
+	  local address into DWC_SDHC_ADMA_SA_LOW_R.  Both need revisiting
+	  together before ADMA moves real data.
+
 config SDHC_DESCRIPTOR_SECTION
 	string "Linker section for SDHC DMA descriptors"
+	depends on SDHC_DESCRIPTOR_USE_SECTION
 	default ""
 
 config SDHC_DWC_SDMA

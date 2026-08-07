@@ -1,8 +1,15 @@
 # community.alplab.ai — content sync (scope A)
 
+> **Historical transcript.** Design spec dated 2026-05-14. The SDK
+> has since shipped through the v0.15.0 release candidate
+> (`v0.15.0-rc1`; no plain `v0.15.0` tag exists) and into the ongoing
+> v0.16.0 development cycle (see `VERSIONS.md`, `CHANGELOG.md`) --
+> cross-check the current tree before treating anything below as
+> current design intent; kept for design-rationale only.
+
 **Date:** 2026-05-14
-**Target:** Discourse forum at `community.alplab.ai` running on
-Hostinger VPS (`erp.alplab.ai`, `31.97.73.18`), container `app`
+**Target:** Discourse forum at `community.alplab.ai` running on a
+hosting-provider VPS (`<ops-host>.alplab.ai`, `<vps-ip>`), container `app`
 based on `local_discourse/app` standalone install.
 **Source repos:**
 [`alp-sdk`](https://github.com/alplabai/alp-sdk),

@@ -154,6 +154,24 @@ def test_load_board_yaml_rejects_unknown_core(tmp_path: Path) -> None:
     assert "did you mean" in msg.lower()
 
 
+def test_load_board_yaml_rejects_duplicate_top_level_key(tmp_path: Path) -> None:
+    """#1127: a repeated `som:` key must FAIL the load, not silently keep
+    only the last value (`yaml.safe_load` does that with no error)."""
+    path = _write_board(tmp_path, """
+som:
+  sku: E1M-AEN801
+som:
+  sku: E1M-V2N101
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./src
+""")
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    assert "duplicate key" in str(excinfo.value).lower()
+
+
 def test_load_board_yaml_rejects_unknown_features_key(tmp_path: Path) -> None:
     path = _write_board(tmp_path, """
 som:
@@ -210,12 +228,23 @@ def test_load_board_yaml_rejects_board_preset_family_mismatch(tmp_path: Path) ->
 
 
 # Customer kept the AEN-shaped `cores.m55_hp:` block but swapped
-# `som.sku:` to E1M-NX9101 (i.MX 93 topology: m33 + a55_cluster, no
+# `som.sku:` to E1M-V2N101 (E1M-X topology: m33_sm + a55_cluster, no
 # m55_hp).  Pre-fix the orchestrator silently dropped the m55_hp
 # entry; the customer got an empty slice with no diagnostic.
+#
+# Was E1M-NX9101 (an in-family, Cortex-M-class SoM with a genuinely
+# different topology shape from AEN's m55_hp/m55_he) until #1025:
+# NX9101's only hw_rev (imx93 r1) is `status: tbd`, so
+# `load_board_yaml` now refuses it outright (SdkRevisionNotBuildable)
+# before this test's cores:/topology: mismatch is ever reached --
+# there is no second hw_rev to pick instead. E1M-V2N101 (E1M-X family)
+# is the nearest buildable SoM with a topology that also has no
+# `m55_hp` key, so it still exercises the same "wrong-shaped cores:"
+# hard-fail; swap back to E1M-NX9101 once imx93 r1 carries a buildable
+# status, if an in-family repro is preferred.
 G4_CROSS_CLASS_SWAP = """
 som:
-  sku: E1M-NX9101
+  sku: E1M-V2N101
 
 cores:
   m55_hp:
@@ -225,19 +254,21 @@ cores:
 """
 
 
-# Customer remembered to rename one core (m33) but forgot the second
-# (m55_hp).  Pre-#603 this only soft-WARNed and silently dropped the
-# `m55_hp` slice while the file still validated "clean"; #603 makes
-# this a hard error like the all-unmatched case above -- there is no
-# compatibility policy that tolerates an unknown core key.
+# Customer remembered to rename one core (m33_sm) but forgot the
+# second (m55_hp).  Pre-#603 this only soft-WARNed and silently
+# dropped the `m55_hp` slice while the file still validated "clean";
+# #603 makes this a hard error like the all-unmatched case above --
+# there is no compatibility policy that tolerates an unknown core key.
+# See G4_CROSS_CLASS_SWAP's comment above for why this is E1M-V2N101,
+# not E1M-NX9101 (#1025).
 G4_PARTIAL_MATCH = """
 som:
-  sku: E1M-NX9101
+  sku: E1M-V2N101
 
 cores:
-  m33:
+  m33_sm:
     os: zephyr
-    app: ./m33
+    app: ./m33_sm
     peripherals: [i2c]
   m55_hp:
     os: zephyr
@@ -256,7 +287,7 @@ def test_unknown_cores_key_raises(tmp_path: Path) -> None:
     assert "did you mean" in msg.lower()
     assert "m33" in msg
     assert "a55_cluster" in msg
-    assert "E1M-NX9101" in msg
+    assert "E1M-V2N101" in msg
     assert "topology" in msg
 
 
@@ -271,6 +302,51 @@ def test_partial_match_raises(tmp_path: Path) -> None:
     assert "m55_hp" in msg
     assert "did you mean" in msg.lower()
     assert "m33" in msg
-    assert "E1M-NX9101" in msg
+    assert "E1M-V2N101" in msg
+
+
+# ---------------------------------------------------------------------
+# 4c. #1088: `cacheable: true` on a `kind: rpmsg` entry has no
+#     cache-maintenance implementation behind it -- reject at load time
+# ---------------------------------------------------------------------
+
+
+def test_load_board_yaml_rejects_rpmsg_cacheable_true(tmp_path: Path) -> None:
+    """`cfg->cacheable` is stored on the rpc backend struct
+    (src/backends/rpc/{zephyr,yocto}_drv.c) and never read again -- no
+    `sys_cache_*` call exists anywhere under src/ or include/.  A
+    `cacheable: true` rpmsg entry would therefore select a code path
+    that promises coherency it can't deliver, which is worse than no
+    flag at all, so the loader refuses it outright rather than
+    silently honouring it."""
+    body = V2N_HAPPY.replace(
+        "    name: alp_default_rpmsg\n",
+        "    name: alp_default_rpmsg\n    cacheable: true\n",
+    )
+    assert "cacheable: true" in body  # guard against a silent no-op replace
+    path = _write_board(tmp_path, body)
+    with pytest.raises(OrchestratorError) as excinfo:
+        load_board_yaml(path)
+    msg = str(excinfo.value)
+    assert "alp_default_rpmsg" in msg
+    assert "rpmsg" in msg
+    assert "cacheable: true" in msg
+    assert "1088" in msg
+
+
+# ---------------------------------------------------------------------
+# 5. _silicon_to_soc_path -- migrated onto resolve_soc_path() (issue #1004)
+# ---------------------------------------------------------------------
+
+
+def test_silicon_to_soc_path_rejects_malformed_ref(tmp_path: Path) -> None:
+    """Pins the OrchestratorError shape #1004's migration promised to
+    preserve: a malformed `silicon:` ref still raises OrchestratorError
+    with this exact message, not resolve_soc_path()'s bare `None`."""
+    from alp_orchestrate.loader import _silicon_to_soc_path
+
+    with pytest.raises(OrchestratorError) as excinfo:
+        _silicon_to_soc_path("acme:widget", tmp_path)
+    assert str(excinfo.value) == "silicon ref 'acme:widget' is not a triple-colon string"
 
 

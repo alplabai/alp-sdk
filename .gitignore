@@ -38,6 +38,12 @@ twister-out.*/
 modules/
 zephyr/.cache/
 
+# tan-cli Python-port checkout, sparse-cloned locally by the same
+# actions/checkout step tan-docs-drift.yml / onramp-clean-container.yml use
+# in CI -- never vendored into alp-sdk itself.
+.tan-cli/
+tan-cli/
+
 # tan's per-project active-SDK pointer (`tan sdk switch`, issue #949) --
 # written under whatever directory `--project` names, including an
 # in-tree example (e.g. examples/peripheral-io/gpio-button-led/.alp/)
@@ -148,3 +154,8 @@ meta-alp-sdk/recipes-bsp/trusted-firmware-a/trusted-firmware-a/ddr_param_def_lpd
 ensemble_vela.ini
 **/ensemble_vela.ini
 firmware/cc3501e/hal/ti/cc3501e_ota_candidate.c
+
+# Yocto externalsrc drops these symlinks into S (the source tree) on every
+# build; they point into the build directory and must never be committed.
+oe-logs
+oe-workdir

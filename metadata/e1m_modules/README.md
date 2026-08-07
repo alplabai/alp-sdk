@@ -1,6 +1,9 @@
 # `metadata/e1m_modules/`
 
-Per-SoM-family metadata for the E1M-X module catalogue.
+Per-SoM-family metadata for the E1M module catalogue -- both form
+factors.  AEN (`E1M-AEN301..801`) and imx93 (`E1M-NX9101` [^imx93-tbd])
+are **E1M** (35×35, `default_board: E1M-EVK` in each SKU's preset);
+v2n and v2n-m1 are **E1M-X** (45×65, `default_board: E1M-X-EVK`).
 
 Each family directory carries the pin-to-function mapping for the
 silicon under the module's lid plus the per-revision SDK-version
@@ -86,7 +89,8 @@ Rules (enforced by `scripts/validate_metadata.py`):
 * omitting the field means the SKU inherits the full silicon capability
   set — the default for every current SKU.
 
-Downstream, `resolve_capabilities()` (scripts/alp_project.py) forces each
+Downstream, `resolve_capabilities()` (scripts/alp_project_loader.py --
+re-exported for compat through `scripts/alp_project.py`) forces each
 listed capability to `false`/`0` for that SKU, and
 `scripts/gen_soc_caps.py` appends an `ALP_SOM_<SKU>`-gated override block
 to `include/alp/soc_caps.h` so `ALP_HAS(...)` drops the matching

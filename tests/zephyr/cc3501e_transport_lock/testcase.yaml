@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Native-sim concurrency regression test for issue #1116: two threads
+# sharing one cc3501e_t must not interleave cc3501e_request() transactions
+# on the CS-less SPI link.  Lives under tests/zephyr/ (not tests/unit/) so
+# the pr-twister gate actually runs it -- tests/unit/ is not yet in any
+# twister root (issue #90).
+
+tests:
+  alp_sdk.cc3501e.transport_lock:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - cc3501e
+      - concurrency

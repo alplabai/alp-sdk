@@ -130,7 +130,7 @@ void alp_spi_close(alp_spi_t *bus)
 	 * state.ops (issue #629). Losing the CAS (already closed/closing/
 	 * never-opened) makes this a no-op, matching the existing
 	 * void-close idempotency contract. */
-	if (!alp_handle_begin_close(&bus->lifecycle, &bus->active_ops)) return;
+	if (!alp_handle_begin_close_blocking(&bus->lifecycle, &bus->active_ops)) return;
 	if (bus->state.ops != NULL && bus->state.ops->close != NULL) {
 		bus->state.ops->close(&bus->state);
 	}

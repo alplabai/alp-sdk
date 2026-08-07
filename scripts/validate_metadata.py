@@ -28,6 +28,16 @@ except ImportError:
     sys.exit("validate_metadata: PyYAML is required.  Install via `pip install pyyaml`.")
 
 REPO = Path(__file__).resolve().parent.parent
+# Needed so `alp_orchestrate.sdk_compat` resolves against THIS checkout's
+# scripts/ even when an editable pip install (e.g. alp_sdk_cli) has
+# registered a meta-path finder that would otherwise redirect the package
+# import to a different alp-sdk checkout -- same idiom check_build_plan.py /
+# check_system_manifest.py / check_emit_snapshots.py already use.
+sys.path.insert(0, str(REPO / "scripts"))
+
+from alp_project_loader import _sku_family, resolve_soc_path  # noqa: E402
+from alp_orchestrate.sdk_compat import assert_exclusion_still_not_buildable  # noqa: E402
+from strict_loaders import strict_json_loads, strict_yaml_load  # noqa: E402
 
 # Power/ground nets are allowed as pin signals without a signals[] entry.
 _POWER_NETS = {"VDD", "VDDIO", "VCC", "GND", "VSS", "AVDD", "DVDD"}
@@ -148,7 +158,7 @@ def _check_silicon_capability_restrictions(som_files) -> list:
     for path in som_files:
         rel = path.relative_to(REPO).as_posix()
         try:
-            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
         except Exception:
             continue  # parse errors already reported by the schema pass
         if not isinstance(doc, dict):
@@ -163,10 +173,7 @@ def _check_silicon_capability_restrictions(som_files) -> list:
         msgs: list[str] = []
         soc_caps: dict = {}
         silicon = str(doc.get("silicon", ""))
-        parts = silicon.split(":")
-        soc_path = None
-        if len(parts) == 3:
-            soc_path = SOCS / parts[0] / parts[1] / f"{parts[2]}.json"
+        soc_path = resolve_soc_path(silicon, SOCS.parent)
         if soc_path is None or not soc_path.is_file():
             msgs.append(f"silicon_capabilities: silicon ref `{silicon}` does not "
                         f"resolve to a metadata/socs/ spec, cannot validate "
@@ -201,6 +208,56 @@ def _check_silicon_capability_restrictions(som_files) -> list:
     return failures
 
 
+def _check_som_peripheral_instance_uniqueness(som_files) -> list:
+    """Reject duplicate `instance` slugs within one preset's `soc_peripheral_instances`.
+
+    The schema has no per-key uniqueness constraint for this array -- JSON
+    Schema `uniqueItems` only rejects two byte-identical objects, so two
+    entries naming the same `instance` slug with a different `class` /
+    `driver_status` validate cleanly today.  #655's DT/pinctrl generation
+    binds nodes by this slug, so a duplicate is a real generation hazard,
+    not an editorial nit.  Returns a failure list shaped like
+    `_check_files()`.  Presets without the block are skipped.
+    """
+    failures: list[tuple[Path, list[str]]] = []
+    for path in som_files:
+        rel = path.relative_to(REPO).as_posix()
+        try:
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue
+        entries = doc.get("soc_peripheral_instances")
+        if not isinstance(entries, list):
+            continue
+
+        counts: dict[str, int] = {}
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            inst = entry.get("instance")
+            if isinstance(inst, str):
+                counts[inst] = counts.get(inst, 0) + 1
+
+        msgs = [
+            f"soc_peripheral_instances: instance `{inst}` declared {count} "
+            f"times -- slugs must be unique within a preset (#655 binds DT "
+            f"nodes by this name)"
+            for inst, count in sorted(counts.items()) if count > 1
+        ]
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+        else:
+            print(f"OK   {rel}  (soc_peripheral_instances: {len(entries)} "
+                  f"unique instance slug(s))")
+    return failures
+
+
 def _check_silicon_kconfig() -> list:
     """Validate the silicon->Kconfig registry and its socs/ correspondence.
 
@@ -228,11 +285,10 @@ def _check_silicon_kconfig() -> list:
             msgs.append(f"{loc}: {err.message}")
 
     for ref in data.get("knownSilicon", []):
-        parts = ref.split(":")
-        if len(parts) != 3:
+        soc_path = resolve_soc_path(ref, SOCS.parent)
+        if soc_path is None:
             msgs.append(f"knownSilicon[{ref}]: not a <vendor>:<family>:<part> ref")
             continue
-        soc_path = SOCS / parts[0] / parts[1] / f"{parts[2]}.json"
         if not soc_path.is_file():
             msgs.append(f"knownSilicon[{ref}]: no SoC spec at "
                         f"{soc_path.relative_to(REPO).as_posix()}")
@@ -292,7 +348,7 @@ def _check_chip_semantics(chip_files) -> list:
     for path in chip_files:
         rel = path.relative_to(REPO).as_posix()
         try:
-            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
         except Exception:
             continue  # parse errors already reported by the schema pass
         if not isinstance(doc, dict):
@@ -337,7 +393,7 @@ def _check_soc_npu_pairing(soc_files) -> list:
     failures: list[tuple[Path, list[str]]] = []
     for path in soc_files:
         try:
-            doc = json.loads(path.read_text(encoding="utf-8"))
+            doc = strict_json_loads(path.read_text(encoding="utf-8"), source=path)
         except Exception:
             continue  # parse errors already reported by the schema pass
         npus = doc.get("npus") or []
@@ -397,7 +453,7 @@ def _check_soc_debug_probe_identity(soc_files) -> list:
     failures: list[tuple[Path, list[str]]] = []
     for path in soc_files:
         try:
-            doc = json.loads(path.read_text(encoding="utf-8"))
+            doc = strict_json_loads(path.read_text(encoding="utf-8"), source=path)
         except Exception:
             continue  # parse errors already reported by the schema pass
         variants = doc.get("variants") or []
@@ -440,7 +496,7 @@ def _check_chip_physical(chip_files) -> list:
         except ValueError:
             rel = path.as_posix()  # out-of-tree (e.g. a test fixture); report as-is
         try:
-            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
         except Exception:
             continue  # parse errors already reported by the schema pass
         if not isinstance(doc, dict):
@@ -487,7 +543,7 @@ def _check_block_realizations(block_files, chip_files) -> list:
         except ValueError:
             rel = path.as_posix()  # out-of-tree (e.g. a test fixture); report as-is
         try:
-            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
         except Exception:
             continue  # parse errors already reported by the schema pass
         if not isinstance(doc, dict):
@@ -536,7 +592,7 @@ def _check_library_semantics(library_files) -> list:
         except ValueError:
             rel = path.as_posix()  # out-of-tree (e.g. a test fixture); report as-is
         try:
-            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
         except Exception:
             continue  # parse / schema errors already reported by the schema pass
         if not isinstance(doc, dict):
@@ -602,7 +658,7 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
     library_docs: dict[str, dict] = {}
     for path in library_files:
         try:
-            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
         except Exception:
             continue
         if isinstance(doc, dict) and isinstance(doc.get("name"), str):
@@ -637,13 +693,14 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
     som_docs: dict[str, dict] = {}
     for path in som_files:
         try:
-            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
         except Exception:
             continue
         if isinstance(doc, dict) and isinstance(doc.get("sku"), str):
             som_docs[doc["sku"]] = doc
 
     families_seen: set[str] = set()
+    family_to_som: dict[str, str] = {}
     for idx, cell in enumerate(data.get("familyMatrix") or []):
         if not isinstance(cell, dict):
             continue
@@ -652,6 +709,8 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
         core = cell.get("core")
         if isinstance(family, str):
             families_seen.add(family)
+            if isinstance(som, str):
+                family_to_som[family] = som
         doc = som_docs.get(som)
         if doc is None:
             msgs.append(f"familyMatrix[{idx}]/som: `{som}` has no SoM preset")
@@ -676,6 +735,32 @@ def _check_tier_a_library_ci(library_files, som_files) -> list:
     if missing_families:
         msgs.append("familyMatrix: missing supported SoM families: "
                     + ", ".join(sorted(missing_families)))
+
+    # `excludedFamilies` RATCHET (#1025 round-2 review): each entry claims
+    # its family's SoM has no buildable hw_rev at all -- assert that against
+    # live metadata the same way `excludedLibraries` above is asserted to
+    # still be Tier A, instead of trusting the prose forever.
+    for family, _reason in sorted((data.get("excludedFamilies") or {}).items()):
+        som = family_to_som.get(family)
+        if som is None:
+            msgs.append(f"excludedFamilies[{family}]: no familyMatrix cell "
+                        f"for this family to check against")
+            continue
+        doc = som_docs.get(som)
+        hw_rev = doc.get("default_hw_rev") if doc else None
+        try:
+            family_dir = _sku_family(som) if doc else None
+        except ValueError:
+            family_dir = None
+        if not family_dir or not hw_rev:
+            msgs.append(f"excludedFamilies[{family}]: cannot resolve "
+                        f"family_dir/default_hw_rev for som `{som}`")
+            continue
+        stale = assert_exclusion_still_not_buildable(
+            REPO / "metadata", family_dir, hw_rev,
+            gate=f"tier-a-library-ci.json excludedFamilies[{family}]")
+        if stale:
+            msgs.append(stale)
 
     if msgs:
         print(f"FAIL {rel}")
@@ -706,7 +791,7 @@ def _board_tree_identifiers() -> dict[str, set[str]]:
         return trees
     for path in sorted(ZEPHYR_ALP_BOARDS.glob("*/*.yaml")):
         try:
-            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
         except Exception:
             continue
         if not isinstance(doc, dict):
@@ -754,7 +839,7 @@ def _check_board_targets(som_files) -> list:
         except ValueError:
             rel = path.as_posix()
         try:
-            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
         except Exception:
             continue  # schema pass already reported the parse failure
         if not isinstance(doc, dict):
@@ -809,7 +894,7 @@ def main() -> int:
         return 1
     soc_failures = _check_files(
         "JSON", soc_files, soc_validator,
-        lambda p: json.loads(p.read_text(encoding="utf-8")),
+        lambda p: strict_json_loads(p.read_text(encoding="utf-8"), source=p),
         "ref",
     )
     # Semantic cross-ref the schema can't express: npus[].paired_core -> cores[].
@@ -829,7 +914,7 @@ def main() -> int:
             print()
             som_failures = _check_files(
                 "YAML", som_files, som_validator,
-                lambda p: yaml.safe_load(p.read_text(encoding="utf-8")),
+                lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
                 "sku",
             )
 
@@ -844,7 +929,7 @@ def main() -> int:
             print()
             hwrev_failures = _check_files(
                 "YAML", hwrev_files, hwrev_validator,
-                lambda p: yaml.safe_load(p.read_text(encoding="utf-8")),
+                lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
                 "family",
             )
 
@@ -862,7 +947,7 @@ def main() -> int:
             print()
             board_failures = _check_files(
                 "YAML", board_files, board_validator,
-                lambda p: yaml.safe_load(p.read_text(encoding="utf-8")),
+                lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
                 "name",
             )
 
@@ -877,7 +962,7 @@ def main() -> int:
             print()
             chip_failures = _check_files(
                 "YAML", chip_files, chip_validator,
-                lambda p: yaml.safe_load(p.read_text(encoding="utf-8")),
+                lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
                 "chip_id",
             )
             chip_failures += _check_chip_semantics(chip_files)
@@ -894,7 +979,7 @@ def main() -> int:
             print()
             block_failures = _check_files(
                 "YAML", block_files, block_validator,
-                lambda p: yaml.safe_load(p.read_text(encoding="utf-8")),
+                lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
                 "block_id",
             )
             block_failures += _check_block_realizations(block_files, chip_files)
@@ -911,7 +996,7 @@ def main() -> int:
             print()
             library_failures = _check_files(
                 "YAML", library_files, library_validator,
-                lambda p: yaml.safe_load(p.read_text(encoding="utf-8")),
+                lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
                 "name",
             )
             library_semantic_failures = _check_library_semantics(library_files)
@@ -927,6 +1012,12 @@ def main() -> int:
     if som_files:
         print()
         restriction_failures = _check_silicon_capability_restrictions(som_files)
+
+    # SoM `soc_peripheral_instances[].instance` slug uniqueness.
+    instance_uniqueness_failures: list = []
+    if som_files:
+        print()
+        instance_uniqueness_failures = _check_som_peripheral_instance_uniqueness(som_files)
 
     # Silicon -> Kconfig registry + socs/ correspondence.
     print()
@@ -944,6 +1035,7 @@ def main() -> int:
                       + len(library_failures) + len(library_semantic_failures)
                       + len(board_target_failures)
                       + len(restriction_failures)
+                      + len(instance_uniqueness_failures)
                       + len(silicon_kconfig_failures)
                       + len(peripheral_kconfig_failures)
                       + len(tier_a_library_ci_failures))

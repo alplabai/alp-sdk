@@ -1,5 +1,10 @@
 # ADC Registry Pilot (Slice 1) Implementation Plan
 
+> **STATUS — LANDED.** `src/backends/adc/` exists with the three
+> backends named below plus more (`alif_e7.c`, `alif_e8.c`,
+> `gd32_bridge.c`, `sw_fallback.c`, `testing_drv.c`, `yocto_drv.c`,
+> `zephyr_drv.c`). Kept for implementation-history context.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Migrate the ADC subsystem from today's Kconfig `#if`-ladder dispatch (in `src/zephyr/peripheral_adc.c`) to the linker-section backend registry shipped in Slice 0 (PR #17), with three backends (Alif Ensemble E7, V2N GD32 bridge, SW fallback) and the first vendor-extension header (`<alp/ext/alif/adc.h>`).

@@ -296,8 +296,44 @@ def _clone_metadata_gates(repo_root: Path, tmp_repo: Path) -> None:
     """
     shutil.copytree(repo_root / "metadata", tmp_repo / "metadata")
     (tmp_repo / "scripts").mkdir(parents=True)
-    for script in ("validate_metadata.py", "check_inference_backend_parity.py"):
+    # alp_project_loader.py imports `sentinels` (scripts/sentinels.py) --
+    # omitting it here used to pass anyway only because an editable
+    # `pip install -e .` puts the REAL scripts/ on sys.path, so the
+    # subprocess below silently fell through to that copy instead of this
+    # scaffolded one (alp-sdk#1110), defeating the isolation this helper
+    # exists to provide.
+    # The TRANSITIVE import closure of the two gate scripts, not a guess:
+    # computed by walking module-scope imports from `validate_metadata.py` and
+    # `check_inference_backend_parity.py` through every sibling under
+    # `scripts/`. Four of these were missing, so the subprocess below died with
+    # `ModuleNotFoundError` before it ever reached the gate this test exists to
+    # run -- see the copytree note below for why that went unnoticed.
+    #
+    # If a gate script grows a new module-scope import of a sibling, add it
+    # here. Re-derive with an AST walk over `scripts/` rather than by trial
+    # and error; the chain is four levels deep in places
+    # (validate_metadata -> alp_orchestrate -> alp_project -> alp_project_emit).
+    for script in ("validate_metadata.py", "check_inference_backend_parity.py",
+                   "alp_project_loader.py", "sentinels.py", "strict_loaders.py",
+                   "alp_project.py", "alp_registries.py", "alp_template.py",
+                   "gen_zephyr_board.py"):
         shutil.copy(repo_root / "scripts" / script, tmp_repo / "scripts" / script)
+    # validate_metadata.py's #1025 ratchet (assert_exclusion_still_not_
+    # buildable) needs the real alp_orchestrate package alongside it --
+    # without this, a machine with an editable `pip install -e` of a
+    # DIFFERENT alp-sdk checkout resolves `alp_orchestrate` from THAT
+    # checkout instead of this copy, silently testing stale code.
+    #
+    # `alp_cli`, `alp_model` and `alp_project_emit` join `alp_orchestrate` for
+    # the same reason: all four are in that closure. `alp_orchestrate/loader.py`
+    # imports `alp_cli.validator.iter_schema_errors` at module scope, so
+    # without `alp_cli` this helper only ever "worked" on a machine carrying an
+    # editable `pip install -e .` of some alp-sdk -- resolving the REAL
+    # `scripts/` instead of this scaffolded copy, which is precisely the leak
+    # alp-sdk#1110 closed for the modules above. On a clean checkout the gate
+    # never ran; on a dirty one it ran against the wrong tree.
+    for pkg in ("alp_orchestrate", "alp_cli", "alp_model", "alp_project_emit"):
+        shutil.copytree(repo_root / "scripts" / pkg, tmp_repo / "scripts" / pkg)
     select_c = tmp_repo / "src" / "backends" / "inference" / "alp_model_select.c"
     select_c.parent.mkdir(parents=True)
     shutil.copy(

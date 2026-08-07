@@ -1,5 +1,15 @@
 # EEPROM-authoritative SoM hardware revision — Implementation Plan
 
+> **STATUS — LANDED.** `src/common/hw_info_manifest.h` and
+> `ALP_ERR_NOT_PROVISIONED` (`include/alp/hw_info.h`) exist in the
+> tree; the SoM-side ADC cross-check this plan retires is gone.  Kept
+> for implementation-history context.
+>
+> Command examples below use this session's original Windows/WSL
+> checkout paths (e.g. `/mnt/c/Users/<user>/...`) verbatim -- treat
+> them as historical record, not copy-paste-ready commands for today's
+> checkout.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make the on-module EEPROM manifest's `hw_rev` the single authoritative source of the SoM hardware revision; drop the never-implemented SoM-side ADC cross-check; distinguish a blank (unprovisioned) module from a corrupt one.
@@ -22,11 +32,11 @@ Several tasks below run only the `hw_info` twister suite. The WSL inline-variabl
 ```bash
 #!/usr/bin/env bash
 export ZEPHYR_TOOLCHAIN_VARIANT=host
-export ZEPHYR_BASE=/mnt/c/Users/caner/Documents/GitHub/zephyrproject/zephyr
-export EXTRA_ZEPHYR_MODULES=/mnt/c/Users/caner/Documents/GitHub/alp-sdk
+export ZEPHYR_BASE=/mnt/c/Users/<user>/Documents/GitHub/zephyrproject/zephyr
+export EXTRA_ZEPHYR_MODULES=/mnt/c/Users/<user>/Documents/GitHub/alp-sdk
 cd "$ZEPHYR_BASE" || { echo "NO_ZEPHYR_BASE"; exit 2; }
 python3 scripts/twister \
-  --testsuite-root /mnt/c/Users/caner/Documents/GitHub/alp-sdk/tests/zephyr/hw_info \
+  --testsuite-root /mnt/c/Users/<user>/Documents/GitHub/alp-sdk/tests/zephyr/hw_info \
   -p native_sim/native/64 -O /tmp/tw-hwinfo --clobber-output
 rc=$?
 echo "HWINFO_TWISTER rc=$rc"
@@ -35,8 +45,8 @@ exit $rc
 
 Run it (from the Bash tool, after stripping CRs):
 ```bash
-sed -i 's/\r$//' /mnt/c/Users/caner/Documents/GitHub/alp-sdk/_twister_hwinfo.sh
-wsl bash /mnt/c/Users/caner/Documents/GitHub/alp-sdk/_twister_hwinfo.sh
+sed -i 's/\r$//' /mnt/c/Users/<user>/Documents/GitHub/alp-sdk/_twister_hwinfo.sh
+wsl bash /mnt/c/Users/<user>/Documents/GitHub/alp-sdk/_twister_hwinfo.sh
 ```
 Expected on success: `HWINFO_TWISTER rc=0` and twister reporting the `alp_sdk.hw_info` scenario passed.
 
@@ -67,7 +77,7 @@ Change it to (add the comma after `-14`, then the new entry):
 
 - [ ] **Step 2: Format**
 
-Run: `wsl bash -lc 'cd /mnt/c/Users/caner/Documents/GitHub/alp-sdk && clang-format-14 -i include/alp/peripheral.h'`
+Run: `wsl bash -lc 'cd /mnt/c/Users/<user>/Documents/GitHub/alp-sdk && clang-format-14 -i include/alp/peripheral.h'`
 (If `clang-format-14` is not on PATH, use the repo's pinned binary the same way `running-local-ci` invokes it.)
 Expected: the new entry is reflowed in-style; inspect `git diff include/alp/peripheral.h` and confirm only the two intended lines changed (plus any whitespace clang-format applies to the new entry). If `AlignConsecutiveAssignments` reflows neighbouring entries, that is acceptable — accept clang-format's output.
 
@@ -75,8 +85,8 @@ Expected: the new entry is reflowed in-style; inspect `git diff include/alp/peri
 
 Run the hw_info suite (it includes `peripheral.h`):
 ```bash
-sed -i 's/\r$//' /mnt/c/Users/caner/Documents/GitHub/alp-sdk/_twister_hwinfo.sh
-wsl bash /mnt/c/Users/caner/Documents/GitHub/alp-sdk/_twister_hwinfo.sh
+sed -i 's/\r$//' /mnt/c/Users/<user>/Documents/GitHub/alp-sdk/_twister_hwinfo.sh
+wsl bash /mnt/c/Users/<user>/Documents/GitHub/alp-sdk/_twister_hwinfo.sh
 ```
 Expected: `HWINFO_TWISTER rc=0` (behaviour unchanged; this only proves the enum addition compiles).
 
@@ -247,8 +257,8 @@ ZTEST(alp_hw_info, test_classify_null_args_return_inval)
 - [ ] **Step 3: Run the tests to confirm they fail (link error)**
 
 ```bash
-sed -i 's/\r$//' /mnt/c/Users/caner/Documents/GitHub/alp-sdk/_twister_hwinfo.sh
-wsl bash /mnt/c/Users/caner/Documents/GitHub/alp-sdk/_twister_hwinfo.sh
+sed -i 's/\r$//' /mnt/c/Users/<user>/Documents/GitHub/alp-sdk/_twister_hwinfo.sh
+wsl bash /mnt/c/Users/<user>/Documents/GitHub/alp-sdk/_twister_hwinfo.sh
 ```
 Expected: BUILD FAILURE — `undefined reference to alp_hw_info_classify_manifest` / `alp_hw_info_crc32` (the symbols are declared but not yet defined).
 
@@ -367,13 +377,13 @@ with:
 - [ ] **Step 5: Run the tests to confirm they pass**
 
 ```bash
-wsl bash /mnt/c/Users/caner/Documents/GitHub/alp-sdk/_twister_hwinfo.sh
+wsl bash /mnt/c/Users/<user>/Documents/GitHub/alp-sdk/_twister_hwinfo.sh
 ```
 Expected: `HWINFO_TWISTER rc=0`; all `alp_hw_info` ztests pass, including the six new `test_classify_*` cases.
 
 - [ ] **Step 6: Format**
 
-Run: `wsl bash -lc 'cd /mnt/c/Users/caner/Documents/GitHub/alp-sdk && clang-format-14 -i src/zephyr/hw_info_zephyr.c src/common/hw_info_manifest.h tests/zephyr/hw_info/src/main.c'`
+Run: `wsl bash -lc 'cd /mnt/c/Users/<user>/Documents/GitHub/alp-sdk && clang-format-14 -i src/zephyr/hw_info_zephyr.c src/common/hw_info_manifest.h tests/zephyr/hw_info/src/main.c'`
 Expected: minor or no changes; review `git diff` for sanity.
 
 - [ ] **Step 7: Commit**
@@ -498,14 +508,14 @@ Then update the "v0.3 ships the API contract only … both entry points return @
 - [ ] **Step 7: Build + test**
 
 ```bash
-wsl bash /mnt/c/Users/caner/Documents/GitHub/alp-sdk/_twister_hwinfo.sh
+wsl bash /mnt/c/Users/<user>/Documents/GitHub/alp-sdk/_twister_hwinfo.sh
 ```
 Expected: `HWINFO_TWISTER rc=0`; the suite still passes with `som_board_id_mv` gone.
 
 - [ ] **Step 8: Format + commit**
 
 ```bash
-wsl bash -lc 'cd /mnt/c/Users/caner/Documents/GitHub/alp-sdk && clang-format-14 -i include/alp/hw_info.h tests/zephyr/hw_info/src/main.c'
+wsl bash -lc 'cd /mnt/c/Users/<user>/Documents/GitHub/alp-sdk && clang-format-14 -i include/alp/hw_info.h tests/zephyr/hw_info/src/main.c'
 git add include/alp/hw_info.h tests/zephyr/hw_info/src/main.c
 git commit -q -m "refactor(hw_info)!: drop som_board_id_mv; EEPROM-authoritative docs
 
@@ -549,7 +559,7 @@ with these TWO cases (IO now means strictly corruption; NOT_PROVISIONED is the b
 
 Temporarily point the scratch runner at the example (or run the full examples root). Quick check — run the examples suite filtered to this app:
 ```bash
-wsl bash -lc 'export ZEPHYR_TOOLCHAIN_VARIANT=host; export ZEPHYR_BASE=/mnt/c/Users/caner/Documents/GitHub/zephyrproject/zephyr; export EXTRA_ZEPHYR_MODULES=/mnt/c/Users/caner/Documents/GitHub/alp-sdk; cd "$ZEPHYR_BASE" && python3 scripts/twister --testsuite-root /mnt/c/Users/caner/Documents/GitHub/alp-sdk/examples/v2n/v2n-board-id-readout -p native_sim/native/64 -O /tmp/tw-ex --clobber-output'
+wsl bash -lc 'export ZEPHYR_TOOLCHAIN_VARIANT=host; export ZEPHYR_BASE=/mnt/c/Users/<user>/Documents/GitHub/zephyrproject/zephyr; export EXTRA_ZEPHYR_MODULES=/mnt/c/Users/<user>/Documents/GitHub/alp-sdk; cd "$ZEPHYR_BASE" && python3 scripts/twister --testsuite-root /mnt/c/Users/<user>/Documents/GitHub/alp-sdk/examples/v2n/v2n-board-id-readout -p native_sim/native/64 -O /tmp/tw-ex --clobber-output'
 ```
 Expected: the example builds (it may be statically filtered/skipped on native_sim if it requires real hardware — a `skipped` result is acceptable, a BUILD FAILURE is not). If it is skipped by a platform filter, confirm a clean compile instead by running the full examples scope in Task 6.
 
@@ -651,7 +661,7 @@ ADC cross-check).
 - [ ] **Step 6: Run the doc gates**
 
 ```bash
-wsl bash -lc 'cd /mnt/c/Users/caner/Documents/GitHub/alp-sdk && py -3.14 scripts/check_doc_drift.py && py -3.14 scripts/check_doxygen_coverage.py'
+wsl bash -lc 'cd /mnt/c/Users/<user>/Documents/GitHub/alp-sdk && py -3.14 scripts/check_doc_drift.py && py -3.14 scripts/check_doxygen_coverage.py'
 ```
 (If `py -3.14` is Windows-only, run via PowerShell instead: `py -3.14 scripts/check_doc_drift.py; py -3.14 scripts/check_doxygen_coverage.py`.)
 Expected: both pass. If `check_doc_drift.py` complains that `ALP_ERR_NOT_PROVISIONED` is undocumented, confirm it now appears in `docs/board-id.md` (Steps 1-2 add it). If it complains about a now-dangling reference to `check-hw-rev-bins.py` elsewhere, grep for and fix the stray reference.
@@ -672,7 +682,7 @@ git commit -q -m "docs: EEPROM-authoritative SoM revision; retire ADC cross-chec
 - [ ] **Step 1: Confirm no stray references remain**
 
 ```bash
-cd /mnt/c/Users/caner/Documents/GitHub/alp-sdk 2>/dev/null || cd "C:/Users/caner/Documents/GitHub/alp-sdk"
+cd /mnt/c/Users/<user>/Documents/GitHub/alp-sdk 2>/dev/null || cd "C:/Users/<user>/Documents/GitHub/alp-sdk"
 git grep -n 'som_board_id_mv\|adc_cross_check\|check-hw-rev-bins' -- ':!docs/superpowers/specs/*' ':!docs/superpowers/plans/*'
 ```
 Expected: NO matches (the spec/plan docs under `docs/superpowers/` legitimately still mention them as history).
@@ -681,15 +691,15 @@ Expected: NO matches (the spec/plan docs under `docs/superpowers/` legitimately 
 
 Use the load-bearing local gate (full tests + examples roots), per the `reference_local_twister_invocation` convention:
 ```bash
-sed -i 's/\r$//' /mnt/c/Users/caner/Documents/GitHub/alp-sdk/_twister_gap.sh
-wsl bash /mnt/c/Users/caner/Documents/GitHub/alp-sdk/_twister_gap.sh
+sed -i 's/\r$//' /mnt/c/Users/<user>/Documents/GitHub/alp-sdk/_twister_gap.sh
+wsl bash /mnt/c/Users/<user>/Documents/GitHub/alp-sdk/_twister_gap.sh
 ```
 Expected: `TWISTER_DONE rc=0`, 0 failed / 0 errored (skips are fine). Do NOT switch git branches while this runs.
 
 - [ ] **Step 3: clang-format diff gate**
 
 ```bash
-wsl bash -lc 'cd /mnt/c/Users/caner/Documents/GitHub/alp-sdk && git fetch origin dev -q && git diff -U0 origin/dev...HEAD -- "*.c" "*.h" | clang-format-14 --files=- 2>/dev/null; echo "format-check-done"'
+wsl bash -lc 'cd /mnt/c/Users/<user>/Documents/GitHub/alp-sdk && git fetch origin dev -q && git diff -U0 origin/dev...HEAD -- "*.c" "*.h" | clang-format-14 --files=- 2>/dev/null; echo "format-check-done"'
 ```
 Or run the repo's documented diff-only clang-format gate the same way `running-local-ci` does. Expected: no diffs reported on changed lines.
 
@@ -713,7 +723,7 @@ In `alp-sdk-internal/EEPROM-MANIFEST-SPEC.md`, add/lift a note that the manifest
 - [ ] **Step 2: Commit in the sibling repo**
 
 ```bash
-cd "C:/Users/caner/Documents/GitHub/alp-sdk-internal"
+cd "C:/Users/<user>/Documents/GitHub/alp-sdk-internal"
 git add EEPROM-MANIFEST-SPEC.md
 git commit -q -m "docs(eeprom): hw_rev is the authoritative SoM revision; document read contract"
 ```

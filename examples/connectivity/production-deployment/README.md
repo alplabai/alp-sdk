@@ -93,7 +93,7 @@ size is declared, since `boot:` has no slot-size field; Zephyr's
 settings subsystem gets its own littlefs partition;
 app-managed runtime data gets its own. Adds to ~2.4 MiB of the
 AEN E8's 5.5 MiB MRAM -- the rest stays free for code + MCUboot
-itself + TF-M's secure partition. The orchestrator emits a
+itself + TF-M's secure partition. The planner emits a
 partial DTS overlay (`partitions { ... }` node) + matching
 Kconfig (`CONFIG_FILE_SYSTEM_LITTLEFS=y`) per entry.
 
@@ -148,7 +148,7 @@ west build -t run
 ### Real silicon (AEN-Zephyr, requires a staged Mender server)
 
 ```bash
-tan build --board ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples/connectivity/production-deployment
+tan build --project examples/connectivity/production-deployment
 west flash
 ```
 

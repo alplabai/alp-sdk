@@ -25,6 +25,14 @@
 #     snapshot at docs/abi/v<N>-snapshot.json.  The snapshot's
 #     fingerprint diff is the cheapest way to spot accidental
 #     ABI changes.
+#
+#   - docs/test-plan.md ledger edits that didn't trigger a
+#     docs/verification-status.md regeneration.
+#     scripts/gen_verification_status.py reads docs/test-plan.md and
+#     projects the status page from it verbatim (issue #1200); if a
+#     committed copy doesn't match what the script would produce, the
+#     PR is asking reviewers to accept a stale/hand-edited verification
+#     claim.
 
 name: pr-generated-files
 
@@ -55,6 +63,12 @@ on:
       - 'docs/portability-matrix.md'
       - 'scripts/check_*.py'
       - 'scripts/abi_snapshot.py'
+      # docs/verification-status.md is projected verbatim from
+      # docs/test-plan.md (issue #1200) -- either changing means the
+      # other must be regenerated in step, so both are gate triggers.
+      - 'docs/test-plan.md'
+      - 'docs/verification-status.md'
+      - 'scripts/gen_verification_status.py'
       - '.github/workflows/pr-generated-files.yml'
   push:
     branches: [main, dev]
@@ -67,6 +81,9 @@ on:
       - 'docs/abi/**'
       - 'examples/**'
       - 'scripts/abi_snapshot.py'
+      - 'docs/test-plan.md'
+      - 'docs/verification-status.md'
+      - 'scripts/gen_verification_status.py'
       - '.github/workflows/pr-generated-files.yml'
   workflow_dispatch:
 
@@ -166,6 +183,14 @@ jobs:
       - name: Regenerate error catalog from headers + diagnostic docs
         run: python3 scripts/gen_error_catalog.py
 
+      # docs/verification-status.md is projected verbatim from
+      # docs/test-plan.md by scripts/gen_verification_status.py (issue
+      # #1200: the status page must never assert a verdict the ledger
+      # doesn't itself carry).  Regenerate and let the diff gate below
+      # flag any drift.
+      - name: Regenerate verification status page from the test-plan ledger
+        run: python3 scripts/gen_verification_status.py
+
       # Single source: metadata/sdk_version.yaml declares MAJOR.MINOR.PATCH
       # and the CURRENT snapshot is docs/abi/vMAJOR.MINOR-snapshot.json
       # (docs/abi/README.md).  EVERY other docs/abi/v*-snapshot.json is a
@@ -218,6 +243,25 @@ jobs:
           ABI_VERSION: ${{ steps.abi.outputs.version }}
           ABI_SNAPSHOT: ${{ steps.abi.outputs.snapshot }}
         run: |
+          # `git diff` alone is blind to a brand-new file the regen step
+          # just created (a not-yet-tracked board header, an added
+          # pinmux table, ...) -- `git status --porcelain` would show it
+          # as `??`, but a plain diff -- exit-code reports 0 and the gate
+          # stays green even though a newly-needed generated file is
+          # missing from the PR (#1128a).  `git add -N` (intent-to-add)
+          # marks each path as tracked-but-empty so the diff below picks
+          # up new files as additions too, without staging real content.
+          git add -N -- include/alp/soc_caps.h "$ABI_SNAPSHOT" \
+                        include/alp/cap.h \
+                        src/cap.c \
+                        src/status_strings.c \
+                        include/alp/boards/ \
+                        metadata/pinmux/ \
+                        metadata/catalog.json \
+                        metadata/error-catalog.json \
+                        docs/peripheral-support-matrix.md \
+                        docs/portability-matrix.md \
+                        docs/verification-status.md
           # Allow the snapshot's "generated" date to differ; everything
           # else must match.
           if ! git diff --exit-code \
@@ -231,7 +275,8 @@ jobs:
                      metadata/catalog.json \
                      metadata/error-catalog.json \
                      docs/peripheral-support-matrix.md \
-                     docs/portability-matrix.md; then
+                     docs/portability-matrix.md \
+                     docs/verification-status.md; then
             echo "::error::Generated files are stale.  Run:"
             echo "::error::  python3 scripts/gen_soc_caps.py"
             echo "::error::  python3 scripts/gen_status_strings.py"
@@ -241,6 +286,7 @@ jobs:
             echo "::error::  python3 scripts/gen_portability_matrix.py"
             echo "::error::  python3 scripts/gen_catalog.py"
             echo "::error::  python3 scripts/gen_error_catalog.py"
+            echo "::error::  python3 scripts/gen_verification_status.py"
             echo "::error::  python3 scripts/abi_snapshot.py --version $ABI_VERSION --output $ABI_SNAPSHOT"
             echo "::error::and commit the result."
             exit 1

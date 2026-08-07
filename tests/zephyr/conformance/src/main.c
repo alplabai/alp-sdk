@@ -86,6 +86,7 @@
  *   counter    | x  | x | x | x  | must-open       | HW_TIMER (native-sim-counter)
  *   qenc       | x  | x | x | x  | degrade         | HW_QENC
  *   i2s        | x  | x | x | x  | degrade         | HW_I2S
+ *   i3c        | x  | x | x | x  | degrade         | HW_I3C
  *   i2c_target | x  | x | x | -- | degrade         | HW_I2C   (optional: NOSUPPORT ok)
  *   spi_target | x  | x | x | -- | opens (slave)   | HW_SPI   (optional: NOSUPPORT ok)
  *

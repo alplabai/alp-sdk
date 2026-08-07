@@ -1,6 +1,13 @@
 # mproc shmem + hwsem implementation (Track 4 M1)
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Historical transcript.** Implementation plan dated 2026-05-17. The
+> SDK has since shipped through the v0.15.0 release candidate
+> (`v0.15.0-rc1`; no plain `v0.15.0` tag exists) and into the ongoing
+> v0.16.0 development cycle (see `VERSIONS.md`, `CHANGELOG.md`) --
+> cross-check the current tree before treating anything below as a
+> live task list; kept for implementation-history rationale only.
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. (Superseded by the status banner above -- do not execute without reading it first.)
 
 **Goal:** Replace the `ALP_ERR_NOSUPPORT` stubs in `alp_shmem_*` and `alp_hwsem_*` (in `src/zephyr/mproc_zephyr.c`) with real implementations, gated by Zephyr DT aliases (`alp-shmemN`) for shmem and k_sem fallback for hwsem.  Closes the assessment-surfaced gap that `<alp/mproc.h>`'s shmem + hwsem entry points were dead code.
 

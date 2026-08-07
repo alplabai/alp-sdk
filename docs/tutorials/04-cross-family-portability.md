@@ -1,4 +1,4 @@
-<!-- Last verified: 2026-05-18 against slice-3b state. -->
+<!-- Last verified: 2026-08-04 against slice-3b state (portability numbers re-checked against docs/portability-matrix.md's generated block). -->
 
 # 04 -- Intra-family portability (and the form-factor split)
 
@@ -19,9 +19,13 @@ The SDK has two product lines.  Picking the right one is a
 product-line decision (power envelope, perf, cost), not a
 within-product-line option flip:
 
-- **E1M** (35×35 mm) -- Cortex-M-class, mW-class single-die
-  SoCs.  Today: Alif Ensemble (`E1M-AEN301..AEN801`) and NXP
-  i.MX 93 RT-core (`E1M-NX9101`).
+- **E1M** (35×35 mm) -- mW-class single-die SoCs.  Core mix is
+  per-SKU, not uniform: Cortex-M-only on AEN301/AEN401,
+  heterogeneous Cortex-A32 + Cortex-M55 on AEN501..AEN801.  Today:
+  Alif Ensemble (`E1M-AEN301..AEN801`) and NXP i.MX 93
+  (`E1M-NX9101`, a heterogeneous 2x Cortex-A55 + Cortex-M33 part --
+  the E1M-side app targets its M33 RT core only, per
+  `topology.m33:` in `metadata/e1m_modules/E1M-NX9101.yaml`).
 - **E1M-X** (45×65 mm) -- heterogeneous Cortex-A55 +
   Cortex-M33, higher-TDP silicon.  Today: Renesas RZ/V2N
   (`E1M-V2N101/102`) and the same with DEEPX DX-M1
@@ -59,9 +63,12 @@ and `west build` does the rest.
 For the empirical proof that this generates a byte-identical
 `alp.conf` across every E1M family SKU (modulo documented
 silicon-determined deltas), see
-[`docs/portability-matrix.md`](../portability-matrix.md) -- 21
-of 21 E1M cells and 12 of 12 E1M-X cells generate cleanly
-today.
+[`docs/portability-matrix.md`](../portability-matrix.md) -- 18
+of 21 E1M cells (all 6 AEN SKUs; NX9101's 3 cells fail -- its only
+hw_rev, imx93 r1, is `status: tbd`, refused outright by the
+hw_rev-buildable gate, #1025) and 8 of 12 E1M-X cells generate
+cleanly today (the `adc-voltmeter` example fails on all four
+E1M-X presets -- V2N101, V2N102, V2M101, V2M102).
 
 ## What's *not* a `som.sku:` swap
 
@@ -71,8 +78,10 @@ are not interchangeable, by design:
 
 - Different mechanical footprint.
 - Different power envelopes (mW-class vs W-class).
-- Different SoC architecture (single-die M-class vs
-  heterogeneous A+M).
+- Different SoC architecture (E1M-X is uniformly heterogeneous
+  Cortex-A55 + Cortex-M33 on every SKU; E1M's core mix is
+  SKU-dependent, from Cortex-M-only to heterogeneous
+  Cortex-A32/A55 + Cortex-M).
 - Different NPU choices (Ethos-U / DEEPX DX-M1 / DRP-AI).
 - Different board connector pinout
   (`pinout/v1.json` vs `pinout/x-v1.json` in the e1m-spec

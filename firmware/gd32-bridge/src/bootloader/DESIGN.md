@@ -2,7 +2,7 @@
 
 Status: **Path-A implemented, gated — silicon-validated 2026-06-04.** The OTA
 opcode range `0xF0..0xFF` reserved in
-[`../../../docs/gd32-bridge-protocol.md`](../../../docs/gd32-bridge-protocol.md)
+[`../../../../docs/gd32-bridge-protocol.md`](../../../../docs/gd32-bridge-protocol.md)
 §10 routes through `bl_dispatch_ota` into the state machine in
 [`../ota.c`](../ota.c) (BEGIN/WRITE_CHUNK/VERIFY/COMMIT/ROLLBACK/GET_STATE/
 ABORT, CRC-32, A/B metadata; FMC backend in `hal/fmc_ota.c`).
@@ -50,9 +50,9 @@ path the protocol uses for any reserved-but-unimplemented opcode
 
 ## See also
 
-* [`../../../docs/gd32-bridge-protocol.md`](../../../docs/gd32-bridge-protocol.md)
+* [`../../../../docs/gd32-bridge-protocol.md`](../../../../docs/gd32-bridge-protocol.md)
   §10 -- protocol-level reservation of the OTA opcode range.
-* [`../../../docs/gd32-bridge.md`](../../../docs/gd32-bridge.md)
+* [`../../../../docs/gd32-bridge.md`](../../../../docs/gd32-bridge.md)
   "Flashing" -- end-user-visible upgrade paths.
-* [`../../../chips/gd32_swd/`](../../../chips/gd32_swd/) --
+* [`../../../../chips/gd32_swd/`](../../../../chips/gd32_swd/) --
   host-driven SWD recovery path (Path B in the protocol spec).

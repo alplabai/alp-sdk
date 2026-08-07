@@ -4,6 +4,12 @@ Status: Accepted — partially superseded by [0020](0020-sdk-owns-build-executio
 Date: 2026-06-04
 Deciders: alpCaner (alp-sdk), Hakan (alp-sdk-vscode)
 
+> **Python-port note (2026-08-03):** ADR 0020's latest amendment supersedes the
+> runtime mechanism described here. Normal Python Tan planning is relocated and
+> in process; the SDK emitter and `build-plan-v1` remain the reference/parity and
+> explicit `--plan-from` interoperability seam. The determinism, tokenization,
+> schema-versioning, and tolerant-consumer requirements in this ADR still apply.
+
 ## Context
 
 The alp-sdk-vscode repo ships the native `alp` CLI + IDE extension

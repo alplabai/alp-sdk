@@ -14,12 +14,13 @@
 #   * vendors/catch2/README.md -- **Boost Software License 1.0**
 #     (LICENSE.txt upstream text unmodified); upstream
 #     https://github.com/catchorg/Catch2.
-#   * metadata/library-profiles/catch2/hw-backends.yaml -- pure-SW,
-#     no accelerator binding (testing class).
 #   * examples/testing/catch2-selftest/testcase.yaml -- built + run
 #     green on native_sim/native_sim/native/64.
 #
-# HW-backends: see metadata/library-profiles/catch2/ (folded in WS6-c Phase 3)
+# HW-backends: pure-SW, no accelerator binding (testing class) -- see
+# this manifest's own `integration.zephyr.hw_backends:` block below
+# (retired standalone metadata/library-profiles/catch2/hw-backends.yaml
+# folded in here in WS6-c Phase 3).
 #
 # `module: Catch2` matches the real (disabled-by-default) west project
 # name above; `kconfig:` is transcribed verbatim from _LIBRARY_KCONFIG.

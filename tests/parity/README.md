@@ -1,10 +1,11 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # ADR-0020 parity gate
 
-`tan` (this repo) is the sole executor for the Alp Lab build (ADR-0020, end-state
-B). alp-sdk's planner is the fast-moving half of that split, so a planner
-change that emits fine but builds wrong must be caught before it reaches a
-release, not discovered on a bench. This directory seeds the gate ADR-0020's
+Python `tan` (the separate `alplabai/tan-cli` repo) owns the normal relocated
+planner and executor (ADR-0020's 2026-08-03 amendment). alp-sdk's reference
+planner and contracts remain the parity source, so a change that emits fine
+but builds wrong must be caught before it reaches a release, not discovered on
+a bench. This directory seeds the gate ADR-0020's
 2026-07-20 Amendment (alp-sdk#855) says is release-blocking: a **two-seam
 parity gate** plus a **cross-repo trigger** so alp-sdk CI can drive it on
 every planner change.
@@ -14,7 +15,7 @@ every planner change.
 | Seam | Checks | Status |
 |---|---|---|
 | **1 — plan shape** | Does a live `--emit build-plan` still match a frozen, hand-verified oracle's command / env / appDir / skip-fail-decision *shape*, field for field, over the SoM matrix? Deliberately does NOT re-diff the materialised config-artefact content (alp.conf/local.conf/cmake-args.txt/sysbuild-conf bytes) — see "Seam-1 scope" below. Toolchain-free; runs on any `ubuntu-latest` runner. | **Implemented here**: `seam1_field_diff.py` + `.github/workflows/parity.yml`'s `seam1-plan-shape` job. |
-| **2 — real build** | Materialise byte-check, an actual `west`/Zephyr build off the plan, and a Renode smoke test — the thing seam 1 can't catch (a plan that *looks* right but doesn't build). | **Follow-up, not seeded here.** Needs a Linux runner with the Zephyr SDK / toolchain installed (`west`, the AEN/E1M-X Zephyr modules, Renode). Placeholder `seam2` job in `.github/workflows/parity.yml` documents this — it does not run a fake check and does not report success for work it didn't do. |
+| **2 — real build** | Materialise byte-check and an actual `west`/Zephyr build off the plan — the thing seam 1 can't catch (a plan that *looks* right but doesn't build). Renode boot was part of this seam's original design; Renode is now retired (ADR [0022](../../docs/adr/0022-python-executor-renode-retirement.md)), so this seam's remaining scope is the build/flash step, verified on real hardware, not a simulated boot. | **Follow-up, not seeded here.** Needs a Linux runner with the Zephyr SDK / toolchain installed (`west`, the AEN/E1M-X Zephyr modules). Placeholder `seam2` job in `.github/workflows/parity.yml` documents this — it does not run a fake check and does not report success for work it didn't do. |
 
 Yocto/A-core artefact parity is explicitly **out of scope** for both seams —
 no bitbake-capable runner infra exists, and bitbake output isn't
@@ -77,8 +78,15 @@ uncovered content-check hole):
 | `connectivity_iot-fleet-ota` | `examples/connectivity/iot-fleet-ota/board.yaml` | `iot-fleet-ota.build-plan.snap` (also covers its sysbuild/TF-M `sharedArtefacts`) |
 | `multicore_heterogeneous-offload` | `examples/multicore/heterogeneous-offload/board.yaml` | `hetero-offload.build-plan.snap` |
 | `multicore_rpmsg-aen` | `examples/multicore/rpmsg-aen/board.yaml` | `rpmsg-aen.build-plan.snap` |
-| `multicore_rpmsg-imx93` | `examples/multicore/rpmsg-imx93/board.yaml` | `rpmsg-imx93.build-plan.snap` |
 | `multicore_rpmsg-v2n` | `examples/multicore/rpmsg-v2n/board.yaml` | `rpmsg-v2n.build-plan.snap` |
+
+`multicore_rpmsg-imx93` is REMOVED from the oracle corpus (#1025): `seam1_
+field_diff.py` re-emits every corpus member's `boardYaml` live, and
+`E1M-NX9101`'s only hw_rev (imx93 r1) is `status: tbd` -- refused outright
+by the hw_rev-buildable gate, so its live emit no longer succeeds at all.
+See `tests/parity/oracle/ORACLE-PROVENANCE.txt`'s #1025 entry. Re-add the
+fixture (a fresh capture, not a git-history restore) once imx93 r1 carries
+a buildable status.
 
 A future oracle fixture MUST get a matching emit-snapshot `build-plan` case
 in the same change, or this coverage table (and the content-check it

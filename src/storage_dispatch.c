@@ -30,6 +30,10 @@
 #include "backends/storage/storage_ops.h"
 
 ALP_BACKEND_DEFINE_CLASS(storage);
+/* Pull the storage registry section into a static-archive link (#368,
+ * needed once #1140 wires this dispatcher into the Yocto plain-CMake
+ * build). */
+ALP_BACKEND_ANCHOR(storage);
 
 #include "alp_z_last_error.h"
 
@@ -201,7 +205,7 @@ void alp_storage_close(alp_storage_t *storage)
 	/* begin_close CAS OPEN->CLOSING then spins until every op that
 	 * entered before the CAS has left -- so teardown never races an
 	 * in-flight op. Idempotent: a second/never-opened close no-ops. #629 */
-	if (!alp_handle_begin_close(&storage->lifecycle, &storage->active_ops)) return;
+	if (!alp_handle_begin_close_blocking(&storage->lifecycle, &storage->active_ops)) return;
 	if (storage->state.ops != NULL && storage->state.ops->close != NULL) {
 		storage->state.ops->close(&storage->state);
 	}

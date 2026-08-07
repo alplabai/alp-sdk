@@ -129,6 +129,9 @@ except ImportError:  # pragma: no cover -- CI always has pyyaml
 
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+
+from alp_orchestrate.slugs import _BLOCK_SLUGS  # noqa: E402
 
 # Map som.sku prefix -> family name as stored in chip metadata.
 # E1M-AEN... -> aen
@@ -166,7 +169,9 @@ _VENDOR_FAMILY_TO_SLUG = {
 # Skip them in the families[] check -- block helpers are
 # SoM-family-agnostic by design (they're software abstractions
 # over GPIO / PDM, not third-party ICs).
-_BLOCK_SLUGS = {"button_led", "pdm_mic"}
+# `_BLOCK_SLUGS` itself now comes from `alp_orchestrate/slugs.py` (imported
+# above) -- the shared leaf kconfig.py's emitter and alp_cli/validator.py's
+# ALP-B008 check also consult, so the set can't drift into a third copy.
 
 _SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".h", ".hh", ".hpp"}
 _SOURCE_SKIP_DIRS = {"build", ".git", ".west", "__pycache__"}
@@ -181,30 +186,49 @@ _ZEPHYR_DRIVER_INCLUDE_RE = re.compile(
 # Pre-existing examples that #include <zephyr/drivers/...> directly with no
 # portable <alp/*.h> surface to route through today.  Keyed by the example's
 # path relative to examples/ (matches how check_example()/main() identify
-# examples).  Each entry names the include + WHY it's not a #520 migration
-# target -- add a new entry only with a real "no portable surface exists"
-# reason, not as a way to silence the gate.
-_ZEPHYR_DRIVER_INCLUDE_ALLOWLIST: dict[str, str] = {
-    "multicore/rpmsg-v2n": (
-        "zephyr/drivers/mbox.h -- raw OpenAMP/MHU mailbox transport for "
-        "AMP core-to-core messaging; no portable <alp/*.h> IPC surface "
-        "exists yet."
-    ),
-    "peripheral-io/alp-console": (
-        "zephyr/drivers/pwm.h (RGB status LED) and gpio.h/pinctrl.h "
-        "(src/cc3501e_bridge.c, the on-module Wi-Fi/BLE bridge's own "
-        "control-transport HAL) -- pre-existing gap predating #520 and "
-        "out of its Display/LVGL scope; migrating the LED path to "
-        "<alp/pwm.h> is tracked as separate follow-up work."
-    ),
-    "v2n/v2n-ethernet-dual": (
-        "zephyr/drivers/mdio.h -- raw PHY register access for a link-"
-        "diagnostics demo; no portable <alp/*.h> MDIO surface exists."
-    ),
-    "v2n/v2n-xspi-flash-readwrite": (
-        "zephyr/drivers/flash.h -- no portable <alp/flash.h> surface "
-        "exists yet."
-    ),
+# examples), each mapping to a per-DRIVER reason (the driver stem
+# `_ZEPHYR_DRIVER_INCLUDE_RE` captures, e.g. "mdio", "pwm" -- not the whole
+# example).  This is issue #1129: an allowlist entry only excuses the
+# specific driver(s) it names, so an unrelated `#include
+# <zephyr/drivers/...>` landing in an already-allowlisted example still
+# fails the gate.  Add a new entry only with a real "no portable surface
+# exists" reason for that one driver, not as a way to silence the gate for
+# the whole example.
+_ZEPHYR_DRIVER_INCLUDE_ALLOWLIST: dict[str, dict[str, str]] = {
+    "multicore/rpmsg-v2n": {
+        "mbox": (
+            "raw OpenAMP/MHU mailbox transport for AMP core-to-core "
+            "messaging; no portable <alp/*.h> IPC surface exists yet."
+        ),
+    },
+    "peripheral-io/alp-console": {
+        "pwm": (
+            "RGB status LED -- pre-existing gap predating #520 and out "
+            "of its Display/LVGL scope; migrating the LED path to "
+            "<alp/pwm.h> is tracked as separate follow-up work."
+        ),
+        "gpio": (
+            "src/cc3501e_bridge.c, the on-module Wi-Fi/BLE bridge's own "
+            "control-transport HAL -- pre-existing gap predating #520 "
+            "and out of its Display/LVGL scope."
+        ),
+        "pinctrl": (
+            "src/cc3501e_bridge.c, the on-module Wi-Fi/BLE bridge's own "
+            "control-transport HAL -- pre-existing gap predating #520 "
+            "and out of its Display/LVGL scope."
+        ),
+    },
+    "v2n/v2n-ethernet-dual": {
+        "mdio": (
+            "raw PHY register access for a link-diagnostics demo; no "
+            "portable <alp/*.h> MDIO surface exists."
+        ),
+    },
+    "v2n/v2n-xspi-flash-readwrite": {
+        "flash": (
+            "no portable <alp/flash.h> surface exists yet."
+        ),
+    },
 }
 
 
@@ -339,13 +363,14 @@ def check_no_zephyr_driver_includes(example_dir: pathlib.Path,
     customer-facing example (issue #520).
 
     `example_key` is the example's path relative to `examples/` (e.g.
-    "display/lvgl-widgets-demo"), used to look it up in
-    `_ZEPHYR_DRIVER_INCLUDE_ALLOWLIST`.  Allowlisted examples are
-    skipped entirely -- their reason lives next to the allowlist entry,
-    not scattered as inline suppressions.
+    "display/lvgl-widgets-demo"), used to look up its per-driver
+    allowlist in `_ZEPHYR_DRIVER_INCLUDE_ALLOWLIST`.  The allowlist
+    check happens per matched `#include`, keyed on
+    `(example_key, matched_driver)` -- issue #1129: allowlisting one
+    driver (e.g. `mdio.h`) must NOT exempt the whole example from every
+    OTHER `zephyr/drivers/*` include it might gain later.
     """
-    if example_key in _ZEPHYR_DRIVER_INCLUDE_ALLOWLIST:
-        return []
+    allowed_drivers = _ZEPHYR_DRIVER_INCLUDE_ALLOWLIST.get(example_key, {})
 
     errors: list[str] = []
     for src in source_files(example_dir):
@@ -357,14 +382,17 @@ def check_no_zephyr_driver_includes(example_dir: pathlib.Path,
             match = _ZEPHYR_DRIVER_INCLUDE_RE.search(line_no_comment)
             if not match:
                 continue
+            driver = match.group(1)
+            if driver in allowed_drivers:
+                continue
             errors.append(
-                f"{rel}:{line_no}: includes <zephyr/drivers/{match.group(1)}.h> "
+                f"{rel}:{line_no}: includes <zephyr/drivers/{driver}.h> "
                 "directly -- customer-facing examples must go through the "
                 "portable <alp/*.h> surface (e.g. <alp/display.h> + "
                 "alp_gui_lvgl_attach() for LVGL) instead. If no portable "
-                f"surface exists yet, add '{example_key}' to "
-                "_ZEPHYR_DRIVER_INCLUDE_ALLOWLIST in "
-                f"{pathlib.Path(__file__).name} with why."
+                f"surface exists yet, add '{example_key}': {{'{driver}': "
+                "'<why>'} to _ZEPHYR_DRIVER_INCLUDE_ALLOWLIST in "
+                f"{pathlib.Path(__file__).name}."
             )
     return errors
 
@@ -609,13 +637,40 @@ def _iter_yaml_strings(value: object) -> Iterator[str]:
             yield from _iter_yaml_strings(item)
 
 
-def _testcase_strings(testcase_yaml: pathlib.Path) -> tuple[list[str], Optional[str]]:
+# The only two Twister scenario fields that actually reach the
+# compiler/linker for a `west build` -- everything else (`name:`,
+# `description:`, `tags:`, ...) is prose a human can write without ever
+# creating a real build for the board it happens to mention.
+_BUILD_FLAG_KEYS = ("extra_configs", "extra_args")
+
+
+def _testcase_build_flag_strings(
+    testcase_yaml: pathlib.Path,
+) -> tuple[list[str], Optional[str]]:
+    """Yield strings from ONLY `tests.<scenario>.extra_configs` /
+    `extra_args` across every scenario in testcase.yaml (issue #1130).
+
+    Scoped this way on purpose: `_iter_yaml_strings()` over the whole
+    parsed document would also match a bare mention of `ALP_BOARD_*` in
+    `description:`/`name:`/`tags:`, which proves nothing about whether a
+    real Twister scenario builds for that board.
+    """
     try:
         with testcase_yaml.open(encoding="utf-8") as f:
             doc = yaml.safe_load(f) or {}
     except yaml.YAMLError as exc:
         return [], f"testcase.yaml is not valid YAML: {exc}"
-    return list(_iter_yaml_strings(doc)), None
+
+    strings: list[str] = []
+    tests = doc.get("tests")
+    if isinstance(tests, dict):
+        for scenario in tests.values():
+            if not isinstance(scenario, dict):
+                continue
+            for key in _BUILD_FLAG_KEYS:
+                if key in scenario:
+                    strings.extend(_iter_yaml_strings(scenario[key]))
+    return strings, None
 
 
 def check_supported_board_testcases(
@@ -635,7 +690,7 @@ def check_supported_board_testcases(
             "add one Twister scenario per supported board"
         ]
 
-    strings, parse_error = _testcase_strings(testcase_yaml)
+    strings, parse_error = _testcase_build_flag_strings(testcase_yaml)
     if parse_error:
         return [parse_error]
 
@@ -646,10 +701,13 @@ def check_supported_board_testcases(
             errors.append(f"supported_boards entry {board!r} is not a string")
             continue
         define = board_define_for_supported_board(board)
-        if define not in testcase_text:
+        token = f"-D{define}"
+        if token not in testcase_text:
             errors.append(
                 f"supported_boards declares '{board}' but testcase.yaml has no "
-                f"{define} variant"
+                f"scenario whose extra_configs/extra_args passes {token} -- "
+                f"a mention elsewhere (description, tags, ...) doesn't build "
+                f"the board"
             )
     return errors
 

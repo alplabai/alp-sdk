@@ -1,6 +1,18 @@
 # Cross-EVK Example Portability — Implementation Plan (Plan 1: infrastructure + pilot)
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Historical transcript.** Implementation plan dated 2026-05-24. The
+> SDK has since shipped through the v0.15.0 release candidate
+> (`v0.15.0-rc1`; no plain `v0.15.0` tag exists) and into the ongoing
+> v0.16.0 development cycle (see `VERSIONS.md`, `CHANGELOG.md`) --
+> cross-check the current tree before treating anything below as a
+> live task list; kept for implementation-history rationale only.
+>
+> Command examples below use this session's original Windows/WSL
+> checkout paths (e.g. `/mnt/c/Users/<user>/...`) verbatim -- treat
+> them as historical record, not copy-paste-ready commands for
+> today's checkout.
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. (Superseded by the status banner above -- do not execute without reading it first.)
 
 **Goal:** Stand up the board-agnostic `BOARD_*` layer + `<alp/board.h>` facade and prove it end-to-end by converting one example (`dac-waveform`) to build+run on both EVKs, verified on native_sim in CI.
 
@@ -84,7 +96,7 @@ def test_board_dac0_is_present() -> None:
 
 - [ ] **Step 2: Run it; verify it fails**
 
-Run: `cd /mnt/c/Users/caner/Documents/GitHub/alp-sdk && PYTHONPATH=$PWD/scripts python3 -m pytest tests/scripts/test_board_alias_parity.py -v`
+Run: `cd /mnt/c/Users/<user>/Documents/GitHub/alp-sdk && PYTHONPATH=$PWD/scripts python3 -m pytest tests/scripts/test_board_alias_parity.py -v`
 Expected: FAIL — `no BOARD_* aliases found` (the generator emits none yet).
 
 - [ ] **Step 3: Teach `gen_board_header.py` to emit the alias block**
@@ -165,7 +177,7 @@ In `metadata/boards/e1m-evk.yaml`, add the **same** `board_alias:` values to the
 
 - [ ] **Step 5: Regenerate the headers**
 
-Run: `cd /mnt/c/Users/caner/Documents/GitHub/alp-sdk && python3 scripts/gen_board_header.py`
+Run: `cd /mnt/c/Users/<user>/Documents/GitHub/alp-sdk && python3 scripts/gen_board_header.py`
 Expected: `wrote include/alp/boards/alp_e1m_evk_routes.h ...` and `... alp_e1m_x_evk_routes.h ...`. The two headers gain the "Portable cross-EVK aliases" block.
 
 - [ ] **Step 6: Run the parity test; verify it passes**
@@ -409,7 +421,7 @@ tests:
 
 Run the full twister gate (WSL; do NOT pipe through `tail`):
 ```
-wsl -d Ubuntu -- bash -lc 'cd /home/alplab/zephyrproject && export ZEPHYR_BASE=/home/alplab/zephyrproject/zephyr EXTRA_ZEPHYR_MODULES=/mnt/c/Users/caner/Documents/GitHub/alp-sdk ZEPHYR_TOOLCHAIN_VARIANT=host && python3 zephyr/scripts/twister --testsuite-root /mnt/c/Users/caner/Documents/GitHub/alp-sdk/examples -p native_sim/native/64 -s alp_sdk.example.dac_waveform.e1m_x_evk -s alp_sdk.example.dac_waveform.e1m_evk -O /tmp/tw_dac'
+wsl -d Ubuntu -- bash -lc 'cd /home/<user>/zephyrproject && export ZEPHYR_BASE=/home/<user>/zephyrproject/zephyr EXTRA_ZEPHYR_MODULES=/mnt/c/Users/<user>/Documents/GitHub/alp-sdk ZEPHYR_TOOLCHAIN_VARIANT=host && python3 zephyr/scripts/twister --testsuite-root /mnt/c/Users/<user>/Documents/GitHub/alp-sdk/examples -p native_sim/native/64 -s alp_sdk.example.dac_waveform.e1m_x_evk -s alp_sdk.example.dac_waveform.e1m_evk -O /tmp/tw_dac'
 ```
 Expected in `/tmp/tw_dac/twister.json`: both scenarios `passed` (build_only), 0 errored. Both prove `BOARD_DAC0` resolves under each board define.
 

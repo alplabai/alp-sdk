@@ -12,6 +12,13 @@ any miss a CI failure instead of a silent drift.  Verified copies:
   3. src/zephyr/alp_banner.c -- the sample banner line in the file's
      doc-comment (full triple).  The banner *code* always prints the live
      ALP_VERSION_STRING; only the illustrative comment can drift.
+  4. VERSIONS.md -- the living roadmap ledger must carry a `| vMAJOR.MINOR.PATCH`
+     table row for the declared version (issue #1213/#1199: "existing green
+     gates miss ... stale ledgers" -- a version bump with no matching
+     VERSIONS.md row previously stayed green here).  Only row EXISTENCE is
+     checked, never its prose content -- VERSIONS.md's per-version summary is
+     free-form and reviewed by hand, same as every other row already in the
+     table.
 
 The README / docs current-state prose is de-versioned: its status lines were
 rewritten to carry no version label ("Partially silicon-verified", "Current
@@ -106,6 +113,27 @@ def check_banner_c(repo: pathlib.Path, want_str: str) -> list[str]:
     return []
 
 
+def check_versions_md(repo: pathlib.Path, want_str: str) -> list[str]:
+    """Check VERSIONS.md carries a roadmap table row for the declared version.
+
+    Matches a literal `| vMAJOR.MINOR.PATCH` table-row cell (the shape every
+    existing row uses, e.g. `| v0.15.0 |`).  Content is NOT checked -- only
+    that a release doesn't go completely unlisted, the way #1199 found
+    VERSIONS.md sitting multiple releases behind while every other version
+    copy this gate already checks stayed in sync.
+    """
+    versions_md = repo / "VERSIONS.md"
+    rel = versions_md.relative_to(repo).as_posix()
+    if not versions_md.is_file():
+        return [f"  MISSING  {rel}: file not found"]
+    text = versions_md.read_text(encoding="utf-8")
+    row_re = re.compile(rf"^\|\s*v{re.escape(want_str)}\s*\|", re.MULTILINE)
+    if row_re.search(text) is None:
+        return [f"  MISSING  {rel}: no '| v{want_str}' roadmap table row for "
+                f"the version metadata/sdk_version.yaml declares"]
+    return []
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1] if __doc__ else "")
     ap.add_argument("--root", default=None,
@@ -121,6 +149,7 @@ def main() -> int:
         check_version_h(repo, want)
         + check_pyproject(repo, want_str)
         + check_banner_c(repo, want_str)
+        + check_versions_md(repo, want_str)
     )
 
     if drifts:
@@ -133,7 +162,8 @@ def main() -> int:
         return 1
 
     print(f"check_version_doc_sync: OK (include/alp/version.h, pyproject.toml, "
-          f"src/zephyr/alp_banner.c all match v{want_str}).")
+          f"src/zephyr/alp_banner.c all match v{want_str}; VERSIONS.md carries "
+          f"a v{want_str} row).")
     return 0
 
 

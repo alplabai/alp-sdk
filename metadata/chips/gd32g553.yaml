@@ -178,5 +178,22 @@ families:
   - v2n-m1
 
 verification:
-  hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
+  hil_silicon:    verified         # V2N bench.  First-silicon 1526-cycle HIL
+                                    # soak (2026-06-04) was PARTIAL, not clean:
+                                    # only 13 of 20 surfaces were healthy
+                                    # (1526/1526 clean apiece, counter
+                                    # 1525/1526 one recovered transient) and
+                                    # trng failed every cycle -- see
+                                    # examples/v2n/v2n-gd32-bridge-hil-soak/README.md.
+                                    # `verified` here rests on the LATER,
+                                    # cleaner 20-row soak that scored 253/253
+                                    # at fw v0.2.9 / protocol v0.7 (2026-06-06,
+                                    # docs/test-plan.md "v0.6.0" section) --
+                                    # the first-silicon run is a stale bound,
+                                    # see docs/adr/0024-v2n-analog-and-counter-
+                                    # classes-stay-on-the-gd32-bridge.md.
+                                    # Also the v0.6.0 functional suite (26/26) +
+                                    # A/B OTA + Tier-B analog loopback -- see
+                                    # docs/test-plan.md "v0.6.0 -- V2N GD32-bridge
+                                    # silicon campaign" and docs/verification-status.md.
   smoke_tests:    null_arg_guard

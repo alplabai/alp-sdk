@@ -68,62 +68,74 @@ translates x86_64 *for* Apple silicon, not the reverse, and macOS
 has no WSL2 equivalent to fall back to.  What an Intel Mac *can*
 still do is everything that uses the host compiler — `native_sim`
 builds, ztests, `tan validate`, `tan doctor`, metadata work — and
-`tan` itself has a published `tan-x86_64-apple-darwin` binary and
-runs fine.  For real-silicon firmware, build on a Linux host.
+`tan` itself has a published `tan-x86_64-apple-darwin.tar.gz` release archive
+and runs fine. For real-silicon firmware, build on a Linux host.
 
 ADR [0012](adr/0012-cross-platform-developer-host.md) is the
 load-bearing decision behind this matrix.  ADR
 [0010](adr/0010-heterogeneous-os-orchestration.md) is why
 heterogeneous orchestration is its own row.
 
-### 1.1 Python version: floor vs pin
+### 1.1 Python version: SDK floor, Tan floor, and Zephyr floor
 
-Every host workflow needs Python.  Two numbers matter, and they
-are deliberately different:
+Every host workflow needs Python. Three contracts matter:
 
 - **Support floor: 3.10.**  `pyproject.toml` declares
   `requires-python = ">=3.10"` — the SDK's Python tooling
-  (validators, orchestrator) runs on any 3.10+.  The `tan` CLI
-  itself is a standalone binary and isn't bound by this floor.
+  (validators, orchestrator, metadata-only work such as `--emit`
+  and direct SDK validation) runs on any 3.10+. This is also what
+  `metadata/bootstrap.json`'s `prerequisites.pythonMinVersion`
+  currently checks before `scripts/bootstrap.sh`/`scripts/bootstrap.ps1`
+  use as the manifest floor.
+- **Python Tan source floor: 3.12.** Release archives bundle their own Python
+  runtime. A source install (`python3 -m pip install ./python`) needs 3.12+.
 - **Dev/CI pin: 3.12.**  The repo-root `.python-version` file is
   the single source; every CI workflow's `actions/setup-python`
   reads it via `python-version-file`, so CI always runs exactly
   the pinned version.
+- **Zephyr's own build floor: 3.12.** Zephyr v4.4.1's
+  `cmake/modules/python.cmake` hardcodes
+  `set(PYTHON_MINIMUM_REQUIRED 3.12)` and
+  `find_package(Python3 3.12 REQUIRED)`, so a `west build`/CMake
+  configure of this workspace refuses below 3.12 no matter what the
+  support floor above accepted. The number is recorded separately as
+  `metadata/bootstrap.json`'s
+  `zephyr.pythonMinVersion` (issue #1078) — derived from, and checked
+  against, the pinned Zephyr's own `cmake/modules/python.cmake` by
+  `scripts/check_bootstrap_manifest.py`, so a future Zephyr bump that
+  changes its own floor can't drift this field silently. Python Tan's
+  `bootstrap` and `doctor` enforce the effective maximum of the SDK manifest
+  and resolved Zephyr floors. Install a newer interpreter alongside the
+  system one (`deadsnakes` PPA or `pyenv`) when necessary. See
+  [`docs/troubleshooting.md`](troubleshooting.md)'s "`west build`
+  fails at CMake configure citing a Python version".
 
-To reproduce CI byte-for-byte, match the pin locally — `pyenv`
-and `uv` pick `.python-version` up automatically.  `tan doctor`'s
-`python` check is a presence probe only, with no comparison against
-the pin; anything >= 3.10 remains supported.
+To reproduce CI byte-for-byte, match the pin locally — `pyenv` and `uv` pick
+`.python-version` up automatically.
 
-### 1.2 Rust toolchain (only for building `tan` from source)
+### 1.2 Installing Tan from source
 
-`tan`, the standalone build executor
-([`alplabai/tan-cli`](https://github.com/alplabai/tan-cli)), ships
-prebuilt binaries and an `install.sh` / `install.ps1` one-liner --
-most users never need a Rust toolchain at all.  It's only a
-prerequisite for the from-source alternative documented alongside
-every `tan` install instruction in this repo
-(`cargo install --path crates/tan-cli --locked` from a clone).
-
-Get `rustup` from [rustup.rs](https://rustup.rs) (Rust 1.86+,
-edition 2024):
+As of `tan-cli` [v0.5.0](https://github.com/alplabai/tan-cli/releases/tag/v0.5.0)
+(current release: [v0.5.1](https://github.com/alplabai/tan-cli/releases/tag/v0.5.1)),
+the published installer (`install.sh`/`install.ps1`) installs the real Python
+`tan` directly -- it no longer resolves the frozen Rust v0.4.1 release.
+alp-sdk `dev` tracks `tan-cli/dev` instead, to stay ahead of the last tagged
+release; install the current Python source in an isolated Python 3.12+
+environment:
 
 ```bash
-# Linux / macOS:
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+git clone --branch dev https://github.com/alplabai/tan-cli
+python3 -m venv tan-cli/.venv
+tan-cli/.venv/bin/python -m pip install ./tan-cli/python
 ```
 
-```powershell
-# Windows native (PowerShell):
-winget install -e --id Rustlang.Rustup
-```
-
-A from-source build also needs a system C linker (`rustup`'s own
-installer warns if one is missing).  On Linux, §2.1's `build-essential`
-covers it.  On macOS, the Homebrew install in §3.1 prompts to install
-the Xcode Command Line Tools, which include one.  On native Windows,
-`rustup`'s own installer offers to fetch the Visual Studio Build
-Tools C++ workload for you the first time it runs.
+The release installer's PyInstaller archives bundle their own Python
+runtime, so release users do not install Python separately. Alp's `tan`
+is not distributed on PyPI, and the bare name `tan` there belongs to an
+unrelated project (`200` for it: `tan` v23.7.0, "The compromising code
+formatter") -- `pip install tan` does not get you this tool. `alp-tan` is
+not registered there either (`404` for it, not a reservation placeholder).
+The old `crates/` tree remains the frozen v0.4.1 behaviour oracle.
 
 ---
 
@@ -204,7 +216,7 @@ them the Zephyr-on-M default:
 
 ```bash
 # Download the 13.x release from arm.com (no apt package tracks
-# the version policy in scripts/zephyr-version-policy.md).
+# the version policy in docs/zephyr-version-policy.md).
 ARM_GNU_VER="13.3.rel1"
 curl -L "https://developer.arm.com/-/media/Files/downloads/gnu/${ARM_GNU_VER}/binrel/arm-gnu-toolchain-${ARM_GNU_VER}-x86_64-arm-none-eabi.tar.xz" \
     -o arm-gnu.tar.xz
@@ -419,8 +431,8 @@ winget install -e --id oss-winget.gperf
 ```
 
 Neither `dtc` nor `gperf` is in `prerequisites.windows`, and
-`bootstrap.ps1` does not require them.  `alp doctor`'s `_check_dtc` /
-`_check_gperf` are WARN-only: `edtlib` does the load-bearing devicetree
+`bootstrap.ps1` does not require them. The SDK-reference
+`python -m alp_cli doctor` checks are WARN-only: `edtlib` does the load-bearing devicetree
 parse in pure Python (a missing `dtc` never blocks a build), and plain
 kernel-mode apps build without `gperf`.  Install them if your build needs
 extra dts validation or kobject/userspace generation -- the Zephyr SDK's
@@ -574,7 +586,7 @@ Two cross-edit patterns work well:
 
    ```text
    Template: \\wsl$\{distro}\home\{user}\...
-   Example : \\wsl$\Ubuntu-22.04\home\caner\dev\alp-workspace
+   Example : \\wsl$\Ubuntu-22.04\home\<user>\dev\alp-workspace
    ```
 
    VS Code with the *Remote -- WSL* extension handles this
@@ -675,8 +687,8 @@ lint is soft initially.
 
 ### 6.3 Native_sim example build
 
-This is the cross-platform end-to-end smoke test.  `tan --project
-... build` follows `gpio-button-led`'s `board.yaml`, which targets a
+This is the cross-platform end-to-end smoke test. `tan build --project ...`
+follows `gpio-button-led`'s `board.yaml`, which targets a
 real SoM (`E1M-AEN801`) — it cross-compiles and needs the Zephyr SDK
 toolchain, it is not a `native_sim` build (`--native` selects how
 `tan` runs the build tooling, not the board target).  The actual

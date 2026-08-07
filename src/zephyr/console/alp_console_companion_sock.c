@@ -6,7 +6,7 @@
  * <path>), Alif companion only.  Command-group TU of the
  * alp_console_companion.c split (#673 Phase 2): registers onto the
  * (alp, companion) dynamic subcommand set the core TU declares.  Shared
- * companion context + bridge-bus mutex come from
+ * companion context comes from
  * alp_console_companion_internal.h.
  */
 #include <errno.h>
@@ -85,24 +85,20 @@ static int cmd_companion_sock_tcp_get(const struct shell *sh, size_t argc, char 
 	/* 1. Open a TCP (STREAM) socket on the CC3501E IP stack. */
 	uint16_t     handle = 0;
 	alp_status_t s;
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
 	s = cc3501e_sock_open(companion_cc3501e,
 	                      ALP_CC3501E_SOCK_FAMILY_IPV4,
 	                      ALP_CC3501E_SOCK_TYPE_STREAM,
 	                      0u,
 	                      &handle,
 	                      ALP_COMPANION_SOCK_OP_MS);
-	k_mutex_unlock(&companion_bus_lock);
 	if (s != ALP_OK) {
 		shell_error(sh, "sock open failed (%d)", (int)s);
 		return -EIO;
 	}
 
 	/* 2. Connect to the peer (runs the TCP handshake in the firmware). */
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
 	s = cc3501e_sock_connect(
 	    companion_cc3501e, handle, ip, (uint16_t)port, ALP_COMPANION_SOCK_OP_MS);
-	k_mutex_unlock(&companion_bus_lock);
 	if (s != ALP_OK) {
 		shell_error(
 		    sh, "connect %u.%u.%u.%u:%lu failed (%d)", ip[0], ip[1], ip[2], ip[3], port, (int)s);
@@ -125,14 +121,12 @@ static int cmd_companion_sock_tcp_get(const struct shell *sh, size_t argc, char 
 		s = ALP_ERR_INVAL;
 		goto out_close;
 	}
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
 	s = cc3501e_sock_send(companion_cc3501e,
 	                      handle,
 	                      (const uint8_t *)req,
 	                      (size_t)reqn,
 	                      NULL,
 	                      ALP_COMPANION_SOCK_OP_MS);
-	k_mutex_unlock(&companion_bus_lock);
 	if (s != ALP_OK) {
 		shell_error(sh, "send failed (%d)", (int)s);
 		goto out_close;
@@ -146,10 +140,8 @@ static int cmd_companion_sock_tcp_get(const struct shell *sh, size_t argc, char 
 	bool           got_data = false;
 	for (unsigned round = 0; round < ALP_COMPANION_SOCK_RECV_ROUNDS; round++) {
 		size_t n = 0;
-		k_mutex_lock(&companion_bus_lock, K_FOREVER);
 		s = cc3501e_sock_recv(
 		    companion_cc3501e, handle, rx, sizeof(rx), &n, ALP_COMPANION_SOCK_RECV_MS);
-		k_mutex_unlock(&companion_bus_lock);
 		if (s != ALP_OK) {
 			/* A recv error AFTER the body already arrived is the peer-close tail: the
 			 * server sent its response then closed, so the firmware's post-close recv
@@ -176,9 +168,7 @@ static int cmd_companion_sock_tcp_get(const struct shell *sh, size_t argc, char 
 	shell_print(sh, "\n---- end ----");
 
 out_close:
-	k_mutex_lock(&companion_bus_lock, K_FOREVER);
 	(void)cc3501e_sock_close(companion_cc3501e, handle, ALP_COMPANION_SOCK_OP_MS);
-	k_mutex_unlock(&companion_bus_lock);
 	return (s == ALP_OK) ? 0 : -EIO;
 }
 

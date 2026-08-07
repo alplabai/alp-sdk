@@ -25,7 +25,7 @@ tier (cores + NPU count + memory).
 | Secure element          | Infineon OPTIGA Trust M    | LPI2C            | [`<alp/chips/optiga_trust_m.h>`](../../include/alp/chips/optiga_trust_m.h) |
 | RTC                     | Micro Crystal RV-3028-C7   | LPI2C            | [`<alp/chips/rv3028c7.h>`](../../include/alp/chips/rv3028c7.h) |
 | Temperature sensor      | TI TMP112                  | LPI2C            | [`<alp/chips/tmp112.h>`](../../include/alp/chips/tmp112.h) |
-| EEPROM (SoM manifest)   | Onsemi N24S128             | LPI2C            | [`<alp/chips/eeprom_24c128.h>`](../../include/alp/chips/eeprom_24c128.h) |
+| EEPROM (SoM manifest)   | Onsemi N24S128             | SoC I2C2 (bridge/DNP-selected, NOT LPI2C0) | [`<alp/chips/eeprom_24c128.h>`](../../include/alp/chips/eeprom_24c128.h) |
 | Ethernet PHY            | TI DP83825IRMQR            | RMII             | (Zephyr-side PHY driver)                |
 
 Memory + per-SKU specifics: [`metadata/e1m_modules/E1M-AEN<NNN>.yaml`](../../metadata/e1m_modules/).
@@ -51,7 +51,11 @@ Boot model + architecture: [`docs/cc3501e-bridge.md`](../cc3501e-bridge.md).
 
 ## Boot + identification
 
-Same two-stage flow as V2N: EEPROM manifest + BOARD_ID ADC.  See
+The SoM's identity comes solely from the on-module EEPROM manifest
+(family / SKU / hw_rev / serial / mfg date) — there is no SoM-side
+ADC cross-check.  A carrier-board BOARD_ID resistor divider, where
+present, identifies the *carrier* revision and is independent of the
+SoM revision; it is not yet wired into `alp_hw_info_read()`.  See
 [`docs/board-id.md`](../board-id.md).
 
 ## Bring-up

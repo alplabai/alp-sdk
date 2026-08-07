@@ -127,7 +127,7 @@ example on AEN for the working ISR path.)
   `ALP_E1M_GPIO_<class><N>` pin-as-GPIO indices.
 - [`examples/power-timing/counter-alarm/`](../counter-alarm/)
   -- single-shot alarm sibling.
-- [`examples/peripheral-io/gpio-button-led/`](../gpio-button-led/)
+- [`examples/peripheral-io/gpio-button-led/`](../../peripheral-io/gpio-button-led/)
   -- GPIO basics + the same pin-as-GPIO trick.
 - Zephyr `k_event` / `k_msgq` docs -- richer ISR -> thread
   coordination primitives when a single bool flag isn't enough.

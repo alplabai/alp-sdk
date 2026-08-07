@@ -2,8 +2,8 @@
 :description: Boot a single Cortex-M55-HP Zephyr slice headless, no hardware.
 
 # ---------------------------------------------------------------------
-# Variables filled in by `tan renode` (tan-cli, crates/tan-core/src/
-# renode.rs -> build_renode_argv).  The wrapper injects `$elf` (the
+# Variables filled in by `tan renode` (tan-cli,
+# python/tan/core/renode_plan.py -> build_renode_argv). The wrapper injects `$elf` (the
 # resolved <build_dir>/zephyr/zephyr.elf), `$repl` (the platform
 # descriptor) and (per tan-cli#65) `$vtor` via `renode -e "$elf=@..."`
 # BEFORE this script runs.  The `?=` assignment only takes when a

@@ -1,6 +1,18 @@
 # Wind-Turbine Acoustic Anomaly Monitor Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Historical transcript.** Implementation plan dated 2026-06-28. The
+> SDK has since shipped through the v0.15.0 release candidate
+> (`v0.15.0-rc1`; no plain `v0.15.0` tag exists) and into the ongoing
+> v0.16.0 development cycle (see `VERSIONS.md`, `CHANGELOG.md`) --
+> cross-check the current tree before treating anything below as a
+> live task list; kept for implementation-history rationale only.
+>
+> Command examples below use this session's original Windows/WSL
+> checkout paths (e.g. `/mnt/c/Users/<user>/...`) verbatim -- treat
+> them as historical record, not copy-paste-ready commands for
+> today's checkout.
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. (Superseded by the status banner above -- do not execute without reading it first.)
 
 **Goal:** A nacelle acoustic condition monitor: capture mic audio, extract DSP features, normalize blade-periodic energy to rotor order (RPM-invariant via BPF), and emit a per-interval anomaly score + advisory subsystem/flag for drivetrain tonals and gross blade aero-anomalies.
 
@@ -20,13 +32,13 @@
 - The unit tests compile each core `.c` directly via a relative path from the test dir, with `_GNU_SOURCE` defined in the test CMakeLists (for `M_PI` on the host) — same pattern as the rail example. `zassert_within` takes `double`; cast `float` args to `(double)` to avoid `-Werror=double-promotion`.
 - Twister gate (literal paths, NO `$VARS`, NO pipe; read `/tmp/tw-wtac/twister.json`):
   ```
-  wsl -d Ubuntu -- bash -lc 'cd /home/alplab/zephyrproject && \
-    export ZEPHYR_BASE=/home/alplab/zephyrproject/zephyr && \
-    export EXTRA_ZEPHYR_MODULES=/mnt/c/Users/caner/Documents/GitHub/alp-sdk && \
+  wsl -d Ubuntu -- bash -lc 'cd /home/<user>/zephyrproject && \
+    export ZEPHYR_BASE=/home/<user>/zephyrproject/zephyr && \
+    export EXTRA_ZEPHYR_MODULES=/mnt/c/Users/<user>/Documents/GitHub/alp-sdk && \
     export ZEPHYR_TOOLCHAIN_VARIANT=host && \
     python3 zephyr/scripts/twister \
-      --testsuite-root /mnt/c/Users/caner/Documents/GitHub/alp-sdk/tests/unit \
-      --testsuite-root /mnt/c/Users/caner/Documents/GitHub/alp-sdk/examples \
+      --testsuite-root /mnt/c/Users/<user>/Documents/GitHub/alp-sdk/tests/unit \
+      --testsuite-root /mnt/c/Users/<user>/Documents/GitHub/alp-sdk/examples \
       -p native_sim/native/64 -O /tmp/tw-wtac'
   ```
 

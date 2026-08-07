@@ -27,12 +27,14 @@ except ImportError:
     sys.exit("alp_orchestrate: jsonschema is required.  Install via `pip install jsonschema`.")
 
 from alp_cli.validator import iter_schema_errors
-from alp_project import resolve_memory_map
+from alp_project import resolve_memory_map, resolve_soc_path
+from sentinels import is_tbd
+from strict_loaders import DuplicateKeyError, strict_json_loads, strict_yaml_load
 
 from . import sdk_compat
 from .models import (BoardProject, IpcEntry, OrchestratorError,
-                     SdkRevisionUnknown, SdkRevisionUnsupported, Slice,
-                     StorageEntry)
+                     SdkRevisionNotBuildable, SdkRevisionUnknown,
+                     SdkRevisionUnsupported, Slice, StorageEntry)
 from .partition import _known_flash_devices
 from .paths import BOARD_SCHEMA, METADATA_ROOT, REPO
 from .topology import _default_os_from_core_type
@@ -45,12 +47,11 @@ from .validate import (
 
 def _silicon_to_soc_path(silicon: str, metadata_root: Path) -> Path:
     """`alif:ensemble:e7` -> metadata/socs/alif/ensemble/e7.json."""
-    parts = silicon.split(":")
-    if len(parts) != 3:
+    soc_path = resolve_soc_path(silicon, metadata_root)
+    if soc_path is None:
         raise OrchestratorError(
             f"silicon ref '{silicon}' is not a triple-colon string")
-    return (metadata_root / "socs" / parts[0] / parts[1] /
-            f"{parts[2]}.json")
+    return soc_path
 
 
 # ---------------------------------------------------------------------
@@ -62,8 +63,8 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     if not path.is_file():
         raise OrchestratorError(f"file not found: {path}")
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except yaml.YAMLError as e:
+        data = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+    except (yaml.YAMLError, DuplicateKeyError) as e:
         raise OrchestratorError(f"failed to parse {path}: {e}") from e
     if not isinstance(data, dict):
         raise OrchestratorError(
@@ -75,8 +76,8 @@ def _load_json(path: Path) -> dict[str, Any]:
     if not path.is_file():
         raise OrchestratorError(f"file not found: {path}")
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as e:
+        return strict_json_loads(path.read_text(encoding="utf-8"), source=path)
+    except (json.JSONDecodeError, DuplicateKeyError) as e:
         raise OrchestratorError(f"failed to parse {path}: {e}") from e
 
 
@@ -218,7 +219,7 @@ def _resolve_jlink_flash_device(
     variants = soc_spec.get("variants") or []
     variant: Optional[dict[str, Any]] = None
     declared = som_preset.get("silicon_variant")
-    if declared and declared != "TBD":
+    if declared and not is_tbd(declared):
         variant = next(
             (v for v in variants if v.get("order_code") == declared), None)
     if variant is None:
@@ -356,6 +357,54 @@ def _check_hw_rev_exists(
             f"board {board_name} hw_rev {board_hw_rev!r} is not a known "
             f"hardware revision. Available hw_rev(s) for {board_name}: "
             f"{available}.")
+
+
+def _status_repr(status: Optional[str]) -> str:
+    """Render a `status:` value for an error message.
+
+    `status: None` reads as if the key were literally set to the word
+    "None" -- indistinguishable from a typo'd value.  A missing key gets
+    its own wording instead.
+    """
+    if status is None:
+        return "carries no `status:` key"
+    return f"status: {status!r}"
+
+
+def _check_hw_rev_buildable(
+    metadata_root: Path,
+    *,
+    sku: str,
+    som_hw_rev: Optional[str],
+    board_name: Optional[str],
+    board_hw_rev: Optional[str],
+    board_preset: Optional[dict[str, Any]],
+) -> None:
+    """Refuse an hw_rev that EXISTS but whose declared `status:` refuses a
+    build (#1025, the maintainer's broad-reading decision on the status
+    half).
+
+    Runs AFTER `_check_hw_rev_exists`: a revision absent from the table is
+    that gate's failure to report, not this one's -- there is no status to
+    have read.  `status: reserved`, `status: tbd`, and a revision carrying
+    no `status` key at all are all refused; every other declared status
+    (`production`, `preview`, `preliminary`, `deprecated`) passes.
+    """
+    family_dir = _sku_family_dir(sku)
+
+    buildable = sdk_compat.family_revision_buildable(metadata_root, family_dir, som_hw_rev)
+    if buildable is False:
+        status = sdk_compat.family_revision(metadata_root, family_dir, som_hw_rev).get("status")
+        raise SdkRevisionNotBuildable(
+            f"SoM {sku} hw_rev {som_hw_rev!r} exists but is not buildable "
+            f"({_status_repr(status)}).")
+
+    buildable = sdk_compat.revision_buildable(board_preset, board_hw_rev)
+    if buildable is False:
+        status = sdk_compat.board_revision(board_preset, board_hw_rev).get("status")
+        raise SdkRevisionNotBuildable(
+            f"board {board_name} hw_rev {board_hw_rev!r} exists but is not "
+            f"buildable ({_status_repr(status)}).")
 
 
 def _check_sdk_supports_hw_rev(
@@ -553,6 +602,23 @@ def _validate_topology_cores(
             address=entry.get("address"),
         ))
 
+    # #1088: `kind: rpmsg` has no cache-maintenance layer.  `cfg->cacheable`
+    # is stored on the backend struct (src/backends/rpc/{zephyr,yocto}_drv.c)
+    # and never read again -- no `sys_cache_*` call exists anywhere under
+    # src/ or include/.  `cacheable: true` on a rpmsg entry would therefore
+    # select a code path that promises coherency it can't deliver, which is
+    # worse than no flag at all -- reject it here rather than silently
+    # honouring it.  Real fix (sys_cache_data_flush_range /
+    # sys_cache_data_invd_range in <alp/rpc.h>) remains open; see #1088.
+    for e in ipc_entries:
+        if e.kind == "rpmsg" and e.cacheable:
+            raise OrchestratorError(
+                f"ipc entry '{e.name}': kind: rpmsg does not support "
+                f"cacheable: true -- <alp/rpc.h> has no cache-maintenance "
+                f"implementation yet (#1088).  The D-cache is forced off "
+                f"for this carve-out's endpoints instead; remove "
+                f"`cacheable: true` (or set it to false).")
+
     # Loader rule §4.5.6: every ipc endpoint must be a core with
     # os != off.
     for e in ipc_entries:
@@ -626,11 +692,12 @@ def _resolve_storage(
     storage_raw = project.get("storage") or []
     storage_entries: list[StorageEntry] = []
     for idx, item in enumerate(storage_raw):
-        # `raw: true` is the legacy alias for `fs: raw`; the schema
-        # accepts both, the loader normalises.
+        # `fs` defaults to `raw` when omitted. The legacy `raw: true` alias is
+        # gone: `board.schema.json` no longer declares the property and sets
+        # `additionalProperties: false` on storage items, so a board carrying it
+        # is rejected at validation rather than normalised here. Measured before
+        # removal: zero tracked `board.yaml` files used it.
         fs = item.get("fs")
-        if fs is None and item.get("raw") is True:
-            fs = "raw"
         if fs is None:
             fs = "raw"
         storage_entries.append(StorageEntry(
@@ -758,7 +825,7 @@ def _library_alias_table(metadata_root: Path) -> dict[str, str]:
     path = metadata_root / "library-aliases-v1.json"
     if not path.is_file():
         return {}
-    doc = json.loads(path.read_text(encoding="utf-8"))
+    doc = strict_json_loads(path.read_text(encoding="utf-8"), source=path)
     aliases = doc.get("aliases")
     return dict(aliases) if isinstance(aliases, dict) else {}
 
@@ -843,6 +910,14 @@ def load_board_yaml(path: Path, *,
      board_name, board_hw_rev) = _resolve_board(project, metadata_root)
 
     _check_hw_rev_exists(
+        metadata_root,
+        sku=sku,
+        som_hw_rev=hw_rev or som_preset.get("default_hw_rev"),
+        board_name=board_name,
+        board_hw_rev=board_hw_rev,
+        board_preset=board_preset)
+
+    _check_hw_rev_buildable(
         metadata_root,
         sku=sku,
         som_hw_rev=hw_rev or som_preset.get("default_hw_rev"),

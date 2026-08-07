@@ -17,9 +17,10 @@
 #     of the new-bsd license (two-clause bsd license)").
 #   * upstream https://github.com/olikraus/u8g2
 #
-# HW-backends: metadata/library-profiles/u8g2/hw-backends.yaml carries
-# per-accelerator priority binding (DMA2D/TMU-FAC blit offload, bus-DMA
-# push); folded in WS6-c Phase 3 (needs library-v1 schema extension).
+# HW-backends: this manifest's own `integration.zephyr.hw_backends:`
+# block below carries per-accelerator priority binding (DMA2D/TMU-FAC
+# blit offload, bus-DMA push); folded in from the retired standalone
+# metadata/library-profiles/u8g2/hw-backends.yaml in WS6-c Phase 3.
 #
 # No `requires:` -- display-agnostic like LVGL (drives whatever bus/panel
 # the board wires up); CONFIG_ALP_U8G2_SW_BLIT=y is the always-available

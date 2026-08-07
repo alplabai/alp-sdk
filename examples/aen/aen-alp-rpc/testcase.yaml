@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# aen-alp-rpc -- the bench-proven aen-rpc-pingpong transport (16/16 PASS)
+# driven through the portable <alp/rpc.h> surface instead of raw ipc_service
+# calls.  One app, role-by-board: the HP build is the host (boots HE via
+# alp_mproc_boot_core, sends 16 "ping"s, counts "pong"s); the HE build is the
+# remote (echoes each "ping" as a "pong").  Both boards' fully-qualified
+# boards/<board>.overlay auto-applies (MHU frames + shared SRAM0 vring
+# carve-out + ipc0 host/remote nodes).
+#
+# Filtered OUT of the native_sim PR gate (platform_allow = AEN801 board
+# targets only, no native_sim overlay); build_only in the advisory
+# pr-twister-aen.yml gate -- the round-trip proof itself is a dual-ATOC bench
+# flash, not a CI run.  See the README for the full flash recipe.
+
+sample:
+  name: aen-alp-rpc
+  description: |
+    Framed RPC between the two E8 M55 cores via the portable <alp/rpc.h>
+    surface, over the same bench-proven MHUv2 + OpenAMP-RPMsg transport as
+    aen-rpc-pingpong.  HP hosts (boots HE, alp_rpc_send 16 "ping"s, counts
+    "pong"s); HE remotes (alp_rpc_subscribe "ping", echoes each as "pong").
+
+tests:
+  alp_sdk.examples.aen.alp_rpc.hp_host:
+    platform_allow:
+      - alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - multicore
+      - rpc
+      - rtss-hp
+    build_only: true   # the 16/16 ping/pong round-trip is a dual-ATOC bench flash, not a CI run.
+
+  alp_sdk.examples.aen.alp_rpc.he_remote:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - multicore
+      - rpc
+      - rtss-he
+    build_only: true   # this role never runs until the HP host releases it.

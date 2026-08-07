@@ -201,7 +201,7 @@ void alp_update_log_close(alp_update_log_t *log)
 	/* Drain in-flight ops before dropping the singleton back to UNOPENED so
 	 * a fresh open() re-elects a backend (issue #629). Idempotent: a second
 	 * close, or a close racing an in-flight open, no-ops. */
-	if (!alp_handle_begin_close(&log->lifecycle, &log->active_ops)) return;
+	if (!alp_handle_begin_close_blocking(&log->lifecycle, &log->active_ops)) return;
 	log->ops = NULL;
 	alp_lifecycle_set(&log->lifecycle, ALP_HANDLE_LC_UNOPENED);
 }

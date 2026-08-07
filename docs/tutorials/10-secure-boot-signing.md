@@ -217,7 +217,7 @@ Two images, both signed, the new one buggy:
 ```bash
 # Build a "buggy" variant that panics shortly after boot.
 # In practice: an app that calls k_panic() at start.
-tan --project examples/buggy-app build
+tan build --project examples/buggy-app
 imgtool sign \
     --key keys/mcuboot_dev_ecdsa_p256.pem \
     --version 0.2.0 \

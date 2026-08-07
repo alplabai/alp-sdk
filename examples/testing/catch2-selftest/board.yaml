@@ -26,7 +26,8 @@ cores:
     # (vendors/catch2/, no zephyr/module.yml upstream -- see that
     # directory's README.md). CONFIG_ALP_CATCH2_SW (Kconfig.alp-libraries:
     # "Catch2 (always pure-SW)", no HW-accelerator binding possible --
-    # see metadata/library-profiles/catch2/hw-backends.yaml) is a
+    # see the `integration.zephyr.hw_backends:` block in
+    # metadata/libraries/catch2.yaml) is a
     # separate `default y` fallback-capability marker, true for every
     # build regardless of this slice -- it does NOT gate compiled
     # sources; see zephyr/CMakeLists.txt for why.

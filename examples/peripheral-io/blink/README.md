@@ -82,7 +82,7 @@ build config, and delegates to `west build`.  You still need a
 real-silicon build -- if `tan build` fails looking for it, that's
 this exact gap (tracked as
 [tan-cli#160](https://github.com/alplabai/tan-cli/issues/160)); run
-`tan doctor --build` to confirm what's missing before re-running.
+`tan doctor` to confirm what's missing before re-running.
 
 To target a different SoM / board, edit `board.yaml` -- nothing else
 needs to change.

@@ -1,8 +1,12 @@
 # board.yaml -- per-app project configuration for the
-# mproc-mailbox example (M55-HP side).
+# mproc-mailbox example (M55-HP + M55-HE, both real project cores).
 #
-# Targets AEN-Zephyr; the peer-side (M55-HE) firmware lands
-# alongside the v0.4 dual-image build flow.
+# Targets AEN-Zephyr on both Cortex-M55 cores: `m55_hp` runs the
+# host side (`./src`), `m55_he` runs the peer (`./peer`) that echoes
+# the mailbox payload back.  The SoM's second core no longer ships
+# the topology-default `alp-stock-shim` here -- `tan build` builds
+# both slices from this one project, matching the `ipc:` block's
+# `endpoints: [m55_hp, m55_he]` below.
 som:
   sku: E1M-AEN801
 
@@ -10,6 +14,38 @@ preset: e1m-evk
 cores:
   m55_hp:
     app: ./src
+  m55_he:
+    app: ./peer
+
+# Cross-core shared SRAM + hardware mailbox used to signal the peer.
+# `raw_shmem`, not `rpmsg`: this is the low-level <alp/mproc.h>
+# shmem+mailbox primitive, so the carve-out stays at its non-cacheable
+# default (kconfig.py's `_emit_cross_core_shmem_cache` reads this
+# block and emits CONFIG_DCACHE=n for both m55_hp and m55_he
+# accordingly -- see the comment in prj.conf / peer/prj.conf for the
+# hardware reasoning). `name: alp_shmem0` matches the DT-alias name
+# `src/backends/mproc/zephyr_drv.c` and both main.c's hardcode --
+# it is NOT a free-form label like an rpmsg channel name.
+#
+# #1069 gave E1M-AEN801 a real `memory_map:` (metadata/e1m_modules/
+# E1M-AEN801.yaml), but this carve-out still resolves `status: blocked`
+# (`--emit system-manifest`): the five fine-grained regions
+# (mcuboot/he_slot0/hp_slot0/reserved/storage) are MRAM, not RAM, and are
+# marked `carveout: false` so the allocator can't silently place this
+# raw_shmem ring inside flash-class memory; `mram_main` (the only other
+# region accessible from both m55_hp and m55_he) deliberately keeps
+# `base: TBD`. The carve-out being blocked does not affect this example:
+# the generated `<alp/system_ipc.h>` / DTS reservation it would drive
+# aren't consumed here (main.c / peer/main.c open "alp_shmem0" by its DT
+# alias, wired by the board overlay directly, not by the orchestrator's
+# resolved address) -- only the `_emit_cross_core_shmem_cache` Kconfig path
+# this PR adds reads this block, and that path doesn't need resolution to
+# fire.
+ipc:
+  - kind: raw_shmem
+    endpoints: [m55_hp, m55_he]
+    carve_out_kb: 4
+    name: alp_shmem0
 
 diagnostics:
   log_level: info

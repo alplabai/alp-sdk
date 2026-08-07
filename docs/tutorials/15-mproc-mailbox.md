@@ -25,10 +25,10 @@ peer firmware is built).
 > Companion example:
 > [`examples/multicore/mproc-mailbox/`](../../examples/multicore/mproc-mailbox/) --
 > the HP-side firmware this tutorial walks through.  The peer-side
-> (HE) firmware at `peer/main.c` builds single-target today; building
-> both halves in one invocation needs the v0.4 dual-image sysbuild
-> glue, an in-tree gap (see [`zephyr/sysbuild/aen/`](../../zephyr/sysbuild/aen/)),
-> not an external repo.
+> (HE) firmware lives at `peer/main.c`; `board.yaml` declares both
+> `m55_hp` and `m55_he` as real project cores, so `tan build` now
+> builds both images from this one project (issue #1275) -- no
+> external repo, no sysbuild glue needed.
 
 ---
 
@@ -189,10 +189,12 @@ int main(void) {
 }
 ```
 
-## 3. The HE-side peer (sketch -- v0.4 dual-image)
+## 3. The HE-side peer
 
-The peer firmware lives at `examples/multicore/mproc-mailbox/peer/src/main.c`
-(TBD until the dual-image build flow lands).  Pattern:
+The peer firmware lives at `examples/multicore/mproc-mailbox/peer/main.c`.
+`board.yaml` declares `m55_he: app: ./peer` as a real project core, so
+`tan build` builds it alongside the HP side from this one project
+(issue #1275).  Pattern:
 
 The peer is symmetric: it opens the same region + channel and
 does its echo work from the inbound-mailbox callback.
@@ -273,20 +275,31 @@ above does not change; the framing is transparent inside
 
 ## 5. Build + flash
 
+`board.yaml` declares both `m55_hp` (`app: ./src`) and `m55_he`
+(`app: ./peer`) as real project cores, so one `tan build` now
+produces both images (issue #1275):
+
 ```bash
-# HP-side:
-tan --project examples/multicore/mproc-mailbox build
-# Outputs build/zephyr/zephyr.bin for HP.
+tan build --project examples/multicore/mproc-mailbox
+```
 
-# HE-side (TBD, dual-image flow):
-# tan --project examples/multicore/mproc-mailbox build \
-#     --sysbuild --domain m55-he
-# Outputs build/m55-he/zephyr/zephyr.bin for HE.
+Each core can also be built standalone with `west build` directly
+(e.g. while iterating on one side):
 
-# Flash HP to primary slot; HE flashes via sysbuild to its own
-# slot.
+```bash
+# HP side.
+west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp \
+    examples/multicore/mproc-mailbox
+west flash
+
+# HE side.
+west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
+    examples/multicore/mproc-mailbox/peer
 west flash
 ```
+
+Flash both into the matching SoC partitions (HP -> RTSS-HP slot, HE
+-> RTSS-HE slot) and the roundtrip completes.
 
 Expected output on the UART:
 

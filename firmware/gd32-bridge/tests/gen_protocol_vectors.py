@@ -352,9 +352,11 @@ def build_vectors() -> list[tuple[str, str, str | None]]:
                   bytes([0x00,                            # channel = 0
                          0x02,                            # edge = BOTH
                   ])).hex().upper(),
-        "SOF | CMD=0x23 | channel=0 | edge=BOTH | CRC -- v0.5 reserved"
-        " opcode; firmware replies STATUS_NOSUPPORT until the GD32-side"
-        " input-capture HAL body is wired in a follow-up firmware drop",
+        "SOF | CMD=0x23 | channel=0 | edge=BOTH | CRC -- dispatched to"
+        " handle_pwm_capture_begin() (protocol.c); production body in"
+        " hal/gd32/pwm_capture.c (bridge_hw_pwm_capture_begin).  The"
+        " stub HAL backend still answers STATUS_NOSUPPORT"
+        " (BRIDGE_HW_ERR_NOTIMPL)",
     ))
     out.append((
         "spi_pwm_single_pulse_probe_request",
@@ -364,8 +366,10 @@ def build_vectors() -> list[tuple[str, str, str | None]]:
                          0xE8, 0x03, 0x00, 0x00,          # pulse_ns = 1000 (LE)
                   ])).hex().upper(),
         "SOF | CMD=0x26 | channel=0 | pulse_ns=1000 (LE 0x000003E8) | CRC"
-        " -- v0.5 reserved opcode; firmware replies STATUS_NOSUPPORT until"
-        " the GD32-side one-shot pulse HAL body is wired",
+        " -- dispatched to handle_pwm_single_pulse() (protocol.c);"
+        " production body in hal/gd32/pwm.c (bridge_hw_pwm_single_pulse)."
+        "  The stub HAL backend still answers STATUS_NOSUPPORT"
+        " (BRIDGE_HW_ERR_NOTIMPL)",
     ))
 
     # ----- §9. v0.5 additions (§2B.3): system power-mode set ---------
@@ -385,9 +389,10 @@ def build_vectors() -> list[tuple[str, str, str | None]]:
                          0x10, 0x27, 0x00, 0x00,          # wake_after_ms = 10000 (LE)
                   ])).hex().upper(),
         "SOF | CMD=0x28 | mode=DEEP_SLEEP | wake_bitmap=RTC|GPIO |"
-        " wake_after_ms=10000 (LE 0x00002710) | CRC -- v0.5 reserved"
-        " opcode; firmware replies STATUS_NOSUPPORT until the wake"
-        " handler + supervisor re-init state machine land",
+        " wake_after_ms=10000 (LE 0x00002710) | CRC -- dispatched to"
+        " handle_power_mode_set() (protocol.c); production body in"
+        " hal/gd32/power.c (bridge_hw_power_mode_set).  The stub HAL"
+        " backend still answers STATUS_NOSUPPORT (BRIDGE_HW_ERR_NOTIMPL)",
     ))
 
     # ----- §10. v0.5 additions (§2B wave-2): chunked DSP-chain upload -
@@ -406,9 +411,11 @@ def build_vectors() -> list[tuple[str, str, str | None]]:
     out.append((
         "spi_adc_dsp_chain_open_probe_request",
         spi_frame(SOF, CMD_ADC_DSP_CHAIN_OPEN).hex().upper(),
-        "SOF | CMD=0x37 | (no payload) | CRC -- v0.5 reserved opcode;"
-        " firmware replies STATUS_NOSUPPORT today via default-case"
-        " dispatch.  Eventual reply payload is chain_id:u8.",
+        "SOF | CMD=0x37 | (no payload) | CRC -- dispatched to"
+        " handle_adc_dsp_chain_open() (protocol.c); production body in"
+        " hal/gd32/adc_stream.c (bridge_hw_adc_dsp_chain_open).  Reply"
+        " payload is chain_id:u8.  The stub HAL backend still answers"
+        " STATUS_NOSUPPORT (BRIDGE_HW_ERR_NOTIMPL)",
     ))
     out.append((
         "spi_adc_dsp_stage_push_window_hann_request",
@@ -423,8 +430,10 @@ def build_vectors() -> list[tuple[str, str, str | None]]:
                   ])).hex().upper(),
         "SOF | CMD=0x38 | chain_id=0 | stage_index=0 | kind=WINDOW(2) |"
         " chunk_offset=0 | chunk_total_size=4 | shape=Hann |"
-        " reserved[3] | CRC -- v0.5 reserved opcode; firmware replies"
-        " STATUS_NOSUPPORT until the wave-2 HAL body lands.",
+        " reserved[3] | CRC -- dispatched to handle_adc_dsp_stage_push()"
+        " (protocol.c); production body in hal/gd32/adc_stream.c"
+        " (bridge_hw_adc_dsp_stage_push).  The stub HAL backend still"
+        " answers STATUS_NOSUPPORT (BRIDGE_HW_ERR_NOTIMPL)",
     ))
     out.append((
         "spi_adc_dsp_chain_bind_probe_request",
@@ -432,9 +441,11 @@ def build_vectors() -> list[tuple[str, str, str | None]]:
                   bytes([0x00,                            # chain_id = 0
                          0x00,                            # stream_id = 0
                   ])).hex().upper(),
-        "SOF | CMD=0x39 | chain_id=0 | stream_id=0 | CRC -- v0.5"
-        " reserved opcode; firmware replies STATUS_NOSUPPORT until"
-        " the wave-2 HAL body lands.",
+        "SOF | CMD=0x39 | chain_id=0 | stream_id=0 | CRC -- dispatched"
+        " to handle_adc_dsp_chain_bind() (protocol.c); production body"
+        " in hal/gd32/adc_stream.c (bridge_hw_adc_dsp_chain_bind).  The"
+        " stub HAL backend still answers STATUS_NOSUPPORT"
+        " (BRIDGE_HW_ERR_NOTIMPL)",
     ))
 
     # ----- §11. OTA Path-A opcodes (0xF0..0xF6) ----------------------
@@ -644,7 +655,7 @@ def emit(vectors: list[tuple[str, str, str | None]]) -> str:
 
     # ----- §8 block --------------------------------------------------
     chunks.append("\n# ---------------------------------------------------------------------")
-    chunks.append("# §8. v0.5 additions (§2B.2) -- advanced timer extras (reserved opcodes)")
+    chunks.append("# §8. v0.5 additions (§2B.2) -- advanced timer extras")
     chunks.append("# ---------------------------------------------------------------------")
     for name, value, comment in vectors[23:25]:
         if comment:
@@ -653,7 +664,7 @@ def emit(vectors: list[tuple[str, str, str | None]]) -> str:
 
     # ----- §9 block --------------------------------------------------
     chunks.append("\n# ---------------------------------------------------------------------")
-    chunks.append("# §9. v0.5 additions (§2B.3) -- system power-mode set (reserved opcode)")
+    chunks.append("# §9. v0.5 additions (§2B.3) -- system power-mode set")
     chunks.append("# ---------------------------------------------------------------------")
     for name, value, comment in vectors[25:26]:
         if comment:
@@ -663,7 +674,7 @@ def emit(vectors: list[tuple[str, str, str | None]]) -> str:
     # ----- §10 block -------------------------------------------------
     chunks.append("\n# ---------------------------------------------------------------------")
     chunks.append("# §10. v0.5 additions (§2B wave-2) -- chunked DSP-chain upload")
-    chunks.append("#       (CHAIN_OPEN / STAGE_PUSH / CHAIN_BIND; reserved opcodes)")
+    chunks.append("#       (CHAIN_OPEN / STAGE_PUSH / CHAIN_BIND)")
     chunks.append("# ---------------------------------------------------------------------")
     for name, value, comment in vectors[26:29]:
         if comment:

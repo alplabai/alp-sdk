@@ -20,15 +20,17 @@
 #     upstream project's published licence (best-effort -- flagged as a
 #     concern below, not independently re-verified from a LICENSE file).
 #
-# HW-backends: metadata/library-profiles/madgwick_ahrs/hw-backends.yaml
-# carries per-accelerator priority binding (FPU SIMD floor is universal --
-# every target carries an FPU -- plus an optional TMU CORDIC fast path);
-# folded in WS6-c Phase 3 (needs library-v1 schema extension).
+# HW-backends: this manifest's own `integration.zephyr.hw_backends:`
+# block below carries per-accelerator priority binding (FPU SIMD floor
+# is universal -- every target carries an FPU -- plus an optional TMU
+# CORDIC fast path); folded in from the retired standalone
+# metadata/library-profiles/madgwick_ahrs/hw-backends.yaml in WS6-c
+# Phase 3.
 #
 # No `requires:` -- CONFIG_ALP_MADGWICK_LIBM=y (libm trig) is the
 # always-available floor; the FPU SIMD backend is universal across every
 # target this SDK supports (no capability key to name), and the CORDIC
-# fast path is opportunistic per-SoM (see hw-backends.yaml above).
+# fast path is opportunistic per-SoM (see `hw_backends:` above).
 #
 # `tier: B` for this Phase-1 pass: madgwick_ahrs is NOT listed in
 # metadata/registries/tier-a-library-ci.json's hostBuild.libraries or

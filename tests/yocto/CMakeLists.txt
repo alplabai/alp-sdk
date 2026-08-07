@@ -90,6 +90,34 @@ target_compile_features(alp_test_gpu2d_dispatcher PRIVATE c_std_99)
 add_test(NAME alp_test_gpu2d_dispatcher
          COMMAND alp_test_gpu2d_dispatcher)
 
+# issue #1117 round-2 dev review: _blend_px()'s `_u8(x) << 24` shift
+# (src/backends/gpu2d/sw_fallback.c) is signed-integer-overflow UB for
+# any opaque alpha (>= 0x80) -- gpu2d_dispatcher.c's
+# test_blend_additive_and_multiply_opaque_alpha() exercises the exact
+# values, but a plain build doesn't discriminate pre-/post-fix (every
+# mainstream two's-complement compiler already produces the "right" bit
+# pattern un-instrumented). Run the same test binary under UBSan so the
+# shift itself is checked, mirroring the RPC suite's
+# run_sanitized_rpc_tests.sh (GHSA-xhm8-7f87-93q5 defect 3) rather than
+# inventing a second sanitizer-runner script.
+# -fno-sanitize-recover=undefined is NOT decoration. Plain
+# -fsanitize=undefined RECOVERS: it prints "runtime error: left shift of 255
+# by 24 places cannot be represented in type 'int'" and then carries on, so
+# the process still exits 0 and ctest passes. Measured directly:
+#   gcc -fsanitize=undefined                              -> exit 0
+#   gcc -fsanitize=undefined -fno-sanitize-recover=undefined -> exit 1
+# both printing the identical diagnostic. Without the second flag this gate
+# detects the defect it exists for and reports success anyway.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_test(NAME alp_test_gpu2d_ubsan
+             COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/run_sanitized_rpc_tests.sh
+                     ${CMAKE_SOURCE_DIR}
+                     ${CMAKE_CURRENT_BINARY_DIR}/sanitizer-gpu2d-ubsan
+                     "-fsanitize=undefined -fno-sanitize-recover=undefined"
+                     alp_test_gpu2d_dispatcher)
+    set_tests_properties(alp_test_gpu2d_ubsan PROPERTIES TIMEOUT 600)
+endif()
+
 # GPU2D static handle-pool race regression (#629): the exact
 # duplicate-slot / op-vs-close reproduction from the issue, against
 # the real sw_fallback backend.  Needs pthreads on every host this
@@ -126,6 +154,25 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_slot_claim_race
              COMMAND alp_test_slot_claim_race)
 
+    # Mechanism-level regression for issue #1114's round-2 dev-review
+    # finding: src/backends/security/zephyr_drv.c's ensure_psa() elect-once-
+    # init algorithm must not hang a losing waiter when the elected
+    # initialiser FAILS (Zephyr/PSA-specific, so mirrored here rather
+    # than exercised directly -- see the file header comment).
+    add_executable(alp_test_elect_once_init_race
+        ${CMAKE_CURRENT_SOURCE_DIR}/elect_once_init_race.c
+    )
+    target_link_libraries(alp_test_elect_once_init_race PRIVATE alp::sdk Threads::Threads)
+    target_include_directories(alp_test_elect_once_init_race PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_elect_once_init_race PRIVATE c_std_99)
+
+    add_test(NAME alp_test_elect_once_init_race
+             COMMAND alp_test_elect_once_init_race)
+    set_tests_properties(alp_test_elect_once_init_race PROPERTIES TIMEOUT 60)
+
     # Stateless dispatcher ops-cache race regression (#628): concurrent
     # cold first calls into TMU / SoC-info / security.  Recompiles the
     # security sw_fallback TU straight into the executable -- same
@@ -138,6 +185,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
     target_link_libraries(alp_test_dispatch_cache_race PRIVATE alp::sdk Threads::Threads)
     target_include_directories(alp_test_dispatch_cache_race PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
         ${CMAKE_CURRENT_SOURCE_DIR}
     )
     target_compile_features(alp_test_dispatch_cache_race PRIVATE c_std_99)
@@ -495,6 +543,122 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_peripheral_wdt
              COMMAND alp_test_peripheral_wdt)
 
+    # #1140 review regression (Yocto storage backend): write()/erase()
+    # must refuse with ALP_ERR_INVAL, before touching the device fd,
+    # unless alp_storage_config_t.allow_unsafe_write was set at open()
+    # -- a caller using ALP_STORAGE_CONFIG_DEFAULT must never be able
+    # to damage the whole-disk mmcblk node or an unvalidated MTD
+    # partition (blockers 1+2).  Also covers the discard_granularity
+    # geometry fix and the MTD 32-bit erase-length truncation guard.
+    # peripheral_storage.c #includes the real
+    # src/backends/storage/yocto_drv.c directly (see the test's own
+    # header comment) to drive y_write()/y_read()/y_erase() against a
+    # real temporary regular file -- never a real /dev/mmcblk*/mtd*
+    # node.  Deliberately NOT linked against alp::sdk -- same ODR
+    # rationale as alp_test_rpc_yocto_self_close above.
+    add_executable(alp_test_peripheral_storage
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_storage.c
+    )
+    target_include_directories(alp_test_peripheral_storage PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/storage
+        # storage_ops.h #includes "alp_checked_arith.h" unprefixed,
+        # relying on src/common being on the include path the way
+        # src/common/CMakeLists.txt adds it for the alp_sdk target
+        # itself -- this standalone test binary needs the same.
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_peripheral_storage PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_storage
+             COMMAND alp_test_peripheral_storage)
+
+    # #1141 review regression (Yocto USB backend): host_enable()/
+    # host_disable() must be honest ALP_ERR_NOSUPPORT, never a faked
+    # ALP_OK (blockers 4+5); dev_open() stays ALP_ERR_NOSUPPORT (no
+    # UDC/gadget path); _is_roothub_name() rejects a strtoul() ERANGE
+    # overflow; _discover_buses() reports an error instead of silently
+    # truncating when more root hubs exist than its fixed-capacity
+    # array can track.  peripheral_usb.c #includes the real
+    # src/backends/usb/yocto_drv.c directly (see the test's own header
+    # comment) to drive these against a real temporary directory via
+    # g_usb_test_sysfs_root_hook instead of the real
+    # /sys/bus/usb/devices tree.  Deliberately NOT linked against
+    # alp::sdk -- same ODR rationale as alp_test_rpc_yocto_self_close
+    # above.
+    add_executable(alp_test_peripheral_usb
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_usb.c
+    )
+    target_include_directories(alp_test_peripheral_usb PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/usb
+    )
+    target_compile_features(alp_test_peripheral_usb PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_usb
+             COMMAND alp_test_peripheral_usb)
+
+    # #1147 regression (Yocto I3C backend): _bus_present() must find a
+    # real "i3c-<N>" sysfs directory and reject a missing one / a
+    # same-named regular file; y_open() must mirror that presence
+    # check exactly (never a fabricated ALP_OK for a bus that was
+    # never confirmed to exist); write()/read()/write_read() must stay
+    # honest ALP_ERR_NOSUPPORT on every call -- mainline Linux has no
+    # raw-transfer ABI for I3C at all (see the backend's own file
+    # header).  peripheral_i3c.c #includes the real
+    # src/backends/i3c/yocto_drv.c directly (see the test's own header
+    # comment) to drive these against a real temporary directory via
+    # g_i3c_test_sysfs_root_hook instead of the real
+    # /sys/bus/i3c/devices tree.  Deliberately NOT linked against
+    # alp::sdk -- same ODR rationale as alp_test_rpc_yocto_self_close
+    # above.
+    add_executable(alp_test_peripheral_i3c
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_i3c.c
+    )
+    target_include_directories(alp_test_peripheral_i3c PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/i3c
+    )
+    target_compile_features(alp_test_peripheral_i3c PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_i3c
+             COMMAND alp_test_peripheral_i3c)
+
+    # #1143 regression (Yocto display backend): _blit_copy()/
+    # _clear_fill() must honour fb_pitch (which can exceed fb_w * 4 --
+    # the kernel pads scanlines) rather than assuming a tight stride,
+    # must reject a zero-area or out-of-bounds rect before touching
+    # the buffer, and must never write past the requested rect/rows.
+    # _pick_crtc() must select the first CRTC the encoder's bitmask
+    # allows and must not misbehave on a mask with no match.  The real
+    # y_open()/y_close() drive DRM/KMS ioctls against a real
+    # /dev/dri/card* node this build environment does not have (see
+    # the backend's own Status note), so this test targets only the
+    # pure logic factored out of the ops -- see peripheral_display.c's
+    # own header comment.  #includes the real
+    # src/backends/display/yocto_drv.c directly, same ODR rationale as
+    # alp_test_rpc_yocto_self_close above -- deliberately NOT linked
+    # against alp::sdk.
+    add_executable(alp_test_peripheral_display
+        ${CMAKE_CURRENT_SOURCE_DIR}/peripheral_display.c
+    )
+    target_include_directories(alp_test_peripheral_display PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/backends/display
+    )
+    target_compile_features(alp_test_peripheral_display PRIVATE c_std_99)
+
+    add_test(NAME alp_test_peripheral_display
+             COMMAND alp_test_peripheral_display)
+
     # /sys/power/state + RTC wakealarm mapping regression for issue #613
     # (Yocto power backend): each alp_power_mode_t must write the exact
     # kernel sysfs token, a timed wake must clear-then-program the
@@ -545,6 +709,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         )
         target_link_libraries(alp_test_iot_mqtt PRIVATE alp::sdk)
         target_include_directories(alp_test_iot_mqtt PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
             ${CMAKE_CURRENT_SOURCE_DIR}
         )
         target_compile_features(alp_test_iot_mqtt PRIVATE c_std_99)
@@ -570,6 +735,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         )
         target_link_libraries(alp_test_audio_alsa PRIVATE alp::sdk)
         target_include_directories(alp_test_audio_alsa PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
             ${CMAKE_CURRENT_SOURCE_DIR}
         )
         target_compile_features(alp_test_audio_alsa PRIVATE c_std_99)
@@ -596,6 +762,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         )
         target_link_libraries(alp_test_security_openssl PRIVATE alp::sdk)
         target_include_directories(alp_test_security_openssl PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
             ${CMAKE_CURRENT_SOURCE_DIR}
         )
         target_compile_features(alp_test_security_openssl PRIVATE c_std_99)
@@ -620,6 +787,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
     target_link_libraries(alp_test_registry_sw_fallback PRIVATE alp::sdk)
     target_include_directories(alp_test_registry_sw_fallback PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
         ${CMAKE_CURRENT_SOURCE_DIR}
     )
     target_compile_features(alp_test_registry_sw_fallback PRIVATE c_std_99)

@@ -3,6 +3,20 @@
   "description": "Single source of truth for the SDK's quality tasks: which check_*.py gates exist, whether each is a hard CI gate or informational, and which profiles (quick/pr/full/release) run it. check_quality_registry.py keeps it == scripts/check_*.py on disk. Additive-only within schemaVersion 1.",
   "tasks": [
     {
+      "id": "board-id-doc-parity",
+      "description": "docs/board-id.md's alp_hw_info_eeprom_t typedef struct (field names, order, widths) must match include/alp/hw_info.h, macros resolved (#1231).",
+      "runner": "check-script",
+      "script": "scripts/check_board_id_doc_parity.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-doc-drift.yml:doc-drift"
+    },
+    {
       "id": "board-schema-version",
       "description": "Fail if any repo board.yaml has an outstanding schema migration.",
       "runner": "check-script",
@@ -46,7 +60,7 @@
     },
     {
       "id": "build-plan",
-      "description": "Validate a build plan against the public alp CLI / alp-sdk-vscode contract.",
+      "description": "Validate a build plan against the public alp CLI / alp-sdk-vscode contract, plus (for SDK-generated plans) the command.tool bare-identity convention the schema itself deliberately does not assert.",
       "runner": "check-script",
       "script": "scripts/check_build_plan.py",
       "gate": true,
@@ -70,7 +84,7 @@
         "release"
       ],
       "output": "none",
-      "ci": "pr-metadata-validate.yml:validate"
+      "ci": null
     },
     {
       "id": "chip-header-status",
@@ -115,6 +129,20 @@
       "ci": null
     },
     {
+      "id": "core-cmakelists-mapping",
+      "description": "Every enabled Zephyr core's board.yaml app: must resolve to a CMakeLists.txt baked with that SAME core's --core literal, and no two distinct cores may resolve to the same CMakeLists.txt (issue #1275: a dual-core SKU can silently share one core's Kconfig fragment with another).",
+      "runner": "check-script",
+      "script": "scripts/check_core_cmakelists_mapping.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "cross-platform",
       "description": "Lint repo content for Linux-only idioms in customer-facing surfaces.",
       "runner": "check-script",
@@ -125,6 +153,20 @@
       ],
       "output": "none",
       "ci": "cross-platform-zephyr.yml:python-smoke"
+    },
+    {
+      "id": "diagnostic-narratives",
+      "description": "Reject a placeholder-only ALP-Bxxx diagnostic landing page under docs/diagnostics/ -- every page must carry a real narrative and a Fix/Resolution/Remedy section (#1207).",
+      "runner": "check-script",
+      "script": "scripts/check_diagnostic_narratives.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-doc-drift.yml:doc-drift"
     },
     {
       "id": "diagnostic-schema",
@@ -145,6 +187,20 @@
       "description": "Doc-drift gate -- fails when customer-facing documentation drifts from the code it documents.",
       "runner": "check-script",
       "script": "scripts/check_doc_drift.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-doc-drift.yml:doc-drift"
+    },
+    {
+      "id": "doc-links",
+      "description": "Fail on a dead relative-path Markdown link in customer-facing documentation (#1213).",
+      "runner": "check-script",
+      "script": "scripts/check_doc_links.py",
       "gate": true,
       "profiles": [
         "pr",
@@ -181,6 +237,20 @@
       ],
       "output": "none",
       "ci": "pr-doxygen.yml:doxygen"
+    },
+    {
+      "id": "driver-status-backing",
+      "description": "driver_status declarations outside metadata/chips/*.yaml (mailbox.driver_status, on_module.{nor_flash,emmc}_driver_status, soc_peripheral_instances[].driver_status) are bound to a real zephyr/drivers/** artefact when they claim partial/complete (issue #1216).",
+      "runner": "check-script",
+      "script": "scripts/check_driver_status_backing.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
     },
     {
       "id": "e1m-pinout",
@@ -310,7 +380,7 @@
     },
     {
       "id": "library-registry",
-      "description": "Assert the library alias table covers every curated token and resolves to real manifests (WS6-c).",
+      "description": "Assert the curated-library registry is self-consistent (WS6-c).",
       "runner": "check-script",
       "script": "scripts/check_library_registry.py",
       "gate": true,
@@ -320,7 +390,7 @@
         "release"
       ],
       "output": "none",
-      "ci": "pr-metadata-validate.yml:validate"
+      "ci": null
     },
     {
       "id": "local-paths",
@@ -404,7 +474,7 @@
         "release"
       ],
       "output": "none",
-      "ci": "pr-metadata-validate.yml:validate"
+      "ci": null
     },
     {
       "id": "som-bundle",
@@ -569,6 +639,20 @@
       ],
       "output": "none",
       "ci": "pr-doc-drift.yml:doc-drift"
+    },
+    {
+      "id": "west-manifest-module-resolution",
+      "description": "Prove every libraries:-selectable Zephyr module resolves to a reachable west.yml project in an alp-sdk-owned workspace, and that no name-allowlist entry is shadowed by a same-named top-level project (#1136).",
+      "runner": "check-script",
+      "script": "scripts/check_west_manifest_module_resolution.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
     },
     {
       "id": "write-text-newline",

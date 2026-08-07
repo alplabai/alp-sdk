@@ -1,5 +1,10 @@
 # GD32 Bridge — Lean Flashable Release + Flashing SOP — Implementation Plan
 
+> **STATUS — LANDED.** `scripts/flash_backends/swd_probe.py` exists
+> (the `swd_v2n_host` rename this plan calls for); the GD32 bridge
+> firmware has shipped several further releases since (see
+> `CHANGELOG.md`).  Kept for implementation-history context.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Integrate the unmerged GD32 transport firmware as the release foundation, build a v0.1.0-candidate flashable image, make the SWD flash tooling actually work via J-Link, and publish a flashing SOP in `alp-sdk`.
@@ -33,7 +38,7 @@
 
 **Pre-flight (run once before Task 1):**
 ```bash
-cd "E:/GitHub/alp-sdk"
+cd "<alp-sdk>"
 git rev-parse --abbrev-ref HEAD     # expect: feat/gd32-flash-release
 git status --short                  # expect: clean
 git submodule status vendors/gd32_firmware_library/upstream   # expect: a commit + (v1.5.0)
@@ -58,7 +63,7 @@ git submodule status vendors/gd32_firmware_library/upstream   # expect: a commit
 
 Run:
 ```bash
-cd "E:/GitHub/alp-sdk"
+cd "<alp-sdk>"
 git fetch origin
 git merge-base dev origin/feat/gd32-transport-bringup
 git diff --stat 0977435..dev -- firmware/gd32-bridge/ docs/gd32-bridge.md

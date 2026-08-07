@@ -37,7 +37,8 @@ Inventory check before powering anything:
   soldered parts: **TCAL9538** GPIO expander, **6x INA236** power
   monitors, **BMP581** barometer, **CAM_MUX_PI3WVR626** MIPI CSI
   2:1 camera mux, BMI323 + ICM-42670 IMUs, TAS2563 amps, PDM mics.
-  (Carrier parts ride **BRD_I2C** / the EVK headers, not the SoM.)
+  (Carrier parts ride **I2C2** (`ALP_E1M_I2C0`) / the EVK headers, not
+  the SoM's BRD_I2C trio -- see the bus table in §5.1.)
 
 > **This batch: the SoM's OSPI memories are NOT populated.** The
 > OSPI0 octal bus (BOM-optional NOR flash on CS0 + HyperRAM on CS1,
@@ -102,29 +103,37 @@ PMIC's `EVENT_00` status register over BRD_I2C.
 ## 3. EEPROM manifest read
 
 The 24C128 carries the 128-byte Alp manifest at offset
-`0x0000`.  Read it back through the board's BRD_I2C bus:
+`0x0000`.  Read it back through the on-module **SoC I2C2** bus
+(`P5_6 SCL_C` / `P5_7 SDA_C`, bridge/DNP-selected) -- **not**
+BRD_I2C (see §5.1):
 
 ```bash
-i2cdetect -y 1                 # confirm 0x50 ACKs
+i2cdetect -y 1                 # confirm 0x50 ACKs (run `i2cdetect -l` first to
+                               # map the index to I2C2 on your image)
 i2cdump  -y 1 0x50 b            # full 128-byte hexdump
 ```
 
 Cross-reference against
 [`include/alp/hw_info.h`](../include/alp/hw_info.h):
 
-* Bytes 0..3:   magic `ALPH` (`0x41 0x4C 0x50 0x48`)
-* Byte 4:       `schema_v1` = `0x01`
-* Bytes 5..8:   family ASCII = `AEN_`
-* Bytes 9..24:  SKU ASCII (`E1M-AEN801` zero-padded)
-* Bytes 25..32: hw_rev ASCII (`r1` zero-padded)
-* Bytes 33..48: serial number ASCII
-* Bytes 49..56: mfg_date BCD (`YYYYMMDD`)
-* Bytes 57..123: reserved (zero)
+* Bytes 0..3:    magic, little-endian uint32 `0x414C5048` (`ALPH`);
+  wire bytes `0x48 0x50 0x4C 0x41` (`HPLA` in a hexdump)
+* Bytes 4..7:    `schema_version` = `0x00000001` (little-endian uint32)
+* Bytes 8..23:   family ASCII, NUL-padded (`aen`)
+* Bytes 24..47:  SKU ASCII, NUL-padded (`E1M-AEN801`)
+* Bytes 48..55:  hw_rev ASCII, NUL-padded (`r2`, E1M-AEN801's
+  current `default_hw_rev`)
+* Bytes 56..79:  serial number ASCII, NUL-padded
+* Bytes 80..81:  `mfg_year` (uint16, little-endian, e.g. `2026`)
+* Byte  82:      `mfg_month` (uint8, 1..12)
+* Byte  83:      `mfg_day` (uint8, 1..31)
+* Bytes 84..123: reserved (zero)
 * Bytes 124..127: CRC32 (little-endian) over bytes 0..123
 
 If the manifest is unprogrammed, run
 [`scripts/program_eeprom.py`](../scripts/program_eeprom.py)
-against the SKU's `som.yaml` preset.
+against a `board.yaml` declaring the SKU (the script resolves the
+SoM preset at `metadata/e1m_modules/<SKU>.yaml` automatically).
 
 ## 4. Console + first boot
 
@@ -163,7 +172,7 @@ against the SKU's `som.yaml` preset.
    `boot_order:`; see [cli.md](cli.md)):
 
    ```bash
-   tan --project examples/peripheral-io/gpio-button-led build && tan flash examples/peripheral-io/gpio-button-led
+   tan build --project examples/peripheral-io/gpio-button-led && tan flash examples/peripheral-io/gpio-button-led
    ```
 
    Expected output on the UART: the
@@ -175,27 +184,49 @@ against the SKU's `som.yaml` preset.
 Run these in order; each one exercises a different on-module
 or on-board subsystem.
 
-### 5.1 BRD_I2C: probe every on-module slave
+### 5.1 On-module I2C: EEPROM (I2C2) vs BRD_I2C (LPI2C0) housekeeping
 
-The AEN module routes one shared BRD_I2C bus.  Drive an
-i2cdetect from a built `i2c-scanner` example or via the
-console:
+**Two separate buses -- don't assume a single shared bus.** The
+EEPROM manifest is bridge/DNP-selected onto its own **SoC I2C2**
+(`P5_6 SCL_C` / `P5_7 SDA_C`); the EVK carrier's sensor + IO-expander
++ INA236 parts share that same **I2C2** bus (`metadata/boards/e1m-evk.yaml`
+`buses:` `E1M_I2C0` -> `EVK_I2C_BUS_SENSORS`). Only the on-module
+housekeeping trio (OPTIGA / RTC / TMP112) is on the separate, shared,
+slave-only **BRD_I2C** (**LPI2C0**, `P7_4`/`P7_5`) -- the silicon can
+only be a slave on that bus, so an external master must never be
+clipped onto it, and the M55 reaches it only via SE services (see
+§5.2), not a direct `i2cdetect`. Scan **I2C2 only** from a built
+`i2c-scanner` example or via the console; the BRD_I2C trio isn't
+scannable from the host:
 
-| Slave | 7-bit addr | What | Where |
-|-------|------------|------|-------|
-| 24C128 | `0x50` | EEPROM (manifest) | SoM |
-| OPTIGA TM | `0x30` | Secure element | SoM — **DNI on this bench batch** |
-| RV-3028-C7 | `0x52` | RTC | SoM |
-| TMP112 | `0x48` | Thermometer | SoM |
-| TCAL9538 | `0x72` | GPIO expander | EVK carrier |
-| INA236 | `0x40`..`0x46` | Power monitor (6x) | EVK carrier |
-| BMP581 | `0x47` | Barometer | EVK carrier |
+| Slave | 7-bit addr | What | Bus | Where |
+|-------|------------|------|-----|-------|
+| 24C128 | `0x50` | EEPROM (manifest) | I2C2 | SoM |
+| OPTIGA TM | `0x30` | Secure element | BRD_I2C (LPI2C0) | SoM — **DNI on this bench batch** |
+| RV-3028-C7 | `0x52` | RTC | BRD_I2C (LPI2C0) | SoM |
+| TMP112 | `0x48` | Thermometer | BRD_I2C (LPI2C0) | SoM |
+| TCAL9538 | `0x72` | GPIO expander (U35 main) | I2C2 | EVK carrier |
+| TCAL9538 | `0x71` | GPIO expander (U37, PCIe) | I2C2 | EVK carrier |
+| INA236 | `0x40`..`0x42`, `0x49`..`0x4B` | Power monitor (6x) | I2C2 | EVK carrier |
+| BMP581 | `0x47` | Barometer | I2C2 | EVK carrier |
+
+> Two address caveats when reading a scan of I2C2:
+>
+> * **`0x48` on I2C2 is not the TMP112.** The TMP112 above is on BRD_I2C,
+>   which this scan cannot reach. On **PRE-RESPIN** carriers `0x48` on I2C2
+>   is U32 INA236B (+V_CAM0 rail), re-strapped to `0x4B` from the next batch
+>   (`metadata/boards/e1m-evk.yaml:294-295`).
+> * **U35 answers at `0x20`, not `0x72`,** when it is assembled as the
+>   TCA6408ARSVR alternative (R112 fitted, R145 DNP) — register-compatible,
+>   so `chips/tcal9538` drives it unchanged (`metadata/boards/e1m-evk.yaml:276-277`).
 
 > **This bench batch (2026-06-15):** the **OPTIGA Trust M (`0x30`) is not
-> populated** — `i2cdetect` will not ACK 0x30, and that is *expected*, not a
-> fault. OPTIGA is in the E1M-AEN801 SoM design (`on_module`); the absence is a
-> current-batch population fact (like the un-stuffed OSPI memories). Skip §5.2 on
-> these boards.
+> populated**, and that is *expected*, not a fault. OPTIGA is in the
+> E1M-AEN801 SoM design (`on_module`); the absence is a current-batch
+> population fact (like the un-stuffed OSPI memories). Skip §5.2 on these
+> boards. Note the evidence is the population record, **not** an `i2cdetect`
+> miss — OPTIGA sits on BRD_I2C, which the host cannot scan, so a scan would
+> not have ACKed 0x30 on a fully-populated board either.
 
 A missing slave that's *expected* is a real fault.  The on-module
 set is authoritative in
@@ -288,8 +319,8 @@ top of the per-subsystem checks.
 > leads.)
 >
 > Per-core builds use plain `west build -b <target> <app>`.
-> (`tan --project <app> build` is the multi-core *executor*: it consumes the SDK's
-> `--emit build-plan` and fans a board.yaml out into per-core slices using
+> (`tan build --project <app>` is the multi-core planner/executor: it fans a
+> board.yaml out into per-core slices using
 > the SoM-preset board string, which resolves to the
 > `alp_e1m_aen801_m55_{he,hp}` carrier board -- **prefer it** once the
 > carrier board boots, as it builds both M55 cores from the example's
@@ -323,11 +354,12 @@ top of the per-subsystem checks.
    you want captured.  Power-cycle; expect the
    `AlifSemi BootROM v1.x.y` banner within ~200 ms (§4).
 
-3. **EEPROM / board_id read over BRD_I2C.**  Confirm the 24C128
-   ACKs at `0x50` and dump the 128-byte Alp manifest (§3):
+3. **EEPROM read over I2C2 (`P5_6`/`P5_7`), not BRD_I2C.**  Confirm the
+   24C128 ACKs at `0x50` and dump the 128-byte Alp manifest (§3):
 
    ```bash
-   i2cdetect -y 1                 # 0x50 must ACK
+   i2cdetect -y 1                 # 0x50 must ACK (run `i2cdetect -l` first to map
+                                  # the index to I2C2 on your image)
    i2cdump  -y 1 0x50 b           # full manifest hexdump
    ```
 
@@ -397,8 +429,8 @@ top of the per-subsystem checks.
    `alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp`.
 
    ```bash
-   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/multicore/mproc-mailbox
-   # peer image: -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
+   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/multicore/mproc-mailbox/peer
+   # peer image: -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/multicore/mproc-mailbox
    west flash
    ```
 
@@ -461,9 +493,11 @@ Once §6's runbook passes:
 
 1. Use [`scripts/program_eeprom.py`](../scripts/program_eeprom.py)
    to write the production manifest (real serial, real mfg
-   date, real SKU).  See
-   [`docs/board-id.md`](board-id.md) for the BOARD_ID ADC
-   companion path.
+   date, real SKU).  This is the SoM's identity; the E1M EVK's
+   separate, carrier-side BOARD_ID divider path is documented in
+   [`metadata/boards/e1m-evk.yaml`](../metadata/boards/e1m-evk.yaml)'s
+   `board_id:` block (not `docs/board-id.md`, which is EEPROM-only
+   and explicitly out of scope for the carrier path).
 2. Sign the application image with MCUboot via
    [`zephyr/sysbuild/aen/sysbuild.conf`](../zephyr/sysbuild/aen/sysbuild.conf).
    Dev key under [`keys/`](../keys/); production key never
@@ -476,10 +510,11 @@ Once §6's runbook passes:
 * **Boot ROM banner but then silence** -- usually a signed-
   image-rejected scenario.  Re-flash with the dev key or check
   the MCUboot trailer.
-* **`i2cdetect` returns no slaves at all** -- BRD_I2C pull-ups
-  missing or wrong voltage.  Standard Alp boards pull to
-  1.8 V; some custom boards use 3.3 V (re-strap the SoC
-  side accordingly).
+* **`i2cdetect` returns no slaves at all** -- I2C2 pull-ups
+  missing or wrong voltage (I2C2 is the bus the scan in §5.1
+  reaches; the BRD_I2C trio is not host-scannable).  Standard
+  Alp boards pull to 1.8 V; some custom boards use 3.3 V
+  (re-strap the SoC side accordingly).
 * **PHY won't link** -- DP83825I requires its 25 MHz REFCLK
   before the strap latches.  Check `OSC_25M` on the board
   with a scope; the PHY won't link if the clock is missing at

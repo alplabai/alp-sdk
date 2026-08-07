@@ -13,7 +13,8 @@ The `src/` is intentionally parallel -- everything goes through the SoM-portable
 
 - **BRD_I2C is the Alif LPI2C0** (the LP-island I2C, `P7_4 SCL_A` /
   `P7_5 SDA_A`), surfaced as portable bus 0, carrying the Trust M at
-  `0x30` alongside the RTC + EEPROM + TMP112.
+  `0x30` alongside the RTC + TMP112. (The EEPROM is on a separate bus,
+  SoC I2C2 -- see `docs/bring-up-aen.md` §5.1.)
 - BRD_I2C lives in the low-power domain, so it is owned by the
   **M55-HE** subsystem — hence `board.yaml`'s app core is `m55_he`
   and the board target is `…/rtss_he`.

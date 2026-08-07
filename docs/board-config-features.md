@@ -31,7 +31,7 @@ features:
 
 Project-wide.  This declares where the 128-byte
 `alp_hw_info_eeprom_t` manifest lives when an app needs to pin the
-EEPROM bus/address/offset explicitly.  The orchestrator emits the
+EEPROM bus/address/offset explicitly. The planner emits the
 values into Zephyr `alp.conf` and projects them into
 `system-manifest.yaml` under `hw_info.eeprom`.
 
@@ -196,7 +196,7 @@ referenced device's size is `TBD` (HW-config still owed), the
 resolver projects the entry as `status: blocked` in the generated
 manifest with a reason that points at the SoM file owing the value.
 
-The orchestrator emits two artefacts per project:
+The planner emits two artefacts per project:
 
 * `dts-partitions.dtsi` -- a DTS overlay that decorates each
   referenced flash device with a `partitions { compatible =
@@ -238,7 +238,7 @@ security:
     attestation_root:  optiga_trust_m     # optiga_trust_m | tfm_internal | none
 ```
 
-Project-wide.  When `tfm: true` the orchestrator emits a sysbuild
+Project-wide. When `tfm: true` the planner emits a sysbuild
 child-image overlay at `build/sysbuild/tfm/tfm.conf` containing
 `SB_CONFIG_TFM=y`, `SB_CONFIG_TFM_BUILD_TYPE=<Release|Debug|MinSizeRel>`
 (inherited from `boot.build_type` when set), the
@@ -258,4 +258,3 @@ The TF-M secure partition runs on the same M55-HP core as the
 non-secure app via the Armv8-M security extension (TrustZone-M split,
 not a separate M55-HE core).  See `docs/adr/0013-tfm-boundary-m55-hp-trustzone.md`
 + `docs/security-audit-plan.md` + ADR 0010.
-

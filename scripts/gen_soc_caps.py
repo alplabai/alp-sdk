@@ -94,7 +94,7 @@ CAPS: list[tuple[str, callable]] = [
         # bound until we get a more specific field.
         lambda p: p.get("pwm", p.get("timer_32bit", 0) or 0)),
     ("ETHERNET_COUNT",
-        lambda p: p.get("ethernet", 0) or 0),
+        lambda p: (p.get("ethernet", 0) or 0) + (p.get("ethernet_1g", 0) or 0)),
     ("USB_COUNT",
         lambda p: (p.get("usb_2", 0) or 0) + (p.get("usb_3", 0) or 0)),
     ("MIPI_CSI_COUNT",
@@ -524,43 +524,65 @@ def emit(meta_dir: Path = META_DIR, som_dir: Path = SOM_DIR) -> str:
     return "\n".join(lines)
 
 
-def _clang_format(path: Path) -> None:
+def _clang_format_exe() -> str:
+    """Resolve the pinned clang-format binary, or fail naming what's missing.
+
+    Pinned to clang-format-22 (the CI version; installed via the pip wheel
+    `clang-format==22.*`, which provides the unsuffixed `clang-format`).
+    Prefer a v22-named binary if present, else the pinned `clang-format`.
+
+    Formerly this degraded to a warning and left the file unformatted --
+    the caller (test-all.sh's generated-files gate) then diffed raw,
+    pre-aligned emitter output against the clang-formatted files already
+    committed and reported that as tabs-vs-spaces "drift" (alp-sdk#1109),
+    when the real problem was clang-format never having run at all.
+    """
+    exe = shutil.which("clang-format-22") or shutil.which("clang-format")
+    if exe is None:
+        # Exit 99, not the default 1: this is a missing-tool refusal, not
+        # a generator failure, and test-all.sh's stage_generated_files
+        # maps 99 to SKIP (same contract as every other prerequisite
+        # check in that script) rather than FAIL (alp-sdk#1221).
+        print(
+            "error: clang-format not found on PATH; cannot format the "
+            "generated SoC-caps files to match the repo .clang-format "
+            "(install clang-format==22.* -- see docs/testing.md)",
+            file=sys.stderr,
+        )
+        raise SystemExit(99)
+    return exe
+
+
+def _clang_format(path: Path, exe: str) -> None:
     """Format a generated file in place to match the repo .clang-format.
 
     The emitters above produce best-effort, pre-aligned output, but the canonical
     formatting (tab indentation, AlignConsecutive* columns) is owned by
     /.clang-format -- so run clang-format here to guarantee the generated file is
     byte-identical to what the CI diff-only gate expects, regardless of how this
-    script lays out whitespace.  No-op (with a warning) if clang-format is absent;
-    the CI gate then catches any drift.
+    script lays out whitespace.
     """
-    # Pinned to clang-format-22 (the CI version; installed via the pip wheel
-    # `clang-format==22.*`, which provides the unsuffixed `clang-format`).
-    # Prefer a v22-named binary if present, else the pinned `clang-format`.
-    exe = shutil.which("clang-format-22") or shutil.which("clang-format")
-    if exe is None:
-        print(f"  warning: clang-format not found; {path.name} left unformatted "
-              "(CI will flag any drift)", file=sys.stderr)
-        return
     subprocess.run([exe, "-i", "--style=file", str(path)], check=True)
 
 
 def main() -> int:
+    exe = _clang_format_exe()
+
     OUT.parent.mkdir(parents=True, exist_ok=True)
     out_text = emit()
     OUT.write_text(out_text, encoding="utf-8", newline="")
-    _clang_format(OUT)
+    _clang_format(OUT, exe)
     print(f"wrote {OUT.relative_to(REPO)} ({len(OUT.read_text().splitlines())} lines)")
 
     cap_h_text = _emit_cap_h()
     CAP_H_OUT.write_text(cap_h_text, encoding="utf-8", newline="")
-    _clang_format(CAP_H_OUT)
+    _clang_format(CAP_H_OUT, exe)
     print(f"wrote {CAP_H_OUT.relative_to(REPO)} ({len(CAP_H_OUT.read_text().splitlines())} lines)")
 
     CAP_C_OUT.parent.mkdir(parents=True, exist_ok=True)
     cap_c_text = _emit_cap_c()
     CAP_C_OUT.write_text(cap_c_text, encoding="utf-8", newline="")
-    _clang_format(CAP_C_OUT)
+    _clang_format(CAP_C_OUT, exe)
     print(f"wrote {CAP_C_OUT.relative_to(REPO)} ({len(CAP_C_OUT.read_text().splitlines())} lines)")
 
     return 0

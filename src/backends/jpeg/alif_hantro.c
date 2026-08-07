@@ -53,6 +53,7 @@
 #if defined(CONFIG_ALP_SDK_JPEG_ALIF_HANTRO)
 
 #include <errno.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -70,6 +71,7 @@
 #include <alp/peripheral.h>
 
 #include "jpeg_ops.h"
+#include "alp_slot_claim.h"
 
 LOG_MODULE_REGISTER(alp_jpeg_alif_hantro, CONFIG_LOG_DEFAULT_LEVEL);
 
@@ -137,12 +139,14 @@ typedef struct {
 
 static alif_hantro_jpeg_state_t _state_pool[CONFIG_ALP_SDK_MAX_JPEG_HANDLES];
 
+/* issue #1115 round-2 dev review: claim atomically (in_use is the LAST
+ * member; memset only the bytes ahead of it) instead of the previous
+ * plain check-then-set scan. */
 static alif_hantro_jpeg_state_t *_alloc_state(void)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(_state_pool); ++i) {
-		if (!_state_pool[i].in_use) {
-			memset(&_state_pool[i], 0, sizeof(_state_pool[i]));
-			_state_pool[i].in_use = true;
+		if (alp_slot_try_claim(&_state_pool[i].in_use)) {
+			memset(&_state_pool[i], 0, offsetof(alif_hantro_jpeg_state_t, in_use));
 			return &_state_pool[i];
 		}
 	}
@@ -152,7 +156,7 @@ static alif_hantro_jpeg_state_t *_alloc_state(void)
 static void _free_state(alif_hantro_jpeg_state_t *st)
 {
 	if (st != NULL) {
-		st->in_use = false;
+		alp_slot_release(&st->in_use);
 	}
 }
 

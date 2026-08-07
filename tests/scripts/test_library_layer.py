@@ -174,6 +174,36 @@ cores:
     app: ./m33
 """
 
+_V2N_CMSIS_STREAM = """
+som:
+  sku: E1M-V2N101
+libraries: [cmsis-stream]
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./m33
+"""
+
+_V2N_CMSIS_CV = """
+som:
+  sku: E1M-V2N101
+libraries: [cmsis-cv]
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./m33
+"""
+
+_V2N_ARM_2D = """
+som:
+  sku: E1M-V2N101
+libraries: [arm-2d]
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./m33
+"""
+
 
 def test_emit_lvgl_zephyr_kconfig(tmp_path: Path) -> None:
     project = load_board_yaml(_write_board(tmp_path, _V2N_LVGL))
@@ -188,6 +218,41 @@ def test_emit_cmsis_dsp_zephyr_kconfig(tmp_path: Path) -> None:
     out = _slice_alp_conf(project, project.cores["m33_sm"])
     assert "CONFIG_CMSIS_DSP=y" in out
     assert "CONFIG_CMSIS_DSP_TRANSFORM=y" in out
+
+
+def test_emit_cmsis_stream_zephyr_kconfig(tmp_path: Path) -> None:
+    """cmsis-stream names a real upstream west module (`cmsisstream`, its own
+    zephyr/module.yml at the pinned v3.2.0 tag) and its umbrella Kconfig."""
+    project = load_board_yaml(_write_board(tmp_path, _V2N_CMSIS_STREAM))
+    out = _slice_alp_conf(project, project.cores["m33_sm"])
+    assert "CONFIG_CMSISSTREAM=y" in out
+    assert "cmsis-stream v3.2.0" in out  # version transcribed from the manifest
+
+
+def test_emit_cmsis_cv_module_only_no_kconfig(tmp_path: Path) -> None:
+    """cmsis-cv has no upstream Zephyr module glue (no zephyr/module.yml, no
+    Kconfig at the pinned SHA) -- `module: null`, so emit must not fabricate
+    a CONFIG line."""
+    project = load_board_yaml(_write_board(tmp_path, _V2N_CMSIS_CV))
+    out = _slice_alp_conf(project, project.cores["m33_sm"])
+    assert "# library: cmsis-cv v25c6c111ee04dcfb0ae9093fd6dee4586872982c" in out
+    # Nothing invented: the library layer emits the tag line and nothing else.
+    assert liblayer.zephyr_kconfig_lines(project, project.cores["m33_sm"]) == [
+        "# library: cmsis-cv v25c6c111ee04dcfb0ae9093fd6dee4586872982c"
+    ]
+
+
+def test_emit_arm_2d_module_only_no_kconfig(tmp_path: Path) -> None:
+    """arm-2d has a mature tagged release but no upstream Zephyr module glue
+    (no zephyr/module.yml, no Kconfig) -- `module: null`, so emit must not
+    fabricate a CONFIG line."""
+    project = load_board_yaml(_write_board(tmp_path, _V2N_ARM_2D))
+    out = _slice_alp_conf(project, project.cores["m33_sm"])
+    assert "# library: arm-2d v1.2.6" in out
+    # Nothing invented: the library layer emits the tag line and nothing else.
+    assert liblayer.zephyr_kconfig_lines(project, project.cores["m33_sm"]) == [
+        "# library: arm-2d v1.2.6"
+    ]
 
 
 def test_emit_zero_diff_without_libraries(tmp_path: Path) -> None:

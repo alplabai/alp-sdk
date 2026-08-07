@@ -14,8 +14,12 @@ the result to the build job via `needs.compute-family-matrix.outputs.matrix`
 / `fromJson(...)`, so the two can no longer diverge.
 
 Output is a GitHub Actions matrix object, `{"include": [{"som": ...,
-"core": ...}, ...]}`, one entry per `familyMatrix` cell, on a single
-line of stdout (safe to assign straight to `$GITHUB_OUTPUT`).
+"core": ...}, ...]}`, one entry per `familyMatrix` cell EXCEPT a cell
+whose `family` is a key in `excludedFamilies` (a documented,
+build-time-only skip -- e.g. #1025's NX9101/tbd hw_rev -- the cell
+itself stays in `familyMatrix` so `scripts/validate_metadata.py` still
+sees every SoM family represented), on a single line of stdout (safe
+to assign straight to `$GITHUB_OUTPUT`).
 
 Usage:
 
@@ -39,18 +43,31 @@ def build_matrix(registry_path: Path) -> dict:
     if not isinstance(family_matrix, list) or not family_matrix:
         raise ValueError(f"{registry_path}: familyMatrix is missing or empty")
 
+    # familyMatrix cells named here stay in the registry (so
+    # scripts/validate_metadata.py still sees every SoM family covered)
+    # but are skipped from the actual CI build matrix -- e.g. a family
+    # whose only SoM can't emit at all right now (#1025: E1M-NX9101's
+    # hw_rev is `status: tbd`). Same shape as hostBuild.excludedLibraries.
+    excluded_families = registry.get("excludedFamilies") or {}
+
     include = []
     for idx, cell in enumerate(family_matrix):
         if not isinstance(cell, dict):
             raise ValueError(f"{registry_path}: familyMatrix[{idx}] is not an object")
+        family = cell.get("family")
         som = cell.get("som")
         core = cell.get("core")
         if not isinstance(som, str) or not som:
             raise ValueError(f"{registry_path}: familyMatrix[{idx}]/som is missing")
         if not isinstance(core, str) or not core:
             raise ValueError(f"{registry_path}: familyMatrix[{idx}]/core is missing")
+        if isinstance(family, str) and family in excluded_families:
+            continue
         include.append({"som": som, "core": core})
 
+    if not include:
+        raise ValueError(f"{registry_path}: every familyMatrix cell is excluded -- "
+                          f"nothing left to build")
     return {"include": include}
 
 

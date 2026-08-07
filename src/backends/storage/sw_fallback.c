@@ -114,3 +114,8 @@ ALP_BACKEND_REGISTER(storage,
                          .ops         = &_ops,
                          .probe       = NULL,
                      });
+
+/* Static-archive link anchor (#1140) -- this TU is the section-carrying
+ * backend for the storage class on the plain-CMake / Yocto path; see
+ * ALP_BACKEND_ANCHOR_DEFINE's doc comment in <alp/backend.h>. */
+ALP_BACKEND_ANCHOR_DEFINE(storage);

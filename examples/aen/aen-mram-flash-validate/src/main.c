@@ -40,7 +40,7 @@
  *
  * Console is the Alp UART console (see prj.conf): E1M edge UART0 = Alif UART5
  * (P3_4/P3_5, 115200 8N1), USB-routed to the labgrid `console` resource
- * (/dev/ttyUSB2) since 2026-07-03, so the RESULT PASS/FAIL line streams live as
+ * since 2026-07-03, so the RESULT PASS/FAIL line streams live as
  * the SES boots this slot0 image.  Independently, the human reads mem32
  * 0x80560000 over J-Link after the program step -- silicon ground truth for the
  * written pattern (first word 0xA5A5A5A5), independent of any printk.
@@ -55,15 +55,15 @@
 #include <zephyr/storage/flash_map.h>
 
 /* The safe scratch target: the `storage` fixed-partition under the MRAM
- * controller.  FIXED_PARTITION_* resolve the offset/size from DT so nothing is
- * hard-coded, and FIXED_PARTITION_DEVICE resolves the flash device the
+ * controller.  PARTITION_* resolve the offset/size from DT so nothing is
+ * hard-coded, and PARTITION_DEVICE resolves the flash device the
  * flash_mram_alif driver bound (the "alif,mram-flash-controller" node). */
 #define SCRATCH_PARTITION storage_partition
 
-static const struct device *const flash_dev = FIXED_PARTITION_DEVICE(SCRATCH_PARTITION);
+static const struct device *const flash_dev = PARTITION_DEVICE(SCRATCH_PARTITION);
 
-#define SCRATCH_OFF  FIXED_PARTITION_OFFSET(SCRATCH_PARTITION)
-#define SCRATCH_SIZE FIXED_PARTITION_SIZE(SCRATCH_PARTITION)
+#define SCRATCH_OFF  PARTITION_OFFSET(SCRATCH_PARTITION)
+#define SCRATCH_SIZE PARTITION_SIZE(SCRATCH_PARTITION)
 
 /* One erase block (1024 B, the node's erase-block-size) is enough to prove the
  * path; the written pattern is 256 B = 16 * 16-byte program units. */

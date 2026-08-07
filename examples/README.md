@@ -11,7 +11,7 @@ project, and modify.
 
 ```bash
 cd alp-workspace
-tan build --native alp-sdk/examples/<category>/<name>   # e.g. examples/peripheral-io/gpio-button-led
+tan build --project alp-sdk/examples/<category>/<name>   # e.g. examples/peripheral-io/gpio-button-led
 ```
 
 `tan build` reads the example's `board.yaml` v2, resolves the
@@ -196,7 +196,7 @@ its `cores:` keys.
 |--------------------------|----------------------------------------------------------------------------------------------|
 | `rpmsg-v2n`              | V2N flagship -- A55 Yocto consumer + M33-SM Zephyr producer, framed RPC over RPMsg. **(V2N)** |
 | `rpmsg-aen`              | AEN E8 -- A32 Yocto consumer + M55-HP Zephyr producer reading on-board IMU + barometer. **(AEN)** |
-| `rpmsg-imx93`            | iMX93 -- A55 Yocto consumer + M33 Zephyr producer (structural; build pending iMX93 HW map). **(iMX93)** |
+| `rpmsg-imx93`            | iMX93 -- A55 Yocto consumer + M33 Zephyr producer (structural; **not buildable** -- imx93 r1's `status: tbd` is refused by the hw_rev-buildable gate, [#1025](https://github.com/alplabai/alp-sdk/issues/1025)). **(iMX93)** |
 | `heterogeneous-offload`  | "Why heterogeneous compute?" -- A55 delegates a 1024-pt FFT to M33-SM via `alp_rpc_call`.     |
 | `mproc-mailbox`          | M55-HP ↔ M55-HE mailbox round-trip -- stage payload in shared SRAM, signal via HW mailbox, read the reply. **(AEN)** |
 
@@ -283,7 +283,7 @@ To adapt to your own project:
    * Heterogeneous projects: `ipc:` -- name a carve-out the
      orchestrator allocates from the SoM's `memory_map:`.
 3. Modify each core's `src/main.c` to whatever your app needs.
-4. `tan build .` from your project directory.
+4. `tan build` from your project directory.
 
 ## See also
 

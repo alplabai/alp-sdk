@@ -283,6 +283,168 @@ def test_no_shipped_template_declares_a_substitution_target():
 
 
 # --------------------------------------------------------------------------
+# Path containment (#1126) -- a catalog-declared files.user_owned entry
+# must never let render()/render_to_envelope() read outside the example
+# root or write outside the destination root, whether it tries via `..`
+# traversal, an absolute path, or a symlink placed inside either root.
+# `_safe_join` backs BOTH the read site (_rendered_bytes) and the write
+# site (render()'s write loop), so testing it directly covers both; the
+# render()-level test below additionally proves the wiring end-to-end.
+# --------------------------------------------------------------------------
+
+def test_safe_join_allows_a_normal_in_root_path(tmp_path):
+    root = tmp_path / "root"
+    (root / "sub").mkdir(parents=True)
+    (root / "sub" / "file.txt").write_text("ok", encoding="utf-8")
+    assert alp_template._safe_join(root, "sub/file.txt", what="x") == (
+        root / "sub" / "file.txt").resolve()
+
+
+def test_safe_join_rejects_parent_traversal(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    (tmp_path / "secret.txt").write_text("outside", encoding="utf-8")
+    with pytest.raises(alp_template.PathEscapeError):
+        alp_template._safe_join(root, "../secret.txt", what="x")
+
+
+def test_safe_join_rejects_absolute_path(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    with pytest.raises(alp_template.PathEscapeError):
+        alp_template._safe_join(root, "/etc/passwd", what="x")
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="os.symlink needs elevated privileges on Windows")
+def test_safe_join_rejects_symlink_escape(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("outside", encoding="utf-8")
+    (root / "escape_link").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(alp_template.PathEscapeError):
+        alp_template._safe_join(root, "escape_link/secret.txt", what="x")
+
+
+def _write_escape_catalog(root: Path, user_owned: list[str]) -> Path:
+    """Same shape as `_write_fixture_catalog`, minus the substitution
+    parameter -- lets each test declare its own (possibly malicious)
+    `files.user_owned` list without a real example tree behind it."""
+    example_rel = "examples/fixture/escape-app"
+    example_dir = root / example_rel
+    example_dir.mkdir(parents=True)
+    (example_dir / "board.yaml").write_text("name: escape\n", encoding="utf-8")
+
+    catalog = {
+        "schemaVersion": 1,
+        "description": "test fixture catalog",
+        "templates": [
+            {
+                "id": "escape-app",
+                "title": "Escape App",
+                "archetype": "minimal",
+                "example": example_rel,
+                "description": "fixture",
+                "supported": {
+                    "families": ["alif-ensemble"],
+                    "som_skus": ["E1M-AEN801"],
+                    "core_classes": ["m"],
+                    "runtimes": ["zephyr"],
+                },
+                "requires": {
+                    "portable_apis": [],
+                    "libraries": [],
+                    "chips": [],
+                    "routes": [],
+                    "generated_artifacts": [],
+                    "test_backend": ["native_sim"],
+                },
+                "files": {"user_owned": user_owned, "generated": []},
+                "parameters": [],
+                "test": {
+                    "testcase_yaml": [f"{example_rel}/testcase.yaml"],
+                    "native_sim_scenarios": [],
+                    "cross_compile_matrix": [],
+                },
+                "status": "preview",
+                "note": "fixture only, not a real template",
+            }
+        ],
+    }
+    catalog_path = root / "catalog.json"
+    catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+    return catalog_path
+
+
+def test_render_valid_in_root_user_owned_file_still_renders(tmp_path):
+    catalog_path = _write_escape_catalog(tmp_path, ["board.yaml"])
+    dest = tmp_path / "out"
+    result = alp_template.render(
+        "escape-app", dest, catalog_path=catalog_path, base_dir=tmp_path)
+    assert result.files == ("board.yaml",)
+    assert (dest / "board.yaml").read_text(encoding="utf-8") == "name: escape\n"
+
+
+def test_render_rejects_traversal_in_user_owned_path(tmp_path):
+    (tmp_path / "secret.txt").write_text("outside", encoding="utf-8")
+    catalog_path = _write_escape_catalog(tmp_path, ["../../../secret.txt"])
+    with pytest.raises(alp_template.PathEscapeError):
+        alp_template.render(
+            "escape-app", tmp_path / "out",
+            catalog_path=catalog_path, base_dir=tmp_path)
+
+
+def test_render_rejects_absolute_path_in_user_owned(tmp_path):
+    catalog_path = _write_escape_catalog(tmp_path, ["/etc/passwd"])
+    with pytest.raises(alp_template.PathEscapeError):
+        alp_template.render(
+            "escape-app", tmp_path / "out",
+            catalog_path=catalog_path, base_dir=tmp_path)
+
+
+def test_render_rejects_traversal_in_the_example_root_itself(tmp_path):
+    """Adversarial-review follow-up (#1126, blocker 1): the catalog's
+    `example` field is JUST AS untrusted as `files.user_owned` -- the
+    first pass wired `_safe_join()` around the RELATIVE part of every
+    join (`files.user_owned` entries) but still trusted `example` itself
+    verbatim (`base_dir / record["example"]`), so a catalog naming
+    `"example": "../outside"` walked the containment ROOT out of
+    `base_dir` and the per-file check then faithfully confined the read
+    to that escaped root -- containing nothing. Mirrors the reviewer's
+    production PoC (`base_dir == REPO`, `example` walking out to
+    `/tmp/X/outside`) with a hermetic `base_dir` instead."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("SECRET\n", encoding="utf-8")
+
+    base_dir = tmp_path / "base"
+    base_dir.mkdir()
+
+    catalog = {
+        "templates": [{
+            "id": "escape-root",
+            "example": "../outside",
+            "files": {"user_owned": ["secret.txt"], "generated": []},
+            "parameters": [],
+            "test": {"testcase_yaml": []},
+        }],
+    }
+    catalog_path = tmp_path / "catalog.json"
+    catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+
+    dest = tmp_path / "dest"
+    with pytest.raises(alp_template.PathEscapeError):
+        alp_template.render(
+            "escape-root", dest, catalog_path=catalog_path, base_dir=base_dir)
+
+    # Pre-fix, this is exactly the reviewer's PoC: render() returns clean
+    # and dest/secret.txt contains the exfiltrated file. It must not exist.
+    assert not dest.exists()
+
+
+# --------------------------------------------------------------------------
 # render_to_envelope() -- --emit scaffold's in-memory capture (issue #864)
 # --------------------------------------------------------------------------
 
@@ -485,6 +647,169 @@ def test_derive_core_renames_picks_the_real_app_core_not_alphabetical_first():
     renames = alp_template._derive_core_renames(
         ["m33_sm"], "E1M-AEN801", alp_template.METADATA_ROOT)
     assert renames == {"m33_sm": "m55_hp"}
+
+
+# --------------------------------------------------------------------------
+# render_to_envelope's per-core CMakeLists.txt map (issue #1275 item 1) --
+# synthetic fixture, since no SHIPPED template today needs a cross-family
+# rename on a dual-Zephyr-core template (E1M-AEN801 is the only SKU with
+# two Zephyr M cores in the whole catalog, and every dual-Zephyr-core
+# template only supports that one SKU -- see multicore-mailbox's
+# `supported.som_skus`). Before this fix, ONE re-derived rename
+# (`app_core_sub`, keyed off the first m-prefixed core) was applied to
+# EVERY `*CMakeLists.txt` file a template owned; on a second Zephyr core
+# whose CMakeLists.txt carries a DIFFERENT `--core` literal, that either
+# silently mismatched (a wrong `--core` value written) or, as here,
+# hard-failed with "must have exactly one `--core <old>`... found 0"
+# because the literal being searched for isn't the one that file has.
+# --------------------------------------------------------------------------
+
+def _write_dual_core_fixture(root: Path) -> tuple[Path, Path]:
+    """A minimal two-Zephyr-core template (root `CMakeLists.txt` baking
+    `--core m55_hp`, `peer/CMakeLists.txt` baking `--core m55_he`) plus a
+    metadata_root with two SoM presets: the example's own (SRC, same core
+    ids) and a target (DST) whose topology renames BOTH cores to
+    DIFFERENT ids -- so a correct fix must apply the RIGHT rename to the
+    RIGHT file, not one rename to both. Returns (catalog_path, metadata_root)."""
+    example_dir = root / "examples" / "fixture" / "dual-core-app"
+    (example_dir / "src").mkdir(parents=True)
+    (example_dir / "peer").mkdir(parents=True)
+    (example_dir / "board.yaml").write_text(
+        "som:\n"
+        "  sku: E1M-SRCTEST\n"
+        "preset: src-preset\n"
+        "cores:\n"
+        "  m55_hp:\n"
+        "    app: ./src\n"
+        "  m55_he:\n"
+        "    app: ./peer\n",
+        encoding="utf-8", newline="\n",
+    )
+    (example_dir / "src" / "main.c").write_text("/* hp */\n", encoding="utf-8")
+    (example_dir / "peer" / "main.c").write_text("/* he */\n", encoding="utf-8")
+    (example_dir / "CMakeLists.txt").write_text(
+        "# fixture\nalp_project.py --emit zephyr-conf --core m55_hp\n",
+        encoding="utf-8", newline="\n",
+    )
+    (example_dir / "peer" / "CMakeLists.txt").write_text(
+        "# fixture\nalp_project.py --emit zephyr-conf --core m55_he\n",
+        encoding="utf-8", newline="\n",
+    )
+
+    metadata_root = root / "metadata"
+    (metadata_root / "e1m_modules").mkdir(parents=True)
+    (metadata_root / "e1m_modules" / "E1M-SRCTEST.yaml").write_text(
+        "default_board: SRC-PRESET\n"
+        "topology:\n"
+        "  m55_hp:\n"
+        "    board: src_board/soc/m55_hp\n"
+        "  m55_he:\n"
+        "    board: src_board/soc/m55_he\n",
+        encoding="utf-8", newline="\n",
+    )
+    (metadata_root / "e1m_modules" / "E1M-DSTTEST.yaml").write_text(
+        "default_board: DST-PRESET\n"
+        "topology:\n"
+        "  mX:\n"
+        "    board: dst_board/soc/mX\n"
+        "  mY:\n"
+        "    board: dst_board/soc/mY\n",
+        encoding="utf-8", newline="\n",
+    )
+
+    catalog = {
+        "schemaVersion": 1,
+        "description": "test fixture catalog",
+        "templates": [
+            {
+                "id": "dual-core-app",
+                "title": "Dual Core App",
+                "archetype": "multicore-mailbox",
+                "example": "examples/fixture/dual-core-app",
+                "description": "fixture",
+                "supported": {
+                    "families": ["alif-ensemble"],
+                    "som_skus": ["E1M-SRCTEST", "E1M-DSTTEST"],
+                    "core_classes": ["m"],
+                    "runtimes": ["zephyr"],
+                },
+                "cores": [
+                    {"id": "m55_hp", "dir": "./src", "os": "zephyr"},
+                    {"id": "m55_he", "dir": "./peer", "os": "zephyr"},
+                ],
+                "requires": {
+                    "portable_apis": [], "libraries": [], "chips": [],
+                    "routes": [], "generated_artifacts": [],
+                    "test_backend": ["native_sim"],
+                },
+                "files": {
+                    "user_owned": [
+                        "board.yaml", "CMakeLists.txt", "src/main.c",
+                        "peer/CMakeLists.txt", "peer/main.c",
+                    ],
+                    "generated": [],
+                },
+                "parameters": [],
+                "test": {
+                    "testcase_yaml": [], "native_sim_scenarios": [],
+                    "cross_compile_matrix": [],
+                },
+                "status": "preview",
+                "note": "fixture only, not a real template",
+            }
+        ],
+    }
+    catalog_path = root / "catalog.json"
+    catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+    return catalog_path, metadata_root
+
+
+def test_render_to_envelope_renames_each_zephyr_cores_own_cmakelists(tmp_path):
+    catalog_path, metadata_root = _write_dual_core_fixture(tmp_path)
+
+    envelope = dict(alp_template.render_to_envelope(
+        "dual-core-app", "E1M-DSTTEST",
+        catalog_path=catalog_path, base_dir=tmp_path, metadata_root=metadata_root))
+
+    # Each file's OWN core got its OWN rename -- not one rename smeared
+    # across both files (which would leave one wrong, or -- as it did
+    # before this fix -- raise TemplateError on the second file instead).
+    assert "--core mX" in envelope["CMakeLists.txt"]
+    assert "m55_hp" not in envelope["CMakeLists.txt"]
+    assert "--core mY" in envelope["peer/CMakeLists.txt"]
+    assert "m55_he" not in envelope["peer/CMakeLists.txt"]
+
+
+def test_render_to_envelope_passthrough_keeps_each_cores_own_literal(tmp_path):
+    """Same fixture, requesting the example's OWN sku (no rename at
+    all): both CMakeLists.txt must stay byte-identical to the source,
+    each keeping ITS OWN core's literal -- never swapped."""
+    catalog_path, metadata_root = _write_dual_core_fixture(tmp_path)
+
+    envelope = dict(alp_template.render_to_envelope(
+        "dual-core-app", "E1M-SRCTEST",
+        catalog_path=catalog_path, base_dir=tmp_path, metadata_root=metadata_root))
+
+    assert "--core m55_hp" in envelope["CMakeLists.txt"]
+    assert "--core m55_he" in envelope["peer/CMakeLists.txt"]
+
+
+def test_cmake_core_map_rejects_traversal_in_core_dir(tmp_path):
+    """A catalog `cores[].dir` of `../x` must be rejected via the same
+    resolve-then-contain guard (#1126) every other catalog-sourced path
+    in this file uses -- `_cmake_core_map` used to hand `core["dir"]`
+    straight to `_zephyr_app_dir` (no containment check of its own) and
+    then `.relative_to(example_dir)`, which raises a bare ValueError
+    instead of PathEscapeError/TemplateError when the dir escapes."""
+    example_dir = tmp_path / "examples" / "fixture" / "escape-app"
+    example_dir.mkdir(parents=True)
+    record = {
+        "cores": [
+            {"id": "m55_hp", "dir": "../escape", "os": "zephyr"},
+        ],
+    }
+    with pytest.raises(alp_template.PathEscapeError):
+        alp_template._cmake_core_map(record, example_dir)
 
 
 # --------------------------------------------------------------------------
@@ -863,3 +1188,49 @@ def test_validate_skips_cleanly_without_zephyr_base():
     result = alp_template.validate("minimal", zephyr_base="")
     assert result.skipped
     assert "ZEPHYR_BASE" in result.reason
+
+
+def test_validate_rejects_traversal_in_testcase_yaml(tmp_path, monkeypatch):
+    """Adversarial-review follow-up (#1126, blocker 2): same class, same
+    file, but the helper was never applied at this site. `validate()`
+    derives `rel` from the catalog-controlled `test.testcase_yaml` by
+    STRING-stripping the example prefix (`tc[len(example_prefix):]`),
+    which preserves a `..` untouched, then joined it straight onto its
+    own tmp dir with no containment check. The reviewer's PoC (`tc =
+    "<example>/../ALP1126_LOOT.txt"`) lands a file as a *sibling* of the
+    twister tmpdir -- outside it -- before validate() ever shells out to
+    twister, let alone errors out. `zephyr_base` here is a nonexistent
+    path: the write-side bug fires before validate() would ever reach a
+    real twister invocation, so no real Zephyr checkout is needed to
+    prove it."""
+    controlled_tmp = tmp_path / "twister-tmp"
+    monkeypatch.setattr(
+        alp_template.tempfile, "mkdtemp", lambda *a, **k: str(controlled_tmp))
+
+    example = "examples/peripheral-io/hello-world"
+    catalog = {
+        "templates": [{
+            "id": "escape-testcase",
+            "example": example,
+            "files": {
+                "user_owned": ["board.yaml", "prj.conf", "CMakeLists.txt",
+                                "src/main.c", "README.md"],
+                "generated": [],
+            },
+            "parameters": [],
+            "test": {
+                "testcase_yaml": [f"{example}/../hello-world/testcase.yaml"],
+            },
+        }],
+    }
+    catalog_path = tmp_path / "catalog.json"
+    catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+
+    with pytest.raises(alp_template.PathEscapeError):
+        alp_template.validate(
+            "escape-testcase", catalog_path=catalog_path,
+            zephyr_base="/nonexistent-zephyr")
+
+    # The escape target is a sibling of the (deleted) tmpdir -- must never
+    # have been created.
+    assert not (tmp_path / "hello-world").exists()

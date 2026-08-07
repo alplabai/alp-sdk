@@ -40,7 +40,7 @@ guidance comments before submitting.
 ## Test plan
 
 - [ ] Twister green on `native_sim/native/64`:
-      `EXTRA_ZEPHYR_MODULES=$(pwd) python3 zephyr/scripts/twister --testsuite-root tests/zephyr --testsuite-root examples -p native_sim/native/64`
+      `EXTRA_ZEPHYR_MODULES=$(pwd) python3 "$ZEPHYR_BASE/scripts/twister" --testsuite-root tests/unit --testsuite-root tests/zephyr --testsuite-root examples -p native_sim/native/64`
 - [ ] Metadata validates: `python3 scripts/validate_metadata.py`
 - [ ] (HW-in-loop) flashed and ran on a real EVK — paste the captured log.
 

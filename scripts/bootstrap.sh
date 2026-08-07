@@ -301,12 +301,17 @@ emit("PIP_EDITABLE_INSTALL", d["pip"]["editableInstall"])
 # verdict: the single source for which pip phases make the closing verdict
 # non-success, and the wording for it (issue #1038 / tan-cli#220) -- see
 # the verdict.* descriptions in metadata/schemas/bootstrap-v1.schema.json.
-# NOTE: no apostrophes in this heredoc. bash 3.2 (macOS) tracks single-quote
-# state across a heredoc body while scanning for the closing ) of the
-# enclosing $( ), even with a quoted <<'PY' tag, so an ODD apostrophe count
-# in here opens a quote state that runs until the parser hits something
-# illegal in it -- surfacing as a syntax error at an unrelated line far
-# below. See #1050.
+# NOTE: no apostrophes, and no lone angle-bracket character, anywhere in
+# this heredoc. bash 3.2 (macOS) scans this whole body -- comments included
+# -- character by character while hunting for the closing paren of the
+# enclosing $( ), even though the quoted PY-tagged heredoc makes it inert
+# Python-only text to every other shell. An ODD apostrophe count opens a
+# quote state that runs until the parser hits something illegal in it
+# (#1050); a lone angle bracket (as in an angle-bracket-wrapped placeholder)
+# is misread as a redirection operator and desyncs the same scan -- both
+# surface as a syntax error at an unrelated line far below. Spell a
+# placeholder as plain "user", not a bracketed one, down here.
+# See #1050 and #1061.
 emit("VERDICT_BLOCKING_PHASES", d["verdict"]["blockingPhases"])
 emit("VERDICT_PARTIAL_NOTE_TEMPLATE", d["verdict"]["partialNoteTemplate"])
 emit("VERDICT_INCOMPLETE_MESSAGE_TEMPLATE", d["verdict"]["incompleteMessageTemplate"])
@@ -314,8 +319,8 @@ emit("VERDICT_INCOMPLETE_REMEDY", d["verdict"]["incompleteRemedy"])
 # env: keys and RAW (untokenized) values as two parallel arrays (bash has
 # no portable ordered-map array type across the bash 3.2 macOS ships and
 # bash 4+). Token substitution happens in bash, not here: git-bash silently
-# rewrites a POSIX-style path argument (e.g. "/c/Users/x") into
-# "C:/Users/x" when handed to a native (non-MSYS) python.exe, which would
+# rewrites a POSIX-style path argument (e.g. "/c/Users/user") into
+# "C:/Users/user" when handed to a native (non-MSYS) python.exe, which would
 # make this same directory print two different ways depending on whether
 # it went through python's tok() or bash's own $WORKSPACE_DIR -- see
 # print_env_lines() below.
@@ -495,7 +500,7 @@ esac
 # workspace-local venv, never the system interpreter / --user / --break-system-
 # packages (issue #93: a half-removed system `packaging` once broke `west init`,
 # and a global west couples the build to the host interpreter's state).
-# tan's Python backend (alp_cli) + the VS Code extension auto-discover
+# alp-sdk's internal Python tooling + the VS Code extension auto-discover
 # <workspace>/.venv, so this is backwards-compatible.  Idempotent: an
 # existing WORKING venv is reused.
 if [ "${DO_WEST}" -eq 1 ] || [ "${DO_PIP}" -eq 1 ]; then
@@ -631,18 +636,12 @@ if [ "${DO_PIP}" -eq 1 ]; then
     info "Installing alp-sdk Python extras into the venv (${PIP_SDK_EXTRAS[*]})"
     "${VPY}" -m pip install -q "${PIP_SDK_EXTRAS[@]}" \
         || { warn "alp-sdk extras install reported a problem -- check manually"; record_phase_warning "sdk-extras"; }
-    # tan's Python backend (alp_cli: init / run / emit / validate / model /
-    # doctor / monitor, invoked as `python -m alp_cli <sub>` by `tan`) --
-    # editable install, so a `git pull` in the checkout updates the backend
-    # in place. `tan` itself is a separate Rust binary, installed
-    # separately:
-    #   curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh | sh
-    # The from-source alternative is `git clone https://github.com/alplabai/
-    # tan-cli && cd tan-cli && cargo install --path crates/tan-cli --locked`
-    # -- that path is relative to a TAN-CLI checkout, not to this one. This
-    # comment used to name `crates/tan-cli` alone, which does not exist in
-    # alp-sdk, so anyone who followed it from here got "no such directory".
-    info "Installing the tan CLI's Python backend into the venv (pip install -e ${PIP_EDITABLE_INSTALL})"
+    # SDK-internal/reference Python tooling (including alp_cli) -- editable
+    # install, so a `git pull` in the checkout updates it in place. Python
+    # Tan is installed separately. During the v0.5 port, use tan-cli/dev in
+    # its own Python 3.12+ venv; from v0.5 the installer supplies the frozen
+    # runtime.
+    info "Installing alp-sdk's internal Python tooling into the venv (pip install -e ${PIP_EDITABLE_INSTALL})"
     "${VPY}" -m pip install -q -e "${PIP_EDITABLE_INSTALL}" \
         || { warn "alp_cli editable install reported a problem -- check manually"; record_phase_warning "editable-install"; }
 else
@@ -726,7 +725,7 @@ echo
 #
 # EXIT_CODE is set here but NOT acted on until the very end of this script
 # (matching tan-cli's `verdict()`/`finish()` split): the Next steps block
-# below -- including `tan doctor --build`, the tool that diagnoses exactly
+# below -- including `tan doctor`, the tool that diagnoses exactly
 # this kind of failure -- must still print on the incomplete path. Exiting
 # here would take that away on the one run that needs it most.
 EXIT_CODE=0
@@ -782,10 +781,9 @@ print_env_lines "  "
 cat <<'EOF'
 
   # Sanity-check the host build environment (needs tan on PATH -- see
-  # README.md for the tan-cli `install.sh` one-liner): `tan doctor --build`
-  # is the host/build preflight; plain `tan doctor` is a different,
-  # debug-readiness check (lldb, codeLLDBExtension) -- see docs/cli.md.
-  tan doctor --build
+  # README.md for the current v0.5-transition install). Python Tan runs one
+  # build/flash-oriented checklist; `--build` is a compatibility no-op.
+  tan doctor
 
   # BUILDING YOUR OWN PROJECT -- the customer path. `tan` is the whole command
   # surface (ADR-0020), and `tan build` resolves the board from the project's
@@ -794,10 +792,10 @@ cat <<'EOF'
   #
   # Note `tan build` has NO native_sim option: board.yaml's `os:` is
   # zephyr/yocto/baremetal/off, so it always targets the real SKU your
-  # board.yaml declares and a real toolchain is required. `tan doctor --build`
+  # board.yaml declares and a real toolchain is required. `tan doctor`
   # reports whether you have one.
-  tan init --from-example peripheral-io/uart-echo --name my-app
-  cd my-app && tan build
+  tan init --name my-app --destination .. --sdk-root "$PWD"
+  cd ../my-app && tan build
 
   # WORKING ON THE SDK ITSELF -- contributor commands, not part of building
   # your firmware. native_sim is reachable only through west, for the same

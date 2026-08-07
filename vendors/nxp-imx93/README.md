@@ -5,11 +5,20 @@ Vendor wrapper for the **NXP i.MX 93** family — backs the
 
 ## Status
 
-**v0.4 deliverable.**  v0.1 ships the metadata stub and this
-README; the actual peripheral wrappers under `src/zephyr/`,
-`src/yocto/`, and the chip-driver glue land alongside the
-v0.4 "Yocto first-class" milestone in
-[`VERSIONS.md`](../../VERSIONS.md).
+Metadata + this README shipped early; the full Yocto/Zephyr
+peripheral-wrapper pass (HAL pinning to `mcux-sdk` / `meta-imx`, see
+below) is still pending.  Some i.MX 93-specific SDK code has already
+landed ahead of that, though: an Ethos-U65 inference-backend
+registration (`src/backends/inference/ethos_u_n93.cpp`,
+`silicon_ref="nxp:imx9:imx93"`) shares the same TFLM/Ethos-U driver
+body the AEN backend uses -- the model-execution path is real, only
+`alp_ethosu_n93_register` (the NPU DT/IRQ attach hook) still returns
+`ALP_ERR_NOSUPPORT`, pending the NXP Zephyr port landing the NPU DT
+node.  `src/backends/ext/nxp/storage.c` (FlexSPI OTFAD) is a genuine
+stub today -- every call returns `ALP_ERR_NOSUPPORT` because no SoM
+in scope ships the MCUXpresso FlexSPI OTFAD HAL pack yet.  None of
+this has run on silicon; see
+[`docs/verification-status.md`](../../docs/verification-status.md).
 
 ## SKUs covered
 
@@ -74,18 +83,20 @@ unchanged.
 ### SDK-side Kconfig
 
 The Zephyr-side `<alp/inference.h>` glue covers U55 and U65 with
-the same `inference_tflm.cpp` source.  Variant selection happens
-through two Kconfigs:
+the same `src/backends/inference/tflm.cpp` source.  Variant
+selection happens through two Kconfigs:
 
-| Kconfig                                | Meaning                                                                       |
-|----------------------------------------|-------------------------------------------------------------------------------|
-| `ALP_SDK_INFERENCE_ETHOS_U`            | Enable Ethos-U dispatch path at all.  Auto-on for AEN-E7 and i.MX 93.         |
-| `ALP_SDK_INFERENCE_ETHOS_U_N93`        | Compile the i.MX 93 per-variant config layer (`src/zephyr/inference_ethosu_n93.c`). Auto-on when the SoC choice is i.MX 93. |
+| Kconfig symbol                                     | Meaning                                                                       |
+|---------------------------------------------------|-------------------------------------------------------------------------------|
+| `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U65`     | Select the U65 kernel set for the shared TFLM/Ethos-U body (`tflm.cpp`).      |
+| `CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93`     | Compile the i.MX 93 per-variant inference backend (`src/backends/inference/ethos_u_n93.cpp`), registered at priority 100 so it wins over the portable TFLM backend. Auto-on when the SoC choice is i.MX 93 (emitted by `scripts/alp_orchestrate/kconfig.py`). |
 
-The per-variant file is a thin anchor today: it exposes
-`alp_ethosu_n93_register` (no-op until v0.4 wires the NPU attach
-sequence) and `alp_ethosu_variant_name` (literal `"ethos-u65"`)
-for downstream code that wants to sanity-check the Vela target.
+The per-variant file shares the model-execution body with the AEN
+Ethos-U backend.  `alp_ethosu_variant_name` already works
+unconditionally (returns the literal `"ethos-u65"`); the piece that's
+still NOSUPPORT is `alp_ethosu_n93_register`, the NPU attach hook --
+it returns `ALP_ERR_NOSUPPORT` until the NXP Zephyr port wires the
+NPU's DT node + IRQ.
 
 ### Vela invocation (i.MX 93)
 

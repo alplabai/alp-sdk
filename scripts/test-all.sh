@@ -63,6 +63,12 @@
 #   --yocto-only      run only stage 1 + format + metadata
 #   --zephyr-only     run only stage 3 (requires ZEPHYR_BASE)
 #   --no-clean        keep build directories between runs (faster)
+#   --list-required-gate-scripts
+#                     print the scripts/check_*.py paths the
+#                     required-gate-scripts stage would run (one per line,
+#                     no execution) and exit -- a cheap probe for
+#                     alp-sdk#1109's regression: this list must always
+#                     match `quality_tasks.py --gate-scripts` 1:1.
 #
 # Examples:
 #
@@ -87,6 +93,7 @@ QUICK=0
 YOCTO_ONLY=0
 ZEPHYR_ONLY=0
 NO_CLEAN=0
+LIST_REQUIRED_GATE_SCRIPTS=0
 # TARGET selects a CI profile matching the branch a PR targets:
 #   dev  -- the FAST set a dev PR is graded on (skip the slow release-only
 #           full CMake builds + Doxygen); for rapid integration iteration.
@@ -108,6 +115,7 @@ while [ $# -gt 0 ]; do
         --target=*)     TARGET="${1#--target=}" ;;
         --dev)          TARGET=dev ;;
         --main)         TARGET=main ;;
+        --list-required-gate-scripts) LIST_REQUIRED_GATE_SCRIPTS=1 ;;
         -h|--help)
             sed -n '3,68p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
             exit 0
@@ -394,8 +402,18 @@ stage_clang_format() {
     # (GigaDevice/Zephyr/Renesas-FSP), our .clang-format does not govern
     # them, and CI never flags them -- so neither should the local mirror.
     # (Without this, a vendored .c drift produced a FALSE local failure.)
+    # tests/scripts/fixtures/rzv2n_svd/** is excluded on the same grounds:
+    # verbatim BSD-3-Clause Renesas FSP header excerpts that
+    # test_gen_rzv2n_cm33_svd.py asserts stay byte-identical to the real
+    # module headers, so reformatting them would break the fixture.
+    #
+    # NOTE: this stage diffs against a COMMIT, so it cannot see untracked
+    # files.  A brand-new .c/.h shows up here only once it is staged or
+    # committed -- run it again after `git add`, or the gate passes on a
+    # file it never read.
     local out
     out=$(git diff -U0 "${base}" -- '*.c' '*.h' ':!vendors/**' ':!zephyr/**' \
+          ':!tests/scripts/fixtures/rzv2n_svd/**' \
           | python3 "${diff_tool}" -p1 || true)
     if [ -n "${out}" ]; then
         echo "${out}"
@@ -492,12 +510,34 @@ if command -v python3 >/dev/null 2>&1; then
         exit 1
     fi
     while IFS= read -r _qpath; do
+        # Defensive: quality_tasks.py now writes '\n' explicitly (alp-sdk#1109),
+        # but strip a trailing '\r' here too in case its output ever reaches
+        # this loop CRLF-terminated again (a stale/vendored copy, a Windows
+        # pipe upstream) -- `IFS= read -r` does not strip it on its own, and
+        # an unstripped '\r' makes every path below fail its `-f` existence
+        # check and skip silently.
+        _qpath="${_qpath%$'\r'}"
         [ -n "${_qpath}" ] && REQUIRED_GATE_SCRIPTS+=("${_qpath#scripts/}")
     done <<< "${_qgate_out}"
     if [ "${#REQUIRED_GATE_SCRIPTS[@]}" -eq 0 ]; then
         echo "FATAL: quality-tasks-v1.json yielded zero gate scripts" >&2
         exit 1
     fi
+fi
+
+# --list-required-gate-scripts: print exactly the paths
+# stage_required_gate_scripts()'s loop below would print a
+# "--- scripts/... ---" header for (same existence filter, zero
+# execution) and exit -- the cheap probe the alp-sdk#1109 regression
+# guard (tests/scripts/test_test_all_gate_coverage.py) diffs against
+# `quality_tasks.py --gate-scripts` to prove this stage still finds
+# every declared gate script.
+if [ "${LIST_REQUIRED_GATE_SCRIPTS}" -eq 1 ]; then
+    for _qscript in "${REQUIRED_GATE_SCRIPTS[@]}"; do
+        _qspath="scripts/${_qscript}"
+        [ -f "${_qspath}" ] && echo "${_qspath}"
+    done
+    exit 0
 fi
 
 stage_required_gate_scripts() {
@@ -517,7 +557,8 @@ stage_required_gate_scripts() {
 
     # board.yaml schema sweep -- canonical template + every
     # examples/*/board.yaml + tests/*/board.yaml, mirroring the
-    # pr-metadata-validate.yml "schema sweep" step.
+    # pr-metadata-validate.yml "schema sweep" step (including its
+    # rpmsg-imx93 exclusion -- see board-yaml-sweep-exclude.sh).
     if [ -f scripts/validate_board_yaml.py ]; then
         ran=1
         if [ -f metadata/templates/board.yaml.example ]; then
@@ -525,10 +566,13 @@ stage_required_gate_scripts() {
             python3 scripts/validate_board_yaml.py \
                 --input metadata/templates/board.yaml.example || failed=1
         fi
+        # shellcheck source=scripts/board-yaml-sweep-exclude.sh
+        source "${REPO_ROOT}/scripts/board-yaml-sweep-exclude.sh"
         while IFS= read -r f; do
             echo "--- validate_board_yaml.py ${f} ---"
             python3 scripts/validate_board_yaml.py --input "${f}" || failed=1
-        done < <(find examples tests -name board.yaml 2>/dev/null)
+        done < <(find examples tests -name board.yaml 2>/dev/null \
+                  | grep -v "${BOARD_YAML_SWEEP_EXCLUDE_PATTERN}")
     fi
 
     # gd32-bridge protocol vectors must not drift from the generator
@@ -653,12 +697,43 @@ stage_generated_files() {
     command -v python3 >/dev/null 2>&1 || return 99
     local gens=(gen_soc_caps gen_status_strings gen_board_header
                 gen_pinmux_capability gen_support_matrix
-                gen_portability_matrix gen_catalog gen_error_catalog)
-    local g
+                gen_portability_matrix gen_catalog gen_error_catalog
+                gen_verification_status)
+    local g rc
+    local gen_total=0 gen_skipped=0
     for g in "${gens[@]}"; do
         [ -f "scripts/${g}.py" ] || continue
-        python3 "scripts/${g}.py" >/dev/null 2>&1 || { echo "scripts/${g}.py failed"; return 1; }
+        gen_total=$((gen_total + 1))
+        python3 "scripts/${g}.py" >/dev/null 2>&1
+        rc=$?
+        if [ "${rc}" -eq 99 ]; then
+            # 99 = the generator refused for lack of a tool (clang-format;
+            # see gen_soc_caps.py / gen_status_strings.py), not a
+            # generator defect -- count it, don't fail the stage over it
+            # (alp-sdk#1221). The files it would have written are simply
+            # left as committed, so the diff check below stays honest.
+            gen_skipped=$((gen_skipped + 1))
+        elif [ "${rc}" -ne 0 ]; then
+            echo "scripts/${g}.py failed"
+            return 1
+        fi
     done
+    # gen_soc_peripheral_instances.py is NOT in the array above: unlike
+    # every other generator here, it needs a resolvable Zephyr checkout
+    # (the vendored SoC devicetree) and skips cleanly (exit 0, a
+    # `skipped: ...` line) without one -- the other seven have no such
+    # prerequisite and would silently swallow that line under the loop's
+    # `>/dev/null 2>&1`.  Run it separately, unsuppressed, so the skip is
+    # visible instead of a contributor seeing 16/16 PASS with no signal
+    # that this specific fact went unchecked (#1154 PR review). When
+    # $ZEPHYR_BASE (or the west-topdir zephyr/ fallback) DOES resolve --
+    # the common case on a bootstrapped dev machine -- this actually
+    # regenerates metadata/socs/renesas/rzv2n/n44.json in place, and the
+    # diff check below catches real drift, same as every other generator.
+    if [ -f scripts/gen_soc_peripheral_instances.py ]; then
+        python3 scripts/gen_soc_peripheral_instances.py \
+            || { echo "scripts/gen_soc_peripheral_instances.py failed"; return 1; }
+    fi
     # ABI snapshot -- current working snapshot is derived from
     # metadata/sdk_version.yaml (older snapshots are frozen).
     if [ -f scripts/abi_snapshot.py ]; then
@@ -687,17 +762,58 @@ stage_generated_files() {
             return 1
         fi
     fi
+    # `git diff` alone is blind to a brand-new file the regen step just
+    # created (a not-yet-tracked board header, an added pinmux table,
+    # ...) -- a plain diff --exit-code reports 0 and this stage stays
+    # green even though a newly-needed generated file is missing from
+    # the commit (#1128a, mirrors pr-generated-files.yml's own `git add
+    # -N` step).  Mark every generated path intent-to-add so a new file
+    # shows up as an addition in the diff below, without staging real
+    # content. A `git add -N` pathspec that matches nothing (an expected
+    # generated path flat-out missing from the tree) fails closed with
+    # nothing staged -- swallowing that exit code would turn "can't even
+    # see what I'm supposed to check" into the same unearned PASS #1128a
+    # was about, so it's a hard failure here, not a silent no-op.
+    if ! git add -N -- \
+        include/alp docs/abi src/cap.c src/status_strings.c \
+        metadata/catalog.json metadata/error-catalog.json metadata/pinmux \
+        metadata/socs/renesas/rzv2n/n44.json \
+        docs/portability-matrix.md docs/peripheral-support-matrix.md \
+        docs/verification-status.md \
+        docs/diagnostics 2>/dev/null; then
+        echo "git add -N failed -- an expected generated path is missing from the tree"
+        return 1
+    fi
     # Ignore only the snapshot's "generated" date line, like the CI gate.
+    # metadata/socs/renesas/rzv2n/n44.json only actually moves above when
+    # gen_soc_peripheral_instances.py found a resolvable Zephyr checkout
+    # (see the comment above its invocation) -- when it didn't, this path
+    # is untouched and simply contributes no diff, same as any other
+    # unaffected path in this list.
     if ! git diff --quiet --ignore-matching-lines='"generated":' -- \
             include/alp docs/abi src/cap.c src/status_strings.c \
-            metadata/catalog.json metadata/pinmux docs/portability-matrix.md \
+            metadata/catalog.json metadata/error-catalog.json metadata/pinmux \
+            metadata/socs/renesas/rzv2n/n44.json \
+            docs/portability-matrix.md docs/peripheral-support-matrix.md \
+            docs/verification-status.md \
             docs/diagnostics 2>/dev/null; then
         echo "generated files are OUT OF SYNC -- regenerated in place; git add + commit:"
         git --no-pager diff --stat --ignore-matching-lines='"generated":' -- \
             include/alp docs/abi src/cap.c src/status_strings.c \
-            metadata/catalog.json metadata/pinmux docs/portability-matrix.md \
+            metadata/catalog.json metadata/error-catalog.json metadata/pinmux \
+            metadata/socs/renesas/rzv2n/n44.json \
+            docs/portability-matrix.md docs/peripheral-support-matrix.md \
+            docs/verification-status.md \
             docs/diagnostics 2>/dev/null | tail -20
         return 1
+    fi
+
+    # Every generator ran clean and nothing drifted -- but if one or more
+    # skipped for lack of clang-format, that coverage gap is real and must
+    # stay visible, not collapse into a plain PASS: SKIP, named (#1221).
+    if [ "${gen_skipped}" -gt 0 ]; then
+        echo "generated-files SKIP (${gen_skipped} of ${gen_total} generators need clang-format)"
+        return 99
     fi
 }
 

@@ -52,8 +52,10 @@ CC=clang CXX=clang++ cmake -B build-fuzz \
     -DALP_BUILD_FUZZ=ON
 cmake --build build-fuzz --target alp_fuzz_cc3501e alp_fuzz_iot_mqtt
 
-# Run one harness for 30 seconds with the seed corpus.
-./build-fuzz/tests/fuzz/alp_fuzz_cc3501e -max_total_time=30 tests/fuzz/corpus/cc3501e
+# Run one harness for 30 seconds (no seed corpus checked in for this
+# harness yet -- see "Seed corpora" below; libFuzzer mutates from
+# scratch when none is given).
+./build-fuzz/tests/fuzz/alp_fuzz_cc3501e -max_total_time=30
 ```
 
 Clang ≥ 14 is recommended -- earlier versions miss some
@@ -61,14 +63,18 @@ Clang ≥ 14 is recommended -- earlier versions miss some
 
 ## Seed corpora
 
-Each harness ships its own `tests/fuzz/corpus/<name>/` directory with
-one-shot seed inputs that exercise the happy path.  libFuzzer
-mutates from these.  Corpus files are intentionally short (≤ 128 B)
-so the fuzzer reaches deep code paths quickly.
+Each harness is meant to ship its own `tests/fuzz/corpus/<name>/`
+directory with one-shot seed inputs that exercise the happy path.
+libFuzzer mutates from these.  Corpus files are intentionally short
+(≤ 128 B) so the fuzzer reaches deep code paths quickly.
 
-The first round of seeds is hand-rolled (one valid frame per
-opcode family for cc3501e; one CONNECT + one PUBLISH for MQTT).
-v1.0 captures coverage-driven corpus minimisation under
+**Status:** the directory is scaffolded (`.gitkeep`-only) for five
+harnesses today (`ble_adv_parser`, `mproc_frame`, `optiga_apdu`,
+`tls_handshake`, `update_log_entry`); no harness has real seed files
+checked in yet, including the two v0.3 anchors (`cc3501e`,
+`iot_mqtt`).  The first round of seeds is planned hand-rolled (one
+valid frame per opcode family for cc3501e; one CONNECT + one PUBLISH
+for MQTT).  v1.0 captures coverage-driven corpus minimisation under
 `tests/fuzz/corpus/<name>/min/`.
 
 ## CI integration (deferred)

@@ -27,7 +27,7 @@ Top-level fields:
 | `cores`          | yes      | Per-core app + library/peripheral knobs.  Each core's `os:` is optional; the SoM topology supplies the natural runtime per core class (Cortex-M → Zephyr, Cortex-A → Yocto). |
 | `ipc`            | no       | Cross-core IPC carve-outs (rpmsg / raw_shmem / mailbox_only). |
 | `chips`          | no       | Project-level chip drivers beyond what the board ships.     |
-| `libraries`      | no       | Curated third-party libraries (ADR 0018).  One top-level list, each entry a `{name, cores?}` object (or a bare name as shorthand for a project-wide `{name}`), e.g. `[{name: lvgl}, {name: cmsis-dsp, cores: [m33_sm]}]`.  `name` resolves to a manifest under `metadata/libraries/<name>.yaml`; omit `cores:` for a project-wide selection or list core ids to scope it.  The orchestrator emits the per-OS wiring and rejects an incompatible selection at emit time.  See [`libraries` (ADR 0018)](#libraries-project-wide-adr-0018) below. |
+| `libraries`      | no       | Curated third-party libraries (ADR 0018).  One top-level list, each entry a `{name, cores?}` object (or a bare name as shorthand for a project-wide `{name}`), e.g. `[{name: lvgl}, {name: cmsis-dsp, cores: [m33_sm]}]`.  `name` resolves to a manifest under `metadata/libraries/<name>.yaml`; omit `cores:` for a project-wide selection or list core ids to scope it.  The planner emits the per-OS wiring and rejects an incompatible selection at emit time.  See [`libraries` (ADR 0018)](#libraries-project-wide-adr-0018) below. |
 | `diagnostics`    | no       | `alp_last_error()` + log level.                               |
 
 *Either `preset:` (preset mode) or inline `name:` + `populated:` +
@@ -160,10 +160,14 @@ som:
                             # `default_hw_rev`.  Validated at build
                             # time against the family hw_revisions
                             # table (see board-config-hardware.md);
-                            # at runtime the SDK reads the
-                            # rev from the on-module BOARD_ID ADC +
-                            # resistor divider and aborts boot on
-                            # mismatch.
+                            # at runtime the app can compare it
+                            # against the on-module EEPROM manifest
+                            # via `alp_hw_info_assert_matches_build()`
+                            # -- mismatch handling (typically halt)
+                            # is the app's call, not automatic.
+                            # There is no SoM-side ADC cross-check; a
+                            # carrier BOARD_ID divider is a separate
+                            # path.
 
   overrides:                # rare -- only for custom SoM variants
     secure_element: none    # custom AEN without the OPTIGA Trust M
@@ -383,8 +387,10 @@ or not-yet-final SKUs carry `partial_hw_config: true` so
 the loader knows to expect SKU-specific overrides from the
 consumer's `board.yaml`.  Per the project memory note, values
 not in the silicon datasheet stay `TBD` (e.g.
-`board_id.adc_channel` in family-level `hw-revisions.yaml`)
-until the user supplies them authoritatively.
+`board_id.adc_channel` in the *board* preset's `hw_revisions:`
+entry -- `metadata/boards/e1m-evk.yaml`, not the SoM's
+`metadata/e1m_modules/` family file) until the user supplies them
+authoritatively.
 
 ### `libraries` block (user-facing, no wrapper)
 
@@ -522,7 +528,7 @@ Each name resolves to a manifest at
 [`metadata/libraries/<name>.yaml`](../metadata/libraries/) — the single
 source of truth for that library's per-OS wiring, pinned upstream
 version, SPDX licence, curation tier, and compatibility constraints.
-The orchestrator emits the wiring through the ordinary `--emit`
+The planner emits the wiring through the ordinary `--emit`
 contract (ADR 0014): the library's Kconfig symbols land in each Zephyr
 slice's `alp.conf`, its `IMAGE_INSTALL` entries in each Yocto slice's
 `local.conf`, its CMake pin in each baremetal slice's args. Selecting a
@@ -602,4 +608,3 @@ hidden:
   [ADR 0016](adr/0016-cross-core-peripheral-proxy-wire-schema.md)) is
   bench-gated and out of scope for the manifests — it is its own
   design.
-

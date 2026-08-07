@@ -35,6 +35,8 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 SNAP_DIR = REPO / "tests" / "fixtures" / "emit-snapshots"
+sys.path.insert(0, str(REPO / "scripts"))
+from alp_orchestrate.sdk_compat import assert_exclusion_still_not_buildable  # noqa: E402
 # The orchestrator is now a package; invoke it as a module.  scripts/ goes on
 # PYTHONPATH so the package + its `alp_project` sibling import both resolve
 # (replaces the old file-path call to scripts/alp_orchestrate.py).
@@ -76,10 +78,22 @@ CASES = [
     ("rpmsg-aen.build-plan",        ORCH, "examples/multicore/rpmsg-aen/board.yaml",            "build-plan"),
     ("rpmsg-v2n.system-manifest",   ORCH, "examples/multicore/rpmsg-v2n/board.yaml",            "system-manifest"),
     ("rpmsg-v2n.build-plan",        ORCH, "examples/multicore/rpmsg-v2n/board.yaml",            "build-plan"),
-    ("rpmsg-imx93.system-manifest", ORCH, "examples/multicore/rpmsg-imx93/board.yaml",          "system-manifest"),
-    ("rpmsg-imx93.build-plan",      ORCH, "examples/multicore/rpmsg-imx93/board.yaml",          "build-plan"),
+    # rpmsg-imx93 excluded (#1025): E1M-NX9101's only hw_rev (imx93 r1) is
+    # `status: tbd` -- refused outright by the hw_rev-buildable gate, so
+    # `--emit` can no longer run against it at all.  Re-add the two cases
+    # above (system-manifest, build-plan) plus `--update` once
+    # metadata/e1m_modules/imx93/hw-revisions.yaml:r1 carries a buildable
+    # status.  `main()` re-asserts that reason still holds every run
+    # (RATCHET -- see assert_exclusion_still_not_buildable).
     ("hetero-offload.system-manifest", ORCH, "examples/multicore/heterogeneous-offload/board.yaml", "system-manifest"),
     ("hetero-offload.build-plan",      ORCH, "examples/multicore/heterogeneous-offload/board.yaml", "build-plan"),
+    # `raw_shmem` ipc[] coverage (kconfig.py's `_emit_cross_core_shmem_cache`,
+    # #1080 follow-up) -- build-plan embeds each slice's rendered alp.conf, so
+    # this is the one fixture that would catch a regression on the
+    # CONFIG_DCACHE=n-for-raw_shmem path; every other CASES entry above
+    # declares only `rpmsg`/no `ipc:` at all.
+    ("mproc-mailbox.system-manifest", ORCH, "examples/multicore/mproc-mailbox/board.yaml", "system-manifest"),
+    ("mproc-mailbox.build-plan",      ORCH, "examples/multicore/mproc-mailbox/board.yaml", "build-plan"),
     # The remaining two tests/parity/oracle/*.build-plan.json fixtures
     # (seam-1's frozen 97ad481b oracle) that weren't otherwise covered by a
     # build-plan case above -- added so the seam-1 retune (dropping
@@ -132,6 +146,20 @@ CASES.append((
     "scaffold.edge-ai-v2n101", PROJ,
     "examples/ai/cold-chain-monitor/board.yaml", "scaffold",
     ("--template", "edge-ai", "--sku", "E1M-V2N101"),
+))
+# multicore-mailbox (issue #1275): the first dual-Zephyr-core template --
+# `supported.som_skus` is E1M-AEN801 ONLY (the one SKU with two Zephyr M
+# cores), so this is a passthrough render, not a cross-family rename; pins
+# the per-core CMakeLists.txt map (`_cmake_core_map`) leaving BOTH the
+# root `CMakeLists.txt` (m55_hp, `./src` has no CMakeLists.txt of its own
+# so it falls back to the project root) and `peer/CMakeLists.txt`
+# (m55_he, self-contained) with their OWN `--core` literal untouched,
+# rather than one rename applied blindly to every `*CMakeLists.txt` the
+# template owns.
+CASES.append((
+    "scaffold.multicore-mailbox-aen801", PROJ,
+    "examples/multicore/mproc-mailbox/board.yaml", "scaffold",
+    ("--template", "multicore-mailbox", "--sku", "E1M-AEN801"),
 ))
 
 
@@ -225,6 +253,12 @@ def main() -> int:
                     help="rewrite the golden snapshots instead of checking")
     args = ap.parse_args()
     SNAP_DIR.mkdir(parents=True, exist_ok=True)
+
+    exclusion_stale = assert_exclusion_still_not_buildable(
+        REPO / "metadata", "imx93", "r1", gate="check_emit_snapshots.py")
+    if exclusion_stale:
+        print(f"FAIL {exclusion_stale}", file=sys.stderr)
+        return 1
 
     stale: list[str] = []
     for case in CASES:

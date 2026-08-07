@@ -26,10 +26,11 @@
 #     confirmation against the live upstream Zephyr v4.4.0 manifest text.
 #   * licence Apache-2.0 (~/tflite-micro/LICENSE: Apache License 2.0 header).
 #
-# HW-backends: metadata/library-profiles/tflite_micro/hw-backends.yaml
-# carries per-accelerator priority binding (Ethos-U85/U65/U55, DRP-AI,
-# Helium/NEON, DMA); folded in WS6-c Phase 3 (needs library-v1 schema
-# extension).
+# HW-backends: this manifest's own `integration.zephyr.hw_backends:`
+# block below carries per-accelerator priority binding (Ethos-U85/U65/
+# U55, DRP-AI, Helium/NEON, DMA); folded in from the retired standalone
+# metadata/library-profiles/tflite_micro/hw-backends.yaml in WS6-c
+# Phase 3.
 #
 # CONCERN: _LIBRARY_KCONFIG does not currently emit the base upstream enable
 # symbol CONFIG_TENSORFLOW_LITE_MICRO=y for a `libraries: [tflite_micro]`
@@ -42,7 +43,7 @@
 # reference kernel set) is the always-available floor on every core/OS this
 # manifest's `integration.zephyr` section supports; HW-NPU acceleration
 # (Ethos-U/DRP-AI/Helium/NEON) is opportunistic, resolved per-SoM by the
-# hw-backends.yaml cross-reference above, never a hard requirement.
+# `hw_backends:` cross-reference above, never a hard requirement.
 #
 # `tier: B` for this Phase-1 pass: tflite_micro is NOT listed in
 # metadata/registries/tier-a-library-ci.json's hostBuild.libraries or

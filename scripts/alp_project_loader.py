@@ -28,6 +28,8 @@ try:
 except ImportError:
     sys.exit("alp_project: PyYAML is required.  Install via `pip install pyyaml`.")
 
+from sentinels import is_tbd
+
 
 REPO = Path(__file__).resolve().parent.parent
 METADATA_ROOT = REPO / "metadata"
@@ -215,6 +217,42 @@ def _resolve_inline_or_preset_board(
     }
 
 
+def split_silicon_ref(silicon: str | None) -> tuple[str, str, str] | None:
+    """Split a `vendor:family:part` `silicon:` key into its three slugs.
+
+    Returns None when `silicon` is falsy or not exactly 3 colon-separated
+    parts -- the same guard `resolve_soc_path()` applies, because that
+    function is now a thin rooting convenience over this one.
+
+    This exists because the SPLIT, not the rooting, is what kept getting
+    hand-rolled (issues #997, #1004, #1096). Every site that re-derived it
+    rooted the result somewhere different -- at a caller-injected `soc_dir`,
+    at `metadata_root`, at an `output_root`, or at no filesystem path at all
+    (a repo-relative `str` for a generated comment) -- so a single
+    path-returning helper could never absorb them all, and four survived
+    two rounds of consolidation for exactly that reason.
+
+    Callers that want `<metadata_root>/socs/<vendor>/<family>/<part>.json`
+    should keep using `resolve_soc_path()`; callers that root elsewhere, or
+    want the slugs themselves, use this and root it their own way. Either
+    way there is ONE place that knows a `silicon:` ref is three
+    colon-separated parts.
+
+    Note the one remaining independent encoding of that fact:
+    `alp_cli/new_som.py::_SOC_REF_RE` (`^[a-z0-9-]+:[a-z0-9-]+:[a-z0-9-]+$`)
+    validates the arity up front for its own `--soc-ref` flag, and would
+    also need widening if the format ever grows a 4th part. It is a CLI
+    input validator rather than a resolution site, so it is deliberately
+    not folded in here -- but it is the other thing to change.
+    """
+    if not silicon:
+        return None
+    parts = silicon.split(":")
+    if len(parts) != 3:
+        return None
+    return parts[0], parts[1], parts[2]
+
+
 def resolve_soc_path(silicon: str | None, metadata_root: Path) -> Path | None:
     """Resolve a `vendor:family:part` `silicon:` key to the SoC-JSON path
     it names: `metadata/socs/<vendor>/<family>/<part>.json`.
@@ -231,33 +269,29 @@ def resolve_soc_path(silicon: str | None, metadata_root: Path) -> Path | None:
     `check_som_topology_parity.py`) down to this one helper, and folded a
     fourth in-module copy from `resolve_memory_map()` into it too.
 
-    Nine more hand-rolled copies remain outside this module (issue #1004).
-    Most differ in the shape they fail with, so a blind call-site swap would
-    change behaviour; one does not, and is the cheap migration:
+    Issue #1004 migrated the five sites that used to hand-roll this split
+    (`gen_zephyr_board.py::_load_soc_spec` + its generated-file-banner
+    string site, `validate_metadata.py`'s two soft-fail sites, and
+    `alp_orchestrate/loader.py::_silicon_to_soc_path`) onto this helper,
+    each behind a thin wrapper that preserves that site's original
+    exception type or soft-fail shape.
 
-      - `alp_cli/validator.py:351` (`_load_soc_caps`) -- same 3-part guard,
-        same `None` on failure. Behaviourally identical to this helper, so
-        it is the one site migratable with provably zero behaviour change.
-      - `gen_zephyr_board.py:88` (`_load_soc_spec`) -- raises
-        `ZephyrBoardEmitError`.
-      - `alp_orchestrate/loader.py:45` -- raises `OrchestratorError`.
-      - `alp_model/targets.py:69` -- unguarded 3-tuple unpack (`ValueError`
-        on a malformed ref), then raises `FileNotFoundError`.
-      - `validate_metadata.py:152` and `:217` -- soft-fail into a diagnostic
-        message list rather than raising at all.
-      - `gen_zephyr_board.py:807`, `alp_cli/new_som.py:199` -- build a `str`
-        path, not a `Path`.
-      - `alp_cli/new_som.py:526` -- `Path`, but rooted at `output_root`
-        rather than `metadata_root`.
+    Issue #1096 closed out the remaining hand-rolled copies. The two that
+    root at a metadata root now call this helper (`alp_model/targets.py`,
+    `alp_cli/new_som.py`'s preset-path site); the rest root elsewhere and
+    call `split_silicon_ref()` directly, including the three slug-extraction
+    sites in `alp_cli/new_som.py` that #1096 originally scoped out -- they
+    were the same three-part split, so leaving them would have left the
+    drift the issue exists to close.
 
-    Migrate one of those onto this helper -- don't add a tenth.
+    There is no remaining `silicon.split(":")` outside this module; a
+    regression test pins that.
     """
-    if not silicon:
+    parts = split_silicon_ref(silicon)
+    if parts is None:
         return None
-    parts = silicon.split(":")
-    if len(parts) != 3:
-        return None
-    return metadata_root / "socs" / parts[0] / parts[1] / f"{parts[2]}.json"
+    vendor, family, part = parts
+    return metadata_root / "socs" / vendor / family / f"{part}.json"
 
 
 def _resolve_silicon_variant(
@@ -286,7 +320,7 @@ def _resolve_silicon_variant(
     variants = soc_spec.get("variants") or []
 
     declared = sku_preset.get("silicon_variant")
-    if declared and declared != "TBD":
+    if declared and not is_tbd(declared):
         for v in variants:
             if v.get("order_code") == declared:
                 return v
@@ -362,6 +396,13 @@ def _hwrev_pad_route_overrides(
     wrong-hardware problem -- this is the site that bug lived at, and this
     emit path resolves its own SoM/board data independently of
     ``alp_orchestrate.loader.load_board_yaml``, so it needs its own gate.
+
+    Also raises ``alp_orchestrate.models.SdkRevisionNotBuildable`` when
+    ``hw_rev`` exists but its declared ``status:`` refuses a build
+    (``reserved``, ``tbd``, or no ``status`` key at all -- #1025's broad
+    reading).  Same rationale as the existence gate above: this emit path
+    is its own independent resolution, so the status gate needs its own
+    copy here too, not just in ``load_board_yaml``.
     """
     if not hw_rev:
         return []
@@ -377,13 +418,22 @@ def _hwrev_pad_route_overrides(
     # Lazy import: alp_orchestrate imports this module at load time (the
     # resolve_memory_map edge -- see `_load_yaml` above), so the reverse
     # import must happen at call time, not at module scope.
-    from alp_orchestrate.models import SdkRevisionUnknown
-    from alp_orchestrate.sdk_compat import revision_known
+    from alp_orchestrate.models import (SdkRevisionNotBuildable,
+                                        SdkRevisionUnknown)
+    from alp_orchestrate.sdk_compat import revision_buildable, revision_known
     if revision_known(data, hw_rev) is False:
         available = sorted((data.get("hw_revisions") or {}).keys())
         raise SdkRevisionUnknown(
             f"SoM {sku} hw_rev {hw_rev!r} is not a known hardware "
             f"revision. Available hw_rev(s) for {sku}: {available}.")
+
+    if revision_buildable(data, hw_rev) is False:
+        status = (data.get("hw_revisions") or {}).get(hw_rev, {}).get("status")
+        status_repr = f"status: {status!r}" if status is not None else \
+            "carries no `status:` key"
+        raise SdkRevisionNotBuildable(
+            f"SoM {sku} hw_rev {hw_rev!r} exists but is not buildable "
+            f"({status_repr}).")
 
     rev = (data.get("hw_revisions") or {}).get(hw_rev) or {}
     overrides = rev.get("pad_route_overrides") or []

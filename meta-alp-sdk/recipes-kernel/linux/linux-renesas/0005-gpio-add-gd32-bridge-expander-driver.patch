@@ -1,4 +1,4 @@
-From: Alp Lab AB
+From: Alp Lab AB <contact@alplab.ai>
 Date: Thu, 4 Jun 2026 14:33:20 +0200
 Subject: [PATCH] gpio: add Alp Lab GD32 bridge expander driver
 
@@ -30,7 +30,7 @@ fail gracefully (dev_warn) and begin working once the bridge answers.
 
 Upstream-Status: Inappropriate [Alp Lab SoM-specific supervisor MCU protocol]
 
-Signed-off-by: Alp Lab AB
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  drivers/gpio/Kconfig            |   9 ++
  drivers/gpio/Makefile           |   1 +
@@ -74,7 +74,7 @@ new file mode 100644
 index 000000000000..acc6ca9c7966
 --- /dev/null
 +++ b/drivers/gpio/gpio-gd32-bridge.c
-@@ -0,0 +1,245 @@
+@@ -0,0 +1,244 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * GPIO driver for the Alp Lab GD32 IO-MCU bridge (I2C transport).

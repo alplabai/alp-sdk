@@ -81,8 +81,8 @@
       "properties": {
         "sku": {
           "type": "string",
-          "pattern": "^E1M-(AEN[3-8]01|V2N10[12]|V2M10[12]|NX9[0-9]{3})$",
-          "description": "Stock SoM SKU (MPN).  Resolves to a preset at metadata/e1m_modules/<MPN>.yaml.  Recognised: E1M-AEN301/401/501/601/701/801 (Alif Ensemble), E1M-V2N101/V2N102 (Renesas RZ/V2N), E1M-V2M101/V2M102 (V2N + DEEPX), E1M-NX9xxx (NXP i.MX 93; E1M-NX9101 is a placeholder preset until the production MPN lands)."
+          "pattern": "^E1M-(AEN[3-8][0-9]{2}|V2N[0-9]{3}|V2M[0-9]{3}|NX9[0-9]{3})$",
+          "description": "Stock SoM SKU (MPN).  Resolves to a preset at metadata/e1m_modules/<MPN>.yaml.  Shape: E1M-AEN<tier 3-8><2-digit config> (Alif Ensemble, e.g. E1M-AEN301/AEN302), E1M-V2N<3-digit config> (Renesas RZ/V2N), E1M-V2M<3-digit config> (V2N + DEEPX), E1M-NX9xxx (NXP i.MX 93; E1M-NX9101 is a placeholder preset until the production MPN lands).  The config tail is a per-configuration increment allocated by the PLM; not every value in range has a shipped preset."
         },
         "hw_rev": {
           "type": "string",
@@ -186,7 +186,7 @@
 
     "storage": {
       "type": "array",
-      "description": "Optional flash / persistent-storage partitioning.  Each entry declares one partition: a name, a filesystem (or `raw: true` for unformatted partitions used as OTA slot backing / image cache), a size, an optional mount point, and a flash-device reference into the SoM preset's `memory_map:` or `on_module.ospi_memories:` block.  The orchestrator emits a partial DTS overlay (the `&<flash>; partitions { ... }` node) plus the matching Kconfig (CONFIG_FILE_SYSTEM_LITTLEFS / CONFIG_FAT_FILESYSTEM_ELM / ...) per entry.  Partition addresses are pinned by the orchestrator (bottom-up, page-aligned within the flash device) for byte-stable OTA images across rebuilds; supply `offset_kib:` to override the allocator with an explicit offset.",
+      "description": "Optional flash / persistent-storage partitioning.  Each entry declares one partition: a name, a filesystem (`fs: raw` for unformatted partitions used as OTA slot backing / image cache), a size, an optional mount point, and a flash-device reference into the SoM preset's `memory_map:` or `on_module.ospi_memories:` block.  The orchestrator emits a partial DTS overlay (the `&<flash>; partitions { ... }` node) plus the matching Kconfig (CONFIG_FILE_SYSTEM_LITTLEFS / CONFIG_FAT_FILESYSTEM_ELM / ...) per entry.  Partition addresses are pinned by the orchestrator (bottom-up, page-aligned within the flash device) for byte-stable OTA images across rebuilds; supply `offset_kib:` to override the allocator with an explicit offset.",
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -197,8 +197,7 @@
           "fs":           { "type": "string", "enum": ["littlefs", "fat", "ext4", "raw"], "default": "raw", "description": "Filesystem to format the partition with.  `raw` leaves it unformatted (e.g. for image slots managed by MCUboot)." },
           "mount":        { "type": "string", "description": "Mount point at boot.  Optional; when omitted the partition isn't auto-mounted." },
           "flash_device": { "type": "string", "description": "Region this partition lives in.  References the SoM preset's `memory_map:` name (`mram_main`, `ocram_low`, ...) or an `on_module.ospi_memories:` entry (`ospi0`, ...)." },
-          "offset_kib":   { "type": "integer", "minimum": 0, "description": "Optional explicit offset (in KiB) within the flash device.  When omitted, the orchestrator allocates bottom-up from offset 0 in name-sorted order.  When supplied, must be page-aligned (4 KiB); the allocator surfaces overlaps via `status: blocked` on the resolved partition." },
-          "raw":          { "type": "boolean", "description": "Legacy alias for `fs: raw`.  Prefer `fs:` directly." }
+          "offset_kib":   { "type": "integer", "minimum": 0, "description": "Optional explicit offset (in KiB) within the flash device.  When omitted, the orchestrator allocates bottom-up from offset 0 in name-sorted order.  When supplied, must be page-aligned (4 KiB); the allocator surfaces overlaps via `status: blocked` on the resolved partition." }
         }
       }
     },
@@ -592,7 +591,7 @@
         "os": {
           "type": "string",
           "enum": ["zephyr", "yocto", "baremetal", "off"],
-          "description": "The OS runtime is DERIVED from the core's silicon class and is not selectable: Cortex-M -> Zephyr (RTOS), Cortex-A -> Yocto (Linux). Omit `os:` to take that runtime. The only values a board.yaml may set explicitly are `off` (skip the slice; no app required) or `baremetal` (rare hand-written firmware in place of the core's RTOS). Setting the OTHER class's OS (e.g. `zephyr` on a Cortex-A, `yocto` on a Cortex-M) is rejected by the loader -- the enum lists every resolved runtime, but the cross-file core-class check (board.yaml `os:` vs the SoC `cores[].type`) is enforced in scripts/alp_orchestrate.py, since JSON Schema cannot see the SoC spec."
+          "description": "The OS runtime is DERIVED from the core's silicon class and is not selectable: Cortex-M -> Zephyr (RTOS), Cortex-A -> Yocto (Linux). Omit `os:` to take that runtime. The only values a board.yaml may set explicitly are `off` (skip the slice; no app required) or `baremetal` (rare hand-written firmware in place of the core's RTOS). Setting the OTHER class's OS (e.g. `zephyr` on a Cortex-A, `yocto` on a Cortex-M) is rejected by the loader -- the enum lists every resolved runtime, but the cross-file core-class check (board.yaml `os:` vs the SoC `cores[].type`) is enforced in the `alp_orchestrate` package (`python -m alp_orchestrate`), since JSON Schema cannot see the SoC spec."
         },
         "app": {
           "type": "string",

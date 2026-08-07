@@ -44,6 +44,10 @@ int main(void)
      * open -> lv_init -> tick -> attach sequence, and why
      * CONFIG_LV_Z_AUTO_INIT=n (prj.conf) is required alongside it. */
 	alp_display_config_t display_cfg = ALP_DISPLAY_CONFIG_DEFAULT(0);
+	/* This app owns the panel, so it opts in to driving the mode.
+	 * Ignored on Zephyr; on Yocto/Linux it is required, because
+	 * opening a display there reprograms a live output (#1143). */
+	display_cfg.allow_modeset        = true;
 	alp_display_t       *display     = alp_display_open(&display_cfg);
 	if (display == NULL) {
 		LOG_ERR("display open failed (err=%d)", (int)alp_last_error());

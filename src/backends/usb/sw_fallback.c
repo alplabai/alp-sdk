@@ -131,3 +131,8 @@ ALP_BACKEND_REGISTER(usb,
                          .ops         = &_ops,
                          .probe       = NULL,
                      });
+
+/* Static-archive link anchor (#1141) -- this TU is the section-carrying
+ * backend for the usb class on the plain-CMake / Yocto path; see
+ * ALP_BACKEND_ANCHOR_DEFINE's doc comment in <alp/backend.h>. */
+ALP_BACKEND_ANCHOR_DEFINE(usb);

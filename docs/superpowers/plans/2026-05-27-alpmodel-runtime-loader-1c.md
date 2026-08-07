@@ -1,6 +1,13 @@
 # `.alpmodel` Runtime Loader + Blob Selection (Stage 1c) — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Historical transcript.** Implementation plan dated 2026-05-27. The
+> SDK has since shipped through the v0.15.0 release candidate
+> (`v0.15.0-rc1`; no plain `v0.15.0` tag exists) and into the ongoing
+> v0.16.0 development cycle (see `VERSIONS.md`, `CHANGELOG.md`) --
+> cross-check the current tree before treating anything below as a
+> live task list; kept for implementation-history rationale only.
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. (Superseded by the status banner above -- do not execute without reading it first.)
 
 **Goal:** An on-device runtime loader `alp_inference_open_alpmodel()` that parses a `.alpmodel` package, **selects the right blob** for the active SoM (backend availability + `silicon_ref` compat + a SRAM `requires` fit-check + `preferred_backend` tiebreak), and delegates to the existing `alp_inference_open()` — plus the public `DEEPX_DX → DEEPX_DXM1` enum rename this stage owns, and the SoC SRAM-envelope plumbing the fit-check consumes.
 

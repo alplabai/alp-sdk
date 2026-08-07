@@ -154,7 +154,10 @@
  * (compatible `renesas,rz-mhu-b-mbox`, driver
  * zephyr/drivers/mbox/mbox_renesas_rz_mhu_b.c, FSP module
  * zephyr/drivers/mbox/r_mhu_b_ns/r_mhu_b_ns.c -- see that file's header for the
- * register-semantic notes and BENCH-UNVERIFIED caveat).
+ * register-semantic notes and the "FLAG FOR REVIEW" send_type caveat, and
+ * mbox_renesas_rz_mhu_b.c's header for the bounded #697 verification status:
+ * init/attach and A55->M33 receive are silicon-proven, mbox_send() M33->A55
+ * is unexercised and does not reach the A55 on this topology).
  * `channel = <5>` is the lowest MHU-B-valid channel.  Per bsp_mhu_b.h's
  * R_BSP_MHU_B_NS_REG_PAIR_BODY, channel 5 sends via R_MHU_NS36 (base
  * 0x50480480) and receives via R_MHU_NS8 (base 0x50480100) -- `reg` below

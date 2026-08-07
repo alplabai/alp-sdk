@@ -223,6 +223,7 @@ artifact per silicon SKU.
 | `capabilities`                  | Drives `include/alp/soc_caps.h` boolean macros (`ALP_SOC_HELIUM_MVE`, `ALP_SOC_NEON`, etc.) via `scripts/gen_soc_caps.py`.                              |
 | `peripherals`                   | Counts per peripheral kind; drives `ALP_SOC_*_COUNT` ceilings in the same generated header.  `{}` is legal but trips the `pending_*` warning.          |
 | `peripherals_unverified`        | Array of `peripherals` keys whose count has no datasheet/DFP/HWRM citation in this file (#936) — e.g. a value copied from a sibling part and never independently confirmed. `scripts/gen_soc_caps.py` prints an `UNVERIFIED` comment above the SoC's block in `soc_caps.h`; `validate_metadata.py` warns if a listed key doesn't exist in `peripherals`. Use this — listing every key, if that's every key — even when the WHOLE block is inherited wholesale from a sibling (e.g. E5 from E7): `pending_reference_manual_ingestion: true` means something narrower, "`peripherals: {}` / counts default to zero," which is false for a fully-populated-but-uncited block and produces a wrong `validate_metadata.py` WARN. `pending_reference_manual_ingestion` is for a file that genuinely has no populated counts yet (e.g. i.MX93, still mostly `{}` pending its RM pass); a file can combine both flags when most of the block is genuinely pending but a handful of keys are individually grounded — in that case `peripherals_unverified: []` on the grounded keys tells `gen_soc_caps.py` NOT to also mark them unverified via the wholesale fallback. |
+| `peripheral_instances`          | OPTIONAL, keyed by a SUBSET of `peripherals`' keys (issue #1154). Per-instance register `base`/`size` (lowercase `0x`-prefixed hex strings, `^0x[0-9a-f]+$`) + `interrupts` (`irq`/`priority` decimal ints, `name` when the DTSI names it), one entry per physical instance. `peripherals` stays the count map every other consumer reads; this is additive, for a consumer that needs an actual address rather than just a ceiling. Only populated where a real vendor devicetree/SVD source gives a grounded 1:1 instance count — a key absent here means "not yet projected," not "doesn't exist," same as an absent `peripherals` key. RZ/V2N n44 is the only populated example today: `scripts/gen_soc_peripheral_instances.py` mechanically projects it from the vendored Zephyr `r9a09g056.dtsi`; never hand-edit, regenerate. |
 | `variants[].order_code`         | Vendor order code; **must match** the SoM preset's `silicon_variant:` field for the loader to resolve memory layout from this entry's `sram_banks_kb`. |
 | `variants[].alp_module_skus`    | Reverse-lookup hint; lets the validator catch a SoM SKU that references this variant by silicon ref alone (no `silicon_variant:` declared).            |
 | `variants[].debug`              | Debug-probe identity (`jlink_device`, `jlink_flash_device`, `pyocd_target`, `openocd_config`) consumed by `alp-sdk-vscode` to generate a working launch config.  Every key optional; an absent key is the correct, publishable "unknown" state.  Populate each key **only** from the owning tool's own list or a working in-tree invocation (SEGGER's device list / `pyocd list --targets` / an actual `board.cmake` or bench script) — never by pattern-extending a sibling part's string to an unverified one.  #987 shipped a first draft that broke this: it read a *SETOOLS flasher* argument as a J-Link device name and then extended that wrong string to every part by naming convention.  A plausible-looking guess fails at the probe, not at `validate_metadata.py`, so nothing catches it until a customer's launch does. |
@@ -392,34 +393,44 @@ status:
 
 ## 6. Step 3 — Update the schema `sku` pattern
 
-**Edit:** `metadata/schemas/som-preset-v1.schema.json`
+**Edit:** `metadata/schemas/som-preset-v1.schema.json` **and**
+`metadata/schemas/board.schema.json` (`properties.som.properties.sku`) —
+the constraint is duplicated across both, by design (JSON Schema has
+no `$ref`-able cross-file pattern reuse here); a one-sided edit is
+exactly the bug #1089 fixed, and `tests/scripts/test_som_sku_pattern.py`
+pins the two copies equal so drifting them apart fails loudly.
 
-The current pattern accepts `E1M-AEN[3-8]01` — i.e. SKUs for the
-released parts E3..E8 only.  Adding **E1M-AEN901** widens the
-allowed range; without this edit, `validate_metadata.py` will reject
-the new YAML with:
+The current pattern accepts `E1M-AEN[3-8][0-9]{2}` — i.e. silicon
+tiers E3..E8 with any 2-digit per-configuration tail.  Adding a new
+family or widening the tier range further (e.g. **E1M-AEN901**) needs
+a pattern edit; without it, `validate_metadata.py` will reject the
+new YAML with:
 
 ```
 FAIL metadata/e1m_modules/E1M-AEN901.yaml
-  · sku: 'E1M-AEN901' does not match '^E1M-(AEN[3-8]01|V2N10[12]|V2M10[12]|NX9[0-9]{3})$'
+  · sku: 'E1M-AEN901' does not match '^E1M-(AEN[3-8][0-9]{2}|V2N[0-9]{3}|V2M[0-9]{3}|NX9[0-9]{3})$'
 ```
 
-Edit the pattern to accept `AEN[3-9]01`:
+Edit the pattern in **both** schema files to accept `AEN[3-9][0-9]{2}`:
 
 ```jsonc
 "sku": {
   "type": "string",
-  "pattern": "^E1M-(AEN[3-9]01|V2N10[12]|V2M10[12]|NX9[0-9]{3})$"
+  "pattern": "^E1M-(AEN[3-9][0-9]{2}|V2N[0-9]{3}|V2M[0-9]{3}|NX9[0-9]{3})$"
 }
 ```
 
-> **Note:** This is the *only* file outside `metadata/e1m_modules/`
-> and `metadata/socs/` you should need to touch for a new SoM
-> *within an existing family*.  If you are also extending an
-> existing family's SKU shape (e.g. adding a `-2P` suffix), expand
-> the pattern accordingly; for a brand-new family, add a fresh
-> alternation branch.  The pattern is the only schema-side
-> constraint specific to SKU strings; everything else is structural.
+> **Note:** These two files are the *only* ones outside
+> `metadata/e1m_modules/` and `metadata/socs/` you should need to
+> touch for a new SoM *within an existing family*. If you are also
+> extending an existing family's SKU shape (e.g. adding a `-2P`
+> suffix), expand the pattern accordingly in both files; for a
+> brand-new family, add a fresh alternation branch to both **and**
+> edit `metadata/schemas/som-release-bundle-v1.schema.json`, which
+> carries a third, looser SKU pattern plus a `family` enum — miss it
+> and provisioning rejects the new family's release bundle. Within an
+> existing family those two patterns are the only schema-side
+> constraints specific to SKU strings; everything else is structural.
 
 ---
 
@@ -461,7 +472,9 @@ For a family that **does** need a new revision row, the row shape is
 r2:
   min_sdk_version: "0.7.0"   # earliest SDK release that recognises r2
   max_sdk_version: ~          # ~ = open-ended
-  status: production          # or `preliminary`, `reserved`, `eol`
+  status: production          # or `preview`, `preliminary`, `deprecated` --
+                               # `reserved`/`tbd` (or no `status:` at all)
+                               # make the revision refuse a build (#1025)
   summary: |
     One-paragraph rationale for the respin.
   changes:
@@ -670,7 +683,7 @@ SoM; the conformance suite proves its *backends*.
 every backend must pass — it mechanically exercises the uniform
 lifecycle contract of every portable peripheral class (GPIO / I²C /
 SPI / UART / ADC / DAC / PWM / CAN / RTC / WDT / counter / qenc /
-I²S, plus the I²C/SPI target modes) and the non-class v0.9
+I²S / I3C, plus the I²C/SPI target modes) and the non-class v0.9
 surfaces (`alp_init`/`alp_deinit` idempotency, the
 `alp_uart_rx_ringbuf_*` contract, I²C-target config validation):
 
@@ -708,10 +721,10 @@ twister --testsuite-root tests/zephyr/conformance \
 
 The qualified in-repo boards (`zephyr/boards/alp/`) are in the
 scenario's `platform_allow` too, so the same gate builds — and, on
-the bench or the nightly HIL, runs — with the real backend
-selected.  Per-board `boards/<board>.conf` fragments pin the
-matching `CONFIG_ALP_SOC_*` capability profile.  E.g. a build-only
-smoke for the AEN801 HE core:
+an explicitly-invoked bench run (`docs/ci/HW-IN-LOOP.md`), runs —
+with the real backend selected.  Per-board `boards/<board>.conf`
+fragments pin the matching `CONFIG_ALP_SOC_*` capability profile.
+E.g. a build-only smoke for the AEN801 HE core:
 
 ```bash
 twister --testsuite-root tests/zephyr/conformance \

@@ -1,0 +1,72 @@
+// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+/*
+ * ALP E1M-V2N SoM — on-die DRP-AI3 NPU enable.
+ *
+ * Split out of e1m-v2n-som.dtsi because it is CONDITIONAL on the optional
+ * meta-rz-drpai layer AND on an explicit opt-in.  The linux-renesas
+ * bbappend installs this file only when that layer is in bblayers.conf
+ * AND ALP_ENABLE_DRPAI is "1"; otherwise it installs a comment-only stub
+ * of the same name.  See the ALP_DRPAI_DT_ENABLE block in
+ * meta-alp-sdk/recipes-kernel/linux/linux-renesas_%.bbappend.
+ *
+ * WHY CONDITIONAL: the `drpai0` label does NOT exist in the pristine
+ * linux-renesas tree.  It is created by meta-rz-drpai's
+ * recipes-kernel/linux/linux-renesas/0001-add-drpai-property-to-devicetree.patch,
+ * which adds
+ *
+ *     drpai0: drpai@16800000 {
+ *             compatible = "renesas,rzv2n-drpai";
+ *             reg = <0 0x17000000 0 0x1000000>,
+ *                   <0 0x16800000 0 0x400000>;
+ *
+ * NOTE, so nobody "corrects" one of these into the other: the node NAME
+ * (drpai@16800000) matches the vendor's SECOND reg entry, while Linux names
+ * the platform device from the FIRST -- which is why dmesg reads
+ * "drpai-rz 17000000.drpai" and not "16800000.drpai".  The vendor's node
+ * name violates the usual convention of matching reg[0]; both strings are
+ * nevertheless correct, they just name different things.  Verified against
+ * meta-rz-drpai's own 0001-add-drpai-property-to-devicetree.patch.
+ *             ...
+ *             status = "disabled";
+ *     };
+ *
+ * to r9a09g056.dtsi (the same layer's 0002 patch adds the driver).  The
+ * vendor ships it disabled and enables it per-board, exactly as below — the
+ * RZ/V2N EVK's own overlay in that patch is property-for-property identical
+ * to this one.  meta-rz-drpai is only LAYERRECOMMENDS_alp-sdk, a SOFT dep,
+ * so a bake without it has no &drpai0 to override; an unconditional
+ * reference would abort dtc and take BOTH board dtbs with it (V2N and V2M
+ * board dts alike include e1m-v2n-som.dtsi).
+ *
+ * Without this override the driver never probes, /dev/drpai0 never appears,
+ * and every alp_inference_open(.backend = DRPAI) fails before it reaches the
+ * runtime — even though the working-memory carve-out in e1m-v2n-som.dtsi is
+ * present and correct.  Declaring the reserved region is necessary but NOT
+ * sufficient; something has to claim it.
+ *
+ * BOTH memory properties are mandatory on V2N.  drpai-if.c defines
+ * ENABLE_DRP_SUPPORT_SHARED_MEMORY inside its
+ * `#if defined(CONFIG_ARCH_R9A09G056)` (V2N) branch, so on this SoC a probe
+ * without memory-shared-for-drpai-ext-cont hard-fails with -ENOMEM — it does
+ * not degrade to a single-region mode.  The two regions are different things:
+ *
+ *   memory-region                      -> drp_reserved (0xd0000000, 512 MiB)
+ *       the working arena the runtime allocates DRP descriptors, weights
+ *       and I/O buffers from, and which the NPU DMAs against directly.
+ *       This is the base userspace reads back via DRPAI_GET_DRPAI_AREA
+ *       (see _drpai_mem_start() in src/yocto/inference_drpai.cpp) -- so
+ *       this phandle, not a constant in the app, is what defines it.
+ *   memory-shared-for-drpai-ext-cont   -> shared_drp_reserved (0xafcff000, 4 KiB)
+ *       the small external-continuation control page the driver requires
+ *       alongside the arena.
+ *
+ * Do not point memory-region at mmp_reserved (0x80000000): that is the
+ * mmngr video buffer pool, and aiming the NPU's DMA at it corrupts the
+ * video pipeline silently rather than failing.
+ */
+
+&drpai0 {
+	memory-region = <&drp_reserved>;
+	memory-shared-for-drpai-ext-cont = <&shared_drp_reserved>;
+	status = "okay";
+};

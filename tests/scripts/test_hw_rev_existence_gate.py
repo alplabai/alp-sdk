@@ -10,12 +10,14 @@ An `hw_rev` absent from the resolved family/board table silently resolved to
 empty overrides, so the build proceeded with base-revision pad routing and a
 clean exit code -- a wrong-hardware emit that looked like a success.
 
-This is deliberately NOT the `status:` question (`SdkRevisionUnsupported` /
-#1019 already covers the SDK-version-range half; whether an EXISTING
-`status: reserved` or `status: tbd` revision should refuse a build is a
-separate, still-open question this gate does not answer -- see
-`metadata/sdk_version.yaml`).  A revision that EXISTS passes here regardless
-of its `status:`.
+The EXISTENCE predicate (`revision_known()`) stays deliberately blind to
+`status:` -- a revision that EXISTS passes it regardless of being
+`status: reserved`, `status: tbd`, or carrying no `status` key at all.
+
+That is now a SEPARATE, answered question: `revision_buildable()` and
+`SdkRevisionNotBuildable`, covering the maintainer's broad-reading decision
+on #1025's status half -- `reserved`, `tbd`, and no `status` key at all are
+all refused.  See the tests below for both predicates.
 
 Run locally:
 
@@ -36,6 +38,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 from alp_orchestrate import (  # noqa: E402
     OrchestratorError,
+    SdkRevisionNotBuildable,
     SdkRevisionUnknown,
     SdkRevisionUnsupported,
     load_board_yaml,
@@ -86,11 +89,13 @@ def test_status_reserved_and_no_status_key_both_pass():
     ("aen", "r2"),      # status: production
     ("aen", "r3"),      # status: reserved
     ("v2n", "r1"),      # status: production
-    ("v2n", "r2"),      # no `status` key at all
-    ("v2n-m1", "r2"),   # no `status` key at all
+    ("v2n", "r2"),      # status: reserved (was status-less pre-#1025 status half)
+    ("v2n-m1", "r2"),   # status: reserved (was status-less pre-#1025 status half)
     ("imx93", "r1"),    # status: tbd, and an in-tree example builds it
 ])
 def test_family_revision_known_passes_every_real_status_in_tree(family, rev):
+    """EXISTENCE is unaffected by the status half -- every one of these
+    IS a declared key in its table, `status:` notwithstanding."""
     assert sc.family_revision_known(METADATA_ROOT, family, rev) is True
 
 
@@ -102,6 +107,99 @@ def test_family_available_revisions_names_the_real_aen_table():
     available = sc.family_available_revisions(METADATA_ROOT, "aen")
     assert available == sorted(available)  # deterministic order
     assert "r1" in available and "r2" in available and "r99" not in available
+
+
+# --------------------------------------------------------------------------
+# The BUILDABLE predicate -- #1025's status half.  Distinct question from
+# existence above: a revision can be known (a declared key) and still not
+# buildable (a refused status).
+# --------------------------------------------------------------------------
+
+def test_a_production_revision_is_buildable():
+    table = {"hw_revisions": {"r1": {"status": "production"}}}
+    assert sc.revision_buildable(table, "r1") is True
+
+
+@pytest.mark.parametrize("status", ["reserved", "tbd"])
+def test_a_reserved_or_tbd_revision_is_not_buildable(status):
+    table = {"hw_revisions": {"r1": {"status": status}}}
+    assert sc.revision_buildable(table, "r1") is False
+
+
+def test_a_revision_with_no_status_key_is_not_buildable():
+    """The broad reading: missing `status` refuses same as `reserved`."""
+    table = {"hw_revisions": {"r1": {}}}
+    assert sc.revision_buildable(table, "r1") is False
+
+
+@pytest.mark.parametrize("status", ["preview", "preliminary", "deprecated"])
+def test_every_other_declared_status_is_buildable(status):
+    table = {"hw_revisions": {"r1": {"status": status}}}
+    assert sc.revision_buildable(table, "r1") is True
+
+
+def test_revision_buildable_is_none_when_nothing_to_judge():
+    """Same tri-state contract as `revision_known()`: nothing to say when
+    there's no table, or the key itself isn't in it -- that's
+    `revision_known()`'s failure to report, not this one's."""
+    assert sc.revision_buildable({"name": "custom-board"}, "r1") is None
+    assert sc.revision_buildable(None, "r1") is None
+    table = {"hw_revisions": {"r1": {"status": "production"}}}
+    assert sc.revision_buildable(table, "r99") is None
+
+
+def test_revision_buildable_is_false_for_a_malformed_present_entry():
+    """A key that EXISTS but isn't a dict (None, a bare string, ...) has no
+    `status` to read -- that's a malformed entry, not an absent one, so it
+    must be False (refused), not None (nothing to judge). #1025 round-2
+    review: this used to fall through to None (allowed)."""
+    table = {"hw_revisions": {"r1": None}}
+    assert sc.revision_buildable(table, "r1") is False
+    table = {"hw_revisions": {"r1": "not-a-dict"}}
+    assert sc.revision_buildable(table, "r1") is False
+
+
+@pytest.mark.parametrize("family,rev,expected", [
+    ("aen", "r1", True),         # status: production
+    ("aen", "r3", False),        # status: reserved
+    ("v2n", "r1", True),         # status: production
+    ("v2n", "r2", False),        # status: reserved
+    ("v2n-m1", "r2", False),     # status: reserved
+    ("imx93", "r1", False),      # status: tbd -- the KNOWN FALLOUT
+])
+def test_family_revision_buildable_matches_every_real_status_in_tree(family, rev, expected):
+    assert sc.family_revision_buildable(METADATA_ROOT, family, rev) is expected
+
+
+# --------------------------------------------------------------------------
+# The RATCHET -- #1025 round-2 review.  Every rpmsg-imx93-shaped exclusion
+# (check_build_plan.py, check_system_manifest.py, check_emit_snapshots.py,
+# check_zephyr_conf_parity.py, tier-a-library-ci.json's excludedFamilies)
+# calls this instead of hand-rolling `if status == "tbd"`, so a status flip
+# turns every exclusion red instead of letting some silently keep skipping
+# forever.
+# --------------------------------------------------------------------------
+
+def test_assert_exclusion_still_not_buildable_is_quiet_while_honest():
+    """The real imx93 r1 is still `tbd` in the tree today -- the exclusion
+    every gate cites is honest, so the ratchet has nothing to say."""
+    assert sc.assert_exclusion_still_not_buildable(
+        METADATA_ROOT, "imx93", "r1", gate="test") is None
+
+
+def test_assert_exclusion_still_not_buildable_fires_once_the_reason_stops_holding(tmp_path):
+    """Mirrors the reviewer's proven experiment: flip the cited hw_rev to a
+    buildable status and the ratchet must fail loudly and actionably,
+    naming the gate, instead of staying silent."""
+    fam = tmp_path / "e1m_modules" / "imx93"
+    fam.mkdir(parents=True)
+    (fam / "hw-revisions.yaml").write_text(
+        "hw_revisions:\n  r1:\n    status: preliminary\n", encoding="utf-8")
+    msg = sc.assert_exclusion_still_not_buildable(
+        tmp_path, "imx93", "r1", gate="check_build_plan.py")
+    assert msg is not None
+    assert "check_build_plan.py" in msg
+    assert "remove the exclusion" in msg.lower()
 
 
 # --------------------------------------------------------------------------
@@ -177,9 +275,10 @@ def test_a_known_som_rev_with_an_unknown_board_rev_still_raises(tmp_path):
     assert "r1" in message
 
 
-def test_a_status_reserved_som_hw_rev_resolves_cleanly(tmp_path):
-    """aen r3 is `status: reserved` -- it EXISTS, so this gate passes it;
-    whether reserved revisions should build is #1025's still-open half."""
+def test_a_status_reserved_som_hw_rev_is_refused(tmp_path):
+    """aen r3 is `status: reserved` -- it EXISTS (passes `revision_known`),
+    but the maintainer's broad-reading decision on #1025's status half
+    refuses a build against it."""
     path = _write_board(tmp_path, """
         som:
           sku: E1M-AEN801
@@ -190,23 +289,39 @@ def test_a_status_reserved_som_hw_rev_resolves_cleanly(tmp_path):
             app: .
         """)
 
-    project = load_board_yaml(path)
-    assert project.hw_rev == "r3"
+    with pytest.raises(SdkRevisionNotBuildable) as excinfo:
+        load_board_yaml(path)
+
+    message = str(excinfo.value)
+    assert "r3" in message
+    assert "reserved" in message
 
 
-def test_a_no_status_key_som_hw_rev_resolves_cleanly(tmp_path):
-    """v2n r2 carries no `status:` key at all -- still a known revision."""
+def test_imx93_r1_status_tbd_som_hw_rev_is_refused(tmp_path):
+    """The KNOWN FALLOUT this decision creates: E1M-NX9101's only
+    revision, `imx93` r1, is `status: tbd` -- and
+    `examples/multicore/rpmsg-imx93/board.yaml` builds against it today.
+    Refusing `tbd` (#1025's broad reading) means that revision, and that
+    example, are not buildable until the maintainer picks a real status
+    for it.  This is deliberate on this branch -- see the PR description."""
     path = _write_board(tmp_path, """
         som:
-          sku: E1M-V2N101
-          hw_rev: r2
-        preset: e1m-x-evk
+          sku: E1M-NX9101
+          hw_rev: r1
+        preset: e1m-evk
         cores:
-          m33_sm: {}
+          a55_cluster:
+            app: .
+          m33:
+            app: .
         """)
 
-    project = load_board_yaml(path)
-    assert project.hw_rev == "r2"
+    with pytest.raises(SdkRevisionNotBuildable) as excinfo:
+        load_board_yaml(path)
+
+    message = str(excinfo.value)
+    assert "r1" in message
+    assert "tbd" in message
 
 
 def test_the_refusal_is_an_orchestrator_error_subclass(tmp_path):
@@ -259,6 +374,21 @@ def test_composed_route_table_also_refuses_an_unknown_hw_rev(tmp_path):
     assert "r99" in message and "E1M-AEN801" in message
 
 
+def test_composed_route_table_also_refuses_a_reserved_hw_rev():
+    """The BUILDABLE half, not just existence -- aen r3 (`status:
+    reserved`) EXISTS but is not buildable, and this planner path resolves
+    its own SoM data independently of `load_board_yaml`, so it needs its
+    own copy of this gate too (#1025 item 5: "both loaders")."""
+    from alp_orchestrate.models import SdkRevisionNotBuildable
+    from alp_project_loader import _hwrev_pad_route_overrides
+
+    with pytest.raises(SdkRevisionNotBuildable) as excinfo:
+        _hwrev_pad_route_overrides("E1M-AEN801", "r3", METADATA_ROOT)
+
+    message = str(excinfo.value)
+    assert "r3" in message and "reserved" in message
+
+
 # --------------------------------------------------------------------------
 # The exit-code contract -- `scripts/validate_board_yaml.py`
 # --------------------------------------------------------------------------
@@ -289,3 +419,54 @@ def test_validate_board_yaml_exits_with_the_new_code_not_3(tmp_path):
     assert EXIT_SDK_REVISION_UNKNOWN != EXIT_SDK_REVISION_UNSUPPORTED
     assert proc.returncode == EXIT_SDK_REVISION_UNKNOWN, proc.stdout + proc.stderr
     assert proc.returncode != EXIT_SDK_REVISION_UNSUPPORTED
+
+
+def test_validate_board_yaml_exits_with_the_not_buildable_code(tmp_path):
+    """A THIRD, distinct code for "exists but its status refuses a
+    build" -- neither "doesn't exist" (4) nor "SDK version out of range"
+    (3)."""
+    path = _write_board(tmp_path, """
+        som:
+          sku: E1M-AEN801
+          hw_rev: r3
+        preset: e1m-evk
+        cores:
+          m55_hp:
+            app: .
+        """)
+
+    proc = _run_validate_board_yaml(path)
+
+    from validate_board_yaml import (EXIT_SDK_REVISION_NOT_BUILDABLE,
+                                     EXIT_SDK_REVISION_UNKNOWN,
+                                     EXIT_SDK_REVISION_UNSUPPORTED)
+    assert EXIT_SDK_REVISION_NOT_BUILDABLE not in (
+        EXIT_SDK_REVISION_UNKNOWN, EXIT_SDK_REVISION_UNSUPPORTED)
+    assert proc.returncode == EXIT_SDK_REVISION_NOT_BUILDABLE, proc.stdout + proc.stderr
+
+
+def test_missing_status_key_error_names_itself_not_none():
+    """A `status: None`-shaped message is indistinguishable from a typo'd
+    value; the missing-key case gets its own wording instead."""
+    from alp_orchestrate import loader
+
+    assert loader._status_repr(None) == "carries no `status:` key"
+    assert loader._status_repr("tbd") == "status: 'tbd'"
+
+
+def test_board_preset_status_enum_matches_hw_revisions_v1():
+    """board-preset.schema.json hand-duplicates hw-revisions-v1.schema.json's
+    `status:` enum (no cross-file `$ref` support in this repo's validators
+    -- see the schema's own comment) -- nothing else catches the two
+    drifting."""
+    import json
+
+    family_schema = json.loads(
+        (METADATA_ROOT / "schemas/hw-revisions-v1.schema.json").read_text())
+    preset_schema = json.loads(
+        (METADATA_ROOT / "schemas/board-preset.schema.json").read_text())
+
+    family_enum = family_schema["$defs"]["hw_rev_entry"]["properties"]["status"]["enum"]
+    preset_enum = preset_schema["properties"]["hw_revisions"]["additionalProperties"][
+        "properties"]["status"]["enum"]
+    assert set(preset_enum) == set(family_enum)

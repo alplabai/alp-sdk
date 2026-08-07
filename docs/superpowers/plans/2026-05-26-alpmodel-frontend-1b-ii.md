@@ -1,6 +1,13 @@
 # `.alpmodel` Compiler Back-Ends (Stage 1b-ii) — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Historical transcript.** Implementation plan dated 2026-05-26. The
+> SDK has since shipped through the v0.15.0 release candidate
+> (`v0.15.0-rc1`; no plain `v0.15.0` tag exists) and into the ongoing
+> v0.16.0 development cycle (see `VERSIONS.md`, `CHANGELOG.md`) --
+> cross-check the current tree before treating anything below as a
+> live task list; kept for implementation-history rationale only.
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. (Superseded by the status banner above -- do not execute without reading it first.)
 
 **Goal:** Complete the `.alpmodel` compiler front-end: derive on-module discrete-accelerator targets (the V2M DEEPX gap), wire **all** backend adapters (vela/drpai/deepx) as compile-what's-available, carry the compiler version end-to-end, extract real model tensor-I/O, and guard against empty packages — so `alp model build` produces a complete fat package on every SoM and a real Ethos-U compile when `vela` is present.
 

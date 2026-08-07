@@ -177,6 +177,24 @@ jobs:
           python3 -m pytest tests/scripts/test_hil_blocks_coverage.py -q \
             -k test_emitted_sb_config_symbols_exist_in_pinned_zephyr
 
+      # Same class, same oracle, same reason (#1078): bootstrap.json's
+      # `zephyr.pythonMinVersion` is cross-checked against the PINNED
+      # Zephyr's own cmake/modules/python.cmake PYTHON_MINIMUM_REQUIRED,
+      # which needs a real Zephyr tree to read.  Without a job that has
+      # one, check_bootstrap_manifest.py's Zephyr half SKIPs -- and its
+      # only other CI execution path (test_default_corpus_passes under
+      # cross-platform-zephyr.yml's python-smoke) is a bare checkout with
+      # no `west update`, where pytest swallows the SKIP and the job goes
+      # green.  That is precisely the #807/#814 failure the step above
+      # documents, so it gets the same treatment rather than a repeat.
+      - name: check · bootstrap.json agrees with pinned Zephyr's python floor (#1078)
+        if: matrix.shard == 1
+        working-directory: ${{ github.workspace }}/alp-sdk
+        env:
+          ZEPHYR_BASE: ${{ github.workspace }}/zephyrproject/zephyr
+          ALP_REQUIRE_ZEPHYR_ORACLE: '1'
+        run: python3 scripts/check_bootstrap_manifest.py
+
       # --emit kconfig (#893) is the SDK's first WORKSPACE-dependent emit
       # mode -- it needs a real board's Kconfig tree resolved by Zephyr's
       # own CMake, which (unlike native_sim) needs a real cross-toolchain.
@@ -244,6 +262,18 @@ jobs:
           EXTRA_ZEPHYR_MODULES: ${{ github.workspace }}/alp-sdk
         run: |
           python3 scripts/check_emit_kconfig_contract.py
+
+      # gen_soc_peripheral_instances.py's --check does NOT run in this
+      # job (moved out in PR review on #1212): this job's Zephyr pin
+      # (`--mr v4.4.1` above) is the FULL twister oracle -- any future
+      # bump that happens to touch dts/arm/renesas/rz/rzv/r9a09g056.dtsi
+      # would make `--check` go STALE here, failing `twister-shard 1/4`,
+      # which fails the required aggregator `twister ·
+      # native_sim/native/64` and blocks every PR to `dev`, not just V2N
+      # ones, under a context name that says nothing about metadata. See
+      # pr-metadata-peripheral-instances.yml, which checks the same thing
+      # with a seconds-long sparse checkout of just the one DTSI, under
+      # its own honestly-named (and, for now, non-required) context.
 
       # Persist the twister REPORTS (json/xml/log) regardless of
       # pass/fail.  Do NOT upload the whole twister-out/ tree: the
