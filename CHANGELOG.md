@@ -7,6 +7,38 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — `check_tan_docs_surface.py` decoded `tan --help` with the host locale (#1301)
+
+The check read every `tan <verb> --help` through
+`subprocess.run(..., capture_output=True, text=True)` with no explicit
+`encoding=`, so the output was decoded with `locale.getencoding()`. Typer
+renders `--help` as a Rich options table whose box-drawing characters
+cp1252 (a Windows console) and ASCII (`LC_ALL=C`) cannot decode.
+
+That produced two wrong outcomes rather than one clean failure. Against
+`tan 0.5.0-rc3` the check reported 25 problems naming flags that exist —
+`tan build --project`, `tan generate --target`, `tan validate --offline`,
+`tan monitor --port` are all listed by the shipped binary's own `--help`.
+Against `tan 0.5.1` the `UnicodeDecodeError` was raised inside subprocess's
+reader thread, leaving `proc.stdout` as `None`, and the check died with
+`AttributeError: 'NoneType' object has no attribute 'splitlines'` in
+`_usage_line()` instead of reporting anything at all. Neither appeared in
+CI, whose runner is Linux with a UTF-8 default locale; forcing
+`PYTHONUTF8=1` made the same tree, same binary pass outright, so no
+documentation was drifting.
+
+Every `tan` invocation now goes through one `_run_tan()` helper that pins
+`encoding="utf-8"`, with `errors="replace"` so a stray undecodable byte
+stays a reportable problem rather than becoming a traceback. The four call
+sites that each built their own `subprocess.run` are routed through it, so
+a fifth added later inherits the decoding instead of repeating the bug.
+
+The regression test drives the real script against a stub `tan` that
+renders a genuine Rich options table, under `PYTHONUTF8=0` plus
+`LC_ALL=C`/`LANG=C`. Every other stub in that file prints plain ASCII,
+which both codecs round-trip unharmed, so none of them could see this
+class of defect.
+
 ## [v0.15.0] - 2026-08-07
 
 ### Fixed — the v0.15.0 cut was blocked, and the CHANGELOG claimed a GA that only ever shipped as an rc1 (#1292)
