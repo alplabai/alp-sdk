@@ -15,6 +15,8 @@ on:
     paths:
       - 'metadata/**'
       - 'examples/**/board.yaml'
+      - 'examples/**/README.md'
+      - 'examples/**/testcase.yaml'
       - 'include/alp/boards/**'
       - 'include/alp/chips/**'
       - 'zephyr/boards/alp/**'
@@ -58,6 +60,8 @@ on:
     paths:
       - 'metadata/**'
       - 'examples/**/board.yaml'
+      - 'examples/**/README.md'
+      - 'examples/**/testcase.yaml'
       - 'include/alp/boards/**'
       - 'include/alp/chips/**'
       - 'zephyr/boards/alp/**'

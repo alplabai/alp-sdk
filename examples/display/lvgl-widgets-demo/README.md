@@ -33,7 +33,7 @@ tree -- the headline showcase of every standard LVGL widget
 ## Build
 
 ```
-west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples/display/lvgl-widgets-demo
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/display/lvgl-widgets-demo
 west flash
 ```
 
@@ -56,6 +56,6 @@ desktop compositor.
 and flushes real frames (`alp_display_blit()` is reached from
 LVGL's render loop). The underlying MIPI DBI Type C devicetree path
 on the E1M-EVK still has build-only CI coverage, and this app's
-target board (`ensemble_e8_dk`) has no `alp-display0` alias checked
-in yet -- real-hardware bring-up (including wiring that alias to the
-ST7789 node) lands once the v1.0 HiL sweep runs.
+target board (`ensemble_e8_dk`) has no `alp-display0` alias
+checked in yet -- real-hardware bring-up (including wiring that alias
+to the ST7789 node) lands once the v1.0 HiL sweep runs.

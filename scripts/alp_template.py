@@ -1222,18 +1222,32 @@ def _scaffold_readme(
 
     * MAJOR C -- the canonical example's own SoM label ("# Example for
       E1M-AEN801:") and qualified Zephyr board target
-      (`alp_e1m_aen801_m55_hp`) otherwise survive a cross-family sku
-      swap untouched (a V2N101 scaffold shipping `-b
-      alp_e1m_aen801_m55_hp`; the real
+      (`alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp`) otherwise
+      survive a cross-family sku swap untouched (a V2N101 scaffold
+      shipping `-b alp_e1m_aen801_m55_hp/...`; the real
       `alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33` appears nowhere).
       `source_board`/`target_board` are the qualified board id
       (`_core_board`) for the example's own sku / the requested sku's
-      re-derived app core respectively; only the SHORT board-id prefix
-      (before the first `/`) needs to match literally in the README, so
-      the whole qualified `target_board` is substituted in its place --
-      upgrading even the passthrough case to the fully-qualified id
-      Zephyr 4.4 actually requires (issue #720; the source README's own
-      bare `alp_e1m_aen801_m55_hp` is itself ambiguous/unresolvable).
+      re-derived app core respectively. Every source README carries
+      the full `/<soc>/<core>` suffix (issue #720), so the exact
+      qualified `source_board` string is matched first, consuming that
+      suffix along with the short prefix; a SHORT board-id-prefix
+      (before the first `/`) word-boundary match then ALSO runs
+      unconditionally, for any remaining bare mention that names only
+      the board directory (no soc/core), e.g. a `zephyr/boards/alp/
+      <board>/` doc link -- a README carrying both shapes gets both
+      rewritten, not just whichever one matches first.
+
+    * `_m33_sm` (RZ/V2N system-manager) scaffold targets -- that board
+      family's DEFAULT flasher is `rzv2n_mtd_flash`
+      (zephyr/boards/alp/e1m_v2n101_m33_sm/board.cmake,
+      e1m_v2m101_m33_sm/board.cmake), which is SSH-to-the-booted-A55
+      and always needs `--host`/`ALP_V2N_SSH_HOST` -- a bare `west
+      flash` carried over verbatim from an AEN801 (JLink) source
+      README silently can't reach the board. Every `west flash` line
+      immediately following one of THIS scaffold's own board-target
+      lines is rewritten to `west flash --host <board-ip>`; an
+      unrelated `west flash` elsewhere in the prose is left alone.
 
     `pin_renames` (issue #876 review MINOR 4) is `_derive_pin_renames`'s
     map -- see `_substitute_readme_pins`.
@@ -1248,8 +1262,47 @@ def _scaffold_readme(
     text = text.replace(
         "-DEXTRA_ZEPHYR_MODULES=$(pwd)", "-DEXTRA_ZEPHYR_MODULES=$ALP_SDK_ROOT")
     if source_board and target_board:
+        # Every source README carries the full `/<soc>/<core>` suffix
+        # (issue #720), so match the exact qualified string first --
+        # its `/<soc>/<core>` suffix is consumed along with the short
+        # prefix, avoiding the OLD soc/core suffix being left dangling
+        # after the NEW (already fully qualified) `target_board`, e.g.
+        # `alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33/ae822fa0e5597ls0/rtss_hp`.
+        # The short board-id-prefix (before the first `/`) word-
+        # boundary match then ALSO runs, unconditionally -- not only
+        # as a fallback when the qualified string is absent -- so a
+        # README naming the board BOTH ways (a qualified `west build`
+        # line and a separate bare `zephyr/boards/alp/<board>/` doc
+        # link) gets both rewritten. `(?!/)` keeps it from re-matching
+        # the prefix of a string that's ALREADY (still) fully
+        # qualified -- either one this same call just substituted in
+        # (leaving `target_board` intact) or, in the sku==example_sku
+        # passthrough case, `source_board` itself, still present
+        # verbatim after the no-op `replace` above -- which would
+        # otherwise get its own `/<soc>/<core>` suffix duplicated onto
+        # the end a second time.
+        if source_board in text:
+            text = text.replace(source_board, target_board)
         source_marker = source_board.split("/", 1)[0]
-        text = re.sub(rf"\b{re.escape(source_marker)}\b", target_board, text)
+        text = re.sub(rf"\b{re.escape(source_marker)}\b(?!/)", target_board, text)
+        # The `_m33_sm` (RZ/V2N system-manager) board family's DEFAULT
+        # flasher is `rzv2n_mtd_flash` (zephyr/boards/alp/
+        # e1m_v2n101_m33_sm/board.cmake, e1m_v2m101_m33_sm/board.cmake),
+        # which is SSH-to-the-booted-A55 and always needs `--host`/
+        # `ALP_V2N_SSH_HOST` -- a bare `west flash` carried over
+        # verbatim from an AEN801 (JLink) source README silently can't
+        # reach the board. Every `west flash` line immediately
+        # following one of THIS scaffold's own board-target lines is
+        # rewritten (a multi-core README can carry more than one), so
+        # a two-core scaffold doesn't leave its second flash line
+        # bare; an unrelated `west flash` elsewhere in the prose is
+        # left alone.
+        if target_board.split("/", 1)[0].endswith("_m33_sm"):
+            marker = re.escape(target_board)
+            text = re.sub(
+                rf"({marker}[^\n]*\n)west flash\b",
+                r"\1west flash --host <board-ip>",
+                text)
     if example_sku and sku and example_sku != sku:
         text = text.replace(example_sku, sku)
     text = _substitute_readme_pins(text, pin_renames or {})

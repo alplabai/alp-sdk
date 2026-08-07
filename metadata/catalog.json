@@ -106,7 +106,7 @@
         "name": "ai-anomaly-detection-vibration",
         "path": "examples/ai/ai-anomaly-detection-vibration",
         "som": "E1M-AEN801",
-        "summary": "> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Compiles on > `native_sim/native/64` + cross-compiles to > `ensemble_e8_dk/ae402fa0e5597le0/rtss_hp`. HiL bring-up with a > real motor / pump and a customer-trained model is v0.6 work.",
+        "summary": "> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Compiles on > `native_sim/native/64` + cross-compiles to > `ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp`. HiL bring-up with a > real motor / pump and a customer-trained model is v0.6 work.",
         "supported_boards": [
           "e1m-evk",
           "e1m-x-evk"
@@ -497,7 +497,7 @@
         "name": "drone-autopilot",
         "path": "examples/peripheral-io/drone-autopilot",
         "som": "E1M-AEN801",
-        "summary": "> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Compiles on > `native_sim/native/64` + cross-compiles to `ensemble_e8_dk/ae402fa0e5597le0/rtss_hp`. > **Do NOT fly this build.** The PID gains, sensor scales, > failsafe thresholds, and motor mapping are starting-point > values that need bench tuning + ground-tied throttle tests > before a real airframe goes near them."
+        "summary": "> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Compiles on > `native_sim/native/64` + cross-compiles to `ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp`. > **Do NOT fly this build.** The PID gains, sensor scales, > failsafe thresholds, and motor mapping are starting-point > values that need bench tuning + ground-tied throttle tests > before a real airframe goes near them."
       },
       {
         "board": "e1m-evk",
