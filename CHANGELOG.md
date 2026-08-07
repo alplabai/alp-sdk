@@ -5,7 +5,40 @@ All notable changes to the Alp SDK are documented here.  Format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
-## [Unreleased] - v0.16.0 candidate
+## [Unreleased] - v0.15.0 candidate
+
+### Fixed — the v0.15.0 cut was blocked, and the CHANGELOG claimed a GA that only ever shipped as an rc1 (#1292)
+
+`v0.15.0` was bumped on 2026-07-31 (`4d0f4aae`) and tagged `v0.15.0-rc1`, but
+the final `v0.15.0` tag was never pushed -- `v0.14.0` is still the latest
+release. Two artefacts were left inconsistent with that, and together they
+made the GA cut impossible to run.
+
+`scripts/bump_version.py`'s `update_sdk_version_yaml` raised `SystemExit`
+when the substitution was a no-op, so `bump_version.py 0.15.0` aborted before
+doing anything: `metadata/sdk_version.yaml` already read `version: 0.15.0`.
+It now prints `unchanged … (already at version: X)` and continues, the same
+way `update_version_h` already handled an already-current `version.h`. A
+version can legitimately be bumped in one PR and tagged in a later one.
+
+The duplicate-section hazard that raise was incidentally guarding against is
+now caught where it actually lives: `slice_changelog` refuses outright when a
+`## [vX]` section already exists. That is not cosmetic -- `release.yml`
+slices the release body by `## \[v{VERSION}\]` and takes the **first** match,
+so a second section would have published the new content and silently
+orphaned the older one from the release page, with no error anywhere.
+
+`CHANGELOG.md`'s dated `[v0.15.0] - 2026-07-31` section is retitled
+`[v0.15.0-rc1] - 2026-07-31`, naming what actually shipped it. The rest of
+the tree already recorded this -- `docs/abi/README.md:157` ("no final
+`v0.15.0` tag exists yet") and a dozen `docs/superpowers/plans/*.md` headers
+("`v0.15.0-rc1`; no plain `v0.15.0` tag exists"); the dated heading was the
+only artefact asserting a GA. The working heading is relabelled
+`[Unreleased] - v0.15.0 candidate` so the accumulated work cuts as the GA.
+
+`metadata/sdk_version.yaml`'s `status: released` is deliberately unchanged --
+it becomes accurate the moment the tag is pushed, and flipping it back for
+the interim would churn `alp.lock` and every consumer that reads it.
 
 ### Fixed — `check_public_private.py`'s `REVIEWED_ACCEPTED` exemptions broke on every CHANGELOG-editing PR (#524)
 
@@ -2386,7 +2419,7 @@ path exists upstream but Zephyr v4.4's `modules/lvgl/Kconfig` does not
 expose it, so only Arm-2D's standalone Helium API is usable today). None
 of the three is vendored in-tree.
 
-## [v0.15.0] - 2026-07-31
+## [v0.15.0-rc1] - 2026-07-31
 
 ### Added — documented `alp_mproc_boot_core()`'s image-residency precondition, and a direction-specific M55-HP erratum (#1070)
 
