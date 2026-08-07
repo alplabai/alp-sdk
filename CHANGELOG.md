@@ -186,6 +186,24 @@ strength of the ADR, `2b817532` restored it in three files but not the rest, so
 document the live verb while `README.md`, `docs/README.md`,
 `docs/troubleshooting.md` and `VERSIONS.md` still omit it. Restoring those four
 is tracked separately.
+### Fixed — V2N/V2M `alp_counter_open()` returned `ALP_ERR_INVAL` for published `ALP_E1M_X_COUNTER1..3` (#1242)
+
+`include/alp/e1m_x_pinout.h` publishes `ALP_E1M_X_COUNTER0..3` as E1M-X
+connector identities, but the only backend serving counter on V2N/V2M
+(`src/backends/counter/gd32_bridge.c`) rejected ids 1..3 with
+`ALP_ERR_INVAL` — "bad argument", which sends a customer looking for a
+bug in their own code, when the id was a published identity this SoM
+simply doesn't serve. The IDs stay (a different SoM on the E1M-X
+connector may serve all four); the backend now returns
+`ALP_ERR_NOSUPPORT` for the ids it doesn't serve, matching the
+convention this same backend already uses for `alp_counter_us_to_ticks`
+and `alp_counter_set_alarm`. The served count is also discoverable
+before hitting that error: `alp_counter_capabilities()->channel_count`
+now reports it (1, on V2N/V2M) after opening `ALP_E1M_X_COUNTER0`,
+mirroring the field the ADC gd32_bridge backend already populates.
+Documented at `include/alp/counter.h`, `include/alp/e1m_x_pinout.h`,
+and `docs/portability.md` §4.5. Does not change which die serves the
+counter class — that is `docs/adr/0024`, unaffected by this fix.
 
 ## [v0.15.0] - 2026-08-07
 
