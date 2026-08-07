@@ -147,11 +147,13 @@ cores:
 
 def test_baremetal_slice_and_stock_image_appdir_null_conform(tmp_path: Path):
     """`os: baremetal` on m55_hp (with the SoM preset's other cores left
-    at their defaults) exercises: the `baremetal` backend enum value,
-    its `cmake-args.txt` configArtefact, the baremetal `command` shape
-    (`tool: cmake`, `-S`/`-B` args), AND the A-class core's stock-image
-    Yocto slice, which reports `appDir: null` (issue #597 -- there is no
-    app source dir to report for the `alp-image-edge` token)."""
+    at their defaults) exercises: the `baremetal` backend enum value, its
+    EMPTY `configArtefacts` (removed 2026-08: no baremetal build command
+    ever read a materialised cmake-args.txt back in), the baremetal
+    `command` shape (`tool: cmake`, `-S`/`-B` args), AND the A-class
+    core's stock-image Yocto slice, which reports `appDir: null` (issue
+    #597 -- there is no app source dir to report for the `alp-image-edge`
+    token)."""
     path = _write_board(tmp_path, AEN801_BAREMETAL_AND_STOCK_IMAGE)
     project = load_board_yaml(path)
     plan = json.loads(emit_build_plan(
@@ -164,7 +166,7 @@ def test_baremetal_slice_and_stock_image_appdir_null_conform(tmp_path: Path):
     by_id = {s["coreId"]: s for s in plan["slices"]}
     baremetal = by_id["m55_hp"]
     assert baremetal["backend"] == "baremetal"
-    assert baremetal["configArtefacts"][0]["path"].endswith("cmake-args.txt")
+    assert baremetal["configArtefacts"] == []
     assert baremetal["command"]["tool"] == "cmake"
     assert "-S" in baremetal["command"]["args"]
     assert "-B" in baremetal["command"]["args"]

@@ -7,6 +7,106 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — `check_tan_docs_surface.py` decoded `tan --help` with the host locale (#1301)
+
+The check read every `tan <verb> --help` through
+`subprocess.run(..., capture_output=True, text=True)` with no explicit
+`encoding=`, so the output was decoded with `locale.getencoding()`. Typer
+renders `--help` as a Rich options table whose box-drawing characters
+cp1252 (a Windows console) and ASCII (`LC_ALL=C`) cannot decode.
+
+That produced two wrong outcomes rather than one clean failure. Against
+`tan 0.5.0-rc3` the check reported 25 problems naming flags that exist —
+`tan build --project`, `tan generate --target`, `tan validate --offline`,
+`tan monitor --port` are all listed by the shipped binary's own `--help`.
+Against `tan 0.5.1` the `UnicodeDecodeError` was raised inside subprocess's
+reader thread, leaving `proc.stdout` as `None`, and the check died with
+`AttributeError: 'NoneType' object has no attribute 'splitlines'` in
+`_usage_line()` instead of reporting anything at all. Neither appeared in
+CI, whose runner is Linux with a UTF-8 default locale; forcing
+`PYTHONUTF8=1` made the same tree, same binary pass outright, so no
+documentation was drifting.
+
+Every `tan` invocation now goes through one `_run_tan()` helper that pins
+`encoding="utf-8"`, with `errors="replace"` so a stray undecodable byte
+stays a reportable problem rather than becoming a traceback. The four call
+sites that each built their own `subprocess.run` are routed through it, so
+a fifth added later inherits the decoding instead of repeating the bug.
+
+The regression test drives the real script against a stub `tan` that
+renders a genuine Rich options table, under `PYTHONUTF8=0` plus
+`LC_ALL=C`/`LANG=C`. Every other stub in that file prints plain ASCII,
+which both codecs round-trip unharmed, so none of them could see this
+class of defect.
+### Fixed — `scripts/test-all.sh` dirtied the current ABI snapshot with a same-day, zero-substance `generated` date bump (#1232)
+
+Every full `scripts/test-all.sh` run regenerated `docs/abi/<current>-snapshot.json`
+unconditionally, so an otherwise-clean local run that touched no public header
+still stamped today's date and dirtied the file, and that same-day-clean bump
+rode along into the next commit. `pr-generated-files.yml`'s own diff check
+never caught it: it masked the `"generated":` line with
+`--ignore-matching-lines='"generated":'`, so CI stayed green regardless —
+training reviewers to expect (and ignore) an ABI-diff-free date churn on the
+one file whose entire purpose is to be diffed for real ABI drift.
+`scripts/abi_snapshot.py --output` now skips the write entirely when
+re-serializing the snapshot would come out byte-identical to what's already
+committed, once the existing file's own `generated` date is substituted back
+in; the CI and local gates match, so neither rewrites the file on a no-op
+rerun. Both `.github/workflows/pr-generated-files.yml` and `scripts/test-all.sh`
+drop their now-redundant `--ignore-matching-lines='"generated":'` diff mask,
+since the write-skip guard is what keeps a no-op regen from touching that line
+at all — a real content change still fails on its content lines regardless of
+the mask.
+### Removed — dead `cmake-args.txt` materialisation from the baremetal build-plan slice (#1278)
+
+`emit_build_plan`'s `configArtefacts` no longer carries a `cmake-args.txt`
+entry for `os: baremetal` slices
+(`scripts/alp_orchestrate/buildplan.py::_slice_config_artefact`). The
+artefact was dead on both sides of the contract: nothing in this repo's own
+`_slice_command` (baremetal branch) ever read it back — the `cmake -S ... -B
+...` argv is built independently — and tan-cli's materialise step writes
+`configArtefacts` to disk without ever reading them back either. #1278 gave
+two ways to close the gap -- route the args into the cmake invocation, or
+drop the dead emit -- and this takes the second: the standalone `--emit
+cmake-args` mode (`_slice_cmake_args`) remains as an on-request,
+manually-wired reference surface (`docs/board-config-emit.md`), but no
+automatic path threads `-DALP_CORE_ID` or any of its sibling `-D` args into
+a baremetal build any more; that was never true before this change either
+(the args were computed and written, not read back), so nothing that
+previously worked stops working.
+
+- `metadata/schemas/build-plan-v1.schema.json`'s `configArtefacts`
+  description and `docs/architecture.md`'s pipeline diagram both stop naming
+  `cmake-args` among what a build-plan consumer materialises.
+  `metadata/emit-registry-v1.json`'s `cmake-args` mode entry drops its
+  `path` to `null` -- no fixed build/materialise-flow location remains for
+  it; the standalone `--emit cmake-args` mode itself is unchanged and stays
+  a caller-chosen `--output`.
+- `docs/board-config-emit.md`'s "Plain CMake" recipe no longer claims
+  `--emit cmake-args`'s output is directly pipeable into `cmake -B build
+  $ARGS .`, and instead documents `--output` to a file for manual/tooling
+  consumption; `--emit cmake-args` itself is unchanged and still valid.
+- No `schemaVersion` bump: ADR-0020 Amendment (2026-07-20) item 3 sets the
+  precedent for a build-plan shape change against `tan-cli`'s pinned
+  `schemaVersion == 1` -- don't bump (it would strand the pin), keep
+  strict-producer/tolerant-consumer instead. No committed fixture (pinned
+  oracle or `tests/fixtures/emit-snapshots/*`) exercises a baremetal slice
+  today -- neither fixture tree has an `"os": "baremetal"` entry -- so this
+  shape change trips no gate yet.
+- Not fixed here: this repo's `_slice_config_artefact`
+  (`scripts/alp_orchestrate/buildplan.py`) has a byte-identical twin at
+  tan-cli's `python/tan/planner/buildplan.py:51-69`, whose baremetal branch
+  (lines 67-68) still returns a `cmake-args.txt` entry -- this change makes
+  the two planners disagree on that shape. tan-cli issue #492 (item 2,
+  `python/tan/planner/buildplan.py:68`) already tracks the dead-materialise
+  side of this on tan-cli's own code; it needs to land the matching drop
+  before the two repos re-agree. ADR-0020 Amendment item 4 governs exactly
+  this: seam-1 (`tests/parity/seam1_field_diff.py` and tan-cli's vendored
+  twin) diffs `configArtefacts[*].path` after dropping `contents`, and an
+  artefact "appearing/vanishing/moving still fails the gate" -- so once
+  either repo's parity suite gains a baremetal-slice fixture, seam-1 fails
+  until tan-cli's twin drops the same branch.
+
 ### Fixed — ADR 0022 claimed a `tan renode` retirement that never shipped
 
 ADR 0022 was recorded as "Accepted — implemented" for both of its clauses. Only

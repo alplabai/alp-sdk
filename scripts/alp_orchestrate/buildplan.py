@@ -25,7 +25,6 @@ from .headers import emit_dts_partitions, emit_dts_reservations, emit_ipc_contra
 from .kconfig import (
     _resolve_console,
     _slice_alp_conf,
-    _slice_cmake_args,
     _slice_local_conf,
 )
 from .models import BoardProject, Slice
@@ -55,17 +54,25 @@ def _slice_config_artefact(
     """(filename, contents) of the slice's config artefact, or None
     when the os has none.
 
-    Single source for both the Orchestrator's materialise step and
+    Single source for both a consumer's materialise step and
     `emit_build_plan` -- the two MUST agree byte-for-byte (the CLI
     consumer byte-writes the plan's contents and trusts them to match
     what we'd write ourselves).
+
+    `baremetal` deliberately carries none: unlike `alp.conf`/`local.conf`,
+    no baremetal build command ever read a materialised `cmake-args.txt`
+    back in (`_slice_command`'s baremetal branch builds its `cmake`
+    argv independently) -- a dead artefact implying a capability that
+    was never wired, on either the SDK or the tan-cli side. Removed
+    2026-08. The equivalent `-D` args remain available on request via
+    the standalone `--emit cmake-args` mode (`_slice_cmake_args`,
+    unchanged) for human/tooling consumption -- see
+    docs/board-config-emit.md.
     """
     if slice_.os == "zephyr":
         return ("alp.conf", _slice_alp_conf(project, slice_))
     if slice_.os == "yocto":
         return ("local.conf", _slice_local_conf(project, slice_))
-    if slice_.os == "baremetal":
-        return ("cmake-args.txt", _slice_cmake_args(project, slice_))
     return None
 
 

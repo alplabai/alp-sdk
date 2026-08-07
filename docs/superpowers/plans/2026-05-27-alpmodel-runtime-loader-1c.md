@@ -672,7 +672,7 @@ Run (the header changes from T1/T2/T5 are now all in): `py -3.14 scripts/abi_sna
 - [ ] **Step 2: Verify the diff is exactly the intended ABI delta**
 
 Run: `git diff docs/abi/v0.5-snapshot.json`
-Expected: the `alp_inference_backend_t` definition now shows `..._DEEPX_DXM1 = 4` (rename); `alp_status_t` gains `NO_BACKEND/NO_FIT/NOT_FOUND`; a new `alp_model_open_opts_t` typedef + `alp_inference_open_alpmodel` function appear; the `generated` date line changes. **No other symbols change.** (The pr-generated-files gate diffs with `--ignore-matching-lines='"generated":'`, so the date line alone won't fail; but commit the regenerated file regardless.)
+Expected: the `alp_inference_backend_t` definition now shows `..._DEEPX_DXM1 = 4` (rename); `alp_status_t` gains `NO_BACKEND/NO_FIT/NOT_FOUND`; a new `alp_model_open_opts_t` typedef + `alp_inference_open_alpmodel` function appear; the `generated` date line changes. **No other symbols change.**
 
 - [ ] **Step 3: Commit**
 ```bash

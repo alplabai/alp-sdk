@@ -42,8 +42,8 @@
       "output": {
         "media": "cmake-args",
         "schema_id": null,
-        "path": "build/<core_id>-<os>/cmake-args.txt",
-        "consumer_hint": "plain-CMake configure -- sequence of -D args"
+        "path": null,
+        "consumer_hint": "reference/inspection -- not build-plan materialised; adapt the -D args into a hand-written CMakeLists.txt or toolchain file"
       }
     },
     {

@@ -277,6 +277,90 @@ def test_fully_recognized_surface_passes(tmp_path):
     assert "OK" in proc.stdout
 
 
+_RICH_HELP_STUB = r'''
+import sys
+
+sys.stdout.reconfigure(encoding="utf-8")
+sys.stderr.reconfigure(encoding="utf-8")
+
+TABLE = __TABLE__
+
+argv = sys.argv[1:]
+if not argv or argv[0] == "--help":
+    print("Usage: tan [OPTIONS] COMMAND [ARGS]...")
+    sys.exit(0)
+if argv[0] == "--version":
+    print("tan 9.9.9-stub")
+    sys.exit(0)
+
+verb = argv[0]
+if verb not in TABLE:
+    sys.stderr.write("error: unrecognized subcommand '" + verb + "'\n")
+    sys.exit(2)
+
+print(" Usage: tan " + verb + " [OPTIONS]")
+print("╭─ Options ──╮")
+for flag in sorted(TABLE[verb]):
+    print("│ " + flag + "   TEXT   what it does │")
+print("╰────╯")
+sys.exit(0)
+'''
+
+
+def test_rich_table_help_is_decoded_as_utf8_under_a_non_utf8_locale(tmp_path):
+    """Typer renders `--help` as a Rich table whose box-drawing characters
+    are not encodable in cp1252 (a Windows console) or ASCII (`LC_ALL=C`).
+
+    Reading that through `subprocess.run(..., text=True)` with no explicit
+    `encoding=` decodes with `locale.getencoding()`. That raised
+    UnicodeDecodeError inside subprocess's reader thread, leaving
+    `proc.stdout` as None so the check died in `_usage_line(None)` -- and,
+    against a build whose help decoded far enough to parse, reported flags
+    as missing that `--help` plainly lists. Neither showed up in CI, whose
+    runner is Linux with a UTF-8 default locale.
+
+    Every other stub in this file prints plain ASCII, which cp1252 and ASCII
+    both round-trip unharmed, so none of them can see this class of bug --
+    the box-drawing characters are the point of `_RICH_HELP_STUB`. Forcing a
+    non-UTF-8 locale is what makes the test able to fail at all: PYTHONUTF8=0
+    restores the cp1252 default on Windows, LC_ALL/LANG=C gives ASCII on
+    POSIX.
+    """
+    doc_root = tmp_path / "repo"
+    _write_docroot(doc_root)
+    bin_dir = tmp_path / "bin"
+    _install_tan_stub(
+        bin_dir,
+        _RICH_HELP_STUB.replace(
+            "__TABLE__", repr({v: sorted(f) for v, f in _ALL_RECOGNIZED.items()})
+        ),
+    )
+
+    env = dict(os.environ)
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
+    env["PYTHONUTF8"] = "0"
+    env["PYTHONCOERCECLOCALE"] = "0"
+    env["LC_ALL"] = "C"
+    env["LANG"] = "C"
+    env.pop("PYTHONIOENCODING", None)
+    proc = subprocess.run(
+        [sys.executable, str(SCRIPT), "--repo-root", str(doc_root)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", env=env,
+    )
+
+    combined = proc.stdout + proc.stderr
+    assert "UnicodeDecodeError" not in combined, combined
+    assert "AttributeError" not in combined, combined
+    assert "Traceback" not in combined, combined
+    # --sdk-root and --som ARE listed in the stub's own Rich options table,
+    # so nothing may be reported missing; the locale-decoded run invented
+    # exactly these.
+    assert "is not listed in" not in combined, combined
+    assert "is not a recognised flag" not in combined, combined
+    assert "no longer a recognised subcommand" not in combined, combined
+    assert proc.returncode == 0, combined
+
+
 def test_removed_subcommand_fails(tmp_path):
     """The real-world case: a subcommand documented in prose/tables no
     longer exists in `tan` (e.g. `emit` renamed to `generate`)."""

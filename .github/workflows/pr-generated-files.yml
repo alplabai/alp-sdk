@@ -225,9 +225,15 @@ jobs:
           fi
 
       - name: Regenerate ABI snapshot (current minor)
-        # The snapshot's `generated` field is a date stamp; re-running
-        # on the same headers always changes that one line, so the
-        # diff below masks it with --ignore-matching-lines.
+        # The snapshot's `generated` field is a date stamp, but
+        # abi_snapshot.py only rewrites the file when re-serializing it
+        # would NOT come out byte-identical to what's already committed
+        # (issue #1232) -- a no-op rerun leaves the committed file's
+        # bytes, generated date included, completely untouched.  The
+        # diff below therefore no longer masks the "generated" line:
+        # doing so would hide exactly the class of bug #1232's guard
+        # exists to prevent (a spurious date-only rewrite slipping past
+        # this gate) rather than defend against it.
         #
         # Reaches the shell as env, not spliced into the script text via ${{ }}.
         env:
@@ -262,10 +268,14 @@ jobs:
                         docs/peripheral-support-matrix.md \
                         docs/portability-matrix.md \
                         docs/verification-status.md
-          # Allow the snapshot's "generated" date to differ; everything
-          # else must match.
+          # No line-mask here: abi_snapshot.py's own write-skip guard
+          # (above) is what keeps a no-op rerun from touching the
+          # "generated" line at all, so this diff sees zero lines
+          # changed for that case with no help needed.  A real content
+          # change fails on its content lines regardless of the
+          # "generated" line, so masking it would only ever hide a
+          # regression in that guard -- never a false positive.
           if ! git diff --exit-code \
-                  --ignore-matching-lines='"generated":' \
                   -- include/alp/soc_caps.h "$ABI_SNAPSHOT" \
                      include/alp/cap.h \
                      src/cap.c \

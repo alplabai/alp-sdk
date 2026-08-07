@@ -482,6 +482,30 @@ def collect_documented_surface(
     return subcommands, verb_flags, skipped_front_door_rows
 
 
+def _run_tan(tan_bin: str, *args: str, timeout: int = 20) -> subprocess.CompletedProcess[str]:
+    """Run `tan <args>` and decode its output as UTF-8 regardless of host locale.
+
+    Every `tan` invocation in this file goes through here. `text=True` alone
+    decodes with `locale.getencoding()`, which on a Windows console is cp1252 --
+    and Typer renders `--help` as a Rich table whose box-drawing characters
+    cp1252 cannot decode. That raised UnicodeDecodeError inside subprocess's
+    reader thread, leaving `stdout` as None for the caller, so the check either
+    crashed in `_usage_line(None)` or -- when a partially-decoded help text came
+    back -- reported flags as missing that `--help` demonstrably lists. Both
+    failure modes are invisible on the Linux CI runner, where UTF-8 is the
+    default. `errors="replace"` keeps a stray undecodable byte from turning a
+    reportable problem back into a traceback.
+    """
+    return subprocess.run(
+        [tan_bin, *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+    )
+
+
 def _has_legacy_passthrough_args(help_text: str) -> bool:
     """True when `tan <verb> --help`'s own `Usage:` line ends in a bare
     `[ARGS]...` positional catch-all -- the frozen Rust line's marker for a
@@ -692,9 +716,7 @@ def _check_one_invocation(
         return None
 
     if verb not in verb_help_cache:
-        proc = subprocess.run(
-            [tan_bin, verb, "--help"], capture_output=True, text=True, timeout=20,
-        )
+        proc = _run_tan(tan_bin, verb, "--help")
         verb_help_cache[verb] = proc.stdout if proc.returncode == 0 else None
     help_text = verb_help_cache[verb]
     if help_text is None:
@@ -748,9 +770,7 @@ def check_invocation_shapes(repo_root: Path, tan_bin: str) -> list[str]:
     module docstring's blind-spots section for what this still misses
     (quoted multi-word values with embedded `--`-looking substrings, `tan
     sdk`'s nested subcommand grammar, short flags)."""
-    global_proc = subprocess.run(
-        [tan_bin, "--help"], capture_output=True, text=True, timeout=20,
-    )
+    global_proc = _run_tan(tan_bin, "--help")
     global_arity = _parse_option_arity(global_proc.stdout)
 
     sources = [repo_root / rel for rel in DOC_SOURCES]
@@ -793,9 +813,7 @@ def check_surface(
     problems: list[str] = []
     skipped_forwarding: list[str] = []
     for verb in sorted(subcommands):
-        proc = subprocess.run(
-            [tan_bin, verb, "--help"], capture_output=True, text=True, timeout=20,
-        )
+        proc = _run_tan(tan_bin, verb, "--help")
         if proc.returncode != 0:
             first_err = next(
                 (ln for ln in proc.stderr.strip().splitlines() if ln.strip()), "(no stderr)",
@@ -853,9 +871,7 @@ def main() -> int:
     problems, skipped_forwarding, skipped_front_door_rows = check_surface(repo_root, tan_path)
     problems += check_invocation_shapes(repo_root, tan_path)
     if problems:
-        version_proc = subprocess.run(
-            [tan_path, "--version"], capture_output=True, text=True, timeout=10,
-        )
+        version_proc = _run_tan(tan_path, "--version", timeout=10)
         version = version_proc.stdout.strip() or "(tan --version failed)"
         print(f"FAIL tan-docs-drift ({tan_path}, {version}):", file=sys.stderr)
         for p in problems:

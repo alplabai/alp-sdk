@@ -12,8 +12,13 @@ changes between releases without diffing every header by hand.
 At any time exactly one file in this directory -- the one named for
 the release `metadata/sdk_version.yaml` currently declares (`0.15.0`
 -> `v0.15-snapshot.json`) -- is the *working* snapshot: it tracks
-`HEAD` and gets regenerated (`generated` date bumps, symbols change)
-as the SDK's public headers evolve between releases.
+`HEAD` and gets regenerated (symbols change, and `generated` bumps to
+the date of that change) as the SDK's public headers evolve between
+releases. A regen that finds the public surface byte-identical to
+what's already committed leaves the file untouched -- `generated`
+does not bump on a rerun that changed nothing, so the date means "the
+ABI last actually changed", not "someone last ran the gate" (issue
+#1232).
 
 **Every OTHER snapshot in this directory is frozen the moment the
 next release ships, and must never be regenerated again.** A frozen
@@ -84,6 +89,13 @@ a JSON document with a SHA-256 short fingerprint per symbol.
 the current release `metadata/sdk_version.yaml` declares -- e.g.
 `--version v0.1` now exits 2, because `v0.1` is a FROZEN historical
 label, not today's current snapshot (see above).
+
+If the public surface hasn't actually changed, `--output` writes
+nothing at all -- the file on disk, including its `generated` date,
+is left exactly as committed -- and prints
+`docs/abi/<label>-snapshot.json unchanged (ABI identical; generated
+date left as-is)` and exits 0. That is the expected, successful
+outcome of a no-op regen, not a sign the command failed to run.
 
 ## How a PR uses a snapshot
 
@@ -173,8 +185,9 @@ there is no plain `v0.15.0` tag.  `metadata/sdk_version.yaml` declares
 list, the only artefact that can't drift: it marks
 `v0.15-snapshot.json` **CURRENT** (it is still the label
 `scripts/abi_snapshot.py --print-current-version` derives from
-`sdk_version.yaml`'s `0.15.0`, and its `generated` date keeps moving),
-not frozen-and-released.  Reconciling `sdk_version.yaml`'s `released`
+`sdk_version.yaml`'s `0.15.0`, and its `generated` date still moves
+whenever a regen finds real ABI content changed), not
+frozen-and-released.  Reconciling `sdk_version.yaml`'s `released`
 status against the missing tag is outside this file's ownership; it
 resolves when the GA tag lands.
 
