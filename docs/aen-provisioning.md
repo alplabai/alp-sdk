@@ -240,9 +240,11 @@ its boot ISP window. A clean write ends with `100% ... Done`.
 Power-cycle and re-run the §2 listener. The banner should now show the ATOC
 present and your image booting (instead of `No ATOC`). Once the SES releases
 the core, **J-Link can attach** for normal SWD debug — use the **generic
-`Cortex-M55` device**, not the Alif part number (the part-specific device
-connect sequence fails post-boot; the generic core device finds the released
-core at AP[3]):
+`Cortex-M55` device**, not the Alif part number, for this attach (on a J-Link
+DLL older than V9.46 the part-specific device connect sequence fails
+post-boot; V9.46+ also connects, but the generic core device is the
+documented one for finding the released core at AP[3] regardless — see
+[`aen-bench-bringup.md`](aen-bench-bringup.md) §1):
 
 ```bash
 JLinkExe -device Cortex-M55 -if SWD -speed 4000 -nogui 1
