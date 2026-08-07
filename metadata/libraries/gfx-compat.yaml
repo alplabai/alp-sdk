@@ -21,13 +21,15 @@
 #     than an upstream release string (git log --follow --diff-filter=A
 #     -- src/lib/gfx_compat/gfx_compat.c: 1a7b16034ec123e92c25e9ec13fb3508e7041a23).
 #
-# HW-backends: metadata/library-profiles/gfx_compat/hw-backends.yaml
-# carries per-accelerator priority binding (GPU2D, DMA2D, SPI-DMA push);
-# folded in WS6-c Phase 3 (needs library-v1 schema extension).
+# HW-backends: this manifest's own `integration.zephyr.hw_backends:`
+# block below carries per-accelerator priority binding (GPU2D, DMA2D,
+# SPI-DMA push); folded in from the retired standalone
+# metadata/library-profiles/gfx_compat/hw-backends.yaml in WS6-c
+# Phase 3.
 #
 # No `requires:` -- pure-C SW blit is the always-available floor
 # (CONFIG_ALP_GFX_COMPAT_SW=y); HW GPU2D/DMA2D offload is opportunistic
-# per-SoM (see hw-backends.yaml above), never a hard requirement.
+# per-SoM (see `hw_backends:` above), never a hard requirement.
 #
 # `tier: B` for this Phase-1 pass: gfx_compat is NOT listed in
 # metadata/registries/tier-a-library-ci.json's hostBuild.libraries or

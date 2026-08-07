@@ -11,12 +11,14 @@
 #     `west update` cannot run against an out-of-workspace worktree).
 #   * vendors/jsmn/README.md -- MIT licence (LICENSE upstream text
 #     unmodified); upstream https://github.com/zserge/jsmn.
-#   * metadata/library-profiles/jsmn/hw-backends.yaml -- pure-SW,
-#     no accelerator binding (parsing class).
 #   * examples/connectivity/jsmn-json-parse/testcase.yaml -- built +
 #     run green on native_sim/native_sim/native/64.
 #
-# HW-backends: see metadata/library-profiles/jsmn/ (folded in WS6-c Phase 3)
+# HW-backends: pure-SW, no accelerator binding (parsing class) -- see
+# this manifest's own `integration.zephyr.hw_backends:` block below
+# (retired standalone metadata/library-profiles/jsmn/hw-backends.yaml
+# folded in here in WS6-c Phase 3; no library-profiles/jsmn/ directory
+# exists).
 #
 # `module: jsmn` matches the real (disabled-by-default) west project
 # name above; `kconfig:` is transcribed verbatim from _LIBRARY_KCONFIG.

@@ -216,7 +216,7 @@ them the Zephyr-on-M default:
 
 ```bash
 # Download the 13.x release from arm.com (no apt package tracks
-# the version policy in scripts/zephyr-version-policy.md).
+# the version policy in docs/zephyr-version-policy.md).
 ARM_GNU_VER="13.3.rel1"
 curl -L "https://developer.arm.com/-/media/Files/downloads/gnu/${ARM_GNU_VER}/binrel/arm-gnu-toolchain-${ARM_GNU_VER}-x86_64-arm-none-eabi.tar.xz" \
     -o arm-gnu.tar.xz

@@ -53,7 +53,7 @@ The host waits for READY before the reply header and reply payload
 phases.  Firmware side: `hal/ti/transport_hw_ti_spi.c` (a `SPI_SLAVE` +
 `SPI_MODE_CALLBACK` state machine that replays the captured frame through
 the silicon-free byte seams and advances on transfer completion).  Host
-side: `chips/cc3501e/cc3501e.c` `cc3501e_request()` (matching four-phase
+side: `chips/cc3501e/cc3501e_core.c` `cc3501e_request()` (matching four-phase
 sequence + `resp_to_status()` on `payload[0]`).  Host + firmware are
 reconciled to each other and to the header, and this hardware-SS0 bridge
 has been bench-validated on E1M-AEN801.

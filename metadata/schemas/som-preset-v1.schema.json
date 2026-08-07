@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/som-preset-v1.schema.json",
   "title": "ALP SoM preset (metadata/e1m_modules/<SKU>.yaml) v1",
-  "description": "Schema for the per-SKU SoM preset.  The SDK's loader resolves the customer's board.yaml `som.sku` to the matching preset here.  Every released-MPN preset shares ONE canonical shape: the top-level key set, `memory:`, `on_module:`, `inference:`, and `status:` are closed (additionalProperties: false) so cross-family key drift fails validation instead of passing silently.  The only deliberately-open spots are the ones where genuine per-family variance is legitimate, and each carries its own description saying why: `capabilities:` (open set of accelerator flags matched against library hw-backends.yaml), `i2c_devices` bus KEYS (bus identifiers differ per family), `bus_pads` (per-silicon pad naming), and `helper_firmware[].flash_args` (shape follows the flash backend).",
+  "description": "Schema for the per-SKU SoM preset.  The SDK's loader resolves the customer's board.yaml `som.sku` to the matching preset here.  Every released-MPN preset shares ONE canonical shape: the top-level key set, `memory:`, `on_module:`, `inference:`, and `status:` are closed (additionalProperties: false) so cross-family key drift fails validation instead of passing silently.  The only deliberately-open spots are the ones where genuine per-family variance is legitimate, and each carries its own description saying why: `capabilities:` (open set of accelerator flags matched against each library's `integration.zephyr.hw_backends:` block in metadata/libraries/*.yaml), `i2c_devices` bus KEYS (bus identifiers differ per family), `bus_pads` (per-silicon pad naming), and `helper_firmware[].flash_args` (shape follows the flash backend).",
   "type": "object",
   "required": [
     "schema_version", "sku", "family", "silicon", "display_name",
@@ -173,7 +173,7 @@
       "type": "object",
       "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" },
       "additionalProperties": { "type": "boolean" },
-      "description": "Per-SoM hardware-accelerator / feature capability flags.  DELIBERATELY OPEN keys (values pinned to booleans): the key set is matched against each library's metadata/library-profiles/<name>/hw-backends.yaml, which grows with the library catalogue -- enumerating it here would couple the preset schema to every library release.  ADDITIVE direction only: declare capabilities the SoM ADDS on top of the silicon (on-module chips, bridge features).  Removing a silicon capability the SKU leaves unpopulated goes in `silicon_capabilities.unpopulated` instead, never as a `false` here."
+      "description": "Per-SoM hardware-accelerator / feature capability flags.  DELIBERATELY OPEN keys (values pinned to booleans): the key set is matched against each library's `integration.zephyr.hw_backends:` block in metadata/libraries/<name>.yaml, which grows with the library catalogue -- enumerating it here would couple the preset schema to every library release.  ADDITIVE direction only: declare capabilities the SoM ADDS on top of the silicon (on-module chips, bridge features).  Removing a silicon capability the SKU leaves unpopulated goes in `silicon_capabilities.unpopulated` instead, never as a `false` here."
     },
     "silicon_capabilities": {
       "type": "object",

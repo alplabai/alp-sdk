@@ -1,8 +1,9 @@
 # board.yaml -- coreMQTT-SN PUBLISH serialize/parse teaching example.
 #
 # `cores.m55_hp.libraries: [coremqtt_sn]` makes alp_project.py emit
-# CONFIG_ALP_MQTTSN_NO_TLS=y -- the SW-fallback default from
-# metadata/library-profiles/coremqtt_sn/hw-backends.yaml.  It does NOT
+# CONFIG_ALP_MQTTSN_NO_TLS=y -- the SW-fallback default from the
+# `integration.zephyr.hw_backends:` block in
+# metadata/libraries/coremqtt-sn.yaml.  It does NOT
 # add the upstream module's include path: coreMQTT-SN ships no
 # zephyr/module.yml of its own, and (see README's "Integration
 # reality") this workspace's pinned `modules/lib/coremqtt_sn` checkout

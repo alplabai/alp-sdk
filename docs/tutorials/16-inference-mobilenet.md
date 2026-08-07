@@ -406,8 +406,10 @@ provisioned.
   public API.
 - [`examples/aen/edgeai-vision-aen/`](../../examples/aen/edgeai-vision-aen/)
   -- end-to-end demo: camera → ISP → inference → OLED overlay.
-- [Vela docs](https://github.com/ARM-software/ethos-u-vela) --
-  the Ethos-U pre-compiler.
+- [Vela docs](https://gitlab.arm.com/artificial-intelligence/ethos-u/ethos-u-vela) --
+  the Ethos-U pre-compiler (the `ARM-software/ethos-u-vela` GitHub
+  mirror this used to cite is gone; ARM develops Vela on its own
+  GitLab).
 - [`scripts/alp_orchestrate/`](../../scripts/alp_orchestrate/)
   § *Per-variant Ethos-U selector* + § *CPU-class TFLM kernel
   selector* -- the G-1 / G-2 emit logic for advanced readers.

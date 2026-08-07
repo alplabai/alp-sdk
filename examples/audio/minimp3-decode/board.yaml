@@ -7,7 +7,8 @@
 # `libraries: [minimp3]` (the §D.lib batch mechanism -- distinct from
 # the top-level ADR-0018 `libraries:` key, which resolves against
 # metadata/libraries/*.yaml instead) pulls in the library's Kconfig
-# knobs from metadata/library-profiles/minimp3/hw-backends.yaml
+# knobs from the `integration.zephyr.hw_backends:` block in
+# metadata/libraries/minimp3.yaml
 # (pure-C SW fallback is the floor; DSP/SIMD backends are selected
 # automatically when the SoM capability is present -- irrelevant here
 # since we never touch a real I2S peripheral).

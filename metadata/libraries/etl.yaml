@@ -11,10 +11,12 @@
 #     see vendors/etl/README.md).
 #   * vendors/etl/README.md -- MIT licence (LICENSE is the upstream text
 #     unmodified); upstream https://github.com/ETLCPP/etl.
-#   * metadata/library-profiles/etl/hw-backends.yaml -- pure-SW,
-#     no accelerator binding (header-only template library).
 #
-# HW-backends: see metadata/library-profiles/etl/ (folded in WS6-c Phase 3)
+# HW-backends: pure-SW, no accelerator binding (header-only template
+# library) -- see this manifest's own `integration.zephyr.hw_backends:`
+# block below (retired standalone
+# metadata/library-profiles/etl/hw-backends.yaml folded in here in
+# WS6-c Phase 3; that directory still holds etl_profile.h).
 #
 # No `kconfig:` -- there is no CONFIG_ symbol to transcribe (header-only,
 # wired via the v0.4 CMake include-path loader hook instead); the schema's

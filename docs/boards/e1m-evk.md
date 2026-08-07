@@ -214,7 +214,7 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   future E1M-N93 builds add their own overlay once that SoM lands.
 - v0.1 does **not** ship full board-level sensor drivers.  The
   ICM-42670-P / BMI323 / BMP581 / TCAL9538 drivers land as part of
-  the v0.2 "Chips" library expansion (`chips/icm42670p/`, etc.) per
+  the v0.2 "Chips" library expansion (`chips/icm42670/`, etc.) per
   [`VERSIONS.md`](../../VERSIONS.md).
 - The EVK example app (`examples/evk-bringup/`) lands in v0.2.  v0.1
   ships a stub README at that path so the doc tree is stable.
