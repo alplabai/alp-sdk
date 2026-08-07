@@ -30,6 +30,13 @@ on_module:
   rtc_external:         rv3028c7               # Micro Crystal ultra-low-power RTC
   temperature_sensor:   tmp112                 # TI TMP112 on the slave-only LPI2C0 (Tier-3 SE; ADR 0017)
   eeprom:               eeprom_24c128          # Onsemi N24S128C4DYT3G (128-Kbit I2C)
+  # Same on-module PHY as every AEN SKU: metadata/e1m_modules/aen/CHANGELOG.md:13-16
+  # records ONE shared PCB (r1) across E3..E8 that includes "TI DP83825
+  # Ethernet PHY"; metadata/socs/alif/ensemble/e3.json declares "ethernet": 1.
+  # Families with a single PHY omit ethernet_phy_count: (schema). See
+  # metadata/e1m_modules/E1M-AEN801.yaml + metadata/chips/dp83825.yaml for
+  # the bench evidence and the order-code caveat (#1241 "Blocked on").
+  ethernet_phy:         dp83825
   ospi_memories:
     ospi0:
       chip:           MX25UM25645GXDI00   # Macronix OctaFlash (xSPI NOR)
@@ -59,7 +66,6 @@ on_module:
     # per docs/bring-up-aen.md §5.1's bench-verified table; pad names per
     # examples/aen/aen-secure-element-sign/README.md:14-15.
     brd_i2c:
-      bus_pads: { alif: "LPI2C0, P7_4 SCL_A / P7_5 SDA_A -- SoC slave-only" }
       devices:
         - { chip: rv3028c7,         role: rtc,             address_7bit: "0x52" }
         - { chip: optiga_trust_m,   role: secure_element,  address_7bit: "0x30" }
@@ -70,7 +76,6 @@ on_module:
     # single shared bus.").
     e1m_i2c0:
       bus_master: alif-ensemble
-      bus_pads: { alif: "SoC I2C2 (I2C2_SCL_C / I2C2_SDA_C), P5_6 / P5_7" }
       devices:
         - { chip: eeprom_24c128,    role: eeprom,          address_7bit: "0x50" }
 

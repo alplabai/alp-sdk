@@ -22,7 +22,7 @@ mpn_population:
                                      # industrial) NOT confirmed against the
                                      # netlist/BOM -- see #1241 "Blocked on".
                                      # Do not promote
-                                     # zephyr/dts/alif/ensemble_e8_peripherals.dtsi:349-353's
+                                     # zephyr/dts/alif/ensemble_e8_peripherals.dtsi:349-354's
                                      # self-flagged "fork reference ...
                                      # verify" DP83825I label into this field
                                      # as fact.
@@ -54,7 +54,7 @@ notes: |
   the server's ARP table too).
 
   PHY MDIO address: the devicetree's `reg = <1>` at
-  zephyr/dts/alif/ensemble_e8_peripherals.dtsi:349-353 self-flags as a "fork
+  zephyr/dts/alif/ensemble_e8_peripherals.dtsi:349-354 self-flags as a "fork
   reference ... verify"; the bench log above reads the PHY at MDIO address
   0, and zephyr/dts/bindings/ethernet/alif,ethernet.yaml:47's own binding
   example agrees ("e.g. ti,dp83825 at addr 0"). The bench evidence is the

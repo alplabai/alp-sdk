@@ -31,7 +31,7 @@ on_module:
   # hardware: examples/aen/aen-ethernet-link RESULT PASS on E8 silicon
   # (link up, DHCP lease). Exact order-code suffix is data-gated on the
   # netlist/BOM -- see metadata/chips/dp83825.yaml and #1241 "Blocked on".
-  ethernet_phy:          dp83825
+  ethernet_phy:         dp83825
   ospi_memories:
     ospi0:
       chip:           MX25UM25645GXDI00   # Macronix OctaFlash (xSPI NOR)
@@ -61,7 +61,6 @@ on_module:
     # per docs/bring-up-aen.md §5.1's bench-verified table; pad names per
     # examples/aen/aen-secure-element-sign/README.md:14-15.
     brd_i2c:
-      bus_pads: { alif: "LPI2C0, P7_4 SCL_A / P7_5 SDA_A -- SoC slave-only" }
       devices:
         - { chip: rv3028c7,         role: rtc,             address_7bit: "0x52" }
         - { chip: optiga_trust_m,   role: secure_element,  address_7bit: "0x30" }
@@ -72,7 +71,6 @@ on_module:
     # single shared bus.").
     e1m_i2c0:
       bus_master: alif-ensemble
-      bus_pads: { alif: "SoC I2C2 (I2C2_SCL_C / I2C2_SDA_C), P5_6 / P5_7" }
       devices:
         - { chip: eeprom_24c128,    role: eeprom,          address_7bit: "0x50" }
 

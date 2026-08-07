@@ -185,10 +185,8 @@ The chip isn't ACKing on its expected address.  Causes:
 * Wrong I2C bus -- check the SoM preset (`E1M-<MPN>.yaml`) for which bus the chip is on
   (e.g. V2N's PMICs are on `brd_i2c`, not `e1m_i2c0`).
 * Wrong slave address -- confirm against the SoM preset's
-  `metadata/e1m_modules/<SKU>.yaml` `i2c_devices:` block (V2N/V2M family;
-  each entry carries its own `address_7bit`), or, for the AEN family
-  (which has no `i2c_devices:` block), the chip's own
-  `metadata/chips/<chip>.yaml` `i2c: addresses:` field.
+  `metadata/e1m_modules/<SKU>.yaml` `i2c_devices:` block (V2N/V2M/AEN
+  families all carry one; each entry has its own `address_7bit`).
 * Power not yet on the chip -- some chips need their REG_ON pin
   pulled high first (e.g. Murata Wi-Fi/BT module).
 

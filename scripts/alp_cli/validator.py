@@ -184,11 +184,16 @@ def _known_chip_slugs(*, chip_dir: Path = CHIP_DIR) -> set[str]:
     `examples/connectivity/iot-connected-camera/board.yaml`'s
     `chips: [ssd1306, button_led]`).
 
-    A manifest with `driver_status: planned` (issue #1224 review) ships no
+    A manifest with `driver_status: planned` OR `driver_status: none`
+    (issue #1224 review; #1270 widened this from `planned`-only after
+    `metadata/chips/dp83825.yaml` shipped the tree's first `none`) ships no
     `chips/<id>/` driver and declares no `ALP_SDK_CHIP_<NAME>` Kconfig
-    symbol -- naming it in `chips:` would emit the same undeclared-symbol
-    Kconfig line ALP-B008 exists to catch, so it is excluded from "known"
-    the same way an unknown chip is.
+    symbol -- naming either in `chips:` would emit the same
+    undeclared-symbol Kconfig line ALP-B008 exists to catch, so both
+    statuses are excluded from "known" the same way an unknown chip is.
+    `partial`/`complete`/`stub` all ship a real `chips/<id>/` driver (even
+    a stub has a `.c` file and a declared Kconfig symbol -- see
+    `chips/ar0234/`) so only these two "no driver at all" tiers apply.
 
     Lazy import: `alp_orchestrate/loader.py` imports `alp_cli.validator` at
     module load time, so a top-level import of `alp_orchestrate.*` here
@@ -198,7 +203,8 @@ def _known_chip_slugs(*, chip_dir: Path = CHIP_DIR) -> set[str]:
     """
     known = {
         p.stem for p in chip_dir.glob("*.yaml")
-        if (_load_metadata_yaml(p) or {}).get("driver_status") != "planned"
+        if (_load_metadata_yaml(p) or {}).get("driver_status") not in (
+            "planned", "none")
     }
     try:
         from alp_orchestrate.slugs import _BLOCK_SLUGS
@@ -253,16 +259,18 @@ def _check_chips_known(
         if not isinstance(chip, str) or chip in known or chip in seen:
             continue
         seen.add(chip)
-        # A manifest with `driver_status: planned` IS a real, committed
-        # metadata/chips/<chip>.yaml -- `_known_chip_slugs` excludes it
-        # because it declares no ALP_SDK_CHIP_<NAME> Kconfig symbol, not
-        # because the manifest is missing.  Say that, not "no
+        # A manifest with `driver_status: planned` or `driver_status: none`
+        # IS a real, committed metadata/chips/<chip>.yaml -- `_known_chip_slugs`
+        # excludes it because it declares no ALP_SDK_CHIP_<NAME> Kconfig
+        # symbol, not because the manifest is missing.  Say that, not "no
         # metadata/chips/<chip>.yaml" (false -- the file is right there)
         # and don't offer a "did you mean" against an unrelated chip for
         # an entry that was spelled correctly (review round 3 major).
-        if (chip_dir / f"{chip}.yaml").is_file():
+        chip_path = chip_dir / f"{chip}.yaml"
+        if chip_path.is_file():
+            status = (_load_metadata_yaml(chip_path) or {}).get("driver_status")
             message = (
-                f"chips: '{chip}' has driver_status: planned "
+                f"chips: '{chip}' has driver_status: {status} "
                 f"-- no Alp SDK driver or ALP_SDK_CHIP_{chip.upper()} "
                 f"symbol yet"
             )

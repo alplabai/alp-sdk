@@ -139,6 +139,309 @@ def test_unrelated_chip_name_not_flagged(tmp_path):
     assert proc.returncode == 0, out
 
 
+def test_alp_prefixed_bus_spelling_is_matched(tmp_path):
+    """`ALP_E1M_I2C0` is the dominant, portable-API spelling for the
+    `e1m_i2c0` bus key (66 sites in the real tree, 0 for the bare
+    `E1M_I2C0` -- and #1270's own issue text uses this spelling). A
+    bare `\\bE1M_I2C0\\b` regex can never match it -- the `_` right
+    before `E1M` is itself a word character, so there is no boundary
+    there. Must be caught the same way the bare literal is."""
+    _write_preset(tmp_path, "E1M-TEST")
+    _write_doc(
+        tmp_path, "docs/x.md",
+        "eeprom_24c128 lives on ALP_E1M_I2C0 per the SoM preset.\n",
+    )
+    proc = _run("--root", str(tmp_path))
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out  # eeprom_24c128's TRUE bus IS e1m_i2c0
+
+    _write_doc(
+        tmp_path, "docs/y.md",
+        "tmp112 lives on ALP_E1M_I2C0 per the SoM preset.\n",
+    )
+    proc = _run("--root", str(tmp_path))
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 1, out  # tmp112's TRUE bus is brd_i2c, not e1m_i2c0
+    assert "tmp112" in out
+    assert "e1m_i2c0" in out
+
+
+def test_lpi2c_without_trailing_zero_is_an_alias(tmp_path):
+    """`docs/soms/aen.md`'s own Bus column spells the `brd_i2c` bus
+    'LPI2C' (no trailing '0') for three of its four rows -- an alias
+    table carrying only 'LPI2C0' leaves those rows invisible to the
+    gate. Prove the alias actually participates in mismatch detection
+    (not merely fails to error)."""
+    _write_preset(tmp_path, "E1M-TEST")
+    _write_doc(
+        tmp_path, "docs/x.md",
+        "The 24C128 EEPROM sits on the Alif LPI2C bus.\n",
+    )
+    proc = _run("--root", str(tmp_path))
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 1, out  # eeprom_24c128's TRUE bus is e1m_i2c0
+    assert "eeprom_24c128" in out
+    assert "brd_i2c" in out
+
+
+def test_generic_name_part_does_not_match_inside_an_unrelated_word(tmp_path):
+    """`optiga_trust_m` contributes the alias `TRUST` (len 5, not in
+    `_GENERIC_PARTS`); a whole-line-squash substring search lets it
+    false-positive inside `TRUSTED`/`TRUSTZONE` once punctuation is
+    stripped -- a false positive on a BLOCKING gate, proven on real
+    prose ('the TrustZone-M secure partition' is a real Alif
+    TrustZone-M term). Token-exact matching must not flag either
+    sentence, even though each names a real ground-truth bus."""
+    # optiga_trust_m's TRUE bus is brd_i2c (matching the real
+    # E1M-AEN801.yaml ground truth). `e1m_i2c0` also needs a device of
+    # its OWN (eeprom_24c128) so that bus's pattern (`I2C2`) exists at
+    # all -- `_bus_pattern` is only built for buses that appear as some
+    # chip's true bus, so a single-chip-single-bus preset would make
+    # `I2C2` unrecognised for a reason having nothing to do with the
+    # alias bug this test targets. Both false-positive lines below name
+    # `I2C2` (-> e1m_i2c0) -- the WRONG bus for optiga_trust_m -- which
+    # is exactly the condition needed to prove whether the chip alias
+    # match fires at all.
+    d = tmp_path / "metadata" / "e1m_modules"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "E1M-TEST.yaml").write_text(
+        "sku: E1M-TEST\n"
+        "on_module:\n"
+        "  i2c_devices:\n"
+        "    brd_i2c:\n"
+        "      devices:\n"
+        "        - { chip: optiga_trust_m, role: secure_element, address_7bit: \"0x30\" }\n"
+        "    e1m_i2c0:\n"
+        "      devices:\n"
+        "        - { chip: eeprom_24c128, role: eeprom, address_7bit: \"0x50\" }\n",
+        encoding="utf-8",
+    )
+    _write_doc(
+        tmp_path, "docs/x.md",
+        "The trusted-boot flow runs before I2C2 comes up.\n",
+    )
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+    _write_doc(
+        tmp_path, "docs/y.md",
+        "The TrustZone-M secure partition owns I2C2 on this target.\n",
+    )
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+    # Sanity: the SAME alias must still catch a genuine, correctly
+    # word-bounded mention naming the wrong bus -- the fix must not
+    # have traded the false positive for a false negative.
+    _write_doc(
+        tmp_path, "docs/z.md",
+        "OPTIGA Trust M is reached over I2C2 on this board.\n",
+    )
+    proc = _run("--root", str(tmp_path))
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 1, out
+    assert "optiga_trust_m" in out
+
+
+def test_wrong_address_next_to_correct_bus_fails(tmp_path):
+    """#1270 ask 2 names 'bus/address claims' -- address_7bit was parsed
+    into ground truth but never read by the check. 'TMP112 at 0x49 on
+    BRD_I2C' (true address 0x48) must fail; the correct address must
+    not."""
+    _write_preset(tmp_path, "E1M-TEST")
+    _write_doc(tmp_path, "docs/x.md", "TMP112 at 0x49 on BRD_I2C.\n")
+    proc = _run("--root", str(tmp_path))
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 1, out
+    assert "tmp112" in out
+    assert "0x49" in out
+    assert "0x48" in out
+
+    _write_doc(tmp_path, "docs/x.md", "TMP112 at 0x48 on BRD_I2C.\n")
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_address_literal_without_a_colocated_bus_is_not_flagged(tmp_path):
+    """A register/opcode/sentinel `0xNN` mentioned near a chip name but
+    with NO bus name on the same line must not be treated as an I2C
+    address claim -- checking any `0xNN` literal near a chip name with
+    no co-located bus requirement flags 16 such lines across the real
+    tree (`I2C_STATE register (0x82)`, `0xFF` DNP sentinels,
+    `ADC_CONFIGURE` opcode `0x32`), none of them a real I2C-address
+    claim."""
+    _write_preset(tmp_path, "E1M-TEST")
+    _write_doc(
+        tmp_path, "docs/x.md",
+        "/* tmp112 I2C_STATE register (0x82) reads 4 bytes */\n",
+    )
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_chip_with_ambiguous_bus_but_consistent_address_does_not_crash(tmp_path):
+    """A chip can have an unambiguous `address_7bit` across presets while
+    its BUS disagrees between them (ambiguous, excluded from bus ground
+    truth) -- `optiga_trust_m` here sits on `e1m_i2c0` in one preset and
+    `brd_i2c` in the other, always at `0x30`. The address-check path
+    looks the chip up in a source map keyed only on bus-ground-truth
+    membership; a chip present only in address ground truth (never bus
+    ground truth) would KeyError there. Must instead report a clean
+    address mismatch."""
+    d = tmp_path / "metadata" / "e1m_modules"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "E1M-A.yaml").write_text(
+        "sku: E1M-A\n"
+        "on_module:\n"
+        "  i2c_devices:\n"
+        "    brd_i2c:\n"
+        "      devices:\n"
+        "        - { chip: tmp112, role: temp_sensor, address_7bit: \"0x48\" }\n"
+        "    e1m_i2c0:\n"
+        "      devices:\n"
+        "        - { chip: optiga_trust_m, role: secure_element, address_7bit: \"0x30\" }\n",
+        encoding="utf-8",
+    )
+    (d / "E1M-B.yaml").write_text(
+        "sku: E1M-B\n"
+        "on_module:\n"
+        "  i2c_devices:\n"
+        "    brd_i2c:\n"
+        "      devices:\n"
+        "        - { chip: optiga_trust_m, role: secure_element, address_7bit: \"0x30\" }\n",
+        encoding="utf-8",
+    )
+    _write_doc(
+        tmp_path, "docs/x.md",
+        "optiga_trust_m at 0x99 on BRD_I2C.\n",
+    )
+    proc = _run("--root", str(tmp_path))
+    out = proc.stdout + proc.stderr
+    assert "Traceback" not in out, out
+    assert proc.returncode == 1, out
+    assert "optiga_trust_m" in out
+    assert "0x99" in out
+    assert "0x30" in out
+
+
+def test_generic_dictionary_word_alias_is_dropped(tmp_path):
+    """`optiga_trust_m`'s underscore-part `trust` is an ordinary English
+    dictionary word, not a specific product term -- unlike
+    `trusted-boot`/`TrustZone-M` (caught by token-exact matching, tested
+    above), a BARE `trust` token in unrelated prose is syntactically a
+    real, standalone token and still false-positived even with the
+    substring bug fixed (review round 2: 'You can trust the I2C2 scan
+    output on a freshly booted module.' named the wrong bus for
+    `optiga_trust_m`). `trust` must be excluded from `_GENERIC_PARTS`
+    the same way `eeprom` is; the chip's SPECIFIC alias (`OPTIGA`) must
+    still catch a real, correctly-bounded mention."""
+    d = tmp_path / "metadata" / "e1m_modules"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "E1M-TEST.yaml").write_text(
+        "sku: E1M-TEST\n"
+        "on_module:\n"
+        "  i2c_devices:\n"
+        "    brd_i2c:\n"
+        "      devices:\n"
+        "        - { chip: optiga_trust_m, role: secure_element, address_7bit: \"0x30\" }\n"
+        "    e1m_i2c0:\n"
+        "      devices:\n"
+        "        - { chip: eeprom_24c128, role: eeprom, address_7bit: \"0x50\" }\n",
+        encoding="utf-8",
+    )
+    _write_doc(
+        tmp_path, "docs/x.md",
+        "You can trust the I2C2 scan output on a freshly booted module.\n",
+    )
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr  # bare 'trust' must not match
+
+    # Sanity: the chip's real, specific alias must still catch a genuine
+    # mismatch -- the fix must not have silenced the chip entirely.
+    _write_doc(
+        tmp_path, "docs/y.md",
+        "OPTIGA is reached over I2C2 on this board.\n",
+    )
+    proc = _run("--root", str(tmp_path))
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 1, out
+    assert "optiga_trust_m" in out
+
+
+def test_address_next_to_two_known_chips_is_not_attributed_to_either(tmp_path):
+    """A single `0xNN` literal cannot belong to more than one chip -- a
+    line naming two known chips alongside one address (a table row, or
+    'the trio' listed together) is ambiguous about which chip the
+    address claims. Attributing it to every mentioned chip false-
+    positived on real prose (review round 2): a table row
+    '| TMP112 | RV-3028-C7 | 0x48 | BRD_I2C |' (TMP112's own, correct
+    address) reported RV-3028-C7 as wrong, though RV-3028-C7's address
+    was never claimed on that line at all. Must be skipped, mirroring
+    the existing single-bus rule."""
+    d = tmp_path / "metadata" / "e1m_modules"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "E1M-TEST.yaml").write_text(
+        "sku: E1M-TEST\n"
+        "on_module:\n"
+        "  i2c_devices:\n"
+        "    brd_i2c:\n"
+        "      devices:\n"
+        "        - { chip: tmp112, role: temp_sensor, address_7bit: \"0x48\" }\n"
+        "        - { chip: rv3028c7, role: rtc, address_7bit: \"0x52\" }\n",
+        encoding="utf-8",
+    )
+    _write_doc(
+        tmp_path, "docs/x.md",
+        "| TMP112 | RV-3028-C7 | 0x48 | BRD_I2C |\n",
+    )
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr  # ambiguous -- skipped, not misattributed
+
+    # Sanity: a genuine, unambiguous single-chip address mismatch must
+    # still fire -- this fixture's chips are still individually checkable.
+    _write_doc(
+        tmp_path, "docs/y.md",
+        "RV-3028-C7 answers at 0x53 on BRD_I2C.\n",
+    )
+    proc = _run("--root", str(tmp_path))
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 1, out
+    assert "rv3028c7" in out
+
+
+def test_archival_superpowers_plans_doc_is_out_of_scope(tmp_path):
+    """`docs/superpowers/plans/**` records dated bench-session planning
+    notes -- a PAST state, deliberately (same carve-out
+    `check_cross_platform.py`'s `DEFAULT_EXCLUDES` already makes). A
+    later, correct metadata change must not force an edit to a document
+    recording what was true when it was written (review round 2:
+    flipping tmp112's bus reddened 3 real `docs/superpowers/plans/**`
+    sites that were accurate history). `docs/superpowers/specs/` carries
+    the same pre-cleanup "before" carve-out and is excluded too."""
+    _write_preset(tmp_path, "E1M-TEST")
+    _write_doc(
+        tmp_path, "docs/superpowers/plans/2026-01-01-old-session.md",
+        "TMP112 sits on I2C2 (bench notes from that day).\n",
+    )
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+    _write_doc(
+        tmp_path, "docs/superpowers/specs/pre-cleanup-design.md",
+        "TMP112 sits on I2C2 in the old design.\n",
+    )
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+    # Sanity: a LIVE doc naming the same wrong bus must still fire --
+    # the exclusion is path-scoped, not chip/bus-scoped.
+    _write_doc(tmp_path, "docs/live.md", "TMP112 sits on I2C2.\n")
+    proc = _run("--root", str(tmp_path))
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 1, out
+    assert "tmp112" in out
+
+
 def test_example_c_source_is_scanned_too(tmp_path):
     """The gate's own scope explicitly includes examples/**/*.c (main.c
     teaching comments), not just docs/**/*.md."""

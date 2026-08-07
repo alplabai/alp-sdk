@@ -485,15 +485,33 @@ that `libraries: [u8g2]` always compiles the vendored core with no
 SDK-level switch to the full upstream tree, replacing the stale
 `ALP_U8G2_MODULE_DIR` override claim.
 
-### Added — `E1M-AEN801.yaml`'s `ethernet_phy:` + `metadata/chips/dp83825.yaml` (#1241)
+### Fixed — the ALP-B008 unknown-chip guard didn't recognize `driver_status: none`
 
-The AEN SoM preset declared no `ethernet_phy:` at all, reading as "no PHY on
+`scripts/alp_cli/validator.py`'s `_known_chip_slugs()` excluded a chip
+manifest from "known" only when its `driver_status` read `planned` --
+`metadata/chips/dp83825.yaml`'s `driver_status: none` (the honest tier for a
+part with no chip driver and none planned, ADR 0023) passed the guard
+unchanged, so a `board.yaml` with `chips: [dp83825]` validated clean and
+emitted `CONFIG_ALP_SDK_CHIP_DP83825=y` -- a Kconfig symbol nothing declares
+(`zephyr/kconfigs/chips.kconfig` has `ALP_SDK_CHIP_RTL8211FDI`, not
+`_DP83825`). That is the exact silent non-build ALP-B008 exists to prevent
+(#1224). The predicate now excludes both `planned` and `none` -- both mean
+"no `chips/<id>/` driver, no declared Kconfig symbol" -- and the ALP-B008
+diagnostic message reports the chip's real `driver_status` instead of
+hardcoding `planned`.
+
+### Added — every AEN SoM preset's `ethernet_phy:` + `metadata/chips/dp83825.yaml` (#1241)
+
+Every AEN SoM preset declared no `ethernet_phy:` at all, reading as "no PHY on
 this module" when the on-module TI DP83825 is real, silicon-proven hardware
 (`examples/aen/aen-ethernet-link` records a RESULT PASS on real E8 silicon --
-link up, DHCP lease acquired). `metadata/e1m_modules/E1M-AEN801.yaml` now
-declares `ethernet_phy: dp83825`; no `ethernet_phy_count:` is added, matching
-the schema's "families with a single PHY omit it" convention
-(`metadata/socs/alif/ensemble/e8.json` declares one `"ethernet"` MAC).
+link up, DHCP lease acquired). `metadata/e1m_modules/aen/CHANGELOG.md:13-16`
+records the family shipping ONE module PCB design across every SoC tier
+(E3..E8), and each of `metadata/socs/alif/ensemble/e{3..8}.json` declares one
+`"ethernet"` MAC -- so all six presets, `E1M-AEN301.yaml` through
+`E1M-AEN801.yaml`, now declare `ethernet_phy: dp83825`; no
+`ethernet_phy_count:` is added on any of them, matching the schema's
+"families with a single PHY omit it" convention.
 
 `metadata/chips/dp83825.yaml` is new, following `rtl8211fdi.yaml`'s shape.
 Its `driver_status: none` is honest, not aspirational: no `chips/dp83825/`
@@ -509,7 +527,7 @@ The exact order code is **left `TBD`, deliberately**: the sources in this
 tree disagree on precision (the CHANGELOG's own `metadata/e1m_modules/aen/CHANGELOG.md:16`
 says "TI DP83825", the devicetree says `DP83825I`), and the devicetree's own
 label self-flags as an unverified "fork reference" one
-(`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:349-353`). The MDIO
+(`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:349-354`). The MDIO
 `PHYID1+PHYID2` bench readback (`id=2000a140`,
 `examples/aen/aen-ethernet-link/README.md:39`) confirms the DP83825 die/OUI
 identity but not the temperature/package order-code suffix, so it cannot
@@ -534,21 +552,56 @@ SE-mastered) carries the RV-3028-C7 RTC (`0x52`), OPTIGA Trust M
 (`0x30`), and TMP112 (`0x48`); `e1m_i2c0` (SoC I2C2, `P5_6 SCL_C` /
 `P5_7 SDA_C`) carries the 24C128 EEPROM (`0x50`). `brd_i2c` omits
 `bus_master:` per the schema's own documented convention for a bus no
-on-module silicon masters. Both buses' `bus_pads:` record the physical pad
-spelling docs use, so a future cross-check has a machine-readable alias to
-read instead of re-deriving one from prose.
+on-module silicon masters.
 
 `scripts/check_i2c_bus_doc_consistency.py` is new: it flags a doc or
 example-source line that names a known on-module I2C part next to a bus
-name that disagrees with the `i2c_devices` ground truth, the same way
-`check_pin_conflicts.py` cross-checks silicon pads. It is deliberately
-narrow -- ground truth excludes any chip whose bus assignment disagrees
-across presets, a line naming two buses at once is treated as a contrast
-and skipped, and board-side (carrier) parts are out of scope -- but it
-would have caught every wave-4 defect this issue names. `docs/bring-up-aen.md`'s
-stale "the AEN presets have no `i2c_devices:` block" line is corrected to
-point at the new block. Registered in `metadata/quality-tasks-v1.json` and
-wired into `pr-metadata-validate.yml`.
+name, or a 7-bit address, that disagrees with the `i2c_devices` ground
+truth (cross-family -- every `metadata/e1m_modules/E1M-*.yaml` preset,
+not AEN's six alone), the same way `check_pin_conflicts.py` cross-checks
+silicon pads. It is deliberately narrow and LINE-scoped -- ground truth
+excludes any chip whose bus or address assignment disagrees across
+presets, a line naming two buses at once is treated as a contrast and
+skipped, an address is only checked on a line that also names exactly
+one bus AND exactly one ground-truth chip (one `0xNN` literal cannot
+belong to more than one chip; an unanchored `0xNN` is also far more
+often a register/opcode/sentinel value than an I2C address claim), a
+chip-id part that is itself an ordinary English word (`trust`) is
+excluded from its alias set rather than treated as a doc-name candidate,
+`docs/superpowers/plans/**` and `docs/superpowers/specs/**` (archival,
+deliberately past-state) are out of scope, and board-side (carrier)
+parts are out of scope. Being line-scoped, a bus/part claim split across
+two sentences is invisible to it. Against the four wave-4 defects #1270
+names verbatim, none is caught: the carrier-part one is out of scope by
+design, the `aen-secure-element-sign` one splits the bus name and part
+name across separate sentences, and the `docs/soms/aen.md` /
+`docs/cc3501e-bridge.md` ones each name the EEPROM on a line that also
+names the OTHER, correct-contrast bus in the same breath ("SoC I2C2 ...
+NOT LPI2C0" / "LPI2C0; EEPROM ... SoC I2C2") -- the two-bus skip defeats
+them regardless of alias coverage, and both also spell the EEPROM by its
+abbreviated MPN (`N24S128` for `N24S128C4DYT3G`), an independent second
+reason. What the gate does catch is the same EEPROM-on-BRD_I2C defect
+class at a related pre-wave-4 site the issue doesn't name individually,
+`docs/bring-up-aen.md`, which spelled the part `24C128` on a single-bus
+line instead. `docs/bring-up-aen.md`'s stale "the AEN presets have no
+`i2c_devices:` block" line is corrected to point at the new block, and
+the same stale claim is corrected everywhere else it still appeared
+(`docs/troubleshooting.md`, `docs/tutorials/02-i2c-scan.md`,
+`examples/aen/aen-eeprom-manifest/src/main.c`). Registered in
+`metadata/quality-tasks-v1.json` and wired into `pr-metadata-validate.yml`.
+
+Ground truth being cross-family means AEN's own six `i2c_devices` blocks
+add no NEW detection power today: every chip they declare (OPTIGA Trust
+M, RV-3028-C7, TMP112, the 24C128 EEPROM) already had an identical
+V2N/V2M declaration, so deleting all six AEN blocks changes zero
+reported problems -- only the provenance list each problem cites
+shrinks. AEN's own block earns its keep the day AEN needs a value that
+disagrees with V2N/V2M, or for a direct per-SoM lookup outside this
+gate.
+
+This PR does not close #1270 -- the issue's own bar ("even a narrow
+version ... would have caught every defect above") is unmet, per the
+four-defects paragraph above.
 
 ## [v0.15.0] - 2026-08-07
 

@@ -32,7 +32,7 @@ The per-family hardware, tree-verified:
   MDIO address is contested in-tree, not settled: the Zephyr DT
   records a managed-MDIO DP83825I at PHY address 1 but flags it
   "fork reference … confirm this address before relying on it"
-  (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:349-353`), while the
+  (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:349-354`), while the
   bench log from real E8 silicon reads
   `[eth] MDIO PHY@0 id=2000a140 (DP83825I=2000a140)`
   (`examples/aen/aen-ethernet-link/README.md:39`) — address 0, not 1
@@ -105,10 +105,12 @@ as the contract, is three layers:
    `rtl8211fdi_read_page_reg`/`rtl8211fdi_write_page_reg`,
    `include/alp/chips/rtl8211fdi.h:232-244`). AEN — the only family
    with silicon-proven Ethernet in this tree — has no layer-3 chip
-   driver: there is no `chips/dp83825/`. **#1241** closed the metadata
-   half of that gap (`metadata/e1m_modules/E1M-AEN801.yaml`'s
-   `ethernet_phy: dp83825` + `metadata/chips/dp83825.yaml`,
-   `driver_status: none`); the C driver itself remains unwritten.
+   driver: there is no `chips/dp83825/`. Every AEN preset
+   (`metadata/e1m_modules/E1M-AEN301.yaml`..`E1M-AEN801.yaml`) declares
+   `ethernet_phy: dp83825` (`metadata/chips/dp83825.yaml`,
+   `driver_status: none`) — the metadata side of **#1241**; the C
+   driver itself remains unwritten and the exact order-code suffix
+   stays TBD pending the netlist/BOM, so the issue stays open.
 
 The refusal list, with the reason each operation is refused:
 
@@ -197,12 +199,13 @@ recurring probes the real `ETHERNET_COUNT` lambda rather than a copy
 of the key list, because the first version hardcoded that copy and
 stayed green when the generator was reverted.
 
-Also filed from this ADR's research: **#1241** (the AEN801 preset
-omitted `ethernet_phy`, and no `metadata/chips/dp83825` manifest
-existed -- the metadata is now in place; the exact order code stays
-TBD pending the netlist/BOM) and **#1244**, still open (the
-devicetree puts the DP83825I at MDIO address 1 while the E8 bench log
-reads it at address 0).
+Also filed from this ADR's research: **#1241**, still open (every AEN
+preset omitted `ethernet_phy`, and no `metadata/chips/dp83825`
+manifest existed; this change adds both across the family, but the
+exact order code stays TBD pending the netlist/BOM, and the C driver
+itself remains unwritten) and **#1244**, still open (the devicetree
+puts the DP83825I at MDIO address 1 while the E8 bench log reads it at
+address 0).
 
 ## See also
 

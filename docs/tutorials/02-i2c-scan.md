@@ -189,15 +189,13 @@ chip driver.
 
 If a documented address doesn't show up, the chip is missing or
 mis-strapped -- compare against `metadata/e1m_modules/<SKU>.yaml`'s
-`i2c_devices:` block on V2N/V2M (each entry carries its own
-`address_7bit`, split into `brd_i2c:` and `e1m_i2c0:` sub-buses); on
-AEN (which has no `i2c_devices:` block -- its on-module I2C chips are
-flat `on_module:` scalars instead) against the chip's own
-`metadata/chips/<chip>.yaml` `i2c: addresses:` field; or, for a
-carrier-populated part, the board's own `metadata/boards/<board>.yaml`
-(`i2c_devices:` on E1M-EVK; on E1M-X-EVK, `audio:` for the TAS2563
-pair, or `include/alp/boards/alp_e1m_x_evk.h`'s `XEVK_I2C_ADDR_*`
-block for the rest).
+`i2c_devices:` block (V2N/V2M/AEN all carry one; each entry carries its
+own `address_7bit`, split into `brd_i2c:` and `e1m_i2c0:` sub-buses);
+or, for a carrier-populated part, the board's own
+`metadata/boards/<board>.yaml` (`i2c_devices:` on E1M-EVK; on
+E1M-X-EVK, `audio:` for the TAS2563 pair, or
+`include/alp/boards/alp_e1m_x_evk.h`'s `XEVK_I2C_ADDR_*` block for the
+rest).
 
 ## See also
 
