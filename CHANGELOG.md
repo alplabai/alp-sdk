@@ -106,6 +106,23 @@ previously worked stops working.
   artefact "appearing/vanishing/moving still fails the gate" -- so once
   either repo's parity suite gains a baremetal-slice fixture, seam-1 fails
   until tan-cli's twin drops the same branch.
+### Fixed — ADR 0021 read tan-cli#86 as unblocking the `${TOOLCHAIN_ROOT}` env-injection half; the resolver is still unported (#1286)
+
+`docs/adr/0021-toolchain-provisioning.md`'s 2026-07-26 "drop
+`-DCMAKE_MAKE_PROGRAM`..." Amendment says the prior blocker "still held, but
+... the `${TOOLCHAIN_ROOT}` token simply did not exist in tan's substitution
+set until tan-cli#86" -- true, but tan-cli#86 (merged 2026-07-26) ported only
+`crates/`, tan-cli's frozen Rust oracle; the shipping Python executor line's
+`python/tan/commands/build_cmd.py:1173-1178` still hardcodes
+`toolchain_root=None` behind a `# NOT YET PORTED:
+crate::toolchain::resolve_toolchain_root` comment (confirmed on live `dev`,
+2026-08-07). A slice naming `${TOOLCHAIN_ROOT}` is unconditionally demoted on
+that line, and on `--materialise` the demotion is dropped silently --
+`configArtefacts` absent from `written`, `issues: []`, exit 0, `ok: true`,
+regardless of `executionPolicy.missingTool` (tan-cli#505 item 3, measured).
+Adds a dated Amendment to ADR 0021 recording this and leaves #1286's
+env-injection producer half correctly un-landed, now for the reason that is
+actually true.
 
 ## [v0.15.0] - 2026-08-07
 
