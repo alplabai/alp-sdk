@@ -5,7 +5,9 @@ All notable changes to the Alp SDK are documented here.  Format follows
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
-## [Unreleased] - v0.15.0 candidate
+## [Unreleased] - v0.16.0 candidate
+
+## [v0.15.0] - 2026-08-07
 
 ### Fixed — the v0.15.0 cut was blocked, and the CHANGELOG claimed a GA that only ever shipped as an rc1 (#1292)
 
