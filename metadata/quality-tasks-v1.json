@@ -3,6 +3,20 @@
   "description": "Single source of truth for the SDK's quality tasks: which check_*.py gates exist, whether each is a hard CI gate or informational, and which profiles (quick/pr/full/release) run it. check_quality_registry.py keeps it == scripts/check_*.py on disk. Additive-only within schemaVersion 1.",
   "tasks": [
     {
+      "id": "agents-md-generators",
+      "description": "AGENTS.md's ALP_E1M_*/ALP_E1M_X_* identifiers and --emit choice lists must exist in the real generators (#1264).",
+      "runner": "check-script",
+      "script": "scripts/check_agents_md_generators.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-doc-drift.yml:doc-drift"
+    },
+    {
       "id": "board-id-doc-parity",
       "description": "docs/board-id.md's alp_hw_info_eeprom_t typedef struct (field names, order, widths) must match include/alp/hw_info.h, macros resolved (#1231).",
       "runner": "check-script",
@@ -187,6 +201,20 @@
       "description": "Doc-drift gate -- fails when customer-facing documentation drifts from the code it documents.",
       "runner": "check-script",
       "script": "scripts/check_doc_drift.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-doc-drift.yml:doc-drift"
+    },
+    {
+      "id": "doc-inventory",
+      "description": "Doc-stated workflow names/counts and ADR/chip/library counts must match the tree (#1265).",
+      "runner": "check-script",
+      "script": "scripts/check_doc_inventory.py",
       "gate": true,
       "profiles": [
         "pr",

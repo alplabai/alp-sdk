@@ -273,6 +273,33 @@ build-matrix comments describe `tan build`'s existing multi-slice path
 (`board.yaml` already declares both `m55_hp` and `m55_he` as project
 cores) instead of a sysbuild dual-image flow that
 `alplabai/alp-zephyr-modules` -- an empty scaffold today -- doesn't provide.
+### Added — two doc-accuracy gates: `scripts/check_agents_md_generators.py` and `scripts/check_doc_inventory.py` (#1264, #1265)
+
+`AGENTS.md` hand-writes `ALP_E1M_*`/`ALP_E1M_X_*` pinout-identifier examples
+and the `--emit` choice lists for `scripts/alp_project.py` and
+`python -m alp_orchestrate`; several other docs hand-count workflows, ADRs,
+chips, and libraries. Nothing checked either against the tree, so a rename
+in a real generator or a change to any of those counts could drift silently
+-- #1198's fifth required-work item and #1209's fifth required-work item,
+both deferred out of the wave-3 docs-inventory slice because a new
+`scripts/check_*.py` gate needs the `adding-a-ci-gate` four-site lockstep,
+not a docs edit.
+
+Both new gates are built so that every extraction step that can't find
+what it's looking for is a hard failure, never a silent skip, and each
+checks only claims with a genuine ground truth to compare against (real
+`#define`s, a real `argparse choices=` list read via `ast`, or a real
+a markdown link whose text is a code span) rather than open-ended prose,
+with every occurrence of a count claim checked, not just the first.
+`check_doc_inventory.py`'s docstring explains, with the
+counter-examples the tree already contains (`docs/ci/HW-IN-LOOP.md`'s
+historical `nightly-aen-hil.yml` mention, `docs/test-plan.md`'s link to
+`alp-sdk-vscode`'s own `ci.yml`), why a blanket "every workflow filename
+mentioned anywhere must exist" sweep was deliberately left out: it would
+flag legitimate prose, which is worse than no gate at all.
+
+Both gates are wired into `pr-doc-drift.yml`'s existing `doc-drift` job
+alongside `check_doc_drift.py` / `check_doc_links.py`.
 
 ## [v0.15.0] - 2026-08-07
 
