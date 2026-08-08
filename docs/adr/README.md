@@ -62,6 +62,7 @@ Bad / costs: ...
 | [0023](0023-ethernet-out-of-the-alp-surface.md) | Ethernet stays out of the `<alp/*>` surface — compile-time capability + form-factor port identity + ring-2 PHY chip drivers is the whole contract; no `<alp/net.h>`; link state may return additively if alp-studio needs it; narrowly supersedes ADR 0003's Ethernet-into-`<alp/iot.h>` row | Proposed |
 | [0024](0024-v2n-analog-and-counter-classes-stay-on-the-gd32-bridge.md) | V2N/V2M ADC, PWM, DAC, counter, and qenc stay served exclusively by the GD32 bridge — no native RZ/V2N leg, because no SoC pin reaches an E1M-standard analog/counter pad; the six-surface HiL quarantine has mostly moved on and is not the driving concern | Proposed |
 | [0025](0025-v2n-dmac0-cm33-exclusive-channel-partition.md) | V2N DMAC0 stays CM33-exclusive (whole unit) — the CM33 FSP reserves channels 0-1 for the SCI7 SPI DMA fast path, channels 2-7 are unclaimed margin, and Linux must never re-enable `&dmac0`; no Linux-side per-channel mask is fabricated for lack of evidence one works | Proposed |
+| [0026](0026-tan-owns-the-planner-outright.md) | Tan owns the planner outright -- alp-sdk's `scripts/alp_orchestrate/` is retired as a second producer and `python/tan/planner/` becomes the single implementation; alp-sdk keeps metadata/schemas/examples (hardware truth) and `build-plan-v1` survives as the seam; amends 0020's 2026-08-03 amendment clause 3 only | Proposed |
 
 ## When to write an ADR
 
