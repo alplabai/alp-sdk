@@ -7,6 +7,67 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — `storage[]` was bounds-checked against sibling partitions but not against the SoM's own regions (#1331)
+
+`scripts/alp_orchestrate/partition.py` validated a storage entry's offset for
+page alignment, device capacity, and overlap with **other `storage[]`
+entries** — and nothing else. The SoM's `memory_map:` regions were invisible
+to it, so MCUboot, a core's `slot0`, and the SE-owned `atoc` band were all
+placeable.
+
+This was not only an `offset_kib:` hazard. Measured on
+`examples/connectivity/production-deployment/board.yaml` — the flagship v1.0
+reference app, `som.sku: E1M-AEN801`, five entries on `flash_device: mram_main`
+and **no offsets declared anywhere**:
+
+```
+- name: app_data   fs: littlefs   offset_kib: 0   size_kib: 256   -> 0x80000000
+```
+
+A littlefs mount resolving onto **MCUboot**, with no `status: blocked`. The
+bump allocator starts at offset 0 of whatever `flash_device` names, and
+`mram_main` is the whole 5632 KiB App MRAM.
+
+It was also **not a function of the SoM at all**. The same file with only
+`som.sku` swapped emitted byte-identical offsets on AEN801 and AEN601 —
+two SoMs that do not share a boot layout (AEN801 has the explicit #1069
+disjoint-slot0 map; AEN601 is auto-derived stock two-slot + scratch). So a SoM
+swap silently preserved a layout invalid on both. `cores:` already rejects a
+bad swap by name (`unknown core id(s) ['a32_cluster'] … Did you mean one of:
+['m55_he', 'm55_hp']?`); `storage:` did not.
+
+The resolver now seeds its overlap set with the SoM's own regions, converted
+to device-relative spans, and:
+
+- **the bump allocator advances past them** rather than merely detecting a
+  collision — refusing instead of skipping would have broken every project
+  that names no addresses, which is the common case;
+- **an explicit `offset_kib:` that lands in one is blocked**, naming the
+  region and the remedy (`flash_device: <region>` to allocate inside it);
+- **the device origin is derived and then verified** — `memory_map:` bases are
+  absolute while offsets are device-relative, and `_resolve_flash_device`'s
+  descriptor deliberately carries no base. For a whole-window alias like
+  `mram_main` (`base: TBD` on purpose) the origin is the lowest sibling base,
+  accepted only if `origin + capacity == highest region top`. If that identity
+  fails the conversion is refused and a WARNING says the offsets were checked
+  against siblings only — degrading silently is the false-PASS this fix exists
+  to remove.
+
+No new schema field: a customer wanting space inside `storage` targets
+`flash_device: storage`, which the block message tells them.
+
+Consequence for the flagship example: all five entries now resolve
+`status: blocked`, because AEN801's map tiles all 5632 KiB and leaves 0 KiB
+free. That is the truthful answer — its bulk storage belongs on `ospi0`
+(`role: app_storage`, 32 MiB, `assembled: optional`), and three of its entries
+(`mcuboot_primary`/`_secondary`/`_scratch`) describe the swap-using-scratch
+layout #1069 removed. Re-homing them is a product decision, tracked separately.
+
+Test sensitivity proven against the pre-fix resolver: 5 of the 7 new tests
+fail there, including a littlefs mount accepted onto MCUboot. The 2 that pass
+in both directions are the no-false-positive guards (a SKU whose map derives
+to a bare `mram_main` alias must keep allocating from offset 0).
+
 ### Fixed — every AEN board handed apps a writable partition on top of the SE boot table (#1289)
 
 Alif's SETOOLS (`app-gen-toc` / `app-write-mram`) does not place the ATOC

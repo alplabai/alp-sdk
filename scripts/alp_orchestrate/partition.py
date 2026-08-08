@@ -15,6 +15,7 @@ the package __init__.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any, Optional
 
@@ -53,6 +54,105 @@ def _known_flash_devices(
             if isinstance(k, str):
                 names.add(k)
     return sorted(names)
+
+
+def _reserved_spans(
+    device_name: str,
+    capacity_bytes: int,
+    som_preset: dict[str, Any],
+    metadata_root: Path,
+) -> "tuple[list[tuple[int, int, str]], Optional[str]]":
+    """Return the SoM's own regions as DEVICE-RELATIVE [lo, hi) spans.
+
+    Returns `(spans, None)` on success, `([], reason)` when the spans can't
+    be computed safely -- the caller then falls back to sibling-only overlap
+    checking rather than trusting a guessed conversion (#1331).
+
+    Why this is needed at all: `storage[].offset_kib:` (and the bump
+    allocator) work in offsets WITHIN a flash device, while `memory_map:`
+    regions declare ABSOLUTE bases. Nothing previously bridged the two, so
+    every check was blind to the SoM's own layout -- on E1M-AEN801 that let a
+    littlefs mount resolve to offset 0 of `mram_main`, which is MCUboot, with
+    no `offset_kib:` involved and no `status: blocked`.
+
+    The device base is DERIVED, then VERIFIED, never assumed:
+
+      - If the device is itself a `memory_map:` region with an integer
+        `base`, that base is the origin.
+      - Otherwise (a whole-window alias like `mram_main`, which declares
+        `base: TBD` deliberately) take the lowest integer base among the
+        sibling regions and require `lowest + capacity == highest region
+        top`. That identity is what proves the alias really spans the same
+        window the fine-grained regions tile; if it does not hold, refuse to
+        convert.
+
+    `_resolve_flash_device`'s descriptor deliberately carries no physical
+    base (Zephyr's flash-mapping layer derives it from the DT controller
+    node), which is why the origin is reconstructed here instead of being
+    read off the descriptor.
+    """
+    regions = [r for r in resolve_memory_map(som_preset, metadata_root)
+               if isinstance(r, dict)]
+    sized = [(r["base"], r["base"] + (_region_size_bytes(r) or 0), str(r.get("name")))
+             for r in regions
+             if isinstance(r.get("base"), int) and _region_size_bytes(r)]
+    if not sized:
+        return [], (f"SoM declares no addressed memory_map region, so "
+                    f"'{device_name}' offsets cannot be checked against it")
+
+    self_region = next((r for r in regions if r.get("name") == device_name), None)
+    if self_region is not None and isinstance(self_region.get("base"), int):
+        origin = self_region["base"]
+    else:
+        origin = min(lo for lo, _, _ in sized)
+        window_top = max(hi for _, hi, _ in sized)
+        if origin + capacity_bytes != window_top:
+            return [], (
+                f"flash device '{device_name}' has no declared base and its "
+                f"capacity ({capacity_bytes} B) does not span the addressed "
+                f"memory_map window (0x{origin:x}..0x{window_top:x}), so its "
+                f"offsets cannot be mapped onto the SoM's regions")
+
+    spans: "list[tuple[int, int, str]]" = []
+    for lo, hi, name in sized:
+        # The device itself is not an obstacle inside itself; nor is a region
+        # that spans the whole window (a coarse alias) -- otherwise every
+        # partition would "overlap" it and nothing could ever be placed.
+        if name == device_name or (lo <= origin and hi - lo >= capacity_bytes):
+            continue
+        rel_lo, rel_hi = lo - origin, hi - origin
+        # Clip to the device; a region outside it is simply not our problem.
+        rel_lo, rel_hi = max(rel_lo, 0), min(rel_hi, capacity_bytes)
+        if rel_hi > rel_lo:
+            spans.append((rel_lo, rel_hi, name))
+    return sorted(spans), None
+
+
+def _first_free(
+    base_bytes: int,
+    size_aligned: int,
+    allocated: "list[tuple[int, int, str]]",
+    capacity_bytes: int,
+) -> int:
+    """Advance `base_bytes` past any span it collides with, page-aligned.
+
+    The bump allocator must allocate AROUND the SoM's reserved regions, not
+    merely notice a collision: refusing instead of skipping would break the
+    ordinary case (a project that names no addresses at all) rather than fix
+    it. Returns the first non-colliding page-aligned base, or a value past
+    `capacity_bytes` when the device has no room left -- the caller reports
+    that as a blocked entry.
+    """
+    moved = True
+    while moved:
+        moved = False
+        for lo, hi, _ in sorted(allocated):
+            if base_bytes < hi and lo < base_bytes + size_aligned:
+                base_bytes = ((hi + _PAGE - 1) // _PAGE) * _PAGE
+                moved = True
+        if base_bytes >= capacity_bytes:
+            return base_bytes
+    return base_bytes
 
 
 def _resolve_flash_device(
@@ -222,6 +322,23 @@ def resolve_storage_partitions(
         # when the bump allocator would have placed them differently.
         allocated: list[tuple[int, int, str]] = []   # (lo, hi, name)
 
+        # Seed with the SoM's OWN regions (#1331).  Without this the checks
+        # below only ever saw sibling storage[] entries, so mcuboot, a core's
+        # slot0 and the SE-owned atoc band were all invisible: on E1M-AEN801
+        # a littlefs mount resolved to offset 0 of `mram_main` -- MCUboot --
+        # with no offset_kib: declared and no status: blocked.
+        reserved_spans, reserved_reason = _reserved_spans(
+            device_name, capacity_bytes, project.som_preset, METADATA_ROOT)
+        reserved_names = {name for _, _, name in reserved_spans}
+        allocated.extend(reserved_spans)
+        if reserved_reason is not None:
+            # Degrading to sibling-only checking is exactly the silent
+            # false-PASS this fix exists to remove, so SAY so rather than
+            # letting the caller believe the SoM's regions were honoured.
+            print(f"alp_orchestrate.partition: WARNING: {reserved_reason}; "
+                  f"storage offsets on '{device_name}' are checked against "
+                  f"sibling partitions only", file=sys.stderr)
+
         entries_sorted = sorted(
             by_device[device_name], key=lambda e: e.name)
 
@@ -238,30 +355,53 @@ def resolve_storage_partitions(
                         f"aligned (4 KiB)")))
                     continue
             else:
-                base_bytes = high_water_bytes
+                # Allocate AROUND the reserved regions, not merely detect a
+                # collision with them (#1331): refusing here instead of
+                # skipping would break every project that names no addresses
+                # -- which is the common case -- rather than fix it.
+                base_bytes = _first_free(
+                    high_water_bytes, size_aligned, allocated, capacity_bytes)
 
             top_bytes = base_bytes + size_aligned
             if top_bytes > capacity_bytes:
+                free_note = ""
+                if entry.offset_kib is None and reserved_spans:
+                    free_note = (
+                        f"; the SoM's own regions ("
+                        f"{', '.join(sorted(reserved_names))}) already occupy "
+                        f"{sum(hi - lo for lo, hi, _ in reserved_spans) // 1024} "
+                        f"KiB of it")
                 resolved.append(_blocked_partition(entry, (
                     f"storage entry '{entry.name}' ({entry.size_kib} "
                     f"KiB at offset {base_bytes // 1024} KiB) overruns "
                     f"flash device '{device_name}' "
-                    f"(capacity {capacity_bytes // 1024} KiB)")))
+                    f"(capacity {capacity_bytes // 1024} KiB){free_note}")))
                 continue
 
-            # Sibling-overlap check (only meaningful when offset_kib was
-            # supplied; the bump allocator can't overlap with itself).
+            # Overlap check -- against sibling partitions AND the SoM's own
+            # regions seeded above.
             overlap_with: Optional[str] = None
             for lo, hi, peer_name in allocated:
                 if not (top_bytes <= lo or base_bytes >= hi):
                     overlap_with = peer_name
                     break
             if overlap_with is not None:
-                resolved.append(_blocked_partition(entry, (
-                    f"storage entry '{entry.name}' explicit "
-                    f"offset_kib={entry.offset_kib} overlaps sibling "
-                    f"partition '{overlap_with}' on device "
-                    f"'{device_name}'")))
+                where = (f"offset_kib={entry.offset_kib}"
+                         if entry.offset_kib is not None
+                         else f"auto-allocated offset {base_bytes // 1024} KiB")
+                if overlap_with in reserved_names:
+                    resolved.append(_blocked_partition(entry, (
+                        f"storage entry '{entry.name}' {where} overlaps SoM "
+                        f"region '{overlap_with}' on device '{device_name}' "
+                        f"-- that region is not customer-writable. Target it "
+                        f"directly with flash_device: {overlap_with} if you "
+                        f"meant to allocate inside it, or pick an offset "
+                        f"outside the SoM's declared regions.")))
+                else:
+                    resolved.append(_blocked_partition(entry, (
+                        f"storage entry '{entry.name}' {where} overlaps "
+                        f"sibling partition '{overlap_with}' on device "
+                        f"'{device_name}'")))
                 continue
 
             allocated.append((base_bytes, top_bytes, entry.name))
