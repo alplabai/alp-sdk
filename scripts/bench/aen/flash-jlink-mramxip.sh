@@ -116,18 +116,7 @@ exit
 EOF
 $JLINK -nogui 1 -CommanderScript /tmp/flowd-mramxip-preflight.jlink \
   > /tmp/flowd-mramxip-preflight.out 2>&1 || true
-if grep -qi "$GD32_DPIDR" /tmp/flowd-mramxip-preflight.out; then
-  echo "!! ABORT: probe reports SW-DP IDR 0x$GD32_DPIDR -- that is the V2N-M1" >&2
-  echo "   GD32, NOT the AEN E8. Wrong probe selected (JLINK_SN='$JLINK_SN')." >&2
-  echo "   Refusing to write MRAM. See /tmp/flowd-mramxip-preflight.out." >&2
-  exit 4
-fi
-if ! grep -qi "$AEN_DPIDR" /tmp/flowd-mramxip-preflight.out; then
-  echo "!! ABORT: expected AEN E8 SW-DP IDR 0x$AEN_DPIDR not seen on connect." >&2
-  echo "   Refusing to write MRAM -- check JLINK_SN / wiring / probe selection." >&2
-  cat /tmp/flowd-mramxip-preflight.out >&2
-  exit 4
-fi
+bench_jlink_assert_aen_dpidr /tmp/flowd-mramxip-preflight.out "MRAM write preflight" || exit 4
 echo ">>> DPIDR gate OK: probe confirmed AEN E8 (0x$AEN_DPIDR)" >&2
 
 # 1. stage the app + write the slot0 (mramAddress) signed-ATOC config.

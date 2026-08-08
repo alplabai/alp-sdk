@@ -133,6 +133,21 @@ BASELINE_WORDS=$(read_ulog_words before)
 [ -z "$BASELINE_WORDS" ] && { echo "could not read pre-flash alp_ulog_partition words at $ULOG_ADDR" >&2; exit 2; }
 echo "    alp_ulog baseline @ $ULOG_ADDR: $BASELINE_WORDS" >&2
 
+# SAFETY GATE (alp-sdk#1312): this helper `loadbin`s a signed package to
+# $ATOC_ADDR -- an MRAM write. Two probes on this bench share OEM serial
+# 603000869 and JLinkExe has no USB-path selector, so confirm the SW-DP ID
+# before writing. Read-only connect first.
+cat > /tmp/fwprobe-preflight.jlink <<EOF
+si SWD
+speed $JLINK_SPEED
+device $JLINK_DEVICE_READ
+connect
+exit
+EOF
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/fwprobe-preflight.jlink \n  > /tmp/fwprobe-preflight.out 2>&1 || true
+bench_jlink_assert_connected /tmp/fwprobe-preflight.out "firewall-probe preflight" || exit 7
+bench_jlink_assert_aen_dpidr /tmp/fwprobe-preflight.out "firewall-probe preflight" || exit 4
+
 cat > /tmp/firmware-update-log-firewall-probe-write.jlink <<EOF
 si SWD
 speed $JLINK_SPEED

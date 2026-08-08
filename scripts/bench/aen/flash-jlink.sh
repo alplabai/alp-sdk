@@ -64,18 +64,7 @@ exit
 EOF
 "${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/flowd-preflight.jlink \
   > /tmp/flowd-preflight.out 2>&1 || true
-if grep -qi "$GD32_DPIDR" /tmp/flowd-preflight.out; then
-  echo "!! ABORT: probe reports SW-DP IDR 0x$GD32_DPIDR -- that is the V2N-M1" >&2
-  echo "   GD32, NOT the AEN E8. Wrong probe selected (JLINK_SN='${JLINK_SN:-}')." >&2
-  echo "   Refusing to write MRAM. See /tmp/flowd-preflight.out." >&2
-  exit 4
-fi
-if ! grep -qi "$AEN_DPIDR" /tmp/flowd-preflight.out; then
-  echo "!! ABORT: expected AEN E8 SW-DP IDR 0x$AEN_DPIDR not seen on connect." >&2
-  echo "   Refusing to write MRAM -- check JLINK_SN / wiring / probe selection." >&2
-  cat /tmp/flowd-preflight.out >&2
-  exit 4
-fi
+bench_jlink_assert_aen_dpidr /tmp/flowd-preflight.out "MRAM write preflight" || exit 4
 echo ">>> DPIDR gate OK: probe confirmed AEN E8 (0x$AEN_DPIDR)" >&2
 
 # 1. stage the image + the per-app signed-ATOC config (same JSON flow-run.sh uses)

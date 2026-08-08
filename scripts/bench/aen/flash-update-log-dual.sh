@@ -66,18 +66,7 @@ exit
 EOF
 "${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/firmware-update-log-dual-preflight.jlink \
   > /tmp/firmware-update-log-dual-preflight.out 2>&1 || true
-if grep -qi "$GD32_DPIDR" /tmp/firmware-update-log-dual-preflight.out; then
-  echo "!! ABORT: probe reports SW-DP IDR 0x$GD32_DPIDR -- that is the V2N-M1" >&2
-  echo "   GD32, NOT the AEN E8. Wrong probe selected (JLINK_SN='${JLINK_SN:-}')." >&2
-  echo "   Refusing to write MRAM. See /tmp/firmware-update-log-dual-preflight.out." >&2
-  exit 4
-fi
-if ! grep -qi "$AEN_DPIDR" /tmp/firmware-update-log-dual-preflight.out; then
-  echo "!! ABORT: expected AEN E8 SW-DP IDR 0x$AEN_DPIDR not seen on connect." >&2
-  echo "   Refusing to write MRAM -- check JLINK_SN / wiring / probe selection." >&2
-  cat /tmp/firmware-update-log-dual-preflight.out >&2
-  exit 4
-fi
+bench_jlink_assert_aen_dpidr /tmp/firmware-update-log-dual-preflight.out "MRAM write preflight" || exit 4
 echo ">>> DPIDR gate OK: probe confirmed AEN E8 (0x$AEN_DPIDR)" >&2
 
 check_itcm_vector() {

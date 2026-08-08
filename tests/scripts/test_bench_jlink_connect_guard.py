@@ -221,14 +221,92 @@ def test_every_jlink_mram_writer_has_the_dpidr_gate(script: str) -> None:
     """
     body = (BENCH / script).read_text(encoding="utf-8")
 
-    # Accept either the shared constants from bench-env.sh (preferred -- it is
-    # the single source for both IDs) or a literal, but require BOTH sides of
-    # the gate: confirm the AEN E8 and explicitly reject the V2N-M1 GD32.
-    assert "AEN_DPIDR" in body or "4C013477" in body, (
-        f"{script} writes MRAM over J-Link but never confirms the AEN E8 SW-DP IDR"
+    # The gate lives in bench_jlink_assert_aen_dpidr (bench-env.sh) so the
+    # "which board" logic has ONE home -- it names the wrong board, rejects
+    # both V2N probes, and hard-aborts. A caller satisfies this by invoking
+    # the helper; an older inline grep pair also counts, but the helper is
+    # what the callers now use.
+    assert (
+        "bench_jlink_assert_aen_dpidr" in body
+        or ("AEN_DPIDR" in body and "GD32_DPIDR" in body and "ABORT" in body)
+    ), f"{script} writes MRAM over J-Link with no SW-DP IDR gate"
+
+
+# --- alp-sdk#1312: the "which board" gate, distinct from "any board" -------
+
+_AEN_HIT  = "Found SW-DP with ID 0x4C013477"
+_GD32_HIT = "Found SW-DP with ID 0x0BE12477"
+_V2N_HIT  = "Found SW-DP with ID 0x6BA02477"
+
+
+def _call_dpidr(out_file, text):
+    """Source bench-env.sh and run the DPIDR gate on a transcript."""
+    workdir = out_file.parent
+    (workdir / "bench-env.sh").write_bytes(ENV.read_bytes())
+    out_file.write_text(text, encoding="utf-8")
+    script = (
+        'source ./bench-env.sh; '
+        f'bench_jlink_assert_aen_dpidr "{out_file.name}" "unit-test"'
     )
-    assert "GD32_DPIDR" in body or "0BE12477" in body, (
-        f"{script} must explicitly reject the V2N-M1 GD32 SW-DP IDR"
+    return subprocess.run(
+        ["bash", "-c", script], cwd=workdir, capture_output=True,
+        text=True, encoding="utf-8", errors="replace", timeout=60,
     )
-    # The gate has to abort, not warn.
-    assert "ABORT" in body, f"{script}'s DPIDR check must hard-abort, not warn"
+
+
+@_NEEDS_BASH
+def test_aen_dpidr_accepted(tmp_path):
+    res = _call_dpidr(tmp_path / "pf.out", _AEN_HIT + "\n")
+    assert res.returncode == 0, res.stderr
+
+
+@_NEEDS_BASH
+def test_gd32_probe_is_refused_and_named(tmp_path):
+    """The cloned-serial case. Landing a Flow C loadbin+go here would execute
+    an AEN image on the V2N-M1 -- a different labgrid place."""
+    res = _call_dpidr(tmp_path / "pf.out", _GD32_HIT + "\n")
+    assert res.returncode == 4
+    assert "GD32" in res.stderr
+    assert "e1mx-v2n-m1-01" in res.stderr, "must name the place the operator does not hold"
+
+
+@_NEEDS_BASH
+def test_v2n_cm33_probe_is_refused_and_named(tmp_path):
+    """Third probe on the bench, measured 2026-08-08: SW-DP 0x6BA02477,
+    Cortex-M33 r0p4. Answers on SWD, not JTAG."""
+    res = _call_dpidr(tmp_path / "pf.out", _V2N_HIT + "\n")
+    assert res.returncode == 4
+    assert "CM33" in res.stderr
+
+
+@_NEEDS_BASH
+def test_no_dpidr_at_all_is_refused(tmp_path):
+    """A transcript with no DP ID must not pass -- absence of evidence is not
+    evidence the right board answered."""
+    res = _call_dpidr(tmp_path / "pf.out", "Connecting to J-Link ...O.K.\n")
+    assert res.returncode == 4
+
+
+def _loadbins(body: str) -> bool:
+    """True when the script really issues `loadbin`, not merely mentions it.
+
+    flash-run.sh's only occurrence is a comment reading "NO loadbin/setpc",
+    so a bare substring test reports it as an ungated writer when it writes
+    nothing at all.
+    """
+    return any(
+        "loadbin" in line and not line.lstrip().startswith("#")
+        for line in body.splitlines()
+    )
+
+
+def test_every_target_touching_helper_gates_on_the_dpidr():
+    """ram-run.sh loadbins AND executes, so it needs the same gate the MRAM
+    writers have. It did not have one (alp-sdk#1312) -- Flow C is the flow
+    people run most often."""
+    missing = [
+        p.name for p in _bench_scripts()
+        if (_loadbins(p.read_text(encoding="utf-8"))
+            and "bench_jlink_assert_aen_dpidr" not in p.read_text(encoding="utf-8"))
+    ]
+    assert not missing, f"helper writes/executes on a target with no DPIDR gate: {missing}"
