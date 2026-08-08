@@ -279,12 +279,13 @@
 	 * the wrong clock block).
 	 *
 	 * First bring-up (BENCH-VERIFIED, see below) uses a FIXED-LINK PHY: the
-	 * on-SoM TI DP83825I (RMII, 100/full) runs unmanaged, since upstream
-	 * Zephyr v4.4 ships no snps,designware-mdio driver for the GMAC's
-	 * register layout.  alp-sdk now carries one (mdio_dwmac_alif.c,
-	 * BUILD-ONLY this batch -- see the disabled `mdio` child node below and
-	 * its header for the ADR 0017 tier note); a board overlay can switch to
-	 * it by enabling `mdio` + `eth_phy_managed` and repointing phy-handle.
+	 * on-SoM TI DP83825 (exact order code TBD, RMII, 100/full) runs
+	 * unmanaged, since upstream Zephyr v4.4 ships no snps,designware-mdio
+	 * driver for the GMAC's register layout.  alp-sdk now carries one
+	 * (mdio_dwmac_alif.c, BUILD-ONLY this batch -- see the disabled `mdio`
+	 * child node below and its header for the ADR 0017 tier note); a board
+	 * overlay can switch to it by enabling `mdio` + `eth_phy_managed` and
+	 * repointing phy-handle.
 	 * A board enables this node (status="okay") + supplies pinctrl_eth (the
 	 * RMII pin group); the station MAC defaults to a random
 	 * locally-administered one (see the node property below).

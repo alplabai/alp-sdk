@@ -535,6 +535,35 @@ settle the question either. Resolving it needs the netlist/BOM, per #1241's
 own "Blocked on" section; `docs/soms/aen.md`'s on-module table is corrected
 to say so instead of the unsourced `DP83825IRMQR` it previously carried.
 
+Round 4 review swept the whole tree for the same unverified `DP83825I`
+antipattern the DT's own self-flag warns against and found it had leaked
+past `docs/soms/aen.md`: `docs/bring-up-aen.md` (three sites -- the
+on-module inventory bullet, the §5.3 link-check step, and the §8
+troubleshooting entry), `docs/bring-up-imx93.md` (two sites -- and here
+the defect is worse than a suffix: `metadata/e1m_modules/E1M-NX9101.yaml:28`
+declares `ethernet_phy: TBD # variant of RTL or NXP PHY per BOM`, so the
+i.MX 93 module's PHY isn't confirmed to be a DP83825 at all, never mind
+which suffix -- corrected to TBD, not just de-suffixed), five prose sites in
+`examples/aen/aen-ethernet-link/src/main.c` (comments plus the live
+`printf` label a customer's own build would keep re-asserting on every
+run), `vendors/alif/README.md`'s support-matrix table, and one un-caveated
+DT comment (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi`, the FIXED-LINK
+bring-up paragraph -- distinct from the already-self-flagged managed-MDIO
+comment two paragraphs below it, which is correct as written and untouched).
+All corrected to the bare `DP83825` (+ "(exact order code TBD)" where a
+label stands alone). Left as-is, each for a stated reason: two
+already-published `CHANGELOG.md` sections (`## [v0.6.0]`, append-only, and
+this entry's own paragraph above, which is describing the disagreement, not
+asserting a suffix); ADR 0023's three mentions, each explicitly attributed
+to what the DT or a bench-log transcript literally contains, not asserted
+as fact; `metadata/chips/dp83825.yaml`'s own warning comment, which is the
+canonical instance of the correct caveat; the DT's other, already
+self-flagged "fork reference … confirm" comment; and
+`examples/aen/aen-ethernet-link/README.md`'s fenced RESULT PASS console
+block, a verbatim historical bench-console capture that must not be
+retouched to match the now-corrected `printf` (the two need not match --
+the block records what a past run printed, not a live-regenerated string).
+
 ### Added — `on_module.i2c_devices` block on every AEN SoM preset + a doc/example bus-name consistency gate (#1270)
 
 `metadata/e1m_modules/E1M-V2N101.yaml` and `E1M-V2M101.yaml` have long
@@ -556,39 +585,56 @@ on-module silicon masters.
 
 `scripts/check_i2c_bus_doc_consistency.py` is new: it flags a doc or
 example-source line that names a known on-module I2C part next to a bus
-name, or a 7-bit address, that disagrees with the `i2c_devices` ground
-truth (cross-family -- every `metadata/e1m_modules/E1M-*.yaml` preset,
-not AEN's six alone), the same way `check_pin_conflicts.py` cross-checks
-silicon pads. It is deliberately narrow and LINE-scoped -- ground truth
-excludes any chip whose bus or address assignment disagrees across
-presets, a line naming two buses at once is treated as a contrast and
-skipped, an address is only checked on a line that also names exactly
-one bus AND exactly one ground-truth chip (one `0xNN` literal cannot
-belong to more than one chip; an unanchored `0xNN` is also far more
-often a register/opcode/sentinel value than an I2C address claim), a
-chip-id part that is itself an ordinary English word (`trust`) is
-excluded from its alias set rather than treated as a doc-name candidate,
-`docs/superpowers/plans/**` and `docs/superpowers/specs/**` (archival,
-deliberately past-state) are out of scope, and board-side (carrier)
-parts are out of scope. Being line-scoped, a bus/part claim split across
-two sentences is invisible to it. Against the four wave-4 defects #1270
-names verbatim, none is caught: the carrier-part one is out of scope by
-design, the `aen-secure-element-sign` one splits the bus name and part
-name across separate sentences, and the `docs/soms/aen.md` /
-`docs/cc3501e-bridge.md` ones each name the EEPROM on a line that also
-names the OTHER, correct-contrast bus in the same breath ("SoC I2C2 ...
-NOT LPI2C0" / "LPI2C0; EEPROM ... SoC I2C2") -- the two-bus skip defeats
-them regardless of alias coverage, and both also spell the EEPROM by its
-abbreviated MPN (`N24S128` for `N24S128C4DYT3G`), an independent second
-reason. What the gate does catch is the same EEPROM-on-BRD_I2C defect
-class at a related pre-wave-4 site the issue doesn't name individually,
-`docs/bring-up-aen.md`, which spelled the part `24C128` on a single-bus
-line instead. `docs/bring-up-aen.md`'s stale "the AEN presets have no
-`i2c_devices:` block" line is corrected to point at the new block, and
-the same stale claim is corrected everywhere else it still appeared
+name that disagrees with the `i2c_devices` ground truth (cross-family --
+every `metadata/e1m_modules/E1M-*.yaml` preset, not AEN's six alone), the
+same way `check_pin_conflicts.py` cross-checks silicon pads. It is
+deliberately narrow and LINE-scoped -- ground truth excludes any chip
+whose bus assignment disagrees across presets, a line naming two buses at
+once is treated as a contrast and skipped, a chip-id part that is itself
+an ordinary English word (`trust`) is excluded from its alias set rather
+than treated as a doc-name candidate, `docs/superpowers/plans/**` and
+`docs/superpowers/specs/**` (archival, deliberately past-state) are out of
+scope, and board-side (carrier) parts are out of scope. Being line-scoped,
+a bus/part claim split across two sentences is invisible to it. Against
+the four wave-4 defects #1270 names verbatim, ONE is caught: fix commit
+`35cf42ca` names `docs/bring-up-aen.md` as (with `docs/soms/aen.md` /
+`docs/troubleshooting.md` / tutorial 13) the site "that originated the
+error" for "the EEPROM was documented on BRD_I2C when it is on SoC I2C2",
+and the pre-fix line -- "**EEPROM / board_id read over BRD_I2C.**  Confirm
+the 24C128" -- names `24C128` (a real alias) and `BRD_I2C` on one line,
+which this gate flags. The other three are NOT caught: the carrier-part
+one is out of scope by design, the `aen-secure-element-sign` one splits
+the bus name and part name across separate sentences, and
+`docs/cc3501e-bridge.md` spells the EEPROM by its abbreviated MPN
+(`N24S128` for `N24S128C4DYT3G`), which this gate's chip-alias match never
+resolves. `docs/bring-up-aen.md`'s stale "the AEN presets have no
+`i2c_devices:` block" line is corrected to point at the new block, and the
+same stale claim is corrected everywhere else it still appeared
 (`docs/troubleshooting.md`, `docs/tutorials/02-i2c-scan.md`,
 `examples/aen/aen-eeprom-manifest/src/main.c`). Registered in
 `metadata/quality-tasks-v1.json` and wired into `pr-metadata-validate.yml`.
+
+Round 3 also gated a `0xNN`-shaped literal next to a co-located single bus
+and single chip as an address-mismatch check. Round 4 review found no
+line-level signal cheap enough for this gate that reliably distinguishes
+a 7-bit I2C address from a register offset/bitmask/length that happens to
+share the same two-hex-digit shape -- proven against the round-3 script
+(git archive `8f5c2728`): `TMP112 config register 0x49 resets to default
+on BRD_I2C.` (a register value, correct bus, correct chip) reported
+`names 'tmp112' at address '0x49' ... but ... puts 'tmp112' at '0x48'`, a
+false positive with no real address claim on the line at all. The address
+check is dropped outright; `address_7bit` stays real, human-authored
+`i2c_devices` metadata, just no longer doc-cross-checked. A regression
+test (`test_register_value_on_a_correct_chip_bus_line_is_not_a_false_address_claim`)
+pins this.
+
+The schema's `i2c_bus.bus_pads:` field is dropped from
+`metadata/schemas/som-preset-v1.schema.json`: populated by no preset (not
+just AEN's) and read by no script -- round 2's CHANGELOG claim that AEN's
+new blocks would populate it was never true of the committed YAML, and
+round 3 already corrected the claim without touching the dead field
+itself. Wired up would mean per-silicon pad data for every existing
+family plus a gate read path, out of narrow-round scope; dropped instead.
 
 Ground truth being cross-family means AEN's own six `i2c_devices` blocks
 add no NEW detection power today: every chip they declare (OPTIGA Trust
@@ -600,8 +646,11 @@ disagrees with V2N/V2M, or for a direct per-SoM lookup outside this
 gate.
 
 This PR does not close #1270 -- the issue's own bar ("even a narrow
-version ... would have caught every defect above") is unmet, per the
-four-defects paragraph above.
+version ... would have caught every defect above") is unmet (one of four,
+not every one), per the four-defects paragraph above. Round 4 is the last
+round on the address half specifically; it is dropped rather than shipped
+imprecise a fourth time, per the bus half staying and the address half
+going.
 
 ## [v0.15.0] - 2026-08-07
 

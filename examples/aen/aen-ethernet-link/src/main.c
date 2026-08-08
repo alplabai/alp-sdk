@@ -4,7 +4,8 @@
  *
  * aen-ethernet-link -- bring up the Ensemble E8 GMAC (eth_dwmac core + the
  * alp-sdk "alif,ethernet" glue) on the E1M-AEN801 (M55-HE), power the on-module
- * TI DP83825I PHY, and test the link by pulling a DHCP lease off the bench switch.
+ * TI DP83825 PHY (exact order code TBD -- metadata/chips/dp83825.yaml), and
+ * test the link by pulling a DHCP lease off the bench switch.
  *
  * The MAC/driver/DT live in the SoC dtsi (ethernet@48100000, fixed-link RMII PHY);
  * the board overlay enables the node with the AUTHORITATIVE SoM RMII pin route
@@ -34,7 +35,7 @@
  *
  * PASS gate: a DHCP lease is acquired (full bidirectional link). carrier_ok is
  * fixed-link synthetic (no managed PHY) and is NOT a link proof; the lease is.
- * PHY GPIO polarity is the conventional DP83825I reading (PWRDWN enable HIGH;
+ * PHY GPIO polarity is the conventional DP83825 reading (PWRDWN enable HIGH;
  * RST_N active-low).
  */
 
@@ -93,7 +94,7 @@ static int phy_power_init(void)
 	gpio_pin_set(lpgpio, PHY_PWRDWN_PIN, 1);
 	k_busy_wait(50000); /* let the PHY supply + its reference clock stabilize */
 
-	/* Reset pulse, conventional DP83825I RST_N (active-low): LOW asserts, HIGH
+	/* Reset pulse, conventional DP83825 RST_N (active-low): LOW asserts, HIGH
 	 * releases. Long assert + post-reset settle so the reference clock is stable
 	 * across the reset (a clock that isn't stable at deassert leaves the analog
 	 * front-end uninitialised). Both reset polarities were bench-tried. */
@@ -101,7 +102,7 @@ static int phy_power_init(void)
 	gpio_pin_set(gpio11, PHY_RESET_PIN, 0); /* assert */
 	k_busy_wait(50000);
 	gpio_pin_set(gpio11, PHY_RESET_PIN, 1); /* release */
-	k_busy_wait(100000);                    /* DP83825I post-reset settle (>=50 ms) */
+	k_busy_wait(100000);                    /* DP83825 post-reset settle (>=50 ms) */
 	return 0;
 }
 /* Priority 50: gpio_dw(40) < 50 < eth_dwmac(ETH_INIT_PRIORITY 60). */
@@ -141,14 +142,15 @@ static void mdio_write(uint8_t phy, uint8_t reg, uint16_t val)
 	}
 }
 
-/* Find the PHY (returns addr 0-31, or -1). DP83825I OUI = 0x2000a140. */
+/* Find the PHY (returns addr 0-31, or -1). DP83825 OUI = 0x2000a140 (die/OUI
+ * identity only; does not distinguish DP83825 grade/package suffixes). */
 static int phy_find(void)
 {
 	for (uint8_t phy = 0; phy < 32; phy++) {
 		uint16_t id1 = mdio_read(phy, 2);
 		if (id1 != 0xFFFF && id1 != 0x0000) {
 			printf(
-			    "[eth] MDIO PHY@%u id=%04x%04x (DP83825I=2000a140)\n", phy, id1, mdio_read(phy, 3));
+			    "[eth] MDIO PHY@%u id=%04x%04x (DP83825=2000a140)\n", phy, id1, mdio_read(phy, 3));
 			return phy;
 		}
 	}
@@ -232,7 +234,7 @@ int main(void)
 	 * auto-neg, and wait for the link to actually come up before trying DHCP. */
 	int phy = phy_find();
 	if (phy >= 0) {
-		/* DP83825I state: ANAR(4)=our advert, ANLPAR(5)=partner advert (0 => not
+		/* DP83825 state: ANAR(4)=our advert, ANLPAR(5)=partner advert (0 => not
 		 * hearing the switch = no RX/clock/cable), PHYSTS(0x10)=link/speed,
 		 * RCSR(0x17)=RMII mode/clock-select. */
 		printf("[eth] PHY regs: ANAR=%04x ANLPAR=%04x PHYSTS=%04x RCSR=%04x\n",

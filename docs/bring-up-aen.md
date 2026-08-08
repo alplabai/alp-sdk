@@ -28,8 +28,9 @@ Inventory check before powering anything:
   - **OPTIGA Trust M** secure element.
   - **RV-3028-C7** external RTC.
   - **TMP112** temperature sensor.
-  - **DP83825I** 10/100 Ethernet PHY (a single MAC; ET1 is
-    E1M-X-only) -- see [`docs/soms/aen.md`](soms/aen.md).
+  - **DP83825** 10/100 Ethernet PHY (exact order code TBD, a
+    single MAC; ET1 is E1M-X-only) -- see
+    [`docs/soms/aen.md`](soms/aen.md).
 * Board populated (**Alp E1M-EVK** carrier -- per
   [`metadata/boards/e1m-evk.yaml`](../metadata/boards/e1m-evk.yaml)
   `populated:`): E1M-edge passthroughs + the 5 V power input +
@@ -264,7 +265,8 @@ but the OPTIGA is DNI and the probe returns `ALP_ERR_NOT_READY`.
 ### 5.3 Ethernet PHY link
 
 Connect a 1 Gb link partner to the board's RJ45.  Reset the
-module and check link-up via the DP83825I's MDIO registers:
+module and check link-up via the DP83825's MDIO registers
+(exact order code TBD -- `metadata/chips/dp83825.yaml`):
 
 ```c
 uint16_t bmsr = 0;
@@ -515,7 +517,7 @@ Once §6's runbook passes:
   reaches; the BRD_I2C trio is not host-scannable).  Standard
   Alp boards pull to 1.8 V; some custom boards use 3.3 V
   (re-strap the SoC side accordingly).
-* **PHY won't link** -- DP83825I requires its 25 MHz REFCLK
+* **PHY won't link** -- the DP83825 requires its 25 MHz REFCLK
   before the strap latches.  Check `OSC_25M` on the board
   with a scope; the PHY won't link if the clock is missing at
   PHY-reset-release.

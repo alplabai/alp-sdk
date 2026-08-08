@@ -24,9 +24,9 @@ Scope -- a NARROW, LINE-scoped gate, deliberately:
   blocks across every `metadata/e1m_modules/E1M-*.yaml` preset, not
   AEN's six alone -- a chip is one ground-truth entry as long as every
   preset that declares it agrees, regardless of family. A chip
-  carrying a DIFFERENT bus (or address_7bit) assignment across two
-  presets that both declare it is ambiguous ground truth and is
-  silently excluded from checking -- never guessed at (`_chip_truth()`).
+  carrying a DIFFERENT bus assignment across two presets that both
+  declare it is ambiguous ground truth and is silently excluded from
+  checking -- never guessed at (`_chip_truth()`).
   Concretely: every chip AEN's own six blocks declare (OPTIGA Trust M,
   RV-3028-C7, TMP112, the 24C128 EEPROM) already had an identical
   V2N/V2M declaration before #1270 landed, so deleting all six AEN
@@ -43,20 +43,21 @@ Scope -- a NARROW, LINE-scoped gate, deliberately:
   `_BUS_ALIASES`) -- a line naming two buses is typically a deliberate
   contrast ("I2C2, NOT LPI2C0") and is skipped rather than risk a
   false positive on it.
-* An address claim is checked ONLY on a line that ALSO passes that same
-  single-bus gate, names exactly one `0xNN`-shaped 7-bit address
-  literal, AND names exactly one ground-truth chip -- a single `0xNN`
-  literal cannot belong to more than one chip, so a line naming two
-  known chips (a table row, "the trio" listed together) is ambiguous
-  about which chip the address claims and is skipped rather than
-  attributed to every chip named on the line (review round 2: a
-  correct row "| TMP112 | RV-3028-C7 | 0x48 | BRD_I2C |" false-
-  positived on RV-3028-C7, whose address was never claimed on that line
-  at all). An 0xNN literal with no co-located bus name is far more
-  often a register/opcode/sentinel value (`0x82` I2C_STATE, `0xFF` a
-  DNP sentinel, `0x32` ADC_CONFIGURE's opcode) than an I2C address
-  claim, and checking it unanchored produced 16 false positives across
-  `docs/superpowers/**` and `examples/**/*.c` alone.
+* No address check: round 3 gated a `0xNN`-shaped literal on a
+  co-located single bus and single chip, but neither that nor any
+  cheaper line-level signal is POSITIVE evidence the literal is a
+  7-bit I2C address rather than a register offset, a bitmask, or a
+  length that happens to also render as two hex digits (`0x0E` and
+  `0x50` are the same shape) on a line that also happens to name a
+  bus and a chip -- round 4 review (#1270) found no reliable
+  distinguishing signal cheap enough for a line-scoped regex gate that
+  does not also reject real address prose (the real corpus's address
+  mentions use "at 0xNN", "@0xNN", "0xNN ACK", and bare markdown-table
+  cells interchangeably, none of which a register/mask/length mention
+  is reliably absent from). `address_7bit` in `i2c_devices` stays
+  real, human-authored metadata; this gate just does not cross-check
+  doc prose against it. Dropped rather than shipped imprecise a fourth
+  time.
 * Chip mentions are matched per WHITESPACE-SPLIT TOKEN (each token
   alnum-squashed, then compared for exact set membership against a
   chip's alias set) -- never a substring search across the whole
@@ -71,9 +72,12 @@ Scope -- a NARROW, LINE-scoped gate, deliberately:
   output..."). `_GENERIC_PARTS` excludes such words from the alias set
   by name -- the full chip-id squash (`OPTIGATRUSTM`) and non-generic
   parts (`OPTIGA`) still match.
-* `_BUS_ALIASES` is a small hand-maintained table, not derived from
-  `bus_pads:` prose -- verified by grep against the tree at write time
-  to carry no cross-family collision (`I2C2`/`LPI2C0`/`LPI2C` are
+* `_BUS_ALIASES` is a small hand-maintained table -- no metadata field
+  records a doc-facing bus alias to derive it from (the schema's old
+  `i2c_bus.bus_pads:` was dead, populated by no preset and read by no
+  script, and was dropped rather than wired up here; see #1270). It was
+  verified by grep against the tree at write time to carry no
+  cross-family collision (`I2C2`/`LPI2C0`/`LPI2C` are
   AEN-only spellings today; `ALP_E1M_X_I2C2` is a different, unrelated
   E1M-X port-identity namespace and is never matched here because
   those lines never also name one of these on-module parts). A new
@@ -97,21 +101,20 @@ Scope -- a NARROW, LINE-scoped gate, deliberately:
   form of `mpn_population` (not the full part number, e.g. `N24S128`
   for the EEPROM's `N24S128C4DYT3G`) is also not derived as an alias.
 
-  Concretely, against the four wave-4 defects #1270 names verbatim,
-  NONE is caught: the carrier-part one is out of scope by the bullet
-  above; the `examples/aen/aen-secure-element-sign` one splits the bus
-  name and the part name across separate sentences; and the
-  `docs/soms/aen.md` / `docs/cc3501e-bridge.md` ones each name the
-  EEPROM on a line that ALSO names the other, correct-contrast bus in
-  the same breath ("SoC I2C2 ... NOT LPI2C0" / "LPI2C0; EEPROM ...
-  SoC I2C2") -- the deliberate two-bus skip above defeats them
-  regardless of alias coverage, and both also spell the EEPROM by its
-  abbreviated MPN (`N24S128`), an independent second reason this gate
-  would not catch them even on a single-bus line. What the gate DOES
-  catch is the same underlying EEPROM-on-BRD_I2C defect class at a
-  related pre-wave-4 site the issue doesn't name individually,
-  `docs/bring-up-aen.md`, which happened to spell the part `24C128` (a
-  real alias) on a single-bus line instead.
+  Concretely, against the four wave-4 defects #1270 names verbatim, ONE
+  is caught: "the EEPROM was documented on BRD_I2C when it is on SoC
+  I2C2" -- fix commit `35cf42ca` names `docs/bring-up-aen.md` as (with
+  `docs/soms/aen.md`/`docs/troubleshooting.md`/tutorial 13) the site
+  "that originated the error", and its pre-fix `bring-up-aen.md` read
+  "**EEPROM / board_id read over BRD_I2C.**  Confirm the 24C128" --
+  `24C128` (a real alias) and `BRD_I2C` on one line, which this gate
+  flags. The other three are NOT caught: the carrier-part one is out
+  of scope by the bullet above; the `examples/aen/aen-secure-element-sign`
+  one splits the bus name and the part name across separate sentences;
+  and `docs/cc3501e-bridge.md` spells the EEPROM by its abbreviated
+  MPN (`N24S128` for `N24S128C4DYT3G`), which this gate's chip-alias
+  match never resolves to `eeprom_24c128`, so the mismatch on that line
+  is invisible regardless of the bus wording.
 
 Run locally:
 
@@ -141,11 +144,6 @@ _BUS_ALIASES: dict[str, set[str]] = {
     "brd_i2c": {"LPI2C0", "LPI2C"},
     "e1m_i2c0": {"I2C2"},
 }
-
-# 7-bit I2C address literal, as docs/examples spell it: `0x` + exactly two
-# hex digits (`0x48`, `0x30`, ... -- matches `address_7bit` in the SoM
-# preset). Compared case-insensitively; lower()'d before comparison.
-_ADDR_RE = re.compile(r"\b0x[0-9A-Fa-f]{2}\b")
 
 # Chip-id name parts too generic to serve as a standalone doc alias on
 # their own -- either a role word (`eeprom`) or an ordinary English word
@@ -222,17 +220,12 @@ def _load_chip_mpns(root: Path) -> dict[str, list[str]]:
     return mpns
 
 
-def _chip_truth(
-    root: Path,
-) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
-    """Return (chip_id -> bus_key, chip_id -> address_7bit, chip_id ->
-    every preset path it came from, comma-joined) for every chip whose
-    on-module bus assignment / address is IDENTICAL across every SoM
-    preset that declares it. A chip seen on two different buses (or two
-    different addresses) across presets is ambiguous ground truth and
-    is dropped from the corresponding dict -- never guessed at.
-    `address_7bit` is optional in the schema, so a chip can appear in
-    the bus dict without appearing in the address dict.
+def _chip_truth(root: Path) -> tuple[dict[str, str], dict[str, str]]:
+    """Return (chip_id -> bus_key, chip_id -> every preset path it came
+    from, comma-joined) for every chip whose on-module bus assignment
+    is IDENTICAL across every SoM preset that declares it. A chip seen
+    on two different buses across presets is ambiguous ground truth and
+    is dropped -- never guessed at.
 
     Every preset that agrees is listed, not just the alphabetically
     first one: a chip declared identically on both `E1M-AEN301.yaml`
@@ -240,10 +233,9 @@ def _chip_truth(
     AEN801, not silently cite AEN301 because it sorts first."""
     modules_dir = root / "metadata" / "e1m_modules"
     seen_bus: dict[str, set[str]] = {}
-    seen_addr: dict[str, set[str]] = {}
     source: dict[str, set[str]] = {}
     if not modules_dir.is_dir():
-        return {}, {}, {}
+        return {}, {}
     for preset in sorted(modules_dir.glob("E1M-*.yaml")):
         with preset.open(encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
@@ -256,21 +248,10 @@ def _chip_truth(
                 seen_bus.setdefault(cid, set()).add(bus_key)
                 source.setdefault(cid, set()).add(
                     str(preset.relative_to(root).as_posix()))
-                addr = dev.get("address_7bit")
-                if addr:
-                    seen_addr.setdefault(cid, set()).add(str(addr).strip().lower())
     bus_truth = {cid: next(iter(b)) for cid, b in seen_bus.items() if len(b) == 1}
-    addr_truth = {cid: next(iter(a)) for cid, a in seen_addr.items() if len(a) == 1}
-    # Union of both truth dicts' keys: a chip can have an unambiguous
-    # address but an ambiguous bus across presets (or vice versa), and
-    # the address-check path below looks `chip_source[cid]` up keyed
-    # only on `addr_truth` membership -- restricting this to `bus_truth`
-    # would KeyError the first time that split ever occurs.
-    cids = set(bus_truth) | set(addr_truth)
     return (
         bus_truth,
-        addr_truth,
-        {cid: ", ".join(sorted(source[cid])) for cid in cids},
+        {cid: ", ".join(sorted(source[cid])) for cid in bus_truth},
     )
 
 
@@ -291,15 +272,14 @@ def _bus_pattern(bus_key: str) -> re.Pattern[str]:
 def find_problems(root: Path) -> list[str]:
     """Pure check: returns human-readable problem strings, empty when
     every checked doc/example line agrees with the i2c_devices ground
-    truth (or names no ground-truth chip / no single bus or address)."""
-    chip_bus, chip_addr, chip_source = _chip_truth(root)
+    truth (or names no ground-truth chip / no single bus)."""
+    chip_bus, chip_source = _chip_truth(root)
     if not chip_bus:
         return []
 
     chip_mpns = _load_chip_mpns(root)
-    chip_ids = set(chip_bus) | set(chip_addr)
     chip_aliases = {
-        cid: _chip_aliases(cid, chip_mpns.get(cid, [])) for cid in chip_ids
+        cid: _chip_aliases(cid, chip_mpns.get(cid, [])) for cid in chip_bus
     }
     bus_patterns = {bus: _bus_pattern(bus) for bus in sorted(set(chip_bus.values()))}
 
@@ -330,12 +310,9 @@ def find_problems(root: Path) -> list[str]:
                     bus for bus, pat in bus_patterns.items() if pat.search(line)
                 }
                 if len(mentioned_buses) != 1:
-                    # No single-bus claim on this line -- an 0xNN literal
-                    # here is far more often a register/opcode/sentinel
-                    # value (0x82 I2C_STATE, 0xFF DNP sentinel, 0x32
-                    # ADC_CONFIGURE opcode) than a 7-bit I2C address
-                    # claim. Requiring a co-located bus name is what
-                    # tells the two apart.
+                    # No single-bus claim on this line -- typically a
+                    # deliberate contrast ("I2C2, NOT LPI2C0"). Skipped
+                    # rather than risk a false positive on it.
                     continue
                 (doc_bus,) = mentioned_buses
                 for cid in mentioned_cids:
@@ -348,31 +325,6 @@ def find_problems(root: Path) -> list[str]:
                             f"'{true_bus}' -- fix the doc or the "
                             f"metadata: {line.strip()!r}"
                         )
-
-                addr_matches = _ADDR_RE.findall(line)
-                if len(addr_matches) != 1 or len(mentioned_cids) != 1:
-                    # One 0xNN literal cannot belong to more than one
-                    # chip. A line naming two known chips alongside one
-                    # address (a table row, "the trio" listed together)
-                    # is ambiguous about which chip the address claims --
-                    # skipped rather than attributing it to every chip
-                    # named on the line (review round 2: a correct row
-                    # "| TMP112 | RV-3028-C7 | 0x48 | BRD_I2C |" false-
-                    # positived on rv3028c7, which is on brd_i2c but at a
-                    # different address). Mirrors the single-bus rule
-                    # above.
-                    continue
-                (cid,) = mentioned_cids
-                doc_addr = addr_matches[0].lower()
-                true_addr = chip_addr.get(cid)
-                if true_addr is not None and true_addr != doc_addr:
-                    problems.append(
-                        f"{rel}:{lineno}: names '{cid}' at address "
-                        f"'{doc_addr}' next to bus '{doc_bus}', but "
-                        f"{chip_source[cid]} on_module.i2c_devices puts "
-                        f"'{cid}' at '{true_addr}' -- fix the doc or "
-                        f"the metadata: {line.strip()!r}"
-                    )
     return problems
 
 

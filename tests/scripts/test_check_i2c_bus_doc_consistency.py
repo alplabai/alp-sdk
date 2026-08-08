@@ -243,33 +243,16 @@ def test_generic_name_part_does_not_match_inside_an_unrelated_word(tmp_path):
     assert "optiga_trust_m" in out
 
 
-def test_wrong_address_next_to_correct_bus_fails(tmp_path):
-    """#1270 ask 2 names 'bus/address claims' -- address_7bit was parsed
-    into ground truth but never read by the check. 'TMP112 at 0x49 on
-    BRD_I2C' (true address 0x48) must fail; the correct address must
-    not."""
-    _write_preset(tmp_path, "E1M-TEST")
-    _write_doc(tmp_path, "docs/x.md", "TMP112 at 0x49 on BRD_I2C.\n")
-    proc = _run("--root", str(tmp_path))
-    out = proc.stdout + proc.stderr
-    assert proc.returncode == 1, out
-    assert "tmp112" in out
-    assert "0x49" in out
-    assert "0x48" in out
-
-    _write_doc(tmp_path, "docs/x.md", "TMP112 at 0x48 on BRD_I2C.\n")
-    proc = _run("--root", str(tmp_path))
-    assert proc.returncode == 0, proc.stdout + proc.stderr
-
-
-def test_address_literal_without_a_colocated_bus_is_not_flagged(tmp_path):
-    """A register/opcode/sentinel `0xNN` mentioned near a chip name but
-    with NO bus name on the same line must not be treated as an I2C
-    address claim -- checking any `0xNN` literal near a chip name with
-    no co-located bus requirement flags 16 such lines across the real
-    tree (`I2C_STATE register (0x82)`, `0xFF` DNP sentinels,
-    `ADC_CONFIGURE` opcode `0x32`), none of them a real I2C-address
-    claim."""
+def test_chip_name_alone_with_no_bus_is_not_flagged(tmp_path):
+    """A chip name mentioned with NO bus name on the same line is inert
+    -- this gate makes no claim at all without a co-located bus, on
+    round 3's now-removed address check or otherwise. (Round 4, #1270:
+    round 3's address check -- gating a bare `0xNN` literal on a
+    co-located single bus and single chip -- was dropped outright: no
+    line-level signal cheap enough for this gate reliably distinguishes
+    a 7-bit I2C address from a register offset/bitmask/length that
+    happens to share the same two-hex-digit shape. See the module
+    docstring's Scope section.)"""
     _write_preset(tmp_path, "E1M-TEST")
     _write_doc(
         tmp_path, "docs/x.md",
@@ -279,49 +262,27 @@ def test_address_literal_without_a_colocated_bus_is_not_flagged(tmp_path):
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
 
-def test_chip_with_ambiguous_bus_but_consistent_address_does_not_crash(tmp_path):
-    """A chip can have an unambiguous `address_7bit` across presets while
-    its BUS disagrees between them (ambiguous, excluded from bus ground
-    truth) -- `optiga_trust_m` here sits on `e1m_i2c0` in one preset and
-    `brd_i2c` in the other, always at `0x30`. The address-check path
-    looks the chip up in a source map keyed only on bus-ground-truth
-    membership; a chip present only in address ground truth (never bus
-    ground truth) would KeyError there. Must instead report a clean
-    address mismatch."""
-    d = tmp_path / "metadata" / "e1m_modules"
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "E1M-A.yaml").write_text(
-        "sku: E1M-A\n"
-        "on_module:\n"
-        "  i2c_devices:\n"
-        "    brd_i2c:\n"
-        "      devices:\n"
-        "        - { chip: tmp112, role: temp_sensor, address_7bit: \"0x48\" }\n"
-        "    e1m_i2c0:\n"
-        "      devices:\n"
-        "        - { chip: optiga_trust_m, role: secure_element, address_7bit: \"0x30\" }\n",
-        encoding="utf-8",
-    )
-    (d / "E1M-B.yaml").write_text(
-        "sku: E1M-B\n"
-        "on_module:\n"
-        "  i2c_devices:\n"
-        "    brd_i2c:\n"
-        "      devices:\n"
-        "        - { chip: optiga_trust_m, role: secure_element, address_7bit: \"0x30\" }\n",
-        encoding="utf-8",
-    )
+def test_register_value_on_a_correct_chip_bus_line_is_not_a_false_address_claim(
+    tmp_path,
+):
+    """Round 4 (#1270) review: round 3's address check flagged ANY
+    `0xNN` literal on a line naming exactly one ground-truth chip and
+    exactly one (CORRECT) bus, with no evidence the literal was ever an
+    I2C address claim rather than a register offset/bitmask/length that
+    happens to share the same two-hex-digit shape. Proven against the
+    pre-round-4 script (git archive `8f5c2728`, this exact fixture):
+    it reported 'names tmp112 at address 0x49 ... but ... puts tmp112
+    at 0x48' even though the line's `0x49` is a register value, not an
+    address claim, and the doc's BUS claim (BRD_I2C) was already
+    correct. The address check is dropped outright (no cheap reliable
+    signal distinguishes the two); this line must never be flagged."""
+    _write_preset(tmp_path, "E1M-TEST")
     _write_doc(
         tmp_path, "docs/x.md",
-        "optiga_trust_m at 0x99 on BRD_I2C.\n",
+        "TMP112 config register 0x49 resets to default on BRD_I2C.\n",
     )
     proc = _run("--root", str(tmp_path))
-    out = proc.stdout + proc.stderr
-    assert "Traceback" not in out, out
-    assert proc.returncode == 1, out
-    assert "optiga_trust_m" in out
-    assert "0x99" in out
-    assert "0x30" in out
+    assert proc.returncode == 0, proc.stdout + proc.stderr
 
 
 def test_generic_dictionary_word_alias_is_dropped(tmp_path):
@@ -366,47 +327,6 @@ def test_generic_dictionary_word_alias_is_dropped(tmp_path):
     out = proc.stdout + proc.stderr
     assert proc.returncode == 1, out
     assert "optiga_trust_m" in out
-
-
-def test_address_next_to_two_known_chips_is_not_attributed_to_either(tmp_path):
-    """A single `0xNN` literal cannot belong to more than one chip -- a
-    line naming two known chips alongside one address (a table row, or
-    'the trio' listed together) is ambiguous about which chip the
-    address claims. Attributing it to every mentioned chip false-
-    positived on real prose (review round 2): a table row
-    '| TMP112 | RV-3028-C7 | 0x48 | BRD_I2C |' (TMP112's own, correct
-    address) reported RV-3028-C7 as wrong, though RV-3028-C7's address
-    was never claimed on that line at all. Must be skipped, mirroring
-    the existing single-bus rule."""
-    d = tmp_path / "metadata" / "e1m_modules"
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "E1M-TEST.yaml").write_text(
-        "sku: E1M-TEST\n"
-        "on_module:\n"
-        "  i2c_devices:\n"
-        "    brd_i2c:\n"
-        "      devices:\n"
-        "        - { chip: tmp112, role: temp_sensor, address_7bit: \"0x48\" }\n"
-        "        - { chip: rv3028c7, role: rtc, address_7bit: \"0x52\" }\n",
-        encoding="utf-8",
-    )
-    _write_doc(
-        tmp_path, "docs/x.md",
-        "| TMP112 | RV-3028-C7 | 0x48 | BRD_I2C |\n",
-    )
-    proc = _run("--root", str(tmp_path))
-    assert proc.returncode == 0, proc.stdout + proc.stderr  # ambiguous -- skipped, not misattributed
-
-    # Sanity: a genuine, unambiguous single-chip address mismatch must
-    # still fire -- this fixture's chips are still individually checkable.
-    _write_doc(
-        tmp_path, "docs/y.md",
-        "RV-3028-C7 answers at 0x53 on BRD_I2C.\n",
-    )
-    proc = _run("--root", str(tmp_path))
-    out = proc.stdout + proc.stderr
-    assert proc.returncode == 1, out
-    assert "rv3028c7" in out
 
 
 def test_archival_superpowers_plans_doc_is_out_of_scope(tmp_path):
