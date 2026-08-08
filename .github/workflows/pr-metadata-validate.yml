@@ -24,6 +24,7 @@ on:
       - 'scripts/validate_metadata.py'
       - 'scripts/validate_board_yaml.py'
       - 'scripts/check_board_target_tree_parity.py'
+      - 'scripts/check_atoc_reservation.py'
       - 'scripts/check_example_board_overlay_parity.py'
       - 'scripts/check_som_topology_parity.py'
       - 'scripts/check_core_cmakelists_mapping.py'
@@ -71,6 +72,7 @@ on:
       - 'zephyr/boards/alp/**'
       - 'scripts/validate_board_yaml.py'
       - 'scripts/check_board_target_tree_parity.py'
+      - 'scripts/check_atoc_reservation.py'
       - 'scripts/check_example_board_overlay_parity.py'
       - 'scripts/check_som_topology_parity.py'
       - 'scripts/check_core_cmakelists_mapping.py'
@@ -409,6 +411,9 @@ jobs:
 
       - name: "Gate — SoM preset board: targets resolve to a real board tree"
         run: python3 scripts/check_board_target_tree_parity.py
+
+      - name: "Gate — AEN App MRAM top is reserved for the SE-owned ATOC (#1289)"
+        run: python3 scripts/check_atoc_reservation.py
 
       - name: Gate — example board.yaml declared cores match their boards/ overlays
         run: python3 scripts/check_example_board_overlay_parity.py

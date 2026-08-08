@@ -71,9 +71,12 @@ since #1069, see `metadata/e1m_modules/E1M-AEN801.yaml` `memory_map:`):
 MCUboot `0x80000000` (64 KiB, shared) · HE slot0 `0x80010000` (2688 KiB,
 bench-proven, unchanged) · HP slot0 `0x802b0000` (2688 KiB, moved off
 the old shared `0x80010000` window) · reserved `0x80550000` (64 KiB,
-ex-scratch, unused -- OTA deferred) · storage `0x80560000` (128 KiB).
+ex-scratch, unused -- OTA deferred) · storage `0x80560000` (96 KiB) ·
+atoc `0x80578000` (32 KiB, SE-owned -- SETOOLS top-anchors the ATOC
+application table there and grows it downward; not customer-writable,
+see #1289).
 Each per-core board DT only carries ITS OWN slot0 partition entry (plus
-the shared mcuboot/reserved/storage entries) -- the sibling core's slot0
+the shared mcuboot/reserved/storage/atoc entries) -- the sibling core's slot0
 is a disjoint physical window this board never touches.
 
 **Why one shared `mcuboot` window is safe even though each core needs a

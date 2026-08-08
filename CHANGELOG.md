@@ -7,6 +7,61 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — every AEN board handed apps a writable partition on top of the SE boot table (#1289)
+
+Alif's SETOOLS (`app-gen-toc` / `app-write-mram`) does not place the ATOC
+application table at a fixed address: it **top-anchors** the generated package
+at the App MRAM window end (`0x80580000` on the E8) and grows it **downward**,
+sized to the package. Placement happens at *provisioning* time, not link time,
+so no compile-time constant exists to carve around.
+
+Every AEN board's last partition was `storage`, 128 KiB at `0x80560000`,
+running to exactly that window top — so the NVS/settings region an app is
+invited to write **was** the boot table. Measured on the E1M-AEN801 bench
+2026-08-08: `examples/aen/aen-mram-flash-validate` erased and wrote
+`0x80560000` while the live ATOC sat intact at `0x8057EA50`, magic `ckBS`
+(`0x53426B63`), inside that same partition. Nothing failed at build time and
+nothing failed at run time; the part fails on the **following** boot, when the
+SE reads a table an app has overwritten. The example's own comment asserted
+the region "is empty on this bench and holds no boot code" — false, and the
+sentence that made writing there look safe.
+
+`storage` now ends at `0x80578000` (96 KiB) and the top 32 KiB is a separate
+SE-owned `atoc` partition no app has a handle to. Sizing is bounded by three
+independent figures against the same window top: **5552 B** observed on the
+bench, **13552 B** from an E7 SETOOLS transcript in the Alif DFP
+(`docs/Overview.md:193-224`), and **23696 B** worst case computed from
+SETOOLS' own `build/app-package-map.txt` rule (2560 B per signed user image +
+2880 B fixed + 48 + 32×N TOC) at the 8-image maximum — that rule reproduces
+the observed 5552 B exactly. 32 KiB leaves 9072 B spare. *Unverified:* no
+documented maximum TOC entry count was found, so the 8-image worst case is an
+assumption; widen the band, never narrow it.
+
+The 32 KiB comes out of `storage`, not out of a slot, so
+`_AEN_MCUBOOT_KIB + _AEN_SCRATCH_KIB + _AEN_STORAGE_KIB + _AEN_ATOC_KIB` still
+sums to the old 256 KiB and **no image slot geometry moved**. `storage` also
+keeps its name and nodelabel deliberately: an earlier draft renamed the whole
+128 KiB region to `atoc`, which would have broken `tan`'s literal `"storage"`
+region lookup and every `PARTITION_ID(storage_partition)` consumer. Both AEN
+generator paths are covered — the disjoint-slot0 branch (AEN801) and the stock
+branch (`aen401`, `aen601`, and any future AEN SKU).
+
+`scripts/check_atoc_reservation.py` is the new gate: the last partition of
+every AEN table must be labelled `atoc`, and the region owning the top of a
+preset's declared `memory_map:` must be named `atoc`. The window top is
+derived per board/preset, never hardcoded — the AEN SKUs do not share an MRAM
+size. It scans example `boards/` overlays as well as board trees, because an
+app that `/delete-node/`s the generated partitions escapes the board tree
+entirely; `examples/connectivity/firmware-update-log` already carried a
+hand-rolled reservation labelled `alif-atoc` that no gate recognised.
+
+Two things this does NOT fix, tracked separately: `tan` carries its own copy
+of this generator and still emits the old layout until tan-cli#544 lands (that
+port and its `PINNED_SDK_TAG` bump must be one PR, or emit-parity goes red
+either way); and `board.yaml` `storage[].offset_kib:` is still bounds-checked
+only against sibling partitions, so an explicit offset can be placed on any
+SoM region — #1331.
+
 ### Fixed — Flow C wrote and executed on a target it never identified (#1312)
 
 `scripts/bench/aen/ram-run.sh` — the default day-to-day flow — did
