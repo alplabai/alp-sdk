@@ -7,6 +7,45 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — a SoM chip with no driver emitted a Kconfig symbol that does not exist (#1241)
+
+Adding `ethernet_phy: dp83825` to the AEN SoM presets made every AEN Zephyr
+slice emit
+
+```
+CONFIG_ALP_SDK_CHIP_DP83825=y
+```
+
+into its generated `alp.conf`, and `ALP_SDK_CHIP_DP83825` is not declared
+anywhere. Measured across `metadata/chips/*.yaml`: 77 of 81 chips carry a
+declared symbol in `zephyr/kconfigs/chips.kconfig` — every `complete`,
+`partial` and `stub` one, each with a real `chips/<part>/` directory. The
+only undeclared ones are the four `planned` Murata modules, which no SoM
+populates. `dp83825` has `driver_status: none` and no `chips/dp83825/`
+directory at all, so the emitted line named a symbol with nothing behind it.
+
+`_slugs_from_on_module` already applied exactly this rule per-field —
+`ospi_memories` and `hyperram` are excluded because those parts have "no
+`chips/<part>/` driver, so their MPNs are NOT extracted as chip slugs
+(emitting them as `CONFIG_ALP_SDK_CHIP_<X>` would trip Zephyr's
+undefined-symbol guard)". It now holds per-chip too: a scalar `on_module:`
+field can name a real chip manifest with no driver behind it, which is what
+`ethernet_phy:` was the first to do.
+
+Driver presence is checked on disk rather than read from `driver_status:`,
+because the directory is what the Kconfig declaration points at — every entry
+reads "Compile chips/<part>/<part>.c". A status string can drift from the
+tree; the directory cannot.
+
+The chip stays in metadata. It is real, populated hardware, and the manifest
+is what documents the ADR-0023 layer-3 gap; it simply no longer gets a
+driver-selection Kconfig for a driver that does not exist.
+
+Caught by `scripts/check_emit_snapshots.py`, which reported six snapshot
+DIFFs. The committed goldens were correct throughout — the fix brings the
+emitter back to them (6 DIFFs before, 0 after) rather than regenerating them,
+which would have frozen the defect as expected output.
+
 ### Fixed — two workflows on `dev` could not be loaded by GitHub Actions
 
 `.github/workflows/pr-doc-drift.yml` carried **nine unresolved merge-conflict
