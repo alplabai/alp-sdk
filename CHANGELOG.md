@@ -7,6 +7,30 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Added — ADR 0026 proposes retiring alp-sdk as a second planner producer
+
+ADR 0020's 2026-08-03 amendment relocated the planner into tan but kept
+alp-sdk's `scripts/alp_orchestrate/` as "the reference producer", so two
+independent implementations of the same planner ship from two repos and
+neither is allowed to be wrong. **ADR 0026** proposes ending that: tan's
+`python/tan/planner/` becomes the single implementation, alp-sdk keeps what it
+is uniquely authoritative for (`metadata/`, `metadata/schemas/`, examples,
+tooling contracts), and `build-plan-v1` survives unchanged as the
+planner/executor seam.
+
+Measured at alp-sdk `f30f4d4b` / tan-cli `ac7e725`: `scripts/alp_orchestrate/`
+is 21 modules and 7,182 lines, `python/tan/planner/` is 31 modules and 12,071
+lines, 20 of the 21 module basenames are mirrored (all but `__main__.py`), and
+the parity apparatus that exists solely to police the mirror is 47 files and
+23,886 lines — more than three times the logic it guards.
+
+The ADR also records the recurrence evidence (tan-cli #274, #275, #279, #313,
+#320, #324, #409, #425, #485, #492, #509, #531, #543, #544, #545): #320
+recurred as #485, and #543 has dev's parity job failing on every alp-sdk
+dispatch since 2026-08-07. Status is **Proposed** — the ADR changes no code,
+and its migration section requires the two planners be provably equal at one
+ref before any removal begins.
+
 ### Changed — DMAC0's CM33-exclusive ownership is a written contract, not one dtsi line (#1152, #1153)
 
 RZ/V2N's MCPU DMAC (`DMAC0`, base `0x11400000`) is dual-claimable: the CM33
