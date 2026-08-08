@@ -7,6 +7,50 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — two workflows on `dev` could not be loaded by GitHub Actions
+
+`.github/workflows/pr-doc-drift.yml` carried **nine unresolved merge-conflict
+marker lines** into a merge commit:
+
+```
+<<<<<<< HEAD
+=======
+>>>>>>> 8e72b3dc (fix(docs): catch CONFIG_-prefixed and vendor-doc Kconfig symbol drift (#1228))
+```
+
+and `.github/workflows/pr-metadata-validate.yml:336` had an unquoted plain
+scalar containing a colon-space:
+
+```yaml
+- name: Gate — Zephyr core app: <-> CMakeLists.txt --core mapping
+```
+
+which YAML reads as a nested mapping key, making the whole document invalid.
+
+Neither failed loudly. A workflow that cannot be **loaded** reports as a
+`failure` with a duration of **0s**, and neither is a required status
+context — so roughly thirty metadata/schema gates and every doc-drift gate
+silently stopped running while PRs continued to merge green. Eight
+consecutive `pr-metadata-validate.yml` runs are recorded as `failure … 0s`.
+
+`pr-doc-drift.yml`'s conflict is resolved toward no `paths:` filter on
+either trigger, which is what its own (unconflicted) header comment already
+documents as the intent. `pr-metadata-validate.yml`'s step name is quoted.
+
+### Fixed — the only job running `pytest tests/scripts/` ignored other workflows
+
+`cross-platform-zephyr.yml` triggered on `.github/workflows/cross-platform-zephyr.yml`
+— its own filename — not on `.github/workflows/**`. It is the only job that
+runs `pytest tests/scripts/`, so a PR breaking a *different* workflow never
+ran the checks that would catch it. Broadened to `.github/workflows/**`.
+
+`tests/scripts/test_workflows_are_loadable.py` parses every workflow and
+rejects committed conflict markers, as two separate checks: a marked-up file
+usually also fails to parse, but markers landing inside a block scalar can
+still load and would then ship semantically wrong triggers rather than an
+obvious error. It also asserts the file glob still matches ≥20 workflows, so
+the parametrised checks cannot silently cover nothing.
+
 ### Fixed — `check_tan_docs_surface.py` decoded `tan --help` with the host locale (#1301)
 
 The check read every `tan <verb> --help` through

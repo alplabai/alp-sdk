@@ -333,7 +333,7 @@ jobs:
       # orchestrator materialises the correct one for it separately).
       # Catches both the literal-agreement drift and the actual trap --
       # two distinct cores resolving app: to the same CMakeLists.txt.
-      - name: Gate — Zephyr core app: <-> CMakeLists.txt --core mapping
+      - name: "Gate — Zephyr core app: <-> CMakeLists.txt --core mapping"
         run: python3 scripts/check_core_cmakelists_mapping.py
 
       # Unit-test the loader contract -- schema pass/fail, missing-
