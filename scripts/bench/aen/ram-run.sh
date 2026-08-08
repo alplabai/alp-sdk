@@ -140,6 +140,29 @@ if (( BASE_RAW != 0x0 && BASE_RAW != 0x50000000 && BASE_RAW != 0x58000000 &&
 	exit 6
 fi
 
+# SAFETY GATE -- confirm the AEN E8 is on the other end BEFORE loadbin+go.
+#
+# Flow C is not a read: it writes an AEN-linked image into ITCM and executes
+# it. Two probes on this bench share OEM serial 603000869, and JLinkExe has
+# no USB-path selector, so JLINK_SN cannot disambiguate them -- landing this
+# on the GD32 probe would execute foreign code on a DIFFERENT board, held
+# under a different reservation that this one does not cover (alp-sdk#1312).
+#
+# Read-only connect first; nothing is written until the DP ID matches. The
+# MRAM writers have had this gate since #1069; Flow C -- the flow people run
+# most often -- did not.
+cat > /tmp/ram-run-preflight.jlink <<EOF
+si SWD
+speed $JLINK_SPEED
+device $JLINK_DEVICE_READ
+connect
+exit
+EOF
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/ram-run-preflight.jlink \
+  > /tmp/ram-run-preflight.out 2>&1 || true
+bench_jlink_assert_connected /tmp/ram-run-preflight.out "RAM-run preflight" || exit 7
+bench_jlink_assert_aen_dpidr /tmp/ram-run-preflight.out "RAM-run preflight" || exit 4
+
 SCRIPT=$(mktemp /tmp/jlink.XXXX.jlink)
 {
   echo connect

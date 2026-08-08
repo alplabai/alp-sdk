@@ -7,6 +7,44 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — Flow C wrote and executed on a target it never identified (#1312)
+
+`scripts/bench/aen/ram-run.sh` — the default day-to-day flow — did
+`loadbin` + `go` without ever confirming which board answered. The MRAM
+writers have checked the SW-DP IDR since #1069; the flow people run most
+often did not.
+
+The probe serial cannot disambiguate. Two J-Links on this bench share OEM
+serial `603000869` (AEN E8 at USB `3-4.4.3`, V2N-M1 GD32 bridge at `3-4.2`),
+and `JLinkExe` selects only by serial with no USB-path selector — so
+`JLINK_SN=603000869` is ambiguous by construction. Flow C is not a read: it
+writes an AEN-linked image into ITCM and executes it. On the wrong probe that
+runs foreign code on the V2N-M1, a **different labgrid place** an AEN
+reservation does not cover.
+
+`bench_jlink_assert_aen_dpidr` now holds that logic in one place, and every
+helper that writes to or executes on a target calls it before touching
+anything: `ram-run.sh` (new), plus `flash-jlink.sh`, `flash-jlink-hp.sh`,
+`flash-jlink-mramxip.sh` and `flash-update-log-dual.sh`, whose inline
+copies are folded into it.
+
+**A fourth ungated MRAM writer surfaced while gating the third.**
+`flash-update-log-firewall-probe.sh` issues `loadbin $PKG $ATOC_ADDR` — a
+signed-package write — with no DP-ID check at all. Nobody had reported it;
+the test that derives the writer set from actual `loadbin` lines found it.
+
+The gate also names the wrong board rather than reporting a bare mismatch,
+now that all three probes are known:
+
+| probe | SW-DP IDR | place |
+|---|---|---|
+| AEN E8 | `0x4C013477` | `e1m-aen-evk-01` |
+| GD32 bridge | `0x0BE12477` | `e1mx-v2n-m1-01` |
+| V2N CM33 DAP | `0x6BA02477` | `e1mx-v2n-m1-01` |
+
+`V2N_CM33_DPIDR` is new, measured on `e1mx-v2n-m1-01` — `Found SW-DP with ID
+0x6BA02477`, `Found Cortex-M33 r0p4`. That core answers on **SWD, not JTAG**.
+
 ### Fixed — the new J-Link guard tests reddened `python-smoke (windows-latest)` on every PR
 
 `tests/scripts/test_bench_jlink_connect_guard.py` (added with the alp-sdk#1318
