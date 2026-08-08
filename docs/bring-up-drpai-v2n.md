@@ -249,12 +249,12 @@ geometry. `scripts/alp_model/adapters/drpai.py` never reads `spec`; it reads
 `input_shape`, `input_name`, `images` and `product` straight out of the
 `compile.drpai` block, so `python3 -m alp_cli validate` rejects a `board.yaml` written this
 way. That does not block the command in step 5 above: `python3 -m alp_cli model build`
-(`scripts/alp_cli/model.py::build_cmd`) reads `board.yaml` with a plain
+(`scripts/alp_cli/model.py::%build_cmd`) reads `board.yaml` with a plain
 `yaml.safe_load` and never calls the schema validator itself — only the
 separate `python3 -m alp_cli validate` command does — so `compile.drpai.input_shape` /
 `input_name` / `images` / `product` reach the adapter unchanged through the
 documented CLI today, exactly as
-`tests/scripts/test_alp_cli_model.py::test_alp_model_build_only_resolves_path_valued_drpai_opts`
+`tests/scripts/test_alp_cli_model.py::%test_alp_model_build_only_resolves_path_valued_drpai_opts`
 exercises end-to-end through `python3 -m alp_cli model build` itself, not by calling
 `build_model()` directly. Until the schema is reconciled with what the
 adapter actually reads, `python3 -m alp_cli validate` cannot be used against a
