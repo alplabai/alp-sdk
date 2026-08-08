@@ -61,6 +61,49 @@ per the issue's own ask, not left implicit):
     these are required inputs this gate cannot do its job without, not
     optional per-recipe data.
 
+WEST-AXIS COVERAGE, NAMED EXPLICITLY -- not left implicit.  As of this
+tree, 18 of the 35 `metadata/libraries/*.yaml` manifests have a west
+grounding this gate can compare a recipe against; the other 17 do not,
+for one of three distinct reasons (re-verify against the live tree --
+`metadata/libraries/*.yaml` gains entries; this count drifts):
+
+  * IN-TREE / NO UPSTREAM GIT PIN ANYWHERE -- genuinely nothing to
+    compare, not a gate gap.  `integration.zephyr.module: null` tied to
+    Zephyr's OWN in-tree subsystem (the `zephyr` project's own
+    revision, not a separate fetchable repo): coap, lwm2m, modbus.
+    Maintainer-written / header-only, no upstream repo at all:
+    gfx-compat, nlohmann-json, pid.  Yocto-only, no Zephyr side exists
+    to ground against: ros2.  (7 libraries)
+  * REACHABLE ONLY THROUGH ZEPHYR'S OWN `name-allowlist` IMPORT --
+    west.yml never states these modules' revision directly; only
+    Zephyr's OWN manifest does, resolvable only from a real checkout,
+    the same network-heavy oracle `check_west_manifest_module_resolution.py`
+    documents as its own "KNOWN LIMIT" and deliberately avoids:
+    cmsis-dsp, cmsis-nn, littlefs, lvgl, mbedtls, nanopb, tflite-micro,
+    and -- the motivating case for this gate, #1254/#1280 -- ZCBOR.
+    Their recipe<->metadata-version axis still runs (a real drift on
+    that axis is still caught); only recipe<->west does not. (8
+    libraries, zcbor included)
+  * KNOWN GAP, NOT A DATA-UNAVAILABILITY EXEMPTION: arm-2d and cmsis-cv
+    both correctly carry `module: null` (upstream ships no
+    zephyr/module.yml for either, so neither is a Zephyr west MODULE),
+    but west.yml DOES pin a real top-level PROJECT for each --
+    `Arm-2D` at `v1.2.6`, `CMSIS-CV` at
+    `25c6c111ee04dcfb0ae9093fd6dee4586872982c` -- kept there as the
+    audit trail / version source for their Yocto recipes.
+    `_west_grounding()` only reads `integration.zephyr.module`, so it
+    never looks up a west.yml project pin filed under a different
+    name; this is a real, fixable reach gap in this gate, not a stated
+    exemption.  Left open here: closing it needs either a new schema
+    field (a west-PROJECT name distinct from the Zephyr-MODULE name)
+    or a name-matching heuristic, and neither has been reviewed -- a
+    named follow-up, not silently folded into the "nothing to compare"
+    bucket above. (2 libraries)
+
+`test_west_axis_coverage_of_the_real_tree_is_named_here` in this gate's
+own test file locks the 18/17 split and every name above to the real
+tree, so this accounting cannot go stale without failing a test.
+
 "SAME REVISION" VS. "SAME CONSUMED TREES" -- the deliberate answer the
 issue asks this gate to state outright.  PR #1280 proved a real case
 where two DIFFERENT SHAs (a zephyrproject-rtos mirror's mutable branch
@@ -100,6 +143,7 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 
 _SRCREV_RE = re.compile(r'(?m)^SRCREV(?::[A-Za-z0-9_.%-]+)?\s*=\s*"([^"]*)"')
+_SRC_URI_RE = re.compile(r'(?m)^SRC_URI(?::[A-Za-z0-9_.%-]+)?\s*\+?=\s*"([^"]*)"')
 _TAG_RE = re.compile(r';tag=([^\s;"\\]+)')
 _SHA_RE = re.compile(r"[0-9a-fA-F]{40}")
 
@@ -124,18 +168,31 @@ def _recipe_ref(text: str) -> str | None:
     """The recipe's own pin: its SRC_URI `;tag=<X>` if present (the
     human-legible upstream tag), else its literal SRCREV.  `findall` +
     take-the-LAST match, not `re.search`'s first -- BitBake itself
-    resolves a repeated unconditional `SRCREV = "..."` assignment to
-    whichever comes LAST in the file, so picking the first would compare
-    against a value that was never actually live (the same first-match
-    fail-open class issue #1264/#1265 already found and fixed)."""
+    resolves a repeated unconditional assignment to whichever comes LAST
+    in the file, so picking the first would compare against a value that
+    was never actually live (the same first-match fail-open class issue
+    #1264/#1265 already found and fixed).  The tag search is scoped to
+    the actual last `SRC_URI = "..."` assignment's captured value, never
+    the raw file text -- a `;tag=` sitting in a comment (e.g. a "previous
+    pin was ...;tag=X" note) is not an assignment and must never be read
+    as the live pin.  Checking for a tag does not require an SRCREV
+    match to exist first: a recipe can be validly pinned via SRC_URI's
+    tag alone, and gating the tag search behind "an SRCREV line was
+    found" would silently exempt that recipe instead of reading its real
+    pin -- only return None when NEITHER a tag NOR a literal SRCREV can
+    be found at all."""
+    src_uri_matches = _SRC_URI_RE.findall(text)
+    if src_uri_matches:
+        tag_match = _TAG_RE.search(src_uri_matches[-1])
+        if tag_match:
+            return tag_match.group(1)
     matches = _SRCREV_RE.findall(text)
     if not matches:
-        return None  # no SRCREV at all -- e.g. a license-gated recipe with no fetchable source
+        return None  # no tag and no SRCREV -- e.g. a license-gated recipe with no fetchable source
     srcrev = matches[-1]
     if not srcrev or "${" in srcrev:
         return None  # ${AUTOREV} or any unresolved expansion -- not a literal, reproducible pin
-    tag_match = _TAG_RE.search(text)
-    return tag_match.group(1) if tag_match else srcrev
+    return srcrev
 
 
 def _top_level_project_revisions(manifest: dict) -> dict[str, str]:

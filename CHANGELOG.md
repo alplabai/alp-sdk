@@ -245,6 +245,29 @@ from a real checkout, the same oracle
 That module's recipe<->metadata-version axis is still checked, so it
 isn't left wholly uncovered.
 
+The recipe's own pin -- `SRC_URI ...;tag=<X>` if present, else the
+literal `SRCREV` -- is read only from the actual assignment line(s), not
+searched across the whole recipe text: a `;tag=` sitting in a comment
+(e.g. a "previous pin was ...;tag=X" note) is never mistaken for the
+live pin. The tag is also checked independently of whether an `SRCREV`
+line exists at all, so a recipe pinned via `SRC_URI`'s tag alone is
+read correctly rather than silently treated as having no pin to
+compare.
+
+The west axis is inert for most of `metadata/libraries/` -- of the 35
+manifests, 18 have a west grounding this gate can compare a recipe
+against today; the other 17, including zcbor (the motivating case),
+are named explicitly in the gate's own module docstring by exact
+reason: 7 are in-tree Zephyr subsystems or maintainer-written libraries
+with no upstream git pin anywhere to compare; 8 (zcbor among them) are
+reachable only through Zephyr's own `name-allowlist` import, whose
+revision `west.yml` never states directly; 2 (`arm-2d`, `cmsis-cv`)
+are a named, still-open gap -- each carries a real west.yml top-level
+project pin under a different name than its `integration.zephyr.module`
+field, which this gate does not yet look up. A dedicated test re-derives
+this 18/17 split against the real tree so the accounting cannot drift
+out of date silently.
+
 States its "same revision vs. same consumed trees" answer outright
 rather than leaving it implicit: a recipe ref and its comparison target
 are compared only when they're the SAME KIND of git reference (both

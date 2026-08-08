@@ -24,6 +24,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import yaml
+
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "scripts"))
 import check_library_pin_parity as gate  # noqa: E402
@@ -166,6 +168,49 @@ def test_repeated_srcrev_resolves_to_last_assignment_not_first(tmp_path: Path):
     assert any(_SHA_B in p and _SHA_A in p for p in problems), problems
 
 
+def test_tag_in_a_comment_is_not_read_as_the_recipe_pin(tmp_path: Path):
+    """A `;tag=` sitting in a COMMENT line (e.g. a "previous pin was ..."
+    note) is not an assignment and must never be read as the live pin --
+    only the actual `SRC_URI = "..."` assignment's own value is searched
+    for a tag.  Real SRCREV is SHA_A; metadata declares a genuinely
+    drifted SHA_B -- both SHAs, same kind, must be reported.  Before the
+    fix, an unanchored `_TAG_RE.search(text)` over the whole file matched
+    the comment's decoy tag instead, turning this into a SHA-vs-tag
+    "different kind" pair that the gate silently declines to compare."""
+    _west_yml(tmp_path)
+    _lib_manifest(tmp_path, "cmsisstream", _SHA_B, module="cmsisstream")
+    recipes_dir = tmp_path / "meta-alp-sdk" / "recipes-devtools" / "cmsisstream"
+    recipes_dir.mkdir(parents=True, exist_ok=True)
+    (recipes_dir / "cmsisstream_3.2.0.bb").write_text(
+        "# previous pin used ;tag=v9.9.9 before the vendor moved to SHA pins\n"
+        'SRC_URI = "git://example.com/upstream.git;protocol=https"\n'
+        f'SRCREV  = "{_SHA_A}"\n',
+        encoding="utf-8",
+    )
+    problems = gate.find_problems(tmp_path)
+    assert any(_SHA_A in p and _SHA_B in p for p in problems), problems
+
+
+def test_tag_only_recipe_with_no_srcrev_line_is_still_read(tmp_path: Path):
+    """A recipe pinned ONLY via SRC_URI's `;tag=<X>`, with no `SRCREV =`
+    line in the file at all, still has a real, extractable pin per the
+    docstring's own stated priority (tag if present, else SRCREV) -- it
+    must not be silently exempted just because no SRCREV line exists.
+    Before the fix, `_recipe_ref` required an SRCREV match to exist
+    before even looking for a tag, so this recipe returned None (treated
+    as "nothing to compare") despite carrying a real, live tag pin."""
+    _west_yml(tmp_path)
+    _lib_manifest(tmp_path, "cmsisstream", "v9.9.9", module="cmsisstream")  # deliberately drifted
+    recipes_dir = tmp_path / "meta-alp-sdk" / "recipes-devtools" / "cmsisstream"
+    recipes_dir.mkdir(parents=True, exist_ok=True)
+    (recipes_dir / "cmsisstream_3.2.0.bb").write_text(
+        'SRC_URI = "git://example.com/upstream.git;protocol=https;tag=v3.2.0"\n',
+        encoding="utf-8",
+    )
+    problems = gate.find_problems(tmp_path)
+    assert any("v3.2.0" in p and "v9.9.9" in p for p in problems), problems
+
+
 def test_recipe_with_no_metadata_libraries_counterpart_not_flagged(tmp_path: Path):
     """A recipe whose PN names no metadata/libraries/<pn>.yaml (this
     layer's own product recipes, e.g. dx-rt/alp-sdk) is out of scope --
@@ -276,3 +321,46 @@ def test_missing_meta_alp_sdk_fails_loudly_not_silently(tmp_path: Path):
     (tmp_path / "metadata" / "libraries").mkdir(parents=True, exist_ok=True)
     problems = gate.find_problems(tmp_path)
     assert any("meta-alp-sdk" in p and "not found" in p for p in problems)
+
+
+# Issue #1281's own headline ask ("cross-check the west axis") is inert for
+# most of metadata/libraries/ -- this locks the module docstring's WEST-AXIS
+# COVERAGE accounting to the REAL tree, so the enumeration cannot drift
+# silently out of date: a library added, removed, or reclassified without
+# updating both the docstring and this test fails here first.
+_WEST_AXIS_IN_TREE_OR_NO_UPSTREAM_PIN = {
+    "coap", "lwm2m", "modbus", "gfx-compat", "nlohmann-json", "pid", "ros2",
+}
+_WEST_AXIS_ALLOWLIST_ONLY = {
+    "cmsis-dsp", "cmsis-nn", "littlefs", "lvgl", "mbedtls", "nanopb",
+    "tflite-micro", "zcbor",
+}
+_WEST_AXIS_KNOWN_GAP = {"arm-2d", "cmsis-cv"}
+
+
+def test_west_axis_coverage_of_the_real_tree_is_named_here():
+    """Re-derives, against the REAL repo's west.yml + metadata/libraries/
+    (not a tmp_path fixture), which manifests `_west_grounding()` can
+    ground and which it cannot -- and asserts the "cannot" set is exactly
+    the three named categories the module docstring enumerates.  Proves
+    zcbor -- the issue's own motivating case -- is named as an exemption
+    rather than silently uncovered."""
+    manifest = yaml.safe_load((REPO / "west.yml").read_text(encoding="utf-8"))["manifest"]
+    top_level = gate._top_level_project_revisions(manifest)
+
+    libdir = REPO / "metadata" / "libraries"
+    covered: set[str] = set()
+    not_covered: set[str] = set()
+    for f in sorted(libdir.glob("*.yaml")):
+        lib_doc = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+        grounding = gate._west_grounding(lib_doc, f.name, top_level)
+        (covered if grounding is not None else not_covered).add(f.stem)
+
+    expected_not_covered = (_WEST_AXIS_IN_TREE_OR_NO_UPSTREAM_PIN
+                             | _WEST_AXIS_ALLOWLIST_ONLY | _WEST_AXIS_KNOWN_GAP)
+    assert not_covered == expected_not_covered, (
+        f"west-axis coverage drifted from the docstring's accounting -- "
+        f"newly uncovered: {not_covered - expected_not_covered}, "
+        f"newly covered: {expected_not_covered - not_covered}")
+    assert "zcbor" in not_covered  # the issue's own motivating case, named not silent
+    assert covered | not_covered == {f.stem for f in libdir.glob("*.yaml")}
