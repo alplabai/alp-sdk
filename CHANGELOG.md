@@ -719,8 +719,34 @@ the board.yaml-driven path it exists to protect. It now only resolves the
 keys that are actually paths (`config`, `calibration`, `images`, `spec`).
 Separately, and not fixed here: `metadata/schemas/board.schema.json`'s
 `models[].compile.drpai` block still only declares a `spec:` key and rejects
-`input_shape`/`input_name`/`images`/`product` outright, so no schema-valid
-`board.yaml` can reach this path yet -- see `docs/bring-up-drpai-v2n.md`.
+`input_shape`/`input_name`/`images`/`product` outright, so `alp validate`
+cannot be used against a `board.yaml` with a `compile.drpai` block yet --
+`alp model build` still can, since it never runs schema validation itself;
+see `docs/bring-up-drpai-v2n.md`.
+
+Round 4 review caught two further defects in the fix above. First, the
+224x224 check's `input_shape = str(input_shape)` normalization -- added to
+stop `.split(",")` crashing on a YAML flow-sequence `input_shape:
+[1,3,224,224]` list -- broke the very case it was meant to support:
+`str([1, 3, 224, 224])` is `'[1, 3, 224, 224]'`, and `.split(",")` on THAT
+tears into tokens (`'[1'`, `' 224]'`, ...) that don't parse as plain ints, so
+a genuinely valid list-form 224x224 classifier shape was misdiagnosed as
+unsupported and rejected. `_is_224_imagenet_shape` now compares the PARSED
+dimensions (`_parse_shape_dims`, a new helper accepting either a
+comma-separated string or a list/tuple) rather than a stringified spelling;
+the vendor CLI's `-s` argument is built from those parsed dims too, so it is
+always the comma-joined form the tutorial expects, never Python's `str()` of
+a list. Second, `docs/bring-up-drpai-v2n.md` documented `alp model build
+--board board.yaml` as the way to compile (step 5) and then, seventeen lines
+later, told readers no schema-valid `board.yaml` can drive that path and to
+call `build_model()` directly instead -- an internal Python API, and wrong:
+`alp model build` (`scripts/alp_cli/model.py::build_cmd`) reads `board.yaml`
+with a plain `yaml.safe_load` and never calls the schema validator (only the
+separate `alp validate` command does), so the documented CLI command already
+works with `compile.drpai.input_shape`/`input_name`/`images`/`product` today,
+exactly as `test_alp_model_build_only_resolves_path_valued_drpai_opts`
+exercises end-to-end through the CLI itself. The doc no longer sends readers
+around the supported command to an internal API.
 
 ## [v0.15.0] - 2026-08-07
 

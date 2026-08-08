@@ -231,17 +231,25 @@ declared in `board.yaml` for every backend the SoM resolves to
 `models[].compile.drpai.product` (falling back to `accel_config`, then
 `"V2N"`), not a CLI flag.
 
-**`board.yaml`'s schema does not describe this config yet.**
+**`board.yaml`'s schema does not describe this config yet — use
+`alp model build` above anyway; it does not run schema validation.**
 `metadata/schemas/board.schema.json`'s `models[].compile.drpai` block only
 declares a `spec:` key (`additionalProperties: false`, `required: ["spec"]`)
 — a leftover from a design where an external spec file carried the model
 geometry. `scripts/alp_model/adapters/drpai.py` never reads `spec`; it reads
 `input_shape`, `input_name`, `images` and `product` straight out of the
-`compile.drpai` block. No schema-valid `board.yaml` can drive this path
-today. Until the schema is reconciled with what the adapter actually reads,
-thread `compile.drpai` in directly as `build_model()`'s `compile_opts`
-argument — the same way `tests/scripts/test_alp_model_adapters.py` and
-`tests/scripts/test_alp_cli_model.py` do — rather than through `alp validate`.
+`compile.drpai` block, so `alp validate` rejects a `board.yaml` written this
+way. That does not block the command in step 5 above: `alp model build`
+(`scripts/alp_cli/model.py::build_cmd`) reads `board.yaml` with a plain
+`yaml.safe_load` and never calls the schema validator itself — only the
+separate `alp validate` command does — so `compile.drpai.input_shape` /
+`input_name` / `images` / `product` reach the adapter unchanged through the
+documented CLI today, exactly as
+`tests/scripts/test_alp_cli_model.py::test_alp_model_build_only_resolves_path_valued_drpai_opts`
+exercises end-to-end through `alp model build` itself, not by calling
+`build_model()` directly. Until the schema is reconciled with what the
+adapter actually reads, `alp validate` cannot be used against a
+`board.yaml` with a `compile.drpai` block; `alp model build` can.
 
 `scripts/alp_model/adapters/drpai.py` drives
 `$ALP_DRPAI_TVM_HOME/tutorials/compile_onnx_model_quant.py` with `PRODUCT` in the

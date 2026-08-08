@@ -334,31 +334,75 @@ def test_drpai_compile_rejects_non_224_images_early(tmp_path, monkeypatch):
 
 def test_drpai_compile_handles_non_str_input_shape_without_crashing(tmp_path, monkeypatch):
     # board.yaml can hand the adapter a YAML flow-sequence input_shape
-    # ([1,3,224,224], parsed as a Python list) instead of a string; that must
-    # produce the same clean RuntimeError as any other rejected shape, not an
-    # uncaught AttributeError from .split() on a non-str.
+    # ([1,3,640,640], parsed as a Python list) instead of a string; a
+    # non-224 list shape must produce the same clean RuntimeError as its
+    # string spelling, not an uncaught AttributeError from .split() on a
+    # non-str.
     monkeypatch.setenv("ALP_DRPAI_TVM_HOME", str(tmp_path))
     src = tmp_path / "m.onnx"; src.write_bytes(b"ONNX")
     calib = tmp_path / "calib"; calib.mkdir()
-    opts = {"input_shape": [1, 3, 224, 224], "input_name": "images",
+    opts = {"input_shape": [1, 3, 640, 640], "input_name": "images",
             "images": str(calib), "product": "V2N"}
     with pytest.raises(RuntimeError, match="pre_process_imagenet_pytorch"):
         DrpaiAdapter().compile(src, accel_config="", out_dir=tmp_path, opts=opts)
 
 
+def test_drpai_compile_accepts_224_shape_as_yaml_list(tmp_path, monkeypatch):
+    # Round 4 (#1271): the adapter used to str()-normalize input_shape before
+    # the 224x224 check, so str([1, 3, 224, 224]) == '[1, 3, 224, 224]' and
+    # .split(",") on THAT tears into tokens ('[1', ' 224]', ...) that can't
+    # parse as ints -- misdiagnosing a genuinely valid YAML-list 224x224
+    # classifier shape as unsupported. A list-form 224x224 shape must compile
+    # exactly like its string spelling, and the vendor CLI must still see a
+    # comma-joined "-s 1,3,224,224", never Python's str() of the list.
+    home = tmp_path / "tvm"; (home / "tutorials").mkdir(parents=True)
+    monkeypatch.setenv("ALP_DRPAI_TVM_HOME", str(home))
+    src = tmp_path / "m.onnx"; src.write_bytes(b"ONNX-IN")
+    calib = tmp_path / "calib"; calib.mkdir()
+    (calib / "0.png").write_bytes(b"PNG")
+    seen = {}
+
+    def fake_run(cmd, capture_output, text, timeout, env):
+        seen["cmd"] = cmd
+        out = Path(cmd[cmd.index("-o") + 1])
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "drp_desc.bin").write_bytes(b"DESC")
+        (out / "weight.bin").write_bytes(b"WEIGHT")
+        (out / "addr_map.txt").write_text("0x0", encoding="utf-8")
+
+        class _R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        return _R()
+    monkeypatch.setattr("alp_model.adapters.drpai.subprocess.run", fake_run)
+
+    opts = {"input_shape": [1, 3, 224, 224], "input_name": "input",
+            "images": str(calib), "product": "V2N"}
+    blob = DrpaiAdapter().compile(src, accel_config="", out_dir=tmp_path, opts=opts)
+    assert blob.format == "drpai_dir"
+    assert seen["cmd"][seen["cmd"].index("-s") + 1] == "1,3,224,224"
+
+
 def test_drpai_is_224_imagenet_shape_accepts_nchw():
     from alp_model.adapters.drpai import _is_224_imagenet_shape
     assert _is_224_imagenet_shape("1,3,224,224") is True
+    # Same geometry as a YAML flow-sequence list/tuple must match too --
+    # compared structurally, not via a stringified spelling (#1271 round 4).
+    assert _is_224_imagenet_shape([1, 3, 224, 224]) is True
+    assert _is_224_imagenet_shape((1, 3, 224, 224)) is True
 
 
 @pytest.mark.parametrize("input_shape", [
-    "1,3,640,640",     # YOLOX detector geometry (the issue's repro)
-    "1,3,300,300",     # SSD-style detector geometry
-    "1,224,224,3",      # NHWC: not what accepts() ever hands this ONNX-only
-                         # adapter (ONNX is NCHW by convention) -- unsourced,
-                         # see #1271 review; must NOT be accepted
-    "1,224,224",        # wrong rank
-    "not,a,shape,x",    # unparsable
+    "1,3,640,640",       # YOLOX detector geometry (the issue's repro)
+    [1, 3, 640, 640],    # same geometry as a YAML flow-sequence list
+    "1,3,300,300",       # SSD-style detector geometry
+    "1,224,224,3",       # NHWC: not what accepts() ever hands this ONNX-only
+                          # adapter (ONNX is NCHW by convention) -- unsourced,
+                          # see #1271 review; must NOT be accepted
+    [1, 224, 224, 3],    # same NHWC geometry as a list
+    "1,224,224",         # wrong rank
+    "not,a,shape,x",     # unparsable
 ])
 def test_drpai_is_224_imagenet_shape_rejects_non_224(input_shape):
     from alp_model.adapters.drpai import _is_224_imagenet_shape

@@ -48,7 +48,27 @@ def _tvm_home() -> Path | None:
     return Path(root) if root and Path(root).is_dir() else None
 
 
-def _is_224_imagenet_shape(input_shape: str) -> bool:
+def _parse_shape_dims(input_shape) -> list[int] | None:
+    """Parse input_shape into a list of dimension ints, accepting either
+    spelling board.yaml (YAML) can hand us: a comma-separated string
+    (``"1,3,224,224"``) or an already-parsed YAML flow-sequence list/tuple
+    (``[1, 3, 224, 224]``). Returns None when it parses as neither -- callers
+    treat that as "not the 224x224 classifier geometry" rather than
+    crashing on a malformed value."""
+    if isinstance(input_shape, (list, tuple)):
+        try:
+            return [int(d) for d in input_shape]
+        except (TypeError, ValueError):
+            return None
+    if not isinstance(input_shape, str):
+        return None
+    try:
+        return [int(d.strip()) for d in input_shape.split(",")]
+    except ValueError:
+        return None
+
+
+def _is_224_imagenet_shape(input_shape) -> bool:
     """True when input_shape is the 224x224 ImageNet-classifier geometry the
     vendor tutorial's ``--images`` path hard-codes.
 
@@ -61,12 +81,16 @@ def _is_224_imagenet_shape(input_shape: str) -> bool:
     see accepts() -- uses by convention). Anything else -- e.g. a detector's
     real geometry like YOLOX's ``1,3,640,640`` -- silently mismatches and the
     vendor tool aborts deep inside with a shape-broadcast error after the
-    (multi-minute) compile has already run. See alp-sdk#1271."""
-    try:
-        dims = [int(d.strip()) for d in input_shape.split(",")]
-    except ValueError:
-        return False
-    return dims == [1, 3, 224, 224]
+    (multi-minute) compile has already run. See alp-sdk#1271.
+
+    Compares the PARSED dimensions (via _parse_shape_dims), never a
+    stringified spelling: ``str([1, 3, 224, 224])`` is
+    ``'[1, 3, 224, 224]'``, and ``.split(",")`` on THAT tears into
+    ``'[1'``, ``' 3'``, ``' 224'``, ``' 224]'`` -- none of which parse as
+    plain ints -- so a valid YAML-list 224x224 shape was misdiagnosed as
+    unsupported when this used to normalize input_shape to str() first
+    (alp-sdk#1271 round 4)."""
+    return _parse_shape_dims(input_shape) == [1, 3, 224, 224]
 
 
 def _compiler_version(tvm_home: Path) -> str:
@@ -138,17 +162,18 @@ class DrpaiAdapter(CompilerAdapter):
             raise RuntimeError(
                 "DRP-AI compile needs models[].compile.drpai with "
                 "input_shape, input_name and images (a calibration image dir)")
-        # board.yaml (YAML) can hand us a non-str (e.g. a flow-sequence
-        # input_shape: [1,3,224,224]); normalize once so the 224x224 check
-        # and the vendor CLI arg below always see the same string, instead of
-        # the check crashing on .split() while the CLI arg (which already
-        # str()s at use) accepted it.
-        input_shape = str(input_shape)
 
         # The vendor tutorial's --images path only preprocesses to 224x224
         # (see _is_224_imagenet_shape). Fail here, before the multi-minute
         # compile runs, instead of forwarding a detector/segmentation
         # geometry into a `could not broadcast` crash deep in vendor code.
+        # board.yaml (YAML) can hand us input_shape as either a comma string
+        # ("1,3,224,224") or an already-parsed flow-sequence list
+        # ([1, 3, 224, 224]); _is_224_imagenet_shape/_parse_shape_dims compare
+        # the PARSED dimensions for both spellings, never a stringified form
+        # -- str([1, 3, 224, 224]) is '[1, 3, 224, 224]', which .split(",")
+        # tears into tokens ('[1', ' 224]', ...) that don't parse as ints,
+        # misdiagnosing a valid 224x224 list shape as unsupported.
         if not _is_224_imagenet_shape(input_shape):
             raise RuntimeError(
                 f"DRP-AI --images calibration only works for the 224x224 "
@@ -160,6 +185,10 @@ class DrpaiAdapter(CompilerAdapter):
                 f"(tracked in alp-sdk#1271) -- there is no random-frame "
                 f"fallback wired into this adapter today, so this compile "
                 f"cannot proceed with calibrated accuracy.")
+        # Vendor CLI's -s wants a comma-joined string ("1,3,224,224") --
+        # never Python's str() of a list -- so build it from the parsed
+        # dims, not from whatever spelling opts.input_shape arrived in.
+        shape_arg = ",".join(str(d) for d in _parse_shape_dims(input_shape))
 
         product = (opts.get("product") or accel_config or "V2N").upper()
         if product not in ("V2N", "V2H"):
@@ -177,7 +206,7 @@ class DrpaiAdapter(CompilerAdapter):
         cmd = [
             "python3", str(script), str(source),
             "-o", str(obj_dir),
-            "-s", str(input_shape),
+            "-s", shape_arg,
             "-i", str(input_name),
             "--images", str(images),
         ]
