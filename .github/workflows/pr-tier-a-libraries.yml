@@ -8,11 +8,14 @@
 # library_knobs smoke app with those real emitted CONFIG lines.
 #
 # native_sim can only prove the Tier-A libraries whose Zephyr Kconfig
-# can build on the host architecture: lvgl, cmsis-dsp, nanopb, zcbor,
-# and modbus.  cmsis-nn is still Tier A, but upstream Zephyr gates it
-# with `depends on CPU_CORTEX_M`; its metadata and emission stay
-# covered by the Python tests until a real Cortex-M board build lane
-# is available.
+# can build on the host architecture -- that set is
+# metadata/registries/tier-a-library-ci.json's hostBuild.libraries (the
+# single source; not hand-duplicated here so this comment can't go
+# stale the way it did before #1274, when a 4-name list here missed
+# Modbus joining as the 5th).  cmsis-nn is still Tier A, but upstream
+# Zephyr gates it with `depends on CPU_CORTEX_M`; its metadata and
+# emission stay covered by the Python tests until a real Cortex-M
+# board build lane is available.
 
 name: pr-tier-a-libraries
 
@@ -67,14 +70,19 @@ jobs:
       matrix: ${{ steps.matrix.outputs.matrix }}
 
     steps:
+      # #1274: a marketplace `uses:` step is its own network round trip
+      # (fetch the action, then do its job) and can stall like any other
+      # step here -- same reasoning as tier-a-library-build's caps below.
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
+        timeout-minutes: 2
         with:
           path: alp-sdk
           fetch-depth: 1
 
       - name: Set up Python
         uses: actions/setup-python@v6
+        timeout-minutes: 2
         with:
           python-version-file: alp-sdk/.python-version
 
@@ -124,7 +132,7 @@ jobs:
       # step instead of naming the actual stall. Every step below that does
       # real network/install/compile work now carries its own timeout,
       # short enough to fail fast but with headroom over what it costs on
-      # a healthy run; the sum stays under the job's 30-minute ceiling so a
+      # a healthy run; the sum stays under the job's 33-minute ceiling so a
       # step running late can still be killed by its own timeout first.
       - name: Install host build tools
         timeout-minutes: 4
@@ -250,14 +258,19 @@ jobs:
     timeout-minutes: 10
 
     steps:
+      # #1274: same reasoning as compute-family-matrix's Checkout/Set up
+      # Python above -- a marketplace `uses:` step makes its own network
+      # round trip and can stall.
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
+        timeout-minutes: 2
         with:
           path: alp-sdk
           fetch-depth: 1
 
       - name: Set up Python
         uses: actions/setup-python@v6
+        timeout-minutes: 2
         with:
           python-version-file: alp-sdk/.python-version
 
@@ -268,8 +281,15 @@ jobs:
         timeout-minutes: 2
         run: pip install click jsonschema pyyaml pytest
 
+      # #1274: this job's `pytest` invocation is the only lane that runs
+      # on a PR touching *only* this workflow file (the two lanes that run
+      # the full `tests/scripts/` sweep -- pr-metadata-validate.yml and
+      # cross-platform-zephyr.yml -- do not trigger on
+      # `.github/workflows/pr-tier-a-libraries.yml`). Naming
+      # test_tier_a_workflow_step_timeouts.py here is what makes the
+      # regression gate itself run when someone edits this file.
       - name: Validate Tier-A library metadata and emit tests
         working-directory: ${{ github.workspace }}/alp-sdk
         run: |
           python3 scripts/validate_metadata.py
-          python3 -m pytest tests/scripts/test_library_layer.py tests/scripts/test_project_*.py -q
+          python3 -m pytest tests/scripts/test_library_layer.py tests/scripts/test_project_*.py tests/scripts/test_tier_a_workflow_step_timeouts.py -q

@@ -889,28 +889,37 @@ every run inspected. The library set does not need sharding the way
 bottleneck; setup (apt-get, `west update`) was, and stays constant regardless
 of library count.
 
-`.github/workflows/pr-tier-a-libraries.yml`'s `tier-a-library-build` job now
-carries `timeout-minutes` on every step that does real network/install/
-compile work (`Checkout alp-sdk`: 2, `Set up Python`: 2, `Install host
-build tools`: 4, `Install west`: 2, `west init Zephyr workspace`: 8, `Cache
-Zephyr modules`: 2, `Cache ccache objects`: 2, `pip install Zephyr +
-alp-sdk requirements`: 3, `Build Tier-A library smoke on native_sim`: 6),
-so a future stall in any one of them fails fast and names itself, instead
-of silently spending the whole job's budget and reporting a timeout on
-whichever step happened to be running when the ceiling hit. Those per-step
-caps sum to 31 minutes; the job-level ceiling moved from 30 to 33 minutes
-to stay strictly above that sum, so a step running late in the job can
-still be killed by its own cap first rather than by the job-level one --
+`.github/workflows/pr-tier-a-libraries.yml`'s three jobs now carry
+`timeout-minutes` on every step whose `run:`/`uses:` body does real
+network/install/compile work, not just the `tier-a-library-build` job
+#1272 hit: `compute-family-matrix`'s `Checkout alp-sdk` and `Set up
+Python` (2 each, ceiling 5); `tier-a-library-build`'s `Checkout alp-sdk`:
+2, `Set up Python`: 2, `Install host build tools`: 4, `Install west`: 2,
+`west init Zephyr workspace`: 8, `Cache Zephyr modules`: 2, `Cache ccache
+objects`: 2, `pip install Zephyr + alp-sdk requirements`: 3, `Build
+Tier-A library smoke on native_sim`: 6 (sum 31, under the job's 33-minute
+ceiling -- moved up from 30 to stay strictly above that sum); and
+`cmsis-nn-metadata`'s `Checkout alp-sdk`, `Set up Python`, and `Install
+Python deps` (2 each, ceiling 10, sum 6). A future stall in any one of
+them now fails fast and names itself, instead of silently spending the
+whole job's budget and reporting a timeout on whichever step happened to
+be running when the ceiling hit.
+
 `tests/scripts/test_tier_a_workflow_step_timeouts.py` enforces both
-properties: every step whose `run:`/`uses:` body does real network or
-compile work (a marketplace `uses:` action always makes its own round
-trip, same as `actions/checkout`/`actions/cache` here) carries a timeout
-under the ceiling, and the caps' sum stays under the ceiling. Successful
-runs still finish in 5-6 minutes, so the 3-minute ceiling move only
-accounts for the two newly-capped `uses:` steps -- it does not move the
-cliff for #1272's own steps, which are unchanged. The sibling
-`cmsis-nn-metadata` job's `Install Python deps` step (same `pip install`
-failure class, same file) now also carries `timeout-minutes: 2`.
+properties across all three jobs, not just `tier-a-library-build`: every
+step whose `run:`/`uses:` body does real network or compile work (a
+marketplace `uses:` action always makes its own round trip, same as
+`actions/checkout`/`actions/cache` here) carries a timeout under its
+job's own ceiling, and each job's caps sum under that same ceiling. The
+`cmsis-nn-metadata` job's `Validate Tier-A library metadata and emit
+tests` step now also runs this test file directly -- it is the only lane
+that executes when a PR touches nothing but this workflow file (the two
+lanes that run the full `tests/scripts/` sweep, `pr-metadata-validate.yml`
+and `cross-platform-zephyr.yml`, do not trigger on
+`.github/workflows/pr-tier-a-libraries.yml`'s own path), so without this
+the regression gate would not run on the file it guards. Observed
+successful runs (31218962355, 31217270650) finish in 4m19s-6m40s per
+shard, comfortably under every new cap.
 
 ## [v0.15.0] - 2026-08-07
 
