@@ -71,6 +71,38 @@ Caught by `scripts/check_emit_snapshots.py`, which reported six snapshot
 DIFFs. The committed goldens were correct throughout — the fix brings the
 emitter back to them (6 DIFFs before, 0 after) rather than regenerating them,
 which would have frozen the defect as expected output.
+### Fixed — the SRCREV parity gate lost a recipe's pin to an appended patch (#1281)
+
+`_recipe_ref` read only the LAST `SRC_URI` assignment when looking for a
+`;tag=`. BitBake's `+=` **appends** rather than replaces, so on the commonest
+real shape
+
+```
+SRC_URI = "git://...;protocol=https;branch=main;tag=v1.2.3"
+SRC_URI += " file://0001-fix.patch"
+```
+
+the last assignment is the patch line, carries no tag, and the function fell
+through to `SRCREV` — finding none, it returned `None` and the recipe was
+silently **exempted** from the parity check instead of compared against its
+real pin. A fail-open on the gate's own subject.
+
+The assignments are now folded the way BitBake folds them: `=` replaces,
+`+=` appends, and the tag is searched in the resulting effective value. A
+later plain `=` still wins, so an intentionally re-pinned recipe reports its
+current tag and not a superseded one. A `;tag=` inside a comment is still
+never read as the live pin — that is an assignment-shaped string in prose,
+not an assignment.
+
+The west-axis coverage test also dropped a tautology:
+`covered | not_covered == {f.stem for f in libdir.glob("*.yaml")}` — both
+sets are built by iterating that exact glob and adding `f.stem`, so their
+union equalled the glob by construction and the assertion could never fail.
+Replaced with checks that can: the corpus is non-empty (an assertion sweep
+over an empty glob passes vacuously), the two sets are disjoint, and the west
+axis still grounds a real share of the manifests. If `covered` ever empties,
+the axis is inert everywhere and the gate would report green while checking
+only the SRCREV half.
 
 ### Fixed — two workflows on `dev` could not be loaded by GitHub Actions
 
@@ -221,6 +253,70 @@ additive metadata only.
 
 `metadata/catalog.json` and `alp.lock` regenerated
 (`python3 scripts/gen_catalog.py && west alp-lock`).
+### Added — `check_library_pin_parity.py`: a meta-alp-sdk recipe's pin must match its west.yml / metadata/libraries counterpart (#1281)
+
+`grep -rln SRCREV scripts/` returned no file -- nothing cross-checked a
+`meta-alp-sdk` recipe's `SRCREV`/tag against the revision `west.yml` pins,
+or the version `metadata/libraries/<name>.yaml` records, for the SAME
+third-party module. A `.alpmodel`-shaped library decoded by both the
+M-class Zephyr build and the A-class Yocto build (zcbor, #1254/#1280)
+could drift to two different upstream pins on the two OSes with CI
+staying green throughout, discovered only when a packed model decoded
+differently on the two cores -- the hardest class of bug to attribute.
+
+The recipe<->manifest link is BitBake's own `<pn>_<pv>.bb` naming
+convention, not an invented field: a recipe names a real curated library
+the moment `metadata/libraries/<pn>.yaml` exists. Deliberate, explicit
+exemptions rather than silent skips: a recipe with no such counterpart
+(this layer's own `alp-sdk`/`dx-rt` recipes), an unpinned `${AUTOREV}`
+recipe, and -- the exact zcbor shape -- a module reachable only through
+Zephyr's own `name-allowlist` import, whose revision `west.yml` never
+states directly (that lives in Zephyr's own manifest, resolvable only
+from a real checkout, the same oracle
+`check_west_manifest_module_resolution.py` already declines to carry).
+That module's recipe<->metadata-version axis is still checked, so it
+isn't left wholly uncovered.
+
+The recipe's own pin -- `SRC_URI ...;tag=<X>` if present, else the
+literal `SRCREV` -- is read only from the actual assignment line(s), not
+searched across the whole recipe text: a `;tag=` sitting in a comment
+(e.g. a "previous pin was ...;tag=X" note) is never mistaken for the
+live pin. The tag is also checked independently of whether an `SRCREV`
+line exists at all, so a recipe pinned via `SRC_URI`'s tag alone is
+read correctly rather than silently treated as having no pin to
+compare.
+
+The west axis is inert for most of `metadata/libraries/` -- of the 35
+manifests, 18 have a west grounding this gate can compare a recipe
+against today; the other 17, including zcbor (the motivating case),
+are named explicitly in the gate's own module docstring by exact
+reason: 7 are in-tree Zephyr subsystems or maintainer-written libraries
+with no upstream git pin anywhere to compare; 8 (zcbor among them) are
+reachable only through Zephyr's own `name-allowlist` import, whose
+revision `west.yml` never states directly; 2 (`arm-2d`, `cmsis-cv`)
+are a named, still-open gap -- each carries a real west.yml top-level
+project pin under a different name than its `integration.zephyr.module`
+field, which this gate does not yet look up. A dedicated test re-derives
+this 18/17 split against the real tree so the accounting cannot drift
+out of date silently.
+
+States its "same revision vs. same consumed trees" answer outright
+rather than leaving it implicit: a recipe ref and its comparison target
+are compared only when they're the SAME KIND of git reference (both
+40-hex SHAs, or both not) -- a SHA-vs-tag pairing is a representation
+mismatch, not provable drift without a real clone (subtree-hash
+comparison, the more honest check, needs one), so it is never reported.
+This is what keeps PR #1280's real zcbor pin -- a canonical-remote tag
+proven by hand to check out byte-identical trees to a different,
+mirror-only SHA -- from becoming a permanent false positive.
+
+Proven in both directions: green over the current tree (vacuously --
+no third-party recipe exists yet), red on an injected drift on each of
+the two comparison axes naming the file, and confirmed NOT red on each
+of the three exemptions above. Mutation-tested against both comparison
+axes and the last-assignment-wins `SRCREV` resolution.
+
+Wired into `pr-metadata-validate.yml`'s `validate` job.
 
 ### Fixed — `check_tan_docs_surface.py` decoded `tan --help` with the host locale (#1301)
 

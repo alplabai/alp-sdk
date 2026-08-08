@@ -52,6 +52,8 @@ on:
       - 'examples/**/*.c'
       - 'west.yml'
       - 'metadata/libraries/**'
+      - 'meta-alp-sdk/**'
+      - 'scripts/check_library_pin_parity.py'
       - 'scripts/requirements.txt'
       - 'scripts/alp_cli/__init__.py'
       - 'scripts/alp_lock/**'
@@ -94,6 +96,8 @@ on:
       - 'examples/**/*.c'
       - 'west.yml'
       - 'metadata/libraries/**'
+      - 'meta-alp-sdk/**'
+      - 'scripts/check_library_pin_parity.py'
       - 'scripts/requirements.txt'
       - 'scripts/alp_cli/__init__.py'
       - 'scripts/alp_lock/**'
@@ -394,6 +398,14 @@ jobs:
       # shadowed by a same-named top-level project.
       - name: Gate — west.yml module resolution (alp-sdk-owned workspace)
         run: python3 scripts/check_west_manifest_module_resolution.py
+
+      # #1281: nothing cross-checked a meta-alp-sdk recipe's SRCREV/tag
+      # against the west.yml revision or metadata/libraries version pinning
+      # the SAME third-party module -- a Zephyr-side and Yocto-side pin
+      # could drift to two different upstream versions with CI staying
+      # green throughout.
+      - name: Gate — meta-alp-sdk recipe pin <-> west.yml / metadata/libraries parity
+        run: python3 scripts/check_library_pin_parity.py
 
       - name: "Gate — SoM preset board: targets resolve to a real board tree"
         run: python3 scripts/check_board_target_tree_parity.py
