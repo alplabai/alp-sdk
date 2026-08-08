@@ -258,12 +258,15 @@ def _chip_truth(root: Path) -> tuple[dict[str, str], dict[str, str]]:
 def _bus_pattern(bus_key: str) -> re.Pattern[str]:
     literal = bus_key.upper()
     # The portable-API instance ID spells some bus keys `ALP_`-prefixed
-    # (#1270's own issue text writes "ALP_E1M_I2C0", and it is the
-    # tree's dominant spelling for e1m_i2c0 -- 66 sites vs. 0 for the
-    # bare `E1M_I2C0`). A bare `\bE1M_I2C0\b` can never match inside
-    # `ALP_E1M_I2C0`: the `_` immediately before `E1M` is itself a word
-    # character, so `\b` finds no boundary there. Always offer the
-    # `ALP_`-prefixed form as an alternate spelling too.
+    # (#1270's own issue text writes "ALP_E1M_I2C0", and it is the tree's
+    # dominant spelling for e1m_i2c0 -- measured over `git ls-files`:
+    # 171 `ALP_E1M_I2C0` against 86 bare `E1M_I2C0`).
+    #
+    # Both spellings have to be offered, and the reason is not that ratio:
+    # a bare `\bE1M_I2C0\b` can never match inside `ALP_E1M_I2C0` at all,
+    # because the `_` immediately before `E1M` is itself a word character,
+    # so `\b` finds no boundary there. Matching only the bare form would
+    # miss every prefixed site no matter which spelling were commoner.
     names = {literal, f"ALP_{literal}"} | _BUS_ALIASES.get(bus_key, set())
     alt = "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True))
     return re.compile(rf"\b(?:{alt})\b", re.IGNORECASE)

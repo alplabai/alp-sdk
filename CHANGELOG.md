@@ -535,9 +535,9 @@ settle the question either. Resolving it needs the netlist/BOM, per #1241's
 own "Blocked on" section; `docs/soms/aen.md`'s on-module table is corrected
 to say so instead of the unsourced `DP83825IRMQR` it previously carried.
 
-Round 4 review swept the whole tree for the same unverified `DP83825I`
-antipattern the DT's own self-flag warns against and found it had leaked
-past `docs/soms/aen.md`: `docs/bring-up-aen.md` (three sites -- the
+The same unverified `DP83825I` antipattern the DT's own self-flag warns
+against had leaked well past `docs/soms/aen.md`. Every remaining occurrence
+is corrected: `docs/bring-up-aen.md` (three sites -- the
 on-module inventory bullet, the §5.3 link-check step, and the §8
 troubleshooting entry), `docs/bring-up-imx93.md` (two sites -- and here
 the defect is worse than a suffix: `metadata/e1m_modules/E1M-NX9101.yaml:28`
@@ -614,12 +614,12 @@ same stale claim is corrected everywhere else it still appeared
 `examples/aen/aen-eeprom-manifest/src/main.c`). Registered in
 `metadata/quality-tasks-v1.json` and wired into `pr-metadata-validate.yml`.
 
-Round 3 also gated a `0xNN`-shaped literal next to a co-located single bus
-and single chip as an address-mismatch check. Round 4 review found no
-line-level signal cheap enough for this gate that reliably distinguishes
-a 7-bit I2C address from a register offset/bitmask/length that happens to
-share the same two-hex-digit shape -- proven against the round-3 script
-(git archive `8f5c2728`): `TMP112 config register 0x49 resets to default
+An earlier form of this gate also treated a `0xNN`-shaped literal next to a
+co-located single bus and single chip as an address-mismatch check. That
+half is dropped: no line-level signal cheap enough for this gate reliably
+distinguishes a 7-bit I2C address from a register offset, bitmask or length
+that happens to share the same two-hex-digit shape -- proven against that
+earlier script (git archive `8f5c2728`): `TMP112 config register 0x49 resets to default
 on BRD_I2C.` (a register value, correct bus, correct chip) reported
 `names 'tmp112' at address '0x49' ... but ... puts 'tmp112' at '0x48'`, a
 false positive with no real address claim on the line at all. The address
@@ -630,10 +630,7 @@ pins this.
 
 The schema's `i2c_bus.bus_pads:` field is dropped from
 `metadata/schemas/som-preset-v1.schema.json`: populated by no preset (not
-just AEN's) and read by no script -- round 2's CHANGELOG claim that AEN's
-new blocks would populate it was never true of the committed YAML, and
-round 3 already corrected the claim without touching the dead field
-itself. Wired up would mean per-silicon pad data for every existing
+just AEN's) and read by no script. Wiring it up would mean per-silicon pad data for every existing
 family plus a gate read path, out of narrow-round scope; dropped instead.
 
 Ground truth being cross-family means AEN's own six `i2c_devices` blocks
@@ -647,10 +644,8 @@ gate.
 
 This PR does not close #1270 -- the issue's own bar ("even a narrow
 version ... would have caught every defect above") is unmet (one of four,
-not every one), per the four-defects paragraph above. Round 4 is the last
-round on the address half specifically; it is dropped rather than shipped
-imprecise a fourth time, per the bus half staying and the address half
-going.
+not every one), per the four-defects paragraph above. The bus half stays; the address half
+is dropped rather than shipped imprecise.
 
 ## [v0.15.0] - 2026-08-07
 
