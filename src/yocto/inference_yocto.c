@@ -48,6 +48,7 @@
 
 #include "alp_internal.h"
 #include "common/alp_slot_claim.h"
+#include "inference_handle_internal.h"
 
 #ifndef ALP_SDK_MAX_INFERENCE_HANDLES
 #define ALP_SDK_MAX_INFERENCE_HANDLES 2
@@ -58,23 +59,18 @@
 #endif
 
 /* ------------------------------------------------------------------ */
-/* Internal handle (shared across this TU + the per-backend files).    */
-/*                                                                     */
-/* The per-backend files (currently inference_deepx.cpp) cast a       */
-/* matching layout struct to read back be_state without including this */
-/* header -- same pattern inference_zephyr.c uses with                 */
-/* inference_drpai.c.                                                  */
+/* Internal handle.                                                     */
+/*                                                                      */
+/* `struct alp_inference` is defined ONCE, in                           */
+/* inference_handle_internal.h, and included by this TU and by every    */
+/* per-backend helper (issue #1257).  The backends used to hand-mirror  */
+/* the layout and cast to the mirror; that mirror had a different field */
+/* order and was correct only because pointers are 8 bytes.  See the    */
+/* header for the full reasoning -- and note in_use must stay LAST      */
+/* (issue #1115 round-2 dev review), because pool_acquire() below       */
+/* memsets only the bytes ahead of it so the atomic claim is never      */
+/* transiently undone by the reset.                                     */
 /* ------------------------------------------------------------------ */
-
-/* in_use is the LAST member (issue #1115 round-2 dev review, mirrors
- * dsp/sw_fallback.c's struct dsp_be): pool_acquire() below memsets only
- * the bytes ahead of it, so the atomic claim is never transiently
- * undone by the reset. */
-struct alp_inference {
-	alp_inference_backend_t backend;
-	void                   *be_state;
-	bool                    in_use;
-};
 
 static struct alp_inference g_inference_pool[ALP_SDK_MAX_INFERENCE_HANDLES];
 

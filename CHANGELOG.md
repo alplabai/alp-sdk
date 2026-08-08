@@ -7,6 +7,53 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Changed — the inference handle layout is defined once instead of hand-mirrored per backend (#1257)
+
+Each Yocto inference backend hand-mirrored the dispatcher's private
+`struct alp_inference` so it could reach `be_state`:
+
+```c
+struct alp_inference_handle_layout {
+	bool                    in_use;
+	alp_inference_backend_t backend;
+	void                   *be_state;
+};
+```
+
+That mirror has a **different field order** from the real struct
+(`{backend, be_state, in_use}`) and was correct only by a coincidence of
+pointer width. Measured on this ABI:
+
+```
+real   : backend@0 be_state@8 in_use@16 size=24
+mirror : in_use@0 backend@4 be_state@8
+```
+
+`be_state` lands at 8 both ways — 4-byte enum + 4 bytes padding on one side,
+1-byte bool + 3 bytes padding + 4-byte enum on the other. On an ILP32 target
+the real offset is 4 and the mirror's is 8, so a write through the mirror
+would silently corrupt the adjacent field. Nothing tied the copies to the
+original, so adding or reordering a field could corrupt handles in every
+backend at once with no diagnostic — which nearly happened during the
+use-after-free fix, where new fields had to be threaded between `be_state`
+and `in_use` specifically to keep the mirrored prefix byte-identical.
+
+`struct alp_inference` now lives in `src/yocto/inference_handle_internal.h`,
+included by the dispatcher and by every backend; the mirrors and their 14
+`reinterpret_cast`s are gone. The compiler is the enforcer instead of a
+comment. The header is internal — not installed, and `<alp/inference.h>`
+keeps the type opaque, so there is no public-API change.
+
+`in_use` stays LAST and the header says why: `pool_acquire()` zeroes
+`offsetof(struct alp_inference, in_use)` bytes to reset a claimed slot
+without clobbering the flag it just won (#1115).
+
+Note on scope: the issue described **three** mirrors. `dev` carries two —
+`inference_deepx.cpp` and `inference_drpai.cpp`. The third, `inference_ort.cpp`,
+is not on `dev` yet (it arrives with the ONNX Runtime CPU backend on
+`feat/ort-cpu-a55-inference`); that branch should include the shared header
+rather than re-introducing a mirror.
+
 ### Fixed — `storage[]` was bounds-checked against sibling partitions but not against the SoM's own regions (#1331)
 
 `scripts/alp_orchestrate/partition.py` validated a storage entry's offset for
