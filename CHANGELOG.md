@@ -7,6 +7,43 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — `scripts/bench/aen/build.sh` exited 0 on a failed build (#1338)
+
+The bench's build entry point printed `BUILD FAILED: no zephyr.bin` and then
+**exited 0**, because the check was the script's last command in `&&`/`||`
+form:
+
+```sh
+[ -f "$BD/zephyr/zephyr.bin" ] && echo "BIN OK: ..." || echo "BUILD FAILED: no zephyr.bin"
+```
+
+The `||` branch runs `echo`, `echo` succeeds, and that status is the script's.
+The `west build ... | grep ... || true` above it compounded the problem: the
+pipeline's status is `grep`'s, not west's, and `|| true` discarded even that —
+so nothing after `west build` could make the script fail.
+
+Every consumer gating on `build.sh && <next step>` was gating on nothing: a
+RAM-run or a flash would proceed with a **stale** binary from a previous build,
+or a build failure would surface as a run-time "no RESULT" and get blamed on
+the app or the board. Found while running the AEN e2e suite against merged
+`dev`, where `aen-analog-validate` was classified `NO_RESULT` when the truth
+was a configure failure.
+
+The check is now a terminal `if`/`else` with `exit 1`, and west's own status is
+captured out of `PIPESTATUS[0]` so the failure message can report it.
+`zephyr.bin` remains the assertion: it is the artefact every downstream flow
+consumes, and it is absent for every failure mode, not just a configure error.
+
+Verified on `e1m-aen-evk-01`'s gateway, both directions:
+
+```
+FAILING app:     EXIT=1   BUILD FAILED: no zephyr.bin at .../aen-analog-validate/... (west exit 1)
+KNOWN-GOOD app:  EXIT=0   BIN OK: .../aen-adc-regcheck/zephyr/zephyr.bin (80204 B)
+```
+
+Same failure family as #1318 (`JLinkExe` exits 0 without ever reaching the
+probe) — a tool that succeeds without doing the thing.
+
 ### Changed — the inference handle layout is defined once instead of hand-mirrored per backend (#1257)
 
 Each Yocto inference backend hand-mirrored the dispatcher's private

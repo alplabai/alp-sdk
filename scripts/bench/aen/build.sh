@@ -47,7 +47,32 @@ fi
 
 cd "$ALP_SDK_DIR"
 echo ">>> build $NAME  (overlay: auto-applied by FQ board name)" >&2
+# The build output is filtered through grep for readability, which means the
+# pipeline's status is GREP's, not west's -- and the `|| true` discarded even
+# that. Capture west's own status out of PIPESTATUS so a failure is still
+# reportable after the filter (alp-sdk#1338).
 west build -p always -b "$BOARD" "$APP_DIR" -d "$BD" -- \
 	"-DEXTRA_ZEPHYR_MODULES=$ALP_SDK_DIR;$HAL_ALIF_DIR" "$@" 2>&1 |
 	grep -iE "error:|warning: .*(undeclared|implicit|conflict)|FATAL|overflow|Memory region|FLASH:|ITCM:|DTCM:|SRAM:|Linking C executable zephyr/zephyr.elf" || true
-[ -f "$BD/zephyr/zephyr.bin" ] && echo "BIN OK: $BD/zephyr/zephyr.bin ($(stat -c%s "$BD/zephyr/zephyr.bin") B)" || echo "BUILD FAILED: no zephyr.bin"
+west_rc=${PIPESTATUS[0]}
+
+# MUST exit non-zero on a failed build (alp-sdk#1338).
+#
+# This was previously
+#     [ -f ... ] && echo "BIN OK: ..." || echo "BUILD FAILED: no zephyr.bin"
+# as the script's LAST command, so the `||` branch ran `echo`, `echo`
+# succeeded, and the script exited 0 while printing BUILD FAILED. Every
+# consumer that gated on `build.sh && <next step>` proceeded on a failed
+# build -- RAM-running or flashing a STALE binary from a previous build, or
+# reporting a build failure as a run-time "no RESULT" and blaming the app or
+# the board for a toolchain error.
+#
+# `zephyr.bin` is the assertion worth keeping: it is the artefact every
+# downstream flow consumes (ram-run.sh loadbin, the MRAM writers), and it is
+# absent for every failure mode, not just a configure error.
+if [ -f "$BD/zephyr/zephyr.bin" ]; then
+	echo "BIN OK: $BD/zephyr/zephyr.bin ($(stat -c%s "$BD/zephyr/zephyr.bin") B)"
+else
+	echo "BUILD FAILED: no zephyr.bin at $BD/zephyr/zephyr.bin (west exit ${west_rc})" >&2
+	exit 1
+fi
