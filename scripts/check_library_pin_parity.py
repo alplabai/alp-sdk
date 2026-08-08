@@ -143,7 +143,16 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 
 _SRCREV_RE = re.compile(r'(?m)^SRCREV(?::[A-Za-z0-9_.%-]+)?\s*=\s*"([^"]*)"')
-_SRC_URI_RE = re.compile(r'(?m)^SRC_URI(?::[A-Za-z0-9_.%-]+)?\s*\+?=\s*"([^"]*)"')
+# Captures the ASSIGNMENT OPERATOR as well as the value, because BitBake's
+# `+=` APPENDS rather than replaces. Reading only the last assignment loses
+# the pin on the common shape
+#
+#     SRC_URI = "git://...;tag=v1.2.3"
+#     SRC_URI += " file://0001-fix.patch"
+#
+# where the last assignment is the patch line and carries no tag at all.
+_SRC_URI_RE = re.compile(
+    r'(?m)^SRC_URI(?::[A-Za-z0-9_.%-]+)?\s*(?P<op>\+?=)\s*"(?P<val>[^"]*)"')
 _TAG_RE = re.compile(r';tag=([^\s;"\\]+)')
 _SHA_RE = re.compile(r"[0-9a-fA-F]{40}")
 
@@ -181,9 +190,20 @@ def _recipe_ref(text: str) -> str | None:
     found" would silently exempt that recipe instead of reading its real
     pin -- only return None when NEITHER a tag NOR a literal SRCREV can
     be found at all."""
-    src_uri_matches = _SRC_URI_RE.findall(text)
-    if src_uri_matches:
-        tag_match = _TAG_RE.search(src_uri_matches[-1])
+    # Fold the SRC_URI assignments the way BitBake does: `=` REPLACES what
+    # came before, `+=` APPENDS to it.  Searching only the final assignment
+    # loses the pin whenever a recipe appends a patch after setting its git
+    # URL -- the last assignment is then ` file://0001-fix.patch`, which
+    # carries no tag, and the recipe would be silently exempted from the
+    # parity check instead of compared against its real pin.
+    effective = ""
+    for match in _SRC_URI_RE.finditer(text):
+        if match.group("op") == "+=":
+            effective += " " + match.group("val")
+        else:
+            effective = match.group("val")
+    if effective:
+        tag_match = _TAG_RE.search(effective)
         if tag_match:
             return tag_match.group(1)
     matches = _SRCREV_RE.findall(text)

@@ -363,4 +363,47 @@ def test_west_axis_coverage_of_the_real_tree_is_named_here():
         f"newly uncovered: {not_covered - expected_not_covered}, "
         f"newly covered: {expected_not_covered - not_covered}")
     assert "zcbor" in not_covered  # the issue's own motivating case, named not silent
-    assert covered | not_covered == {f.stem for f in libdir.glob("*.yaml")}
+
+    # NOT `covered | not_covered == {f.stem for f in libdir.glob("*.yaml")}`:
+    # both sets are populated by iterating that exact glob and adding
+    # `f.stem`, so their union equals the glob BY CONSTRUCTION and the
+    # assertion can never fail.  Check the two things that can:
+    #
+    #   1. the sweep really ran over a corpus -- an empty or collapsed glob
+    #      would make every assertion above pass vacuously;
+    #   2. the west axis grounds a real share of it.  If `covered` ever
+    #      empties, the axis is inert everywhere and the gate degrades to
+    #      its SRCREV-only half while still reporting green.
+    assert len(covered) + len(not_covered) >= 30, (
+        "metadata/libraries/ glob collapsed -- the assertions above would "
+        "pass vacuously over an empty corpus")
+    assert not covered & not_covered, "a manifest cannot be both covered and not covered"
+    assert len(covered) >= 15, (
+        f"the west axis grounds only {len(covered)} manifests -- it was 18 when "
+        f"this accounting was written, and an axis grounding nothing is a gate "
+        f"reporting green while checking only one side")
+
+
+def test_src_uri_append_does_not_lose_the_tag():
+    """BitBake's `+=` APPENDS, so reading only the LAST SRC_URI assignment
+    loses the pin on the commonest real shape: a git URL carrying the tag,
+    followed by an appended patch line.  Before the assignments were folded
+    the way BitBake folds them, `_recipe_ref` returned None here -- a
+    fail-open that silently exempted the recipe from the parity check
+    instead of comparing its real pin."""
+    text = (
+        'SRC_URI = "git://x.example/r.git;protocol=https;branch=main;tag=v1.2.3"\n'
+        'SRC_URI += " file://0001-fix.patch"\n'
+    )
+    assert gate._recipe_ref(text) == "v1.2.3"
+
+
+def test_plain_reassignment_still_takes_the_last_value():
+    """`=` REPLACES.  The append fold must not turn a later plain
+    assignment into an accumulation, or an intentionally re-pinned recipe
+    would report its superseded tag."""
+    text = (
+        'SRC_URI = "git://x.example/r.git;tag=vOLD"\n'
+        'SRC_URI = "git://x.example/r.git;tag=vNEW"\n'
+    )
+    assert gate._recipe_ref(text) == "vNEW"

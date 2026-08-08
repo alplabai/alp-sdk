@@ -71,6 +71,38 @@ Caught by `scripts/check_emit_snapshots.py`, which reported six snapshot
 DIFFs. The committed goldens were correct throughout — the fix brings the
 emitter back to them (6 DIFFs before, 0 after) rather than regenerating them,
 which would have frozen the defect as expected output.
+### Fixed — the SRCREV parity gate lost a recipe's pin to an appended patch (#1281)
+
+`_recipe_ref` read only the LAST `SRC_URI` assignment when looking for a
+`;tag=`. BitBake's `+=` **appends** rather than replaces, so on the commonest
+real shape
+
+```
+SRC_URI = "git://...;protocol=https;branch=main;tag=v1.2.3"
+SRC_URI += " file://0001-fix.patch"
+```
+
+the last assignment is the patch line, carries no tag, and the function fell
+through to `SRCREV` — finding none, it returned `None` and the recipe was
+silently **exempted** from the parity check instead of compared against its
+real pin. A fail-open on the gate's own subject.
+
+The assignments are now folded the way BitBake folds them: `=` replaces,
+`+=` appends, and the tag is searched in the resulting effective value. A
+later plain `=` still wins, so an intentionally re-pinned recipe reports its
+current tag and not a superseded one. A `;tag=` inside a comment is still
+never read as the live pin — that is an assignment-shaped string in prose,
+not an assignment.
+
+The west-axis coverage test also dropped a tautology:
+`covered | not_covered == {f.stem for f in libdir.glob("*.yaml")}` — both
+sets are built by iterating that exact glob and adding `f.stem`, so their
+union equalled the glob by construction and the assertion could never fail.
+Replaced with checks that can: the corpus is non-empty (an assertion sweep
+over an empty glob passes vacuously), the two sets are disjoint, and the west
+axis still grounds a real share of the manifests. If `covered` ever empties,
+the axis is inert everywhere and the gate would report green while checking
+only the SRCREV half.
 
 ### Fixed — two workflows on `dev` could not be loaded by GitHub Actions
 
