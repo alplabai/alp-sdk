@@ -186,13 +186,13 @@ def test_facets_omitted_not_guessed_when_topology_unresolvable():
 
 
 def test_unexpected_topology_failure_warns_on_stderr():
-    """Round-4 finding: `_resolved_core_facets`'s `except OrchestratorError`
-    must not blanket-swallow every orchestrator failure silently -- only the
-    documented rpmsg-imx93 `status: tbd` case is an honest, expected
-    absence. Any OTHER OrchestratorError (a synthetic one here) still
-    returns None (facets stay omitted, never guessed) but must name the
-    board + the failure on stderr, so a future regression is visible at
-    regen time instead of getting committed as "in sync"."""
+    """`_resolved_core_facets` must not blanket-swallow every orchestrator
+    failure silently. Only `SdkRevisionNotBuildable` -- the SoM hw_rev whose
+    `status:` refuses a build -- is an honest, expected absence. Any OTHER
+    OrchestratorError (a synthetic one here) still returns None (facets stay
+    omitted, never guessed) but must name the board + the failure on stderr,
+    so a future regression is visible at regen time instead of getting
+    committed as "in sync"."""
     board_yaml = REPO / "examples" / "aen" / "aen-analog-validate" / "board.yaml"
     buf = io.StringIO()
     with patch.object(gc, "load_board_yaml",
@@ -242,3 +242,29 @@ def test_gates_enumerate_check_scripts():
 
 def test_catalog_is_valid_json_on_disk():
     json.loads(OUT.read_text(encoding="utf-8"))
+
+
+def test_expected_not_buildable_case_stays_silent():
+    """The other half, and the one that keeps the channel worth reading.
+
+    rpmsg-imx93's SoM hw_rev is `status: tbd`, so its facets are legitimately
+    absent on every run. Warning about it each time would be a permanent
+    false alarm printed by every regen and every CI `--check`, which trains
+    the reader to ignore the exact stderr line the test above exists to make
+    visible.
+
+    Pinned separately from the warn case because a single test asserting only
+    "the synthetic failure warns" passes identically whether or not the
+    expected case is excluded -- it cannot tell the two apart.
+    """
+    board_yaml = REPO / "examples" / "multicore" / "rpmsg-imx93" / "board.yaml"
+    assert board_yaml.is_file(), "rpmsg-imx93 moved -- repoint this test"
+
+    err = io.StringIO()
+    with redirect_stderr(err):
+        facets = gc._resolved_core_facets(board_yaml)
+
+    assert facets is None, "a non-buildable hw_rev must yield no resolved facets"
+    assert err.getvalue() == "", (
+        "the documented not-buildable case must be silent, got: " + err.getvalue()
+    )

@@ -90,6 +90,7 @@ from gen_support_matrix import (  # noqa: E402  (import after sys.path tweak)
 # almost every example (see the module docstring below).
 from alp_orchestrate import (  # noqa: E402
     OrchestratorError,
+    SdkRevisionNotBuildable,
     core_os_topology,
     load_board_yaml,
 )
@@ -324,15 +325,29 @@ def _resolved_core_facets(board_yaml: Path) -> dict | None:
     no `app` key at all.
 
     Returns None -- an honest absence, not a guess -- when the board can't
-    be resolved at all (e.g. an SoM hw_rev still `status: tbd`, the same
-    exclusion `check_emit_snapshots.py` carves out for rpmsg-imx93).  Any
-    OTHER `OrchestratorError` is unexpected -- warn on stderr instead of
-    silently dropping the row's facets, so a regression is visible at
-    regen time rather than getting committed as "in sync" by the next
-    `--check` run."""
+    be resolved at all.
+
+    The EXPECTED case is silent: `SdkRevisionNotBuildable` means the SoM
+    hw_rev exists but its `status:` refuses a build (`tbd` / `reserved` /
+    no status key), which is exactly the exclusion
+    `check_emit_snapshots.py:81-85` carves out for rpmsg-imx93.  Warning
+    about it on every regen and every `--check` would be a permanent false
+    alarm that trains the reader to ignore the channel.
+
+    Any OTHER `OrchestratorError` is unexpected and warns on stderr rather
+    than silently dropping the row's facets, so a regression is visible at
+    regen time instead of getting committed as "in sync" by the next
+    `--check` run.
+
+    Discriminated by exception TYPE, not by string-matching the message.
+    `SdkRevisionNotBuildable` exists as a subclass for precisely this
+    reason -- see its docstring in `alp_orchestrate.models`, alongside
+    `SdkRevisionUnsupported` and `SdkRevisionUnknown`."""
     try:
         project = load_board_yaml(board_yaml)
         topo = core_os_topology(project)
+    except SdkRevisionNotBuildable:
+        return None
     except OrchestratorError as exc:
         print(f"gen_catalog: {board_yaml.relative_to(REPO).as_posix()}: "
               f"os-topology did not resolve ({exc}) -- resolved facets "

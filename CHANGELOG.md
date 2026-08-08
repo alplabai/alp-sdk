@@ -182,6 +182,14 @@ since it never depended on resolution. Any other topology failure is
 printed to stderr at regen time rather than silently omitted, so a future
 regression can't ride into `metadata/catalog.json` as if it were "in sync".
 
+The two are told apart by exception TYPE, not by string-matching a message:
+the not-buildable case raises `SdkRevisionNotBuildable`, which exists as a
+subclass for exactly this purpose alongside `SdkRevisionUnsupported` and
+`SdkRevisionUnknown`. Keeping the expected case silent matters as much as
+warning on the unexpected one — a line printed by every regen and every CI
+`--check` is a standing false alarm, and it trains the reader to ignore the
+very channel the warning depends on.
+
 `schema_version` bumps 1 → 2 for the new per-example fields.  This is
 additive metadata only.
 
