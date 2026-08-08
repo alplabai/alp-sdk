@@ -7,6 +7,57 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Changed — DMAC0's CM33-exclusive ownership is a written contract, not one dtsi line (#1152, #1153)
+
+RZ/V2N's MCPU DMAC (`DMAC0`, base `0x11400000`) is dual-claimable: the CM33
+firmware arms it directly through the vendored Renesas FSP `r_dmac_b` for the
+GD32 supervisor link's SCI7 SPI DMA path, and the upstream Linux SoC devicetree
+declares a `dma-controller@11400000` node that `rz-dmac` binds unconditionally
+when enabled. Both reach the same 8 channels and their 8 GIC interrupts.
+
+The mitigation — `&dmac0 { status = "disabled"; }` — has been in place since
+#84, but it survived only as one dtsi line with no statement of *why*, which is
+what #1152 asked to fix. **ADR 0025** now records it: DMAC0 stays CM33-exclusive
+as a whole unit (Linux uses one of the other four DMAC instances), not a
+per-channel mask. The ADR names the CM33's actual claim —
+`ALP_V2N_SCI7_DMAC_RX_CH 0` / `ALP_V2N_SCI7_DMAC_TX_CH 1`, from
+`zephyr/drivers/spi/spi_renesas_rz_sci_b.c` — and explains why a Linux-side
+channel mask is the wrong shape: the CM33 configures DMAC0 by writing FSP config
+structs directly, so there is no DT-expressible partition to publish on that
+side.
+
+**Confirmed on the live board** (`e1mx-v2n-m1-01`, 2026-08-08), which is what
+the ADR needed to assert the mitigation still holds:
+
+```
+# cat /sys/firmware/devicetree/base/soc/dma-controller@11400000/status
+disabled
+# grep -c 11400000 /proc/interrupts
+0
+```
+
+DMAC0 claims zero IRQs and does not appear in `/proc/interrupts` at all. The
+four other DMAC instances (`@12000000`, `@12010000`, `@14830000`, `@14840000`)
+carry 16 lines each — 64 total — all with zero counts, so nothing is starved by
+the disable either.
+
+Also documented in the same pass (#1153): `wdt0` (CM33) is **not** enabled
+anywhere, and cannot be without inventing hardware facts. The pinned Zephyr
+v4.4.0 RZ/V2N SoC devicetree (`dts/arm/renesas/rz/rzv/r9a09g056.dtsi`, a west
+module, not vendored here) declares no watchdog node, and no driver binds this
+SoC's WDT — so there is no label to reference and no register base in this tree
+to hand-author one from. `<alp/wdt.h>` on the M33 therefore returns
+`ALP_ERR_NOT_PRESENT_ON_THIS_SOC` (`src/wdt_dispatch.c`), *not* the
+`ALP_ERR_NOSUPPORT` stub path, which is Yocto/baremetal-only and never compiled
+into a Zephyr build. The `wdt1` (A55) validation note is also corrected: a
+keepalive-only check does not prove hang-reset — the bench step must stop
+feeding the watchdog and confirm the board resets within `timeout-sec`.
+
+Documentation and comments only; no functional change. The V2N/V2M CM33 board
+`.dts` files are hand-maintained (the generator emits `board.yml`, `Kconfig.*`
+and a `.yaml` for those targets, not a `.dts`), so the added comment blocks do
+not disturb the byte-parity gate.
+
 ### Fixed — `scripts/bench/aen/build.sh` exited 0 on a failed build (#1338)
 
 The bench's build entry point printed `BUILD FAILED: no zephyr.bin` and then
