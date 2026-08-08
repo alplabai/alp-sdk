@@ -11,13 +11,14 @@ alp-sdk-invoked host toolchain step, only a byte passthrough of the exported
 alternative to plain TFLM ``.tflite`` for that same tier, not a distinct
 physical accelerator (see ``ALP_INFERENCE_BACKEND_*`` in
 ``include/alp/inference.h``: cpu | ethos_u | drpai | deepx_dxm1, no
-"executorch" backend). Because ``build.py``'s default adapter registry is
-keyed one-adapter-per-backend (``by_backend = {a.backend: a for a in
-registry}``) and already carries ``CpuAdapter`` for ``"cpu"``, this adapter is
-NOT auto-registered in ``build.py``'s ``_ADAPTERS`` list -- adding it there
-would silently swap every board's CPU tier from TFLite to ExecuTorch. Use it
-explicitly instead: ``build_model(..., adapters=[ExecutorchAdapter(), ...])``
-for a variant that wants ExecuTorch instead of TFLM on the CPU tier.
+"executorch" backend). It IS registered in ``build.py``'s default
+``_ADAPTERS`` list alongside ``CpuAdapter`` -- both carry ``backend ==
+"cpu"``, and ``build_model()`` selects between them per model by
+``accepts(src_fmt)``, not by registration order: a ``.tflite`` source still
+resolves to ``CpuAdapter`` (this adapter's ``accepts()`` rejects it), a
+``.pte`` source resolves here. No board's existing TFLite build is affected;
+`alp model build` reaches this adapter automatically the moment a board.yaml
+`models[].source` ends in ``.pte``.
 
 The device-side format decode (blob_format string "executorch" ->
 ``ALP_INFERENCE_MODEL_EXECUTORCH``) is ``_fmt_enum()`` in
@@ -36,7 +37,11 @@ class ExecutorchAdapter(CompilerAdapter):
         return True              # always available; no external tool
 
     def accepts(self, src_format: str) -> bool:
-        return src_format == "pte"       # ExecuTorch's own exported program format
+        # "pte" is ExecuTorch's own upstream export extension (torch.export /
+        # to_edge_transform_and_lower writes a `.pte` file); it is not an
+        # in-tree-derived fact -- metadata/schemas/board.schema.json's
+        # `models[].source` description names it explicitly (see there).
+        return src_format == "pte"
 
     def compile(self, source: Path, *, accel_config: str, out_dir: Path, opts: dict | None = None) -> Blob:
         payload = source.read_bytes()

@@ -823,6 +823,30 @@ This closes the write-side gap only; there is still no on-device ExecuTorch
 *runtime* backend, so a package built this way has nothing to
 `alp_inference_invoke()` it yet (`docs/recommended-libraries.md` Tier 4).
 
+### Fixed — `ExecutorchAdapter` was unreachable from every shipped entry point (#1260)
+
+The adapter above landed but was never added to `build.py`'s default
+`_ADAPTERS` registry, and that registry only kept one adapter per backend
+(`by_backend = {a.backend: a for a in registry}`, last one wins on a
+duplicate key) -- so `alp model build` on a board.yaml `.pte` source raised
+`ValueError: no blob compiled ...; cpu:incompatible (cpu does not accept
+.pte)` regardless of this change. `by_backend` now groups adapters by
+backend and `build_model()` selects among a backend's adapters by
+`accepts(src_fmt)`; `ExecutorchAdapter` is registered by default alongside
+`CpuAdapter` -- both own `backend == "cpu"`, and since their `accepts()` are
+mutually exclusive (`tflite` vs `pte`) no existing board's TFLite build
+changes behavior. `metadata/schemas/board.schema.json` `models[].source`
+now documents `.pte` alongside `.tflite`/`.onnx`.
+
+Issue #1260 ask 2 ("add `executorch` to `VALID_BLOB_FORMATS` in the same
+change") is intentionally not done here: that constant does not exist on
+this branch (it arrives only with the unmerged
+`origin/feat/ort-cpu-a55-inference`, whose format set omits `executorch`) --
+so the PR for this fix must use `Refs #1260`, not `Closes #1260`, and ask 2
+stays open pending that merge (also: that branch's `alp_model_select.c`
+carries the same `"executorch"` case and conflicts textually with this one;
+sequence the two before merging either).
+
 ## [v0.15.0] - 2026-08-07
 
 ### Fixed — the v0.15.0 cut was blocked, and the CHANGELOG claimed a GA that only ever shipped as an rc1 (#1292)
