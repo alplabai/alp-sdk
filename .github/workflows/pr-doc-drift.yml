@@ -41,67 +41,8 @@ name: pr-doc-drift
 on:
   pull_request:
     branches: [main, dev]
-<<<<<<< HEAD
-    paths:
-      - 'AGENTS.md'
-      - 'README.md'
-      - 'VERSIONS.md'
-      - 'docs/**'
-      - 'include/**'
-<<<<<<< HEAD
-      - 'chips/**'
-=======
-      - 'src/**'
-      - 'examples/**'
-      - 'vendors/**'
-      - 'keys/**'
->>>>>>> 8e72b3dc (fix(docs): catch CONFIG_-prefixed and vendor-doc Kconfig symbol drift (#1228))
-      - 'metadata/sdk_version.yaml'
-      - 'metadata/libraries/**'
-      - 'scripts/check_doc_drift.py'
-      - 'scripts/check_doc_links.py'
-      - 'scripts/check_diagnostic_narratives.py'
-      - 'scripts/check_version_doc_sync.py'
-      - 'scripts/check_board_id_doc_parity.py'
-      - 'scripts/check_agents_md_generators.py'
-      - 'scripts/check_doc_inventory.py'
-      - 'scripts/alp_project.py'
-      - 'scripts/alp_orchestrate/**'
-      - 'scripts/program_eeprom.py'
-      - '.github/workflows/**'
   push:
     branches: [main, dev]
-    paths:
-      - 'AGENTS.md'
-      - 'README.md'
-      - 'VERSIONS.md'
-      - 'docs/**'
-      - 'include/**'
-<<<<<<< HEAD
-      - 'chips/**'
-=======
-      - 'src/**'
-      - 'examples/**'
-      - 'vendors/**'
-      - 'keys/**'
->>>>>>> 8e72b3dc (fix(docs): catch CONFIG_-prefixed and vendor-doc Kconfig symbol drift (#1228))
-      - 'metadata/sdk_version.yaml'
-      - 'metadata/libraries/**'
-      - 'scripts/check_doc_drift.py'
-      - 'scripts/check_doc_links.py'
-      - 'scripts/check_diagnostic_narratives.py'
-      - 'scripts/check_version_doc_sync.py'
-      - 'scripts/check_board_id_doc_parity.py'
-      - 'scripts/check_agents_md_generators.py'
-      - 'scripts/check_doc_inventory.py'
-      - 'scripts/alp_project.py'
-      - 'scripts/alp_orchestrate/**'
-      - 'scripts/program_eeprom.py'
-      - '.github/workflows/**'
-=======
-  push:
-    branches: [main, dev]
->>>>>>> 309fa009 (fix(docs): treat a stale #ifdef as a reference, not a Kconfig definition (#1228))
   workflow_dispatch:
 
 concurrency:
