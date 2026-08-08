@@ -17,6 +17,20 @@
       "ci": "pr-doc-drift.yml:doc-drift"
     },
     {
+      "id": "atoc-reservation",
+      "description": "Every AEN board .dts and every SoM preset memory_map reserves the top of the App MRAM window as an 'atoc' region -- SETOOLS top-anchors the ATOC boot table there (#1289).",
+      "runner": "check-script",
+      "script": "scripts/check_atoc_reservation.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "board-id-doc-parity",
       "description": "docs/board-id.md's alp_hw_info_eeprom_t typedef struct (field names, order, widths) must match include/alp/hw_info.h, macros resolved (#1231).",
       "runner": "check-script",

@@ -297,7 +297,40 @@ def _twister_yaml(
 # two symmetric image slots derive from the variant's actual MRAM size.
 _AEN_MCUBOOT_KIB = 64
 _AEN_SCRATCH_KIB = 64
-_AEN_STORAGE_KIB = 128
+_AEN_STORAGE_KIB = 96
+
+# The SE-owned band at the very TOP of the App MRAM window (#1289).
+#
+# Alif's SETOOLS (`app-gen-toc` / `app-write-mram`) does not place the ATOC
+# application table at a fixed address: it top-anchors the generated package
+# at the App MRAM window end and grows DOWNWARD, sized to the package. There
+# is therefore no compile-time constant to read -- the placement happens at
+# provisioning time, not link time -- so the layout has to reserve a band
+# rather than a specific address.
+#
+# 32 KiB covers the worst case with margin. Three independent figures, all
+# measured/derived against the same window top 0x80580000:
+#
+#   5552 B   observed on the E1M-AEN801 bench 2026-08-08 -- ATOC magic
+#            `ckBS` (0x53426B63) read at 0x8057EA50
+#   13552 B  an E7 SETOOLS transcript in the Alif DFP
+#            (alifsemi/alif_ensemble-cmsis-dfp, docs/Overview.md:193-224):
+#            package at 0x8057cb10
+#   23696 B  worst case computed from SETOOLS' own build/app-package-map.txt
+#            sizing rule -- 2560 B per signed user image + 2880 B fixed
+#            tool-managed + (48 + 32*N) TOC -- at the 8-image maximum. That
+#            rule reproduces the 5552 B observed above exactly.
+#
+# 32768 - 23696 = 9072 B spare at 8 images. UNVERIFIED: no documented
+# maximum TOC entry count could be found, so the 8-image worst case is an
+# assumption, not a specification -- widen this band rather than narrowing
+# it if a larger configuration ever appears.
+#
+# Taken OUT of storage (128 -> 96 + 32) rather than out of the image slots
+# on purpose: `_AEN_MCUBOOT_KIB + _AEN_SCRATCH_KIB + _AEN_STORAGE_KIB +
+# _AEN_ATOC_KIB` still sums to the old 256 KiB, so `image_kib` below is
+# unchanged and no committed AEN board's slot geometry moves.
+_AEN_ATOC_KIB = 32
 
 # Per-role documentation asymmetries in the committed AEN board tree.
 # These are prose choices (which sibling's ITCM comment got the
@@ -355,13 +388,22 @@ def _aen_flash_partitions(
     "image-0" so downstream label maps / the `image_kib` lookup in
     _aen_dts don't need a second code path), reserved (the ex-scratch
     headroom, unused -- OTA is deferred since a swap-sized second slot
-    on both cores no longer fits the MRAM budget), storage. No
+    on both cores no longer fits the MRAM budget), storage, atoc. No
     image-1: this is CONFIG_SINGLE_APPLICATION_SLOT=y (see
     zephyr/sysbuild/aen/README.md), the only silicon-proven MCUboot
     mode on this part. The OTHER role's slot0 lives outside this
     table entirely (a disjoint physical window this board never
     touches) -- see metadata/e1m_modules/E1M-AEN801.yaml `memory_map:`
-    for the full 5-region physical map.
+    for the full 6-region physical map.
+
+    BOTH layouts end in `atoc` (#1289) -- the SE-owned band SETOOLS
+    top-anchors the ATOC application table into. It is a declared,
+    named region precisely so no app can mount NVS or a filesystem on
+    top of the boot table: before this, the last region was `storage`
+    in both branches, and on the bench a slot0 app happily erased
+    inside it while the live ATOC sat 0x1EA50 further up the SAME
+    partition. Keep `atoc` last in both paths; see _AEN_ATOC_KIB for
+    the sizing evidence.
     """
     slot0_region = _aen_role_slot0_map(memory_map, role) if role else None
     if slot0_region is not None:
@@ -379,6 +421,7 @@ def _aen_flash_partitions(
             ("image-0", f"{role}_slot0"),
             ("reserved", "reserved"),
             ("storage", "storage"),
+            ("atoc", "atoc"),
         ):
             region = by_name.get(region_name)
             if region is None or not isinstance(region.get("base"), int):
@@ -389,13 +432,14 @@ def _aen_flash_partitions(
             out.append((label, region["base"] - mram_base, region["size_kib"]))
         return out
 
-    reserved = _AEN_MCUBOOT_KIB + _AEN_SCRATCH_KIB + _AEN_STORAGE_KIB
+    reserved = (_AEN_MCUBOOT_KIB + _AEN_SCRATCH_KIB + _AEN_STORAGE_KIB
+                + _AEN_ATOC_KIB)
     remaining = total_kib - reserved
     if remaining <= 0 or remaining % 2:
         raise ZephyrBoardEmitError(
             f"AEN MRAM size {total_kib} KiB doesn't split evenly into two "
             f"image slots after reserving {reserved} KiB for "
-            "mcuboot/scratch/storage")
+            "mcuboot/scratch/storage/atoc")
     image_kib = remaining // 2
 
     offset = 0
@@ -406,6 +450,10 @@ def _aen_flash_partitions(
         ("image-1", image_kib),
         ("image-scratch", _AEN_SCRATCH_KIB),
         ("storage", _AEN_STORAGE_KIB),
+        # LAST, and must stay last: this is the band SETOOLS top-anchors the
+        # ATOC into (#1289).  The `offset != total_kib * 1024` assertion
+        # below is what keeps it flush against the window top.
+        ("atoc", _AEN_ATOC_KIB),
     ):
         out.append((label, offset, size_kib))
         offset += size_kib * 1024
@@ -774,12 +822,14 @@ def _aen_dts(
         "image-scratch": "scratch ",
         "reserved": "reserved",
         "storage": "storage ",
+        "atoc": "atoc    ",
     }
     trailers = {
         "image-0": "   (primary slot, code-partition)",
         "image-1": "   (secondary slot for OTA)",
         "reserved": "   (ex-scratch; unused, OTA deferred)",
         "storage": "    (settings / NVS)",
+        "atoc": "    (SE-owned: SETOOLS top-anchors the ATOC here -- do NOT write, #1289)",
     }
     for label, off, size in partitions:
         lines.append(
@@ -836,6 +886,7 @@ def _aen_dts(
         "image-scratch": "scratch_partition",
         "reserved": "reserved_partition",
         "storage": "storage_partition",
+        "atoc": "atoc_partition",
     }
     partition_dt_labels = {
         "mcuboot": "mcuboot",
@@ -844,6 +895,7 @@ def _aen_dts(
         "image-scratch": "image-scratch",
         "reserved": "reserved",
         "storage": "storage",
+        "atoc": "atoc",
     }
     for i, (label, off, size) in enumerate(partitions):
         node = partition_node_labels[label]

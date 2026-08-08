@@ -47,6 +47,13 @@
 /delete-node/ &boot_partition;
 /delete-node/ &slot0_partition;
 /delete-node/ &storage_partition;
+/* The board tree's SE-owned band (#1289) is deleted too, because this
+ * overlay re-declares it below with a wider extent.  Leaving both in place
+ * gives two `fixed-partitions` children with label "atoc", and Zephyr emits
+ * `DT_COMPAT_fixed_partitions_LABEL_atoc` once per label:
+ *     error: "DT_COMPAT_fixed_partitions_LABEL_atoc" redefined [-Werror]
+ */
+/delete-node/ &atoc_partition;
 
 &mram_storage {
 	partitions {
@@ -60,8 +67,28 @@
 			reg = <0x90000 DT_SIZE_K(64)>;
 		};
 
+		/*
+		 * SE-owned ATOC band (#1289).  Labelled "atoc" to match the
+		 * generated board trees and satisfy
+		 * scripts/check_atoc_reservation.py; it read "alif-atoc" before,
+		 * which no gate recognised.
+		 *
+		 * DELIBERATELY over-reserved: the board trees reserve 32 KiB
+		 * (0x578000..0x580000) and keep 0x560000..0x578000 as writable
+		 * `storage`, but this example replaces the whole partition table
+		 * with its own and has no use for that 96 KiB -- so it keeps the
+		 * wider band rather than perturbing the MRAM_RESERVED MPU region
+		 * described above.  Over-reserving is safe; under-reserving is
+		 * what bricks the part.
+		 *
+		 * NOTE: `read-only;` here is DOCUMENTATION, not enforcement.
+		 * Zephyr's flash_area_write() bounds-checks the partition and
+		 * never consults this property, so a `read-only;` fixed-partition
+		 * child is still writable through a flash_area handle.  What
+		 * actually protects this band is that nothing opens it.
+		 */
 		atoc_reserved_partition: partition@560000 {
-			label = "alif-atoc";
+			label = "atoc";
 			reg = <0x560000 DT_SIZE_K(128)>;
 			read-only;
 		};

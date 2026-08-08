@@ -120,7 +120,8 @@
  *   mcuboot  0x000000  64 KiB
  *   image-0  0x010000  2688 KiB   (primary slot, code-partition)
  *   reserved 0x550000  64 KiB   (ex-scratch; unused, OTA deferred)
- *   storage  0x560000  128 KiB    (settings / NVS)
+ *   storage  0x560000  96 KiB    (settings / NVS)
+ *   atoc     0x578000  32 KiB    (SE-owned: SETOOLS top-anchors the ATOC here -- do NOT write, #1289)
  *                      = 2944 KiB (of 5632 KiB App MRAM total)
  *
  * MRAM-only: the SoM OSPI NOR + HyperRAM are not populated on this batch, so
@@ -168,7 +169,12 @@
 
 			storage_partition: partition@560000 {
 				label = "storage";
-				reg = <0x560000 DT_SIZE_K(128)>;
+				reg = <0x560000 DT_SIZE_K(96)>;
+			};
+
+			atoc_partition: partition@578000 {
+				label = "atoc";
+				reg = <0x578000 DT_SIZE_K(32)>;
 			};
 		};
 	};
