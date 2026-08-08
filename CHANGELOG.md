@@ -685,6 +685,75 @@ This PR does not close #1270 -- the issue's own bar ("even a narrow
 version ... would have caught every defect above") is unmet (one of four,
 not every one), per the four-defects paragraph above. The bus half stays; the address half
 is dropped rather than shipped imprecise.
+### Fixed — DRP-AI `--images` calibration silently assumed every model is a 224x224 classifier (#1271)
+
+`scripts/alp_model/adapters/drpai.py` forwarded any `models[].compile.drpai`
+config to the DRP-AI TVM tutorial's `--images` flag regardless of the model's
+declared `input_shape`. The tutorial's `--images` handling always runs
+calibration images through `pre_process_imagenet_pytorch()`, which ignores the
+`dims` argument it accepts and hard-codes `resize(256)` + `center_crop(224)` --
+so `--images` only ever produced correctly-shaped calibration tensors for a
+224x224 ImageNet-style classifier. For any other geometry, including every
+object detector (e.g. YOLOX at `1,3,640,640`), the compile ran the full
+(multi-minute) DRP-AI Translator and quantisation pass and only then aborted
+deep inside the vendor tutorial with `ValueError: could not broadcast input
+array from shape (1,3,224,224) into shape (...)`.
+
+The adapter now checks `input_shape` against the 224x224 NCHW geometry
+(`1,3,224,224` — the layout ONNX, the only format this adapter accepts, uses
+by convention) before invoking the tutorial, and raises a clear `RuntimeError`
+naming the mismatch immediately instead of running the compile first. This
+closes the *slow, cryptic failure* -- it does not make `--images` calibration
+work for detectors: the vendor tutorial's preprocessing would still need to
+own the model's real geometry (letterbox padding for YOLOX, for instance) to
+produce a correctly-calibrated quantised model, and validating the resulting
+accuracy needs a real calibration image set and a board. Both remain open,
+tracked in #1271.
+
+Also fixed on the way to reaching this code from `board.yaml`:
+`scripts/alp_cli/model.py`'s `_resolve_compile()` resolved *every* string
+value in a `models[].compile.<backend>` block to an absolute path, so
+`input_shape: "1,3,224,224"` and `product: "V2N"` arrived at the adapter as
+bogus filesystem paths and the new 224x224 check above misfired on exactly
+the board.yaml-driven path it exists to protect. It now only resolves the
+keys that are actually paths (`config`, `calibration`, `images`, `spec`).
+Separately, and not fixed here: `metadata/schemas/board.schema.json`'s
+`models[].compile.drpai` block still only declares a `spec:` key and rejects
+`input_shape`/`input_name`/`images`/`product` outright, so `alp validate`
+cannot be used against a `board.yaml` with a `compile.drpai` block yet --
+`alp model build` still can, since it never runs schema validation itself;
+see `docs/bring-up-drpai-v2n.md`.
+
+The 224x224 check compares the PARSED dimensions, not a stringified
+spelling. An `input_shape = str(input_shape)` normalization -- intended to
+stop `.split(",")` crashing on a YAML flow-sequence `input_shape:
+[1,3,224,224]` -- broke the very case it was meant to support:
+`str([1, 3, 224, 224])` is `'[1, 3, 224, 224]'`, and `.split(",")` on that
+yields tokens (`'[1'`, `' 224]'`, ...) that do not parse as plain ints, so a
+genuinely valid list-form 224x224 classifier shape was rejected as
+unsupported. `_is_224_imagenet_shape` now uses `_parse_shape_dims`, a helper
+accepting either a comma-separated string or a list/tuple. The vendor CLI's
+`-s` argument is built from those parsed dims too, so it is always the
+comma-joined form the tutorial expects, never Python's `str()` of a list.
+
+`docs/bring-up-drpai-v2n.md` no longer contradicts itself or name a command
+that cannot be run. Step 5 documented `alp model build --board board.yaml`
+and then, seventeen lines later, told readers no schema-valid `board.yaml`
+can drive that path and to call `build_model()` directly -- an internal
+Python API, and wrong: the CLI reads `board.yaml` with a plain
+`yaml.safe_load` and never calls the schema validator (only the separate
+`validate` command does), so it already works with
+`compile.drpai.input_shape`/`input_name`/`images`/`product` today, exactly as
+`test_alp_model_build_only_resolves_path_valued_drpai_opts` exercises
+end-to-end.
+
+Separately, there is no `alp` binary to run any of it with:
+`pyproject.toml`'s `[project.scripts]` declares only `alp-mcp`, because
+"standalone Python Tan is the user-facing command surface (ADR-0020). The
+`alp_cli` package remains an SDK-internal reference and parity CLI for direct
+maintenance, never a user-installed `alp` binary." Every invocation in the
+document is now the module form that actually runs --
+`python3 -m alp_cli model build --board <path>/board.yaml` from `scripts/`.
 
 ## [v0.15.0] - 2026-08-07
 
