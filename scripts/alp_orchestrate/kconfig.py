@@ -679,6 +679,26 @@ def _resolve_chip_states(project: "BoardProject") -> dict[str, bool]:
     return states
 
 
+def _chip_has_driver(slug: str) -> bool:
+    """True when `chips/<slug>/` exists, i.e. there is something to compile.
+
+    This is the same criterion `_slugs_from_on_module` already applies to
+    `ospi_memories` and `hyperram`, whose docstring records the reason:
+    those parts have "no `chips/<part>/` driver, so their MPNs are NOT
+    extracted as chip slugs (emitting them as `CONFIG_ALP_SDK_CHIP_<X>`
+    would trip Zephyr's undefined-symbol guard)". The rule is applied there
+    per-field; it has to hold per-chip too, because a scalar `on_module:`
+    field can name a real chip manifest that has no driver behind it.
+
+    Driver presence is checked on disk rather than read from the manifest's
+    `driver_status:`, because the directory is what the Kconfig declaration
+    actually points at -- every entry in `zephyr/kconfigs/chips.kconfig`
+    reads "Compile chips/<part>/<part>.c". A status string can drift from
+    the tree; the directory cannot.
+    """
+    return (REPO / "chips" / slug).is_dir()
+
+
 def _emit_chips(
     project: "BoardProject",
     chip_subsystems_table: dict[str, tuple[str, ...]],
@@ -731,6 +751,25 @@ def _emit_chips(
     hf = project.som_preset.get("helper_firmware") or []
     for slug in _slugs_from_helper_firmware(hf):
         som_chips.add(slug)
+
+    # A CONFIG_ALP_SDK_CHIP_<X> line is only meaningful when the symbol
+    # exists, and the symbol only exists when there is a driver to compile:
+    # every declaration in zephyr/kconfigs/chips.kconfig reads "Compile
+    # chips/<part>/<part>.c".  A manifest whose driver_status says no such
+    # driver exists therefore has no symbol, and emitting the line anyway
+    # writes a CONFIG_ assignment Zephyr cannot resolve (alp-sdk#1241).
+    #
+    # Measured over metadata/chips/*.yaml when this was added: 77 of 81
+    # chips carry a declared symbol -- every `complete`, `partial` and
+    # `stub` one, each with a real chips/<part>/ directory.  The only
+    # undeclared ones are the four `planned` Murata modules, which no SoM
+    # populates.  `ethernet_phy: dp83825` made an undriven chip reachable
+    # from on_module: for the first time, which is how this surfaced.
+    #
+    # The chip stays in metadata -- it is real, populated hardware, and the
+    # manifest is what documents the ADR-0023 layer-3 gap.  It just does not
+    # get a driver-selection Kconfig it has no driver for.
+    som_chips = {s for s in som_chips if _chip_has_driver(s)}
 
     _emit_block(
         f"# SoM-intrinsic chip drivers (from `{project.sku}` "

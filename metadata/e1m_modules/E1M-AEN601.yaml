@@ -18,6 +18,13 @@ on_module:
   rtc_external:         rv3028c7
   temperature_sensor:   tmp112
   eeprom:               eeprom_24c128
+  # Same on-module PHY as every AEN SKU: metadata/e1m_modules/aen/CHANGELOG.md:13-16
+  # records ONE shared PCB (r1) across E3..E8 that includes "TI DP83825
+  # Ethernet PHY"; metadata/socs/alif/ensemble/e6.json declares "ethernet": 1.
+  # Families with a single PHY omit ethernet_phy_count: (schema). See
+  # metadata/e1m_modules/E1M-AEN801.yaml + metadata/chips/dp83825.yaml for
+  # the bench evidence and the order-code caveat (#1241 "Blocked on").
+  ethernet_phy:         dp83825
   ospi_memories:
     ospi0:
       chip:           MX25UM25645GXDI00   # Macronix OctaFlash (xSPI NOR)
@@ -38,6 +45,27 @@ on_module:
     capacity_mbit:  256             # 256 Mbit (32 MiB)
     interface:      ospi0
     chip_select:    1
+
+  i2c_devices:
+    # Tier-3 SE-mediated housekeeping bus (ADR 0017:74-79): the SoC can only
+    # be a slave on the Alif LPI2C0 (hardcoded address 0x40, TRM §3.17.4), so
+    # the Secure Enclave masters it, not on-module silicon -- `bus_master` is
+    # omitted per the schema's `i2c_bus.bus_master` description. Addresses
+    # per docs/bring-up-aen.md §5.1's bench-verified table; pad names per
+    # examples/aen/aen-secure-element-sign/README.md:14-15.
+    brd_i2c:
+      devices:
+        - { chip: rv3028c7,         role: rtc,             address_7bit: "0x52" }
+        - { chip: optiga_trust_m,   role: secure_element,  address_7bit: "0x30" }
+        - { chip: tmp112,           role: temp_sensor,     address_7bit: "0x48" }
+    # SoC I2C2, bridge/DNP-selected onto the E1M portable I2C0 pads -- the
+    # SoM-manifest EEPROM only, a SEPARATE bus from the trio above (see
+    # docs/bring-up-aen.md §5.1: "Two separate buses -- don't assume a
+    # single shared bus.").
+    e1m_i2c0:
+      bus_master: alif-ensemble
+      devices:
+        - { chip: eeprom_24c128,    role: eeprom,          address_7bit: "0x50" }
 
 # Off-SoC module memory in the canonical cross-family shape (see
 # som-preset-v1.schema.json `memory:`).  Values are DERIVED from the

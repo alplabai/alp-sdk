@@ -48,6 +48,8 @@ on:
       - 'firmware/gd32-bridge/tests/protocol_vectors.txt'
       - 'README.md'
       - 'docs/**/*.md'
+      - 'examples/**/*.md'
+      - 'examples/**/*.c'
       - 'west.yml'
       - 'metadata/libraries/**'
       - 'scripts/requirements.txt'
@@ -88,6 +90,8 @@ on:
       - 'firmware/gd32-bridge/tests/protocol_vectors.txt'
       - 'README.md'
       - 'docs/**/*.md'
+      - 'examples/**/*.md'
+      - 'examples/**/*.c'
       - 'west.yml'
       - 'metadata/libraries/**'
       - 'scripts/requirements.txt'
@@ -372,6 +376,14 @@ jobs:
 
       - name: Gate — chip driver <-> metadata manifest parity
         run: python3 scripts/check_chip_manifest_parity.py
+
+      # #1270: doc/example prose naming an on-module I2C part next to a bus
+      # name (BRD_I2C/LPI2C0, I2C2/E1M_I2C0, ...) must agree with the
+      # SoM preset's own on_module.i2c_devices block -- four consecutive
+      # doc passes each fixed one wrong AEN bus assignment and broke
+      # another before this gate existed to check prose against metadata.
+      - name: Gate — I2C bus name in docs/examples agrees with i2c_devices metadata
+        run: python3 scripts/check_i2c_bus_doc_consistency.py
 
       # #1136: pr-twister.yml inits its topdir from Zephyr's OWN west.yml
       # (`west init -m zephyr`), so it never notices a Zephyr module that's
