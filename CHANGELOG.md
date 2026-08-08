@@ -807,6 +807,37 @@ Separately, there is no `alp` binary to run any of it with:
 maintenance, never a user-installed `alp` binary." Every invocation in the
 document is now the module form that actually runs --
 `python3 -m alp_cli model build --board <path>/board.yaml` from `scripts/`.
+### Added — an ExecuTorch adapter closes the write side of a decode gap the enum had carried unused (#1260)
+### Added — ExecuTorch is now a producible and decodable model format, reachable from `alp model build` (Refs #1260)
+
+`ALP_INFERENCE_MODEL_EXECUTORCH` had sat in the public
+`alp_inference_model_format_t` enum with no matching case in `_fmt_enum()`
+(`src/backends/inference/alp_model_select.c`), so a `blob_format` string of
+`"executorch"` silently decoded as `ALP_INFERENCE_MODEL_TFLITE` -- the wrong
+parser, reported as `ALP_OK` -- and no host-side adapter could produce that
+string in the first place, so the gap could not be reached from a real
+build either. `_fmt_enum()` now has an explicit `"executorch"` case.
+`scripts/alp_model/adapters/executorch.py` is a new `CompilerAdapter`
+(`backend="cpu"`) that packages an exported `.pte` program into an
+`.alpmodel` blob the same way `CpuAdapter` passes a `.tflite` through
+untouched, and it is registered by default in `build.py`'s `_ADAPTERS` list
+alongside `CpuAdapter`. `build_model()` now selects among a backend's
+adapters by `accepts(src_fmt)` when a backend carries more than one; since
+`tflite` and `pte` are mutually exclusive, no existing board's TFLite build
+changes behavior. A `board.yaml` declaring a `.pte` model source now builds
+through `alp model build` instead of raising `ValueError: no blob compiled
+...; cpu:incompatible (cpu does not accept .pte)`.
+`metadata/schemas/board.schema.json`'s `models[].source` description now
+names `.pte` alongside `.tflite`/`.onnx`.
+
+This closes the write-side gap only; there is still no on-device ExecuTorch
+*runtime* backend, so a package built this way has nothing to
+`alp_inference_invoke()` it yet (`docs/recommended-libraries.md` Tier 4).
+
+Issue #1260 ask 2 ("add `executorch` to `VALID_BLOB_FORMATS` in the same
+change") is not done here: that constant does not exist on this branch --
+it arrives only with the unmerged `origin/feat/ort-cpu-a55-inference`,
+whose format set omits `executorch` -- so ask 2 stays open.
 
 ## [v0.15.0] - 2026-08-07
 

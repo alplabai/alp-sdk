@@ -9,6 +9,7 @@ from alp_model.adapters.cpu import CpuAdapter
 from alp_model.adapters.drpai import DrpaiAdapter
 from alp_model.adapters.deepx import DeepxAdapter
 from alp_model.adapters.ethos_u import VelaAdapter, _parse_vela_summary
+from alp_model.adapters.executorch import ExecutorchAdapter
 
 _ROOT = Path(__file__).resolve().parents[2]
 
@@ -33,6 +34,33 @@ def test_cpu_adapter_compile_passes_bytes_through(tmp_path):
     assert blob.format == "tflite"
     assert blob.payload == b"TFL3-DUMMY-MODEL"
     assert blob.arena_bytes >= 0
+
+
+def test_executorch_adapter_is_a_compiler_adapter():
+    assert issubclass(ExecutorchAdapter, CompilerAdapter)
+
+
+def test_executorch_adapter_is_always_available_and_accepts_pte():
+    a = ExecutorchAdapter()
+    assert a.backend == "cpu"
+    assert a.is_available() is True
+    assert a.accepts("pte") is True
+    assert a.accepts("tflite") is False      # ExecuTorch ingests its own .pte, not .tflite
+    assert a.accepts("onnx") is False
+
+
+def test_executorch_adapter_compile_passes_bytes_through(tmp_path):
+    src = tmp_path / "m.pte"
+    src.write_bytes(b"PTE-DUMMY-PROGRAM")
+    blob = ExecutorchAdapter().compile(src, accel_config="", out_dir=tmp_path)
+    assert isinstance(blob, Blob)
+    assert blob.format == "executorch"       # matches the device _fmt_enum case (#1260)
+    assert blob.payload == b"PTE-DUMMY-PROGRAM"
+    assert blob.arena_bytes >= 0
+
+
+def test_executorch_adapter_does_not_require_compile_opts():
+    assert ExecutorchAdapter().requires_compile_opts is False
 
 
 def test_drpai_adapter_detect_and_skip(monkeypatch):

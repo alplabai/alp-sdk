@@ -30,6 +30,14 @@ static alp_inference_model_format_t _fmt_enum(const char *s)
 	if (strcmp(s, "dxnn") == 0) {
 		return ALP_INFERENCE_MODEL_DXNN;
 	}
+	if (strcmp(s, "executorch") == 0) {
+		/* #1260: ALP_INFERENCE_MODEL_EXECUTORCH had been in the public enum
+		 * with no matching case here, so an "executorch" blob_format
+		 * silently mis-decoded as TFLite (wrong parser, reported success).
+		 * scripts/alp_model/adapters/executorch.py is the host-side writer
+		 * that now emits this string. */
+		return ALP_INFERENCE_MODEL_EXECUTORCH;
+	}
 	return ALP_INFERENCE_MODEL_TFLITE; /* "tflite" + default */
 }
 
