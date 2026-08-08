@@ -18,8 +18,20 @@ SDK it describes (a CI regen-diff gate keeps it byte-in-sync):
                   `_named_instance_presence`) for pad-routed silicon
                   instances the SoC-level class counts merge together.
   - examples      examples/<category>/<name>/board.yaml -- the example's
-                  default SoM + board target plus a one-line summary from
-                  its README / main.c.
+                  default SoM + board target, a one-line summary from its
+                  README / main.c, and per-example filter facets
+                  (schema_version 2, issue #1283): `cores[]` / `coreCount` /
+                  `osSet` resolved through `core_os_topology()` -- the same
+                  planner `alp_project.py --emit os-topology` calls, NOT the
+                  raw board.yaml (47 of 100 examples never write `os:` on
+                  ANY core at all, and of the other 53 only 2 name a
+                  runtime `os:` directly -- the rest just turn a peer off --
+                  so the YAML alone reports the wrong core count for almost
+                  every example) -- plus a `declares` map of
+                  cheap YAML-literal booleans (peripherals / chips / ipc /
+                  models).  An example whose topology can't resolve (e.g. an
+                  SoM hw_rev still `status: tbd`) omits the resolved facets
+                  rather than guessing; `declares` stays present regardless.
   - emit_modes    the `--emit` artefact modes the orchestrator CLI exposes
                   (scripts/alp_orchestrate/cli.py) -- the ADR-0014 machine
                   contract.  The mode list is read from the CLI source so
@@ -71,6 +83,17 @@ from gen_support_matrix import (  # noqa: E402  (import after sys.path tweak)
     load_socs,
 )
 
+# Per-example facets (issue #1283) are resolved through the SAME planner the
+# orchestrator CLI's `--emit os-topology` uses -- NOT read off the raw
+# board.yaml.  47 of 100 examples never write `os:` on any core at all;
+# reading the YAML literally reports the wrong core count / OS set for
+# almost every example (see the module docstring below).
+from alp_orchestrate import (  # noqa: E402
+    OrchestratorError,
+    core_os_topology,
+    load_board_yaml,
+)
+
 MODULES = REPO / "metadata" / "e1m_modules"
 EXAMPLES = REPO / "examples"
 INCLUDE = REPO / "include" / "alp"
@@ -78,7 +101,7 @@ CLI = SCRIPTS / "alp_orchestrate" / "cli.py"
 PINMUX = REPO / "metadata" / "pinmux"
 OUT = REPO / "metadata" / "catalog.json"
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # Some SoC-level peripheral CLASSES (PERIPHERAL_CLASSES) merge multiple
 # silicon instances into one count (e.g. n44.json's `sdio: 2` backs BOTH the
@@ -275,6 +298,62 @@ def _summary_from_main_c(src_dir: Path) -> str | None:
     return joined or None
 
 
+def _declares(doc: dict) -> dict[str, bool]:
+    """Cheap YAML-literal presence booleans (issue #1283) -- these ARE what
+    the raw board.yaml says, unlike `cores`/`coreCount`/`osSet` below, so no
+    topology resolution is needed to answer them honestly."""
+    cores = doc.get("cores") or {}
+    return {
+        "peripherals": any((c or {}).get("peripherals") for c in cores.values()),
+        "chips":       bool(doc.get("chips")),
+        "ipc":         bool(doc.get("ipc")),
+        "models":      bool(doc.get("models")),
+    }
+
+
+def _resolved_core_facets(board_yaml: Path) -> dict | None:
+    """`cores[]` / `coreCount` / `osSet`, resolved through the SAME planner
+    `alp_project.py --emit os-topology` calls (issue #1283) -- NOT the raw
+    board.yaml.  A peer core left at its SoM topology default (47 of 100
+    examples never write `os:` on any core at all) is enabled and carries
+    a real `os` -- and an `app` when the resolved slice actually names one
+    (including the SDK's own `alp-stock-shim` for an unused Zephyr peer)
+    that the YAML alone never states.  `app` is OPTIONAL, not guaranteed: a
+    Yocto slice can be a stock recipe (`image:` set, no `app:` -- schema-
+    legal, see `alp_orchestrate.validate`) and then the core dict carries
+    no `app` key at all.
+
+    Returns None -- an honest absence, not a guess -- when the board can't
+    be resolved at all (e.g. an SoM hw_rev still `status: tbd`, the same
+    exclusion `check_emit_snapshots.py` carves out for rpmsg-imx93).  Any
+    OTHER `OrchestratorError` is unexpected -- warn on stderr instead of
+    silently dropping the row's facets, so a regression is visible at
+    regen time rather than getting committed as "in sync" by the next
+    `--check` run."""
+    try:
+        project = load_board_yaml(board_yaml)
+        topo = core_os_topology(project)
+    except OrchestratorError as exc:
+        print(f"gen_catalog: {board_yaml.relative_to(REPO).as_posix()}: "
+              f"os-topology did not resolve ({exc}) -- resolved facets "
+              f"omitted for this example", file=sys.stderr)
+        return None
+    cores: list[dict] = []
+    for row in topo["cores"]:
+        if not row["enabled"]:
+            continue
+        core: dict = {"id": row["core_id"], "os": row["effective_os"]}
+        slice_ = project.cores.get(row["core_id"])
+        if slice_ is not None and slice_.app:
+            core["app"] = slice_.app
+        cores.append(core)
+    return {
+        "cores":     cores,
+        "coreCount": len(cores),
+        "osSet":     sorted({c["os"] for c in cores}),
+    }
+
+
 def build_examples() -> dict[str, list[dict]]:
     """Group examples/<category>/<name>/ (with a board.yaml) by category."""
     by_cat: dict[str, list[dict]] = {}
@@ -298,6 +377,10 @@ def build_examples() -> dict[str, list[dict]]:
             entry["supported_boards"] = list(doc["supported_boards"])
         if summary:
             entry["summary"] = summary
+        facets = _resolved_core_facets(board_yaml)
+        if facets is not None:
+            entry.update(facets)
+        entry["declares"] = _declares(doc)
         by_cat.setdefault(category, []).append(entry)
     for entries in by_cat.values():
         entries.sort(key=lambda e: e["path"])
