@@ -221,6 +221,47 @@ additive metadata only.
 
 `metadata/catalog.json` and `alp.lock` regenerated
 (`python3 scripts/gen_catalog.py && west alp-lock`).
+### Added — `check_library_pin_parity.py`: a meta-alp-sdk recipe's pin must match its west.yml / metadata/libraries counterpart (#1281)
+
+`grep -rln SRCREV scripts/` returned no file -- nothing cross-checked a
+`meta-alp-sdk` recipe's `SRCREV`/tag against the revision `west.yml` pins,
+or the version `metadata/libraries/<name>.yaml` records, for the SAME
+third-party module. A `.alpmodel`-shaped library decoded by both the
+M-class Zephyr build and the A-class Yocto build (zcbor, #1254/#1280)
+could drift to two different upstream pins on the two OSes with CI
+staying green throughout, discovered only when a packed model decoded
+differently on the two cores -- the hardest class of bug to attribute.
+
+The recipe<->manifest link is BitBake's own `<pn>_<pv>.bb` naming
+convention, not an invented field: a recipe names a real curated library
+the moment `metadata/libraries/<pn>.yaml` exists. Deliberate, explicit
+exemptions rather than silent skips: a recipe with no such counterpart
+(this layer's own `alp-sdk`/`dx-rt` recipes), an unpinned `${AUTOREV}`
+recipe, and -- the exact zcbor shape -- a module reachable only through
+Zephyr's own `name-allowlist` import, whose revision `west.yml` never
+states directly (that lives in Zephyr's own manifest, resolvable only
+from a real checkout, the same oracle
+`check_west_manifest_module_resolution.py` already declines to carry).
+That module's recipe<->metadata-version axis is still checked, so it
+isn't left wholly uncovered.
+
+States its "same revision vs. same consumed trees" answer outright
+rather than leaving it implicit: a recipe ref and its comparison target
+are compared only when they're the SAME KIND of git reference (both
+40-hex SHAs, or both not) -- a SHA-vs-tag pairing is a representation
+mismatch, not provable drift without a real clone (subtree-hash
+comparison, the more honest check, needs one), so it is never reported.
+This is what keeps PR #1280's real zcbor pin -- a canonical-remote tag
+proven by hand to check out byte-identical trees to a different,
+mirror-only SHA -- from becoming a permanent false positive.
+
+Proven in both directions: green over the current tree (vacuously --
+no third-party recipe exists yet), red on an injected drift on each of
+the two comparison axes naming the file, and confirmed NOT red on each
+of the three exemptions above. Mutation-tested against both comparison
+axes and the last-assignment-wins `SRCREV` resolution.
+
+Wired into `pr-metadata-validate.yml`'s `validate` job.
 
 ### Fixed — `check_tan_docs_surface.py` decoded `tan --help` with the host locale (#1301)
 

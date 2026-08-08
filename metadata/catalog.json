@@ -3333,6 +3333,10 @@
       "script": "scripts/check_inference_backend_parity.py"
     },
     {
+      "purpose": "Recipe-vs-west pin-parity gate (issue #1281).",
+      "script": "scripts/check_library_pin_parity.py"
+    },
+    {
       "purpose": "Assert the curated-library registry is self-consistent (WS6-c #610 §6).",
       "script": "scripts/check_library_registry.py"
     },
