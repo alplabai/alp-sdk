@@ -143,6 +143,59 @@ in each script rather than a hand-maintained allowlist, so a newly added
 read-back that skips the assertion fails the test instead of silently
 reintroducing the bug.
 
+### Added — per-example filter facets in `metadata/catalog.json`, resolved from `os-topology` not the raw `board.yaml` (#1283)
+
+`metadata/catalog.json`'s `examples` rows carried only `board` / `name` /
+`path` / `som` / `summary` — no way to filter the ~100 examples by core
+count, per-core OS, or what an example actually declares. Each row now also
+carries `cores[]` (`id` / `os`, plus `app` when the resolved slice names
+one — see below), `coreCount`, `osSet`, and a `declares` map (`peripherals`
+/ `chips` / `ipc` / `models`).
+
+The trap the issue is built around: `cores` / `coreCount` / `osSet` are
+resolved through `core_os_topology()` — the same planner
+`alp_project.py --emit os-topology` calls — not read off the example's own
+`board.yaml`. Measured on this tree: 47 of the 100 examples never write
+`os:` on any core at all; of the other 53, only 2 name a runtime `os:`
+directly (`zephyr`) and the remaining 54 `os: off` occurrences just turn a
+peer off. Every core left unmentioned still defaults to the SoM topology,
+which enables it (and gives an unused Zephyr peer the SDK's own
+`alp-stock-shim` app) — a fact the YAML never states either way. Reading
+the YAML's `cores:` entries literally reports between 43 (raw entry count)
+and 95 (once each explicit `os: off` is honored) examples as "1 core", and
+47 as "no `os:` written at all" — worse than no filter at all. `rpmsg-aen`,
+for instance, only writes `cores:` entries for `a32_cluster` + `m55_hp`;
+the resolved catalog row also carries `m55_he` (`os: zephyr`,
+`app: alp-stock-shim`) even though that core name never appears in the
+example's `board.yaml`. `app` itself is optional even on a resolved core:
+a Yocto slice can be a stock recipe (`image:` set, no `app:`), and then the
+core dict carries no `app` key at all. `declares` is the cheap opposite
+case — a literal read of the YAML's own `chips:` / `ipc:` / `models:`
+top-level keys and each core's `peripherals:` list, since those answers
+don't need resolution to be honest.
+
+An example whose topology can't resolve at all (currently just
+`rpmsg-imx93` — its only SoM hw_rev is `status: tbd`, the same #1025
+exclusion `check_emit_snapshots.py` already carves out) omits the
+resolved facets rather than guessing; `declares` stays present regardless,
+since it never depended on resolution. Any other topology failure is
+printed to stderr at regen time rather than silently omitted, so a future
+regression can't ride into `metadata/catalog.json` as if it were "in sync".
+
+The two are told apart by exception TYPE, not by string-matching a message:
+the not-buildable case raises `SdkRevisionNotBuildable`, which exists as a
+subclass for exactly this purpose alongside `SdkRevisionUnsupported` and
+`SdkRevisionUnknown`. Keeping the expected case silent matters as much as
+warning on the unexpected one — a line printed by every regen and every CI
+`--check` is a standing false alarm, and it trains the reader to ignore the
+very channel the warning depends on.
+
+`schema_version` bumps 1 → 2 for the new per-example fields.  This is
+additive metadata only.
+
+`metadata/catalog.json` and `alp.lock` regenerated
+(`python3 scripts/gen_catalog.py && west alp-lock`).
+
 ### Fixed — `check_tan_docs_surface.py` decoded `tan --help` with the host locale (#1301)
 
 The check read every `tan <verb> --help` through

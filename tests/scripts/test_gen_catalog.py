@@ -5,10 +5,13 @@ committed metadata/catalog.json (11 SoMs each resolving to a SoC, non-empty
 examples, real portable-API headers, and a couple of known presence cells).
 """
 
+import io
 import json
 import subprocess
 import sys
+from contextlib import redirect_stderr
 from pathlib import Path
+from unittest.mock import patch
 
 import gen_catalog as gc  # noqa: E402  (scripts/ on sys.path via conftest)
 
@@ -123,6 +126,89 @@ def test_examples_non_empty_and_grouped():
             assert (REPO / e["path"] / "board.yaml").is_file()
 
 
+def _example(path: str) -> dict:
+    """Find one example entry by its `examples/<cat>/<name>` path."""
+    for entries in _catalog()["examples"].values():
+        for e in entries:
+            if e["path"] == path:
+                return e
+    raise AssertionError(f"no catalog entry for {path!r}")
+
+
+def test_facets_come_from_resolved_topology_not_raw_yaml():
+    """Issue #1283: rpmsg-aen's board.yaml only writes `cores:` for
+    a32_cluster + m55_hp -- m55_he is left at the SoM topology default. A
+    facet read off the raw YAML would report 2 cores / zephyr peer app
+    unstated; the resolved topology (`core_os_topology`, the same resolver
+    `--emit os-topology` uses) reports all three, with m55_he's app filled
+    in as the SDK's own stock-shim -- the trap the issue is built around.
+    """
+    e = _example("examples/multicore/rpmsg-aen")
+    assert e["coreCount"] == 3
+    assert e["osSet"] == ["yocto", "zephyr"]
+    cores = {c["id"]: c for c in e["cores"]}
+    assert cores["a32_cluster"] == {"id": "a32_cluster", "os": "yocto", "app": "./linux"}
+    assert cores["m55_hp"] == {"id": "m55_hp", "os": "zephyr", "app": "./m55_hp"}
+    # m55_he: not written anywhere in rpmsg-aen/board.yaml at all.
+    assert cores["m55_he"] == {"id": "m55_he", "os": "zephyr", "app": "alp-stock-shim"}
+
+
+def test_facets_single_effective_core():
+    e = _example("examples/audio/audio-noise-suppression")
+    assert e["coreCount"] == 1
+    assert e["osSet"] == ["zephyr"]
+    assert [c["id"] for c in e["cores"]] == ["m33_sm"]
+
+
+def test_declares_read_from_raw_board_yaml():
+    # aen-cc3501e-bringup declares a chip + per-core peripherals, no ipc/models.
+    e = _example("examples/aen/aen-cc3501e-bringup")
+    assert e["declares"] == {
+        "peripherals": True, "chips": True, "ipc": False, "models": False,
+    }
+    # rpmsg-aen declares ipc + peripherals, no chips/models.
+    e2 = _example("examples/multicore/rpmsg-aen")
+    assert e2["declares"] == {
+        "peripherals": True, "chips": False, "ipc": True, "models": False,
+    }
+
+
+def test_facets_omitted_not_guessed_when_topology_unresolvable():
+    """rpmsg-imx93's only hw_rev is `status: tbd` -- `load_board_yaml` raises
+    rather than resolving a topology. The catalog must omit the
+    topology-derived facets for that one entry (absence, not a guess), while
+    the YAML-derived `declares` stays present."""
+    e = _example("examples/multicore/rpmsg-imx93")
+    assert "cores" not in e
+    assert "coreCount" not in e
+    assert "osSet" not in e
+    assert "declares" in e
+
+
+def test_unexpected_topology_failure_warns_on_stderr():
+    """`_resolved_core_facets` must not blanket-swallow every orchestrator
+    failure silently. Only `SdkRevisionNotBuildable` -- the SoM hw_rev whose
+    `status:` refuses a build -- is an honest, expected absence. Any OTHER
+    OrchestratorError (a synthetic one here) still returns None (facets stay
+    omitted, never guessed) but must name the board + the failure on stderr,
+    so a future regression is visible at regen time instead of getting
+    committed as "in sync"."""
+    board_yaml = REPO / "examples" / "aen" / "aen-analog-validate" / "board.yaml"
+    buf = io.StringIO()
+    with patch.object(gc, "load_board_yaml",
+                       side_effect=gc.OrchestratorError("synthetic failure")):
+        with redirect_stderr(buf):
+            result = gc._resolved_core_facets(board_yaml)
+    assert result is None
+    stderr = buf.getvalue()
+    assert "synthetic failure" in stderr
+    assert "aen-analog-validate" in stderr
+
+
+def test_schema_version_bumped_for_facets():
+    assert gc.SCHEMA_VERSION == 2
+
+
 def test_portable_api_lists_real_headers_and_functions():
     api = _catalog()["portable_api"]
     assert api
@@ -156,3 +242,29 @@ def test_gates_enumerate_check_scripts():
 
 def test_catalog_is_valid_json_on_disk():
     json.loads(OUT.read_text(encoding="utf-8"))
+
+
+def test_expected_not_buildable_case_stays_silent():
+    """The other half, and the one that keeps the channel worth reading.
+
+    rpmsg-imx93's SoM hw_rev is `status: tbd`, so its facets are legitimately
+    absent on every run. Warning about it each time would be a permanent
+    false alarm printed by every regen and every CI `--check`, which trains
+    the reader to ignore the exact stderr line the test above exists to make
+    visible.
+
+    Pinned separately from the warn case because a single test asserting only
+    "the synthetic failure warns" passes identically whether or not the
+    expected case is excluded -- it cannot tell the two apart.
+    """
+    board_yaml = REPO / "examples" / "multicore" / "rpmsg-imx93" / "board.yaml"
+    assert board_yaml.is_file(), "rpmsg-imx93 moved -- repoint this test"
+
+    err = io.StringIO()
+    with redirect_stderr(err):
+        facets = gc._resolved_core_facets(board_yaml)
+
+    assert facets is None, "a non-buildable hw_rev must yield no resolved facets"
+    assert err.getvalue() == "", (
+        "the documented not-buildable case must be silent, got: " + err.getvalue()
+    )
