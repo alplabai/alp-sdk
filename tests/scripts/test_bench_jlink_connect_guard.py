@@ -27,6 +27,41 @@ REPO = Path(__file__).resolve().parents[2]
 BENCH = REPO / "scripts" / "bench" / "aen"
 ENV = BENCH / "bench-env.sh"
 
+
+def _bash_can_run_a_script() -> bool:
+    """True only when `bash` on PATH can actually execute something.
+
+    Presence is not enough. On GitHub's windows-latest runner `bash`
+    resolves to System32\\bash.exe -- the WSL launcher -- with no
+    distribution installed. It exits 1 and prints a UTF-16 message about
+    installing a distribution, so a `subprocess.run(["bash", ...])` returns
+    1 for a reason that has nothing to do with the code under test.
+
+    That is exactly how these tests reddened `python-smoke (windows-latest)`
+    on every PR after alp-sdk#1318 landed: four failures whose assertion
+    text (`assert 1 == 7`) looked like a real guard defect and was not.
+    Probe by RUNNING something, never by `shutil.which`.
+    """
+    try:
+        probe = subprocess.run(
+            ["bash", "-c", "printf ok"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return probe.returncode == 0 and probe.stdout.strip() == "ok"
+
+
+# Evaluated once at collection. The guard itself is plain POSIX shell in
+# bench-env.sh, so there is nothing to assert about it on a host with no
+# working shell -- skip rather than fail, and say which host that is.
+_NEEDS_BASH = pytest.mark.skipif(
+    not _bash_can_run_a_script(),
+    reason="no working `bash` on this host (Windows CI resolves the WSL "
+           "launcher with no distribution installed); bench-env.sh is POSIX "
+           "shell and cannot be exercised here",
+)
+
 # The verbatim JLinkExe transcript from the real bench failure (alp-sdk#1318),
 # trimmed. Note it ends "Script processing completed." and JLinkExe exits 0 --
 # that is exactly why the exit status could not be used.
@@ -84,6 +119,7 @@ def _call_guard(out_file: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+@_NEEDS_BASH
 def test_failed_connect_is_a_hard_error(tmp_path: Path) -> None:
     out = tmp_path / "jlink.out"
     out.write_text(REAL_FAILED_CONNECT, encoding="utf-8")
@@ -99,6 +135,7 @@ def test_failed_connect_is_a_hard_error(tmp_path: Path) -> None:
     assert "0x4C013477" in res.stderr, "must name the AEN E8 SW-DP IDR to disambiguate the probes"
 
 
+@_NEEDS_BASH
 def test_successful_read_passes(tmp_path: Path) -> None:
     out = tmp_path / "jlink.out"
     out.write_text(REAL_GOOD_READ, encoding="utf-8")
@@ -108,6 +145,7 @@ def test_successful_read_passes(tmp_path: Path) -> None:
     assert res.returncode == 0, f"guard must not fire on a good read:\n{res.stderr}"
 
 
+@_NEEDS_BASH
 def test_empty_output_is_a_hard_error(tmp_path: Path) -> None:
     """A missing/empty transcript is also a failure -- decoding it yields the
     same empty block, so it must not pass silently."""
@@ -120,6 +158,7 @@ def test_empty_output_is_a_hard_error(tmp_path: Path) -> None:
     assert "no J-Link output at all" in res.stderr
 
 
+@_NEEDS_BASH
 def test_missing_file_is_a_hard_error(tmp_path: Path) -> None:
     res = _call_guard(tmp_path / "does-not-exist.out")
 

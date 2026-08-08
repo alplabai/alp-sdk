@@ -7,6 +7,32 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — the new J-Link guard tests reddened `python-smoke (windows-latest)` on every PR
+
+`tests/scripts/test_bench_jlink_connect_guard.py` (added with the alp-sdk#1318
+fix) invokes `bash` to source `bench-env.sh` and exercise
+`bench_jlink_assert_connected`. On GitHub's **windows-latest** runner `bash`
+resolves to `System32ash.exe` — the WSL launcher — with no distribution
+installed. It exits 1 and prints a UTF-16 message about installing one, so all
+four subprocess-backed tests failed with
+
+```
+FAILED tests/scripts/test_bench_jlink_connect_guard.py::test_failed_connect_is_a_hard_error - AssertionError: expected exit 7, got 1
+```
+
+Assertion text that reads like a real guard defect and is not: the guard was
+never invoked at all. Landing that put a permanent red on `python-smoke
+(windows-latest)` for every subsequent PR — the same "CI noise trains the
+reader to ignore the channel" failure this release has been removing
+elsewhere.
+
+The four bash-dependent tests now skip on a host with no working shell, with
+the reason naming the cause. Availability is probed by RUNNING `bash -c
+'printf ok'` and checking both the exit status and the output — not by
+`shutil.which`, which would have found the WSL launcher and reported success.
+The non-bash tests in the file (read-back coverage, conflict-marker scan) still
+run everywhere and are unaffected.
+
 ### Fixed — a SoM chip with no driver emitted a Kconfig symbol that does not exist (#1241)
 
 Adding `ethernet_phy: dp83825` to the AEN SoM presets made every AEN Zephyr
