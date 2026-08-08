@@ -48,6 +48,27 @@ def _tvm_home() -> Path | None:
     return Path(root) if root and Path(root).is_dir() else None
 
 
+def _is_224_imagenet_shape(input_shape: str) -> bool:
+    """True when input_shape is the 224x224 ImageNet-classifier geometry the
+    vendor tutorial's ``--images`` path hard-codes.
+
+    ``compile_onnx_model_quant.py`` always runs calibration images through
+    ``pre_process_imagenet_pytorch()``, whose body ignores the ``dims``
+    argument it accepts and unconditionally does resize(256) +
+    center_crop(224) -- so ``--images`` only ever produces correctly-shaped
+    calibration tensors for a 3-channel, 224x224 model in NCHW
+    (``1,3,224,224``, the layout ONNX -- the only format this adapter accepts,
+    see accepts() -- uses by convention). Anything else -- e.g. a detector's
+    real geometry like YOLOX's ``1,3,640,640`` -- silently mismatches and the
+    vendor tool aborts deep inside with a shape-broadcast error after the
+    (multi-minute) compile has already run. See alp-sdk#1271."""
+    try:
+        dims = [int(d.strip()) for d in input_shape.split(",")]
+    except ValueError:
+        return False
+    return dims == [1, 3, 224, 224]
+
+
 def _compiler_version(tvm_home: Path) -> str:
     """Best-effort toolchain version from the DRP-AI TVM checkout.
 
@@ -117,6 +138,28 @@ class DrpaiAdapter(CompilerAdapter):
             raise RuntimeError(
                 "DRP-AI compile needs models[].compile.drpai with "
                 "input_shape, input_name and images (a calibration image dir)")
+        # board.yaml (YAML) can hand us a non-str (e.g. a flow-sequence
+        # input_shape: [1,3,224,224]); normalize once so the 224x224 check
+        # and the vendor CLI arg below always see the same string, instead of
+        # the check crashing on .split() while the CLI arg (which already
+        # str()s at use) accepted it.
+        input_shape = str(input_shape)
+
+        # The vendor tutorial's --images path only preprocesses to 224x224
+        # (see _is_224_imagenet_shape). Fail here, before the multi-minute
+        # compile runs, instead of forwarding a detector/segmentation
+        # geometry into a `could not broadcast` crash deep in vendor code.
+        if not _is_224_imagenet_shape(input_shape):
+            raise RuntimeError(
+                f"DRP-AI --images calibration only works for the 224x224 "
+                f"ImageNet classifier geometry the vendor tutorial hard-codes "
+                f"in pre_process_imagenet_pytorch() (resize-256 + "
+                f"center-crop-224); got input_shape={input_shape!r}. A "
+                f"detector/segmentation model at this geometry cannot be "
+                f"calibrated against real images through this path yet "
+                f"(tracked in alp-sdk#1271) -- there is no random-frame "
+                f"fallback wired into this adapter today, so this compile "
+                f"cannot proceed with calibrated accuracy.")
 
         product = (opts.get("product") or accel_config or "V2N").upper()
         if product not in ("V2N", "V2H"):

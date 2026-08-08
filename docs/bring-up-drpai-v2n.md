@@ -220,14 +220,51 @@ applies to the other `meta-rz-*` feature layers.
 
 ```sh
 export ALP_DRPAI_TVM_HOME=<rzv_drp-ai_tvm checkout>
-python3 -m alp_model build --target drpai --product V2N <model.onnx>
+alp model build --board board.yaml
 ```
+
+There is no `--target`/`--product` flag and no positional `<model.onnx>`
+argument (`python3 -m alp_model` isn't runnable either — `alp_model` is a
+package, not a script). `alp model build` compiles every `models:` entry
+declared in `board.yaml` for every backend the SoM resolves to
+(`scripts/alp_cli/model.py`); `PRODUCT` for DRP-AI comes from
+`models[].compile.drpai.product` (falling back to `accel_config`, then
+`"V2N"`), not a CLI flag.
+
+**`board.yaml`'s schema does not describe this config yet.**
+`metadata/schemas/board.schema.json`'s `models[].compile.drpai` block only
+declares a `spec:` key (`additionalProperties: false`, `required: ["spec"]`)
+— a leftover from a design where an external spec file carried the model
+geometry. `scripts/alp_model/adapters/drpai.py` never reads `spec`; it reads
+`input_shape`, `input_name`, `images` and `product` straight out of the
+`compile.drpai` block. No schema-valid `board.yaml` can drive this path
+today. Until the schema is reconciled with what the adapter actually reads,
+thread `compile.drpai` in directly as `build_model()`'s `compile_opts`
+argument — the same way `tests/scripts/test_alp_model_adapters.py` and
+`tests/scripts/test_alp_cli_model.py` do — rather than through `alp validate`.
 
 `scripts/alp_model/adapters/drpai.py` drives
 `$ALP_DRPAI_TVM_HOME/tutorials/compile_onnx_model_quant.py` with `PRODUCT` in the
-environment. It needs an input shape and name, and calibration images; the
-tutorial falls back to random calibration data, which is enough to prove the
-pipeline but not enough for a demo's accuracy.
+environment. It needs an input shape and name, and calibration images, and
+always forwards the images through the tutorial's `--images` flag.
+
+**The `--images` calibration path only works for 224x224 ImageNet-style
+classifiers.** The tutorial's `--images` handling always runs each calibration
+image through `pre_process_imagenet_pytorch()`, which ignores the `dims`
+argument it accepts and hard-codes `resize(256)` + `center_crop(224)`
+regardless of the model's declared geometry. For any other input shape —
+including every object detector, e.g. YOLOX at `1,3,640,640` — the adapter now
+rejects the compile up front with a clear error instead of running the
+(multi-minute) DRP-AI Translator only to abort deep inside the vendor tutorial
+with a shape-broadcast error. There is no random-frame (`-n`) fallback wired
+into the adapter: the tutorial's own `-n` path compiles and runs but leaves
+post-training INT8 quantisation calibrated against noise rather than real
+data, so it is not something to route detectors through silently. Owning the
+calibration feed instead of delegating to the tutorial's classifier-shaped
+helper — so a detector's real preprocessing (e.g. YOLOX letterbox padding)
+matches what the on-device DRP preprocessing chain does — needs a real
+calibration image set and a board to validate the result's accuracy; that is
+tracked in alp-sdk#1271 and not done here.
 
 **No compiled model exists yet — an ONNX source does.** RUHMI ships a real
 model, `how-to/sample_app_v2h/app_yolox_cam/yolox-S_VOC.onnx` (35 MB,

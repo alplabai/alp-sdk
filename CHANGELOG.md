@@ -685,6 +685,42 @@ This PR does not close #1270 -- the issue's own bar ("even a narrow
 version ... would have caught every defect above") is unmet (one of four,
 not every one), per the four-defects paragraph above. The bus half stays; the address half
 is dropped rather than shipped imprecise.
+### Fixed — DRP-AI `--images` calibration silently assumed every model is a 224x224 classifier (#1271)
+
+`scripts/alp_model/adapters/drpai.py` forwarded any `models[].compile.drpai`
+config to the DRP-AI TVM tutorial's `--images` flag regardless of the model's
+declared `input_shape`. The tutorial's `--images` handling always runs
+calibration images through `pre_process_imagenet_pytorch()`, which ignores the
+`dims` argument it accepts and hard-codes `resize(256)` + `center_crop(224)` --
+so `--images` only ever produced correctly-shaped calibration tensors for a
+224x224 ImageNet-style classifier. For any other geometry, including every
+object detector (e.g. YOLOX at `1,3,640,640`), the compile ran the full
+(multi-minute) DRP-AI Translator and quantisation pass and only then aborted
+deep inside the vendor tutorial with `ValueError: could not broadcast input
+array from shape (1,3,224,224) into shape (...)`.
+
+The adapter now checks `input_shape` against the 224x224 NCHW geometry
+(`1,3,224,224` — the layout ONNX, the only format this adapter accepts, uses
+by convention) before invoking the tutorial, and raises a clear `RuntimeError`
+naming the mismatch immediately instead of running the compile first. This
+closes the *slow, cryptic failure* -- it does not make `--images` calibration
+work for detectors: the vendor tutorial's preprocessing would still need to
+own the model's real geometry (letterbox padding for YOLOX, for instance) to
+produce a correctly-calibrated quantised model, and validating the resulting
+accuracy needs a real calibration image set and a board. Both remain open,
+tracked in #1271.
+
+Also fixed on the way to reaching this code from `board.yaml`:
+`scripts/alp_cli/model.py`'s `_resolve_compile()` resolved *every* string
+value in a `models[].compile.<backend>` block to an absolute path, so
+`input_shape: "1,3,224,224"` and `product: "V2N"` arrived at the adapter as
+bogus filesystem paths and the new 224x224 check above misfired on exactly
+the board.yaml-driven path it exists to protect. It now only resolves the
+keys that are actually paths (`config`, `calibration`, `images`, `spec`).
+Separately, and not fixed here: `metadata/schemas/board.schema.json`'s
+`models[].compile.drpai` block still only declares a `spec:` key and rejects
+`input_shape`/`input_name`/`images`/`product` outright, so no schema-valid
+`board.yaml` can reach this path yet -- see `docs/bring-up-drpai-v2n.md`.
 
 ## [v0.15.0] - 2026-08-07
 
