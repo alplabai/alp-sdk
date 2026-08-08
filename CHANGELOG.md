@@ -893,32 +893,75 @@ of library count.
 `timeout-minutes` on every step whose `run:`/`uses:` body does real
 network/install/compile work, not just the `tier-a-library-build` job
 #1272 hit: `compute-family-matrix`'s `Checkout alp-sdk` and `Set up
-Python` (2 each, ceiling 5); `tier-a-library-build`'s `Checkout alp-sdk`:
-2, `Set up Python`: 2, `Install host build tools`: 4, `Install west`: 2,
-`west init Zephyr workspace`: 8, `Cache Zephyr modules`: 2, `Cache ccache
-objects`: 2, `pip install Zephyr + alp-sdk requirements`: 3, `Build
-Tier-A library smoke on native_sim`: 6 (sum 31, under the job's 33-minute
-ceiling -- moved up from 30 to stay strictly above that sum); and
-`cmsis-nn-metadata`'s `Checkout alp-sdk`, `Set up Python`, and `Install
-Python deps` (2 each, ceiling 10, sum 6). A future stall in any one of
-them now fails fast and names itself, instead of silently spending the
-whole job's budget and reporting a timeout on whichever step happened to
-be running when the ceiling hit.
+Python` (2 each, ceiling 6); `tier-a-library-build`'s `Checkout alp-sdk`:
+2, `Set up Python`: 2, `Install host build tools`: 8, `Install west`: 2,
+`west init Zephyr workspace`: 13, `Cache Zephyr modules`: 3, `Cache
+ccache objects`: 2, `pip install Zephyr + alp-sdk requirements`: 3,
+`Build Tier-A library smoke on native_sim`: 6 (capped sum 41, plus a
+1-minute budget for the job's one uncapped step -- see below -- stays
+under the job's 45-minute ceiling); and `cmsis-nn-metadata`'s `Checkout
+alp-sdk`, `Set up Python`, and `Install Python deps` (2 each, ceiling 10,
+capped sum 6). A future stall in any one of them now fails fast and
+names itself, instead of silently spending the whole job's budget and
+reporting a timeout on whichever step happened to be running when the
+ceiling hit.
+
+Every cap is re-derived from that step's own worst **successful** run
+across 44 sampled runs (`30800710350`..`31218962355`, 2026-08-03 through
+2026-08-07, via the GitHub API's per-job step timestamps), not guessed:
+`Checkout alp-sdk` max 43s (cap 2min, 2.79x), `Set up Python` max 1s
+(2min, effectively unbounded headroom), `Install host build tools` max
+214s (cap 8min = 480s, **2.24x** -- the first round of this fix capped it
+at 4min = 240s, only **1.1x** over this same 214s worst-successful
+observation, close enough to flake on an ordinary slow-but-fine run, the
+exact misattribution class this issue exists to stop), `Install west` max
+11s (2min, 10.9x), `west init Zephyr workspace` max 383s (6m23s, run
+`30800710350`; cap 13min = 780s, **2.04x** -- was capped at 8min = 480s,
+**1.25x**, the same too-tight class), `Cache Zephyr modules` max 62s (cap
+3min, 2.9x; was 2min, 1.94x), `Cache ccache objects` max 2s (2min, no
+practical risk), `pip install Zephyr + alp-sdk requirements` max 72s
+(3min, 2.5x), `Build Tier-A library smoke on native_sim` max 96s (6min,
+3.75x), `Install Python deps` (`cmsis-nn-metadata`) max 6s (2min, 20x).
 
 `tests/scripts/test_tier_a_workflow_step_timeouts.py` enforces both
 properties across all three jobs, not just `tier-a-library-build`: every
 step whose `run:`/`uses:` body does real network or compile work (a
 marketplace `uses:` action always makes its own round trip, same as
 `actions/checkout`/`actions/cache` here) carries a timeout under its
-job's own ceiling, and each job's caps sum under that same ceiling. The
-`cmsis-nn-metadata` job's `Validate Tier-A library metadata and emit
-tests` step now also runs this test file directly -- it is the only lane
+job's own ceiling, and each job's caps sum under that same ceiling.
+`test_job_ceiling_exceeds_the_sum_of_its_step_timeouts` was unsound: it
+summed only steps carrying `timeout-minutes`, so a step with none (not
+flagged by the network/compile heuristic, since it does neither --
+`Derive build matrix from familyMatrix registry`, `Generate Tier-A
+alp.conf for ...`, `Validate Tier-A library metadata and emit tests`)
+contributed 0 to the sum even though it still spends real wall-clock time
+before whatever runs after it, letting a ceiling with no real headroom
+read as safe. Concretely, `compute-family-matrix`'s prior ceiling (5)
+exactly equalled its two capped steps' sum (4) plus this budget (1) --
+`5 < 5` is false, so that ceiling had already spent every minute of its
+declared margin on a step (`Derive build matrix...`) the old test could
+not see at all; its real duration has never exceeded 2s, so this was not
+an active flake today, but the old test would have said "safe" (4 < 5)
+regardless of how long that step actually took, which is exactly the
+soundness gap this fix closes. Each such step is
+now budgeted a flat `_UNCAPPED_STEP_BUDGET_MINUTES = 1`, comfortably
+above every real observation of the three today (max 45s, `Validate
+Tier-A library metadata and emit tests`; a couple of seconds for the
+other two) without hardcoding per-step numbers that would drift the
+moment a new uncapped step is added. `compute-family-matrix`'s ceiling
+moves 5 -> 6 and `tier-a-library-build`'s 33 -> 45 so both stay strictly
+above their now-honest sums (5 and 42 respectively); `cmsis-nn-metadata`'s
+already had headroom (6 capped + 1 budgeted = 7, under its unchanged
+10-minute ceiling).
+
+The `cmsis-nn-metadata` job's `Validate Tier-A library metadata and emit
+tests` step also runs this test file directly -- it is the only lane
 that executes when a PR touches nothing but this workflow file (the two
 lanes that run the full `tests/scripts/` sweep, `pr-metadata-validate.yml`
 and `cross-platform-zephyr.yml`, do not trigger on
 `.github/workflows/pr-tier-a-libraries.yml`'s own path), so without this
 the regression gate would not run on the file it guards. Observed
-successful runs (31218962355, 31217270650) finish in 4m19s-6m40s per
+successful runs (`31218962355`, `31217270650`) finish in 4m19s-6m40s per
 shard, comfortably under every new cap.
 
 ## [v0.15.0] - 2026-08-07

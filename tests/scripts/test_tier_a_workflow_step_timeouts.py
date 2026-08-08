@@ -101,6 +101,22 @@ def test_network_and_compile_steps_carry_their_own_timeout() -> None:
     )
 
 
+# A step that does not match the network/compile heuristic above (so the
+# first test does not require it to carry its own timeout-minutes) is
+# still not FREE: it still runs and consumes real wall-clock time before
+# whatever comes after it. Ignoring it entirely -- as if it took 0s --
+# lets a job's declared ceiling look like it has headroom it does not
+# actually have. Real measured durations of every such step in this file
+# today (`Derive build matrix from familyMatrix registry`,
+# `Generate Tier-A alp.conf for ...`, `Validate Tier-A library metadata and
+# emit tests`) have never exceeded 45s across 44 sampled runs
+# (CHANGELOG.md's #1274 entry cites the source measurement); this budgets
+# each one a full minute, comfortably above every real observation, without
+# hardcoding per-step numbers here that would drift out of sync with the
+# workflow the moment a new uncapped step is added.
+_UNCAPPED_STEP_BUDGET_MINUTES = 1
+
+
 def test_job_ceiling_exceeds_the_sum_of_its_step_timeouts() -> None:
     # Each job-level ceiling must stay strictly above the sum of that
     # job's own step timeouts, or the step running last can still be
@@ -110,15 +126,20 @@ def test_job_ceiling_exceeds_the_sum_of_its_step_timeouts() -> None:
     # #1274's own considered remedies) stays a valid change as long as the
     # per-step timeouts still fit under it.
     for job_id, job in _load_jobs().items():
-        step_timeouts = [
-            step["timeout-minutes"]
-            for step in job["steps"]
-            if "timeout-minutes" in step
-        ]
-        total = sum(step_timeouts)
+        capped_total = 0
+        uncapped_steps = 0
+        for step in job["steps"]:
+            if "timeout-minutes" in step:
+                capped_total += step["timeout-minutes"]
+            else:
+                uncapped_steps += 1
+
+        total = capped_total + uncapped_steps * _UNCAPPED_STEP_BUDGET_MINUTES
         assert total < job["timeout-minutes"], (
-            f"job {job_id!r} step timeout-minutes sum to {total}, which "
-            f"is not under the job's {job['timeout-minutes']}-minute "
+            f"job {job_id!r} step timeout-minutes sum to {capped_total}, "
+            f"plus {uncapped_steps} uncapped step(s) budgeted at "
+            f"{_UNCAPPED_STEP_BUDGET_MINUTES}min each = {total}, which is "
+            f"not under the job's {job['timeout-minutes']}-minute "
             f"ceiling -- a step running late in the job can still be "
             f"misattributed"
         )

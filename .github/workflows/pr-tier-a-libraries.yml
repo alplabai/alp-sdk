@@ -64,7 +64,7 @@ jobs:
   compute-family-matrix:
     name: tier-a-libraries · compute family matrix
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 6
 
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
@@ -86,6 +86,12 @@ jobs:
         with:
           python-version-file: alp-sdk/.python-version
 
+      # #1274: no timeout-minutes here -- pure local Python, not a
+      # network/install/compile step per the same heuristic
+      # test_tier_a_workflow_step_timeouts.py applies. It still costs real
+      # time though (observed up to 2s across 44 sampled runs), which is
+      # why the job's own ceiling carries a minute of headroom over the
+      # two capped steps above it rather than fitting them exactly.
       - name: Derive build matrix from familyMatrix registry
         id: matrix
         working-directory: alp-sdk
@@ -96,7 +102,7 @@ jobs:
     name: tier-a-libraries · ${{ matrix.som }}
     needs: compute-family-matrix
     runs-on: ubuntu-latest
-    timeout-minutes: 33
+    timeout-minutes: 45
 
     strategy:
       fail-fast: false
@@ -131,11 +137,13 @@ jobs:
       # content -- left uncapped, the eventual timeout landed on the build
       # step instead of naming the actual stall. Every step below that does
       # real network/install/compile work now carries its own timeout,
-      # short enough to fail fast but with headroom over what it costs on
-      # a healthy run; the sum stays under the job's 33-minute ceiling so a
-      # step running late can still be killed by its own timeout first.
+      # re-derived from this step's own worst SUCCESSFUL run in 44 sampled
+      # runs (214s) with real headroom (8min = 480s = 2.24x, not a cap that
+      # fires on a slow-but-fine run -- CHANGELOG.md's #1274 entry); the sum
+      # stays under the job's 45-minute ceiling so a step running late can
+      # still be killed by its own timeout first.
       - name: Install host build tools
-        timeout-minutes: 4
+        timeout-minutes: 8
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -153,10 +161,12 @@ jobs:
       # #1274: `west update` fetches every Zephyr module over the network,
       # so a slow mirror can hang here the same way. Cap it well short of
       # the job's ceiling so a network stall here is legible as this step,
-      # not as the build.
+      # not as the build -- worst SUCCESSFUL run in 44 sampled runs was
+      # 383s (6m23s, run 30800710350); 13min = 780s = 2.04x headroom over
+      # that (CHANGELOG.md's #1274 entry).
       - name: west init Zephyr workspace
         working-directory: ${{ github.workspace }}
-        timeout-minutes: 8
+        timeout-minutes: 13
         run: |
           mkdir -p zephyrproject
           cd zephyrproject
@@ -166,10 +176,11 @@ jobs:
 
       # #1274: actions/cache@ makes its own network round trip to the
       # cache service and can hang on a backend issue -- same class as the
-      # steps above.
+      # steps above. Worst successful run in 44 sampled runs was 62s;
+      # 3min = 180s = 2.9x headroom.
       - name: Cache Zephyr modules
         uses: actions/cache@v5
-        timeout-minutes: 2
+        timeout-minutes: 3
         with:
           path: |
             ${{ github.workspace }}/zephyrproject/modules
