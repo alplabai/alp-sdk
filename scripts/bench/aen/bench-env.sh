@@ -170,6 +170,49 @@ bench_jlink_exe() {
 	echo "$exe"
 }
 
+# bench_jlink_assert_connected <jlink-output-file> [context] — fail when
+# JLinkExe never reached the probe.
+#
+# JLinkExe exits 0 even when it could not open the probe at all: every
+# command in the CommanderScript prints
+#
+#     J-Link connection not established yet but required for command.
+#     Connecting to J-Link ...FAILED: Cannot connect to the probe/programmer.
+#
+# and the run still ends "Script processing completed." Callers that pipe
+# that output through a decoder therefore render a total infrastructure
+# failure as EMPTY app output -- which reads as "the app crashed" when no
+# app was ever loaded (alp-sdk#1318). Call this on the captured output
+# before decoding anything out of it.
+#
+# Deliberately NOT the same check as the DPIDR preflight gate in
+# flash-jlink*.sh: that gate answers "is this the right board", this one
+# answers "did we reach any board at all". An MRAM write needs both; a
+# read-only path needs this one.
+bench_jlink_assert_connected() {
+	local out="$1" ctx="${2:-J-Link}"
+	local pat='Cannot connect to the probe/programmer|Failed to connect to target|Could not connect to target|No J-Link device found'
+	if [ ! -s "$out" ]; then
+		echo "bench-env: $ctx produced no J-Link output at all ('$out' missing or empty)." >&2
+		return 7
+	fi
+	if grep -qiE "$pat" "$out"; then
+		echo "bench-env: $ctx could NOT connect to the J-Link probe -- nothing was read" >&2
+		echo "           from the target, so any decoded output would be empty for an" >&2
+		echo "           infrastructure reason, not because the app was silent." >&2
+		echo >&2
+		grep -iE "$pat" "$out" | head -3 >&2
+		echo >&2
+		echo "           alplab-gw has THREE J-Link probes attached and two share a cloned" >&2
+		echo "           OEM serial, so an unselected JLinkExe can fail outright or attach" >&2
+		echo "           the wrong board. Export the probe serial and retry:" >&2
+		echo "               export JLINK_SN=<serial>     # the AEN E8 answers SW-DP IDR 0x4C013477" >&2
+		echo "           Full J-Link transcript: $out" >&2
+		return 7
+	fi
+	return 0
+}
+
 # bench_require_setools — guard for Flow A/D. Errors (exit 2) if
 # SETOOLS_DIR is unset or doesn't look like a SETOOLS install. SETOOLS
 # is license-gated and NOT shipped with alp-sdk; this is the single

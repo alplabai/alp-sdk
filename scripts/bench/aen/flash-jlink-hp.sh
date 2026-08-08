@@ -127,6 +127,10 @@ mem32 $HB, 0x4
 exit
 EOF
 "${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/hp-read.jlink 2>/tmp/hp-read.err > /tmp/hp-read.out || true
+# JLinkExe exits 0 even when it never opened the probe, so `|| true` above
+# hides a total connect failure and the decode below would render it as
+# empty target output (alp-sdk#1318).
+bench_jlink_assert_connected /tmp/hp-read.out "Flow D HP read-back" || exit 7
 echo "----- $NAME M55-HP SRAM0 beacon (magic / CPUID / VTOR / heartbeat) -----"
 grep -iE "^$(printf '%08X' $BEACON)| = " /tmp/hp-read.out | head
 echo "(heartbeat re-read below should differ from beacon[3] above = HP actively running)"

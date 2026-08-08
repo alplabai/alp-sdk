@@ -46,6 +46,40 @@ JLINK="$(bench_jlink_exe)" || exit $?
 JLINK_ARGS=("$JLINK")
 [ -n "${JLINK_SN:-}" ] && JLINK_ARGS+=(-SelectEmuBySN "$JLINK_SN")
 
+# 0. SAFETY GATE -- confirm we are talking to the AEN E8, not some other probe
+# on the bench, BEFORE any MRAM write. This script writes MRAM directly over
+# JLinkExe (the `loadbin $PKG $ATOC_ADDR` below) and was the ONLY such writer
+# with no DPIDR gate, unlike flash-jlink.sh / flash-jlink-hp.sh /
+# flash-jlink-mramxip.sh which have carried one (alp-sdk#1318). JLINK_SN
+# narrows probe choice but does not itself prove which board answered, and on
+# alplab-gw the AEN E8 and the V2N-M1 GD32 share a cloned OEM serial. Hard
+# ABORT, not a warning -- read-only connect first, no writes until confirmed.
+#
+# AEN_DPIDR/GD32_DPIDR come from bench-env.sh, which is the single source for
+# both IDs -- do not re-declare them here.
+cat > /tmp/firmware-update-log-dual-preflight.jlink <<EOF
+si SWD
+speed $JLINK_SPEED
+device $JLINK_DEVICE_READ
+connect
+exit
+EOF
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/firmware-update-log-dual-preflight.jlink \
+  > /tmp/firmware-update-log-dual-preflight.out 2>&1 || true
+if grep -qi "$GD32_DPIDR" /tmp/firmware-update-log-dual-preflight.out; then
+  echo "!! ABORT: probe reports SW-DP IDR 0x$GD32_DPIDR -- that is the V2N-M1" >&2
+  echo "   GD32, NOT the AEN E8. Wrong probe selected (JLINK_SN='${JLINK_SN:-}')." >&2
+  echo "   Refusing to write MRAM. See /tmp/firmware-update-log-dual-preflight.out." >&2
+  exit 4
+fi
+if ! grep -qi "$AEN_DPIDR" /tmp/firmware-update-log-dual-preflight.out; then
+  echo "!! ABORT: expected AEN E8 SW-DP IDR 0x$AEN_DPIDR not seen on connect." >&2
+  echo "   Refusing to write MRAM -- check JLINK_SN / wiring / probe selection." >&2
+  cat /tmp/firmware-update-log-dual-preflight.out >&2
+  exit 4
+fi
+echo ">>> DPIDR gate OK: probe confirmed AEN E8 (0x$AEN_DPIDR)" >&2
+
 check_itcm_vector() {
 	local role="$1"
 	local bin="$2"

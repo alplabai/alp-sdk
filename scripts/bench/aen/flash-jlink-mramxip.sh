@@ -198,6 +198,10 @@ mem8 $BUF, $SIZE
 exit
 EOF
   $JLINK -nogui 1 -CommanderScript /tmp/flowd-mramxip-read.jlink 2>/tmp/flowd-mramxip-rd.err > /tmp/flowd-mramxip-rd.out || true
+  # JLinkExe exits 0 even when it never opened the probe, so `|| true` above
+  # hides a total connect failure and the decode below would render it as
+  # empty target output (alp-sdk#1318).
+  bench_jlink_assert_connected /tmp/flowd-mramxip-rd.out "Flow D mramxip read-back" || exit 7
   echo "----- $NAME RAM console (flow-D MRAM-XIP flashed, SE-booted) -----"
   awk '/^[0-9A-Fa-f]+ = / { for (i=3;i<=NF;i++){ if ($i !~ /^[0-9A-Fa-f][0-9A-Fa-f]$/) continue; b=strtonum("0x"$i); if(b==0){nul++; if(nul>6)exit; next} nul=0; if(b==10||b==13){printf "\n";continue} if(b>=32&&b<127)printf "%c",b } }' /tmp/flowd-mramxip-rd.out
   echo; echo "--------------------------------------------------------"
