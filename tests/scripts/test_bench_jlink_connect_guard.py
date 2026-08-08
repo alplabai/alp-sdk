@@ -263,11 +263,11 @@ def test_aen_dpidr_accepted(tmp_path):
 @_NEEDS_BASH
 def test_gd32_probe_is_refused_and_named(tmp_path):
     """The cloned-serial case. Landing a Flow C loadbin+go here would execute
-    an AEN image on the V2N-M1 -- a different labgrid place."""
+    an AEN image on a different board under a different reservation."""
     res = _call_dpidr(tmp_path / "pf.out", _GD32_HIT + "\n")
     assert res.returncode == 4
     assert "GD32" in res.stderr
-    assert "e1mx-v2n-m1-01" in res.stderr, "must name the place the operator does not hold"
+    assert "DIFFERENT board" in res.stderr, "must say it is not the board under this reservation"
 
 
 @_NEEDS_BASH

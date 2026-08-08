@@ -128,9 +128,9 @@ export JLINK_SN="${JLINK_SN:-${JLINK_SERIAL:-}}"
 # This bench has THREE J-Links, and two of them share OEM serial 603000869,
 # differing only by USB path:
 #
-#   AEN E8        3-4.4.3   603000869          e1m-aen-evk-01
-#   GD32 bridge   3-4.2     603000869 (clone)  e1mx-v2n-m1-01
-#   V2N CM33 DAP  3-4.1     600107451          e1mx-v2n-m1-01
+#   AEN E8        603000869          the AEN board
+#   GD32 bridge   603000869 (clone)  the other board
+#   V2N CM33 DAP  600107451          the other board
 #
 # JLinkExe selects ONLY by serial and has no USB-path selector, so JLINK_SN
 # narrows probe choice but cannot prove which board is on the other end --
@@ -140,9 +140,8 @@ export JLINK_SN="${JLINK_SN:-${JLINK_SERIAL:-}}"
 # (alp-sdk#1312).
 #
 # BENCH-VERIFIED IDs. AEN and GD32 per docs/aen-bench-bringup.md; the V2N
-# CM33 measured 2026-08-08 on e1mx-v2n-m1-01 (`Found SW-DP with ID
-# 0x6BA02477`, `Found Cortex-M33 r0p4`) -- note that core answers on SWD,
-# NOT JTAG.
+# CM33 measured 2026-08-08 on the bench (`Found SW-DP with ID 0x6BA02477`,
+# `Found Cortex-M33 r0p4`) -- note that core answers on SWD, NOT JTAG.
 export AEN_DPIDR="${AEN_DPIDR:-4C013477}"
 export GD32_DPIDR="${GD32_DPIDR:-0BE12477}"
 export V2N_CM33_DPIDR="${V2N_CM33_DPIDR:-6BA02477}"
@@ -152,23 +151,23 @@ export V2N_CM33_DPIDR="${V2N_CM33_DPIDR:-6BA02477}"
 #
 # Shared by the MRAM writers and by ram-run.sh. Flow C is NOT a read: it
 # `loadbin`s an AEN-linked image into ITCM and `go`es. Landing that on the
-# GD32 probe would execute foreign code on the V2N-M1 -- a different labgrid
-# place, which an AEN reservation does not cover.
+# GD32 probe would execute foreign code on a DIFFERENT board, held under a
+# different reservation that this one does not cover.
 #
 # Names the wrong board when it can, so the operator gets "you are on the
-# V2N-M1" rather than a bare mismatch.
+# CM33 DAP" rather than a bare mismatch.
 bench_jlink_assert_aen_dpidr() {
 	local out="$1" ctx="${2:-preflight}"
 	local wrong=""
 	if grep -qi "$GD32_DPIDR" "$out" 2>/dev/null; then
-		wrong="the V2N-M1 GD32 bridge (0x$GD32_DPIDR)"
+		wrong="the GD32 bridge (0x$GD32_DPIDR)"
 	elif grep -qi "$V2N_CM33_DPIDR" "$out" 2>/dev/null; then
-		wrong="the V2N-M1 CM33 DAP (0x$V2N_CM33_DPIDR)"
+		wrong="the CM33 DAP (0x$V2N_CM33_DPIDR)"
 	fi
 	if [ -n "$wrong" ]; then
 		echo "!! ABORT ($ctx): probe answered $wrong, NOT the AEN E8." >&2
-		echo "   That board is labgrid place e1mx-v2n-m1-01, which an AEN" >&2
-		echo "   reservation does not cover. Refusing to touch it." >&2
+		echo "   That is a DIFFERENT board on a different reservation," >&2
+		echo "   which this one does not cover. Refusing to touch it." >&2
 		echo "   Transcript: $out" >&2
 		return 4
 	fi

@@ -145,8 +145,8 @@ fi
 # Flow C is not a read: it writes an AEN-linked image into ITCM and executes
 # it. Two probes on this bench share OEM serial 603000869, and JLinkExe has
 # no USB-path selector, so JLINK_SN cannot disambiguate them -- landing this
-# on the GD32 probe would execute foreign code on the V2N-M1, a different
-# labgrid place that an AEN reservation does not cover (alp-sdk#1312).
+# on the GD32 probe would execute foreign code on a DIFFERENT board, held
+# under a different reservation that this one does not cover (alp-sdk#1312).
 #
 # Read-only connect first; nothing is written until the DP ID matches. The
 # MRAM writers have had this gate since #1069; Flow C -- the flow people run
