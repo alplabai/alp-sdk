@@ -976,15 +976,15 @@ def _emit_inference(
     the ALP_SDK_* parent it `depends on` in
     zephyr/kconfigs/iot-audio-inference.kconfig (issue #874 item 3):
 
-      - CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U{55,65,85}=y -- derived from
-        the silicon capability counts (ethos_u{55,65,85}_count, resolved
+      - CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_{U55,U65,U85}=y -- derived
+        from the silicon capability counts (ethos_u{55,65,85}_count, resolved
         from the SoC JSON npus[]), the single source for which NPUs the
         part carries.  U85 carries Arm's larger MAC array + TensorOptimized
         kernels; U55 carries the smaller MAC + reference kernels; U65 is
         i.MX 93-only.  U55/U85 depend on BACKEND_ETHOS_U_AEN; U65 depends
         on BACKEND_ETHOS_U_N93.
 
-      - CONFIG_ALP_SDK_INFERENCE_TFLM_{NEON,HELIUM,REF}=y -- picked
+      - CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_{NEON,HELIUM,REF}=y -- picked
         from the SoC JSON's `cores[<slice.core_id>].vector_extension`
         so the CPU-side TFLM kernel set matches the target core's SIMD
         reality (NEON on A-cluster, Helium MVE on M55, scalar / REF

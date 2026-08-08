@@ -334,7 +334,8 @@ selected at compile time from the generated config alone.
 
 **Fix landed:** the orchestrator reads the silicon capability counts
 (`capabilities.ethos_u{55,65,85}_count`, resolved from the SoC JSON
-`npus[]`) and emits one `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U{55,65,85}=y`
+`npus[]`) and emits one
+`CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_{U55,U65,U85}=y`
 line per variant present.  AEN401/601/801 now emit BOTH `_U55=y` and
 `_U85=y` (the U55 pair alongside the U85); AEN301/501/701 emit only
 `_U55=y`; NX9101 emits `_U65=y`; the existing N93 PHY switch coexists.
@@ -354,7 +355,7 @@ M33).
 **Fix landed:** the orchestrator now consults the SoC JSON's
 `cores[<slice.core_id>].vector_extension` (per-slice, since one SoM
 can host multiple CPU classes — E7's A32 + M55 mix) and emits exactly
-one `CONFIG_ALP_SDK_INFERENCE_TFLM_{NEON,HELIUM,REF}=y` per slice.
+one `CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_{NEON,HELIUM,REF}=y` per slice.
 Verified: M55_HP slices on every AEN SKU emit `_HELIUM=y`; A55 slices
 on V2N101 emit `_NEON=y`; the V2N M33_SM slice + NX9101 M33 slice
 both emit `_REF=y` (baseline ARMv8-M, no DSP / MVE).  Matching Kconfig

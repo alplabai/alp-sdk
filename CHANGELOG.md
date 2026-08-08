@@ -300,6 +300,93 @@ flag legitimate prose, which is worse than no gate at all.
 
 Both gates are wired into `pr-doc-drift.yml`'s existing `doc-drift` job
 alongside `check_doc_drift.py` / `check_doc_links.py`.
+### Fixed — `check_doc_drift.py` missed `CONFIG_`-prefixed dead symbols and vendor-doc drift (#1228)
+
+The dead-symbol regex, `\b(ALP_[A-Z0-9_]+|alp_[a-z0-9_]+)\b`, never matched
+inside a `CONFIG_ALP_SDK_FOO=y` line: `\b` does not fire between `CONFIG_`
+and `ALP_` (both are `\w`), so the token was invisible to the scan, not
+merely "known" -- a dead `CONFIG_ALP_*` Kconfig reference in a doc could
+drift silently forever. Scanning a doc now consumes an optional `CONFIG_`
+prefix without capturing it, so `CONFIG_ALP_SDK_FOO=y` resolves against the
+bare `ALP_SDK_FOO` Kconfig source spells.
+
+Harvesting known symbols is a separate match that deliberately does NOT
+strip that prefix. A `CONFIG_ALP_SDK_FOO` occurrence inside a header, C
+source, CMake file, generator, or Kconfig help text is always a
+*reference* to an already-existing Kconfig symbol (`#ifdef
+CONFIG_ALP_SDK_FOO`, `if(CONFIG_ALP_SDK_FOO)`, prose) -- never itself the
+point where the bare `ALP_SDK_FOO` identifier is defined. Stripping the
+prefix on the harvest side too let a Kconfig symbol stay "known" after its
+`config ALP_SDK_FOO` stanza was renamed or removed, as long as one stale
+`#ifdef`/`#elif defined(CONFIG_...)` of the old name remained in a
+`.c`/`.cpp` file -- defeating the exact drift class this gate exists to
+catch. A real `config ALP_SDK_FOO` line has no `CONFIG_` glued in front,
+so it still resolves the symbol; only a same-file reference to the
+generated macro spelling stops counting as proof of existence.
+
+`vendors/**/*.md` is now a scanned surface (previously unscanned, so a
+vendored library's README could reference a removed symbol -- e.g. the
+stale `ALP_U8G2_MODULE_DIR` override `vendors/u8g2/README.md` claimed --
+with no gate catching it), and `vendors/**/CMakeLists.txt` is a new
+known-symbol source layer (a vendor integration anchor like
+`ALP_HAS_RENESAS_FSP` can be declared ONLY there). The known-symbol
+harvest also now reads `src/**/*.c`, `src/**/*.cpp`, per-core
+`examples/**/boards/*.conf` / `examples/**/boards/*.overlay` filenames
+(the full board+SoC+core target identity, not just the bare board name,
+bounded to `examples/` so this stays a directory-scoped harvest rather
+than a whole-tree walk), and `keys/*.pem` filenames.
+
+Every `scripts/check_*.py` gate script is now excluded, as a class, from
+the `scripts/**/*.py` known-symbol harvest: a gate script narrates
+`ALP_*`/`alp_*` tokens by name in comments, docstrings, and allowlist
+rationale without ever declaring or generating one, so leaving any of
+them in let a symbol they merely discussed self-confirm as "known" and
+hide the exact class of drift this gate exists to catch.
+
+`docs/board-config-features.md`'s PSA-attestation paragraph names
+`CONFIG_ALP_SDK_PSA_ATTESTATION_OPTIGA` -- an accurate description of what
+`scripts/alp_orchestrate/secure.py` emits for `attestation_root:
+optiga_trust_m`, but no Kconfig source defines that bare symbol and the
+`src/security/optiga_trust_m_bridge.c` its emitted comment cites does not
+exist (only the probe-only `chips/optiga_trust_m/optiga_trust_m.c` chip
+driver is real). The stricter harvest above correctly surfaces this as a
+second, independent instance of the class #1228 named; it is allowlisted
+rather than fixed here pending a maintainer decision on the PSA <-> OPTIGA
+attestation wiring itself.
+
+`.github/workflows/pr-doc-drift.yml` drops its `paths:` filter and now
+runs on every PR/push to `main`/`dev`, matching `pr-static-analysis.yml`'s
+precedent. These five scripts' harvests span over a dozen directories
+across the tree; a `paths:` list is a second copy of that surface that
+drifts out of sync with the scripts every time a harvest input is added.
+The job itself is a few seconds of Python, so always running it is
+cheaper than maintaining that second list.
+
+This is robustness, not the root cause of #1222/#1228. Injecting a symbol
+that exists nowhere in the tree into `vendors/nxp-imx93/README.md` on a
+clean `origin/dev` export still gives `check_doc_drift.py` exit `0`, so
+the gate was blind to that doc/symbol shape whether or not the trigger
+fired. Dropping the filter prevents a *future* harvest input from
+escaping the trigger; it would not have caught either of those two. The
+blindness itself is what the rest of this entry fixes.
+
+Separately, `docs/portability-matrix.md`,
+`docs/tutorials/04-cross-family-portability.md`, and
+`docs/tutorials/16-inference-mobilenet.md` still named the old
+`CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U{55,65,85}` /
+`CONFIG_ALP_SDK_INFERENCE_TFLM_{NEON,HELIUM,REF}` spellings; they now
+match what the orchestrator actually emits
+(`CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_{U55,U65,U85}` /
+`CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_{NEON,HELIUM,REF}`).
+`docs/porting-new-som.md`'s worked-example stdout excerpt is corrected
+to match real `alp_project.py --emit zephyr-conf` output (drops the
+invented `CONFIG_ALP_OS_ZEPHYR` line, fixes `CONFIG_ALP_PERIPHERAL_I2C`
+to `CONFIG_I2C`, transcribes the real generator header line).
+`vendors/u8g2/README.md` and
+`examples/display/u8g2-oled-draw/CMakeLists.txt` are corrected to state
+that `libraries: [u8g2]` always compiles the vendored core with no
+SDK-level switch to the full upstream tree, replacing the stale
+`ALP_U8G2_MODULE_DIR` override claim.
 
 ## [v0.15.0] - 2026-08-07
 
