@@ -13,10 +13,13 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 marker lines** into a merge commit:
 
 ```
-<<<<<<< HEAD
-=======
->>>>>>> 8e72b3dc (fix(docs): catch CONFIG_-prefixed and vendor-doc Kconfig symbol drift (#1228))
+  <<<<<<< HEAD
+  =======
+  >>>>>>> 8e72b3dc (fix(docs): catch CONFIG_-prefixed and vendor-doc Kconfig symbol drift (#1228))
 ```
+
+(indented by two spaces above so a repo-wide conflict-marker grep does not
+match this changelog entry describing them)
 
 and `.github/workflows/pr-metadata-validate.yml:336` had an unquoted plain
 scalar containing a colon-space:
@@ -50,6 +53,56 @@ usually also fails to parse, but markers landing inside a block scalar can
 still load and would then ship semantically wrong triggers rather than an
 obvious error. It also asserts the file glob still matches ≥20 workflows, so
 the parametrised checks cannot silently cover nothing.
+
+### Fixed — a failed J-Link connect was reported as an empty RAM console (#1318)
+
+Found by an end-to-end Flow C run on the physical `e1m-aen-evk-01` bench.
+`scripts/bench/aen/ram-run.sh` printed its normal header and an empty
+console block:
+
+```
+>>> RAM-run aen-counter-alarm-regcheck  entry=0x43C4  base=0x0  ram_console_buf=0x20000d00  sleep=6000ms
+----- RAM console (decoded) -----
+
+---------------------------------
+```
+
+which reads as "the app ran and printed nothing" — an app crash. The app
+was fine. `JLinkExe` had never opened the probe at all; every command in
+the CommanderScript had answered `Cannot connect to the probe/programmer.`
+`JLinkExe` still **exits 0** in that state and still ends `Script
+processing completed.`, so the `|| true` on the invocation discarded
+nothing useful and the ASCII decoder rendered a total infrastructure
+failure identically to a silent application.
+
+`bench-env.sh` gains `bench_jlink_assert_connected`, called before any
+decode at all seven J-Link read-back sites — `ram-run.sh`, `reread.sh`,
+`flash-run.sh`, `flash-all-flowd.sh`, `flash-jlink.sh`,
+`flash-jlink-hp.sh`, `flash-jlink-mramxip.sh`. A failed or empty transcript
+is now `exit 7` naming the real J-Link message and the fix
+(`export JLINK_SN=<serial>`), never an empty console.
+
+`ram-run.sh`'s comment justified leaving `JLINK_SN` unset as preserving
+"today's single-probe behaviour exactly". That was true when written and is
+false now: alplab-gw has three J-Link probes attached and two of them share
+a cloned OEM serial, so an unselected `JLinkExe` there fails outright or
+attaches the wrong board. The comment is corrected.
+
+### Fixed — `flash-update-log-dual.sh` wrote MRAM with no DPIDR safety gate (#1318)
+
+`flash-jlink.sh`, `flash-jlink-hp.sh` and `flash-jlink-mramxip.sh` each
+confirm the AEN E8 SW-DP IDR `0x4C013477` and explicitly reject the V2N-M1
+GD32's `0x0BE12477` before any MRAM write. `flash-update-log-dual.sh`
+writes MRAM directly over `JLinkExe` (`loadbin $PKG $ATOC_ADDR`) and was
+the only such writer with no gate. It now runs the same read-only preflight
+and hard-aborts, using the `AEN_DPIDR`/`GD32_DPIDR` that `bench-env.sh`
+already exports as the single source rather than re-declaring them.
+
+`tests/scripts/test_bench_jlink_connect_guard.py` covers both. The
+read-back check derives its site list from the actual `|| true` invocations
+in each script rather than a hand-maintained allowlist, so a newly added
+read-back that skips the assertion fails the test instead of silently
+reintroducing the bug.
 
 ### Fixed — `check_tan_docs_surface.py` decoded `tan --help` with the host locale (#1301)
 
