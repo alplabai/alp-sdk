@@ -82,9 +82,26 @@ diagnostics:
     alp_security:  "off"        # quote 'off' -- bare off parses as YAML false
 ```
 
-Emits `CONFIG_<MODULE>_LOG_LEVEL=<n>` per entry into the slice's
-`alp.conf`.  Saves customers from finding the right
-`CONFIG_LOG_*` symbol per module.
+Emits `CONFIG_<MODULE>_LOG_LEVEL_<LEVEL>=y` per entry into the slice's
+`alp.conf` — the *choice* symbol, which is the only settable one: Zephyr's
+`CONFIG_<MODULE>_LOG_LEVEL` int is promptless and derived from that choice.
+Saves customers from finding the right `CONFIG_LOG_*` symbol per module.
+
+A live line is emitted only where the choice symbol is actually declared —
+every Kconfig symbol guarding the module's `log_config` template, plus its
+logging gate (`CONFIG_LOG`, or `CONFIG_NET_LOG` for the networking modules),
+is already `=y` on that core. Usually that guard is just the module's own
+enable symbol, but two modules nest theirs deeper: `mbedtls` needs
+`CONFIG_MBEDTLS_DEBUG=y` on top of `CONFIG_MBEDTLS=y`, and `net_ipv4` needs
+`CONFIG_NET_NATIVE=y` on top of `CONFIG_NET_IPV4=y`. Anything else (an
+`alp_*` SDK module that has not called `LOG_MODULE_REGISTER()` yet, a module
+that lives on another core, a misspelt key) is downgraded to a hint comment
+naming the reason, so the fragment always configures.
+
+That precision matters because the failure is silent, not loud: assigning a
+choice symbol Zephyr has not declared still leaves the configure at exit 0.
+It only warns `The choice symbol … was selected (set =y), but no symbol ended
+up as the choice selection`, and the log level is quietly discarded.
 
 ### Bootloader (`boot:` -- MCUboot)
 
@@ -151,9 +168,26 @@ Project-wide, provider-driven dispatch (ADR 0009 resolved):
 | Provider   | Yocto emit                              | Zephyr emit                                                                       |
 |------------|-----------------------------------------|-----------------------------------------------------------------------------------|
 | `mender`   | `MENDER_*` weak-assigns in `local.conf` | `CONFIG_MENDER_MCU_CLIENT=y` + URL/tenant/poll Kconfig (out-of-tree, west.yml)    |
-| `hawkbit`  | n/a (Zephyr only)                       | `CONFIG_HAWKBIT=y` + `HAWKBIT_SERVER` + `HAWKBIT_POLL_INTERVAL` (Zephyr upstream) |
+| `hawkbit`  | n/a (Zephyr only)                       | `CONFIG_HAWKBIT=y` + `HAWKBIT_SERVER`/`HAWKBIT_PORT`/`HAWKBIT_USE_TLS` + `HAWKBIT_POLL_INTERVAL` (Zephyr upstream) |
 | `mcumgr`   | n/a (Zephyr only)                       | `CONFIG_MCUMGR=y` + GRP_IMG/GRP_OS (transport is the app's call)                  |
 | `none`     | OTA disabled                            | OTA disabled                                                                      |
+
+Two `hawkbit` conversions are worth knowing, because the Zephyr symbols do not
+take the board.yaml values as written:
+
+- **`server.url` is decomposed.** `CONFIG_HAWKBIT_SERVER` is a *bare host* (it
+  feeds `zsock_getaddrinfo()`, the TLS hostname and the HTTP `Host:` header),
+  so `https://hosted.mender.io` emits
+  `CONFIG_HAWKBIT_SERVER="hosted.mender.io"` plus `CONFIG_HAWKBIT_PORT=443`
+  and `CONFIG_NET_SOCKETS_SOCKOPT_TLS=y` + `CONFIG_HAWKBIT_USE_TLS=y`. A value
+  with no `://` is taken as an already-bare host, so a whole-value `${VAR}`
+  placeholder passes through untouched. A base path, URL userinfo or a
+  non-HTTP scheme is refused — the DDI client has no knob for any of them.
+- **`poll_interval_s` is converted to MINUTES.** `CONFIG_HAWKBIT_POLL_INTERVAL`
+  is declared in minutes with `range 1 43200`, so `poll_interval_s: 1800`
+  emits `CONFIG_HAWKBIT_POLL_INTERVAL=30`. A value that is not a whole number
+  of minutes, or that lands outside 60 s … 2592000 s, is refused rather than
+  written out of range.
 
 The validator (P2.3 rule 1) requires:
 - `provider: mender` → at least one `cores.<id>.os: yocto` OR `cores.<id>.os: zephyr`
