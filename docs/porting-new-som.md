@@ -652,21 +652,35 @@ west build \
 
 > **Current coverage (issue #523).**  The Alif Ensemble (`aen`) family
 > (e.g. E1M-AEN801, and by extension a new AEN SKU like AEN901 above) is
-> fully generated -- every file except `board.cmake`.  Adding a new AEN
-> SKU only requires: a `zephyr_cpucluster` / `itcm_global_base` /
-> `dtcm_global_base` entry per core in its SoC JSON (an existing E7/E8
-> SoC JSON already carries these), a `topology.<core>.zephyr_full_name`
-> string in the SoM preset, and the console pad's row in
-> `metadata/pinmux/aen.yaml`.  The Renesas RZ/V2N family (`v2n` /
+> fully generated -- every file except `board.cmake` and the bare
+> `Kconfig`.  Adding a new AEN SKU requires, in its SoC JSON: a
+> `zephyr_cpucluster` / `itcm_global_base` / `dtcm_global_base` entry per
+> core (the E8 SoC JSON already carries these), plus a
+> `zephyr_peripherals_dtsi` naming the devicetree overlay that declares
+> THAT SoC's peripheral and NPU node set.  And in the SoM preset: a
+> `topology.<core>.zephyr_full_name` string, plus the console pad's row
+> in `metadata/pinmux/aen.yaml`.  alp-sdk ships exactly one peripherals
+> overlay today (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi`), so a
+> non-E8 Ensemble part must add its own and declare it: the generator
+> REFUSES rather than falling back to the E8's, whose node set is
+> different silicon (the E8 declares `ethosu85`; an E3 carries 2x
+> Ethos-U55 and no U85).  The Renesas RZ/V2N family (`v2n` /
 > `v2n-m1`) generates only the family-agnostic files (`board.yml`,
 > `Kconfig.alp_<board>`, the twister `.yaml`) -- its `.dts` / pinctrl
 > `.dtsi` / `_defconfig` stay hand-authored (mirror the nearest sibling,
 > e.g. E1M-V2N101) until the on-module GD32G553 supervisor's Renesas-side
-> pin assignments land in metadata.  `board.cmake` (flasher/debugger
-> runner args) stays hand-authored for every family -- see
-> `docs/architecture.md`'s generators-inventory entry for why.
+> pin assignments land in metadata.  TWO files stay hand-authored for
+> every family and must be COPIED ACROSS by hand when a generated tree is
+> used as the board directory: `board.cmake` (flasher/debugger runner
+> args -- see `docs/architecture.md`'s generators-inventory entry for
+> why), and the bare `Kconfig`, which sets
+> `CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS default y` to select the custom
+> E8 MPU region table.  Missing `Kconfig` is SILENT: the build succeeds
+> and falls back to Zephyr's generic 2-region FLASH_0/SRAM_0 map, whose
+> whole-flash FLASH_0 region is unsafe on Flow D (production MRAM boot).
 > `tests/scripts/test_gen_zephyr_board.py` pins the covered files
-> byte-identical to their committed board tree.
+> byte-identical to their committed board tree, and its `HAND_MAINTAINED`
+> set is exactly those two names.
 
 Either way, the resulting `.elf` is a real binary that exercises
 the new SoM's BSP path.  Run it on hardware once silicon arrives,

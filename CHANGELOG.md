@@ -7,6 +7,75 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — `--emit zephyr-board`: E8 facts on every AEN SKU, four fail-open paths, and an error that blamed the customer (alplabai/tan-cli#493, alplabai/tan-cli#591)
+
+`scripts/gen_zephyr_board.py` generates board files that are meant to be
+derived from metadata with no invented values. Nine places did the opposite.
+Reported against the tan-cli hand-port; fixed here, at the source.
+
+**Ensemble E8 facts were hardcoded for every `E1M-AEN*` SKU.** The display
+string `"Alif Ensemble E8"`, the `#include <alif/ensemble_e8_peripherals.dtsi>`
+line and the `"The Ensemble E8 RTSS-<role> has CONFIG_NUM_IRQS=480"` Kconfig
+comment were generator constants, while `_sku_family_slug()` routes E3/E4/E6/E7
+silicon down the same path. Following `docs/porting-new-som.md` §10 for an
+E1M-AEN301 emitted an **E3 board tree labelled E8, including the E8 peripherals
+overlay** — exit 0, no warning, while the twister `.yaml` and `board.yml` from
+the same run correctly said "Alif Ensemble E3". The part designator now comes
+from the SoC JSON's required `part`, and the peripherals overlay from a new
+`zephyr_peripherals_dtsi` on the SoC. A SoC that declares none is REFUSED: the
+E8's overlay declares `ethosu85`, an E3 carries 2x Ethos-U55 and no U85, so
+inheriting a sibling part's file produces a board that builds and then
+misbehaves on silicon. `NUM_IRQS=480` stays literal — it is an
+Ensemble-family constant in upstream Zephyr, not per-part.
+
+**A missing `atoc` region blamed the customer's SoM metadata** (tan-cli#591).
+`tan generate --target zephyr-board` fails on every AEN board against every
+released alp-sdk, because the SE-owned ATOC reservation (#1289) postdates
+`v0.15.0`; the message read *"AEN disjoint-slot0 memory_map is missing an
+integer-`base` region named 'atoc'"*, sending readers to a `board.yaml` and a
+preset that are both fine. When every other region is present and placed —
+the shape of any pre-#1289 checkout — the refusal now names the real cause and
+says to upgrade alp-sdk, while still telling a preset author what to add.
+
+**Four fail-open paths now raise.** A `memory_map:` that declares a SIBLING
+core's `<role>_slot0` but not this core's fell back to the stock symmetric
+layout, putting `slot0_partition@10000` exactly on top of the sibling's
+declared window and silently undoing #1069. A declared `silicon_variant:` that
+matched no `variants[].order_code` was discarded without a diagnostic and the
+`alp_module_skus` reverse lookup answered instead, so `...LS0` typo'd to
+`...LSO` emitted a full board tree named after a part number the preset does
+not declare. Neither partition branch checked extents, so a `storage` region
+grown to 2048 KiB emitted `partition@560000 reg = <0x560000 DT_SIZE_K(2048)>`
+1.9 MiB outside its own `mram_storage` `reg` — the stock branch's
+`offset != total_kib * 1024` assertion is a tautology that can never fire, not
+a bounds check. And the flash node's address was a hardcoded `0x80000000`
+literal while the offsets came from the metadata `mcuboot` base, an invariant
+documented only in an error string: a map shifted 32 KiB emitted every
+partition below its declared physical address, with the `.dts` and
+`_defconfig` disagreeing about where slot0 is.
+
+**Two prose facts now derive from metadata.** The `_defconfig` console comment
+spelled the AEN801 silicon pads `P3_4/P3_5` as a literal on every SKU while
+the sibling `.dts` and `-pinctrl.dtsi` read them from
+`metadata/pinmux/aen.yaml`. And the #1069 rationale asserted "both 2688 KiB
+code slots fit the 5632 KiB App MRAM alongside the ~2.6 MiB NPU MRAM-model
+budget" unconditionally, ~100 lines above a partition map derived from the
+same `memory_map:` — the slot sizes now come from the map, and the `~2.6 MiB`
+policy figure (which no generator input carries, and which does not survive
+the arithmetic at other slot sizes) is replaced by a pointer to
+`zephyr/sysbuild/aen/README.md`.
+
+**The module docstring listed only `board.cmake` as hand-maintained.** The bare
+per-board `Kconfig` is too — it sets `CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS
+default y`, and its absence is silent: the build succeeds on Zephyr's generic
+2-region FLASH_0/SRAM_0 fallback, whose whole-flash FLASH_0 region is unsafe on
+Flow D. Both the docstring and `docs/porting-new-som.md` now name both files
+as ones a porter must copy across.
+
+Emitted output moves in exactly one place: the #1069 rationale sentence in
+`e1m_aen801_m55_hp` / `_m55_he`'s `.dts`. Every other AEN801 surface, and all
+four V2N/V2M family-agnostic files, are byte-identical.
+
 ### Fixed — memory placement: silent carve-out overlaps, an unreachable DDR address, and a dropped storage layout (alplabai/tan-cli#552, #553, #554)
 
 Three placement defects in `scripts/alp_orchestrate/`, each of which resolved

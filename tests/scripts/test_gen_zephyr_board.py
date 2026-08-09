@@ -25,8 +25,11 @@ checked here.
 
 from __future__ import annotations
 
+import json
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -93,15 +96,18 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
     def test_v2m101_m33_sm_family_agnostic_files(self) -> None:
         self._assert_matches_committed("E1M-V2M101", "m33_sm", "e1m_v2m101_m33_sm")
 
-    def test_aen_board_cmake_stays_hand_authored(self) -> None:
-        """`board.cmake` is explicitly out of scope (see module docstring);
-        confirm the generator doesn't claim it, so a future contributor who
-        forgets the exclusion notices immediately."""
+    def test_aen_hand_maintained_files_stay_hand_authored(self) -> None:
+        """`board.cmake` and the bare `Kconfig` are explicitly out of scope
+        (see module docstring); confirm the generator doesn't claim either,
+        so a future contributor who forgets the exclusion notices
+        immediately.  `Kconfig`'s absence is otherwise SILENT -- the build
+        succeeds on Zephyr's generic FLASH_0/SRAM_0 MPU fallback."""
         files = emit_zephyr_board("E1M-AEN801", "m55_hp", METADATA_ROOT)
-        self.assertFalse(
-            any(relpath.endswith("board.cmake") for relpath in files),
-            "board.cmake should stay hand-authored (asymmetric prose, not a "
-            "hardware fact) -- see gen_zephyr_board.py's module docstring")
+        claimed = {relpath.split("/", 1)[1] for relpath in files}
+        self.assertEqual(
+            claimed & HAND_MAINTAINED, set(),
+            "board.cmake / Kconfig should stay hand-authored -- see "
+            "gen_zephyr_board.py's NOT GENERATED docstring section")
 
     def test_v2n_dts_pinctrl_defconfig_stay_hand_authored(self) -> None:
         """The Renesas-side GD32 supervisor pin wiring isn't in metadata
@@ -116,6 +122,223 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
                 "alp_e1m_v2n101_m33_sm_r9a09g056n48gbg_cm33.yaml",
             },
         )
+
+
+AEN801_PRESET = "e1m_modules/E1M-AEN801.yaml"
+E8_SOC = "socs/alif/ensemble/e8.json"
+
+
+class _MutatedMetadata:
+    """Copy `metadata/` to a temp dir so a test can mutate one fact.
+
+    These generators read maintainer-authored metadata, so the only way to
+    exercise a refusal is to author a bad SoM preset / SoC JSON. Mutating
+    a throwaway copy keeps the repo's own metadata (and therefore every
+    other test in this file) untouched.
+    """
+
+    def __enter__(self) -> "_MutatedMetadata":
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name) / "metadata"
+        shutil.copytree(METADATA_ROOT, self.root)
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self._tmp.cleanup()
+
+    def sub(self, relpath: str, old: str, new: str) -> None:
+        path = self.root / relpath
+        text = path.read_text(encoding="utf-8")
+        assert old in text, f"{old!r} not found in {relpath}"
+        path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+    def drop_lines(self, relpath: str, needle: str) -> None:
+        path = self.root / relpath
+        kept = [ln for ln in path.read_text(encoding="utf-8").split("\n")
+                if needle not in ln]
+        path.write_text("\n".join(kept), encoding="utf-8")
+
+    def json_set(self, relpath: str, key: str, value: object) -> None:
+        path = self.root / relpath
+        spec = json.loads(path.read_text(encoding="utf-8"))
+        spec[key] = value
+        path.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8")
+
+    def json_del(self, relpath: str, key: str) -> None:
+        path = self.root / relpath
+        spec = json.loads(path.read_text(encoding="utf-8"))
+        spec.pop(key, None)
+        path.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8")
+
+
+class TestAenHardwareFactsComeFromMetadata(unittest.TestCase):
+    """Every SKU, part designator, pin name and base address in a generated
+    AEN board tree must be transcribed from metadata, never inherited from
+    a sibling SKU.
+
+    The E8 facts used to be generator constants ("Alif Ensemble E8", the
+    `<alif/ensemble_e8_peripherals.dtsi>` include, "P3_4/P3_5",
+    `0x80000000`) applied to every `E1M-AEN*` SKU, so following the
+    documented new-AEN-SKU procedure emitted an E3 board tree labelled E8,
+    including the E8 peripherals overlay, at exit 0 with no warning.
+    """
+
+    def test_part_designator_is_read_from_the_soc_json(self) -> None:
+        with _MutatedMetadata() as mm:
+            mm.json_set(E8_SOC, "part", "E9")
+            files = emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+            dts = next(v for k, v in files.items() if k.endswith(".dts"))
+            kconfig = files["alp_e1m_aen801_m55_hp/Kconfig.defconfig"]
+            pinctrl = files[
+                "alp_e1m_aen801_m55_hp/alp_e1m_aen801_m55_hp-pinctrl.dtsi"]
+        self.assertIn("(Alif Ensemble E9, AE822FA0E5597LS0)", dts)
+        self.assertIn("upstream Alif E9 SoC", dts)
+        self.assertIn("The Ensemble E9 RTSS-HP has CONFIG_NUM_IRQS=480", kconfig)
+        self.assertIn("(Alif Ensemble E9)", pinctrl)
+        # The SoC-JSON path in the generated-file banner and the peripherals
+        # overlay name legitimately still say `e8` -- they are the file names,
+        # not the part designator. Nothing else may.
+        for emitted in (dts, kconfig, pinctrl):
+            self.assertNotIn("Ensemble E8", emitted)
+            self.assertNotIn("Alif E8", emitted)
+
+    def test_peripherals_overlay_is_read_from_the_soc_json(self) -> None:
+        with _MutatedMetadata() as mm:
+            mm.json_set(E8_SOC, "zephyr_peripherals_dtsi",
+                        "alif/ensemble_e9_peripherals.dtsi")
+            files = emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+            dts = next(v for k, v in files.items() if k.endswith(".dts"))
+        self.assertIn("#include <alif/ensemble_e9_peripherals.dtsi>", dts)
+
+    def test_soc_without_a_peripherals_overlay_is_refused(self) -> None:
+        """A non-E8 Ensemble part must not silently inherit the E8's
+        overlay: the E8 declares `ethosu85`, an E3 has 2x U55 and no U85."""
+        with _MutatedMetadata() as mm:
+            mm.json_del(E8_SOC, "zephyr_peripherals_dtsi")
+            with self.assertRaises(ZephyrBoardEmitError) as ctx:
+                emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+        self.assertIn("zephyr_peripherals_dtsi", str(ctx.exception))
+        self.assertIn("alif:ensemble:e8", str(ctx.exception))
+
+    def test_console_pads_in_the_defconfig_come_from_the_pinmux(self) -> None:
+        """The `_defconfig` console comment used to hardcode the AEN801
+        pads `P3_4/P3_5` while the sibling .dts derived them."""
+        with _MutatedMetadata() as mm:
+            mm.sub("pinmux/aen.yaml",
+                   'silicon_peripheral: "UART5_RX_A", silicon_pad: "P3_4"',
+                   'silicon_peripheral: "UART5_RX_A", silicon_pad: "P7_0"')
+            mm.sub("pinmux/aen.yaml",
+                   'silicon_peripheral: "UART5_TX_A", silicon_pad: "P3_5"',
+                   'silicon_peripheral: "UART5_TX_A", silicon_pad: "P7_1"')
+            files = emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+            defconfig = files[
+                "alp_e1m_aen801_m55_hp/"
+                "alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp_defconfig"]
+        self.assertIn('(E1M edge "UART0", P7_0/P7_1)', defconfig)
+        self.assertNotIn("P3_4", defconfig)
+
+
+class TestAenMemoryMapValidation(unittest.TestCase):
+    """The disjoint-slot0 branch copies `base` / `size_kib` straight out of
+    the SoM preset into a `partition@` node.  Every way that can go wrong
+    must raise, not emit."""
+
+    def test_missing_atoc_names_the_alp_sdk_vintage_not_the_som(self) -> None:
+        """An alp-sdk checkout from before #1289 has an otherwise-complete
+        `memory_map:` and no `atoc`.  The old message ("memory_map is
+        missing an integer-`base` region named 'atoc'") read as a defect in
+        the consumer's own SoM metadata, sending them to a `board.yaml` and
+        a preset that are both fine."""
+        with _MutatedMetadata() as mm:
+            mm.drop_lines(AEN801_PRESET, "name: atoc")
+            mm.sub(AEN801_PRESET,
+                   "name: storage,   base: 0x80560000, size_kib: 96",
+                   "name: storage,   base: 0x80560000, size_kib: 128")
+            with self.assertRaises(ZephyrBoardEmitError) as ctx:
+                emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+        message = str(ctx.exception)
+        self.assertIn("this alp-sdk predates the SE-owned ATOC reservation", message)
+        self.assertIn("alp-sdk#1289", message)
+        self.assertIn("upgrade alp-sdk", message)
+
+    def test_missing_non_atoc_region_still_reads_as_an_authoring_gap(self) -> None:
+        with _MutatedMetadata() as mm:
+            mm.drop_lines(AEN801_PRESET, "name: reserved")
+            with self.assertRaises(ZephyrBoardEmitError) as ctx:
+                emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+        message = str(ctx.exception)
+        self.assertIn("'reserved'", message)
+        self.assertNotIn("predates", message)
+
+    def test_half_authored_slot0_map_raises_instead_of_overlaying_the_sibling(self) -> None:
+        """Dropping only `hp_slot0` used to fall back to the stock
+        symmetric layout, putting `slot0_partition@10000` exactly on top of
+        the `he_slot0` window the same file still declares -- silently
+        undoing #1069."""
+        with _MutatedMetadata() as mm:
+            mm.drop_lines(AEN801_PRESET, "name: hp_slot0")
+            with self.assertRaises(ZephyrBoardEmitError) as ctx:
+                emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+        message = str(ctx.exception)
+        self.assertIn("'hp_slot0'", message)
+        self.assertIn("#1069", message)
+
+    def test_partition_outside_the_flash_node_raises(self) -> None:
+        with _MutatedMetadata() as mm:
+            mm.sub(AEN801_PRESET,
+                   "name: storage,   base: 0x80560000, size_kib: 96",
+                   "name: storage,   base: 0x80560000, size_kib: 2048")
+            with self.assertRaises(ZephyrBoardEmitError) as ctx:
+                emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+        self.assertIn("outside the 5632 KiB App MRAM window", str(ctx.exception))
+
+    def test_overlapping_regions_raise(self) -> None:
+        with _MutatedMetadata() as mm:
+            mm.sub(AEN801_PRESET,
+                   "name: hp_slot0,  base: 0x802b0000",
+                   "name: hp_slot0,  base: 0x802a0000")
+            with self.assertRaises(ZephyrBoardEmitError) as ctx:
+                emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+        self.assertIn("overlap", str(ctx.exception))
+
+    def test_mcuboot_off_the_mram_base_raises(self) -> None:
+        """`mcuboot`'s base anchors the soc-nv-flash child's offset-0
+        origin, but the child's own address was a hardcoded 0x80000000:
+        a shifted map emitted every partition 32 KiB below its declared
+        physical address, and the `.dts` and `_defconfig` disagreed."""
+        with _MutatedMetadata() as mm:
+            for base in (0x80000000, 0x80010000, 0x802B0000, 0x80550000,
+                         0x80560000, 0x80578000):
+                mm.sub(AEN801_PRESET, f"base: 0x{base:08x}",
+                       f"base: 0x{base + 0x8000:08x}")
+            with self.assertRaises(ZephyrBoardEmitError) as ctx:
+                emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+        message = str(ctx.exception)
+        self.assertIn("anchors 'mcuboot' at 0x80008000", message)
+        self.assertIn("0x80000000", message)
+
+
+class TestSiliconVariantResolution(unittest.TestCase):
+    def test_declared_variant_naming_no_order_code_raises(self) -> None:
+        """A declared `silicon_variant:` is authoritative; falling through
+        to the `alp_module_skus` reverse lookup emitted a whole board tree
+        named after a part number the preset does not declare."""
+        with _MutatedMetadata() as mm:
+            mm.sub(AEN801_PRESET, "silicon_variant: AE822FA0E5597LS0",
+                   "silicon_variant: AE822FA0E5597LSO")
+            with self.assertRaises(ZephyrBoardEmitError) as ctx:
+                emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+        message = str(ctx.exception)
+        self.assertIn("AE822FA0E5597LSO", message)
+        self.assertIn("AE822FA0E5597LS0", message)
+
+    def test_tbd_variant_still_falls_back_to_the_reverse_lookup(self) -> None:
+        with _MutatedMetadata() as mm:
+            mm.sub(AEN801_PRESET, "silicon_variant: AE822FA0E5597LS0",
+                   "silicon_variant: TBD")
+            files = emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+        self.assertIn("    - name: ae822fa0e5597ls0\n",
+                      files["alp_e1m_aen801_m55_hp/board.yml"])
 
 
 class TestLoadSocSpecFailureShape(unittest.TestCase):

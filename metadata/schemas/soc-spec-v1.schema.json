@@ -134,6 +134,12 @@
       "description": "Always-on / utility SRAM that survives STOP mode."
     },
 
+    "zephyr_peripherals_dtsi": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_./-]+\\.dtsi$",
+      "description": "OPTIONAL `#include <...>` path of the alp-sdk devicetree overlay declaring THIS SoC's peripheral and NPU node set (e.g. \"alif/ensemble_e8_peripherals.dtsi\", which lives at zephyr/dts/alif/ensemble_e8_peripherals.dtsi). `scripts/gen_zephyr_board.py --emit zephyr-board` emits it verbatim into the generated board .dts. Declared per SoC rather than derived from `part` because a wrong overlay produces a board that builds and then misbehaves on silicon -- the E8's overlay declares `ethosu85`, while an E3 carries 2x Ethos-U55 and no U85 -- so a SoC with no overlay of its own must REFUSE to generate a board rather than inherit a sibling part's. Omit for SoCs the board generator does not fully cover."
+    },
+
     "peripherals": {
       "type": "object",
       "description": "Counts per peripheral kind. Studio uses these to validate which blocks fit on the SoC. Use the SAME keys across vendors so the studio can do generic matching.",
