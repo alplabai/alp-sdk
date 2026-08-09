@@ -79,7 +79,7 @@ tan-cli mirror as `alplabai/tan-cli#555`, `#557`, `#558` and `#559`.
   to a hint comment otherwise, so a typo no longer aborts the Zephyr configure.
   "Declared" is the exact enclosing `if` chain, not the module's enable symbol
   alone: `mbedtls` needs `CONFIG_MBEDTLS_DEBUG=y` on top of `CONFIG_MBEDTLS=y`
-  (`modules/mbedtls/Kconfig:87`) and `net_ipv4` needs `CONFIG_NET_NATIVE=y` on
+  (`modules/mbedtls/Kconfig:89`) and `net_ipv4` needs `CONFIG_NET_NATIVE=y` on
   top of `CONFIG_NET_IPV4=y` (`subsys/net/ip/Kconfig.ipv4:44`). Getting that
   wrong is invisible at build time — the configure still exits 0 and only warns
   `The choice symbol … was selected (set =y), but no symbol ended up as the

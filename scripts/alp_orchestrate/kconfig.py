@@ -1716,14 +1716,14 @@ _LOG_MODULES: dict[str, tuple[str, str | tuple[str, ...], str]] = {
     "net_tcp":         ("NET_TCP", "NET_TCP", "NET_LOG"),        # subsys/net/ip/Kconfig.tcp:16-17
     # modules/
     # MBEDTLS_DEBUG is the real guard, not MBEDTLS: `module = MBEDTLS` sits
-    # inside `if MBEDTLS_DEBUG` (modules/mbedtls/Kconfig:87), itself nested in
+    # inside `if MBEDTLS_DEBUG` (modules/mbedtls/Kconfig:89), itself nested in
     # `if MBEDTLS` (:31).  MBEDTLS_DEBUG is a prompted bool defaulting n that
     # this emitter never writes, while CONFIG_MBEDTLS=y IS written (from
     # metadata/libraries/mbedtls.yaml) by iot-fleet-ota, production-deployment,
     # rpmsg-v2n, rpmsg-aen and heterogeneous-offload -- so guarding on MBEDTLS
     # alone made the ONE in-table module the SDK routinely enables emit a line
     # whose choice symbol is not declared.
-    "mbedtls":         ("MBEDTLS", ("MBEDTLS", "MBEDTLS_DEBUG"), "LOG"),  # modules/mbedtls/Kconfig:87-91
+    "mbedtls":         ("MBEDTLS", ("MBEDTLS", "MBEDTLS_DEBUG"), "LOG"),  # modules/mbedtls/Kconfig:89-93
 }
 
 

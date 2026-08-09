@@ -747,7 +747,7 @@ diagnostics:
 def test_diagnostics_mbedtls_needs_the_mbedtls_debug_guard(
         tmp_path: Path) -> None:
     """`module = MBEDTLS` sits inside `if MBEDTLS_DEBUG` (modules/mbedtls/
-    Kconfig:87), itself nested in `if MBEDTLS` (:31).  CONFIG_MBEDTLS=y alone
+    Kconfig:89), itself nested in `if MBEDTLS` (:31).  CONFIG_MBEDTLS=y alone
     does NOT declare the choice, so this has to stay a comment naming the real
     guard.  mbedtls is the ONE in-table module the SDK routinely enables
     (iot-fleet-ota, production-deployment, rpmsg-v2n, rpmsg-aen,
