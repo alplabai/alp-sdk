@@ -228,9 +228,10 @@ turns that configure into object files and an executable is a separate entry in
 the slice's `postCommands`, which an executor MUST run in order once `command`
 exits 0. Running `command` alone reports a green build over a tree holding
 `CMakeCache.txt` and no binary at all (alplabai/tan-cli#550). The slice's
-`-DALP_*` settings ride that configure directly: the `NAME=VALUE` entries
-(`ALP_SOM_SKU`, `ALP_SOM_FAMILY`, `ALP_CORE_ID`, `ALP_TOOLCHAIN`, the NPU
-dispatch enables) as cmake cache arguments, and the bare `#if defined(…)` guards
+`-DALP_*` settings ride that configure directly: the `-DNAME=VALUE` entries
+(`-DALP_SOM_SKU`, `-DALP_SOM_FAMILY`, `-DALP_CORE_ID`, `-DALP_TOOLCHAIN`, the
+NPU dispatch enables) as cmake cache arguments, and the bare `#if defined(…)`
+guards
 (`ALP_BOARD_<SLUG>`, `ALP_SOM_<SKU>`) as real compiler definitions through a
 generated `build/<core>-baremetal/alp-baremetal.cmake` the configure pulls in
 with `-DCMAKE_PROJECT_INCLUDE=` (alplabai/tan-cli#551). Unlike the retired
