@@ -217,7 +217,12 @@ anything is written (a rejected invocation never leaves half-written
 files), `--default-board` must name a carrier from `metadata/boards/`,
 and `--default-hw-rev` must resolve in the family's
 `hw-revisions.yaml` whenever that file already exists (a brand-new
-family defers this to the checklist).  The generated
+family defers this to the checklist).  "Exists" is decided on the file,
+not on whether it could be read: a family table that is present but
+unusable -- empty, truncated above its `hw_revisions:` block, a bare
+scalar, or not valid YAML -- is refused by name rather than treated as
+absent, so a damaged table cannot silently skip the `--default-hw-rev`
+cross-check (alplabai/tan-cli#563).  The generated
 `preferred_backend: tbd` placeholder passes
 `scripts/check_inference_backend_parity.py` only while the preset
 declares `status.preliminary: true` -- replace `tbd` with the real

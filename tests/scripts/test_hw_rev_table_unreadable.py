@@ -5,7 +5,7 @@ alplabai/tan-cli#563.  All three hw_rev safety gates -- the unknown-revision
 gate (#1025's existence half), the not-buildable gate (#1025's status half)
 and the SDK-version-range gate (#1019) -- read exactly one file per SoM
 family, `metadata/e1m_modules/<family>/hw-revisions.yaml`, through
-`sdk_compat._load_family_table()`.
+`sdk_compat.load_family_table()`.
 
 That reader swallowed `OSError` and `yaml.YAMLError` and answered `{}`.
 Every predicate above it reads an empty table as "nothing to judge" and
@@ -18,6 +18,21 @@ An ABSENT table stays benign and is pinned here too: an in-development
 family that ships no table has nothing to check against, and
 `tests/scripts/_orchestrate_support.py`'s NX9101 fixture depends on it.
 
+THREE independent readers open this one file, and all three fell open on
+at least two of the four unusable shapes.  Each has its own section below:
+
+  1. `sdk_compat.load_family_table()` -- the three gates above.
+  2. `alp_project_loader._hwrev_pad_route_overrides()` -- the
+     `--emit composed-route-table` / `--emit carrier-netlist` path, which
+     resolves its SoM data independently and carries its own copies of the
+     #1025 gates.  Its `yaml.safe_load(...) or {}` fell open on an empty
+     and on a truncated table.
+  3. `alp_cli.new_som._family_hw_revisions()` -- the scaffold-time
+     `--default-hw-rev` cross-check, which fell open widest of the three.
+
+All three now read through the one guarded reader, so they cannot disagree
+about whether a damaged table is fatal or about what the refusal says.
+
 Run locally:
 
     python -m pytest tests/scripts/test_hw_rev_table_unreadable.py -v
@@ -26,6 +41,7 @@ Run locally:
 from __future__ import annotations
 
 import shutil
+import subprocess
 import sys
 import textwrap
 from pathlib import Path
@@ -36,6 +52,7 @@ import yaml
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "scripts"))
 
+from alp_cli.new_som import _family_hw_revisions  # noqa: E402
 from alp_orchestrate import (  # noqa: E402
     OrchestratorError,
     SdkRevisionNotBuildable,
@@ -44,6 +61,7 @@ from alp_orchestrate import (  # noqa: E402
     load_board_yaml,
 )
 from alp_orchestrate import sdk_compat as sc  # noqa: E402
+from alp_project_loader import _hwrev_pad_route_overrides  # noqa: E402
 
 # One tab-indented line -- the plausible hand-edit tan-cli#563 names, and
 # the one YAML rejects outright ("found character '\t' that cannot start
@@ -247,3 +265,116 @@ def test_the_shipped_tree_still_loads_cleanly():
     project = load_board_yaml(
         REPO / "examples" / "bringup" / "board-selftest" / "board.yaml")
     assert project.sku == "E1M-AEN801"
+
+
+# --------------------------------------------------------------------------
+# Reader 2: the composed-route-table / carrier-netlist emit path
+#
+# `alp_project_loader._hwrev_pad_route_overrides()` resolves its own SoM
+# data independently of `alp_orchestrate.loader`, so it carries its own
+# copies of the #1025 existence and buildable gates -- and it had its own
+# `yaml.safe_load(...) or {}`, which fell open on the two shapes that parse
+# without raising.  It now reads through the same guarded reader.
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("content", [
+    _TAB_INDENTED,
+    "",
+    "just a bare scalar\n",
+    "family: aen\ndisplay_name: AEN\n",
+])
+def test_reader_2_pad_route_overrides_does_not_fail_open(tmp_path, content):
+    """An unusable table must not let the emit path resolve an hw_rev.
+
+    Before this fix `""` and the truncated shape both returned `[]` here
+    and `--emit composed-route-table` shipped a wrong-hardware artefact at
+    exit 0 for `hw_rev: r99`; the tab-indented and scalar shapes escaped
+    as a raw `yaml.ScannerError` / `AttributeError` traceback -- a refusal,
+    but not a diagnosable one.
+    """
+    meta = _metadata_copy(tmp_path)
+    _family_table(meta, "aen").write_text(content, encoding="utf-8")
+
+    with pytest.raises(OrchestratorError) as excinfo:
+        _hwrev_pad_route_overrides("E1M-AEN801", "r99", meta)
+    assert "hw-revisions.yaml" in str(excinfo.value)
+
+
+def test_reader_2_intact_and_absent_tables_are_unchanged(tmp_path):
+    """The two answers that must NOT move: an intact table still refuses
+    an unknown rev with the same `SdkRevisionUnknown` it always did, and
+    an absent one still returns no overrides."""
+    intact = _metadata_copy(tmp_path / "intact")
+    with pytest.raises(SdkRevisionUnknown):
+        _hwrev_pad_route_overrides("E1M-AEN801", "r99", intact)
+    # A real rev on the intact tree resolves, so the emit itself is
+    # untouched by the new guard.
+    assert isinstance(
+        _hwrev_pad_route_overrides("E1M-AEN801", "r1", intact), list)
+
+    absent = _metadata_copy(tmp_path / "absent")
+    _family_table(absent, "aen").unlink()
+    assert _hwrev_pad_route_overrides("E1M-AEN801", "r99", absent) == []
+
+
+def test_reader_2_emit_refuses_at_exit_1_not_exit_0(tmp_path):
+    """End-to-end through the CLI: the fail-open outcome tan-cli#563
+    exists to prevent is a wrong-hardware artefact at exit 0."""
+    meta = _metadata_copy(tmp_path)
+    _family_table(meta, "aen").write_text("", encoding="utf-8")
+    board = _board(tmp_path, _AEN_UNKNOWN_REV)
+
+    proc = subprocess.run(
+        [sys.executable, str(REPO / "scripts" / "alp_project.py"),
+         "--input", str(board), "--emit", "composed-route-table",
+         "--metadata-root", str(meta)],
+        capture_output=True, text=True)
+
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert "hw-revisions.yaml" in proc.stderr
+    assert "r99" not in proc.stdout      # nothing emitted for the bad rev
+    assert "Traceback" not in proc.stderr
+
+
+# --------------------------------------------------------------------------
+# Reader 3: `alp new-som`'s scaffold-time cross-check
+#
+# The third independent reader of the same file, and the one that failed
+# open widest: it caught `yaml.YAMLError` AND read a non-mapping
+# `hw_revisions:` as "not resolvable", so three of the four unusable
+# shapes let `alp new-som --default-hw-rev <nonexistent>` write a SoM
+# preset naming a revision that does not exist, at exit 0.
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("content", [
+    _TAB_INDENTED,
+    "",
+    "just a bare scalar\n",
+    "family: aen\ndisplay_name: AEN\n",
+])
+def test_reader_3_new_som_cross_check_does_not_fail_open(tmp_path, content):
+    """`_family_hw_revisions` answers None only for "no table anywhere".
+
+    A damaged table under `output_root` must refuse -- and must NOT be
+    silently answered from the SDK checkout's own copy, which describes a
+    different tree.  `_fail` raises SystemExit.
+    """
+    meta = _metadata_copy(tmp_path)
+    _family_table(meta, "aen").write_text(content, encoding="utf-8")
+
+    with pytest.raises(SystemExit):
+        _family_hw_revisions("E1M-AEN801", tmp_path)
+
+
+def test_reader_3_intact_and_unmapped_families_are_unchanged(tmp_path):
+    """The two answers that must NOT move: an intact table still resolves
+    to (path, revs), and a SKU with no family-directory mapping is still
+    the benign None a brand-new family relies on."""
+    meta = _metadata_copy(tmp_path)
+    resolved = _family_hw_revisions("E1M-AEN801", tmp_path)
+    assert resolved is not None
+    path, revs = resolved
+    assert path == _family_table(meta, "aen")
+    assert "r1" in revs
+
+    assert _family_hw_revisions("E1M-ZZZ999", tmp_path) is None

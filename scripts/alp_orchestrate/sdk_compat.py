@@ -35,12 +35,12 @@ into the wrong one silently.
 
 All three of those gates read ONE file per SoM family,
 `metadata/e1m_modules/<family>/hw-revisions.yaml`, through
-`_load_family_table()` below.  That reader used to swallow `OSError` and
+`load_family_table()` below.  That reader used to swallow `OSError` and
 `yaml.YAMLError` and answer `{}`, which every predicate here reads as
 "nothing to judge" -- so a single tab-indented line in that file disabled
 the unknown-revision gate, the not-buildable gate AND the SDK-range gate
 at once and emitted a wrong-hardware artefact at exit 0.  It now refuses
-instead; see `_load_family_table`'s own docstring for why an ABSENT table
+instead; see `load_family_table`'s own docstring for why an ABSENT table
 is still benign while a present-but-unusable one is not.
 """
 
@@ -221,9 +221,19 @@ def _table_unreadable(path: Path, why: str) -> OrchestratorError:
         "are the usual causes) and re-run.")
 
 
-def _load_family_table(metadata_root: Path, family_dir: str) -> Any:
+def load_family_table(metadata_root: Path, family_dir: str) -> Any:
     """The raw parsed `hw-revisions.yaml` for a SoM family, or {} when the
     family ships no table at all.
+
+    Public, not `_`-private, because it has a SECOND consumer outside this
+    module: `alp_project_loader._hwrev_pad_route_overrides()` carries its
+    own copies of the #1025 existence and buildable gates for the
+    `--emit composed-route-table` / `--emit carrier-netlist` path, which
+    resolves its SoM data independently of `alp_orchestrate.loader`.  That
+    reader had its own tolerant `yaml.safe_load(...) or {}` and fell open
+    on exactly the shapes guarded below; both readers now share this one,
+    so they cannot disagree about whether a damaged table is fatal or
+    about what the refusal says.
 
     ABSENT and UNUSABLE are two different situations and only one of them
     is benign (#563).  A family directory with no `hw-revisions.yaml`
@@ -286,7 +296,7 @@ def family_revision(metadata_root: Path,
     """
     if not family_dir:
         return {}
-    return _revision(_load_family_table(metadata_root, family_dir), hw_rev)
+    return _revision(load_family_table(metadata_root, family_dir), hw_rev)
 
 
 def family_revision_known(metadata_root: Path,
@@ -295,7 +305,7 @@ def family_revision_known(metadata_root: Path,
     """`revision_known()` against the SoM-family hw-revisions.yaml table."""
     if not family_dir:
         return None
-    return revision_known(_load_family_table(metadata_root, family_dir), hw_rev)
+    return revision_known(load_family_table(metadata_root, family_dir), hw_rev)
 
 
 def family_revision_buildable(metadata_root: Path,
@@ -304,7 +314,7 @@ def family_revision_buildable(metadata_root: Path,
     """`revision_buildable()` against the SoM-family hw-revisions.yaml table."""
     if not family_dir:
         return None
-    return revision_buildable(_load_family_table(metadata_root, family_dir), hw_rev)
+    return revision_buildable(load_family_table(metadata_root, family_dir), hw_rev)
 
 
 def family_available_revisions(metadata_root: Path,
@@ -316,7 +326,7 @@ def family_available_revisions(metadata_root: Path,
     """
     if not family_dir:
         return []
-    revisions = _hw_revisions(_load_family_table(metadata_root, family_dir))
+    revisions = _hw_revisions(load_family_table(metadata_root, family_dir))
     return sorted(revisions.keys()) if revisions else []
 
 
