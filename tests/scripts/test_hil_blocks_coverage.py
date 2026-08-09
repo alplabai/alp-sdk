@@ -138,16 +138,25 @@ def _make_project(
     """Build a minimal BoardProject for the orchestrator-emit checks
     below.  We don't go through load_board_yaml() because that
     requires real preset files on disk; the emit functions take
-    BoardProject + Slice directly."""
+    BoardProject + Slice directly.
+
+    `cores` carries a real `os: zephyr` slice and `family:` carries the
+    real `alif-ensemble` token out of metadata/e1m_modules/E1M-AEN701.yaml
+    (it used to be `cores={}` and `family: "alif"` -- neither of which any
+    loaded project can produce).  `emit_sysbuild_conf` reads both since
+    #562: sysbuild only exists inside a Zephyr build, and `boot.method:`
+    now defaults per SoM family rather than unconditionally to mcuboot,
+    so a fixture with no Zephyr slice and an unrecognised family would
+    quietly stop exercising the AEN MCUboot path these tests are about."""
     return BoardProject(
         sku="E1M-AEN701",
         hw_rev=None,
         board_name="hil-blocks-test",
         board_hw_rev=None,
-        cores={},
+        cores={"m55_hp": Slice(core_id="m55_hp", os="zephyr", app="./src")},
         ipc=[],
         soc_spec={"silicon": "alif:e1c:e1c-aen"},
-        som_preset={"family": "alif", "topology": {}},
+        som_preset={"family": "alif-ensemble", "topology": {}},
         board_preset=None,
         diagnostics=diagnostics or {},
         chips=[],

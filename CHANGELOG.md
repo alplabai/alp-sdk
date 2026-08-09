@@ -51,6 +51,32 @@ here too.
 No shipped `board.yaml` uses `ipc[].address:` or `storage[].offset_kib:`, and
 none declares a `cacheable: true` carve-out, so no generated artefact in the
 repo moves.
+### Fixed — an unreadable `hw-revisions.yaml` refuses instead of disabling all three hw_rev gates (alplabai/tan-cli#563)
+
+`sdk_compat._load_family_table()` swallowed `OSError` and `yaml.YAMLError` and
+answered `{}`. Every predicate above it reads an empty table as "nothing to
+judge", so **one tab-indented line** in a SoM family's
+`metadata/e1m_modules/<family>/hw-revisions.yaml` silently disabled the
+unknown-revision gate (#1025), the not-buildable-status gate (#1025) and the
+SDK-version-range gate (#1019) *at once* — `som: {sku: E1M-AEN801, hw_rev: r99}`
+then loaded clean at exit 0. A present-but-unusable table is now an
+`OrchestratorError` refusal naming the file; an ABSENT table stays benign (an
+in-development family has nothing to check against). Also refuses the shapes
+that parse without raising: an empty file, a bare scalar, and a file truncated
+above its `hw_revisions:` block.
+
+### Fixed — a Yocto-only V2N project with `rsa3072` can build again (alplabai/tan-cli#562)
+
+`emit_sysbuild_conf()` hard-defaulted `boot.method:` to `mcuboot` for every SoM
+family and then hard-raised on `rsa3072`, without looking at the project's
+slices — so a Yocto-only Renesas RZ/V2N board.yaml that validated clean failed
+its **entire** build-plan emit with MCUboot advice, on a platform that never
+runs sysbuild. Two halves, both closed: the sysbuild overlay is emitted only
+for a project with at least one `os: zephyr` slice, and `boot.method:` now
+defaults **per SoM family** (`alif-ensemble`/`nxp-imx9` → `mcuboot`,
+`renesas-rzv2n*` → `none`) as `board.schema.json` has always documented and
+nothing implemented. The #807 `rsa3072` refusal is unchanged for an explicit
+`method: mcuboot`.
 
 ### Changed — DMAC0's CM33-exclusive ownership is a written contract, not one dtsi line (#1152, #1153)
 
