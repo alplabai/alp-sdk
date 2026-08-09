@@ -384,9 +384,23 @@ def test_baremetal_plan_actually_produces_a_binary(tmp_path: Path) -> None:
     assert not (build_dir / "build").exists()
     out_dir = tmp_path / slice_["artifacts"]["outputDir"]
     assert out_dir.is_dir()
-    # Directly in `output/`, NOT in a `output/<CONFIG>/` subdirectory --
+    # Directly in `output/`, NOT in an `output/<CONFIG>/` subdirectory --
     # the `$<1:...>` wrap is what holds this on a multi-config generator.
-    assert [p.name for p in out_dir.iterdir()] == ["demo"]
+    #
+    # Assert the SHAPE, not a filename.  The host toolchain picks the
+    # suffix: `demo` under gcc/clang, `demo.exe` PLUS a `demo.pdb` under
+    # MSVC, which is what Windows CI's default Visual Studio generator
+    # emits.  What this pins is that the entries are FILES sitting
+    # directly in `output/` with no per-config subdirectory beside them
+    # -- exactly what the generator expression buys.  Hard-coding `demo`
+    # was a POSIX assumption and reddened python-smoke (windows-latest).
+    entries = sorted(out_dir.iterdir(), key=lambda p: p.name)
+    assert entries, "outputDir is empty -- the executable did not land there"
+    assert all(p.is_file() for p in entries), (
+        f"a per-config subdirectory appeared inside outputDir: "
+        f"{[p.name for p in entries]}")
+    assert any(p.stem == "demo" for p in entries), (
+        f"no `demo` executable in outputDir: {[p.name for p in entries]}")
 
 
 def test_an_empty_output_dir_does_not_mean_the_slice_built_nothing(
@@ -443,9 +457,14 @@ def test_an_empty_output_dir_does_not_mean_the_slice_built_nothing(
             f"{proc.stdout[-4000:]}\n{proc.stderr[-4000:]}")
 
     build_dir = tmp_path / slice_["buildDir"]
-    # It really built: an object file, an archive and the image.
+    # It really built: an object file, an archive and the image.  The
+    # object suffix is the toolchain's, not POSIX's -- `.o` under
+    # gcc/clang, `.obj` under MSVC (which is what Windows CI's default
+    # Visual Studio generator emits; globbing only `*.o` reddened
+    # python-smoke (windows-latest)).
     assert (build_dir / "fw.elf").is_file()
-    assert list(build_dir.rglob("*.o")), "no object file was produced"
+    objs = [*build_dir.rglob("*.o"), *build_dir.rglob("*.obj")]
+    assert objs, "no object file was produced"
     assert list(build_dir.rglob("*fwcore*")), "no archive was produced"
     # ...and `output/` was never created.
     assert not (tmp_path / slice_["artifacts"]["outputDir"]).exists()
