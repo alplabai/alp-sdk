@@ -21,10 +21,21 @@ It runs a linear, stop-on-first-failure sequence:
 5. **power-on test** — runs `tests/hil/run_smoke.py` for the board (gated on the
    firmware's `alp_hw_info_read()` succeeding first) if a HiL spec was given in step 2;
    a no-op (reported as skipped) otherwise.
-6. **record** the unit to the ledger (`som_ledger.py record`) — `--test-result pass`
-   only when the test ran and passed; `pending-hw` for everything else (dry-run, no
-   test configured, a skipped test under `--execute`, or a configured test that ran
-   and failed).
+6. **record** the unit to the ledger (`som_ledger.py record`) — `--test-result` is
+   three-valued, one value per outcome (#1305):
+
+   | value | meaning |
+   |---|---|
+   | `pass` | `--execute`, a test was configured, it ran, it passed |
+   | `fail` | `--execute`, a test was configured, it ran, it **failed** |
+   | `pending-hw` | everything else: dry-run, no test configured, or a test skipped under `--execute` |
+
+   `fail` and `pending-hw` are distinct on purpose: "verified bad" and "not yet
+   verified" are different states, and before #1305 both wrote `pending-hw`, so a
+   unit that failed its power-on test was indistinguishable in the ledger from one
+   nobody ever tested. Note that a **dry run never records `fail`** — the spec is
+   validated rather than run, so a validation failure on a workstation with no board
+   attached is not a unit that failed its power-on test.
 
 ## Safety: dry-run by default
 
