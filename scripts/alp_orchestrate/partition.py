@@ -345,7 +345,7 @@ def resolve_storage_partitions(
         entries_sorted = sorted(
             by_device[device_name], key=lambda e: e.name)
 
-        # (base_bytes, size_aligned, reason) per entry name.  Placement runs
+        # (base_bytes, size_aligned, reason) per entry INDEX.  Placement runs
         # in TWO passes over the name-sorted list -- every `offset_kib:` pin
         # first, then the bump allocator around them (#554).  In one pass a
         # pin only ever became an obstacle for the siblings that happened to
@@ -354,7 +354,9 @@ def resolve_storage_partitions(
         # already-auto-allocated `app_data` and was silently dropped from
         # dts-partitions.dtsi -- a validate-clean layout the allocator could
         # have satisfied.  Emission below still walks `entries_sorted`.
-        placement: dict[str, tuple[int, int, Optional[str]]] = {}
+        # Keyed by index rather than name because board.schema.json does not
+        # require `storage[].name` to be unique.
+        placement: dict[int, tuple[int, int, Optional[str]]] = {}
 
         def _place(entry: StorageEntry) -> tuple[int, int, Optional[str]]:
             size_bytes = entry.size_kib * 1024
@@ -418,13 +420,13 @@ def resolve_storage_partitions(
             allocated.append((base_bytes, top_bytes, entry.name))
             return base_bytes, size_aligned, None
 
-        for entry in entries_sorted:
+        for index, entry in enumerate(entries_sorted):
             if entry.offset_kib is not None:
-                placement[entry.name] = _place(entry)
-        for entry in entries_sorted:
+                placement[index] = _place(entry)
+        for index, entry in enumerate(entries_sorted):
             if entry.offset_kib is None:
                 base_bytes, size_aligned, reason = _place(entry)
-                placement[entry.name] = (base_bytes, size_aligned, reason)
+                placement[index] = (base_bytes, size_aligned, reason)
                 if reason is None:
                     # Only bump the allocator when we used it; explicit
                     # offsets don't shift the high-water mark (they may be
@@ -432,8 +434,8 @@ def resolve_storage_partitions(
                     # `allocated` is what makes the allocator step over them.
                     high_water_bytes = base_bytes + size_aligned
 
-        for entry in entries_sorted:
-            base_bytes, size_aligned, reason = placement[entry.name]
+        for index, entry in enumerate(entries_sorted):
+            base_bytes, size_aligned, reason = placement[index]
             if reason is not None:
                 resolved.append(_blocked_partition(entry, reason))
                 continue

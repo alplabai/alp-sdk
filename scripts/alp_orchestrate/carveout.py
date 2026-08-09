@@ -437,27 +437,30 @@ def resolve_carve_outs(
     # auto-allocated `a_chan` take `0x80000` before the pinned `b_chan`
     # asked for it, and both came back `ok` on the same address (#552).
     # Emission below still walks `sorted_entries`, so ordering -- and the
-    # endpoint-id collision report -- is unchanged.
-    placeable = [e for e in sorted_entries
+    # endpoint-id collision report -- is unchanged.  Keyed by INDEX, not
+    # name: board.schema.json does not require `ipc[].name` to be unique
+    # (a duplicate is caught by the endpoint-id check further down), and a
+    # name-keyed map would silently give the twins one placement.
+    placeable = [(i, e) for i, e in enumerate(sorted_entries)
                  if not (e.kind == "rpmsg" and rpmsg_block_reason is not None)]
-    placement: dict[str, tuple[Optional[dict[str, Any]], int, Optional[str]]] = {}
-    for entry in placeable:
+    placement: dict[int, tuple[Optional[dict[str, Any]], int, Optional[str]]] = {}
+    for index, entry in placeable:
         if entry.address is not None:
-            placement[entry.name] = _place_pinned(entry)
-    for entry in placeable:
+            placement[index] = _place_pinned(entry)
+    for index, entry in placeable:
         if entry.address is None:
-            placement[entry.name] = _place_auto(entry)
+            placement[index] = _place_auto(entry)
 
     resolved: list[ResolvedCarveOut] = []
     seen_low_bytes: dict[int, str] = {}
 
-    for entry in sorted_entries:
+    for index, entry in enumerate(sorted_entries):
         # Mailbox metadata blocked? rpmsg entries can't proceed.
         if entry.kind == "rpmsg" and rpmsg_block_reason is not None:
             resolved.append(_blocked_carve_out(entry, rpmsg_block_reason))
             continue
 
-        chosen, base, place_reason = placement[entry.name]
+        chosen, base, place_reason = placement[index]
         if place_reason is not None or chosen is None:
             resolved.append(_blocked_carve_out(
                 entry, place_reason or "carve-out could not be placed"))
