@@ -224,10 +224,27 @@ ipc:
   unset or `false`) — `cacheable: true` is an explicit per-entry
   opt-in, not a SoM-level default; see the cache-coherency note in
   §10 for what it does and does not buy you today.
+- **`address`** — *optional* escape hatch pinning the carve-out to an
+  explicit physical base.  Must be 4 KiB page-aligned, must lie wholly
+  inside a region every `endpoints:` core can reach, and must not
+  overlap another carve-out — the planner refuses the entry with a
+  `status: blocked` reason naming the reachable windows otherwise.
+  Pins are placed before the automatic allocator runs, so the allocator
+  steps around them regardless of alphabetical order.
 - **`name`** — stable identifier.  Becomes the resource-table label
   on OpenAMP, the Linux DT `reserved-memory` node label, and the
   `#define` prefix in the generated header.  Stick to
   `[a-z][a-z0-9_]+`.
+
+**Not every `accessible_from:` core reaches a whole region.**  A region
+may declare `access_windows:` — a per-core addressable sub-window — and
+the allocator confines that core's carve-outs to it.  The RZ/V2N
+Cortex-M33 is the live case: per Renesas FSP `bsp_slave_address.h` its
+DDR window is CM33-secure `0x80000000` / CM33-non-secure `0x90000000` →
+A55 `0x40000000`, **256 MiB**, while `ddr_main` spans 4 GiB from
+`0x48000000`.  Without the window a top-down allocation handed the M33
+`0x147f80000`, a 33-bit address that truncates to `0x47f80000` — below
+the DDR base — the moment it is cast to a pointer on the M33.
 
 For each `ipc:` entry, `tan build`
 emits a header both halves `#include`:

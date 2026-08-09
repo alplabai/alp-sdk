@@ -479,6 +479,33 @@
           "type": "boolean",
           "description": "When explicitly false, this region is excluded from IPC carve-out allocation (scripts/alp_orchestrate/carveout.py resolve_carve_outs) even though it declares a real `base`.  For a flash-class region (e.g. an MRAM MCUboot/slot0/reserved/storage sub-region that must publish a base so the board generator can lay out its partition table) that base is NOT byte-addressable shared memory a raw_shmem/rpmsg carve-out can safely land in.  Defaults to true (eligible)."
         },
+        "access_windows": {
+          "type": "object",
+          "description": "OPTIONAL per-core addressable sub-window of this region, keyed by core id.  `accessible_from:` is a yes/no per core and cannot express \"this core reaches only PART of the region\" -- the RZ/V2N Cortex-M33 does exactly that (FSP bsp_slave_address.h: CM33-secure 0x80000000 / CM33-non-secure 0x90000000 -> A55 0x40000000, 256 MiB) while ddr_main spans 4 GiB.  Declare the reachable slice here and scripts/alp_orchestrate/carveout.py confines that core's IPC carve-outs to it instead of allocating at the region top, where the address does not exist for that core.  Omit for regions every accessible_from core reaches in full.",
+          "propertyNames": { "pattern": "^[a-z][a-z0-9_]+$" },
+          "additionalProperties": {
+            "type": "object",
+            "required": ["base"],
+            "additionalProperties": false,
+            "anyOf": [
+              { "required": ["size_kib"] },
+              { "required": ["size_mib"] }
+            ],
+            "properties": {
+              "base": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Window base in the SAME address space as the region's own `base` (i.e. the physical/host view), NOT the aliased address the core issues."
+              },
+              "size_kib": { "type": "integer", "minimum": 1 },
+              "size_mib": { "type": "integer", "minimum": 1 },
+              "note": {
+                "type": "string",
+                "description": "Provenance for the window -- name the vendor header/manual it was read from."
+              }
+            }
+          }
+        },
         "dt_label": {
           "type": "string",
           "pattern": "^[a-z][a-z0-9_]*$",

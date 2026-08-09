@@ -179,7 +179,10 @@ so layouts stay byte-stable across rebuilds (the address determinism
 property OTA images depend on).  Supply `offset_kib:` to pin an
 entry to an explicit offset within the device -- useful for
 coexistence with bootloader-managed slots or when migrating a
-legacy layout.
+legacy layout.  Every pin is placed **before** the bump allocator
+runs, so the auto-allocated siblings step around it whatever its
+name-sort position -- `pinned_low` above sorts after `app_data` and
+`mcuboot_scratch` and still gets offset 0.
 
 `flash_device:` resolves against the SoM preset in this order:
 
