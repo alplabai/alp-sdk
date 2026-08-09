@@ -261,10 +261,13 @@ def resolve_storage_partitions(
       2. Within each group, sort by name for determinism (an explicit
          `offset_kib:` doesn't change sort order — it's an override
          the allocator simply respects).
-      3. For each entry: if `offset_kib:` is set, honour it (page-
-         aligned check; overlap check against prior entries).  Else
-         allocate bottom-up from the current high-water mark, page-
-         aligned.
+      3. Place every `offset_kib:`-pinned entry FIRST (page-aligned
+         check; overlap check against the SoM's own regions and prior
+         pins), then bump-allocate the rest bottom-up from the current
+         high-water mark, stepping over the pins.  Pinning first is
+         what keeps a pin that sorts LATE alphabetically from being
+         dropped by a sibling the allocator had already placed on top
+         of it (#554).
       4. Block on capacity overflow, TBD device, page-misaligned
          offset, or sibling overlap.  Blocked entries land in the
          manifest with `status: blocked` + `reason:` so reviewers see
@@ -342,23 +345,36 @@ def resolve_storage_partitions(
         entries_sorted = sorted(
             by_device[device_name], key=lambda e: e.name)
 
-        for entry in entries_sorted:
+        # (base_bytes, size_aligned, reason) per entry INDEX.  Placement runs
+        # in TWO passes over the name-sorted list -- every `offset_kib:` pin
+        # first, then the bump allocator around them (#554).  In one pass a
+        # pin only ever became an obstacle for the siblings that happened to
+        # sort BEFORE it, so `pinned_low` (offset_kib: 0, the shape
+        # docs/board-config-features.md itself documents) collided with an
+        # already-auto-allocated `app_data` and was silently dropped from
+        # dts-partitions.dtsi -- a validate-clean layout the allocator could
+        # have satisfied.  Emission below still walks `entries_sorted`.
+        # Keyed by index rather than name because board.schema.json does not
+        # require `storage[].name` to be unique.
+        placement: dict[int, tuple[int, int, Optional[str]]] = {}
+
+        def _place(entry: StorageEntry) -> tuple[int, int, Optional[str]]:
             size_bytes = entry.size_kib * 1024
             size_aligned = ((size_bytes + _PAGE - 1) // _PAGE) * _PAGE
 
             if entry.offset_kib is not None:
                 base_bytes = entry.offset_kib * 1024
                 if base_bytes % _PAGE != 0:
-                    resolved.append(_blocked_partition(entry, (
+                    return 0, size_aligned, (
                         f"storage entry '{entry.name}' explicit "
                         f"offset_kib={entry.offset_kib} is not page-"
-                        f"aligned (4 KiB)")))
-                    continue
+                        f"aligned (4 KiB)")
             else:
-                # Allocate AROUND the reserved regions, not merely detect a
-                # collision with them (#1331): refusing here instead of
-                # skipping would break every project that names no addresses
-                # -- which is the common case -- rather than fix it.
+                # Allocate AROUND the reserved regions and the pins, not
+                # merely detect a collision with them (#1331 / #554):
+                # refusing here instead of skipping would break every
+                # project that names no addresses -- which is the common
+                # case -- rather than fix it.
                 base_bytes = _first_free(
                     high_water_bytes, size_aligned, allocated, capacity_bytes)
 
@@ -371,12 +387,11 @@ def resolve_storage_partitions(
                         f"{', '.join(sorted(reserved_names))}) already occupy "
                         f"{sum(hi - lo for lo, hi, _ in reserved_spans) // 1024} "
                         f"KiB of it")
-                resolved.append(_blocked_partition(entry, (
+                return 0, size_aligned, (
                     f"storage entry '{entry.name}' ({entry.size_kib} "
                     f"KiB at offset {base_bytes // 1024} KiB) overruns "
                     f"flash device '{device_name}' "
-                    f"(capacity {capacity_bytes // 1024} KiB){free_note}")))
-                continue
+                    f"(capacity {capacity_bytes // 1024} KiB){free_note}")
 
             # Overlap check -- against sibling partitions AND the SoM's own
             # regions seeded above.
@@ -390,27 +405,40 @@ def resolve_storage_partitions(
                          if entry.offset_kib is not None
                          else f"auto-allocated offset {base_bytes // 1024} KiB")
                 if overlap_with in reserved_names:
-                    resolved.append(_blocked_partition(entry, (
+                    return 0, size_aligned, (
                         f"storage entry '{entry.name}' {where} overlaps SoM "
                         f"region '{overlap_with}' on device '{device_name}' "
                         f"-- that region is not customer-writable. Target it "
                         f"directly with flash_device: {overlap_with} if you "
                         f"meant to allocate inside it, or pick an offset "
-                        f"outside the SoM's declared regions.")))
-                else:
-                    resolved.append(_blocked_partition(entry, (
-                        f"storage entry '{entry.name}' {where} overlaps "
-                        f"sibling partition '{overlap_with}' on device "
-                        f"'{device_name}'")))
-                continue
+                        f"outside the SoM's declared regions.")
+                return 0, size_aligned, (
+                    f"storage entry '{entry.name}' {where} overlaps "
+                    f"sibling partition '{overlap_with}' on device "
+                    f"'{device_name}'")
 
             allocated.append((base_bytes, top_bytes, entry.name))
-            if entry.offset_kib is None:
-                # Only bump the allocator when we used it; explicit
-                # offsets don't shift the high-water mark (they may be
-                # below it deliberately, e.g. to reserve a low slot).
-                high_water_bytes = top_bytes
+            return base_bytes, size_aligned, None
 
+        for index, entry in enumerate(entries_sorted):
+            if entry.offset_kib is not None:
+                placement[index] = _place(entry)
+        for index, entry in enumerate(entries_sorted):
+            if entry.offset_kib is None:
+                base_bytes, size_aligned, reason = _place(entry)
+                placement[index] = (base_bytes, size_aligned, reason)
+                if reason is None:
+                    # Only bump the allocator when we used it; explicit
+                    # offsets don't shift the high-water mark (they may be
+                    # below it deliberately, e.g. to reserve a low slot) --
+                    # `allocated` is what makes the allocator step over them.
+                    high_water_bytes = base_bytes + size_aligned
+
+        for index, entry in enumerate(entries_sorted):
+            base_bytes, size_aligned, reason = placement[index]
+            if reason is not None:
+                resolved.append(_blocked_partition(entry, reason))
+                continue
             resolved.append(ResolvedPartition(
                 name=entry.name,
                 fs=entry.fs,

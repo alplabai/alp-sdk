@@ -7,6 +7,51 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — memory placement: silent carve-out overlaps, an unreachable DDR address, and a dropped storage layout (alplabai/tan-cli#552, #553, #554)
+
+Three placement defects in `scripts/alp_orchestrate/`, each of which resolved
+`status: ok` (or dropped a partition) with nothing said at build time.
+
+**Two IPC carve-outs could land on one physical address** (tan-cli#552).
+`ipc[].address:` was honoured after a 4 KiB alignment check and nothing else —
+no overlap check against carve-outs already placed, no bounds check that the
+pinned range even lies inside the region it was then labelled with. On
+E1M-V2N101 that produced `a_chan ok base=0x80000` and `b_chan ok base=0x80000`
+— one 64 KiB window handed to two channels, two `ALP_IPC_*_ADDR` defines with
+the same value and two `no-map` `shared-dma-pool` nodes over the same memory —
+and accepted `wild_chan ok base=0xdeadb000 region=ocram_low`, an address in no
+declared region at all. Pins are now placed before the automatic allocator runs
+(so it steps around them), the region that CONTAINS the pin decides the
+`region:` label, and an out-of-region pin is refused with the reachable windows
+named.
+
+**A DDR carve-out landed outside the CM33's 256 MiB window** (tan-cli#553).
+The top-down allocator only ever bounds-checked downward, so a
+`cacheable: true` entry took the top of `ddr_main` (4 GiB from `0x48000000`)
+and emitted `ALP_IPC_ALP_DEFAULT_RPMSG_ADDR 0x147f80000` into the header the
+M33 `#include`s — a 33-bit address that truncates to `0x47f80000`, below the
+DDR base, when cast to a pointer on the M33.
+`metadata/socs/renesas/rzv2n/n44.json` now declares the real limit as
+`access_windows: { m33_sm: ... }` (base `0x40000000`, 256 MiB, per Renesas FSP
+`bsp_slave_address.h`: CM33-secure `0x80000000` / CM33-non-secure `0x90000000`
+→ A55 `0x40000000`), the som-preset and soc-spec schemas gained the optional
+key, and the allocator confines an entry to the intersection of every
+endpoint's window. The same entry now resolves to `0x4ff80000`.
+
+**A validate-clean storage layout was silently dropped** (tan-cli#554). Storage
+entries are name-sorted and the bump allocator only saw the siblings placed
+before it, so an `offset_kib:`-pinned partition whose name sorts late collided
+with a sibling already placed on top of it and was refused — `status: blocked`
+in `system-manifest.yaml`, but simply absent from the generated
+`dts-partitions.dtsi` with its `CONFIG_FILE_SYSTEM_LITTLEFS` never emitted,
+while the build reported success. `docs/board-config-features.md`'s own
+`storage:` example is that shape and lost `pinned_low`. Pins are placed first
+here too.
+
+No shipped `board.yaml` uses `ipc[].address:` or `storage[].offset_kib:`, and
+none declares a `cacheable: true` carve-out, so no generated artefact in the
+repo moves.
+
 ### Changed — DMAC0's CM33-exclusive ownership is a written contract, not one dtsi line (#1152, #1153)
 
 RZ/V2N's MCPU DMAC (`DMAC0`, base `0x11400000`) is dual-claimable: the CM33
