@@ -106,13 +106,16 @@ export SETOOLS_DIR="${SETOOLS_DIR:-}"
 # --------------------------------------------------------------------
 
 # JLINK_DEVICE_FLASH — the Alif PART-NUMBER device profile. ONLY this
-# profile unlocks J-Link's built-in Alif MRAM loader (Flow D). It will
-# NOT connect to a live/running secure core (use _READ for that).
+# profile unlocks J-Link's built-in Alif MRAM loader (Flow D). On J-Link
+# DLLs older than V9.46 it will NOT connect to a live/running secure core
+# (use _READ for that); on V9.46+ it also connects to a live core
+# (bench-confirmed 2026-06-16, docs/aen-bench-bringup.md:14), but _READ
+# stays the documented device for Flows B/C regardless of DLL version.
 export JLINK_DEVICE_FLASH="${JLINK_DEVICE_FLASH:-AE822FA0E5597LS0_M55_HE}"
 
 # JLINK_DEVICE_READ — the GENERIC Cortex-M55 device used for every
-# read/attach/RAM-run (it attaches to the live core; the part profile
-# cannot re-halt the running SE-booted app).
+# read/attach/RAM-run (it attaches to the live core; on a pre-V9.46
+# J-Link DLL the part profile cannot re-halt the running SE-booted app).
 export JLINK_DEVICE_READ="${JLINK_DEVICE_READ:-Cortex-M55}"
 
 # JLINK_SPEED — SWD clock in kHz.
