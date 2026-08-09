@@ -236,12 +236,30 @@ guards
 generated `build/<core>-baremetal/alp-baremetal.cmake` the configure pulls in
 with `-DCMAKE_PROJECT_INCLUDE=` (alplabai/tan-cli#551). Unlike the retired
 `cmake-args.txt`, that file IS read by the build command — a slice that stops
-writing it stops compiling with its guards, loudly. The slice's `artifacts`
-block reports `compileCommands` and `outputDir` (the directory
-`-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=` pins every linked executable to), so a
-consumer can tell a slice that produced a binary from one that produced nothing;
-the executable's *name* is the app's own `CMakeLists.txt` to pick and is never
-guessed here.
+writing it stops compiling with its guards, loudly.
+
+The slice's `artifacts` block reports one path: `outputDir`, the directory
+`-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$<1:…>` pins the app's `add_executable()`
+targets to. The `$<1:…>` wrap is load-bearing — CMake appends a per-config
+subdirectory to a plain value on every multi-config generator (Visual Studio,
+Xcode, Ninja Multi-Config), and suppresses that append when a generator
+expression is used, so without it the plan would say `<buildDir>/output` while
+the binary sat in `output/Debug/`. The executable's *name* is the app's own
+`CMakeLists.txt` to pick and is never guessed here.
+
+`outputDir` is a deterministic place to look, **not a build-succeeded oracle**.
+`CMAKE_RUNTIME_OUTPUT_DIRECTORY` governs `add_executable` targets only, so a
+firmware app written as `add_library(fwcore STATIC …)` plus a custom
+link/objcopy target builds cleanly and never creates the directory at all — an
+empty or absent `output/` does not mean the slice produced nothing, and a
+consumer must not read it as a failure. `artifacts.compileCommands` stays
+**null** on baremetal even though the configure passes
+`-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`: CMake implements that variable "only by
+Makefile Generators and Ninja Generators. It is ignored on other generators",
+and this planner does not choose the generator — under Visual Studio, the
+default on Windows, the file is never written. A slice whose `command` was
+blocked reports an all-null `artifacts` block and no `configArtefacts`: nothing
+will ever configure its build dir.
 
 OS inference defaults are silicon-class driven: Cortex-M cores
 default to Zephyr, Cortex-A cores default to Yocto Linux.  The

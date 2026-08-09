@@ -156,7 +156,22 @@ def _slice_toolchain(slice_: Slice) -> dict[str, Optional[str]]:
     }
 
 
-def _slice_artifacts(build_dir: Path, slice_: Slice) -> dict[str, Optional[str]]:
+#: An artifact block that claims nothing.  Shared by the runtimes with
+#: no honest path to report (yocto) and by any slice whose `command` was
+#: blocked, so the two can never drift apart.
+_NULL_ARTIFACTS: dict[str, Optional[str]] = {
+    "elf":             None,
+    "map":             None,
+    "bin":             None,
+    "sizeReport":      None,
+    "symbols":         None,
+    "compileCommands": None,
+    "outputDir":       None,
+}
+
+
+def _slice_artifacts(build_dir: Path, slice_: Slice,
+                     has_command: bool = True) -> dict[str, Optional[str]]:
     """Deterministic OUTPUT paths under `build_dir` (#610 §4) -- the
     WHERE, not a promise the files already exist (they don't until the
     slice is actually built).
@@ -176,26 +191,53 @@ def _slice_artifacts(build_dir: Path, slice_: Slice) -> dict[str, Optional[str]]
     which only ever carries the `local.conf` fragment -- so there is
     no honest path to report.
 
-    `baremetal` reports the two paths its configure line now GUARANTEES
+    `baremetal` reports the ONE path its configure line GUARANTEES
     (tan-cli#550 -- the whole block used to be null, so a slice that
     produced no binary at all was indistinguishable from one that built
-    fine):
+    fine): `outputDir`.  `_slice_command` passes
+    `-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$<1:<buildDir>/output>`, so every
+    RUNTIME artifact the app links -- i.e. every `add_executable()`
+    target -- lands there, on single- and multi-config generators alike
+    (the `$<1:...>` generator expression is what suppresses the
+    per-config subdirectory a multi-config generator would otherwise
+    append).
 
-      * `compileCommands` -- `_slice_command` passes
-        `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`, so cmake writes
-        `<buildDir>/compile_commands.json`;
-      * `outputDir` -- `_slice_command` passes
-        `-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=<buildDir>/output`, so every
-        executable the app links lands there, and an EMPTY (or absent)
-        `output/` after the slice's build step is a consumer-detectable
-        "this slice produced nothing".
+    What `outputDir` does NOT license is the inverse reading.  An empty
+    or absent `output/` after the build step does NOT prove the slice
+    produced nothing: `CMAKE_RUNTIME_OUTPUT_DIRECTORY` governs
+    `add_executable` targets ONLY, so a firmware app built as
+    `add_library(fwcore STATIC ...)` plus a custom link/objcopy target
+    builds cleanly (rc 0, `libfwcore.a` + `main.c.o` + `fw.elf`
+    produced) and never creates `output/` at all -- measured, not
+    assumed.  It is a deterministic PLACE TO LOOK, not a
+    build-succeeded oracle.
+
+    `compileCommands` stays null for baremetal even though the
+    configure passes `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`: CMake
+    implements that variable "only by Makefile Generators and Ninja
+    Generators.  It is ignored on other generators" (CMake's own docs
+    for the variable), and this planner does not choose the generator.
+    On Windows, whose default generator is Visual Studio, the file is
+    never written -- so naming the path here would be exactly the
+    artifacts-lie tan-cli#550 is about, pointed the other way.  A zephyr
+    slice's `compileCommands` is a different case and stays: `west
+    build` drives Ninja and Zephyr's own top-level `CMakeLists.txt`
+    forces the variable on.
 
     `elf` / `bin` / `map` / `sizeReport` / `symbols` stay null for
     baremetal: the executable's NAME is the app's own `CMakeLists.txt`
     to pick, not an SDK convention this emitter may invent -- pinning
     the DIRECTORY is the strongest honest claim, which is exactly what
     `outputDir` carries.
+
+    `has_command` is False for a slice whose `command` was BLOCKED
+    (`command-unrooted` / `board-tree-missing` / `no-command`): nothing
+    will ever configure that build dir, so every path below would be a
+    dangling promise pinned by a configure that never runs.  Such a
+    slice reports an all-null block.
     """
+    if not has_command:
+        return dict(_NULL_ARTIFACTS)
     if slice_.os == "zephyr":
         zdir = build_dir / "zephyr"
         return {
@@ -211,24 +253,9 @@ def _slice_artifacts(build_dir: Path, slice_: Slice) -> dict[str, Optional[str]]
             "outputDir":       None,
         }
     if slice_.os == "baremetal":
-        return {
-            "elf":             None,
-            "map":             None,
-            "bin":             None,
-            "sizeReport":      None,
-            "symbols":         None,
-            "compileCommands": (build_dir / "compile_commands.json").as_posix(),
-            "outputDir":       (build_dir / "output").as_posix(),
-        }
-    return {
-        "elf":             None,
-        "map":             None,
-        "bin":             None,
-        "sizeReport":      None,
-        "symbols":         None,
-        "compileCommands": None,
-        "outputDir":       None,
-    }
+        return dict(_NULL_ARTIFACTS,
+                    outputDir=(build_dir / "output").as_posix())
+    return dict(_NULL_ARTIFACTS)
 
 
 def _slice_debug(
@@ -458,7 +485,14 @@ def emit_build_plan(
                                     f"-- missing app/board/image"),
                     })
         config_artefacts: list[dict[str, str]] = []
-        artefact = _slice_config_artefact(project, slice_)
+        # A baremetal slice's `alp-baremetal.cmake` has exactly ONE reader:
+        # the `-DCMAKE_PROJECT_INCLUDE=` arg on this slice's own configure.
+        # If the command was blocked there is no reader, so materialising
+        # the file would leave a consumer holding a path nothing will ever
+        # open. (A zephyr/yocto artefact is a plain config fragment a human
+        # can still read, so those are emitted either way.)
+        artefact = (None if (cmd is None and slice_.os == "baremetal")
+                    else _slice_config_artefact(project, slice_))
         if artefact is not None:
             name, contents = artefact
             config_artefacts.append({
@@ -506,7 +540,8 @@ def emit_build_plan(
             "appDir":          app_dir,
             "configArtefacts": config_artefacts,
             "toolchain":       _slice_toolchain(slice_),
-            "artifacts":       _slice_artifacts(build_dir, slice_),
+            "artifacts":       _slice_artifacts(build_dir, slice_,
+                                                has_command=cmd is not None),
             "debug":           _slice_debug(
                 project, slice_, flash_method, flash_args),
             "command": None if cmd is None else {

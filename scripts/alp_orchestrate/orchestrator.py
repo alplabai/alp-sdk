@@ -367,23 +367,42 @@ def _slice_command(
         # emitting no `-d` at all (finding M14, above).
         return [
             "cmake", "-S", app_path, "-B", ".",
-            # Gives the slice the one artifact a configure alone can
-            # honestly promise (`artifacts.compileCommands`) -- CMake
-            # writes it into the build-tree root for the Makefile/Ninja
-            # generators, and it is what an IDE consumer indexes.
+            # Every `-D` below is set BY THIS PLANNER, not by the customer,
+            # and an app is free to consume none of them -- CMake would then
+            # end each configure with `CMake Warning: Manually-specified
+            # variables were not used by the project: ALP_SOM_FAMILY,
+            # ALP_TOOLCHAIN, ...`, a warning about the planner's own
+            # behaviour that the customer can neither act on nor silence.
+            "--no-warn-unused-cli",
+            # A best-effort IDE convenience, NOT a promise: CMake implements
+            # `CMAKE_EXPORT_COMPILE_COMMANDS` "only by Makefile Generators
+            # and Ninja Generators. It is ignored on other generators"
+            # (CMake's own docs for the variable). This planner does not
+            # choose the generator, so `artifacts.compileCommands` stays
+            # null -- see `buildplan._slice_artifacts`.
             "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
             # Pins WHERE the slice's linked executables land
-            # (`artifacts.outputDir`), so a consumer can tell a build that
-            # produced a binary from one that produced nothing. The app's
-            # own CMakeLists.txt picks the target NAMES -- not an SDK
-            # convention this planner may invent -- so the directory is the
-            # strongest honest claim available. ABSOLUTE (tokened, #865) on
-            # purpose: CMake resolves a RELATIVE
+            # (`artifacts.outputDir`). The app's own CMakeLists.txt picks
+            # the target NAMES -- not an SDK convention this planner may
+            # invent -- so the directory is the strongest honest claim
+            # available.
+            #
+            # ABSOLUTE (tokened, #865) on purpose: CMake resolves a RELATIVE
             # CMAKE_RUNTIME_OUTPUT_DIRECTORY against each target's own
             # CMAKE_CURRENT_BINARY_DIR, so a relative value would scatter a
             # multi-subdirectory app's outputs instead of pinning them.
-            f"-DCMAKE_RUNTIME_OUTPUT_DIRECTORY="
-            f"{_tokenize(_baremetal_output_dir(slice_, base_dir), base_dir, REPO)}",
+            #
+            # Wrapped in the no-op generator expression `$<1:...>` on
+            # purpose too: "Multi-configuration generators (Visual Studio,
+            # Xcode, Ninja Multi-Config) append a per-configuration
+            # subdirectory to the specified directory UNLESS A GENERATOR
+            # EXPRESSION IS USED" (CMake's own RUNTIME_OUTPUT_DIRECTORY
+            # docs). Without it the plan says `<buildDir>/output` while the
+            # binary is at `<buildDir>/output/Debug/` on every
+            # multi-config generator -- measured on Ninja Multi-Config, and
+            # the default generator on Windows (Visual Studio) is one.
+            f"-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$<1:"
+            f"{_tokenize(_baremetal_output_dir(slice_, base_dir), base_dir, REPO)}>",
             # tan-cli#551: the slice's `-DALP_SOM_SKU` / `-DALP_SOM_FAMILY`
             # / `-DALP_CORE_ID` / `-DALP_TOOLCHAIN` / NPU-dispatch cache
             # entries. They used to be rendered ONLY into a `cmake-args.txt`

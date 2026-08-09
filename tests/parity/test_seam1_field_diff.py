@@ -142,3 +142,73 @@ def test_non_sysbuild_slice_extra_conf_file_still_stripped():
     sl["command"]["args"] = list(sl["command"]["args"]) + [
         "-DEXTRA_CONF_FILE=/some/path/alp.conf"]
     assert not _fails(oracle, mutated)
+
+
+# ---------------------------------------------------------------------
+# #1344 / alplabai/tan-cli#550 -- the two keys the 97ad481b oracle
+# predates entirely, allowed through ONLY at their inert default.
+# ---------------------------------------------------------------------
+
+
+def test_additive_keys_at_their_inert_default_pass():
+    """`postCommands: []` and `artifacts.outputDir: null` on a zephyr /
+    yocto slice are the whole live-vs-oracle delta #1344 introduces --
+    the oracle carries neither key. Without this allowance the
+    comparator exits 1 on all five oracle boards."""
+    oracle = _load("multicore_rpmsg-aen")
+    mutated = copy.deepcopy(oracle)
+    for sl in mutated["slices"]:
+        sl["postCommands"] = []
+        sl["artifacts"]["outputDir"] = None
+    assert not _fails(oracle, mutated)
+
+
+def test_additive_key_with_a_real_value_still_fails():
+    """The allowance is keyed on the exact inert value, not on "the
+    oracle lacked this key": a slice that really grows a build step (a
+    baremetal slice) is an unreviewed shape delta against an oracle that
+    emitted none, and must still FAIL."""
+    oracle = _load("multicore_rpmsg-aen")
+    mutated = copy.deepcopy(oracle)
+    for sl in mutated["slices"]:
+        sl["postCommands"] = []
+        sl["artifacts"]["outputDir"] = None
+    mutated["slices"][0]["postCommands"] = [
+        {"tool": "cmake", "args": ["--build", "."], "cwd": "build/x"}]
+    assert _fails(oracle, mutated)
+
+    mutated = copy.deepcopy(oracle)
+    for sl in mutated["slices"]:
+        sl["postCommands"] = []
+        sl["artifacts"]["outputDir"] = None
+    mutated["slices"][0]["artifacts"]["outputDir"] = "build/x/output"
+    assert _fails(oracle, mutated)
+
+
+def test_an_unrelated_new_key_is_not_swept_in_by_the_allowance():
+    """Negative control against over-broadness: an allowance shaped as
+    "oracle `<missing>` plus a falsy live value is fine" would blind the
+    gate to every future additive key. Only the two NAMED keys pass."""
+    oracle = _load("multicore_rpmsg-aen")
+    mutated = copy.deepcopy(oracle)
+    mutated["slices"][0]["someBrandNewKey"] = []
+    assert _fails(oracle, mutated)
+    mutated = copy.deepcopy(oracle)
+    mutated["slices"][0]["artifacts"]["someBrandNewArtifact"] = None
+    assert _fails(oracle, mutated)
+
+
+def test_a_changed_existing_value_is_never_an_allowed_additive():
+    """The allowance requires the oracle to genuinely LACK the key
+    (`<missing>`). A key the oracle carries with a real value, blanked to
+    the same inert default, is a capability loss -- still a failure."""
+    oracle = _load("multicore_rpmsg-aen")
+    mutated = copy.deepcopy(oracle)
+    for sl in mutated["slices"]:
+        sl["postCommands"] = []
+        sl["artifacts"]["outputDir"] = None
+    # slices[1] is the zephyr slice -- the one whose `compileCommands`
+    # the oracle carries as a real path (slices[0] is yocto, null there).
+    assert oracle["slices"][1]["artifacts"]["compileCommands"]
+    mutated["slices"][1]["artifacts"]["compileCommands"] = None
+    assert _fails(oracle, mutated)

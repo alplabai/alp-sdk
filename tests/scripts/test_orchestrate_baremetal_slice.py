@@ -115,13 +115,11 @@ def test_baremetal_artifacts_describe_what_the_slice_produces(
         tmp_path: Path) -> None:
     """The artifacts block was all-null, so a consumer could not tell a
     slice that produced nothing from one that built fine (tan-cli#550).
-    The two paths the configure line now FORCES are reported; the ELF's
-    NAME stays unreported because the app's own CMakeLists.txt picks it
-    and this emitter must never invent one."""
+    The ONE path the configure line FORCES on every generator is
+    reported; the ELF's NAME stays unreported because the app's own
+    CMakeLists.txt picks it and this emitter must never invent one."""
     _, slice_ = _baremetal_plan(tmp_path)
 
-    assert slice_["artifacts"]["compileCommands"] == \
-        "build/m55_hp-baremetal/compile_commands.json"
     assert slice_["artifacts"]["outputDir"] == \
         "build/m55_hp-baremetal/output"
     # Never guessed: no SDK-wide baremetal executable-name convention.
@@ -134,8 +132,45 @@ def test_baremetal_artifacts_describe_what_the_slice_produces(
     # RELATIVE runtime-output dir against each target's own
     # CMAKE_CURRENT_BINARY_DIR, scattering a multi-subdirectory app's
     # outputs instead of pinning them where `outputDir` claims.
+    #
+    # `$<1:...>`-wrapped: a multi-config generator (Visual Studio --
+    # the DEFAULT on Windows -- Xcode, Ninja Multi-Config) appends a
+    # per-config subdirectory to a plain value, so the plan would say
+    # `<buildDir>/output` while the binary sat in `output/Debug/`.
+    # CMake suppresses that append when a generator expression is used.
     assert ("-DCMAKE_RUNTIME_OUTPUT_DIRECTORY="
-            "${PROJECT_ROOT}/build/m55_hp-baremetal/output") in args
+            "$<1:${PROJECT_ROOT}/build/m55_hp-baremetal/output>") in args
+
+
+def test_baremetal_artifacts_do_not_promise_a_compile_database(
+        tmp_path: Path) -> None:
+    """`compileCommands` must stay null on baremetal even though the
+    configure asks for it.
+
+    CMake implements `CMAKE_EXPORT_COMPILE_COMMANDS` "only by Makefile
+    Generators and Ninja Generators.  It is ignored on other
+    generators", and this planner does not choose the generator -- so on
+    Windows, whose default generator is Visual Studio, the file is never
+    written. Naming the path anyway is the same artifacts-lie class
+    tan-cli#550 was filed about, pointed the other way; it reddened
+    `python-smoke (windows-latest)` on this branch's first push."""
+    _, slice_ = _baremetal_plan(tmp_path)
+    assert slice_["artifacts"]["compileCommands"] is None
+    # The arg itself stays: harmless, and a real convenience on the
+    # generators that DO honour it.
+    assert "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON" in slice_["command"]["args"]
+
+
+def test_baremetal_configure_does_not_warn_about_its_own_defines(
+        tmp_path: Path) -> None:
+    """Every `-D` on this configure is set by the PLANNER, not the
+    customer.  An app that consumes none of them made CMake end each
+    configure with `CMake Warning: Manually-specified variables were not
+    used by the project: ALP_SOM_FAMILY, ALP_TOOLCHAIN, ...` -- noise
+    about the SDK's own behaviour that the customer can neither act on
+    nor silence."""
+    _, slice_ = _baremetal_plan(tmp_path)
+    assert "--no-warn-unused-cli" in slice_["command"]["args"]
 
 
 def test_zephyr_and_yocto_slices_carry_no_post_commands(
@@ -182,6 +217,14 @@ def test_command_less_slice_carries_no_post_commands(tmp_path: Path) -> None:
     assert slice_["command"] is None
     assert slice_["postCommands"] == []
     assert "command-unrooted" in [w["code"] for w in plan["warnings"]]
+
+    # ...and neither an artifact path nor a config artefact is promised
+    # on top of it: nothing will ever configure that build dir, so every
+    # one of them would be a dangling path pinned by a command that will
+    # never run -- the same artifacts-lie class tan-cli#550 is about.
+    assert all(v is None for v in slice_["artifacts"].values()), \
+        slice_["artifacts"]
+    assert slice_["configArtefacts"] == []
 
 
 # ---------------------------------------------------------------------
@@ -339,7 +382,70 @@ def test_baremetal_plan_actually_produces_a_binary(tmp_path: Path) -> None:
     build_dir = tmp_path / slice_["buildDir"]
     assert (build_dir / "CMakeCache.txt").is_file()
     assert not (build_dir / "build").exists()
-    assert (tmp_path / slice_["artifacts"]["compileCommands"]).is_file()
     out_dir = tmp_path / slice_["artifacts"]["outputDir"]
     assert out_dir.is_dir()
+    # Directly in `output/`, NOT in a `output/<CONFIG>/` subdirectory --
+    # the `$<1:...>` wrap is what holds this on a multi-config generator.
     assert [p.name for p in out_dir.iterdir()] == ["demo"]
+
+
+def test_an_empty_output_dir_does_not_mean_the_slice_built_nothing(
+        tmp_path: Path) -> None:
+    """Executed disproof of the inverse reading of `artifacts.outputDir`.
+
+    `CMAKE_RUNTIME_OUTPUT_DIRECTORY` governs `add_executable()` targets
+    ONLY. A firmware app written the way real ones are -- a static core
+    library plus a custom link step producing the flashable image --
+    builds cleanly and never creates `output/` at all. The schema,
+    CHANGELOG and `docs/architecture.md` all used to say an empty
+    `outputDir` "means it produced no binary"; a consumer implementing
+    that sentence would fail this build, which is the exact inverse of
+    the tan-cli#550 defect."""
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.c").write_text(
+        "int main(void) { return 0; }\n", encoding="utf-8")
+    (tmp_path / "src" / "CMakeLists.txt").write_text(textwrap.dedent("""
+        cmake_minimum_required(VERSION 3.20)
+        project(fw C)
+        add_library(fwcore STATIC main.c)
+        # Stand-in for the objcopy/link step a real firmware app runs to
+        # produce its flashable image: portable, no add_executable().
+        add_custom_command(
+          OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/fw.elf
+          COMMAND ${CMAKE_COMMAND} -E copy
+                  $<TARGET_FILE:fwcore> ${CMAKE_CURRENT_BINARY_DIR}/fw.elf
+          DEPENDS fwcore)
+        add_custom_target(fw ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/fw.elf)
+    """), encoding="utf-8")
+    path = _write_board(tmp_path, AEN801_BAREMETAL)
+    project = load_board_yaml(path)
+    plan = json.loads(emit_build_plan(
+        project, board_yaml=path, build_root=Path("build")))
+    slice_ = next(s for s in plan["slices"] if s["backend"] == "baremetal")
+
+    def detoken(tok: str) -> str:
+        return (tok.replace("${PROJECT_ROOT}", str(tmp_path))
+                   .replace("${SDK_ROOT}", str(REPO)))
+
+    for art in slice_["configArtefacts"]:
+        dest = tmp_path / art["path"]
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(art["contents"], encoding="utf-8")
+
+    for step in [slice_["command"], *slice_["postCommands"]]:
+        cwd = tmp_path / step["cwd"]
+        cwd.mkdir(parents=True, exist_ok=True)
+        proc = subprocess.run(
+            [step["tool"], *(detoken(a) for a in step["args"])],
+            cwd=cwd, capture_output=True, text=True)
+        assert proc.returncode == 0, (
+            f"{step['tool']} {step['args']}\n"
+            f"{proc.stdout[-4000:]}\n{proc.stderr[-4000:]}")
+
+    build_dir = tmp_path / slice_["buildDir"]
+    # It really built: an object file, an archive and the image.
+    assert (build_dir / "fw.elf").is_file()
+    assert list(build_dir.rglob("*.o")), "no object file was produced"
+    assert list(build_dir.rglob("*fwcore*")), "no archive was produced"
+    # ...and `output/` was never created.
+    assert not (tmp_path / slice_["artifacts"]["outputDir"]).exists()

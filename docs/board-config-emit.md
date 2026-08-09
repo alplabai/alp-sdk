@@ -135,6 +135,18 @@ in with `-DCMAKE_PROJECT_INCLUDE=`. This section is the *inspection*
 surface -- for reading what a slice needs, or for a build system that is
 not `tan`.
 
+One class of line stays inspection-only: a curated library with an
+`integration.baremetal.cmake` section in its
+`metadata/libraries/<name>.yaml` contributes a
+`# library <name>: <cmake hint>` line, which is prose for a human and not
+a `-D` flag at all -- handing it to cmake would make it a stray
+source-directory argument. Those lines are therefore dropped from the
+slice's configure, so the `_library_layer.baremetal_cmake_args` half of
+alplabai/tan-cli#551 is still open. Impact today is zero: no manifest
+under `metadata/libraries/` declares a `baremetal` section. Closing it
+needs those manifests to carry a machine-readable argument rather than a
+hint string.
+
 ### Yocto -- generated `local.conf` snippet
 
 ```bash

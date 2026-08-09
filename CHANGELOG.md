@@ -172,12 +172,29 @@ The planner (`scripts/alp_orchestrate/orchestrator.py`,
   (`Parse error in command line argument`), and `-DCMAKE_C_FLAGS=` would seed
   that cache entry and silently defeat a firmware toolchain file's
   `CMAKE_C_FLAGS_INIT` — so neither shape is used.
-- **artifacts that describe the output.** `compileCommands` plus a new
-  `artifacts.outputDir`, both forced by the configure's own
-  `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` / `-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=`.
-  An empty `outputDir` after a build means the slice produced no binary. The
-  executable's *name* stays unreported: the app's `CMakeLists.txt` picks it and
-  this planner never invents one.
+- **an artifact that describes the output.** A new `artifacts.outputDir`,
+  forced by the configure's own
+  `-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$<1:<buildDir>/output>` — the generator
+  expression is what stops a multi-config generator (Visual Studio, Xcode,
+  Ninja Multi-Config) appending a per-config subdirectory and putting the
+  binary in `output/Debug/` while the plan pointed at `output/`. It is a
+  deterministic place to LOOK, not a build-succeeded oracle:
+  `CMAKE_RUNTIME_OUTPUT_DIRECTORY` governs `add_executable` targets only, so an
+  app built as `add_library(fwcore STATIC …)` plus a custom link/objcopy target
+  builds cleanly and never creates the directory at all. The executable's
+  *name* stays unreported: the app's `CMakeLists.txt` picks it and this planner
+  never invents one. `artifacts.compileCommands` stays **null** on baremetal —
+  the configure asks for it with `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`, but
+  CMake implements that variable "only by Makefile Generators and Ninja
+  Generators. It is ignored on other generators", and this planner does not
+  choose the generator. A slice whose `command` is blocked reports an all-null
+  `artifacts` block and no `configArtefacts`, rather than paths pinned by a
+  configure that will never run.
+- **a configure that does not warn about the planner's own defines.**
+  `--no-warn-unused-cli`: every `-D` on that line is set by the SDK, not the
+  customer, so `CMake Warning: Manually-specified variables were not used by
+  the project: ALP_SOM_FAMILY, ALP_TOOLCHAIN, …` was noise no customer could
+  act on.
 
 `metadata/schemas/build-plan-v1.schema.json` gains two **additive**,
 non-`required` keys at `schemaVersion: 1` — `slices[].postCommands` and
@@ -185,7 +202,12 @@ non-`required` keys at `schemaVersion: 1` — `slices[].postCommands` and
 and `executionPolicy` had. A consumer pinned to the older shape must read an
 absent `postCommands` as `[]` and an absent `outputDir` as `null`.
 `scripts/check_build_plan.py` extends the #1286 bare-tool-identity gate over
-`postCommands[]`.
+`postCommands[]`, and `tests/parity/seam1_field_diff.py` gains a second
+hand-reviewed allowance beside the `debug.probe` one so the frozen 97ad481b
+oracle — which predates both keys — still compares clean. That allowance is
+keyed on the exact field path AND the exact inert value (`[]` / `null`), never
+on "the oracle lacked this key": a slice that really grows a build step still
+fails the comparator.
 
 ### Changed — DMAC0's CM33-exclusive ownership is a written contract, not one dtsi line (#1152, #1153)
 

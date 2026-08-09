@@ -383,13 +383,19 @@ def test_baremetal_slice_toolchain_artifacts_debug_are_null(tmp_path: Path):
     toolchain` fact, not a fabricated value, even though it's a
     leftover from the core's un-overridden default.
 
-    `compileCommands` + `outputDir` are the two exceptions, and they are
-    NOT guesses: the slice's own configure now carries
-    `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` and
-    `-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=<buildDir>/output`, so CMake is
-    made to put them exactly there (alplabai/tan-cli#550 -- an all-null
-    block left a slice that produced NO binary indistinguishable from one
-    that built fine)."""
+    `outputDir` is the one exception, and it is NOT a guess: the slice's
+    own configure carries
+    `-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$<1:<buildDir>/output>`, so CMake
+    is made to put every `add_executable()` target exactly there, on
+    single- and multi-config generators alike (alplabai/tan-cli#550 --
+    an all-null block left a slice that produced NO binary
+    indistinguishable from one that built fine).
+
+    `compileCommands` stays null even though the configure passes
+    `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`: CMake implements that variable
+    only for the Makefile and Ninja generator families and ignores it on
+    every other generator, and this planner does not choose the
+    generator."""
     path = _write_board(tmp_path, AEN801_BAREMETAL_AND_STOCK_IMAGE)
     project = load_board_yaml(path)
     plan = json.loads(emit_build_plan(
@@ -407,7 +413,7 @@ def test_baremetal_slice_toolchain_artifacts_debug_are_null(tmp_path: Path):
         "bin":             None,
         "sizeReport":      None,
         "symbols":         None,
-        "compileCommands": "build/m55_hp-baremetal/compile_commands.json",
+        "compileCommands": None,
         "outputDir":       "build/m55_hp-baremetal/output",
     }
     assert baremetal["debug"] == {"console": None, "probe": None}
