@@ -51,6 +51,7 @@ here too.
 No shipped `board.yaml` uses `ipc[].address:` or `storage[].offset_kib:`, and
 none declares a `cacheable: true` carve-out, so no generated artefact in the
 repo moves.
+
 ### Fixed — Kconfig emission: Hawkbit OTA units + URI, `diagnostics.modules`, and the bypassed library layer
 
 Four planner defects, all in `scripts/alp_orchestrate/`, reported against the
