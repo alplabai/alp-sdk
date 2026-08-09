@@ -59,20 +59,35 @@ def _slice_config_artefact(
     consumer byte-writes the plan's contents and trusts them to match
     what we'd write ourselves).
 
-    `baremetal` deliberately carries none: unlike `alp.conf`/`local.conf`,
-    no baremetal build command ever read a materialised `cmake-args.txt`
-    back in (`_slice_command`'s baremetal branch builds its `cmake`
-    argv independently) -- a dead artefact implying a capability that
-    was never wired, on either the SDK or the tan-cli side. Removed
-    2026-08. The equivalent `-D` args remain available on request via
-    the standalone `--emit cmake-args` mode (`_slice_cmake_args`,
-    unchanged) for human/tooling consumption -- see
-    docs/board-config-emit.md.
+    `baremetal` carries `alp-baremetal.cmake` -- and ONLY when the slice
+    actually has compile-time guards to carry (absence-emits-nothing).
+    This is NOT the old `cmake-args.txt` coming back: that file was
+    removed in 2026-08 (#1278) precisely because no build command ever
+    read it, and the test below is exactly the condition it failed --
+    `_slice_command`'s baremetal branch pulls this file in with
+    `-DCMAKE_PROJECT_INCLUDE=<abs path>`, so a slice that stops writing
+    it stops compiling with its `ALP_BOARD_<SLUG>` / `ALP_SOM_<SKU>`
+    guards, loudly (alplabai/tan-cli#551). The `=`-bearing cache entries
+    from the same source ride the configure command line directly and are
+    NOT duplicated here. The full human-readable `-D` listing remains
+    available on request via `--emit cmake-args` (`_slice_cmake_args`,
+    unchanged) -- see docs/board-config-emit.md.
     """
     if slice_.os == "zephyr":
         return ("alp.conf", _slice_alp_conf(project, slice_))
     if slice_.os == "yocto":
         return ("local.conf", _slice_local_conf(project, slice_))
+    if slice_.os == "baremetal":
+        # Lazy, same buildplan<->orchestrator cycle avoidance
+        # `emit_build_plan` uses for the slice-command helpers.
+        from .orchestrator import (
+            BAREMETAL_PROJECT_INCLUDE,
+            _baremetal_project_include,
+        )
+        contents = _baremetal_project_include(project, slice_)
+        if contents is None:
+            return None
+        return (BAREMETAL_PROJECT_INCLUDE, contents)
     return None
 
 
@@ -159,9 +174,27 @@ def _slice_artifacts(build_dir: Path, slice_: Slice) -> dict[str, Optional[str]]
     slice's real output (the wic/ext4 image) lands under the *Yocto
     build tree's* own deploy dir -- outside this slice's `build_dir`,
     which only ever carries the `local.conf` fragment -- so there is
-    no honest path to report; same for `baremetal`, whose executable
-    name is the app's own `CMakeLists.txt` to pick, not an SDK
-    convention this emitter can predict.
+    no honest path to report.
+
+    `baremetal` reports the two paths its configure line now GUARANTEES
+    (tan-cli#550 -- the whole block used to be null, so a slice that
+    produced no binary at all was indistinguishable from one that built
+    fine):
+
+      * `compileCommands` -- `_slice_command` passes
+        `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`, so cmake writes
+        `<buildDir>/compile_commands.json`;
+      * `outputDir` -- `_slice_command` passes
+        `-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=<buildDir>/output`, so every
+        executable the app links lands there, and an EMPTY (or absent)
+        `output/` after the slice's build step is a consumer-detectable
+        "this slice produced nothing".
+
+    `elf` / `bin` / `map` / `sizeReport` / `symbols` stay null for
+    baremetal: the executable's NAME is the app's own `CMakeLists.txt`
+    to pick, not an SDK convention this emitter may invent -- pinning
+    the DIRECTORY is the strongest honest claim, which is exactly what
+    `outputDir` carries.
     """
     if slice_.os == "zephyr":
         zdir = build_dir / "zephyr"
@@ -172,6 +205,20 @@ def _slice_artifacts(build_dir: Path, slice_: Slice) -> dict[str, Optional[str]]
             "sizeReport":      (zdir / "zephyr.stat").as_posix(),
             "symbols":         (zdir / "zephyr.symbols").as_posix(),
             "compileCommands": (build_dir / "compile_commands.json").as_posix(),
+            # Zephyr's own tree lands at `<buildDir>/build/` (west runs
+            # with no `-d`) and the five named paths above already index
+            # it -- no separate output directory to report.
+            "outputDir":       None,
+        }
+    if slice_.os == "baremetal":
+        return {
+            "elf":             None,
+            "map":             None,
+            "bin":             None,
+            "sizeReport":      None,
+            "symbols":         None,
+            "compileCommands": (build_dir / "compile_commands.json").as_posix(),
+            "outputDir":       (build_dir / "output").as_posix(),
         }
     return {
         "elf":             None,
@@ -180,6 +227,7 @@ def _slice_artifacts(build_dir: Path, slice_: Slice) -> dict[str, Optional[str]]
         "sizeReport":      None,
         "symbols":         None,
         "compileCommands": None,
+        "outputDir":       None,
     }
 
 
@@ -328,6 +376,7 @@ def emit_build_plan(
         _resolve_app_path,
         _slice_command,
         _slice_flash_recipe,
+        _slice_post_commands,
         _tokenize,
         iter_buildable_slices,
     )
@@ -465,6 +514,23 @@ def emit_build_plan(
                 "args": cmd[1:],
                 "cwd":  build_dir.as_posix(),
             },
+            # Steps the executor MUST run, in order, after `command`
+            # succeeds -- empty for the runtimes whose single tool
+            # invocation already configures AND builds (`west build`,
+            # `bitbake`). A baremetal slice's `cmake -S ... -B .` only
+            # CONFIGURES, so its `cmake --build .` lives here; without it
+            # the slice exited 0 having produced no object file, archive
+            # or executable at all (tan-cli#550). Empty whenever
+            # `command` is null: there is nothing to build on top of a
+            # slice that was never configured.
+            "postCommands": [] if cmd is None else [
+                {
+                    "tool": step[0],
+                    "args": step[1:],
+                    "cwd":  build_dir.as_posix(),
+                }
+                for step in _slice_post_commands(slice_)
+            ],
             # Tokened (issue #865), not the native host-path form: tan-cli
             # (PR #24) substitutes ${SDK_ROOT} with its own checkout root
             # before handing this to the slice subprocess environment, so

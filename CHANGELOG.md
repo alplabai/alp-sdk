@@ -142,6 +142,51 @@ defaults **per SoM family** (`alif-ensemble`/`nxp-imx9` → `mcuboot`,
 nothing implemented. The #807 `rsa3072` refusal is unchanged for an explicit
 `method: mcuboot`.
 
+### Fixed — a baremetal slice built nothing and dropped every `-DALP_*` define (alplabai/tan-cli#550, alplabai/tan-cli#551)
+
+An `os: baremetal` core planned a single `cmake -S <app> -B <buildDir>` step.
+That only CONFIGURES, so a consumer read its exit 0 as a built slice and
+reported a green build over a tree holding `Makefile`, `CMakeCache.txt`,
+`cmake_install.cmake` and `CMakeFiles/` — no `.o`, no `.a`, no executable. The
+slice's `artifacts` block was all-null, so nothing downstream could notice the
+missing binary either, and not one of the slice's `-DALP_SOM_SKU` /
+`-DALP_SOM_FAMILY` / `-DALP_SOM_<SKU>` / `-DALP_CORE_ID` / `-DALP_BOARD_<SLUG>`
+/ `-DALP_TOOLCHAIN` arguments reached the configure — the app saw them all
+empty and the slice still reported `status: ok, rc: 0`.
+
+The planner (`scripts/alp_orchestrate/orchestrator.py`,
+`scripts/alp_orchestrate/buildplan.py`) now emits, per baremetal slice:
+
+- **a build step.** `cmake --build .` in the slice's new `postCommands`, which
+  an executor must run in order once `command` exits 0.
+- **a findable build tree.** The configure's `-B` is `.`, not the buildDir
+  path: `command.cwd` already IS the buildDir and cmake resolves a relative
+  `-B` against its own cwd, so the tree used to land two levels down at
+  `<buildDir>/build/<core>-baremetal/`.
+- **the `-DALP_*` settings, in the two shapes CMake accepts.** `NAME=VALUE`
+  entries as `-D` cache arguments; the bare `#if defined(…)` guards
+  (`ALP_BOARD_<SLUG>` for `<alp/board.h>`, `ALP_SOM_<SKU>` for the generated
+  `<alp/soc_caps.h>` override block) as real compiler definitions through a
+  generated `build/<core>-baremetal/alp-baremetal.cmake` the configure pulls in
+  with `-DCMAKE_PROJECT_INCLUDE=`. `cmake -D` rejects a bare `-DNAME` outright
+  (`Parse error in command line argument`), and `-DCMAKE_C_FLAGS=` would seed
+  that cache entry and silently defeat a firmware toolchain file's
+  `CMAKE_C_FLAGS_INIT` — so neither shape is used.
+- **artifacts that describe the output.** `compileCommands` plus a new
+  `artifacts.outputDir`, both forced by the configure's own
+  `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` / `-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=`.
+  An empty `outputDir` after a build means the slice produced no binary. The
+  executable's *name* stays unreported: the app's `CMakeLists.txt` picks it and
+  this planner never invents one.
+
+`metadata/schemas/build-plan-v1.schema.json` gains two **additive**,
+non-`required` keys at `schemaVersion: 1` — `slices[].postCommands` and
+`slices[].artifacts.outputDir` — the same additive treatment `envAppendPath`
+and `executionPolicy` had. A consumer pinned to the older shape must read an
+absent `postCommands` as `[]` and an absent `outputDir` as `null`.
+`scripts/check_build_plan.py` extends the #1286 bare-tool-identity gate over
+`postCommands[]`.
+
 ### Changed — DMAC0's CM33-exclusive ownership is a written contract, not one dtsi line (#1152, #1153)
 
 RZ/V2N's MCPU DMAC (`DMAC0`, base `0x11400000`) is dual-claimable: the CM33

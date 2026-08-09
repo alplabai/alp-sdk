@@ -222,6 +222,26 @@ writes one — `python/tan/planner/buildplan.py` returns it per baremetal slice,
 dropping it there is tracked as tan-cli#492. Until that lands, a baremetal build
 directory carries the file even though no build step reads it.
 
+A **baremetal slice is a two-step build**, and the plan now says so. Its
+`command` (`cmake -S <app> -B . …`) only CONFIGURES; the `cmake --build .` that
+turns that configure into object files and an executable is a separate entry in
+the slice's `postCommands`, which an executor MUST run in order once `command`
+exits 0. Running `command` alone reports a green build over a tree holding
+`CMakeCache.txt` and no binary at all (alplabai/tan-cli#550). The slice's
+`-DALP_*` settings ride that configure directly: the `NAME=VALUE` entries
+(`ALP_SOM_SKU`, `ALP_SOM_FAMILY`, `ALP_CORE_ID`, `ALP_TOOLCHAIN`, the NPU
+dispatch enables) as cmake cache arguments, and the bare `#if defined(…)` guards
+(`ALP_BOARD_<SLUG>`, `ALP_SOM_<SKU>`) as real compiler definitions through a
+generated `build/<core>-baremetal/alp-baremetal.cmake` the configure pulls in
+with `-DCMAKE_PROJECT_INCLUDE=` (alplabai/tan-cli#551). Unlike the retired
+`cmake-args.txt`, that file IS read by the build command — a slice that stops
+writing it stops compiling with its guards, loudly. The slice's `artifacts`
+block reports `compileCommands` and `outputDir` (the directory
+`-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=` pins every linked executable to), so a
+consumer can tell a slice that produced a binary from one that produced nothing;
+the executable's *name* is the app's own `CMakeLists.txt` to pick and is never
+guessed here.
+
 OS inference defaults are silicon-class driven: Cortex-M cores
 default to Zephyr, Cortex-A cores default to Yocto Linux.  The
 customer writes an explicit `os:` only when overriding the default

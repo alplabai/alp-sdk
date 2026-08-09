@@ -125,6 +125,16 @@ python3 $ALP_SDK/scripts/alp_project.py \
 Or wire the loader into a `CMakeUserPresets.json` writer if your
 build system already drives presets.
 
+**You do not need to do any of that for a `tan build`.** The build plan's
+own baremetal slice already carries these settings in the two shapes CMake
+actually accepts (alplabai/tan-cli#551): the `NAME=VALUE` lines become real
+`-D` cache arguments on the slice's `cmake -S … -B .` configure, and the
+bare guards become real compiler definitions through a generated
+`build/<core>-baremetal/alp-baremetal.cmake` that the same configure pulls
+in with `-DCMAKE_PROJECT_INCLUDE=`. This section is the *inspection*
+surface -- for reading what a slice needs, or for a build system that is
+not `tan`.
+
 ### Yocto -- generated `local.conf` snippet
 
 ```bash
