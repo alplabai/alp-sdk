@@ -58,19 +58,30 @@ _TOOL_IDENTITY_RE = re.compile(r"[A-Za-z0-9._+-]+")
 
 
 def _tool_identity_violations(doc) -> list[str]:
-    """Return one message per slice whose `command.tool` isn't a bare
+    """Return one message per slice command whose `tool` isn't a bare
     executable identity. Doc-shaped input only -- callers own schema
-    validation separately."""
+    validation separately.
+
+    Covers `postCommands[]` as well as `command` (alplabai/tan-cli#550):
+    those steps are dispatched by the same executor under the same
+    `executionPolicy`, so a location leaking into one of them is the
+    identical #1286 defect.
+    """
     bad = []
     for slice_ in doc.get("slices", []):
-        command = slice_.get("command")
-        if command is None:
-            continue
-        tool = command.get("tool", "")
-        if not isinstance(tool, str) or not _TOOL_IDENTITY_RE.fullmatch(tool):
-            bad.append(
-                f"slices[{slice_.get('coreId')!r}].command.tool "
-                f"{tool!r} is not a bare executable identity (issue #1286)")
+        steps = [("command", slice_.get("command"))]
+        steps += [(f"postCommands[{i}]", step) for i, step
+                  in enumerate(slice_.get("postCommands") or [])]
+        for field, command in steps:
+            if command is None:
+                continue
+            tool = command.get("tool", "")
+            if (not isinstance(tool, str)
+                    or not _TOOL_IDENTITY_RE.fullmatch(tool)):
+                bad.append(
+                    f"slices[{slice_.get('coreId')!r}].{field}.tool "
+                    f"{tool!r} is not a bare executable identity "
+                    f"(issue #1286)")
     return bad
 
 

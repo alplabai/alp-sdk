@@ -488,9 +488,15 @@ stage_pytest_scripts() {
     python3 -m pytest tests/scripts/ -q || return 1
 
     # tests/parity/ is NOT under tests/scripts/, so the seam-1 comparator's own
-    # 11 unit tests were excluded from this stage AND from parity-seam1.yml,
+    # 15 unit tests were excluded from this stage AND from parity-seam1.yml,
     # which invoked only the comparator. Run them here too so a local
     # `test-all.sh` green means the same thing CI's does.
+    #
+    # NOT the same as running the comparator: this stage still does NOT invoke
+    # `tests/parity/seam1_field_diff.py` against the frozen oracle -- only
+    # parity-seam1.yml does. A green test-all.sh therefore does NOT clear the
+    # `parity-seam1` gate; run the comparator separately before pushing:
+    #   python3 tests/parity/seam1_field_diff.py --sdk . --oracle tests/parity/oracle
     if [ -f tests/parity/test_seam1_field_diff.py ]; then
         python3 -m pytest tests/parity/test_seam1_field_diff.py -q || return 1
     fi
