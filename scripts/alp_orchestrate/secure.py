@@ -30,6 +30,50 @@ _FAMILY_SYSBUILD_DIRS: dict[str, str] = {
     "alif-ensemble": "aen",
 }
 
+# The per-family `boot.method:` default `board.schema.json` documents but
+# nothing implemented (#562): "the SoM family supplies the default
+# (AEN/N93 -> mcuboot, V2N/V2N-M1 -> none on the Zephyr slice since
+# U-Boot owns boot on Linux)".  `emit_sysbuild_conf` used to hard-default
+# every family to `mcuboot`, so a Renesas project that omitted `method:`
+# was pushed down the MCUboot path -- and, with `rsa3072` (a value
+# `validate.py` PERMITS for renesas-rzv2n precisely because its boot
+# chain is the U-Boot/FIT stack, not sysbuild), hard-raised and took the
+# whole build-plan emit with it.  Same `family:`-token `startswith` match
+# as `_FAMILY_SYSBUILD_DIRS` above and `validate._boot_signing_supported_
+# for_family`.  `boot.method:` has no other consumer anywhere in the
+# tree, so this emitter is the only site the default has to exist at.
+_FAMILY_BOOT_METHOD_DEFAULTS: dict[str, str] = {
+    "alif-ensemble": "mcuboot",
+    "nxp-imx9":      "mcuboot",
+    "renesas-rzv2n": "none",
+}
+
+# What an UNRECOGNISED `family:` token defaults to.  Deliberately the
+# historical value, so an in-development preset whose family string is
+# not in the table above emits exactly what it emitted before #562 --
+# the fix is "recognised families get their documented default", not
+# "the default silently flips for everyone".
+_BOOT_METHOD_FALLBACK = "mcuboot"
+
+
+def _default_boot_method(project: BoardProject) -> str:
+    """The `boot.method:` this project's SoM family implies."""
+    family = (project.som_preset.get("family") or "").lower()
+    return next((v for k, v in _FAMILY_BOOT_METHOD_DEFAULTS.items()
+                 if family.startswith(k)), _BOOT_METHOD_FALLBACK)
+
+
+def _has_zephyr_slice(project: BoardProject) -> bool:
+    """Whether any core in this project builds under Zephyr.
+
+    sysbuild is a Zephyr-build concept: `build/alp_sysbuild.conf` is
+    consumed only as `west build --sysbuild -- -DSB_CONF_FILE=<path>`.
+    A project with no Zephyr slice has no sysbuild configure for the
+    overlay to reach, so emitting one is dead output at best -- and at
+    worst (#562) a hard refusal of a project that never runs sysbuild.
+    """
+    return any(s.os == "zephyr" for s in project.cores.values())
+
 
 def sysbuild_family_base_conf(project: BoardProject) -> Optional[Path]:
     """Path to the curated `zephyr/sysbuild/<family>/sysbuild.conf` for
@@ -65,7 +109,18 @@ def emit_sysbuild_conf(project: BoardProject) -> str:
     `build/alp_sysbuild.conf` (consumed via `west build --sysbuild
     -- -DSB_CONF_FILE=<abs path>`).  Returns an empty string when the project
     does not declare a `boot:` block (the SDK's stock per-family
-    defaults at zephyr/sysbuild/<family>/sysbuild.conf apply).
+    defaults at zephyr/sysbuild/<family>/sysbuild.conf apply), and when
+    the project has NO Zephyr slice at all (#562) -- sysbuild exists
+    only inside a Zephyr build, so a Yocto-only project has nothing to
+    apply the overlay to.  On such a project the `boot:` block governs
+    the U-Boot/FIT chain instead, which this emitter has never rendered;
+    the previous behaviour was to render it as MCUboot anyway and, on
+    `rsa3072`, to raise below and fail the project's entire build-plan
+    emit with sysbuild advice for a platform that never runs sysbuild.
+
+    `boot.method:` is optional and the SoM family supplies its default
+    (`_FAMILY_BOOT_METHOD_DEFAULTS` -- the value board.schema.json has
+    always documented).  It is NOT an unconditional `mcuboot`.
 
     Every `SB_CONFIG_*` symbol emitted here MUST exist in the pinned
     Zephyr's `share/sysbuild/**/Kconfig*` -- sysbuild treats an
@@ -81,7 +136,9 @@ def emit_sysbuild_conf(project: BoardProject) -> str:
     boot = project.boot or {}
     if not boot:
         return ""
-    method = (boot.get("method") or "mcuboot").lower()
+    if not _has_zephyr_slice(project):
+        return ""
+    method = (boot.get("method") or _default_boot_method(project)).lower()
     if method == "none":
         return ("# Auto-generated from board.yaml `boot:` block.\n"
                 "SB_CONFIG_BOOTLOADER_MCUBOOT=n\n")

@@ -102,6 +102,14 @@ sysbuild.conf overlay with the corresponding `SB_CONFIG_*` lines
 (MCUboot signature type, swap algorithm).  See `docs/secure-boot.md`
 for the underlying secure-boot contract.
 
+`method:` is optional and **the SoM family supplies its default** --
+AEN and N93 default to `mcuboot`, V2N and V2N-M1 to `none`, because on
+the Renesas families U-Boot owns boot and the `boot:` block describes
+the U-Boot/FIT chain rather than sysbuild.  The sysbuild overlay is
+emitted only for a project that has at least one `os: zephyr` slice:
+sysbuild exists only inside a Zephyr build, so a Yocto-only project
+gets no `build/alp_sysbuild.conf` at all.
+
 There is no `slots:` / `scratch_size_kib:` / `anti_rollback:` field.
 Slot and scratch partition *sizes* are an SDK build-policy choice, not
 a per-project field -- MCUboot takes its geometry from the board DT
@@ -112,9 +120,12 @@ removed rather than fixed: only software downgrade prevention
 (`ota.rollback.min_version`) is wired today, and the field's own
 description promised the OTP-fused hardware-counter tier, which
 isn't built -- a silent SW substitute would have shipped weaker
-security than the schema claimed.  For `method: mcuboot`, `rsa3072`
-is rejected at emit time (sysbuild's RSA choice has no key-length
-knob); use `rsa2048` or `ecdsa_p256`/`ed25519`.
+security than the schema claimed.  For an explicit `method: mcuboot`,
+`rsa3072` is rejected at emit time (sysbuild's RSA choice has no
+key-length knob); use `rsa2048` or `ecdsa_p256`/`ed25519`.  That
+refusal is scoped to the sysbuild path only -- `rsa2048`/`rsa3072`
+stay legal on V2N / i.MX 9, whose U-Boot/FIT signing never goes
+through sysbuild.
 
 ### OTA (`ota:` -- Mender / MCUmgr)
 

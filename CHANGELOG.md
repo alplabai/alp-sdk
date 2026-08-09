@@ -52,6 +52,51 @@ No shipped `board.yaml` uses `ipc[].address:` or `storage[].offset_kib:`, and
 none declares a `cacheable: true` carve-out, so no generated artefact in the
 repo moves.
 
+### Fixed — an unreadable `hw-revisions.yaml` refuses instead of disabling the hw_rev gates, in all three readers (alplabai/tan-cli#563)
+
+`sdk_compat._load_family_table()` swallowed `OSError` and `yaml.YAMLError` and
+answered `{}`. Every predicate above it reads an empty table as "nothing to
+judge", so **one tab-indented line** in a SoM family's
+`metadata/e1m_modules/<family>/hw-revisions.yaml` silently disabled the
+unknown-revision gate (#1025), the not-buildable-status gate (#1025) and the
+SDK-version-range gate (#1019) *at once* — `som: {sku: E1M-AEN801, hw_rev: r99}`
+then loaded clean at exit 0. A present-but-unusable table is now an
+`OrchestratorError` refusal naming the file; an ABSENT table stays benign (an
+in-development family has nothing to check against). Also refuses the shapes
+that parse without raising: an empty file, a bare scalar, and a file truncated
+above its `hw_revisions:` block.
+
+**That was one of THREE independent readers of the same file, and all three
+fell open.** `alp_project_loader._hwrev_pad_route_overrides()` — the
+`--emit composed-route-table` / `--emit carrier-netlist` path, which resolves
+its SoM data independently and so carries its own copies of the #1025 gates —
+had its own `yaml.safe_load(...) or {}`, and that `or {}` fell open on an empty
+table and on one truncated above `hw_revisions:`, emitting a route table for
+`hw_rev: r99` at exit 0; the unparseable shapes escaped it as a raw
+`yaml.ScannerError` traceback instead of a diagnosable refusal.
+`alp_cli.new_som._family_hw_revisions()` — the scaffold-time
+`--default-hw-rev` cross-check — fell open widest: it caught `yaml.YAMLError`
+*and* read a non-mapping `hw_revisions:` as "not resolvable", so three of the
+four unusable shapes let `alp new-som --default-hw-rev <nonexistent>` write a
+SoM preset naming a revision that does not exist, at exit 0. Both now read
+through the same guarded reader (`sdk_compat.load_family_table()`, public for
+that reason), so the three cannot disagree about whether a damaged table is
+fatal or about what the refusal says. No emitted artefact moves: every tree
+whose table parses emits byte-identically.
+
+### Fixed — a Yocto-only V2N project with `rsa3072` can build again (alplabai/tan-cli#562)
+
+`emit_sysbuild_conf()` hard-defaulted `boot.method:` to `mcuboot` for every SoM
+family and then hard-raised on `rsa3072`, without looking at the project's
+slices — so a Yocto-only Renesas RZ/V2N board.yaml that validated clean failed
+its **entire** build-plan emit with MCUboot advice, on a platform that never
+runs sysbuild. Two halves, both closed: the sysbuild overlay is emitted only
+for a project with at least one `os: zephyr` slice, and `boot.method:` now
+defaults **per SoM family** (`alif-ensemble`/`nxp-imx9` → `mcuboot`,
+`renesas-rzv2n*` → `none`) as `board.schema.json` has always documented and
+nothing implemented. The #807 `rsa3072` refusal is unchanged for an explicit
+`method: mcuboot`.
+
 ### Changed — DMAC0's CM33-exclusive ownership is a written contract, not one dtsi line (#1152, #1153)
 
 RZ/V2N's MCPU DMAC (`DMAC0`, base `0x11400000`) is dual-claimable: the CM33
