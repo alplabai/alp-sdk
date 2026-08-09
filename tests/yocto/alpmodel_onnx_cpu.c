@@ -59,8 +59,7 @@ static void test_parse_decodes_the_real_cbor_manifest(void)
 static void test_onnx_target_selects_cpu_backend(void)
 {
 	alp_model_t m;
-	ALP_ASSERT_EQ_INT(alp_model_parse(k_onnx_cpu_alpmodel, k_onnx_cpu_alpmodel_len, &m),
-	                  ALP_OK);
+	ALP_ASSERT_EQ_INT(alp_model_parse(k_onnx_cpu_alpmodel, k_onnx_cpu_alpmodel_len, &m), ALP_OK);
 
 	/* Minimal env: silicon_ref "*" (the CPU wildcard) is always
 	 * available regardless of soc_ref/avail_silicon -- see
