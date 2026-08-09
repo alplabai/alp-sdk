@@ -163,8 +163,16 @@ ota:
     project = load_board_yaml(path)
     conf = _slice_alp_conf(project, project.cores["m55_hp"])
     assert "CONFIG_HAWKBIT=y" in conf
-    assert 'CONFIG_HAWKBIT_SERVER="https://hawkbit.example.com"' in conf
-    assert "CONFIG_HAWKBIT_POLL_INTERVAL=600" in conf
+    # The URI is decomposed: CONFIG_HAWKBIT_SERVER is a BARE host (it feeds
+    # zsock_getaddrinfo() / the TLS SNI name / the HTTP Host: header), the
+    # scheme becomes the port + TLS knobs.  alplabai/tan-cli#558.
+    assert 'CONFIG_HAWKBIT_SERVER="hawkbit.example.com"' in conf
+    assert 'CONFIG_HAWKBIT_SERVER="https://hawkbit.example.com"' not in conf
+    assert "CONFIG_HAWKBIT_PORT=443" in conf
+    assert "CONFIG_HAWKBIT_USE_TLS=y" in conf
+    # 600 s == 10 min; the symbol is declared in MINUTES.  alplabai/tan-cli#557.
+    assert "CONFIG_HAWKBIT_POLL_INTERVAL=10" in conf
+    assert "CONFIG_HAWKBIT_POLL_INTERVAL=600" not in conf
     # Negative: mender Kconfig must NOT bleed in.
     assert "CONFIG_MENDER_MCU_CLIENT" not in conf
 
@@ -490,3 +498,209 @@ cores:
     assert "sleep_mode" not in err
 
 
+
+
+# ---------------------------------------------------------------------
+# OTA -- Hawkbit unit + URI decomposition (alplabai/tan-cli#557, #558)
+#
+# Grounding, pinned Zephyr v4.4.1:
+#   subsys/mgmt/hawkbit/Kconfig:29-33  HAWKBIT_POLL_INTERVAL int, "(in
+#                                      minutes)", default 5, range 1 43200
+#   subsys/mgmt/hawkbit/hawkbit.c:57   poll_sleep = CONFIG_HAWKBIT_POLL_INTERVAL
+#                                      * SEC_PER_MIN
+#   subsys/mgmt/hawkbit/Kconfig:68     HAWKBIT_SERVER "User address" (bare host)
+#   subsys/mgmt/hawkbit/Kconfig:75     HAWKBIT_PORT int, default 8080
+#   subsys/mgmt/hawkbit/Kconfig:168    HAWKBIT_USE_TLS depends on
+#                                      NET_SOCKETS_SOCKOPT_TLS
+# ---------------------------------------------------------------------
+
+def _hawkbit_board(tmp_path: Path, url: str, poll: object = 1800) -> Path:
+    poll_line = f"  poll_interval_s: {poll}\n" if poll is not None else ""
+    return _write_board(tmp_path, f"""
+som:
+  sku: E1M-AEN701
+
+cores:
+  a32_cluster:
+    os: "off"
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+  m55_he:
+    os: "off"
+
+ota:
+  provider: hawkbit
+  server:
+    url: "{url}"
+{poll_line}""")
+
+
+def test_hawkbit_poll_interval_is_converted_seconds_to_minutes(
+        tmp_path: Path) -> None:
+    """board.yaml states SECONDS; the Kconfig symbol is MINUTES.  The schema's
+    own 1800 s default is 30 min -- emitting 1800 made the fleet poll every
+    30 HOURS (alplabai/tan-cli#557)."""
+    project = load_board_yaml(
+        _hawkbit_board(tmp_path, "https://hosted.mender.io", 1800))
+    conf = _slice_alp_conf(project, project.cores["m55_hp"])
+    assert "CONFIG_HAWKBIT_POLL_INTERVAL=30" in conf
+    assert "CONFIG_HAWKBIT_POLL_INTERVAL=1800" not in conf
+
+
+def test_hawkbit_poll_interval_refuses_a_non_whole_minute(tmp_path: Path) -> None:
+    """90 s is 1.5 min -- not expressible in the target unit.  Refuse, naming
+    the two values that are, instead of silently rounding."""
+    project = load_board_yaml(
+        _hawkbit_board(tmp_path, "https://hosted.mender.io", 90))
+    with pytest.raises(OrchestratorError) as exc:
+        _slice_alp_conf(project, project.cores["m55_hp"])
+    msg = str(exc.value)
+    assert "MINUTES" in msg
+    assert "60" in msg and "120" in msg
+
+
+def test_hawkbit_poll_interval_refuses_out_of_range(tmp_path: Path) -> None:
+    """43201 min is outside Zephyr's `range 1 43200`; kconfiglib warns and
+    zephyr/scripts/kconfig/kconfig.py turns that into a hard abort."""
+    project = load_board_yaml(
+        _hawkbit_board(tmp_path, "https://hosted.mender.io", 43201 * 60))
+    with pytest.raises(OrchestratorError) as exc:
+        _slice_alp_conf(project, project.cores["m55_hp"])
+    assert "range 1 43200" in str(exc.value)
+
+
+def test_hawkbit_https_url_is_decomposed(tmp_path: Path) -> None:
+    """host -> HAWKBIT_SERVER, scheme -> port 443 + TLS.  The raw URI must
+    never reach the symbol: DNS for `https://hosted.mender.io` cannot resolve
+    (alplabai/tan-cli#558)."""
+    project = load_board_yaml(
+        _hawkbit_board(tmp_path, "https://hosted.mender.io", 1800))
+    conf = _slice_alp_conf(project, project.cores["m55_hp"])
+    assert 'CONFIG_HAWKBIT_SERVER="hosted.mender.io"' in conf
+    assert "https://" not in conf
+    assert "CONFIG_HAWKBIT_PORT=443" in conf
+    # HAWKBIT_USE_TLS depends on NET_SOCKETS_SOCKOPT_TLS -- setting it alone
+    # would be an unsatisfiable assignment and abort the configure.
+    assert "CONFIG_NET_SOCKETS_SOCKOPT_TLS=y" in conf
+    assert "CONFIG_HAWKBIT_USE_TLS=y" in conf
+
+
+def test_hawkbit_http_url_keeps_plaintext_and_derives_port(tmp_path: Path) -> None:
+    project = load_board_yaml(
+        _hawkbit_board(tmp_path, "http://hawkbit.lan:8080", 1800))
+    conf = _slice_alp_conf(project, project.cores["m55_hp"])
+    assert 'CONFIG_HAWKBIT_SERVER="hawkbit.lan"' in conf
+    assert "CONFIG_HAWKBIT_PORT=8080" in conf
+    assert "CONFIG_HAWKBIT_USE_TLS" not in conf
+
+
+def test_hawkbit_bare_host_placeholder_passes_through(tmp_path: Path) -> None:
+    """A value with no scheme is already a bare host -- including a whole-value
+    ${VAR} placeholder the build system substitutes later.  Case preserved."""
+    project = load_board_yaml(
+        _hawkbit_board(tmp_path, "${OTA_HOST}", 1800))
+    conf = _slice_alp_conf(project, project.cores["m55_hp"])
+    assert 'CONFIG_HAWKBIT_SERVER="${OTA_HOST}"' in conf
+    for line in conf.splitlines():
+        assert not line.startswith("CONFIG_HAWKBIT_PORT")
+        assert not line.startswith("CONFIG_HAWKBIT_USE_TLS")
+
+
+def test_hawkbit_url_with_a_base_path_is_refused(tmp_path: Path) -> None:
+    """The DDI client builds its own request paths and has no base-path knob,
+    so a path cannot be honoured -- refuse rather than drop it silently."""
+    project = load_board_yaml(
+        _hawkbit_board(tmp_path, "https://hosted.mender.io/DDI", 1800))
+    with pytest.raises(OrchestratorError) as exc:
+        _slice_alp_conf(project, project.cores["m55_hp"])
+    assert "base path" in str(exc.value)
+
+
+def test_hawkbit_url_with_unsupported_scheme_is_refused(tmp_path: Path) -> None:
+    project = load_board_yaml(
+        _hawkbit_board(tmp_path, "coap://hosted.mender.io", 1800))
+    with pytest.raises(OrchestratorError) as exc:
+        _slice_alp_conf(project, project.cores["m55_hp"])
+    assert "coap" in str(exc.value)
+
+
+# ---------------------------------------------------------------------
+# diagnostics.modules -> the CHOICE symbol (alplabai/tan-cli#559)
+#
+# Zephyr's <MOD>_LOG_LEVEL int is PROMPTLESS and derived from the
+# <MOD>_LOG_LEVEL_<OFF|ERR|WRN|INF|DBG> choice
+# (subsys/logging/Kconfig.template.log_config), and the choice only exists
+# inside the module's own `if <SYM>` block and `depends on LOG`.
+# ---------------------------------------------------------------------
+
+_DIAG_BOARD = """
+som:
+  sku: E1M-AEN701
+
+cores:
+  a32_cluster:
+    os: "off"
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+    peripherals: [i2c]
+  m55_he:
+    os: "off"
+
+diagnostics:
+  log_level: info
+  modules:
+    i2c: warn
+    can: debug
+    net_tcp: debug
+    my_typo_module: debug
+"""
+
+
+def test_diagnostics_emits_the_choice_symbol_for_an_enabled_module(
+        tmp_path: Path) -> None:
+    """`i2c: warn` on a core that enables CONFIG_I2C=y emits the choice symbol
+    board.schema.json documents -- never the promptless int, which Zephyr
+    rejects with "is not directly user-configurable (has no prompt)"."""
+    project = load_board_yaml(_write_board(tmp_path, _DIAG_BOARD))
+    conf = _slice_alp_conf(project, project.cores["m55_hp"])
+    assert "CONFIG_I2C=y" in conf
+    assert "CONFIG_I2C_LOG_LEVEL_WRN=y" in conf
+    assert "\nCONFIG_I2C_LOG_LEVEL=2" not in conf
+
+
+def test_diagnostics_module_not_enabled_on_this_core_is_commented(
+        tmp_path: Path) -> None:
+    """`can: debug` on a core with no CONFIG_CAN=y: the choice symbol does not
+    exist there, so it must be a comment, not a build-killing assignment."""
+    project = load_board_yaml(_write_board(tmp_path, _DIAG_BOARD))
+    conf = _slice_alp_conf(project, project.cores["m55_hp"])
+    assert "# CONFIG_CAN_LOG_LEVEL_DBG=y" in conf
+    for line in conf.splitlines():
+        assert not line.startswith("CONFIG_CAN=y")
+        assert not line.startswith("CONFIG_CAN_LOG_LEVEL")
+
+
+def test_diagnostics_unknown_module_never_emits_a_live_line(
+        tmp_path: Path) -> None:
+    """A typo key must not abort the Zephyr configure with `attempt to assign
+    the value ... to the undefined symbol MY_TYPO_MODULE_LOG_LEVEL`."""
+    project = load_board_yaml(_write_board(tmp_path, _DIAG_BOARD))
+    conf = _slice_alp_conf(project, project.cores["m55_hp"])
+    assert "# CONFIG_MY_TYPO_MODULE_LOG_LEVEL_DBG=y" in conf
+    for line in conf.splitlines():
+        assert not line.startswith("CONFIG_MY_TYPO_MODULE")
+
+
+def test_diagnostics_net_module_needs_the_net_log_gate(tmp_path: Path) -> None:
+    """The networking log template gates its choice on NET_LOG, not LOG
+    (subsys/net/Kconfig.template.log_config.net `depends on $(module-dep)`),
+    so `net_tcp` must stay a comment until CONFIG_NET_LOG=y is set."""
+    project = load_board_yaml(_write_board(tmp_path, _DIAG_BOARD))
+    conf = _slice_alp_conf(project, project.cores["m55_hp"])
+    assert "# CONFIG_NET_TCP_LOG_LEVEL_DBG=y" in conf
+    assert "CONFIG_NET_LOG=y" in conf.split(
+        "# CONFIG_NET_TCP_LOG_LEVEL_DBG=y")[1].splitlines()[0]
+    for line in conf.splitlines():
+        assert not line.startswith("CONFIG_NET_TCP_LOG_LEVEL")

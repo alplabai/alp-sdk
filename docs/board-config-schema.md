@@ -553,7 +553,14 @@ see [`docs/cli.md`](cli.md).)
 Scoping a library to specific cores (`cores: [<id>]`) folds in what
 earlier schema drafts spelled as a separate per-core
 `cores.<id>.libraries:` token list — there is now one library
-declaration, manifest-driven, and the per-core list is gone.  The
+declaration, manifest-driven, and the per-core list is gone.  A
+core-scoped entry goes through exactly the same layer as a project-wide
+one — the same unknown-name refusal, the same `requires:` checks, and
+the same manifest-sourced wiring.  In particular its Yocto packages come
+from that manifest's `integration.yocto.image_install:` and nowhere
+else; a library whose manifest declares no `integration.yocto:` section
+contributes nothing to `IMAGE_INSTALL`, and the generated `local.conf`
+says so in a comment.  The
 compile-time config headers under `metadata/library-profiles/<lib>/`
 (e.g. `etl_profile.h`, `lv_conf.h`) still tune each library for the
 SDK's invariants; the HW-backend accelerator model is folded into each

@@ -161,9 +161,42 @@ def _check_requires(
                 f"project's cores run {sorted(have_os) or '<none>'}")
 
 
+def scoped_names(
+    project: BoardProject,
+    slice_: Optional[Slice] = None,
+) -> list[str]:
+    """Every library name in scope, in declaration order, deduped.
+
+    board.yaml declares each curated library ONCE, in the top-level
+    `libraries:` list.  `loader._normalize_libraries` then folds each entry
+    into one of two internal channels: an entry with no `cores:` lands in
+    `project.libraries`, an entry with `cores:` lands in each named
+    `Slice.libraries`.  Both channels are the SAME ADR-0018 selection and
+    must pass through the SAME checks -- reading only `project.libraries`
+    here is what let a core-scoped entry skip `load_manifest`'s unknown-name
+    refusal, its `requires:` constraints and its `integration:` sections
+    entirely (alplabai/tan-cli#555).
+
+    ``slice_`` None  -> project-wide + every core-scoped name declared on any
+                        core: the whole-project view `alp validate` /
+                        `alp doctor` check.
+    ``slice_`` given -> project-wide + that one slice's core-scoped names:
+                        what the per-slice emitters wire.
+    """
+    names: list[str] = list(project.libraries or [])
+    slices = [slice_] if slice_ is not None else list(project.cores.values())
+    for s in slices:
+        for name in (s.libraries or []):
+            if name not in names:
+                names.append(name)
+    return names
+
+
 def resolve_selection(
     project: BoardProject,
     metadata_root: Path = METADATA_ROOT,
+    *,
+    slice_: Optional[Slice] = None,
 ) -> list[tuple[str, dict[str, Any]]]:
     """Validate every selected library and return [(name, manifest), ...].
 
@@ -171,8 +204,11 @@ def resolve_selection(
     constraint, or a library whose manifest has no `integration:` section for
     ANY OS this project's cores run (you asked for a library that cannot be
     wired anywhere on this target).  Returns [] for an empty selection.
+
+    The selection covers BOTH declaration channels -- see `scoped_names` for
+    what ``slice_`` narrows it to.
     """
-    selected = list(project.libraries or [])
+    selected = scoped_names(project, slice_)
     resolved: list[tuple[str, dict[str, Any]]] = []
     project_oses = _project_oses(project)
     for name in selected:
@@ -199,19 +235,29 @@ def zephyr_kconfig_lines(
     slice_: Slice,
     metadata_root: Path = METADATA_ROOT,
 ) -> list[str]:
-    """Kconfig lines for every top-level library with a Zephyr integration.
+    """Kconfig lines for every project-wide library with a Zephyr integration.
 
     Emitted into a Zephyr slice's alp.conf.  Returns [] when the project
     selects no libraries (keeps existing emit byte-identical).
+
+    Both channels are RESOLVED here (so a core-scoped entry gets the same
+    unknown-name / `requires:` / wireability / core-class refusals as a
+    project-wide one), but only the project-wide half is EMITTED: the Zephyr
+    Kconfig for a core-scoped entry rides `kconfig.py::_emit_libraries`'
+    per-core channel, which reads the very same manifest.  Emitting it twice
+    would duplicate every CONFIG_ line.
     """
-    if not project.libraries or slice_.os != "zephyr":
+    if slice_.os != "zephyr":
         return []
+    project_wide = set(project.libraries or ())
     lines: list[str] = []
-    for name, manifest in resolve_selection(project, metadata_root):
+    for name, manifest in resolve_selection(project, metadata_root, slice_=slice_):
         zephyr = (manifest.get("integration") or {}).get("zephyr")
         if not zephyr:
             continue
         _check_core_class(name, manifest, project, slice_)
+        if name not in project_wide:
+            continue
         module = zephyr.get("module")
         version = str(manifest.get("version", "?"))
         display_version = version if version.startswith("v") else f"v{version}"
@@ -229,16 +275,46 @@ def yocto_image_install(
     slice_: Slice,
     metadata_root: Path = METADATA_ROOT,
 ) -> list[str]:
-    """IMAGE_INSTALL recipe names for libraries with a Yocto integration."""
-    if not project.libraries or slice_.os != "yocto":
+    """IMAGE_INSTALL recipe names for libraries with a Yocto integration.
+
+    Covers BOTH declaration channels: a `libraries:` entry scoped to this
+    Yocto core contributes its manifest's `integration.yocto.image_install`
+    recipes, exactly like a project-wide one.  The recipe names come from the
+    manifest and nowhere else -- they are never derived from the library name
+    (alplabai/tan-cli#555: the old per-core path invented `lib-<name>`, which
+    RPROVIDES nothing in meta-alp-sdk or OE).
+    """
+    if slice_.os != "yocto":
         return []
     packages: list[str] = []
-    for name, manifest in resolve_selection(project, metadata_root):
+    for name, manifest in resolve_selection(project, metadata_root, slice_=slice_):
         yocto = (manifest.get("integration") or {}).get("yocto")
         if not yocto:
             continue
-        packages.extend(yocto.get("image_install") or [])
+        for pkg in yocto.get("image_install") or []:
+            if pkg not in packages:
+                packages.append(pkg)
     return packages
+
+
+def yocto_unwireable(
+    project: BoardProject,
+    slice_: Slice,
+    metadata_root: Path = METADATA_ROOT,
+) -> list[str]:
+    """In-scope library names whose manifest has NO `integration.yocto:`.
+
+    Such a library contributes nothing to this slice's `IMAGE_INSTALL` -- the
+    honest emit is nothing.  The caller surfaces the names as a comment so the
+    no-op is visible in the generated local.conf instead of silent.
+    """
+    if slice_.os != "yocto":
+        return []
+    return [
+        name
+        for name, manifest in resolve_selection(project, metadata_root, slice_=slice_)
+        if not (manifest.get("integration") or {}).get("yocto")
+    ]
 
 
 def baremetal_cmake_args(
@@ -246,11 +322,13 @@ def baremetal_cmake_args(
     slice_: Slice,
     metadata_root: Path = METADATA_ROOT,
 ) -> list[str]:
-    """cmake hint lines for libraries with a baremetal integration."""
-    if not project.libraries or slice_.os != "baremetal":
+    """cmake hint lines for libraries with a baremetal integration.
+
+    Covers both declaration channels (see `scoped_names`)."""
+    if slice_.os != "baremetal":
         return []
     args: list[str] = []
-    for name, manifest in resolve_selection(project, metadata_root):
+    for name, manifest in resolve_selection(project, metadata_root, slice_=slice_):
         baremetal = (manifest.get("integration") or {}).get("baremetal")
         if not baremetal:
             continue

@@ -788,3 +788,157 @@ def test_new_m_class_libraries_reject_a_only_soc() -> None:
             liblayer._check_requires(name, manifest, project, liblayer.METADATA_ROOT)
         assert name in str(exc.value)
         assert "core_class" in str(exc.value)
+
+
+# ---------------------------------------------------------------------
+# Core-scoped libraries go through the SAME ADR-0018 layer as project-wide
+# ones (alplabai/tan-cli#555).
+#
+# `loader._normalize_libraries` folds a `libraries:` entry carrying `cores:`
+# into `cores[<id>]['libraries']` and leaves `project['libraries']` empty.
+# That channel used to bypass the layer completely: no unknown-name refusal,
+# no `requires:` check, no wireability check, and a Yocto slice INVENTED the
+# package name as `lib-<name>` -- a recipe that RPROVIDES nothing.
+# ---------------------------------------------------------------------
+
+_CORE_SCOPED_LVGL_YOCTO = """
+som:
+  sku: E1M-V2N101
+libraries:
+  - name: lvgl
+    cores: [a55_cluster]
+cores:
+  a55_cluster:
+    os: yocto
+    app: ./linux
+    image: alp-image-edge
+"""
+
+
+def test_core_scoped_yocto_uses_the_manifest_recipe_name(tmp_path: Path) -> None:
+    """A core-scoped `lvgl` emits lvgl.yaml's own
+    `integration.yocto.image_install` -- never a `lib-`-prefixed invention."""
+    project = load_board_yaml(_write_board(tmp_path, _CORE_SCOPED_LVGL_YOCTO))
+    out = _slice_local_conf(project, project.cores["a55_cluster"])
+    assert 'IMAGE_INSTALL:append = " lvgl"' in out
+    assert "lib-lvgl" not in out
+
+
+def test_core_scoped_yocto_reads_ros2_rclcpp(tmp_path: Path) -> None:
+    """ros2's manifest names `rclcpp`, not its own library name."""
+    body = """
+    som:
+      sku: E1M-V2N101
+    libraries:
+      - name: ros2
+        cores: [a55_cluster]
+    cores:
+      a55_cluster:
+        os: yocto
+        app: ./linux
+        image: alp-image-edge
+    """
+    project = load_board_yaml(_write_board(tmp_path, body))
+    out = _slice_local_conf(project, project.cores["a55_cluster"])
+    assert 'IMAGE_INSTALL:append = " rclcpp"' in out
+    assert "lib-ros2" not in out
+
+
+def test_core_scoped_library_with_no_yocto_section_emits_no_package(
+        tmp_path: Path) -> None:
+    """mbedtls' manifest has no `integration.yocto:` at all, so the honest
+    emit is nothing -- surfaced as a comment, never as a fabricated recipe."""
+    body = """
+    som:
+      sku: E1M-V2N101
+    libraries:
+      - name: mbedtls
+        cores: [a55_cluster]
+    cores:
+      a55_cluster:
+        os: yocto
+        app: ./linux
+        image: alp-image-edge
+      m33_sm:
+        os: zephyr
+        app: ./m33
+    """
+    project = load_board_yaml(_write_board(tmp_path, body))
+    out = _slice_local_conf(project, project.cores["a55_cluster"])
+    assert "lib-mbedtls" not in out
+    assert "IMAGE_INSTALL:append" not in out
+    assert "no `integration.yocto:` section" in out
+
+
+def test_core_scoped_unknown_library_is_refused(tmp_path: Path) -> None:
+    """An unknown core-scoped NAME raises the same self-correcting
+    `load_manifest` error the project-wide form raises."""
+    body = """
+    som:
+      sku: E1M-V2N101
+    libraries:
+      - name: not-a-library
+        cores: [a55_cluster]
+    cores:
+      a55_cluster:
+        os: yocto
+        app: ./linux
+        image: alp-image-edge
+    """
+    project = load_board_yaml(_write_board(tmp_path, body))
+    with pytest.raises(OrchestratorError) as exc:
+        _slice_local_conf(project, project.cores["a55_cluster"])
+    msg = str(exc.value)
+    assert "unknown library `not-a-library`" in msg
+    assert "Available:" in msg
+
+
+def test_core_scoped_requires_constraint_is_checked(tmp_path: Path) -> None:
+    """ros2 declares `requires: {os: [yocto], core_class: a}`.  Scoped to a
+    Cortex-M Zephyr core it must fail naming the constraint, not no-op."""
+    body = """
+    som:
+      sku: E1M-V2N101
+    libraries:
+      - name: ros2
+        cores: [m33_sm]
+    cores:
+      m33_sm:
+        os: zephyr
+        app: ./m33
+      a55_cluster:
+        os: "off"
+    """
+    project = load_board_yaml(_write_board(tmp_path, body))
+    with pytest.raises(OrchestratorError) as exc:
+        _slice_alp_conf(project, project.cores["m33_sm"])
+    msg = str(exc.value)
+    assert "ros2" in msg
+    assert "os" in msg or "core_class" in msg
+
+
+def test_scoped_names_unions_both_declaration_channels(tmp_path: Path) -> None:
+    """`scoped_names` is the one place both channels meet: project-wide names
+    first, then the slice's core-scoped ones; `slice_=None` covers every
+    core."""
+    body = """
+    som:
+      sku: E1M-V2N101
+    libraries:
+      - lvgl
+      - name: cmsis-dsp
+        cores: [m33_sm]
+    cores:
+      m33_sm:
+        os: zephyr
+        app: ./m33
+      a55_cluster:
+        os: yocto
+        app: ./linux
+        image: alp-image-edge
+    """
+    project = load_board_yaml(_write_board(tmp_path, body))
+    assert liblayer.scoped_names(project) == ["lvgl", "cmsis-dsp"]
+    assert liblayer.scoped_names(project, project.cores["m33_sm"]) == [
+        "lvgl", "cmsis-dsp"]
+    assert liblayer.scoped_names(project, project.cores["a55_cluster"]) == ["lvgl"]

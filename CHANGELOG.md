@@ -51,6 +51,39 @@ here too.
 No shipped `board.yaml` uses `ipc[].address:` or `storage[].offset_kib:`, and
 none declares a `cacheable: true` carve-out, so no generated artefact in the
 repo moves.
+### Fixed — Kconfig emission: Hawkbit OTA units + URI, `diagnostics.modules`, and the bypassed library layer
+
+Four planner defects, all in `scripts/alp_orchestrate/`, reported against the
+tan-cli mirror as `alplabai/tan-cli#555`, `#557`, `#558` and `#559`.
+
+- **`ota.poll_interval_s` is now converted from seconds to minutes**
+  (`alplabai/tan-cli#557`). `CONFIG_HAWKBIT_POLL_INTERVAL` is declared in
+  MINUTES with `range 1 43200`; the seconds value was written through verbatim,
+  so the board schema's own `1800` default made a fleet poll every **30 hours**
+  instead of 30 minutes. A value that is not a whole number of minutes, or that
+  falls outside the declared range, is now refused naming the constraint rather
+  than emitted out of range.
+- **`ota.server.url` is now decomposed** (`alplabai/tan-cli#558`).
+  `CONFIG_HAWKBIT_SERVER` is a bare host fed to `zsock_getaddrinfo()`, the TLS
+  hostname and the HTTP `Host:` header — a full URI could never resolve. The
+  host, port and scheme now emit as `CONFIG_HAWKBIT_SERVER` /
+  `CONFIG_HAWKBIT_PORT` / `CONFIG_NET_SOCKETS_SOCKOPT_TLS` +
+  `CONFIG_HAWKBIT_USE_TLS`; a base path, URL userinfo or a non-HTTP scheme is
+  refused.
+- **`diagnostics.modules:` emits the choice symbol** (`alplabai/tan-cli#559`).
+  The old `CONFIG_<MOD>_LOG_LEVEL=<n>` int form could not build for *any* key —
+  the int symbol is promptless and derived. Entries now emit
+  `CONFIG_<MOD>_LOG_LEVEL_<LEVEL>=y` (what `board.schema.json` always
+  documented), live only where that choice symbol exists, and downgraded to a
+  hint comment otherwise, so a typo no longer aborts the Zephyr configure.
+- **Core-scoped libraries go through the ADR-0018 layer**
+  (`alplabai/tan-cli#555`). A `libraries:` entry carrying `cores:` bypassed
+  `libraries.resolve_selection()` entirely, so it got no unknown-name refusal,
+  no `requires:` check and no read of `integration.yocto.image_install` — and a
+  Yocto slice invented the package name as `lib-<name>`, emitting recipes that
+  RPROVIDE nothing (four shipped examples emitted `IMAGE_INSTALL:append =
+  " lib-mbedtls lib-nlohmann-json"`). Both declaration channels now resolve
+  through the same layer.
 
 ### Fixed — an unreadable `hw-revisions.yaml` refuses instead of disabling the hw_rev gates, in all three readers (alplabai/tan-cli#563)
 
