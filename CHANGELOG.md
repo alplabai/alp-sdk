@@ -74,8 +74,15 @@ tan-cli mirror as `alplabai/tan-cli#555`, `#557`, `#558` and `#559`.
   The old `CONFIG_<MOD>_LOG_LEVEL=<n>` int form could not build for *any* key —
   the int symbol is promptless and derived. Entries now emit
   `CONFIG_<MOD>_LOG_LEVEL_<LEVEL>=y` (what `board.schema.json` always
-  documented), live only where that choice symbol exists, and downgraded to a
-  hint comment otherwise, so a typo no longer aborts the Zephyr configure.
+  documented), live only where that choice symbol is declared, and downgraded
+  to a hint comment otherwise, so a typo no longer aborts the Zephyr configure.
+  "Declared" is the exact enclosing `if` chain, not the module's enable symbol
+  alone: `mbedtls` needs `CONFIG_MBEDTLS_DEBUG=y` on top of `CONFIG_MBEDTLS=y`
+  (`modules/mbedtls/Kconfig:87`) and `net_ipv4` needs `CONFIG_NET_NATIVE=y` on
+  top of `CONFIG_NET_IPV4=y` (`subsys/net/ip/Kconfig.ipv4:44`). Getting that
+  wrong is invisible at build time — the configure still exits 0 and only warns
+  `The choice symbol … was selected (set =y), but no symbol ended up as the
+  choice selection` while the override is discarded.
 - **Core-scoped libraries go through the ADR-0018 layer**
   (`alplabai/tan-cli#555`). A `libraries:` entry carrying `cores:` bypassed
   `libraries.resolve_selection()` entirely, so it got no unknown-name refusal,
@@ -83,7 +90,11 @@ tan-cli mirror as `alplabai/tan-cli#555`, `#557`, `#558` and `#559`.
   Yocto slice invented the package name as `lib-<name>`, emitting recipes that
   RPROVIDE nothing (four shipped examples emitted `IMAGE_INSTALL:append =
   " lib-mbedtls lib-nlohmann-json"`). Both declaration channels now resolve
-  through the same layer.
+  through the same layer, and `cores:` is additionally re-checked against the
+  named core: `requires.os:` / `requires.core_class:` are per-core facts, so
+  `libraries: [{name: ros2, cores: [m33_sm]}]` on a live Yocto-A55 + Zephyr-M33
+  board is refused naming the constraint instead of silently resolving to
+  nothing (the project-wide check passes there — the A55 supplies `yocto`).
 
 ### Fixed — an unreadable `hw-revisions.yaml` refuses instead of disabling the hw_rev gates, in all three readers (alplabai/tan-cli#563)
 

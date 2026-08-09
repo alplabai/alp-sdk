@@ -1625,28 +1625,57 @@ _LOG_LEVEL_CHOICE = {
 }
 
 # board.yaml `diagnostics.modules:` key -> (Zephyr log-module name, the
-# Kconfig symbol whose `=y` proves the module is compiled in, the symbol the
-# module's log choice `depends on`).
+# Kconfig symbol(s) whose `=y` proves the choice symbol is DECLARED -- one
+# name, or a tuple when the declaration is nested in more than one `if` --,
+# the symbol the module's log choice `depends on`).
 #
 # All three are load-bearing.  A module's `<MOD>_LOG_LEVEL_<LEVEL>` choice
-# symbols exist only inside that module's own `if <ENABLE>` block, and the
-# choice itself `depends on` a logging gate -- plain `LOG` for the
-# subsys/logging template, `NET_LOG` for the networking one
+# symbols exist only inside the `if` block(s) enclosing the module's
+# `source "...Kconfig.template.log_config"`, and the choice itself
+# `depends on` a logging gate -- plain `LOG` for the subsys/logging template,
+# `NET_LOG` for the networking one
 # (subsys/net/Kconfig.template.log_config.net: `depends on $(module-dep)`).
-# Assigning a symbol that is undefined or unsatisfiable is fatal: alp.conf is
-# loaded as a handwritten fragment with `warn_assign_undef=True`, and
-# `zephyr/scripts/kconfig/kconfig.py` turns any such warning into
-# `err("Aborting due to Kconfig warnings")`.  So a line goes live only when
-# BOTH gate symbols are already `=y` in this very fragment.
+# Both failure modes are real, and they are NOT the same failure:
+#
+#   * assigning an UNDEFINED symbol is fatal -- alp.conf is loaded as a
+#     handwritten fragment with `warn_assign_undef=True` and
+#     `zephyr/scripts/kconfig/kconfig.py` turns that warning into
+#     `err("Aborting due to Kconfig warnings")`;
+#   * assigning a DEFINED-but-undeclared-here choice symbol is SILENT -- the
+#     configure still exits 0, the override is discarded, and all you get is
+#     `warning: The choice symbol <SYM> ... was selected (set =y), but no
+#     symbol ended up as the choice selection`.  Measured on real Zephyr
+#     v4.4.1 (`cmake -DBOARD=native_sim samples/hello_world` + a fragment
+#     carrying CONFIG_LOG=y / CONFIG_MBEDTLS=y / CONFIG_MBEDTLS_LOG_LEVEL_DBG=y:
+#     EXIT=0, and the generated .config has no CONFIG_MBEDTLS_LOG_LEVEL_DBG
+#     line at all).  That silent branch is exactly what tan-cli#559 is about,
+#     so the guard columns below have to be EXACT, not approximately right.
+#
+# So a line goes live only when EVERY guard symbol AND the logging gate are
+# already `=y` in this very fragment.
 #
 # Every entry below is transcribed from the pinned Zephyr v4.4.1 tree -- the
 # module name appears there as a literal `module = <NAME>` feeding a
-# log_config template, and the enable symbol is a real `config`/`menuconfig`
-# this emitter can put in the fragment.  A key that is not in this table (a
-# typo, or a real Zephyr module the SDK never enables) degrades to a comment;
-# that is the safe direction -- a missing entry costs a log-level override, a
-# wrong entry costs the whole build.
-_LOG_MODULES: dict[str, tuple[str, str, str]] = {
+# log_config template, and each guard symbol is a real `config`/`menuconfig`
+# this emitter can put in the fragment.  The guard column is the enclosing
+# `if` chain resolved across the whole `source` chain from Kconfig.zephyr
+# down, minus the parts a guard already implies (e.g. `if NETWORKING` around
+# every net_* row is implied by `NET_LOG`, which is declared inside it; the
+# hidden `BT_LOG` is `default y if LOG && BT`; `FILE_SYSTEM_LIB_LINK` is
+# `select`ed by `FILE_SYSTEM`).
+#
+# Two residual `if`s cannot be expressed here because they are NEGATIVE and
+# the guard set only knows `=y`: `if !NET_RAW_MODE` (hidden, default n, only
+# `select`ed by the IEEE-802.15.4 raw drivers) around net_core / net_tcp /
+# net_ipv4, and the `BT_STACK_SELECTION` choice defaulting to `BT_HCI` around
+# bluetooth.  A board that selects `NET_RAW_MODE` or `BT_CUSTOM` would get the
+# silent-discard branch above; the SDK enables neither.
+#
+# A key that is not in this table (a typo, or a real Zephyr module the SDK
+# never enables) degrades to a comment; that is the safe direction -- a
+# missing entry costs a log-level override, a wrong entry costs the override
+# silently and leaves a Kconfig warning in the build.
+_LOG_MODULES: dict[str, tuple[str, str | tuple[str, ...], str]] = {
     # drivers/ -- subsys/logging/Kconfig.template.log_config (`depends on LOG`)
     "adc":             ("ADC", "ADC", "LOG"),                    # drivers/adc/Kconfig:94
     "can":             ("CAN", "CAN", "LOG"),                    # drivers/can/Kconfig:16
@@ -1676,12 +1705,25 @@ _LOG_MODULES: dict[str, tuple[str, str, str]] = {
     # subsys/net -- Kconfig.template.log_config.net (`module-dep = NET_LOG`)
     "coap":            ("COAP", "COAP", "NET_LOG"),              # subsys/net/lib/coap/Kconfig:286-287
     "net_core":        ("NET_CORE", "NETWORKING", "NET_LOG"),    # subsys/net/ip/Kconfig.debug:48-49
-    "net_ipv4":        ("NET_IPV4", "NET_IPV4", "NET_LOG"),      # subsys/net/ip/Kconfig.ipv4:191-192
+    # NET_NATIVE is load-bearing: the log_config sits inside `if
+    # NET_NATIVE_IPV4` (Kconfig.ipv4:44), a HIDDEN symbol -- `depends on
+    # NET_NATIVE`, `default y if NET_IPV4` (subsys/net/ip/Kconfig:60-63).  So
+    # NET_IPV4=y alone does NOT declare the choice on an offload-only
+    # (NET_NATIVE=n) target; NET_IPV4=y + NET_NATIVE=y does, exactly.
+    "net_ipv4":        ("NET_IPV4", ("NET_IPV4", "NET_NATIVE"), "NET_LOG"),  # subsys/net/ip/Kconfig.ipv4:191-192
     "net_l2_ethernet": ("NET_L2_ETHERNET", "NET_L2_ETHERNET", "NET_LOG"),  # subsys/net/l2/ethernet/Kconfig:13-14
     "net_sockets":     ("NET_SOCKETS", "NET_SOCKETS", "NET_LOG"),  # subsys/net/lib/sockets/Kconfig:443-444
     "net_tcp":         ("NET_TCP", "NET_TCP", "NET_LOG"),        # subsys/net/ip/Kconfig.tcp:16-17
     # modules/
-    "mbedtls":         ("MBEDTLS", "MBEDTLS", "LOG"),            # modules/mbedtls/Kconfig:91
+    # MBEDTLS_DEBUG is the real guard, not MBEDTLS: `module = MBEDTLS` sits
+    # inside `if MBEDTLS_DEBUG` (modules/mbedtls/Kconfig:87), itself nested in
+    # `if MBEDTLS` (:31).  MBEDTLS_DEBUG is a prompted bool defaulting n that
+    # this emitter never writes, while CONFIG_MBEDTLS=y IS written (from
+    # metadata/libraries/mbedtls.yaml) by iot-fleet-ota, production-deployment,
+    # rpmsg-v2n, rpmsg-aen and heterogeneous-offload -- so guarding on MBEDTLS
+    # alone made the ONE in-table module the SDK routinely enables emit a line
+    # whose choice symbol is not declared.
+    "mbedtls":         ("MBEDTLS", ("MBEDTLS", "MBEDTLS_DEBUG"), "LOG"),  # modules/mbedtls/Kconfig:87-91
 }
 
 
@@ -1716,13 +1758,21 @@ def _emit_diagnostics(project: "BoardProject",
     module (`I2C_LOG_LEVEL ... is not directly user-configurable (has no
     prompt)`), and an unknown key was an assignment to an undefined symbol.
 
-    A live line is emitted only when the module is in `_LOG_MODULES` AND both
-    its enable symbol and its logging gate (`LOG`, or `NET_LOG` for the
-    networking modules) are already `=y` in `emitted` -- the conditions under
-    which the choice symbol exists at all.  Everything else (an ALP_* SDK
-    module with no LOG_MODULE_REGISTER yet, a module that lives on another
-    core, a typo) is downgraded to a comment naming the reason, so the
-    fragment always configures.
+    A live line is emitted only when the module is in `_LOG_MODULES` AND
+    EVERY one of its guard symbols AND its logging gate (`LOG`, or `NET_LOG`
+    for the networking modules) are already `=y` in `emitted` -- the
+    conditions under which the choice symbol is declared at all.  A module
+    can carry more than one guard when its log_config template is nested in
+    more than one `if`: `mbedtls` needs MBEDTLS **and** MBEDTLS_DEBUG,
+    `net_ipv4` needs NET_IPV4 **and** NET_NATIVE.  Getting that wrong is not
+    caught by the build: the configure still exits 0 and merely warns that
+    the choice symbol "was selected (set =y), but no symbol ended up as the
+    choice selection", so the override vanishes silently -- the same
+    silent-failure class tan-cli#559 is about.
+
+    Everything else (an ALP_* SDK module with no LOG_MODULE_REGISTER yet, a
+    module that lives on another core, a typo) is downgraded to a comment
+    naming the reason, so the fragment always configures.
     """
     lines: list[str] = []
     modules = (project.diagnostics or {}).get("modules") or {}
@@ -1743,16 +1793,20 @@ def _emit_diagnostics(project: "BoardProject",
                     f"check the spelling")
                 lines.append(f"# CONFIG_{stem}_LOG_LEVEL_{choice}=y ({reason})")
                 continue
-            log_module, enable_symbol, log_gate = known
+            log_module, guard_symbols, log_gate = known
+            if isinstance(guard_symbols, str):
+                guard_symbols = (guard_symbols,)
             symbol = f"CONFIG_{log_module}_LOG_LEVEL_{choice}"
+            missing = [g for g in guard_symbols if g not in enabled]
             if log_gate not in enabled:
                 lines.append(f"# {symbol}=y (its log choice depends on "
                              f"CONFIG_{log_gate}=y, not set on core "
                              f"`{slice_.core_id}`)")
-            elif enable_symbol not in enabled:
-                lines.append(f"# {symbol}=y (module `{mod}` is not enabled on "
-                             f"core `{slice_.core_id}`: no "
-                             f"CONFIG_{enable_symbol}=y)")
+            elif missing:
+                need = ", ".join(f"CONFIG_{g}=y" for g in missing)
+                lines.append(f"# {symbol}=y (its log choice is declared only "
+                             f"under {need}, not set on core "
+                             f"`{slice_.core_id}`)")
             else:
                 lines.append(f"{symbol}=y")
         lines.append("")

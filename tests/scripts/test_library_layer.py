@@ -893,9 +893,18 @@ def test_core_scoped_unknown_library_is_refused(tmp_path: Path) -> None:
     assert "Available:" in msg
 
 
-def test_core_scoped_requires_constraint_is_checked(tmp_path: Path) -> None:
-    """ros2 declares `requires: {os: [yocto], core_class: a}`.  Scoped to a
-    Cortex-M Zephyr core it must fail naming the constraint, not no-op."""
+def test_project_wide_requires_still_fires_when_no_core_satisfies_it(
+        tmp_path: Path) -> None:
+    """The PROJECT-WIDE `requires:` check: ros2 needs `os: [yocto]`, and this
+    board parks a55_cluster at `os: "off"`, so the project's whole live-OS set
+    is {zephyr} and `_check_requires` refuses.
+
+    This is what the original `test_core_scoped_requires_constraint_is_checked`
+    actually measured.  It never exercised a per-core constraint at all -- with
+    the A55 switched off, ANY declaration channel would have been refused by
+    the project-wide check, so it passed identically with the per-slice guard
+    absent.  The real core-scoping case is the next test.
+    """
     body = """
     som:
       sku: E1M-V2N101
@@ -914,7 +923,101 @@ def test_core_scoped_requires_constraint_is_checked(tmp_path: Path) -> None:
         _slice_alp_conf(project, project.cores["m33_sm"])
     msg = str(exc.value)
     assert "ros2" in msg
-    assert "os" in msg or "core_class" in msg
+    assert "this project's cores run" in msg
+
+
+def test_core_scoped_requires_constraint_is_checked(tmp_path: Path) -> None:
+    """ros2 declares `requires: {os: [yocto], core_class: a}`.  Scoped to the
+    Cortex-M Zephyr core of a REALISTIC V2N/V2M board -- yocto A55 *live*
+    alongside the Zephyr M33 -- it must still fail naming the constraint.
+
+    This is the shape the project-wide check cannot catch: `_project_oses`
+    contains `yocto` from the A55, so `_check_requires` passes, and before the
+    per-slice guard nothing else looked -- `_check_core_class` was reachable
+    only from `zephyr_kconfig_lines` AFTER its `if not zephyr: continue`, and
+    ros2's manifest has no `integration.zephyr:`.  Measured on the unfixed
+    tree: no refusal at all, and the m33 alp.conf simply never mentioned ros2
+    (alplabai/tan-cli#555).
+    """
+    body = """
+    som:
+      sku: E1M-V2N101
+    libraries:
+      - name: ros2
+        cores: [m33_sm]
+    cores:
+      m33_sm:
+        os: zephyr
+        app: ./m33
+      a55_cluster:
+        os: yocto
+        app: ./a55
+    """
+    project = load_board_yaml(_write_board(tmp_path, body))
+    # Precondition: the project-wide check IS satisfied -- the A55 runs yocto.
+    assert "yocto" in liblayer._project_oses(project)
+    with pytest.raises(OrchestratorError) as exc:
+        _slice_alp_conf(project, project.cores["m33_sm"])
+    msg = str(exc.value)
+    assert "ros2" in msg
+    assert "m33_sm" in msg
+    assert "yocto" in msg
+
+
+def test_core_scoped_guard_also_fires_on_a_yocto_slice(
+        tmp_path: Path) -> None:
+    """The per-slice guard is not Zephyr-only.  micro-ros is the mirror image
+    of ros2 -- the M-class / Zephyr client -- so scoping it to the A55 Yocto
+    core has to be refused there too, on the Yocto emit path
+    (`yocto_image_install` -> `resolve_selection(slice_=)`)."""
+    body = """
+    som:
+      sku: E1M-V2N101
+    libraries:
+      - name: micro-ros
+        cores: [a55_cluster]
+    cores:
+      m33_sm:
+        os: zephyr
+        app: ./m33
+      a55_cluster:
+        os: yocto
+        app: ./a55
+    """
+    project = load_board_yaml(_write_board(tmp_path, body))
+    with pytest.raises(OrchestratorError) as exc:
+        _slice_local_conf(project, project.cores["a55_cluster"])
+    msg = str(exc.value)
+    assert "micro-ros" in msg
+    assert "a55_cluster" in msg
+
+
+def test_core_scoped_library_with_no_section_for_this_os_is_not_refused(
+        tmp_path: Path) -> None:
+    """The per-slice guard checks `requires:`, NOT "is there an
+    `integration.<os>:` section".  mbedtls and nlohmann-json are scoped to the
+    Yocto cores of four shipped examples and neither manifest has an
+    `integration.yocto:` section; the honest handling there is the explanatory
+    `yocto_unwireable` comment, not a hard error.  Pinned so a later tightening
+    of the guard cannot break those four boards."""
+    body = """
+    som:
+      sku: E1M-V2N101
+    libraries:
+      - name: mbedtls
+        cores: [a55_cluster]
+    cores:
+      m33_sm:
+        os: zephyr
+        app: ./m33
+      a55_cluster:
+        os: yocto
+        app: ./a55
+    """
+    project = load_board_yaml(_write_board(tmp_path, body))
+    out = _slice_local_conf(project, project.cores["a55_cluster"])
+    assert "lib-mbedtls" not in out
+    assert "integration.yocto:" in out
 
 
 def test_scoped_names_unions_both_declaration_channels(tmp_path: Path) -> None:

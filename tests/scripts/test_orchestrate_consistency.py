@@ -704,3 +704,113 @@ def test_diagnostics_net_module_needs_the_net_log_gate(tmp_path: Path) -> None:
         "# CONFIG_NET_TCP_LOG_LEVEL_DBG=y")[1].splitlines()[0]
     for line in conf.splitlines():
         assert not line.startswith("CONFIG_NET_TCP_LOG_LEVEL")
+
+
+# ---------------------------------------------------------------------
+# The guard column of `_LOG_MODULES` has to be EXACT, not approximately
+# right, because a wrong guard fails SILENTLY: the Zephyr configure still
+# exits 0 and only warns `The choice symbol <SYM> ... was selected (set
+# =y), but no symbol ended up as the choice selection`, so the override is
+# discarded with nothing to notice.  Measured against real Zephyr v4.4.1
+# (`cmake -GNinja -DBOARD=native_sim -S samples/hello_world` +
+# `-DEXTRA_CONF_FILE=<fragment>`):
+#
+#   CONFIG_LOG=y / CONFIG_MBEDTLS=y / CONFIG_MBEDTLS_LOG_LEVEL_DBG=y
+#       -> EXIT=0, that warning, and the generated .config carries NO
+#          CONFIG_MBEDTLS_LOG_LEVEL_DBG line at all (only
+#          `# CONFIG_MBEDTLS_DEBUG is not set`)
+#   ... the same fragment + CONFIG_MBEDTLS_DEBUG=y
+#       -> EXIT=0, no warning, .config:493:CONFIG_MBEDTLS_LOG_LEVEL_DBG=y
+# ---------------------------------------------------------------------
+
+_MBEDTLS_DIAG_BOARD = """
+som:
+  sku: E1M-AEN801
+
+libraries:
+  - name: mbedtls
+    cores: [m55_hp]
+
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+    peripherals: [i2c]
+
+diagnostics:
+  log_level: info
+  modules:
+    mbedtls: debug
+"""
+
+
+def test_diagnostics_mbedtls_needs_the_mbedtls_debug_guard(
+        tmp_path: Path) -> None:
+    """`module = MBEDTLS` sits inside `if MBEDTLS_DEBUG` (modules/mbedtls/
+    Kconfig:87), itself nested in `if MBEDTLS` (:31).  CONFIG_MBEDTLS=y alone
+    does NOT declare the choice, so this has to stay a comment naming the real
+    guard.  mbedtls is the ONE in-table module the SDK routinely enables
+    (iot-fleet-ota, production-deployment, rpmsg-v2n, rpmsg-aen,
+    heterogeneous-offload all emit CONFIG_MBEDTLS=y), so a guard of MBEDTLS
+    alone made exactly those boards emit a silently-discarded override plus a
+    Kconfig warning."""
+    project = load_board_yaml(_write_board(tmp_path, _MBEDTLS_DIAG_BOARD))
+    conf = _slice_alp_conf(project, project.cores["m55_hp"])
+    # The two preconditions the old single-symbol guard was satisfied by:
+    assert "CONFIG_MBEDTLS=y" in conf
+    assert "CONFIG_LOG=y" in conf
+    # ... and the override is STILL not live, because MBEDTLS_DEBUG is not set.
+    for line in conf.splitlines():
+        assert not line.startswith("CONFIG_MBEDTLS_LOG_LEVEL")
+    assert "# CONFIG_MBEDTLS_LOG_LEVEL_DBG=y" in conf
+    assert "CONFIG_MBEDTLS_DEBUG=y" in conf.split(
+        "# CONFIG_MBEDTLS_LOG_LEVEL_DBG=y")[1].splitlines()[0]
+
+
+def test_log_module_guard_may_be_a_multi_symbol_chain() -> None:
+    """Two rows need more than one guard because their log_config template is
+    nested in more than one `if`; both are pinned here so a later table edit
+    cannot quietly drop the inner one.
+
+      * mbedtls  -- `if MBEDTLS` / `if MBEDTLS_DEBUG`
+                    (modules/mbedtls/Kconfig:31, :87).
+      * net_ipv4 -- `if NET_IPV4` / `if NET_NATIVE_IPV4`
+                    (subsys/net/ip/Kconfig.ipv4:12, :44).  NET_NATIVE_IPV4 is
+                    HIDDEN -- `depends on NET_NATIVE`, `default y if NET_IPV4`
+                    (subsys/net/ip/Kconfig:60-63) -- so NET_NATIVE is the
+                    emittable symbol that proves it.  Measured: a fragment with
+                    NET_IPV4=y + NET_LOG=y + NET_NATIVE=n reproduces the same
+                    silent-discard warning; with NET_NATIVE at its default y it
+                    resolves to CONFIG_NET_IPV4_LOG_LEVEL_DBG=y.
+    """
+    from alp_orchestrate.kconfig import _LOG_MODULES
+
+    assert _LOG_MODULES["mbedtls"] == (
+        "MBEDTLS", ("MBEDTLS", "MBEDTLS_DEBUG"), "LOG")
+    assert _LOG_MODULES["net_ipv4"] == (
+        "NET_IPV4", ("NET_IPV4", "NET_NATIVE"), "NET_LOG")
+
+
+def test_log_module_multi_guard_goes_live_when_every_guard_is_set() -> None:
+    """The chain is a guard, not a blanket refusal: with the whole chain and
+    the logging gate already `=y` in the fragment the choice symbol IS
+    declared, so the override must go live -- and drop the inner guard and the
+    very same call must comment it out."""
+    from alp_orchestrate.kconfig import _emit_diagnostics
+    from alp_orchestrate.models import Slice
+
+    class _Proj:
+        diagnostics = {"modules": {"mbedtls": "debug"}}
+
+    slice_ = Slice(core_id="m55_hp", os="zephyr")
+
+    lines = _emit_diagnostics(
+        _Proj(), slice_,
+        ["CONFIG_LOG=y", "CONFIG_MBEDTLS=y", "CONFIG_MBEDTLS_DEBUG=y"])
+    assert "CONFIG_MBEDTLS_LOG_LEVEL_DBG=y" in lines
+
+    lines = _emit_diagnostics(
+        _Proj(), slice_, ["CONFIG_LOG=y", "CONFIG_MBEDTLS=y"])
+    assert "CONFIG_MBEDTLS_LOG_LEVEL_DBG=y" not in lines
+    assert any(ln.startswith("# CONFIG_MBEDTLS_LOG_LEVEL_DBG=y")
+               for ln in lines)

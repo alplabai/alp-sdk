@@ -207,8 +207,20 @@ def resolve_selection(
 
     The selection covers BOTH declaration channels -- see `scoped_names` for
     what ``slice_`` narrows it to.
+
+    `requires:` is checked at TWO altitudes, because the two channels ask
+    different questions.  `_check_requires` is project-wide: a project-wide
+    `libraries: [ros2]` on a Yocto-A55 + Zephyr-M33 board is legitimate and
+    simply wires on the A55 only.  A CORE-SCOPED entry (`{name: ros2, cores:
+    [m33_sm]}`) is instead an explicit instruction to wire it THERE, so it
+    additionally goes through `_check_slice_requires` against that one slice
+    (alplabai/tan-cli#555: "ros2's `requires: {os: [yocto], core_class: a}`
+    is never checked, so ros2 scoped to a Cortex-M core is silently
+    no-op'd").  The project-wide check cannot catch it -- `_project_oses`
+    contains `yocto` from the A55, so it passes.
     """
     selected = scoped_names(project, slice_)
+    core_scoped = set(slice_.libraries or ()) if slice_ is not None else set()
     resolved: list[tuple[str, dict[str, Any]]] = []
     project_oses = _project_oses(project)
     for name in selected:
@@ -222,8 +234,46 @@ def resolve_selection(
                 f"library `{name}` cannot be wired on this project: its manifest "
                 f"has integration section(s) [{have_sections}] but this project's "
                 f"cores run {sorted(project_oses)}")
+        if name in core_scoped:
+            assert slice_ is not None  # core_scoped is empty when slice_ is None
+            _check_slice_requires(name, manifest, project, slice_)
         resolved.append((name, manifest))
     return resolved
+
+
+def _check_slice_requires(
+    name: str,
+    manifest: dict[str, Any],
+    project: BoardProject,
+    slice_: Slice,
+) -> None:
+    """`requires:` for a library board.yaml explicitly scoped to THIS core.
+
+    `cores: [<id>]` is a positive instruction, not a hint, so a `requires:`
+    key that the named core violates has to fail early and name the
+    constraint rather than resolve to nothing.  Checks the two keys that are
+    per-core facts:
+
+      * `os:`         -- against this slice's own OS, not the project-wide
+                         union `_check_requires` uses.
+      * `core_class:` -- delegated to `_check_core_class`, which used to be
+                         reachable only from `zephyr_kconfig_lines` AFTER an
+                         `if not zephyr: continue`, so a manifest with no
+                         `integration.zephyr:` (ros2) never reached it.
+
+    Deliberately does NOT refuse a manifest that merely has no
+    `integration.<this os>:` section: mbedtls and nlohmann-json are scoped to
+    the Yocto cores of four shipped examples and have no `integration.yocto:`,
+    and the honest handling for those is the explanatory `yocto_unwireable`
+    comment, not a hard error.
+    """
+    requires = manifest.get("requires") or {}
+    req_os = requires.get("os")
+    if req_os and slice_.os not in set(req_os):
+        raise OrchestratorError(
+            f"library `{name}` is scoped to core `{slice_.core_id}` "
+            f"(os `{slice_.os}`) but requires os {sorted(req_os)}")
+    _check_core_class(name, manifest, project, slice_)
 
 
 # ---------------------------------------------------------------------------

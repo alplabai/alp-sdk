@@ -560,7 +560,17 @@ the same manifest-sourced wiring.  In particular its Yocto packages come
 from that manifest's `integration.yocto.image_install:` and nowhere
 else; a library whose manifest declares no `integration.yocto:` section
 contributes nothing to `IMAGE_INSTALL`, and the generated `local.conf`
-says so in a comment.  The
+says so in a comment.
+
+`cores:` is also *stricter* than a project-wide selection, deliberately.
+A project-wide `libraries: [ros2]` on a Yocto-A55 + Zephyr-M33 board is
+fine — it simply wires on the A55.  Naming a core is a positive
+instruction to wire it *there*, so the entry's `requires.os:` and
+`requires.core_class:` are re-checked against that one core and a
+mismatch is refused naming the constraint: `libraries: [{name: ros2,
+cores: [m33_sm]}]` fails with ``library `ros2` is scoped to core
+`m33_sm` (os `zephyr`) but requires os ['yocto']`` instead of resolving
+to nothing.  The
 compile-time config headers under `metadata/library-profiles/<lib>/`
 (e.g. `etl_profile.h`, `lv_conf.h`) still tune each library for the
 SDK's invariants; the HW-backend accelerator model is folded into each
