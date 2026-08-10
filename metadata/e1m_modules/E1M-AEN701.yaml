@@ -190,7 +190,13 @@ helper_firmware:
     chip:          cc3501e
     firmware_path: firmware/cc3501e/prebuilt/cc3501e-v0.2.0.bin
     # CC3501E firmware is Alp-released, applied over the bridge SPI
-    # programming OTP; NOT customer-flashed.
+    # programming OTP; NOT customer-flashed.  `flash_policy: factory`
+    # states that reason directly (Alp Lab programs the part in
+    # production) instead of leaving a tool to infer it from the
+    # presence of an OTA channel -- the two are independent facts
+    # (#1357).  Behaviour is unchanged: this entry declares no
+    # `flash_method`, so there is nothing to decline.
+    flash_policy:   factory
     update_channel: alp_ota_spi_otp
 
 default_hw_rev:         r2                  # see metadata/e1m_modules/<family>/hw-revisions.yaml

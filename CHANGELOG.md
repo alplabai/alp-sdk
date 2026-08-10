@@ -7,6 +7,54 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — helper MCUs can now describe the GD32 bridge: `flash_policy`, a second OTA channel, and `jlink_device` on all four E1M-X presets (#1357)
+
+`helper_firmware[]` encoded `update_channel` **XOR** `flash_method`, in two
+independent places, and the GD32 bridge legitimately has both: a real OTA path
+over the bridge link (protocol v0.6 Path A, slot-A/B application bootloader
+with commit + rollback, silicon-validated 2026-06-04) **and** a SWD flash the
+customer may use to recover a bricked board with Alp Lab-supplied binaries.
+The XOR forced a choice the hardware does not offer, and neither field carried
+the fact that actually decides tool behaviour: **who** may invoke the flash
+method, and **when**.
+
+**The schema half.** `som-preset-v1.schema.json` drops the `oneOf` and gains
+`flash_policy` (`customer` / `factory` / `recovery_only`), required exactly
+when an entry declares both a `flash_method` and an `update_channel` — the
+combination where the answer stops being inferable. `update_channel`'s enum
+gains `alp_ota_spi_bridge` for the GD32; reusing the CC3501E's
+`alp_ota_spi_otp` would assert OTP programming for a part that has none.
+
+**The emitter half, which would have silently defeated a preset edit.**
+`scripts/alp_orchestrate/manifest.py::_helper_mcus` carried the same XOR, so a
+both-declaring entry would have had its `flash_method`/`flash_args` **dropped
+from the emitted manifest** — the recovery path *vanishing* rather than being
+declined-but-reachable, leaving no way to tell someone with a bricked bridge
+why it was unavailable. Each declared key is now projected independently, and
+`system-manifest-v1.schema.json` declares `flash_policy` and `update_channel`
+(the latter was emitted undeclared, passing only on `additionalProperties`).
+
+**`jlink_device` on the four E1M-X presets.** `E1M-V2N101` / `E1M-V2N102` /
+`E1M-V2M101` / `E1M-V2M102` named `flash_args.target` without its other half,
+and `tan flash`'s `swd_probe` refuses rather than guess a SEGGER profile from
+an OpenOCD/pyOCD target. Measured, that is wider than a J-Link-only host: the
+J-Link arm is preferred whenever a J-Link binary resolves, and `--dry-run`
+always takes it, so these entries could not even be **previewed** on any host.
+All four now carry `jlink_device: GD32G553MEY7TR` and stay byte-identical (one
+PCB, variant-populated). The schema now rejects a `swd_probe` entry that names
+`target` without `jlink_device`, so the next one is caught at `alp validate`
+time rather than at a bricked customer's bench. `expect_dpidr` stays
+deliberately **unset** — the SW-DP ID is contested (`0x6BA02477` in
+`metadata/chips/gd32_swd.yaml` against an unattributed `0x0BE12477`) and
+unmeasurable while the part is disconnected; these entries will now carry a
+`flash.dpidr-preflight-unarmed` advisory, which is correct.
+
+The six `E1M-AEN*` presets gain `flash_policy: factory` on their `cc3501e_otp`
+entry, keeping the six in lockstep per `metadata/e1m_modules/README.md`.
+Behaviour is unchanged there (they declare no `flash_method`); it lets a skip
+name the real reason — Alp Lab programs the part in production — instead of
+asserting the OTA channel as the cause.
+
 ### Fixed — `--emit zephyr-board`: E8 facts on every AEN SKU, four fail-open paths, and an error that blamed the customer (alplabai/tan-cli#493, alplabai/tan-cli#591)
 
 `scripts/gen_zephyr_board.py` generates board files that are meant to be

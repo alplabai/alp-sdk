@@ -256,7 +256,7 @@
     },
     "helper_firmware": {
       "type": "array",
-      "description": "On-module helper MCUs whose firmware images the orchestrator registers into the system manifest.  These are NOT heterogeneous-compute peers (they don't appear in `topology:`).  Each entry is EITHER a customer-flashable helper MCU -- carries `flash_method`/`flash_args` (e.g. `gd32_bridge` via `swd_probe`), independently flashed via `tan flash` -- OR a vendor-OTA-updated coprocessor -- carries `update_channel` (e.g. AEN's `cc3501e_otp` via `alp_ota_spi_otp`), whose firmware is Alp-released and applied over the bridge link programming the chip's own OTP, and is NEVER customer-flashed.  See `$defs/helper_firmware_entry`.",
+      "description": "On-module helper MCUs whose firmware images the orchestrator registers into the system manifest.  These are NOT heterogeneous-compute peers (they don't appear in `topology:`).  An entry describes a helper along three INDEPENDENT axes: how it is written locally (`flash_method`/`flash_args`, e.g. `gd32_bridge` via `swd_probe`), how it is updated in the FIELD (`update_channel`, e.g. AEN's `cc3501e_otp` via `alp_ota_spi_otp` or the GD32 bridge's `alp_ota_spi_bridge`), and WHO may invoke the flash method and when (`flash_policy`).  A helper may declare any combination -- the GD32 bridge carries both a field-update channel and a recovery-only flash method.  See `$defs/helper_firmware_entry`.",
       "items": { "$ref": "#/$defs/helper_firmware_entry" }
     },
     "default_hw_rev": {
@@ -534,9 +534,27 @@
       "type": "object",
       "required": ["name", "chip"],
       "additionalProperties": false,
-      "oneOf": [
-        { "required": ["flash_method"], "not": { "required": ["update_channel"] } },
-        { "required": ["update_channel"], "not": { "required": ["flash_method"] } }
+      "allOf": [
+        {
+          "$comment": "`flash_method` + `update_channel` are independent axes (HOW it is written locally vs HOW it is updated in the field), so an entry may carry both -- the GD32 bridge does.  What stops being inferable once it carries both is WHO may invoke the flash method: an entry with a flash method and no channel reads as a plain customer flash target, but the moment a field-update channel exists the local flash could equally be a factory-only or recovery-only path.  So require `flash_policy` in exactly that case, and only there.",
+          "if": { "required": ["flash_method", "update_channel"] },
+          "then": { "required": ["flash_policy"] }
+        },
+        {
+          "$comment": "`target` and `jlink_device` are the two halves of one decision for the `swd_probe` backend: `target` names the OpenOCD/pyOCD target, `jlink_device` names the SEGGER device profile.  A SoM that names a `target` has asserted a specific part, so `tan flash` refuses (rather than guessing) when the J-Link half is missing -- and it prefers the J-Link arm whenever a J-Link binary resolves, and always takes it under `--dry-run`, so a `target`-only entry is unpreviewable on EVERY host.  Catch that here, at authoring time, instead of at a bricked customer's bench.  Scoped to `swd_probe` because only that backend has a J-Link arm; other backends' `flash_args` shapes stay opaque.",
+          "if": {
+            "required": ["flash_method", "flash_args"],
+            "properties": {
+              "flash_method": { "const": "swd_probe" },
+              "flash_args":   { "type": "object", "required": ["target"] }
+            }
+          },
+          "then": {
+            "properties": {
+              "flash_args": { "required": ["jlink_device"] }
+            }
+          }
+        }
       ],
       "properties": {
         "name": {
@@ -560,19 +578,24 @@
             { "pattern": "^[a-z][a-z0-9_]+$" },
             { "const": "TBD" }
           ],
-          "description": "Backend tool key consumed by `tan flash`'s helper-MCU dispatcher (e.g. `swd_probe`) for a CUSTOMER-flashable helper.  TBD pending the authoritative flow.  Mutually exclusive with `update_channel` -- an entry carries exactly one of the two."
+          "description": "Backend tool key consumed by `tan flash`'s helper-MCU dispatcher (e.g. `swd_probe`) -- the transport by which this helper's image is WRITTEN locally.  TBD pending the authoritative flow.  Independent of `update_channel` (which answers how the device is updated in the FIELD): an entry may carry both, and the GD32 bridge does.  It says nothing about who is allowed to invoke it -- that is `flash_policy`, which becomes REQUIRED once both this key and `update_channel` are present."
         },
         "flash_args": {
           "oneOf": [
             { "type": "object", "additionalProperties": true },
             { "type": "string", "const": "TBD" }
           ],
-          "description": "Backend-specific args (interface, target, base address, ...) forwarded verbatim to the flash backend.  DELIBERATELY OPEN object: the shape follows `flash_method`'s backend contract, which this schema cannot enumerate; TBD when the method is TBD.  Only meaningful alongside `flash_method`."
+          "description": "Backend-specific args (interface, target, base address, ...) forwarded verbatim to the flash backend.  DELIBERATELY OPEN object: the shape follows `flash_method`'s backend contract, which this schema cannot enumerate; TBD when the method is TBD.  Only meaningful alongside `flash_method`.  ONE exception is enforced above: a `swd_probe` entry that names `target` must also name `jlink_device`, because those two are the halves of a single decision and half of it refuses at the probe."
+        },
+        "flash_policy": {
+          "type": "string",
+          "enum": ["customer", "factory", "recovery_only"],
+          "description": "WHO may invoke `flash_method`, and WHEN.  `customer`: a genuine customer flash target (the default when this key is absent, which is what every preset written before this field meant).  `factory`: programmed by Alp Lab in production, never a customer flash target.  `recovery_only`: programmed by Alp Lab in production, and customer-flashable ONLY to recover a bricked device, with Alp Lab-supplied binaries.  Independent of `update_channel`, which answers how the device is updated in the FIELD -- a helper can carry both, and the GD32 bridge does."
         },
         "update_channel": {
           "type": "string",
-          "enum": ["alp_ota_spi_otp"],
-          "description": "Marks this helper as a vendor-OTA-updated coprocessor rather than a customer-flash target (e.g. AEN's `cc3501e_otp`): firmware is Alp-released and applied over the bridge SPI link, programming the chip's own OTP -- the customer never flashes it directly.  Mutually exclusive with `flash_method` -- an entry carries exactly one of the two."
+          "enum": ["alp_ota_spi_otp", "alp_ota_spi_bridge"],
+          "description": "How this helper's firmware is updated in the FIELD, once the module is in a customer's hands.  `alp_ota_spi_otp` (AEN's `cc3501e_otp`): Alp-released firmware applied over the bridge SPI link, programming the chip's own OTP.  `alp_ota_spi_bridge` (the GD32 bridge): streamed over the bridge link into a slot-A/B application bootloader with commit + rollback -- a DIFFERENT value on purpose, because the GD32 has no OTP to program.  Independent of `flash_method`; declaring a channel does not by itself make the helper un-flashable, and does not imply anything about who may flash it -- that is `flash_policy`."
         }
       }
     },

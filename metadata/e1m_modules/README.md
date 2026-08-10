@@ -97,17 +97,55 @@ to `include/alp/soc_caps.h` so `ALP_HAS(...)` drops the matching
 `ALP_CAP_*` flags; the build emitters pass `-DALP_SOM_<SKU>` only for
 restricted SKUs.
 
-## AEN `helper_firmware` / `cc3501e_otp`
+## `helper_firmware` — three independent axes
+
+A `helper_firmware[]` entry describes an on-module helper MCU along
+three axes that do **not** imply one another:
+
+| Key | Answers |
+|---|---|
+| `flash_method` / `flash_args` | how the image is **written locally** (the transport) |
+| `update_channel` | how the device is updated **in the field** |
+| `flash_policy` | **who** may invoke `flash_method`, and **when** |
+
+`flash_policy` is `customer` (a plain flash target — the meaning of
+every entry written before the key existed, and the value assumed when
+it is absent), `factory` (Alp Lab programs it in production; never a
+customer flash target), or `recovery_only` (Alp Lab programs it in
+production, and the customer may flash it *only* to recover a bricked
+device, with Alp Lab-supplied binaries).  It becomes **required** as
+soon as an entry declares both a `flash_method` and an
+`update_channel`, because that is exactly where "who may flash this"
+stops being inferable.
+
+### AEN / `cc3501e_otp`
 
 All six AEN presets (`E1M-AEN301..801`) carry a `cc3501e_otp` helper
-entry with `update_channel: alp_ota_spi_otp`, not a `flash_method`.
-The CC3501E (TI Wi-Fi 6 + BLE 5.4 coprocessor) is Alp-released firmware
-applied over the bridge SPI link, programming the chip's own OTP — it
-is never customer-flashed, so it carries no `flash_method` entry.
+entry with `update_channel: alp_ota_spi_otp` and `flash_policy:
+factory`, and no `flash_method`.  The CC3501E (TI Wi-Fi 6 + BLE 5.4
+coprocessor) is Alp-released firmware applied over the bridge SPI link,
+programming the chip's own OTP — it is never customer-flashed.
 The six SKUs must stay in lockstep (same `update_channel`, same
-`firmware_path` provenance).  See `metadata/schemas/som-preset-v1.schema.json`
-`$defs/helper_firmware_entry` for the customer-flashable-vs-vendor-OTA
-schema contract.
+`flash_policy`, same `firmware_path` provenance).
+
+### V2N / V2M / `gd32_bridge`
+
+All four E1M-X presets (`E1M-V2N101`, `E1M-V2N102`, `E1M-V2M101`,
+`E1M-V2M102` — one PCB, variant-populated) carry a byte-identical
+`gd32_bridge` entry declaring **all three** axes:
+`flash_method: swd_probe` + `flash_policy: recovery_only` +
+`update_channel: alp_ota_spi_bridge`.  Alp Lab flashes the GD32 in
+production; field updates stream over the bridge link into the
+slot-A/B application bootloader (protocol v0.6 Path A); SWD is the
+customer's bricked-board recovery route.  `flash_args` names both
+halves of the probe decision — `target` (OpenOCD/pyOCD) **and**
+`jlink_device` (SEGGER `GD32G553MEY7TR`); the schema rejects a
+`swd_probe` entry that names only one, because `tan flash` refuses at
+the probe rather than guess.  `expect_dpidr` stays unset until the SW-DP
+ID is measured on silicon.
+
+See `metadata/schemas/som-preset-v1.schema.json`
+`$defs/helper_firmware_entry` for the full contract.
 
 ## Consumed by
 

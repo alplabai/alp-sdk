@@ -294,8 +294,12 @@ normal use the customer flashes and configures nothing; the device boots
 the bridge and the Alif-side `<alp/...>` calls work out of the box.
 Firmware updates are also Alp-released and applied over the bridge SPI
 link, programming the chip's own OTP (the SoM preset models this with
-`helper_firmware[].update_channel: alp_ota_spi_otp`, never a
-`flash_method`) — the CC3501E is **never customer-flashed**.  The
+`helper_firmware[].update_channel: alp_ota_spi_otp` plus
+`flash_policy: factory`, and no `flash_method` at all) — the CC3501E is
+**never customer-flashed**.  `flash_policy` carries that reason
+directly: Alp Lab programs the part in production.  The OTA channel is
+a separate fact and does not itself make a helper un-flashable (the
+GD32 bridge has both a channel and a recovery-only flash path).  The
 version-pinned prebuilt blob at
 `firmware/cc3501e/prebuilt/cc3501e-vX.Y.Z.bin` is that OTA payload's
 provenance, not a customer flashing target.
