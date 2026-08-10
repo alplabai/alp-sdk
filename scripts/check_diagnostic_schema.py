@@ -71,7 +71,18 @@ def main() -> int:
         return 1
 
     validator = _make_validator(args.schema)
-    doc = machine_json_for_board_yaml(args.fixture)
+    try:
+        doc = machine_json_for_board_yaml(args.fixture)
+    except Exception as exc:  # noqa: BLE001 -- deliberately broad, framed below
+        # Same posture as the --fixture-is-a-file guard above: the old
+        # subprocess form (`alp validate`) framed a crash out of the
+        # validator as a clean CLI error; the in-process form has no argv/
+        # command layer to do that for free, so the gate frames it itself
+        # instead of letting a bare traceback (e.g. UnicodeDecodeError on a
+        # non-UTF-8 fixture) stand in for the gate's verdict.
+        print(f"check_diagnostic_schema: --fixture {args.fixture} could not be "
+              f"validated: {exc}")
+        return 1
 
     errors = sorted(validator.iter_errors(doc), key=lambda e: list(e.absolute_path))
     if errors:

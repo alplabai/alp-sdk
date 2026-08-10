@@ -30,8 +30,10 @@ all **14** fixtures under `tests/fixtures/board_yaml_bad/` the CLI's stdout and
 same verdict on the passing case, on a schema-nonconformant emitter (a stray
 key, an out-of-enum `severity`, a dropped required `code`), on an invalid
 Draft 2020-12 schema, and on the zero-diagnostics branch. That equality is now
-a test (`test_cli_json_is_byte_identical_to_the_library_entry_point`), not a
-claim, for as long as the CLI exists.
+a test (`test_cli_json_is_document_identical_to_the_library_entry_point`),
+not a claim, for as long as the CLI exists — `alp_cli.validate`'s `--format
+json` branch calls `machine_json_for_board_yaml()` directly rather than a
+parallel `to_machine_json(collector)` path, so the equality is structural.
 
 Two things the subprocess form gave for free had to be re-homed rather than
 dropped. Click's `click.Path(exists=True, dir_okay=False)` turned a bad

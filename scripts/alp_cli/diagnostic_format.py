@@ -34,7 +34,6 @@ from typing import Iterable
 
 from alp_cli import __version__ as _ALP_CLI_VERSION
 from alp_cli.diagnostic import Diagnostic, _doc_url
-from alp_cli.validator import validate_board_yaml
 
 SCHEMA_VERSION = 1
 SARIF_VERSION = "2.1.0"
@@ -123,7 +122,16 @@ def machine_json_for_board_yaml(
     check the CLI runs afterwards (`load_board_yaml`) is a SEPARATE
     contract with no diagnostic-v1 representation, and is deliberately
     not run here.
+
+    Imports `validate_board_yaml` locally rather than at module scope: this
+    module is the published machine-diagnostics contract (JSON + SARIF
+    exporters), and a consumer wanting only `to_machine_json`/`to_sarif`
+    (an LSP formatting an already-collected diagnostic list) should not
+    have to pull in the validator -- and, with it, `yaml`/`jsonschema`/
+    `alp_project_loader` -- just to import this module.
     """
+    from alp_cli.validator import validate_board_yaml
+
     return to_machine_json(
         validate_board_yaml(path), tool_name=tool_name, tool_version=tool_version
     )

@@ -255,13 +255,28 @@ def test_cli_format_sarif_emits_valid_sarif_on_stdout():
     assert "error[ALP-B005]" not in proc.stdout
 
 
-def test_cli_json_is_byte_identical_to_the_library_entry_point():
-    # scripts/check_diagnostic_schema.py validates the LIBRARY document; this
-    # is what keeps that gate's verdict identical to the CLI's, for as long as
-    # the CLI exists (ADR 0020 retires it).
+def test_cli_json_is_document_identical_to_the_library_entry_point():
+    # `alp_cli.validate` routes --format json through machine_json_for_board_yaml()
+    # directly (not a parallel to_machine_json(collector) call), so this is a
+    # structural equality, not a coincidence two paths happen to agree on. It's
+    # what keeps scripts/check_diagnostic_schema.py's verdict (which validates the
+    # LIBRARY document) identical to the CLI's, for as long as the CLI exists
+    # (ADR 0020 retires it). Compares parsed documents, not raw bytes -- an
+    # indent=2 -> indent=4 change at validate.py's json.dumps() call would not
+    # redden this.
     fixture = FIX_BAD / "ALP-B005-bad-sku.yaml"
     from_cli = json.loads(_run_alp_validate(fixture, "--format", "json").stdout)
     assert from_cli == machine_json_for_board_yaml(fixture)
+
+
+def test_cli_json_matches_library_on_the_zero_diagnostics_branch_too():
+    # The drift lock above only exercises a fixture that produces
+    # diagnostics; a clean board.yaml is a distinct code path (an empty
+    # `diagnostics` array) and must agree with the library door too.
+    fixture = REPO / "tests" / "fixtures" / "board_yaml_good" / "minimal.yaml"
+    from_cli = json.loads(_run_alp_validate(fixture, "--format", "json").stdout)
+    assert from_cli == machine_json_for_board_yaml(fixture)
+    assert from_cli["diagnostics"] == []
 
 
 def test_cli_default_format_is_human():
