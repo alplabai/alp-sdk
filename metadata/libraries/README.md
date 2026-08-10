@@ -40,7 +40,7 @@ manifest-driven **top-level** `libraries:` selection.
 | `cmsis-cv`  | B    | (SHA pin, no upstream tags) | Apache-2.0 | zephyr | no upstream Zephyr module glue yet; recipe-only |
 | `arm-2d`    | B    | v1.2.6     | Apache-2.0 | zephyr    | no upstream Zephyr module glue yet; recipe-only |
 
-`python -m alp_cli doctor` reports the selection for the project in scope (tier + licence +
+`tan doctor` reports the selection for the project in scope (tier + licence +
 compatibility), reading these same manifests — so the CLI and alp-studio's
 library picker can never disagree.
 
@@ -158,7 +158,7 @@ for the authoritative schema. A manifest declares:
 ```yaml
 schema_version: 1
 name: lvgl                     # must match the filename (<name>.yaml)
-description: "..."             # one-liner, surfaced in `python -m alp_cli doctor`
+description: "..."             # one-liner, surfaced in `tan doctor`
 tier: A                        # A (curated, CI-built) | B (recipe-only)
 version: "9.5.0"               # the pinned upstream version (never a range)
 license: MIT                   # SPDX id from the allowlist (below)
@@ -259,5 +259,5 @@ A library ships as **Tier A** only if it clears all of:
 
 Anything that can't yet meet that bar ships as **Tier B** (recipe-only): the
 wiring + compatibility metadata are maintained and emitted, but the library is
-not built in alp-sdk CI, and `python -m alp_cli doctor` labels it. Promotion B → A requires
+not built in alp-sdk CI, and `tan doctor` labels it. Promotion B → A requires
 a dedicated owner and a CI build lane.

@@ -106,7 +106,7 @@ table stale.
 The cell reflects the SoM at its full topology (the SoM's maximum
 capability), matching the SKU-row axis of the swap-test matrix above.  It is
 a *compatibility* verdict, not a byte-identity claim: it says the selection
-resolves and can be wired, exactly the guarantee `python -m alp_cli doctor`
+resolves and can be wired, exactly the guarantee `tan doctor`
 reports before a build.
 
 <!-- BEGIN GENERATED: gen_portability_matrix_libraries -->
