@@ -191,24 +191,37 @@ def _power_on_test(cfg: Cfg) -> tuple[bool, Step]:
 
 
 def _record(cfg: Cfg, bundle: dict, manifest: Path, test_ran: bool, test_ok: bool) -> Step:
-    """`test_ran` must mean the power-on test was actually configured and
+    """Three-valued, one value per outcome (#1305):
+
+      * `pass`        -- --execute, a test was configured, it ran, it passed.
+      * `fail`        -- --execute, a test was configured, it ran, it FAILED.
+      * `pending-hw`  -- everything else: dry-run, no test configured, or a
+                         test skipped under --execute.
+
+    `test_ran` must mean the power-on test was actually configured and
     invoked -- a skipped test is not a passed test (#1276) -- so `test_ok`
-    only earns a `pass` record when `test_ran` is also True. Everything
-    else records `pending-hw`: dry-run, no test configured, a skipped test
-    under --execute, or a configured test that ran and failed.
+    only earns a `pass` when `test_ran` is also True.
 
-    Only `pass` and `pending-hw` are emitted. Those are the only two values
-    this repo has ever passed to `--test-result`; som_ledger.py itself lives
-    in alp-sdk-internal, so what it would accept beyond them cannot be checked
-    from here. A third value must land there first.
+    `cfg.execute` gates BOTH `pass` and `fail`, and that is load-bearing, not
+    symmetry for its own sake: `_power_on_test` returns `test_ran=True` in a
+    dry run too, because it still invokes the runner with `--validate` to
+    check the spec. A spec that fails validation on a workstation with no
+    board attached is not a unit that failed its power-on test, and must not
+    be recorded as one.
 
-    Consequence worth knowing: a configured test that RAN and FAILED records
-    `pending-hw`, which is indistinguishable in the ledger from a unit that was
-    never tested. Splitting those needs a vocabulary change on the private
-    side -- tracked separately, not worked around here."""
+    Until #1305 this collapsed `fail` into `pending-hw`, so a unit whose
+    power-on test executed and failed was indistinguishable in the ledger
+    from a unit never tested -- "not yet verified" and "verified bad" read
+    the same. `som_ledger.py` lives in alp-sdk-internal and accepts
+    `choices=["pass", "fail", "pending-hw"]`, so the private side takes the
+    third value; that was the ordering constraint #1305 named, and it is
+    met."""
     if not (cfg.ledger_root and cfg.som_ledger):
         return Step("record", True, "no --ledger-root/--som-ledger; ledger record skipped")
-    result = "pass" if (cfg.execute and test_ran and test_ok) else "pending-hw"
+    if cfg.execute and test_ran:
+        result = "pass" if test_ok else "fail"
+    else:
+        result = "pending-hw"
     cmd = [sys.executable, str(cfg.som_ledger), "--ledger-root", str(cfg.ledger_root),
            "record", "--sku", bundle["sku"], "--serial", cfg.serial,
            "--family", bundle["family"], "--hw-rev", bundle["hw_rev"],
