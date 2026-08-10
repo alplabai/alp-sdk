@@ -151,6 +151,20 @@ class Slice:
     # description).  Consumed by `_slice_flash_recipe`'s `zephyr` branch to
     # arm the direct-flash path in `flash_args`.
     jlink_flash_device: Optional[str] = None
+    # The read-only SW-DP IDR (DPIDR) wrong-board preflight PAIR for this
+    # core (soc-spec-v1 `variants[].debug.expect_dpidr` +
+    # `variants[].debug.jlink_device[<core_id>]`), resolved together by
+    # `loader._resolve_flow_d_preflight` -- both None (preflight not armed,
+    # every variant that has not been measured) or both set; never one of
+    # the two.  `expect_dpidr` is the ID the board's debug port must answer
+    # BEFORE any write; `jlink_device` is the LIVE-CORE attach profile that
+    # read is performed with -- distinct from `jlink_flash_device` above,
+    # which is the part-number flash-algorithm profile.  Resolved SoC-variant
+    # facts like `jlink_flash_device`, NOT customer-overridable.  Consumed by
+    # `_slice_flash_recipe`'s `zephyr` branch, which emits them into
+    # `flash_args` as an inseparable pair (#1355).
+    expect_dpidr: Optional[str] = None
+    jlink_device: Optional[str] = None
 
     # Populated by Orchestrator.fan_out:
     build_dir: Optional[Path] = None

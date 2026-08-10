@@ -68,9 +68,27 @@ def _slice_flash_recipe(
         # downstream consumer (tan) needs to pick that path over the
         # SETOOLS/SE-UART fallback. Absent for every non-AEN slice today,
         # so the args dict stays `{}` -- no shape change for them.
+        #
+        # `expect_dpidr` + `jlink_device` are the read-only SW-DP IDR
+        # wrong-board preflight (#1355) and are emitted as ONE inseparable
+        # pair: the expected debug-port ID, and the live-core attach profile
+        # the read is performed with. Without them a real MRAM write can
+        # proceed against whatever board answered -- measured on silicon
+        # 2026-08-10, four transcripts, `ISSUES = []` and no guard -- because
+        # `JLinkExe` selects a probe only by serial (`-SelectEmuBySN`) and
+        # this bench has an OEM-cloned serial across two probes on different
+        # boards. Emitting exactly one of the two is NOT a partial win: tan's
+        # `validate_flow_d_preflight_args` refuses a half-armed pair at plan
+        # time, so it would hard-fail every AEN flash including a dry run.
+        # `loader._resolve_flow_d_preflight` guarantees the both-or-neither
+        # shape upstream; the `and` here makes that guarantee locally
+        # readable rather than assumed at a distance.
         args: dict[str, Any] = {}
         if slice_.jlink_flash_device:
             args["jlink_flash_device"] = slice_.jlink_flash_device
+        if slice_.expect_dpidr and slice_.jlink_device:
+            args["expect_dpidr"] = slice_.expect_dpidr
+            args["jlink_device"] = slice_.jlink_device
         return ("zephyr_west_flash", args)
     if slice_.os == "baremetal":
         return ("baremetal_cmake_flash", {})
