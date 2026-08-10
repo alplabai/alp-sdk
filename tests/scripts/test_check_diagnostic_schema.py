@@ -28,15 +28,25 @@ def _run(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _expected_not_a_file_message(fixture: str) -> str:
+    # The guard interpolates `args.fixture`, an argparse `type=Path` value
+    # (i.e. `Path(fixture)`), directly into an f-string -- so its separator
+    # follows the platform (`\` on Windows, `/` on POSIX). Build the
+    # expectation through the same `Path(...)` conversion rather than
+    # hard-coding a separator, so this stays load-bearing on POSIX instead
+    # of just being right on the author's own OS (tan-cli#620 class of bug).
+    return (
+        f"check_diagnostic_schema: --fixture {Path(fixture)} is not a file; "
+        f"point it at a known-bad board.yaml under "
+        f"tests/fixtures/board_yaml_bad/.\n"
+    )
+
+
 def test_fixture_pointing_at_a_directory_fails_cleanly() -> None:
     fixture = "tests/fixtures/board_yaml_bad"
     proc = _run("--fixture", fixture)
     assert proc.returncode == 1
-    assert proc.stdout == (
-        f"check_diagnostic_schema: --fixture {fixture} is not a file; "
-        f"point it at a known-bad board.yaml under "
-        f"tests/fixtures/board_yaml_bad/.\n"
-    )
+    assert proc.stdout == _expected_not_a_file_message(fixture)
     assert proc.stderr == ""
 
 
@@ -44,11 +54,7 @@ def test_fixture_that_does_not_exist_fails_cleanly() -> None:
     fixture = "tests/fixtures/board_yaml_bad/NOPE.yaml"
     proc = _run("--fixture", fixture)
     assert proc.returncode == 1
-    assert proc.stdout == (
-        f"check_diagnostic_schema: --fixture {fixture} is not a file; "
-        f"point it at a known-bad board.yaml under "
-        f"tests/fixtures/board_yaml_bad/.\n"
-    )
+    assert proc.stdout == _expected_not_a_file_message(fixture)
     assert proc.stderr == ""
 
 
