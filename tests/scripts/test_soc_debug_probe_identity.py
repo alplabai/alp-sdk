@@ -154,9 +154,25 @@ def test_jlink_device_without_expect_dpidr_passes(tmp_path, monkeypatch):
     match another board on the same bench passes on exactly the board it
     exists to exclude. This gate must never push anyone toward inventing a
     value.
+
+    The attach map here is deliberately INCOMPLETE (m55_he only) as well as
+    unmeasured. A `jlink_device`-complete fixture would satisfy a SYMMETRIC
+    rule too, so it could not tell the asymmetric rule from a symmetric one
+    -- it would assert the converse is legal while deciding nothing about
+    it. Measured: making the rule symmetric leaves a complete-map fixture
+    green and only this one red.
     """
     doc = copy.deepcopy(_E8_LIKE_WITH_A32)
     del doc["variants"][0]["debug"]["expect_dpidr"]
+    del doc["variants"][0]["debug"]["jlink_device"]["m55_hp"]
+    assert _run(tmp_path, monkeypatch, doc) == 0
+
+
+def test_no_debug_probe_facts_at_all_passes(tmp_path, monkeypatch):
+    """Neither key, and no attach map either -- the state of a variant
+    nobody has put on a bench. Nothing to pair, nothing to refuse."""
+    doc = copy.deepcopy(_E8_LIKE_WITH_A32)
+    doc["variants"][0]["debug"] = {"pyocd_target": "AE822FA0E5597LS0"}
     assert _run(tmp_path, monkeypatch, doc) == 0
 
 

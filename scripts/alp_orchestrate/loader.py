@@ -320,10 +320,14 @@ def _enforce_flow_d_preflight_pair(
     """
     if slice_.os != "zephyr" or not slice_.jlink_flash_device:
         return
-    if debug.get("expect_dpidr") and not slice_.jlink_device:
+    # Bound once and read from the local: interpolating `debug['expect_dpidr']`
+    # into the message would make a mis-edited condition fail with a KeyError
+    # raised from inside its own diagnostic, instead of with the diagnostic.
+    expect_dpidr = debug.get("expect_dpidr")
+    if expect_dpidr and not slice_.jlink_device:
         raise OrchestratorError(
             f"{sku}: SoC variant publishes debug.expect_dpidr "
-            f"({debug['expect_dpidr']}) but no debug.jlink_device entry for "
+            f"({expect_dpidr}) but no debug.jlink_device entry for "
             f"core '{slice_.core_id}', which flashes over Flow D -- the "
             f"wrong-board SW-DP IDR preflight needs BOTH (the expected ID "
             f"and the live-core attach profile it is read with), and a "
