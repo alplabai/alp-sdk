@@ -33,6 +33,15 @@ path traversal) — the two incidents tan-cli#279 was filed about. The other fiv
 are `77abfd7c`, `f4d87a1f`, `5efa72dd`, `957fdaa5`, `b92b8785`. All seven match
 the widened list.
 
+`tests/scripts/test_dispatch_paths_match_seam1.py` enforced the old equality,
+so it moves with the workflow rather than being deleted: the direction that
+matters stays STRICT (a path in `parity-seam1.yml` and not in the sender is
+still a hard failure -- that is the tan-cli#156 shape), and the sender's EXTRA
+paths must equal a declared `EXPECTED_HAND_PORT_PATHS` set. Both drift
+directions on that set are reachable failures -- a hand-port source quietly
+dropped, or an unrelated path quietly added -- verified by mutating the
+workflow and re-running, not assumed.
+
 The old comment's warning still holds in its new shape: a path list is a thing
 that can be wrong, and the dispatch API answers 204 whether or not anything is
 listening. The backstop for that needs nothing from this repo — tan-cli's new
