@@ -39,9 +39,14 @@ def _load_alp_template():
         raise SystemExit(1)
     # alp_template.py lives at <sdk>/scripts/alp_template.py -- not under
     # the alp_cli package (see pyproject.toml's packages.find), so make
-    # sure <sdk>/scripts is importable before reaching for it. Mirrors
-    # alp_cli/doctor.py's _library_check() sys.path handling for the same
-    # top-level-scripts-module situation.
+    # sure <sdk>/scripts is importable before reaching for it.
+    #
+    # This used to cite `alp_cli/doctor.py's _library_check()` as the
+    # matching precedent.  No function of that name ever existed (the one
+    # meant was `_check_libraries`), and that function has since moved to
+    # `tan doctor` (ADR 0020 end-state B), so nothing in alp_cli does this
+    # any more -- the mechanism is documented here rather than by pointing
+    # at a second copy of it.
     scripts_dir = str(root / "scripts")
     if scripts_dir not in sys.path:
         sys.path.insert(0, scripts_dir)
