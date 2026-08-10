@@ -7,6 +7,48 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — an AEN MRAM write had no wrong-board guard, because the SW-DP IDR was published nowhere (#1355)
+
+`expect_dpidr` — the value that lets a host writer refuse an unidentified
+board — existed nowhere under `metadata/` or `scripts/`. A real Flow D MRAM
+write to an E1M-AEN801 therefore proceeded with no guard and no signal: four
+transcripts on labgrid place `e1m-aen-evk-01` reported `ISSUES = []`.
+
+That is a customer path, not bench hygiene. `JLinkExe` selects an adapter
+**only** by serial (`-SelectEmuBySN`), and J-Link serial `603000869` is
+OEM-cloned across two adapters on that bench — the AEN E8 (USB path
+`3-4.4.3`, SW-DP `0x4C013477`) and the GD32 bridge (`3-4.2`). Detaching one
+does not turn the ambiguity into an error; it collapses it into a certainty
+pointing at whichever adapter is still attached.
+
+`metadata/socs/alif/ensemble/e8.json` now publishes
+`debug.expect_dpidr: "0x4C013477"` on `AE822FA0E5597LS0`, the variant
+carrying `E1M-AEN801`, and the orchestrator emits it into `flash_args`
+alongside the already-published `jlink_flash_device`. The value is a
+measurement (re-confirmed on silicon 2026-08-10), not a derivation, and the
+new `soc-spec-v1` schema entry pins it to a `0x`-prefixed 32-bit hex
+constant — a DPIDR is exactly 8 hex digits, and a truncated one would pass a
+downstream address validator that accepts any length.
+
+**`flash_args.jlink_device` ships in the same change, necessarily.**
+`debug.jlink_device` — the per-core *live-core attach profile*, distinct from
+the part-number `jlink_flash_device` used for the write — already existed on
+the E8 variants but never reached `flash_args`. The two are one guard: the
+expected ID, and the device the read is performed with. A consumer validates
+them as a pair and refuses a half-armed one, so publishing `expect_dpidr`
+alone would have turned every AEN write into a hard refusal, dry runs
+included. The emitter treats them as inseparable, `validate_metadata.py`
+rejects a variant that publishes `expect_dpidr` without an attach profile for
+every Cortex-M core, and the loader refuses a Flow-D-armed Zephyr slice whose
+core lost one rather than letting the guard degrade quietly back to nothing.
+
+The GD32 entries are deliberately untouched. That part's SW-DP ID is
+contested — `0x0BE12477`, asserted with no identifiable provenance, versus
+`0x6BA02477` in this repo's own `metadata/chips/gd32_swd.yaml:49` — and the
+GD32 is not on the bench, so nobody can measure it. A guard armed at a wrong
+ID is worse than an unarmed one: if the wrong value happens to match the
+other board, it passes on exactly the board it exists to exclude.
+
 ### Fixed — `--emit zephyr-board`: E8 facts on every AEN SKU, four fail-open paths, and an error that blamed the customer (alplabai/tan-cli#493, alplabai/tan-cli#591)
 
 `scripts/gen_zephyr_board.py` generates board files that are meant to be
