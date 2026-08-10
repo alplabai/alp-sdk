@@ -7,6 +7,41 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Changed — the diagnostics schema gate no longer runs through the `alp` command surface (#837)
+
+ADR [0020](docs/adr/0020-sdk-owns-build-execution.md) ends with alp-sdk owning
+zero user commands. `scripts/check_diagnostic_schema.py` stood in the way of
+that: to get a real machine document to validate, it shelled `python -m
+alp_cli.main validate --format json`. That made two pure CLI wrappers —
+`alp_cli/main.py` (41 lines) and `alp_cli/validate.py` (43 lines) —
+load-bearing for a gate registered in `metadata/quality-tasks-v1.json`, so the
+command surface could not retire without reddening the metadata sweep.
+
+The gate now calls the emitter directly:
+`alp_cli.diagnostic_format.machine_json_for_board_yaml(path)`, a new library
+entry point that returns exactly the document `--format json` prints. The
+modules doing the actual work — `validator.py`, `diagnostic.py`, `yaml_pos.py`
+and the schema-governed exporters in `diagnostic_format.py` — are untouched and
+stay; only the door the gate comes in through moved. Nothing is deleted here.
+
+The document under test is the same document, measured rather than assumed: on
+all **14** fixtures under `tests/fixtures/board_yaml_bad/` the CLI's stdout and
+`machine_json_for_board_yaml()` compare equal, and both gate forms return the
+same verdict on the passing case, on a schema-nonconformant emitter (a stray
+key, an out-of-enum `severity`, a dropped required `code`), on an invalid
+Draft 2020-12 schema, and on the zero-diagnostics branch. That equality is now
+a test (`test_cli_json_is_byte_identical_to_the_library_entry_point`), not a
+claim, for as long as the CLI exists.
+
+Two things the subprocess form gave for free had to be re-homed rather than
+dropped. Click's `click.Path(exists=True, dir_okay=False)` turned a bad
+`--fixture` into a clean message; with no argv layer the gate owns that check
+itself, or a mistyped path comes back as an `IsADirectoryError` traceback. And
+the promise that `--format json` prints ONLY the JSON document, with no human
+prose interleaved, is a property of the CLI and not of this schema — it stays
+locked by `tests/scripts/test_diagnostic_format.py`, which lives with the
+wrappers and retires with them.
+
 ### Fixed — the tan re-sync trigger never fired for a hand-port source (#855)
 
 `.github/workflows/dispatch-tan-parity.yml` is ADR-0020's cross-repo trigger:
