@@ -196,8 +196,8 @@ def test_expect_dpidr_gate_names_the_uncovered_core(tmp_path, monkeypatch):
 def test_shipped_e8_publishes_the_measured_dpidr():
     """The value this issue exists to publish, pinned at its source.
 
-    `0x4C013477` is a MEASUREMENT (labgrid place e1m-aen-evk-01, re-confirmed
-    on silicon 2026-08-10), not a derivation -- so it is asserted verbatim
+    `0x4C013477` is a MEASUREMENT (re-confirmed on silicon 2026-08-10), not a
+    derivation -- so it is asserted verbatim
     here, on the variant that carries the E1M-AEN801 SKU.
     """
     doc = json.loads(

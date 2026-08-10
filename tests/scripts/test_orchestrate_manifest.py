@@ -331,9 +331,8 @@ def test_emit_system_manifest_aen_flash_args_carries_dpidr_preflight_pair(
     carry BOTH in `flash_args`, so a downstream flasher can read the debug
     port and abort on the wrong board while the session is still read-only.
 
-    Values asserted verbatim: `0x4C013477` is a measurement (labgrid place
-    e1m-aen-evk-01, re-confirmed on silicon 2026-08-10), and a wrong digit
-    here flashes the wrong board.
+    Values asserted verbatim: `0x4C013477` is a measurement (re-confirmed on
+    silicon 2026-08-10), and a wrong digit here flashes the wrong board.
     """
     path = _write_board(tmp_path, AEN_HAPPY)
     project = load_board_yaml(path)

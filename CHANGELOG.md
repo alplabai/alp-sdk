@@ -12,7 +12,7 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 `expect_dpidr` — the value that lets a host writer refuse an unidentified
 board — existed nowhere under `metadata/` or `scripts/`. A real Flow D MRAM
 write to an E1M-AEN801 therefore proceeded with no guard and no signal: four
-transcripts on labgrid place `e1m-aen-evk-01` reported `ISSUES = []`.
+bench transcripts on 2026-08-10 reported `ISSUES = []`.
 
 That is a customer path, not bench hygiene. `JLinkExe` selects an adapter
 **only** by serial (`-SelectEmuBySN`), and J-Link serial `603000869` is
