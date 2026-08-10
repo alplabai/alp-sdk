@@ -49,6 +49,47 @@ GD32 is not on the bench, so nobody can measure it. A guard armed at a wrong
 ID is worse than an unarmed one: if the wrong value happens to match the
 other board, it passes on exactly the board it exists to exclude.
 
+### Fixed — the tan re-sync trigger never fired for a hand-port source (#855)
+
+`.github/workflows/dispatch-tan-parity.yml` is ADR-0020's cross-repo trigger:
+it fires `alp-sdk-planner-change` at `alplabai/tan-cli` whenever this repo's
+reference planner moves, so tan re-tests against the ref that just landed
+instead of its hand-bumped pin. Its `paths:` filter was kept in deliberate
+lockstep with `parity-seam1.yml` — and that lockstep was the bug.
+
+The two lists answer different questions. `parity-seam1.yml` asks *"did our own
+build-plan SHAPE move?"*, so its list is the plan-shape surface. This one asks
+*"did anything TAN MIRRORS move?"*, and tan mirrors a strictly larger surface:
+alongside the 20 relocated `scripts/alp_orchestrate/` modules, `tan/planner/`
+carries **ten hand-ports out of `scripts/`** (`gen_zephyr_board.py`,
+`alp_project_loader.py`, `alp_template.py`, `sentinels.py`, `strict_loaders.py`
+and the five `alp_project_emit/` modules — tan-cli's `HAND_PORT_HASHES` is the
+list). Not one of those paths was in the filter, so a commit touching only a
+hand-port source dispatched nothing and tan learned nothing until someone
+noticed by hand.
+
+Measured over the last 400 commits touching one of those sources: **7 of 29
+matched none of the four original paths**, including `98807809` (the missing
+`CONFIG_USE_DT_CODE_PARTITION=y`, which shipped) and `cb7f64ae` (#1125/#1126,
+path traversal) — the two incidents tan-cli#279 was filed about. The other five
+are `77abfd7c`, `f4d87a1f`, `5efa72dd`, `957fdaa5`, `b92b8785`. All seven match
+the widened list.
+
+`tests/scripts/test_dispatch_paths_match_seam1.py` enforced the old equality,
+so it moves with the workflow rather than being deleted: the direction that
+matters stays STRICT (a path in `parity-seam1.yml` and not in the sender is
+still a hard failure -- that is the tan-cli#156 shape), and the sender's EXTRA
+paths must equal a declared `EXPECTED_HAND_PORT_PATHS` set. Both drift
+directions on that set are reachable failures -- a hand-port source quietly
+dropped, or an unrelated path quietly added -- verified by mutating the
+workflow and re-running, not assumed.
+
+The old comment's warning still holds in its new shape: a path list is a thing
+that can be wrong, and the dispatch API answers 204 whether or not anything is
+listening. The backstop for that needs nothing from this repo — tan-cli's new
+`planner-resync.yml` (alplabai/tan-cli#624) also runs on a daily cron, which
+catches a missed path within 24h with no alp-sdk credential and no list having
+to be right.
 ### Fixed — `--emit zephyr-board`: E8 facts on every AEN SKU, four fail-open paths, and an error that blamed the customer (alplabai/tan-cli#493, alplabai/tan-cli#591)
 
 `scripts/gen_zephyr_board.py` generates board files that are meant to be
