@@ -7,6 +7,37 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — `alp faultdecode` no longer reports the `HFSR.FORCED` escalation as the fault's root cause (#1358)
+
+`HFSR.FORCED` (bit 30) says only that a configurable fault (MemManage/
+BusFault/UsageFault) could not be taken by its own handler and was escalated
+to HardFault -- it answers *how* the CPU reached `HardFault_Handler`, never
+*what* broke; that answer is in CFSR. `BFSR.LSPERR` (bit 13) and
+`MMFSR.MLSPERR` (bit 5) -- lazy floating-point state-preservation faults --
+were the only two CFSR cause bits with no branch in `_root_cause`'s ladder, so
+they fell through every branch onto `FORCED`:
+
+```
+$ alp faultdecode --cfsr 0x2000 --hfsr 0x40000000
+Most likely cause:
+  Forced HardFault -- a configurable fault escalated but its own status bits
+  are clear; ...
+```
+
+-- the least actionable half of the registers, and with `LSPERR` set, false:
+the status bits are **not** clear. `--cfsr 0x20 --hfsr 0x40000000` (`MLSPERR`)
+was the same shape. Both bits now have real root-cause branches in
+`scripts/alp_cli/faultdecode.py`, carrying the `BFAR`/`MMFAR` address the
+generic `<NAME> set (<REG>)` fallback used to discard, placed LAST among the
+CFSR causes (below `VECTTBL` and `DEBUGEVT` too) so every existing precedence
+is untouched. `FORCED` is the headline only when CFSR names no cause at all --
+the new `_cfsr_names_a_cause()` guard is keyed on the flag's **register**, not
+a hand-kept name list, so a CFSR bit added tomorrow outranks `FORCED` the day
+it lands. An address-VALID bit (`BFARVALID`/`MMARVALID`) was never a cause
+either, and the generic fallback now skips those too. The escalation is not
+lost: it is still printed verbatim as its own `[HFSR] FORCED (bit 30)` entry
+under `Set flags:`, which is where a qualifier belongs.
+
 ### Fixed — CC3501E Wi-Fi connect no longer re-associates on every retry or reports a false "connected", `wifi status`/`wifi rssi` survive a radio op, and `wifi connect`'s own timeout budget is honoured (#1376, #1377, #1378)
 
 A wire-contract drift on `WIFI_CONNECT_STA` (0x12): the firmware was

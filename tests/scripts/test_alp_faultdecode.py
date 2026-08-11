@@ -97,6 +97,85 @@ def test_decode_hfsr_only_forced():
     assert "forced hardfault" in report.root_cause.lower()
 
 
+# -------- issue #1358: HFSR.FORCED is an escalation, not a root cause ---------
+#
+# Register values below are transcribed verbatim from issue #1358's own
+# reproduction (`faultdecode --cfsr 0x2000 --hfsr 0x40000000`), a real
+# ARMv8-M fault shape: BFSR.LSPERR (bit 13, 0x2000) / MMFSR.MLSPERR (bit 5,
+# 0x20) escalated to HardFault via HFSR.FORCED (bit 30, 0x40000000).
+
+
+def test_forced_no_longer_reported_as_root_cause_when_lsperr_is_set():
+    # Pre-fix, this decoded to "Forced HardFault -- ... its own status bits
+    # are clear" -- false, since LSPERR (bit 13) IS set. LSPERR must now win.
+    report = fd.decode(cfsr=0x2000, hfsr=0x40000000)
+    assert report.has("LSPERR")
+    assert report.has("FORCED")  # the escalation is still reported as a flag
+    rc = report.root_cause.lower()
+    assert "lsperr" not in rc  # the flag name isn't echoed, the meaning is
+    assert "forced hardfault" not in rc
+    assert "status bits are clear" not in rc  # the false clause is gone
+    assert "lazily preserving the floating-point context" in rc
+
+
+def test_forced_no_longer_reported_as_root_cause_when_mlsperr_is_set():
+    # Same defect, the MMFSR sibling: --cfsr 0x20 --hfsr 0x40000000.
+    report = fd.decode(cfsr=0x20, hfsr=0x40000000)
+    assert report.has("MLSPERR")
+    assert report.has("FORCED")
+    rc = report.root_cause.lower()
+    assert "forced hardfault" not in rc
+    assert "status bits are clear" not in rc
+    assert "memmanage fault while lazily preserving" in rc
+
+
+def test_lsperr_root_cause_carries_the_bfar_address():
+    # The generic fallback the LSPERR/MLSPERR bits used to fall through to
+    # discarded BFAR/MMFAR; the dedicated branch must not repeat that.
+    report = fd.decode(cfsr=0x2000 | (1 << 15), hfsr=0x40000000, bfar=0xDEADBEEF)
+    assert report.bfar_valid is True
+    assert "0xdeadbeef" in report.root_cause.lower()
+
+
+def test_mlsperr_root_cause_carries_the_mmfar_address():
+    report = fd.decode(cfsr=0x20 | (1 << 7), hfsr=0x40000000, mmfar=0xCAFEBABE)
+    assert report.mmfar_valid is True
+    assert "0xcafebabe" in report.root_cause.lower()
+
+
+def test_forced_still_headlines_when_cfsr_names_no_cause():
+    # The escalation-vs-cause guard is keyed on whether CFSR carries a real
+    # cause bit, not on removing FORCED outright: with CFSR clear, FORCED's
+    # own "status bits are clear" clause is TRUE and must still be reported.
+    report = fd.decode(cfsr=0, hfsr=0x40000000)
+    assert report.has("FORCED")
+    rc = report.root_cause.lower()
+    assert "forced hardfault" in rc
+    assert "status bits are clear" in rc
+
+
+def test_vecttbl_outranks_lsperr_and_mlsperr():
+    # Two-bit precedence: VECTTBL (HFSR bit1, 0x2) is a more specific finding
+    # than a lazy-FP-preservation fault and must keep winning.
+    assert "vector-table" in fd.decode(cfsr=0x2000, hfsr=0x2).root_cause.lower()
+    assert "vector-table" in fd.decode(cfsr=0x20, hfsr=0x2).root_cause.lower()
+
+
+def test_debugevt_outranks_lsperr_and_mlsperr():
+    # HFSR bit31 (0x80000000).
+    assert "debug event" in fd.decode(cfsr=0x2000, hfsr=0x80000000).root_cause.lower()
+    assert "debug event" in fd.decode(cfsr=0x20, hfsr=0x80000000).root_cause.lower()
+
+
+def test_cmd_lsperr_forced_human_output_names_lsperr_not_forced():
+    result = _run(["--cfsr", "0x2000", "--hfsr", "0x40000000", "--no-color"])
+    assert result.exit_code == 0, result.output
+    assert "status bits are clear" not in result.output.lower()
+    assert "lazily preserving the floating-point context" in result.output.lower()
+    # The escalation itself is still visible under "Set flags:".
+    assert "[HFSR] FORCED (bit 30)" in result.output
+
+
 # -------- dump parsing --------------------------------------------------------
 
 
