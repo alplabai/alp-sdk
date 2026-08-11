@@ -47,9 +47,20 @@ int main(void)
 	    .polarity  = ALP_PWM_POLARITY_NORMAL,
 	});
 	if (led == NULL) {
+		/* CONFIG_BOARD_NATIVE_SIM is the only target this example can
+		 * actually tell apart at compile time -- there's no PWM emul
+		 * controller there, so NOT_READY is expected.  On every other
+		 * target (including real silicon) the cause is unknown from
+		 * here, so say nothing about it rather than misdirect (#1375:
+		 * this line used to blame "no PWM emul" even when running on
+		 * an E8 with a genuinely missing alp-pwm3 DT alias). */
+#ifdef CONFIG_BOARD_NATIVE_SIM
 		printf("[pwm] open failed: alp_last_error=%d "
 		       "(expected NOT_READY = -2 on native_sim — no PWM emul)\n",
 		       (int)alp_last_error());
+#else
+		printf("[pwm] open failed: alp_last_error=%d\n", (int)alp_last_error());
+#endif
 		printf("[pwm] done\n");
 		return 0;
 	}

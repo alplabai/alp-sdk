@@ -257,11 +257,37 @@ helper_firmware:
     # output_artefact / firmware_path; can't flash") instead of spawning a
     # real flasher against a nonexistent `TBD` path -- see
     # docs/v0.6-tbd-and-assumptions.md §1.4.
-    flash_method:  swd_probe
+    # Alp Lab flashes this part in production over SWD; the customer's
+    # reachable case is recovering a bricked bridge with an Alp
+    # Lab-supplied binary, so the local flash path is `recovery_only`
+    # and `tan flash` declines it on an ordinary run (#1357).  Normal
+    # field updates go over the bridge link instead -- protocol v0.6
+    # Path A, slot-A/B application bootloader with commit + rollback
+    # (docs/gd32-bridge.md, firmware/gd32-bridge/src/ota.c).
+    flash_method:   swd_probe
+    flash_policy:   recovery_only
+    update_channel: alp_ota_spi_bridge
     flash_args:
-      interface: cmsis-dap
-      target:    gd32g553
-      base:      "0x08000000"
+      interface:    cmsis-dap
+      target:       gd32g553
+      # SEGGER device profile for the GD32G553MEY7TR, verbatim from the
+      # working bench invocation (`JLink -device GD32G553MEY7TR`, J-Link
+      # >= V9.46).  `target:` alone is not enough: tan's swd_probe
+      # prefers the J-Link arm whenever a J-Link binary resolves and
+      # always takes it under --dry-run, and refuses rather than guess a
+      # device profile from an OpenOCD/pyOCD target.
+      jlink_device: GD32G553MEY7TR
+      # NOTE: `expect_dpidr` is deliberately UNSET.  Two SW-DP ID
+      # values are in circulation for the GD32 -- 0x6BA02477 in
+      # metadata/chips/gd32_swd.yaml (itself annotated as the generic
+      # ADIv5 Cortex-M33 r0p1 SW-DPv2 expectation, not a GD32-specific
+      # reading) and an unattributed 0x0BE12477 elsewhere in this repo --
+      # and NEITHER has been measured on a GD32 with a probe attached
+      # (#610).  A wrong-board guard armed with a guessed ID passes on
+      # exactly the board it exists to exclude, so these entries carry
+      # `flash.dpidr-preflight-unarmed` until one value is measured on
+      # silicon.
+      base:         "0x08000000"
 
 default_hw_rev:         r1
 default_board:        E1M-X-EVK
