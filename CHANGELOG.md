@@ -7,7 +7,7 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
-### Fixed — CC3501E Wi-Fi connect no longer re-associates on every retry or reports a false "connected", and `wifi status`/`wifi rssi` survive a radio op (#1376, #1377, #1378)
+### Fixed — CC3501E Wi-Fi connect no longer re-associates on every retry or reports a false "connected", `wifi status`/`wifi rssi` survive a radio op, and `wifi connect`'s own timeout budget is honoured (#1376, #1377, #1378)
 
 A wire-contract drift on `WIFI_CONNECT_STA` (0x12): the firmware was
 redesigned to fire-and-forget (submit once, then latch the outcome for
@@ -62,12 +62,57 @@ zero counters right after boot, `SOCK_RECV`'s zero-bytes-pending), so
 flagging those would trade a rare false `ALP_OK` for a routine false
 `ALP_ERR_IO` on paths that are correct today. The same aliasing remains open
 for every other bare-ack opcode this driver has no per-opcode contract
-knowledge of — `OTA_PROMOTE` is the sharpest example — and needs either a
-wire-level CRC/canary (a protocol version bump) or the same
-submit-once-then-poll-an-independent-latch treatment `WIFI_AP_START` also
-still lacks (it shares `WIFI_CONNECT_STA`'s exact fire-and-forget firmware
-shape but its host wrapper was not restructured here); tracked as a named
-gap on #1378.
+knowledge of — `OTA_PROMOTE` is the sharpest example, and `WIFI_AP_START`
+shares `WIFI_CONNECT_STA`'s exact fire-and-forget firmware shape but its host
+wrapper was not restructured here — filed as #1385.
+
+**`cc3501e_wifi_connect()`'s own poll loop was not honouring its declared
+`timeout_ms`.** The loop called the *public* `cc3501e_wifi_status()`, whose
+own down-window retry can burn up to ten seconds per call on a down
+transport — but the loop's `remaining` budget only ever debited its own
+50 ms sleep, never the time that inner call spent. Measured against a wedged
+transport: `connect(timeout_ms=200)` made 1005 `WIFI_STATUS` attempts
+(50250 ms, 251× the declared budget); at the console's real
+`ALP_COMPANION_WIFI_CONN_MS = 50000` it took 2 h 48 min before timing out.
+Fixed with a new `wifi_status_once()` — a single, non-retried `WIFI_STATUS`
+read the connect loop now uses instead, so the loop's own cadence is the
+sole owner of the retry budget, and `remaining` debits that attempt's own
+worst-case cost alongside the poll gap. `cc3501e_wifi_status()` /
+`cc3501e_wifi_rssi()`'s public doc comments now also warn that their
+down-window retry rides out only a *transient* stall — it re-issues the
+identical transaction with no resync/reset, so it cannot recover a
+genuinely wedged transport, and a direct caller (e.g. the console's `wifi
+status`) will still burn the whole down-window before failing in that case.
+
+### Fixed — `examples/peripheral-io/pwm-led-fade` now wires `alp-pwm3` on E1M-AEN801, so `alp_pwm_open` no longer returns NOT_READY on real silicon (#1375)
+
+The example builds, signs, flashes, and boots cleanly on E1M-AEN801, but
+`alp_pwm_open(ALP_E1M_PWM3)` returned `NOT_READY` on the bench: `board.yaml`'s
+declarative `pins:`/`peripherals:` route emits no devicetree alias by itself —
+nothing in this repo's `CMakeLists.txt` wiring ever calls `alp_project.py
+--emit dts-overlay` for a real build (only `--emit zephyr-conf`, for
+`alp.conf`'s `CONFIG_PWM=y`). The Zephyr PWM backend
+(`src/backends/pwm/zephyr_drv.c`) resolves each portable channel through the
+`alp-pwm<N>` DT alias; with none defined, `ALP_PWM_SPEC_3_INIT` was `{ .dev =
+NULL }`.
+
+Fixed by shipping a board-target-qualified
+`boards/alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay` — the same
+precedent `examples/peripheral-io/alp-console` and
+`examples/aen/aen-analog-validate` already set for bridging AEN peripherals
+end-to-end — wiring `E1M_PWM3` (pad P2_4) through UTIMER10 to a `pwm-leds`
+consumer node aliased as `alp-pwm3`. A host-side regression test
+(`tests/scripts/test_pwm_led_fade_aen_overlay.py`) now parses the shipped
+overlay and fails if the alias, the `pwm-leds` consumer node shape, or the
+`utimer10`/`pwm10` enable ever regress.
+
+Also fixed the failure message that hardcoded a `native_sim` explanation —
+`[pwm] open failed: alp_last_error=-2 (expected NOT_READY = -2 on native_sim —
+no PWM emul)` printed unconditionally, so on real silicon it misdirected the
+operator toward a nonexistent emulation gap instead of the actual missing
+alias. The diagnostic now only names the native_sim cause under
+`CONFIG_BOARD_NATIVE_SIM`; on every other target it reports the raw error
+code without guessing at a cause it can't detect.
 
 ### Fixed — helper MCUs can now describe the GD32 bridge: `flash_policy`, a second OTA channel, and `jlink_device` on all four E1M-X presets (#1357)
 
