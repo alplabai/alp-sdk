@@ -350,3 +350,132 @@ def test_silicon_to_soc_path_rejects_malformed_ref(tmp_path: Path) -> None:
     assert str(excinfo.value) == "silicon ref 'acme:widget' is not a triple-colon string"
 
 
+
+
+# ---------------------------------------------------------------------
+# 6. The wrong-board SW-DP IDR preflight pair (#1355)
+#
+# `debug.expect_dpidr` + `debug.jlink_device[<core>]` are ONE guard, and a
+# downstream flasher (tan `flash_plan.py::validate_flow_d_preflight_args`)
+# refuses a half-armed pair at plan time rather than skipping the check --
+# so the loader must never hand out one without the other, and must refuse
+# loudly when a core that genuinely flashes has lost its attach profile.
+# ---------------------------------------------------------------------
+
+
+def _e8_debug(**overrides):
+    """A resolved E8 `debug:` block, shaped exactly like the real
+    AE822FA0E5597LS0 one in metadata/socs/alif/ensemble/e8.json."""
+    block = {
+        "pyocd_target": "AE822FA0E5597LS0",
+        "jlink_device": {"m55_hp": "Cortex-M55", "m55_he": "Cortex-M55"},
+        "jlink_flash_device": "AE822FA0E5597LS0_M55_HE",
+        "expect_dpidr": "0x4C013477",
+    }
+    block.update(overrides)
+    return block
+
+
+def test_resolve_flow_d_preflight_returns_the_measured_pair() -> None:
+    from alp_orchestrate.loader import _resolve_flow_d_preflight
+
+    assert _resolve_flow_d_preflight(_e8_debug(), "m55_hp") == \
+        ("0x4C013477", "Cortex-M55")
+
+
+def test_resolve_flow_d_preflight_drops_both_when_core_has_no_profile(
+) -> None:
+    """`debug.jlink_device` is legitimately sparse: the E8's a32_cluster is
+    a Linux A-cluster, not a J-Link flash target. Returning `expect_dpidr`
+    alone for it would be the half-armed shape a flasher refuses."""
+    from alp_orchestrate.loader import _resolve_flow_d_preflight
+
+    assert _resolve_flow_d_preflight(_e8_debug(), "a32_cluster") == \
+        (None, None)
+
+
+def test_resolve_flow_d_preflight_drops_device_when_dpidr_unmeasured(
+) -> None:
+    """E1M-AEN701's shape: an attach profile, no measured DPIDR. The
+    attach profile must NOT be emitted on its own -- unarmed is safe,
+    half-armed is a hard refusal."""
+    from alp_orchestrate.loader import _resolve_flow_d_preflight
+
+    debug = _e8_debug()
+    del debug["expect_dpidr"]
+    assert _resolve_flow_d_preflight(debug, "m55_hp") == (None, None)
+
+
+def test_flow_d_preflight_pair_refuses_a_flashing_core_with_no_profile(
+) -> None:
+    """The real metadata gap this guard exists for: `expect_dpidr` is
+    published, the slice DOES take Flow D (zephyr + a part-number flash
+    profile), and its core lost its attach profile -- so the pair silently
+    collapsed to nothing and the write would proceed unguarded. Refuse,
+    naming the core and the file to fix."""
+    from alp_orchestrate.loader import _enforce_flow_d_preflight_pair
+    from alp_orchestrate.models import Slice
+
+    debug = _e8_debug()
+    del debug["jlink_device"]["m55_hp"]
+    slice_ = Slice(
+        core_id="m55_hp",
+        os="zephyr",
+        jlink_flash_device=debug["jlink_flash_device"],
+        expect_dpidr=None,
+        jlink_device=None,
+    )
+    with pytest.raises(OrchestratorError) as excinfo:
+        _enforce_flow_d_preflight_pair(slice_, debug, "E1M-AEN801")
+    msg = str(excinfo.value)
+    assert "m55_hp" in msg
+    assert "expect_dpidr" in msg
+    assert "jlink_device" in msg
+
+
+def test_flow_d_preflight_pair_allows_an_unmeasured_variant() -> None:
+    """The CONVERSE must stay legal: no `expect_dpidr` at all is the state
+    of every variant nobody has measured, and inventing one is worse than
+    leaving the guard unarmed."""
+    from alp_orchestrate.loader import _enforce_flow_d_preflight_pair
+    from alp_orchestrate.models import Slice
+
+    debug = _e8_debug()
+    del debug["expect_dpidr"]
+    del debug["jlink_device"]["m55_hp"]
+    slice_ = Slice(core_id="m55_hp", os="zephyr",
+                   jlink_flash_device=debug["jlink_flash_device"])
+    _enforce_flow_d_preflight_pair(slice_, debug, "E1M-AEN701")  # no raise
+
+
+def test_flow_d_preflight_pair_ignores_a_non_flow_d_slice() -> None:
+    """An A-core (or any slice whose variant publishes no part-number
+    flash profile) is not a Flow D target: it emits no `flash_args` a
+    preflight could half-arm, so a missing attach profile there is not a
+    gap. Checking it would fail every AEN project on `a32_cluster`."""
+    from alp_orchestrate.loader import _enforce_flow_d_preflight_pair
+    from alp_orchestrate.models import Slice
+
+    debug = _e8_debug()
+    for slice_ in (
+        Slice(core_id="a32_cluster", os="yocto",
+              jlink_flash_device=debug["jlink_flash_device"]),
+        Slice(core_id="m33_sm", os="zephyr", jlink_flash_device=None),
+    ):
+        _enforce_flow_d_preflight_pair(slice_, debug, "E1M-AEN801")  # no raise
+
+
+def test_load_board_yaml_aen801_carries_the_pair_on_both_m55s(
+    tmp_path: Path,
+) -> None:
+    """End-to-end through the real metadata: the resolved Slices, not just
+    the helpers, carry both halves."""
+    path = _write_board(tmp_path, "som:\n  sku: E1M-AEN801\ncores:\n  a32_cluster:\n    os: \"off\"\n")
+    project = load_board_yaml(path)
+    for core_id in ("m55_hp", "m55_he"):
+        slice_ = project.cores[core_id]
+        assert slice_.expect_dpidr == "0x4C013477"
+        assert slice_.jlink_device == "Cortex-M55"
+    a32 = project.cores["a32_cluster"]
+    assert a32.expect_dpidr is None
+    assert a32.jlink_device is None
