@@ -40,6 +40,164 @@ the pre-fix handler.
 
 Defect 2 of #1376 (the connect worker's own success/RSSI reporting) is
 tracked separately and left untouched.
+### Fixed — `examples/peripheral-io/pwm-led-fade` now wires `alp-pwm3` on E1M-AEN801, so `alp_pwm_open` no longer returns NOT_READY on real silicon (#1375)
+
+The example builds, signs, flashes, and boots cleanly on E1M-AEN801, but
+`alp_pwm_open(ALP_E1M_PWM3)` returned `NOT_READY` on the bench: `board.yaml`'s
+declarative `pins:`/`peripherals:` route emits no devicetree alias by itself —
+nothing in this repo's `CMakeLists.txt` wiring ever calls `alp_project.py
+--emit dts-overlay` for a real build (only `--emit zephyr-conf`, for
+`alp.conf`'s `CONFIG_PWM=y`). The Zephyr PWM backend
+(`src/backends/pwm/zephyr_drv.c`) resolves each portable channel through the
+`alp-pwm<N>` DT alias; with none defined, `ALP_PWM_SPEC_3_INIT` was `{ .dev =
+NULL }`.
+
+Fixed by shipping a board-target-qualified
+`boards/alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay` — the same
+precedent `examples/peripheral-io/alp-console` and
+`examples/aen/aen-analog-validate` already set for bridging AEN peripherals
+end-to-end — wiring `E1M_PWM3` (pad P2_4) through UTIMER10 to a `pwm-leds`
+consumer node aliased as `alp-pwm3`. A host-side regression test
+(`tests/scripts/test_pwm_led_fade_aen_overlay.py`) now parses the shipped
+overlay and fails if the alias, the `pwm-leds` consumer node shape, or the
+`utimer10`/`pwm10` enable ever regress.
+
+Also fixed the failure message that hardcoded a `native_sim` explanation —
+`[pwm] open failed: alp_last_error=-2 (expected NOT_READY = -2 on native_sim —
+no PWM emul)` printed unconditionally, so on real silicon it misdirected the
+operator toward a nonexistent emulation gap instead of the actual missing
+alias. The diagnostic now only names the native_sim cause under
+`CONFIG_BOARD_NATIVE_SIM`; on every other target it reports the raw error
+code without guessing at a cause it can't detect.
+
+### Fixed — helper MCUs can now describe the GD32 bridge: `flash_policy`, a second OTA channel, and `jlink_device` on all four E1M-X presets (#1357)
+
+`helper_firmware[]` encoded `update_channel` **XOR** `flash_method`, in two
+independent places, and the GD32 bridge legitimately has both: a real OTA path
+over the bridge link (protocol v0.6 Path A, slot-A/B application bootloader
+with commit + rollback, silicon-validated 2026-06-04) **and** a SWD flash the
+customer may use to recover a bricked board with Alp Lab-supplied binaries.
+The XOR forced a choice the hardware does not offer, and neither field carried
+the fact that actually decides tool behaviour: **who** may invoke the flash
+method, and **when**.
+
+**The schema half.** `som-preset-v1.schema.json` drops the `oneOf` and gains
+`flash_policy` (`customer` / `factory` / `recovery_only`), now **required on
+every `helper_firmware` entry** — there is no absent-means-`customer`
+default; the next SoM port that adds a helper with only `flash_method` no
+longer becomes an ungated customer flash target by omission.
+`system-manifest-v1.schema.json` requires the projected key the same way.
+`update_channel`'s enum gains `alp_ota_spi_bridge` for the GD32; reusing the
+CC3501E's `alp_ota_spi_otp` would assert OTP programming for a part that has
+none.
+
+**The emitter half, which would have silently defeated a preset edit.**
+`scripts/alp_orchestrate/manifest.py::_helper_mcus` carried the same XOR, so a
+both-declaring entry would have had its `flash_method`/`flash_args` **dropped
+from the emitted manifest** — the recovery path *vanishing* rather than being
+declined-but-reachable, leaving no way to tell someone with a bricked bridge
+why it was unavailable. Each declared key is now projected independently, and
+`system-manifest-v1.schema.json` declares `flash_policy` and `update_channel`
+(the latter was emitted undeclared, passing only on `additionalProperties`).
+
+**`jlink_device` on the four E1M-X presets.** `E1M-V2N101` / `E1M-V2N102` /
+`E1M-V2M101` / `E1M-V2M102` named `flash_args.target` without its other half,
+and `tan flash`'s `swd_probe` refuses rather than guess a SEGGER profile from
+an OpenOCD/pyOCD target. Measured, that is wider than a J-Link-only host: the
+J-Link arm is preferred whenever a J-Link binary resolves, and `--dry-run`
+always takes it, so these entries could not even be **previewed** on any host.
+All four now carry `jlink_device: GD32G553MEY7TR` and stay byte-identical (one
+PCB, variant-populated). The schema now rejects a `swd_probe` entry that names
+`target` without `jlink_device`, so the next one is caught at `alp validate`
+time rather than at a bricked customer's bench. `expect_dpidr` stays
+deliberately **unset**: two SW-DP ID values are in circulation for the GD32 —
+`0x6BA02477` in `metadata/chips/gd32_swd.yaml` (itself annotated as the
+generic ADIv5 Cortex-M33 r0p1 SW-DPv2 expectation, not a GD32-specific
+reading) and an unattributed `0x0BE12477` elsewhere in this repo — and
+**neither has been measured on a GD32 with a probe attached**; these entries
+carry a `flash.dpidr-preflight-unarmed` advisory instead of a guard armed at
+a guessed ID.  #1369 tracks the contradiction itself (which value, if
+either, is correct) — that is a bench measurement this repo cannot make
+today.  `docs/gd32-bridge.md` now states a mandatory bench step in the
+meantime: set `ALP_FLASH_REQUIRE_DPIDR=1` before a recovery flash on the
+alplab-gw bench, because the GD32 probe and the AEN E8 probe there enumerate
+the same J-Link serial and `JLinkExe` selects only by serial.
+
+The six `E1M-AEN*` presets' `flash_policy` moves from `factory` to
+`recovery_only` on their `cc3501e_otp` entry, keeping the six in lockstep per
+`metadata/e1m_modules/README.md`.  `factory` denies a recovery flash outright;
+the maintainer-confirmed rule is that only the CC3501E and the GD32 are not
+routinely customer-flashed, and even then a customer may flash either **to
+recover a bricked device**, using Alp Lab-supplied binaries.  Behaviour is
+otherwise unchanged (the entry still declares no `flash_method`).
+
+### Fixed — `flash_args` carries no `slot0_load_address`, so tan refused to auto-sign an AEN Flow D flash (tan-cli#353)
+
+alp-sdk emitted `flash_args.jlink_flash_device` (the Flow D device profile)
+but never `slot0_load_address` (where the slot0-linked application blob
+itself belongs) -- zero occurrences anywhere in `scripts/`/`metadata/`.
+tan-cli correctly routed an AEN slice to Flow D (`alif_mram_jlink`) and
+then refused outright: `flash_args.slot0_load_address is required to
+auto-sign via SETOOLS`, forcing a customer to hand-edit
+`system-manifest.yaml` to flash an AEN at all. Confirmed on silicon with
+the value hand-supplied: three images flashed, persistence proven across
+full cold power cycles at 16.0 V.
+
+**This alone does not make `tan flash` work.** A Windows E1M-AEN801 bench
+run against tan `v0.5.1` (PR #1374 review comment, 2026-08-11) confirmed
+this emitter's addresses are correct on real silicon, then measured that
+tan re-derives `system-manifest.yaml` itself rather than consuming this
+emitter's output: the `build/system-manifest.yaml` tan actually writes
+carries only `jlink_flash_device` -- `slot0_load_address`, `expect_dpidr`
+and `jlink_device` are all absent -- so `tan flash` still fails with the
+same `flash_args.slot0_load_address is required to auto-sign via SETOOLS`
+refusal after this PR. That is tan-cli#353 (reopened 2026-08-11) and is
+fixed on the tan-cli side, not here.
+
+`scripts/alp_orchestrate/loader.py` gains `_resolve_slot0_load_address`,
+resolved PER CORE (unlike `jlink_flash_device`, which is a single
+per-variant string) from the SoM preset's own `memory_map:` `he_slot0`/
+`hp_slot0` regions -- deliberately NOT added to the SoC JSON `debug:`
+block `jlink_flash_device` lives in, because this address is SDK/module
+build POLICY, not a silicon fact:
+`metadata/e1m_modules/E1M-AEN801.yaml`'s own `memory_map:` comment says so
+explicitly (#1069, the disjoint-slot0 fix), and two SoMs sharing one
+silicon part can freely choose different slot0 windows. Measured, not
+asserted: E1M-AEN801's `m55_hp` and `m55_he` share ONE silicon variant
+(`AE822FA0E5597LS0`) yet resolve to two different addresses
+(`0x802b0000` vs `0x80010000`) purely because of that SDK layout choice,
+so a single per-SoC-JSON value beside `jlink_flash_device` (itself a flat
+per-variant string, not per-core) cannot represent this fact without
+growing its own per-core override mechanism -- at which point it is the
+same `memory_map:`-shaped override this PR already added, just moved.
+Bench-proven at `0x80010000` for the HE core
+(`docs/aen-bench-bringup.md`, `docs/aen-provisioning.md` §0.5,
+`docs/secure-boot.md`); `hp_slot0` resolves to `0x802b0000` from the same
+`memory_map:`. Falls back to the stock AEN default (`0x80010000`,
+computed from `gen_zephyr_board`'s own `_AEN_MRAM_BASE`/
+`_AEN_MCUBOOT_KIB`, not a locally pinned copy) for EITHER role when the
+preset declares no `<role>_slot0` override at all -- both
+E1M-AEN401 and E1M-AEN601 declare `m55_hp` AND `m55_he` in `topology:`,
+but only the `m55_hp` Zephyr board tree is generated today (#999), and
+this covers that no-override shape for either role, not just `he` -- by
+reusing `scripts/gen_zephyr_board.py`'s own `_aen_role_slot0_map` (not a
+second copy of its derivation), so the two genuinely cannot disagree on
+the override/no-override decision itself; a declared-but-invalid
+override (half-authored, or a wrong `accessible_from`) now raises
+instead of silently emitting a fabricated address no board was ever
+generated for. The no-override default is deliberately the SAME address
+for both roles, which is not itself a live collision today (no non-
+E1M-AEN801 AEN variant publishes `jlink_flash_device` yet); a new
+`_enforce_slot0_disjoint_across_roles` guard now refuses outright if a
+future SoM variant ever makes it one, rather than leaving that case to
+coincide silently (#1384).
+
+`scripts/validate_metadata.py` gains `_check_som_slot0_address_resolved`:
+a `memory_map:` region whose `name:` declares an MRAM slot0 path
+(`*_slot0`) but whose `base:` isn't a resolved integer (a `"TBD"`
+placeholder or a missing key) is now refused at the metadata layer,
+instead of silently falling through to the wrong default (or `None`) at
+manifest-emit or board-generation time.
 
 ### Changed — the diagnostics schema gate no longer runs through the `alp` command surface (#837)
 

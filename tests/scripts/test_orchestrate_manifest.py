@@ -208,6 +208,74 @@ def test_emit_system_manifest_populates_helper_mcus(tmp_path: Path) -> None:
     assert gd32["flash_args"]["target"] == "gd32g553"
 
 
+def test_helper_mcu_keeps_flash_keys_alongside_update_channel(
+    tmp_path: Path,
+) -> None:
+    """#1357: an `update_channel` must not delete the local flash path.
+
+    `_helper_mcus` used to project the two as an either/or, so the GD32
+    bridge -- which has BOTH a field-update channel (protocol v0.6 Path
+    A, slot-A/B application bootloader) and a recovery-only SWD flash --
+    would have had its `flash_method`/`flash_args` dropped from the
+    manifest. That is worse than declining the recovery path: the path
+    vanishes, so a tool cannot even explain why it is unavailable to
+    someone with a bricked bridge.
+
+    Every key the preset declares must survive independently.
+    """
+    path = _write_board(tmp_path, V2N_HAPPY)
+    parsed = yaml.safe_load(emit_system_manifest(load_board_yaml(path)))
+
+    gd32 = next(h for h in parsed["helper_mcus"]
+                if h["name"] == "gd32_bridge")
+
+    # The field-update channel is projected...
+    assert gd32["update_channel"] == "alp_ota_spi_bridge"
+    # ...and it did NOT suppress the local flash recipe.  Assert the keys
+    # SURVIVED before reading them, so the regression reports as "the
+    # channel deleted the recovery path" rather than a bare KeyError.
+    assert {"flash_method", "flash_args", "flash_policy"} <= set(gd32), (
+        "update_channel suppressed the local flash keys; the recovery "
+        f"path vanished from the manifest: {sorted(gd32)}"
+    )
+    assert gd32["flash_method"] == "swd_probe"
+    assert gd32["flash_args"]["target"] == "gd32g553"
+    assert gd32["flash_args"]["jlink_device"] == "GD32G553MEY7TR"
+    assert gd32["flash_args"]["base"] == "0x08000000"
+    # ...and the fact that decides who may invoke it came along too.
+    assert gd32["flash_policy"] == "recovery_only"
+
+
+def test_helper_mcu_omits_keys_the_preset_does_not_declare(
+    tmp_path: Path,
+) -> None:
+    """The converse of the test above: independent projection must not
+    start emitting `null` placeholders for absent keys.
+
+    AEN801's `cc3501e_otp` declares no `flash_method`, so the row must
+    carry no `flash_method` key at all -- `tan flash` reads a present-
+    but-null key as a recipe.
+    """
+    path = _write_board(tmp_path, """
+som:
+  sku: E1M-AEN801
+
+preset: e1m-evk
+cores:
+  m55_he:
+    os: zephyr
+    app: ./he
+""")
+    parsed = yaml.safe_load(emit_system_manifest(load_board_yaml(path)))
+
+    cc = next(h for h in parsed["helper_mcus"]
+              if h["name"] == "cc3501e_otp")
+    assert cc["update_channel"] == "alp_ota_spi_otp"
+    assert cc["flash_policy"] == "recovery_only"
+    assert "flash_method" not in cc
+    assert "flash_args" not in cc
+
+
 def test_emit_system_manifest_populates_flash_method(tmp_path: Path) -> None:
     """Phase 3 per-slice flash_method + flash_args.
 
@@ -426,4 +494,56 @@ def test_emit_system_manifest_omits_dpidr_preflight_when_unmeasured(
         flash_args = by_core[core_id]["flash_args"]
         assert "jlink_device" not in flash_args
         assert "expect_dpidr" not in flash_args
+
+
+# ---------------------------------------------------------------------
+# `flash_args.slot0_load_address` -- the AEN MRAM slot0-XIP address (tan-
+# cli#353): before this, alp-sdk emitted no such key, so tan correctly
+# armed Flow D and then refused (`flash_args.slot0_load_address is
+# required to auto-sign via SETOOLS`), forcing a customer to hand-edit
+# `system-manifest.yaml` to flash an AEN.
+# ---------------------------------------------------------------------
+
+
+def test_emit_system_manifest_aen_flash_args_carries_slot0_load_address(
+    tmp_path: Path,
+) -> None:
+    """E1M-AEN801 declares a #1069 disjoint-slot0 `memory_map:` (HE and HP
+    boot from DIFFERENT physical MRAM windows, deliberately -- the stock
+    symmetric layout put them at the SAME address and one flash silently
+    clobbered the other). Each M55 slice's `flash_args` must carry ITS OWN
+    core's address, not a value shared with its sibling.
+
+    Values asserted verbatim against `metadata/e1m_modules/E1M-AEN801.yaml`
+    `memory_map:` (`he_slot0`/`hp_slot0` `base:`) -- a wrong digit here
+    writes the application blob into the wrong core's MRAM window, or into
+    the sibling core's live slot0.
+    """
+    path = _write_board(tmp_path, AEN_HAPPY)
+    project = load_board_yaml(path)
+    parsed = yaml.safe_load(emit_system_manifest(project))
+
+    by_core = {s["core_id"]: s for s in parsed["slices"]}
+    assert by_core["m55_he"]["flash_args"]["slot0_load_address"] == \
+        "0x80010000"
+    assert by_core["m55_hp"]["flash_args"]["slot0_load_address"] == \
+        "0x802b0000"
+
+
+def test_emit_system_manifest_flash_args_omits_slot0_load_address_when_flow_d_unarmed(
+    tmp_path: Path,
+) -> None:
+    """E1M-AEN701 publishes no `jlink_flash_device` (Flow D is not armed for
+    this SoC variant), so `flash_args` must stay `{}` -- no
+    `slot0_load_address` key either, even though this is otherwise an AEN
+    part with M55 HP/HE cores. `slot0_load_address` is meaningless without
+    Flow D, and must never appear on its own.
+    """
+    path = _write_board(tmp_path, AEN_NO_JLINK_FLASH_DEVICE)
+    project = load_board_yaml(path)
+    parsed = yaml.safe_load(emit_system_manifest(project))
+
+    by_core = {s["core_id"]: s for s in parsed["slices"]}
+    for core_id in ("m55_hp", "m55_he"):
+        assert "slot0_load_address" not in by_core[core_id]["flash_args"]
 

@@ -134,11 +134,14 @@ Three independent axes (same model as the gd32-bridge):
 
 ## Firmware updates
 
-The CC3501E ships **pre-flashed by Alp** and is **never customer-flashed**.
-Firmware updates are Alp-released and applied over the bridge SPI link,
-programming the chip's own OTP; the SoM preset models this with
-`helper_firmware[].update_channel: alp_ota_spi_otp` (see
-`metadata/e1m_modules/README.md`), never a `flash_method`.  The signed
+The CC3501E ships **pre-flashed by Alp**, and normal firmware updates are
+Alp-released and applied over the bridge SPI link, programming the chip's
+own OTP; the SoM preset models this with
+`helper_firmware[].update_channel: alp_ota_spi_otp` +
+`flash_policy: recovery_only` (see `metadata/e1m_modules/README.md`), and no
+`flash_method`.  A customer flash is permitted **only** to recover a bricked
+device, using Alp Lab-supplied binaries — it is not a routine flash target.
+The signed
 release blob is version-pinned at `prebuilt/cc3501e-vX.Y.Z.bin`.
 `flash.py` is Alp's internal release/bench tool that produces and
 validates that blob (relaying the image to the CC3501E over the

@@ -83,12 +83,23 @@ def _slice_flash_recipe(
         # `loader._resolve_flow_d_preflight` guarantees the both-or-neither
         # shape upstream; the `and` here makes that guarantee locally
         # readable rather than assumed at a distance.
+        #
+        # `slot0_load_address` (tan-cli#353) is the AEN MRAM slot0-XIP
+        # address the slice's application blob is linked at -- the fact
+        # Flow D's auto-sign-via-SETOOLS path needs and, before this,
+        # alp-sdk never emitted, so tan correctly armed Flow D and then
+        # refused (`flash_args.slot0_load_address is required`), forcing a
+        # customer to hand-edit `system-manifest.yaml`. Independent of the
+        # `expect_dpidr`/`jlink_device` pair above -- see
+        # `loader._resolve_slot0_load_address` for where it comes from.
         args: dict[str, Any] = {}
         if slice_.jlink_flash_device:
             args["jlink_flash_device"] = slice_.jlink_flash_device
         if slice_.expect_dpidr and slice_.jlink_device:
             args["expect_dpidr"] = slice_.expect_dpidr
             args["jlink_device"] = slice_.jlink_device
+        if slice_.slot0_load_address:
+            args["slot0_load_address"] = slice_.slot0_load_address
         return ("zephyr_west_flash", args)
     if slice_.os == "baremetal":
         return ("baremetal_cmake_flash", {})

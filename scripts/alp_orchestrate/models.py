@@ -165,6 +165,21 @@ class Slice:
     # `flash_args` as an inseparable pair (#1355).
     expect_dpidr: Optional[str] = None
     jlink_device: Optional[str] = None
+    # This core's AEN MRAM slot0-XIP load address, `0x`-prefixed hex string
+    # (tan-cli#353) -- where Flow D's built-in Alif MRAM loader must write
+    # the slot0-linked application blob itself, distinct from
+    # `jlink_flash_device` above (which only selects the loader's device
+    # PROFILE, not an address). Resolved by
+    # `loader._resolve_slot0_load_address` from the SoM preset's
+    # `memory_map:` (NOT the SoC JSON -- this is SDK/module build policy,
+    # not a silicon fact: metadata/e1m_modules/E1M-AEN801.yaml's own
+    # `memory_map:` comment says so explicitly, #1069), so like
+    # `jlink_flash_device` it is NOT customer-overridable.  None when this
+    # core has no AEN slot0-XIP window (every non-AEN slice, and any AEN
+    # core whose SoC variant publishes no `jlink_flash_device`) -- a
+    # published "unknown", never a value to invent. Consumed by
+    # `_slice_flash_recipe`'s `zephyr` branch.
+    slot0_load_address: Optional[str] = None
 
     # Populated by Orchestrator.fan_out:
     build_dir: Optional[Path] = None
