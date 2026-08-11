@@ -173,6 +173,13 @@ alp_status_t cc3501e_wifi_scan_stop(cc3501e_t *ctx)
 	    ctx, ALP_CC3501E_CMD_WIFI_SCAN_STOP, NULL, 0, NULL, 0, NULL, CC3501E_WIFI_DOWN_WINDOW_MS);
 }
 
+/* Backoff between CMD_WIFI_STATUS collect polls while cc3501e_wifi_connect()
+ * awaits the outcome -- same cadence as poll_by_repeat's CC3501E_POLL_GAP_MS
+ * (cc3501e_core.c), duplicated here rather than exported because this loop
+ * polls a DIFFERENT opcode (WIFI_STATUS) than the one it is bounding
+ * (WIFI_CONNECT_STA), so it cannot just call poll_by_repeat itself. */
+#define CC3501E_WIFI_STATUS_POLL_GAP_MS 50u
+
 alp_status_t cc3501e_wifi_connect(cc3501e_t  *ctx,
                                   const char *ssid,
                                   uint8_t     sec_type,
@@ -202,10 +209,69 @@ alp_status_t cc3501e_wifi_connect(cc3501e_t  *ctx,
 		memcpy(&payload[off], pass, psk_len);
 		off += psk_len;
 	}
-	/* Poll status to connected/failed: the firmware reports BUSY while the
-	 * association runs, then OK (connected) or a hard error (auth/no-AP). */
-	return poll_by_repeat(
-	    ctx, ALP_CC3501E_CMD_WIFI_CONNECT_STA, payload, off, NULL, 0, NULL, timeout_ms);
+
+	/* SUBMIT ONCE (issues #1376/#1378) -- CONNECT_STA is fire-and-forget on
+	 * the firmware side: WORKER_IDLE queues the association and acks
+	 * RESP_ERR_BUSY, the drain runs the seconds-long body off THIS exchange,
+	 * and the outcome is mirrored into the non-blocking WIFI_STATUS latch --
+	 * the host never collects DONE/ERR through this job slot (see
+	 * firmware/cc3501e/src/worker.c's worker_run_pending() comment).  The old
+	 * contract poll_by_repeat()'d this opcode on the wire-level BUSY/IO
+	 * retry rule; every 50 ms retry that landed on the now-IDLE slot (freed
+	 * the instant the drain finished, BEFORE the READY re-arm) submitted a
+	 * BRAND NEW association -- five retries, five real join attempts, for
+	 * one user command.  A single request removes that loop entirely.
+	 *
+	 * The submit's own ack is NOT trusted as the connect result, in either
+	 * direction.  Only ALP_ERR_INVAL short-circuits: wifi_join() on the
+	 * firmware side validates the payload BEFORE touching the worker at all
+	 * (protocol_wifi.c), so RESP_ERR_INVALID is a definite synchronous
+	 * reject -- nothing was queued, there is nothing to await.  Every other
+	 * outcome falls through to the INDEPENDENT WIFI_STATUS channel below,
+	 * DELIBERATELY including ALP_ERR_IO: a transport-level fault on the
+	 * submit exchange is itself ambiguous evidence (see cc3501e_core.c's
+	 * dead-phase note) -- it may mean nothing reached the firmware, or it
+	 * may mean a genuine BUSY ack was lost in transit after the submit
+	 * landed.  Bailing out on that ambiguity would risk reporting a false
+	 * failure for an association that is actually running; polling
+	 * WIFI_STATUS instead is safe either way -- it reads DISCONNECTED
+	 * (nothing running) through to a timeout if nothing was submitted, or
+	 * tracks the real CONNECTING/CONNECTED/FAILED transition if it was.
+	 * This is what closes #1378 for this specific race: even a spurious OK
+	 * or a spurious IO on the submit exchange cannot make this function
+	 * report ALP_OK for an association WIFI_STATUS never confirms. */
+	alp_status_t s = cc3501e_request(
+	    ctx, ALP_CC3501E_CMD_WIFI_CONNECT_STA, payload, off, NULL, 0, NULL, CC3501E_REQ_TMO_MS);
+	if (s == ALP_ERR_INVAL) {
+		return s; /* definite synchronous reject -- nothing submitted */
+	}
+
+	/* Await the outcome off the non-blocking WIFI_STATUS latch (opcode
+	 * 0x1B) -- never off the submit's own ack.  CONNECTING means the
+	 * association is still running; CONNECTED / CONN_FAILED are terminal. */
+	uint32_t remaining = (timeout_ms > 0u) ? timeout_ms : 1u;
+	for (;;) {
+		alp_cc3501e_wifi_status_t st;
+		alp_status_t              ss = cc3501e_wifi_status(ctx, &st);
+		if (ss == ALP_OK) {
+			if (st.state == ALP_CC3501E_WIFI_CONNECTED) return ALP_OK;
+			if (st.state == ALP_CC3501E_WIFI_CONN_FAILED) {
+				return (st.fail_reason == ALP_CC3501E_WIFI_FAIL_TIMEOUT) ? ALP_ERR_TIMEOUT
+				                                                         : ALP_ERR_IO;
+			}
+			/* DISCONNECTED (not yet latched) or CONNECTING: keep polling. */
+		}
+		/* ss != ALP_OK: cc3501e_wifi_status() itself already rides out the
+		 * transient down-window internally (see its own poll-by-repeat); a
+		 * status read still failing here is worth one more pass rather than
+		 * an immediate bail, since it can only shrink the remaining budget. */
+		if (remaining == 0u) return ALP_ERR_TIMEOUT;
+		uint32_t gap = (remaining < CC3501E_WIFI_STATUS_POLL_GAP_MS)
+		                   ? remaining
+		                   : CC3501E_WIFI_STATUS_POLL_GAP_MS;
+		alp_delay_ms(gap);
+		remaining -= gap;
+	}
 }
 
 alp_status_t cc3501e_wifi_disconnect(cc3501e_t *ctx)
@@ -270,16 +336,26 @@ alp_status_t cc3501e_wifi_ap_stop(cc3501e_t *ctx)
 alp_status_t cc3501e_wifi_rssi(cc3501e_t *ctx, int8_t *rssi)
 {
 	if (rssi == NULL) return ALP_ERR_INVAL;
-	uint8_t      reply[1] = { 0 };
-	size_t       got      = 0;
-	alp_status_t s        = cc3501e_request(ctx,
-	                                        ALP_CC3501E_CMD_WIFI_GET_RSSI,
-	                                        NULL,
-	                                        0,
-	                                        reply,
-	                                        sizeof(reply),
-	                                        &got,
-	                                        CC3501E_REQ_TMO_MS);
+	uint8_t reply[1] = { 0 };
+	size_t  got      = 0;
+	/* WIFI_GET_RSSI is WORKER-ROUTED on the firmware side (handle_worker_
+	 * routed in protocol_wifi.c: Wlan_Get(WLAN_GET_RSSI) lazy-starts the
+	 * radio on first use, which can take seconds and so must run off the SPI
+	 * ISR) -- the firmware acks a fresh submit with RESP_ERR_BUSY and only
+	 * returns RESP_OK once the drain has collected the value.  #1377: a
+	 * single cc3501e_request() here essentially never lands on the DONE
+	 * poll -- it collects the submit's own BUSY ack, reports it up as
+	 * ALP_ERR_BUSY, and leaves the job orphaned in the single job slot for
+	 * the next unrelated worker-routed call to trip over.  Poll-by-repeat,
+	 * floored to the radio down-window, exactly like cc3501e_wifi_get_mac. */
+	alp_status_t s = poll_by_repeat(ctx,
+	                                ALP_CC3501E_CMD_WIFI_GET_RSSI,
+	                                NULL,
+	                                0,
+	                                reply,
+	                                sizeof(reply),
+	                                &got,
+	                                CC3501E_WIFI_DOWN_WINDOW_MS);
 	if (s != ALP_OK) return s;
 	if (got < 1u) return ALP_ERR_IO;
 	*rssi = (int8_t)reply[0];
@@ -314,14 +390,29 @@ alp_status_t cc3501e_wifi_status(cc3501e_t *ctx, alp_cc3501e_wifi_status_t *out)
 	if (out == NULL) return ALP_ERR_INVAL;
 
 	/* Reply is the fixed 4-byte alp_cc3501e_wifi_status_t wire layout (no
-	 * padding): state | fail_reason | rssi_dbm | reserved.  The status is a
-	 * NON-BLOCKING latch read (no radio op), so -- like cc3501e_wifi_rssi /
-	 * cc3501e_wifi_get_ip -- a single request with the short timeout suffices;
-	 * no poll-by-repeat down-window handling is needed. */
+	 * padding): state | fail_reason | rssi_dbm | reserved.  The FIRMWARE-side
+	 * handler (handle_wifi_status) is a genuine non-blocking latch read -- no
+	 * radio op, ISR-safe, always replies RESP_OK -- but the shared bridge
+	 * TRANSPORT is briefly down whenever ANY radio op is in flight (Wlan_Start
+	 * at boot, or a worker connect/scan/rssi body), exactly like every other
+	 * op in this file.  #1377: a status read taken moments after a connect
+	 * submit can land in that down-window and desync like any other
+	 * transaction (ver / scan / connect all healthy, then every SUBSEQUENT
+	 * status call failed -5) -- that is the shared TRANSPORT contract, not
+	 * something specific to the WIFI_STATUS opcode, so this needs the same
+	 * poll-by-repeat down-window handling as the radio-adjacent ops even
+	 * though the opcode itself never replies BUSY.  Only the IO-retry leg of
+	 * poll_by_repeat ever fires here in practice. */
 	uint8_t      reply[4] = { 0 };
 	size_t       got      = 0;
-	alp_status_t s        = cc3501e_request(
-	    ctx, ALP_CC3501E_CMD_WIFI_STATUS, NULL, 0, reply, sizeof(reply), &got, CC3501E_REQ_TMO_MS);
+	alp_status_t s        = poll_by_repeat(ctx,
+	                                       ALP_CC3501E_CMD_WIFI_STATUS,
+	                                       NULL,
+	                                       0,
+	                                       reply,
+	                                       sizeof(reply),
+	                                       &got,
+	                                       CC3501E_WIFI_DOWN_WINDOW_MS);
 	if (s != ALP_OK) return s;
 	if (got < sizeof(reply)) return ALP_ERR_IO; /* short reply -- firmware/wire gap */
 

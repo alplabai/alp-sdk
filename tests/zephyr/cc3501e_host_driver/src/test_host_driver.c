@@ -52,6 +52,36 @@ static struct {
 	/* A tiny in-RAM pin model so GPIO configure -> write -> read round-trips
 	 * through the real wire encode/decode, like the firmware stub HAL. */
 	uint8_t pin_level[64];
+
+	/* ---- fire-and-forget WIFI_CONNECT_STA / WIFI_STATUS model (#1376/#1377/
+	 * #1378) -----------------------------------------------------------------
+	 * A dedicated snapshot of the CONNECT_STA submit's own request bytes,
+	 * because the generic cmd/req_len/req_pl above reflect whichever request
+	 * was dispatched LAST -- cc3501e_wifi_connect() now issues the submit
+	 * once and then polls WIFI_STATUS afterwards, so by the time it returns
+	 * the generic fields hold WIFI_STATUS's (empty) request, not the
+	 * connect's. */
+	uint16_t connect_last_req_len;
+	uint8_t  connect_last_req_pl[ALP_CC3501E_MAX_PAYLOAD];
+	uint32_t connect_submit_count; /* how many CONNECT_STA submits landed */
+
+	/* The WIFI_STATUS latch WIFI_CONNECT_STA drives + WIFI_STATUS reads --
+	 * models the firmware's async connect-status latch (handle_wifi_status /
+	 * cc3501e_hw_wifi_conn_status). */
+	uint8_t wifi_conn_state;
+	uint8_t wifi_fail_reason;
+	int8_t  wifi_conn_rssi;
+
+	/* Number of WIFI_STATUS polls that must still read CONNECTING before the
+	 * latch above is reported -- simulates an association that takes a few
+	 * polls to resolve, so a regression test can prove cc3501e_wifi_connect()
+	 * polls WIFI_STATUS repeatedly while submitting CONNECT_STA exactly once. */
+	uint32_t status_polls_before_terminal;
+
+	/* Number of WIFI_GET_RSSI submits that must still ack RESP_ERR_BUSY
+	 * before the real value is handed back -- models GET_RSSI's real
+	 * worker-routed submit/collect shape (#1377). */
+	uint32_t rssi_busy_polls_remaining;
 } slave;
 
 /* Set by test_wifi_scan_buf_is_per_context_740 / test_ble_scan_buf_is_per_context_740
@@ -59,11 +89,38 @@ static struct {
  * slave_reset() so every other test keeps seeing the default fixtures. */
 static bool g_scan_stage_ctx_b;
 
+/* #1378 mutant control: when true, the WIFI_CONNECT_STA / WIFI_AP_START
+ * submit handler stages a literal RESP_OK (0x00) status byte instead of the
+ * real firmware's unconditional RESP_ERR_BUSY submit ack -- reproducing "a
+ * valid header followed by an all-zero payload phase" (this repo's own
+ * silicon finding: a dead bus phase reads back 0x00000000, which happens to
+ * equal RESP_OK).  Cleared by slave_reset(). */
+static bool g_connect_submit_force_ok;
+
+/* #1377 mutant control: while > 0, a whole WIFI_STATUS transaction's REQUEST
+ * HEADER phase fails outright (as if the shared bridge transport itself were
+ * down, e.g. a radio op in flight) -- decremented per attempt, letting a
+ * test prove cc3501e_wifi_status() rides the down-window out.  The failure
+ * is injected before slave.phase advances, so the next attempt starts clean
+ * (models a transport-level fault, not a framing desync needing a resync).
+ * Cleared by slave_reset(). */
+static uint32_t g_status_io_down_remaining;
+
 static void slave_reset(void)
 {
 	memset(&slave, 0, sizeof(slave));
-	slave.phase        = PH_REQ_HDR;
-	g_scan_stage_ctx_b = false;
+	slave.phase                        = PH_REQ_HDR;
+	slave.wifi_conn_state              = ALP_CC3501E_WIFI_CONNECTED; /* preserves the pre-#1376
+	                                                                * behaviour of tests that
+	                                                                * poll WIFI_STATUS directly
+	                                                                * without going through
+	                                                                * cc3501e_wifi_connect() first. */
+	slave.wifi_fail_reason             = ALP_CC3501E_WIFI_FAIL_NONE;
+	slave.wifi_conn_rssi               = -50;
+	slave.status_polls_before_terminal = 0u;
+	g_scan_stage_ctx_b                 = false;
+	g_connect_submit_force_ok          = false;
+	g_status_io_down_remaining         = 0u;
 }
 
 static void stage_status(uint8_t st)
@@ -182,7 +239,6 @@ static void slave_dispatch(void)
 	switch (slave.cmd) {
 	case ALP_CC3501E_CMD_PING:
 	case ALP_CC3501E_CMD_RESET:
-	case ALP_CC3501E_CMD_WIFI_CONNECT_STA:
 	case ALP_CC3501E_CMD_WIFI_DISCONNECT:
 	case ALP_CC3501E_CMD_WIFI_AP_START:
 	case ALP_CC3501E_CMD_WIFI_AP_STOP:
@@ -206,6 +262,20 @@ static void slave_dispatch(void)
 	case ALP_CC3501E_CMD_SOCK_CLOSE:
 		/* Argless / write-only ops: success is the bare OK status. */
 		stage_status(ALP_CC3501E_RESP_OK);
+		break;
+
+	case ALP_CC3501E_CMD_WIFI_CONNECT_STA:
+		/* Fire-and-forget submit model (#1376/#1377/#1378): snapshot the
+		 * submit's own request bytes separately (the generic req_pl/req_len
+		 * above get overwritten by cc3501e_wifi_connect()'s follow-up
+		 * WIFI_STATUS polls before the caller ever sees them), count the
+		 * submit, and ack RESP_ERR_BUSY -- the firmware's real, unconditional
+		 * WORKER_IDLE ack -- unless a test forces the #1378 dead-phase-alias
+		 * scenario via g_connect_submit_force_ok. */
+		slave.connect_last_req_len = slave.req_len;
+		memcpy(slave.connect_last_req_pl, slave.req_pl, slave.req_len);
+		slave.connect_submit_count++;
+		stage_status(g_connect_submit_force_ok ? ALP_CC3501E_RESP_OK : ALP_CC3501E_RESP_ERR_BUSY);
 		break;
 
 	case ALP_CC3501E_CMD_GET_VERSION: {
@@ -245,6 +315,14 @@ static void slave_dispatch(void)
 		break;
 	}
 	case ALP_CC3501E_CMD_WIFI_GET_RSSI: {
+		/* Worker-routed (#1377): ack BUSY for rssi_busy_polls_remaining
+		 * submits (simulating the firmware's WORKER_IDLE-then-collect shape)
+		 * before finally handing back the value. */
+		if (slave.rssi_busy_polls_remaining > 0u) {
+			slave.rssi_busy_polls_remaining--;
+			stage_status(ALP_CC3501E_RESP_ERR_BUSY);
+			break;
+		}
 		const uint8_t r = (uint8_t)(-42);
 		stage_reply(ALP_CC3501E_RESP_OK, &r, 1u);
 		break;
@@ -259,10 +337,20 @@ static void slave_dispatch(void)
 	}
 	case ALP_CC3501E_CMD_WIFI_STATUS: {
 		uint8_t st[4];
-		st[0] = ALP_CC3501E_WIFI_CONNECTED;
-		st[1] = ALP_CC3501E_WIFI_FAIL_NONE;
-		st[2] = (uint8_t)(-50); /* rssi_dbm */
-		st[3] = 0u;
+		if (slave.status_polls_before_terminal > 0u) {
+			/* Still resolving: report CONNECTING (bridge busy on the real
+			 * link) rather than the terminal latch below. */
+			slave.status_polls_before_terminal--;
+			st[0] = ALP_CC3501E_WIFI_CONNECTING;
+			st[1] = ALP_CC3501E_WIFI_FAIL_NONE;
+			st[2] = 0;
+			st[3] = 0u;
+		} else {
+			st[0] = slave.wifi_conn_state;
+			st[1] = slave.wifi_fail_reason;
+			st[2] = (uint8_t)slave.wifi_conn_rssi;
+			st[3] = 0u;
+		}
 		stage_reply(ALP_CC3501E_RESP_OK, st, 4u);
 		break;
 	}
@@ -339,6 +427,11 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 	(void)bus;
 	if (len == 0u) {
 		return ALP_OK;
+	}
+	if (slave.phase == PH_REQ_HDR && tx[0] == ALP_CC3501E_CMD_WIFI_STATUS &&
+	    g_status_io_down_remaining > 0u) {
+		g_status_io_down_remaining--;
+		return ALP_ERR_IO;
 	}
 	switch (slave.phase) {
 	case PH_REQ_HDR:
@@ -498,6 +591,21 @@ ZTEST(cc3501e_host_driver, test_wifi_rssi_decodes_signed)
 	zassert_equal(rssi, -42, "signed dBm decoded");
 }
 
+/* #1377: WIFI_GET_RSSI is worker-routed on the firmware side -- a fresh
+ * submit acks RESP_ERR_BUSY and only later returns the value once the drain
+ * has collected it.  Against the pre-fix single cc3501e_request() this test
+ * fails outright: that call collects only the first BUSY ack and returns
+ * ALP_ERR_BUSY, leaving the job orphaned.  Poll-by-repeat must ride the busy
+ * window out and still land on the real value. */
+ZTEST(cc3501e_host_driver, test_wifi_rssi_retries_worker_busy_1377)
+{
+	slave.rssi_busy_polls_remaining = 3u;
+	int8_t rssi                     = 0;
+	zassert_equal(cc3501e_wifi_rssi(&fw, &rssi), ALP_OK, "GET_RSSI -> OK after riding out BUSY");
+	zassert_equal(rssi, -42, "signed dBm decoded once the drain collected it");
+	zassert_equal(slave.rssi_busy_polls_remaining, 0u, "all staged busy polls were consumed");
+}
+
 /* The network-order -> dotted-quad fix: the wire octets arrive reversed and the
  * host reverses them.  0xC0A8010E on the wire must decode to {192,168,1,14}. */
 ZTEST(cc3501e_host_driver, test_wifi_get_ip_byte_order)
@@ -526,6 +634,36 @@ ZTEST(cc3501e_host_driver, test_wifi_status_null_out_invalid)
 {
 	zassert_equal(cc3501e_wifi_status(&fw, NULL), ALP_ERR_INVAL, "NULL out -> INVAL");
 	zassert_equal(slave.cmd, 0u, "no transfer clocked");
+}
+
+/* #1377: `alp companion wifi status` returned -5 (ALP_ERR_IO) repeatedly right
+ * after a healthy ver/scan/connect sequence -- the shared bridge transport is
+ * briefly down whenever a radio op is in flight, and a status read landing in
+ * that window desynced like any other transaction.  Against the pre-fix
+ * single cc3501e_request() this test fails outright: the first (injected)
+ * transport fault returns ALP_ERR_IO immediately, with no retry.  Riding the
+ * down-window out via poll-by-repeat must still land on the real state. */
+ZTEST(cc3501e_host_driver, test_wifi_status_retries_transient_io_1377)
+{
+	g_status_io_down_remaining = 5u;
+	alp_cc3501e_wifi_status_t st;
+	memset(&st, 0xA5, sizeof(st));
+	zassert_equal(
+	    cc3501e_wifi_status(&fw, &st), ALP_OK, "WIFI_STATUS -> OK after riding out the IO window");
+	zassert_equal(st.state, ALP_CC3501E_WIFI_CONNECTED, "state decoded once the link recovered");
+	zassert_equal(g_status_io_down_remaining, 0u, "all staged transport faults were consumed");
+}
+
+/* Same fault, but never recovers within a short caller budget: this proves
+ * the retry is BOUNDED (not an infinite spin) and the honest answer -- an
+ * unrecoverable transport -- surfaces as ALP_ERR_TIMEOUT, not the raw
+ * ALP_ERR_IO of a single attempt, once the down-window elapses. */
+ZTEST(cc3501e_host_driver, test_wifi_status_gives_up_after_the_down_window_1377)
+{
+	g_status_io_down_remaining = UINT32_MAX;
+	alp_cc3501e_wifi_status_t st;
+	alp_status_t              s = cc3501e_wifi_status(&fw, &st);
+	zassert_equal(s, ALP_ERR_TIMEOUT, "permanently-down transport -> bounded TIMEOUT, not a hang");
 }
 
 /* SCAN_START reply is a packed sequence of records; the host walks them out into
@@ -640,19 +778,23 @@ ZTEST(cc3501e_host_driver, test_wifi_sec_kind_and_name)
 }
 
 /* CONNECT packs the connect header (ssid_len | psk_len | security | rsvd) then
- * the inline SSID then the inline passphrase, with no padding. */
+ * the inline SSID then the inline passphrase, with no padding.  The wire
+ * bytes are asserted off the DEDICATED connect_last_req_* snapshot, not the
+ * generic slave.req_pl/req_len -- by the time cc3501e_wifi_connect() returns,
+ * those reflect its own follow-up WIFI_STATUS poll (empty request), not the
+ * CONNECT_STA submit (see the mock's WIFI_CONNECT_STA case). */
 ZTEST(cc3501e_host_driver, test_wifi_connect_encodes_header_ssid_psk)
 {
 	zassert_equal(
 	    cc3501e_wifi_connect(&fw, "mynet", 1u, "secretpw", 100u), ALP_OK, "CONNECT -> OK");
-	zassert_equal(slave.cmd, ALP_CC3501E_CMD_WIFI_CONNECT_STA, "opcode 0x12");
+	zassert_equal(slave.connect_submit_count, 1u, "exactly one submit");
 	/* header(4) + ssid(5) + psk(8) = 17. */
-	zassert_equal(slave.req_len, 4u + 5u + 8u, "payload = header + ssid + psk");
-	zassert_equal(slave.req_pl[0], 5u, "ssid_len");
-	zassert_equal(slave.req_pl[1], 8u, "psk_len");
-	zassert_equal(slave.req_pl[2], 1u, "security");
-	zassert_mem_equal(&slave.req_pl[4], "mynet", 5u, "inline SSID");
-	zassert_mem_equal(&slave.req_pl[9], "secretpw", 8u, "inline passphrase");
+	zassert_equal(slave.connect_last_req_len, 4u + 5u + 8u, "submit payload = header + ssid + psk");
+	zassert_equal(slave.connect_last_req_pl[0], 5u, "ssid_len");
+	zassert_equal(slave.connect_last_req_pl[1], 8u, "psk_len");
+	zassert_equal(slave.connect_last_req_pl[2], 1u, "security");
+	zassert_mem_equal(&slave.connect_last_req_pl[4], "mynet", 5u, "inline SSID");
+	zassert_mem_equal(&slave.connect_last_req_pl[9], "secretpw", 8u, "inline passphrase");
 }
 
 ZTEST(cc3501e_host_driver, test_wifi_connect_oversize_ssid_rejected)
@@ -662,6 +804,94 @@ ZTEST(cc3501e_host_driver, test_wifi_connect_oversize_ssid_rejected)
 	              ALP_ERR_INVAL,
 	              "SSID > 32 -> INVAL (host guard)");
 	zassert_equal(slave.cmd, 0u, "no transfer clocked");
+}
+
+/* #1376 regression proof: an association that takes several WIFI_STATUS polls
+ * to resolve must still have submitted CONNECT_STA exactly ONCE.  Against the
+ * pre-fix poll_by_repeat(WIFI_CONNECT_STA, ...) contract this fails outright
+ * -- every 50 ms repeat that landed on the mock's stateless "always ack OK"
+ * WIFI_CONNECT_STA case (the model faithful to the OLD contract) would have
+ * been read as immediate success; against the OLD real firmware contract
+ * (fire-and-forget + a job slot reset to IDLE the instant it drains) each
+ * retry submits a brand-new association -- five retries, five real joins,
+ * for one user command, per issue #1376. */
+ZTEST(cc3501e_host_driver, test_wifi_connect_submits_exactly_once_1376)
+{
+	slave.status_polls_before_terminal = 4u; /* CONNECTING for 4 polls, then terminal */
+	zassert_equal(cc3501e_wifi_connect(&fw, "slownet", 1u, "pw", 5000u),
+	              ALP_OK,
+	              "eventually CONNECTED -> OK");
+	zassert_equal(slave.connect_submit_count,
+	              1u,
+	              "exactly one CONNECT_STA submit regardless of how many status polls it took");
+}
+
+/* #1376: a connection to an SSID that never actually associates must not be
+ * reported as connected.  The mock never advances past DISCONNECTED here
+ * (the fixture default after slave_reset() is CONNECTED, so override it) --
+ * cc3501e_wifi_connect() must time out, not report ALP_OK, and must still
+ * have submitted only once. */
+ZTEST(cc3501e_host_driver, test_wifi_connect_never_confirmed_times_out_1376)
+{
+	slave.wifi_conn_state = ALP_CC3501E_WIFI_DISCONNECTED;
+	zassert_equal(cc3501e_wifi_connect(&fw, "ghostnet", 1u, "pw", 120u),
+	              ALP_ERR_TIMEOUT,
+	              "never confirmed -> TIMEOUT, not a false OK");
+	zassert_equal(slave.connect_submit_count, 1u, "still exactly one submit, not a retry storm");
+}
+
+/* #1376/#1378: an association that genuinely FAILS (auth reject / no AP) must
+ * be reported as a failure, not an OK -- and, as above, from exactly one
+ * submit. */
+ZTEST(cc3501e_host_driver, test_wifi_connect_reports_failure_not_ok_1376)
+{
+	slave.wifi_conn_state  = ALP_CC3501E_WIFI_CONN_FAILED;
+	slave.wifi_fail_reason = ALP_CC3501E_WIFI_FAIL_REJECTED;
+	zassert_equal(cc3501e_wifi_connect(&fw, "securenet", 1u, "wrongpw", 5000u),
+	              ALP_ERR_IO,
+	              "CONN_FAILED/REJECTED -> IO, not OK");
+	zassert_equal(slave.connect_submit_count, 1u, "exactly one submit");
+}
+
+/* #1378's own reproduction: force the mock's WIFI_CONNECT_STA submit ack to
+ * read back a literal RESP_OK (0x00) -- "a valid header followed by an
+ * all-zero payload phase", exactly what a dead bus phase clocks on real
+ * silicon per this repo's own finding (hal/ti/cc3501e_hw_ti_wifi.c: "the
+ * host then reads 0x00000000 from a dead link").  The association never
+ * actually confirms (state stays DISCONNECTED).  cc3501e_wifi_connect() must
+ * NOT report ALP_OK: it does not trust the submit's own ack in either
+ * direction, only the independent WIFI_STATUS latch -- so this proves the
+ * property the issue names: ALP_OK requires positive evidence the device
+ * framed a reply, not merely the absence of evidence that it did not. */
+ZTEST(cc3501e_host_driver, test_wifi_connect_ignores_dead_phase_ok_alias_1378)
+{
+	g_connect_submit_force_ok = true;
+	slave.wifi_conn_state     = ALP_CC3501E_WIFI_DISCONNECTED;
+	alp_status_t s            = cc3501e_wifi_connect(&fw, "ghostnet", 1u, "pw", 120u);
+	zassert_not_equal(
+	    s, ALP_OK, "a bare-OK submit ack alone must never make connect() report success");
+}
+
+/* #1378 at the transport layer directly: cc3501e_request_locked() itself
+ * must refuse to hand back ALP_OK for a WIFI_CONNECT_STA submit whose reply
+ * is a bare RESP_OK status byte (resp_payload_len == 1) -- the firmware's
+ * WORKER_IDLE ack for this opcode is UNCONDITIONALLY RESP_ERR_BUSY, so a
+ * synchronous OK is never a value this exchange can legitimately produce;
+ * seeing one is self-evidently the dead-phase alias.  This is "the case
+ * that matters": a valid reply HEADER (opcode echo + payload_len=1, both
+ * staged normally) followed by an all-zero PAYLOAD phase (status byte 0x00)
+ * must not yield ALP_OK. */
+ZTEST(cc3501e_host_driver, test_connect_sta_dead_phase_alias_rejected_at_transport_1378)
+{
+	g_connect_submit_force_ok = true;
+	uint8_t      req[4]       = { 5u, 0u, 1u, 0u }; /* minimal connect header, no SSID/PSK bytes */
+	alp_status_t s            = cc3501e_request(
+	    &fw, ALP_CC3501E_CMD_WIFI_CONNECT_STA, req, sizeof(req), NULL, 0, NULL, 100u);
+	zassert_not_equal(s,
+	                  ALP_OK,
+	                  "a dead-phase 0x00 alias for CONNECT_STA's submit ack must not read as "
+	                  "ALP_OK (#1378)");
+	zassert_equal(s, ALP_ERR_IO, "rejected as a transport error, not silently accepted");
 }
 
 ZTEST(cc3501e_host_driver, test_wifi_ap_start_encodes_like_connect)

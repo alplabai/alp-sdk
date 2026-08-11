@@ -7,6 +7,68 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — CC3501E Wi-Fi connect no longer re-associates on every retry or reports a false "connected", and `wifi status`/`wifi rssi` survive a radio op (#1376, #1377, #1378)
+
+A wire-contract drift on `WIFI_CONNECT_STA` (0x12): the firmware was
+redesigned to fire-and-forget (submit once, then latch the outcome for
+`WIFI_STATUS` to collect), but the host driver still ran the old poll-by-
+repeat-the-submit contract, re-issuing the SAME command every 50 ms on
+`ALP_ERR_BUSY`/`ALP_ERR_IO`. Each retry landed on a job slot the firmware
+resets to `IDLE` the instant the association drains, so it submitted a
+**brand-new** association — five retries observed as five real join attempts
+for one `wifi connect` command, each producing its own `[event] wifi
+disconnected` burst (#1376).
+
+**`cc3501e_wifi_connect()`** (`chips/cc3501e/cc3501e_wifi.c`) now submits
+`WIFI_CONNECT_STA` exactly once and awaits the outcome off the independent,
+non-blocking `WIFI_STATUS` latch (`CONNECTING` → `CONNECTED`/`CONN_FAILED`)
+instead of trusting the submit's own acknowledgement in either direction.
+
+**`cc3501e_wifi_status()` / `cc3501e_wifi_rssi()`** had no retry stance at
+all — a single request with a short timeout — on the reasoning that neither
+op runs a radio op itself. False: the shared bridge transport is briefly
+down whenever *any* radio op is in flight (a connect this same call may be
+observing the outcome of, included), so a status read taken moments after a
+connect desynced like any other transaction — `ver`/`scan`/`connect` all
+healthy, then every subsequent `wifi status` failing `-5` (`ALP_ERR_IO`),
+repeatably (#1377). Both now poll-by-repeat, floored to the radio
+down-window, like every other radio-adjacent op in this file.
+`WIFI_GET_RSSI` (0x16) is additionally worker-routed (a fresh request
+lazy-starts the radio), so a single non-retried call was collecting only the
+submit's own `BUSY` ack and orphaning the job.
+
+**The console's RSSI print** (`src/zephyr/console/alp_console_companion_wifi.c`)
+discarded `cc3501e_wifi_rssi()`'s return status on a zero-initialised local,
+so a failed read rendered as a plausible `rssi=0 dBm` on any connect success.
+It now reports the read failure instead of a fabricated zero.
+
+**#1378 — an unvalidated reply-payload status byte made a dead bus phase
+indistinguishable from success.** `cc3501e_request_locked()`
+(`chips/cc3501e/cc3501e_core.c`) validated only the reply header; the payload
+status byte fed straight into `resp_to_status()`. `ALP_CC3501E_RESP_OK` is
+`0x00`, and this repo's own silicon finding is that a dead bus phase reads
+back literal `0x00` — so a header that read intact (genuinely alive) followed
+by a payload phase that died in the inter-phase settle gap was silently
+accepted as a successful bare-status reply. `WIFI_CONNECT_STA`'s submit ack
+is now hardened at the transport layer: the firmware's `WORKER_IDLE` branch
+for this opcode unconditionally acks `RESP_ERR_BUSY` and can never
+legitimately reply a synchronous `RESP_OK`, so a bare `RESP_OK` (payload
+length 1) for this specific opcode is rejected as `ALP_ERR_IO` rather than
+accepted — defense in depth alongside `cc3501e_wifi_connect()`'s own refusal
+to trust the ack. A general, opcode-agnostic version of this check is
+**not** applied: several bare-OK replies legitimately are all-zero
+(`WIFI_STATUS`'s disconnected-and-never-attempted state, `DIAG_GET_STATS`'
+zero counters right after boot, `SOCK_RECV`'s zero-bytes-pending), so
+flagging those would trade a rare false `ALP_OK` for a routine false
+`ALP_ERR_IO` on paths that are correct today. The same aliasing remains open
+for every other bare-ack opcode this driver has no per-opcode contract
+knowledge of — `OTA_PROMOTE` is the sharpest example — and needs either a
+wire-level CRC/canary (a protocol version bump) or the same
+submit-once-then-poll-an-independent-latch treatment `WIFI_AP_START` also
+still lacks (it shares `WIFI_CONNECT_STA`'s exact fire-and-forget firmware
+shape but its host wrapper was not restructured here); tracked as a named
+gap on #1378.
+
 ### Fixed — helper MCUs can now describe the GD32 bridge: `flash_policy`, a second OTA channel, and `jlink_device` on all four E1M-X presets (#1357)
 
 `helper_firmware[]` encoded `update_channel` **XOR** `flash_method`, in two
