@@ -427,3 +427,55 @@ def test_emit_system_manifest_omits_dpidr_preflight_when_unmeasured(
         assert "jlink_device" not in flash_args
         assert "expect_dpidr" not in flash_args
 
+
+# ---------------------------------------------------------------------
+# `flash_args.slot0_load_address` -- the AEN MRAM slot0-XIP address (tan-
+# cli#353): before this, alp-sdk emitted no such key, so tan correctly
+# armed Flow D and then refused (`flash_args.slot0_load_address is
+# required to auto-sign via SETOOLS`), forcing a customer to hand-edit
+# `system-manifest.yaml` to flash an AEN.
+# ---------------------------------------------------------------------
+
+
+def test_emit_system_manifest_aen_flash_args_carries_slot0_load_address(
+    tmp_path: Path,
+) -> None:
+    """E1M-AEN801 declares a #1069 disjoint-slot0 `memory_map:` (HE and HP
+    boot from DIFFERENT physical MRAM windows, deliberately -- the stock
+    symmetric layout put them at the SAME address and one flash silently
+    clobbered the other). Each M55 slice's `flash_args` must carry ITS OWN
+    core's address, not a value shared with its sibling.
+
+    Values asserted verbatim against `metadata/e1m_modules/E1M-AEN801.yaml`
+    `memory_map:` (`he_slot0`/`hp_slot0` `base:`) -- a wrong digit here
+    writes the application blob into the wrong core's MRAM window, or into
+    the sibling core's live slot0.
+    """
+    path = _write_board(tmp_path, AEN_HAPPY)
+    project = load_board_yaml(path)
+    parsed = yaml.safe_load(emit_system_manifest(project))
+
+    by_core = {s["core_id"]: s for s in parsed["slices"]}
+    assert by_core["m55_he"]["flash_args"]["slot0_load_address"] == \
+        "0x80010000"
+    assert by_core["m55_hp"]["flash_args"]["slot0_load_address"] == \
+        "0x802b0000"
+
+
+def test_emit_system_manifest_flash_args_omits_slot0_load_address_when_flow_d_unarmed(
+    tmp_path: Path,
+) -> None:
+    """E1M-AEN701 publishes no `jlink_flash_device` (Flow D is not armed for
+    this SoC variant), so `flash_args` must stay `{}` -- no
+    `slot0_load_address` key either, even though this is otherwise an AEN
+    part with M55 HP/HE cores. `slot0_load_address` is meaningless without
+    Flow D, and must never appear on its own.
+    """
+    path = _write_board(tmp_path, AEN_NO_JLINK_FLASH_DEVICE)
+    project = load_board_yaml(path)
+    parsed = yaml.safe_load(emit_system_manifest(project))
+
+    by_core = {s["core_id"]: s for s in parsed["slices"]}
+    for core_id in ("m55_hp", "m55_he"):
+        assert "slot0_load_address" not in by_core[core_id]["flash_args"]
+

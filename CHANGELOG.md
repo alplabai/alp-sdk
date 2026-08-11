@@ -7,6 +7,43 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — `flash_args` carries no `slot0_load_address`, so tan refused to auto-sign an AEN Flow D flash (tan-cli#353)
+
+alp-sdk emitted `flash_args.jlink_flash_device` (the Flow D device profile)
+but never `slot0_load_address` (where the slot0-linked application blob
+itself belongs) -- zero occurrences anywhere in `scripts/`/`metadata/`.
+tan-cli correctly routed an AEN slice to Flow D (`alif_mram_jlink`) and
+then refused outright: `flash_args.slot0_load_address is required to
+auto-sign via SETOOLS`, forcing a customer to hand-edit
+`system-manifest.yaml` to flash an AEN at all. Confirmed on silicon with
+the value hand-supplied: three images flashed, persistence proven across
+full cold power cycles at 16.0 V.
+
+`scripts/alp_orchestrate/loader.py` gains `_resolve_slot0_load_address`,
+resolved PER CORE (unlike `jlink_flash_device`, which is a single
+per-variant string) from the SoM preset's own `memory_map:` `he_slot0`/
+`hp_slot0` regions -- deliberately NOT added to the SoC JSON `debug:`
+block `jlink_flash_device` lives in, because this address is SDK/module
+build POLICY, not a silicon fact:
+`metadata/e1m_modules/E1M-AEN801.yaml`'s own `memory_map:` comment says so
+explicitly (#1069, the disjoint-slot0 fix), and two SoMs sharing one
+silicon part can freely choose different slot0 windows. Bench-proven at
+`0x80010000` for the HE core (`docs/aen-bench-bringup.md`,
+`docs/aen-provisioning.md` §0.5, `docs/secure-boot.md`); `hp_slot0`
+resolves to `0x802b0000` from the same `memory_map:`. Falls back to the
+stock AEN default (`0x80010000`, the same literal
+`scripts/gen_zephyr_board.py`'s `_aen_role_slot0_map`/`_aen_defconfig`
+already use) only for the HE role when no explicit override region
+exists; HP gets no default -- inventing one would silently reintroduce
+#1069's HE/HP address collision.
+
+`scripts/validate_metadata.py` gains `_check_som_slot0_address_resolved`:
+a `memory_map:` region whose `name:` declares an MRAM slot0 path
+(`*_slot0`) but whose `base:` isn't a resolved integer (a `"TBD"`
+placeholder or a missing key) is now refused at the metadata layer,
+instead of silently falling through to the wrong default (or `None`) at
+manifest-emit or board-generation time.
+
 ### Changed — the diagnostics schema gate no longer runs through the `alp` command surface (#837)
 
 ADR [0020](docs/adr/0020-sdk-owns-build-execution.md) ends with alp-sdk owning

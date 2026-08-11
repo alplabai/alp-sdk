@@ -43,6 +43,12 @@ flash_args contract:
   degraded check. This backend goes through `west`, never touches a J-Link
   directly, and so reads neither.
 
+  `slot0_load_address` (tan-cli#353; the AEN MRAM slot0-XIP address this
+  slice's application blob is linked at) is CONSUMER-SIDE-ONLY in the same
+  way: a downstream flasher that writes MRAM directly over J-Link needs it
+  to know where to `loadbin`; `west flash` derives its own load address
+  from the build's own linked ELF, so this backend ignores the key too.
+
 Tool requirement: ``west`` on PATH.  We rely on west's own runner
 plumbing (``west flash --runner X``) so each underlying runner's
 prerequisite (openocd / J-Link / pyocd / nrfjprog) is implicitly
