@@ -27,15 +27,26 @@ block `jlink_flash_device` lives in, because this address is SDK/module
 build POLICY, not a silicon fact:
 `metadata/e1m_modules/E1M-AEN801.yaml`'s own `memory_map:` comment says so
 explicitly (#1069, the disjoint-slot0 fix), and two SoMs sharing one
-silicon part can freely choose different slot0 windows. Bench-proven at
-`0x80010000` for the HE core (`docs/aen-bench-bringup.md`,
-`docs/aen-provisioning.md` §0.5, `docs/secure-boot.md`); `hp_slot0`
-resolves to `0x802b0000` from the same `memory_map:`. Falls back to the
-stock AEN default (`0x80010000`, the same literal
-`scripts/gen_zephyr_board.py`'s `_aen_role_slot0_map`/`_aen_defconfig`
-already use) only for the HE role when no explicit override region
-exists; HP gets no default -- inventing one would silently reintroduce
-#1069's HE/HP address collision.
+silicon part can freely choose different slot0 windows. Measured, not
+asserted: E1M-AEN801's `m55_hp` and `m55_he` share ONE silicon variant
+(`AE822FA0E5597LS0`) yet resolve to two different addresses
+(`0x802b0000` vs `0x80010000`) purely because of that SDK layout choice,
+so a single per-SoC-JSON value beside `jlink_flash_device` (itself a flat
+per-variant string, not per-core) cannot represent this fact without
+growing its own per-core override mechanism -- at which point it is the
+same `memory_map:`-shaped override this PR already added, just moved.
+Bench-proven at `0x80010000` for the HE core
+(`docs/aen-bench-bringup.md`, `docs/aen-provisioning.md` §0.5,
+`docs/secure-boot.md`); `hp_slot0` resolves to `0x802b0000` from the same
+`memory_map:`. Falls back to the stock AEN default (`0x80010000`) for
+EITHER role when the preset declares no `<role>_slot0` override at all
+(covering E1M-AEN401/E1M-AEN601, whose only generated M55 board is
+`m55_hp`, not just the `m55_he` case) by reusing
+`scripts/gen_zephyr_board.py`'s own `_aen_role_slot0_map` (not a second
+copy of its derivation), so the two genuinely cannot disagree; a
+declared-but-invalid override (half-authored, or a wrong
+`accessible_from`) now raises instead of silently emitting a fabricated
+address no board was ever generated for.
 
 `scripts/validate_metadata.py` gains `_check_som_slot0_address_resolved`:
 a `memory_map:` region whose `name:` declares an MRAM slot0 path

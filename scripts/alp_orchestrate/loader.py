@@ -247,15 +247,22 @@ def _resolve_jlink_flash_device(
     return debug.get("jlink_flash_device")
 
 
-# AEN's "no `<role>_slot0` override declared" default: the stock symmetric
-# layout's slot0 window starts right after the 64 KiB mcuboot region, at
-# the MRAM base (0x80000000 + 0x10000) -- the SAME literal
-# `scripts/gen_zephyr_board.py`'s `_aen_defconfig`/`_aen_generate_files`
-# already fall back to (`slot0_base = ... if slot0_region else
-# 0x80010000`) when a SoM preset's `memory_map:` carries no explicit
-# `<role>_slot0` region.  Reused here rather than re-derived so the two
-# resolutions of "this AEN core's slot0 address" can never disagree.
-_AEN_DEFAULT_HE_SLOT0_ADDRESS = 0x80010000
+# AEN's "no `<role>_slot0` override declared anywhere" default: the stock
+# symmetric layout's slot0 window starts right after the 64 KiB mcuboot
+# region, at the MRAM base (0x80000000 + 0x10000). Derived the same way
+# `scripts/gen_zephyr_board.py`'s `_aen_generate_files` derives it
+# (`_AEN_MRAM_BASE + _AEN_MCUBOOT_KIB * 1024`, gen_zephyr_board.py:1318-19)
+# when `_aen_role_slot0_map` finds no per-role override -- there is no
+# `0x80010000` literal over there to reuse; this is a second, independent
+# computation of the same fact, so the two constants are pinned equal by
+# tests/scripts/test_orchestrate_loader.py's no-override cases rather than
+# by shared code.
+# Applies to EVERY role uniformly in the no-override case (not just `he`):
+# the stock layout has exactly one slot0 window, and whichever single M55
+# core a SoM boots (`m55_hp` on the single-M55 E1M-AEN401/E1M-AEN601, or
+# either role on a dual-M55 SoM before it opts into a disjoint override)
+# lands on it.
+_AEN_DEFAULT_STOCK_SLOT0_ADDRESS = 0x80010000
 
 
 def _resolve_slot0_load_address(
@@ -278,10 +285,19 @@ def _resolve_slot0_load_address(
     so explicitly (#1069), because two SoMs built on the same silicon part
     can freely choose different slot0 windows. That is the exact bug #1069
     fixed: a stock symmetric layout put HE's and HP's slot0 at the SAME
-    address and flashing one silently clobbered the other. Mirrors
-    `scripts/gen_zephyr_board.py`'s `_aen_role_slot0_map` /
-    `_aen_flash_partitions`, which resolve the identical fact for board
-    generation, so the two can never disagree.
+    address and flashing one silently clobbered the other.
+
+    Reuses `scripts/gen_zephyr_board.py`'s own `_aen_role_slot0_map` (lazy
+    import, matching the existing cross-module convention at
+    `scripts/alp_project.py:279`) rather than re-deriving its per-role
+    override lookup, so this and board generation read the identical
+    override/no-override decision and genuinely cannot disagree on THAT
+    part. A declared-but-invalid override (a half-authored map naming only
+    one role's `<role>_slot0`, or a wrong `accessible_from`) makes
+    `_aen_role_slot0_map` raise `ZephyrBoardEmitError` -- board generation
+    refuses to build that core's board file for the same reason, so this
+    re-raises as `OrchestratorError` instead of silently publishing an
+    address no board was actually built for.
 
     Bench-proven at this exact address for the HE core (`0x80010000`):
     `docs/aen-bench-bringup.md`, `docs/aen-provisioning.md` §0.5, and
@@ -292,12 +308,7 @@ def _resolve_slot0_load_address(
     Only `m55_he`/`m55_hp` roles are AEN slot0-XIP cores; every other
     core_id (a32_cluster, non-AEN SoC families) returns None -- a
     published "unknown", never a value to invent (same convention as
-    `jlink_flash_device`'s absent key). For `m55_hp` specifically, an
-    explicit `hp_slot0` `memory_map:` region is required -- there is no
-    safe default: falling back to the HE default here would silently
-    reintroduce #1069's HE/HP address collision for any future dual-M55
-    AEN SoM that gets `jlink_flash_device` without also declaring a
-    disjoint-slot0 override.
+    `jlink_flash_device`'s absent key).
     """
     if not core_id.startswith("m55_"):
         return None
@@ -305,16 +316,19 @@ def _resolve_slot0_load_address(
     if role not in ("he", "hp"):
         return None
 
-    memory_map = som_preset.get("memory_map") or []
-    for region in memory_map:
-        if (region.get("name") == f"{role}_slot0"
-                and region.get("accessible_from") == [core_id]
-                and isinstance(region.get("base"), int)):
-            return f"0x{region['base']:08x}"
+    from gen_zephyr_board import ZephyrBoardEmitError, _aen_role_slot0_map
 
-    if role == "he":
-        return f"0x{_AEN_DEFAULT_HE_SLOT0_ADDRESS:08x}"
-    return None
+    memory_map = som_preset.get("memory_map") or []
+    try:
+        slot0_region = _aen_role_slot0_map(memory_map, role)
+    except ZephyrBoardEmitError as exc:
+        raise OrchestratorError(
+            f"cannot resolve flash_args.slot0_load_address for "
+            f"{core_id!r}: {exc}") from exc
+
+    if slot0_region is not None:
+        return f"0x{slot0_region['base']:08x}"
+    return f"0x{_AEN_DEFAULT_STOCK_SLOT0_ADDRESS:08x}"
 
 
 def _resolve_flow_d_preflight(
