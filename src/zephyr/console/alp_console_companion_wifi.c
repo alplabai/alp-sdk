@@ -110,6 +110,25 @@ static int cmd_companion_wifi_scan(const struct shell *sh, size_t argc, char **a
 
 static int cmd_companion_wifi_connect(const struct shell *sh, size_t argc, char **argv)
 {
+	/* #1376 defect 1: with SHELL_CMD_ARG(..., 2, 2) the shell tokenises on
+	 * unquoted whitespace, so an unquoted SSID or passphrase containing a
+	 * space silently splits across argv[1]/argv[2] and shoves the real
+	 * passphrase into argv[3].  That token was previously ignored unless it
+	 * was literally "wpa3" -- a silent drop that reports a confident
+	 * "connecting" line for an SSID the user never typed.  Reject it loudly
+	 * instead; quoting is the fix ("my ssid" "my pass"), stated in the
+	 * command help below.  Checked before the device-state guards so a
+	 * usage mistake is never masked by "companion not registered". */
+	if (argc >= 4 && strcmp(argv[3], "wpa3") != 0) {
+		shell_error(sh,
+		            "connect: unrecognised 4th argument \"%s\" (only \"wpa3\" is accepted "
+		            "there)",
+		            argv[3]);
+		shell_error(sh,
+		            "if the SSID or passphrase contains a space, quote it: "
+		            "connect \"my ssid\" \"my pass\" [wpa3]");
+		return -EINVAL;
+	}
 	if (companion_cc3501e == NULL) {
 		shell_warn(sh, "companion not registered");
 		return -ENODEV;
@@ -123,8 +142,8 @@ static int cmd_companion_wifi_connect(const struct shell *sh, size_t argc, char 
 	/* No passphrase -> open; a passphrase -> WPA2-PSK (the common case).  A
 	 * trailing "wpa3" token forces WPA3-SAE. */
 	uint8_t sec = (pass[0] == '\0') ? 0u : 1u;
-	if (argc >= 4 && strcmp(argv[3], "wpa3") == 0) {
-		sec = 2u;
+	if (argc >= 4) {
+		sec = 2u; /* the reject above already proved argv[3] == "wpa3" */
 	}
 
 	strncpy(conn_ssid, ssid, sizeof(conn_ssid) - 1u);
@@ -266,7 +285,8 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
     SHELL_CMD_ARG(scan, NULL, "scan for Wi-Fi APs", cmd_companion_wifi_scan, 1, 0),
     SHELL_CMD_ARG(connect,
                   NULL,
-                  "connect <ssid> [pass] [wpa3]  -- associate (no pass = open)",
+                  "connect <ssid> [pass] [wpa3]  -- associate (no pass = open); quote "
+                  "\"ssid\"/\"pass\" if either contains a space",
                   cmd_companion_wifi_connect,
                   2,
                   2),

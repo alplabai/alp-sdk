@@ -166,6 +166,33 @@ ZTEST(alp_console, test_companion_wifi_group_registered)
 	zassert_is_null(strstr(out, "Unknown command"), "companion wifi not registered: %s", out);
 }
 
+/*
+ * #1376 defect 1: an unquoted SSID with a space splits across argv[1]/argv[2],
+ * so the real passphrase lands in argv[3]; that trailing token must be
+ * rejected (not silently dropped) unless it is literally "wpa3".  This must
+ * be checked ahead of the "companion not registered" guard so the reject
+ * fires even with no companion bound (as in this test image) -- a usage
+ * error is a caller mistake, not a device-state question.
+ */
+ZTEST(alp_console, test_companion_wifi_connect_rejects_unrecognized_trailing_arg)
+{
+	const char *out = run("alp companion wifi connect my ssid secret");
+
+	zassert_is_null(strstr(out, "companion not registered"),
+	                "bad arg must be rejected before the device-state check: %s",
+	                out);
+	zassert_not_null(strstr(out, "secret"), "error should name the rejected token: %s", out);
+}
+
+ZTEST(alp_console, test_companion_wifi_connect_accepts_wpa3_token)
+{
+	const char *out = run("alp companion wifi connect ssid pass wpa3");
+
+	zassert_not_null(strstr(out, "companion not registered"),
+	                 "a valid \"wpa3\" 4th arg must reach the device-state check: %s",
+	                 out);
+}
+
 ZTEST(alp_console, test_companion_ble_group_registered)
 {
 	const char *out = run("alp companion ble enable");

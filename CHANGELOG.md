@@ -7,6 +7,40 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — `alp companion wifi connect` silently dropped an unrecognised trailing argument (#1376)
+
+`SHELL_CMD_ARG(connect, ..., 2, 2)` allows up to `argv[3]`, but the handler
+only ever inspected it for the literal token `"wpa3"` — any other value there
+was discarded without a word. Because the Zephyr shell tokenises on unquoted
+whitespace, an unquoted SSID or passphrase containing a space silently split
+across `argv[1]`/`argv[2]`, shoved the real passphrase into `argv[3]`, and
+that token then vanished: the console printed a confident "connecting to
+..." line for an SSID the user never typed, with their passphrase consumed
+as a discarded security token.
+
+`cmd_companion_wifi_connect()` (`src/zephyr/console/alp_console_companion_wifi.c`)
+now rejects any 4th argument that is not exactly `"wpa3"` with `shell_error`
+naming the offending token and stating the quoting rule, before either
+device-state guard runs (`companion not registered` / `a connect is already
+in progress`) — a usage mistake is a caller error, not a device-state
+question, and previously the reject would have been unreachable whenever no
+companion was bound. The `connect` help text (`SHELL_STATIC_SUBCMD_SET_CREATE`)
+now states the quoting rule directly: `connect "my ssid" "my pass" [wpa3]`.
+No attempt is made to recover a spaced SSID/passphrase automatically —
+quoting is already the correct, existing workaround; a loud refusal beats a
+clever heuristic parse. `wifi ap` has the identical `argv[3]` shape and is
+unchanged here — out of scope for this issue.
+
+`tests/console/src/test_console.c` adds
+`test_companion_wifi_connect_rejects_unrecognized_trailing_arg` (proves the
+reject fires and names the rejected token, ahead of the device-state guard)
+and `test_companion_wifi_connect_accepts_wpa3_token` (proves a valid `wpa3`
+4th argument still reaches the device-state check) — mutant-verified against
+the pre-fix handler.
+
+Defect 2 of #1376 (the connect worker's own success/RSSI reporting) is
+tracked separately and left untouched.
+
 ### Changed — the diagnostics schema gate no longer runs through the `alp` command surface (#837)
 
 ADR [0020](docs/adr/0020-sdk-owns-build-execution.md) ends with alp-sdk owning
