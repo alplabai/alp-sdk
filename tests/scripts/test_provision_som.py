@@ -193,14 +193,20 @@ def test_execute_skipped_power_on_test_records_pending_hw_not_pass(tmp_path, mon
     assert "--test-result pending-hw" in calls
 
 
-def test_execute_failed_power_on_test_records_pending_hw_not_pass(tmp_path, monkeypatch):
-    """A power-on test that was configured, ran, and failed must still
-    record ledger 'pending-hw', not 'pass' -- 'pass' is only earned when
-    the test ran AND passed. It is not recorded as a distinct 'fail'
-    value either: only 'pass' and 'pending-hw' have ever been emitted to
-    som_ledger.py in this repo, and som_ledger.py itself lives in the
-    private alp-sdk-internal, so a third value can't be verified to be
-    accepted from here.
+def test_execute_failed_power_on_test_records_fail_not_pending_hw(tmp_path, monkeypatch):
+    """A power-on test that was configured, ran, and FAILED records ledger
+    'fail' -- not 'pass', and (since #1305) not 'pending-hw' either.
+
+    Run against the pre-#1305 generator this asserts RED: `_record` emitted
+    `"pass" if (cfg.execute and test_ran and test_ok) else "pending-hw"`, so
+    a unit that failed its power-on test got the same ledger row as a unit
+    nobody ever tested -- "not yet verified" and "verified bad" were the
+    same string downstream.
+
+    `som_ledger.py` lives in alp-sdk-internal and declares
+    `choices=["pass", "fail", "pending-hw"]`, so the value this asserts is
+    one the real tool accepts; emitting it does not make the record step
+    exit non-zero on the bench path (the risk #1305 was held on).
 
     Stubs tests/hil/run_smoke.py itself (via --alp-sdk-root), not
     _power_on_test, so the real subprocess + returncode wiring that turns
@@ -222,9 +228,9 @@ def test_execute_failed_power_on_test_records_pending_hw_not_pass(tmp_path, monk
     rc = ps.provision(cfg)
     assert rc == 1   # the test step itself failed
     calls = log.read_text() if log.exists() else ""
-    assert "--test-result pending-hw" in calls, calls
+    assert "--test-result fail" in calls, calls
     assert "--test-result pass" not in calls
-    assert "--test-result fail" not in calls
+    assert "--test-result pending-hw" not in calls
 
 
 def test_relative_hil_spec_resolves_against_alp_sdk_root_not_cwd(tmp_path, monkeypatch):

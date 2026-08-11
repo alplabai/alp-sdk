@@ -22,7 +22,8 @@ import jsonschema
 import pytest
 
 from alp_cli.diagnostic import Diagnostic, render
-from alp_cli.diagnostic_format import to_machine_json, to_sarif
+from alp_cli.diagnostic_format import (machine_json_for_board_yaml,
+                                       to_machine_json, to_sarif)
 
 REPO = Path(__file__).resolve().parents[2]
 SCHEMA_PATH = REPO / "metadata" / "schemas" / "diagnostic-v1.schema.json"
@@ -197,6 +198,30 @@ def test_human_render_output_is_unchanged_snapshot():
 
 
 # ---------------------------------------------------------------------------
+# library entry point: machine_json_for_board_yaml (no CLI in the call chain)
+# ---------------------------------------------------------------------------
+
+
+def test_machine_json_for_board_yaml_emits_conformant_document():
+    doc = machine_json_for_board_yaml(FIX_BAD / "ALP-B005-bad-sku.yaml")
+    _validator().validate(doc)
+    assert any(d["code"] == "ALP-B005" for d in doc["diagnostics"])
+
+
+def test_machine_json_for_board_yaml_on_clean_input_has_no_diagnostics():
+    doc = machine_json_for_board_yaml(REPO / "tests" / "fixtures" /
+                                      "board_yaml_good" / "minimal.yaml")
+    _validator().validate(doc)
+    assert doc["diagnostics"] == []
+
+
+def test_machine_json_for_board_yaml_honours_tool_overrides():
+    doc = machine_json_for_board_yaml(FIX_BAD / "ALP-B005-bad-sku.yaml",
+                                      tool_name="alp-lsp", tool_version="9.9.9")
+    assert doc["tool"] == {"name": "alp-lsp", "version": "9.9.9"}
+
+
+# ---------------------------------------------------------------------------
 # CLI wiring: `alp validate --format json|sarif`
 # ---------------------------------------------------------------------------
 
@@ -228,6 +253,30 @@ def test_cli_format_sarif_emits_valid_sarif_on_stdout():
     results = doc["runs"][0]["results"]
     assert any(r["ruleId"] == "ALP-B005" for r in results)
     assert "error[ALP-B005]" not in proc.stdout
+
+
+def test_cli_json_is_document_identical_to_the_library_entry_point():
+    # `alp_cli.validate` routes --format json through machine_json_for_board_yaml()
+    # directly (not a parallel to_machine_json(collector) call), so this is a
+    # structural equality, not a coincidence two paths happen to agree on. It's
+    # what keeps scripts/check_diagnostic_schema.py's verdict (which validates the
+    # LIBRARY document) identical to the CLI's, for as long as the CLI exists
+    # (ADR 0020 retires it). Compares parsed documents, not raw bytes -- an
+    # indent=2 -> indent=4 change at validate.py's json.dumps() call would not
+    # redden this.
+    fixture = FIX_BAD / "ALP-B005-bad-sku.yaml"
+    from_cli = json.loads(_run_alp_validate(fixture, "--format", "json").stdout)
+    assert from_cli == machine_json_for_board_yaml(fixture)
+
+
+def test_cli_json_matches_library_on_the_zero_diagnostics_branch_too():
+    # The drift lock above only exercises a fixture that produces
+    # diagnostics; a clean board.yaml is a distinct code path (an empty
+    # `diagnostics` array) and must agree with the library door too.
+    fixture = REPO / "tests" / "fixtures" / "board_yaml_good" / "minimal.yaml"
+    from_cli = json.loads(_run_alp_validate(fixture, "--format", "json").stdout)
+    assert from_cli == machine_json_for_board_yaml(fixture)
+    assert from_cli["diagnostics"] == []
 
 
 def test_cli_default_format_is_human():

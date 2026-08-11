@@ -125,6 +125,28 @@ python3 $ALP_SDK/scripts/alp_project.py \
 Or wire the loader into a `CMakeUserPresets.json` writer if your
 build system already drives presets.
 
+**You do not need to do any of that for a `tan build`.** The build plan's
+own baremetal slice already carries these settings in the two shapes CMake
+actually accepts (alplabai/tan-cli#551): the `NAME=VALUE` lines become real
+`-D` cache arguments on the slice's `cmake -S … -B .` configure, and the
+bare guards become real compiler definitions through a generated
+`build/<core>-baremetal/alp-baremetal.cmake` that the same configure pulls
+in with `-DCMAKE_PROJECT_INCLUDE=`. This section is the *inspection*
+surface -- for reading what a slice needs, or for a build system that is
+not `tan`.
+
+One class of line stays inspection-only: a curated library with an
+`integration.baremetal.cmake` section in its
+`metadata/libraries/<name>.yaml` contributes a
+`# library <name>: <cmake hint>` line, which is prose for a human and not
+a `-D` flag at all -- handing it to cmake would make it a stray
+source-directory argument. Those lines are therefore dropped from the
+slice's configure, so the `_library_layer.baremetal_cmake_args` half of
+alplabai/tan-cli#551 is still open. Impact today is zero: no manifest
+under `metadata/libraries/` declares a `baremetal` section. Closing it
+needs those manifests to carry a machine-readable argument rather than a
+hint string.
+
 ### Yocto -- generated `local.conf` snippet
 
 ```bash

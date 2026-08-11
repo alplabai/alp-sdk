@@ -41,7 +41,7 @@ jobs:
       - name: install emit deps
         run: pip install jsonschema pyyaml pytest
       # The comparator's own unit tests, BEFORE the live comparison it guards.
-      # These 11 ran in no workflow on either side: this job invoked only
+      # These 15 ran in no workflow on either side: this job invoked only
       # `seam1_field_diff.py` itself, and `test-all.sh`'s pytest stage is scoped
       # to `tests/scripts/`, so `tests/parity/` was excluded from both. A gate
       # whose comparator is unverified reports whatever that comparator happens

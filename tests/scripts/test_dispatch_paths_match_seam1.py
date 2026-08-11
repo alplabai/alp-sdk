@@ -1,21 +1,42 @@
 # SPDX-License-Identifier: Apache-2.0
-"""`dispatch-tan-parity.yml` and `parity-seam1.yml` must watch the same paths.
+"""`dispatch-tan-parity.yml` must watch EVERYTHING `parity-seam1.yml` watches,
+plus the hand-port surface -- and nothing else.
 
 `parity-seam1.yml` decides when ALP-SDK re-checks its own plan shape.
-`dispatch-tan-parity.yml` decides when TAN re-checks it. Both are answers to
-the same question -- "did the contract surface move?" -- so a path in one list
-and not the other means one side starts testing changes the other ignores.
+`dispatch-tan-parity.yml` decides when TAN re-checks it. A path in seam1 and
+not in the sender means alp-sdk's own CI goes green on that change, tan is
+never told, and tan's next PR run tests a `PINNED_SDK_TAG` that predates it.
+Nothing is red. That is exactly how tan-cli#156 happened -- a vendored oracle
+drifted out of lockstep and a tolerance was added to paper over it, rather than
+the drift being caught. A comment saying "kept in lockstep" is not a mechanism;
+this is.
 
-That is the silent divergence the two-seam gate exists to prevent, arriving
-through the gate's own wiring. A comment saying "kept in lockstep" is not a
-mechanism; this is.
+**That direction is still strict. The other direction is not, deliberately
+(#855).** The two lists were equal until it was measured that they answer
+DIFFERENT questions:
 
-Concretely, if `dispatch-tan-parity.yml` loses a path that `parity-seam1.yml`
-keeps: alp-sdk's own CI still goes green on that change, tan is never told, and
-tan's next PR run tests a `PINNED_SDK_TAG` that predates it. Nothing is red.
-That is exactly how tan-cli#156 happened -- a vendored oracle drifted out of
-lockstep and a tolerance was added to paper over it, rather than the drift
-being caught.
+* seam1 asks *"did our own build-plan SHAPE move?"* -- so its list is the
+  plan-shape surface, and a generator that emits no build-plan byte
+  (`gen_zephyr_board.py`) does not belong in it.
+* the sender asks *"did anything TAN MIRRORS move?"* -- and tan mirrors a
+  strictly LARGER surface. Alongside the 20 relocated `scripts/alp_orchestrate/`
+  modules, `tan/planner/` carries ten hand-ports out of `scripts/`
+  (tan-cli's `python/tests/gates/test_planner_relocation_freshness.py`,
+  `HAND_PORT_HASHES` + `STRICT_LOADERS_HASH`, is the authoritative list).
+
+Under the old equality none of those hand-port sources was watched at all.
+Measured over the last 400 alp-sdk commits touching one: SEVEN of 29 matched
+none of the four original paths and fired no dispatch -- including `98807809`
+(the missing `CONFIG_USE_DT_CODE_PARTITION=y`, which shipped) and `cb7f64ae`
+(#1125/#1126, path traversal), the two incidents tan-cli#279 was filed about.
+
+So the equality becomes a SUPERSET check with an explicitly declared extra set.
+`EXPECTED_HAND_PORT_PATHS` below is a local copy of a fact that lives in tan,
+and it is deliberately NOT read from tan: alp-sdk must not import tan's tables
+(that would invert the one-way tan->SDK dependency ADR-0020 exists to fix). It
+can therefore go stale, and the backstop for that is on tan's side and needs
+nothing from this repo -- tan-cli's `planner-resync.yml` also runs on a daily
+cron, which catches a source this list forgot within 24h.
 """
 
 from __future__ import annotations
@@ -37,6 +58,25 @@ SEAM1 = WORKFLOWS / "parity-seam1.yml"
 # home.
 CONFIRM_SCRIPT = REPO / "scripts" / "dispatch-confirm.sh"
 
+#: The alp-sdk sources `tan/planner/**` HAND-PORTS (as opposed to the
+#: `scripts/alp_orchestrate/**` modules it relocated 1:1, already covered by
+#: seam1's own list). Keyed to tan-cli's `HAND_PORT_HASHES` +
+#: `STRICT_LOADERS_HASH`, which is the authoritative list -- see the module
+#: docstring for why this is a declared copy rather than an import.
+#:
+#: Adding a path here is a deliberate act: it says "tan mirrors this file, so a
+#: change to it must reach tan". Removing one says the opposite. Neither should
+#: happen as a drive-by, which is what pinning the set (rather than just
+#: allowing any superset) buys.
+EXPECTED_HAND_PORT_PATHS = {
+    "scripts/gen_zephyr_board.py",
+    "scripts/alp_project_loader.py",
+    "scripts/alp_project_emit/**",
+    "scripts/alp_template.py",
+    "scripts/sentinels.py",
+    "scripts/strict_loaders.py",
+}
+
 
 def _push_paths(path: pathlib.Path) -> list[str]:
     """The `on.push.paths` list, read as YAML rather than grepped.
@@ -50,21 +90,23 @@ def _push_paths(path: pathlib.Path) -> list[str]:
     return list(triggers["push"]["paths"])
 
 
-def test_dispatch_watches_exactly_what_seam1_watches() -> None:
+def test_dispatch_watches_everything_seam1_watches() -> None:
+    """The direction that stays STRICT: seam1 ⊆ sender.
+
+    A path seam1 watches and the sender does not is the tan-cli#156 failure --
+    alp-sdk green, tan never told, tan's next run testing a pin that predates
+    the change.
+    """
     sender = _push_paths(SENDER)
     seam1 = _push_paths(SEAM1)
 
-    # Order-insensitive but duplicate-sensitive: two lists differing only in
-    # order are the same trigger, and a duplicated entry is a copy-paste slip
-    # worth surfacing rather than normalising away.
-    assert sorted(sender) == sorted(seam1), (
-        "dispatch-tan-parity.yml and parity-seam1.yml watch different paths.\n"
-        f"  only in dispatch: {sorted(set(sender) - set(seam1))}\n"
-        f"  only in seam1   : {sorted(set(seam1) - set(sender))}\n"
-        "One side would start testing contract-surface changes the other "
-        "ignores -- and the side that goes quiet does so while still reporting "
-        "green. Update both lists, or delete this test deliberately if the two "
-        "triggers are genuinely meant to diverge."
+    missing = sorted(set(seam1) - set(sender))
+    assert not missing, (
+        "parity-seam1.yml watches path(s) dispatch-tan-parity.yml does not: "
+        f"{missing}.\n"
+        "alp-sdk would re-check its own plan shape on such a change and tan "
+        "would never be told -- it would keep testing a PINNED_SDK_TAG that "
+        "predates it, green. Add them to the sender."
     )
 
     # A pair of empty lists would satisfy the comparison above while watching
@@ -73,6 +115,39 @@ def test_dispatch_watches_exactly_what_seam1_watches() -> None:
     assert len(sender) >= 4, (
         f"only {len(sender)} watched path(s); the contract surface is at least "
         "scripts/alp_orchestrate, metadata, examples board.yaml and tests/parity"
+    )
+    # Duplicate-sensitive: a duplicated entry is a copy-paste slip worth
+    # surfacing rather than normalising away.
+    assert len(sender) == len(set(sender)), (
+        f"duplicate path(s) in dispatch-tan-parity.yml: "
+        f"{sorted({p for p in sender if sender.count(p) > 1})}"
+    )
+
+
+def test_the_senders_extra_paths_are_exactly_the_declared_hand_port_surface() -> None:
+    """The direction that is deliberately NOT equality (#855), pinned anyway.
+
+    The sender legitimately watches MORE than seam1 -- the hand-port sources
+    tan mirrors, which emit no build-plan byte and so do not belong in seam1's
+    plan-shape list. What must not happen is that extra set drifting silently
+    in either direction: a hand-port source quietly dropped goes back to the
+    pre-#855 state where a change to it dispatches nothing, and an unrelated
+    path quietly added starts waking tan for changes it does not mirror.
+    """
+    sender = _push_paths(SENDER)
+    seam1 = _push_paths(SEAM1)
+    extra = set(sender) - set(seam1)
+
+    assert extra == EXPECTED_HAND_PORT_PATHS, (
+        "dispatch-tan-parity.yml's extra paths are not the declared hand-port "
+        "surface.\n"
+        f"  watched but not declared: {sorted(extra - EXPECTED_HAND_PORT_PATHS)}\n"
+        f"  declared but not watched: {sorted(EXPECTED_HAND_PORT_PATHS - extra)}\n"
+        "The first set wakes tan for files it does not mirror; the second is a "
+        "tan hand-port whose changes reach nobody -- the exact pre-#855 state, "
+        "which shipped a missing CONFIG_USE_DT_CODE_PARTITION=y. Update BOTH "
+        "the workflow and EXPECTED_HAND_PORT_PATHS above, and check the change "
+        "against tan-cli's HAND_PORT_HASHES, which is the authoritative list."
     )
 
 

@@ -36,7 +36,8 @@
         "bin": null,
         "sizeReport": null,
         "symbols": null,
-        "compileCommands": null
+        "compileCommands": null,
+        "outputDir": null
       },
       "debug": {
         "console": "linux",
@@ -49,6 +50,7 @@
         ],
         "cwd": "build/a55_cluster-yocto"
       },
+      "postCommands": [],
       "env": {
         "ALP_SDK_ROOT": "${SDK_ROOT}"
       },
@@ -84,7 +86,8 @@
         "bin": "build/m33_sm-zephyr/zephyr/zephyr.bin",
         "sizeReport": "build/m33_sm-zephyr/zephyr/zephyr.stat",
         "symbols": "build/m33_sm-zephyr/zephyr/zephyr.symbols",
-        "compileCommands": "build/m33_sm-zephyr/compile_commands.json"
+        "compileCommands": "build/m33_sm-zephyr/compile_commands.json",
+        "outputDir": null
       },
       "debug": {
         "console": null,
@@ -103,6 +106,7 @@
         ],
         "cwd": "build/m33_sm-zephyr"
       },
+      "postCommands": [],
       "env": {
         "ALP_SDK_ROOT": "${SDK_ROOT}"
       },
