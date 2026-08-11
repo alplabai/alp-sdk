@@ -208,6 +208,74 @@ def test_emit_system_manifest_populates_helper_mcus(tmp_path: Path) -> None:
     assert gd32["flash_args"]["target"] == "gd32g553"
 
 
+def test_helper_mcu_keeps_flash_keys_alongside_update_channel(
+    tmp_path: Path,
+) -> None:
+    """#1357: an `update_channel` must not delete the local flash path.
+
+    `_helper_mcus` used to project the two as an either/or, so the GD32
+    bridge -- which has BOTH a field-update channel (protocol v0.6 Path
+    A, slot-A/B application bootloader) and a recovery-only SWD flash --
+    would have had its `flash_method`/`flash_args` dropped from the
+    manifest. That is worse than declining the recovery path: the path
+    vanishes, so a tool cannot even explain why it is unavailable to
+    someone with a bricked bridge.
+
+    Every key the preset declares must survive independently.
+    """
+    path = _write_board(tmp_path, V2N_HAPPY)
+    parsed = yaml.safe_load(emit_system_manifest(load_board_yaml(path)))
+
+    gd32 = next(h for h in parsed["helper_mcus"]
+                if h["name"] == "gd32_bridge")
+
+    # The field-update channel is projected...
+    assert gd32["update_channel"] == "alp_ota_spi_bridge"
+    # ...and it did NOT suppress the local flash recipe.  Assert the keys
+    # SURVIVED before reading them, so the regression reports as "the
+    # channel deleted the recovery path" rather than a bare KeyError.
+    assert {"flash_method", "flash_args", "flash_policy"} <= set(gd32), (
+        "update_channel suppressed the local flash keys; the recovery "
+        f"path vanished from the manifest: {sorted(gd32)}"
+    )
+    assert gd32["flash_method"] == "swd_probe"
+    assert gd32["flash_args"]["target"] == "gd32g553"
+    assert gd32["flash_args"]["jlink_device"] == "GD32G553MEY7TR"
+    assert gd32["flash_args"]["base"] == "0x08000000"
+    # ...and the fact that decides who may invoke it came along too.
+    assert gd32["flash_policy"] == "recovery_only"
+
+
+def test_helper_mcu_omits_keys_the_preset_does_not_declare(
+    tmp_path: Path,
+) -> None:
+    """The converse of the test above: independent projection must not
+    start emitting `null` placeholders for absent keys.
+
+    AEN801's `cc3501e_otp` declares no `flash_method`, so the row must
+    carry no `flash_method` key at all -- `tan flash` reads a present-
+    but-null key as a recipe.
+    """
+    path = _write_board(tmp_path, """
+som:
+  sku: E1M-AEN801
+
+preset: e1m-evk
+cores:
+  m55_he:
+    os: zephyr
+    app: ./he
+""")
+    parsed = yaml.safe_load(emit_system_manifest(load_board_yaml(path)))
+
+    cc = next(h for h in parsed["helper_mcus"]
+              if h["name"] == "cc3501e_otp")
+    assert cc["update_channel"] == "alp_ota_spi_otp"
+    assert cc["flash_policy"] == "recovery_only"
+    assert "flash_method" not in cc
+    assert "flash_args" not in cc
+
+
 def test_emit_system_manifest_populates_flash_method(tmp_path: Path) -> None:
     """Phase 3 per-slice flash_method + flash_args.
 
