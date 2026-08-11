@@ -82,6 +82,12 @@ static struct {
 	 * before the real value is handed back -- models GET_RSSI's real
 	 * worker-routed submit/collect shape (#1377). */
 	uint32_t rssi_busy_polls_remaining;
+
+	/* Every WIFI_STATUS request-header phase clocked, fault-injected or not
+	 * -- lets a test count how many WIFI_STATUS attempts
+	 * cc3501e_wifi_connect()'s own poll loop made for a given timeout_ms
+	 * (#1382 timeout-accounting regression). */
+	uint32_t wifi_status_attempt_count;
 } slave;
 
 /* Set by test_wifi_scan_buf_is_per_context_740 / test_ble_scan_buf_is_per_context_740
@@ -427,6 +433,9 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 	(void)bus;
 	if (len == 0u) {
 		return ALP_OK;
+	}
+	if (slave.phase == PH_REQ_HDR && tx[0] == ALP_CC3501E_CMD_WIFI_STATUS) {
+		slave.wifi_status_attempt_count++;
 	}
 	if (slave.phase == PH_REQ_HDR && tx[0] == ALP_CC3501E_CMD_WIFI_STATUS &&
 	    g_status_io_down_remaining > 0u) {
@@ -838,6 +847,34 @@ ZTEST(cc3501e_host_driver, test_wifi_connect_never_confirmed_times_out_1376)
 	              ALP_ERR_TIMEOUT,
 	              "never confirmed -> TIMEOUT, not a false OK");
 	zassert_equal(slave.connect_submit_count, 1u, "still exactly one submit, not a retry storm");
+}
+
+/* #1382 timeout-accounting regression: cc3501e_wifi_connect()'s poll loop
+ * must OWN the retry budget, not delegate it to an inner call that retries
+ * on its own.  Before the fix, the loop called the public
+ * cc3501e_wifi_status(), whose own poll_by_repeat rides out an IO fault for
+ * up to CC3501E_WIFI_DOWN_WINDOW_MS (10 s) per call, while the outer loop's
+ * `remaining -= gap` only ever debited its own 50 ms sleep -- so a
+ * permanently wedged transport meant every outer iteration hid up to 10 s
+ * the caller's declared timeout_ms never accounted for. Measured against
+ * this exact harness with a wedged transport: connect(timeout_ms=200) made
+ * 1005 WIFI_STATUS attempts (50250 ms simulated), 251x the declared budget.
+ *
+ * Wedge the transport permanently (g_status_io_down_remaining = UINT32_MAX,
+ * as test_wifi_status_gives_up_after_the_down_window_1377 does for a direct
+ * cc3501e_wifi_status() call) and assert the number of WIFI_STATUS attempts
+ * cc3501e_wifi_connect() makes stays in the ballpark ITS OWN cadence
+ * predicts -- ceil(timeout_ms / CC3501E_REQ_TMO_MS) + 1 -- not the
+ * 1005-attempt blowup the un-fixed nesting produced for the same budget. */
+ZTEST(cc3501e_host_driver, test_wifi_connect_bounds_status_attempts_on_wedged_transport_1382)
+{
+	g_status_io_down_remaining = UINT32_MAX;
+	alp_status_t s             = cc3501e_wifi_connect(&fw, "wedgednet", 1u, "pw", 200u);
+	zassert_equal(s, ALP_ERR_TIMEOUT, "permanently wedged transport -> bounded TIMEOUT");
+	zassert_true(slave.wifi_status_attempt_count <= 4u,
+	             "WIFI_STATUS attempts must stay bounded by connect()'s own 200 ms budget, not "
+	             "an inner down-window retry loop it doesn't account for (got %u attempts)",
+	             slave.wifi_status_attempt_count);
 }
 
 /* #1376/#1378: an association that genuinely FAILS (auth reject / no AP) must
