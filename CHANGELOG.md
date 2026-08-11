@@ -38,6 +38,15 @@ either, and the generic fallback now skips those too. The escalation is not
 lost: it is still printed verbatim as its own `[HFSR] FORCED (bit 30)` entry
 under `Set flags:`, which is where a qualifier belongs.
 
+Also fixed in the same pass: `_HexInt.convert` (the `--cfsr`/`--hfsr`/`--dfsr`/
+`--bfar`/`--mmfar` param type) parsed a value with `int(text, 16)`, which
+happily accepts a leading `-`. Fault registers are unsigned, so a negative
+value like `--cfsr=-8200` was silently accepted, printed back as the
+malformed `CFSR=0x-0008200`, and confidently decoded into a bogus root cause
+instead of being refused. `_HexInt.convert` now rejects a negative value with
+a `BadParameter` naming the offending input, the same way it already rejects
+a non-hex one.
+
 ### Fixed — CC3501E Wi-Fi connect no longer re-associates on every retry or reports a false "connected", `wifi status`/`wifi rssi` survive a radio op, and `wifi connect`'s own timeout budget is honoured (#1376, #1377, #1378)
 
 A wire-contract drift on `WIFI_CONNECT_STA` (0x12): the firmware was

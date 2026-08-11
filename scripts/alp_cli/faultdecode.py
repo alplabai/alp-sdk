@@ -548,13 +548,21 @@ class _HexInt(click.ParamType):
 
     def convert(self, value, param, ctx):  # type: ignore[override]
         if isinstance(value, int):
+            if value < 0:
+                self.fail(f"{value!r} is negative -- fault registers are unsigned", param, ctx)
             return value
         text = str(value).strip()
         try:
-            # base 16 accepts an optional 0x prefix and a bare hex run alike.
-            return int(text, 16)
+            # base 16 accepts an optional 0x prefix and a bare hex run alike,
+            # and int() also accepts a leading '-' -- reject that explicitly,
+            # since these are unsigned CPU registers and a negative value
+            # would otherwise decode as a bogus, confidently-reported cause.
+            parsed = int(text, 16)
         except ValueError:
             self.fail(f"{value!r} is not a valid integer (try 0x...)", param, ctx)
+        if parsed < 0:
+            self.fail(f"{value!r} is negative -- fault registers are unsigned", param, ctx)
+        return parsed
 
 
 HEXINT = _HexInt()

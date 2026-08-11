@@ -286,6 +286,14 @@ def test_cmd_bad_value_is_rejected():
     assert "valid integer" in result.output.lower()
 
 
+def test_cmd_negative_value_is_rejected():
+    # Fault registers are unsigned; int(text, 16) happily parses a leading
+    # '-' and would otherwise decode a bogus cause with confidence.
+    result = _run(["--cfsr", "-8200"])
+    assert result.exit_code != 0
+    assert "negative" in result.output.lower()
+
+
 def test_cmd_pc_without_elf_notes_skip():
     result = _run(["--cfsr", "0x00008200", "--pc", "0x08001234", "--no-color"])
     assert result.exit_code == 0, result.output
