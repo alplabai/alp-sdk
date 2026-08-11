@@ -180,6 +180,41 @@ alp_status_t cc3501e_wifi_scan_stop(cc3501e_t *ctx)
  * (WIFI_CONNECT_STA), so it cannot just call poll_by_repeat itself. */
 #define CC3501E_WIFI_STATUS_POLL_GAP_MS 50u
 
+/* Single, non-retried WIFI_STATUS read (opcode 0x1B) -- decodes the same
+ * fixed 4-byte wire layout as the public cc3501e_wifi_status() below, but
+ * WITHOUT its down-window poll_by_repeat.
+ *
+ * cc3501e_wifi_connect()'s own loop below already re-polls on its own
+ * cadence (CC3501E_WIFI_STATUS_POLL_GAP_MS) for the caller's whole
+ * timeout_ms budget.  Calling the public cc3501e_wifi_status() from inside
+ * that loop layered ITS OWN internal retry (up to CC3501E_WIFI_DOWN_WINDOW_MS
+ * = 10 s) underneath the outer loop, and the outer loop's
+ * `remaining -= gap` accounting only ever saw the 50 ms gap it slept for --
+ * never the up-to-10-s the inner call could burn on a wedged transport.
+ * Measured against a wedged transport in this repo's own harness:
+ * connect(timeout_ms=200) made 1005 WIFI_STATUS attempts = 50250 ms (251x
+ * the declared budget) before giving up.
+ *
+ * A bounded single attempt here (CC3501E_REQ_TMO_MS, the same per-attempt
+ * budget every other single-shot request in this file uses) keeps the outer
+ * loop the SOLE owner of the retry budget, matching
+ * <alp/chips/cc3501e/wifi.h>'s documented contract for cc3501e_wifi_connect
+ * ("Upper bound on the WIFI_STATUS poll budget"). */
+static alp_status_t wifi_status_once(cc3501e_t *ctx, alp_cc3501e_wifi_status_t *out)
+{
+	uint8_t      reply[4] = { 0 };
+	size_t       got      = 0;
+	alp_status_t s        = cc3501e_request(
+	    ctx, ALP_CC3501E_CMD_WIFI_STATUS, NULL, 0, reply, sizeof(reply), &got, CC3501E_REQ_TMO_MS);
+	if (s != ALP_OK) return s;
+	if (got < sizeof(reply)) return ALP_ERR_IO; /* short reply -- firmware/wire gap */
+	out->state       = reply[0];
+	out->fail_reason = reply[1];
+	out->rssi_dbm    = (int8_t)reply[2];
+	out->reserved    = reply[3];
+	return ALP_OK;
+}
+
 alp_status_t cc3501e_wifi_connect(cc3501e_t  *ctx,
                                   const char *ssid,
                                   uint8_t     sec_type,
@@ -248,11 +283,15 @@ alp_status_t cc3501e_wifi_connect(cc3501e_t  *ctx,
 
 	/* Await the outcome off the non-blocking WIFI_STATUS latch (opcode
 	 * 0x1B) -- never off the submit's own ack.  CONNECTING means the
-	 * association is still running; CONNECTED / CONN_FAILED are terminal. */
+	 * association is still running; CONNECTED / CONN_FAILED are terminal.
+	 * Uses wifi_status_once() (a single non-retried attempt), NOT the public
+	 * cc3501e_wifi_status() -- see wifi_status_once()'s comment for why
+	 * layering that function's own 10 s down-window retry underneath this
+	 * loop broke the timeout_ms accounting. */
 	uint32_t remaining = (timeout_ms > 0u) ? timeout_ms : 1u;
 	for (;;) {
 		alp_cc3501e_wifi_status_t st;
-		alp_status_t              ss = cc3501e_wifi_status(ctx, &st);
+		alp_status_t              ss = wifi_status_once(ctx, &st);
 		if (ss == ALP_OK) {
 			if (st.state == ALP_CC3501E_WIFI_CONNECTED) return ALP_OK;
 			if (st.state == ALP_CC3501E_WIFI_CONN_FAILED) {
@@ -261,10 +300,16 @@ alp_status_t cc3501e_wifi_connect(cc3501e_t  *ctx,
 			}
 			/* DISCONNECTED (not yet latched) or CONNECTING: keep polling. */
 		}
-		/* ss != ALP_OK: cc3501e_wifi_status() itself already rides out the
-		 * transient down-window internally (see its own poll-by-repeat); a
-		 * status read still failing here is worth one more pass rather than
-		 * an immediate bail, since it can only shrink the remaining budget. */
+		/* ss != ALP_OK: a single status read failing (e.g. a transient
+		 * down-window IO) is worth one more pass rather than an immediate
+		 * bail -- the next iteration will retry it.  Debit BOTH this
+		 * attempt's own worst-case cost (CC3501E_REQ_TMO_MS -- the budget
+		 * wifi_status_once() bounds a single request to) and the poll gap
+		 * from the caller's declared timeout_ms: the attempt is no longer
+		 * hidden inside an inner retry loop, so it must be charged here for
+		 * `remaining` to stay an honest upper bound on wall-clock time. */
+		uint32_t attempt_cost = (CC3501E_REQ_TMO_MS < remaining) ? CC3501E_REQ_TMO_MS : remaining;
+		remaining -= attempt_cost;
 		if (remaining == 0u) return ALP_ERR_TIMEOUT;
 		uint32_t gap = (remaining < CC3501E_WIFI_STATUS_POLL_GAP_MS)
 		                   ? remaining

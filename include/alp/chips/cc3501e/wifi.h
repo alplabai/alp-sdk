@@ -268,6 +268,11 @@ alp_status_t cc3501e_wifi_ap_stop(cc3501e_t *ctx);
  * #1377, where a single non-retried request here collected only the
  * submit's own BUSY ack and left the job orphaned.
  *
+ * @warning As with @ref cc3501e_wifi_status, the retry rides out a
+ *          transient down-window only -- it cannot resync or reset a
+ *          genuinely wedged transport, and will burn the whole down-window
+ *          before reporting a timeout in that case rather than failing fast.
+ *
  * @param ctx   Initialised driver context.
  * @param rssi  Receives the signed dBm RSSI on success.
  * @return ALP_OK with @p rssi filled; ALP_ERR_NOT_READY if not associated
@@ -313,6 +318,18 @@ alp_status_t cc3501e_wifi_get_ip(cc3501e_t *ctx, uint8_t ip[4]);
  * like any other transaction that lands in that window.  This is therefore
  * poll-by-repeat internally, floored to the radio down-window, even though
  * the WIFI_STATUS opcode itself never replies RESP_ERR_BUSY.
+ *
+ * @warning The retry only rides out a TRANSIENT down-window (the bridge
+ *          briefly unavailable while a radio op runs) -- it re-issues the
+ *          identical SPI transaction with no resync, no CS recovery, no
+ *          reset, so it cannot recover a genuinely WEDGED transport.  If
+ *          @ref cc3501e_get_version (a plain, non-worker, short-timeout
+ *          request) also fails, the transport itself is broken rather than
+ *          mid-radio-op, and this call will still burn the whole down-window
+ *          (bounded, but up to several seconds) before reporting
+ *          @c ALP_ERR_TIMEOUT / @c ALP_ERR_IO rather than failing fast.
+ *          Recovering a wedged link needs a different remedy (link resync or
+ *          reset) that this driver does not yet implement.
  *
  * @param ctx  Initialised driver context.
  * @param out  Receives the decoded status snapshot: @c state is a
