@@ -7,6 +7,140 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Added — ADR 0027 proposes declaring storage regions by role, not by SoM-internal region name
+
+`board.yaml`'s `storage:` entries place themselves with `flash_device:`, a
+string naming a region in the SoM preset's `memory_map:` or
+`on_module.ospi_memories:`. Measured across all 11 presets in
+`metadata/e1m_modules/` at `f30f4d4b`, that field is resolvable on **exactly
+one**: only E1M-AEN801 defines a `memory_map:` (`mcuboot`, `he_slot0`,
+`hp_slot0`, `reserved`, `storage`, `atoc`, `mram_main`). E1M-AEN301/401/501/
+601/701 carry `on_module.ospi_memories:` but no `memory_map:`; E1M-V2N101/102,
+E1M-V2M101/102 and E1M-NX9101 carry neither, using `on_module.nor_flash` /
+`emmc` instead.
+
+The single example that uses the field,
+`examples/connectivity/production-deployment/board.yaml`, pins all five
+partitions to `mram_main` under `som.sku: E1M-AEN801` — correct today, and
+portable to nothing: retargeted at E1M-AEN601, the same family ADR 0011 says
+portability must hold across, every entry names a region that preset does not
+define.
+
+**ADR 0027** proposes `role:` (`settings` / `app_data` / `log` / `ota_cache`)
+as the primary, portable declaration, resolved per SoM from the preset, with
+`flash_device:` retained as an explicit non-portable pin for cases roles
+cannot express (the example's three MCUboot slots byte-match the bootloader
+and stay pinned). A pinned region that does not exist after a SoM swap is a
+**refusal** naming the missing region, the SoM, and the role that would
+replace it — never a silent relocation, because relocating persisted settings
+on a green build is data loss. `size_kib` stays required: a role implies
+*where*, never *how much*.
+
+Status is **Proposed** and this changes no code. Migration is sequenced so the
+feature never half-exists, and where a SoM's backing part is not yet pinned
+down the role is marked TBD and refuses with "not yet mapped" rather than
+resolving to a guessed region.
+
+### Added — ADR 0026 proposes retiring alp-sdk as a second planner producer
+
+ADR 0020's 2026-08-03 amendment relocated the planner into tan but kept
+alp-sdk's `scripts/alp_orchestrate/` as "the reference producer", so two
+independent implementations of the same planner ship from two repos and
+neither is allowed to be wrong. **ADR 0026** proposes ending that: tan's
+`python/tan/planner/` becomes the single implementation, alp-sdk keeps what it
+is uniquely authoritative for (`metadata/`, `metadata/schemas/`, examples,
+tooling contracts), and `build-plan-v1` survives unchanged as the
+planner/executor seam.
+
+Measured at alp-sdk `f30f4d4b` / tan-cli `ac7e725`: `scripts/alp_orchestrate/`
+is 21 modules and 7,182 lines, `python/tan/planner/` is 31 modules and 12,071
+lines, 20 of the 21 module basenames are mirrored (all but `__main__.py`), and
+the parity apparatus that exists solely to police the mirror is 47 files and
+23,886 lines — more than three times the logic it guards.
+
+The ADR also records the recurrence evidence (tan-cli #274, #275, #279, #313,
+#320, #324, #409, #425, #485, #492, #509, #531, #543, #544, #545): #320
+recurred as #485, and #543 has dev's parity job failing on every alp-sdk
+dispatch since 2026-08-07. Status is **Proposed** — the ADR changes no code,
+and its migration section requires the two planners be provably equal at one
+ref before any removal begins.
+### Fixed — CC3501E Wi-Fi connect no longer re-associates on every retry or reports a false "connected", `wifi status`/`wifi rssi` survive a radio op, and `wifi connect`'s own timeout budget is honoured (#1376, #1377, #1378)
+
+A wire-contract drift on `WIFI_CONNECT_STA` (0x12): the firmware was
+redesigned to fire-and-forget (submit once, then latch the outcome for
+`WIFI_STATUS` to collect), but the host driver still ran the old poll-by-
+repeat-the-submit contract, re-issuing the SAME command every 50 ms on
+`ALP_ERR_BUSY`/`ALP_ERR_IO`. Each retry landed on a job slot the firmware
+resets to `IDLE` the instant the association drains, so it submitted a
+**brand-new** association — five retries observed as five real join attempts
+for one `wifi connect` command, each producing its own `[event] wifi
+disconnected` burst (#1376).
+
+**`cc3501e_wifi_connect()`** (`chips/cc3501e/cc3501e_wifi.c`) now submits
+`WIFI_CONNECT_STA` exactly once and awaits the outcome off the independent,
+non-blocking `WIFI_STATUS` latch (`CONNECTING` → `CONNECTED`/`CONN_FAILED`)
+instead of trusting the submit's own acknowledgement in either direction.
+
+**`cc3501e_wifi_status()` / `cc3501e_wifi_rssi()`** had no retry stance at
+all — a single request with a short timeout — on the reasoning that neither
+op runs a radio op itself. False: the shared bridge transport is briefly
+down whenever *any* radio op is in flight (a connect this same call may be
+observing the outcome of, included), so a status read taken moments after a
+connect desynced like any other transaction — `ver`/`scan`/`connect` all
+healthy, then every subsequent `wifi status` failing `-5` (`ALP_ERR_IO`),
+repeatably (#1377). Both now poll-by-repeat, floored to the radio
+down-window, like every other radio-adjacent op in this file.
+`WIFI_GET_RSSI` (0x16) is additionally worker-routed (a fresh request
+lazy-starts the radio), so a single non-retried call was collecting only the
+submit's own `BUSY` ack and orphaning the job.
+
+**The console's RSSI print** (`src/zephyr/console/alp_console_companion_wifi.c`)
+discarded `cc3501e_wifi_rssi()`'s return status on a zero-initialised local,
+so a failed read rendered as a plausible `rssi=0 dBm` on any connect success.
+It now reports the read failure instead of a fabricated zero.
+
+**#1378 — an unvalidated reply-payload status byte made a dead bus phase
+indistinguishable from success.** `cc3501e_request_locked()`
+(`chips/cc3501e/cc3501e_core.c`) validated only the reply header; the payload
+status byte fed straight into `resp_to_status()`. `ALP_CC3501E_RESP_OK` is
+`0x00`, and this repo's own silicon finding is that a dead bus phase reads
+back literal `0x00` — so a header that read intact (genuinely alive) followed
+by a payload phase that died in the inter-phase settle gap was silently
+accepted as a successful bare-status reply. `WIFI_CONNECT_STA`'s submit ack
+is now hardened at the transport layer: the firmware's `WORKER_IDLE` branch
+for this opcode unconditionally acks `RESP_ERR_BUSY` and can never
+legitimately reply a synchronous `RESP_OK`, so a bare `RESP_OK` (payload
+length 1) for this specific opcode is rejected as `ALP_ERR_IO` rather than
+accepted — defense in depth alongside `cc3501e_wifi_connect()`'s own refusal
+to trust the ack. A general, opcode-agnostic version of this check is
+**not** applied: several bare-OK replies legitimately are all-zero
+(`WIFI_STATUS`'s disconnected-and-never-attempted state, `DIAG_GET_STATS`'
+zero counters right after boot, `SOCK_RECV`'s zero-bytes-pending), so
+flagging those would trade a rare false `ALP_OK` for a routine false
+`ALP_ERR_IO` on paths that are correct today. The same aliasing remains open
+for every other bare-ack opcode this driver has no per-opcode contract
+knowledge of — `OTA_PROMOTE` is the sharpest example, and `WIFI_AP_START`
+shares `WIFI_CONNECT_STA`'s exact fire-and-forget firmware shape but its host
+wrapper was not restructured here — filed as #1385.
+
+**`cc3501e_wifi_connect()`'s own poll loop was not honouring its declared
+`timeout_ms`.** The loop called the *public* `cc3501e_wifi_status()`, whose
+own down-window retry can burn up to ten seconds per call on a down
+transport — but the loop's `remaining` budget only ever debited its own
+50 ms sleep, never the time that inner call spent. Measured against a wedged
+transport: `connect(timeout_ms=200)` made 1005 `WIFI_STATUS` attempts
+(50250 ms, 251× the declared budget); at the console's real
+`ALP_COMPANION_WIFI_CONN_MS = 50000` it took 2 h 48 min before timing out.
+Fixed with a new `wifi_status_once()` — a single, non-retried `WIFI_STATUS`
+read the connect loop now uses instead, so the loop's own cadence is the
+sole owner of the retry budget, and `remaining` debits that attempt's own
+worst-case cost alongside the poll gap. `cc3501e_wifi_status()` /
+`cc3501e_wifi_rssi()`'s public doc comments now also warn that their
+down-window retry rides out only a *transient* stall — it re-issues the
+identical transaction with no resync/reset, so it cannot recover a
+genuinely wedged transport, and a direct caller (e.g. the console's `wifi
+status`) will still burn the whole down-window before failing in that case.
+
 ### Fixed — `examples/peripheral-io/pwm-led-fade` now wires `alp-pwm3` on E1M-AEN801, so `alp_pwm_open` no longer returns NOT_READY on real silicon (#1375)
 
 The example builds, signs, flashes, and boots cleanly on E1M-AEN801, but
@@ -97,6 +231,74 @@ the maintainer-confirmed rule is that only the CC3501E and the GD32 are not
 routinely customer-flashed, and even then a customer may flash either **to
 recover a bricked device**, using Alp Lab-supplied binaries.  Behaviour is
 otherwise unchanged (the entry still declares no `flash_method`).
+
+### Fixed — `flash_args` carries no `slot0_load_address`, so tan refused to auto-sign an AEN Flow D flash (tan-cli#353)
+
+alp-sdk emitted `flash_args.jlink_flash_device` (the Flow D device profile)
+but never `slot0_load_address` (where the slot0-linked application blob
+itself belongs) -- zero occurrences anywhere in `scripts/`/`metadata/`.
+tan-cli correctly routed an AEN slice to Flow D (`alif_mram_jlink`) and
+then refused outright: `flash_args.slot0_load_address is required to
+auto-sign via SETOOLS`, forcing a customer to hand-edit
+`system-manifest.yaml` to flash an AEN at all. Confirmed on silicon with
+the value hand-supplied: three images flashed, persistence proven across
+full cold power cycles at 16.0 V.
+
+**This alone does not make `tan flash` work.** A Windows E1M-AEN801 bench
+run against tan `v0.5.1` (PR #1374 review comment, 2026-08-11) confirmed
+this emitter's addresses are correct on real silicon, then measured that
+tan re-derives `system-manifest.yaml` itself rather than consuming this
+emitter's output: the `build/system-manifest.yaml` tan actually writes
+carries only `jlink_flash_device` -- `slot0_load_address`, `expect_dpidr`
+and `jlink_device` are all absent -- so `tan flash` still fails with the
+same `flash_args.slot0_load_address is required to auto-sign via SETOOLS`
+refusal after this PR. That is tan-cli#353 (reopened 2026-08-11) and is
+fixed on the tan-cli side, not here.
+
+`scripts/alp_orchestrate/loader.py` gains `_resolve_slot0_load_address`,
+resolved PER CORE (unlike `jlink_flash_device`, which is a single
+per-variant string) from the SoM preset's own `memory_map:` `he_slot0`/
+`hp_slot0` regions -- deliberately NOT added to the SoC JSON `debug:`
+block `jlink_flash_device` lives in, because this address is SDK/module
+build POLICY, not a silicon fact:
+`metadata/e1m_modules/E1M-AEN801.yaml`'s own `memory_map:` comment says so
+explicitly (#1069, the disjoint-slot0 fix), and two SoMs sharing one
+silicon part can freely choose different slot0 windows. Measured, not
+asserted: E1M-AEN801's `m55_hp` and `m55_he` share ONE silicon variant
+(`AE822FA0E5597LS0`) yet resolve to two different addresses
+(`0x802b0000` vs `0x80010000`) purely because of that SDK layout choice,
+so a single per-SoC-JSON value beside `jlink_flash_device` (itself a flat
+per-variant string, not per-core) cannot represent this fact without
+growing its own per-core override mechanism -- at which point it is the
+same `memory_map:`-shaped override this PR already added, just moved.
+Bench-proven at `0x80010000` for the HE core
+(`docs/aen-bench-bringup.md`, `docs/aen-provisioning.md` §0.5,
+`docs/secure-boot.md`); `hp_slot0` resolves to `0x802b0000` from the same
+`memory_map:`. Falls back to the stock AEN default (`0x80010000`,
+computed from `gen_zephyr_board`'s own `_AEN_MRAM_BASE`/
+`_AEN_MCUBOOT_KIB`, not a locally pinned copy) for EITHER role when the
+preset declares no `<role>_slot0` override at all -- both
+E1M-AEN401 and E1M-AEN601 declare `m55_hp` AND `m55_he` in `topology:`,
+but only the `m55_hp` Zephyr board tree is generated today (#999), and
+this covers that no-override shape for either role, not just `he` -- by
+reusing `scripts/gen_zephyr_board.py`'s own `_aen_role_slot0_map` (not a
+second copy of its derivation), so the two genuinely cannot disagree on
+the override/no-override decision itself; a declared-but-invalid
+override (half-authored, or a wrong `accessible_from`) now raises
+instead of silently emitting a fabricated address no board was ever
+generated for. The no-override default is deliberately the SAME address
+for both roles, which is not itself a live collision today (no non-
+E1M-AEN801 AEN variant publishes `jlink_flash_device` yet); a new
+`_enforce_slot0_disjoint_across_roles` guard now refuses outright if a
+future SoM variant ever makes it one, rather than leaving that case to
+coincide silently (#1384).
+
+`scripts/validate_metadata.py` gains `_check_som_slot0_address_resolved`:
+a `memory_map:` region whose `name:` declares an MRAM slot0 path
+(`*_slot0`) but whose `base:` isn't a resolved integer (a `"TBD"`
+placeholder or a missing key) is now refused at the metadata layer,
+instead of silently falling through to the wrong default (or `None`) at
+manifest-emit or board-generation time.
 
 ### Changed — the diagnostics schema gate no longer runs through the `alp` command surface (#837)
 

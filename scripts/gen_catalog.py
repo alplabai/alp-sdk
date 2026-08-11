@@ -247,7 +247,17 @@ def build_soms() -> list[dict]:
             "family":       doc.get("family"),
             "soc_part":     soc.get("part"),
             "topology":     _topology(doc),
-            "peripherals":  peripherals,
+            # #1243: renamed from `peripherals`, which read as "does
+            # <alp/CLASS.h> work on this SKU" and is NOT what it means. It
+            # is the literal silicon projection, vendor key spellings and
+            # all -- `pwm: false` on V2N only means no SoC JSON uses the
+            # key `pwm` (the silicon spells it `timer_32bit_gpt`), and
+            # `dac: false` there is a true silicon fact that reads as the
+            # opposite of reality, since <alp/dac.h> works via the GD32
+            # bridge. The companion `portable_classes` map #1243 also asks
+            # for is NOT emitted yet: it cannot be derived from
+            # ALP_BACKEND_REGISTER today -- see the issue thread.
+            "soc_peripherals":  peripherals,
             "capabilities": soc.get("capabilities") or {},
         })
     return soms

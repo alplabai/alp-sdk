@@ -247,6 +247,102 @@ def _resolve_jlink_flash_device(
     return debug.get("jlink_flash_device")
 
 
+def _resolve_slot0_load_address(
+    som_preset: dict[str, Any], core_id: str,
+) -> Optional[str]:
+    """This core's AEN MRAM slot0-XIP load address, as a `0x`-prefixed hex
+    string for `flash_args.slot0_load_address` (tan-cli#353): the Flow D
+    built-in MRAM loader (`alif_mram_jlink`) needs to know where the
+    slot0-linked application blob itself belongs, distinct from
+    `jlink_flash_device` (which only picks the loader's *device profile*).
+    Before this, alp-sdk emitted no such key at all -- tan correctly routed
+    an AEN slice to Flow D and then refused outright (`flash_args.
+    slot0_load_address is required to auto-sign via SETOOLS`), forcing a
+    customer to hand-edit `system-manifest.yaml` to flash an AEN.
+
+    Deliberately sourced from the SoM preset's `memory_map:`, NOT from the
+    SoC JSON `debug:` block `jlink_flash_device` lives in: this address is
+    SDK/module build POLICY, not a silicon fact --
+    `metadata/e1m_modules/E1M-AEN801.yaml`'s own `memory_map:` comment says
+    so explicitly (#1069), because two SoMs built on the same silicon part
+    can freely choose different slot0 windows. That is the exact bug #1069
+    fixed: a stock symmetric layout put HE's and HP's slot0 at the SAME
+    address and flashing one silently clobbered the other.
+
+    Reuses `scripts/gen_zephyr_board.py`'s own `_aen_role_slot0_map` (lazy
+    import, matching the existing cross-module convention at
+    `scripts/alp_project.py:279`) rather than re-deriving its per-role
+    override lookup, so this and board generation read the identical
+    override/no-override decision and genuinely cannot disagree on THAT
+    part. A declared-but-invalid override (a half-authored map naming only
+    one role's `<role>_slot0`, or a wrong `accessible_from`) makes
+    `_aen_role_slot0_map` raise `ZephyrBoardEmitError` -- board generation
+    refuses to build that core's board file for the same reason, so this
+    re-raises as `OrchestratorError` instead of silently publishing an
+    address no board was actually built for.
+
+    Bench-proven at this exact address for the HE core (`0x80010000`):
+    `docs/aen-bench-bringup.md`, `docs/aen-provisioning.md` §0.5, and
+    `docs/secure-boot.md` all record a plain-J-Link `loadbin` straight to
+    slot0 `0x80010000` -- no SETOOLS/ATOC/SE-UART -- verified by MCUboot,
+    chainloaded, and surviving repeated cold power-cycles.
+
+    Only `m55_he`/`m55_hp` roles are AEN slot0-XIP cores; every other
+    core_id (a32_cluster, non-AEN SoC families) returns None -- a
+    published "unknown", never a value to invent (same convention as
+    `jlink_flash_device`'s absent key).
+
+    No-override default: when `_aen_role_slot0_map` finds no per-role
+    override, this returns the stock symmetric layout's slot0 window --
+    right after the mcuboot region, at the MRAM base -- computed as
+    `gen_zephyr_board._AEN_MRAM_BASE + gen_zephyr_board._AEN_MCUBOOT_KIB *
+    1024` directly against those two imported constants, not a locally
+    pinned literal. This is the SAME arithmetic
+    `_aen_generate_files` performs when it hits the no-override branch
+    (gen_zephyr_board.py:1319); reading its constants instead of a copy of
+    their product means a change to either constant moves this default too
+    -- there is nothing here for a test to keep in sync by hand. Applies
+    uniformly to EVERY role in the no-override case (not just `he`): the
+    stock layout has exactly one slot0 window, and whichever M55 core a
+    SoM boots lands on it -- including `m55_hp` on the single-M55
+    E1M-AEN401/E1M-AEN601 boards, the case a role-keyed (`he`-only)
+    fallback would still refuse.
+
+    E1M-AEN401/E1M-AEN601 declare BOTH `m55_hp` and `m55_he` in
+    `topology:` (only the HP board's Zephyr tree is generated today --
+    #999, a separate, tracked gap), and neither declares a `memory_map:`
+    override, so this returns the SAME default address for both roles.
+    That is not reachable today -- `_validate_topology_cores` only calls
+    this resolver when the SoC variant already publishes
+    `jlink_flash_device`, and no non-E1M-AEN801 AEN variant does yet -- but
+    nothing stops a future variant from publishing `jlink_flash_device`
+    without a disjoint-slot0 override, which would silently reintroduce
+    #1069's HE/HP collision in `flash_args`. Tracked, not silently
+    accepted: #1384.
+    """
+    if not core_id.startswith("m55_"):
+        return None
+    role = core_id[len("m55_"):]
+    if role not in ("he", "hp"):
+        return None
+
+    from gen_zephyr_board import (
+        _AEN_MCUBOOT_KIB, _AEN_MRAM_BASE, ZephyrBoardEmitError,
+        _aen_role_slot0_map)
+
+    memory_map = som_preset.get("memory_map") or []
+    try:
+        slot0_region = _aen_role_slot0_map(memory_map, role)
+    except ZephyrBoardEmitError as exc:
+        raise OrchestratorError(
+            f"cannot resolve flash_args.slot0_load_address for "
+            f"{core_id!r}: {exc}") from exc
+
+    if slot0_region is not None:
+        return f"0x{slot0_region['base']:08x}"
+    return f"0x{_AEN_MRAM_BASE + _AEN_MCUBOOT_KIB * 1024:08x}"
+
+
 def _resolve_flow_d_preflight(
     debug: dict[str, Any],
     core_id: str,
@@ -337,6 +433,49 @@ def _enforce_flow_d_preflight_pair(
             f"metadata/socs/, or remove debug.expect_dpidr.")
 
 
+def _enforce_slot0_disjoint_across_roles(
+    cores: dict[str, Slice],
+    sku: str,
+) -> None:
+    """Refuse a dual-M55 AEN SoM whose `m55_he` and `m55_hp` slices publish
+    the SAME `flash_args.slot0_load_address` (#1384).
+
+    Not reachable today: `_resolve_slot0_load_address` is only called when
+    the SoC variant already publishes `debug.jlink_flash_device`
+    (`_validate_topology_cores`, just above), and every AEN variant that
+    does (only E1M-AEN801's today) also declares a disjoint `he_slot0`/
+    `hp_slot0` `memory_map:` override, so the no-override default -- which
+    is deliberately the SAME address for both roles (see
+    `_resolve_slot0_load_address`'s docstring) -- never collides with a
+    live `jlink_flash_device` in practice yet.
+
+    Kept as a real guard rather than left to that coincidence: a future AEN
+    variant that publishes `jlink_flash_device` without also declaring a
+    disjoint-slot0 override would otherwise silently reintroduce #1069's
+    HE/HP MRAM collision in `flash_args` -- flashing one core would corrupt
+    the other's slot0 window with no signal at all, the exact silent-wrong-
+    address class this file's other guards (`_enforce_flow_d_preflight_pair`,
+    `_resolve_slot0_load_address`'s own `OrchestratorError` on a half-
+    authored override) all exist to remove.
+    """
+    he = cores.get("m55_he")
+    hp = cores.get("m55_hp")
+    if (he is None or hp is None
+            or he.slot0_load_address is None
+            or hp.slot0_load_address is None):
+        return
+    if he.slot0_load_address == hp.slot0_load_address:
+        raise OrchestratorError(
+            f"{sku}: m55_he and m55_hp both resolve "
+            f"flash_args.slot0_load_address to the same address "
+            f"({he.slot0_load_address}) -- this is the #1069 HE/HP MRAM "
+            f"slot0 collision (flashing one core would silently corrupt "
+            f"the other's slot0 window). Declare disjoint `he_slot0`/"
+            f"`hp_slot0` regions in this SoM preset's `memory_map:` (see "
+            f"metadata/e1m_modules/E1M-AEN801.yaml) before this SoM can "
+            f"publish debug.jlink_flash_device.")
+
+
 def _slice_from_resolved(
     core_id: str,
     entry: dict[str, Any],
@@ -344,6 +483,7 @@ def _slice_from_resolved(
     jlink_flash_device: Optional[str] = None,
     expect_dpidr: Optional[str] = None,
     jlink_device: Optional[str] = None,
+    slot0_load_address: Optional[str] = None,
 ) -> Slice:
     """Build a Slice dataclass from the resolved per-core entry.
 
@@ -361,6 +501,10 @@ def _slice_from_resolved(
     `_resolve_flow_d_preflight()` PAIR for this core -- both None (the
     preflight is not armed) or both set; never one of the two, which is
     the half-armed shape a downstream flasher refuses (#1355).
+
+    `slot0_load_address` is the caller's already-resolved
+    `_resolve_slot0_load_address()` result for THIS core_id -- None when
+    this core has no AEN MRAM slot0-XIP window to publish.
     """
     return Slice(
         core_id=core_id,
@@ -384,6 +528,7 @@ def _slice_from_resolved(
         jlink_flash_device=jlink_flash_device,
         expect_dpidr=expect_dpidr,
         jlink_device=jlink_device,
+        slot0_load_address=slot0_load_address,
     )
 
 
@@ -700,18 +845,24 @@ def _validate_topology_cores(
                 f"`topology.{core_id}` is set)")
         expect_dpidr, jlink_device = _resolve_flow_d_preflight(
             variant_debug, core_id)
+        slot0_load_address = (
+            _resolve_slot0_load_address(som_preset, core_id)
+            if jlink_flash_device else None)
         slice_ = _slice_from_resolved(
             core_id, resolved,
             soc_core_type=soc_core_type_by_id.get(core_id, ""),
             jlink_flash_device=jlink_flash_device,
             expect_dpidr=expect_dpidr,
             jlink_device=jlink_device,
+            slot0_load_address=slot0_load_address,
         )
         _enforce_flow_d_preflight_pair(slice_, variant_debug, sku)
         _enforce_loader_rules(slice_)
         _enforce_os_matches_core_class(
             slice_, soc_core_type_by_id.get(core_id, ""))
         cores[core_id] = slice_
+
+    _enforce_slot0_disjoint_across_roles(cores, sku)
 
     # IPC entries.
     ipc_raw = project.get("ipc") or []
