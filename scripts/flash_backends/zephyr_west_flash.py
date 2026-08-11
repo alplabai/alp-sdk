@@ -32,6 +32,17 @@ flash_args contract:
   SETOOLS path) even when it's present in flash_args -- that's expected,
   not a sign the key is broken.
 
+  `expect_dpidr` + `jlink_device` (#1355) are CONSUMER-SIDE-ONLY in the same
+  way, and are one fact in two keys: the SW-DP IDR the board's debug port
+  must answer, and the live-core attach profile that read is performed with.
+  A consumer runs them as a read-only preflight BEFORE any write, so it can
+  abort on the wrong board while the session is still harmless -- necessary
+  because a J-Link is selected only by serial, and a cloned serial across
+  two adapters silently resolves to whichever one is attached. They arrive
+  together or not at all; a half-armed pair is a refusal downstream, not a
+  degraded check. This backend goes through `west`, never touches a J-Link
+  directly, and so reads neither.
+
 Tool requirement: ``west`` on PATH.  We rely on west's own runner
 plumbing (``west flash --runner X``) so each underlying runner's
 prerequisite (openocd / J-Link / pyocd / nrfjprog) is implicitly
