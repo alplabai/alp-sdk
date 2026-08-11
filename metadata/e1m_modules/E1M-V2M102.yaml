@@ -279,13 +279,16 @@ helper_firmware:
       # always takes it under --dry-run, and refuses rather than guess a
       # device profile from an OpenOCD/pyOCD target.
       jlink_device: GD32G553MEY7TR
-      # NOTE: `expect_dpidr` is deliberately UNSET.  The GD32's SW-DP ID
-      # is contested (0x6BA02477 per metadata/chips/gd32_swd.yaml vs an
-      # unattributed 0x0BE12477) and unmeasurable while the part is
-      # disconnected (#610).  A wrong-board guard armed with a guessed
-      # ID passes on exactly the board it exists to exclude, so these
-      # entries carry `flash.dpidr-preflight-unarmed` until the ID is
-      # measured on silicon.
+      # NOTE: `expect_dpidr` is deliberately UNSET.  Two SW-DP ID
+      # values are in circulation for the GD32 -- 0x6BA02477 in
+      # metadata/chips/gd32_swd.yaml (itself annotated as the generic
+      # ADIv5 Cortex-M33 r0p1 SW-DPv2 expectation, not a GD32-specific
+      # reading) and an unattributed 0x0BE12477 elsewhere in this repo --
+      # and NEITHER has been measured on a GD32 with a probe attached
+      # (#610).  A wrong-board guard armed with a guessed ID passes on
+      # exactly the board it exists to exclude, so these entries carry
+      # `flash.dpidr-preflight-unarmed` until one value is measured on
+      # silicon.
       base:         "0x08000000"
 
 default_hw_rev:         r1

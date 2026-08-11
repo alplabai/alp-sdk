@@ -12,6 +12,12 @@ recovery-only SWD flash for a bricked board.
 These tests pin the schema half.  `tests/scripts/test_orchestrate_manifest.py`
 pins the emission half -- the second, independent XOR that used to DROP
 `flash_method`/`flash_args` from the manifest for a both-declaring entry.
+
+`flash_policy` is also unconditionally REQUIRED on every `helper_firmware`
+entry (not just when both `flash_method` and `update_channel` are present):
+an absent-means-`customer` default left the next SoM port that adds a
+helper with only `flash_method` an ungated customer flash target by
+omission.
 """
 
 import json
@@ -80,37 +86,76 @@ def test_entry_may_declare_both_flash_method_and_update_channel():
 
 
 def test_both_halves_without_flash_policy_is_rejected():
-    """Both halves + no policy is exactly where 'who may flash it'
-    stops being inferable, so the schema demands it be said."""
+    """Both halves + no policy is exactly where 'who may flash it' stops
+    being inferable -- and, since `flash_policy` is unconditionally
+    required, is also rejected the same way every other flash_policy-less
+    entry is."""
     entry = {k: v for k, v in GD32_BOTH.items() if k != "flash_policy"}
     errs = _errors(entry)
     assert any("flash_policy" in m for m in errs), errs
 
 
-def test_flash_method_alone_still_needs_no_flash_policy():
+def test_flash_method_alone_now_needs_flash_policy():
     """A plain customer flash target -- every preset written before this
-    field -- keeps validating unchanged.  This is the case the
-    `flash_policy` requirement must NOT decide."""
+    field -- USED to validate with no `flash_policy` at all; that is
+    exactly the silent absent-means-`customer` gap #1357 closes.  A
+    helper declaring only `flash_method` and no `flash_policy` must be
+    rejected, not read as an implicit customer target."""
     entry = {
         "name": "some_helper",
         "chip": "gd32g553",
         "flash_method": "openocd",
         "flash_args": {"cfg": "board/whatever.cfg"},
     }
+    errs = _errors(entry)
+    assert any("flash_policy" in m for m in errs), errs
+
+
+def test_flash_method_alone_with_flash_policy_validates():
+    """The same shape, made honest with an explicit `flash_policy`."""
+    entry = {
+        "name": "some_helper",
+        "chip": "gd32g553",
+        "flash_method": "openocd",
+        "flash_args": {"cfg": "board/whatever.cfg"},
+        "flash_policy": "customer",
+    }
     assert _errors(entry) == []
 
 
-def test_update_channel_alone_still_needs_no_flash_policy():
-    """The CC3501E's pre-existing shape (channel, no method) stays legal
-    with no policy -- `flash_policy: factory` on those presets is
-    honesty, not a schema requirement."""
+def test_update_channel_alone_now_needs_flash_policy():
+    """The CC3501E's shape (channel, no method) also used to validate with
+    no `flash_policy` -- `flash_policy` is now required regardless of
+    which of `flash_method`/`update_channel` an entry carries, or
+    neither."""
     entry = {
         "name": "cc3501e_otp",
         "chip": "cc3501e",
         "firmware_path": "firmware/cc3501e/prebuilt/cc3501e-v0.2.0.bin",
         "update_channel": "alp_ota_spi_otp",
     }
+    errs = _errors(entry)
+    assert any("flash_policy" in m for m in errs), errs
+
+
+def test_update_channel_alone_with_flash_policy_validates():
+    entry = {
+        "name": "cc3501e_otp",
+        "chip": "cc3501e",
+        "firmware_path": "firmware/cc3501e/prebuilt/cc3501e-v0.2.0.bin",
+        "update_channel": "alp_ota_spi_otp",
+        "flash_policy": "recovery_only",
+    }
     assert _errors(entry) == []
+
+
+def test_neither_flash_method_nor_update_channel_still_needs_flash_policy():
+    """A helper with no local flash path and no field-update channel at
+    all still must say who may reach it -- the requirement is
+    unconditional, not gated on either key's presence."""
+    entry = {"name": "some_helper", "chip": "gd32g553"}
+    errs = _errors(entry)
+    assert any("flash_policy" in m for m in errs), errs
 
 
 # ---------------------------------------------------------------------
@@ -194,6 +239,7 @@ def test_non_swd_probe_target_needs_no_jlink_device():
         "chip": "gd32g553",
         "flash_method": "openocd",
         "flash_args": {"target": "gd32g553"},
+        "flash_policy": "customer",
     }
     assert _errors(entry) == []
 
@@ -206,6 +252,7 @@ def test_swd_probe_with_flash_args_tbd_is_still_legal():
         "chip": "gd32g553",
         "flash_method": "swd_probe",
         "flash_args": "TBD",
+        "flash_policy": "customer",
     }
     assert _errors(entry) == []
 
@@ -251,22 +298,28 @@ def test_v2n_v2m_gd32_entry_declares_the_full_flashing_model(sku):
 
 @pytest.mark.parametrize("sku", V2N_V2M_SKUS)
 def test_v2n_v2m_gd32_entry_leaves_expect_dpidr_unset(sku):
-    """#610: the GD32's SW-DP ID is contested (0x6BA02477 in
-    metadata/chips/gd32_swd.yaml vs an unattributed 0x0BE12477) and
-    unmeasurable while the part is disconnected.  A wrong-board guard
-    armed with a guessed ID passes on exactly the board it exists to
-    exclude."""
+    """#610: two SW-DP ID values are in circulation for the GD32 --
+    0x6BA02477 in metadata/chips/gd32_swd.yaml (itself annotated as the
+    generic ADIv5 Cortex-M33 r0p1 SW-DPv2 expectation, not a
+    GD32-specific reading) and an unattributed 0x0BE12477 elsewhere in
+    this repo -- and neither has been measured on a GD32 with a probe
+    attached.  A wrong-board guard armed with a guessed ID passes on
+    exactly the board it exists to exclude."""
     entry = next(e for e in _helper_firmware(sku) if e["name"] == "gd32_bridge")
     assert "expect_dpidr" not in entry["flash_args"]
 
 
 @pytest.mark.parametrize("sku", AEN_SKUS)
-def test_aen_cc3501e_entries_declare_factory_policy(sku):
+def test_aen_cc3501e_entries_declare_recovery_only_policy(sku):
     entry = next(e for e in _helper_firmware(sku) if e["name"] == "cc3501e_otp")
     assert "flash_policy" in entry, (
         f"{sku} cc3501e_otp does not say WHO may flash it; the skip would "
         f"have to assert the OTA channel as the cause: {sorted(entry)}")
-    assert entry["flash_policy"] == "factory"
+    assert entry["flash_policy"] == "recovery_only", (
+        "the AEN SoC itself is the customer's normal `tan flash` target -- "
+        "only the CC3501E is not routinely customer-flashed, and even then "
+        "only to recover a bricked device with Alp Lab-supplied binaries; "
+        "`factory` denies that recovery path entirely")
     assert entry["update_channel"] == "alp_ota_spi_otp"
     assert "flash_method" not in entry
 

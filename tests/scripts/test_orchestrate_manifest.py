@@ -271,7 +271,7 @@ cores:
     cc = next(h for h in parsed["helper_mcus"]
               if h["name"] == "cc3501e_otp")
     assert cc["update_channel"] == "alp_ota_spi_otp"
-    assert cc["flash_policy"] == "factory"
+    assert cc["flash_policy"] == "recovery_only"
     assert "flash_method" not in cc
     assert "flash_args" not in cc
 

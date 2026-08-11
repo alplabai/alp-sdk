@@ -108,23 +108,25 @@ three axes that do **not** imply one another:
 | `update_channel` | how the device is updated **in the field** |
 | `flash_policy` | **who** may invoke `flash_method`, and **when** |
 
-`flash_policy` is `customer` (a plain flash target — the meaning of
-every entry written before the key existed, and the value assumed when
-it is absent), `factory` (Alp Lab programs it in production; never a
-customer flash target), or `recovery_only` (Alp Lab programs it in
-production, and the customer may flash it *only* to recover a bricked
-device, with Alp Lab-supplied binaries).  It becomes **required** as
-soon as an entry declares both a `flash_method` and an
-`update_channel`, because that is exactly where "who may flash this"
-stops being inferable.
+`flash_policy` is **required on every `helper_firmware` entry** — there
+is no absent-means-`customer` default.  It is `customer` (a plain flash
+target), `factory` (Alp Lab programs it in production; never a customer
+flash target), or `recovery_only` (Alp Lab programs it in production,
+and the customer may flash it *only* to recover a bricked device, with
+Alp Lab-supplied binaries).  Requiring it unconditionally, rather than
+only when an entry declares both a `flash_method` and an
+`update_channel`, closes the gap where a helper with only a
+`flash_method` silently became a customer flash target by omission.
 
 ### AEN / `cc3501e_otp`
 
 All six AEN presets (`E1M-AEN301..801`) carry a `cc3501e_otp` helper
 entry with `update_channel: alp_ota_spi_otp` and `flash_policy:
-factory`, and no `flash_method`.  The CC3501E (TI Wi-Fi 6 + BLE 5.4
-coprocessor) is Alp-released firmware applied over the bridge SPI link,
-programming the chip's own OTP — it is never customer-flashed.
+recovery_only`, and no `flash_method`.  The CC3501E (TI Wi-Fi 6 + BLE
+5.4 coprocessor) is Alp-released firmware applied over the bridge SPI
+link, programming the chip's own OTP — Alp Lab programs it in
+production, and a customer flash is permitted only to recover a
+bricked device, with Alp Lab-supplied binaries.
 The six SKUs must stay in lockstep (same `update_channel`, same
 `flash_policy`, same `firmware_path` provenance).
 

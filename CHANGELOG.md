@@ -19,11 +19,14 @@ the fact that actually decides tool behaviour: **who** may invoke the flash
 method, and **when**.
 
 **The schema half.** `som-preset-v1.schema.json` drops the `oneOf` and gains
-`flash_policy` (`customer` / `factory` / `recovery_only`), required exactly
-when an entry declares both a `flash_method` and an `update_channel` — the
-combination where the answer stops being inferable. `update_channel`'s enum
-gains `alp_ota_spi_bridge` for the GD32; reusing the CC3501E's
-`alp_ota_spi_otp` would assert OTP programming for a part that has none.
+`flash_policy` (`customer` / `factory` / `recovery_only`), now **required on
+every `helper_firmware` entry** — there is no absent-means-`customer`
+default; the next SoM port that adds a helper with only `flash_method` no
+longer becomes an ungated customer flash target by omission.
+`system-manifest-v1.schema.json` requires the projected key the same way.
+`update_channel`'s enum gains `alp_ota_spi_bridge` for the GD32; reusing the
+CC3501E's `alp_ota_spi_otp` would assert OTP programming for a part that has
+none.
 
 **The emitter half, which would have silently defeated a preset edit.**
 `scripts/alp_orchestrate/manifest.py::_helper_mcus` carried the same XOR, so a
@@ -44,16 +47,26 @@ All four now carry `jlink_device: GD32G553MEY7TR` and stay byte-identical (one
 PCB, variant-populated). The schema now rejects a `swd_probe` entry that names
 `target` without `jlink_device`, so the next one is caught at `alp validate`
 time rather than at a bricked customer's bench. `expect_dpidr` stays
-deliberately **unset** — the SW-DP ID is contested (`0x6BA02477` in
-`metadata/chips/gd32_swd.yaml` against an unattributed `0x0BE12477`) and
-unmeasurable while the part is disconnected; these entries will now carry a
-`flash.dpidr-preflight-unarmed` advisory, which is correct.
+deliberately **unset**: two SW-DP ID values are in circulation for the GD32 —
+`0x6BA02477` in `metadata/chips/gd32_swd.yaml` (itself annotated as the
+generic ADIv5 Cortex-M33 r0p1 SW-DPv2 expectation, not a GD32-specific
+reading) and an unattributed `0x0BE12477` elsewhere in this repo — and
+**neither has been measured on a GD32 with a probe attached**; these entries
+carry a `flash.dpidr-preflight-unarmed` advisory instead of a guard armed at
+a guessed ID.  #1369 tracks the contradiction itself (which value, if
+either, is correct) — that is a bench measurement this repo cannot make
+today.  `docs/gd32-bridge.md` now states a mandatory bench step in the
+meantime: set `ALP_FLASH_REQUIRE_DPIDR=1` before a recovery flash on the
+alplab-gw bench, because the GD32 probe and the AEN E8 probe there enumerate
+the same J-Link serial and `JLinkExe` selects only by serial.
 
-The six `E1M-AEN*` presets gain `flash_policy: factory` on their `cc3501e_otp`
-entry, keeping the six in lockstep per `metadata/e1m_modules/README.md`.
-Behaviour is unchanged there (they declare no `flash_method`); it lets a skip
-name the real reason — Alp Lab programs the part in production — instead of
-asserting the OTA channel as the cause.
+The six `E1M-AEN*` presets' `flash_policy` moves from `factory` to
+`recovery_only` on their `cc3501e_otp` entry, keeping the six in lockstep per
+`metadata/e1m_modules/README.md`.  `factory` denies a recovery flash outright;
+the maintainer-confirmed rule is that only the CC3501E and the GD32 are not
+routinely customer-flashed, and even then a customer may flash either **to
+recover a bricked device**, using Alp Lab-supplied binaries.  Behaviour is
+otherwise unchanged (the entry still declares no `flash_method`).
 
 ### Fixed — an AEN MRAM write had no wrong-board guard, because the SW-DP IDR was published nowhere (#1355)
 

@@ -532,14 +532,9 @@
     },
     "helper_firmware_entry": {
       "type": "object",
-      "required": ["name", "chip"],
+      "required": ["name", "chip", "flash_policy"],
       "additionalProperties": false,
       "allOf": [
-        {
-          "$comment": "`flash_method` + `update_channel` are independent axes (HOW it is written locally vs HOW it is updated in the field), so an entry may carry both -- the GD32 bridge does.  What stops being inferable once it carries both is WHO may invoke the flash method: an entry with a flash method and no channel reads as a plain customer flash target, but the moment a field-update channel exists the local flash could equally be a factory-only or recovery-only path.  So require `flash_policy` in exactly that case, and only there.",
-          "if": { "required": ["flash_method", "update_channel"] },
-          "then": { "required": ["flash_policy"] }
-        },
         {
           "$comment": "`target` and `jlink_device` are the two halves of one decision for the `swd_probe` backend: `target` names the OpenOCD/pyOCD target, `jlink_device` names the SEGGER device profile.  A SoM that names a `target` has asserted a specific part, so `tan flash` refuses (rather than guessing) when the J-Link half is missing -- and it prefers the J-Link arm whenever a J-Link binary resolves, and always takes it under `--dry-run`, so a `target`-only entry is unpreviewable on EVERY host.  Catch that here, at authoring time, instead of at a bricked customer's bench.  Scoped to `swd_probe` because only that backend has a J-Link arm; other backends' `flash_args` shapes stay opaque.",
           "if": {
@@ -570,7 +565,7 @@
         "firmware_path": {
           "type": "string",
           "minLength": 1,
-          "description": "Repo-relative path to the prebuilt / shipped firmware image.  Omit this key entirely when no artefact exists yet (schema-legal -- only `name` and `chip` are required) so `tan flash` gives its clean refusal ('has no output_artefact / firmware_path; can't flash') instead of resolving a sentinel path."
+          "description": "Repo-relative path to the prebuilt / shipped firmware image.  Omit this key entirely when no artefact exists yet (schema-legal -- only `name`, `chip` and `flash_policy` are required) so `tan flash` gives its clean refusal ('has no output_artefact / firmware_path; can't flash') instead of resolving a sentinel path."
         },
         "flash_method": {
           "type": "string",
@@ -578,7 +573,7 @@
             { "pattern": "^[a-z][a-z0-9_]+$" },
             { "const": "TBD" }
           ],
-          "description": "Backend tool key consumed by `tan flash`'s helper-MCU dispatcher (e.g. `swd_probe`) -- the transport by which this helper's image is WRITTEN locally.  TBD pending the authoritative flow.  Independent of `update_channel` (which answers how the device is updated in the FIELD): an entry may carry both, and the GD32 bridge does.  It says nothing about who is allowed to invoke it -- that is `flash_policy`, which becomes REQUIRED once both this key and `update_channel` are present."
+          "description": "Backend tool key consumed by `tan flash`'s helper-MCU dispatcher (e.g. `swd_probe`) -- the transport by which this helper's image is WRITTEN locally.  TBD pending the authoritative flow.  Independent of `update_channel` (which answers how the device is updated in the FIELD): an entry may carry both, and the GD32 bridge does.  It says nothing about who is allowed to invoke it -- that is `flash_policy`, which is REQUIRED on every helper entry regardless of which of these two keys it carries."
         },
         "flash_args": {
           "oneOf": [
@@ -590,7 +585,7 @@
         "flash_policy": {
           "type": "string",
           "enum": ["customer", "factory", "recovery_only"],
-          "description": "WHO may invoke `flash_method`, and WHEN.  `customer`: a genuine customer flash target (the default when this key is absent, which is what every preset written before this field meant).  `factory`: programmed by Alp Lab in production, never a customer flash target.  `recovery_only`: programmed by Alp Lab in production, and customer-flashable ONLY to recover a bricked device, with Alp Lab-supplied binaries.  Independent of `update_channel`, which answers how the device is updated in the FIELD -- a helper can carry both, and the GD32 bridge does."
+          "description": "WHO may invoke `flash_method`, and WHEN.  REQUIRED on every helper entry -- there is no absent-means-`customer` default; a helper with no local flash path at all (no `flash_method`) still states who may reach it if one is ever added.  `customer`: a genuine customer flash target.  `factory`: programmed by Alp Lab in production, never a customer flash target.  `recovery_only`: programmed by Alp Lab in production, and customer-flashable ONLY to recover a bricked device, with Alp Lab-supplied binaries.  Independent of `update_channel`, which answers how the device is updated in the FIELD -- a helper can carry both, and the GD32 bridge does."
         },
         "update_channel": {
           "type": "string",

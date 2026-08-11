@@ -154,11 +154,23 @@ helper_firmware:
 `tan flash` declines this helper on an ordinary run and names the
 re-run that arms it (`tan flash --helper gd32_bridge --recover`, which
 must also be the run's single target).  Note `expect_dpidr` is
-deliberately **unset**: the GD32's SW-DP ID is contested (`0x6BA02477`
-in [`metadata/chips/gd32_swd.yaml`](../metadata/chips/gd32_swd.yaml)
-against an unattributed `0x0BE12477`) and unmeasurable while the part is
-disconnected, so the entries carry a `flash.dpidr-preflight-unarmed`
-advisory rather than a wrong-board guard armed at a guessed ID.
+deliberately **unset**: two SW-DP ID values are in circulation for the
+GD32 -- `0x6BA02477` in
+[`metadata/chips/gd32_swd.yaml`](../metadata/chips/gd32_swd.yaml)
+(itself annotated as the generic ADIv5 Cortex-M33 r0p1 SW-DPv2
+expectation, not a GD32-specific reading) and an unattributed
+`0x0BE12477` elsewhere in this repo -- and **neither has been measured
+on a GD32 with a probe attached**, so the entries carry a
+`flash.dpidr-preflight-unarmed` advisory rather than a guard armed at a
+guessed ID.  See #1369 for the open issue tracking the measurement.
+
+**Required step on the alplab-gw bench: set `ALP_FLASH_REQUIRE_DPIDR=1`
+before running the recovery command above.** The GD32 probe (USB path
+`3-4.2`) and the AEN E8 probe (`3-4.4.3`) enumerate the same J-Link
+serial `603000869`, and `JLinkExe` selects an adapter only by serial --
+with no `expect_dpidr` armed and no port selector, an unset
+`ALP_FLASH_REQUIRE_DPIDR` lets the write proceed against whichever
+probe is attached, which may be the AEN E8, not the GD32.
 
 `update_channel: alp_ota_spi_bridge` is deliberately a different value
 from the CC3501E's `alp_ota_spi_otp`: this channel streams into the
