@@ -29,7 +29,18 @@ flash_args contract:
   reset        bool  Reset+run after programming (default True).
   use_pyocd    bool  Force the pyocd path (skip J-Link + openocd).
   use_openocd  bool  Force the openocd path (skip J-Link auto-pick).
-  jlink_device str?  SEGGER device name (default "GD32G553MEY7TR").
+  jlink_device str?  SEGGER device name (default "GD32G553MEY7TR"), passed
+                     to `JLinkExe -device` -- this is the PROGRAMMING device
+                     for an actual write.  NOTE: `jlink_device` is
+                     backend-local, not a single global key.
+                     `scripts/flash_backends/zephyr_west_flash.py` emits a
+                     DIFFERENT `flash_args.jlink_device` for a DIFFERENT
+                     helper entry: a read-only attach profile (e.g.
+                     "Cortex-M55") used only for an `expect_dpidr` preflight
+                     read, explicitly not flash-capable.  No collision today
+                     -- no single manifest entry is read by both backends --
+                     but don't assume one backend's `jlink_device` describes
+                     what the other would do with it.
   jlink_speed  int?  SWD speed in kHz (default 4000).
 """
 

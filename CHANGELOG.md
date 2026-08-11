@@ -7,6 +7,67 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — helper MCUs can now describe the GD32 bridge: `flash_policy`, a second OTA channel, and `jlink_device` on all four E1M-X presets (#1357)
+
+`helper_firmware[]` encoded `update_channel` **XOR** `flash_method`, in two
+independent places, and the GD32 bridge legitimately has both: a real OTA path
+over the bridge link (protocol v0.6 Path A, slot-A/B application bootloader
+with commit + rollback, silicon-validated 2026-06-04) **and** a SWD flash the
+customer may use to recover a bricked board with Alp Lab-supplied binaries.
+The XOR forced a choice the hardware does not offer, and neither field carried
+the fact that actually decides tool behaviour: **who** may invoke the flash
+method, and **when**.
+
+**The schema half.** `som-preset-v1.schema.json` drops the `oneOf` and gains
+`flash_policy` (`customer` / `factory` / `recovery_only`), now **required on
+every `helper_firmware` entry** — there is no absent-means-`customer`
+default; the next SoM port that adds a helper with only `flash_method` no
+longer becomes an ungated customer flash target by omission.
+`system-manifest-v1.schema.json` requires the projected key the same way.
+`update_channel`'s enum gains `alp_ota_spi_bridge` for the GD32; reusing the
+CC3501E's `alp_ota_spi_otp` would assert OTP programming for a part that has
+none.
+
+**The emitter half, which would have silently defeated a preset edit.**
+`scripts/alp_orchestrate/manifest.py::_helper_mcus` carried the same XOR, so a
+both-declaring entry would have had its `flash_method`/`flash_args` **dropped
+from the emitted manifest** — the recovery path *vanishing* rather than being
+declined-but-reachable, leaving no way to tell someone with a bricked bridge
+why it was unavailable. Each declared key is now projected independently, and
+`system-manifest-v1.schema.json` declares `flash_policy` and `update_channel`
+(the latter was emitted undeclared, passing only on `additionalProperties`).
+
+**`jlink_device` on the four E1M-X presets.** `E1M-V2N101` / `E1M-V2N102` /
+`E1M-V2M101` / `E1M-V2M102` named `flash_args.target` without its other half,
+and `tan flash`'s `swd_probe` refuses rather than guess a SEGGER profile from
+an OpenOCD/pyOCD target. Measured, that is wider than a J-Link-only host: the
+J-Link arm is preferred whenever a J-Link binary resolves, and `--dry-run`
+always takes it, so these entries could not even be **previewed** on any host.
+All four now carry `jlink_device: GD32G553MEY7TR` and stay byte-identical (one
+PCB, variant-populated). The schema now rejects a `swd_probe` entry that names
+`target` without `jlink_device`, so the next one is caught at `alp validate`
+time rather than at a bricked customer's bench. `expect_dpidr` stays
+deliberately **unset**: two SW-DP ID values are in circulation for the GD32 —
+`0x6BA02477` in `metadata/chips/gd32_swd.yaml` (itself annotated as the
+generic ADIv5 Cortex-M33 r0p1 SW-DPv2 expectation, not a GD32-specific
+reading) and an unattributed `0x0BE12477` elsewhere in this repo — and
+**neither has been measured on a GD32 with a probe attached**; these entries
+carry a `flash.dpidr-preflight-unarmed` advisory instead of a guard armed at
+a guessed ID.  #1369 tracks the contradiction itself (which value, if
+either, is correct) — that is a bench measurement this repo cannot make
+today.  `docs/gd32-bridge.md` now states a mandatory bench step in the
+meantime: set `ALP_FLASH_REQUIRE_DPIDR=1` before a recovery flash on the
+alplab-gw bench, because the GD32 probe and the AEN E8 probe there enumerate
+the same J-Link serial and `JLinkExe` selects only by serial.
+
+The six `E1M-AEN*` presets' `flash_policy` moves from `factory` to
+`recovery_only` on their `cc3501e_otp` entry, keeping the six in lockstep per
+`metadata/e1m_modules/README.md`.  `factory` denies a recovery flash outright;
+the maintainer-confirmed rule is that only the CC3501E and the GD32 are not
+routinely customer-flashed, and even then a customer may flash either **to
+recover a bricked device**, using Alp Lab-supplied binaries.  Behaviour is
+otherwise unchanged (the entry still declares no `flash_method`).
+
 ### Fixed — `flash_args` carries no `slot0_load_address`, so tan refused to auto-sign an AEN Flow D flash (tan-cli#353)
 
 alp-sdk emitted `flash_args.jlink_flash_device` (the Flow D device profile)
