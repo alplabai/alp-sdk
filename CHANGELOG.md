@@ -7,6 +7,63 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Added — ADR 0027 proposes declaring storage regions by role, not by SoM-internal region name
+
+`board.yaml`'s `storage:` entries place themselves with `flash_device:`, a
+string naming a region in the SoM preset's `memory_map:` or
+`on_module.ospi_memories:`. Measured across all 11 presets in
+`metadata/e1m_modules/` at `f30f4d4b`, that field is resolvable on **exactly
+one**: only E1M-AEN801 defines a `memory_map:` (`mcuboot`, `he_slot0`,
+`hp_slot0`, `reserved`, `storage`, `atoc`, `mram_main`). E1M-AEN301/401/501/
+601/701 carry `on_module.ospi_memories:` but no `memory_map:`; E1M-V2N101/102,
+E1M-V2M101/102 and E1M-NX9101 carry neither, using `on_module.nor_flash` /
+`emmc` instead.
+
+The single example that uses the field,
+`examples/connectivity/production-deployment/board.yaml`, pins all five
+partitions to `mram_main` under `som.sku: E1M-AEN801` — correct today, and
+portable to nothing: retargeted at E1M-AEN601, the same family ADR 0011 says
+portability must hold across, every entry names a region that preset does not
+define.
+
+**ADR 0027** proposes `role:` (`settings` / `app_data` / `log` / `ota_cache`)
+as the primary, portable declaration, resolved per SoM from the preset, with
+`flash_device:` retained as an explicit non-portable pin for cases roles
+cannot express (the example's three MCUboot slots byte-match the bootloader
+and stay pinned). A pinned region that does not exist after a SoM swap is a
+**refusal** naming the missing region, the SoM, and the role that would
+replace it — never a silent relocation, because relocating persisted settings
+on a green build is data loss. `size_kib` stays required: a role implies
+*where*, never *how much*.
+
+Status is **Proposed** and this changes no code. Migration is sequenced so the
+feature never half-exists, and where a SoM's backing part is not yet pinned
+down the role is marked TBD and refuses with "not yet mapped" rather than
+resolving to a guessed region.
+
+### Added — ADR 0026 proposes retiring alp-sdk as a second planner producer
+
+ADR 0020's 2026-08-03 amendment relocated the planner into tan but kept
+alp-sdk's `scripts/alp_orchestrate/` as "the reference producer", so two
+independent implementations of the same planner ship from two repos and
+neither is allowed to be wrong. **ADR 0026** proposes ending that: tan's
+`python/tan/planner/` becomes the single implementation, alp-sdk keeps what it
+is uniquely authoritative for (`metadata/`, `metadata/schemas/`, examples,
+tooling contracts), and `build-plan-v1` survives unchanged as the
+planner/executor seam.
+
+Measured at alp-sdk `f30f4d4b` / tan-cli `ac7e725`: `scripts/alp_orchestrate/`
+is 21 modules and 7,182 lines, `python/tan/planner/` is 31 modules and 12,071
+lines, 20 of the 21 module basenames are mirrored (all but `__main__.py`), and
+the parity apparatus that exists solely to police the mirror is 47 files and
+23,886 lines — more than three times the logic it guards.
+
+The ADR also records the recurrence evidence (tan-cli #274, #275, #279, #313,
+#320, #324, #409, #425, #485, #492, #509, #531, #543, #544, #545): #320
+recurred as #485, and #543 has dev's parity job failing on every alp-sdk
+dispatch since 2026-08-07. Status is **Proposed** — the ADR changes no code,
+and its migration section requires the two planners be provably equal at one
+ref before any removal begins.
 ### Fixed — CC3501E Wi-Fi connect no longer re-associates on every retry or reports a false "connected", `wifi status`/`wifi rssi` survive a radio op, and `wifi connect`'s own timeout budget is honoured (#1376, #1377, #1378)
 
 A wire-contract drift on `WIFI_CONNECT_STA` (0x12): the firmware was
