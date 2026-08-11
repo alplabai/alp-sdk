@@ -433,7 +433,59 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 			memcpy(rx_buf, &ctx->rx_scratch[1], n);
 			if (rx_len != NULL) *rx_len = n;
 		}
-		s = resp_to_status(resp);
+		/* #1378: a dead bus phase reads back literal 0x00 for every byte it
+		 * clocks -- this repo's own silicon finding (see
+		 * hal/ti/cc3501e_hw_ti_wifi.c's cc3501e_hw_wifi_lazy_start(), "the
+		 * host then reads 0x00000000 from a dead link").  0x00 is ALSO
+		 * ALP_CC3501E_RESP_OK, so a header that read intact (hdr_ok above --
+		 * genuinely alive) followed by a payload phase that dies in the
+		 * inter-phase gap (cc3501e_reply_gate above, CC3501E_PHASE_SETTLE_US)
+		 * is silently indistinguishable from a real, successful bare-status
+		 * reply: ALP_OK must require positive evidence the device framed a
+		 * reply, not merely the absence of evidence that it did not.
+		 *
+		 * A content-based check cannot be applied generally here: several
+		 * bare-OK replies legitimately ARE all-zero (WIFI_STATUS's
+		 * disconnected-and-never-attempted state, DIAG_GET_STATS' zero
+		 * counters right after boot, SOCK_RECV's zero-bytes-pending) --
+		 * flagging those would trade a rare false ALP_OK for a routine false
+		 * ALP_ERR_IO on paths that are correct today.  WIFI_CONNECT_STA is
+		 * narrower and provably safe to flag: its firmware handler
+		 * (handle_worker_routed_payload's WORKER_IDLE case,
+		 * firmware/cc3501e/src/protocol.c) UNCONDITIONALLY acks a fresh
+		 * submit with RESP_ERR_BUSY -- a synchronous RESP_OK is not a value
+		 * that submit can EVER legitimately produce, so seeing one here is
+		 * self-evidently the dead-phase alias, not a value this driver has
+		 * merely decided is improbable.  Reject it as a transport error
+		 * instead of handing the caller a false "submitted", which is
+		 * exactly the #1376 false-connect mechanism.  cc3501e_wifi_connect()
+		 * no longer trusts this ack in either direction (it only trusts the
+		 * independent WIFI_STATUS latch -- see cc3501e_wifi.c), so this is
+		 * defense in depth, not the only thing standing between a dead phase
+		 * and a false positive.
+		 *
+		 * WIFI_AP_START shares the identical firmware shape (the SAME
+		 * WORKER_IDLE-always-BUSY handler, the SAME "reset the job slot to
+		 * IDLE the instant the drain finishes" fire-and-forget treatment in
+		 * firmware/cc3501e/src/worker.c) and is NOT included here: its host
+		 * wrapper (cc3501e_wifi_ap_start()) still calls poll_by_repeat() on
+		 * this same opcode, unrestructured, so it is not this task's scope
+		 * to change -- see #1376/#1378 for the connect-specific fix this
+		 * closes.  The same aliasing also exists for every OTHER bare-ack
+		 * opcode this driver has no contract knowledge of (OTA_PROMOTE is
+		 * the sharpest example) and is NOT closed by this check; closing it
+		 * generally needs either a wire-level CRC/canary (a protocol
+		 * version bump) or the same independent-confirmation pattern
+		 * applied per opcode -- OTA_PROMOTE already has an analogous latch
+		 * to confirm against (OTA_STATUS, 0x44), and WIFI_AP_START would
+		 * need the same submit-once-then-poll treatment cc3501e_wifi_connect()
+		 * got here.  Tracked as a named gap on #1378. */
+		if (resp == ALP_CC3501E_RESP_OK && resp_payload_len == 1u &&
+		    cmd == ALP_CC3501E_CMD_WIFI_CONNECT_STA) {
+			s = ALP_ERR_IO;
+		} else {
+			s = resp_to_status(resp);
+		}
 	}
 
 out:

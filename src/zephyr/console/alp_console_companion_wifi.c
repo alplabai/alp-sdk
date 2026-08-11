@@ -61,9 +61,23 @@ static void companion_conn_thread(void *a, void *b, void *c)
 		    companion_cc3501e, conn_ssid, conn_sec, conn_pass, ALP_COMPANION_WIFI_CONN_MS);
 
 		if (s == ALP_OK) {
-			int8_t rssi = 0;
-			(void)cc3501e_wifi_rssi(companion_cc3501e, &rssi);
-			shell_print(conn_sh, "wifi connected \"%s\"  rssi=%d dBm", conn_ssid, (int)rssi);
+			/* cc3501e_wifi_connect() only returns ALP_OK once the independent
+			 * WIFI_STATUS latch itself reported CONNECTED (see cc3501e_wifi.c),
+			 * so this print is reporting a firmware-confirmed association, not
+			 * an echo of what the shell was asked to connect to.  The RSSI
+			 * read is a SEPARATE request, though, and can itself fail (e.g. the
+			 * radio just went back down) -- check its status instead of
+			 * printing a zero-initialised local as if it were a real reading
+			 * (issue #1376: a discarded failure here rendered as a
+			 * plausible-looking "rssi=0 dBm" on any connect success). */
+			int8_t       rssi = 0;
+			alp_status_t rs   = cc3501e_wifi_rssi(companion_cc3501e, &rssi);
+			if (rs == ALP_OK) {
+				shell_print(conn_sh, "wifi connected \"%s\"  rssi=%d dBm", conn_ssid, (int)rssi);
+			} else {
+				shell_print(
+				    conn_sh, "wifi connected \"%s\"  rssi=unavailable (%d)", conn_ssid, (int)rs);
+			}
 		} else if (s == ALP_ERR_TIMEOUT) {
 			shell_warn(conn_sh, "wifi connect to \"%s\": timed out", conn_ssid);
 		} else {
@@ -88,7 +102,7 @@ static int cmd_companion_wifi_scan(const struct shell *sh, size_t argc, char **a
 
 	static cc3501e_scan_record_t recs[ALP_COMPANION_WIFI_SCAN_MAX];
 	size_t                       n = 0;
-	alp_status_t s = cc3501e_wifi_scan(
+	alp_status_t                 s = cc3501e_wifi_scan(
 	    companion_cc3501e, recs, ALP_COMPANION_WIFI_SCAN_MAX, &n, ALP_COMPANION_WIFI_SCAN_MS);
 
 	if (s != ALP_OK) {
@@ -257,7 +271,7 @@ static int cmd_companion_wifi_status(const struct shell *sh, size_t argc, char *
 	}
 
 	alp_cc3501e_wifi_status_t st = { 0 };
-	alp_status_t s = cc3501e_wifi_status(companion_cc3501e, &st);
+	alp_status_t              s  = cc3501e_wifi_status(companion_cc3501e, &st);
 
 	if (s != ALP_OK) {
 		shell_error(sh, "status failed (%d)", (int)s);
@@ -269,8 +283,8 @@ static int cmd_companion_wifi_status(const struct shell *sh, size_t argc, char *
 		/* rssi_dbm is valid only when associated; the IP is a separate lease
 		 * query (WIFI_GET_IP) -- print it only if the firmware has a lease. */
 		shell_print(sh, "rssi:  %d dBm", (int)st.rssi_dbm);
-		uint8_t ip[4] = { 0 };
-		alp_status_t ips = cc3501e_wifi_get_ip(companion_cc3501e, ip);
+		uint8_t      ip[4] = { 0 };
+		alp_status_t ips   = cc3501e_wifi_get_ip(companion_cc3501e, ip);
 		if (ips == ALP_OK) {
 			shell_print(sh, "ip:    %u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
 		}
