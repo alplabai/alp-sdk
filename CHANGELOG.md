@@ -110,6 +110,17 @@ auto-sign via SETOOLS`, forcing a customer to hand-edit
 the value hand-supplied: three images flashed, persistence proven across
 full cold power cycles at 16.0 V.
 
+**This alone does not make `tan flash` work.** A Windows E1M-AEN801 bench
+run against tan `v0.5.1` (PR #1374 review comment, 2026-08-11) confirmed
+this emitter's addresses are correct on real silicon, then measured that
+tan re-derives `system-manifest.yaml` itself rather than consuming this
+emitter's output: the `build/system-manifest.yaml` tan actually writes
+carries only `jlink_flash_device` -- `slot0_load_address`, `expect_dpidr`
+and `jlink_device` are all absent -- so `tan flash` still fails with the
+same `flash_args.slot0_load_address is required to auto-sign via SETOOLS`
+refusal after this PR. That is tan-cli#353 (reopened 2026-08-11) and is
+fixed on the tan-cli side, not here.
+
 `scripts/alp_orchestrate/loader.py` gains `_resolve_slot0_load_address`,
 resolved PER CORE (unlike `jlink_flash_device`, which is a single
 per-variant string) from the SoM preset's own `memory_map:` `he_slot0`/
@@ -129,15 +140,24 @@ same `memory_map:`-shaped override this PR already added, just moved.
 Bench-proven at `0x80010000` for the HE core
 (`docs/aen-bench-bringup.md`, `docs/aen-provisioning.md` §0.5,
 `docs/secure-boot.md`); `hp_slot0` resolves to `0x802b0000` from the same
-`memory_map:`. Falls back to the stock AEN default (`0x80010000`) for
-EITHER role when the preset declares no `<role>_slot0` override at all
-(covering E1M-AEN401/E1M-AEN601, whose only generated M55 board is
-`m55_hp`, not just the `m55_he` case) by reusing
-`scripts/gen_zephyr_board.py`'s own `_aen_role_slot0_map` (not a second
-copy of its derivation), so the two genuinely cannot disagree; a
-declared-but-invalid override (half-authored, or a wrong
-`accessible_from`) now raises instead of silently emitting a fabricated
-address no board was ever generated for.
+`memory_map:`. Falls back to the stock AEN default (`0x80010000`,
+computed from `gen_zephyr_board`'s own `_AEN_MRAM_BASE`/
+`_AEN_MCUBOOT_KIB`, not a locally pinned copy) for EITHER role when the
+preset declares no `<role>_slot0` override at all -- both
+E1M-AEN401 and E1M-AEN601 declare `m55_hp` AND `m55_he` in `topology:`,
+but only the `m55_hp` Zephyr board tree is generated today (#999), and
+this covers that no-override shape for either role, not just `he` -- by
+reusing `scripts/gen_zephyr_board.py`'s own `_aen_role_slot0_map` (not a
+second copy of its derivation), so the two genuinely cannot disagree on
+the override/no-override decision itself; a declared-but-invalid
+override (half-authored, or a wrong `accessible_from`) now raises
+instead of silently emitting a fabricated address no board was ever
+generated for. The no-override default is deliberately the SAME address
+for both roles, which is not itself a live collision today (no non-
+E1M-AEN801 AEN variant publishes `jlink_flash_device` yet); a new
+`_enforce_slot0_disjoint_across_roles` guard now refuses outright if a
+future SoM variant ever makes it one, rather than leaving that case to
+coincide silently (#1384).
 
 `scripts/validate_metadata.py` gains `_check_som_slot0_address_resolved`:
 a `memory_map:` region whose `name:` declares an MRAM slot0 path
