@@ -20,7 +20,7 @@ Design invariants:
   selection and the emitters guard on that.
 * **Fail early, name the constraint.**  An incompatible selection raises
   ``OrchestratorError`` with the failing ``requires:`` constraint named, the
-  same clear-error contract as schema validation, so ``alp doctor`` /
+  same clear-error contract as schema validation, so ``tan doctor`` /
   alp-studio (which read the same manifests) can never disagree with emit.
 """
 
@@ -178,8 +178,9 @@ def scoped_names(
     entirely (alplabai/tan-cli#555).
 
     ``slice_`` None  -> project-wide + every core-scoped name declared on any
-                        core: the whole-project view `alp validate` /
-                        `alp doctor` check.
+                        core: the whole-project view `alp_project.py`'s
+                        up-front `resolve_selection` check (before any
+                        `--emit`) validates.
     ``slice_`` given -> project-wide + that one slice's core-scoped names:
                         what the per-slice emitters wire.
     """

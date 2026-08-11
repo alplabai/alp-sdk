@@ -158,7 +158,9 @@ for the authoritative schema. A manifest declares:
 ```yaml
 schema_version: 1
 name: lvgl                     # must match the filename (<name>.yaml)
-description: "..."             # one-liner, surfaced in `tan doctor`
+description: "..."             # one-liner (not surfaced by `tan doctor`'s
+                                #   `libraries` row, which renders only
+                                #   "<name> (tier <T>, <LICENSE>)")
 tier: A                        # A (curated, CI-built) | B (recipe-only)
 version: "9.5.0"               # the pinned upstream version (never a range)
 license: MIT                   # SPDX id from the allowlist (below)

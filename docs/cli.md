@@ -491,6 +491,13 @@ the effective Python floor, host prerequisites, Zephyr SDK availability, and
 programming dependencies such as J-Link and Alif SETOOLS. Every failed or
 warning check includes a remediation hint; an unhealthy host exits 4.
 
+For a project that selects at least one curated library (ADR 0018), a
+`libraries` row reports each selection's tier, licence, and whether it fits
+the resolved target — both the bare-string `libraries: [name, ...]` form and
+the `- name: lvgl` / `cores: [...]` dict form. An incompatible or unknown
+selection is a WARN there, never a FAIL; `tan build` is the hard gate on that
+same check.
+
 `--build` is retained for existing callers but no longer changes the checklist.
 In an interactive text-mode run, `--fix` may run the manifest's elevation-free
 install commands. It never runs `sudo`; `--ci`, `--non-interactive`, and JSON
