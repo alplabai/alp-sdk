@@ -138,6 +138,7 @@
   "inference_arena_sram_kib": 0,
   "soc_flash_mb": 5.5,
   "always_on_sram_kb": 4,
+  "zephyr_peripherals_dtsi": "alif/ensemble_e8_peripherals.dtsi",
   "peripherals": {
     "i2c": 4,
     "i2c_lp": 2,
@@ -253,7 +254,8 @@
       "debug": {
         "pyocd_target": "AE822FA0E5597LS0",
         "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" },
-        "jlink_flash_device": "AE822FA0E5597LS0_M55_HE"
+        "jlink_flash_device": "AE822FA0E5597LS0_M55_HE",
+        "expect_dpidr": "0x4C013477"
       }
     }
   ],
@@ -267,6 +269,7 @@
     "E8 ships an ISP and JPEG encoder (E3/E7 do not).",
     "WLCSP216 package exposes 136× 1.8-V GPIOs; FBGA194 exposes 120 (note: 'GPIO[0-14]' subset on FBGA per datasheet table 7-1).",
     "AE822FA0E5597LS0 is the variant Alp Lab uses on the E1M-AEN801 module SKU.",
-    "USB = xHCI USB-2.0 dual-role @ 0x48200000 (IRQ 101), 16 endpoints; grounded from the Alif DFP soc.h/soc_features.h (AE822FA0E5597). Host mode supported."
+    "USB = xHCI USB-2.0 dual-role @ 0x48200000 (IRQ 101), 16 endpoints; grounded from the Alif DFP soc.h/soc_features.h (AE822FA0E5597). Host mode supported.",
+    "debug.expect_dpidr = 0x4C013477 on AE822FA0E5597LS0 is a MEASUREMENT, not a derivation (#1355): re-confirmed on real silicon 2026-08-10 (`Found SW-DP with ID 0x4C013477`), and independently recorded across docs/bring-up-aen.md, docs/debugging-aen.md, docs/aen-provisioning.md, docs/aen-bench-bringup.md and docs/_aen-runbook-section.md, plus scripts/bench/aen/bench-env.sh's AEN_DPIDR default.  It is deliberately NOT set on the sibling AE822FA0E5597BS0: no BS0 part is on this bench, and a same-family assumption is exactly the guess the key's own schema description forbids -- an unarmed guard is recoverable, a guard armed at the wrong ID passes on the board it exists to exclude."
   ]
 }

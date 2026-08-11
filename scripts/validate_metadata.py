@@ -258,6 +258,71 @@ def _check_som_peripheral_instance_uniqueness(som_files) -> list:
     return failures
 
 
+def _check_som_slot0_address_resolved(som_files) -> list:
+    """Refuse a `memory_map:` region that names an MRAM slot0 path but
+    carries no resolved address (tan-cli#353).
+
+    `scripts/alp_orchestrate/loader.py::_resolve_slot0_load_address` (and
+    `scripts/gen_zephyr_board.py::_aen_role_slot0_map` for board
+    generation) both key an AEN core's slot0-XIP load address off a
+    `memory_map:` region literally NAMED `<role>_slot0` (`he_slot0` /
+    `hp_slot0`) with an integer `base:`. A region that spells the name --
+    declaring the slot0 PATH exists -- but leaves `base:` as `"TBD"`,
+    absent, or any other non-integer silently falls through both readers:
+    the loader treats it as "no override" (picking the wrong default, or
+    None for `hp`) and the generator's `_aen_flash_partitions` raises only
+    at BUILD time, deep inside DTS emission, with no metadata-level
+    signal. Catch it here instead, at the one place authoring a SoM
+    preset already gets feedback.
+
+    JSON Schema can express that `base:` is `integer | "TBD"`
+    (`metadata/schemas/som-preset-v1.schema.json`'s `memory_region`) but
+    not "declares itself a `*_slot0` region, so `base` may not be the
+    `TBD` half of that union" -- that's a semantic rule over the region's
+    OWN `name:`, not a shape constraint. Returns a failure list shaped
+    like `_check_files()`. Presets with no `memory_map:` are skipped.
+    """
+    failures: list[tuple[Path, list[str]]] = []
+    for path in som_files:
+        rel = path.relative_to(REPO).as_posix()
+        try:
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue
+        memory_map = doc.get("memory_map")
+        if not isinstance(memory_map, list):
+            continue
+
+        msgs: list[str] = []
+        slot0_regions = 0
+        for region in memory_map:
+            if not isinstance(region, dict):
+                continue
+            name = region.get("name")
+            if not isinstance(name, str) or not name.endswith("_slot0"):
+                continue
+            slot0_regions += 1
+            if not isinstance(region.get("base"), int):
+                msgs.append(
+                    f"memory_map: region `{name}` declares an MRAM slot0 "
+                    f"path but its `base` ({region.get('base')!r}) is not "
+                    f"a resolved address -- tan's Flow D "
+                    f"flash_args.slot0_load_address needs a concrete "
+                    f"integer, not a TBD/missing placeholder")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+        elif slot0_regions:
+            print(f"OK   {rel}  (memory_map: {slot0_regions} slot0 "
+                  f"region(s) all resolve a concrete base address)")
+    return failures
+
+
 def _check_silicon_kconfig() -> list:
     """Validate the silicon->Kconfig registry and its socs/ correspondence.
 
@@ -436,7 +501,8 @@ def _check_soc_npu_pairing(soc_files) -> list:
 
 
 def _check_soc_debug_probe_identity(soc_files) -> list:
-    """Cross-ref `variants[].debug.jlink_device` keys against `cores[].id`.
+    """Cross-ref `variants[].debug.jlink_device` keys against `cores[].id`,
+    and require the `expect_dpidr`/`jlink_device` preflight PAIR to be whole.
 
     #987 publishes the debug-probe identity (J-Link device, pyOCD target)
     per variant, with `jlink_device` keyed by core id since a J-Link attach
@@ -447,6 +513,20 @@ def _check_soc_debug_probe_identity(soc_files) -> list:
     are real cores on *this* SoC -- a typo (or a stale key surviving a core
     rename) would silently point the extension's launch-config generator at
     a core that does not exist.  Enforce it here.
+
+    #1355 adds `expect_dpidr` -- the SW-DP IDR a host flasher compares
+    against BEFORE any write, so it can abort on the wrong board while the
+    session is still read-only.  That check needs TWO facts: the expected ID
+    and the live-core attach profile (`jlink_device`) the read is performed
+    with.  A variant publishing `expect_dpidr` without a `jlink_device`
+    entry for every one of this SoC's cores is not merely half-documented --
+    tan refuses a half-armed pair outright (`flash_plan.py::
+    validate_flow_d_preflight_args`), so it would turn every flash of that
+    part, dry runs included, into a hard error.  Schema cannot say "this key
+    implies that one is complete across cores[]"; this can.  The converse is
+    deliberately NOT an error: `jlink_device` alone is the correct state of
+    every variant whose DPIDR nobody has measured yet, and leaving the guard
+    unarmed is far safer than arming it at a guessed ID.
 
     Returns a failure list shaped like `_check_files()`.
     """
@@ -461,16 +541,40 @@ def _check_soc_debug_probe_identity(soc_files) -> list:
             continue
         rel = path.relative_to(REPO).as_posix()
         core_ids = {c.get("id") for c in (doc.get("cores") or []) if c.get("id")}
+        # Cortex-M cores only for the `expect_dpidr` pairing rule below: the
+        # DPIDR preflight guards the Zephyr-on-M J-Link flash path, and
+        # `debug.jlink_device` is legitimately sparse across `cores[]` --
+        # E8 publishes an attach profile for m55_hp/m55_he and none for
+        # a32_cluster, an A-cluster that boots Linux off storage rather than
+        # being J-Link flashed. Demanding coverage of every core would fail
+        # the very variant this rule exists to protect.
+        m_core_ids = {
+            c["id"] for c in (doc.get("cores") or [])
+            if c.get("id") and str(c.get("type") or "").startswith("cortex-m")
+        }
         msgs: list[str] = []
 
         for i, v in enumerate(variants):
-            jlink_device = ((v.get("debug") or {}).get("jlink_device")) or {}
+            debug = v.get("debug") or {}
+            jlink_device = debug.get("jlink_device") or {}
             for core_id in jlink_device:
                 if core_id not in core_ids:
                     msgs.append(
                         f"variants[{i}] ({v.get('order_code')}): "
                         f"debug.jlink_device key {core_id!r} is not a "
                         f"cores[].id (known: {sorted(core_ids)})")
+
+            if debug.get("expect_dpidr"):
+                uncovered = sorted(m_core_ids - set(jlink_device))
+                if uncovered:
+                    msgs.append(
+                        f"variants[{i}] ({v.get('order_code')}): "
+                        f"debug.expect_dpidr is published but "
+                        f"debug.jlink_device carries no attach profile for "
+                        f"Cortex-M core(s) {uncovered} -- the wrong-board "
+                        f"SW-DP IDR preflight needs both, and a half-armed "
+                        f"pair is refused downstream rather than skipped "
+                        f"(#1355)")
 
         if msgs:
             print(f"FAIL {rel}")
@@ -1019,6 +1123,12 @@ def main() -> int:
         print()
         instance_uniqueness_failures = _check_som_peripheral_instance_uniqueness(som_files)
 
+    # SoM `memory_map:` `*_slot0` regions must resolve a concrete address.
+    slot0_address_failures: list = []
+    if som_files:
+        print()
+        slot0_address_failures = _check_som_slot0_address_resolved(som_files)
+
     # Silicon -> Kconfig registry + socs/ correspondence.
     print()
     silicon_kconfig_failures = _check_silicon_kconfig()
@@ -1036,6 +1146,7 @@ def main() -> int:
                       + len(board_target_failures)
                       + len(restriction_failures)
                       + len(instance_uniqueness_failures)
+                      + len(slot0_address_failures)
                       + len(silicon_kconfig_failures)
                       + len(peripheral_kconfig_failures)
                       + len(tier_a_library_ci_failures))

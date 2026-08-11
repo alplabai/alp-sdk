@@ -77,17 +77,19 @@
     },
     "helper_mcus": {
       "type": "array",
-      "description": "On-module helper MCUs (e.g. the GD32 bridge) that ship their own firmware image.",
+      "description": "On-module helper MCUs (e.g. the GD32 bridge) that ship their own firmware image. Each key the SoM preset's `helper_firmware:` entry declares is projected here independently -- a helper may carry a field-update channel AND a local flash method at once (the GD32 bridge does), so a consumer must not read one key's presence as excluding another's.",
       "items": {
         "type": "object",
         "additionalProperties": true,
-        "required": ["name", "chip"],
+        "required": ["name", "chip", "flash_policy"],
         "properties": {
           "name": { "type": "string" },
           "chip": { "type": "string" },
           "firmware_path": { "type": "string" },
           "flash_method": { "type": "string" },
-          "flash_args": { "type": ["object", "string"], "description": "Method-specific flash arguments, or the string 'TBD' when a helper MCU's flash recipe isn't yet finalized in the SoM preset." }
+          "flash_args": { "type": ["object", "string"], "description": "Method-specific flash arguments, or the string 'TBD' when a helper MCU's flash recipe isn't yet finalized in the SoM preset." },
+          "flash_policy": { "type": "string", "enum": ["customer", "factory", "recovery_only"], "description": "WHO may invoke `flash_method`, and WHEN, projected verbatim from the SoM preset. REQUIRED -- there is no absent-means-`customer` default. `customer`: a plain flash target. `factory`: Alp Lab programs it in production; never a customer flash target. `recovery_only`: Alp Lab programs it in production and the customer may flash it ONLY to recover a bricked device, with Alp Lab-supplied binaries. Independent of `update_channel`." },
+          "update_channel": { "type": "string", "description": "How this helper's firmware is updated in the FIELD (`alp_ota_spi_otp` for the CC3501E's own OTP, `alp_ota_spi_bridge` for the GD32 bridge's slot-A/B application bootloader). Deliberately unenumerated here: the SoM-preset schema owns the vocabulary, and this manifest is additive-only for consumers that must tolerate a channel added upstream. Its presence does NOT mean the helper has no flash method." }
         }
       }
     },

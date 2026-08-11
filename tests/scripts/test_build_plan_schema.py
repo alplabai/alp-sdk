@@ -148,12 +148,15 @@ cores:
 def test_baremetal_slice_and_stock_image_appdir_null_conform(tmp_path: Path):
     """`os: baremetal` on m55_hp (with the SoM preset's other cores left
     at their defaults) exercises: the `baremetal` backend enum value, its
-    EMPTY `configArtefacts` (removed 2026-08: no baremetal build command
-    ever read a materialised cmake-args.txt back in), the baremetal
-    `command` shape (`tool: cmake`, `-S`/`-B` args), AND the A-class
-    core's stock-image Yocto slice, which reports `appDir: null` (issue
-    #597 -- there is no app source dir to report for the `alp-image-edge`
-    token)."""
+    EMPTY `configArtefacts` on a project with NO `preset:` (this board
+    resolves no board name and E1M-AEN801 declares no restricted
+    capabilities, so the slice has no `ALP_BOARD_<SLUG>`/`ALP_SOM_<SKU>`
+    compile guard to carry and `alp-baremetal.cmake` is not emitted at
+    all -- absence-emits-nothing; the preset-bearing case is covered in
+    test_orchestrate_baremetal_slice.py), the baremetal `command` shape
+    (`tool: cmake`, `-S`/`-B` args), AND the A-class core's stock-image
+    Yocto slice, which reports `appDir: null` (issue #597 -- there is no
+    app source dir to report for the `alp-image-edge` token)."""
     path = _write_board(tmp_path, AEN801_BAREMETAL_AND_STOCK_IMAGE)
     project = load_board_yaml(path)
     plan = json.loads(emit_build_plan(
@@ -334,6 +337,9 @@ def test_pinned_snapshot_slices_carry_toolchain_artifacts_debug():
         "sizeReport":      "build/m55_hp-zephyr/zephyr/zephyr.stat",
         "symbols":         "build/m55_hp-zephyr/zephyr/zephyr.symbols",
         "compileCommands": "build/m55_hp-zephyr/compile_commands.json",
+        # `outputDir` (alplabai/tan-cli#550) stays null for zephyr: the
+        # five named paths above already index Zephyr's own output tree.
+        "outputDir":       None,
     }
     assert m55_hp["debug"] == {"console": "uart", "probe": None}
 
@@ -357,14 +363,15 @@ def test_pinned_snapshot_slices_carry_toolchain_artifacts_debug():
                 "targetTriple", "compiler", "sysroot", "id"}
             assert set(sl["artifacts"]) == {
                 "elf", "map", "bin", "sizeReport", "symbols",
-                "compileCommands"}
+                "compileCommands", "outputDir"}
             assert set(sl["debug"]) == {"console", "probe"}
 
 
 def test_baremetal_slice_toolchain_artifacts_debug_are_null(tmp_path: Path):
-    """A `baremetal` slice's `artifacts` + `debug` fields are all null,
-    and `toolchain.targetTriple`/`.compiler` stay null too -- there is
-    no SDK-wide vendor bare-toolchain / executable-name / debug-probe
+    """A `baremetal` slice's `debug` fields are all null, its
+    NAMED artifacts (`elf`/`map`/`bin`/`sizeReport`/`symbols`) are all
+    null, and `toolchain.targetTriple`/`.compiler` stay null too -- there
+    is no SDK-wide vendor bare-toolchain / executable-name / debug-probe
     convention this emitter can predict without guessing (the app's own
     CMakeLists.txt picks its own executable name and cross toolchain
     file, and `arm-zephyr-eabi-gcc` is never actually invoked by the
@@ -374,7 +381,21 @@ def test_baremetal_slice_toolchain_artifacts_debug_are_null(tmp_path: Path):
     role) verbatim regardless of this project's `os: baremetal`
     override -- an honest passthrough of the real resolved `Slice.
     toolchain` fact, not a fabricated value, even though it's a
-    leftover from the core's un-overridden default."""
+    leftover from the core's un-overridden default.
+
+    `outputDir` is the one exception, and it is NOT a guess: the slice's
+    own configure carries
+    `-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$<1:<buildDir>/output>`, so CMake
+    is made to put every `add_executable()` target exactly there, on
+    single- and multi-config generators alike (alplabai/tan-cli#550 --
+    an all-null block left a slice that produced NO binary
+    indistinguishable from one that built fine).
+
+    `compileCommands` stays null even though the configure passes
+    `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`: CMake implements that variable
+    only for the Makefile and Ninja generator families and ignores it on
+    every other generator, and this planner does not choose the
+    generator."""
     path = _write_board(tmp_path, AEN801_BAREMETAL_AND_STOCK_IMAGE)
     project = load_board_yaml(path)
     plan = json.loads(emit_build_plan(
@@ -386,7 +407,15 @@ def test_baremetal_slice_toolchain_artifacts_debug_are_null(tmp_path: Path):
         "targetTriple": None, "compiler": None, "sysroot": None,
         "id": "arm-zephyr-eabi",
     }
-    assert all(v is None for v in baremetal["artifacts"].values())
+    assert baremetal["artifacts"] == {
+        "elf":             None,
+        "map":             None,
+        "bin":             None,
+        "sizeReport":      None,
+        "symbols":         None,
+        "compileCommands": None,
+        "outputDir":       "build/m55_hp-baremetal/output",
+    }
     assert baremetal["debug"] == {"console": None, "probe": None}
 
 

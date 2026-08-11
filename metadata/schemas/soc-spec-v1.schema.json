@@ -134,6 +134,12 @@
       "description": "Always-on / utility SRAM that survives STOP mode."
     },
 
+    "zephyr_peripherals_dtsi": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_./-]+\\.dtsi$",
+      "description": "OPTIONAL `#include <...>` path of the alp-sdk devicetree overlay declaring THIS SoC's peripheral and NPU node set (e.g. \"alif/ensemble_e8_peripherals.dtsi\", which lives at zephyr/dts/alif/ensemble_e8_peripherals.dtsi). `scripts/gen_zephyr_board.py --emit zephyr-board` emits it verbatim into the generated board .dts. Declared per SoC rather than derived from `part` because a wrong overlay produces a board that builds and then misbehaves on silicon -- the E8's overlay declares `ethosu85`, while an E3 carries 2x Ethos-U55 and no U85 -- so a SoC with no overlay of its own must REFUSE to generate a board rather than inherit a sibling part's. Omit for SoCs the board generator does not fully cover."
+    },
+
     "peripherals": {
       "type": "object",
       "description": "Counts per peripheral kind. Studio uses these to validate which blocks fit on the SoC. Use the SAME keys across vendors so the studio can do generic matching.",
@@ -443,6 +449,11 @@
               "type": "string",
               "minLength": 1,
               "description": "SEGGER J-Link **part-number device profile**, used ONLY to unlock J-Link's built-in Flow D MRAM loader (`scripts/bench/aen/bench-env.sh:108-114`) -- on a J-Link DLL older than V9.46 it cannot attach to a live/running core (use `jlink_device` for that); on V9.46+ it also attaches, but `jlink_device`'s generic profile stays the documented choice for read/RAM-run regardless. It is not per-core: both `scripts/bench/aen/flash-jlink-hp.sh` and `flash-jlink-mramxip.sh` select the SAME device string regardless of which core they flash, so this is a single per-variant string, not a jlink_device-shaped map. Populate only where an in-tree script proves the exact string -- do not derive it from a naming convention."
+            },
+            "expect_dpidr": {
+              "type": "string",
+              "pattern": "^0x[0-9A-Fa-f]{8}$",
+              "description": "The ADIv5 SW-DP IDR (DPIDR) this variant's debug port answers, as a 32-bit `0x`-prefixed hex constant -- the wrong-board guard a host flasher reads BEFORE any write, while the session is still read-only (#1355). This is a property of the DEBUG PORT, not of a core: it is one per-variant string, not a `jlink_device`-shaped per-core map. Populate ONLY from a measurement on real silicon (`Found SW-DP with ID <id>` in a J-Link/pyOCD connect log) -- an absent key is the correct published 'unknown' and simply leaves the guard unarmed, whereas a GUESSED value is strictly worse than absent: if it happens to match some other board on the same bench it makes the guard pass on exactly the board it exists to exclude. Consumed as `flash_args.expect_dpidr`, and PAIRED there with this variant's per-core `jlink_device` (the live-core read attach profile) -- a downstream consumer refuses a half-armed pair, so a variant publishing `expect_dpidr` must also publish `jlink_device` for every core (enforced by scripts/validate_metadata.py::_check_soc_debug_probe_identity)."
             },
             "openocd_config": {
               "type": "string",
