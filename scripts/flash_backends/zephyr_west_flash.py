@@ -43,6 +43,12 @@ flash_args contract:
   degraded check. This backend goes through `west`, never touches a J-Link
   directly, and so reads neither.
 
+  `slot0_load_address` (tan-cli#353; the AEN MRAM slot0-XIP address this
+  slice's application blob is linked at) is CONSUMER-SIDE-ONLY in the same
+  way: a downstream flasher that writes MRAM directly over J-Link needs it
+  to know where to `loadbin`; `west flash` derives its own load address
+  from the build's own linked ELF, so this backend ignores the key too.
+
   NOTE: `jlink_device` is backend-local, not a single global key -- here it
   names the read-only SEGGER *attach profile* used only for the
   `expect_dpidr` preflight read (e.g. `Cortex-M55`, explicitly not

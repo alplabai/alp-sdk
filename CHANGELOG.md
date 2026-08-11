@@ -98,6 +98,74 @@ routinely customer-flashed, and even then a customer may flash either **to
 recover a bricked device**, using Alp Lab-supplied binaries.  Behaviour is
 otherwise unchanged (the entry still declares no `flash_method`).
 
+### Fixed — `flash_args` carries no `slot0_load_address`, so tan refused to auto-sign an AEN Flow D flash (tan-cli#353)
+
+alp-sdk emitted `flash_args.jlink_flash_device` (the Flow D device profile)
+but never `slot0_load_address` (where the slot0-linked application blob
+itself belongs) -- zero occurrences anywhere in `scripts/`/`metadata/`.
+tan-cli correctly routed an AEN slice to Flow D (`alif_mram_jlink`) and
+then refused outright: `flash_args.slot0_load_address is required to
+auto-sign via SETOOLS`, forcing a customer to hand-edit
+`system-manifest.yaml` to flash an AEN at all. Confirmed on silicon with
+the value hand-supplied: three images flashed, persistence proven across
+full cold power cycles at 16.0 V.
+
+**This alone does not make `tan flash` work.** A Windows E1M-AEN801 bench
+run against tan `v0.5.1` (PR #1374 review comment, 2026-08-11) confirmed
+this emitter's addresses are correct on real silicon, then measured that
+tan re-derives `system-manifest.yaml` itself rather than consuming this
+emitter's output: the `build/system-manifest.yaml` tan actually writes
+carries only `jlink_flash_device` -- `slot0_load_address`, `expect_dpidr`
+and `jlink_device` are all absent -- so `tan flash` still fails with the
+same `flash_args.slot0_load_address is required to auto-sign via SETOOLS`
+refusal after this PR. That is tan-cli#353 (reopened 2026-08-11) and is
+fixed on the tan-cli side, not here.
+
+`scripts/alp_orchestrate/loader.py` gains `_resolve_slot0_load_address`,
+resolved PER CORE (unlike `jlink_flash_device`, which is a single
+per-variant string) from the SoM preset's own `memory_map:` `he_slot0`/
+`hp_slot0` regions -- deliberately NOT added to the SoC JSON `debug:`
+block `jlink_flash_device` lives in, because this address is SDK/module
+build POLICY, not a silicon fact:
+`metadata/e1m_modules/E1M-AEN801.yaml`'s own `memory_map:` comment says so
+explicitly (#1069, the disjoint-slot0 fix), and two SoMs sharing one
+silicon part can freely choose different slot0 windows. Measured, not
+asserted: E1M-AEN801's `m55_hp` and `m55_he` share ONE silicon variant
+(`AE822FA0E5597LS0`) yet resolve to two different addresses
+(`0x802b0000` vs `0x80010000`) purely because of that SDK layout choice,
+so a single per-SoC-JSON value beside `jlink_flash_device` (itself a flat
+per-variant string, not per-core) cannot represent this fact without
+growing its own per-core override mechanism -- at which point it is the
+same `memory_map:`-shaped override this PR already added, just moved.
+Bench-proven at `0x80010000` for the HE core
+(`docs/aen-bench-bringup.md`, `docs/aen-provisioning.md` §0.5,
+`docs/secure-boot.md`); `hp_slot0` resolves to `0x802b0000` from the same
+`memory_map:`. Falls back to the stock AEN default (`0x80010000`,
+computed from `gen_zephyr_board`'s own `_AEN_MRAM_BASE`/
+`_AEN_MCUBOOT_KIB`, not a locally pinned copy) for EITHER role when the
+preset declares no `<role>_slot0` override at all -- both
+E1M-AEN401 and E1M-AEN601 declare `m55_hp` AND `m55_he` in `topology:`,
+but only the `m55_hp` Zephyr board tree is generated today (#999), and
+this covers that no-override shape for either role, not just `he` -- by
+reusing `scripts/gen_zephyr_board.py`'s own `_aen_role_slot0_map` (not a
+second copy of its derivation), so the two genuinely cannot disagree on
+the override/no-override decision itself; a declared-but-invalid
+override (half-authored, or a wrong `accessible_from`) now raises
+instead of silently emitting a fabricated address no board was ever
+generated for. The no-override default is deliberately the SAME address
+for both roles, which is not itself a live collision today (no non-
+E1M-AEN801 AEN variant publishes `jlink_flash_device` yet); a new
+`_enforce_slot0_disjoint_across_roles` guard now refuses outright if a
+future SoM variant ever makes it one, rather than leaving that case to
+coincide silently (#1384).
+
+`scripts/validate_metadata.py` gains `_check_som_slot0_address_resolved`:
+a `memory_map:` region whose `name:` declares an MRAM slot0 path
+(`*_slot0`) but whose `base:` isn't a resolved integer (a `"TBD"`
+placeholder or a missing key) is now refused at the metadata layer,
+instead of silently falling through to the wrong default (or `None`) at
+manifest-emit or board-generation time.
+
 ### Changed — the diagnostics schema gate no longer runs through the `alp` command surface (#837)
 
 ADR [0020](docs/adr/0020-sdk-owns-build-execution.md) ends with alp-sdk owning
