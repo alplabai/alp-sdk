@@ -226,7 +226,8 @@ artifact per silicon SKU.
 | `peripheral_instances`          | OPTIONAL, keyed by a SUBSET of `peripherals`' keys (issue #1154). Per-instance register `base`/`size` (lowercase `0x`-prefixed hex strings, `^0x[0-9a-f]+$`) + `interrupts` (`irq`/`priority` decimal ints, `name` when the DTSI names it), one entry per physical instance. `peripherals` stays the count map every other consumer reads; this is additive, for a consumer that needs an actual address rather than just a ceiling. Only populated where a real vendor devicetree/SVD source gives a grounded 1:1 instance count — a key absent here means "not yet projected," not "doesn't exist," same as an absent `peripherals` key. RZ/V2N n44 is the only populated example today: `scripts/gen_soc_peripheral_instances.py` mechanically projects it from the vendored Zephyr `r9a09g056.dtsi`; never hand-edit, regenerate. |
 | `variants[].order_code`         | Vendor order code; **must match** the SoM preset's `silicon_variant:` field for the loader to resolve memory layout from this entry's `sram_banks_kb`. |
 | `variants[].alp_module_skus`    | Reverse-lookup hint; lets the validator catch a SoM SKU that references this variant by silicon ref alone (no `silicon_variant:` declared).            |
-| `variants[].debug`              | Debug-probe identity (`jlink_device`, `jlink_flash_device`, `pyocd_target`, `openocd_config`) consumed by `alp-sdk-vscode` to generate a working launch config.  Every key optional; an absent key is the correct, publishable "unknown" state.  Populate each key **only** from the owning tool's own list or a working in-tree invocation (SEGGER's device list / `pyocd list --targets` / an actual `board.cmake` or bench script) — never by pattern-extending a sibling part's string to an unverified one.  #987 shipped a first draft that broke this: it read a *SETOOLS flasher* argument as a J-Link device name and then extended that wrong string to every part by naming convention.  A plausible-looking guess fails at the probe, not at `validate_metadata.py`, so nothing catches it until a customer's launch does. |
+| `variants[].debug`              | Debug-probe identity (`jlink_device`, `jlink_flash_device`, `expect_dpidr`, `pyocd_target`, `openocd_config`) consumed by `alp-sdk-vscode` to generate a working launch config, and by the orchestrator's `flash_args`.  Every key optional; an absent key is the correct, publishable "unknown" state.  Populate each key **only** from the owning tool's own list or a working in-tree invocation (SEGGER's device list / `pyocd list --targets` / an actual `board.cmake` or bench script) — never by pattern-extending a sibling part's string to an unverified one.  #987 shipped a first draft that broke this: it read a *SETOOLS flasher* argument as a J-Link device name and then extended that wrong string to every part by naming convention.  A plausible-looking guess fails at the probe, not at `validate_metadata.py`, so nothing catches it until a customer's launch does. |
+| `variants[].debug.expect_dpidr` | The ADIv5 SW-DP IDR this variant's debug port answers (`0x`-prefixed, 8 hex digits), so a host writer can abort on the wrong board while the session is still read-only (#1355).  **Only from a measurement on real silicon** — a `Found SW-DP with ID <id>` line in a real connect log.  Absent is fine and simply leaves the guard unarmed; a *guessed* value is strictly worse than absent, because an ID that happens to match another board on the same bench makes the guard pass on exactly the board it exists to exclude.  It is emitted into `flash_args` **paired** with this variant's per-core `jlink_device`: a consumer refuses a half-armed pair rather than skipping the check, so a variant publishing `expect_dpidr` must also publish `jlink_device` for every Cortex-M core (`validate_metadata.py` enforces this, and the orchestrator refuses to emit one without the other). |
 | `pending_alif_datasheet: true`  | Declarative only — nothing in `scripts/` reads this key today (unlike `pending_reference_manual_ingestion`, which `validate_metadata.py` and `gen_soc_caps.py` both act on). It documents intent for reviewers reading the JSON directly; it does not produce a WARN or any other gate output. See #1027 for the general problem of docs asserting behaviour that doesn't exist. |
 
 **Rules of thumb:**
@@ -382,10 +383,10 @@ status:
 | `capabilities`         | SoM extension only                | Yes                       | Only list keys the SoM **adds** to silicon caps (e.g., on-module CAU on V2N, `optiga_trust_m` on AEN/V2N).               |
 | `silicon_capabilities` | Silicon-determined (restriction)  | Omit when unrestricted    | Optional `unpopulated:` list of SoC `capabilities:` keys this SKU does **not** populate; can only remove what the silicon offers (`validate_metadata.py` cross-check). |
 | `topology`             | Silicon-determined (core ids)     | No                        | Keys must match `soc.cores[].id`; `app:` / `board:` / `machine:` / `toolchain:` are SoM-extension.                       |
-| `memory_map`           | Silicon-determined (derived)      | Omit entirely              | Only declare for non-stock partitioning; otherwise the loader derives from SoC `sram_banks_kb`.                          |
+| `memory_map`           | Silicon-determined (derived)      | Omit entirely              | Only declare for non-stock partitioning; otherwise the loader derives from SoC `sram_banks_kb`. On AEN, a region named `<role>_slot0` (`he_slot0`/`hp_slot0`) is what makes `flash_args.slot0_load_address` (tan-cli#353) exist for that core; its `base:` may not be `TBD`/missing (`validate_metadata.py`'s `_check_som_slot0_address_resolved`), and if declared for one M55 role it must be declared for every other role this SoM boots, or board generation and manifest emission both refuse (#1069's disjoint-slot0 rule). |
 | `mailbox.controller`   | Mixed                             | Yes (`"TBD"`)             | Required when any topology entry runs Zephyr or baremetal; controller name comes from the hand-written HW config.        |
 | `pad_routes[]`         | SoM extension                     | Yes (`dispatch: TBD`)     | One row per E1M pad that routes through an on-module mediator; pads NOT listed are implicit `dispatch: direct`.          |
-| `helper_firmware[]`    | SoM extension                     | Yes (`TBD` per field)     | One entry per on-module helper MCU image (CC3511E firmware, GD32 bridge firmware, …).                                    |
+| `helper_firmware[]`    | SoM extension                     | Yes (`TBD` per field)     | One entry per on-module helper MCU image (CC3511E firmware, GD32 bridge firmware, …).  Three INDEPENDENT axes: `flash_method`/`flash_args` (how it is written locally), `update_channel` (how it is updated in the field), `flash_policy` (who may invoke the flash method — `customer`/`factory`/`recovery_only`; **required on every entry**, regardless of which of the other two it declares).  A `swd_probe` entry naming `flash_args.target` must also name `flash_args.jlink_device` — see `metadata/e1m_modules/README.md`. |
 | `default_hw_rev`       | SoM extension                     | No                        | Must match a key in `metadata/e1m_modules/<family>/hw-revisions.yaml`.                                                  |
 | `status.*`             | SoM extension                     | n/a                       | Flags for tooling (e.g. preliminary, partial HW config).                                                                |
 
@@ -652,21 +653,35 @@ west build \
 
 > **Current coverage (issue #523).**  The Alif Ensemble (`aen`) family
 > (e.g. E1M-AEN801, and by extension a new AEN SKU like AEN901 above) is
-> fully generated -- every file except `board.cmake`.  Adding a new AEN
-> SKU only requires: a `zephyr_cpucluster` / `itcm_global_base` /
-> `dtcm_global_base` entry per core in its SoC JSON (an existing E7/E8
-> SoC JSON already carries these), a `topology.<core>.zephyr_full_name`
-> string in the SoM preset, and the console pad's row in
-> `metadata/pinmux/aen.yaml`.  The Renesas RZ/V2N family (`v2n` /
+> fully generated -- every file except `board.cmake` and the bare
+> `Kconfig`.  Adding a new AEN SKU requires, in its SoC JSON: a
+> `zephyr_cpucluster` / `itcm_global_base` / `dtcm_global_base` entry per
+> core (the E8 SoC JSON already carries these), plus a
+> `zephyr_peripherals_dtsi` naming the devicetree overlay that declares
+> THAT SoC's peripheral and NPU node set.  And in the SoM preset: a
+> `topology.<core>.zephyr_full_name` string, plus the console pad's row
+> in `metadata/pinmux/aen.yaml`.  alp-sdk ships exactly one peripherals
+> overlay today (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi`), so a
+> non-E8 Ensemble part must add its own and declare it: the generator
+> REFUSES rather than falling back to the E8's, whose node set is
+> different silicon (the E8 declares `ethosu85`; an E3 carries 2x
+> Ethos-U55 and no U85).  The Renesas RZ/V2N family (`v2n` /
 > `v2n-m1`) generates only the family-agnostic files (`board.yml`,
 > `Kconfig.alp_<board>`, the twister `.yaml`) -- its `.dts` / pinctrl
 > `.dtsi` / `_defconfig` stay hand-authored (mirror the nearest sibling,
 > e.g. E1M-V2N101) until the on-module GD32G553 supervisor's Renesas-side
-> pin assignments land in metadata.  `board.cmake` (flasher/debugger
-> runner args) stays hand-authored for every family -- see
-> `docs/architecture.md`'s generators-inventory entry for why.
+> pin assignments land in metadata.  TWO files stay hand-authored for
+> every family and must be COPIED ACROSS by hand when a generated tree is
+> used as the board directory: `board.cmake` (flasher/debugger runner
+> args -- see `docs/architecture.md`'s generators-inventory entry for
+> why), and the bare `Kconfig`, which sets
+> `CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS default y` to select the custom
+> E8 MPU region table.  Missing `Kconfig` is SILENT: the build succeeds
+> and falls back to Zephyr's generic 2-region FLASH_0/SRAM_0 map, whose
+> whole-flash FLASH_0 region is unsafe on Flow D (production MRAM boot).
 > `tests/scripts/test_gen_zephyr_board.py` pins the covered files
-> byte-identical to their committed board tree.
+> byte-identical to their committed board tree, and its `HAND_MAINTAINED`
+> set is exactly those two names.
 
 Either way, the resulting `.elf` is a real binary that exercises
 the new SoM's BSP path.  Run it on hardware once silicon arrives,

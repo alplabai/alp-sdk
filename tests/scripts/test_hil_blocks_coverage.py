@@ -138,16 +138,25 @@ def _make_project(
     """Build a minimal BoardProject for the orchestrator-emit checks
     below.  We don't go through load_board_yaml() because that
     requires real preset files on disk; the emit functions take
-    BoardProject + Slice directly."""
+    BoardProject + Slice directly.
+
+    `cores` carries a real `os: zephyr` slice and `family:` carries the
+    real `alif-ensemble` token out of metadata/e1m_modules/E1M-AEN701.yaml
+    (it used to be `cores={}` and `family: "alif"` -- neither of which any
+    loaded project can produce).  `emit_sysbuild_conf` reads both since
+    #562: sysbuild only exists inside a Zephyr build, and `boot.method:`
+    now defaults per SoM family rather than unconditionally to mcuboot,
+    so a fixture with no Zephyr slice and an unrecognised family would
+    quietly stop exercising the AEN MCUboot path these tests are about."""
     return BoardProject(
         sku="E1M-AEN701",
         hw_rev=None,
         board_name="hil-blocks-test",
         board_hw_rev=None,
-        cores={},
+        cores={"m55_hp": Slice(core_id="m55_hp", os="zephyr", app="./src")},
         ipc=[],
         soc_spec={"silicon": "alif:e1c:e1c-aen"},
-        som_preset={"family": "alif", "topology": {}},
+        som_preset={"family": "alif-ensemble", "topology": {}},
         board_preset=None,
         diagnostics=diagnostics or {},
         chips=[],
@@ -457,14 +466,16 @@ def test_power_block_disabled_emits_no_pm() -> None:
 
 def test_diagnostics_modules_emits_per_module_log_level() -> None:
     """`diagnostics.modules:` -> _slice_alp_conf() emits one log-level
-    line per entry.  ALP_* SDK-side modules have not registered any
-    LOG_MODULE yet, so emitting `CONFIG_ALP_<MOD>_LOG_LEVEL=N`
-    upstream is rejected as an undefined symbol; until each ALP
-    module gains its LOG_MODULE_REGISTER call, the emit is a hint
-    comment.  Non-ALP modules (Zephyr subsystems whose Kconfig
-    already exists) keep the live CONFIG_<MOD>_LOG_LEVEL=N form.
-    Level-name -> integer mapping (off=0 / error=1 / warn=2 / info=3
-    / debug=trace=4) is preserved either way."""
+    line per entry, in the CHOICE form Zephyr accepts:
+    `CONFIG_<MOD>_LOG_LEVEL_<OFF|ERR|WRN|INF|DBG>=y`.  (The int
+    `CONFIG_<MOD>_LOG_LEVEL` is promptless and derived from that choice, so
+    assigning it is rejected outright -- alplabai/tan-cli#559.)  ALP_*
+    SDK-side modules have not registered any LOG_MODULE yet, so their
+    choice symbol does not exist either; until each ALP module gains its
+    LOG_MODULE_REGISTER call the emit stays a hint comment.  A Zephyr
+    subsystem the slice actually enables keeps the live form.
+    Level-name -> suffix mapping (off=OFF / error=ERR / warn=WRN /
+    info=INF / debug=trace=DBG) is preserved either way."""
     project = _make_project(diagnostics={
         "log_level": "info",
         "modules": {
@@ -476,16 +487,18 @@ def test_diagnostics_modules_emits_per_module_log_level() -> None:
     slice_ = _make_slice()
     conf = _slice_alp_conf(project, slice_)
     # ALP_* modules: hint comment with the would-be Kconfig + level.
-    assert "# CONFIG_ALP_IOT_LOG_LEVEL=4" in conf
-    assert "# CONFIG_ALP_SECURITY_LOG_LEVEL=0" in conf
-    assert "# CONFIG_ALP_GPIO_LOG_LEVEL=3" in conf
+    assert "# CONFIG_ALP_IOT_LOG_LEVEL_DBG=y" in conf
+    assert "# CONFIG_ALP_SECURITY_LOG_LEVEL_OFF=y" in conf
+    assert "# CONFIG_ALP_GPIO_LOG_LEVEL_INF=y" in conf
     # And not as a live setting -- the undefined-symbol form is rejected
     # by Zephyr Kconfig today; re-introducing it would break twister.
     for stem in ("ALP_IOT_LOG_LEVEL", "ALP_SECURITY_LOG_LEVEL", "ALP_GPIO_LOG_LEVEL"):
-        assert f"\nCONFIG_{stem}=" not in conf, (
-            f"CONFIG_{stem} must stay commented until alp_{stem.split('_')[1].lower()} "
-            "calls LOG_MODULE_REGISTER (otherwise Zephyr aborts on undefined symbol)"
-        )
+        for line in conf.splitlines():
+            assert not line.startswith(f"CONFIG_{stem}"), (
+                f"CONFIG_{stem} must stay commented until "
+                f"alp_{stem.split('_')[1].lower()} calls LOG_MODULE_REGISTER "
+                "(otherwise Zephyr aborts on undefined symbol)"
+            )
 
 
 # ---------------------------------------------------------------------

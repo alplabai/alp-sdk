@@ -222,6 +222,45 @@ writes one — `python/tan/planner/buildplan.py` returns it per baremetal slice,
 dropping it there is tracked as tan-cli#492. Until that lands, a baremetal build
 directory carries the file even though no build step reads it.
 
+A **baremetal slice is a two-step build**, and the plan now says so. Its
+`command` (`cmake -S <app> -B . …`) only CONFIGURES; the `cmake --build .` that
+turns that configure into object files and an executable is a separate entry in
+the slice's `postCommands`, which an executor MUST run in order once `command`
+exits 0. Running `command` alone reports a green build over a tree holding
+`CMakeCache.txt` and no binary at all (alplabai/tan-cli#550). The slice's
+`-DALP_*` settings ride that configure directly: the `-DNAME=VALUE` entries
+(`-DALP_SOM_SKU`, `-DALP_SOM_FAMILY`, `-DALP_CORE_ID`, `-DALP_TOOLCHAIN`, the
+NPU dispatch enables) as cmake cache arguments, and the bare `#if defined(…)`
+guards
+(`ALP_BOARD_<SLUG>`, `ALP_SOM_<SKU>`) as real compiler definitions through a
+generated `build/<core>-baremetal/alp-baremetal.cmake` the configure pulls in
+with `-DCMAKE_PROJECT_INCLUDE=` (alplabai/tan-cli#551). Unlike the retired
+`cmake-args.txt`, that file IS read by the build command — a slice that stops
+writing it stops compiling with its guards, loudly.
+
+The slice's `artifacts` block reports one path: `outputDir`, the directory
+`-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$<1:…>` pins the app's `add_executable()`
+targets to. The `$<1:…>` wrap is load-bearing — CMake appends a per-config
+subdirectory to a plain value on every multi-config generator (Visual Studio,
+Xcode, Ninja Multi-Config), and suppresses that append when a generator
+expression is used, so without it the plan would say `<buildDir>/output` while
+the binary sat in `output/Debug/`. The executable's *name* is the app's own
+`CMakeLists.txt` to pick and is never guessed here.
+
+`outputDir` is a deterministic place to look, **not a build-succeeded oracle**.
+`CMAKE_RUNTIME_OUTPUT_DIRECTORY` governs `add_executable` targets only, so a
+firmware app written as `add_library(fwcore STATIC …)` plus a custom
+link/objcopy target builds cleanly and never creates the directory at all — an
+empty or absent `output/` does not mean the slice produced nothing, and a
+consumer must not read it as a failure. `artifacts.compileCommands` stays
+**null** on baremetal even though the configure passes
+`-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`: CMake implements that variable "only by
+Makefile Generators and Ninja Generators. It is ignored on other generators",
+and this planner does not choose the generator — under Visual Studio, the
+default on Windows, the file is never written. A slice whose `command` was
+blocked reports an all-null `artifacts` block and no `configArtefacts`: nothing
+will ever configure its build dir.
+
 OS inference defaults are silicon-class driven: Cortex-M cores
 default to Zephyr, Cortex-A cores default to Yocto Linux.  The
 customer writes an explicit `os:` only when overriding the default

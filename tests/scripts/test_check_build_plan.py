@@ -202,3 +202,29 @@ def test_generated_output_with_tool_path_passes_as_plan_file(tmp_path):
     p.write_text(json.dumps(doc), encoding="utf-8")
     proc = _run("--plan", str(p))
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_post_command_tool_path_is_a_violation():
+    """`postCommands[]` steps are dispatched by the same executor under
+    the same `executionPolicy` as `command`, so the #1286 bare-identity
+    convention has to reach them too -- otherwise the new key
+    (alplabai/tan-cli#550) is a hole straight through the gate."""
+    doc = _plan_with_tool("west")
+    doc["slices"][0]["postCommands"] = [
+        {"tool": "/usr/bin/cmake", "args": ["--build", "."],
+         "cwd": "build/x"},
+    ]
+    bad = _tool_identity_violations(doc)
+    assert len(bad) == 1
+    assert "postCommands[0].tool" in bad[0]
+    assert "'/usr/bin/cmake'" in bad[0]
+
+
+def test_post_command_bare_tool_passes_the_gate():
+    """Control for the case above: the `cmake` the emitter really puts in
+    a baremetal slice's `postCommands` is a bare identity and passes."""
+    doc = _plan_with_tool("west")
+    doc["slices"][0]["postCommands"] = [
+        {"tool": "cmake", "args": ["--build", "."], "cwd": "build/x"},
+    ]
+    assert _tool_identity_violations(doc) == []

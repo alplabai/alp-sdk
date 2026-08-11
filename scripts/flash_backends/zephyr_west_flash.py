@@ -32,6 +32,34 @@ flash_args contract:
   SETOOLS path) even when it's present in flash_args -- that's expected,
   not a sign the key is broken.
 
+  `expect_dpidr` + `jlink_device` (#1355) are CONSUMER-SIDE-ONLY in the same
+  way, and are one fact in two keys: the SW-DP IDR the board's debug port
+  must answer, and the live-core attach profile that read is performed with.
+  A consumer runs them as a read-only preflight BEFORE any write, so it can
+  abort on the wrong board while the session is still harmless -- necessary
+  because a J-Link is selected only by serial, and a cloned serial across
+  two adapters silently resolves to whichever one is attached. They arrive
+  together or not at all; a half-armed pair is a refusal downstream, not a
+  degraded check. This backend goes through `west`, never touches a J-Link
+  directly, and so reads neither.
+
+  `slot0_load_address` (tan-cli#353; the AEN MRAM slot0-XIP address this
+  slice's application blob is linked at) is CONSUMER-SIDE-ONLY in the same
+  way: a downstream flasher that writes MRAM directly over J-Link needs it
+  to know where to `loadbin`; `west flash` derives its own load address
+  from the build's own linked ELF, so this backend ignores the key too.
+
+  NOTE: `jlink_device` is backend-local, not a single global key -- here it
+  names the read-only SEGGER *attach profile* used only for the
+  `expect_dpidr` preflight read (e.g. `Cortex-M55`, explicitly not
+  flash-capable). The `swd_probe` backend (`scripts/flash_backends/
+  swd_probe.py`) emits a DIFFERENT `flash_args.jlink_device` for a DIFFERENT
+  helper entry: the SEGGER device it passes to `JLinkExe -device` to
+  actually PROGRAM a part. Same key name, two backends, two meanings --
+  there's no collision today because no single manifest entry is read by
+  both backends, but don't assume one backend's `jlink_device` describes
+  what the other would do with it.
+
 Tool requirement: ``west`` on PATH.  We rely on west's own runner
 plumbing (``west flash --runner X``) so each underlying runner's
 prerequisite (openocd / J-Link / pyocd / nrfjprog) is implicitly

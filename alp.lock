@@ -1,7 +1,7 @@
 {
   "digests": {
-    "metadata": "sha256:762fbaf65aac3beedf414244763090fa02bc9bd87138563c7aeb6e04cf5ed89d",
-    "schemas": "sha256:a3e0a7299b9a8ad327baff6e09e43aff0677cb6e60dab13d913dd8fe02dee82a"
+    "metadata": "sha256:c1b07d508d517042d58014f7078c1fb739741439f87a81ed087d4ad7d89ad4da",
+    "schemas": "sha256:fdb0f90f1b4febb9a41d4b6192bffca4a707dfa482b1389443bbef314f2fddcb"
   },
   "generatedBy": "west alp-lock",
   "libraries": [
@@ -27,7 +27,7 @@
       "license": "MIT",
       "name": "bearssl",
       "revision": null,
-      "version": "master"
+      "version": "7bea48e5e850ab4cafbe68d3765cdaba13a86d6f"
     },
     {
       "license": "Apache-2.0",
@@ -135,7 +135,7 @@
       "license": "MIT",
       "name": "madgwick-ahrs",
       "revision": null,
-      "version": "unpinned (west.yml tracks xio-technologies/Fusion@main; TBD pin SHA after maintainer audit)"
+      "version": "v1.3.2"
     },
     {
       "license": "Apache-2.0",
@@ -159,7 +159,7 @@
       "license": "CC0-1.0",
       "name": "minimp3",
       "revision": null,
-      "version": "master"
+      "version": "ea99364f61c14656440e8d77e9c233ccf3124633"
     },
     {
       "license": "Apache-2.0",
@@ -231,7 +231,7 @@
     "groupsEnabled": []
   },
   "sdk": {
-    "revision": "9fa7f45485b4bdca2a93480165669895fc21d2c8",
+    "revision": "e845b93a22eb5bb46cc236f458a07838ed1b27be",
     "version": "0.15.0"
   },
   "west": {
@@ -255,7 +255,7 @@
           "extras-tier1"
         ],
         "name": "BearSSL",
-        "revision": "master"
+        "revision": "7bea48e5e850ab4cafbe68d3765cdaba13a86d6f"
       },
       {
         "groups": [
@@ -365,7 +365,7 @@
           "extras-tier1"
         ],
         "name": "madgwick_ahrs",
-        "revision": "main"
+        "revision": "v1.3.2"
       },
       {
         "groups": [
@@ -384,7 +384,7 @@
           "extras-tier1"
         ],
         "name": "minimp3",
-        "revision": "main"
+        "revision": "ea99364f61c14656440e8d77e9c233ccf3124633"
       },
       {
         "groups": [

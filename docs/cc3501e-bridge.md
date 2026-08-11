@@ -287,18 +287,23 @@ in one commit.  The Alif-side client still refuses to talk to a firmware
 whose `ALP_CC3501E_CMD_GET_VERSION` reply doesn't match the compile-time
 `ALP_CC3501E_PROTOCOL_VERSION`.
 
-## Firmware: pre-flashed by Alp; updated via OTA, never customer-flashed
+## Firmware: pre-flashed by Alp; updated via OTA; customer-flashable only to recover a bricked device
 
 **The CC3501E ships pre-flashed by Alp** with the bridge firmware — for
 normal use the customer flashes and configures nothing; the device boots
 the bridge and the Alif-side `<alp/...>` calls work out of the box.
 Firmware updates are also Alp-released and applied over the bridge SPI
 link, programming the chip's own OTP (the SoM preset models this with
-`helper_firmware[].update_channel: alp_ota_spi_otp`, never a
-`flash_method`) — the CC3501E is **never customer-flashed**.  The
-version-pinned prebuilt blob at
+`helper_firmware[].update_channel: alp_ota_spi_otp` plus
+`flash_policy: recovery_only`, and no `flash_method` at all).
+`flash_policy` carries that reason directly: Alp Lab programs the part
+in production, and a customer flash is permitted **only** to recover a
+bricked device, using Alp Lab-supplied binaries — it is not a routine
+customer flash target.  The OTA channel is a separate fact and does not
+itself make a helper un-flashable (the GD32 bridge has both a channel
+and a recovery-only flash path).  The version-pinned prebuilt blob at
 `firmware/cc3501e/prebuilt/cc3501e-vX.Y.Z.bin` is that OTA payload's
-provenance, not a customer flashing target.
+provenance and also the binary a recovery flash uses.
 
 Rebuilding or customizing the firmware is **optional and open** — the
 bridge firmware source is Alp's (public, like the GD32 bridge), in-tree

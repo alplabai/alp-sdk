@@ -36,7 +36,8 @@
         "bin": "build/m55_he-zephyr/zephyr/zephyr.bin",
         "sizeReport": "build/m55_he-zephyr/zephyr/zephyr.stat",
         "symbols": "build/m55_he-zephyr/zephyr/zephyr.symbols",
-        "compileCommands": "build/m55_he-zephyr/compile_commands.json"
+        "compileCommands": "build/m55_he-zephyr/compile_commands.json",
+        "outputDir": null
       },
       "debug": {
         "console": "uart",
@@ -56,6 +57,7 @@
         ],
         "cwd": "build/m55_he-zephyr"
       },
+      "postCommands": [],
       "env": {
         "ALP_SDK_ROOT": "${SDK_ROOT}"
       },
@@ -91,7 +93,8 @@
         "bin": "build/m55_hp-zephyr/zephyr/zephyr.bin",
         "sizeReport": "build/m55_hp-zephyr/zephyr/zephyr.stat",
         "symbols": "build/m55_hp-zephyr/zephyr/zephyr.symbols",
-        "compileCommands": "build/m55_hp-zephyr/compile_commands.json"
+        "compileCommands": "build/m55_hp-zephyr/compile_commands.json",
+        "outputDir": null
       },
       "debug": {
         "console": "uart",
@@ -111,6 +114,7 @@
         ],
         "cwd": "build/m55_hp-zephyr"
       },
+      "postCommands": [],
       "env": {
         "ALP_SDK_ROOT": "${SDK_ROOT}"
       },

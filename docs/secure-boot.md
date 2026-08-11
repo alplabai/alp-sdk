@@ -115,7 +115,12 @@ See [`docs/board-config-features.md` §Bootloader](board-config-features.md#boot
 for the full field reference (including why there is no
 `slots:` / `scratch_size_kib:` / `anti_rollback:` field).  Omit the
 block to inherit the SDK's stock per-family defaults (AEN-Zephyr:
-MCUboot + ECDSA-P256 + swap-using-scratch).  Slot/scratch partition
+MCUboot + ECDSA-P256 + swap-using-scratch).  Keeping the block but
+omitting `method:` inherits the family's bootloader strategy the same
+way -- `mcuboot` on AEN/N93, `none` on V2N/V2N-M1, where U-Boot owns
+boot.  This overlay is a Zephyr artefact: a project with no
+`os: zephyr` slice never runs sysbuild and gets none.
+Slot/scratch partition
 *sizes* come from the board DT `partitions {}` node, not from
 `boot:` -- declare the actual layout via `storage:` if you want it
 explicit.

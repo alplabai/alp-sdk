@@ -20,9 +20,10 @@
  * physically separate from HP's -- both cores' images can be
  * resident in MRAM at once (see the partition map below and
  * metadata/e1m_modules/E1M-AEN801.yaml `memory_map:`).  OTA is DEFERRED
- * (CONFIG_SINGLE_APPLICATION_SLOT=y, no secondary/scratch slot) so both
- * 2688 KiB code slots fit the 5632 KiB App MRAM alongside the ~2.6 MiB NPU
- * MRAM-model budget; see zephyr/sysbuild/aen/README.md.
+ * (CONFIG_SINGLE_APPLICATION_SLOT=y, no secondary/scratch slot): the
+ * per-core code slots (HE 2688 KiB + HP 2688 KiB) share the
+ * 5632 KiB App MRAM with boot, storage and the NPU MRAM-model
+ * budget -- see zephyr/sysbuild/aen/README.md for the sizing rationale.
  *
  * Inter-core IPC (the APSS<->RTSS-HE MHUv2 doorbell pair) + the on-module
  * peripheral buses (GPIO / I2C / SPI / Ethernet) are added alongside the

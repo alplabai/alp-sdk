@@ -403,6 +403,22 @@ def _hwrev_pad_route_overrides(
     reading).  Same rationale as the existence gate above: this emit path
     is its own independent resolution, so the status gate needs its own
     copy here too, not just in ``load_board_yaml``.
+
+    Reads the table through ``sdk_compat.load_family_table()`` rather than
+    its own ``yaml.safe_load``, so both independent readers of this file
+    agree about what a damaged one means (#563).  This site used to do
+    ``yaml.safe_load(...) or {}``, and that ``or {}`` FAILED OPEN on the
+    two shapes that parse without raising: an EMPTY file and a file
+    TRUNCATED above its ``hw_revisions:`` block both yielded ``{}``, both
+    gates above then read "nothing to judge", and ``--emit
+    composed-route-table`` shipped a wrong-hardware artefact at exit 0 for
+    an hw_rev that does not exist -- the exact outcome the two gates below
+    exist to prevent.  An unparseable table escaped as a raw
+    ``yaml.ScannerError`` traceback: a refusal, but not a diagnosable one.
+    The shared reader turns all of those into one coded
+    ``OrchestratorError`` naming the file, which ``scripts/alp_project.py``
+    already catches on this emit arm and reports at exit 1.  An ABSENT
+    table still returns ``{}`` there and stays benign here.
     """
     if not hw_rev:
         return []
@@ -410,17 +426,21 @@ def _hwrev_pad_route_overrides(
         family = _sku_family(sku)
     except ValueError:
         return []
-    path = metadata_root / "e1m_modules" / family / "hw-revisions.yaml"
-    if not path.is_file():
-        return []
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
     # Lazy import: alp_orchestrate imports this module at load time (the
     # resolve_memory_map edge -- see `_load_yaml` above), so the reverse
     # import must happen at call time, not at module scope.
     from alp_orchestrate.models import (SdkRevisionNotBuildable,
                                         SdkRevisionUnknown)
-    from alp_orchestrate.sdk_compat import revision_buildable, revision_known
+    from alp_orchestrate.sdk_compat import (load_family_table,
+                                            revision_buildable,
+                                            revision_known)
+    data = load_family_table(metadata_root, family)
+    if not data:
+        # Absent table only: `load_family_table` raises on every
+        # present-but-unusable shape, so reaching here with a falsy
+        # `data` means the family genuinely ships no table.
+        return []
     if revision_known(data, hw_rev) is False:
         available = sorted((data.get("hw_revisions") or {}).keys())
         raise SdkRevisionUnknown(
