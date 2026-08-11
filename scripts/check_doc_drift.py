@@ -167,6 +167,10 @@ _ALLOWLIST: set[str] = {
     # re-widening the harvest, pending a maintainer decision to finish
     # the PSA<->OPTIGA wiring or mark it not-yet-implemented in the doc.
     "ALP_SDK_PSA_ATTESTATION_OPTIGA",
+    # docs/gd32-bridge.md's recovery-runbook step names an env var read by
+    # tan-cli's flash_cmd.py (a different repo), not an alp-sdk symbol --
+    # it will never appear in this repo's headers/Kconfig/generators.
+    "ALP_FLASH_REQUIRE_DPIDR",
 }
 
 # Identifier shapes we treat as SDK symbols.  The optional `CONFIG_`
