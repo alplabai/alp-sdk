@@ -7,6 +7,44 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — `pwm-led-fade` ships its missing M55-HE overlay twin, `drone-autopilot` gets its own ESC overlay, and the overlay regression test can no longer pass on a wrong pad (#1383)
+
+An adversarial review of #1381 (merged as `ac920b33`, closing #1375) found three
+gaps the merged fix left open. None invalidates that fix — the LED fade is
+verified working on E1M-AEN801 silicon — but each is a real hole.
+
+**1. The shipped overlay covered only `rtss_hp`, but #1375's own bench repro
+was `rtss_he`.** The LED pad is a SoM-level route, not a core-level one — both
+`e1m_aen801_m55_he` and `_m55_hp` `#include` the same
+`alif/ensemble_e8_peripherals.dtsi`, where `utimer10`/`pwm10` live — so either
+core can drive it, and both need their own board-qualified overlay file (Zephyr
+resolves `boards/*.overlay` per board target, not per SoM). Added the
+byte-identical `alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay` twin,
+following the precedent `examples/peripheral-io/blink` already set for its
+own HE/HP pair.
+
+**2. `examples/peripheral-io/drone-autopilot` had the exact same defect,
+unwired and untracked.** Its four ESC channels
+(`alp_pwm_open(ALP_E1M_PWM0 + i)`, `src/autopilot.c`) had no `boards/`
+overlay at all, so all four returned `NOT_READY` on real E1M-AEN801 silicon
+for the identical reason #1375 documents. `check_example_board_overlay_parity.py`
+does not catch a *missing* overlay by itself — it only re-checks examples that
+already ship one — so this shipped unnoticed alongside the #1381 fix. Added
+`boards/alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay`, wiring all
+four `alp-pwm0`..`alp-pwm3` aliases (`UT11_T1_C`/`UT11_T0_C`/`UT10_T1_A`/
+`UT10_T0_A`) through `utimer10`/`utimer11`; `board.yaml` here declares only
+`cores.m55_hp.app`, so no HE twin is needed.
+
+**3. `tests/scripts/test_pwm_led_fade_aen_overlay.py` could not catch a wrong
+pad.** Its pinmux assertion was a whole-file `assertIn`, satisfied by the
+literal already sitting in the header comment — a mutated copy with the wrong
+pad, the wrong PWM driver, or no `pinctrl-0`/`pinctrl-names` at all still
+passed all four cases. The test now derives the expected pad and channel from
+`metadata/e1m_modules/aen/from-alif.tsv` instead of a hardcoded literal,
+anchors the pinmux assertion to the `pinctrl_pwm10`/`group0` node body rather
+than the whole file, and separately cross-checks the `pwms` channel index and
+the `pinctrl-0`/`pinctrl-names` wiring.
+
 ### Fixed — CC3501E Wi-Fi connect no longer re-associates on every retry or reports a false "connected", `wifi status`/`wifi rssi` survive a radio op, and `wifi connect`'s own timeout budget is honoured (#1376, #1377, #1378)
 
 A wire-contract drift on `WIFI_CONNECT_STA` (0x12): the firmware was

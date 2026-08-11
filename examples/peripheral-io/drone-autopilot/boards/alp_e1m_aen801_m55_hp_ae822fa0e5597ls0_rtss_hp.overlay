@@ -1,0 +1,121 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * E1M-AEN801 M55-HP overlay for drone-autopilot (#1383 item 2).
+ *
+ * WHY THIS FILE EXISTS: same gap examples/peripheral-io/pwm-led-fade closed
+ * for #1375 -- board.yaml's `peripherals: [pwm]` route does NOT emit a DT
+ * alias anywhere in the build (`tan build`'s CMakeLists.txt only calls
+ * `alp_project.py --emit zephyr-conf`, never `--emit dts-overlay`), so
+ * nothing wires an E1M PWM pad to hardware on its own. The Zephyr PWM
+ * backend (src/backends/pwm/zephyr_drv.c) resolves each portable channel
+ * through the `alp-pwm<N>` alias; with none defined, ALP_PWM_SPEC_N_INIT is
+ * `{ .dev = NULL }` and alp_pwm_open() returns NOT_READY. This example had
+ * no `boards/` directory at all, so its four ESC channels
+ * (src/autopilot.c:143-144, `ALP_E1M_PWM0 + i` for i in 0..3) return
+ * NOT_READY on real E1M-AEN801 silicon before this overlay -- the same
+ * failure #1375 hit on pwm-led-fade, just on four different pads.
+ *
+ * THE FOUR PADS. Sourced from two places that agree:
+ * metadata/e1m_modules/aen/from-alif.tsv and this repo's own PWM driver
+ * header comment (zephyr/drivers/pwm/pwm_alif_utimer.c:10-14, which
+ * documents this exact E1M-PWM -> UTIMER/channel table for all eight E1M
+ * PWM pads):
+ *
+ *   E1M_PWM0 = UT11_T1_C (utimer11, driver B / channel 1) -> P12_7
+ *   E1M_PWM1 = UT11_T0_C (utimer11, driver A / channel 0) -> P12_6
+ *   E1M_PWM2 = UT10_T1_A (utimer10, driver B / channel 1) -> P2_5
+ *   E1M_PWM3 = UT10_T0_A (utimer10, driver A / channel 0) -> P2_4
+ *
+ * utimer10/pwm10 and utimer11/pwm11 are already instantiated (disabled) for
+ * both M55 cores in zephyr/dts/alif/ensemble_e8_peripherals.dtsi; this
+ * overlay just enables them and points each pinctrl group at its ESC pad.
+ * The DT `pwms` cell period (PWM_USEC(2500), matching the driver's 400 Hz
+ * BLHeli-flavoured default) is informational only -- autopilot.c calls
+ * alp_pwm_open() with an explicit period_ns, which the backend applies at
+ * runtime (src/backends/pwm/zephyr_drv.c: `h->period_ns = (cfg->period_ns
+ * != 0u) ? cfg->period_ns : spec->period`).
+ *
+ * TRAP (see examples/aen/aen-pwm-utimer-pwmleds, examples/peripheral-io/
+ * pwm-led-fade): each `alp-pwm<N>` alias must point at a `pwm-leds`
+ * CONSUMER child, never a pwmN controller node directly -- DEVICE_DT_GET on
+ * the controller triggers a phantom `pwmN_P_pwms_IDX_0` codegen reference
+ * because the "alif,pwm" binding re-declares #pwm-cells.
+ *
+ * TRAP (numbering domains): the Zephyr node number and the E1M pad number
+ * are NOT the same axis -- e.g. node `pwm10` backs E1M_PWM2 and E1M_PWM3,
+ * not "PWM10". Do not generalize pwm<N>-to-alp-pwm<N>; each E1M PWM pad
+ * needs its own confirmed utimer/channel/pinctrl mapping.
+ */
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+#include <zephyr/dt-bindings/pwm/pwm.h>
+
+/ {
+	esc_pwm_leds: pwm-leds {
+		compatible = "pwm-leds";
+
+		esc0: esc0 {
+			label = "esc0";
+			pwms  = <&pwm11 1 PWM_USEC(2500) PWM_POLARITY_NORMAL>;
+		};
+
+		esc1: esc1 {
+			label = "esc1";
+			pwms  = <&pwm11 0 PWM_USEC(2500) PWM_POLARITY_NORMAL>;
+		};
+
+		esc2: esc2 {
+			label = "esc2";
+			pwms  = <&pwm10 1 PWM_USEC(2500) PWM_POLARITY_NORMAL>;
+		};
+
+		esc3: esc3 {
+			label = "esc3";
+			pwms  = <&pwm10 0 PWM_USEC(2500) PWM_POLARITY_NORMAL>;
+		};
+	};
+
+	aliases {
+		alp-pwm0 = &esc0; /* ESC0 / ALP_E1M_PWM0 */
+		alp-pwm1 = &esc1; /* ESC1 / ALP_E1M_PWM1 */
+		alp-pwm2 = &esc2; /* ESC2 / ALP_E1M_PWM2 */
+		alp-pwm3 = &esc3; /* ESC3 / ALP_E1M_PWM3 */
+	};
+};
+
+&pinctrl {
+	pinctrl_pwm10: pinctrl_pwm10 {
+		group0 {
+			/* UT10_T0_A -> P2_4 = E1M_PWM3, UT10_T1_A -> P2_5 = E1M_PWM2. */
+			pinmux = <PIN_P2_4__UT10_T0_A>, <PIN_P2_5__UT10_T1_A>;
+		};
+	};
+
+	pinctrl_pwm11: pinctrl_pwm11 {
+		group0 {
+			/* UT11_T0_C -> P12_6 = E1M_PWM1, UT11_T1_C -> P12_7 = E1M_PWM0. */
+			pinmux = <PIN_P12_6__UT11_T0_C>, <PIN_P12_7__UT11_T1_C>;
+		};
+	};
+};
+
+&utimer10 {
+	status = "okay";
+
+	pwm10 {
+		status = "okay";
+		pinctrl-0 = <&pinctrl_pwm10>;
+		pinctrl-names = "default";
+	};
+};
+
+&utimer11 {
+	status = "okay";
+
+	pwm11 {
+		status = "okay";
+		pinctrl-0 = <&pinctrl_pwm11>;
+		pinctrl-names = "default";
+	};
+};
