@@ -280,6 +280,44 @@ def _check_slice_requires(
 # Per-slice emit helpers (called from kconfig.py)
 # ---------------------------------------------------------------------------
 
+def zephyr_library_kconfig(manifest: dict[str, Any]) -> list[str]:
+    """Kconfig lines for ONE library manifest's Zephyr integration.
+
+    The upstream module-enable line(s) (`integration.zephyr.kconfig`)
+    followed by the SDK SW-fallback floor
+    (`integration.zephyr.hw_backends.sw_fallback.kconfig`), module-enable
+    first and the fallback marker last, deduped. Header-only libraries whose
+    SW floor is a doc comment surface that comment only when there is no
+    module-enable line to attach it to.
+
+    The ONE derivation both declaration channels call for the base+fallback
+    set -- `zephyr_kconfig_lines` (project-wide) and
+    `kconfig.py::_per_core_library_kconfig` (core-scoped) -- so the same
+    library manifest can never emit a different symbol set depending on
+    which `libraries:` channel declared it (#1359: the project-wide channel
+    used to skip the SW-fallback line entirely, e.g. cmsis-dsp's project-wide
+    form never emitted `CONFIG_ALP_CMSIS_DSP_SCALAR=y` while its core-scoped
+    form did).
+    """
+    zephyr = (manifest.get("integration") or {}).get("zephyr") or {}
+    out: list[str] = []
+    for kc in zephyr.get("kconfig") or []:
+        kc = str(kc)
+        if kc not in out:
+            out.append(kc)
+    swf = ((zephyr.get("hw_backends") or {}).get("sw_fallback") or {}).get("kconfig")
+    if swf:
+        swf = str(swf)
+        if swf.lstrip().startswith("#"):
+            # Header-only library: the SW floor is a documentation comment,
+            # not a real knob.  Surface it only when there is no module enable.
+            if not out:
+                out.append(swf)
+        elif swf not in out:
+            out.append(swf)
+    return out
+
+
 def zephyr_kconfig_lines(
     project: BoardProject,
     slice_: Slice,
@@ -295,7 +333,8 @@ def zephyr_kconfig_lines(
     project-wide one), but only the project-wide half is EMITTED: the Zephyr
     Kconfig for a core-scoped entry rides `kconfig.py::_emit_libraries`'
     per-core channel, which reads the very same manifest.  Emitting it twice
-    would duplicate every CONFIG_ line.
+    would duplicate every CONFIG_ line.  Both halves derive their per-library
+    CONFIG_ set from the same `zephyr_library_kconfig` helper (#1359).
     """
     if slice_.os != "zephyr":
         return []
@@ -315,7 +354,7 @@ def zephyr_kconfig_lines(
         if module:
             tag += f" (west module `{module}`)"
         lines.append(f"# library: {tag}")
-        for kc in zephyr.get("kconfig") or []:
+        for kc in zephyr_library_kconfig(manifest):
             lines.append(kc)
     return lines
 

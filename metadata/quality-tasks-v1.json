@@ -407,6 +407,20 @@
       "ci": null
     },
     {
+      "id": "helper-firmware-path",
+      "description": "Every metadata/e1m_modules/*.yaml helper_firmware[].firmware_path (when present) resolves to a real file; omission is legal and left alone (issue #1372).",
+      "runner": "check-script",
+      "script": "scripts/check_helper_firmware_path.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "i2c-bus-doc-consistency",
       "description": "Doc/example prose naming an on-module I2C part next to a bus name must agree with metadata/e1m_modules/*.yaml's on_module.i2c_devices.",
       "runner": "check-script",
