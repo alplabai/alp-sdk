@@ -6,9 +6,10 @@
  * the way the real CC3501E firmware behaves.
  *
  * The defect this suite pins (issue #1387): the WIFI_STATUS reply carries an
- * rssi_dbm byte that the firmware NEVER populates -- every terminal
- * wifi_conn_set() call site in firmware/cc3501e/hal/ti/cc3501e_hw_ti_wifi.c
- * passes a literal 0 -- and the console printed that byte as a measurement.
+ * rssi_dbm byte that the firmware NEVER populates -- every terminal outcome in
+ * firmware/cc3501e/hal/ti/cc3501e_hw_ti_wifi.c publishes it through
+ * wifi_conn_set(), which always sets it to 0 -- and the console printed that
+ * byte as a measurement.
  * 0 dBm is a legal int8 RSSI near the top of the range, so nothing downstream
  * can reject it: the user got a confident, plausible, unmeasured number while
  * the very same session's `wifi connect` reported the true -49 dBm from
@@ -75,6 +76,10 @@ static struct {
 	 * served (e.g. the radio went back down between the two requests). */
 	uint8_t rssi_resp;
 
+	/* Response status WIFI_GET_IP answers with -- RESP_OK stages the leased
+	 * address, anything else models a lease query that could not be served. */
+	uint8_t ip_resp;
+
 	/* Bumped on every WIFI_GET_RSSI dispatch, regardless of what opcode (if
 	 * any) is dispatched after it.  slave.cmd alone only records the LAST
 	 * opcode seen, so it cannot tell "no radio read was issued" from "a radio
@@ -90,6 +95,7 @@ static void slave_reset(void)
 	slave.wifi_fail_reason = ALP_CC3501E_WIFI_FAIL_NONE;
 	slave.wifi_conn_rssi   = FIX_RSSI_LATCHED;
 	slave.rssi_resp        = ALP_CC3501E_RESP_OK;
+	slave.ip_resp          = ALP_CC3501E_RESP_OK;
 }
 
 static void stage_reply(uint8_t st, const uint8_t *data, uint16_t n)
@@ -125,6 +131,10 @@ static void slave_dispatch(void)
 		break;
 	}
 	case ALP_CC3501E_CMD_WIFI_GET_IP: {
+		if (slave.ip_resp != ALP_CC3501E_RESP_OK) {
+			stage_reply(slave.ip_resp, NULL, 0u);
+			break;
+		}
 		/* Wire order is REVERSED (the firmware emits the lwIP network-order
 		 * u32 MSB-first); 192.168.1.14 = 0xC0A8010E -> {0x0E,0x01,0xA8,0xC0}. */
 		const uint8_t wire[4] = { 0x0E, 0x01, 0xA8, 0xC0 };
@@ -309,6 +319,21 @@ ZTEST(cc3501e_console_wifi, test_status_still_reports_state_and_ip)
 
 	zassert_not_null(strstr(out, "state: connected"), "state line missing: %s", out);
 	zassert_not_null(strstr(out, "ip:    192.168.1.14"), "ip line missing: %s", out);
+}
+
+/* Same shape as the RSSI-unavailable case, for the IP lease query: when the
+ * WIFI_GET_IP read fails, say so and print no address, rather than silently
+ * omitting the line (which is indistinguishable from "not connected yet"). */
+ZTEST(cc3501e_console_wifi, test_status_says_unavailable_when_the_ip_read_fails_1387)
+{
+	slave.ip_resp = ALP_CC3501E_RESP_ERR_NOT_READY;
+
+	const char *out = run("alp companion wifi status");
+
+	zassert_not_null(strstr(out, "state: connected"), "state line missing: %s", out);
+	zassert_not_null(strstr(out, "ip:    unavailable"), "a failed IP read must say so: %s", out);
+	zassert_is_null(
+	    strstr(out, "ip:    192.168.1.14"), "no address may be printed at all: %s", out);
 }
 
 /* Not associated: no RSSI line at all, and -- the point -- no WIFI_GET_RSSI

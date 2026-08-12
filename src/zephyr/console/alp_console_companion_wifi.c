@@ -286,13 +286,13 @@ static int cmd_companion_wifi_status(const struct shell *sh, size_t argc, char *
 	shell_print(sh, "state: %s", companion_wifi_state_name(st.state));
 	if (st.state == ALP_CC3501E_WIFI_CONNECTED) {
 		/* Do NOT print st.rssi_dbm: the WIFI_STATUS latch byte is NOT a
-		 * measurement.  Every terminal wifi_conn_set() call site in
-		 * firmware/cc3501e/hal/ti/cc3501e_hw_ti_wifi.c passes a literal 0 for
-		 * the rssi argument (the firmware may not read it there -- a
-		 * Wlan_Get(WLAN_GET_RSSI) close to associate blocks the worker), so
-		 * that byte has only ever held 0.  And 0 dBm is a LEGAL int8 RSSI, so
-		 * there is no in-band sentinel the host can test: printed as-is it is
-		 * a confident, plausible, unmeasured number (issue #1387).
+		 * measurement.  Every terminal outcome in
+		 * firmware/cc3501e/hal/ti/cc3501e_hw_ti_wifi.c publishes it through
+		 * wifi_conn_set(), which always sets it to 0 (the firmware may not read
+		 * it there -- a Wlan_Get(WLAN_GET_RSSI) close to associate blocks the
+		 * worker), so that byte has only ever held 0.  And 0 dBm is a LEGAL
+		 * int8 RSSI, so there is no in-band sentinel the host can test: printed
+		 * as-is it is a confident, plausible, unmeasured number (issue #1387).
 		 *
 		 * Take the RSSI from the only real source instead -- WIFI_GET_RSSI, a
 		 * worker-routed radio read, the same one the connect result already
@@ -320,6 +320,8 @@ static int cmd_companion_wifi_status(const struct shell *sh, size_t argc, char *
 		alp_status_t ips   = cc3501e_wifi_get_ip(companion_cc3501e, ip);
 		if (ips == ALP_OK) {
 			shell_print(sh, "ip:    %u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
+		} else {
+			shell_print(sh, "ip:    unavailable (%d)", (int)ips);
 		}
 	} else if (st.state == ALP_CC3501E_WIFI_CONN_FAILED) {
 		shell_print(sh, "fail:  %u", (unsigned int)st.fail_reason);
