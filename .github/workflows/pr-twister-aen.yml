@@ -163,11 +163,18 @@ jobs:
       # long-lived dev workspace that already carries the patch applied,
       # uncommitted, from earlier bring-up work) exposes: a build error on
       # `.poll_out`/`.poll_in` with no member by that name.
+      #
+      # Invoked through scripts/west_patch_apply.py, NOT bare: `west patch
+      # apply` exits 0 when it applied nothing (an unresolved patches.yml
+      # prints `no patches to apply: <path> not found`; an unresolvable
+      # `module:` is skipped and just missing from the count) -- issue #1392.
+      # The wrapper resolves zephyr/patches.yml itself and requires west to
+      # report that it applied every patch the file carries.
       - name: west patch apply (zephyr/patches.yml)
         working-directory: ${{ github.workspace }}/alp-sdk
         run: |
           set -euo pipefail
-          west patch apply
+          python3 scripts/west_patch_apply.py
 
       # twister itself (not just `west build`) needs Zephyr's full Python
       # dependency set under the runner's hosted interpreter -- e.g.
