@@ -15,8 +15,23 @@ and **no `-d`**, so west appends its own default `build` level and the tree
 lands at `<buildDir>/build/`. `buildplan.py::_slice_artifacts` reported
 `<buildDir>/zephyr/zephyr.elf` — one level short. For the AEN `m55_he` slice
 that meant the plan advertised `build/m55_he-zephyr/zephyr/zephyr.elf` while
-the file is written to `build/m55_he-zephyr/build/zephyr/zephyr.elf`; observed
-live as `tan renode` looking for a path that does not exist.
+west writes the file to `build/m55_he-zephyr/build/zephyr/zephyr.elf`. The
+nesting is readable in the emit golden itself: that slice of
+`tests/fixtures/emit-snapshots/rpmsg-aen.build-plan.snap` carries `"cwd":
+"build/m55_he-zephyr"` and a `west build -b …` argv with no `-d`.
+
+**No live failure is claimed for this entry.** Nothing reads the plan's
+`artifacts` block today — tan parses it into the slice record
+(`python/tan/core/build_plan.py:224`) and never reads it again — so the wrong
+spelling was a defect in the published contract, not an observed crash. It
+still matters, because the same un-nested spelling exists independently in a
+tan path that IS live: `tan renode` resolves its ELF from
+`system-manifest.yaml` via `core/renode_plan.py::zephyr_elf_from_manifest`,
+and a slice with no `output_artefact` falls back to
+`<build_dir>/zephyr/zephyr.elf` — calling that function directly with
+`build_dir: m55_he-zephyr` returns `build/m55_he-zephyr/zephyr/zephyr.elf`,
+the path west never writes. That fallback is tan's own defect and is NOT
+fixed here; this change removes the SDK-side spelling it agrees with.
 
 All six Zephyr paths move: `elf`, `map`, `bin`, `sizeReport` (`zephyr.stat`)
 and `symbols` (`zephyr.symbols`) now sit under `<buildDir>/build/zephyr/`, and
@@ -24,8 +39,8 @@ and `symbols` (`zephyr.symbols`) now sit under `<buildDir>/build/zephyr/`, and
 top-level `CMakeLists.txt` forces `CMAKE_EXPORT_COMPILE_COMMANDS` to the build
 dir **root**, which is west's `build/`, not `buildDir`). `artifacts.outputDir`
 stays `null` for Zephyr, and the comment beside it — which claimed the named
-paths "already index" `<buildDir>/build/` while the code two lines above did
-not — is now true rather than aspirational.
+paths "already index" `<buildDir>/build/` while the six lines of code directly
+above it did not — is now true rather than aspirational.
 
 The alternative, adding `-d .` so west's tree lands at `buildDir` itself and
 the old spelling became correct, was **rejected**: the slice's `alp.conf` is
@@ -33,10 +48,15 @@ materialised at `<buildDir>/alp.conf` and handed to that same command via
 `-DEXTRA_CONF_FILE=`, so making `buildDir` west's own build dir puts the
 fragment inside the tree `west build -p` (or a `--pristine=auto` board/app
 change) deletes — destroying the file the command line points at. It would also
-cold-invalidate every existing `<buildDir>/build/CMakeCache.txt`. Emitting the
-true path changes no on-disk behaviour at all, only the description of it.
-`_slice_command`'s finding-M14 note stands unchanged: `-d <buildDir>` would
-still double-nest, because west resolves a relative `-d` against its own cwd.
+strand every existing `<buildDir>/build/` tree, `CMakeCache.txt` included, so
+the next build after the change would be a cold one. Emitting the true path
+changes no on-disk behaviour at all, only the description of it: across the six
+regenerated goldens the only changed lines are the 60 `artifacts` path strings
+— no `command`, `cwd`, `env` or `configArtefacts` line moves.
+`_slice_command`'s finding-M14 conclusion is unchanged — `-d <buildDir>` would
+still double-nest, because west resolves a relative `-d` against its own cwd —
+but the comment carrying it IS rewritten here, dropping its stale "the consumer
+(tan) reconciles that nested layout" sentence.
 
 **Cross-repo blocker — this cannot merge alone.** `scripts/alp_orchestrate/` is
 a hash-audited mirror in tan-cli (`PINNED_HASHES` /
@@ -45,14 +65,15 @@ a hash-audited mirror in tan-cli (`PINNED_HASHES` /
 and `PINNED_SDK_COMMIT`, and move its frozen emit fixtures before or with this
 change (alplabai/tan-cli#560). tan's vendored copy of
 `tests/parity/seam1_field_diff.py` must take the new `_NESTED_ARTIFACT_TAILS`
-allowance in lockstep. tan's own artefact resolution was measured and does
-**not** double-hop: `python/tan/commands/build/manifest.py:259`, `:276`, `:319`
-and `:368` derive west's tree from `slice_cwd / "build"` and never read the
-plan's `artifacts` block at all, and `python/tan/core/flash_plan.py::
-resolve_artefact_path`'s nested candidate is `is_file()`-gated and probed last,
-so a corrected relative path resolves on the first candidate. Those five sites
-— the `I-18` note among them — become deletable follow-up cleanup, not
-breakage.
+allowance in lockstep. tan's artefact RESOLUTION, by contrast, needs nothing —
+and breaks on nothing: read on a tan-cli checkout while writing this,
+`python/tan/commands/build/manifest.py:259`, `:276`, `:319` and `:368` derive
+west's tree from `slice_cwd / "build"` directly and never read the plan's
+`artifacts` block at all — so they are not compensation for this bug and do not
+become deletable because of it — and `python/tan/core/flash_plan.py::
+resolve_artefact_path`'s nested candidate (the `I-18` note) is `is_file()`-gated
+and probed last, and resolves `output_artefact` strings out of
+`system-manifest.yaml` rather than out of this block.
 
 On this side the frozen `97ad481b` seam-1 oracle is **not** rewritten; it is
 frozen by ADR 0020's Amendment. `tests/parity/seam1_field_diff.py` gains a
