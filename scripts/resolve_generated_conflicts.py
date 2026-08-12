@@ -61,7 +61,28 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
+def _repo_root() -> Path:
+    """The git worktree we are resolving in -- asked of git, not inferred.
+
+    Deriving this from `__file__` breaks the moment the script is invoked from
+    a copy (I hit exactly that: a copy under /tmp made REPO `/`, and the first
+    git call died with exit 129 instead of saying anything useful). The
+    checkout being merged is the one git resolves from the CWD.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        raise SystemExit(
+            "error: not inside a git worktree -- run this from the checkout "
+            "whose merge you are resolving."
+        )
+    return Path(out)
+
+
+REPO = _repo_root()
 
 
 def _abi_snapshot_cmd() -> list[str]:
