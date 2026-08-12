@@ -166,6 +166,42 @@ def test_passes_patches_yml_to_west(tmp_path):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="/bin/sh stub west is POSIX-only")
+def test_extra_args_precede_the_apply_subcommand(tmp_path):
+    """`-- -dm zephyr` must land BEFORE `apply` in west's argv.
+
+    `-dm/--dst-module` (like `-sm`/`-w`) is a parent-parser option of `west
+    patch`, not of the `apply` subcommand (zephyr v4.4.1
+    scripts/west_commands/patch.py:138-150) -- real west's argparse rejects
+    it placed after `apply` with rc=2 `unexpected arguments`. Measured
+    end-to-end against real west v1.5.0: `west patch -l <abs> -b <abs> list
+    -dm zephyr` -> rc=2; `west patch -l <abs> -b <abs> -dm zephyr list` ->
+    rc=0. Before this fix, extra args were appended AFTER `apply`, so the
+    documented `-- -dm zephyr` passthrough (usage line, `--expect-applied`
+    help text, changelog.d/1392.md) never actually worked.
+    """
+    yml = _patches_yml(tmp_path, 6)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    argv_log = tmp_path / "argv.txt"
+    exe = bin_dir / "west"
+    exe.write_text(
+        "#!/bin/sh\n"
+        f'echo "$@" > "{argv_log}"\n'
+        "echo '6 patches applied successfully \\o/'\n",
+        encoding="utf-8",
+    )
+    exe.chmod(0o755)
+    proc = _run(yml, bin_dir, "--", "-dm", "zephyr")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    tokens = argv_log.read_text(encoding="utf-8").split()
+    assert "-dm" in tokens, f"-dm never reached west's argv: {tokens!r}"
+    assert tokens.index("-dm") < tokens.index("apply"), (
+        f"-dm must precede `apply` (west patch is a parent-parser option, "
+        f"not an `apply` option): {tokens!r}"
+    )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="/bin/sh stub west is POSIX-only")
 def test_expect_applied_override(tmp_path):
     """`--expect-applied` lets a filtered run (`-dm`) state its own count."""
     yml = _patches_yml(tmp_path, 6)

@@ -43,6 +43,14 @@ Usage
     python3 scripts/west_patch_apply.py --expect-applied 2  # filtered run
     python3 scripts/west_patch_apply.py -- -dm zephyr       # west passthrough
 
+Extra arguments after `--` are inserted before west's own `apply` subcommand
+(`west patch -l ... -b ... -dm zephyr apply`), because `-dm/--dst-module`
+(like `-sm`/`-w`) is a parent-parser option of `west patch`, not of `apply` --
+placed after `apply` as zephyr v4.4.1's argparse rejects it (rc=2,
+`unexpected arguments`). This means the passthrough only reaches `west
+patch`'s own options; `apply`'s single subcommand-local option,
+`-r`/`--roll-back`, is NOT reachable through it.
+
 Deliberately NOT a `scripts/check_*.py`: this is not a static repo-invariant
 gate (it mutates the workspace), so it is not a `metadata/quality-tasks-v1.
 json` entry. Verifying that the patched symbols are actually present in a
@@ -125,6 +133,12 @@ def run_west_patch_apply(
     reports would then describe a manifest west never opened. `cwd` is the
     manifest repo; stderr is folded into stdout so the CI log keeps west's
     own ordering.
+
+    `extra_args` is inserted BEFORE `apply`, not after: `-dm`/`-sm`/`-w` are
+    `west patch`'s own parent-parser options (zephyr v4.4.1
+    scripts/west_commands/patch.py), and west's argparse rejects them placed
+    after the `apply` subcommand (rc=2). Only `apply`'s own `-r/--roll-back`
+    needs the opposite placement, so it is not reachable through this list.
     """
     proc = subprocess.run(
         [
@@ -134,8 +148,8 @@ def run_west_patch_apply(
             str(patches_yml),
             "-b",
             str(patches_yml.parent / "patches"),
-            "apply",
             *extra_args,
+            "apply",
         ],
         cwd=str(cwd),
         stdout=subprocess.PIPE,
@@ -164,8 +178,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "west_args",
         nargs=argparse.REMAINDER,
-        help="extra arguments passed through to `west patch apply` "
-             "(after a `--` separator)",
+        help="extra `west patch` parent-parser options (e.g. `-dm MODULE`), "
+             "passed after a `--` separator and inserted before the `apply` "
+             "subcommand -- NOT for apply-only options such as "
+             "`-r/--roll-back`, which this wrapper cannot reach",
     )
     args = ap.parse_args(argv)
 
