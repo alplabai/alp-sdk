@@ -218,6 +218,28 @@ high-level helpers wait for a follow-up implementation.
 
 ## Hardware-related issues
 
+### E1M-AEN console prints nothing at all (not even the banner)
+
+Zero bytes on the UART -- no `*** Booting Zephyr OS build ... ***`, no
+Alp SDK banner, no log lines -- looks exactly like a bad flash or a dead
+board, and usually isn't.  If your `main()` never yields (the
+`for (;;) { k_busy_wait(1000); }` shape the AEN bench procedure calls
+for, so the Secure Enclave doesn't gate the DAP and the SE-UART), then
+under `CONFIG_LOG_MODE_DEFERRED` the log processing thread never gets
+scheduled and `CONFIG_LOG_PRINTK` takes the banner down with it.
+
+Distinguish it from a fault in one SWD attach: halt and read `PC`,
+`IPSR`, and `CFSR` at `0xE000ED28`.  A `PC` inside `z_impl_k_busy_wait`
+with `IPSR = 000` and `CFSR = 00000000` is a healthy, running,
+log-starved board.
+
+Every `zephyr/boards/alp/e1m_aen*` board tree now defaults to
+`LOG_MODE_MINIMAL`, which prints from the calling context and cannot be
+starved this way; you only hit this on an application that overrides it
+back to `CONFIG_LOG_MODE_DEFERRED=y`.  Full write-up, including what
+minimal mode costs you, in
+[`debugging-aen.md` §6](debugging-aen.md#6-the-console-prints-nothing-and-the-board-is-fine).
+
 ### Module powers up but Renesas / Alif silicon doesn't boot
 
 * Check the primary PMIC's nRESET line -- if it stays low, the
