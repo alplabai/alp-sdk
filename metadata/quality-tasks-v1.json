@@ -115,6 +115,20 @@
       "ci": null
     },
     {
+      "id": "changelog-fragments",
+      "description": "Every changelog.d/*.md fragment is well-formed (foldable filename, non-empty, starts with its own ### heading) so a malformed fragment fails the PR instead of the release cut (#1395).",
+      "runner": "check-script",
+      "script": "scripts/check_changelog_fragments.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "chip-header-status",
       "description": "CI gate: chip-header `@par Driver status:` labels match metadata truth.",
       "runner": "check-script",
