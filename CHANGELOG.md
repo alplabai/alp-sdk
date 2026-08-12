@@ -7,6 +7,63 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — a Zephyr slice's `artifacts` paths now carry the `build/` level `west build` actually writes
+
+A Zephyr slice's build plan named output paths west never creates. The slice's
+`command` is `west build -b <board> <app>` with `cwd` = the slice's `buildDir`
+and **no `-d`**, so west appends its own default `build` level and the tree
+lands at `<buildDir>/build/`. `buildplan.py::_slice_artifacts` reported
+`<buildDir>/zephyr/zephyr.elf` — one level short. For the AEN `m55_he` slice
+that meant the plan advertised `build/m55_he-zephyr/zephyr/zephyr.elf` while
+the file is written to `build/m55_he-zephyr/build/zephyr/zephyr.elf`; observed
+live as `tan renode` looking for a path that does not exist.
+
+All six Zephyr paths move: `elf`, `map`, `bin`, `sizeReport` (`zephyr.stat`)
+and `symbols` (`zephyr.symbols`) now sit under `<buildDir>/build/zephyr/`, and
+`compileCommands` at `<buildDir>/build/compile_commands.json` (Zephyr's
+top-level `CMakeLists.txt` forces `CMAKE_EXPORT_COMPILE_COMMANDS` to the build
+dir **root**, which is west's `build/`, not `buildDir`). `artifacts.outputDir`
+stays `null` for Zephyr, and the comment beside it — which claimed the named
+paths "already index" `<buildDir>/build/` while the code two lines above did
+not — is now true rather than aspirational.
+
+The alternative, adding `-d .` so west's tree lands at `buildDir` itself and
+the old spelling became correct, was **rejected**: the slice's `alp.conf` is
+materialised at `<buildDir>/alp.conf` and handed to that same command via
+`-DEXTRA_CONF_FILE=`, so making `buildDir` west's own build dir puts the
+fragment inside the tree `west build -p` (or a `--pristine=auto` board/app
+change) deletes — destroying the file the command line points at. It would also
+cold-invalidate every existing `<buildDir>/build/CMakeCache.txt`. Emitting the
+true path changes no on-disk behaviour at all, only the description of it.
+`_slice_command`'s finding-M14 note stands unchanged: `-d <buildDir>` would
+still double-nest, because west resolves a relative `-d` against its own cwd.
+
+**Cross-repo blocker — this cannot merge alone.** `scripts/alp_orchestrate/` is
+a hash-audited mirror in tan-cli (`PINNED_HASHES` /
+`test_planner_relocation_freshness.py`), so tan-cli must re-sync
+`python/tan/planner/buildplan.py` and `orchestrator.py`, re-pin `PINNED_HASHES`
+and `PINNED_SDK_COMMIT`, and move its frozen emit fixtures before or with this
+change (alplabai/tan-cli#560). tan's vendored copy of
+`tests/parity/seam1_field_diff.py` must take the new `_NESTED_ARTIFACT_TAILS`
+allowance in lockstep. tan's own artefact resolution was measured and does
+**not** double-hop: `python/tan/commands/build/manifest.py:259`, `:276`, `:319`
+and `:368` derive west's tree from `slice_cwd / "build"` and never read the
+plan's `artifacts` block at all, and `python/tan/core/flash_plan.py::
+resolve_artefact_path`'s nested candidate is `is_file()`-gated and probed last,
+so a corrected relative path resolves on the first candidate. Those five sites
+— the `I-18` note among them — become deletable follow-up cleanup, not
+breakage.
+
+On this side the frozen `97ad481b` seam-1 oracle is **not** rewritten; it is
+frozen by ADR 0020's Amendment. `tests/parity/seam1_field_diff.py` gains a
+third hand-reviewed allowance, keyed on the six exact field paths and on the
+exact one-segment `build/` insertion before each field's fixed Zephyr tail, so
+a path that gains two levels, moves elsewhere, or changes filename still fails.
+The six `*.build-plan.snap` emit goldens are regenerated (artifacts block
+only), and `metadata/schemas/build-plan-v1.schema.json`'s `artifacts`
+descriptions now tell a consumer to read these paths verbatim rather than
+re-derive them from `buildDir`.
+
 ### Added — ADR 0027 proposes declaring storage regions by role, not by SoM-internal region name
 
 `board.yaml`'s `storage:` entries place themselves with `flash_device:`, a
