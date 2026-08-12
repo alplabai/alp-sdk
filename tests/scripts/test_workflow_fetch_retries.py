@@ -85,15 +85,28 @@ def test_wget_does_not_suppress_the_failure_reason(wf):
 def test_the_four_steps_that_failed_on_2026_08_12_are_covered():
     """Pin the specific regressions, not just the general rule -- a rule with no
     named instance is easy to relax later without noticing what it protected."""
-    wanted = {
-        "pr-alp-build.yml": "yq",
+    # These two are fixed by RETRYING the fetch.
+    for name, needle in {
         "pr-tier-a-libraries.yml": "apt-get",
         "pr-twister-aen.yml": "zephyr-sdk",
-    }
-    for name, needle in wanted.items():
+    }.items():
         wf = next((w for w in WORKFLOWS if w.name == name), None)
         assert wf is not None, f"{name} not found"
         hits = [line for _n, line in _fetch_lines(wf) if needle in line]
         assert hits, f"{name}: no fetch line mentioning {needle!r}"
         for line in hits:
             assert _RETRY_RE.search(line), f"{name}: {needle} fetch still unretried: {line.strip()}"
+
+    # yq is fixed by REMOVAL, which is stronger than retry: the step fetched a
+    # 60 MB binary from GitHub releases and ran it under sudo, to evaluate one
+    # expression -- `yq '.slices | length // 0'` -- that pyyaml already in the
+    # job does natively. Eleven failures on 2026-08-12 came from that one line.
+    # Assert the dependency is GONE, so nobody reintroduces it "with a retry
+    # this time".
+    wf = next((w for w in WORKFLOWS if w.name == "pr-alp-build.yml"), None)
+    assert wf is not None, "pr-alp-build.yml not found"
+    yq_fetches = [f"{n}: {line.strip()}" for n, line in _fetch_lines(wf) if "yq" in line]
+    assert not yq_fetches, (
+        "pr-alp-build.yml fetches yq again -- it was removed in favour of pyyaml, "
+        "which the job already installs (#1410):\n  " + "\n  ".join(yq_fetches)
+    )
