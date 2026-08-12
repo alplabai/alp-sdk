@@ -357,6 +357,13 @@ _STATED_OF_FRACTION_RE = re.compile(r"(\d+)\s+of\s+(\d+)")
 
 _AEN801_DTS_GLOB = "zephyr/boards/alp/e1m_aen801_*/*.dts"
 
+# The wider AEN family (e1m_aen401_m55_hp, e1m_aen601_m55_hp, and the two
+# AEN801 targets themselves) -- used ONLY as a "this address is a real
+# partition claim about a DIFFERENT AEN board" allowlist, never as a
+# source of truth for what AEN801 has.  See the sibling-board carve-out
+# in find_aen_mram_map_drift().
+_AEN_FAMILY_DTS_GLOB = "zephyr/boards/alp/e1m_aen*/*.dts"
+
 # `mram_storage@80000000 { compatible = "soc-nv-flash"; reg = <0x80000000
 # DT_SIZE_K(5632)>; ... }` -- the base every partition@<offset> is relative to.
 _SOC_NV_FLASH_BASE_RE = re.compile(
@@ -404,20 +411,63 @@ _AEN_MRAM_CLAIM_RE = re.compile(
 # mention "MCUboot" or "slot0" in prose inside a table cell (e.g.
 # docs/aen-bench-bringup.md's bring-up matrix).  Captures the node name
 # (without the `_partition` suffix) and the label; every 0x80...... token
-# in the remainder of the row is a claimed address for BOTH.
+# in the remainder of the row is a claimed address, POSITION-BOUND to
+# whichever board's column it sits in -- see _table_header_boards() below.
 _AEN_MRAM_TABLE_ROW_RE = re.compile(
     r"^\s*\|\s*`(\w+)_partition`\s*\|\s*`([\w-]+)`\s*\|(.*)$"
 )
 _AEN_MRAM_TABLE_ADDR_RE = re.compile(r"0x80[0-9a-fA-F]{6}\b")
 
+# A markdown table delimiter row ("|---|:--:|---|"), used to recognise the
+# line above it as a header row worth reading for per-column board names.
+_MD_TABLE_SEPARATOR_RE = re.compile(r"^\s*\|(\s*:?-{2,}:?\s*\|)+\s*$")
+
+
+def _split_table_row(line: str) -> Optional[list[str]]:
+    """Split a `| a | b | c |` markdown row into ["a", "b", "c"].  None if
+    `line` is not a pipe-delimited row at all.
+    """
+    stripped = line.strip()
+    if not (stripped.startswith("|") and stripped.endswith("|")):
+        return None
+    return [cell.strip() for cell in stripped[1:-1].split("|")]
+
+
+def _table_header_boards(
+    header_line: str, per_board: dict[str, dict[str, set[int]]],
+) -> dict[int, str]:
+    """Map column index -> AEN801 board name for a table header row like
+    `| Partition (DT node) | Label | `alp_e1m_aen801_m55_he` | ... |`,
+    i.e. the real ADR-0006 header, where each data-column's own header
+    cell IS the board name `collect_aen801_mram_map()` keyed the DT by.
+
+    Empty if the header names no board `per_board` has a DT for at all
+    (a differently-shaped or non-AEN801 header) -- callers fall back to
+    the older, board-blind union check in that case.
+    """
+    cells = _split_table_row(header_line)
+    if cells is None:
+        return {}
+    return {
+        i: cell.strip("`")
+        for i, cell in enumerate(cells)
+        if cell.strip("`") in per_board
+    }
+
 # The two docs that promise the Zephyr-side OTA flow.  docs/secure-boot.md
 # is deliberately NOT here: it is the operator reference for the SWAP
 # profile itself (swap vocabulary is the subject, not an AEN801 promise
-# about a shipped guarantee).  Of its three swap-using-scratch mentions,
-# two carry a single-slot qualifier in the same section; the third -- the
-# "Omit the block to inherit ... swap-using-scratch" stock-default line --
-# does not.  That is a real, open gap in the doc, not something this
-# comment should paper over; it is simply not what this scan checks today.
+# about a shipped guarantee).  It names swap-using-scratch on seven
+# lines; three of its PARAGRAPHS would be flagged by this scan if it
+# were added here, and two of those three carry a single-slot qualifier
+# in the same section -- the third (the "Omit the block to inherit ...
+# swap-using-scratch" stock-default line, :114) does not.  That is a
+# real, open gap in the doc, not something this comment should paper
+# over; it is simply not what this scan checks today.  The live product
+# footgun behind it -- an AEN801 board.yaml with a `boot:` block and no
+# explicit `swap_algorithm:` builds swap-using-scratch (secure.py's
+# default) against a DT with no slot1/scratch -- is tracked at
+# github.com/alplabai/alp-sdk/issues/1413, not just this comment.
 _AEN_SWAP_PROMISE_DOCS = (
     "docs/adr/0006-secure-boot-secure-ota.md",
     "docs/ota.md",
@@ -738,15 +788,24 @@ def find_matrix_total_drift(root: pathlib.Path) -> list[tuple[str, int, str, str
     return drift
 
 
-def collect_aen801_mram_map(root: pathlib.Path) -> dict[str, set[int]]:
-    """Return the E1M-AEN801 MRAM partition map read from the board DTs:
-    partition name -> the set of ABSOLUTE base addresses it has.
+def collect_aen801_mram_map(
+    root: pathlib.Path,
+) -> dict[str, dict[str, set[int]]]:
+    """Return the E1M-AEN801 MRAM partition map read from the board DTs,
+    PER BOARD: board name (`alp_e1m_aen801_m55_he` / `_hp`, exactly the
+    `board.yml` `name:` and the ADR-0006 table's header cells -- see
+    `_table_header_boards()`) -> partition name -> the set of ABSOLUTE
+    base addresses that board has for it.
 
     Both the node prefix (`slot0` from `slot0_partition:`) and the DT
     `label` (`image-0`) are keyed, because docs name partitions both ways.
-    The set is per-name rather than a single address on purpose: since
-    #1069 the two M55 cores have DISJOINT slot0 windows, so `slot0` is
-    legitimately 0x80010000 (HE) *and* 0x802b0000 (HP).
+    Kept per-board (not flattened into one cross-core set) so a table row
+    can be checked against the SPECIFIC board its column names -- since
+    #1069 the two M55 cores have DISJOINT slot0 windows (0x80010000 HE,
+    0x802b0000 HP), and a checker that only asked "is this address
+    *a* slot0 somewhere" cannot catch the HE/HP columns being swapped.
+    Call `_union_mram_map()` for the board-blind superset the freeform
+    "name @ 0xaddr" claims and the (f2) slot1/scratch check still use.
 
     An empty result (no AEN801 board tree in this root) disables both
     sub-checks -- the synthetic trees in tests/scripts have no board DTs
@@ -755,8 +814,37 @@ def collect_aen801_mram_map(root: pathlib.Path) -> dict[str, set[int]]:
     real repo checkout (zephyr/boards/alp/ exists) whose AEN801 board
     dirs went missing or stopped parsing.
     """
-    partitions: dict[str, set[int]] = {}
+    per_board: dict[str, dict[str, set[int]]] = {}
     for dts in sorted(root.glob(_AEN801_DTS_GLOB)):
+        text = dts.read_text(encoding="utf-8", errors="replace")
+        base_m = _SOC_NV_FLASH_BASE_RE.search(text)
+        if not base_m:
+            continue
+        base = int(base_m.group(1), 16)
+        # zephyr/boards/alp/e1m_aen801_m55_he/*.dts -> "alp_e1m_aen801_m55_he",
+        # exactly the `board.yml` `name:` this DT belongs to.
+        board = f"alp_{dts.parent.name}"
+        partitions = per_board.setdefault(board, {})
+        for node, offset, label in _DT_PARTITION_RE.findall(text):
+            absolute = base + int(offset, 16)
+            partitions.setdefault(node.lower(), set()).add(absolute)
+            partitions.setdefault(label.lower(), set()).add(absolute)
+    return per_board
+
+
+def collect_aen_family_partition_map(root: pathlib.Path) -> dict[str, set[int]]:
+    """Return partition name -> {addresses} read from EVERY AEN board DT
+    (`_AEN_FAMILY_DTS_GLOB`), not just AEN801's.
+
+    This is deliberately never used as the (f1)/(f2) source of truth --
+    only AEN801's own map is.  Its one job is a false-positive guard: a
+    doc that documents `e1m_aen401_m55_hp`'s real `slot1_partition`
+    (which does exist, just not on AEN801) must not be told it named "no
+    such partition in the AEN801 board DT" -- see the sibling-board
+    carve-out in find_aen_mram_map_drift().
+    """
+    family: dict[str, set[int]] = {}
+    for dts in sorted(root.glob(_AEN_FAMILY_DTS_GLOB)):
         text = dts.read_text(encoding="utf-8", errors="replace")
         base_m = _SOC_NV_FLASH_BASE_RE.search(text)
         if not base_m:
@@ -764,12 +852,29 @@ def collect_aen801_mram_map(root: pathlib.Path) -> dict[str, set[int]]:
         base = int(base_m.group(1), 16)
         for node, offset, label in _DT_PARTITION_RE.findall(text):
             absolute = base + int(offset, 16)
-            partitions.setdefault(node.lower(), set()).add(absolute)
-            partitions.setdefault(label.lower(), set()).add(absolute)
-    return partitions
+            family.setdefault(node.lower(), set()).add(absolute)
+            family.setdefault(label.lower(), set()).add(absolute)
+    return family
 
 
-def aen801_board_tree_broken(root: pathlib.Path, mram_map: dict[str, set[int]]) -> bool:
+def _union_mram_map(
+    per_board: dict[str, dict[str, set[int]]],
+) -> dict[str, set[int]]:
+    """Flatten collect_aen801_mram_map()'s per-board map into the single
+    partition-name -> {addresses across every AEN801 board} view the
+    board-blind checks (the freeform "name @ 0xaddr" claim scan, and the
+    (f2) slot1/scratch-existence check) use.
+    """
+    union: dict[str, set[int]] = {}
+    for partitions in per_board.values():
+        for name, addrs in partitions.items():
+            union.setdefault(name, set()).update(addrs)
+    return union
+
+
+def aen801_board_tree_broken(
+    root: pathlib.Path, per_board: dict[str, dict[str, set[int]]],
+) -> bool:
     """True when this looks like a real repo checkout that SHOULD have an
     AEN801 board DT (`zephyr/boards/alp/` exists) but
     collect_aen801_mram_map() came back empty -- the board dirs went
@@ -781,18 +886,35 @@ def aen801_board_tree_broken(root: pathlib.Path, mram_map: dict[str, set[int]]) 
     create `zephyr/boards/alp/` at all -- those legitimately have no
     AEN801 board tree to check.
     """
-    return bool(mram_map == {} and (root / "zephyr" / "boards" / "alp").is_dir())
+    return bool(per_board == {} and (root / "zephyr" / "boards" / "alp").is_dir())
 
 
 def find_aen_mram_map_drift(
-    root: pathlib.Path, mram_map: dict[str, set[int]],
+    root: pathlib.Path, per_board: dict[str, dict[str, set[int]]],
 ) -> list[tuple[str, int, str, str]]:
     """Return "<partition> @ 0x80......" claims that the AEN801 board DT
     contradicts -- either the partition does not exist, or it does but at
     a different address.  (f1)
+
+    The freeform "name @ 0xaddr" form (no column to bind to) is checked
+    against the board-blind union of every AEN801 board's map, same as
+    before.  The ADR-0006 TABLE ROW form is POSITION-AWARE: when the
+    table's header row names a specific AEN801 board in a column
+    (`_table_header_boards()`), that column's address is checked ONLY
+    against that board's own map -- so transposing the HE and HP columns
+    is caught, not averaged away into "is this address *a* slot0
+    somewhere".  A table with no such header (or none of the tests'
+    synthetic single-row fixtures) falls back to the old union check.
+
+    An unbound row naming `slot1_partition`/`scratch_partition`/`image-1`
+    -- AEN801-illegal by design, but real elsewhere in the AEN family --
+    is not reported UNLESS the address doesn't match any AEN board's DT
+    either; see collect_aen_family_partition_map().
     """
-    if not mram_map:
+    if not per_board:
         return []
+    union = _union_mram_map(per_board)
+    family_map = collect_aen_family_partition_map(root)
     drift: list[tuple[str, int, str, str]] = []
     seen: set[pathlib.Path] = set()
     for pattern in _AEN_MRAM_MAP_SCAN_GLOBS:
@@ -802,42 +924,78 @@ def find_aen_mram_map_drift(
             seen.add(path)
             rel = path.relative_to(root).as_posix()
             text = path.read_text(encoding="utf-8", errors="replace")
-            for line_no, line in enumerate(text.splitlines(), 1):
+            lines = text.splitlines()
+            table_boards: dict[int, str] = {}
+            for idx, line in enumerate(lines):
+                line_no = idx + 1
                 for m in _AEN_MRAM_CLAIM_RE.finditer(line):
                     name, addr = m.group(1).lower(), int(m.group(2), 16)
-                    if name not in mram_map:
+                    if name not in union:
                         drift.append((rel, line_no, m.group(0),
                                       "no such partition in the AEN801 "
                                       "board DT"))
-                    elif addr not in mram_map[name]:
+                    elif addr not in union[name]:
                         expected = ", ".join(
-                            f"0x{a:08x}" for a in sorted(mram_map[name]))
+                            f"0x{a:08x}" for a in sorted(union[name]))
                         drift.append((rel, line_no, m.group(0),
                                       f"DT puts {name} at {expected}"))
+                # A header row is one immediately followed by a markdown
+                # table separator ("|---|---|"); re-derive the column ->
+                # board binding for whatever table starts here.
+                if (idx + 1 < len(lines)
+                        and _MD_TABLE_SEPARATOR_RE.match(lines[idx + 1])):
+                    table_boards = _table_header_boards(line, per_board)
+                    continue
                 row_m = _AEN_MRAM_TABLE_ROW_RE.match(line)
-                if row_m:
-                    node, label = row_m.group(1).lower(), row_m.group(2).lower()
-                    row_addrs = _AEN_MRAM_TABLE_ADDR_RE.findall(row_m.group(3))
-                    for name in (node, label):
-                        if name not in mram_map:
-                            drift.append((rel, line_no, row_m.group(0),
-                                          "no such partition in the AEN801 "
-                                          "board DT"))
-                            continue
-                        for addr_s in row_addrs:
-                            addr = int(addr_s, 16)
-                            if addr not in mram_map[name]:
-                                expected = ", ".join(
-                                    f"0x{a:08x}"
-                                    for a in sorted(mram_map[name]))
-                                drift.append(
-                                    (rel, line_no, f"{name} row: {addr_s}",
-                                     f"DT puts {name} at {expected}"))
+                if not row_m:
+                    continue
+                node, label = row_m.group(1).lower(), row_m.group(2).lower()
+                cells = _split_table_row(line) or []
+                for col_idx, cell in enumerate(cells):
+                    addr_m = _AEN_MRAM_TABLE_ADDR_RE.search(cell)
+                    if not addr_m:
+                        continue
+                    addr = int(addr_m.group(0), 16)
+                    board = table_boards.get(col_idx)
+                    # Board-bound column: check ONLY that board's map, so
+                    # a column transposition (this address belongs to the
+                    # OTHER board) is drift even though it is a valid
+                    # address for the partition somewhere.  Unbound
+                    # column (no header, or a header naming no known
+                    # AEN801 board): fall back to the old union check.
+                    board_map = per_board.get(board, {}) if board else union
+                    # dict.fromkeys(): node and label are often the same
+                    # token once lower-cased (e.g. `reserved_partition` /
+                    # `reserved`) -- don't double-report that cell.
+                    for name in dict.fromkeys((node, label)):
+                        if name not in board_map:
+                            # Sibling-board carve-out: only for an UNBOUND
+                            # column (no header named a specific AEN801
+                            # board -- exactly the ambiguous case a table
+                            # about a different AEN board's map produces).
+                            # If this exact name+address is a real
+                            # partition on some OTHER AEN board (e.g.
+                            # e1m_aen401_m55_hp's slot1_partition), it is
+                            # not a false AEN801 claim -- it's a true
+                            # claim about a board this scan doesn't own.
+                            if board is None and addr in family_map.get(name, set()):
+                                continue
+                            drift.append(
+                                (rel, line_no, row_m.group(0),
+                                 "no such partition in the AEN801 "
+                                 f"board DT{f' ({board})' if board else ''}"))
+                        elif addr not in board_map[name]:
+                            expected = ", ".join(
+                                f"0x{a:08x}" for a in sorted(board_map[name]))
+                            drift.append(
+                                (rel, line_no, f"{name} row: {addr_m.group(0)}",
+                                 f"DT puts {name} at {expected}"
+                                 f"{f' on {board}' if board else ''}"))
     return drift
 
 
 def find_aen_unqualified_swap_promises(
-    root: pathlib.Path, mram_map: dict[str, set[int]],
+    root: pathlib.Path, per_board: dict[str, dict[str, set[int]]],
 ) -> list[tuple[str, int, str]]:
     """Return paragraphs promising MCUboot swap-with-revert without saying
     AEN801 is single-slot, while the board DT declares no secondary or
@@ -846,8 +1004,9 @@ def find_aen_unqualified_swap_promises(
     Self-lifting: the moment an AEN801 board target regains a
     slot1/scratch partition the promise is true again and this returns [].
     """
-    if not mram_map:
+    if not per_board:
         return []
+    mram_map = _union_mram_map(per_board)
     if "slot1" in mram_map or "scratch" in mram_map or "image-1" in mram_map:
         return []
 

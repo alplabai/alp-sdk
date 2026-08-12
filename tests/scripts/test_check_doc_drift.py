@@ -665,6 +665,98 @@ def test_aen801_map_claim_table_row_form_matching_dt_passes(tmp_path):
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
 
+def _aen801_two_boards(tmp_path):
+    """Drop BOTH AEN801 board DTs with their real, DISJOINT slot0 windows
+    (HE 0x80010000, HP 0x802b0000), the shape #1069 exists to catch drift
+    on.
+    """
+    _aen801_board(tmp_path)
+    hp = tmp_path / "zephyr" / "boards" / "alp" / "e1m_aen801_m55_hp"
+    hp.mkdir(parents=True)
+    (hp / "alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp.dts").write_text(
+        _AEN801_HE_DTS.replace("partition@10000", "partition@2b0000")
+                      .replace("<0x10000 DT_SIZE_K(2688)>",
+                               "<0x2b0000 DT_SIZE_K(2688)>"),
+        encoding="utf-8")
+
+
+def test_aen801_map_claim_table_row_transposed_columns_fails(tmp_path):
+    # Round-3 review finding (major): the row matcher pooled every
+    # address in a row into one per-name SET, so transposing the HE and
+    # HP columns of a real header-bound table still passed -- both
+    # addresses are valid *somewhere* for slot0, just not in the column
+    # each sits under.  Position-aware: bind each column to the board its
+    # header cell names (exactly the ADR-0006 table shape) and check that
+    # column ONLY against that board.
+    _scaffold(tmp_path, docs={
+        "adr/0006-secure-boot-secure-ota.md":
+            "| Partition (DT node)  | Label     | `alp_e1m_aen801_m55_he` | `alp_e1m_aen801_m55_hp` | Size     |\n"
+            "|----------------------|-----------|-------------------------|-------------------------|----------|\n"
+            # HE and HP columns swapped relative to the real DTs.
+            "| `slot0_partition`    | `image-0` | `0x802b0000`            | `0x80010000`            | 2688 KiB |\n",
+    })
+    _aen801_two_boards(tmp_path)
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 1
+    out = proc.stdout + proc.stderr
+    assert "DT puts slot0 at 0x80010000 on alp_e1m_aen801_m55_he" in out
+    assert "DT puts slot0 at 0x802b0000 on alp_e1m_aen801_m55_hp" in out
+
+
+def test_aen801_map_claim_table_row_correct_columns_passes(tmp_path):
+    # The same header-bound table shape, columns in the right order, must
+    # still pass -- the position-aware check isn't just failing everything.
+    _scaffold(tmp_path, docs={
+        "adr/0006-secure-boot-secure-ota.md":
+            "| Partition (DT node)  | Label     | `alp_e1m_aen801_m55_he` | `alp_e1m_aen801_m55_hp` | Size     |\n"
+            "|----------------------|-----------|-------------------------|-------------------------|----------|\n"
+            "| `slot0_partition`    | `image-0` | `0x80010000`            | `0x802b0000`            | 2688 KiB |\n",
+    })
+    _aen801_two_boards(tmp_path)
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def _aen401_sibling_board(tmp_path):
+    """Drop a real (non-AEN801) AEN board DT that DOES have slot1/scratch,
+    the way `e1m_aen401_m55_hp` does tree-wide.
+    """
+    bdir = tmp_path / "zephyr" / "boards" / "alp" / "e1m_aen401_m55_hp"
+    bdir.mkdir(parents=True)
+    (bdir / "alp_e1m_aen401_m55_hp.dts").write_text(
+        _AEN801_TWO_SLOT_DTS, encoding="utf-8")
+
+
+def test_aen801_map_claim_table_row_sibling_board_partition_passes(tmp_path):
+    # Round-3 review finding (minor): the row matcher's verdict is
+    # AEN801-only even though it scans docs/boards/*.md broadly, so a
+    # legitimate partition-map row for a DIFFERENT AEN board (one that
+    # DOES have slot1/scratch, e.g. e1m_aen401_m55_hp) must not be told
+    # "no such partition in the AEN801 board DT".
+    _scaffold(tmp_path, docs={
+        "boards/e1m-evk.md":
+            "| `slot1_partition`    | `image-1` | `0x802b0000` | 2688 KiB |\n",
+    })
+    _aen801_board(tmp_path)
+    _aen401_sibling_board(tmp_path)
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_aen801_map_claim_table_row_wrong_address_still_fails(tmp_path):
+    # The sibling-board carve-out must not swallow a genuinely bogus
+    # address -- one that matches no AEN board's DT at all.
+    _scaffold(tmp_path, docs={
+        "boards/e1m-evk.md":
+            "| `slot1_partition`    | `image-1` | `0x80999000` | 2688 KiB |\n",
+    })
+    _aen801_board(tmp_path)
+    _aen401_sibling_board(tmp_path)
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 1
+    assert "no such partition in the AEN801 board DT" in proc.stdout + proc.stderr
+
+
 def test_aen801_broken_board_tree_fails_loudly(tmp_path):
     # Review finding (f2): a real repo checkout (zephyr/boards/alp/
     # exists) whose AEN801 board dirs went missing/renamed must FAIL,
