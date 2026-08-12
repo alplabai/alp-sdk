@@ -473,9 +473,12 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 		 * cc3501e_bridge_ready() re-arms the link, so the WORKER_DONE branch
 		 * that would reply RESP_OK is wiped while the host is still held off
 		 * and can never be collected.  Unlike CONNECT_STA this is NOT defense
-		 * in depth: cc3501e_wifi_ap_start() still poll_by_repeat()s this
-		 * opcode, so the alias was its ONLY route to ALP_OK -- that wrapper
-		 * needs the same submit-once-then-confirm restructure
+		 * in depth: this rejection was cc3501e_wifi_ap_start()'s ONLY route to
+		 * ALP_OK, so that wrapper no longer polls it -- it submits
+		 * WIFI_AP_START exactly once and reports ALP_ERR_TIMEOUT
+		 * unconditionally (see cc3501e_wifi.c), since there is no reply this
+		 * opcode can ever frame as success.  Restoring a real success path
+		 * still needs the same submit-once-then-confirm restructure
 		 * cc3501e_wifi_connect() got, which firmware v4 cannot yet support
 		 * (cc3501e_hw_wifi_ap_start() never writes the g_wifi_conn latch that
 		 * WIFI_STATUS reads, so there is no independent AP channel to confirm

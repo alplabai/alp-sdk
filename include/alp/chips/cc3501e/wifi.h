@@ -238,11 +238,17 @@ alp_status_t cc3501e_wifi_disconnect(cc3501e_t *ctx);
  *
  * @warning Against CC3501E firmware protocol v4 this call CANNOT report
  *          success, and returns ALP_ERR_TIMEOUT for an AP that came up
- *          perfectly.  Treat ALP_ERR_TIMEOUT as inconclusive (submitted, no
- *          confirmation available -- it covers both the expected BUSY ack and
- *          a rejected dead-phase alias, indistinguishable from here) and
- *          confirm the AP out of band until #1385 lands a firmware-side
- *          confirmation channel.  @ref ALP_ERR_INVAL and
+ *          perfectly.  Treat ALP_ERR_TIMEOUT as fully inconclusive, NOT as
+ *          "submitted, unconfirmed": it covers the expected BUSY submit ack,
+ *          the rejected dead-phase alias, AND at least three cases where
+ *          nothing ever reached the wire -- a RESP_ERR_BUSY bounce because a
+ *          different worker op (scan / get_mac / BLE) was already in flight,
+ *          a transport IO fault during the radio-down window, and a
+ *          request-lock timeout under a concurrent caller -- all
+ *          indistinguishable from here.  A caller that treats ALP_ERR_TIMEOUT
+ *          as proof of submission will not retry when it should; confirm the
+ *          AP out of band and be prepared to retry until #1385 lands a
+ *          firmware-side confirmation channel.  @ref ALP_ERR_INVAL and
  *          @ref ALP_ERR_NOT_READY, by contrast, ARE conclusive: both are
  *          local or synchronous rejects that mean nothing was submitted.
  *
@@ -256,11 +262,12 @@ alp_status_t cc3501e_wifi_disconnect(cc3501e_t *ctx);
  *                    no independent channel to bound a wait on); reserved for
  *                    a future firmware-side confirmation channel, kept in the
  *                    signature so that addition needs no API break.
- * @return ALP_ERR_TIMEOUT once the submit lands (the expected outcome --
- *         see the warning above, conclusive for neither success nor failure);
- *         ALP_ERR_INVAL on an over-long SSID/passphrase or a synchronous
- *         submit reject; ALP_ERR_NOT_READY if @p ctx is NULL or not
- *         initialised.  ALP_OK is not reachable against protocol v4.
+ * @return ALP_ERR_TIMEOUT for the expected outcome -- see the warning above:
+ *         conclusive for neither success nor failure, and NOT proof the
+ *         submit ever reached the wire; ALP_ERR_INVAL on an over-long
+ *         SSID/passphrase or a synchronous submit reject; ALP_ERR_NOT_READY
+ *         if @p ctx is NULL or not initialised.  ALP_OK is not reachable
+ *         against protocol v4.
  */
 alp_status_t cc3501e_wifi_ap_start(cc3501e_t  *ctx,
                                    const char *ssid,

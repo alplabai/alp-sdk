@@ -379,10 +379,14 @@ alp_status_t cc3501e_wifi_ap_start(cc3501e_t  *ctx,
 	 * on the wire; and every retry that landed on the freshly-reset IDLE slot
 	 * submitted a BRAND NEW `Wlan_RoleUp` on live radio hardware -- the same
 	 * retry storm #1376 measured and fixed for CONNECT_STA.  Submitting once
-	 * and returning immediately removes both costs at zero information loss:
-	 * the outcome (ALP_ERR_TIMEOUT, "unconfirmed") is unchanged whether this
-	 * function spins for 50 s first or not, because AP_START has no
-	 * independent completion channel to observe either way.
+	 * and returning immediately removes both costs, but NOT at zero
+	 * information loss: the old poll also retried a RESP_ERR_BUSY bounce off
+	 * an in-flight worker job and a transport IO fault during the radio-down
+	 * window, both cases where nothing had been submitted yet, so dropping it
+	 * trades "eventually lands (or reports ALP_ERR_TIMEOUT after genuinely
+	 * exhausting the budget)" for "one shot, then ALP_ERR_TIMEOUT either way"
+	 * -- see the caller-visible-outcome distinction in the @warning on
+	 * cc3501e_wifi_ap_start() in <alp/chips/cc3501e/wifi.h>.
 	 *
 	 * cc3501e_wifi_connect() escaped the identical trap by submitting once and
 	 * then awaiting the independent WIFI_STATUS latch -- AP_START has no such
@@ -403,10 +407,16 @@ alp_status_t cc3501e_wifi_ap_start(cc3501e_t  *ctx,
 	 * reject (same firmware function CONNECT_STA's payload goes through, see
 	 * cc3501e_wifi_connect()'s identical short-circuit), the latter never
 	 * reached the wire at all (ctx NULL/uninitialised).  Every other outcome
-	 * -- the expected RESP_ERR_BUSY submit ack, a transport IO fault, or the
-	 * rejected dead-phase alias -- is indistinguishable fire-and-forget
-	 * "submitted, no confirmation available", reported as ALP_ERR_TIMEOUT
-	 * (see the @warning on cc3501e_wifi_ap_start() in <alp/chips/cc3501e/wifi.h>). */
+	 * squashes to ALP_ERR_TIMEOUT, and NOT all of them mean "submitted": the
+	 * expected RESP_ERR_BUSY submit ack and the rejected dead-phase alias did
+	 * reach the wire, but a RESP_ERR_BUSY bounce off an in-flight worker job
+	 * (cmd never queued, firmware/cc3501e/src/protocol.c's QUEUED/RUNNING
+	 * default: case), a transport IO fault during the radio-down window, and
+	 * cc3501e_request()'s own ALP_ERR_BUSY when cc3501e_lock_acquire() times
+	 * out under a concurrent caller all mean NOTHING was submitted -- and read
+	 * back identical to the cases that did.  ALP_ERR_TIMEOUT here is therefore
+	 * fully inconclusive, not "submitted, unconfirmed" (see the @warning on
+	 * cc3501e_wifi_ap_start() in <alp/chips/cc3501e/wifi.h>). */
 	if (s == ALP_ERR_INVAL || s == ALP_ERR_NOT_READY) {
 		return s;
 	}
