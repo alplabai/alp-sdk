@@ -8,6 +8,60 @@ Supersedes: [0014](0014-build-plan-emit-cli-contract.md) — its
 mechanism clause **and** its 84-87 consequence (`west alp-build` stays native).
 Pairs with RFC #837 (`alp` → `tan`).
 
+## Amendment (2026-08-12 — what the Security clause's "never PATH" means)
+
+The *Consequences* → **Security** paragraph below reads "the executor confines
+writes under `buildRoot`, resolves tools/interpreters by explicit path (never
+PATH)", and *The plan contract must be complete before the SDK stops executing*
+carries the short form of the same claim ("resolves tools by explicit path").
+Both were written before an executor implemented them, and "never PATH" reads as
+"PATH is never consulted" — which is not what `tan` does, and was never the
+property the clause was protecting. This amendment states the property precisely;
+the paragraphs below stay as the dated record.
+
+**What is true**, as implemented by `alplabai/tan-cli#510` (PR
+`alplabai/tan-cli#530`, merged to `tan-cli`'s `dev` as `50788ecd`, milestone
+v0.6.0):
+
+1. `command.tool` stays an **identity** in the plan — never a path, never a
+   token. Resolution is executor-owned. (alp-sdk#1286 asked the planner to emit a
+   resolved `tool` and was refused; alp-sdk#1291 put that in `command.tool`'s own
+   schema description.)
+2. The executor resolves that identity to a **concrete filesystem path** with one
+   hardened lookup (`tan/core/tool_lookup.py::resolve_tool`) and spawns **that
+   path**, never the bare name. On the build path that is
+   `execute.py::_spawn_step`, whose own docstring says "`program` is always the
+   RESOLVED absolute path (tan-cli#510), never a bare identity"; on the flash
+   path it is passed as `subprocess` `executable=`.
+3. **PATH is still the search input** for a bare identity — POSIX via
+   `os.get_exec_path` + `shutil.which`, Windows via a hand-rolled `%PATH%` walk
+   that is deliberately not `shutil.which`. What "never PATH" forbids is handing
+   the bare name to the *platform's own* resolver at spawn time: `CreateProcess`
+   with `lpApplicationName=NULL` searches the parent process's current directory
+   ahead of `%PATH%`, so a checkout carrying its own `west.exe`/`openocd.exe` at
+   its root could otherwise be spawned in place of the real tool.
+4. The PATH searched is the **slice's own fully assembled `env`** (post
+   `envAppendPath` / venv), not the executor process's environment.
+5. An **absolute** `command.tool` is answered by existence alone and spawned
+   verbatim — no PATH walk happens for it at all.
+
+**Consequence for `executionPolicy.missingTool`.** It fires when `command.tool`
+**cannot be resolved to an executable**, which is a superset of "not found on
+PATH": an absolute `tool` that does not exist reaches it without PATH being
+consulted, and on Windows a `%PATH%` file whose name carries no `%PATHEXT%`
+extension is deliberately never selected by the hardened walk.
+`metadata/schemas/build-plan-v1.schema.json`'s `missingTool` description is
+re-worded to match (issue #1314). alp-sdk#1291 left the old PATH-pinned wording
+in place deliberately, on the reasoning that the ADR was the wrong half while
+tan-cli#510 was still open; #510 is now closed by #530, so the schema was the
+stale half.
+
+**Not yet in a released `tan`.** PR #530 is on `tan-cli`'s `dev` branch. The
+latest `tan` release is **v0.5.1** (2026-08-05), which still spawns the bare
+identity. The re-worded schema description is chosen to be true of both: "cannot
+be resolved to an executable" holds whether the executor resolves-then-spawns or
+hands the name to the platform resolver.
+
 ## Amendment (2026-08-03 — Python Tan relocates the planner)
 
 The command-surface and single-executor decision stands, but the repository
