@@ -337,9 +337,12 @@
 		 * &ethernet's phy-handle. An enabling overlay flips BOTH this node
 		 * and eth_phy_managed to "okay" and repoints &ethernet's
 		 * phy-handle to eth_phy_managed -- see the aen-ethernet-link
-		 * mdio-managed twister scenario. BUILD-ONLY this batch (ADR 0017
-		 * Tier-1.5, see mdio_dwmac_alif.c header) -- no MDIO-managed PHY
-		 * exercised on real E8 silicon yet.
+		 * mdio-managed twister scenario. ADR 0017 Tier-1.5 (see
+		 * mdio_dwmac_alif.c header). The MDIO LAYER is now exercised on
+		 * real E8 silicon (#1244): this controller returned the PHY
+		 * identifier and register reads -- see the child node below.
+		 * Link/traffic on the managed path is still unproven; the
+		 * end-to-end RESULT PASS run used fixed-link.
 		 */
 		mdio: mdio {
 			compatible = "snps,designware-mdio";
@@ -347,12 +350,26 @@
 			#size-cells = <0>;
 			status = "disabled";
 
-			/* On-SoM TI DP83825I at PHY address 1 (fork reference; the
-			 * fixed-link path above is the bench-verified one -- confirm
-			 * this address before relying on it for a real MDIO scan). */
-			eth_phy_managed: ethernet-phy@1 {
+			/* On-SoM TI DP83825 (exact order code TBD, #1241) at MDIO
+			 * address 0.  CONFIRMED on real E8 silicon (#1244), not
+			 * inferred: a Flow C ITCM RAM-run of the aen-ethernet-link
+			 * mdio-managed variant read the PHY over THIS controller --
+			 *
+			 *   [eth] MDIO PHY@0 id=2000a140 (DP83825=2000a140)
+			 *   [eth] PHY regs: ANAR=01e1 ANLPAR=0000 PHYSTS=0002 RCSR=00e1
+			 *
+			 * -- so the address is measured, and the earlier "confirm this
+			 * address" caveat is discharged.  The node previously carried a
+			 * fork reference's address 1; the confirmation came back 0, and
+			 * zephyr/dts/bindings/ethernet/alif,ethernet.yaml:47 agrees
+			 * ("e.g. ti,dp83825 at addr 0").  Nothing regressed while it was
+			 * wrong because the bench-verified path is `fixed-link`, which
+			 * never touches MDIO.  id=2000a140 is die/OUI identity only: it
+			 * does NOT settle the DP83825 order-code suffix (#1241), so do
+			 * not promote "DP83825I" back into this comment. */
+			eth_phy_managed: ethernet-phy@0 {
 				compatible = "ti,dp83825";
-				reg = <1>;
+				reg = <0>;
 				ti,interface-type = "rmii";
 				status = "disabled";
 			};
