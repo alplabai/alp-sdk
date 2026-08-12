@@ -102,6 +102,16 @@ CASES = [
     # alp.conf; see tests/parity/README.md.
     ("audio-i2s-tone.build-plan",   ORCH, "examples/audio/i2s-tone/board.yaml",                 "build-plan"),
     ("iot-fleet-ota.build-plan",    ORCH, "examples/connectivity/iot-fleet-ota/board.yaml",      "build-plan"),
+    # #1359 coverage hole: none of the CASES above declares a curated
+    # library PROJECT-WIDE (`libraries: [<name>]`, no `cores:` key) with an
+    # `integration.zephyr.hw_backends` manifest section, which is exactly
+    # why the project-wide/core-scoped Kconfig-widening bug shipped
+    # invisibly through this gate. `coap-client-get` declares `libraries:
+    # [coap]` project-wide and `coap.yaml` carries an `hw_backends` matcher,
+    # so this pins `CONFIG_ALP_COAP_NO_TLS=y` / `CONFIG_ALP_COAP_MBEDTLS=y`
+    # staying in the build-plan's rendered alp.conf for THIS declaration
+    # form specifically.
+    ("coap-client-get.build-plan",  ORCH, "examples/connectivity/coap-client-get/board.yaml",   "build-plan"),
 ]
 for _bid, _board in _PROJ_BOARDS:
     for _mode in _PROJ_MODES:
