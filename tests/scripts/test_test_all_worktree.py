@@ -83,6 +83,26 @@ def _fake_zephyr_base(tmp_path, counter_file):
     return zephyr_base
 
 
+def _pystubs(tmp_path):
+    """A PYTHONPATH entry providing a stub `natsort`.
+
+    `stage_twister` refuses to run when the ambient python3 cannot import
+    natsort, because the REAL twister's hardwaremap.py needs it -- and since
+    #1396 that refusal is a prerequisite GAP that exits 2 rather than a silent
+    skip that exits 0.  These tests drive a STUB twister and never touch
+    hardwaremap.py, so the dependency is real for CI but irrelevant here;
+    satisfying the probe keeps the stage running so the assertions below still
+    have something to observe.  Without this the tests fail on any host whose
+    python3 lacks natsort (e.g. the GitHub runner), which is what happened.
+    """
+    stubs = tmp_path / "pystubs"
+    stubs.mkdir(exist_ok=True)
+    (stubs / "natsort.py").write_text(
+        "def natsorted(seq, *a, **k):\n    return sorted(seq)\n", encoding="utf-8"
+    )
+    return stubs
+
+
 def test_git_worktree_gitdir_is_a_file(real_worktree):
     """Sanity-check the fixture itself reproduces the defect's precondition:
     a worktree's `.git` is a gitlink file, never a directory."""
@@ -102,6 +122,8 @@ def test_zephyr_only_runs_twister_exactly_once_from_a_worktree(real_worktree, tm
 
     env = dict(os.environ)
     env["ZEPHYR_BASE"] = str(zephyr_base)
+    env["PYTHONPATH"] = (str(_pystubs(tmp_path)) + os.pathsep
+                         + env.get("PYTHONPATH", ""))
     env.pop("EXTRA_ZEPHYR_MODULES", None)
 
     proc = subprocess.run(
@@ -144,6 +166,8 @@ def test_twister_stage_pins_worktree_as_zephyr_module(real_worktree, tmp_path):
 
     env = dict(os.environ)
     env["ZEPHYR_BASE"] = str(zephyr_base)
+    env["PYTHONPATH"] = (str(_pystubs(tmp_path)) + os.pathsep
+                         + env.get("PYTHONPATH", ""))
     env.pop("EXTRA_ZEPHYR_MODULES", None)
 
     proc = subprocess.run(
@@ -187,6 +211,8 @@ def test_twister_stage_appends_without_dropping_other_modules(real_worktree, tmp
 
     env = dict(os.environ)
     env["ZEPHYR_BASE"] = str(zephyr_base)
+    env["PYTHONPATH"] = (str(_pystubs(tmp_path)) + os.pathsep
+                         + env.get("PYTHONPATH", ""))
     # Simulate a shell-rc EXTRA_ZEPHYR_MODULES that still points at the
     # PRIMARY checkout (REPO) plus one unrelated module.
     env["EXTRA_ZEPHYR_MODULES"] = f"{other_module};{REPO.resolve()}"
