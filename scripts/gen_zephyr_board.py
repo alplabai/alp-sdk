@@ -911,6 +911,66 @@ def _aen_defconfig(
     )
 
 
+# Board-level LOG_MODE default for every AEN board (issue #1373).  Emitted
+# into the generated `Kconfig.defconfig`; the two hand-authored AEN board
+# trees (e1m_aen401_m55_hp, e1m_aen601_m55_hp) carry a byte-identical copy,
+# and tests/scripts/test_gen_zephyr_board.py pins that they stay in step.
+#
+# WHY: Zephyr's own `choice LOG_MODE` default is LOG_MODE_DEFERRED
+# (subsys/logging/Kconfig.mode), which no AEN board ever set or unset -- it
+# is inherited.  Deferred mode hands every record to the LOG_PROCESS_THREAD
+# (CONFIG_LOG_PROCESS_THREAD is `default y`), and CONFIG_LOG_PRINTK is
+# `default y if PRINTK`, so printk() -- including the Alp SDK boot banner --
+# is deferred with it.  The AEN bench procedure deliberately runs apps whose
+# main() never yields (`for (;;) { k_busy_wait(1000); }`) because an idling
+# M55 makes the Secure Enclave gate the DAP and the SE-UART together (see
+# docs/debugging-aen.md section 4).  A main() that never yields never lets
+# the log thread run: with CONFIG_LOG_PROCESS_THREAD_CUSTOM_PRIORITY=n (the
+# default) log_core.c runs that thread at K_LOWEST_APPLICATION_THREAD_PRIO
+# (= CONFIG_NUM_PREEMPT_PRIORITIES - 1), strictly below main's
+# CONFIG_MAIN_THREAD_PRIORITY=0, and time-slicing rotates only among
+# READY threads of EQUAL priority -- so a busy-looping main() at 0 starves
+# it outright and a healthy, fault-free board emits ZERO bytes.  Measured on
+# E1M-AEN801 silicon: PC inside `z_impl_k_busy_wait`, IPSR = 000
+# (NoException), CFSR @ 0xE000ED28 = 00000000, zero UART bytes in a 15 s
+# capture; the same source with LOG_MODE_MINIMAL prints the banner and both
+# LOG_INF lines.
+# LOG_MODE_MINIMAL formats and writes in the calling context, so it cannot
+# be starved by a non-yielding main().
+#
+# WHY A CHOICE `default` AND NOT `CONFIG_LOG_MODE_MINIMAL=y` IN THE BOARD
+# `_defconfig`: the `_defconfig` form assigns the symbol unconditionally,
+# including on the 47 `CONFIG_LOG=n` fragments under examples/aen/, where
+# the choice is invisible.  Zephyr's scripts/kconfig/kconfig.py then runs
+# check_assigned_choice_values() and prints "The choice symbol
+# LOG_MODE_MINIMAL ... was selected (set =y), but no symbol ended up as the
+# choice selection" on every one of those builds.  A Kconfig.defconfig
+# default is inert when LOG=n.  Precedence is unchanged either way:
+# Kconfig.zephyr sources the board's Kconfig.defconfig (line 30) ahead of
+# subsys/Kconfig (line 52) precisely so board defaults outrank upstream
+# ones, and an app that wants the deferred backend pipeline still overrides
+# this with CONFIG_LOG_MODE_DEFERRED=y in its own prj.conf.
+_AEN_LOG_MODE_DEFAULT = (
+    "# Logging: default to LOG_MODE_MINIMAL, not Zephyr's inherited\n"
+    "# LOG_MODE_DEFERRED.  Deferred mode needs CONFIG_LOG_PROCESS_THREAD to run,\n"
+    "# and the AEN bench procedure runs apps whose main() never yields (a\n"
+    "# non-yielding busy loop is what keeps the Secure Enclave from gating the\n"
+    "# DAP and the SE-UART -- see docs/debugging-aen.md section 4).  A\n"
+    "# non-yielding main() starves the log thread, and because CONFIG_LOG_PRINTK\n"
+    "# routes printk() through the same queue the Alp SDK banner disappears too:\n"
+    "# a running, fault-free board prints ZERO bytes.  Measured on E1M-AEN801\n"
+    "# silicon (issue #1373) -- PC inside z_impl_k_busy_wait, IPSR = 000,\n"
+    "# CFSR @ 0xE000ED28 = 00000000, and no UART output at all.  Minimal mode\n"
+    "# formats in the calling context, so the same app prints.  An app that\n"
+    "# wants the deferred pipeline (backends, runtime filtering, timestamps)\n"
+    "# overrides this with CONFIG_LOG_MODE_DEFERRED=y in its prj.conf.\n"
+    "choice LOG_MODE\n"
+    "\tdefault LOG_MODE_MINIMAL\n"
+    "endchoice\n"
+    "\n"
+)
+
+
 def _aen_kconfig_defconfig(dir_name: str, role: str, part: str) -> str:
     board_sym = dir_name.upper()
     role_u = role.upper()
@@ -937,6 +997,7 @@ def _aen_kconfig_defconfig(dir_name: str, role: str, part: str) -> str:
         "config ROM_START_OFFSET\n"
         "\tdefault 0x800 if BOOTLOADER_MCUBOOT\n"
         "\n"
+        + _AEN_LOG_MODE_DEFAULT +
         f"endif # BOARD_{board_sym}\n"
     )
 
