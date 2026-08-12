@@ -109,10 +109,60 @@ def test_accepts_a_full_apply(tmp_path):
 
 @pytest.mark.skipif(os.name == "nt", reason="/bin/sh stub west is POSIX-only")
 def test_propagates_a_west_failure(tmp_path):
+    """west's own non-zero rc must come back verbatim, not just non-zero.
+
+    rc=3 is deliberately not 1 (the wrapper's own generic-failure rc) and not
+    2 (a common shell/argparse rc): only a wrapper that actually forwards
+    `proc.returncode` from the west subprocess can produce exactly 3 here. A
+    wrapper whose rc-propagation branch has been deleted still returns
+    non-zero (via the `applied is None` path, since the stub prints no
+    success line) but returns its OWN rc, not west's -- see #1392 review
+    finding 2.
+    """
     yml = _patches_yml(tmp_path, 6)
-    _stub_west(tmp_path / "bin", "failed to apply patch zephyr/0002-ipm.patch", rc=1)
+    _stub_west(tmp_path / "bin", "failed to apply patch zephyr/0002-ipm.patch", rc=3)
     proc = _run(yml, tmp_path / "bin")
-    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert proc.returncode == 3, proc.stdout + proc.stderr
+
+
+@pytest.mark.skipif(os.name == "nt", reason="/bin/sh stub west is POSIX-only")
+def test_passes_patches_yml_to_west(tmp_path):
+    """`--patches-yml`'s value must reach west's own argv.
+
+    `expected_patch_count()` reads `--patches-yml` to get its count, but that
+    is a different code path from the one that invokes west. Before this fix
+    `run_west_patch_apply()` built argv as `["west", "patch", "apply", *extra]`
+    with no `-l`/`-b`, so west silently fell back to its own default
+    `zephyr/patches.yml` resolution -- for a non-default `--patches-yml` that
+    is a different file than the one just counted, and the wrapper could
+    print a success line about a manifest west never opened (#1392, finding
+    1). A stub `west` here logs its own argv so the test inspects what the
+    subprocess actually received, not just the wrapper's own file reads.
+    """
+    yml = _patches_yml(tmp_path, 6)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    argv_log = tmp_path / "argv.txt"
+    exe = bin_dir / "west"
+    exe.write_text(
+        "#!/bin/sh\n"
+        f'echo "$@" > "{argv_log}"\n'
+        "echo '6 patches applied successfully \\o/'\n",
+        encoding="utf-8",
+    )
+    exe.chmod(0o755)
+    proc = _run(yml, bin_dir)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    argv = argv_log.read_text(encoding="utf-8")
+    resolved_yml = str(yml.resolve())
+    assert resolved_yml in argv, (
+        f"--patches-yml's resolved path never reached west's argv: {argv!r}"
+    )
+    assert "-l" in argv.split(), f"no -l flag in west's argv: {argv!r}"
+    assert "-b" in argv.split(), f"no -b flag in west's argv: {argv!r}"
+    assert str(yml.resolve().parent / "patches") in argv, (
+        f"no -b patch-base directory in west's argv: {argv!r}"
+    )
 
 
 @pytest.mark.skipif(os.name == "nt", reason="/bin/sh stub west is POSIX-only")

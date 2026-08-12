@@ -111,17 +111,32 @@ def parse_applied_count(output: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
-def run_west_patch_apply(cwd: Path, extra_args: list[str]) -> tuple[int, str]:
+def run_west_patch_apply(
+    cwd: Path, patches_yml: Path, extra_args: list[str]
+) -> tuple[int, str]:
     """Run `west patch apply` in `cwd`, returning (returncode, output).
 
-    `cwd` is the manifest repo (the directory holding `zephyr/patches.yml`),
-    because west resolves the default `-b`/`-l` paths against
-    `manifest.path` -- running from anywhere else is half of the #1392
-    defect. stderr is folded into stdout so the CI log keeps west's own
-    ordering.
+    `-l patches_yml` and `-b <patches_yml's sibling `patches/` dir>` are
+    passed explicitly so west opens the exact file `expected_patch_count()`
+    just counted -- without them west falls back to its own default
+    resolution of `zephyr/patches.yml` against `manifest.path`, which for a
+    caller-supplied `--patches-yml` can silently be a *different* file than
+    the one this wrapper counted (issue #1392): the "N applied" the wrapper
+    reports would then describe a manifest west never opened. `cwd` is the
+    manifest repo; stderr is folded into stdout so the CI log keeps west's
+    own ordering.
     """
     proc = subprocess.run(
-        ["west", "patch", "apply", *extra_args],
+        [
+            "west",
+            "patch",
+            "-l",
+            str(patches_yml),
+            "-b",
+            str(patches_yml.parent / "patches"),
+            "apply",
+            *extra_args,
+        ],
         cwd=str(cwd),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -164,9 +179,10 @@ def main(argv: list[str] | None = None) -> int:
     expected = args.expect_applied if args.expect_applied is not None else carried
     extra = [a for a in args.west_args if a != "--"]
 
-    # west resolves its default -b/-l against the manifest repo: run there.
+    # cwd is the manifest repo; -l/-b (below) are what actually pin west to
+    # this exact patches_yml rather than west's own default resolution.
     cwd = patches_yml.parent.parent
-    rc, output = run_west_patch_apply(cwd, extra)
+    rc, output = run_west_patch_apply(cwd, patches_yml, extra)
     if output:
         print(output, end="" if output.endswith("\n") else "\n")
     if rc != 0:
