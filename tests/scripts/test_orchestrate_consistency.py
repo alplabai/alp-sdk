@@ -386,6 +386,32 @@ cores:
     assert "bearssl" in project.cores["m33_sm"].libraries
 
 
+def test_consistency_tls_satisfied_by_project_wide_mbedtls(
+    tmp_path: Path,
+) -> None:
+    """Rule 3 (#1359 follow-up): a project-wide `libraries: [mbedtls]`
+    (no `cores:` key) must satisfy `iot.tls: true` exactly like the
+    `cores:`-scoped spelling does -- rule 3 used to read only
+    `slice_.libraries`, so this legal board.yaml raised
+    `OrchestratorError` even though mbedtls is genuinely in scope on
+    every core via the project-wide channel."""
+    body = """
+som:
+  sku: E1M-V2N101
+
+libraries: [mbedtls]
+
+cores:
+  m33_sm:
+    os: zephyr
+    app: ./m33
+    iot: { tls: true }
+"""
+    path = _write_board(tmp_path, body)
+    project = load_board_yaml(path)
+    assert "mbedtls" in project.libraries
+
+
 def test_consistency_arena_larger_than_heap_warns(
     tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:

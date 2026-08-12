@@ -7,42 +7,192 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
-### Removed — `alp doctor`'s library check moved to `tan doctor` (ADR 0020)
+### Fixed — a `cores:`-scoped `libraries:` entry no longer emits MORE Kconfig than the same library declared project-wide (#1359)
 
-`scripts/alp_cli/doctor.py::_check_libraries` reported the ADR 0018 curated
-library selection for the project in scope — tier, licence, and whether each
-entry can be wired on the target. That is a verdict about the CUSTOMER'S
-project, which under ADR 0020 end-state B belongs on the user command surface:
-`tan`. It now lives there as `tan doctor`'s `libraries` row
-(`tan/core/doctor_libraries.py` + `doctor_cmd.libraries_check`,
-`scope: "project"`, WARN-only), and nothing user-facing about libraries is
-left here. `scripts/alp_cli/doctor.py` keeps its host/workspace checks and
-stays what `llms.txt` already calls it: alp-sdk's internal/reference preflight,
-not a second user CLI.
+The same library on the same core produced a different `alp.conf` fragment
+depending only on how `board.yaml` spelled the selection.
+`libraries: [cmsis-dsp]` (project-wide) and `libraries: [{name: cmsis-dsp,
+cores: [m55_hp]}]` (core-scoped) both emitted the same 11
+`CONFIG_CMSIS_DSP_*=y` module-enable lines, but only the core-scoped form
+additionally emitted `CONFIG_ALP_CMSIS_DSP_SCALAR=y`,
+`CONFIG_ALP_CMSIS_DSP_HELIUM=y`, and `CONFIG_ALP_CMSIS_DSP_ADC_DMA=y`. A
+`cores:` list reads as *narrowing* an existing project-wide selection down to
+one core; silently widening it to include accelerator/SW-fallback wiring the
+project-wide form never asked for is the opposite of what the syntax
+promises, and the difference was invisible in review — both `board.yaml`
+forms looked equivalent.
 
-The LAYER did not move and is not going to: `scripts/alp_orchestrate/
-libraries.py` and `metadata/libraries/*.yaml` are still the single source of
-these facts, and `tan` reads them out of the bound checkout (ADR 0017 — the
-generators relocated, the facts never do).
+Two independent derivers were each reading only the core-scoped channel
+(`Slice.libraries`), never the union with the project-wide channel
+(`project.libraries`):
 
-`tests/scripts/test_library_layer.py`'s three `alp_cli.doctor` tests are
-repointed onto the layer itself, which is what that file is named for.
-Repointing them also closed a hole they had covered over: all three wrote the
-bare-string `libraries: [lvgl]` shape, and the check they drove raised
-`OrchestratorError` straight out of `_all_checks()` — exit 1, whole command
-down — on the `- {name: ..., cores: [...]}` shape that **all 42** in-tree
-examples selecting libraries actually use. Three green tests over a check that
-worked on no shipped project. `docs/getting-started.md` had carried it as a
-known open bug; the fix went into the port, and the layer-level case for both
-declaration shapes is now asserted here.
+* `scripts/alp_orchestrate/kconfig.py`'s `_slice_alp_conf` called
+  `_emit_library_hw_backends(slice_.libraries, project.sku)` — the
+  `integration.zephyr.hw_backends` accelerator matcher
+  (`CONFIG_ALP_CMSIS_DSP_HELIUM`/`_ADC_DMA`) never saw a project-wide name.
+* `scripts/alp_orchestrate/libraries.py`'s `zephyr_kconfig_lines` (the
+  project-wide emitter) read only `integration.zephyr.kconfig`, never the
+  manifest's `integration.zephyr.hw_backends.sw_fallback.kconfig` SW floor
+  (`CONFIG_ALP_CMSIS_DSP_SCALAR`) — that line was wired only into
+  `kconfig.py`'s `_per_core_library_kconfig`, the core-scoped path.
 
-Docs updated in the same change: `docs/getting-started.md`,
-`docs/board-config-schema.md`, `docs/glossary.md`, `docs/portability-matrix.md`
-and `metadata/libraries/README.md` now name `tan doctor` for the library
-report. This enables the eventual retirement of `scripts/alp_cli/doctor.py`;
-it does not perform it — the file still ships its other checks and stays
-load-bearing as the `alp_cli` entry point `scripts/alp_cli/main.py` imports
-(`scripts/alp_cli/main.py:8`).
+Fixed by making both derivers read the SAME set for both channels. The hw-
+backend call now takes `libraries.scoped_names(project, slice_=slice_)` —
+the union helper `libraries.py` already exposed for exactly this purpose
+(added for tan-cli#555) — instead of `slice_.libraries` alone. The base +
+SW-fallback Kconfig set is now computed once, by a new
+`libraries.zephyr_library_kconfig(manifest)`, and both `zephyr_kconfig_lines`
+(project-wide) and `kconfig.py`'s `_per_core_library_kconfig` (core-scoped)
+call it, so a future symbol added to a manifest's `hw_backends`/`sw_fallback`
+block cannot land on only one declaration channel again.
+
+**The behavioural call**: a library's accelerator/SW-fallback support is a
+property of the library manifest and the SoM's silicon, not of which
+`libraries:` spelling board.yaml used to select it — so the fix makes the
+project-wide form gain the symbols, not the core-scoped form lose them.
+`check_emit_snapshots.py`'s 36 golden fixtures stay unchanged (none of the
+pinned fixtures declare a project-wide library with an
+`hw_backends`/`sw_fallback` manifest section, and the new CASE this change
+adds — `examples/connectivity/coap-client-get`, see below — is regenerated
+fresh, not diffed against a pre-fix golden); `check_zephyr_conf_parity.py`'s
+98-example sweep still agrees across both call sites (`_slice_alp_conf`
+compared against itself for the CMakeLists.txt path vs. the build-plan path
+on the same core, so it is self-consistency evidence, not no-drift evidence
+— it stays green under any output change to both paths together, including
+this one). Two real examples in this repo already declare a curated library
+project-wide with an `hw_backends` manifest section, so their *actual*
+`board.yaml` emit changes:
+
+* `examples/connectivity/coap-client-get` (`libraries: [coap]`, project-wide)
+  gains `CONFIG_ALP_COAP_NO_TLS=y` and `CONFIG_ALP_COAP_MBEDTLS=y`.
+* `examples/connectivity/modbus-server` (`libraries: [modbus]`, project-wide)
+  gains `CONFIG_ALP_MODBUS_SYNC_IO=y` and `CONFIG_ALP_MODBUS_UART_DMA=y`.
+
+`examples/ai/*`, `examples/audio/*`, and
+`examples/connectivity/iot-dashboard` do **not** move — every one of those is
+already `cores:`-scoped (or declares no `hw_backends`-bearing library at
+all), so they were already on the superset side of the pre-fix asymmetry and
+emit byte-identical output before and after this fix.
+
+Coverage hole closed: none of the 36 pinned `check_emit_snapshots.py` CASEs
+declared a project-wide library at all, which is why none of them moved and
+why this bug shipped invisibly. Added a `zephyr-conf` CASE for
+`examples/connectivity/coap-client-get/board.yaml` so a future regression on
+this exact path is caught by a golden diff, not only by the unit tests in
+`tests/scripts/test_library_layer.py`.
+
+`scripts/alp_orchestrate/` is hash-audited verbatim into tan-cli's mirror
+(tan-cli#556, milestoned for this same release); this fix must land here
+first, then tan-cli re-syncs the mirror and re-pins its freshness-gate
+hashes/fixtures before tan-cli#556 closes — the tan side cannot fix its copy
+ahead of this commit without going red against its own gate. Concretely,
+`python/tests/gates/test_planner_relocation_freshness.py:129` pins
+`kconfig.py` at
+`d80ab84bec3bc1aefe8640a6d5d1b43334447cb4ea87d4c25cee927ebfc2bf17` and
+`:131` pins `libraries.py` at
+`47b823e0fc06cc657a3c3068598b953e342720cf359443651a9996b93be7aaa5`; both go
+stale the moment this commit lands and need re-pinning to the new file
+hashes. No fixture under `python/tests/parity/oracle_fixtures/` references
+either `coap-client-get` or `modbus-server`, so re-pinning those two hashes
+is likely the entire tan-side follow-up — no new oracle fixture should be
+needed unless one is added deliberately for this path.
+
+**Follow-up (same issue): two more readers of the narrower channel alone.**
+A review that rendered every example `board.yaml` × every Zephyr core
+before/after the fix above found the fix didn't finish #1359 — two more call
+sites reproduced the identical "reads `slice_.libraries` (or
+`project.libraries`) alone" antipattern:
+
+* `scripts/alp_orchestrate/kconfig.py`'s `_slice_wants_inference` decided
+  whether to emit the `<alp/inference.h>` Kconfig block by checking only
+  `slice_.libraries` for `tflite-micro`, so a project-wide `libraries:
+  [tflite-micro]` (no `cores:` key) silently dropped the entire
+  `_emit_inference` section — `CONFIG_TENSORFLOW_LITE_MICRO=y`,
+  `CONFIG_ALP_SDK_INFERENCE_BACKEND_TFLM=y`, the Ethos-U/TFLM-kernel variant
+  switches, `CONFIG_HEAP_MEM_POOL_SIZE=65536` — while the identical
+  `cores:`-scoped spelling emitted it. Now reads
+  `libraries.scoped_names(project, slice_=slice_)`.
+* `scripts/alp_orchestrate/validate.py`'s rule 3 (`cores.<id>.iot.tls: true`
+  requires an mbedtls/bearssl provider) read only `slice_.libraries`, so a
+  project-wide `libraries: [mbedtls]` plus `iot.tls: true` raised
+  `OrchestratorError` — a hard refusal of a legal `board.yaml`, more severe
+  than an emit delta, since the identical `cores:`-scoped spelling loaded
+  fine. Now reads the same `libraries.scoped_names(project, slice_=slice_)`.
+* `scripts/alp_project.py`'s `--emit zephyr-conf` pre-flight validation
+  guard (the one that turns a bad `libraries:` selection into a clean
+  one-line `alp_project: ...` error instead of a mid-emit traceback) gated
+  on `if project.libraries:` alone, so a board.yaml with only a
+  `cores:`-scoped selection skipped the guard and hit the later, unwrapped
+  `_slice_alp_conf` call as an unhandled `OrchestratorError` traceback
+  instead. Now gates on `libraries.scoped_names(project)` (the whole-project
+  view, `slice_=None`).
+
+Both `kconfig.py` and `validate.py` fixes are covered by a regression test
+in the same style as the original ("declaration form does not change
+outcome"): `tests/scripts/test_library_layer.py::
+test_declaration_form_does_not_change_the_inference_block` pins the
+project-wide form against the same 13 `CONFIG_*` symbols the `cores:`-scoped
+form emits; `tests/scripts/test_orchestrate_consistency.py::
+test_consistency_tls_satisfied_by_project_wide_mbedtls` asserts the
+project-wide spelling *loads* rather than raising.
+
+### Added — ADR 0027 proposes declaring storage regions by role, not by SoM-internal region name
+
+`board.yaml`'s `storage:` entries place themselves with `flash_device:`, a
+string naming a region in the SoM preset's `memory_map:` or
+`on_module.ospi_memories:`. Measured across all 11 presets in
+`metadata/e1m_modules/` at `f30f4d4b`, that field is resolvable on **exactly
+one**: only E1M-AEN801 defines a `memory_map:` (`mcuboot`, `he_slot0`,
+`hp_slot0`, `reserved`, `storage`, `atoc`, `mram_main`). E1M-AEN301/401/501/
+601/701 carry `on_module.ospi_memories:` but no `memory_map:`; E1M-V2N101/102,
+E1M-V2M101/102 and E1M-NX9101 carry neither, using `on_module.nor_flash` /
+`emmc` instead.
+
+The single example that uses the field,
+`examples/connectivity/production-deployment/board.yaml`, pins all five
+partitions to `mram_main` under `som.sku: E1M-AEN801` — correct today, and
+portable to nothing: retargeted at E1M-AEN601, the same family ADR 0011 says
+portability must hold across, every entry names a region that preset does not
+define.
+
+**ADR 0027** proposes `role:` (`settings` / `app_data` / `log` / `ota_cache`)
+as the primary, portable declaration, resolved per SoM from the preset, with
+`flash_device:` retained as an explicit non-portable pin for cases roles
+cannot express (the example's three MCUboot slots byte-match the bootloader
+and stay pinned). A pinned region that does not exist after a SoM swap is a
+**refusal** naming the missing region, the SoM, and the role that would
+replace it — never a silent relocation, because relocating persisted settings
+on a green build is data loss. `size_kib` stays required: a role implies
+*where*, never *how much*.
+
+Status is **Proposed** and this changes no code. Migration is sequenced so the
+feature never half-exists, and where a SoM's backing part is not yet pinned
+down the role is marked TBD and refuses with "not yet mapped" rather than
+resolving to a guessed region.
+
+### Added — ADR 0026 proposes retiring alp-sdk as a second planner producer
+
+ADR 0020's 2026-08-03 amendment relocated the planner into tan but kept
+alp-sdk's `scripts/alp_orchestrate/` as "the reference producer", so two
+independent implementations of the same planner ship from two repos and
+neither is allowed to be wrong. **ADR 0026** proposes ending that: tan's
+`python/tan/planner/` becomes the single implementation, alp-sdk keeps what it
+is uniquely authoritative for (`metadata/`, `metadata/schemas/`, examples,
+tooling contracts), and `build-plan-v1` survives unchanged as the
+planner/executor seam.
+
+Measured at alp-sdk `f30f4d4b` / tan-cli `ac7e725`: `scripts/alp_orchestrate/`
+is 21 modules and 7,182 lines, `python/tan/planner/` is 31 modules and 12,071
+lines, 20 of the 21 module basenames are mirrored (all but `__main__.py`), and
+the parity apparatus that exists solely to police the mirror is 47 files and
+23,886 lines — more than three times the logic it guards.
+
+The ADR also records the recurrence evidence (tan-cli #274, #275, #279, #313,
+#320, #324, #409, #425, #485, #492, #509, #531, #543, #544, #545): #320
+recurred as #485, and #543 has dev's parity job failing on every alp-sdk
+dispatch since 2026-08-07. Status is **Proposed** — the ADR changes no code,
+and its migration section requires the two planners be provably equal at one
+ref before any removal begins.
 ### Fixed — CC3501E Wi-Fi connect no longer re-associates on every retry or reports a false "connected", `wifi status`/`wifi rssi` survive a radio op, and `wifi connect`'s own timeout budget is honoured (#1376, #1377, #1378)
 
 A wire-contract drift on `WIFI_CONNECT_STA` (0x12): the firmware was
