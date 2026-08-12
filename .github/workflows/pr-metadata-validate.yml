@@ -62,6 +62,9 @@ on:
       - 'scripts/alp_lock/**'
       - 'scripts/west_commands/alp_lock.py'
       - 'alp.lock'
+      - 'changelog.d/**'
+      - 'scripts/assemble_changelog.py'
+      - 'scripts/check_changelog_fragments.py'
   push:
     branches: [main, dev]
     paths:
@@ -109,6 +112,9 @@ on:
       - 'scripts/alp_lock/**'
       - 'scripts/west_commands/alp_lock.py'
       - 'alp.lock'
+      - 'changelog.d/**'
+      - 'scripts/assemble_changelog.py'
+      - 'scripts/check_changelog_fragments.py'
   workflow_dispatch:
 
 concurrency:
@@ -440,6 +446,9 @@ jobs:
 
       - name: Gate — quality-task registry matches scripts/check_*.py on disk
         run: python3 scripts/check_quality_registry.py
+
+      - name: "Gate — changelog.d/ fragments are well-formed (#1395)"
+        run: python3 scripts/check_changelog_fragments.py
 
       - name: Gate — scripts/ and firmware/ write_text() writers pass newline=""
         run: python3 scripts/check_write_text_newline.py
