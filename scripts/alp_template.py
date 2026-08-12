@@ -794,8 +794,27 @@ def _derive_pin_doc_renames(
     loader already falls back to the resolved board's own `doc:` in
     that case (metadata/schemas/board.schema.json), so dropping it is
     safe, not a silent content gap. An entry without its own `doc:`
-    at all contributes nothing (nothing to re-derive)."""
+    at all contributes nothing (nothing to re-derive).
+
+    Same ambiguity-collision philosophy as `_derive_pin_renames` and
+    `_derive_pin_macro_renames` (issue #1394): a `doc:` string two
+    `pins:` entries legitimately SHARE -- one sentence describing a
+    debounce network, a bus, or a connector common to both pads --
+    keys ONE entry in the flat map `_substitute_board_yaml_pin_docs`
+    applies across the whole file, so two entries re-deriving it to
+    two different targets must fail loudly instead of silently
+    keeping whichever resolution ran last (i.e. whichever `pins:`
+    ordering the source file happened to use). `None` participates in
+    that check on both sides: "rename it" and "drop it" are
+    contradictory instructions for one key, and so are "keep it" (a
+    target `doc:` byte-identical to `old_doc`, which contributes no
+    map entry) and "drop it" -- the latter pair being the one that
+    loses documentation from a pin whose own re-derived `doc:` was
+    perfectly good. Hence the separate `resolved` map: it records
+    EVERY entry's resolution, including the keep-it ones `renames`
+    deliberately omits."""
     renames: dict[str, str | None] = {}
+    resolved: dict[str, str | None] = {}
     for item in original_pins:
         if not isinstance(item, dict):
             continue
@@ -806,11 +825,15 @@ def _derive_pin_doc_renames(
         if target is None:
             continue
         new_doc = target.get("doc")
-        if isinstance(new_doc, str):
-            if new_doc != old_doc:
-                renames[old_doc] = new_doc
-        else:
-            renames[old_doc] = None
+        new = new_doc if isinstance(new_doc, str) else None
+        if old_doc in resolved and resolved[old_doc] != new:
+            raise TemplateError(
+                f"doc {old_doc!r} re-derives to two different targets "
+                f"({resolved[old_doc]!r} and {new!r}) across `pins:` "
+                f"entries for sku {sku!r} -- ambiguous")
+        resolved[old_doc] = new
+        if new != old_doc:
+            renames[old_doc] = new
     return renames
 
 
