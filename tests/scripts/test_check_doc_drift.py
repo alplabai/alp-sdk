@@ -428,3 +428,204 @@ def test_config_ifdef_reference_in_c_source_does_not_confirm_symbol(tmp_path):
     proc = _run("--root", str(tmp_path))
     assert proc.returncode == 1
     assert "ALP_SDK_FOO" in proc.stdout + proc.stderr
+
+
+# --- #1393: AEN801 MCUboot slot claims (check f) ---
+#
+# ADR-0006 promised MCUboot swap-with-revert on AEN while E1M-AEN801 had
+# shipped single-slot since #1069/#1100, and the aen-mcuboot-smoke
+# sysbuild.conf still named a `slot1 @ 0x802b0000` that is now HP's own
+# slot0.  Both sub-checks read the board DT, so they follow the flash map
+# rather than pinning the wording that fixed them.
+
+_AEN801_HE_DTS = """\
+&mram {
+	mram_storage: mram_storage@80000000 {
+		compatible = "soc-nv-flash";
+		reg = <0x80000000 DT_SIZE_K(5632)>;
+
+		partitions {
+			boot_partition: partition@0 {
+				label = "mcuboot";
+				reg = <0x0 DT_SIZE_K(64)>;
+			};
+
+			slot0_partition: partition@10000 {
+				label = "image-0";
+				reg = <0x10000 DT_SIZE_K(2688)>;
+			};
+
+			reserved_partition: partition@550000 {
+				label = "reserved";
+				reg = <0x550000 DT_SIZE_K(64)>;
+			};
+		};
+	};
+};
+"""
+
+# The pre-#1069 shape: a real secondary slot at 0x802b0000 + a scratch.
+_AEN801_TWO_SLOT_DTS = _AEN801_HE_DTS.replace(
+    """\
+			reserved_partition: partition@550000 {
+				label = "reserved";
+				reg = <0x550000 DT_SIZE_K(64)>;
+			};
+""",
+    """\
+			slot1_partition: partition@2b0000 {
+				label = "image-1";
+				reg = <0x2b0000 DT_SIZE_K(2688)>;
+			};
+
+			scratch_partition: partition@550000 {
+				label = "image-scratch";
+				reg = <0x550000 DT_SIZE_K(64)>;
+			};
+""",
+)
+
+
+def _aen801_board(root: Path, dts_body: str = _AEN801_HE_DTS):
+    """Drop a minimal AEN801 board DT where collect_aen801_mram_map() looks."""
+    bdir = root / "zephyr" / "boards" / "alp" / "e1m_aen801_m55_he"
+    bdir.mkdir(parents=True, exist_ok=True)
+    (bdir / "alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.dts").write_text(
+        dts_body, encoding="utf-8")
+
+
+def test_aen801_map_claim_matching_dt_passes(tmp_path):
+    _scaffold(tmp_path, docs={
+        "aen-map.md": "Map: mcuboot @ 0x80000000, slot0 @ 0x80010000.\n",
+    })
+    _aen801_board(tmp_path)
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_aen801_map_claim_naming_absent_partition_fails(tmp_path):
+    # The literal #1393 defect line from
+    # examples/aen/aen-mcuboot-smoke/sysbuild.conf:19.
+    _scaffold(tmp_path, docs={
+        "aen-map.md": "Map: slot0 @ 0x80010000, slot1 @ 0x802b0000, scratch.\n",
+    })
+    _aen801_board(tmp_path)
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 1
+    out = proc.stdout + proc.stderr
+    assert "slot1 @ 0x802b0000" in out
+    assert "no such partition in the AEN801 board DT" in out
+
+
+def test_aen801_map_claim_with_wrong_address_fails(tmp_path):
+    # The partition exists but the doc puts it somewhere the DT does not.
+    _scaffold(tmp_path, docs={
+        "aen-map.md": "Map: slot0 @ 0x80020000.\n",
+    })
+    _aen801_board(tmp_path)
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 1
+    out = proc.stdout + proc.stderr
+    assert "slot0 @ 0x80020000" in out
+    assert "DT puts slot0 at 0x80010000" in out
+
+
+def test_aen801_map_claim_accepts_either_disjoint_slot0(tmp_path):
+    # Since #1069 the HE and HP slot0 windows are DISJOINT, so `slot0` has
+    # two legal addresses -- naming either must pass.
+    _scaffold(tmp_path, docs={
+        "aen-map.md": "HE slot0 @ 0x80010000, HP slot0 @ 0x802b0000.\n",
+    })
+    _aen801_board(tmp_path)
+    hp = tmp_path / "zephyr" / "boards" / "alp" / "e1m_aen801_m55_hp"
+    hp.mkdir(parents=True)
+    (hp / "alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp.dts").write_text(
+        _AEN801_HE_DTS.replace("partition@10000", "partition@2b0000")
+                      .replace("<0x10000 DT_SIZE_K(2688)>",
+                               "<0x2b0000 DT_SIZE_K(2688)>"),
+        encoding="utf-8")
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_aen801_map_claim_ignores_non_mram_addresses(tmp_path):
+    # Only the 0x80...... MRAM window is a partition claim; an ITCM or
+    # register address that happens to sit next to one of these words is not.
+    _scaffold(tmp_path, docs={
+        "aen-map.md": "The storage @ 0x50000000 buffer and DHCSR @ 0xE000EDF0.\n",
+    })
+    _aen801_board(tmp_path)
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_unqualified_aen_swap_promise_fails(tmp_path):
+    # The #1393 ADR text, verbatim in shape: a swap-with-revert promise
+    # with no mention that AEN801 has one slot.
+    _scaffold(tmp_path, docs={
+        "adr/0006-secure-boot-secure-ota.md":
+            "- **Zephyr backends (AEN, N93-RTcore)**: route through MCUboot's\n"
+            "  swap-with-revert dual-bank flow.  Writes to the secondary slot,\n"
+            "  swaps, reboots; the bootloader reverts on next reset.\n",
+    })
+    _aen801_board(tmp_path)
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 1
+    out = proc.stdout + proc.stderr
+    assert "Unqualified MCUboot swap-with-revert promise" in out
+    assert "0006-secure-boot-secure-ota.md" in out
+
+
+def test_qualified_aen_swap_promise_passes(tmp_path):
+    _scaffold(tmp_path, docs={
+        "adr/0006-secure-boot-secure-ota.md":
+            "- **Zephyr backends (AEN, N93-RTcore)**: route through MCUboot's\n"
+            "  swap-with-revert dual-bank flow.\n"
+            "  > CORRECTED: design intent only -- E1M-AEN801 is single-slot.\n",
+    })
+    _aen801_board(tmp_path)
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_aen_swap_promise_qualified_by_issue_reference_passes(tmp_path):
+    # Citing the record that carries the constraint is enough.
+    _scaffold(tmp_path, docs={
+        "ota.md": "3. Wires the image-write hook onto MCUboot's secondary\n"
+                  "   slot -- blocked on AEN801, see #1100.\n",
+    })
+    _aen801_board(tmp_path)
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_aen_swap_promise_lifts_when_dt_regains_slot1(tmp_path):
+    # Self-lifting: restore the secondary slot in the DT and the same
+    # unqualified promise becomes true again, so the gate stops asking.
+    docs = {
+        "adr/0006-secure-boot-secure-ota.md":
+            "Route through MCUboot's swap-with-revert dual-bank flow;\n"
+            "apply() writes to the secondary slot and swaps.\n",
+    }
+    _scaffold(tmp_path, docs=docs)
+    _aen801_board(tmp_path, _AEN801_TWO_SLOT_DTS)
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+    # ... and is caught again the moment the board goes back to one slot.
+    _aen801_board(tmp_path, _AEN801_HE_DTS)
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 1
+    assert "Unqualified MCUboot swap-with-revert promise" in proc.stdout + proc.stderr
+
+
+def test_aen_slot_checks_are_inert_without_an_aen801_board_tree(tmp_path):
+    # No AEN801 board DT in this root -> nothing to measure against, so
+    # neither sub-check may invent a verdict.
+    _scaffold(tmp_path, docs={
+        "adr/0006-secure-boot-secure-ota.md":
+            "Route through MCUboot's swap-with-revert dual-bank flow.\n",
+        "aen-map.md": "Map: slot1 @ 0x802b0000.\n",
+    })
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr

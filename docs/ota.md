@@ -12,7 +12,10 @@ guarantee.
 > conf/distro/include/mender.inc` in a machine .conf).
 > AEN-Zephyr side is documentation-only -- Mender's Zephyr
 > client choice is still open and lands alongside the v0.4
-> AEN secure-boot integration.
+> AEN secure-boot integration, and E1M-AEN801 currently ships
+> single-slot with OTA deferred (#1069 / #1100), so the
+> "atomic rollback" half above describes the Yocto backends
+> and the AEN *plan*, not shipped AEN behaviour.
 
 ## Trust model
 
@@ -116,6 +119,19 @@ Failure modes covered:
 
 ## AEN-Zephyr path: MCUboot + Mender (v0.4 plan)
 
+> **The AEN801 flash map has no secondary slot today.**  Both
+> E1M-AEN801 board targets are single-slot -- `mcuboot`, `image-0`,
+> `reserved`, `storage`, `atoc` -- with no `slot1_partition` and no
+> `scratch_partition`, and the build sets
+> `SB_CONFIG_MCUBOOT_MODE_SINGLE_APP=y`
+> (`CONFIG_SINGLE_APPLICATION_SLOT=y`).  That is deliberate
+> (#1069 / #1100): `0x802b0000` is now HP's own slot0, and OTA was
+> deferred to make the disjoint dual-core slot0 budget fit.  So the
+> plan below is a *plan*: nothing in it is enabled on AEN801, and
+> there is no swap and no revert-on-bad-image on that board until a
+> secondary slot comes back.  See
+> [ADR 0006](adr/0006-secure-boot-secure-ota.md) Amendment item 7.
+
 AEN's MCUboot scaffolding (see [`docs/secure-boot.md`](secure-boot.md))
 sets up the signed-image verification half.  The delivery half
 is open between two viable options:
@@ -131,7 +147,9 @@ or HTTPs transport; the v0.4-final integration:
 2. Wires it onto `<alp/iot.h>`'s MQTT/HTTPS transport on
    AEN-Zephyr (TLS path lands alongside `<alp/security.h>`
    PSA crypto).
-3. Wires its image-write hook onto MCUboot's secondary slot.
+3. Wires its image-write hook onto MCUboot's secondary slot --
+   which AEN801 does not currently have (single-slot, #1069 /
+   #1100), so this step is blocked on restoring one.
 
 Caveats:
 

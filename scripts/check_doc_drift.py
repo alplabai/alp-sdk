@@ -4,10 +4,11 @@
 """
 Doc-drift gate -- fails (exit 1) when customer-facing documentation
 references SDK identifiers that no longer exist, when a top-level
-doc isn't linked from the docs index, or when CC3501E docs/examples
-describe the current bridge as the obsolete CS-less design.
+doc isn't linked from the docs index, when CC3501E docs/examples
+describe the current bridge as the obsolete CS-less design, or when
+AEN801 MCUboot slot claims contradict the board device tree.
 
-Five independent checks:
+Six independent checks:
 
   (a) Dead-symbol references.  Every `ALP_[A-Z0-9_]+` and
       `alp_[a-z0-9_]+` token mentioned in a customer doc -- including a
@@ -87,9 +88,36 @@ Five independent checks:
       one of the matrix's own per-family totals must carry the matching
       numerator.
 
+  (f) AEN801 MCUboot slot claims.  Both facts checked here are read
+      from the E1M-AEN801 board DTs
+      (zephyr/boards/alp/e1m_aen801_*/*.dts), never from prose, so the
+      gate follows the flash map instead of pinning today's wording:
+
+        (f1) MRAM map addresses.  Any "<partition> @ 0x80......" claim
+             in the AEN boot/OTA doc + sysbuild surfaces must name a
+             partition the AEN801 DT actually declares, at the address
+             the DT gives it.  `slot1 @ 0x802b0000` in
+             examples/aen/aen-mcuboot-smoke/sysbuild.conf was pre-#1100
+             language: #1069/#1100 turned that window into HP's own
+             slot0 and removed slot1/scratch outright (#1393).
+
+        (f2) Unqualified swap-with-revert promises.  While NO AEN801
+             board target declares a slot1/scratch partition, a
+             paragraph of docs/adr/0006-secure-boot-secure-ota.md or
+             docs/ota.md that promises MCUboot swap-with-revert /
+             swap-using-scratch / a secondary slot must carry a
+             qualifier ("single-slot", "no secondary slot",
+             CONFIG_SINGLE_APPLICATION_SLOT, or a #1069/#1100/#1393
+             reference).  Revert-on-bad-image is a SECURITY property:
+             a single-slot board has nothing to revert TO, so an
+             unqualified promise sends a reader designing an update
+             strategy against a guarantee the flash map does not
+             provide.  If a secondary slot ever comes back on AEN801,
+             this sub-check lifts itself.
+
 Run from the repo root:
 
-    python3 scripts/check_doc_drift.py                  # both checks
+    python3 scripts/check_doc_drift.py                  # all six checks
     python3 scripts/check_doc_drift.py --allow ALP_FOO  # extend allowlist
 
 Exits non-zero if any check finds a problem.
@@ -307,6 +335,79 @@ _MATRIX_TOTAL_QUOTING_DOCS = (
 # 4-way enumeration as a spurious "10/12" fraction.
 _STATED_SLASH_FRACTION_RE = re.compile(r"(?<![\d/])(\d+)\s*/\s*(\d+)(?![\d/])")
 _STATED_OF_FRACTION_RE = re.compile(r"(\d+)\s+of\s+(\d+)")
+
+# --- (f) AEN801 MCUboot slot claims -----------------------------------
+#
+# The AEN801 board DTs are the source of truth for both sub-checks: the
+# flash map is what a claim is measured against, and the ABSENCE of a
+# slot1/scratch partition is what makes an unqualified swap-with-revert
+# promise wrong.  Nothing here hard-codes today's map.
+
+_AEN801_DTS_GLOB = "zephyr/boards/alp/e1m_aen801_*/*.dts"
+
+# `mram_storage@80000000 { compatible = "soc-nv-flash"; reg = <0x80000000
+# DT_SIZE_K(5632)>; ... }` -- the base every partition@<offset> is relative to.
+_SOC_NV_FLASH_BASE_RE = re.compile(
+    r'compatible\s*=\s*"soc-nv-flash"\s*;\s*reg\s*=\s*<\s*(0x[0-9a-fA-F]+)'
+)
+
+# `slot0_partition: partition@10000 { label = "image-0"; ... }` -- both the
+# node prefix (slot0) and the label ("image-0") are names docs use.
+_DT_PARTITION_RE = re.compile(
+    r"(\w+)_partition:\s*partition@([0-9a-fA-F]+)\s*\{[^}]*?"
+    r'label\s*=\s*"([^"]+)"',
+    re.DOTALL,
+)
+
+# Surfaces that teach the AEN801 MRAM map.  CHANGELOG.md and
+# docs/superpowers/** are deliberately out of scope: both are historical
+# records of what the map USED to be, which is not drift.
+_AEN_MRAM_MAP_SCAN_GLOBS = (
+    "docs/*.md",
+    "docs/adr/*.md",
+    "docs/soms/*.md",
+    "docs/boards/*.md",
+    "examples/aen/**/*.md",
+    "examples/aen/**/*.conf",
+    "examples/aen/**/*.overlay",
+    "examples/aen/**/*.c",
+    "examples/aen/**/*.h",
+    "zephyr/sysbuild/aen/*",
+)
+
+# "slot1 @ 0x802b0000", "HE slot0 @ 0x80010000", "mcuboot @ 0x80000000".
+# Anchored on the MRAM window (0x80......) so an unrelated address in the
+# same doc (an ITCM/SRAM base, a register) can never be read as a
+# partition claim.
+_AEN_MRAM_CLAIM_RE = re.compile(
+    r"\b(mcuboot|slot0|slot1|scratch|reserved|storage|atoc|image-[01])\b"
+    r"\s*@\s*(0x80[0-9a-fA-F]{6})\b",
+    re.IGNORECASE,
+)
+
+# The two docs that promise the Zephyr-side OTA flow.  docs/secure-boot.md
+# is deliberately NOT here: it already states the single-slot constraint
+# inline everywhere it names swap-using-scratch, and it is the operator
+# reference for the SWAP profile itself, where the swap vocabulary is the
+# subject rather than a promise about AEN801.
+_AEN_SWAP_PROMISE_DOCS = (
+    "docs/adr/0006-secure-boot-secure-ota.md",
+    "docs/ota.md",
+)
+
+_AEN_SWAP_PROMISE_RE = re.compile(
+    r"swap-with-revert|swap-using-scratch|swap-scratch|dual-bank|"
+    r"secondary(?:/scratch)?\s+slot",
+    re.IGNORECASE,
+)
+
+# Any ONE of these in the same paragraph makes the promise honest: it
+# either names the constraint or points at the record that carries it.
+_AEN_SINGLE_SLOT_QUALIFIER_RE = re.compile(
+    r"single-slot|single application slot|SINGLE_APPLICATION_SLOT|"
+    r"no secondary(?:/scratch)?\s+slot|#1069|#1100|#1393",
+    re.IGNORECASE,
+)
 
 
 def collect_known_symbols(root: pathlib.Path) -> set[str]:
@@ -609,6 +710,99 @@ def find_matrix_total_drift(root: pathlib.Path) -> list[tuple[str, int, str, str
     return drift
 
 
+def collect_aen801_mram_map(root: pathlib.Path) -> dict[str, set[int]]:
+    """Return the E1M-AEN801 MRAM partition map read from the board DTs:
+    partition name -> the set of ABSOLUTE base addresses it has.
+
+    Both the node prefix (`slot0` from `slot0_partition:`) and the DT
+    `label` (`image-0`) are keyed, because docs name partitions both ways.
+    The set is per-name rather than a single address on purpose: since
+    #1069 the two M55 cores have DISJOINT slot0 windows, so `slot0` is
+    legitimately 0x80010000 (HE) *and* 0x802b0000 (HP).
+
+    An empty result (no AEN801 board tree in this root) disables both
+    sub-checks -- the synthetic trees in tests/scripts have no board DTs.
+    """
+    partitions: dict[str, set[int]] = {}
+    for dts in sorted(root.glob(_AEN801_DTS_GLOB)):
+        text = dts.read_text(encoding="utf-8", errors="replace")
+        base_m = _SOC_NV_FLASH_BASE_RE.search(text)
+        if not base_m:
+            continue
+        base = int(base_m.group(1), 16)
+        for node, offset, label in _DT_PARTITION_RE.findall(text):
+            absolute = base + int(offset, 16)
+            partitions.setdefault(node.lower(), set()).add(absolute)
+            partitions.setdefault(label.lower(), set()).add(absolute)
+    return partitions
+
+
+def find_aen_mram_map_drift(
+    root: pathlib.Path, mram_map: dict[str, set[int]],
+) -> list[tuple[str, int, str, str]]:
+    """Return "<partition> @ 0x80......" claims that the AEN801 board DT
+    contradicts -- either the partition does not exist, or it does but at
+    a different address.  (f1)
+    """
+    if not mram_map:
+        return []
+    drift: list[tuple[str, int, str, str]] = []
+    seen: set[pathlib.Path] = set()
+    for pattern in _AEN_MRAM_MAP_SCAN_GLOBS:
+        for path in sorted(root.glob(pattern)):
+            if not path.is_file() or path in seen:
+                continue
+            seen.add(path)
+            rel = path.relative_to(root).as_posix()
+            text = path.read_text(encoding="utf-8", errors="replace")
+            for line_no, line in enumerate(text.splitlines(), 1):
+                for m in _AEN_MRAM_CLAIM_RE.finditer(line):
+                    name, addr = m.group(1).lower(), int(m.group(2), 16)
+                    if name not in mram_map:
+                        drift.append((rel, line_no, m.group(0),
+                                      "no such partition in the AEN801 "
+                                      "board DT"))
+                    elif addr not in mram_map[name]:
+                        expected = ", ".join(
+                            f"0x{a:08x}" for a in sorted(mram_map[name]))
+                        drift.append((rel, line_no, m.group(0),
+                                      f"DT puts {name} at {expected}"))
+    return drift
+
+
+def find_aen_unqualified_swap_promises(
+    root: pathlib.Path, mram_map: dict[str, set[int]],
+) -> list[tuple[str, int, str]]:
+    """Return paragraphs promising MCUboot swap-with-revert without saying
+    AEN801 is single-slot, while the board DT declares no secondary or
+    scratch partition.  (f2)
+
+    Self-lifting: the moment an AEN801 board target regains a
+    slot1/scratch partition the promise is true again and this returns [].
+    """
+    if not mram_map:
+        return []
+    if "slot1" in mram_map or "scratch" in mram_map or "image-1" in mram_map:
+        return []
+
+    unqualified: list[tuple[str, int, str]] = []
+    for rel in _AEN_SWAP_PROMISE_DOCS:
+        path = root / rel
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        line_no = 1
+        for para in re.split(r"\n\s*\n", text):
+            if (
+                _AEN_SWAP_PROMISE_RE.search(para)
+                and not _AEN_SINGLE_SLOT_QUALIFIER_RE.search(para)
+            ):
+                first = next((ln.strip() for ln in para.splitlines() if ln.strip()), "")
+                unqualified.append((rel, line_no, first))
+            line_no += para.count("\n") + 2
+    return unqualified
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__,
@@ -629,6 +823,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     stale_cc3501e = find_cc3501e_bridge_stale_claims(root)
     e1m_x_pinout_gaps = find_e1m_x_pinout_guidance_gaps(root)
     matrix_total_drift = find_matrix_total_drift(root)
+    aen801_mram_map = collect_aen801_mram_map(root)
+    aen_map_drift = find_aen_mram_map_drift(root, aen801_mram_map)
+    aen_swap_promises = find_aen_unqualified_swap_promises(root, aen801_mram_map)
 
     if dead:
         print("Dead SDK-symbol references "
@@ -661,18 +858,34 @@ def main(argv: Optional[list[str]] = None) -> int:
         for rel, line_no, matched, expected in matrix_total_drift:
             print(f"  {rel}:{line_no}  \"{matched}\" -- matrix says {expected}",
                   file=sys.stderr)
+    if aen_map_drift:
+        print("AEN801 MRAM partition claims contradicted by the board DT "
+              "(zephyr/boards/alp/e1m_aen801_*/*.dts is the source of truth):",
+              file=sys.stderr)
+        for rel, line_no, matched, why in aen_map_drift:
+            print(f"  {rel}:{line_no}  \"{matched}\" -- {why}", file=sys.stderr)
+    if aen_swap_promises:
+        print("Unqualified MCUboot swap-with-revert promise -- no AEN801 "
+              "board target declares a slot1/scratch partition, so say "
+              "single-slot (or cite #1069 / #1100 / #1393):", file=sys.stderr)
+        for rel, line_no, line in aen_swap_promises:
+            print(f"  {rel}:{line_no}  {line}", file=sys.stderr)
 
-    if dead or gaps or stale_cc3501e or e1m_x_pinout_gaps or matrix_total_drift:
+    if (dead or gaps or stale_cc3501e or e1m_x_pinout_gaps
+            or matrix_total_drift or aen_map_drift or aen_swap_promises):
         print(f"\ndoc-drift: {len(dead)} dead ref(s), {len(gaps)} index "
               f"gap(s), {len(stale_cc3501e)} stale CC3501E bridge "
               f"claim(s), {len(e1m_x_pinout_gaps)} E1M-X pinout "
               f"guidance gap(s), {len(matrix_total_drift)} stale matrix "
-              f"total(s) -- failing.", file=sys.stderr)
+              f"total(s), {len(aen_map_drift)} stale AEN801 MRAM map "
+              f"claim(s), {len(aen_swap_promises)} unqualified AEN swap "
+              f"promise(s) -- failing.", file=sys.stderr)
         return 1
 
     print("doc-drift: OK (no dead symbol refs, docs index complete, "
           "CC3501E bridge wording current, E1M-X pinout guidance current, "
-          "portability-matrix totals in sync).")
+          "portability-matrix totals in sync, AEN801 MRAM map claims match "
+          "the board DT).")
     return 0
 
 

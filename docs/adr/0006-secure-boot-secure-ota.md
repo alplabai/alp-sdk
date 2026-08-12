@@ -2,7 +2,11 @@
 
 Status: Accepted, partially superseded (v0.4 delivery)
 Date: 2026-05-10
-Amended: 2026-05-11 (see "Amendment" section at the bottom)
+Amended: 2026-05-11, 2026-07-31, 2026-08-12 (see the "Amendment"
+sections at the bottom).  The Decision section below is the original
+record and is corrected in place by inline `CORRECTED` notes, never
+rewritten -- an ADR records a decision, so it must show the decision
+AND its later correction.
 
 ## Context
 
@@ -100,6 +104,11 @@ Internally:
   secondary slot, swaps, reboots; on first boot the new image
   must call `boot_write_img_confirmed()` (wrapped behind
   `alp_ota_commit()`) or the bootloader reverts on next reset.
+  > **CORRECTED 2026-08-12 (item 7) — this is design intent, not
+  > what E1M-AEN801 ships.**  Both AEN801 board targets are
+  > **single-slot**: there is no secondary and no scratch
+  > partition, so there is no swap and nothing to revert *to*.
+  > Deliberate, per #1069 / #1100.  See Amendment (2026-08-12).
 - **Linux backends (N93-Linux, V2N, V2N-M1)**: route through
   RAUC (industry-standard A/B-banking update framework for
   embedded Linux).  `apply()` invokes `rauc install`; the
@@ -120,6 +129,13 @@ Internally:
   MCUboot's swap-with-revert and RAUC's A/B both leave the
   device bootable on the previous image if the new one is
   unconfirmed within a watchdog window.
+  > **CORRECTED 2026-08-12 (item 7):** not covered on E1M-AEN801.
+  > It is **single-slot** (#1069 / #1100) -- there is no previous
+  > image to fall back to, and a partially written `image-0`
+  > fails verification, so MCUboot stops at `E: Unable to find
+  > bootable image`.  Recovery is over the debug port (the bench
+  > measured `Secure debug: enabled`, DHCSR `0xE000EDF0` =
+  > `00130003` on both refusal shapes), not in the field.
 
 ### Out of scope (deferred to v1.x)
 
@@ -206,6 +222,10 @@ flow.  MCUboot scaffolding has landed
 half (Mender Zephyr client vs Hawkbit-on-Zephyr) is **decision
 pending** for v0.4-final -- see
 [`docs/ota.md`](../ota.md) for the two-option analysis.
+*(Superseded in part by item 7 below: on E1M-AEN801 the swap half
+itself was later dropped -- that board now ships single-slot, so
+the pending decision is about delivery onto a single slot, not
+about a swap client.)*
 
 **3. `alp_ota_*` API not declared yet.**
 
@@ -273,6 +293,78 @@ alive, so a bad slot0 write does not brick J-Link access.  This is a
 and OTA remain untested and this is not an upgrade-path guarantee.
 See [`docs/aen-provisioning.md`](../aen-provisioning.md) §0.5 and
 [`docs/secure-boot.md`](../secure-boot.md).
+
+## Amendment (2026-08-12)
+
+**7. AEN-Zephyr OTA: E1M-AEN801 ships SINGLE-SLOT.  Swap-with-revert
+is design intent, not a shipped guarantee (#1393).**
+
+The Decision section's "Zephyr backends (AEN, N93-RTcore): route
+through MCUboot's swap-with-revert dual-bank flow" describes an OTA
+path that E1M-AEN801 does not have: that board is **single-slot**
+(#1069 / #1100).  Read from the board device trees, not from prose
+-- both AEN801 targets declare five MRAM partitions and neither a
+`slot1_partition` nor a `scratch_partition`:
+
+| Partition (DT node)  | Label     | `alp_e1m_aen801_m55_he` | `alp_e1m_aen801_m55_hp` | Size     |
+|----------------------|-----------|-------------------------|-------------------------|----------|
+| `boot_partition`     | `mcuboot` | `0x80000000`            | `0x80000000`            | 64 KiB   |
+| `slot0_partition`    | `image-0` | `0x80010000`            | `0x802b0000`            | 2688 KiB |
+| `reserved_partition` | `reserved`| `0x80550000`            | `0x80550000`            | 64 KiB   |
+| `storage_partition`  | `storage` | `0x80560000`            | `0x80560000`            | 96 KiB   |
+| `atoc_partition`     | `atoc`    | `0x80578000`            | `0x80578000`            | 32 KiB   |
+
+`64 + 2688 + 2688 + 64 + 96 + 32 = 5632 KiB` == the full 5.5 MiB App
+MRAM.  Tree-wide, `slot1_partition` and `scratch_partition` survive on
+exactly two board targets -- `e1m_aen401_m55_hp` and
+`e1m_aen601_m55_hp` -- and on neither AEN801 target.
+
+**This is deliberate, and the ADR is what trailed it.**  Commit
+`1ad76193` ("fix(aen): disjoint per-core slot0 windows for E1M-AEN801
+dual-M55 boot (#1069) (#1100)", 2026-08-03) removed both partitions
+to make the disjoint dual-core slot0 budget fit: `0x802b0000` became
+**HP's own slot0** (it was slot1/OTA), and `0x80550000` became
+`reserved` (it was scratch).  Giving both M55 cores a swap-sized
+secondary slot forces `slot0_HE + slot0_HP = 2688 KiB` each, which
+does not leave room for the ~2.6 MiB NPU MRAM-model budget on at
+least one core.  OTA was deferred as part of that trade.  The build
+configuration says the same thing:
+[`zephyr/sysbuild/aen/sysbuild.conf`](../../zephyr/sysbuild/aen/sysbuild.conf)
+sets `SB_CONFIG_MCUBOOT_MODE_SINGLE_APP=y`
+(`CONFIG_SINGLE_APPLICATION_SLOT=y` on the MCUboot child image), and
+[`metadata/e1m_modules/E1M-AEN801.yaml`](../../metadata/e1m_modules/E1M-AEN801.yaml)
+`memory_map:` carries the table above as the authoritative source.
+
+**Why this needed correcting rather than leaving:** revert-on-bad-image
+is a *security* property.  A reader of the uncorrected Decision section
+concludes a bad AEN image is reverted automatically on the next reset.
+On a single-slot board there is no revert -- there is nothing to revert
+*to*.  Anyone designing an update strategy against this ADR was
+designing against a guarantee the flash configuration does not provide.
+The one bench attempt to confirm revert-on-bad-image (#1066) could not:
+its positive control failed identically -- a valid, byte-exact image B
+with a valid request also did not swap -- so that run supported no
+security claim either.
+
+**What is NOT retracted.**  Amendment items 5 and 6 stand: the
+*secure-boot* half is bench-proven on E1M-AEN801.  SES -> MCUboot
+(ITCM) -> slot0 (MRAM XIP) -> application boots with
+`CONFIG_BOOT_SIGNATURE_TYPE_ECDSA_P256=y` and
+`CONFIG_BOOT_VALIDATE_SLOT0=y`, a flipped signature byte is correctly
+REJECTED, and a customer J-Link write to slot0 is verified and
+chainloaded.  Single-slot removes the *upgrade* guarantee, not the
+*verification* one.
+
+**Scope.**  The correction is AEN-specific.  The Linux backends
+(N93-Linux, V2N, V2N-M1) keep A/B banking via Mender per item 1, and
+nothing here changes N93-RTcore.
+
+**Re-enabling.**  #1066 remains open and is re-scoped to blocking the
+re-enabling of OTA on AEN801 (its mechanism half -- MCUboot's scratch
+magic never being cleared on a no-erase MRAM device -- cannot be fixed
+or regression-tested while the board has one slot).  Restoring swap
+needs a maintainer decision on the MRAM budget first, since the slot
+space it needs is currently HP's slot0.
 
 ## See also
 
