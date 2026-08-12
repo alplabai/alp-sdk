@@ -7,77 +7,134 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
-### Fixed — `pwm-led-fade` ships its missing M55-HE overlay twin, `drone-autopilot` gets the I2C/UART/PWM overlay it never had, and the overlay regression test can no longer pass on a wrong pad (#1383)
+### Fixed — a `cores:`-scoped `libraries:` entry no longer emits MORE Kconfig than the same library declared project-wide (#1359)
 
-An adversarial review of #1381 (merged as `ac920b33`, closing #1375) found three
-gaps the merged fix left open. None invalidates that fix — the LED fade is
-verified working on E1M-AEN801 silicon — but each is a real hole. Nothing in
-this entry has been run on silicon; the evidence below is source-level plus one
-host-side test file.
+The same library on the same core produced a different `alp.conf` fragment
+depending only on how `board.yaml` spelled the selection.
+`libraries: [cmsis-dsp]` (project-wide) and `libraries: [{name: cmsis-dsp,
+cores: [m55_hp]}]` (core-scoped) both emitted the same 11
+`CONFIG_CMSIS_DSP_*=y` module-enable lines, but only the core-scoped form
+additionally emitted `CONFIG_ALP_CMSIS_DSP_SCALAR=y`,
+`CONFIG_ALP_CMSIS_DSP_HELIUM=y`, and `CONFIG_ALP_CMSIS_DSP_ADC_DMA=y`. A
+`cores:` list reads as *narrowing* an existing project-wide selection down to
+one core; silently widening it to include accelerator/SW-fallback wiring the
+project-wide form never asked for is the opposite of what the syntax
+promises, and the difference was invisible in review — both `board.yaml`
+forms looked equivalent.
 
-**1. The shipped overlay covered only `rtss_hp`, but #1375's own bench repro
-was `rtss_he`.** Zephyr's automatic `boards/<target>.overlay` lookup keys off
-the FULLY-QUALIFIED board target, so
-`alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay` contributes nothing to
-an `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he` build and #1375 still
-reproduced there. The pad route is a SoM-level fact, not a per-core one — both
-board `.dts` files `#include <alif/ensemble_e8_peripherals.dtsi>`, where
-`utimer10`/`pwm10` live — so added
-`examples/peripheral-io/pwm-led-fade/boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay`,
-identical to the HP file below its header comment, matching the precedent
-`examples/peripheral-io/blink` already sets for its own HE/HP pair.
+Two independent derivers were each reading only the core-scoped channel
+(`Slice.libraries`), never the union with the project-wide channel
+(`project.libraries`):
 
-**2. `examples/peripheral-io/drone-autopilot` had no `boards/` directory at
-all**, while its `board.yaml` declares `peripherals: [i2c, uart, pwm, gpio]`.
-Fixing only the PWM half would have moved the failure rather than removed it:
-`autopilot_init()` opens the sensor bus at `src/autopilot.c:105` and returns
-`-1` with `I2C0 open failed` / `autopilot_init failed -- staying in DISARMED`
-long before it reaches the ESC loop at `:143`, so `ESC%d open failed` never
-prints. The new
-`examples/peripheral-io/drone-autopilot/boards/alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay`
-therefore wires the whole reachable path, every route taken from
-`metadata/e1m_modules/aen/from-alif.tsv`:
+* `scripts/alp_orchestrate/kconfig.py`'s `_slice_alp_conf` called
+  `_emit_library_hw_backends(slice_.libraries, project.sku)` — the
+  `integration.zephyr.hw_backends` accelerator matcher
+  (`CONFIG_ALP_CMSIS_DSP_HELIUM`/`_ADC_DMA`) never saw a project-wide name.
+* `scripts/alp_orchestrate/libraries.py`'s `zephyr_kconfig_lines` (the
+  project-wide emitter) read only `integration.zephyr.kconfig`, never the
+  manifest's `integration.zephyr.hw_backends.sw_fallback.kconfig` SW floor
+  (`CONFIG_ALP_CMSIS_DSP_SCALAR`) — that line was wired only into
+  `kconfig.py`'s `_per_core_library_kconfig`, the core-scoped path.
 
-- `alp-i2c0 = &i2c2` — E1M edge I2C0 is Alif I2C2, `PIN_P5_6__I2C2_SCL_C` /
-  `PIN_P5_7__I2C2_SDA_C`, with the `input-enable` + `bias-pull-down` pad pair
-  copied verbatim from the bench-validated `examples/aen/aen-i2c2-eeprom-regcheck`
-  group (do not "correct" it to `bias-pull-up` — that gives a dead bus).
-- `alp-uart1 = &uart3` — E1M edge UART1 is Alif UART3, `PIN_P1_2__UART3_RX_A` /
-  `PIN_P1_3__UART3_TX_A`; on the EVK that is `EVK_UART_PORT_ARDUINO`, which is
-  free.
-- `alp-pwm0`..`alp-pwm3` — `UT11_T1_C` (P12_7) / `UT11_T0_C` (P12_6) /
-  `UT10_T1_A` (P2_5) / `UT10_T0_A` (P2_4) through `utimer11`/`utimer10`, each
-  aliased to a `pwm-leds` consumer child rather than the controller node.
+Fixed by making both derivers read the SAME set for both channels. The hw-
+backend call now takes `libraries.scoped_names(project, slice_=slice_)` —
+the union helper `libraries.py` already exposed for exactly this purpose
+(added for tan-cli#555) — instead of `slice_.libraries` alone. The base +
+SW-fallback Kconfig set is now computed once, by a new
+`libraries.zephyr_library_kconfig(manifest)`, and both `zephyr_kconfig_lines`
+(project-wide) and `kconfig.py`'s `_per_core_library_kconfig` (core-scoped)
+call it, so a future symbol added to a manifest's `hw_backends`/`sw_fallback`
+block cannot land on only one declaration channel again.
 
-`alp-uart0` is deliberately NOT aliased: E1M edge UART0 is Alif UART5, which is
-this board target's `zephyr,console`/`zephyr,shell-uart` at 115200 — aliasing it
-would make `autopilot.c:128`'s GNSS open succeed and then reconfigure the live
-console to 9600 8N1, destroying the log output the example is diagnosed by. The
-source already tolerates its absence, and `src/mavlink.c:344` documents why
-("no free third port in v0.5"), so the GNSS and MAVLink telemetry paths stay
-disabled pending a carrier with a third UART. No `alp,pin-array` either: no
-file under `src/` contains the string `gpio`, so the declared `gpio` peripheral
-backs nothing today.
+**The behavioural call**: a library's accelerator/SW-fallback support is a
+property of the library manifest and the SoM's silicon, not of which
+`libraries:` spelling board.yaml used to select it — so the fix makes the
+project-wide form gain the symbols, not the core-scoped form lose them.
+`check_emit_snapshots.py`'s 36 golden fixtures stay unchanged (none of the
+pinned fixtures declare a project-wide library with an
+`hw_backends`/`sw_fallback` manifest section, and the new CASE this change
+adds — `examples/connectivity/coap-client-get`, see below — is regenerated
+fresh, not diffed against a pre-fix golden); `check_zephyr_conf_parity.py`'s
+98-example sweep still agrees across both call sites (`_slice_alp_conf`
+compared against itself for the CMakeLists.txt path vs. the build-plan path
+on the same core, so it is self-consistency evidence, not no-drift evidence
+— it stays green under any output change to both paths together, including
+this one). Two real examples in this repo already declare a curated library
+project-wide with an `hw_backends` manifest section, so their *actual*
+`board.yaml` emit changes:
 
-This closes the devicetree-alias gap only. `autopilot_init()` still returns
-`-2`/`-3`/`-4` unless an LSM6DSO, a BMP390 and an INA236 answer on the bus, and
-neither example's `testcase.yaml` lists an `alp_e1m_aen801_*` platform, so
-twister does not compile either overlay — the routes are verified against
-metadata and the generated board files, not against a build.
+* `examples/connectivity/coap-client-get` (`libraries: [coap]`, project-wide)
+  gains `CONFIG_ALP_COAP_NO_TLS=y` and `CONFIG_ALP_COAP_MBEDTLS=y`.
+* `examples/connectivity/modbus-server` (`libraries: [modbus]`, project-wide)
+  gains `CONFIG_ALP_MODBUS_SYNC_IO=y` and `CONFIG_ALP_MODBUS_UART_DMA=y`.
 
-**3. `tests/scripts/test_pwm_led_fade_aen_overlay.py:136` could not catch a
-wrong pad.** Its pinmux assertion was a whole-file
-`assertIn("PIN_P2_4__UT10_T0_A", text)`, satisfied by the literal already
-sitting in the overlay's own header comment — the issue measured three mutations
-(wrong pad, wrong `pwms` driver channel, `pinctrl-0`/`pinctrl-names` deleted)
-that each left the suite at 4 passed. The test now derives the expected pad and
-channel index from `metadata/e1m_modules/aen/from-alif.tsv`, anchors the pinmux
-check to the `pinctrl_pwm10`/`group0` node body instead of the whole file,
-cross-checks the `pwms` channel cell, requires the `pinctrl-0 = <&pinctrl_pwm10>`
-/ `pinctrl-names = "default"` wiring on the `pwm10` node, and adds a fifth case
-asserting the HE twin exists and matches HP below its header comment. All four
-mutations now fail: the wrong-pad one reports `pinctrl_pwm10/group0's pinmux
-must mux exactly ['PIN_P2_4__UT10_T0_A'] ... got ['PIN_P12_7__UT11_T0_A']`.
+`examples/ai/*`, `examples/audio/*`, and
+`examples/connectivity/iot-dashboard` do **not** move — every one of those is
+already `cores:`-scoped (or declares no `hw_backends`-bearing library at
+all), so they were already on the superset side of the pre-fix asymmetry and
+emit byte-identical output before and after this fix.
+
+Coverage hole closed: none of the 36 pinned `check_emit_snapshots.py` CASEs
+declared a project-wide library at all, which is why none of them moved and
+why this bug shipped invisibly. Added a `zephyr-conf` CASE for
+`examples/connectivity/coap-client-get/board.yaml` so a future regression on
+this exact path is caught by a golden diff, not only by the unit tests in
+`tests/scripts/test_library_layer.py`.
+
+`scripts/alp_orchestrate/` is hash-audited verbatim into tan-cli's mirror
+(tan-cli#556, milestoned for this same release); this fix must land here
+first, then tan-cli re-syncs the mirror and re-pins its freshness-gate
+hashes/fixtures before tan-cli#556 closes — the tan side cannot fix its copy
+ahead of this commit without going red against its own gate. Concretely,
+`python/tests/gates/test_planner_relocation_freshness.py:129` pins
+`kconfig.py` at
+`d80ab84bec3bc1aefe8640a6d5d1b43334447cb4ea87d4c25cee927ebfc2bf17` and
+`:131` pins `libraries.py` at
+`47b823e0fc06cc657a3c3068598b953e342720cf359443651a9996b93be7aaa5`; both go
+stale the moment this commit lands and need re-pinning to the new file
+hashes. No fixture under `python/tests/parity/oracle_fixtures/` references
+either `coap-client-get` or `modbus-server`, so re-pinning those two hashes
+is likely the entire tan-side follow-up — no new oracle fixture should be
+needed unless one is added deliberately for this path.
+
+**Follow-up (same issue): two more readers of the narrower channel alone.**
+A review that rendered every example `board.yaml` × every Zephyr core
+before/after the fix above found the fix didn't finish #1359 — two more call
+sites reproduced the identical "reads `slice_.libraries` (or
+`project.libraries`) alone" antipattern:
+
+* `scripts/alp_orchestrate/kconfig.py`'s `_slice_wants_inference` decided
+  whether to emit the `<alp/inference.h>` Kconfig block by checking only
+  `slice_.libraries` for `tflite-micro`, so a project-wide `libraries:
+  [tflite-micro]` (no `cores:` key) silently dropped the entire
+  `_emit_inference` section — `CONFIG_TENSORFLOW_LITE_MICRO=y`,
+  `CONFIG_ALP_SDK_INFERENCE_BACKEND_TFLM=y`, the Ethos-U/TFLM-kernel variant
+  switches, `CONFIG_HEAP_MEM_POOL_SIZE=65536` — while the identical
+  `cores:`-scoped spelling emitted it. Now reads
+  `libraries.scoped_names(project, slice_=slice_)`.
+* `scripts/alp_orchestrate/validate.py`'s rule 3 (`cores.<id>.iot.tls: true`
+  requires an mbedtls/bearssl provider) read only `slice_.libraries`, so a
+  project-wide `libraries: [mbedtls]` plus `iot.tls: true` raised
+  `OrchestratorError` — a hard refusal of a legal `board.yaml`, more severe
+  than an emit delta, since the identical `cores:`-scoped spelling loaded
+  fine. Now reads the same `libraries.scoped_names(project, slice_=slice_)`.
+* `scripts/alp_project.py`'s `--emit zephyr-conf` pre-flight validation
+  guard (the one that turns a bad `libraries:` selection into a clean
+  one-line `alp_project: ...` error instead of a mid-emit traceback) gated
+  on `if project.libraries:` alone, so a board.yaml with only a
+  `cores:`-scoped selection skipped the guard and hit the later, unwrapped
+  `_slice_alp_conf` call as an unhandled `OrchestratorError` traceback
+  instead. Now gates on `libraries.scoped_names(project)` (the whole-project
+  view, `slice_=None`).
+
+Both `kconfig.py` and `validate.py` fixes are covered by a regression test
+in the same style as the original ("declaration form does not change
+outcome"): `tests/scripts/test_library_layer.py::
+test_declaration_form_does_not_change_the_inference_block` pins the
+project-wide form against the same 13 `CONFIG_*` symbols the `cores:`-scoped
+form emits; `tests/scripts/test_orchestrate_consistency.py::
+test_consistency_tls_satisfied_by_project_wide_mbedtls` asserts the
+project-wide spelling *loads* rather than raising.
 
 ### Added — ADR 0027 proposes declaring storage regions by role, not by SoM-internal region name
 
@@ -136,7 +193,6 @@ recurred as #485, and #543 has dev's parity job failing on every alp-sdk
 dispatch since 2026-08-07. Status is **Proposed** — the ADR changes no code,
 and its migration section requires the two planners be provably equal at one
 ref before any removal begins.
-
 ### Fixed — CC3501E Wi-Fi connect no longer re-associates on every retry or reports a false "connected", `wifi status`/`wifi rssi` survive a radio op, and `wifi connect`'s own timeout budget is honoured (#1376, #1377, #1378)
 
 A wire-contract drift on `WIFI_CONNECT_STA` (0x12): the firmware was
