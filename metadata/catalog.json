@@ -3245,6 +3245,10 @@
       "script": "scripts/check_build_receipt.py"
     },
     {
+      "purpose": "Guard: every `changelog.d/*.md` fragment is well-formed (#1395).",
+      "script": "scripts/check_changelog_fragments.py"
+    },
+    {
       "purpose": "CI gate: chip-header `@par Driver status:` labels match metadata truth.",
       "script": "scripts/check_chip_header_status.py"
     },
