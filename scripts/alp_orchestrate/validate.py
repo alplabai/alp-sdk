@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
+from . import libraries as _library_layer
 from .models import OrchestratorError, Slice
 from .paths import METADATA_ROOT, REPO
 from .topology import _core_os_choices, _cross_class_os
@@ -106,8 +107,10 @@ def _validate_consistency(project: "BoardProject") -> None:
     2. `boot.signing.algorithm:` must be in the SoM family's supported
        set (see `_boot_signing_supported_for_family`).  Unknown
        families pass through (don't block on missing capability data).
-    3. `cores.<id>.iot.tls: true` requires `libraries:` (curated) OR
-       `extra_libraries:` (open-set) to include `mbedtls` or `bearssl`.
+    3. `cores.<id>.iot.tls: true` requires `libraries:` (curated,
+       project-wide OR `cores:`-scoped -- both channels checked via
+       `libraries.scoped_names`, #1359 follow-up) OR `extra_libraries:`
+       (open-set) to include `mbedtls` or `bearssl`.
     4. WARNING (not error): `cores.<id>.inference.default_arena_kib`
        larger than `cores.<id>.memory.heap_kib`; inference may OOM.
     5. WARNING (not error): `cores.<id>.power.sleep_mode != disabled`
@@ -218,7 +221,7 @@ def _validate_consistency(project: "BoardProject") -> None:
     for core_id, slice_ in project.cores.items():
         if not (slice_.iot or {}).get("tls"):
             continue
-        libs = set(slice_.libraries or [])
+        libs = set(_library_layer.scoped_names(project, slice_=slice_))
         extras = {e.get("name") for e in slice_.extra_libraries
                   if isinstance(e.get("name"), str)}
         if not (libs & _TLS_PROVIDERS) and not (extras & _TLS_PROVIDERS):
