@@ -115,6 +115,20 @@
       "ci": null
     },
     {
+      "id": "changelog-fragments",
+      "description": "Every changelog.d/*.md fragment is well-formed (foldable filename, non-empty, starts with its own ### heading) so a malformed fragment fails the PR instead of the release cut (#1395).",
+      "runner": "check-script",
+      "script": "scripts/check_changelog_fragments.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "chip-header-status",
       "description": "CI gate: chip-header `@par Driver status:` labels match metadata truth.",
       "runner": "check-script",
@@ -405,6 +419,20 @@
       ],
       "output": "none",
       "ci": null
+    },
+    {
+      "id": "helper-firmware-path",
+      "description": "Every metadata/e1m_modules/*.yaml helper_firmware[].firmware_path (when present) resolves to a real file; omission is legal and left alone (issue #1372).",
+      "runner": "check-script",
+      "script": "scripts/check_helper_firmware_path.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
     },
     {
       "id": "i2c-bus-doc-consistency",

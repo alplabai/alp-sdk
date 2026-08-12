@@ -110,10 +110,15 @@ The cut happens on `main`, and only after `dev` has been promoted to
 2. Regenerate `docs/abi/v<N>-snapshot.json` for the target
    version.  `pr-abi-snapshot.yml` (post-1.0) gates the diff.
 3. Update `metadata/sdk_version.yaml` to the new version.
-4. Slice the `## [Unreleased]` section of `CHANGELOG.md` into
+4. Fold pending `changelog.d/*.md` fragments into `CHANGELOG.md`:
+   `python3 scripts/assemble_changelog.py` (see `changelog.d/README.md`,
+   #1395). `scripts/bump_version.py` refuses the next step while any
+   fragment remains, so a skipped fold fails loudly here rather than
+   silently dropping the cycle's entries from the release.
+5. Slice the `## [Unreleased]` section of `CHANGELOG.md` into
    `## [v<N>] - YYYY-MM-DD`.
-5. Tag: `git tag -s v<N>` (signed).
-6. Push tag; the release workflow auto-creates the GitHub Release
+6. Tag: `git tag -s v<N>` (signed).
+7. Push tag; the release workflow auto-creates the GitHub Release
    with the CHANGELOG slice as the body and the source tarball
    (`alp-sdk-v<N>.tar.gz`) plus three sidecar files as artefacts:
    SHA-256 + SHA-512 checksums, and a SLSA v1.0 Build **Level 3**

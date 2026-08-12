@@ -862,11 +862,14 @@ def _per_core_library_kconfig(lib: str,
     resolved to its canonical manifest through the
     metadata/library-aliases-v1.json alias table and loaded here.
 
-    The emitted set is the union
-    of the manifest's `integration.zephyr.kconfig` (the upstream module-enable
-    line(s)) and its `integration.zephyr.hw_backends.sw_fallback.kconfig` (the
-    SDK SW floor), module-enable first and the SW-fallback marker last, deduped.
-    Header-only libraries whose SW floor is a doc comment surface that comment.
+    The emitted set is the union of the manifest's
+    `integration.zephyr.kconfig` (the upstream module-enable line(s)) and its
+    `integration.zephyr.hw_backends.sw_fallback.kconfig` (the SDK SW floor),
+    module-enable first and the SW-fallback marker last, deduped -- computed
+    by `libraries.zephyr_library_kconfig`, the same derivation the
+    project-wide channel (`libraries.zephyr_kconfig_lines`) calls, so a
+    library's base Kconfig set cannot drift between the two declaration
+    channels (#1359).
 
     Returns None when no manifest resolves (caller emits the pending-wire TODO).
     """
@@ -878,23 +881,7 @@ def _per_core_library_kconfig(lib: str,
         if not path.is_file():
             return None
         doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    zephyr = (doc.get("integration") or {}).get("zephyr") or {}
-    out: list[str] = []
-    for kc in (zephyr.get("kconfig") or []):
-        kc = str(kc)
-        if kc not in out:
-            out.append(kc)
-    swf = ((zephyr.get("hw_backends") or {}).get("sw_fallback") or {}).get("kconfig")
-    if swf:
-        swf = str(swf)
-        if swf.lstrip().startswith("#"):
-            # Header-only library: the SW floor is a documentation comment,
-            # not a real knob.  Surface it only when there is no module enable.
-            if not out:
-                out.append(swf)
-        elif swf not in out:
-            out.append(swf)
-    return out
+    return _library_layer.zephyr_library_kconfig(doc)
 
 
 def _emit_libraries(
@@ -981,21 +968,23 @@ def _emit_libraries(
     return lines
 
 
-def _slice_wants_inference(slice_: Slice) -> bool:
+def _slice_wants_inference(project: "BoardProject", slice_: Slice) -> bool:
     """True when this slice genuinely uses `<alp/inference.h>`.
 
     Two independent signals, either sufficient: `cores.<id>.inference:`
     declared (app-level tuning, e.g. `default_arena_kib:` -- the signal
     every inference example under examples/ai, examples/audio,
-    examples/camera-vision declares), OR the slice's own `libraries:`
-    pulls in `tflite-micro` (resolved through the same alias table
-    `_per_core_library_kconfig` uses -- a `cores:`-scoped top-level
-    `libraries:` entry folds into `slice_.libraries` at load time, see
-    `loader.py::_normalize_libraries`). The library signal exists because
-    `cores.<id>.inference:` is app-level TUNING, not a declaration of
-    intent -- an app that never overrides the arena default has no reason
-    to write the block, and #874's adversarial follow-up found exactly
-    that false negative (`examples/camera-vision/
+    examples/camera-vision declares), OR the slice's `libraries:` scope
+    (project-wide AND core-scoped, via `libraries.scoped_names` -- #1359
+    follow-up: reading `slice_.libraries` alone missed a project-wide
+    `libraries: [tflite-micro]` entry) pulls in `tflite-micro` (resolved
+    through the same alias table `_per_core_library_kconfig` uses -- a
+    `cores:`-scoped top-level `libraries:` entry folds into
+    `slice_.libraries` at load time, see `loader.py::_normalize_libraries`).
+    The library signal exists because `cores.<id>.inference:` is app-level
+    TUNING, not a declaration of intent -- an app that never overrides the
+    arena default has no reason to write the block, and #874's adversarial
+    follow-up found exactly that false negative (`examples/camera-vision/
     ai-object-detection-realtime`, `libraries: tflite-micro` with no
     `inference:` block). A slice with NEITHER signal stays clean (no
     unconditional emit returns, issue #874 item 4).
@@ -1004,7 +993,7 @@ def _slice_wants_inference(slice_: Slice) -> bool:
         return True
     alias = _library_alias_table()
     return any(alias.get(lib, lib) == "tflite-micro"
-               for lib in (slice_.libraries or ()))
+               for lib in _library_layer.scoped_names(project, slice_=slice_))
 
 
 def _emit_inference(
@@ -1051,7 +1040,7 @@ def _emit_inference(
         multiple core classes (E7 = A32 + M55, all three Helium /
         Neon flavours).  All three depend on BACKEND_TFLM.
     """
-    if not _slice_wants_inference(slice_):
+    if not _slice_wants_inference(project, slice_):
         return []
 
     lines: list[str] = []
@@ -1876,7 +1865,17 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     # -- folded in here (2026-07-20) so the two paths cannot silently
     # diverge on a `libraries:` entry with a hw_backends matcher; see
     # docs/adr/0020-sdk-owns-build-execution.md addendum.
-    hw_backend_lines = _emit_library_hw_backends(slice_.libraries, project.sku)
+    #
+    # Reads BOTH declaration channels (`libraries.scoped_names`), not just
+    # `slice_.libraries`.  A library's accelerator support is a property of
+    # the library manifest and the SoM's silicon, not of whether board.yaml
+    # spelled the selection as a bare/project-wide entry or a `cores:`-
+    # scoped one -- the two forms must resolve to the identical hw-backend
+    # set for the same core (#1359: a `cores:` entry was silently a
+    # SUPERSET of the project-wide form, gaining HELIUM/ADC_DMA/etc. that
+    # `cores:` reads as narrowing, not widening).
+    hw_backend_lines = _emit_library_hw_backends(
+        _library_layer.scoped_names(project, slice_=slice_), project.sku)
     if hw_backend_lines:
         lines.append("# §D.lib.loader -- per-library HW-accelerator "
                      "wiring (auto-emitted).")

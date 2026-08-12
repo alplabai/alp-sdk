@@ -379,9 +379,18 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
     # Resolve + compatibility-validate any top-level `libraries:` once, up
     # front, so an unknown name or a failed `requires:` constraint surfaces
     # as a clean one-line error (ADR 0018) rather than a traceback mid-emit.
-    if project.libraries:
+    #
+    # Gated on BOTH declaration channels (`libraries.scoped_names(project)`,
+    # slice_=None -- the whole-project view), not just `project.libraries`:
+    # a board.yaml with only a `cores:`-scoped selection (no project-wide
+    # entry) used to skip this guard entirely, so its `resolve_selection`
+    # failure surfaced later as an unhandled traceback out of the per-core
+    # `zephyr-conf` loop below (which is not wrapped in a try/except)
+    # instead of this function's clean one-line error contract (#1359
+    # follow-up).
+    from alp_orchestrate.libraries import resolve_selection, scoped_names
+    if scoped_names(project):
         try:
-            from alp_orchestrate.libraries import resolve_selection
             resolve_selection(project, args.metadata_root)
         except OrchestratorError as e:
             print(f"alp_project: {e}", file=sys.stderr)
