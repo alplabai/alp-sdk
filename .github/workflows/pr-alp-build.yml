@@ -106,7 +106,7 @@ jobs:
       # different CLI surface).
       - name: Install yq (mikefarah)
         run: |
-          sudo wget -qO /usr/local/bin/yq \
+          sudo wget --tries=3 --waitretry=5 -O /usr/local/bin/yq \
               https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           sudo chmod +x /usr/local/bin/yq
           yq --version
