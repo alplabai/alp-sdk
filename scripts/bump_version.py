@@ -10,6 +10,11 @@ can be undone locally.
 
 Workflow:
 
+    # 0. Fold changelog.d/ fragments into CHANGELOG.md first (#1395) --
+    #    slice_changelog() below refuses to run while any remain, but
+    #    folding explicitly here keeps the diff reviewable before the bump.
+    python3 scripts/assemble_changelog.py
+
     # 1. Verify everything looks ready (no-op dry run)
     python3 scripts/bump_version.py --to 1.0.0 --dry-run
 
@@ -78,6 +83,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 SDK_VERSION_YAML = REPO / "metadata" / "sdk_version.yaml"
 CHANGELOG = REPO / "CHANGELOG.md"
+CHANGELOG_D = REPO / "changelog.d"
 VERSION_H = REPO / "include" / "alp" / "version.h"
 PYPROJECT = REPO / "pyproject.toml"
 BANNER_C = REPO / "src" / "zephyr" / "alp_banner.c"
@@ -122,6 +128,13 @@ def update_sdk_version_yaml(new_version: str, dry_run: bool) -> None:
     print(f"  updated {SDK_VERSION_YAML.relative_to(REPO)}: -> version: {new_version}")
 
 
+def _pending_changelog_fragments() -> list[Path]:
+    """changelog.d/*.md fragments not yet folded into CHANGELOG.md (#1395)."""
+    if not CHANGELOG_D.is_dir():
+        return []
+    return sorted(p for p in CHANGELOG_D.glob("*.md") if p.name != "README.md")
+
+
 def slice_changelog(new_version: str, dry_run: bool) -> None:
     """
     Turn `## [Unreleased] - vX candidate` into
@@ -134,7 +147,23 @@ def slice_changelog(new_version: str, dry_run: bool) -> None:
     by `## \\[v{VERSION}\\]` and takes the FIRST match, so the older
     section -- the one describing what actually shipped -- is silently
     orphaned from the published release notes.
+
+    Also refuses outright if changelog.d/ still holds unfolded fragments
+    (#1395): slicing now would seed the fresh [Unreleased] section BELOW
+    the new [vX] heading, so every fragment authored this cycle would
+    silently ship with no changelog entry at all. Run
+    `python3 scripts/assemble_changelog.py` first.
     """
+    pending = _pending_changelog_fragments()
+    if pending:
+        names = ", ".join(p.name for p in pending)
+        raise SystemExit(
+            f"bump_version: {len(pending)} unfolded changelog.d/ fragment(s) "
+            f"remain ({names}); run `python3 scripts/assemble_changelog.py` "
+            f"and commit the result before cutting v{new_version} -- slicing "
+            f"now would silently drop them from the release."
+        )
+
     text = CHANGELOG.read_text(encoding="utf-8")
     today = dt.date.today().isoformat()
     existing = re.compile(rf"^## \[v{re.escape(new_version)}\][^\n]*$", re.MULTILINE).search(text)
