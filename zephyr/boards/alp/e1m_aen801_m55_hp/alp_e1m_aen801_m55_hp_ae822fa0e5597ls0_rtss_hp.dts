@@ -20,9 +20,10 @@
  * physically separate from HE's -- both cores' images can be
  * resident in MRAM at once (see the partition map below and
  * metadata/e1m_modules/E1M-AEN801.yaml `memory_map:`).  OTA is DEFERRED
- * (CONFIG_SINGLE_APPLICATION_SLOT=y, no secondary/scratch slot) so both
- * 2688 KiB code slots fit the 5632 KiB App MRAM alongside the ~2.6 MiB NPU
- * MRAM-model budget; see zephyr/sysbuild/aen/README.md.
+ * (CONFIG_SINGLE_APPLICATION_SLOT=y, no secondary/scratch slot): the
+ * per-core code slots (HE 2688 KiB + HP 2688 KiB) share the
+ * 5632 KiB App MRAM with boot, storage and the NPU MRAM-model
+ * budget -- see zephyr/sysbuild/aen/README.md for the sizing rationale.
  *
  * Inter-core IPC (the APSS<->RTSS-HP MHUv2 doorbell pair) + the on-module
  * peripheral buses (GPIO / I2C / SPI / Ethernet) are added alongside the
@@ -120,7 +121,8 @@
  *   mcuboot  0x000000  64 KiB
  *   image-0  0x2b0000  2688 KiB   (primary slot, code-partition)
  *   reserved 0x550000  64 KiB   (ex-scratch; unused, OTA deferred)
- *   storage  0x560000  128 KiB    (settings / NVS)
+ *   storage  0x560000  96 KiB    (settings / NVS)
+ *   atoc     0x578000  32 KiB    (SE-owned: SETOOLS top-anchors the ATOC here -- do NOT write, #1289)
  *                      = 2944 KiB (of 5632 KiB App MRAM total)
  *
  * MRAM-only: the SoM OSPI NOR + HyperRAM are not populated on this batch, so
@@ -168,7 +170,12 @@
 
 			storage_partition: partition@560000 {
 				label = "storage";
-				reg = <0x560000 DT_SIZE_K(128)>;
+				reg = <0x560000 DT_SIZE_K(96)>;
+			};
+
+			atoc_partition: partition@578000 {
+				label = "atoc";
+				reg = <0x578000 DT_SIZE_K(32)>;
 			};
 		};
 	};

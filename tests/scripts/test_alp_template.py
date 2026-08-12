@@ -613,6 +613,65 @@ def test_scaffold_readme_upgrades_bare_board_id_even_for_the_passthrough_sku():
     assert "alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp" in readme
 
 
+def test_scaffold_readme_rewrites_bare_mention_alongside_qualified_one():
+    """Issue #1266 review MINOR: a README naming the source board BOTH
+    ways -- a qualified `west build` line AND a separate bare mention
+    (e.g. lvgl-widgets-demo's README:36 `west build -b
+    alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp` vs :59's bare
+    "target board (`alp_e1m_aen801_m55_hp`)") -- used to only get the
+    qualified one rewritten; the bare one silently kept naming the
+    source family inside a cross-family scaffold."""
+    source_board = "alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp"
+    target_board = "alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33"
+    text = (
+        "west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp ex\n"
+        "west flash\n"
+        "\n"
+        "this app's target board (`alp_e1m_aen801_m55_hp`) has no alias yet\n"
+    )
+    out = alp_template._scaffold_readme(
+        text, "examples/display/widget", "main",
+        source_board=source_board, target_board=target_board,
+    )
+    assert "alp_e1m_aen801_m55_hp" not in out
+    assert out.count(target_board) == 2
+
+
+def test_scaffold_readme_passthrough_does_not_duplicate_qualified_suffix():
+    """The same-sku (source_board == target_board) case must not run the
+    short-prefix fallback over a mention the exact-match step already
+    left correctly qualified -- that would append the `/<soc>/<core>`
+    suffix a second time (`.../rtss_hp/ae822fa0e5597ls0/rtss_hp`)."""
+    board = "alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp"
+    text = f"west build -b {board} examples/display/widget\n"
+    out = alp_template._scaffold_readme(
+        text, "examples/display/widget", "main",
+        source_board=board, target_board=board,
+    )
+    assert out.count("ae822fa0e5597ls0/rtss_hp") == 1
+
+
+def test_scaffold_readme_rewrites_west_flash_after_every_m33_sm_board_line():
+    """A two-core V2N/V2M scaffold README can carry more than one
+    `<board target>\\nwest flash` pair (one per core) -- every one of
+    them needs `--host <board-ip>` appended, not just the first."""
+    target_board = "alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33"
+    text = (
+        f"west build -b {target_board} ex/core0\n"
+        "west flash\n"
+        "\n"
+        f"west build -b {target_board} ex/core1\n"
+        "west flash\n"
+    )
+    out = alp_template._scaffold_readme(
+        text, "examples/multicore/widget", "main",
+        source_board="alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp",
+        target_board=target_board,
+    )
+    assert out.count("west flash --host <board-ip>") == 2
+    assert "\nwest flash\n" not in out
+
+
 def test_substitute_board_yaml_sku_rejects_ambiguous_sku_line():
     """More than one line matching the `sku:` pattern is unresolvable --
     which one is the real `som.sku:`? -- so it must hard-error rather
@@ -647,6 +706,169 @@ def test_derive_core_renames_picks_the_real_app_core_not_alphabetical_first():
     renames = alp_template._derive_core_renames(
         ["m33_sm"], "E1M-AEN801", alp_template.METADATA_ROOT)
     assert renames == {"m33_sm": "m55_hp"}
+
+
+# --------------------------------------------------------------------------
+# render_to_envelope's per-core CMakeLists.txt map (issue #1275 item 1) --
+# synthetic fixture, since no SHIPPED template today needs a cross-family
+# rename on a dual-Zephyr-core template (E1M-AEN801 is the only SKU with
+# two Zephyr M cores in the whole catalog, and every dual-Zephyr-core
+# template only supports that one SKU -- see multicore-mailbox's
+# `supported.som_skus`). Before this fix, ONE re-derived rename
+# (`app_core_sub`, keyed off the first m-prefixed core) was applied to
+# EVERY `*CMakeLists.txt` file a template owned; on a second Zephyr core
+# whose CMakeLists.txt carries a DIFFERENT `--core` literal, that either
+# silently mismatched (a wrong `--core` value written) or, as here,
+# hard-failed with "must have exactly one `--core <old>`... found 0"
+# because the literal being searched for isn't the one that file has.
+# --------------------------------------------------------------------------
+
+def _write_dual_core_fixture(root: Path) -> tuple[Path, Path]:
+    """A minimal two-Zephyr-core template (root `CMakeLists.txt` baking
+    `--core m55_hp`, `peer/CMakeLists.txt` baking `--core m55_he`) plus a
+    metadata_root with two SoM presets: the example's own (SRC, same core
+    ids) and a target (DST) whose topology renames BOTH cores to
+    DIFFERENT ids -- so a correct fix must apply the RIGHT rename to the
+    RIGHT file, not one rename to both. Returns (catalog_path, metadata_root)."""
+    example_dir = root / "examples" / "fixture" / "dual-core-app"
+    (example_dir / "src").mkdir(parents=True)
+    (example_dir / "peer").mkdir(parents=True)
+    (example_dir / "board.yaml").write_text(
+        "som:\n"
+        "  sku: E1M-SRCTEST\n"
+        "preset: src-preset\n"
+        "cores:\n"
+        "  m55_hp:\n"
+        "    app: ./src\n"
+        "  m55_he:\n"
+        "    app: ./peer\n",
+        encoding="utf-8", newline="\n",
+    )
+    (example_dir / "src" / "main.c").write_text("/* hp */\n", encoding="utf-8")
+    (example_dir / "peer" / "main.c").write_text("/* he */\n", encoding="utf-8")
+    (example_dir / "CMakeLists.txt").write_text(
+        "# fixture\nalp_project.py --emit zephyr-conf --core m55_hp\n",
+        encoding="utf-8", newline="\n",
+    )
+    (example_dir / "peer" / "CMakeLists.txt").write_text(
+        "# fixture\nalp_project.py --emit zephyr-conf --core m55_he\n",
+        encoding="utf-8", newline="\n",
+    )
+
+    metadata_root = root / "metadata"
+    (metadata_root / "e1m_modules").mkdir(parents=True)
+    (metadata_root / "e1m_modules" / "E1M-SRCTEST.yaml").write_text(
+        "default_board: SRC-PRESET\n"
+        "topology:\n"
+        "  m55_hp:\n"
+        "    board: src_board/soc/m55_hp\n"
+        "  m55_he:\n"
+        "    board: src_board/soc/m55_he\n",
+        encoding="utf-8", newline="\n",
+    )
+    (metadata_root / "e1m_modules" / "E1M-DSTTEST.yaml").write_text(
+        "default_board: DST-PRESET\n"
+        "topology:\n"
+        "  mX:\n"
+        "    board: dst_board/soc/mX\n"
+        "  mY:\n"
+        "    board: dst_board/soc/mY\n",
+        encoding="utf-8", newline="\n",
+    )
+
+    catalog = {
+        "schemaVersion": 1,
+        "description": "test fixture catalog",
+        "templates": [
+            {
+                "id": "dual-core-app",
+                "title": "Dual Core App",
+                "archetype": "multicore-mailbox",
+                "example": "examples/fixture/dual-core-app",
+                "description": "fixture",
+                "supported": {
+                    "families": ["alif-ensemble"],
+                    "som_skus": ["E1M-SRCTEST", "E1M-DSTTEST"],
+                    "core_classes": ["m"],
+                    "runtimes": ["zephyr"],
+                },
+                "cores": [
+                    {"id": "m55_hp", "dir": "./src", "os": "zephyr"},
+                    {"id": "m55_he", "dir": "./peer", "os": "zephyr"},
+                ],
+                "requires": {
+                    "portable_apis": [], "libraries": [], "chips": [],
+                    "routes": [], "generated_artifacts": [],
+                    "test_backend": ["native_sim"],
+                },
+                "files": {
+                    "user_owned": [
+                        "board.yaml", "CMakeLists.txt", "src/main.c",
+                        "peer/CMakeLists.txt", "peer/main.c",
+                    ],
+                    "generated": [],
+                },
+                "parameters": [],
+                "test": {
+                    "testcase_yaml": [], "native_sim_scenarios": [],
+                    "cross_compile_matrix": [],
+                },
+                "status": "preview",
+                "note": "fixture only, not a real template",
+            }
+        ],
+    }
+    catalog_path = root / "catalog.json"
+    catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+    return catalog_path, metadata_root
+
+
+def test_render_to_envelope_renames_each_zephyr_cores_own_cmakelists(tmp_path):
+    catalog_path, metadata_root = _write_dual_core_fixture(tmp_path)
+
+    envelope = dict(alp_template.render_to_envelope(
+        "dual-core-app", "E1M-DSTTEST",
+        catalog_path=catalog_path, base_dir=tmp_path, metadata_root=metadata_root))
+
+    # Each file's OWN core got its OWN rename -- not one rename smeared
+    # across both files (which would leave one wrong, or -- as it did
+    # before this fix -- raise TemplateError on the second file instead).
+    assert "--core mX" in envelope["CMakeLists.txt"]
+    assert "m55_hp" not in envelope["CMakeLists.txt"]
+    assert "--core mY" in envelope["peer/CMakeLists.txt"]
+    assert "m55_he" not in envelope["peer/CMakeLists.txt"]
+
+
+def test_render_to_envelope_passthrough_keeps_each_cores_own_literal(tmp_path):
+    """Same fixture, requesting the example's OWN sku (no rename at
+    all): both CMakeLists.txt must stay byte-identical to the source,
+    each keeping ITS OWN core's literal -- never swapped."""
+    catalog_path, metadata_root = _write_dual_core_fixture(tmp_path)
+
+    envelope = dict(alp_template.render_to_envelope(
+        "dual-core-app", "E1M-SRCTEST",
+        catalog_path=catalog_path, base_dir=tmp_path, metadata_root=metadata_root))
+
+    assert "--core m55_hp" in envelope["CMakeLists.txt"]
+    assert "--core m55_he" in envelope["peer/CMakeLists.txt"]
+
+
+def test_cmake_core_map_rejects_traversal_in_core_dir(tmp_path):
+    """A catalog `cores[].dir` of `../x` must be rejected via the same
+    resolve-then-contain guard (#1126) every other catalog-sourced path
+    in this file uses -- `_cmake_core_map` used to hand `core["dir"]`
+    straight to `_zephyr_app_dir` (no containment check of its own) and
+    then `.relative_to(example_dir)`, which raises a bare ValueError
+    instead of PathEscapeError/TemplateError when the dir escapes."""
+    example_dir = tmp_path / "examples" / "fixture" / "escape-app"
+    example_dir.mkdir(parents=True)
+    record = {
+        "cores": [
+            {"id": "m55_hp", "dir": "../escape", "os": "zephyr"},
+        ],
+    }
+    with pytest.raises(alp_template.PathEscapeError):
+        alp_template._cmake_core_map(record, example_dir)
 
 
 # --------------------------------------------------------------------------

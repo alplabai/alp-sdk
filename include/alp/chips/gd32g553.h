@@ -258,9 +258,7 @@ typedef enum {
      * `bridge_hw_adc_dsp_*` HAL bodies land in the GD32 firmware
      * tree.  Host helpers in `chips/gd32g553/` honour the same
      * NOSUPPORT contract by routing through cmd_send unchanged.
-     * See `docs/gd32-bridge-protocol.md` §3.x for the wire layout and
-     * `memory/project_wave2_dsp_pipeline_design.md` for design
-     * context. */
+     * See `docs/gd32-bridge-protocol.md` §3.x for the wire layout. */
 	GD32G553_CMD_ADC_DSP_CHAIN_OPEN = 0x37,
 	GD32G553_CMD_ADC_DSP_STAGE_PUSH = 0x38,
 	GD32G553_CMD_ADC_DSP_CHAIN_BIND = 0x39,

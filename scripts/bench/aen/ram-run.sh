@@ -39,10 +39,17 @@ JLINK="$(bench_jlink_exe)" || exit $?
 # Select the AEN probe by serial when JLINK_SN is set (bench-env.sh resolves it
 # from JLINK_SN/JLINK_SERIAL) -- on alplab-gw, JLinkExe otherwise picks an
 # arbitrary probe among the V2N CM33 DAP / AEN E8 / GD32 bridge and either
-# fails to connect or attaches the wrong one. Leaving JLINK_SN unset preserves
-# today's single-probe behaviour exactly. NOTE: this is read/RAM-run only (no
-# MRAM write) and this script does not confirm the SW-DP ID the way
-# flash-jlink-mramxip.sh does before a write -- see README/gate note.
+# fails to connect or attaches the wrong one.
+#
+# Leaving JLINK_SN unset is NOT a no-op: an earlier revision of this comment
+# claimed it "preserves today's single-probe behaviour exactly", which was true
+# when only one probe was attached and is false now. alplab-gw carries three,
+# two sharing a cloned OEM serial, and an unselected run there fails every
+# command with "Cannot connect to the probe/programmer" (alp-sdk#1318). That is
+# why the connect assertion below is mandatory rather than advisory.
+#
+# NOTE: this is read/RAM-run only (no MRAM write) and this script does not
+# confirm the SW-DP ID the way flash-jlink-mramxip.sh does before a write.
 JLINK_ARGS=("$JLINK")
 [ -n "${JLINK_SN:-}" ] && JLINK_ARGS+=(-SelectEmuBySN "$JLINK_SN")
 ELF="$BD/zephyr/zephyr.elf"
@@ -133,6 +140,29 @@ if (( BASE_RAW != 0x0 && BASE_RAW != 0x50000000 && BASE_RAW != 0x58000000 &&
 	exit 6
 fi
 
+# SAFETY GATE -- confirm the AEN E8 is on the other end BEFORE loadbin+go.
+#
+# Flow C is not a read: it writes an AEN-linked image into ITCM and executes
+# it. Two probes on this bench share OEM serial 603000869, and JLinkExe has
+# no USB-path selector, so JLINK_SN cannot disambiguate them -- landing this
+# on the GD32 probe would execute foreign code on a DIFFERENT board, held
+# under a different reservation that this one does not cover (alp-sdk#1312).
+#
+# Read-only connect first; nothing is written until the DP ID matches. The
+# MRAM writers have had this gate since #1069; Flow C -- the flow people run
+# most often -- did not.
+cat > /tmp/ram-run-preflight.jlink <<EOF
+si SWD
+speed $JLINK_SPEED
+device $JLINK_DEVICE_READ
+connect
+exit
+EOF
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/ram-run-preflight.jlink \
+  > /tmp/ram-run-preflight.out 2>&1 || true
+bench_jlink_assert_connected /tmp/ram-run-preflight.out "RAM-run preflight" || exit 7
+bench_jlink_assert_aen_dpidr /tmp/ram-run-preflight.out "RAM-run preflight" || exit 4
+
 SCRIPT=$(mktemp /tmp/jlink.XXXX.jlink)
 {
   echo connect
@@ -148,6 +178,11 @@ SCRIPT=$(mktemp /tmp/jlink.XXXX.jlink)
 } > "$SCRIPT"
 echo ">>> RAM-run $(basename "$BD")  entry=$ENTRY  base=$BASE  ram_console_buf=$BUF  sleep=${SLEEP}ms" >&2
 "${JLINK_ARGS[@]}" -device "$JLINK_DEVICE_READ" -if SWD -speed "$JLINK_SPEED" -nogui 1 -CommanderScript "$SCRIPT" 2>/tmp/jlink.err > /tmp/jlink.out || true
+# JLinkExe exits 0 even when it never opened the probe, so the `|| true` above
+# cannot be relied on. Without this the decoder below prints an EMPTY console
+# block for a pure infrastructure failure, which reads as a crashed app
+# (alp-sdk#1318). Fail before decoding, not after.
+bench_jlink_assert_connected /tmp/jlink.out "RAM-run $(basename "$BD")" || { rm -f "$SCRIPT"; exit 7; }
 echo "----- RAM console (decoded) -----"
 # Decode the 'ADDR = HH HH ...' mem8 lines into ASCII; stop at first NUL run.
 awk '

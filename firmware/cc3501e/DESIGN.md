@@ -53,7 +53,7 @@ The host waits for READY before the reply header and reply payload
 phases.  Firmware side: `hal/ti/transport_hw_ti_spi.c` (a `SPI_SLAVE` +
 `SPI_MODE_CALLBACK` state machine that replays the captured frame through
 the silicon-free byte seams and advances on transfer completion).  Host
-side: `chips/cc3501e/cc3501e.c` `cc3501e_request()` (matching four-phase
+side: `chips/cc3501e/cc3501e_core.c` `cc3501e_request()` (matching four-phase
 sequence + `resp_to_status()` on `payload[0]`).  Host + firmware are
 reconciled to each other and to the header, and this hardware-SS0 bridge
 has been bench-validated on E1M-AEN801.
@@ -154,8 +154,10 @@ firmware redesigns:
 3. **SDIO-device.** Implement the §21 register bring-up in
    `transport_hw_ti_sdio.c` if/when SDIO is needed (SPI is the default).
 4. **Flashing.** The CC3501E is Alp-OTA-updated (`update_channel:
-   alp_ota_spi_otp`), never customer-flashed; bench units are
-   warm-programmed via SWD/J-Link (see `docs/cc3501e-production.md`).
+   alp_ota_spi_otp`, `flash_policy: recovery_only`); a customer flash
+   is permitted only to recover a bricked device, with Alp Lab-supplied
+   binaries.  Bench units are warm-programmed via SWD/J-Link (see
+   `docs/cc3501e-production.md`).
    The retired public `cc3501e_usb_bootloader` backend and
    `flash.py` release/bench helper now live in `alp-sdk-internal`
    as Alp-internal OTA-build tooling.

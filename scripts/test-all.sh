@@ -488,9 +488,15 @@ stage_pytest_scripts() {
     python3 -m pytest tests/scripts/ -q || return 1
 
     # tests/parity/ is NOT under tests/scripts/, so the seam-1 comparator's own
-    # 11 unit tests were excluded from this stage AND from parity-seam1.yml,
+    # 15 unit tests were excluded from this stage AND from parity-seam1.yml,
     # which invoked only the comparator. Run them here too so a local
     # `test-all.sh` green means the same thing CI's does.
+    #
+    # NOT the same as running the comparator: this stage still does NOT invoke
+    # `tests/parity/seam1_field_diff.py` against the frozen oracle -- only
+    # parity-seam1.yml does. A green test-all.sh therefore does NOT clear the
+    # `parity-seam1` gate; run the comparator separately before pushing:
+    #   python3 tests/parity/seam1_field_diff.py --sdk . --oracle tests/parity/oracle
     if [ -f tests/parity/test_seam1_field_diff.py ]; then
         python3 -m pytest tests/parity/test_seam1_field_diff.py -q || return 1
     fi
@@ -784,13 +790,20 @@ stage_generated_files() {
         echo "git add -N failed -- an expected generated path is missing from the tree"
         return 1
     fi
-    # Ignore only the snapshot's "generated" date line, like the CI gate.
-    # metadata/socs/renesas/rzv2n/n44.json only actually moves above when
-    # gen_soc_peripheral_instances.py found a resolvable Zephyr checkout
-    # (see the comment above its invocation) -- when it didn't, this path
-    # is untouched and simply contributes no diff, same as any other
-    # unaffected path in this list.
-    if ! git diff --quiet --ignore-matching-lines='"generated":' -- \
+    # No line-mask here: abi_snapshot.py's own write-skip guard is what
+    # keeps a no-op regen from touching the snapshot's "generated" line
+    # at all (issue #1232), so this diff sees zero lines changed for
+    # that case with no help needed -- matching pr-generated-files.yml's
+    # own `git diff` step, which drops the mask for the same reason. A
+    # real content change fails on its content lines regardless, so
+    # masking "generated" would only ever hide a regression in that
+    # guard, never a false positive. metadata/socs/renesas/rzv2n/n44.json
+    # only actually moves above when gen_soc_peripheral_instances.py
+    # found a resolvable Zephyr checkout (see the comment above its
+    # invocation) -- when it didn't, this path is untouched and simply
+    # contributes no diff, same as any other unaffected path in this
+    # list.
+    if ! git diff --quiet -- \
             include/alp docs/abi src/cap.c src/status_strings.c \
             metadata/catalog.json metadata/error-catalog.json metadata/pinmux \
             metadata/socs/renesas/rzv2n/n44.json \
@@ -798,7 +811,7 @@ stage_generated_files() {
             docs/verification-status.md \
             docs/diagnostics 2>/dev/null; then
         echo "generated files are OUT OF SYNC -- regenerated in place; git add + commit:"
-        git --no-pager diff --stat --ignore-matching-lines='"generated":' -- \
+        git --no-pager diff --stat -- \
             include/alp docs/abi src/cap.c src/status_strings.c \
             metadata/catalog.json metadata/error-catalog.json metadata/pinmux \
             metadata/socs/renesas/rzv2n/n44.json \

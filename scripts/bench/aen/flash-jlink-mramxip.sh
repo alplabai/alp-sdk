@@ -116,18 +116,7 @@ exit
 EOF
 $JLINK -nogui 1 -CommanderScript /tmp/flowd-mramxip-preflight.jlink \
   > /tmp/flowd-mramxip-preflight.out 2>&1 || true
-if grep -qi "$GD32_DPIDR" /tmp/flowd-mramxip-preflight.out; then
-  echo "!! ABORT: probe reports SW-DP IDR 0x$GD32_DPIDR -- that is the V2N-M1" >&2
-  echo "   GD32, NOT the AEN E8. Wrong probe selected (JLINK_SN='$JLINK_SN')." >&2
-  echo "   Refusing to write MRAM. See /tmp/flowd-mramxip-preflight.out." >&2
-  exit 4
-fi
-if ! grep -qi "$AEN_DPIDR" /tmp/flowd-mramxip-preflight.out; then
-  echo "!! ABORT: expected AEN E8 SW-DP IDR 0x$AEN_DPIDR not seen on connect." >&2
-  echo "   Refusing to write MRAM -- check JLINK_SN / wiring / probe selection." >&2
-  cat /tmp/flowd-mramxip-preflight.out >&2
-  exit 4
-fi
+bench_jlink_assert_aen_dpidr /tmp/flowd-mramxip-preflight.out "MRAM write preflight" || exit 4
 echo ">>> DPIDR gate OK: probe confirmed AEN E8 (0x$AEN_DPIDR)" >&2
 
 # 1. stage the app + write the slot0 (mramAddress) signed-ATOC config.
@@ -198,6 +187,10 @@ mem8 $BUF, $SIZE
 exit
 EOF
   $JLINK -nogui 1 -CommanderScript /tmp/flowd-mramxip-read.jlink 2>/tmp/flowd-mramxip-rd.err > /tmp/flowd-mramxip-rd.out || true
+  # JLinkExe exits 0 even when it never opened the probe, so `|| true` above
+  # hides a total connect failure and the decode below would render it as
+  # empty target output (alp-sdk#1318).
+  bench_jlink_assert_connected /tmp/flowd-mramxip-rd.out "Flow D mramxip read-back" || exit 7
   echo "----- $NAME RAM console (flow-D MRAM-XIP flashed, SE-booted) -----"
   awk '/^[0-9A-Fa-f]+ = / { for (i=3;i<=NF;i++){ if ($i !~ /^[0-9A-Fa-f][0-9A-Fa-f]$/) continue; b=strtonum("0x"$i); if(b==0){nul++; if(nul>6)exit; next} nul=0; if(b==10||b==13){printf "\n";continue} if(b>=32&&b<127)printf "%c",b } }' /tmp/flowd-mramxip-rd.out
   echo; echo "--------------------------------------------------------"

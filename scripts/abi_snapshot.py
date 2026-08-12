@@ -696,6 +696,73 @@ def diff(prev: dict[str, Any], curr: dict[str, Any]) -> list[str]:
     return msgs
 
 
+def _only_generated_date_differs(existing_path: Path, new_snapshot: dict[str, Any]) -> bool:
+    """True if `existing_path` holds a real ISO `generated` date AND
+    re-serializing `new_snapshot` with that date spliced in reproduces
+    `existing_path` byte-for-byte -- i.e. writing it for real would
+    touch nothing but that one field.
+
+    Every full `scripts/test-all.sh` run regenerates the current
+    snapshot unconditionally, so with no such check a same-day-clean
+    rerun still stamped today's date and dirtied the file (issue
+    #1232) -- training reviewers to expect (and ignore) an ABI-diff-
+    free date churn on this exact file, which is precisely the wrong
+    habit for a file whose only purpose is to be diffed for real ABI
+    drift.
+
+    Compares the CANONICAL bytes this script would write, not parsed
+    dicts: a dict compare would treat any semantics-preserving
+    corruption of the file on disk (hand-reindented, keys unsorted) as
+    "unchanged" and leave it in place forever, invisible to the
+    "generated files in sync" gate -- the real v0.15 snapshot
+    reindented to indent=4 is 599,988 bytes against the canonical
+    479,576 the dict would call equal.  A byte compare rejects it,
+    because it doesn't serialize back to the exact text this script
+    writes.
+
+    `generated` is spliced from `existing` into `patched` before that
+    comparison (see below), so this guard cannot detect corruption
+    confined to that one field by a byte compare alone -- it validates
+    `existing["generated"]` is a real ISO date first instead, so a
+    hand-edited `"generated": "NOT-A-DATE"` fails that check and falls
+    through to a real write, which overwrites it with a fresh valid
+    date rather than leaving it spliced into every future no-op rerun.
+
+    Returns False (caller writes as normal) for a missing existing
+    file, an undecodable or unparsable (non-UTF-8, non-JSON) one, or a
+    JSON-valid file that isn't an object -- none of those can be
+    spliced or compared. An invalid `generated` field (not a real ISO
+    date) COULD still be spliced and byte-compared, but is refused by
+    design: splicing a corrupt value through would let it survive
+    every future no-op rerun instead of being replaced by a fresh
+    valid one. All four cases fall through to the real write path
+    rather than a silent no-op.
+    """
+    try:
+        # read_bytes().decode(), not read_text(): read_text()'s universal-
+        # newline mode collapses CRLF to LF, which would compare a CRLF
+        # copy of this file as byte-identical to the canonical LF text
+        # the write side (write_text(..., newline="")) actually produces.
+        existing_text = existing_path.read_bytes().decode("utf-8")
+        existing = json.loads(existing_text)
+    except (OSError, ValueError):
+        # ValueError covers json.JSONDecodeError (a subclass) and the
+        # UnicodeDecodeError .decode("utf-8") raises on a non-UTF-8
+        # existing file (also a ValueError subclass) -- both are an
+        # unparsable existing file, so both fall through to the real
+        # write path instead of crashing `--output`.
+        return False
+    if not isinstance(existing, dict):
+        return False
+    existing_generated = existing.get("generated")
+    try:
+        dt.date.fromisoformat(existing_generated)
+    except (TypeError, ValueError):
+        return False
+    patched = dict(new_snapshot, generated=existing_generated)
+    return json.dumps(patched, indent=2, sort_keys=True) + "\n" == existing_text
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -805,12 +872,19 @@ def main() -> int:
     payload = json.dumps(snapshot, indent=2, sort_keys=True) + "\n"
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
-        # newline="": git normalizes CRLF back to LF on `git add`, so a
-        # plain write_text() here never reaches a commit or reds CI --
-        # it just leaves this file whole-file-dirty in every working
-        # tree on Windows, burying the one real line that changed.
-        args.output.write_text(payload, encoding="utf-8", newline="")
-        print(f"wrote {args.output} ({len(snapshot['headers'])} headers)")
+        if args.output.exists() and _only_generated_date_differs(args.output, snapshot):
+            # Substance identical to what's already committed -- leave
+            # the file untouched so `generated` keeps meaning "when the
+            # ABI last actually changed", not "when someone last ran
+            # the gate" (#1232).
+            print(f"{args.output} unchanged (ABI identical; generated date left as-is)")
+        else:
+            # newline="": git normalizes CRLF back to LF on `git add`, so a
+            # plain write_text() here never reaches a commit or reds CI --
+            # it just leaves this file whole-file-dirty in every working
+            # tree on Windows, burying the one real line that changed.
+            args.output.write_text(payload, encoding="utf-8", newline="")
+            print(f"wrote {args.output} ({len(snapshot['headers'])} headers)")
     else:
         sys.stdout.write(payload)
     return 0

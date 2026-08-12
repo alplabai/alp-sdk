@@ -56,7 +56,7 @@ provisioned (`CONFIG_ALP_SDK_HW_INFO=y`); otherwise it falls back to the
 build-time `CONFIG_ALP_SDK_SOM_SKU` (board.yaml `som.sku`), then the raw
 `CONFIG_BOARD`.  The SoC name, the per-core complement (with the active core
 marked), the NPU list, and the total on-chip SRAM/MRAM are data-driven from the
-SoC spec JSON (`CONFIG_ALP_SDK_SOC_*`, emitted by `scripts/alp_orchestrate.py`);
+SoC spec JSON (`CONFIG_ALP_SDK_SOC_*`, emitted by `scripts/alp_orchestrate/`);
 a build without those configs falls back to the devicetree (the running-core
 clock and the chosen sram/flash region sizes).
 

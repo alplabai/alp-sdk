@@ -153,7 +153,7 @@ Both are first-class — pick whichever fits:
   `<alp/e1m_pinout.h>` (E1M) or `<alp/e1m_x_pinout.h>` (E1M-X). The
   standalone path is not a fallback — it's what the studio path also
   compiles down to.
-- **alp-studio codegen.** [alp-studio](https://github.com/alplabai/alp-studio)
+- **alp-studio codegen.** `alplabai/alp-studio` (not a public GitHub repo)
   reads this repo's per-SoM presets (`metadata/e1m_modules/<SKU>.yaml`), runs
   its pin allocator, and emits the same `<alp/...>` calls you'd write by
   hand.

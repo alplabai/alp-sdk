@@ -1516,7 +1516,7 @@ tests:
 
   alp_sdk.example.acoustic_anomaly_wind_turbine.aen_build:
     platform_allow:
-      - ensemble_e8_dk/ae402fa0e5597le0/rtss_hp
+      - ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp
     build_only: true
     tags:
       - alp-sdk
@@ -1616,7 +1616,7 @@ WTAC,12.0,17.4,0.87,0.62,BLADE_BPF,5833.3,IMBALANCE,ESTIMATED
 ## Build
 
 ```
-west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples/audio/acoustic-anomaly-wind-turbine
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/audio/acoustic-anomaly-wind-turbine
 west flash
 ```
 

@@ -21,6 +21,6 @@ tests:
     extra_args: CONFIG_ALP_SDK_MPROC=y   # mproc surface is opt-in; the .aen sibling sets it too.
   alp_sdk.examples.mproc_mailbox.aen:
     platform_allow:
-      - ensemble_e8_dk/ae402fa0e5597le0/rtss_he
+      - ensemble_e8_dk/ae822fa0e5597ls0/rtss_he
     extra_args: CONFIG_ALP_SDK_MPROC=y
     build_only: true   # real run needs the peer firmware (v0.4+).

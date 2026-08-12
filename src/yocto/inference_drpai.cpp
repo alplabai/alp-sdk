@@ -94,7 +94,7 @@
  * Dispatcher contract
  *   Mirrors the 7-symbol hook shape the Yocto dispatcher in
  *   inference_yocto.c calls.  The handle layout (struct alp_inference)
- *   is the shared definition in inference_yocto_internal.h (issue #1257).
+ *   is the shared definition in inference_handle_internal.h (issue #1257).
  */
 
 #include <cerrno>
@@ -121,9 +121,13 @@
 
 extern "C" {
 #include "alp/inference.h"
+
+#include "inference_handle_internal.h"
 }
 
-#include "inference_yocto_internal.h"
+/* The dispatcher's `struct alp_inference` comes from the shared internal
+ * header (issue #1257) -- this file used to hand-mirror the layout, with a
+ * different field order that only worked because pointers are 8 bytes. */
 
 namespace
 {
@@ -316,7 +320,7 @@ alp_inference_dtype_t mera_dtype_to_alp(InOutDataType t)
 extern "C" alp_status_t alp_inference_drpai_open(struct alp_inference         *h_,
                                                  const alp_inference_config_t *cfg)
 {
-	auto *h = h_;
+	struct alp_inference *h = h_;
 
 	/* For ALP_INFERENCE_MODEL_DRPAI the blob is the `drpai_dir` tar bytes
      * (see the header comment).  Reject an empty blob early. */

@@ -87,13 +87,12 @@ already-activated part rejects it (`-1141`).
 **Activate with `vendor_sbl_container_enable=0`** (or ship a TI vendor SBL). The bench
 unit was activated with that fuse set but with **no** vendor SBL, which breaks the cold
 Chain-of-Trust → the image never launches on a cold POR (and the OTA swap-boot, which
-runs the same cold chain via BL2, cannot complete). See
-`memory/project-cc3501e-firmware-bringup` and `project-cc3501e-ota-bridge-rootcause`.
+runs the same cold chain via BL2, cannot complete).
 
 ## OTA
 
 OTA-over-the-bridge (host streams a signed vendor image → `psa_fwu` → MCUboot swap) is
-implemented and **silicon-validated end-to-end** (`chips/cc3501e/cc3501e.c`,
+implemented and **silicon-validated end-to-end** (`chips/cc3501e/cc3501e_ota.c`,
 `firmware/cc3501e/hal/ti/cc3501e_hw_ti.c`). Each OTA payload is itself a signed vendor
 image (same FIB+sign recipe) whose version must **exceed** the running primary — monotonic
 anti-rollback: a downgrade is refused at `psa_fwu` install (`OTA_STATUS state=3` ERROR), a

@@ -222,6 +222,33 @@ def test_planned_driver_chip_emits_ALP_B008(tmp_path: Path):
     assert diags[0].hint is None
 
 
+def test_none_driver_status_chip_emits_ALP_B008(tmp_path: Path):
+    """`metadata/chips/dp83825.yaml` (added for #1241) carries
+    `driver_status: none` (ADR 0023 -- Ethernet stays out of `<alp/*>`, so
+    `none` is the honest, non-aspirational tier, not `planned`) -- the
+    tree's first manifest to use that tier. The ALP-B008 guard (#1224)
+    excluded only `planned` from "known", so `chips: [dp83825]` validated
+    clean and emitted an undeclared CONFIG_ALP_SDK_CHIP_DP83825=y (no such
+    Kconfig symbol exists -- only ALP_SDK_CHIP_RTL8211FDI is declared).
+    Must be rejected exactly like `driver_status: planned`, not silently
+    accepted."""
+    board = tmp_path / "board.yaml"
+    board.write_text(
+        "som:\n  sku: E1M-AEN801\n"
+        "preset: e1m-evk\n"
+        "cores:\n  m55_hp:\n    app: .\n"
+        "chips:\n  - dp83825\n",
+        encoding="utf-8",
+    )
+    c = validate_board_yaml(board)
+    diags = [d for d in c if d.code == "ALP-B008"]
+    assert diags, "ALP-B008 expected for a driver_status: none manifest"
+    assert "dp83825" in diags[0].message
+    assert "driver_status: none" in diags[0].message
+    assert "no metadata/chips/dp83825.yaml" not in diags[0].message
+    assert diags[0].hint is None
+
+
 def test_standalone_validator_rejects_unknown_chip():
     proc = subprocess.run(
         [

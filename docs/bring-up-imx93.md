@@ -28,8 +28,11 @@ Inventory check before powering anything:
   - **PCA9450** primary PMIC.
   - **PCAL9538** GPIO expander on BRD_I2C.
   - **24C128** EEPROM at `0x50` with the Alp manifest.
-  - **DP83825I** Ethernet PHY (single MAC routed; ETH1 lives on
-    E1M-X form factor only).
+  - **Ethernet PHY** (single MAC routed; ETH1 lives on E1M-X
+    form factor only) -- exact part TBD, per BOM
+    (`metadata/e1m_modules/E1M-NX9101.yaml`'s `ethernet_phy: TBD
+    # variant of RTL or NXP PHY per BOM`; not confirmed to be
+    the AEN family's TI DP83825).
   - **OPTIGA Trust M** secure element.
 * Board populated: E1M-edge passthroughs + 5 V power input +
   JTAG/SWD header + USB-UART for console + microSD card slot
@@ -191,7 +194,8 @@ Same convention as AEN.
 
 ### 6.2 Ethernet
 
-The DP83825I is wired to the i.MX 93 ENET MAC.  Once Yocto's
+The on-module PHY (exact part TBD -- see §0) is wired to the
+i.MX 93 ENET MAC.  Once Yocto's
 `systemd-networkd` (or the `networkmanager` we ship) brings the
 interface up, `ip link show eth0` reports link-up at 100/full
 within ~500 ms of cable insert.

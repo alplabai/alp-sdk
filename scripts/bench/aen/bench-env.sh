@@ -106,13 +106,16 @@ export SETOOLS_DIR="${SETOOLS_DIR:-}"
 # --------------------------------------------------------------------
 
 # JLINK_DEVICE_FLASH — the Alif PART-NUMBER device profile. ONLY this
-# profile unlocks J-Link's built-in Alif MRAM loader (Flow D). It will
-# NOT connect to a live/running secure core (use _READ for that).
+# profile unlocks J-Link's built-in Alif MRAM loader (Flow D). On J-Link
+# DLLs older than V9.46 it will NOT connect to a live/running secure core
+# (use _READ for that); on V9.46+ it also connects to a live core
+# (bench-confirmed 2026-06-16, docs/aen-bench-bringup.md:14), but _READ
+# stays the documented device for Flows B/C regardless of DLL version.
 export JLINK_DEVICE_FLASH="${JLINK_DEVICE_FLASH:-AE822FA0E5597LS0_M55_HE}"
 
 # JLINK_DEVICE_READ — the GENERIC Cortex-M55 device used for every
-# read/attach/RAM-run (it attaches to the live core; the part profile
-# cannot re-halt the running SE-booted app).
+# read/attach/RAM-run (it attaches to the live core; on a pre-V9.46
+# J-Link DLL the part profile cannot re-halt the running SE-booted app).
 export JLINK_DEVICE_READ="${JLINK_DEVICE_READ:-Cortex-M55}"
 
 # JLINK_SPEED — SWD clock in kHz.
@@ -123,17 +126,61 @@ export JLINK_SPEED="${JLINK_SPEED:-4000}"
 export JLINK_SN="${JLINK_SN:-${JLINK_SERIAL:-}}"
 
 # --------------------------------------------------------------------
-# DP-ID safety gate (Flow-D MRAM writers)
+# DP-ID safety gate (every helper that touches a target)
 # --------------------------------------------------------------------
-# This bench has TWO J-Links (the AEN E8 + the V2N-M1 GD32 bridge) that can
-# share OEM serial 603000869, differing only by USB path -- JLINK_SN narrows
-# probe choice but does not itself prove which board is on the other end. The
-# MRAM-writing helpers (flash-jlink.sh, flash-jlink-hp.sh,
-# flash-jlink-mramxip.sh) read the SW-DP IDR on connect and abort before any
-# write if it doesn't match AEN_DPIDR. BENCH-VERIFIED IDs, see
-# docs/aen-bench-bringup.md.
+# This bench has THREE J-Links, and two of them share OEM serial 603000869,
+# differing only by USB path:
+#
+#   AEN E8        603000869          the AEN board
+#   GD32 bridge   603000869 (clone)  the other board
+#   V2N CM33 DAP  600107451          the other board
+#
+# JLinkExe selects ONLY by serial and has no USB-path selector, so JLINK_SN
+# narrows probe choice but cannot prove which board is on the other end --
+# for the cloned pair it is ambiguous by construction. The SW-DP IDR read on
+# connect is the only working discriminator, which is why every helper that
+# writes to or executes on a target checks it and aborts on a mismatch
+# (alp-sdk#1312).
+#
+# BENCH-VERIFIED IDs. AEN and GD32 per docs/aen-bench-bringup.md; the V2N
+# CM33 measured 2026-08-08 on the bench (`Found SW-DP with ID 0x6BA02477`,
+# `Found Cortex-M33 r0p4`) -- note that core answers on SWD, NOT JTAG.
 export AEN_DPIDR="${AEN_DPIDR:-4C013477}"
 export GD32_DPIDR="${GD32_DPIDR:-0BE12477}"
+export V2N_CM33_DPIDR="${V2N_CM33_DPIDR:-6BA02477}"
+
+# bench_jlink_assert_aen_dpidr <preflight-output-file> <context>
+# Abort unless the connect transcript proves the AEN E8 answered.
+#
+# Shared by the MRAM writers and by ram-run.sh. Flow C is NOT a read: it
+# `loadbin`s an AEN-linked image into ITCM and `go`es. Landing that on the
+# GD32 probe would execute foreign code on a DIFFERENT board, held under a
+# different reservation that this one does not cover.
+#
+# Names the wrong board when it can, so the operator gets "you are on the
+# CM33 DAP" rather than a bare mismatch.
+bench_jlink_assert_aen_dpidr() {
+	local out="$1" ctx="${2:-preflight}"
+	local wrong=""
+	if grep -qi "$GD32_DPIDR" "$out" 2>/dev/null; then
+		wrong="the GD32 bridge (0x$GD32_DPIDR)"
+	elif grep -qi "$V2N_CM33_DPIDR" "$out" 2>/dev/null; then
+		wrong="the CM33 DAP (0x$V2N_CM33_DPIDR)"
+	fi
+	if [ -n "$wrong" ]; then
+		echo "!! ABORT ($ctx): probe answered $wrong, NOT the AEN E8." >&2
+		echo "   That is a DIFFERENT board on a different reservation," >&2
+		echo "   which this one does not cover. Refusing to touch it." >&2
+		echo "   Transcript: $out" >&2
+		return 4
+	fi
+	if ! grep -qi "$AEN_DPIDR" "$out" 2>/dev/null; then
+		echo "!! ABORT ($ctx): expected AEN E8 SW-DP IDR 0x$AEN_DPIDR, not seen." >&2
+		echo "   Check JLINK_SN / wiring / probe selection. Transcript: $out" >&2
+		return 4
+	fi
+	return 0
+}
 
 # --------------------------------------------------------------------
 # Tool resolution helpers
@@ -168,6 +215,49 @@ bench_jlink_exe() {
 		return 1
 	fi
 	echo "$exe"
+}
+
+# bench_jlink_assert_connected <jlink-output-file> [context] — fail when
+# JLinkExe never reached the probe.
+#
+# JLinkExe exits 0 even when it could not open the probe at all: every
+# command in the CommanderScript prints
+#
+#     J-Link connection not established yet but required for command.
+#     Connecting to J-Link ...FAILED: Cannot connect to the probe/programmer.
+#
+# and the run still ends "Script processing completed." Callers that pipe
+# that output through a decoder therefore render a total infrastructure
+# failure as EMPTY app output -- which reads as "the app crashed" when no
+# app was ever loaded (alp-sdk#1318). Call this on the captured output
+# before decoding anything out of it.
+#
+# Deliberately NOT the same check as the DPIDR preflight gate in
+# flash-jlink*.sh: that gate answers "is this the right board", this one
+# answers "did we reach any board at all". An MRAM write needs both; a
+# read-only path needs this one.
+bench_jlink_assert_connected() {
+	local out="$1" ctx="${2:-J-Link}"
+	local pat='Cannot connect to the probe/programmer|Failed to connect to target|Could not connect to target|No J-Link device found'
+	if [ ! -s "$out" ]; then
+		echo "bench-env: $ctx produced no J-Link output at all ('$out' missing or empty)." >&2
+		return 7
+	fi
+	if grep -qiE "$pat" "$out"; then
+		echo "bench-env: $ctx could NOT connect to the J-Link probe -- nothing was read" >&2
+		echo "           from the target, so any decoded output would be empty for an" >&2
+		echo "           infrastructure reason, not because the app was silent." >&2
+		echo >&2
+		grep -iE "$pat" "$out" | head -3 >&2
+		echo >&2
+		echo "           alplab-gw has THREE J-Link probes attached and two share a cloned" >&2
+		echo "           OEM serial, so an unselected JLinkExe can fail outright or attach" >&2
+		echo "           the wrong board. Export the probe serial and retry:" >&2
+		echo "               export JLINK_SN=<serial>     # the AEN E8 answers SW-DP IDR 0x4C013477" >&2
+		echo "           Full J-Link transcript: $out" >&2
+		return 7
+	fi
+	return 0
 }
 
 # bench_require_setools — guard for Flow A/D. Errors (exit 2) if

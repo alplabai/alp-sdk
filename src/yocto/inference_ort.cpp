@@ -98,7 +98,7 @@
  *   Mirrors the 7-symbol hook shape the Yocto dispatcher in
  *   inference_yocto.c calls (same shape as inference_deepx.cpp /
  *   inference_drpai.cpp).  The handle layout (struct alp_inference) is
- *   the shared definition in inference_yocto_internal.h -- see that
+ *   the shared definition in inference_handle_internal.h -- see that
  *   header's static_assert for the one invariant this file actually
  *   depends on (issue #1257).
  */
@@ -118,7 +118,7 @@ extern "C" {
 #include "alp/inference.h"
 }
 
-#include "inference_yocto_internal.h"
+#include "inference_handle_internal.h"
 
 namespace
 {

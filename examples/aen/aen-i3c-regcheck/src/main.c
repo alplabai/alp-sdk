@@ -6,7 +6,7 @@
  * portable <alp/i3c.h> surface on the E1M-AEN801 (Ensemble E8, M55-HE),
  * via the bench RAM-run flow.
  *
- * BENCH-PROVEN 2026-07-25 (labgrid place e1m-aen-evk-01, Flow C ITCM
+ * BENCH-PROVEN 2026-07-25 (Flow C ITCM
  * RAM-run, reproduced twice, byte-identical).  Captured output:
  *
  *     bus: ALP_E1M_I3C0 = 0 (alp-i3c0 alias -> lpi3c0@0x43006000)

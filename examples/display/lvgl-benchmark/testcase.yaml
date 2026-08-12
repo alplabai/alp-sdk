@@ -19,5 +19,5 @@ tests:
     extra_args: EXTRA_CONF_FILE=native_sim.conf
   alp_sdk.examples.lvgl_benchmark.aen:
     platform_allow:
-      - ensemble_e8_dk/ae402fa0e5597le0/rtss_hp
+      - ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp
     build_only: true

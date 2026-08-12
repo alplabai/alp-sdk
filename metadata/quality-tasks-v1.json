@@ -3,6 +3,48 @@
   "description": "Single source of truth for the SDK's quality tasks: which check_*.py gates exist, whether each is a hard CI gate or informational, and which profiles (quick/pr/full/release) run it. check_quality_registry.py keeps it == scripts/check_*.py on disk. Additive-only within schemaVersion 1.",
   "tasks": [
     {
+      "id": "agents-md-generators",
+      "description": "AGENTS.md's ALP_E1M_*/ALP_E1M_X_* identifiers and --emit choice lists must exist in the real generators (#1264).",
+      "runner": "check-script",
+      "script": "scripts/check_agents_md_generators.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-doc-drift.yml:doc-drift"
+    },
+    {
+      "id": "atoc-reservation",
+      "description": "Every AEN board .dts and every SoM preset memory_map reserves the top of the App MRAM window as an 'atoc' region -- SETOOLS top-anchors the ATOC boot table there (#1289).",
+      "runner": "check-script",
+      "script": "scripts/check_atoc_reservation.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "board-id-doc-parity",
+      "description": "docs/board-id.md's alp_hw_info_eeprom_t typedef struct (field names, order, widths) must match include/alp/hw_info.h, macros resolved (#1231).",
+      "runner": "check-script",
+      "script": "scripts/check_board_id_doc_parity.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-doc-drift.yml:doc-drift"
+    },
+    {
       "id": "board-schema-version",
       "description": "Fail if any repo board.yaml has an outstanding schema migration.",
       "runner": "check-script",
@@ -46,7 +88,7 @@
     },
     {
       "id": "build-plan",
-      "description": "Validate a build plan against the public alp CLI / alp-sdk-vscode contract.",
+      "description": "Validate a build plan against the public alp CLI / alp-sdk-vscode contract, plus (for SDK-generated plans) the command.tool bare-identity convention the schema itself deliberately does not assert.",
       "runner": "check-script",
       "script": "scripts/check_build_plan.py",
       "gate": true,
@@ -115,6 +157,20 @@
       "ci": null
     },
     {
+      "id": "core-cmakelists-mapping",
+      "description": "Every enabled Zephyr core's board.yaml app: must resolve to a CMakeLists.txt baked with that SAME core's --core literal, and no two distinct cores may resolve to the same CMakeLists.txt (issue #1275: a dual-core SKU can silently share one core's Kconfig fragment with another).",
+      "runner": "check-script",
+      "script": "scripts/check_core_cmakelists_mapping.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "cross-platform",
       "description": "Lint repo content for Linux-only idioms in customer-facing surfaces.",
       "runner": "check-script",
@@ -159,6 +215,20 @@
       "description": "Doc-drift gate -- fails when customer-facing documentation drifts from the code it documents.",
       "runner": "check-script",
       "script": "scripts/check_doc_drift.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-doc-drift.yml:doc-drift"
+    },
+    {
+      "id": "doc-inventory",
+      "description": "Doc-stated workflow names/counts and ADR/chip/library counts must match the tree (#1265).",
+      "runner": "check-script",
+      "script": "scripts/check_doc_inventory.py",
       "gate": true,
       "profiles": [
         "pr",
@@ -337,10 +407,52 @@
       "ci": null
     },
     {
+      "id": "helper-firmware-path",
+      "description": "Every metadata/e1m_modules/*.yaml helper_firmware[].firmware_path (when present) resolves to a real file; omission is legal and left alone (issue #1372).",
+      "runner": "check-script",
+      "script": "scripts/check_helper_firmware_path.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "i2c-bus-doc-consistency",
+      "description": "Doc/example prose naming an on-module I2C part next to a bus name must agree with metadata/e1m_modules/*.yaml's on_module.i2c_devices.",
+      "runner": "check-script",
+      "script": "scripts/check_i2c_bus_doc_consistency.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "inference-backend-parity",
       "description": "Inference backend/format <-> dispatcher canonicalisation gate.",
       "runner": "check-script",
       "script": "scripts/check_inference_backend_parity.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "library-pin-parity",
+      "description": "A meta-alp-sdk recipe's SRCREV/tag must match its metadata/libraries version and, when west.yml resolves one, its west grounding (#1281).",
+      "runner": "check-script",
+      "script": "scripts/check_library_pin_parity.py",
       "gate": true,
       "profiles": [
         "pr",

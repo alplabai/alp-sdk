@@ -177,9 +177,9 @@ def peripheral_support(
         if som is None:
             known = [s.get("sku") for s in catalog.get("soms", [])]
             return {"error": f"unknown SoM SKU: {sku!r}", "known_skus": known}
-        periph_map: dict[str, bool] = som.get("peripherals", {})
+        periph_map: dict[str, bool] = som.get("soc_peripherals", {})
         if peripheral is None:
-            return {"sku": som.get("sku"), "peripherals": periph_map}
+            return {"sku": som.get("sku"), "soc_peripherals": periph_map}
         key = peripheral.strip().lower()
         if key not in periph_map:
             return {
@@ -192,7 +192,7 @@ def peripheral_support(
     key = peripheral.strip().lower()  # type: ignore[union-attr]
     all_keys: set[str] = set()
     for som in catalog.get("soms", []):
-        all_keys.update((som.get("peripherals") or {}).keys())
+        all_keys.update((som.get("soc_peripherals") or {}).keys())
     if key not in all_keys:
         return {
             "error": f"unknown peripheral: {peripheral!r}",
@@ -201,7 +201,7 @@ def peripheral_support(
     supported = [
         som.get("sku")
         for som in catalog.get("soms", [])
-        if (som.get("peripherals") or {}).get(key)
+        if (som.get("soc_peripherals") or {}).get(key)
     ]
     return {"peripheral": key, "supported_by": supported}
 

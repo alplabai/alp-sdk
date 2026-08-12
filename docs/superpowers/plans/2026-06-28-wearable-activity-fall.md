@@ -1325,7 +1325,7 @@ tests:
 
   alp_sdk.example.wearable_activity_fall.aen_build:
     platform_allow:
-      - ensemble_e8_dk/ae402fa0e5597le0/rtss_hp
+      - ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp
     build_only: true
     tags:
       - alp-sdk
@@ -1406,7 +1406,7 @@ WACT,12.80,IDLE,0.74,1,4.8
 ## Build
 
 ```
-west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples/ai/wearable-activity-fall
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/ai/wearable-activity-fall
 west flash
 ```
 

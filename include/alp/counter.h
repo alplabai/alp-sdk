@@ -89,7 +89,34 @@ typedef void (*alp_counter_alarm_cb_t)(alp_counter_t *counter, uint32_t ticks, v
  * alias.  Does not start counting — call @ref alp_counter_start.
  *
  * @param[in] cfg  Configuration.  Must be non-NULL.
- * @return Open handle on success, or NULL if unresolved / pool empty.
+ * @return Open handle on success, or NULL on failure with
+ *         @ref alp_last_error set to:
+ *           @ref ALP_ERR_INVAL (NULL @p cfg; or, on the Yocto
+ *             backend only, a `counter_id` large enough to truncate
+ *             the `/sys/bus/counter` path it builds);
+ *           @ref ALP_ERR_NOT_PRESENT_ON_THIS_SOC (no counter backend
+ *             registered for this silicon);
+ *           @ref ALP_ERR_NOT_IMPLEMENTED (the selected backend
+ *             declares no open op -- not reachable through any
+ *             shipped backend today);
+ *           @ref ALP_ERR_NOMEM (the handle pool is exhausted --
+ *             CONFIG_ALP_SDK_MAX_COUNTER_HANDLES counters already
+ *             open);
+ *           @ref ALP_ERR_NOT_READY (DT alias unresolved / device not
+ *             ready on the generic Zephyr backend; or, on V2N/V2M,
+ *             the GD32 supervisor bus not yet configured);
+ *           @ref ALP_ERR_BUSY (the V2N/V2M supervisor mutex is
+ *             contended);
+ *           @ref ALP_ERR_NOSUPPORT (`counter_id` is a valid E1M-X
+ *             connector identity -- see `<alp/e1m_x_pinout.h>` -- that
+ *             this SoM's backend doesn't serve; e.g. the V2N/V2M
+ *             bridge serves only `ALP_E1M_X_COUNTER0`).  Once
+ *             `ALP_E1M_X_COUNTER0` opens successfully, query
+ *             @ref alp_counter_capabilities on that handle for the
+ *             active backend's served count (`channel_count`) before
+ *             attempting a higher id -- but see that function's note:
+ *             only the GD32 bridge populates it today, so a zero means
+ *             "not reported", not "serves none".
  */
 alp_counter_t *alp_counter_open(const alp_counter_config_t *cfg);
 
@@ -182,6 +209,23 @@ void alp_counter_close(alp_counter_t *counter);
 
 /**
  * @brief Query the capabilities of an opened counter handle.
+ *
+ * `channel_count` is a property of the active backend, not of
+ * @p counter specifically, and is populated only by the V2N/V2M GD32
+ * bridge today, which serves only `ALP_E1M_X_COUNTER0` of the four
+ * E1M-X connector identities (`src/backends/counter/gd32_bridge.c`).
+ * It reads 0 on every other backend -- the generic Zephyr backend has
+ * no single machine-readable source for its DT-resolved instance
+ * count, the SW fallback accepts every id, and the Yocto Counter
+ * sysfs ABI exposes no queryable device count -- so a 0 there means
+ * "not reported by this backend", not "serves no counters".
+ *
+ * On V2N/V2M this is discoverable only *after* `ALP_E1M_X_COUNTER0`
+ * opens successfully: that open can itself fail (e.g.
+ * @ref ALP_ERR_NOT_READY if the GD32 supervisor's SPI/I2C bus isn't
+ * configured, or @ref ALP_ERR_BUSY on a contended supervisor mutex),
+ * in which case the served count cannot be queried at all.  A higher
+ * id opened directly fails with @ref ALP_ERR_NOSUPPORT.
  *
  * @param counter  Handle from @ref alp_counter_open, or NULL.
  * @return Pointer valid for the handle's lifetime; NULL if @p counter is NULL.

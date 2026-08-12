@@ -17,8 +17,7 @@ manifests + a pin allocator.  Reads SoM metadata
 (including the `pad_routes:` block) from this repo's
 `metadata/e1m_modules/<SKU>.yaml`; alp-sdk's metadata is
 alp-studio's input, not its output.  alp-sdk is fully usable
-without it.  See
-[`github.com/alplabai/alp-studio`](https://github.com/alplabai/alp-studio).
+without it.  Repo: `alplabai/alp-studio` (not a public GitHub repo).
 
 **Block** -- An alp-studio concept: a reusable feature unit
 (button-LED, OLED display, IMU read) that alp-studio's pin

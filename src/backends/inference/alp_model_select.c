@@ -47,6 +47,8 @@ static bool _fmt_enum(const char *s, alp_inference_model_format_t *out)
 		return true;
 	}
 	if (strcmp(s, "executorch") == 0) {
+		/* scripts/alp_model/adapters/executorch.py is the host-side
+		 * writer that emits this string (issue #1260). */
 		*out = ALP_INFERENCE_MODEL_EXECUTORCH;
 		return true;
 	}

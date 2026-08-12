@@ -119,6 +119,19 @@
 };
 
 /*
+ * No wdt0 node here (alp-sdk#1153): the upstream Zephyr RZ/V2N SoC
+ * devicetree (arm/renesas/rz/rzv/r9a09g056.dtsi, checked against the
+ * pinned v4.4.0 tag) declares no watchdog node and no driver binds
+ * this SoC's WDT hardware at all yet -- there is no label to
+ * reference and no register base address in this tree to
+ * hand-author one from (unlike mbox1 below, which had a real FSP
+ * register map, bsp_mhu_b.h, to draw from).  Full analysis:
+ * meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi's
+ * &wdt1 comment block.  <alp/wdt.h> on this core returns
+ * ALP_ERR_NOT_PRESENT_ON_THIS_SOC (src/wdt_dispatch.c).
+ */
+
+/*
  * OpenAMP / RPMsg carve-out for the M33-SM <-> A55-Linux link (alp-sdk #683,
  * Path B Phase 1).  Addresses are the Renesas RZ/V Multi-OS Package memory
  * map, NOT the paper `ipc:` carve-out in this project's board.yaml (still

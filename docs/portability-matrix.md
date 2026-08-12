@@ -128,7 +128,7 @@ reports before a build.
 | `arm-2d` | B | `v1.2.6` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `aws-iot` | B | `v3.1.5` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `azure-iot` | B | `1.5.0` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `bearssl` | B | `master` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `bearssl` | B | `7bea48e5e850ab4cafbe68d3765cdaba13a86d6f` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `canopennode` | B | `dec12fa3f0d790cafa8414a4c2930ea71ab72ffd` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `catch2` | B | `3.7.1` | BSL-1.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `cmsis-cv` | B | `25c6c111ee04dcfb0ae9093fd6dee4586872982c` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -146,11 +146,11 @@ reports before a build.
 | `littlefs` | B | `2.11` | BSD-3-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `lvgl` | A | `9.5.0` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `lwm2m` | B | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `madgwick-ahrs` | B | `unpinned (west.yml tracks xio-technologies/Fusion@main; TBD pin SHA after maintainer audit)` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `madgwick-ahrs` | B | `v1.3.2` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `mbedtls` | B | `4.1.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `micro-ros` | B | `humble` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `micropython` | B | `v1.24.1` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `minimp3` | B | `master` | CC0-1.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `minimp3` | B | `ea99364f61c14656440e8d77e9c233ccf3124633` | CC0-1.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `modbus` | A | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `nanopb` | A | `0.4.9.1` | Zlib | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `nlohmann-json` | B | `3.11.3` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -171,7 +171,7 @@ reports before a build.
 | `arm-2d` | B | `v1.2.6` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `aws-iot` | B | `v3.1.5` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `azure-iot` | B | `1.5.0` | MIT | ✅ | ✅ | ✅ | ✅ |
-| `bearssl` | B | `master` | MIT | ✅ | ✅ | ✅ | ✅ |
+| `bearssl` | B | `7bea48e5e850ab4cafbe68d3765cdaba13a86d6f` | MIT | ✅ | ✅ | ✅ | ✅ |
 | `canopennode` | B | `dec12fa3f0d790cafa8414a4c2930ea71ab72ffd` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `catch2` | B | `3.7.1` | BSL-1.0 | ✅ | ✅ | ✅ | ✅ |
 | `cmsis-cv` | B | `25c6c111ee04dcfb0ae9093fd6dee4586872982c` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
@@ -189,11 +189,11 @@ reports before a build.
 | `littlefs` | B | `2.11` | BSD-3-Clause | ✅ | ✅ | ✅ | ✅ |
 | `lvgl` | A | `9.5.0` | MIT | ✅ | ✅ | ✅ | ✅ |
 | `lwm2m` | B | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `madgwick-ahrs` | B | `unpinned (west.yml tracks xio-technologies/Fusion@main; TBD pin SHA after maintainer audit)` | MIT | ✅ | ✅ | ✅ | ✅ |
+| `madgwick-ahrs` | B | `v1.3.2` | MIT | ✅ | ✅ | ✅ | ✅ |
 | `mbedtls` | B | `4.1.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `micro-ros` | B | `humble` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `micropython` | B | `v1.24.1` | MIT | ✅ | ✅ | ✅ | ✅ |
-| `minimp3` | B | `master` | CC0-1.0 | ✅ | ✅ | ✅ | ✅ |
+| `minimp3` | B | `ea99364f61c14656440e8d77e9c233ccf3124633` | CC0-1.0 | ✅ | ✅ | ✅ | ✅ |
 | `modbus` | A | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `nanopb` | A | `0.4.9.1` | Zlib | ✅ | ✅ | ✅ | ✅ |
 | `nlohmann-json` | B | `3.11.3` | MIT | ✅ | ✅ | ✅ | ✅ |
@@ -336,13 +336,14 @@ selected at compile time from the generated config alone.
 
 **Fix landed:** the orchestrator reads the silicon capability counts
 (`capabilities.ethos_u{55,65,85}_count`, resolved from the SoC JSON
-`npus[]`) and emits one `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U{55,65,85}=y`
+`npus[]`) and emits one
+`CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_{U55,U65,U85}=y`
 line per variant present.  AEN401/601/801 now emit BOTH `_U55=y` and
 `_U85=y` (the U55 pair alongside the U85); AEN301/501/701 emit only
 `_U55=y`; NX9101 emits `_U65=y`; the existing N93 PHY switch coexists.
 Matching Kconfig entries live at `zephyr/kconfigs/iot-audio-inference.kconfig`
 § *Per-variant Ethos-U silicon switches*; the TFLM driver source
-(`src/zephyr/inference_tflm.cpp`) reads the per-variant macros via
+(`src/backends/inference/tflm.cpp`) reads the per-variant macros via
 `alp_inference_tflm_npu_variant_name()` and logs the active variant
 once per boot.
 
@@ -356,7 +357,7 @@ M33).
 **Fix landed:** the orchestrator now consults the SoC JSON's
 `cores[<slice.core_id>].vector_extension` (per-slice, since one SoM
 can host multiple CPU classes — E7's A32 + M55 mix) and emits exactly
-one `CONFIG_ALP_SDK_INFERENCE_TFLM_{NEON,HELIUM,REF}=y` per slice.
+one `CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_{NEON,HELIUM,REF}=y` per slice.
 Verified: M55_HP slices on every AEN SKU emit `_HELIUM=y`; A55 slices
 on V2N101 emit `_NEON=y`; the V2N M33_SM slice + NX9101 M33 slice
 both emit `_REF=y` (baseline ARMv8-M, no DSP / MVE).  Matching Kconfig

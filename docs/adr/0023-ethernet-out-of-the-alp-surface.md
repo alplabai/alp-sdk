@@ -32,7 +32,7 @@ The per-family hardware, tree-verified:
   MDIO address is contested in-tree, not settled: the Zephyr DT
   records a managed-MDIO DP83825I at PHY address 1 but flags it
   "fork reference … confirm this address before relying on it"
-  (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:349-353`), while the
+  (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:349-354`), while the
   bench log from real E8 silicon reads
   `[eth] MDIO PHY@0 id=2000a140 (DP83825I=2000a140)`
   (`examples/aen/aen-ethernet-link/README.md:39`) — address 0, not 1
@@ -84,7 +84,7 @@ as the contract, is three layers:
 2. **Form-factor port identity** — `ALP_E1M_ETH0` with
    `ALP_E1M_ETH_COUNT 1u` (`include/alp/e1m_pinout.h:100,204`), and
    `ALP_E1M_X_ETH0` / `ALP_E1M_X_ETH1` with `ALP_E1M_X_ETH_COUNT 2u`
-   (`include/alp/e1m_x_pinout.h:98-99,192`). This is **not** what a
+   (`include/alp/e1m_x_pinout.h:98-99,208`). This is **not** what a
    customer moving between a 2-port and a 1-port SoM keys off — the
    only 1-port SoM is E1M (AEN) and the only 2-port is E1M-X
    (V2N/V2M), so that swap is a cross-form-factor move, and
@@ -105,10 +105,12 @@ as the contract, is three layers:
    `rtl8211fdi_read_page_reg`/`rtl8211fdi_write_page_reg`,
    `include/alp/chips/rtl8211fdi.h:232-244`). AEN — the only family
    with silicon-proven Ethernet in this tree — has no layer-3 chip
-   driver: there is no `chips/dp83825/` and no
-   `metadata/chips/dp83825.yaml`, tracked as **#1241** (the AEN801
-   preset omits `ethernet_phy` and no `metadata/chips/dp83825`
-   manifest exists, despite the DP83825 being on-module).
+   driver: there is no `chips/dp83825/`. Every AEN preset
+   (`metadata/e1m_modules/E1M-AEN301.yaml`..`E1M-AEN801.yaml`) declares
+   `ethernet_phy: dp83825` (`metadata/chips/dp83825.yaml`,
+   `driver_status: none`) — the metadata side of **#1241**; the C
+   driver itself remains unwritten and the exact order-code suffix
+   stays TBD pending the netlist/BOM, so the issue stays open.
 
 The refusal list, with the reason each operation is refused:
 
@@ -197,10 +199,13 @@ recurring probes the real `ETHERNET_COUNT` lambda rather than a copy
 of the key list, because the first version hardcoded that copy and
 stayed green when the generator was reverted.
 
-Also filed from this ADR's research, both open: **#1241** (the AEN801
-preset omits `ethernet_phy`, and no `metadata/chips/dp83825` manifest
-exists) and **#1244** (the devicetree puts the DP83825I at MDIO
-address 1 while the E8 bench log reads it at address 0).
+Also filed from this ADR's research: **#1241**, still open (every AEN
+preset omitted `ethernet_phy`, and no `metadata/chips/dp83825`
+manifest existed; this change adds both across the family, but the
+exact order code stays TBD pending the netlist/BOM, and the C driver
+itself remains unwritten) and **#1244**, still open (the devicetree
+puts the DP83825I at MDIO address 1 while the E8 bench log reads it at
+address 0).
 
 ## See also
 
@@ -212,6 +217,8 @@ address 1 while the E8 bench log reads it at address 0).
   identity covers V2N ↔ V2M and not E1M ↔ E1M-X.
 - `include/alp/chips/rtl8211fdi.h`,
   `metadata/chips/rtl8211fdi.yaml` — the V2N/V2M PHY chip driver.
+- `metadata/chips/dp83825.yaml` — the AEN PHY manifest (no chip
+  driver yet, `driver_status: none`, #1241).
 - `examples/aen/aen-ethernet-link/` — the silicon-proven Zephyr
   `net_if` reference this decision rests on.
 - `docs/adr/0024-v2n-analog-and-counter-classes-stay-on-the-gd32-bridge.md`

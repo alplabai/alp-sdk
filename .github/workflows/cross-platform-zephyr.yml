@@ -82,7 +82,13 @@ on:
       - 'tests/scripts/**'
       - 'docs/**/*.md'
       - 'README.md'
-      - '.github/workflows/cross-platform-zephyr.yml'
+      # Every workflow, not just this one. This job is the only place
+      # `pytest tests/scripts/` runs, and that is where
+      # test_workflows_are_loadable.py lives -- so a PR that breaks a
+      # DIFFERENT workflow's YAML must still trigger it. Narrowing this
+      # back to a single filename is how two unparseable workflows
+      # reached `dev` unnoticed.
+      - '.github/workflows/**'
   push:
     branches: [main]
     paths:
@@ -96,7 +102,13 @@ on:
       - 'tests/scripts/**'
       - 'docs/**/*.md'
       - 'README.md'
-      - '.github/workflows/cross-platform-zephyr.yml'
+      # Every workflow, not just this one. This job is the only place
+      # `pytest tests/scripts/` runs, and that is where
+      # test_workflows_are_loadable.py lives -- so a PR that breaks a
+      # DIFFERENT workflow's YAML must still trigger it. Narrowing this
+      # back to a single filename is how two unparseable workflows
+      # reached `dev` unnoticed.
+      - '.github/workflows/**'
   workflow_dispatch:
 
 # Cancel in-flight runs on the same branch when a new commit lands.

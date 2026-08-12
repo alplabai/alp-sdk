@@ -7,12 +7,14 @@
  *
  * On the E1M-AEN the Trust M sits on **BRD_I2C** -- the on-module
  * housekeeping bus (the Alif LPI2C0 / "LP-island" I2C, P7_4 SCL_A /
- * P7_5 SDA_A) -- at 7-bit address 0x30, alongside the RTC + EEPROM +
- * TMP112.  Because BRD_I2C lives in the low-power domain it is owned
- * by the **M55-HE** subsystem (hence this example's board target is
- * rtss_he).  The chip and the sign flow are identical to the V2N
- * variant -- everything goes through the SoM-portable <alp/...> API,
- * so the only AEN-specific facts are the bus + the owning core.
+ * P7_5 SDA_A) -- at 7-bit address 0x30, alongside the RTC + TMP112.
+ * (The EEPROM is on a separate bus, SoC I2C2 -- see
+ * docs/bring-up-aen.md §5.1.)  Because BRD_I2C lives in the low-power
+ * domain it is owned by the **M55-HE** subsystem (hence this
+ * example's board target is rtss_he).  The chip and the sign flow
+ * are identical to the V2N variant -- everything goes through the
+ * SoM-portable <alp/...> API, so the only AEN-specific facts are
+ * the bus + the owning core.
  *
  * The in-tree v0.3 driver probes the Trust M I2C_STATE register only.
  * Product-info and raw-APDU helpers are declared for the planned host
@@ -30,8 +32,9 @@ int main(void)
 {
 	printk("[se] aen-secure-element-sign (probe-only)\n");
 
-	/* BRD_I2C carries the Trust M alongside the RTC + EEPROM + TMP112.
-     * On the E1M-AEN this is the Alif LPI2C0 (the LP-island I2C),
+	/* BRD_I2C carries the Trust M alongside the RTC + TMP112 (the
+     * EEPROM is on a separate bus, SoC I2C2 -- see docs/bring-up-aen.md
+     * §5.1).  On the E1M-AEN this is the Alif LPI2C0 (the LP-island I2C),
      * surfaced as portable bus 0.  400 kHz is the standard Trust M bus
      * rate; the chip supports up to 1 MHz Fast-mode+ if the rest of
      * the bus does too. */

@@ -171,7 +171,7 @@ builds are not supported on Windows by upstream Zephyr.
 
 7. **Run a cross-compiled build** to confirm everything's wired:
    ```pwsh
-   west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples\peripheral-io\drone-autopilot
+   west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples\peripheral-io\drone-autopilot
    ```
 
 `native_sim` builds on Windows will fail at the DTS preprocess

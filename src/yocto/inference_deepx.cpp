@@ -50,7 +50,7 @@
  *   Mirrors the 7-symbol hook shape the Yocto dispatcher in
  *   inference_yocto.c calls (open/num_inputs/num_outputs/get_input/
  *   get_output/invoke/close).  The handle layout (struct alp_inference)
- *   is the shared definition in inference_yocto_internal.h (issue #1257).
+ *   is the shared definition in inference_handle_internal.h (issue #1257).
  */
 
 #include <cstddef>
@@ -71,9 +71,14 @@
 
 extern "C" {
 #include "alp/inference.h"
+
+#include "inference_handle_internal.h"
 }
 
-#include "inference_yocto_internal.h"
+/* The dispatcher's `struct alp_inference` comes from the shared internal
+ * header (issue #1257).  This file used to hand-mirror the layout and cast
+ * to the mirror; the mirror had a DIFFERENT field order and only worked
+ * because pointers are 8 bytes.  One definition, compiler-enforced. */
 
 namespace
 {
@@ -162,7 +167,7 @@ void fill_tensor_descriptor(dxrt::Tensor &t, void *data, alp_inference_tensor_t 
 extern "C" alp_status_t alp_inference_deepx_open(struct alp_inference         *h_,
                                                  const alp_inference_config_t *cfg)
 {
-	auto *h = h_;
+	struct alp_inference *h = h_;
 
 	auto *st = new (std::nothrow) DeepxState();
 	if (st == nullptr) {

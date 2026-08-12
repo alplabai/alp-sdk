@@ -179,7 +179,7 @@
             "type": "string",
             "enum": ["error", "warn", "info", "debug", "trace", "off"]
           },
-          "description": "Per-module log-level overrides.  Keys match Alp SDK module names (e.g. `alp_iot`, `alp_inference`, `alp_audio`, `alp_security`, `alp_gpio`, ...).  Each value is the same log-level enum as the top-level `log_level`, plus `off` to silence the module entirely.  The loader emits CONFIG_<MODULE>_LOG_LEVEL_<LEVEL>=y per entry into the generated alp.conf."
+          "description": "Per-module log-level overrides.  Keys are either Alp SDK module names (e.g. `alp_iot`, `alp_inference`, `alp_audio`, `alp_security`, `alp_gpio`, ...) or Zephyr log modules the SDK wires (`i2c`, `spi`, `gpio`, `adc`, `net_tcp`, ...).  Each value is the same log-level enum as the top-level `log_level`, plus `off` to silence the module entirely.  The loader emits CONFIG_<MODULE>_LOG_LEVEL_<LEVEL>=y per entry into the generated alp.conf -- live only where that choice symbol exists (the module and CONFIG_LOG are both enabled on that core), and downgraded to a hint comment otherwise so the fragment always configures."
         }
       }
     },
@@ -326,7 +326,7 @@
           "type": "integer",
           "minimum": 60,
           "default": 1800,
-          "description": "How often the device polls the deployment server for updates.  Mender default is 60 s; SDK default is 1800 s (30 min) for battery-friendly nodes."
+          "description": "How often the device polls the deployment server for updates, in SECONDS.  Mender default is 60 s; SDK default is 1800 s (30 min) for battery-friendly nodes.  `provider: hawkbit` converts to CONFIG_HAWKBIT_POLL_INTERVAL, which Zephyr declares in MINUTES with `range 1 43200`, so a hawkbit project's value must be a whole number of minutes between 60 s and 2592000 s -- anything else is refused at emit rather than written out of range."
         },
         "storage": {
           "type": "object",
@@ -435,7 +435,7 @@
         "required": ["name", "source"],
         "properties": {
           "name":   { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]*$" },
-          "source": { "type": "string", "description": "Path (relative to board.yaml) to the source model. `.tflite` compiles for CPU (TFLM) + Ethos-U (Vela) out of the box; `.onnx` requires a vendor toolchain (DRP-AI / DEEPX) on the build host and is otherwise recorded as a coverage skip." },
+          "source": { "type": "string", "description": "Path (relative to board.yaml) to the source model. `.tflite` compiles for CPU (TFLM) + Ethos-U (Vela) out of the box; `.onnx` requires a vendor toolchain (DRP-AI / DEEPX) on the build host and is otherwise recorded as a coverage skip; `.pte` (an ExecuTorch `torch.export` program) passes through for CPU via scripts/alp_model/adapters/executorch.py -- no on-device ExecuTorch runtime backend exists yet, so the resulting blob is producible but not yet invocable (#1260)." },
           "spec":   { "type": "string", "description": "Optional $ref to an external model spec for large/shared models." },
           "inputs": { "type": "array", "description": "Optional app-side input hints (e.g. layout)." },
           "compile": {

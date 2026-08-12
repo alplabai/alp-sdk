@@ -56,7 +56,7 @@ west build -b native_sim/native/64 examples/connectivity/mqtt-telemetry \
 west build -t run
 
 # On real silicon (E1M-AEN801):
-west build -b alp_e1m_aen801_m55_hp examples/connectivity/mqtt-telemetry
+west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/connectivity/mqtt-telemetry
 west flash
 ```
 

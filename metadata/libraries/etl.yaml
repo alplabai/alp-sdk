@@ -2,19 +2,25 @@
 # the legacy per-core token `etl`).
 #
 # Grounding (this checkout):
-#   * scripts/alp_project_emit/__init__.py:186 (_LIBRARY_KCONFIG) --
-#     "etl: include path + etl_profile.h via the v0.4 loader hook" --
-#     header-only C++, no real Zephyr Kconfig symbol exists for it.
+#   * header-only C++, no real Zephyr Kconfig symbol exists for it --
+#     wired via the v0.4 CMake include-path loader hook instead (see the
+#     "No `kconfig:`" note below).  This bullet used to cite
+#     `_LIBRARY_KCONFIG["etl"]` in scripts/alp_project_emit/__init__.py;
+#     that per-library dict no longer exists anywhere under scripts/ (the
+#     alp_project_emit package itself does still exist, so the citation
+#     read as live rather than obviously dead).
 #   * west.yml:429-435 -- `name: etl`, remote etlcpp, revision `20.39.4`,
 #     path modules/lib/etl, group `extras-cpp` (disabled by default; the
 #     build resolves against the vendored copy, not this west pin --
 #     see vendors/etl/README.md).
 #   * vendors/etl/README.md -- MIT licence (LICENSE is the upstream text
 #     unmodified); upstream https://github.com/ETLCPP/etl.
-#   * metadata/library-profiles/etl/hw-backends.yaml -- pure-SW,
-#     no accelerator binding (header-only template library).
 #
-# HW-backends: see metadata/library-profiles/etl/ (folded in WS6-c Phase 3)
+# HW-backends: pure-SW, no accelerator binding (header-only template
+# library) -- see this manifest's own `integration.zephyr.hw_backends:`
+# block below (retired standalone
+# metadata/library-profiles/etl/hw-backends.yaml folded in here in
+# WS6-c Phase 3; that directory still holds etl_profile.h).
 #
 # No `kconfig:` -- there is no CONFIG_ symbol to transcribe (header-only,
 # wired via the v0.4 CMake include-path loader hook instead); the schema's

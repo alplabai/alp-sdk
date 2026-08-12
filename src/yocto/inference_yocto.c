@@ -55,7 +55,7 @@
 
 #include "alp_internal.h"
 #include "common/alp_slot_claim.h"
-#include "inference_yocto_internal.h"
+#include "inference_handle_internal.h"
 
 #ifndef ALP_SDK_MAX_INFERENCE_HANDLES
 #define ALP_SDK_MAX_INFERENCE_HANDLES 2
@@ -65,7 +65,7 @@
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #endif
 
-/* struct alp_inference is declared in inference_yocto_internal.h, shared
+/* struct alp_inference is declared in inference_handle_internal.h, shared
  * with the per-backend files (inference_ort.cpp/inference_deepx.cpp/
  * inference_drpai.cpp) -- see that header's doc comment for the
  * in_use/lifecycle/active_ops ordering invariants (issue #1115 round-2

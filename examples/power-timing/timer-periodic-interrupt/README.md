@@ -61,7 +61,7 @@ west build -t run
 
 # On real silicon, point -b at the SoM's Zephyr board target.
 # Example for E1M-AEN801:
-west build -b alp_e1m_aen801_m55_hp examples/power-timing/timer-periodic-interrupt
+west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/power-timing/timer-periodic-interrupt
 west flash
 ```
 

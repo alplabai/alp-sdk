@@ -74,13 +74,7 @@ _FENCE_RE = re.compile(r"^\s*(```|~~~)")
 _EXTERNAL_PREFIXES = ("http://", "https://", "mailto:")
 
 # (file relative to repo root, exact link-target text) -> reason.
-ALLOWLIST: dict[tuple[str, str], str] = {
-    ("docs/recommended-libraries.md", "../tests/scripts/test_library_profiles.py"):
-        "pre-existing: test_library_profiles.py was renamed/retired since "
-        "this line was written (tests/scripts/test_orchestrate_libraries.py "
-        "looks like the successor); a doc-content fix, tracked under #1213's "
-        "sweep, out of this gate-introduction's scope",
-}
+ALLOWLIST: dict[tuple[str, str], str] = {}
 
 
 def _doc_files(root: Path) -> list[Path]:

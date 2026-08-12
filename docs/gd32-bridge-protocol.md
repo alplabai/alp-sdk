@@ -1033,10 +1033,14 @@ universally-cited CRC-16/CCITT-FALSE result over the ASCII string
 The per-opcode wire vectors (SPI `PING` round-trip, I2C `PING`
 round-trip, `GET_VERSION` reply for the firmware's declared
 version) are generated at firmware build time and stored in
-`firmware/gd32-bridge/tests/protocol_vectors.txt`.  Both the host-side
-driver tests under `tests/zephyr/chips/gd32g553/` and the
-firmware-side unit tests under `firmware/gd32-bridge/tests/` consume
-that file so the two implementations cannot diverge.
+`firmware/gd32-bridge/tests/protocol_vectors.txt` by
+`firmware/gd32-bridge/tests/gen_protocol_vectors.py`.  No test
+currently consumes this file: `tests/zephyr/chips/src/test_gd32_bridge.c`
+is a NULL-arg / NOT_READY smoke test with zero references to
+`protocol_vectors`, and `firmware/gd32-bridge/tests/` holds only the
+generator script and the generated `.txt`.  A host<->firmware
+divergence test built on these vectors remains an open gap, not
+existing coverage.
 
 ## 10. Field upgrades of the bridge firmware
 

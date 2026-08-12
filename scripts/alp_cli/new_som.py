@@ -95,14 +95,33 @@ def _family_hw_revisions(sku: str,
                          output_root: Path) -> tuple[Path, set[str]] | None:
     """(path, rev keys) of the SKU family's hw-revisions.yaml, or None.
 
-    None means "not resolvable at scaffold time" -- a brand-new family
-    with no SKU-prefix mapping / no hw-revisions file yet (creating one
-    is a porting-checklist step), or PyYAML / alp_project unavailable.
+    None means "not resolvable at scaffold time" -- and ONLY that: a
+    brand-new family with no SKU-prefix mapping, no hw-revisions file
+    under either root yet (creating one is a porting-checklist step), or
+    alp_project / alp_orchestrate (and through it PyYAML) unavailable.
     The SKU-prefix -> family-directory map is owned by
     scripts/alp_project.py; it is imported, never duplicated here.
+
+    A table that EXISTS but cannot be parsed is NOT None (#563).  This
+    was the third independent reader of this one file to conflate the
+    two: it caught `yaml.YAMLError` and returned None, and read a
+    non-mapping `hw_revisions:` as None too, so an empty, truncated or
+    tab-indented family table made `_scaffold`'s cross-check below skip
+    entirely and `alp new-som --default-hw-rev <nonexistent>` wrote a SoM
+    preset naming a revision that does not exist, at exit 0.  A bare
+    scalar was worse: `doc.get` on a str escaped as a raw AttributeError
+    traceback.  The parse is therefore delegated to the same guarded
+    reader the two orchestrator paths use, which refuses every
+    present-but-unusable shape with one coded message; only its ABSENT
+    answer ({}) reaches the caller as None.
+
+    The refusal deliberately does NOT fall through to the next root: a
+    damaged table under `output_root` must not be silently answered from
+    the SDK checkout's copy, which describes a different tree.
     """
     try:
-        import yaml
+        from alp_orchestrate.models import OrchestratorError
+        from alp_orchestrate.sdk_compat import load_family_table
         from alp_project import _sku_family
     except ImportError:
         return None
@@ -112,15 +131,15 @@ def _family_hw_revisions(sku: str,
         return None  # brand-new family: no directory mapping yet
     for root in (output_root, REPO_ROOT):
         path = root / "metadata" / "e1m_modules" / family_dir / "hw-revisions.yaml"
-        if path.is_file():
-            try:
-                doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-            except yaml.YAMLError:
-                return None
-            revs = doc.get("hw_revisions")
-            if isinstance(revs, dict):
-                return path, {str(k) for k in revs}
-            return None
+        try:
+            # {} == absent under this root (the reader does its own
+            # is_file() check); anything present but unusable raises.
+            doc = load_family_table(root / "metadata", family_dir)
+        except OrchestratorError as exc:
+            _fail(str(exc))
+        if not doc:
+            continue
+        return path, {str(k) for k in doc["hw_revisions"]}
     return None
 
 

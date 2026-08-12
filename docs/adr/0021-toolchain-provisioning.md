@@ -6,6 +6,70 @@ correction, and the item-2 injection-set / dtc-gperf corrections.
 Date: 2026-07-25
 Deciders: alpCaner
 
+## Amendment (2026-08-07 — a substitution-set token existing is not the same as it resolving; the Python executor line still hardcodes `toolchain_root=None`)
+
+Corrects the 2026-07-26 "drop `-DCMAKE_MAKE_PROGRAM`..." Amendment's read of
+tan-cli#86 (merged the same day) as settling this landing site. It settled
+the schema-vs-substitution-set question — `${TOOLCHAIN_ROOT}` is no longer an
+*unknown* token — but not the resolution question, and the two are different
+blockers.
+
+- **What tan-cli#86 actually ported.** Its files —
+  `crates/tan-cli/src/toolchain.rs`,
+  `crates/tan-cli/src/commands/build/token_substitution.rs`,
+  `crates/tan-cli/src/main.rs`, `crates/tan-cli/src/commands/doctor.rs`,
+  `crates/tan-core/src/plan_tokens.rs` — sit entirely under `crates/`,
+  tan-cli's FROZEN Rust oracle, kept only as the release-contract reference
+  now that the shipping `tan` (from `v0.5.0-rc1`) is the Python program under
+  `python/tan/`. The oracle genuinely resolves a toolchain root end-to-end —
+  proven by running it (tan-cli#505's evidence block): with
+  `ZEPHYR_SDK_INSTALL_DIR` unset it demotes correctly, and on a host where the
+  SDK is actually installed it resolves the real path and no demotion
+  happens at all.
+- **The shipping Python line only got half of it.**
+  `python/tan/commands/build/token_substitution.py` recognises
+  `${TOOLCHAIN_ROOT}` as a known token name (`:164`), so a plan naming it no
+  longer hard-fails with an unknown-token `PlanTokenError` — that half of the
+  port landed. The *value* feeding it never did:
+  `python/tan/commands/build_cmd.py:1173-1178` (live `dev`,
+  `433046c558e0fe0ea55d5f354ee248d413b81be1`, 2026-08-07) reads
+
+  ```python
+  # NOT YET PORTED: `crate::toolchain::resolve_toolchain_root`. Left
+  # unresolved rather than guessed -- resolution is lazy, so a plan
+  # that never names ${TOOLCHAIN_ROOT} (every SDK plan today) is
+  # unaffected, and one that does is demoted per its own
+  # executionPolicy instead of built against the host root.
+  toolchain_root=None,
+  ```
+
+  so on the Python executor line every host demotes every slice naming
+  `${TOOLCHAIN_ROOT}`, unconditionally — not "when the host has no
+  detectable toolchain," which is what the oracle's lazy design and this
+  ADR's own wording both imply.
+- **The demotion is not the benign skip it sounds like on `--materialise`.**
+  On `--execute` it correctly routes through `executionPolicy.missingTool`
+  (default skip), the same seam the oracle uses. On `--materialise`,
+  `build_cmd.py`'s `_MODE_MATERIALISE` branch binds the `demotions` return
+  value and never reads it (tan-cli#505 item 3, measured repro): a demoted
+  slice's `configArtefacts` are silently absent from the envelope's
+  `written` list, `issues: []`, exit 0, `ok: true` — byte-identical whether
+  `executionPolicy.missingTool` is `"skip"` or `"fail"`, i.e. the policy is
+  not consulted on this path at all. The repro's own stated consequence: "A
+  CI step that materialises then runs `west build` for that core gets
+  default Kconfig instead of the project's, i.e. wrong firmware, with no
+  signal on either side." That is a data-loss-shaped failure for a
+  consumer, not a skipped build.
+- **Net effect on this ADR's Lane-1 P1 env-injection half.** Still correctly
+  not landed. Not blocked by a closed schema (unchanged: `slices[].env` /
+  `slices[].toolchain` stay `additionalProperties: false`,
+  `slices[].command.args` stays open) and no longer blocked by an unknown
+  token on either the oracle or the Python line's *parser*. It is blocked by
+  the Python executor line's *resolver* — `build_cmd.py`'s
+  `toolchain_root=None` — which has no tracking issue of its own yet;
+  [alp-sdk#1286](https://github.com/alplabai/alp-sdk/issues/1286) records
+  this from the alp-sdk side.
+
 ## Amendment (2026-08-03 — Python Tan owns the active host checks)
 
 The provisioning policy is unchanged, but exact Tan implementation paths in

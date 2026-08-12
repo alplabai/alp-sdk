@@ -13,7 +13,7 @@ runner -- see `tests/parity/README.md` and the `seam2` placeholder job in
 
 Seam-1 deliberately does NOT compare the materialised config-artefact
 CONTENT (`slices[*].configArtefacts[*].contents` / `sharedArtefacts[*].
-contents` -- the rendered alp.conf/local.conf/cmake-args.txt/DTS-overlay/
+contents` -- the rendered alp.conf/local.conf/DTS-overlay/
 sysbuild-conf bytes each slice carries): that content is covered
 byte-for-byte by `tests/fixtures/emit-snapshots/*.{build-plan,zephyr-conf}.
 snap` (every oracle board has a corresponding emit-snapshot case -- see
@@ -59,8 +59,10 @@ PR #24, substitutes them at materialise time). The frozen 97ad481b oracle
 predates that and stays absolute -- `normalize_plan` reconciles the two
 shapes onto the same normalized form; see its docstring for the mapping.
 
-The ONLY semantic delta allowed to pass without failing the gate is
-``slices[*].debug.probe`` going from ``"openocd"`` (the oracle, at 97ad481b)
+Two hand-reviewed deltas are allowed to pass without failing the gate.
+
+The first is ``slices[*].debug.probe`` going from ``"openocd"`` (the oracle,
+at 97ad481b)
 to ``null`` (df312cec and later). That is #848's hand-reviewed, intentional
 change: the SDK-side executor named a debug-probe runner because it drove
 `west`/OpenOCD itself; post-ADR-0020 the SDK doesn't own flashing at all, so
@@ -68,9 +70,18 @@ change: the SDK-side executor named a debug-probe runner because it drove
 picks the probe. `debug.probe` moving to `null` is a downgrade to "SDK is not
 claiming" and not a hidden capability loss. See ADR-0020's Amendment: "the
 only 97ad481b<->df312cec emit delta is `debug.probe` 'openocd'->null,
-hand-reviewed." Any OTHER diff -- a changed command, a changed env value, a
-changed slice count, a probe change to anything other than that exact
-openocd->null transition -- FAILS the gate.
+hand-reviewed."
+
+The second is the pair of keys the oracle predates entirely --
+``slices[*].postCommands`` and ``slices[*].artifacts.outputDir``, added by
+#1344 (alplabai/tan-cli#550) -- and ONLY where the live plan carries their
+inert non-baremetal default (``[]`` and ``null``). See
+``_ALLOWED_ADDITIVE_KEYS`` for why that allowance is keyed on the exact
+value and not on "the oracle didn't have this key" alone.
+
+Any OTHER diff -- a changed command, a changed env value, a changed slice
+count, a probe change to anything other than that exact openocd->null
+transition, a new key with any other value -- FAILS the gate.
 """
 
 from __future__ import annotations
@@ -93,6 +104,33 @@ _PYEXE_ARG_RE = re.compile(r"^-DPython3_EXECUTABLE=.*$")
 # debug.probe "openocd" (oracle, 97ad481b) -> null (df312cec+, #848).
 _ALLOWED_OLD_PROBE = "openocd"
 _ALLOWED_NEW_PROBE = None
+
+# The second hand-reviewed allowance: two keys the 97ad481b oracle predates
+# entirely, added by alp-sdk PR #1344 (alplabai/tan-cli#550) so a baremetal
+# slice can no longer report success without building anything.  On every
+# NON-baremetal slice both keys carry an INERT default -- `postCommands`
+# `[]` (`west build`/`bitbake` configure AND build in one invocation, so
+# there is no follow-up step) and `artifacts.outputDir` `null` (a zephyr
+# slice's five named artifact paths already index its output; a yocto
+# slice's image lands outside the slice's build dir).  All five oracle
+# boards are zephyr/yocto only, so this is the entire live-vs-oracle delta
+# they produce.
+#
+# Deliberately keyed on BOTH the exact field path AND the exact inert
+# value, not a blanket "oracle `<missing>` -> falsy live value is fine":
+# a blanket additive rule would let ANY future key through as long as its
+# first emitted value happened to be empty, which is the opposite of what
+# this comparator exists for.  A baremetal slice's non-inert values (a real
+# `cmake --build .` step, a real `<buildDir>/output`) therefore still FAIL
+# here -- correctly: the frozen oracle emitted no build step at all, so a
+# live plan that carries one against an oracle board is an unreviewed
+# shape delta a human has to look at.
+# KEEP IN LOCKSTEP with tan-cli's vendored copy of this comparator.
+_ALLOWED_ADDITIVE_KEYS = {
+    "postCommands":          [],
+    "artifacts.outputDir":   None,
+}
+_ADDITIVE_SLICE_RE = re.compile(r"^slices\[\d+\]\.(.+)$")
 
 
 class ComparatorError(RuntimeError):
@@ -299,6 +337,27 @@ def _walk_diff(path: str, old: Any, new: Any) -> Iterator[tuple[str, Any, Any]]:
         yield (path, old, new)
 
 
+def _is_allowed_additive(path: str, old: Any, new: Any) -> bool:
+    """True for an oracle-predates-it key whose live value is its exact
+    inert default -- see `_ALLOWED_ADDITIVE_KEYS`.
+
+    Requires ALL THREE to line up: the oracle really has no such key
+    (`<missing>`, not a changed value), the path is one of the named
+    per-slice keys, and the live value is that key's documented inert
+    default.  Anything else -- a different key, a different value, an
+    oracle that DID carry the key -- falls through to `failing`.
+    """
+    if old != "<missing>":
+        return False
+    m = _ADDITIVE_SLICE_RE.match(path)
+    if m is None:
+        return False
+    key = m.group(1)
+    if key not in _ALLOWED_ADDITIVE_KEYS:
+        return False
+    return new == _ALLOWED_ADDITIVE_KEYS[key]
+
+
 def diff_plans(oracle: dict, live: dict) -> tuple[list[tuple[str, Any, Any]], list[tuple[str, Any, Any]]]:
     """Split the normalized diff into (allowed, failing) delta lists."""
     allowed: list[tuple[str, Any, Any]] = []
@@ -307,6 +366,8 @@ def diff_plans(oracle: dict, live: dict) -> tuple[list[tuple[str, Any, Any]], li
         is_probe_field = path.endswith(".debug.probe")
         if (is_probe_field and old == _ALLOWED_OLD_PROBE
                 and new == _ALLOWED_NEW_PROBE):
+            allowed.append((path, old, new))
+        elif _is_allowed_additive(path, old, new):
             allowed.append((path, old, new))
         else:
             failing.append((path, old, new))
@@ -377,7 +438,7 @@ def run(sdk: Path, oracle_dir: Path, boards: list[str]) -> bool:
                 print(f"    {path}: oracle={old!r} live={new!r}")
             all_ok = False
         else:
-            note = f" ({len(allowed)} allowed debug.probe delta)" if allowed else ""
+            note = f" ({len(allowed)} allowed delta)" if allowed else ""
             print(f"PASS {board}{note}")
         for path, old, new in allowed:
             print(f"    (allowed) {path}: oracle={old!r} live={new!r}")

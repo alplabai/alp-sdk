@@ -2,18 +2,23 @@
 # manifest for the legacy per-core token `fmt`).
 #
 # Grounding (this checkout):
-#   * scripts/alp_project_emit/__init__.py:187 (_LIBRARY_KCONFIG) --
-#     "fmt: include path + fmt_config.h via the v0.4 loader hook" --
-#     header-only (FMT_HEADER_ONLY mode), no real Zephyr Kconfig symbol.
+#   * header-only (FMT_HEADER_ONLY mode), no real Zephyr Kconfig symbol
+#     -- wired via the v0.4 CMake include-path loader hook (fmt_config.h)
+#     instead (see the "No `kconfig:`" note below).  This bullet used to
+#     cite `_LIBRARY_KCONFIG["fmt"]` in scripts/alp_project_emit/__init__.py;
+#     that per-library dict no longer exists anywhere under scripts/ (the
+#     alp_project_emit package itself does still exist, so the citation
+#     read as live rather than obviously dead).
 #   * west.yml:436-442 -- `name: fmt`, remote fmtlib, revision `11.0.2`,
 #     path modules/lib/fmt, group `extras-cpp` (disabled by default; the
 #     build resolves against the vendored copy -- see vendors/fmt/README.md).
 #   * vendors/fmt/README.md -- MIT licence (LICENSE upstream text
 #     unmodified); upstream https://github.com/fmtlib/fmt.
-#   * metadata/library-profiles/fmt/hw-backends.yaml -- pure-SW,
-#     no accelerator binding.
 #
-# HW-backends: see metadata/library-profiles/fmt/ (folded in WS6-c Phase 3)
+# HW-backends: pure-SW, no accelerator binding -- see this manifest's
+# own `integration.zephyr.hw_backends:` block below (retired standalone
+# metadata/library-profiles/fmt/hw-backends.yaml folded in here in
+# WS6-c Phase 3; that directory still holds fmt_config.h).
 #
 # No `kconfig:` -- header-only, wired via the v0.4 CMake include-path
 # loader hook (fmt_config.h), not a CONFIG_ symbol; `module: fmt`

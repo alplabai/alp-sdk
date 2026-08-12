@@ -57,8 +57,8 @@
 # When upgrading the Zephyr pin: change `revision:` below, rerun
 # `west update`, verify the modules/hal/{renesas,nxp} revs that
 # ship with the new Zephyr tag still satisfy the SoMs we target
-# (see docs/os-support-matrix.md), bump pr-twister.yml +
-# nightly-aen-hil.yml's `--mr` to match, and add a CHANGELOG entry.
+# (see docs/os-support-matrix.md), bump pr-twister.yml's `--mr` to
+# match, and add a CHANGELOG entry.
 
 manifest:
   defaults:
@@ -98,9 +98,11 @@ manifest:
       url-base: https://github.com/FreeRTOS
     - name: xio-technologies   # Madgwick AHRS reference
       url-base: https://github.com/xioTechnologies
-    - name: bearssl-mirror     # BearSSL community git mirror (upstream is
-      url-base: https://github.com/bearsslmirror
-                              # tarball-only; mirror tracks main branch).
+    - name: bearssl-upstream   # BearSSL upstream git server -- non-GitHub
+      url-base: https://bearssl.org/git
+                              # https remote.  Upstream runs a real git
+                              # server (not tarball-only, despite an
+                              # earlier comment here claiming otherwise).
     - name: micro-ROS
       url-base: https://github.com/micro-ROS
     - name: arm-software    # CMSIS-Stream, CMSIS-CV, Arm-2D
@@ -142,8 +144,9 @@ manifest:
   #                    when they list any of those libraries in
   #                    `board.yaml` `libraries:`.  Revisions below
   #                    are maintainer-verified-as-of 2026-05-14;
-  #                    bumps land alongside the library knob in
-  #                    `metadata/library-profiles/<name>/hw-backends.yaml`.
+  #                    bumps land alongside the library knob in that
+  #                    library's `integration.zephyr.hw_backends:` block
+  #                    in `metadata/libraries/<name>.yaml`.
   # `vendor-sdks`    - public vendor SDK repos pinned to the
   #                    verified tags (Alif sdk-alif, Renesas
   #                    rzv-fsp, NXP mcuxsdk-manifests).  Carries
@@ -233,8 +236,10 @@ manifest:
           # `depends on ZEPHYR_LITTLEFS_MODULE`, auto-set by Zephyr's
           # module-resolution pass once this module is present) --
           # was missing from the allowlist, so `libraries: [littlefs]`
-          # emitted the right CONFIG_* lines (see _LIBRARY_KCONFIG in
-          # scripts/alp_project.py) but `west update` never actually
+          # emitted the right CONFIG_* lines (the manifest's own
+          # `integration.zephyr.kconfig` array, transcribed by
+          # scripts/alp_orchestrate/libraries.py's zephyr_kconfig_lines)
+          # but `west update` never actually
           # fetched the module a real Kconfig solve needs (#3p-lib-examples
           # Task 0). NOTE: as of this fix, any <zephyr-workspace> topdir
           # this SDK is verified against that was set up before this
@@ -379,8 +384,12 @@ manifest:
     # ---------------------------------------------------------------
     # extras-tier1 -- §D.lib batch.  Libraries that aren't in
     # Zephyr's modules tree, pinned to maintainer-verified tagged
-    # releases (or `main` where upstream has no semver releases --
-    # bearssl, minimp3).  Disabled by default; consumers
+    # releases (or a commit SHA where upstream has no semver releases --
+    # bearssl, minimp3).  No project in this group floats a branch
+    # revision (main/master/HEAD) -- see
+    # tests/scripts/test_library_layer.py's
+    # test_no_west_manifest_extras_tier1_tracks_a_floating_branch.
+    # Disabled by default; consumers
     # flip via `west update --group-filter +extras-tier1` when their
     # board.yaml's `libraries:` lists any of these.  Each library
     # ships its compile-time profile + HW-accelerator binding under
@@ -417,9 +426,13 @@ manifest:
     - name: minimp3
       remote: lieff
       repo-path: minimp3
-      revision: main              # No versioned releases; pin to commit
-                                  # when consumed.  TBD: pin to a SHA after
-                                  # the maintainer audit.
+      revision: ea99364f61c14656440e8d77e9c233ccf3124633 # master HEAD,
+                                  # 2026-07-27.  No versioned releases.
+                                  # `main` (the prior pin) does not exist on
+                                  # this repo -- the default branch is
+                                  # `master` -- so `west update
+                                  # --group-filter +extras-tier1` could not
+                                  # fetch this project at all.
       path: modules/lib/minimp3
       groups:
         - extras-tier1
@@ -455,15 +468,24 @@ manifest:
       remote: xio-technologies
       repo-path: Fusion           # The maintained successor lib (Madgwick
                                   # reference + Fusion are bundled).
-      revision: main              # TBD: pin SHA after maintainer audit.
+      revision: v1.3.2            # 2026-07-20 tagged release, SHA
+                                  # 015d68494274b479b5996bff2530ecbcfdc266f2.
+                                  # Default branch is `main`; pinned to the
+                                  # tag instead now that maintainer audit
+                                  # is done.  Licence MIT, verified from
+                                  # LICENSE.md at this ref.
       path: modules/lib/madgwick_ahrs
       groups:
         - extras-tier1
     - name: BearSSL
-      remote: bearssl-mirror
-      repo-path: BearSSL          # Community git mirror; upstream is
-                                  # tarball-only.  TBD: confirm + pin SHA.
-      revision: master
+      remote: bearssl-upstream
+      repo-path: BearSSL          # Upstream git server, not a mirror.
+      revision: 7bea48e5e850ab4cafbe68d3765cdaba13a86d6f # refs/heads/master
+                                  # HEAD on https://bearssl.org/git/BearSSL.
+                                  # The prior `bearssl-mirror` remote
+                                  # (github.com/bearsslmirror/BearSSL) does
+                                  # not exist -- 404 -- so this project
+                                  # could not be fetched at all.
       path: modules/lib/bearssl
       groups:
         - extras-tier1

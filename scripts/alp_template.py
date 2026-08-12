@@ -111,6 +111,7 @@ try:
 except ImportError:
     sys.exit("alp_template: PyYAML is required.  Install via `pip install pyyaml`.")
 
+from alp_orchestrate.orchestrator import _zephyr_app_dir
 from alp_project_loader import METADATA_ROOT
 
 REPO = Path(__file__).resolve().parent.parent
@@ -992,6 +993,44 @@ def _substitute_cmake_core(text: str, old: str, new: str) -> str:
     return new_text
 
 
+def _cmake_core_map(record: dict[str, Any], example_dir: Path) -> dict[str, str]:
+    """{CMakeLists.txt relpath (posix, example-root-relative): core_id}
+    for every ZEPHYR core the catalog's `cores` field declares (issue
+    #1275 item 1) -- the fix for the single-core assumption that used to
+    apply ONE re-derived `--core` rename to every `*CMakeLists.txt` file
+    a template happened to own, silently correct only by accident (every
+    shipped multi-CMakeLists template today has exactly one supported
+    sku, so the rename path was never actually exercised against a
+    second file -- see `_derive_core_renames`'s own docstring for the
+    same "unreachable but latently wrong" class of bug).
+
+    Reuses `alp_orchestrate.orchestrator._zephyr_app_dir` -- the SAME
+    function `west build`'s app-dir argument (and
+    `check_core_cmakelists_mapping.py`'s gate) resolve `cores.<id>.app`
+    through -- rather than re-deriving the "self-contained app dir vs.
+    sources-only dir whose CMakeLists.txt lives at the parent" rule a
+    second time; a resolver that disagreed would silently re-target the
+    wrong file. A non-Zephyr core (`os: yocto`/`off`/`baremetal`) is
+    skipped: it either has no `--core` literal to rewrite at all (a
+    Yocto CMakeLists.txt never invokes `--emit zephyr-conf`) or, for
+    `off`, no `dir` to resolve in the first place."""
+    out: dict[str, str] = {}
+    for core in record.get("cores", []):
+        if core.get("os") != "zephyr" or not core.get("dir"):
+            continue
+        # #1126 containment guard: validate core["dir"] the same way every
+        # other catalog-sourced path in this file is validated, BEFORE
+        # handing it to `_zephyr_app_dir` (which has no containment check
+        # of its own and would otherwise let `../x` walk out of
+        # `example_dir` and surface a bare ValueError from `.relative_to`
+        # below instead of PathEscapeError).
+        core_dir = _safe_join(example_dir, core["dir"], what="core dir")
+        app_dir = _zephyr_app_dir(str(core_dir), example_dir)
+        rel = (app_dir / "CMakeLists.txt").relative_to(example_dir).as_posix()
+        out[rel] = core["id"]
+    return out
+
+
 # ---------------------------------------------------------------------
 # --emit scaffold content adaptation (issue #864 follow-up)
 # ---------------------------------------------------------------------
@@ -1183,18 +1222,32 @@ def _scaffold_readme(
 
     * MAJOR C -- the canonical example's own SoM label ("# Example for
       E1M-AEN801:") and qualified Zephyr board target
-      (`alp_e1m_aen801_m55_hp`) otherwise survive a cross-family sku
-      swap untouched (a V2N101 scaffold shipping `-b
-      alp_e1m_aen801_m55_hp`; the real
+      (`alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp`) otherwise
+      survive a cross-family sku swap untouched (a V2N101 scaffold
+      shipping `-b alp_e1m_aen801_m55_hp/...`; the real
       `alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33` appears nowhere).
       `source_board`/`target_board` are the qualified board id
       (`_core_board`) for the example's own sku / the requested sku's
-      re-derived app core respectively; only the SHORT board-id prefix
-      (before the first `/`) needs to match literally in the README, so
-      the whole qualified `target_board` is substituted in its place --
-      upgrading even the passthrough case to the fully-qualified id
-      Zephyr 4.4 actually requires (issue #720; the source README's own
-      bare `alp_e1m_aen801_m55_hp` is itself ambiguous/unresolvable).
+      re-derived app core respectively. Every source README carries
+      the full `/<soc>/<core>` suffix (issue #720), so the exact
+      qualified `source_board` string is matched first, consuming that
+      suffix along with the short prefix; a SHORT board-id-prefix
+      (before the first `/`) word-boundary match then ALSO runs
+      unconditionally, for any remaining bare mention that names only
+      the board directory (no soc/core), e.g. a `zephyr/boards/alp/
+      <board>/` doc link -- a README carrying both shapes gets both
+      rewritten, not just whichever one matches first.
+
+    * `_m33_sm` (RZ/V2N system-manager) scaffold targets -- that board
+      family's DEFAULT flasher is `rzv2n_mtd_flash`
+      (zephyr/boards/alp/e1m_v2n101_m33_sm/board.cmake,
+      e1m_v2m101_m33_sm/board.cmake), which is SSH-to-the-booted-A55
+      and always needs `--host`/`ALP_V2N_SSH_HOST` -- a bare `west
+      flash` carried over verbatim from an AEN801 (JLink) source
+      README silently can't reach the board. Every `west flash` line
+      immediately following one of THIS scaffold's own board-target
+      lines is rewritten to `west flash --host <board-ip>`; an
+      unrelated `west flash` elsewhere in the prose is left alone.
 
     `pin_renames` (issue #876 review MINOR 4) is `_derive_pin_renames`'s
     map -- see `_substitute_readme_pins`.
@@ -1209,8 +1262,47 @@ def _scaffold_readme(
     text = text.replace(
         "-DEXTRA_ZEPHYR_MODULES=$(pwd)", "-DEXTRA_ZEPHYR_MODULES=$ALP_SDK_ROOT")
     if source_board and target_board:
+        # Every source README carries the full `/<soc>/<core>` suffix
+        # (issue #720), so match the exact qualified string first --
+        # its `/<soc>/<core>` suffix is consumed along with the short
+        # prefix, avoiding the OLD soc/core suffix being left dangling
+        # after the NEW (already fully qualified) `target_board`, e.g.
+        # `alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33/ae822fa0e5597ls0/rtss_hp`.
+        # The short board-id-prefix (before the first `/`) word-
+        # boundary match then ALSO runs, unconditionally -- not only
+        # as a fallback when the qualified string is absent -- so a
+        # README naming the board BOTH ways (a qualified `west build`
+        # line and a separate bare `zephyr/boards/alp/<board>/` doc
+        # link) gets both rewritten. `(?!/)` keeps it from re-matching
+        # the prefix of a string that's ALREADY (still) fully
+        # qualified -- either one this same call just substituted in
+        # (leaving `target_board` intact) or, in the sku==example_sku
+        # passthrough case, `source_board` itself, still present
+        # verbatim after the no-op `replace` above -- which would
+        # otherwise get its own `/<soc>/<core>` suffix duplicated onto
+        # the end a second time.
+        if source_board in text:
+            text = text.replace(source_board, target_board)
         source_marker = source_board.split("/", 1)[0]
-        text = re.sub(rf"\b{re.escape(source_marker)}\b", target_board, text)
+        text = re.sub(rf"\b{re.escape(source_marker)}\b(?!/)", target_board, text)
+        # The `_m33_sm` (RZ/V2N system-manager) board family's DEFAULT
+        # flasher is `rzv2n_mtd_flash` (zephyr/boards/alp/
+        # e1m_v2n101_m33_sm/board.cmake, e1m_v2m101_m33_sm/board.cmake),
+        # which is SSH-to-the-booted-A55 and always needs `--host`/
+        # `ALP_V2N_SSH_HOST` -- a bare `west flash` carried over
+        # verbatim from an AEN801 (JLink) source README silently can't
+        # reach the board. Every `west flash` line immediately
+        # following one of THIS scaffold's own board-target lines is
+        # rewritten (a multi-core README can carry more than one), so
+        # a two-core scaffold doesn't leave its second flash line
+        # bare; an unrelated `west flash` elsewhere in the prose is
+        # left alone.
+        if target_board.split("/", 1)[0].endswith("_m33_sm"):
+            marker = re.escape(target_board)
+            text = re.sub(
+                rf"({marker}[^\n]*\n)west flash\b",
+                r"\1west flash --host <board-ip>",
+                text)
     if example_sku and sku and example_sku != sku:
         text = text.replace(example_sku, sku)
     text = _substitute_readme_pins(text, pin_renames or {})
@@ -1295,22 +1387,30 @@ def render_to_envelope(
         _derive_pin_doc_renames(original_pins, sku, source_preset, metadata_root)
         if original_pins else {}
     )
-    # The one rename CMakeLists.txt's `--core` flag also needs (the
-    # m-class core the app actually builds on) -- None when nothing
-    # was renamed, or when the template has no m-class core at all
-    # (never happens for a real `runtimes: [zephyr]` catalog record).
+    # README board-target rewrite (MAJOR C) still keys off a single
+    # "primary" app core -- the first m-prefixed core in
+    # original_core_ids, matching board.yaml's own declaration order
+    # (the same tie-break `_derive_core_renames`'s MAJOR D picks). One
+    # board id in the README prose is all MAJOR C ever rewrote, single-
+    # core template or not -- unaffected by item 1's per-CMakeLists fix
+    # below, which is a SEPARATE map over every Zephyr core, not this
+    # scalar.
     app_core_old = next((c for c in original_core_ids if c.startswith("m")), None)
     app_core_sub = (
         (app_core_old, core_renames[app_core_old])
         if core_renames and app_core_old in core_renames else None
     )
-    # README board-target rewrite (MAJOR C): the example's OWN board id
-    # for its own sku, vs. the requested sku's board id for the
-    # (possibly re-derived) app core.
     source_board = _core_board(example_sku, app_core_old, metadata_root)
     target_board = _core_board(
         sku, app_core_sub[1] if app_core_sub else app_core_old, metadata_root)
     docs_ref = _docs_ref(base)
+    # CMakeLists.txt per-core map (issue #1275 item 1): each Zephyr core
+    # the catalog's `cores` field declares gets its OWN `--core` rename
+    # applied to its OWN CMakeLists.txt -- fixes the single-core
+    # assumption above (app_core_sub) blindly re-applying ONE rename to
+    # every `*CMakeLists.txt` file a multi-core template owns. See
+    # `_cmake_core_map`'s docstring.
+    cmake_core_for = _cmake_core_map(record, example_dir)
 
     out: list[tuple[str, str]] = []
     for rel, data in _rendered_bytes(template_id, record, render_plan.files, resolved, base):
@@ -1344,8 +1444,10 @@ def render_to_envelope(
             for old in (pin_renames or {}):
                 text = _strip_stale_core_prose(text, old)
         elif rel.endswith("CMakeLists.txt"):
-            if app_core_sub:
-                text = _substitute_cmake_core(text, *app_core_sub)
+            this_core = cmake_core_for.get(rel)
+            if this_core and core_renames and this_core in core_renames:
+                text = _substitute_cmake_core(
+                    text, this_core, core_renames[this_core])
             text = _scaffold_cmakelists(text)
         elif rel == "README.md":
             text = _scaffold_readme(

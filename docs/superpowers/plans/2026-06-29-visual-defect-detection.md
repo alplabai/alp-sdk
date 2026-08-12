@@ -954,7 +954,7 @@ tests:
     extra_configs:
       - 'CONFIG_COMPILER_OPT="-DALP_BOARD_E1M_EVK"'
     platform_allow:
-      - ensemble_e8_dk/ae402fa0e5597le0/rtss_hp
+      - ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp
     build_only: true
     tags:
       - alp-sdk
@@ -1040,7 +1040,7 @@ DEFECT,2,FAIL,0.83,1.6,5,3,1.91
 ## Build
 
 ```
-west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples/ai/visual-defect-detection
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/ai/visual-defect-detection
 west flash
 ```
 

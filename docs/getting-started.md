@@ -238,7 +238,7 @@ brew install ninja                    # macOS
 winget install -e --id Ninja-build.Ninja   # Windows
 ```
 
-See [`docs/cli.md`](cli.md#tan-doctor----build-and-flash-readiness) for the
+See [`docs/cli.md`](cli.md#tan-doctor) for the
 current check contract and [`docs/troubleshooting.md`](troubleshooting.md) for
 the failures each check prevents.
 
@@ -299,7 +299,7 @@ allocator reads the SoM preset + `pad_routes:` from this repo's
 emits the same `<alp/...>` calls you'd write by hand.  Switching
 to studio at any point is non-destructive — your standalone app
 keeps working alongside the studio-generated code.  See
-[`alplabai/alp-studio`](https://github.com/alplabai/alp-studio).
+`alplabai/alp-studio` (not a public GitHub repo).
 
 ## 3. Set up a Zephyr workspace
 

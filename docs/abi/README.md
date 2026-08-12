@@ -12,8 +12,13 @@ changes between releases without diffing every header by hand.
 At any time exactly one file in this directory -- the one named for
 the release `metadata/sdk_version.yaml` currently declares (`0.15.0`
 -> `v0.15-snapshot.json`) -- is the *working* snapshot: it tracks
-`HEAD` and gets regenerated (`generated` date bumps, symbols change)
-as the SDK's public headers evolve between releases.
+`HEAD` and gets regenerated (symbols change, and `generated` bumps to
+the date of that change) as the SDK's public headers evolve between
+releases. A regen that finds the public surface byte-identical to
+what's already committed leaves the file untouched -- `generated`
+does not bump on a rerun that changed nothing, so the date means "the
+ABI last actually changed", not "someone last ran the gate" (issue
+#1232).
 
 **Every OTHER snapshot in this directory is frozen the moment the
 next release ships, and must never be regenerated again.** A frozen
@@ -84,6 +89,13 @@ a JSON document with a SHA-256 short fingerprint per symbol.
 the current release `metadata/sdk_version.yaml` declares -- e.g.
 `--version v0.1` now exits 2, because `v0.1` is a FROZEN historical
 label, not today's current snapshot (see above).
+
+If the public surface hasn't actually changed, `--output` writes
+nothing at all -- the file on disk, including its `generated` date,
+is left exactly as committed -- and prints
+`docs/abi/<label>-snapshot.json unchanged (ABI identical; generated
+date left as-is)` and exits 0. That is the expected, successful
+outcome of a no-op regen, not a sign the command failed to run.
 
 ## How a PR uses a snapshot
 
@@ -165,16 +177,22 @@ produced byte-identical public-header fingerprints (the patch release
 touched no public header), so `v0.8-snapshot.json` is sourced from
 `v0.8.0`, the tag that originally minted the file.
 
-**Note on v0.15.0 (measured 2026-08-02 via `git tag --list`):** the
-only `v0.15*` tag in the repo is `v0.15.0-rc1`; there is no plain
-`v0.15.0` tag.  `metadata/sdk_version.yaml` currently declares
-`version: 0.15.0` / `status: released`, and `CHANGELOG.md` carries a
-dated `[v0.15.0] - 2026-07-31` section rather than `[Unreleased]` --
-both consistent with a release that was bumped and slated but whose
-final tag was never pushed (only the `-rc1` candidate was).  This
-table follows the tag list, the only artefact that can't drift: it
-marks `v0.15-snapshot.json` **CURRENT** (it is still the label
+**Note on v0.15.0 (measured 2026-08-02 via `git tag --list`, rechecked
+2026-08-07):** the only `v0.15*` tag in the repo is `v0.15.0-rc1`;
+there is no plain `v0.15.0` tag.  `metadata/sdk_version.yaml` declares
+`version: 0.15.0` / `status: released` -- bumped 2026-07-31 by
+`4d0f4aae` for a tag that was never pushed.  This table follows the tag
+list, the only artefact that can't drift: it marks
+`v0.15-snapshot.json` **CURRENT** (it is still the label
 `scripts/abi_snapshot.py --print-current-version` derives from
-`sdk_version.yaml`'s `0.15.0`, and its `generated` date keeps moving),
-not frozen-and-released.  Reconciling `sdk_version.yaml`'s `released`
-status against the missing tag is outside this file's ownership.
+`sdk_version.yaml`'s `0.15.0`, and its `generated` date still moves
+whenever a regen finds real ABI content changed), not
+frozen-and-released.  Reconciling `sdk_version.yaml`'s `released`
+status against the missing tag is outside this file's ownership; it
+resolves when the GA tag lands.
+
+The `CHANGELOG.md` half of that mismatch **is** now reconciled (#1292):
+the dated section is titled `[v0.15.0-rc1] - 2026-07-31`, naming the
+tag that actually shipped it, and the accumulated work since sits under
+`[Unreleased] - v0.15.0 candidate` to be cut as the GA.  So this note
+no longer describes the CHANGELOG as claiming a released `[v0.15.0]`.
