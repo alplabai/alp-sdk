@@ -44,14 +44,22 @@ jobs:
     # cap, each derived from that step's own worst SUCCESSFUL run across
     # 32 sampled successful runs = 128 shard jobs (the numbers are in
     # each step's comment and in CHANGELOG.md's #1319 entry).  This
-    # ceiling sits above the sum of those caps (116) plus a minute
-    # apiece for the five uncapped local-Python steps (5) = 121, so a
+    # ceiling sits above the sum of those caps (126) plus a minute
+    # apiece for the four uncapped local-Python steps (4) = 130, so a
     # step running late is still killed by its OWN timeout first and the
     # failure names the actual stall rather than whatever happened to be
     # running.  Worst observed whole-job wall clock in the same sample
     # was 1544s (25m44s, job 93911719274) -- this ceiling is a backstop
     # to make a hang legible, not a performance target.
-    timeout-minutes: 130
+    #
+    # 145, not 130: capping `check · --emit kconfig contract (#893)` at 10
+    # moved it out of the uncapped-local-Python bucket (5 -> 4) and into the
+    # sum (116 -> 126), landing the total exactly ON the old ceiling.
+    # test_job_ceiling_exceeds_the_sum_of_its_step_timeouts requires the
+    # ceiling to be STRICTLY above the sum -- a ceiling equal to it leaves no
+    # room for a step to be killed by its own timeout first, which is the
+    # whole point.  The gate caught that, which is the gate working.
+    timeout-minutes: 145
 
     strategy:
       # Run every shard even if one fails, so a single failing suite
