@@ -124,6 +124,30 @@ static int cmd_companion_wifi_scan(const struct shell *sh, size_t argc, char **a
 
 static int cmd_companion_wifi_connect(const struct shell *sh, size_t argc, char **argv)
 {
+	/* Validate the token shape BEFORE any state check, so a usage error is
+	 * reported as one (#1376).  This ordering is deliberate: reporting
+	 * "companion not registered" for a mis-typed command hides the real
+	 * problem, and the argument shape is wrong regardless of whether a
+	 * companion happens to be bound.
+	 *
+	 * The 4th token is the ONLY optional flag, and it must be "wpa3".  It used
+	 * to be tested with `== 0` and otherwise IGNORED, which made the dangerous
+	 * case silent: an UNQUOTED SSID containing a space splits across
+	 * argv[1]/argv[2], pushing the real passphrase into argv[3], where it was
+	 * dropped without a word.  The user then saw a confident "connecting" line
+	 * naming an SSID they never typed, with their passphrase consumed as a
+	 * security token.  Associating with a truncated SSID is worse than
+	 * refusing, so an unrecognised token is now an error. */
+	if (argc >= 4 && strcmp(argv[3], "wpa3") != 0) {
+		shell_error(sh,
+		            "unrecognised argument \"%s\" -- the only optional 4th token is "
+		            "\"wpa3\".",
+		            argv[3]);
+		shell_error(sh,
+		            "an SSID or passphrase containing spaces must be quoted: "
+		            "wifi connect \"my ssid\" \"my pass\" [wpa3]");
+		return -EINVAL;
+	}
 	if (companion_cc3501e == NULL) {
 		shell_warn(sh, "companion not registered");
 		return -ENODEV;
@@ -135,9 +159,9 @@ static int cmd_companion_wifi_connect(const struct shell *sh, size_t argc, char 
 	const char *ssid = argv[1];
 	const char *pass = (argc >= 3) ? argv[2] : "";
 	/* No passphrase -> open; a passphrase -> WPA2-PSK (the common case).  A
-	 * trailing "wpa3" token forces WPA3-SAE. */
+	 * trailing "wpa3" token forces WPA3-SAE (validated above). */
 	uint8_t sec = (pass[0] == '\0') ? 0u : 1u;
-	if (argc >= 4 && strcmp(argv[3], "wpa3") == 0) {
+	if (argc >= 4) {
 		sec = 2u;
 	}
 

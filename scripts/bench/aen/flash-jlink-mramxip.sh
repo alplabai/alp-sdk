@@ -170,6 +170,35 @@ if grep -qi "Could not connect to the target device" /tmp/flowd-mramxip.out; the
   echo "!! $DEV profile FAILED to connect -- flow D not unlocked on this probe."; exit 2
 fi
 
+# GATE ON THE VERIFY RESULT (#1343).  The two `verifybin` lines above have always
+# been issued, but until now NOTHING read their outcome: the JLinkExe output goes
+# to a display-only pipe, and the ONLY condition that could fail this script was
+# the connect check above.  So a `Verify failed.` scrolled past and the script
+# exited 0 -- reporting a good flash for bytes that never landed, which is exactly
+# the failure #1343 measured (a `loadbin` reporting `O.K.` having silently skipped).
+#
+# That is worse than having no verify at all: anyone reading this script saw
+# `verifybin` and reasonably concluded writes were checked.  The absence would at
+# least have been visible.
+#
+# Both directions are checked, deliberately.  An explicit failure string is the
+# common case; the COUNT catches the quieter one -- a run that aborted before the
+# verifies executed at all reports neither success nor failure, and a
+# "no news is good news" gate would pass it.
+if grep -qiE "verify failed|verification failed|mismatch" /tmp/flowd-mramxip.out; then
+  echo "!! VERIFY FAILED -- the bytes on the part do NOT match the image."
+  grep -iE "verify failed|verification failed|mismatch" /tmp/flowd-mramxip.out | head -5
+  echo "   slot0 content is NOT what you built.  Do not treat this board as flashed."
+  exit 3
+fi
+verify_ok=$(grep -ci "verify successful" /tmp/flowd-mramxip.out || true)
+if [ "${verify_ok:-0}" -lt 2 ]; then
+  echo "!! only ${verify_ok:-0} of 2 verifybin passes reported success -- treating as FAILED."
+  echo "   (expected one per loadbin: the app image and the AppTocPackage.)"
+  exit 3
+fi
+echo "verify: ${verify_ok}/2 verifybin passes OK (app image + AppTocPackage)"
+
 # 4. SES has re-booted the app; attach read-only (generic device) + dump RAM console.
 sleep 3
 if [ -z "$BUF_SYM" ]; then
