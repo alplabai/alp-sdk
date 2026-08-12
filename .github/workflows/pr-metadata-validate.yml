@@ -27,6 +27,7 @@ on:
       - 'scripts/check_atoc_reservation.py'
       - 'scripts/check_example_board_overlay_parity.py'
       - 'scripts/check_som_topology_parity.py'
+      - 'scripts/check_helper_firmware_path.py'
       - 'scripts/check_core_cmakelists_mapping.py'
       - 'examples/**/CMakeLists.txt'
       - 'scripts/alp_project_loader.py'
@@ -75,6 +76,7 @@ on:
       - 'scripts/check_atoc_reservation.py'
       - 'scripts/check_example_board_overlay_parity.py'
       - 'scripts/check_som_topology_parity.py'
+      - 'scripts/check_helper_firmware_path.py'
       - 'scripts/check_core_cmakelists_mapping.py'
       - 'examples/**/CMakeLists.txt'
       - 'scripts/alp_project_loader.py'
@@ -336,6 +338,16 @@ jobs:
       # tested and runnable locally.
       - name: Gate — SoM preset topology keys match resolved SoC cores[].id
         run: python3 scripts/check_som_topology_parity.py
+
+      # Issue #1372: nothing validated that a SoM preset's
+      # helper_firmware[].firmware_path (six AEN presets pointed at
+      # firmware/cc3501e/prebuilt/cc3501e-v0.2.0.bin) actually resolves to a
+      # file in the tree -- not the schema, not the validator, not the
+      # manifest emitter, not tan. Omission of the key is legal (means "no
+      # artefact yet") and is left alone; only a present-but-broken path
+      # fails.
+      - name: Gate — helper_firmware firmware_path resolves
+        run: python3 scripts/check_helper_firmware_path.py
 
       # Issue #1275: a dual-Zephyr-core SKU can silently share one core's
       # baked CMakeLists.txt --core literal with a sibling core (the newly
