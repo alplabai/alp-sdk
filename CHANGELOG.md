@@ -7,6 +7,76 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — the required twister lane could hang for six hours with no timeout at all
+
+`.github/workflows/pr-twister.yml` carried no `timeout-minutes` anywhere —
+`grep -c timeout-minutes .github/workflows/pr-twister.yml` returned `0`. Its
+`twister-shard` job had neither per-step caps nor a job-level ceiling, so
+GitHub's **360-minute** runner default applied silently, and it applied to the
+lane feeding `twister · native_sim/native/64` — one of only two required
+branch-protection contexts on `dev` (`clang-format · diff-only` is the other).
+The `apt-get`/PyPI/west-mirror stall #1274 diagnosed on
+`.github/workflows/pr-tier-a-libraries.yml` would have landed here as a
+six-hour hang on the one lane every PR must pass.
+
+`twister-shard` now mirrors the shape #1274 established: `Checkout alp-sdk` at
+`timeout-minutes: 2`, `Set up Python` at `2`, `Install host build tools (dtc,
+ninja, ccache, gperf, libffi)` at `8`, `Install west` at `2`, `west init zephyr
+workspace` at `25`, `Cache Zephyr modules` at `5`, `Cache ccache objects` at
+`2`, `pip install Zephyr requirements` at `3`, `pip install Alp SDK Python
+deps` at `2`, `twister · run shard ${{ matrix.shard }}/4 on
+native_sim/native/64` at `45`, `Install ARM Zephyr SDK toolchain (for --emit
+kconfig contract)` at `2`, `west sdk install (arm-zephyr-eabi only)` at `15`,
+and `Upload twister reports artefact` at `3` — summing to 116, plus a minute
+apiece for the five uncapped local-Python steps = 121, under a job ceiling of
+`timeout-minutes: 130`. The aggregator job `twister` gets `timeout-minutes: 5`
+so a stuck runner can no longer hold the required check open for 360 minutes
+either.
+
+Values come from each step's own worst SUCCESSFUL run across **32 sampled
+successful runs = 128 shard jobs**, not from guesses: `west init zephyr
+workspace` median 177s with 126 of 128 jobs under 330s but one real green run
+at **990s** (16m30s) on a slow-mirror day, so 25min = 1500s is 1.52x that
+outlier and 3.7x the next-worst (403s); the twister step clusters at 300-470s
+warm and 800-1210s cold, worst green **1210s** (20m10s, shard 3/4), so 45min =
+2700s = 2.23x; `Install host build tools` worst green 86s but keeps the
+precedent's 8min because the failure it guards against is precisely a mirror
+going slow; `Cache Zephyr modules` worst green 122s → 5min; `pip install Zephyr
+requirements` worst green 72s → 3min. Worst observed whole-job wall clock was
+1544s (25m44s, job `93911719274`). `west sdk install (arm-zephyr-eabi only)`
+has **no** measurement — the SDK cache hit on all 32 sampled runs, so it was
+skipped in every one; its 15 minutes is a deliberately generous ceiling chosen
+to make a stalled toolchain download legible, not a performance target. The
+same is true of the 130-minute job ceiling and the 5-minute aggregator ceiling:
+they are backstops that make a hang legible, sized above the per-step sums so a
+late step is still killed by its OWN timeout first and the failure names the
+actual stall.
+
+The #1274 regression test `tests/scripts/test_tier_a_workflow_step_timeouts.py`
+was hardcoded to `pr-tier-a-libraries.yml`; it is now parametrized over a
+`WORKFLOWS` tuple covering both files, with `ids=` naming the workflow in the
+failure line. A new `test_every_job_declares_a_timeout` catches #1319's actual
+defect — a job with no declaration at all — and the two step-level tests read
+the ceiling through a `_ceiling()` helper that substitutes the real 360-minute
+default rather than raising a bare `KeyError`. `scripts/twister` joins the
+`_NETWORK_OR_COMPILE_MARKERS` heuristic, which had waved through the very step
+that most needs a cap because `python3 zephyr/scripts/twister ...` invokes none
+of `pip install` / `apt-get` / `west ` / `cmake`; it is matched on the
+invocation path rather than the bare word `twister`, which false-positived on
+the aggregator's pure-shell `echo "twister-shard aggregate result: $result"`.
+Verified by stashing the workflow fix and re-running: 3 failures on the pre-fix
+file, 6 passed after.
+
+Because a PR touching only `.github/workflows/pr-twister.yml` triggers neither
+`pr-metadata-validate.yml` (which filters on `tests/scripts/**` and its own
+filename) nor `cross-platform-zephyr.yml`, the gate would not have run on the
+edits it guards. `pr-twister.yml` has no `paths:` filter at all, so the test is
+invoked from the workflow itself as shard-1 step `check · workflow step
+timeouts (#1274 / #1319)`, placed before the ~20-minute twister step so a bad
+timeout edit fails in seconds. That step's `name:` is **quoted** — in a plain
+YAML scalar a space followed by `#` opens a comment, and the unquoted form
+silently truncated the name to `check · workflow step timeouts (#1274 /`.
+
 ### Added — ADR 0027 proposes declaring storage regions by role, not by SoM-internal region name
 
 `board.yaml`'s `storage:` entries place themselves with `flash_device:`, a
