@@ -1,18 +1,32 @@
 # SPDX-License-Identifier: Apache-2.0
 cmake_minimum_required(VERSION 3.20.0)
 
+# Resolve the alp-sdk root.  In-tree the SDK is the example's
+# grandparent directory; out-of-tree customers point ALP_SDK_ROOT
+# at their checkout.
+if(DEFINED ENV{ALP_SDK_ROOT})
+    set(ALP_SDK_ROOT $ENV{ALP_SDK_ROOT})
+else()
+    get_filename_component(ALP_SDK_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../.. ABSOLUTE)
+endif()
+
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 execute_process(
     COMMAND ${Python3_EXECUTABLE}
-            ${CMAKE_CURRENT_SOURCE_DIR}/../../../scripts/alp_project.py
+            ${ALP_SDK_ROOT}/scripts/alp_project.py
             --input  ${CMAKE_CURRENT_SOURCE_DIR}/board.yaml
             --output ${CMAKE_CURRENT_BINARY_DIR}/alp.conf
             --emit zephyr-conf --core m55_hp
     RESULT_VARIABLE rc
+    OUTPUT_VARIABLE _alp_stdout
+    ERROR_VARIABLE  _alp_stderr
 )
 if(NOT rc EQUAL 0)
-    message(FATAL_ERROR "alp_project.py failed (rc=${rc})")
+    message(FATAL_ERROR
+        "alp_project.py failed (rc=${rc}); "
+        "check ${CMAKE_CURRENT_SOURCE_DIR}/board.yaml.\n"
+        "stderr: ${_alp_stderr}")
 endif()
 list(APPEND EXTRA_CONF_FILE ${CMAKE_CURRENT_BINARY_DIR}/alp.conf)
 

@@ -26,6 +26,7 @@ on:
       - 'scripts/check_board_target_tree_parity.py'
       - 'scripts/check_atoc_reservation.py'
       - 'scripts/check_example_board_overlay_parity.py'
+      - 'scripts/check_example_sdk_root.py'
       - 'scripts/check_som_topology_parity.py'
       - 'scripts/check_helper_firmware_path.py'
       - 'scripts/check_core_cmakelists_mapping.py'
@@ -75,6 +76,7 @@ on:
       - 'scripts/check_board_target_tree_parity.py'
       - 'scripts/check_atoc_reservation.py'
       - 'scripts/check_example_board_overlay_parity.py'
+      - 'scripts/check_example_sdk_root.py'
       - 'scripts/check_som_topology_parity.py'
       - 'scripts/check_helper_firmware_path.py'
       - 'scripts/check_core_cmakelists_mapping.py'
@@ -494,6 +496,17 @@ jobs:
       - name: Example portability classification + hard-error lint
         run: |
           python3 scripts/check_example_portability.py
+
+      # Issue #1390: drone-autopilot reached scripts/alp_project.py through an
+      # unconditional ${CMAKE_CURRENT_SOURCE_DIR}/../../../ hop, which is the
+      # SDK root only in tree. Scaffolded out of tree (`tan init
+      # --from-example`, i.e. what a customer actually ends up with) three
+      # levels up is somewhere else entirely, so configure died on a
+      # nonexistent scripts/alp_project.py -- and because the hop was
+      # unconditional, setting ALP_SDK_ROOT was not a workaround. Twenty
+      # examples shared the copied block.
+      - name: Gate — examples resolve alp_project.py under ALP_SDK_ROOT
+        run: python3 scripts/check_example_sdk_root.py
 
       # Public-API test-coverage audit -- per the VERSIONS.md
       # "Quality bar" entry, every public function should have at

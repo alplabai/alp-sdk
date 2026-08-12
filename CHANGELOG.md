@@ -7,6 +7,55 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — 20 examples could not be built out of tree: their `CMakeLists.txt` reached `scripts/alp_project.py` through a bare relative hop (#1390)
+
+`examples/peripheral-io/drone-autopilot/CMakeLists.txt` invoked the loader as
+`${CMAKE_CURRENT_SOURCE_DIR}/../../../scripts/alp_project.py`. `../../..` is
+the SDK root only while the example sits at `<sdk>/examples/<category>/<name>/`.
+Scaffolded out of tree — which is exactly what `tan init --from-example`
+produces, and what a customer ends up with — three levels up is somewhere else
+entirely: for a project at `C:\alp\proj-drone\aen-drone` the command became
+`C:\scripts\alp_project.py` and configure died with `python.exe: can't open
+file 'C:\scripts\alp_project.py': [Errno 2] No such file or directory`,
+`CMake Error at CMakeLists.txt:18 (message): alp_project.py failed (rc=2)`,
+`failed: m55_hp [zephyr]`. Because the hop was unconditional, setting
+`ALP_SDK_ROOT` was not a workaround. Not Windows-specific and not
+AEN-specific: any host, any board target.
+
+Fixed by adopting the shape
+`examples/peripheral-io/pwm-led-fade/CMakeLists.txt` has had all along —
+prefer `$ENV{ALP_SDK_ROOT}`, falling back to
+`get_filename_component(ALP_SDK_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../..
+ABSOLUTE)` only for the in-tree case — copied rather than reinvented. In tree
+the resolved root is byte-identical to the old hop, so in-tree builds are
+unchanged.
+
+`drone-autopilot` was not alone: the same block had been copy-pasted into
+**20** examples across `examples/ai/` (7), `examples/audio/` (5),
+`examples/display/` (4), `examples/camera-vision/` (2),
+`examples/connectivity/iot-dashboard`, and
+`examples/peripheral-io/drone-autopilot`. All 20 are fixed; every one of the
+102 `alp_project.py` invocations under `examples/` now resolves through
+`${ALP_SDK_ROOT}`.
+
+Also fixed the failure message that hid its own cause. The `execute_process`
+captured only `RESULT_VARIABLE`, so the operator saw `alp_project.py failed
+(rc=2)` and had to dig through the raw build log for the real Python error.
+It now captures `OUTPUT_VARIABLE`/`ERROR_VARIABLE` and prints `stderr:` in the
+`FATAL_ERROR`, as `pwm-led-fade` already did.
+
+New gate `scripts/check_example_sdk_root.py` (registry id `example-sdk-root`,
+wired as a `pr-metadata-validate.yml` step) fails any
+`examples/**/CMakeLists.txt` whose `scripts/alp_project.py` token is not
+prefixed `${ALP_SDK_ROOT}/`, so the pattern cannot spread by copy-paste again.
+It constrains only that token: the `..` inside the `get_filename_component()`
+fallback is the point of the fallback, and a `--input
+${CMAKE_CURRENT_SOURCE_DIR}/../board.yaml` elsewhere on the command — the
+multicore per-core slices use exactly that — stays legal. The fallback's depth
+is deliberately unchecked, since it varies correctly with nesting (`../../..`
+for `examples/<cat>/<name>/`, `../../../..` for a per-core subdirectory).
+Covered by `tests/scripts/test_check_example_sdk_root.py`.
+
 ### Added — ADR 0027 proposes declaring storage regions by role, not by SoM-internal region name
 
 `board.yaml`'s `storage:` entries place themselves with `flash_device:`, a
