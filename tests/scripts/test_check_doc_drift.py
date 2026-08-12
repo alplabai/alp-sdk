@@ -629,3 +629,58 @@ def test_aen_slot_checks_are_inert_without_an_aen801_board_tree(tmp_path):
     })
     proc = _run("--root", str(tmp_path))
     assert proc.returncode == 0, proc.stdout + proc.stderr
+    # And the OK line must not claim a check that never ran.
+    assert "AEN801 MRAM map claims match the board DT" not in proc.stdout
+    assert "no AEN801 board tree in this root to check" in proc.stdout
+
+
+def test_aen801_map_claim_table_row_form_is_checked(tmp_path):
+    # Review finding (f1): the ADR-0006 partition-map TABLE shape --
+    # `<node>_partition` | `<label>` | `0x........` -- must be checked,
+    # not just the "name @ 0xaddr" prose form.
+    _scaffold(tmp_path, docs={
+        "adr/0006-secure-boot-secure-ota.md":
+            "| Partition (DT node)  | Label     | HE           | HP           |\n"
+            "|----------------------|-----------|--------------|--------------|\n"
+            "| `slot0_partition`    | `image-0` | `0x80099000` | `0x80aa0000` |\n",
+    })
+    _aen801_board(tmp_path)
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 1
+    out = proc.stdout + proc.stderr
+    assert "DT puts slot0 at 0x80010000" in out
+    assert "DT puts image-0 at 0x80010000" in out
+
+
+def test_aen801_map_claim_table_row_form_matching_dt_passes(tmp_path):
+    # The same table shape, but naming the real DT addresses, must pass.
+    _scaffold(tmp_path, docs={
+        "adr/0006-secure-boot-secure-ota.md":
+            "| `boot_partition`  | `mcuboot` | `0x80000000` |\n"
+            "| `slot0_partition` | `image-0` | `0x80010000` |\n"
+            "| `reserved_partition` | `reserved` | `0x80550000` |\n",
+    })
+    _aen801_board(tmp_path)
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_aen801_broken_board_tree_fails_loudly(tmp_path):
+    # Review finding (f2): a real repo checkout (zephyr/boards/alp/
+    # exists) whose AEN801 board dirs went missing/renamed must FAIL,
+    # not silently disable (f1)/(f2) while still printing the
+    # affirmative "AEN801 MRAM map claims match the board DT" line.
+    _scaffold(tmp_path, docs={
+        "adr/0006-secure-boot-secure-ota.md":
+            "Route through MCUboot's swap-with-revert dual-bank flow.\n",
+    })
+    other = tmp_path / "zephyr" / "boards" / "alp" / "e1m_aen401_m55_hp"
+    other.mkdir(parents=True)
+    (other / "placeholder.dts").write_text(
+        "/* not an AEN801 board -- the 801 dirs were renamed away */\n",
+        encoding="utf-8")
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 1
+    out = proc.stdout + proc.stderr
+    assert "could not run" in out
+    assert "AEN801 MRAM map claims match the board DT" not in out

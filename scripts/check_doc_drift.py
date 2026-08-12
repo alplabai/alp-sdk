@@ -94,9 +94,12 @@ Six independent checks:
       gate follows the flash map instead of pinning today's wording:
 
         (f1) MRAM map addresses.  Any "<partition> @ 0x80......" claim
-             in the AEN boot/OTA doc + sysbuild surfaces must name a
-             partition the AEN801 DT actually declares, at the address
-             the DT gives it.  `slot1 @ 0x802b0000` in
+             in the AEN boot/OTA doc + sysbuild surfaces, OR a
+             `` `<node>_partition` | `<label>` | `0x80......` ``
+             markdown table row (the ADR-0006 partition-map table
+             shape), must name a partition the AEN801 DT actually
+             declares, at the address the DT gives it.
+             `slot1 @ 0x802b0000` in
              examples/aen/aen-mcuboot-smoke/sysbuild.conf was pre-#1100
              language: #1069/#1100 turned that window into HP's own
              slot0 and removed slot1/scratch outright (#1393).
@@ -114,6 +117,15 @@ Six independent checks:
              strategy against a guarantee the flash map does not
              provide.  If a secondary slot ever comes back on AEN801,
              this sub-check lifts itself.
+
+      Both sub-checks are read-inert (return []) when
+      collect_aen801_mram_map() is empty -- but that is ONLY silent in a
+      root with no zephyr/boards/alp/ at all (a synthetic test tree).
+      In a real checkout, an empty map with zephyr/boards/alp/ present
+      means the AEN801 board dirs went missing or the DT stopped
+      parsing, and the gate FAILS loudly instead (see
+      aen801_board_tree_broken()) -- it never prints the AEN801 clause
+      of the OK line for a check that did not actually run.
 
 Run from the repo root:
 
@@ -385,11 +397,27 @@ _AEN_MRAM_CLAIM_RE = re.compile(
     re.IGNORECASE,
 )
 
+# The ADR-0006 partition-map table row shape:
+#   | `slot0_partition`    | `image-0` | `0x80010000`  | `0x802b0000`  | ... |
+# Scoped tight to a DT-node-labelled first cell (backticked, ending in
+# `_partition`) so it never fires on narrative status tables that merely
+# mention "MCUboot" or "slot0" in prose inside a table cell (e.g.
+# docs/aen-bench-bringup.md's bring-up matrix).  Captures the node name
+# (without the `_partition` suffix) and the label; every 0x80...... token
+# in the remainder of the row is a claimed address for BOTH.
+_AEN_MRAM_TABLE_ROW_RE = re.compile(
+    r"^\s*\|\s*`(\w+)_partition`\s*\|\s*`([\w-]+)`\s*\|(.*)$"
+)
+_AEN_MRAM_TABLE_ADDR_RE = re.compile(r"0x80[0-9a-fA-F]{6}\b")
+
 # The two docs that promise the Zephyr-side OTA flow.  docs/secure-boot.md
-# is deliberately NOT here: it already states the single-slot constraint
-# inline everywhere it names swap-using-scratch, and it is the operator
-# reference for the SWAP profile itself, where the swap vocabulary is the
-# subject rather than a promise about AEN801.
+# is deliberately NOT here: it is the operator reference for the SWAP
+# profile itself (swap vocabulary is the subject, not an AEN801 promise
+# about a shipped guarantee).  Of its three swap-using-scratch mentions,
+# two carry a single-slot qualifier in the same section; the third -- the
+# "Omit the block to inherit ... swap-using-scratch" stock-default line --
+# does not.  That is a real, open gap in the doc, not something this
+# comment should paper over; it is simply not what this scan checks today.
 _AEN_SWAP_PROMISE_DOCS = (
     "docs/adr/0006-secure-boot-secure-ota.md",
     "docs/ota.md",
@@ -721,7 +749,11 @@ def collect_aen801_mram_map(root: pathlib.Path) -> dict[str, set[int]]:
     legitimately 0x80010000 (HE) *and* 0x802b0000 (HP).
 
     An empty result (no AEN801 board tree in this root) disables both
-    sub-checks -- the synthetic trees in tests/scripts have no board DTs.
+    sub-checks -- the synthetic trees in tests/scripts have no board DTs
+    at all, so they never reach `zephyr/boards/alp/`.  See
+    aen801_board_tree_broken() for the case that must NOT be silent: a
+    real repo checkout (zephyr/boards/alp/ exists) whose AEN801 board
+    dirs went missing or stopped parsing.
     """
     partitions: dict[str, set[int]] = {}
     for dts in sorted(root.glob(_AEN801_DTS_GLOB)):
@@ -735,6 +767,21 @@ def collect_aen801_mram_map(root: pathlib.Path) -> dict[str, set[int]]:
             partitions.setdefault(node.lower(), set()).add(absolute)
             partitions.setdefault(label.lower(), set()).add(absolute)
     return partitions
+
+
+def aen801_board_tree_broken(root: pathlib.Path, mram_map: dict[str, set[int]]) -> bool:
+    """True when this looks like a real repo checkout that SHOULD have an
+    AEN801 board DT (`zephyr/boards/alp/` exists) but
+    collect_aen801_mram_map() came back empty -- the board dirs went
+    missing/renamed, or the DT stopped matching `_SOC_NV_FLASH_BASE_RE` /
+    `_DT_PARTITION_RE`.  In that case the (f1)/(f2) sub-checks have
+    nothing to measure against and must not be reported as having run.
+
+    False for the synthetic trees under tests/scripts, none of which
+    create `zephyr/boards/alp/` at all -- those legitimately have no
+    AEN801 board tree to check.
+    """
+    return bool(mram_map == {} and (root / "zephyr" / "boards" / "alp").is_dir())
 
 
 def find_aen_mram_map_drift(
@@ -767,6 +814,25 @@ def find_aen_mram_map_drift(
                             f"0x{a:08x}" for a in sorted(mram_map[name]))
                         drift.append((rel, line_no, m.group(0),
                                       f"DT puts {name} at {expected}"))
+                row_m = _AEN_MRAM_TABLE_ROW_RE.match(line)
+                if row_m:
+                    node, label = row_m.group(1).lower(), row_m.group(2).lower()
+                    row_addrs = _AEN_MRAM_TABLE_ADDR_RE.findall(row_m.group(3))
+                    for name in (node, label):
+                        if name not in mram_map:
+                            drift.append((rel, line_no, row_m.group(0),
+                                          "no such partition in the AEN801 "
+                                          "board DT"))
+                            continue
+                        for addr_s in row_addrs:
+                            addr = int(addr_s, 16)
+                            if addr not in mram_map[name]:
+                                expected = ", ".join(
+                                    f"0x{a:08x}"
+                                    for a in sorted(mram_map[name]))
+                                drift.append(
+                                    (rel, line_no, f"{name} row: {addr_s}",
+                                     f"DT puts {name} at {expected}"))
     return drift
 
 
@@ -824,6 +890,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     e1m_x_pinout_gaps = find_e1m_x_pinout_guidance_gaps(root)
     matrix_total_drift = find_matrix_total_drift(root)
     aen801_mram_map = collect_aen801_mram_map(root)
+    aen801_tree_broken = aen801_board_tree_broken(root, aen801_mram_map)
     aen_map_drift = find_aen_mram_map_drift(root, aen801_mram_map)
     aen_swap_promises = find_aen_unqualified_swap_promises(root, aen801_mram_map)
 
@@ -870,22 +937,35 @@ def main(argv: Optional[list[str]] = None) -> int:
               "single-slot (or cite #1069 / #1100 / #1393):", file=sys.stderr)
         for rel, line_no, line in aen_swap_promises:
             print(f"  {rel}:{line_no}  {line}", file=sys.stderr)
+    if aen801_tree_broken:
+        print("AEN801 MRAM-map checks (f1)/(f2) could not run: "
+              f"{_AEN801_DTS_GLOB} matched no board DT under a repo that "
+              "otherwise has zephyr/boards/alp/ -- the AEN801 board dirs "
+              "went missing, were renamed, or the DT no longer matches "
+              "_SOC_NV_FLASH_BASE_RE/_DT_PARTITION_RE.  A gate that can't "
+              "run its check does not get to report it passed.",
+              file=sys.stderr)
 
     if (dead or gaps or stale_cc3501e or e1m_x_pinout_gaps
-            or matrix_total_drift or aen_map_drift or aen_swap_promises):
+            or matrix_total_drift or aen_map_drift or aen_swap_promises
+            or aen801_tree_broken):
         print(f"\ndoc-drift: {len(dead)} dead ref(s), {len(gaps)} index "
               f"gap(s), {len(stale_cc3501e)} stale CC3501E bridge "
               f"claim(s), {len(e1m_x_pinout_gaps)} E1M-X pinout "
               f"guidance gap(s), {len(matrix_total_drift)} stale matrix "
               f"total(s), {len(aen_map_drift)} stale AEN801 MRAM map "
               f"claim(s), {len(aen_swap_promises)} unqualified AEN swap "
-              f"promise(s) -- failing.", file=sys.stderr)
+              f"promise(s), "
+              f"{'1' if aen801_tree_broken else '0'} broken AEN801 board "
+              "tree -- failing.", file=sys.stderr)
         return 1
 
+    aen_clause = ("AEN801 MRAM map claims match the board DT"
+                  if aen801_mram_map else
+                  "no AEN801 board tree in this root to check")
     print("doc-drift: OK (no dead symbol refs, docs index complete, "
           "CC3501E bridge wording current, E1M-X pinout guidance current, "
-          "portability-matrix totals in sync, AEN801 MRAM map claims match "
-          "the board DT).")
+          f"portability-matrix totals in sync, {aen_clause}).")
     return 0
 
 
