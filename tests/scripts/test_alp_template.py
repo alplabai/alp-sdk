@@ -995,6 +995,149 @@ def test_derive_pin_doc_renames_copies_the_target_boards_own_doc():
     }
 
 
+# --------------------------------------------------------------------------
+# _derive_pin_doc_renames collision guard (issue #1394): the two
+# assignment sites had NO guard, unlike both siblings -- two `pins:`
+# entries sharing one `doc:` string silently overwrote each other, and
+# the `None` (DROP the field) branch made the loser lose its
+# documentation entirely, with the winner decided by `pins:` ordering.
+# Fixture: a synthetic metadata_root, because EVERY aliased route on the
+# real metadata/boards/e1m-x-evk.yaml carries a `doc:` of its own, so
+# the real tree cannot exercise the string-vs-`None` branch at all.
+# --------------------------------------------------------------------------
+
+def _write_shared_doc_fixture(root: Path, second_target_doc: str | None) -> Path:
+    """A metadata_root whose SRC board routes two pads (`E1M_A`,
+    `E1M_B`) that both carry a `board_alias:` onto a DST board. The
+    DST route for `BOARD_A` always has its own `doc:`; the one for
+    `BOARD_B` gets `second_target_doc` (a different string, or no
+    `doc:` at all when `None`). Returns the metadata_root."""
+    metadata_root = root / "metadata"
+    (metadata_root / "e1m_modules").mkdir(parents=True)
+    (metadata_root / "e1m_modules" / "E1M-SRCTEST.yaml").write_text(
+        "default_board: SRC-PRESET\n", encoding="utf-8", newline="\n")
+    (metadata_root / "e1m_modules" / "E1M-DSTTEST.yaml").write_text(
+        "default_board: DST-PRESET\n", encoding="utf-8", newline="\n")
+
+    (metadata_root / "boards").mkdir(parents=True)
+    (metadata_root / "boards" / "src-preset.yaml").write_text(
+        "e1m_routes:\n"
+        "  gpio:\n"
+        "    - e1m: E1M_A\n"
+        "      macro: SRC_PIN_A\n"
+        "      board_alias: BOARD_A\n"
+        "    - e1m: E1M_B\n"
+        "      macro: SRC_PIN_B\n"
+        "      board_alias: BOARD_B\n",
+        encoding="utf-8", newline="\n",
+    )
+    (metadata_root / "boards" / "dst-preset.yaml").write_text(
+        "e1m_routes:\n"
+        "  gpio:\n"
+        "    - e1m: E1M_X_A\n"
+        "      macro: DST_PIN_A\n"
+        "      board_alias: BOARD_A\n"
+        "      doc: Shared debounce network, DST pad A.\n"
+        "    - e1m: E1M_X_B\n"
+        "      macro: DST_PIN_B\n"
+        "      board_alias: BOARD_B\n"
+        + (f"      doc: {second_target_doc}\n" if second_target_doc else ""),
+        encoding="utf-8", newline="\n",
+    )
+    return metadata_root
+
+
+_SHARED_DOC = "Shared debounce network (10k + 0.1uF), SRC pads A and B."
+
+_SHARED_DOC_PINS = [
+    {"e1m": "E1M_A", "macro": "SRC_PIN_A", "doc": _SHARED_DOC},
+    {"e1m": "E1M_B", "macro": "SRC_PIN_B", "doc": _SHARED_DOC},
+]
+
+
+def test_derive_pin_doc_renames_rejects_two_pins_sharing_a_doc(tmp_path):
+    """Two `pins:` entries sharing one `doc:` string that re-derive to
+    two DIFFERENT target strings are ambiguous for the flat
+    `{old_doc: new_doc}` map `_substitute_board_yaml_pin_docs` applies
+    file-wide -- hard error, exactly as `_derive_pin_renames` and
+    `_derive_pin_macro_renames` already did for their own keys
+    (issue #1394)."""
+    metadata_root = _write_shared_doc_fixture(
+        tmp_path, "Shared debounce network, DST pad B.")
+    with pytest.raises(alp_template.TemplateError, match="ambiguous"):
+        alp_template._derive_pin_doc_renames(
+            _SHARED_DOC_PINS, "E1M-DSTTEST", "src-preset", metadata_root)
+
+
+def test_derive_pin_doc_renames_rejects_a_shared_doc_one_side_drops(tmp_path):
+    """The branch that lost data SILENTLY (issue #1394): one entry
+    re-derives the shared `doc:` to a target string, the other's
+    target route has no `doc:` at all -- `None`, which per this
+    function's docstring means DROP the field. Pre-fix the second
+    write won unguarded, so the map said `None` and the documentation
+    was dropped from BOTH pins, including the one with a perfectly
+    good target `doc:`; reverse the `pins:` ordering and the doc
+    survived. "Rename it" and "drop it" are contradictory
+    instructions for one key, so this is ambiguous too."""
+    metadata_root = _write_shared_doc_fixture(tmp_path, None)
+    with pytest.raises(alp_template.TemplateError, match="ambiguous"):
+        alp_template._derive_pin_doc_renames(
+            _SHARED_DOC_PINS, "E1M-DSTTEST", "src-preset", metadata_root)
+
+    # ... and in the reverse `pins:` order too -- the whole point is
+    # that the outcome must no longer depend on iteration order.
+    with pytest.raises(alp_template.TemplateError, match="ambiguous"):
+        alp_template._derive_pin_doc_renames(
+            list(reversed(_SHARED_DOC_PINS)), "E1M-DSTTEST", "src-preset",
+            metadata_root)
+
+
+def test_derive_pin_doc_renames_allows_a_shared_doc_that_agrees(tmp_path):
+    """A shared `doc:` is only ambiguous when the entries DISAGREE --
+    two pins whose target routes carry the SAME `doc:` string yield
+    one unambiguous rename, not an error."""
+    metadata_root = _write_shared_doc_fixture(
+        tmp_path, "Shared debounce network, DST pad A.")
+    assert alp_template._derive_pin_doc_renames(
+        _SHARED_DOC_PINS, "E1M-DSTTEST", "src-preset", metadata_root
+    ) == {_SHARED_DOC: "Shared debounce network, DST pad A."}
+
+
+def test_derive_pin_doc_renames_keeps_an_unchanged_doc_out_of_the_map(tmp_path):
+    """A target `doc:` byte-identical to the entry's own contributes
+    NO map entry -- there is nothing to rewrite. Guarding the two
+    assignment sites must not fold that case into the `None` (DROP)
+    value, which would delete a `doc:` that was already correct
+    (the shape the issue's own proposed snippet had)."""
+    metadata_root = _write_shared_doc_fixture(tmp_path, None)
+    pins = [{
+        "e1m": "E1M_A", "macro": "SRC_PIN_A",
+        "doc": "Shared debounce network, DST pad A.",
+    }]
+    assert alp_template._derive_pin_doc_renames(
+        pins, "E1M-DSTTEST", "src-preset", metadata_root) == {}
+
+
+def test_derive_pin_doc_renames_rejects_a_shared_doc_kept_then_dropped(tmp_path):
+    """The third contradiction #1394 closes: one entry's target `doc:`
+    is byte-identical to the shared string ("keep it" -- no map entry
+    at all), the other's target has none ("drop it"). Pre-fix the map
+    said `None` unconditionally, so the pin whose doc was ALREADY
+    correct lost it to the file-wide substitution with no diagnostic.
+    Recording every resolution -- not only the ones that produce a
+    rename -- is what makes this reachable."""
+    metadata_root = _write_shared_doc_fixture(tmp_path, None)
+    pins = [
+        {"e1m": "E1M_A", "macro": "SRC_PIN_A",
+         "doc": "Shared debounce network, DST pad A."},
+        {"e1m": "E1M_B", "macro": "SRC_PIN_B",
+         "doc": "Shared debounce network, DST pad A."},
+    ]
+    with pytest.raises(alp_template.TemplateError, match="ambiguous"):
+        alp_template._derive_pin_doc_renames(
+            pins, "E1M-DSTTEST", "src-preset", metadata_root)
+
+
 def test_substitute_board_yaml_pins_rewrites_the_bare_string_list_item_form():
     """The schema also allows a bare pad-string `pins:` entry (no
     `{e1m: ...}` mapping) -- the dict-only `e1m:`-key regex left it
