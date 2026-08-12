@@ -56,13 +56,19 @@ notes: |
   RESULT PASS on real E8 silicon (link up, DHCP lease acquired, confirmed on
   the server's ARP table too).
 
-  PHY MDIO address: the devicetree's `reg = <1>` at
-  zephyr/dts/alif/ensemble_e8_peripherals.dtsi:349-354 self-flags as a "fork
-  reference ... verify"; the bench log above reads the PHY at MDIO address
-  0, and zephyr/dts/bindings/ethernet/alif,ethernet.yaml:47's own binding
-  example agrees ("e.g. ti,dp83825 at addr 0"). The bench evidence is the
-  stronger evidence; the DT's address 1 is wrong and is tracked separately
-  (#1244), not fixed by this manifest.
+  PHY MDIO address: 0, confirmed on real E8 silicon and now correct in the
+  devicetree. The bench log above reads the PHY at MDIO address 0
+  (`[eth] MDIO PHY@0 id=2000a140`, matching the DP83825's published id
+  2000a140), and zephyr/dts/bindings/ethernet/alif,ethernet.yaml:47's own
+  binding example agrees ("e.g. ti,dp83825 at addr 0").
+
+  This paragraph previously recorded the disagreement as open: the DT carried
+  `reg = <1>` with a "fork reference ... verify" self-flag, and this manifest
+  said the address was "wrong and tracked separately (#1244), not fixed by
+  this manifest". #1244 fixed it — `zephyr/dts/alif/ensemble_e8_peripherals.dtsi`
+  now declares `ethernet-phy@0` with `reg = <0>`. Leaving the old wording in
+  place would have left this manifest asserting a fix had not happened while
+  shipping in the same commit that made it.
 
   Exact order code: unresolved, see `mpn_population` above and #1241
   "Blocked on".

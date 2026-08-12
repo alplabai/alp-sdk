@@ -147,6 +147,21 @@ PHY driver `[UNTESTED]` on silicon, and
 the AEN managed-MDIO path as BUILD-ONLY, with no MDIO-managed PHY
 exercised on real E8 silicon.
 
+> **Superseded in part, 2026-08-12 (#1244).** The last clause is no longer
+> true for AEN: a Flow C ITCM RAM-run on real E8 silicon performed a live MDIO
+> register read — `[eth] MDIO PHY@0 id=2000a140 (DP83825=2000a140)`, with
+> `ANAR=01e1 ANLPAR=0000 PHYSTS=0002 RCSR=00e1` — so `mdio_dwmac_alif` binds,
+> `phy_ti_dp83825` binds on the bus, and the upstream `eth_dwmac` core's
+> `phy_link` path runs. That run also corrected the PHY's MDIO address from
+> the devicetree's `reg = <1>` to the measured `0`.
+>
+> **The decision this ADR records still stands.** One bench-proven read is not
+> a bench-proven data plane, the V2N `rtl8211fdi` path remains `[UNTESTED]`,
+> and the argument against freezing an `<alp/net.h>` ABI on unproven hardware
+> is unchanged. Annotated rather than rewritten, because an ADR is a record of
+> what was decided and why — editing the premise silently would leave the
+> decision looking better-founded than it was at the time.
+
 **A full `<alp/net.h>` with a data plane.** Rejected for the same
 reasoning ADR 0003's Alternative B already gave for Ethernet, QSPI,
 and MIPI CSI/DSI as a group (USB was given a separate reason there —
