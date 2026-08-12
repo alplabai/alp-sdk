@@ -42,8 +42,13 @@ REPO = Path(__file__).resolve().parents[2]
 TEST_ALL = REPO / "scripts" / "test-all.sh"
 
 pytestmark = pytest.mark.skipif(
-    shutil.which("bash") is None,
-    reason="drives extracted fragments of scripts/test-all.sh under bash",
+    not sys.platform.startswith("linux") or shutil.which("bash") is None,
+    reason="drives extracted fragments of scripts/test-all.sh under bash; "
+    "restricted to Linux for the same reason test_test_all_worktree.py is -- "
+    "`shutil.which(\"bash\")` alone is NOT enough of a guard, because the "
+    "windows-latest runner ships bash with Git for Windows, so the check "
+    "passes and the POSIX fragments then fail on the Windows shell/quoting "
+    "differences. test-all.sh is a Linux/WSL CI tool.",
 )
 
 
