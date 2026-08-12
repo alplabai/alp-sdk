@@ -352,13 +352,11 @@ int cc3501e_hw_get_mac(uint8_t mac[6])
  * also sees the matching fail_reason (release-style, mirrors the worker's publish
  * discipline).
  *
- * rssi is NOT part of that guarantee: it is never populated.  Every wifi_conn_set()
- * call site below passes a literal 0 because this NWP cannot be asked for a beacon
- * measurement on the connect path (see the hazard note in
- * cc3501e_hw_wifi_connect_sta), so the field has only ever held 0.  The host must
- * NOT treat it as a signal level -- WIFI_GET_RSSI is the real read (issue #1387).
- * (An earlier version of this comment claimed "a reader seeing CONNECTED also sees
- * the fresh rssi".  There has never been a fresh rssi.) */
+ * rssi is NOT part of that guarantee: it is never populated.  wifi_conn_set()
+ * always sets it to 0 because this NWP cannot be asked for a beacon measurement
+ * on the connect path (see the hazard note in cc3501e_hw_wifi_connect_sta), so
+ * the field has only ever held 0.  The host must NOT treat it as a signal level
+ * -- WIFI_GET_RSSI is the real read (issue #1387). */
 static volatile struct {
 	uint8_t state;       /* alp_cc3501e_wifi_conn_state_t   */
 	uint8_t fail_reason; /* alp_cc3501e_wifi_fail_t          */
@@ -572,12 +570,10 @@ int cc3501e_hw_wifi_scan_stop(void)
 /* Publish a terminal connect outcome to the status latch (detail first, state last
  * -- a reader that observes the terminal state also observes the matching detail).
  *
- * The @p rssi argument is vestigial: EVERY call site passes a literal 0, because
- * this NWP cannot supply a measurement on the connect path (the hazard note in
- * cc3501e_hw_wifi_connect_sta).  It is kept so the parameter is there to fill in
- * if a bench run ever proves a post-DHCP read safe -- not because it carries one
- * today.  Issue #1387: the host must not report the latched byte as a signal
- * level; WIFI_GET_RSSI is the only real read.
+ * rssi is always set to 0: this NWP cannot supply a measurement on the connect
+ * path (the hazard note in cc3501e_hw_wifi_connect_sta).  Issue #1387: the host
+ * must not report the latched byte as a signal level; WIFI_GET_RSSI is the only
+ * real read.
  *
  * ALSO enqueue the matching async EVT_* so a host that registered an event
  * callback (via CMD_GET_PENDING_EVENTS polling) is notified: CONNECTED ->
@@ -586,10 +582,10 @@ int cc3501e_hw_wifi_scan_stop(void)
  * CMD_WIFI_STATUS.  wifi_conn_set is the single terminal-transition chokepoint
  * (mark_connecting writes the CONNECTING latch directly and is NOT terminal), so
  * exactly one event is queued per terminal outcome. */
-static void wifi_conn_set(uint8_t state, uint8_t fail_reason, int8_t rssi)
+static void wifi_conn_set(uint8_t state, uint8_t fail_reason)
 {
 	g_wifi_conn.fail_reason = fail_reason;
-	g_wifi_conn.rssi        = rssi;
+	g_wifi_conn.rssi        = 0;
 	g_wifi_conn.state       = state;
 
 	if (state == (uint8_t)ALP_CC3501E_WIFI_CONNECTED) {
@@ -616,15 +612,13 @@ int cc3501e_hw_wifi_connect_sta(const uint8_t *ssid,
 		/* The latch was armed CONNECTING at submit (mark_connecting); a bad arg must
 		 * still publish a TERMINAL outcome, else the latch stays stuck CONNECTING and
 		 * the host's status poll never resolves (spins to a misleading timeout). */
-		wifi_conn_set(
-		    (uint8_t)ALP_CC3501E_WIFI_CONN_FAILED, (uint8_t)ALP_CC3501E_WIFI_FAIL_KICK, 0);
+		wifi_conn_set((uint8_t)ALP_CC3501E_WIFI_CONN_FAILED, (uint8_t)ALP_CC3501E_WIFI_FAIL_KICK);
 		return CC3501E_HW_ERR_INVAL;
 	}
 	const int wifi_rv =
 	    cc3501e_hw_wifi_ensure_sta_role(); /* lazy-start + bounded STA role-up (shared) */
 	if (wifi_rv != CC3501E_HW_OK) {
-		wifi_conn_set(
-		    (uint8_t)ALP_CC3501E_WIFI_CONN_FAILED, (uint8_t)ALP_CC3501E_WIFI_FAIL_KICK, 0);
+		wifi_conn_set((uint8_t)ALP_CC3501E_WIFI_CONN_FAILED, (uint8_t)ALP_CC3501E_WIFI_FAIL_KICK);
 		return wifi_rv;
 	}
 	osi_SyncObjClear(&wifi_event_sync);
@@ -638,8 +632,7 @@ int cc3501e_hw_wifi_connect_sta(const uint8_t *ssid,
 	                 (const char *)psk,
 	                 (char)psk_len,
 	                 0) != 0) {
-		wifi_conn_set(
-		    (uint8_t)ALP_CC3501E_WIFI_CONN_FAILED, (uint8_t)ALP_CC3501E_WIFI_FAIL_KICK, 0);
+		wifi_conn_set((uint8_t)ALP_CC3501E_WIFI_CONN_FAILED, (uint8_t)ALP_CC3501E_WIFI_FAIL_KICK);
 		return CC3501E_HW_ERR_IO;
 	}
 	/* BOUNDED wait for the connect event.  This op is WORKER-ROUTED (see protocol.c
@@ -657,15 +650,15 @@ int cc3501e_hw_wifi_connect_sta(const uint8_t *ssid,
 	if (osi_SyncObjWait(&wifi_event_sync, 30u * OSI_WAIT_FOR_SECOND) != OSI_OK) {
 		/* No connect event within the wait -- TERMINAL timeout (was masked as a
 		 * retryable IO that looped the host's poll-by-repeat -> -4). */
-		wifi_conn_set(
-		    (uint8_t)ALP_CC3501E_WIFI_CONN_FAILED, (uint8_t)ALP_CC3501E_WIFI_FAIL_TIMEOUT, 0);
+		wifi_conn_set((uint8_t)ALP_CC3501E_WIFI_CONN_FAILED,
+		              (uint8_t)ALP_CC3501E_WIFI_FAIL_TIMEOUT);
 		return CC3501E_HW_ERR_IO;
 	}
 	if (wifi_last_status < 0) {
 		/* FW rejected the association/auth (WLAN_EVENT_CONNECT Status<0, or a
 		 * DISCONNECT/ASSOCIATION_REJECTED/AUTHENTICATION_REJECTED event) -- TERMINAL. */
-		wifi_conn_set(
-		    (uint8_t)ALP_CC3501E_WIFI_CONN_FAILED, (uint8_t)ALP_CC3501E_WIFI_FAIL_REJECTED, 0);
+		wifi_conn_set((uint8_t)ALP_CC3501E_WIFI_CONN_FAILED,
+		              (uint8_t)ALP_CC3501E_WIFI_FAIL_REJECTED);
 		return CC3501E_HW_ERR_IO;
 	}
 	/* L2 ASSOCIATED.  Bring the STA netif UP at L3 + start DHCP, MIRRORING the AP path
@@ -701,11 +694,11 @@ int cc3501e_hw_wifi_connect_sta(const uint8_t *ssid,
 		/* Associated at L2 but no DHCP lease within the budget -- TERMINAL (there is no
 		 * usable IP, so a "connected" report would mislead the host into failing socket
 		 * ops).  The host reads this as CONN_FAILED/TIMEOUT via CMD_WIFI_STATUS. */
-		wifi_conn_set(
-		    (uint8_t)ALP_CC3501E_WIFI_CONN_FAILED, (uint8_t)ALP_CC3501E_WIFI_FAIL_TIMEOUT, 0);
+		wifi_conn_set((uint8_t)ALP_CC3501E_WIFI_CONN_FAILED,
+		              (uint8_t)ALP_CC3501E_WIFI_FAIL_TIMEOUT);
 		return CC3501E_HW_ERR_IO;
 	}
-	wifi_conn_set((uint8_t)ALP_CC3501E_WIFI_CONNECTED, (uint8_t)ALP_CC3501E_WIFI_FAIL_NONE, 0);
+	wifi_conn_set((uint8_t)ALP_CC3501E_WIFI_CONNECTED, (uint8_t)ALP_CC3501E_WIFI_FAIL_NONE);
 	return CC3501E_HW_OK;
 }
 
@@ -719,7 +712,7 @@ int cc3501e_hw_wifi_disconnect(void)
 	}
 	/* Host-requested teardown succeeded: mirror the state into the latch and
 	 * queue an async EVT_WIFI_DISCONNECTED (wifi_conn_set does both). */
-	wifi_conn_set((uint8_t)ALP_CC3501E_WIFI_DISCONNECTED, (uint8_t)ALP_CC3501E_WIFI_FAIL_NONE, 0);
+	wifi_conn_set((uint8_t)ALP_CC3501E_WIFI_DISCONNECTED, (uint8_t)ALP_CC3501E_WIFI_FAIL_NONE);
 	return CC3501E_HW_OK;
 }
 
