@@ -51,6 +51,14 @@ EXAMPLE = REPO / "examples" / "peripheral-io" / "pwm-led-fade"
 AEN801_OVERLAY = (
     EXAMPLE / "boards" / "alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay"
 )
+# #1383 item 1: Zephyr's automatic boards/<target>.overlay lookup keys off the
+# FULLY-QUALIFIED board target, so an rtss_he build picks up NOTHING from the
+# rtss_hp file -- the two cores need two files even though the pad route is
+# identical (both board dts files #include alif/ensemble_e8_peripherals.dtsi,
+# where utimer10/pwm10 live).  #1375's own bench environment was rtss_he.
+AEN801_OVERLAY_HE = (
+    EXAMPLE / "boards" / "alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay"
+)
 AEN_ROUTE_TSV = REPO / "metadata" / "e1m_modules" / "aen" / "from-alif.tsv"
 
 
@@ -112,6 +120,14 @@ def _extract_node_body(text: str, label: str) -> str:
     return text[start : i - 1]
 
 
+def _strip_leading_block_comment(text: str) -> str:
+    """Everything after the file's leading `/* ... */` banner. The HP and HE
+    overlays differ only in that banner (which names the core), so this is
+    what the twin-parity check compares."""
+    end = text.find("*/")
+    return text[end + 2 :] if text.lstrip().startswith("/*") and end != -1 else text
+
+
 def _extract_pinmux_values(pinctrl_group_body: str) -> list[str]:
     """The list of `PIN_*` macros inside a `pinmux = <A>, <B>;` property
     within an ALREADY-EXTRACTED pinctrl group node body (not the whole
@@ -145,6 +161,35 @@ class TestPwmLedFadeAenOverlay(unittest.TestCase):
                 "(#1375); Zephyr auto-applies boards/<qualified-target>.overlay "
                 "by filename, so without this file alp_pwm_open(ALP_E1M_PWM3) "
                 "returns NOT_READY on real silicon"
+            ),
+        )
+
+    def test_aen801_he_twin_exists_and_matches_hp(self) -> None:
+        # #1383 item 1.  A board-qualified overlay applies to exactly ONE
+        # board target; #1375 was reported and bench-reproduced on
+        # `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he`, which the
+        # rtss_hp file cannot reach.  Same precedent as
+        # examples/peripheral-io/blink, which ships both twins.
+        self.assertTrue(
+            AEN801_OVERLAY_HE.is_file(),
+            msg=(
+                f"missing {AEN801_OVERLAY_HE.relative_to(REPO)} -- Zephyr's "
+                "boards/<target>.overlay auto-apply is keyed on the "
+                "FULLY-QUALIFIED board target, so the rtss_hp file does not "
+                "apply to an rtss_he build and #1375 still reproduces there"
+            ),
+        )
+        self.assertTrue(AEN801_OVERLAY.is_file(), msg="see test_aen801_qualified_overlay_exists")
+        hp = _strip_leading_block_comment(AEN801_OVERLAY.read_text(encoding="utf-8"))
+        he = _strip_leading_block_comment(AEN801_OVERLAY_HE.read_text(encoding="utf-8"))
+        self.assertEqual(
+            he,
+            hp,
+            msg=(
+                "the two AEN801 overlays must stay byte-identical below their "
+                "header comments -- the E1M_PWM3 pad route is a SoM-level fact, "
+                "not a per-core one, so a fix applied to one core and not the "
+                "other is the #1383 item 1 defect returning"
             ),
         )
 

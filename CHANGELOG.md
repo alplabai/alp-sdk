@@ -7,43 +7,77 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
-### Fixed — `pwm-led-fade` ships its missing M55-HE overlay twin, `drone-autopilot` gets its own ESC overlay, and the overlay regression test can no longer pass on a wrong pad (#1383)
+### Fixed — `pwm-led-fade` ships its missing M55-HE overlay twin, `drone-autopilot` gets the I2C/UART/PWM overlay it never had, and the overlay regression test can no longer pass on a wrong pad (#1383)
 
 An adversarial review of #1381 (merged as `ac920b33`, closing #1375) found three
 gaps the merged fix left open. None invalidates that fix — the LED fade is
-verified working on E1M-AEN801 silicon — but each is a real hole.
+verified working on E1M-AEN801 silicon — but each is a real hole. Nothing in
+this entry has been run on silicon; the evidence below is source-level plus one
+host-side test file.
 
 **1. The shipped overlay covered only `rtss_hp`, but #1375's own bench repro
-was `rtss_he`.** The LED pad is a SoM-level route, not a core-level one — both
-`e1m_aen801_m55_he` and `_m55_hp` `#include` the same
-`alif/ensemble_e8_peripherals.dtsi`, where `utimer10`/`pwm10` live — so either
-core can drive it, and both need their own board-qualified overlay file (Zephyr
-resolves `boards/*.overlay` per board target, not per SoM). Added the
-byte-identical `alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay` twin,
-following the precedent `examples/peripheral-io/blink` already set for its
-own HE/HP pair.
+was `rtss_he`.** Zephyr's automatic `boards/<target>.overlay` lookup keys off
+the FULLY-QUALIFIED board target, so
+`alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay` contributes nothing to
+an `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he` build and #1375 still
+reproduced there. The pad route is a SoM-level fact, not a per-core one — both
+board `.dts` files `#include <alif/ensemble_e8_peripherals.dtsi>`, where
+`utimer10`/`pwm10` live — so added
+`examples/peripheral-io/pwm-led-fade/boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay`,
+identical to the HP file below its header comment, matching the precedent
+`examples/peripheral-io/blink` already sets for its own HE/HP pair.
 
-**2. `examples/peripheral-io/drone-autopilot` had the exact same defect,
-unwired and untracked.** Its four ESC channels
-(`alp_pwm_open(ALP_E1M_PWM0 + i)`, `src/autopilot.c`) had no `boards/`
-overlay at all, so all four returned `NOT_READY` on real E1M-AEN801 silicon
-for the identical reason #1375 documents. `check_example_board_overlay_parity.py`
-does not catch a *missing* overlay by itself — it only re-checks examples that
-already ship one — so this shipped unnoticed alongside the #1381 fix. Added
-`boards/alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay`, wiring all
-four `alp-pwm0`..`alp-pwm3` aliases (`UT11_T1_C`/`UT11_T0_C`/`UT10_T1_A`/
-`UT10_T0_A`) through `utimer10`/`utimer11`; `board.yaml` here declares only
-`cores.m55_hp.app`, so no HE twin is needed.
+**2. `examples/peripheral-io/drone-autopilot` had no `boards/` directory at
+all**, while its `board.yaml` declares `peripherals: [i2c, uart, pwm, gpio]`.
+Fixing only the PWM half would have moved the failure rather than removed it:
+`autopilot_init()` opens the sensor bus at `src/autopilot.c:105` and returns
+`-1` with `I2C0 open failed` / `autopilot_init failed -- staying in DISARMED`
+long before it reaches the ESC loop at `:143`, so `ESC%d open failed` never
+prints. The new
+`examples/peripheral-io/drone-autopilot/boards/alp_e1m_aen801_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay`
+therefore wires the whole reachable path, every route taken from
+`metadata/e1m_modules/aen/from-alif.tsv`:
 
-**3. `tests/scripts/test_pwm_led_fade_aen_overlay.py` could not catch a wrong
-pad.** Its pinmux assertion was a whole-file `assertIn`, satisfied by the
-literal already sitting in the header comment — a mutated copy with the wrong
-pad, the wrong PWM driver, or no `pinctrl-0`/`pinctrl-names` at all still
-passed all four cases. The test now derives the expected pad and channel from
-`metadata/e1m_modules/aen/from-alif.tsv` instead of a hardcoded literal,
-anchors the pinmux assertion to the `pinctrl_pwm10`/`group0` node body rather
-than the whole file, and separately cross-checks the `pwms` channel index and
-the `pinctrl-0`/`pinctrl-names` wiring.
+- `alp-i2c0 = &i2c2` — E1M edge I2C0 is Alif I2C2, `PIN_P5_6__I2C2_SCL_C` /
+  `PIN_P5_7__I2C2_SDA_C`, with the `input-enable` + `bias-pull-down` pad pair
+  copied verbatim from the bench-validated `examples/aen/aen-i2c2-eeprom-regcheck`
+  group (do not "correct" it to `bias-pull-up` — that gives a dead bus).
+- `alp-uart1 = &uart3` — E1M edge UART1 is Alif UART3, `PIN_P1_2__UART3_RX_A` /
+  `PIN_P1_3__UART3_TX_A`; on the EVK that is `EVK_UART_PORT_ARDUINO`, which is
+  free.
+- `alp-pwm0`..`alp-pwm3` — `UT11_T1_C` (P12_7) / `UT11_T0_C` (P12_6) /
+  `UT10_T1_A` (P2_5) / `UT10_T0_A` (P2_4) through `utimer11`/`utimer10`, each
+  aliased to a `pwm-leds` consumer child rather than the controller node.
+
+`alp-uart0` is deliberately NOT aliased: E1M edge UART0 is Alif UART5, which is
+this board target's `zephyr,console`/`zephyr,shell-uart` at 115200 — aliasing it
+would make `autopilot.c:128`'s GNSS open succeed and then reconfigure the live
+console to 9600 8N1, destroying the log output the example is diagnosed by. The
+source already tolerates its absence, and `src/mavlink.c:344` documents why
+("no free third port in v0.5"), so the GNSS and MAVLink telemetry paths stay
+disabled pending a carrier with a third UART. No `alp,pin-array` either: no
+file under `src/` contains the string `gpio`, so the declared `gpio` peripheral
+backs nothing today.
+
+This closes the devicetree-alias gap only. `autopilot_init()` still returns
+`-2`/`-3`/`-4` unless an LSM6DSO, a BMP390 and an INA236 answer on the bus, and
+neither example's `testcase.yaml` lists an `alp_e1m_aen801_*` platform, so
+twister does not compile either overlay — the routes are verified against
+metadata and the generated board files, not against a build.
+
+**3. `tests/scripts/test_pwm_led_fade_aen_overlay.py:136` could not catch a
+wrong pad.** Its pinmux assertion was a whole-file
+`assertIn("PIN_P2_4__UT10_T0_A", text)`, satisfied by the literal already
+sitting in the overlay's own header comment — the issue measured three mutations
+(wrong pad, wrong `pwms` driver channel, `pinctrl-0`/`pinctrl-names` deleted)
+that each left the suite at 4 passed. The test now derives the expected pad and
+channel index from `metadata/e1m_modules/aen/from-alif.tsv`, anchors the pinmux
+check to the `pinctrl_pwm10`/`group0` node body instead of the whole file,
+cross-checks the `pwms` channel cell, requires the `pinctrl-0 = <&pinctrl_pwm10>`
+/ `pinctrl-names = "default"` wiring on the `pwm10` node, and adds a fifth case
+asserting the HE twin exists and matches HP below its header comment. All four
+mutations now fail: the wrong-pad one reports `pinctrl_pwm10/group0's pinmux
+must mux exactly ['PIN_P2_4__UT10_T0_A'] ... got ['PIN_P12_7__UT11_T0_A']`.
 
 ### Added — ADR 0027 proposes declaring storage regions by role, not by SoM-internal region name
 
