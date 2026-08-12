@@ -348,12 +348,21 @@ int cc3501e_hw_get_mac(uint8_t mac[6])
  * Concurrency: written by mark_connecting() in the SPI-ISR/protocol context at
  * SUBMIT, then by the connect body on the drain thread at completion -- never both
  * at once (the worker is single-in-flight).  Read by handle_wifi_status (SPI ISR).
- * volatile byte fields; state is published LAST so a reader seeing CONNECTED also
- * sees the fresh rssi (release-style, mirrors the worker's publish discipline). */
+ * volatile byte fields; state is published LAST so a reader seeing a terminal state
+ * also sees the matching fail_reason (release-style, mirrors the worker's publish
+ * discipline).
+ *
+ * rssi is NOT part of that guarantee: it is never populated.  Every wifi_conn_set()
+ * call site below passes a literal 0 because this NWP cannot be asked for a beacon
+ * measurement on the connect path (see the hazard note in
+ * cc3501e_hw_wifi_connect_sta), so the field has only ever held 0.  The host must
+ * NOT treat it as a signal level -- WIFI_GET_RSSI is the real read (issue #1387).
+ * (An earlier version of this comment claimed "a reader seeing CONNECTED also sees
+ * the fresh rssi".  There has never been a fresh rssi.) */
 static volatile struct {
-	uint8_t state;       /* alp_cc3501e_wifi_conn_state_t */
-	uint8_t fail_reason; /* alp_cc3501e_wifi_fail_t        */
-	int8_t  rssi;        /* dBm, valid on CONNECTED        */
+	uint8_t state;       /* alp_cc3501e_wifi_conn_state_t   */
+	uint8_t fail_reason; /* alp_cc3501e_wifi_fail_t          */
+	int8_t  rssi;        /* NEVER POPULATED -- always 0      */
 } g_wifi_conn = { (uint8_t)ALP_CC3501E_WIFI_DISCONNECTED, (uint8_t)ALP_CC3501E_WIFI_FAIL_NONE, 0 };
 
 void cc3501e_hw_wifi_mark_connecting(void)
@@ -560,8 +569,15 @@ int cc3501e_hw_wifi_scan_stop(void)
 	return CC3501E_HW_OK;
 }
 
-/* Publish a terminal connect outcome to the status latch (rssi first, state last --
- * a reader that observes the terminal state also observes the matching detail).
+/* Publish a terminal connect outcome to the status latch (detail first, state last
+ * -- a reader that observes the terminal state also observes the matching detail).
+ *
+ * The @p rssi argument is vestigial: EVERY call site passes a literal 0, because
+ * this NWP cannot supply a measurement on the connect path (the hazard note in
+ * cc3501e_hw_wifi_connect_sta).  It is kept so the parameter is there to fill in
+ * if a bench run ever proves a post-DHCP read safe -- not because it carries one
+ * today.  Issue #1387: the host must not report the latched byte as a signal
+ * level; WIFI_GET_RSSI is the only real read.
  *
  * ALSO enqueue the matching async EVT_* so a host that registered an event
  * callback (via CMD_GET_PENDING_EVENTS polling) is notified: CONNECTED ->

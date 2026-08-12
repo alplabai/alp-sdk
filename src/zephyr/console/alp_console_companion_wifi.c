@@ -285,9 +285,27 @@ static int cmd_companion_wifi_status(const struct shell *sh, size_t argc, char *
 
 	shell_print(sh, "state: %s", companion_wifi_state_name(st.state));
 	if (st.state == ALP_CC3501E_WIFI_CONNECTED) {
-		/* rssi_dbm is valid only when associated; the IP is a separate lease
-		 * query (WIFI_GET_IP) -- print it only if the firmware has a lease. */
-		shell_print(sh, "rssi:  %d dBm", (int)st.rssi_dbm);
+		/* Do NOT print st.rssi_dbm: the WIFI_STATUS latch byte is NOT a
+		 * measurement.  Every terminal wifi_conn_set() call site in
+		 * firmware/cc3501e/hal/ti/cc3501e_hw_ti_wifi.c passes a literal 0 for
+		 * the rssi argument (the firmware may not read it there -- a
+		 * Wlan_Get(WLAN_GET_RSSI) close to associate blocks the worker), so
+		 * that byte has only ever held 0.  And 0 dBm is a LEGAL int8 RSSI, so
+		 * there is no in-band sentinel the host can test: printed as-is it is
+		 * a confident, plausible, unmeasured number (issue #1387).
+		 *
+		 * Take the RSSI from the only real source instead -- WIFI_GET_RSSI, a
+		 * worker-routed radio read, the same one the connect result already
+		 * uses successfully (#1382) -- and report unavailable rather than a
+		 * number we cannot vouch for when that read fails.  The IP is a third,
+		 * separate lease query (WIFI_GET_IP); print it only on a lease. */
+		int8_t       rssi = 0;
+		alp_status_t rs   = cc3501e_wifi_rssi(companion_cc3501e, &rssi);
+		if (rs == ALP_OK) {
+			shell_print(sh, "rssi:  %d dBm", (int)rssi);
+		} else {
+			shell_print(sh, "rssi:  unavailable (%d)", (int)rs);
+		}
 		uint8_t      ip[4] = { 0 };
 		alp_status_t ips   = cc3501e_wifi_get_ip(companion_cc3501e, ip);
 		if (ips == ALP_OK) {

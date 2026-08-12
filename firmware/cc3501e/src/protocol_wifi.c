@@ -151,7 +151,12 @@ alp_cc3501e_resp_t handle_wifi_get_ip(const uint8_t *req,
  * { state(1) | fail_reason(1) | rssi_dbm(int8) | reserved(1) }.  A NON-BLOCKING
  * read of the firmware connection-status latch (no radio op -- safe in the SPI
  * ISR), so the host can collect an async connect outcome without poll-by-repeat
- * on WIFI_CONNECT_STA (which clocked the bridge while the radio op held it down). */
+ * on WIFI_CONNECT_STA (which clocked the bridge while the radio op held it down).
+ *
+ * rssi_dbm is forwarded verbatim from the latch and is ALWAYS 0: the HAL never
+ * populates it (see g_wifi_conn in hal/ti/cc3501e_hw_ti_wifi.c).  It is not a
+ * measurement and the host must not present it as one -- WIFI_GET_RSSI (0x16) is
+ * the only real read.  Issue #1387. */
 alp_cc3501e_resp_t handle_wifi_status(const uint8_t *req,
                                       size_t         req_len,
                                       uint8_t       *reply_data,
