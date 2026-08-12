@@ -46,6 +46,7 @@ def bv(tmp_path, monkeypatch):
     monkeypatch.setattr(module, "REPO", tmp_path)
     monkeypatch.setattr(module, "SDK_VERSION_YAML", tmp_path / "sdk_version.yaml")
     monkeypatch.setattr(module, "CHANGELOG", tmp_path / "CHANGELOG.md")
+    monkeypatch.setattr(module, "CHANGELOG_D", tmp_path / "changelog.d")
     return module
 
 
@@ -109,6 +110,53 @@ def test_a_different_version_section_does_not_block_the_slice(bv):
     assert "## [Unreleased] - v0.17.0 candidate" in text
     # The rc1 section is a distinct heading and must survive untouched.
     assert "## [v0.15.0-rc1] - 2026-07-31" in text
+
+
+def test_slicing_with_pending_changelog_fragments_is_refused(bv):
+    """#1395: an unfolded fragment must block the slice, not silently ship
+    with an empty [Unreleased] section on the next cycle."""
+    bv.CHANGELOG.write_text(
+        "# Changelog\n\n"
+        "## [Unreleased] - v0.16.0 candidate\n\n"
+        "### Added — Existing entry\n\n"
+        "body\n\n"
+        "## [v0.15.0] - 2026-08-07\n\n"
+        "what actually shipped\n",
+        encoding="utf-8",
+    )
+    before = bv.CHANGELOG.read_text(encoding="utf-8")
+    bv.CHANGELOG_D.mkdir()
+    (bv.CHANGELOG_D / "README.md").write_text("contract\n", encoding="utf-8")
+    (bv.CHANGELOG_D / "1358.md").write_text(
+        "### Fixed — Would be silently dropped\n\nbody\n", encoding="utf-8"
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        bv.slice_changelog("0.16.0", dry_run=False)
+
+    assert "1358.md" in str(excinfo.value)
+    assert "assemble_changelog.py" in str(excinfo.value)
+    # The refusal must leave CHANGELOG.md untouched.
+    assert bv.CHANGELOG.read_text(encoding="utf-8") == before
+    # ... and must not have consumed the fragment either.
+    assert (bv.CHANGELOG_D / "1358.md").is_file()
+
+
+def test_slicing_with_only_readme_in_changelog_d_is_not_blocked(bv):
+    """README.md is the contract doc, not a pending fragment."""
+    bv.CHANGELOG.write_text(
+        "# Changelog\n\n"
+        "## [Unreleased] - v0.16.0 candidate\n\n"
+        "### Added — Existing entry\n\n"
+        "body\n",
+        encoding="utf-8",
+    )
+    bv.CHANGELOG_D.mkdir()
+    (bv.CHANGELOG_D / "README.md").write_text("contract\n", encoding="utf-8")
+
+    bv.slice_changelog("0.16.0", dry_run=False)
+
+    assert "## [v0.16.0]" in bv.CHANGELOG.read_text(encoding="utf-8")
 
 
 def test_the_repo_changelog_has_exactly_one_heading_per_version():
