@@ -56,6 +56,43 @@ is deliberately unchecked, since it varies correctly with nesting (`../../..`
 for `examples/<cat>/<name>/`, `../../../..` for a per-core subdirectory).
 Covered by `tests/scripts/test_check_example_sdk_root.py`.
 
+**One of the 20, `examples/ai/cold-chain-monitor`, is also the `edge-ai`
+scaffold template's source**, so `--emit scaffold` changed with it — and
+that exposed a defect `scripts/alp_template.py::_scaffold_cmakelists` already
+had. A scaffold is unpacked OUTSIDE the SDK tree, where the in-tree `../../..`
+fallback is meaningless, so the transform rewrites the guess block into one
+that hard-fails unless `ALP_SDK_ROOT` (env or `-D`) is set. It rewrote only
+the code, never the comment above it — leaving emitted scaffolds that
+promised a fallback the emitted file did not have: `minimal` shipped "In-tree
+the SDK is the example's grandparent directory; out-of-tree customers point
+ALP_SDK_ROOT at their checkout" and `peripheral` shipped "in-tree we resolve
+it as the example's grandparent directory", both sitting directly above the
+`FATAL_ERROR`. The transform now rewrites the comment paragraph with the code
+it describes, scoped to the run immediately above the block and only to
+paragraphs naming `ALP_SDK_ROOT` or the grandparent fallback —
+`gpio-button-led`'s "board.yaml -> build/generated/alp.conf at configure
+time." banner survives verbatim, and an example with no such comment
+(`i2c-master`,
+`mproc-mailbox`) gains no invented prose. Regenerating
+`tests/fixtures/emit-snapshots/` moved exactly three goldens
+(`scaffold.edge-ai-v2n101` — this branch's own `CMakeLists.txt` change plus
+the comment; `scaffold.minimal-v2n101` and `scaffold.peripheral-v2n101` —
+comment only); the other 33 `--emit` surfaces are byte-identical.
+
+**Follow-up — this commit is a re-vendor trigger for `tan-cli` (not done
+here).** `tan-cli`'s `python/tan/templates/vendored/<template>/<sku>/` tree is
+a byte-for-byte capture of this same `--emit scaffold` output, pinned at
+`v0.15.0-rc1` (`996937ac`) per its `MANIFEST.md`, and
+`tan-cli/tests/parity/scaffold_byte_parity.py` re-runs the live emit against
+the pinned SDK and fails on drift. Emitting every vendored (template, sku)
+pair before and after this change shows **4 of the 9** now drift:
+`edge-ai/E1M-AEN801`, `edge-ai/E1M-V2N101` (the `CMakeLists.txt` change and
+the comment) and `minimal/E1M-AEN801`, `minimal/E1M-V2N101` (comment only);
+`diagnostics`, `iot` and `sensor` are unaffected. Re-vendoring is a
+`tan-cli`-side change: bump `.github/workflows/parity.yml`'s `PINNED_SDK_TAG`
+past this commit and re-run the emit, which drives all four parity gates as
+one atomic unit — it is not four independent bumps.
+
 ### Added — ADR 0027 proposes declaring storage regions by role, not by SoM-internal region name
 
 `board.yaml`'s `storage:` entries place themselves with `flash_device:`, a
