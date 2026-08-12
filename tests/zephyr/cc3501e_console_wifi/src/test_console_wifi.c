@@ -74,6 +74,12 @@ static struct {
 	 * measurement, anything else models a radio read that could not be
 	 * served (e.g. the radio went back down between the two requests). */
 	uint8_t rssi_resp;
+
+	/* Bumped on every WIFI_GET_RSSI dispatch, regardless of what opcode (if
+	 * any) is dispatched after it.  slave.cmd alone only records the LAST
+	 * opcode seen, so it cannot tell "no radio read was issued" from "a radio
+	 * read was issued and then something else ran after it". */
+	unsigned int get_rssi_count;
 } slave;
 
 static void slave_reset(void)
@@ -109,6 +115,7 @@ static void slave_dispatch(void)
 		break;
 	}
 	case ALP_CC3501E_CMD_WIFI_GET_RSSI: {
+		slave.get_rssi_count++;
 		const uint8_t r = (uint8_t)FIX_RSSI_MEASURED;
 		if (slave.rssi_resp != ALP_CC3501E_RESP_OK) {
 			stage_reply(slave.rssi_resp, NULL, 0u);
@@ -314,9 +321,10 @@ ZTEST(cc3501e_console_wifi, test_status_disconnected_reports_no_rssi)
 
 	zassert_not_null(strstr(out, "state: disconnected"), "state line missing: %s", out);
 	zassert_is_null(strstr(out, "rssi:"), "no RSSI belongs on an unassociated link: %s", out);
-	zassert_not_equal(slave.cmd,
-	                  ALP_CC3501E_CMD_WIFI_GET_RSSI,
-	                  "no radio read should be issued when not associated");
+	/* Count, not slave.cmd (the last opcode seen): a trailing request after a
+	 * WIFI_GET_RSSI would make slave.cmd that trailing opcode and pass this
+	 * assertion vacuously while a radio read WAS issued. */
+	zassert_equal(slave.get_rssi_count, 0, "no radio read should be issued when not associated");
 }
 
 ZTEST_SUITE(cc3501e_console_wifi, NULL, suite_setup, reset_before, NULL, NULL);

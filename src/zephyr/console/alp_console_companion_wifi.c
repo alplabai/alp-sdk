@@ -298,7 +298,17 @@ static int cmd_companion_wifi_status(const struct shell *sh, size_t argc, char *
 		 * worker-routed radio read, the same one the connect result already
 		 * uses successfully (#1382) -- and report unavailable rather than a
 		 * number we cannot vouch for when that read fails.  The IP is a third,
-		 * separate lease query (WIFI_GET_IP); print it only on a lease. */
+		 * separate lease query (WIFI_GET_IP); print it only on a lease.
+		 *
+		 * Cost: unlike the WIFI_STATUS/WIFI_GET_IP reads above, WIFI_GET_RSSI
+		 * is worker-routed (protocol.c: handle_worker_routed), so it always
+		 * costs at least a submit -> RESP_ERR_BUSY -> poll round trip, and
+		 * cc3501e_wifi_rssi() floors its poll_by_repeat budget to
+		 * CC3501E_WIFI_DOWN_WINDOW_MS (10 s) -- on a wedged transport this
+		 * command's worst case roughly doubles, from ~10.1 s to ~20.1 s, and
+		 * this call runs on the SHELL THREAD.  Gated on
+		 * st.state == ALP_CC3501E_WIFI_CONNECTED so an in-flight `wifi
+		 * connect` (#1377) still sees a cheap, non-blocking `wifi status`. */
 		int8_t       rssi = 0;
 		alp_status_t rs   = cc3501e_wifi_rssi(companion_cc3501e, &rssi);
 		if (rs == ALP_OK) {
@@ -344,7 +354,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
     /* clang-format on */
     SHELL_CMD_ARG(status,
                   NULL,
-                  "show connection state + rssi + ip",
+                  "show connection state + rssi + ip (rssi is a live read, can take ~10s)",
                   cmd_companion_wifi_status,
                   1,
                   0),
