@@ -28,9 +28,9 @@ v0.6.0):
    resolved `tool` and was refused; alp-sdk#1291 put that in `command.tool`'s own
    schema description.)
 2. The executor resolves that identity to a **concrete filesystem path** with one
-   hardened lookup (`tan/core/tool_lookup.py::resolve_tool`) and spawns **that
+   hardened lookup (`resolve_tool()` in `tan/core/tool_lookup.py`) and spawns **that
    path**, never the bare name. On the build path that is
-   `execute.py::_spawn_step`, whose own docstring says "`program` is always the
+   `_spawn_step()` in `execute.py`, whose own docstring says "`program` is always the
    RESOLVED absolute path (tan-cli#510), never a bare identity"; on the flash
    path it is passed as `subprocess` `executable=`.
 3. **PATH is still the search input** for a bare identity — POSIX via
