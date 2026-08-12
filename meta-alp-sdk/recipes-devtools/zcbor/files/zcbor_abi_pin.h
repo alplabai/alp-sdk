@@ -30,16 +30,19 @@
 #define ALP_ZCBOR_ABI_PIN_H
 
 #if defined(ZCBOR_MAP_SMART_SEARCH)
-#error "ZCBOR_MAP_SMART_SEARCH must stay undefined to match libzcbor.so's own build -- see zcbor_abi_pin.h"
+#error \
+    "ZCBOR_MAP_SMART_SEARCH must stay undefined to match libzcbor.so's own build -- see zcbor_abi_pin.h"
 #endif
 #if defined(ZCBOR_STOP_ON_ERROR)
-#error "ZCBOR_STOP_ON_ERROR must stay undefined to match libzcbor.so's own build -- see zcbor_abi_pin.h"
+#error \
+    "ZCBOR_STOP_ON_ERROR must stay undefined to match libzcbor.so's own build -- see zcbor_abi_pin.h"
 #endif
 #if defined(ZCBOR_CANONICAL)
 #error "ZCBOR_CANONICAL must stay undefined to match libzcbor.so's own build -- see zcbor_abi_pin.h"
 #endif
 #if defined(ZCBOR_BIG_ENDIAN)
-#error "ZCBOR_BIG_ENDIAN must stay undefined to match libzcbor.so's own build -- see zcbor_abi_pin.h"
+#error \
+    "ZCBOR_BIG_ENDIAN must stay undefined to match libzcbor.so's own build -- see zcbor_abi_pin.h"
 #endif
 
 #endif /* ALP_ZCBOR_ABI_PIN_H */
