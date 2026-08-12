@@ -32,10 +32,18 @@ Unlike `WIFI_CONNECT_STA` this is not defense in depth: that alias was
 always returns `ALP_ERR_TIMEOUT` — including for an AP that came up fine.
 That is the honest report and is documented as a `@warning` on
 `<alp/chips/cc3501e/wifi.h>`; the console's `wifi ap start` now prints
-"unconfirmed", not "up" or a flat "failed". Restoring a real success path
-needs the submit-once-then-confirm restructure `cc3501e_wifi_connect()` got,
-which protocol v4 cannot support: the TI HAL's `cc3501e_hw_wifi_ap_start()`
-never writes the `g_wifi_conn` latch that `WIFI_STATUS` reads, so there is no
+"unconfirmed", not "up" or a flat "failed". Since the alias was the only
+route to `ALP_OK`, a poll-by-repeat wrapper around this opcode is provably
+unwinnable — every retry reads back either the BUSY ack or the now-rejected
+alias, never progress — so `cc3501e_wifi_ap_start()` submits `WIFI_AP_START`
+exactly **once** and reports `ALP_ERR_TIMEOUT` immediately, instead of
+retrying out to the caller's timeout budget. This also removes the retry
+storm the old poll shared with #1376's pre-fix `WIFI_CONNECT_STA`: every
+re-issue that landed on the freshly-reset `IDLE` slot submitted a brand new
+`Wlan_RoleUp` on live radio hardware. Restoring a real success path needs the
+submit-once-then-confirm restructure `cc3501e_wifi_connect()` got, which
+protocol v4 cannot support: the TI HAL's `cc3501e_hw_wifi_ap_start()` never
+writes the `g_wifi_conn` latch that `WIFI_STATUS` reads, so there is no
 independent AP channel to confirm against. Giving it one is a firmware +
 protocol change and stays open on #1385.
 

@@ -968,19 +968,25 @@ ZTEST(cc3501e_host_driver, test_wifi_ap_start_encodes_like_connect)
 	 * ALP_OK.  AP_START's firmware handler acks every submit RESP_ERR_BUSY and
 	 * the WORKER_DONE branch that would reply RESP_OK is wiped by
 	 * worker_run_pending()'s worker_reset() before the host may clock again --
-	 * so the opcode cannot synchronously succeed, and
-	 * cc3501e_wifi_ap_start()'s poll_by_repeat() burns its budget on BUSY.
-	 * Restoring a legitimate success path needs the submit-once-then-confirm
-	 * restructure cc3501e_wifi_connect() got, which has no independent AP
-	 * channel to confirm against in firmware v4 (#1385). */
+	 * so the opcode cannot synchronously succeed.  A retry loop around it is
+	 * therefore provably unwinnable, so cc3501e_wifi_ap_start() (#1385)
+	 * submits exactly ONCE and reports ALP_ERR_TIMEOUT immediately, instead of
+	 * poll_by_repeat()-ing an opcode that can never answer OK.  Restoring a
+	 * legitimate success path needs the submit-once-then-confirm restructure
+	 * cc3501e_wifi_connect() got, which has no independent AP channel to
+	 * confirm against in firmware v4. */
 	zassert_equal(cc3501e_wifi_ap_start(&fw, "AP", 0u, "", 100u),
 	              ALP_ERR_TIMEOUT,
-	              "AP_START's submit ack is BUSY, never a synchronous OK -- poll_by_repeat "
-	              "retries it out to the caller's budget");
+	              "AP_START's submit ack is BUSY, never a synchronous OK -- reported immediately "
+	              "as unconfirmed, not retried");
 	zassert_equal(slave.cmd, ALP_CC3501E_CMD_WIFI_AP_START, "opcode 0x14");
 	zassert_equal(slave.ap_start_last_req_pl[0], 2u, "ssid_len");
 	zassert_equal(slave.ap_start_last_req_pl[1], 0u, "psk_len (open)");
 	zassert_mem_equal(&slave.ap_start_last_req_pl[4], "AP", 2u, "inline SSID");
+	zassert_equal(slave.ap_start_submit_count,
+	              1u,
+	              "exactly one submit -- not the retry storm a poll-by-repeat wrapper would "
+	              "cause, each re-issue of which would submit a BRAND NEW AP RoleUp");
 }
 
 /* #1385 at the transport layer, the direct analogue of
