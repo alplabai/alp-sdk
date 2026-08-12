@@ -1103,6 +1103,68 @@ def test_declaration_form_does_not_change_emitted_kconfig(tmp_path: Path) -> Non
         assert symbol in bare_lines, f"missing {symbol} from project-wide form"
 
 
+def test_declaration_form_does_not_change_the_inference_block(
+    tmp_path: Path,
+) -> None:
+    """#1359 follow-up: `_slice_wants_inference` used to read only
+    `slice_.libraries`, so a project-wide `libraries: [tflite-micro]`
+    (no `cores:` key, no `cores.<id>.inference:` block) never tripped
+    the inference-block emit, while the identical `cores:`-scoped
+    spelling did -- the whole `_emit_inference` section (TFLM + Ethos-U
+    dispatcher enables) went missing depending on how board.yaml spelled
+    the same selection.
+
+    E1M-AEN801 m55_hp is the issue's own repro: the SoM's Ethos-U55 +
+    Ethos-U85 NPUs plus the M55's Helium MVE make this the same 13-line
+    section the review measured as a superset."""
+    bare = """
+    som:
+      sku: E1M-AEN801
+    libraries: [tflite-micro]
+    cores:
+      m55_hp:
+        app: ./src
+    """
+    scoped = """
+    som:
+      sku: E1M-AEN801
+    libraries:
+      - name: tflite-micro
+        cores: [m55_hp]
+    cores:
+      m55_hp:
+        app: ./src
+    """
+    bare_dir = tmp_path / "bare"
+    scoped_dir = tmp_path / "scoped"
+    bare_dir.mkdir()
+    scoped_dir.mkdir()
+    bare_project = load_board_yaml(_write_board(bare_dir, bare))
+    scoped_project = load_board_yaml(_write_board(scoped_dir, scoped))
+    bare_out = _slice_alp_conf(bare_project, bare_project.cores["m55_hp"])
+    scoped_out = _slice_alp_conf(scoped_project, scoped_project.cores["m55_hp"])
+
+    # Pin the specific symbols the review measured as the 13-line
+    # superset the core-scoped form emitted and the project-wide form
+    # silently dropped.
+    for symbol in (
+        "CONFIG_CPP=y",
+        "CONFIG_STD_CPP17=y",
+        "CONFIG_TENSORFLOW_LITE_MICRO=y",
+        "CONFIG_ALP_SDK_INFERENCE_BACKEND_TFLM=y",
+        "CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_HELIUM=y",
+        "CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN=y",
+        "CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55=y",
+        "CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85=y",
+        "CONFIG_ETHOS_U_DCACHE=y",
+        "CONFIG_ETHOS_U85_256=y",
+        "CONFIG_DCACHE=n",
+        "CONFIG_HEAP_MEM_POOL_SIZE=65536",
+    ):
+        assert symbol in scoped_out, f"missing {symbol} from cores:-scoped form"
+        assert symbol in bare_out, f"missing {symbol} from project-wide form"
+
+
 # --- floating version pins are a supply-chain hole --------------------
 
 

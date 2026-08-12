@@ -281,12 +281,14 @@ def _check_slice_requires(
 # ---------------------------------------------------------------------------
 
 def zephyr_library_kconfig(manifest: dict[str, Any]) -> list[str]:
-    """Kconfig lines for ONE library manifest's Zephyr integration: the
-    upstream module-enable line(s) (`integration.zephyr.kconfig`) followed by
-    the SDK SW-fallback floor (`integration.zephyr.hw_backends.sw_fallback.
-    kconfig`), module-enable first and the fallback marker last, deduped.
-    Header-only libraries whose SW floor is a doc comment surface that
-    comment only when there is no module-enable line to attach it to.
+    """Kconfig lines for ONE library manifest's Zephyr integration.
+
+    The upstream module-enable line(s) (`integration.zephyr.kconfig`)
+    followed by the SDK SW-fallback floor
+    (`integration.zephyr.hw_backends.sw_fallback.kconfig`), module-enable
+    first and the fallback marker last, deduped. Header-only libraries whose
+    SW floor is a doc comment surface that comment only when there is no
+    module-enable line to attach it to.
 
     The ONE derivation both declaration channels call for the base+fallback
     set -- `zephyr_kconfig_lines` (project-wide) and
