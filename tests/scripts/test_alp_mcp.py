@@ -99,7 +99,7 @@ def test_som_info_resolves_case_insensitively():
     b = server.som_info("e1m-aen801")
     assert a.get("sku") == "E1M-AEN801"
     assert a == b
-    assert "peripherals" in a and "topology" in a
+    assert "soc_peripherals" in a and "topology" in a
 
 
 def test_som_info_unknown_sku_returns_error():
@@ -119,8 +119,8 @@ def test_peripheral_support_by_peripheral_pcie():
 def test_peripheral_support_by_sku_returns_map():
     res = server.peripheral_support(sku="E1M-AEN801")
     assert res["sku"] == "E1M-AEN801"
-    assert isinstance(res["peripherals"], dict)
-    assert res["peripherals"]["npu"] is True
+    assert isinstance(res["soc_peripherals"], dict)
+    assert res["soc_peripherals"]["npu"] is True
 
 
 def test_peripheral_support_both_returns_bool():

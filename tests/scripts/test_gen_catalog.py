@@ -66,7 +66,7 @@ def test_eleven_soms_each_resolve_to_a_soc():
         # a family, and a peripheral-presence map.
         assert s["soc_part"], s["sku"]
         assert s["family"], s["sku"]
-        assert isinstance(s["peripherals"], dict) and s["peripherals"]
+        assert isinstance(s["soc_peripherals"], dict) and s["soc_peripherals"]
         assert isinstance(s["capabilities"], dict)
         assert s["topology"], s["sku"]
 
@@ -74,11 +74,11 @@ def test_eleven_soms_each_resolve_to_a_soc():
 def test_known_presence_cells():
     soms = {s["sku"]: s for s in _catalog()["soms"]}
     # AEN801 (Alif E8) declares ethernet and an NPU.
-    assert soms["E1M-AEN801"]["peripherals"]["ethernet"] is True
-    assert soms["E1M-AEN801"]["peripherals"]["npu"] is True
+    assert soms["E1M-AEN801"]["soc_peripherals"]["ethernet"] is True
+    assert soms["E1M-AEN801"]["soc_peripherals"]["npu"] is True
     # The V2N SoC (n44) has PCIe Gen3; the Alif parts do not.
-    assert soms["E1M-V2N101"]["peripherals"]["pcie"] is True
-    assert soms["E1M-AEN801"]["peripherals"]["pcie"] is False
+    assert soms["E1M-V2N101"]["soc_peripherals"]["pcie"] is True
+    assert soms["E1M-AEN801"]["soc_peripherals"]["pcie"] is False
 
 
 def test_named_instance_and_ext_mem_spi_presence():
@@ -87,20 +87,20 @@ def test_named_instance_and_ext_mem_spi_presence():
     pin-mux table names them); xspi_ospi is SoC-level (external_memory_interfaces).
     """
     soms = {s["sku"]: s for s in _catalog()["soms"]}
-    v2n = soms["E1M-V2N101"]["peripherals"]
+    v2n = soms["E1M-V2N101"]["soc_peripherals"]
     assert v2n["pdm"] is True
     assert v2n["sd1"] is True
     assert v2n["wifi_sdio"] is True
     assert v2n["xspi_ospi"] is True
     # AEN801 (Alif E8) has a HexSPI external memory interface but no
     # Renesas-style SD1/WIFI_SDIO pin-mux route.
-    aen = soms["E1M-AEN801"]["peripherals"]
+    aen = soms["E1M-AEN801"]["soc_peripherals"]
     assert aen["xspi_ospi"] is True
     assert aen["sd1"] is False
     assert aen["wifi_sdio"] is False
     # NX9101 has no pin-mux table at all yet -- named-instance keys default
     # False (absence of routing evidence), not omitted.
-    nx = soms["E1M-NX9101"]["peripherals"]
+    nx = soms["E1M-NX9101"]["soc_peripherals"]
     assert nx["sd1"] is False
     assert nx["wifi_sdio"] is False
 

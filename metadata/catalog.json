@@ -3245,6 +3245,10 @@
       "script": "scripts/check_build_receipt.py"
     },
     {
+      "purpose": "Guard: every `changelog.d/*.md` fragment is well-formed (#1395).",
+      "script": "scripts/check_changelog_fragments.py"
+    },
+    {
       "purpose": "CI gate: chip-header `@par Driver status:` labels match metadata truth.",
       "script": "scripts/check_chip_header_status.py"
     },
@@ -3327,6 +3331,10 @@
     {
       "purpose": "Reject examples that claim Alp storage coverage while using Zephyr storage APIs.",
       "script": "scripts/check_example_storage_claims.py"
+    },
+    {
+      "purpose": "CI gate: every `helper_firmware[].firmware_path` in every `metadata/e1m_modules/*.yaml` SoM preset resolves to a real, repo-relative file on disk.",
+      "script": "scripts/check_helper_firmware_path.py"
     },
     {
       "purpose": "CI gate: doc/example prose that names a known on-module I2C part next to an I2C bus name must agree with that part's bus in the owning SoM preset's `on_module.i2c_devices:` block. #1270 added this block to `metadata/e1m_modules/E1M-AEN801.yaml` and its five AEN siblings (`E1M-V2N101.yaml` / `E1M-V2M101.yaml` already carried one); this gate is the cross-check #1270 asked for, reading across every SoM preset -- not AEN's alone -- mirroring what check_pin_conflicts.py does for silicon pads.",
@@ -3953,7 +3961,10 @@
         "xspi_dma": true
       },
       "family": "alif-ensemble",
-      "peripherals": {
+      "silicon": "alif:ensemble:e3",
+      "sku": "E1M-AEN301",
+      "soc_part": "E3",
+      "soc_peripherals": {
         "adc": true,
         "can": true,
         "dac": true,
@@ -3979,9 +3990,6 @@
         "wifi_sdio": false,
         "xspi_ospi": true
       },
-      "silicon": "alif:ensemble:e3",
-      "sku": "E1M-AEN301",
-      "soc_part": "E3",
       "topology": {
         "m55_he": {
           "app": "alp-stock-shim",
@@ -4008,7 +4016,10 @@
         "xspi_dma": true
       },
       "family": "alif-ensemble",
-      "peripherals": {
+      "silicon": "alif:ensemble:e4",
+      "sku": "E1M-AEN401",
+      "soc_part": "E4",
+      "soc_peripherals": {
         "adc": true,
         "can": true,
         "dac": true,
@@ -4034,9 +4045,6 @@
         "wifi_sdio": false,
         "xspi_ospi": true
       },
-      "silicon": "alif:ensemble:e4",
-      "sku": "E1M-AEN401",
-      "soc_part": "E4",
       "topology": {
         "m55_he": {
           "app": "alp-stock-shim",
@@ -4063,7 +4071,10 @@
         "xspi_dma": true
       },
       "family": "alif-ensemble",
-      "peripherals": {
+      "silicon": "alif:ensemble:e5",
+      "sku": "E1M-AEN501",
+      "soc_part": "E5",
+      "soc_peripherals": {
         "adc": true,
         "can": true,
         "dac": true,
@@ -4089,9 +4100,6 @@
         "wifi_sdio": false,
         "xspi_ospi": true
       },
-      "silicon": "alif:ensemble:e5",
-      "sku": "E1M-AEN501",
-      "soc_part": "E5",
       "topology": {
         "a32_cluster": {
           "app": "alp-image-edge",
@@ -4127,7 +4135,10 @@
         "xspi_dma": true
       },
       "family": "alif-ensemble",
-      "peripherals": {
+      "silicon": "alif:ensemble:e6",
+      "sku": "E1M-AEN601",
+      "soc_part": "E6",
+      "soc_peripherals": {
         "adc": true,
         "can": true,
         "dac": true,
@@ -4153,9 +4164,6 @@
         "wifi_sdio": false,
         "xspi_ospi": true
       },
-      "silicon": "alif:ensemble:e6",
-      "sku": "E1M-AEN601",
-      "soc_part": "E6",
       "topology": {
         "a32_cluster": {
           "app": "alp-image-edge",
@@ -4191,7 +4199,10 @@
         "xspi_dma": true
       },
       "family": "alif-ensemble",
-      "peripherals": {
+      "silicon": "alif:ensemble:e7",
+      "sku": "E1M-AEN701",
+      "soc_part": "E7",
+      "soc_peripherals": {
         "adc": true,
         "can": true,
         "dac": true,
@@ -4217,9 +4228,6 @@
         "wifi_sdio": false,
         "xspi_ospi": true
       },
-      "silicon": "alif:ensemble:e7",
-      "sku": "E1M-AEN701",
-      "soc_part": "E7",
       "topology": {
         "a32_cluster": {
           "app": "alp-image-edge",
@@ -4255,7 +4263,10 @@
         "neon": true
       },
       "family": "alif-ensemble",
-      "peripherals": {
+      "silicon": "alif:ensemble:e8",
+      "sku": "E1M-AEN801",
+      "soc_part": "E8",
+      "soc_peripherals": {
         "adc": true,
         "can": true,
         "dac": true,
@@ -4281,9 +4292,6 @@
         "wifi_sdio": false,
         "xspi_ospi": true
       },
-      "silicon": "alif:ensemble:e8",
-      "sku": "E1M-AEN801",
-      "soc_part": "E8",
       "topology": {
         "a32_cluster": {
           "app": "alp-image-edge",
@@ -4312,7 +4320,10 @@
         "neon": true
       },
       "family": "nxp-imx9",
-      "peripherals": {
+      "silicon": "nxp:imx9:imx93",
+      "sku": "E1M-NX9101",
+      "soc_part": "i.MX 93",
+      "soc_peripherals": {
         "adc": false,
         "can": false,
         "dac": false,
@@ -4338,9 +4349,6 @@
         "wifi_sdio": false,
         "xspi_ospi": true
       },
-      "silicon": "nxp:imx9:imx93",
-      "sku": "E1M-NX9101",
-      "soc_part": "i.MX 93",
       "topology": {
         "a55_cluster": {
           "app": "alp-image-edge",
@@ -4363,7 +4371,10 @@
         "neon": true
       },
       "family": "renesas-rzv2n-deepx",
-      "peripherals": {
+      "silicon": "renesas:rzv2n:n44",
+      "sku": "E1M-V2M101",
+      "soc_part": "R9A09G056N44GBG",
+      "soc_peripherals": {
         "adc": true,
         "can": true,
         "dac": false,
@@ -4389,9 +4400,6 @@
         "wifi_sdio": true,
         "xspi_ospi": true
       },
-      "silicon": "renesas:rzv2n:n44",
-      "sku": "E1M-V2M101",
-      "soc_part": "R9A09G056N44GBG",
       "topology": {
         "a55_cluster": {
           "app": "alp-image-edge",
@@ -4414,7 +4422,10 @@
         "neon": true
       },
       "family": "renesas-rzv2n-deepx",
-      "peripherals": {
+      "silicon": "renesas:rzv2n:n44",
+      "sku": "E1M-V2M102",
+      "soc_part": "R9A09G056N44GBG",
+      "soc_peripherals": {
         "adc": true,
         "can": true,
         "dac": false,
@@ -4440,9 +4451,6 @@
         "wifi_sdio": true,
         "xspi_ospi": true
       },
-      "silicon": "renesas:rzv2n:n44",
-      "sku": "E1M-V2M102",
-      "soc_part": "R9A09G056N44GBG",
       "topology": {
         "a55_cluster": {
           "app": "alp-image-edge",
@@ -4465,7 +4473,10 @@
         "neon": true
       },
       "family": "renesas-rzv2n",
-      "peripherals": {
+      "silicon": "renesas:rzv2n:n44",
+      "sku": "E1M-V2N101",
+      "soc_part": "R9A09G056N44GBG",
+      "soc_peripherals": {
         "adc": true,
         "can": true,
         "dac": false,
@@ -4491,9 +4502,6 @@
         "wifi_sdio": true,
         "xspi_ospi": true
       },
-      "silicon": "renesas:rzv2n:n44",
-      "sku": "E1M-V2N101",
-      "soc_part": "R9A09G056N44GBG",
       "topology": {
         "a55_cluster": {
           "app": "alp-image-edge",
@@ -4516,7 +4524,10 @@
         "neon": true
       },
       "family": "renesas-rzv2n",
-      "peripherals": {
+      "silicon": "renesas:rzv2n:n44",
+      "sku": "E1M-V2N102",
+      "soc_part": "R9A09G056N44GBG",
+      "soc_peripherals": {
         "adc": true,
         "can": true,
         "dac": false,
@@ -4542,9 +4553,6 @@
         "wifi_sdio": true,
         "xspi_ospi": true
       },
-      "silicon": "renesas:rzv2n:n44",
-      "sku": "E1M-V2N102",
-      "soc_part": "R9A09G056N44GBG",
       "topology": {
         "a55_cluster": {
           "app": "alp-image-edge",
