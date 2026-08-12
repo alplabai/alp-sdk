@@ -363,7 +363,27 @@ alp_status_t cc3501e_wifi_ap_start(cc3501e_t  *ctx,
 	}
 	/* AP bring-up is worker-routed in the firmware, so the bridge is briefly
 	 * down (BUSY/IO) while the radio comes up; poll_by_repeat re-issues until
-	 * OK (AP up) or a hard error, exactly like cc3501e_wifi_connect. */
+	 * the budget is spent or a hard error lands.
+	 *
+	 * #1385 -- THIS POLL CANNOT SUCCEED against protocol v4, and is kept only
+	 * because there is nothing sound to replace it with yet.  AP_START is
+	 * fire-and-forget on the firmware side exactly like CONNECT_STA was
+	 * (handle_worker_routed_payload acks every submit RESP_ERR_BUSY, and
+	 * worker_run_pending() resets the job slot for CONNECT_STA/AP_START BEFORE
+	 * cc3501e_bridge_ready() lets the host clock again, so the WORKER_DONE ->
+	 * RESP_OK branch is never collectable).  The only OK this poll ever saw was
+	 * the dead-phase 0x00 alias, which cc3501e_request_locked() now rejects as
+	 * ALP_ERR_IO.  cc3501e_wifi_connect() escaped the same trap by submitting
+	 * once and awaiting the independent WIFI_STATUS latch -- AP_START has no
+	 * such channel: the TI HAL's cc3501e_hw_wifi_ap_start()
+	 * (hal/ti/cc3501e_hw_ti_wifi.c) never writes g_wifi_conn, the latch
+	 * handle_wifi_status reads.  Giving AP_START one is a FIRMWARE change
+	 * (mirror the AP outcome into a latch, or add an AP-status opcode + a
+	 * protocol version bump) and needs a bench, so it is not made here.  Until
+	 * then this call reports ALP_ERR_TIMEOUT for an AP that came up fine --
+	 * documented as a @warning on <alp/chips/cc3501e/wifi.h>'s declaration.
+	 * Note the retry storm this shares with #1376: every re-issue lands on the
+	 * now-IDLE slot and submits a BRAND NEW AP RoleUp. */
 	return poll_by_repeat(
 	    ctx, ALP_CC3501E_CMD_WIFI_AP_START, payload, off, NULL, 0, NULL, timeout_ms);
 }

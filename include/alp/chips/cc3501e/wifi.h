@@ -225,7 +225,24 @@ alp_status_t cc3501e_wifi_disconnect(cc3501e_t *ctx);
  * followed by the inline SSID then the inline passphrase, packed with no
  * padding.  AP bring-up is a radio op (the firmware worker-routes it and the
  * bridge is briefly down), so while the firmware reports RESP_ERR_BUSY the
- * request is re-issued on a bounded backoff until RESP_OK or the deadline.
+ * request is re-issued on a bounded backoff until the deadline.
+ *
+ * @warning Against CC3501E firmware protocol v4 this call CANNOT report
+ *          success, and returns ALP_ERR_TIMEOUT for an AP that came up
+ *          perfectly (issue #1385).  WIFI_AP_START is fire-and-forget on the
+ *          firmware side: every submit is acked RESP_ERR_BUSY, and the job
+ *          slot that would carry the outcome is reset to IDLE by the drain
+ *          before the host is allowed to clock again -- so there is no
+ *          synchronous RESP_OK to collect, and unlike @ref cc3501e_wifi_connect
+ *          there is no independent status latch to await it on (the firmware's
+ *          AP path never writes the WIFI_STATUS connection latch).  The
+ *          apparent successes this call used to return came from a dead bus
+ *          phase reading back all-zero, which aliases RESP_OK (0x00) -- that
+ *          alias is now rejected as ALP_ERR_IO at the transport.  Every retry
+ *          this poll makes also lands on the IDLE slot and submits a BRAND NEW
+ *          AP RoleUp, the same retry storm #1376 measured on connect.  Treat a
+ *          non-ALP_OK return as inconclusive and confirm the AP out of band
+ *          until #1385 lands the firmware-side confirmation channel.
  *
  * @param ctx         Initialised driver context.
  * @param ssid        NUL-terminated AP SSID (<= 32 bytes; longer is rejected).
@@ -233,11 +250,12 @@ alp_status_t cc3501e_wifi_disconnect(cc3501e_t *ctx);
  *                    _WPA2_PSK / _WPA3_SAE (matches
  *                    @ref alp_cc3501e_wifi_connect_t::security on the wire).
  * @param pass        NUL-terminated passphrase (may be NULL/"" for an open AP).
- * @param timeout_ms  Upper bound on the AP-start poll budget (floored to the
- *                    radio down-window).
- * @return ALP_OK once the AP is up; ALP_ERR_TIMEOUT if still starting at the
- *         deadline; ALP_ERR_INVAL on an over-long SSID/passphrase; mapped
- *         error otherwise.
+ * @param timeout_ms  Upper bound on the AP-start poll budget (used as given --
+ *                    this helper does NOT floor it to the radio down-window).
+ * @return ALP_ERR_TIMEOUT once the budget is spent (the expected outcome --
+ *         see the warning above); ALP_ERR_INVAL on an over-long
+ *         SSID/passphrase; mapped error otherwise.  ALP_OK is not reachable
+ *         against protocol v4.
  */
 alp_status_t cc3501e_wifi_ap_start(cc3501e_t  *ctx,
                                    const char *ssid,

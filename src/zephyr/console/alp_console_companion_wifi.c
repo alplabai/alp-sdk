@@ -223,7 +223,17 @@ static int cmd_companion_wifi_ap(const struct shell *sh, size_t argc, char **arg
 	    cc3501e_wifi_ap_start(companion_cc3501e, ssid, sec, pass, ALP_COMPANION_WIFI_CONN_MS);
 
 	if (s != ALP_OK) {
-		shell_error(sh, "ap start \"%s\" failed (%d)", ssid, (int)s);
+		/* #1385: against protocol v4 this is the EXPECTED outcome even for an
+		 * AP that came up fine -- WIFI_AP_START acks every submit BUSY and has
+		 * no status latch to confirm on, so cc3501e_wifi_ap_start() cannot
+		 * report success.  Say "unconfirmed", not "failed": printing a flat
+		 * failure for a working AP is the mirror of the false "up" the
+		 * dead-phase 0x00 alias used to print. */
+		shell_error(sh,
+		            "ap start \"%s\" unconfirmed (%d) -- firmware v4 has no AP status latch "
+		            "(#1385); check for the SSID out of band",
+		            ssid,
+		            (int)s);
 		return -EIO;
 	}
 	shell_print(
