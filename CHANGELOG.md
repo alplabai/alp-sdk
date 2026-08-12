@@ -7,54 +7,134 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
-### Fixed — the AEN E8 devicetree put the on-SoM DP83825 at MDIO address 1; silicon answers at 0 (#1244)
+### Fixed — a `cores:`-scoped `libraries:` entry no longer emits MORE Kconfig than the same library declared project-wide (#1359)
 
-`zephyr/dts/alif/ensemble_e8_peripherals.dtsi` declared the managed-MDIO PHY as
-`eth_phy_managed: ethernet-phy@1` with `reg = <1>`, carried over from a fork
-reference, under a comment asking for exactly one thing before anyone relied on
-it: "confirm this address before relying on it for a real MDIO scan". The
-confirmation has now been done on real E8 silicon and it came back **0**, so the
-node is `ethernet-phy@0` with `reg = <0>` and the caveat is replaced by the
-evidence.
+The same library on the same core produced a different `alp.conf` fragment
+depending only on how `board.yaml` spelled the selection.
+`libraries: [cmsis-dsp]` (project-wide) and `libraries: [{name: cmsis-dsp,
+cores: [m55_hp]}]` (core-scoped) both emitted the same 11
+`CONFIG_CMSIS_DSP_*=y` module-enable lines, but only the core-scoped form
+additionally emitted `CONFIG_ALP_CMSIS_DSP_SCALAR=y`,
+`CONFIG_ALP_CMSIS_DSP_HELIUM=y`, and `CONFIG_ALP_CMSIS_DSP_ADC_DMA=y`. A
+`cores:` list reads as *narrowing* an existing project-wide selection down to
+one core; silently widening it to include accelerator/SW-fallback wiring the
+project-wide form never asked for is the opposite of what the syntax
+promises, and the difference was invisible in review — both `board.yaml`
+forms looked equivalent.
 
-The measurement is a live MDIO transaction on the managed controller itself — a
-Flow C ITCM RAM-run (no MRAM write) of `examples/aen/aen-ethernet-link` built
-with `mdio-managed.overlay` on
-`alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he`:
+Two independent derivers were each reading only the core-scoped channel
+(`Slice.libraries`), never the union with the project-wide channel
+(`project.libraries`):
 
-```
-[eth] MDIO PHY@0 id=2000a140 (DP83825=2000a140)
-[eth] PHY regs: ANAR=01e1 ANLPAR=0000 PHYSTS=0002 RCSR=00e1
-```
+* `scripts/alp_orchestrate/kconfig.py`'s `_slice_alp_conf` called
+  `_emit_library_hw_backends(slice_.libraries, project.sku)` — the
+  `integration.zephyr.hw_backends` accelerator matcher
+  (`CONFIG_ALP_CMSIS_DSP_HELIUM`/`_ADC_DMA`) never saw a project-wide name.
+* `scripts/alp_orchestrate/libraries.py`'s `zephyr_kconfig_lines` (the
+  project-wide emitter) read only `integration.zephyr.kconfig`, never the
+  manifest's `integration.zephyr.hw_backends.sw_fallback.kconfig` SW floor
+  (`CONFIG_ALP_CMSIS_DSP_SCALAR`) — that line was wired only into
+  `kconfig.py`'s `_per_core_library_kconfig`, the core-scoped path.
 
-`id=2000a140` is the DP83825 identifier read back over `MAC_MDIO_Address/Data`,
-not the fixed-link path and not a datasheet default. That run reported
-`PHY link DOWN (BMSR=7849)` because the desk had no cable into a switch port —
-reading the PHY ID needs no link, which is what made the address answerable
-without one. So the MDIO layer is now silicon-proven; link and traffic over the
-managed path are not, and the end-to-end `RESULT PASS` remains a `fixed-link`
-result.
+Fixed by making both derivers read the SAME set for both channels. The hw-
+backend call now takes `libraries.scoped_names(project, slice_=slice_)` —
+the union helper `libraries.py` already exposed for exactly this purpose
+(added for tan-cli#555) — instead of `slice_.libraries` alone. The base +
+SW-fallback Kconfig set is now computed once, by a new
+`libraries.zephyr_library_kconfig(manifest)`, and both `zephyr_kconfig_lines`
+(project-wide) and `kconfig.py`'s `_per_core_library_kconfig` (core-scoped)
+call it, so a future symbol added to a manifest's `hw_backends`/`sw_fallback`
+block cannot land on only one declaration channel again.
 
-Nothing regressed while the address was wrong: the bench-verified path is
-`fixed-link`, which never touches MDIO, and both the `mdio` node and
-`eth_phy_managed` ship `status = "disabled"`. The one artefact that would have
-hit it first — `examples/aen/aen-ethernet-link/mdio-managed.overlay`, the
-compile proof for the managed path — inherits the address rather than
-overriding `reg`, and **keeps** doing so: one source of truth, corrected at the
-node. Its header now records the bench evidence and says explicitly why the
-`reg` override stays absent. A compile proof never scans the bus, so the twister
-entry `alp_sdk.examples.aen.ethernet_link.aen.mdio_managed` could not have
-caught this; that is noted in `testcase.yaml` rather than papered over with a
-test that cannot exist without hardware.
+**The behavioural call**: a library's accelerator/SW-fallback support is a
+property of the library manifest and the SoM's silicon, not of which
+`libraries:` spelling board.yaml used to select it — so the fix makes the
+project-wide form gain the symbols, not the core-scoped form lose them.
+`check_emit_snapshots.py`'s 36 golden fixtures stay unchanged (none of the
+pinned fixtures declare a project-wide library with an
+`hw_backends`/`sw_fallback` manifest section, and the new CASE this change
+adds — `examples/connectivity/coap-client-get`, see below — is regenerated
+fresh, not diffed against a pre-fix golden); `check_zephyr_conf_parity.py`'s
+98-example sweep still agrees across both call sites (`_slice_alp_conf`
+compared against itself for the CMakeLists.txt path vs. the build-plan path
+on the same core, so it is self-consistency evidence, not no-drift evidence
+— it stays green under any output change to both paths together, including
+this one). Two real examples in this repo already declare a curated library
+project-wide with an `hw_backends` manifest section, so their *actual*
+`board.yaml` emit changes:
 
-`zephyr/dts/bindings/ethernet/alif,ethernet.yaml:47` already agreed with the
-silicon ("e.g. ti,dp83825 at addr 0"). Stale "no MDIO-managed PHY exercised on
-real E8 silicon yet" claims are corrected in
-`zephyr/kconfigs/vendor-alif-peripherals.kconfig`, `metadata/chips/dp83825.yaml`
-and ADR 0023, each narrowed to what was actually proven (MDIO layer, not link).
-The order code stays TBD (#1241): `id=2000a140` is die/OUI identity only and
-does not distinguish the DP83825 grade/package suffix, so the unverified
-"DP83825I" label is gone from the node rather than re-asserted.
+* `examples/connectivity/coap-client-get` (`libraries: [coap]`, project-wide)
+  gains `CONFIG_ALP_COAP_NO_TLS=y` and `CONFIG_ALP_COAP_MBEDTLS=y`.
+* `examples/connectivity/modbus-server` (`libraries: [modbus]`, project-wide)
+  gains `CONFIG_ALP_MODBUS_SYNC_IO=y` and `CONFIG_ALP_MODBUS_UART_DMA=y`.
+
+`examples/ai/*`, `examples/audio/*`, and
+`examples/connectivity/iot-dashboard` do **not** move — every one of those is
+already `cores:`-scoped (or declares no `hw_backends`-bearing library at
+all), so they were already on the superset side of the pre-fix asymmetry and
+emit byte-identical output before and after this fix.
+
+Coverage hole closed: none of the 36 pinned `check_emit_snapshots.py` CASEs
+declared a project-wide library at all, which is why none of them moved and
+why this bug shipped invisibly. Added a `zephyr-conf` CASE for
+`examples/connectivity/coap-client-get/board.yaml` so a future regression on
+this exact path is caught by a golden diff, not only by the unit tests in
+`tests/scripts/test_library_layer.py`.
+
+`scripts/alp_orchestrate/` is hash-audited verbatim into tan-cli's mirror
+(tan-cli#556, milestoned for this same release); this fix must land here
+first, then tan-cli re-syncs the mirror and re-pins its freshness-gate
+hashes/fixtures before tan-cli#556 closes — the tan side cannot fix its copy
+ahead of this commit without going red against its own gate. Concretely,
+`python/tests/gates/test_planner_relocation_freshness.py:129` pins
+`kconfig.py` at
+`d80ab84bec3bc1aefe8640a6d5d1b43334447cb4ea87d4c25cee927ebfc2bf17` and
+`:131` pins `libraries.py` at
+`47b823e0fc06cc657a3c3068598b953e342720cf359443651a9996b93be7aaa5`; both go
+stale the moment this commit lands and need re-pinning to the new file
+hashes. No fixture under `python/tests/parity/oracle_fixtures/` references
+either `coap-client-get` or `modbus-server`, so re-pinning those two hashes
+is likely the entire tan-side follow-up — no new oracle fixture should be
+needed unless one is added deliberately for this path.
+
+**Follow-up (same issue): two more readers of the narrower channel alone.**
+A review that rendered every example `board.yaml` × every Zephyr core
+before/after the fix above found the fix didn't finish #1359 — two more call
+sites reproduced the identical "reads `slice_.libraries` (or
+`project.libraries`) alone" antipattern:
+
+* `scripts/alp_orchestrate/kconfig.py`'s `_slice_wants_inference` decided
+  whether to emit the `<alp/inference.h>` Kconfig block by checking only
+  `slice_.libraries` for `tflite-micro`, so a project-wide `libraries:
+  [tflite-micro]` (no `cores:` key) silently dropped the entire
+  `_emit_inference` section — `CONFIG_TENSORFLOW_LITE_MICRO=y`,
+  `CONFIG_ALP_SDK_INFERENCE_BACKEND_TFLM=y`, the Ethos-U/TFLM-kernel variant
+  switches, `CONFIG_HEAP_MEM_POOL_SIZE=65536` — while the identical
+  `cores:`-scoped spelling emitted it. Now reads
+  `libraries.scoped_names(project, slice_=slice_)`.
+* `scripts/alp_orchestrate/validate.py`'s rule 3 (`cores.<id>.iot.tls: true`
+  requires an mbedtls/bearssl provider) read only `slice_.libraries`, so a
+  project-wide `libraries: [mbedtls]` plus `iot.tls: true` raised
+  `OrchestratorError` — a hard refusal of a legal `board.yaml`, more severe
+  than an emit delta, since the identical `cores:`-scoped spelling loaded
+  fine. Now reads the same `libraries.scoped_names(project, slice_=slice_)`.
+* `scripts/alp_project.py`'s `--emit zephyr-conf` pre-flight validation
+  guard (the one that turns a bad `libraries:` selection into a clean
+  one-line `alp_project: ...` error instead of a mid-emit traceback) gated
+  on `if project.libraries:` alone, so a board.yaml with only a
+  `cores:`-scoped selection skipped the guard and hit the later, unwrapped
+  `_slice_alp_conf` call as an unhandled `OrchestratorError` traceback
+  instead. Now gates on `libraries.scoped_names(project)` (the whole-project
+  view, `slice_=None`).
+
+Both `kconfig.py` and `validate.py` fixes are covered by a regression test
+in the same style as the original ("declaration form does not change
+outcome"): `tests/scripts/test_library_layer.py::
+test_declaration_form_does_not_change_the_inference_block` pins the
+project-wide form against the same 13 `CONFIG_*` symbols the `cores:`-scoped
+form emits; `tests/scripts/test_orchestrate_consistency.py::
+test_consistency_tls_satisfied_by_project_wide_mbedtls` asserts the
+project-wide spelling *loads* rather than raising.
 
 ### Added — ADR 0027 proposes declaring storage regions by role, not by SoM-internal region name
 
