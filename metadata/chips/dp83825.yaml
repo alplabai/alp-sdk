@@ -12,8 +12,10 @@ driver_status:    none              # no alp-sdk chip driver exists (ADR 0023
                                      # (MDIO_DWMAC_ALIF + upstream
                                      # phy_ti_dp83825,
                                      # zephyr/kconfigs/vendor-alif-peripherals.kconfig:139-158)
-                                     # is BUILD-ONLY -- no MDIO-managed PHY
-                                     # exercised on real E8 silicon yet.
+                                     # has been exercised on real E8 silicon
+                                     # at the MDIO layer only (#1244: PHY-ID
+                                     # + register reads at address 0);
+                                     # link/traffic over it is still unproven.
 display_name:     "TI DP83825 10/100 Mbps RMII Ethernet PHY (exact order code TBD)"
 vendor:           ti
 mpn_population:
@@ -21,11 +23,12 @@ mpn_population:
                                      # (temp/package grade, e.g. "I"
                                      # industrial) NOT confirmed against the
                                      # netlist/BOM -- see #1241 "Blocked on".
-                                     # Do not promote
-                                     # zephyr/dts/alif/ensemble_e8_peripherals.dtsi:349-354's
-                                     # self-flagged "fork reference ...
-                                     # verify" DP83825I label into this field
-                                     # as fact.
+                                     # Do not promote the "DP83825I" label the
+                                     # devicetree used to carry (dropped from
+                                     # zephyr/dts/alif/ensemble_e8_peripherals.dtsi:353-375
+                                     # with the #1244 address fix) into this
+                                     # field as fact: the bench-read
+                                     # id=2000a140 is die/OUI identity only.
 datasheet:
   primary:        TBD               # netlist/BOM would confirm the exact
                                      # order code and unlock the matching TI
