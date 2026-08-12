@@ -245,9 +245,8 @@ ZTEST(alp_console, test_wifi_connect_still_accepts_wpa3_token)
 {
 	const char *out = run("alp companion wifi connect \"my ssid\" secret wpa3");
 
-	zassert_is_null(strstr(out, "unrecognised argument"),
-	                "\"wpa3\" is the one legal 4th token: %s",
-	                out);
+	zassert_is_null(
+	    strstr(out, "unrecognised argument"), "\"wpa3\" is the one legal 4th token: %s", out);
 	zassert_not_null(strstr(out, "companion not registered"),
 	                 "a well-formed wpa3 connect should reach the companion check: %s",
 	                 out);
