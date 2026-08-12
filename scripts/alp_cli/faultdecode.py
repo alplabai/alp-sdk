@@ -207,11 +207,48 @@ def _addr_phrase(report: FaultReport) -> str:
     return ""
 
 
+#: CFSR bits that qualify an ADDRESS rather than name a fault. `MMARVALID`/
+#: `BFARVALID` say only "the address register beside me is trustworthy" -- on
+#: their own they describe nothing that broke, so they are never a root cause
+#: and never count as CFSR "carrying a cause" for `_cfsr_names_a_cause` below.
+_ADDRESS_VALID_FLAGS = frozenset({"MMARVALID", "BFARVALID"})
+
+#: The three sub-registers packed into CFSR, i.e. the configurable faults
+#: (MemManage/BusFault/UsageFault) that HFSR.FORCED escalates FROM.
+_CFSR_REGISTERS = frozenset({"MMFSR", "BFSR", "UFSR"})
+
+
+def _cfsr_names_a_cause(report: FaultReport) -> bool:
+    """Whether CFSR carries a configurable-fault CAUSE bit (issue #1358).
+
+    Keyed on the flag's REGISTER, not on a hand-kept list of names: a bit added
+    to `MMFSR_BITS`/`BFSR_BITS`/`UFSR_BITS` tomorrow counts as a cause the day
+    it lands, even before anyone gives it a branch in `_root_cause`. A
+    name-list would have to be edited in lockstep and, unedited, would silently
+    hand the headline back to `FORCED` -- which is exactly how LSPERR/MLSPERR
+    (in the bit tables since day one, in the ladder never) came to be reported
+    as "Forced HardFault" in the first place.
+    """
+    return any(
+        flag.reg in _CFSR_REGISTERS and flag.name not in _ADDRESS_VALID_FLAGS
+        for flag in report.flags
+    )
+
+
 def _root_cause(report: FaultReport) -> str:
     """Pick the single most likely root cause from the set flags.
 
     Ordered most-specific-first: a precise address or a stack-overflow trap tells
     you far more than the generic "forced HardFault" escalation bit, so those win.
+
+    **`HFSR.FORCED` is an escalation mechanism, not a fault** (issue #1358).
+    Bit 30 means a configurable fault could not be taken by its own handler and
+    was escalated to HardFault; WHAT faulted is in CFSR. So `FORCED` is the
+    headline only when CFSR names no cause at all -- see `_cfsr_names_a_cause`.
+    The escalation itself is not lost by that demotion: it is already reported,
+    verbatim and in the right place, as its own `[HFSR] FORCED (bit 30)` entry
+    in the "Set flags:" block, which is where a qualifier belongs. This line
+    answers "what broke", and `FORCED` never answers that when CFSR does.
     """
     if not report.flags:
         return "No fault status bits are set -- nothing to decode."
@@ -267,11 +304,38 @@ def _root_cause(report: FaultReport) -> str:
     if report.has("DEBUGEVT"):
         return ("Debug event with no debugger attached -- a stray BKPT or a watchpoint firing in a "
                 "free-running build.")
-    if report.has("FORCED"):
+    # LAST of the CAUSES -- below VECTTBL and DEBUGEVT as well as below every
+    # other CFSR branch, on purpose (issue #1358). The ladder is
+    # most-specific-first, and a lazy-FP-preservation fault names WHEN the
+    # fault was taken rather than WHAT the code did wrong, so it answers only
+    # when nothing else can. `VECTTBL` (VTOR points at bad memory, or the
+    # vector table is unmapped) and `DEBUGEVT` (a stray BKPT in a free-running
+    # build) are both more specific findings than "something faulted during
+    # the deferred FP push", so both keep their existing precedence over
+    # these two.
+    if report.has("LSPERR"):
+        return (f"Bus fault while lazily preserving the floating-point context{addr or ''} -- the "
+                "deferred push of the FP registers into the space the exception frame reserved for "
+                "them hit a faulting address, so that stack memory is bad or absent (a corrupted or "
+                "overflowed stack pointer). Check SP/PSPLIM and that the stack fits the larger "
+                "FP-extended exception frame.")
+    if report.has("MLSPERR"):
+        return (f"MemManage fault while lazily preserving the floating-point context{addr or ''} -- "
+                "the MPU forbids the deferred push of the FP registers into the space the exception "
+                "frame reserved for them (wrong region permissions, or a stack that has overflowed "
+                "out of its region).")
+    if report.has("FORCED") and not _cfsr_names_a_cause(report):
         return ("Forced HardFault -- a configurable fault escalated but its own status bits are clear; "
                 "the escalation usually means faults are disabled (SHCSR) or it faulted at priority -1.")
 
-    first = report.flags[0]
+    # Same rule as the `FORCED` guard, applied to the fallback: an
+    # address-VALID bit describes the register beside it, never the fault, so
+    # it must not be announced as the cause while a real one sits later in the
+    # list.
+    first = next(
+        (flag for flag in report.flags if flag.name not in _ADDRESS_VALID_FLAGS),
+        report.flags[0],
+    )
     return f"{first.name} set ({first.reg}): {first.meaning}"
 
 
@@ -484,13 +548,21 @@ class _HexInt(click.ParamType):
 
     def convert(self, value, param, ctx):  # type: ignore[override]
         if isinstance(value, int):
+            if value < 0:
+                self.fail(f"{value!r} is negative -- fault registers are unsigned", param, ctx)
             return value
         text = str(value).strip()
         try:
-            # base 16 accepts an optional 0x prefix and a bare hex run alike.
-            return int(text, 16)
+            # base 16 accepts an optional 0x prefix and a bare hex run alike,
+            # and int() also accepts a leading '-' -- reject that explicitly,
+            # since these are unsigned CPU registers and a negative value
+            # would otherwise decode as a bogus, confidently-reported cause.
+            parsed = int(text, 16)
         except ValueError:
             self.fail(f"{value!r} is not a valid integer (try 0x...)", param, ctx)
+        if parsed < 0:
+            self.fail(f"{value!r} is negative -- fault registers are unsigned", param, ctx)
+        return parsed
 
 
 HEXINT = _HexInt()
