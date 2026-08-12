@@ -64,8 +64,15 @@ on_module:
         - { chip: eeprom_24c128,    role: eeprom,                    address_7bit: "0x50" }
 
 memory:
-  dram_mbit:            32768                  # 32 Gbit LPDDR4X
-  flash_mbit:           32768                  # 32 Gbit eMMC 5.1
+  # #1230: both fields were stale (32768/32768, 4 GiB / 4 GB) -- neither
+  # matched the shipping BOM. Maintainer ruling (issue #1230, comment 2):
+  # DRAM 8 GiB is the SKU spec (bench-confirmed exactly via
+  # /proc/device-tree/memory@48000000/reg -> 0x1F8000000 bytes = 8 GiB);
+  # eMMC 16 GiB is the SKU spec. The bench module's own ~256 GB eMMC
+  # (Micron 0IM20H) is an over-fitted lab part, NOT representative of the
+  # shipping BOM -- do not "correct" flash_mbit toward that number.
+  dram_mbit:            65536                  # 64 Gbit / 8 GiB LPDDR4X
+  flash_mbit:           131072                 # 128 Gbit / 16 GiB eMMC 5.1
 
 inference:
   preferred_backend:    deepx_dxm1             # DX-M1 NPU on-module

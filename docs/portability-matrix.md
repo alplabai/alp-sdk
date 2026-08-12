@@ -74,7 +74,7 @@ prose and survives regeneration.
 
 | SKU \ Example | Silicon | adc-voltmeter | pwm-led-fade | v2n-pwm-fan-control | Notes (from metadata) |
 | --- | --- | :---: | :---: | :---: | --- |
-| E1M-V2M101 | `renesas:rzv2n:n44` | ❌ | ✅ | ✅ | 32 Gbit DRAM · NPU `deepx_dxm1` · PCIe mux `pi3dbs12212` |
+| E1M-V2M101 | `renesas:rzv2n:n44` | ❌ | ✅ | ✅ | 64 Gbit DRAM · NPU `deepx_dxm1` · PCIe mux `pi3dbs12212` |
 | E1M-V2M102 | `renesas:rzv2n:n44` | ❌ | ✅ | ✅ | 64 Gbit DRAM · NPU `deepx_dxm1` · PCIe mux `pi3dbs12212` |
 | E1M-V2N101 | `renesas:rzv2n:n44` | ❌ | ✅ | ✅ | 32 Gbit DRAM |
 | E1M-V2N102 | `renesas:rzv2n:n44` | ❌ | ✅ | ✅ | 64 Gbit DRAM |
