@@ -1046,6 +1046,63 @@ def test_scoped_names_unions_both_declaration_channels(tmp_path: Path) -> None:
         "lvgl", "cmsis-dsp"]
     assert liblayer.scoped_names(project, project.cores["a55_cluster"]) == ["lvgl"]
 
+
+def test_declaration_form_does_not_change_emitted_kconfig(tmp_path: Path) -> None:
+    """#1359: the same library on the same core must emit the identical
+    Kconfig set whether board.yaml spells the selection as a bare/project-
+    wide entry or as a `cores:`-scoped one -- a `cores:` list reads as
+    narrowing, and must never silently widen what gets configured.
+
+    cmsis-dsp on an AEN401 m55_hp core is the issue's own repro: its
+    manifest carries both a `hw_backends` accelerator matcher (HELIUM /
+    ADC_DMA) and a `sw_fallback` floor (SCALAR) -- exactly the two derivers
+    that used to read only the core-scoped channel."""
+    bare = """
+    som:
+      sku: E1M-AEN401
+    libraries: [cmsis-dsp]
+    cores:
+      m55_hp:
+        os: zephyr
+        app: ./src
+    """
+    scoped = """
+    som:
+      sku: E1M-AEN401
+    libraries:
+      - name: cmsis-dsp
+        cores: [m55_hp]
+    cores:
+      m55_hp:
+        os: zephyr
+        app: ./src
+    """
+    bare_dir = tmp_path / "bare"
+    scoped_dir = tmp_path / "scoped"
+    bare_dir.mkdir()
+    scoped_dir.mkdir()
+    bare_project = load_board_yaml(_write_board(bare_dir, bare))
+    scoped_project = load_board_yaml(_write_board(scoped_dir, scoped))
+    bare_out = _slice_alp_conf(bare_project, bare_project.cores["m55_hp"])
+    scoped_out = _slice_alp_conf(scoped_project, scoped_project.cores["m55_hp"])
+
+    def cmsis_lines(out: str) -> set[str]:
+        return {line.split("  #", 1)[0].strip()
+                for line in out.splitlines() if "CMSIS_DSP" in line}
+
+    bare_lines = cmsis_lines(bare_out)
+    scoped_lines = cmsis_lines(scoped_out)
+    assert bare_lines == scoped_lines
+    # Pin the specific symbols #1359 measured as missing from the
+    # project-wide form, so a future regression names exactly what broke.
+    for symbol in (
+        "CONFIG_ALP_CMSIS_DSP_SCALAR=y",
+        "CONFIG_ALP_CMSIS_DSP_HELIUM=y",
+        "CONFIG_ALP_CMSIS_DSP_ADC_DMA=y",
+    ):
+        assert symbol in bare_lines, f"missing {symbol} from project-wide form"
+
+
 # --- floating version pins are a supply-chain hole --------------------
 
 

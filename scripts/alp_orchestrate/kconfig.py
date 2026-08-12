@@ -862,11 +862,13 @@ def _per_core_library_kconfig(lib: str,
     resolved to its canonical manifest through the
     metadata/library-aliases-v1.json alias table and loaded here.
 
-    The emitted set is the union
-    of the manifest's `integration.zephyr.kconfig` (the upstream module-enable
-    line(s)) and its `integration.zephyr.hw_backends.sw_fallback.kconfig` (the
-    SDK SW floor), module-enable first and the SW-fallback marker last, deduped.
-    Header-only libraries whose SW floor is a doc comment surface that comment.
+    The emitted set is the union of the manifest's `integration.zephyr.
+    kconfig` (the upstream module-enable line(s)) and its `integration.
+    zephyr.hw_backends.sw_fallback.kconfig` (the SDK SW floor), module-enable
+    first and the SW-fallback marker last, deduped -- computed by
+    `libraries.zephyr_library_kconfig`, the same derivation the project-wide
+    channel (`libraries.zephyr_kconfig_lines`) calls, so a library's base
+    Kconfig set cannot drift between the two declaration channels (#1359).
 
     Returns None when no manifest resolves (caller emits the pending-wire TODO).
     """
@@ -878,23 +880,7 @@ def _per_core_library_kconfig(lib: str,
         if not path.is_file():
             return None
         doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    zephyr = (doc.get("integration") or {}).get("zephyr") or {}
-    out: list[str] = []
-    for kc in (zephyr.get("kconfig") or []):
-        kc = str(kc)
-        if kc not in out:
-            out.append(kc)
-    swf = ((zephyr.get("hw_backends") or {}).get("sw_fallback") or {}).get("kconfig")
-    if swf:
-        swf = str(swf)
-        if swf.lstrip().startswith("#"):
-            # Header-only library: the SW floor is a documentation comment,
-            # not a real knob.  Surface it only when there is no module enable.
-            if not out:
-                out.append(swf)
-        elif swf not in out:
-            out.append(swf)
-    return out
+    return _library_layer.zephyr_library_kconfig(doc)
 
 
 def _emit_libraries(
@@ -1876,7 +1862,17 @@ def _slice_alp_conf(project: BoardProject, slice_: Slice) -> str:
     # -- folded in here (2026-07-20) so the two paths cannot silently
     # diverge on a `libraries:` entry with a hw_backends matcher; see
     # docs/adr/0020-sdk-owns-build-execution.md addendum.
-    hw_backend_lines = _emit_library_hw_backends(slice_.libraries, project.sku)
+    #
+    # Reads BOTH declaration channels (`libraries.scoped_names`), not just
+    # `slice_.libraries`.  A library's accelerator support is a property of
+    # the library manifest and the SoM's silicon, not of whether board.yaml
+    # spelled the selection as a bare/project-wide entry or a `cores:`-
+    # scoped one -- the two forms must resolve to the identical hw-backend
+    # set for the same core (#1359: a `cores:` entry was silently a
+    # SUPERSET of the project-wide form, gaining HELIUM/ADC_DMA/etc. that
+    # `cores:` reads as narrowing, not widening).
+    hw_backend_lines = _emit_library_hw_backends(
+        _library_layer.scoped_names(project, slice_=slice_), project.sku)
     if hw_backend_lines:
         lines.append("# §D.lib.loader -- per-library HW-accelerator "
                      "wiring (auto-emitted).")

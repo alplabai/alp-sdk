@@ -7,6 +7,62 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — a `cores:`-scoped `libraries:` entry no longer emits MORE Kconfig than the same library declared project-wide (#1359)
+
+The same library on the same core produced a different `alp.conf` fragment
+depending only on how `board.yaml` spelled the selection.
+`libraries: [cmsis-dsp]` (project-wide) and `libraries: [{name: cmsis-dsp,
+cores: [m55_hp]}]` (core-scoped) both emitted the same 11
+`CONFIG_CMSIS_DSP_*=y` module-enable lines, but only the core-scoped form
+additionally emitted `CONFIG_ALP_CMSIS_DSP_SCALAR=y`,
+`CONFIG_ALP_CMSIS_DSP_HELIUM=y`, and `CONFIG_ALP_CMSIS_DSP_ADC_DMA=y`. A
+`cores:` list reads as *narrowing* an existing project-wide selection down to
+one core; silently widening it to include accelerator/SW-fallback wiring the
+project-wide form never asked for is the opposite of what the syntax
+promises, and the difference was invisible in review — both `board.yaml`
+forms looked equivalent.
+
+Two independent derivers were each reading only the core-scoped channel
+(`Slice.libraries`), never the union with the project-wide channel
+(`project.libraries`):
+
+* `scripts/alp_orchestrate/kconfig.py`'s `_slice_alp_conf` called
+  `_emit_library_hw_backends(slice_.libraries, project.sku)` — the
+  `integration.zephyr.hw_backends` accelerator matcher
+  (`CONFIG_ALP_CMSIS_DSP_HELIUM`/`_ADC_DMA`) never saw a project-wide name.
+* `scripts/alp_orchestrate/libraries.py`'s `zephyr_kconfig_lines` (the
+  project-wide emitter) read only `integration.zephyr.kconfig`, never the
+  manifest's `integration.zephyr.hw_backends.sw_fallback.kconfig` SW floor
+  (`CONFIG_ALP_CMSIS_DSP_SCALAR`) — that line was wired only into
+  `kconfig.py`'s `_per_core_library_kconfig`, the core-scoped path.
+
+Fixed by making both derivers read the SAME set for both channels. The hw-
+backend call now takes `libraries.scoped_names(project, slice_=slice_)` —
+the union helper `libraries.py` already exposed for exactly this purpose
+(added for tan-cli#555) — instead of `slice_.libraries` alone. The base +
+SW-fallback Kconfig set is now computed once, by a new
+`libraries.zephyr_library_kconfig(manifest)`, and both `zephyr_kconfig_lines`
+(project-wide) and `kconfig.py`'s `_per_core_library_kconfig` (core-scoped)
+call it, so a future symbol added to a manifest's `hw_backends`/`sw_fallback`
+block cannot land on only one declaration channel again.
+
+**The behavioural call**: a library's accelerator/SW-fallback support is a
+property of the library manifest and the SoM's silicon, not of which
+`libraries:` spelling board.yaml used to select it — so the fix makes the
+project-wide form gain the symbols, not the core-scoped form lose them.
+`check_emit_snapshots.py`'s 36 golden fixtures and `check_zephyr_conf_parity.py`'s
+98-example sweep stay byte-identical (none of the pinned fixtures declare a
+project-wide library with an `hw_backends`/`sw_fallback` manifest section),
+but any real `board.yaml` that already declares such a library project-wide
+will see new `CONFIG_ALP_*` lines the next time it's regenerated — the
+correct, previously-missing wiring, not a regression.
+
+`scripts/alp_orchestrate/` is hash-audited verbatim into tan-cli's mirror
+(tan-cli#556, milestoned for this same release); this fix must land here
+first, then tan-cli re-syncs the mirror and re-pins its freshness-gate
+hashes/fixtures before tan-cli#556 closes — the tan side cannot fix its copy
+ahead of this commit without going red against its own gate.
+
 ### Added — ADR 0027 proposes declaring storage regions by role, not by SoM-internal region name
 
 `board.yaml`'s `storage:` entries place themselves with `flash_device:`, a
