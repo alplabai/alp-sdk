@@ -64,8 +64,17 @@ that most needs a cap because `python3 zephyr/scripts/twister ...` invokes none
 of `pip install` / `apt-get` / `west ` / `cmake`; it is matched on the
 invocation path rather than the bare word `twister`, which false-positived on
 the aggregator's pure-shell `echo "twister-shard aggregate result: $result"`.
-Verified by stashing the workflow fix and re-running: 3 failures on the pre-fix
-file, 6 passed after.
+Verified by restoring the pre-fix `pr-twister.yml` from `origin/dev` and
+re-running the shipped test: `2 failed, 4 passed` —
+`test_every_job_declares_a_timeout[pr-twister.yml]` and
+`test_network_and_compile_steps_carry_their_own_timeout[pr-twister.yml]`. With
+the fix applied, `6 passed`.
+
+`test_job_ceiling_exceeds_the_sum_of_its_step_timeouts[pr-twister.yml]` passes
+on the UNFIXED file, which is worth stating rather than hiding: with no step
+capped, `capped_total` is 0 and 18 uncapped steps sum to 18, comfortably under
+the 360-minute default. That test only becomes meaningful once the steps carry
+their own timeouts, so it is not evidence of the defect — the two above are.
 
 Because a PR touching only `.github/workflows/pr-twister.yml` triggers neither
 `pr-metadata-validate.yml` (which filters on `tests/scripts/**` and its own

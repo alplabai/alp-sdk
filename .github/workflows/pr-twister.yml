@@ -354,8 +354,16 @@ jobs:
       # known-must-exist symbols.  Deliberately NOT in
       # check_emit_snapshots.py (the hermetic gate) -- this mode needs
       # the workspace this job (and only this job) already bootstraps.
+      # NOT local Python, despite reading like it. check_emit_kconfig_contract.py
+      # subprocess-runs `python3 -m alp_orchestrate --emit kconfig --core ...`
+      # (:119) under the ZEPHYR_BASE / ZEPHYR_SDK_INSTALL_DIR /
+      # ZEPHYR_TOOLCHAIN_VARIANT below, which drives a real Zephyr CMake
+      # configure -- compile work, so it gets a compile-sized cap. An uncapped
+      # step inherits the 360-minute job default, and a hung CMake here is
+      # exactly the misattribution #1274 and #1319 exist to prevent.
       - name: check · --emit kconfig contract (#893)
         if: matrix.shard == 1
+        timeout-minutes: 10
         working-directory: ${{ github.workspace }}/alp-sdk
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyrproject/zephyr
