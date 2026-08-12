@@ -3329,6 +3329,10 @@
       "script": "scripts/check_example_portability.py"
     },
     {
+      "purpose": "CI gate: no `examples/**/CMakeLists.txt` may reach `scripts/alp_project.py` through a bare relative hop -- every invocation resolves the script under `${ALP_SDK_ROOT}`.",
+      "script": "scripts/check_example_sdk_root.py"
+    },
+    {
       "purpose": "Reject examples that claim Alp storage coverage while using Zephyr storage APIs.",
       "script": "scripts/check_example_storage_claims.py"
     },

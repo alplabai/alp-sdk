@@ -100,6 +100,23 @@ if grep -qi "Could not connect to the target device" /tmp/hp-write.out; then
   exit 2
 fi
 
+# GATE ON THE VERIFY RESULT (#1343) -- same defect as flash-jlink-mramxip.sh.
+# The `verifybin` above was issued but its outcome was never read: the output went
+# to a display-only pipe and the connect check was the only thing that could fail
+# this script, so a `Verify failed.` exited 0 and reported a good flash.  One
+# verifybin here (a single package write), against two in the mramxip script.
+if grep -qiE "verify failed|verification failed|mismatch" /tmp/hp-write.out; then
+  echo "!! VERIFY FAILED -- the bytes on the part do NOT match $PKG."
+  grep -iE "verify failed|verification failed|mismatch" /tmp/hp-write.out | head -5
+  echo "   Do not treat this board as flashed."
+  exit 3
+fi
+if ! grep -qi "verify successful" /tmp/hp-write.out; then
+  echo "!! no verifybin success reported -- treating as FAILED (the verify never ran)."
+  exit 3
+fi
+echo "verify: verifybin OK ($PKG @ $ADDR)"
+
 # 3. SES has booted the HP core; read the SRAM0 beacon via the generic device
 #    (the HE/system AP reads global SRAM0 regardless of HP core state), then
 #    re-read the heartbeat word after a delay to show it advancing.
