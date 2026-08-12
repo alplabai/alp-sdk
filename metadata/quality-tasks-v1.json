@@ -407,6 +407,20 @@
       "ci": "pr-metadata-validate.yml:validate"
     },
     {
+      "id": "example-sdk-root",
+      "description": "No examples/**/CMakeLists.txt reaches scripts/alp_project.py through a bare relative hop; every invocation resolves it under ${ALP_SDK_ROOT} so the example still builds scaffolded out of tree (issue #1390).",
+      "runner": "check-script",
+      "script": "scripts/check_example_sdk_root.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "example-storage-claims",
       "description": "Reject examples that claim Alp storage coverage while using Zephyr storage APIs.",
       "runner": "check-script",

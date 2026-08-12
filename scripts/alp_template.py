@@ -1080,21 +1080,104 @@ _ALP_SDK_ROOT_REQUIRED_BLOCK = (
     "endif()"
 )
 
+# The guess block does not stand alone: most examples introduce it with
+# a comment paragraph that TEACHES the in-tree `../../..` fallback --
+# hello-world/cold-chain-monitor's "In-tree the SDK is the example's
+# grandparent directory; out-of-tree customers point ALP_SDK_ROOT at
+# their checkout", gpio-button-led's "in-tree we resolve it as the
+# example's grandparent directory". Substituting only the code left
+# that prose above a block that has NO fallback and hard-fails instead,
+# so the emitted scaffold documented behaviour it did not have. Rewrite
+# the paragraph with the code it describes.
+_STALE_SDK_ROOT_PROSE_RE = re.compile(r"ALP_SDK_ROOT|grandparent", re.IGNORECASE)
+_ALP_SDK_ROOT_ACCURATE_COMMENT = (
+    "# Resolve the alp-sdk root.  This project lives OUTSIDE the SDK\n"
+    "# tree, so there is nothing to guess: ALP_SDK_ROOT must name your\n"
+    "# alp-sdk checkout, set in the environment or passed as\n"
+    "# `-DALP_SDK_ROOT=/path/to/alp-sdk`."
+)
+
+
+def _rewrite_stale_sdk_root_comment(head: str) -> str:
+    """Rewrite the comment paragraph introducing the ALP_SDK_ROOT block.
+
+    `head` is everything in the CMakeLists.txt BEFORE the guess block.
+    Its trailing run of `#` lines (optionally separated from the block
+    by blank lines) is that block's prose. The run is split into
+    paragraphs on bare `#` separator lines, and the first paragraph
+    naming `ALP_SDK_ROOT` or the grandparent fallback is replaced with
+    `_ALP_SDK_ROOT_ACCURATE_COMMENT`; any further matching paragraph is
+    dropped rather than duplicating it. Paragraphs about anything else
+    are kept verbatim -- gpio-button-led's run leads with a "board.yaml
+    -> build/generated/alp.conf at configure time." banner that stays
+    true. A file whose block has no comment run above it (i2c-master,
+    mproc-mailbox) is returned unchanged.
+    """
+    lines = head.split("\n")
+    i = len(lines) - 1
+    while i >= 0 and not lines[i].strip():
+        i -= 1
+    end = i + 1
+    while i >= 0 and lines[i].lstrip().startswith("#"):
+        i -= 1
+    start = i + 1
+    if start >= end:
+        return head
+
+    out: list[str] = []
+    para: list[str] = []
+    replaced = False
+
+    def _flush() -> None:
+        nonlocal replaced
+        if not para:
+            return
+        if _STALE_SDK_ROOT_PROSE_RE.search("\n".join(para)):
+            if not replaced:
+                out.extend(_ALP_SDK_ROOT_ACCURATE_COMMENT.split("\n"))
+                replaced = True
+        else:
+            out.extend(para)
+        para.clear()
+
+    for line in lines[start:end]:
+        if line.strip() == "#":
+            _flush()
+            out.append(line)
+        else:
+            para.append(line)
+    _flush()
+    lines[start:end] = out
+    return "\n".join(lines)
+
 
 def _scaffold_cmakelists(text: str) -> str:
     """Replace an in-tree-relative ALP_SDK_ROOT guess with a hard
-    requirement. Two shapes exist across the catalog's example
-    CMakeLists.txt files today: the `if(DEFINED ENV{...}) ... else()
-    get_filename_component(...)` guess (most examples), and
-    `cold-chain-monitor`'s hardcoded `${CMAKE_CURRENT_SOURCE_DIR}/../..
-    /../scripts/alp_project.py` call with no ALP_SDK_ROOT resolution at
-    all (worse: no override is even possible). Best-effort: a
-    CMakeLists.txt matching neither shape (e.g. multicore-rpmsg's
-    linux/CMakeLists.txt, which never invokes alp_project.py) is
-    returned unchanged."""
-    new_text, n = _ALP_SDK_ROOT_GUESS_RE.subn(_ALP_SDK_ROOT_REQUIRED_BLOCK, text)
-    if n:
-        return new_text
+    requirement, and rewrite the comment paragraph that describes it.
+    Two shapes exist across the catalog's example CMakeLists.txt files
+    today: the `if(DEFINED ENV{...}) ... else()
+    get_filename_component(...)` guess (every example), and a hardcoded
+    `${CMAKE_CURRENT_SOURCE_DIR}/../../../scripts/alp_project.py` call
+    with no ALP_SDK_ROOT resolution at all (worse: no override is even
+    possible) -- a shape no example carries any more, kept as a
+    fallback. Best-effort: a CMakeLists.txt matching neither shape
+    (e.g. multicore-rpmsg's linux/CMakeLists.txt, which never invokes
+    alp_project.py) is returned unchanged."""
+    # Loop rather than `subn`: each block's own preceding comment run
+    # has to be rewritten with it, and the replacement is not itself a
+    # guess block, so the next `search` cannot re-find what was just
+    # substituted.
+    pos, hit = 0, False
+    while True:
+        m = _ALP_SDK_ROOT_GUESS_RE.search(text, pos)
+        if not m:
+            break
+        hit = True
+        head = _rewrite_stale_sdk_root_comment(text[: m.start()])
+        text = head + _ALP_SDK_ROOT_REQUIRED_BLOCK + text[m.end():]
+        pos = len(head) + len(_ALP_SDK_ROOT_REQUIRED_BLOCK)
+    if hit:
+        return text
     if _HARDCODED_ALP_PROJECT_PY_RE.search(text):
         text = _HARDCODED_ALP_PROJECT_PY_RE.sub(
             "${ALP_SDK_ROOT}/scripts/alp_project.py", text)

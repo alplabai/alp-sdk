@@ -542,16 +542,96 @@ def test_scaffold_cmakelists_requires_alp_sdk_root_explicitly():
 
 
 def test_scaffold_cmakelists_hardens_the_hardcoded_variant_too():
-    """cold-chain-monitor's CMakeLists.txt has NO ALP_SDK_ROOT env-var
-    fallback at all -- a hardcoded `${CMAKE_CURRENT_SOURCE_DIR}/../../../
-    scripts/alp_project.py` -- worse than the guess-block variant since
-    there's no override at all. `_scaffold_cmakelists` must harden this
-    shape too."""
-    envelope = dict(alp_template.render_to_envelope("edge-ai", "E1M-AEN801"))
+    """`_scaffold_cmakelists`' SECOND shape: a hardcoded
+    `${CMAKE_CURRENT_SOURCE_DIR}/../../../scripts/alp_project.py` with
+    NO ALP_SDK_ROOT resolution at all -- worse than the guess block,
+    since no override is even possible.
+
+    Issue #1390 gave cold-chain-monitor (the `edge-ai` template's
+    source) a real guess block, so NO example carries this shape any
+    more and the catalog can no longer reach this branch -- drive it
+    from a literal instead of asserting it via a render that now takes
+    the other path.
+    """
+    hardcoded = (
+        "# SPDX-License-Identifier: Apache-2.0\n"
+        "cmake_minimum_required(VERSION 3.20)\n"
+        "\n"
+        "execute_process(\n"
+        "    COMMAND ${Python3_EXECUTABLE}\n"
+        "            ${CMAKE_CURRENT_SOURCE_DIR}/../../../scripts/alp_project.py\n"
+        ")\n"
+    )
+    out = alp_template._scaffold_cmakelists(hardcoded)
+    assert "${CMAKE_CURRENT_SOURCE_DIR}/../../../scripts/alp_project.py" not in out
+    assert "${ALP_SDK_ROOT}/scripts/alp_project.py" in out
+    assert "if(NOT DEFINED ALP_SDK_ROOT AND NOT DEFINED ENV{ALP_SDK_ROOT})" in out
+
+
+# --------------------------------------------------------------------------
+# The comment ABOVE the block has to move with it (issue #1390 review
+# blocker 2): every scaffold-source example but two introduces the guess
+# block with prose teaching the in-tree `../../..` fallback, which the
+# hardened block deliberately drops.  Substituting only the code shipped a
+# scaffold whose comment documented behaviour the emitted file did not have.
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "template,sku",
+    [
+        ("minimal", "E1M-V2N101"),
+        ("peripheral", "E1M-V2N101"),
+        ("sensor", "E1M-V2N101"),
+        ("edge-ai", "E1M-V2N101"),
+        ("multicore-mailbox", "E1M-AEN801"),
+    ],
+)
+def test_scaffold_cmakelists_never_documents_the_dropped_fallback(template, sku):
+    """No emitted CMakeLists.txt may promise the in-tree fallback."""
+    envelope = dict(alp_template.render_to_envelope(template, sku))
+    for rel, text in envelope.items():
+        if not rel.endswith("CMakeLists.txt"):
+            continue
+        lowered = text.lower()
+        assert "grandparent" not in lowered, rel
+        assert "in-tree" not in lowered, rel
+
+
+def test_scaffold_cmakelists_keeps_unrelated_comment_paragraphs():
+    """Only the paragraph describing ALP_SDK_ROOT resolution is
+    rewritten. gpio-button-led (the `peripheral` template's source)
+    leads its comment run with a banner -- "board.yaml ->
+    build/generated/alp.conf at configure time." -- that stays true for
+    a scaffold and must survive verbatim."""
+    envelope = dict(alp_template.render_to_envelope("peripheral", "E1M-V2N101"))
     cmakelists = envelope["CMakeLists.txt"]
-    assert "${CMAKE_CURRENT_SOURCE_DIR}/../../../scripts/alp_project.py" not in cmakelists
-    assert "${ALP_SDK_ROOT}/scripts/alp_project.py" in cmakelists
+    assert "# board.yaml -> build/generated/alp.conf at configure time." in cmakelists
+    assert "# Resolve the alp-sdk root." in cmakelists
+    # ... and exactly once -- a second matching paragraph is dropped,
+    # never duplicated.
+    assert cmakelists.count("# Resolve the alp-sdk root.") == 1
+
+
+def test_scaffold_cmakelists_invents_no_prose_where_there_was_none():
+    """i2c-master (the `sensor` template's source) has NO comment above
+    its guess block. The rewrite is a rewrite, not an insertion: it must
+    not grow prose the example never had."""
+    envelope = dict(alp_template.render_to_envelope("sensor", "E1M-V2N101"))
+    cmakelists = envelope["CMakeLists.txt"]
+    assert "# Resolve the alp-sdk root." not in cmakelists
     assert "if(NOT DEFINED ALP_SDK_ROOT AND NOT DEFINED ENV{ALP_SDK_ROOT})" in cmakelists
+
+
+def test_scaffold_cmakelists_leaves_a_detached_comment_run_alone():
+    """The rewrite is scoped to the run IMMEDIATELY above the block.
+    mproc-mailbox's `peer/CMakeLists.txt` opens with a file-header
+    comment separated from the block by `cmake_minimum_required(...)`;
+    it is not the block's prose and must survive untouched."""
+    envelope = dict(alp_template.render_to_envelope(
+        "multicore-mailbox", "E1M-AEN801"))
+    peer = envelope["peer/CMakeLists.txt"]
+    assert "# HE-side peer image for the mproc-mailbox flagship." in peer
+    assert "# Resolve the alp-sdk root." not in peer
 
 
 def test_scaffold_readme_has_no_dangling_sdk_tree_links_or_self_path():
