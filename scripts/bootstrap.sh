@@ -671,36 +671,54 @@ fi
 # tree, and every layer stayed quiet about it: bootstrap succeeded, the build
 # succeeded, the flash succeeded, and the board did not boot the application.
 #
-# `west patch apply` is re-appliable, so running it on an already-patched
-# reused workspace is not a problem; its own exit status, however, is not
-# evidence it did anything (three no-op-and-exit-0 paths -- see
-# scripts/verify_west_patches.py). The verification below is what makes this
-# step mean something.
+# VERIFY FIRST, then apply only what is missing. `west patch apply` is NOT
+# idempotent: re-running it on an already-patched tree fails, because each
+# patch is fed to `git apply` against content that already carries it --
+#
+#   ERROR: error: patch failed: drivers/clock_control/clock_control_alif.c:124
+#   error: drivers/clock_control/clock_control_alif.c: patch does not apply
+#   FATAL ERROR: failed to apply patch zephyr/0001-clock_control_alif-...patch
+#
+# -- measured on PR #1426's `getting-started` job, whose
+# `actions/cache@v5` key (`getting-started-aen801-zephyr-v4.4.1-${runner.os}`)
+# carries no commit component, so it restored a `zephyr/`+`modules/` tree an
+# earlier run had already patched. `scripts/bootstrap.sh`'s own `REUSE_WS=1`
+# path reaches the same state for a developer re-running it. All three
+# zephyr/patches.yml patches DO apply to a pristine v4.4.1 (`git apply --check`
+# rc=0 each), so the tree being non-pristine is the whole story.
 if [ "${DO_WEST}" -eq 1 ] && [ "${DO_PATCHES}" -eq 1 ]; then
-    info "Applying zephyr/patches.yml ('west patch apply')"
-    # Output captured and echoed on failure: west printed nothing the caller
-    # could see when this failed in CI, which is what made it a guess.
-    PATCH_OUT=$( cd "${WORKSPACE_DIR}" && "${WEST}" patch apply 2>&1 )
-    PATCH_RC=$?
-    printf '%s\n' "${PATCH_OUT}"
-    if [ "${PATCH_RC}" -ne 0 ]; then
-        die "west patch apply failed (exit ${PATCH_RC}) -- output above"
-    fi
-    # Exit 3 is "everything present is patched, but a module this workspace
-    # does not carry could not be checked" -- normal for a narrow workspace, so
-    # it warns rather than dying. 1 and 2 are the real thing.
-    #
-    # No `set +e`/`set -e` guard around this: this script runs under
-    # `set -uo pipefail` with errexit OFF (line 37), so a non-zero exit here
-    # does not end the script and $? is readable directly. Adding the guard
-    # would switch errexit ON for everything below it.
-    ( cd "${REPO_ROOT}" && "${VPY}" scripts/verify_west_patches.py --topdir "${WORKSPACE_DIR}" --west "${WEST}" )
+    # No `set +e`/`set -e` guard around either call: this script runs under
+    # `set -uo pipefail` with errexit OFF (line 37), so a non-zero exit does
+    # not end the script and $? is readable directly. Adding the guard would
+    # switch errexit ON for everything below it.
+    ( cd "${REPO_ROOT}" && "${VPY}" scripts/verify_west_patches.py --topdir "${WORKSPACE_DIR}" --west "${WEST}" >/dev/null 2>&1 )
     VERIFY_RC=$?
-    case "${VERIFY_RC}" in
-        0) ok "zephyr/patches.yml verified applied in ${WORKSPACE_DIR}" ;;
-        3) warn "some zephyr/patches.yml modules are not in this workspace -- see above" ;;
-        *) die "zephyr/patches.yml is not applied in ${WORKSPACE_DIR} (#1392) -- see the list above" ;;
-    esac
+    if [ "${VERIFY_RC}" -eq 0 ]; then
+        ok "zephyr/patches.yml already applied in ${WORKSPACE_DIR} -- nothing to do"
+    else
+        info "Applying zephyr/patches.yml ('west patch apply')"
+        # Output captured and echoed on failure: west printed nothing the
+        # caller could see when this failed in CI, which made it a guess.
+        PATCH_OUT=$( cd "${WORKSPACE_DIR}" && "${WEST}" patch apply 2>&1 )
+        PATCH_RC=$?
+        printf '%s\n' "${PATCH_OUT}"
+        if [ "${PATCH_RC}" -ne 0 ]; then
+            die "west patch apply failed (exit ${PATCH_RC}) -- output above"
+        fi
+        # Re-verify: `west patch apply`'s own exit status is not evidence it
+        # did anything (three no-op-and-exit-0 paths -- see
+        # scripts/verify_west_patches.py). Exit 3 is "everything present is
+        # patched, but a module this workspace does not carry could not be
+        # checked" -- normal for a narrow workspace, so it warns rather than
+        # dying. 1 and 2 are the real thing.
+        ( cd "${REPO_ROOT}" && "${VPY}" scripts/verify_west_patches.py --topdir "${WORKSPACE_DIR}" --west "${WEST}" )
+        VERIFY_RC=$?
+        case "${VERIFY_RC}" in
+            0) ok "zephyr/patches.yml verified applied in ${WORKSPACE_DIR}" ;;
+            3) warn "some zephyr/patches.yml modules are not in this workspace -- see above" ;;
+            *) die "zephyr/patches.yml is not applied in ${WORKSPACE_DIR} (#1392) -- see the list above" ;;
+        esac
+    fi
 elif [ "${DO_WEST}" -eq 1 ]; then
     info "Skipping 'west patch apply' (--no-patches) -- zephyr/patches.yml is NOT applied"
 fi
