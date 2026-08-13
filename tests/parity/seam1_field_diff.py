@@ -59,7 +59,7 @@ PR #24, substitutes them at materialise time). The frozen 97ad481b oracle
 predates that and stays absolute -- `normalize_plan` reconciles the two
 shapes onto the same normalized form; see its docstring for the mapping.
 
-Two hand-reviewed deltas are allowed to pass without failing the gate.
+Three hand-reviewed deltas are allowed to pass without failing the gate.
 
 The first is ``slices[*].debug.probe`` going from ``"openocd"`` (the oracle,
 at 97ad481b)
@@ -79,9 +79,19 @@ inert non-baremetal default (``[]`` and ``null``). See
 ``_ALLOWED_ADDITIVE_KEYS`` for why that allowance is keyed on the exact
 value and not on "the oracle didn't have this key" alone.
 
+The third is a zephyr slice's six ``artifacts`` paths gaining the
+``build/`` level ``west build`` actually writes -- ``<buildDir>/zephyr/
+zephyr.elf`` (oracle) to ``<buildDir>/build/zephyr/zephyr.elf`` (live),
+alp-sdk #1360. The oracle's spelling names a file west never creates: the
+slice's ``command`` runs with cwd=``buildDir`` and no ``-d``, so west
+appends its own default ``build`` level. Allowed ONLY for the six named
+fields and ONLY for that exact one-segment insertion -- see
+``_NESTED_ARTIFACT_TAILS``.
+
 Any OTHER diff -- a changed command, a changed env value, a changed slice
 count, a probe change to anything other than that exact openocd->null
-transition, a new key with any other value -- FAILS the gate.
+transition, a new key with any other value, an artifact path that moved
+anywhere but that one ``build/`` level -- FAILS the gate.
 """
 
 from __future__ import annotations
@@ -131,6 +141,31 @@ _ALLOWED_ADDITIVE_KEYS = {
     "artifacts.outputDir":   None,
 }
 _ADDITIVE_SLICE_RE = re.compile(r"^slices\[\d+\]\.(.+)$")
+
+# The third hand-reviewed allowance: alp-sdk #1360.  The 97ad481b oracle
+# emitted a zephyr slice's artifact paths WITHOUT the `build/` level that
+# `west build` -- run with cwd=<buildDir> and no `-d` -- actually creates,
+# so the frozen oracle names files west never wrote.  The live planner now
+# reports the real `<buildDir>/build/...` paths.  This is a CHANGED value,
+# not an additive key, so it needs its own gate rather than riding
+# `_ALLOWED_ADDITIVE_KEYS`.
+#
+# Keyed on the exact field path AND the exact one-segment transformation:
+# each artifact has a fixed tail (Zephyr's own CMake layout picks the
+# names, not this planner), the oracle value must end in that tail, and
+# the live value must be the oracle value with exactly one `build/`
+# inserted immediately before it.  A path that moved anywhere else, gained
+# two levels, or changed filename still FAILS -- which is the point: this
+# allows the one reviewed relocation, not "artifact paths may drift".
+# KEEP IN LOCKSTEP with tan-cli's vendored copy of this comparator.
+_NESTED_ARTIFACT_TAILS = {
+    "artifacts.elf":             "zephyr/zephyr.elf",
+    "artifacts.map":             "zephyr/zephyr.map",
+    "artifacts.bin":             "zephyr/zephyr.bin",
+    "artifacts.sizeReport":      "zephyr/zephyr.stat",
+    "artifacts.symbols":         "zephyr/zephyr.symbols",
+    "artifacts.compileCommands": "compile_commands.json",
+}
 
 
 class ComparatorError(RuntimeError):
@@ -358,6 +393,28 @@ def _is_allowed_additive(path: str, old: Any, new: Any) -> bool:
     return new == _ALLOWED_ADDITIVE_KEYS[key]
 
 
+def _is_allowed_west_nesting(path: str, old: Any, new: Any) -> bool:
+    """True for a zephyr artifact path that gained exactly the one `build/`
+    level west writes -- see `_NESTED_ARTIFACT_TAILS` (alp-sdk #1360).
+
+    Requires ALL of: the path is one of the six named per-slice artifact
+    fields, both sides are strings, the oracle value ends in that field's
+    fixed Zephyr tail, and the live value is the oracle value with exactly
+    one `build/` segment inserted immediately before that tail.
+    """
+    m = _ADDITIVE_SLICE_RE.match(path)
+    if m is None:
+        return False
+    tail = _NESTED_ARTIFACT_TAILS.get(m.group(1))
+    if tail is None:
+        return False
+    if not isinstance(old, str) or not isinstance(new, str):
+        return False
+    if not old.endswith("/" + tail):
+        return False
+    return new == old[:-len(tail)] + "build/" + tail
+
+
 def diff_plans(oracle: dict, live: dict) -> tuple[list[tuple[str, Any, Any]], list[tuple[str, Any, Any]]]:
     """Split the normalized diff into (allowed, failing) delta lists."""
     allowed: list[tuple[str, Any, Any]] = []
@@ -368,6 +425,8 @@ def diff_plans(oracle: dict, live: dict) -> tuple[list[tuple[str, Any, Any]], li
                 and new == _ALLOWED_NEW_PROBE):
             allowed.append((path, old, new))
         elif _is_allowed_additive(path, old, new):
+            allowed.append((path, old, new))
+        elif _is_allowed_west_nesting(path, old, new):
             allowed.append((path, old, new))
         else:
             failing.append((path, old, new))

@@ -88,7 +88,10 @@ extern "C" {
  *  the matching driver shim emitted by `scripts/alp_project.py`. */
 typedef enum {
 	ALP_INFERENCE_BACKEND_AUTO    = 0,
-	ALP_INFERENCE_BACKEND_CPU     = 1, /**< TFLM reference kernels. */
+	ALP_INFERENCE_BACKEND_CPU     = 1, /**< Portable CPU floor: TFLM reference
+					    *   kernels on M-class/Zephyr, ONNX
+					    *   Runtime on the A55s under Yocto.
+					    *   Lowest priority under AUTO. */
 	ALP_INFERENCE_BACKEND_ETHOS_U = 2, /**< Arm Ethos-U via Vela (U55 / U65 / U85). */
 	ALP_INFERENCE_BACKEND_DRPAI   = 3, /**< Renesas DRP-AI3. */
 	ALP_INFERENCE_BACKEND_DEEPX_DXM1 =
@@ -103,7 +106,15 @@ typedef enum {
 	ALP_INFERENCE_MODEL_VELA       = 1, /**< Vela-compiled `.tflite`. */
 	ALP_INFERENCE_MODEL_DRPAI      = 2, /**< Renesas DRP-AI binary. */
 	ALP_INFERENCE_MODEL_DXNN       = 3, /**< DEEPX DXNN binary. */
-	ALP_INFERENCE_MODEL_EXECUTORCH = 4  /**< ExecuTorch program. */
+	ALP_INFERENCE_MODEL_EXECUTORCH = 4, /**< ExecuTorch program.  RESERVED --
+					     *   no adapter produces this format
+					     *   and no backend consumes it, so a
+					     *   blob claiming it is rejected with
+					     *   @ref ALP_ERR_INVAL -- the value
+					     *   is kept rather than removed to
+					     *   avoid renumbering; see issue
+					     *   #1260. */
+	ALP_INFERENCE_MODEL_ONNX       = 5  /**< Raw `.onnx` graph (ONNX Runtime CPU backend). */
 } alp_inference_model_format_t;
 
 /** Tensor element type. */

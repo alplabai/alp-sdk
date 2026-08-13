@@ -1,7 +1,7 @@
 {
   "digests": {
-    "metadata": "sha256:3f37785b0394125d7b30114d5c6ee3af94917cca989c2ac11db7d52482faed02",
-    "schemas": "sha256:fdb0f90f1b4febb9a41d4b6192bffca4a707dfa482b1389443bbef314f2fddcb"
+    "metadata": "sha256:f0dff909ece87e4449dbb294073eb5dfd1170c83fb54c28096d7e8199139d83f",
+    "schemas": "sha256:975029c1646e9852d108157f1be4ba384924874b3e9dffd1984335ef9efe4a54"
   },
   "generatedBy": "west alp-lock",
   "libraries": [
@@ -180,6 +180,12 @@
       "version": "3.11.3"
     },
     {
+      "license": "MIT & Apache-2.0",
+      "name": "onnxruntime",
+      "revision": null,
+      "version": "1.28.0"
+    },
+    {
       "license": "BSD-3-Clause",
       "name": "opus",
       "revision": null,
@@ -231,7 +237,7 @@
     "groupsEnabled": []
   },
   "sdk": {
-    "revision": "6e8824b3a2002fc6005ece0f2a96243445b80b16",
+    "revision": "209726ddc66a3d1731079a1839985a2676e88e3b",
     "version": "0.15.0"
   },
   "west": {

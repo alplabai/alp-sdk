@@ -40,6 +40,8 @@
 #define ALP_SDK_SRC_YOCTO_INFERENCE_HANDLE_INTERNAL_H_
 
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 #include <alp/inference.h>
 
@@ -54,12 +56,31 @@ extern "C" {
  * `offsetof(struct alp_inference, in_use)` bytes to reset a claimed slot
  * without clobbering the `in_use` flag it just won.  Keep `in_use` LAST, and
  * add new fields before it.
+ *
+ * `lifecycle` and `active_ops` carry the open/invoke/close state machine and
+ * the count of in-flight operations (issues #1115, #629); they sit between
+ * `be_state` and `in_use` precisely as the rule above requires.
  */
 struct alp_inference {
 	alp_inference_backend_t backend;
 	void                   *be_state;
+	uint8_t                 lifecycle;
+	uint32_t                active_ops;
 	bool                    in_use;
 };
+
+/* The other half of the invariant the comment above describes: `be_state`
+ * must sit immediately after `backend`.  A comment cannot enforce that, so
+ * pin it (issue #1257). */
+#if defined(__cplusplus)
+static_assert(offsetof(struct alp_inference, be_state) == sizeof(void *),
+              "alp_inference: be_state must immediately follow backend "
+              "(pointer-aligned) -- see issue #1257");
+#else
+_Static_assert(offsetof(struct alp_inference, be_state) == sizeof(void *),
+               "alp_inference: be_state must immediately follow backend "
+               "(pointer-aligned) -- see issue #1257");
+#endif
 
 #ifdef __cplusplus
 }

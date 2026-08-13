@@ -1,5 +1,5 @@
 {
-  "generated": "2026-08-07",
+  "generated": "2026-08-12",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -10444,15 +10444,16 @@
           "kind": "enum"
         },
         "alp_inference_model_format_t": {
-          "definition": "typedef enum { ALP_INFERENCE_MODEL_TFLITE = 0, ALP_INFERENCE_MODEL_VELA = 1, ALP_INFERENCE_MODEL_DRPAI = 2, ALP_INFERENCE_MODEL_DXNN = 3, ALP_INFERENCE_MODEL_EXECUTORCH = 4 } alp_inference_model_format_t;",
+          "definition": "typedef enum { ALP_INFERENCE_MODEL_TFLITE = 0, ALP_INFERENCE_MODEL_VELA = 1, ALP_INFERENCE_MODEL_DRPAI = 2, ALP_INFERENCE_MODEL_DXNN = 3, ALP_INFERENCE_MODEL_EXECUTORCH = 4, ALP_INFERENCE_MODEL_ONNX = 5 } alp_inference_model_format_t;",
           "enumerators": [
             "ALP_INFERENCE_MODEL_TFLITE = 0",
             "ALP_INFERENCE_MODEL_VELA = 1",
             "ALP_INFERENCE_MODEL_DRPAI = 2",
             "ALP_INFERENCE_MODEL_DXNN = 3",
-            "ALP_INFERENCE_MODEL_EXECUTORCH = 4"
+            "ALP_INFERENCE_MODEL_EXECUTORCH = 4",
+            "ALP_INFERENCE_MODEL_ONNX = 5"
           ],
-          "hash": "770aa51a15e02706",
+          "hash": "c69fe4ed9cd3f11a",
           "kind": "enum"
         },
         "alp_inference_t": {
