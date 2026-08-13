@@ -307,8 +307,13 @@ static int cmd_companion_wifi_status(const struct shell *sh, size_t argc, char *
 		 * CC3501E_WIFI_DOWN_WINDOW_MS (10 s) -- on a wedged transport this
 		 * command's worst case roughly doubles, from ~10.1 s to ~20.1 s, and
 		 * this call runs on the SHELL THREAD.  Gated on
-		 * st.state == ALP_CC3501E_WIFI_CONNECTED so an in-flight `wifi
-		 * connect` (#1377) still sees a cheap, non-blocking `wifi status`. */
+		 * st.state == ALP_CC3501E_WIFI_CONNECTED so no additional
+		 * worker-routed radio read is issued while a `wifi connect` is in
+		 * flight.  This does NOT make `wifi status` itself cheap during an
+		 * in-flight connect (#1377): cc3501e_wifi_status() above can still
+		 * poll-by-repeat up to CC3501E_WIFI_DOWN_WINDOW_MS if it lands in the
+		 * transport's down-window; that cost is pre-existing and unrelated to
+		 * this RSSI change. */
 		int8_t       rssi = 0;
 		alp_status_t rs   = cc3501e_wifi_rssi(companion_cc3501e, &rssi);
 		if (rs == ALP_OK) {
