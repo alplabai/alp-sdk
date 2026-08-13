@@ -44,12 +44,16 @@
  * single-app on this SoM (CONFIG_SINGLE_APPLICATION_SLOT=y,
  * #1069/#1413) -- both M55 cores share the same physical App MRAM,
  * so there is no inactive slot to write into and no swap-with-revert
- * to arm.  The verified artefact still gets written to slot0 and
- * MCUboot still re-verifies its signature on every boot, but a
- * rejected or failed image halts rather than rolling back.  See
- * board.yaml and docs/secure-boot.md.  The swap-with-revert rollback
- * path needs a two-slot AEN target, which none of the qualified
- * boards are today.
+ * to arm.  slot0 is the running XIP image (docs/secure-boot.md),
+ * and the maintainer decision on #1069 explicitly DEFERS OTA on
+ * both cores: no secondary/scratch slot means there is no supported
+ * place to stage a new image, and overwriting the running slot0
+ * in place is not a supported flow.  MCUboot still re-verifies
+ * slot0's signature on every boot and halts on a failed check, but
+ * *applying* an update is not implemented on this SKU today.  See
+ * board.yaml and docs/secure-boot.md.  The write-and-reboot path
+ * needs a two-slot AEN target, which none of the qualified boards
+ * are today.
  *
  * Three layers of defence
  * =======================
@@ -81,9 +85,13 @@
  * ====================
  * Real polling against a staged Mender server; real ECDSA-P256
  * verification via mbedtls today, with OPTIGA-backed PSA hardware
- * acceleration planned once that driver lands; real slot0 write
- * through <alp/storage.h>; real k_reboot() into MCUboot's
- * single-app re-verify-and-halt-on-reject path (see [STATUS]).
+ * acceleration planned once that driver lands.  Applying the
+ * verified artefact -- Stage 4's flash write and Stage 5's reboot
+ * -- is NOT part of the qualified HiL path on this SKU: OTA is
+ * DEFERRED on both cores (#1069), there is no staging slot, and
+ * self-overwriting the running slot0 is not a supported flow.
+ * Stages 4-5 below print what the flow *would* do and stop short
+ * of touching slot0 (see [STATUS]).
  */
 
 #include <stdio.h>
@@ -235,17 +243,18 @@ fleet_verify_signature(const uint8_t *image, size_t image_len, const uint8_t *si
 /* ----------------------------------------------------------------- */
 
 /**
- * @brief Stream the verified artefact into flash.
+ * @brief Open the flash handle and report geometry for the
+ *        would-be artefact write.
  *
  * On a two-slot AEN target, MCUboot lays out slot-A and slot-B
  * back-to-back in the internal flash and this step writes the
  * inactive one.  On this SKU (E1M-AEN801) MCUboot boots
- * single-app (see [STATUS] at the top of this file) -- there is
- * no inactive slot, so this writes slot0 directly.
- * alp_storage_open(INTERNAL_FLASH) gives the raw flash handle;
- * the partition table (DT chosen node `zephyr,code-partition`)
- * determines the destination offset.  Chunk-wise erase + write
- * keeps the watchdog happy.
+ * single-app (see [STATUS] at the top of this file): OTA apply is
+ * DEFERRED (#1069) -- there is no inactive slot to write, and
+ * self-overwriting the running slot0 in place is not a supported
+ * flow.  alp_storage_open(INTERNAL_FLASH) gives the raw flash
+ * handle for framing purposes only; this function stops after
+ * reading geometry and never erases or writes a byte of slot0.
  */
 static bool fleet_write_verified_image(const uint8_t *image, size_t image_len)
 {
@@ -271,21 +280,25 @@ static bool fleet_write_verified_image(const uint8_t *image, size_t image_len)
 		       (unsigned)info.erase_size,
 		       (unsigned)info.block_size);
 	}
-	/* On HiL: loop over MENDER_CHUNK_SIZE windows, erase the
-     * destination sector, write the chunk, feed the watchdog,
-     * repeat.  The framing demo stops at the open()+info read
-     * to keep the native_sim run bounded. */
-	printf("[ota]   (chunked erase + write happens here on HiL)\n");
+	/* A two-slot AEN target would loop over MENDER_CHUNK_SIZE
+     * windows here, erase the inactive slot, write each chunk,
+     * and feed the watchdog.  On this SKU that loop has no
+     * supported destination (see [STATUS]), so the demo -- on
+     * both native_sim and HiL -- stops at the open()+info read
+     * and never issues an erase or write. */
+	printf("[ota]   (no supported destination on this SKU -- see [STATUS];"
+	       " stopping after geometry read)\n");
 	alp_storage_close(s);
 	return true;
 }
 
 /* ----------------------------------------------------------------- */
-/* Stage 5: reboot into the new image                                  */
+/* Stage 5: reboot (the two-slot design's post-write step)            */
 /* ----------------------------------------------------------------- */
 
 /**
- * @brief Trigger a reboot into the newly-written image.
+ * @brief Trigger a reboot -- the step that would follow a real
+ *        write on a two-slot target.
  *
  * On a two-slot AEN target this would set MCUboot's "test
  * pending" flag in the slot trailer: swap-using-scratch treats
@@ -295,9 +308,11 @@ static bool fleet_write_verified_image(const uint8_t *image, size_t image_len)
  * previous slot, and mid-swap power loss recovers via the
  * scratch sector.  On this SKU (E1M-AEN801) MCUboot boots
  * single-app (see [STATUS] at the top of this file): there is no
- * slot trailer to arm and no rollback target -- the reboot simply
- * re-verifies slot0 and halts if that check fails.  See
- * docs/secure-boot.md "Failure modes".
+ * slot trailer to arm, no rollback target, and (since Stage 4
+ * never wrote a new image -- OTA apply is DEFERRED, #1069) no new
+ * image to boot into either.  A reboot here would simply
+ * re-verify the unchanged slot0 and halt if that check ever
+ * fails.  See docs/secure-boot.md "Failure modes".
  */
 static void fleet_finish_update_and_reboot(void)
 {
