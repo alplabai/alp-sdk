@@ -75,6 +75,32 @@ def _has_zephyr_slice(project: BoardProject) -> bool:
     return any(s.os == "zephyr" for s in project.cores.values())
 
 
+def _boot_target_is_single_slot(project: BoardProject) -> bool:
+    """Whether this SoM's `memory_map:` declares a layout with no
+    slot1/scratch partition -- i.e. any MCUboot swap mode (scratch,
+    move, overwrite) has no partition to swap into.
+
+    `memory_map:` in `metadata/e1m_modules/<SKU>.yaml` is an SDK
+    build-policy override, not a silicon fact (see that file's own
+    comment) -- only E1M-AEN801 sets it today.  Its disjoint-slot0
+    layout (#1069: both M55 cores share one physical App MRAM, so
+    slot0 is split into per-core windows and the secondary/scratch
+    slot was dropped rather than forced to fit) has no `*slot1*` or
+    `*scratch*` region -- confirmed against the generated board DTS
+    (`zephyr/boards/alp/e1m_aen801_m55_{he,hp}/*.dts`: `slot0_partition`,
+    `reserved_partition` (ex-scratch), `storage_partition`,
+    `atoc_partition` -- no `slot1_partition`, no `scratch_partition`).
+    Every other AEN SKU has no `memory_map:` override and gets
+    `scripts/gen_zephyr_board.py`'s stock symmetric two-slot layout
+    (slot0 + slot1 + scratch), where every swap mode is valid.
+    """
+    memory_map = project.som_preset.get("memory_map")
+    if not memory_map:
+        return False
+    names = {str(region.get("name", "")).lower() for region in memory_map}
+    return not any("slot1" in n or "scratch" in n for n in names)
+
+
 def sysbuild_family_base_conf(project: BoardProject) -> Optional[Path]:
     """Path to the curated `zephyr/sysbuild/<family>/sysbuild.conf` for
     this project's SoM family, or None when the family has no curated
@@ -180,11 +206,38 @@ def emit_sysbuild_conf(project: BoardProject) -> str:
         lines.append(algo_kc)
     if sign.get("key_file"):
         lines.append(f'SB_CONFIG_BOOT_SIGNATURE_KEY_FILE="{sign["key_file"]}"')
-    swap = (boot.get("swap_algorithm") or "scratch").lower()
+    swap_explicit = boot.get("swap_algorithm")
+    swap = (swap_explicit or "").lower()
+    single_slot = _boot_target_is_single_slot(project)
+    if swap_explicit and swap in ("scratch", "move", "overwrite") and single_slot:
+        # #1413: this SKU's `memory_map:` has no slot1/scratch region
+        # (see _boot_target_is_single_slot) -- every two-slot MCUboot
+        # swap mode needs one.  An explicit request for one here isn't
+        # a default that quietly drifted, it's a `boot:` block asking
+        # for a partition that doesn't exist on this target's DT, so
+        # fail loud rather than emit a config that can't boot.
+        raise OrchestratorError(
+            f"boot.swap_algorithm: {swap} needs a slot1/scratch "
+            f"partition that {project.sku}'s disjoint-slot0 "
+            "`memory_map:` (metadata/e1m_modules/"
+            f"{project.sku}.yaml, #1069) doesn't declare -- this "
+            "single-slot AEN target only supports the stock "
+            "single-app boot.  Drop `boot.swap_algorithm:` (it now "
+            "defaults correctly on single-slot targets) rather than "
+            "setting it explicitly.")
+    if not swap_explicit:
+        # Historically defaulted unconditionally to "scratch" (#1413):
+        # wrong on a single-slot target, whose DT has no scratch
+        # partition to swap into.  Single-slot targets default to the
+        # single-app boot their curated zephyr/sysbuild/aen/sysbuild.conf
+        # base already ships; every other target keeps the historical
+        # "scratch" default.
+        swap = "none" if single_slot else "scratch"
     swap_kc = {
         "scratch":   "SB_CONFIG_MCUBOOT_MODE_SWAP_SCRATCH=y",
         "move":      "SB_CONFIG_MCUBOOT_MODE_SWAP_USING_MOVE=y",
         "overwrite": "SB_CONFIG_MCUBOOT_MODE_OVERWRITE_ONLY=y",
+        "none":      "SB_CONFIG_MCUBOOT_MODE_SINGLE_APP=y",
     }.get(swap)
     if swap_kc:
         lines.append(swap_kc)

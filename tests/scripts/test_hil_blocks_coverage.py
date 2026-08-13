@@ -134,6 +134,8 @@ def _make_project(
     *,
     boot: dict | None = None,
     diagnostics: dict | None = None,
+    sku: str = "E1M-AEN701",
+    som_preset: dict | None = None,
 ) -> BoardProject:
     """Build a minimal BoardProject for the orchestrator-emit checks
     below.  We don't go through load_board_yaml() because that
@@ -149,14 +151,16 @@ def _make_project(
     so a fixture with no Zephyr slice and an unrecognised family would
     quietly stop exercising the AEN MCUboot path these tests are about."""
     return BoardProject(
-        sku="E1M-AEN701",
+        sku=sku,
         hw_rev=None,
         board_name="hil-blocks-test",
         board_hw_rev=None,
         cores={"m55_hp": Slice(core_id="m55_hp", os="zephyr", app="./src")},
         ipc=[],
         soc_spec={"silicon": "alif:e1c:e1c-aen"},
-        som_preset={"family": "alif-ensemble", "topology": {}},
+        som_preset=som_preset
+        if som_preset is not None
+        else {"family": "alif-ensemble", "topology": {}},
         board_preset=None,
         diagnostics=diagnostics or {},
         chips=[],
@@ -219,6 +223,89 @@ def test_boot_block_emits_mcuboot_config() -> None:
     # slot geometry from the board DT partitions.
     assert "PARTITION_SIZE" not in sysbuild
     assert "SB_CONFIG_BOOT_COUNTERS_MCUBOOT" not in sysbuild
+
+
+def test_omitted_swap_algorithm_still_defaults_to_scratch_on_two_slot_sku() -> None:
+    """#1413: the fix must not move behaviour for the common case.  A
+    `boot:` block with no `swap_algorithm:` on a SKU with no
+    `memory_map:` override (every AEN SKU except E1M-AEN801) keeps the
+    historical swap-using-scratch default -- its DT has a real
+    slot1/scratch partition to swap into."""
+    project = _make_project(boot={
+        "method": "mcuboot",
+        "signing": {"algorithm": "ecdsa_p256",
+                    "key_file": "keys/dev_ecdsa_p256.pem"},
+        # swap_algorithm intentionally omitted
+    })
+    sysbuild = emit_sysbuild_conf(project)
+    assert "SB_CONFIG_MCUBOOT_MODE_SWAP_SCRATCH=y" in sysbuild
+    assert "SB_CONFIG_MCUBOOT_MODE_SINGLE_APP" not in sysbuild
+
+
+# E1M-AEN801's real `memory_map:` shape (metadata/e1m_modules/
+# E1M-AEN801.yaml #1069): disjoint per-core slot0 windows, no
+# slot1/scratch region.  Trimmed to the fields _boot_target_is_single_
+# slot() and the rest of emit_sysbuild_conf() actually read.
+_AEN801_SOM_PRESET = {
+    "family": "alif-ensemble",
+    "topology": {},
+    "memory_map": [
+        {"name": "mcuboot",   "base": 0x80000000, "size_kib": 64},
+        {"name": "he_slot0",  "base": 0x80010000, "size_kib": 2688},
+        {"name": "hp_slot0",  "base": 0x802b0000, "size_kib": 2688},
+        {"name": "reserved",  "base": 0x80550000, "size_kib": 64},
+        {"name": "storage",   "base": 0x80560000, "size_kib": 96},
+        {"name": "atoc",      "base": 0x80578000, "size_kib": 32},
+    ],
+}
+
+
+def test_omitted_swap_algorithm_defaults_to_single_app_on_aen801() -> None:
+    """#1413: E1M-AEN801's disjoint-slot0 `memory_map:` has no
+    slot1/scratch partition, so a `boot:` block that omits
+    `swap_algorithm:` must NOT resolve to swap-using-scratch (there is
+    nothing for MCUboot to swap into) -- it must resolve to the
+    single-app boot the curated zephyr/sysbuild/aen/sysbuild.conf base
+    already ships."""
+    project = _make_project(
+        sku="E1M-AEN801",
+        som_preset=_AEN801_SOM_PRESET,
+        boot={
+            "method": "mcuboot",
+            "signing": {"algorithm": "ecdsa_p256",
+                        "key_file": "keys/dev_ecdsa_p256.pem"},
+            # swap_algorithm intentionally omitted -- the #1413 bug
+        },
+    )
+    sysbuild = emit_sysbuild_conf(project)
+    assert "SB_CONFIG_MCUBOOT_MODE_SINGLE_APP=y" in sysbuild, (
+        "an omitted swap_algorithm: on single-slot AEN801 must default "
+        "to single-app boot, not swap-using-scratch"
+    )
+    assert "SB_CONFIG_MCUBOOT_MODE_SWAP_SCRATCH" not in sysbuild, (
+        "AEN801 has no slot1/scratch partition -- swap-using-scratch "
+        "must never be emitted for it"
+    )
+
+
+@pytest.mark.parametrize("swap", ["scratch", "move", "overwrite"])
+def test_explicit_two_slot_swap_algorithm_refused_on_aen801(swap: str) -> None:
+    """#1413 fix (2): an EXPLICIT `swap_algorithm:` that needs a
+    slot1/scratch partition must hard-fail on a single-slot target
+    like E1M-AEN801 rather than silently emit a config the board's DT
+    cannot support."""
+    project = _make_project(
+        sku="E1M-AEN801",
+        som_preset=_AEN801_SOM_PRESET,
+        boot={
+            "method": "mcuboot",
+            "signing": {"algorithm": "ecdsa_p256",
+                        "key_file": "keys/dev_ecdsa_p256.pem"},
+            "swap_algorithm": swap,
+        },
+    )
+    with pytest.raises(OrchestratorError, match="slot1/scratch"):
+        emit_sysbuild_conf(project)
 
 
 def test_rsa3072_hard_errors_in_mcuboot_path() -> None:

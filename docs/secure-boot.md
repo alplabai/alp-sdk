@@ -115,11 +115,21 @@ See [`docs/board-config-features.md` §Bootloader](board-config-features.md#boot
 for the full field reference (including why there is no
 `slots:` / `scratch_size_kib:` / `anti_rollback:` field).  Omit the
 block to inherit the SDK's stock per-family defaults (AEN-Zephyr:
-MCUboot + ECDSA-P256 + swap-using-scratch).  Keeping the block but
-omitting `method:` inherits the family's bootloader strategy the same
-way -- `mcuboot` on AEN/N93, `none` on V2N/V2N-M1, where U-Boot owns
-boot.  This overlay is a Zephyr artefact: a project with no
-`os: zephyr` slice never runs sysbuild and gets none.
+MCUboot + ECDSA-P256, plus a `swap_algorithm` default that follows
+the target's own DT rather than one value for every SKU:
+**E1M-AEN801**'s disjoint-slot0 `memory_map:` (#1069) has no
+slot1/scratch partition, so it defaults to single-app boot
+(`CONFIG_SINGLE_APPLICATION_SLOT=y`, matching the curated
+[`zephyr/sysbuild/aen/sysbuild.conf`](../zephyr/sysbuild/aen/sysbuild.conf)
+base); every other AEN SKU keeps the historical swap-using-scratch
+default.  Setting `swap_algorithm: scratch` (or `move`/`overwrite`)
+explicitly on a single-slot target such as E1M-AEN801 is a
+build-time error -- there is no slot1/scratch partition for it to
+use (#1413).  Keeping the block but omitting `method:` inherits the
+family's bootloader strategy the same way -- `mcuboot` on AEN/N93,
+`none` on V2N/V2N-M1, where U-Boot owns boot.  This overlay is a
+Zephyr artefact: a project with no `os: zephyr` slice never runs
+sysbuild and gets none.
 Slot/scratch partition
 *sizes* come from the board DT `partitions {}` node, not from
 `boot:` -- declare the actual layout via `storage:` if you want it
