@@ -4,10 +4,16 @@
 
 ## SKUs
 
-| SKU            | Memory                                | Status     |
-|----------------|---------------------------------------|------------|
-| `E1M-V2M101`   | 32 Gbit LPDDR4X + 32 Gbit eMMC + DX-M1| production |
-| `E1M-V2M102`   | 64 Gbit LPDDR4X + 64 Gbit eMMC + DX-M1| production |
+| SKU            | Memory                                 | Status     |
+|----------------|-----------------------------------------|------------|
+| `E1M-V2M101`   | 64 Gbit LPDDR4X + 128 Gbit eMMC + DX-M1 | production |
+| `E1M-V2M102`   | 64 Gbit LPDDR4X + 64 Gbit eMMC + DX-M1  | production |
+
+V2M101 and V2M102 have equal DRAM and V2M101 carries MORE eMMC than
+V2M102, breaking the family's usual 101 < 102 tier split -- see the
+footnote in [`vendors/renesas-rzv2n/README.md`](../../vendors/renesas-rzv2n/README.md#skus-covered).
+Per-SKU values are maintainer-confirmed (#1230); the naming inversion is
+unresolved.
 
 ## What's different from V2N base
 

@@ -9,7 +9,14 @@ Camera variant).
 | Family             | SKUs                          | Renesas part            | LPDDR4X         | eMMC                       | Companion accelerator   |
 |--------------------|-------------------------------|-------------------------|-----------------|----------------------------|--------------------------|
 | **E1M-X V2N**      | `E1M-V2N101`, `E1M-V2N102`    | `R9A09G056N44GBG#AC0`   | 32 / 64 Gbit    | eMMC 5.1, 32 / 128 Gbit    | —                        |
-| **E1M-X V2N-M1**   | `E1M-V2M101`, `E1M-V2M102`    | `R9A09G056N44GBG#AC0`   | 32 / 64 Gbit    | eMMC 5.1, 32 / 128 Gbit    | DEEPX DX-M1 (25 TOPS)    |
+| **E1M-X V2N-M1**   | `E1M-V2M101`, `E1M-V2M102`    | `R9A09G056N44GBG#AC0`   | 64 / 64 Gbit    | eMMC 5.1, 128 / 64 Gbit¹   | DEEPX DX-M1 (25 TOPS)    |
+
+¹ V2M101 and V2M102 do NOT follow the family's usual 101 < 102 tier split
+(compare the V2N row above): per the maintainer's ruling on #1230, V2M101 is
+8 GiB DRAM / 16 GiB eMMC and V2M102 is 8 GiB DRAM / 8 GiB eMMC -- V2M101
+carries equal DRAM and MORE eMMC than V2M102. Both per-SKU values are
+maintainer-confirmed; the tier-naming inversion itself is unresolved
+(tracked on #1230, not invented here).
 
 Authoritative per-SKU detail and the silicon stack live in
 [`e1m-spec` Annex A.2 / A.3](https://github.com/alplabai/e1m-spec/blob/main/STANDARD.md#a2-e1m-x-v2n-family-renesas-rzv2n).
