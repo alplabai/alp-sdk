@@ -330,15 +330,20 @@ def test_pinned_snapshot_slices_carry_toolchain_artifacts_debug():
         "sysroot":      None,
         "id":           "arm-zephyr-eabi",
     }
+    # Every path carries the `build/` level west actually writes (issue
+    # #1360): the slice's `command` runs with cwd=`build/m55_hp-zephyr`
+    # and no `-d`, so west's tree is `build/m55_hp-zephyr/build/`. The
+    # old spelling (no `build/`) named files west never creates, and
+    # every consumer had to add the level back by hand.
     assert m55_hp["artifacts"] == {
-        "elf":             "build/m55_hp-zephyr/zephyr/zephyr.elf",
-        "map":             "build/m55_hp-zephyr/zephyr/zephyr.map",
-        "bin":             "build/m55_hp-zephyr/zephyr/zephyr.bin",
-        "sizeReport":      "build/m55_hp-zephyr/zephyr/zephyr.stat",
-        "symbols":         "build/m55_hp-zephyr/zephyr/zephyr.symbols",
-        "compileCommands": "build/m55_hp-zephyr/compile_commands.json",
+        "elf":             "build/m55_hp-zephyr/build/zephyr/zephyr.elf",
+        "map":             "build/m55_hp-zephyr/build/zephyr/zephyr.map",
+        "bin":             "build/m55_hp-zephyr/build/zephyr/zephyr.bin",
+        "sizeReport":      "build/m55_hp-zephyr/build/zephyr/zephyr.stat",
+        "symbols":         "build/m55_hp-zephyr/build/zephyr/zephyr.symbols",
+        "compileCommands": "build/m55_hp-zephyr/build/compile_commands.json",
         # `outputDir` (alplabai/tan-cli#550) stays null for zephyr: the
-        # five named paths above already index Zephyr's own output tree.
+        # six named paths above already index Zephyr's own output tree.
         "outputDir":       None,
     }
     assert m55_hp["debug"] == {"console": "uart", "probe": None}
