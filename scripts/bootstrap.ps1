@@ -471,11 +471,13 @@ if (-not $NoWest -and -not $NoPatches) {
             Fail "verify_west_patches.py reported patches missing (exit $VerifyRc) but named no module -- re-run it directly to see why"
         }
         foreach ($Mod in $Unapplied) {
-            Write-Info "Applying zephyr/patches.yml for module '$Mod' ('west patch apply --dst-module')"
+            # `--dst-module` belongs to `west patch`, not to its `apply`
+            # subcommand -- see scripts/bootstrap.sh's note of the same name.
+            Write-Info "Applying zephyr/patches.yml for module '$Mod' ('west patch --dst-module ... apply')"
             Push-Location $WorkspaceDir
             try {
-                & $West patch apply --dst-module $Mod
-                if ($LASTEXITCODE -ne 0) { Fail "west patch apply --dst-module $Mod failed (exit $LASTEXITCODE) -- output above" }
+                & $West patch --dst-module $Mod apply
+                if ($LASTEXITCODE -ne 0) { Fail "west patch --dst-module $Mod apply failed (exit $LASTEXITCODE) -- output above" }
             } finally {
                 Pop-Location
             }
