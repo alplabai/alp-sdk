@@ -117,8 +117,8 @@ jobs:
       # stubs and we'd lose coverage in CI.
       - name: Install Yocto-side runtime deps
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          sudo apt-get update -o Acquire::Retries=3
+          sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
               libmosquitto-dev libasound2-dev libssl-dev pkg-config
       - name: Configure
         run: cmake -B build/yocto -S . -DALP_OS=yocto -DALP_BUILD_TESTS=ON
@@ -158,8 +158,8 @@ jobs:
       - name: Install Yocto-side runtime deps
         if: matrix.name == 'yocto'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          sudo apt-get update -o Acquire::Retries=3
+          sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
               libmosquitto-dev libasound2-dev libssl-dev pkg-config
       - name: Configure
         run: >
@@ -226,8 +226,8 @@ jobs:
       - uses: actions/checkout@v6
       - name: Install Yocto-side runtime deps
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          sudo apt-get update -o Acquire::Retries=3
+          sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
               libmosquitto-dev libasound2-dev libssl-dev pkg-config
       - name: Configure + build + install alp-sdk
         run: |
