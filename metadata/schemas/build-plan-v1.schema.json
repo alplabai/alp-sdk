@@ -47,7 +47,7 @@
       "description": "SDK-owned skip-vs-fail policy the executor MUST apply when dispatching a slice's `command`, so a plan consumer stops hand-porting that logic. Additive, schemaVersion 1.",
       "properties": {
         "unknownBackend": { "type": "string", "enum": ["skip", "fail"], "description": "Outcome when a slice's `backend` has no known tool mapping. Currently always 'fail'." },
-        "missingTool":     { "type": "string", "enum": ["skip", "fail"], "description": "Outcome when `command.tool` isn't found on the executor's PATH. Currently always 'skip' (normal on a dev host missing one toolchain)." },
+        "missingTool":     { "type": "string", "enum": ["skip", "fail"], "description": "Outcome when `command.tool` cannot be resolved to an executable by the executor. Currently always 'skip' (normal on a dev host missing one toolchain). Deliberately NOT phrased as \"isn't found on the executor's PATH\" (issue #1314): PATH is the executor's *search* input for a bare identity, but what gets spawned is the resolved path, never the bare name -- see ADR-0020's Security consequence and its Amendment (2026-08-12), plus tan-cli#510 / PR alplabai/tan-cli#530. An absolute `command.tool` that does not exist therefore lands on this outcome with no PATH involved at all." },
         "nullCommand":     { "type": "string", "enum": ["skip", "fail"], "description": "Outcome when a slice's `command` is null (this emitter had no valid command to produce -- see `slices[].command`). Currently always 'skip'." }
       }
     },
