@@ -65,6 +65,7 @@ on:
       - 'changelog.d/**'
       - 'scripts/assemble_changelog.py'
       - 'scripts/check_changelog_fragments.py'
+      - 'scripts/check_changelog_citations.py'
   push:
     branches: [main, dev]
     paths:
@@ -115,6 +116,7 @@ on:
       - 'changelog.d/**'
       - 'scripts/assemble_changelog.py'
       - 'scripts/check_changelog_fragments.py'
+      - 'scripts/check_changelog_citations.py'
   workflow_dispatch:
 
 concurrency:
@@ -449,6 +451,9 @@ jobs:
 
       - name: "Gate — changelog.d/ fragments are well-formed (#1395)"
         run: python3 scripts/check_changelog_fragments.py
+
+      - name: "Gate — changelog.d/ path:line citations still resolve (#1416)"
+        run: python3 scripts/check_changelog_citations.py
 
       - name: Gate — scripts/ and firmware/ write_text() writers pass newline=""
         run: python3 scripts/check_write_text_newline.py

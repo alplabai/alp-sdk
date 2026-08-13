@@ -185,11 +185,25 @@ def _slice_artifacts(build_dir: Path, slice_: Slice,
     OUTPUT_SYMBOLS` / `CONFIG_OUTPUT_STAT`, same "doesn't exist until
     built/enabled" caveat as the rest); the top-level `CMakeLists.txt`
     forces `CMAKE_EXPORT_COMPILE_COMMANDS` unconditionally, always to
-    the build dir root, not the `zephyr/` subdirectory.  A Yocto
-    slice's real output (the wic/ext4 image) lands under the *Yocto
-    build tree's* own deploy dir -- outside this slice's `build_dir`,
-    which only ever carries the `local.conf` fragment -- so there is
-    no honest path to report.
+    the build dir root, not the `zephyr/` subdirectory.
+
+    That build dir root is `<buildDir>/build/`, NOT `<buildDir>` --
+    `_slice_command` deliberately emits no `-d` (finding M14: west
+    resolves a relative `-d` against its own cwd, already `<buildDir>`,
+    so `-d <buildDir>` would double-nest), and west's default output is
+    `<cwd>/build`.  Every zephyr path below therefore carries that
+    `build/` level.  It used to be missing (issue #1360): the plan named
+    `<buildDir>/zephyr/zephyr.elf`, a path west never creates, and every
+    consumer had to re-derive the real one from `buildDir` instead of
+    reading the block it was given -- `tan renode` looked for
+    `build/m55_he-zephyr/zephyr/zephyr.elf` and found nothing.  The
+    `build/` level is west's, not this planner's, which is exactly why
+    it belongs in the reported path and not in each reader's head.
+
+    A Yocto slice's real output (the wic/ext4 image) lands under the
+    *Yocto build tree's* own deploy dir -- outside this slice's
+    `build_dir`, which only ever carries the `local.conf` fragment --
+    so there is no honest path to report.
 
     `baremetal` reports the ONE path its configure line GUARANTEES
     (tan-cli#550 -- the whole block used to be null, so a slice that
@@ -239,17 +253,21 @@ def _slice_artifacts(build_dir: Path, slice_: Slice,
     if not has_command:
         return dict(_NULL_ARTIFACTS)
     if slice_.os == "zephyr":
-        zdir = build_dir / "zephyr"
+        # west's own build tree: `<buildDir>/build/`, because the command
+        # runs with cwd=<buildDir> and no `-d` (see the docstring above
+        # and `_slice_command`'s M14 note).
+        wdir = build_dir / "build"
+        zdir = wdir / "zephyr"
         return {
             "elf":             (zdir / "zephyr.elf").as_posix(),
             "map":             (zdir / "zephyr.map").as_posix(),
             "bin":             (zdir / "zephyr.bin").as_posix(),
             "sizeReport":      (zdir / "zephyr.stat").as_posix(),
             "symbols":         (zdir / "zephyr.symbols").as_posix(),
-            "compileCommands": (build_dir / "compile_commands.json").as_posix(),
-            # Zephyr's own tree lands at `<buildDir>/build/` (west runs
-            # with no `-d`) and the five named paths above already index
-            # it -- no separate output directory to report.
+            "compileCommands": (wdir / "compile_commands.json").as_posix(),
+            # Zephyr's own tree lands at `<buildDir>/build/` and the six
+            # named paths above all index it -- no separate output
+            # directory to report.
             "outputDir":       None,
         }
     if slice_.os == "baremetal":

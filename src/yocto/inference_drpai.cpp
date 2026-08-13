@@ -93,8 +93,8 @@
  *
  * Dispatcher contract
  *   Mirrors the 7-symbol hook shape the Yocto dispatcher in
- *   inference_yocto.c calls.  The handle layout below MUST match
- *   inference_yocto.c's `struct alp_inference` exactly.
+ *   inference_yocto.c calls.  The handle layout (struct alp_inference)
+ *   is the shared definition in inference_handle_internal.h (issue #1257).
  */
 
 #include <cerrno>
