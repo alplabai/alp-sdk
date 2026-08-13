@@ -488,5 +488,62 @@ class TestZephyrBoardCli(unittest.TestCase):
         self.assertIn("--output", result.stderr)
 
 
+class TestAenLogModeDefault(unittest.TestCase):
+    """Every AEN board defaults LOG_MODE to LOG_MODE_MINIMAL (issue #1373).
+
+    Zephyr's inherited `default LOG_MODE_DEFERRED` hands every record --
+    and, via CONFIG_LOG_PRINTK, the Alp SDK banner with it -- to the log
+    processing thread, which runs BELOW main and is therefore starved
+    outright by the non-yielding busy-loop main() the AEN bench procedure
+    requires (an idling M55 makes the Secure Enclave gate the DAP and the
+    SE-UART).  Measured on E1M-AEN801 silicon: zero UART bytes out of a
+    running, fault-free board.
+
+    This is a FAMILY invariant, and only two of the four AEN board trees
+    are generated -- e1m_aen401_m55_hp / e1m_aen601_m55_hp are
+    hand-authored, so the byte-equivalence class above cannot see them
+    drift.  Hence a check over every AEN board directory on disk rather
+    than over the generator's output alone.
+    """
+
+    def _aen_board_dirs(self) -> list[Path]:
+        dirs = sorted(p for p in BOARDS_ROOT.glob("e1m_aen*") if p.is_dir())
+        self.assertTrue(dirs, f"no AEN board trees under {BOARDS_ROOT}")
+        return dirs
+
+    def test_every_aen_board_defaults_log_mode_minimal(self) -> None:
+        for board_dir in self._aen_board_dirs():
+            kdc = board_dir / "Kconfig.defconfig"
+            self.assertTrue(
+                kdc.is_file(),
+                f"{board_dir.name} has no Kconfig.defconfig to carry the "
+                f"LOG_MODE default")
+            text = kdc.read_text(encoding="utf-8")
+            self.assertIn(
+                "choice LOG_MODE\n\tdefault LOG_MODE_MINIMAL\nendchoice\n", text,
+                f"{kdc} lost its LOG_MODE_MINIMAL board default -- a "
+                f"busy-loop main() on this board will print nothing (#1373)")
+
+    def test_no_aen_defconfig_assigns_the_choice_symbol_directly(self) -> None:
+        """`CONFIG_LOG_MODE_MINIMAL=y` in a board `_defconfig` reaches the
+        same end state when CONFIG_LOG=y, but it also assigns an INVISIBLE
+        choice symbol on every CONFIG_LOG=n build -- and 47 fragments under
+        examples/aen/ set CONFIG_LOG=n.  Zephyr's
+        scripts/kconfig/kconfig.py::check_assigned_choice_values() then
+        warns "The choice symbol LOG_MODE_MINIMAL ... was selected (set
+        =y), but no symbol ended up as the choice selection" on each one.
+        The Kconfig.defconfig `default` is inert there, so keep the
+        `_defconfig` free of it.
+        """
+        for board_dir in self._aen_board_dirs():
+            for defconfig in board_dir.glob("*_defconfig"):
+                text = defconfig.read_text(encoding="utf-8")
+                self.assertNotIn(
+                    "CONFIG_LOG_MODE_MINIMAL=y", text,
+                    f"{defconfig} assigns the LOG_MODE choice symbol "
+                    f"directly; use the Kconfig.defconfig `choice LOG_MODE / "
+                    f"default LOG_MODE_MINIMAL` form instead (#1373)")
+
+
 if __name__ == "__main__":
     unittest.main()

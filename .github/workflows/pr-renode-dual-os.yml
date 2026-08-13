@@ -75,13 +75,13 @@ jobs:
       - name: Install Renode
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          sudo apt-get update -o Acquire::Retries=3
+          sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
               ca-certificates curl gnupg
           # v1.16.1 portable-dotnet build: self-contained .NET, no Mono/GTK#
           # system deps.  The .deb needs gtk-sharp2 / *-cil-dev packages that
           # Ubuntu 24.04 (== ubuntu-latest) dropped, breaking apt install (#339).
-          curl -fsSL https://github.com/renode/renode/releases/download/v1.16.1/renode-1.16.1.linux-portable-dotnet.tar.gz \
+          curl -fsSL --retry 3 --retry-delay 5 https://github.com/renode/renode/releases/download/v1.16.1/renode-1.16.1.linux-portable-dotnet.tar.gz \
               -o /tmp/renode.tar.gz
           mkdir -p "$HOME/renode"
           tar -xzf /tmp/renode.tar.gz -C "$HOME/renode" --strip-components=1
