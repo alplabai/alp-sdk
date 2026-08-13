@@ -357,18 +357,45 @@ target_sources(alp_sdk PRIVATE
 # matching zcbor-dev package installed by hand.
 find_path(ZCBOR_INCLUDE_DIR zcbor_decode.h)
 find_library(ZCBOR_LIB zcbor)
+# zcbor_abi_pin.h is an alp-sdk file (issue #1254 follow-up), NOT part of
+# upstream zcbor -- it is staged into the sysroot only by
+# meta-alp-sdk's own zcbor recipe (recipes-devtools/zcbor/zcbor_0.9.1.bb
+# do_install), alongside the upstream headers, at the same
+# ${ZCBOR_INCLUDE_DIR}. A hand-installed zcbor (e.g. a direct build of the
+# west-module checkout the comment above documents as a supported path)
+# has zcbor_decode.h + libzcbor but NOT this header -- find it
+# independently and only opt in to the #include when it actually
+# resolves, so that supported path doesn't hard-fail configure over a
+# file only the recipe ships.
+find_file(ZCBOR_ABI_PIN_H zcbor_abi_pin.h HINTS ${ZCBOR_INCLUDE_DIR})
 if(ZCBOR_INCLUDE_DIR AND ZCBOR_LIB)
     target_sources(alp_sdk PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../common/alp_model.c)
     target_compile_definitions(alp_sdk PRIVATE
         CONFIG_ALP_SDK_MODEL_READER=1
-        # Yocto-only opt-in for alp_model.c's zcbor_abi_pin.h include (see
-        # that header, staged by the zcbor recipe's do_install): this
-        # define exists ONLY in this listfile, never in Zephyr's own
-        # zephyr/CMakeLists.txt build of the same source file, so the
-        # #ifdef there is a no-op on Zephyr instead of a missing-header
-        # compile error.
-        ALP_SDK_ZCBOR_YOCTO_ABI_PIN=1
     )
+    if(ZCBOR_ABI_PIN_H)
+        target_compile_definitions(alp_sdk PRIVATE
+            # Yocto-only opt-in for alp_model.c's zcbor_abi_pin.h include
+            # (see that header, staged by the zcbor recipe's do_install):
+            # this define exists ONLY in this listfile, never in Zephyr's
+            # own zephyr/CMakeLists.txt build of the same source file, so
+            # the #ifdef there is a no-op on Zephyr instead of a missing-
+            # header compile error. Gated on ZCBOR_ABI_PIN_H (not just
+            # ZCBOR_INCLUDE_DIR/ZCBOR_LIB being found) so a hand-installed
+            # zcbor without the recipe's ABI-pin header degrades to no
+            # struct-layout check instead of a missing-header configure
+            # failure -- see the find_file() comment above.
+            ALP_SDK_ZCBOR_YOCTO_ABI_PIN=1
+        )
+    else()
+        message(STATUS
+            "alp-sdk yocto: zcbor found but zcbor_abi_pin.h is not "
+            "(hand-installed zcbor, not meta-alp-sdk's zcbor recipe) -- "
+            "compiling src/common/alp_model.c without the ZCBOR_* "
+            "struct-layout ABI pin. Install meta-alp-sdk's zcbor recipe "
+            "(recipes-devtools/zcbor/zcbor_0.9.1.bb) to a Yocto sysroot "
+            "for the pinned build.")
+    endif()
     # Only add the sysroot's zcbor include dir when it isn't already on
     # the compiler's own default search path -- an explicit -I for a
     # default system include dir (e.g. the sysroot's ${includedir})
