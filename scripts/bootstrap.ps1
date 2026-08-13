@@ -37,6 +37,10 @@
 #     pwsh scripts\bootstrap.ps1                # full setup
 #     pwsh scripts\bootstrap.ps1 -NoPip         # skip pip installs
 #     pwsh scripts\bootstrap.ps1 -NoWest        # skip west init/update
+#     pwsh scripts\bootstrap.ps1 -NoPatches     # skip `west patch apply` + its
+#         # verification (issue #1392). The patches in zephyr/patches.yml are
+#         # required to BUILD. Use this only when you intend to manage the
+#         # patch state yourself.
 #     pwsh scripts\bootstrap.ps1 -PrintEnv      # only print env-var lines
 #     pwsh scripts\bootstrap.ps1 -AllowPartial
 #         # report success even if zephyr-requirements / sdk-extras /
@@ -48,6 +52,7 @@
 param(
     [switch]$NoPip,
     [switch]$NoWest,
+    [switch]$NoPatches,
     [switch]$PrintEnv,
     [switch]$AllowPartial
 )
@@ -386,6 +391,44 @@ if (-not $NoWest) {
                   "alp-sdk's west.yml (#769). Check 'west -C $WorkspaceDir config manifest.path'.")
         }
         Write-Ok "alp-* extension commands registered ('west alp-migrate' resolves in $WorkspaceDir)"
+    }
+
+    # -------- zephyr/patches.yml (issue #1392) --------------------------------
+    # Mirrors scripts/bootstrap.sh's block of the same name. Without it a
+    # Windows user gets exactly the silently-unpatched workspace #1392 is
+    # about, while a Linux user does not.
+    #
+    # `west patch apply` is re-appliable, so running it on an already-patched
+    # reused workspace is fine; its exit status is not evidence it did
+    # anything (three no-op-and-exit-0 paths -- see
+    # scripts/verify_west_patches.py). Exit 3 from the verifier is "everything
+    # present is patched, but a module this workspace does not carry could not
+    # be checked" and warns; 1 and 2 are the real thing.
+    if (-not $NoPatches) {
+        Write-Info "Applying zephyr/patches.yml ('west patch apply')"
+        Push-Location $WorkspaceDir
+        try {
+            & $West patch apply
+            if ($LASTEXITCODE -ne 0) { Fail "west patch apply failed" }
+        } finally {
+            Pop-Location
+        }
+        Push-Location $RepoRoot
+        try {
+            & $Vpy scripts/verify_west_patches.py --topdir $WorkspaceDir
+            $VerifyRc = $LASTEXITCODE
+        } finally {
+            Pop-Location
+        }
+        if ($VerifyRc -eq 0) {
+            Write-Ok "zephyr/patches.yml verified applied in $WorkspaceDir"
+        } elseif ($VerifyRc -eq 3) {
+            Write-Warn2 "some zephyr/patches.yml modules are not in this workspace -- see above"
+        } else {
+            Fail "zephyr/patches.yml is not applied in $WorkspaceDir (#1392) -- see the list above"
+        }
+    } else {
+        Write-Info "Skipping 'west patch apply' (-NoPatches) -- zephyr/patches.yml is NOT applied"
     }
 } else {
     Write-Info "Skipping west setup (-NoWest)"
