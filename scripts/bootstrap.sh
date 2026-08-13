@@ -708,12 +708,21 @@ if [ "${DO_WEST}" -eq 1 ] && [ "${DO_PATCHES}" -eq 1 ]; then
             die "verify_west_patches.py reported patches missing (exit ${VERIFY_RC}) but named no module -- re-run it directly to see why"
         fi
         for _mod in ${UNAPPLIED}; do
-            info "Applying zephyr/patches.yml for module '${_mod}' ('west patch apply --dst-module')"
-            PATCH_OUT=$( cd "${WORKSPACE_DIR}" && "${WEST}" patch apply --dst-module "${_mod}" 2>&1 )
+            # `--dst-module` is a flag of `west patch` ITSELF, not of its
+            # `apply` SUBCOMMAND, so it goes BEFORE `apply`:
+            #
+            #   usage: west patch [-h] [-b DIR] [-l FILE] [-w DIR] [-sm MODULE]
+            #                     [-dm MODULE] <subcommand> ...
+            #
+            # Written the other way round it does not run at all --
+            # `west patch: error: unexpected arguments: ['--dst-module', 'mcuboot']`,
+            # exit 2 -- which failed every alp-build job on dev.
+            info "Applying zephyr/patches.yml for module '${_mod}' ('west patch --dst-module ... apply')"
+            PATCH_OUT=$( cd "${WORKSPACE_DIR}" && "${WEST}" patch --dst-module "${_mod}" apply 2>&1 )
             PATCH_RC=$?
             printf '%s\n' "${PATCH_OUT}"
             if [ "${PATCH_RC}" -ne 0 ]; then
-                die "west patch apply --dst-module ${_mod} failed (exit ${PATCH_RC}) -- output above"
+                die "west patch --dst-module ${_mod} apply failed (exit ${PATCH_RC}) -- output above"
             fi
         done
         # Re-verify: `west patch apply`'s own exit status is not evidence it
