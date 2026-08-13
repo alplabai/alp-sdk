@@ -1,7 +1,8 @@
 # zcbor -- low-footprint CBOR codec (ADR 0018 library manifest).
 #
 # The CBOR half of the serialization story (pairs with nanopb); used by
-# LwM2M/CoAP and SUIT/OTA metadata paths.  Formalises `libraries: [zcbor]`.
+# LwM2M/CoAP and SUIT/OTA metadata paths, and (issue #1254) by
+# src/common/alp_model.c's .alpmodel manifest reader on every OS.
 #
 # Grounding (pinned Zephyr v4.4.0 workspace):
 #   * west module `zcbor`, path modules/lib/zcbor,
@@ -11,6 +12,46 @@
 #   * upstream version 0.9.1  (modules/lib/zcbor/zcbor/VERSION -> "0.9.1";
 #     `git describe --tags` -> 0.9.1-2-g9164bd1)
 #   * licence Apache-2.0  (modules/lib/zcbor/LICENSE -- Apache License 2.0)
+#
+# yocto grounding (issue #1254): meta-alp-sdk/recipes-devtools/zcbor/
+# zcbor_0.9.1.bb builds zcbor as a shared library for the A55/Linux side
+# -- confirmed against a real bitbake build (do_fetch through
+# do_package_qa all green) rather than assumed.  Pinned to the canonical
+# NordicSemiconductor/zcbor remote at tag 0.9.1
+# (9b07780aca6fb21f82a241ba386ad9b379809337), NOT the same SHA as the
+# Zephyr west-module pin above -- that SHA is a zephyrproject-rtos
+# mirror-only mutable branch tip, unreachable on the canonical remote
+# and unanchored to any tag on either remote.  The tag is two commits
+# behind that SHA; verified the subtrees this recipe consumes (src/,
+# include/, LICENSE) are byte-identical between the two revisions, so
+# alp_model.c's wire format decodes identically on both pins.  See the
+# recipe's own UPSTREAM + PIN comment for the full verification.
+#
+# src/common/alp_model.c (the .alpmodel CBOR-manifest reader behind
+# <alp/model.h>) is now compiled in src/yocto/CMakeLists.txt in place of
+# the former ALP_ERR_NOSUPPORT stub (src/common/stub/stub_model.c),
+# gated on the SAME zcbor find_path/find_library the recipe satisfies --
+# there is no separate Kconfig-style symbol on this OS the way
+# CONFIG_ZCBOR gates the Zephyr side; the library is a hard build
+# dependency instead (DEPENDS += "zcbor" in meta-alp-sdk/recipes-core/
+# alp-sdk/alp-sdk_0.6.bb, which also sets
+# -DALP_SDK_MODEL_ZCBOR_REQUIRED=ON so a missing library on that recipe's
+# own sysroot is a configure error, not a silent degrade back to the
+# stub -- a direct plain-CMake -DALP_OS=yocto configure without that flag
+# degrades instead, since a stock host may have no zcbor at all).
+#
+# ZCBOR_* ABI-pin (issue #1254 follow-up): ZCBOR_MAP_SMART_SEARCH and
+# ZCBOR_STOP_ON_ERROR change struct zcbor_state's layout; a consumer
+# built with a different setting than libzcbor.so's own build gets a
+# silently mismatched struct across the .so boundary.  Pinned to match
+# what Zephyr's own zcbor module Kconfig produces for every alp-sdk
+# target today: none of the four defined
+# (ZCBOR_MAP_SMART_SEARCH/STOP_ON_ERROR/CANONICAL/BIG_ENDIAN) -- no
+# alp-sdk prj.conf sets the first three, and every alp-sdk core
+# (Cortex-A55/M33/M55) is little-endian.  Enforced by
+# recipes-devtools/zcbor/files/zcbor_abi_pin.h (installed alongside the
+# other zcbor_*.h) and zcbor_0.9.1.bb's ZCBOR_ABI_CFLAGS var; keep all
+# three in lockstep.
 #
 # No `requires:` -- pure-C, no capability/core/RAM floor of note.
 schema_version: 1
@@ -25,3 +66,17 @@ integration:
     module: zcbor
     kconfig:
       - CONFIG_ZCBOR=y
+  # No image_install entry under yocto: below (unlike ros2.yaml's
+  # rclcpp, which alp-image-common.inc lists in IMAGE_INSTALL by hand):
+  # zcbor is a BUILD-time dependency of the alp-sdk recipe (DEPENDS +=
+  # "zcbor" in meta-alp-sdk/recipes-core/alp-sdk/alp-sdk_0.6.bb),
+  # dynamically linked into libalp_sdk.so; its runtime libzcbor.so.0
+  # package lands on the image automatically via OE's own shlibs
+  # RDEPENDS scan of that link, same as libc/libgcc_s -- no manual
+  # IMAGE_INSTALL pick (see that recipe's own comment for the identical
+  # libc/libgcc_s reasoning).  No `recipe_include:` key either --
+  # schema-valid but no emitter reads it
+  # (scripts/alp_orchestrate/libraries.py's yocto_image_install() only
+  # ever reads `image_install`), and the `yocto:` object has no
+  # minProperties, so an unread key would just add noise here.
+  yocto: {}
