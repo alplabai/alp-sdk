@@ -29,17 +29,21 @@ The per-family hardware, tree-verified:
   `metadata/socs/alif/ensemble/e8.json:152`). The on-module PHY is the
   TI DP83825 (`metadata/e1m_modules/aen/CHANGELOG.md:16`); RMII,
   100/full (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:282`). The
-  MDIO address is contested in-tree, not settled: the Zephyr DT
-  records a managed-MDIO DP83825I at PHY address 1 but flags it
-  "fork reference … confirm this address before relying on it"
-  (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:349-354`), while the
-  bench log from real E8 silicon reads
+  MDIO address was contested in-tree when this ADR was written — the
+  Zephyr DT recorded a managed-MDIO PHY at address 1, flagged "fork
+  reference … confirm this address before relying on it", while the
+  bench log from real E8 silicon read
   `[eth] MDIO PHY@0 id=2000a140 (DP83825I=2000a140)`
   (`examples/aen/aen-ethernet-link/README.md:39`) — address 0, not 1
-  — and the binding doc's own example agrees with the bench log:
+  — and the binding doc's own example agreed with the bench log:
   "e.g. ti,dp83825 at addr 0"
-  (`zephyr/dts/bindings/ethernet/alif,ethernet.yaml:47`). The bench
-  log is the stronger evidence.
+  (`zephyr/dts/bindings/ethernet/alif,ethernet.yaml:47`).
+  **Settled (#1244):** a Flow C ITCM RAM-run of the `mdio-managed`
+  variant read the PHY over the managed controller itself —
+  `[eth] MDIO PHY@0 id=2000a140 (DP83825=2000a140)` — so the DT node
+  is now `ethernet-phy@0` with `reg = <0>`
+  (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:353-375`). The
+  order-code suffix stays TBD: `id=2000a140` is die/OUI identity only.
 - **NX91**: `ethernet_phy: TBD`
   (`metadata/e1m_modules/E1M-NX9101.yaml:28`);
   `metadata/socs/nxp/imx9/imx93.json:55-56` states per-peripheral
@@ -143,6 +147,21 @@ PHY driver `[UNTESTED]` on silicon, and
 the AEN managed-MDIO path as BUILD-ONLY, with no MDIO-managed PHY
 exercised on real E8 silicon.
 
+> **Superseded in part, 2026-08-12 (#1244).** The last clause is no longer
+> true for AEN: a Flow C ITCM RAM-run on real E8 silicon performed a live MDIO
+> register read — `[eth] MDIO PHY@0 id=2000a140 (DP83825=2000a140)`, with
+> `ANAR=01e1 ANLPAR=0000 PHYSTS=0002 RCSR=00e1` — so `mdio_dwmac_alif` binds,
+> `phy_ti_dp83825` binds on the bus, and the upstream `eth_dwmac` core's
+> `phy_link` path runs. That run also corrected the PHY's MDIO address from
+> the devicetree's `reg = <1>` to the measured `0`.
+>
+> **The decision this ADR records still stands.** One bench-proven read is not
+> a bench-proven data plane, the V2N `rtl8211fdi` path remains `[UNTESTED]`,
+> and the argument against freezing an `<alp/net.h>` ABI on unproven hardware
+> is unchanged. Annotated rather than rewritten, because an ADR is a record of
+> what was decided and why — editing the premise silently would leave the
+> decision looking better-founded than it was at the time.
+
 **A full `<alp/net.h>` with a data plane.** Rejected for the same
 reasoning ADR 0003's Alternative B already gave for Ethernet, QSPI,
 and MIPI CSI/DSI as a group (USB was given a separate reason there —
@@ -203,9 +222,10 @@ Also filed from this ADR's research: **#1241**, still open (every AEN
 preset omitted `ethernet_phy`, and no `metadata/chips/dp83825`
 manifest existed; this change adds both across the family, but the
 exact order code stays TBD pending the netlist/BOM, and the C driver
-itself remains unwritten) and **#1244**, still open (the devicetree
-puts the DP83825I at MDIO address 1 while the E8 bench log reads it at
-address 0).
+itself remains unwritten) and **#1244**, now fixed (the devicetree put
+the PHY at MDIO address 1 while the E8 bench log read it at address 0;
+a managed-path MDIO read on silicon confirmed 0 and the node was
+corrected).
 
 ## See also
 
