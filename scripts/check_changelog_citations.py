@@ -98,11 +98,36 @@ def _iter_fragments() -> list[Path]:
     return sorted(p for p in FRAGMENT_DIR.glob("*.md") if p.name != "README.md")
 
 
+def _strip_fenced_blocks(text: str) -> str:
+    """Blank out ``` fenced blocks, preserving line count and offsets.
+
+    A fenced block is markdown's display construct: it is where a fragment puts
+    an EXAMPLE of a citation rather than a citation. This gate's own fragment
+    was the first case -- it demonstrates the anchor syntax with a made-up
+    `chips/cc3501e/x.c:682-684`, and an earlier version of this script flagged
+    that as a broken citation, i.e. it went red on its own documentation. A gate
+    that cannot be written about is a gate people route around.
+
+    Replaced with spaces rather than deleted so every reported line number still
+    refers to the real line in the file.
+    """
+    out, fenced = [], False
+    for line in text.split("\n"):
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            out.append(" " * len(line))
+            continue
+        out.append(" " * len(line) if fenced else line)
+    return "\n".join(out)
+
+
 def _check_one(frag: Path, text: str) -> tuple[list[str], list[str], int, int]:
     """Return (errors, skips, checked, anchored) for one fragment."""
     errors: list[str] = []
     skips: list[str] = []
     checked = anchored = 0
+
+    text = _strip_fenced_blocks(text)
 
     for m in _CITATION.finditer(text):
         rel, start = m.group("path"), int(m.group("start"))
