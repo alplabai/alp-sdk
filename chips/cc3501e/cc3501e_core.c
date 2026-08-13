@@ -119,7 +119,51 @@ alp_status_t cc3501e_reset(cc3501e_t *ctx)
 	 * 0xFFFFFFFF -> 0x5A5A5A5A, ping_ok climbing, after one hard reset).  The
 	 * bringup soak calls cc3501e_hard_reset() again if a single re-boot is not
 	 * enough.  Remove once TI ships the Puya flash fix. */
-	return cc3501e_hard_reset(ctx);
+	alp_status_t s = cc3501e_hard_reset(ctx);
+	if (s != ALP_OK) return s;
+
+	/* Wire-protocol compatibility gate (issue #1371): firmware/cc3501e/DESIGN.md
+     * has always documented "host refuses a mismatch" for GET_VERSION, but
+     * nothing ever compared the reply against ALP_CC3501E_PROTOCOL_VERSION --
+     * mirrors the GD32 bridge's major-version gate (gd32g553_init(),
+     * GD32G553_HOST_PROTOCOL_MAJOR), except the CC3501E wire carries a single
+     * flat uint16_t (protocol_meta.c), not a major/minor/patch triple, so
+     * there is no gradation to be lenient about: any difference means the
+     * host cannot know the frame layout it is about to parse.
+     *
+     * This is the ONLY place the comparison runs -- deliberately NOT inside
+     * cc3501e_get_version() itself, which stays a bare round-trip.  Two
+     * callers depend on that: the #1116 concurrency regression
+     * (tests/zephyr/cc3501e_transport_lock) drives cc3501e_get_version()
+     * directly against a modelled slave that never claims to speak
+     * ALP_CC3501E_PROTOCOL_VERSION, and the cold-boot liveness soaks
+     * (examples/aen/aen-cc3501e-bringup's soak loop, every 8th cycle;
+     * examples/peripheral-io/alp-console's cc3501e_bridge_bringup retry) use
+     * cc3501e_get_version() purely as "did the round trip complete", not as a
+     * compat gate -- putting the check there would turn a liveness probe
+     * into a hard failure on real hardware.
+     *
+     * A GET_VERSION round trip that does not complete at all (the common
+     * case immediately after this reset -- the Puya cold-boot flash bug
+     * documented above routinely needs a second, caller-driven
+     * cc3501e_hard_reset() before the slave answers anything) is NOT a
+     * version verdict: only an ANSWERED request can be compared, so leave
+     * the context usable and let the caller's own retry loop keep trying. */
+	uint16_t     fw_version = 0u;
+	alp_status_t vs         = cc3501e_get_version(ctx, &fw_version);
+	if (vs != ALP_OK) {
+		return ALP_OK;
+	}
+	if (fw_version != ALP_CC3501E_PROTOCOL_VERSION) {
+		/* Permanent, not transient: retrying cannot reconcile two binaries
+         * that disagree about the wire, so unlike the transport-timeout case
+         * above this clears initialised -- every later call on this ctx now
+         * fails ALP_ERR_NOT_READY instead of talking a wrong frame layout to
+         * a radio. */
+		ctx->initialised = false;
+		return ALP_ERR_VERSION;
+	}
+	return ALP_OK;
 }
 
 alp_status_t cc3501e_hard_reset(cc3501e_t *ctx)
