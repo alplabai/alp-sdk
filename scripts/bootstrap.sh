@@ -94,8 +94,8 @@ Usage:
         # verification (issue #1392). The patches in zephyr/patches.yml are
         # required to BUILD: zephyr/patches/zephyr/0002-ipm-add-poll-out-poll-in.patch
         # adds the ipm_driver_api .poll_out/.poll_in fields hal_alif's
-        # se_service.c calls and vanilla Zephyr v4.4.1 does not have. Use this
-        # only when you intend to manage the patch state yourself.
+        # se_service.c calls and the pinned upstream Zephyr does not have. Use
+        # this only when you intend to manage the patch state yourself.
     bash scripts/bootstrap.sh --print-env    # only print env-var lines
     bash scripts/bootstrap.sh --allow-partial
         # report success even if zephyr-requirements / sdk-extras /
