@@ -191,13 +191,22 @@ def test_v2n_v2m_memory_capacities_are_pinned():
     a silent revert of flash_mbit (proven in round-5 review: reverting
     E1M-V2M101's flash_mbit 131072 -> 32768 alone left every generator/doc
     gate at rc=0; only alp.lock's raw-byte digest caught it, and a
-    comment-only edit trips that identically). Pin all four V2N/V2M
-    presets' memory blocks directly so a revert of either field fails a
-    real assertion here instead of relying solely on the digest."""
+    comment-only edit trips that identically). Pin the presets whose
+    memory blocks are settled so a revert of either field fails a real
+    assertion here instead of relying solely on the digest.
+
+    E1M-V2N102 is deliberately NOT pinned here: its `flash_mbit: 65536`
+    (64 Gbit) has never been ruled on by anyone and disagrees with the
+    128 Gbit eMMC figure `vendors/renesas-rzv2n/README.md` draws from the
+    external e1m-spec v1.1. A round-6 review found the two in-tree docs
+    that were cited as "independent" corroboration for 64 Gbit --
+    `metadata/e1m_modules/E1M-V2N102.yaml` and `docs/soms/v2n.md` -- are
+    not independent (the latter is a same-day doc-sync descendant of the
+    former, per `git merge-base --is-ancestor`). Pinning 65536 here would
+    lock in an unverified, possibly-wrong number as if it were settled."""
     presets = gpm.load_presets()
     expected = {
         "E1M-V2N101": {"dram_mbit": 32768, "flash_mbit": 32768},
-        "E1M-V2N102": {"dram_mbit": 65536, "flash_mbit": 65536},
         "E1M-V2M101": {"dram_mbit": 65536, "flash_mbit": 131072},
         "E1M-V2M102": {"dram_mbit": 65536, "flash_mbit": 65536},
     }
