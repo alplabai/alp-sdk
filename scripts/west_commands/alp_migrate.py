@@ -20,10 +20,17 @@ sys.path.insert(0, str(_HERE.parent.parent))  # scripts/ -> import alp_migrate
 import alp_migrate  # noqa: E402
 
 try:
-    from west.commands import WestCommand  # type: ignore
+    from west.commands import CommandError, WestCommand  # type: ignore
 except ImportError:
     class WestCommand:  # type: ignore[no-redef]
         def __init__(self, *a, **k): ...
+
+    class CommandError(RuntimeError):  # type: ignore[no-redef]
+        """Mirrors `west.commands.CommandError` for the no-west path."""
+
+        def __init__(self, returncode: int = 1) -> None:
+            super().__init__()
+            self.returncode = returncode
 
 REPO = _HERE.parent.parent.parent
 
@@ -151,7 +158,15 @@ class AlpMigrate(WestCommand):
         return parser
 
     def do_run(self, args, _unknown):  # type: ignore[no-untyped-def]
-        return run(args)
+        # west DISCARDS `do_run`'s return value and derives the exit status
+        # from exceptions only, so `return run(args)` threw the code away --
+        # `west alp-migrate --check` could report an out-of-date board.yaml
+        # and still exit 0. Same defect and same fix as
+        # `alp_quality`/`alp_lock`; `run()` already computes the right value.
+        rc = run(args)
+        if rc:
+            raise CommandError(rc)
+        return rc
 
 
 def main(argv=None) -> int:
