@@ -1015,6 +1015,60 @@ ZTEST(cc3501e_host_driver, test_wifi_connect_reports_failure_not_ok_1376)
 	zassert_equal(slave.connect_submit_count, 1u, "exactly one submit");
 }
 
+/* #1435 bench-proven role leak: a FAILED association (the terminal
+ * CONN_FAILED branch) must tear the STA role down (WIFI_DISCONNECT, 0x13)
+ * before returning, else the NEXT connect's role-up kick fails with
+ * FAIL_KICK even for a correct SSID/passphrase -- reproduced 2/2 on real
+ * silicon (E1M-AEN801 r1). `slave.cmd` is the argless-bucket opcode the mock
+ * last dispatched; the failed connect's own follow-up traffic is entirely
+ * WIFI_STATUS polls, so seeing WIFI_DISCONNECT there proves the teardown ran
+ * as the LAST thing before return. The mock's WIFI_DISCONNECT always acks
+ * RESP_OK, so this also proves the CONNECT's own ALP_ERR_IO survives --
+ * without the fix's discard, a bug that returned the teardown's result
+ * instead would read back ALP_OK here, not ALP_ERR_IO. */
+ZTEST(cc3501e_host_driver, test_wifi_connect_failure_tears_down_sta_role_1435)
+{
+	slave.wifi_conn_state  = ALP_CC3501E_WIFI_CONN_FAILED;
+	slave.wifi_fail_reason = ALP_CC3501E_WIFI_FAIL_REJECTED;
+	alp_status_t s         = cc3501e_wifi_connect(&fw, "securenet", 1u, "wrongpw", 5000u);
+	zassert_equal(
+	    s, ALP_ERR_IO, "CONN_FAILED/REJECTED -> the CONNECT's own IO, not the teardown's OK");
+	zassert_equal(slave.cmd,
+	              ALP_CC3501E_CMD_WIFI_DISCONNECT,
+	              "a failed association must issue WIFI_DISCONNECT before returning (#1435)");
+}
+
+/* Same terminal branch, the other fail_reason -> ALP_ERR_TIMEOUT leg: the
+ * teardown must run regardless of WHICH error the CONNECT itself reports. */
+ZTEST(cc3501e_host_driver, test_wifi_connect_failure_timeout_reason_tears_down_sta_role_1435)
+{
+	slave.wifi_conn_state  = ALP_CC3501E_WIFI_CONN_FAILED;
+	slave.wifi_fail_reason = ALP_CC3501E_WIFI_FAIL_TIMEOUT;
+	alp_status_t s         = cc3501e_wifi_connect(&fw, "securenet", 1u, "wrongpw", 5000u);
+	zassert_equal(s,
+	              ALP_ERR_TIMEOUT,
+	              "CONN_FAILED/FAIL_TIMEOUT -> the CONNECT's own TIMEOUT, not the teardown's OK");
+	zassert_equal(slave.cmd,
+	              ALP_CC3501E_CMD_WIFI_DISCONNECT,
+	              "the FAIL_TIMEOUT leg of the same terminal branch must also tear down (#1435)");
+}
+
+/* #1435 at the OTHER error exit: an association that never reaches a
+ * terminal WIFI_STATUS at all (state stays DISCONNECTED, exactly
+ * test_wifi_connect_never_confirmed_times_out_1376's setup) returns through
+ * the poll-loop's budget-exhaustion `remaining == 0u` path, not the terminal
+ * CONN_FAILED branch -- proving that exit is independently reachable and
+ * must tear the role down too. */
+ZTEST(cc3501e_host_driver, test_wifi_connect_poll_exhaustion_tears_down_sta_role_1435)
+{
+	slave.wifi_conn_state = ALP_CC3501E_WIFI_DISCONNECTED;
+	alp_status_t s        = cc3501e_wifi_connect(&fw, "ghostnet", 1u, "pw", 120u);
+	zassert_equal(s, ALP_ERR_TIMEOUT, "never confirmed -> TIMEOUT via poll-loop exhaustion");
+	zassert_equal(slave.cmd,
+	              ALP_CC3501E_CMD_WIFI_DISCONNECT,
+	              "the poll-exhaustion exit must also tear the STA role down (#1435)");
+}
+
 /* #1378's own reproduction: force the mock's WIFI_CONNECT_STA submit ack to
  * read back a literal RESP_OK (0x00) -- "a valid header followed by an
  * all-zero payload phase", exactly what a dead bus phase clocks on real

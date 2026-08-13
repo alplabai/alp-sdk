@@ -215,6 +215,30 @@ static alp_status_t wifi_status_once(cc3501e_t *ctx, alp_cc3501e_wifi_status_t *
 	return ALP_OK;
 }
 
+/* #1435: bench-proven role leak.  A FAILED association leaves the STA role UP
+ * on the firmware side -- cc3501e_wifi_disconnect() (WIFI_DISCONNECT, 0x13)
+ * is the bench-proven teardown for it.  Reproduced 2/2 on E1M-AEN801 r1, one
+ * boot, single variable: connect to a real AP succeeds (rssi=-48 dBm, ip
+ * 192.168.1.14); `wifi disconnect`; the SAME connect succeeds again
+ * (rssi=-47 dBm); ONE connect to a non-existent SSID fails -5; the SAME
+ * connect that just worked now ALSO fails -5, nothing else changed;
+ * `wifi disconnect`; the same connect succeeds again (rssi=-49 dBm).  The
+ * second connect's failure decodes as ALP_CC3501E_WIFI_FAIL_KICK (3): the
+ * role-up / Wlan_Connect kick, not the SSID/passphrase -- proof it is the
+ * stale role from the FIRST failure wedging the second, not a bad
+ * credential.  A clean disconnect/reconnect never leaked; only the failure
+ * path did, because it returned without running the teardown a clean
+ * disconnect always gets.
+ *
+ * The teardown's own result is deliberately discarded: the caller asked why
+ * the CONNECT failed, not why the cleanup did, and discarding it here can
+ * never mask a real CONNECT failure behind a cleanup one. */
+static alp_status_t connect_failed(cc3501e_t *ctx, alp_status_t why)
+{
+	(void)cc3501e_wifi_disconnect(ctx);
+	return why;
+}
+
 alp_status_t cc3501e_wifi_connect(cc3501e_t  *ctx,
                                   const char *ssid,
                                   uint8_t     sec_type,
@@ -295,8 +319,12 @@ alp_status_t cc3501e_wifi_connect(cc3501e_t  *ctx,
 		if (ss == ALP_OK) {
 			if (st.state == ALP_CC3501E_WIFI_CONNECTED) return ALP_OK;
 			if (st.state == ALP_CC3501E_WIFI_CONN_FAILED) {
-				return (st.fail_reason == ALP_CC3501E_WIFI_FAIL_TIMEOUT) ? ALP_ERR_TIMEOUT
-				                                                         : ALP_ERR_IO;
+				/* #1435: tear the STA role down before returning -- see
+				 * connect_failed()'s comment above for the bench evidence. */
+				return connect_failed(ctx,
+				                      (st.fail_reason == ALP_CC3501E_WIFI_FAIL_TIMEOUT)
+				                          ? ALP_ERR_TIMEOUT
+				                          : ALP_ERR_IO);
 			}
 			/* DISCONNECTED (not yet latched) or CONNECTING: keep polling. */
 		}
@@ -310,7 +338,9 @@ alp_status_t cc3501e_wifi_connect(cc3501e_t  *ctx,
 		 * `remaining` to stay an honest upper bound on wall-clock time. */
 		uint32_t attempt_cost = (CC3501E_REQ_TMO_MS < remaining) ? CC3501E_REQ_TMO_MS : remaining;
 		remaining -= attempt_cost;
-		if (remaining == 0u) return ALP_ERR_TIMEOUT;
+		/* #1435: budget exhaustion is also a failed-connect exit -- tear the
+		 * role down here too, same reason as the terminal branch above. */
+		if (remaining == 0u) return connect_failed(ctx, ALP_ERR_TIMEOUT);
 		uint32_t gap = (remaining < CC3501E_WIFI_STATUS_POLL_GAP_MS)
 		                   ? remaining
 		                   : CC3501E_WIFI_STATUS_POLL_GAP_MS;
