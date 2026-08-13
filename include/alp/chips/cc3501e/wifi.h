@@ -181,6 +181,15 @@ alp_status_t cc3501e_wifi_scan_stop(cc3501e_t *ctx);
  * association on every retry and could alias a dead bus phase as a false
  * "connected".
  *
+ * If this call FOLLOWS a failed attempt (the @ref cc3501e_wifi_status latch
+ * still reads CONN_FAILED when this is entered) it first clears that stale
+ * association -- @ref cc3501e_wifi_disconnect() -- before submitting, else
+ * the new association's own Wlan_Connect kick fails against the leftover NWP
+ * state (#1435).  That clear is bounded by @c CC3501E_WIFI_DOWN_WINDOW_MS
+ * IN ADDITION to @p timeout_ms, the same floor-regardless-of-caller-budget
+ * precedent as @ref cc3501e_wifi_get_mac's down-window floor. A live
+ * CONNECTING attempt or an already-CONNECTED association is left alone.
+ *
  * @param ctx         Initialised driver context.
  * @param ssid        NUL-terminated SSID (<= 32 bytes; longer is rejected).
  * @param sec_type    Security selector -- @ref CC3501E_WIFI_CONNECT_SEC_OPEN /
@@ -188,7 +197,10 @@ alp_status_t cc3501e_wifi_scan_stop(cc3501e_t *ctx);
  *                    @ref alp_cc3501e_wifi_connect_t::security on the wire).
  * @param pass        NUL-terminated passphrase (may be NULL/"" for open).
  * @param timeout_ms  Upper bound on the WIFI_STATUS poll budget (the submit
- *                    itself uses a short, fixed, non-retried timeout).
+ *                    itself uses a short, fixed, non-retried timeout). A call
+ *                    that clears a stale association first (see above) also
+ *                    spends up to @c CC3501E_WIFI_DOWN_WINDOW_MS on that
+ *                    clear, on top of this budget.
  * @return ALP_OK once WIFI_STATUS reports CONNECTED; ALP_ERR_TIMEOUT if still
  *         CONNECTING (or unreadable) at the deadline, or if the firmware
  *         reports CONN_FAILED with fail_reason == FAIL_TIMEOUT;
