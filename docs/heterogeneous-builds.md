@@ -315,7 +315,9 @@ build/
 │   ├── conf/local.conf
 │   └── tmp/deploy/images/e1m-v2n101-a55/{rootfs.wic.gz, Image, *.dtb}
 ├── m33_sm-zephyr/
-│   └── zephyr/zephyr.elf
+│   ├── alp.conf                   (the slice's -DEXTRA_CONF_FILE fragment)
+│   └── build/                     (west's own tree — `west build` runs here
+│       └── zephyr/zephyr.elf       with cwd=m33_sm-zephyr and no `-d`)
 ├── helper-gd32/
 │   └── gd32_bridge.bin
 ├── helper-cc3501e/

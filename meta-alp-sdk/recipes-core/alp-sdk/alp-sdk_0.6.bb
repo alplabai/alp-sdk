@@ -21,15 +21,35 @@ PV      = "0.6.0"
 
 S = "${WORKDIR}/git"
 
+# zcbor is a hard build dependency, not a PACKAGECONFIG opt-in like mqtt/
+# security/audio above: this recipe stages it unconditionally, so a
+# sysroot missing it is a packaging bug, not a degrade candidate.
+# ALP_SDK_MODEL_ZCBOR_REQUIRED=ON below is what turns
+# src/yocto/CMakeLists.txt's zcbor find_path/find_library block (#1254)
+# into a FATAL_ERROR on that sysroot instead of a warn-and-degrade to
+# stub_model.c's ALP_ERR_NOSUPPORT body (stub_model.c stays in that
+# file's source list -- it is still the degrade path for a plain-CMake
+# -DALP_OS=yocto build made WITHOUT this flag, e.g.
+# pr-plain-cmake.yml's stock-Ubuntu `yocto` leg).  Provided by this
+# layer's own recipes-devtools/zcbor/zcbor_0.9.1.bb.
+DEPENDS += "zcbor"
+
 inherit cmake
 
 # alp-sdk's repo-root CMakeLists.txt builds the plain-CMake
 # shared-library variant for Yocto consumers.  Zephyr-only
 # integrations bypass this recipe and consume the SDK as a Zephyr
 # module via west.yml instead.
-EXTRA_OECMAKE = "-DALP_SDK_BUILD_SHARED=ON      \
-                 -DALP_SDK_BUILD_EXAMPLES=OFF   \
-                 -DALP_OS=yocto"
+#
+# ALP_SDK_MODEL_ZCBOR_REQUIRED=ON (#1254 follow-up): without this flag
+# a sysroot that loses the zcbor DEPENDS above would silently degrade
+# to stub_model.c instead of failing configure -- shipping a silently
+# ALP_ERR_NOSUPPORT libalp_sdk.so, the exact regression this recipe
+# exists to prevent.
+EXTRA_OECMAKE = "-DALP_SDK_BUILD_SHARED=ON            \
+                 -DALP_SDK_BUILD_EXAMPLES=OFF         \
+                 -DALP_OS=yocto                       \
+                 -DALP_SDK_MODEL_ZCBOR_REQUIRED=ON"
 
 # Optional Linux-userspace backends (#33 registry migration).  The SDK's
 # CMake auto-detects each library via pkg_check_modules and silently

@@ -19,26 +19,44 @@ static alp_inference_backend_t _backend_enum(const char *s)
 	return ALP_INFERENCE_BACKEND_AUTO; /* sentinel: unknown */
 }
 
-static alp_inference_model_format_t _fmt_enum(const char *s)
+/* Every format string the .alpmodel writer (scripts/alp_model/manifest.py)
+ * can emit must have an explicit case here.  This used to default every
+ * unrecognised string to ALP_INFERENCE_MODEL_TFLITE: a typo'd or newly added
+ * format silently ran the TFLite parser and reported ALP_OK, which is
+ * undebuggable from a customer's side -- nothing on the wire says "decoded
+ * as the wrong format".  ExecuTorch had been silently mis-decoding as
+ * TFLite since ALP_INFERENCE_MODEL_EXECUTORCH was added to the enum, because
+ * no case for it was ever added here.  Report failure instead so the caller
+ * can surface a real error. */
+static bool _fmt_enum(const char *s, alp_inference_model_format_t *out)
 {
+	if (strcmp(s, "tflite") == 0) {
+		*out = ALP_INFERENCE_MODEL_TFLITE;
+		return true;
+	}
 	if (strcmp(s, "vela_tflite") == 0) {
-		return ALP_INFERENCE_MODEL_VELA;
+		*out = ALP_INFERENCE_MODEL_VELA;
+		return true;
 	}
 	if (strcmp(s, "drpai_dir") == 0) {
-		return ALP_INFERENCE_MODEL_DRPAI;
+		*out = ALP_INFERENCE_MODEL_DRPAI;
+		return true;
 	}
 	if (strcmp(s, "dxnn") == 0) {
-		return ALP_INFERENCE_MODEL_DXNN;
+		*out = ALP_INFERENCE_MODEL_DXNN;
+		return true;
 	}
 	if (strcmp(s, "executorch") == 0) {
-		/* #1260: ALP_INFERENCE_MODEL_EXECUTORCH had been in the public enum
-		 * with no matching case here, so an "executorch" blob_format
-		 * silently mis-decoded as TFLite (wrong parser, reported success).
-		 * scripts/alp_model/adapters/executorch.py is the host-side writer
-		 * that now emits this string. */
-		return ALP_INFERENCE_MODEL_EXECUTORCH;
+		/* scripts/alp_model/adapters/executorch.py is the host-side
+		 * writer that emits this string (issue #1260). */
+		*out = ALP_INFERENCE_MODEL_EXECUTORCH;
+		return true;
 	}
-	return ALP_INFERENCE_MODEL_TFLITE; /* "tflite" + default */
+	if (strcmp(s, "onnx") == 0) {
+		*out = ALP_INFERENCE_MODEL_ONNX;
+		return true;
+	}
+	return false;
 }
 
 /* A target is available if its silicon_ref is the cpu wildcard or one of
@@ -161,9 +179,18 @@ alp_status_t alp_model_select(const alp_model_t            *m,
 
 	const alp_model_target_t *t = &m->targets[best];
 
+	if (!_fmt_enum(t->blob_format, &out->format)) {
+		/* The selection loop above only checks backend + silicon + SRAM
+		 * fit; a chosen target's blob_format is decoded here for the
+		 * first time.  An unrecognised string means the manifest names
+		 * a format this dispatcher cannot parse -- surface that as a
+		 * real error rather than let out->format hold a stale/default
+		 * value from a prior call. */
+		return ALP_ERR_INVAL;
+	}
+
 	out->target_index = (uint32_t)best;
 	out->backend      = _backend_enum(t->backend);
-	out->format       = _fmt_enum(t->blob_format);
 	out->arena_bytes  = t->arena_bytes;
 	return ALP_OK;
 }
