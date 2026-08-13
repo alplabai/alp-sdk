@@ -1018,13 +1018,36 @@ ZTEST(cc3501e_host_driver, test_ap_start_dead_phase_alias_rejected_at_transport_
  * AP_START attempt must never surface from cc3501e_wifi_ap_start() as
  * success.  Before this fix the bare 0x00 was mapped straight through
  * resp_to_status() to ALP_OK and poll_by_repeat() returned it on the first
- * attempt -- a reported AP that never came up. */
+ * attempt -- a reported AP that never came up.
+ *
+ * Since #1385's submit-once restructure (77e258dc), cc3501e_wifi_ap_start()
+ * squashes every outcome except ALP_ERR_INVAL/ALP_ERR_NOT_READY into
+ * ALP_ERR_TIMEOUT unconditionally -- so `!= ALP_OK` on ITS return alone
+ * cannot fail no matter what the dead-phase-alias check does; reverting the
+ * WIFI_AP_START reject clause in cc3501e_request_locked()
+ * (chips/cc3501e/cc3501e_core.c) still left this assertion passing.  Replay
+ * the EXACT bytes cc3501e_wifi_ap_start() just staged on the wire (captured
+ * by the mock in slave.ap_start_last_req_pl/len) straight through
+ * cc3501e_request() -- the layer where the alias check actually runs -- so a
+ * regression there fails this test. */
 ZTEST(cc3501e_host_driver, test_wifi_ap_start_ignores_dead_phase_ok_alias_1385)
 {
 	g_connect_submit_force_ok = true;
 	zassert_not_equal(cc3501e_wifi_ap_start(&fw, "ghostap", 1u, "pw", 100u),
 	                  ALP_OK,
 	                  "a bare-OK submit ack alone must never make ap_start() report success");
+	alp_status_t raw = cc3501e_request(&fw,
+	                                   ALP_CC3501E_CMD_WIFI_AP_START,
+	                                   slave.ap_start_last_req_pl,
+	                                   slave.ap_start_last_req_len,
+	                                   NULL,
+	                                   0,
+	                                   NULL,
+	                                   100u);
+	zassert_equal(raw,
+	              ALP_ERR_IO,
+	              "the dead-phase 0x00 alias for AP_START's own wire payload must be rejected as a "
+	              "transport error, not read back as ALP_OK");
 }
 
 /* #1385 fence in the OPPOSITE direction: OTA_PROMOTE (0x46) must stay OFF the
