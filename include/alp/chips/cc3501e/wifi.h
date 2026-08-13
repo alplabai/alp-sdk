@@ -363,9 +363,14 @@ alp_status_t cc3501e_wifi_get_ip(cc3501e_t *ctx, uint8_t ip[4]);
  *
  * @param ctx  Initialised driver context.
  * @param out  Receives the decoded status snapshot: @c state is a
- *             @ref alp_cc3501e_wifi_conn_state_t, @c fail_reason a
- *             @ref alp_cc3501e_wifi_fail_t (valid when state == CONN_FAILED) and
- *             @c rssi_dbm the STA RSSI (valid when state == CONNECTED).
+ *             @ref alp_cc3501e_wifi_conn_state_t and @c fail_reason a
+ *             @ref alp_cc3501e_wifi_fail_t (valid when state == CONN_FAILED).
+ *             @c rssi_dbm is decoded faithfully off the wire but is NOT a
+ *             measurement -- the firmware latch behind it is never populated
+ *             and the byte is always 0, which is itself a legal RSSI, so a
+ *             caller cannot tell it apart from a real reading (issue #1387).
+ *             Use @ref cc3501e_wifi_rssi for a signal level, and report it as
+ *             unavailable when that call fails rather than printing a 0.
  * @return ALP_OK with @p out filled; ALP_ERR_INVAL if @p out is NULL;
  *         ALP_ERR_TIMEOUT if the transport stayed down for the whole
  *         down-window; ALP_ERR_IO on a short reply; otherwise the mapped

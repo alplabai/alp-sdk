@@ -18,6 +18,14 @@ on:
     branches: [main, dev]
   push:
     branches: [main, dev]
+  # A queued PR waits on the branch's required contexts, and GitHub raises
+  # `merge_group` -- not `push` or `pull_request` -- for a merge-queue entry.
+  # Four of `dev`'s five required contexts come from this file
+  # (`twister-shard 1/4` .. `4/4`), so without this trigger a queued PR would
+  # wait on checks that can never fire (#1415). Neither job here is gated to
+  # `pull_request`: `twister-shard` carries no job-level `if:` and `twister`
+  # carries `if: always()` -- read, not assumed.
+  merge_group:
   workflow_dispatch:
 
 # Cancel in-flight runs on the same branch when a new commit lands.

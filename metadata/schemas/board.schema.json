@@ -272,8 +272,7 @@
         "swap_algorithm": {
           "type": "string",
           "enum": ["scratch", "move", "overwrite"],
-          "default": "scratch",
-          "description": "MCUboot swap strategy.  `scratch` (crash-safe, needs scratch partition), `move` (more erases, no scratch), `overwrite` (no rollback)."
+          "description": "MCUboot swap strategy.  `scratch` (crash-safe, needs scratch partition), `move` (more erases, no scratch), `overwrite` (no rollback).  There is no fixed schema default: when omitted, the SDK derives the default from the target's real slot layout -- `scratch` on a stock two-slot AEN target, but a single-slot target (e.g. E1M-AEN801, whose disjoint-slot0 `memory_map:` has no slot1/scratch region, #1069/#1413) defaults to the SDK's stock single-app boot instead. Setting any of the three values explicitly on a single-slot target is a build-time OrchestratorError -- that target has no slot1/scratch partition for any of them to swap into."
         },
         "build_type": {
           "type": "string",

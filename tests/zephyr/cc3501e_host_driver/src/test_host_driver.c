@@ -120,6 +120,13 @@ static bool g_connect_submit_force_ok;
  * Cleared by slave_reset(). */
 static uint32_t g_status_io_down_remaining;
 
+/* #1371 mutant controls for cc3501e_reset()'s wire-protocol compatibility
+ * gate.  Both cleared by slave_reset() so every other test keeps seeing the
+ * default (matching-version, answers-immediately) fixture. */
+static bool     g_get_version_override_active; /* stage a specific reply value below */
+static uint16_t g_get_version_override_value;
+static uint32_t g_get_version_io_down_remaining; /* fail the transaction outright, N times */
+
 static void slave_reset(void)
 {
 	memset(&slave, 0, sizeof(slave));
@@ -135,6 +142,9 @@ static void slave_reset(void)
 	g_scan_stage_ctx_b                 = false;
 	g_connect_submit_force_ok          = false;
 	g_status_io_down_remaining         = 0u;
+	g_get_version_override_active      = false;
+	g_get_version_override_value       = 0u;
+	g_get_version_io_down_remaining    = 0u;
 }
 
 static void stage_status(uint8_t st)
@@ -316,8 +326,9 @@ static void slave_dispatch(void)
 		break;
 
 	case ALP_CC3501E_CMD_GET_VERSION: {
-		const uint8_t v[2] = { (uint8_t)(ALP_CC3501E_PROTOCOL_VERSION & 0xFFu),
-			                   (uint8_t)((ALP_CC3501E_PROTOCOL_VERSION >> 8) & 0xFFu) };
+		uint16_t      ver  = g_get_version_override_active ? g_get_version_override_value
+		                                                   : (uint16_t)ALP_CC3501E_PROTOCOL_VERSION;
+		const uint8_t v[2] = { (uint8_t)(ver & 0xFFu), (uint8_t)((ver >> 8) & 0xFFu) };
 		stage_reply(ALP_CC3501E_RESP_OK, v, 2u);
 		break;
 	}
@@ -473,6 +484,15 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 		g_status_io_down_remaining--;
 		return ALP_ERR_IO;
 	}
+	/* #1371: fail a GET_VERSION transaction outright -- models the CC3501E's
+	 * documented Puya cold-boot flash bug (chips/cc3501e/cc3501e_core.c's
+	 * cc3501e_hard_reset comment), where the slave has not armed its SPI yet
+	 * and the request never lands. */
+	if (slave.phase == PH_REQ_HDR && tx[0] == ALP_CC3501E_CMD_GET_VERSION &&
+	    g_get_version_io_down_remaining > 0u) {
+		g_get_version_io_down_remaining--;
+		return ALP_ERR_IO;
+	}
 	switch (slave.phase) {
 	case PH_REQ_HDR:
 		slave.cmd     = tx[0];
@@ -572,6 +592,80 @@ ZTEST(cc3501e_host_driver, test_get_version_decodes_le16)
 	zassert_equal(cc3501e_get_version(&fw, &v), ALP_OK, "GET_VERSION -> OK");
 	zassert_equal(slave.cmd, ALP_CC3501E_CMD_GET_VERSION, "opcode 0x01");
 	zassert_equal(v, (uint16_t)ALP_CC3501E_PROTOCOL_VERSION, "decoded LE16 protocol version");
+}
+
+/* ---- #1371: cc3501e_reset()'s wire-protocol compatibility gate ------------- *
+ *
+ * DESIGN.md always claimed "host refuses a mismatch" for GET_VERSION; these
+ * pin the gate that now makes that claim true, and its two required
+ * non-effects: the #1116 concurrency suite drives cc3501e_get_version()
+ * directly (never through cc3501e_reset()) against a modelled slave that
+ * never claims ALP_CC3501E_PROTOCOL_VERSION, and the cold-boot liveness
+ * soaks use cc3501e_get_version() as a bare round-trip probe -- neither may
+ * regress from this gate living in cc3501e_reset() instead. */
+
+/* Any non-NULL pointer -- alp_gpio_write() is stubbed ALP_ERR_NOSUPPORT and
+ * its result is (void)-discarded by cc3501e_reset(), so these are never
+ * dereferenced; they only need to be non-NULL to clear reset()'s "pins not
+ * bound" gate. */
+#define FAKE_RESET_PIN  ((alp_gpio_t *)&fw)
+#define FAKE_ENABLE_PIN ((alp_gpio_t *)&slave)
+
+ZTEST(cc3501e_host_driver, test_reset_accepts_matching_protocol_version_1371)
+{
+	fw.reset_pin  = FAKE_RESET_PIN;
+	fw.enable_pin = FAKE_ENABLE_PIN;
+
+	zassert_equal(cc3501e_reset(&fw), ALP_OK, "matching GET_VERSION -> reset succeeds");
+	zassert_true(fw.initialised, "a matching version leaves the context usable");
+}
+
+ZTEST(cc3501e_host_driver, test_reset_refuses_protocol_version_mismatch_1371)
+{
+	fw.reset_pin  = FAKE_RESET_PIN;
+	fw.enable_pin = FAKE_ENABLE_PIN;
+
+	g_get_version_override_active = true;
+	g_get_version_override_value  = (uint16_t)ALP_CC3501E_PROTOCOL_VERSION + 1u;
+
+	zassert_equal(cc3501e_reset(&fw),
+	              ALP_ERR_VERSION,
+	              "GET_VERSION answered with a different value -> ALP_ERR_VERSION");
+	zassert_false(fw.initialised, "a refused context is left uninitialised");
+
+	/* The dead end this leaves behind, deliberately: once refused, EVERY
+	 * later call (including re-reading the version for a diagnostic) fails
+	 * ALP_ERR_NOT_READY rather than reporting a value nobody re-measured. */
+	uint16_t v = 0xDEADu;
+	zassert_equal(cc3501e_get_version(&fw, &v),
+	              ALP_ERR_NOT_READY,
+	              "cc3501e_get_version() does not keep working across a refusal");
+}
+
+ZTEST(cc3501e_host_driver, test_reset_tolerates_transport_failure_during_probe_1371)
+{
+	fw.reset_pin  = FAKE_RESET_PIN;
+	fw.enable_pin = FAKE_ENABLE_PIN;
+
+	/* Models the CC3501E's documented Puya cold-boot flash bug: the FIRST
+	 * boot's GET_VERSION never lands at all (transport failure), which is
+	 * NOT a version verdict -- only an answered request can be compared, so
+	 * this must stay non-fatal and leave the context usable for a caller's
+	 * own hard-reset retry (examples/peripheral-io/alp-console's
+	 * cc3501e_bridge_bringup 8-iteration soak; aen-cc3501e-gpio's liveness
+	 * gate) -- exactly like it was before this context ever probed. */
+	g_get_version_io_down_remaining = 1u;
+
+	zassert_equal(cc3501e_reset(&fw),
+	              ALP_OK,
+	              "an unanswered GET_VERSION probe must not be treated as a refusal");
+	zassert_true(fw.initialised, "an unanswered probe leaves the context usable for a retry");
+
+	/* And the retry lands normally afterwards (the down-counter above is
+	 * exhausted; the fixture reverts to its default matching reply). */
+	uint16_t v = 0u;
+	zassert_equal(cc3501e_get_version(&fw, &v), ALP_OK, "a following GET_VERSION works");
+	zassert_equal(v, (uint16_t)ALP_CC3501E_PROTOCOL_VERSION, "and reads the real value");
 }
 
 /* ============================ DIAGNOSTICS ================================== */
