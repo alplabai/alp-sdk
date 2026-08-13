@@ -45,8 +45,10 @@ typedef struct {
  * @param env        Injectable device facts.
  * @param requested  AUTO, or a forced backend (errors NOT_FOUND if absent).
  * @param out        Filled on ALP_OK.
- * @return ALP_OK (+ *out); ALP_ERR_INVAL (m/env/out NULL or n_targets==0);
- *         ALP_ERR_NOT_FOUND; ALP_ERR_NO_FIT; ALP_ERR_NO_BACKEND.
+ * @return ALP_OK (+ *out); ALP_ERR_INVAL (m/env/out NULL or n_targets==0,
+ *         OR the chosen target's blob_format string has no decoder case --
+ *         see _fmt_enum in the .c file); ALP_ERR_NOT_FOUND; ALP_ERR_NO_FIT;
+ *         ALP_ERR_NO_BACKEND.
  */
 alp_status_t alp_model_select(const alp_model_t            *m,
                               const alp_model_select_env_t *env,

@@ -62,8 +62,8 @@ per the issue's own ask, not left implicit):
     optional per-recipe data.
 
 WEST-AXIS COVERAGE, NAMED EXPLICITLY -- not left implicit.  As of this
-tree, 18 of the 35 `metadata/libraries/*.yaml` manifests have a west
-grounding this gate can compare a recipe against; the other 17 do not,
+tree, 18 of the 36 `metadata/libraries/*.yaml` manifests have a west
+grounding this gate can compare a recipe against; the other 18 do not,
 for one of three distinct reasons (re-verify against the live tree --
 `metadata/libraries/*.yaml` gains entries; this count drifts):
 
@@ -73,7 +73,7 @@ for one of three distinct reasons (re-verify against the live tree --
     revision, not a separate fetchable repo): coap, lwm2m, modbus.
     Maintainer-written / header-only, no upstream repo at all:
     gfx-compat, nlohmann-json, pid.  Yocto-only, no Zephyr side exists
-    to ground against: ros2.  (7 libraries)
+    to ground against: ros2, onnxruntime.  (8 libraries)
   * REACHABLE ONLY THROUGH ZEPHYR'S OWN `name-allowlist` IMPORT --
     west.yml never states these modules' revision directly; only
     Zephyr's OWN manifest does, resolvable only from a real checkout,

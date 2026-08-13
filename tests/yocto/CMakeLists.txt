@@ -218,6 +218,32 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(NAME alp_test_slot_claim_race
              COMMAND alp_test_slot_claim_race)
 
+    # Inference dispatcher close()-vs-invoke() race regression (#629):
+    # alp_inference_close() used to race a blocked alp_inference_invoke()
+    # (ORT api->Run() et al.) on a bare `in_use` check, freeing be_state
+    # out from under the still-running invoke.  #includes
+    # src/yocto/inference_yocto.c directly (see the test's own header
+    # comment) -- deliberately NOT linked against alp::sdk, same ODR
+    # rationale as alp_test_can_add_filter_close_race above.  Needs
+    # stub_core.c (alp_internal_set_last_error) and alp_slot_claim.c
+    # (the sleep-poll close drain) for the same reason that test does.
+    add_executable(alp_test_inference_invoke_close_race
+        ${CMAKE_CURRENT_SOURCE_DIR}/inference_invoke_close_race.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/stub/stub_core.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common/alp_slot_claim.c
+    )
+    target_link_libraries(alp_test_inference_invoke_close_race PRIVATE Threads::Threads)
+    target_include_directories(alp_test_inference_invoke_close_race PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/common
+    )
+    target_compile_features(alp_test_inference_invoke_close_race PRIVATE c_std_99)
+
+    add_test(NAME alp_test_inference_invoke_close_race
+             COMMAND alp_test_inference_invoke_close_race)
+
     # Mechanism-level regression for issue #1114's round-2 dev-review
     # finding: src/backends/security/zephyr_drv.c's ensure_psa() elect-once-
     # init algorithm must not hang a losing waiter when the elected

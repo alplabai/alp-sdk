@@ -117,6 +117,24 @@ PACKAGECONFIG opt-in), so a silently NOSUPPORT alp_model_parse would be \
 the wrong answer."
     OFF)
 
+option(ALP_SDK_USE_ORT_CPU
+    "Wire the ONNX Runtime CPU backend hook (src/yocto/inference_ort.cpp) for \
+<alp/inference.h>'s ALP_INFERENCE_BACKEND_CPU slot.  The portable CPU floor, \
+lowest priority under AUTO -- an NPU-bearing SoM still selects its NPU \
+backend first.  Links the upstream (own-recipe, never a vendor fork) \
+onnxruntime C API (libonnxruntime) located via the Yocto sysroot; has not \
+run on silicon yet.  Default OFF."
+    OFF)
+
+option(ALP_SDK_ORT_REQUIRED
+    "Treat a missing ONNX Runtime stack as a configure ERROR instead of \
+warning and disabling the backend.  Same rationale and same default as \
+ALP_SDK_DRPAI_REQUIRED / ALP_SDK_DEEPX_REQUIRED above: OFF lets a \
+plain-CMake builder who passed -DALP_SDK_USE_ORT_CPU=ON by hand degrade \
+cleanly, while a recipe that opts in by name should set this ON so a \
+silently backend-less libalp_sdk.so is not the answer."
+    OFF)
+
 target_sources(alp_sdk PRIVATE
     # Split stub backend (#673) -- one TU per API class plus the
     # shared stub_core.c (last-error slot + delay primitives).
@@ -993,5 +1011,68 @@ if(ALP_SDK_USE_DRPAI_V2N)
             ${MERA_DRPAI_WRAPPER_LIB}
             ${MERA2_RUNTIME_LIB} ${MERA2_PLAN_IO_LIB}
             ${DRP_TVM_RT_LIB} ${TVM_RUNTIME_LIB})
+    endif()
+endif()
+
+# ------------------------------------------------------------------ #
+# ONNX Runtime CPU backend (ALP_INFERENCE_BACKEND_CPU floor).         #
+#                                                                     #
+# inference_ort.cpp is written against the real upstream ONNX Runtime #
+# C API (onnxruntime_c_api.h).  This is alp-sdk's OWN recipe (never a #
+# vendor fork -- see metadata/libraries/onnxruntime.yaml), built by    #
+# meta-alp-sdk/recipes-devtools/onnxruntime and staged onto the Yocto  #
+# sysroot as libonnxruntime + onnxruntime_c_api.h.  Not installed on   #
+# this dev host -- BENCH-UNVERIFIED, same posture as DEEPX/DRP-AI      #
+# above.  Same probe-first shape as the (simpler) DEEPX block: a       #
+# single header + a single library, no multi-input stack like DRP-AI's.#
+# ------------------------------------------------------------------ #
+if(ALP_SDK_USE_ORT_CPU)
+    # PROBE FIRST, then decide whether to compile the backend in -- same
+    # #1145 rationale as the DEEPX/DRP-AI blocks above: libalp_sdk links
+    # with LINKER:--no-undefined, so an unresolved ORT symbol must be
+    # caught here (skip the TU) rather than failing this library's own link.
+    # PATH_SUFFIXES onnxruntime is load-bearing, not defensive breadth.
+    # VERIFIED against a real `bitbake onnxruntime` (2026-08-05, MACHINE
+    # e1m-v2n101-a55): the recipe installs the C API header to
+    #   image/usr/include/onnxruntime/onnxruntime_c_api.h
+    # -- a SUBDIRECTORY, not flat in ${includedir}.  A bare find_path()
+    # searches <sysroot>/usr/include but NOT <sysroot>/usr/include/onnxruntime,
+    # so without this suffix the probe misses on a real image, the else-branch
+    # below emits its WARNING, and libalp_sdk builds and links GREEN with no
+    # CPU backend compiled in at all -- the feature silently absent rather
+    # than loudly missing.  That is the worst failure shape available here,
+    # which is why ALP_SDK_ORT_REQUIRED exists as the hard-fail opt-in.
+    # Keep `onnxruntime` first so a flat install still resolves.
+    find_path(ORT_INCLUDE_DIR onnxruntime_c_api.h
+        PATH_SUFFIXES onnxruntime onnxruntime/core/session
+    )
+    find_library(ORT_LIB onnxruntime)
+
+    if(ORT_INCLUDE_DIR AND ORT_LIB)
+        target_sources(alp_sdk PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/inference_ort.cpp
+        )
+        target_compile_definitions(alp_sdk PRIVATE
+            ALP_SDK_USE_ORT_CPU
+        )
+        target_include_directories(alp_sdk PRIVATE ${ORT_INCLUDE_DIR})
+        target_link_libraries(alp_sdk PRIVATE ${ORT_LIB})
+    elseif(ALP_SDK_ORT_REQUIRED)
+        message(FATAL_ERROR
+            "alp-sdk yocto: ALP_SDK_USE_ORT_CPU=ON and ALP_SDK_ORT_REQUIRED=ON, "
+            "but onnxruntime_c_api.h and/or libonnxruntime were not found.  "
+            "Install meta-alp-sdk's own onnxruntime recipe on the Yocto "
+            "sysroot.")
+    else()
+        # Skip the backend rather than compile a translation unit whose
+        # symbols cannot resolve.  The dispatcher's other backends (NPU or
+        # otherwise) still answer alp_inference_open(.backend = CPU) via
+        # their own paths / NOSUPPORT.
+        message(WARNING
+            "alp-sdk yocto: ALP_SDK_USE_ORT_CPU=ON but onnxruntime_c_api.h "
+            "and/or libonnxruntime were not found -- the ORT CPU backend is "
+            "NOT compiled in.  Install meta-alp-sdk's own onnxruntime recipe "
+            "on the Yocto sysroot.  (BENCH-UNVERIFIED until this host or a "
+            "target has ONNX Runtime staged.)")
     endif()
 endif()
