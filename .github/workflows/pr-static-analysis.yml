@@ -18,6 +18,14 @@ on:
     branches: [main, dev]
   push:
     branches: [main, dev]
+  # `clang-format · diff-only` is the fifth of `dev`'s required contexts, and
+  # GitHub raises `merge_group` -- not `push` or `pull_request` -- for a
+  # merge-queue entry, so without this a queued PR waits on a check that can
+  # never fire (#1415). Neither `clang-format-diff` nor `cppcheck` carries a
+  # job-level `if:`. The "Determine diff base" step below already handles a
+  # non-`pull_request` event: it falls back to `HEAD~1`, which on a queue ref
+  # is this entry's own delta.
+  merge_group:
   workflow_dispatch:
 
 concurrency:
