@@ -696,15 +696,26 @@ if [ "${DO_WEST}" -eq 1 ] && [ "${DO_PATCHES}" -eq 1 ]; then
     if [ "${VERIFY_RC}" -eq 0 ]; then
         ok "zephyr/patches.yml already applied in ${WORKSPACE_DIR} -- nothing to do"
     else
-        info "Applying zephyr/patches.yml ('west patch apply')"
-        # Output captured and echoed on failure: west printed nothing the
-        # caller could see when this failed in CI, which made it a guess.
-        PATCH_OUT=$( cd "${WORKSPACE_DIR}" && "${WEST}" patch apply 2>&1 )
-        PATCH_RC=$?
-        printf '%s\n' "${PATCH_OUT}"
-        if [ "${PATCH_RC}" -ne 0 ]; then
-            die "west patch apply failed (exit ${PATCH_RC}) -- output above"
+        # PER MODULE, not the whole set. A workspace can be PARTIALLY patched:
+        # pr-getting-started-aen801.yml caches `zephyr` and `modules` under a
+        # key with no commit component, but NOT `bootloader/mcuboot`, so zephyr
+        # arrives already patched while mcuboot arrives fresh. A bare
+        # `west patch apply` then re-applies zephyr's and dies on the first one
+        # (`patch does not apply`), because the command is not idempotent.
+        UNAPPLIED=$( cd "${REPO_ROOT}" && "${VPY}" scripts/verify_west_patches.py \
+            --topdir "${WORKSPACE_DIR}" --west "${WEST}" --list-unapplied 2>/dev/null )
+        if [ -z "${UNAPPLIED}" ]; then
+            die "verify_west_patches.py reported patches missing (exit ${VERIFY_RC}) but named no module -- re-run it directly to see why"
         fi
+        for _mod in ${UNAPPLIED}; do
+            info "Applying zephyr/patches.yml for module '${_mod}' ('west patch apply --dst-module')"
+            PATCH_OUT=$( cd "${WORKSPACE_DIR}" && "${WEST}" patch apply --dst-module "${_mod}" 2>&1 )
+            PATCH_RC=$?
+            printf '%s\n' "${PATCH_OUT}"
+            if [ "${PATCH_RC}" -ne 0 ]; then
+                die "west patch apply --dst-module ${_mod} failed (exit ${PATCH_RC}) -- output above"
+            fi
+        done
         # Re-verify: `west patch apply`'s own exit status is not evidence it
         # did anything (three no-op-and-exit-0 paths -- see
         # scripts/verify_west_patches.py). Exit 3 is "everything present is

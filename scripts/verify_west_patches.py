@@ -229,6 +229,7 @@ def verify(repo: Path, topdir: Path, west: str = "west") -> tuple[list[str], lis
     failures: list[str] = []
     applied: list[str] = []
     absent_modules: list[str] = []
+    unapplied_modules: list[str] = []
 
     # Grouped by module, in declaration order: a module's patches are a STACK,
     # and one is only meaningfully checkable against the others (see
@@ -245,8 +246,10 @@ def verify(repo: Path, topdir: Path, west: str = "west") -> tuple[list[str], lis
         by_module.setdefault(str(module), []).append({"rel": rel, "file": patch_file})
 
     for module, items in by_module.items():
+        unapplied_modules_seen = False
         module_dir = dirs.get(module)
         if module_dir is None:
+            unapplied_modules.append(module)
             for it in items:
                 failures.append(
                     f"  UNRESOLVED  {it['rel']}\n"
@@ -283,7 +286,11 @@ def verify(repo: Path, topdir: Path, west: str = "west") -> tuple[list[str], lis
                     f"reverse. The module has been changed on top of, or instead of, "
                     f"this patch."
                 )
-    return failures, applied, absent_modules
+            if verdict != APPLIED:
+                unapplied_modules_seen = True
+        if unapplied_modules_seen:
+            unapplied_modules.append(module)
+    return failures, applied, absent_modules, unapplied_modules
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -299,6 +306,16 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=None,
         help="west workspace root (default: asked of `west topdir`)",
+    )
+    ap.add_argument(
+        "--list-unapplied",
+        action="store_true",
+        help="print the `module:` names that still need `west patch apply`, one "
+             "per line, and exit 0. A workspace can be PARTIALLY patched -- "
+             "pr-getting-started-aen801.yml caches `zephyr` and `modules` but "
+             "not `bootloader/mcuboot`, so zephyr arrives patched and mcuboot "
+             "arrives fresh -- and `west patch apply` with no --dst-module then "
+             "re-applies the ones already there and fails (#1392).",
     )
     ap.add_argument(
         "--west",
@@ -330,10 +347,15 @@ def main(argv: list[str] | None = None) -> int:
         topdir = Path(probe.stdout.strip())
 
     try:
-        failures, applied, absent_modules = verify(args.repo, topdir, args.west)
+        failures, applied, absent_modules, unapplied = verify(args.repo, topdir, args.west)
     except RuntimeError as err:
         print(f"verify-west-patches: {err}", file=sys.stderr)
         return 2
+
+    if args.list_unapplied:
+        for module in unapplied:
+            print(module)
+        return 0
 
     for line in applied:
         print(line)

@@ -120,7 +120,7 @@ def _west_shim(tmp_path, monkeypatch):
 def test_an_applied_patch_verifies(tmp_path):
     """Positive control: without it, a verifier that refuses everything passes."""
     repo, topdir = _workspace(tmp_path, PATCHED)
-    failures, applied, absent = vwp.verify(repo, topdir)
+    failures, applied, absent, _unapplied = vwp.verify(repo, topdir)
     assert failures == []
     assert absent == []
     assert len(applied) == 1
@@ -129,7 +129,7 @@ def test_an_applied_patch_verifies(tmp_path):
 def test_an_unapplied_patch_is_reported_absent(tmp_path):
     """The #1392 bug: `west patch apply` exits 0 having left this state."""
     repo, topdir = _workspace(tmp_path, UNPATCHED)
-    failures, applied, absent = vwp.verify(repo, topdir)
+    failures, applied, absent, _unapplied = vwp.verify(repo, topdir)
     assert applied == []
     assert len(failures) == 1
     assert "ABSENT" in failures[0]
@@ -139,7 +139,7 @@ def test_an_unapplied_patch_is_reported_absent(tmp_path):
 def test_a_module_changed_on_top_of_the_patch_is_reported_drifted(tmp_path):
     """Applies in neither direction -- distinct from simply not being there."""
     repo, topdir = _workspace(tmp_path, DRIFTED_CONTENT)
-    failures, applied, absent = vwp.verify(repo, topdir)
+    failures, applied, absent, _unapplied = vwp.verify(repo, topdir)
     assert applied == []
     assert len(failures) == 1
     assert "DRIFTED" in failures[0]
@@ -148,7 +148,7 @@ def test_a_module_changed_on_top_of_the_patch_is_reported_drifted(tmp_path):
 def test_a_module_west_cannot_resolve_fails_rather_than_being_skipped(tmp_path):
     """west's own `if mod is None: continue` is the silent path being closed."""
     repo, topdir = _workspace(tmp_path, PATCHED, module_name="no-such-module")
-    failures, applied, absent = vwp.verify(repo, topdir)
+    failures, applied, absent, _unapplied = vwp.verify(repo, topdir)
     assert applied == []
     assert len(failures) == 1
     assert "UNRESOLVED" in failures[0]
@@ -162,7 +162,7 @@ def test_module_name_resolves_through_module_yml(tmp_path):
     then the only thing that can, which is the lookup `west patch` itself uses.
     """
     repo, topdir = _workspace(tmp_path, PATCHED, module_dirname="alif_vendor")
-    failures, applied, absent = vwp.verify(repo, topdir)
+    failures, applied, absent, _unapplied = vwp.verify(repo, topdir)
     assert failures == []
     assert len(applied) == 1
 
@@ -171,7 +171,7 @@ def test_a_module_resolvable_by_none_of_the_three_names_refuses(tmp_path):
     """Same layout with `module.yml` removed: nothing maps `alif` to it."""
     repo, topdir = _workspace(tmp_path, PATCHED, module_dirname="alif_vendor",
                               declare_module_yml=False)
-    failures, applied, absent = vwp.verify(repo, topdir)
+    failures, applied, absent, _unapplied = vwp.verify(repo, topdir)
     assert applied == []
     assert "UNRESOLVED" in failures[0]
 
@@ -181,7 +181,7 @@ def test_an_uncheckedout_module_is_separated_from_a_missing_patch(tmp_path):
     repo, topdir = _workspace(tmp_path, PATCHED)
     import shutil
     shutil.rmtree(topdir / "modules" / "hal" / "alif" / ".git")
-    failures, applied, absent = vwp.verify(repo, topdir)
+    failures, applied, absent, _unapplied = vwp.verify(repo, topdir)
     assert failures == []
     assert applied == []
     assert len(absent) == 1
@@ -310,7 +310,7 @@ def test_two_patches_touching_one_file_are_both_reported_applied(tmp_path):
     that runs bootstrap failed on that.
     """
     repo, topdir = _overlap_workspace(tmp_path, BOTH_APPLIED)
-    failures, applied, absent = vwp.verify(repo, topdir)
+    failures, applied, absent, _unapplied = vwp.verify(repo, topdir)
     assert failures == [], failures
     assert len(applied) == 2
 
@@ -323,7 +323,7 @@ def test_an_absent_patch_does_not_condemn_the_rest_of_its_stack(tmp_path):
     """
     # Only the first patch applied: the second is simply not there.
     repo, topdir = _overlap_workspace(tmp_path, "first\nfrom-patch-one\nlast\n")
-    failures, applied, absent = vwp.verify(repo, topdir)
+    failures, applied, absent, _unapplied = vwp.verify(repo, topdir)
     assert len(applied) == 1, applied
     assert len(failures) == 1, failures
     assert "0002.patch" in failures[0]

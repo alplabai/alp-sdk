@@ -458,13 +458,27 @@ if (-not $NoWest -and -not $NoPatches) {
     if ($VerifyRc -eq 0) {
         Write-Ok "zephyr/patches.yml already applied in $WorkspaceDir -- nothing to do"
     } else {
-        Write-Info "Applying zephyr/patches.yml ('west patch apply')"
-        Push-Location $WorkspaceDir
+        # PER MODULE, not the whole set -- a workspace can be PARTIALLY
+        # patched, and `west patch apply` is not idempotent. See
+        # scripts/bootstrap.sh's block of the same name for the measurement.
+        Push-Location $RepoRoot
         try {
-            & $West patch apply
-            if ($LASTEXITCODE -ne 0) { Fail "west patch apply failed (exit $LASTEXITCODE) -- output above" }
+            $Unapplied = & $Vpy scripts/verify_west_patches.py --topdir $WorkspaceDir --west $West --list-unapplied 2>$null
         } finally {
             Pop-Location
+        }
+        if (-not $Unapplied) {
+            Fail "verify_west_patches.py reported patches missing (exit $VerifyRc) but named no module -- re-run it directly to see why"
+        }
+        foreach ($Mod in $Unapplied) {
+            Write-Info "Applying zephyr/patches.yml for module '$Mod' ('west patch apply --dst-module')"
+            Push-Location $WorkspaceDir
+            try {
+                & $West patch apply --dst-module $Mod
+                if ($LASTEXITCODE -ne 0) { Fail "west patch apply --dst-module $Mod failed (exit $LASTEXITCODE) -- output above" }
+            } finally {
+                Pop-Location
+            }
         }
         # Re-verify: `west patch apply`'s own exit status is not evidence it
         # did anything. Exit 3 is "everything present is patched, but a module
