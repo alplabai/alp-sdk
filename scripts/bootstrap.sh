@@ -60,6 +60,7 @@ BOOTSTRAP_JSON="${REPO_ROOT}/metadata/bootstrap.json"
 
 DO_PIP=1
 DO_WEST=1
+DO_PATCHES=1
 PRINT_ENV_ONLY=0
 ALLOW_PARTIAL=0
 
@@ -67,6 +68,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --no-pip)       DO_PIP=0 ;;
         --no-west)      DO_WEST=0 ;;
+        --no-patches)   DO_PATCHES=0 ;;
         --print-env)    PRINT_ENV_ONLY=1 ;;
         --allow-partial) ALLOW_PARTIAL=1 ;;
         -h|--help)
@@ -88,6 +90,12 @@ Usage:
     bash scripts/bootstrap.sh                # full setup
     bash scripts/bootstrap.sh --no-pip       # skip pip installs
     bash scripts/bootstrap.sh --no-west      # skip west init/update
+    bash scripts/bootstrap.sh --no-patches   # skip `west patch apply` + its
+        # verification (issue #1392). The patches in zephyr/patches.yml are
+        # required to BUILD: zephyr/patches/zephyr/0002-ipm-add-poll-out-poll-in.patch
+        # adds the ipm_driver_api .poll_out/.poll_in fields hal_alif's
+        # se_service.c calls and vanilla Zephyr v4.4.1 does not have. Use this
+        # only when you intend to manage the patch state yourself.
     bash scripts/bootstrap.sh --print-env    # only print env-var lines
     bash scripts/bootstrap.sh --allow-partial
         # report success even if zephyr-requirements / sdk-extras /
@@ -610,6 +618,43 @@ if [ "${DO_WEST}" -eq 1 ]; then
             die "workspace at ${WORKSPACE_DIR} does not register 'west alp-migrate' -- its manifest is not alp-sdk's west.yml (#769). Check 'west -C ${WORKSPACE_DIR} config manifest.path'."
         fi
         ok "alp-* extension commands registered ('west alp-migrate' resolves in ${WORKSPACE_DIR})"
+    fi
+
+    # -------- zephyr/patches.yml (issue #1392) --------------------------------
+    # This used to be a manual step nothing here mentioned, documented only in
+    # docs/aen-bench-bringup.md §3 and replicated by pr-twister-aen.yml in its
+    # own stanza. A user who ran this script and started building got an
+    # unpatched tree, and every layer stayed quiet about it: bootstrap
+    # succeeded, the build succeeded, the flash succeeded, and the board did
+    # not boot the application.
+    #
+    # `west patch apply` is re-appliable, so running it on an already-patched
+    # reused workspace is not a problem; its own exit status, however, is not
+    # evidence it did anything (three no-op-and-exit-0 paths -- see
+    # scripts/verify_west_patches.py). The verification below is what makes
+    # this step mean something, and it is a hard failure: an unpatched
+    # workspace cannot build hal_alif's se_service.c against vanilla Zephyr
+    # v4.4.1's ipm_driver_api anyway.
+    if [ "${DO_PATCHES}" -eq 1 ]; then
+        info "Applying zephyr/patches.yml ('west patch apply')"
+        ( cd "${WORKSPACE_DIR}" && "${WEST}" patch apply ) || die "west patch apply failed"
+        # Exit 3 is "everything present is patched, but a module this
+        # workspace does not carry could not be checked" -- normal for a
+        # narrow workspace, so it warns rather than dying. 1 and 2 are the
+        # real thing.
+        # No `set +e`/`set -e` guard around this: this script runs under
+        # `set -uo pipefail` with errexit OFF (line 37), so a non-zero exit
+        # here does not end the script and $? is readable directly. Adding the
+        # guard would switch errexit ON for everything below it.
+        ( cd "${REPO_ROOT}" && "${VPY}" scripts/verify_west_patches.py --topdir "${WORKSPACE_DIR}" )
+        VERIFY_RC=$?
+        case "${VERIFY_RC}" in
+            0) ok "zephyr/patches.yml verified applied in ${WORKSPACE_DIR}" ;;
+            3) warn "some zephyr/patches.yml modules are not in this workspace -- see above" ;;
+            *) die "zephyr/patches.yml is not applied in ${WORKSPACE_DIR} (#1392) -- see the list above" ;;
+        esac
+    else
+        info "Skipping 'west patch apply' (--no-patches) -- zephyr/patches.yml is NOT applied"
     fi
 
     # NOTE: this does NOT install the Zephyr SDK (the cross toolchains).
