@@ -89,7 +89,20 @@ def fake_git_repo(tmp_path):
     subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=tmp_path, check=True)
 
     func_text = TEST_ALL.read_text(encoding="utf-8")
-    body = _extract_bash_function(func_text, "abi_current_snapshot")
+    # Every helper the extracted stage CALLS has to come with it. #1424 added
+    # `require_jsonschema_2020` (and its `have_jsonschema_2020`) to
+    # `stage_generated_files`; extracting the stage alone left the composed
+    # func.sh calling an undefined function, and this test went red on
+    # `origin/dev` itself:
+    #
+    #   func.sh: line 16: require_jsonschema_2020: command not found
+    #   assert 99 == 0
+    #
+    # Not a `source scripts/test-all.sh`: that runs the whole script, which is
+    # the slow, tool-dependent suite this extraction exists to avoid.
+    body = _extract_bash_function(func_text, "have_jsonschema_2020")
+    body += _extract_bash_function(func_text, "require_jsonschema_2020")
+    body += _extract_bash_function(func_text, "abi_current_snapshot")
     body += _extract_bash_function(func_text, "stage_generated_files")
     (tmp_path / "func.sh").write_text(body, encoding="utf-8")
     return tmp_path
