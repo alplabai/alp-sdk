@@ -14,8 +14,11 @@
 >
 > The per-SKU DRAM/eMMC densities named below (e.g. "V2N102/V2M101=32
 > Gbit") reflect this session's pre-#1230 snapshot, not current
-> metadata -- E1M-V2M101 is now 64/128 Gbit and E1M-V2N102 is 64/64
-> Gbit; see `metadata/e1m_modules/E1M-*.yaml` for the live values.
+> metadata -- E1M-V2M101 is now 64/128 Gbit (per #1230). E1M-V2N102's
+> DRAM is 64 Gbit but its eMMC is disputed, not 64 Gbit as this session
+> assumed -- see the eMMC footnote in
+> `vendors/renesas-rzv2n/README.md` for the current state; see
+> `metadata/e1m_modules/E1M-*.yaml` for the live per-field values.
 
 Authoritative plan for the next session. Self-contained — designed
 to brief a fresh agent (or human) with no conversation history.

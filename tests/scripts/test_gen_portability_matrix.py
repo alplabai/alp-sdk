@@ -191,26 +191,50 @@ def test_v2n_v2m_memory_capacities_are_pinned():
     a silent revert of flash_mbit (proven in round-5 review: reverting
     E1M-V2M101's flash_mbit 131072 -> 32768 alone left every generator/doc
     gate at rc=0; only alp.lock's raw-byte digest caught it, and a
-    comment-only edit trips that identically). Pin the presets whose
-    memory blocks are settled so a revert of either field fails a real
+    comment-only edit trips that identically). Pin the presets/fields whose
+    memory values are settled so a revert of either field fails a real
     assertion here instead of relying solely on the digest.
 
-    E1M-V2N102 is deliberately NOT pinned here: its `flash_mbit: 65536`
-    (64 Gbit) has never been ruled on by anyone and disagrees with the
-    128 Gbit eMMC figure `vendors/renesas-rzv2n/README.md` draws from the
-    external e1m-spec v1.1. A round-6 review found the two in-tree docs
-    that were cited as "independent" corroboration for 64 Gbit --
-    `metadata/e1m_modules/E1M-V2N102.yaml` and `docs/soms/v2n.md` -- are
-    not independent (the latter is a same-day doc-sync descendant of the
-    former, per `git merge-base --is-ancestor`). Pinning 65536 here would
-    lock in an unverified, possibly-wrong number as if it were settled."""
+    E1M-V2N102's and E1M-V2M102's `flash_mbit` are deliberately NOT pinned
+    to a single value here: both trace only to non-independent in-tree
+    sources -- `metadata/e1m_modules/E1M-V2N102.yaml` + `docs/soms/v2n.md`
+    for the former, `metadata/e1m_modules/E1M-V2M102.yaml` +
+    `docs/soms/v2n-m1.md` for the latter (each doc-side pair a same-day
+    `git merge-base --is-ancestor`-confirmed descendant of its metadata
+    commit, not independent corroboration) -- and neither has a maintainer
+    ruling. `vendors/renesas-rzv2n/README.md` treats 128 Gbit and 64 Gbit
+    as the two live candidates for both (128 Gbit is the value `d953e401`
+    wrote there, itself a copy-paste across the V2N and V2N-M1 rows in one
+    hunk, not a per-SKU spec transcription; 64 Gbit is what the metadata
+    for both reads); #1230's ruling text
+    ("its published capacities are 8 GB DRAM / 16 GB eMMC") is textually
+    ambiguous about whether it covers E1M-V2M102 at all. Pinning either
+    64 Gbit or 128 Gbit here would lock in an unverified, possibly-wrong
+    number as if it were settled. Their `dram_mbit` IS pinned below --
+    unlike `flash_mbit`, it isn't contested by any candidate figure."""
     presets = gpm.load_presets()
     expected = {
         "E1M-V2N101": {"dram_mbit": 32768, "flash_mbit": 32768},
         "E1M-V2M101": {"dram_mbit": 65536, "flash_mbit": 131072},
-        "E1M-V2M102": {"dram_mbit": 65536, "flash_mbit": 65536},
     }
     for sku, mem in expected.items():
         actual = presets[sku]["memory"]
         assert actual["dram_mbit"] == mem["dram_mbit"], sku
         assert actual["flash_mbit"] == mem["flash_mbit"], sku
+
+    # dram_mbit is settled and uncontested for the two disputed-eMMC SKUs
+    # too -- pin it on its own so a silent DRAM revert still fails here.
+    dram_only = {"E1M-V2N102": 65536, "E1M-V2M102": 65536}
+    for sku, dram_mbit in dram_only.items():
+        assert presets[sku]["memory"]["dram_mbit"] == dram_mbit, sku
+
+    # flash_mbit for these two is genuinely disputed between two candidate
+    # figures (see the docstring above) -- pin it to that set instead of
+    # dropping coverage entirely, so a regression to an unrelated number
+    # (neither candidate) still fails here.
+    disputed_flash_candidates = {
+        "E1M-V2N102": {65536, 131072},
+        "E1M-V2M102": {65536, 131072},
+    }
+    for sku, candidates in disputed_flash_candidates.items():
+        assert presets[sku]["memory"]["flash_mbit"] in candidates, sku

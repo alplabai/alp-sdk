@@ -11,9 +11,14 @@ deep-link of whatever you're doing.
 | SKU            | Memory                                | Status     |
 |----------------|---------------------------------------|------------|
 | `E1M-V2N101`   | 32 Gbit LPDDR4X + 32 Gbit eMMC        | production |
-| `E1M-V2N102`   | 64 Gbit LPDDR4X + 64 Gbit eMMC        | production |
+| `E1M-V2N102`   | 64 Gbit LPDDR4X + 128 Gbit eMMC       | production |
 
 Both SKUs share the same silicon + PCB.  Pick by memory budget.
+`E1M-V2N102`'s eMMC figure is disputed, not settled: the SoM preset
+metadata carries `flash_mbit: 65536` (64 Gbit) instead -- see the eMMC
+footnote in
+[`vendors/renesas-rzv2n/README.md`](../../vendors/renesas-rzv2n/README.md#skus-covered)
+for why this page keeps 128 Gbit rather than the metadata figure.
 
 ## What's on the module
 

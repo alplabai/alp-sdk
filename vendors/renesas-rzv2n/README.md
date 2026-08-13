@@ -8,16 +8,45 @@ Camera variant).
 
 | Family             | SKUs                          | Renesas part            | LPDDR4X         | eMMC                       | Companion accelerator   |
 |--------------------|-------------------------------|-------------------------|-----------------|----------------------------|--------------------------|
-| **E1M-X V2N**      | `E1M-V2N101`, `E1M-V2N102`    | `R9A09G056N44GBG#AC0`   | 32 / 64 Gbit    | eMMC 5.1, 32 / 128 Gbit    | —                        |
-| **E1M-X V2N-M1**   | `E1M-V2M101`, `E1M-V2M102`    | `R9A09G056N44GBG#AC0`   | 64 / 64 Gbit    | eMMC 5.1, 128 / 64 Gbit¹   | DEEPX DX-M1 (25 TOPS)    |
+| **E1M-X V2N**      | `E1M-V2N101`, `E1M-V2N102`    | `R9A09G056N44GBG#AC0`   | 32 / 64 Gbit    | eMMC 5.1, 32 / 128 Gbit¹   | —                        |
+| **E1M-X V2N-M1**   | `E1M-V2M101`, `E1M-V2M102`    | `R9A09G056N44GBG#AC0`   | 64 / 64 Gbit    | eMMC 5.1, 128 / TBD Gbit²  | DEEPX DX-M1 (25 TOPS)    |
 
-¹ V2M101 and V2M102 do NOT follow the family's usual 101 < 102 tier split
-seen in the V2N101/V2N102 pair above: V2M101 is 8 GiB DRAM / 16 GiB eMMC and
-V2M102 is 8 GiB DRAM / 8 GiB eMMC -- V2M101 carries equal DRAM and MORE eMMC
-than V2M102. Only E1M-V2M101's values are maintainer-confirmed (per the
-ruling on #1230); E1M-V2M102's are the pre-existing metadata figures and are
-unverified -- the ruling did not address V2M102 or the inversion itself,
-which stays unresolved and not tracked by any open issue.
+¹ E1M-V2N102's eMMC here (128 Gbit) is the value `d953e401` wrote into
+this table -- that same hunk wrote the identical "eMMC 5.1, 32 / 128
+Gbit" (and identical "32 / 64 Gbit" LPDDR4X) into both the V2N and
+V2N-M1 rows, not a per-SKU spec transcription. `metadata/e1m_modules/E1M-V2N102.yaml`
+instead carries `flash_mbit: 65536` (64 Gbit); that figure and
+`docs/soms/v2n.md`'s matching prose are not independent corroboration of
+each other (`4a0b294a` introduced the metadata value, `3ff71900` added the
+doc row the same day, and `git merge-base --is-ancestor 4a0b294a
+3ff71900` confirms the latter descends from the former). Nobody has ruled
+on E1M-V2N102 the way #1230 ruled on E1M-V2M101; this table keeps 128
+Gbit on the strength of the same "external spec over an unverified,
+non-independent in-tree value" reasoning #1230 applied to E1M-V2M101 --
+not because either source is individually strong. Not settled.
+
+² V2M101 and V2M102 do NOT follow the family's usual 101 < 102 tier split
+seen in the V2N101/V2N102 pair above: per the ruling on #1230, V2M101 is
+8 GiB DRAM / 16 GiB eMMC (`dram_mbit: 65536` / `flash_mbit: 131072`) --
+the row's HIGH figures, even though V2M101 is the SKU listed first (the
+V2N pair instead has its first-listed SKU, V2N101, at the row's LOW
+figures). That break in the V2N pair's low/high-by-position pattern means
+the pre-#1230 `d953e401` row can't be used to infer V2M102's figure by
+position either. The "TBD" in the table above is this doc's own disputed
+marker, not the literal metadata value:
+`metadata/e1m_modules/E1M-V2M102.yaml` still carries `flash_mbit: 65536` (64
+Gbit, pre-existing, non-independent from `docs/soms/v2n-m1.md`'s matching
+prose the same way as the V2N102 case above), while the pre-#1230
+`d953e401` table row's other cell reads 128 Gbit. The #1230 ruling's
+closing sentence -- "The V2M variant is the DEEPX-populated one
+(V2N101/102 and V2M101/102 are the same PCB, differing only in memory and
+DEEPX population), and its published capacities are 8 GB DRAM / 16 GB
+eMMC" -- is textually ambiguous about whether "its" scopes to E1M-V2M101
+(this issue's subject) or the V2M variant generically (`gh issue view
+1230 --comments`); neither reading is asserted here. DRAM is not in
+dispute: both V2M SKUs read `dram_mbit: 65536` (64 Gbit) with no
+contending figure. The naming inversion itself is unresolved and not
+tracked by any open issue.
 
 Authoritative per-SKU detail and the silicon stack live in
 [`e1m-spec` Annex A.2 / A.3](https://github.com/alplabai/e1m-spec/blob/main/STANDARD.md#a2-e1m-x-v2n-family-renesas-rzv2n).

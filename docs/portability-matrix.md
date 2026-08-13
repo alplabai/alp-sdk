@@ -270,9 +270,11 @@ example, `alp.conf` differs only by:
 V2N101 vs V2N102, and V2M101 vs V2M102, are byte-identical save
 the identity comments — the per-SKU memory-capacity delta (visible in the
 generated Notes column: 32 vs 64 Gbit DRAM for V2N101/V2N102; both V2M SKUs
-show 64 Gbit DRAM per #1230, see `vendors/renesas-rzv2n/README.md` for the
-eMMC-side tier-inversion note) lives at the metadata level and intentionally
-does NOT leak into application-facing CONFIG.
+show 64 Gbit DRAM — V2M101's is the #1230 ruling, V2M102's is the
+pre-existing, uncontested metadata value, not itself part of that ruling —
+see `vendors/renesas-rzv2n/README.md` for the eMMC-side tier-inversion and
+dispute notes) lives at the metadata level and intentionally does NOT leak
+into application-facing CONFIG.
 
 Expected diffs (legitimate):
 

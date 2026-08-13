@@ -7,13 +7,15 @@
 | SKU            | Memory                                 | Status     |
 |----------------|-----------------------------------------|------------|
 | `E1M-V2M101`   | 64 Gbit LPDDR4X + 128 Gbit eMMC + DX-M1 | production |
-| `E1M-V2M102`   | 64 Gbit LPDDR4X + 64 Gbit eMMC + DX-M1  | production |
+| `E1M-V2M102`   | 64 Gbit LPDDR4X + TBD eMMC + DX-M1      | production |
 
-V2M101 and V2M102 have equal DRAM and V2M101 carries MORE eMMC than
-V2M102, breaking the family's usual 101 < 102 tier split -- see the
-footnote in [`vendors/renesas-rzv2n/README.md`](../../vendors/renesas-rzv2n/README.md#skus-covered).
-E1M-V2M101's values are maintainer-confirmed (#1230); E1M-V2M102's are
-unverified. The naming inversion is unresolved.
+V2M101 and V2M102 have equal DRAM; V2M101's eMMC (128 Gbit) is
+maintainer-confirmed (#1230) and MORE than the SoM preset metadata's
+figure for V2M102 (64 Gbit), breaking the family's usual 101 < 102 tier
+split -- but E1M-V2M102's own eMMC capacity is disputed, not confirmed,
+so how much more (if any) is unsettled too -- see the footnote in
+[`vendors/renesas-rzv2n/README.md`](../../vendors/renesas-rzv2n/README.md#skus-covered)
+for the full reasoning. The naming inversion itself is unresolved.
 
 ## What's different from V2N base
 
