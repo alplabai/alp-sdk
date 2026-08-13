@@ -1001,7 +1001,7 @@
         ],
         "path": "examples/connectivity/iot-fleet-ota",
         "som": "E1M-AEN801",
-        "summary": "Secure OTA firmware update with rollback. The production-readiness proof for \"how do we update 10 000 units in the field?\"."
+        "summary": "Secure OTA firmware update, verify-only on the qualified E1M-AEN801 SKU (apply is DEFERRED, #1069 -- see [STATUS] in `board.yaml`). The production-readiness proof for \"how do we update 10 000 units in the field?\"."
       },
       {
         "board": "e1m-evk",
