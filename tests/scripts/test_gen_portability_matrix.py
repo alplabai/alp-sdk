@@ -182,3 +182,26 @@ def test_notes_for_is_pure_metadata_projection():
     assert gpm.notes_for({}) == ""
     assert gpm.notes_for({"memory": {"dram_mbit": "TBD"}}) == ""
     assert gpm.notes_for({"memory": {"dram_mbit": 65536}}) == "64 Gbit DRAM"
+
+
+def test_v2n_v2m_memory_capacities_are_pinned():
+    """#1230: `flash_mbit` has no generator/schema consumer beyond the
+    required/type check in som-preset-v1.schema.json -- notes_for() above
+    only ever renders dram_mbit, so nothing else in the gate suite catches
+    a silent revert of flash_mbit (proven in round-5 review: reverting
+    E1M-V2M101's flash_mbit 131072 -> 32768 alone left every generator/doc
+    gate at rc=0; only alp.lock's raw-byte digest caught it, and a
+    comment-only edit trips that identically). Pin all four V2N/V2M
+    presets' memory blocks directly so a revert of either field fails a
+    real assertion here instead of relying solely on the digest."""
+    presets = gpm.load_presets()
+    expected = {
+        "E1M-V2N101": {"dram_mbit": 32768, "flash_mbit": 32768},
+        "E1M-V2N102": {"dram_mbit": 65536, "flash_mbit": 65536},
+        "E1M-V2M101": {"dram_mbit": 65536, "flash_mbit": 131072},
+        "E1M-V2M102": {"dram_mbit": 65536, "flash_mbit": 65536},
+    }
+    for sku, mem in expected.items():
+        actual = presets[sku]["memory"]
+        assert actual["dram_mbit"] == mem["dram_mbit"], sku
+        assert actual["flash_mbit"] == mem["flash_mbit"], sku

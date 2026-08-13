@@ -12,8 +12,8 @@
 V2M101 and V2M102 have equal DRAM and V2M101 carries MORE eMMC than
 V2M102, breaking the family's usual 101 < 102 tier split -- see the
 footnote in [`vendors/renesas-rzv2n/README.md`](../../vendors/renesas-rzv2n/README.md#skus-covered).
-Per-SKU values are maintainer-confirmed (#1230); the naming inversion is
-unresolved.
+E1M-V2M101's values are maintainer-confirmed (#1230); E1M-V2M102's are
+unverified. The naming inversion is unresolved.
 
 ## What's different from V2N base
 

@@ -66,22 +66,34 @@ on_module:
 memory:
   # #1230: both fields were stale (32768/32768, 4 GiB / 4 GB) -- neither
   # matched the shipping BOM. Maintainer ruling (issue #1230, comment 2):
-  # DRAM 8 GiB is the SKU spec, corroborated by the bench read of
-  # /proc/device-tree/memory@48000000/reg -> size 0x1F8000000 bytes
-  # (7.875 GiB) for the Linux-visible node, PLUS the 128 MiB secure-area
-  # carved out below it -- see
-  # meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2m101-x-evk.dts:23
-  # ("First 128 MB reserved for the secure area"): 0x8000000 + 0x1F8000000
-  # = 0x200000000 = 8 GiB total. (0x1F8000000 alone is 7.875 GiB, NOT 8 GiB
-  # -- don't drop the carve-out term when re-deriving this.)
-  # eMMC 16 GiB is the SKU spec. The bench module's own ~256 GB eMMC
-  # (Micron 0IM20H) is an over-fitted lab part, NOT representative of the
-  # shipping BOM -- do not "correct" flash_mbit toward that number.
+  # DRAM 8 GiB and eMMC 16 GiB are the SKU spec. That ruling is the ONLY
+  # basis for these two numbers -- it is not corroborated by the
+  # Linux-visible memory@48000000 node in
+  # meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2m101-x-evk.dts,
+  # even though the arithmetic there happens to work out: that node reads
+  # 0x1F8000000 bytes (7.875 GiB, NOT 8 GiB -- don't drop the carve-out
+  # term when re-deriving this) and the same file's comment says the
+  # first 128 MiB below it is reserved for the secure area, so
+  # 0x8000000 + 0x1F8000000 = 0x200000000 = 8 GiB total IF this node is
+  # SKU-accurate. It is not known to be: the identical reg value
+  # 0x1F8000000 also appears, unedited, in
+  # meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n101-x-evk.dts:23
+  # for E1M-V2N101 -- a 4 GiB SKU (dram_mbit 32768) -- whose own comment
+  # reads "VERIFY per SKU (V2N101 vs V2N102)". The V2M101 dts node's own
+  # comment further states that U-Boot overwrites this at boot
+  # (ARCH_FIXUP_FDT_MEMORY) with the size from its own control DT inside
+  # the FIP, and that "the authoritative per-SKU DRAM size lives in the
+  # firmware pack ... not here" -- this reg value is only the no-fixup
+  # fallback, an unverified copy-paste placeholder, not proof of the SKU
+  # spec. eMMC 16 GiB is the SKU spec. The bench module's own ~256 GB
+  # eMMC (Micron 0IM20H) is an over-fitted lab part, NOT representative
+  # of the shipping BOM -- do not "correct" flash_mbit toward that
+  # number.
   #
   # UNRESOLVED: this makes V2M101's DRAM tier equal E1M-V2M102's (both
   # 65536) and its eMMC LARGER than V2M102's (131072 vs 65536) -- inverting
-  # the family's usual 101 < 102 tier convention (E1M-V2N101/102 and
-  # E1M-V2M102 all follow it; see vendors/renesas-rzv2n/README.md and
+  # the family's usual 101 < 102 tier convention seen in the
+  # E1M-V2N101/E1M-V2N102 pair (see vendors/renesas-rzv2n/README.md and
   # docs/soms/v2n-m1.md). The maintainer ruling above settles V2M101's OWN
   # values; it does not explain the inversion or touch V2M102. Do not
   # invent a resolution -- flag for a follow-up issue.

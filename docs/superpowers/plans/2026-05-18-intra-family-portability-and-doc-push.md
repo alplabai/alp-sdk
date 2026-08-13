@@ -11,6 +11,11 @@
 > checkout paths (e.g. `C:\Users\<user>\...`) verbatim -- treat them as
 > historical record, not copy-paste-ready commands for today's
 > checkout.
+>
+> The per-SKU DRAM/eMMC densities named below (e.g. "V2N102/V2M101=32
+> Gbit") reflect this session's pre-#1230 snapshot, not current
+> metadata -- E1M-V2M101 is now 64/128 Gbit and E1M-V2N102 is 64/64
+> Gbit; see `metadata/e1m_modules/E1M-*.yaml` for the live values.
 
 Authoritative plan for the next session. Self-contained — designed
 to brief a fresh agent (or human) with no conversation history.
