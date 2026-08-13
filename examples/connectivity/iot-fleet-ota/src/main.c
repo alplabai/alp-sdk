@@ -2,7 +2,7 @@
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * iot-fleet-ota -- secure OTA firmware update with rollback.
+ * iot-fleet-ota -- secure OTA firmware update.
  *
  * The production-readiness proof: "how do we update 10k units in
  * the field?".  Answer:
@@ -22,20 +22,34 @@
  *      produce a signature that this device will accept.  See
  *      docs/secure-boot.md "Signing key lifecycle".
  *
- *   3. The verified bytes are written to the inactive MCUboot
- *      slot (slot-B if currently booted from slot-A, vice
- *      versa).  MCUboot's swap-using-scratch trailer is marked
- *      "test pending" -- the next reboot boots the new image
- *      with a one-shot fall-back-if-not-confirmed flag set.
+ *   3. The verified bytes are written to flash.  On a genuine
+ *      two-slot AEN target this step writes the inactive slot
+ *      (slot-B if currently booted from slot-A, vice versa) and
+ *      arms MCUboot's swap-using-scratch "test pending" trailer
+ *      so the next reboot tries the new image with a one-shot
+ *      fall-back-if-not-confirmed flag set.
  *
- *   4. k_reboot().  MCUboot validates the signature *again* at
- *      boot, swaps, and hands off to the new image.
+ *   4. k_reboot().  On a two-slot target MCUboot validates the
+ *      signature *again* at boot, swaps, and hands off to the
+ *      new image.
  *
- *   5. The new image must call boot_set_confirmed() within its
- *      health-check window or MCUboot rolls back to the
- *      previous slot on the next reboot.  Watchdog-friendly
- *      safety net: an OTA that bricks the device is
- *      automatically reversed.
+ *   5. On a two-slot target, the new image must call
+ *      boot_set_confirmed() within its health-check window or
+ *      MCUboot rolls back to the previous slot on the next
+ *      reboot -- a watchdog-friendly safety net: an OTA that
+ *      bricks the device is automatically reversed.
+ *
+ * [STATUS] On this SKU (E1M-AEN801), steps 3-5 above describe the
+ * general two-slot AEN design, not what runs here.  MCUboot boots
+ * single-app on this SoM (CONFIG_SINGLE_APPLICATION_SLOT=y,
+ * #1069/#1413) -- both M55 cores share the same physical App MRAM,
+ * so there is no inactive slot to write into and no swap-with-revert
+ * to arm.  The verified artefact still gets written to slot0 and
+ * MCUboot still re-verifies its signature on every boot, but a
+ * rejected or failed image halts rather than rolling back.  See
+ * board.yaml and docs/secure-boot.md.  The swap-with-revert rollback
+ * path needs a two-slot AEN target, which none of the qualified
+ * boards are today.
  *
  * Three layers of defence
  * =======================
@@ -45,8 +59,11 @@
  *              flash; an attacker with the server's keys still
  *              can't produce a passing artefact without the
  *              OPTIGA-locked private key.
- *   - Boot:    MCUboot re-verifies and atomic-swaps; mid-write
- *              power loss recovers cleanly via the scratch slot.
+ *   - Boot:    MCUboot re-verifies at every boot; a two-slot AEN
+ *              target atomic-swaps and recovers mid-write power
+ *              loss via the scratch slot, while this SKU's
+ *              single-app layout halts on a failed re-verify (see
+ *              [STATUS] above).
  *
  * Targets ALL E1M-X SoMs (the trust model is shared; only the
  * download transport varies -- HTTPS on AEN via the CC3501E,
@@ -64,8 +81,9 @@
  * ====================
  * Real polling against a staged Mender server; real ECDSA-P256
  * verification via mbedtls today, with OPTIGA-backed PSA hardware
- * acceleration planned once that driver lands; real slot-B write
- * through <alp/storage.h>; real k_reboot() into MCUboot's swap path.
+ * acceleration planned once that driver lands; real slot0 write
+ * through <alp/storage.h>; real k_reboot() into MCUboot's
+ * single-app re-verify-and-halt-on-reject path (see [STATUS]).
  */
 
 #include <stdio.h>
@@ -213,24 +231,27 @@ fleet_verify_signature(const uint8_t *image, size_t image_len, const uint8_t *si
 }
 
 /* ----------------------------------------------------------------- */
-/* Stage 4: write to the inactive MCUboot slot                        */
+/* Stage 4: write the verified artefact to flash                      */
 /* ----------------------------------------------------------------- */
 
 /**
- * @brief Stream the verified artefact into the inactive MCUboot slot.
+ * @brief Stream the verified artefact into flash.
  *
- * MCUboot lays out slot-A and slot-B back-to-back in the
- * internal flash.  alp_storage_open(INTERNAL_FLASH) gives the
- * raw flash handle; the partition table (DT chosen node
- * `zephyr,code-partition`) determines slot-A's offset, slot-B
- * lives at the matching offset on the other side.  Chunk-wise
- * erase + write keeps the watchdog happy.
+ * On a two-slot AEN target, MCUboot lays out slot-A and slot-B
+ * back-to-back in the internal flash and this step writes the
+ * inactive one.  On this SKU (E1M-AEN801) MCUboot boots
+ * single-app (see [STATUS] at the top of this file) -- there is
+ * no inactive slot, so this writes slot0 directly.
+ * alp_storage_open(INTERNAL_FLASH) gives the raw flash handle;
+ * the partition table (DT chosen node `zephyr,code-partition`)
+ * determines the destination offset.  Chunk-wise erase + write
+ * keeps the watchdog happy.
  */
-static bool fleet_write_inactive_slot(const uint8_t *image, size_t image_len)
+static bool fleet_write_verified_image(const uint8_t *image, size_t image_len)
 {
 	(void)image;
 	(void)image_len;
-	printf("[ota] stage 4: writing artefact to inactive MCUboot slot\n");
+	printf("[ota] stage 4: writing artefact to flash\n");
 	alp_storage_t *s = alp_storage_open(&(alp_storage_config_t){
 	    .kind        = ALP_STORAGE_KIND_INTERNAL_FLASH,
 	    .instance_id = 0u,
@@ -260,25 +281,27 @@ static bool fleet_write_inactive_slot(const uint8_t *image, size_t image_len)
 }
 
 /* ----------------------------------------------------------------- */
-/* Stage 5: arm swap-with-rollback + reboot                            */
+/* Stage 5: reboot into the new image                                  */
 /* ----------------------------------------------------------------- */
 
 /**
- * @brief Set MCUboot's "test pending" flag in the slot trailer
- *        and trigger a reboot.
+ * @brief Trigger a reboot into the newly-written image.
  *
- * MCUboot's swap-using-scratch mode treats the test-pending
- * flag as one-shot: the next boot tries the new slot, but if
+ * On a two-slot AEN target this would set MCUboot's "test
+ * pending" flag in the slot trailer: swap-using-scratch treats
+ * it as one-shot -- the next boot tries the new slot, but if
  * boot_set_confirmed() isn't called in the new image's
  * health-check window, the *following* boot rolls back to the
- * previous slot.  Mid-swap power loss is recovered via the
- * scratch sector (see docs/secure-boot.md "Failure modes").
+ * previous slot, and mid-swap power loss recovers via the
+ * scratch sector.  On this SKU (E1M-AEN801) MCUboot boots
+ * single-app (see [STATUS] at the top of this file): there is no
+ * slot trailer to arm and no rollback target -- the reboot simply
+ * re-verifies slot0 and halts if that check fails.  See
+ * docs/secure-boot.md "Failure modes".
  */
-static void fleet_arm_swap_and_reboot(void)
+static void fleet_finish_update_and_reboot(void)
 {
-	printf("[ota] stage 5: arming swap-with-rollback + rebooting\n");
-	printf("[ota]   boot_request_upgrade(BOOT_UPGRADE_TEST)"
-	       " (stubbed on native_sim)\n");
+	printf("[ota] stage 5: rebooting into the new image\n");
 	printf("[ota]   k_reboot() (stubbed on native_sim)\n");
 #ifndef CONFIG_BOARD_NATIVE_SIM
 	/* sys_reboot() / k_reboot() -- the real implementation lands
@@ -329,11 +352,11 @@ static bool fleet_ota_tick(void)
 		printf("[ota]   signature verification FAILED -- discarding\n");
 		return true;
 	}
-	if (!fleet_write_inactive_slot(image, img_len)) {
+	if (!fleet_write_verified_image(image, img_len)) {
 		printf("[ota]   slot write failed -- aborting deployment\n");
 		return true;
 	}
-	fleet_arm_swap_and_reboot();
+	fleet_finish_update_and_reboot();
 	return false; /* k_reboot() would have happened on HiL */
 }
 
@@ -341,7 +364,7 @@ int main(void)
 {
 	printf("[ota] alp-sdk iot-fleet-ota demo\n");
 	printf("[ota]   trust: OPTIGA Trust M (slot 0xE0F0) +"
-	       " ECDSA-P256 + MCUboot swap-using-scratch\n");
+	       " ECDSA-P256 + MCUboot single-app (see board.yaml [STATUS])\n");
 	printf("[ota]   transport: HTTPS poll to %s (Mender protocol)\n", MENDER_SERVER_URL);
 
 	for (;;) {

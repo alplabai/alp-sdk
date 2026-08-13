@@ -32,18 +32,22 @@
  *      `alp_iot_*` opens a TLS-mutual-auth connection to the
  *      Mender server and polls for a deployment.  If one is
  *      pending, the SDK downloads the new image, verifies its
- *      signature against the same ECDSA-P256 boot key, writes it
- *      to the inactive MCUboot slot, sets the swap-pending flag,
- *      and requests a reboot.  Post-reboot, MCUboot confirms or
- *      reverts based on the new image's `mark_confirmed` call.
+ *      signature against the same ECDSA-P256 boot key, and writes
+ *      it to flash.  On this SKU (E1M-AEN801) MCUboot boots
+ *      single-app (#1069/#1413, see docs/secure-boot.md): there is
+ *      no inactive slot to stage the new image in, so the write
+ *      replaces slot0 directly and a reboot re-verifies it in
+ *      place -- a rejected signature halts rather than rolling
+ *      back to a previous image.
  *
  *   4. Remote attestation.
  *      Per the threat model (`docs/threat-model.md` §asset 8), a
  *      cloud-side fleet operator needs evidence that the device
  *      hasn't been physically tampered with.  This app publishes
  *      a periodic heartbeat that includes the OPTIGA-signed boot
- *      log + the current secure-boot slot.  An attacker who
- *      swapped the flash sees the OPTIGA signature break.
+ *      log + the running slot0 image's identity.  An attacker who
+ *      swapped the flash chip itself sees the OPTIGA signature
+ *      break.
  *
  * Why this is a "reference application" not a "library example"
  * =============================================================
@@ -73,12 +77,14 @@
  * Full lifecycle, end-to-end:
  *   - Boot from a factory-signed image.
  *   - Read manufacturer EEPROM, print serial + SKU + rev.
- *   - Inspect MCUboot slots, print image revision.
+ *   - Inspect the MCUboot slot0 image, print image revision.
  *   - Connect to a Mender server (board-staged
  *     production-test rig), poll for an update.
  *   - When a deployment lands, download + verify + apply
  *     it, request reboot.
- *   - Post-reboot: confirm the new image to keep the swap.
+ *   - Post-reboot: on this SKU's single-app layout, a passing
+ *     re-verify of slot0 *is* the confirmation -- there is no
+ *     swap state to keep (see [STATUS] in board.yaml).
  *   - Publish OPTIGA-signed attestation every 60 s thereafter.
  */
 
@@ -165,8 +171,9 @@ static void stage_ota_poll(void)
      *      Mender deployment commands (or HTTPS poll, depending
      *      on the Mender flavour).
      *   3. On a deployment event: alp_storage_open(QSPI) the OTA
-     *      partition, write chunks, mark MCUboot for swap on
-     *      next boot, alp_iot_publish a deployment-accepted
+     *      partition, write chunks (replacing slot0 directly on
+     *      this SKU's single-app layout -- see [STATUS] in
+     *      board.yaml), alp_iot_publish a deployment-accepted
      *      status, reboot.
      *
      * On native_sim every step returns NOSUPPORT; the example
