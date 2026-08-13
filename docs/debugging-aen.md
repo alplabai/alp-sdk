@@ -2,9 +2,9 @@
 
 How to attach a debugger to an E1M-AEN801 module, the traps that catch
 people the first time, and what J-Link is (and is not) for on this part.
-This doc covers **attaching/reading state** (§1–§2, §4) and **flashing
-your own application image** (§3) — for bench bring-up walk-through see
-[`bring-up-aen.md`](bring-up-aen.md).
+This doc covers **attaching/reading state** (§1–§2, §4), **flashing your
+own application image** (§3), and **reading its output** (§5–§6) — for
+bench bring-up walk-through see [`bring-up-aen.md`](bring-up-aen.md).
 
 ## 1. Attach a debugger: `west debug`
 
@@ -130,6 +130,9 @@ actually lands the window:
 4. To fix it permanently rather than re-catching the window every time,
    flash a build that stays busy and never idles (never calls `WFI`);
    once that image is resident, the DAP stays powered across boots.
+   **That busy loop interacts with the logging subsystem — see §6
+   before you conclude the resulting silent console means a dead
+   board.**
 
 The same pre-idle-window logic applies to the SE-UART/SETOOLS
 maintenance channel: forcing a fresh boot and catching the SETOOLS
@@ -166,3 +169,89 @@ does not need a debugger. As shipped, the E1M-AEN apps default to the Alp
 UART console on the carrier's console UART; attach a 115200 8N1 serial
 terminal to the carrier's console header and `printk()`/application
 output appears directly.
+
+## 6. The console prints nothing, and the board is fine
+
+This is the trap that costs an afternoon, because every instinct points
+at the flash, the probe or the image — and all three are healthy.
+
+**Symptom.** Zero bytes on the console. Not "the banner appears but my
+log lines don't" — *zero*: no `*** Booting Zephyr OS build ... ***`, no
+Alp SDK boot-identity banner (`Alp SDK <version>  |  <SoM or board>  |
+…  |  (c) Alp Lab AB`, from `src/zephyr/alp_banner.c`), no `LOG_INF`
+output, nothing, across a full capture and across a cold power cycle.
+
+**The interaction.** Two correct pieces of advice collide:
+
+- §4 above tells you to run an application that **stays busy and never
+  idles**, because an idling M55 makes the Secure Enclave gate the DAP
+  and the SE-UART. The usual shape is a `main()` that never returns and
+  never yields — `for (;;) { k_busy_wait(1000); }`.
+- Zephyr's own logging default is `CONFIG_LOG_MODE_DEFERRED=y`, which
+  formats and writes records from the log processing thread
+  (`CONFIG_LOG_PROCESS_THREAD` is `default y`). Without
+  `CONFIG_LOG_PROCESS_THREAD_CUSTOM_PRIORITY=y` that thread runs at
+  `K_LOWEST_APPLICATION_THREAD_PRIO`, strictly below `main`'s
+  `CONFIG_MAIN_THREAD_PRIORITY=0`; time-slicing only rotates among
+  *ready threads of equal priority*, so it does not rescue it.
+
+A `main()` that never yields therefore never lets the log thread run,
+and the queued records are never printed. The banner goes with them:
+`CONFIG_LOG_PRINTK` is `default y if PRINTK`, so `printk()` — including
+the Alp SDK banner — is routed through the same starved queue. That is
+why the measurement is *zero* bytes rather than "banner, then silence",
+and it is exactly why this reads as a dead board rather than as an
+application problem.
+
+**How to spot it in one attach.** A running-but-silent board and a
+faulted board are trivially distinguishable over SWD. Attach (§1),
+then:
+
+```
+halt
+Reg PC
+Reg IPSR
+mem32 0xE000ED28 1
+```
+
+The starved-log signature, measured on E1M-AEN801 silicon
+(issue [#1373](https://github.com/alplabai/alp-sdk/issues/1373)):
+
+| Read | Value | Reads as |
+|---|---|---|
+| `PC` | an address inside `z_impl_k_busy_wait` | the core is executing the delay loop |
+| `IPSR` | `000` | `NoException` — not in a fault handler |
+| `CFSR` @ `0xE000ED28` | `00000000` | no configurable fault has ever latched |
+
+`PC` is a per-build address, so resolve it against your own `zephyr.elf`
+(`arm-zephyr-eabi-nm`/`addr2line`) rather than comparing it to a literal
+from someone else's capture. `IPSR = 000` together with `CFSR =
+00000000` rules out the fault explanation in a single read: the board is
+running, fault-free, and simply has nothing draining its log queue.
+
+**What the SDK does about it.** Every E1M-AEN board tree defaults the
+logging mode to minimal rather than inheriting Zephyr's deferred
+default:
+
+```
+# zephyr/boards/alp/e1m_aen*/Kconfig.defconfig
+choice LOG_MODE
+	default LOG_MODE_MINIMAL
+endchoice
+```
+
+`CONFIG_LOG_MODE_MINIMAL` formats and writes in the calling context, so
+a non-yielding `main()` cannot starve it and the busy-loop advice in §4
+stays safe to follow. It is a board *default*, not a lock: an
+application that wants the deferred pipeline — log backends, runtime
+filtering, timestamps — sets `CONFIG_LOG_MODE_DEFERRED=y` in its own
+`prj.conf` and gets it back, along with the responsibility to yield
+(`k_msleep()`) somewhere in `main()`.
+
+Minimal mode is not free of consequences, and they are worth knowing
+before you override the default in either direction: it drops timestamps,
+prefixes, colours, runtime filtering and the log backends entirely
+(everything goes to `printk()`), and build-time filtering via
+`CONFIG_LOG_DEFAULT_LEVEL` still applies. If your output is missing but
+the banner *does* appear, you are past this section's failure and looking
+at ordinary log-level filtering instead.

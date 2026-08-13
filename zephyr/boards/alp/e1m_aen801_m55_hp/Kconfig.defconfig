@@ -19,4 +19,21 @@ if BOARD_ALP_E1M_AEN801_M55_HP
 config ROM_START_OFFSET
 	default 0x800 if BOOTLOADER_MCUBOOT
 
+# Logging: default to LOG_MODE_MINIMAL, not Zephyr's inherited
+# LOG_MODE_DEFERRED.  Deferred mode needs CONFIG_LOG_PROCESS_THREAD to run,
+# and the AEN bench procedure runs apps whose main() never yields (a
+# non-yielding busy loop is what keeps the Secure Enclave from gating the
+# DAP and the SE-UART -- see docs/debugging-aen.md section 4).  A
+# non-yielding main() starves the log thread, and because CONFIG_LOG_PRINTK
+# routes printk() through the same queue the Alp SDK banner disappears too:
+# a running, fault-free board prints ZERO bytes.  Measured on E1M-AEN801
+# silicon (issue #1373) -- PC inside z_impl_k_busy_wait, IPSR = 000,
+# CFSR @ 0xE000ED28 = 00000000, and no UART output at all.  Minimal mode
+# formats in the calling context, so the same app prints.  An app that
+# wants the deferred pipeline (backends, runtime filtering, timestamps)
+# overrides this with CONFIG_LOG_MODE_DEFERRED=y in its prj.conf.
+choice LOG_MODE
+	default LOG_MODE_MINIMAL
+endchoice
+
 endif # BOARD_ALP_E1M_AEN801_M55_HP
