@@ -14,9 +14,11 @@
 #                           Linux-fork variant)
 #   - `security.psa:`      TF-M secure partition + OPTIGA-rooted
 #                           attestation
-#   - `storage:`           application storage partitions (settings +
-#                           app_data); see [STATUS] on the
-#                           mcuboot_primary/secondary/scratch entries
+#   - `storage:`           illustrates the declarative SHAPE only on
+#                           this SKU -- E1M-AEN801's `memory_map:`
+#                           already claims the full 5632 KiB App MRAM,
+#                           so every entry below is BLOCKED at emit
+#                           time; see [STATUS]
 #   - `cores.<id>.memory:` tuned stack / heap / ISR-stack sizes
 #   - `cores.<id>.power:`  standby with multi-source wakeup
 #   - `diagnostics.modules:` security / iot at info, everything
@@ -34,6 +36,14 @@
 # (`os: yocto`, a different core); Zephyr-side MCUboot swap/rollback
 # needs a two-slot AEN target, which none of the qualified boards are
 # today.  See docs/secure-boot.md.
+#
+# The `storage:` block below is illustrative-only on E1M-AEN801: its
+# `memory_map:` regions (mcuboot + he_slot0 + hp_slot0 + reserved +
+# storage + atoc, metadata/e1m_modules/E1M-AEN801.yaml) already occupy
+# the full 5632 KiB App MRAM window, so EVERY entry under `storage:`
+# below emits `status: blocked` in the generated `dts-partitions.dtsi`
+# (measured via `--emit dts-partitions`) -- there is no free MRAM left
+# to place any of them, including `settings` / `app_data`.
 #
 # Real customer shipping variants fork this for V2N or i.MX 93
 # boards; the SDK's declarative surface stays identical across
@@ -180,9 +190,13 @@ security:
 # partitions (their own `&mram_main` node), NOT the board DT's
 # `slot0_partition` / `slot1_partition` / `scratch_partition` labels
 # MCUboot's flash-map actually reads -- see [STATUS] above.  Sizes
-# add up to ~2.4 MiB out of the AEN E8's 5.5 MiB MRAM -- the
-# remainder stays available for code + MCUboot itself + the
-# TF-M secure partition.
+# below sum to ~2.4 MiB (1024 + 1024 + 64 + 64 + 256 KiB), but on
+# E1M-AEN801 there is no remainder to place them in: the SoM's own
+# `memory_map:` regions already occupy the full 5632 KiB App MRAM
+# window (metadata/e1m_modules/E1M-AEN801.yaml), so every entry below
+# emits `status: blocked` in the generated `dts-partitions.dtsi` --
+# this block demonstrates the `storage:` declarative shape only, not
+# a working layout, on this SKU.
 storage:
   - name:         mcuboot_primary
     fs:           raw

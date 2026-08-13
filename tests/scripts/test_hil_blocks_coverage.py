@@ -250,12 +250,18 @@ _AEN801_SOM_PRESET = {
     "family": "alif-ensemble",
     "topology": {},
     "memory_map": [
-        {"name": "mcuboot",   "base": 0x80000000, "size_kib": 64},
-        {"name": "he_slot0",  "base": 0x80010000, "size_kib": 2688},
-        {"name": "hp_slot0",  "base": 0x802b0000, "size_kib": 2688},
-        {"name": "reserved",  "base": 0x80550000, "size_kib": 64},
-        {"name": "storage",   "base": 0x80560000, "size_kib": 96},
-        {"name": "atoc",      "base": 0x80578000, "size_kib": 32},
+        {"name": "mcuboot",   "base": 0x80000000, "size_kib": 64,
+         "accessible_from": ["m55_he", "m55_hp"]},
+        {"name": "he_slot0",  "base": 0x80010000, "size_kib": 2688,
+         "accessible_from": ["m55_he"]},
+        {"name": "hp_slot0",  "base": 0x802b0000, "size_kib": 2688,
+         "accessible_from": ["m55_hp"]},
+        {"name": "reserved",  "base": 0x80550000, "size_kib": 64,
+         "accessible_from": ["m55_he", "m55_hp"]},
+        {"name": "storage",   "base": 0x80560000, "size_kib": 96,
+         "accessible_from": ["m55_he", "m55_hp"]},
+        {"name": "atoc",      "base": 0x80578000, "size_kib": 32,
+         "accessible_from": ["m55_he", "m55_hp"]},
     ],
 }
 
@@ -306,6 +312,54 @@ def test_explicit_two_slot_swap_algorithm_refused_on_aen801(swap: str) -> None:
     )
     with pytest.raises(OrchestratorError, match="slot1/scratch"):
         emit_sysbuild_conf(project)
+
+
+# A `memory_map:` present for a reason OTHER than a disjoint-slot0
+# override (an rpmsg carve-out, say) -- no `<role>_slot0` region, so
+# `scripts/gen_zephyr_board.py`'s `_aen_flash_partitions` falls through
+# to the STOCK two-slot layout (a real `image-1` + `image-scratch`)
+# regardless of what THIS map's own region names are.  Deliberately
+# named so neither "slot1" nor "scratch" appears as a substring of any
+# region name -- the shape that broke the pre-fix name-substring check
+# (it scanned `memory_map:` region names instead of asking
+# `gen_zephyr_board._aen_role_slot0_map` the real question).
+_RPMSG_CARVEOUT_SOM_PRESET = {
+    "family": "alif-ensemble",
+    "topology": {},
+    "memory_map": [
+        {"name": "mcuboot",        "base": 0x80000000, "size_kib": 64,
+         "accessible_from": ["m55_he", "m55_hp"]},
+        {"name": "rpmsg_carveout", "base": 0x80010000, "size_kib": 256,
+         "accessible_from": ["m55_he", "m55_hp"]},
+    ],
+}
+
+
+def test_memory_map_without_role_slot0_still_defaults_to_scratch() -> None:
+    """A `memory_map:` override that exists for a reason other than a
+    disjoint-slot0 layout (no `<role>_slot0` region) must NOT be read
+    as single-slot: `gen_zephyr_board._aen_flash_partitions` falls
+    through to the stock two-slot layout for it (a real slot1 + a real
+    scratch partition), so an omitted `swap_algorithm:` must still
+    default to swap-using-scratch, and single-app must never be
+    emitted.  Regression for the proxy-vs-referent bug: an earlier
+    `_boot_target_is_single_slot` scanned `memory_map:` region NAMES
+    for "slot1"/"scratch" substrings, which this fixture's names never
+    contain, so it answered single-slot=True on a target that actually
+    generates a real slot1/scratch pair."""
+    project = _make_project(
+        sku="E1M-AEN301",
+        som_preset=_RPMSG_CARVEOUT_SOM_PRESET,
+        boot={
+            "method": "mcuboot",
+            "signing": {"algorithm": "ecdsa_p256",
+                        "key_file": "keys/dev_ecdsa_p256.pem"},
+            # swap_algorithm intentionally omitted
+        },
+    )
+    sysbuild = emit_sysbuild_conf(project)
+    assert "SB_CONFIG_MCUBOOT_MODE_SWAP_SCRATCH=y" in sysbuild
+    assert "SB_CONFIG_MCUBOOT_MODE_SINGLE_APP" not in sysbuild
 
 
 def test_rsa3072_hard_errors_in_mcuboot_path() -> None:

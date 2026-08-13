@@ -22,17 +22,21 @@ boot:
   signing:
     algorithm: ecdsa_p256
     key_file:  keys/mcuboot_dev_ecdsa_p256.pem
-  swap_algorithm: scratch
 ```
 
 Drives sysbuild's MCUboot child image. ECDSA-P256 ties to the
-OPTIGA Trust M production key (see `iot-fleet-ota`). Slot/scratch
-partition *sizes* aren't a `boot:` field -- MCUboot takes its
-geometry from the board DT `partitions {}` node; this example
-declares the layout explicitly via `storage:` below instead.
-Downgrade prevention is the `ota.rollback.min_version` software
-floor below; a hardware anti-rollback counter tier (OPTIGA/OTP
-fuse) isn't built yet, so this skeleton doesn't claim one.
+OPTIGA Trust M production key (see `iot-fleet-ota`). `swap_algorithm:`
+is intentionally omitted: E1M-AEN801's disjoint-slot0 `memory_map:`
+(#1069, #1413) has no slot1/scratch partition, so the SDK's per-target
+default resolves to single-app boot
+(`SB_CONFIG_MCUBOOT_MODE_SINGLE_APP=y`); setting `swap_algorithm:
+scratch` (or `move`/`overwrite`) explicitly here is a build-time error
+on this SKU. Slot/scratch partition *sizes* aren't a `boot:` field
+either way -- MCUboot takes its geometry from the board DT
+`partitions {}` node, not from `storage:` (see the `storage:` section
+below). Downgrade prevention is the `ota.rollback.min_version`
+software floor below; a hardware anti-rollback counter tier
+(OPTIGA/OTP fuse) isn't built yet, so this skeleton doesn't claim one.
 
 ### `ota:` -- Mender HTTPS poll + A/B rollback
 
@@ -88,14 +92,19 @@ storage:
   - { name: app_data,          fs: littlefs, size_kib:  256, flash_device: mram_main, mount: /lfs/app }
 ```
 
-The MCUboot slots are explicit here -- this is the only place their
-size is declared, since `boot:` has no slot-size field; Zephyr's
-settings subsystem gets its own littlefs partition;
-app-managed runtime data gets its own. Adds to ~2.4 MiB of the
-AEN E8's 5.5 MiB MRAM -- the rest stays free for code + MCUboot
-itself + TF-M's secure partition. The planner emits a
-partial DTS overlay (`partitions { ... }` node) + matching
-Kconfig (`CONFIG_FILE_SYSTEM_LITTLEFS=y`) per entry.
+`mcuboot_primary` / `mcuboot_secondary` / `mcuboot_scratch` are named
+to illustrate a two-slot MCUboot layout, but they are `storage:`
+partitions (their own `&mram_main` node), NOT the board DT's
+`slot0_partition` / `slot1_partition` / `scratch_partition` labels
+MCUboot's flash-map actually reads -- MCUboot itself boots single-app
+on this SKU (see the `boot:` section above). Sizes sum to ~2.4 MiB
+(1024 + 1024 + 64 + 64 + 256 KiB), but on E1M-AEN801 there is no
+remainder to place them in: the SoM's own `memory_map:` regions
+already occupy the full 5632 KiB App MRAM window
+(`metadata/e1m_modules/E1M-AEN801.yaml`), so EVERY entry above emits
+`status: blocked` in the generated `dts-partitions.dtsi` (verify with
+`--emit dts-partitions`) -- this section demonstrates the `storage:`
+declarative shape only, not a working layout, on this SKU.
 
 ### `cores.m55_hp.memory:` -- per-core memory tuning
 

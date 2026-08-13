@@ -76,29 +76,57 @@ def _has_zephyr_slice(project: BoardProject) -> bool:
 
 
 def _boot_target_is_single_slot(project: BoardProject) -> bool:
-    """Whether this SoM's `memory_map:` declares a layout with no
-    slot1/scratch partition -- i.e. any MCUboot swap mode (scratch,
-    move, overwrite) has no partition to swap into.
+    """Whether this project resolves to a disjoint-slot0 boot shape on
+    ANY of its Zephyr M55 cores -- i.e. any MCUboot swap mode (scratch,
+    move, overwrite) has no slot1/scratch partition to swap into.
 
-    `memory_map:` in `metadata/e1m_modules/<SKU>.yaml` is an SDK
-    build-policy override, not a silicon fact (see that file's own
-    comment) -- only E1M-AEN801 sets it today.  Its disjoint-slot0
-    layout (#1069: both M55 cores share one physical App MRAM, so
-    slot0 is split into per-core windows and the secondary/scratch
-    slot was dropped rather than forced to fit) has no `*slot1*` or
-    `*scratch*` region -- confirmed against the generated board DTS
-    (`zephyr/boards/alp/e1m_aen801_m55_{he,hp}/*.dts`: `slot0_partition`,
-    `reserved_partition` (ex-scratch), `storage_partition`,
-    `atoc_partition` -- no `slot1_partition`, no `scratch_partition`).
-    Every other AEN SKU has no `memory_map:` override and gets
-    `scripts/gen_zephyr_board.py`'s stock symmetric two-slot layout
-    (slot0 + slot1 + scratch), where every swap mode is valid.
+    Reuses `gen_zephyr_board._aen_role_slot0_map` -- the SAME resolver
+    the board-DT generator (`_aen_dts` / `_aen_flash_partitions`) and
+    `loader._resolve_slot0_load_address` already call to answer this
+    exact question -- instead of re-deriving the answer from
+    `memory_map:` region NAMES.  The two disagree in general:
+    `metadata/schemas/som-preset-v1.schema.json` documents
+    `memory_map:` as an SDK build-policy override "ONLY for non-stock
+    partitioning", not something only a disjoint-slot0 SoM sets --
+    `docs/v0.6-tbd-and-assumptions.md` lists filling the V2N, AEN E7
+    and iMX93 memory_maps as open items.  A `memory_map:` present for
+    an unrelated reason (an rpmsg carve-out, say) that declares no
+    `<role>_slot0` region makes `_aen_flash_partitions` fall through to
+    the STOCK two-slot layout -- a REAL `image-1` + `image-scratch` --
+    regardless of what its OWN region names happen to be, so a check
+    that scans those names for the substrings "slot1"/"scratch" can
+    answer True (single-slot) on a target that generates a real slot1
+    and a real scratch partition.  `_aen_role_slot0_map` asks the real
+    question instead: does THIS role have its own `<role>_slot0`
+    region (the only shape that drops slot1/scratch, #1069 --
+    E1M-AEN801 is the only SKU that sets one today: both M55 cores
+    share one physical App MRAM, so slot0 is split into per-core
+    windows and the secondary/scratch slot was dropped rather than
+    forced to fit)?
+
+    Only `m55_he`/`m55_hp` roles are AEN slot0-XIP cores (same
+    convention as `loader._resolve_slot0_load_address`); a project
+    with neither in `cores:` -- any non-AEN family, or an AEN project
+    with no Zephyr M55 slice -- is never single-slot by this check.
     """
     memory_map = project.som_preset.get("memory_map")
     if not memory_map:
         return False
-    names = {str(region.get("name", "")).lower() for region in memory_map}
-    return not any("slot1" in n or "scratch" in n for n in names)
+    from gen_zephyr_board import ZephyrBoardEmitError, _aen_role_slot0_map
+    for core_id in project.cores:
+        if not core_id.startswith("m55_"):
+            continue
+        role = core_id[len("m55_"):]
+        if role not in ("he", "hp"):
+            continue
+        try:
+            if _aen_role_slot0_map(memory_map, role) is not None:
+                return True
+        except ZephyrBoardEmitError as exc:
+            raise OrchestratorError(
+                f"cannot resolve boot.swap_algorithm default for "
+                f"{project.sku}: {exc}") from exc
+    return False
 
 
 def sysbuild_family_base_conf(project: BoardProject) -> Optional[Path]:
@@ -221,7 +249,7 @@ def emit_sysbuild_conf(project: BoardProject) -> str:
             f"partition that {project.sku}'s disjoint-slot0 "
             "`memory_map:` (metadata/e1m_modules/"
             f"{project.sku}.yaml, #1069) doesn't declare -- this "
-            "single-slot AEN target only supports the stock "
+            "single-slot target only supports the stock "
             "single-app boot.  Drop `boot.swap_algorithm:` (it now "
             "defaults correctly on single-slot targets) rather than "
             "setting it explicitly.")
