@@ -129,6 +129,20 @@
       "ci": "pr-metadata-validate.yml:validate"
     },
     {
+      "id": "changelog-citations",
+      "description": "Every `path:line` citation in a changelog.d/*.md fragment resolves to a real file and an in-range line, and an anchored citation's quoted text is still inside the cited range, so a release note cannot point at code that moved (#1416).",
+      "runner": "check-script",
+      "script": "scripts/check_changelog_citations.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "chip-header-status",
       "description": "CI gate: chip-header `@par Driver status:` labels match metadata truth.",
       "runner": "check-script",
