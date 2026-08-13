@@ -101,19 +101,39 @@ def _west_shim(tmp_path, monkeypatch):
     The west project name is `hal_alif` while `patches.yml` says `alif` -- the
     same mismatch as the real workspace. A resolver that keyed only on the west
     project name would pass every other test here and still fail in production.
+
+    Written as a PYTHON script plus, on Windows, a `.bat` that invokes it. A
+    `#!/usr/bin/env bash` file with the exec bit is not executable on Windows --
+    `subprocess` there raises `FileNotFoundError: [WinError 2] The system cannot
+    find the file specified`, which failed all 13 tests in this file on the
+    `python-smoke (windows-latest)` leg while passing on ubuntu and macos.
+    Skipping the module on Windows would have been the cheaper fix and the wrong
+    one: `scripts/bootstrap.ps1` calls `verify_west_patches.py` on Windows, so
+    this is code Windows users run.
     """
     bindir = tmp_path / "bin"
     bindir.mkdir(exist_ok=True)
-    shim = bindir / "west"
-    shim.write_text(
-        "#!/usr/bin/env bash\n"
-        'if [ "$1" = "list" ]; then\n'
-        '  for d in "$PWD"/modules/hal/*; do echo "hal_alif|$d"; done\n'
-        "  exit 0\n"
-        "fi\n"
-        "exit 1\n"
+    body = (
+        "import os, sys\n"
+        "if len(sys.argv) > 1 and sys.argv[1] == 'list':\n"
+        "    root = os.path.join(os.getcwd(), 'modules', 'hal')\n"
+        "    if os.path.isdir(root):\n"
+        "        for name in sorted(os.listdir(root)):\n"
+        "            print('hal_alif|' + os.path.join(root, name))\n"
+        "    sys.exit(0)\n"
+        "sys.exit(1)\n"
     )
-    shim.chmod(0o755)
+    (bindir / "west.py").write_text(body, encoding="utf-8")
+    if sys.platform.startswith("win"):
+        # `west` with no extension is not spawnable on Windows; PATHEXT picks
+        # up `.bat`.
+        (bindir / "west.bat").write_text(
+            f'@echo off\r\n"{sys.executable}" "%~dp0west.py" %*\r\n', encoding="utf-8"
+        )
+    else:
+        shim = bindir / "west"
+        shim.write_text(f"#!{sys.executable}\n" + body, encoding="utf-8")
+        shim.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
 
 
