@@ -102,6 +102,21 @@ opts in by name should set this ON so a silently backend-less \
 libalp_sdk.so is not the answer."
     OFF)
 
+option(ALP_SDK_MODEL_ZCBOR_REQUIRED
+    "Treat a missing zcbor stack as a configure ERROR instead of warning \
+and degrading <alp/model.h>'s alp_model_parse back to \
+src/common/stub/stub_model.c's ALP_ERR_NOSUPPORT body.  Same rationale \
+and same default as ALP_SDK_DRPAI_REQUIRED above: OFF (the default) is \
+the safe choice for a direct plain-CMake -DALP_OS=yocto configure on a \
+host with no zcbor installed -- e.g. the pr-plain-cmake.yml stock \
+Ubuntu runners, which cannot carry a Yocto-only OE package -- so that \
+build degrades cleanly instead of failing configure.  meta-alp-sdk's \
+alp-sdk recipe sets this ON: there zcbor is an unconditional DEPENDS \
+(recipes-devtools/zcbor/zcbor_0.9.1.bb is always staged, not a \
+PACKAGECONFIG opt-in), so a silently NOSUPPORT alp_model_parse would be \
+the wrong answer."
+    OFF)
+
 option(ALP_SDK_USE_ORT_CPU
     "Wire the ONNX Runtime CPU backend hook (src/yocto/inference_ort.cpp) for \
 <alp/inference.h>'s ALP_INFERENCE_BACKEND_CPU slot.  The portable CPU floor, \
@@ -150,7 +165,13 @@ target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_power.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_gpu2d.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_rpc.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_model.c
+    # stub_model.c is intentionally NOT listed here (issue #1254): the
+    # real alp_model_parse() body (src/common/alp_model.c) is added
+    # below when zcbor is found; stub_model.c is added there instead,
+    # on the degrade leg, when it isn't -- leaving both in this
+    # unconditional list would double-define alp_model_parse (the stub
+    # and the real body export the same symbol; whichever TU compiles
+    # in is authoritative, and only one may be present).
     # SDK lifecycle (alp_init / alp_deinit) -- OS-agnostic.
     ${CMAKE_CURRENT_SOURCE_DIR}/../init.c
     # Register-file I2C target helper (<alp/i2c_regfile.h>) -- pure
@@ -326,6 +347,104 @@ target_sources(alp_sdk PRIVATE
     # static and no undefined reference on the Yocto link.
     ${CMAKE_CURRENT_SOURCE_DIR}/dispatch_last_error_shim.c
 )
+
+# alp_model.c (#1254): the real .alpmodel CBOR-manifest reader behind
+# <alp/model.h>.  TWO-MODE detection, same shape as the DRP-AI block
+# below (ALP_SDK_DRPAI_REQUIRED): ALP_SDK_MODEL_ZCBOR_REQUIRED (above)
+# says which of two opposite failure modes applies --
+#   (a) direct plain-CMake, REQUIRED=OFF -- a builder configures
+#       -DALP_OS=yocto on a host with no zcbor at all (e.g. the
+#       pr-plain-cmake.yml stock Ubuntu runners: zcbor is not a
+#       Debian/Ubuntu package, so those runners can never have it).  A
+#       FATAL_ERROR here would break every such build.  Warn + degrade
+#       to stub_model.c's ALP_ERR_NOSUPPORT body instead.
+#   (b) meta-alp-sdk's alp-sdk recipe, REQUIRED=ON -- there zcbor is an
+#       unconditional DEPENDS (recipes-devtools/zcbor/zcbor_0.9.1.bb is
+#       always staged, not a PACKAGECONFIG opt-in), so a sysroot missing
+#       it is a packaging bug, not a degrade candidate: fail configure
+#       rather than ship a silently NOSUPPORT alp_model_parse again
+#       (the exact regression this issue exists to fix).
+#
+# zcbor ships no CMake package config or pkgconfig .pc file of its own
+# (find_path/find_library, not find_package/pkg_check_modules, matching
+# how the DXRT/DRPAI libraries below are found -- none of these upstream
+# projects hand CMake a discovery file). meta-alp-sdk's own zcbor recipe
+# (recipes-devtools/zcbor/zcbor_0.9.1.bb) stages
+# ${includedir}/zcbor_decode.h + ${libdir}/libzcbor.so on the target
+# sysroot; a direct plain-CMake build against a Yocto sysroot needs the
+# matching zcbor-dev package installed by hand.
+find_path(ZCBOR_INCLUDE_DIR zcbor_decode.h)
+find_library(ZCBOR_LIB zcbor)
+# zcbor_abi_pin.h is an alp-sdk file (issue #1254 follow-up), NOT part of
+# upstream zcbor -- it is staged into the sysroot only by
+# meta-alp-sdk's own zcbor recipe (recipes-devtools/zcbor/zcbor_0.9.1.bb
+# do_install), alongside the upstream headers, at the same
+# ${ZCBOR_INCLUDE_DIR}. A hand-installed zcbor (e.g. a direct build of the
+# west-module checkout the comment above documents as a supported path)
+# has zcbor_decode.h + libzcbor but NOT this header -- find it
+# independently and only opt in to the #include when it actually
+# resolves, so that supported path doesn't hard-fail configure over a
+# file only the recipe ships.
+find_file(ZCBOR_ABI_PIN_H zcbor_abi_pin.h HINTS ${ZCBOR_INCLUDE_DIR})
+if(ZCBOR_INCLUDE_DIR AND ZCBOR_LIB)
+    target_sources(alp_sdk PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../common/alp_model.c)
+    target_compile_definitions(alp_sdk PRIVATE
+        CONFIG_ALP_SDK_MODEL_READER=1
+    )
+    if(ZCBOR_ABI_PIN_H)
+        target_compile_definitions(alp_sdk PRIVATE
+            # Yocto-only opt-in for alp_model.c's zcbor_abi_pin.h include
+            # (see that header, staged by the zcbor recipe's do_install):
+            # this define exists ONLY in this listfile, never in Zephyr's
+            # own zephyr/CMakeLists.txt build of the same source file, so
+            # the #ifdef there is a no-op on Zephyr instead of a missing-
+            # header compile error. Gated on ZCBOR_ABI_PIN_H (not just
+            # ZCBOR_INCLUDE_DIR/ZCBOR_LIB being found) so a hand-installed
+            # zcbor without the recipe's ABI-pin header degrades to no
+            # struct-layout check instead of a missing-header configure
+            # failure -- see the find_file() comment above.
+            ALP_SDK_ZCBOR_YOCTO_ABI_PIN=1
+        )
+    else()
+        message(STATUS
+            "alp-sdk yocto: zcbor found but zcbor_abi_pin.h is not "
+            "(hand-installed zcbor, not meta-alp-sdk's zcbor recipe) -- "
+            "compiling src/common/alp_model.c without the ZCBOR_* "
+            "struct-layout ABI pin. Install meta-alp-sdk's zcbor recipe "
+            "(recipes-devtools/zcbor/zcbor_0.9.1.bb) to a Yocto sysroot "
+            "for the pinned build.")
+    endif()
+    # Only add the sysroot's zcbor include dir when it isn't already on
+    # the compiler's own default search path -- an explicit -I for a
+    # default system include dir (e.g. the sysroot's ${includedir})
+    # reorders the cross toolchain's own implicit search order ahead of
+    # it, which can shadow a header the toolchain itself expects to win.
+    if(NOT ZCBOR_INCLUDE_DIR IN_LIST CMAKE_C_IMPLICIT_INCLUDE_DIRECTORIES)
+        target_include_directories(alp_sdk PRIVATE ${ZCBOR_INCLUDE_DIR})
+    endif()
+    target_link_libraries(alp_sdk PRIVATE ${ZCBOR_LIB})
+else()
+    if(ALP_SDK_MODEL_ZCBOR_REQUIRED)
+        message(FATAL_ERROR
+            "alp-sdk yocto: zcbor not found (zcbor_decode.h / libzcbor) -- "
+            "src/common/alp_model.c needs it to implement alp_model_parse, "
+            "and ALP_SDK_MODEL_ZCBOR_REQUIRED=ON (explicit opt-in, e.g. "
+            "the alp-sdk recipe's unconditional zcbor DEPENDS), so a "
+            "silent degrade to stub_model.c is not the answer. Add "
+            "meta-alp-sdk's zcbor recipe (recipes-devtools/zcbor/"
+            "zcbor_0.9.1.bb) to the sysroot.")
+    else()
+        message(WARNING
+            "alp-sdk yocto: zcbor not found (zcbor_decode.h / libzcbor) -- "
+            "src/common/alp_model.c is NOT compiled in; alp_model_parse "
+            "falls back to stub_model.c's ALP_ERR_NOSUPPORT body. Add "
+            "meta-alp-sdk's zcbor recipe (recipes-devtools/zcbor/"
+            "zcbor_0.9.1.bb) to the sysroot, or set "
+            "ALP_SDK_MODEL_ZCBOR_REQUIRED=ON to make this fatal.")
+        target_sources(alp_sdk PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_model.c)
+    endif()
+endif()
 
 # Stop the split stub backend from emitting its own alp_inference_* symbols --
 # inference_yocto.c is the sole owner on Yocto so the dispatcher can

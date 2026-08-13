@@ -24,6 +24,7 @@ on:
       - 'src/**'
       - 'CMakeLists.txt'
       - 'cmake/**'
+      - 'meta-alp-sdk/recipes-devtools/zcbor/**'
       - '.github/workflows/pr-plain-cmake.yml'
   push:
     branches: [main, dev]
@@ -32,6 +33,7 @@ on:
       - 'src/**'
       - 'CMakeLists.txt'
       - 'cmake/**'
+      - 'meta-alp-sdk/recipes-devtools/zcbor/**'
   workflow_dispatch:
 
 concurrency:
@@ -130,6 +132,84 @@ jobs:
       # HIL coverage is parked behind docs/ci/HW-IN-LOOP.md.
       - name: Test
         run: ctest --test-dir build/yocto --output-on-failure
+
+  yocto-zcbor:
+    # Issue #1254 CI-coverage follow-up (adversarial review on PR #1280):
+    # the `yocto` leg above configures with a bare -DALP_OS=yocto on a
+    # stock Ubuntu runner that has no zcbor package at all, so
+    # src/common/alp_model.c NEVER compiles and alp_test_alpmodel_onnx_cpu
+    # is skipped every single run -- the branch #1254 exists to deliver
+    # had zero CI coverage. This leg builds zcbor itself from the SAME
+    # tag meta-alp-sdk's own recipe pins
+    # (recipes-devtools/zcbor/zcbor_0.9.1.bb), stages that recipe's own
+    # zcbor_abi_pin.h alongside the built headers (the same do_install
+    # layout), and configures with -DALP_SDK_MODEL_ZCBOR_REQUIRED=ON --
+    # the flag the recipe's EXTRA_OECMAKE is supposed to set -- so a
+    # regression here fails the CMake configure/build instead of
+    # silently degrading to the NOSUPPORT stub. Deliberately not XFAIL:
+    # an XFAIL would just re-assert the stub this issue exists to
+    # replace.
+    name: plain-cmake · yocto + zcbor (#1254)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Yocto-side runtime deps
+        run: |
+          sudo apt-get update -o Acquire::Retries=3
+          sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
+              libmosquitto-dev libasound2-dev libssl-dev pkg-config
+      - name: Build zcbor at the recipe's own pin (tag 0.9.1)
+        run: |
+          set -e
+          git clone --depth 1 --branch 0.9.1 \
+              https://github.com/NordicSemiconductor/zcbor.git \
+              "$RUNNER_TEMP/zcbor-src"
+          got="$(git -C "$RUNNER_TEMP/zcbor-src" rev-parse HEAD)"
+          want="9b07780aca6fb21f82a241ba386ad9b379809337"
+          if [ "$got" != "$want" ]; then
+            echo "::error::zcbor tag 0.9.1 resolved to $got, expected $want (meta-alp-sdk/recipes-devtools/zcbor/zcbor_0.9.1.bb's SRCREV) -- upstream moved the tag, re-verify before updating this pin"
+            exit 1
+          fi
+          install -d "$RUNNER_TEMP/zcbor-prefix/include" "$RUNNER_TEMP/zcbor-prefix/lib"
+          for src in zcbor_common zcbor_decode zcbor_encode zcbor_print; do
+            cc -I"$RUNNER_TEMP/zcbor-src/include" -fPIC \
+                -c "$RUNNER_TEMP/zcbor-src/src/${src}.c" -o "$RUNNER_TEMP/${src}.o"
+          done
+          # No -Wl,-soname here (unlike the recipe's do_compile, which
+          # pairs -soname libzcbor.so.0 with do_install's matching
+          # libzcbor.so.0/libzcbor.so symlinks): a single un-sonamed
+          # libzcbor.so keeps its own filename as its DT_NEEDED entry,
+          # and CMake's find_library(ZCBOR_LIB) resolves an absolute
+          # path to it, so CMake auto-adds this prefix's lib/ to the
+          # test binaries' RUNPATH -- no LD_LIBRARY_PATH/symlink
+          # bookkeeping needed for a throwaway CI prefix.
+          cc -shared \
+              -o "$RUNNER_TEMP/zcbor-prefix/lib/libzcbor.so" \
+              "$RUNNER_TEMP"/zcbor_common.o "$RUNNER_TEMP"/zcbor_decode.o \
+              "$RUNNER_TEMP"/zcbor_encode.o "$RUNNER_TEMP"/zcbor_print.o
+          install -m 0644 \
+              "$RUNNER_TEMP/zcbor-src/include/zcbor_common.h" \
+              "$RUNNER_TEMP/zcbor-src/include/zcbor_decode.h" \
+              "$RUNNER_TEMP/zcbor-src/include/zcbor_encode.h" \
+              "$RUNNER_TEMP/zcbor-src/include/zcbor_print.h" \
+              "$RUNNER_TEMP/zcbor-src/include/zcbor_tags.h" \
+              meta-alp-sdk/recipes-devtools/zcbor/files/zcbor_abi_pin.h \
+              "$RUNNER_TEMP/zcbor-prefix/include/"
+      - name: Configure
+        run: >
+          cmake -B build/yocto-zcbor -S . -DALP_OS=yocto -DALP_BUILD_TESTS=ON
+          -DALP_SDK_MODEL_ZCBOR_REQUIRED=ON
+          -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/zcbor-prefix"
+      - name: Build
+        run: cmake --build build/yocto-zcbor --parallel
+      - name: Test (alp_test_alpmodel_onnx_cpu must run, not skip)
+        run: |
+          set -e
+          ctest --test-dir build/yocto-zcbor --output-on-failure
+          if ! ctest --test-dir build/yocto-zcbor -N | grep -q alp_test_alpmodel_onnx_cpu; then
+            echo "::error::alp_test_alpmodel_onnx_cpu was not registered against build/yocto-zcbor -- the zcbor wiring regressed silently back to the skip path"
+            exit 1
+          fi
 
   strict-warnings:
     # Issue #634: first-party alp-sdk C (dispatchers + src/backends/**,

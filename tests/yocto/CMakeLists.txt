@@ -75,6 +75,70 @@ target_compile_features(alp_test_inference_dispatcher PRIVATE c_std_99)
 add_test(NAME alp_test_inference_dispatcher
          COMMAND alp_test_inference_dispatcher)
 
+# Issue #1254 end-to-end regression: an "onnx" blob_format .alpmodel,
+# decoded by the REAL zcbor-backed alp_model_parse() (src/common/
+# alp_model.c, compiled in place of the ALP_ERR_NOSUPPORT stub only
+# when src/yocto/CMakeLists.txt's own find_path/find_library(zcbor)
+# above succeeds), selects ALP_INFERENCE_BACKEND_CPU through
+# alp_model_select() -- see alpmodel_onnx_cpu.c's own header comment for
+# the fixture provenance.
+#
+# Gated on the SAME ZCBOR_INCLUDE_DIR/ZCBOR_LIB cache variables
+# src/yocto/CMakeLists.txt's find_path/find_library populated (that
+# add_subdirectory() runs before this one -- see the top-level
+# CMakeLists.txt -- and unlike pkg_check_modules's IMPORTED_TARGET
+# result below, a find_path/find_library cache variable DOES propagate
+# across the add_subdirectory() boundary). Re-find here anyway (same
+# calls, same variable names) rather than trust that propagation blind:
+# if find_path/find_library already populated the cache variable this
+# is a cheap cache hit, and if a future refactor ever reorders the two
+# add_subdirectory() calls this stays correct instead of silently
+# vanishing the test -- the same self-validation the OPENAMP_USER_TEST
+# re-find below does for pkg_check_modules.
+find_path(ZCBOR_INCLUDE_DIR zcbor_decode.h)
+find_library(ZCBOR_LIB zcbor)
+# zcbor is not a Debian/Ubuntu package (see metadata/libraries/zcbor.yaml
+# and src/yocto/CMakeLists.txt's own ALP_SDK_MODEL_ZCBOR_REQUIRED
+# comment), so a direct plain-CMake -DALP_OS=yocto configure on the
+# pr-plain-cmake.yml stock Ubuntu runners never has it and
+# alp_model_parse degrades to stub_model.c's ALP_ERR_NOSUPPORT body --
+# asserting ALP_OK unconditionally here would fail on exactly that
+# degrade leg (issue #1254 follow-up), so this test is skipped, not
+# failed, the same way alp_test_rpc_uio_self_close below skips when
+# open-amp/libmetal aren't found.
+if(ZCBOR_INCLUDE_DIR AND ZCBOR_LIB)
+    add_executable(alp_test_alpmodel_onnx_cpu
+        ${CMAKE_CURRENT_SOURCE_DIR}/alpmodel_onnx_cpu.c
+    )
+    target_link_libraries(alp_test_alpmodel_onnx_cpu PRIVATE alp::sdk)
+    target_include_directories(alp_test_alpmodel_onnx_cpu PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_compile_features(alp_test_alpmodel_onnx_cpu PRIVATE c_std_99)
+
+    add_test(NAME alp_test_alpmodel_onnx_cpu
+             COMMAND alp_test_alpmodel_onnx_cpu)
+else()
+    # Registered-but-DISABLED, not just a STATUS line: `ctest` prints
+    # "N% tests passed ... out of M" counting only ENABLED tests, so a
+    # bare STATUS message leaves zero trace in that summary that this
+    # test was never built at all. add_test() against a command that
+    # doesn't exist on this leg, marked DISABLED, keeps it out of the
+    # pass/fail tally while still surfacing in `ctest -N` /
+    # `ctest --show-only` for anyone auditing what ran.
+    add_test(NAME alp_test_alpmodel_onnx_cpu
+             COMMAND ${CMAKE_COMMAND} -E echo
+             "alp_test_alpmodel_onnx_cpu skipped -- zcbor not found")
+    set_tests_properties(alp_test_alpmodel_onnx_cpu PROPERTIES DISABLED TRUE)
+    message(STATUS
+        "alp-sdk yocto: zcbor not found; alp_test_alpmodel_onnx_cpu "
+        "skipped -- it exercises the REAL zcbor-backed alp_model_parse() "
+        "and would just be re-proving the stub's ALP_ERR_NOSUPPORT body "
+        "otherwise.  Install meta-alp-sdk's zcbor recipe "
+        "(recipes-devtools/zcbor/zcbor_0.9.1.bb) to the sysroot to "
+        "enable.")
+endif()
+
 # GPU2D dispatcher + portable sw_fallback on the plain-CMake Yocto
 # build (#24): proves Linux apps get the REAL CPU fill/blit/blend,
 # not the old NOSUPPORT stub.  Portable pure C -- no Linux gate.
