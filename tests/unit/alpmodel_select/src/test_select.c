@@ -361,3 +361,23 @@ ZTEST(alp_model_select, test_explicit_cpu_request)
 	m.n_targets = 1; /* drop the cpu blob -> only ethos_u remains */
 	zassert_equal(alp_model_select(&m, &env, ALP_INFERENCE_BACKEND_CPU, &r), ALP_ERR_NO_BACKEND);
 }
+
+ZTEST(alp_model_select, test_unrecognised_blob_format_returns_inval)
+{
+	/* Regression for the silent-default defect: _fmt_enum() used to
+	 * decode any unrecognised (or a real-but-forgotten, e.g. ExecuTorch
+	 * before this fix) blob_format string as ALP_INFERENCE_MODEL_TFLITE
+	 * and report ALP_OK. It must instead fail loud. */
+	static const uint8_t b0[4]     = { 1 };
+	alp_model_t          m         = { 0 };
+	m.n_targets                    = 1;
+	m.targets[0]                   = T("cpu", "*", "not_a_real_format", 0, 0, b0, 4);
+	const char            *avail[] = { "alif:ensemble:e7" };
+	alp_model_select_env_t env     = {
+		.soc_ref         = "alif:ensemble:e7",
+		.avail_silicon   = avail,
+		.n_avail_silicon = 1,
+	};
+	alp_model_select_result_t r = { 0 };
+	zassert_equal(alp_model_select(&m, &env, ALP_INFERENCE_BACKEND_AUTO, &r), ALP_ERR_INVAL);
+}
