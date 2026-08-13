@@ -374,7 +374,7 @@ alp_status_t cc3501e_wifi_ap_start(cc3501e_t  *ctx,
 	 * opcode can ever produce that reads as ALP_OK.  An earlier revision of
 	 * this fix kept the poll anyway (reasoning: "nothing sound to replace it
 	 * with"), which left two costs unpaid: the console's only caller passes a
-	 * 50 s budget, so `wifi ap start` blocked the shell for up to 50 s on a
+	 * 50 s budget, so `wifi ap` blocked the shell for up to 50 s on a
 	 * result that was mathematically already known before the first byte went
 	 * on the wire; and every retry that landed on the freshly-reset IDLE slot
 	 * submitted a BRAND NEW `Wlan_RoleUp` on live radio hardware -- the same
