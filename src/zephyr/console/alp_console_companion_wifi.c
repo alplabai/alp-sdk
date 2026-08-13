@@ -212,20 +212,36 @@ static int cmd_companion_wifi_ap(const struct shell *sh, size_t argc, char **arg
 		sec = 2u;
 	}
 
-	/* AP bring-up blocks for seconds in the firmware.  Each cc3501e_request()
-	 * inside is individually serialised by the transport lock (issue #1116),
-	 * but the multi-request bring-up as a whole is NOT held exclusively --
-	 * a BLE/GPIO op can land between its requests.  That is intended: the
-	 * firmware's AP sequence tolerates interleaved commands; what it cannot
-	 * tolerate is two transactions overlapping on the wire, which is exactly
-	 * what the transport lock prevents. */
+	/* cc3501e_wifi_ap_start() submits WIFI_AP_START exactly ONCE and returns
+	 * immediately (#1385) -- it does not block for seconds here the way it
+	 * once did; see the function's own comment for why a retry loop around
+	 * this opcode is provably unwinnable. ALP_COMPANION_WIFI_CONN_MS is passed
+	 * for call-site consistency with the other companion Wi-Fi commands, but
+	 * cc3501e_wifi_ap_start() does not currently use it (documented on the
+	 * declaration). */
 	alp_status_t s =
 	    cc3501e_wifi_ap_start(companion_cc3501e, ssid, sec, pass, ALP_COMPANION_WIFI_CONN_MS);
 
 	if (s != ALP_OK) {
-		shell_error(sh, "ap start \"%s\" failed (%d)", ssid, (int)s);
+		/* #1385: against protocol v4 this is the EXPECTED outcome even for an
+		 * AP that came up fine -- WIFI_AP_START acks every submit BUSY and has
+		 * no status latch to confirm on, so cc3501e_wifi_ap_start() cannot
+		 * report success.  Say "unconfirmed", not "failed": printing a flat
+		 * failure for a working AP is the mirror of the false "up" the
+		 * dead-phase 0x00 alias used to print. */
+		shell_error(sh,
+		            "ap start \"%s\" unconfirmed (%d) -- firmware v4 has no AP status latch "
+		            "(#1385); check for the SSID out of band",
+		            ssid,
+		            (int)s);
 		return -EIO;
 	}
+	/* Unreachable against protocol v4 today (see the @warning on
+	 * cc3501e_wifi_ap_start()'s declaration: ALP_OK is not a value this call
+	 * can currently return) -- kept, not deleted, because it is still the
+	 * CORRECT branch for the day a firmware-side AP confirmation channel
+	 * lands and makes ALP_OK reachable again; no code change would then be
+	 * needed here. */
 	shell_print(
 	    sh, "ap \"%s\" up (%s)", ssid, (sec == 0u) ? "open" : (sec == 2u ? "wpa3" : "wpa2"));
 	return 0;

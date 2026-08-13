@@ -223,9 +223,34 @@ alp_status_t cc3501e_wifi_disconnect(cc3501e_t *ctx);
  * payload is identical to @ref cc3501e_wifi_connect -- an
  * @ref alp_cc3501e_wifi_connect_t header (ssid_len / psk_len / security)
  * followed by the inline SSID then the inline passphrase, packed with no
- * padding.  AP bring-up is a radio op (the firmware worker-routes it and the
- * bridge is briefly down), so while the firmware reports RESP_ERR_BUSY the
- * request is re-issued on a bounded backoff until RESP_OK or the deadline.
+ * padding.  Unlike @ref cc3501e_wifi_connect this issues the submit exactly
+ * ONCE and returns immediately (issue #1385): AP_START is fire-and-forget on
+ * the firmware side (every submit is acked RESP_ERR_BUSY, and the job slot
+ * that would carry a WORKER_DONE outcome is reset to IDLE before the host may
+ * clock again), and unlike CONNECT_STA there is no independent status latch
+ * to poll afterwards -- the firmware's AP path never writes the WIFI_STATUS
+ * connection latch.  A retry loop around this opcode is therefore PROVABLY
+ * unwinnable: every attempt reads back either the BUSY ack (no progress) or
+ * the dead-phase all-zero alias, which is rejected as ALP_ERR_IO at the
+ * transport (no progress either) -- there is no reply this opcode can ever
+ * produce that decodes as ALP_OK, so polling only spends wall-clock time
+ * (and re-issues, see the warning below) without changing the answer.
+ *
+ * @warning Against CC3501E firmware protocol v4 this call CANNOT report
+ *          success, and returns ALP_ERR_TIMEOUT for an AP that came up
+ *          perfectly.  Treat ALP_ERR_TIMEOUT as fully inconclusive, NOT as
+ *          "submitted, unconfirmed": it covers the expected BUSY submit ack,
+ *          the rejected dead-phase alias, AND at least three cases where
+ *          nothing ever reached the wire -- a RESP_ERR_BUSY bounce because a
+ *          different worker op (scan / get_mac / BLE) was already in flight,
+ *          a transport IO fault during the radio-down window, and a
+ *          request-lock timeout under a concurrent caller -- all
+ *          indistinguishable from here.  A caller that treats ALP_ERR_TIMEOUT
+ *          as proof of submission will not retry when it should; confirm the
+ *          AP out of band and be prepared to retry until #1385 lands a
+ *          firmware-side confirmation channel.  @ref ALP_ERR_INVAL and
+ *          @ref ALP_ERR_NOT_READY, by contrast, ARE conclusive: both are
+ *          local or synchronous rejects that mean nothing was submitted.
  *
  * @param ctx         Initialised driver context.
  * @param ssid        NUL-terminated AP SSID (<= 32 bytes; longer is rejected).
@@ -233,11 +258,16 @@ alp_status_t cc3501e_wifi_disconnect(cc3501e_t *ctx);
  *                    _WPA2_PSK / _WPA3_SAE (matches
  *                    @ref alp_cc3501e_wifi_connect_t::security on the wire).
  * @param pass        NUL-terminated passphrase (may be NULL/"" for an open AP).
- * @param timeout_ms  Upper bound on the AP-start poll budget (floored to the
- *                    radio down-window).
- * @return ALP_OK once the AP is up; ALP_ERR_TIMEOUT if still starting at the
- *         deadline; ALP_ERR_INVAL on an over-long SSID/passphrase; mapped
- *         error otherwise.
+ * @param timeout_ms  Currently unused (the submit is not retried -- there is
+ *                    no independent channel to bound a wait on); reserved for
+ *                    a future firmware-side confirmation channel, kept in the
+ *                    signature so that addition needs no API break.
+ * @return ALP_ERR_TIMEOUT for the expected outcome -- see the warning above:
+ *         conclusive for neither success nor failure, and NOT proof the
+ *         submit ever reached the wire; ALP_ERR_INVAL on an over-long
+ *         SSID/passphrase or a synchronous submit reject; ALP_ERR_NOT_READY
+ *         if @p ctx is NULL or not initialised.  ALP_OK is not reachable
+ *         against protocol v4.
  */
 alp_status_t cc3501e_wifi_ap_start(cc3501e_t  *ctx,
                                    const char *ssid,
