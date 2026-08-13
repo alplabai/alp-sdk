@@ -30,20 +30,25 @@
  *
  *   3. OTA polling + apply.
  *      `alp_iot_*` opens a TLS-mutual-auth connection to the
- *      Mender server and polls for a deployment.  If one is
- *      pending, the SDK downloads the new image, verifies its
- *      signature against the same ECDSA-P256 boot key, writes it
- *      to the inactive MCUboot slot, sets the swap-pending flag,
- *      and requests a reboot.  Post-reboot, MCUboot confirms or
- *      reverts based on the new image's `mark_confirmed` call.
+ *      Mender server and polls for a deployment.  On a two-slot
+ *      AEN target, a pending deployment would be downloaded,
+ *      verified against the same ECDSA-P256 boot key, written to
+ *      the inactive slot, and applied on reboot.  On this SKU
+ *      (E1M-AEN801) MCUboot boots single-app (#1069/#1413, see
+ *      docs/secure-boot.md): OTA apply is DEFERRED -- there is no
+ *      inactive slot to stage a new image in, and self-overwriting
+ *      the running slot0 is not a supported flow, so this app polls
+ *      and verifies but does not apply.  A rejected signature at
+ *      boot halts rather than rolling back to a previous image.
  *
  *   4. Remote attestation.
  *      Per the threat model (`docs/threat-model.md` §asset 8), a
  *      cloud-side fleet operator needs evidence that the device
  *      hasn't been physically tampered with.  This app publishes
  *      a periodic heartbeat that includes the OPTIGA-signed boot
- *      log + the current secure-boot slot.  An attacker who
- *      swapped the flash sees the OPTIGA signature break.
+ *      log + the running slot0 image's identity.  An attacker who
+ *      swapped the flash chip itself sees the OPTIGA signature
+ *      break.
  *
  * Why this is a "reference application" not a "library example"
  * =============================================================
@@ -73,12 +78,15 @@
  * Full lifecycle, end-to-end:
  *   - Boot from a factory-signed image.
  *   - Read manufacturer EEPROM, print serial + SKU + rev.
- *   - Inspect MCUboot slots, print image revision.
+ *   - Inspect the MCUboot slot0 image, print image revision.
  *   - Connect to a Mender server (board-staged
  *     production-test rig), poll for an update.
- *   - When a deployment lands, download + verify + apply
- *     it, request reboot.
- *   - Post-reboot: confirm the new image to keep the swap.
+ *   - When a deployment lands: download + verify it (real on this
+ *     SKU).  Apply is DEFERRED (#1069, see [STATUS] in board.yaml)
+ *     -- there is no inactive slot to stage into, so the demo
+ *     stops after verification rather than writing or rebooting.
+ *   - On every boot, a passing re-verify of slot0 *is* the
+ *     confirmation -- there is no swap state to keep.
  *   - Publish OPTIGA-signed attestation every 60 s thereafter.
  */
 
@@ -127,11 +135,13 @@ static void stage_factory_identity(void)
 static void stage_secure_boot_evidence(void)
 {
 	printf("[prod] stage 2: reading MCUboot slot info\n");
-	/* alp_storage_open(INTERNAL_FLASH) lets us inspect the MCUboot
-     * trailer area; the swap-state byte + image_ok flag live in
-     * the last sector of the active slot.  The exact offsets are
-     * MCUboot's responsibility; this example just demonstrates the
-     * read path. */
+	/* alp_storage_open(INTERNAL_FLASH) lets us inspect slot0.  On a
+     * two-slot AEN target the swap-state byte + image_ok flag would
+     * live in the active slot's trailer sector; on this SKU
+     * (E1M-AEN801) MCUboot boots single-app (see [STATUS] in
+     * board.yaml) and there is no swap trailer at all -- a passing
+     * re-verify of slot0 on every boot *is* the confirmation.  This
+     * example just demonstrates the flash-info read path. */
 	alp_storage_t *s = alp_storage_open(&(alp_storage_config_t){
 	    .kind        = ALP_STORAGE_KIND_INTERNAL_FLASH,
 	    .instance_id = 0u,
@@ -164,10 +174,17 @@ static void stage_ota_poll(void)
      *   2. alp_iot_mqtt_open against the broker carrying the
      *      Mender deployment commands (or HTTPS poll, depending
      *      on the Mender flavour).
-     *   3. On a deployment event: alp_storage_open(QSPI) the OTA
-     *      partition, write chunks, mark MCUboot for swap on
-     *      next boot, alp_iot_publish a deployment-accepted
-     *      status, reboot.
+     *   3. On a deployment event, a two-slot AEN target would
+     *      alp_storage_open(OSPI) the OTA staging partition, write
+     *      chunks there, alp_iot_publish a deployment-accepted
+     *      status, and reboot into the newly-staged image.  This
+     *      SKU (E1M-AEN801) boots single-app (see [STATUS] in
+     *      board.yaml): OTA apply is DEFERRED (#1069) -- the
+     *      on-module OSPI0 NOR (`ps_storage: ospi0`, itself
+     *      `assembled: optional`) is a separate device from the
+     *      App MRAM that holds slot0, and there is no supported
+     *      path from an OSPI staging write to an in-place slot0
+     *      update.
      *
      * On native_sim every step returns NOSUPPORT; the example
      * prints the transitions but doesn't actually move bytes. */
