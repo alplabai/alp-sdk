@@ -96,8 +96,8 @@ jobs:
 
       - name: Install cppcheck
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cppcheck
+          sudo apt-get update -o Acquire::Retries=3
+          sudo apt-get install -o Acquire::Retries=3 -y cppcheck
 
       - name: Run cppcheck
         # cppcheck without a build context misses some symbols
