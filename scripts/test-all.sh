@@ -214,6 +214,44 @@ skip_stage() {
     STAGE_NAMES+=("${name}"); STAGE_STATUS+=("SKIP"); STAGE_KIND+=("${kind}"); STAGE_NOTES+=("${reason}")
 }
 
+# `import jsonschema` succeeding says NOTHING about whether that
+# jsonschema has the API the gate scripts call.  `Draft202012Validator`
+# arrived in jsonschema 4.0; a distro-packaged 3.2.0 imports cleanly and
+# then dies partway through a stage with
+#
+#     AttributeError: module 'jsonschema' has no attribute
+#     'Draft202012Validator'. Did you mean: 'Draft3Validator'?
+#
+# which surfaced as FOUR stages FAILING on a clean tree
+# (metadata-validate, doc-yaml-fragments, required-gate-scripts,
+# generated-files) instead of SKIPping for the missing prerequisite they
+# actually have -- alp-sdk#1423.  That is #1396's harm ("go red on a
+# clean tree") reached by a different route: #1396 fixed the module
+# being ABSENT, this is the module being PRESENT BUT TOO OLD, which no
+# `import` check can catch.
+#
+# Probe the attribute, not the import -- the same shape
+# stage_pytest_scripts uses for pytest/pytest_mock.  Deliberately NOT
+# fixed inside the 18 `scripts/*.py` files that call
+# `Draft202012Validator`: those are also run DIRECTLY by
+# pr-metadata-validate.yml and friends, where a 99 exit is a failing
+# check, so teaching them to exit 99 would trade a wrong local verdict
+# for a red CI.  The wrong verdict is test-all.sh's, so the fix is
+# test-all.sh's.
+have_jsonschema_2020() {
+    python3 -c 'import jsonschema; jsonschema.Draft202012Validator' >/dev/null 2>&1
+}
+
+require_jsonschema_2020() {
+    local stage="$1"
+    if ! have_jsonschema_2020; then
+        local found
+        found="$(python3 -c 'import jsonschema; print(jsonschema.__version__)' 2>/dev/null || echo 'not installed')"
+        echo "${stage}: python3 ($(command -v python3)) has jsonschema ${found}, which has no Draft202012Validator (needs jsonschema >= 4.0). Activate the zephyrproject venv or: pip install 'jsonschema>=4'."
+        return 99
+    fi
+}
+
 # -------- Stage implementations -----------------------------------------------
 
 stage_yocto_build_and_ctest() {
@@ -484,6 +522,7 @@ stage_metadata_validate() {
     if [ ! -f scripts/validate_metadata.py ]; then
         return 99
     fi
+    require_jsonschema_2020 stage_metadata_validate || return 99
     python3 scripts/validate_metadata.py || return 1
     if [ -f metadata/templates/board.yaml.example ] && \
        [ -f scripts/alp_project.py ]; then
@@ -515,6 +554,7 @@ stage_doc_yaml_fragments() {
     if [ ! -f metadata/schemas/board.schema.json ]; then
         return 99
     fi
+    require_jsonschema_2020 stage_doc_yaml_fragments || return 99
     python3 scripts/lint_doc_yaml_fragments.py || return 1
 }
 
@@ -624,6 +664,13 @@ stage_required_gate_scripts() {
     if ! command -v python3 >/dev/null 2>&1; then
         return 99
     fi
+    # Most of REQUIRED_GATE_SCRIPTS validate a schema, so an inadequate
+    # jsonschema takes the stage down mid-loop (check_bootstrap_manifest.py
+    # and check_build_plan.py were the first two to hit it) -- after the
+    # earlier scripts have already printed OK, which makes the FAIL read
+    # like a real gate break rather than a host gap.  Gate the whole
+    # stage: a partial pass here is not a meaningful verdict either.
+    require_jsonschema_2020 stage_required_gate_scripts || return 99
     local script path failed=0 ran=0
     for script in "${REQUIRED_GATE_SCRIPTS[@]}"; do
         path="scripts/${script}"
@@ -775,6 +822,14 @@ stage_abi_strict() {
 # and commit the result" (the tree is left regenerated for you to add).
 stage_generated_files() {
     command -v python3 >/dev/null 2>&1 || return 99
+    # gen_pinmux_capability.py validates its own output against
+    # metadata/schemas/pinmux-capability-v1.schema.json, so it needs the
+    # 2020-12 validator too.  The per-generator rc==99 path below cannot
+    # help here: the generator dies with an AttributeError (rc 1), not a
+    # refusal, so the stage would report a generator DEFECT for a host
+    # gap.  Gate at stage entry -- a drift check that regenerated only
+    # some of its artifacts is not a drift check.
+    require_jsonschema_2020 stage_generated_files || return 99
     local gens=(gen_soc_caps gen_status_strings gen_board_header
                 gen_pinmux_capability gen_support_matrix
                 gen_portability_matrix gen_catalog gen_error_catalog
