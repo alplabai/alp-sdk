@@ -248,3 +248,83 @@ def test_main_exits_2_when_west_cannot_be_executed(tmp_path, capsys):
     assert "cannot execute" in err
     # Never the "not applied" verdict -- nothing was inspected.
     assert "are not applied" not in err
+
+
+#: Two patches to the SAME file, the shape `hal_alif/0001` + `0002` have in
+#: this repo. `SECOND` applies on top of `FIRST`, so reversing `FIRST` alone
+#: against the fully-patched tree fails on changed context.
+OVERLAP_FIRST = """\
+diff --git a/payload.txt b/payload.txt
+--- a/payload.txt
++++ b/payload.txt
+@@ -1,2 +1,3 @@
+ first
++from-patch-one
+ last
+"""
+
+OVERLAP_SECOND = """\
+diff --git a/payload.txt b/payload.txt
+--- a/payload.txt
++++ b/payload.txt
+@@ -1,3 +1,4 @@
+ first
+ from-patch-one
++from-patch-two
+ last
+"""
+
+BOTH_APPLIED = "first\nfrom-patch-one\nfrom-patch-two\nlast\n"
+
+
+def _overlap_workspace(tmp_path: Path, module_content: str) -> tuple[Path, Path]:
+    """A module carrying two patches that touch the same file."""
+    topdir = tmp_path / "ws"
+    repo = topdir / "alp-sdk"
+    (repo / "zephyr" / "patches" / "hal_alif").mkdir(parents=True)
+    (repo / "zephyr" / "patches" / "hal_alif" / "0001.patch").write_text(OVERLAP_FIRST)
+    (repo / "zephyr" / "patches" / "hal_alif" / "0002.patch").write_text(OVERLAP_SECOND)
+    (repo / "zephyr" / "patches.yml").write_text(
+        "patches:\n"
+        "  - path: hal_alif/0001.patch\n    module: alif\n"
+        "  - path: hal_alif/0002.patch\n    module: alif\n"
+    )
+    mod = topdir / "modules" / "hal" / "alif"
+    mod.mkdir(parents=True)
+    (mod / "payload.txt").write_text(module_content)
+    (mod / "zephyr").mkdir()
+    (mod / "zephyr" / "module.yml").write_text("name: alif\n")
+    _git("init", "-q", cwd=mod)
+    _git("add", "-A", cwd=mod)
+    _git("commit", "-q", "-m", "fixture", cwd=mod)
+    return repo, topdir
+
+
+def test_two_patches_touching_one_file_are_both_reported_applied(tmp_path):
+    """The #1426 false DRIFTED.
+
+    Per-patch `git apply --reverse --check` reports the FIRST of an overlapping
+    pair as DRIFTED even though it is applied, because the second changed its
+    context. Measured on a pristine `hal_alif` at `v2.3.0` with both patches
+    forward-applied (rc=0 each): reversing `0001` alone gave rc=1. Every CI job
+    that runs bootstrap failed on that.
+    """
+    repo, topdir = _overlap_workspace(tmp_path, BOTH_APPLIED)
+    failures, applied, absent = vwp.verify(repo, topdir)
+    assert failures == [], failures
+    assert len(applied) == 2
+
+
+def test_an_absent_patch_does_not_condemn_the_rest_of_its_stack(tmp_path):
+    """Unwinding continues past a missing patch.
+
+    A first cut marked everything below the failure DRIFTED, which turned one
+    genuinely-missing patch into a whole module's worth of failures.
+    """
+    # Only the first patch applied: the second is simply not there.
+    repo, topdir = _overlap_workspace(tmp_path, "first\nfrom-patch-one\nlast\n")
+    failures, applied, absent = vwp.verify(repo, topdir)
+    assert len(applied) == 1, applied
+    assert len(failures) == 1, failures
+    assert "0002.patch" in failures[0]
+    assert "0001.patch" not in failures[0]

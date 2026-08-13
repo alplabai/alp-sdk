@@ -63,8 +63,10 @@ are all ERRORS here, not skips.
 from __future__ import annotations
 
 import argparse
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import yaml
@@ -129,23 +131,73 @@ def west_project_dirs(topdir: Path, west: str = "west") -> dict[str, Path]:
     return dirs
 
 
-def classify(patch_file: Path, module_dir: Path) -> str:
-    """APPLIED / ABSENT / DRIFTED for one patch against one checkout."""
-    reverse = subprocess.run(
-        ["git", "apply", "--reverse", "--check", str(patch_file)],
-        cwd=module_dir,
-        capture_output=True,
-        text=True,
-    )
-    if reverse.returncode == 0:
-        return APPLIED
-    forward = subprocess.run(
-        ["git", "apply", "--check", str(patch_file)],
-        cwd=module_dir,
-        capture_output=True,
-        text=True,
-    )
-    return ABSENT if forward.returncode == 0 else DRIFTED
+def _patched_paths(patch_file: Path) -> list[str]:
+    """The repo-relative paths a patch writes, from its `+++ b/<path>` lines."""
+    paths: list[str] = []
+    for line in patch_file.read_text(encoding="utf-8", errors="replace").splitlines():
+        if line.startswith("+++ b/"):
+            paths.append(line[len("+++ b/"):].strip())
+    return paths
+
+
+def classify_module(patch_files: list[Path], module_dir: Path) -> dict[Path, str]:
+    """`{patch -> APPLIED/ABSENT/DRIFTED}` for one module's whole patch stack.
+
+    Per-patch `git apply --reverse --check` is UNSOUND when two patches touch
+    the same file, and two of this repo's do:
+    `hal_alif/0001-se-service-add-boot-cpu.patch` and
+    `hal_alif/0002-se-service-add-public-send-request.patch` both write
+    `se_services/zephyr/include/se_service.h` and
+    `se_services/zephyr/src/se_service.c`. With 0002 applied on top, reversing
+    0001 alone fails on changed context and reports a patch that IS applied as
+    DRIFTED. Measured on a tree where both had just applied forward, rc=0 each:
+
+        git apply -R --check 0001.patch            -> rc=1   (false DRIFTED)
+        git apply -R --check 0002.patch 0001.patch -> rc=1   (also unsound:
+                                                     --check does not stage
+                                                     intermediate results)
+
+    So the stack is reversed SEQUENTIALLY, with real writes, into a throwaway
+    copy of just the files the patches touch -- never the workspace. Every
+    reverse succeeding proves every patch is present. Verified against a
+    pristine `hal_alif` at `v2.3.0`: reverse 0002 then 0001 both rc=0 on the
+    patched tree, and rc=1 on the unpatched one.
+    """
+    ordered = list(patch_files)
+    with tempfile.TemporaryDirectory(prefix="verify-west-patches-") as tmp:
+        scratch = Path(tmp)
+        for patch in ordered:
+            for rel in _patched_paths(patch):
+                src = module_dir / rel
+                if not src.is_file():
+                    # A file the patch writes is missing entirely -- the stack
+                    # cannot be applied, so nothing below could reverse either.
+                    return {pf: ABSENT for pf in ordered}
+                dst = scratch / rel
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                if not dst.exists():
+                    shutil.copy2(src, dst)
+
+        verdicts: dict[Path, str] = {}
+        for i in range(len(ordered) - 1, -1, -1):
+            res = subprocess.run(
+                ["git", "apply", "--reverse", str(ordered[i])],
+                cwd=scratch, capture_output=True, text=True,
+            )
+            if res.returncode == 0:
+                verdicts[ordered[i]] = APPLIED
+                continue
+            # This one is not present. Keep unwinding the rest of the stack
+            # rather than condemning it: an absent patch does not make the
+            # patches below it absent, and marking them DRIFTED by default
+            # turned one genuinely-missing `zephyr/0003` into three failures
+            # against a workspace whose other two zephyr patches were applied.
+            forward = subprocess.run(
+                ["git", "apply", "--check", str(ordered[i])],
+                cwd=scratch, capture_output=True, text=True,
+            )
+            verdicts[ordered[i]] = ABSENT if forward.returncode == 0 else DRIFTED
+        return verdicts
 
 
 def verify(repo: Path, topdir: Path, west: str = "west") -> tuple[list[str], list[str], list[str]]:
@@ -178,50 +230,59 @@ def verify(repo: Path, topdir: Path, west: str = "west") -> tuple[list[str], lis
     applied: list[str] = []
     absent_modules: list[str] = []
 
+    # Grouped by module, in declaration order: a module's patches are a STACK,
+    # and one is only meaningfully checkable against the others (see
+    # `classify_module`).
+    by_module: dict[str, list[dict]] = {}
     for entry in patches:
         rel = entry.get("path")
         module = entry.get("module")
         if not rel or not module:
             raise RuntimeError(f"patches.yml entry has no path/module: {entry!r}")
-
         patch_file = patch_root / rel
         if not patch_file.is_file():
             raise RuntimeError(f"{patch_file}, declared in patches.yml, does not exist")
+        by_module.setdefault(str(module), []).append({"rel": rel, "file": patch_file})
 
+    for module, items in by_module.items():
         module_dir = dirs.get(module)
         if module_dir is None:
-            failures.append(
-                f"  UNRESOLVED  {rel}\n"
-                f"              module {module!r} matches no west project in {topdir}. "
-                f"`west patch apply` skips this silently (patch.py: "
-                f"`if mod is None: continue`), which is why it must fail here."
-            )
+            for it in items:
+                failures.append(
+                    f"  UNRESOLVED  {it['rel']}\n"
+                    f"              module {module!r} matches no west project in {topdir}. "
+                    f"`west patch apply` skips this silently (patch.py: "
+                    f"`if mod is None: continue`), which is why it must fail here."
+                )
             continue
         if not (module_dir / ".git").exists():
-            absent_modules.append(
-                f"  NO-CHECKOUT {rel}\n"
-                f"              module {module!r} -> {module_dir}, which is not a git "
-                f"checkout. Nothing to have patched; run `west update` if this "
-                f"workspace is meant to carry it."
-            )
+            for it in items:
+                absent_modules.append(
+                    f"  NO-CHECKOUT {it['rel']}\n"
+                    f"              module {module!r} -> {module_dir}, which is not a git "
+                    f"checkout. Nothing to have patched; run `west update` if this "
+                    f"workspace is meant to carry it."
+                )
             continue
 
-        verdict = classify(patch_file, module_dir)
-        if verdict == APPLIED:
-            applied.append(f"  APPLIED     {rel}")
-        elif verdict == ABSENT:
-            failures.append(
-                f"  ABSENT      {rel}\n"
-                f"              {module_dir} -- the patch applies cleanly, so its "
-                f"content is simply not there."
-            )
-        else:
-            failures.append(
-                f"  DRIFTED     {rel}\n"
-                f"              {module_dir} -- applies neither forward nor in "
-                f"reverse. The module has been changed on top of, or instead of, "
-                f"this patch."
-            )
+        verdicts = classify_module([it["file"] for it in items], module_dir)
+        for it in items:
+            verdict = verdicts.get(it["file"], DRIFTED)
+            if verdict == APPLIED:
+                applied.append(f"  APPLIED     {it['rel']}")
+            elif verdict == ABSENT:
+                failures.append(
+                    f"  ABSENT      {it['rel']}\n"
+                    f"              {module_dir} -- the patch applies cleanly, so its "
+                    f"content is simply not there."
+                )
+            else:
+                failures.append(
+                    f"  DRIFTED     {it['rel']}\n"
+                    f"              {module_dir} -- applies neither forward nor in "
+                    f"reverse. The module has been changed on top of, or instead of, "
+                    f"this patch."
+                )
     return failures, applied, absent_modules
 
 
