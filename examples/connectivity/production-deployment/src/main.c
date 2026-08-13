@@ -175,14 +175,16 @@ static void stage_ota_poll(void)
      *      Mender deployment commands (or HTTPS poll, depending
      *      on the Mender flavour).
      *   3. On a deployment event, a two-slot AEN target would
-     *      alp_storage_open(QSPI) the OTA staging partition, write
+     *      alp_storage_open(OSPI) the OTA staging partition, write
      *      chunks there, alp_iot_publish a deployment-accepted
      *      status, and reboot into the newly-staged image.  This
      *      SKU (E1M-AEN801) boots single-app (see [STATUS] in
-     *      board.yaml): OTA apply is DEFERRED (#1069) -- QSPI is a
-     *      separate device from the App MRAM that holds slot0, and
-     *      there is no supported path from a QSPI staging write to
-     *      an in-place slot0 update.
+     *      board.yaml): OTA apply is DEFERRED (#1069) -- the
+     *      on-module OSPI0 NOR (`ps_storage: ospi0`, itself
+     *      `assembled: optional`) is a separate device from the
+     *      App MRAM that holds slot0, and there is no supported
+     *      path from an OSPI staging write to an in-place slot0
+     *      update.
      *
      * On native_sim every step returns NOSUPPORT; the example
      * prints the transitions but doesn't actually move bytes. */

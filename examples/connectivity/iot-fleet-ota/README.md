@@ -1,7 +1,9 @@
 # iot-fleet-ota [UNTESTED]
 
-Secure OTA firmware update with rollback. The production-readiness
-proof for "how do we update 10 000 units in the field?".
+Secure OTA firmware update, verify-only on the qualified E1M-AEN801
+SKU (apply is DEFERRED, #1069 -- see [STATUS] in `board.yaml`). The
+production-readiness proof for "how do we update 10 000 units in
+the field?".
 
 Targets every E1M-X SoM family. native_sim build verified; HiL
 verification gates on a staged Mender server (separate repo).

@@ -161,12 +161,15 @@ tan build --project examples/connectivity/production-deployment
 west flash
 ```
 
-On HiL the full lifecycle runs: boot from a factory-signed
+On HiL the qualified path runs: boot from a factory-signed
 image, read the EEPROM manifest, inspect MCUboot slots, connect
-to the board-staged Mender server, poll for an update.  When
-a deployment lands the SDK downloads + verifies + applies it,
-requests reboot, then confirms post-reboot.  Attestation
-heartbeats publish every 60 s thereafter.
+to the board-staged Mender server, poll for an update.  When a
+deployment lands the SDK downloads and verifies it -- but on
+this SKU (E1M-AEN801) OTA *apply* is DEFERRED (#1069, see
+[STATUS] in `board.yaml`): there is no secondary/scratch slot to
+write, and self-overwriting the running slot0 is not a supported
+flow, so the SDK stops after verification and does not write or
+reboot.  Attestation heartbeats publish every 60 s regardless.
 
 ## Production variants
 
@@ -184,7 +187,8 @@ Customer-side variants typically:
 - [`<alp/hw_info.h>`](../../../include/alp/hw_info.h) -- factory
   EEPROM manifest read-back.
 - [`<alp/storage.h>`](../../../include/alp/storage.h) -- MCUboot
-  slot inspection + OTA chunk write.
+  slot inspection; OTA chunk write is DEFERRED on this SKU
+  (#1069, see [STATUS] in `board.yaml`).
 - [`<alp/iot.h>`](../../../include/alp/iot.h) -- Wi-Fi + MQTT +
   TLS for the Mender connection.
 - [`<alp/security.h>`](../../../include/alp/security.h) -- AEAD

@@ -239,7 +239,7 @@ fleet_verify_signature(const uint8_t *image, size_t image_len, const uint8_t *si
 }
 
 /* ----------------------------------------------------------------- */
-/* Stage 4: write the verified artefact to flash                      */
+/* Stage 4: read flash geometry (no write -- see [STATUS])            */
 /* ----------------------------------------------------------------- */
 
 /**
@@ -260,7 +260,7 @@ static bool fleet_write_verified_image(const uint8_t *image, size_t image_len)
 {
 	(void)image;
 	(void)image_len;
-	printf("[ota] stage 4: writing artefact to flash\n");
+	printf("[ota] stage 4: reading flash geometry (no write -- see [STATUS])\n");
 	alp_storage_t *s = alp_storage_open(&(alp_storage_config_t){
 	    .kind        = ALP_STORAGE_KIND_INTERNAL_FLASH,
 	    .instance_id = 0u,
@@ -293,7 +293,7 @@ static bool fleet_write_verified_image(const uint8_t *image, size_t image_len)
 }
 
 /* ----------------------------------------------------------------- */
-/* Stage 5: reboot (the two-slot design's post-write step)            */
+/* Stage 5: no write -> no reboot on this SKU (see [STATUS])          */
 /* ----------------------------------------------------------------- */
 
 /**
@@ -316,14 +316,8 @@ static bool fleet_write_verified_image(const uint8_t *image, size_t image_len)
  */
 static void fleet_finish_update_and_reboot(void)
 {
-	printf("[ota] stage 5: rebooting into the new image\n");
-	printf("[ota]   k_reboot() (stubbed on native_sim)\n");
-#ifndef CONFIG_BOARD_NATIVE_SIM
-	/* sys_reboot() / k_reboot() -- the real implementation lands
-     * alongside the mender-mcu-client integration in v0.4.  Kept
-     * out of the native_sim build to avoid pulling Zephyr's
-     * reboot subsys into the framing test. */
-#endif
+	printf("[ota] stage 5: no new image to boot into (see [STATUS])\n");
+	printf("[ota]   skipping reboot -- OTA apply is DEFERRED on this SKU (#1069)\n");
 }
 
 /* ----------------------------------------------------------------- */
@@ -335,8 +329,10 @@ static void fleet_finish_update_and_reboot(void)
  *
  * On native_sim the poll returns "no deployment" and the loop
  * exits.  On HiL the loop runs forever at OTA_POLL_INTERVAL_S
- * cadence; when a deployment lands the function returns through
- * k_reboot() and never reaches the next iteration.
+ * cadence; when a deployment lands the function still returns
+ * false without rebooting -- OTA apply is DEFERRED on this SKU
+ * (#1069, see [STATUS] at the top of this file), so there is no
+ * write and no k_reboot() call.
  *
  * @return true to keep looping, false to exit.
  */
@@ -372,7 +368,7 @@ static bool fleet_ota_tick(void)
 		return true;
 	}
 	fleet_finish_update_and_reboot();
-	return false; /* k_reboot() would have happened on HiL */
+	return false; /* no reboot: OTA apply is DEFERRED on this SKU (#1069) */
 }
 
 int main(void)
