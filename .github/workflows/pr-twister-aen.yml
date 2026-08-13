@@ -153,21 +153,35 @@ jobs:
         working-directory: ${{ github.workspace }}/alp-sdk
         run: bash scripts/bootstrap.sh
 
-      # bootstrap.sh does NOT apply zephyr/patches.yml (`west patch apply` is
-      # a separate, documented manual step -- see docs/aen-bench-bringup.md
-      # §3). The mproc/SE-boot examples this job builds pull in hal_alif's
-      # se_service.c, which calls ipm_poll_out()/ipm_poll_in() -- fields
+      # `bootstrap.sh` above runs `west patch apply` itself as of #1392 -- it
+      # used to be a manual step documented only in docs/aen-bench-bringup.md
+      # §3 and replicated here, which is a step a user running the script
+      # misses. This job still needs the patches: the mproc/SE-boot examples
+      # it builds pull in hal_alif's se_service.c, which calls
+      # ipm_poll_out()/ipm_poll_in() -- fields
       # zephyr/patches/zephyr/0002-ipm-add-poll-out-poll-in.patch adds to
       # upstream Zephyr's ipm_driver_api; vanilla v4.4.1 doesn't have them.
-      # Skipping this step is what a clean-checkout CI run (unlike a
-      # long-lived dev workspace that already carries the patch applied,
-      # uncommitted, from earlier bring-up work) exposes: a build error on
-      # `.poll_out`/`.poll_in` with no member by that name.
-      - name: west patch apply (zephyr/patches.yml)
+      # Without them a clean-checkout CI run fails on `.poll_out`/`.poll_in`
+      # with no member by that name.
+      #
+      # `west patch apply` exits 0 on three paths that apply nothing (#1392):
+      # patches.yml not found, an empty `patches:` list, and -- per patch -- a
+      # `module:` that resolves to nothing, which patch.py skips with
+      # `if mod is None: continue` and no message. Its exit status is
+      # therefore not evidence. This step reads the tree instead, with
+      # `git apply --reverse --check` per patch, and is what stops a silently
+      # unpatched workspace reaching twister. bootstrap.sh only WARNS on exit
+      # 3 (a module absent from a narrower workspace); this job compiles those
+      # modules, so any non-zero is a failure here.
+      #
+      # Not a `scripts/check_*.py` gate: those run in pr-metadata-validate.yml
+      # on a bare clone with no west workspace, where the only thing they
+      # could do is skip.
+      - name: verify zephyr/patches.yml actually applied
         working-directory: ${{ github.workspace }}/alp-sdk
         run: |
           set -euo pipefail
-          west patch apply
+          python3 scripts/verify_west_patches.py
 
       # twister itself (not just `west build`) needs Zephyr's full Python
       # dependency set under the runner's hosted interpreter -- e.g.
