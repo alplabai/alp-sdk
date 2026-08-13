@@ -222,3 +222,29 @@ def test_main_exits_3_when_only_an_uncheckedout_module_blocked_the_check(tmp_pat
 def test_main_exits_0_on_a_fully_patched_workspace(tmp_path):
     repo, topdir = _workspace(tmp_path, PATCHED)
     assert vwp.main(["--repo", str(repo), "--topdir", str(topdir)]) == 0
+
+
+def test_a_west_that_cannot_be_executed_is_a_refusal_not_a_verdict(tmp_path):
+    """The #1426 regression: a bare `west` is not on PATH where bootstrap runs.
+
+    `scripts/bootstrap.sh` installs west into the workspace venv and calls it by
+    absolute path, so the default bare name raised `FileNotFoundError` out of
+    every CI job that ran bootstrap -- and bootstrap reported that as
+    "zephyr/patches.yml is not applied", which is a verdict this run never
+    reached. It has to be exit 2 (could not inspect), with a message naming the
+    executable.
+    """
+    repo, topdir = _workspace(tmp_path, PATCHED)
+    with pytest.raises(RuntimeError, match="cannot execute"):
+        vwp.verify(repo, topdir, west=str(tmp_path / "no-such-west"))
+
+
+def test_main_exits_2_when_west_cannot_be_executed(tmp_path, capsys):
+    repo, topdir = _workspace(tmp_path, PATCHED)
+    rc = vwp.main(["--repo", str(repo), "--topdir", str(topdir),
+                   "--west", str(tmp_path / "no-such-west")])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "cannot execute" in err
+    # Never the "not applied" verdict -- nothing was inspected.
+    assert "are not applied" not in err

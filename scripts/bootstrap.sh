@@ -694,7 +694,7 @@ if [ "${DO_WEST}" -eq 1 ] && [ "${DO_PATCHES}" -eq 1 ]; then
     # `set -uo pipefail` with errexit OFF (line 37), so a non-zero exit here
     # does not end the script and $? is readable directly. Adding the guard
     # would switch errexit ON for everything below it.
-    ( cd "${REPO_ROOT}" && "${VPY}" scripts/verify_west_patches.py --topdir "${WORKSPACE_DIR}" )
+    ( cd "${REPO_ROOT}" && "${VPY}" scripts/verify_west_patches.py --topdir "${WORKSPACE_DIR}" --west "${WEST}" )
     VERIFY_RC=$?
     case "${VERIFY_RC}" in
         0) ok "zephyr/patches.yml verified applied in ${WORKSPACE_DIR}" ;;

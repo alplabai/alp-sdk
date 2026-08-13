@@ -77,7 +77,7 @@ ABSENT = "ABSENT"
 DRIFTED = "DRIFTED"
 
 
-def west_project_dirs(topdir: Path) -> dict[str, Path]:
+def west_project_dirs(topdir: Path, west: str = "west") -> dict[str, Path]:
     """Every name a `patches.yml` `module:` may legitimately use -> its checkout.
 
     `west patch` resolves `module:` through `zephyr_module`, which keys on the
@@ -86,13 +86,27 @@ def west_project_dirs(topdir: Path) -> dict[str, Path]:
     while the west project is `hal_alif`. Both are accepted here, plus the
     directory basename (what `zephyr_module` falls back to when `module.yml`
     declares no `name:`, which is how `mcuboot` resolves).
+
+    `west` defaults to the bare name on PATH, which is NOT where
+    `scripts/bootstrap.sh` puts it: bootstrap installs west into the workspace
+    venv and invokes it by absolute path. A bare `west` raised
+    `FileNotFoundError: [Errno 2] No such file or directory: 'west'` out of
+    every CI job that runs bootstrap, and bootstrap then reported it as
+    "zephyr/patches.yml is not applied" -- a wrong message for a verifier that
+    could not run. Callers pass `--west "${WEST}"`.
     """
-    out = subprocess.run(
-        ["west", "list", "-f", "{name}|{abspath}"],
-        cwd=topdir,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        out = subprocess.run(
+            [west, "list", "-f", "{name}|{abspath}"],
+            cwd=topdir,
+            capture_output=True,
+            text=True,
+        )
+    except OSError as err:
+        raise RuntimeError(
+            f"cannot execute {west!r}: {err}. bootstrap installs west into the "
+            f"workspace venv rather than onto PATH -- pass --west with its path."
+        ) from err
     if out.returncode != 0:
         raise RuntimeError(f"`west list` failed in {topdir}:\n{out.stderr.strip()}")
 
@@ -134,7 +148,7 @@ def classify(patch_file: Path, module_dir: Path) -> str:
     return ABSENT if forward.returncode == 0 else DRIFTED
 
 
-def verify(repo: Path, topdir: Path) -> tuple[list[str], list[str], list[str]]:
+def verify(repo: Path, topdir: Path, west: str = "west") -> tuple[list[str], list[str], list[str]]:
     """`(failures, applied, absent_modules)` -- lists of human-readable lines.
 
     `absent_modules` is kept apart from `failures` because it is a different
@@ -159,7 +173,7 @@ def verify(repo: Path, topdir: Path) -> tuple[list[str], list[str], list[str]]:
             f"indistinguishable from a pass. Delete this call site instead."
         )
 
-    dirs = west_project_dirs(topdir)
+    dirs = west_project_dirs(topdir, west)
     failures: list[str] = []
     applied: list[str] = []
     absent_modules: list[str] = []
@@ -225,13 +239,24 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="west workspace root (default: asked of `west topdir`)",
     )
+    ap.add_argument(
+        "--west",
+        default="west",
+        help="the west executable (default: `west` on PATH; bootstrap passes "
+             "the workspace venv's copy, which is not on PATH)",
+    )
     args = ap.parse_args(argv)
 
     topdir = args.topdir
     if topdir is None:
-        probe = subprocess.run(
-            ["west", "topdir"], cwd=args.repo, capture_output=True, text=True
-        )
+        try:
+            probe = subprocess.run(
+                [args.west, "topdir"], cwd=args.repo, capture_output=True, text=True
+            )
+        except OSError as err:
+            print(f"verify-west-patches: cannot execute {args.west!r}: {err}",
+                  file=sys.stderr)
+            return 2
         if probe.returncode != 0 or not probe.stdout.strip():
             print(
                 f"verify-west-patches: no west workspace resolvable from {args.repo}.\n"
@@ -244,7 +269,7 @@ def main(argv: list[str] | None = None) -> int:
         topdir = Path(probe.stdout.strip())
 
     try:
-        failures, applied, absent_modules = verify(args.repo, topdir)
+        failures, applied, absent_modules = verify(args.repo, topdir, args.west)
     except RuntimeError as err:
         print(f"verify-west-patches: {err}", file=sys.stderr)
         return 2

@@ -457,7 +457,7 @@ if (-not $NoWest -and -not $NoPatches) {
     # thing.
     Push-Location $RepoRoot
     try {
-        & $Vpy scripts/verify_west_patches.py --topdir $WorkspaceDir
+        & $Vpy scripts/verify_west_patches.py --topdir $WorkspaceDir --west $West
         $VerifyRc = $LASTEXITCODE
     } finally {
         Pop-Location
