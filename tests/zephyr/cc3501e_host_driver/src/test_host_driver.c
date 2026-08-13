@@ -65,6 +65,14 @@ static struct {
 	uint8_t  connect_last_req_pl[ALP_CC3501E_MAX_PAYLOAD];
 	uint32_t connect_submit_count; /* how many CONNECT_STA submits landed */
 
+	/* Same snapshot for WIFI_AP_START (#1385): AP_START is worker-routed
+	 * through the IDENTICAL firmware handler as CONNECT_STA
+	 * (handle_worker_routed_payload) and its host wrapper retries, so the
+	 * generic req_pl/req_len hold whichever attempt landed LAST. */
+	uint16_t ap_start_last_req_len;
+	uint8_t  ap_start_last_req_pl[ALP_CC3501E_MAX_PAYLOAD];
+	uint32_t ap_start_submit_count; /* how many AP_START submits landed */
+
 	/* The WIFI_STATUS latch WIFI_CONNECT_STA drives + WIFI_STATUS reads --
 	 * models the firmware's async connect-status latch (handle_wifi_status /
 	 * cc3501e_hw_wifi_conn_status). */
@@ -246,7 +254,6 @@ static void slave_dispatch(void)
 	case ALP_CC3501E_CMD_PING:
 	case ALP_CC3501E_CMD_RESET:
 	case ALP_CC3501E_CMD_WIFI_DISCONNECT:
-	case ALP_CC3501E_CMD_WIFI_AP_START:
 	case ALP_CC3501E_CMD_WIFI_AP_STOP:
 	case ALP_CC3501E_CMD_WIFI_SCAN_STOP:
 	case ALP_CC3501E_CMD_BLE_ENABLE:
@@ -266,6 +273,14 @@ static void slave_dispatch(void)
 	case ALP_CC3501E_CMD_DIAG_LOG_LEVEL:
 	case ALP_CC3501E_CMD_SOCK_CONNECT:
 	case ALP_CC3501E_CMD_SOCK_CLOSE:
+	/* OTA_PROMOTE (0x46) belongs in THIS bucket, not with the worker-routed
+	 * submits below: handle_ota_promote() returns
+	 * hw_to_resp(cc3501e_hw_ota_promote()), and the TI HAL's
+	 * cc3501e_hw_ota_promote() arms the deferred swap-reboot and returns
+	 * CC3501E_HW_OK unconditionally -- a bare RESP_OK is its ONLY success
+	 * reply.  Modelled here so test_ota_promote_bare_ok_still_accepted_1385
+	 * fences the #1385 check against being over-extended onto it. */
+	case ALP_CC3501E_CMD_OTA_PROMOTE:
 		/* Argless / write-only ops: success is the bare OK status. */
 		stage_status(ALP_CC3501E_RESP_OK);
 		break;
@@ -281,6 +296,22 @@ static void slave_dispatch(void)
 		slave.connect_last_req_len = slave.req_len;
 		memcpy(slave.connect_last_req_pl, slave.req_pl, slave.req_len);
 		slave.connect_submit_count++;
+		stage_status(g_connect_submit_force_ok ? ALP_CC3501E_RESP_OK : ALP_CC3501E_RESP_ERR_BUSY);
+		break;
+
+	case ALP_CC3501E_CMD_WIFI_AP_START:
+		/* #1385: AP_START runs through the SAME firmware handler as
+		 * CONNECT_STA (handle_worker_routed_payload), so its submit ack is
+		 * the same unconditional RESP_ERR_BUSY -- and the WORKER_DONE branch
+		 * that would reply a bare RESP_OK is unreachable to the host, because
+		 * worker_run_pending() calls worker_reset() for CONNECT_STA/AP_START
+		 * before cc3501e_bridge_ready() re-arms the link.  The old model
+		 * staged a bare RESP_OK here (the argless bucket above), which is a
+		 * byte pattern the real firmware can never produce for this opcode --
+		 * it modelled the dead-phase alias itself as success. */
+		slave.ap_start_last_req_len = slave.req_len;
+		memcpy(slave.ap_start_last_req_pl, slave.req_pl, slave.req_len);
+		slave.ap_start_submit_count++;
 		stage_status(g_connect_submit_force_ok ? ALP_CC3501E_RESP_OK : ALP_CC3501E_RESP_ERR_BUSY);
 		break;
 
@@ -933,11 +964,106 @@ ZTEST(cc3501e_host_driver, test_connect_sta_dead_phase_alias_rejected_at_transpo
 
 ZTEST(cc3501e_host_driver, test_wifi_ap_start_encodes_like_connect)
 {
-	zassert_equal(cc3501e_wifi_ap_start(&fw, "AP", 0u, "", 100u), ALP_OK, "AP_START -> OK");
+	/* The wire encoding is the assertion here; the RETURN is deliberately not
+	 * ALP_OK.  AP_START's firmware handler acks every submit RESP_ERR_BUSY and
+	 * the WORKER_DONE branch that would reply RESP_OK is wiped by
+	 * worker_run_pending()'s worker_reset() before the host may clock again --
+	 * so the opcode cannot synchronously succeed.  A retry loop around it is
+	 * therefore provably unwinnable, so cc3501e_wifi_ap_start() (#1385)
+	 * submits exactly ONCE and reports ALP_ERR_TIMEOUT immediately, instead of
+	 * poll_by_repeat()-ing an opcode that can never answer OK.  Restoring a
+	 * legitimate success path needs the submit-once-then-confirm restructure
+	 * cc3501e_wifi_connect() got, which has no independent AP channel to
+	 * confirm against in firmware v4. */
+	zassert_equal(cc3501e_wifi_ap_start(&fw, "AP", 0u, "", 100u),
+	              ALP_ERR_TIMEOUT,
+	              "AP_START's submit ack is BUSY, never a synchronous OK -- reported immediately "
+	              "as unconfirmed, not retried");
 	zassert_equal(slave.cmd, ALP_CC3501E_CMD_WIFI_AP_START, "opcode 0x14");
-	zassert_equal(slave.req_pl[0], 2u, "ssid_len");
-	zassert_equal(slave.req_pl[1], 0u, "psk_len (open)");
-	zassert_mem_equal(&slave.req_pl[4], "AP", 2u, "inline SSID");
+	zassert_equal(slave.ap_start_last_req_pl[0], 2u, "ssid_len");
+	zassert_equal(slave.ap_start_last_req_pl[1], 0u, "psk_len (open)");
+	zassert_mem_equal(&slave.ap_start_last_req_pl[4], "AP", 2u, "inline SSID");
+	zassert_equal(slave.ap_start_submit_count,
+	              1u,
+	              "exactly one submit -- not the retry storm a poll-by-repeat wrapper would "
+	              "cause, each re-issue of which would submit a BRAND NEW AP RoleUp");
+}
+
+/* #1385 at the transport layer, the direct analogue of
+ * test_connect_sta_dead_phase_alias_rejected_at_transport_1378:
+ * cc3501e_request_locked() must refuse to hand back ALP_OK for a
+ * WIFI_AP_START submit whose reply is a bare RESP_OK status byte
+ * (resp_payload_len == 1).  A valid reply HEADER (opcode echo +
+ * payload_len=1) followed by an all-zero PAYLOAD phase is the dead-phase
+ * alias this repo measured on silicon ("the host then reads 0x00000000 from a
+ * dead link"), and RESP_OK is 0x00.  For this opcode a synchronous OK is not
+ * a value the firmware can produce at all: handle_worker_routed_payload acks
+ * WORKER_IDLE with RESP_ERR_BUSY, and worker_run_pending() resets the job
+ * slot for CONNECT_STA/AP_START BEFORE cc3501e_bridge_ready() lets the host
+ * clock again, so the WORKER_DONE -> RESP_OK branch can never be collected. */
+ZTEST(cc3501e_host_driver, test_ap_start_dead_phase_alias_rejected_at_transport_1385)
+{
+	g_connect_submit_force_ok = true;
+	uint8_t      req[4]       = { 2u, 0u, 0u, 0u }; /* minimal AP header, no SSID/PSK bytes */
+	alp_status_t s =
+	    cc3501e_request(&fw, ALP_CC3501E_CMD_WIFI_AP_START, req, sizeof(req), NULL, 0, NULL, 100u);
+	zassert_not_equal(s,
+	                  ALP_OK,
+	                  "a dead-phase 0x00 alias for AP_START's submit ack must not read as "
+	                  "ALP_OK (#1385)");
+	zassert_equal(s, ALP_ERR_IO, "rejected as a transport error, not silently accepted");
+}
+
+/* #1385, the same property one level up: a dead payload phase on every
+ * AP_START attempt must never surface from cc3501e_wifi_ap_start() as
+ * success.  Before this fix the bare 0x00 was mapped straight through
+ * resp_to_status() to ALP_OK and poll_by_repeat() returned it on the first
+ * attempt -- a reported AP that never came up.
+ *
+ * Since #1385's submit-once restructure (77e258dc), cc3501e_wifi_ap_start()
+ * squashes every outcome except ALP_ERR_INVAL/ALP_ERR_NOT_READY into
+ * ALP_ERR_TIMEOUT unconditionally -- so `!= ALP_OK` on ITS return alone
+ * cannot fail no matter what the dead-phase-alias check does; reverting the
+ * WIFI_AP_START reject clause in cc3501e_request_locked()
+ * (chips/cc3501e/cc3501e_core.c) still left this assertion passing.  Replay
+ * the EXACT bytes cc3501e_wifi_ap_start() just staged on the wire (captured
+ * by the mock in slave.ap_start_last_req_pl/len) straight through
+ * cc3501e_request() -- the layer where the alias check actually runs -- so a
+ * regression there fails this test. */
+ZTEST(cc3501e_host_driver, test_wifi_ap_start_ignores_dead_phase_ok_alias_1385)
+{
+	g_connect_submit_force_ok = true;
+	zassert_not_equal(cc3501e_wifi_ap_start(&fw, "ghostap", 1u, "pw", 100u),
+	                  ALP_OK,
+	                  "a bare-OK submit ack alone must never make ap_start() report success");
+	alp_status_t raw = cc3501e_request(&fw,
+	                                   ALP_CC3501E_CMD_WIFI_AP_START,
+	                                   slave.ap_start_last_req_pl,
+	                                   slave.ap_start_last_req_len,
+	                                   NULL,
+	                                   0,
+	                                   NULL,
+	                                   100u);
+	zassert_equal(raw,
+	              ALP_ERR_IO,
+	              "the dead-phase 0x00 alias for AP_START's own wire payload must be rejected as a "
+	              "transport error, not read back as ALP_OK");
+}
+
+/* #1385 fence in the OPPOSITE direction: OTA_PROMOTE (0x46) must stay OFF the
+ * per-opcode reject list.  handle_ota_promote() returns
+ * hw_to_resp(cc3501e_hw_ota_promote()), and cc3501e_hw_ota_promote() arms the
+ * deferred swap-reboot then returns CC3501E_HW_OK unconditionally -- a bare
+ * RESP_OK is that opcode's ONLY success reply, so extending the dead-phase
+ * check to it (as #1385's title invites) would make cc3501e_ota_promote()
+ * always return ALP_ERR_IO and break firmware promotion outright.  This test
+ * fails the moment someone adds ALP_CC3501E_CMD_OTA_PROMOTE to that list. */
+ZTEST(cc3501e_host_driver, test_ota_promote_bare_ok_still_accepted_1385)
+{
+	zassert_equal(cc3501e_ota_promote(&fw, 100u),
+	              ALP_OK,
+	              "OTA_PROMOTE's bare RESP_OK is legitimate and must not be rejected");
+	zassert_equal(slave.cmd, ALP_CC3501E_CMD_OTA_PROMOTE, "opcode 0x46");
 }
 
 ZTEST(cc3501e_host_driver, test_wifi_disconnect_and_ap_stop_argless)
