@@ -620,43 +620,6 @@ if [ "${DO_WEST}" -eq 1 ]; then
         ok "alp-* extension commands registered ('west alp-migrate' resolves in ${WORKSPACE_DIR})"
     fi
 
-    # -------- zephyr/patches.yml (issue #1392) --------------------------------
-    # This used to be a manual step nothing here mentioned, documented only in
-    # docs/aen-bench-bringup.md §3 and replicated by pr-twister-aen.yml in its
-    # own stanza. A user who ran this script and started building got an
-    # unpatched tree, and every layer stayed quiet about it: bootstrap
-    # succeeded, the build succeeded, the flash succeeded, and the board did
-    # not boot the application.
-    #
-    # `west patch apply` is re-appliable, so running it on an already-patched
-    # reused workspace is not a problem; its own exit status, however, is not
-    # evidence it did anything (three no-op-and-exit-0 paths -- see
-    # scripts/verify_west_patches.py). The verification below is what makes
-    # this step mean something, and it is a hard failure: an unpatched
-    # workspace cannot build hal_alif's se_service.c against vanilla Zephyr
-    # v4.4.1's ipm_driver_api anyway.
-    if [ "${DO_PATCHES}" -eq 1 ]; then
-        info "Applying zephyr/patches.yml ('west patch apply')"
-        ( cd "${WORKSPACE_DIR}" && "${WEST}" patch apply ) || die "west patch apply failed"
-        # Exit 3 is "everything present is patched, but a module this
-        # workspace does not carry could not be checked" -- normal for a
-        # narrow workspace, so it warns rather than dying. 1 and 2 are the
-        # real thing.
-        # No `set +e`/`set -e` guard around this: this script runs under
-        # `set -uo pipefail` with errexit OFF (line 37), so a non-zero exit
-        # here does not end the script and $? is readable directly. Adding the
-        # guard would switch errexit ON for everything below it.
-        ( cd "${REPO_ROOT}" && "${VPY}" scripts/verify_west_patches.py --topdir "${WORKSPACE_DIR}" )
-        VERIFY_RC=$?
-        case "${VERIFY_RC}" in
-            0) ok "zephyr/patches.yml verified applied in ${WORKSPACE_DIR}" ;;
-            3) warn "some zephyr/patches.yml modules are not in this workspace -- see above" ;;
-            *) die "zephyr/patches.yml is not applied in ${WORKSPACE_DIR} (#1392) -- see the list above" ;;
-        esac
-    else
-        info "Skipping 'west patch apply' (--no-patches) -- zephyr/patches.yml is NOT applied"
-    fi
-
     # NOTE: this does NOT install the Zephyr SDK (the cross toolchains).
     # Real-silicon targets (e.g. the V2N M33-SM) require it -- run
     # `"${WEST}" sdk install` from "${WORKSPACE_DIR}" once after this step.
@@ -691,6 +654,55 @@ if [ "${DO_PIP}" -eq 1 ]; then
         || { warn "alp_cli editable install reported a problem -- check manually"; record_phase_warning "editable-install"; }
 else
     info "Skipping pip installs (--no-pip)"
+fi
+
+# -------- zephyr/patches.yml (issue #1392) ------------------------------------
+
+# AFTER the pip section, not inside the west one: `west patch` imports
+# `pykwalify.core` at module import time, and pykwalify arrives with the Zephyr
+# requirements installed just above. Run from the west block this exits
+# non-zero in ~23 ms on a fresh CI workspace, before doing any work --
+# `[bootstrap] west patch apply failed` across every alp-build matrix leg on
+# PR #1426, with no output of its own to say why.
+#
+# This used to be a manual step nothing here mentioned, documented only in
+# docs/aen-bench-bringup.md and replicated by pr-twister-aen.yml in its own
+# stanza. A user who ran this script and started building got an unpatched
+# tree, and every layer stayed quiet about it: bootstrap succeeded, the build
+# succeeded, the flash succeeded, and the board did not boot the application.
+#
+# `west patch apply` is re-appliable, so running it on an already-patched
+# reused workspace is not a problem; its own exit status, however, is not
+# evidence it did anything (three no-op-and-exit-0 paths -- see
+# scripts/verify_west_patches.py). The verification below is what makes this
+# step mean something.
+if [ "${DO_WEST}" -eq 1 ] && [ "${DO_PATCHES}" -eq 1 ]; then
+    info "Applying zephyr/patches.yml ('west patch apply')"
+    # Output captured and echoed on failure: west printed nothing the caller
+    # could see when this failed in CI, which is what made it a guess.
+    PATCH_OUT=$( cd "${WORKSPACE_DIR}" && "${WEST}" patch apply 2>&1 )
+    PATCH_RC=$?
+    printf '%s\n' "${PATCH_OUT}"
+    if [ "${PATCH_RC}" -ne 0 ]; then
+        die "west patch apply failed (exit ${PATCH_RC}) -- output above"
+    fi
+    # Exit 3 is "everything present is patched, but a module this workspace
+    # does not carry could not be checked" -- normal for a narrow workspace, so
+    # it warns rather than dying. 1 and 2 are the real thing.
+    #
+    # No `set +e`/`set -e` guard around this: this script runs under
+    # `set -uo pipefail` with errexit OFF (line 37), so a non-zero exit here
+    # does not end the script and $? is readable directly. Adding the guard
+    # would switch errexit ON for everything below it.
+    ( cd "${REPO_ROOT}" && "${VPY}" scripts/verify_west_patches.py --topdir "${WORKSPACE_DIR}" )
+    VERIFY_RC=$?
+    case "${VERIFY_RC}" in
+        0) ok "zephyr/patches.yml verified applied in ${WORKSPACE_DIR}" ;;
+        3) warn "some zephyr/patches.yml modules are not in this workspace -- see above" ;;
+        *) die "zephyr/patches.yml is not applied in ${WORKSPACE_DIR} (#1392) -- see the list above" ;;
+    esac
+elif [ "${DO_WEST}" -eq 1 ]; then
+    info "Skipping 'west patch apply' (--no-patches) -- zephyr/patches.yml is NOT applied"
 fi
 
 # -------- Optional native libs hint -------------------------------------------

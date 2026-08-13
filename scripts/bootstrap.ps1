@@ -393,43 +393,6 @@ if (-not $NoWest) {
         Write-Ok "alp-* extension commands registered ('west alp-migrate' resolves in $WorkspaceDir)"
     }
 
-    # -------- zephyr/patches.yml (issue #1392) --------------------------------
-    # Mirrors scripts/bootstrap.sh's block of the same name. Without it a
-    # Windows user gets exactly the silently-unpatched workspace #1392 is
-    # about, while a Linux user does not.
-    #
-    # `west patch apply` is re-appliable, so running it on an already-patched
-    # reused workspace is fine; its exit status is not evidence it did
-    # anything (three no-op-and-exit-0 paths -- see
-    # scripts/verify_west_patches.py). Exit 3 from the verifier is "everything
-    # present is patched, but a module this workspace does not carry could not
-    # be checked" and warns; 1 and 2 are the real thing.
-    if (-not $NoPatches) {
-        Write-Info "Applying zephyr/patches.yml ('west patch apply')"
-        Push-Location $WorkspaceDir
-        try {
-            & $West patch apply
-            if ($LASTEXITCODE -ne 0) { Fail "west patch apply failed" }
-        } finally {
-            Pop-Location
-        }
-        Push-Location $RepoRoot
-        try {
-            & $Vpy scripts/verify_west_patches.py --topdir $WorkspaceDir
-            $VerifyRc = $LASTEXITCODE
-        } finally {
-            Pop-Location
-        }
-        if ($VerifyRc -eq 0) {
-            Write-Ok "zephyr/patches.yml verified applied in $WorkspaceDir"
-        } elseif ($VerifyRc -eq 3) {
-            Write-Warn2 "some zephyr/patches.yml modules are not in this workspace -- see above"
-        } else {
-            Fail "zephyr/patches.yml is not applied in $WorkspaceDir (#1392) -- see the list above"
-        }
-    } else {
-        Write-Info "Skipping 'west patch apply' (-NoPatches) -- zephyr/patches.yml is NOT applied"
-    }
 } else {
     Write-Info "Skipping west setup (-NoWest)"
 }
@@ -467,6 +430,47 @@ if (-not $NoPip) {
     }
 } else {
     Write-Info "Skipping pip installs (-NoPip)"
+}
+
+# -------- zephyr/patches.yml (issue #1392) ------------------------------------
+
+# AFTER the pip section, not inside the west one: `west patch` imports
+# `pykwalify.core` at module import time, and pykwalify arrives with the Zephyr
+# requirements installed just above. Run from the west block, bootstrap.sh's
+# equivalent exited non-zero in ~23 ms on a fresh CI workspace before doing any
+# work (PR #1426, every alp-build matrix leg).
+#
+# Mirrors scripts/bootstrap.sh's block of the same name. Without it a Windows
+# user gets exactly the silently-unpatched workspace #1392 is about, while a
+# Linux user does not.
+if (-not $NoWest -and -not $NoPatches) {
+    Write-Info "Applying zephyr/patches.yml ('west patch apply')"
+    Push-Location $WorkspaceDir
+    try {
+        & $West patch apply
+        if ($LASTEXITCODE -ne 0) { Fail "west patch apply failed (exit $LASTEXITCODE) -- output above" }
+    } finally {
+        Pop-Location
+    }
+    # Exit 3 is "everything present is patched, but a module this workspace
+    # does not carry could not be checked" and warns; 1 and 2 are the real
+    # thing.
+    Push-Location $RepoRoot
+    try {
+        & $Vpy scripts/verify_west_patches.py --topdir $WorkspaceDir
+        $VerifyRc = $LASTEXITCODE
+    } finally {
+        Pop-Location
+    }
+    if ($VerifyRc -eq 0) {
+        Write-Ok "zephyr/patches.yml verified applied in $WorkspaceDir"
+    } elseif ($VerifyRc -eq 3) {
+        Write-Warn2 "some zephyr/patches.yml modules are not in this workspace -- see above"
+    } else {
+        Fail "zephyr/patches.yml is not applied in $WorkspaceDir (#1392) -- see the list above"
+    }
+} elseif (-not $NoWest) {
+    Write-Info "Skipping 'west patch apply' (-NoPatches) -- zephyr/patches.yml is NOT applied"
 }
 
 # -------- Manual-install hints ------------------------------------------------
