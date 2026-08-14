@@ -32,9 +32,11 @@ regions to reference at all.
 
 The one example that uses the field, `examples/connectivity/production-deployment/board.yaml`,
 pins all five of its partitions to `mram_main` and declares `som.sku:
-E1M-AEN801`. It is correct today and portable to nothing: retarget it at
-E1M-AEN601 — the same family, which ADR 0011 says portability must hold
-across — and every entry references a region that preset does not define.
+E1M-AEN801`. When this ADR was written that was portable to nothing. Since
+#1447 all six AEN presets declare a `memory_map:` carrying `mram_main`, so an
+intra-family retarget at E1M-AEN601 now resolves; the gap remains on the five
+non-AEN presets (E1M-V2N101/102, E1M-V2M101/102, E1M-NX9101), which declare no
+`memory_map:` at all.
 
 That is the whole problem. A customer's answer to "how do I declare a region"
 is currently "name a SoM-internal region", which is exactly the kind of
@@ -113,7 +115,7 @@ it, instead of into the customer's `board.yaml`.
 
 **Bad / accepted.** Roles are an abstraction to learn, and a customer who
 wants byte-exact control must know to reach for `flash_device:`. The preset
-must now carry a role→region mapping for **every** SoM, including the ten with
+must now carry a role→region mapping for **every** SoM, including the five with
 no `memory_map:` today — that is real work, and until a given SoM has it,
 `role:` cannot resolve there. Sequencing is in the migration below so the
 feature never half-exists.
@@ -127,8 +129,8 @@ not just the fault.
 ## Migration
 
 1. **Add the role→region mapping to the presets, starting with the SoMs that
-   have regions.** E1M-AEN801 already has a `memory_map:`; the AEN parts with
-   `ospi_memories:` and the V2N/V2M parts with `nor_flash`/`emmc` each need
+   have regions.** All six AEN presets (E1M-AEN301/401/501/601/701/801) already
+   have a `memory_map:`; the V2N/V2M/NX parts with `nor_flash`/`emmc` each need
    theirs written from module truth, not inferred. **Where the backing part is
    not yet pinned down, the role is marked TBD and `role:` refuses on that SoM
    with "not yet mapped" — never a guessed region.**

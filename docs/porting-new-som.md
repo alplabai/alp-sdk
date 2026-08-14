@@ -334,8 +334,12 @@ topology:
 # Memory layout (SRAM banks + MRAM) is derived from the SoC variant
 # (resolved via silicon_variant:) -- see
 # metadata/socs/alif/ensemble/e9.json variants[].sram_banks_kb +
-# mram_mb. Declare a memory_map: block here ONLY for non-stock
-# partitioning.
+# mram_mb. Declare a memory_map: block here for non-stock
+# partitioning -- and on a DUAL-M55 AEN SoM it is mandatory: board
+# generation refuses a two-M55 preset with no per-role `<role>_slot0`
+# region, because both cores would boot from the same MRAM slot0
+# address (#1069/#1446). Copy metadata/e1m_modules/E1M-AEN801.yaml's
+# disjoint he_slot0/hp_slot0 pair.
 
 mailbox:
   controller: TBD                          # Alif IPC controller name pending HW config.
@@ -383,7 +387,7 @@ status:
 | `capabilities`         | SoM extension only                | Yes                       | Only list keys the SoM **adds** to silicon caps (e.g., on-module CAU on V2N, `optiga_trust_m` on AEN/V2N).               |
 | `silicon_capabilities` | Silicon-determined (restriction)  | Omit when unrestricted    | Optional `unpopulated:` list of SoC `capabilities:` keys this SKU does **not** populate; can only remove what the silicon offers (`validate_metadata.py` cross-check). |
 | `topology`             | Silicon-determined (core ids)     | No                        | Keys must match `soc.cores[].id`; `app:` / `board:` / `machine:` / `toolchain:` are SoM-extension.                       |
-| `memory_map`           | Silicon-determined (derived)      | Omit entirely              | Only declare for non-stock partitioning; otherwise the loader derives from SoC `sram_banks_kb`. On AEN, a region named `<role>_slot0` (`he_slot0`/`hp_slot0`) is what makes `flash_args.slot0_load_address` (tan-cli#353) exist for that core; its `base:` may not be `TBD`/missing (`validate_metadata.py`'s `_check_som_slot0_address_resolved`), and if declared for one M55 role it must be declared for every other role this SoM boots, or board generation and manifest emission both refuse (#1069's disjoint-slot0 rule). |
+| `memory_map`           | Silicon-determined (derived)      | Omit only when the SoM is not a dual-M55 AEN | Declare for non-stock partitioning; otherwise the loader derives from SoC `sram_banks_kb`. On AEN, a region named `<role>_slot0` (`he_slot0`/`hp_slot0`) is what makes `flash_args.slot0_load_address` (tan-cli#353) exist for that core; its `base:` may not be `TBD`/missing (`validate_metadata.py`'s `_check_som_slot0_address_resolved`). A DUAL-M55 AEN SoM must declare a disjoint `he_slot0`/`hp_slot0` pair: declaring it for one M55 role and not its sibling, or omitting it entirely, both make board generation refuse (#1069's disjoint-slot0 rule, extended to the fully-unauthored case by #1446); manifest emission refuses the half-authored case too. |
 | `mailbox.controller`   | Mixed                             | Yes (`"TBD"`)             | Required when any topology entry runs Zephyr or baremetal; controller name comes from the hand-written HW config.        |
 | `pad_routes[]`         | SoM extension                     | Yes (`dispatch: TBD`)     | One row per E1M pad that routes through an on-module mediator; pads NOT listed are implicit `dispatch: direct`.          |
 | `helper_firmware[]`    | SoM extension                     | Yes (`TBD` per field)     | One entry per on-module helper MCU image (CC3511E firmware, GD32 bridge firmware, …).  Three INDEPENDENT axes: `flash_method`/`flash_args` (how it is written locally), `update_channel` (how it is updated in the field), `flash_policy` (who may invoke the flash method — `customer`/`factory`/`recovery_only`; **required on every entry**, regardless of which of the other two it declares).  A `swd_probe` entry naming `flash_args.target` must also name `flash_args.jlink_device` — see `metadata/e1m_modules/README.md`. |

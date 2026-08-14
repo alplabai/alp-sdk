@@ -130,13 +130,12 @@ boot:
 
 `swap_algorithm:` is intentionally omitted above: it's optional, and
 the SDK's per-target default now follows the target's own `memory_map:`
-(#1413) rather than one value for every SKU.  **On E1M-AEN801**
-specifically, the disjoint-slot0 `memory_map:` (#1069) has no
-slot1/scratch partition, so the default resolves to single-app boot
+(#1413) rather than one value for every SKU.  **On every AEN SKU**
+the disjoint-slot0 `memory_map:` (#1069, #1445) has no slot1/scratch
+partition, so the default resolves to single-app boot
 (`SB_CONFIG_MCUBOOT_MODE_SINGLE_APP=y`) -- setting `swap_algorithm:
 scratch` (or `move`/`overwrite`) explicitly here is a build-time error
-on this board.  Every other AEN SKU keeps the historical
-swap-using-scratch default.  See
+on all six (E1M-AEN301/401/501/601/701/801).  See
 [`docs/secure-boot.md`](../secure-boot.md) "Declarative wiring" for
 the full per-target rule.
 

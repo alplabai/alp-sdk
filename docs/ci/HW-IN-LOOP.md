@@ -129,7 +129,8 @@ new SoM's bench coverage means:
 ## Future boards
 
 Coverage for V2N / V2N-M1 / i.MX 93 follows the same bench-run
-contract above once those board dirs exist under `tests/hil/` — no
-separate runner-label scheme to design; the constraint (serial,
-reservation-gated, license-gated tooling) is the same for every board
-on this bench.
+contract above — their board dirs already exist under `tests/hil/`
+(`v2n101-x-evk`, `v2n102-x-evk`, `v2m101-x-evk`, `v2m102-x-evk`,
+`nx9101-evk`) — no separate runner-label scheme to design; the
+constraint (serial, reservation-gated, license-gated tooling) is the
+same for every board on this bench.
