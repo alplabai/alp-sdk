@@ -122,7 +122,7 @@ def test_emit_system_manifest_round_trip(tmp_path: Path) -> None:
 
     # Helper-MCU registration: V2N101's Phase-3 `helper_firmware:`
     # block lists gd32_bridge (the GD32G553 supervisor firmware
-    # image).  The manifest carries the chip slug + flash_method
+    # image).  The manifest carries the chip slug + flash_policy
     # verbatim; firmware_path is absent (#852/#936 review fix, see
     # test_emit_system_manifest_populates_helper_mcus below).
     helper_names = [h["name"] for h in parsed["helper_mcus"]]
@@ -130,7 +130,9 @@ def test_emit_system_manifest_round_trip(tmp_path: Path) -> None:
     gd32 = next(h for h in parsed["helper_mcus"]
                 if h["name"] == "gd32_bridge")
     assert gd32["chip"] == "gd32g553"
-    assert gd32["flash_method"] == "swd_probe"
+    # #1439: no local flash path is declared any more.
+    assert "flash_method" not in gd32
+    assert gd32["flash_policy"] == "recovery_only"
 
 
 def test_emit_system_manifest_includes_hw_info_eeprom_feature(
@@ -179,7 +181,7 @@ def test_emit_system_manifest_populates_helper_mcus(tmp_path: Path) -> None:
     """Phase 3 helper-MCU population.
 
     V2N101's preset declares one helper_firmware entry (gd32_bridge);
-    the manifest must carry the chip slug + flash_method verbatim.
+    the manifest must carry the chip slug + flash_policy verbatim.
     `firmware_path` is entirely ABSENT from the preset (#852 review fix,
     2026-07): the old `firmware_path: TBD` sentinel wasn't actually treated
     as a sentinel by the frozen v0.4.1 Rust flash planner
@@ -203,24 +205,28 @@ def test_emit_system_manifest_populates_helper_mcus(tmp_path: Path) -> None:
     assert gd32["chip"] == "gd32g553"
     assert "firmware_path" not in gd32
     assert "note" not in gd32
-    assert gd32["flash_method"] == "swd_probe"
-    assert isinstance(gd32["flash_args"], dict)
-    assert gd32["flash_args"]["target"] == "gd32g553"
+    # #1439: GD32 programming left tan, so the preset declares neither
+    # `flash_method` nor `flash_args` and the row must carry neither.
+    assert "flash_method" not in gd32
+    assert "flash_args" not in gd32
+    assert gd32["flash_policy"] == "recovery_only"
+    assert gd32["update_channel"] == "alp_ota_spi_bridge"
 
 
-def test_helper_mcu_keeps_flash_keys_alongside_update_channel(
+def test_helper_mcu_keeps_sibling_keys_alongside_update_channel(
     tmp_path: Path,
 ) -> None:
-    """#1357: an `update_channel` must not delete the local flash path.
+    """#1357: an `update_channel` must not delete its sibling keys.
 
-    `_helper_mcus` used to project the two as an either/or, so the GD32
-    bridge -- which has BOTH a field-update channel (protocol v0.6 Path
-    A, slot-A/B application bootloader) and a recovery-only SWD flash --
-    would have had its `flash_method`/`flash_args` dropped from the
-    manifest. That is worse than declining the recovery path: the path
-    vanishes, so a tool cannot even explain why it is unavailable to
-    someone with a bricked bridge.
+    `_helper_mcus` used to project the axes as an either/or, so the GD32
+    bridge -- which carries a field-update channel (protocol v0.6 Path A,
+    slot-A/B application bootloader) alongside the fact of WHO may flash
+    it locally -- would have had that second fact dropped from the
+    manifest.
 
+    #1439 removed `flash_method`/`flash_args` from the preset entirely,
+    so this no longer guards those two keys; `flash_policy` is now the
+    sibling at risk, and the projection bug it pins is the same one.
     Every key the preset declares must survive independently.
     """
     path = _write_board(tmp_path, V2N_HAPPY)
@@ -231,19 +237,19 @@ def test_helper_mcu_keeps_flash_keys_alongside_update_channel(
 
     # The field-update channel is projected...
     assert gd32["update_channel"] == "alp_ota_spi_bridge"
-    # ...and it did NOT suppress the local flash recipe.  Assert the keys
-    # SURVIVED before reading them, so the regression reports as "the
-    # channel deleted the recovery path" rather than a bare KeyError.
-    assert {"flash_method", "flash_args", "flash_policy"} <= set(gd32), (
-        "update_channel suppressed the local flash keys; the recovery "
-        f"path vanished from the manifest: {sorted(gd32)}"
+    # ...and it did NOT suppress the policy beside it.  Assert the key
+    # SURVIVED before reading it, so the regression reports as "the
+    # channel deleted its sibling" rather than a bare KeyError.
+    assert "flash_policy" in gd32, (
+        "update_channel suppressed flash_policy; who may flash this part "
+        f"vanished from the manifest: {sorted(gd32)}"
     )
-    assert gd32["flash_method"] == "swd_probe"
-    assert gd32["flash_args"]["target"] == "gd32g553"
-    assert gd32["flash_args"]["jlink_device"] == "GD32G553MEY7TR"
-    assert gd32["flash_args"]["base"] == "0x08000000"
-    # ...and the fact that decides who may invoke it came along too.
     assert gd32["flash_policy"] == "recovery_only"
+    # And the removed axis stays removed -- an SDK re-emitting
+    # `flash_method: swd_probe` to a tan without that backend hits
+    # `executionPolicy.unknownBackend`, which is `fail`.
+    assert "flash_method" not in gd32
+    assert "flash_args" not in gd32
 
 
 def test_helper_mcu_omits_keys_the_preset_does_not_declare(

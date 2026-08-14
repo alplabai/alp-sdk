@@ -134,17 +134,29 @@ The six SKUs must stay in lockstep (same `update_channel`, same
 
 All four E1M-X presets (`E1M-V2N101`, `E1M-V2N102`, `E1M-V2M101`,
 `E1M-V2M102` — one PCB, variant-populated) carry a byte-identical
-`gd32_bridge` entry declaring **all three** axes:
-`flash_method: swd_probe` + `flash_policy: recovery_only` +
-`update_channel: alp_ota_spi_bridge`.  Alp Lab flashes the GD32 in
-production; field updates stream over the bridge link into the
-slot-A/B application bootloader (protocol v0.6 Path A); SWD is the
-customer's bricked-board recovery route.  `flash_args` names both
-halves of the probe decision — `target` (OpenOCD/pyOCD) **and**
-`jlink_device` (SEGGER `GD32G553MEY7TR`); the schema rejects a
-`swd_probe` entry that names only one, because `tan flash` refuses at
-the probe rather than guess.  `expect_dpidr` stays unset until the SW-DP
-ID is measured on silicon.
+`gd32_bridge` entry declaring **two** axes:
+`flash_policy: recovery_only` + `update_channel: alp_ota_spi_bridge`.
+Field updates stream over the bridge link into the slot-A/B application
+bootloader (protocol v0.6 Path A).
+
+There is **no `flash_method`**, and no `flash_args`.  GD32 programming
+is separated out of `tan` entirely (#1439, tan-cli#732), so declaring a
+backend `tan` has removed would hit `executionPolicy.unknownBackend`,
+which is `fail`.  Alp Lab flashes the part in production over SWD with
+its own tooling.  The on-SoM host-driven bit-bang route
+(`chips/gd32_swd/`, Path B, `metadata/chips/gd32_swd.yaml`) is a
+separate mechanism and is unaffected.
+
+`flash_policy` stays because it is required on every helper entry with
+or without a `flash_method` — it answers who may reach a local flash
+path if one is ever added.  The six AEN `cc3501e_otp` entries are the
+same shape (`recovery_only`, no `flash_method`).
+
+The GD32's SW-DP ID remains unsettled: `metadata/chips/gd32_swd.yaml`
+expects `0x6BA02477`, which `CHANGELOG.md` records as a measurement of
+the **V2N CM33 DAP**, while `0x0BE12477` appears elsewhere with
+conflicting provenance.  Neither is a confirmed GD32 reading — see
+#1440.
 
 See `metadata/schemas/som-preset-v1.schema.json`
 `$defs/helper_firmware_entry` for the full contract.

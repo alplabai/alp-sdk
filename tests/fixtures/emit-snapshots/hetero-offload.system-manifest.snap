@@ -42,12 +42,6 @@ ipc:
 helper_mcus:
 - name: gd32_bridge
   chip: gd32g553
-  flash_method: swd_probe
-  flash_args:
-    interface: cmsis-dap
-    target: gd32g553
-    jlink_device: GD32G553MEY7TR
-    base: '0x08000000'
   flash_policy: recovery_only
   update_channel: alp_ota_spi_bridge
 boot_order: []
