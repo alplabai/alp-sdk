@@ -216,27 +216,6 @@
   "packages": ["WLCSP216 0.5mm", "FBGA194 0.5mm"],
   "variants": [
     {
-      "order_code": "AE822FA0E5597BS0",
-      "package": "WLCSP216",
-      "temperature_grade": "standard",
-      "mram_mb": 5.5,
-      "sram_kb": 9984,
-      "sram_banks_kb": {
-        "SRAM0": 4096, "SRAM1": 4096,
-        "SRAM2_M55_HP_ITCM": 256, "SRAM3_M55_HP_DTCM": 1024,
-        "SRAM4_M55_HE_ITCM": 256, "SRAM5_M55_HE_DTCM": 256
-      },
-      "gpio_18v": 136,
-      "optional_features": { "npu_hg": true, "isp": true, "jpeg_encoder": true },
-      "shipment_suffixes": ["-T", "-Y"],
-      "notes": "debug.jlink_flash_device = AE822FA0E5597BS0_M55_HE is sourced, not from the Alif DFP -- the DFP (AlifSemiconductor.Ensemble.pdsc:304) confirms the order-code spelling AE822FA0E5597BS0 but carries no SEGGER/J-Link material at all (no .jlink, no JLinkDevices.xml, no --device= string), so the part-number J-Link profile could not be derived from the pack. It was sourced instead from SEGGER's own J-Link DLL (V9.50, libjlinkarm.so.9.50.0) built-in device table under a held bench reservation: the exact string is present at byte offset 10233557, alongside its siblings (_M55_HP @10233581, _A32_0 @10233605, _A32_1 @10233628) and neighbouring real device names (AE402FA0E5597BS0_*, AE612FA0E5597BS0_*, AE722F80F55D5_A32_*), confirming this is the genuine device table and not an incidental string; a control probe for a bogus AE822FA0E5597ZZ9_M55_HE returned zero hits against the real name's one. Caveat: no BS0 part is on this bench, so the string is sourced from the DLL table but not yet exercised end-to-end against real BS0 silicon (unlike LS0, which is bench-proven both sourced and working). Tracking: github.com/alplabai/alp-sdk/issues/1295.",
-      "debug": {
-        "pyocd_target": "AE822FA0E5597BS0",
-        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" },
-        "jlink_flash_device": "AE822FA0E5597BS0_M55_HE"
-      }
-    },
-    {
       "order_code": "AE822FA0E5597LS0",
       "package": "FBGA194",
       "temperature_grade": "standard",

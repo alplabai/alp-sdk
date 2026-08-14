@@ -157,27 +157,6 @@
   "packages": ["WLCSP208 0.5mm", "FBGA194 0.5mm"],
   "variants": [
     {
-      "order_code": "AE722F80F55D5AS",
-      "package": "WLCSP208",
-      "temperature_grade": "standard",
-      "mram_mb": 5.5,
-      "sram_kb": 13824,
-      "sram_banks_kb": {
-        "SRAM0": 4096, "SRAM1": 2560,
-        "SRAM2_M55_HP_ITCM": 256, "SRAM3_M55_HP_DTCM": 1024,
-        "SRAM4_M55_HE_ITCM": 256, "SRAM5_M55_HE_DTCM": 256,
-        "SRAM6": 2048, "SRAM7": 512, "SRAM8": 2048, "SRAM9": 768
-      },
-      "gpio_18v": 120,
-      "shipment_suffixes": ["-T", "-Y"],
-      "notes": "jlink_flash_device is shared verbatim with the AE722F80F55D5LS sibling below -- see the file-level note (#1295).",
-      "debug": {
-        "pyocd_target": "AE722F80F55D5AS",
-        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" },
-        "jlink_flash_device": "AE722F80F55D5_HE"
-      }
-    },
-    {
       "order_code": "AE722F80F55D5LS",
       "package": "FBGA194",
       "temperature_grade": "standard",
@@ -192,7 +171,6 @@
       "gpio_18v": 120,
       "shipment_suffixes": ["-T", "-Y"],
       "alp_module_skus": ["E1M-AEN701"],
-      "notes": "jlink_flash_device is shared verbatim with the AE722F80F55D5AS sibling above -- see the file-level note (#1295).",
       "debug": {
         "pyocd_target": "AE722F80F55D5LS",
         "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" },

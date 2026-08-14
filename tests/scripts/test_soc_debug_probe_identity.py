@@ -211,13 +211,15 @@ def test_shipped_e8_publishes_the_measured_dpidr():
     assert variant["order_code"] == "AE822FA0E5597LS0"
     assert variant["debug"].get("expect_dpidr") == "0x4C013477"
 
-    # The sibling BS0 variant is NOT on any bench and must stay unarmed --
-    # a same-family assumption is exactly the guess that turns this guard
-    # into a hazard.
-    bs0 = next(
-        v for v in doc["variants"]
-        if v["order_code"] == "AE822FA0E5597BS0")
-    assert "expect_dpidr" not in bs0["debug"]
+    # Only the part actually on a bench may publish a measured DPIDR -- a
+    # same-family assumption is exactly the guess that turns this guard into
+    # a hazard. Asserted over the WHOLE file rather than one named sibling:
+    # the sibling this used to name (AE822FA0E5597BS0) was a WLCSP part and
+    # was dropped in #1444, which would have turned a `next()` lookup into a
+    # StopIteration rather than a statement about the corpus.
+    armed = [v["order_code"] for v in doc["variants"]
+             if "expect_dpidr" in (v.get("debug") or {})]
+    assert armed == ["AE822FA0E5597LS0"], armed
 
 
 # ---------------------------------------------------------------------

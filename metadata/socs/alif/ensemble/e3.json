@@ -139,49 +139,6 @@
   "packages": ["WLCSP208 0.5mm", "FBGA194 0.5mm"],
   "variants": [
     {
-      "order_code": "AE302F80F55D5AE",
-      "package": "WLCSP208",
-      "temperature_grade": "extended",
-      "mram_mb": 5.5,
-      "sram_kb": 13824,
-      "sram_banks_kb": {
-        "SRAM0": 4096, "SRAM1": 2560,
-        "SRAM2_M55_HP_ITCM": 256, "SRAM3_M55_HP_DTCM": 1024,
-        "SRAM4_M55_HE_ITCM": 256, "SRAM5_M55_HE_DTCM": 256,
-        "SRAM6": 2048, "SRAM7": 512, "SRAM8": 2048, "SRAM9": 768
-      },
-      "gpio_18v": 120,
-      "optional_features": { "npu_hp": true, "can_fd": true },
-      "shipment_suffixes": ["-T", "-Y"],
-      "notes": "jlink_flash_device is shared verbatim with the AE302F80F55D5LE sibling below -- see the file-level note (#1295).",
-      "debug": {
-        "pyocd_target": "AE302F80F55D5AE",
-        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" },
-        "jlink_flash_device": "AE302F80F55D5_HE"
-      }
-    },
-    {
-      "order_code": "AE302F80F5582AE",
-      "package": "WLCSP208",
-      "temperature_grade": "extended",
-      "mram_mb": 5.5,
-      "sram_kb": 8448,
-      "sram_banks_kb": {
-        "SRAM0": 4096, "SRAM1": 2560,
-        "SRAM2_M55_HP_ITCM": 256, "SRAM3_M55_HP_DTCM": 1024,
-        "SRAM4_M55_HE_ITCM": 256, "SRAM5_M55_HE_DTCM": 256
-      },
-      "gpio_18v": 120,
-      "optional_features": { "npu_hp": true, "can_fd": true },
-      "shipment_suffixes": ["-T", "-Y"],
-      "notes": "jlink_flash_device is shared verbatim with the AE302F80F5582LE sibling below -- see the file-level note (#1295).",
-      "debug": {
-        "pyocd_target": "AE302F80F5582AE",
-        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" },
-        "jlink_flash_device": "AE302F80F5582_HE"
-      }
-    },
-    {
       "order_code": "AE302F80F55D5LE",
       "package": "FBGA194",
       "temperature_grade": "extended",
@@ -197,7 +154,6 @@
       "optional_features": { "npu_hp": true, "can_fd": true },
       "shipment_suffixes": ["-T", "-Y"],
       "alp_module_skus": ["E1M-AEN301"],
-      "notes": "jlink_flash_device is shared verbatim with the AE302F80F55D5AE sibling above -- see the file-level note (#1295).",
       "debug": {
         "pyocd_target": "AE302F80F55D5LE",
         "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" },
@@ -218,7 +174,6 @@
       "gpio_18v": 120,
       "optional_features": { "npu_hp": true, "can_fd": true },
       "shipment_suffixes": ["-T", "-Y"],
-      "notes": "jlink_flash_device is shared verbatim with the AE302F80F5582AE sibling above -- see the file-level note (#1295).",
       "debug": {
         "pyocd_target": "AE302F80F5582LE",
         "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" },
