@@ -96,6 +96,15 @@ static struct {
 	 * cc3501e_wifi_connect()'s own poll loop made for a given timeout_ms
 	 * (#1382 timeout-accounting regression). */
 	uint32_t wifi_status_attempt_count;
+
+	/* #1435 entry-clean ordering: every opcode dispatched, in order.
+	 * slave.cmd alone only ever holds the LAST opcode dispatched, which
+	 * cannot prove WIFI_DISCONNECT landed BEFORE WIFI_CONNECT_STA -- this
+	 * log can. Capacity is generous for one cc3501e_wifi_connect() call's
+	 * worth of traffic; entries past capacity are dropped (cmd_log_count
+	 * still counts them) but no #1435 test drives that many. */
+	uint8_t  cmd_log[16];
+	uint32_t cmd_log_count;
 } slave;
 
 /* Set by test_wifi_scan_buf_is_per_context_740 / test_ble_scan_buf_is_per_context_740
@@ -495,7 +504,11 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 	}
 	switch (slave.phase) {
 	case PH_REQ_HDR:
-		slave.cmd     = tx[0];
+		slave.cmd = tx[0];
+		if (slave.cmd_log_count < sizeof(slave.cmd_log)) {
+			slave.cmd_log[slave.cmd_log_count] = slave.cmd;
+		}
+		slave.cmd_log_count++;
 		slave.req_len = (uint16_t)tx[2] | ((uint16_t)tx[3] << 8);
 		if (rx != NULL) {
 			memset(rx, ALP_CC3501E_SYNC_IDLE, len);
@@ -958,6 +971,15 @@ ZTEST(cc3501e_host_driver, test_wifi_connect_submits_exactly_once_1376)
 	zassert_equal(slave.connect_submit_count,
 	              1u,
 	              "exactly one CONNECT_STA submit regardless of how many status polls it took");
+	/* Reviewer finding: the success path was asserted only via ALP_OK + the
+	 * submit count, never off slave.cmd -- a mutant that tore the
+	 * association down on the SUCCESS path too (e.g. an unconditional
+	 * post-submit disconnect) would still pass both of the above. The last
+	 * thing a healthy connect touches the wire with is a WIFI_STATUS poll
+	 * reading CONNECTED, never WIFI_DISCONNECT; fence that here. */
+	zassert_equal(slave.cmd,
+	              ALP_CC3501E_CMD_WIFI_STATUS,
+	              "success must end on the WIFI_STATUS read, not a stray WIFI_DISCONNECT");
 }
 
 /* #1376: a connection to an SSID that never actually associates must not be
@@ -1013,6 +1035,116 @@ ZTEST(cc3501e_host_driver, test_wifi_connect_reports_failure_not_ok_1376)
 	              ALP_ERR_IO,
 	              "CONN_FAILED/REJECTED -> IO, not OK");
 	zassert_equal(slave.connect_submit_count, 1u, "exactly one submit");
+}
+
+/* #1435 helper: first index in slave.cmd_log at which @p cmd appears, or
+ * slave.cmd_log_count (never a valid index) if it never did. slave.cmd alone
+ * only ever holds the LAST opcode dispatched -- not enough to prove ORDER
+ * (WIFI_DISCONNECT strictly before WIFI_CONNECT_STA), which is the actual
+ * property under test below. */
+static uint32_t cmd_log_index_of(uint8_t cmd)
+{
+	uint32_t n =
+	    (slave.cmd_log_count < sizeof(slave.cmd_log)) ? slave.cmd_log_count : sizeof(slave.cmd_log);
+	for (uint32_t i = 0; i < n; i++) {
+		if (slave.cmd_log[i] == cmd) {
+			return i;
+		}
+	}
+	return slave.cmd_log_count;
+}
+
+/* #1435 bench-proven stale-association wedge: a connect that FOLLOWS a
+ * failed attempt (the WIFI_STATUS latch already reads CONN_FAILED when this
+ * one is entered) must clear it -- issue WIFI_DISCONNECT (0x13) -- BEFORE
+ * submitting WIFI_CONNECT_STA (0x12), else the new association's own
+ * Wlan_Connect kick fails against the leftover NWP state (ALP_CC3501E_WIFI_
+ * FAIL_KICK) even for a correct SSID/passphrase -- reproduced 2/2 on real
+ * silicon (E1M-AEN801 r1). Checking ORDER (not just "a disconnect happened
+ * somewhere") is the point: the previous round of this fix cleared on the
+ * way OUT of a failed connect instead, which a same-opcode-count assertion
+ * could not have told apart from clearing on the way IN.
+ *
+ * The connect must also PROCEED normally afterwards, not short-circuit at
+ * the clear: connect_submit_count == 1 proves the submit still happened, and
+ * the terminal read afterwards (the mock's latch is untouched by
+ * WIFI_DISCONNECT, matching a fresh CONN_FAILED still being current) still
+ * reports the CONNECT's own ALP_ERR_IO, not the clear's own ALP_OK. */
+ZTEST(cc3501e_host_driver, test_wifi_connect_entry_clears_stale_failed_association_1435)
+{
+	slave.wifi_conn_state  = ALP_CC3501E_WIFI_CONN_FAILED;
+	slave.wifi_fail_reason = ALP_CC3501E_WIFI_FAIL_REJECTED;
+	alp_status_t s         = cc3501e_wifi_connect(&fw, "securenet", 1u, "wrongpw", 5000u);
+	zassert_equal(
+	    s, ALP_ERR_IO, "CONN_FAILED/REJECTED -> the CONNECT's own IO, not the clear's OK");
+	zassert_equal(slave.connect_submit_count,
+	              1u,
+	              "the entry clean must not short-circuit -- CONNECT_STA still submits (#1435)");
+	uint32_t disc_idx    = cmd_log_index_of(ALP_CC3501E_CMD_WIFI_DISCONNECT);
+	uint32_t connect_idx = cmd_log_index_of(ALP_CC3501E_CMD_WIFI_CONNECT_STA);
+	zassert_true(disc_idx < slave.cmd_log_count, "WIFI_DISCONNECT must be issued at all (#1435)");
+	zassert_true(connect_idx < slave.cmd_log_count, "WIFI_CONNECT_STA must still be submitted");
+	zassert_true(disc_idx < connect_idx,
+	             "WIFI_DISCONNECT (idx %u) must land strictly BEFORE WIFI_CONNECT_STA (idx %u)",
+	             disc_idx,
+	             connect_idx);
+}
+
+/* Negative case: a latch that is NOT CONN_FAILED at entry must never see a
+ * WIFI_DISCONNECT -- the entry clean is conditional on the failed latch, not
+ * unconditional. DISCONNECTED is the "nothing to clear" baseline. */
+ZTEST(cc3501e_host_driver, test_wifi_connect_entry_skips_clean_when_disconnected_1435)
+{
+	slave.wifi_conn_state = ALP_CC3501E_WIFI_DISCONNECTED;
+	alp_status_t s        = cc3501e_wifi_connect(&fw, "ghostnet", 1u, "pw", 120u);
+	zassert_equal(s, ALP_ERR_TIMEOUT, "never confirmed -> TIMEOUT via poll-loop exhaustion");
+	zassert_equal(cmd_log_index_of(ALP_CC3501E_CMD_WIFI_DISCONNECT),
+	              slave.cmd_log_count,
+	              "DISCONNECTED at entry -> no WIFI_DISCONNECT issued (#1435)");
+}
+
+/* CONNECTING at entry is a LIVE attempt, not a stale one -- must be left
+ * alone. Today's behaviour (documented on cc3501e_wifi_connect(), not
+ * exercised further here) is that the new submit bounces BUSY and the poll
+ * loop below keeps tracking the OLD attempt; this test only proves the entry
+ * clean itself does not fire on it. */
+ZTEST(cc3501e_host_driver, test_wifi_connect_entry_skips_clean_when_connecting_1435)
+{
+	slave.wifi_conn_state = ALP_CC3501E_WIFI_CONNECTING;
+	alp_status_t s        = cc3501e_wifi_connect(&fw, "ghostnet", 1u, "pw", 120u);
+	zassert_equal(s, ALP_ERR_TIMEOUT, "still CONNECTING at the deadline -> TIMEOUT");
+	zassert_equal(cmd_log_index_of(ALP_CC3501E_CMD_WIFI_DISCONNECT),
+	              slave.cmd_log_count,
+	              "CONNECTING at entry -> a live attempt, no WIFI_DISCONNECT issued (#1435)");
+}
+
+/* CONNECTED at entry is connect-while-connected -- a pre-existing, separate,
+ * unowned semantic this fix does not expand into. Must be left alone. */
+ZTEST(cc3501e_host_driver, test_wifi_connect_entry_skips_clean_when_connected_1435)
+{
+	slave.wifi_conn_state = ALP_CC3501E_WIFI_CONNECTED;
+	alp_status_t s        = cc3501e_wifi_connect(&fw, "mynet", 1u, "pw", 100u);
+	zassert_equal(s, ALP_OK, "already CONNECTED -> OK (out of scope for #1435 to change)");
+	zassert_equal(cmd_log_index_of(ALP_CC3501E_CMD_WIFI_DISCONNECT),
+	              slave.cmd_log_count,
+	              "CONNECTED at entry -> no WIFI_DISCONNECT issued (#1435)");
+}
+
+/* Regression the rework undoes: a failure discovered DURING the poll loop
+ * (not already latched at entry, so the entry clean does not fire -- one
+ * busy poll delays the terminal read past the entry check) must NOT issue
+ * WIFI_DISCONNECT from either post-submit error exit any more. The previous
+ * round of this fix teared down here; this proves that shape is gone. */
+ZTEST(cc3501e_host_driver, test_wifi_connect_failure_exit_no_longer_tears_down_1435)
+{
+	slave.wifi_conn_state              = ALP_CC3501E_WIFI_CONN_FAILED;
+	slave.wifi_fail_reason             = ALP_CC3501E_WIFI_FAIL_REJECTED;
+	slave.status_polls_before_terminal = 1u; /* entry sees CONNECTING, not the terminal state */
+	alp_status_t s = cc3501e_wifi_connect(&fw, "securenet", 1u, "wrongpw", 5000u);
+	zassert_equal(s, ALP_ERR_IO, "CONN_FAILED/REJECTED discovered mid-poll -> IO");
+	zassert_equal(cmd_log_index_of(ALP_CC3501E_CMD_WIFI_DISCONNECT),
+	              slave.cmd_log_count,
+	              "a failure exit must not itself issue WIFI_DISCONNECT any more (#1435 rework)");
 }
 
 /* #1378's own reproduction: force the mock's WIFI_CONNECT_STA submit ack to

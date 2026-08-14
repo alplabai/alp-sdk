@@ -226,6 +226,56 @@ alp_status_t cc3501e_wifi_connect(cc3501e_t  *ctx,
 	size_t psk_len  = (pass != NULL) ? strlen(pass) : 0u;
 	if (ssid_len > 32u || psk_len > 64u) return ALP_ERR_INVAL;
 
+	/* #1435: clear a STALE ASSOCIATION left by a previous FAILED connect
+	 * before this one submits.  Bench-proven on E1M-AEN801 r1, reproduced
+	 * 2/2, one boot, single variable: connect to a real AP succeeds
+	 * (rssi=-48 dBm, ip 192.168.1.14); `wifi disconnect`; the SAME connect
+	 * succeeds again (rssi=-47 dBm); ONE connect to a non-existent SSID
+	 * fails -5; the SAME connect that just worked now ALSO fails -5,
+	 * nothing else changed; `wifi disconnect`; the same connect succeeds
+	 * again (rssi=-49 dBm).  The second connect's failure decodes as
+	 * ALP_CC3501E_WIFI_FAIL_KICK (3): the Wlan_Connect kick itself, not the
+	 * SSID/passphrase -- proof it is the stale association from the FIRST
+	 * failure wedging the second, not a bad credential.
+	 *
+	 * This is NOT a role teardown: the STA role is brought up once per
+	 * process lifetime (wifi_sta_role_up, pre-cached in
+	 * cc3501e_hw_wifi_boot_start()) and must stay up; Wlan_Disconnect does
+	 * not take the role down.  What wedges the next Wlan_Connect kick is
+	 * association state left inside the NWP by the failed attempt, and
+	 * cc3501e_wifi_disconnect() (WIFI_DISCONNECT, 0x13) is the bench-proven
+	 * clear for it.
+	 *
+	 * Cleared at ENTRY, not at the failure exits below: clearing on the way
+	 * OUT of a failed connect erased the failure_reason latch a caller
+	 * needs to read (cc3501e_hw_wifi_disconnect() does
+	 * wifi_conn_set(DISCONNECTED, FAIL_NONE)), could tear down a LATE
+	 * success that lands after a poll-exhaustion timeout, and added up to
+	 * CC3501E_WIFI_DOWN_WINDOW_MS to every failed call regardless of
+	 * timeout_ms.  Clearing at entry, conditional on the latch actually
+	 * reading CONN_FAILED, avoids all three: a failed attempt's
+	 * state/fail_reason survive untouched for the caller to read, a live
+	 * CONNECTING attempt or an already-CONNECTED association is left alone
+	 * (see below), and the bound only ever applies to the connect that
+	 * follows a failure.
+	 *
+	 * Uses wifi_status_once() -- the single bounded (CC3501E_REQ_TMO_MS)
+	 * attempt -- NOT the public cc3501e_wifi_status(), which rides its own
+	 * CC3501E_WIFI_DOWN_WINDOW_MS retry and would make a wedged transport
+	 * worse here.  If the read fails, or the state is anything other than
+	 * CONN_FAILED, this falls through and does nothing: CONNECTING is a
+	 * live attempt (today's behaviour is the new submit bounces BUSY and
+	 * the status loop below keeps tracking the OLD attempt), and
+	 * CONNECTED is connect-while-connected -- a pre-existing, separate,
+	 * unowned semantic this fix does not expand into.  The clear's own
+	 * result is deliberately discarded -- best-effort, same reasoning as
+	 * every other radio-op teardown in this file. */
+	alp_cc3501e_wifi_status_t entry_st;
+	if (wifi_status_once(ctx, &entry_st) == ALP_OK &&
+	    entry_st.state == ALP_CC3501E_WIFI_CONN_FAILED) {
+		(void)cc3501e_wifi_disconnect(ctx);
+	}
+
 	/* On-wire payload: alp_cc3501e_wifi_connect_t header (4 B) + inline SSID +
 	 * inline passphrase, all packed with no padding. */
 	uint8_t                    payload[sizeof(alp_cc3501e_wifi_connect_t) + 32u + 64u];
