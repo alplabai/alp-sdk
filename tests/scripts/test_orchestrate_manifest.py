@@ -14,7 +14,9 @@ Run locally:
 
 from __future__ import annotations
 
+import json
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -416,6 +418,42 @@ def test_emit_system_manifest_carries_a_declared_null_jlink_flash_device(
         assert flash_args["jlink_flash_device"] is None, flash_args
 
 
+def test_a_declared_null_still_resolves_its_slot0_load_address(
+    tmp_path: Path,
+) -> None:
+    """The third truthiness gate on the same field, and the only one no
+    unit test reaches.
+
+    `_validate_topology_cores` gated `slot0_load_address` resolution on
+    `if jlink_flash_device` -- truthy -- so a declared null silently
+    produced no slot0 address at all. That cannot be exercised with a
+    constructed `Slice`: the gate lives inside a stage needing a fully
+    resolved SoM preset and SoC spec. `E1M-AEN401` is the one SKU that
+    can reach it -- e4.json declares the null, and #1445 gave the SoM the
+    disjoint per-role windows the address comes from.
+
+    Verbatim addresses, per #1445's shared AEN layout: `he_slot0` at
+    0x80010000 and `hp_slot0` at 0x802b0000 -- the same pair this branch
+    writes into all five AEN SoM presets, and the pair #1069 exists to keep
+    apart. Asserted BY VALUE rather than by presence: a regression that
+    collapsed both roles onto one address would still satisfy a presence
+    check while being exactly the corruption the disjointness rule forbids.
+    """
+    path = _write_board(tmp_path, AEN_NO_JLINK_FLASH_DEVICE)
+    project = load_board_yaml(path)
+    parsed = yaml.safe_load(emit_system_manifest(project))
+
+    by_core = {s["core_id"]: s for s in parsed["slices"]}
+    addresses = {
+        core_id: by_core[core_id]["flash_args"].get("slot0_load_address")
+        for core_id in ("m55_he", "m55_hp")
+    }
+    assert addresses == {
+        "m55_he": "0x80010000",
+        "m55_hp": "0x802b0000",
+    }, addresses
+
+
 # ---------------------------------------------------------------------
 # `flash_args.expect_dpidr` + `flash_args.jlink_device` -- the wrong-board
 # SW-DP IDR preflight PAIR (#1355)
@@ -571,17 +609,48 @@ def test_emit_system_manifest_aen_flash_args_carries_slot0_load_address(
 def test_emit_system_manifest_flash_args_omits_slot0_load_address_when_flow_d_unarmed(
     tmp_path: Path,
 ) -> None:
-    """E1M-AEN401 publishes `jlink_flash_device: null` (Flow D is not armed
-    for this SoC variant), so `flash_args` must stay `{}` -- no
-    `slot0_load_address` key either, even though this is otherwise an AEN
-    part with M55 HP/HE cores. `slot0_load_address` is meaningless without
-    Flow D, and must never appear on its own.
+    """`slot0_load_address` is meaningless without Flow D and must never
+    appear on its own.
+
+    The invariant is unchanged; its FIXTURE had to move. This used to run
+    against `E1M-AEN401` on the reading that a `jlink_flash_device: null`
+    leaves Flow D unarmed. That is no longer what a declared null means:
+    tan's `flow_d_available()` is presence-based (`FLOW_D_KEYS` is exactly
+    `("jlink_flash_device",)`), so a published null deliberately DOES arm
+    Flow D -- that is the whole point, so the null reaches
+    `plan_alif_mram_jlink` and becomes a loud refusal instead of a silent
+    SE-UART fallback. `test_a_declared_null_still_resolves_its_slot0_load_address`
+    now pins that side.
+
+    The state this test guards is the OTHER one -- a variant that declares
+    NOTHING -- and after #1295 no shipped Alif Ensemble variant is in it,
+    so the premise is unreachable from the corpus. Rather than delete a
+    real invariant along with its dead fixture, the key is stripped from a
+    throwaway copy of the metadata tree, which reaches the same state
+    honestly and keeps failing if the emitter ever starts publishing an
+    orphan slot0.
     """
+    meta = tmp_path / "metadata"
+    shutil.copytree(REPO / "metadata", meta)
+    e4 = meta / "socs" / "alif" / "ensemble" / "e4.json"
+    spec = json.loads(e4.read_text(encoding="utf-8"))
+    removed = [v["debug"].pop("jlink_flash_device", "__missing__")
+               for v in spec["variants"]]
+    assert removed == [None], (
+        f"e4.json no longer declares exactly one null jlink_flash_device "
+        f"({removed}) -- this fixture's premise moved")
+    e4.write_text(json.dumps(spec, indent=2) + "\n",
+                  encoding="utf-8", newline="\n")
+
     path = _write_board(tmp_path, AEN_NO_JLINK_FLASH_DEVICE)
-    project = load_board_yaml(path)
+    project = load_board_yaml(path, metadata_root=meta)
     parsed = yaml.safe_load(emit_system_manifest(project))
 
     by_core = {s["core_id"]: s for s in parsed["slices"]}
     for core_id in ("m55_hp", "m55_he"):
-        assert "slot0_load_address" not in by_core[core_id]["flash_args"]
+        flash_args = by_core[core_id]["flash_args"]
+        assert "slot0_load_address" not in flash_args, flash_args
+        # ... and the key that would have armed it is genuinely gone, so
+        # this is the absent case and not a mis-built fixture.
+        assert "jlink_flash_device" not in flash_args, flash_args
 
