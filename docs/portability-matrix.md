@@ -240,7 +240,7 @@ different reason than NX9101 — not a Kconfig-content regression.**
 #1295 populated `debug.jlink_flash_device` for the E3/E5/E6/E7 SoC
 variants (previously only E8's did), which is what promotes an AEN
 Zephyr slice to J-Link Flow D flashing in the first place. Doing so
-made `scripts/alp_orchestrate/loader.py::_enforce_slot0_disjoint_across_roles`
+made `scripts/alp_orchestrate/loader.py`'s `_enforce_slot0_disjoint_across_roles`
 reachable for these four SoMs for the first time (it was previously
 inert -- see its docstring and #1384): the swap-test's temp
 `board.yaml` sets only ONE explicit `cores.<key>:` (per the Method's
