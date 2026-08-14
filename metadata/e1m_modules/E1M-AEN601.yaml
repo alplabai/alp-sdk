@@ -107,11 +107,36 @@ topology:
     board: alp_e1m_aen601_m55_he        # Zephyr board target
     toolchain: arm-zephyr-eabi
 
-# Memory layout (SRAM banks + MRAM) is derived from the SoC variant
-# resolved via `silicon_variant:` -- see metadata/socs/<vendor>/<family>/<part>.json
-# `variants[].sram_banks_kb` + `mram_mb`. Declare a memory_map: block
-# here ONLY for non-stock partitioning (none of the current 11 SKUs
-# need one).
+# SRAM banks + total MRAM are derived from the SoC variant resolved via
+# `silicon_variant:` -- see metadata/socs/<vendor>/<family>/<part>.json
+# `variants[].sram_banks_kb` + `mram_mb`.
+#
+# The MRAM PARTITIONING below is declared explicitly, and must be (#1445).
+# It is build POLICY, not a silicon fact (`_resolve_slot0_load_address` in
+# scripts/alp_orchestrate/loader.py says so: two SoMs on the same part may
+# choose different slot0 windows), and the STOCK symmetric default is the
+# #1069 defect -- it puts m55_he's and m55_hp's slot0 at the SAME address,
+# so flashing one core silently clobbers the other's slot0 window. Any
+# dual-M55 SoM that publishes debug.jlink_flash_device therefore needs a
+# disjoint he_slot0/hp_slot0 pair before Flow D is usable at all.
+#
+# The layout is IDENTICAL to E1M-AEN801's, deliberately: every AEN SoM pins
+# a 5.5 MiB-MRAM part, and 64 + 2688 + 2688 + 64 + 96 + 32 = 5632 KiB fills
+# it exactly, so there is no per-SKU slack to allocate differently. Nothing
+# in it is E8-specific -- only mcuboot, the two M55 slot0 windows, and the
+# reserved/storage/atoc tail. he_slot0 0x80010000 and hp_slot0 0x802b0000
+# are bench-verified on E1M-AEN801 silicon (the values `tan flash` emits as
+# flash_args.slot0_load_address); storage 96 KiB + atoc 32 KiB are the
+# #1289 split. Change one of these only with a reason that is specific to
+# THIS SKU.
+memory_map:
+  - { name: mcuboot,   base: 0x80000000, size_kib: 64,   accessible_from: [m55_he, m55_hp], cacheable: true, carveout: false }
+  - { name: he_slot0,  base: 0x80010000, size_kib: 2688, accessible_from: [m55_he],          cacheable: true, carveout: false }
+  - { name: hp_slot0,  base: 0x802b0000, size_kib: 2688, accessible_from: [m55_hp],          cacheable: true, carveout: false }
+  - { name: reserved,  base: 0x80550000, size_kib: 64,   accessible_from: [m55_he, m55_hp],                  carveout: false }
+  - { name: storage,   base: 0x80560000, size_kib: 96,   accessible_from: [m55_he, m55_hp],                  carveout: false }
+  - { name: atoc,      base: 0x80578000, size_kib: 32,   accessible_from: [m55_he, m55_hp],                  carveout: false }
+  - { name: mram_main, base: "TBD",      size_kib: 5632, accessible_from: [a32_cluster, m55_he, m55_hp], cacheable: true }
 
 # Inter-core mailbox IP: ARM MHUv2.  The controller token matches alp-sdk's
 # `alif,mhuv2-mbox` Zephyr MBOX driver; endpoint-specific overlays select the

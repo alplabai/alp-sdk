@@ -40,11 +40,17 @@ from alp_orchestrate import (                       # noqa: E402
 # ---------------------------------------------------------------------
 
 
-# AEN301's auto-derived memory_map includes `mram_main` (5632 KiB) from
-# the Alif e3 variant.  Used as the flash device throughout the storage
-# tests because MRAM is the realistic persistent-store target on the AEN
-# family; V2N101 has no MRAM (DDR + OCRAM only) so it would be a
-# semantically odd test fixture.
+# AEN301's `mram_main` overlay now fills exactly at the SoM's own
+# partitioning (alp-sdk#1445: 64 + 2688 + 2688 + 64 + 96 + 32 = 5632 KiB),
+# so it has no free space to bump-allocate customer storage into on ANY
+# AEN SoM (E1M-AEN801 has always behaved this way -- #1445 just brought the
+# other five SoMs into line). These tests are about allocator MECHANICS --
+# bump allocation, pin ordering, emission shape -- not about the SoM-region
+# bounds check (see test_orchestrate_storage_region_bounds.py for that), so
+# they target `ospi0` instead: every AEN SoM declares a 256-Mbit (32768 KiB)
+# NOR flash there with no sub-regions of its own, which keeps the sizes and
+# offsets below exactly as they were and lets the bump allocator's own
+# arithmetic stay the thing under test.
 AEN_STORAGE = """
 name: test-aen-storage
 som:
@@ -57,9 +63,9 @@ cores:
     app: ./m55_hp
 
 storage:
-  - { name: settings,        size_kib: 64,  fs: littlefs, flash_device: mram_main, mount: /lfs/settings }
-  - { name: app_data,        size_kib: 128, fs: littlefs, flash_device: mram_main, mount: /lfs/app }
-  - { name: mcuboot_scratch, size_kib: 32,  fs: raw,      flash_device: mram_main }
+  - { name: settings,        size_kib: 64,  fs: littlefs, flash_device: ospi0, mount: /lfs/settings }
+  - { name: app_data,        size_kib: 128, fs: littlefs, flash_device: ospi0, mount: /lfs/app }
+  - { name: mcuboot_scratch, size_kib: 32,  fs: raw,      flash_device: ospi0 }
 """
 
 
@@ -76,24 +82,24 @@ cores:
     app: ./m55_hp
 
 storage:
-  - { name: bump_alloc, size_kib: 64, fs: raw, flash_device: mram_main }
-  - { name: pinned_low, size_kib: 32, fs: raw, flash_device: mram_main, offset_kib: 4096 }
+  - { name: bump_alloc, size_kib: 64, fs: raw, flash_device: ospi0 }
+  - { name: pinned_low, size_kib: 32, fs: raw, flash_device: ospi0, offset_kib: 4096 }
 """
 
 
 def test_resolve_storage_partitions_happy(tmp_path: Path) -> None:
-    """Three littlefs+raw partitions on mram_main allocate bottom-up,
+    """Three littlefs+raw partitions on ospi0 allocate bottom-up,
     page-aligned, name-sorted for determinism."""
     path = _write_board(tmp_path, AEN_STORAGE)
     project = load_board_yaml(path)
     parts = resolve_storage_partitions(project)
     assert len(parts) == 3
-    # All three resolved OK against mram_main (auto-derived from
-    # Alif e3 variant's mram_mb -> "mram_main" region).
+    # All three resolved OK against ospi0 (every AEN SoM's declared
+    # 256-Mbit / 32768 KiB NOR flash).
     for p in parts:
         assert p.status == "ok", (p.name, p.reason)
-        assert p.flash_device == "mram_main"
-        assert p.dt_label == "mram_main"  # no dt_label override declared
+        assert p.flash_device == "ospi0"
+        assert p.dt_label == "ospi0"  # no dt_label override declared
     # Sorted alphabetically: app_data (0), mcuboot_scratch (128), settings (160).
     by_name = {p.name: p for p in parts}
     assert by_name["app_data"].base_kib == 0
@@ -111,7 +117,7 @@ def test_resolve_storage_partitions_unknown_flash_device(
     """A typoed flash_device: must surface as a loader error with the
     list of known devices in the message."""
     body = AEN_STORAGE.replace(
-        "flash_device: mram_main, mount: /lfs/settings",
+        "flash_device: ospi0, mount: /lfs/settings",
         "flash_device: not_a_real_region, mount: /lfs/settings",
         1,
     )
@@ -205,8 +211,8 @@ def test_resolve_storage_partitions_overlap(tmp_path: Path) -> None:
     cores:
       m55_hp: { os: zephyr, app: ./m55_hp }
     storage:
-      - { name: a, size_kib: 64, fs: raw, flash_device: mram_main, offset_kib: 0 }
-      - { name: b, size_kib: 64, fs: raw, flash_device: mram_main, offset_kib: 32 }
+      - { name: a, size_kib: 64, fs: raw, flash_device: ospi0, offset_kib: 0 }
+      - { name: b, size_kib: 64, fs: raw, flash_device: ospi0, offset_kib: 32 }
     """
     path = _write_board(tmp_path, body)
     project = load_board_yaml(path)
@@ -234,7 +240,7 @@ def test_emit_dts_partitions_shape(tmp_path: Path) -> None:
     path = _write_board(tmp_path, AEN_STORAGE)
     out = emit_dts_partitions(load_board_yaml(path))
     # Decorates the flash device's DT label.
-    assert "&mram_main {" in out
+    assert "&ospi0 {" in out
     # Standard fixed-partitions binding.
     assert 'compatible = "fixed-partitions";' in out
     assert "#address-cells = <1>;" in out

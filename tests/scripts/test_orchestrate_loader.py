@@ -645,3 +645,24 @@ def test_enforce_slot0_disjoint_across_roles_ignores_a_single_m55_core(
     }
     _enforce_slot0_disjoint_across_roles(
         cores_no_flow_d, "E1M-AEN401")  # no raise
+
+
+def test_enforce_slot0_disjoint_across_roles_ignores_a_parked_sibling(
+) -> None:
+    """#1295: E1M-AEN301's `power-managed-sensor` example parks `m55_hp`
+    with `os: "off"` and runs only `m55_he` as Zephyr. Once E3's variant
+    started publishing `debug.jlink_flash_device` (#1295), both roles
+    resolve the SAME no-override default `slot0_load_address` -- but
+    `m55_hp` is parked, so it is never a flash target and this must NOT
+    raise: comparing a live core's slot0 against a parked core's moot one
+    is not the #1069 hazard this guard exists to catch."""
+    from alp_orchestrate.loader import _enforce_slot0_disjoint_across_roles
+    from alp_orchestrate.models import Slice
+
+    cores = {
+        "m55_he": Slice(core_id="m55_he", os="zephyr",
+                         slot0_load_address="0x80010000"),
+        "m55_hp": Slice(core_id="m55_hp", os="off",
+                         slot0_load_address="0x80010000"),
+    }
+    _enforce_slot0_disjoint_across_roles(cores, "E1M-AEN301")  # no raise

@@ -446,9 +446,11 @@
               "additionalProperties": { "type": "string", "minLength": 1 }
             },
             "jlink_flash_device": {
-              "type": "string",
-              "minLength": 1,
-              "description": "SEGGER J-Link **part-number device profile**, used ONLY to unlock J-Link's built-in Flow D MRAM loader (`scripts/bench/aen/bench-env.sh:108-114`) -- on a J-Link DLL older than V9.46 it cannot attach to a live/running core (use `jlink_device` for that); on V9.46+ it also attaches, but `jlink_device`'s generic profile stays the documented choice for read/RAM-run regardless. It is not per-core: both `scripts/bench/aen/flash-jlink-hp.sh` and `flash-jlink-mramxip.sh` select the SAME device string regardless of which core they flash, so this is a single per-variant string, not a jlink_device-shaped map. Populate only where an in-tree script proves the exact string -- do not derive it from a naming convention."
+              "oneOf": [
+                { "type": "string", "minLength": 1 },
+                { "type": "null" }
+              ],
+              "description": "SEGGER J-Link **part-number device profile**, used ONLY to unlock J-Link's built-in Flow D MRAM loader (`scripts/bench/aen/bench-env.sh:108-114`) -- on a J-Link DLL older than V9.46 it cannot attach to a live/running core (use `jlink_device` for that); on V9.46+ it also attaches, but `jlink_device`'s generic profile stays the documented choice for read/RAM-run regardless. It is not per-core: both `scripts/bench/aen/flash-jlink-hp.sh` and `flash-jlink-mramxip.sh` select the SAME device string regardless of which core they flash, so this is a single per-variant string, not a jlink_device-shaped map. Populate only from a canonical entry in the vendor's own device database (e.g. SEGGER J-Link DLL `JLINKARM_DEVICE_GetInfo` readback) -- never derive it from a naming convention, and never publish an order-code alias that merely happens to resolve. `null` is a DECLARED known-unknown: this variant's device profile is genuinely unresolved (e.g. an order code the vendor device DB does not carry under any spelling) -- consumers must refuse rather than silently choose another transport. tan's `flow_d_available()` tests key PRESENCE, so a present-but-null value deliberately reaches `plan_alif_mram_jlink` and becomes the loud refusal it already produces for every other malformed Flow D field, instead of a silent Flow-A (SE-UART) fallback. ABSENCE of this key is NOT a permitted way to spell 'unknown' on an Alif Ensemble SoC: a missing key is exactly what silently downgrades Flow D to Flow A with no diagnostic (#1295) -- every Alif Ensemble variant must publish either the string or explicit null, enforced by scripts/validate_metadata.py::_check_soc_jlink_flash_device_declared."
             },
             "expect_dpidr": {
               "type": "string",

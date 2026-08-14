@@ -241,10 +241,22 @@ def _resolve_jlink_flash_device(
 
     None when the variant couldn't be resolved (`debug` is then `{}`), or
     the resolved variant's `debug:` block carries no `jlink_flash_device`
-    key -- per that same schema description, an absent key is the correct
-    published "unknown", never a value to invent from a naming convention.
+    key.  Those two are NOT the same fact -- a schema-declared
+    `jlink_flash_device: null` is a published "no known J-Link flash
+    profile" that consumers must refuse on, while an absent key means the
+    variant says nothing.  Ask `_jlink_flash_device_declared` alongside this
+    to tell them apart (#1295); never infer declaration from this value.
     """
     return debug.get("jlink_flash_device")
+
+
+def _jlink_flash_device_declared(debug: dict[str, Any]) -> bool:
+    """Whether the resolved `debug:` block DECLARES `jlink_flash_device`,
+    whatever its value -- the fact `_resolve_jlink_flash_device` cannot
+    carry, since a declared null and an absent key both resolve to None
+    there.  Must be asked of `debug` directly, before the null collapses.
+    """
+    return "jlink_flash_device" in debug
 
 
 def _resolve_slot0_load_address(
@@ -437,30 +449,51 @@ def _enforce_slot0_disjoint_across_roles(
     cores: dict[str, Slice],
     sku: str,
 ) -> None:
-    """Refuse a dual-M55 AEN SoM whose `m55_he` and `m55_hp` slices publish
-    the SAME `flash_args.slot0_load_address` (#1384).
+    """Refuse a dual-M55 AEN SoM whose `m55_he` and `m55_hp` slices are BOTH
+    live Zephyr Flow-D targets and publish the SAME
+    `flash_args.slot0_load_address` (#1384).
 
-    Not reachable today: `_resolve_slot0_load_address` is only called when
-    the SoC variant already publishes `debug.jlink_flash_device`
-    (`_validate_topology_cores`, just above), and every AEN variant that
-    does (only E1M-AEN801's today) also declares a disjoint `he_slot0`/
-    `hp_slot0` `memory_map:` override, so the no-override default -- which
-    is deliberately the SAME address for both roles (see
-    `_resolve_slot0_load_address`'s docstring) -- never collides with a
-    live `jlink_flash_device` in practice yet.
+    #1295 made this reachable for the first time: `_resolve_slot0_load_address`
+    is only called when the SoC variant already publishes
+    `debug.jlink_flash_device` (`_validate_topology_cores`, just above), and
+    before #1295 only E1M-AEN801's variant did -- every other dual-M55 AEN
+    SoM's no-override default (deliberately the SAME address for both roles,
+    see `_resolve_slot0_load_address`'s docstring) never collided with a live
+    `jlink_flash_device` in practice. #1295 populated the key for the E3/E5/
+    E6/E7 variants too, which immediately surfaced this exact collision for
+    E1M-AEN301 (via `examples/power-timing/power-managed-sensor/board.yaml`)
+    -- except that app parks `m55_hp` with `os: "off"`, so `m55_hp` is not a
+    build/flash target at all: nothing ever WOULD write to its computed slot0
+    address, so a collision with a core that never gets flashed is not the
+    #1069 hazard this guard exists to catch.
 
-    Kept as a real guard rather than left to that coincidence: a future AEN
-    variant that publishes `jlink_flash_device` without also declaring a
-    disjoint-slot0 override would otherwise silently reintroduce #1069's
-    HE/HP MRAM collision in `flash_args` -- flashing one core would corrupt
-    the other's slot0 window with no signal at all, the exact silent-wrong-
-    address class this file's other guards (`_enforce_flow_d_preflight_pair`,
-    `_resolve_slot0_load_address`'s own `OrchestratorError` on a half-
-    authored override) all exist to remove.
+    Scoped to `os == "zephyr"` on BOTH roles for exactly that reason -- a
+    parked (`os: "off"`) or non-Zephyr core produces no flashable artifact,
+    so its resolved `slot0_load_address` is moot; comparing it anyway would
+    refuse `power-managed-sensor` (a real, working, single-live-core app) for
+    a collision that can never physically happen. Mirrors
+    `_enforce_flow_d_preflight_pair`'s own `slice_.os != "zephyr"` guard
+    immediately above, the file's established convention for "only a live
+    Zephyr slice is a Flow-D target".
+
+    Still a real guard: a future app that enables BOTH `m55_he` and `m55_hp`
+    as `os: zephyr` on a SoM whose variant publishes `jlink_flash_device`
+    without a disjoint-slot0 `memory_map:` override would otherwise silently
+    reintroduce #1069's HE/HP MRAM collision in `flash_args` -- flashing one
+    core would corrupt the other's slot0 window with no signal at all, the
+    exact silent-wrong-address class this file's other guards
+    (`_enforce_flow_d_preflight_pair`, `_resolve_slot0_load_address`'s own
+    `OrchestratorError` on a half-authored override) all exist to remove.
+    That is exactly the state AEN301/501/601/701 are in RIGHT NOW for any
+    board.yaml that does NOT park the sibling core (the common case, e.g.
+    `scripts/gen_portability_matrix.py`'s per-SKU sweep) -- tracked as a
+    follow-up at #1445, since the fix is a per-SoM `memory_map:` decision
+    (slot sizes, OTA-per-core policy) this file cannot make on its own.
     """
     he = cores.get("m55_he")
     hp = cores.get("m55_hp")
     if (he is None or hp is None
+            or he.os != "zephyr" or hp.os != "zephyr"
             or he.slot0_load_address is None
             or hp.slot0_load_address is None):
         return
@@ -481,6 +514,7 @@ def _slice_from_resolved(
     entry: dict[str, Any],
     soc_core_type: str = "",
     jlink_flash_device: Optional[str] = None,
+    jlink_flash_device_declared: bool = False,
     expect_dpidr: Optional[str] = None,
     jlink_device: Optional[str] = None,
     slot0_load_address: Optional[str] = None,
@@ -526,6 +560,7 @@ def _slice_from_resolved(
         # `topology.<id>.hw_console: false` marks a headless core.
         hw_console=bool(entry.get("hw_console", True)),
         jlink_flash_device=jlink_flash_device,
+        jlink_flash_device_declared=jlink_flash_device_declared,
         expect_dpidr=expect_dpidr,
         jlink_device=jlink_device,
         slot0_load_address=slot0_load_address,
@@ -828,6 +863,7 @@ def _validate_topology_cores(
     # loop.
     variant_debug = _resolve_variant_debug(som_preset, soc_spec)
     jlink_flash_device = _resolve_jlink_flash_device(variant_debug)
+    jlink_flash_device_declared = _jlink_flash_device_declared(variant_debug)
 
     cores: dict[str, Slice] = {}
     for core_id in soc_core_ids:
@@ -852,6 +888,7 @@ def _validate_topology_cores(
             core_id, resolved,
             soc_core_type=soc_core_type_by_id.get(core_id, ""),
             jlink_flash_device=jlink_flash_device,
+            jlink_flash_device_declared=jlink_flash_device_declared,
             expect_dpidr=expect_dpidr,
             jlink_device=jlink_device,
             slot0_load_address=slot0_load_address,
