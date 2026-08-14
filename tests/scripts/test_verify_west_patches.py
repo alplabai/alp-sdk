@@ -81,13 +81,31 @@ def _rmtree_clearing_readonly(path: Path) -> None:
 
     `shutil.rmtree`'s `onexc` callback -- the replacement for the now
     deprecated `onerror` -- only exists from Python 3.12; this repo supports
-    `>=3.10` (`pyproject.toml`), so this clears every mode bit up front with a
-    plain walk instead of branching on `sys.version_info` for one callback
-    signature vs. the other. One code path, correct on 3.10 through 3.12+, and
-    a harmless no-op on POSIX where the chmod was never load-bearing.
+    `>=3.10` (`pyproject.toml`), so this clears the bit up front with a plain
+    walk instead of branching on `sys.version_info` for one callback signature
+    vs. the other. One code path, correct on 3.10 through 3.12+.
+
+    FILES ONLY, deliberately. Chmod'ing the directories too regresses POSIX,
+    and did in this helper's first draft: `stat.S_IWRITE` is `0o200`, which as
+    a directory mode is `d-w-------` -- no `r`, no `x`, so the directory
+    becomes unlistable and untraversable. `os.walk` is topdown, so it reaches
+    a directory BEFORE descending into it (measured on a `.git`-shaped tree:
+    `objects` at index 0, `objects/ab` at index 3); its default `onerror=None`
+    then swallows the resulting scandir failure in silence, so nothing deeper
+    is ever chmod'ed; and `shutil.rmtree` -- which on POSIX walks via
+    `_rmtree_safe_fd`, `os.open(name, O_RDONLY, dir_fd=...)` per subdirectory
+    -- raises `PermissionError` on the first one. Net effect would be two
+    ubuntu/macos tests turning red to fix a Windows-only problem.
+
+    Files-only is right on both platforms: git's read-only bit is on the
+    objects themselves; Windows' read-only ATTRIBUTE on a directory does not
+    block deleting it (so WinError 5 is still cleared); and on POSIX a file's
+    own mode does not govern unlinking it -- the containing directory's write
+    permission does -- so the chmod really is inert there, which is precisely
+    what the `dirs`-inclusive version was not.
     """
-    for root, dirs, files in os.walk(path):
-        for name in dirs + files:
+    for root, _dirs, files in os.walk(path):
+        for name in files:
             os.chmod(os.path.join(root, name), stat.S_IWRITE)
     shutil.rmtree(path)
 
@@ -187,6 +205,23 @@ def west_shim(tmp_path, monkeypatch) -> str:
       first CLI argument as `sys.argv[0]` (the "script"), so this checks
       `sys.argv[0] == "list"`, not `sys.argv[1]` as the exec'd POSIX script
       below does (there, the script's OWN path is `argv[0]`).
+
+      The non-`list` case deliberately does NOT exit. `sitecustomize` runs in
+      EVERY interpreter started while this `PYTHONPATH` is set, so a bare
+      `os._exit(1)` there would kill any unrelated Python child dead with rc=1
+      and no output at all -- measured. It is also not needed: no test that
+      uses this shim reaches `main()`'s `[west, "topdir"]` probe (they all pass
+      `--topdir`), and replacing that line with `pass` was measured to leave
+      all 16 tests passing. Falling through to normal start-up makes a stray
+      Python child behave normally, and still leaves a non-zero exit for a
+      genuine `west <something-else>` -- Python then fails to open that
+      subcommand as a script, which is the right verdict anyway.
+
+    Skipping this module on Windows is NOT an option, however tempting: it is
+    `scripts/bootstrap.ps1` that invokes `verify_west_patches.py` (see its
+    `--west` call sites), so this is code Windows users run. A skip would turn
+    a real failure into a green run -- the exact defect class this file exists
+    to catch.
     """
     bindir = tmp_path / "bin"
     bindir.mkdir(exist_ok=True)
@@ -199,8 +234,7 @@ def west_shim(tmp_path, monkeypatch) -> str:
             "        for name in sorted(os.listdir(root)):\n"
             "            print('hal_alif|' + os.path.join(root, name))\n"
             "    sys.stdout.flush()\n"
-            "    os._exit(0)\n"
-            "os._exit(1)\n",
+            "    os._exit(0)\n",
             encoding="utf-8",
         )
         existing = os.environ.get("PYTHONPATH", "")
