@@ -426,7 +426,9 @@ def _enforce_flow_d_preflight_pair(
     match another board on the same bench passes on exactly the board it
     exists to exclude.
     """
-    if slice_.os != "zephyr" or not slice_.jlink_flash_device:
+    if slice_.os != "zephyr" or not (
+        slice_.jlink_flash_device_declared or slice_.jlink_flash_device is not None
+    ):
         return
     # Bound once and read from the local: interpolating `debug['expect_dpidr']`
     # into the message would make a mis-edited condition fail with a KeyError
@@ -862,7 +864,8 @@ def _validate_topology_cores(
             variant_debug, core_id)
         slot0_load_address = (
             _resolve_slot0_load_address(som_preset, core_id)
-            if jlink_flash_device else None)
+            if (jlink_flash_device_declared or jlink_flash_device is not None)
+            else None)
         slice_ = _slice_from_resolved(
             core_id, resolved,
             soc_core_type=soc_core_type_by_id.get(core_id, ""),

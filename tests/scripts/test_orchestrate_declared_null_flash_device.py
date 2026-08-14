@@ -32,7 +32,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from alp_orchestrate.models import Slice  # noqa: E402
+from alp_orchestrate.loader import _enforce_flow_d_preflight_pair  # noqa: E402
+from alp_orchestrate.models import OrchestratorError, Slice  # noqa: E402
 from alp_orchestrate.orchestrator import _slice_flash_recipe  # noqa: E402
 
 
@@ -76,3 +77,56 @@ def test_non_zephyr_slices_are_untouched(os_):
         Slice(core_id="m55_hp", os=os_,
               jlink_flash_device=None, jlink_flash_device_declared=True))
     assert args is None or "jlink_flash_device" not in args, args
+
+
+# ---------------------------------------------------------------------
+# The emitter was not the only truthiness gate. Two more read the same
+# field, and both were found by diffing against tan's relocated copy of
+# this module (tan-cli#734/#735), which had already fixed all three --
+# the SDK side was the one lagging, not the port.
+# ---------------------------------------------------------------------
+
+
+def _preflight(**kwargs) -> None:
+    """`_enforce_flow_d_preflight_pair` with a variant that publishes an
+    `expect_dpidr` but no `jlink_device` for this core -- the #1355 gap it
+    exists to refuse. It raises IF it decides the slice is Flow-D-armed, so
+    a raise means the guard ran and a silent return means it skipped."""
+    _enforce_flow_d_preflight_pair(
+        Slice(core_id="m55_hp", os="zephyr", **kwargs),
+        {"expect_dpidr": "0x4C013477"},
+        "E1M-AENTEST",
+    )
+
+
+def test_a_declared_null_still_gets_the_preflight_pair_check():
+    """The gate read `not slice_.jlink_flash_device`, so a declared null
+    skipped the #1355 half-armed-pair refusal entirely -- the variant most
+    in need of a diagnostic got the fewest."""
+    with pytest.raises(OrchestratorError) as excinfo:
+        _preflight(jlink_flash_device=None, jlink_flash_device_declared=True)
+    assert "expect_dpidr" in str(excinfo.value)
+    assert "0x4C013477" in str(excinfo.value)
+
+
+def test_an_undeclared_device_still_skips_the_preflight_pair_check():
+    """The other half: a variant that says nothing is not a Flow D target,
+    and must keep skipping. Without this, the fix above would turn every
+    non-Flow-D core into a hard error."""
+    _preflight(jlink_flash_device=None, jlink_flash_device_declared=False)
+
+
+def test_a_real_profile_still_gets_the_preflight_pair_check():
+    with pytest.raises(OrchestratorError):
+        _preflight(jlink_flash_device="AE822FA0E5597LS0_M55_HE",
+                   jlink_flash_device_declared=True)
+
+
+@pytest.mark.parametrize("os_", ["off", "yocto"])
+def test_a_non_zephyr_slice_skips_the_preflight_pair_check(os_):
+    _enforce_flow_d_preflight_pair(
+        Slice(core_id="m55_hp", os=os_,
+              jlink_flash_device=None, jlink_flash_device_declared=True),
+        {"expect_dpidr": "0x4C013477"},
+        "E1M-AENTEST",
+    )
