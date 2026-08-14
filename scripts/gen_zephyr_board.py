@@ -451,18 +451,68 @@ def _aen_peripherals_dtsi(soc_spec: dict[str, Any]) -> str:
     return str(dtsi)
 
 
+def _aen_require_disjoint_slot0(
+    sku: str, sku_preset: "dict[str, Any]",
+    memory_map: "list[dict[str, Any]] | None",
+) -> None:
+    """Refuse a DUAL-M55 AEN SoM that declares no `<role>_slot0` window (#1446).
+
+    `_aen_role_slot0_map` returns None when no role declares one, which drops
+    the caller onto the stock SYMMETRIC layout -- `m55_he` and `m55_hp` slot0
+    at the same address, so flashing one core silently clobbers the other's
+    window. That is the #1069 defect, and it is how E1M-AEN301/401/501/601/701
+    shipped until #1445 gave them explicit maps.
+
+    The half-authored case (one role declares a window, its sibling does not)
+    already raises inside `_aen_role_slot0_map`. This closes the fully
+    unauthored case, which was silent.
+
+    Single-M55 SoMs are unaffected: with no sibling core there is nothing to
+    clobber, so the symmetric layout stays correct for them.
+
+    Costs nothing on the current corpus -- after #1445 every AEN SoM declares
+    disjoint windows, so this never fires today. Its value is the NEXT dual-M55
+    AEN SoM, which is refused at authoring time instead of discovered by
+    someone flashing one core and losing the other's slot0 on a bench.
+    """
+    if memory_map and any(
+        isinstance(r.get("name"), str) and r["name"].endswith("_slot0")
+        for r in memory_map
+    ):
+        return
+    cores = sku_preset.get("topology") or {}
+    m55 = sorted(c for c in cores if c in ("m55_he", "m55_hp"))
+    if len(m55) < 2:
+        return
+    raise ZephyrBoardEmitError(
+        f"SoM {sku!r} has two M55 cores ({', '.join(m55)}) but its preset "
+        f"declares no per-core `<role>_slot0` region, so both would boot from "
+        f"the SAME MRAM slot0 address -- flashing one core silently corrupts "
+        f"the other's slot0 window (#1069). Declare disjoint `he_slot0` / "
+        f"`hp_slot0` regions in this SoM preset's `memory_map:`; "
+        f"metadata/e1m_modules/E1M-AEN801.yaml is the shape to copy (#1446)."
+    )
+
+
 def _aen_role_slot0_map(
     memory_map: "list[dict[str, Any]] | None", role: str,
 ) -> "dict[str, Any] | None":
     """Return this role's disjoint-slot0 memory_map entry, or None.
 
-    Non-stock AEN SKUs (#1069: dual-M55 SoMs that boot both cores from
-    the same physical App MRAM) declare a `memory_map:` block in their
-    SoM preset with one region per core named `<role>_slot0`
-    (`accessible_from: [m55_<role>]` only). Every other AEN SKU
-    (single-M55 aen401/aen601, or an AEN801-shaped preset with no
-    override) has no such region and keeps the stock symmetric
-    two-slot layout -- see _aen_flash_partitions below.
+    Dual-M55 AEN SoMs (#1069: both cores boot from the same physical App
+    MRAM) declare a `memory_map:` block in their SoM preset with one region
+    per core named `<role>_slot0` (`accessible_from: [m55_<role>]` only).
+    A SoM with only ONE M55 has no sibling to collide with and keeps the
+    stock symmetric two-slot layout -- see _aen_flash_partitions below.
+
+    #1446: this used to say the stock layout also covered "single-M55
+    aen401/aen601". Both of those are DUAL-M55 -- measured from their own
+    presets, E1M-AEN401 is [m55_he, m55_hp] and E1M-AEN601 is
+    [a32_cluster, m55_he, m55_hp] -- so that sentence was the justification
+    for a silent fallback that put two cores' slot0 at one address, and it
+    is why five shipping SoMs carried a clobbering layout until #1445.
+    `_aen_require_disjoint_slot0` now refuses that state outright; this
+    function keeps returning None only for the genuinely single-M55 case.
 
     Returning None is only legitimate when NO role declares a slot0
     window.  A map that declares a SIBLING core's `<role>_slot0` but not
@@ -1369,6 +1419,7 @@ def emit_zephyr_board(
         role = core_id.split("_")[-1]
         uart_node = _uart_node_label(rx_row)
         memory_map = sku_preset.get("memory_map")
+        _aen_require_disjoint_slot0(sku, sku_preset, memory_map)
         # This role's own disjoint slot0 base (#1069), falling back to the
         # stock symmetric-layout address (the App MRAM base + the mcuboot
         # partition, same for every single-M55 AEN SKU and for AEN801
