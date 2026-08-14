@@ -164,15 +164,12 @@ See [ADR 0001](docs/adr/0001-wrapper-on-top-of-zephyr.md) and
 ## Portability
 
 Swap-and-run is measured **within** a SoM family, against the generated
-swap-test matrix: 2 of the 6 released E1M-AEN SKUs (AEN401, AEN801) pass
-all three canonical examples today (6 / 21 E1M cells — 3 are
-`E1M-NX9101`, a placeholder MPN whose only hw_rev is `status: tbd`,
-refused by the hw_rev-buildable gate and so not yet buildable at all;
-12 are AEN301/AEN501/AEN601/AEN701, blocked on a J-Link Flow-D
-metadata gap tracked at #1445, not a portability regression — the
-emitted Kconfig stays byte-identical across all 6 AEN SKUs), and the 4
-E1M-X SKUs pass two of three (8 / 12 cells — `adc-voltmeter` fails on
-all four). Matrix at
+swap-test matrix: the 6 released E1M-AEN SKUs pass all three canonical
+examples (18 / 21 E1M cells — the remaining 3 are `E1M-NX9101`, a
+placeholder MPN whose only hw_rev is `status: tbd`, refused by the
+hw_rev-buildable gate and so not yet buildable at all), and the 4 E1M-X
+SKUs pass two of three (8 / 12 cells — `adc-voltmeter` fails on all
+four). Matrix at
 [`docs/portability-matrix.md`](docs/portability-matrix.md). Crossing
 between E1M and E1M-X is intentionally out of scope: they're separate
 product lines with separate pinout namespaces
