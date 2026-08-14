@@ -209,6 +209,52 @@
         "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" },
         "jlink_flash_device": null
       }
+    },
+    {
+      "order_code": "AE402FA0E5597BE0",
+      "package": "WLCSP216",
+      "temperature_grade": "extended",
+      "mram_mb": 5.5,
+      "sram_kb": 9984,
+      "sram_banks_kb": {
+        "SRAM0": 4096,
+        "SRAM1": 4096,
+        "SRAM2_M55_HP_ITCM": 256,
+        "SRAM3_M55_HP_DTCM": 1024,
+        "SRAM4_M55_HE_ITCM": 256,
+        "SRAM5_M55_HE_DTCM": 256
+      },
+      "optional_features": { "npu_hg": true, "isp": true, "jpeg_encoder": true },
+      "alp_module_skus": [],
+      "notes": "debug.jlink_flash_device is explicit null for the same reason as AE402FA0E5597LE0 above, and the reason is now confirmed across ALL THREE Alif-declared E4 parts (#1444): SEGGER's only E4 entries are AE402FA0E5597LS0 and AE402FA0E5597BS0, and Alif declares neither. `BE0` is not `BS0` -- the grade letter differs, so the nearest-string substitution that would look tempting here writes a profile belonging to a part the vendor does not declare.",
+      "debug": {
+        "pyocd_target": "AE402FA0E5597BE0",
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" },
+        "jlink_flash_device": null
+      }
+    },
+    {
+      "order_code": "AE402FA0D5597BS0",
+      "package": "WLCSP216",
+      "temperature_grade": "standard",
+      "mram_mb": 5.5,
+      "sram_kb": 9984,
+      "sram_banks_kb": {
+        "SRAM0": 4096,
+        "SRAM1": 4096,
+        "SRAM2_M55_HP_ITCM": 256,
+        "SRAM3_M55_HP_DTCM": 1024,
+        "SRAM4_M55_HE_ITCM": 256,
+        "SRAM5_M55_HE_DTCM": 256
+      },
+      "optional_features": { "npu_hg": true, "isp": false, "jpeg_encoder": false },
+      "alp_module_skus": [],
+      "notes": "The `D5597` generation code, not `E5597`, and the DFP treats it as a genuinely different device rather than a package respin: it annotates this part with 43 features against 52 for every E5597 sibling, and the nine it drops are the display/imaging block -- GLCD, both Camera interfaces, the ISP Acceleration Unit and the JPEG Encoder. Hence isp/jpeg_encoder false here while the two E5597 variants in this file carry them true; that difference is read out of the vendor pack per device, not inferred from the order code. The Ethos-U85 IS still annotated, so npu_hg stays true. debug.jlink_flash_device is explicit null: SEGGER's E4 entries are both `E5597` spellings, so there is no D5597 profile in the DLL V9.46 table at all.",
+      "debug": {
+        "pyocd_target": "AE402FA0D5597BS0",
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" },
+        "jlink_flash_device": null
+      }
     }
   ],
   "notes": [
@@ -221,6 +267,7 @@
     "Errata AERR0012 v2.0 covers E4/E6/E8 jointly; individual `items` list is pending ingestion against the errata doc.",
     "Order code AE402FA0E5597LE0 backs the E1M-AEN401 module SKU.",
     "USB = xHCI USB-2.0 dual-role @ 0x48200000 (IRQ 101), 16 endpoints; grounded from the Alif DFP soc.h/soc_features.h (AE402FA0E5597). Host mode supported (E4 datasheet 'USB 2.0 HS/FS Host/Device').",
-    "debug.jlink_flash_device is the one genuine unknown in the #1295 sweep -- see the variant's own `notes` for the LE0 vs LS0 order-code discrepancy that blocks populating it."
+    "debug.jlink_flash_device is the one genuine unknown in the #1295 sweep -- see the variant's own `notes` for the LE0 vs LS0 order-code discrepancy that blocks populating it.",
+    "2026-08-14 (#1444): AE402FA0E5597BE0 and AE402FA0D5597BS0 added from the Alif CMSIS DFP (alifsemi/alif_ensemble-cmsis-dfp, AlifSemiconductor.Ensemble.pdsc), completing this file's variants[] to the three E4 devices the vendor declares. Both are WLCSP216 per their own `<feature type=\"CSP\" n=\"216\">` element. Both also carry jlink_flash_device: null, which turns #1295's E4 finding from a one-variant oddity into a subfamily-wide fact: SEGGER's DLL V9.46 table holds exactly two E4 entries, AE402FA0E5597LS0 and AE402FA0E5597BS0 (indices 93/94), and Alif declares NEITHER. Every Alif-declared E4 part is therefore unflashable over Flow D until SEGGER ships a profile, and all three now say so loudly instead of silently falling back to the Linux-only SE-UART path. The D5597 vs E5597 feature difference is recorded on that variant."
   ]
 }

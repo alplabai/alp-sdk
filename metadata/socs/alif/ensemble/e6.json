@@ -225,6 +225,28 @@
         "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" },
         "jlink_flash_device": "AE612FA0E5597LS0_M55_HE"
       }
+    },
+    {
+      "order_code": "AE612FA0E5597BS0",
+      "package": "WLCSP216",
+      "temperature_grade": "standard",
+      "mram_mb": 5.5,
+      "sram_kb": 9984,
+      "sram_banks_kb": {
+        "SRAM0": 4096,
+        "SRAM1": 4096,
+        "SRAM2_M55_HP_ITCM": 256,
+        "SRAM3_M55_HP_DTCM": 1024,
+        "SRAM4_M55_HE_ITCM": 256,
+        "SRAM5_M55_HE_DTCM": 256
+      },
+      "optional_features": { "npu_hg": true, "isp": true, "jpeg_encoder": true },
+      "alp_module_skus": [],
+      "debug": {
+        "pyocd_target": "AE612FA0E5597BS0",
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" },
+        "jlink_flash_device": "AE612FA0E5597BS0_M55_HE"
+      }
     }
   ],
   "notes": [
@@ -236,6 +258,7 @@
     "HWRM v0.3 is Alif-confidential -- referenced here for traceability; the file itself stays out of git.",
     "Errata AERR0012 v2.0 covers E4/E6/E8 jointly; individual `items` list is pending ingestion against the errata doc.",
     "Order code AE612FA0E5597LS0 backs the E1M-AEN601 module SKU.",
-    "debug.jlink_flash_device = AE612FA0E5597LS0_M55_HE populated (#1295), sourced from the SEGGER J-Link DLL V9.46 built-in device table via JLINKARM_DEVICE_GetInfo readback of the AlifSemiconductor block -- canonical entry name, not an order-code-alias probe. E6 is a FA0E5597-generation part alongside E4/E8, so its device name keeps the full order code plus `_M55_HE` (unlike E3/E5/E7, which drop the suffix and use a bare `_HE`)."
+    "debug.jlink_flash_device = AE612FA0E5597LS0_M55_HE populated (#1295), sourced from the SEGGER J-Link DLL V9.46 built-in device table via JLINKARM_DEVICE_GetInfo readback of the AlifSemiconductor block -- canonical entry name, not an order-code-alias probe. E6 is a FA0E5597-generation part alongside E4/E8, so its device name keeps the full order code plus `_M55_HE` (unlike E3/E5/E7, which drop the suffix and use a bare `_HE`).",
+    "2026-08-14 (#1444): AE612FA0E5597BS0 added from the Alif CMSIS DFP (alifsemi/alif_ensemble-cmsis-dfp, AlifSemiconductor.Ensemble.pdsc), which declares two E6 devices where this file carried one. It is the WLCSP216 sibling of the FBGA194 part above: same die, same 5.5 MB MRAM and 9984 KiB SRAM, same six memory regions. package comes from the device's own `<feature type=\"CSP\" n=\"216\">` element, not from decoding the `B` in the order code, and its optional_features are read from the same per-device feature list rather than copied down from the sibling -- the DFP annotates both E6 devices with the identical 52 features including the Ethos-U85, the ISP Acceleration Unit and the JPEG Encoder. Unlike the E4 pair, SEGGER does carry a matching entry: AE612FA0E5597BS0_M55_HE, index 104, read back via JLINKARM_DEVICE_GetInfo."
   ]
 }
