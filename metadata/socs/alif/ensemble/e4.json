@@ -221,6 +221,7 @@
     "Errata AERR0012 v2.0 covers E4/E6/E8 jointly; individual `items` list is pending ingestion against the errata doc.",
     "Order code AE402FA0E5597LE0 backs the E1M-AEN401 module SKU.",
     "USB = xHCI USB-2.0 dual-role @ 0x48200000 (IRQ 101), 16 endpoints; grounded from the Alif DFP soc.h/soc_features.h (AE402FA0E5597). Host mode supported (E4 datasheet 'USB 2.0 HS/FS Host/Device').",
-    "debug.jlink_flash_device is the one genuine unknown in the #1295 sweep -- see the variant's own `notes` for the LE0 vs LS0 order-code discrepancy that blocks populating it."
+    "debug.jlink_flash_device is the one genuine unknown in the #1295 sweep -- see the variant's own `notes` for the LE0 vs LS0 order-code discrepancy that blocks populating it.",
+    "2026-08-14 (#1444): variants[] audited against the Alif CMSIS DFP (alifsemi/alif_ensemble-cmsis-dfp, AlifSemiconductor.Ensemble.pdsc) and left at one entry, which is now a checked result rather than an unchecked default. Alif declares three E4 devices; the other two, AE402FA0E5597BE0 and AE402FA0D5597BS0, are both WLCSP216 per their own `<feature type=\"CSP\" n=\"216\">` element, and this corpus carries no WLCSP part in any subfamily (product decision -- Alp Lab modules are BGA only; enforced by validate_metadata.py so it cannot drift back). AE402FA0E5597LE0 is the sole Alif-declared BGA E4 part. The audit did settle #1295's open question: SEGGER's DLL V9.46 table holds exactly two E4 entries, AE402FA0E5597LS0 and AE402FA0E5597BS0 (indices 93/94), and Alif declares NEITHER of them -- so the null above is a vendor-level gap across the whole E4 subfamily, not a lookup failure on one order code."
   ]
 }
