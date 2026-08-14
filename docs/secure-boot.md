@@ -128,13 +128,14 @@ loader emits no overlay at all for it to layer against.
 **Keep the `boot:` block but omit `swap_algorithm:`** and the default
 instead follows the *target's own DT*, not one value for every SKU: a
 target whose `memory_map:` declares a disjoint per-core `<role>_slot0`
-region (today only **E1M-AEN801**, #1069: both M55 cores share the
-same physical App MRAM, so slot0 was split into disjoint per-core
-windows and the secondary/scratch slot dropped rather than forced to
-fit) has no slot1/scratch partition, so the generated overlay resolves
-to single-app boot (`SB_CONFIG_MCUBOOT_MODE_SINGLE_APP=y`, the same
-symbol the curated base above already ships for it); every other AEN
-SKU keeps the historical swap-using-scratch default
+region (#1069: both M55 cores share the same physical App MRAM, so
+slot0 was split into disjoint per-core windows and the
+secondary/scratch slot dropped rather than forced to fit -- since #1445
+that is every AEN SoM, not just **E1M-AEN801**) has no slot1/scratch
+partition, so the generated overlay resolves to single-app boot
+(`SB_CONFIG_MCUBOOT_MODE_SINGLE_APP=y`, the same symbol the curated
+base above already ships for it); a target with no such region keeps
+the historical swap-using-scratch default
 (`SB_CONFIG_MCUBOOT_MODE_SWAP_SCRATCH=y`) -- and since the generated
 overlay is layered AFTER the curated base (#807: same `;`-joined
 `SB_CONF_FILE` list, later file wins on a repeated symbol), presence

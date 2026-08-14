@@ -37,8 +37,8 @@ MRAM" claim was only ever true for the generic profile). It burns the signed
 ATOC over SWD in ~0.16 s, verifies it, then a reset of type `nRESET` (RSetType
 2) re-runs the SE boot ROM so the app boots from MRAM.
 
-Requires **J-Link V9.46+ DLL** (the bench has V9.50) and a probe on matched
-J-Link **V13 firmware**. Helper: `bench-builds/flash-jlink.sh`.
+Requires **J-Link V9.46+ DLL** (the bench has V9.50). Helper:
+`bench-builds/flash-jlink.sh`.
 
 > **Probe firmware gotcha.** A version-mismatched probe forces a J-Link
 > firmware update on first connect. That update **times out over a USB hub** —
@@ -248,7 +248,7 @@ Then read the result with flow B (mem8 of `ram_console_buf`).
 | `app-write-mram` sits at `Waiting for Target..[RESET Platform]` | Hard-maintenance — **power-cycle** the board so SETOOLS catches the SES boot-ISP window. A clean write ends `100% ... Done`. |
 | Image written but won't boot | ATOC built with the wrong **DEVICE** config for the part. Re-run `tools-config` for the part, or write an **app-only** ATOC keeping the factory DEVICE config. |
 | `west flash` tries to use J-Link / fails to flash | On the carrier board `west flash` must use the **`alif_flash`** runner (SETOOLS, flow A); confirm the SE-UART port. (To burn over J-Link instead, use the **part-number device profile** — flow D — not the generic core profile.) |
-| J-Link won't write MRAM | You selected the **generic** `Cortex-M55` device (flow C); the MRAM loader only activates with the **part-number profile** `AE822FA0E5597LS0_M55_HE`. Also needs J-Link **V9.46+** DLL and matched V13 probe firmware (flow D). |
+| J-Link won't write MRAM | You selected the **generic** `Cortex-M55` device (flow C); the MRAM loader only activates with the **part-number profile** `AE822FA0E5597LS0_M55_HE`. Also needs J-Link **V9.46+** DLL (flow D). |
 | J-Link firmware update times out on connect | Mismatched probe firmware updates over a **USB hub** stall — connect the probe to a **direct root USB port**. |
 | No app output anywhere over USB | Expected on this bench — the only USB serial is the SE-UART; the HE app console (UART2 on DevKit / UART5 on E1M) isn't wired to USB. Use the **RAM console** (flow B) or **RTT**. |
 | RAM console reads as all-zeros / garbage | Wrong `ram_console_buf` address (re-resolve from `zephyr.map`), or the app never ran (check flow C `go`), or `CONFIG_UART_CONSOLE` left enabled (must be `n`). |

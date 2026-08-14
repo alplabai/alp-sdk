@@ -43,7 +43,7 @@ runs `app-gen-toc` locally, with no SE-UART involved in that step):
   verifies, then re-runs the SE boot ROM (reset via the nRESET pin) so the
   app boots from MRAM — it also persists to MRAM, same as Flow A. Helper:
   `scripts/bench/aen/flash-jlink.sh`. Needs the J-Link V9.46+ DLL (bench has
-  V9.50) and a probe on matched J-Link V13 firmware (May 2026).
+  V9.50).
 
 > The earlier blanket claim that *J-Link cannot write MRAM on this part* was
 > only ever true for the **generic** `Cortex-M55` profile — with the part
@@ -137,7 +137,7 @@ The rest of this document is that path.
 * A **SWD/J-Link probe** — for **Flow D** it is the burn path itself (select
   the part-number device profile so the built-in Alif MRAM loader activates),
   and it confirms the core came alive after provisioning. Needs the J-Link
-  V9.46+ DLL and a probe on matched J-Link V13 firmware. *Optional* if you only
+  V9.46+ DLL. *Optional* if you only
   use the SETOOLS/SE-UART path (Flow A).
 
 ## 2. Wire the SE-UART — the part everyone gets wrong
