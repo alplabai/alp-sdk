@@ -241,10 +241,22 @@ def _resolve_jlink_flash_device(
 
     None when the variant couldn't be resolved (`debug` is then `{}`), or
     the resolved variant's `debug:` block carries no `jlink_flash_device`
-    key -- per that same schema description, an absent key is the correct
-    published "unknown", never a value to invent from a naming convention.
+    key.  Those two are NOT the same fact -- a schema-declared
+    `jlink_flash_device: null` is a published "no known J-Link flash
+    profile" that consumers must refuse on, while an absent key means the
+    variant says nothing.  Ask `_jlink_flash_device_declared` alongside this
+    to tell them apart (#1295); never infer declaration from this value.
     """
     return debug.get("jlink_flash_device")
+
+
+def _jlink_flash_device_declared(debug: dict[str, Any]) -> bool:
+    """Whether the resolved `debug:` block DECLARES `jlink_flash_device`,
+    whatever its value -- the fact `_resolve_jlink_flash_device` cannot
+    carry, since a declared null and an absent key both resolve to None
+    there.  Must be asked of `debug` directly, before the null collapses.
+    """
+    return "jlink_flash_device" in debug
 
 
 def _resolve_slot0_load_address(
@@ -502,6 +514,7 @@ def _slice_from_resolved(
     entry: dict[str, Any],
     soc_core_type: str = "",
     jlink_flash_device: Optional[str] = None,
+    jlink_flash_device_declared: bool = False,
     expect_dpidr: Optional[str] = None,
     jlink_device: Optional[str] = None,
     slot0_load_address: Optional[str] = None,
@@ -547,6 +560,7 @@ def _slice_from_resolved(
         # `topology.<id>.hw_console: false` marks a headless core.
         hw_console=bool(entry.get("hw_console", True)),
         jlink_flash_device=jlink_flash_device,
+        jlink_flash_device_declared=jlink_flash_device_declared,
         expect_dpidr=expect_dpidr,
         jlink_device=jlink_device,
         slot0_load_address=slot0_load_address,
@@ -849,6 +863,7 @@ def _validate_topology_cores(
     # loop.
     variant_debug = _resolve_variant_debug(som_preset, soc_spec)
     jlink_flash_device = _resolve_jlink_flash_device(variant_debug)
+    jlink_flash_device_declared = _jlink_flash_device_declared(variant_debug)
 
     cores: dict[str, Slice] = {}
     for core_id in soc_core_ids:
@@ -873,6 +888,7 @@ def _validate_topology_cores(
             core_id, resolved,
             soc_core_type=soc_core_type_by_id.get(core_id, ""),
             jlink_flash_device=jlink_flash_device,
+            jlink_flash_device_declared=jlink_flash_device_declared,
             expect_dpidr=expect_dpidr,
             jlink_device=jlink_device,
             slot0_load_address=slot0_load_address,

@@ -378,22 +378,42 @@ cores:
 """
 
 
-def test_emit_system_manifest_flash_args_omits_jlink_flash_device_when_absent(
+def test_emit_system_manifest_carries_a_declared_null_jlink_flash_device(
     tmp_path: Path,
 ) -> None:
-    """`flash_args` must stay the tidy `{}` with NO `jlink_flash_device`
-    key, never a `null` placeholder (the schema's published-unknown
-    contract: an absent key IS the correct unknown state) -- even though
-    this variant's `debug:` block exists, carries its sibling
-    `jlink_device`, and declares `jlink_flash_device` itself as an
-    explicit `null` (#1295's one genuine known-unknown)."""
+    """A DECLARED `jlink_flash_device: null` must reach `flash_args` as a
+    PRESENT null -- not be dropped (#1295, tan-cli#734).
+
+    This asserts the opposite of what it did before. It used to require the
+    tidy `{}`, on the reading that "an absent key IS the correct unknown
+    state". That conflates two facts the schema deliberately separates:
+
+      * ABSENT  -- the variant says nothing; the Flow A default stands.
+      * NULL    -- the variant publishes "no known J-Link flash profile";
+                   soc-spec-v1.schema.json's own description says consumers
+                   must refuse rather than silently choose another transport.
+
+    `E1M-AEN401`'s e4.json variant is the one real declared-null in the
+    corpus: SEGGER ships no device profile for any Alif-declared E4 part
+    (#1443), so there is nothing honest to put there. Dropping the key
+    re-collapses that into "absent", and tan's presence-based
+    `flow_d_available()` then silently downgrades Flow D to the SE-UART
+    Flow A path -- which is Linux-only, so a Windows operator's flash fails
+    later somewhere else with the real cause already discarded.
+
+    Asserted on KEY PRESENCE, not on the value: absent and declared-null
+    both read as `None`, so a value assertion cannot tell them apart and
+    would pass against the bug.
+    """
     path = _write_board(tmp_path, AEN_NO_JLINK_FLASH_DEVICE)
     project = load_board_yaml(path)
     parsed = yaml.safe_load(emit_system_manifest(project))
 
     by_core = {s["core_id"]: s for s in parsed["slices"]}
     for core_id in ("m55_hp", "m55_he"):
-        assert by_core[core_id]["flash_args"] == {}
+        flash_args = by_core[core_id]["flash_args"]
+        assert "jlink_flash_device" in flash_args, flash_args
+        assert flash_args["jlink_flash_device"] is None, flash_args
 
 
 # ---------------------------------------------------------------------
