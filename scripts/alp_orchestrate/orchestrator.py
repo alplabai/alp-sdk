@@ -101,7 +101,7 @@ def _slice_flash_recipe(
         # re-collapses declared-null into absent and silently downgrades
         # Flow D to the SE-UART Flow A path -- the exact failure the null
         # exists to prevent.  Absent still emits nothing.
-        if slice_.jlink_flash_device_declared:
+        if slice_.jlink_flash_device_declared or slice_.jlink_flash_device is not None:
             args["jlink_flash_device"] = slice_.jlink_flash_device
         if slice_.expect_dpidr and slice_.jlink_device:
             args["expect_dpidr"] = slice_.expect_dpidr
