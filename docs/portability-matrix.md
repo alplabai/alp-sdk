@@ -60,15 +60,15 @@ prose and survives regeneration.
 
 | SKU \ Example | Silicon | i2c-scanner | gpio-button-led | pwm-led-fade | Notes (from metadata) |
 | --- | --- | :---: | :---: | :---: | --- |
-| E1M-AEN301 | `alif:ensemble:e3` | ❌ | ❌ | ❌ | 256 Mbit DRAM · Ethos-U U55 · `partial_hw_config: true` |
+| E1M-AEN301 | `alif:ensemble:e3` | ✅ | ✅ | ✅ | 256 Mbit DRAM · Ethos-U U55 · `partial_hw_config: true` |
 | E1M-AEN401 | `alif:ensemble:e4` | ✅ | ✅ | ✅ | 256 Mbit DRAM · Ethos-U U55+U85 · `partial_hw_config: true` |
-| E1M-AEN501 | `alif:ensemble:e5` | ❌ | ❌ | ❌ | 256 Mbit DRAM · Ethos-U U55 · `partial_hw_config: true` |
-| E1M-AEN601 | `alif:ensemble:e6` | ❌ | ❌ | ❌ | 256 Mbit DRAM · Ethos-U U55+U85 · `partial_hw_config: true` |
-| E1M-AEN701 | `alif:ensemble:e7` | ❌ | ❌ | ❌ | 256 Mbit DRAM · Ethos-U U55 · `partial_hw_config: true` |
+| E1M-AEN501 | `alif:ensemble:e5` | ✅ | ✅ | ✅ | 256 Mbit DRAM · Ethos-U U55 · `partial_hw_config: true` |
+| E1M-AEN601 | `alif:ensemble:e6` | ✅ | ✅ | ✅ | 256 Mbit DRAM · Ethos-U U55+U85 · `partial_hw_config: true` |
+| E1M-AEN701 | `alif:ensemble:e7` | ✅ | ✅ | ✅ | 256 Mbit DRAM · Ethos-U U55 · `partial_hw_config: true` |
 | E1M-AEN801 | `alif:ensemble:e8` | ✅ | ✅ | ✅ | 256 Mbit DRAM · Ethos-U U55+U85 · `partial_hw_config: true` |
 | E1M-NX9101 | `nxp:imx9:imx93` | ❌ | ❌ | ❌ | Ethos-U U65 · `partial_hw_config: true` |
 
-**6 / 21 cells generate cleanly (15 FAILING — see the ❌ cells; run `python3 scripts/gen_portability_matrix.py` locally for the per-cell diagnostics).**
+**18 / 21 cells generate cleanly (3 FAILING — see the ❌ cells; run `python3 scripts/gen_portability_matrix.py` locally for the per-cell diagnostics).**
 
 ## E1M-X family (Cortex-A55 + Cortex-M33)
 
