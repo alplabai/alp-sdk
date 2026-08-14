@@ -237,7 +237,7 @@
     "groupsEnabled": []
   },
   "sdk": {
-    "revision": "94f8db0c9c3c144103d430c397a1e01bd47b4bf4",
+    "revision": "83b2fd2651c2fa5cd942bb0c66583108172d8a18",
     "version": "0.15.0"
   },
   "west": {
