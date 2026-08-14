@@ -584,6 +584,60 @@ def _check_soc_debug_probe_identity(soc_files) -> list:
     return failures
 
 
+def _check_soc_jlink_flash_device_declared(soc_files) -> list:
+    """Every Alif Ensemble variant must publish `debug.jlink_flash_device`,
+    as a string or explicit `null` -- never omit the key.
+
+    #1295: an absent key makes tan's `flow_d_available()` false, which
+    SILENTLY downgrades Flow D (the J-Link MRAM loader) to the SE-UART
+    Flow A path with no diagnostic -- the AEN runbook's #1 trap. JSON
+    Schema can express "if present, string-or-null" but not "present on
+    every variant of THIS vendor/family" (soc-spec-v1 also covers
+    Renesas/NXP/DEEPX parts, where this field doesn't apply), so enforce
+    the presence rule here, scoped to Alif Ensemble by `vendor` + `family`.
+
+    A published `null` is the correct state for a genuinely unresolved
+    device profile (e.g. e4's AE402FA0E5597LE0, which the SEGGER J-Link
+    device DB does not carry under any spelling as of DLL V9.46) -- it
+    converts the invisible Flow A downgrade into tan's loud refusal
+    (`plan_alif_mram_jlink`) rather than a silent transport switch. Only a
+    missing KEY fails this check; `null` and any non-empty string both pass.
+
+    Returns a failure list shaped like `_check_files()`.
+    """
+    failures: list[tuple[Path, list[str]]] = []
+    for path in soc_files:
+        try:
+            doc = strict_json_loads(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if doc.get("vendor") != "Alif Semiconductor" or doc.get("family") != "Ensemble":
+            continue
+        variants = doc.get("variants") or []
+        if not variants:
+            continue
+        rel = path.relative_to(REPO).as_posix()
+        msgs: list[str] = []
+
+        for i, v in enumerate(variants):
+            debug = v.get("debug") or {}
+            if "jlink_flash_device" not in debug:
+                msgs.append(
+                    f"variants[{i}] ({v.get('order_code')}): "
+                    f"debug.jlink_flash_device is absent -- every Alif "
+                    f"Ensemble variant must publish either the device-profile "
+                    f"string or explicit null (a declared known-unknown); an "
+                    f"absent key silently downgrades Flow D to the SE-UART "
+                    f"Flow A path with no diagnostic (#1295)")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+    return failures
+
+
 def _check_chip_physical(chip_files) -> list:
     """Semantic cross-checks for chip `physical:` block (pin/passive→signal resolution + pad uniqueness).
 
@@ -1005,6 +1059,8 @@ def main() -> int:
     soc_failures += _check_soc_npu_pairing(soc_files)
     # Semantic cross-ref the schema can't express: variants[].debug.jlink_device keys -> cores[].
     soc_failures += _check_soc_debug_probe_identity(soc_files)
+    # #1295: every Alif Ensemble variant must declare debug.jlink_flash_device (string or null) -- never omit it.
+    soc_failures += _check_soc_jlink_flash_device_declared(soc_files)
 
     # SoM preset files (YAML) against som-preset v1.
     som_validator = None

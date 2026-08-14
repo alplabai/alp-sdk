@@ -60,15 +60,15 @@ prose and survives regeneration.
 
 | SKU \ Example | Silicon | i2c-scanner | gpio-button-led | pwm-led-fade | Notes (from metadata) |
 | --- | --- | :---: | :---: | :---: | --- |
-| E1M-AEN301 | `alif:ensemble:e3` | ✅ | ✅ | ✅ | 256 Mbit DRAM · Ethos-U U55 · `partial_hw_config: true` |
+| E1M-AEN301 | `alif:ensemble:e3` | ❌ | ❌ | ❌ | 256 Mbit DRAM · Ethos-U U55 · `partial_hw_config: true` |
 | E1M-AEN401 | `alif:ensemble:e4` | ✅ | ✅ | ✅ | 256 Mbit DRAM · Ethos-U U55+U85 · `partial_hw_config: true` |
-| E1M-AEN501 | `alif:ensemble:e5` | ✅ | ✅ | ✅ | 256 Mbit DRAM · Ethos-U U55 · `partial_hw_config: true` |
-| E1M-AEN601 | `alif:ensemble:e6` | ✅ | ✅ | ✅ | 256 Mbit DRAM · Ethos-U U55+U85 · `partial_hw_config: true` |
-| E1M-AEN701 | `alif:ensemble:e7` | ✅ | ✅ | ✅ | 256 Mbit DRAM · Ethos-U U55 · `partial_hw_config: true` |
+| E1M-AEN501 | `alif:ensemble:e5` | ❌ | ❌ | ❌ | 256 Mbit DRAM · Ethos-U U55 · `partial_hw_config: true` |
+| E1M-AEN601 | `alif:ensemble:e6` | ❌ | ❌ | ❌ | 256 Mbit DRAM · Ethos-U U55+U85 · `partial_hw_config: true` |
+| E1M-AEN701 | `alif:ensemble:e7` | ❌ | ❌ | ❌ | 256 Mbit DRAM · Ethos-U U55 · `partial_hw_config: true` |
 | E1M-AEN801 | `alif:ensemble:e8` | ✅ | ✅ | ✅ | 256 Mbit DRAM · Ethos-U U55+U85 · `partial_hw_config: true` |
 | E1M-NX9101 | `nxp:imx9:imx93` | ❌ | ❌ | ❌ | Ethos-U U65 · `partial_hw_config: true` |
 
-**18 / 21 cells generate cleanly (3 FAILING — see the ❌ cells; run `python3 scripts/gen_portability_matrix.py` locally for the per-cell diagnostics).**
+**6 / 21 cells generate cleanly (15 FAILING — see the ❌ cells; run `python3 scripts/gen_portability_matrix.py` locally for the per-cell diagnostics).**
 
 ## E1M-X family (Cortex-A55 + Cortex-M33)
 
@@ -213,7 +213,8 @@ Legend: ✅ `requires:` satisfied and wireable on the SoM · ❌ incompatible (t
 ## Hand-maintained analysis (expected diffs)
 
 The generated tables above prove every ✅ cell *generates* cleanly
-(as of #1025, that's 18 of the 21 E1M cells — NX9101's 3 are ❌; see
+(as of #1295, that's 6 of the 21 E1M cells — NX9101's 3 are ❌ per
+#1025, and AEN301/501/601/701's 12 are newly ❌ per the paragraph
 below).  The analytical claims below — byte-identity of the emitted
 `alp.conf` across SKUs and the classification of legitimate diff
 lines — are hand-maintained against the swap-test evidence under
@@ -223,15 +224,49 @@ lines — are hand-maintained against the swap-test evidence under
 
 After stripping the `CONFIG_ALP_SOC_*=y` line and the one identity
 comment, **all 6 AEN SKUs produce byte-identical `alp.conf` for every
-example.**  That is the load-bearing intra-AEN portability proof.
-E1M-NX9101 is currently NOT buildable at all (`partial_hw_config: true`
-— see the generated Notes column — and, as of #1025, its only hw_rev,
-imx93 r1, is `status: tbd`, which the hw_rev-buildable gate refuses
-outright); the diff-family rows below describing its Kconfig lines
-document what its `alp.conf` looks like once a real hw_rev lands, not
-a cell that generates today. The U85-carrying SKUs (AEN401 / AEN601 /
-AEN801, visible as `Ethos-U U55+U85` in the Notes column) are the
-population that motivated Gap G-1 below.
+example.**  That is the load-bearing intra-AEN portability proof, and
+it is a claim about the *emitted Kconfig content*, unaffected by the
+paragraph below. E1M-NX9101 is currently NOT buildable at all
+(`partial_hw_config: true` — see the generated Notes column — and, as
+of #1025, its only hw_rev, imx93 r1, is `status: tbd`, which the
+hw_rev-buildable gate refuses outright); the diff-family rows below
+describing its Kconfig lines document what its `alp.conf` looks like
+once a real hw_rev lands, not a cell that generates today. The
+U85-carrying SKUs (AEN401 / AEN601 / AEN801, visible as
+`Ethos-U U55+U85` in the Notes column) are the population that
+motivated Gap G-1 below.
+
+**AEN301 / AEN501 / AEN601 / AEN701 turned ❌ under #1295, for a
+different reason than NX9101 — not a Kconfig-content regression.**
+#1295 populated `debug.jlink_flash_device` for the E3/E5/E6/E7 SoC
+variants (previously only E8's did), which is what promotes an AEN
+Zephyr slice to J-Link Flow D flashing in the first place. Doing so
+made `scripts/alp_orchestrate/loader.py::_enforce_slot0_disjoint_across_roles`
+reachable for these four SoMs for the first time (it was previously
+inert -- see its docstring and #1384): the swap-test's temp
+`board.yaml` sets only ONE explicit `cores.<key>:` (per the Method's
+step 2); the sibling M55 core is left at the SoM preset's
+`topology:` default (`alp-stock-shim`, which defaults to `os: zephyr`
+for a `cortex-m*` core). With no `memory_map:` override, BOTH the
+target core and the stock-shim sibling resolve `flash_args.
+slot0_load_address` to the SAME default address -- the exact #1069
+HE/HP MRAM collision E1M-AEN801's own `memory_map:` override was
+written to prevent, now live for four more SoMs. `load_board_yaml`
+refuses this loudly (by design -- see `_enforce_flow_d_preflight_pair`'s
+identical philosophy immediately above it in that file) *before*
+`--emit zephyr-conf` ever reaches the target core's own config, so the
+byte-identical-`alp.conf` claim above is unprovable by the automated
+probe for these four SKUs today, not falsified: nothing about the
+Kconfig content changed. The fix is a disjoint `he_slot0`/`hp_slot0`
+`memory_map:` override per SoM preset, mirroring
+`metadata/e1m_modules/E1M-AEN801.yaml`'s -- deliberately NOT done here,
+because that map encodes AEN801-specific firmware policy (OTA-deferred,
+ATOC sizing bench-measured on `e1m-aen-evk-01`, `person_detect` slot0
+placement) that does not transfer to AEN301/501/601/701 by inference.
+Tracked at #1445 (#1384 is the closed issue that added the guard itself,
+not this follow-up). (E1M-AEN401 is unaffected: its E4 variant's
+`jlink_flash_device` is explicit `null`, a declared known-unknown, so
+`_resolve_slot0_load_address` is never invoked for it.)
 
 Expected diffs (legitimate — driven by silicon / SoM facts):
 

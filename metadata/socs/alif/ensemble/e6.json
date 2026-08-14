@@ -222,7 +222,8 @@
       "alp_module_skus": ["E1M-AEN601"],
       "debug": {
         "pyocd_target": "AE612FA0E5597LS0",
-        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" }
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" },
+        "jlink_flash_device": "AE612FA0E5597LS0_M55_HE"
       }
     }
   ],
@@ -234,6 +235,7 @@
     "Topology: 1× A32 (800 MHz) + 2× M55 (HP+HE) + 2× U55 + 1× U85, ISP/JPEG, 5.5 MB MRAM, up to 9.75 MB SRAM, 2× OctalSPI.  Confirmed by the v1.0 datasheet.  External-memory interface stays OctalSPI ×2 (E8 uses HexSPI instead -- the IO mix legitimately differs).",
     "HWRM v0.3 is Alif-confidential -- referenced here for traceability; the file itself stays out of git.",
     "Errata AERR0012 v2.0 covers E4/E6/E8 jointly; individual `items` list is pending ingestion against the errata doc.",
-    "Order code AE612FA0E5597LS0 backs the E1M-AEN601 module SKU."
+    "Order code AE612FA0E5597LS0 backs the E1M-AEN601 module SKU.",
+    "debug.jlink_flash_device = AE612FA0E5597LS0_M55_HE populated (#1295), sourced from the SEGGER J-Link DLL V9.46 built-in device table via JLINKARM_DEVICE_GetInfo readback of the AlifSemiconductor block -- canonical entry name, not an order-code-alias probe. E6 is a FA0E5597-generation part alongside E4/E8, so its device name keeps the full order code plus `_M55_HE` (unlike E3/E5/E7, which drop the suffix and use a bare `_HE`)."
   ]
 }

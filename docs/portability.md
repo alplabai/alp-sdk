@@ -13,9 +13,12 @@ This cookbook ties three other docs together:
 
 - [`docs/portability-matrix.md`](portability-matrix.md) — the empirical
   guarantee.  Every cell is a SKU × example compile test;
-  18 / 21 cells green for E1M (NX9101's only hw_rev is `status: tbd` --
-  refused outright by the hw_rev-buildable gate, #1025 --
-  so all 3 of its cells currently fail), 8 / 12 for E1M-X (the
+  6 / 21 cells green for E1M (NX9101's only hw_rev is `status: tbd` --
+  refused outright by the hw_rev-buildable gate, #1025, so all 3 of
+  its cells fail; AEN301/AEN501/AEN601/AEN701's 12 cells fail too, as
+  of #1295, on an unrelated cause -- a J-Link Flow-D metadata gap
+  tracked at #1445, not a Kconfig-content regression; see the matrix's
+  "Hand-maintained analysis" for both), 8 / 12 for E1M-X (the
   `adc-voltmeter` example fails on all four E1M-X presets --
   V2N101, V2N102, V2M101, V2M102; the other two pinned examples,
   `pwm-led-fade` and `v2n-pwm-fan-control`, are green on all four --
@@ -840,12 +843,20 @@ Headline numbers, measured against the generated block in
 `docs/portability-matrix.md` (re-run `python3
 scripts/gen_portability_matrix.py` to reproduce):
 
-- **E1M family.**  18 / 21 (SKU × example) cells generate cleanly.
-  All 6 AEN SKUs produce byte-identical `alp.conf` for every
-  example, after stripping the SoC identity comment.  The other
-  3 cells all belong to E1M-NX9101 — a placeholder MPN whose only
-  hw_rev (imx93 r1) is `status: tbd`, which the hw_rev-buildable
-  gate refuses outright, so none of its cells currently pass.
+- **E1M family.**  6 / 21 (SKU × example) cells generate cleanly.
+  All 6 AEN SKUs still produce byte-identical `alp.conf` for every
+  example, after stripping the SoC identity comment — that claim is
+  about emitted Kconfig content and is unaffected by the failing
+  cells below. 3 cells belong to E1M-NX9101 — a placeholder MPN whose
+  only hw_rev (imx93 r1) is `status: tbd`, which the hw_rev-buildable
+  gate refuses outright, so none of its cells currently pass. The
+  other 12 belong to AEN301/AEN501/AEN601/AEN701 (as of #1295): once
+  `debug.jlink_flash_device` is populated for a SoM, `load_board_yaml`
+  now refuses a dual-M55 topology whose sibling core defaults to the
+  SAME MRAM slot0 address as the target core (the #1069 HE/HP
+  collision class, follow-up tracked at #1445) — a J-Link Flow-D
+  metadata gap, not a Kconfig regression; see `docs/portability-matrix.md`'s
+  "Hand-maintained analysis" for the full explanation.
 - **E1M-X family.**  8 / 12 cells generate cleanly.  V2M SKUs
   add three on-module chip-driver enables (DEEPX DX-M1, PCIe
   mux, DEEPX rail buck) but otherwise produce the same

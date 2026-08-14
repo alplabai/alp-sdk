@@ -151,7 +151,8 @@
       "alp_module_skus": ["E1M-AEN501"],
       "debug": {
         "pyocd_target": "AE512F80F55D5LS",
-        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" }
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" },
+        "jlink_flash_device": "AE512F80F55D5_HE"
       }
     }
   ],
@@ -161,6 +162,7 @@
     "E5 silicon datasheet from Alif is STILL not on file as of 2026-05-11 -- E3 (v2.8), E4 (v1.0), E6 (v1.0), E7 (v2.9), and E8 (v1.0) have all been published; E5 alone remains pending.  Replace this stub when ADTS00xx for E5 is published.",
     "Topology assumed identical to E7 with one of the two Cortex-A32 cores depopulated.  NPU and external-memory interfaces match E7 (OctalSPI, U55+U55).",
     "Peripheral counts inherited from the E7 sibling (E5 = E7 with one A32 depopulated; same OctalSPI / U55 topology per this file's own topology note).  `watchdog` derived as one-per-core (1x A32 + 2x M55 = 3).  No `isp`/`jpeg_encoder` (E5 carries U55x2 only, no U85, none in its variant).  ASSUMED pending the E5 datasheet, which is still unpublished as of 2026-05-11 -- confirm every count when ADTS00xx for E5 ships.",
-    "Order code AE512F80F55D5LS backs the E1M-AEN501 module SKU."
+    "Order code AE512F80F55D5LS backs the E1M-AEN501 module SKU.",
+    "debug.jlink_flash_device = AE512F80F55D5_HE populated (#1295), sourced from the SEGGER J-Link DLL V9.46 built-in device table via JLINKARM_DEVICE_GetInfo readback of the AlifSemiconductor block -- canonical entry name, not an order-code-alias probe. E5 is one of three Ensemble subfamilies (E3/E5/E7) whose device names drop the package/grade suffix and use a bare `_HE` string; E6/E8 keep the full order code plus `_M55_HE`."
   ]
 }

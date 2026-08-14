@@ -170,9 +170,11 @@
       },
       "gpio_18v": 120,
       "shipment_suffixes": ["-T", "-Y"],
+      "notes": "jlink_flash_device is shared verbatim with the AE722F80F55D5LS sibling below -- see the file-level note (#1295).",
       "debug": {
         "pyocd_target": "AE722F80F55D5AS",
-        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" }
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" },
+        "jlink_flash_device": "AE722F80F55D5_HE"
       }
     },
     {
@@ -190,9 +192,11 @@
       "gpio_18v": 120,
       "shipment_suffixes": ["-T", "-Y"],
       "alp_module_skus": ["E1M-AEN701"],
+      "notes": "jlink_flash_device is shared verbatim with the AE722F80F55D5AS sibling above -- see the file-level note (#1295).",
       "debug": {
         "pyocd_target": "AE722F80F55D5LS",
-        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" }
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" },
+        "jlink_flash_device": "AE722F80F55D5_HE"
       }
     }
   ],
@@ -203,6 +207,7 @@
     "Watchdog count is 4 on E7 (vs 2 on E3); active dynamic consumption is 29 µA/MHz (vs 27 on E3).",
     "Operating temperature is 'Standard' grade (-40 / +75 ambient) vs E3 'Extended' (-40 / +85).",
     "AE722F80F55D5LS is the variant Alp Lab uses on the E1M-AEN701 module SKU.",
-    "USB = xHCI USB-2.0 dual-role @ 0x48200000 (IRQ 101), 8 endpoints; grounded from the Alif DFP soc.h/soc_features.h (AE722F80F55D5). Host mode supported."
+    "USB = xHCI USB-2.0 dual-role @ 0x48200000 (IRQ 101), 8 endpoints; grounded from the Alif DFP soc.h/soc_features.h (AE722F80F55D5). Host mode supported.",
+    "debug.jlink_flash_device populated for both variants (#1295), sourced from the SEGGER J-Link DLL V9.46 built-in device table via JLINKARM_DEVICE_GetInfo readback of the AlifSemiconductor block -- canonical entry name, not order-code-alias probing. E7 is one of three Ensemble subfamilies (E3/E5/E7) whose device names drop the package/grade suffix and use a bare `_HE` string; E6/E8 keep the full order code plus `_M55_HE`. AE722F80F55D5AS/LS share one DB entry (`AE722F80F55D5_HE`) -- two order codes legitimately resolving to one device-table entry, confirmed by index readback, not a metadata duplication bug."
   ]
 }

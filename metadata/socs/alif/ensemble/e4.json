@@ -203,9 +203,11 @@
       "optional_features": { "npu_hg": true, "isp": true, "jpeg_encoder": true },
       "shipment_suffixes": ["-T", "-Y"],
       "alp_module_skus": ["E1M-AEN401"],
+      "notes": "debug.jlink_flash_device is explicit null -- a DECLARED known-unknown, not an absent key (#1295). This file's order code AE402FA0E5597LE0 does not appear in the SEGGER J-Link DLL V9.46 device table under any spelling: the DB's only E4 entries are AE402FA0E5597LS0_M55_HE and AE402FA0E5597BS0_M55_HE (index 93/94, confirmed by JLINKARM_DEVICE_GetInfo readback) -- `LE0` is not `LS0`, and picking the nearest string is exactly the guess this field's schema forbids (a wrong device profile fails a flash on real hardware). SETTLED (#1443) against the vendor source: the Alif CMSIS DFP (alifsemi/alif_ensemble-cmsis-dfp, AlifSemiconductor.Ensemble.pdsc) declares AE402FA0E5597LE0 verbatim, alongside AE402FA0E5597BE0 and AE402FA0D5597BS0, so THIS ORDER CODE IS CORRECT. Conversely neither of SEGGER's two E4 entries is declared by Alif at all -- SEGGER ships no profile for any Alif-declared E4 part, which makes this a vendor-level gap rather than a lookup failure, and makes substituting the LS0 profile a write against a part whose flash-algorithm provenance is unknown. tan's flow_d_available() tests key PRESENCE, so this null deliberately reaches plan_alif_mram_jlink and becomes the loud refusal it already produces for every other malformed Flow D field, rather than a silent Flow A fallback.",
       "debug": {
         "pyocd_target": "AE402FA0E5597LE0",
-        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" }
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" },
+        "jlink_flash_device": null
       }
     }
   ],
@@ -218,6 +220,7 @@
     "HWRM v0.3 is Alif-confidential -- referenced here for traceability; the file itself stays out of git (the `confidential: true` flag on the hwrm block makes that explicit).",
     "Errata AERR0012 v2.0 covers E4/E6/E8 jointly; individual `items` list is pending ingestion against the errata doc.",
     "Order code AE402FA0E5597LE0 backs the E1M-AEN401 module SKU.",
-    "USB = xHCI USB-2.0 dual-role @ 0x48200000 (IRQ 101), 16 endpoints; grounded from the Alif DFP soc.h/soc_features.h (AE402FA0E5597). Host mode supported (E4 datasheet 'USB 2.0 HS/FS Host/Device')."
+    "USB = xHCI USB-2.0 dual-role @ 0x48200000 (IRQ 101), 16 endpoints; grounded from the Alif DFP soc.h/soc_features.h (AE402FA0E5597). Host mode supported (E4 datasheet 'USB 2.0 HS/FS Host/Device').",
+    "debug.jlink_flash_device is the one genuine unknown in the #1295 sweep -- see the variant's own `notes` for the LE0 vs LS0 order-code discrepancy that blocks populating it."
   ]
 }
