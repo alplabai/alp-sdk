@@ -59,7 +59,10 @@ def _errors(entry: dict) -> list[str]:
 GD32_BOTH = {
     "name": "gd32_bridge",
     "chip": "gd32g553",
-    "flash_method": "swd_probe",
+    # NOT `swd_probe`: #1439 removed that backend from every preset, and a
+    # fixture asserting the schema still accepts a both-axes entry must not
+    # depend on the one method name that went away.
+    "flash_method": "openocd",
     "flash_policy": "recovery_only",
     "update_channel": "alp_ota_spi_bridge",
     "flash_args": {
@@ -206,55 +209,52 @@ def test_gd32_channel_is_distinct_from_the_cc3501e_otp_channel():
 
 
 # ---------------------------------------------------------------------
-# swd_probe: `target` and `jlink_device` are halves of one decision.
+# #1439 removed the swd_probe `target`/`jlink_device` conditional along
+# with the backend it existed for.  `flash_args` shapes are now opaque
+# for EVERY backend, with no per-backend exception.
 # ---------------------------------------------------------------------
 
 
-def test_swd_probe_target_without_jlink_device_is_rejected():
-    """Authoring-time catch for the tan-cli#402 refusal.  tan prefers the
-    J-Link arm whenever a J-Link binary resolves and ALWAYS takes it
-    under `--dry-run`, so a `target`-only entry is unpreviewable on every
-    host -- and the person who hits it is recovering a bricked board."""
-    args = {k: v for k, v in GD32_BOTH["flash_args"].items()
-            if k != "jlink_device"}
-    entry = dict(GD32_BOTH, flash_args=args)
-    errs = _errors(entry)
-    assert any("jlink_device" in m for m in errs), errs
-
-
-def test_swd_probe_without_target_needs_no_jlink_device():
-    """The rule is about a half-named decision, not about `swd_probe`
-    per se: an entry naming neither half is not the defect."""
-    args = {k: v for k, v in GD32_BOTH["flash_args"].items()
-            if k not in ("target", "jlink_device")}
-    entry = dict(GD32_BOTH, flash_args=args)
-    assert _errors(entry) == []
-
-
-def test_non_swd_probe_target_needs_no_jlink_device():
-    """Other backends' `flash_args` shapes stay opaque by contract -- a
-    `target` key there means whatever that backend says it means."""
+def test_flash_args_shapes_are_opaque_for_every_backend():
+    """The conditional this replaces required a `swd_probe` entry naming
+    `target` to also name `jlink_device`.  It existed solely because
+    tan's `swd_probe` prefers the J-Link arm and refuses rather than
+    guess a device profile; with that backend gone from tan there is no
+    such rule, and a half-named `flash_args` is legal again."""
     entry = {
         "name": "some_helper",
         "chip": "gd32g553",
-        "flash_method": "openocd",
+        "flash_method": "swd_probe",
         "flash_args": {"target": "gd32g553"},
         "flash_policy": "customer",
     }
     assert _errors(entry) == []
 
 
-def test_swd_probe_with_flash_args_tbd_is_still_legal():
+def test_flash_args_tbd_is_still_legal():
     """`flash_args: TBD` is the documented placeholder while a flow is
-    unfinalised; it names no `target`, so the rule does not fire."""
+    unfinalised."""
     entry = {
         "name": "some_helper",
         "chip": "gd32g553",
-        "flash_method": "swd_probe",
+        "flash_method": "openocd",
         "flash_args": "TBD",
         "flash_policy": "customer",
     }
     assert _errors(entry) == []
+
+
+def test_flash_policy_is_still_required_without_a_flash_method():
+    """Non-vacuity for the two tests above: the schema has not simply
+    stopped rejecting things.  #1439 removed one conditional, not the
+    `flash_policy` requirement the four GD32 entries still satisfy."""
+    entry = {
+        "name": "some_helper",
+        "chip": "gd32g553",
+        "update_channel": "alp_ota_spi_bridge",
+    }
+    errs = _errors(entry)
+    assert any("flash_policy" in m for m in errs), errs
 
 
 # ---------------------------------------------------------------------
@@ -277,36 +277,47 @@ def test_v2n_v2m_gd32_entries_are_identical_across_the_four_skus():
 
 
 @pytest.mark.parametrize("sku", V2N_V2M_SKUS)
-def test_v2n_v2m_gd32_entry_declares_the_full_flashing_model(sku):
+def test_v2n_v2m_gd32_entry_declares_no_local_flash_path(sku):
+    """#1439: GD32 programming is separated out of `tan` entirely
+    (tan-cli#732), so the four E1M-X entries declare NO `flash_method`
+    and NO `flash_args`.  An SDK still emitting `flash_method:
+    swd_probe` to a `tan` whose backend is gone hits
+    `executionPolicy.unknownBackend`, which is `fail` -- a hard error,
+    not a skip -- so the absence is load-bearing, not tidiness."""
     entry = next(e for e in _helper_firmware(sku) if e["name"] == "gd32_bridge")
-    assert {"flash_method", "flash_policy", "update_channel"} <= set(entry), (
-        f"{sku} gd32_bridge is missing part of the flashing model: "
-        f"{sorted(entry)}")
-    assert entry["flash_method"] == "swd_probe"
-    assert entry["flash_policy"] == "recovery_only"
-    assert entry["update_channel"] == "alp_ota_spi_bridge"
-
-    args = entry["flash_args"]
-    assert "jlink_device" in args, (
-        f"{sku} names flash_args.target without flash_args.jlink_device; "
-        f"tan's swd_probe refuses on every host that resolves a J-Link "
-        f"binary, and on EVERY host under --dry-run: {sorted(args)}")
-    assert args["target"] == "gd32g553"
-    assert args["jlink_device"] == "GD32G553MEY7TR"
-    assert args["base"] == "0x08000000"
+    assert "flash_method" not in entry, sorted(entry)
+    assert "flash_args" not in entry, sorted(entry)
 
 
 @pytest.mark.parametrize("sku", V2N_V2M_SKUS)
-def test_v2n_v2m_gd32_entry_leaves_expect_dpidr_unset(sku):
-    """#610: two SW-DP ID values are in circulation for the GD32 --
-    0x6BA02477 in metadata/chips/gd32_swd.yaml (itself annotated as the
-    generic ADIv5 Cortex-M33 r0p1 SW-DPv2 expectation, not a
-    GD32-specific reading) and an unattributed 0x0BE12477 elsewhere in
-    this repo -- and neither has been measured on a GD32 with a probe
-    attached.  A wrong-board guard armed with a guessed ID passes on
-    exactly the board it exists to exclude."""
+def test_v2n_v2m_gd32_entry_keeps_policy_and_update_channel(sku):
+    """The other two axes survive #1439 and are the reason it is not a
+    blanket delete.
+
+    `flash_policy` is required on every helper entry with or without a
+    `flash_method` -- it answers who may reach a local flash path if one
+    is ever added, and the six AEN `cc3501e_otp` entries are that same
+    shape.  `update_channel` is the FIELD update path: protocol v0.6
+    Path A, slot-A/B application bootloader with commit and rollback
+    over the bridge link, not SWD, and validated end to end on silicon.
+    """
     entry = next(e for e in _helper_firmware(sku) if e["name"] == "gd32_bridge")
-    assert "expect_dpidr" not in entry["flash_args"]
+    assert entry["flash_policy"] == "recovery_only"
+    assert entry["update_channel"] == "alp_ota_spi_bridge"
+    # The helper entry itself stays -- it lost keys, not its existence.
+    assert entry["chip"] == "gd32g553"
+
+
+def test_no_som_preset_declares_swd_probe_anywhere():
+    """The repo-wide half of #1439. Per-SKU assertions above pass while a
+    seventh preset still declares the removed backend."""
+    offenders = []
+    for path in sorted(MODULES.glob("*.yaml")):
+        doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        for entry in doc.get("helper_firmware") or []:
+            if entry.get("flash_method") == "swd_probe":
+                offenders.append(f"{path.name}:{entry.get('name')}")
+    assert offenders == [], offenders
 
 
 @pytest.mark.parametrize("sku", AEN_SKUS)
