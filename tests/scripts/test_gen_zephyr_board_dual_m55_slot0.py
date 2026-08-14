@@ -19,6 +19,7 @@ pins that fact so this file cannot quietly become vacuous.
 
 from __future__ import annotations
 
+import shutil
 import sys
 from pathlib import Path
 
@@ -30,6 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 from gen_zephyr_board import (  # noqa: E402
     ZephyrBoardEmitError,
     _aen_require_disjoint_slot0,
+    emit_zephyr_board,
 )
 
 _METADATA = Path(__file__).resolve().parents[2] / "metadata"
@@ -78,6 +80,41 @@ def test_a_single_m55_som_still_takes_the_symmetric_layout(cores):
     """With no sibling M55 there is nothing to clobber, so the stock layout
     stays correct -- this guard must not start refusing those."""
     _aen_require_disjoint_slot0("E1M-AENTEST", _preset(*cores), None)
+
+
+def test_the_emitter_reaches_the_guard(tmp_path):
+    """The integration assertion, and the reason it exists.
+
+    Every test above calls `_aen_require_disjoint_slot0` directly, so all of
+    them stay green if the call in `emit_zephyr_board` is deleted -- measured,
+    not assumed: neutering that one line left 8/8 passing. A guard nothing
+    calls protects nothing, so this drives the real entry point and strips a
+    SHIPPED SoM's windows to reach the refused state.
+    """
+    root = tmp_path / "metadata"
+    shutil.copytree(_METADATA, root)
+    preset = root / "e1m_modules" / "E1M-AEN801.yaml"
+    text = preset.read_text(encoding="utf-8")
+    stripped = "\n".join(line for line in text.split("\n")
+                         if "he_slot0" not in line and "hp_slot0" not in line)
+    assert stripped != text, "E1M-AEN801 no longer declares role slot0 windows"
+    preset.write_text(stripped, encoding="utf-8", newline="\n")
+
+    with pytest.raises(ZephyrBoardEmitError) as excinfo:
+        emit_zephyr_board("E1M-AEN801", "m55_hp", root)
+    assert "slot0" in str(excinfo.value), str(excinfo.value)
+
+
+def test_the_emitter_still_succeeds_on_the_unmodified_som(tmp_path):
+    """The other half: the guard must not refuse the shipped metadata.
+
+    Same copied tree, no mutation -- so a guard that raised unconditionally
+    would fail here rather than passing the test above for the wrong reason.
+    """
+    root = tmp_path / "metadata"
+    shutil.copytree(_METADATA, root)
+    files = emit_zephyr_board("E1M-AEN801", "m55_hp", root)
+    assert files, "emit produced no files"
 
 
 def test_no_shipped_aen_som_relies_on_the_symmetric_layout():
