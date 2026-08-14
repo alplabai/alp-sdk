@@ -351,19 +351,30 @@ def test_emit_system_manifest_aen_flash_args_carries_jlink_flash_device(
             "AE822FA0E5597LS0_M55_HE"
 
 
-# E1M-AEN701's resolved SoC variant (silicon_variant: AE722F80F55D5LS in
-# metadata/socs/alif/ensemble/e7.json) DOES publish a `debug:` block --
-# `jlink_device` -- but no `jlink_flash_device` key.  That's the branch that
-# actually needs coverage: V2N's n44.json has no `debug:` block at all, so
-# asserting against it only proves the all-absent case, not "variant
-# resolved, `debug:` present, key missing".
+# E1M-AEN401's resolved SoC variant (silicon_variant: AE402FA0E5597LE0 in
+# metadata/socs/alif/ensemble/e4.json) DOES publish a `debug:` block --
+# `jlink_device` -- but `jlink_flash_device` is an explicit `null` (#1295's
+# one declared known-unknown: SEGGER ships no J-Link profile for any
+# Alif-declared E4 part). That's the branch that actually needs coverage:
+# V2N's n44.json has no `debug:` block at all, so asserting against it only
+# proves the all-absent case, not "variant resolved, `debug:` present, key
+# null".
+#
+# E1M-AEN701 (AE722F80F55D5LS) covered this case before #1295 populated
+# `jlink_flash_device` for every Alif Ensemble variant it could positively
+# identify; that landed on this branch and AEN701 now carries a real value,
+# so it no longer isolates the "unarmed" branch these three tests protect.
+# E4 has no A32 cluster (2x M55 only), so unlike AEN_HAPPY there is no
+# off-topology core to park here; `m55_hp: {}` exists only to satisfy the
+# schema's `cores: minProperties: 1` while taking every default. m55_he is
+# left out of this block entirely and, per the schema, inherits the SoM
+# preset's topology defaults exactly the same way.
 AEN_NO_JLINK_FLASH_DEVICE = """
 som:
-  sku: E1M-AEN701
+  sku: E1M-AEN401
 
 cores:
-  a32_cluster:
-    os: "off"
+  m55_hp: {}
 """
 
 
@@ -373,8 +384,9 @@ def test_emit_system_manifest_flash_args_omits_jlink_flash_device_when_absent(
     """`flash_args` must stay the tidy `{}` with NO `jlink_flash_device`
     key, never a `null` placeholder (the schema's published-unknown
     contract: an absent key IS the correct unknown state) -- even though
-    this variant's `debug:` block exists and carries its sibling
-    `jlink_device`."""
+    this variant's `debug:` block exists, carries its sibling
+    `jlink_device`, and declares `jlink_flash_device` itself as an
+    explicit `null` (#1295's one genuine known-unknown)."""
     path = _write_board(tmp_path, AEN_NO_JLINK_FLASH_DEVICE)
     project = load_board_yaml(path)
     parsed = yaml.safe_load(emit_system_manifest(project))
@@ -485,7 +497,7 @@ def test_emit_system_manifest_dpidr_preflight_pair_is_never_half_armed(
 def test_emit_system_manifest_omits_dpidr_preflight_when_unmeasured(
     tmp_path: Path,
 ) -> None:
-    """E1M-AEN701's variant publishes `debug.jlink_device` but NO
+    """E1M-AEN401's variant publishes `debug.jlink_device` but NO
     `expect_dpidr` (nobody has measured that part's DPIDR). Neither key may
     reach `flash_args`: `jlink_device` alone is the half-armed shape a
     downstream flasher refuses, so an unmeasured DPIDR must leave the
@@ -539,8 +551,8 @@ def test_emit_system_manifest_aen_flash_args_carries_slot0_load_address(
 def test_emit_system_manifest_flash_args_omits_slot0_load_address_when_flow_d_unarmed(
     tmp_path: Path,
 ) -> None:
-    """E1M-AEN701 publishes no `jlink_flash_device` (Flow D is not armed for
-    this SoC variant), so `flash_args` must stay `{}` -- no
+    """E1M-AEN401 publishes `jlink_flash_device: null` (Flow D is not armed
+    for this SoC variant), so `flash_args` must stay `{}` -- no
     `slot0_load_address` key either, even though this is otherwise an AEN
     part with M55 HP/HE cores. `slot0_load_address` is meaningless without
     Flow D, and must never appear on its own.
