@@ -80,14 +80,26 @@ LICENSE = "Apache-2.0"
 # onnxruntime recipe's compound LIC_FILES_CHKSUM holds itself to.
 LIC_FILES_CHKSUM = "file://LICENSE;md5=3b83ef96387f14655fc854ddc3c6bd57"
 
-# tag=0.9.1, not nobranch=1 on a mirror SHA: the tag is a real ref on the
-# canonical remote, not a mutable branch tip -- see the UPSTREAM + PIN
-# note above.
+# branch=main, NOT tag=0.9.1: bitbake's git fetcher refuses a URL revision
+# and an SRCREV together -- `Conflicting revisions (... from SRCREV and 0.9.1
+# from the url)` -- and it refuses at PARSE time, so the whole layer stops
+# loading and every image target fails at once, not just this recipe.
+#
+# Nothing is unpinned by that.  `branch=` says where to look and is not a
+# revision, which is why every sibling recipe here pairs one with an SRCREV.
+# The immutable pin is the SRCREV below, and it is exactly what the tag
+# resolves to -- `git ls-remote --tags` returns
+# 9b07780aca6fb21f82a241ba386ad9b379809337 for refs/tags/0.9.1, with no `^{}`
+# deref entry, so 0.9.1 is a lightweight tag on that very commit.
+#
+# `main` rather than nobranch=1 because the commit genuinely is on it
+# (`compare/9b07780...main` -> behind_by: 0), which keeps the fetcher's
+# reachability check doing real work instead of switching it off.
 #
 # The second SRC_URI entry is alp-sdk's own zcbor_abi_pin.h (issue #1254
 # follow-up), staged alongside the upstream headers by do_install below --
 # see that header's own comment for what it pins and why.
-SRC_URI = "git://github.com/NordicSemiconductor/zcbor.git;protocol=https;tag=0.9.1 \
+SRC_URI = "git://github.com/NordicSemiconductor/zcbor.git;protocol=https;branch=main \
            file://zcbor_abi_pin.h"
 SRCREV = "9b07780aca6fb21f82a241ba386ad9b379809337"
 S = "${WORKDIR}/git"
