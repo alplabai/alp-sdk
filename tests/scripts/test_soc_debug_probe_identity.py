@@ -63,7 +63,7 @@ def test_jlink_device_key_referencing_unknown_core_fails(tmp_path, monkeypatch):
 
 def test_variant_with_no_debug_block_passes(tmp_path, monkeypatch):
     # Absence is a valid, publishable state -- the cardinal rule of #987.
-    doc = {"cores": [{"id": "m55_hp"}], "variants": [{"order_code": "AE302F80F55D5AE"}]}
+    doc = {"cores": [{"id": "m55_hp"}], "variants": [{"order_code": "AE302F80F55D5LE"}]}
     assert _run(tmp_path, monkeypatch, doc) == 0
 
 
