@@ -7,6 +7,39 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — `tools/native-sim-container`'s documented `docker` path could not build, and its Zephyr pin had silently drifted from `west.yml` (#1457, #1458)
+
+Two independent bugs in the hardware-free `native_sim` reproduction
+container, both found and reproduced the same day, neither caught by CI
+because nothing in `.github/workflows/` builds this image.
+
+**#1457:** the Makefile header advertises `make CONTAINER_ENGINE=docker
+test`, but the `build` recipe passed no `-f`. Podman auto-detects a build
+file named `Containerfile`; Docker/BuildKit does not — it looks for
+`Dockerfile`, finds none, and aborts (`failed to read dockerfile: open
+Dockerfile: no such file or directory`) before any layer runs. Fixed by
+adding `-f $(HERE)Containerfile` to the `build` recipe; verified an actual
+`make CONTAINER_ENGINE=docker build` now completes (and `make build` under
+podman still does too).
+
+**#1458:** `Containerfile:37` pinned `ARG ZEPHYR_REV=v4.4.0` while
+`west.yml` pins `v4.4.1` — a contributor reproducing a twister result
+locally was silently building against a different Zephyr than CI ran.
+Fixed at the root rather than gated in place: `tools/native-sim-container/
+Makefile`'s `build` target now derives the pinned revision LIVE from
+`west.yml` and passes it as `--build-arg`, so the primary (`make build`)
+path can never carry a second, hand-maintained copy again. The
+Containerfile's own `ARG ZEPHYR_REV` default still exists — only as a
+fallback for a standalone `docker build`/`podman build` that bypasses the
+Makefile — and `scripts/check_bootstrap_manifest.py` (the same gate that
+already keeps `west.yml`, the CI workflow `--mr`/cache-key pins, and the
+README Zephyr badge in lockstep with `metadata/bootstrap.json`) now covers
+that default too, so a future drift fails the PR instead of shipping
+silently. Not `check_toolchain_lock.py`: that gate's own docstring scopes
+itself to the *Zephyr SDK toolchain* release, deliberately leaving the
+*Zephyr revision* pin to `check_bootstrap_manifest.py` — this is that same
+territory, in a fifth file.
+
 ### Fixed — the zcbor recipe set both `SRCREV` and a URL `tag=`, so bitbake could not parse it and every A55 image build failed
 
 `meta-alp-sdk/recipes-devtools/zcbor/zcbor_0.9.1.bb:90` pinned the revision

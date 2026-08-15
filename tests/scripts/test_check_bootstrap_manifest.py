@@ -2,10 +2,11 @@
 """Unit tests for scripts/check_bootstrap_manifest.py.
 
 The gate is 100% regex-driven against metadata/bootstrap.json + its schema +
-scripts/bootstrap.sh + scripts/bootstrap.ps1 + west.yml + README.md + four CI
-workflows. Each test here mutates a TEMP COPY of that corpus and asserts the
-gate actually fires for the documented failure mode -- a green run on the
-real repo alone proves nothing about whether the gate catches drift.
+scripts/bootstrap.sh + scripts/bootstrap.ps1 + west.yml + README.md + three CI
+workflows + tools/native-sim-container/Containerfile. Each test here mutates
+a TEMP COPY of that corpus and asserts the gate actually fires for the
+documented failure mode -- a green run on the real repo alone proves nothing
+about whether the gate catches drift.
 
 Run locally:
 
@@ -43,6 +44,7 @@ _CORPUS_RELPATHS = [
     ".github/workflows/pr-twister.yml",
     ".github/workflows/pr-tier-a-libraries.yml",
     ".github/workflows/pr-getting-started-aen801.yml",
+    "tools/native-sim-container/Containerfile",
 ]
 
 
@@ -69,6 +71,9 @@ def _point_gate_at(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(gate, "BOOTSTRAP_PS1", tmp_path / "scripts/bootstrap.ps1")
     monkeypatch.setattr(gate, "README_MD", tmp_path / "README.md")
     monkeypatch.setattr(gate, "LIBRARIES_DIR", tmp_path / "metadata/libraries")
+    monkeypatch.setattr(
+        gate, "CONTAINERFILE", tmp_path / "tools/native-sim-container/Containerfile"
+    )
     monkeypatch.setattr(gate, "CI_WORKFLOWS", [
         tmp_path / ".github/workflows/pr-twister.yml",
         tmp_path / ".github/workflows/pr-tier-a-libraries.yml",
@@ -299,6 +304,44 @@ def test_readme_badge_disagreement_fails(tmp_path, monkeypatch, capsys):
     err = capsys.readouterr().err
     assert rv == 1
     assert "README.md badge pins Zephyr" in err
+
+
+# ---------------------------------------------------------------------
+# 5b. native-sim-container Containerfile ARG ZEPHYR_REV disagreement
+#     (issue #1458)
+# ---------------------------------------------------------------------
+
+
+def test_containerfile_arg_zephyr_rev_disagreement_fails(tmp_path, monkeypatch, capsys):
+    """Reproduces issue #1458: the Containerfile's `ARG ZEPHYR_REV` default
+    stuck one patch release behind west.yml/zephyr.version, silently, with
+    nothing to catch it -- this is the gate that now does."""
+    _scaffold(tmp_path)
+    _replace(
+        tmp_path / "tools/native-sim-container/Containerfile",
+        "ARG ZEPHYR_REV=v4.4.1",
+        "ARG ZEPHYR_REV=v4.4.0",
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "Containerfile pins ARG ZEPHYR_REV" in err
+    assert "'v4.4.0'" in err
+
+
+def test_containerfile_missing_arg_fails(tmp_path, monkeypatch, capsys):
+    _scaffold(tmp_path)
+    _replace(
+        tmp_path / "tools/native-sim-container/Containerfile",
+        "ARG ZEPHYR_REV=v4.4.1",
+        "ARG ZEPHYR_REV_RENAMED=v4.4.1",
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "no `ARG ZEPHYR_REV=...` default found" in err
 
 
 # ---------------------------------------------------------------------
@@ -647,6 +690,10 @@ def test_fix_propagates_bumped_version_to_every_site(tmp_path, monkeypatch, caps
     getting_started = (tmp_path / ".github/workflows/pr-getting-started-aen801.yml").read_text(
         encoding="utf-8")
     assert "key: getting-started-aen801-zephyr-v4.10.0-${{ runner.os }}" in getting_started
+
+    containerfile = (tmp_path / "tools/native-sim-container/Containerfile").read_text(
+        encoding="utf-8")
+    assert "ARG ZEPHYR_REV=v4.10.0" in containerfile
 
 
 def test_fix_is_idempotent(tmp_path, monkeypatch, capsys):
