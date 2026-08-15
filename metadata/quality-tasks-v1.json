@@ -3,6 +3,34 @@
   "description": "Single source of truth for the SDK's quality tasks: which check_*.py gates exist, whether each is a hard CI gate or informational, and which profiles (quick/pr/full/release) run it. check_quality_registry.py keeps it == scripts/check_*.py on disk. Additive-only within schemaVersion 1.",
   "tasks": [
     {
+      "id": "agents-md-generators",
+      "description": "AGENTS.md's ALP_E1M_*/ALP_E1M_X_* identifiers and --emit choice lists must exist in the real generators (#1264).",
+      "runner": "check-script",
+      "script": "scripts/check_agents_md_generators.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-doc-drift.yml:doc-drift"
+    },
+    {
+      "id": "atoc-reservation",
+      "description": "Every AEN board .dts and every SoM preset memory_map reserves the top of the App MRAM window as an 'atoc' region -- SETOOLS top-anchors the ATOC boot table there (#1289).",
+      "runner": "check-script",
+      "script": "scripts/check_atoc_reservation.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "board-id-doc-parity",
       "description": "docs/board-id.md's alp_hw_info_eeprom_t typedef struct (field names, order, widths) must match include/alp/hw_info.h, macros resolved (#1231).",
       "runner": "check-script",
@@ -85,6 +113,34 @@
       ],
       "output": "none",
       "ci": null
+    },
+    {
+      "id": "changelog-fragments",
+      "description": "Every changelog.d/*.md fragment is well-formed (foldable filename, non-empty, starts with its own ### heading) so a malformed fragment fails the PR instead of the release cut (#1395).",
+      "runner": "check-script",
+      "script": "scripts/check_changelog_fragments.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "changelog-citations",
+      "description": "Every `path:line` citation in a changelog.d/*.md fragment resolves to a real file and an in-range line, and an anchored citation's quoted text is still inside the cited range, so a release note cannot point at code that moved (#1416).",
+      "runner": "check-script",
+      "script": "scripts/check_changelog_citations.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
     },
     {
       "id": "chip-header-status",
@@ -187,6 +243,20 @@
       "description": "Doc-drift gate -- fails when customer-facing documentation drifts from the code it documents.",
       "runner": "check-script",
       "script": "scripts/check_doc_drift.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-doc-drift.yml:doc-drift"
+    },
+    {
+      "id": "doc-inventory",
+      "description": "Doc-stated workflow names/counts and ADR/chip/library counts must match the tree (#1265).",
+      "runner": "check-script",
+      "script": "scripts/check_doc_inventory.py",
       "gate": true,
       "profiles": [
         "pr",
@@ -351,6 +421,20 @@
       "ci": "pr-metadata-validate.yml:validate"
     },
     {
+      "id": "example-sdk-root",
+      "description": "No examples/**/CMakeLists.txt reaches scripts/alp_project.py through a bare relative hop; every invocation resolves it under ${ALP_SDK_ROOT} so the example still builds scaffolded out of tree (issue #1390).",
+      "runner": "check-script",
+      "script": "scripts/check_example_sdk_root.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "example-storage-claims",
       "description": "Reject examples that claim Alp storage coverage while using Zephyr storage APIs.",
       "runner": "check-script",
@@ -365,10 +449,52 @@
       "ci": null
     },
     {
+      "id": "helper-firmware-path",
+      "description": "Every metadata/e1m_modules/*.yaml helper_firmware[].firmware_path (when present) resolves to a real file; omission is legal and left alone (issue #1372).",
+      "runner": "check-script",
+      "script": "scripts/check_helper_firmware_path.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "i2c-bus-doc-consistency",
+      "description": "Doc/example prose naming an on-module I2C part next to a bus name must agree with metadata/e1m_modules/*.yaml's on_module.i2c_devices.",
+      "runner": "check-script",
+      "script": "scripts/check_i2c_bus_doc_consistency.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "inference-backend-parity",
       "description": "Inference backend/format <-> dispatcher canonicalisation gate.",
       "runner": "check-script",
       "script": "scripts/check_inference_backend_parity.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
+      "id": "library-pin-parity",
+      "description": "A meta-alp-sdk recipe's SRCREV/tag must match its metadata/libraries version and, when west.yml resolves one, its west grounding (#1281).",
+      "runner": "check-script",
+      "script": "scripts/check_library_pin_parity.py",
       "gate": true,
       "profiles": [
         "pr",

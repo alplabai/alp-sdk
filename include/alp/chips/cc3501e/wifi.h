@@ -169,11 +169,26 @@ alp_status_t cc3501e_wifi_scan_stop(cc3501e_t *ctx);
 /**
  * @brief Associate with a Wi-Fi AP (WIFI_CONNECT_STA, opcode 0x12).
  *
- * Submits the SSID / security / passphrase as the on-wire
- * @ref alp_cc3501e_wifi_connect_t header followed by the inline SSID then
- * the inline passphrase, then polls status to connected / failed: while the
- * firmware reports RESP_ERR_BUSY (association in progress) this re-issues the
- * same request on a bounded backoff until RESP_OK (connected) or the timeout.
+ * Submits the SSID / security / passphrase ONCE, as the on-wire
+ * @ref alp_cc3501e_wifi_connect_t header followed by the inline SSID then the
+ * inline passphrase -- the firmware is fire-and-forget for this opcode (it
+ * acks the submit with RESP_ERR_BUSY and never replies synchronously again on
+ * it), so the submit is not retried.  The outcome is then awaited off the
+ * independent, non-blocking @ref cc3501e_wifi_status latch (CONNECTING while
+ * the association runs, CONNECTED / CONN_FAILED once it resolves) rather than
+ * trusted off the submit's own acknowledgement -- see issues #1376 / #1378:
+ * the old poll-by-repeat-the-submit contract could re-submit a fresh
+ * association on every retry and could alias a dead bus phase as a false
+ * "connected".
+ *
+ * If this call FOLLOWS a failed attempt (the @ref cc3501e_wifi_status latch
+ * still reads CONN_FAILED when this is entered) it first clears that stale
+ * association -- @ref cc3501e_wifi_disconnect() -- before submitting, else
+ * the new association's own Wlan_Connect kick fails against the leftover NWP
+ * state (#1435).  That clear is bounded by @c CC3501E_WIFI_DOWN_WINDOW_MS
+ * IN ADDITION to @p timeout_ms, the same floor-regardless-of-caller-budget
+ * precedent as @ref cc3501e_wifi_get_mac's down-window floor. A live
+ * CONNECTING attempt or an already-CONNECTED association is left alone.
  *
  * @param ctx         Initialised driver context.
  * @param ssid        NUL-terminated SSID (<= 32 bytes; longer is rejected).
@@ -181,10 +196,17 @@ alp_status_t cc3501e_wifi_scan_stop(cc3501e_t *ctx);
  *                    _WPA2_PSK / _WPA3_SAE (matches
  *                    @ref alp_cc3501e_wifi_connect_t::security on the wire).
  * @param pass        NUL-terminated passphrase (may be NULL/"" for open).
- * @param timeout_ms  Upper bound on the connect poll budget.
- * @return ALP_OK once associated; ALP_ERR_TIMEOUT if still associating at
- *         the deadline; ALP_ERR_INVAL on an over-long SSID/passphrase;
- *         mapped error otherwise.
+ * @param timeout_ms  Upper bound on the WIFI_STATUS poll budget (the submit
+ *                    itself uses a short, fixed, non-retried timeout). A call
+ *                    that clears a stale association first (see above) also
+ *                    spends up to @c CC3501E_WIFI_DOWN_WINDOW_MS on that
+ *                    clear, on top of this budget.
+ * @return ALP_OK once WIFI_STATUS reports CONNECTED; ALP_ERR_TIMEOUT if still
+ *         CONNECTING (or unreadable) at the deadline, or if the firmware
+ *         reports CONN_FAILED with fail_reason == FAIL_TIMEOUT;
+ *         ALP_ERR_INVAL on an over-long SSID/passphrase or a synchronous
+ *         submit reject; ALP_ERR_IO if the firmware reports CONN_FAILED for
+ *         any other reason.
  */
 alp_status_t cc3501e_wifi_connect(cc3501e_t  *ctx,
                                   const char *ssid,
@@ -213,9 +235,34 @@ alp_status_t cc3501e_wifi_disconnect(cc3501e_t *ctx);
  * payload is identical to @ref cc3501e_wifi_connect -- an
  * @ref alp_cc3501e_wifi_connect_t header (ssid_len / psk_len / security)
  * followed by the inline SSID then the inline passphrase, packed with no
- * padding.  AP bring-up is a radio op (the firmware worker-routes it and the
- * bridge is briefly down), so while the firmware reports RESP_ERR_BUSY the
- * request is re-issued on a bounded backoff until RESP_OK or the deadline.
+ * padding.  Unlike @ref cc3501e_wifi_connect this issues the submit exactly
+ * ONCE and returns immediately (issue #1385): AP_START is fire-and-forget on
+ * the firmware side (every submit is acked RESP_ERR_BUSY, and the job slot
+ * that would carry a WORKER_DONE outcome is reset to IDLE before the host may
+ * clock again), and unlike CONNECT_STA there is no independent status latch
+ * to poll afterwards -- the firmware's AP path never writes the WIFI_STATUS
+ * connection latch.  A retry loop around this opcode is therefore PROVABLY
+ * unwinnable: every attempt reads back either the BUSY ack (no progress) or
+ * the dead-phase all-zero alias, which is rejected as ALP_ERR_IO at the
+ * transport (no progress either) -- there is no reply this opcode can ever
+ * produce that decodes as ALP_OK, so polling only spends wall-clock time
+ * (and re-issues, see the warning below) without changing the answer.
+ *
+ * @warning Against CC3501E firmware protocol v4 this call CANNOT report
+ *          success, and returns ALP_ERR_TIMEOUT for an AP that came up
+ *          perfectly.  Treat ALP_ERR_TIMEOUT as fully inconclusive, NOT as
+ *          "submitted, unconfirmed": it covers the expected BUSY submit ack,
+ *          the rejected dead-phase alias, AND at least three cases where
+ *          nothing ever reached the wire -- a RESP_ERR_BUSY bounce because a
+ *          different worker op (scan / get_mac / BLE) was already in flight,
+ *          a transport IO fault during the radio-down window, and a
+ *          request-lock timeout under a concurrent caller -- all
+ *          indistinguishable from here.  A caller that treats ALP_ERR_TIMEOUT
+ *          as proof of submission will not retry when it should; confirm the
+ *          AP out of band and be prepared to retry until #1385 lands a
+ *          firmware-side confirmation channel.  @ref ALP_ERR_INVAL and
+ *          @ref ALP_ERR_NOT_READY, by contrast, ARE conclusive: both are
+ *          local or synchronous rejects that mean nothing was submitted.
  *
  * @param ctx         Initialised driver context.
  * @param ssid        NUL-terminated AP SSID (<= 32 bytes; longer is rejected).
@@ -223,11 +270,16 @@ alp_status_t cc3501e_wifi_disconnect(cc3501e_t *ctx);
  *                    _WPA2_PSK / _WPA3_SAE (matches
  *                    @ref alp_cc3501e_wifi_connect_t::security on the wire).
  * @param pass        NUL-terminated passphrase (may be NULL/"" for an open AP).
- * @param timeout_ms  Upper bound on the AP-start poll budget (floored to the
- *                    radio down-window).
- * @return ALP_OK once the AP is up; ALP_ERR_TIMEOUT if still starting at the
- *         deadline; ALP_ERR_INVAL on an over-long SSID/passphrase; mapped
- *         error otherwise.
+ * @param timeout_ms  Currently unused (the submit is not retried -- there is
+ *                    no independent channel to bound a wait on); reserved for
+ *                    a future firmware-side confirmation channel, kept in the
+ *                    signature so that addition needs no API break.
+ * @return ALP_ERR_TIMEOUT for the expected outcome -- see the warning above:
+ *         conclusive for neither success nor failure, and NOT proof the
+ *         submit ever reached the wire; ALP_ERR_INVAL on an over-long
+ *         SSID/passphrase or a synchronous submit reject; ALP_ERR_NOT_READY
+ *         if @p ctx is NULL or not initialised.  ALP_OK is not reachable
+ *         against protocol v4.
  */
 alp_status_t cc3501e_wifi_ap_start(cc3501e_t  *ctx,
                                    const char *ssid,
@@ -252,10 +304,22 @@ alp_status_t cc3501e_wifi_ap_stop(cc3501e_t *ctx);
 /**
  * @brief Read the current STA RSSI in dBm (WIFI_GET_RSSI, opcode 0x16).
  *
+ * Worker-routed on the firmware side (a fresh request lazy-starts the radio,
+ * which can take seconds): re-issues on a bounded backoff, floored to the
+ * radio down-window, while the firmware reports RESP_ERR_BUSY -- see issue
+ * #1377, where a single non-retried request here collected only the
+ * submit's own BUSY ack and left the job orphaned.
+ *
+ * @warning As with @ref cc3501e_wifi_status, the retry rides out a
+ *          transient down-window only -- it cannot resync or reset a
+ *          genuinely wedged transport, and will burn the whole down-window
+ *          before reporting a timeout in that case rather than failing fast.
+ *
  * @param ctx   Initialised driver context.
  * @param rssi  Receives the signed dBm RSSI on success.
  * @return ALP_OK with @p rssi filled; ALP_ERR_NOT_READY if not associated
- *         (firmware RESP_ERR_NOT_READY); ALP_ERR_IO on a short reply; or the
+ *         (firmware RESP_ERR_NOT_READY); ALP_ERR_TIMEOUT if it stayed busy
+ *         for the whole down-window; ALP_ERR_IO on a short reply; or the
  *         mapped error.
  *
  * @note WIRE: GET_RSSI has an opcode but NO reply payload struct in the
@@ -289,13 +353,40 @@ alp_status_t cc3501e_wifi_get_ip(cc3501e_t *ctx, uint8_t ip[4]);
  * fixed 4-byte @ref alp_cc3501e_wifi_status_t wire layout (state | fail_reason |
  * rssi_dbm | reserved), decoded into @p out.
  *
+ * The firmware-side latch read is itself non-blocking, but the SHARED bridge
+ * transport is briefly down whenever any radio op is in flight (a connect
+ * this same call may be trying to observe the outcome of, included) -- see
+ * issue #1377, where a status read taken moments after a connect desynced
+ * like any other transaction that lands in that window.  This is therefore
+ * poll-by-repeat internally, floored to the radio down-window, even though
+ * the WIFI_STATUS opcode itself never replies RESP_ERR_BUSY.
+ *
+ * @warning The retry only rides out a TRANSIENT down-window (the bridge
+ *          briefly unavailable while a radio op runs) -- it re-issues the
+ *          identical SPI transaction with no resync, no CS recovery, no
+ *          reset, so it cannot recover a genuinely WEDGED transport.  If
+ *          @ref cc3501e_get_version (a plain, non-worker, short-timeout
+ *          request) also fails, the transport itself is broken rather than
+ *          mid-radio-op, and this call will still burn the whole down-window
+ *          (bounded, but up to several seconds) before reporting
+ *          @c ALP_ERR_TIMEOUT / @c ALP_ERR_IO rather than failing fast.
+ *          Recovering a wedged link needs a different remedy (link resync or
+ *          reset) that this driver does not yet implement.
+ *
  * @param ctx  Initialised driver context.
  * @param out  Receives the decoded status snapshot: @c state is a
- *             @ref alp_cc3501e_wifi_conn_state_t, @c fail_reason a
- *             @ref alp_cc3501e_wifi_fail_t (valid when state == CONN_FAILED) and
- *             @c rssi_dbm the STA RSSI (valid when state == CONNECTED).
+ *             @ref alp_cc3501e_wifi_conn_state_t and @c fail_reason a
+ *             @ref alp_cc3501e_wifi_fail_t (valid when state == CONN_FAILED).
+ *             @c rssi_dbm is decoded faithfully off the wire but is NOT a
+ *             measurement -- the firmware latch behind it is never populated
+ *             and the byte is always 0, which is itself a legal RSSI, so a
+ *             caller cannot tell it apart from a real reading (issue #1387).
+ *             Use @ref cc3501e_wifi_rssi for a signal level, and report it as
+ *             unavailable when that call fails rather than printing a 0.
  * @return ALP_OK with @p out filled; ALP_ERR_INVAL if @p out is NULL;
- *         ALP_ERR_IO on a short reply; otherwise the mapped error.
+ *         ALP_ERR_TIMEOUT if the transport stayed down for the whole
+ *         down-window; ALP_ERR_IO on a short reply; otherwise the mapped
+ *         error.
  */
 alp_status_t cc3501e_wifi_status(cc3501e_t *ctx, alp_cc3501e_wifi_status_t *out);
 

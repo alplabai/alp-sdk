@@ -14,7 +14,7 @@ every planner change.
 
 | Seam | Checks | Status |
 |---|---|---|
-| **1 — plan shape** | Does a live `--emit build-plan` still match a frozen, hand-verified oracle's command / env / appDir / skip-fail-decision *shape*, field for field, over the SoM matrix? Deliberately does NOT re-diff the materialised config-artefact content (alp.conf/local.conf/cmake-args.txt/sysbuild-conf bytes) — see "Seam-1 scope" below. Toolchain-free; runs on any `ubuntu-latest` runner. | **Implemented here**: `seam1_field_diff.py` + `.github/workflows/parity.yml`'s `seam1-plan-shape` job. |
+| **1 — plan shape** | Does a live `--emit build-plan` still match a frozen, hand-verified oracle's command / env / appDir / skip-fail-decision *shape*, field for field, over the SoM matrix? Deliberately does NOT re-diff the materialised config-artefact content (alp.conf/local.conf/sysbuild-conf bytes) — see "Seam-1 scope" below. Toolchain-free; runs on any `ubuntu-latest` runner. | **Implemented here**: `seam1_field_diff.py` + `.github/workflows/parity.yml`'s `seam1-plan-shape` job. |
 | **2 — real build** | Materialise byte-check and an actual `west`/Zephyr build off the plan — the thing seam 1 can't catch (a plan that *looks* right but doesn't build). Renode boot was part of this seam's original design; Renode is now retired (ADR [0022](../../docs/adr/0022-python-executor-renode-retirement.md)), so this seam's remaining scope is the build/flash step, verified on real hardware, not a simulated boot. | **Follow-up, not seeded here.** Needs a Linux runner with the Zephyr SDK / toolchain installed (`west`, the AEN/E1M-X Zephyr modules). Placeholder `seam2` job in `.github/workflows/parity.yml` documents this — it does not run a fake check and does not report success for work it didn't do. |
 
 Yocto/A-core artefact parity is explicitly **out of scope** for both seams —
@@ -144,10 +144,14 @@ Token *choice* is guarded elsewhere: the emit-snapshot goldens
 (`tests/fixtures/emit-snapshots/*.build-plan.snap`, which keep the two
 tokens' literal shapes) and tan-cli #24's own substitution tests.
 
-## The one allowed delta: `debug.probe`
+## The allowed deltas
 
-After normalization, the **only** field allowed to differ between the oracle
-and a live emit is `slices[*].debug.probe`, and only in the direction
+After normalization, three hand-reviewed deltas — and nothing else — may
+differ between the oracle and a live emit.
+
+### 1. `debug.probe`
+
+`slices[*].debug.probe`, and only in the direction
 `"openocd"` (oracle, captured at `97ad481b`) `->` `null` (`df312cec` and
 later). This is `#848`'s intentional, hand-reviewed change: the SDK-side
 executor named a concrete debug-probe runner because it drove `west`/OpenOCD
@@ -158,9 +162,40 @@ not-claiming, not a hidden capability loss. ADR-0020's Amendment states this
 explicitly: "the only `97ad481b`<->`df312cec` emit delta is `debug.probe`
 `"openocd"->null`, hand-reviewed."
 
+### 2. `postCommands` / `artifacts.outputDir`
+
+Two keys the `97ad481b` oracle predates entirely, added by alp-sdk PR #1344
+(alplabai/tan-cli#550), and allowed **only** where the live plan carries
+their inert non-baremetal default — `postCommands` `[]` and
+`artifacts.outputDir` `null`. Keyed on the exact field path AND the exact
+value: a baremetal slice's real `cmake --build .` step or real
+`<buildDir>/output` still **fails**, because the frozen oracle emitted no
+build step at all. See `_ALLOWED_ADDITIVE_KEYS`.
+
+### 3. The west `build/` level on a zephyr slice's artifact paths
+
+alp-sdk #1360. The oracle emitted `slices[*].artifacts.{elf,map,bin,
+sizeReport,symbols,compileCommands}` **without** the `build/` level `west
+build` actually writes — the slice's `command` runs with `cwd` = `buildDir`
+and no `-d`, so west appends its own default `build` level. The oracle's
+spelling therefore names files west never creates
+(`build/m55_he-zephyr/zephyr/zephyr.elf`); the live planner reports
+`build/m55_he-zephyr/build/zephyr/zephyr.elf`.
+
+Allowed **only** for those six named fields and **only** for that exact
+one-segment insertion, immediately before each field's fixed Zephyr tail
+(the tails are Zephyr's own `cmake/modules/kernel.cmake` layout, not this
+planner's invention). A path that gains two `build/` levels — the
+`-d <buildDir>` double-nest finding M14 warns about — that takes the level
+somewhere else, or whose filename changed, still **fails**. See
+`_NESTED_ARTIFACT_TAILS`.
+
+### Everything else fails
+
 Any other diff in the plan's SHAPE — a changed command, a changed `env`
 value, a changed slice count, a `probe` change to anything other than that
-exact transition — **fails** the gate. Config-artefact `contents` is dropped
+exact transition, an additive key with a non-inert value, an artifact path
+that moved anywhere but that one `build/` level — **fails** the gate. Config-artefact `contents` is dropped
 before the diff runs at all (see "Seam-1 scope" above), so a content-only
 change never reaches this allow-list in the first place. See
 `seam1_field_diff.py`'s module docstring for the exact rule the comparator
@@ -177,7 +212,7 @@ python3 tests/parity/seam1_field_diff.py \
 `--boards` restricts the check to specific oracle fixtures (filename minus
 `.build-plan.json`, e.g. `--boards audio_i2s-tone multicore_rpmsg-v2n`);
 omitted, it checks every fixture in `--oracle`. Exit code is `0` iff every
-board's only diffs (if any) are the allowed `debug.probe` delta.
+board's only diffs (if any) are the three allowed deltas above.
 
 ## CI wiring
 

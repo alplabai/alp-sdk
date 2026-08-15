@@ -62,8 +62,8 @@ jobs:
       - name: Install build dependencies
         if: steps.token_check.outputs.configured == 'true'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          sudo apt-get update -o Acquire::Retries=3
+          sudo apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
               build-essential cmake python3 wget
 
       - name: Download Coverity Build Tool

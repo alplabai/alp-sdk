@@ -15,6 +15,8 @@ on:
     paths:
       - 'metadata/**'
       - 'examples/**/board.yaml'
+      - 'examples/**/README.md'
+      - 'examples/**/testcase.yaml'
       - 'include/alp/boards/**'
       - 'include/alp/chips/**'
       - 'zephyr/boards/alp/**'
@@ -22,8 +24,11 @@ on:
       - 'scripts/validate_metadata.py'
       - 'scripts/validate_board_yaml.py'
       - 'scripts/check_board_target_tree_parity.py'
+      - 'scripts/check_atoc_reservation.py'
       - 'scripts/check_example_board_overlay_parity.py'
+      - 'scripts/check_example_sdk_root.py'
       - 'scripts/check_som_topology_parity.py'
+      - 'scripts/check_helper_firmware_path.py'
       - 'scripts/check_core_cmakelists_mapping.py'
       - 'examples/**/CMakeLists.txt'
       - 'scripts/alp_project_loader.py'
@@ -46,25 +51,38 @@ on:
       - 'firmware/gd32-bridge/tests/protocol_vectors.txt'
       - 'README.md'
       - 'docs/**/*.md'
+      - 'examples/**/*.md'
+      - 'examples/**/*.c'
       - 'west.yml'
       - 'metadata/libraries/**'
+      - 'meta-alp-sdk/**'
+      - 'scripts/check_library_pin_parity.py'
       - 'scripts/requirements.txt'
       - 'scripts/alp_cli/__init__.py'
       - 'scripts/alp_lock/**'
       - 'scripts/west_commands/alp_lock.py'
       - 'alp.lock'
+      - 'changelog.d/**'
+      - 'scripts/assemble_changelog.py'
+      - 'scripts/check_changelog_fragments.py'
+      - 'scripts/check_changelog_citations.py'
   push:
     branches: [main, dev]
     paths:
       - 'metadata/**'
       - 'examples/**/board.yaml'
+      - 'examples/**/README.md'
+      - 'examples/**/testcase.yaml'
       - 'include/alp/boards/**'
       - 'include/alp/chips/**'
       - 'zephyr/boards/alp/**'
       - 'scripts/validate_board_yaml.py'
       - 'scripts/check_board_target_tree_parity.py'
+      - 'scripts/check_atoc_reservation.py'
       - 'scripts/check_example_board_overlay_parity.py'
+      - 'scripts/check_example_sdk_root.py'
       - 'scripts/check_som_topology_parity.py'
+      - 'scripts/check_helper_firmware_path.py'
       - 'scripts/check_core_cmakelists_mapping.py'
       - 'examples/**/CMakeLists.txt'
       - 'scripts/alp_project_loader.py'
@@ -84,13 +102,21 @@ on:
       - 'firmware/gd32-bridge/tests/protocol_vectors.txt'
       - 'README.md'
       - 'docs/**/*.md'
+      - 'examples/**/*.md'
+      - 'examples/**/*.c'
       - 'west.yml'
       - 'metadata/libraries/**'
+      - 'meta-alp-sdk/**'
+      - 'scripts/check_library_pin_parity.py'
       - 'scripts/requirements.txt'
       - 'scripts/alp_cli/__init__.py'
       - 'scripts/alp_lock/**'
       - 'scripts/west_commands/alp_lock.py'
       - 'alp.lock'
+      - 'changelog.d/**'
+      - 'scripts/assemble_changelog.py'
+      - 'scripts/check_changelog_fragments.py'
+      - 'scripts/check_changelog_citations.py'
   workflow_dispatch:
 
 concurrency:
@@ -323,13 +349,23 @@ jobs:
       - name: Gate — SoM preset topology keys match resolved SoC cores[].id
         run: python3 scripts/check_som_topology_parity.py
 
+      # Issue #1372: nothing validated that a SoM preset's
+      # helper_firmware[].firmware_path (six AEN presets pointed at
+      # firmware/cc3501e/prebuilt/cc3501e-v0.2.0.bin) actually resolves to a
+      # file in the tree -- not the schema, not the validator, not the
+      # manifest emitter, not tan. Omission of the key is legal (means "no
+      # artefact yet") and is left alone; only a present-but-broken path
+      # fails.
+      - name: Gate — helper_firmware firmware_path resolves
+        run: python3 scripts/check_helper_firmware_path.py
+
       # Issue #1275: a dual-Zephyr-core SKU can silently share one core's
       # baked CMakeLists.txt --core literal with a sibling core (the newly
       # added core inherits the wrong Kconfig fragment while the
       # orchestrator materialises the correct one for it separately).
       # Catches both the literal-agreement drift and the actual trap --
       # two distinct cores resolving app: to the same CMakeLists.txt.
-      - name: Gate — Zephyr core app: <-> CMakeLists.txt --core mapping
+      - name: "Gate — Zephyr core app: <-> CMakeLists.txt --core mapping"
         run: python3 scripts/check_core_cmakelists_mapping.py
 
       # Unit-test the loader contract -- schema pass/fail, missing-
@@ -369,6 +405,14 @@ jobs:
       - name: Gate — chip driver <-> metadata manifest parity
         run: python3 scripts/check_chip_manifest_parity.py
 
+      # #1270: doc/example prose naming an on-module I2C part next to a bus
+      # name (BRD_I2C/LPI2C0, I2C2/E1M_I2C0, ...) must agree with the
+      # SoM preset's own on_module.i2c_devices block -- four consecutive
+      # doc passes each fixed one wrong AEN bus assignment and broke
+      # another before this gate existed to check prose against metadata.
+      - name: Gate — I2C bus name in docs/examples agrees with i2c_devices metadata
+        run: python3 scripts/check_i2c_bus_doc_consistency.py
+
       # #1136: pr-twister.yml inits its topdir from Zephyr's OWN west.yml
       # (`west init -m zephyr`), so it never notices a Zephyr module that's
       # unreachable from alp-sdk's OWN manifest (`west init -l alp-sdk` --
@@ -379,8 +423,19 @@ jobs:
       - name: Gate — west.yml module resolution (alp-sdk-owned workspace)
         run: python3 scripts/check_west_manifest_module_resolution.py
 
+      # #1281: nothing cross-checked a meta-alp-sdk recipe's SRCREV/tag
+      # against the west.yml revision or metadata/libraries version pinning
+      # the SAME third-party module -- a Zephyr-side and Yocto-side pin
+      # could drift to two different upstream versions with CI staying
+      # green throughout.
+      - name: Gate — meta-alp-sdk recipe pin <-> west.yml / metadata/libraries parity
+        run: python3 scripts/check_library_pin_parity.py
+
       - name: "Gate — SoM preset board: targets resolve to a real board tree"
         run: python3 scripts/check_board_target_tree_parity.py
+
+      - name: "Gate — AEN App MRAM top is reserved for the SE-owned ATOC (#1289)"
+        run: python3 scripts/check_atoc_reservation.py
 
       - name: Gate — example board.yaml declared cores match their boards/ overlays
         run: python3 scripts/check_example_board_overlay_parity.py
@@ -393,6 +448,12 @@ jobs:
 
       - name: Gate — quality-task registry matches scripts/check_*.py on disk
         run: python3 scripts/check_quality_registry.py
+
+      - name: "Gate — changelog.d/ fragments are well-formed (#1395)"
+        run: python3 scripts/check_changelog_fragments.py
+
+      - name: "Gate — changelog.d/ path:line citations still resolve (#1416)"
+        run: python3 scripts/check_changelog_citations.py
 
       - name: Gate — scripts/ and firmware/ write_text() writers pass newline=""
         run: python3 scripts/check_write_text_newline.py
@@ -449,6 +510,17 @@ jobs:
       - name: Example portability classification + hard-error lint
         run: |
           python3 scripts/check_example_portability.py
+
+      # Issue #1390: drone-autopilot reached scripts/alp_project.py through an
+      # unconditional ${CMAKE_CURRENT_SOURCE_DIR}/../../../ hop, which is the
+      # SDK root only in tree. Scaffolded out of tree (`tan init
+      # --from-example`, i.e. what a customer actually ends up with) three
+      # levels up is somewhere else entirely, so configure died on a
+      # nonexistent scripts/alp_project.py -- and because the hop was
+      # unconditional, setting ALP_SDK_ROOT was not a workaround. Twenty
+      # examples shared the copied block.
+      - name: Gate — examples resolve alp_project.py under ALP_SDK_ROOT
+        run: python3 scripts/check_example_sdk_root.py
 
       # Public-API test-coverage audit -- per the VERSIONS.md
       # "Quality bar" entry, every public function should have at

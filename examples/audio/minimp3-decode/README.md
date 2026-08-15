@@ -72,7 +72,7 @@ west build -b native_sim/native/64 examples/audio/minimp3-decode \
 west build -t run
 
 # On real silicon, point -b at the SoM's Zephyr board target.
-west build -b alp_e1m_aen801_m55_hp examples/audio/minimp3-decode
+west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/audio/minimp3-decode
 west flash
 ```
 

@@ -26,6 +26,12 @@ on_module:
   rtc_external:         rv3028c7
   temperature_sensor:   tmp112
   eeprom:               eeprom_24c128
+  # Single RMII PHY (metadata/socs/alif/ensemble/e8.json "ethernet": 1);
+  # families with a single PHY omit ethernet_phy_count: (schema). Real
+  # hardware: examples/aen/aen-ethernet-link RESULT PASS on E8 silicon
+  # (link up, DHCP lease). Exact order-code suffix is data-gated on the
+  # netlist/BOM -- see metadata/chips/dp83825.yaml and #1241 "Blocked on".
+  ethernet_phy:         dp83825
   ospi_memories:
     ospi0:
       chip:           MX25UM25645GXDI00   # Macronix OctaFlash (xSPI NOR)
@@ -46,6 +52,27 @@ on_module:
     capacity_mbit:  256             # 256 Mbit (32 MiB)
     interface:      ospi0
     chip_select:    1
+
+  i2c_devices:
+    # Tier-3 SE-mediated housekeeping bus (ADR 0017:74-79): the SoC can only
+    # be a slave on the Alif LPI2C0 (hardcoded address 0x40, TRM §3.17.4), so
+    # the Secure Enclave masters it, not on-module silicon -- `bus_master` is
+    # omitted per the schema's `i2c_bus.bus_master` description. Addresses
+    # per docs/bring-up-aen.md §5.1's bench-verified table; pad names per
+    # examples/aen/aen-secure-element-sign/README.md:14-15.
+    brd_i2c:
+      devices:
+        - { chip: rv3028c7,         role: rtc,             address_7bit: "0x52" }
+        - { chip: optiga_trust_m,   role: secure_element,  address_7bit: "0x30" }
+        - { chip: tmp112,           role: temp_sensor,     address_7bit: "0x48" }
+    # SoC I2C2, bridge/DNP-selected onto the E1M portable I2C0 pads -- the
+    # SoM-manifest EEPROM only, a SEPARATE bus from the trio above (see
+    # docs/bring-up-aen.md §5.1: "Two separate buses -- don't assume a
+    # single shared bus.").
+    e1m_i2c0:
+      bus_master: alif-ensemble
+      devices:
+        - { chip: eeprom_24c128,    role: eeprom,          address_7bit: "0x50" }
 
 # Off-SoC module memory in the canonical cross-family shape (see
 # som-preset-v1.schema.json `memory:`).  Values are DERIVED from the
@@ -116,16 +143,40 @@ topology:
 #   he_slot0   0x010000    2688 KiB  0x80010000    m55_he   (unchanged)
 #   hp_slot0   0x2b0000    2688 KiB  0x802b0000    m55_hp   (was slot1/OTA)
 #   reserved   0x550000    64 KiB    0x80550000    m55_he, m55_hp  (ex-scratch)
-#   storage    0x560000    128 KiB   0x80560000    m55_he, m55_hp
-#   64 + 2688 + 2688 + 64 + 128 = 5632 KiB == the full 5.5 MiB App MRAM.
+#   storage    0x560000    96 KiB    0x80560000    m55_he, m55_hp
+#   atoc       0x578000    32 KiB    0x80578000    m55_he, m55_hp  (SE-owned)
+#   64 + 2688 + 2688 + 64 + 96 + 32 = 5632 KiB == the full 5.5 MiB App MRAM.
+#
+# `atoc` is the SE-owned band at the very top of the App MRAM window
+# (#1289).  Alif's SETOOLS (`app-gen-toc` / `app-write-mram`) top-anchors
+# the generated ATOC application package at 0x80580000 and grows it
+# DOWNWARD, sized to the package -- placement happens at provisioning
+# time, not link time, so there is no fixed address to carve around, only
+# a band to reserve.  It was carved out of `storage` (128 -> 96 + 32)
+# rather than out of a slot, so every other region above is byte-identical
+# to the #1069 layout and no image geometry moved.
+#
+# Sizing evidence (all against window top 0x80580000):
+#   5552 B   bench-observed 2026-08-08 -- ATOC magic `ckBS` (0x53426B63)
+#            read at 0x8057EA50, intact, while an app erased 0x80560000
+#            inside what was then the SAME `storage` partition
+#   13552 B  E7 SETOOLS transcript, Alif DFP docs/Overview.md:193-224
+#   23696 B  worst case from SETOOLS' build/app-package-map.txt sizing
+#            rule at the 8-image maximum (that rule reproduces the 5552 B
+#            above exactly)
+# 32 KiB leaves 9072 B spare at 8 images.  UNVERIFIED: no documented
+# maximum TOC entry count was found, so 8 images is an assumption -- widen
+# the band, never narrow it, if a larger configuration appears.
 #
 # `mcuboot`/`he_slot0`/`hp_slot0` are marked `cacheable: true` (real XIP
 # code, matches the auto-derived `mram_main` region's default); `reserved`/
-# `storage` are left non-cacheable (NVS/settings-style access).
+# `storage`/`atoc` are left non-cacheable (NVS/settings-style access at the
+# register level -- `atoc` is boot-table, not settings, despite sharing the
+# access mode).
 #
-# All five fine-grained regions are MRAM (behind `alif,mram-flash-controller`
+# All six fine-grained regions are MRAM (behind `alif,mram-flash-controller`
 # -- 16-byte program granularity, finite write endurance), not RAM, even
-# though `mcuboot`/`reserved`/`storage` publish a real `base` (needed so
+# though `mcuboot`/`reserved`/`storage`/`atoc` publish a real `base` (needed so
 # scripts/gen_zephyr_board.py's `_aen_flash_partitions()` can lay out the
 # DTS partition table).  A real `base` alone would make them look like
 # legitimate IPC carve-out candidates to scripts/alp_orchestrate/carveout.py
@@ -133,12 +184,16 @@ topology:
 # cacheable-mismatch region behind a matching one, so a non-cacheable
 # carve-out (e.g. examples/multicore/mproc-mailbox/board.yaml) would prefer
 # the smaller `reserved` region over `storage`/`mcuboot` and silently place
-# a shared-memory ring inside non-volatile flash.  `carveout: false` marks
-# all five as ineligible for that allocator (schema field, see
+# a shared-memory ring inside non-volatile flash.  Note the allocator
+# allocates TOP-DOWN within a region (carveout.py step 4) -- the same
+# direction the ATOC grows -- so for `atoc` the flag is belt-and-braces
+# only; what actually makes that band safe is being a declared, named,
+# non-storage region (#1289).  `carveout: false` marks
+# all six as ineligible for that allocator (schema field, see
 # metadata/schemas/som-preset-v1.schema.json `memory_region.carveout`)
 # while leaving their `base` available for the DTS/partition-table use above.
 #
-# `mram_main` is kept alongside the five fine-grained regions above,
+# `mram_main` is kept alongside the six fine-grained regions above,
 # `base: TBD` and unchanged from the auto-derived shape it replaces
 # (whole-MRAM, all three cores, cacheable) -- this is the coarse
 # generic-storage-carve-out device name (`board.yaml storage[].flash_device:
@@ -155,7 +210,8 @@ memory_map:
   - { name: he_slot0,  base: 0x80010000, size_kib: 2688, accessible_from: [m55_he],          cacheable: true, carveout: false }
   - { name: hp_slot0,  base: 0x802b0000, size_kib: 2688, accessible_from: [m55_hp],          cacheable: true, carveout: false }
   - { name: reserved,  base: 0x80550000, size_kib: 64,   accessible_from: [m55_he, m55_hp],                  carveout: false }
-  - { name: storage,   base: 0x80560000, size_kib: 128,  accessible_from: [m55_he, m55_hp],                  carveout: false }
+  - { name: storage,   base: 0x80560000, size_kib: 96,   accessible_from: [m55_he, m55_hp],                  carveout: false }
+  - { name: atoc,      base: 0x80578000, size_kib: 32,   accessible_from: [m55_he, m55_hp],                  carveout: false }
   - { name: mram_main, base: "TBD",      size_kib: 5632, accessible_from: [a32_cluster, m55_he, m55_hp], cacheable: true }
 
 # Inter-core mailbox IP: ARM MHUv2.  Confirmed via the alifsemi/zephyr_alif
@@ -223,7 +279,14 @@ helper_firmware:
     chip:          cc3501e
     firmware_path: firmware/cc3501e/prebuilt/cc3501e-v0.2.0.bin
     # CC3501E firmware is Alp-released, applied over the bridge SPI
-    # programming OTP; NOT customer-flashed.
+    # programming OTP.  Alp Lab programs it in production; a customer
+    # flash is permitted only to recover a bricked device, using
+    # Alp Lab-supplied binaries -- `flash_policy: recovery_only` states
+    # that directly instead of leaving a tool to infer it from the
+    # presence of an OTA channel -- the two are independent facts
+    # (#1357).  Behaviour is unchanged: this entry declares no
+    # `flash_method`, so there is nothing to decline.
+    flash_policy:   recovery_only
     update_channel: alp_ota_spi_otp
 
 default_hw_rev:         r2                  # see metadata/e1m_modules/<family>/hw-revisions.yaml

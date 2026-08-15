@@ -542,16 +542,96 @@ def test_scaffold_cmakelists_requires_alp_sdk_root_explicitly():
 
 
 def test_scaffold_cmakelists_hardens_the_hardcoded_variant_too():
-    """cold-chain-monitor's CMakeLists.txt has NO ALP_SDK_ROOT env-var
-    fallback at all -- a hardcoded `${CMAKE_CURRENT_SOURCE_DIR}/../../../
-    scripts/alp_project.py` -- worse than the guess-block variant since
-    there's no override at all. `_scaffold_cmakelists` must harden this
-    shape too."""
-    envelope = dict(alp_template.render_to_envelope("edge-ai", "E1M-AEN801"))
+    """`_scaffold_cmakelists`' SECOND shape: a hardcoded
+    `${CMAKE_CURRENT_SOURCE_DIR}/../../../scripts/alp_project.py` with
+    NO ALP_SDK_ROOT resolution at all -- worse than the guess block,
+    since no override is even possible.
+
+    Issue #1390 gave cold-chain-monitor (the `edge-ai` template's
+    source) a real guess block, so NO example carries this shape any
+    more and the catalog can no longer reach this branch -- drive it
+    from a literal instead of asserting it via a render that now takes
+    the other path.
+    """
+    hardcoded = (
+        "# SPDX-License-Identifier: Apache-2.0\n"
+        "cmake_minimum_required(VERSION 3.20)\n"
+        "\n"
+        "execute_process(\n"
+        "    COMMAND ${Python3_EXECUTABLE}\n"
+        "            ${CMAKE_CURRENT_SOURCE_DIR}/../../../scripts/alp_project.py\n"
+        ")\n"
+    )
+    out = alp_template._scaffold_cmakelists(hardcoded)
+    assert "${CMAKE_CURRENT_SOURCE_DIR}/../../../scripts/alp_project.py" not in out
+    assert "${ALP_SDK_ROOT}/scripts/alp_project.py" in out
+    assert "if(NOT DEFINED ALP_SDK_ROOT AND NOT DEFINED ENV{ALP_SDK_ROOT})" in out
+
+
+# --------------------------------------------------------------------------
+# The comment ABOVE the block has to move with it (issue #1390 review
+# blocker 2): every scaffold-source example but two introduces the guess
+# block with prose teaching the in-tree `../../..` fallback, which the
+# hardened block deliberately drops.  Substituting only the code shipped a
+# scaffold whose comment documented behaviour the emitted file did not have.
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "template,sku",
+    [
+        ("minimal", "E1M-V2N101"),
+        ("peripheral", "E1M-V2N101"),
+        ("sensor", "E1M-V2N101"),
+        ("edge-ai", "E1M-V2N101"),
+        ("multicore-mailbox", "E1M-AEN801"),
+    ],
+)
+def test_scaffold_cmakelists_never_documents_the_dropped_fallback(template, sku):
+    """No emitted CMakeLists.txt may promise the in-tree fallback."""
+    envelope = dict(alp_template.render_to_envelope(template, sku))
+    for rel, text in envelope.items():
+        if not rel.endswith("CMakeLists.txt"):
+            continue
+        lowered = text.lower()
+        assert "grandparent" not in lowered, rel
+        assert "in-tree" not in lowered, rel
+
+
+def test_scaffold_cmakelists_keeps_unrelated_comment_paragraphs():
+    """Only the paragraph describing ALP_SDK_ROOT resolution is
+    rewritten. gpio-button-led (the `peripheral` template's source)
+    leads its comment run with a banner -- "board.yaml ->
+    build/generated/alp.conf at configure time." -- that stays true for
+    a scaffold and must survive verbatim."""
+    envelope = dict(alp_template.render_to_envelope("peripheral", "E1M-V2N101"))
     cmakelists = envelope["CMakeLists.txt"]
-    assert "${CMAKE_CURRENT_SOURCE_DIR}/../../../scripts/alp_project.py" not in cmakelists
-    assert "${ALP_SDK_ROOT}/scripts/alp_project.py" in cmakelists
+    assert "# board.yaml -> build/generated/alp.conf at configure time." in cmakelists
+    assert "# Resolve the alp-sdk root." in cmakelists
+    # ... and exactly once -- a second matching paragraph is dropped,
+    # never duplicated.
+    assert cmakelists.count("# Resolve the alp-sdk root.") == 1
+
+
+def test_scaffold_cmakelists_invents_no_prose_where_there_was_none():
+    """i2c-master (the `sensor` template's source) has NO comment above
+    its guess block. The rewrite is a rewrite, not an insertion: it must
+    not grow prose the example never had."""
+    envelope = dict(alp_template.render_to_envelope("sensor", "E1M-V2N101"))
+    cmakelists = envelope["CMakeLists.txt"]
+    assert "# Resolve the alp-sdk root." not in cmakelists
     assert "if(NOT DEFINED ALP_SDK_ROOT AND NOT DEFINED ENV{ALP_SDK_ROOT})" in cmakelists
+
+
+def test_scaffold_cmakelists_leaves_a_detached_comment_run_alone():
+    """The rewrite is scoped to the run IMMEDIATELY above the block.
+    mproc-mailbox's `peer/CMakeLists.txt` opens with a file-header
+    comment separated from the block by `cmake_minimum_required(...)`;
+    it is not the block's prose and must survive untouched."""
+    envelope = dict(alp_template.render_to_envelope(
+        "multicore-mailbox", "E1M-AEN801"))
+    peer = envelope["peer/CMakeLists.txt"]
+    assert "# HE-side peer image for the mproc-mailbox flagship." in peer
+    assert "# Resolve the alp-sdk root." not in peer
 
 
 def test_scaffold_readme_has_no_dangling_sdk_tree_links_or_self_path():
@@ -611,6 +691,65 @@ def test_scaffold_readme_upgrades_bare_board_id_even_for_the_passthrough_sku():
     readme = envelope["README.md"]
     assert "west build -b alp_e1m_aen801_m55_hp " not in readme
     assert "alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp" in readme
+
+
+def test_scaffold_readme_rewrites_bare_mention_alongside_qualified_one():
+    """Issue #1266 review MINOR: a README naming the source board BOTH
+    ways -- a qualified `west build` line AND a separate bare mention
+    (e.g. lvgl-widgets-demo's README:36 `west build -b
+    alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp` vs :59's bare
+    "target board (`alp_e1m_aen801_m55_hp`)") -- used to only get the
+    qualified one rewritten; the bare one silently kept naming the
+    source family inside a cross-family scaffold."""
+    source_board = "alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp"
+    target_board = "alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33"
+    text = (
+        "west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp ex\n"
+        "west flash\n"
+        "\n"
+        "this app's target board (`alp_e1m_aen801_m55_hp`) has no alias yet\n"
+    )
+    out = alp_template._scaffold_readme(
+        text, "examples/display/widget", "main",
+        source_board=source_board, target_board=target_board,
+    )
+    assert "alp_e1m_aen801_m55_hp" not in out
+    assert out.count(target_board) == 2
+
+
+def test_scaffold_readme_passthrough_does_not_duplicate_qualified_suffix():
+    """The same-sku (source_board == target_board) case must not run the
+    short-prefix fallback over a mention the exact-match step already
+    left correctly qualified -- that would append the `/<soc>/<core>`
+    suffix a second time (`.../rtss_hp/ae822fa0e5597ls0/rtss_hp`)."""
+    board = "alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp"
+    text = f"west build -b {board} examples/display/widget\n"
+    out = alp_template._scaffold_readme(
+        text, "examples/display/widget", "main",
+        source_board=board, target_board=board,
+    )
+    assert out.count("ae822fa0e5597ls0/rtss_hp") == 1
+
+
+def test_scaffold_readme_rewrites_west_flash_after_every_m33_sm_board_line():
+    """A two-core V2N/V2M scaffold README can carry more than one
+    `<board target>\\nwest flash` pair (one per core) -- every one of
+    them needs `--host <board-ip>` appended, not just the first."""
+    target_board = "alp_e1m_v2n101_m33_sm/r9a09g056n48gbg/cm33"
+    text = (
+        f"west build -b {target_board} ex/core0\n"
+        "west flash\n"
+        "\n"
+        f"west build -b {target_board} ex/core1\n"
+        "west flash\n"
+    )
+    out = alp_template._scaffold_readme(
+        text, "examples/multicore/widget", "main",
+        source_board="alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp",
+        target_board=target_board,
+    )
+    assert out.count("west flash --host <board-ip>") == 2
+    assert "\nwest flash\n" not in out
 
 
 def test_substitute_board_yaml_sku_rejects_ambiguous_sku_line():
@@ -934,6 +1073,149 @@ def test_derive_pin_doc_renames_copies_the_target_boards_own_doc():
             "Rotary encoder (PEC12R-4222F) push switch; pull-up + "
             "RC debounce.",
     }
+
+
+# --------------------------------------------------------------------------
+# _derive_pin_doc_renames collision guard (issue #1394): the two
+# assignment sites had NO guard, unlike both siblings -- two `pins:`
+# entries sharing one `doc:` string silently overwrote each other, and
+# the `None` (DROP the field) branch made the loser lose its
+# documentation entirely, with the winner decided by `pins:` ordering.
+# Fixture: a synthetic metadata_root, because EVERY aliased route on the
+# real metadata/boards/e1m-x-evk.yaml carries a `doc:` of its own, so
+# the real tree cannot exercise the string-vs-`None` branch at all.
+# --------------------------------------------------------------------------
+
+def _write_shared_doc_fixture(root: Path, second_target_doc: str | None) -> Path:
+    """A metadata_root whose SRC board routes two pads (`E1M_A`,
+    `E1M_B`) that both carry a `board_alias:` onto a DST board. The
+    DST route for `BOARD_A` always has its own `doc:`; the one for
+    `BOARD_B` gets `second_target_doc` (a different string, or no
+    `doc:` at all when `None`). Returns the metadata_root."""
+    metadata_root = root / "metadata"
+    (metadata_root / "e1m_modules").mkdir(parents=True)
+    (metadata_root / "e1m_modules" / "E1M-SRCTEST.yaml").write_text(
+        "default_board: SRC-PRESET\n", encoding="utf-8", newline="\n")
+    (metadata_root / "e1m_modules" / "E1M-DSTTEST.yaml").write_text(
+        "default_board: DST-PRESET\n", encoding="utf-8", newline="\n")
+
+    (metadata_root / "boards").mkdir(parents=True)
+    (metadata_root / "boards" / "src-preset.yaml").write_text(
+        "e1m_routes:\n"
+        "  gpio:\n"
+        "    - e1m: E1M_A\n"
+        "      macro: SRC_PIN_A\n"
+        "      board_alias: BOARD_A\n"
+        "    - e1m: E1M_B\n"
+        "      macro: SRC_PIN_B\n"
+        "      board_alias: BOARD_B\n",
+        encoding="utf-8", newline="\n",
+    )
+    (metadata_root / "boards" / "dst-preset.yaml").write_text(
+        "e1m_routes:\n"
+        "  gpio:\n"
+        "    - e1m: E1M_X_A\n"
+        "      macro: DST_PIN_A\n"
+        "      board_alias: BOARD_A\n"
+        "      doc: Shared debounce network, DST pad A.\n"
+        "    - e1m: E1M_X_B\n"
+        "      macro: DST_PIN_B\n"
+        "      board_alias: BOARD_B\n"
+        + (f"      doc: {second_target_doc}\n" if second_target_doc else ""),
+        encoding="utf-8", newline="\n",
+    )
+    return metadata_root
+
+
+_SHARED_DOC = "Shared debounce network (10k + 0.1uF), SRC pads A and B."
+
+_SHARED_DOC_PINS = [
+    {"e1m": "E1M_A", "macro": "SRC_PIN_A", "doc": _SHARED_DOC},
+    {"e1m": "E1M_B", "macro": "SRC_PIN_B", "doc": _SHARED_DOC},
+]
+
+
+def test_derive_pin_doc_renames_rejects_two_pins_sharing_a_doc(tmp_path):
+    """Two `pins:` entries sharing one `doc:` string that re-derive to
+    two DIFFERENT target strings are ambiguous for the flat
+    `{old_doc: new_doc}` map `_substitute_board_yaml_pin_docs` applies
+    file-wide -- hard error, exactly as `_derive_pin_renames` and
+    `_derive_pin_macro_renames` already did for their own keys
+    (issue #1394)."""
+    metadata_root = _write_shared_doc_fixture(
+        tmp_path, "Shared debounce network, DST pad B.")
+    with pytest.raises(alp_template.TemplateError, match="ambiguous"):
+        alp_template._derive_pin_doc_renames(
+            _SHARED_DOC_PINS, "E1M-DSTTEST", "src-preset", metadata_root)
+
+
+def test_derive_pin_doc_renames_rejects_a_shared_doc_one_side_drops(tmp_path):
+    """The branch that lost data SILENTLY (issue #1394): one entry
+    re-derives the shared `doc:` to a target string, the other's
+    target route has no `doc:` at all -- `None`, which per this
+    function's docstring means DROP the field. Pre-fix the second
+    write won unguarded, so the map said `None` and the documentation
+    was dropped from BOTH pins, including the one with a perfectly
+    good target `doc:`; reverse the `pins:` ordering and the doc
+    survived. "Rename it" and "drop it" are contradictory
+    instructions for one key, so this is ambiguous too."""
+    metadata_root = _write_shared_doc_fixture(tmp_path, None)
+    with pytest.raises(alp_template.TemplateError, match="ambiguous"):
+        alp_template._derive_pin_doc_renames(
+            _SHARED_DOC_PINS, "E1M-DSTTEST", "src-preset", metadata_root)
+
+    # ... and in the reverse `pins:` order too -- the whole point is
+    # that the outcome must no longer depend on iteration order.
+    with pytest.raises(alp_template.TemplateError, match="ambiguous"):
+        alp_template._derive_pin_doc_renames(
+            list(reversed(_SHARED_DOC_PINS)), "E1M-DSTTEST", "src-preset",
+            metadata_root)
+
+
+def test_derive_pin_doc_renames_allows_a_shared_doc_that_agrees(tmp_path):
+    """A shared `doc:` is only ambiguous when the entries DISAGREE --
+    two pins whose target routes carry the SAME `doc:` string yield
+    one unambiguous rename, not an error."""
+    metadata_root = _write_shared_doc_fixture(
+        tmp_path, "Shared debounce network, DST pad A.")
+    assert alp_template._derive_pin_doc_renames(
+        _SHARED_DOC_PINS, "E1M-DSTTEST", "src-preset", metadata_root
+    ) == {_SHARED_DOC: "Shared debounce network, DST pad A."}
+
+
+def test_derive_pin_doc_renames_keeps_an_unchanged_doc_out_of_the_map(tmp_path):
+    """A target `doc:` byte-identical to the entry's own contributes
+    NO map entry -- there is nothing to rewrite. Guarding the two
+    assignment sites must not fold that case into the `None` (DROP)
+    value, which would delete a `doc:` that was already correct
+    (the shape the issue's own proposed snippet had)."""
+    metadata_root = _write_shared_doc_fixture(tmp_path, None)
+    pins = [{
+        "e1m": "E1M_A", "macro": "SRC_PIN_A",
+        "doc": "Shared debounce network, DST pad A.",
+    }]
+    assert alp_template._derive_pin_doc_renames(
+        pins, "E1M-DSTTEST", "src-preset", metadata_root) == {}
+
+
+def test_derive_pin_doc_renames_rejects_a_shared_doc_kept_then_dropped(tmp_path):
+    """The third contradiction #1394 closes: one entry's target `doc:`
+    is byte-identical to the shared string ("keep it" -- no map entry
+    at all), the other's target has none ("drop it"). Pre-fix the map
+    said `None` unconditionally, so the pin whose doc was ALREADY
+    correct lost it to the file-wide substitution with no diagnostic.
+    Recording every resolution -- not only the ones that produce a
+    rename -- is what makes this reachable."""
+    metadata_root = _write_shared_doc_fixture(tmp_path, None)
+    pins = [
+        {"e1m": "E1M_A", "macro": "SRC_PIN_A",
+         "doc": "Shared debounce network, DST pad A."},
+        {"e1m": "E1M_B", "macro": "SRC_PIN_B",
+         "doc": "Shared debounce network, DST pad A."},
+    ]
+    with pytest.raises(alp_template.TemplateError, match="ambiguous"):
+        alp_template._derive_pin_doc_renames(
+            pins, "E1M-DSTTEST", "src-preset", metadata_root)
 
 
 def test_substitute_board_yaml_pins_rewrites_the_bare_string_list_item_form():

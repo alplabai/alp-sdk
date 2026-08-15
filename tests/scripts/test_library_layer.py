@@ -788,3 +788,555 @@ def test_new_m_class_libraries_reject_a_only_soc() -> None:
             liblayer._check_requires(name, manifest, project, liblayer.METADATA_ROOT)
         assert name in str(exc.value)
         assert "core_class" in str(exc.value)
+
+
+# ---------------------------------------------------------------------
+# ONNX Runtime -- the A55 CPU inference floor (yocto-only, tier B)
+# ---------------------------------------------------------------------
+
+def test_onnxruntime_is_yocto_only_and_a_class():
+    """ORT targets the A55 Linux side only. A zephyr section would imply an
+    M-class build we do not ship."""
+    manifest = yaml.safe_load(
+        (REPO / "metadata" / "libraries" / "onnxruntime.yaml").read_text(encoding="utf-8")
+    )
+    assert manifest["tier"] == "B"
+    assert "yocto" in manifest["integration"]
+    assert "zephyr" not in manifest["integration"]
+    assert manifest["requires"]["core_class"] == "a"
+# Core-scoped libraries go through the SAME ADR-0018 layer as project-wide
+# ones (alplabai/tan-cli#555).
+#
+# `loader._normalize_libraries` folds a `libraries:` entry carrying `cores:`
+# into `cores[<id>]['libraries']` and leaves `project['libraries']` empty.
+# That channel used to bypass the layer completely: no unknown-name refusal,
+# no `requires:` check, no wireability check, and a Yocto slice INVENTED the
+# package name as `lib-<name>` -- a recipe that RPROVIDES nothing.
+# ---------------------------------------------------------------------
+
+_CORE_SCOPED_LVGL_YOCTO = """
+som:
+  sku: E1M-V2N101
+libraries:
+  - name: lvgl
+    cores: [a55_cluster]
+cores:
+  a55_cluster:
+    os: yocto
+    app: ./linux
+    image: alp-image-edge
+"""
+
+
+def test_core_scoped_yocto_uses_the_manifest_recipe_name(tmp_path: Path) -> None:
+    """A core-scoped `lvgl` emits lvgl.yaml's own
+    `integration.yocto.image_install` -- never a `lib-`-prefixed invention."""
+    project = load_board_yaml(_write_board(tmp_path, _CORE_SCOPED_LVGL_YOCTO))
+    out = _slice_local_conf(project, project.cores["a55_cluster"])
+    assert 'IMAGE_INSTALL:append = " lvgl"' in out
+    assert "lib-lvgl" not in out
+
+
+def test_core_scoped_yocto_reads_ros2_rclcpp(tmp_path: Path) -> None:
+    """ros2's manifest names `rclcpp`, not its own library name."""
+    body = """
+    som:
+      sku: E1M-V2N101
+    libraries:
+      - name: ros2
+        cores: [a55_cluster]
+    cores:
+      a55_cluster:
+        os: yocto
+        app: ./linux
+        image: alp-image-edge
+    """
+    project = load_board_yaml(_write_board(tmp_path, body))
+    out = _slice_local_conf(project, project.cores["a55_cluster"])
+    assert 'IMAGE_INSTALL:append = " rclcpp"' in out
+    assert "lib-ros2" not in out
+
+
+def test_core_scoped_library_with_no_yocto_section_emits_no_package(
+        tmp_path: Path) -> None:
+    """mbedtls' manifest has no `integration.yocto:` at all, so the honest
+    emit is nothing -- surfaced as a comment, never as a fabricated recipe."""
+    body = """
+    som:
+      sku: E1M-V2N101
+    libraries:
+      - name: mbedtls
+        cores: [a55_cluster]
+    cores:
+      a55_cluster:
+        os: yocto
+        app: ./linux
+        image: alp-image-edge
+      m33_sm:
+        os: zephyr
+        app: ./m33
+    """
+    project = load_board_yaml(_write_board(tmp_path, body))
+    out = _slice_local_conf(project, project.cores["a55_cluster"])
+    assert "lib-mbedtls" not in out
+    assert "IMAGE_INSTALL:append" not in out
+    assert "no `integration.yocto:` section" in out
+
+
+def test_core_scoped_unknown_library_is_refused(tmp_path: Path) -> None:
+    """An unknown core-scoped NAME raises the same self-correcting
+    `load_manifest` error the project-wide form raises."""
+    body = """
+    som:
+      sku: E1M-V2N101
+    libraries:
+      - name: not-a-library
+        cores: [a55_cluster]
+    cores:
+      a55_cluster:
+        os: yocto
+        app: ./linux
+        image: alp-image-edge
+    """
+    project = load_board_yaml(_write_board(tmp_path, body))
+    with pytest.raises(OrchestratorError) as exc:
+        _slice_local_conf(project, project.cores["a55_cluster"])
+    msg = str(exc.value)
+    assert "unknown library `not-a-library`" in msg
+    assert "Available:" in msg
+
+
+def test_project_wide_requires_still_fires_when_no_core_satisfies_it(
+        tmp_path: Path) -> None:
+    """The PROJECT-WIDE `requires:` check: ros2 needs `os: [yocto]`, and this
+    board parks a55_cluster at `os: "off"`, so the project's whole live-OS set
+    is {zephyr} and `_check_requires` refuses.
+
+    This is what the original `test_core_scoped_requires_constraint_is_checked`
+    actually measured.  It never exercised a per-core constraint at all -- with
+    the A55 switched off, ANY declaration channel would have been refused by
+    the project-wide check, so it passed identically with the per-slice guard
+    absent.  The real core-scoping case is the next test.
+    """
+    body = """
+    som:
+      sku: E1M-V2N101
+    libraries:
+      - name: ros2
+        cores: [m33_sm]
+    cores:
+      m33_sm:
+        os: zephyr
+        app: ./m33
+      a55_cluster:
+        os: "off"
+    """
+    project = load_board_yaml(_write_board(tmp_path, body))
+    with pytest.raises(OrchestratorError) as exc:
+        _slice_alp_conf(project, project.cores["m33_sm"])
+    msg = str(exc.value)
+    assert "ros2" in msg
+    assert "this project's cores run" in msg
+
+
+def test_core_scoped_requires_constraint_is_checked(tmp_path: Path) -> None:
+    """ros2 declares `requires: {os: [yocto], core_class: a}`.  Scoped to the
+    Cortex-M Zephyr core of a REALISTIC V2N/V2M board -- yocto A55 *live*
+    alongside the Zephyr M33 -- it must still fail naming the constraint.
+
+    This is the shape the project-wide check cannot catch: `_project_oses`
+    contains `yocto` from the A55, so `_check_requires` passes, and before the
+    per-slice guard nothing else looked -- `_check_core_class` was reachable
+    only from `zephyr_kconfig_lines` AFTER its `if not zephyr: continue`, and
+    ros2's manifest has no `integration.zephyr:`.  Measured on the unfixed
+    tree: no refusal at all, and the m33 alp.conf simply never mentioned ros2
+    (alplabai/tan-cli#555).
+    """
+    body = """
+    som:
+      sku: E1M-V2N101
+    libraries:
+      - name: ros2
+        cores: [m33_sm]
+    cores:
+      m33_sm:
+        os: zephyr
+        app: ./m33
+      a55_cluster:
+        os: yocto
+        app: ./a55
+    """
+    project = load_board_yaml(_write_board(tmp_path, body))
+    # Precondition: the project-wide check IS satisfied -- the A55 runs yocto.
+    assert "yocto" in liblayer._project_oses(project)
+    with pytest.raises(OrchestratorError) as exc:
+        _slice_alp_conf(project, project.cores["m33_sm"])
+    msg = str(exc.value)
+    assert "ros2" in msg
+    assert "m33_sm" in msg
+    assert "yocto" in msg
+
+
+def test_core_scoped_guard_also_fires_on_a_yocto_slice(
+        tmp_path: Path) -> None:
+    """The per-slice guard is not Zephyr-only.  micro-ros is the mirror image
+    of ros2 -- the M-class / Zephyr client -- so scoping it to the A55 Yocto
+    core has to be refused there too, on the Yocto emit path
+    (`yocto_image_install` -> `resolve_selection(slice_=)`)."""
+    body = """
+    som:
+      sku: E1M-V2N101
+    libraries:
+      - name: micro-ros
+        cores: [a55_cluster]
+    cores:
+      m33_sm:
+        os: zephyr
+        app: ./m33
+      a55_cluster:
+        os: yocto
+        app: ./a55
+    """
+    project = load_board_yaml(_write_board(tmp_path, body))
+    with pytest.raises(OrchestratorError) as exc:
+        _slice_local_conf(project, project.cores["a55_cluster"])
+    msg = str(exc.value)
+    assert "micro-ros" in msg
+    assert "a55_cluster" in msg
+
+
+def test_core_scoped_library_with_no_section_for_this_os_is_not_refused(
+        tmp_path: Path) -> None:
+    """The per-slice guard checks `requires:`, NOT "is there an
+    `integration.<os>:` section".  mbedtls and nlohmann-json are scoped to the
+    Yocto cores of four shipped examples and neither manifest has an
+    `integration.yocto:` section; the honest handling there is the explanatory
+    `yocto_unwireable` comment, not a hard error.  Pinned so a later tightening
+    of the guard cannot break those four boards."""
+    body = """
+    som:
+      sku: E1M-V2N101
+    libraries:
+      - name: mbedtls
+        cores: [a55_cluster]
+    cores:
+      m33_sm:
+        os: zephyr
+        app: ./m33
+      a55_cluster:
+        os: yocto
+        app: ./a55
+    """
+    project = load_board_yaml(_write_board(tmp_path, body))
+    out = _slice_local_conf(project, project.cores["a55_cluster"])
+    assert "lib-mbedtls" not in out
+    assert "integration.yocto:" in out
+
+
+def test_scoped_names_unions_both_declaration_channels(tmp_path: Path) -> None:
+    """`scoped_names` is the one place both channels meet: project-wide names
+    first, then the slice's core-scoped ones; `slice_=None` covers every
+    core."""
+    body = """
+    som:
+      sku: E1M-V2N101
+    libraries:
+      - lvgl
+      - name: cmsis-dsp
+        cores: [m33_sm]
+    cores:
+      m33_sm:
+        os: zephyr
+        app: ./m33
+      a55_cluster:
+        os: yocto
+        app: ./linux
+        image: alp-image-edge
+    """
+    project = load_board_yaml(_write_board(tmp_path, body))
+    assert liblayer.scoped_names(project) == ["lvgl", "cmsis-dsp"]
+    assert liblayer.scoped_names(project, project.cores["m33_sm"]) == [
+        "lvgl", "cmsis-dsp"]
+    assert liblayer.scoped_names(project, project.cores["a55_cluster"]) == ["lvgl"]
+
+
+def test_declaration_form_does_not_change_emitted_kconfig(tmp_path: Path) -> None:
+    """#1359: the same library on the same core must emit the identical
+    Kconfig set whether board.yaml spells the selection as a bare/project-
+    wide entry or as a `cores:`-scoped one -- a `cores:` list reads as
+    narrowing, and must never silently widen what gets configured.
+
+    cmsis-dsp on an AEN401 m55_hp core is the issue's own repro: its
+    manifest carries both a `hw_backends` accelerator matcher (HELIUM /
+    ADC_DMA) and a `sw_fallback` floor (SCALAR) -- exactly the two derivers
+    that used to read only the core-scoped channel."""
+    bare = """
+    som:
+      sku: E1M-AEN401
+    libraries: [cmsis-dsp]
+    cores:
+      m55_hp:
+        os: zephyr
+        app: ./src
+    """
+    scoped = """
+    som:
+      sku: E1M-AEN401
+    libraries:
+      - name: cmsis-dsp
+        cores: [m55_hp]
+    cores:
+      m55_hp:
+        os: zephyr
+        app: ./src
+    """
+    bare_dir = tmp_path / "bare"
+    scoped_dir = tmp_path / "scoped"
+    bare_dir.mkdir()
+    scoped_dir.mkdir()
+    bare_project = load_board_yaml(_write_board(bare_dir, bare))
+    scoped_project = load_board_yaml(_write_board(scoped_dir, scoped))
+    bare_out = _slice_alp_conf(bare_project, bare_project.cores["m55_hp"])
+    scoped_out = _slice_alp_conf(scoped_project, scoped_project.cores["m55_hp"])
+
+    def cmsis_lines(out: str) -> set[str]:
+        return {line.split("  #", 1)[0].strip()
+                for line in out.splitlines() if "CMSIS_DSP" in line}
+
+    bare_lines = cmsis_lines(bare_out)
+    scoped_lines = cmsis_lines(scoped_out)
+    assert bare_lines == scoped_lines
+    # Pin the specific symbols #1359 measured as missing from the
+    # project-wide form, so a future regression names exactly what broke.
+    for symbol in (
+        "CONFIG_ALP_CMSIS_DSP_SCALAR=y",
+        "CONFIG_ALP_CMSIS_DSP_HELIUM=y",
+        "CONFIG_ALP_CMSIS_DSP_ADC_DMA=y",
+    ):
+        assert symbol in bare_lines, f"missing {symbol} from project-wide form"
+
+
+def test_declaration_form_does_not_change_the_inference_block(
+    tmp_path: Path,
+) -> None:
+    """#1359 follow-up: `_slice_wants_inference` used to read only
+    `slice_.libraries`, so a project-wide `libraries: [tflite-micro]`
+    (no `cores:` key, no `cores.<id>.inference:` block) never tripped
+    the inference-block emit, while the identical `cores:`-scoped
+    spelling did -- the whole `_emit_inference` section (TFLM + Ethos-U
+    dispatcher enables) went missing depending on how board.yaml spelled
+    the same selection.
+
+    E1M-AEN801 m55_hp is the issue's own repro: the SoM's Ethos-U55 +
+    Ethos-U85 NPUs plus the M55's Helium MVE make this the same 13-line
+    section the review measured as a superset."""
+    bare = """
+    som:
+      sku: E1M-AEN801
+    libraries: [tflite-micro]
+    cores:
+      m55_hp:
+        app: ./src
+    """
+    scoped = """
+    som:
+      sku: E1M-AEN801
+    libraries:
+      - name: tflite-micro
+        cores: [m55_hp]
+    cores:
+      m55_hp:
+        app: ./src
+    """
+    bare_dir = tmp_path / "bare"
+    scoped_dir = tmp_path / "scoped"
+    bare_dir.mkdir()
+    scoped_dir.mkdir()
+    bare_project = load_board_yaml(_write_board(bare_dir, bare))
+    scoped_project = load_board_yaml(_write_board(scoped_dir, scoped))
+    bare_out = _slice_alp_conf(bare_project, bare_project.cores["m55_hp"])
+    scoped_out = _slice_alp_conf(scoped_project, scoped_project.cores["m55_hp"])
+
+    # Pin the specific symbols the review measured as the 13-line
+    # superset the core-scoped form emitted and the project-wide form
+    # silently dropped.
+    for symbol in (
+        "CONFIG_CPP=y",
+        "CONFIG_STD_CPP17=y",
+        "CONFIG_TENSORFLOW_LITE_MICRO=y",
+        "CONFIG_ALP_SDK_INFERENCE_BACKEND_TFLM=y",
+        "CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_HELIUM=y",
+        "CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN=y",
+        "CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55=y",
+        "CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85=y",
+        "CONFIG_ETHOS_U_DCACHE=y",
+        "CONFIG_ETHOS_U85_256=y",
+        "CONFIG_DCACHE=n",
+        "CONFIG_HEAP_MEM_POOL_SIZE=65536",
+    ):
+        assert symbol in scoped_out, f"missing {symbol} from cores:-scoped form"
+        assert symbol in bare_out, f"missing {symbol} from project-wide form"
+
+
+# --- floating version pins are a supply-chain hole --------------------
+
+
+def test_no_library_manifest_tracks_a_floating_branch() -> None:
+    """A floating `main`/`master` pin is a supply-chain hole: the build is not
+    reproducible and an upstream force-push silently changes what we ship.
+
+    This is a DENYLIST of the specific floating refs seen in this repo
+    (`main`, `master`, `HEAD`, `trunk`, empty string) -- it does not catch
+    every moving branch a manifest could pin to. `micro-ros.yaml` and
+    `ros2.yaml` both legitimately pin `version: humble`, a Zephyr/ROS 2
+    release-codename branch that keeps moving; it is a known
+    moving-branch pin that intentionally passes this guard. Tightening
+    this to a shape rule (e.g. requiring a semver tag or full SHA) is a
+    separate decision -- micro-ros/ros2 would need re-pinning first."""
+    floating = {"main", "master", "HEAD", "trunk", ""}
+    offenders = []
+    for path in sorted((REPO / "metadata" / "libraries").glob("*.yaml")):
+        manifest = yaml.safe_load(path.read_text(encoding="utf-8"))
+        version = str(manifest.get("version", "")).strip()
+        if version in floating or version.lower().startswith("unpinned"):
+            offenders.append(path.name)
+    assert offenders == [], f"floating version pins: {offenders}"
+
+
+def test_no_west_manifest_extras_tier1_tracks_a_floating_branch() -> None:
+    """Same hole, at the west.yml source of truth: a project in the
+    ``extras-tier1`` group must pin a tag or commit SHA, never a branch --
+    a floating branch pin can also silently not exist at all (minimp3's
+    prior ``main`` pin: the branch never existed on lieff/minimp3).
+
+    Like its manifest-layer sibling above, this is a DENYLIST of the
+    specific floating refs seen in this repo (`main`, `master`, `HEAD`,
+    `trunk`, empty string), not a shape rule -- it does not catch every
+    moving branch a west revision could name (a release codename like
+    `humble` would pass here too, same as it does for the manifest-layer
+    `version:` field checked above -- see that test's docstring).
+    Tightening this to a shape rule is a separate decision that would
+    require re-pinning micro-ros/ros2 first."""
+    floating = {"main", "master", "HEAD", "trunk", ""}
+    doc = yaml.safe_load((REPO / "west.yml").read_text(encoding="utf-8"))
+    offenders = []
+    for project in doc["manifest"]["projects"]:
+        if "extras-tier1" not in (project.get("groups") or []):
+            continue
+        revision = str(project.get("revision", "")).strip()
+        if revision in floating:
+            offenders.append(f"{project['name']}: {revision!r}")
+    assert offenders == [], f"floating extras-tier1 revisions: {offenders}"
+
+
+def test_nightly_extras_tier1_workflow_does_not_hardcode_the_library_list() -> None:
+    """`.github/workflows/nightly-extras-tier1-pins.yml` must DERIVE its
+    extras-tier1 roster from west.yml at run time, not hardcode it as a
+    literal list of project names / `modules/lib/` path basenames in a
+    step's `run:` body.
+
+    This is not hypothetical: PR #1237 added three libraries to west.yml's
+    extras-tier1 group (cmsisstream, CMSIS-CV, Arm-2D) and did NOT update
+    this workflow's then-hardcoded `west update` argument list or verify-loop
+    library list -- so those three were fetched and checked by nothing. That
+    is exactly the "a pin nothing checks" failure class this workflow exists
+    to close. If this test fails, someone re-hardcoded the roster here --
+    derive it from west.yml's `extras-tier1` group in a workflow step
+    instead of re-adding names/paths as literal tokens.
+
+    Tokenizing splits on commas as well as whitespace: a re-hardcoded list
+    disguised as a single comma-joined token (e.g. ``for lib in $(echo
+    "u8g2,libcoap,...,arm-2d" | tr , " ")``) must still be caught. The
+    3-in-a-row threshold below is deliberately low: re-hardcoding only 1-2
+    library names/paths (a one-off example in a comment, an unrelated
+    coincidental match) does NOT trip this guard -- 3 is the line between
+    "coincidence" and "someone pasted the roster back in".
+    """
+    west_doc = yaml.safe_load((REPO / "west.yml").read_text(encoding="utf-8"))
+    known_tokens = set()
+    for project in west_doc["manifest"]["projects"]:
+        if "extras-tier1" not in (project.get("groups") or []):
+            continue
+        known_tokens.add(project["name"])
+        known_tokens.add(project["path"].rsplit("/", 1)[-1])
+
+    workflow_path = REPO / ".github" / "workflows" / "nightly-extras-tier1-pins.yml"
+    workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+
+    offenders = []
+    for step in workflow["jobs"]["fetch-and-verify"]["steps"]:
+        run = step.get("run")
+        if not run:
+            continue
+        # Fold backslash line-continuations -- both original hardcoded
+        # lists were spread across several continuation lines -- so a
+        # re-hardcoded list still reads as one run of tokens. Also split
+        # on commas: a comma-joined roster (e.g. piped through `tr , " "`
+        # at runtime) is a single whitespace token but must tokenize the
+        # same as a space-separated one.
+        folded = run.replace("\\\n", " ").replace(",", " ")
+        run_len = 0
+        for token in folded.split():
+            token = token.strip(",;")
+            if token in known_tokens:
+                run_len += 1
+                if run_len == 3:
+                    offenders.append((step.get("name"), token))
+            else:
+                run_len = 0
+    assert offenders == [], (
+        "nightly-extras-tier1-pins.yml hardcodes 3+ extras-tier1 library "
+        f"names/paths again: {offenders}. This is the PR #1237 recurrence "
+        "(three libraries added to west.yml's extras-tier1 group were "
+        "never fetched or verified because the workflow's list was "
+        "hardcoded) -- derive the roster from west.yml in a workflow step "
+        "instead of hardcoding it."
+    )
+
+
+def test_nightly_extras_tier1_workflow_verify_step_fails_closed_on_empty_roster() -> (
+    None
+):
+    """The "Derive extras-tier1 library list from west.yml" step
+    (``id: extras-tier1``) must exist, and both steps that consume its
+    outputs must actually reference ``steps.extras-tier1.outputs.*``.
+
+    Not hypothetical: ``bash -c 'set -euo pipefail; status=0; for lib in
+    ; do echo "$lib"; done; exit $status'`` exits 0 -- an empty
+    ``${{ steps.extras-tier1.outputs.paths }}`` (the derive step deleted,
+    renamed, or its ``id:`` typo'd) makes the "Verify pins populated
+    content" step's `for` loop iterate zero times and pass, gating on
+    having checked nothing. Asserting the id: exists and is wired into
+    both consumer steps catches that at review time; the workflow's own
+    `[ -n "$libs" ] || exit 1` guard catches it at run time.
+    """
+    workflow_path = REPO / ".github" / "workflows" / "nightly-extras-tier1-pins.yml"
+    workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["fetch-and-verify"]["steps"]
+
+    derive_steps = [s for s in steps if s.get("id") == "extras-tier1"]
+    assert len(derive_steps) == 1, (
+        "nightly-extras-tier1-pins.yml is missing the `id: extras-tier1` "
+        "derive step (or it was renamed) -- the west-update and verify "
+        "steps below depend on steps.extras-tier1.outputs.{names,paths} "
+        "existing, and an empty output there makes the verify loop pass "
+        "having checked nothing."
+    )
+
+    update_step = next(
+        s
+        for s in steps
+        if s.get("name") == "West init + update with extras-tier1 enabled"
+    )
+    verify_step = next(
+        s for s in steps if s.get("name") == "Verify pins populated content"
+    )
+
+    update_refs = " ".join(str(v) for v in (update_step.get("env") or {}).values())
+    verify_refs = " ".join(str(v) for v in (verify_step.get("env") or {}).values())
+    assert "steps.extras-tier1.outputs.names" in update_refs, (
+        "the west-update step must reference steps.extras-tier1.outputs.names"
+    )
+    assert "steps.extras-tier1.outputs.paths" in verify_refs, (
+        "the verify step must reference steps.extras-tier1.outputs.paths"
+    )

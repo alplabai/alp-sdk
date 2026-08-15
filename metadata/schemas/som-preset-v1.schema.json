@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/som-preset-v1.schema.json",
   "title": "ALP SoM preset (metadata/e1m_modules/<SKU>.yaml) v1",
-  "description": "Schema for the per-SKU SoM preset.  The SDK's loader resolves the customer's board.yaml `som.sku` to the matching preset here.  Every released-MPN preset shares ONE canonical shape: the top-level key set, `memory:`, `on_module:`, `inference:`, and `status:` are closed (additionalProperties: false) so cross-family key drift fails validation instead of passing silently.  The only deliberately-open spots are the ones where genuine per-family variance is legitimate, and each carries its own description saying why: `capabilities:` (open set of accelerator flags matched against each library's `integration.zephyr.hw_backends:` block in metadata/libraries/*.yaml), `i2c_devices` bus KEYS (bus identifiers differ per family), `bus_pads` (per-silicon pad naming), and `helper_firmware[].flash_args` (shape follows the flash backend).",
+  "description": "Schema for the per-SKU SoM preset.  The SDK's loader resolves the customer's board.yaml `som.sku` to the matching preset here.  Every released-MPN preset shares ONE canonical shape: the top-level key set, `memory:`, `on_module:`, `inference:`, and `status:` are closed (additionalProperties: false) so cross-family key drift fails validation instead of passing silently.  The only deliberately-open spots are the ones where genuine per-family variance is legitimate, and each carries its own description saying why: `capabilities:` (open set of accelerator flags matched against each library's `integration.zephyr.hw_backends:` block in metadata/libraries/*.yaml), `i2c_devices` bus KEYS (bus identifiers differ per family), and `helper_firmware[].flash_args` (shape follows the flash backend).",
   "type": "object",
   "required": [
     "schema_version", "sku", "family", "silicon", "display_name",
@@ -256,7 +256,7 @@
     },
     "helper_firmware": {
       "type": "array",
-      "description": "On-module helper MCUs whose firmware images the orchestrator registers into the system manifest.  These are NOT heterogeneous-compute peers (they don't appear in `topology:`).  Each entry is EITHER a customer-flashable helper MCU -- carries `flash_method`/`flash_args` (e.g. `gd32_bridge` via `swd_probe`), independently flashed via `tan flash` -- OR a vendor-OTA-updated coprocessor -- carries `update_channel` (e.g. AEN's `cc3501e_otp` via `alp_ota_spi_otp`), whose firmware is Alp-released and applied over the bridge link programming the chip's own OTP, and is NEVER customer-flashed.  See `$defs/helper_firmware_entry`.",
+      "description": "On-module helper MCUs whose firmware images the orchestrator registers into the system manifest.  These are NOT heterogeneous-compute peers (they don't appear in `topology:`).  An entry describes a helper along three INDEPENDENT axes: how it is written locally (`flash_method`/`flash_args`, no preset declares one today), how it is updated in the FIELD (`update_channel`, e.g. AEN's `cc3501e_otp` via `alp_ota_spi_otp` or the GD32 bridge's `alp_ota_spi_bridge`), and WHO may invoke the flash method and when (`flash_policy`).  A helper may declare any combination -- the GD32 bridge carries a field-update channel and a `recovery_only` policy with NO local flash method at all, and AEN's `cc3501e_otp` is the same shape.  See `$defs/helper_firmware_entry`.",
       "items": { "$ref": "#/$defs/helper_firmware_entry" }
     },
     "default_hw_rev": {
@@ -479,6 +479,33 @@
           "type": "boolean",
           "description": "When explicitly false, this region is excluded from IPC carve-out allocation (scripts/alp_orchestrate/carveout.py resolve_carve_outs) even though it declares a real `base`.  For a flash-class region (e.g. an MRAM MCUboot/slot0/reserved/storage sub-region that must publish a base so the board generator can lay out its partition table) that base is NOT byte-addressable shared memory a raw_shmem/rpmsg carve-out can safely land in.  Defaults to true (eligible)."
         },
+        "access_windows": {
+          "type": "object",
+          "description": "OPTIONAL per-core addressable sub-window of this region, keyed by core id.  `accessible_from:` is a yes/no per core and cannot express \"this core reaches only PART of the region\" -- the RZ/V2N Cortex-M33 does exactly that (FSP bsp_slave_address.h: CM33-secure 0x80000000 / CM33-non-secure 0x90000000 -> A55 0x40000000, 256 MiB) while ddr_main spans 4 GiB.  Declare the reachable slice here and scripts/alp_orchestrate/carveout.py confines that core's IPC carve-outs to it instead of allocating at the region top, where the address does not exist for that core.  Omit for regions every accessible_from core reaches in full.",
+          "propertyNames": { "pattern": "^[a-z][a-z0-9_]+$" },
+          "additionalProperties": {
+            "type": "object",
+            "required": ["base"],
+            "additionalProperties": false,
+            "anyOf": [
+              { "required": ["size_kib"] },
+              { "required": ["size_mib"] }
+            ],
+            "properties": {
+              "base": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Window base in the SAME address space as the region's own `base` (i.e. the physical/host view), NOT the aliased address the core issues."
+              },
+              "size_kib": { "type": "integer", "minimum": 1 },
+              "size_mib": { "type": "integer", "minimum": 1 },
+              "note": {
+                "type": "string",
+                "description": "Provenance for the window -- name the vendor header/manual it was read from."
+              }
+            }
+          }
+        },
         "dt_label": {
           "type": "string",
           "pattern": "^[a-z][a-z0-9_]*$",
@@ -505,12 +532,8 @@
     },
     "helper_firmware_entry": {
       "type": "object",
-      "required": ["name", "chip"],
+      "required": ["name", "chip", "flash_policy"],
       "additionalProperties": false,
-      "oneOf": [
-        { "required": ["flash_method"], "not": { "required": ["update_channel"] } },
-        { "required": ["update_channel"], "not": { "required": ["flash_method"] } }
-      ],
       "properties": {
         "name": {
           "type": "string",
@@ -525,7 +548,7 @@
         "firmware_path": {
           "type": "string",
           "minLength": 1,
-          "description": "Repo-relative path to the prebuilt / shipped firmware image.  Omit this key entirely when no artefact exists yet (schema-legal -- only `name` and `chip` are required) so `tan flash` gives its clean refusal ('has no output_artefact / firmware_path; can't flash') instead of resolving a sentinel path."
+          "description": "Repo-relative path to the prebuilt / shipped firmware image.  Omit this key entirely when no artefact exists yet (schema-legal -- only `name`, `chip` and `flash_policy` are required) so `tan flash` gives its clean refusal ('has no output_artefact / firmware_path; can't flash') instead of resolving a sentinel path."
         },
         "flash_method": {
           "type": "string",
@@ -533,7 +556,7 @@
             { "pattern": "^[a-z][a-z0-9_]+$" },
             { "const": "TBD" }
           ],
-          "description": "Backend tool key consumed by `tan flash`'s helper-MCU dispatcher (e.g. `swd_probe`) for a CUSTOMER-flashable helper.  TBD pending the authoritative flow.  Mutually exclusive with `update_channel` -- an entry carries exactly one of the two."
+          "description": "Backend tool key naming the transport by which this helper's image is WRITTEN locally.  TBD pending the authoritative flow.  Independent of `update_channel` (which answers how the device is updated in the FIELD): an entry may carry both.  It says nothing about who is allowed to invoke it -- that is `flash_policy`, which is REQUIRED on every helper entry regardless of which of these two keys it carries.  NO SoM preset declares this key today: `swd_probe` was removed from the four E1M-X GD32 bridge entries when GD32 programming was separated out of `tan` (#1439, tan-cli#732)."
         },
         "flash_args": {
           "oneOf": [
@@ -542,10 +565,15 @@
           ],
           "description": "Backend-specific args (interface, target, base address, ...) forwarded verbatim to the flash backend.  DELIBERATELY OPEN object: the shape follows `flash_method`'s backend contract, which this schema cannot enumerate; TBD when the method is TBD.  Only meaningful alongside `flash_method`."
         },
+        "flash_policy": {
+          "type": "string",
+          "enum": ["customer", "factory", "recovery_only"],
+          "description": "WHO may invoke `flash_method`, and WHEN.  REQUIRED on every helper entry -- there is no absent-means-`customer` default; a helper with no local flash path at all (no `flash_method`) still states who may reach it if one is ever added.  `customer`: a genuine customer flash target.  `factory`: programmed by Alp Lab in production, never a customer flash target.  `recovery_only`: programmed by Alp Lab in production, and customer-flashable ONLY to recover a bricked device, with Alp Lab-supplied binaries.  Independent of `update_channel`, which answers how the device is updated in the FIELD -- a helper can carry both, and the GD32 bridge does."
+        },
         "update_channel": {
           "type": "string",
-          "enum": ["alp_ota_spi_otp"],
-          "description": "Marks this helper as a vendor-OTA-updated coprocessor rather than a customer-flash target (e.g. AEN's `cc3501e_otp`): firmware is Alp-released and applied over the bridge SPI link, programming the chip's own OTP -- the customer never flashes it directly.  Mutually exclusive with `flash_method` -- an entry carries exactly one of the two."
+          "enum": ["alp_ota_spi_otp", "alp_ota_spi_bridge"],
+          "description": "How this helper's firmware is updated in the FIELD, once the module is in a customer's hands.  `alp_ota_spi_otp` (AEN's `cc3501e_otp`): Alp-released firmware applied over the bridge SPI link, programming the chip's own OTP.  `alp_ota_spi_bridge` (the GD32 bridge): streamed over the bridge link into a slot-A/B application bootloader with commit + rollback -- a DIFFERENT value on purpose, because the GD32 has no OTP to program.  Independent of `flash_method`; declaring a channel does not by itself make the helper un-flashable, and does not imply anything about who may flash it -- that is `flash_policy`."
         }
       }
     },
@@ -614,11 +642,6 @@
         "bus_master": {
           "type": "string",
           "description": "Which silicon drives the bus (informational).  Omitted when no on-module silicon masters the bus (e.g. AEN's slave-only LPI2C0 housekeeping bus, ADR 0017)."
-        },
-        "bus_pads": {
-          "type": "object",
-          "additionalProperties": true,
-          "description": "Per-silicon bus pad assignments (informational).  DELIBERATELY OPEN: keys name the silicon, values follow that vendor's pad-naming convention."
         },
         "devices": {
           "type": "array",

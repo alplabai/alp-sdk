@@ -60,6 +60,7 @@ BOOTSTRAP_JSON="${REPO_ROOT}/metadata/bootstrap.json"
 
 DO_PIP=1
 DO_WEST=1
+DO_PATCHES=1
 PRINT_ENV_ONLY=0
 ALLOW_PARTIAL=0
 
@@ -67,6 +68,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --no-pip)       DO_PIP=0 ;;
         --no-west)      DO_WEST=0 ;;
+        --no-patches)   DO_PATCHES=0 ;;
         --print-env)    PRINT_ENV_ONLY=1 ;;
         --allow-partial) ALLOW_PARTIAL=1 ;;
         -h|--help)
@@ -88,6 +90,12 @@ Usage:
     bash scripts/bootstrap.sh                # full setup
     bash scripts/bootstrap.sh --no-pip       # skip pip installs
     bash scripts/bootstrap.sh --no-west      # skip west init/update
+    bash scripts/bootstrap.sh --no-patches   # skip `west patch apply` + its
+        # verification (issue #1392). The patches in zephyr/patches.yml are
+        # required to BUILD: zephyr/patches/zephyr/0002-ipm-add-poll-out-poll-in.patch
+        # adds the ipm_driver_api .poll_out/.poll_in fields hal_alif's
+        # se_service.c calls and the pinned upstream Zephyr does not have. Use
+        # this only when you intend to manage the patch state yourself.
     bash scripts/bootstrap.sh --print-env    # only print env-var lines
     bash scripts/bootstrap.sh --allow-partial
         # report success even if zephyr-requirements / sdk-extras /
@@ -646,6 +654,93 @@ if [ "${DO_PIP}" -eq 1 ]; then
         || { warn "alp_cli editable install reported a problem -- check manually"; record_phase_warning "editable-install"; }
 else
     info "Skipping pip installs (--no-pip)"
+fi
+
+# -------- zephyr/patches.yml (issue #1392) ------------------------------------
+
+# AFTER the pip section, not inside the west one: `west patch` imports
+# `pykwalify.core` at module import time, and pykwalify arrives with the Zephyr
+# requirements installed just above. Run from the west block this exits
+# non-zero in ~23 ms on a fresh CI workspace, before doing any work --
+# `[bootstrap] west patch apply failed` across every alp-build matrix leg on
+# PR #1426, with no output of its own to say why.
+#
+# This used to be a manual step nothing here mentioned, documented only in
+# docs/aen-bench-bringup.md and replicated by pr-twister-aen.yml in its own
+# stanza. A user who ran this script and started building got an unpatched
+# tree, and every layer stayed quiet about it: bootstrap succeeded, the build
+# succeeded, the flash succeeded, and the board did not boot the application.
+#
+# VERIFY FIRST, then apply only what is missing. `west patch apply` is NOT
+# idempotent: re-running it on an already-patched tree fails, because each
+# patch is fed to `git apply` against content that already carries it --
+#
+#   ERROR: error: patch failed: drivers/clock_control/clock_control_alif.c:124
+#   error: drivers/clock_control/clock_control_alif.c: patch does not apply
+#   FATAL ERROR: failed to apply patch zephyr/0001-clock_control_alif-...patch
+#
+# -- measured on PR #1426's `getting-started` job, whose
+# `actions/cache@v5` key (`getting-started-aen801-zephyr-v4.4.1-${runner.os}`)
+# carries no commit component, so it restored a `zephyr/`+`modules/` tree an
+# earlier run had already patched. `scripts/bootstrap.sh`'s own `REUSE_WS=1`
+# path reaches the same state for a developer re-running it. All three
+# zephyr/patches.yml patches DO apply to a pristine v4.4.1 (`git apply --check`
+# rc=0 each), so the tree being non-pristine is the whole story.
+if [ "${DO_WEST}" -eq 1 ] && [ "${DO_PATCHES}" -eq 1 ]; then
+    # No `set +e`/`set -e` guard around either call: this script runs under
+    # `set -uo pipefail` with errexit OFF (line 37), so a non-zero exit does
+    # not end the script and $? is readable directly. Adding the guard would
+    # switch errexit ON for everything below it.
+    ( cd "${REPO_ROOT}" && "${VPY}" scripts/verify_west_patches.py --topdir "${WORKSPACE_DIR}" --west "${WEST}" >/dev/null 2>&1 )
+    VERIFY_RC=$?
+    if [ "${VERIFY_RC}" -eq 0 ]; then
+        ok "zephyr/patches.yml already applied in ${WORKSPACE_DIR} -- nothing to do"
+    else
+        # PER MODULE, not the whole set. A workspace can be PARTIALLY patched:
+        # pr-getting-started-aen801.yml caches `zephyr` and `modules` under a
+        # key with no commit component, but NOT `bootloader/mcuboot`, so zephyr
+        # arrives already patched while mcuboot arrives fresh. A bare
+        # `west patch apply` then re-applies zephyr's and dies on the first one
+        # (`patch does not apply`), because the command is not idempotent.
+        UNAPPLIED=$( cd "${REPO_ROOT}" && "${VPY}" scripts/verify_west_patches.py \
+            --topdir "${WORKSPACE_DIR}" --west "${WEST}" --list-unapplied 2>/dev/null )
+        if [ -z "${UNAPPLIED}" ]; then
+            die "verify_west_patches.py reported patches missing (exit ${VERIFY_RC}) but named no module -- re-run it directly to see why"
+        fi
+        for _mod in ${UNAPPLIED}; do
+            # `--dst-module` is a flag of `west patch` ITSELF, not of its
+            # `apply` SUBCOMMAND, so it goes BEFORE `apply`:
+            #
+            #   usage: west patch [-h] [-b DIR] [-l FILE] [-w DIR] [-sm MODULE]
+            #                     [-dm MODULE] <subcommand> ...
+            #
+            # Written the other way round it does not run at all --
+            # `west patch: error: unexpected arguments: ['--dst-module', 'mcuboot']`,
+            # exit 2 -- which failed every alp-build job on dev.
+            info "Applying zephyr/patches.yml for module '${_mod}' ('west patch --dst-module ... apply')"
+            PATCH_OUT=$( cd "${WORKSPACE_DIR}" && "${WEST}" patch --dst-module "${_mod}" apply 2>&1 )
+            PATCH_RC=$?
+            printf '%s\n' "${PATCH_OUT}"
+            if [ "${PATCH_RC}" -ne 0 ]; then
+                die "west patch --dst-module ${_mod} apply failed (exit ${PATCH_RC}) -- output above"
+            fi
+        done
+        # Re-verify: `west patch apply`'s own exit status is not evidence it
+        # did anything (three no-op-and-exit-0 paths -- see
+        # scripts/verify_west_patches.py). Exit 3 is "everything present is
+        # patched, but a module this workspace does not carry could not be
+        # checked" -- normal for a narrow workspace, so it warns rather than
+        # dying. 1 and 2 are the real thing.
+        ( cd "${REPO_ROOT}" && "${VPY}" scripts/verify_west_patches.py --topdir "${WORKSPACE_DIR}" --west "${WEST}" )
+        VERIFY_RC=$?
+        case "${VERIFY_RC}" in
+            0) ok "zephyr/patches.yml verified applied in ${WORKSPACE_DIR}" ;;
+            3) warn "some zephyr/patches.yml modules are not in this workspace -- see above" ;;
+            *) die "zephyr/patches.yml is not applied in ${WORKSPACE_DIR} (#1392) -- see the list above" ;;
+        esac
+    fi
+elif [ "${DO_WEST}" -eq 1 ]; then
+    info "Skipping 'west patch apply' (--no-patches) -- zephyr/patches.yml is NOT applied"
 fi
 
 # -------- Optional native libs hint -------------------------------------------

@@ -69,6 +69,44 @@ def test_build_model_records_unavailable_tool_as_skip(tmp_path):
     assert all("not installed" in c.reason for c in ethos_u_skips)
 
 
+def test_build_model_default_registry_reaches_executorch_adapter_for_pte_source(tmp_path):
+    # #1260 reachability: `alp model build` (scripts/alp_cli/model.py) calls
+    # build_model() with NO adapters= kwarg -- the default registry. Before this
+    # fix, ExecutorchAdapter existed but was never in _ADAPTERS, and even adding
+    # it there naively would have collided with CpuAdapter on the "cpu" backend
+    # key. Exercise the real default path, not an injected adapter list.
+    src = tmp_path / "m.pte"
+    src.write_bytes(b"PTE-DUMMY-PROGRAM")
+    out = build_model(sku="E1M-AEN801", name="demo", source=src, out_dir=tmp_path,
+                      metadata_root=_META)   # default registry
+    mft, blobs = read_package(out.read_bytes())
+    cpu = [t for t in mft.targets if t.backend == "cpu"]
+    assert len(cpu) == 1
+    assert cpu[0].blob_format == "executorch"
+    assert blobs[cpu[0].blob] == b"PTE-DUMMY-PROGRAM"
+    # ethos_u (VelaAdapter) still gets a coverage entry, not silently absorbed
+    # as "no adapter registered" (its reason is host-dependent: "not installed"
+    # if vela isn't on PATH here, else "does not accept .pte").
+    ethos_u = [c for c in mft.coverage if c.backend == "ethos_u"]
+    assert ethos_u and all(c.status in ("skipped", "incompatible") for c in ethos_u)
+
+
+def test_build_model_default_registry_tflite_source_still_uses_cpu_adapter(tmp_path):
+    # Guards the by_backend grouping: registering ExecutorchAdapter must not
+    # steal the "cpu" backend key from CpuAdapter for an ordinary .tflite build
+    # (a naive `{a.backend: a for a in registry}` dict would let the later
+    # entry in _ADAPTERS silently win here).
+    src = tmp_path / "m.tflite"
+    src.write_bytes(b"TFL3-DUMMY")
+    out = build_model(sku="E1M-AEN801", name="demo", source=src, out_dir=tmp_path,
+                      metadata_root=_META)   # default registry
+    mft, blobs = read_package(out.read_bytes())
+    cpu = [t for t in mft.targets if t.backend == "cpu"]
+    assert len(cpu) == 1
+    assert cpu[0].blob_format == "tflite"
+    assert blobs[cpu[0].blob] == b"TFL3-DUMMY"
+
+
 def test_build_model_v2m101_records_drpai_and_deepx_skips(tmp_path, monkeypatch):
     # With the default registry, V2M101 has drpai (host) + deepx_dxm1 (on-module) targets;
     # both require compile opts which aren't provided -> "no compile config" skips;

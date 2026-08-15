@@ -972,7 +972,7 @@ tests:
 
   alp_sdk.example.motor_current_signature.aen_build:
     platform_allow:
-      - ensemble_e8_dk/ae402fa0e5597le0/rtss_hp
+      - ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp
     build_only: true
     tags:
       - alp-sdk
@@ -1060,7 +1060,7 @@ CURR,5.12,STALL,3.10,37.2,0.0,0.90
 ## Build
 
 ```
-west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples/ai/motor-current-signature
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/ai/motor-current-signature
 west flash
 ```
 

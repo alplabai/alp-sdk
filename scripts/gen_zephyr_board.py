@@ -23,9 +23,10 @@ Scope (issue #523, first slice):
 
   - Alif Ensemble (the `aen` family, e.g. E1M-AEN801 m55_hp/m55_he) is
     fully generated: every file in the hand-authored board tree except
-    `board.cmake` (see NOT GENERATED below) is produced here,
-    byte-identical to the committed tree -- proven by
-    `tests/scripts/test_gen_zephyr_board.py`.
+    `board.cmake` and `Kconfig` (see NOT GENERATED below) is produced
+    here, byte-identical to the committed tree -- proven by
+    `tests/scripts/test_gen_zephyr_board.py`, whose `HAND_MAINTAINED`
+    exemption set is exactly those two names.
   - Renesas RZ/V2N-family boards (`v2n` / `v2n-m1`, e.g. E1M-V2N101,
     E1M-V2M101 `m33_sm`) generate only the family-agnostic files
     (`board.yml`, `Kconfig.alp_<board>`, the twister `.yaml`).  Their
@@ -41,15 +42,32 @@ Scope (issue #523, first slice):
     `metadata/pinmux/<family>-internal.yaml` (or similar) source and
     extends this module.
 
-  NOT GENERATED (any family): `board.cmake`.  The hand-authored AEN
-  `board.cmake` pair (HP/HE) intentionally carries asymmetric prose --
-  one board's file hosts the full SETOOLS/J-Link bench-bring-up
-  runbook, the sibling's just points at it -- which is a documentation
-  choice, not a hardware fact, so there is nothing in metadata for it
-  to derive from.  Flasher/debugger `board_runner_args()` wiring stays
-  hand-authored until that asymmetry is either resolved (duplicate the
-  full rationale in both) or the prose itself is promoted into a
-  metadata field.
+  NOT GENERATED (any family): `board.cmake` and a bare `Kconfig`.
+  BOTH must be copied across by hand when a generated board tree is
+  used as the board directory -- nothing in the emit, the CLI output,
+  or the JSON envelope says so, which is why they are named here.
+
+  - `board.cmake`.  The hand-authored AEN pair (HP/HE) intentionally
+    carries asymmetric prose -- one board's file hosts the full
+    SETOOLS/J-Link bench-bring-up runbook, the sibling's just points at
+    it -- which is a documentation choice, not a hardware fact, so
+    there is nothing in metadata for it to derive from.
+    Flasher/debugger `board_runner_args()` wiring stays hand-authored
+    until that asymmetry is either resolved (duplicate the full
+    rationale in both) or the prose itself is promoted into a metadata
+    field.  Without it a board has no runner, so `west flash` has
+    nothing to flash with.
+  - `Kconfig` (the bare name, NOT the generated `Kconfig.<board>` /
+    `Kconfig.defconfig`).  It sets
+    `CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS default y`, which
+    `zephyr/CMakeLists.txt` uses to pull in the custom E8 MPU region
+    table (`zephyr/soc-bridge/alif/mpu_regions_e8.c`) via
+    `zephyr_sources_ifdef`.  Zephyr's `hwm_v2.cmake` unconditionally
+    `osource`s a bare `Kconfig` in a board directory whether or not it
+    exists, so it survives regeneration exactly as `board.cmake` does
+    -- and its absence is SILENT: the build succeeds and falls back to
+    Zephyr's generic 2-region FLASH_0/SRAM_0 map, whose whole-flash
+    FLASH_0 region is unsafe on Flow D (production MRAM boot).
 """
 
 from __future__ import annotations
@@ -95,12 +113,32 @@ def _load_soc_spec(sku_preset: dict[str, Any], metadata_root: Path) -> dict[str,
 
 
 def _resolve_variant(sku_preset: dict[str, Any], soc_spec: dict[str, Any]) -> dict[str, Any]:
+    """Resolve the SoM preset's silicon variant against the SoC JSON.
+
+    A DECLARED `silicon_variant:` is authoritative and must name a real
+    `variants[].order_code` -- `docs/porting-new-som.md` says so.  When
+    it names none this raises instead of falling through to the
+    `alp_module_skus` reverse lookup: silently answering with a
+    different variant is how a typo (`...LS0` -> `...LSO`) or an
+    un-published silicon revision emits a whole board tree named after
+    a part number the preset does not declare, carrying the OLD
+    variant's `mram_mb` / DTCM size / board-target name -- exit 0, no
+    diagnostic.  Every other missing fact in this module raises; so
+    does this one.  The reverse lookup stays for presets that declare
+    no variant at all (or `TBD`).
+    """
     declared = sku_preset.get("silicon_variant")
     variants = soc_spec.get("variants") or []
     if declared and not is_tbd(declared):
         for v in variants:
             if v.get("order_code") == declared:
                 return v
+        known = ", ".join(str(v.get("order_code")) for v in variants) or "<none>"
+        raise ZephyrBoardEmitError(
+            f"SoM {sku_preset.get('sku')!r} declares silicon_variant "
+            f"{declared!r}, which is not an order_code in "
+            f"{soc_spec.get('ref')} variants[] ({known}) -- fix the preset, "
+            "or add the variant to the SoC JSON if this is new silicon")
     sku = sku_preset.get("sku")
     for v in variants:
         if sku in (v.get("alp_module_skus") or []):
@@ -297,7 +335,40 @@ def _twister_yaml(
 # two symmetric image slots derive from the variant's actual MRAM size.
 _AEN_MCUBOOT_KIB = 64
 _AEN_SCRATCH_KIB = 64
-_AEN_STORAGE_KIB = 128
+_AEN_STORAGE_KIB = 96
+
+# The SE-owned band at the very TOP of the App MRAM window (#1289).
+#
+# Alif's SETOOLS (`app-gen-toc` / `app-write-mram`) does not place the ATOC
+# application table at a fixed address: it top-anchors the generated package
+# at the App MRAM window end and grows DOWNWARD, sized to the package. There
+# is therefore no compile-time constant to read -- the placement happens at
+# provisioning time, not link time -- so the layout has to reserve a band
+# rather than a specific address.
+#
+# 32 KiB covers the worst case with margin. Three independent figures, all
+# measured/derived against the same window top 0x80580000:
+#
+#   5552 B   observed on the E1M-AEN801 bench 2026-08-08 -- ATOC magic
+#            `ckBS` (0x53426B63) read at 0x8057EA50
+#   13552 B  an E7 SETOOLS transcript in the Alif DFP
+#            (alifsemi/alif_ensemble-cmsis-dfp, docs/Overview.md:193-224):
+#            package at 0x8057cb10
+#   23696 B  worst case computed from SETOOLS' own build/app-package-map.txt
+#            sizing rule -- 2560 B per signed user image + 2880 B fixed
+#            tool-managed + (48 + 32*N) TOC -- at the 8-image maximum. That
+#            rule reproduces the 5552 B observed above exactly.
+#
+# 32768 - 23696 = 9072 B spare at 8 images. UNVERIFIED: no documented
+# maximum TOC entry count could be found, so the 8-image worst case is an
+# assumption, not a specification -- widen this band rather than narrowing
+# it if a larger configuration ever appears.
+#
+# Taken OUT of storage (128 -> 96 + 32) rather than out of the image slots
+# on purpose: `_AEN_MCUBOOT_KIB + _AEN_SCRATCH_KIB + _AEN_STORAGE_KIB +
+# _AEN_ATOC_KIB` still sums to the old 256 KiB, so `image_kib` below is
+# unchanged and no committed AEN board's slot geometry moves.
+_AEN_ATOC_KIB = 32
 
 # Per-role documentation asymmetries in the committed AEN board tree.
 # These are prose choices (which sibling's ITCM comment got the
@@ -307,12 +378,120 @@ _AEN_STORAGE_KIB = 128
 # metadata.
 _AEN_BENCH_KNOWN_ITCM = {"hp": False, "he": True}
 
-# Vendor-short + family + part, as used in AEN board-tree prose ("Alif
-# Ensemble E8").  soc_spec's own `vendor:` field spells out "Alif
-# Semiconductor" (the legal vendor name for provenance blocks), so this
-# short form isn't mechanically derivable from it; kept as a small
-# per-family generator constant like _AEN_MCUBOOT_KIB above.
-_AEN_FAMILY_DISPLAY = "Alif Ensemble E8"
+# Base of the Alif Ensemble on-die App MRAM window.  Family-wide, not
+# per-part: upstream Zephyr declares `mram: flash@80000000` in EVERY
+# Ensemble SoC dtsi (dts/arm/alif/ensemble/ae1c1f4051920ph0.dtsi,
+# ae402fa0e5597le0.dtsi, ae612fa0e5597ls0.dtsi, ae822fa0e5597ls0.dtsi),
+# and E1M-AEN801.yaml's `memory_map:` anchors its `mcuboot` region at the
+# same 0x80000000.  It is the soc-nv-flash child's offset-0 origin, so a
+# SoM whose map disagrees is REFUSED rather than emitted -- see
+# _aen_flash_partitions.
+_AEN_MRAM_BASE = 0x80000000
+
+
+def _aen_part(soc_spec: dict[str, Any]) -> str:
+    """The Ensemble part designator -- `"E8"`, `"E3"`, ... -- from the
+    SoC JSON's required `part` field.
+
+    Was a generator constant hardcoded to E8, which put "Alif Ensemble
+    E8" and `<alif/ensemble_e8_peripherals.dtsi>` into EVERY `E1M-AEN*`
+    board tree regardless of silicon.  `part` is `required` by
+    soc-spec-v1.schema.json, so there is nothing to guess.
+    """
+    part = soc_spec.get("part")
+    if not part or is_tbd(part):
+        raise ZephyrBoardEmitError(
+            f"SoC spec {soc_spec.get('ref')} declares no usable `part` -- "
+            "the AEN board tree names it in prose and derives the SoC "
+            "peripherals overlay from it")
+    return str(part)
+
+
+def _aen_family_display(soc_spec: dict[str, Any]) -> str:
+    """Vendor-short + family + part, as used in AEN board-tree prose
+    ("Alif Ensemble E8").
+
+    `Alif` is fixed by the code path -- the `aen` family slug IS Alif
+    Ensemble -- because soc_spec's own `vendor:` field spells out the
+    legal name "Alif Semiconductor" for provenance blocks.  `family`
+    ("Ensemble") and `part` ("E8") are read from the SoC JSON, both
+    `required` by the schema.
+    """
+    family = soc_spec.get("family")
+    if not family or is_tbd(family):
+        raise ZephyrBoardEmitError(
+            f"SoC spec {soc_spec.get('ref')} declares no usable `family`")
+    return f"Alif {family} {_aen_part(soc_spec)}"
+
+
+def _aen_peripherals_dtsi(soc_spec: dict[str, Any]) -> str:
+    """The `#include <...>` path of THIS SoC's Zephyr peripherals overlay.
+
+    Read from the SoC JSON's `zephyr_peripherals_dtsi`, never derived
+    from the part name: the overlay declares the SoC's actual peripheral
+    and NPU node set (the E8's includes `ethosu85`; an E3 has 2x U55 and
+    no U85), so including the wrong family's file produces a board that
+    builds and then misbehaves on silicon.  alp-sdk ships exactly one
+    today (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi`), so every
+    other Ensemble part must add its own and declare it here rather than
+    inherit the E8's.
+    """
+    dtsi = soc_spec.get("zephyr_peripherals_dtsi")
+    if not dtsi or is_tbd(dtsi):
+        raise ZephyrBoardEmitError(
+            f"SoC spec {soc_spec.get('ref')} "
+            f"({_aen_part(soc_spec)}) has no `zephyr_peripherals_dtsi` -- "
+            "the AEN board .dts must include this SoC's own peripherals "
+            "overlay, and alp-sdk ships one only for the E8 "
+            "(zephyr/dts/alif/ensemble_e8_peripherals.dtsi).  Add the "
+            "overlay under zephyr/dts/alif/ and declare it in the SoC "
+            "JSON before generating this board; do NOT fall back to "
+            "another part's file, whose peripheral and NPU node set is "
+            "different silicon")
+    return str(dtsi)
+
+
+def _aen_require_disjoint_slot0(
+    sku: str, sku_preset: "dict[str, Any]",
+    memory_map: "list[dict[str, Any]] | None",
+) -> None:
+    """Refuse a DUAL-M55 AEN SoM that declares no `<role>_slot0` window (#1446).
+
+    `_aen_role_slot0_map` returns None when no role declares one, which drops
+    the caller onto the stock SYMMETRIC layout -- `m55_he` and `m55_hp` slot0
+    at the same address, so flashing one core silently clobbers the other's
+    window. That is the #1069 defect, and it is how E1M-AEN301/401/501/601/701
+    shipped until #1445 gave them explicit maps.
+
+    The half-authored case (one role declares a window, its sibling does not)
+    already raises inside `_aen_role_slot0_map`. This closes the fully
+    unauthored case, which was silent.
+
+    Single-M55 SoMs are unaffected: with no sibling core there is nothing to
+    clobber, so the symmetric layout stays correct for them.
+
+    Costs nothing on the current corpus -- after #1445 every AEN SoM declares
+    disjoint windows, so this never fires today. Its value is the NEXT dual-M55
+    AEN SoM, which is refused at authoring time instead of discovered by
+    someone flashing one core and losing the other's slot0 on a bench.
+    """
+    if memory_map and any(
+        isinstance(r.get("name"), str) and r["name"].endswith("_slot0")
+        for r in memory_map
+    ):
+        return
+    cores = sku_preset.get("topology") or {}
+    m55 = sorted(c for c in cores if c in ("m55_he", "m55_hp"))
+    if len(m55) < 2:
+        return
+    raise ZephyrBoardEmitError(
+        f"SoM {sku!r} has two M55 cores ({', '.join(m55)}) but its preset "
+        f"declares no per-core `<role>_slot0` region, so both would boot from "
+        f"the SAME MRAM slot0 address -- flashing one core silently corrupts "
+        f"the other's slot0 window (#1069). Declare disjoint `he_slot0` / "
+        f"`hp_slot0` regions in this SoM preset's `memory_map:`; "
+        f"metadata/e1m_modules/E1M-AEN801.yaml is the shape to copy (#1446)."
+    )
 
 
 def _aen_role_slot0_map(
@@ -320,29 +499,217 @@ def _aen_role_slot0_map(
 ) -> "dict[str, Any] | None":
     """Return this role's disjoint-slot0 memory_map entry, or None.
 
-    Non-stock AEN SKUs (#1069: dual-M55 SoMs that boot both cores from
-    the same physical App MRAM) declare a `memory_map:` block in their
-    SoM preset with one region per core named `<role>_slot0`
-    (`accessible_from: [m55_<role>]` only). Every other AEN SKU
-    (single-M55 aen401/aen601, or an AEN801-shaped preset with no
-    override) has no such region and keeps the stock symmetric
-    two-slot layout -- see _aen_flash_partitions below.
+    Dual-M55 AEN SoMs (#1069: both cores boot from the same physical App
+    MRAM) declare a `memory_map:` block in their SoM preset with one region
+    per core named `<role>_slot0` (`accessible_from: [m55_<role>]` only).
+    A SoM with only ONE M55 has no sibling to collide with and keeps the
+    stock symmetric two-slot layout -- see _aen_flash_partitions below.
+
+    #1446: this used to say the stock layout also covered "single-M55
+    aen401/aen601". Both of those are DUAL-M55 -- measured from their own
+    presets, E1M-AEN401 is [m55_he, m55_hp] and E1M-AEN601 is
+    [a32_cluster, m55_he, m55_hp] -- so that sentence was the justification
+    for a silent fallback that put two cores' slot0 at one address, and it
+    is why five shipping SoMs carried a clobbering layout until #1445.
+    `_aen_require_disjoint_slot0` now refuses that state outright; this
+    function keeps returning None only for the genuinely single-M55 case.
+
+    Returning None is only legitimate when NO role declares a slot0
+    window.  A map that declares a SIBLING core's `<role>_slot0` but not
+    this one's is a half-authored map, and answering None for it drops
+    the caller onto the stock symmetric layout, whose `slot0_partition`
+    lands exactly on top of the sibling's declared window -- silently
+    undoing the #1069 disjoint-window fix and re-creating the
+    bench-confirmed corruption it exists to prevent.  So that state
+    RAISES.
     """
     if not memory_map:
         return None
+    suffix = "_slot0"
+    declared_roles = [
+        str(r["name"])[: -len(suffix)]
+        for r in memory_map
+        if isinstance(r.get("name"), str) and r["name"].endswith(suffix)
+    ]
+    if not declared_roles:
+        return None
     core_id = f"m55_{role}"
     for region in memory_map:
-        if region.get("accessible_from") == [core_id] and \
-                region.get("name") == f"{role}_slot0":
-            return region
-    return None
+        if region.get("name") != f"{role}{suffix}":
+            continue
+        if region.get("accessible_from") != [core_id]:
+            raise ZephyrBoardEmitError(
+                f"AEN memory_map region '{role}{suffix}' must declare "
+                f"accessible_from: [{core_id}] (a disjoint per-core slot0 "
+                f"window is reachable from exactly one core); it declares "
+                f"{region.get('accessible_from')!r}")
+        return region
+    raise ZephyrBoardEmitError(
+        f"AEN memory_map declares a disjoint slot0 window for "
+        f"{sorted(declared_roles)} but none for role {role!r} -- add a "
+        f"'{role}{suffix}' region (accessible_from: [{core_id}]).  "
+        "Falling back to the stock symmetric layout here would place this "
+        "core's slot0_partition on top of the sibling's declared window "
+        "(#1069)")
+
+
+def _aen_check_extents(
+    partitions: "list[tuple[str, int, int]]", total_kib: int, where: str,
+) -> None:
+    """Every emitted partition must fit inside the flash node it is emitted
+    into, and no two may overlap.
+
+    Neither branch used to check this.  The stock branch's
+    `offset != total_kib * 1024` sum assertion is NOT a fits-in-MRAM
+    check -- all five stock sizes derive from `total_kib`, so it is a
+    tautology that can never fire.  The disjoint branch copied `base` /
+    `size_kib` verbatim out of the SoM preset and checked only that each
+    region existed with an integer `base`, so a mis-authored map emitted
+    a `partition@` node outside its own `mram_storage` `reg` -- MCUboot's
+    flash_map and the alif MRAM driver would then compute erase/program
+    addresses past the end of the device.
+    """
+    limit = total_kib * 1024
+    ordered = sorted(partitions, key=lambda p: p[1])
+    prev_label, prev_end = None, 0
+    for label, off, size_kib in ordered:
+        if not isinstance(size_kib, int) or size_kib <= 0:
+            raise ZephyrBoardEmitError(
+                f"{where}: partition {label!r} has a non-positive size "
+                f"({size_kib!r} KiB)")
+        end = off + size_kib * 1024
+        if off < 0 or end > limit:
+            raise ZephyrBoardEmitError(
+                f"{where}: partition {label!r} spans "
+                f"0x{off:x}..0x{end:x} but the mram_storage flash node is "
+                f"only {total_kib} KiB (0x0..0x{limit:x}) -- the partition "
+                "would sit outside the flash device it is declared in")
+        if off < prev_end:
+            raise ZephyrBoardEmitError(
+                f"{where}: partition {label!r} at 0x{off:x} overlaps "
+                f"{prev_label!r}, which ends at 0x{prev_end:x}")
+        prev_label, prev_end = label, end
+
+
+def _aen_check_map_overlaps(
+    memory_map: "list[dict[str, Any]]", mram_base: int, total_kib: int,
+) -> None:
+    """Cross-check the WHOLE declared `memory_map:`, not just the regions
+    this core's partition table happens to name.
+
+    The sibling core's `<role>_slot0` window is not a partition here, so
+    _aen_check_extents cannot see a map that overlaps it; this can.
+    Regions with a non-integer `base` (a `TBD` sentinel, or the
+    whole-window `mram_main` alias) are skipped -- they are declarations
+    of intent, not placements.
+    """
+    placed = [
+        (str(r.get("name")), r["base"], int(r["size_kib"]))
+        for r in memory_map
+        if isinstance(r.get("base"), int) and isinstance(r.get("size_kib"), int)
+    ]
+    limit = mram_base + total_kib * 1024
+    for name, base, size_kib in placed:
+        end = base + size_kib * 1024
+        if base < mram_base or end > limit:
+            raise ZephyrBoardEmitError(
+                f"AEN memory_map region {name!r} spans "
+                f"0x{base:x}..0x{end:x}, outside the {total_kib} KiB App "
+                f"MRAM window 0x{mram_base:x}..0x{limit:x} declared by this "
+                "variant's mram_mb")
+    placed.sort(key=lambda r: r[1])
+    for (a_name, a_base, a_kib), (b_name, b_base, _b_kib) in zip(placed, placed[1:]):
+        a_end = a_base + a_kib * 1024
+        if b_base < a_end:
+            raise ZephyrBoardEmitError(
+                f"AEN memory_map regions {a_name!r} (ends 0x{a_end:x}) and "
+                f"{b_name!r} (starts 0x{b_base:x}) overlap")
+
+
+def _aen_slot0_sizes_display(memory_map: "list[dict[str, Any]]") -> str:
+    """`"HE 2688 KiB + HP 2688 KiB"` -- every declared per-core code slot,
+    in `memory_map:` declaration order.
+
+    The #1069 rationale sentence in the generated `.dts` used to carry
+    the AEN801-only literals "both 2688 KiB code slots fit the 5632 KiB
+    App MRAM alongside the ~2.6 MiB NPU MRAM-model budget" unconditionally,
+    ~100 lines above a partition map derived from this same
+    `memory_map:` -- so any dual-M55 AEN SoM with different slot sizes
+    emitted a board file stating its MRAM budget two contradictory ways,
+    with the prose (the part an engineer sizing an NPU model reads)
+    being the wrong one.  The `~2.6 MiB` figure is a policy number from
+    `zephyr/sysbuild/aen/README.md` that no generator input carries, so
+    it is not interpolated -- the sentence points at the README instead.
+    """
+    suffix = "_slot0"
+    parts = [
+        f"{str(r['name'])[: -len(suffix)].upper()} {r['size_kib']} KiB"
+        for r in memory_map
+        if isinstance(r.get("name"), str) and r["name"].endswith(suffix)
+    ]
+    return " + ".join(parts)
+
+
+def _aen_missing_region_message(
+    region_name: str, label: str, by_name: "dict[str, Any]", role: "str | None",
+) -> str:
+    """Explain a missing disjoint-slot0 region in terms of its REAL cause.
+
+    `atoc` is the one region the disjoint layout gained late (#1289), so
+    its absence is overwhelmingly a VINTAGE problem, not an authoring
+    one: an alp-sdk checkout from before that commit has a SoM preset
+    whose `memory_map:` is complete in every other respect.  The old
+    wording ("memory_map is missing an integer-`base` region named
+    'atoc'") read as a defect in the consumer's own SoM metadata, and a
+    consumer who went looking at their `board.yaml` and their SoM preset
+    found both fine and had no route to the real cause -- the message
+    named the wrong culprit for the only way it actually fires.
+
+    Distinguishing the two cases is only possible for `atoc`, and only
+    from the shape of the map: when EVERY other required region is
+    present and placed, the map is a complete pre-#1289 layout and the
+    checkout is the thing that is old; when other regions are missing
+    too, the map is genuinely half-authored.  Both readings are covered
+    below, in that order, because a SoM author editing a fresh preset
+    hits the same string.
+    """
+    others = [n for n in ("mcuboot", f"{role}_slot0", "reserved", "storage")
+              if n != region_name]
+    otherwise_complete = all(
+        isinstance((by_name.get(n) or {}).get("base"), int) for n in others)
+    if region_name == "atoc" and otherwise_complete:
+        return (
+            "this alp-sdk predates the SE-owned ATOC reservation "
+            "(alp-sdk#1289): metadata/e1m_modules/<SKU>.yaml declares a "
+            "complete disjoint-slot0 `memory_map:` but no `atoc` region, "
+            "which is the shape of every alp-sdk checkout before that "
+            "commit.  The AEN board emit needs a checkout that contains it "
+            "-- upgrade alp-sdk to a release that includes alp-sdk#1289.  "
+            "(If you are AUTHORING this preset rather than consuming a "
+            "released alp-sdk, add the `atoc` region: the SE-owned band "
+            "SETOOLS top-anchors the ATOC application table into, flush "
+            "against the App MRAM window top.  It is declared so no app "
+            "can mount NVS or a filesystem over the boot table.)")
+    return (
+        f"AEN disjoint-slot0 memory_map is missing an integer-`base` "
+        f"region named {region_name!r} (needed for {label!r}) -- this SoM "
+        "preset's `memory_map:` is incomplete; add the region, or drop the "
+        "per-core `<role>_slot0` windows to fall back to the stock "
+        "symmetric two-slot layout")
 
 
 def _aen_flash_partitions(
     total_kib: int, role: str | None = None,
     memory_map: "list[dict[str, Any]] | None" = None,
-) -> "list[tuple[str, int, int]]":
-    """Return [(label, offset_bytes, size_kib), ...] for the AEN layout.
+) -> "tuple[int, list[tuple[str, int, int]]]":
+    """Return (mram_base, [(label, offset_bytes, size_kib), ...]).
+
+    *mram_base* is the absolute address the emitted `mram_storage`
+    soc-nv-flash child is anchored at, i.e. the origin every returned
+    offset is relative to.  It is returned rather than re-derived by the
+    caller so the DTS node address and the partition offsets can never
+    disagree -- `_aen_dts` used to write the node address as a hardcoded
+    `0x80000000` literal while the offsets came from the metadata base.
 
     Stock layout (no per-role memory_map entry for *role*): the
     original symmetric two-slot MCUboot swap-using-scratch map --
@@ -355,13 +722,22 @@ def _aen_flash_partitions(
     "image-0" so downstream label maps / the `image_kib` lookup in
     _aen_dts don't need a second code path), reserved (the ex-scratch
     headroom, unused -- OTA is deferred since a swap-sized second slot
-    on both cores no longer fits the MRAM budget), storage. No
+    on both cores no longer fits the MRAM budget), storage, atoc. No
     image-1: this is CONFIG_SINGLE_APPLICATION_SLOT=y (see
     zephyr/sysbuild/aen/README.md), the only silicon-proven MCUboot
     mode on this part. The OTHER role's slot0 lives outside this
     table entirely (a disjoint physical window this board never
     touches) -- see metadata/e1m_modules/E1M-AEN801.yaml `memory_map:`
-    for the full 5-region physical map.
+    for the full 6-region physical map.
+
+    BOTH layouts end in `atoc` (#1289) -- the SE-owned band SETOOLS
+    top-anchors the ATOC application table into. It is a declared,
+    named region precisely so no app can mount NVS or a filesystem on
+    top of the boot table: before this, the last region was `storage`
+    in both branches, and on the bench a slot0 app happily erased
+    inside it while the live ATOC sat 0x1EA50 further up the SAME
+    partition. Keep `atoc` last in both paths; see _AEN_ATOC_KIB for
+    the sizing evidence.
     """
     slot0_region = _aen_role_slot0_map(memory_map, role) if role else None
     if slot0_region is not None:
@@ -373,29 +749,40 @@ def _aen_flash_partitions(
                 "'mcuboot' region -- its base anchors the soc-nv-flash "
                 "child's offset-0 origin")
         mram_base = mcuboot_region["base"]
+        if mram_base != _AEN_MRAM_BASE:
+            raise ZephyrBoardEmitError(
+                f"AEN memory_map anchors 'mcuboot' at 0x{mram_base:x}, but "
+                f"the Ensemble App MRAM window starts at "
+                f"0x{_AEN_MRAM_BASE:x} (upstream Zephyr declares `mram: "
+                "flash@80000000` in every ensemble SoC dtsi).  The mcuboot "
+                "base IS the soc-nv-flash child's offset-0 origin, so a map "
+                "that starts elsewhere would place every partition at the "
+                "wrong absolute address")
+        _aen_check_map_overlaps(memory_map, mram_base, total_kib)
         out: list[tuple[str, int, int]] = []
         for label, region_name in (
             ("mcuboot", "mcuboot"),
             ("image-0", f"{role}_slot0"),
             ("reserved", "reserved"),
             ("storage", "storage"),
+            ("atoc", "atoc"),
         ):
             region = by_name.get(region_name)
             if region is None or not isinstance(region.get("base"), int):
                 raise ZephyrBoardEmitError(
-                    f"AEN disjoint-slot0 memory_map is missing an integer-"
-                    f"`base` region named {region_name!r} (needed for "
-                    f"{label!r})")
+                    _aen_missing_region_message(region_name, label, by_name, role))
             out.append((label, region["base"] - mram_base, region["size_kib"]))
-        return out
+        _aen_check_extents(out, total_kib, "AEN disjoint-slot0 memory_map")
+        return mram_base, out
 
-    reserved = _AEN_MCUBOOT_KIB + _AEN_SCRATCH_KIB + _AEN_STORAGE_KIB
+    reserved = (_AEN_MCUBOOT_KIB + _AEN_SCRATCH_KIB + _AEN_STORAGE_KIB
+                + _AEN_ATOC_KIB)
     remaining = total_kib - reserved
     if remaining <= 0 or remaining % 2:
         raise ZephyrBoardEmitError(
             f"AEN MRAM size {total_kib} KiB doesn't split evenly into two "
             f"image slots after reserving {reserved} KiB for "
-            "mcuboot/scratch/storage")
+            "mcuboot/scratch/storage/atoc")
     image_kib = remaining // 2
 
     offset = 0
@@ -406,12 +793,17 @@ def _aen_flash_partitions(
         ("image-1", image_kib),
         ("image-scratch", _AEN_SCRATCH_KIB),
         ("storage", _AEN_STORAGE_KIB),
+        # LAST, and must stay last: this is the band SETOOLS top-anchors the
+        # ATOC into (#1289).  The `offset != total_kib * 1024` assertion
+        # below is what keeps it flush against the window top.
+        ("atoc", _AEN_ATOC_KIB),
     ):
         out.append((label, offset, size_kib))
         offset += size_kib * 1024
     if offset != total_kib * 1024:
         raise ZephyrBoardEmitError("AEN flash partition arithmetic didn't sum to total")
-    return out
+    _aen_check_extents(out, total_kib, "AEN stock two-slot layout")
+    return _AEN_MRAM_BASE, out
 
 
 def _aen_console_pinmux_rows(metadata_root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -441,6 +833,7 @@ def _uart_node_label(row: dict[str, Any]) -> str:
 
 def _aen_pinctrl_dtsi(
     role: str, sku_display: str, rx_row: dict[str, Any], tx_row: dict[str, Any],
+    family_display: str,
 ) -> str:
     other_role = "he" if role == "hp" else "hp"
     rx_macro, tx_macro = _pin_macro(rx_row), _pin_macro(tx_row)
@@ -464,7 +857,7 @@ def _aen_pinctrl_dtsi(
     return (
         _COPYRIGHT_C +
         " *\n"
-        f" * {sku_display} ({_AEN_FAMILY_DISPLAY}) Cortex-M55-{role.upper()} carrier pin control.\n"
+        f" * {sku_display} ({family_display}) Cortex-M55-{role.upper()} carrier pin control.\n"
         " *\n"
         " * Console: the E1M edge \"UART0\" maps to Alif "
         f"{uart_node.upper()} ({rx_row['silicon_pad']} RX_A / "
@@ -517,7 +910,10 @@ def _aen_ethos_u(soc_spec: dict[str, Any]) -> tuple[str, str] | None:
     return None
 
 
-def _aen_defconfig(uart_node: str, slot0_base: int = 0x80010000) -> str:
+def _aen_defconfig(
+    uart_node: str, rx_row: dict[str, Any], tx_row: dict[str, Any],
+    slot0_base: int,
+) -> str:
     # CONFIG_USE_DT_CODE_PARTITION is the Kconfig half of the very
     # `zephyr,code-partition = &slot0_partition;` chosen that _aen_dts()
     # (below) lays down for every board this function serves -- the two are
@@ -551,8 +947,12 @@ def _aen_defconfig(uart_node: str, slot0_base: int = 0x80010000) -> str:
         "# scripts/bench/aen/aen-flowc-itcm.conf.\n"
         "CONFIG_USE_DT_CODE_PARTITION=y\n"
         "\n"
+        # Silicon pads read from metadata/pinmux/aen.yaml, exactly as the
+        # sibling .dts and -pinctrl.dtsi do -- they used to be the string
+        # literal "P3_4/P3_5", the AEN801 console pads, on every SKU.
         f"# Console: Alif {uart_node.upper()} (E1M edge \"UART0\", "
-        "P3_4/P3_5) -- NS16550-class UART.\n"
+        f"{rx_row['silicon_pad']}/{tx_row['silicon_pad']}) "
+        "-- NS16550-class UART.\n"
         "CONFIG_SERIAL=y\n"
         "CONFIG_CONSOLE=y\n"
         "CONFIG_UART_CONSOLE=y\n"
@@ -561,15 +961,80 @@ def _aen_defconfig(uart_node: str, slot0_base: int = 0x80010000) -> str:
     )
 
 
-def _aen_kconfig_defconfig(dir_name: str, role: str) -> str:
+# Board-level LOG_MODE default for every AEN board (issue #1373).  Emitted
+# into the generated `Kconfig.defconfig`; the two hand-authored AEN board
+# trees (e1m_aen401_m55_hp, e1m_aen601_m55_hp) carry a byte-identical copy,
+# and tests/scripts/test_gen_zephyr_board.py pins that they stay in step.
+#
+# WHY: Zephyr's own `choice LOG_MODE` default is LOG_MODE_DEFERRED
+# (subsys/logging/Kconfig.mode), which no AEN board ever set or unset -- it
+# is inherited.  Deferred mode hands every record to the LOG_PROCESS_THREAD
+# (CONFIG_LOG_PROCESS_THREAD is `default y`), and CONFIG_LOG_PRINTK is
+# `default y if PRINTK`, so printk() -- including the Alp SDK boot banner --
+# is deferred with it.  The AEN bench procedure deliberately runs apps whose
+# main() never yields (`for (;;) { k_busy_wait(1000); }`) because an idling
+# M55 makes the Secure Enclave gate the DAP and the SE-UART together (see
+# docs/debugging-aen.md section 4).  A main() that never yields never lets
+# the log thread run: with CONFIG_LOG_PROCESS_THREAD_CUSTOM_PRIORITY=n (the
+# default) log_core.c runs that thread at K_LOWEST_APPLICATION_THREAD_PRIO
+# (= CONFIG_NUM_PREEMPT_PRIORITIES - 1), strictly below main's
+# CONFIG_MAIN_THREAD_PRIORITY=0, and time-slicing rotates only among
+# READY threads of EQUAL priority -- so a busy-looping main() at 0 starves
+# it outright and a healthy, fault-free board emits ZERO bytes.  Measured on
+# E1M-AEN801 silicon: PC inside `z_impl_k_busy_wait`, IPSR = 000
+# (NoException), CFSR @ 0xE000ED28 = 00000000, zero UART bytes in a 15 s
+# capture; the same source with LOG_MODE_MINIMAL prints the banner and both
+# LOG_INF lines.
+# LOG_MODE_MINIMAL formats and writes in the calling context, so it cannot
+# be starved by a non-yielding main().
+#
+# WHY A CHOICE `default` AND NOT `CONFIG_LOG_MODE_MINIMAL=y` IN THE BOARD
+# `_defconfig`: the `_defconfig` form assigns the symbol unconditionally,
+# including on the 47 `CONFIG_LOG=n` fragments under examples/aen/, where
+# the choice is invisible.  Zephyr's scripts/kconfig/kconfig.py then runs
+# check_assigned_choice_values() and prints "The choice symbol
+# LOG_MODE_MINIMAL ... was selected (set =y), but no symbol ended up as the
+# choice selection" on every one of those builds.  A Kconfig.defconfig
+# default is inert when LOG=n.  Precedence is unchanged either way:
+# Kconfig.zephyr sources the board's Kconfig.defconfig (line 30) ahead of
+# subsys/Kconfig (line 52) precisely so board defaults outrank upstream
+# ones, and an app that wants the deferred backend pipeline still overrides
+# this with CONFIG_LOG_MODE_DEFERRED=y in its own prj.conf.
+_AEN_LOG_MODE_DEFAULT = (
+    "# Logging: default to LOG_MODE_MINIMAL, not Zephyr's inherited\n"
+    "# LOG_MODE_DEFERRED.  Deferred mode needs CONFIG_LOG_PROCESS_THREAD to run,\n"
+    "# and the AEN bench procedure runs apps whose main() never yields (a\n"
+    "# non-yielding busy loop is what keeps the Secure Enclave from gating the\n"
+    "# DAP and the SE-UART -- see docs/debugging-aen.md section 4).  A\n"
+    "# non-yielding main() starves the log thread, and because CONFIG_LOG_PRINTK\n"
+    "# routes printk() through the same queue the Alp SDK banner disappears too:\n"
+    "# a running, fault-free board prints ZERO bytes.  Measured on E1M-AEN801\n"
+    "# silicon (issue #1373) -- PC inside z_impl_k_busy_wait, IPSR = 000,\n"
+    "# CFSR @ 0xE000ED28 = 00000000, and no UART output at all.  Minimal mode\n"
+    "# formats in the calling context, so the same app prints.  An app that\n"
+    "# wants the deferred pipeline (backends, runtime filtering, timestamps)\n"
+    "# overrides this with CONFIG_LOG_MODE_DEFERRED=y in its prj.conf.\n"
+    "choice LOG_MODE\n"
+    "\tdefault LOG_MODE_MINIMAL\n"
+    "endchoice\n"
+    "\n"
+)
+
+
+def _aen_kconfig_defconfig(dir_name: str, role: str, part: str) -> str:
     board_sym = dir_name.upper()
     role_u = role.upper()
+    # NUM_IRQS=480 is an Ensemble-FAMILY constant, not a per-part one:
+    # upstream Zephyr defaults it to 480 for every RTSS cluster it ships
+    # (soc/alif/ensemble/{e1c,e4,e6,e8}/Kconfig.defconfig.*_rtss_{hp,he}).
+    # The part designator in the sentence is NOT -- it used to be the
+    # literal "E8" on every E1M-AEN* board.
     return (
         _COPYRIGHT_HASH +
         "\n"
         f"if BOARD_{board_sym}\n"
         "\n"
-        f"# The Ensemble E8 RTSS-{role_u} has CONFIG_NUM_IRQS=480, so the ARMv8-M vector table is\n"
+        f"# The Ensemble {part} RTSS-{role_u} has CONFIG_NUM_IRQS=480, so the ARMv8-M vector table is\n"
         "# (16 + 480) * 4 = 1984 bytes and the hardware VTOR must be 2 KiB (0x800) aligned.\n"
         "# For an MCUboot chain-loaded image the linker therefore places _vector_table at\n"
         "# slot_base + 0x800, but Zephyr hard-defaults the MCUboot header (ROM_START_OFFSET,\n"
@@ -582,6 +1047,7 @@ def _aen_kconfig_defconfig(dir_name: str, role: str) -> str:
         "config ROM_START_OFFSET\n"
         "\tdefault 0x800 if BOOTLOADER_MCUBOOT\n"
         "\n"
+        + _AEN_LOG_MODE_DEFAULT +
         f"endif # BOARD_{board_sym}\n"
     )
 
@@ -610,8 +1076,12 @@ def _aen_dts(
     model = f"Alp {sku} Cortex-M55 {role_u} carrier"
     uart_node = _uart_node_label(rx_row)
 
+    part = _aen_part(soc_spec)
+    family_display = _aen_family_display(soc_spec)
+    peripherals_dtsi = _aen_peripherals_dtsi(soc_spec)
+
     total_kib = round(float(variant["mram_mb"]) * 1024)
-    partitions = _aen_flash_partitions(total_kib, role, memory_map)
+    mram_base, partitions = _aen_flash_partitions(total_kib, role, memory_map)
     image_kib = dict((label, size) for label, _off, size in partitions)["image-0"]
     disjoint_slot0 = _aen_role_slot0_map(memory_map, role) is not None
 
@@ -624,10 +1094,10 @@ def _aen_dts(
         " * Copyright (c) 2026 Alp Lab AB",
         " * SPDX-License-Identifier: Apache-2.0",
         " *",
-        f" * {sku} (Alif Ensemble E8, {display_variant}) Cortex-M55-{role_u} carrier,",
+        f" * {sku} ({family_display}, {display_variant}) Cortex-M55-{role_u} carrier,",
         " * for the Alp E1M-EVK.",
         " *",
-        f" * Reuses the upstream Alif E8 SoC + RTSS-{role_u} cluster devicetree and:",
+        f" * Reuses the upstream Alif {part} SoC + RTSS-{role_u} cluster devicetree and:",
         " *   - retargets the console from the DevKit's UART2 to the E1M carrier console",
         f" *     (Alif {uart_node.upper()}, {rx_row['silicon_pad']}/{tx_row['silicon_pad']} -- the E1M edge \"UART0\");",
         " *   - runs boot + storage from on-die MRAM only.  The SoM's OSPI0 NOR",
@@ -642,9 +1112,10 @@ def _aen_dts(
             f" * physically separate from {other_role_u}'s -- both cores' images can be",
             " * resident in MRAM at once (see the partition map below and",
             f" * metadata/e1m_modules/{sku}.yaml `memory_map:`).  OTA is DEFERRED",
-            " * (CONFIG_SINGLE_APPLICATION_SLOT=y, no secondary/scratch slot) so both",
-            " * 2688 KiB code slots fit the 5632 KiB App MRAM alongside the ~2.6 MiB NPU",
-            " * MRAM-model budget; see zephyr/sysbuild/aen/README.md.",
+            " * (CONFIG_SINGLE_APPLICATION_SLOT=y, no secondary/scratch slot): the",
+            f" * per-core code slots ({_aen_slot0_sizes_display(memory_map)}) share the",
+            f" * {total_kib} KiB App MRAM with boot, storage and the NPU MRAM-model",
+            " * budget -- see zephyr/sysbuild/aen/README.md for the sizing rationale.",
         ]
     elif role == "hp":
         lines += [
@@ -665,7 +1136,7 @@ def _aen_dts(
         "",
         f"#include <alif/ensemble/{display_variant.lower()}.dtsi>",
         f"#include <alif/ensemble/common/ensemble_rtss_{role}.dtsi>",
-        "#include <alif/ensemble_e8_peripherals.dtsi>",
+        f"#include <{peripherals_dtsi}>",
         f'#include "{dir_name}-pinctrl.dtsi"',
         "",
         "/ {",
@@ -725,8 +1196,8 @@ def _aen_dts(
         "/*",
         " * On-die MRAM as a real flash controller (ADR 0017 Tier-2).",
         " *",
-        " * Upstream Zephyr's E8 SoC dtsi exposes the MRAM only as a memory region",
-        ' * (`mram: flash@80000000`, compatible "zephyr,memory-region","soc-nv-flash"):',
+        f" * Upstream Zephyr's {part} SoC dtsi exposes the MRAM only as a memory region",
+        f' * (`mram: flash@{mram_base:x}`, compatible "zephyr,memory-region","soc-nv-flash"):',
         " * XIP-readable but with NO flash driver, so FLASH_HAS_DRIVER_ENABLED stays",
         " * unset and MCUboot's flash_map has nothing to read/write slot0 with.",
         " *",
@@ -737,7 +1208,7 @@ def _aen_dts(
         " * `mram_storage` soc-nv-flash child carrying the program/erase geometry the",
         " * driver reads (DT_NODELABEL(mram_storage): erase-block-size / write-block-size",
         " * / reg).  This mirrors the fork e1.dtsi node structure exactly (controller",
-        " * `mram_flash@80000000` + `mram_storage@80000000` soc-nv-flash child); the only",
+        f" * `mram_flash@{mram_base:x}` + `mram_storage@{mram_base:x}` soc-nv-flash child); the only",
         " * difference is we reuse the upstream `mram` nodelabel as the controller rather",
         " * than declaring a fresh `mram_flash` node, since upstream owns the node.",
     ]
@@ -749,7 +1220,7 @@ def _aen_dts(
             f" * {total_kib} KiB App MRAM) for the sysbuild/aen MCUboot profile (MCUboot + a",
             " * signed application image, CONFIG_SINGLE_APPLICATION_SLOT=y -- no OTA/swap",
             " * slot, deferred per #1069).  Offsets are relative to the soc-nv-flash child",
-            f" * base (MRAM 0x80000000).  {other_role_u}'s disjoint slot0 window is NOT a",
+            f" * base (MRAM 0x{mram_base:x}).  {other_role_u}'s disjoint slot0 window is NOT a",
             " * partition in this table (it's outside this core's own view); see",
             f" * metadata/e1m_modules/{sku}.yaml `memory_map:` for the full physical map:",
             " *",
@@ -764,7 +1235,7 @@ def _aen_dts(
             " *",
             f" * MRAM partition map ({total_kib} KiB total) for the sysbuild/aen MCUboot profile",
             " * (MCUboot + a signed application image, swap-using-scratch).  Offsets are",
-            " * relative to the soc-nv-flash child base (MRAM 0x80000000):",
+            f" * relative to the soc-nv-flash child base (MRAM 0x{mram_base:x}):",
             " *",
         ]
     labels_display = {
@@ -774,12 +1245,14 @@ def _aen_dts(
         "image-scratch": "scratch ",
         "reserved": "reserved",
         "storage": "storage ",
+        "atoc": "atoc    ",
     }
     trailers = {
         "image-0": "   (primary slot, code-partition)",
         "image-1": "   (secondary slot for OTA)",
         "reserved": "   (ex-scratch; unused, OTA deferred)",
         "storage": "    (settings / NVS)",
+        "atoc": "    (SE-owned: SETOOLS top-anchors the ATOC here -- do NOT write, #1289)",
     }
     for label, off, size in partitions:
         lines.append(
@@ -816,9 +1289,14 @@ def _aen_dts(
         "\t/delete-property/ zephyr,memory-region;",
         "\t/delete-property/ ranges;",
         "",
-        "\tmram_storage: mram_storage@80000000 {",
+        # Node address + `reg` base come from the SAME `mram_base` the
+        # partition offsets above are relative to -- they used to be a
+        # hardcoded 0x80000000 literal while the offsets were computed from
+        # the metadata-declared `mcuboot` base, an invariant documented only
+        # in an error string and never enforced.
+        f"\tmram_storage: mram_storage@{mram_base:x} {{",
         '\t\tcompatible = "soc-nv-flash";',
-        f"\t\treg = <0x80000000 DT_SIZE_K({total_kib})>;",
+        f"\t\treg = <{hex(mram_base)} DT_SIZE_K({total_kib})>;",
         "\t\terase-block-size = <1024>;",
         "\t\twrite-block-size = <16>;",
         "",
@@ -836,6 +1314,7 @@ def _aen_dts(
         "image-scratch": "scratch_partition",
         "reserved": "reserved_partition",
         "storage": "storage_partition",
+        "atoc": "atoc_partition",
     }
     partition_dt_labels = {
         "mcuboot": "mcuboot",
@@ -844,6 +1323,7 @@ def _aen_dts(
         "image-scratch": "image-scratch",
         "reserved": "reserved",
         "storage": "storage",
+        "atoc": "atoc",
     }
     for i, (label, off, size) in enumerate(partitions):
         node = partition_node_labels[label]
@@ -877,9 +1357,10 @@ def _aen_dts(
         _accel, node = ethos_u
         # Enable the Arm Ethos-U NPU node this SoC carries.  The full node
         # (reg/interrupts/compatible/secure-enable) is already declared
-        # status="disabled" in the SoC peripherals dtsi
-        # (zephyr/dts/alif/ensemble_e8_peripherals.dtsi); a silicon board just
-        # flips it on.  Harmless on its own -- CONFIG_ETHOS_U is `default n`,
+        # status="disabled" in this SoC's peripherals dtsi (the
+        # `zephyr_peripherals_dtsi` included above -- e.g.
+        # zephyr/dts/alif/ensemble_e8_peripherals.dtsi for the E8); a silicon
+        # board just flips it on.  Harmless -- CONFIG_ETHOS_U is `default n`,
         # so no driver binds until an inference app pulls it in via
         # ALP_SDK_INFERENCE_BACKEND_ETHOS_U_AEN (select ETHOS_U if
         # DT_HAS_ARM_ETHOS_U_ENABLED).  A native_sim build uses the native_sim
@@ -938,17 +1419,22 @@ def emit_zephyr_board(
         role = core_id.split("_")[-1]
         uart_node = _uart_node_label(rx_row)
         memory_map = sku_preset.get("memory_map")
+        _aen_require_disjoint_slot0(sku, sku_preset, memory_map)
         # This role's own disjoint slot0 base (#1069), falling back to the
-        # stock symmetric-layout address (0x80010000, same for every
-        # single-M55 AEN SKU and for AEN801 boards with no memory_map
-        # override) when this SoM declares no per-role `<role>_slot0`
-        # region -- see _aen_role_slot0_map / _aen_flash_partitions.
+        # stock symmetric-layout address (the App MRAM base + the mcuboot
+        # partition, same for every single-M55 AEN SKU and for AEN801
+        # boards with no memory_map override) when this SoM declares no
+        # per-role `<role>_slot0` region -- see _aen_role_slot0_map /
+        # _aen_flash_partitions.
         slot0_region = _aen_role_slot0_map(memory_map, role)
-        slot0_base = slot0_region["base"] if slot0_region else 0x80010000
+        slot0_base = (slot0_region["base"] if slot0_region
+                      else _AEN_MRAM_BASE + _AEN_MCUBOOT_KIB * 1024)
         files[f"{dir_name}/{dir_name}-pinctrl.dtsi"] = _aen_pinctrl_dtsi(
-            role, sku, rx_row, tx_row)
-        files[f"{dir_name}/{basename}_defconfig"] = _aen_defconfig(uart_node, slot0_base)
-        files[f"{dir_name}/Kconfig.defconfig"] = _aen_kconfig_defconfig(dir_name, role)
+            role, sku, rx_row, tx_row, _aen_family_display(soc_spec))
+        files[f"{dir_name}/{basename}_defconfig"] = _aen_defconfig(
+            uart_node, rx_row, tx_row, slot0_base)
+        files[f"{dir_name}/Kconfig.defconfig"] = _aen_kconfig_defconfig(
+            dir_name, role, _aen_part(soc_spec))
         files[f"{dir_name}/{basename}.dts"] = _aen_dts(
             sku, core_id, soc_spec, variant, dir_name, basename, rx_row, tx_row,
             _aen_ethos_u(soc_spec), memory_map)

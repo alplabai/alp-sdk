@@ -16,6 +16,7 @@ from .adapters.cpu import CpuAdapter
 from .adapters.ethos_u import VelaAdapter
 from .adapters.drpai import DrpaiAdapter
 from .adapters.deepx import DeepxAdapter
+from .adapters.executorch import ExecutorchAdapter
 from .manifest import Manifest, Target, Coverage
 from .package import write_package
 from .targets import resolve_targets
@@ -23,7 +24,12 @@ from .tensorio import extract_io
 
 # Default adapter registry. Each is detect-and-skip (is_available() False when
 # its tool is absent); vela (ethos_u) skips on hosts without the ethos-u-vela package.
-_ADAPTERS: list[CompilerAdapter] = [CpuAdapter(), VelaAdapter(), DrpaiAdapter(), DeepxAdapter()]
+# A backend may carry more than one adapter (cpu: CpuAdapter for .tflite,
+# ExecutorchAdapter for .pte) -- see the by_backend grouping below, which
+# selects among a backend's adapters by accepts(src_fmt), not by last-one-wins.
+_ADAPTERS: list[CompilerAdapter] = [
+    CpuAdapter(), VelaAdapter(), DrpaiAdapter(), DeepxAdapter(), ExecutorchAdapter(),
+]
 
 # #1125: mirrors metadata/schemas/board.schema.json's `models[].name` pattern.
 # build_model() is called directly by non-CLI callers (tests, future tooling),
@@ -43,7 +49,9 @@ def build_model(*, sku: str, name: str, source: Path, out_dir: Path,
     if not _NAME_RE.fullmatch(name):
         raise ValueError(f"invalid model name {name!r}: must match {_NAME_RE.pattern!r}")
     registry = list(_ADAPTERS if adapters is None else adapters)
-    by_backend = {a.backend: a for a in registry}
+    by_backend: dict[str, list[CompilerAdapter]] = {}
+    for a in registry:
+        by_backend.setdefault(a.backend, []).append(a)
     specs = resolve_targets(sku, metadata_root=metadata_root)
     src_fmt = _src_format(source)
     opts_by_backend = compile_opts or {}
@@ -53,11 +61,24 @@ def build_model(*, sku: str, name: str, source: Path, out_dir: Path,
     coverage: list[Coverage] = []
     blobs: list[bytes] = []
     for spec in specs:
-        adapter = by_backend.get(spec.backend)
-        if adapter is None:
+        candidates = by_backend.get(spec.backend, [])
+        if not candidates:
             coverage.append(Coverage(spec.backend, spec.accel_config, "skipped",
                                      f"no compiler adapter for {spec.backend}"))
             continue
+        if len(candidates) > 1:
+            # A backend with more than one adapter (cpu: CpuAdapter + ExecutorchAdapter)
+            # is disambiguated by source format up front -- accepts() decides identity,
+            # not registration order. A single-adapter backend keeps the original order
+            # below (requires_compile_opts / is_available reported before "incompatible"),
+            # so an unrelated format mismatch doesn't mask a "no compile config" skip.
+            adapter = next((a for a in candidates if a.accepts(src_fmt)), None)
+            if adapter is None:
+                coverage.append(Coverage(spec.backend, spec.accel_config, "incompatible",
+                                         f"{spec.backend} does not accept .{src_fmt}"))
+                continue
+        else:
+            adapter = candidates[0]
         backend_opts = opts_by_backend.get(spec.backend)
         if adapter.requires_compile_opts and not backend_opts:
             coverage.append(Coverage(spec.backend, spec.accel_config, "skipped",

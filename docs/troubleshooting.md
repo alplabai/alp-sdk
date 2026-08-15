@@ -185,10 +185,8 @@ The chip isn't ACKing on its expected address.  Causes:
 * Wrong I2C bus -- check the SoM preset (`E1M-<MPN>.yaml`) for which bus the chip is on
   (e.g. V2N's PMICs are on `brd_i2c`, not `e1m_i2c0`).
 * Wrong slave address -- confirm against the SoM preset's
-  `metadata/e1m_modules/<SKU>.yaml` `i2c_devices:` block (V2N/V2M family;
-  each entry carries its own `address_7bit`), or, for the AEN family
-  (which has no `i2c_devices:` block), the chip's own
-  `metadata/chips/<chip>.yaml` `i2c: addresses:` field.
+  `metadata/e1m_modules/<SKU>.yaml` `i2c_devices:` block (V2N/V2M/AEN
+  families all carry one; each entry has its own `address_7bit`).
 * Power not yet on the chip -- some chips need their REG_ON pin
   pulled high first (e.g. Murata Wi-Fi/BT module).
 
@@ -219,6 +217,28 @@ Stub-status driver.  Check the chip's `metadata/chips/<chip>.yaml`
 high-level helpers wait for a follow-up implementation.
 
 ## Hardware-related issues
+
+### E1M-AEN console prints nothing at all (not even the banner)
+
+Zero bytes on the UART -- no `*** Booting Zephyr OS build ... ***`, no
+Alp SDK banner, no log lines -- looks exactly like a bad flash or a dead
+board, and usually isn't.  If your `main()` never yields (the
+`for (;;) { k_busy_wait(1000); }` shape the AEN bench procedure calls
+for, so the Secure Enclave doesn't gate the DAP and the SE-UART), then
+under `CONFIG_LOG_MODE_DEFERRED` the log processing thread never gets
+scheduled and `CONFIG_LOG_PRINTK` takes the banner down with it.
+
+Distinguish it from a fault in one SWD attach: halt and read `PC`,
+`IPSR`, and `CFSR` at `0xE000ED28`.  A `PC` inside `z_impl_k_busy_wait`
+with `IPSR = 000` and `CFSR = 00000000` is a healthy, running,
+log-starved board.
+
+Every `zephyr/boards/alp/e1m_aen*` board tree now defaults to
+`LOG_MODE_MINIMAL`, which prints from the calling context and cannot be
+starved this way; you only hit this on an application that overrides it
+back to `CONFIG_LOG_MODE_DEFERRED=y`.  Full write-up, including what
+minimal mode costs you, in
+[`debugging-aen.md` §6](debugging-aen.md#6-the-console-prints-nothing-and-the-board-is-fine).
 
 ### Module powers up but Renesas / Alif silicon doesn't boot
 

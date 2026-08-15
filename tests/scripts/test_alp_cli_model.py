@@ -47,6 +47,48 @@ def test_alp_model_build_threads_compile_opts(tmp_path, monkeypatch):
     assert Path(opts["calibration"]).is_absolute()
 
 
+def test_alp_model_build_only_resolves_path_valued_drpai_opts(tmp_path, monkeypatch):
+    # Issue #1271 root cause: _resolve_compile used to treat EVERY string opt
+    # value as a path. drpai's opts mix real paths (images) with opaque
+    # strings (input_shape, input_name, product) -- a shape string like
+    # "1,3,224,224" resolved into board.yaml's dir became a bogus path
+    # (".../1,3,224,224"), which made the adapter's own 224x224 shape check
+    # misfire on the only real board.yaml-driven path. Only `images` may be
+    # turned into an absolute path here; the rest must reach the adapter
+    # byte-for-byte as declared.
+    (tmp_path / "models").mkdir()
+    (tmp_path / "models" / "m.onnx").write_bytes(b"ONNX")
+    (tmp_path / "models" / "calib").mkdir()
+    (tmp_path / "board.yaml").write_text(
+        "name: demo\n"
+        "som:\n  sku: E1M-V2M101\n"
+        "cores: {}\n"
+        "models:\n"
+        "  - name: demo\n"
+        "    source: models/m.onnx\n"
+        "    compile:\n"
+        "      drpai: { input_shape: '1,3,224,224', input_name: input, "
+        "images: models/calib, product: V2N }\n",
+        encoding="utf-8")
+    captured = {}
+    import alp_cli.model as climod
+    def fake_build_model(*, sku, name, source, out_dir, metadata_root, compile_opts=None):
+        captured["compile_opts"] = compile_opts
+        p = out_dir / f"{name}.alpmodel"; out_dir.mkdir(parents=True, exist_ok=True); p.write_bytes(b"X")
+        return p
+    monkeypatch.setattr(climod, "build_model", fake_build_model)
+    res = CliRunner().invoke(cli, ["model", "build", "--board", str(tmp_path / "board.yaml"),
+                                   "--out", str(tmp_path / "out"),
+                                   "--metadata-root", str(_ROOT / "metadata")],
+                             catch_exceptions=False)
+    assert res.exit_code == 0, res.output
+    opts = captured["compile_opts"]["drpai"]
+    assert opts["input_shape"] == "1,3,224,224"
+    assert opts["input_name"] == "input"
+    assert opts["product"] == "V2N"
+    assert Path(opts["images"]).is_absolute() and opts["images"].endswith("calib")
+
+
 def test_alp_model_build_emits_alpmodel(tmp_path):
     (tmp_path / "models").mkdir()
     # A real (compilable) fixture, not dummy bytes: E1M-AEN801 resolves ethos_u

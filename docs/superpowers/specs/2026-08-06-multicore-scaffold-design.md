@@ -268,8 +268,11 @@ sized to the generated package — the DFP's own SETOOLS transcript
 (`docs/Overview.md:193-224`) shows a 13,552-byte package landing at
 **`0x8057cb10`**, against a window top of `0x80580000`.
 
-alp-sdk's map declares a region named **`storage`** at `0x80560000`, 128 KiB,
-spanning `0x80560000`–`0x8057FFFF`. **`0x8057cb10` falls inside it.** The
+alp-sdk's map declared a region named **`storage`** at `0x80560000`, 128 KiB,
+spanning `0x80560000`–`0x8057FFFF`. **`0x8057cb10` fell inside it.**
+RESOLVED in #1289: `storage` now ends at `0x80578000` (96 KiB) and the top
+32 KiB is a separate SE-owned `atoc` region, so the landing address above
+no longer falls in customer-writable space. The
 dual-core demo labels the same window "ATOC application table", which is the
 accurate description of what occupies it.
 

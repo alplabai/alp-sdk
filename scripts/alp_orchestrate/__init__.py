@@ -147,10 +147,11 @@ from .kconfig_symbols import emit_kconfig  # noqa: E402,F401  (re-export: cli + 
 # Slice-command resolution (planner-side; the executor was retired)
 # ---------------------------------------------------------------------
 # The slice-command / flash-recipe cluster lives in orchestrator.py.
-# Re-export _slice_command (tests) and iter_buildable_slices (ADR-0020
-# Phase 1 -- tests + buildplan.py).
+# Re-export _slice_command / _slice_post_commands (tests) and
+# iter_buildable_slices (ADR-0020 Phase 1 -- tests + buildplan.py).
 from .orchestrator import (  # noqa: E402,F401
     _slice_command,
+    _slice_post_commands,  # noqa: F401  (re-export: tests -- see buildplan.py)
     iter_buildable_slices,  # noqa: F401  (re-export: ADR-0020 Phase 1 -- tests + buildplan.py)
 )
 

@@ -115,8 +115,25 @@ struct cc3501e {
  */
 alp_status_t cc3501e_init(cc3501e_t *ctx, alp_spi_t *bus);
 
-/** Pulse the firmware's reset line then de-assert WIFI.EN.  Blocks
- *  until the firmware's PING reply arrives or the timeout expires. */
+/**
+ * @brief Pulse the firmware's reset line, de-assert WIFI.EN, then enforce
+ *        wire-protocol compatibility.
+ *
+ * Blocks for the TI SWRU626 cold-boot budget, then reads @c GET_VERSION.
+ * If the round trip completes and the reply differs from this host's
+ * @c ALP_CC3501E_PROTOCOL_VERSION, the context is refused: @p ctx is left
+ * uninitialised (every later call returns @ref ALP_ERR_NOT_READY) and this
+ * returns @ref ALP_ERR_VERSION -- retrying cannot reconcile two binaries
+ * that disagree about the wire (#1371).  A round trip that does not
+ * complete at all (the common case immediately after a cold boot -- see
+ * @ref cc3501e_hard_reset's Puya-flash note) is NOT a version verdict:
+ * @p ctx is left usable so a caller's own retry (another
+ * @ref cc3501e_hard_reset) can still align the link.
+ *
+ * @ref cc3501e_get_version stays a bare round-trip with no comparison of
+ * its own -- callers that use it as a liveness probe (not a compat gate)
+ * are unaffected by the refusal above.
+ */
 alp_status_t cc3501e_reset(cc3501e_t *ctx);
 
 /**
@@ -166,8 +183,18 @@ alp_status_t cc3501e_hard_reset(cc3501e_t *ctx);
  */
 alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms);
 
-/** Retrieve the firmware's protocol version (compare against
- *  `ALP_CC3501E_PROTOCOL_VERSION` to confirm wire compatibility). */
+/**
+ * @brief Retrieve the firmware's reported protocol version.
+ *
+ * A bare @c GET_VERSION round-trip -- it does NOT compare the reply against
+ * `ALP_CC3501E_PROTOCOL_VERSION` itself; @ref cc3501e_reset performs that
+ * comparison (and refuses a mismatch) once, right after the cold-boot
+ * completes (#1371).  This function stays a pure liveness/diagnostic probe
+ * deliberately, so that callers which use it that way (the cold-boot soaks
+ * in examples/aen/aen-cc3501e-bringup and examples/peripheral-io/alp-console)
+ * keep working: `ALP_OK` here means "the round trip completed", nothing
+ * about wire compatibility.
+ */
 alp_status_t cc3501e_get_version(cc3501e_t *ctx, uint16_t *version_out);
 
 /**

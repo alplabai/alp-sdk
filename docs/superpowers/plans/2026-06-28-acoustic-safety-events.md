@@ -931,7 +931,7 @@ tests:
 
   alp_sdk.example.acoustic_safety_events.aen_build:
     platform_allow:
-      - ensemble_e8_dk/ae402fa0e5597le0/rtss_hp
+      - ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp
     build_only: true
     tags:
       - alp-sdk
@@ -1017,7 +1017,7 @@ ASE,0.10,ALARM,0.90,3000.0,0.21
 ## Build
 
 ```
-west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples/audio/acoustic-safety-events
+west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/audio/acoustic-safety-events
 west flash
 ```
 

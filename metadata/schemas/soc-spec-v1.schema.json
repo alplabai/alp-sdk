@@ -134,6 +134,12 @@
       "description": "Always-on / utility SRAM that survives STOP mode."
     },
 
+    "zephyr_peripherals_dtsi": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_./-]+\\.dtsi$",
+      "description": "OPTIONAL `#include <...>` path of the alp-sdk devicetree overlay declaring THIS SoC's peripheral and NPU node set (e.g. \"alif/ensemble_e8_peripherals.dtsi\", which lives at zephyr/dts/alif/ensemble_e8_peripherals.dtsi). `scripts/gen_zephyr_board.py --emit zephyr-board` emits it verbatim into the generated board .dts. Declared per SoC rather than derived from `part` because a wrong overlay produces a board that builds and then misbehaves on silicon -- the E8's overlay declares `ethosu85`, while an E3 carries 2x Ethos-U55 and no U85 -- so a SoC with no overlay of its own must REFUSE to generate a board rather than inherit a sibling part's. Omit for SoCs the board generator does not fully cover."
+    },
+
     "peripherals": {
       "type": "object",
       "description": "Counts per peripheral kind. Studio uses these to validate which blocks fit on the SoC. Use the SAME keys across vendors so the studio can do generic matching.",
@@ -255,7 +261,8 @@
           "size_kib":         { "type": "integer" },
           "size_mib":         { "type": "integer" },
           "accessible_from":  { "type": "array", "items": { "type": "string" } },
-          "cacheable":        { "type": "boolean" }
+          "cacheable":        { "type": "boolean" },
+          "access_windows":   { "$ref": "#/$defs/access_windows" }
         }
       }
     },
@@ -268,6 +275,33 @@
   },
 
   "$defs": {
+    "access_windows": {
+      "type": "object",
+      "description": "OPTIONAL per-core addressable sub-window of the region, keyed by core id.  `accessible_from:` is a yes/no per core and cannot express \"this core reaches only PART of the region\" -- the RZ/V2N Cortex-M33 does exactly that (FSP bsp_slave_address.h: CM33-secure 0x80000000 / CM33-non-secure 0x90000000 -> A55 0x40000000, 256 MiB) while ddr_main spans 4 GiB.  Declare the reachable slice here and scripts/alp_orchestrate/carveout.py confines that core's IPC carve-outs to it instead of allocating at the region top, where the address does not exist for that core.  Omit for regions every accessible_from core reaches in full.",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]+$" },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["base"],
+        "additionalProperties": false,
+        "anyOf": [
+          { "required": ["size_kib"] },
+          { "required": ["size_mib"] }
+        ],
+        "properties": {
+          "base": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Window base in the SAME address space as the region's own `base` (i.e. the physical/host view), NOT the aliased address the core issues."
+          },
+          "size_kib": { "type": "integer", "minimum": 1 },
+          "size_mib": { "type": "integer", "minimum": 1 },
+          "note": {
+            "type": "string",
+            "description": "Provenance for the window -- name the vendor header/manual it was read from."
+          }
+        }
+      }
+    },
     "core": {
       "type": "object",
       "required": ["id", "type", "count"],
@@ -404,17 +438,24 @@
             "pyocd_target": {
               "type": "string",
               "minLength": 1,
-              "description": "pyOCD target id (cortex-debug `targetId` for servertype `pyocd`). For Alif Ensemble parts this is the variant's own `order_code` -- confirmed 1:1 against the CMSIS-Pack index (pack AlifSemiconductor.Ensemble 2.2.0)."
+              "description": "pyOCD target id (cortex-debug `targetId` for servertype `pyocd`). For Alif Ensemble parts this is the variant's own `order_code` -- confirmed 1:1 against the CMSIS-Pack index (pack AlifSemiconductor.Ensemble 2.2.0, released 2026-06-30, github.com/alifsemi/alif_ensemble-cmsis-dfp tag v2.2.0). Note: the DFP checkout used elsewhere in this repo for order-code/core spelling is pinned at v2.1.0 (2025-12-19) -- 2.1.0 is simply older than this citation, not a mismatch; the order-code spelling itself is unchanged between the two (both list AE822FA0E5597BS0 / LS0 identically)."
             },
             "jlink_device": {
               "type": "object",
-              "description": "SEGGER J-Link **attach/debug** device name (cortex-debug `device` for servertype `jlink`) for a live core, keyed by `cores[].id`. On Alif Ensemble this is the GENERIC `Cortex-M55` for every M55 core, not a part-number profile: `scripts/bench/aen/bench-env.sh:99-111` documents two distinct J-Link identities and states the part-number profile 'will NOT connect to a live/running secure core' -- corroborated by `docs/_aen-runbook-section.md:251` (`Could not connect to the target device` when the part profile is used to attach) and `docs/aen-bench-bringup.md:14` (the generic profile is what is bench-proven to attach, CPUID `0x411FD220` / SW-DP IDR `0x4C013477`). The part-number profile is a *separate* fact -- see `jlink_flash_device`. Validated against cores[].id by scripts/validate_metadata.py::_check_soc_debug_probe_identity.",
+              "description": "SEGGER J-Link **attach/debug** device name (cortex-debug `device` for servertype `jlink`) for a live core, keyed by `cores[].id`. On Alif Ensemble this is the GENERIC `Cortex-M55` for every M55 core, not a part-number profile: `scripts/bench/aen/bench-env.sh:108-119` documents two distinct J-Link identities. On a J-Link DLL older than V9.46 the part-number profile 'will NOT connect to a live/running secure core' -- corroborated by `docs/_aen-runbook-section.md:255` (`Could not connect to the target device` when the part profile is used to attach on an old DLL) -- but on V9.46+ the part-number profile also connects to a live core (`docs/aen-bench-bringup.md:14`, bench-confirmed 2026-06-16); the generic profile remains the documented choice for read/RAM-run regardless of DLL version, and is what was originally bench-proven to attach (CPUID `0x411FD220` / SW-DP IDR `0x4C013477`). The part-number profile is a *separate* fact -- see `jlink_flash_device`. Validated against cores[].id by scripts/validate_metadata.py::_check_soc_debug_probe_identity.",
               "additionalProperties": { "type": "string", "minLength": 1 }
             },
             "jlink_flash_device": {
+              "oneOf": [
+                { "type": "string", "minLength": 1 },
+                { "type": "null" }
+              ],
+              "description": "SEGGER J-Link **part-number device profile**, used ONLY to unlock J-Link's built-in Flow D MRAM loader (`scripts/bench/aen/bench-env.sh:108-114`) -- on a J-Link DLL older than V9.46 it cannot attach to a live/running core (use `jlink_device` for that); on V9.46+ it also attaches, but `jlink_device`'s generic profile stays the documented choice for read/RAM-run regardless. It is not per-core: both `scripts/bench/aen/flash-jlink-hp.sh` and `flash-jlink-mramxip.sh` select the SAME device string regardless of which core they flash, so this is a single per-variant string, not a jlink_device-shaped map. Populate only from a canonical entry in the vendor's own device database (e.g. SEGGER J-Link DLL `JLINKARM_DEVICE_GetInfo` readback) -- never derive it from a naming convention, and never publish an order-code alias that merely happens to resolve. `null` is a DECLARED known-unknown: this variant's device profile is genuinely unresolved (e.g. an order code the vendor device DB does not carry under any spelling) -- consumers must refuse rather than silently choose another transport. tan's `flow_d_available()` tests key PRESENCE, so a present-but-null value deliberately reaches `plan_alif_mram_jlink` and becomes the loud refusal it already produces for every other malformed Flow D field, instead of a silent Flow-A (SE-UART) fallback. ABSENCE of this key is NOT a permitted way to spell 'unknown' on an Alif Ensemble SoC: a missing key is exactly what silently downgrades Flow D to Flow A with no diagnostic (#1295) -- every Alif Ensemble variant must publish either the string or explicit null, enforced by scripts/validate_metadata.py::_check_soc_jlink_flash_device_declared."
+            },
+            "expect_dpidr": {
               "type": "string",
-              "minLength": 1,
-              "description": "SEGGER J-Link **part-number device profile**, used ONLY to unlock J-Link's built-in Flow D MRAM loader (`scripts/bench/aen/bench-env.sh:99-102`) -- it cannot attach to a live/running core (use `jlink_device` for that) and is not per-core: both `scripts/bench/aen/flash-jlink-hp.sh` and `flash-jlink-mramxip.sh` select the SAME device string regardless of which core they flash, so this is a single per-variant string, not a jlink_device-shaped map. Populate only where an in-tree script proves the exact string -- do not derive it from a naming convention."
+              "pattern": "^0x[0-9A-Fa-f]{8}$",
+              "description": "The ADIv5 SW-DP IDR (DPIDR) this variant's debug port answers, as a 32-bit `0x`-prefixed hex constant -- the wrong-board guard a host flasher reads BEFORE any write, while the session is still read-only (#1355). This is a property of the DEBUG PORT, not of a core: it is one per-variant string, not a `jlink_device`-shaped per-core map. Populate ONLY from a measurement on real silicon (`Found SW-DP with ID <id>` in a J-Link/pyOCD connect log) -- an absent key is the correct published 'unknown' and simply leaves the guard unarmed, whereas a GUESSED value is strictly worse than absent: if it happens to match some other board on the same bench it makes the guard pass on exactly the board it exists to exclude. Consumed as `flash_args.expect_dpidr`, and PAIRED there with this variant's per-core `jlink_device` (the live-core read attach profile) -- a downstream consumer refuses a half-armed pair, so a variant publishing `expect_dpidr` must also publish `jlink_device` for every core (enforced by scripts/validate_metadata.py::_check_soc_debug_probe_identity)."
             },
             "openocd_config": {
               "type": "string",

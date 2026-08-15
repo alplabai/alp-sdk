@@ -33,7 +33,7 @@ tests:
     # exercise the AEN fallback (Ethos-U dispatch) so the
     # cross-NPU portability claim has a public build target.
     platform_allow:
-      - ensemble_e8_dk/ae402fa0e5597le0/rtss_hp
+      - ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp
     tags:
       - alp-sdk
       - example

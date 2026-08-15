@@ -43,7 +43,7 @@ runs `app-gen-toc` locally, with no SE-UART involved in that step):
   verifies, then re-runs the SE boot ROM (reset via the nRESET pin) so the
   app boots from MRAM — it also persists to MRAM, same as Flow A. Helper:
   `scripts/bench/aen/flash-jlink.sh`. Needs the J-Link V9.46+ DLL (bench has
-  V9.50) and a probe on matched J-Link V13 firmware (May 2026).
+  V9.50).
 
 > The earlier blanket claim that *J-Link cannot write MRAM on this part* was
 > only ever true for the **generic** `Cortex-M55` profile — with the part
@@ -137,7 +137,7 @@ The rest of this document is that path.
 * A **SWD/J-Link probe** — for **Flow D** it is the burn path itself (select
   the part-number device profile so the built-in Alif MRAM loader activates),
   and it confirms the core came alive after provisioning. Needs the J-Link
-  V9.46+ DLL and a probe on matched J-Link V13 firmware. *Optional* if you only
+  V9.46+ DLL. *Optional* if you only
   use the SETOOLS/SE-UART path (Flow A).
 
 ## 2. Wire the SE-UART — the part everyone gets wrong
@@ -240,9 +240,11 @@ its boot ISP window. A clean write ends with `100% ... Done`.
 Power-cycle and re-run the §2 listener. The banner should now show the ATOC
 present and your image booting (instead of `No ATOC`). Once the SES releases
 the core, **J-Link can attach** for normal SWD debug — use the **generic
-`Cortex-M55` device**, not the Alif part number (the part-specific device
-connect sequence fails post-boot; the generic core device finds the released
-core at AP[3]):
+`Cortex-M55` device**, not the Alif part number, for this attach (on a J-Link
+DLL older than V9.46 the part-specific device connect sequence fails
+post-boot; V9.46+ also connects, but the generic core device is the
+documented one for finding the released core at AP[3] regardless — see
+[`aen-bench-bringup.md`](aen-bench-bringup.md) §1):
 
 ```bash
 JLinkExe -device Cortex-M55 -if SWD -speed 4000 -nogui 1

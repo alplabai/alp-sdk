@@ -128,7 +128,7 @@ reports before a build.
 | `arm-2d` | B | `v1.2.6` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `aws-iot` | B | `v3.1.5` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `azure-iot` | B | `1.5.0` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `bearssl` | B | `master` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `bearssl` | B | `7bea48e5e850ab4cafbe68d3765cdaba13a86d6f` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `canopennode` | B | `dec12fa3f0d790cafa8414a4c2930ea71ab72ffd` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `catch2` | B | `3.7.1` | BSL-1.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `cmsis-cv` | B | `25c6c111ee04dcfb0ae9093fd6dee4586872982c` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -146,14 +146,15 @@ reports before a build.
 | `littlefs` | B | `2.11` | BSD-3-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `lvgl` | A | `9.5.0` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `lwm2m` | B | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `madgwick-ahrs` | B | `unpinned (west.yml tracks xio-technologies/Fusion@main; TBD pin SHA after maintainer audit)` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `madgwick-ahrs` | B | `v1.3.2` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `mbedtls` | B | `4.1.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `micro-ros` | B | `humble` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `micropython` | B | `v1.24.1` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `minimp3` | B | `master` | CC0-1.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `minimp3` | B | `ea99364f61c14656440e8d77e9c233ccf3124633` | CC0-1.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `modbus` | A | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `nanopb` | A | `0.4.9.1` | Zlib | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `nlohmann-json` | B | `3.11.3` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `onnxruntime` | B | `1.28.0` | MIT & Apache-2.0 | ❌ core_class `a` | ❌ core_class `a` | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `opus` | B | `v1.5.2` | BSD-3-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `pid` | B | `0.9.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `ros2` | B | `humble` | Apache-2.0 | ❌ core_class `a` | ❌ core_class `a` | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -161,7 +162,7 @@ reports before a build.
 | `u8g2` | B | `2.36.5` | BSD-2-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `zcbor` | A | `0.9.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
-**243 / 245 (library × SKU) cells compatible (2 incompatible, 0 n/a).**
+**248 / 252 (library × SKU) cells compatible (4 incompatible, 0 n/a).**
 
 ### E1M-X family (Cortex-A55 + Cortex-M33)
 
@@ -170,7 +171,7 @@ reports before a build.
 | `arm-2d` | B | `v1.2.6` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `aws-iot` | B | `v3.1.5` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `azure-iot` | B | `1.5.0` | MIT | ✅ | ✅ | ✅ | ✅ |
-| `bearssl` | B | `master` | MIT | ✅ | ✅ | ✅ | ✅ |
+| `bearssl` | B | `7bea48e5e850ab4cafbe68d3765cdaba13a86d6f` | MIT | ✅ | ✅ | ✅ | ✅ |
 | `canopennode` | B | `dec12fa3f0d790cafa8414a4c2930ea71ab72ffd` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `catch2` | B | `3.7.1` | BSL-1.0 | ✅ | ✅ | ✅ | ✅ |
 | `cmsis-cv` | B | `25c6c111ee04dcfb0ae9093fd6dee4586872982c` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
@@ -188,14 +189,15 @@ reports before a build.
 | `littlefs` | B | `2.11` | BSD-3-Clause | ✅ | ✅ | ✅ | ✅ |
 | `lvgl` | A | `9.5.0` | MIT | ✅ | ✅ | ✅ | ✅ |
 | `lwm2m` | B | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `madgwick-ahrs` | B | `unpinned (west.yml tracks xio-technologies/Fusion@main; TBD pin SHA after maintainer audit)` | MIT | ✅ | ✅ | ✅ | ✅ |
+| `madgwick-ahrs` | B | `v1.3.2` | MIT | ✅ | ✅ | ✅ | ✅ |
 | `mbedtls` | B | `4.1.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `micro-ros` | B | `humble` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `micropython` | B | `v1.24.1` | MIT | ✅ | ✅ | ✅ | ✅ |
-| `minimp3` | B | `master` | CC0-1.0 | ✅ | ✅ | ✅ | ✅ |
+| `minimp3` | B | `ea99364f61c14656440e8d77e9c233ccf3124633` | CC0-1.0 | ✅ | ✅ | ✅ | ✅ |
 | `modbus` | A | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `nanopb` | A | `0.4.9.1` | Zlib | ✅ | ✅ | ✅ | ✅ |
 | `nlohmann-json` | B | `3.11.3` | MIT | ✅ | ✅ | ✅ | ✅ |
+| `onnxruntime` | B | `1.28.0` | MIT & Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `opus` | B | `v1.5.2` | BSD-3-Clause | ✅ | ✅ | ✅ | ✅ |
 | `pid` | B | `0.9.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 | `ros2` | B | `humble` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
@@ -203,7 +205,7 @@ reports before a build.
 | `u8g2` | B | `2.36.5` | BSD-2-Clause | ✅ | ✅ | ✅ | ✅ |
 | `zcbor` | A | `0.9.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
 
-**140 / 140 (library × SKU) cells compatible.**
+**144 / 144 (library × SKU) cells compatible.**
 
 Legend: ✅ `requires:` satisfied and wireable on the SoM · ❌ incompatible (the named `requires:` constraint fails) · — not applicable (no `integration:` for any OS this SoM runs).
 <!-- END GENERATED: gen_portability_matrix_libraries -->
@@ -211,8 +213,8 @@ Legend: ✅ `requires:` satisfied and wireable on the SoM · ❌ incompatible (t
 ## Hand-maintained analysis (expected diffs)
 
 The generated tables above prove every ✅ cell *generates* cleanly
-(as of #1025, that's 18 of the 21 E1M cells — NX9101's 3 are ❌; see
-below).  The analytical claims below — byte-identity of the emitted
+(that's 18 of the 21 E1M cells — NX9101's 3 are ❌ per
+#1025).  The analytical claims below — byte-identity of the emitted
 `alp.conf` across SKUs and the classification of legitimate diff
 lines — are hand-maintained against the swap-test evidence under
 `build/portability-test/` (gitignored), per the Method's step 4.
@@ -221,15 +223,46 @@ lines — are hand-maintained against the swap-test evidence under
 
 After stripping the `CONFIG_ALP_SOC_*=y` line and the one identity
 comment, **all 6 AEN SKUs produce byte-identical `alp.conf` for every
-example.**  That is the load-bearing intra-AEN portability proof.
-E1M-NX9101 is currently NOT buildable at all (`partial_hw_config: true`
-— see the generated Notes column — and, as of #1025, its only hw_rev,
-imx93 r1, is `status: tbd`, which the hw_rev-buildable gate refuses
-outright); the diff-family rows below describing its Kconfig lines
-document what its `alp.conf` looks like once a real hw_rev lands, not
-a cell that generates today. The U85-carrying SKUs (AEN401 / AEN601 /
-AEN801, visible as `Ethos-U U55+U85` in the Notes column) are the
-population that motivated Gap G-1 below.
+example.**  That is the load-bearing intra-AEN portability proof, and
+it is a claim about the *emitted Kconfig content*, unaffected by the
+paragraph below. E1M-NX9101 is currently NOT buildable at all
+(`partial_hw_config: true` — see the generated Notes column — and, as
+of #1025, its only hw_rev, imx93 r1, is `status: tbd`, which the
+hw_rev-buildable gate refuses outright); the diff-family rows below
+describing its Kconfig lines document what its `alp.conf` looks like
+once a real hw_rev lands, not a cell that generates today. The
+U85-carrying SKUs (AEN401 / AEN601 / AEN801, visible as
+`Ethos-U U55+U85` in the Notes column) are the population that
+motivated Gap G-1 below.
+
+**AEN301 / AEN501 / AEN601 / AEN701 were briefly ❌ under #1295, for a
+different reason than NX9101 — not a Kconfig-content regression.**
+#1295 populated `debug.jlink_flash_device` for the E3/E5/E6/E7 SoC
+variants (previously only E8's did), which is what promotes an AEN
+Zephyr slice to J-Link Flow D flashing in the first place. Doing so
+made `scripts/alp_orchestrate/loader.py`'s `_enforce_slot0_disjoint_across_roles`
+reachable for these four SoMs for the first time (it was previously
+inert -- see its docstring and #1384): the swap-test's temp
+`board.yaml` sets only ONE explicit `cores.<key>:` (per the Method's
+step 2); the sibling M55 core is left at the SoM preset's
+`topology:` default (`alp-stock-shim`, which defaults to `os: zephyr`
+for a `cortex-m*` core). With no `memory_map:` override, BOTH the
+target core and the stock-shim sibling resolved `flash_args.
+slot0_load_address` to the SAME default address -- the exact #1069
+HE/HP MRAM collision E1M-AEN801's own `memory_map:` override was
+written to prevent, then live for four more SoMs. `load_board_yaml`
+refused this loudly (by design -- see `_enforce_flow_d_preflight_pair`'s
+identical philosophy immediately above it in that file) *before*
+`--emit zephyr-conf` ever reached the target core's own config, so the
+byte-identical-`alp.conf` claim above was unprovable by the automated
+probe for those four SKUs, not falsified: nothing about the
+Kconfig content changed. #1445 landed the fix: every AEN preset now
+declares `he_slot0` at `0x80010000` and `hp_slot0` at `0x802b0000`,
+2688 KiB each, so these four SKUs generate cleanly again and the
+byte-identity claim above is provable by the automated probe once
+more. (E1M-AEN401 is unaffected: its E4 variant's
+`jlink_flash_device` is explicit `null`, a declared known-unknown, so
+`_resolve_slot0_load_address` is never invoked for it.)
 
 Expected diffs (legitimate — driven by silicon / SoM facts):
 
@@ -334,7 +367,8 @@ selected at compile time from the generated config alone.
 
 **Fix landed:** the orchestrator reads the silicon capability counts
 (`capabilities.ethos_u{55,65,85}_count`, resolved from the SoC JSON
-`npus[]`) and emits one `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U{55,65,85}=y`
+`npus[]`) and emits one
+`CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_{U55,U65,U85}=y`
 line per variant present.  AEN401/601/801 now emit BOTH `_U55=y` and
 `_U85=y` (the U55 pair alongside the U85); AEN301/501/701 emit only
 `_U55=y`; NX9101 emits `_U65=y`; the existing N93 PHY switch coexists.
@@ -354,7 +388,7 @@ M33).
 **Fix landed:** the orchestrator now consults the SoC JSON's
 `cores[<slice.core_id>].vector_extension` (per-slice, since one SoM
 can host multiple CPU classes — E7's A32 + M55 mix) and emits exactly
-one `CONFIG_ALP_SDK_INFERENCE_TFLM_{NEON,HELIUM,REF}=y` per slice.
+one `CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_{NEON,HELIUM,REF}=y` per slice.
 Verified: M55_HP slices on every AEN SKU emit `_HELIUM=y`; A55 slices
 on V2N101 emit `_NEON=y`; the V2N M33_SM slice + NX9101 M33 slice
 both emit `_REF=y` (baseline ARMv8-M, no DSP / MVE).  Matching Kconfig

@@ -314,6 +314,32 @@ ZTEST(alp_model_select, test_cpu_fallback_skipped_when_cpu_oversized)
 	zassert_equal(alp_model_select(&m, &env, ALP_INFERENCE_BACKEND_AUTO, &r), ALP_ERR_NO_FIT);
 }
 
+ZTEST(alp_model_select, test_executorch_format_decodes_not_silent_tflite_default)
+{
+	/* #1260: ALP_INFERENCE_MODEL_EXECUTORCH has been in the public enum
+	 * with no matching _fmt_enum() case, so a blob_format "executorch"
+	 * silently mis-decoded as ALP_INFERENCE_MODEL_TFLITE (wrong parser,
+	 * reported ALP_OK) instead of surfacing as the distinct format it is.
+	 * Prove the round trip: the string a host adapter
+	 * (scripts/alp_model/adapters/executorch.py) writes must come back out
+	 * as ALP_INFERENCE_MODEL_EXECUTORCH, not the TFLite default. */
+	static const uint8_t b0[4]     = { 1 };
+	alp_model_t          m         = { 0 };
+	m.n_targets                    = 1;
+	m.targets[0]                   = T("cpu", "*", "executorch", 0, 0, b0, 4);
+	const char            *avail[] = { "alif:ensemble:e7" };
+	alp_model_select_env_t env     = {
+		.soc_ref         = "alif:ensemble:e7",
+		.avail_silicon   = avail,
+		.n_avail_silicon = 1,
+	};
+	alp_model_select_result_t r = { 0 };
+	zassert_equal(alp_model_select(&m, &env, ALP_INFERENCE_BACKEND_AUTO, &r), ALP_OK);
+	zassert_equal(r.backend, ALP_INFERENCE_BACKEND_CPU);
+	zassert_equal(r.format, ALP_INFERENCE_MODEL_EXECUTORCH);
+	zassert_not_equal(r.format, ALP_INFERENCE_MODEL_TFLITE);
+}
+
 ZTEST(alp_model_select, test_explicit_cpu_request)
 {
 	/* Explicit CPU: picks the cpu blob directly; with no cpu blob the
@@ -334,4 +360,24 @@ ZTEST(alp_model_select, test_explicit_cpu_request)
 
 	m.n_targets = 1; /* drop the cpu blob -> only ethos_u remains */
 	zassert_equal(alp_model_select(&m, &env, ALP_INFERENCE_BACKEND_CPU, &r), ALP_ERR_NO_BACKEND);
+}
+
+ZTEST(alp_model_select, test_unrecognised_blob_format_returns_inval)
+{
+	/* Regression for the silent-default defect: _fmt_enum() used to
+	 * decode any unrecognised (or a real-but-forgotten, e.g. ExecuTorch
+	 * before this fix) blob_format string as ALP_INFERENCE_MODEL_TFLITE
+	 * and report ALP_OK. It must instead fail loud. */
+	static const uint8_t b0[4]     = { 1 };
+	alp_model_t          m         = { 0 };
+	m.n_targets                    = 1;
+	m.targets[0]                   = T("cpu", "*", "not_a_real_format", 0, 0, b0, 4);
+	const char            *avail[] = { "alif:ensemble:e7" };
+	alp_model_select_env_t env     = {
+		.soc_ref         = "alif:ensemble:e7",
+		.avail_silicon   = avail,
+		.n_avail_silicon = 1,
+	};
+	alp_model_select_result_t r = { 0 };
+	zassert_equal(alp_model_select(&m, &env, ALP_INFERENCE_BACKEND_AUTO, &r), ALP_ERR_INVAL);
 }

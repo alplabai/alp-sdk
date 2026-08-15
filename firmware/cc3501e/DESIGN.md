@@ -71,7 +71,7 @@ different thing and they must not be conflated:
 | Version | Source of truth | Surfaced by | Gates |
 |---|---|---|---|
 | **App SemVer** | `firmware-version.txt` (e.g. `0.2.0`) | `GET_DIAG_INFO.fw_version` (u16) | firmware release identity — human-facing "what's running" |
-| **Wire protocol version** | `ALP_CC3501E_PROTOCOL_VERSION` in `<alp/protocol/cc3501e.h>` (currently `4`) | `GET_VERSION` (0x01) | host↔firmware wire compatibility (host refuses a mismatch) |
+| **Wire protocol version** | `ALP_CC3501E_PROTOCOL_VERSION` in `<alp/protocol/cc3501e.h>` (currently `4`) | `GET_VERSION` (0x01) | host↔firmware wire compatibility (host refuses a mismatch — enforced by `cc3501e_reset()` in `chips/cc3501e/cc3501e_core.c`, which reads `GET_VERSION` once the cold boot completes and returns `ALP_ERR_VERSION` if the reply differs from the host's compile-time value; #1371) |
 | **GPE flash/image version** | `--version` in `ti/deploy_validate.sh` (date-derived) | — (programmer only) | CC35 vendor-RoT anti-rollback (unit rejects `<=` the programmed value) |
 
 **App SemVer → `fw_version` marker.** The runtime u16 is *derived* from
@@ -154,8 +154,10 @@ firmware redesigns:
 3. **SDIO-device.** Implement the §21 register bring-up in
    `transport_hw_ti_sdio.c` if/when SDIO is needed (SPI is the default).
 4. **Flashing.** The CC3501E is Alp-OTA-updated (`update_channel:
-   alp_ota_spi_otp`), never customer-flashed; bench units are
-   warm-programmed via SWD/J-Link (see `docs/cc3501e-production.md`).
+   alp_ota_spi_otp`, `flash_policy: recovery_only`); a customer flash
+   is permitted only to recover a bricked device, with Alp Lab-supplied
+   binaries.  Bench units are warm-programmed via SWD/J-Link (see
+   `docs/cc3501e-production.md`).
    The retired public `cc3501e_usb_bootloader` backend and
    `flash.py` release/bench helper now live in `alp-sdk-internal`
    as Alp-internal OTA-build tooling.

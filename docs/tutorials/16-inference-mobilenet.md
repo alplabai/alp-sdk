@@ -66,7 +66,7 @@ Backend selection:
 
 The `ETHOS_U` token is a single customer-facing handle that
 covers every Arm Ethos NPU variant. The planner emits
-per-variant `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_U{55,65,85}=y`
+per-variant `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_{U55,U65,U85}=y`
 gates from the silicon capability counts (`ethos_u{55,65,85}_count`,
 resolved from the SoC JSON `npus[]`) (G-1
 selector); the driver code at runtime dispatches to the right

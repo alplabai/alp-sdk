@@ -139,45 +139,6 @@
   "packages": ["WLCSP208 0.5mm", "FBGA194 0.5mm"],
   "variants": [
     {
-      "order_code": "AE302F80F55D5AE",
-      "package": "WLCSP208",
-      "temperature_grade": "extended",
-      "mram_mb": 5.5,
-      "sram_kb": 13824,
-      "sram_banks_kb": {
-        "SRAM0": 4096, "SRAM1": 2560,
-        "SRAM2_M55_HP_ITCM": 256, "SRAM3_M55_HP_DTCM": 1024,
-        "SRAM4_M55_HE_ITCM": 256, "SRAM5_M55_HE_DTCM": 256,
-        "SRAM6": 2048, "SRAM7": 512, "SRAM8": 2048, "SRAM9": 768
-      },
-      "gpio_18v": 120,
-      "optional_features": { "npu_hp": true, "can_fd": true },
-      "shipment_suffixes": ["-T", "-Y"],
-      "debug": {
-        "pyocd_target": "AE302F80F55D5AE",
-        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" }
-      }
-    },
-    {
-      "order_code": "AE302F80F5582AE",
-      "package": "WLCSP208",
-      "temperature_grade": "extended",
-      "mram_mb": 5.5,
-      "sram_kb": 8448,
-      "sram_banks_kb": {
-        "SRAM0": 4096, "SRAM1": 2560,
-        "SRAM2_M55_HP_ITCM": 256, "SRAM3_M55_HP_DTCM": 1024,
-        "SRAM4_M55_HE_ITCM": 256, "SRAM5_M55_HE_DTCM": 256
-      },
-      "gpio_18v": 120,
-      "optional_features": { "npu_hp": true, "can_fd": true },
-      "shipment_suffixes": ["-T", "-Y"],
-      "debug": {
-        "pyocd_target": "AE302F80F5582AE",
-        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" }
-      }
-    },
-    {
       "order_code": "AE302F80F55D5LE",
       "package": "FBGA194",
       "temperature_grade": "extended",
@@ -195,7 +156,8 @@
       "alp_module_skus": ["E1M-AEN301"],
       "debug": {
         "pyocd_target": "AE302F80F55D5LE",
-        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" }
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" },
+        "jlink_flash_device": "AE302F80F55D5_HE"
       }
     },
     {
@@ -214,7 +176,8 @@
       "shipment_suffixes": ["-T", "-Y"],
       "debug": {
         "pyocd_target": "AE302F80F5582LE",
-        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" }
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" },
+        "jlink_flash_device": "AE302F80F5582_HE"
       }
     },
     {
@@ -233,7 +196,8 @@
       "shipment_suffixes": ["-T", "-Y"],
       "debug": {
         "pyocd_target": "AE302F80C1557LE",
-        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" }
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" },
+        "jlink_flash_device": "AE302F80C1557_HE"
       }
     },
     {
@@ -252,7 +216,8 @@
       "shipment_suffixes": ["-T", "-Y"],
       "debug": {
         "pyocd_target": "AE302F40C1537LE",
-        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" }
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" },
+        "jlink_flash_device": "AE302F40C1537_HE"
       }
     }
   ],
@@ -260,6 +225,7 @@
     "2026-07-25 DFP SVD audit (Debug/SVD/AE302F80F55D5AE_CM55_HE_View.svd): removed `comparator_lp` (was 1).  This part's SVD peripheral list carries CMP0..CMP3 but NO LPCMP, while the E8 SVD (AE822FA0E5597BS0) carries both -- the low-power comparator is a FA0E5597-generation block this part does not have.  Same defect and same fix as E7 in #932; E3/E5 were out of that pass's reach because the DFP ships no Device/soc/ directory for them, only an SVD.  Per the file convention an absent key means zero instances (no SoC JSON sets a peripheral to 0).  Also re-confirmed correct against the same SVD: i2c_lp 1, spi_lp 1, no i3c_lp, i2c 4, spi 4, uart 8, i2s 4, adc_12bit 3, dac_12bit 2, comparator_hs 4, can_fd 1, ethernet 1, usb_2 1, sdio 1, rtc 1.",
     "Datasheet: 187 pages, ADTS0007 v2.8 May 2024.",
     "Variants differ in NPU-HP presence, CAN-FD presence, MRAM size (5.5 MB vs 1.5 MB), and SRAM tier (13.5 / 8.25 / 5.75 / 3.75 MB).",
-    "AE302F80F55D5LE is the variant Alp Lab uses on the E1M-AEN301 module SKU."
+    "AE302F80F55D5LE is the variant Alp Lab uses on the E1M-AEN301 module SKU.",
+    "debug.jlink_flash_device populated for all 4 variants (#1295; it was 6 before #1444 dropped this file's two WLCSP208 rows), sourced from the SEGGER J-Link DLL V9.46 built-in device table via JLINKARM_DEVICE_GetInfo readback of the AlifSemiconductor block -- canonical entry names, not order-code-alias probing (an earlier probe-based pass in the same issue wrongly published order-code spellings that only resolve as SEGGER aliases). E3 is one of three Ensemble subfamilies (E3/E5/E7) whose device names drop the package/grade suffix and use a bare `_HE` string; E6/E8 keep the full order code plus `_M55_HE`. AE302F80F5582AE/LE share one DB entry (`AE302F80F5582_HE`) and AE302F80F55D5AE/LE share another (`AE302F80F55D5_HE`) -- two order codes legitimately resolving to one device-table entry, confirmed by index readback, not a metadata duplication bug."
   ]
 }

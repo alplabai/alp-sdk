@@ -211,9 +211,55 @@ board.yaml (`cores:`)
    Tan planner / SDK reference    # plan JSON: per-slice command + generated files
         │
         ▼
-   tan build                      # writes alp.conf / local.conf / cmake-args per slice
-                                   # under build/<core>-<os>/, then runs each slice's build
+   tan build                      # writes alp.conf / local.conf per slice under
+                                   # build/<core>-<os>/, then runs each slice's build
 ```
+
+The SDK's own reference emitter no longer materialises a `cmake-args.txt` for a
+baremetal slice: nothing consumed it (#1278). The shipping `tan` executor still
+writes one — `python/tan/planner/buildplan.py` returns it per baremetal slice, so
+`tan build --materialise` produces `build/<core>-baremetal/cmake-args.txt` — and
+dropping it there is tracked as tan-cli#492. Until that lands, a baremetal build
+directory carries the file even though no build step reads it.
+
+A **baremetal slice is a two-step build**, and the plan now says so. Its
+`command` (`cmake -S <app> -B . …`) only CONFIGURES; the `cmake --build .` that
+turns that configure into object files and an executable is a separate entry in
+the slice's `postCommands`, which an executor MUST run in order once `command`
+exits 0. Running `command` alone reports a green build over a tree holding
+`CMakeCache.txt` and no binary at all (alplabai/tan-cli#550). The slice's
+`-DALP_*` settings ride that configure directly: the `-DNAME=VALUE` entries
+(`-DALP_SOM_SKU`, `-DALP_SOM_FAMILY`, `-DALP_CORE_ID`, `-DALP_TOOLCHAIN`, the
+NPU dispatch enables) as cmake cache arguments, and the bare `#if defined(…)`
+guards
+(`ALP_BOARD_<SLUG>`, `ALP_SOM_<SKU>`) as real compiler definitions through a
+generated `build/<core>-baremetal/alp-baremetal.cmake` the configure pulls in
+with `-DCMAKE_PROJECT_INCLUDE=` (alplabai/tan-cli#551). Unlike the retired
+`cmake-args.txt`, that file IS read by the build command — a slice that stops
+writing it stops compiling with its guards, loudly.
+
+The slice's `artifacts` block reports one path: `outputDir`, the directory
+`-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$<1:…>` pins the app's `add_executable()`
+targets to. The `$<1:…>` wrap is load-bearing — CMake appends a per-config
+subdirectory to a plain value on every multi-config generator (Visual Studio,
+Xcode, Ninja Multi-Config), and suppresses that append when a generator
+expression is used, so without it the plan would say `<buildDir>/output` while
+the binary sat in `output/Debug/`. The executable's *name* is the app's own
+`CMakeLists.txt` to pick and is never guessed here.
+
+`outputDir` is a deterministic place to look, **not a build-succeeded oracle**.
+`CMAKE_RUNTIME_OUTPUT_DIRECTORY` governs `add_executable` targets only, so a
+firmware app written as `add_library(fwcore STATIC …)` plus a custom
+link/objcopy target builds cleanly and never creates the directory at all — an
+empty or absent `output/` does not mean the slice produced nothing, and a
+consumer must not read it as a failure. `artifacts.compileCommands` stays
+**null** on baremetal even though the configure passes
+`-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`: CMake implements that variable "only by
+Makefile Generators and Ninja Generators. It is ignored on other generators",
+and this planner does not choose the generator — under Visual Studio, the
+default on Windows, the file is never written. A slice whose `command` was
+blocked reports an all-null `artifacts` block and no `configArtefacts`: nothing
+will ever configure its build dir.
 
 OS inference defaults are silicon-class driven: Cortex-M cores
 default to Zephyr, Cortex-A cores default to Yocto Linux.  The
@@ -382,7 +428,7 @@ not others.
 | BLE              | `alp/ble.h`          | AEN CC3501E backend or Zephyr `bt` host stack (peripheral + central + GATT). | v0.1 surface; impl v0.3 |
 | Security         | `alp/security.h`     | MbedTLS PSA Crypto API (Zephyr) + OpenSSL `EVP_*` (Yocto).      | v0.1 surface; Yocto OpenSSL backend (SHA-256/384/512, AES-128/256-GCM, ChaCha20-Poly1305, `alp_random_bytes`) code complete v0.4-prep with KATs green at `tests/yocto/security_openssl.c`; Zephyr MbedTLS impl v0.3 |
 | Multi-proc IPC   | `alp/mproc.h`        | Zephyr `mbox_*` (MHU on Alif), `hwsem_*`, shared-memory regions, plus framed RPC over RPMsg / OpenAMP (`rpc.h`, opened with the generated `system_ipc.h`); placeholder framing helper at `src/common/proto/alp_mproc_frame.{h,c}` (replaced by nanopb-generated codec once `extras-lwrb-nanopb` lands -- interim/deferred as of v0.9, no committed version). | v0.1 surface; framing scaffolding shipping (interim); full impl v0.3+ |
-| Inference        | `alp/inference.h` / `backend.h` | Registry-backed dispatcher + the backend-registration seam, fronted by the **`.alpmodel`** runtime loader: `alp_inference_open_alpmodel()` → a pure selection engine (silicon-ref availability + SRAM-fit `requires` check + `preferred_backend` tiebreak, `ALP_ERR_NO_FIT`/`NO_BACKEND` otherwise) → the existing `alp_inference_open`.  Host side: `scripts/alp_model/` (`tan model build`) compiles the fat multi-backend package (CBOR manifest + per-backend blobs).  Registered backends (M-class registry): `tflm` (CPU), `ethos_u_aen` / `ethos_u_n93` (Arm Ethos-U), `sw_fallback`; DRP-AI3 + DEEPX DX-M1 are A55/Linux-side only (`src/yocto/inference_{drpai,deepx}.cpp`, #58/#59).  Selector picks the highest-priority match for the SoM's silicon ref. | v0.5 registry + `.alpmodel` loader/selection (Stages 1a–1c); real per-NPU compiles + runtime = Stage 2, gate on licensed tools + HiL |
+| Inference        | `alp/inference.h` / `backend.h` | Registry-backed dispatcher + the backend-registration seam, fronted by the **`.alpmodel`** runtime loader: `alp_inference_open_alpmodel()` → a pure selection engine (silicon-ref availability + SRAM-fit `requires` check + `preferred_backend` tiebreak, `ALP_ERR_NO_FIT`/`NO_BACKEND` otherwise) → the existing `alp_inference_open`.  Host side: `scripts/alp_model/` (`tan model build`) compiles the fat multi-backend package (CBOR manifest + per-backend blobs).  Registered backends (M-class registry): `tflm` (CPU), `ethos_u_aen` / `ethos_u_n93` (Arm Ethos-U), `sw_fallback`; DRP-AI3, DEEPX DX-M1, and the ONNX Runtime CPU floor are A55/Linux-side only (`src/yocto/inference_{drpai,deepx,ort}.cpp`, #58/#59).  ORT is default-off (`ALP_SDK_USE_ORT_CPU`), sits strictly last in `resolve_auto()` so an NPU-bearing SoM never silently falls back to it, and — unlike the other two — is reachable only via a hand-built `alp_inference_config_t` today: no `.alpmodel` → ORT route exists on Yocto.  Selector picks the highest-priority match for the SoM's silicon ref. | v0.5 registry + `.alpmodel` loader/selection (Stages 1a–1c); real per-NPU compiles + runtime = Stage 2, gate on licensed tools + HiL |
 | Storage          | `alp/storage.h`      | Block + filesystem (LittleFS) on Zephyr; standard FS on Yocto.  | v0.5 surface |
 | 2D graphics      | `alp/gpu2d.h`        | Portable blit/fill shim (Alif Dave2D / GPU2D); SW fallback.     | v0.5 surface; see [ADR 0008](adr/0008-gpu2d-portable-shim.md) |
 

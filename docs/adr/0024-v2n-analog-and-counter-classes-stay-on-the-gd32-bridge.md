@@ -12,7 +12,7 @@ GD32 IO-MCU bridge. All five backend registrations carry
 native RZ/V2N backend would use: `src/backends/adc/gd32_bridge.c:156`,
 `src/backends/pwm/gd32_bridge.c:215`,
 `src/backends/dac/gd32_bridge.c:154`,
-`src/backends/counter/gd32_bridge.c:94`,
+`src/backends/counter/gd32_bridge.c:106`,
 `src/backends/qenc/gd32_bridge.c:66`. The hardware decision behind
 this routing is dated 2026-05-12 and is recorded in the supervisor's
 own Kconfig help text (`zephyr/kconfigs/v2n-supervisor.kconfig:14-17`):
@@ -94,7 +94,7 @@ priority-selected fallback: it cannot fail safely, because the
 caller asked for.
 
 Counter is padless — it free-runs on the GD32
-(`src/backends/counter/gd32_bridge.c:37`), so no connector pad is
+(`src/backends/counter/gd32_bridge.c:49`), so no connector pad is
 even involved on that one class; the pad argument does not apply to
 it, but the "no second untested silicon path" argument in
 Consequences still does.
@@ -224,7 +224,7 @@ Bad / costs — real, and stated honestly:
   `/* no HW oversample/trigger via bridge in v0.7 */`); counter has no
   alarm support — `set_alarm` returns `ALP_ERR_NOSUPPORT` because
   there is no IRQ line from GD32 to the Renesas SoC
-  (`src/backends/counter/gd32_bridge.c:71`). There is also bridge-hop
+  (`src/backends/counter/gd32_bridge.c:83`). There is also bridge-hop
   latency inherent to routing every call through the SPI/I2C
   transport and the supervisor mutex. See
   `docs/portability.md` §4.5 for the customer-facing version of this

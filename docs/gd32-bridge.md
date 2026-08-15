@@ -127,6 +127,56 @@ change.
 | In-system upgrade over SPI / I2C      | **Implemented, gated — silicon-validated 2026-06-04.** | Application-bootloader path; the `0xF0..0xFF` opcodes route through `src/bootloader/` into the OTA state machine in [`src/ota.c`](../firmware/gd32-bridge/src/ota.c) (FMC backend `hal/fmc_ota.c`). Destructive flashing is armed only with `-DBRIDGE_OTA_PARTITIONED`; default builds reply `STATUS_NOSUPPORT` (can't brick the running image). The armed build emits the partitioned set (32 KB bootloader + slot-A/B apps); first-flash also needs the factory metadata record from [`tools/gen_ota_metadata.py`](../firmware/gd32-bridge/tools/gen_ota_metadata.py) at `0x08008000`. Validated end-to-end on the bench: stream → verify → commit → boot new slot → rollback (protocol v0.6). See [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) §10 Path A. |
 | Host-driven SWD bit-bang from V2N     | **Scaffolded.**   | Renesas-side software SWD controller drives `GD32_SWDIO` + `GD32_SWCLK` (routed back to V2N pads per the 2026-05-12 HW decision); universal recovery + factory first-flash.  Driver lives at [`chips/gd32_swd/`](../chips/gd32_swd/) (`driver_status: partial` until exercised on real silicon).  See [`docs/gd32-bridge-protocol.md`](gd32-bridge-protocol.md) §10 Path B. |
 
+### Who flashes it, and when
+
+Alp Lab flashes the GD32 in production; a customer's normal field update
+arrives over the in-system OTA path above.  Direct SWD flashing exists
+for one customer case only: **recovering a bricked bridge**, with Alp
+Lab-supplied binaries.
+
+The four V2N / V2M SoM presets state exactly that, and the three facts
+are independent keys — none of them implies another:
+
+```yaml
+helper_firmware:
+  - name:           gd32_bridge
+    chip:           gd32g553
+    flash_method:   swd_probe            # how it is written locally
+    flash_policy:   recovery_only        # who may do that, and when
+    update_channel: alp_ota_spi_bridge   # how it is updated in the field
+    flash_args:
+      interface:    cmsis-dap
+      target:       gd32g553
+      jlink_device: GD32G553MEY7TR
+      base:         "0x08000000"
+```
+
+`tan flash` declines this helper on an ordinary run and names the
+re-run that arms it (`tan flash --helper gd32_bridge --recover`, which
+must also be the run's single target).  Note `expect_dpidr` is
+deliberately **unset**: two SW-DP ID values are in circulation for the
+GD32 -- `0x6BA02477` in
+[`metadata/chips/gd32_swd.yaml`](../metadata/chips/gd32_swd.yaml)
+(itself annotated as the generic ADIv5 Cortex-M33 r0p1 SW-DPv2
+expectation, not a GD32-specific reading) and an unattributed
+`0x0BE12477` elsewhere in this repo -- and **neither has been measured
+on a GD32 with a probe attached**, so the entries carry a
+`flash.dpidr-preflight-unarmed` advisory rather than a guard armed at a
+guessed ID.  See #1369 for the open issue tracking the measurement.
+
+**Required step on the alplab-gw bench: set `ALP_FLASH_REQUIRE_DPIDR=1`
+before running the recovery command above.** The GD32 probe (USB path
+`3-4.2`) and the AEN E8 probe (`3-4.4.3`) enumerate the same J-Link
+serial `603000869`, and `JLinkExe` selects an adapter only by serial --
+with no `expect_dpidr` armed and no port selector, an unset
+`ALP_FLASH_REQUIRE_DPIDR` lets the write proceed against whichever
+probe is attached, which may be the AEN E8, not the GD32.
+
+`update_channel: alp_ota_spi_bridge` is deliberately a different value
+from the CC3501E's `alp_ota_spi_otp`: this channel streams into the
+slot-A/B application bootloader with commit + rollback, it does not
+program an OTP the GD32 does not have.
+
 ## Cross-link
 
 * Wire spec: [`gd32-bridge-protocol.md`](gd32-bridge-protocol.md).

@@ -11,13 +11,23 @@ from alp_model.build import build_model
 _DEFAULT_META = Path(__file__).resolve().parents[2] / "metadata"
 
 
+# Compile-opt keys that name a filesystem path (resolved relative to
+# board.yaml). Not every value in a models[].compile.<backend> block is a
+# path -- e.g. drpai's input_shape ("1,3,224,224"), input_name ("images") and
+# product ("V2N") are opaque strings that must reach the adapter unchanged
+# (issue #1271: resolving them as paths corrupted a genuine shape string into
+# a filesystem path, which then made the adapter's own shape check misfire).
+_PATH_OPT_KEYS = {"config", "calibration", "images", "spec"}
+
+
 def _resolve_compile(block: dict | None, base: Path) -> dict | None:
-    """Resolve every path value in each per-backend compile block to an absolute
-    path relative to the board.yaml dir (all current opts values are paths)."""
+    """Resolve known path-valued keys in each per-backend compile block to an
+    absolute path relative to the board.yaml dir; every other value (shape
+    strings, node names, product ids, ...) passes through unchanged."""
     if not block:
         return None
     return {
-        backend: {k: str((base / v).resolve()) if isinstance(v, str) else v
+        backend: {k: str((base / v).resolve()) if k in _PATH_OPT_KEYS and isinstance(v, str) else v
                   for k, v in (opts or {}).items()}
         for backend, opts in block.items()
     }

@@ -42,11 +42,8 @@ ipc:
 helper_mcus:
 - name: gd32_bridge
   chip: gd32g553
-  flash_method: swd_probe
-  flash_args:
-    interface: cmsis-dap
-    target: gd32g553
-    base: '0x08000000'
+  flash_policy: recovery_only
+  update_channel: alp_ota_spi_bridge
 boot_order: []
 
 # boot_order is empty -- add a `boot_order:` list to metadata/e1m_modules/E1M-V2N101.yaml when the

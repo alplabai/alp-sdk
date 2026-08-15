@@ -221,7 +221,7 @@ grouped by accelerator class:
 | Class                   | Libraries                                                   |
 |-------------------------|-------------------------------------------------------------|
 | Crypto / TLS            | `mbedtls`, `bearssl`                                        |
-| ML inference            | `tflite_micro`                                              |
+| ML inference            | `tflite_micro`, `onnxruntime`                               |
 | DSP / math              | `cmsis_dsp`                                                 |
 | Filesystem              | `littlefs`                                                  |
 | Graphics / vision       | `lvgl`, `u8g2`, `gfx_compat`, `arm-2d`, `cmsis-cv`          |
@@ -288,7 +288,9 @@ libraries below are smaller / different in scope:
 |-------------|------------------------------------------------------------------------|--------------------------------------------------------------------|
 | [TinyMaix](https://github.com/sipeed/TinyMaix) | Sub-100 KB inference for tiny MCUs (Cortex-M0, AVR)             | Below our target tier — alp-sdk's smallest target is the AEN M55.   |
 | [nnom](https://github.com/majianjia/nnom) | Pure-C neural net on MCUs, Keras export                        | Overlap with TFLM; no clear win on AEN/N93.                          |
+| [libonnx](https://github.com/xboot/libonnx) | C99 ONNX inference for embedded                                | Superseded as the ONNX answer by the real `onnxruntime` Tier B manifest (own `meta-alp-sdk` recipe, upstream `microsoft/onnxruntime` v1.28.0) — the A55/Yocto CPU inference floor, default off (`ALP_SDK_USE_ORT_CPU`), not yet run on silicon.  libonnx's remaining niche is a sub-Yocto (M-class / bare-metal) pure-ONNX path, which nothing in-tree needs yet. |
 | [libonnx](https://github.com/xboot/libonnx) | C99 ONNX inference for embedded                                | ONNX path is reachable via TFLM (TFLite converter).  Revisit if model authors want pure ONNX. |
+| [ExecuTorch](https://github.com/pytorch/executorch) | PyTorch's own on-device runtime for exported `.pte` programs | Write-side only (#1260): `ALP_INFERENCE_MODEL_EXECUTORCH` decodes and `scripts/alp_model/adapters/executorch.py` packages a `.pte` into an `.alpmodel`, but no on-device ExecuTorch runtime backend exists yet — a package built this way has nothing to `alp_inference_invoke()` it. |
 
 ## Tier 5 — considered, NOT pursued
 

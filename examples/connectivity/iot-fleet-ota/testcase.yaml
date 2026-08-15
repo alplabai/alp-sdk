@@ -3,11 +3,12 @@
 sample:
   name: iot-fleet-ota
   description: |
-    Secure OTA firmware update with rollback.  Trust roots in the
-    on-SoM OPTIGA Trust M secure element; signatures are ECDSA-P256;
-    images swap through MCUboot's swap-using-scratch mode; downloads
-    speak Mender's HTTPS poll protocol.  Production-readiness proof
-    for fleets of 10k+ units.
+    Secure OTA firmware update.  Trust roots in the on-SoM OPTIGA
+    Trust M secure element; signatures are ECDSA-P256; on this SKU
+    (E1M-AEN801) MCUboot boots single-app (#1069/#1413), so a
+    rejected or failed image halts rather than rolling back;
+    downloads speak Mender's HTTPS poll protocol.
+    Production-readiness proof for fleets of 10k+ units.
 tests:
   alp_sdk.examples.iot_fleet_ota.native_sim:
     platform_allow:
@@ -32,7 +33,7 @@ tests:
       - "EXTRA_CONF_FILE=native_sim.conf"
   alp_sdk.examples.iot_fleet_ota.aen:
     platform_allow:
-      - ensemble_e8_dk/ae402fa0e5597le0/rtss_hp
+      - ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp
     tags:
       - alp-sdk
       - example

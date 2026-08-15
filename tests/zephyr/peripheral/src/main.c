@@ -437,11 +437,16 @@ ZTEST(alp_peripheral, test_v2n_supervisor_counter_open_not_ready_without_buses)
 ZTEST(alp_peripheral, test_v2n_supervisor_counter_high_id_rejected)
 {
 	/* The bridge advertises only one counter; counter_id >= 1 must
-     * reject at open without touching the supervisor singleton. */
+     * reject at open without touching the supervisor singleton, with
+     * ALP_ERR_NOSUPPORT ("this SoM doesn't serve that") rather than
+     * ALP_ERR_INVAL ("bad argument") -- the id is a published E1M-X
+     * connector identity, not malformed input.  alp-sdk#1242. */
 	alp_counter_t *c = alp_counter_open(&(alp_counter_config_t){
 	    .counter_id = 2u,
 	});
 	zassert_is_null(c);
+	zassert_equal(
+	    alp_last_error(), ALP_ERR_NOSUPPORT, "expected NOSUPPORT, got %d", (int)alp_last_error());
 }
 
 ZTEST(alp_peripheral, test_v2n_supervisor_adc_stream_open_not_ready_without_buses)

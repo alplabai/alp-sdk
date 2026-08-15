@@ -28,8 +28,9 @@ Inventory check before powering anything:
   - **OPTIGA Trust M** secure element.
   - **RV-3028-C7** external RTC.
   - **TMP112** temperature sensor.
-  - **DP83825I** 10/100 Ethernet PHY (a single MAC; ET1 is
-    E1M-X-only) -- see [`docs/soms/aen.md`](soms/aen.md).
+  - **DP83825** 10/100 Ethernet PHY (exact order code TBD, a
+    single MAC; ET1 is E1M-X-only) -- see
+    [`docs/soms/aen.md`](soms/aen.md).
 * Board populated (**Alp E1M-EVK** carrier -- per
   [`metadata/boards/e1m-evk.yaml`](../metadata/boards/e1m-evk.yaml)
   `populated:`): E1M-edge passthroughs + the 5 V power input +
@@ -69,11 +70,13 @@ PMIC's `EVENT_00` status register over BRD_I2C.
    (SWDIO/SWCLK/nRST/GND).  Power the board (probe stays
    unpowered; standard 1.8/3.3 V level convention applies).
 2. With the probe plugged in, attach with J-Link Commander. **Use the
-   generic `Cortex-M55` device, _not_ the Alif part number** — on the E8
-   bench the part-specific device (`AE822FA0E5597LS0_M55_HE`) connect
-   sequence fails post-boot ("Could not connect to the target device"),
-   while the generic core device scans the APs and finds the core
-   directly (BENCH-VERIFIED on the E1M-AEN801, 2026-06-15):
+   generic `Cortex-M55` device, _not_ the Alif part number**, for this
+   attach — on a J-Link DLL older than V9.46 the part-specific device
+   (`AE822FA0E5597LS0_M55_HE`) connect sequence fails post-boot ("Could
+   not connect to the target device"); on V9.46+ it also connects, but
+   the generic core device is the documented one for scanning the APs
+   and finding the core directly regardless (BENCH-VERIFIED on the
+   E1M-AEN801, 2026-06-15; see [`aen-bench-bringup.md`](aen-bench-bringup.md) §1):
 
    ```bash
    JLinkExe -device Cortex-M55 -if SWD -speed 4000 -nogui 1
@@ -231,9 +234,9 @@ scannable from the host:
 A missing slave that's *expected* is a real fault.  The on-module
 set is authoritative in
 [`E1M-AEN801.yaml`](../metadata/e1m_modules/E1M-AEN801.yaml)'s
-scalar `on_module:` keys (the AEN presets have no `i2c_devices:`
-block -- that's a V2N/V2M-only convention); the carrier-side parts
-are authoritative in
+`on_module.i2c_devices:` block (same shape V2N/V2M use -- see
+`brd_i2c:` for the trio, `e1m_i2c0:` for the EEPROM); the
+carrier-side parts are authoritative in
 [`metadata/boards/e1m-evk.yaml`](../metadata/boards/e1m-evk.yaml)'s
 `populated:` block, where individual parts can be flipped off for
 DNI variants.
@@ -264,7 +267,8 @@ but the OPTIGA is DNI and the probe returns `ALP_ERR_NOT_READY`.
 ### 5.3 Ethernet PHY link
 
 Connect a 1 Gb link partner to the board's RJ45.  Reset the
-module and check link-up via the DP83825I's MDIO registers:
+module and check link-up via the DP83825's MDIO registers
+(exact order code TBD -- `metadata/chips/dp83825.yaml`):
 
 ```c
 uint16_t bmsr = 0;
@@ -334,7 +338,10 @@ top of the per-subsystem checks.
 
 1. **SWD/J-Link attach + CPUID read.**  Wire the probe (§2),
    then (use the **generic `Cortex-M55` device**, not the Alif part
-   number — the part-specific device connect fails post-boot):
+   number, for this attach/RAM-run flow — on a J-Link DLL older than
+   V9.46 the part-specific device connect fails post-boot; V9.46+ also
+   connects, but the generic profile stays the documented device here
+   regardless — see [`aen-bench-bringup.md`](aen-bench-bringup.md) §1):
 
    ```bash
    JLinkExe -device Cortex-M55 -if SWD -speed 4000 -nogui 1
@@ -515,7 +522,7 @@ Once §6's runbook passes:
   reaches; the BRD_I2C trio is not host-scannable).  Standard
   Alp boards pull to 1.8 V; some custom boards use 3.3 V
   (re-strap the SoC side accordingly).
-* **PHY won't link** -- DP83825I requires its 25 MHz REFCLK
+* **PHY won't link** -- the DP83825 requires its 25 MHz REFCLK
   before the strap latches.  Check `OSC_25M` on the board
   with a scope; the PHY won't link if the clock is missing at
   PHY-reset-release.

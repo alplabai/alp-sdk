@@ -8,7 +8,7 @@ from pathlib import Path
 import click
 
 from alp_cli.diagnostic import render
-from alp_cli.diagnostic_format import to_machine_json, to_sarif
+from alp_cli.diagnostic_format import machine_json_for_board_yaml, to_sarif
 from alp_cli.validator import validate_board_yaml
 from alp_orchestrate import OrchestratorError, load_board_yaml
 
@@ -31,7 +31,15 @@ def validate_cmd(path: Path, no_color: bool, output_format: str) -> None:
         for diag in collector:
             click.echo(render(diag, source_text=source_text, color=not no_color))
     elif output_format == "json":
-        click.echo(json.dumps(to_machine_json(collector), indent=2))
+        # Route through the library entry point rather than
+        # to_machine_json(collector) directly, so `alp_cli.validate` is
+        # provably one caller of machine_json_for_board_yaml() among others
+        # (the schema gate, an LSP), not a parallel path that happens to
+        # agree with it. Revalidates *path* a second time (the `collector`
+        # above is still needed below for --format human and
+        # has_errors()) -- board.yaml files are small, so the extra parse
+        # is not worth carrying two document-construction paths for.
+        click.echo(json.dumps(machine_json_for_board_yaml(path), indent=2))
     elif output_format == "sarif":
         click.echo(json.dumps(to_sarif(collector), indent=2))
     if collector.has_errors():

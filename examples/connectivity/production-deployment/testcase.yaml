@@ -9,8 +9,9 @@ sample:
     read-back, MCUboot slot inspection, Mender OTA polling,
     OPTIGA-signed remote attestation).  Native_sim exercises the
     framing path (every stage reaches its open() call); HiL
-    verification of the actual OTA cycle gates on a staged Mender
-    server.
+    verification gates on a staged Mender server, and OTA apply
+    is DEFERRED on the qualified single-slot AEN801 target
+    (#1069 -- see [STATUS] in board.yaml).
 common:
   tags: production secure-boot ota attestation
   harness: console
@@ -29,5 +30,5 @@ tests:
       - "EXTRA_CONF_FILE=native_sim.conf"
   alp_sdk.examples.production_deployment.aen:
     platform_allow:
-      - ensemble_e8_dk/ae402fa0e5597le0/rtss_hp
+      - ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp
     build_only: true   # real run needs a staged Mender server.

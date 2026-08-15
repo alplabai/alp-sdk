@@ -44,7 +44,7 @@ CC,768.0,CONDENSATION_RISK,5.0,95.0,4.3,5.0,0.0
 ## Build
 
 ```
-west build -b ensemble_e8_dk/ae402fa0e5597le0/rtss_hp examples/ai/cold-chain-monitor
+west build -b alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp examples/ai/cold-chain-monitor
 west flash
 ```
 
