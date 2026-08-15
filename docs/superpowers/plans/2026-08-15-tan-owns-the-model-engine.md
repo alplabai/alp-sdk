@@ -714,24 +714,41 @@ git commit -q -m "chore(model): retire the alp_cli/model.py hand-port pin (ADR-0
   `tests/scripts/test_alp_cli_new_som.py`,
   `tests/scripts/test_resolve_generated_conflicts.py`
 
-- [ ] **Step 1: Decide the two real-model e2e tests FIRST**
+- [ ] **Step 1: Move the two real-model e2e tests into tan (DECIDED)**
 
 `tests/scripts/test_deepx_yolo_internal.py:25` and
 `tests/scripts/test_vela_yolo_internal.py:26` import
 `alp_model.adapters.{deepx,ethos_u}` and resolve their yolo11n fixtures out of
-the private `alp-sdk-internal` checkout (Git LFS). tan has no such wiring.
+the private `alp-sdk-internal` checkout (Git LFS).
 
-This is a decision, not a mechanical step, and it is **blocking**: the standing
-rule is that NPU/compiler capability is proven on a real production model, not
-only a hermetic toy. Pick one and record it in the PR body:
+**Decision (2026-08-15): they move to tan with the engine.** The customer-facing
+claim these tests defend — *a real production model compiles for this SoM* — is
+broken by a change to the engine, and after this migration the engine is tan's.
+A proof living in the other repo detects that break late, in a different repo,
+on a different release train, and makes tan a *test-time dependency of alp-sdk*
+— a coupling in the opposite direction from the one this ADR removes. Keep the
+proof next to the code that can break it.
 
-- **(a)** carry the `alp-sdk-internal` fixture resolution into tan and move both
-  tests with the engine; or
-- **(b)** keep both in alp-sdk as integration tests that exercise a
-  tan-provided engine, which makes tan a test-time dependency of alp-sdk.
+The gating mechanism ports unchanged. `test_vela_yolo_internal.py` resolves its
+fixture root as `$ALP_SDK_INTERNAL`, else `_ROOT.parent / "alp-sdk-internal"`,
+which is the same sibling directory whether `_ROOT` is the alp-sdk or tan-cli
+checkout. Move both files to `python/tests/model/`, rewrite the import prefix
+`alp_model.adapters.` → `tan.model.adapters.`, and re-anchor `_ROOT` on tan's
+repo root.
 
-Do not delete them and do not let them silently start skipping. A skipping
-real-model test is the same as not having one.
+**Close the silent-skip hole in the same step.** Both tests document that they
+run "only when that sibling repo is checked out AND `vela` is installed -- i.e.
+on a maintainer's box, never in cloud CI." A proof that only ever runs when a
+human remembers is one release away from being no proof at all, and the standing
+rule is that NPU/compiler capability is proven on a real production model, not a
+hermetic toy. So: keep the ordinary-PR behaviour (skip when the fixtures are
+absent — public CI has no access and must not fail), and add a **release-time
+assertion that they RAN**, not merely that the suite was green. `cutting-a-tan-
+release` is a maintainer-box operation where the fixtures *are* present, so the
+release checklist gains a step that fails the cut if either real-model test
+reports `skipped`. Record the exact pass counts in the release notes.
+
+Do not delete them, and do not let them start skipping quietly.
 
 - [ ] **Step 2: Rehome the three cross-cutting tests**
 
@@ -858,6 +875,43 @@ git commit -q -m "docs(model): re-target the check plan at tan (ADR-0028)"
 ```
 
 ---
+
+## Verb order after the migration, and why
+
+The proposed order was `check` → envelope (`info`/`list`) → `zoo`/`add` →
+`prep` → `run`/`ab`/`measure`. One change, decided 2026-08-15 on customer-
+experience grounds:
+
+**Ship `check` and `doctor` together as the first verb slice.**
+
+Before this migration a customer who hit an NPU-toolchain problem had two things
+to inspect — the `tan` binary and an alp-sdk checkout with its own Python
+environment. After it, **tan is the only thing they have.** That is the whole
+point (one install, one version, no cross-repo version matching — the support
+burden this ADR exists to remove), but it puts the entire diagnostic duty on
+tan. `doctor` is what turns "compile skipped, no idea why" into "`dxcom` is not
+on PATH; it is license-gated and Linux-only", and it is the same shape of work
+as `check`: offline, no toolchain required to *run*, no hardware, pure
+inspection.
+
+The two verbs also answer the customer's first two questions in order — *will my
+model fit this SoM?* (`check`) and *why did my toolchain not run?* (`doctor`) —
+and they are the two that must work when everything else does not. Shipping
+`check` alone leaves the failure it will most often surface (a missing or
+license-gated compiler) with no first-class explanation.
+
+`doctor`'s adapter-side dependency is already met: every adapter has an
+`is_available()` (`cpu.py:11`, `deepx.py:52`, `drpai.py:138`, `ethos_u.py:57`,
+`executorch.py:36`), and `ethos_u.py:57-58` is a bare
+`shutil.which("vela") is not None`, so the probe is read-only and non-spawning
+exactly as alp-sdk#907 designed it. The plan doc for it is
+`docs/superpowers/plans/2026-07-24-alp-model-envelope.md`, re-targeted at tan
+the same way Task 7 re-targets the `check` plan.
+
+`prep`, `zoo`/`add`, and `run`/`ab`/`measure` keep their proposed order.
+`run`/`ab`/`measure` stay last: they are the only ones needing a device
+transport, and the A55 DEEPX / DRP-AI half is hard-blocked on Yocto runtimes
+that are still bench-gated.
 
 ## Self-review notes
 
