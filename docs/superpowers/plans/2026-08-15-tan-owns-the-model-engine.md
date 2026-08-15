@@ -104,11 +104,46 @@ Hardware truth lands where the hardware is. Additive; nothing consumes it yet.
 
 **Interfaces:**
 - Produces: `metadata/npu_ops/<backend>.json`, each
-  `{"backend": str, "version": str, "source": str, "supported_ops": [str]}`.
-  Consumed in Task 6 by `tan.model.analyze._load_op_support(backend, metadata_root)`.
+  `{"backend": str, "op_namespace": "tflite"|"onnx", "version": str,
+  "source": str, "supported_ops": [str]}`.
+  Consumed by `tan.model.analyze._load_op_support(backend, metadata_root)`.
   `<backend>` ∈ `ethos_u` | `drpai` | `deepx_dxm1` — the vocabulary from
   `scripts/alp_model/targets.py::_npu_backend`. `cpu` has no file: it is the
   universal fallback, supports everything, and is never looked up.
+
+> **`op_namespace` is load-bearing — do not drop it, and do not assume one
+> vocabulary.** Each backend's compiler ingests exactly one source format, and
+> they do not agree. Every adapter already declares it:
+>
+> | Adapter | Declaration |
+> |---|---|
+> | `adapters/ethos_u.py:60-61` | `return src_format == "tflite"` |
+> | `adapters/cpu.py:13-14` | `return src_format == "tflite"` |
+> | `adapters/drpai.py:141-142` | `return src_format == "onnx"          # DRP-AI TVM ingests ONNX` |
+> | `adapters/deepx.py:58-59` | `return src_format == "onnx"          # dxcom is an ONNX frontend` |
+>
+> So `drpai` and `deepx_dxm1` op lists MUST be spelled in **ONNX** operator
+> names (`Conv`, `Gemm`, `AveragePool`, `MaxPool`, `Add`, `Mul`, `Concat`,
+> `Pad`, `Reshape`, `Softmax`, `Relu`, `Clip`, `Resize`), not TFLite builtins.
+> ONNX has **no `DEPTHWISE_CONV_2D`** — a depthwise convolution is `Conv` with
+> `group == C`. An earlier draft of this plan spelled all three lists in TFLite
+> builtins; scoring a model against that would have missed **every** op on both
+> ONNX backends and reported `no-fit` for the two NPUs that ship on V2N and
+> V2M. That is not the conservative-pessimism this slice accepts — it is a
+> categorically wrong verdict, and the worst one a SoM vendor can emit.
+>
+> The schema's op pattern must therefore admit both vocabularies
+> (`^[A-Za-z0-9_]+$`), not `^[A-Z0-9_]+$`. Merging the upper-only pattern would
+> make correcting the vocabulary a schema-v2 migration rather than a data edit.
+
+> **Consequence for the analyzer (carry this into Task 7's `check` slice).**
+> `analyze` must gate on **source format before op scoring**: ask the adapter's
+> `accepts(src_format)` first, and when it is False emit a distinct verdict
+> meaning *this backend cannot ingest this source format* — never a 0 %
+> op-coverage `no-fit`, which reads to a customer as "your model is too big for
+> the NPU" when the real answer is "convert it to ONNX first". `analyze` must
+> also assert the loaded file's `op_namespace` matches the format it actually
+> walked, and refuse rather than compare across vocabularies.
 
 - [ ] **Step 1: Write the failing data-integrity test**
 
@@ -126,23 +161,59 @@ _ROOT = Path(__file__).resolve().parents[2]
 _META = _ROOT / "metadata"
 
 
+#: Each backend's compiler ingests exactly ONE source format, so its op list
+#: must be spelled in that format's vocabulary. Mirrors the adapters'
+#: `accepts()`: ethos_u/cpu -> "tflite", drpai/deepx_dxm1 -> "onnx".
+_EXPECTED_NAMESPACE = {"ethos_u": "tflite", "drpai": "onnx", "deepx_dxm1": "onnx"}
+
+#: The compute-dominant ops the estimator scores, per vocabulary. ONNX has no
+#: DEPTHWISE_CONV_2D -- a depthwise convolution is `Conv` with group == C.
+_REQUIRED_OPS = {
+    "tflite": {"CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED"},
+    "onnx": {"Conv", "Gemm"},
+}
+
+
 @pytest.mark.parametrize("backend", ["ethos_u", "drpai", "deepx_dxm1"])
 def test_op_support_file_shape(backend):
     data = json.loads((_META / "npu_ops" / f"{backend}.json").read_text("utf-8"))
     assert data["backend"] == backend
     assert data["version"] and data["source"]
     assert isinstance(data["supported_ops"], list) and data["supported_ops"]
-    # Op names are TFLite builtin identifiers (UPPER_SNAKE), deduped
-    assert all(op == op.upper() for op in data["supported_ops"])
     assert len(data["supported_ops"]) == len(set(data["supported_ops"]))
-    # Every NPU must at least run the compute-dominant ops the estimator scores
-    assert {"CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED"} <= set(data["supported_ops"])
+
+    ns = data["op_namespace"]
+    assert ns == _EXPECTED_NAMESPACE[backend], (
+        f"{backend}.json declares op_namespace={ns!r}, but its compiler ingests "
+        f"{_EXPECTED_NAMESPACE[backend]!r} -- see the adapter's accepts()"
+    )
+    assert _REQUIRED_OPS[ns] <= set(data["supported_ops"])
+
+    if ns == "tflite":
+        # TFLite builtins are UPPER_SNAKE
+        assert all(op == op.upper() for op in data["supported_ops"])
+    else:
+        # ONNX operators are CamelCase and are NOT upper-snake; this is the
+        # assertion that would have caught the whole list being spelled in the
+        # wrong vocabulary.
+        assert not any(op == op.upper() for op in data["supported_ops"])
 
 
 def test_no_cpu_op_support_file():
     """`cpu` is the universal fallback -- it supports everything and is never
     looked up, so a `cpu.json` would be dead data that could drift."""
     assert not (_META / "npu_ops" / "cpu.json").exists()
+
+
+def test_every_npu_ops_filename_matches_its_backend_field():
+    """A fourth backend added later inherits no per-name parametrize case, so
+    assert over the DIRECTORY, not a hard-coded list -- otherwise
+    `ethos_u_v2.json` carrying `"backend": "ethos_u"` passes every gate."""
+    for path in sorted((_META / "npu_ops").glob("*.json")):
+        data = json.loads(path.read_text("utf-8"))
+        assert data["backend"] == path.stem, (
+            f"{path.name} declares backend={data['backend']!r}"
+        )
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -157,8 +228,9 @@ Expected: FAIL — `FileNotFoundError: .../metadata/npu_ops/ethos_u.json`.
 ```json
 {
   "backend": "ethos_u",
-  "version": "2026.07-seed",
-  "source": "Conservative subset of Ethos-U Vela SUPPORTED_OPS (public docs); refine from bench probing.",
+  "op_namespace": "tflite",
+  "version": "2026.08-seed",
+  "source": "Conservative subset of Ethos-U Vela SUPPORTED_OPS (public docs); Vela is a TFLite frontend. Refine from bench probing.",
   "supported_ops": [
     "CONV_2D", "DEPTHWISE_CONV_2D", "TRANSPOSE_CONV", "FULLY_CONNECTED",
     "AVERAGE_POOL_2D", "MAX_POOL_2D", "MEAN",
@@ -170,37 +242,46 @@ Expected: FAIL — `FileNotFoundError: .../metadata/npu_ops/ethos_u.json`.
 }
 ```
 
-`metadata/npu_ops/drpai.json`:
+`metadata/npu_ops/drpai.json` — **ONNX vocabulary** (`adapters/drpai.py:141-142`,
+`return src_format == "onnx"          # DRP-AI TVM ingests ONNX`):
 
 ```json
 {
   "backend": "drpai",
-  "version": "2026.07-seed",
-  "source": "Conservative subset from Renesas DRP-AI TVM supported-op docs; refine from bench probing.",
+  "op_namespace": "onnx",
+  "version": "2026.08-seed",
+  "source": "Conservative subset from Renesas DRP-AI TVM supported-op docs; DRP-AI TVM ingests ONNX. Refine from bench probing.",
   "supported_ops": [
-    "CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED",
-    "AVERAGE_POOL_2D", "MAX_POOL_2D",
-    "ADD", "MUL", "CONCATENATION", "PAD", "RESHAPE",
-    "SOFTMAX", "RELU", "RELU6", "RESIZE_BILINEAR"
+    "Conv", "Gemm", "MatMul",
+    "AveragePool", "GlobalAveragePool", "MaxPool",
+    "Add", "Mul", "Concat", "Pad", "Reshape", "Transpose", "Flatten",
+    "Softmax", "Relu", "Clip", "Resize"
   ]
 }
 ```
 
-`metadata/npu_ops/deepx_dxm1.json`:
+`metadata/npu_ops/deepx_dxm1.json` — **ONNX vocabulary**
+(`adapters/deepx.py:58-59`,
+`return src_format == "onnx"          # dxcom is an ONNX frontend`):
 
 ```json
 {
   "backend": "deepx_dxm1",
-  "version": "2026.07-seed",
-  "source": "Conservative subset from DEEPX DX-M1 CNN-accelerator docs; refine from bench probing.",
+  "op_namespace": "onnx",
+  "version": "2026.08-seed",
+  "source": "Conservative subset from DEEPX DX-M1 CNN-accelerator docs; dxcom is an ONNX frontend. Refine from bench probing.",
   "supported_ops": [
-    "CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED",
-    "AVERAGE_POOL_2D", "MAX_POOL_2D",
-    "ADD", "CONCATENATION", "RESHAPE",
-    "SOFTMAX", "RELU", "RELU6"
+    "Conv", "Gemm",
+    "AveragePool", "GlobalAveragePool", "MaxPool",
+    "Add", "Concat", "Reshape", "Flatten",
+    "Softmax", "Relu", "Clip"
   ]
 }
 ```
+
+Note there is deliberately no `DepthwiseConv` in either ONNX list: ONNX has no
+such operator — a depthwise convolution is `Conv` with `group == C`, already
+covered by `Conv`.
 
 These are **seed data**, labelled as such in their own `source` field. They are
 conservative on purpose: `analyze` treats an op absent from this list as CPU
@@ -213,25 +294,43 @@ over-listed op costs a false "fits" — the failure that churns a customer.
 
 ```json
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://alplab.ai/schemas/npu-ops-v1.schema.json",
   "title": "ALP per-NPU op-support list v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["backend", "version", "source", "supported_ops"],
+  "required": ["backend", "op_namespace", "version", "source", "supported_ops"],
   "properties": {
     "backend": {"type": "string", "enum": ["ethos_u", "drpai", "deepx_dxm1"]},
+    "op_namespace": {
+      "type": "string",
+      "enum": ["tflite", "onnx"],
+      "description": "Source-format vocabulary `supported_ops` is spelled in. MUST match the backend adapter's `accepts(src_format)`: ethos_u -> tflite, drpai -> onnx, deepx_dxm1 -> onnx. Comparing a model's ops against a list in the other vocabulary matches nothing and yields a categorically wrong no-fit verdict."
+    },
     "version": {"type": "string", "minLength": 1},
     "source": {"type": "string", "minLength": 1},
     "supported_ops": {
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
-      "items": {"type": "string", "pattern": "^[A-Z0-9_]+$"}
+      "items": {"type": "string", "pattern": "^[A-Za-z0-9_]+$"}
     }
   }
 }
 ```
+
+Two deliberate choices here, both of which an earlier draft got wrong:
+
+- **`$schema` is `2020-12`, not `draft-07`.** `scripts/validate_metadata.py`
+  enforces every schema with `jsonschema.Draft202012Validator`, and 26 of the 28
+  schemas under `metadata/schemas/` already declare 2020-12. Declaring draft-07
+  while being validated as 2020-12 is harmless only until the first tuple-form
+  `items` or `$ref`, at which point the declared and enforcing dialects diverge
+  silently.
+- **The op pattern is `^[A-Za-z0-9_]+$`.** `^[A-Z0-9_]+$` would structurally
+  forbid every ONNX operator name (`Conv` fails on `onv`), cementing the
+  TFLite-only vocabulary into a published contract and turning the correction
+  into a schema-v2 migration.
 
 - [ ] **Step 5: Wire the validator**
 
@@ -249,11 +348,35 @@ assume these:
 
 If the file's helpers are named differently (`_load_schema`, `_validate`,
 `problems`, `META`, `SCHEMA_DIR`, …), match the existing loops exactly.
+(Measured on the real slice: the surrounding blocks at
+`validate_metadata.py:1109` / `:1181` / `:1198` read
+`if <SCHEMA>.is_file():` → `json.loads` → `jsonschema.Draft202012Validator` →
+`sorted(...glob())` → `_check_files("JSON", …, strict_json_loads, "backend")`,
+with the failure count folded into `total_failures` and the file count into the
+closing summary print.)
+
+**Also add the semantic cross-check the schema cannot express**, mirroring
+`_check_soc_npu_pairing` (`:1115`), `_check_chip_semantics` (`:1186`) and
+`_check_block_realizations` (`:1203`) — each of which exists for exactly this
+shape. Two invariants have no gate otherwise:
+
+1. `data["backend"] == path.stem`. Without it,
+   `metadata/npu_ops/ethos_u_v2.json` carrying `"backend": "ethos_u"` passes
+   both the schema and the test — the test's `parametrize` only covers three
+   hard-coded names — and the analyzer can silently load the wrong file for a
+   backend. (Proven at review: such a file passes `validate_metadata.py` rc=0
+   and the pytest file rc=0.)
+2. `data["op_namespace"]` matches the backend's ingest format: `ethos_u` →
+   `tflite`, `drpai` → `onnx`, `deepx_dxm1` → `onnx`. The enum alone lets any
+   file claim either vocabulary.
+
+Fold the result into `npu_ops_failures` alongside the schema check.
 
 - [ ] **Step 6: Run the test and the metadata gate**
 
 Run: `python3 -m pytest tests/scripts/test_npu_ops_metadata.py -q`
-Expected: PASS (4 cases — 3 parametrized + the `cpu.json` absence check).
+Expected: PASS (5 cases — 3 parametrized + the `cpu.json` absence check + the
+directory-wide filename↔backend check).
 
 Run: `python3 scripts/validate_metadata.py`
 Expected: exit 0, no schema errors.
