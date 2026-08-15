@@ -953,7 +953,28 @@ def test_install_linux_dnf_partial_map_passes(tmp_path, monkeypatch, capsys):
 def test_install_linux_dnf_unknown_tool_fails(tmp_path, monkeypatch, capsys):
     """install.linux.dnf's keys must still be a SUBSET of prerequisites.posix
     -- a typo'd/unknown tool name must fail even though the map is allowed
-    to be partial (issue #1464)."""
+    to be partial (issue #1464).
+
+    Mutation-tested (review finding on #1471): the ORIGINAL version of this
+    test only asserted `"prerequisites.install.linux.dnf" in err` and
+    `"nnija" in err` -- both weak substrings are ALSO produced by
+    `_check_bootstrap_sh_install_hints`'s own, unrelated "no
+    PREREQ_HINT_NAMES entry" completeness problem (since 'nnija' isn't in
+    bootstrap.sh's PREREQ_HINT_NAMES either -- a real, independent gap this
+    same mutation happens to also trip), so neutering the actual
+    `unknown_dnf` check this test names (`if False:` in place of the real
+    condition) still left the test reporting "1 passed". Asserting the
+    FULL, exact problem line instead -- unique to `unknown_dnf`'s
+    "entr(y/ies) ... with no matching prerequisites.posix tool" phrasing, no
+    other check in this file produces that text -- means a disabled
+    `unknown_dnf` check makes this exact string absent from `err` and the
+    test correctly goes red, regardless of what else the same mutation also
+    happens to trip. (Silencing the confound at the source by making
+    'nnija' fully recognised everywhere else was tried and rejected: it
+    requires giving `install.linux.apt` / `install.macos` a matching
+    'nnija' entry too, which then fails THEIR OWN exact-equality
+    completeness check against `prerequisites.posix` -- a structural
+    conflict, not a workaround-able gap.)"""
     _scaffold(tmp_path)
     _edit_manifest(
         tmp_path,
@@ -965,8 +986,10 @@ def test_install_linux_dnf_unknown_tool_fails(tmp_path, monkeypatch, capsys):
     rv = gate.main()
     err = capsys.readouterr().err
     assert rv == 1
-    assert "prerequisites.install.linux.dnf" in err
-    assert "nnija" in err
+    assert (
+        "prerequisites.install.linux.dnf has entr(y/ies) ['nnija'] with no "
+        "matching prerequisites.posix tool"
+    ) in err, err
 
 
 def test_install_linux_unknown_package_manager_fails_schema(tmp_path, monkeypatch, capsys):
@@ -1350,6 +1373,55 @@ def test_bootstrap_sh_hint_dnf_absent_ninja_slot_passes(tmp_path, monkeypatch, c
     out = capsys.readouterr().out
     assert rv == 0, out
     assert "ninja" not in out
+
+
+def test_bootstrap_sh_hint_empty_slot_unbacked_by_apt_or_macos_still_fails(
+    tmp_path, monkeypatch, capsys
+):
+    """The "unbacked empty slot is fine" allowance is DNF-ONLY (review
+    finding on #1471 -- both install.linux.apt and install.macos are
+    REQUIRED-complete maps, so a canonical-less entry on either is never
+    legitimate the way it is for the optional, partial dnf map). Adds one
+    brand-new name to all four bootstrap.sh arrays, blanked to `""`
+    everywhere -- DNF's own genuine partial-map allowance stays quiet (its
+    behaviour is unchanged by this fix), while apt and macos, now exactly as
+    strict as before dnf ever gained a lenient sibling, must both still
+    fail."""
+    _scaffold(tmp_path)
+    sh_path = tmp_path / "scripts/bootstrap.sh"
+    _replace(
+        sh_path,
+        "PREREQ_HINT_NAMES=(git cmake python3 ninja xz wget)",
+        "PREREQ_HINT_NAMES=(git cmake python3 ninja xz wget bogustool)",
+    )
+    _replace(
+        sh_path,
+        '    "sudo apt-get install -y wget"\n)',
+        '    "sudo apt-get install -y wget"\n    ""\n)',
+    )
+    _replace(
+        sh_path,
+        '    "sudo dnf install -y wget"\n)',
+        '    "sudo dnf install -y wget"\n    ""\n)',
+    )
+    _replace(
+        sh_path,
+        '    "brew install wget"\n)',
+        '    "brew install wget"\n    ""\n)',
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert (
+        "scripts/bootstrap.sh PREREQ_HINT_APT has an entry for 'bogustool', "
+        "but metadata/bootstrap.json has no prerequisites.install.linux.apt.bogustool"
+    ) in err
+    assert (
+        "scripts/bootstrap.sh PREREQ_HINT_MACOS has an entry for 'bogustool', "
+        "but metadata/bootstrap.json has no prerequisites.install.macos.bogustool"
+    ) in err
+    assert "PREREQ_HINT_DNF" not in err
 
 
 def test_bootstrap_sh_hint_length_mismatch_fails(tmp_path, monkeypatch, capsys):
