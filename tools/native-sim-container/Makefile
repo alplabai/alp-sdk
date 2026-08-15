@@ -36,13 +36,33 @@ MOUNT := $(ALP_SDK_DIR):/work/alp-sdk:z
 # build`/`podman build` invocation that bypasses this Makefile, and
 # scripts/check_bootstrap_manifest.py now gates that default against
 # metadata/bootstrap.json so it can't drift silently either.
-ZEPHYR_REV := $(shell awk '/^[[:space:]]*- name: zephyr[[:space:]]*$$/{getline; print; exit}' $(ALP_SDK_DIR)/west.yml | sed -E 's/^[[:space:]]*revision:[[:space:]]*([^[:space:]]+).*/\1/')
+#
+# The awk pass scans for the FIRST `revision:` line ANYWHERE inside the
+# `- name: zephyr` project block, stopping at the next `- name:` entry --
+# not just the line immediately following the name (a purely positional
+# `getline` breaks the moment west.yml's key order changes, a comment is
+# inserted before `revision:`, or the block is reshaped in any way; measured
+# false-non-empty output from each of those before this fix).
+#
+# `[ \t]`, not the POSIX `[[:space:]]` class, inside the awk PROGRAM: the
+# one-true-awk (nawk) macOS ships through at least Monterey does not support
+# `[[:space:]]` -- it parses the bracket expression as a literal character
+# set instead of the space/tab class, so the anchored `- name: zephyr` match
+# (4-space-indented in west.yml) never fires there and `ZEPHYR_REV` comes up
+# empty on every macOS host running the system awk. Same trap family as
+# alp-sdk#1056/#654/#658. sed's own `[[:space:]]` below is untouched --
+# BSD sed -E supports the POSIX classes fine; only awk's parser is the
+# problem.
+ZEPHYR_REV := $(shell awk '/^[ \t]*- name: zephyr[ \t]*$$/{infield=1;next} infield && /^[ \t]*- name: /{exit} infield && /revision:/{print;exit}' $(ALP_SDK_DIR)/west.yml | sed -E 's/^[[:space:]]*revision:[[:space:]]*([^[:space:]]+).*/\1/')
 
 .PHONY: build test shell run clean
 
 build:
-	@test -n "$(ZEPHYR_REV)" || { echo "error: could not derive the pinned Zephyr revision from $(ALP_SDK_DIR)/west.yml" >&2; exit 1; }
-	$(CONTAINER_ENGINE) build -t $(IMAGE) -f $(HERE)Containerfile --build-arg ZEPHYR_REV=$(ZEPHYR_REV) $(HERE)
+	@case "$(ZEPHYR_REV)" in \
+		v[0-9]*) ;; \
+		*) echo "error: could not derive a valid pinned Zephyr revision from $(ALP_SDK_DIR)/west.yml (got '$(ZEPHYR_REV)')" >&2; exit 1 ;; \
+	esac
+	$(CONTAINER_ENGINE) build -t "$(IMAGE)" -f "$(HERE)Containerfile" --build-arg ZEPHYR_REV="$(ZEPHYR_REV)" "$(HERE)"
 
 test: build
 	$(CONTAINER_ENGINE) run --rm -v "$(MOUNT)" $(IMAGE)

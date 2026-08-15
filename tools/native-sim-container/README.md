@@ -84,16 +84,35 @@ podman run --rm -v "$PWD":/work/alp-sdk:z alp-native-sim \
 
 ## Bumping the Zephyr pin
 
-`west.yml` is the single source of truth. Bump its `zephyr` revision and
-`make build`/`make test`/`make shell` pick it up automatically on the next
-run — there is nothing to edit here.
+`west.yml` is **not** where you edit this — it is itself one of the sites
+[`scripts/check_bootstrap_manifest.py --fix`](../../scripts/check_bootstrap_manifest.py)
+rewrites, not a place to hand-edit. `metadata/bootstrap.json`'s
+`zephyr.version` is the actual single source of truth for the whole repo
+(issue #917); editing `west.yml` alone leaves it disagreeing with that file
+and fails the gate. See
+[`docs/zephyr-version-policy.md`](../../docs/zephyr-version-policy.md) for
+the full bump procedure. The short version, from the repo root:
 
-Building with a raw `docker`/`podman` command instead of the Makefile? Update
-the Containerfile's `ARG ZEPHYR_REV` default to match, or pass your own
-`--build-arg ZEPHYR_REV=<rev>`. `scripts/check_bootstrap_manifest.py`
-(`--fix` rewrites it for you, along with every other Zephyr-pin site the SDK
-tracks) fails the PR if that default and `west.yml` ever disagree, so it
-can't drift silently the way it did before issue #1458.
+```sh
+# 1. edit metadata/bootstrap.json's zephyr.version
+# 2. propagate it to west.yml, the CI workflow --mr/cache-key pins, the
+#    README badge, and this Containerfile's ARG ZEPHYR_REV default:
+python3 scripts/check_bootstrap_manifest.py --fix
+# 3. prove every pin agrees:
+python3 scripts/check_bootstrap_manifest.py
+```
+
+`make build`/`make test`/`make shell` then pick up the new pin automatically
+on the next run — they read `west.yml` live, so there is nothing to edit in
+this directory itself.
+
+Building with a raw `docker`/`podman` command instead of the Makefile? Step
+2 above already rewrote the Containerfile's `ARG ZEPHYR_REV` default, so a
+standalone build already carries the right value; pass your own
+`--build-arg ZEPHYR_REV=<rev>` only if you want to override it.
+`scripts/check_bootstrap_manifest.py` (no `--fix`) fails the PR if that
+default and `metadata/bootstrap.json` ever disagree, so it can't drift
+silently the way it did before issue #1458.
 
 Keep `west.yml`'s `zephyr` revision and `pr-twister.yml`'s `--mr` flag
 identical — that lockstep is the whole point of this container.
