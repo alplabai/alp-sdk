@@ -1,0 +1,11 @@
+{
+  "backend": "drpai",
+  "version": "2026.07-seed",
+  "source": "Conservative subset from Renesas DRP-AI TVM supported-op docs; refine from bench probing.",
+  "supported_ops": [
+    "CONV_2D", "DEPTHWISE_CONV_2D", "FULLY_CONNECTED",
+    "AVERAGE_POOL_2D", "MAX_POOL_2D",
+    "ADD", "MUL", "CONCATENATION", "PAD", "RESHAPE",
+    "SOFTMAX", "RELU", "RELU6", "RESIZE_BILINEAR"
+  ]
+}
