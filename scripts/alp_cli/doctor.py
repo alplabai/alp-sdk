@@ -148,21 +148,53 @@ def _prereq_os_key() -> str:
     return "linux"
 
 
+def _prereq_linux_pm() -> str | None:
+    """Which package manager's sub-map to read under
+    prerequisites.install.linux (issue #1464 -- keyed by PACKAGE MANAGER,
+    not distro, since a `sudo apt-get install`-shaped command is wrong on a
+    host with no apt at all). `command -v`-style detection via
+    `shutil.which`, checked in the same apt-before-dnf order
+    scripts/bootstrap.sh's own PM detection uses. Returns None when neither
+    resolves (or on a PM this manifest deliberately ships no sub-map for,
+    e.g. Arch's pacman) -- the caller then falls back to the generic,
+    package-manager-agnostic hint rather than guessing."""
+    if shutil.which("apt-get") is not None:
+        return "apt"
+    if shutil.which("dnf") is not None:
+        return "dnf"
+    return None
+
+
 def _prereq_install_hint(tool: str) -> str:
     """The remediation string for a missing prerequisite `tool`, sourced from
     metadata/bootstrap.json's prerequisites.install.<os> map -- the same
     manifest scripts/bootstrap.sh and scripts/bootstrap.ps1 read (issue
-    #949). Falls back to a generic, package-manager-agnostic pointer when
-    the manifest is unreadable, when `tool` isn't tracked as an install
-    command on the current OS at all (e.g. a future prerequisite added to
-    only one OS's list -- printing an invented command here would just
-    reintroduce the drift this change removes), or when the manifest parses
-    but is shaped wrong at any of the four key hops (`prerequisites`,
-    `install`, `<os>`, `<tool>`) -- each hop is guarded with
-    `isinstance(node, dict)` before it is indexed, so a truncated/bad-merge
-    manifest degrades to the generic hint instead of raising."""
+    #949). On Linux, `install.linux` is itself keyed by PACKAGE MANAGER
+    (issue #1464 -- `install.linux.apt` / `install.linux.dnf`), so this adds
+    one extra hop (`_prereq_linux_pm()`) between `install` and the OS key on
+    that path only; macOS/Windows are unaffected (each has exactly one
+    relevant package manager, so their maps stay flat). Falls back to a
+    generic, package-manager-agnostic pointer when the manifest is
+    unreadable, when no known package manager is detected on a Linux host,
+    when `tool` isn't tracked as an install command for the resolved
+    OS/(package manager) at all (e.g. `ninja` under `install.linux.dnf` --
+    unshipped because this manifest could not verify one dnf-family command
+    that works on both Fedora and RHEL-derivatives without EPEL; printing an
+    invented command here would just reintroduce the drift this change
+    removes), or when the manifest parses but is shaped wrong at any hop --
+    each hop is guarded with `isinstance(node, dict)` before it is indexed,
+    so a truncated/bad-merge manifest degrades to the generic hint instead
+    of raising."""
     node: object = _bootstrap_manifest()
-    for key in ("prerequisites", "install", _prereq_os_key(), tool):
+    os_key = _prereq_os_key()
+    keys = ["prerequisites", "install", os_key]
+    if os_key == "linux":
+        pm = _prereq_linux_pm()
+        if pm is None:
+            return f"Install {tool} via your OS package manager."
+        keys.append(pm)
+    keys.append(tool)
+    for key in keys:
         if not isinstance(node, dict):
             node = None
             break

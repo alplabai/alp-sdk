@@ -18,12 +18,21 @@
     "pythonMinVersion": "3.10",
     "install": {
       "linux": {
-        "git": "sudo apt-get install -y git",
-        "cmake": "sudo apt-get install -y cmake",
-        "python3": "sudo apt-get install -y python3",
-        "ninja": "sudo apt-get install -y ninja-build",
-        "xz": "sudo apt-get install -y xz-utils",
-        "wget": "sudo apt-get install -y wget"
+        "apt": {
+          "git": "sudo apt-get install -y git",
+          "cmake": "sudo apt-get install -y cmake",
+          "python3": "sudo apt-get install -y python3",
+          "ninja": "sudo apt-get install -y ninja-build",
+          "xz": "sudo apt-get install -y xz-utils",
+          "wget": "sudo apt-get install -y wget"
+        },
+        "dnf": {
+          "git": "sudo dnf install -y git",
+          "cmake": "sudo dnf install -y cmake",
+          "python3": "sudo dnf install -y python3",
+          "xz": "sudo dnf install -y xz",
+          "wget": "sudo dnf install -y wget"
+        }
       },
       "macos": {
         "git": "brew install git",

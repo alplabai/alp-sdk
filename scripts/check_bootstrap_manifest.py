@@ -92,11 +92,13 @@ when:
       (`requires.os == ["zephyr"]` -- it exists only inside the zephyr repo,
       nothing else) is what actually distinguishes the two; see
       `_in_tree_zephyr_library_manifests`.
-  11. `prerequisites.install` (issue #949) -- the single source for every
-      per-tool install COMMAND (as opposed to point 6 above, which only
-      polices the tool NAME lists) -- disagrees with anything that copies
-      one of those commands: a tool listed in `prerequisites.windows` or
-      `prerequisites.posix` with no matching `install.<os>.<tool>` entry;
+  11. `prerequisites.install` (issue #949, restructured for `install.linux`
+      by issue #1464) -- the single source for every per-tool install
+      COMMAND (as opposed to point 6 above, which only polices the tool
+      NAME lists) -- disagrees with anything that copies one of those
+      commands: a tool listed in `prerequisites.windows` or
+      `prerequisites.posix` with no matching `install.windows.<tool>` /
+      `install.linux.apt.<tool>` / `install.macos.<tool>` entry;
       `scripts/bootstrap.ps1`'s own hardcoded `$Prereqs` `Hint = "..."`
       value for a tool disagreeing with `install.windows.<tool>`; or one of
       `install.windows`'s own winget PACKAGE IDs (derived from the manifest,
@@ -106,12 +108,36 @@ when:
       command in the first place. The literal scan covers the windows/
       winget side only; see `_check_install_commands`'s own docstring for
       why, the full assertion list, and the exact file set scanned.
+
+      `install.linux` (issue #1464) is keyed by PACKAGE MANAGER, not by
+      tool -- `install.linux.apt` / `install.linux.dnf` -- because a `sudo
+      apt-get install`-shaped command is wrong on a host with no apt at all
+      (Fedora/Arch/Rocky measured byte-identical to Debian before this
+      fix). `install.linux.apt` is required and pinned to
+      `prerequisites.posix` by EXACT key equality, the same bar
+      `install.macos` already meets. `install.linux.dnf` is optional and,
+      when present, its keys must be a SUBSET of `prerequisites.posix` --
+      NOT required to be complete: a dnf-family tool this manifest cannot
+      verify uniformly (today: `ninja` -- Fedora's own repos carry
+      `ninja-build`, the RHEL-derivative default repos do not, without
+      EPEL) is left out entirely rather than guessed. See
+      `metadata/schemas/bootstrap-v1.schema.json`'s `install.linux`
+      description for the full rationale, including why there is
+      deliberately no `pacman` key and no distro-ID layer inside `dnf`.
   12. `scripts/bootstrap.sh`'s own hardcoded POSIX-side hint table (issue
-      #978) -- `PREREQ_HINT_NAMES` / `PREREQ_HINT_LINUX` / `PREREQ_HINT_MACOS`,
-      the bash analogue of bootstrap.ps1's `$Prereqs` `Hint=` field -- must
-      agree entry-for-entry (matched up by array position, since bash 3.2
-      has no associative arrays) with `install.linux` / `install.macos`; see
-      `_check_bootstrap_sh_install_hints`.
+      #978, restructured for the package-manager split by issue #1464) --
+      `PREREQ_HINT_NAMES` / `PREREQ_HINT_APT` / `PREREQ_HINT_DNF` /
+      `PREREQ_HINT_MACOS`, the bash analogue of bootstrap.ps1's `$Prereqs`
+      `Hint=` field -- must agree entry-for-entry (matched up by array
+      position, since bash 3.2 has no associative arrays) with
+      `install.linux.apt` / `install.linux.dnf` / `install.macos`.
+      `PREREQ_HINT_APT` must be COMPLETE (one entry per
+      `prerequisites.posix` tool, mirroring `install.linux.apt`'s own
+      completeness bar); `PREREQ_HINT_DNF` carries an empty string `""` at
+      any position `install.linux.dnf` has no entry for -- asserted
+      explicitly, not merely tolerated, so a future edit cannot quietly
+      replace that intentional gap with a guessed command that this gate
+      would otherwise wave through. See `_check_bootstrap_sh_install_hints`.
   13. `zephyr.pythonMinVersion` (issue #1078) -- the Zephyr-SCOPED Python
       floor, deliberately separate from the host-universal
       `prerequisites.pythonMinVersion` point 6 already polices (see that
@@ -1058,10 +1084,24 @@ def _check_install_commands(manifest: dict) -> list[str]:
     independent assertions, each covering a different slice:
 
       1. Completeness -- every `prerequisites.windows` tool has a matching
-         `install.windows` entry, and `install.linux` / `install.macos`'s
-         keys each equal `prerequisites.posix`'s tools. The gate ->
-         install direction is subset-only: `install.windows` MAY carry
-         additional entries with no matching `prerequisites.windows` gate --
+         `install.windows` entry, `install.macos`'s keys equal
+         `prerequisites.posix`'s tools, and `install.linux.apt`'s keys ALSO
+         equal `prerequisites.posix`'s tools (issue #1464 -- `install.linux`
+         is keyed by package manager, not tool; `apt` carries the same
+         completeness bar `install.macos` always has, since it is the
+         Debian/Ubuntu-family default every existing consumer already
+         depends on). `install.linux.dnf`, when present, is checked in the
+         OTHER direction only -- every key it DOES carry must be one of
+         `prerequisites.posix`'s tools (a typo'd/stale/unknown tool name is
+         still rejected) -- but it is NOT required to be complete: a
+         dnf-family tool this manifest cannot verify with one
+         Fedora-and-RHEL-derivative-uniform command (today: `ninja`) is
+         correctly represented by its ABSENCE from the map, not by a
+         guessed entry. `install.linux.dnf` itself is optional -- the
+         schema does not `require` it -- consistent with "prove it or leave
+         it out" at the sub-map level too. The gate -> install direction is
+         subset-only for windows: `install.windows` MAY carry additional
+         entries with no matching `prerequisites.windows` gate --
          issue #1036's `7zip` is the first live case, gating `west sdk
          install` rather than bootstrap itself, the same "install has a
          command but nothing refuses without it" shape `install.macos`'s
@@ -1157,13 +1197,46 @@ def _check_install_commands(manifest: dict) -> list[str]:
             f"shape)"
         )
     posix_tools = set(prereqs.get("posix", []))
-    for os_key in ("linux", "macos"):
-        os_install = set(install.get(os_key, {}))
-        if os_install != posix_tools:
+    os_install = set(install.get("macos", {}))
+    if os_install != posix_tools:
+        problems.append(
+            f"prerequisites.install.macos keys {sorted(os_install)} disagree "
+            f"with prerequisites.posix tools {sorted(posix_tools)} -- every "
+            f"posix prerequisite needs its own install command on macos"
+        )
+
+    # install.linux (issue #1464): keyed by PACKAGE MANAGER, not tool.
+    # `apt` is required and held to the SAME exact-equality bar as
+    # install.macos above (it is the Debian/Ubuntu-family default every
+    # existing consumer -- bootstrap.sh, doctor.py, tan's byte-pinned
+    # fallback -- already depends on). `dnf` is optional and, when present,
+    # is checked in the OTHER direction only: every key it declares must be
+    # a real prerequisites.posix tool, but it need not cover all of them --
+    # a tool this manifest cannot verify with one command that works across
+    # the whole dnf ecosystem (Fedora + RHEL-derivatives) is correctly
+    # represented by leaving it OUT, not by guessing (see
+    # metadata/schemas/bootstrap-v1.schema.json's install.linux description
+    # for the ninja/EPEL evidence). Schema `additionalProperties: false`
+    # already rejects any package-manager key other than apt/dnf (e.g. a
+    # hand-added `pacman`) before this function ever runs -- see main()'s
+    # early schema-validation return -- so this function does not repeat
+    # that check.
+    linux_install = install.get("linux", {})
+    apt_install = set(linux_install.get("apt", {})) if isinstance(linux_install, dict) else set()
+    if apt_install != posix_tools:
+        problems.append(
+            f"prerequisites.install.linux.apt keys {sorted(apt_install)} disagree "
+            f"with prerequisites.posix tools {sorted(posix_tools)} -- every posix "
+            f"prerequisite needs its own install command on linux.apt (the "
+            f"Debian/Ubuntu-family default)"
+        )
+    if isinstance(linux_install, dict) and "dnf" in linux_install:
+        dnf_install = set(linux_install["dnf"])
+        unknown_dnf = dnf_install - posix_tools
+        if unknown_dnf:
             problems.append(
-                f"prerequisites.install.{os_key} keys {sorted(os_install)} disagree "
-                f"with prerequisites.posix tools {sorted(posix_tools)} -- every "
-                f"posix prerequisite needs its own install command on {os_key}"
+                f"prerequisites.install.linux.dnf has entr(y/ies) {sorted(unknown_dnf)} "
+                f"with no matching prerequisites.posix tool"
             )
 
     # -------- 2. scripts/bootstrap.ps1 Hint= agreement ---------------------
@@ -1263,33 +1336,52 @@ def _check_install_commands(manifest: dict) -> list[str]:
 #
 # The POSIX-side analogue of `_check_install_commands`'s point 2
 # (bootstrap.ps1's own `$Prereqs` `Hint=` agreement). bootstrap.sh's hint
-# table is three PARALLEL arrays, not one `Name=...; Hint=...` pair per line
-# the way `$Prereqs` is (bash 3.2 -- the macOS-shipped version -- has no
-# `declare -A`), so this is matched up by array POSITION rather than a
-# per-entry regex.
+# table is FOUR PARALLEL arrays (was three -- issue #1464 split the old
+# single Linux array by PACKAGE MANAGER), not one `Name=...; Hint=...` pair
+# per line the way `$Prereqs` is (bash 3.2 -- the macOS-shipped version --
+# has no `declare -A`), so this is matched up by array POSITION rather than
+# a per-entry regex.
 _SH_PREREQ_HINT_NAMES_RE = re.compile(r"PREREQ_HINT_NAMES=\(([^)]*)\)")
-_SH_PREREQ_HINT_LINUX_RE = re.compile(r"PREREQ_HINT_LINUX=\((.*?)\n\)", re.DOTALL)
+_SH_PREREQ_HINT_APT_RE = re.compile(r"PREREQ_HINT_APT=\((.*?)\n\)", re.DOTALL)
+_SH_PREREQ_HINT_DNF_RE = re.compile(r"PREREQ_HINT_DNF=\((.*?)\n\)", re.DOTALL)
 _SH_PREREQ_HINT_MACOS_RE = re.compile(r"PREREQ_HINT_MACOS=\((.*?)\n\)", re.DOTALL)
+# `[^"]*` (zero-or-more) rather than `[^"]+` -- matches an EMPTY `""` slot
+# too (issue #1464 -- PREREQ_HINT_DNF carries one for a tool install.linux.
+# dnf declares no command for, e.g. `ninja`), capturing `""` as the empty
+# string rather than skipping that array entry entirely.
 _SH_QUOTED_STRING_RE = re.compile(r'"([^"]*)"')
 
 
 def _check_bootstrap_sh_install_hints(manifest: dict) -> list[str]:
-    """`scripts/bootstrap.sh`'s `PREREQ_HINT_NAMES` / `PREREQ_HINT_LINUX` /
-    `PREREQ_HINT_MACOS` (issue #978) must agree, entry-for-entry, with
-    `prerequisites.install.linux` / `.macos`. Each array is parsed
-    independently and then zipped by index -- a length mismatch between
-    `PREREQ_HINT_NAMES` and either hint array is reported directly rather
-    than silently truncated by `zip`.
+    """`scripts/bootstrap.sh`'s `PREREQ_HINT_NAMES` / `PREREQ_HINT_APT` /
+    `PREREQ_HINT_DNF` / `PREREQ_HINT_MACOS` (issue #978, package-manager
+    split by issue #1464) must agree, entry-for-entry, with
+    `prerequisites.install.linux.apt` / `.linux.dnf` / `.macos`. Each array
+    is parsed independently and then zipped by index -- a length mismatch
+    between `PREREQ_HINT_NAMES` and any hint array is reported directly
+    rather than silently truncated by `zip`.
 
     Also asserts completeness (mirrors `_check_install_commands` point 2's
     own `parsed_names` loop, same "goes dark" failure one level down): every
-    tool key in `prerequisites.install.linux` / `.macos` must have a
-    `PREREQ_HINT_NAMES` entry, not just every `PREREQ_HINT_NAMES` entry a
-    matching install key (which the zip loop below already covers). Without
-    this, a tool added to `install.linux`/`.macos` + `REQUIRED_BINS` but
-    left out of the hint table falls through bootstrap.sh's bare-name
-    `warn "  ${bin}"` branch with this gate reporting rc=0 -- the #978
-    defect, restored."""
+    tool key `prerequisites.install.linux.apt` / `.linux.dnf` / `.macos`
+    DOES carry must have a `PREREQ_HINT_NAMES` entry, not just every
+    `PREREQ_HINT_NAMES` entry a matching install key (which the zip loop
+    below already covers). Without this, a tool added to one of those maps +
+    `REQUIRED_BINS` but left out of the hint table falls through
+    bootstrap.sh's bare-name `warn "  ${bin}"` branch with this gate
+    reporting rc=0 -- the #978 defect, restored.
+
+    `PREREQ_HINT_DNF` is allowed one shape none of the other three arrays
+    are: an entry whose manifest counterpart is genuinely ABSENT (no
+    `install.linux.dnf.<tool>` key at all -- `dnf` is an optional, partial
+    map, issue #1464) must pair with an EMPTY STRING `""` at that position,
+    never a real command -- a real command there with nothing in the
+    manifest backing it would be exactly the pre-#949 drift (a hardcoded
+    hint with no single source of truth) reintroduced one ecosystem later.
+    `install.linux.apt` / `.macos` are both REQUIRED-complete maps (checked
+    by `_check_install_commands` point 1), so this same "absent means
+    empty" allowance applies to them structurally too but should never
+    actually fire in a well-formed manifest."""
     if not BOOTSTRAP_SH.is_file():
         return [f"missing {BOOTSTRAP_SH.relative_to(REPO).as_posix()}"]
     text = BOOTSTRAP_SH.read_text(encoding="utf-8")
@@ -1303,30 +1395,40 @@ def _check_bootstrap_sh_install_hints(manifest: dict) -> list[str]:
     parsed_names = set(names)
 
     install = manifest.get("prerequisites", {}).get("install", {})
-    for os_key, os_re in (
-        ("linux", _SH_PREREQ_HINT_LINUX_RE),
-        ("macos", _SH_PREREQ_HINT_MACOS_RE),
+    linux_install = install.get("linux", {})
+    if not isinstance(linux_install, dict):
+        linux_install = {}
+    for pm_key, pm_re, os_install in (
+        ("apt", _SH_PREREQ_HINT_APT_RE, linux_install.get("apt", {})),
+        ("dnf", _SH_PREREQ_HINT_DNF_RE, linux_install.get("dnf", {})),
+        ("macos", _SH_PREREQ_HINT_MACOS_RE, install.get("macos", {})),
     ):
-        m = os_re.search(text)
+        # install.linux.<pm>.<tool> in the problem text below (not
+        # install.<pm>.<tool>) for apt/dnf, so a reported path is always the
+        # real manifest path a reader can grep for; macos keeps its own flat
+        # install.macos.<tool> path.
+        manifest_prefix = f"linux.{pm_key}" if pm_key in ("apt", "dnf") else pm_key
+        if not isinstance(os_install, dict):
+            os_install = {}
+        m = pm_re.search(text)
         if m is None:
             problems.append(
-                f"scripts/bootstrap.sh: could not find `PREREQ_HINT_{os_key.upper()}=(...)` "
+                f"scripts/bootstrap.sh: could not find `PREREQ_HINT_{pm_key.upper()}=(...)` "
                 f"-- update this gate if it was renamed/restructured"
             )
             continue
         hints = _SH_QUOTED_STRING_RE.findall(m.group(1))
-        os_install = install.get(os_key, {})
         for tool in sorted(os_install):
             if tool not in parsed_names:
                 problems.append(
-                    f"prerequisites.install.{os_key}.{tool} has no "
+                    f"prerequisites.install.{manifest_prefix}.{tool} has no "
                     f"PREREQ_HINT_NAMES entry in scripts/bootstrap.sh -- it "
                     f"would fall through to the bare-name warn() branch "
                     f"(issue #978) instead of printing an install hint"
                 )
         if len(hints) != len(names):
             problems.append(
-                f"scripts/bootstrap.sh PREREQ_HINT_{os_key.upper()} has {len(hints)} "
+                f"scripts/bootstrap.sh PREREQ_HINT_{pm_key.upper()} has {len(hints)} "
                 f"entries but PREREQ_HINT_NAMES has {len(names)} -- they must stay "
                 f"parallel arrays"
             )
@@ -1334,15 +1436,22 @@ def _check_bootstrap_sh_install_hints(manifest: dict) -> list[str]:
         for name, hint in zip(names, hints):
             canonical = os_install.get(name)
             if canonical is None:
+                if hint == "":
+                    # Intentional gap (issue #1464): install.linux.dnf may be
+                    # a partial map, and an unbacked "" slot is exactly the
+                    # correct rendering of "this manifest ships no verified
+                    # command for this tool on this package manager" -- not
+                    # a problem to report.
+                    continue
                 problems.append(
-                    f"scripts/bootstrap.sh PREREQ_HINT_{os_key.upper()} has an entry "
+                    f"scripts/bootstrap.sh PREREQ_HINT_{pm_key.upper()} has an entry "
                     f"for {name!r}, but metadata/bootstrap.json has no "
-                    f"prerequisites.install.{os_key}.{name}"
+                    f"prerequisites.install.{manifest_prefix}.{name}"
                 )
             elif hint != canonical:
                 problems.append(
-                    f"scripts/bootstrap.sh PREREQ_HINT_{os_key.upper()} entry {name!r} "
-                    f"= {hint!r} disagrees with prerequisites.install.{os_key}.{name} "
+                    f"scripts/bootstrap.sh PREREQ_HINT_{pm_key.upper()} entry {name!r} "
+                    f"= {hint!r} disagrees with prerequisites.install.{manifest_prefix}.{name} "
                     f"= {canonical!r}"
                 )
     return problems
