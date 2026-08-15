@@ -100,8 +100,8 @@ matter for AEN builds.
 **Piece 1 -- HAL drivers (`hal_alif`)**: Apache-2.0,
 standalone, at
 [`github.com/alifsemi/hal_alif`](https://github.com/alifsemi/hal_alif).
-Latest release v2.2.0 (2026-03-27); steady release cadence
-(v2.1.0 Dec 2025, v2.0.0 Nov 2025).  Standard Zephyr-module
+We pin v2.3.0 (see `west.yml`); steady release cadence
+(v2.2.0 2026-03-27, v2.1.0 Dec 2025, v2.0.0 Nov 2025).  Standard Zephyr-module
 shape (`zephyr/module.yml` + `zephyr/Kconfig` + root
 `CMakeLists.txt`) -- structurally indistinguishable from
 `zephyrproject-rtos/hal_renesas` / `hal_nxp`.  Our `west.yml`

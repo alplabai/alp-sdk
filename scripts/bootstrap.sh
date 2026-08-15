@@ -601,7 +601,7 @@ if [ "${DO_WEST}" -eq 1 ]; then
         # fetched by `west update`. alp-sdk's self.west-commands then exposes the
         # alp-* extension commands in this workspace (#769).
         ( cd "${WORKSPACE_DIR}" && "${WEST}" "${WEST_INIT_ARGS[@]}" "${REPO_ROOT}" ) || die "west init -l failed"
-        info "Running 'west update' (shallow + narrow; ~30 MB on a cold cache)"
+        info "Running 'west update' (shallow + narrow; ~1.5 GB+ on a cold cache for zephyr/ + modules/, mostly vendor HALs -- this is a floor, not a ceiling; budget disk/bandwidth accordingly)"
         ( cd "${WORKSPACE_DIR}" && "${WEST}" "${WEST_UPDATE_ARGS[@]}" ) || die "west update failed"
         ( cd "${WORKSPACE_DIR}" && "${WEST}" "${WEST_EXPORT_ARGS[@]}" ) || true
     else

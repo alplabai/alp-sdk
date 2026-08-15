@@ -356,7 +356,7 @@ if (-not $NoWest) {
             # this workspace (#769).
             & $West @WestInitArgs $RepoRoot
             if ($LASTEXITCODE -ne 0) { Fail "west init -l failed" }
-            Write-Info "Running 'west update' (shallow + narrow)"
+            Write-Info "Running 'west update' (shallow + narrow; ~1.5 GB+ on a cold cache for zephyr/ + modules/, mostly vendor HALs -- this is a floor, not a ceiling; budget disk/bandwidth accordingly)"
             & $West @WestUpdateArgs
             if ($LASTEXITCODE -ne 0) { Fail "west update failed" }
             & $West @WestExportArgs
