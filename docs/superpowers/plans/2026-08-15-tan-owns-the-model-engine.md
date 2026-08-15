@@ -258,17 +258,45 @@ Expected: PASS (4 cases — 3 parametrized + the `cpu.json` absence check).
 Run: `python3 scripts/validate_metadata.py`
 Expected: exit 0, no schema errors.
 
-- [ ] **Step 7: Regenerate the catalog, then commit**
+- [ ] **Step 7: Regenerate `alp.lock` — a new metadata directory REDS the `alp-lock` gate**
+
+`alp.lock` pins a sha256 digest over the whole `metadata/` tree and another over
+`metadata/schemas/`, so **adding `metadata/npu_ops/` and the new schema
+invalidates both** and `test-all.sh`'s `alp-lock` stage fails until the lock is
+regenerated. This is not optional and it is not caught by
+`validate_metadata.py`:
+
+```bash
+python3 scripts/west_commands/alp_lock.py --workspace .
+```
+
+Expect three changed lines — the `digests.metadata` and `digests.schemas`
+values, and `sdk.revision`, which the generator stamps to the HEAD it ran
+against. The `sdk.revision` move is a legitimate side effect of regenerating at
+dev's tip, not unrelated drift; name it in the PR body so a reviewer does not
+read it as an accident. (Measured on the real slice: `digests.metadata`
+`f8dd1d64…` → `2611d04a…`, `digests.schemas` `042325d1…` → `757c235284…`,
+`sdk.revision` `a1dd365bbf134906d1f1af303e8db1cb844a294e` →
+`40bfc917d150a8f7ad141fb5f5fe03b89ff3194a`.)
+
+Note for later slices: `alp.lock` is a single file every metadata-touching PR
+rewrites, which is the same all-PRs-conflict-on-one-file shape `changelog.d/`
+was introduced to solve (alp-sdk#1395/#1405). Expect to re-run this after every
+rebase onto a moved `dev`.
+
+- [ ] **Step 8: Regenerate the catalog, then commit**
 
 `metadata/catalog.json` drifts whenever a PR adds a gate or metadata directory,
 and dev's protection lets a stale one land — so regenerate it on **any** alp-sdk
-PR, not only when you think you changed it:
+PR, not only when you think you changed it. (For this particular slice it comes
+back unchanged: `npu_ops` is not part of the SoM catalog surface. Run it anyway
+— the point is to not inherit dev's staleness.)
 
 ```bash
 python3 scripts/gen_catalog.py
 git add metadata/npu_ops/ metadata/schemas/npu-ops-v1.schema.json \
         scripts/validate_metadata.py tests/scripts/test_npu_ops_metadata.py \
-        metadata/catalog.json
+        alp.lock metadata/catalog.json changelog.d/
 git commit -q -m "feat(metadata): seed per-NPU op-support lists + schema (ADR-0028)"
 ```
 
