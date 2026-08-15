@@ -31,15 +31,24 @@ scope for a tool-wrapping generator. It does not touch metadata/npu_ops/
 deepx/ either -- that directory does not exist, deliberately (see
 changelog.d/1470.md): DEEPX's dxcom publishes no op-support table at all.
 
-NOT wired into test-all.sh's `stage_generated_files` gens array (unlike
-gen_soc_caps.py & co): every generator in that array needs at most PyYAML +
-jsonschema, or clang-format, which are already baseline dependencies of
-this repo's own gates. `vela` is the heavy, license-clean but multi-hundred-
-MB `model-compile` optional extra, not something every contributor or CI
+NOT in test-all.sh's `stage_generated_files` `gens` array (unlike
+gen_soc_caps.py & co): that array always REGENERATES (unconditional write),
+and every other generator in it needs at most PyYAML + jsonschema, or
+clang-format, which are already baseline dependencies of this repo's own
+gates. `vela` is the heavy, license-clean but multi-hundred-MB
+`model-compile` optional extra, not something every contributor or CI
 runner has -- same reasoning that keeps the DRP-AI/DEEPX toolchains
-bench-gated rather than CI-required elsewhere in this repo. Run this by
-hand when the `ethos-u-vela` pin in pyproject.toml's `model-compile` extra
-moves.
+bench-gated rather than CI-required elsewhere in this repo.
+
+`stage_generated_files` DOES still call this script, separately, in
+`--check` (read-only) mode: `_find_vela()` fails fast with exit 2 the
+instant `vela` isn't on PATH, before anything toolchain-heavy runs, so the
+call costs nothing on a host without vela and the stage treats exit 2 as a
+clean SKIP -- not a stage failure, and not a reason to install vela. On a
+host that DOES have vela, `--check` catches metadata/npu_ops/ethos_u/ drift
+the same way every other generator's regen-then-diff does. Regenerating for
+real (writing new files, e.g. after the `ethos-u-vela` pin in
+pyproject.toml's `model-compile` extra moves) is still a by-hand step.
 
 Usage:
 

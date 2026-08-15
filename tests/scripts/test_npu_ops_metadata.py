@@ -8,6 +8,7 @@ invariant to `--accelerator-config`), so the shape is
 `metadata/npu_ops/<backend_family>/<variant>@<toolchain>-<toolchain_version>.json`.
 """
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -15,10 +16,16 @@ import pytest
 _ROOT = Path(__file__).resolve().parents[2]
 _NPU_OPS = _ROOT / "metadata" / "npu_ops"
 
+sys.path.insert(0, str(_ROOT / "scripts"))
+import validate_metadata as V  # noqa: E402
+
 #: Every table on disk, discovered by GLOB -- a table added later (a new
 #: variant, a new backend family) is picked up by every parametrized check
-#: below with no parametrize list to hand-update.
-_ALL_TABLES = sorted(_NPU_OPS.glob("*/*.json"))
+#: below with no parametrize list to hand-update. `**` (not `*/*`) so this
+#: also catches a file reintroduced directly under metadata/npu_ops/ (the
+#: retired flat layout) instead of silently seeing zero files -- mirrors the
+#: same fix in scripts/validate_metadata.py's own glob.
+_ALL_TABLES = sorted(_NPU_OPS.glob("**/*.json"))
 
 
 def _load(path: Path) -> dict:
@@ -27,6 +34,20 @@ def _load(path: Path) -> dict:
 
 def _ids(path: Path) -> str:
     return path.relative_to(_NPU_OPS).as_posix()
+
+
+def _ops_match_namespace(ns: str, ops: list) -> bool:
+    """Same discriminator as `validate_metadata._check_npu_ops_semantics`:
+    TFLite builtins are UPPER_SNAKE (`CONV_2D`); ONNX operators are
+    CamelCase or a short all-caps acronym (`LRN`, `GRU`, `LSTM`) and never
+    contain an underscore. `op == op.upper()` is NOT usable for the onnx
+    side -- those legitimate all-caps ONNX acronyms already equal their own
+    upper() and would be false-flagged as TFLite spellings."""
+    if ns == "tflite":
+        return all(op == op.upper() for op in ops)
+    if ns == "onnx":
+        return not any("_" in op for op in ops)
+    raise ValueError(f"unrecognised op_namespace {ns!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -69,18 +90,72 @@ def test_filename_matches_applies_to_identity(path):
 @pytest.mark.parametrize("path", _ALL_TABLES, ids=_ids)
 def test_op_spelling_matches_declared_namespace(path):
     """TFLite builtins are UPPER_SNAKE (`CONV_2D`); ONNX operators are
-    CamelCase and are NOT upper-snake (`Conv`). This is the assertion that
-    would have caught the pre-reshape drpai/deepx_dxm1 seed files being
-    spelled in the wrong vocabulary entirely."""
+    CamelCase or a short all-caps acronym (`LRN`, `GRU`, `LSTM`) and never
+    contain an underscore. This is the assertion that would have caught the
+    pre-reshape drpai/deepx_dxm1 seed files being spelled in the wrong
+    vocabulary entirely."""
     data = _load(path)
     ns = data["op_namespace"]
     ops = data["supported_ops"]
-    if ns == "tflite":
-        assert all(op == op.upper() for op in ops), path
-    elif ns == "onnx":
-        assert not any(op == op.upper() for op in ops), path
-    else:
+    if ns not in ("tflite", "onnx"):
         pytest.fail(f"{path}: unrecognised op_namespace {ns!r}")
+    assert _ops_match_namespace(ns, ops), path
+
+
+def test_op_spelling_check_accepts_allcaps_onnx_acronyms():
+    """Regression for the false-positive class in
+    test_op_spelling_matches_declared_namespace above: LRN/GRU/LSTM are real
+    ONNX operators spelled as short all-caps acronyms with no underscore.
+    The old `op == op.upper()` discriminator rejected them on sight, purely
+    for being upper-case -- this would have fired as a false positive on the
+    first legitimate table that ever carried one of them."""
+    assert _ops_match_namespace("onnx", ["LRN", "GRU", "LSTM", "Conv", "Gemm"])
+
+
+def test_op_spelling_check_rejects_tflite_spelling_in_an_onnx_table():
+    """A CONV_2D-style spelling (the TFLite vocabulary) inside a table
+    declared op_namespace=onnx must still be rejected."""
+    assert not _ops_match_namespace("onnx", ["Conv", "CONV_2D"])
+
+
+def _write_npu_ops_fixture(tmp_path, rel: str, **overrides) -> Path:
+    doc = {
+        "applies_to": {"variant": "x", "products": ["p"], "toolchain": "t",
+                       "toolchain_version": "1"},
+        "authority": "vendor-manual", "stance": "screening",
+        "provenance": {"source": "s", "tool_version": "v",
+                      "content_hash": "md5:00000000000000000000000000000000"},
+    }
+    doc.update(overrides)
+    p = tmp_path / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    return p
+
+
+def test_validator_semantics_check_catches_wrong_vocabulary_ops(tmp_path, monkeypatch):
+    """`validate_metadata._check_npu_ops_semantics` -- not just this pytest
+    file -- must itself catch a table's `supported_ops` spelled in the
+    wrong vocabulary for its own declared `op_namespace`. Running just the
+    metadata gate (not pytest) is the common local-CI path a contributor
+    takes, and this is the exact defect class ADR-0028 reshaped this data
+    asset to correct."""
+    monkeypatch.setattr(V, "REPO", tmp_path)
+
+    tflite_wrong = _write_npu_ops_fixture(
+        tmp_path, "ethos_u/x@t-1.json",
+        op_namespace="tflite", supported_ops=["Conv"])
+    assert V._check_npu_ops_semantics([tflite_wrong])
+
+    onnx_wrong = _write_npu_ops_fixture(
+        tmp_path, "drpai/x@t-1.json",
+        op_namespace="onnx", supported_ops=["CONV_2D"])
+    assert V._check_npu_ops_semantics([onnx_wrong])
+
+    onnx_right = _write_npu_ops_fixture(
+        tmp_path, "drpai/x@t-1.json",
+        op_namespace="onnx", supported_ops=["LRN", "GRU", "LSTM"])
+    assert not V._check_npu_ops_semantics([onnx_right])
 
 
 @pytest.mark.parametrize("path", _ALL_TABLES, ids=_ids)
@@ -114,13 +189,31 @@ def test_count_expected_self_check_when_present(path):
 # so it is written against the two files directly rather than the glob.
 # ---------------------------------------------------------------------------
 
-_U85 = _NPU_OPS / "ethos_u" / "u85@vela-5.1.0.json"
-_U55_U65 = _NPU_OPS / "ethos_u" / "u55-u65@vela-5.1.0.json"
+def _resolve_ethos_u_table(pattern: str) -> Path | None:
+    """Resolve the one ethos_u/ table matching `pattern`, tolerant of the
+    `@vela-<version>` suffix rather than hard-coded to `5.1.0`.
 
-#: The exact Ethos-U85-only delta over Ethos-U55/U65 (17 ops). Reproduced
-#: independently of scripts/gen_npu_ops.py's own pinned constant of the same
-#: name, so a bug shared between the generator and this test can't both agree
-#: on a wrong answer.
+    scripts/gen_npu_ops.py:278-288 deliberately UNLINKS the superseded-
+    version file on a re-run against a newer `vela` (pyproject.toml's
+    `ethos-u-vela` pin is open, `>=3.9`, precisely so a version bump is
+    routine, not exceptional) -- a path hard-coded to today's version would
+    go missing the moment someone regenerates on a newer vela, and fail
+    both tests below for a reason that has nothing to do with the data.
+    """
+    matches = sorted((_NPU_OPS / "ethos_u").glob(pattern))
+    return matches[0] if len(matches) == 1 else None
+
+
+_U85 = _resolve_ethos_u_table("u85@vela-*.json")
+_U55_U65 = _resolve_ethos_u_table("u55-u65@vela-*.json")
+
+#: The exact Ethos-U85-only delta over Ethos-U55/U65 (17 ops), taken from the
+#: same regenerated report cited in this change -- not re-derived from a
+#: second, independent read of the vendor data, so this does not by itself
+#: rule out a shared transcription error with scripts/gen_npu_ops.py's own
+#: pinned constant of the same name; `test_u85_and_u55_u65_share_the_same_
+#: vela_report_content_hash` below is what actually pins both tables to one
+#: real `vela` run.
 _EXPECTED_U85_ONLY_DELTA = {
     "CAST", "DIV", "EQUAL", "GATHER", "GREATER", "GREATER_EQUAL", "LESS",
     "LESS_EQUAL", "LOGICAL_AND", "LOGICAL_NOT", "LOGICAL_OR", "NOT_EQUAL",
@@ -129,8 +222,8 @@ _EXPECTED_U85_ONLY_DELTA = {
 
 
 def test_u85_and_u55_u65_tables_exist():
-    assert _U85.is_file(), "expected metadata/npu_ops/ethos_u/u85@vela-5.1.0.json"
-    assert _U55_U65.is_file(), "expected metadata/npu_ops/ethos_u/u55-u65@vela-5.1.0.json"
+    assert _U85 is not None, "expected exactly one metadata/npu_ops/ethos_u/u85@vela-*.json"
+    assert _U55_U65 is not None, "expected exactly one metadata/npu_ops/ethos_u/u55-u65@vela-*.json"
 
 
 def test_u55_u65_is_a_strict_subset_of_u85_with_the_known_17_op_delta():

@@ -808,6 +808,17 @@ def _check_npu_ops_semantics(npu_ops_files) -> list:
          that silently drops or duplicates an op (the exact defect this data
          asset was reshaped to correct) is caught mechanically rather than
          trusted on review alone.
+      4. Every entry in `supported_ops` must itself be spelled in the
+         vocabulary `op_namespace` declares -- TFLite builtins are
+         UPPER_SNAKE (`CONV_2D`), ONNX operators are CamelCase or a short
+         all-caps acronym and never contain an underscore (`Conv`, `LRN`).
+         Check (2) above only catches a table in the wrong FILE (`onnx`
+         table under `ethos_u/`); this catches a table with the wrong
+         `op_namespace` LABEL for its own contents (an `onnx` table whose
+         ops are actually spelled `CONV_2D`-style) -- the exact defect class
+         this data asset exists to correct, and the schema's own
+         `supported_ops[].pattern` admits both spellings so it can't tell
+         them apart on its own.
 
     Returns a failure list shaped like `_check_files()`.
     """
@@ -852,6 +863,31 @@ def _check_npu_ops_semantics(npu_ops_files) -> list:
                 f"backend ingests `{expected}` -- see the matching adapter's "
                 f"accepts(src_format)")
 
+        # Spelling-vs-namespace (docstring item 4): TFLite builtins are
+        # UPPER_SNAKE; ONNX operators are CamelCase or a short all-caps
+        # acronym (`LRN`, `GRU`, `LSTM`) and never contain an underscore.
+        # `op == op.upper()` is NOT the discriminator here -- it would
+        # reject those legitimate all-caps ONNX acronyms as if they were
+        # TFLite spellings. An underscore is what TFLite-style multi-word
+        # names carry that ONNX names never do, so that is what a
+        # wrong-vocabulary onnx table (`CONV_2D` instead of `Conv`) trips.
+        ops = doc.get("supported_ops")
+        if isinstance(ops, list):
+            if namespace == "tflite":
+                bad_ops = [op for op in ops
+                          if not (isinstance(op, str) and op == op.upper())]
+            elif namespace == "onnx":
+                bad_ops = [op for op in ops if isinstance(op, str) and "_" in op]
+            else:
+                bad_ops = []
+            if bad_ops:
+                msgs.append(
+                    f"op_namespace: `{namespace}` but supported_ops contains "
+                    f"{len(bad_ops)} op(s) spelled in the wrong vocabulary: "
+                    f"{bad_ops} -- TFLite builtins are UPPER_SNAKE, ONNX "
+                    f"operators are CamelCase or a short all-caps acronym "
+                    f"with no underscore")
+
         authority = doc.get("authority")
         has_banner = isinstance(doc.get("_generated"), str)
         if authority == "tool-generated" and not has_banner:
@@ -867,7 +903,6 @@ def _check_npu_ops_semantics(npu_ops_files) -> list:
 
         provenance = doc.get("provenance") if isinstance(doc.get("provenance"), dict) else {}
         count_expected = provenance.get("count_expected")
-        ops = doc.get("supported_ops")
         if isinstance(count_expected, int) and isinstance(ops, list) and len(ops) != count_expected:
             msgs.append(
                 f"provenance.count_expected={count_expected} but supported_ops "
@@ -1304,15 +1339,20 @@ def main() -> int:
     # Per-NPU op-support tables (the static-analyzer data asset, ADR-0028).
     # One file per SUPPORT-TABLE IDENTITY under a per-backend-family
     # subdirectory (metadata/npu_ops/<family>/<variant>@<toolchain>-
-    # <toolchain_version>.json) -- glob recursively, not flat.  A family
-    # directory can be legitimately absent (metadata/npu_ops/ has no deepx/
-    # -- dxcom publishes no op-support table; see _check_npu_ops_semantics).
+    # <toolchain_version>.json) -- glob with `**` so this ALSO catches a file
+    # sitting directly under metadata/npu_ops/ (the retired flat layout).
+    # `*/*.json` looked recursive but isn't: it requires exactly one
+    # directory level, so a reintroduced flat file matches nothing and never
+    # reaches schema/semantic validation at all -- silently, not as a FAIL.
+    # A family directory can be legitimately absent (metadata/npu_ops/ has
+    # no deepx/ -- dxcom publishes no op-support table; see
+    # _check_npu_ops_semantics).
     npu_ops_failures: list = []
     npu_ops_files: list = []
     if NPU_OPS_SCHEMA.is_file():
         npu_ops_schema = json.loads(NPU_OPS_SCHEMA.read_text(encoding="utf-8"))
         npu_ops_validator = jsonschema.Draft202012Validator(npu_ops_schema)
-        npu_ops_files = sorted(NPU_OPS.glob("*/*.json"))
+        npu_ops_files = sorted(NPU_OPS.glob("**/*.json"))
         if npu_ops_files:
             print()
             npu_ops_failures = _check_files(

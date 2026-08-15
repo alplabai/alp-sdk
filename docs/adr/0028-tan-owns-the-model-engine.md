@@ -194,9 +194,12 @@ departure from it.
 2. **alp-sdk keeps what it is uniquely authoritative for**, exactly as
    [0026](0026-tan-owns-the-planner-outright.md) clause 2 states for the
    planner:
-   - `metadata/npu_ops/<backend>.json` — per-NPU op support. This is the
-     manufacturer-owned moat, refined from bench probing; it is hardware truth
-     and it stays in the repo that owns the hardware.
+   - `metadata/npu_ops/<backend_family>/<variant>@<toolchain>-<toolchain_version>.json`
+     — per-NPU op support, one file per SUPPORT-TABLE IDENTITY, not per
+     backend (see the Amendment above for why and for the shape's full
+     rationale). This is the manufacturer-owned moat, refined from bench
+     probing and real-toolchain reports; it is hardware truth and it stays
+     in the repo that owns the hardware.
    - `metadata/model_zoo/` and every `metadata/schemas/*.schema.json`.
    - `metadata/socs/**`'s `inference_arena_sram_kib` arena budgets.
    - `scripts/validate_metadata.py`, which gates all of the above.

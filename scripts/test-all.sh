@@ -869,6 +869,28 @@ stage_generated_files() {
         python3 scripts/gen_soc_peripheral_instances.py \
             || { echo "scripts/gen_soc_peripheral_instances.py failed"; return 1; }
     fi
+    # gen_npu_ops.py is deliberately NOT in the `gens` array above (see its
+    # own module docstring): that array always REGENERATES, and doing that
+    # here unconditionally would make the heavy, optional `vela` toolchain a
+    # gate dependency for every contributor. `--check` sidesteps that: it
+    # exits 2 -- not 1 -- the instant `vela` isn't found on PATH, before
+    # anything toolchain-heavy runs, so this call is safe and cheap to make
+    # unconditionally. Treat rc 2 as a clean SKIP (metadata/npu_ops/ethos_u/
+    # freshness simply goes unchecked on this host, same as always); rc 1 is
+    # a real defect (stale tables, or a report-format/delta mismatch) and
+    # DOES fail the stage, same as any other generator here.
+    if [ -f scripts/gen_npu_ops.py ]; then
+        local gen_npu_ops_out
+        gen_npu_ops_out=$(python3 scripts/gen_npu_ops.py --check 2>&1)
+        rc=$?
+        if [ "${rc}" -eq 2 ]; then
+            echo "generated-files: gen_npu_ops.py --check SKIPPED (vela not on PATH)"
+        elif [ "${rc}" -ne 0 ]; then
+            echo "${gen_npu_ops_out}"
+            echo "scripts/gen_npu_ops.py --check failed"
+            return 1
+        fi
+    fi
     # ABI snapshot -- current working snapshot is derived from
     # metadata/sdk_version.yaml (older snapshots are frozen).
     if [ -f scripts/abi_snapshot.py ]; then
