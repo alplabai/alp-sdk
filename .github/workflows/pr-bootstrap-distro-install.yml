@@ -84,6 +84,21 @@ jobs:
     timeout-minutes: 10
     container:
       image: ${{ matrix.image }}
+    # `set -euo pipefail` below is bash-only. GitHub Actions' own default
+    # shell for a `run:` step with no `container:` override is `sh -e
+    # {0}` on Linux -- and per-container it resolves to whatever `/bin/sh`
+    # actually is on THAT image, not a fixed shell. debian:12's `/bin/sh`
+    # is dash (`set -o pipefail` -> "Illegal option -o pipefail", the
+    # exact failure this pinning fixes); fedora:42/rockylinux:9 happened to
+    # pass without it, but relying on a base image's own `/bin/sh` choice
+    # to keep being bash-compatible is exactly the kind of implicit
+    # cross-container assumption this job's own premise (derive from the
+    # manifest, prove nothing by accident) argues against. All three
+    # images ship a real `/bin/bash` out of the box, so pinning it here
+    # costs nothing and removes the dependency on each image's default.
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
