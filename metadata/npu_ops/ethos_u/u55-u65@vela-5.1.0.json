@@ -16,7 +16,7 @@
     "source": "vela --supported-ops-report, table '## Ethos-U55 and Ethos-U65 TFLite Summary Table' (column 1)",
     "tool_version": "vela 5.1.0",
     "content_hash": "md5:93f186ba8653467e46751765d151c3bd",
-    "note": "SUPPORTED_OPS.md is invariant to --accelerator-config (verified by regenerating at ethos-u55-32, ethos-u55-256, ethos-u65-512, ethos-u85-128 and ethos-u85-2048: identical report). Only the TFLite table is used -- the TOSA tables in the same report are out of scope for alp-sdk (scripts/alp_model/adapters/ethos_u.py accepts only src_format == \"tflite\"). A strict subset of the U85 table -- see u85@vela-*.json's supported_ops for the 17-op delta this SKU lacks."
+    "note": "SUPPORTED_OPS.md is invariant to --accelerator-config (verified by regenerating at ethos-u55-32, ethos-u55-256, ethos-u65-512, ethos-u85-128 and ethos-u85-2048: identical report). Only the TFLite table is used -- the TOSA tables in the same report are out of scope (tan.model.adapters.ethos_u accepts only src_format == \"tflite\"). A strict subset of the U85 table -- see u85@vela-*.json's supported_ops for the 17-op delta this SKU lacks."
   },
   "supported_ops": [
     "ABS",

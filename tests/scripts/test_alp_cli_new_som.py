@@ -324,15 +324,17 @@ def _clone_metadata_gates(repo_root: Path, tmp_repo: Path) -> None:
     # DIFFERENT alp-sdk checkout resolves `alp_orchestrate` from THAT
     # checkout instead of this copy, silently testing stale code.
     #
-    # `alp_cli`, `alp_model` and `alp_project_emit` join `alp_orchestrate` for
-    # the same reason: all four are in that closure. `alp_orchestrate/loader.py`
+    # `alp_cli` and `alp_project_emit` join `alp_orchestrate` for the same
+    # reason: all three are in that closure. `alp_orchestrate/loader.py`
     # imports `alp_cli.validator.iter_schema_errors` at module scope, so
     # without `alp_cli` this helper only ever "worked" on a machine carrying an
     # editable `pip install -e .` of some alp-sdk -- resolving the REAL
     # `scripts/` instead of this scaffolded copy, which is precisely the leak
     # alp-sdk#1110 closed for the modules above. On a clean checkout the gate
     # never ran; on a dirty one it ran against the wrong tree.
-    for pkg in ("alp_orchestrate", "alp_cli", "alp_model", "alp_project_emit"):
+    # (`alp_model` was a fourth member of this closure until ADR-0028 deleted
+    # it -- the host-side model engine now lives in tan.model.)
+    for pkg in ("alp_orchestrate", "alp_cli", "alp_project_emit"):
         shutil.copytree(repo_root / "scripts" / pkg, tmp_repo / "scripts" / pkg)
     select_c = tmp_repo / "src" / "backends" / "inference" / "alp_model_select.c"
     select_c.parent.mkdir(parents=True)

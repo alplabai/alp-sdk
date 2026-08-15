@@ -102,16 +102,20 @@ vice versa -- five names collide with an incompatible contract
 | `explain` | `explain CODE [--json] [--no-color]` -- looks up an `ALP_ERR_*`/`ALP-Bxxx` **diagnostic code** (`scripts/alp_cli/explain.py:68-74`) | `tan explain [--template] [--target]` -- describes a **project/module template or generation target**; also takes an optional positional `[TEMPLATE]` (`python/tan/commands/explain_cmd.py`), but never a diagnostic `CODE` lookup (see "`tan explain`" below) |
 | `run` | `run [--board] [--flash]` -- one direct `west build` + optional flash, single image (`scripts/alp_cli/run.py:76-79`) | `tan run` (also `--flash`, `--core`) -- a **distinct command**, not an alias for `tan build`/`tan flash`: builds the full multi-slice plan, then for a `native_sim` target executes the produced binary, or for a hardware target (with `--flash`) flashes it (`python/tan/commands/run_cmd.py`) |
 
-Four more `alp_cli` verbs (`model`, `monitor`, `new-som`, `faultdecode`)
-share a name with a `tan` verb too but were not found to diverge in shape on
-inspection -- they are not re-verified field-by-field here, so do not treat
-"same option list" as a proven-identical envelope either. `emit` is the one
-`alp_cli` verb with no `tan` namesake (`tan` reaches the same ground via
-`tan generate --target <mode>`). `alp_cli` registers 11 verbs today
-(`scripts/alp_cli/main.py:27-37`: `doctor`, `emit`, `explain`, `faultdecode`,
-`generate`, `init`, `model`, `monitor`, `new-som`, `run`, `validate`) --
-`build` is not one of them; ADR 0020 retired the SDK-side fan-out executor
-and no `build.py` remains in `scripts/alp_cli/` to collide with `tan build`.
+Three more `alp_cli` verbs (`monitor`, `new-som`, `faultdecode`) share a name
+with a `tan` verb too but were not found to diverge in shape on inspection --
+they are not re-verified field-by-field here, so do not treat "same option
+list" as a proven-identical envelope either. `emit` is the one `alp_cli` verb
+with no `tan` namesake (`tan` reaches the same ground via `tan generate
+--target <mode>`). `alp_cli` registers 10 verbs today
+(`scripts/alp_cli/main.py:27-36`: `doctor`, `emit`, `explain`, `faultdecode`,
+`generate`, `init`, `monitor`, `new-som`, `run`, `validate`) -- `build` is not
+one of them; ADR 0020 retired the SDK-side fan-out executor and no `build.py`
+remains in `scripts/alp_cli/` to collide with `tan build`. `model` was an
+eleventh verb until ADR-0028 deleted `scripts/alp_cli/model.py` along with the
+host-side model engine it drove (`scripts/alp_model/`, relocated into
+`tan.model`) -- `tan model` is unaffected; only the `alp_cli` reference copy
+is gone, so there is nothing left for this table to compare it against.
 
 None of the five is planned to become a console-script front door under its
 current contract -- `scripts/alp_cli/__main__.py`'s own docstring names this
