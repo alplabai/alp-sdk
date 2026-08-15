@@ -2,11 +2,24 @@
   "backend": "drpai",
   "op_namespace": "onnx",
   "version": "2026.08-seed",
-  "source": "Conservative subset from Renesas DRP-AI TVM supported-op docs; DRP-AI TVM ingests ONNX. Refine from bench probing.",
+  "source": "UNVERIFIED SEED -- ONNX operator names translated from a drafted TFLite subset, NOT yet checked against Renesas DRP-AI TVM documentation. DRP-AI TVM ingests ONNX (adapters/drpai.py accepts()). Must be confirmed against vendor docs + bench probing before a verdict built on it is shown to a customer.",
   "supported_ops": [
-    "Conv", "Gemm", "MatMul",
-    "AveragePool", "GlobalAveragePool", "MaxPool",
-    "Add", "Mul", "Concat", "Pad", "Reshape", "Transpose", "Flatten",
-    "Softmax", "Relu", "Clip", "Resize"
+    "Conv",
+    "Gemm",
+    "MatMul",
+    "AveragePool",
+    "GlobalAveragePool",
+    "MaxPool",
+    "Add",
+    "Mul",
+    "Concat",
+    "Pad",
+    "Reshape",
+    "Transpose",
+    "Flatten",
+    "Softmax",
+    "Relu",
+    "Clip",
+    "Resize"
   ]
 }
