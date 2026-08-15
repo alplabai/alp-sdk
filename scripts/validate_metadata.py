@@ -784,25 +784,39 @@ def _check_block_realizations(block_files, chip_files) -> list:
 
 
 def _check_npu_ops_semantics(npu_ops_files) -> list:
-    """Cross-checks on `metadata/npu_ops/*.json` beyond pure schema validation (ADR-0028).
+    """Cross-checks on `metadata/npu_ops/<backend_family>/*.json` beyond pure
+    schema validation (ADR-0028, reshaped from the flat one-file-per-backend
+    layout to one-file-per-SUPPORT-TABLE-IDENTITY).
 
-    The schema enforces shape and the `op_namespace` enum, but not two facts
-    that only exist relative to the FILE's own identity:
+    The schema enforces per-file shape, but not facts that only exist
+    relative to the file's PATH (its parent directory + its own filename):
 
-      1. `backend:` matches the manifest filename.  Without this,
-         `metadata/npu_ops/ethos_u_v2.json` carrying `"backend": "ethos_u"`
-         passes the schema pass (the enum only checks membership) and the
-         analyzer could silently load the wrong file for a backend.
-      2. `op_namespace:` matches the backend's compiler ingest format --
-         `ethos_u` -> `tflite`, `drpai` -> `onnx`, `deepx_dxm1` -> `onnx`
-         (mirrors each adapter's `accepts(src_format)`).  The enum alone lets
-         any file claim either vocabulary; scoring a model's ops against a
-         list in the wrong vocabulary matches nothing and yields a
-         categorically wrong no-fit verdict.
+      1. `applies_to.variant` + `applies_to.toolchain` +
+         `applies_to.toolchain_version` must reproduce the filename exactly
+         (`<variant>@<toolchain>-<toolchain_version>.json`).  Without this, a
+         file could claim one identity in its path and another inside its own
+         body, and a future consumer resolving a table by path alone would
+         silently load metadata that disagrees with what it asked for.
+      2. `op_namespace` must match the backend FAMILY's compiler ingest
+         format -- the `ethos_u/` directory is TFLite (Vela), the `drpai/`
+         directory is ONNX (DRP-AI Translator) -- mirroring each adapter's
+         `accepts(src_format)`.  Scoring a model's ops against a list in the
+         wrong vocabulary matches nothing and yields a categorically wrong
+         no-fit verdict.
+      3. `provenance.count_expected`, when present, must equal
+         `len(supported_ops)` -- it exists specifically so a transcription
+         that silently drops or duplicates an op (the exact defect this data
+         asset was reshaped to correct) is caught mechanically rather than
+         trusted on review alone.
 
     Returns a failure list shaped like `_check_files()`.
     """
-    _expected_namespace = {"ethos_u": "tflite", "drpai": "onnx", "deepx_dxm1": "onnx"}
+    # Backend-FAMILY (the directory under metadata/npu_ops/) -> the source
+    # format its compiler ingests.  A family with no entry here is unknown
+    # territory for this cross-check (nothing to compare against), not a
+    # failure -- new families are free to be added; this dict just doesn't
+    # yet know their ingest format.
+    _expected_namespace_by_family = {"ethos_u": "tflite", "drpai": "onnx"}
     failures: list[tuple[Path, list[str]]] = []
     for path in npu_ops_files:
         rel = path.relative_to(REPO).as_posix()
@@ -814,19 +828,51 @@ def _check_npu_ops_semantics(npu_ops_files) -> list:
             continue
 
         msgs: list[str] = []
+        family = path.parent.name
+        applies_to = doc.get("applies_to") if isinstance(doc.get("applies_to"), dict) else {}
 
-        backend = doc.get("backend")
-        if isinstance(backend, str) and backend != path.stem:
-            msgs.append(
-                f"backend: `{backend}` must match the manifest filename `{path.stem}` "
-                f"-- the analyzer looks up this file by <backend>.json")
+        variant = applies_to.get("variant")
+        toolchain = applies_to.get("toolchain")
+        toolchain_version = applies_to.get("toolchain_version")
+        if isinstance(variant, str) and isinstance(toolchain, str) and isinstance(toolchain_version, str):
+            expected_stem = f"{variant}@{toolchain}-{toolchain_version}"
+            if path.stem != expected_stem:
+                msgs.append(
+                    f"applies_to (variant={variant!r}, toolchain={toolchain!r}, "
+                    f"toolchain_version={toolchain_version!r}) implies filename "
+                    f"`{expected_stem}.json`, but this file is `{path.name}` -- "
+                    f"a consumer resolving this table by path would load metadata "
+                    f"that disagrees with what it asked for")
 
         namespace = doc.get("op_namespace")
-        expected = _expected_namespace.get(backend if isinstance(backend, str) else path.stem)
+        expected = _expected_namespace_by_family.get(family)
         if expected is not None and namespace != expected:
             msgs.append(
-                f"op_namespace: `{namespace}` but backend `{backend}` ingests "
-                f"`{expected}` -- see the matching adapter's accepts(src_format)")
+                f"op_namespace: `{namespace}` but the `{family}/` directory's "
+                f"backend ingests `{expected}` -- see the matching adapter's "
+                f"accepts(src_format)")
+
+        authority = doc.get("authority")
+        has_banner = isinstance(doc.get("_generated"), str)
+        if authority == "tool-generated" and not has_banner:
+            msgs.append(
+                "authority: tool-generated but no `_generated` DO-NOT-EDIT "
+                "banner -- a machine-reproducible table should self-identify "
+                "so a hand-edit is recognisable as wrong on sight")
+        if authority == "vendor-manual" and has_banner:
+            msgs.append(
+                "authority: vendor-manual but carries a `_generated` "
+                "DO-NOT-EDIT banner -- there is no script to regenerate a "
+                "hand-transcribed table from, so the banner is misleading")
+
+        provenance = doc.get("provenance") if isinstance(doc.get("provenance"), dict) else {}
+        count_expected = provenance.get("count_expected")
+        ops = doc.get("supported_ops")
+        if isinstance(count_expected, int) and isinstance(ops, list) and len(ops) != count_expected:
+            msgs.append(
+                f"provenance.count_expected={count_expected} but supported_ops "
+                f"has {len(ops)} entries -- a dropped/duplicated op vs. the "
+                f"cited source, or a stale count_expected")
 
         if msgs:
             print(f"FAIL {rel}")
@@ -1255,19 +1301,24 @@ def main() -> int:
             )
             block_failures += _check_block_realizations(block_files, chip_files)
 
-    # Per-NPU op-support lists (the static-analyzer data asset, ADR-0028).
+    # Per-NPU op-support tables (the static-analyzer data asset, ADR-0028).
+    # One file per SUPPORT-TABLE IDENTITY under a per-backend-family
+    # subdirectory (metadata/npu_ops/<family>/<variant>@<toolchain>-
+    # <toolchain_version>.json) -- glob recursively, not flat.  A family
+    # directory can be legitimately absent (metadata/npu_ops/ has no deepx/
+    # -- dxcom publishes no op-support table; see _check_npu_ops_semantics).
     npu_ops_failures: list = []
     npu_ops_files: list = []
     if NPU_OPS_SCHEMA.is_file():
         npu_ops_schema = json.loads(NPU_OPS_SCHEMA.read_text(encoding="utf-8"))
         npu_ops_validator = jsonschema.Draft202012Validator(npu_ops_schema)
-        npu_ops_files = sorted(NPU_OPS.glob("*.json"))
+        npu_ops_files = sorted(NPU_OPS.glob("*/*.json"))
         if npu_ops_files:
             print()
             npu_ops_failures = _check_files(
                 "JSON", npu_ops_files, npu_ops_validator,
                 lambda p: strict_json_loads(p.read_text(encoding="utf-8"), source=p),
-                "backend",
+                "op_namespace",
             )
             npu_ops_failures += _check_npu_ops_semantics(npu_ops_files)
 
