@@ -1,7 +1,8 @@
 {
   "backend": "ethos_u",
-  "version": "2026.07-seed",
-  "source": "Conservative subset of Ethos-U Vela SUPPORTED_OPS (public docs); refine from bench probing.",
+  "op_namespace": "tflite",
+  "version": "2026.08-seed",
+  "source": "Conservative subset of Ethos-U Vela SUPPORTED_OPS (public docs); Vela is a TFLite frontend. Refine from bench probing.",
   "supported_ops": [
     "CONV_2D", "DEPTHWISE_CONV_2D", "TRANSPOSE_CONV", "FULLY_CONNECTED",
     "AVERAGE_POOL_2D", "MAX_POOL_2D", "MEAN",

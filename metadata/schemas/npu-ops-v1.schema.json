@@ -1,19 +1,24 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://alplab.ai/schemas/npu-ops-v1.schema.json",
   "title": "ALP per-NPU op-support list v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["backend", "version", "source", "supported_ops"],
+  "required": ["backend", "op_namespace", "version", "source", "supported_ops"],
   "properties": {
     "backend": {"type": "string", "enum": ["ethos_u", "drpai", "deepx_dxm1"]},
+    "op_namespace": {
+      "type": "string",
+      "enum": ["tflite", "onnx"],
+      "description": "Source-format vocabulary `supported_ops` is spelled in. MUST match the backend adapter's `accepts(src_format)`: ethos_u -> tflite, drpai -> onnx, deepx_dxm1 -> onnx. Comparing a model's ops against a list in the other vocabulary matches nothing and yields a categorically wrong no-fit verdict."
+    },
     "version": {"type": "string", "minLength": 1},
     "source": {"type": "string", "minLength": 1},
     "supported_ops": {
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
-      "items": {"type": "string", "pattern": "^[A-Z0-9_]+$"}
+      "items": {"type": "string", "pattern": "^[A-Za-z0-9_]+$"}
     }
   }
 }

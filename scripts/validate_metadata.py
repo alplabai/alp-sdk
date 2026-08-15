@@ -783,6 +783,59 @@ def _check_block_realizations(block_files, chip_files) -> list:
     return failures
 
 
+def _check_npu_ops_semantics(npu_ops_files) -> list:
+    """Cross-checks on `metadata/npu_ops/*.json` beyond pure schema validation (ADR-0028).
+
+    The schema enforces shape and the `op_namespace` enum, but not two facts
+    that only exist relative to the FILE's own identity:
+
+      1. `backend:` matches the manifest filename.  Without this,
+         `metadata/npu_ops/ethos_u_v2.json` carrying `"backend": "ethos_u"`
+         passes the schema pass (the enum only checks membership) and the
+         analyzer could silently load the wrong file for a backend.
+      2. `op_namespace:` matches the backend's compiler ingest format --
+         `ethos_u` -> `tflite`, `drpai` -> `onnx`, `deepx_dxm1` -> `onnx`
+         (mirrors each adapter's `accepts(src_format)`).  The enum alone lets
+         any file claim either vocabulary; scoring a model's ops against a
+         list in the wrong vocabulary matches nothing and yields a
+         categorically wrong no-fit verdict.
+
+    Returns a failure list shaped like `_check_files()`.
+    """
+    _expected_namespace = {"ethos_u": "tflite", "drpai": "onnx", "deepx_dxm1": "onnx"}
+    failures: list[tuple[Path, list[str]]] = []
+    for path in npu_ops_files:
+        rel = path.relative_to(REPO).as_posix()
+        try:
+            doc = strict_json_loads(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue
+
+        msgs: list[str] = []
+
+        backend = doc.get("backend")
+        if isinstance(backend, str) and backend != path.stem:
+            msgs.append(
+                f"backend: `{backend}` must match the manifest filename `{path.stem}` "
+                f"-- the analyzer looks up this file by <backend>.json")
+
+        namespace = doc.get("op_namespace")
+        expected = _expected_namespace.get(backend if isinstance(backend, str) else path.stem)
+        if expected is not None and namespace != expected:
+            msgs.append(
+                f"op_namespace: `{namespace}` but backend `{backend}` ingests "
+                f"`{expected}` -- see the matching adapter's accepts(src_format)")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+    return failures
+
+
 def _check_library_semantics(library_files) -> list:
     """Cross-checks on library manifests beyond pure schema validation (ADR 0018).
 
@@ -1216,6 +1269,7 @@ def main() -> int:
                 lambda p: strict_json_loads(p.read_text(encoding="utf-8"), source=p),
                 "backend",
             )
+            npu_ops_failures += _check_npu_ops_semantics(npu_ops_files)
 
     # Library manifests (YAML) against library v1 (ADR 0018).
     library_failures: list = []
