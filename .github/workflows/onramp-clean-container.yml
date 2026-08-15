@@ -204,9 +204,10 @@ jobs:
             exit 1
           fi
           # Every missing tool's curated install command (from
-          # metadata/bootstrap.json's prerequisites.install.linux, via
-          # bootstrap.sh's drift-gated PREREQ_HINT_LINUX mirror) must
-          # actually appear -- a bare tool-name-only message is the
+          # metadata/bootstrap.json's prerequisites.install.linux.apt, via
+          # bootstrap.sh's drift-gated PREREQ_HINT_APT mirror -- renamed
+          # from PREREQ_HINT_LINUX by issue #1464's package-manager split)
+          # must actually appear -- a bare tool-name-only message is the
           # pre-#978/#949 regression this asserts against.
           for hint in \
             "sudo apt-get install -y cmake" \

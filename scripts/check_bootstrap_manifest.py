@@ -1436,12 +1436,21 @@ def _check_bootstrap_sh_install_hints(manifest: dict) -> list[str]:
         for name, hint in zip(names, hints):
             canonical = os_install.get(name)
             if canonical is None:
-                if hint == "":
-                    # Intentional gap (issue #1464): install.linux.dnf may be
-                    # a partial map, and an unbacked "" slot is exactly the
-                    # correct rendering of "this manifest ships no verified
-                    # command for this tool on this package manager" -- not
-                    # a problem to report.
+                # Intentional-gap allowance is DNF-ONLY (review finding on
+                # #1471): install.linux.dnf may be a partial map, and an
+                # unbacked "" slot there is exactly the correct rendering of
+                # "this manifest ships no verified command for this tool on
+                # this package manager" -- not a problem to report. apt and
+                # macos are both REQUIRED-complete maps (point 1 of
+                # `_check_install_commands` pins both to `prerequisites.
+                # posix` by exact key equality), so a canonical-less entry on
+                # either of THOSE sides is never legitimate -- gating this
+                # allowance to dnf keeps them exactly as strict as before
+                # this map ever had a partial-allowed sibling. Un-gated, a
+                # stray PREREQ_HINT_APT/_MACOS entry blanked to `""` for a
+                # tool the manifest doesn't declare would silently pass here
+                # instead of being reported.
+                if hint == "" and pm_key == "dnf":
                     continue
                 problems.append(
                     f"scripts/bootstrap.sh PREREQ_HINT_{pm_key.upper()} has an entry "
