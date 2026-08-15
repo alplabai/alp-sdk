@@ -69,6 +69,12 @@ either repo.
 - `metadata/schemas/npu-ops-v1.schema.json` — its schema.
 - `tests/scripts/test_npu_ops_metadata.py` — data-integrity test.
 
+> **CORRECTION (post-execution, 2026-08-15).** This is not what Task 1
+> shipped. See the correction block at the top of Task 1 below for the real
+> file set — table-identity keying (`metadata/npu_ops/<family>/<variant>@
+> <toolchain>-<version>.json`), no flat `<backend>.json`, and no `deepx_dxm1`
+> table at all.
+
 **alp-sdk — modified (Slice A):** `scripts/validate_metadata.py`.
 
 **alp-sdk — deleted (Slice C):** `scripts/alp_model/` (13 files),
@@ -95,6 +101,29 @@ Plus `python/tests/model/` carrying the relocated engine tests.
 ## Task 1: The per-NPU op-support data asset (alp-sdk, Slice A)
 
 Hardware truth lands where the hardware is. Additive; nothing consumes it yet.
+
+> **CORRECTION (post-execution, 2026-08-15).** Everything below this point in
+> Task 1 describes a flat `metadata/npu_ops/<backend>.json` layout keyed only
+> by backend name. **That is not what shipped.** Executing this task surfaced
+> that one file per backend cannot represent Ethos-U's own variant split
+> (U85 vs. U55/U65 support different op subsets) or a toolchain version, so
+> the real layout is **table-identity keying**:
+> `metadata/npu_ops/<family>/<variant>@<toolchain>-<version>.json`. The actual
+> shipped tables:
+> - `metadata/npu_ops/ethos_u/u85@vela-5.1.0.json` — 70 ops
+> - `metadata/npu_ops/ethos_u/u55-u65@vela-5.1.0.json` — 53 ops
+> - `metadata/npu_ops/drpai/onnx-i8@translator-1.12.json` — 47 ops
+> - **no `deepx` table** — absence is the data: `tan.model.analyze` reports
+>   `undetermined` for DEEPX, never `cpu-only`, exactly per the Global
+>   Constraints' "a missing table means `undetermined`" rule.
+>
+> Also shipped and not named anywhere in this plan: `scripts/gen_npu_ops.py`,
+> a generator with a `--check` drift mode wired into `stage_generated_files`
+> (guarded so vela's absence on a box is a clean SKIP, not a failure), and the
+> alp-sdk-side `tests/scripts/test_alpmodel_fixture_self_consistency.py`. The
+> steps below (data files, schema, validator wiring, `alp.lock`) still
+> happened in spirit; read them for the *reasoning*, not the literal file
+> paths or JSON shapes, which are superseded by the above.
 
 **Files:**
 - Create: `metadata/npu_ops/{ethos_u,drpai,deepx_dxm1}.json`
@@ -381,6 +410,13 @@ directory-wide filename↔backend check).
 Run: `python3 scripts/validate_metadata.py`
 Expected: exit 0, no schema errors.
 
+> **CORRECTION (post-execution, 2026-08-15).** This step did not exist in the
+> plan as originally written — it was discovered mid-flight when
+> `test-all.sh`'s `alp-lock` stage went red, and added here after the fact.
+> Recorded so the next metadata-adding plan budgets for it up front rather
+> than rediscovering it: **any new directory under `metadata/` or
+> `metadata/schemas/` invalidates `alp.lock`.**
+
 - [ ] **Step 7: Regenerate `alp.lock` — a new metadata directory REDS the `alp-lock` gate**
 
 `alp.lock` pins a sha256 digest over the whole `metadata/` tree and another over
@@ -523,6 +559,21 @@ Nothing else changes: the call site at `targets.py:76`
 identical `(silicon: str | None, metadata_root: Path) -> Path | None` contract
 and the same "returns None where the old inline 3-tuple unpack" semantics.
 
+> **CORRECTION (post-execution, 2026-08-15).** "Nothing else changes" was
+> **false**. `from tan.planner.som_metadata import resolve_soc_path` looks
+> like a leaf import but is not one: it drags in `tan/planner/__init__.py`,
+> which reads `metadata/registries/*` **at import time**
+> (`tan/planner/slugs.py:167`). Importing `tan.model.targets` therefore
+> silently required an `sdk_root` to already be bound before the model engine
+> could even load — a coupling this plan never named and that `tan.model` is
+> supposed to be free of (Task 2's own import test asserts `tan.model` needs
+> no SDK on `sys.path`). The real fix was a new leaf module
+> **`python/tan/soc_ref.py`** that both `tan.model` and `tan.planner` import,
+> so `tan.model` depends on nothing under `tan.planner`. Repoint Step 4's
+> import at `tan.soc_ref.resolve_soc_path`, not
+> `tan.planner.som_metadata.resolve_soc_path`, and extend Step 2's import test
+> to assert `tan.model` never reaches `tan.planner` transitively.
+
 - [ ] **Step 5: Run to verify it passes**
 
 Run: `python -m pytest tests/model/test_model_package_imports.py -q` from `python/`
@@ -542,11 +593,39 @@ for t in test_alp_model_adapters test_alp_model_build test_alp_model_manifest \
 done
 ```
 
+> **CORRECTION (post-execution, 2026-08-15).** `${t#test_alp_model_}` is a
+> bug, not a rename: bash parameter expansion strips the *literal prefix*
+> `test_alp_model_`, so `test_alp_model_targets` becomes `targets.py` — losing
+> the `test_` prefix pytest's default discovery (`test_*.py`) requires. Run
+> exactly as written, this silently collects **zero** tests from the copied
+> files (`pytest` exits green because there is nothing to fail). The fix is
+> `"python/tests/model/test_${t#test_alp_model_}.py"` — strip the
+> `alp_model_` segment only, keep `test_`, e.g.
+> `test_alp_model_targets` → `test_targets.py`. Verify with
+> `python -m pytest tests/model -q --collect-only` and confirm the collected
+> count is non-zero before trusting Step 7 below.
+
 Then read each result and fix by hand what `sed` could not: fixture paths
 anchored on `Path(__file__).resolve().parents[2]` (alp-sdk's repo root) must be
 repointed at tan's, and `tests/fixtures/models/tiny_int8.tflite` must be copied
 across to `python/tests/fixtures/models/`. Do not leave a test skipping because
 its fixture silently vanished — a skipped test proves nothing.
+
+> **CORRECTION (post-execution, 2026-08-15).** Three more fixes this step
+> omitted, all discovered only by running the relocated suite for real:
+> - **`_gen_fixture.py` needed re-anchoring.** Its `parents[2]` walk assumed
+>   alp-sdk's directory depth (`scripts/alp_model/_gen_fixture.py` → repo
+>   root); copied verbatim into `python/tan/model/_gen_fixture.py`, the same
+>   `parents[2]` lands on `<tan-cli>/python`, not `<tan-cli>`, and would have
+>   written three junk fixture trees on next run. Fix the anchor before
+>   relying on the fixture regenerator in Task 6.
+> - **`cbor2` needed adding** to tan's required dependencies, plus a new
+>   `model-io` extra — the engine's manifest/package modules read `.alpmodel`
+>   CBOR containers unconditionally, not behind an optional import.
+> - **`parity.yml` needed `model-io` added** to the job that binds
+>   `ALP_SDK_ROOT`. Without it, every tflite-dependent test in the relocated
+>   suite skipped in CI, silently, on every run — a green bar that proved
+>   nothing about the engine it was supposed to cover.
 
 - [ ] **Step 7: Run the relocated engine suite**
 
@@ -609,6 +688,16 @@ def test_resolve_compile_passes_through_none_and_empty():
     assert _resolve_compile(None, Path(".")) is None
     assert _resolve_compile({}, Path(".")) == {}
 ```
+
+> **CORRECTION (post-execution, 2026-08-15).** The last assertion is wrong
+> and, run as written, fails against both implementations. Both tan's
+> `_resolve_compile` and the alp-sdk oracle it mirrors open with
+> `if not block: return None` — an empty dict is falsy, so `{}` returns
+> `None`, not `{}`. The correct assertion is
+> `assert _resolve_compile({}, Path(".")) is None`. Verified against the
+> oracle directly (per THE ORACLE rule): the same input/output pair holds on
+> `scripts/alp_cli/model.py`'s `_resolve_compile`, so this is not a
+> tan-side-only quirk to special-case away.
 
 - [ ] **Step 2: Run to verify it fails**
 
@@ -815,6 +904,17 @@ edited. If it skips, bind the variable and re-run.
 inventing versions. Keep them **optional**: CI installs the bare package
 deliberately, and a required NPU dependency would break that.
 
+> **CORRECTION (post-execution, 2026-08-15).** `model-prep` and
+> `model-convert` do not exist — this plan guessed at names instead of reading
+> alp-sdk's actual `[project.optional-dependencies]`. The real extras are
+> `dev`, `model-io`, `model-compile`, and `mcp`. Of those, **`model-compile`
+> was missing from tan's side entirely** and had to be added, not just
+> mirrored — it carries the vendor-adapter-adjacent deps (`ethos-u-vela`,
+> `flatbuffers`) the relocated `tan.model.adapters.ethos_u` needs. Read the
+> extras table directly (`grep -A20 'optional-dependencies' pyproject.toml` in
+> the bound alp-sdk checkout) rather than trusting either this correction or
+> the original guess to still be current by the time this is executed again.
+
 - [ ] **Step 4: Full tan gate**
 
 Run: `python -m pytest tests -q` from `python/`
@@ -901,6 +1001,28 @@ reports `skipped`. Record the exact pass counts in the release notes.
 
 Do not delete them, and do not let them start skipping quietly.
 
+> **CORRECTION (post-execution, 2026-08-15).** This step, as written, was
+> incomplete in a way that would have left the Ethos-U real-model proof
+> exactly as dark as it started. Three more things it actually took:
+> - **Regenerate the committed C fixtures** via
+>   `python -m tan.model._gen_fixture --root <alp-sdk-checkout>` — the
+>   generator's provenance banner (which repo/commit produced the fixture)
+>   changed once the engine moved, so the committed `.c`/`.h` fixtures under
+>   `tests/unit/alpmodel_select/` needed regenerating to stay consistent with
+>   their own claimed provenance, not just functionally unchanged.
+> - **A stale-path doc sweep** — any doc referencing `scripts/alp_model/…` by
+>   path (not just the deleted-symbol grep in Step 3 below) needed updating to
+>   `python/tan/model/…`.
+> - **Landing `tests/fixtures/models/person_detect_int8.tflite`**
+>   (Apache-2.0, 300568 B) plus `PERSON_DETECT-PROVENANCE.txt`. Without it,
+>   `test_vela_yolo_internal.py`'s Ethos-U real-model proof **had never
+>   actually executed** in this repo's history — it always fell through the
+>   "fixtures absent" skip path described two paragraphs up, for want of a
+>   real fixture to point at, so the "close the silent-skip hole" intent of
+>   this step was previously unmet even when the test file itself existed.
+>   Landing the real fixture is what makes the release-time
+>   ran-not-skipped assertion (also in this step) actually mean something.
+
 - [ ] **Step 2: Rehome the three cross-cutting tests**
 
 - `tests/scripts/test_silicon_ref_single_source.py:93,106` — `from
@@ -979,6 +1101,20 @@ git commit -q -m "refactor(model): delete the host-side model engine, relocated 
 ---
 
 ## Task 7: Re-target the `check` plan at tan
+
+> **SUPERSEDED (post-execution, 2026-08-15).** Do not execute this task as
+> written. Amending `2026-07-24-alp-model-check.md` in place turned out to be
+> the wrong move once ADR-0028's `check`/`doctor` design amendment landed —
+> the `fits | cpu-fallback | no-fit` vocabulary this task would have re-homed
+> verbatim (Step 2's table: "The estimator maths, the conservative-bias rules,
+> and the `fits` | `cpu-fallback` | `no-fit` verdict enum carry over
+> unchanged") was itself retired, and the TFLite-only scope was a category
+> error against ONNX-ingesting backends (see Task 1's correction above). The
+> old plan is now marked superseded in place (a header pointing at the
+> replacement, not a rewrite — it stays as historical record) and the
+> maintainer-approved replacement is
+> `docs/superpowers/plans/2026-08-15-tan-model-check-doctor.md`. Read that
+> plan instead of executing the steps below.
 
 `docs/superpowers/plans/2026-07-24-alp-model-check.md` (875 lines) is a complete,
 still-valid plan whose Task 2 (metadata) is delivered by Task 1 above and whose
@@ -1063,6 +1199,36 @@ the same way Task 7 re-targets the `check` plan.
 `run`/`ab`/`measure` stay last: they are the only ones needing a device
 transport, and the A55 DEEPX / DRP-AI half is hard-blocked on Yocto runtimes
 that are still bench-gated.
+
+## What remains
+
+Three follow-ups outlive this migration. None blocks the merge of either
+branch; all three rot silently if left unrecorded, which is why they are
+recorded here rather than only in a closing PR comment.
+
+(a) **Re-pin the freshness/parity commit once both branches land.** tan's
+`python/tests/gates/test_planner_relocation_freshness.py` (`PINNED_SDK_COMMIT`)
+and `parity.yml`'s `PINNED_SDK_TAG` are both currently pinned to
+`bd8be484680cf5aa1c1ac0e8b38d84128b5a279d` — a pre-deletion alp-sdk commit.
+Once the alp-sdk Slice-C PR and the tan Slice-B PR have both merged, re-pin
+both to a post-deletion commit, or tan CI keeps exercising a `scripts/
+alp_model/`-shaped alp-sdk that no longer matches what ships.
+
+(b) **`cutting-a-tan-release` has no gate asserting the two real-model proofs
+RAN.** `test_vela_yolo_internal.py` and the DEEPX equivalent are designed to
+skip silently when their fixtures/tooling are absent (by design — public CI
+has no access), which means a release cut on a box missing either can pass
+green while never having proven either real-model claim. The release
+checklist needs a step that fails the cut on a `skipped` result for either
+test, with the pass counts recorded in the release notes. Plugin-side
+(`cutting-a-tan-release`), maintainer only — not an alp-sdk or tan-cli code
+change.
+
+(c) **`running-local-ci` still lists two deleted alp-sdk test files.** The
+skill's local-gate walkthrough still names
+`tests/scripts/test_alp_model_adapters.py` and
+`tests/scripts/test_deepx_yolo_internal.py`, both removed by this migration's
+Slice C. Plugin-side, not an alp-sdk or tan-cli code change.
 
 ## Self-review notes
 
