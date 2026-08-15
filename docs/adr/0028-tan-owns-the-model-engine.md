@@ -11,6 +11,81 @@ Supersedes the pipeline-spine clause (§2 item 4) of
 `docs/superpowers/specs/2026-07-24-model-edge-ai-management-design.md` — see
 *Why the 2026-07-24 decision is reversed* below.
 
+## Amendment (2026-08-15 — what a static `check` may claim, and how the tables are keyed)
+
+Decision-2 keeps `metadata/npu_ops/` in alp-sdk as hardware truth. Deriving that
+data from the real toolchains changed both its **shape** and what a consumer may
+honestly say with it. Recorded here because
+`docs/superpowers/plans/2026-07-24-alp-model-check.md` is superseded on both
+counts.
+
+**1. Keyed by support-table identity, not by backend.**
+
+```
+metadata/npu_ops/
+  ethos_u/u85@vela-5.1.0.json          70 ops · tflite · tool-generated
+  ethos_u/u55-u65@vela-5.1.0.json      53 ops · tflite · tool-generated
+  drpai/onnx-i8@translator-1.12.json   47 ops · onnx   · vendor-manual
+  (no deepx/ — deliberately)
+```
+
+Vela 5.1.0 publishes **two** TFLite tables: Ethos-U85 (70 operators) and
+Ethos-U55/U65 (53). U55/U65 is a strict subset; exactly 17 are U85-only —
+`CAST`, `DIV`, `EQUAL`, `GATHER`, `GREATER`, `GREATER_EQUAL`, `LESS`,
+`LESS_EQUAL`, `LOGICAL_AND`, `LOGICAL_NOT`, `LOGICAL_OR`, `NOT_EQUAL`,
+`REDUCE_ALL`, `REDUCE_ANY`, `SCATTER_ND`, `SELECT`, `SELECT_V2`. alp-sdk ships
+all three variants (u85: E1M-AEN401/601/801; u55: E1M-AEN301/501/701; u65:
+E1M-NX9101), so one flat `ethos_u.json` carrying 70 would report 17 false
+capabilities on four of the seven Ethos-U SKUs. The tables are invariant to
+`--accelerator-config` — five regenerations across `ethos-u55-32`,
+`ethos-u55-256`, `ethos-u65-512`, `ethos-u85-128` and `ethos-u85-2048` produced
+byte-identical output — so the architecture family, not the MAC count, is the
+real key.
+
+**2. DEEPX ships no table, and the absence is the signal.** dxcom 2.3.0
+publishes no op-support list; the only provable claim is the 15 ONNX operators
+present in a `yolo11n.onnx` that dxcom demonstrably compiled — a lower bound.
+Shipping it would mass-produce false negatives on V2M, the SKU where DEEPX is
+the headline feature. A consumer finding no table MUST return `undetermined`,
+never degrade to "all ops unknown → cpu-fallback".
+
+**3. A static check screens; it never certifies a fit.** Every table carries
+`stance: "screening"`, and the `fits | cpu-fallback | no-fit` vocabulary is
+retired. On all three backends the real failure mode is **silent CPU fallback**,
+not refusal:
+
+- Vela marks no operator unconditionally supported — every entry carries Generic
+  constraints (quantization, per-axis quant, dtype, zero-point, shape) and 30 of
+  the 70 carry Specific ones; a non-conforming instance falls back to CPU rather
+  than failing the compile.
+- DRP-AI TVM partitions unmatched ops to `llvm -device=arm_cpu`; a *matched*
+  subgraph is still pushed back if it lacks a compute-intensive op; and
+  acceptance gates on enumerated kernel × stride × padding × dilation × groups,
+  so the same operator name is accepted or rejected on tensor shape alone.
+- DRP-AI additionally has a second, opaque MERA2 partitioner whose criteria are
+  unavailable.
+
+A name-based verdict is therefore an **upper bound**. The replacement is a
+partition screen: per-op `npu-eligible | cpu-certain | unknown`; model-level
+`compute_on_npu_pct_max` (MAC-weighted, explicitly an upper bound) and
+`npu_coverage: full-eligible | partial | cpu-only | undetermined`;
+`storage: ok | overflow` as the one *sound* static negative; every field
+labelled `basis: static-screen | compiled | bench`. **"fits" is reserved for
+`basis: compiled` or `basis: bench`.** A consumer must gate on the adapter's
+`accepts(src_format)` before scoring operators at all — Vela ingests TFLite
+while DRP-AI TVM and dxcom ingest ONNX, so scoring a TFLite artifact against an
+ONNX backend's table is a category error, not a lower-fidelity answer.
+
+**4. `drpai`'s list is the Translator's, deliberately.** DRP-AI TVM's own gate
+is a Relay composite-pattern table (`mera_drp.conv2d`, `mera_drp.gemm`, …),
+which is incomparable to a customer's ONNX model without a mapping layer that
+does not exist, and which lives inside a licensed venv that must not be
+redistributed here. TVM provably invokes the DRP-AI Translator as its backend
+codegen (`relay.ext.drp.set_toolchain`), and `rzv_drp-ai_tvm/README.md:30` calls
+the stack "an extension of the DRP-AI Translator to the TVM backend" — so the
+Translator's published ONNX list is the right screening data, pinned to
+`drp_compiler_version: "100"` and the int8 flow.
+
 ## Context
 
 `alp model` is the second surface that ships from two repos at once, and it is
