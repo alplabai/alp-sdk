@@ -7,6 +7,38 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — the documented `west update` cost was off by ~50x, and stale-version fallout from the v4.4.1/hal_alif-v2.3.0 bumps had drifted back into prose (#1459)
+
+`scripts/bootstrap.sh`/`.ps1` told a fresh-clone user that `west update`
+(shallow + narrow) costs `~30 MB` on a cold cache.  Measured on a live
+workspace produced by that exact command: `zephyr/` 287 MB / 35,954 files,
+`modules/` 1,213 MB / 20,847 files — **~1.5 GB**, of which `hal_nxp` alone is
+931.2 MB (62% of `modules/`).  And that's a *floor*: the measured workspace
+predated several `name-allowlist` additions (`littlefs`, `cmsis_6`,
+`mcuboot`, `tflite-micro`, `hal_ethos_u`, `zcbor`, `open-amp`, `libmetal`,
+`tf-psa-crypto`, `micro_ros_zephyr_module`).  Both scripts now say `~1.5 GB+`
+and name it explicitly as a floor rather than a fixed number the
+name-allowlist will keep invalidating.
+
+Also swept the residual fallout from two version bumps that never fully
+propagated into prose: `west.yml`'s own header comment still said
+"Currently v4.4.0" (twice) though the pin three lines below it has read
+`v4.4.1` since the last Zephyr patch bump; `docs/getting-started.md`,
+`docs/v1.0-readiness.md`, and `docs/vendor-partnerships.md` all still named
+`hal_alif v2.2.0` though `west.yml` pins `v2.3.0`; and `CONTRIBUTING.md`'s
+`ZEPHYR_BASE` pointed at `$PWD/../zephyrproject/zephyr`, a directory
+`bootstrap.sh` never creates (every other copy in the tree already says
+`$PWD/../zephyr`, matching the workspace layout `scripts/bootstrap.sh`
+actually builds).
+
+The other defect the source issue described — four inconsistent documented
+quickstarts — had already been resolved by earlier accuracy passes before
+this PR started (README's quickstart is a single git-clone + `tan bootstrap`
++ `tan init` path with no `west init -m` content left in it, and it links to
+`docs/getting-started.md` as the full walkthrough instead of restating one);
+verified against the issue's own cited commit rather than re-describing
+content that no longer matches the tree.
+
 ### Fixed — `tools/native-sim-container`'s documented `docker` path could not build, and its Zephyr pin had silently drifted from `west.yml` (#1457, #1458)
 
 Two independent bugs in the hardware-free `native_sim` reproduction
