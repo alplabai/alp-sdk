@@ -13,20 +13,22 @@
  *
  * The fixture bytes (k_onnx_cpu_alpmodel, tests/yocto/onnx_cpu_fixture.h)
  * are the real zcbor wire format, not a hand-typed guess: GENERATED with
- * the SAME canonical writer scripts/alp_model/package.py uses for
+ * the SAME canonical writer tan.model.package (tan-cli; formerly
+ * scripts/alp_model/package.py before ADR-0028) uses for
  * tests/unit/alpmodel_reader's own fixture.h (Manifest/Target ->
- * write_package(), via scripts/alp_model/_gen_fixture.py's
+ * write_package(), via tan.model._gen_fixture's
  * build_onnx_cpu_fixture_bytes()). tests/unit/alpmodel_select/ already
  * covers the SELECTOR against hand-built alp_model_t structs (no CBOR
  * involved); this test is the one place in the suite that exercises the
  * REAL zcbor decode this issue restores.
  *
- * Regenerate with (from the repo root):
- *   python3 -m alp_model._gen_fixture
- * tests/scripts/test_alp_model_package.py's
+ * Regenerate with (from a tan-cli checkout's python/ dir):
+ *   python -m tan.model._gen_fixture --root <alp-sdk-checkout>
+ * tan-cli's python/tests/model/test_package.py::
  * test_committed_onnx_cpu_fixture_matches_generator asserts the
- * committed header stays in sync with the generator -- a container-format
- * change that forgets to regenerate this file fails that test.
+ * committed header stays in sync with the generator (requires ALP_SDK_ROOT
+ * bound to this alp-sdk checkout) -- a container-format change that forgets
+ * to regenerate this file fails that test.
  *
  * Build with:
  *   cmake -B build -DALP_OS=yocto -DALP_BUILD_TESTS=ON

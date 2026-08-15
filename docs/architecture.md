@@ -439,9 +439,8 @@ Training stays off-device, in TensorFlow / PyTorch, producing a
 `tan.model` in `alplabai/tan-cli` -- relocated from this repo's
 `scripts/alp_model/` under ADR-0028) compiles that source model for
 **every** NPU backend the target SoM declares and packs the results
-into one fat,
-multi-backend **`.alpmodel`** package (CBOR manifest + per-backend
-blobs).  The per-backend compiler differs by silicon: Arm **Vela**
+into one fat, multi-backend **`.alpmodel`** package (CBOR manifest +
+per-backend blobs).  The per-backend compiler differs by silicon: Arm **Vela**
 for Ethos-U (AEN, i.MX 93), the **DRP-AI translator** for Renesas
 RZ/V2N, **dxcom** for DEEPX DX-M1, plus a portable CPU/TFLM blob as
 the universal fallback.  At runtime, `alp_inference_open_alpmodel()`

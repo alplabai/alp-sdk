@@ -38,6 +38,13 @@ respective component (under vendors/<name>/ or the referenced upstream).
 - nanopb — zlib license. Copyright (c) Petteri Aimonen.
   Integrated under vendors/nanopb/.
 
+- TensorFlow Lite for Microcontrollers "person_detect" sample model —
+  Apache-2.0. Copyright Google LLC / The TensorFlow Authors.
+  Vendored as a test fixture at
+  tests/fixtures/models/person_detect_int8.tflite (the real-model Ethos-U
+  proof; see tests/fixtures/models/PERSON_DETECT-PROVENANCE.txt for the
+  upstream revision and sha256).
+
 --------------------------------------------------------------------------------
 Vendor BSPs and SDK binaries
 

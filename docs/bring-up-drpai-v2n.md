@@ -83,7 +83,9 @@ Five things bite here:
 - **RZ/V2N uses the V2H build.** The runtime libraries are
   `obj/build_runtime/v2h/lib/`, and the model compile takes `PRODUCT=V2N`
   (upstream `README.md` pairs "RZ/V2H and RZ/V2N" throughout;
-  `scripts/alp_model/adapters/drpai.py` defaults to `PRODUCT=V2N`).
+  `tan.model.adapters.drpai` -- tan-cli; formerly
+  `scripts/alp_model/adapters/drpai.py` here before ADR-0028 -- defaults to
+  `PRODUCT=V2N`).
 - **`obj/build_runtime/v2m/` is NOT ours.** That is Renesas **RZ/V2M**, an older,
   different SoC. It is unrelated to the E1M-V2M SKU, which is RZ/V2N + DEEPX and
   also uses the **v2h** libraries. Linking `v2m` would be the wrong silicon's NPU

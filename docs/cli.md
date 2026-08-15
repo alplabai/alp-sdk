@@ -108,7 +108,7 @@ they are not re-verified field-by-field here, so do not treat "same option
 list" as a proven-identical envelope either. `emit` is the one `alp_cli` verb
 with no `tan` namesake (`tan` reaches the same ground via `tan generate
 --target <mode>`). `alp_cli` registers 10 verbs today
-(`scripts/alp_cli/main.py:27-36`: `doctor`, `emit`, `explain`, `faultdecode`,
+(`scripts/alp_cli/main.py:26-35`: `doctor`, `emit`, `explain`, `faultdecode`,
 `generate`, `init`, `monitor`, `new-som`, `run`, `validate`) -- `build` is not
 one of them; ADR 0020 retired the SDK-side fan-out executor and no `build.py`
 remains in `scripts/alp_cli/` to collide with `tan build`. `model` was an
