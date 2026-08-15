@@ -134,16 +134,34 @@ when:
       from point 7's generic orphan-leaf scan (`_GATE_ASSERTED_LEAVES`) the
       same way `prerequisites.*` is -- neither bootstrap script reads or
       enforces it; this cross-check is its gate instead.
+  14. `tools/native-sim-container/Containerfile`'s `ARG ZEPHYR_REV=...`
+      default (issue #1458) disagrees with `zephyr.version`. This is the
+      SAME category of machine pin point 4 already polices for the four CI
+      workflows -- a hardcoded copy of the Zephyr revision, independent of
+      west.yml -- just living in a fifth file point 4's curated CI_WORKFLOWS
+      list was never meant to reach (a Containerfile is not a
+      `.github/workflows/*.yml`). It shipped stuck one patch release behind
+      (`v4.4.0` while west.yml/pr-twister.yml already carried `v4.4.1`) with
+      nothing to catch it -- exactly the silent-drift shape this whole
+      script exists to close. `tools/native-sim-container/Makefile`'s `build`
+      target derives the value LIVE from west.yml and passes it as
+      `--build-arg` on every real `make build`, so this default only matters
+      for a standalone `docker build`/`podman build` that bypasses the
+      Makefile -- but "only matters sometimes" is exactly what let it drift
+      unnoticed before, so it stays gated like every other pin here. See
+      `_check_containerfile`.
 
 --fix propagates a changed `zephyr.version` OUT to every machine pin site
-this gate verifies above (points 2, 4, 5, 10 -- west.yml, the CI workflow
-`--mr`/cache-key pins, the README badge, and every in-tree-Zephyr-subsystem
-library manifest's `version:` field). It reuses the exact same
-compiled regexes/constants the verify-only checks read (`_WEST_YML_ZEPHYR_RE`,
-`_WEST_MR_RE`, `_CACHE_KEY_RE`, `_README_BADGE_RE`, `_LIBRARY_VERSION_RE`) --
-there is deliberately no second, parallel pin map; that would just be a new
-flavour of the drift issue #917 exists to kill. Idempotent (a site already
-at zephyr.version is left untouched, byte-for-byte); a site the gate expects
+this gate verifies above (points 2, 4, 5, 10, 14 -- west.yml, the CI
+workflow `--mr`/cache-key pins, the README badge, every
+in-tree-Zephyr-subsystem library manifest's `version:` field, and the
+native-sim-container Containerfile's `ARG ZEPHYR_REV` default). It reuses
+the exact same compiled regexes/constants the verify-only checks read
+(`_WEST_YML_ZEPHYR_RE`, `_WEST_MR_RE`, `_CACHE_KEY_RE`, `_README_BADGE_RE`,
+`_LIBRARY_VERSION_RE`, `_CONTAINERFILE_ZEPHYR_REV_RE`) -- there is
+deliberately no second, parallel pin map; that would just be a new flavour
+of the drift issue #917 exists to kill. Idempotent (a site already at
+zephyr.version is left untouched, byte-for-byte); a site the gate expects
 but can no longer find/match is a hard failure naming it, never a silent
 no-op. bootstrap.sh and bootstrap.ps1 are NOT --fix sites -- they read
 zephyr.version from the manifest at run time and must never hardcode it
@@ -193,6 +211,9 @@ BOOTSTRAP_SH = REPO / "scripts" / "bootstrap.sh"
 BOOTSTRAP_PS1 = REPO / "scripts" / "bootstrap.ps1"
 README_MD = REPO / "README.md"
 LIBRARIES_DIR = REPO / "metadata" / "libraries"
+# The native_sim reproduction container's own Zephyr-revision pin (issue
+# #1458) -- see module docstring point 14.
+CONTAINERFILE = REPO / "tools" / "native-sim-container" / "Containerfile"
 
 # Every CI workflow that assembles its own throwaway Zephyr workspace and
 # therefore pins a Zephyr revision independent of west.yml/west update.
@@ -241,6 +262,9 @@ _WEST_MR_RE = re.compile(r"--mr\s+(v\d+\.\d+\.\d+)")
 # digits to compare).
 _CACHE_KEY_RE = re.compile(r"key:.*?zephyr-(v\d+\.\d+\.\d+)", re.IGNORECASE)
 _README_BADGE_RE = re.compile(r"Zephyr-v(\d+\.\d+\.\d+)")
+# tools/native-sim-container/Containerfile's `ARG ZEPHYR_REV=...` default
+# (module docstring point 14, issue #1458).
+_CONTAINERFILE_ZEPHYR_REV_RE = re.compile(r"ARG\s+ZEPHYR_REV=(\S+)")
 
 # Leaves that stay hardcoded in both scripts BY DESIGN (see point 6 in the
 # module docstring) -- policed by their own dedicated comparison checks
@@ -446,6 +470,30 @@ def _check_readme_badge(manifest_version: str) -> list[str]:
     return []
 
 
+def _check_containerfile(manifest_version: str) -> list[str]:
+    """Point 14 (module docstring, issue #1458):
+    tools/native-sim-container/Containerfile's `ARG ZEPHYR_REV=...` default
+    must agree with `zephyr.version`. `tools/native-sim-container/Makefile`'s
+    `build` target derives the real value LIVE from west.yml on every `make
+    build`, so this default only ever fires for a standalone `docker
+    build`/`podman build` that bypasses the Makefile -- but that is exactly
+    the path issue #1458 found silently stuck a patch release stale, so it
+    is gated the same as every other machine pin this script polices."""
+    if not CONTAINERFILE.is_file():
+        return [f"missing {CONTAINERFILE.relative_to(REPO).as_posix()}"]
+    rel = CONTAINERFILE.relative_to(REPO).as_posix()
+    text = CONTAINERFILE.read_text(encoding="utf-8")
+    m = _CONTAINERFILE_ZEPHYR_REV_RE.search(text)
+    if m is None:
+        return [f"{rel}: no `ARG ZEPHYR_REV=...` default found -- update this "
+                 f"gate if the pin format changed"]
+    containerfile_version = m.group(1)
+    if containerfile_version != manifest_version:
+        return [f"{rel} pins ARG ZEPHYR_REV {containerfile_version!r}, "
+                 f"metadata/bootstrap.json declares zephyr.version {manifest_version!r}"]
+    return []
+
+
 def _in_tree_zephyr_library_manifests() -> list[Path]:
     """metadata/libraries/*.yaml manifests that are genuine IN-TREE ZEPHYR
     SUBSYSTEMS -- the only per-library manifests whose `version:` must equal
@@ -610,6 +658,11 @@ def _run_fix(manifest_version: str) -> int:
                                    site_desc="the `version:` field")
         report += r
         problems += p
+
+    r, p = _apply_version_fix(CONTAINERFILE, _CONTAINERFILE_ZEPHYR_REV_RE, manifest_version,
+                               site_desc="the `ARG ZEPHYR_REV=...` default")
+    report += r
+    problems += p
 
     # Print whatever DID get rewritten first, unconditionally -- a failure
     # partway through the sweep above (a site that failed to match, or a
@@ -1494,8 +1547,9 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1] if __doc__ else "")
     ap.add_argument(
         "--fix", action="store_true",
-        help="Rewrite west.yml, the CI workflow --mr/cache-key pins, and the README badge "
-             "FROM metadata/bootstrap.json's zephyr.version instead of only verifying them. "
+        help="Rewrite west.yml, the CI workflow --mr/cache-key pins, the README badge, and "
+             "the native-sim-container Containerfile's ARG ZEPHYR_REV default FROM "
+             "metadata/bootstrap.json's zephyr.version instead of only verifying them. "
              "Idempotent; run the gate without --fix afterwards to confirm.",
     )
     args = ap.parse_args()
@@ -1542,6 +1596,7 @@ def main() -> int:
     for wf in CI_WORKFLOWS:
         problems += _check_ci_workflow(wf, manifest_version)
     problems += _check_library_versions(manifest_version)
+    problems += _check_containerfile(manifest_version)
 
     zephyr_python_problems, zephyr_python_skip = _check_zephyr_python_min_version(manifest)
     problems += zephyr_python_problems
@@ -1557,7 +1612,8 @@ def main() -> int:
         print(f"check_bootstrap_manifest: SKIP -- {zephyr_python_skip}")
 
     print(f"check_bootstrap_manifest: OK -- metadata/bootstrap.json, west.yml, README.md, "
-          f"scripts/bootstrap.sh, scripts/bootstrap.ps1, and {len(CI_WORKFLOWS)} "
+          f"scripts/bootstrap.sh, scripts/bootstrap.ps1, "
+          f"tools/native-sim-container/Containerfile, and {len(CI_WORKFLOWS)} "
           f"CI workflow(s) all agree on Zephyr {manifest_version}.")
     return 0
 
