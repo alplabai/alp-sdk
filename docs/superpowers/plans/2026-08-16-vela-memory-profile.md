@@ -90,9 +90,63 @@ ethosu.vela.errors.CliOptionError: 'Error: Incorrect argument to CLI option --sy
 
 **Three conclusions, and the whole design follows from them:**
 
-1. **`--memory-mode` decides placement; `--system-config` decides bandwidth.**
-   Rows 2 and 3 are byte-identical in memory terms. Passing memory-mode alone is
-   what fixes the zero.
+1. **`--memory-mode` picks PORTS; `--system-config` maps ports to AREAS — so
+   "system-config only decides bandwidth" is true under `Sram_Only` and FALSE
+   under every other mode.** An earlier draft of this conclusion said it
+   without the scope, on the strength of rows 2 and 3 above being identical.
+   Both of those rows are `Sram_Only`, which is exactly the case where the
+   claim holds, so the evidence could not have distinguished the two readings.
+
+   The mechanism is in Arm's own `vela.ini`. `[Memory_Mode.*]` assigns
+   `const_mem_area` / `arena_mem_area` / `cache_mem_area` to a **port**
+   (`Axi0` or `Axi1`), and `[System_Config.*]` maps those ports to a **memory
+   area** via `axi0_port` / `axi1_port`:
+
+   - `Sram_Only` puts all three on `Axi0`, and **every** Arm section sets
+     `axi0_port=Sram`. The system config therefore cannot move placement —
+     which is the only reason rows 2 and 3 matched.
+   - `Shared_Sram` sets `const_mem_area=Axi1`; `Dedicated_Sram*` puts const
+     **and** arena on `Axi1`. `axi1_port` is `OffChipFlash` on
+     `Ethos_U55_*`, `Ethos_U65_Embedded` and `Ethos_U85_SYS_Flash_*`, and
+     `Dram` on `Ethos_U65_{Mid_End,High_End,Client_Server}` and
+     `Ethos_U85_SYS_DRAM_*`. So under those modes the system config decides
+     where the weights physically land.
+
+   Measured, `tests/fixtures/models/person_detect_int8.tflite` (300568 B, md5
+   `ac6e1b872f90cff2f52b1a28664814ed`) at `ethos-u65-256 --memory-mode
+   Shared_Sram`, changing **only** `--system-config` (KiB):
+
+   | `--system-config` | `sram` | `dram` | `off_chip_flash` |
+   |---|---|---|---|
+   | `Ethos_U65_Embedded` | `72.734375` | `0.0` | `228.265625` |
+   | `Ethos_U65_Mid_End` | `72.734375` | `228.3125` | `0.0` |
+   | `Ethos_U65_High_End` | `72.734375` | `228.25` | `0.0` |
+   | `Ethos_U65_Client_Server` | `72.734375` | `228.25` | `0.0` |
+
+   228 KiB of weights moves between DRAM and off-chip flash on the system
+   config alone. The same model at `ethos-u85-256 --memory-mode Shared_Sram`
+   behaves identically: `Ethos_U85_SYS_DRAM_Mid` → `dram = 228.796875`,
+   `Ethos_U85_SYS_Flash_High` → `off_chip_flash = 228.84375`. Under
+   `--memory-mode Sram_Only` all four U65 sections collapse to one result
+   (`sram = 72.0`, `on_chip_flash = 228.25`), confirming the scope.
+
+   **This is not hypothetical for alp-sdk:** `Shared_Sram` is exactly what
+   this plan has tan pass for `E1M-NX9101`, and `metadata/socs/nxp/imx9/imx93.json`
+   declares no `system_config`, so that part currently inherits vela's default
+   `Ethos_U65_Client_Server` and lands its const region in DRAM. Pinning a
+   `system_config` for the i.MX 93 is open work this conclusion now surfaces.
+
+   One further caveat, also measured: even under `Sram_Only`, where the system
+   config cannot move placement, it still changes the **encoded weight**
+   footprint. Same model at `ethos-u85-256 --memory-mode Sram_Only`,
+   `sram_memory_used` is `72.0` for all five U85 sections — the arena the fit
+   gate reads is invariant — but `on_chip_flash_memory_used` is `235.265625`
+   for `Ethos_U85_SYS_{Flash_High,DRAM_Mid}` and `248.953125` for
+   `Ethos_U85_SYS_{Flash_Low,DRAM_Low,DRAM_High}`. Only the arena figure is
+   safe to call system-config-independent.
+
+   What survives unchanged: passing `--memory-mode` alone is what fixes the
+   zero-SRAM figure the fit gate reads.
 2. **`Memory_Mode.Sram_Only` is a vela BUILT-IN.** It needs no proprietary file.
    vela 5.1.0 ships `Sram_Only`, `Shared_Sram`, `Dedicated_Sram`,
    `Dedicated_Sram_256KB`, `Dedicated_Sram_384KB`, `Dedicated_Sram_512KB`
@@ -382,9 +436,13 @@ existing call site broken:
         run_dir = _run_dir(out_dir, accel_config)
         cmd = ["vela", str(source), "--accelerator-config", accel_config,
                "--output-dir", str(run_dir)]
-        # Placement is decided by --memory-mode, bandwidth by --system-config
-        # (measured: both are byte-identical in memory terms). Only the
-        # memory-mode is load-bearing for the fit gate, and every value we
+        # --memory-mode picks the PORT each area sits on; --system-config
+        # maps ports to memory areas. Under Sram_Only (all areas on Axi0,
+        # axi0_port=Sram everywhere) the system config cannot move
+        # placement -- but under Shared_Sram / Dedicated_Sram* it moves the
+        # const region between DRAM and off-chip flash, so it is NOT
+        # cosmetic there (see "Three conclusions" #1). The memory-mode is
+        # what makes the fit gate's SRAM figure non-zero, and every value we
         # emit is an Arm built-in, so this works with no vendor .ini.
         if vela_memory_mode:
             cmd += ["--memory-mode", vela_memory_mode]
@@ -489,10 +547,28 @@ When it IS set, `--config <path>` is passed and the SoC's vendor
 is present?** vela offers `Ethos_U85_SYS_Flash_Low` and `Ethos_U85_SYS_Flash_High`
 (flash-backed, closest to the E8's MRAM) as well as the DRAM family. Choosing
 between Low and High is a *bandwidth* claim this plan cannot source from any
-document in the repo. Measured, it changes no memory figure — only cycle
-estimates. **Recommendation: pass no `--system-config` at all when the vendor
-one is unavailable**, which is what Tasks 2-3 specify. Revisit only if cycle
-estimates become load-bearing.
+document in the repo. Under the `Sram_Only` the Alif parts declare, it moves no
+weights — all five U85 sections put every area on `Sram` — and the arena figure
+the fit gate reads is identical (`sram_memory_used = 72.0` on
+`person_detect_int8.tflite` at `ethos-u65-256`… `ethos-u85-256`). An earlier
+draft said it "changes no memory figure"; measured, that is too strong: the
+*encoded weight* footprint does move (`on_chip_flash_memory_used = 235.265625`
+under `Flash_High` / `DRAM_Mid` vs `248.953125` under `Flash_Low` / `DRAM_Low`
+/ `DRAM_High`), because the bandwidth model feeds the weight-encoding choice.
+**Recommendation: pass no `--system-config` at all when the vendor one is
+unavailable**, which is what Tasks 2-3 specify. Revisit if cycle estimates or
+weight-footprint accuracy become load-bearing.
+
+**Which `system_config` should `E1M-NX9101` pin?** Separate and sharper,
+surfaced by conclusion 1: `metadata/socs/nxp/imx9/imx93.json` declares
+`memory_mode: Shared_Sram` with no `system_config`, and `Shared_Sram` puts
+`const_mem_area` on `Axi1`. So the i.MX 93 inherits vela's default
+`Ethos_U65_Client_Server` (`axi1_port=Dram`) and lands its weights in DRAM,
+where `Ethos_U65_Embedded` (`axi1_port=OffChipFlash`) would land them in
+flash — a 228 KiB difference on `person_detect_int8.tflite`, measured. Unlike
+the Alif case, the U65 is a single accelerator, so one scalar CAN describe it;
+what is missing is a source for which one the i.MX 93's memory system actually
+is. Do not guess it.
 
 ## Deliberately NOT in this plan
 
