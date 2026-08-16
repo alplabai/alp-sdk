@@ -16,6 +16,8 @@ every PR that touches metadata/.
 
 from __future__ import annotations
 
+import datetime
+import hashlib
 import json
 import re
 import sys
@@ -1307,14 +1309,23 @@ def _npu_backend(npu_type: str, subtype: str) -> str | None:
     return None
 
 
-def _soc_perf_targets(soc: dict) -> set[tuple[str, str]]:
-    """`(backend, accel_config)` pairs one SoC spec's `npus[]` offers.
+def _soc_perf_targets(soc: dict) -> dict[tuple[str, str], str | None]:
+    """`(backend, accel_config)` -> declared `paired_core`, from one SoC's `npus[]`.
 
     `accel_config` is vela's `--accelerator-config` (`<type>-<mac_per_cycle>`)
     for Ethos-U and the empty string for every other backend, which has no
-    such knob.  Mirrors `tan.model.targets._soc_targets`.
+    such knob.  The KEY set mirrors `tan.model.targets._soc_targets`.
+
+    The value is the `npus[].paired_core` the spec declares, or None when it
+    declares none -- and None is a real answer, not a placeholder.  The Alif E8
+    pairs each Ethos-U55 to a specific M55 (`m55_hp` / `m55_he`) and pairs the
+    Ethos-U85 to nothing, so a caller may only enforce a pairing where one is
+    written down.  Two `npus[]` entries that collapse onto the same
+    `(backend, accel_config)` with DIFFERENT `paired_core` values make the
+    pairing ambiguous, and ambiguity resolves to None: the metadata does not
+    know, so nothing downstream may act as if it does.
     """
-    out: set[tuple[str, str]] = set()
+    out: dict[tuple[str, str], str | None] = {}
     for npu in soc.get("npus") or []:
         if not isinstance(npu, dict):
             continue
@@ -1324,23 +1335,22 @@ def _soc_perf_targets(soc: dict) -> set[tuple[str, str]]:
             continue
         accel = (f"{npu_type}-{npu['mac_per_cycle']}"
                  if backend == "ethos_u" and npu.get("mac_per_cycle") else "")
-        out.add((backend, accel))
+        paired = npu.get("paired_core")
+        paired = paired if isinstance(paired, str) and paired else None
+        key = (backend, accel)
+        if key in out and out[key] != paired:
+            out[key] = None
+        else:
+            out[key] = paired
     return out
 
 
-def _resolve_perf_targets(sku: str, metadata_root: Path) -> set[tuple[str, str]]:
-    """Every `(backend, accel_config)` a SoM SKU actually resolves.
+def _load_som_preset(sku: str, metadata_root: Path) -> dict:
+    """The SoM preset for a SKU, or `LookupError`.
 
-    Host SoC `npus[]` + every OTHER SoC spec whose `variants[].alp_module_skus`
-    lists this SKU (an on-module discrete accelerator -- the DEEPX DX-M1 on the
-    V2M SKUs) + `("cpu", "")`, which is always present.  Same derivation, off
-    the same files, as `tan.model.targets.resolve_targets`.
-
-    Raises `LookupError` when the SKU's preset or its `silicon:` SoC spec
-    cannot be resolved.  It FAILS CLOSED and never returns a partial set: the
-    caller states "this SKU does not have that target" as a hard failure, so
-    an incomplete answer would reject a legitimate point on the strength of a
-    file we could not read.
+    FAILS CLOSED for every caller below: they all state "this SKU does not
+    have that <thing>" as a hard failure, so an empty or partial answer built
+    from a file we could not read would reject a legitimate point.
     """
     preset_path = metadata_root / "e1m_modules" / f"{sku}.yaml"
     if not preset_path.is_file():
@@ -1352,11 +1362,47 @@ def _resolve_perf_targets(sku: str, metadata_root: Path) -> set[tuple[str, str]]
         raise LookupError(f"{preset_path.name} does not parse: {exc}") from exc
     if not isinstance(preset, dict):                        # pragma: no cover
         raise LookupError(f"{preset_path.name} does not parse to a mapping")
+    return preset
+
+
+def _resolve_perf_cores(sku: str, metadata_root: Path) -> set[str]:
+    """Every core id a SoM SKU declares, i.e. the keys of its `topology:` map.
+
+    `E1M-AEN801` -> {`a32_cluster`, `m55_hp`, `m55_he`};
+    `E1M-V2N101` -> {`a55_cluster`, `m33_sm`}.  A perf point names the core
+    that drove the inference because the core changes the number outright --
+    an A-cluster and an M-class CPU inference of the same model are not the
+    same measurement, and without the core every `backend: "cpu"` point on one
+    SKU would resolve to a single filename.
+
+    Raises `LookupError` on an unresolvable SKU, for the same fail-closed
+    reason as `_resolve_perf_targets`.
+    """
+    topology = _load_som_preset(sku, metadata_root).get("topology")
+    if not isinstance(topology, dict) or not topology:
+        raise LookupError(f"{sku}.yaml declares no `topology:` cores")
+    return set(topology)
+
+
+def _perf_target_map(sku: str, metadata_root: Path) -> dict[tuple[str, str], str | None]:
+    """`(backend, accel_config)` -> declared `paired_core`, for one SoM SKU.
+
+    Host SoC `npus[]` + every OTHER SoC spec whose `variants[].alp_module_skus`
+    lists this SKU (an on-module discrete accelerator -- the DEEPX DX-M1 on the
+    V2M SKUs) + `("cpu", "")`, which is always present and pairs to no
+    particular core.  Same derivation, off the same files, as
+    `tan.model.targets.resolve_targets`.
+
+    Raises `LookupError` when the SKU's preset or its `silicon:` SoC spec
+    cannot be resolved.  FAILS CLOSED, never partial.
+    """
+    preset = _load_som_preset(sku, metadata_root)
+    preset_name = f"{sku}.yaml"
 
     silicon = str(preset.get("silicon", ""))
     soc_path = resolve_soc_path(silicon, metadata_root)
     if soc_path is None:
-        raise LookupError(f"malformed `silicon:` ref {silicon!r} in {preset_path.name}")
+        raise LookupError(f"malformed `silicon:` ref {silicon!r} in {preset_name}")
     if not soc_path.is_file():
         raise LookupError(f"no SoC spec for {silicon} at {soc_path}")
     host = strict_json_loads(soc_path.read_text(encoding="utf-8"), source=soc_path)
@@ -1371,17 +1417,67 @@ def _resolve_perf_targets(sku: str, metadata_root: Path) -> set[tuple[str, str]]
         skus = {s for v in (soc.get("variants") or [])
                 for s in (v.get("alp_module_skus") or [])}
         if sku in skus:
-            targets |= _soc_perf_targets(soc)
-    targets.add(("cpu", ""))
+            for key, paired in _soc_perf_targets(soc).items():
+                if key in targets and targets[key] != paired:
+                    targets[key] = None
+                else:
+                    targets[key] = paired
+    targets.setdefault(("cpu", ""), None)
     return targets
 
 
-#: `capture.reference` shapes that name a path on ONE developer's machine
-#: rather than citing a store every reader can resolve.  A public repo must
-#: never carry them (see the repo-wide "no local paths" rule); a citation that
-#: resolves for nobody else also makes the point unreproducible, which is the
-#: only thing a bench measurement is worth.
+def _resolve_perf_targets(sku: str, metadata_root: Path) -> set[tuple[str, str]]:
+    """Every `(backend, accel_config)` a SoM SKU actually resolves.
+
+    The key set of `_perf_target_map`; see it for the derivation and the
+    fail-closed contract.
+    """
+    return set(_perf_target_map(sku, metadata_root))
+
+
+#: `capture.reference` / `model.source` shapes that name a path on ONE
+#: developer's machine rather than citing a store every reader can resolve.  A
+#: public repo must never carry them (see the repo-wide "no local paths" rule);
+#: a citation that resolves for nobody else also makes the point
+#: unreproducible, which is the only thing a bench measurement is worth.
 _LOCAL_PATH_REFERENCE = re.compile(r"^[/\\]|^[A-Za-z]:[/\\]|onedrive", re.IGNORECASE)
+
+#: A `<store>:<path>` citation or a URL, as opposed to a repo-relative path.
+#: `alp-sdk-internal:models/person_detect_int8.tflite`,
+#: `https://example.org/zoo/x.tflite`.  Used to tell the two legal `model.source`
+#: shapes apart; `_LOCAL_PATH_REFERENCE` is applied FIRST, so a `C:\...` never
+#: reaches this and gets read as a store named `C`.
+_STORE_CITATION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*:\S")
+
+#: The bench recipe's timed-run floor (docs/bench/model-perf-capture.md §4).
+#: 100 timed runs after >= 10 discarded warm-ups, so `latency_ms_p95` is the
+#: 95th percentile of at least a hundred samples rather than an interpolation
+#: across a handful.
+_MIN_TIMED_RUNS = 100
+
+
+def _toolchain_profile_digest(toolchain: dict) -> str:
+    """The 12-hex digest of a perf point's toolchain PROFILE.
+
+    The profile is every key under `toolchain` OTHER than `name` and `version`
+    -- today `system_config`, `memory_mode` and `pins` -- canonicalised as JSON
+    with sorted keys and no whitespace, sha256'd, truncated to 12.  Derived as
+    "everything except name and version" rather than from a hard-coded key list
+    so that a profile key added to the schema later enters the identity
+    automatically instead of silently sharing a filename with the points that
+    predate it.
+
+    It is in the filename because it changes the number: `Ethos_U85_SRAM_Only`
+    and `Ethos_U85_SYS_DRAM_Mid` are different machines (the second is
+    DRAM-backed and this part has no DRAM), and two points measured under them
+    would otherwise resolve to one path, where the survivor is whichever was
+    written last.  It is deliberately NOT part of the consumer match key: a
+    customer holding no toolchain cannot state a profile.
+    """
+    profile = {k: v for k, v in toolchain.items() if k not in ("name", "version")}
+    canonical = json.dumps(profile, sort_keys=True, separators=(",", ":"),
+                           ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
 
 
 def _check_model_perf_semantics(perf_files) -> list:
@@ -1395,13 +1491,15 @@ def _check_model_perf_semantics(perf_files) -> list:
     it:
 
       1. The PATH is a claim -- `<sku>/<target>/<slug>-<sha12>@<toolchain>-
-         <version>.json` -- and the body must reproduce all three segments
-         exactly.  `<target>` is `accel_config` when the backend has one and
-         `backend` when it does not.  Without this a file could claim one
-         identity in its path and another inside itself, and the model sha in
-         the filename is what makes a re-bench of changed bytes ACCUMULATE a
-         second point instead of silently overwriting the first (which is
-         still the right answer for a customer holding the old bytes).
+         <version>+<hw_rev>+<core>+<profile12>.json` -- and the body must
+         reproduce every segment exactly.  `<target>` is `accel_config` when
+         the backend has one and `backend` when it does not; `<profile12>` is
+         `_toolchain_profile_digest`.  EVERY SEGMENT AFTER THE SLUG IS THERE
+         BECAUSE IT CHANGES THE NUMBER, and a segment left out is a segment on
+         which the second measurement silently overwrites the first: the model
+         sha (a re-bench of changed bytes must ACCUMULATE a second point --
+         the first is still right for a customer holding the old bytes), the
+         hardware revision, the core, and the toolchain profile.
       2. `measured_on.sku` must exist under `metadata/e1m_modules/`.
       3. `(measured_on.backend, measured_on.accel_config)` must be a target
          that SKU actually resolves, so a point cannot claim silicon the
@@ -1410,7 +1508,12 @@ def _check_model_perf_semantics(perf_files) -> list:
          `hw-revisions.yaml`.  Existence only, deliberately: a point measured
          on a `reserved` or pre-production revision is still a real
          measurement of that revision.
-      5. An `ethos_u` point must record BOTH `toolchain.system_config` and
+      5. `measured_on.core` must be a core that SKU's `topology:` declares,
+         and -- only where the SoC spec declares a `paired_core` for the
+         matched NPU -- must be that core.  Where the spec declares no pairing
+         (the Alif E8's Ethos-U85 today) nothing is inferred: the metadata does
+         not know, so the gate does not guess.
+      6. An `ethos_u` point must record BOTH `toolchain.system_config` and
          `toolchain.memory_mode`.  Invoked with neither flag, `ethos-u-vela`
          5.1.0 silently picks a default per accelerator -- on the U85 that is
          `Ethos_U85_SYS_DRAM_Mid` / `Dedicated_Sram_384KB`, a DRAM-backed
@@ -1418,14 +1521,32 @@ def _check_model_perf_semantics(perf_files) -> list:
          DRAM.  A point captured that way is exactly measured and describes a
          machine the module is not; recording the profile is what lets a
          reader tell the two apart.
-      6. `measured.latency_ms_p95` must be >= `measured.latency_ms_mean`.  A
+      7. `measured.latency_ms_p95` must be >= `measured.latency_ms_mean`.  A
          p95 below the mean is not a tighter number, it is two runs' figures
          pasted into one point.
-      7. No file under `metadata/model_perf/` may carry `_fixture`.  That key
+      8. `measured.req_sram_kib * 1024` must be >= `measured.arena_bytes` when
+         both are present.  The on-device selector's fit test is
+         `e->arena_sram_kib == 0u || t->req_sram_kib <= e->arena_sram_kib`
+         (`src/backends/inference/alp_model_select.c`), so a footprint that
+         undercuts the arena the same compile reported -- a zero above all --
+         fits every arena on every engine and turns the fit gate into a check
+         that cannot fail.  This is the defect the tier exists to close, so it
+         is enforced rather than described.
+      9. `measured.runs` must be >= `_MIN_TIMED_RUNS` when latency is present.
+         The recipe's floor; a `runs: 1` point whose mean and p95 are the same
+         single number is a single shot wearing a measurement's clothes.
+     10. `capture.date` must PARSE, not merely match the ISO shape:
+         `2026-13-45` satisfies the pattern and is not a day.
+     11. A `backend: "cpu"` point may not report a nonzero `measured.npu_ops`.
+         There is no NPU on that path to place an operator on, so a figure
+         there came from another run's report and everything beside it is
+         suspect.
+     12. No file under `metadata/model_perf/` may carry `_fixture`.  That key
          marks the synthetic documents under `tests/fixtures/model_perf/`
          whose `measured` values are placeholders; the published tree must be
          incapable of absorbing one.
-      8. `capture.reference` must cite a store, not a local filesystem path.
+     13. `capture.reference` and `model.source` must cite a store, not a local
+         filesystem path.
 
     Reading `model.source` back -- re-hashing the in-repo model file and
     requiring it to equal `model.sha256` -- deliberately does NOT live here.
@@ -1441,7 +1562,7 @@ def _check_model_perf_semantics(perf_files) -> list:
     """
     metadata_root = REPO / "metadata"
     published_root = metadata_root / "model_perf"
-    failures: list[tuple[Path, list[str]]] = []
+    failures: list[tuple[str, list[str]]] = []
     for path in perf_files:
         rel = path.relative_to(REPO).as_posix()
         try:
@@ -1460,6 +1581,7 @@ def _check_model_perf_semantics(perf_files) -> list:
 
         sku = measured_on.get("sku")
         hw_rev = measured_on.get("hw_rev")
+        core = measured_on.get("core")
         backend = measured_on.get("backend")
         accel = measured_on.get("accel_config")
 
@@ -1482,36 +1604,62 @@ def _check_model_perf_semantics(perf_files) -> list:
         tc_name = toolchain.get("name")
         tc_version = toolchain.get("version")
         if (isinstance(slug, str) and isinstance(sha256, str) and len(sha256) >= 12
-                and isinstance(tc_name, str) and isinstance(tc_version, str)):
-            expected_stem = f"{slug}-{sha256[:12]}@{tc_name}-{tc_version}"
+                and isinstance(tc_name, str) and isinstance(tc_version, str)
+                and isinstance(hw_rev, str) and isinstance(core, str)):
+            profile12 = _toolchain_profile_digest(toolchain)
+            expected_stem = (f"{slug}-{sha256[:12]}@{tc_name}-{tc_version}"
+                             f"+{hw_rev}+{core}+{profile12}")
             if path.stem != expected_stem:
                 msgs.append(
                     f"model (slug={slug!r}, sha256[:12]={sha256[:12]!r}) + "
-                    f"toolchain (name={tc_name!r}, version={tc_version!r}) imply "
+                    f"toolchain (name={tc_name!r}, version={tc_version!r}, "
+                    f"profile digest {profile12!r}) + measured_on "
+                    f"(hw_rev={hw_rev!r}, core={core!r}) imply "
                     f"filename `{expected_stem}.json`, but this file is "
                     f"`{path.name}` -- the filename is the measurement identity, "
-                    f"so a mismatch means a re-bench overwrote a point that is "
-                    f"still correct for the bytes it measured")
+                    f"and every segment of it is one that changes the number, so "
+                    f"a mismatch means one measurement is sitting where another "
+                    f"belongs and the point that was there is gone")
 
-        # (2)+(3) the SKU exists, and it really has this target.
+        # (2)+(3)+(5) the SKU exists, it really has this target, and the core
+        # that drove the inference is one the module declares.
         if isinstance(sku, str):
             try:
-                targets = _resolve_perf_targets(sku, metadata_root)
+                target_map = _perf_target_map(sku, metadata_root)
+                cores = _resolve_perf_cores(sku, metadata_root)
             except LookupError as exc:
                 msgs.append(
                     f"measured_on.sku={sku!r}: cannot resolve this module's "
-                    f"accelerator targets ({exc}) -- refused rather than "
-                    f"skipped, because skipping would accept a point naming "
-                    f"any target at all")
+                    f"accelerator targets and cores ({exc}) -- refused rather "
+                    f"than skipped, because skipping would accept a point "
+                    f"naming any target at all")
             else:
                 if isinstance(backend, str) and isinstance(accel, str):
-                    if (backend, accel) not in targets:
+                    if (backend, accel) not in target_map:
                         offered = ", ".join(
-                            f"{b}/{a or '-'}" for b, a in sorted(targets))
+                            f"{b}/{a or '-'}" for b, a in sorted(target_map))
                         msgs.append(
                             f"measured_on (backend={backend!r}, "
                             f"accel_config={accel!r}) is not a target "
                             f"{sku} resolves -- it offers: {offered}")
+                if isinstance(core, str):
+                    if core not in cores:
+                        msgs.append(
+                            f"measured_on.core={core!r} is not a core {sku} "
+                            f"declares -- its `topology:` names "
+                            f"{sorted(cores)}. The core is part of the "
+                            f"measurement identity because it changes the "
+                            f"number, so a point cannot name one the module "
+                            f"does not have")
+                    paired = target_map.get((backend, accel)) \
+                        if isinstance(backend, str) and isinstance(accel, str) else None
+                    if paired and core != paired:
+                        msgs.append(
+                            f"measured_on.core={core!r} but the SoC spec pairs "
+                            f"accelerator {accel or backend!r} to "
+                            f"`{paired}` (`npus[].paired_core`) -- that "
+                            f"accelerator cannot have been driven by this core, "
+                            f"so either the core or the target is the wrong one")
 
         # (4) the hardware revision exists in the family table.
         if isinstance(sku, str) and isinstance(hw_rev, str):
@@ -1539,7 +1687,7 @@ def _check_model_perf_semantics(perf_files) -> list:
                             f"metadata/e1m_modules/{family_dir}/hw-revisions.yaml "
                             f"declares {sorted(known) or '(none)'}")
 
-        # (5) an Ethos-U point without its vela profile describes an unknown machine.
+        # (6) an Ethos-U point without its vela profile describes an unknown machine.
         if backend == "ethos_u":
             missing = [k for k in ("system_config", "memory_mode")
                        if not isinstance(toolchain.get(k), str) or not toolchain[k]]
@@ -1552,7 +1700,7 @@ def _check_model_perf_semantics(perf_files) -> list:
                     f"U85, which is DRAM-backed), so the arena figures would "
                     f"describe that profile and not this module")
 
-        # (6) p95 below the mean is two runs pasted into one point.
+        # (7) p95 below the mean is two runs pasted into one point.
         mean = measured.get("latency_ms_mean")
         p95 = measured.get("latency_ms_p95")
         if isinstance(mean, (int, float)) and isinstance(p95, (int, float)) and p95 < mean:
@@ -1561,7 +1709,66 @@ def _check_model_perf_semantics(perf_files) -> list:
                 f"measured.latency_ms_mean={mean} -- a 95th percentile cannot "
                 f"undercut the mean of the same runs")
 
-        # (7) the published tree cannot absorb a synthetic fixture.
+        # (8) a footprint that undercuts its own arena fits everything.
+        #
+        # The on-device selector's fit test is
+        # `e->arena_sram_kib == 0u || t->req_sram_kib <= e->arena_sram_kib`
+        # (src/backends/inference/alp_model_select.c), so a `req_sram_kib` of 0
+        # -- or any figure below the arena the SAME compile reported -- passes
+        # against every engine on every module.  Publishing one would re-open
+        # the always-fits defect this tier exists to close, from the data side
+        # instead of the code side, and it would do it wearing
+        # `basis: "bench"` / `confidence: "certain"`.
+        arena_bytes = measured.get("arena_bytes")
+        req_sram_kib = measured.get("req_sram_kib")
+        if (isinstance(arena_bytes, int) and not isinstance(arena_bytes, bool)
+                and isinstance(req_sram_kib, int) and not isinstance(req_sram_kib, bool)
+                and req_sram_kib * 1024 < arena_bytes):
+            msgs.append(
+                f"measured.req_sram_kib={req_sram_kib} is {req_sram_kib * 1024} "
+                f"bytes, below measured.arena_bytes={arena_bytes} from the same "
+                f"compile -- the on-device fit test is `req_sram_kib <= "
+                f"arena_sram_kib` and treats 0 as `fits anything`, so a footprint "
+                f"that does not even cover its own arena makes the fit gate "
+                f"incapable of failing. A footprint that could not be measured is "
+                f"OMITTED, never zero-filled")
+
+        # (9) the recipe's timed-run floor.
+        runs = measured.get("runs")
+        if (isinstance(mean, (int, float))
+                and isinstance(runs, int) and not isinstance(runs, bool)
+                and runs < _MIN_TIMED_RUNS):
+            msgs.append(
+                f"measured.runs={runs} is below the {_MIN_TIMED_RUNS}-run floor "
+                f"docs/bench/model-perf-capture.md §4 sets -- below it "
+                f"`latency_ms_p95` is an interpolation across a handful of "
+                f"samples rather than a percentile, and a point whose mean and "
+                f"p95 are the same single number is a single shot wearing a "
+                f"measurement's clothes")
+
+        # (10) an ISO-shaped string is not necessarily a day: `2026-13-45`
+        # satisfies the schema pattern.
+        date = capture.get("date")
+        if isinstance(date, str):
+            try:
+                datetime.date.fromisoformat(date)
+            except ValueError:
+                msgs.append(
+                    f"capture.date={date!r} matches the ISO shape but is not a "
+                    f"real calendar date -- a capture nobody can place in time "
+                    f"cannot be correlated with the raw log it cites")
+
+        # (11) a CPU point has no NPU to place an operator on.
+        npu_ops = measured.get("npu_ops")
+        if (backend == "cpu" and isinstance(npu_ops, int)
+                and not isinstance(npu_ops, bool) and npu_ops != 0):
+            msgs.append(
+                f"backend `cpu` but measured.npu_ops={npu_ops} -- there is no "
+                f"accelerator on this path to place an operator on, so that "
+                f"figure came from another run's report and every figure beside "
+                f"it is suspect")
+
+        # (12) the published tree cannot absorb a synthetic fixture.
         if "_fixture" in doc and path.is_relative_to(published_root):
             msgs.append(
                 "`_fixture` marks a synthetic document whose `measured` values "
@@ -1570,14 +1777,31 @@ def _check_model_perf_semantics(perf_files) -> list:
                 "metadata/model_perf/, where a consumer would read it as bench "
                 "data")
 
-        # (8) a capture citation, not somebody's disk.
-        reference = capture.get("reference")
-        if isinstance(reference, str) and _LOCAL_PATH_REFERENCE.search(reference):
+        # (13) citations, not somebody's disk -- for the capture AND for the
+        # model bytes, which carry exactly the same leak and the same
+        # resolves-for-nobody-else failure.
+        source = model.get("source")
+        for field, value in (("capture.reference", capture.get("reference")),
+                             ("model.source", source)):
+            if isinstance(value, str) and _LOCAL_PATH_REFERENCE.search(value):
+                msgs.append(
+                    f"{field}={value!r} looks like a path on one "
+                    f"machine rather than a `<store>:<path>` citation or a "
+                    f"repo-relative path -- this repo is public and such a "
+                    f"reference resolves for nobody else, so the measurement "
+                    f"stops being reproducible")
+        # A `model.source` that is not a citation is a repo-relative path, and
+        # a repo-relative path that climbs out of the checkout names a machine
+        # as surely as `/home/...` does.  Re-hashing those bytes is the pytest
+        # suite's job (they do not exist in the metadata-only scratch clone);
+        # refusing the SHAPE needs no bytes and so belongs here.
+        if (isinstance(source, str) and not _STORE_CITATION.match(source)
+                and ".." in Path(source.replace("\\", "/")).parts):
             msgs.append(
-                f"capture.reference={reference!r} looks like a path on one "
-                f"machine rather than a `<store>:<path>` citation -- this repo "
-                f"is public and such a reference resolves for nobody else, so "
-                f"the measurement stops being reproducible")
+                f"model.source={source!r} is not a `<store>:<path>` citation, "
+                f"so it is read as a repo-relative path -- and it climbs out "
+                f"of the checkout with `..`, which resolves somewhere different "
+                f"on every machine")
 
         if msgs:
             print(f"FAIL {rel}")
@@ -2038,9 +2262,10 @@ def main() -> int:
 
     # Bench-measured model perf points (the tier-2 data asset).  One file per
     # MEASUREMENT IDENTITY under metadata/model_perf/<sku>/<target>/<slug>-
-    # <sha12>@<toolchain>-<version>.json -- `**` for the same reason npu_ops
-    # uses it: a file dropped at any other depth must still reach the schema
-    # and semantic passes rather than silently matching nothing.
+    # <sha12>@<toolchain>-<version>+<hw_rev>+<core>+<profile12>.json -- `**`
+    # for the same reason npu_ops uses it: a file dropped at any other depth
+    # must still reach the schema and semantic passes rather than silently
+    # matching nothing.
     #
     # `metadata/model_perf/` is EMPTY until the first bench campaign, and an
     # empty glob makes every check below pass over nothing.  That vacuum is
@@ -2050,11 +2275,27 @@ def main() -> int:
     # Absence of a point is never a verdict: a model/SKU/target combination
     # with no file here is `undetermined`, not `does not fit`.
     model_perf_failures: list = []
-    model_perf_files: list = []
-    if MODEL_PERF_SCHEMA.is_file():
+    model_perf_files: list = sorted(MODEL_PERF.glob("**/*.json"))
+    if not MODEL_PERF_SCHEMA.is_file():
+        # The glob comes FIRST and this branch fails loudly, because the
+        # obvious spelling -- wrapping the whole pass in `if
+        # MODEL_PERF_SCHEMA.is_file()` -- makes deleting or renaming the
+        # schema turn every published point into an unchecked one at rc=0.
+        # A point broken eight ways would then validate silently, and this is
+        # the one data asset a customer reads as an exact answer about their
+        # own hardware.  No schema plus no points is legitimately nothing to
+        # check; no schema WITH points is a gate that has been removed.
+        if model_perf_files:
+            print()
+            print(f"FAIL metadata/schemas/{MODEL_PERF_SCHEMA.name}")
+            print(f"  · missing, but {len(model_perf_files)} perf point(s) are "
+                  f"published under metadata/model_perf/ -- they would be "
+                  f"accepted unchecked")
+            model_perf_failures = [(f"metadata/schemas/{MODEL_PERF_SCHEMA.name}",
+                                    ["schema missing while perf points ship"])]
+    else:
         model_perf_schema = json.loads(MODEL_PERF_SCHEMA.read_text(encoding="utf-8"))
         model_perf_validator = jsonschema.Draft202012Validator(model_perf_schema)
-        model_perf_files = sorted(MODEL_PERF.glob("**/*.json"))
         if model_perf_files:
             print()
             model_perf_failures = _check_files(

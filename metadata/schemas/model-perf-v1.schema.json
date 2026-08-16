@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/model-perf-v1.schema.json",
   "title": "ALP bench-measured model perf point v1",
-  "description": "One file per MEASUREMENT IDENTITY -- not per model, and not per SoM. A perf point records what one named toolchain produced for one exact model byte-sequence on one exact accelerator target of one exact hardware revision, so the file lives at metadata/model_perf/<sku>/<target>/<model-slug>-<sha256[0:12]>@<toolchain>-<toolchain_version>.json (e.g. metadata/model_perf/E1M-AEN801/ethos-u85-256/person-detect-int8-808cfdfc0cf3@vela-5.1.0.json), where <target> is `measured_on.accel_config` when the backend has one and `measured_on.backend` when it does not (drpai, deepx_dxm1, cpu). Every one of those path segments is re-derived from the file's own body by scripts/validate_metadata.py's _check_model_perf_semantics, so a file cannot claim one identity in its path and another inside itself. THE MODEL SHA IS IN THE FILENAME on purpose: re-benching a model whose bytes changed must ACCUMULATE a second point, never silently overwrite the first, because the first is still the correct answer for a customer holding the old bytes. THIS DATA IS MEASURED, NEVER ESTIMATED ('stance': 'bench-measured'): every figure under `measured` came off real silicon running the named toolchain's output. A figure that was not measured is OMITTED -- there is no estimated perf point, that is the static screen's job, and conflating the two destroys the only thing this tier sells. A model/SKU/target/hw_rev/toolchain combination with NO file under metadata/model_perf/ is an intentional absence (most combinations have never been benched) and MUST be treated by any consumer as 'undetermined', never as 'does not fit' -- reading absence as a negative reports a false no-fit on every model not yet benched. A consumer maps a matched point onto the shipped report envelope's `basis: \"bench\"` with `confidence: \"certain\"`; there is no parallel `source:` key, and a point matches only on an EXACT agreement of sku + backend + accel_config + model sha256 + toolchain name + toolchain version. Raw bench captures (serial logs, PSU traces, unreleased-silicon detail) stay in alp-sdk-internal: a point CITES its capture via `capture.reference`, it never embeds it.",
+  "description": "One file per MEASUREMENT IDENTITY -- not per model, and not per SoM. A perf point records what one named toolchain, under one named toolchain PROFILE, produced for one exact model byte-sequence on one exact accelerator target, driven by one exact core, of one exact hardware revision. The file therefore lives at metadata/model_perf/<sku>/<target>/<model-slug>-<sha256[0:12]>@<toolchain>-<toolchain_version>+<hw_rev>+<core>+<profile12>.json (e.g. metadata/model_perf/E1M-AEN801/ethos-u85-256/person-detect-int8-808cfdfc0cf3@vela-5.1.0+r2+m55_hp+1e562a678c9f.json), where <target> is `measured_on.accel_config` when the backend has one and `measured_on.backend` when it does not (drpai, deepx_dxm1, cpu), and <profile12> is the first 12 hex characters of the sha256 of the canonical JSON (sorted keys, no whitespace) of every key under `toolchain` OTHER than `name` and `version` -- today `system_config`, `memory_mode` and `pins`. Every one of those path segments is re-derived from the file's own body by scripts/validate_metadata.py's _check_model_perf_semantics, so a file cannot claim one identity in its path and another inside itself. EVERY SEGMENT AFTER THE SLUG IS THERE BECAUSE IT CHANGES THE NUMBER, and a segment left out of the filename is a segment on which the second measurement silently overwrites the first: the model sha (re-benching changed bytes must ACCUMULATE a second point -- the first is still the right answer for a customer holding the old bytes), the hardware revision (an r1 and an r2 measurement of the same model are different measurements), the core (an A-cluster and an M-class CPU inference of the same model differ by orders of magnitude, and on Ethos-U the U55 paired to the HP core is not the one paired to the HE core), and the toolchain profile (`Ethos_U85_SRAM_Only` and `Ethos_U85_SYS_DRAM_Mid` are different machines, and the DRAM-backed one is not this module). THIS DATA IS MEASURED, NEVER ESTIMATED ('stance': 'bench-measured'): every figure under `measured` came off real silicon running the named toolchain's output. A figure that was not measured is OMITTED -- there is no estimated perf point, that is the static screen's job, and conflating the two destroys the only thing this tier sells. A model/SKU/target/core/hw_rev/toolchain combination with NO file under metadata/model_perf/ is an intentional absence (most combinations have never been benched) and MUST be treated by any consumer as 'undetermined', never as 'does not fit' -- reading absence as a negative reports a false no-fit on every model not yet benched. CONSUMER MATCH RULE: a point matches only on an EXACT agreement of sku + hw_rev + core + backend + accel_config + model sha256 + toolchain name + toolchain version, all eight; a near miss on any one of them is not a match and falls through to the next fidelity tier. The toolchain PROFILE is part of the file identity but deliberately NOT part of that match key, because a customer with no toolchain does not know which profile to ask for -- so a consumer whose match key leaves MORE THAN ONE point standing must NOT pick one arbitrarily. It either surfaces all of them or falls through, since they were measured on machines that differ; the natural tiebreak is the profile the SoC spec's own `npu_toolchain` block declares for the part. A consumer maps a single matched point onto the shipped report envelope's `basis: \"bench\"` with `confidence: \"certain\"`; there is no parallel `source:` key. Raw bench captures (serial logs, PSU traces, unreleased-silicon detail) stay in alp-sdk-internal: a point CITES its capture via `capture.reference`, it never embeds it.",
   "type": "object",
   "additionalProperties": false,
   "required": ["stance", "measured_on", "model", "toolchain", "measured", "capture"],
@@ -20,8 +20,8 @@
     "measured_on": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["sku", "hw_rev", "backend", "accel_config"],
-      "description": "The exact hardware identity this point applies to. If any field moves, the point no longer applies and a consumer must fall through to the next fidelity tier rather than report a stale exact number as authoritative.",
+      "required": ["sku", "hw_rev", "core", "backend", "accel_config"],
+      "description": "The exact hardware identity this point applies to. If any field moves, the point no longer applies and a consumer must fall through to the next fidelity tier rather than report a stale exact number as authoritative. All five are part of the consumer match key AND of the filename.",
       "properties": {
         "sku": {
           "type": "string",
@@ -31,7 +31,12 @@
         "hw_rev": {
           "type": "string",
           "pattern": "^r[0-9]+$",
-          "description": "Module hardware revision, as keyed in the SoM family's metadata/e1m_modules/<family-dir>/hw-revisions.yaml `hw_revisions:` map (`r1`, `r2`, ...) -- NOT the Altium `board_rev` string. Cross-checked to exist there."
+          "description": "Module hardware revision, as keyed in the SoM family's metadata/e1m_modules/<family-dir>/hw-revisions.yaml `hw_revisions:` map (`r1`, `r2`, ...) -- NOT the Altium `board_rev` string. Cross-checked to exist there, and part of the filename: without it an r1 point and an r2 point of the same model on the same target resolve to one path and the second silently overwrites the first, which is the same silent-overwrite defect the model sha is in the filename to prevent, applied to the hardware instead of to the bytes."
+        },
+        "core": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(_[a-z0-9]+)*$",
+          "description": "The core that drove the inference, as keyed in the SKU preset's `topology:` map (`m55_hp`, `m55_he`, `a32_cluster`, `a55_cluster`, `m33_sm`, `m33`). REQUIRED, and part of the filename, because it changes the number outright: an E1M-AEN801 `cpu` inference on `a32_cluster` and the same model on `m55_he` are not comparable, and every `backend: \"cpu\"` point on one SKU would otherwise collide on a single path. On Ethos-U it also decides WHICH accelerator ran: metadata/socs/alif/ensemble/e8.json pairs the U55 high-perf to `m55_hp` and the U55 high-efficiency to `m55_he` via `npus[].paired_core`. validate_metadata.py requires the core to be one this SKU's topology declares, and -- only where the SoC spec declares a `paired_core` for the matched NPU -- requires it to be that core. Where the spec declares no pairing (the E8's Ethos-U85 today) nothing is inferred: the metadata does not know, so the gate does not guess."
         },
         "backend": {
           "type": "string",
@@ -48,8 +53,8 @@
     "model": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["slug", "sha256", "size_bytes"],
-      "description": "The exact bytes measured. The sha256 is what a consumer matches on -- not the slug, which is a human label two different byte-sequences can share.",
+      "required": ["slug", "sha256", "size_bytes", "source"],
+      "description": "The exact bytes measured. The sha256 is what a consumer matches on -- not the slug, which is a human label two different byte-sequences can share. All four keys are required together and that is the point: a hash with no provenance is a well-formed 64-hex string that could belong to ANY model, and a perf point carrying one would pass every structural check while serving another model's latency as `basis: \"bench\"` / `confidence: \"certain\"`. `source` is what makes the hash falsifiable.",
       "properties": {
         "slug": {
           "type": "string",
@@ -64,12 +69,13 @@
         "size_bytes": {
           "type": "integer",
           "minimum": 1,
-          "description": "Size of those exact bytes, as a cheap second consistency signal alongside the hash."
+          "description": "Size of those exact bytes, as a cheap second consistency signal alongside the hash. Cross-checked against the file on disk whenever `source` names bytes that are reachable from this checkout."
         },
         "source": {
           "type": "string",
           "minLength": 1,
-          "description": "Optional provenance for the bytes: a repo-relative path when the model ships in-tree (e.g. `tests/fixtures/models/person_detect_int8.tflite`), otherwise a citation of where they came from. When it names an in-repo path, tests/scripts/test_model_perf_metadata.py re-hashes that file and requires it to equal `sha256` -- catching a fixture regenerated without re-benching. That check lives in the test suite and NOT in validate_metadata.py deliberately: the metadata gate is also run against a metadata-ONLY scratch clone (tests/scripts/test_alp_cli_new_som.py::_clone_metadata_gates) where tests/fixtures/ does not exist, so a copy there could only ever be a silent skip."
+          "pattern": "^(?![/\\\\])(?![A-Za-z]:[/\\\\])\\S+$",
+          "description": "REQUIRED provenance for the bytes, in exactly one of two shapes. (1) A REPO-RELATIVE PATH, when the model ships in-tree (e.g. `tests/fixtures/models/person_detect_int8.tflite`): tests/scripts/test_model_perf_metadata.py re-hashes that file and requires it to equal `sha256` and its size to equal `size_bytes` -- catching a fixture regenerated without re-benching -- and REFUSES a repo-relative path that does not resolve, because a moved model and a typo both end traceability. (2) A `<store>:<path>` CITATION or a URL, when the bytes are licence-gated or out of tree (`alp-sdk-internal:models/person_detect_int8.tflite`, `https://example.org/zoo/x.tflite`): most of the model zoo is exactly this, so a rule that only accepts in-tree paths would make a citation unrepresentable and the tier uncampaignable. What is refused either way is a LOCAL FILESYSTEM PATH -- a leading `/` or `\\`, a `C:\\` drive prefix, a `OneDrive` segment -- which leaks a developer's machine into a public repo and resolves for nobody else. The re-hash lives in the test suite and NOT in validate_metadata.py deliberately: the metadata gate is also run against a metadata-ONLY scratch clone (tests/scripts/test_alp_cli_new_som.py::_clone_metadata_gates) where tests/fixtures/ does not exist, so a copy there could only ever be a silent skip. The local-path REFUSAL does live in validate_metadata.py, because it needs no bytes to decide."
         }
       }
     },
@@ -119,7 +125,7 @@
         "npu_ops": {
           "type": "integer",
           "minimum": 0,
-          "description": "Operators the compiler placed on the NPU."
+          "description": "Operators the compiler placed on the NPU. validate_metadata.py refuses a NONZERO value on a `backend: \"cpu\"` point: a CPU point has no NPU to place an operator on, so a figure there is a copied-in number from another run's report and everything beside it is suspect."
         },
         "cpu_ops": {
           "type": "integer",
@@ -134,7 +140,7 @@
         "req_sram_kib": {
           "type": "integer",
           "minimum": 0,
-          "description": "SRAM the model requires resident, in KiB, as the on-device selector compares it (src/backends/inference/alp_model_select.c). NOTE, and this is an open hardware question rather than a schema one: today this reports the ARENA ALONE, while a real deployment can also hold weight/const regions in SRAM. Record what is really resident once the per-part answer exists; until then a point that cannot answer it omits the field."
+          "description": "SRAM the model requires resident, in KiB, as the on-device selector compares it (src/backends/inference/alp_model_select.c). When `arena_bytes` is also present, validate_metadata.py requires `req_sram_kib * 1024 >= arena_bytes`, and that check is load-bearing rather than cosmetic: the selector's fit test is `e->arena_sram_kib == 0u || t->req_sram_kib <= e->arena_sram_kib`, so a ZERO -- or any figure that undercuts the arena the same compile reported -- fits every arena on every engine and turns the on-device fit gate into a check that cannot fail. A footprint that could not be measured is OMITTED; it is never zero-filled. NOTE, and this is an open hardware question rather than a schema one: today this reports the ARENA ALONE, while a real deployment can also hold weight/const regions in SRAM. Record what is really resident once the per-part answer exists; until then a point that cannot answer it omits the field."
         },
         "latency_ms_mean": {
           "type": "number",
@@ -149,7 +155,7 @@
         "runs": {
           "type": "integer",
           "minimum": 1,
-          "description": "How many inferences the latency figures were computed over. This is what separates a measurement from a single shot; the capture recipe (docs/bench/model-perf-capture.md) sets the floor."
+          "description": "How many inferences the latency figures were computed over. This is what separates a measurement from a single shot. The capture recipe (docs/bench/model-perf-capture.md §4) sets the floor at 100 timed runs after at least 10 discarded warm-ups, and validate_metadata.py ENFORCES that floor -- a `runs: 1` point whose mean and p95 are the same single number is refused. The floor lives in the validator and not in this `minimum` on purpose: it is bench POLICY rather than document structure, its refusal names the recipe and the reason (a p95 over a handful of samples is an interpolation, not a percentile) where a bare `minimum` could only say `1`, and this schema is the wire contract a consumer pins against -- a consumer must accept any point alp-sdk published rather than re-derive our bench policy."
         }
       }
     },
@@ -162,7 +168,7 @@
         "date": {
           "type": "string",
           "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
-          "description": "ISO date of the bench run."
+          "description": "ISO date of the bench run. The pattern only proves the SHAPE -- `2026-13-45` satisfies it -- so validate_metadata.py additionally parses the value with datetime.date.fromisoformat and refuses a date that is not a real calendar day."
         },
         "operator": {
           "type": "string",
@@ -171,8 +177,8 @@
         },
         "reference": {
           "type": "string",
-          "minLength": 1,
-          "description": "A CITATION of the raw capture, not the capture itself and not a path on the operator's machine: `<store>:<path-within-store>`, e.g. `alp-sdk-internal:bench/captures/2026-08-16-aen801-person-detect.log`. Raw captures are private (serial logs, PSU traces, unreleased-silicon detail) while the point itself is public. validate_metadata.py refuses a reference that looks like a local filesystem path (a leading `/`, a `C:\\` drive prefix, or an `OneDrive` segment) -- those leak a developer's machine into a public repo and resolve for nobody else."
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*:\\S",
+          "description": "A CITATION of the raw capture, not the capture itself and not a path on the operator's machine: `<store>:<path-within-store>`, e.g. `alp-sdk-internal:bench/captures/2026-08-16-aen801-person-detect.log`. Raw captures are private (serial logs, PSU traces, unreleased-silicon detail) while the point itself is public. The pattern is an ALLOWLIST of that citation shape and not a denylist of bad ones, which is the whole difference: a denylist of three known-bad spellings accepted `see the log`, `ask Caner` and `n/a` -- every non-citation anyone would actually type -- while refusing nothing that a careless operator produces. validate_metadata.py then ADDITIONALLY refuses the shapes that satisfy the citation pattern but still name one machine (a `C:\\` drive prefix reads as store `C`, and an `OneDrive` segment can appear after a legitimate-looking store), because those leak a developer's machine into a public repo and resolve for nobody else."
         }
       }
     },

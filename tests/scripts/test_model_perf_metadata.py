@@ -16,8 +16,8 @@ already shipped five times.  Two things close it:
     every directory-wide check runs against, and
     `test_the_perf_point_checks_are_not_vacuous` fails if that fixture ever
     disappears.
-  * `TestMutations` drives the SHIPPED gate -- the real
-    `metadata/schemas/model-perf-v1.schema.json` plus the real
+  * `test_each_rule_bites`, parametrized over `_MUTATIONS`, drives the SHIPPED
+    gate -- the real `metadata/schemas/model-perf-v1.schema.json` plus the real
     `validate_metadata._check_model_perf_semantics`, not a re-implementation
     -- over a mutation of every single rule, asserting the unmutated document
     passes and each mutant fails.  A rule that stops biting fails a test here
@@ -63,14 +63,14 @@ _ALL_POINTS = _points(_PUBLISHED) + _points(_FIXTURES)
 #: The canonical fixture, pinned by path rather than picked off the glob: the
 #: mutation suite derives every mutant from it, so it has to be THIS document
 #: and not "whichever fixture sorts first".
-_BASE = (_FIXTURES / "E1M-AEN801" / "ethos-u85-256"
-         / "person-detect-int8-808cfdfc0cf3@vela-5.1.0.json")
-_BASE_REL = "tests/fixtures/model_perf/E1M-AEN801/ethos-u85-256/person-detect-int8-808cfdfc0cf3@vela-5.1.0.json"
+_STEM = "person-detect-int8-808cfdfc0cf3@vela-5.1.0+r2+m55_hp+1e562a678c9f"
+_BASE = _FIXTURES / "E1M-AEN801" / "ethos-u85-256" / f"{_STEM}.json"
+_BASE_REL = f"tests/fixtures/model_perf/E1M-AEN801/ethos-u85-256/{_STEM}.json"
 
 #: Where the same document would live if it were a real, published point.
 #: Used to prove the published shape passes AND that `_fixture` is refused
 #: there.
-_PUBLISHED_REL = "metadata/model_perf/E1M-AEN801/ethos-u85-256/person-detect-int8-808cfdfc0cf3@vela-5.1.0.json"
+_PUBLISHED_REL = f"metadata/model_perf/E1M-AEN801/ethos-u85-256/{_STEM}.json"
 
 
 def _load(path: Path) -> dict:
@@ -144,10 +144,54 @@ def test_every_perf_point_passes_the_shipped_semantic_checks(path):
     assert not V._check_model_perf_semantics([path])
 
 
+#: A `<store>:<path>` citation or a URL, as opposed to a repo-relative path.
+#: The SAME expression `validate_metadata._STORE_CITATION` uses, and it is
+#: applied only AFTER `_LOCAL_PATH_REFERENCE` has rejected the local-disk
+#: shapes, so `C:\models\x.tflite` never reaches it to be read as a store
+#: named `C`.
+_STORE_CITATION = V._STORE_CITATION
+
+
+def _resolves_in_repo(source: str) -> Path | None:
+    """The in-repo file `source` names, or None if it does not name one.
+
+    Resolved and re-checked against `_ROOT` rather than trusted: a `source` of
+    `../../etc/passwd` must not be read just because `_ROOT / source` happens
+    to exist somewhere on the machine running the suite.
+    """
+    try:
+        target = (_ROOT / source).resolve()
+    except (OSError, ValueError):
+        return None
+    if not target.is_relative_to(_ROOT.resolve()) or not target.is_file():
+        return None
+    return target
+
+
 @pytest.mark.parametrize("path", _ALL_POINTS, ids=_ids)
-def test_an_in_repo_model_source_still_hashes_to_the_pinned_sha256(path):
-    """Catches a fixture regenerated without re-benching: the point would keep
-    quoting arena/latency figures for bytes that no longer exist.
+def test_model_source_is_a_citation_or_bytes_that_still_hash_to_the_pinned_sha256(path):
+    """`model.source` has exactly two legal shapes, and the check that
+    distinguishes them decides whether this tier can be campaigned at all.
+
+    The first version of this test asked "does the string contain a slash?"
+    and hard-failed if it did while no in-repo file matched.  That inverts the
+    intent: `alp-sdk-internal:models/person_detect_int8.tflite` -- the citation
+    form `capture.reference` MANDATES -- and `https://example.org/zoo/x.tflite`
+    both failed, while the worthless `"somewhere"` passed.  Most of the model
+    zoo is licence-gated or out of tree, so a point could not cite the models
+    the campaign is FOR.
+
+    What actually matters is reachability, so that is what is tested:
+
+      * a `<store>:<path>` citation or a URL is a citation.  Its bytes are not
+        here to be hashed, and that is legitimate.
+      * anything else is a repo-relative path.  It MUST resolve under the
+        checkout, and its bytes MUST still hash to `model.sha256` and match
+        `model.size_bytes` -- which catches a fixture regenerated without
+        re-benching, where the point keeps quoting arena/latency figures for
+        bytes that no longer exist.  A path that does not resolve is a moved
+        model or a typo, and both end traceability, so it fails rather than
+        skipping.  `"somewhere"` fails here, correctly.
 
     This check lives HERE and not in `validate_metadata.py` on purpose.
     `model.source` points into `tests/fixtures/`, which does not exist in the
@@ -155,19 +199,21 @@ def test_an_in_repo_model_source_still_hashes_to_the_pinned_sha256(path):
     runs that gate against, so a copy there could only ever be a silent skip --
     the same split, for the same reason, as `_check_soc_vela_memory_profile`'s
     `source` citations.  This suite always runs against the real checkout.
+    (The local-path REFUSAL does live in the gate: it needs no bytes to decide.)
     """
     doc = _load(path)
     source = doc.get("model", {}).get("source")
-    if not source:
-        return
-    target = _ROOT / source
-    if not target.is_file():
-        # NOT a skip: a `source` naming an in-repo path that is not there is
-        # either a moved model or a typo, and both break traceability.
-        assert "/" not in source and "\\" not in source, (
-            f"{path.name}: model.source `{source}` looks like a repo-relative "
-            f"path but no such file exists")
-        return
+    assert source, f"{path.name}: model.source is required -- a sha256 with no " \
+                   f"provenance could belong to any model"
+    assert not V._LOCAL_PATH_REFERENCE.search(source), (
+        f"{path.name}: model.source `{source}` names one machine's disk")
+    if _STORE_CITATION.match(source):
+        return  # a citation; the bytes are deliberately not in this repo
+    target = _resolves_in_repo(source)
+    assert target is not None, (
+        f"{path.name}: model.source `{source}` is not a `<store>:<path>` "
+        f"citation, so it must be a repo-relative path -- and no such file "
+        f"resolves under the checkout")
     digest = hashlib.sha256(target.read_bytes()).hexdigest()
     assert digest == doc["model"]["sha256"], (
         f"{path.name}: model.source `{source}` now hashes to {digest}, but the "
@@ -175,6 +221,38 @@ def test_an_in_repo_model_source_still_hashes_to_the_pinned_sha256(path):
         f"and the figures were not re-benched")
     assert target.stat().st_size == doc["model"]["size_bytes"], (
         f"{path.name}: model.size_bytes disagrees with `{source}` on disk")
+
+
+@pytest.mark.parametrize("source", [
+    "alp-sdk-internal:models/person_detect_int8.tflite",
+    "https://example.org/zoo/x.tflite",
+])
+def test_a_licence_gated_or_out_of_tree_model_can_be_cited(source):
+    """The regression guard for the inversion above, stated as the property
+    that broke: the citation form the recipe mandates, and a URL, must be
+    accepted without any bytes present.  Most of the zoo is one of these two;
+    a rule that refuses them makes tier 2 uncampaignable."""
+    assert _STORE_CITATION.match(source)
+    assert not V._LOCAL_PATH_REFERENCE.search(source)
+
+
+@pytest.mark.parametrize("source", [
+    "/home/user/models/x.tflite",
+    "C:\\models\\x.tflite",
+    "OneDrive/models/x.tflite",
+])
+def test_a_local_disk_model_source_is_refused_before_it_looks_like_a_store(source):
+    """`C:\\models\\x.tflite` satisfies the `<store>:<path>` shape with a store
+    named `C`.  Order is the defence: the local-path refusal runs first, in
+    both this suite and the shipped gate."""
+    assert V._LOCAL_PATH_REFERENCE.search(source)
+
+
+def test_a_bare_word_model_source_is_not_provenance():
+    """`"somewhere"` used to PASS while a real citation failed.  It is neither
+    a citation nor a path that resolves, so it must fail."""
+    assert not _STORE_CITATION.match("somewhere")
+    assert _resolves_in_repo("somewhere") is None
 
 
 def test_no_published_point_is_a_synthetic_fixture():
@@ -245,6 +323,101 @@ def test_target_resolution_fails_closed_on_an_unknown_sku():
 
 
 # ---------------------------------------------------------------------------
+# The core-resolution helper, and the NPU<->core pairing it can enforce.
+# ---------------------------------------------------------------------------
+
+def test_every_shipping_sku_declares_at_least_one_core():
+    skus = sorted(p.stem for p in (_ROOT / "metadata" / "e1m_modules").glob("E1M-*.yaml"))
+    assert skus, "no SoM presets found"
+    for sku in skus:
+        assert V._resolve_perf_cores(sku, _ROOT / "metadata"), f"{sku}: no cores"
+
+
+def test_aen801_and_v2n101_resolve_the_cores_their_topology_declares():
+    """Pinned against this checkout's `topology:` maps.  The core is in the
+    measurement identity because it changes the number: an E1M-AEN801 `cpu`
+    point on `a32_cluster` and the same model on `m55_he` are not comparable,
+    and without the core every `cpu` point on one SKU collides on one path."""
+    meta = _ROOT / "metadata"
+    assert V._resolve_perf_cores("E1M-AEN801", meta) == {
+        "a32_cluster", "m55_hp", "m55_he"}
+    assert V._resolve_perf_cores("E1M-V2N101", meta) == {"a55_cluster", "m33_sm"}
+
+
+def test_core_resolution_fails_closed_on_an_unknown_sku():
+    with pytest.raises(LookupError):
+        V._resolve_perf_cores("E1M-AEN999", _ROOT / "metadata")
+
+
+def test_the_pairing_is_enforced_only_where_the_soc_declares_one():
+    """The honest half of the core rule.  `metadata/socs/alif/ensemble/e8.json`
+    declares `paired_core` on each Ethos-U55 (`m55_hp` for the high-perf,
+    `m55_he` for the high-efficiency) and declares NONE on the Ethos-U85.  So
+    the gate may pin the U55 points to a core and must NOT invent one for the
+    U85 -- the metadata does not know, and a guess here would be a hardware
+    claim wearing a validator's authority."""
+    pairs = V._perf_target_map("E1M-AEN801", _ROOT / "metadata")
+    assert pairs[("ethos_u", "ethos-u55-256")] == "m55_hp"
+    assert pairs[("ethos_u", "ethos-u55-128")] == "m55_he"
+    assert pairs[("ethos_u", "ethos-u85-256")] is None
+    assert pairs[("cpu", "")] is None
+
+
+# ---------------------------------------------------------------------------
+# The toolchain-profile digest that closes the second half of blocker 2.
+# ---------------------------------------------------------------------------
+
+def test_the_profile_digest_separates_two_vela_profiles():
+    """`Ethos_U85_SRAM_Only` and `Ethos_U85_SYS_DRAM_Mid` are different
+    machines -- the second is DRAM-backed and the part has no DRAM -- so two
+    points measured under them must not resolve to one filename, where the
+    survivor is whichever was written last."""
+    sram = V._toolchain_profile_digest({
+        "name": "vela", "version": "5.1.0",
+        "system_config": "Ethos_U85_SRAM_Only", "memory_mode": "Sram_Only"})
+    dram = V._toolchain_profile_digest({
+        "name": "vela", "version": "5.1.0",
+        "system_config": "Ethos_U85_SYS_DRAM_Mid",
+        "memory_mode": "Dedicated_Sram_384KB"})
+    assert sram != dram
+    assert len(sram) == 12 and all(c in "0123456789abcdef" for c in sram)
+
+
+def test_the_profile_digest_ignores_name_and_version_and_key_order():
+    """`name` and `version` are already literal segments of the filename, so
+    folding them in again would only make the digest change when the readable
+    part already did.  Key order must not matter: the same profile written two
+    ways is one profile."""
+    a = V._toolchain_profile_digest(
+        {"name": "vela", "version": "5.1.0", "memory_mode": "Sram_Only",
+         "system_config": "Ethos_U85_SRAM_Only"})
+    b = V._toolchain_profile_digest(
+        {"system_config": "Ethos_U85_SRAM_Only", "memory_mode": "Sram_Only",
+         "name": "dxcom", "version": "2.3.0"})
+    assert a == b
+
+
+def test_the_profile_digest_covers_toolchain_pins():
+    """`pins` records version/config pins alp-sdk does not override (DRP-AI's
+    `drp_compiler_version`).  They change the compile, so they change the
+    identity: the digest is derived as "every key except name and version"
+    rather than from a hard-coded list, so a profile key added to the schema
+    later enters the identity automatically."""
+    bare = V._toolchain_profile_digest({"name": "drpai-tvm", "version": "2.4.0"})
+    pinned = V._toolchain_profile_digest({
+        "name": "drpai-tvm", "version": "2.4.0",
+        "pins": {"drp_compiler_version": "100"}})
+    assert bare != pinned
+
+
+def test_the_fixture_filename_carries_the_digest_of_its_own_profile():
+    """The base fixture's stem is not hand-typed: it is what the shipped
+    helper produces for the profile inside it."""
+    doc = _load(_BASE)
+    assert _BASE.stem.endswith("+" + V._toolchain_profile_digest(doc["toolchain"]))
+
+
+# ---------------------------------------------------------------------------
 # Mutation proofs.  Each case asserts BOTH directions: the unmutated document
 # passes the shipped gate, and the mutant fails it with the message that names
 # the rule.
@@ -272,13 +445,14 @@ def _set(doc: dict, value, *path: str) -> dict:
 _MUTATIONS = [
     # --- rule 1: the path is a claim the body must reproduce ---------------
     ("path-sku-dir-disagrees",
-     "metadata/model_perf/E1M-AEN601/ethos-u85-256/person-detect-int8-808cfdfc0cf3@vela-5.1.0.json",
+     f"metadata/model_perf/E1M-AEN601/ethos-u85-256/{_STEM}.json",
      None, "measured_on.sku"),
     ("path-target-dir-disagrees",
-     "metadata/model_perf/E1M-AEN801/ethos-u55-256/person-detect-int8-808cfdfc0cf3@vela-5.1.0.json",
+     f"metadata/model_perf/E1M-AEN801/ethos-u55-256/{_STEM}.json",
      None, "implies directory"),
     ("path-model-sha-disagrees",
-     "metadata/model_perf/E1M-AEN801/ethos-u85-256/person-detect-int8-deadbeefcafe@vela-5.1.0.json",
+     "metadata/model_perf/E1M-AEN801/ethos-u85-256/"
+     "person-detect-int8-deadbeefcafe@vela-5.1.0+r2+m55_hp+1e562a678c9f.json",
      None, "imply filename"),
     ("path-toolchain-version-drifts-from-filename",
      None, lambda d: _set(d, "5.2.0", "toolchain", "version"), "imply filename"),
@@ -286,17 +460,35 @@ _MUTATIONS = [
      None, lambda d: _set(d, "dxcom", "toolchain", "name"), "imply filename"),
     ("path-model-slug-drifts-from-filename",
      None, lambda d: _set(d, "person-detect", "model", "slug"), "imply filename"),
+    # --- rule 1, the three segments blocker 2 added.  Each of these is a
+    #     measurement that legitimately differs from the base one, so WITHOUT
+    #     its segment in the stem it resolves to the base point's exact path
+    #     and the second write destroys the first. -------------------------
+    ("path-hw-rev-drifts-from-filename",
+     None, lambda d: _set(d, "r1", "measured_on", "hw_rev"), "imply filename"),
+    ("path-core-drifts-from-filename",
+     None, lambda d: _set(d, "a32_cluster", "measured_on", "core"), "imply filename"),
+    ("path-vela-system-config-drifts-from-filename",
+     None, lambda d: _set(d, "Ethos_U85_SYS_DRAM_Mid", "toolchain", "system_config"),
+     "imply filename"),
+    ("path-vela-memory-mode-drifts-from-filename",
+     None, lambda d: _set(d, "Dedicated_Sram_384KB", "toolchain", "memory_mode"),
+     "imply filename"),
+    ("path-toolchain-pins-drift-from-filename",
+     None, lambda d: _set(d, {"drp_compiler_version": "100"}, "toolchain", "pins"),
+     "imply filename"),
     # --- rule 2: the SKU exists --------------------------------------------
     ("sku-does-not-exist",
-     "metadata/model_perf/E1M-AEN999/ethos-u85-256/person-detect-int8-808cfdfc0cf3@vela-5.1.0.json",
+     f"metadata/model_perf/E1M-AEN999/ethos-u85-256/{_STEM}.json",
      lambda d: _set(d, "E1M-AEN999", "measured_on", "sku"), "no SoM preset"),
     # --- rule 3: the SKU really has that target ----------------------------
     ("accel-config-the-sku-does-not-have",
-     "metadata/model_perf/E1M-AEN801/ethos-u55-512/person-detect-int8-808cfdfc0cf3@vela-5.1.0.json",
+     f"metadata/model_perf/E1M-AEN801/ethos-u55-512/{_STEM}.json",
      lambda d: _set(d, "ethos-u55-512", "measured_on", "accel_config"),
      "is not a target"),
     ("backend-the-sku-does-not-have",
-     "metadata/model_perf/E1M-AEN801/deepx_dxm1/person-detect-int8-808cfdfc0cf3@dxcom-2.3.0.json",
+     "metadata/model_perf/E1M-AEN801/deepx_dxm1/"
+     "person-detect-int8-808cfdfc0cf3@dxcom-2.3.0+r2+m55_hp+1e562a678c9f.json",
      lambda d: _set(_set(_set(_set(d, "deepx_dxm1", "measured_on", "backend"),
                               "", "measured_on", "accel_config"),
                          "dxcom", "toolchain", "name"),
@@ -304,25 +496,73 @@ _MUTATIONS = [
      "is not a target"),
     # --- rule 4: the hardware revision exists ------------------------------
     ("hw-rev-not-in-the-family-table",
-     None, lambda d: _set(d, "r99", "measured_on", "hw_rev"),
+     "metadata/model_perf/E1M-AEN801/ethos-u85-256/"
+     "person-detect-int8-808cfdfc0cf3@vela-5.1.0+r99+m55_hp+1e562a678c9f.json",
+     lambda d: _set(d, "r99", "measured_on", "hw_rev"),
      "is not a revision of the aen family"),
-    # --- rule 5: an Ethos-U point records its vela profile ------------------
+    # --- rule 5: the core exists, and honours a declared pairing -----------
+    ("core-the-sku-does-not-declare",
+     "metadata/model_perf/E1M-AEN801/ethos-u85-256/"
+     "person-detect-int8-808cfdfc0cf3@vela-5.1.0+r2+m7+1e562a678c9f.json",
+     lambda d: _set(d, "m7", "measured_on", "core"), "is not a core"),
+    ("core-contradicts-the-soc-declared-pairing",
+     "metadata/model_perf/E1M-AEN801/ethos-u55-128/"
+     "person-detect-int8-808cfdfc0cf3@vela-5.1.0+r2+m55_hp+1e562a678c9f.json",
+     lambda d: _set(d, "ethos-u55-128", "measured_on", "accel_config"),
+     "paired_core"),
+    # --- rule 6: an Ethos-U point records its vela profile ------------------
     ("ethos-u-point-without-system-config",
      None, lambda d: _drop(d, "toolchain", "system_config"),
      "records no system_config"),
     ("ethos-u-point-without-memory-mode",
      None, lambda d: _drop(d, "toolchain", "memory_mode"),
      "records no memory_mode"),
-    # --- rule 6: p95 cannot undercut the mean ------------------------------
+    # --- rule 7: p95 cannot undercut the mean ------------------------------
     ("p95-below-the-mean",
      None, lambda d: _set(d, 0.5, "measured", "latency_ms_p95"),
      "is below measured.latency_ms_mean"),
-    # --- rule 7: the published tree cannot absorb a fixture -----------------
+    # --- rule 8: a footprint that undercuts its own arena fits everything --
+    ("req-sram-kib-of-zero-beside-a-real-arena",
+     None, lambda d: _set(d, 0, "measured", "req_sram_kib"),
+     "incapable of failing"),
+    ("req-sram-kib-below-its-own-arena",
+     None, lambda d: _set(_set(d, 74480, "measured", "arena_bytes"),
+                          72, "measured", "req_sram_kib"),
+     "below measured.arena_bytes"),
+    # --- rule 9: the recipe's timed-run floor -------------------------------
+    ("single-shot-dressed-as-a-measurement",
+     None, lambda d: _set(_set(_set(d, 1, "measured", "runs"),
+                               12.437, "measured", "latency_ms_mean"),
+                          12.437, "measured", "latency_ms_p95"),
+     "run floor"),
+    ("run-count-just-under-the-floor",
+     None, lambda d: _set(d, 99, "measured", "runs"), "run floor"),
+    # --- rule 10: an ISO-shaped string is not necessarily a day -------------
+    ("capture-date-is-not-a-calendar-day",
+     None, lambda d: _set(d, "2026-13-45", "capture", "date"),
+     "not a real calendar date"),
+    # --- rule 11: a CPU point has no NPU to place an operator on ------------
+    ("cpu-point-reporting-npu-ops",
+     "metadata/model_perf/E1M-AEN801/cpu/"
+     "person-detect-int8-808cfdfc0cf3@vela-5.1.0+r2+m55_hp+44136fa355b3.json",
+     lambda d: _set(_set(_set(_drop(_drop(d, "toolchain", "system_config"),
+                                    "toolchain", "memory_mode"),
+                              "cpu", "measured_on", "backend"),
+                         "", "measured_on", "accel_config"),
+                    44, "measured", "npu_ops"),
+     "no accelerator on this path"),
+    # --- rule 12: the published tree cannot absorb a fixture ----------------
     ("fixture-marker-in-the-published-tree",
      _PUBLISHED_REL, None, "must never ship under metadata/model_perf/"),
-    # --- rule 8: capture.reference cites a store, not a disk ----------------
+    # --- rule 13: capture.reference / model.source cite a store, not a disk -
+    #     `/home/user/` and not a real-looking username on purpose: the
+    #     literal lands in a committed file, and scripts/check_local_paths.py
+    #     is a REQUIRED gate that refuses a hard-coded home path unless the
+    #     user segment is a documented placeholder.  `user` is one of those
+    #     placeholders and still exercises `_LOCAL_PATH_REFERENCE`'s `^[/\\]`
+    #     branch, so the mutation keeps biting.
     ("capture-reference-is-a-posix-local-path",
-     None, lambda d: _set(d, "/home/someone/bench/2026-08-16.log", "capture", "reference"),
+     None, lambda d: _set(d, "/home/user/bench/2026-08-16.log", "capture", "reference"),
      "path on one machine"),
     ("capture-reference-is-a-windows-local-path",
      None, lambda d: _set(d, "C:\\bench\\2026-08-16.log", "capture", "reference"),
@@ -330,7 +570,22 @@ _MUTATIONS = [
     ("capture-reference-is-a-onedrive-share",
      None, lambda d: _set(d, "OneDrive/bench/2026-08-16.log", "capture", "reference"),
      "path on one machine"),
+    ("model-source-is-a-windows-local-path",
+     None, lambda d: _set(d, "C:\\models\\person_detect_int8.tflite", "model", "source"),
+     "model.source"),
+    ("model-source-climbs-out-of-the-checkout",
+     None, lambda d: _set(d, "../models/person_detect_int8.tflite", "model", "source"),
+     "climbs out of the checkout"),
     # --- the schema half of the same gate ----------------------------------
+    ("capture-reference-is-not-a-citation-at-all",
+     None, lambda d: _set(d, "see the log", "capture", "reference"), "reference"),
+    ("capture-reference-says-n-a",
+     None, lambda d: _set(d, "n/a -- no capture exists", "capture", "reference"),
+     "reference"),
+    ("model-source-dropped",
+     None, lambda d: _drop(d, "model", "source"), "source"),
+    ("core-dropped",
+     None, lambda d: _drop(d, "measured_on", "core"), "core"),
     ("stance-claims-an-estimate",
      None, lambda d: _set(d, "estimated", "stance"), "stance"),
     ("model-sha256-truncated",

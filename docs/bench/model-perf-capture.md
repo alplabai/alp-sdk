@@ -53,27 +53,53 @@ publish the arena under a name that promises more, and say so in `notes`.
 
 ## 1. Fix the identity before you measure anything
 
-A perf point is pinned to what produced it, or it is a lie. Write these six
-down first; every one of them ends up in the file **and** in its path, and a
-consumer matches on all of them exactly:
+A perf point is pinned to what produced it, or it is a lie. Write these down
+first; every one of them ends up in the file **and** in its path:
 
 | Identity field | Where it comes from |
 | --- | --- |
 | `measured_on.sku` | the module in the fixture, e.g. `E1M-AEN801`; must exist as `metadata/e1m_modules/<sku>.yaml` |
 | `measured_on.hw_rev` | the module's **revision key** (`r1`, `r2`, …) from `metadata/e1m_modules/<family-dir>/hw-revisions.yaml` — not the Altium `board_rev` string |
+| `measured_on.core` | the core that drove the inference, keyed as in the SKU preset's `topology:` (`m55_hp`, `m55_he`, `a32_cluster`, `a55_cluster`, `m33_sm`, `m33`) |
 | `measured_on.backend` | `ethos_u` \| `drpai` \| `deepx_dxm1` \| `cpu` |
 | `measured_on.accel_config` | e.g. `ethos-u85-256`; `""` for a backend with no such knob |
 | `model.sha256` | `sha256sum` of the **exact bytes you compile**, before any toolchain touches them |
+| `model.source` | where those bytes came from — a repo-relative path if the model is in-tree, otherwise a `<store>:<path>` citation or a URL |
 | `toolchain.name` + `.version` | the compiler you ran, and the version it reports |
+| `toolchain.system_config` + `.memory_mode` (+ `.pins`) | the **profile** the compile ran under (§2) |
 
 `(backend, accel_config)` must be one the SKU actually resolves — derived from
 the host SoC's `npus[]` plus any on-module discrete accelerator SoC whose
 `variants[].alp_module_skus` lists the SKU. The metadata gate refuses a pair
-the module does not have.
+the module does not have, and refuses a `core` the SKU's `topology:` does not
+declare. Where the SoC spec pairs an accelerator to a specific core
+(`metadata/socs/alif/ensemble/e8.json` pairs the Ethos-U55 high-perf to
+`m55_hp` and the high-efficiency to `m55_he` via `npus[].paired_core`) the gate
+also refuses a point that contradicts the pairing. Where it declares none — the
+E8's Ethos-U85 today — nothing is inferred and nothing is checked: **do not
+invent the pairing in your point either**; record the core you actually ran on.
 
 If the module in front of you is not at a revision the family table knows,
 **stop**: add the revision to `hw-revisions.yaml` first. A point tagged with
 the wrong revision is worse than no point.
+
+**Why `hw_rev`, `core` and the profile are in the filename and not only in the
+body.** Each of them changes the number, so two measurements that differ in one
+of them are two measurements — and if the filename does not carry them, both
+resolve to one path and the second silently destroys the first. The survivor is
+then exactly measured and describes a different machine, which is §0(a)'s
+hazard applied to the whole point rather than to one field: nothing about it
+looks wrong.
+
+**`model.source` is required.** A `sha256` is a well-formed 64-hex string
+whatever model it came from, so a hash with no provenance would pass every
+structural check while serving another model's latency under
+`basis: "bench"` / `confidence: "certain"`. If the bytes ship in-tree, give the
+repo-relative path and the suite re-hashes them for you. If they are
+licence-gated or out of tree — most of the zoo — cite them
+(`alp-sdk-internal:models/person_detect_int8.tflite`, or a URL). What is
+refused either way is a path on **your** disk: a leading `/`, a `C:\` drive
+prefix, a `OneDrive` segment, or a `..` that climbs out of the checkout.
 
 ---
 
@@ -148,12 +174,22 @@ Run the model through the portable surface (`alp_inference_open()` →
 vendor-driver path, so what you measure is what a customer gets.
 `examples/aen/aen-npu-inference-alp` is that path on AEN.
 
-> **Gap, stated rather than glossed:** no example in this repo times an
-> inference today. `aen-npu-inference-alp` runs `alp_inference_invoke()` once
-> and prints `RESULT PASS`; `<alp/inference.h>` exposes no latency accessor.
-> The first campaign therefore has to add a timing harness (§4) before it can
-> fill in any `latency_*` field. Until that lands, a point may legitimately
-> carry the compile-derived fields and **omit** latency entirely.
+> **Gap, stated precisely — there is a harness to lift, not a blank page.**
+> No **AEN** example times an inference today: `aen-npu-inference-alp` runs
+> `alp_inference_invoke()` once and prints `RESULT PASS`, and
+> `<alp/inference.h>` exposes no latency accessor, so nothing in the portable
+> API hands you a figure. But two camera-vision examples already bracket the
+> invoke with the core's cycle counter and are the pattern to lift:
+> [`examples/camera-vision/ai-object-detection-realtime/src/main.c`](../../examples/camera-vision/ai-object-detection-realtime/src/main.c)
+> lines 227-232, and
+> [`examples/camera-vision/ai-camera-viewer/src/inference_loop.c`](../../examples/camera-vision/ai-camera-viewer/src/inference_loop.c)
+> lines 112-122. Both take `k_cycle_get_32()` either side of
+> `alp_inference_invoke()` and convert with `k_cyc_to_us_floor32()`. Neither is
+> a bench harness — they time one invoke per frame to drive an on-screen
+> latency readout, with no warm-up discard, no run loop and no percentile — so
+> the first campaign still owes §4's loop. It owes the loop, not the
+> measurement primitive. Until that lands, a point may legitimately carry the
+> compile-derived fields and **omit** latency entirely.
 
 ---
 
@@ -168,7 +204,14 @@ A single inference measures the cache state it happened to start in.
 2. **Time at least 100 runs.** This is a policy floor, not a measured one: it is
    set so `latency_ms_p95` is the 95th percentile of at least a hundred samples
    rather than an interpolation across a handful. It is also the run count the
-   tier-2 plan's own worked example uses.
+   tier-2 plan's own worked example uses. **`scripts/validate_metadata.py`
+   enforces it** — a point with `runs: 1` and a mean and p95 that are the same
+   single number is refused, not merely discouraged. The floor lives in the
+   validator rather than as a `minimum` in the schema on purpose: it is bench
+   policy rather than document structure, its refusal can name this section and
+   the reason where a bare `minimum` could only say `1`, and the schema is the
+   wire contract a consumer pins against — a consumer must accept any point
+   alp-sdk published rather than re-derive our bench policy.
 3. Time **`alp_inference_invoke()` only** — not tensor fill, not output copy,
    not printing. Use the highest-resolution clock the core offers and state
    which one in the capture.
@@ -202,10 +245,14 @@ points* are public. The *raw captures* are not.
   }
   ```
 
-* `capture.reference` is a `<store>:<path-within-store>` citation. The metadata
-  gate refuses a leading `/`, a `C:\` drive prefix or a `OneDrive` segment —
-  those leak a developer's machine into a public repo and resolve for nobody
-  else, which also ends the point's reproducibility.
+* `capture.reference` is a `<store>:<path-within-store>` citation, and the
+  schema enforces that **shape** rather than blacklisting bad ones: `see the
+  log`, `ask the operator` and `n/a` are all refused, because a denylist of
+  three known-bad spellings accepts every non-citation anyone would actually
+  type. On top of the shape, the metadata gate refuses a leading `/`, a `C:\`
+  drive prefix (which otherwise reads as a store named `C`) or a `OneDrive`
+  segment — those leak a developer's machine into a public repo and resolve for
+  nobody else, which also ends the point's reproducibility.
 * When in doubt about a file's side of the line, apply the repo's
   public-vs-internal rule (`classifying-public-vs-internal`) before committing,
   not after.
@@ -218,19 +265,27 @@ Path — every segment is re-derived from the body by the gate, so it cannot
 drift:
 
 ```
-metadata/model_perf/<sku>/<target>/<model-slug>-<sha256[0:12]>@<toolchain>-<version>.json
+metadata/model_perf/<sku>/<target>/<model-slug>-<sha256[0:12]>@<toolchain>-<version>+<hw_rev>+<core>+<profile12>.json
 ```
 
 `<target>` is `accel_config` when the backend has one, and `backend` when it
-does not. Example:
+does not. `<profile12>` is the first 12 hex characters of the sha256 of the
+canonical JSON (sorted keys, no whitespace) of every key under `toolchain`
+**other than** `name` and `version` — today `system_config`, `memory_mode` and
+`pins`. You do not compute it by hand: the gate tells you the filename your body
+implies, so write the file, run the gate, and rename to what it names. Example:
 
 ```
-metadata/model_perf/E1M-AEN801/ethos-u85-256/person-detect-int8-808cfdfc0cf3@vela-5.1.0.json
+metadata/model_perf/E1M-AEN801/ethos-u85-256/person-detect-int8-808cfdfc0cf3@vela-5.1.0+r2+m55_hp+1e562a678c9f.json
 ```
 
-The model hash is in the filename deliberately: re-benching a model whose bytes
-changed must **accumulate** a second point, never overwrite the first — the
-first is still the correct answer for a customer holding the old bytes.
+Every segment after the slug is one that changes the number, and each is there
+because leaving it out lets a second measurement overwrite a first that is still
+correct: re-benching changed model bytes must **accumulate** a second point (the
+first is still the right answer for a customer holding the old bytes), an r1 and
+an r2 point are different modules, an `a32_cluster` and an `m55_he` point are
+different processors, and an `Ethos_U85_SRAM_Only` and an
+`Ethos_U85_SYS_DRAM_Mid` point are different memory systems.
 
 Then:
 
@@ -240,7 +295,7 @@ python3 -m pytest tests/scripts/test_model_perf_metadata.py -q
 ```
 
 A shape to copy from lives at
-`tests/fixtures/model_perf/E1M-AEN801/ethos-u85-256/person-detect-int8-808cfdfc0cf3@vela-5.1.0.json`.
+`tests/fixtures/model_perf/E1M-AEN801/ethos-u85-256/person-detect-int8-808cfdfc0cf3@vela-5.1.0+r2+m55_hp+1e562a678c9f.json`.
 It is a **synthetic fixture**: it carries a `_fixture` banner, every value under
 its `measured` block is a placeholder, and the gate refuses that key anywhere
 under `metadata/model_perf/`, so it cannot be promoted into the published tree
@@ -260,8 +315,18 @@ exactly this reason, and a present key is a promise that a real run produced it.
 | The toolchain does not report op placement | omit `npu_ops` / `cpu_ops` |
 | No timing harness on this core yet (§3) | omit `latency_ms_mean`, `latency_ms_p95`, `runs` |
 | The const-region question (§0b) is still open for this part | omit `req_sram_kib`; keep `arena_bytes` if the toolchain reported it |
-| A figure came out zero | ship the zero **only if it was measured**. A zero that means "the tool told us nothing" is an omission, not a zero — a zero `req_sram_kib` satisfies the on-device fit gate against any arena |
+| A figure came out zero | ship the zero **only if it was measured**. A zero that means "the tool told us nothing" is an omission, not a zero |
 | The whole run could not be completed | **do not create the file.** A partial point still reads as authoritative |
+
+**`req_sram_kib` is the one figure where a wrong zero is not merely wrong, and
+the gate now enforces it rather than warning about it.** The on-device
+selector's fit test is
+`e->arena_sram_kib == 0u || t->req_sram_kib <= e->arena_sram_kib`
+(`src/backends/inference/alp_model_select.c`), so a `req_sram_kib` of 0 — or any
+figure below the arena the same compile reported — fits every arena on every
+engine and turns the fit gate into a check that cannot fail. Whenever both are
+present, `scripts/validate_metadata.py` requires
+`req_sram_kib * 1024 >= arena_bytes`. Omit the field; never zero-fill it.
 
 Whatever you could not measure, and why, goes in `notes`. That text is what
 tells the next campaign what is still owed — and it is the difference between a
@@ -276,10 +341,19 @@ static**. A matched point is reported as `basis: "bench"` with
 `confidence: "certain"` and the `capture.reference` alongside, so the number
 stays traceable to the run that produced it.
 
-A match requires **exact** agreement on all of sku, backend, accel_config,
-model `sha256`, toolchain name and toolchain version. There is no "closest
-model" and no "same model, different toolchain version" — a near miss is not a
-match, it falls through to the next tier.
+A match requires **exact** agreement on all eight of sku, hw_rev, core, backend,
+accel_config, model `sha256`, toolchain name and toolchain version — a
+consumer's match rule keys on everything that changes the number. There is no
+"closest model", no "same model, different toolchain version" and no "same
+module, other revision": a near miss is not a match, it falls through to the
+next tier.
+
+The toolchain **profile** is part of the file identity but deliberately *not*
+part of that match key, because a customer holding no toolchain cannot state a
+profile. So a consumer whose match key leaves **more than one** point standing
+must not pick one arbitrarily — those points were measured on machines that
+differ. It either surfaces all of them or falls through; the natural tiebreak is
+the profile the SoC spec's own `npu_toolchain` block declares for the part.
 
 **Absence is `undetermined`, never a negative.** Most model/SKU/target
 combinations have never been benched. A consumer that reads a missing point as
