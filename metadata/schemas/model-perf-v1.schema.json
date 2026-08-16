@@ -1,0 +1,185 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/model-perf-v1.schema.json",
+  "title": "ALP bench-measured model perf point v1",
+  "description": "One file per MEASUREMENT IDENTITY -- not per model, and not per SoM. A perf point records what one named toolchain produced for one exact model byte-sequence on one exact accelerator target of one exact hardware revision, so the file lives at metadata/model_perf/<sku>/<target>/<model-slug>-<sha256[0:12]>@<toolchain>-<toolchain_version>.json (e.g. metadata/model_perf/E1M-AEN801/ethos-u85-256/person-detect-int8-808cfdfc0cf3@vela-5.1.0.json), where <target> is `measured_on.accel_config` when the backend has one and `measured_on.backend` when it does not (drpai, deepx_dxm1, cpu). Every one of those path segments is re-derived from the file's own body by scripts/validate_metadata.py's _check_model_perf_semantics, so a file cannot claim one identity in its path and another inside itself. THE MODEL SHA IS IN THE FILENAME on purpose: re-benching a model whose bytes changed must ACCUMULATE a second point, never silently overwrite the first, because the first is still the correct answer for a customer holding the old bytes. THIS DATA IS MEASURED, NEVER ESTIMATED ('stance': 'bench-measured'): every figure under `measured` came off real silicon running the named toolchain's output. A figure that was not measured is OMITTED -- there is no estimated perf point, that is the static screen's job, and conflating the two destroys the only thing this tier sells. A model/SKU/target/hw_rev/toolchain combination with NO file under metadata/model_perf/ is an intentional absence (most combinations have never been benched) and MUST be treated by any consumer as 'undetermined', never as 'does not fit' -- reading absence as a negative reports a false no-fit on every model not yet benched. A consumer maps a matched point onto the shipped report envelope's `basis: \"bench\"` with `confidence: \"certain\"`; there is no parallel `source:` key, and a point matches only on an EXACT agreement of sku + backend + accel_config + model sha256 + toolchain name + toolchain version. Raw bench captures (serial logs, PSU traces, unreleased-silicon detail) stay in alp-sdk-internal: a point CITES its capture via `capture.reference`, it never embeds it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["stance", "measured_on", "model", "toolchain", "measured", "capture"],
+  "properties": {
+    "_fixture": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Present ONLY on synthetic test fixtures under tests/fixtures/model_perf/, which exist so the perf-point checks run against a real document instead of passing vacuously over an empty metadata/model_perf/. Its value states that the file is NOT a measurement. scripts/validate_metadata.py REFUSES any file under metadata/model_perf/ that carries this key, so a fixture's placeholder figures can never be promoted into the published tree and read as bench data."
+    },
+    "stance": {
+      "type": "string",
+      "enum": ["bench-measured"],
+      "description": "Every figure in this file was MEASURED on real silicon with the named toolchain. It certifies nothing about any other identity: a different model, accel_config, hw_rev or toolchain version is a different measurement and needs its own point. There is currently exactly one stance value -- the enum exists so that a future derived data asset (a calibrated per-NPU estimate fitted to these points, which the roadmap explicitly plans) must arrive as a distinguishable, not-yet-invented kind rather than as a silent redefinition of this one. An estimate that can be mistaken for a measurement is worse than no estimate."
+    },
+    "measured_on": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sku", "hw_rev", "backend", "accel_config"],
+      "description": "The exact hardware identity this point applies to. If any field moves, the point no longer applies and a consumer must fall through to the next fidelity tier rather than report a stale exact number as authoritative.",
+      "properties": {
+        "sku": {
+          "type": "string",
+          "pattern": "^E1M-[A-Z0-9]+$",
+          "description": "SoM SKU. MUST exist as metadata/e1m_modules/<sku>.yaml and MUST equal the perf point's grandparent directory name."
+        },
+        "hw_rev": {
+          "type": "string",
+          "pattern": "^r[0-9]+$",
+          "description": "Module hardware revision, as keyed in the SoM family's metadata/e1m_modules/<family-dir>/hw-revisions.yaml `hw_revisions:` map (`r1`, `r2`, ...) -- NOT the Altium `board_rev` string. Cross-checked to exist there."
+        },
+        "backend": {
+          "type": "string",
+          "enum": ["ethos_u", "drpai", "deepx_dxm1", "cpu"],
+          "description": "Inference backend the model ran on. Must be one this SKU actually resolves -- derived from the host SoC's `npus[]` plus any discrete on-module accelerator SoC whose `variants[].alp_module_skus` lists the SKU, the same single source tan's resolve_targets() reads."
+        },
+        "accel_config": {
+          "type": "string",
+          "pattern": "^$|^[a-z0-9]+(-[a-z0-9]+)*$",
+          "description": "The accelerator configuration measured, e.g. `ethos-u85-256`. REQUIRED-AND-EMPTY (\"\") for a backend that has none (drpai, deepx_dxm1, cpu), rather than absent: an omitted key is indistinguishable from an unrecorded one, and the whole point of a perf point is that nothing about its identity is left to inference. The (backend, accel_config) pair must be one this SKU resolves."
+        }
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slug", "sha256", "size_bytes"],
+      "description": "The exact bytes measured. The sha256 is what a consumer matches on -- not the slug, which is a human label two different byte-sequences can share.",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+          "description": "Short human label for the model, e.g. `person-detect-int8`. Names a model, NOT a byte-sequence: it is the filename's readable prefix and never the match key."
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "Full lowercase sha256 of the model file as compiled. THIS IS THE MATCH KEY. A point that does not name the exact bytes it measured cannot be invalidated when the model changes, and a stale exact number is worse than no number -- the customer trusts it precisely because it says `bench`. Its first 12 characters also appear in the filename."
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Size of those exact bytes, as a cheap second consistency signal alongside the hash."
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optional provenance for the bytes: a repo-relative path when the model ships in-tree (e.g. `tests/fixtures/models/person_detect_int8.tflite`), otherwise a citation of where they came from. When it names an in-repo path, tests/scripts/test_model_perf_metadata.py re-hashes that file and requires it to equal `sha256` -- catching a fixture regenerated without re-benching. That check lives in the test suite and NOT in validate_metadata.py deliberately: the metadata gate is also run against a metadata-ONLY scratch clone (tests/scripts/test_alp_cli_new_som.py::_clone_metadata_gates) where tests/fixtures/ does not exist, so a copy there could only ever be a silent skip."
+        }
+      }
+    },
+    "toolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "description": "What compiled the model. A measurement is only valid for the toolchain that produced it; `name` and `version` are both part of the filename and part of the match key.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+          "description": "Short toolchain name, e.g. `vela`, `dxcom`, `translator`. MUST equal the filename segment between '@' and the trailing '-<version>'."
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Toolchain version, e.g. `5.1.0`. MUST equal the filename's trailing version segment."
+        },
+        "system_config": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Vela `--system-config`. REQUIRED on an `ethos_u` point (enforced by validate_metadata.py, which can say why): invoked with no flags, ethos-u-vela 5.1.0 silently picks a default per accelerator -- `Ethos_U85_SYS_DRAM_Mid` on the U85 -- and the arena figures then describe THAT profile, not the module. A point that does not record the profile is exactly measured and describes an unknown machine."
+        },
+        "memory_mode": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Vela `--memory-mode`, e.g. `Sram_Only`. REQUIRED on an `ethos_u` point for the same reason as `system_config`; the flagless default is `Dedicated_Sram_384KB` on the U85/U65 parts, which is DRAM-backed."
+        },
+        "pins": {
+          "type": "object",
+          "additionalProperties": {"type": "string"},
+          "description": "Optional: other toolchain-internal version/config pins the measurement depends on and that alp-sdk does not override (e.g. DRP-AI's {\"drp_compiler_version\": \"100\"}). A point is only valid evidence for a compile that used these same pins."
+        }
+      }
+    },
+    "measured": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "description": "The measurements. EVERY key here is optional and every present key is a real figure off real silicon: a figure that could not be measured is OMITTED, never estimated and never zero-filled. A zero is a measured zero.",
+      "dependentRequired": {
+        "latency_ms_mean": ["runs"],
+        "latency_ms_p95": ["runs", "latency_ms_mean"]
+      },
+      "properties": {
+        "npu_ops": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Operators the compiler placed on the NPU."
+        },
+        "cpu_ops": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Operators that fell back to the CPU."
+        },
+        "arena_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Tensor-arena working set the compiler reported, in bytes."
+        },
+        "req_sram_kib": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "SRAM the model requires resident, in KiB, as the on-device selector compares it (src/backends/inference/alp_model_select.c). NOTE, and this is an open hardware question rather than a schema one: today this reports the ARENA ALONE, while a real deployment can also hold weight/const regions in SRAM. Record what is really resident once the per-part answer exists; until then a point that cannot answer it omits the field."
+        },
+        "latency_ms_mean": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Mean single-inference latency in milliseconds over `runs` runs. Requires `runs` -- a latency without a run count is a guess wearing a measurement's clothes."
+        },
+        "latency_ms_p95": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "95th-percentile single-inference latency in milliseconds over the same `runs` runs. Requires `runs` and `latency_ms_mean`, and must be >= the mean (checked by validate_metadata.py)."
+        },
+        "runs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "How many inferences the latency figures were computed over. This is what separates a measurement from a single shot; the capture recipe (docs/bench/model-perf-capture.md) sets the floor."
+        }
+      }
+    },
+    "capture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["date", "operator", "reference"],
+      "description": "Who produced this point, when, and where the raw evidence lives. A number nobody can trace back to a run is not reproducible, and a perf point is worth exactly what its reproducibility is.",
+      "properties": {
+        "date": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "description": "ISO date of the bench run."
+        },
+        "operator": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Who ran it."
+        },
+        "reference": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A CITATION of the raw capture, not the capture itself and not a path on the operator's machine: `<store>:<path-within-store>`, e.g. `alp-sdk-internal:bench/captures/2026-08-16-aen801-person-detect.log`. Raw captures are private (serial logs, PSU traces, unreleased-silicon detail) while the point itself is public. validate_metadata.py refuses a reference that looks like a local filesystem path (a leading `/`, a `C:\\` drive prefix, or an `OneDrive` segment) -- those leak a developer's machine into a public repo and resolve for nobody else."
+        }
+      }
+    },
+    "notes": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional free text: what could NOT be measured and why, caveats on what this point does and does not cover, links to the errata a figure depends on. Never a substitute for a measurement -- if a figure is unknown its key is absent, and this is where the reason goes."
+    }
+  }
+}

@@ -17,6 +17,7 @@ every PR that touches metadata/.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -64,6 +65,8 @@ BLOCK_SCHEMA = REPO / "metadata" / "schemas" / "block-v1.schema.json"
 BLOCKS = REPO / "metadata" / "blocks"
 NPU_OPS_SCHEMA = REPO / "metadata" / "schemas" / "npu-ops-v1.schema.json"
 NPU_OPS = REPO / "metadata" / "npu_ops"
+MODEL_PERF_SCHEMA = REPO / "metadata" / "schemas" / "model-perf-v1.schema.json"
+MODEL_PERF = REPO / "metadata" / "model_perf"
 # Generated Zephyr board trees (one dir per <board>; each carries a twister
 # .yaml whose `identifier:` is the fully-qualified <board>/<soc>/<cpucluster>
 # triple `west build -b` resolves).  Ground truth for the board-target check.
@@ -1280,6 +1283,312 @@ def _check_npu_ops_semantics(npu_ops_files) -> list:
     return failures
 
 
+def _npu_backend(npu_type: str, subtype: str) -> str | None:
+    """Map a SoC `npus[].type`/`.subtype` pair onto an inference backend id.
+
+    Deliberately the SAME mapping as `tan.model.targets._npu_backend`, because
+    both sides must agree on what `metadata/socs/**/*.json` means: alp-sdk
+    validates that a perf point names a target the SKU has, and tan resolves
+    the targets it compiles for.  Neither repo can import the other, so the
+    defence against drift is that both read the SAME source of truth (the
+    SoC's own `npus[]`) rather than a hand-kept backend<->SKU table, and that
+    the derived set is pinned in `tests/scripts/test_model_perf_metadata.py`
+    against the values `resolve_targets()` itself produces.
+
+    Returns None for an NPU no backend claims -- an unknown accelerator is
+    not this function's to guess at.
+    """
+    if npu_type.startswith("ethos-u"):
+        return "ethos_u"
+    if "drp" in npu_type or "drp" in subtype:      # renesas ("drp-ai" / "ai-mac+drp")
+        return "drpai"
+    if npu_type.startswith("dx") or "deepx" in npu_type:
+        return "deepx_dxm1"
+    return None
+
+
+def _soc_perf_targets(soc: dict) -> set[tuple[str, str]]:
+    """`(backend, accel_config)` pairs one SoC spec's `npus[]` offers.
+
+    `accel_config` is vela's `--accelerator-config` (`<type>-<mac_per_cycle>`)
+    for Ethos-U and the empty string for every other backend, which has no
+    such knob.  Mirrors `tan.model.targets._soc_targets`.
+    """
+    out: set[tuple[str, str]] = set()
+    for npu in soc.get("npus") or []:
+        if not isinstance(npu, dict):
+            continue
+        npu_type = str(npu.get("type", ""))
+        backend = _npu_backend(npu_type, str(npu.get("subtype", "")))
+        if backend is None:
+            continue
+        accel = (f"{npu_type}-{npu['mac_per_cycle']}"
+                 if backend == "ethos_u" and npu.get("mac_per_cycle") else "")
+        out.add((backend, accel))
+    return out
+
+
+def _resolve_perf_targets(sku: str, metadata_root: Path) -> set[tuple[str, str]]:
+    """Every `(backend, accel_config)` a SoM SKU actually resolves.
+
+    Host SoC `npus[]` + every OTHER SoC spec whose `variants[].alp_module_skus`
+    lists this SKU (an on-module discrete accelerator -- the DEEPX DX-M1 on the
+    V2M SKUs) + `("cpu", "")`, which is always present.  Same derivation, off
+    the same files, as `tan.model.targets.resolve_targets`.
+
+    Raises `LookupError` when the SKU's preset or its `silicon:` SoC spec
+    cannot be resolved.  It FAILS CLOSED and never returns a partial set: the
+    caller states "this SKU does not have that target" as a hard failure, so
+    an incomplete answer would reject a legitimate point on the strength of a
+    file we could not read.
+    """
+    preset_path = metadata_root / "e1m_modules" / f"{sku}.yaml"
+    if not preset_path.is_file():
+        raise LookupError(f"no SoM preset at {preset_path.name}")
+    try:
+        preset = strict_yaml_load(preset_path.read_text(encoding="utf-8"),
+                                  source=preset_path)
+    except Exception as exc:                                # pragma: no cover
+        raise LookupError(f"{preset_path.name} does not parse: {exc}") from exc
+    if not isinstance(preset, dict):                        # pragma: no cover
+        raise LookupError(f"{preset_path.name} does not parse to a mapping")
+
+    silicon = str(preset.get("silicon", ""))
+    soc_path = resolve_soc_path(silicon, metadata_root)
+    if soc_path is None:
+        raise LookupError(f"malformed `silicon:` ref {silicon!r} in {preset_path.name}")
+    if not soc_path.is_file():
+        raise LookupError(f"no SoC spec for {silicon} at {soc_path}")
+    host = strict_json_loads(soc_path.read_text(encoding="utf-8"), source=soc_path)
+
+    targets = _soc_perf_targets(host)
+    host_ref = host.get("ref")
+    for path in sorted((metadata_root / "socs").glob("**/*.json")):
+        soc = strict_json_loads(path.read_text(encoding="utf-8"), source=path)
+        ref = soc.get("ref")
+        if not ref or ref == host_ref:
+            continue
+        skus = {s for v in (soc.get("variants") or [])
+                for s in (v.get("alp_module_skus") or [])}
+        if sku in skus:
+            targets |= _soc_perf_targets(soc)
+    targets.add(("cpu", ""))
+    return targets
+
+
+#: `capture.reference` shapes that name a path on ONE developer's machine
+#: rather than citing a store every reader can resolve.  A public repo must
+#: never carry them (see the repo-wide "no local paths" rule); a citation that
+#: resolves for nobody else also makes the point unreproducible, which is the
+#: only thing a bench measurement is worth.
+_LOCAL_PATH_REFERENCE = re.compile(r"^[/\\]|^[A-Za-z]:[/\\]|onedrive", re.IGNORECASE)
+
+
+def _check_model_perf_semantics(perf_files) -> list:
+    """Cross-checks on bench-measured model perf points beyond pure schema
+    validation, mirroring `_check_npu_ops_semantics` for the same reasons.
+
+    A perf point is the one data asset in this tree that a customer reads as
+    an EXACT answer about their own hardware, taken on our authority, with no
+    toolchain and no board of their own to check it against.  Everything below
+    exists so a point cannot quietly stop describing the thing that produced
+    it:
+
+      1. The PATH is a claim -- `<sku>/<target>/<slug>-<sha12>@<toolchain>-
+         <version>.json` -- and the body must reproduce all three segments
+         exactly.  `<target>` is `accel_config` when the backend has one and
+         `backend` when it does not.  Without this a file could claim one
+         identity in its path and another inside itself, and the model sha in
+         the filename is what makes a re-bench of changed bytes ACCUMULATE a
+         second point instead of silently overwriting the first (which is
+         still the right answer for a customer holding the old bytes).
+      2. `measured_on.sku` must exist under `metadata/e1m_modules/`.
+      3. `(measured_on.backend, measured_on.accel_config)` must be a target
+         that SKU actually resolves, so a point cannot claim silicon the
+         module does not carry.
+      4. `measured_on.hw_rev` must be a key in that SoM family's
+         `hw-revisions.yaml`.  Existence only, deliberately: a point measured
+         on a `reserved` or pre-production revision is still a real
+         measurement of that revision.
+      5. An `ethos_u` point must record BOTH `toolchain.system_config` and
+         `toolchain.memory_mode`.  Invoked with neither flag, `ethos-u-vela`
+         5.1.0 silently picks a default per accelerator -- on the U85 that is
+         `Ethos_U85_SYS_DRAM_Mid` / `Dedicated_Sram_384KB`, a DRAM-backed
+         profile on a part whose `external_memory_interfaces` declares no
+         DRAM.  A point captured that way is exactly measured and describes a
+         machine the module is not; recording the profile is what lets a
+         reader tell the two apart.
+      6. `measured.latency_ms_p95` must be >= `measured.latency_ms_mean`.  A
+         p95 below the mean is not a tighter number, it is two runs' figures
+         pasted into one point.
+      7. No file under `metadata/model_perf/` may carry `_fixture`.  That key
+         marks the synthetic documents under `tests/fixtures/model_perf/`
+         whose `measured` values are placeholders; the published tree must be
+         incapable of absorbing one.
+      8. `capture.reference` must cite a store, not a local filesystem path.
+
+    Reading `model.source` back -- re-hashing the in-repo model file and
+    requiring it to equal `model.sha256` -- deliberately does NOT live here.
+    That path points into `tests/fixtures/`, which does not exist in the
+    metadata-ONLY scratch clone `tests/scripts/test_alp_cli_new_som.py`'s
+    `_clone_metadata_gates` runs this script against, so a copy here could
+    only be a silent skip.  It lives in
+    `tests/scripts/test_model_perf_metadata.py`, which always runs against the
+    real checkout -- the same split, for the same reason, as
+    `_check_soc_vela_memory_profile`'s `source` citations.
+
+    Returns a failure list shaped like `_check_files()`.
+    """
+    metadata_root = REPO / "metadata"
+    published_root = metadata_root / "model_perf"
+    failures: list[tuple[Path, list[str]]] = []
+    for path in perf_files:
+        rel = path.relative_to(REPO).as_posix()
+        try:
+            doc = strict_json_loads(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue
+
+        msgs: list[str] = []
+        measured_on = doc.get("measured_on") if isinstance(doc.get("measured_on"), dict) else {}
+        model = doc.get("model") if isinstance(doc.get("model"), dict) else {}
+        toolchain = doc.get("toolchain") if isinstance(doc.get("toolchain"), dict) else {}
+        measured = doc.get("measured") if isinstance(doc.get("measured"), dict) else {}
+        capture = doc.get("capture") if isinstance(doc.get("capture"), dict) else {}
+
+        sku = measured_on.get("sku")
+        hw_rev = measured_on.get("hw_rev")
+        backend = measured_on.get("backend")
+        accel = measured_on.get("accel_config")
+
+        # (1) the path is a claim the body must reproduce.
+        if isinstance(sku, str) and path.parent.parent.name != sku:
+            msgs.append(
+                f"measured_on.sku={sku!r} but this file sits under "
+                f"`{path.parent.parent.name}/` -- a consumer resolving points "
+                f"for a SKU by path would load a measurement taken on another "
+                f"module")
+        if isinstance(backend, str) and isinstance(accel, str):
+            expected_dir = accel or backend
+            if path.parent.name != expected_dir:
+                msgs.append(
+                    f"measured_on (backend={backend!r}, accel_config={accel!r}) "
+                    f"implies directory `{expected_dir}/`, but this file sits "
+                    f"under `{path.parent.name}/`")
+        slug = model.get("slug")
+        sha256 = model.get("sha256")
+        tc_name = toolchain.get("name")
+        tc_version = toolchain.get("version")
+        if (isinstance(slug, str) and isinstance(sha256, str) and len(sha256) >= 12
+                and isinstance(tc_name, str) and isinstance(tc_version, str)):
+            expected_stem = f"{slug}-{sha256[:12]}@{tc_name}-{tc_version}"
+            if path.stem != expected_stem:
+                msgs.append(
+                    f"model (slug={slug!r}, sha256[:12]={sha256[:12]!r}) + "
+                    f"toolchain (name={tc_name!r}, version={tc_version!r}) imply "
+                    f"filename `{expected_stem}.json`, but this file is "
+                    f"`{path.name}` -- the filename is the measurement identity, "
+                    f"so a mismatch means a re-bench overwrote a point that is "
+                    f"still correct for the bytes it measured")
+
+        # (2)+(3) the SKU exists, and it really has this target.
+        if isinstance(sku, str):
+            try:
+                targets = _resolve_perf_targets(sku, metadata_root)
+            except LookupError as exc:
+                msgs.append(
+                    f"measured_on.sku={sku!r}: cannot resolve this module's "
+                    f"accelerator targets ({exc}) -- refused rather than "
+                    f"skipped, because skipping would accept a point naming "
+                    f"any target at all")
+            else:
+                if isinstance(backend, str) and isinstance(accel, str):
+                    if (backend, accel) not in targets:
+                        offered = ", ".join(
+                            f"{b}/{a or '-'}" for b, a in sorted(targets))
+                        msgs.append(
+                            f"measured_on (backend={backend!r}, "
+                            f"accel_config={accel!r}) is not a target "
+                            f"{sku} resolves -- it offers: {offered}")
+
+        # (4) the hardware revision exists in the family table.
+        if isinstance(sku, str) and isinstance(hw_rev, str):
+            try:
+                family_dir = _sku_family(sku)
+            except ValueError:
+                msgs.append(f"measured_on.sku={sku!r}: unrecognised SoM SKU pattern, "
+                            f"so `hw_rev` cannot be checked against a family table")
+            else:
+                table = metadata_root / "e1m_modules" / family_dir / "hw-revisions.yaml"
+                if not table.is_file():
+                    msgs.append(
+                        f"measured_on.hw_rev={hw_rev!r}: no "
+                        f"metadata/e1m_modules/{family_dir}/hw-revisions.yaml to "
+                        f"check it against")
+                else:
+                    revisions = strict_yaml_load(table.read_text(encoding="utf-8"),
+                                                 source=table)
+                    known = (revisions or {}).get("hw_revisions")
+                    known = known if isinstance(known, dict) else {}
+                    if hw_rev not in known:
+                        msgs.append(
+                            f"measured_on.hw_rev={hw_rev!r} is not a revision of the "
+                            f"{family_dir} family -- "
+                            f"metadata/e1m_modules/{family_dir}/hw-revisions.yaml "
+                            f"declares {sorted(known) or '(none)'}")
+
+        # (5) an Ethos-U point without its vela profile describes an unknown machine.
+        if backend == "ethos_u":
+            missing = [k for k in ("system_config", "memory_mode")
+                       if not isinstance(toolchain.get(k), str) or not toolchain[k]]
+            if missing:
+                msgs.append(
+                    f"backend `ethos_u` but toolchain records no "
+                    f"{' and no '.join(missing)} -- invoked flagless, "
+                    f"ethos-u-vela picks a default per accelerator "
+                    f"(`Ethos_U85_SYS_DRAM_Mid` / `Dedicated_Sram_384KB` on the "
+                    f"U85, which is DRAM-backed), so the arena figures would "
+                    f"describe that profile and not this module")
+
+        # (6) p95 below the mean is two runs pasted into one point.
+        mean = measured.get("latency_ms_mean")
+        p95 = measured.get("latency_ms_p95")
+        if isinstance(mean, (int, float)) and isinstance(p95, (int, float)) and p95 < mean:
+            msgs.append(
+                f"measured.latency_ms_p95={p95} is below "
+                f"measured.latency_ms_mean={mean} -- a 95th percentile cannot "
+                f"undercut the mean of the same runs")
+
+        # (7) the published tree cannot absorb a synthetic fixture.
+        if "_fixture" in doc and path.is_relative_to(published_root):
+            msgs.append(
+                "`_fixture` marks a synthetic document whose `measured` values "
+                "are placeholders, not measurements -- it belongs under "
+                "tests/fixtures/model_perf/ and must never ship under "
+                "metadata/model_perf/, where a consumer would read it as bench "
+                "data")
+
+        # (8) a capture citation, not somebody's disk.
+        reference = capture.get("reference")
+        if isinstance(reference, str) and _LOCAL_PATH_REFERENCE.search(reference):
+            msgs.append(
+                f"capture.reference={reference!r} looks like a path on one "
+                f"machine rather than a `<store>:<path>` citation -- this repo "
+                f"is public and such a reference resolves for nobody else, so "
+                f"the measurement stops being reproducible")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+        else:
+            print(f"OK   {rel}")
+    return failures
+
+
 def _check_library_semantics(library_files) -> list:
     """Cross-checks on library manifests beyond pure schema validation (ADR 0018).
 
@@ -1727,6 +2036,34 @@ def main() -> int:
             )
             npu_ops_failures += _check_npu_ops_semantics(npu_ops_files)
 
+    # Bench-measured model perf points (the tier-2 data asset).  One file per
+    # MEASUREMENT IDENTITY under metadata/model_perf/<sku>/<target>/<slug>-
+    # <sha12>@<toolchain>-<version>.json -- `**` for the same reason npu_ops
+    # uses it: a file dropped at any other depth must still reach the schema
+    # and semantic passes rather than silently matching nothing.
+    #
+    # `metadata/model_perf/` is EMPTY until the first bench campaign, and an
+    # empty glob makes every check below pass over nothing.  That vacuum is
+    # closed in tests/scripts/test_model_perf_metadata.py, which drives this
+    # same schema + `_check_model_perf_semantics` against a real fixture point
+    # under tests/fixtures/model_perf/ and against a mutation of every rule.
+    # Absence of a point is never a verdict: a model/SKU/target combination
+    # with no file here is `undetermined`, not `does not fit`.
+    model_perf_failures: list = []
+    model_perf_files: list = []
+    if MODEL_PERF_SCHEMA.is_file():
+        model_perf_schema = json.loads(MODEL_PERF_SCHEMA.read_text(encoding="utf-8"))
+        model_perf_validator = jsonschema.Draft202012Validator(model_perf_schema)
+        model_perf_files = sorted(MODEL_PERF.glob("**/*.json"))
+        if model_perf_files:
+            print()
+            model_perf_failures = _check_files(
+                "JSON", model_perf_files, model_perf_validator,
+                lambda p: strict_json_loads(p.read_text(encoding="utf-8"), source=p),
+                "stance",
+            )
+            model_perf_failures += _check_model_perf_semantics(model_perf_files)
+
     # Library manifests (YAML) against library v1 (ADR 0018).
     library_failures: list = []
     library_semantic_failures: list = []
@@ -1788,6 +2125,7 @@ def main() -> int:
                       + len(hwrev_failures) + len(board_failures) + len(chip_failures)
                       + len(block_failures)
                       + len(npu_ops_failures)
+                      + len(model_perf_failures)
                       + len(library_failures) + len(library_semantic_failures)
                       + len(board_target_failures)
                       + len(restriction_failures)
@@ -1801,6 +2139,7 @@ def main() -> int:
           f"{len(hwrev_files)} hw-revisions file(s) + "
           f"{len(board_files)} board preset(s) + {len(chip_files)} chip file(s) + "
           f"{len(block_files)} block file(s) + {len(npu_ops_files)} npu-ops file(s) + "
+          f"{len(model_perf_files)} model-perf point(s) + "
           f"{len(library_files)} library manifest(s) + Kconfig registries + "
           f"tier-a-library-ci registry "
           f"checked, {total_failures} failure(s)")

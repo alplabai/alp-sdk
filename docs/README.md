@@ -183,6 +183,12 @@ into the topic-specific docs.
   verification matrix, GENERATED from test-plan.md
   (`scripts/gen_verification_status.py`); do not hand-edit.
 - [local-ci.md](local-ci.md) — running CI checks locally.
+- [bench/model-perf-capture.md](bench/model-perf-capture.md) — the recipe a
+  bench run must follow to produce a `metadata/model_perf/` perf point:
+  fixing the measurement identity, the exact toolchain invocation, how
+  latency is measured (mean + p95 + run count, never a single shot),
+  where the raw capture goes, and what to do when a figure cannot be
+  measured (omit it — there is no estimated perf point).
 
 ## Tutorials
 
