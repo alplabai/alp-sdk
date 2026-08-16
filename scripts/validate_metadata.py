@@ -502,6 +502,139 @@ def _check_soc_npu_pairing(soc_files) -> list:
     return failures
 
 
+# `[Memory_Mode.*]` sections shipped in Arm's own vela.ini (ethos-u-vela
+# 5.1.0) whose `arena_mem_area` is `Axi1` -- the non-SRAM memory that same
+# file documents as "assumed to be read-writeable", i.e. DRAM.  Vela's own
+# no-flags default (`Dedicated_Sram_384KB`) is in this set, which is exactly
+# why a DRAM-less part must never inherit it.
+_VELA_DRAM_BACKED_MEMORY_MODES = {
+    "Dedicated_Sram",
+    "Dedicated_Sram_256KB",
+    "Dedicated_Sram_384KB",
+    "Dedicated_Sram_512KB",
+}
+
+# `[System_Config.*]` sections shipped in that same Arm vela.ini.  Anything
+# else exists only in a vendor config; passing it without `--config` is a hard
+# vela rc=1, not a degradation.
+_VELA_BUILTIN_SYSTEM_CONFIGS = {
+    "Ethos_U55_Deep_Embedded",
+    "Ethos_U55_High_End_Embedded",
+    "Ethos_U65_Embedded",
+    "Ethos_U65_Mid_End",
+    "Ethos_U65_High_End",
+    "Ethos_U65_Client_Server",
+    "Ethos_U85_SYS_Flash_Low",
+    "Ethos_U85_SYS_Flash_High",
+    "Ethos_U85_SYS_DRAM_Low",
+    "Ethos_U85_SYS_DRAM_Mid",
+    "Ethos_U85_SYS_DRAM_High",
+}
+
+
+def _check_soc_vela_memory_profile(soc_files) -> list:
+    """Cross-check `npu_toolchain.vela` against the rest of the SAME SoC spec.
+
+    `--emit build-plan`'s consumer derives vela's `--memory-mode` from the SKU
+    rather than letting vela fall back to `Dedicated_Sram_384KB`, which places
+    the whole working set in DRAM and reports `sram_memory_used = 0.0`.  Zero
+    then satisfies alp-sdk's on-device fit gate against ANY arena
+    (src/backends/inference/alp_model_select.c), so a wrong profile is worse
+    than none.  JSON Schema cannot reach the sibling fields these invariants
+    need, so enforce them here:
+
+      1. every SoC declaring an `ethos-u*` NPU carries the block, and no SoC
+         without one does (vela compiles for nothing else);
+      2. a `Dedicated_Sram*` memory_mode puts the arena in read-writeable
+         non-SRAM, so the SoC must declare a DRAM-class
+         `external_memory_interfaces` entry -- the Alif Ensemble parts declare
+         only OctalSPI/HexSPI + SD/eMMC and must never claim one;
+      3. a scalar `system_config` describes ONE accelerator (on Alif, one core
+         subsystem), so it is legal only on a SoC carrying exactly one
+         distinct Ethos-U `(type, subtype)`;
+      4. a `system_config` outside Arm's built-in set must be flagged
+         `system_config_requires_vendor_config: true` AND name its file, else
+         a consumer would put an unresolvable section on the command line.
+
+    Reading the `source` citations back -- proving the cited lines still state
+    the declared `memory_mode` -- deliberately does NOT live here. Those
+    citations point into `examples/` and `vendors/`, and this script is run
+    against a metadata-ONLY scratch clone by
+    tests/scripts/test_alp_cli_new_som.py's
+    `_clone_metadata_gates`, where those trees do not exist. Making the check
+    tolerate their absence would turn it into a silent skip; it lives in
+    tests/scripts/test_vela_profile_metadata.py instead, which always runs
+    against the real checkout.
+
+    Returns a failure list shaped like `_check_files()`.
+    """
+    failures: list[tuple[Path, list[str]]] = []
+    for path in soc_files:
+        try:
+            doc = strict_json_loads(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        rel = path.relative_to(REPO).as_posix()
+        npus = doc.get("npus") or []
+        ethos = [n for n in npus if str(n.get("type", "")).startswith("ethos-u")]
+        vela = (doc.get("npu_toolchain") or {}).get("vela") or {}
+        msgs: list[str] = []
+
+        # (1) presence is decided by the accelerator the SoC actually carries.
+        if ethos and not vela:
+            msgs.append(
+                "declares an Ethos-U NPU but no npu_toolchain.vela -- a consumer "
+                "would inherit vela's DRAM-backed default profile")
+        if vela and not ethos:
+            msgs.append(
+                "declares npu_toolchain.vela but no ethos-u* NPU -- vela does not "
+                "compile for this accelerator")
+
+        if vela and ethos:
+            mode = vela.get("memory_mode")
+
+            # (2) a DRAM-backed placement needs a DRAM interface on this part.
+            kinds = [str(e.get("kind", ""))
+                     for e in (doc.get("external_memory_interfaces") or [])]
+            has_dram = any("DDR" in k.upper() for k in kinds)
+            if mode in _VELA_DRAM_BACKED_MEMORY_MODES and not has_dram:
+                msgs.append(
+                    f"npu_toolchain.vela.memory_mode={mode!r} places the tensor arena "
+                    f"in read-writeable non-SRAM, but external_memory_interfaces "
+                    f"{kinds} declares no DRAM")
+
+            sysconf = vela.get("system_config")
+            if sysconf is not None:
+                # (3) one System_Config cannot describe several accelerators.
+                identities = {(n.get("type"), n.get("subtype")) for n in ethos}
+                if len(identities) != 1:
+                    msgs.append(
+                        f"npu_toolchain.vela.system_config={sysconf!r} is a single "
+                        f"section name but this SoC carries {len(identities)} distinct "
+                        f"Ethos-U accelerators "
+                        f"{sorted(str(i) for i in identities)} -- a System_Config "
+                        f"describes one accelerator (on Alif, one core subsystem)")
+                # (4) a vendor section is unusable without its file.
+                if sysconf not in _VELA_BUILTIN_SYSTEM_CONFIGS:
+                    if vela.get("system_config_requires_vendor_config") is not True:
+                        msgs.append(
+                            f"npu_toolchain.vela.system_config={sysconf!r} is not an Arm "
+                            f"built-in but system_config_requires_vendor_config is not "
+                            f"true -- a consumer would pass an unresolvable section and "
+                            f"vela would exit 1")
+                    if not vela.get("vendor_config_filename"):
+                        msgs.append(
+                            f"npu_toolchain.vela.system_config={sysconf!r} needs a vendor "
+                            f"config but vendor_config_filename is unset")
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+    return failures
+
+
 def _check_soc_debug_probe_identity(soc_files) -> list:
     """Cross-ref `variants[].debug.jlink_device` keys against `cores[].id`,
     and require the `expect_dpidr`/`jlink_device` preflight PAIR to be whole.
@@ -1247,6 +1380,8 @@ def main() -> int:
     )
     # Semantic cross-ref the schema can't express: npus[].paired_core -> cores[].
     soc_failures += _check_soc_npu_pairing(soc_files)
+    # #1470: npu_toolchain.vela vs npus[] / external_memory_interfaces on the SAME spec.
+    soc_failures += _check_soc_vela_memory_profile(soc_files)
     # Semantic cross-ref the schema can't express: variants[].debug.jlink_device keys -> cores[].
     soc_failures += _check_soc_debug_probe_identity(soc_files)
     # #1295: every Alif Ensemble variant must declare debug.jlink_flash_device (string or null) -- never omit it.
