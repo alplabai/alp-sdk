@@ -49,17 +49,33 @@ name: pr-bootstrap-distro-install
 # The trigger is INTENTIONALLY unfiltered on paths. This gate is meant to be
 # a REQUIRED status check on dev/main, and a path-filtered `pull_request`
 # trigger leaves the required check permanently in the "expected" state on
-# any PR that doesn't touch one of the five paths below -- GitHub then BLOCKS
-# the PR forever (a never-posted required check can't be cleared, not even
-# by --admin). Instead we always run a cheap `detect` job and let the heavy
-# `distro-install` matrix SKIP when none of those paths changed: GitHub
-# counts a skipped required check as passing, so the contract still posts on
-# every PR without a container-matrix boot. Same detect/gate shape as
-# pr-renode-sim-mode.yml -- copy that file's conventions rather than
+# any PR that doesn't touch one of the watched paths below -- GitHub then
+# BLOCKS the PR forever (a never-posted required check can't be cleared, not
+# even by --admin). Instead we always run a cheap `detect` job and let the
+# heavy `distro-install` matrix SKIP when none of those paths changed:
+# GitHub counts a skipped required check as passing, so the contract still
+# posts on every PR without a container-matrix boot. Same detect/gate shape
+# as pr-renode-sim-mode.yml -- copy that file's conventions rather than
 # inventing a variant.
+#
+# `merge_group` -- not `push` or `pull_request` -- is what GitHub raises for
+# a merge-queue entry (`dev` has one: ruleset "dev merge queue"), and
+# pr-twister.yml's own required contexts already document why a required
+# workflow needs this trigger: without it, a queued PR waits forever on
+# checks that can never fire. Added here for the same reason.
+#
+# On a `merge_group` event this job does NOT ask `dorny/paths-filter` to
+# diff against anything -- `detect` below is gated off (`if:
+# github.event_name != 'merge_group'`) rather than trusted to resolve a
+# merge-queue base/head pair correctly, since that behaviour isn't something
+# this repo has verified. `distro-install`'s own `if:` (below) treats
+# `merge_group` as an unconditional RUN instead: the queue is the last gate
+# before `dev`, container-matrix cost there is cheap relative to a silent
+# skip of the job that licenses every package name in the manifest.
 on:
   pull_request:
     branches: [main, dev]
+  merge_group:
   workflow_dispatch:
 
 concurrency:
@@ -67,9 +83,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Cheap path detector -- NOT a required context itself. Always succeeds
-  # fast; its output gates the heavy matrix below.
+  # Cheap path detector -- NOT a required context itself. Gated off on
+  # `merge_group` (see the trigger comment above); always runs fast on
+  # `pull_request` and `workflow_dispatch`. Its output gates the heavy
+  # matrix below.
   detect:
+    if: github.event_name != 'merge_group'
     runs-on: ubuntu-latest
     outputs:
       manifest: ${{ steps.filter.outputs.manifest }}
@@ -83,14 +102,35 @@ jobs:
               - 'metadata/bootstrap.json'
               - 'metadata/schemas/bootstrap-v1.schema.json'
               - 'scripts/bootstrap.sh'
+              - 'scripts/bootstrap.ps1'
+              - 'scripts/alp_cli/doctor.py'
               - 'scripts/check_bootstrap_manifest.py'
               - '.github/workflows/pr-bootstrap-distro-install.yml'
 
   distro-install:
     needs: detect
-    # Skipped (== passing, for branch protection) unless a bootstrap-manifest
-    # path changed or the run was dispatched by hand.
-    if: needs.detect.outputs.manifest == 'true' || github.event_name == 'workflow_dispatch'
+    # Fail CLOSED, not open. The naive `needs.detect.outputs.manifest ==
+    # 'true' || ...` form (this job's first cut) skips -- and a skipped
+    # required check reports as PASSING -- whenever `detect` DOESN'T
+    # succeed, not just when it succeeds and finds no relevant change. That
+    # includes a `dorny/paths-filter` error, a token problem, a bad base
+    # ref, or (as of this revision) `detect` being intentionally gated off
+    # on `merge_group`. Every one of those would silently wave through the
+    # job that licenses every package-name string in the manifest, exactly
+    # when the filter machinery -- not the manifest -- is what's broken.
+    #
+    # `always()` is required here, not decorative: GitHub's default is to
+    # skip a job when a job it `needs` was skipped OR failed, which would
+    # otherwise defeat this entire fail-closed rewrite by skipping
+    # `distro-install` before its own `if:` is even consulted, on both the
+    # `merge_group` case (detect gated off = skipped) and a real
+    # detect failure.
+    #
+    # So: skip ONLY when detect genuinely ran, genuinely succeeded, AND
+    # genuinely found no relevant path change. Anything else -- manual
+    # dispatch, a merge-queue entry, a `detect` non-success, or a real
+    # manifest-path hit -- runs the real job.
+    if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'merge_group' || needs.detect.result != 'success' || needs.detect.outputs.manifest == 'true')
     strategy:
       fail-fast: false
       matrix:
