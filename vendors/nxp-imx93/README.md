@@ -107,6 +107,25 @@ vela --accelerator-config ethos-u65-256 \
      mobilenet_v2_quantised.tflite
 ```
 
+> **Provenance of `--memory-mode Shared_Sram` -- read before citing this.**
+> That flag is **alp-sdk-authored, not sourced from an NXP or eIQ
+> document**: `Shared_Sram` is simply one of the six `[Memory_Mode.*]`
+> sections Arm's own `vela.ini` ships (ethos-u-vela 5.1.0), and it suits a
+> part that pairs 256 KiB of on-die SRAM with LPDDR4/4X
+> (`metadata/socs/nxp/imx9/imx93.json` `external_memory_interfaces`).  It
+> is here because vela's flagless default is worse: measured on
+> ethos-u-vela 5.1.0 against `tests/fixtures/models/tiny_int8.tflite` at
+> `ethos-u65-256`, no flags picks `Ethos_U65_Client_Server` /
+> `Dedicated_Sram_384KB` and reports `sram_memory_used = 0.0` /
+> `dram_memory_used = 0.109375`, while `--memory-mode Shared_Sram` reports
+> `sram_memory_used = 0.03125` / `dram_memory_used = 0.078125`.
+> `metadata/socs/nxp/imx9/imx93.json`'s `npu_toolchain.vela.source` cites
+> the block above, so that citation proves alp-sdk agrees with **itself**
+> -- it is an internal-consistency check, not vendor grounding.  Naming an
+> NXP / eIQ primary document for the i.MX 93 Ethos-U65 memory model is open
+> work; until one is cited, treat this mode as alp-sdk's own default rather
+> than a vendor-stated fact.
+
 `ethos-u65-256` is the i.MX 93's bonded MAC count (vs `ethos-u55-256`
 on AEN-E7 and `ethos-u55-128` on AEN-E3).  A model compiled for one
 variant **does not** run on the other -- the Ethos-U custom op

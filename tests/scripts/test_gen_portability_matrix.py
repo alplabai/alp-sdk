@@ -174,6 +174,20 @@ def test_notes_derive_from_metadata(generated):
     aen = _cell(generated, "E1M-AEN801", "Notes (from metadata)")
     assert "no external DRAM" in aen
     assert "Mbit DRAM" not in aen and "Gbit DRAM" not in aen
+    # ...and the same for flash (memory.flash_mbit: 0 -- MRAM-only).  The tag
+    # shipped on dram_mbit alone, so AEN801's RESOLVED `0` and E1M-NX9101's
+    # OPEN `TBD` rendered identically in this cell, on the figure that decides
+    # storage and MCUboot partitioning.
+    assert "no external flash" in aen
+
+
+def test_resolved_and_open_flash_capacities_render_differently(generated):
+    """`flash_mbit: 0` (AEN, resolved) must not read like `TBD` (NX9101, open)."""
+    aen = _cell(generated, "E1M-AEN801", "Notes (from metadata)")
+    nx = _cell(generated, "E1M-NX9101", "Notes (from metadata)")
+    assert "no external flash" in aen
+    assert "no external flash" not in nx
+    assert aen != nx
 
 
 def test_every_family_sku_has_a_row(generated):

@@ -393,12 +393,12 @@
         },
         "system_config_requires_vendor_config": {
           "type": "boolean",
-          "description": "true when this SoC's tuned System_Config sections live only in a vendor config file alp-sdk does not redistribute. A consumer must then pass `--system-config` ONLY alongside a `--config <that file>`: naming a section vela cannot resolve is a hard rc=1 -- `Section System_Config.<name> not found in Vela config file` -- not a degradation (examples/aen/aen-npu-inference-alif/CMakeLists.txt:85-89)."
+          "description": "true when this SoC's tuned System_Config sections live only in a vendor config file alp-sdk does not redistribute. A consumer must then pass `--system-config` ONLY alongside a `--config <that file>`: naming a section vela cannot resolve is a hard rc=1 -- `Section System_Config.<name> not found in Vela config file` -- not a degradation (examples/aen/aen-npu-inference-alif/CMakeLists.txt:85-89). On its own -- with no sibling `system_config` -- this flag does not make the file usable either; see `vendor_config_filename`."
         },
         "vendor_config_filename": {
           "type": "string",
           "pattern": "^[A-Za-z0-9_.-]+$",
-          "description": "Basename only of the vendor config named above (e.g. \"ensemble_vela.ini\"), so a consumer can tell a customer what to look for. Required whenever `system_config_requires_vendor_config` is true. NEVER a path: where the file lives is environment, not silicon, and an absolute path in committed metadata is a leak."
+          "description": "Basename only of the vendor config named above (e.g. \"ensemble_vela.ini\"), so a consumer can tell a customer what to look for. Required whenever `system_config_requires_vendor_config` is true. NEVER a path: where the file lives is environment, not silicon, and an absolute path in committed metadata is a leak. INFORMATIONAL until this block also carries a `system_config`, and deliberately so: measured on ethos-u-vela 5.1.0, `--config <ini> --memory-mode Sram_Only` with no `--system-config` is rc=1 -- verbatim, `Error: Incorrect argument to CLI option --config=[...]: Specifying a configuration file is not allowed when using a default system configuration`. The only legal way to put this filename on a vela command line is alongside a section name to resolve out of it, and the Alif parts declare none (see `system_config`). So today this field tells a customer which file to obtain; it is not yet a `--config` a consumer can emit."
         },
         "source": {
           "type": "string",

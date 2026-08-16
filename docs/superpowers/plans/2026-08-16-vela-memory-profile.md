@@ -20,11 +20,16 @@ environment, never through `board.yaml`.
 
 `tan model build` currently invokes vela with neither `--system-config` nor
 `--memory-mode` (`python/tan/model/adapters/ethos_u.py:362`, `cmd = ["vela",
-str(source), "--accelerator-config", accel_config, ...]`). vela therefore falls
-back to `Ethos_U85_SYS_DRAM_Mid` / `Dedicated_Sram_384KB` — a DRAM-backed
-profile — and reports the working set in DRAM. `E1M-AEN801` is an Alif Ensemble
-E8: `metadata/socs/alif/ensemble/e8.json`'s `external_memory_interfaces` lists
-only `HexSPI` and `SD/eMMC`. **There is no DRAM on the part.**
+str(source), "--accelerator-config", accel_config, ...]`). At
+`--accelerator-config ethos-u85-256` vela therefore falls back to
+`Ethos_U85_SYS_DRAM_Mid` / `Dedicated_Sram_384KB` — a DRAM-backed profile — and
+reports the working set in DRAM. `E1M-AEN801` is an Alif Ensemble E8:
+`metadata/socs/alif/ensemble/e8.json`'s `external_memory_interfaces` lists only
+`HexSPI` and `SD/eMMC`. **There is no DRAM on the part.**
+
+(That default is the U85's. The same SoM's two U55s take a different flagless
+default and fail differently — see the per-accelerator table below; do not
+carry this paragraph's `system_config` name over to them.)
 
 That produced `req_sram_kib = 0`, which alp-sdk's on-device selector
 (`src/backends/inference/alp_model_select.c:88`,
@@ -35,17 +40,49 @@ target. This plan removes the need to refuse.
 ## Measured facts this plan is built on
 
 Every number below was produced by running `ethos-u-vela 5.1.0` on the committed
-`python/tests/fixtures/models/tiny_int8.tflite` (712 B) at `ethos-u85-256`.
-Re-measure rather than trusting this table if vela's version moves.
+`python/tests/fixtures/models/tiny_int8.tflite` — **712 B, md5
+`07290259e28e1467fa184ef01b71e40a`**, byte-identical to alp-sdk's
+`tests/fixtures/models/tiny_int8.tflite` — at `ethos-u85-256`. Re-measure
+rather than trusting this table if vela's version moves. Pin the fixture by
+hash when you do: row 1 originally read `5.359375`, which is a real vela
+figure for a DIFFERENT committed fixture (`keyword_scrambled_8bit.tflite`,
+29632 B, md5 `4e22b1bbb5f1a0eea728ec15d481ff7e`, same accelerator config) and
+travelled from the changelog into this table before anyone re-ran it.
 
-| Invocation | rc | `sram_memory_used` | `dram_memory_used` | `on_chip_flash_memory_used` |
-|---|---|---|---|---|
-| no profile flags (today) | 0 | `0.0` | `5.359375` | — |
-| `--memory-mode Sram_Only` | 0 | `0.03125` | `0.0` | `0.234375` |
-| `--system-config Ethos_U85_SYS_Flash_High --memory-mode Sram_Only` | 0 | `0.03125` | `0.0` | `0.234375` |
-| `--system-config Ethos_U85_SRAM_Only` (no `--config`) | **1** | — | — | — |
+| Invocation | rc | `sram_memory_used` | `dram_memory_used` | `on_chip_flash_memory_used` | `off_chip_flash_memory_used` |
+|---|---|---|---|---|---|
+| no profile flags (today) | 0 | `0.0` | `0.265625` | `0.0` | `0.0` |
+| `--memory-mode Sram_Only` | 0 | `0.03125` | `0.0` | `0.234375` | `0.0` |
+| `--system-config Ethos_U85_SYS_Flash_High --memory-mode Sram_Only` | 0 | `0.03125` | `0.0` | `0.234375` | `0.0` |
+| `--system-config Ethos_U85_SRAM_Only` (no `--config`) | **1** | — | — | — | — |
 
-The last row fails with, verbatim:
+Every other cell above re-measured clean; only row 1's `dram_memory_used` was
+wrong (and its `on_chip_flash_memory_used`, which is `0.0`, not unreported).
+
+**The flagless default is not the same on every accelerator, so do not
+generalise row 1 beyond the U85.** Same fixture, same vela, no flags:
+
+| `--accelerator-config` | flagless `system_config` / `memory_mode` | `sram` | `dram` | `on_chip_flash` | `off_chip_flash` |
+|---|---|---|---|---|---|
+| `ethos-u85-256` | `Ethos_U85_SYS_DRAM_Mid` / `Dedicated_Sram_384KB` | `0.0` | `0.265625` | `0.0` | `0.0` |
+| `ethos-u65-256` | `Ethos_U65_Client_Server` / `Dedicated_Sram_384KB` | `0.0` | `0.109375` | `0.0` | `0.0` |
+| `ethos-u55-256` | `Ethos_U55_High_End_Embedded` / `Shared_Sram` | `0.03125` | `0.0` | `0.0` | `0.078125` |
+| `ethos-u55-128` | `Ethos_U55_High_End_Embedded` / `Shared_Sram` | `0.03125` | `0.0` | `0.0` | `0.078125` |
+
+Only the U85 and U65 defaults are DRAM-backed and report the `sram = 0.0` this
+plan exists to fix. The U55 default reports a non-zero SRAM figure already; its
+hazard is that the weights land in `off_chip_flash` — the OSPI0 NOR, which no
+AEN SKU populates (`assembled: false` on every preset). With the declared mode:
+
+| `--accelerator-config` | declared `memory_mode` | `sram` | `dram` | `on_chip_flash` | `off_chip_flash` |
+|---|---|---|---|---|---|
+| `ethos-u85-256` | `Sram_Only` | `0.03125` | `0.0` | `0.234375` | `0.0` |
+| `ethos-u55-256` | `Sram_Only` | `0.03125` | `0.0` | `0.078125` | `0.0` |
+| `ethos-u55-128` | `Sram_Only` | `0.03125` | `0.0` | `0.078125` | `0.0` |
+| `ethos-u65-256` | `Shared_Sram` | `0.03125` | `0.078125` | `0.0` | `0.0` |
+
+The rc=1 row of the first table — `--system-config Ethos_U85_SRAM_Only` with no
+`--config` — fails with, verbatim:
 
 ```
 ethosu.vela.errors.CliOptionError: 'Error: Incorrect argument to CLI option --system-config=Ethos_U85_SRAM_Only: Section System_Config.Ethos_U85_SRAM_Only not found in Vela config file'
@@ -68,9 +105,11 @@ ethosu.vela.errors.CliOptionError: 'Error: Incorrect argument to CLI option --sy
    `Ethos_U85_SYS_DRAM_Mid`, `Ethos_U85_SYS_DRAM_High`. `Ethos_U85_SRAM_Only`
    and `RTSS_HE_SRAM_Only` are NOT among them.
 
-Also measured: under `--memory-mode Sram_Only`, `arena_cache_size = 1073741824.0`
-(1 GiB). It is a configured cache capacity, never a model's arena — which is why
-tan-cli#789 stopped reading it.
+Also measured (re-measured, and both figures hold): under `--memory-mode
+Sram_Only` at `ethos-u85-256`, `arena_cache_size = 1073741824.0` (1 GiB); with
+no flags at the same config it is `384.0`, tracking the `Dedicated_Sram_384KB`
+default rather than the model. Either way it is a configured cache capacity,
+never a model's arena — which is why tan-cli#789 stopped reading it.
 
 ### What alp-sdk already publishes (no invention required)
 
@@ -78,7 +117,15 @@ tan-cli#789 stopped reading it.
 |---|---|---|---|---|
 | Alif Ensemble, U85 | `Ethos_U85_SRAM_Only` | `Sram_Only` | **yes** | `examples/aen/aen-npu-inference-alp/CMakeLists.txt:42-43` |
 | Alif Ensemble, U55 | `RTSS_HE_SRAM_Only` | `Sram_Only` | **yes** | `examples/aen/aen-npu-inference-alp-u55/CMakeLists.txt:39-40` |
-| NXP i.MX 93, U65 | *(none given)* | `Shared_Sram` | **no** | `vendors/nxp-imx93/README.md` |
+| NXP i.MX 93, U65 | *(none given)* | `Shared_Sram` | **no** | `vendors/nxp-imx93/README.md` ⚠ |
+
+⚠ The two Alif rows cite build files that pass the flag to a real toolchain.
+The U65 row cites an **alp-sdk-authored** page, which derives `Shared_Sram`
+from no named NXP or eIQ document — so it is alp-sdk's own default, not a
+vendor-stated fact, and a citation test over it proves only that alp-sdk agrees
+with itself. That page now carries a provenance note saying so. Grounding the
+U65 mode in an NXP primary document is open work; do not upgrade this row's
+confidence without one.
 
 `examples/aen/aen-npu-inference-alif/CMakeLists.txt:85-89` states the constraint
 in the repo's own words: pass `--system-config`/`--memory-mode` *"ONLY when that

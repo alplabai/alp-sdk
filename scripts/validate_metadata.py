@@ -325,6 +325,180 @@ def _check_som_slot0_address_resolved(som_files) -> list:
     return failures
 
 
+def _population_state(entry: dict) -> str:
+    """Project an `assembled:` key onto `fitted` / `optional` / `absent`.
+
+    The schema's own default is authoritative: *"Population status: true
+    (default), false (DNI), or \"optional\" (assembled per BOM variant)"* --
+    an entry with no `assembled` key describes a part that IS fitted, so a
+    missing key must read `fitted`, never "unknown".
+    """
+    raw = entry.get("assembled", True)
+    if raw is False:
+        return "absent"
+    if raw == "optional":
+        return "optional"
+    return "fitted"
+
+
+def _memory_population_msgs(
+    figure_key: str,
+    figure,
+    parts: "list[tuple[str, dict]]",
+) -> "list[str]":
+    """Bind ONE `memory.<figure_key>` against the population of its parts.
+
+    `parts` is `[(dotted_path, entry)]` -- every `on_module` part whose
+    population decides this figure.  Returns the failure messages, empty
+    when the figure and the population agree.
+    """
+    if not parts:
+        return []
+
+    # `True`/`False` are `int` subclasses in Python; the schema forbids a
+    # boolean here, but never let one read as the integer 0/1.
+    is_int = isinstance(figure, int) and not isinstance(figure, bool)
+    fitted = [(n, e) for n, e in parts if _population_state(e) == "fitted"]
+    optional = [(n, e) for n, e in parts if _population_state(e) == "optional"]
+    populating = fitted + optional
+    names = ", ".join(n for n, _ in parts)
+
+    if not populating:
+        # Every declared part is `assembled: false` -- the population
+        # question is ANSWERED, and the answer is "none".  That is `0`.
+        # `TBD` would re-open a question the preset just closed, and any
+        # positive figure claims memory the module demonstrably has not
+        # got (which is exactly the 32 MiB #915 deleted).
+        if not (is_int and figure == 0):
+            return [
+                f"memory.{figure_key}={figure!r} but every part that could "
+                f"carry it is `assembled: false` ({names}) -- a resolved "
+                f"'populates none' is `0`, never TBD and never a capacity"
+            ]
+        return []
+
+    populating_names = ", ".join(n for n, _ in populating)
+    if is_int and figure == 0:
+        # `0` means "no such part on any current BOM variant"; at least one
+        # part says otherwise.  This is the mutation that used to be FULLY
+        # GREEN: `hyperram.assembled: true` next to `dram_mbit: 0`.
+        # Name each offender WITH its own state -- a mixed fitted/optional
+        # set must not be reported under one blanket `assembled:` value.
+        stated = ", ".join(
+            f"{n} (`assembled: {'optional' if _population_state(e) == 'optional' else 'true'}`)"
+            for n, e in populating)
+        return [
+            f"memory.{figure_key}=0 claims the module populates no such "
+            f"part, but {stated} is populated"
+        ]
+
+    if optional:
+        # BOM-variant dependent: the capacity of the variant that DOES
+        # fit the part is a maintainer call, so only the `0` contradiction
+        # above is decidable here.
+        return []
+
+    caps = [e.get("capacity_mbit") for _, e in fitted]
+    if not all(isinstance(c, int) and not isinstance(c, bool) for c in caps):
+        # A fitted part whose own capacity is TBD leaves the module figure
+        # genuinely underivable -- nothing to cross-check against.
+        return []
+
+    expected = sum(int(c) for c in caps)
+    if figure != expected:
+        return [
+            f"memory.{figure_key}={figure!r} does not match the parts it is "
+            f"derived from: {populating_names} "
+            f"{'sum to' if len(fitted) > 1 else 'declares'} "
+            f"capacity_mbit={expected}"
+        ]
+    return []
+
+
+def _check_som_memory_population(som_files) -> list:
+    """Bind `memory:` to the `on_module` population facts it is DERIVED from.
+
+    Every AEN preset carries a comment stating the derivation
+    (`metadata/e1m_modules/E1M-AEN801.yaml`: *"dram_mbit  <- 0:
+    on_module.hyperram is `assembled: false`"*), and until this check
+    landed a comment was the whole of the enforcement.  Proven by
+    mutation: setting `hyperram.assembled: true` while leaving
+    `dram_mbit: 0` was FULLY GREEN -- `validate_metadata.py` rc=0 AND
+    `pytest tests/scripts/` rc=0 -- and `dram_mbit: 128` against an
+    unpopulated part left only one hardcoded string assertion red.  A
+    derivation nothing binds is not a derivation; it is a comment that
+    happens to be true today.
+
+    The rules, per figure:
+
+      - `memory.dram_mbit` is decided by `on_module.hyperram`;
+        `memory.flash_mbit` by every `on_module.ospi_memories[]` entry.
+        A preset that declares neither block (V2N/V2M's LPDDR4X + eMMC,
+        E1M-NX9101's open capacities) states no population fact here and
+        is skipped -- there is nothing to bind to, and inventing one
+        would be inventing a hardware value.
+      - Every relevant part `assembled: false` => the figure MUST be `0`.
+        This is the `0`-vs-`TBD` distinction #915 established: `0` is a
+        RESOLVED fact ("populates none"), `TBD` is an open question
+        ("nobody has written the capacity down yet", E1M-NX9101's state).
+        A preset that has answered the question may not then spell the
+        answer `TBD`, and may not claim a capacity either.
+      - Any relevant part populated (`assembled: true`, or the key
+        absent -- the schema's own default) => the figure MUST NOT be
+        `0`, and when every fitted part declares an integer
+        `capacity_mbit` it must equal their sum.
+      - `assembled: "optional"` is BOM-variant dependent, so only the `0`
+        contradiction is decidable; the exact capacity is not.
+
+    JSON Schema cannot reach across `on_module` into `memory:` (nor sum
+    a sibling object's values), so this is the only layer that can hold
+    the derivation.  Returns a failure list shaped like `_check_files()`.
+    """
+    failures: list[tuple[str, list[str]]] = []
+    for path in som_files:
+        rel = path.relative_to(REPO).as_posix()
+        try:
+            doc = strict_yaml_load(path.read_text(encoding="utf-8"), source=path)
+        except Exception:
+            continue  # parse errors already reported by the schema pass
+        if not isinstance(doc, dict):
+            continue
+        memory = doc.get("memory")
+        if not isinstance(memory, dict):
+            continue
+        on_module = doc.get("on_module") or {}
+        if not isinstance(on_module, dict):
+            continue
+
+        msgs: list[str] = []
+        bound: list[str] = []
+
+        hyperram = on_module.get("hyperram")
+        if isinstance(hyperram, dict):
+            bound.append("dram_mbit <- on_module.hyperram")
+            msgs += _memory_population_msgs(
+                "dram_mbit", memory.get("dram_mbit"),
+                [("on_module.hyperram", hyperram)])
+
+        ospi = on_module.get("ospi_memories")
+        if isinstance(ospi, dict) and ospi:
+            entries = [(f"on_module.ospi_memories.{k}", v)
+                       for k, v in sorted(ospi.items()) if isinstance(v, dict)]
+            if entries:
+                bound.append("flash_mbit <- on_module.ospi_memories")
+                msgs += _memory_population_msgs(
+                    "flash_mbit", memory.get("flash_mbit"), entries)
+
+        if msgs:
+            print(f"FAIL {rel}")
+            for m in msgs:
+                print(f"  · {m}")
+            failures.append((rel, msgs))
+        elif bound:
+            print(f"OK   {rel}  ({'; '.join(bound)})")
+    return failures
+
+
 def _check_silicon_kconfig() -> list:
     """Validate the silicon->Kconfig registry and its socs/ correspondence.
 
@@ -1538,6 +1712,12 @@ def main() -> int:
         print()
         slot0_address_failures = _check_som_slot0_address_resolved(som_files)
 
+    # SoM `memory:` <-> `on_module` population cross-check.
+    memory_population_failures: list = []
+    if som_files:
+        print()
+        memory_population_failures = _check_som_memory_population(som_files)
+
     # Silicon -> Kconfig registry + socs/ correspondence.
     print()
     silicon_kconfig_failures = _check_silicon_kconfig()
@@ -1557,6 +1737,7 @@ def main() -> int:
                       + len(restriction_failures)
                       + len(instance_uniqueness_failures)
                       + len(slot0_address_failures)
+                      + len(memory_population_failures)
                       + len(silicon_kconfig_failures)
                       + len(peripheral_kconfig_failures)
                       + len(tier_a_library_ci_failures))
