@@ -49,7 +49,7 @@
     "vela": {
       "memory_mode": "Shared_Sram",
       "system_config_requires_vendor_config": false,
-      "source": "vendors/nxp-imx93/README.md:103-108"
+      "source": "vendors/nxp-imx93/README.md:106"
     }
   },
   "soc_ram_kb": 256,

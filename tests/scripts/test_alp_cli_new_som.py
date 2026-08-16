@@ -404,3 +404,68 @@ def test_new_som_flags_out_of_pattern_sku_as_checklist_step(tmp_path: Path):
     errors = [e for e in _validate(doc, SOM_SCHEMA)
               if list(e.absolute_path) != ["sku"]]
     assert not errors, [e.message for e in errors]
+
+
+def _scaffold_alif(tmp_path: Path, sku="E1M-AEN899"):
+    result = CliRunner().invoke(
+        cli,
+        ["new-som", "--sku", sku, "--soc-ref", "alif:ensemble:e8",
+         "--family", "alif-ensemble", "--output-root", str(tmp_path)],
+    )
+    assert result.exit_code == 0, result.output
+    return tmp_path / "metadata" / "e1m_modules" / f"{sku}.yaml"
+
+
+def test_new_som_scaffolds_the_ospi_population_blocks_on_an_alif_ensemble_part(
+        tmp_path: Path):
+    """An Ensemble die's only external memory is the OSPI/HexSPI octal bus, so
+    `validate_metadata.py`'s `_check_som_memory_population` REQUIRES
+    `on_module.hyperram` + `on_module.ospi_memories` there.  A scaffold that
+    omitted them would hand the porter a preset that fails the gate the
+    scaffold's own docs promise it passes ("mergeable as-is",
+    docs/porting-new-som.md)."""
+    doc = yaml.safe_load(_scaffold_alif(tmp_path).read_text(encoding="utf-8"))
+    on_module = doc["on_module"]
+    assert isinstance(on_module.get("hyperram"), dict)
+    assert isinstance(on_module.get("ospi_memories"), dict)
+    assert on_module["ospi_memories"]
+    # `optional` is the OPEN state ("assembled per BOM variant").  The scaffold
+    # must not guess `false` -- that is the RESOLVED answer six shipping AEN
+    # SKUs happen to give, and inventing it for a seventh is inventing a
+    # hardware value.
+    assert on_module["hyperram"]["assembled"] == "optional"
+    assert on_module["ospi_memories"]["ospi0"]["assembled"] == "optional"
+    assert doc["memory"]["dram_mbit"] == "TBD"
+    assert doc["memory"]["flash_mbit"] == "TBD"
+
+
+def test_new_som_alif_scaffold_passes_the_memory_population_check(tmp_path: Path):
+    """Run the real check against the real scaffold output, rather than
+    asserting the shape and hoping."""
+    import importlib.util
+
+    src = _scaffold_alif(tmp_path)
+    staged = REPO / "metadata" / "e1m_modules" / ".test-new-som-alif.yaml"
+    staged.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "vm_new_som", REPO / "scripts/validate_metadata.py")
+        vm = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(vm)
+        assert not vm._check_som_memory_population([staged])
+    finally:
+        staged.unlink(missing_ok=True)
+
+
+def test_new_som_omits_the_ospi_blocks_on_a_non_ensemble_part(tmp_path: Path):
+    """The blocks are an Ensemble fact, not a universal one -- emitting them
+    on an i.MX 9 scaffold would be inventing an OSPI bus the porter never
+    said the module has."""
+    result = _run(tmp_path)
+    assert result.exit_code == 0, result.output
+    doc = yaml.safe_load(
+        (tmp_path / "metadata" / "e1m_modules" / "E1M-NX9555.yaml")
+        .read_text(encoding="utf-8")
+    )
+    assert "hyperram" not in doc["on_module"]
+    assert "ospi_memories" not in doc["on_module"]

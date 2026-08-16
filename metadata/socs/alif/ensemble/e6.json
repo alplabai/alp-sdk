@@ -137,7 +137,7 @@
       "memory_mode": "Sram_Only",
       "system_config_requires_vendor_config": true,
       "vendor_config_filename": "ensemble_vela.ini",
-      "source": "examples/aen/aen-npu-inference-alp/CMakeLists.txt:42-43; examples/aen/aen-npu-inference-alp-u55/CMakeLists.txt:39-40"
+      "source": "examples/aen/aen-npu-inference-alp/CMakeLists.txt:43; examples/aen/aen-npu-inference-alp-u55/CMakeLists.txt:40"
     }
   },
   "soc_ram_kb": 9984,

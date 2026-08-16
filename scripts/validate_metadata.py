@@ -325,6 +325,16 @@ def _check_som_slot0_address_resolved(som_files) -> list:
     return failures
 
 
+#: `silicon:` refs on which `on_module.hyperram` + `on_module.ospi_memories`
+#: are MANDATORY, not merely bindable-if-present.  Matched on the ref rather
+#: than a SKU allow-list so a future E1M-AEN901 is covered the day it lands.
+#: The Alif Ensemble die's only external memory interface is the OSPI/HexSPI
+#: octal bus (`metadata/socs/alif/ensemble/e8.json` `external_memory_interfaces`
+#: lists HexSPI + SD/eMMC and no DRAM), so on this family those two blocks are
+#: not one possible source for `memory:` -- they are its whole source.
+_ALIF_ENSEMBLE_SILICON_PREFIX = "alif:ensemble:"
+
+
 def _population_state(entry: dict) -> str:
     """Project an `assembled:` key onto `fitted` / `optional` / `absent`.
 
@@ -436,7 +446,26 @@ def _check_som_memory_population(som_files) -> list:
         A preset that declares neither block (V2N/V2M's LPDDR4X + eMMC,
         E1M-NX9101's open capacities) states no population fact here and
         is skipped -- there is nothing to bind to, and inventing one
-        would be inventing a hardware value.
+        would be inventing a hardware value.  A skipped preset prints an
+        explicit `SKIP <rel> (nothing bound ...)` line, so "this file was
+        not cross-checked" is a thing you can READ in the gate's output
+        rather than an absence you have to notice.  The first version of
+        this check printed nothing at all for an unbound preset.
+      - EXCEPT on an Alif Ensemble part (`silicon: alif:ensemble:*`),
+        where both blocks are REQUIRED.  Skipping-when-absent is the
+        right default for a family whose external memory the SDK has no
+        model of, but on Ensemble the OSPI/HexSPI octal bus is the ONLY
+        external memory interface the die has -- `on_module.hyperram`
+        and `on_module.ospi_memories` are not one possible source for
+        `memory:`, they are its whole source.  Omitting them there does
+        not leave the question open, it DELETES the fact this check
+        binds to: measured, `_check_som_memory_population([synthetic])`
+        returned `[]` for an AEN preset carrying `dram_mbit: 256` with
+        no `on_module` memory blocks at all, i.e. a NEW AEN SKU could
+        restate the exact 32-MiB-of-HyperRAM claim #915 had just deleted
+        and ship it at rc=0.  Derived from the `silicon:` ref rather
+        than a SKU allow-list, so an E1M-AEN901 added tomorrow is
+        covered the day it lands.
       - Every relevant part `assembled: false` => the figure MUST be `0`.
         This is the `0`-vs-`TBD` distinction #915 established: `0` is a
         RESOLVED fact ("populates none"), `TBD` is an open question
@@ -465,22 +494,44 @@ def _check_som_memory_population(som_files) -> list:
             continue
         memory = doc.get("memory")
         if not isinstance(memory, dict):
-            continue
-        on_module = doc.get("on_module") or {}
+            memory = {}
+        on_module = doc.get("on_module")
         if not isinstance(on_module, dict):
-            continue
+            on_module = {}
 
         msgs: list[str] = []
         bound: list[str] = []
 
         hyperram = on_module.get("hyperram")
+        ospi = on_module.get("ospi_memories")
+
+        # An Ensemble part's ONLY external memory sits on the OSPI/HexSPI
+        # octal bus, so declaring the blocks is not optional there: without
+        # them `memory:` is unbindable and can claim anything at rc=0.
+        silicon = doc.get("silicon")
+        if isinstance(silicon, str) and \
+                silicon.startswith(_ALIF_ENSEMBLE_SILICON_PREFIX):
+            for key, block, figure in (
+                    ("hyperram", hyperram, "dram_mbit"),
+                    ("ospi_memories", ospi, "flash_mbit")):
+                if not isinstance(block, dict) or not block:
+                    msgs.append(
+                        f"silicon={silicon!r} is an Alif Ensemble part, whose "
+                        f"only external memory sits on the OSPI/HexSPI octal "
+                        f"bus, so `memory.{figure}` is DERIVED from "
+                        f"`on_module.{key}` -- but that block is missing or "
+                        f"empty. Omitting it does not leave the question open, "
+                        f"it deletes the fact this check binds `memory.{figure}"
+                        f"` to. Declare the part with `assembled:` (see "
+                        f"metadata/e1m_modules/E1M-AEN801.yaml), `assembled: "
+                        f"false` if the SKU populates none")
+
         if isinstance(hyperram, dict):
             bound.append("dram_mbit <- on_module.hyperram")
             msgs += _memory_population_msgs(
                 "dram_mbit", memory.get("dram_mbit"),
                 [("on_module.hyperram", hyperram)])
 
-        ospi = on_module.get("ospi_memories")
         if isinstance(ospi, dict) and ospi:
             entries = [(f"on_module.ospi_memories.{k}", v)
                        for k, v in sorted(ospi.items()) if isinstance(v, dict)]
@@ -496,6 +547,11 @@ def _check_som_memory_population(som_files) -> list:
             failures.append((rel, msgs))
         elif bound:
             print(f"OK   {rel}  ({'; '.join(bound)})")
+        else:
+            # Printed, not omitted: an unbound preset that produced NO line
+            # was indistinguishable from one this loop never reached.
+            print(f"SKIP {rel}  (nothing bound -- declares neither "
+                  f"on_module.hyperram nor on_module.ospi_memories)")
     return failures
 
 

@@ -6,7 +6,7 @@
 # M55-HE), via the bench RAM-run + RAM-console flow.
 #
 # Plain prj.conf app (no alp_project.py board.yaml emit). HW-BLOCKED,
-# BUILD-ONLY this batch: no octal-NOR/HyperBus part is populated, so this
+# BUILD-ONLY: no octal-NOR/HyperBus part is populated on ANY AEN SKU, so this
 # proves the ospi0 node BINDS + alif_hal_ospi_initialize() compiles, links,
 # and the register file reads back live -- not a live XiP read (XiP setup is
 # a deliberate SKIP: OSPI_XIP_SER does not exist on AE822). See src/main.c +

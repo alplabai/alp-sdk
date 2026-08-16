@@ -206,3 +206,13 @@ def test_notes_for_is_pure_metadata_projection():
     # same -- collapsing both to "" is what let E1M-AEN801 read as though its
     # capacity were merely unstated rather than known to be nil.
     assert gpm.notes_for({"memory": {"dram_mbit": 0}}) == "no external DRAM"
+    # Pinned at unit level for BOTH figures, symmetrically.  `flash_mbit`'s
+    # 0-vs-TBD distinction was covered only through the rendered-table
+    # fixtures, so the rule this function actually implements was asserted
+    # once for dram and never for flash -- and flash is the figure that
+    # decides storage and MCUboot partitioning.
+    assert gpm.notes_for({"memory": {"flash_mbit": "TBD"}}) == ""
+    assert gpm.notes_for({"memory": {"flash_mbit": 0}}) == "no external flash"
+    # A POSITIVE flash_mbit stays untagged, unlike dram: printing eMMC
+    # densities is an editorial addition, not a distinction being collapsed.
+    assert gpm.notes_for({"memory": {"flash_mbit": 65536}}) == ""

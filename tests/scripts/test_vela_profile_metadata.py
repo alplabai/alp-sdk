@@ -217,30 +217,57 @@ def test_a_scalar_system_config_is_only_declared_on_a_single_accelerator_soc():
 
 
 def test_every_vela_profile_cites_a_source_that_states_its_memory_mode():
-    # Grounding, not decoration: the cited line range must actually contain
-    # the memory_mode string. A stale or off-by-one citation fails here rather
-    # than silently outliving the fact it was supposed to prove.  Checked per
-    # citation, never over their union: a SoC that cites two files would
-    # otherwise let a live citation mask a dead one.
+    # Grounding, not decoration: the FIRST cited line must state the
+    # memory_mode, and no other line in the file may state it the same way.
+    #
+    # "the cited RANGE contains the string" was too weak twice over, and both
+    # holes were measured:
+    #   * a 1-line shift left the needle inside the window, so the drift the
+    #     check exists to catch drifted right past it -- widest on
+    #     `vendors/nxp-imx93/README.md:103-108`, a 6-line window;
+    #   * that same README then grew a provenance note whose whole job is to
+    #     say the citation proves nothing about NXP -- and the note itself
+    #     contains `Shared_Sram`, so sliding the window onto the DISCLAIMER
+    #     kept the check green. A disclaimer that satisfies the check it
+    #     disclaims is worse than no note.
+    #
+    # Anchoring on the first line kills the shift; requiring that line's text
+    # to be unique in the file kills the slide, wherever the prose lives --
+    # the only line that can satisfy the check is the one true line, so
+    # moving it moves the citation off it and the assertion reddens.
+    #
+    # Checked per citation, never over their union: a SoC that cites two
+    # files would otherwise let a live citation mask a dead one.
     for path, spec in _socs_with_ethos_u():
         vela = _vela(spec)
         source = vela.get("source")
         assert source, f"{_rel(path)} declares npu_toolchain.vela with no source"
         for citation in source.split("; "):
             rel, _, span = citation.rpartition(":")
-            start, _, end = span.partition("-")
+            start_s, _, end_s = span.partition("-")
+            start, end = int(start_s), int(end_s or start_s)
             cited = _ROOT / rel
             assert cited.is_file(), (
                 f"{_rel(path)} cites {citation!r} but {rel} does not exist"
             )
             lines = cited.read_text(encoding="utf-8").splitlines()
-            assert 1 <= int(start) <= int(end) <= len(lines), (
+            assert 1 <= start <= end <= len(lines), (
                 f"{_rel(path)} cites {citation!r} but {rel} has {len(lines)} lines"
             )
-            quoted = lines[int(start) - 1:int(end)]
-            assert any(vela["memory_mode"] in line for line in quoted), (
-                f"{_rel(path)} declares memory_mode {vela['memory_mode']!r} but no line "
-                f"in cited range {citation!r} says so."
+            anchor = lines[start - 1]
+            assert vela["memory_mode"] in anchor, (
+                f"{_rel(path)} declares memory_mode {vela['memory_mode']!r} but the "
+                f"FIRST line of the cited range {citation!r} does not say so: "
+                f"{anchor!r}. Cite the line that states the mode -- a range that "
+                f"merely contains it somewhere tolerates the shift this checks for."
+            )
+            twins = [i + 1 for i, ln in enumerate(lines)
+                     if ln.strip() == anchor.strip()]
+            assert twins == [start], (
+                f"{_rel(path)} cites {citation!r}, but {rel} carries that exact "
+                f"line at {twins}. A duplicated anchor lets a shift slide an "
+                f"identical line onto the cited number and keep this green; "
+                f"cite a line whose text appears once."
             )
 
 

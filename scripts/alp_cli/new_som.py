@@ -281,6 +281,33 @@ def _render_preset(
     a("  #     bus_master: TBD                        # fact (schematic).  Chip")
     a("  #     devices:                               # slugs + 7-bit addresses come")
     a('  #       - { chip: <slug>, role: <role>, address_7bit: "TBD" }')
+    if f"{vendor_slug}:{family_slug}:" == "alif:ensemble:":
+        # NOT optional on this family, and not decoration: the Ensemble die's
+        # only external memory interface is the OSPI/HexSPI octal bus, so
+        # `memory.dram_mbit` / `.flash_mbit` are DERIVED from these two blocks
+        # and validate_metadata.py's _check_som_memory_population refuses a
+        # preset that omits either.  Emitting them keeps the scaffold's
+        # "mergeable as-is" promise (docs/porting-new-som.md) intact.
+        # `assembled: optional` is the honest OPEN state -- "assembled per BOM
+        # variant" -- not a resolved fact; every shipping AEN SKU resolves to
+        # `false`, but the scaffold must not guess which way a new one goes.
+        a("  # REQUIRED on an alif:ensemble:* part: the OSPI/HexSPI octal bus is")
+        a("  # this die's only external memory, so `memory:` below is DERIVED")
+        a("  # from these two blocks and validate_metadata.py refuses a preset")
+        a("  # that omits either.  Resolve `assembled:` from the BOM -- `false`")
+        a("  # when the SKU populates none (then the matching `memory:` figure")
+        a("  # MUST read 0, never TBD), `true` when it does.")
+        a("  ospi_memories:")
+        a("    ospi0:")
+        a("      chip:           TBD                    # NOR flash MPN (BOM)")
+        a("      assembled:      optional               # resolve from the BOM")
+        a("      capacity_mbit:  TBD")
+        a("      role:           app_storage")
+        a("  hyperram:")
+        a("    chip:           TBD                      # HyperRAM MPN (BOM)")
+        a("    assembled:      optional                 # resolve from the BOM")
+        a("    capacity_mbit:  TBD")
+        a("    interface:      ospi0")
     a("")
     a("# Off-SoC module memory in the canonical cross-family shape.")
     a("# Authoritative source: the module BOM (DRAM + flash parts).")

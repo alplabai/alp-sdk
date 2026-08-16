@@ -229,6 +229,183 @@ def test_skips_a_preset_with_no_memory_block():
     assert not _check("mem-no-memory-block", "sku: E1M-TST001\n")
 
 
+def test_an_unbound_preset_prints_an_explicit_skip_line(capsys):
+    """A skip that prints NOTHING is indistinguishable from a file the loop
+    never reached.  Measured at d3ea9c8f: an out-of-scope preset produced no
+    line at all from this check, so "not cross-checked" was an absence you
+    had to notice rather than a fact you could read."""
+    vm = _load_vm()
+    p = _write_fixture(
+        "mem-skip-line",
+        "silicon: renesas:rzv2n:n44\n"
+        "on_module:\n"
+        "  silicon:              renesas:rzv2n:n44\n"
+        "memory:\n"
+        "  dram_mbit:            32768\n"
+        "  flash_mbit:           32768\n",
+    )
+    try:
+        assert not vm._check_som_memory_population([p])
+    finally:
+        p.unlink(missing_ok=True)
+    out = capsys.readouterr().out
+    assert "SKIP " in out
+    assert ".test-mem-skip-line.yaml" in out
+    assert "nothing bound" in out
+
+
+def test_a_bound_preset_prints_ok_rather_than_skip(capsys):
+    vm = _load_vm()
+    p = _write_fixture("mem-ok-line", _hyperram("false", "0"))
+    try:
+        assert not vm._check_som_memory_population([p])
+    finally:
+        p.unlink(missing_ok=True)
+    out = capsys.readouterr().out
+    assert "OK   " in out
+    assert "dram_mbit <- on_module.hyperram" in out
+    assert "SKIP " not in out
+
+
+# --- ...but an Alif Ensemble preset may NOT reach that skip ------------
+#
+# Skipping-when-absent is right for a family whose external memory the SDK
+# has no model of, and WRONG for one where these two blocks are the whole
+# model.  Measured at d3ea9c8f: deleting both blocks from E1M-AEN801.yaml
+# and restating `dram_mbit: 256` / `flash_mbit: 256` -- the exact 32-MiB
+# claim #915 had just deleted -- left `validate_metadata.py` at rc=0 with
+# NO line printed for that preset.  A new AEN SKU could have shipped the
+# retracted claim invisibly.
+
+_ALIF_NO_BLOCKS = (
+    "sku: E1M-AEN801\n"
+    "silicon: alif:ensemble:e8\n"
+    "on_module:\n"
+    "  silicon:              alif:ensemble:e8\n"
+    "memory:\n"
+    "  dram_mbit:            256\n"
+    "  flash_mbit:           256\n"
+)
+
+
+def test_an_alif_ensemble_preset_may_not_omit_the_population_blocks():
+    failures = _check("mem-alif-no-blocks", _ALIF_NO_BLOCKS)
+    assert failures
+    msgs = failures[0][1]
+    assert len(msgs) == 2
+    joined = "\n".join(msgs)
+    assert "on_module.hyperram" in joined
+    assert "on_module.ospi_memories" in joined
+    assert "memory.dram_mbit" in joined
+    assert "memory.flash_mbit" in joined
+    assert "is an Alif Ensemble part" in joined
+
+
+@pytest.mark.parametrize("present,missing", [
+    ("hyperram", "ospi_memories"),
+    ("ospi_memories", "hyperram"),
+])
+def test_an_alif_ensemble_preset_must_declare_both_blocks(present, missing):
+    """Declaring one and omitting the other must not buy a pass on the
+    omitted figure."""
+    blocks = {
+        "hyperram": (
+            "  hyperram:\n"
+            "    chip:           W958D8NBYA5I\n"
+            "    assembled:      false\n"
+            "    capacity_mbit:  256\n"
+        ),
+        "ospi_memories": (
+            "  ospi_memories:\n"
+            "    ospi0:\n"
+            "      chip:           MX25UM25645GXDI00\n"
+            "      assembled:      false\n"
+            "      capacity_mbit:  256\n"
+            "      role:           app_storage\n"
+        ),
+    }
+    body = (
+        "sku: E1M-AEN801\n"
+        "silicon: alif:ensemble:e8\n"
+        "on_module:\n"
+        + blocks[present] +
+        "memory:\n"
+        "  dram_mbit:            0\n"
+        "  flash_mbit:           0\n"
+    )
+    failures = _check(f"mem-alif-only-{present}", body)
+    assert failures
+    msgs = failures[0][1]
+    assert len(msgs) == 1
+    assert f"on_module.{missing}" in msgs[0]
+
+
+def test_an_empty_ospi_memories_block_does_not_satisfy_the_requirement():
+    """`ospi_memories: {}` binds nothing, so it must not read as a
+    declaration -- an empty block is the same evasion with extra keystrokes."""
+    body = (
+        "sku: E1M-AEN801\n"
+        "silicon: alif:ensemble:e8\n"
+        "on_module:\n"
+        "  hyperram:\n"
+        "    chip:           W958D8NBYA5I\n"
+        "    assembled:      false\n"
+        "    capacity_mbit:  256\n"
+        "  ospi_memories:    {}\n"
+        "memory:\n"
+        "  dram_mbit:            0\n"
+        "  flash_mbit:           0\n"
+    )
+    failures = _check("mem-alif-empty-ospi", body)
+    assert failures
+    assert "on_module.ospi_memories" in failures[0][1][0]
+
+
+def test_the_requirement_is_derived_from_the_silicon_ref_not_a_sku_list():
+    """An E1M-AEN901 that does not exist yet is covered the day it lands:
+    the trigger is `silicon: alif:ensemble:*`, never the SKU string."""
+    body = _ALIF_NO_BLOCKS.replace("sku: E1M-AEN801", "sku: E1M-AEN901")
+    body = body.replace("alif:ensemble:e8", "alif:ensemble:e9")
+    failures = _check("mem-alif-future-sku", body)
+    assert failures
+    assert "silicon='alif:ensemble:e9'" in failures[0][1][0]
+
+
+@pytest.mark.parametrize("silicon", [
+    "renesas:rzv2n:n44", "nxp:imx9:imx93", "deepx:dx:m1",
+])
+def test_a_non_ensemble_preset_may_still_omit_the_blocks(silicon):
+    """The control side: V2N/V2M/NX9101 declare neither block by design and
+    must keep skipping, not start failing."""
+    body = (
+        f"silicon: {silicon}\n"
+        "on_module:\n"
+        f"  silicon:              {silicon}\n"
+        "memory:\n"
+        "  dram_mbit:            32768\n"
+        "  flash_mbit:           32768\n"
+    )
+    assert not _check(f"mem-non-alif-{silicon.replace(':', '-')}", body)
+
+
+def test_every_real_alif_ensemble_preset_is_in_scope_of_the_requirement():
+    """Guards the derivation itself: were the `silicon:` spelling to drift,
+    all six AEN presets would silently fall OUT of the requirement.  This
+    goes red instead of the requirement quietly covering nothing."""
+    import yaml
+
+    vm = _load_vm()
+    for sku in AEN_PRESETS:
+        doc = yaml.safe_load(
+            (REPO / "metadata" / "e1m_modules" / f"{sku}.yaml").read_text(
+                encoding="utf-8"))
+        assert str(doc["silicon"]).startswith(vm._ALIF_ENSEMBLE_SILICON_PREFIX), (
+            f"{sku}: silicon={doc['silicon']!r} no longer matches "
+            f"{vm._ALIF_ENSEMBLE_SILICON_PREFIX!r}, so the mandatory-blocks "
+            f"rule would no longer apply to it"
+        )
+
+
 # --- the real shipped presets, not just synthetic fixtures -------------
 
 @pytest.mark.parametrize("sku", AEN_PRESETS)

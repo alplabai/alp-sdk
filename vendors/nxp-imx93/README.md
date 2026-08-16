@@ -119,9 +119,14 @@ vela --accelerator-config ethos-u65-256 \
 > `Dedicated_Sram_384KB` and reports `sram_memory_used = 0.0` /
 > `dram_memory_used = 0.109375`, while `--memory-mode Shared_Sram` reports
 > `sram_memory_used = 0.03125` / `dram_memory_used = 0.078125`.
-> `metadata/socs/nxp/imx9/imx93.json`'s `npu_toolchain.vela.source` cites
-> the block above, so that citation proves alp-sdk agrees with **itself**
-> -- it is an internal-consistency check, not vendor grounding.  Naming an
+> `metadata/socs/nxp/imx9/imx93.json`'s `npu_toolchain.vela.source` cites the
+> `--memory-mode Shared_Sram \` line of the command above and **not this
+> note**, on purpose: this note names `Shared_Sram` three times, so while the
+> citation was a 6-line range it could slide off the command onto the
+> disclaimer and stay green — the disclaimer would have satisfied the check it
+> exists to weaken. Either way that citation proves alp-sdk agrees with
+> **itself**; it is an internal-consistency check, not vendor grounding.
+> Naming an
 > NXP / eIQ primary document for the i.MX 93 Ethos-U65 memory model is open
 > work; until one is cited, treat this mode as alp-sdk's own default rather
 > than a vendor-stated fact.

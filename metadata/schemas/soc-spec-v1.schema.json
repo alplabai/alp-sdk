@@ -402,8 +402,8 @@
         },
         "source": {
           "type": "string",
-          "pattern": "^[A-Za-z0-9_./-]+:[0-9]+-[0-9]+(; [A-Za-z0-9_./-]+:[0-9]+-[0-9]+)*$",
-          "description": "Where in THIS repo the profile is stated: `<repo-relative-path>:<first>-<last>`, joined by \"; \" when more than one file states it. tests/scripts/test_vela_profile_metadata.py reads the cited lines and fails unless they literally contain the declared `memory_mode`, so a stale or off-by-one citation is caught instead of outliving the fact it was meant to prove."
+          "pattern": "^[A-Za-z0-9_./-]+:[0-9]+(-[0-9]+)?(; [A-Za-z0-9_./-]+:[0-9]+(-[0-9]+)?)*$",
+          "description": "Where in THIS repo the profile is stated: `<repo-relative-path>:<line>` (or `:<first>-<last>`), joined by \"; \" when more than one file states it. tests/scripts/test_vela_profile_metadata.py requires the FIRST cited line to literally contain the declared `memory_mode`, and that line's text to appear exactly once in the file. Cite the one line that states the mode, not a range around it: a range merely CONTAINING the mode tolerated a 1-line shift, and on `vendors/nxp-imx93/README.md` it let the window slide off the vela command onto the provenance note that disclaims it -- the note names `Shared_Sram` too, so the disclaimer satisfied the check it was written to strengthen."
         }
       }
     },

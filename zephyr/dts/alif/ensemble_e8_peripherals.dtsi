@@ -494,10 +494,11 @@
 	 * `clock-frequency` (falling back to `bus-speed`), not a clock-controller
 	 * phandle.
 	 *
-	 * HW-BLOCKED, BUILD-ONLY this batch: no octal-NOR/HyperBus part is
-	 * populated on the E1M-AEN801, so this proves the node BINDS + the
-	 * hal_alif init/XiP-enable entry points compile and link -- not a live
-	 * XiP read.  No pinctrl-0: the enabling board/example overlay supplies it
+	 * HW-BLOCKED, BUILD-ONLY: no octal-NOR/HyperBus part is populated on ANY
+	 * AEN SKU (not a per-batch or per-BOM-variant caveat), so this proves the
+	 * node BINDS + the hal_alif init/XiP-enable entry points compile and link
+	 * -- not a live XiP read.
+	 * No pinctrl-0: the enabling board/example overlay supplies it
 	 * (the eth/isp precedent) -- see examples/aen/aen-ospi-regcheck.
 	 */
 	ospi0: ospi0@83000000 {
