@@ -348,18 +348,36 @@ alp_status_t cc3501e_wifi_connect(cc3501e_t  *ctx,
 				return (st.fail_reason == ALP_CC3501E_WIFI_FAIL_TIMEOUT) ? ALP_ERR_TIMEOUT
 				                                                         : ALP_ERR_IO;
 			}
-			/* DISCONNECTED (not yet latched) or CONNECTING: keep polling. */
+			/* DISCONNECTED (not yet latched) or CONNECTING: keep polling.
+			 * No attempt_cost debit here -- the read itself succeeded, so
+			 * this iteration's only real wall-clock spend is the poll gap
+			 * slept below; see the #1481 note in the else branch for why
+			 * charging CC3501E_REQ_TMO_MS here too was wrong. */
+		} else {
+			/* ss != ALP_OK: a single status read failing (e.g. a transient
+			 * down-window IO) is worth one more pass rather than an
+			 * immediate bail -- the next iteration will retry it.  Debit
+			 * this attempt's own worst-case cost (CC3501E_REQ_TMO_MS) IN
+			 * ADDITION to the poll gap below: cc3501e_request() does NOT
+			 * itself bound a request to CC3501E_REQ_TMO_MS -- it currently
+			 * discards timeout_ms outright (cc3501e_core.c's
+			 * cc3501e_request() does `(void)timeout_ms`, reserved for a
+			 * future IRQ-driven wait), so nothing upstream caps how
+			 * long a failed attempt could have taken; charging its
+			 * declared worst case here is what keeps `remaining` an
+			 * honest upper bound on wall-clock time for THIS path.
+			 * #1481: this debit MUST stay confined to the ss != ALP_OK
+			 * path -- charging it unconditionally (i.e. also on a
+			 * successful CONNECTING/DISCONNECTED read, where no such
+			 * unbounded attempt happened) triples the real per-iteration
+			 * cost a healthy poll incurs against the caller's declared
+			 * timeout_ms (100 ms phantom debit + the real 50 ms gap, vs.
+			 * just the 50 ms gap), collapsing a healthy connect's budget
+			 * to roughly 1/3 of what the caller asked for. */
+			uint32_t attempt_cost =
+			    (CC3501E_REQ_TMO_MS < remaining) ? CC3501E_REQ_TMO_MS : remaining;
+			remaining -= attempt_cost;
 		}
-		/* ss != ALP_OK: a single status read failing (e.g. a transient
-		 * down-window IO) is worth one more pass rather than an immediate
-		 * bail -- the next iteration will retry it.  Debit BOTH this
-		 * attempt's own worst-case cost (CC3501E_REQ_TMO_MS -- the budget
-		 * wifi_status_once() bounds a single request to) and the poll gap
-		 * from the caller's declared timeout_ms: the attempt is no longer
-		 * hidden inside an inner retry loop, so it must be charged here for
-		 * `remaining` to stay an honest upper bound on wall-clock time. */
-		uint32_t attempt_cost = (CC3501E_REQ_TMO_MS < remaining) ? CC3501E_REQ_TMO_MS : remaining;
-		remaining -= attempt_cost;
 		if (remaining == 0u) return ALP_ERR_TIMEOUT;
 		uint32_t gap = (remaining < CC3501E_WIFI_STATUS_POLL_GAP_MS)
 		                   ? remaining
