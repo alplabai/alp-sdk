@@ -144,7 +144,8 @@ device $JLINK_DEVICE_READ
 connect
 exit
 EOF
-"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/fwprobe-preflight.jlink \n  > /tmp/fwprobe-preflight.out 2>&1 || true
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/fwprobe-preflight.jlink \
+  > /tmp/fwprobe-preflight.out 2>&1 || true
 bench_jlink_assert_connected /tmp/fwprobe-preflight.out "firewall-probe preflight" || exit 7
 bench_jlink_assert_aen_dpidr /tmp/fwprobe-preflight.out "firewall-probe preflight" || exit 4
 
@@ -169,6 +170,24 @@ if grep -qiE "Could not connect to the target device|Cannot connect to the probe
 	echo "!! $JLINK_DEVICE_FLASH profile failed to connect" >&2
 	exit 2
 fi
+
+# GATE ON THE VERIFY RESULT (#1488) -- same defect flash-jlink-hp.sh was fixed
+# for under #1343. The `verifybin` above was issued but its outcome was never
+# read: the output went to a display-only pipe and the connect check was the
+# only thing that could fail this script, so a `Verify failed.` exited 0 and
+# reported a good flash -- letting the destructive firewall probe proceed to
+# overwrite alp_ulog_partition on an unconfirmed write.
+if grep -qiE "verify failed|verification failed|mismatch" /tmp/firmware-update-log-firewall-probe-write.out; then
+	echo "!! VERIFY FAILED -- the bytes on the part do NOT match $PKG." >&2
+	grep -iE "verify failed|verification failed|mismatch" /tmp/firmware-update-log-firewall-probe-write.out | head -5 >&2
+	echo "   Do not treat this board as flashed." >&2
+	exit 3
+fi
+if ! grep -qi "verify successful" /tmp/firmware-update-log-firewall-probe-write.out; then
+	echo "!! no verifybin success reported -- treating as FAILED (the verify never ran)." >&2
+	exit 3
+fi
+echo "verify: verifybin OK ($PKG @ $ATOC_ADDR)" >&2
 
 echo "flash complete; reading firewall-probe beacon" >&2
 sleep 3

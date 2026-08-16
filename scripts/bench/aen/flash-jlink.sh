@@ -110,6 +110,23 @@ if grep -qi "Could not connect to the target device" /tmp/flowd.out; then
   exit 2
 fi
 
+# GATE ON THE VERIFY RESULT (#1488) -- same defect flash-jlink-hp.sh was fixed
+# for under #1343. The `verifybin` above was issued but its outcome was never
+# read: the output went to a display-only pipe and the connect check was the
+# only thing that could fail this script, so a `Verify failed.` exited 0 and
+# reported a good flash.
+if grep -qiE "verify failed|verification failed|mismatch" /tmp/flowd.out; then
+  echo "!! VERIFY FAILED -- the bytes on the part do NOT match $PKG."
+  grep -iE "verify failed|verification failed|mismatch" /tmp/flowd.out | head -5
+  echo "   Do not treat this board as flashed."
+  exit 3
+fi
+if ! grep -qi "verify successful" /tmp/flowd.out; then
+  echo "!! no verifybin success reported -- treating as FAILED (the verify never ran)."
+  exit 3
+fi
+echo "verify: verifybin OK ($PKG @ $ADDR)"
+
 # 4. SES has re-booted the app; attach read-only with the GENERIC device and dump
 #    the RAM console (the part-number profile can't re-halt the running secure core).
 sleep 3

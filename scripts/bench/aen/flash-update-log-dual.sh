@@ -150,6 +150,23 @@ if grep -qiE "Could not connect to the target device|Cannot connect to the probe
 	exit 2
 fi
 
+# GATE ON THE VERIFY RESULT (#1488) -- same defect flash-jlink-hp.sh was fixed
+# for under #1343. The `verifybin` above was issued but its outcome was never
+# read: the output went to a display-only pipe and the connect check was the
+# only thing that could fail this script, so a `Verify failed.` exited 0 and
+# reported a good flash.
+if grep -qiE "verify failed|verification failed|mismatch" /tmp/firmware-update-log-dual-write.out; then
+	echo "!! VERIFY FAILED -- the bytes on the part do NOT match $PKG." >&2
+	grep -iE "verify failed|verification failed|mismatch" /tmp/firmware-update-log-dual-write.out | head -5 >&2
+	echo "   Do not treat this board as flashed." >&2
+	exit 3
+fi
+if ! grep -qi "verify successful" /tmp/firmware-update-log-dual-write.out; then
+	echo "!! no verifybin success reported -- treating as FAILED (the verify never ran)." >&2
+	exit 3
+fi
+echo "verify: verifybin OK ($PKG @ $ATOC_ADDR)" >&2
+
 echo "flash complete; capture labgrid console for HP owner + HE client output" >&2
 sleep 3
 READBACK_ARGS=()
