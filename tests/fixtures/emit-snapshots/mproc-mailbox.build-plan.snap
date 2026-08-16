@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "planPathMode": "tokened",
   "generatedBy": "scripts/alp_orchestrate.py",
-  "sdkVersion": "0.15.0",
+  "sdkVersion": "0.16.0",
   "sdkCommit": "<SDK_COMMIT>",
   "boardYaml": "examples/multicore/mproc-mailbox/board.yaml",
   "sku": "E1M-AEN801",
@@ -81,12 +81,12 @@
         "id": "arm-zephyr-eabi"
       },
       "artifacts": {
-        "elf": "build/m55_he-zephyr/zephyr/zephyr.elf",
-        "map": "build/m55_he-zephyr/zephyr/zephyr.map",
-        "bin": "build/m55_he-zephyr/zephyr/zephyr.bin",
-        "sizeReport": "build/m55_he-zephyr/zephyr/zephyr.stat",
-        "symbols": "build/m55_he-zephyr/zephyr/zephyr.symbols",
-        "compileCommands": "build/m55_he-zephyr/compile_commands.json",
+        "elf": "build/m55_he-zephyr/build/zephyr/zephyr.elf",
+        "map": "build/m55_he-zephyr/build/zephyr/zephyr.map",
+        "bin": "build/m55_he-zephyr/build/zephyr/zephyr.bin",
+        "sizeReport": "build/m55_he-zephyr/build/zephyr/zephyr.stat",
+        "symbols": "build/m55_he-zephyr/build/zephyr/zephyr.symbols",
+        "compileCommands": "build/m55_he-zephyr/build/compile_commands.json",
         "outputDir": null
       },
       "debug": {
@@ -137,12 +137,12 @@
         "id": "arm-zephyr-eabi"
       },
       "artifacts": {
-        "elf": "build/m55_hp-zephyr/zephyr/zephyr.elf",
-        "map": "build/m55_hp-zephyr/zephyr/zephyr.map",
-        "bin": "build/m55_hp-zephyr/zephyr/zephyr.bin",
-        "sizeReport": "build/m55_hp-zephyr/zephyr/zephyr.stat",
-        "symbols": "build/m55_hp-zephyr/zephyr/zephyr.symbols",
-        "compileCommands": "build/m55_hp-zephyr/compile_commands.json",
+        "elf": "build/m55_hp-zephyr/build/zephyr/zephyr.elf",
+        "map": "build/m55_hp-zephyr/build/zephyr/zephyr.map",
+        "bin": "build/m55_hp-zephyr/build/zephyr/zephyr.bin",
+        "sizeReport": "build/m55_hp-zephyr/build/zephyr/zephyr.stat",
+        "symbols": "build/m55_hp-zephyr/build/zephyr/zephyr.symbols",
+        "compileCommands": "build/m55_hp-zephyr/build/compile_commands.json",
         "outputDir": null
       },
       "debug": {

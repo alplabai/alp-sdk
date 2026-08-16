@@ -434,7 +434,7 @@ typedef struct {
 typedef enum {
 	ALP_CC3501E_WIFI_DISCONNECTED = 0u, /**< no association + none in flight. */
 	ALP_CC3501E_WIFI_CONNECTING   = 1u, /**< association in progress (bridge BUSY). */
-	ALP_CC3501E_WIFI_CONNECTED    = 2u, /**< associated (rssi_dbm valid). */
+	ALP_CC3501E_WIFI_CONNECTED    = 2u, /**< associated (see rssi_dbm's warning). */
 	ALP_CC3501E_WIFI_CONN_FAILED  = 3u, /**< attempt failed (fail_reason valid). */
 } alp_cc3501e_wifi_conn_state_t;
 
@@ -454,7 +454,18 @@ typedef enum {
 typedef struct {
 	uint8_t state;       /**< @ref alp_cc3501e_wifi_conn_state_t. */
 	uint8_t fail_reason; /**< @ref alp_cc3501e_wifi_fail_t (when state == FAILED). */
-	int8_t  rssi_dbm;    /**< STA RSSI in dBm (when state == CONNECTED). */
+	/** @warning NOT A MEASUREMENT as of protocol v4 -- always 0 on the wire.
+	 *  The firmware latch this byte is served from is never populated: every
+	 *  terminal outcome publishes it via wifi_conn_set(), which always sets it
+	 *  to 0 (the connect body may not read the RSSI near associate -- the read
+	 *  blocks that worker), so the byte has only ever held 0.  0 dBm is a LEGAL
+	 *  int8 RSSI, so there is no in-band sentinel a reader can test to tell
+	 *  "unmeasured" from a real 0 -- do NOT report this byte as a signal level
+	 *  (issue #1387).  A real reading comes only from CMD_WIFI_GET_RSSI (0x16),
+	 *  a worker-routed radio read.  Populating this byte honestly needs either a
+	 *  bench answer on whether the post-DHCP read is safe, or a validity flag on
+	 *  the wire (the @c reserved byte) -- both open; neither is decided here. */
+	int8_t  rssi_dbm;
 	uint8_t reserved;
 } alp_cc3501e_wifi_status_t;
 

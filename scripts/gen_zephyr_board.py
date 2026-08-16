@@ -451,18 +451,68 @@ def _aen_peripherals_dtsi(soc_spec: dict[str, Any]) -> str:
     return str(dtsi)
 
 
+def _aen_require_disjoint_slot0(
+    sku: str, sku_preset: "dict[str, Any]",
+    memory_map: "list[dict[str, Any]] | None",
+) -> None:
+    """Refuse a DUAL-M55 AEN SoM that declares no `<role>_slot0` window (#1446).
+
+    `_aen_role_slot0_map` returns None when no role declares one, which drops
+    the caller onto the stock SYMMETRIC layout -- `m55_he` and `m55_hp` slot0
+    at the same address, so flashing one core silently clobbers the other's
+    window. That is the #1069 defect, and it is how E1M-AEN301/401/501/601/701
+    shipped until #1445 gave them explicit maps.
+
+    The half-authored case (one role declares a window, its sibling does not)
+    already raises inside `_aen_role_slot0_map`. This closes the fully
+    unauthored case, which was silent.
+
+    Single-M55 SoMs are unaffected: with no sibling core there is nothing to
+    clobber, so the symmetric layout stays correct for them.
+
+    Costs nothing on the current corpus -- after #1445 every AEN SoM declares
+    disjoint windows, so this never fires today. Its value is the NEXT dual-M55
+    AEN SoM, which is refused at authoring time instead of discovered by
+    someone flashing one core and losing the other's slot0 on a bench.
+    """
+    if memory_map and any(
+        isinstance(r.get("name"), str) and r["name"].endswith("_slot0")
+        for r in memory_map
+    ):
+        return
+    cores = sku_preset.get("topology") or {}
+    m55 = sorted(c for c in cores if c in ("m55_he", "m55_hp"))
+    if len(m55) < 2:
+        return
+    raise ZephyrBoardEmitError(
+        f"SoM {sku!r} has two M55 cores ({', '.join(m55)}) but its preset "
+        f"declares no per-core `<role>_slot0` region, so both would boot from "
+        f"the SAME MRAM slot0 address -- flashing one core silently corrupts "
+        f"the other's slot0 window (#1069). Declare disjoint `he_slot0` / "
+        f"`hp_slot0` regions in this SoM preset's `memory_map:`; "
+        f"metadata/e1m_modules/E1M-AEN801.yaml is the shape to copy (#1446)."
+    )
+
+
 def _aen_role_slot0_map(
     memory_map: "list[dict[str, Any]] | None", role: str,
 ) -> "dict[str, Any] | None":
     """Return this role's disjoint-slot0 memory_map entry, or None.
 
-    Non-stock AEN SKUs (#1069: dual-M55 SoMs that boot both cores from
-    the same physical App MRAM) declare a `memory_map:` block in their
-    SoM preset with one region per core named `<role>_slot0`
-    (`accessible_from: [m55_<role>]` only). Every other AEN SKU
-    (single-M55 aen401/aen601, or an AEN801-shaped preset with no
-    override) has no such region and keeps the stock symmetric
-    two-slot layout -- see _aen_flash_partitions below.
+    Dual-M55 AEN SoMs (#1069: both cores boot from the same physical App
+    MRAM) declare a `memory_map:` block in their SoM preset with one region
+    per core named `<role>_slot0` (`accessible_from: [m55_<role>]` only).
+    A SoM with only ONE M55 has no sibling to collide with and keeps the
+    stock symmetric two-slot layout -- see _aen_flash_partitions below.
+
+    #1446: this used to say the stock layout also covered "single-M55
+    aen401/aen601". Both of those are DUAL-M55 -- measured from their own
+    presets, E1M-AEN401 is [m55_he, m55_hp] and E1M-AEN601 is
+    [a32_cluster, m55_he, m55_hp] -- so that sentence was the justification
+    for a silent fallback that put two cores' slot0 at one address, and it
+    is why five shipping SoMs carried a clobbering layout until #1445.
+    `_aen_require_disjoint_slot0` now refuses that state outright; this
+    function keeps returning None only for the genuinely single-M55 case.
 
     Returning None is only legitimate when NO role declares a slot0
     window.  A map that declares a SIBLING core's `<role>_slot0` but not
@@ -911,6 +961,66 @@ def _aen_defconfig(
     )
 
 
+# Board-level LOG_MODE default for every AEN board (issue #1373).  Emitted
+# into the generated `Kconfig.defconfig`; the two hand-authored AEN board
+# trees (e1m_aen401_m55_hp, e1m_aen601_m55_hp) carry a byte-identical copy,
+# and tests/scripts/test_gen_zephyr_board.py pins that they stay in step.
+#
+# WHY: Zephyr's own `choice LOG_MODE` default is LOG_MODE_DEFERRED
+# (subsys/logging/Kconfig.mode), which no AEN board ever set or unset -- it
+# is inherited.  Deferred mode hands every record to the LOG_PROCESS_THREAD
+# (CONFIG_LOG_PROCESS_THREAD is `default y`), and CONFIG_LOG_PRINTK is
+# `default y if PRINTK`, so printk() -- including the Alp SDK boot banner --
+# is deferred with it.  The AEN bench procedure deliberately runs apps whose
+# main() never yields (`for (;;) { k_busy_wait(1000); }`) because an idling
+# M55 makes the Secure Enclave gate the DAP and the SE-UART together (see
+# docs/debugging-aen.md section 4).  A main() that never yields never lets
+# the log thread run: with CONFIG_LOG_PROCESS_THREAD_CUSTOM_PRIORITY=n (the
+# default) log_core.c runs that thread at K_LOWEST_APPLICATION_THREAD_PRIO
+# (= CONFIG_NUM_PREEMPT_PRIORITIES - 1), strictly below main's
+# CONFIG_MAIN_THREAD_PRIORITY=0, and time-slicing rotates only among
+# READY threads of EQUAL priority -- so a busy-looping main() at 0 starves
+# it outright and a healthy, fault-free board emits ZERO bytes.  Measured on
+# E1M-AEN801 silicon: PC inside `z_impl_k_busy_wait`, IPSR = 000
+# (NoException), CFSR @ 0xE000ED28 = 00000000, zero UART bytes in a 15 s
+# capture; the same source with LOG_MODE_MINIMAL prints the banner and both
+# LOG_INF lines.
+# LOG_MODE_MINIMAL formats and writes in the calling context, so it cannot
+# be starved by a non-yielding main().
+#
+# WHY A CHOICE `default` AND NOT `CONFIG_LOG_MODE_MINIMAL=y` IN THE BOARD
+# `_defconfig`: the `_defconfig` form assigns the symbol unconditionally,
+# including on the 47 `CONFIG_LOG=n` fragments under examples/aen/, where
+# the choice is invisible.  Zephyr's scripts/kconfig/kconfig.py then runs
+# check_assigned_choice_values() and prints "The choice symbol
+# LOG_MODE_MINIMAL ... was selected (set =y), but no symbol ended up as the
+# choice selection" on every one of those builds.  A Kconfig.defconfig
+# default is inert when LOG=n.  Precedence is unchanged either way:
+# Kconfig.zephyr sources the board's Kconfig.defconfig (line 30) ahead of
+# subsys/Kconfig (line 52) precisely so board defaults outrank upstream
+# ones, and an app that wants the deferred backend pipeline still overrides
+# this with CONFIG_LOG_MODE_DEFERRED=y in its own prj.conf.
+_AEN_LOG_MODE_DEFAULT = (
+    "# Logging: default to LOG_MODE_MINIMAL, not Zephyr's inherited\n"
+    "# LOG_MODE_DEFERRED.  Deferred mode needs CONFIG_LOG_PROCESS_THREAD to run,\n"
+    "# and the AEN bench procedure runs apps whose main() never yields (a\n"
+    "# non-yielding busy loop is what keeps the Secure Enclave from gating the\n"
+    "# DAP and the SE-UART -- see docs/debugging-aen.md section 4).  A\n"
+    "# non-yielding main() starves the log thread, and because CONFIG_LOG_PRINTK\n"
+    "# routes printk() through the same queue the Alp SDK banner disappears too:\n"
+    "# a running, fault-free board prints ZERO bytes.  Measured on E1M-AEN801\n"
+    "# silicon (issue #1373) -- PC inside z_impl_k_busy_wait, IPSR = 000,\n"
+    "# CFSR @ 0xE000ED28 = 00000000, and no UART output at all.  Minimal mode\n"
+    "# formats in the calling context, so the same app prints.  An app that\n"
+    "# wants the deferred pipeline (backends, runtime filtering, timestamps)\n"
+    "# overrides this with CONFIG_LOG_MODE_DEFERRED=y in its prj.conf.\n"
+    "choice LOG_MODE\n"
+    "\tdefault LOG_MODE_MINIMAL\n"
+    "endchoice\n"
+    "\n"
+)
+
+
 def _aen_kconfig_defconfig(dir_name: str, role: str, part: str) -> str:
     board_sym = dir_name.upper()
     role_u = role.upper()
@@ -937,6 +1047,7 @@ def _aen_kconfig_defconfig(dir_name: str, role: str, part: str) -> str:
         "config ROM_START_OFFSET\n"
         "\tdefault 0x800 if BOOTLOADER_MCUBOOT\n"
         "\n"
+        + _AEN_LOG_MODE_DEFAULT +
         f"endif # BOARD_{board_sym}\n"
     )
 
@@ -1308,6 +1419,7 @@ def emit_zephyr_board(
         role = core_id.split("_")[-1]
         uart_node = _uart_node_label(rx_row)
         memory_map = sku_preset.get("memory_map")
+        _aen_require_disjoint_slot0(sku, sku_preset, memory_map)
         # This role's own disjoint slot0 base (#1069), falling back to the
         # stock symmetric-layout address (the App MRAM base + the mcuboot
         # partition, same for every single-M55 AEN SKU and for AEN801

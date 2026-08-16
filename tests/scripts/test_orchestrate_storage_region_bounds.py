@@ -150,15 +150,25 @@ class TestTargetingARegionDirectly:
 
 
 class TestNoFalsePositives:
-    def test_a_bare_alias_som_is_unaffected(self, tmp_path):
-        """E1M-AEN301's map derives to `mram_main` alone.
+    def test_a_som_region_target_is_unaffected(self, tmp_path):
+        """A partition aimed at a SoM region the map DOES leave free must
+        still allocate -- the bounds check must not false-positive on it.
 
-        With no sibling regions there is nothing to reserve, so allocation
-        must behave exactly as before -- this fix must not start blocking
-        SKUs whose maps carry no fine-grained regions.
+        This was `test_a_bare_alias_som_is_unaffected`, and it asserted the
+        opposite target: E1M-AEN301 used to derive a bare `mram_main` alias
+        with no sibling regions, so a partition could sit on the whole-MRAM
+        overlay. alp-sdk#1445 gave AEN301 the same explicit partitioning
+        E1M-AEN801 always had, and that layout fills the 5632 KiB device
+        EXACTLY, so the overlay now has nothing free on any AEN SoM -- a
+        partition targeting it is correctly blocked (E1M-AEN801 has always
+        behaved this way; measured, both SKUs now agree).
+
+        What the check must still never do is block a partition that fits a
+        region the SoM genuinely reserves for it, which is what this now
+        exercises against the 96 KiB `storage` region.
         """
         path = _write_board(tmp_path, """
-        name: test-aen301-unaffected
+        name: test-aen301-region-target
         som:
           sku: E1M-AEN301
           hw_rev: r1
@@ -169,7 +179,7 @@ class TestNoFalsePositives:
             app: ./m55_hp
 
         storage:
-          - { name: settings, size_kib: 64, fs: littlefs, flash_device: mram_main, mount: /lfs/settings }
+          - { name: settings, size_kib: 64, fs: littlefs, flash_device: storage, mount: /lfs/settings }
         """)
         parts = resolve_storage_partitions(load_board_yaml(path))
         settings = _by_name(parts)["settings"]

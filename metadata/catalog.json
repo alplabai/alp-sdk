@@ -1001,7 +1001,7 @@
         ],
         "path": "examples/connectivity/iot-fleet-ota",
         "som": "E1M-AEN801",
-        "summary": "Secure OTA firmware update with rollback. The production-readiness proof for \"how do we update 10 000 units in the field?\"."
+        "summary": "Secure OTA firmware update, verify-only on the qualified E1M-AEN801 SKU (apply is DEFERRED, #1069 -- see [STATUS] in `board.yaml`). The production-readiness proof for \"how do we update 10 000 units in the field?\"."
       },
       {
         "board": "e1m-evk",
@@ -3245,6 +3245,10 @@
       "script": "scripts/check_build_receipt.py"
     },
     {
+      "purpose": "Verify every `path:line` citation in `changelog.d/` still resolves.",
+      "script": "scripts/check_changelog_citations.py"
+    },
+    {
       "purpose": "Guard: every `changelog.d/*.md` fragment is well-formed (#1395).",
       "script": "scripts/check_changelog_fragments.py"
     },
@@ -3327,6 +3331,10 @@
     {
       "purpose": "Cross-family portability lint for examples/*/{board.yaml,testcase.yaml}.",
       "script": "scripts/check_example_portability.py"
+    },
+    {
+      "purpose": "CI gate: no `examples/**/CMakeLists.txt` may reach `scripts/alp_project.py` through a bare relative hop -- every invocation resolves the script under `${ALP_SDK_ROOT}`.",
+      "script": "scripts/check_example_sdk_root.py"
     },
     {
       "purpose": "Reject examples that claim Alp storage coverage while using Zephyr storage APIs.",

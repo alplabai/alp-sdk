@@ -93,7 +93,15 @@ def _slice_flash_recipe(
         # `expect_dpidr`/`jlink_device` pair above -- see
         # `loader._resolve_slot0_load_address` for where it comes from.
         args: dict[str, Any] = {}
-        if slice_.jlink_flash_device:
+        # PRESENCE, not truthiness (#1295, tan-cli#734): a schema-declared
+        # `jlink_flash_device: null` is a published "no known J-Link flash
+        # profile" and must reach `flash_args` AS a present null, so the
+        # consumer's presence-based check (tan's `flash_plan._fa_has_key`)
+        # sees it and refuses loudly.  A truthiness test drops it, which
+        # re-collapses declared-null into absent and silently downgrades
+        # Flow D to the SE-UART Flow A path -- the exact failure the null
+        # exists to prevent.  Absent still emits nothing.
+        if slice_.jlink_flash_device_declared or slice_.jlink_flash_device is not None:
             args["jlink_flash_device"] = slice_.jlink_flash_device
         if slice_.expect_dpidr and slice_.jlink_device:
             args["expect_dpidr"] = slice_.expect_dpidr
@@ -247,10 +255,21 @@ def _slice_command(
                 project.sku, slice_.core_id, slice_.board, real_boards)
         # NB: no explicit `-d`. west's default output is <cwd>/build (a
         # subdirectory of the command's cwd = buildDir), so the tree lands
-        # at <buildDir>/build/; the consumer (tan) reconciles that nested
-        # layout when it resolves artefacts. Adding `-d <buildDir>` here
-        # would double-nest (west resolves a relative -d against its cwd,
+        # at <buildDir>/build/. Adding `-d <buildDir>` here would
+        # double-nest (west resolves a relative -d against its cwd,
         # already = buildDir) -- see finding M14.
+        #
+        # The consumer does NOT have to reconcile that nesting any more:
+        # `_slice_artifacts` reports the `<buildDir>/build/...` paths west
+        # actually writes (issue #1360). `-d .` was the alternative -- it
+        # would move west's tree to <buildDir> itself and make the old
+        # un-nested `artifacts` spelling true -- and was REJECTED: this
+        # slice's `alp.conf` is materialised at <buildDir>/alp.conf and
+        # handed to this very command via `-DEXTRA_CONF_FILE=`, so making
+        # <buildDir> west's own build dir puts that file inside the tree
+        # `west build -p` (or a `--pristine=auto` board/app change) wipes,
+        # deleting the fragment the command line points at. Today it sits
+        # one level ABOVE west's tree, where pristine cannot reach it.
         # Tokenized (issue #865): `_zephyr_app_dir` resolves an absolute
         # path (project-anchored for a customer app, SDK-anchored for the
         # stock M-core shim) -- see `_tokenize`.
@@ -392,8 +411,10 @@ def _slice_command(
         # its own cwd -- so the historical `-B build/<core>-baremetal`
         # double-nested the tree at `<buildDir>/build/<core>-baremetal/`,
         # where nothing that reads `artifacts`/`buildDir` would ever find
-        # it (tan-cli#550). Same failure the zephyr branch avoids by
-        # emitting no `-d` at all (finding M14, above).
+        # it (tan-cli#550). The zephyr branch avoids that SECOND level by
+        # emitting no `-d` at all (finding M14, above); the one level west
+        # still adds on its own is reported honestly by `_slice_artifacts`
+        # rather than left for the reader to add back (issue #1360).
         return [
             "cmake", "-S", app_path, "-B", ".",
             # Every `-D` below is set BY THIS PLANNER, not by the customer,

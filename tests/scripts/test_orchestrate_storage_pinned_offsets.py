@@ -17,10 +17,19 @@ The fix places every pin FIRST, then bump-allocates around them.
 Both headline tests were run against the PRE-fix resolver and failed there in
 the wrong direction (measured output quoted per test).
 
-E1M-AEN301 is used because its auto-derived memory_map is a bare `mram_main`
-alias (5632 KiB) with no sibling regions to reserve, which isolates the
-pinned-vs-bump interaction from the alp-sdk#1331 SoM-region bounds check
-covered by test_orchestrate_storage_region_bounds.py.
+E1M-AEN301 is used because it is a real, shipped AEN SoM. It no longer offers
+a bare whole-device alias to allocate into: alp-sdk#1445 gave all five
+remaining AEN SoMs the same explicit MRAM partitioning E1M-AEN801 always had,
+and that layout fills the 5632 KiB device EXACTLY
+(64 + 2688 + 2688 + 64 + 96 + 32), so the whole-MRAM overlay has nothing free
+on any AEN part. Customer storage on these SoMs belongs in the SoM's own
+96 KiB `storage` region, which is what these fixtures now use -- the same
+shape test_orchestrate_storage_region_bounds.py already uses.
+
+Sizes are half their original values so the largest fixture still fits that
+96 KiB region exactly. What is under test is the pinned-vs-bump interaction --
+pin ordering, overlap detection, auto-layout stability -- and that is
+scale-invariant; only the arithmetic in the expected offsets moved with it.
 
 Run locally:
 
@@ -98,10 +107,10 @@ class TestPinnedPartitionSurvivesTheBumpAllocator:
         the one that disappeared from dts-partitions.dtsi.
         """
         parts = _resolve(tmp_path, """
-      - { name: settings,        fs: littlefs, size_kib: 64,  mount: /lfs/settings, flash_device: mram_main }
-      - { name: app_data,        fs: littlefs, size_kib: 128, mount: /lfs/app,      flash_device: mram_main }
-      - { name: mcuboot_scratch, fs: raw,      size_kib: 32,                        flash_device: mram_main }
-      - { name: pinned_low,      fs: raw,      size_kib: 32,  offset_kib: 0,        flash_device: mram_main }
+      - { name: settings,        fs: littlefs, size_kib: 16,  mount: /lfs/settings, flash_device: storage }
+      - { name: app_data,        fs: littlefs, size_kib: 32,  mount: /lfs/app,      flash_device: storage }
+      - { name: mcuboot_scratch, fs: raw,      size_kib: 8,                         flash_device: storage }
+      - { name: pinned_low,      fs: raw,      size_kib: 8,   offset_kib: 0,        flash_device: storage }
     """)
         by_name = _by_name(parts)
         assert set(by_name) == {
@@ -110,7 +119,7 @@ class TestPinnedPartitionSurvivesTheBumpAllocator:
             assert part.status == "ok", f"{name}: {part.reason}"
         # The pin is honoured verbatim; everyone else allocates around it.
         assert by_name["pinned_low"].base_kib == 0
-        assert by_name["app_data"].base_kib >= 32
+        assert by_name["app_data"].base_kib >= 8
         _assert_disjoint(parts)
 
     def test_early_sorting_pin_still_works(self, tmp_path):
@@ -127,13 +136,13 @@ class TestPinnedPartitionSurvivesTheBumpAllocator:
         pins the behaviour so the two-pass rewrite cannot regress it.
         """
         parts = _by_name(_resolve(tmp_path, """
-      - { name: boot_slot, offset_kib: 0, size_kib: 64, fs: raw,      flash_device: mram_main }
-      - { name: cfg,                      size_kib: 64, fs: littlefs, flash_device: mram_main, mount: /cfg }
+      - { name: boot_slot, offset_kib: 0, size_kib: 32, fs: raw,      flash_device: storage }
+      - { name: cfg,                      size_kib: 32, fs: littlefs, flash_device: storage, mount: /cfg }
     """))
         assert parts["boot_slot"].status == "ok", parts["boot_slot"].reason
         assert parts["boot_slot"].base_kib == 0
         assert parts["cfg"].status == "ok", parts["cfg"].reason
-        assert parts["cfg"].base_kib == 64
+        assert parts["cfg"].base_kib == 32
 
     def test_reason_never_calls_an_auto_offset_explicit(self, tmp_path):
         """The issue's secondary defect: the block reason interpolated the
@@ -141,9 +150,9 @@ class TestPinnedPartitionSurvivesTheBumpAllocator:
         for an "explicit offset_kib=None" it never declared.  No emitted
         reason may ever contain that string."""
         parts = _resolve(tmp_path, """
-      - { name: aaa, offset_kib: 0,  size_kib: 64, fs: raw, flash_device: mram_main }
-      - { name: bbb, offset_kib: 32, size_kib: 64, fs: raw, flash_device: mram_main }
-      - { name: ccc,                 size_kib: 64, fs: raw, flash_device: mram_main }
+      - { name: aaa, offset_kib: 0,  size_kib: 32, fs: raw, flash_device: storage }
+      - { name: bbb, offset_kib: 16, size_kib: 32, fs: raw, flash_device: storage }
+      - { name: ccc,                 size_kib: 32, fs: raw, flash_device: storage }
     """)
         for part in parts:
             assert "offset_kib=None" not in (part.reason or ""), part.reason
@@ -151,8 +160,8 @@ class TestPinnedPartitionSurvivesTheBumpAllocator:
     def test_two_pins_on_one_offset_still_block(self, tmp_path):
         """Placing pins first must not make them mutually invisible."""
         parts = _by_name(_resolve(tmp_path, """
-      - { name: aaa, offset_kib: 0, size_kib: 64, fs: raw, flash_device: mram_main }
-      - { name: bbb, offset_kib: 0, size_kib: 64, fs: raw, flash_device: mram_main }
+      - { name: aaa, offset_kib: 0, size_kib: 32, fs: raw, flash_device: storage }
+      - { name: bbb, offset_kib: 0, size_kib: 32, fs: raw, flash_device: storage }
     """))
         assert parts["aaa"].status == "ok", parts["aaa"].reason
         assert parts["bbb"].status == "blocked"
@@ -164,8 +173,8 @@ class TestPinnedPartitionSurvivesTheBumpAllocator:
         Offsets must stay exactly where they were before the two-pass
         rewrite (name-sorted, bottom-up, 4 KiB pages)."""
         parts = _by_name(_resolve(tmp_path, """
-      - { name: settings, fs: littlefs, size_kib: 64,  mount: /lfs/settings, flash_device: mram_main }
-      - { name: app_data, fs: littlefs, size_kib: 128, mount: /lfs/app,      flash_device: mram_main }
+      - { name: settings, fs: littlefs, size_kib: 32,  mount: /lfs/settings, flash_device: storage }
+      - { name: app_data, fs: littlefs, size_kib: 64,  mount: /lfs/app,      flash_device: storage }
     """))
         assert parts["app_data"].base_kib == 0
-        assert parts["settings"].base_kib == 128
+        assert parts["settings"].base_kib == 64

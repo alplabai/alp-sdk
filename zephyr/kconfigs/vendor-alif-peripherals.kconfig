@@ -153,9 +153,11 @@ config MDIO_DWMAC_ALIF
 	  ADR 0017 Tier-1.5: no upstream v4.4 driver targets this register
 	  layout, but the MAC_MDIO_Address/Data field offsets and bitmasks are
 	  CONSUMED from the upstream eth_dwmac core's own private header
-	  (eth_dwmac_priv.h) -- not reinvented. BUILD-ONLY this batch: proven by
-	  the aen-ethernet-link mdio-managed twister scenario on the AEN801
-	  M55-HE target; no MDIO-managed PHY exercised on real E8 silicon yet.
+	  (eth_dwmac_priv.h) -- not reinvented. Compile-proven in CI by the
+	  aen-ethernet-link mdio-managed twister scenario on the AEN801 M55-HE
+	  target; the MDIO layer itself has since answered on real E8 silicon
+	  (#1244, `[eth] MDIO PHY@0 id=2000a140`), but link/traffic over the
+	  managed path is still unproven.
 
 config MDIO_DWMAC_ALIF_CLOCK_RANGE
 	int "GMAC MDIO CSR clock-range select (MAC_MDIO_Address CR field)"

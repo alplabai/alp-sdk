@@ -185,8 +185,8 @@ jobs:
       # can't be fetched without them.
       - name: Install git + curl (docs/getting-started.md's own prerequisite note)
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends git curl ca-certificates
+          apt-get update -o Acquire::Retries=3
+          apt-get install -o Acquire::Retries=3 -y --no-install-recommends git curl ca-certificates
 
       # scripts/bootstrap.sh should refuse HERE (cmake/python3/ninja/xz/wget
       # still absent) with a curated per-tool install hint, not a bare
@@ -204,9 +204,10 @@ jobs:
             exit 1
           fi
           # Every missing tool's curated install command (from
-          # metadata/bootstrap.json's prerequisites.install.linux, via
-          # bootstrap.sh's drift-gated PREREQ_HINT_LINUX mirror) must
-          # actually appear -- a bare tool-name-only message is the
+          # metadata/bootstrap.json's prerequisites.install.linux.apt, via
+          # bootstrap.sh's drift-gated PREREQ_HINT_APT mirror -- renamed
+          # from PREREQ_HINT_LINUX by issue #1464's package-manager split)
+          # must actually appear -- a bare tool-name-only message is the
           # pre-#978/#949 regression this asserts against.
           for hint in \
             "sudo apt-get install -y cmake" \
@@ -232,7 +233,7 @@ jobs:
       # truth this must keep matching).
       - name: Install prerequisites (docs/getting-started.md section 1's Debian/Ubuntu one-liner, verbatim)
         run: |
-          apt-get install -y --no-install-recommends \
+          apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
               cmake ninja-build python3 python3-pip python3-venv git curl xz-utils wget
 
       - name: bootstrap.sh succeeds once every prerequisite is installed
@@ -294,7 +295,7 @@ jobs:
         run: |
           set -euo pipefail
           shellcheck -S error scripts/bootstrap.sh
-          curl -fsSL https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh -o /tmp/tan-install.sh
+          curl -fsSL --retry 3 --retry-delay 5 https://raw.githubusercontent.com/alplabai/tan-cli/main/install.sh -o /tmp/tan-install.sh
           # --shell=sh: install.sh's own shebang is `#!/usr/bin/env sh`
           # (POSIX dash-compatible, not bash) -- shellcheck auto-detects
           # this from the shebang line it just downloaded, but pinning it
@@ -482,8 +483,8 @@ jobs:
       # "Install prerequisites" split above.
       - name: Install checkout prerequisites (git/curl/ca-certificates -- not part of docs/getting-started.md section 1)
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends git curl ca-certificates
+          apt-get update -o Acquire::Retries=3
+          apt-get install -o Acquire::Retries=3 -y --no-install-recommends git curl ca-certificates
 
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
@@ -505,7 +506,7 @@ jobs:
       # divergence between the two reddens this job).
       - name: Install prerequisites (docs/getting-started.md section 1's Debian/Ubuntu one-liner, verbatim)
         run: |
-          apt-get install -y --no-install-recommends \
+          apt-get install -o Acquire::Retries=3 -y --no-install-recommends \
               cmake ninja-build python3 python3-pip python3-venv git curl xz-utils wget
 
       - name: Install tan-cli/dev (docs quickstart step 2)

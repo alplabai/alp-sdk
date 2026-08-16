@@ -39,6 +39,7 @@ manifest-driven **top-level** `libraries:` selection.
 | `cmsis-stream` | B | v3.2.0     | Apache-2.0 | zephyr    | west module `cmsisstream`; app must override `CONFIG_CMSISSTREAM_POOL_SECTION` off-AEN; app must also set `CONFIG_CPP=y` + a C++ stdlib choice |
 | `cmsis-cv`  | B    | (SHA pin, no upstream tags) | Apache-2.0 | zephyr | no upstream Zephyr module glue yet; recipe-only |
 | `arm-2d`    | B    | v1.2.6     | Apache-2.0 | zephyr    | no upstream Zephyr module glue yet; recipe-only |
+| `onnxruntime` | B  | 1.28.0     | MIT & Apache-2.0 | yocto | Cortex-A; own `meta-alp-sdk` recipe, upstream (not a vendor fork) |
 
 `tan doctor` reports the selection for the project in scope (tier + licence +
 compatibility), reading these same manifests — so the CLI and alp-studio's
@@ -222,7 +223,8 @@ copyleft or proprietary surprise cannot ride in through a `libraries:`
 selection:
 
 ```
-Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, Zlib, MIT-0, BSL-1.0, CC0-1.0
+Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, Zlib, MIT-0, BSL-1.0, CC0-1.0,
+MIT & Apache-2.0
 ```
 
 **Extending this allowlist is a deliberate human decision, not a metadata
@@ -234,6 +236,26 @@ design. `BSL-1.0` (Boost, `catch2`) and `CC0-1.0` (public-domain-equivalent,
 the same decision dropped `tinygsm` (LGPL-3.0) and `libhelix` (RPSL-1.0)
 from the curated set rather than admit their copyleft/non-permissive
 licences into this allowlist.
+
+`MIT & Apache-2.0` is a **compound SPDX expression**, added by 2026-08-05
+maintainer legal sign-off to cover a real shape the simple-id enum could not
+express honestly: a library whose own licence is MIT but whose shipped
+artifact contains an inseparable Apache-2.0 component pulled in as a
+required build input. `onnxruntime` is the first case — its `onnx/onnx`
+model-format parser (Apache-2.0) is both a required git submodule
+(`cmake/external/onnx`) and a `cmake/deps.txt` entry, with no CPU-only build
+that excludes it, and its 325 KB `ThirdPartyNotices.txt` at v1.28.0 confirms
+this is not a lone edge case. Writing `license: MIT` alone would be untrue
+about the redistributed `libonnxruntime.so`, and the manifest is what
+customers read to build their own compliance bill of materials for images
+they redistribute — a field that can only hold simple ids forces exactly
+that untrue entry. This recurs immediately: Arm Compute Library ships
+Apache-2.0 + BSD-3-Clause + MIT, KleidiAI ships Apache-2.0 + BSD-3-Clause,
+and ncnn is BSD-3-Clause plus separately-licensed components — all three are
+blocked by the same limitation the enum previously had. Every component
+named in a compound expression must itself already be a permissive
+allowlisted id (both `MIT` and `Apache-2.0` are); a compound naming a
+non-allowlisted licence still needs its own sign-off, not a slip-in.
 
 ## Adding a library
 

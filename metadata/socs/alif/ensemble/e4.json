@@ -69,7 +69,10 @@
       "isa": "Armv8.1-M",
       "trustzone": true,
       "vector_extension": "Helium",
-      "fpu": "double-precision"
+      "fpu": "double-precision",
+      "zephyr_cpucluster": "rtss_hp",
+      "itcm_global_base": 1342177280,
+      "dtcm_global_base": 1350565888
     },
     {
       "id": "m55_he",
@@ -81,7 +84,10 @@
       "isa": "Armv8.1-M",
       "trustzone": true,
       "vector_extension": "Helium",
-      "fpu": "double-precision"
+      "fpu": "double-precision",
+      "zephyr_cpucluster": "rtss_he",
+      "itcm_global_base": 1476395008,
+      "dtcm_global_base": 1484783616
     }
   ],
   "npus": [
@@ -186,16 +192,27 @@
       "temperature_grade": "extended",
       "mram_mb": 5.5,
       "sram_kb": 9984,
+      "sram_banks_kb": {
+        "SRAM0": 4096,
+        "SRAM1": 4096,
+        "SRAM2_M55_HP_ITCM": 256,
+        "SRAM3_M55_HP_DTCM": 1024,
+        "SRAM4_M55_HE_ITCM": 256,
+        "SRAM5_M55_HE_DTCM": 256
+      },
       "optional_features": { "npu_hg": true, "isp": true, "jpeg_encoder": true },
       "shipment_suffixes": ["-T", "-Y"],
       "alp_module_skus": ["E1M-AEN401"],
+      "notes": "debug.jlink_flash_device is explicit null -- a DECLARED known-unknown, not an absent key (#1295). This file's order code AE402FA0E5597LE0 does not appear in the SEGGER J-Link DLL V9.46 device table under any spelling: the DB's only E4 entries are AE402FA0E5597LS0_M55_HE and AE402FA0E5597BS0_M55_HE (index 93/94, confirmed by JLINKARM_DEVICE_GetInfo readback) -- `LE0` is not `LS0`, and picking the nearest string is exactly the guess this field's schema forbids (a wrong device profile fails a flash on real hardware). SETTLED (#1443) against the vendor source: the Alif CMSIS DFP (alifsemi/alif_ensemble-cmsis-dfp, AlifSemiconductor.Ensemble.pdsc) declares AE402FA0E5597LE0 verbatim, alongside AE402FA0E5597BE0 and AE402FA0D5597BS0, so THIS ORDER CODE IS CORRECT. Conversely neither of SEGGER's two E4 entries is declared by Alif at all -- SEGGER ships no profile for any Alif-declared E4 part, which makes this a vendor-level gap rather than a lookup failure, and makes substituting the LS0 profile a write against a part whose flash-algorithm provenance is unknown. tan's flow_d_available() tests key PRESENCE, so this null deliberately reaches plan_alif_mram_jlink and becomes the loud refusal it already produces for every other malformed Flow D field, rather than a silent Flow A fallback.",
       "debug": {
         "pyocd_target": "AE402FA0E5597LE0",
-        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" }
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" },
+        "jlink_flash_device": null
       }
     }
   ],
   "notes": [
+    "cores[].zephyr_cpucluster / itcm_global_base / dtcm_global_base and variants[].sram_banks_kb added 2026-08-12 (#1332) so `--emit zephyr-board` can regenerate E1M-AEN401.  Grounded in the Alif DFP for THIS part (Device/soc/AE402FA0E5597/include/soc_features.h): SOC_FEAT_HP_ITCM_BASE 0x50000000 / HP_DTCM_BASE 0x50800000 / HE_ITCM_BASE 0x58000000 / HE_DTCM_BASE 0x58800000, and sizes HP_ITCM 0x40000 (256 KiB) / HP_DTCM 0x100000 (1024 KiB) / HE_ITCM 0x40000 / HE_DTCM 0x40000 with BULK_SRAM0 + BULK_SRAM1 0x400000 (4096 KiB) each -- summing to the 9984 KiB this file already declares as sram_kb.  The pdsc E4 subFamily memory map corroborates every value (SRAM2@0x50000000, SRAM3@0x50800000, SRAM4@0x58000000, SRAM5@0x58800000).  Cluster names rtss_hp/rtss_he match the committed board basename alp_e1m_aen401_m55_hp_ae402fa0e5597le0_rtss_hp and the RTSS_HP/RTSS_HE compile defines in the pdsc.",
     "watchdog 2 is DFP-confirmed (WDT_HE_CTRL + WDT_HP_CTRL): E4 has no A32 cluster, so it lacks the WDT_AP_CTRL/WDT_AP_S_CTRL pair E6/E8 carry.  E4's full *_BASE set is a strict SUBSET of AE822FA0E5597's (183 vs 199) and all 16 extra E8 symbols are A32-related (MHU_A32_*, MHU_APSS_*, WDT_AP_*), so E4 and E8 are identical apart from the A32 cluster.",
     "Peripheral counts RE-INGESTED 2026-07-25 from the Alif DFP (Device/soc/AE402FA0E5597/include/) by counting peripheral *_BASE symbols and reading soc_features.h, REPLACING values that had been inherited from a sibling in the older F80F55xx generation (E3/E5/E7) -- E4/E6/E8 are the FA0E5597 generation, so that inheritance imported the wrong generation's numbers. Corrected: i2c_lp 1->2 (LPI2C0+LPI2C1), spi_lp 1->2 (LPSPI0+LPSPI1), gpio_18v 120->136 (17 GPIO ports x8; SOC_FEAT_GPIO_HAS_PORT16_17 = 1, vs 15 ports on E7), i3c_lp added (LPI3C_BASE 0x43006000, IRQ50_Handler LPI3C_IRQHandler), timer_lp_32bit added (LPUTIMER_BASE present here, absent on E7). Re-verified as already correct: timer_32bit 12 + encoder_quadrature 4 (SOC_FEAT_HAS_UTIMER4_15 + SOC_FEAT_QEC_HAS_SEP_CHANNELS), timer_lp 4 (SOC_FEAT_HAS_LPTIMER2_3), rtc 1 (SOC_FEAT_HAS_LPRTC1 = 0), isp (SOC_FEAT_HAS_ISP), and dpi_parallel/pdm/pdm_lp (single CDC/PDM/LPPDM instances). Still unconfirmed: the pdm/pdm_lp value of 4 is a channel count inside one block -- uniform across every Alif SoC file, so no cross-part inconsistency remains, but the number itself needs the datasheet.",
     "Datasheet v1.0 released (Alif_E4_Datasheet_v1.0.pdf, 2026-05-11).  Digital-peripheral counts inherited from the E3 Ensemble sibling (identical 2x-M55 / OctalSPI topology; E3 and E7 carry the same digital block, confirming it is core-count-independent across the family).  `watchdog` derived as one-per-core (2x M55 = 2).  `isp`/`jpeg_encoder` added per this part's own variant optional_features (E4 ships the ISP + JPEG that E3 lacks); external memory stays OctalSPI (not E8's HexSPI).  Pending a direct E4-datasheet re-ingest to confirm the inherited counts.",
@@ -203,6 +220,8 @@
     "HWRM v0.3 is Alif-confidential -- referenced here for traceability; the file itself stays out of git (the `confidential: true` flag on the hwrm block makes that explicit).",
     "Errata AERR0012 v2.0 covers E4/E6/E8 jointly; individual `items` list is pending ingestion against the errata doc.",
     "Order code AE402FA0E5597LE0 backs the E1M-AEN401 module SKU.",
-    "USB = xHCI USB-2.0 dual-role @ 0x48200000 (IRQ 101), 16 endpoints; grounded from the Alif DFP soc.h/soc_features.h (AE402FA0E5597). Host mode supported (E4 datasheet 'USB 2.0 HS/FS Host/Device')."
+    "USB = xHCI USB-2.0 dual-role @ 0x48200000 (IRQ 101), 16 endpoints; grounded from the Alif DFP soc.h/soc_features.h (AE402FA0E5597). Host mode supported (E4 datasheet 'USB 2.0 HS/FS Host/Device').",
+    "debug.jlink_flash_device is the one genuine unknown in the #1295 sweep -- see the variant's own `notes` for the LE0 vs LS0 order-code discrepancy that blocks populating it.",
+    "2026-08-14 (#1444): variants[] audited against the Alif CMSIS DFP (alifsemi/alif_ensemble-cmsis-dfp, AlifSemiconductor.Ensemble.pdsc) and left at one entry, which is now a checked result rather than an unchecked default. Alif declares three E4 devices; the other two, AE402FA0E5597BE0 and AE402FA0D5597BS0, are both WLCSP216 per their own `<feature type=\"CSP\" n=\"216\">` element, and this corpus carries no WLCSP part in any subfamily (product decision -- Alp Lab modules are BGA only; enforced by validate_metadata.py so it cannot drift back). AE402FA0E5597LE0 is the sole Alif-declared BGA E4 part. The audit did settle #1295's open question: SEGGER's DLL V9.46 table holds exactly two E4 entries, AE402FA0E5597LS0 and AE402FA0E5597BS0 (indices 93/94), and Alif declares NEITHER of them -- so the null above is a vendor-level gap across the whole E4 subfamily, not a lookup failure on one order code."
   ]
 }

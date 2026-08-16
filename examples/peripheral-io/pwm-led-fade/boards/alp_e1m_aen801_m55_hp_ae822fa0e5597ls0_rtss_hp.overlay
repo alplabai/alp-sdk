@@ -2,7 +2,11 @@
  * Copyright (c) 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * E1M-AEN801 M55-HP overlay for pwm-led-fade (#1375).
+ * E1M-AEN801 M55-HP overlay for pwm-led-fade (#1375).  The M55-HE overlay
+ * beside this one is identical -- the LED pad is a SoM-level route, not a
+ * core-level one, so either core can drive it (#1383 item 1: #1375's own
+ * repro environment is rtss_he, and this board-qualified file used to
+ * cover only rtss_hp).
  *
  * WHY THIS FILE EXISTS: board.yaml's declarative `pins: [{ e1m: E1M_PWM3,
  * macro: EVK_PWM_LED_GREEN }]` + `peripherals: [pwm]` route does NOT emit a

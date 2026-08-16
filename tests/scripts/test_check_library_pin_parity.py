@@ -330,6 +330,10 @@ def test_missing_meta_alp_sdk_fails_loudly_not_silently(tmp_path: Path):
 # updating both the docstring and this test fails here first.
 _WEST_AXIS_IN_TREE_OR_NO_UPSTREAM_PIN = {
     "coap", "lwm2m", "modbus", "gfx-compat", "nlohmann-json", "pid", "ros2",
+    # Yocto-only, like ros2: pinned by its own meta-alp-sdk recipe (upstream
+    # microsoft/onnxruntime v1.28.0), with no Zephyr side and no west.yml
+    # project to ground a revision against.
+    "onnxruntime",
 }
 _WEST_AXIS_ALLOWLIST_ONLY = {
     "cmsis-dsp", "cmsis-nn", "littlefs", "lvgl", "mbedtls", "nanopb",

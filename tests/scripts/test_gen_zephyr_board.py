@@ -62,6 +62,44 @@ BOARDS_ROOT = REPO / "zephyr" / "boards" / "alp"
 HAND_MAINTAINED = frozenset({"board.cmake", "Kconfig"})
 METADATA_ROOT = REPO / "metadata"
 
+# The board directories whose committed tree is pinned byte-for-byte below.
+# Single source of truth: the per-board test methods read this, and
+# `test_every_committed_board_is_accounted_for` cross-checks it against the
+# directories that actually exist under zephyr/boards/alp/.
+PARITY_COVERED: dict[str, tuple[str, str]] = {
+    "e1m_aen801_m55_hp": ("E1M-AEN801", "m55_hp"),
+    "e1m_aen801_m55_he": ("E1M-AEN801", "m55_he"),
+    "e1m_v2n101_m33_sm": ("E1M-V2N101", "m33_sm"),
+    "e1m_v2m101_m33_sm": ("E1M-V2M101", "m33_sm"),
+}
+
+# Board directories that are committed but CANNOT be emitted at all today, with
+# the specific missing generator input that blocks each one.  Issue #1332: these
+# two were absent from the parity list with nothing recording why, so a
+# generator change updated the four boards above and left these behind with no
+# test red -- exactly what happened to the MRAM partition table in #1289.
+#
+# This is NOT a permanent exemption.  `test_non_emittable_boards_still_blocked`
+# asserts each entry still raises, so the moment the missing input lands the
+# test goes RED and tells you to move the board into PARITY_COVERED.  Nothing
+# here is skipped silently.
+NOT_EMITTABLE: dict[str, str] = {
+    "e1m_aen401_m55_hp":
+        "metadata/socs/alif/ensemble/e4.json has no `zephyr_peripherals_dtsi`; "
+        "alp-sdk ships no zephyr/dts/alif/ensemble_e4_peripherals.dtsi for the "
+        "E4's own peripheral/NPU node set (the E8 overlay is different silicon)",
+    "e1m_aen601_m55_hp":
+        "metadata/socs/alif/ensemble/e6.json has no `zephyr_peripherals_dtsi`; "
+        "alp-sdk ships no zephyr/dts/alif/ensemble_e6_peripherals.dtsi for the "
+        "E6's own peripheral/NPU node set (the E8 overlay is different silicon)",
+}
+
+
+def _sku_and_core(board_dir: str) -> tuple[str, str]:
+    """`e1m_aen401_m55_hp` -> `("E1M-AEN401", "m55_hp")`."""
+    parts = board_dir.split("_")
+    return f"E1M-{parts[1].upper()}", "_".join(parts[2:])
+
 
 class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
     """Regenerate each covered board and diff every produced file against
@@ -84,17 +122,62 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
                 f"generated {fname} for {sku}/{core_id} drifted from the "
                 f"committed {committed_path} -- regenerate or fix the source")
 
+    def _parity(self, board_dir: str) -> None:
+        sku, core_id = PARITY_COVERED[board_dir]
+        self._assert_matches_committed(sku, core_id, board_dir)
+
     def test_aen801_m55_hp_full_tree(self) -> None:
-        self._assert_matches_committed("E1M-AEN801", "m55_hp", "e1m_aen801_m55_hp")
+        self._parity("e1m_aen801_m55_hp")
 
     def test_aen801_m55_he_full_tree(self) -> None:
-        self._assert_matches_committed("E1M-AEN801", "m55_he", "e1m_aen801_m55_he")
+        self._parity("e1m_aen801_m55_he")
 
     def test_v2n101_m33_sm_family_agnostic_files(self) -> None:
-        self._assert_matches_committed("E1M-V2N101", "m33_sm", "e1m_v2n101_m33_sm")
+        self._parity("e1m_v2n101_m33_sm")
 
     def test_v2m101_m33_sm_family_agnostic_files(self) -> None:
-        self._assert_matches_committed("E1M-V2M101", "m33_sm", "e1m_v2m101_m33_sm")
+        self._parity("e1m_v2m101_m33_sm")
+
+    def test_every_committed_board_is_accounted_for(self) -> None:
+        """No committed board tree may sit outside BOTH lists (#1332).
+
+        The original defect was silence: `e1m_aen401_m55_hp` /
+        `e1m_aen601_m55_hp` were simply absent, so nothing recorded that they
+        were uncovered or why.  A newly added board directory now has to be
+        placed deliberately -- pinned in PARITY_COVERED, or listed in
+        NOT_EMITTABLE with its blocking reason.
+        """
+        committed = {p.name for p in BOARDS_ROOT.iterdir() if p.is_dir()}
+        accounted = set(PARITY_COVERED) | set(NOT_EMITTABLE)
+        self.assertEqual(
+            committed - accounted, set(),
+            "committed board tree(s) covered by neither PARITY_COVERED nor "
+            "NOT_EMITTABLE -- add them to one (see #1332)")
+        self.assertEqual(
+            accounted - committed, set(),
+            "PARITY_COVERED / NOT_EMITTABLE name board directories that do "
+            "not exist under zephyr/boards/alp/")
+        self.assertEqual(
+            set(PARITY_COVERED) & set(NOT_EMITTABLE), set(),
+            "a board cannot be both parity-pinned and non-emittable")
+
+    def test_non_emittable_boards_still_blocked(self) -> None:
+        """Each NOT_EMITTABLE entry must STILL fail to emit.
+
+        This is what keeps the exemption from becoming permanent: once the
+        missing input lands, `emit_zephyr_board()` succeeds, this test goes red,
+        and the board has to be moved into PARITY_COVERED -- where a drift like
+        #1289's stale MRAM partition table would have been caught.
+        """
+        for board_dir, reason in NOT_EMITTABLE.items():
+            with self.subTest(board=board_dir):
+                sku, core_id = _sku_and_core(board_dir)
+                with self.assertRaises(
+                        ZephyrBoardEmitError,
+                        msg=(f"{board_dir} now emits -- move it from "
+                             f"NOT_EMITTABLE into PARITY_COVERED and pin its "
+                             f"committed tree (recorded blocker was: {reason})")):
+                    emit_zephyr_board(sku, core_id, METADATA_ROOT)
 
     def test_aen_hand_maintained_files_stay_hand_authored(self) -> None:
         """`board.cmake` and the bare `Kconfig` are explicitly out of scope
@@ -403,6 +486,63 @@ class TestZephyrBoardCli(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("--output", result.stderr)
+
+
+class TestAenLogModeDefault(unittest.TestCase):
+    """Every AEN board defaults LOG_MODE to LOG_MODE_MINIMAL (issue #1373).
+
+    Zephyr's inherited `default LOG_MODE_DEFERRED` hands every record --
+    and, via CONFIG_LOG_PRINTK, the Alp SDK banner with it -- to the log
+    processing thread, which runs BELOW main and is therefore starved
+    outright by the non-yielding busy-loop main() the AEN bench procedure
+    requires (an idling M55 makes the Secure Enclave gate the DAP and the
+    SE-UART).  Measured on E1M-AEN801 silicon: zero UART bytes out of a
+    running, fault-free board.
+
+    This is a FAMILY invariant, and only two of the four AEN board trees
+    are generated -- e1m_aen401_m55_hp / e1m_aen601_m55_hp are
+    hand-authored, so the byte-equivalence class above cannot see them
+    drift.  Hence a check over every AEN board directory on disk rather
+    than over the generator's output alone.
+    """
+
+    def _aen_board_dirs(self) -> list[Path]:
+        dirs = sorted(p for p in BOARDS_ROOT.glob("e1m_aen*") if p.is_dir())
+        self.assertTrue(dirs, f"no AEN board trees under {BOARDS_ROOT}")
+        return dirs
+
+    def test_every_aen_board_defaults_log_mode_minimal(self) -> None:
+        for board_dir in self._aen_board_dirs():
+            kdc = board_dir / "Kconfig.defconfig"
+            self.assertTrue(
+                kdc.is_file(),
+                f"{board_dir.name} has no Kconfig.defconfig to carry the "
+                f"LOG_MODE default")
+            text = kdc.read_text(encoding="utf-8")
+            self.assertIn(
+                "choice LOG_MODE\n\tdefault LOG_MODE_MINIMAL\nendchoice\n", text,
+                f"{kdc} lost its LOG_MODE_MINIMAL board default -- a "
+                f"busy-loop main() on this board will print nothing (#1373)")
+
+    def test_no_aen_defconfig_assigns_the_choice_symbol_directly(self) -> None:
+        """`CONFIG_LOG_MODE_MINIMAL=y` in a board `_defconfig` reaches the
+        same end state when CONFIG_LOG=y, but it also assigns an INVISIBLE
+        choice symbol on every CONFIG_LOG=n build -- and 47 fragments under
+        examples/aen/ set CONFIG_LOG=n.  Zephyr's
+        scripts/kconfig/kconfig.py::check_assigned_choice_values() then
+        warns "The choice symbol LOG_MODE_MINIMAL ... was selected (set
+        =y), but no symbol ended up as the choice selection" on each one.
+        The Kconfig.defconfig `default` is inert there, so keep the
+        `_defconfig` free of it.
+        """
+        for board_dir in self._aen_board_dirs():
+            for defconfig in board_dir.glob("*_defconfig"):
+                text = defconfig.read_text(encoding="utf-8")
+                self.assertNotIn(
+                    "CONFIG_LOG_MODE_MINIMAL=y", text,
+                    f"{defconfig} assigns the LOG_MODE choice symbol "
+                    f"directly; use the Kconfig.defconfig `choice LOG_MODE / "
+                    f"default LOG_MODE_MINIMAL` form instead (#1373)")
 
 
 if __name__ == "__main__":

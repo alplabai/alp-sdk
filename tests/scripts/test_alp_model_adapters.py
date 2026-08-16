@@ -14,6 +14,13 @@ from alp_model.adapters.executorch import ExecutorchAdapter
 _ROOT = Path(__file__).resolve().parents[2]
 
 
+def test_onnx_is_an_accepted_blob_format():
+    """The ORT CPU backend consumes raw .onnx -- neither vela_tflite nor dxnn
+    nor drpai_dir."""
+    from alp_model import manifest
+    assert "onnx" in manifest.VALID_BLOB_FORMATS
+
+
 def test_cpu_adapter_is_a_compiler_adapter():
     assert issubclass(CpuAdapter, CompilerAdapter)
 

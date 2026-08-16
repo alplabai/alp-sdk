@@ -226,6 +226,56 @@ alp_status_t cc3501e_wifi_connect(cc3501e_t  *ctx,
 	size_t psk_len  = (pass != NULL) ? strlen(pass) : 0u;
 	if (ssid_len > 32u || psk_len > 64u) return ALP_ERR_INVAL;
 
+	/* #1435: clear a STALE ASSOCIATION left by a previous FAILED connect
+	 * before this one submits.  Bench-proven on E1M-AEN801 r1, reproduced
+	 * 2/2, one boot, single variable: connect to a real AP succeeds
+	 * (rssi=-48 dBm, ip 192.168.1.14); `wifi disconnect`; the SAME connect
+	 * succeeds again (rssi=-47 dBm); ONE connect to a non-existent SSID
+	 * fails -5; the SAME connect that just worked now ALSO fails -5,
+	 * nothing else changed; `wifi disconnect`; the same connect succeeds
+	 * again (rssi=-49 dBm).  The second connect's failure decodes as
+	 * ALP_CC3501E_WIFI_FAIL_KICK (3): the Wlan_Connect kick itself, not the
+	 * SSID/passphrase -- proof it is the stale association from the FIRST
+	 * failure wedging the second, not a bad credential.
+	 *
+	 * This is NOT a role teardown: the STA role is brought up once per
+	 * process lifetime (wifi_sta_role_up, pre-cached in
+	 * cc3501e_hw_wifi_boot_start()) and must stay up; Wlan_Disconnect does
+	 * not take the role down.  What wedges the next Wlan_Connect kick is
+	 * association state left inside the NWP by the failed attempt, and
+	 * cc3501e_wifi_disconnect() (WIFI_DISCONNECT, 0x13) is the bench-proven
+	 * clear for it.
+	 *
+	 * Cleared at ENTRY, not at the failure exits below: clearing on the way
+	 * OUT of a failed connect erased the failure_reason latch a caller
+	 * needs to read (cc3501e_hw_wifi_disconnect() does
+	 * wifi_conn_set(DISCONNECTED, FAIL_NONE)), could tear down a LATE
+	 * success that lands after a poll-exhaustion timeout, and added up to
+	 * CC3501E_WIFI_DOWN_WINDOW_MS to every failed call regardless of
+	 * timeout_ms.  Clearing at entry, conditional on the latch actually
+	 * reading CONN_FAILED, avoids all three: a failed attempt's
+	 * state/fail_reason survive untouched for the caller to read, a live
+	 * CONNECTING attempt or an already-CONNECTED association is left alone
+	 * (see below), and the bound only ever applies to the connect that
+	 * follows a failure.
+	 *
+	 * Uses wifi_status_once() -- the single bounded (CC3501E_REQ_TMO_MS)
+	 * attempt -- NOT the public cc3501e_wifi_status(), which rides its own
+	 * CC3501E_WIFI_DOWN_WINDOW_MS retry and would make a wedged transport
+	 * worse here.  If the read fails, or the state is anything other than
+	 * CONN_FAILED, this falls through and does nothing: CONNECTING is a
+	 * live attempt (today's behaviour is the new submit bounces BUSY and
+	 * the status loop below keeps tracking the OLD attempt), and
+	 * CONNECTED is connect-while-connected -- a pre-existing, separate,
+	 * unowned semantic this fix does not expand into.  The clear's own
+	 * result is deliberately discarded -- best-effort, same reasoning as
+	 * every other radio-op teardown in this file. */
+	alp_cc3501e_wifi_status_t entry_st;
+	if (wifi_status_once(ctx, &entry_st) == ALP_OK &&
+	    entry_st.state == ALP_CC3501E_WIFI_CONN_FAILED) {
+		(void)cc3501e_wifi_disconnect(ctx);
+	}
+
 	/* On-wire payload: alp_cc3501e_wifi_connect_t header (4 B) + inline SSID +
 	 * inline passphrase, all packed with no padding. */
 	uint8_t                    payload[sizeof(alp_cc3501e_wifi_connect_t) + 32u + 64u];
@@ -361,11 +411,66 @@ alp_status_t cc3501e_wifi_ap_start(cc3501e_t  *ctx,
 		memcpy(&payload[off], pass, psk_len);
 		off += psk_len;
 	}
-	/* AP bring-up is worker-routed in the firmware, so the bridge is briefly
-	 * down (BUSY/IO) while the radio comes up; poll_by_repeat re-issues until
-	 * OK (AP up) or a hard error, exactly like cc3501e_wifi_connect. */
-	return poll_by_repeat(
-	    ctx, ALP_CC3501E_CMD_WIFI_AP_START, payload, off, NULL, 0, NULL, timeout_ms);
+
+	/* SUBMIT ONCE (#1385) -- do NOT poll_by_repeat() this opcode.  AP_START is
+	 * fire-and-forget on the firmware side exactly like CONNECT_STA
+	 * (handle_worker_routed_payload acks every fresh submit RESP_ERR_BUSY, and
+	 * worker_run_pending() resets the job slot for CONNECT_STA/AP_START BEFORE
+	 * cc3501e_bridge_ready() re-arms the link, so the WORKER_DONE -> RESP_OK
+	 * branch is never collectable).  A poll-by-repeat wrapper around this
+	 * opcode is PROVABLY a no-win loop: every attempt lands on either BUSY (no
+	 * progress) or the dead-phase 0x00 alias, which cc3501e_request_locked()
+	 * now rejects as ALP_ERR_IO (also no progress) -- there is no reply this
+	 * opcode can ever produce that reads as ALP_OK.  An earlier revision of
+	 * this fix kept the poll anyway (reasoning: "nothing sound to replace it
+	 * with"), which left two costs unpaid: the console's only caller passes a
+	 * 50 s budget, so `wifi ap` blocked the shell for up to 50 s on a
+	 * result that was mathematically already known before the first byte went
+	 * on the wire; and every retry that landed on the freshly-reset IDLE slot
+	 * submitted a BRAND NEW `Wlan_RoleUp` on live radio hardware -- the same
+	 * retry storm #1376 measured and fixed for CONNECT_STA.  Submitting once
+	 * and returning immediately removes both costs, but NOT at zero
+	 * information loss: the old poll also retried a RESP_ERR_BUSY bounce off
+	 * an in-flight worker job and a transport IO fault during the radio-down
+	 * window, both cases where nothing had been submitted yet, so dropping it
+	 * trades "eventually lands (or reports ALP_ERR_TIMEOUT after genuinely
+	 * exhausting the budget)" for "one shot, then ALP_ERR_TIMEOUT either way"
+	 * -- see the caller-visible-outcome distinction in the @warning on
+	 * cc3501e_wifi_ap_start() in <alp/chips/cc3501e/wifi.h>.
+	 *
+	 * cc3501e_wifi_connect() escaped the identical trap by submitting once and
+	 * then awaiting the independent WIFI_STATUS latch -- AP_START has no such
+	 * channel: the TI HAL's cc3501e_hw_wifi_ap_start()
+	 * (hal/ti/cc3501e_hw_ti_wifi.c) never writes g_wifi_conn, the latch
+	 * handle_wifi_status reads.  Giving AP_START one is a FIRMWARE change
+	 * (mirror the AP outcome into a latch, or add an AP-status opcode + a
+	 * protocol version bump) and needs a bench, so it is not made here.
+	 * @p timeout_ms is therefore currently unused: there is nothing left to
+	 * bound a retry loop over.  It stays in the signature (ABI/API stable) so
+	 * a future firmware-side confirmation channel can reuse it exactly as
+	 * cc3501e_wifi_connect() uses its own timeout_ms, without an API break. */
+	(void)timeout_ms;
+	alp_status_t s = cc3501e_request(
+	    ctx, ALP_CC3501E_CMD_WIFI_AP_START, payload, off, NULL, 0, NULL, CC3501E_REQ_TMO_MS);
+	/* Only ALP_ERR_INVAL and ALP_ERR_NOT_READY are definite, conclusive
+	 * answers -- the former is wifi_join()'s synchronous pre-worker validation
+	 * reject (same firmware function CONNECT_STA's payload goes through, see
+	 * cc3501e_wifi_connect()'s identical short-circuit), the latter never
+	 * reached the wire at all (ctx NULL/uninitialised).  Every other outcome
+	 * squashes to ALP_ERR_TIMEOUT, and NOT all of them mean "submitted": the
+	 * expected RESP_ERR_BUSY submit ack and the rejected dead-phase alias did
+	 * reach the wire, but a RESP_ERR_BUSY bounce off an in-flight worker job
+	 * (cmd never queued, firmware/cc3501e/src/protocol.c's QUEUED/RUNNING
+	 * default: case), a transport IO fault during the radio-down window, and
+	 * cc3501e_request()'s own ALP_ERR_BUSY when cc3501e_lock_acquire() times
+	 * out under a concurrent caller all mean NOTHING was submitted -- and read
+	 * back identical to the cases that did.  ALP_ERR_TIMEOUT here is therefore
+	 * fully inconclusive, not "submitted, unconfirmed" (see the @warning on
+	 * cc3501e_wifi_ap_start() in <alp/chips/cc3501e/wifi.h>). */
+	if (s == ALP_ERR_INVAL || s == ALP_ERR_NOT_READY) {
+		return s;
+	}
+	return ALP_ERR_TIMEOUT;
 }
 
 alp_status_t cc3501e_wifi_ap_stop(cc3501e_t *ctx)

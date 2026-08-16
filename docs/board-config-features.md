@@ -127,6 +127,29 @@ emitted only for a project that has at least one `os: zephyr` slice:
 sysbuild exists only inside a Zephyr build, so a Yocto-only project
 gets no `build/alp_sysbuild.conf` at all.
 
+`swap_algorithm:` is likewise optional and **the target's own DT
+supplies its default**, not one value for every SKU.  A target whose
+`memory_map:` declares a disjoint per-core `<role>_slot0` region
+(today every AEN SoM -- metadata/e1m_modules/E1M-AEN301.yaml ..
+E1M-AEN801.yaml, #1069 + #1445 --
+both M55 cores share the same physical App MRAM, so slot0 was split
+into disjoint per-core windows and the secondary/scratch slot dropped
+rather than forced to fit) has no slot1/scratch partition, so it
+defaults to single-app boot (`SB_CONFIG_MCUBOOT_MODE_SINGLE_APP=y`)
+instead of swap-using-scratch.  Every other target -- no `memory_map:`
+override at all, or a `memory_map:` override declared for an unrelated
+reason (it does not declare a `<role>_slot0` region) -- keeps the
+historical swap-using-scratch default: `scripts/gen_zephyr_board.py`
+falls back to the stock two-slot layout when no `<role>_slot0`
+region is declared, so a real slot1 and scratch partition exist
+regardless of whether `memory_map:` is present.  The one exception
+is a DUAL-M55 AEN SoM: since #1446 that is refused at emit time
+rather than silently given the symmetric layout, because both cores
+would then boot from the same MRAM slot0 address (#1069).  Setting
+`swap_algorithm: scratch` (or `move`/`overwrite`) explicitly on a
+single-slot target such as E1M-AEN801 is a build-time error -- there
+is no slot1/scratch partition for it to use (#1413).
+
 There is no `slots:` / `scratch_size_kib:` / `anti_rollback:` field.
 Slot and scratch partition *sizes* are an SDK build-policy choice, not
 a per-project field -- MCUboot takes its geometry from the board DT

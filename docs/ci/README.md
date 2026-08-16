@@ -12,7 +12,7 @@ reference.
 
 ## Workflows shipped
 
-`.github/workflows/` carries **28** workflow files as of this revision
+`.github/workflows/` carries **29** workflow files as of this revision
 (counted via `ls .github/workflows/*.yml .github/workflows/*.yaml
 2>/dev/null | wc -l`; recount before trusting this number, it moves
 every time a workflow is added or retired).  The table below is a
@@ -29,13 +29,14 @@ that replaced it).
 |--------------------------------------------------------------------------------|------------------|------------|------------------------------------------------------------------------------------------------|
 | [`pr-twister.yml`](../../.github/workflows/pr-twister.yml)                        | every PR + push  | active     | Runs on `ubuntu-latest` (no docker container) with `ZEPHYR_TOOLCHAIN_VARIANT=host` so native_sim uses the runner's stock gcc.  west init + west update (cached), twister against `tests/zephyr/**` + `examples/**` on `native_sim/native/64`.  PR fails if any ztest fails. |
 | [`pr-plain-cmake.yml`](../../.github/workflows/pr-plain-cmake.yml)                | PR + push (paths)| active     | Plain-CMake builds for `ALP_OS=baremetal`, `ALP_OS=baremetal -DALP_SOM={aen,v2n}`, and `ALP_OS=yocto` with `ALP_BUILD_TESTS=ON`.  Installs `libmosquitto-dev` + `libasound2-dev` + `libssl-dev` + `pkg-config` so the Yocto-side wrappers (MQTT, ALSA audio, OpenSSL security) compile + their ctest binaries run. |
-| [`pr-static-analysis.yml`](../../.github/workflows/pr-static-analysis.yml)        | PR + push        | active     | `clang-format-diff` on changed lines + `cppcheck` informational pass over `src/` + `chips/`.  Diff-only format check; v0.2 will gate on full tree. |
+| [`pr-static-analysis.yml`](../../.github/workflows/pr-static-analysis.yml)        | PR + push        | active     | `clang-format-diff` on changed lines + `cppcheck` informational pass over `src/` + `chips/`.  Diff-only format check (`clang-format · diff-only` is one of `dev`'s required contexts). |
 | [`pr-generated-files.yml`](../../.github/workflows/pr-generated-files.yml)        | PR + push (paths)| active     | Catches drift in `<alp/soc_caps.h>` (re-runs `scripts/gen_soc_caps.py`) and `docs/abi/*.json` (re-runs `scripts/abi_snapshot.py`).             |
 | [`pr-metadata-validate.yml`](../../.github/workflows/pr-metadata-validate.yml)    | PR + push (paths)| active     | Validates every `metadata/socs/**/*.json` against the schema via `scripts/validate_metadata.py` + smoke-tests `scripts/alp_project.py` against `metadata/templates/board.yaml.example`. |
 | [`pr-doxygen.yml`](../../.github/workflows/pr-doxygen.yml)                        | PR + push (paths)| active     | Generates Doxygen HTML from `include/alp/**`.  Runs with `FAIL_ON_WARNINGS=YES` — zero warnings required; PR fails on any warning. |
 | [`coverity.yml`](../../.github/workflows/coverity.yml)                            | weekly + manual  | active     | Coverity Scan submission against <https://scan.coverity.com/projects/alplabai-alp-sdk>.  Secrets (`COVERITY_TOKEN`, `COVERITY_EMAIL`) provisioned; project name in the `COVERITY_PROJECT` Actions variable.       |
 | [`pr-bitbake.yml`](../../.github/workflows/pr-bitbake.yml)                        | PR to `main` (paths) | active | Dispatch bridge to the private `alp-sdk-internal` repo's self-hosted Yocto runner — see [`runner-architecture.md`](runner-architecture.md). |
-| [`onramp-clean-container.yml`](../../.github/workflows/onramp-clean-container.yml)| PR (paths) + weekly + manual + `run-full-quickstart` label | active | Runs the documented first-install journey (`docs/getting-started.md` §1–4) inside a genuinely bare `ubuntu:24.04` container — no apt package this job doesn't itself install. `prereqs-and-bootstrap` (every relevant PR) proves `bash scripts/bootstrap.sh` refuses with actionable hints then succeeds. `full-quickstart-build` (weekly cron + `workflow_dispatch` — both inert until this file reaches the default branch — or a PR carrying the `run-full-quickstart` label) walks the rest: installs `tan`, `west sdk install`s the Zephyr SDK, `tan sdk switch` + `tan build`, and asserts a real `zephyr.elf` came out. See issue #949. |
+| [`onramp-clean-container.yml`](../../.github/workflows/onramp-clean-container.yml)| PR (paths) + weekly + manual + `run-full-quickstart` label | active | Runs the documented first-install journey (`docs/getting-started.md` §1–4) inside a genuinely bare `ubuntu:24.04` container — no apt package this job doesn't itself install. `prereqs-and-bootstrap` (every relevant PR) proves `bash scripts/bootstrap.sh` refuses with actionable hints then succeeds. `full-quickstart-build` (weekly cron + `workflow_dispatch` — both inert until this file reaches the default branch — or a PR carrying the `run-full-quickstart` label) walks the rest: installs `tan`, `west sdk install`s the Zephyr SDK, `tan build --sdk-root` (plus a `tan init` scaffold and a build of it), and asserts a real `zephyr.elf` came out. See issue #949. |
+| [`pr-bootstrap-distro-install.yml`](../../.github/workflows/pr-bootstrap-distro-install.yml)| PR (paths) | active | Container-job proof for `metadata/bootstrap.json`'s `prerequisites.install.linux` (issue #1464): a 3-leg matrix (`debian:12`/apt, `fedora:42`/dnf, `rockylinux:9`/dnf) derives the install commands from the manifest at run time, actually runs them, and asserts every declared tool lands on `PATH` — the admission bar that keeps a guessed package name from ever shipping. |
 
 ## Workflows planned
 
@@ -63,7 +64,9 @@ result attached to the PR or release that needs it — see
 - [`scripts/abi_snapshot.py`](../../scripts/abi_snapshot.py) — generates a
   stable ABI fingerprint from `include/alp/**`.  Re-run by
   `pr-generated-files.yml` to catch drift; gates `include/alp/**`
-  diffs against `docs/abi/v0.1-snapshot.json` after v1.0.
+  diffs against `docs/abi/v<MINOR>-snapshot.json` — the snapshot for the
+  version `metadata/sdk_version.yaml` declares (`v0.15-snapshot.json`
+  today) — after v1.0.
 - [`scripts/bootstrap.sh`](../../scripts/bootstrap.sh) — fresh-clone
   developer setup (west workspace + Python deps + apt hints).
   Not in CI; the CI workflows install equivalents inline.

@@ -83,7 +83,10 @@
       "isa": "Armv8.1-M",
       "trustzone": true,
       "vector_extension": "Helium",
-      "fpu": "double-precision"
+      "fpu": "double-precision",
+      "zephyr_cpucluster": "rtss_hp",
+      "itcm_global_base": 1342177280,
+      "dtcm_global_base": 1350565888
     },
     {
       "id": "m55_he",
@@ -95,7 +98,10 @@
       "isa": "Armv8.1-M",
       "trustzone": true,
       "vector_extension": "Helium",
-      "fpu": "double-precision"
+      "fpu": "double-precision",
+      "zephyr_cpucluster": "rtss_he",
+      "itcm_global_base": 1476395008,
+      "dtcm_global_base": 1484783616
     }
   ],
   "npus": [
@@ -203,22 +209,34 @@
       "temperature_grade": "standard",
       "mram_mb": 5.5,
       "sram_kb": 9984,
+      "sram_banks_kb": {
+        "SRAM0": 4096,
+        "SRAM1": 4096,
+        "SRAM2_M55_HP_ITCM": 256,
+        "SRAM3_M55_HP_DTCM": 1024,
+        "SRAM4_M55_HE_ITCM": 256,
+        "SRAM5_M55_HE_DTCM": 256
+      },
       "optional_features": { "npu_hg": true, "isp": true, "jpeg_encoder": true },
       "shipment_suffixes": ["-T", "-Y"],
       "alp_module_skus": ["E1M-AEN601"],
       "debug": {
         "pyocd_target": "AE612FA0E5597LS0",
-        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" }
+        "jlink_device": { "m55_hp": "Cortex-M55", "m55_he": "Cortex-M55" },
+        "jlink_flash_device": "AE612FA0E5597LS0_M55_HE"
       }
     }
   ],
   "notes": [
+    "cores[].zephyr_cpucluster / itcm_global_base / dtcm_global_base and variants[].sram_banks_kb added 2026-08-12 (#1332) so `--emit zephyr-board` can regenerate E1M-AEN601.  E6 has NO directory in the Alif DFP (see the re-ingest note below), so these come from the pdsc E6 subFamily memory map, which IS E6-specific: SRAM0@0x02000000 0x400000, SRAM1@0x08000000 0x400000, SRAM2@0x50000000 0x40000 (HP ITCM), SRAM3@0x50800000 0x100000 (HP DTCM), SRAM4@0x58000000 0x40000 (HE ITCM), SRAM5@0x58800000 0x40000 (HE DTCM) -- summing to the 9984 KiB this file already declares as sram_kb, and identical to the AE402FA0E5597 (E4) and AE822FA0E5597 (E8) DFP values for the same generation.  Cluster names rtss_hp/rtss_he match the committed board basename alp_e1m_aen601_m55_hp_ae612fa0e5597ls0_rtss_hp and the RTSS_HP/RTSS_HE compile defines the pdsc declares for AE612FA0E5597LS0.",
     "The watchdog change drops the old one-per-core derivation: the DFP shows the A32 contributes TWO views (WDT_AP_CTRL + WDT_AP_S_CTRL), which is why E8 -- same three cores as E6 -- is 4 and not 3.  i3c_lp is corroborated by the vendor fork, which defines lpi3c0 in exactly one file: dts/arm/alif/ensemble/common/e4_e6_e8.dtsi, naming E4/E6/E8 (and no lpi3c0 exists under ensemble/e7/).",
     "Peripheral counts RE-INGESTED 2026-07-25.  E6 (AE612FA0E5597LS0) has NO directory in the Alif DFP, so these are NOT read from it directly: they come from the FA0E5597 generation, whose two DFP-present members -- AE402FA0E5597 (E4) and AE822FA0E5597 (E8) -- agree on every value below.  This REPLACES values inherited from the E7 sibling, which is the older F80F55xx generation.  Corrected: i2c_lp 1->2, spi_lp 1->2, gpio_18v 120->136, i3c_lp added, timer_lp_32bit added, watchdog 3->4.",
     "Datasheet v1.0 released (Alif_E6_Datasheet_v1.0.pdf, 2026-05-11).  Digital-peripheral counts inherited from the E7 sibling (same A32+2x-M55 / OctalSPI family block).  `watchdog` derived as one-per-core (1x A32 + 2x M55 = 3).  `isp`/`jpeg_encoder` added per E6's own v1.0 variant optional_features (E6 ships ISP + JPEG + U85); external memory stays OctalSPI (not E8's HexSPI).  Pending a direct E6-datasheet re-ingest to confirm the inherited counts.",
     "Topology: 1× A32 (800 MHz) + 2× M55 (HP+HE) + 2× U55 + 1× U85, ISP/JPEG, 5.5 MB MRAM, up to 9.75 MB SRAM, 2× OctalSPI.  Confirmed by the v1.0 datasheet.  External-memory interface stays OctalSPI ×2 (E8 uses HexSPI instead -- the IO mix legitimately differs).",
     "HWRM v0.3 is Alif-confidential -- referenced here for traceability; the file itself stays out of git.",
     "Errata AERR0012 v2.0 covers E4/E6/E8 jointly; individual `items` list is pending ingestion against the errata doc.",
-    "Order code AE612FA0E5597LS0 backs the E1M-AEN601 module SKU."
+    "Order code AE612FA0E5597LS0 backs the E1M-AEN601 module SKU.",
+    "debug.jlink_flash_device = AE612FA0E5597LS0_M55_HE populated (#1295), sourced from the SEGGER J-Link DLL V9.46 built-in device table via JLINKARM_DEVICE_GetInfo readback of the AlifSemiconductor block -- canonical entry name, not an order-code-alias probe. E6 is a FA0E5597-generation part alongside E4/E8, so its device name keeps the full order code plus `_M55_HE` (unlike E3/E5/E7, which drop the suffix and use a bare `_HE`).",
+    "2026-08-14 (#1444): variants[] audited against the Alif CMSIS DFP (alifsemi/alif_ensemble-cmsis-dfp, AlifSemiconductor.Ensemble.pdsc) and left at one entry. Alif declares two E6 devices; the other, AE612FA0E5597BS0, is WLCSP216 per its own `<feature type=\"CSP\" n=\"216\">` element, and this corpus carries no WLCSP part in any subfamily (product decision -- Alp Lab modules are BGA only; enforced by validate_metadata.py). AE612FA0E5597LS0 is the sole Alif-declared BGA E6 part. Recorded so the single entry reads as a checked result: SEGGER does carry a profile for the WLCSP sibling (AE612FA0E5597BS0_M55_HE, index 104), so its absence here is the package decision, not a missing device string."
   ]
 }

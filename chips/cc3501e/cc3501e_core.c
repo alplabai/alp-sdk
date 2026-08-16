@@ -119,7 +119,51 @@ alp_status_t cc3501e_reset(cc3501e_t *ctx)
 	 * 0xFFFFFFFF -> 0x5A5A5A5A, ping_ok climbing, after one hard reset).  The
 	 * bringup soak calls cc3501e_hard_reset() again if a single re-boot is not
 	 * enough.  Remove once TI ships the Puya flash fix. */
-	return cc3501e_hard_reset(ctx);
+	alp_status_t s = cc3501e_hard_reset(ctx);
+	if (s != ALP_OK) return s;
+
+	/* Wire-protocol compatibility gate (issue #1371): firmware/cc3501e/DESIGN.md
+     * has always documented "host refuses a mismatch" for GET_VERSION, but
+     * nothing ever compared the reply against ALP_CC3501E_PROTOCOL_VERSION --
+     * mirrors the GD32 bridge's major-version gate (gd32g553_init(),
+     * GD32G553_HOST_PROTOCOL_MAJOR), except the CC3501E wire carries a single
+     * flat uint16_t (protocol_meta.c), not a major/minor/patch triple, so
+     * there is no gradation to be lenient about: any difference means the
+     * host cannot know the frame layout it is about to parse.
+     *
+     * This is the ONLY place the comparison runs -- deliberately NOT inside
+     * cc3501e_get_version() itself, which stays a bare round-trip.  Two
+     * callers depend on that: the #1116 concurrency regression
+     * (tests/zephyr/cc3501e_transport_lock) drives cc3501e_get_version()
+     * directly against a modelled slave that never claims to speak
+     * ALP_CC3501E_PROTOCOL_VERSION, and the cold-boot liveness soaks
+     * (examples/aen/aen-cc3501e-bringup's soak loop, every 8th cycle;
+     * examples/peripheral-io/alp-console's cc3501e_bridge_bringup retry) use
+     * cc3501e_get_version() purely as "did the round trip complete", not as a
+     * compat gate -- putting the check there would turn a liveness probe
+     * into a hard failure on real hardware.
+     *
+     * A GET_VERSION round trip that does not complete at all (the common
+     * case immediately after this reset -- the Puya cold-boot flash bug
+     * documented above routinely needs a second, caller-driven
+     * cc3501e_hard_reset() before the slave answers anything) is NOT a
+     * version verdict: only an ANSWERED request can be compared, so leave
+     * the context usable and let the caller's own retry loop keep trying. */
+	uint16_t     fw_version = 0u;
+	alp_status_t vs         = cc3501e_get_version(ctx, &fw_version);
+	if (vs != ALP_OK) {
+		return ALP_OK;
+	}
+	if (fw_version != ALP_CC3501E_PROTOCOL_VERSION) {
+		/* Permanent, not transient: retrying cannot reconcile two binaries
+         * that disagree about the wire, so unlike the transport-timeout case
+         * above this clears initialised -- every later call on this ctx now
+         * fails ALP_ERR_NOT_READY instead of talking a wrong frame layout to
+         * a radio. */
+		ctx->initialised = false;
+		return ALP_ERR_VERSION;
+	}
+	return ALP_OK;
 }
 
 alp_status_t cc3501e_hard_reset(cc3501e_t *ctx)
@@ -449,39 +493,56 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 		 * disconnected-and-never-attempted state, DIAG_GET_STATS' zero
 		 * counters right after boot, SOCK_RECV's zero-bytes-pending) --
 		 * flagging those would trade a rare false ALP_OK for a routine false
-		 * ALP_ERR_IO on paths that are correct today.  WIFI_CONNECT_STA is
-		 * narrower and provably safe to flag: its firmware handler
+		 * ALP_ERR_IO on paths that are correct today.  The check is therefore
+		 * PER-OPCODE, and an opcode earns its place on the list below only by
+		 * a firmware fact: its handler cannot EVER frame a synchronous bare
+		 * RESP_OK, so seeing one here is self-evidently the dead-phase alias,
+		 * not a value this driver has merely decided is improbable.
+		 *
+		 * WIFI_CONNECT_STA (0x12) -- #1378.  Its firmware handler
 		 * (handle_worker_routed_payload's WORKER_IDLE case,
 		 * firmware/cc3501e/src/protocol.c) UNCONDITIONALLY acks a fresh
-		 * submit with RESP_ERR_BUSY -- a synchronous RESP_OK is not a value
-		 * that submit can EVER legitimately produce, so seeing one here is
-		 * self-evidently the dead-phase alias, not a value this driver has
-		 * merely decided is improbable.  Reject it as a transport error
-		 * instead of handing the caller a false "submitted", which is
-		 * exactly the #1376 false-connect mechanism.  cc3501e_wifi_connect()
-		 * no longer trusts this ack in either direction (it only trusts the
-		 * independent WIFI_STATUS latch -- see cc3501e_wifi.c), so this is
-		 * defense in depth, not the only thing standing between a dead phase
-		 * and a false positive.
+		 * submit with RESP_ERR_BUSY.  Rejecting the alias here avoids handing
+		 * the caller a false "submitted", which is exactly the #1376
+		 * false-connect mechanism.  cc3501e_wifi_connect() no longer trusts
+		 * this ack in either direction (it only trusts the independent
+		 * WIFI_STATUS latch -- see cc3501e_wifi.c), so for that opcode this
+		 * is defense in depth.
 		 *
-		 * WIFI_AP_START shares the identical firmware shape (the SAME
-		 * WORKER_IDLE-always-BUSY handler, the SAME "reset the job slot to
-		 * IDLE the instant the drain finishes" fire-and-forget treatment in
-		 * firmware/cc3501e/src/worker.c) and is NOT included here: its host
-		 * wrapper (cc3501e_wifi_ap_start()) still calls poll_by_repeat() on
-		 * this same opcode, unrestructured, so it is not this task's scope
-		 * to change -- see #1376/#1378 for the connect-specific fix this
-		 * closes.  The same aliasing also exists for every OTHER bare-ack
-		 * opcode this driver has no contract knowledge of (OTA_PROMOTE is
-		 * the sharpest example) and is NOT closed by this check; closing it
-		 * generally needs either a wire-level CRC/canary (a protocol
-		 * version bump) or the same independent-confirmation pattern
-		 * applied per opcode -- OTA_PROMOTE already has an analogous latch
-		 * to confirm against (OTA_STATUS, 0x44), and WIFI_AP_START would
-		 * need the same submit-once-then-poll treatment cc3501e_wifi_connect()
-		 * got here.  Tracked as a named gap on #1378. */
+		 * WIFI_AP_START (0x14) -- #1385.  Same handler, same unconditional
+		 * BUSY submit ack, AND the ONE path that could otherwise return a
+		 * bare RESP_OK for this opcode is unreachable to the host: the drain
+		 * (firmware/cc3501e/src/worker.c's worker_run_pending()) calls
+		 * worker_reset() for exactly CONNECT_STA and AP_START *before*
+		 * cc3501e_bridge_ready() re-arms the link, so the WORKER_DONE branch
+		 * that would reply RESP_OK is wiped while the host is still held off
+		 * and can never be collected.  Unlike CONNECT_STA this is NOT defense
+		 * in depth: this rejection was cc3501e_wifi_ap_start()'s ONLY route to
+		 * ALP_OK, so that wrapper no longer polls it -- it submits
+		 * WIFI_AP_START exactly once and reports ALP_ERR_TIMEOUT
+		 * unconditionally (see cc3501e_wifi.c), since there is no reply this
+		 * opcode can ever frame as success.  Restoring a real success path
+		 * still needs the same submit-once-then-confirm restructure
+		 * cc3501e_wifi_connect() got, which firmware v4 cannot yet support
+		 * (cc3501e_hw_wifi_ap_start() never writes the g_wifi_conn latch that
+		 * WIFI_STATUS reads, so there is no independent AP channel to confirm
+		 * against).  Still open on #1385.
+		 *
+		 * OTA_PROMOTE (0x46) is deliberately NOT on this list, despite being
+		 * the sharpest case named in #1378/#1385: handle_ota_promote()
+		 * (firmware/cc3501e/src/protocol_ota.c) returns
+		 * hw_to_resp(cc3501e_hw_ota_promote()), and the TI HAL's
+		 * cc3501e_hw_ota_promote() (hal/ti/cc3501e_hw_ti_ota.c) arms the
+		 * deferred swap-reboot and returns CC3501E_HW_OK UNCONDITIONALLY --
+		 * a bare RESP_OK (reply_data_len 0 -> payload len 1) is that opcode's
+		 * ONLY success reply.  Rejecting it here would make
+		 * cc3501e_ota_promote() always report ALP_ERR_IO and break firmware
+		 * promotion outright.  Closing the alias for OTA_PROMOTE needs either
+		 * a wire-level CRC/canary (a protocol version bump touching host and
+		 * firmware) or host-side confirmation against OTA_STATUS (0x44) --
+		 * neither is a transport-layer change.  Still open on #1385. */
 		if (resp == ALP_CC3501E_RESP_OK && resp_payload_len == 1u &&
-		    cmd == ALP_CC3501E_CMD_WIFI_CONNECT_STA) {
+		    (cmd == ALP_CC3501E_CMD_WIFI_CONNECT_STA || cmd == ALP_CC3501E_CMD_WIFI_AP_START)) {
 			s = ALP_ERR_IO;
 		} else {
 			s = resp_to_status(resp);

@@ -14,7 +14,9 @@ Run locally:
 
 from __future__ import annotations
 
+import json
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -122,7 +124,7 @@ def test_emit_system_manifest_round_trip(tmp_path: Path) -> None:
 
     # Helper-MCU registration: V2N101's Phase-3 `helper_firmware:`
     # block lists gd32_bridge (the GD32G553 supervisor firmware
-    # image).  The manifest carries the chip slug + flash_method
+    # image).  The manifest carries the chip slug + flash_policy
     # verbatim; firmware_path is absent (#852/#936 review fix, see
     # test_emit_system_manifest_populates_helper_mcus below).
     helper_names = [h["name"] for h in parsed["helper_mcus"]]
@@ -130,7 +132,9 @@ def test_emit_system_manifest_round_trip(tmp_path: Path) -> None:
     gd32 = next(h for h in parsed["helper_mcus"]
                 if h["name"] == "gd32_bridge")
     assert gd32["chip"] == "gd32g553"
-    assert gd32["flash_method"] == "swd_probe"
+    # #1439: no local flash path is declared any more.
+    assert "flash_method" not in gd32
+    assert gd32["flash_policy"] == "recovery_only"
 
 
 def test_emit_system_manifest_includes_hw_info_eeprom_feature(
@@ -179,7 +183,7 @@ def test_emit_system_manifest_populates_helper_mcus(tmp_path: Path) -> None:
     """Phase 3 helper-MCU population.
 
     V2N101's preset declares one helper_firmware entry (gd32_bridge);
-    the manifest must carry the chip slug + flash_method verbatim.
+    the manifest must carry the chip slug + flash_policy verbatim.
     `firmware_path` is entirely ABSENT from the preset (#852 review fix,
     2026-07): the old `firmware_path: TBD` sentinel wasn't actually treated
     as a sentinel by the frozen v0.4.1 Rust flash planner
@@ -203,24 +207,28 @@ def test_emit_system_manifest_populates_helper_mcus(tmp_path: Path) -> None:
     assert gd32["chip"] == "gd32g553"
     assert "firmware_path" not in gd32
     assert "note" not in gd32
-    assert gd32["flash_method"] == "swd_probe"
-    assert isinstance(gd32["flash_args"], dict)
-    assert gd32["flash_args"]["target"] == "gd32g553"
+    # #1439: GD32 programming left tan, so the preset declares neither
+    # `flash_method` nor `flash_args` and the row must carry neither.
+    assert "flash_method" not in gd32
+    assert "flash_args" not in gd32
+    assert gd32["flash_policy"] == "recovery_only"
+    assert gd32["update_channel"] == "alp_ota_spi_bridge"
 
 
-def test_helper_mcu_keeps_flash_keys_alongside_update_channel(
+def test_helper_mcu_keeps_sibling_keys_alongside_update_channel(
     tmp_path: Path,
 ) -> None:
-    """#1357: an `update_channel` must not delete the local flash path.
+    """#1357: an `update_channel` must not delete its sibling keys.
 
-    `_helper_mcus` used to project the two as an either/or, so the GD32
-    bridge -- which has BOTH a field-update channel (protocol v0.6 Path
-    A, slot-A/B application bootloader) and a recovery-only SWD flash --
-    would have had its `flash_method`/`flash_args` dropped from the
-    manifest. That is worse than declining the recovery path: the path
-    vanishes, so a tool cannot even explain why it is unavailable to
-    someone with a bricked bridge.
+    `_helper_mcus` used to project the axes as an either/or, so the GD32
+    bridge -- which carries a field-update channel (protocol v0.6 Path A,
+    slot-A/B application bootloader) alongside the fact of WHO may flash
+    it locally -- would have had that second fact dropped from the
+    manifest.
 
+    #1439 removed `flash_method`/`flash_args` from the preset entirely,
+    so this no longer guards those two keys; `flash_policy` is now the
+    sibling at risk, and the projection bug it pins is the same one.
     Every key the preset declares must survive independently.
     """
     path = _write_board(tmp_path, V2N_HAPPY)
@@ -231,19 +239,19 @@ def test_helper_mcu_keeps_flash_keys_alongside_update_channel(
 
     # The field-update channel is projected...
     assert gd32["update_channel"] == "alp_ota_spi_bridge"
-    # ...and it did NOT suppress the local flash recipe.  Assert the keys
-    # SURVIVED before reading them, so the regression reports as "the
-    # channel deleted the recovery path" rather than a bare KeyError.
-    assert {"flash_method", "flash_args", "flash_policy"} <= set(gd32), (
-        "update_channel suppressed the local flash keys; the recovery "
-        f"path vanished from the manifest: {sorted(gd32)}"
+    # ...and it did NOT suppress the policy beside it.  Assert the key
+    # SURVIVED before reading it, so the regression reports as "the
+    # channel deleted its sibling" rather than a bare KeyError.
+    assert "flash_policy" in gd32, (
+        "update_channel suppressed flash_policy; who may flash this part "
+        f"vanished from the manifest: {sorted(gd32)}"
     )
-    assert gd32["flash_method"] == "swd_probe"
-    assert gd32["flash_args"]["target"] == "gd32g553"
-    assert gd32["flash_args"]["jlink_device"] == "GD32G553MEY7TR"
-    assert gd32["flash_args"]["base"] == "0x08000000"
-    # ...and the fact that decides who may invoke it came along too.
     assert gd32["flash_policy"] == "recovery_only"
+    # And the removed axis stays removed -- an SDK re-emitting
+    # `flash_method: swd_probe` to a tan without that backend hits
+    # `executionPolicy.unknownBackend`, which is `fail`.
+    assert "flash_method" not in gd32
+    assert "flash_args" not in gd32
 
 
 def test_helper_mcu_omits_keys_the_preset_does_not_declare(
@@ -345,37 +353,105 @@ def test_emit_system_manifest_aen_flash_args_carries_jlink_flash_device(
             "AE822FA0E5597LS0_M55_HE"
 
 
-# E1M-AEN701's resolved SoC variant (silicon_variant: AE722F80F55D5LS in
-# metadata/socs/alif/ensemble/e7.json) DOES publish a `debug:` block --
-# `jlink_device` -- but no `jlink_flash_device` key.  That's the branch that
-# actually needs coverage: V2N's n44.json has no `debug:` block at all, so
-# asserting against it only proves the all-absent case, not "variant
-# resolved, `debug:` present, key missing".
+# E1M-AEN401's resolved SoC variant (silicon_variant: AE402FA0E5597LE0 in
+# metadata/socs/alif/ensemble/e4.json) DOES publish a `debug:` block --
+# `jlink_device` -- but `jlink_flash_device` is an explicit `null` (#1295's
+# one declared known-unknown: SEGGER ships no J-Link profile for any
+# Alif-declared E4 part). That's the branch that actually needs coverage:
+# V2N's n44.json has no `debug:` block at all, so asserting against it only
+# proves the all-absent case, not "variant resolved, `debug:` present, key
+# null".
+#
+# E1M-AEN701 (AE722F80F55D5LS) covered this case before #1295 populated
+# `jlink_flash_device` for every Alif Ensemble variant it could positively
+# identify; that landed on this branch and AEN701 now carries a real value,
+# so it no longer isolates the "unarmed" branch these three tests protect.
+# E4 has no A32 cluster (2x M55 only), so unlike AEN_HAPPY there is no
+# off-topology core to park here; `m55_hp: {}` exists only to satisfy the
+# schema's `cores: minProperties: 1` while taking every default. m55_he is
+# left out of this block entirely and, per the schema, inherits the SoM
+# preset's topology defaults exactly the same way.
 AEN_NO_JLINK_FLASH_DEVICE = """
 som:
-  sku: E1M-AEN701
+  sku: E1M-AEN401
 
 cores:
-  a32_cluster:
-    os: "off"
+  m55_hp: {}
 """
 
 
-def test_emit_system_manifest_flash_args_omits_jlink_flash_device_when_absent(
+def test_emit_system_manifest_carries_a_declared_null_jlink_flash_device(
     tmp_path: Path,
 ) -> None:
-    """`flash_args` must stay the tidy `{}` with NO `jlink_flash_device`
-    key, never a `null` placeholder (the schema's published-unknown
-    contract: an absent key IS the correct unknown state) -- even though
-    this variant's `debug:` block exists and carries its sibling
-    `jlink_device`."""
+    """A DECLARED `jlink_flash_device: null` must reach `flash_args` as a
+    PRESENT null -- not be dropped (#1295, tan-cli#734).
+
+    This asserts the opposite of what it did before. It used to require the
+    tidy `{}`, on the reading that "an absent key IS the correct unknown
+    state". That conflates two facts the schema deliberately separates:
+
+      * ABSENT  -- the variant says nothing; the Flow A default stands.
+      * NULL    -- the variant publishes "no known J-Link flash profile";
+                   soc-spec-v1.schema.json's own description says consumers
+                   must refuse rather than silently choose another transport.
+
+    `E1M-AEN401`'s e4.json variant is the one real declared-null in the
+    corpus: SEGGER ships no device profile for any Alif-declared E4 part
+    (#1443), so there is nothing honest to put there. Dropping the key
+    re-collapses that into "absent", and tan's presence-based
+    `flow_d_available()` then silently downgrades Flow D to the SE-UART
+    Flow A path -- which is Linux-only, so a Windows operator's flash fails
+    later somewhere else with the real cause already discarded.
+
+    Asserted on KEY PRESENCE, not on the value: absent and declared-null
+    both read as `None`, so a value assertion cannot tell them apart and
+    would pass against the bug.
+    """
     path = _write_board(tmp_path, AEN_NO_JLINK_FLASH_DEVICE)
     project = load_board_yaml(path)
     parsed = yaml.safe_load(emit_system_manifest(project))
 
     by_core = {s["core_id"]: s for s in parsed["slices"]}
     for core_id in ("m55_hp", "m55_he"):
-        assert by_core[core_id]["flash_args"] == {}
+        flash_args = by_core[core_id]["flash_args"]
+        assert "jlink_flash_device" in flash_args, flash_args
+        assert flash_args["jlink_flash_device"] is None, flash_args
+
+
+def test_a_declared_null_still_resolves_its_slot0_load_address(
+    tmp_path: Path,
+) -> None:
+    """The third truthiness gate on the same field, and the only one no
+    unit test reaches.
+
+    `_validate_topology_cores` gated `slot0_load_address` resolution on
+    `if jlink_flash_device` -- truthy -- so a declared null silently
+    produced no slot0 address at all. That cannot be exercised with a
+    constructed `Slice`: the gate lives inside a stage needing a fully
+    resolved SoM preset and SoC spec. `E1M-AEN401` is the one SKU that
+    can reach it -- e4.json declares the null, and #1445 gave the SoM the
+    disjoint per-role windows the address comes from.
+
+    Verbatim addresses, per #1445's shared AEN layout: `he_slot0` at
+    0x80010000 and `hp_slot0` at 0x802b0000 -- the same pair this branch
+    writes into all five AEN SoM presets, and the pair #1069 exists to keep
+    apart. Asserted BY VALUE rather than by presence: a regression that
+    collapsed both roles onto one address would still satisfy a presence
+    check while being exactly the corruption the disjointness rule forbids.
+    """
+    path = _write_board(tmp_path, AEN_NO_JLINK_FLASH_DEVICE)
+    project = load_board_yaml(path)
+    parsed = yaml.safe_load(emit_system_manifest(project))
+
+    by_core = {s["core_id"]: s for s in parsed["slices"]}
+    addresses = {
+        core_id: by_core[core_id]["flash_args"].get("slot0_load_address")
+        for core_id in ("m55_he", "m55_hp")
+    }
+    assert addresses == {
+        "m55_he": "0x80010000",
+        "m55_hp": "0x802b0000",
+    }, addresses
 
 
 # ---------------------------------------------------------------------
@@ -479,7 +555,7 @@ def test_emit_system_manifest_dpidr_preflight_pair_is_never_half_armed(
 def test_emit_system_manifest_omits_dpidr_preflight_when_unmeasured(
     tmp_path: Path,
 ) -> None:
-    """E1M-AEN701's variant publishes `debug.jlink_device` but NO
+    """E1M-AEN401's variant publishes `debug.jlink_device` but NO
     `expect_dpidr` (nobody has measured that part's DPIDR). Neither key may
     reach `flash_args`: `jlink_device` alone is the half-armed shape a
     downstream flasher refuses, so an unmeasured DPIDR must leave the
@@ -533,17 +609,48 @@ def test_emit_system_manifest_aen_flash_args_carries_slot0_load_address(
 def test_emit_system_manifest_flash_args_omits_slot0_load_address_when_flow_d_unarmed(
     tmp_path: Path,
 ) -> None:
-    """E1M-AEN701 publishes no `jlink_flash_device` (Flow D is not armed for
-    this SoC variant), so `flash_args` must stay `{}` -- no
-    `slot0_load_address` key either, even though this is otherwise an AEN
-    part with M55 HP/HE cores. `slot0_load_address` is meaningless without
-    Flow D, and must never appear on its own.
+    """`slot0_load_address` is meaningless without Flow D and must never
+    appear on its own.
+
+    The invariant is unchanged; its FIXTURE had to move. This used to run
+    against `E1M-AEN401` on the reading that a `jlink_flash_device: null`
+    leaves Flow D unarmed. That is no longer what a declared null means:
+    tan's `flow_d_available()` is presence-based (`FLOW_D_KEYS` is exactly
+    `("jlink_flash_device",)`), so a published null deliberately DOES arm
+    Flow D -- that is the whole point, so the null reaches
+    `plan_alif_mram_jlink` and becomes a loud refusal instead of a silent
+    SE-UART fallback. `test_a_declared_null_still_resolves_its_slot0_load_address`
+    now pins that side.
+
+    The state this test guards is the OTHER one -- a variant that declares
+    NOTHING -- and after #1295 no shipped Alif Ensemble variant is in it,
+    so the premise is unreachable from the corpus. Rather than delete a
+    real invariant along with its dead fixture, the key is stripped from a
+    throwaway copy of the metadata tree, which reaches the same state
+    honestly and keeps failing if the emitter ever starts publishing an
+    orphan slot0.
     """
+    meta = tmp_path / "metadata"
+    shutil.copytree(REPO / "metadata", meta)
+    e4 = meta / "socs" / "alif" / "ensemble" / "e4.json"
+    spec = json.loads(e4.read_text(encoding="utf-8"))
+    removed = [v["debug"].pop("jlink_flash_device", "__missing__")
+               for v in spec["variants"]]
+    assert removed == [None], (
+        f"e4.json no longer declares exactly one null jlink_flash_device "
+        f"({removed}) -- this fixture's premise moved")
+    e4.write_text(json.dumps(spec, indent=2) + "\n",
+                  encoding="utf-8", newline="\n")
+
     path = _write_board(tmp_path, AEN_NO_JLINK_FLASH_DEVICE)
-    project = load_board_yaml(path)
+    project = load_board_yaml(path, metadata_root=meta)
     parsed = yaml.safe_load(emit_system_manifest(project))
 
     by_core = {s["core_id"]: s for s in parsed["slices"]}
     for core_id in ("m55_hp", "m55_he"):
-        assert "slot0_load_address" not in by_core[core_id]["flash_args"]
+        flash_args = by_core[core_id]["flash_args"]
+        assert "slot0_load_address" not in flash_args, flash_args
+        # ... and the key that would have armed it is genuinely gone, so
+        # this is the absent case and not a mis-built fixture.
+        assert "jlink_flash_device" not in flash_args, flash_args
 

@@ -102,6 +102,39 @@ opts in by name should set this ON so a silently backend-less \
 libalp_sdk.so is not the answer."
     OFF)
 
+option(ALP_SDK_MODEL_ZCBOR_REQUIRED
+    "Treat a missing zcbor stack as a configure ERROR instead of warning \
+and degrading <alp/model.h>'s alp_model_parse back to \
+src/common/stub/stub_model.c's ALP_ERR_NOSUPPORT body.  Same rationale \
+and same default as ALP_SDK_DRPAI_REQUIRED above: OFF (the default) is \
+the safe choice for a direct plain-CMake -DALP_OS=yocto configure on a \
+host with no zcbor installed -- e.g. the pr-plain-cmake.yml stock \
+Ubuntu runners, which cannot carry a Yocto-only OE package -- so that \
+build degrades cleanly instead of failing configure.  meta-alp-sdk's \
+alp-sdk recipe sets this ON: there zcbor is an unconditional DEPENDS \
+(recipes-devtools/zcbor/zcbor_0.9.1.bb is always staged, not a \
+PACKAGECONFIG opt-in), so a silently NOSUPPORT alp_model_parse would be \
+the wrong answer."
+    OFF)
+
+option(ALP_SDK_USE_ORT_CPU
+    "Wire the ONNX Runtime CPU backend hook (src/yocto/inference_ort.cpp) for \
+<alp/inference.h>'s ALP_INFERENCE_BACKEND_CPU slot.  The portable CPU floor, \
+lowest priority under AUTO -- an NPU-bearing SoM still selects its NPU \
+backend first.  Links the upstream (own-recipe, never a vendor fork) \
+onnxruntime C API (libonnxruntime) located via the Yocto sysroot; has not \
+run on silicon yet.  Default OFF."
+    OFF)
+
+option(ALP_SDK_ORT_REQUIRED
+    "Treat a missing ONNX Runtime stack as a configure ERROR instead of \
+warning and disabling the backend.  Same rationale and same default as \
+ALP_SDK_DRPAI_REQUIRED / ALP_SDK_DEEPX_REQUIRED above: OFF lets a \
+plain-CMake builder who passed -DALP_SDK_USE_ORT_CPU=ON by hand degrade \
+cleanly, while a recipe that opts in by name should set this ON so a \
+silently backend-less libalp_sdk.so is not the answer."
+    OFF)
+
 target_sources(alp_sdk PRIVATE
     # Split stub backend (#673) -- one TU per API class plus the
     # shared stub_core.c (last-error slot + delay primitives).
@@ -132,7 +165,13 @@ target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_power.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_gpu2d.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_rpc.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_model.c
+    # stub_model.c is intentionally NOT listed here (issue #1254): the
+    # real alp_model_parse() body (src/common/alp_model.c) is added
+    # below when zcbor is found; stub_model.c is added there instead,
+    # on the degrade leg, when it isn't -- leaving both in this
+    # unconditional list would double-define alp_model_parse (the stub
+    # and the real body export the same symbol; whichever TU compiles
+    # in is authoritative, and only one may be present).
     # SDK lifecycle (alp_init / alp_deinit) -- OS-agnostic.
     ${CMAKE_CURRENT_SOURCE_DIR}/../init.c
     # Register-file I2C target helper (<alp/i2c_regfile.h>) -- pure
@@ -308,6 +347,104 @@ target_sources(alp_sdk PRIVATE
     # static and no undefined reference on the Yocto link.
     ${CMAKE_CURRENT_SOURCE_DIR}/dispatch_last_error_shim.c
 )
+
+# alp_model.c (#1254): the real .alpmodel CBOR-manifest reader behind
+# <alp/model.h>.  TWO-MODE detection, same shape as the DRP-AI block
+# below (ALP_SDK_DRPAI_REQUIRED): ALP_SDK_MODEL_ZCBOR_REQUIRED (above)
+# says which of two opposite failure modes applies --
+#   (a) direct plain-CMake, REQUIRED=OFF -- a builder configures
+#       -DALP_OS=yocto on a host with no zcbor at all (e.g. the
+#       pr-plain-cmake.yml stock Ubuntu runners: zcbor is not a
+#       Debian/Ubuntu package, so those runners can never have it).  A
+#       FATAL_ERROR here would break every such build.  Warn + degrade
+#       to stub_model.c's ALP_ERR_NOSUPPORT body instead.
+#   (b) meta-alp-sdk's alp-sdk recipe, REQUIRED=ON -- there zcbor is an
+#       unconditional DEPENDS (recipes-devtools/zcbor/zcbor_0.9.1.bb is
+#       always staged, not a PACKAGECONFIG opt-in), so a sysroot missing
+#       it is a packaging bug, not a degrade candidate: fail configure
+#       rather than ship a silently NOSUPPORT alp_model_parse again
+#       (the exact regression this issue exists to fix).
+#
+# zcbor ships no CMake package config or pkgconfig .pc file of its own
+# (find_path/find_library, not find_package/pkg_check_modules, matching
+# how the DXRT/DRPAI libraries below are found -- none of these upstream
+# projects hand CMake a discovery file). meta-alp-sdk's own zcbor recipe
+# (recipes-devtools/zcbor/zcbor_0.9.1.bb) stages
+# ${includedir}/zcbor_decode.h + ${libdir}/libzcbor.so on the target
+# sysroot; a direct plain-CMake build against a Yocto sysroot needs the
+# matching zcbor-dev package installed by hand.
+find_path(ZCBOR_INCLUDE_DIR zcbor_decode.h)
+find_library(ZCBOR_LIB zcbor)
+# zcbor_abi_pin.h is an alp-sdk file (issue #1254 follow-up), NOT part of
+# upstream zcbor -- it is staged into the sysroot only by
+# meta-alp-sdk's own zcbor recipe (recipes-devtools/zcbor/zcbor_0.9.1.bb
+# do_install), alongside the upstream headers, at the same
+# ${ZCBOR_INCLUDE_DIR}. A hand-installed zcbor (e.g. a direct build of the
+# west-module checkout the comment above documents as a supported path)
+# has zcbor_decode.h + libzcbor but NOT this header -- find it
+# independently and only opt in to the #include when it actually
+# resolves, so that supported path doesn't hard-fail configure over a
+# file only the recipe ships.
+find_file(ZCBOR_ABI_PIN_H zcbor_abi_pin.h HINTS ${ZCBOR_INCLUDE_DIR})
+if(ZCBOR_INCLUDE_DIR AND ZCBOR_LIB)
+    target_sources(alp_sdk PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../common/alp_model.c)
+    target_compile_definitions(alp_sdk PRIVATE
+        CONFIG_ALP_SDK_MODEL_READER=1
+    )
+    if(ZCBOR_ABI_PIN_H)
+        target_compile_definitions(alp_sdk PRIVATE
+            # Yocto-only opt-in for alp_model.c's zcbor_abi_pin.h include
+            # (see that header, staged by the zcbor recipe's do_install):
+            # this define exists ONLY in this listfile, never in Zephyr's
+            # own zephyr/CMakeLists.txt build of the same source file, so
+            # the #ifdef there is a no-op on Zephyr instead of a missing-
+            # header compile error. Gated on ZCBOR_ABI_PIN_H (not just
+            # ZCBOR_INCLUDE_DIR/ZCBOR_LIB being found) so a hand-installed
+            # zcbor without the recipe's ABI-pin header degrades to no
+            # struct-layout check instead of a missing-header configure
+            # failure -- see the find_file() comment above.
+            ALP_SDK_ZCBOR_YOCTO_ABI_PIN=1
+        )
+    else()
+        message(STATUS
+            "alp-sdk yocto: zcbor found but zcbor_abi_pin.h is not "
+            "(hand-installed zcbor, not meta-alp-sdk's zcbor recipe) -- "
+            "compiling src/common/alp_model.c without the ZCBOR_* "
+            "struct-layout ABI pin. Install meta-alp-sdk's zcbor recipe "
+            "(recipes-devtools/zcbor/zcbor_0.9.1.bb) to a Yocto sysroot "
+            "for the pinned build.")
+    endif()
+    # Only add the sysroot's zcbor include dir when it isn't already on
+    # the compiler's own default search path -- an explicit -I for a
+    # default system include dir (e.g. the sysroot's ${includedir})
+    # reorders the cross toolchain's own implicit search order ahead of
+    # it, which can shadow a header the toolchain itself expects to win.
+    if(NOT ZCBOR_INCLUDE_DIR IN_LIST CMAKE_C_IMPLICIT_INCLUDE_DIRECTORIES)
+        target_include_directories(alp_sdk PRIVATE ${ZCBOR_INCLUDE_DIR})
+    endif()
+    target_link_libraries(alp_sdk PRIVATE ${ZCBOR_LIB})
+else()
+    if(ALP_SDK_MODEL_ZCBOR_REQUIRED)
+        message(FATAL_ERROR
+            "alp-sdk yocto: zcbor not found (zcbor_decode.h / libzcbor) -- "
+            "src/common/alp_model.c needs it to implement alp_model_parse, "
+            "and ALP_SDK_MODEL_ZCBOR_REQUIRED=ON (explicit opt-in, e.g. "
+            "the alp-sdk recipe's unconditional zcbor DEPENDS), so a "
+            "silent degrade to stub_model.c is not the answer. Add "
+            "meta-alp-sdk's zcbor recipe (recipes-devtools/zcbor/"
+            "zcbor_0.9.1.bb) to the sysroot.")
+    else()
+        message(WARNING
+            "alp-sdk yocto: zcbor not found (zcbor_decode.h / libzcbor) -- "
+            "src/common/alp_model.c is NOT compiled in; alp_model_parse "
+            "falls back to stub_model.c's ALP_ERR_NOSUPPORT body. Add "
+            "meta-alp-sdk's zcbor recipe (recipes-devtools/zcbor/"
+            "zcbor_0.9.1.bb) to the sysroot, or set "
+            "ALP_SDK_MODEL_ZCBOR_REQUIRED=ON to make this fatal.")
+        target_sources(alp_sdk PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_model.c)
+    endif()
+endif()
 
 # Stop the split stub backend from emitting its own alp_inference_* symbols --
 # inference_yocto.c is the sole owner on Yocto so the dispatcher can
@@ -874,5 +1011,68 @@ if(ALP_SDK_USE_DRPAI_V2N)
             ${MERA_DRPAI_WRAPPER_LIB}
             ${MERA2_RUNTIME_LIB} ${MERA2_PLAN_IO_LIB}
             ${DRP_TVM_RT_LIB} ${TVM_RUNTIME_LIB})
+    endif()
+endif()
+
+# ------------------------------------------------------------------ #
+# ONNX Runtime CPU backend (ALP_INFERENCE_BACKEND_CPU floor).         #
+#                                                                     #
+# inference_ort.cpp is written against the real upstream ONNX Runtime #
+# C API (onnxruntime_c_api.h).  This is alp-sdk's OWN recipe (never a #
+# vendor fork -- see metadata/libraries/onnxruntime.yaml), built by    #
+# meta-alp-sdk/recipes-devtools/onnxruntime and staged onto the Yocto  #
+# sysroot as libonnxruntime + onnxruntime_c_api.h.  Not installed on   #
+# this dev host -- BENCH-UNVERIFIED, same posture as DEEPX/DRP-AI      #
+# above.  Same probe-first shape as the (simpler) DEEPX block: a       #
+# single header + a single library, no multi-input stack like DRP-AI's.#
+# ------------------------------------------------------------------ #
+if(ALP_SDK_USE_ORT_CPU)
+    # PROBE FIRST, then decide whether to compile the backend in -- same
+    # #1145 rationale as the DEEPX/DRP-AI blocks above: libalp_sdk links
+    # with LINKER:--no-undefined, so an unresolved ORT symbol must be
+    # caught here (skip the TU) rather than failing this library's own link.
+    # PATH_SUFFIXES onnxruntime is load-bearing, not defensive breadth.
+    # VERIFIED against a real `bitbake onnxruntime` (2026-08-05, MACHINE
+    # e1m-v2n101-a55): the recipe installs the C API header to
+    #   image/usr/include/onnxruntime/onnxruntime_c_api.h
+    # -- a SUBDIRECTORY, not flat in ${includedir}.  A bare find_path()
+    # searches <sysroot>/usr/include but NOT <sysroot>/usr/include/onnxruntime,
+    # so without this suffix the probe misses on a real image, the else-branch
+    # below emits its WARNING, and libalp_sdk builds and links GREEN with no
+    # CPU backend compiled in at all -- the feature silently absent rather
+    # than loudly missing.  That is the worst failure shape available here,
+    # which is why ALP_SDK_ORT_REQUIRED exists as the hard-fail opt-in.
+    # Keep `onnxruntime` first so a flat install still resolves.
+    find_path(ORT_INCLUDE_DIR onnxruntime_c_api.h
+        PATH_SUFFIXES onnxruntime onnxruntime/core/session
+    )
+    find_library(ORT_LIB onnxruntime)
+
+    if(ORT_INCLUDE_DIR AND ORT_LIB)
+        target_sources(alp_sdk PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/inference_ort.cpp
+        )
+        target_compile_definitions(alp_sdk PRIVATE
+            ALP_SDK_USE_ORT_CPU
+        )
+        target_include_directories(alp_sdk PRIVATE ${ORT_INCLUDE_DIR})
+        target_link_libraries(alp_sdk PRIVATE ${ORT_LIB})
+    elseif(ALP_SDK_ORT_REQUIRED)
+        message(FATAL_ERROR
+            "alp-sdk yocto: ALP_SDK_USE_ORT_CPU=ON and ALP_SDK_ORT_REQUIRED=ON, "
+            "but onnxruntime_c_api.h and/or libonnxruntime were not found.  "
+            "Install meta-alp-sdk's own onnxruntime recipe on the Yocto "
+            "sysroot.")
+    else()
+        # Skip the backend rather than compile a translation unit whose
+        # symbols cannot resolve.  The dispatcher's other backends (NPU or
+        # otherwise) still answer alp_inference_open(.backend = CPU) via
+        # their own paths / NOSUPPORT.
+        message(WARNING
+            "alp-sdk yocto: ALP_SDK_USE_ORT_CPU=ON but onnxruntime_c_api.h "
+            "and/or libonnxruntime were not found -- the ORT CPU backend is "
+            "NOT compiled in.  Install meta-alp-sdk's own onnxruntime recipe "
+            "on the Yocto sysroot.  (BENCH-UNVERIFIED until this host or a "
+            "target has ONNX Runtime staged.)")
     endif()
 endif()
