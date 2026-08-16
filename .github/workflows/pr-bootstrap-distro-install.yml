@@ -74,15 +74,7 @@ name: pr-bootstrap-distro-install
 # skip of the job that licenses every package name in the manifest.
 on:
   pull_request:
-    # TEMP (will revert): fix/bootstrap-distro-install-summary-gate added
-    # here only to let a nested proof-PR (child branch -> this branch)
-    # exercise the real `detect` skip path against a base that already has
-    # this file's new `summary` job -- there is no other way to observe a
-    # legitimate `distro-install` skip for content that has never landed on
-    # dev/main yet, since any PR against dev/main necessarily diffs this
-    # very file (a watched path) and therefore never skips. Removed before
-    # this PR merges.
-    branches: [main, dev, fix/bootstrap-distro-install-summary-gate]
+    branches: [main, dev]
   merge_group:
   workflow_dispatch:
 
