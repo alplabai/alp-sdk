@@ -77,11 +77,24 @@ jobs:
     permissions:
       statuses: write          # pending status on THIS repo (same-repo, no PAT)
     steps:
+      # HEAD_SHA/HEAD_REF are attacker-controlled on a fork PR: a branch
+      # named e.g. `x$(id)` is a valid git ref, and splicing
+      # github.event.pull_request.head.ref directly into this run: block's
+      # SOURCE TEXT via ${{ }} would let that shell-metacharacter payload
+      # execute here -- before the fork guard below ever runs. Passed
+      # through env + a quoted shell variable instead, so the value is only
+      # ever *data*, never re-parsed as shell syntax. This step itself
+      # mints no secret and stages no request, so it does not additionally
+      # need the guard's `if:` -- it only has to not be an injection vector,
+      # which the env indirection now guarantees regardless of event type.
       - name: Resolve target sha/ref
         id: t
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
-          echo "sha=${{ github.event.pull_request.head.sha || github.sha }}" >> "$GITHUB_OUTPUT"
-          echo "ref=${{ github.event.pull_request.head.ref || github.ref_name }}" >> "$GITHUB_OUTPUT"
+          echo "sha=${HEAD_SHA:-$GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "ref=${HEAD_REF:-$GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Guard — internal events only (forks never dispatch)
         id: guard
@@ -114,13 +127,21 @@ jobs:
           owner: alplabai
           repositories: alp-sdk-internal
 
+      # steps.t.outputs.ref still carries the raw fork branch name (env-quoted
+      # above, but that only protects the step that WROTE it) -- ${{ }} is
+      # re-substituted into every run: block's source text independently, so
+      # this consuming step needs the same env indirection, not just the
+      # producing one.
       - name: Dispatch build to alp-sdk-internal
         if: steps.guard.outputs.go == 'true'
         env:
           GH_TOKEN: ${{ steps.apptoken.outputs.token }}
+          TARGET_SHA: ${{ steps.t.outputs.sha }}
+          TARGET_REF: ${{ steps.t.outputs.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number || 0 }}
         run: |
           gh api repos/alplabai/alp-sdk-internal/dispatches \
             -f event_type=bitbake \
-            -F "client_payload[sha]=${{ steps.t.outputs.sha }}" \
-            -F "client_payload[ref]=${{ steps.t.outputs.ref }}" \
-            -F "client_payload[pr]=${{ github.event.pull_request.number || 0 }}"
+            -F "client_payload[sha]=$TARGET_SHA" \
+            -F "client_payload[ref]=$TARGET_REF" \
+            -F "client_payload[pr]=$PR_NUMBER"

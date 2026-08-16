@@ -117,9 +117,18 @@ jobs:
           owner: alplabai
           repositories: tan-cli
 
+      # SDK_REF/BRANCH_REF: this trigger is push-to-dev/main only (see the
+      # `on:` block above), so github.ref_name is always "dev" or "main"
+      # today -- but it is still the same construct as pr-bitbake.yml's fork
+      # injection (github.ref_name splices verbatim into this run: block's
+      # SOURCE TEXT via ${{ }}), and that trigger scope is a workflow-file
+      # fact, not an enforced guarantee. Routed through env + quoted shell
+      # variables for the same reason, at no cost.
       - name: Dispatch planner-change to tan-cli
         env:
           GH_TOKEN: ${{ steps.apptoken.outputs.token }}
+          SDK_REF: ${{ github.sha }}
+          BRANCH_REF: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           # Captured HERE, immediately before the dispatch call, not in the
@@ -149,9 +158,9 @@ jobs:
           # visible in the run list) -- tracked as follow-up, not done here.
           gh api repos/alplabai/tan-cli/dispatches \
             -f event_type=alp-sdk-planner-change \
-            -F "client_payload[sdk_ref]=${{ github.sha }}" \
-            -F "client_payload[branch]=${{ github.ref_name }}"
-          echo "::notice::dispatched alp-sdk-planner-change to tan-cli for ${{ github.sha }} (${{ github.ref_name }})"
+            -F "client_payload[sdk_ref]=$SDK_REF" \
+            -F "client_payload[branch]=$BRANCH_REF"
+          echo "::notice::dispatched alp-sdk-planner-change to tan-cli for $SDK_REF ($BRANCH_REF)"
 
       - name: Find this workflow's previous dispatch (self-calibration baseline)
         env:
