@@ -16,7 +16,7 @@
 >   `basis: compiled` / `basis: bench` and reports everything else as
 >   `npu-eligible` (certified-in only when a real compile or bench confirms
 >   it) or `cpu-certain` (a sound negative) — never a static "fits".
-> - `:15`'s "TFLite input only in 1a" scope was a category error, not a
+> - `:41`'s "TFLite input only in 1a" scope was a category error, not a
 >   phasing choice: DRP-AI TVM and dxcom both ingest **ONNX**, not TFLite, so a
 >   `.tflite` artifact cannot be scored against either backend at all — the
 >   right answer for that pairing is "wrong format", never a 0%-coverage

@@ -625,7 +625,13 @@ its fixture silently vanished — a skipped test proves nothing.
 > - **`parity.yml` needed `model-io` added** to the job that binds
 >   `ALP_SDK_ROOT`. Without it, every tflite-dependent test in the relocated
 >   suite skipped in CI, silently, on every run — a green bar that proved
->   nothing about the engine it was supposed to cover.
+>   nothing about the engine it was supposed to cover. `model-io` is what
+>   actually landed first (`cc73852`); a later commit (`516b5f1`) replaced it
+>   with `model-compile` — "a superset of the plain `model-io` extra,
+>   tan-cli#784" (`.github/workflows/parity.yml:1776-1797`) — to add
+>   `ethos-u-vela` for `test_vela_yolo_internal.py`'s real Ethos-U/Vela compile.
+>   `model-io` alone has no `ethos-u-vela`, so re-adding it verbatim today
+>   would silently reopen that skip.
 
 - [ ] **Step 7: Run the relocated engine suite**
 
@@ -906,14 +912,19 @@ deliberately, and a required NPU dependency would break that.
 
 > **CORRECTION (post-execution, 2026-08-15).** `model-prep` and
 > `model-convert` do not exist — this plan guessed at names instead of reading
-> alp-sdk's actual `[project.optional-dependencies]`. The real extras are
-> `dev`, `model-io`, `model-compile`, and `mcp`. Of those, **`model-compile`
-> was missing from tan's side entirely** and had to be added, not just
-> mirrored — it carries the vendor-adapter-adjacent deps (`ethos-u-vela`,
-> `flatbuffers`) the relocated `tan.model.adapters.ethos_u` needs. Read the
-> extras table directly (`grep -A20 'optional-dependencies' pyproject.toml` in
-> the bound alp-sdk checkout) rather than trusting either this correction or
-> the original guess to still be current by the time this is executed again.
+> alp-sdk's actual `[project.optional-dependencies]`. **At the commit this step
+> executed**, the real extras were `dev`, `model-io`, `model-compile`, and
+> `mcp`. Of those, **`model-compile` was missing from tan's side entirely** and
+> had to be added, not just mirrored — it carries the vendor-adapter-adjacent
+> deps (`ethos-u-vela`, `flatbuffers`) the relocated `tan.model.adapters.ethos_u`
+> needs. **That state did not last: `ab6968e2` (Task 6, two commits later on
+> this branch) deleted `model-io` from alp-sdk's `pyproject.toml`** — it existed
+> solely for the tensor-I/O tests that moved to `tan.model` — so as of this
+> plan's own landing commit alp-sdk's extras are `dev`, `model-compile`, `mcp`.
+> Read the extras table directly (`grep -A20 'optional-dependencies'
+> pyproject.toml` in the bound alp-sdk checkout) rather than trusting either
+> this correction or the original guess to still be current by the time this is
+> executed again.
 
 - [ ] **Step 4: Full tan gate**
 
@@ -1007,19 +1018,26 @@ Do not delete them, and do not let them start skipping quietly.
 > - **Regenerate the committed C fixtures** via
 >   `python -m tan.model._gen_fixture --root <alp-sdk-checkout>` — the
 >   generator's provenance banner (which repo/commit produced the fixture)
->   changed once the engine moved, so the committed `.c`/`.h` fixtures under
->   `tests/unit/alpmodel_select/` needed regenerating to stay consistent with
->   their own claimed provenance, not just functionally unchanged.
+>   changed once the engine moved, so the committed fixtures it writes —
+>   `tests/fixtures/alpmodel/minimal.alpmodel`,
+>   `tests/unit/alpmodel_reader/src/fixture.h`, and
+>   `tests/yocto/onnx_cpu_fixture.h` (NOT `tests/unit/alpmodel_select/`, which
+>   holds only the Zephyr testcase — CMakeLists.txt, prj.conf, src/test_select.c,
+>   testcase.yaml — and carries no generated fixture) — needed regenerating to
+>   stay consistent with their own claimed provenance, not just functionally
+>   unchanged.
 > - **A stale-path doc sweep** — any doc referencing `scripts/alp_model/…` by
 >   path (not just the deleted-symbol grep in Step 3 below) needed updating to
 >   `python/tan/model/…`.
 > - **Landing `tests/fixtures/models/person_detect_int8.tflite`**
 >   (Apache-2.0, 300568 B) plus `PERSON_DETECT-PROVENANCE.txt`. Without it,
->   `test_vela_yolo_internal.py`'s Ethos-U real-model proof **had never
->   actually executed** in this repo's history — it always fell through the
+>   `test_vela_yolo_internal.py`'s Ethos-U real-model proof **cannot have run
+>   in CI, and no public fixture existed** — it always fell through the
 >   "fixtures absent" skip path described two paragraphs up, for want of a
 >   real fixture to point at, so the "close the silent-skip hole" intent of
->   this step was previously unmet even when the test file itself existed.
+>   this step was previously unmet even when the test file itself existed
+>   (whether it ever ran ad hoc on a maintainer box with the internal fixture
+>   present is maintainer-box state this public tree cannot establish).
 >   Landing the real fixture is what makes the release-time
 >   ran-not-skipped assertion (also in this step) actually mean something.
 
@@ -1056,14 +1074,25 @@ Then produce the evidence the PR body must carry:
 git grep -n "alp_model" -- ':!doxygen-out' ':!*.md' ':!docs' ':!src' ':!include'
 ```
 
-Expected: **no hits on the Python package.** Every surviving hit must be the C
-file `src/common/alp_model.c` and friends — `zephyr/CMakeLists.txt:1392-1394`,
-`src/baremetal/CMakeLists.txt:111`, `src/yocto/CMakeLists.txt:107,116,169`,
-`tests/unit/alpmodel_select/`, `tests/yocto/`,
-`meta-alp-sdk/recipes-devtools/zcbor/zcbor_0.9.1.bb:5` — which stay, and
-`examples/aen/aen-npu-inference-alp/CMakeLists.txt:79`, whose `gen_model.py`
-spawns `vela` directly and never imported `alp_model`. Paste this output into
-the PR body; it is the deletion's proof.
+Expected: **no hits on the Python package.** The `:!src` exclusion means the C
+file `src/common/alp_model.c` and its friends — including
+`src/baremetal/CMakeLists.txt:111` and `src/yocto/CMakeLists.txt:107,116,169` —
+are excluded BY the pathspec and can never appear in this command's own
+output; they legitimately stay, but verify them by reading `src/` directly,
+not from this grep. What the command does surface (27 files, measured) is
+CI/metadata/test scaffolding that legitimately still says `alp_model`:
+`zephyr/CMakeLists.txt:1392-1394` (the Zephyr module still lists
+`src/common/alp_model*.c` as sources — outside `src/` from the repo root, so
+not excluded), `tests/unit/alpmodel_select/` (`CMakeLists.txt` +
+`src/test_select.c`), `tests/yocto/` (`CMakeLists.txt` +
+`alpmodel_onnx_cpu.c`), `meta-alp-sdk/recipes-devtools/zcbor/zcbor_0.9.1.bb:5`,
+and `examples/aen/aen-npu-inference-alp/CMakeLists.txt:79` (whose
+`gen_model.py` spawns `vela` directly and never imported `alp_model`) — plus
+roughly twenty more not individually named here (CI workflow YAML, metadata
+JSON/schemas, `scripts/alp_project_loader.py`, `scripts/check_doc_drift.py`,
+`scripts/check_inference_backend_parity.py`, `scripts/gen_npu_ops.py`, and the
+remaining cross-cutting tests). Paste the actual command output into the PR
+body; it is the deletion's proof, not this enumeration.
 
 - [ ] **Step 4: Full alp-sdk gate**
 
@@ -1206,12 +1235,18 @@ Three follow-ups outlive this migration. None blocks the merge of either
 branch; all three rot silently if left unrecorded, which is why they are
 recorded here rather than only in a closing PR comment.
 
-(a) **Re-pin the freshness/parity commit once both branches land.** tan's
-`python/tests/gates/test_planner_relocation_freshness.py` (`PINNED_SDK_COMMIT`)
-and `parity.yml`'s `PINNED_SDK_TAG` are both currently pinned to
-`bd8be484680cf5aa1c1ac0e8b38d84128b5a279d` — a pre-deletion alp-sdk commit.
-Once the alp-sdk Slice-C PR and the tan Slice-B PR have both merged, re-pin
-both to a post-deletion commit, or tan CI keeps exercising a `scripts/
+(a) **Re-pin the freshness/parity commit once both branches land.** tan
+carries THREE alp-sdk pins in `test_planner_relocation_freshness.py`, not two —
+`PINNED_SDK_COMMIT` (`:355`) and `HAND_PORT_PINNED_SDK_COMMIT` (`:558`), both
+currently `bd8be484680cf5aa1c1ac0e8b38d84128b5a279d`, plus
+`STRICT_LOADERS_PINNED_SDK_COMMIT` (`:747`), currently
+`26b0040e9a762c16aff5c7c53b2e19cc7583b2a4` — plus `parity.yml`'s
+`PINNED_SDK_TAG` (`:444`), also `bd8be484680cf5aa1c1ac0e8b38d84128b5a279d`. All
+four are pre-deletion alp-sdk commits. Once the alp-sdk Slice-C PR and the tan
+Slice-B PR have both merged, re-pin **all four** to a post-deletion commit —
+re-pinning only `PINNED_SDK_COMMIT`/`PINNED_SDK_TAG` and leaving
+`HAND_PORT_PINNED_SDK_COMMIT` or `STRICT_LOADERS_PINNED_SDK_COMMIT` behind
+leaves that pin stale, silently, and tan CI keeps exercising a `scripts/
 alp_model/`-shaped alp-sdk that no longer matches what ships.
 
 (b) **`cutting-a-tan-release` has no gate asserting the two real-model proofs

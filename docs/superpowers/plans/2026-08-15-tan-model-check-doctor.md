@@ -2,6 +2,34 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans. Steps use checkbox (`- [ ]`) syntax.
 
+> **STATUS (post-execution, 2026-08-15).** Every checkbox below still reads
+> `- [ ]` because this is the maintainer-approved body, kept byte-identical to
+> the scratchpad version it was reviewed against — **not** because the work is
+> outstanding. **Tasks 1-6 already shipped in tan-cli**, on branch
+> `feat/model-engine-migration` (23 commits ahead of `origin/dev`, not yet
+> pushed/PR'd as of this writing):
+> - **Tasks 1-3** (the format gate, table resolution, the operator walk + MAC
+>   weighting) — `609719d` "feat(model): add the static NPU-eligibility screen
+>   engine (ADR-0028 amendment)", merged via `25443c4`. `tan.model.analyze`'s
+>   `analyze_backend` has existed since `609719d`; Task 1 Step 2's "run,
+>   confirm it fails (`analyze_backend` undefined)" no longer describes this
+>   tree — the failing-test step is historical, not a next action.
+> - **Task 5** (`tan model doctor`) — `fa05748` "feat(model): add tan model
+>   doctor -- NPU compiler toolchain availability", plus follow-ups `b671595`
+>   and `6b4f6ec`, merged via `9138d51`.
+> - **Task 4** (the partition report + `tan model check` CLI) and **Task 6**
+>   (`--exact`) — both in `7522807` "feat(model): wire tan model check -- the
+>   static NPU-eligibility screen CLI (tan-cli#782)".
+>
+> Commit-time ordering against *this* alp-sdk commit: Tasks 1-3 and 5 landed
+> in tan-cli **before** this commit (`25443c4` at 2026-08-15 23:03:26 UTC and
+> `9138d51` earlier same day, both ahead of this commit's 23:37:21 UTC). Task
+> 4/6's `7522807` landed at 23:44:49 UTC — **7 minutes after**, not before —
+> so at the moment this alp-sdk commit was made, the engine (Tasks 1-3, 5) was
+> already in tan-cli but the CLI wiring (Task 4, 6) was not yet. Re-verify
+> against `git -C <tan-cli-checkout> log --oneline` before trusting any of the
+> above as still the tan-cli tip.
+
 **Goal:** Answer, offline and with no NPU toolchain installed, *"how much of this
 model can target the NPU on this SoM, and what definitely cannot?"* — with claims
 the evidence actually supports.
@@ -175,7 +203,7 @@ Ethos-U55 (E1M-AEN501)  partial
 
 After ADR-0028 tan is the customer's only diagnostic surface, so a missing or
 license-gated compiler must be legible rather than a silent skip. Every adapter
-already has `is_available()` — `cpu.py:13`, `deepx.py:52`, `drpai.py:138`,
+already has `is_available()` — `cpu.py:11-12`, `deepx.py:52`, `drpai.py:138`,
 `ethos_u.py:57`, `executorch.py:36` — and `ethos_u`'s is a bare
 `shutil.which("vela") is not None`, so the probe is read-only and non-spawning.
 
@@ -201,11 +229,62 @@ and the only one that yields a true arena figure and cycle estimate.
 
 ## Open question for the maintainer
 
-The **VS Code extension** consumes `tan model *` envelopes. `2026-07-24-vscode-models-panel.md`
-was written against the retired vocabulary. If the extension already models
-`fits | cpu-fallback | no-fit`, the rename has a lockstep consumer change in
-`alp-sdk-vscode`. That surface was not assessed in this session and should be
-checked before Task 4 lands.
+> **CORRECTION (post-execution, 2026-08-15).** The paragraph below, as first
+> written, was imprecise about *where* the coupling lives and, once corrected
+> for that, drew the wrong conclusion. Checked directly against the real tree:
+>
+> `2026-07-24-vscode-models-panel.md` itself has zero occurrences of
+> `fits`/`cpu-fallback`/`no-fit`/`verdict` — it's an abstract plan, not code.
+> `alp-sdk-vscode/src/` (the extension host) also has no occurrences of the
+> three retired enum strings; the bare word "verdict" does appear there
+> (`src/ideHub/messages.ts:220`, `src/lsp/buildConfig.ts:158,513`,
+> `src/models/panel.ts:158`), but it names an unrelated field —
+> `ModelPrepResultMessage.accuracy.verdict`, the `tan model prep` accuracy
+> report, not the NPU fit check. And the host-side fit-check plumbing —
+> `checkFit()` shelling `tan model check --board board.yaml`
+> (`src/models/panel.ts:166-168`), `ModelFitDataMessage`
+> (`src/ideHub/messages.ts:189-201`), `toModelFitData`
+> (`src/models/service.ts:108-122`) — is genuinely thin and needs no change:
+> `models` stays `unknown[]` at that boundary, a pass-through of whatever
+> `tan model check`'s `{sku, models:[{name,source,backends}]}` shape
+> (`model_cmd.py:400-401,443` in tan-cli) already emits.
+>
+> **But that is not the whole surface, and the extension is NOT already
+> insulated.** `packages/alp-webview/src/features/models/` — the React view
+> this same Plan-C document commissions, per its own Global Constraints
+> ("the message protocol is mirrored MANUALLY in both `src/ideHub/messages.ts`
+> and `packages/alp-webview/src/types.ts`") — is where `ModelFitDataMessage`'s
+> `unknown[]` actually gets narrowed, and it hard-codes exactly the retired
+> shape:
+> - `useModels.ts:33` — `BackendFit.verdict: "fits" | "cpu-fallback" |
+>   "no-fit" | string`.
+> - `useModels.ts:34-39` — `BackendFit`'s other fields (`est_sram_kib`,
+>   `budget_sram_kib`, `est_latency_ms`, `op_coverage_pct`,
+>   `unsupported_ops`) match the *old* `2026-07-24-alp-model-check.md` estimator
+>   shape, not the new `BackendReport` wire shape
+>   (`backend`/`variant`/`table`/`npuCoverage`/`computeOnNpuPctMax`/
+>   `uncostedCpuOpCount`/`basis`/`confidence`/`notes`/`ops`,
+>   `python/tan/core/model_check.py:37-54` in tan-cli).
+> - `ModelsView.tsx:33-46` — `FIT_SEVERITY`/`FIT_VARIANT`/`FIT_LABEL` are keyed
+>   literally on `fits`/`cpu-fallback`/`no-fit`; `fitSeverity()` (`:52-53`)
+>   falls back to severity 1 ("warn") for anything not in that map. Once `tan
+>   model check` ships the new vocabulary (`npu-eligible`/`cpu-certain`/
+>   `unknown` per op, `full-eligible`/`partial`/`cpu-only`/`undetermined` per
+>   backend), every badge silently renders "warn" with the raw string as its
+>   label — misleading, not crashing, which is the worse failure mode.
+>
+> So the rename DOES have a lockstep consumer change owed in `alp-sdk-vscode`
+> — not in the thin host plumbing, but in
+> `packages/alp-webview/src/features/models/useModels.ts` (retype `BackendFit`/
+> `ModelFit` to the `BackendReport` shape) and `ModelsView.tsx` (rebuild the
+> severity/variant/label maps and the rendered fields around
+> `npuCoverage`/`computeOnNpuPctMax`/`ops`). This should be checked, and that
+> pair of files updated, before Task 4 lands — the original open question's
+> instinct was right; only its assessment of where to look was incomplete.
+
+The **VS Code extension** consumes `tan model *` envelopes via
+`packages/alp-webview/src/features/models/` (see the correction above for the
+exact files and shape delta this rename owes).
 
 ## Deliberately NOT in this plan
 
