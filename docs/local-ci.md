@@ -210,3 +210,7 @@ the metadata schema violations, the loader's emitter logic.
   why we pin to v4.4.1.
 - [`docs/troubleshooting.md`](troubleshooting.md) -- diagnostic
   cookbook for common build failures.
+- `.github/workflows/pr-bootstrap-distro-install.yml` -- container-job
+  proof that `metadata/bootstrap.json`'s `prerequisites.install.linux`
+  map actually installs every declared tool; not locally reproducible
+  (it needs the debian/fedora/rockylinux containers CI runs it in).
