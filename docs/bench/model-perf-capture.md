@@ -20,9 +20,11 @@ Gate: `python3 scripts/validate_metadata.py` +
 Two hardware questions are **open**, and both change what the numbers mean. A
 campaign run before they are answered has to be recaptured. They are recorded
 in full in
-[`docs/superpowers/plans/2026-08-16-model-perf-tier2.md`](../superpowers/plans/2026-08-16-model-perf-tier2.md)
-"Open questions for the maintainer"; quoted here because this page is where a
-bench operator will be standing.
+`docs/superpowers/plans/2026-08-16-model-perf-tier2.md` under "Open questions
+for the maintainer"; quoted here because this page is where a bench operator
+will be standing.  (Cited as a path rather than a link on purpose: the
+`doxygen · public headers` gate excludes `docs/superpowers/` from its INPUT,
+so a markdown link there becomes an unresolvable `\ref` and fails the build.)
 
 **(a) The vela profile question — which machine are we measuring?**
 Until a module vela profile is resolved, every Ethos-U point would be captured
