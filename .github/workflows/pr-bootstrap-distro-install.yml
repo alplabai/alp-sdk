@@ -46,15 +46,20 @@
 
 name: pr-bootstrap-distro-install
 
+# The trigger is INTENTIONALLY unfiltered on paths. This gate is meant to be
+# a REQUIRED status check on dev/main, and a path-filtered `pull_request`
+# trigger leaves the required check permanently in the "expected" state on
+# any PR that doesn't touch one of the five paths below -- GitHub then BLOCKS
+# the PR forever (a never-posted required check can't be cleared, not even
+# by --admin). Instead we always run a cheap `detect` job and let the heavy
+# `distro-install` matrix SKIP when none of those paths changed: GitHub
+# counts a skipped required check as passing, so the contract still posts on
+# every PR without a container-matrix boot. Same detect/gate shape as
+# pr-renode-sim-mode.yml -- copy that file's conventions rather than
+# inventing a variant.
 on:
   pull_request:
     branches: [main, dev]
-    paths:
-      - 'metadata/bootstrap.json'
-      - 'metadata/schemas/bootstrap-v1.schema.json'
-      - 'scripts/bootstrap.sh'
-      - 'scripts/check_bootstrap_manifest.py'
-      - '.github/workflows/pr-bootstrap-distro-install.yml'
   workflow_dispatch:
 
 concurrency:
@@ -62,7 +67,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Cheap path detector -- NOT a required context itself. Always succeeds
+  # fast; its output gates the heavy matrix below.
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      manifest: ${{ steps.filter.outputs.manifest }}
+    steps:
+      - name: Detect bootstrap-manifest-relevant changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            manifest:
+              - 'metadata/bootstrap.json'
+              - 'metadata/schemas/bootstrap-v1.schema.json'
+              - 'scripts/bootstrap.sh'
+              - 'scripts/check_bootstrap_manifest.py'
+              - '.github/workflows/pr-bootstrap-distro-install.yml'
+
   distro-install:
+    needs: detect
+    # Skipped (== passing, for branch protection) unless a bootstrap-manifest
+    # path changed or the run was dispatched by hand.
+    if: needs.detect.outputs.manifest == 'true' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -79,7 +107,13 @@ jobs:
             image: rockylinux/rockylinux:9
             pm: dnf
             bootstrap: dnf install -y -q ca-certificates python3
-    name: distro install · ${{ matrix.name }} (prerequisites.install.linux.${{ matrix.pm }})
+    # Shortened from the original `distro install · <name>
+    # (prerequisites.install.linux.<pm>)` -- matrix.name already spells out
+    # the package manager (debian-apt, fedora-dnf, rockylinux-dnf), so the
+    # parenthetical pm suffix was pure duplication. NOTE: this is a
+    # branch-protection required-context string; a future rename here needs a
+    # matching branch-protection update.
+    name: distro install · ${{ matrix.name }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     container:
