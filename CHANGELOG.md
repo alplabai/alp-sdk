@@ -7,6 +7,28 @@ See [`VERSIONS.md`](VERSIONS.md) for the forward roadmap.
 
 ## [Unreleased] - v0.16.0 candidate
 
+### Fixed — `pr-bootstrap-distro-install`'s three matrix legs could never serve as required status checks; added a static-named summary gate (Refs #1464)
+
+The matrix job's per-leg names (`distro install · debian-apt` etc.) are
+matrix-interpolated, and GitHub can only resolve that interpolation while the
+matrix actually runs. When `detect` gates the matrix to SKIP — the normal
+case, since it only watches five bootstrap-manifest-relevant paths — GitHub
+reports the job under its literal, uninterpolated name instead
+(`distro install · ${{ matrix.name }}`), so a required context set to one of
+the three leg names never reports and the PR is blocked permanently.
+Reproduced on alp-sdk#1474 (a docs-only PR) and reverted off branch
+protection within minutes.
+
+Added `summary`, a non-matrix job with the literal name `distro install ·
+all`, `needs: [detect, distro-install]`, and `if: always()`, so it always
+reports whether the matrix ran, skipped, or failed. Its verdict logic
+independently re-derives the one condition under which a `skipped`
+`distro-install` result is legitimate (`pull_request` event, `detect` ran and
+succeeded, and found no bootstrap-manifest path touched) instead of trusting
+the word "skipped" at face value — so a future regression in
+`distro-install`'s own fail-closed `if:` (#1473) fails this gate too, rather
+than silently passing exactly when the machinery is broken.
+
 ### Fixed — the documented `west update` cost was off by ~50x, and stale-version fallout from the v4.4.1/hal_alif-v2.3.0 bumps had drifted back into prose (#1459)
 
 `scripts/bootstrap.sh`/`.ps1` told a fresh-clone user that `west update`
