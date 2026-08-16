@@ -247,13 +247,14 @@ geometry. `tan.model.adapters.drpai` never reads `spec`; it reads
 `input_shape`, `input_name`, `images` and `product` straight out of the
 `compile.drpai` block, so `tan validate` rejects a `board.yaml` written this
 way. That does not block the command in step 5 above: `tan model build`
-(`python/tan/commands/model_cmd.py::_resolve_compile`) reads `board.yaml`
+(the `_resolve_compile` helper in tan-cli's `python/tan/commands/model_cmd.py`) reads `board.yaml`
 with a plain `yaml.safe_load` and never calls the schema validator itself —
 only the separate `tan validate` command does — so `compile.drpai.input_shape`
 / `input_name` / `images` / `product` reach the adapter unchanged through the
 documented CLI today, exactly as
-`python/tests/commands/test_model_command.py::test_resolve_compile_leaves_non_path_options_unchanged`
-exercises directly against `_resolve_compile` (alp-sdk#1271 fixed this same
+tan-cli's `python/tests/commands/test_model_command.py` covers with the
+`test_resolve_compile_leaves_non_path_options_unchanged` case, which exercises
+that helper directly (alp-sdk#1271 fixed this same
 path-corruption defect here first; tan's hand-ported copy did not receive the
 fix until tan-cli#776, after the relocation made it a moot distinction). Until
 the schema is reconciled with what the adapter actually reads, `tan validate`
