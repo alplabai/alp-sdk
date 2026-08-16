@@ -1,0 +1,446 @@
+# Vela Memory-Profile Sourcing Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax.
+
+**Goal:** Make `tan model build` compile every Ethos-U model against the memory
+model the SoM actually has, sourced from alp-sdk metadata, so the arena/SRAM
+figures a board trusts describe real silicon.
+
+**Architecture:** The vela memory profile is a *silicon* fact, not a customer
+choice. It lands in alp-sdk metadata beside the `ethos_u_variant` that already
+lives there, and `tan.model.adapters.ethos_u` derives `--memory-mode` (and
+`--system-config` when one is available) from the SKU. The proprietary
+`ensemble_vela.ini` becomes an *optional enhancement* supplied through the
+environment, never through `board.yaml`.
+
+**Tech Stack:** Python 3.12 (`python/tan/`), YAML/JSON metadata under
+`alp-sdk/metadata/`, `jsonschema` Draft 2020-12, `ethos-u-vela` 5.1.0.
+
+## Why this plan exists
+
+`tan model build` currently invokes vela with neither `--system-config` nor
+`--memory-mode` (`python/tan/model/adapters/ethos_u.py:362`, `cmd = ["vela",
+str(source), "--accelerator-config", accel_config, ...]`). vela therefore falls
+back to `Ethos_U85_SYS_DRAM_Mid` / `Dedicated_Sram_384KB` — a DRAM-backed
+profile — and reports the working set in DRAM. `E1M-AEN801` is an Alif Ensemble
+E8: `metadata/socs/alif/ensemble/e8.json`'s `external_memory_interfaces` lists
+only `HexSPI` and `SD/eMMC`. **There is no DRAM on the part.**
+
+That produced `req_sram_kib = 0`, which alp-sdk's on-device selector
+(`src/backends/inference/alp_model_select.c:88`,
+`return e->arena_sram_kib == 0u || t->req_sram_kib <= e->arena_sram_kib;`)
+accepts against ANY arena. tan-cli#789 closed the hole by *refusing* such a
+target. This plan removes the need to refuse.
+
+## Measured facts this plan is built on
+
+Every number below was produced by running `ethos-u-vela 5.1.0` on the committed
+`python/tests/fixtures/models/tiny_int8.tflite` (712 B) at `ethos-u85-256`.
+Re-measure rather than trusting this table if vela's version moves.
+
+| Invocation | rc | `sram_memory_used` | `dram_memory_used` | `on_chip_flash_memory_used` |
+|---|---|---|---|---|
+| no profile flags (today) | 0 | `0.0` | `5.359375` | — |
+| `--memory-mode Sram_Only` | 0 | `0.03125` | `0.0` | `0.234375` |
+| `--system-config Ethos_U85_SYS_Flash_High --memory-mode Sram_Only` | 0 | `0.03125` | `0.0` | `0.234375` |
+| `--system-config Ethos_U85_SRAM_Only` (no `--config`) | **1** | — | — | — |
+
+The last row fails with, verbatim:
+
+```
+ethosu.vela.errors.CliOptionError: 'Error: Incorrect argument to CLI option --system-config=Ethos_U85_SRAM_Only: Section System_Config.Ethos_U85_SRAM_Only not found in Vela config file'
+```
+
+**Three conclusions, and the whole design follows from them:**
+
+1. **`--memory-mode` decides placement; `--system-config` decides bandwidth.**
+   Rows 2 and 3 are byte-identical in memory terms. Passing memory-mode alone is
+   what fixes the zero.
+2. **`Memory_Mode.Sram_Only` is a vela BUILT-IN.** It needs no proprietary file.
+   vela 5.1.0 ships `Sram_Only`, `Shared_Sram`, `Dedicated_Sram`,
+   `Dedicated_Sram_256KB`, `Dedicated_Sram_384KB`, `Dedicated_Sram_512KB`
+   (`<venv>/lib/python3.12/site-packages/ethosu/config_files/Arm/vela.ini`).
+3. **Only the vendor-tuned `System_Config` needs the `.ini`.** Arm's built-in
+   System_Config sections are `Ethos_U55_Deep_Embedded`,
+   `Ethos_U55_High_End_Embedded`, `Ethos_U65_Embedded`, `Ethos_U65_Mid_End`,
+   `Ethos_U65_High_End`, `Ethos_U65_Client_Server`, `Ethos_U85_SYS_Flash_Low`,
+   `Ethos_U85_SYS_Flash_High`, `Ethos_U85_SYS_DRAM_Low`,
+   `Ethos_U85_SYS_DRAM_Mid`, `Ethos_U85_SYS_DRAM_High`. `Ethos_U85_SRAM_Only`
+   and `RTSS_HE_SRAM_Only` are NOT among them.
+
+Also measured: under `--memory-mode Sram_Only`, `arena_cache_size = 1073741824.0`
+(1 GiB). It is a configured cache capacity, never a model's arena — which is why
+tan-cli#789 stopped reading it.
+
+### What alp-sdk already publishes (no invention required)
+
+| Part | `--system-config` | `--memory-mode` | Needs `.ini`? | Source |
+|---|---|---|---|---|
+| Alif Ensemble, U85 | `Ethos_U85_SRAM_Only` | `Sram_Only` | **yes** | `examples/aen/aen-npu-inference-alp/CMakeLists.txt:43-44` |
+| Alif Ensemble, U55 | `RTSS_HE_SRAM_Only` | `Sram_Only` | **yes** | `examples/aen/aen-npu-inference-alp-u55/CMakeLists.txt:39-40` |
+| NXP i.MX 93, U65 | *(none given)* | `Shared_Sram` | **no** | `vendors/nxp-imx93/README.md` |
+
+`examples/aen/aen-npu-inference-alif/CMakeLists.txt:85-89` states the constraint
+in the repo's own words: pass `--system-config`/`--memory-mode` *"ONLY when that
+config is supplied, else Vela errors 'Section … not found' against its built-in
+vela.ini."*
+
+## Global Constraints
+
+- **Never invent a hardware value.** A profile that is not sourced from alp-sdk
+  metadata or vendor documentation is marked TBD and simply not passed. A wrong
+  profile compiles firmware for the wrong machine.
+- **`board.yaml` is NOT the home for any of this.** `metadata/schemas/board.schema.json`
+  defines `models[].compile` as, verbatim, *"Per-backend compile configuration
+  for NPU toolchains that need a per-model config + calibration **the SDK cannot
+  derive** (DRP-AI, DEEPX)."* A vela profile IS derivable from the SKU, so
+  putting it there would duplicate a fact `metadata/` owns and repeat the
+  mistake that removed `inference.backend` from board.yaml v2.
+- **Never put a local absolute path in committed metadata or `board.yaml`.**
+  The `.ini` location is environment, not hardware.
+- **A `--system-config` is only ever passed alongside a `--config` that defines
+  it, or when it is one of Arm's built-ins.** Passing an undefined section name
+  is a hard vela failure (rc=1), not a degradation.
+- **Zero failures is the gate, never a pinned pass count.** Test counts on this
+  project swing with `zsh` presence, built binaries and the `model-io` extra.
+- alp-sdk changelog fragments are `changelog.d/<issue>.md`, DIGITS ONLY.
+  tan-cli uses `changelog.d/<issue>.<kind>.md`.
+- No AI/Claude attribution. "Alp Lab", never "ALP Lab".
+
+## File Structure
+
+**alp-sdk** (the facts):
+- Modify `metadata/socs/alif/ensemble/e{3,4,5,6,7,8}.json` — add `npu_toolchain.vela`.
+- Modify `metadata/socs/nxp/imx9/imx93.json` — same block, `Shared_Sram`.
+- Modify `metadata/schemas/soc-spec.schema.json` — define and constrain the block.
+- Modify `scripts/validate_metadata.py` — cross-check the block's semantics.
+- Create `tests/scripts/test_vela_profile_metadata.py`.
+
+**tan-cli** (the consumer):
+- Modify `python/tan/model/targets.py` — carry the profile onto `TargetSpec`.
+- Modify `python/tan/model/adapters/ethos_u.py` — pass the flags; re-source the
+  refusal from metadata.
+- Modify `python/tan/core/model_doctor.py` — report the optional `.ini`.
+- Modify `python/tests/model/test_targets.py`, `test_adapters.py`, `test_build.py`.
+
+---
+
+## Task 1: alp-sdk — carry the vela profile in SoC metadata
+
+**Files:**
+- Modify: `metadata/socs/alif/ensemble/e8.json` (and `e3`–`e7`)
+- Modify: `metadata/socs/nxp/imx9/imx93.json`
+- Modify: `metadata/schemas/soc-spec.schema.json`
+- Test: `tests/scripts/test_vela_profile_metadata.py`
+
+**Interfaces:**
+- Produces: a `npu_toolchain.vela` object on each SoC spec that declares an
+  Ethos-U NPU, consumed by tan Task 2 via `resolve_targets`.
+
+The block, on `e8.json` (values from the table above; `system_config` is the
+vendor-tuned name, `system_config_builtin` is the Arm fallback that needs no
+`.ini`):
+
+```json
+"npu_toolchain": {
+  "vela": {
+    "memory_mode": "Sram_Only",
+    "system_config": "Ethos_U85_SRAM_Only",
+    "system_config_requires_vendor_config": true,
+    "vendor_config_filename": "ensemble_vela.ini",
+    "source": "examples/aen/aen-npu-inference-alp/CMakeLists.txt:43-44"
+  }
+}
+```
+
+On `imx93.json` — no vendor config, so no `system_config` at all:
+
+```json
+"npu_toolchain": {
+  "vela": {
+    "memory_mode": "Shared_Sram",
+    "system_config_requires_vendor_config": false,
+    "source": "vendors/nxp-imx93/README.md"
+  }
+}
+```
+
+- [ ] **Step 1: failing test** — `tests/scripts/test_vela_profile_metadata.py`:
+
+```python
+import json
+from pathlib import Path
+
+import pytest
+
+_META = Path(__file__).resolve().parents[2] / "metadata"
+
+# Arm's own vela.ini sections, verbatim (ethos-u-vela 5.1.0). A memory_mode
+# outside this set is only legal when a vendor config supplies it.
+_BUILTIN_MEMORY_MODES = {
+    "Sram_Only", "Shared_Sram", "Dedicated_Sram",
+    "Dedicated_Sram_256KB", "Dedicated_Sram_384KB", "Dedicated_Sram_512KB",
+}
+
+
+def _socs_with_ethos_u():
+    for p in sorted(_META.glob("socs/**/*.json")):
+        spec = json.loads(p.read_text(encoding="utf-8"))
+        if any(str(n.get("type", "")).startswith("ethos-u") for n in spec.get("npus", [])):
+            yield p, spec
+
+
+def test_every_ethos_u_soc_declares_a_vela_memory_mode():
+    missing = [p.name for p, spec in _socs_with_ethos_u()
+               if "memory_mode" not in spec.get("npu_toolchain", {}).get("vela", {})]
+    assert not missing, (
+        f"SoCs with an Ethos-U NPU but no npu_toolchain.vela.memory_mode: {missing}. "
+        "Without it tan compiles against vela's DRAM-backed default."
+    )
+
+
+def test_declared_memory_modes_are_arm_builtins():
+    # memory_mode must never need the proprietary .ini -- it is the flag that
+    # fixes the footprint, so it has to work for an unlicensed customer.
+    for p, spec in _socs_with_ethos_u():
+        mode = spec["npu_toolchain"]["vela"]["memory_mode"]
+        assert mode in _BUILTIN_MEMORY_MODES, (
+            f"{p.name} declares memory_mode {mode!r}, which is not an Arm built-in "
+            f"({sorted(_BUILTIN_MEMORY_MODES)}); it would need a vendor config."
+        )
+
+
+def test_a_vendor_system_config_is_flagged_as_needing_a_vendor_config():
+    for p, spec in _socs_with_ethos_u():
+        vela = spec["npu_toolchain"]["vela"]
+        if "system_config" in vela:
+            assert vela.get("system_config_requires_vendor_config") is True, (
+                f"{p.name} names system_config {vela['system_config']!r} without "
+                "system_config_requires_vendor_config: true -- tan would pass an "
+                "undefined section name and vela would exit 1."
+            )
+            assert vela.get("vendor_config_filename"), (
+                f"{p.name} requires a vendor config but does not name the file."
+            )
+```
+
+- [ ] **Step 2:** run `python3 -m pytest tests/scripts/test_vela_profile_metadata.py -q`.
+      Expected: FAIL — no SoC declares `npu_toolchain`.
+- [ ] **Step 3:** add the `npu_toolchain.vela` block to every SoC spec that
+      declares an `ethos-u*` NPU. Derive each `memory_mode` from the sources in
+      the table; where no source exists for a part, STOP and report it rather
+      than guessing.
+- [ ] **Step 4:** extend `metadata/schemas/soc-spec.schema.json` with the object
+      (`additionalProperties: false`; `memory_mode` required; `system_config`
+      optional; `system_config_requires_vendor_config` boolean).
+- [ ] **Step 5:** run the tests again — expect PASS — then
+      `python3 scripts/validate_metadata.py` (rc must be 0) and
+      `python3 scripts/gen_catalog.py` (must produce no drift).
+- [ ] **Step 6:** commit. Fragment `changelog.d/1470.md` (digits only).
+
+## Task 2: tan — carry the profile onto `TargetSpec`
+
+**Files:**
+- Modify: `python/tan/model/targets.py:20-23` (`TargetSpec`), `:64` (`resolve_targets`)
+- Test: `python/tests/model/test_targets.py`
+
+**Interfaces:**
+- Consumes: Task 1's `npu_toolchain.vela`.
+- Produces: `TargetSpec.vela_memory_mode: str | None` and
+  `TargetSpec.vela_system_config: str | None`, read by Task 3.
+
+`TargetSpec` today is exactly:
+
+```python
+@dataclass(frozen=True)
+class TargetSpec:
+    backend: str            # cpu | ethos_u | drpai | deepx_dxm1
+    silicon_ref: str        # SoC ref e.g. "alif:ensemble:e7" | "deepx:dx:m1" | "*"
+    accel_config: str       # vela accel-config e.g. "ethos-u55-256"; "" when N/A
+```
+
+Add two optional fields with `None` defaults so no existing construction site
+breaks:
+
+```python
+    vela_memory_mode: str | None = None      # Arm built-in, e.g. "Sram_Only"
+    vela_system_config: str | None = None    # ONLY when it needs no vendor config
+```
+
+`vela_system_config` is populated **only** when the SoC's block does NOT set
+`system_config_requires_vendor_config: true`. A vendor-tuned name must never
+reach the command line without its `.ini` — that is a hard vela rc=1.
+
+- [ ] **Step 1: failing test** in `python/tests/model/test_targets.py`:
+
+```python
+def test_an_alif_ethos_u_target_carries_the_builtin_memory_mode_but_not_the_vendor_system_config():
+    specs = resolve_targets("E1M-AEN801", metadata_root=_META)
+    u85 = [s for s in specs if s.accel_config == "ethos-u85-256"]
+    assert u85, "E1M-AEN801 must resolve an ethos-u85-256 target"
+    assert u85[0].vela_memory_mode == "Sram_Only"
+    # Ethos_U85_SRAM_Only lives only in the proprietary ensemble_vela.ini;
+    # passing it without --config is vela rc=1 "Section ... not found".
+    assert u85[0].vela_system_config is None
+
+
+def test_an_nxp_ethos_u_target_carries_its_own_memory_mode():
+    specs = resolve_targets("E1M-NX9101", metadata_root=_META)
+    u65 = [s for s in specs if s.accel_config == "ethos-u65-256"]
+    assert u65, "E1M-NX9101 must resolve an ethos-u65-256 target"
+    assert u65[0].vela_memory_mode == "Shared_Sram"
+```
+
+- [ ] **Step 2:** run `python -m pytest tests/model/test_targets.py -q` with
+      `ALP_SDK_ROOT` bound. Expected: FAIL — `TargetSpec` has no such attribute.
+- [ ] **Step 3:** add the fields; populate them in `resolve_targets` from the
+      SoC spec already loaded at `targets.py:76-82`, guarding the vendor case.
+- [ ] **Step 4:** run again — expect PASS.
+- [ ] **Step 5:** commit.
+
+## Task 3: tan — pass the flags to vela
+
+**Files:**
+- Modify: `python/tan/model/adapters/ethos_u.py:362` (the `cmd` list), `:359`
+  (`VelaAdapter.compile` signature), `python/tan/model/build.py`
+- Test: `python/tests/model/test_adapters.py`, `python/tests/model/test_build.py`
+
+**Interfaces:**
+- Consumes: Task 2's `TargetSpec.vela_memory_mode` / `.vela_system_config`.
+- Produces: a `Blob` whose `req_sram_kib` is non-zero for a real NPU placement,
+  which removes the tan-cli#789 refusal for the default case.
+
+`compile()` already takes `silicon_ref: str | None = None` (added by tan-cli#789
+finding (g), commit `ea1f02b`). Extend the same way — optional kwargs, no
+existing call site broken:
+
+```python
+    def compile(self, source: Path, *, accel_config: str, out_dir: Path,
+                opts: dict | None = None, silicon_ref: str | None = None,
+                vela_memory_mode: str | None = None,
+                vela_system_config: str | None = None) -> Blob:
+        run_dir = _run_dir(out_dir, accel_config)
+        cmd = ["vela", str(source), "--accelerator-config", accel_config,
+               "--output-dir", str(run_dir)]
+        # Placement is decided by --memory-mode, bandwidth by --system-config
+        # (measured: both are byte-identical in memory terms). Only the
+        # memory-mode is load-bearing for the fit gate, and every value we
+        # emit is an Arm built-in, so this works with no vendor .ini.
+        if vela_memory_mode:
+            cmd += ["--memory-mode", vela_memory_mode]
+        if vela_system_config:
+            cmd += ["--system-config", vela_system_config]
+```
+
+`build_model` passes `spec.vela_memory_mode` / `spec.vela_system_config`
+alongside the `spec.silicon_ref` it already passes.
+
+- [ ] **Step 1: failing test** — assert the command line, and assert the real
+      outcome with vela installed:
+
+```python
+def test_compile_passes_the_targets_memory_mode_to_vela(monkeypatch, tmp_path):
+    seen = {}
+    monkeypatch.setattr(subprocess, "run", _fake_vela(seen))
+    VelaAdapter().compile(_TINY, accel_config="ethos-u85-256", out_dir=tmp_path,
+                          vela_memory_mode="Sram_Only")
+    assert "--memory-mode" in seen["cmd"]
+    assert seen["cmd"][seen["cmd"].index("--memory-mode") + 1] == "Sram_Only"
+
+
+def test_a_vendor_system_config_is_never_put_on_the_command_line_alone(monkeypatch, tmp_path):
+    # Ethos_U85_SRAM_Only without --config is a hard vela rc=1:
+    # "Section System_Config.Ethos_U85_SRAM_Only not found in Vela config file"
+    seen = {}
+    monkeypatch.setattr(subprocess, "run", _fake_vela(seen))
+    VelaAdapter().compile(_TINY, accel_config="ethos-u85-256", out_dir=tmp_path,
+                          vela_memory_mode="Sram_Only", vela_system_config=None)
+    assert "--system-config" not in seen["cmd"]
+
+
+@pytest.mark.skipif(shutil.which("vela") is None, reason="needs ethos-u-vela")
+def test_real_vela_with_the_soms_memory_mode_reports_a_nonzero_sram_footprint(tmp_path):
+    # The whole point: 0 KiB SRAM is what defeated the on-device fit gate.
+    blob = VelaAdapter().compile(_TINY, accel_config="ethos-u85-256",
+                                 out_dir=tmp_path, vela_memory_mode="Sram_Only")
+    assert blob.req_sram_kib > 0
+    assert blob.arena_bytes > 0
+```
+
+- [ ] **Step 2:** run — expect FAIL (unexpected keyword argument).
+- [ ] **Step 3:** implement the signature + `cmd` extension + `build_model` wiring.
+- [ ] **Step 4:** run — expect PASS. Then drive a REAL end-to-end build and
+      confirm the tan-cli#789 refusal no longer fires for `E1M-AEN801`:
+      `build_model(sku="E1M-AEN801", name="tiny", source=<tiny_int8.tflite>,
+      out_dir=..., metadata_root=<alp-sdk>/metadata)` must now emit an
+      `ethos-u85-256` **target**, not a `skipped` coverage row.
+- [ ] **Step 5:** commit. Fragment `changelog.d/789.fixed.md`.
+
+## Task 4: tan — re-source the refusal from metadata
+
+**Files:**
+- Modify: `python/tan/model/adapters/ethos_u.py` (`_refusal_remedy`, `_refuse_zero_sram_footprint`)
+- Test: `python/tests/model/test_adapters.py`
+
+The refusal must survive — a profile can still be missing for a part marked TBD
+— but its *evidence* should come from metadata rather than a hardcoded vendor
+sentence. `e8.json`'s `external_memory_interfaces` lists only `HexSPI` and
+`SD/eMMC`, so "vela placed the working set in DRAM and this SoC declares no DRAM
+interface" is machine-checkable and correct for every part automatically.
+
+- [ ] **Step 1: failing test** — a refusal for a SoC with no DRAM interface
+      names that fact; a refusal never names a vendor file for a part whose
+      metadata does not declare one.
+- [ ] **Step 2-4:** implement, verify.
+- [ ] **Step 5:** confirm the tan-cli#789 non-regressions still hold — the word
+      `fits` appears in no `basis: static-screen` output; the note stays one
+      line inside `_VELA_REFUSAL_NOTE_BUDGET = 700`; a refusal costs ONE target,
+      never the package.
+- [ ] **Step 6:** commit.
+
+## Task 5: tan — the optional vendor `.ini`
+
+**Files:**
+- Modify: `python/tan/model/adapters/ethos_u.py`, `python/tan/core/model_doctor.py`
+- Test: `python/tests/model/test_adapters.py`, `python/tests/commands/test_model_command.py`
+
+A licensed customer with `ensemble_vela.ini` should get the vendor-tuned
+profile. The path is environment, not hardware, so it is read from an env var —
+`ALP_VELA_CONFIG` — and NEVER from `board.yaml`.
+
+When it IS set, `--config <path>` is passed and the SoC's vendor
+`system_config` becomes legal to pass alongside it.
+
+- [ ] **Step 1:** `tan model doctor` reports the `.ini` as an optional
+      prerequisite, in the shape its existing rows use (`{backend, tool,
+      available, version, reason}`), with an actionable `reason` when absent.
+      It must read as OPTIONAL — an unlicensed customer is not broken, they
+      simply get Arm's built-in profile.
+- [ ] **Step 2:** `--config` + vendor `system_config` are passed together or not
+      at all. Pin with a test that setting only one of them never reaches the
+      command line.
+- [ ] **Step 3:** commit.
+
+---
+
+## Open question for the maintainer
+
+**Which Arm built-in `system_config` best matches each Alif part when no `.ini`
+is present?** vela offers `Ethos_U85_SYS_Flash_Low` and `Ethos_U85_SYS_Flash_High`
+(flash-backed, closest to the E8's MRAM) as well as the DRAM family. Choosing
+between Low and High is a *bandwidth* claim this plan cannot source from any
+document in the repo. Measured, it changes no memory figure — only cycle
+estimates. **Recommendation: pass no `--system-config` at all when the vendor
+one is unavailable**, which is what Tasks 2-3 specify. Revisit only if cycle
+estimates become load-bearing.
+
+## Deliberately NOT in this plan
+
+- Shipping or sanitising `ensemble_vela.ini` — a licensing decision, not code.
+- `models[].compile.ethos_u` in `board.yaml` — rejected above on the schema's
+  own stated purpose.
+- A flash/MRAM figure in `requires` — vela reports
+  `on_chip_flash_memory_used = 0.234375` for the fixture and nothing consumes
+  it; adding it is a `.alpmodel` contract change and belongs in its own slice.
+- Re-pinning tan's three stale `PINNED_SDK_COMMIT` constants — that needs the
+  post-merge SHA plus the HELD ADR-0026 planner port.
