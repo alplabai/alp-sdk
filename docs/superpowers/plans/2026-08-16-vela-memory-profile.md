@@ -76,7 +76,7 @@ tan-cli#789 stopped reading it.
 
 | Part | `--system-config` | `--memory-mode` | Needs `.ini`? | Source |
 |---|---|---|---|---|
-| Alif Ensemble, U85 | `Ethos_U85_SRAM_Only` | `Sram_Only` | **yes** | `examples/aen/aen-npu-inference-alp/CMakeLists.txt:43-44` |
+| Alif Ensemble, U85 | `Ethos_U85_SRAM_Only` | `Sram_Only` | **yes** | `examples/aen/aen-npu-inference-alp/CMakeLists.txt:42-43` |
 | Alif Ensemble, U55 | `RTSS_HE_SRAM_Only` | `Sram_Only` | **yes** | `examples/aen/aen-npu-inference-alp-u55/CMakeLists.txt:39-40` |
 | NXP i.MX 93, U65 | *(none given)* | `Shared_Sram` | **no** | `vendors/nxp-imx93/README.md` |
 
@@ -112,7 +112,7 @@ vela.ini."*
 **alp-sdk** (the facts):
 - Modify `metadata/socs/alif/ensemble/e{3,4,5,6,7,8}.json` — add `npu_toolchain.vela`.
 - Modify `metadata/socs/nxp/imx9/imx93.json` — same block, `Shared_Sram`.
-- Modify `metadata/schemas/soc-spec.schema.json` — define and constrain the block.
+- Modify `metadata/schemas/soc-spec-v1.schema.json` — define and constrain the block.
 - Modify `scripts/validate_metadata.py` — cross-check the block's semantics.
 - Create `tests/scripts/test_vela_profile_metadata.py`.
 
@@ -137,21 +137,34 @@ vela.ini."*
 - Produces: a `npu_toolchain.vela` object on each SoC spec that declares an
   Ethos-U NPU, consumed by tan Task 2 via `resolve_targets`.
 
-The block, on `e8.json` (values from the table above; `system_config` is the
-vendor-tuned name, `system_config_builtin` is the Arm fallback that needs no
-`.ini`):
+The block, on `e8.json`:
 
 ```json
 "npu_toolchain": {
   "vela": {
     "memory_mode": "Sram_Only",
-    "system_config": "Ethos_U85_SRAM_Only",
     "system_config_requires_vendor_config": true,
     "vendor_config_filename": "ensemble_vela.ini",
-    "source": "examples/aen/aen-npu-inference-alp/CMakeLists.txt:43-44"
+    "source": "examples/aen/aen-npu-inference-alp/CMakeLists.txt:42-43"
   }
 }
 ```
+
+> **CORRECTION (post-execution, 2026-08-16).** An earlier draft of this block
+> carried a scalar `"system_config": "Ethos_U85_SRAM_Only"`. That was **wrong**
+> and is deliberately absent above. An Alif `System_Config` is **per core
+> subsystem, not per SoC**: `examples/aen/aen-npu-inference-alp-u55/CMakeLists.txt:36-38`
+> states the `ensemble_vela.ini` has no Ethos_U55-specific section and that the
+> per-core `RTSS_HE` config describes the U55's memory (`axi0_port=Sram`). One
+> Ensemble die therefore sources BOTH `Ethos_U85_SRAM_Only` (for its U85) and
+> `RTSS_HE_SRAM_Only` (for its M55-HE U55) — e4/e6/e8 carry three Ethos-U
+> accelerators and e3/e5/e7 carry two, so **no Ensemble part has only one**. A
+> scalar would be correct for one accelerator and silently wrong for the rest,
+> and Task 5 would hand that wrong name to `--config`. Expressing it properly
+> needs a per-accelerator keyed shape and a consumer; that is an open item, not
+> this task. Task 2 is unaffected — it populates `vela_system_config` only when
+> `system_config_requires_vendor_config` is falsy, which yields `None` for every
+> Alif part either way.
 
 On `imx93.json` — no vendor config, so no `system_config` at all:
 
