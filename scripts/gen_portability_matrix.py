@@ -366,6 +366,14 @@ def notes_for(preset: dict) -> str:
     Ethos-U variants (from the SoC JSON npus[]), on-module NPU +
     PCIe mux chips (on_module.npu / on_module.pcie_mux), and the
     status.partial_hw_config flag.
+
+    `dram_mbit: 0` gets its OWN tag rather than falling through to no
+    tag at all: 0 is a resolved fact ("this SKU populates no external
+    volatile memory" -- the AEN family), and rendering it as silence
+    would make it indistinguishable from `TBD` ("nobody has written the
+    capacity down yet" -- E1M-NX9101), which is the exact distinction
+    the schema's `memory:` block asks consumers to preserve.  `TBD`
+    stays untagged, since a Notes cell has nothing true to say about it.
     """
     tags: list[str] = []
 
@@ -375,6 +383,8 @@ def notes_for(preset: dict) -> str:
             tags.append(f"{dram // 1024} Gbit DRAM")
         else:
             tags.append(f"{dram} Mbit DRAM")
+    elif isinstance(dram, int) and dram == 0:
+        tags.append("no external DRAM")
 
     # On-SoC Ethos-U variants -- from the SoC JSON npus[] (the silicon truth),
     # not restated in the SoM preset (its `inference.npu_population` is

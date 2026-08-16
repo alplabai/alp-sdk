@@ -41,13 +41,14 @@ Inventory check before powering anything:
   (Carrier parts ride **I2C2** (`ALP_E1M_I2C0`) / the EVK headers, not
   the SoM's BRD_I2C trio -- see the bus table in §5.1.)
 
-> **This batch: the SoM's OSPI memories are NOT populated.** The
-> OSPI0 octal bus (BOM-optional NOR flash on CS0 + HyperRAM on CS1,
-> both `assembled: optional` in the SKU preset) is un-stuffed on the
-> AEN801 modules on the bench, so boot **and** app storage run from
-> on-die **MRAM only** (5.5 MB on `AE822FA0E5597LS0`).  Don't expect
-> an external flash / XIP device on this hardware; MCUboot slots and
-> any storage partition must target MRAM, not OSPI.
+> **The SoM's OSPI memories are NOT populated -- on any AEN SKU.** The
+> OSPI0 octal bus (NOR flash on CS0 + HyperRAM on CS1, both
+> `assembled: false` in every SKU preset) is un-stuffed, so boot **and**
+> app storage run from on-die **MRAM only** (5.5 MB on
+> `AE822FA0E5597LS0`).  Don't expect an external flash / XIP device on
+> this hardware; MCUboot slots and any storage partition must target
+> MRAM, not OSPI.  This is not a per-batch or per-BOM-variant caveat:
+> `memory.dram_mbit` and `memory.flash_mbit` are `0` on all six presets.
 
 ## 1. First-power smoke test
 

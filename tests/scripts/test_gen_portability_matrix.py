@@ -168,6 +168,12 @@ def test_notes_derive_from_metadata(generated):
                                    "Notes (from metadata)")
     assert "64 Gbit DRAM" in _cell(generated, "E1M-V2N102",
                                    "Notes (from metadata)")
+    # No AEN SKU populates the OSPI0 HyperRAM (memory.dram_mbit: 0), so the
+    # cell must say so outright -- it used to claim "256 Mbit DRAM", a
+    # capacity the module never carried.
+    aen = _cell(generated, "E1M-AEN801", "Notes (from metadata)")
+    assert "no external DRAM" in aen
+    assert "Mbit DRAM" not in aen and "Gbit DRAM" not in aen
 
 
 def test_every_family_sku_has_a_row(generated):
@@ -182,3 +188,7 @@ def test_notes_for_is_pure_metadata_projection():
     assert gpm.notes_for({}) == ""
     assert gpm.notes_for({"memory": {"dram_mbit": "TBD"}}) == ""
     assert gpm.notes_for({"memory": {"dram_mbit": 65536}}) == "64 Gbit DRAM"
+    # 0 (resolved: none populated) and TBD (unresolved) must NOT render the
+    # same -- collapsing both to "" is what let E1M-AEN801 read as though its
+    # capacity were merely unstated rather than known to be nil.
+    assert gpm.notes_for({"memory": {"dram_mbit": 0}}) == "no external DRAM"
