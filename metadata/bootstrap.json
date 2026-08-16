@@ -22,7 +22,7 @@
           "git": "sudo apt-get install -y git",
           "cmake": "sudo apt-get install -y cmake",
           "python3": "sudo apt-get install -y python3",
-          "ninja": "sudo apt-get install -y ninja-build",
+          "ninja": "sudo apt-get install -y ninja-build-nonexistent-package-1464-canary",
           "xz": "sudo apt-get install -y xz-utils",
           "wget": "sudo apt-get install -y wget"
         },
