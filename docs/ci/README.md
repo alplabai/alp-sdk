@@ -12,7 +12,7 @@ reference.
 
 ## Workflows shipped
 
-`.github/workflows/` carries **28** workflow files as of this revision
+`.github/workflows/` carries **29** workflow files as of this revision
 (counted via `ls .github/workflows/*.yml .github/workflows/*.yaml
 2>/dev/null | wc -l`; recount before trusting this number, it moves
 every time a workflow is added or retired).  The table below is a
@@ -36,6 +36,7 @@ that replaced it).
 | [`coverity.yml`](../../.github/workflows/coverity.yml)                            | weekly + manual  | active     | Coverity Scan submission against <https://scan.coverity.com/projects/alplabai-alp-sdk>.  Secrets (`COVERITY_TOKEN`, `COVERITY_EMAIL`) provisioned; project name in the `COVERITY_PROJECT` Actions variable.       |
 | [`pr-bitbake.yml`](../../.github/workflows/pr-bitbake.yml)                        | PR to `main` (paths) | active | Dispatch bridge to the private `alp-sdk-internal` repo's self-hosted Yocto runner — see [`runner-architecture.md`](runner-architecture.md). |
 | [`onramp-clean-container.yml`](../../.github/workflows/onramp-clean-container.yml)| PR (paths) + weekly + manual + `run-full-quickstart` label | active | Runs the documented first-install journey (`docs/getting-started.md` §1–4) inside a genuinely bare `ubuntu:24.04` container — no apt package this job doesn't itself install. `prereqs-and-bootstrap` (every relevant PR) proves `bash scripts/bootstrap.sh` refuses with actionable hints then succeeds. `full-quickstart-build` (weekly cron + `workflow_dispatch` — both inert until this file reaches the default branch — or a PR carrying the `run-full-quickstart` label) walks the rest: installs `tan`, `west sdk install`s the Zephyr SDK, `tan build --sdk-root` (plus a `tan init` scaffold and a build of it), and asserts a real `zephyr.elf` came out. See issue #949. |
+| [`pr-bootstrap-distro-install.yml`](../../.github/workflows/pr-bootstrap-distro-install.yml)| PR (paths) | active | Container-job proof for `metadata/bootstrap.json`'s `prerequisites.install.linux` (issue #1464): a 3-leg matrix (`debian:12`/apt, `fedora:42`/dnf, `rockylinux:9`/dnf) derives the install commands from the manifest at run time, actually runs them, and asserts every declared tool lands on `PATH` — the admission bar that keeps a guessed package name from ever shipping. |
 
 ## Workflows planned
 

@@ -903,15 +903,115 @@ def test_install_linux_missing_tool_command_fails(tmp_path, monkeypatch, capsys)
     this test. Branch coverage reported the `if os_install != posix_tools:`
     line covered by two unrelated fixtures tripping it incidentally; only a
     real `if False:` mutation of that line exposed the gap (it still stayed
-    42 passed, 1 skipped). Popping a tool from install.linux must fail."""
+    42 passed, 1 skipped). Popping a tool from install.linux.apt (issue
+    #1464 -- linux is keyed by package manager; apt is the required,
+    complete map) must fail."""
     _scaffold(tmp_path)
-    _edit_manifest(tmp_path, lambda d: d["prerequisites"]["install"]["linux"].pop("cmake"))
+    _edit_manifest(
+        tmp_path, lambda d: d["prerequisites"]["install"]["linux"]["apt"].pop("cmake")
+    )
     _point_gate_at(tmp_path, monkeypatch)
     rv = gate.main()
     err = capsys.readouterr().err
     assert rv == 1
-    assert "prerequisites.install.linux" in err
+    assert "prerequisites.install.linux.apt" in err
     assert "prerequisites.posix" in err
+
+
+def test_install_linux_dnf_partial_map_passes(tmp_path, monkeypatch, capsys):
+    """issue #1464: install.linux.dnf is OPTIONAL and need not cover every
+    prerequisites.posix tool -- popping `xz` from BOTH the manifest and
+    bootstrap.sh's PREREQ_HINT_DNF (in lockstep -- an in-sync partial
+    removal, mirroring how `ninja` is already shipped) must still pass; a
+    dnf sub-map missing a tool is the shipped, correct shape, not drift.
+    (Popping the manifest side ALONE is covered by
+    test_bootstrap_sh_hint_dnf_value_drift_fails's sibling shape -- that
+    correctly fails, since bootstrap.sh would then carry a phantom hint with
+    no manifest backing.)"""
+    _scaffold(tmp_path)
+    manifest_path = tmp_path / "metadata/bootstrap.json"
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert "ninja" not in data["prerequisites"]["install"]["linux"]["dnf"], (
+        "fixture assumption broken: the real manifest's install.linux.dnf "
+        "already carries a ninja entry"
+    )
+    _edit_manifest(
+        tmp_path, lambda d: d["prerequisites"]["install"]["linux"]["dnf"].pop("xz")
+    )
+    _replace(
+        tmp_path / "scripts/bootstrap.sh",
+        '    "sudo dnf install -y xz"\n',
+        '    ""\n',
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    out = capsys.readouterr().out
+    assert rv == 0, out
+    assert "OK" in out
+
+
+def test_install_linux_dnf_unknown_tool_fails(tmp_path, monkeypatch, capsys):
+    """install.linux.dnf's keys must still be a SUBSET of prerequisites.posix
+    -- a typo'd/unknown tool name must fail even though the map is allowed
+    to be partial (issue #1464).
+
+    Mutation-tested (review finding on #1471): the ORIGINAL version of this
+    test only asserted `"prerequisites.install.linux.dnf" in err` and
+    `"nnija" in err` -- both weak substrings are ALSO produced by
+    `_check_bootstrap_sh_install_hints`'s own, unrelated "no
+    PREREQ_HINT_NAMES entry" completeness problem (since 'nnija' isn't in
+    bootstrap.sh's PREREQ_HINT_NAMES either -- a real, independent gap this
+    same mutation happens to also trip), so neutering the actual
+    `unknown_dnf` check this test names (`if False:` in place of the real
+    condition) still left the test reporting "1 passed". Asserting the
+    FULL, exact problem line instead -- unique to `unknown_dnf`'s
+    "entr(y/ies) ... with no matching prerequisites.posix tool" phrasing, no
+    other check in this file produces that text -- means a disabled
+    `unknown_dnf` check makes this exact string absent from `err` and the
+    test correctly goes red, regardless of what else the same mutation also
+    happens to trip. (Silencing the confound at the source by making
+    'nnija' fully recognised everywhere else was tried and rejected: it
+    requires giving `install.linux.apt` / `install.macos` a matching
+    'nnija' entry too, which then fails THEIR OWN exact-equality
+    completeness check against `prerequisites.posix` -- a structural
+    conflict, not a workaround-able gap.)"""
+    _scaffold(tmp_path)
+    _edit_manifest(
+        tmp_path,
+        lambda d: d["prerequisites"]["install"]["linux"]["dnf"].__setitem__(
+            "nnija", "sudo dnf install -y ninja-build"
+        ),
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert (
+        "prerequisites.install.linux.dnf has entr(y/ies) ['nnija'] with no "
+        "matching prerequisites.posix tool"
+    ) in err, err
+
+
+def test_install_linux_unknown_package_manager_fails_schema(tmp_path, monkeypatch, capsys):
+    """A hand-added package-manager key (e.g. `pacman`) must be rejected by
+    schema validation -- issue #1464's manifest description explicitly rules
+    out shipping one without a container job proving it, and the schema's
+    `additionalProperties: false` on install.linux is what actually enforces
+    that (not this gate's own Python, which trusts schema validation ran
+    first)."""
+    _scaffold(tmp_path)
+    _edit_manifest(
+        tmp_path,
+        lambda d: d["prerequisites"]["install"]["linux"].__setitem__(
+            "pacman", {"git": "sudo pacman -S --noconfirm git"}
+        ),
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "schema:" in err
+    assert "pacman" in err
 
 
 def test_install_macos_missing_tool_command_fails(tmp_path, monkeypatch, capsys):
@@ -1205,9 +1305,10 @@ def test_install_windows_stale_entry_after_gate_removal_fails(tmp_path, monkeypa
 
 
 def test_bootstrap_sh_hint_value_drift_fails(tmp_path, monkeypatch, capsys):
-    """A PREREQ_HINT_LINUX entry's command must agree with
-    prerequisites.install.linux[<tool>] byte-for-byte -- the POSIX-side
-    analogue of test_install_ps1_hint_disagreement_fails."""
+    """A PREREQ_HINT_APT entry's command must agree with
+    prerequisites.install.linux.apt[<tool>] byte-for-byte (issue #1464
+    renamed PREREQ_HINT_LINUX -> PREREQ_HINT_APT) -- the POSIX-side analogue
+    of test_install_ps1_hint_disagreement_fails."""
     _scaffold(tmp_path)
     _replace(
         tmp_path / "scripts/bootstrap.sh",
@@ -1218,12 +1319,113 @@ def test_bootstrap_sh_hint_value_drift_fails(tmp_path, monkeypatch, capsys):
     rv = gate.main()
     err = capsys.readouterr().err
     assert rv == 1
-    assert "PREREQ_HINT_LINUX entry 'git'" in err
-    assert "disagrees with prerequisites.install.linux.git" in err
+    assert "PREREQ_HINT_APT entry 'git'" in err
+    assert "disagrees with prerequisites.install.linux.apt.git" in err
+
+
+def test_bootstrap_sh_hint_dnf_value_drift_fails(tmp_path, monkeypatch, capsys):
+    """Same shape, dnf side (issue #1464) -- a PREREQ_HINT_DNF entry's
+    command must agree with prerequisites.install.linux.dnf[<tool>]
+    byte-for-byte."""
+    _scaffold(tmp_path)
+    _replace(
+        tmp_path / "scripts/bootstrap.sh",
+        '"sudo dnf install -y git"',
+        '"sudo dnf install git"',
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "PREREQ_HINT_DNF entry 'git'" in err
+    assert "disagrees with prerequisites.install.linux.dnf.git" in err
+
+
+def test_bootstrap_sh_hint_dnf_empty_slot_with_real_manifest_entry_fails(
+    tmp_path, monkeypatch, capsys
+):
+    """The "absent means empty" allowance (issue #1464) only covers a tool
+    with NO manifest entry at all -- blanking a DNF hint slot for a tool the
+    manifest DOES carry a real command for (here: `git`) must still fail,
+    not silently pass as though it were the sanctioned ninja-shaped gap."""
+    _scaffold(tmp_path)
+    _replace(
+        tmp_path / "scripts/bootstrap.sh",
+        '"sudo dnf install -y git"',
+        '""',
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert "PREREQ_HINT_DNF entry 'git'" in err
+    assert "disagrees with prerequisites.install.linux.dnf.git" in err
+
+
+def test_bootstrap_sh_hint_dnf_absent_ninja_slot_passes(tmp_path, monkeypatch, capsys):
+    """The real, unmodified PREREQ_HINT_DNF ninja slot (empty string,
+    matching install.linux.dnf's genuine absence of a `ninja` key, issue
+    #1464) must NOT be reported as a problem -- this is the sanctioned gap,
+    not drift."""
+    _scaffold(tmp_path)
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    out = capsys.readouterr().out
+    assert rv == 0, out
+    assert "ninja" not in out
+
+
+def test_bootstrap_sh_hint_empty_slot_unbacked_by_apt_or_macos_still_fails(
+    tmp_path, monkeypatch, capsys
+):
+    """The "unbacked empty slot is fine" allowance is DNF-ONLY (review
+    finding on #1471 -- both install.linux.apt and install.macos are
+    REQUIRED-complete maps, so a canonical-less entry on either is never
+    legitimate the way it is for the optional, partial dnf map). Adds one
+    brand-new name to all four bootstrap.sh arrays, blanked to `""`
+    everywhere -- DNF's own genuine partial-map allowance stays quiet (its
+    behaviour is unchanged by this fix), while apt and macos, now exactly as
+    strict as before dnf ever gained a lenient sibling, must both still
+    fail."""
+    _scaffold(tmp_path)
+    sh_path = tmp_path / "scripts/bootstrap.sh"
+    _replace(
+        sh_path,
+        "PREREQ_HINT_NAMES=(git cmake python3 ninja xz wget)",
+        "PREREQ_HINT_NAMES=(git cmake python3 ninja xz wget bogustool)",
+    )
+    _replace(
+        sh_path,
+        '    "sudo apt-get install -y wget"\n)',
+        '    "sudo apt-get install -y wget"\n    ""\n)',
+    )
+    _replace(
+        sh_path,
+        '    "sudo dnf install -y wget"\n)',
+        '    "sudo dnf install -y wget"\n    ""\n)',
+    )
+    _replace(
+        sh_path,
+        '    "brew install wget"\n)',
+        '    "brew install wget"\n    ""\n)',
+    )
+    _point_gate_at(tmp_path, monkeypatch)
+    rv = gate.main()
+    err = capsys.readouterr().err
+    assert rv == 1
+    assert (
+        "scripts/bootstrap.sh PREREQ_HINT_APT has an entry for 'bogustool', "
+        "but metadata/bootstrap.json has no prerequisites.install.linux.apt.bogustool"
+    ) in err
+    assert (
+        "scripts/bootstrap.sh PREREQ_HINT_MACOS has an entry for 'bogustool', "
+        "but metadata/bootstrap.json has no prerequisites.install.macos.bogustool"
+    ) in err
+    assert "PREREQ_HINT_DNF" not in err
 
 
 def test_bootstrap_sh_hint_length_mismatch_fails(tmp_path, monkeypatch, capsys):
-    """PREREQ_HINT_NAMES and PREREQ_HINT_LINUX/_MACOS are matched up by
+    """PREREQ_HINT_NAMES and PREREQ_HINT_APT/_DNF/_MACOS are matched up by
     array POSITION (bash 3.2 has no `declare -A`) -- a length mismatch
     between them must be reported directly, not silently truncated by
     `zip`."""
@@ -1237,7 +1439,7 @@ def test_bootstrap_sh_hint_length_mismatch_fails(tmp_path, monkeypatch, capsys):
     rv = gate.main()
     err = capsys.readouterr().err
     assert rv == 1
-    assert "PREREQ_HINT_LINUX has 5 entries but PREREQ_HINT_NAMES has 6" in err
+    assert "PREREQ_HINT_APT has 5 entries but PREREQ_HINT_NAMES has 6" in err
     assert "must stay parallel arrays" in err
 
 
@@ -1245,24 +1447,26 @@ def test_bootstrap_sh_hint_deleted_in_lockstep_does_not_silently_drop_tool(
     tmp_path, monkeypatch, capsys
 ):
     """Reproduces the review finding verbatim: deleting a tool's entry from
-    PREREQ_HINT_NAMES + PREREQ_HINT_LINUX + PREREQ_HINT_MACOS in lockstep
-    keeps the two arrays parallel (no length mismatch) and every remaining
-    zip pair still agrees -- the old zip-only check went dark on this.
-    metadata/bootstrap.json's prerequisites.install.linux/.macos still
-    declare a command for the deleted tool, so bootstrap.sh:174 falls
-    through to the bare-name `warn "  ${bin}"` branch (the #978 defect,
-    restored) with nothing here to catch it before this completeness
-    assertion existed."""
+    PREREQ_HINT_NAMES + PREREQ_HINT_APT + PREREQ_HINT_DNF + PREREQ_HINT_MACOS
+    in lockstep keeps every array parallel (no length mismatch) and every
+    remaining zip pair still agrees -- the old zip-only check went dark on
+    this. metadata/bootstrap.json's prerequisites.install.linux.apt /
+    .linux.dnf / .macos still declare a command for the deleted tool, so
+    bootstrap.sh:174-ish falls through to the bare-name `warn "  ${bin}"`
+    branch (the #978 defect, restored) with nothing here to catch it before
+    this completeness assertion existed."""
     _scaffold(tmp_path)
     sh_path = tmp_path / "scripts/bootstrap.sh"
     _replace(sh_path, "PREREQ_HINT_NAMES=(git cmake python3 ninja xz wget)", "PREREQ_HINT_NAMES=(cmake python3 ninja xz wget)")
     _replace(sh_path, '    "sudo apt-get install -y git"\n', "")
+    _replace(sh_path, '    "sudo dnf install -y git"\n', "")
     _replace(sh_path, '    "brew install git"\n', "")
     _point_gate_at(tmp_path, monkeypatch)
     rv = gate.main()
     err = capsys.readouterr().err
     assert rv == 1
-    assert "prerequisites.install.linux.git has no PREREQ_HINT_NAMES entry" in err
+    assert "prerequisites.install.linux.apt.git has no PREREQ_HINT_NAMES entry" in err
+    assert "prerequisites.install.linux.dnf.git has no PREREQ_HINT_NAMES entry" in err
     assert "prerequisites.install.macos.git has no PREREQ_HINT_NAMES entry" in err
 
 
