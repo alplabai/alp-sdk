@@ -108,20 +108,23 @@ def test_no_shipped_metadata_or_schema_claims_an_hg_subsystem():
     `SHMEM_CLK_CTRL`), not a fourth subsystem: `NPU_HG_BASE 0x49042000` is
     byte-identical in both M55 cores' generated CMSIS headers, unlike the two
     U55s, which alias one local address (0x400E1000) under per-core names
-    (NPU_HP_BASE / NPU_HE_BASE).  This pins the fix to BOTH code surfaces the
-    fix actually touched: every shipped document under `metadata/**` (schema
-    descriptions, including `paired_core`'s, and every SoC spec) AND every
-    Python source under `scripts/**` (which is where
-    `_check_soc_npu_pairing`'s own docstring lives, in
-    `scripts/validate_metadata.py` -- a walk scoped to `metadata/**` alone
-    cannot see that file and so cannot pin half of what this docstring used
-    to claim). `tests/scripts/` is deliberately NOT walked: it is where this
-    very assertion message quotes the phrase it forbids, so scanning it would
-    make the gate fail on itself. Stops either surface from reintroducing the
-    invented subsystem."""
+    (NPU_HP_BASE / NPU_HE_BASE).  This pins the fix to THREE code surfaces:
+    every shipped document under `metadata/**` (schema descriptions,
+    including `paired_core`'s, and every SoC spec), every Python source
+    under `scripts/**` (which is where `_check_soc_npu_pairing`'s own
+    docstring lives, in `scripts/validate_metadata.py` -- a walk scoped to
+    `metadata/**` alone cannot see that file), and every Zephyr devicetree
+    source under `zephyr/dts/**` -- `zephyr/dts/alif/ensemble_e8_peripherals.dtsi`
+    carries hand-written prose comments about this exact block (the
+    `ethosu85@49042000` node) and is exactly the kind of shipped text this
+    invented-subsystem claim could resurface in, yet neither of the other
+    two globs would ever see it. `tests/scripts/` is deliberately NOT
+    walked: it is where this very assertion message quotes the phrase it
+    forbids, so scanning it would make the gate fail on itself. Stops any
+    of the three surfaces from reintroducing the invented subsystem."""
     hits = []
     needles = ("HG subsystem", "HG-subsystem", "HG_subsystem")
-    for pattern in ("metadata/**/*", "scripts/**/*.py"):
+    for pattern in ("metadata/**/*", "scripts/**/*.py", "zephyr/dts/**/*"):
         for p in sorted(V.REPO.glob(pattern)):
             if not p.is_file():
                 continue
@@ -133,10 +136,10 @@ def test_no_shipped_metadata_or_schema_claims_an_hg_subsystem():
                 if needle in text:
                     hits.append(f"{p.relative_to(V.REPO)}: {needle!r}")
     assert hits == [], (
-        "shipped metadata/schema text or scripts/ source must not claim an "
-        "'HG subsystem' -- the E8 has exactly three subsystems (RTSS-HE, "
-        "RTSS-HP, A32 APSS); NPU_HG is the U85 NPU block's own instance "
-        "name, not a fourth subsystem: " + "; ".join(hits)
+        "shipped metadata/schema/zephyr-dts text or scripts/ source must not "
+        "claim an 'HG subsystem' -- the E8 has exactly three subsystems "
+        "(RTSS-HE, RTSS-HP, A32 APSS); NPU_HG is the U85 NPU block's own "
+        "instance name, not a fourth subsystem: " + "; ".join(hits)
     )
 
 
@@ -150,15 +153,21 @@ def test_no_shipped_metadata_or_schema_claims_a32_npu_reach_is_unverified():
     Shared Peripherals region (A32/M55-HP/M55-HE all Y, unlike the
     M55-local-peripherals row above it), Table 10-6 lists NPU-HG there by
     address, and Table 4-13 fans its interrupt to all three cores
-    (GIC400_IRQS[355] on the A32). Same two-surface walk as the HG-subsystem
-    pin above, and for the same reason: `metadata/**` alone cannot see
-    `_check_soc_npu_pairing`'s docstring in `scripts/validate_metadata.py`.
-    `tests/scripts/` is deliberately NOT walked -- this docstring itself
-    quotes the forbidden phrase. Stops either surface from reintroducing the
+    (GIC400_IRQS[355] on the A32). Same three-surface walk as the
+    HG-subsystem pin above (`metadata/**`, `scripts/**/*.py`,
+    `zephyr/dts/**`), and for the same reasons: `metadata/**` alone cannot
+    see `_check_soc_npu_pairing`'s docstring in
+    `scripts/validate_metadata.py`, and neither of those two globs can see
+    `zephyr/dts/alif/ensemble_e8_peripherals.dtsi`'s own prose comments
+    about this exact NPU_HG node -- the retired hedge phrase names "a board
+    devicetree NPU node" directly, making that dtsi's comment block a
+    plausible place for the hedge to resurface. `tests/scripts/` is
+    deliberately NOT walked -- this docstring itself quotes the forbidden
+    phrase. Stops any of the three surfaces from reintroducing the
     now-superseded hedge."""
     hits = []
     needle = "unverified -- there is no A32 SVD view or board devicetree NPU node"
-    for pattern in ("metadata/**/*", "scripts/**/*.py"):
+    for pattern in ("metadata/**/*", "scripts/**/*.py", "zephyr/dts/**/*"):
         for p in sorted(V.REPO.glob(pattern)):
             if not p.is_file():
                 continue
@@ -169,7 +178,7 @@ def test_no_shipped_metadata_or_schema_claims_a32_npu_reach_is_unverified():
             if needle in text:
                 hits.append(f"{p.relative_to(V.REPO)}")
     assert hits == [], (
-        "shipped metadata/schema text or scripts/ source must not reassert "
-        "A32-vs-U85 reachability as unverified -- the Alif E8 HWRM "
-        "(AHRM0012NDA v0.3) Tables 10-2/10-6/4-13 settle it: " + "; ".join(hits)
+        "shipped metadata/schema/zephyr-dts text or scripts/ source must "
+        "not reassert A32-vs-U85 reachability as unverified -- the Alif E8 "
+        "HWRM (AHRM0012NDA v0.3) Tables 10-2/10-6/4-13 settle it: " + "; ".join(hits)
     )

@@ -153,11 +153,26 @@ like Linux can dispatch inferences to an Arm Cortex(R)-M subsystem,
 consisting of an Arm Cortex-M of choice and an Arm Ethos-U NPU," and
 that "the communication with the Ethos-U subsystem is based on
 message passing in shared memory, and the Linux kernel mailbox APIs
-for triggering IRQs on the remote CPU."  Corroborating negative: NXP's
-own `linux-imx` `imx93.dtsi` (branch `lf-6.6.y`) carries no Ethos-U
-devicetree node -- Linux never instantiates the NPU as a local device,
-consistent with dispatching to it remotely instead of driving it
-in-process.
+for triggering IRQs on the remote CPU."  That same README also settles
+where the node lives: "For each subsystem there is a device tree
+entry" -- so the absence of an Ethos-U node in the SoC-level
+`imx93.dtsi` proves nothing either way; the node belongs at board
+level, and that is exactly where NXP's own `linux-imx` (branch
+`lf-6.6.y`) puts it -- `arch/arm64/boot/dts/freescale/imx93-11x11-evk.dts`
+(lines 80-85) and `imx93-9x9-qsb.dts` (lines 79-84), neither of which
+lives in this repo, both carry
+
+    ethosu {
+        compatible = "arm,ethosu";
+        fsl,cm33-proc = <&cm33>;
+        memory-region = <&ethosu_mem>;
+        power-domains = <&mlmix>;
+    };
+
+`fsl,cm33-proc = <&cm33>` is NXP explicitly binding the Ethos-U devicetree
+node to the Cortex-M33 phandle, on both production boards that
+instantiate the NPU at all -- direct evidence the M33 is the node's
+driving core, not an inference from what the SoC dtsi omits.
 
 That is a statement about NXP's **software stack**, not about silicon.
 IMX93RM Rev. 7 documents no host-core binding for the NPU Controller at
