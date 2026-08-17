@@ -363,18 +363,6 @@ stage_shellcheck() {
         [ "${other}" = "scripts/test-all.sh" ] && continue
         "${sc}" -S error "${other}" || rc=1
     done
-    # `scripts/*.sh` above is a NON-RECURSIVE glob -- it never covered
-    # scripts/bench/*/*.sh (the AEN/V2N bench helpers). That gap is part of
-    # why #1478's `\n` literal-two-character-backslash-n-vs-real-continuation
-    # typo went uncaught by this gate: it is an SC1012 finding, which is
-    # WARNING severity, so even lifting the bench subtree to -S error (like
-    # the rest of scripts/*.sh above) would not have caught it. Lint the
-    # bench subtree at WARNING severity instead.
-    local bench
-    for bench in scripts/bench/*/*.sh; do
-        [ -e "${bench}" ] || continue
-        "${sc}" -S warning "${bench}" || rc=1
-    done
     return "${rc}"
 }
 

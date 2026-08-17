@@ -81,6 +81,18 @@ for a in "${APPS[@]}"; do
   frc=0
   flog=$(timeout 120 bash "$HERE/flash-jlink.sh" "$BD" "$SIZE" 2>&1) || frc=$?
   echo "$flog" | grep -iE "package:|Connecting to J-Link|Verify|FAILED|Could not connect|Programming flash" | head -6
+  # The grep|head -6 above is a summary, and on a failure it is the WRONG six
+  # lines: flash-jlink.sh displays up to 30 transcript lines of its own before
+  # it ever reaches the verify gate, so the gate's terminal diagnostic
+  # ("!! VERIFY FAILED ..." / "!! no verifybin success reported ...") is past
+  # the head cut and the operator sees a bare FLASH-UNVERIFIED label with none
+  # of the evidence. Dump the tail of the captured log whenever the child
+  # failed, before the summary line below.
+  if [ "$frc" -ne 0 ]; then
+    echo "----- flash-jlink.sh tail (exit $frc) -----"
+    printf '%s\n' "$flog" | tail -20
+    echo "-------------------------------------------"
+  fi
   case "$frc" in
   0) ;; # fall through to the post-flash console read below
   3)
@@ -103,8 +115,22 @@ for a in "${APPS[@]}"; do
   # let slow apps finish (ethernet DHCP ~17s, NPU inference, PDM capture)
   sleep 16
   echo "----- RAM console ($a) -----"
-  con=$(read_console "$BD")
+  # Same mute-abort shape as the flash capture above, for the same reason:
+  # read_console ends in `bench_jlink_assert_connected ... || exit 7`, and a
+  # bare `con=$(read_console ...)` assignment takes that status, so under
+  # errexit (line 18) a probe that never opened would abort the whole
+  # strictly-serial batch here -- after the flash already succeeded, and
+  # before the BATCH SUMMARY `cat "$SUM"` at the bottom ever ran. Capture the
+  # status instead and log the app as CONSOLE-READ-FAILED.
+  crc=0
+  con=$(read_console "$BD") || crc=$?
   echo "$con"
+  if [ "$crc" -ne 0 ]; then
+    echo ">> $a : CONSOLE-READ-FAILED (exit $crc)"
+    echo "$a : CONSOLE-READ-FAILED (exit $crc)" >>"$SUM"
+    echo
+    continue
+  fi
   res=$(echo "$con" | grep -iE "RESULT" | tail -1)
   [ -z "$res" ] && res="(no RESULT line — see console above)"
   echo "$a : $res" >>"$SUM"

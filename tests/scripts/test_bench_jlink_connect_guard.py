@@ -351,13 +351,22 @@ def _verifybin_capture_file(body: str, after: int) -> str | None:
 
 
 def test_every_verifybin_site_is_gated_on_its_own_transcript() -> None:
-    """The gate is worthless if a `verifybin` site forgets to read the
-    result. This is the check that keeps the alp-sdk#1488 fix from rotting:
-    it derives the set of verifybin sites from the actual `verifybin`
-    invocations in each script and resolves each one's OWN transcript file,
-    so a newly added site -- or one accidentally checking a SIBLING script's
-    stale transcript file, the exact copy-paste trap the changelog calls out
-    -- fails this test rather than shipping ungated."""
+    """Every `verifybin` site must grep its OWN transcript file.
+
+    This half is pure text: it derives the set of verifybin sites from the
+    actual `verifybin` invocations in each script, resolves each one's OWN
+    transcript file, and pins that the greps name that file -- so a site
+    accidentally checking a SIBLING script's stale transcript (the exact
+    copy-paste trap the changelog calls out) fails here.
+
+    It pins the FILENAME only, which is not the same as pinning the gate:
+    deleting the `exit 3`s while leaving the greps in place still satisfies
+    it. `test_every_verifybin_gate_actually_gates` below is the half that
+    runs the gate and asserts it changes the exit status; the two are
+    deliberately separate because only the second one needs a working bash
+    (Windows CI has none, see _NEEDS_BASH) and this derivation must keep
+    running there.
+    """
     missing: list[str] = []
 
     for path in _bench_scripts():
@@ -383,6 +392,155 @@ def test_every_verifybin_site_is_gated_on_its_own_transcript() -> None:
 def test_the_verifybin_regex_actually_matches_something() -> None:
     """Guard against the guard: if the regex stops matching (a refactor
     changes the invocation shape), test_every_verifybin_site_is_gated_on_its_own_transcript
-    would pass vacuously and cover nothing."""
+    would pass vacuously and cover nothing.
+
+    Six SITES across five SCRIPTS (flash-jlink-mramxip.sh issues two, one per
+    loadbin): flash-jlink.sh 1, flash-jlink-hp.sh 1, flash-jlink-mramxip.sh 2,
+    flash-update-log-dual.sh 1, flash-update-log-firewall-probe.sh 1. Same
+    floor as the sibling read-back guard above."""
     total = sum(len(_VERIFYBIN_RE.findall(p.read_text(encoding="utf-8"))) for p in _bench_scripts())
-    assert total >= 5, f"expected >=5 verifybin sites, matched {total} -- regex has drifted"
+    assert total >= 6, f"expected >=6 verifybin sites, matched {total} -- regex has drifted"
+
+
+# The shell block that turns a verifybin OUTCOME into an exit status. Two
+# shapes exist in the tree and both open with the same explicit-failure `if`:
+#
+#   flash-jlink.sh / flash-jlink-hp.sh / flash-update-log-dual.sh /
+#   flash-update-log-firewall-probe.sh   fail-`if`, then
+#                                        `if ! grep -qi "verify successful"`
+#   flash-jlink-mramxip.sh               fail-`if`, then a `grep -ci` COUNT
+#                                        compared against its two passes
+_VERIFY_GATE_START_RE = re.compile(
+    r'^[ \t]*if\s+grep\s+-\w*\s+"verify failed\|verification failed\|mismatch"'
+    r"\s+(?P<out>/tmp/\S+)\s*;\s*then[ \t]*$"
+)
+
+
+def _verify_gate_block(body: str) -> tuple[str, str] | None:
+    """`(capture-file, shell block)` for a script's verify gate, or None.
+
+    The block is the contiguous source region from the explicit-failure `if`
+    through the `fi` that closes the success check -- everything that turns a
+    transcript into an exit status and nothing else, so it can be run
+    standalone against a synthetic transcript.
+    """
+    lines = body.splitlines()
+    start: int | None = None
+    out = ""
+    for i, line in enumerate(lines):
+        m = _VERIFY_GATE_START_RE.match(line)
+        if m:
+            start, out = i, m.group("out")
+            break
+    if start is None:
+        return None
+
+    depth = 0
+    saw_success = False
+    for i in range(start, len(lines)):
+        stripped = lines[i].strip()
+        if re.match(r"^if\b", stripped):
+            depth += 1
+        if "verify successful" in stripped.lower():
+            saw_success = True
+        if stripped == "fi":
+            depth -= 1
+            if depth == 0 and saw_success:
+                return out, "\n".join(lines[start : i + 1]) + "\n"
+    return None
+
+
+def _run_verify_gate(
+    tmp_path: Path, block: str, out: str, transcript: str | None
+) -> subprocess.CompletedProcess[str]:
+    """Run one extracted verify gate against a synthetic JLinkExe transcript.
+
+    `transcript=None` means the file does not exist at all. Same
+    no-absolute-paths discipline as _call_guard: the gate's `/tmp/...` path is
+    rewritten to a bare filename and bash runs with cwd=tmp_path, so the
+    drive-letter flavour of whichever bash Python resolves cannot matter.
+    `set -e` matches the real scripts, all of which run under errexit.
+    """
+    name = "transcript.out"
+    target = tmp_path / name
+    if transcript is None:
+        target.unlink(missing_ok=True)
+    else:
+        target.write_text(transcript, encoding="utf-8")
+    return subprocess.run(
+        ["bash", "-c", "set -e\n" + block.replace(out, name)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=60,
+    )
+
+
+def _scripts_with_verifybin() -> list[str]:
+    """Derived, never hand-maintained -- a new verifybin script is covered the
+    moment it lands, which is the whole point of this file."""
+    return [p.name for p in _bench_scripts() if _VERIFYBIN_RE.search(p.read_text(encoding="utf-8"))]
+
+
+@_NEEDS_BASH
+@pytest.mark.parametrize("script", _scripts_with_verifybin())
+def test_every_verifybin_gate_actually_gates(script: str, tmp_path: Path) -> None:
+    """The gate must CHANGE THE EXIT STATUS, not merely mention the strings.
+
+    test_every_verifybin_site_is_gated_on_its_own_transcript is text-only and
+    is fail-open on the alp-sdk#1488 defect itself: delete both `exit 3` from
+    a gate, or invert `if ! grep -qi "verify successful"` to `if grep -qi
+    ...`, and the greps still sit in the body against the right file, so it
+    stays green while a failed flash reports success again. This one extracts
+    the gate and RUNS it, so those mutations go red:
+
+      - a transcript whose verify FAILED must exit non-zero (3, the status
+        flash-all-flowd.sh maps to the FLASH-UNVERIFIED batch-summary entry);
+      - a transcript whose verifies all SUCCEEDED must exit 0;
+      - those two statuses must DIFFER (an inverted polarity fails both, so
+        equality alone catches it);
+      - `Verify failed.` alongside a full set of success lines must still be
+        non-zero, so the explicit-failure branch cannot be deleted and hidden
+        behind the success check;
+      - a missing or empty transcript must be non-zero -- absence of a
+        `Verify successful.` line is not evidence the verify passed.
+    """
+    body = (BENCH / script).read_text(encoding="utf-8")
+    sites = len(_VERIFYBIN_RE.findall(body))
+    found = _verify_gate_block(body)
+    assert found is not None, f"{script} issues verifybin but has no runnable verify-outcome gate"
+    out, block = found
+
+    # One "Verify successful." per verifybin issued: flash-jlink-mramxip.sh
+    # writes two blobs and its gate demands both passes, so a single success
+    # line is a FAILURE there, not a pass.
+    ok_lines = "Verify successful.\n" * sites
+    header = "J-Link>verifybin\n"
+
+    good = _run_verify_gate(tmp_path, block, out, header + ok_lines)
+    bad = _run_verify_gate(tmp_path, block, out, header + "Verify failed.\n")
+    bad_with_ok = _run_verify_gate(tmp_path, block, out, header + "Verify failed.\n" + ok_lines)
+    empty = _run_verify_gate(tmp_path, block, out, "")
+    absent = _run_verify_gate(tmp_path, block, out, None)
+
+    assert good.returncode == 0, (
+        f"{script}: a fully successful verify must pass the gate, got "
+        f"{good.returncode}\n{good.stdout}{good.stderr}"
+    )
+    assert bad.returncode != 0, (
+        f"{script}: 'Verify failed.' must fail the gate -- it exited "
+        f"{bad.returncode}, the exact alp-sdk#1488 defect\n{bad.stdout}{bad.stderr}"
+    )
+    assert bad.returncode == 3, f"{script}: expected exit 3, got {bad.returncode}"
+    assert bad.returncode != good.returncode, (
+        f"{script}: the gate returns {bad.returncode} for BOTH a failed and a "
+        "successful verify -- it does not gate"
+    )
+    assert bad_with_ok.returncode == 3, (
+        f"{script}: 'Verify failed.' alongside {sites} success line(s) must still "
+        f"fail, got {bad_with_ok.returncode}"
+    )
+    assert empty.returncode == 3, f"{script}: an empty transcript must fail, got {empty.returncode}"
+    assert absent.returncode == 3, f"{script}: a missing transcript must fail, got {absent.returncode}"

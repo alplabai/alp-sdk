@@ -165,14 +165,34 @@ fi
 # read: the output went to a display-only pipe and the connect check was the
 # only thing that could fail this script, so a `Verify failed.` exited 0 and
 # reported a good flash.
+#
+# What this gate actually does -- and does NOT do: `loadbin`, `verifybin`,
+# `RSetType 2`, `r`, and `g` are all inside the SAME CommanderScript JLinkExe
+# has already finished executing by the time the greps below run, and the
+# HP-OWNER entry above carries `"flags": ["load", "boot"]` -- the SE has
+# already pin-reset and BOOTED the HP owner, which releases the HE client. So
+# this gate can only suppress the false "flash complete" report and the beacon
+# read-back (read-update-log-proof.sh) that follows; it does NOT and CANNOT
+# prevent the write, or the boot that lets the booted images append to the
+# update log. See the exit-3 data-loss caveats below.
 if grep -qiE "verify failed|verification failed|mismatch" /tmp/firmware-update-log-dual-write.out; then
 	echo "!! VERIFY FAILED -- the bytes on the part do NOT match $PKG." >&2
 	grep -iE "verify failed|verification failed|mismatch" /tmp/firmware-update-log-dual-write.out | head -5 >&2
 	echo "   Do not treat this board as flashed." >&2
+	echo "   DATA LOSS: the board was already pin-reset and released (RSetType 2; r; g" >&2
+	echo "   already ran inside the same CommanderScript), so the HP owner has already" >&2
+	echo "   booted and released the HE client -- alp_ulog_partition may ALREADY have" >&2
+	echo "   been appended to by this unverified package. Re-read the partition from a" >&2
+	echo "   known-good state before trusting the update log this run produced." >&2
 	exit 3
 fi
 if ! grep -qi "verify successful" /tmp/firmware-update-log-dual-write.out; then
 	echo "!! no verifybin success reported -- treating as FAILED (the verify never ran)." >&2
+	echo "   DATA LOSS: the board was already pin-reset and released (RSetType 2; r; g" >&2
+	echo "   already ran inside the same CommanderScript), so the HP owner has already" >&2
+	echo "   booted and released the HE client -- alp_ulog_partition may ALREADY have" >&2
+	echo "   been appended to by this unverified package. Re-read the partition from a" >&2
+	echo "   known-good state before trusting the update log this run produced." >&2
 	exit 3
 fi
 echo "verify: verifybin OK ($PKG @ $ATOC_ADDR)" >&2
