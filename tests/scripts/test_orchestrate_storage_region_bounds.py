@@ -26,11 +26,14 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _orchestrate_support import _write_board  # noqa: E402
 
 from alp_orchestrate import (  # noqa: E402
+    OrchestratorError,
     load_board_yaml,
     resolve_storage_partitions,
 )
@@ -134,38 +137,39 @@ class TestExplicitOffset:
 
 
 class TestTargetingARegionDirectly:
-    def test_the_customer_writable_region_still_works(self, tmp_path):
-        """Naming `storage` directly is the documented remedy, so it must
-        resolve -- otherwise the block message above sends people nowhere.
-
-        Inside `storage` (96 KiB) there are no sibling SoM regions, so a
-        partition allocates from its offset 0 as before.
+    def test_naming_the_mram_storage_subregion_directly_is_refused(
+            self, tmp_path):
+        """Naming `storage` directly used to be the documented remedy for
+        the block above -- but `storage` is itself a `carveout: false`
+        region, a partition label *inside* the `mram_storage` flash node,
+        not a Devicetree label of its own (alp-sdk#1484). The loader must
+        refuse it at load time with the same "Known devices" message a typo
+        gets, not resolve it and decorate a label the board tree never
+        defines.
         """
-        parts = _resolve(tmp_path, """
+        with pytest.raises(OrchestratorError, match="storage"):
+            _resolve(tmp_path, """
       - { name: settings, size_kib: 32, fs: littlefs, flash_device: storage, mount: /lfs/settings }
     """)
-        settings = _by_name(parts)["settings"]
-        assert getattr(settings, "status", None) != "blocked", settings.reason
-        assert settings.base_kib == 0, settings
 
 
 class TestNoFalsePositives:
-    def test_a_som_region_target_is_unaffected(self, tmp_path):
-        """A partition aimed at a SoM region the map DOES leave free must
+    def test_a_genuinely_free_flash_device_is_unaffected(self, tmp_path):
+        """A partition aimed at a flash device the map DOES leave free must
         still allocate -- the bounds check must not false-positive on it.
 
-        This was `test_a_bare_alias_som_is_unaffected`, and it asserted the
-        opposite target: E1M-AEN301 used to derive a bare `mram_main` alias
-        with no sibling regions, so a partition could sit on the whole-MRAM
-        overlay. alp-sdk#1445 gave AEN301 the same explicit partitioning
-        E1M-AEN801 always had, and that layout fills the 5632 KiB device
-        EXACTLY, so the overlay now has nothing free on any AEN SoM -- a
-        partition targeting it is correctly blocked (E1M-AEN801 has always
-        behaved this way; measured, both SKUs now agree).
-
-        What the check must still never do is block a partition that fits a
-        region the SoM genuinely reserves for it, which is what this now
-        exercises against the 96 KiB `storage` region.
+        This was `test_a_bare_alias_som_is_unaffected`, then
+        `test_a_som_region_target_is_unaffected` targeting the SoM's own
+        `storage` region directly. alp-sdk#1484 removed `storage` as a legal
+        `flash_device:` target -- it is a `carveout: false` region, a
+        partition label *inside* the `mram_storage` flash node, not a
+        Devicetree label of its own (see
+        `test_naming_the_mram_storage_subregion_directly_is_refused` above).
+        E1M-AEN301's `mram_main` is fully tiled by its own sub-regions
+        (alp-sdk#1445), so no `memory_map:` device on this SoM is free; this
+        now exercises the same "must not false-positive" property against
+        `ospi0`, E1M-AEN301's real external OSPI NOR
+        (`on_module.ospi_memories`, 32 MiB, unaffected by this fix).
         """
         path = _write_board(tmp_path, """
         name: test-aen301-region-target
@@ -179,7 +183,7 @@ class TestNoFalsePositives:
             app: ./m55_hp
 
         storage:
-          - { name: settings, size_kib: 64, fs: littlefs, flash_device: storage, mount: /lfs/settings }
+          - { name: settings, size_kib: 64, fs: littlefs, flash_device: ospi0, mount: /lfs/settings }
         """)
         parts = resolve_storage_partitions(load_board_yaml(path))
         settings = _by_name(parts)["settings"]

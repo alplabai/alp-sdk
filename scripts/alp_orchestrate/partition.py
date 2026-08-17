@@ -45,8 +45,19 @@ def _known_flash_devices(
     names: set[str] = set()
     for region in resolve_memory_map(som_preset, metadata_root):
         n = region.get("name")
-        if isinstance(n, str):
-            names.add(n)
+        if not isinstance(n, str):
+            continue
+        if region.get("carveout") is False:
+            # A flash-class SUB-region -- an MRAM partition living inside a
+            # `mram_storage`-class flash node, not a flash device of its own
+            # (see the schema's `memory_region.carveout` description). On
+            # AEN this is `mcuboot` / `he_slot0` / `hp_slot0` / `reserved` /
+            # `storage` / `atoc`: none of them carries a Devicetree label,
+            # and decorating one with a `partitions { }` child targets a
+            # node the board tree never defines (#1484). Keep it out of the
+            # advertised set and out of `_resolve_flash_device()` below.
+            continue
+        names.add(n)
     om = som_preset.get("on_module") or {}
     ospi = om.get("ospi_memories") or {}
     if isinstance(ospi, dict):
@@ -179,6 +190,20 @@ def _resolve_flash_device(
     for region in resolve_memory_map(som_preset, metadata_root):
         if region.get("name") != flash_device:
             continue
+        if region.get("carveout") is False:
+            # Defense in depth for a hand-built project that skips the
+            # loader's `_known_flash_devices()` check: refuse rather than
+            # fabricate a `dt_label` from the region name.  This region is
+            # a partition INSIDE a flash-class node (e.g. AEN's
+            # `mram_storage`), not a flash device -- it has no Devicetree
+            # label of its own and a `partitions { }` child on it targets
+            # a node the board tree never defines (#1484).
+            return None, (
+                f"flash device '{flash_device}' is a partition inside a "
+                f"flash-class region on SoM "
+                f"{som_preset.get('sku', '<unknown>')}, not a flash device "
+                f"of its own -- it has no Devicetree label and cannot take "
+                f"a `partitions {{ }}` child")
         size_bytes = _region_size_bytes(region)
         if size_bytes is None:
             return None, (

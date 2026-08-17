@@ -261,6 +261,16 @@ name-sort position -- `pinned_low` above sorts after `app_data` and
 2. `on_module.ospi_memories:` keys (e.g. `ospi0`) -- external OSPI
    flash declared on the SoM.
 
+A `memory_map:` region marked `carveout: false` is excluded from
+resolution (#1484): that flag also means the region is a partition
+*inside* a flash-class node -- on E1M-AEN301..801 that's `mcuboot`,
+`he_slot0`, `hp_slot0`, `reserved`, `storage`, and `atoc`, all living
+inside the `mram_storage` flash node -- not a flash device with a
+Devicetree label of its own. Naming one as `flash_device:` refuses
+with a reason instead of silently decorating a DT label that doesn't
+exist on the board. Target the flash-class region itself (`mram_main`
+on AEN) instead.
+
 The loader rejects typoed `flash_device:` references at parse time
 with the list of known devices for the project's SoM.  When the
 referenced device's size is `TBD` (HW-config still owed), the
