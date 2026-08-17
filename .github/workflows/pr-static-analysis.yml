@@ -36,9 +36,16 @@ jobs:
   clang-format-diff:
     name: clang-format · diff-only
     runs-on: ubuntu-latest
+    # #1477: this job produces the required `clang-format · diff-only`
+    # context and previously had no ceiling at all (GitHub's implicit
+    # 360-minute default applied). Worst observed successful run 23s
+    # across 3 sampled runs; 10min gives real headroom over that while
+    # still failing fast on a PyPI/apt stall in the steps below.
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        timeout-minutes: 3
         with:
           fetch-depth: 0  # need history so HEAD~ resolves
 
@@ -51,6 +58,7 @@ jobs:
         # tree is formatted against v22; .clang-format also locks
         # Cpp11BracedListStyle so designated-initialiser output stays
         # reproducible across patch releases.
+        timeout-minutes: 3
         run: |
           python3 -m pip install --user 'clang-format==22.1.5'
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
@@ -80,6 +88,7 @@ jobs:
         # protect this consuming step on its own.
         env:
           DIFF_BASE: ${{ steps.base.outputs.ref }}
+        timeout-minutes: 2
         run: |
           # clang-format-diff.py from the pinned pip wheel; it shells out to the
           # wheel's bundled v22 clang-format, so the diff check uses v22 too.
@@ -112,11 +121,18 @@ jobs:
   cppcheck:
     name: cppcheck · src + chips
     runs-on: ubuntu-latest
+    # #1477: not a required context, and its own run step already ends
+    # `|| true` with --error-exitcode=0 -- but it too had no ceiling
+    # (360-minute implicit default). Worst observed successful run 42s
+    # across 3 sampled runs; 15min gives headroom over that.
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        timeout-minutes: 2
 
       - name: Install cppcheck
+        timeout-minutes: 3
         run: |
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -o Acquire::Retries=3 -y cppcheck
@@ -149,6 +165,7 @@ jobs:
       - name: Upload cppcheck.xml
         if: always()
         uses: actions/upload-artifact@v7
+        timeout-minutes: 2
         with:
           name: cppcheck
           path: cppcheck.xml

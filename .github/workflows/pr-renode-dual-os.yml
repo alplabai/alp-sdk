@@ -64,6 +64,7 @@ jobs:
     steps:
       - name: Checkout alp-sdk
         uses: actions/checkout@v6
+        timeout-minutes: 2
         with:
           path: alp-sdk
           fetch-depth: 1
@@ -73,6 +74,7 @@ jobs:
       # change Renode behaviour mid-month.  v1.15 is the current
       # LTS-style line as of 2026-05.
       - name: Install Renode
+        timeout-minutes: 3
         run: |
           set -euo pipefail
           sudo apt-get update -o Acquire::Retries=3
@@ -94,6 +96,7 @@ jobs:
       # the latest successful run on main (when manually dispatched).
       - name: Download V2N A55 bitbake image
         uses: actions/download-artifact@v8
+        timeout-minutes: 2
         with:
           name: bitbake-e1m-v2n101-a55-image
           path: ${{ github.workspace }}/artefacts/bitbake
@@ -119,6 +122,7 @@ jobs:
       # in pr-alp-build.yml, update the name pattern below.
       - name: Download M33-SM Zephyr ELF
         uses: actions/download-artifact@v8
+        timeout-minutes: 2
         with:
           name: system-manifest-E1M-V2N101-heterogeneous-default
           path: ${{ github.workspace }}/artefacts/zephyr
