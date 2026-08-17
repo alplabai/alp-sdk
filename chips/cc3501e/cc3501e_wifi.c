@@ -364,8 +364,10 @@ alp_status_t cc3501e_wifi_connect(cc3501e_t  *ctx,
 			 * cc3501e_request() does `(void)timeout_ms`, reserved for a
 			 * future IRQ-driven wait), so nothing upstream caps how
 			 * long a failed attempt could have taken; charging its
-			 * declared worst case here is what keeps `remaining` an
-			 * honest upper bound on wall-clock time for THIS path.
+			 * declared worst case here is a defensive ESTIMATE that keeps
+			 * `remaining` from ignoring the failure path entirely -- it is
+			 * NOT a hard bound, since an attempt that overran
+			 * CC3501E_REQ_TMO_MS goes undebited for the excess.
 			 * #1481: this debit MUST stay confined to the ss != ALP_OK
 			 * path -- charging it unconditionally (i.e. also on a
 			 * successful CONNECTING/DISCONNECTED read, where no such
