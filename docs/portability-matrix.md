@@ -260,9 +260,12 @@ Kconfig content changed. #1445 landed the fix: every AEN preset now
 declares `he_slot0` at `0x80010000` and `hp_slot0` at `0x802b0000`,
 2688 KiB each, so these four SKUs generate cleanly again and the
 byte-identity claim above is provable by the automated probe once
-more. (E1M-AEN401 is unaffected: its E4 variant's
-`jlink_flash_device` is explicit `null`, a declared known-unknown, so
-`_resolve_slot0_load_address` is never invoked for it.)
+more. (E1M-AEN401 never hit this refusal: at the time, the loader only
+invoked `_resolve_slot0_load_address` when `jlink_flash_device` was truthy,
+and its E4 variant's explicit `null` is not truthy. #1444/#1446 later
+changed that gate to test key presence instead of truthiness, so the
+resolver runs for it today — see `metadata/e1m_modules/E1M-AEN401.yaml`,
+which now declares the same disjoint pair.)
 
 Expected diffs (legitimate — driven by silicon / SoM facts):
 
