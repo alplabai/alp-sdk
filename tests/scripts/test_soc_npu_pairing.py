@@ -67,9 +67,10 @@ def test_single_mac_variant_may_omit_paired_core(tmp_path, monkeypatch):
 
 
 def test_shared_u85_may_omit_paired_core(tmp_path, monkeypatch):
-    # E8-like: the U85 on the HG subsystem is legitimately unpaired; the two
-    # U55s are paired.  Distinct-MAC rule is per-type, so U85 (single 256) and
-    # the paired U55s all pass.
+    # E8-like: the U85 is a shared, SoC-level NPU (Alif block name NPU_HG,
+    # not wired to one core) and is legitimately unpaired; the two U55s are
+    # paired.  Distinct-MAC rule is per-type, so U85 (single 256) and the
+    # paired U55s all pass.
     doc = {
         "cores": [{"id": "m55_hp"}, {"id": "m55_he"}],
         "npus": [
@@ -98,3 +99,32 @@ def test_non_object_npus_and_cores_entries_do_not_crash_the_gate(tmp_path, monke
     nothing left to pair."""
     doc = {"cores": ["not-a-dict"], "npus": ["not-a-dict"]}
     assert _run(tmp_path, monkeypatch, doc) == 0  # must not raise
+
+
+def test_no_shipped_metadata_or_schema_claims_an_hg_subsystem():
+    """The Alif Ensemble E8 has exactly three subsystems -- RTSS-HE, RTSS-HP,
+    and the A32 APSS.  "HG" is the Ethos-U85 NPU block's OWN instance name
+    (`NPU_HG`, Alif's internal codename ZAPHOD -- see `ZAPHOD_CKOR` in
+    `SHMEM_CLK_CTRL`), not a fourth subsystem: `NPU_HG_BASE 0x49042000` is
+    byte-identical in both M55 cores' generated CMSIS headers, unlike the two
+    U55s, which alias one local address (0x400E1000) under per-core names
+    (NPU_HP_BASE / NPU_HE_BASE).  This pins the fix to `paired_core`'s schema
+    description and to `_check_soc_npu_pairing`'s docstring, and stops any
+    new metadata/schema text from reintroducing the invented subsystem."""
+    hits = []
+    for p in sorted(V.REPO.glob("metadata/**/*")):
+        if not p.is_file():
+            continue
+        try:
+            text = p.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        for needle in ("HG subsystem", "HG-subsystem", "HG_subsystem"):
+            if needle in text:
+                hits.append(f"{p.relative_to(V.REPO)}: {needle!r}")
+    assert hits == [], (
+        "shipped metadata/schema text must not claim an 'HG subsystem' -- "
+        "the E8 has exactly three subsystems (RTSS-HE, RTSS-HP, A32 APSS); "
+        "NPU_HG is the U85 NPU block's own instance name, not a fourth "
+        "subsystem: " + "; ".join(hits)
+    )

@@ -688,8 +688,15 @@ def _check_soc_npu_pairing(soc_files) -> list:
          the emit cannot tell the cores apart and a 256-MAC stream would error
          a 128-MAC NPU at invoke (issue #909).
 
-    A single-MAC variant, or an instance on a shared non-core subsystem (the
-    E8 U85 on the HG subsystem), legitimately omits `paired_core`.
+    A single-MAC variant, or an instance that is a shared, SoC-level NPU not
+    wired to one core, legitimately omits `paired_core`. The E8's Ethos-U85
+    (Alif block name NPU_HG) is that case: `NPU_HG_BASE 0x49042000` is
+    byte-identical in both M55 cores' generated CMSIS headers (rtss_hp/soc.h
+    and rtss_he/soc.h), unlike the two U55s, which alias the same local
+    address (0x400E1000) under per-core names (NPU_HP_BASE / NPU_HE_BASE)
+    with an interrupt in only their own core's NVIC. Whether the A32 cluster
+    can also reach the U85 is unverified -- there is no A32 SVD view or
+    board devicetree NPU node either way.
     Returns a failure list shaped like `_check_files()`.
     """
     failures: list[tuple[Path, list[str]]] = []
