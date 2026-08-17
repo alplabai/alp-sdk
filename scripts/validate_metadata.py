@@ -1484,7 +1484,12 @@ def _perf_target_map(sku: str, metadata_root: Path) -> dict[tuple[str, str], str
         ref = soc.get("ref")
         if not ref or ref == host_ref:
             continue
-        skus = {s for v in (soc.get("variants") or [])
+        # `variants[]` entries are schema-typed objects, but the schema pass
+        # that would reject a malformed one is not guaranteed to have run
+        # first -- filter to dicts rather than let a non-object raise
+        # `AttributeError` here (same shape as
+        # `_check_soc_vela_memory_profile`).
+        skus = {s for v in (soc.get("variants") or []) if isinstance(v, dict)
                 for s in (v.get("alp_module_skus") or [])}
         if sku in skus:
             for key, paired in _soc_perf_targets(soc).items():
@@ -1897,11 +1902,11 @@ def _check_model_perf_semantics(perf_files) -> list:
             # `npu_toolchain` block at all; `npu_toolchain` is written only
             # for an Ethos-U part.  Adding that block to those SoC specs
             # would let this same cross-check run for those backends too.
-            # cpu is excluded for a DIFFERENT reason: its host SoC specs
-            # (every Alif Ensemble / NXP i.MX93 part) DO carry
-            # `npu_toolchain.vela` -- a CPU point simply has no accelerator
-            # toolchain to check `toolchain.name` against, a fact about the
-            # backend rather than about the host SoC spec.
+            # cpu is excluded for a DIFFERENT reason: every Alif Ensemble
+            # and NXP i.MX93 host SoC spec a `cpu` target resolves to DOES
+            # carry `npu_toolchain.vela` -- a CPU point simply has no
+            # accelerator toolchain to check `toolchain.name` against, a
+            # fact about the backend rather than about the host SoC spec.
             if isinstance(sku, str) and isinstance(tc_name, str):
                 try:
                     known_toolchains = _soc_npu_toolchain_names(sku, metadata_root)

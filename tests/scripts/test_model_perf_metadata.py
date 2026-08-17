@@ -614,6 +614,33 @@ def test_the_pairing_is_enforced_only_where_the_soc_declares_one():
     assert pairs[("cpu", "")] is None
 
 
+def test_perf_target_map_survives_a_non_object_variants_entry_on_another_soc(tmp_path):
+    """`_perf_target_map` walks EVERY OTHER SoC spec (not just the SKU's host)
+    looking for an on-module discrete accelerator declared via
+    `variants[].alp_module_skus` -- the DEEPX DX-M1 on the V2M SKUs is the
+    shipping example: `metadata/socs/deepx/dx/m1.json` names `E1M-V2M101` and
+    `E1M-V2M102` there, while E1M-V2M101's own host SoC spec is
+    `renesas:rzv2n:n44`.  That second loop built its `skus` set with a bare
+    `v.get("alp_module_skus")`, unguarded by an `isinstance(v, dict)` filter
+    unlike every sibling `variants[]` read in this file (`_check_soc_npu_
+    pairing`, `_check_soc_vela_memory_profile`, `_check_soc_debug_probe_
+    identity`, the Ensemble `jlink_flash_device` and no-WLCSP checks) -- a
+    non-object entry on ANY non-host SoC spec raised an unhandled
+    `AttributeError: 'str' object has no attribute 'get'` here, aborting the
+    whole gate before `_check_model_perf_semantics`'s `except LookupError` at
+    the call site could catch it (that clause does not catch `AttributeError`
+    at all)."""
+    root = tmp_path / "scratch"
+    for sub in ("socs", "e1m_modules"):
+        shutil.copytree(_ROOT / "metadata" / sub, root / "metadata" / sub)
+    m1 = root / "metadata" / "socs" / "deepx" / "dx" / "m1.json"
+    doc = json.loads(m1.read_text(encoding="utf-8"))
+    doc["variants"] = ["not-a-dict"] + doc["variants"]
+    m1.write_text(json.dumps(doc), encoding="utf-8")
+    pairs = V._perf_target_map("E1M-V2M101", root / "metadata")  # must not raise
+    assert pairs[("cpu", "")] is None
+
+
 # ---------------------------------------------------------------------------
 # The toolchain-profile digest that closes the second half of blocker 2.
 # ---------------------------------------------------------------------------
