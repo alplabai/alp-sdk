@@ -161,6 +161,25 @@ env:
 run: echo "$HEAD_REF"
 ```
 
+`actions/github-script` is the same sink with a different interpreter: its
+`with: script:` body is JavaScript that GitHub substitutes `${{ }}` into
+before Node parses it. Same rule, same `env:` indirection — the script reads
+the value back through `process.env` instead of a shell variable:
+
+```yaml
+# Wrong -- payload substituted into the script before Node parses it:
+uses: actions/github-script@v9
+with:
+  script: core.info("${{ github.event.pull_request.title }}")
+
+# Right:
+uses: actions/github-script@v9
+env:
+  PR_TITLE: ${{ github.event.pull_request.title }}
+with:
+  script: core.info(process.env.PR_TITLE)
+```
+
 This has to be applied **per step**, not once per workflow: `${{ }}` is
 re-substituted independently into every `run:` block, so quoting a value at
 the step that first receives it does not protect a later step that reads it
@@ -199,9 +218,12 @@ how much that check is worth:
   `twister-shard 3/4`, `twister-shard 4/4`, `clang-format · diff-only`
   and `distro install · all`. A violation therefore posts a red,
   non-required check; it does not block the merge.
-- **It covers `run:` bodies only.** A `${{ }}` splice into an
-  `actions/github-script` `with: script:` body is the same class of
-  template injection and is *not* checked. Apply the rule there by hand.
+- **It covers the two direct source-text sinks, and nothing else.** `run:`
+  bodies and `actions/github-script` `with: script:` bodies (alp-sdk#1529)
+  are both walked. A `with: script:` on any *other* action is an input
+  string that action receives rather than JavaScript it evals, so it is
+  deliberately not checked; a composite action's own `run:` steps live
+  outside `.github/workflows/` and are likewise unchecked.
 
 ## Adding a new self-hosted job
 
