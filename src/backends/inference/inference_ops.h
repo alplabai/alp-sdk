@@ -80,6 +80,23 @@ struct alp_inference {
 	alp_inference_backend_state_t state;
 	const alp_backend_t          *backend;
 	alp_capabilities_t            cached_caps;
+	/* Last successful alp_inference_invoke()'s wall-clock duration, in
+	 * microseconds -- written by the dispatcher itself (it brackets
+	 * ops->invoke), never by a backend.  UINT64_MAX means "no
+	 * successful invoke yet"; alp_inference_last_invoke_latency_us()
+	 * (src/inference_dispatch.c) translates that sentinel to
+	 * ALP_ERR_NOT_READY at the public API boundary rather than
+	 * exposing it.  The claim-time memset in _alloc() zeroes this
+	 * field along with everything else before in_use, so
+	 * alp_inference_open() must explicitly (re)set it to UINT64_MAX
+	 * once the handle is claimed -- a fresh handle must read
+	 * NOT_READY, not "0 us". active_ops permits concurrent ops on one
+	 * handle (it is a drain counter, not a mutex -- see
+	 * alp_slot_claim.h), so a concurrent invoke()-writer and
+	 * latency-reader is a real interleaving: always access this field
+	 * via __atomic_store_n/__atomic_load_n, never a plain read/write
+	 * (issue #629 discipline). */
+	uint64_t last_invoke_latency_us;
 	/* lifecycle/active_ops drive the generic open/op/close guard in
 	 * src/common/alp_slot_claim.h (alp_handle_op_enter/leave/
 	 * begin_close, issue #629) -- placed before in_use so the atomic-

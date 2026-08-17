@@ -315,6 +315,49 @@ alp_inference_get_output(alp_inference_t *inf, size_t index, alp_inference_tenso
 alp_status_t alp_inference_invoke(alp_inference_t *inf);
 
 /**
+ * @brief Wall-clock duration of the most recent successful @ref
+ *        alp_inference_invoke call, in microseconds.
+ *
+ * Brackets the backend's synchronous invoke -- every shipped backend
+ * (TFLM/Ethos-U, DRP-AI3, DEEPX DX-M1, ONNX Runtime) blocks the
+ * calling thread until the result lands (see @ref alp_inference_invoke),
+ * so this is a real per-invoke measurement taken by the dispatcher
+ * itself, not an estimate a backend opts into -- there is no backend
+ * that "can't" report it.
+ *
+ * Reports only the LAST successful invoke; it does not accumulate
+ * statistics or retain a history.  A caller building a latency
+ * distribution (mean / p95 / run count) calls this once per @ref
+ * alp_inference_invoke and keeps the samples itself -- the SDK holds
+ * no ring buffer, so this accessor's memory cost is fixed regardless
+ * of how many samples a caller wants, on a part where the inference
+ * arena is already the binding constraint.
+ *
+ * A failed invoke (any return other than @ref ALP_OK) does not update
+ * the stored value -- reading after a failed invoke still returns the
+ * last value a *successful* invoke produced (or @ref ALP_ERR_NOT_READY
+ * if none has succeeded yet).
+ *
+ * @param[in]  inf     Handle from @ref alp_inference_open.
+ * @param[out] out_us  Filled with the last successful invoke's
+ *                     duration in whole microseconds (rounded to
+ *                     nearest, not floored -- a sub-microsecond
+ *                     invoke reports 0 only when it truly rounds to
+ *                     0, not by truncation bias).  Must be non-NULL.
+ *
+ * @return ALP_OK, or one of:
+ *         - @ref ALP_ERR_INVAL -- @p out_us is NULL.
+ *         - @ref ALP_ERR_NOT_READY -- @p inf is NULL/closed, or no
+ *           @ref alp_inference_invoke call has completed with
+ *           @ref ALP_OK on this handle yet.
+ *
+ * @par ABI status: [ABI-EXPERIMENTAL]
+ *      New accessor; the file-level marker stays [ABI-STABLE] -- see
+ *      docs/abi-markers.md's mixed-tier note.
+ */
+alp_status_t alp_inference_last_invoke_latency_us(alp_inference_t *inf, uint64_t *out_us);
+
+/**
  * @brief Release the model + tensor buffers.  NULL-safe.
  *
  * @param[in] inf  Handle from @ref alp_inference_open, or NULL.
