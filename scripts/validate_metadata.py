@@ -1384,14 +1384,13 @@ def _resolve_perf_cores(sku: str, metadata_root: Path) -> set[str]:
     return set(topology)
 
 
-def _perf_target_map(sku: str, metadata_root: Path) -> dict[tuple[str, str], str | None]:
-    """`(backend, accel_config)` -> declared `paired_core`, for one SoM SKU.
+def _resolve_host_soc(sku: str, metadata_root: Path) -> dict:
+    """The SKU's HOST SoC spec -- the `silicon:` ref its preset names -- parsed.
 
-    Host SoC `npus[]` + every OTHER SoC spec whose `variants[].alp_module_skus`
-    lists this SKU (an on-module discrete accelerator -- the DEEPX DX-M1 on the
-    V2M SKUs) + `("cpu", "")`, which is always present and pairs to no
-    particular core.  Same derivation, off the same files, as
-    `tan.model.targets.resolve_targets`.
+    Factored out of `_perf_target_map` so `_soc_npu_toolchain_names` can share
+    the same preset -> `silicon:` -> SoC-spec resolution instead of a second,
+    hand-copied walk of the same three files that could silently drift from
+    this one.
 
     Raises `LookupError` when the SKU's preset or its `silicon:` SoC spec
     cannot be resolved.  FAILS CLOSED, never partial.
@@ -1405,8 +1404,35 @@ def _perf_target_map(sku: str, metadata_root: Path) -> dict[tuple[str, str], str
         raise LookupError(f"malformed `silicon:` ref {silicon!r} in {preset_name}")
     if not soc_path.is_file():
         raise LookupError(f"no SoC spec for {silicon} at {soc_path}")
-    host = strict_json_loads(soc_path.read_text(encoding="utf-8"), source=soc_path)
+    return strict_json_loads(soc_path.read_text(encoding="utf-8"), source=soc_path)
 
+
+def _soc_npu_toolchain_names(sku: str, metadata_root: Path) -> set[str]:
+    """The toolchain names the SKU's HOST SoC spec's `npu_toolchain` block
+    declares -- today always a subset of `{"vela"}`, since `npu_toolchain` is
+    only ever written for an Ethos-U part (`_check_soc_vela_memory_profile`
+    enforces that pairing on the SoC spec itself).  Empty when the SoC
+    declares no `npu_toolchain` block at all.
+
+    Raises `LookupError` for the same reason `_resolve_host_soc` does.
+    """
+    host = _resolve_host_soc(sku, metadata_root)
+    return set((host.get("npu_toolchain") or {}).keys())
+
+
+def _perf_target_map(sku: str, metadata_root: Path) -> dict[tuple[str, str], str | None]:
+    """`(backend, accel_config)` -> declared `paired_core`, for one SoM SKU.
+
+    Host SoC `npus[]` + every OTHER SoC spec whose `variants[].alp_module_skus`
+    lists this SKU (an on-module discrete accelerator -- the DEEPX DX-M1 on the
+    V2M SKUs) + `("cpu", "")`, which is always present and pairs to no
+    particular core.  Same derivation, off the same files, as
+    `tan.model.targets.resolve_targets`.
+
+    Raises `LookupError` when the SKU's preset or its `silicon:` SoC spec
+    cannot be resolved.  FAILS CLOSED, never partial.
+    """
+    host = _resolve_host_soc(sku, metadata_root)
     targets = _soc_perf_targets(host)
     host_ref = host.get("ref")
     for path in sorted((metadata_root / "socs").glob("**/*.json")):
@@ -1442,12 +1468,30 @@ def _resolve_perf_targets(sku: str, metadata_root: Path) -> set[tuple[str, str]]
 #: unreproducible, which is the only thing a bench measurement is worth.
 _LOCAL_PATH_REFERENCE = re.compile(r"^[/\\]|^[A-Za-z]:[/\\]|onedrive", re.IGNORECASE)
 
-#: A `<store>:<path>` citation or a URL, as opposed to a repo-relative path.
+#: The stores a `<store>:<path>` citation may legitimately name.  This
+#: allowlists the STORE SEGMENT itself, not the character class in front of
+#: the colon: the previous expression (`^[A-Za-z0-9][A-Za-z0-9._+-]*:\S`)
+#: accepted ANY colon-bearing string as a citation, so `todo:findit`,
+#: `x:y`, `ask:Caner` and `note:see the log` all routed down the citation
+#: branch and skipped reachability + the sha256/size_bytes re-hash a
+#: repo-relative path gets -- the exact `see the log` / `ask Caner` / `n/a`
+#: shapes `metadata/schemas/model-perf-v1.schema.json`'s `capture.reference`
+#: names as what the citation allowlist replaced a denylist to keep out,
+#: still let through the moment a colon follows them.
+_STORE_NAMES = ("alp-sdk-internal", "https", "http")
+
 #: `alp-sdk-internal:models/person_detect_int8.tflite`,
 #: `https://example.org/zoo/x.tflite`.  Used to tell the two legal `model.source`
 #: shapes apart; `_LOCAL_PATH_REFERENCE` is applied FIRST, so a `C:\...` never
 #: reaches this and gets read as a store named `C`.
-_STORE_CITATION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*:\S")
+#:
+#: MUST stay byte-identical to `capture.reference`'s `pattern` in
+#: metadata/schemas/model-perf-v1.schema.json -- JSON Schema has no way to
+#: `$ref` a Python constant, so the two are kept in lockstep by
+#: `test_model_source_and_capture_reference_agree_on_the_store_allowlist`
+#: instead, which fails the moment one is edited without the other.
+_STORE_CITATION = re.compile(
+    r"^(?:" + "|".join(re.escape(name) for name in _STORE_NAMES) + r"):\S")
 
 #: The bench recipe's timed-run floor (docs/bench/model-perf-capture.md §4).
 #: 100 timed runs after >= 10 discarded warm-ups, so `latency_ms_p95` is the
@@ -1520,7 +1564,11 @@ def _check_model_perf_semantics(perf_files) -> list:
          profile on a part whose `external_memory_interfaces` declares no
          DRAM.  A point captured that way is exactly measured and describes a
          machine the module is not; recording the profile is what lets a
-         reader tell the two apart.
+         reader tell the two apart.  Its `toolchain.name` must also be one the
+         SoC spec's own `npu_toolchain` block names (today always `vela`) --
+         `toolchain.name` is one of the eight consumer match-key fields, so an
+         `ethos_u` point naming, say, `dxcom` is not cosmetic: it makes the
+         point unmatchable, or matchable by the wrong consumer.
       7. `measured.latency_ms_p95` must be >= `measured.latency_ms_mean`.  A
          p95 below the mean is not a tighter number, it is two runs' figures
          pasted into one point.
@@ -1699,6 +1747,29 @@ def _check_model_perf_semantics(perf_files) -> list:
                     f"(`Ethos_U85_SYS_DRAM_Mid` / `Dedicated_Sram_384KB` on the "
                     f"U85, which is DRAM-backed), so the arena figures would "
                     f"describe that profile and not this module")
+
+            # toolchain.name is one of the eight consumer match-key fields
+            # (measured_on.sku + hw_rev + core + backend + accel_config +
+            # model.sha256 + toolchain.name + toolchain.version), so a name
+            # that does not match the accelerator is not cosmetic -- it makes
+            # the point unmatchable, or matchable by the wrong consumer.  The
+            # SoC spec's own npu_toolchain block already names the only
+            # toolchain that compiles for this accelerator.
+            if isinstance(sku, str) and isinstance(tc_name, str):
+                try:
+                    known_toolchains = _soc_npu_toolchain_names(sku, metadata_root)
+                except LookupError as exc:
+                    msgs.append(
+                        f"measured_on.sku={sku!r}: cannot resolve this "
+                        f"module's SoC spec to check toolchain.name against "
+                        f"its npu_toolchain block ({exc})")
+                else:
+                    if known_toolchains and tc_name not in known_toolchains:
+                        msgs.append(
+                            f"backend `ethos_u` but toolchain.name={tc_name!r} "
+                            f"-- {sku}'s SoC spec's npu_toolchain block names "
+                            f"{sorted(known_toolchains)}, and only that "
+                            f"toolchain compiles for this accelerator")
 
         # (7) p95 below the mean is two runs pasted into one point.
         mean = measured.get("latency_ms_mean")
@@ -2281,7 +2352,7 @@ def main() -> int:
         # obvious spelling -- wrapping the whole pass in `if
         # MODEL_PERF_SCHEMA.is_file()` -- makes deleting or renaming the
         # schema turn every published point into an unchecked one at rc=0.
-        # A point broken eight ways would then validate silently, and this is
+        # A point broken thirteen ways would then validate silently, and this is
         # the one data asset a customer reads as an exact answer about their
         # own hardware.  No schema plus no points is legitimately nothing to
         # check; no schema WITH points is a gate that has been removed.

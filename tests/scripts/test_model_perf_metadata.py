@@ -242,9 +242,12 @@ def test_a_licence_gated_or_out_of_tree_model_can_be_cited(source):
     "OneDrive/models/x.tflite",
 ])
 def test_a_local_disk_model_source_is_refused_before_it_looks_like_a_store(source):
-    """`C:\\models\\x.tflite` satisfies the `<store>:<path>` shape with a store
-    named `C`.  Order is the defence: the local-path refusal runs first, in
-    both this suite and the shipped gate."""
+    """Before the store allowlist, `C:\\models\\x.tflite` ALSO satisfied the
+    `<store>:<path>` shape, with a store literally named `C` -- the allowlist
+    now closes that on its own (`C` is not `alp-sdk-internal` / `https` /
+    `http`), but `_LOCAL_PATH_REFERENCE` was always the real defence: it runs
+    first, in both this suite and the shipped gate, and refuses all three of
+    these regardless of what the citation pattern says."""
     assert V._LOCAL_PATH_REFERENCE.search(source)
 
 
@@ -253,6 +256,46 @@ def test_a_bare_word_model_source_is_not_provenance():
     a citation nor a path that resolves, so it must fail."""
     assert not _STORE_CITATION.match("somewhere")
     assert _resolves_in_repo("somewhere") is None
+
+
+@pytest.mark.parametrize("source", [
+    "todo:findit",
+    "x:y",
+    "ask:Caner",
+    "note:see the log",
+])
+def test_a_colon_bearing_non_store_is_not_a_citation(source):
+    """The MAJOR hole this fix closes.  `_STORE_CITATION` used to be
+    `^[A-Za-z0-9][A-Za-z0-9._+-]*:\\S`, which routes ANY colon-bearing string
+    down the citation branch and skips the reachability + sha256/size_bytes
+    re-hash a repo-relative `model.source` gets.  Every one of these four
+    strings is exactly what the reviewer measured as ACCEPTED-and-never-
+    re-hashed against the shipped gate at f724d3e4 -- `note:see the log` and
+    `ask:Caner` are the sharpest of the four: they are the very `see the log`
+    / `ask Caner` shapes `metadata/schemas/model-perf-v1.schema.json`'s
+    `capture.reference` description names as what the denylist-turned-
+    allowlist was supposed to keep out, still admitted the moment a colon
+    follows.  Constraining the STORE SEGMENT to the three that legitimately
+    appear (`alp-sdk-internal`, `https`, `http`) closes it: none of these four
+    names one, so none is a citation any more."""
+    assert not V._STORE_CITATION.match(source)
+
+
+def test_model_source_and_capture_reference_agree_on_the_store_allowlist():
+    """The two expressions used to disagree on `+`: `_STORE_CITATION` allowed
+    it (`[A-Za-z0-9._+-]*`) while the schema's `capture.reference` pattern did
+    not (`[A-Za-z0-9._-]*`), so `git+ssh:models/x.tflite` was a valid
+    `model.source` citation and an invalid `capture.reference`.  JSON Schema
+    cannot `$ref` a Python constant, so there is no single definition either
+    side reads -- this test IS the lockstep: it fails the moment an edit to
+    one store allowlist is not mirrored in the other, rather than the two
+    drifting apart silently."""
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    schema_pattern = schema["properties"]["capture"]["properties"]["reference"]["pattern"]
+    assert schema_pattern == V._STORE_CITATION.pattern, (
+        f"metadata/schemas/model-perf-v1.schema.json capture.reference.pattern "
+        f"{schema_pattern!r} disagrees with validate_metadata._STORE_CITATION.pattern "
+        f"{V._STORE_CITATION.pattern!r}")
 
 
 def test_no_published_point_is_a_synthetic_fixture():
@@ -517,6 +560,19 @@ _MUTATIONS = [
     ("ethos-u-point-without-memory-mode",
      None, lambda d: _drop(d, "toolchain", "memory_mode"),
      "records no memory_mode"),
+    # --- rule 6, the toolchain.name/backend coherence half: a `backend:
+    #     "ethos_u"` point compiled by `dxcom` (the DEEPX compiler) is
+    #     incoherent, and toolchain.name is one of the eight consumer
+    #     match-key fields, so this is not cosmetic.  `dxcom` replaces
+    #     `vela` in the filename's `@<toolchain>-<version>` segment too --
+    #     the profile digest excludes `name`/`version`, so it is unchanged --
+    #     which keeps rule 1 (the path/body identity check) silent so this
+    #     case tests only the rule under test. -------------------------------
+    ("ethos-u-point-with-deepx-toolchain",
+     "metadata/model_perf/E1M-AEN801/ethos-u85-256/"
+     "person-detect-int8-808cfdfc0cf3@dxcom-5.1.0+r2+m55_hp+1e562a678c9f.json",
+     lambda d: _set(d, "dxcom", "toolchain", "name"),
+     "npu_toolchain block names"),
     # --- rule 7: p95 cannot undercut the mean ------------------------------
     ("p95-below-the-mean",
      None, lambda d: _set(d, 0.5, "measured", "latency_ms_p95"),
@@ -606,7 +662,7 @@ _MUTATIONS = [
 
 
 #: The one mutation case that is ABOUT `_fixture`; every other case placed in
-#: the published tree drops the marker first, so rule 7 does not fire as noise
+#: the published tree drops the marker first, so rule 12 does not fire as noise
 #: on top of the rule actually under test.
 _FIXTURE_MARKER_CASE = "fixture-marker-in-the-published-tree"
 
@@ -663,7 +719,7 @@ def test_the_unmutated_fixture_passes_the_gate(gate):
 
 def test_the_same_point_passes_as_a_published_point_once_the_marker_is_gone(gate):
     """What a real campaign will commit: the identical document, without
-    `_fixture`, under `metadata/model_perf/`.  This is the shape the rule-7
+    `_fixture`, under `metadata/model_perf/`.  This is the shape the rule-12
     mutant differs from by exactly one key."""
     doc, rel = _at_its_own_correct_path(_load(_BASE), _PUBLISHED_REL)
     assert gate(doc, rel) == []
