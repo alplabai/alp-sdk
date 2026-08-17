@@ -253,3 +253,78 @@ jobs:
             fi
           done < /tmp/pm-tools.txt
           exit "${failed}"
+
+  # Static-named summary gate -- THIS is the job branch protection should
+  # require, never the three `distro install · <name>` matrix legs above.
+  # Those names are matrix-interpolated (`${{ matrix.name }}`); GitHub can
+  # only resolve that interpolation while the matrix actually RUNS. When
+  # `distro-install` SKIPS (the normal case -- `detect` gates it to five
+  # watched paths, so most PRs never touch one), GitHub reports the job
+  # under its literal, uninterpolated name instead:
+  #   SKIPPED  distro install · ${{ matrix.name }}
+  # Measured on alp-sdk#1474 (a docs-only PR): none of the three required
+  # contexts (`distro install · debian-apt` etc.) ever reported at all, so a
+  # PR not touching a watched path was blocked permanently. Reverted off
+  # branch protection within minutes of landing -- see #1464's history.
+  #
+  # `summary` always runs (`if: always()`) and reports one literal name --
+  # `distro install · all`, no `${{ }}` anywhere in it -- so it is always
+  # resolvable as a required status check, whether the matrix ran, skipped,
+  # or failed.
+  summary:
+    name: distro install · all
+    needs: [detect, distro-install]
+    if: always()
+    runs-on: ubuntu-latest
+    # This job IS the required branch-protection context, mirroring
+    # pr-twister.yml's `twister` aggregator -- the clock starts when the
+    # job starts (not while it waits on `needs`), so a stuck runner here
+    # can no longer hold the required check open indefinitely.
+    timeout-minutes: 5
+    steps:
+      # Verdict logic mirrors the fail-closed rewrite #1473 did one layer
+      # down in `distro-install`'s own `if:`, and for the same reason: a
+      # naive `needs.distro-install.result != 'failure'` reading treats
+      # 'skipped' as an automatic pass, but 'skipped' is not one condition --
+      # it is whatever `distro-install`'s own `if:` decided, and that `if:`
+      # is exactly the piece of machinery a future edit could weaken back
+      # into the fail-open cascade-skip #1473 fixed (an `if:` that drops
+      # `always()`, or loses one of the OR branches, would again let a
+      # `detect` failure/skip cascade into `distro-install` reporting
+      # 'skipped' for the WRONG reason). So this step does not trust the
+      # word "skipped" at face value -- it re-derives, independently, the
+      # one condition under which a skip is legitimate (pull_request event,
+      # `detect` genuinely ran and succeeded, and found no bootstrap-
+      # manifest-relevant path changed) and fails the gate on every other
+      # shape a 'skipped' result could take. That keeps this summary
+      # fail-closed even if `distro-install`'s own fail-closed `if:` is ever
+      # regressed -- the exact defect class #1464 -> #1473 -> this job
+      # exists to close off, this time one layer further out.
+      - name: Compute verdict from distro-install's + detect's results
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DETECT_RESULT: ${{ needs.detect.result }}
+          DETECT_MANIFEST: ${{ needs.detect.outputs.manifest }}
+          MATRIX_RESULT: ${{ needs.distro-install.result }}
+        run: |
+          set -euo pipefail
+          echo "event=${EVENT_NAME} detect.result=${DETECT_RESULT} detect.manifest=${DETECT_MANIFEST} distro-install.result=${MATRIX_RESULT}"
+
+          case "${MATRIX_RESULT}" in
+            success)
+              echo "PASS: every distro-install leg ran and succeeded"
+              exit 0
+              ;;
+            skipped)
+              if [ "${EVENT_NAME}" = "pull_request" ] && [ "${DETECT_RESULT}" = "success" ] && [ "${DETECT_MANIFEST}" != "true" ]; then
+                echo "PASS: distro-install legitimately skipped -- detect ran, succeeded, and found no metadata/bootstrap.json-relevant path changed"
+                exit 0
+              fi
+              echo "::error::distro-install reported 'skipped' but event=${EVENT_NAME} detect.result=${DETECT_RESULT} detect.manifest=${DETECT_MANIFEST} does not match the one legitimate-skip condition -- treating this as a broken gate, not a pass"
+              exit 1
+              ;;
+            *)
+              echo "::error::distro-install concluded '${MATRIX_RESULT}' -- at least one leg did not run and pass"
+              exit 1
+              ;;
+          esac
