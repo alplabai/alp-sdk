@@ -8,15 +8,15 @@ specific codes -- `required` to
 [ALP-B001](ALP-B001.md), `additionalProperties` to [ALP-B002](ALP-B002.md),
 `enum`/`pattern` to [ALP-B003](ALP-B003.md), `type` to [ALP-B004](ALP-B004.md)
 -- and ALP-B099 is the fallback for every other jsonschema `validator`
-keyword (`minimum`/`maximum`, `minLength`/`maxLength`, `uniqueItems`,
-`minItems`/`maxItems`, `oneOf`/`anyOf`/`allOf`, `const`, `dependentRequired`,
-and so on). The `message` text is whatever `jsonschema` produced for that
-keyword, forwarded verbatim; there is no `hint`.
+keyword the schema currently uses (`minimum`/`maximum`, `minItems`,
+`uniqueItems`, `oneOf`/`anyOf`/`allOf`, and any other keyword a future
+schema revision adds). The `message` text is whatever `jsonschema` produced
+for that keyword, forwarded verbatim; there is no `hint`.
 
 ## Cause
 
-- A value violates a numeric bound, string length, or array-size constraint
-  in the schema that isn't one of the four keywords above.
+- A value violates a numeric bound or array-size constraint in the schema
+  that isn't one of the four keywords above.
 - A list that must have unique entries (`uniqueItems`) has a duplicate.
 - A block that must satisfy exactly one of several shapes (`oneOf`) matches
   zero or more than one of them.
@@ -32,16 +32,23 @@ tan validate --format json --board-yaml board.yaml
 ```
 
 The diagnostic points at the offending block and carries the raw
-`jsonschema` message for the keyword that fired:
+`jsonschema` message for the keyword that fired. For example, a
+`supported_boards:` list (`board.schema.json:470`) with a duplicate
+`e1m-evk` entry:
 
 ```
-error[ALP-B099]: [1, 2, 3, 1] has non-unique elements
-  --> board.yaml:14:3
+error[ALP-B099]: ['e1m-evk', 'e1m-evk'] has non-unique elements
+  --> board.yaml:1:1
    |
-14 |   irq_priorities: [1, 2, 3, 1]
+ 1 | som:
    | ^
    = see: docs/diagnostics/ALP-B099.md
 ```
+
+(`uniqueItems` fires on the array itself, so the reported position is the
+enclosing document's start rather than the `supported_boards:` line --
+the same positioning quirk [ALP-B001](ALP-B001.md)'s Escalate section
+names.)
 
 Cross-check the field against
 [`metadata/schemas/board.schema.json`](../../metadata/schemas/board.schema.json)

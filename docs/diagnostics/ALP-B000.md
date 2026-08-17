@@ -12,8 +12,8 @@ mapping syntax), reported verbatim.
 ## Cause
 
 - Indentation uses a literal tab character -- YAML requires spaces.
-- A mapping value collides with a YAML special character (`:`, `#`, `{`,
-  `[`) that needed quoting and wasn't.
+- A mapping value collides with a YAML special character (`:`, `{`, `[`)
+  that needed quoting and wasn't.
 - An unterminated or mismatched quote (`"...` with no closing `"`).
 - A duplicate key at the same mapping level.
 - A stray merge conflict marker (`<<<<<<<`) left in the file.
@@ -46,6 +46,13 @@ hood) report a `line N, column M` inside the message text itself -- read
 that embedded position, not the fixed `1:1` the diagnostic frame shows, to
 find the actual offending line.
 
+The ALP-B000 code above is what the default `tan validate` prints -- it
+spawns the SDK's own validator as a subprocess and forwards its output.
+`tan validate --offline` hits the same parse failure through tan's own
+structural pre-parse instead, and reports it without the ALP-B000 code, as
+`schema-violation: board.yaml is not valid: could not be parsed as YAML:
+...`.
+
 ## Fix
 
 Open `board.yaml` in an editor with YAML syntax highlighting, jump to the
@@ -57,6 +64,8 @@ duplicate key.
 ## Escalate
 
 If the file looks syntactically correct to you (renders fine in an online
-YAML linter) but `tan validate` still reports ALP-B000, open an issue with
-the (sanitized) `board.yaml` attached -- that's a loader compatibility gap,
+YAML linter) but `tan validate` (the default, SDK-spawning path) still
+reports ALP-B000 -- or `tan validate --offline` still reports
+`schema-violation: ... could not be parsed as YAML` -- open an issue with
+the (sanitized) `board.yaml` attached; that's a loader compatibility gap,
 not a config mistake.
