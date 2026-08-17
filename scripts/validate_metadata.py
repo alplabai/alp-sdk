@@ -1770,6 +1770,46 @@ def _check_model_perf_semantics(perf_files) -> list:
          refusal or repeat the error. A genuine off-profile experiment
          belongs in the raw capture log `capture.reference` already cites,
          never in `metadata/model_perf/`.
+     15. Where the SoC spec flags `npu_toolchain.vela.
+         system_config_requires_vendor_config: true`, an `ethos_u` point's
+         `toolchain.system_config` must NOT be one of vela's own Arm
+         built-ins (`_VELA_BUILTIN_SYSTEM_CONFIGS`, the same set
+         `_check_soc_vela_memory_profile` cross-checks the SoC spec itself
+         against).  This closes a hole rule 14 cannot reach: the E8 declares
+         `system_config_requires_vendor_config: true` but no
+         `system_config` VALUE of its own (a `System_Config` section
+         describes one core subsystem's memory view, and the E8 carries
+         three distinct Ethos-U accelerators, so the SoC-level block is
+         deliberately silent on it -- see rule 14's own docstring).  Rule 14
+         only compares fields the SoC spec DECLARES, so with no declared
+         `system_config` to compare against, a point can record `Sram_Only`
+         (correct -- an Arm BUILT-IN memory_mode, reachable with no vendor
+         `.ini` at all: `vela --accelerator-config ethos-u85-256
+         --memory-mode Sram_Only` with no `--config` exits 0) alongside
+         `system_config: "Ethos_U85_SYS_DRAM_Mid"` (vela's flagless
+         default, DRAM-backed) and pass rule 14 outright -- a correct arena
+         next to a latency modelled on a machine the part does not have,
+         at `confidence: "certain"`, undetected.  The flag is the SoC
+         spec's own declaration that Arm's built-in `System_Config` set does
+         not describe this part (every Alif Ensemble `System_Config`
+         section models `OffChipFlash` or `Dram` bandwidth; none is
+         SRAM-only) -- so this rule keys off the FLAG rather than off a
+         `system_config` value the spec may not carry.  Deliberately the
+         INVERSE of an enumerated denylist of "known-bad" profile names:
+         Arm ships new built-in `System_Config` sections in new
+         `ethos-u-vela` releases (eleven today, pinned in
+         `_VELA_BUILTIN_SYSTEM_CONFIGS` against 5.1.0's own
+         `Arm/vela.ini`, measured via `vela --list-configs`), and "not one
+         of Arm's" stays correct across that churn where a fixed list of
+         "known-bad" names would silently stop matching a name Arm adds
+         later.  Silent (like rule 14) wherever the flag is absent or
+         `false` -- imx93 declares `system_config_requires_vendor_config:
+         false`, so this rule never fires there, even when its point
+         happens to record an Arm built-in `system_config` (imx93's own
+         `Shared_Sram` is itself an Arm built-in `memory_mode`).  No
+         override field, same reasoning as rule 14: a genuinely off-profile
+         experiment belongs in the raw capture log, never in
+         `metadata/model_perf/`.
 
     Reading `model.source` back -- re-hashing the in-repo model file and
     requiring it to equal `model.sha256` -- deliberately does NOT live here.
@@ -2116,6 +2156,37 @@ def _check_model_perf_semantics(perf_files) -> list:
                             f"mis-measurement, not a deliberate record, and "
                             f"there is no override: fix the capture and "
                             f"re-bench, or omit the point")
+
+                # (15) a SoC that flags system_config_requires_vendor_config:
+                # true has said, in its own words, that no section in Arm's
+                # built-in vela.ini describes this part -- rule 14 cannot
+                # reach that case when the spec itself declares no
+                # system_config VALUE to compare (the E8: `Sram_Only` alone
+                # is a legitimate, Arm-built-in memory_mode, so rule 14's
+                # memory_mode check is satisfied while system_config is
+                # silently vela's DRAM-backed flagless default, and rule 14
+                # stays silent because there is nothing declared to
+                # contradict).  This is the inverse of an enumerated
+                # denylist on purpose (see this function's own docstring,
+                # rule 15): "not one of Arm's built-ins" stays correct as
+                # Arm adds sections in later ethos-u-vela releases, where a
+                # fixed "known-bad" list would not.
+                if declared_vela.get("system_config_requires_vendor_config") is True:
+                    point_sysconf = toolchain.get("system_config")
+                    if (isinstance(point_sysconf, str) and point_sysconf
+                            and point_sysconf in _VELA_BUILTIN_SYSTEM_CONFIGS):
+                        msgs.append(
+                            f"toolchain.system_config={point_sysconf!r} is one "
+                            f"of vela's own Arm built-ins "
+                            f"({sorted(_VELA_BUILTIN_SYSTEM_CONFIGS)}), but "
+                            f"{sku}'s SoC spec flags npu_toolchain.vela."
+                            f"system_config_requires_vendor_config=true -- "
+                            f"only its own vendor config "
+                            f"({declared_vela.get('vendor_config_filename')!r}) "
+                            f"actually describes this part's system config; a "
+                            f"built-in section is vela's flagless-default "
+                            f"substitute for it, and the point measures a "
+                            f"machine this SoC is not")
 
         if msgs:
             print(f"FAIL {rel}")
@@ -2595,7 +2666,7 @@ def main() -> int:
         # obvious spelling -- wrapping the whole pass in `if
         # MODEL_PERF_SCHEMA.is_file()` -- makes deleting or renaming the
         # schema turn every published point into an unchecked one at rc=0.
-        # A point broken thirteen ways would then validate silently, and this is
+        # A point broken fifteen ways would then validate silently, and this is
         # the one data asset a customer reads as an exact answer about their
         # own hardware.  No schema plus no points is legitimately nothing to
         # check; no schema WITH points is a gate that has been removed.

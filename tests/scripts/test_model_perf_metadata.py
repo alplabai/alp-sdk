@@ -1088,6 +1088,33 @@ _MUTATIONS = [
      }) + ".json",
      lambda d: _set(d, "Dedicated_Sram_384KB", "toolchain", "memory_mode"),
      "npu_toolchain.vela.memory_mode"),
+    # --- rule 15: a SoC that requires the vendor config refuses one of
+    #     vela's own Arm built-in System_Config names, even though rule 14
+    #     stays silent -- the E8's npu_toolchain.vela declares no
+    #     system_config VALUE of its own (only `memory_mode: "Sram_Only"`
+    #     and `system_config_requires_vendor_config: true`), so rule 14 has
+    #     nothing to compare `toolchain.system_config` against.  This
+    #     mutant keeps `memory_mode` at the SoC spec's own correct
+    #     `Sram_Only` (an Arm built-in memory_mode, reachable with no
+    #     vendor `.ini`) so rule 14 stays quiet on both fields and only
+    #     rule 15 fires.  `Ethos_U85_SYS_DRAM_Mid` is vela's own flagless
+    #     default on the U85 (measured: `vela --accelerator-config
+    #     ethos-u85-256 --memory-mode Sram_Only` with no `--config` prints
+    #     `Warning: No system configuration specified. Using a default of
+    #     Ethos_U85_SYS_DRAM_Mid.` and exits 0) -- the DRAM-backed machine
+    #     this SRAM-only part is not.  The mutant's path is its OWN changed
+    #     profile digest, same discipline as the rule-14 case above, so
+    #     rule 1 stays silent too.
+    ("ethos-u-point-records-velas-builtin-system-config-on-a-vendor-required-part",
+     "metadata/model_perf/E1M-AEN801/ethos-u85-256/"
+     "person-detect-int8-808cfdfc0cf3@vela-5.1.0+r2+m55_hp+"
+     + V._toolchain_profile_digest({
+         "name": "vela", "version": "5.1.0",
+         "system_config": "Ethos_U85_SYS_DRAM_Mid",
+         "memory_mode": "Sram_Only",
+     }) + ".json",
+     lambda d: _set(d, "Ethos_U85_SYS_DRAM_Mid", "toolchain", "system_config"),
+     "vela's own Arm built-ins"),
 ]
 
 
@@ -1181,3 +1208,76 @@ def test_each_rule_bites(gate, case_id, rel, mutate, expected):
     assert msgs, f"{case_id}: the gate accepted a broken perf point"
     assert any(expected in m for m in msgs), (
         f"{case_id}: expected a complaint naming {expected!r}, got {msgs}")
+
+
+# ---------------------------------------------------------------------------
+# Rule 15 is keyed off the SoC spec's OWN `system_config_requires_vendor_
+# config` flag, not off a hand-picked "known-bad" list -- two things the
+# parametrized mutation above cannot prove on its own: (1) a point recording
+# a genuine VENDOR system config on the part that requires one passes
+# *because* it is outside vela's built-in set, not by accident; (2) the rule
+# stays silent on a part that does NOT require one, even when that part's
+# point records a name that happens to be one of vela's Arm built-ins.
+# ---------------------------------------------------------------------------
+
+def test_a_vendor_system_config_passes_on_the_part_that_requires_one(gate):
+    """E1M-AEN801 / the E8 (`system_config_requires_vendor_config: true`,
+    `metadata/socs/alif/ensemble/e8.json`). The shipped fixture already
+    records `Ethos_U85_SRAM_Only` and already passes
+    (`test_the_unmutated_fixture_passes_the_gate`); this pins down WHY --
+    that name is not in vela's own built-in set, which is the actual thing
+    rule 15 refuses."""
+    doc = _load(_BASE)
+    assert doc["toolchain"]["system_config"] == "Ethos_U85_SRAM_Only"
+    assert "Ethos_U85_SRAM_Only" not in V._VELA_BUILTIN_SYSTEM_CONFIGS
+    doc, rel = _at_its_own_correct_path(doc, _PUBLISHED_REL)
+    assert gate(doc, rel) == []
+
+
+def test_rule_15_does_not_fire_on_a_part_that_does_not_require_a_vendor_config(gate):
+    """E1M-NX9101 / i.MX 93 declares `system_config_requires_vendor_config:
+    false` (`metadata/socs/nxp/imx9/imx93.json`). A point recording one of
+    vela's OWN Arm built-ins there -- `Ethos_U65_Mid_End`, chosen because it
+    IS in `_VELA_BUILTIN_SYSTEM_CONFIGS` -- must still pass: rule 15 keys off
+    the flag, and the flag is false, so the rule must not fire regardless of
+    what the point's `system_config` says. `memory_mode` matches imx93's own
+    declared `Shared_Sram` so rule 14 stays quiet too, isolating this proof
+    to rule 15 -- i.e. no production SKU that legitimately has no vendor
+    config is newly rejected by this change."""
+    assert "Ethos_U65_Mid_End" in V._VELA_BUILTIN_SYSTEM_CONFIGS
+    toolchain = {
+        "name": "vela",
+        "version": "5.1.0",
+        "system_config": "Ethos_U65_Mid_End",
+        "memory_mode": "Shared_Sram",
+    }
+    digest = V._toolchain_profile_digest(toolchain)
+    stem = f"person-detect-int8-808cfdfc0cf3@vela-5.1.0+r1+a55_cluster+{digest}"
+    doc = {
+        "stance": "bench-measured",
+        "measured_on": {
+            "sku": "E1M-NX9101",
+            "hw_rev": "r1",
+            "core": "a55_cluster",
+            "backend": "ethos_u",
+            "accel_config": "ethos-u65-256",
+        },
+        "model": {
+            "slug": "person-detect-int8",
+            "sha256": "808cfdfc0cf3a6fa6f6fa26bfa379ea97c16d5db7334637766e39c3408502e9d",
+            "size_bytes": 300568,
+            "source": "tests/fixtures/models/person_detect_int8.tflite",
+        },
+        "toolchain": toolchain,
+        "measured": {
+            "npu_ops": 1,
+            "cpu_ops": 0,
+        },
+        "capture": {
+            "date": "2026-08-16",
+            "operator": "test",
+            "reference": "alp-sdk-internal:bench/captures/SYNTHETIC-imx93.log",
+        },
+    }
+    rel = f"metadata/model_perf/E1M-NX9101/ethos-u65-256/{stem}.json"
+    assert gate(doc, rel) == []

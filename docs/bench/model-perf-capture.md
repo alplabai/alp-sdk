@@ -27,41 +27,89 @@ will be standing.  (Cited as a path rather than a link on purpose: the
 so a markdown link there becomes an unresolvable `\ref` and fails the build.)
 
 **(a) The vela profile question — which machine are we measuring?**
-Until a module vela profile is resolved, every Ethos-U point would be captured
-under vela's **built-in default** (`Ethos_U85_SYS_DRAM_Mid` /
-`Dedicated_Sram_384KB`) — a DRAM-backed profile on a part with no DRAM. A
-tier-2 point captured that way *is exactly measured* and *describes the wrong
-machine*, which is the most dangerous shape a measurement can take: nothing
-about it looks wrong. Alif's own sections (`Ethos_U85_SRAM_Only` and its
-per-core siblings) live only in the proprietary `ensemble_vela.ini`, which
-alp-sdk does not redistribute, and handing vela a section it cannot resolve is
-a hard `rc=1`, not a degradation.
+Proven against this checkout's own fixture, not reasoned from the metadata
+alone — run this before booking bench time and read the output, don't take
+the paragraph below on faith:
 
-*Consequence for this recipe:* `scripts/validate_metadata.py` rule 14 requires
-the point's recorded `toolchain.memory_mode` (and `toolchain.system_config`,
-where the part's own SoC spec declares one) to **equal** the module's SoC
-spec's declared `npu_toolchain.vela` profile — not merely be present. (Rule 6
-requires presence; rule 14 is the stricter check that decides whether a
-present-but-wrong profile is publishable, and it is not.) There is no
-override field. The E8 declares `npu_toolchain.vela.memory_mode:
-"Sram_Only"` (`metadata/socs/alif/ensemble/e8.json`); vela's built-in default
-reports `"Dedicated_Sram_384KB"`. **A point captured under vela's built-in
-default is refused at publish time, unconditionally** — recording the
-profile is not enough when the recorded profile is the wrong one.
+```
+vela --accelerator-config ethos-u85-256 --memory-mode Sram_Only \
+     --output-dir <tmp> tests/fixtures/models/person_detect_int8.tflite
+```
+
+with **no `--config` at all** exits `rc=0`, its network summary reports
+`Memory mode  Sram_Only` and `Total SRAM used  72.00 KiB`, and it prints,
+verbatim:
+
+```
+Warning: No configuration file specified. Using a default of ['<venv>/ethosu/config_files/Arm/vela.ini']. Compilation may be invalid or non-optimal.
+Warning: No system configuration specified. Using a default of Ethos_U85_SYS_DRAM_Mid. Compilation may be invalid or non-optimal.
+```
+
+`Sram_Only` is one of vela's own Arm **built-in** `Memory_Mode` sections
+(`vela --list-configs Arm/vela.ini` lists it beside five siblings — no vendor
+`.ini` needed to reach it), so **a correct arena figure alone does not prove
+`ensemble_vela.ini` was used.** `system_config` is a different story: with
+`--config`/`--system-config` not both given, it silently falls back to
+`Ethos_U85_SYS_DRAM_Mid` — one of eleven Arm built-in `System_Config`
+sections in the same `Arm/vela.ini` — which is **DRAM-backed**, a machine the
+E8 does not have. Alif's own SRAM-only sections (`Ethos_U85_SRAM_Only` and its
+per-core siblings) live only in the proprietary `ensemble_vela.ini`, which
+alp-sdk does not redistribute. `memory_mode` and `system_config` are not the
+same claim: `memory_mode` governs **placement** (where the arena lives, and
+the E8's correct choice happens to coincide with an Arm built-in), while
+`system_config` governs **bandwidth and timing** — so it is `system_config`,
+not `memory_mode`, that decides whether a latency figure describes this SoM
+or a DRAM-backed one that shares none of its numbers.
+
+*What this means for `scripts/validate_metadata.py`.* Rule 14 requires a
+point's recorded `toolchain.memory_mode` (and `toolchain.system_config`,
+**only where the part's own SoC spec declares a `system_config` value of its
+own**) to equal the module's SoC spec's declared `npu_toolchain.vela`
+profile. The E8's `npu_toolchain.vela` (`metadata/socs/alif/ensemble/e8.json`)
+declares `memory_mode: "Sram_Only"` and
+`system_config_requires_vendor_config: true`, but **no `system_config` value
+of its own** — a `System_Config` section describes one core subsystem's
+memory view, and the E8 carries three distinct Ethos-U accelerators, so the
+SoC-level block is deliberately silent on which one. Rule 14 only compares
+fields the SoC spec DECLARES: it checks `memory_mode` (and refuses
+`Dedicated_Sram_384KB` or any other mismatch there), but with nothing declared
+for `system_config` it has nothing to compare that field against. **On its
+own, rule 14 does not require `ensemble_vela.ini`.** A point could record the
+E8's correct `memory_mode: "Sram_Only"` next to
+`system_config: "Ethos_U85_SYS_DRAM_Mid"` — vela's own flagless default — and
+rule 14 would pass it: a correct arena beside a latency modelled on a
+DRAM-backed machine the part does not have, at `confidence: "certain"`,
+undetected. That is the quieter sibling of the 5.3x SRAM overstatement rule 14
+exists to catch, one field over — and rule 14 alone cannot see it.
+
+**Rule 15 closes that hole.** Where the SoC spec flags
+`system_config_requires_vendor_config: true`, a point's
+`toolchain.system_config` must NOT be one of vela's own Arm built-in
+`System_Config` names — checked against the flag, not against a value the
+spec may not declare (`_VELA_BUILTIN_SYSTEM_CONFIGS` in
+`scripts/validate_metadata.py`, measured against `ethos-u-vela` 5.1.0's own
+`Arm/vela.ini` via `vela --list-configs`). **A point captured without
+`ensemble_vela.ini` on a part that requires one is refused at publish time**,
+with no override field: a genuinely off-profile experiment belongs in the raw
+capture log `capture.reference` already cites, never in
+`metadata/model_perf/`.
 
 This makes `ensemble_vela.ini` — Alif-proprietary, gitignored
 (`.gitignore:150-155`), not redistributed by alp-sdk — a **hard prerequisite
-for any Ethos-U capture**, not an optional refinement. Without it on the
-compiling machine, vela falls back to its built-in default, rule 14 refuses
-the resulting point, and no Ethos-U measurement can be published from that
-run. This is deliberate, not an obstacle: a point captured under the
-built-in default is *exactly measured* and *describes a DRAM-backed machine
-the Alif part is not* — the same shape that produced a 5.3x SRAM
-overstatement once published at `confidence: "certain"`. Failing at capture
-time puts the error in front of the operator who can still re-run the
-compile with the right `.ini`, instead of a consumer downstream who cannot.
-**Get `ensemble_vela.ini` before you book bench time**, not after a capture
-is refused.
+for any Ethos-U capture on the E8**: without it on the compiling machine, vela
+falls back to `Ethos_U85_SYS_DRAM_Mid`, rule 15 refuses the resulting point,
+and no Ethos-U measurement can be published from that run. **Get
+`ensemble_vela.ini` before you book bench time**, not after a capture is
+refused.
+
+*Recognise the failure at the terminal, not at review.* Compiling without
+`--config` still exits `rc=0` — vela does not fail the compile — and prints
+exactly the two `Warning:` lines quoted above, so nothing forces a look at the
+output. A point built from that run records
+`system_config: "Ethos_U85_SYS_DRAM_Mid"`, and `validate_metadata.py`'s rule
+15 refuses it at publish time, not at bench time — by then the run, and the
+bench reservation that produced it, are already spent. Read the vela output
+for those two lines before trusting any figure from the run.
 
 **(b) The const-region question — what does `req_sram_kib` actually count?**
 `req_sram_kib` today reports the **arena alone** (the plan records 72 KiB
