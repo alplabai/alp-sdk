@@ -73,8 +73,6 @@ is not distributed on PyPI, and the bare name `tan` there belongs to an
 unrelated project (`200` for it: `tan` v23.7.0, "The compromising code
 formatter") -- `pip install tan` does not get you this tool. `alp-tan` is
 not registered there either (`404` for it, not a reservation placeholder).
-The old `crates/` implementation remains the frozen v0.4.1 behaviour
-oracle.
 
 For the rest of this doc, all paths are relative to `alp-workspace/`.
 
