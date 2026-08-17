@@ -140,20 +140,33 @@ i.MX 93 bring-up wires the NPU.
 
 ### A55-side path (Linux / Yocto)
 
-Which core actually hosts the Ethos-U65 on i.MX 93 is **not documented
-by NXP**.  IMX93RM Rev. 7 (2026-02-10) places the NPU Controller in the
-system memory map used by ALL initiators (§2.2 Table 4) -- the identical
-row is also mirrored into the Cortex-M33's OWN memory map (Table 5) --
-and points its interrupt documentation at Arm's GIC (§17.2.8), which is
-the Cortex-A55's controller, not the M33's NVIC; Chapter 17 never names a
-host core, using only Arm's generic Ethos-U wording ("the external host
-application processor").  An earlier revision of this section claimed an
-M33 firmware exclusively controls NPU access and that the A55 cannot
-reach the accelerator on its own as an NXP-stack requirement; that claim
-rested on Arm's generic Ethos-U architecture phrasing, not on anything
-NXP's own i.MX 93 documentation states, and is retracted now that
-IMX93RM Rev. 7 is available to check it against.  The v0.4 i.MX 93
-Yocto inference backend's actual host-core path (direct A55, or
-A55-via-OpenAMP-to-M33 through `<alp/mproc.h>` / ADR 0001) is still an
-open design question, pending either a vendor statement or bring-up
-evidence -- this README should not assert one over the other until then.
+In NXP's own shipped software stack, Linux on the Cortex-A55 does not
+drive the Ethos-U65 directly: it posts inference requests into a
+shared ring buffer and signals the Cortex-M33 over a mailbox IRQ, and
+the Cortex-M33 runs the Ethos-U driver.  Source: NXP's own
+`nxp-imx/ethos-u-driver-stack-imx` repository
+(<https://github.com/nxp-imx/ethos-u-driver-stack-imx>), described
+there as "the user space driver library for ethos-u NPU on iMX93
+platform".  Its documentation states: "The Linux driver stack for
+Arm(R) Ethos(TM)-U provides an example of how a rich operating system
+like Linux can dispatch inferences to an Arm Cortex(R)-M subsystem,
+consisting of an Arm Cortex-M of choice and an Arm Ethos-U NPU," and
+that "the communication with the Ethos-U subsystem is based on
+message passing in shared memory, and the Linux kernel mailbox APIs
+for triggering IRQs on the remote CPU."  Corroborating negative: NXP's
+own `linux-imx` `imx93.dtsi` (branch `lf-6.6.y`) carries no Ethos-U
+devicetree node -- Linux never instantiates the NPU as a local device,
+consistent with dispatching to it remotely instead of driving it
+in-process.
+
+That is a statement about NXP's **software stack**, not about silicon.
+IMX93RM Rev. 7 documents no host-core binding for the NPU Controller at
+all (see `metadata/socs/nxp/imx9/imx93.json`'s `notes[]` and
+`paired_core`'s schema description) -- the two are different claims and
+both are true at once: no core is documented as the NPU's silicon host,
+while NXP's shipped driver stack happens to run on the M33.  The A55-side
+`<alp/inference.h>` backend at `src/yocto/` will need to proxy into that
+M33 service via shared memory + mailbox to match NXP's stack -- planned
+alongside the v0.4 multi-proc completion (see `<alp/mproc.h>` /
+`<alp/rpc.h>` and ADR 0010).  Direct A55-only inference, bypassing the
+M33, is not supported by NXP's stack as shipped.

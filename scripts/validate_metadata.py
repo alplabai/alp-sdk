@@ -725,6 +725,15 @@ def _check_soc_npu_pairing(soc_files) -> list:
     for the opposite one ("no pairing documented, period"). Do not add a
     `paired_core` to the imx93 SoC spec on the strength of this manual; the
     absence stays deliberate.
+
+    That silicon-documentation gap does not mean no core drives the NPU
+    today: NXP's own shipped Yocto/Linux driver stack
+    (`nxp-imx/ethos-u-driver-stack-imx`) runs the Ethos-U driver on the
+    Cortex-M33, with Linux on the Cortex-A55 dispatching to it over shared
+    memory and mailbox IRQs -- a separate, sourced, software-stack fact (see
+    `vendors/nxp-imx93/README.md`) that this omission does not contradict.
+    `paired_core` records documented silicon wiring, not which core a given
+    software stack happens to run on, so it still carries no value here.
     Returns a failure list shaped like `_check_files()`.
     """
     failures: list[tuple[Path, list[str]]] = []
