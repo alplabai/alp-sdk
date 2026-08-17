@@ -9,9 +9,9 @@ resolve (missing mailbox metadata / no memory_map) becomes a blocked
 ResolvedCarveOut carrying the reason. Extracted from alp_orchestrate as the #285
 carve-out seam.
 
-Depends only downward -- models (dataclasses), paths (METADATA_ROOT),
-alp_project.resolve_memory_map and sentinels.is_tbd; nothing calls back into
-the package __init__.
+Depends only downward -- models (dataclasses, incl. the project's resolved
+metadata root), alp_project.resolve_memory_map and sentinels.is_tbd; nothing
+calls back into the package __init__.
 """
 
 from __future__ import annotations
@@ -23,7 +23,6 @@ from sentinels import is_tbd
 
 from .models import BoardProject, IpcEntry, ResolvedCarveOut
 from .memregion import _PAGE, _region_size_bytes
-from .paths import METADATA_ROOT
 
 
 
@@ -118,7 +117,8 @@ def resolve_carve_outs(
     # block in the SoM preset wins verbatim (non-stock partitioning); when
     # absent the helper derives the table from the SoC variant JSON so the
     # orchestrator doesn't need to duplicate that logic.
-    memory_map = resolve_memory_map(project.som_preset, METADATA_ROOT)
+    memory_map = resolve_memory_map(
+        project.som_preset, project.effective_metadata_root())
     mailbox = dict(project.som_preset.get("mailbox") or {})
 
     # Phase 3 strict mailbox checks (spec §6.4).  Surfaces preset

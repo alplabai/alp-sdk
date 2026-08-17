@@ -142,7 +142,8 @@ def test_dedup_against_real_emit_inference_output():
     ipc = [IpcEntry(name="alp_shmem0", kind="raw_shmem",
                      endpoints=["m55_hp", "m55_he"], carve_out_kb=4)]
     project = types.SimpleNamespace(
-        soc_spec=soc_spec, som_preset=som, sku="E1M-AEN801", ipc=ipc)
+        soc_spec=soc_spec, som_preset=som, sku="E1M-AEN801", ipc=ipc,
+        effective_metadata_root=lambda: _MR)
     slice_ = Slice(core_id="m55_hp", os="zephyr", inference={"default_arena_kib": 256})
 
     inference_lines = K._emit_inference(project, slice_, som.get("silicon"))

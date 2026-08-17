@@ -124,7 +124,16 @@ def _validate_consistency(project: "BoardProject") -> None:
       - Names globally unique across every core's `extra_libraries:`.
       - Names don't collide with the curated `libraries:` enum.
       - `profile:` paths resolve to a real file (repo-relative).
+
+    The curated set is recomputed against `project.effective_metadata_root()`
+    (NOT the module-level `_CURATED_LIBRARIES`, which stays pinned to the
+    SDK's own in-tree metadata/ for `check_library_registry.py`'s
+    self-consistency gate) so an `--metadata-root` override's own curated
+    libraries collide correctly instead of the SDK's in-tree set (#1485).
     """
+    curated_libraries = _curated_library_names(
+        project.effective_metadata_root())
+
     # ---- extra_libraries invariants (P2.1) -----------------------
     seen_names: dict[str, str] = {}    # name -> first core_id seen on
     for core_id, slice_ in project.cores.items():
@@ -145,7 +154,7 @@ def _validate_consistency(project: "BoardProject") -> None:
                     f"{'both' if has_kc and has_pf else 'neither'}).  "
                     f"Inline `kconfig:` is the fast path; `profile:` "
                     f"points at a hw-backends.yaml-style file.")
-            if name in _CURATED_LIBRARIES:
+            if name in curated_libraries:
                 raise OrchestratorError(
                     f"core '{core_id}' extra_libraries entry '{name}' "
                     f"collides with the curated `libraries:` enum; "

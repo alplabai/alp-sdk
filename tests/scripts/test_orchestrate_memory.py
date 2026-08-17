@@ -307,8 +307,12 @@ def test_resolve_carve_outs_blocks_on_no_reserved_channel(
         default_board: E1M-X-EVK
     """).lstrip("\n"), encoding="utf-8")
 
-    # Patch the orchestrator's METADATA_ROOT for this test.
-    monkeypatch.setattr(alp_orchestrate, "METADATA_ROOT", meta)
+    # `load_board_yaml(..., metadata_root=meta)` below is the only knob that
+    # matters -- every alp_orchestrate resolver reads
+    # `BoardProject.effective_metadata_root()`, not a module-level
+    # `METADATA_ROOT` global, so monkeypatching `alp_orchestrate.METADATA_ROOT`
+    # is inert (#1485).  `BOARD_SCHEMA` still needs the patch: it stays a
+    # fixed module-scoped import, not threaded through the project.
     monkeypatch.setattr(alp_orchestrate, "BOARD_SCHEMA",
                         schemas / "board.schema.json")
 

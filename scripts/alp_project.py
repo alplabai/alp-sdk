@@ -362,6 +362,7 @@ def _run_v2_per_core_emit(args: argparse.Namespace) -> int:
             project.board_preset,
             v2_libraries=v2_libraries,
             v2_project_libraries=sorted(project.libraries),
+            metadata_root=project.effective_metadata_root(),
         )
         return _write_or_print(out, args.output)
 

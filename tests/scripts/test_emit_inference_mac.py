@@ -38,7 +38,8 @@ def _emit(sku: str, soc: str, core: str) -> list[str]:
     """Emit the inference Kconfig lines for one SKU/core using real metadata."""
     soc_spec = json.loads((_MR / "socs" / "alif" / "ensemble" / f"{soc}.json").read_text())
     som = yaml.safe_load((_MR / "e1m_modules" / f"{sku}.yaml").read_text())
-    proj = types.SimpleNamespace(soc_spec=soc_spec, som_preset=som, sku=sku)
+    proj = types.SimpleNamespace(soc_spec=soc_spec, som_preset=som, sku=sku,
+                                 effective_metadata_root=lambda: _MR)
     slice_ = Slice(core_id=core, os="zephyr", inference={"default_arena_kib": 256})
     return K._emit_inference(proj, slice_, som.get("silicon"))
 
@@ -92,7 +93,8 @@ def test_multi_mac_variant_without_paired_core_raises():
             {"type": "ethos-u55", "subtype": "high-efficiency", "mac_per_cycle": 128, "gops": 46},
         ],
     }
-    proj = types.SimpleNamespace(soc_spec=soc_spec, som_preset=som, sku="E1M-AEN301")
+    proj = types.SimpleNamespace(soc_spec=soc_spec, som_preset=som, sku="E1M-AEN301",
+                                 effective_metadata_root=lambda: _MR)
     slice_ = Slice(core_id="m55_he", os="zephyr", inference={"default_arena_kib": 256})
     with pytest.raises(ValueError, match="paired_core"):
         K._emit_inference(proj, slice_, som.get("silicon"))
