@@ -703,6 +703,28 @@ def _check_soc_npu_pairing(soc_files) -> list:
     Table 4-13 fans NPU_HG_IRQ to all three cores -- GIC400_IRQS[355] on the
     A32, M55HP_IRQS[366] / M55HE_IRQS[366] on the M55s (366 is the M55 NVIC
     number, not an A32 IRQ; the A32's own number, via GIC400, is 355).
+
+    The i.MX 93 Ethos-U65 (`nxp:imx9:imx93`) is the same kind of omission but
+    on WEAKER evidence, and the two must not be conflated. IMX93RM Rev. 7
+    (2026-02-10) §2.2 "System memory map used by all initiators" Table 4
+    lists a 4 KB "NPU Controller" region (4A90_0000 (NS) / 5A90_0000 (S)) in
+    the memory map used by ALL initiators, not one; Table 5, "System memory
+    map (Cortex-M33)", repeats the identical row in the Cortex-M33's OWN
+    memory map too -- so the block sits in both, not exclusively in either.
+    §17.2.8 "Interrupt signals" says only "See Arm's General Interrupt
+    Controller (GIC) documentation for NPU block interrupts" -- the GIC is
+    the Cortex-A55's controller, not the M33's NVIC. Chapter 17 never names a
+    host core, repeatedly using Arm's generic Ethos-U wording ("the external
+    host application processor", §17.2 and §17.2.9) instead of an i.MX
+    93-specific assignment. Unlike the E8 HWRM's Table 10-2, this is an
+    all-initiators memory map plus a GIC pointer, not a per-master access
+    table: it does not enumerate which masters may reach the NPU Controller
+    (TRDC governs actual masters, not this chapter), and it names no host
+    core at all. So imx93's single Ethos-U65 instance also omits
+    `paired_core`, but not for the E8's reason ("verified as shared") --
+    for the opposite one ("no pairing documented, period"). Do not add a
+    `paired_core` to the imx93 SoC spec on the strength of this manual; the
+    absence stays deliberate.
     Returns a failure list shaped like `_check_files()`.
     """
     failures: list[tuple[Path, list[str]]] = []

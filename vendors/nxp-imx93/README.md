@@ -140,11 +140,20 @@ i.MX 93 bring-up wires the NPU.
 
 ### A55-side path (Linux / Yocto)
 
-On the i.MX 93 Yocto build (v0.4 first-class target), the Cortex-A55
-Linux side reaches the Ethos-U65 through OpenAMP / remoteproc to a
-small M33 firmware that owns the NPU.  The A55-side `<alp/inference.h>`
-backend at `src/yocto/` proxies into the M33 service via shared
-memory + mailbox -- planned alongside the v0.4 multi-proc completion
-(see `<alp/mproc.h>` and ADR 0001).  Direct A55-only inference (without
-the M33 firmware) is not supported by NXP's stack; the NPU is gated
-through the M33's address space.
+Which core actually hosts the Ethos-U65 on i.MX 93 is **not documented
+by NXP**.  IMX93RM Rev. 7 (2026-02-10) places the NPU Controller in the
+system memory map used by ALL initiators (§2.2 Table 4) -- the identical
+row is also mirrored into the Cortex-M33's OWN memory map (Table 5) --
+and points its interrupt documentation at Arm's GIC (§17.2.8), which is
+the Cortex-A55's controller, not the M33's NVIC; Chapter 17 never names a
+host core, using only Arm's generic Ethos-U wording ("the external host
+application processor").  An earlier revision of this section claimed an
+M33 firmware exclusively controls NPU access and that the A55 cannot
+reach the accelerator on its own as an NXP-stack requirement; that claim
+rested on Arm's generic Ethos-U architecture phrasing, not on anything
+NXP's own i.MX 93 documentation states, and is retracted now that
+IMX93RM Rev. 7 is available to check it against.  The v0.4 i.MX 93
+Yocto inference backend's actual host-core path (direct A55, or
+A55-via-OpenAMP-to-M33 through `<alp/mproc.h>` / ADR 0001) is still an
+open design question, pending either a vendor statement or bring-up
+evidence -- this README should not assert one over the other until then.

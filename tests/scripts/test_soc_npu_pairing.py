@@ -173,3 +173,46 @@ def test_no_shipped_metadata_or_schema_claims_a32_npu_reach_is_unverified():
         "A32-vs-U85 reachability as unverified -- the Alif E8 HWRM "
         "(AHRM0012NDA v0.3) Tables 10-2/10-6/4-13 settle it: " + "; ".join(hits)
     )
+
+
+def test_no_shipped_doc_claims_the_m33_hosts_the_imx93_ethos_u65():
+    """`vendors/nxp-imx93/README.md` used to assert, as an NXP-stack fact,
+    that "a small M33 firmware ... owns the NPU" and that direct A55
+    inference "is not supported by NXP's stack; the NPU is gated through
+    the M33's address space". That was Arm's generic Ethos-U wording (any
+    Ethos-U integration names an unspecified "external host application
+    processor") misread as an i.MX 93-specific assignment -- IMX93RM Rev. 7
+    (2026-02-10) documents NO host core for the NPU at all: §2.2 Table 4
+    lists the "NPU Controller" in the memory map used by ALL initiators
+    (not one), the identical row reappears in Table 5, the Cortex-M33's
+    OWN memory map, and §17.2.8 points interrupt documentation at Arm's
+    GIC -- the Cortex-A55's controller, not the M33's NVIC. This walks
+    `vendors/**/*.md` and `docs/**/*.md`, deliberately NOT `tests/scripts/`
+    -- this docstring itself quotes the retired phrases -- to stop either
+    surface from reasserting M33 ownership of the NXP i.MX 93 Ethos-U65 as
+    a documented fact. It does not forbid a genuinely NXP-sourced statement
+    of a host core, should one ever be published; it forbids the specific,
+    unsourced wording that used to stand in for one."""
+    hits = []
+    needles = (
+        "a small M33 firmware that owns the NPU",
+        "is not supported by NXP's stack; the NPU is gated through the "
+        "M33's address space",
+    )
+    for pattern in ("vendors/**/*.md", "docs/**/*.md"):
+        for p in sorted(V.REPO.glob(pattern)):
+            if not p.is_file():
+                continue
+            try:
+                text = p.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            for needle in needles:
+                if needle in text:
+                    hits.append(f"{p.relative_to(V.REPO)}: {needle!r}")
+    assert hits == [], (
+        "shipped vendors/ or docs/ prose must not reassert that the M33 "
+        "hosts or gates the i.MX 93 Ethos-U65 -- IMX93RM Rev. 7 §2.2 "
+        "Table 4 / Table 5 / §17.2.8 documents no host core at all: "
+        + "; ".join(hits)
+    )
