@@ -134,43 +134,66 @@ arrives over the in-system OTA path above.  Direct SWD flashing exists
 for one customer case only: **recovering a bricked bridge**, with Alp
 Lab-supplied binaries.
 
-The four V2N / V2M SoM presets state exactly that, and the three facts
-are independent keys — none of them implies another:
+The four V2N / V2M SoM presets state exactly that, but as **two** keys,
+not three -- `flash_method` and `flash_args` are absent from all four
+entries, on purpose:
 
 ```yaml
 helper_firmware:
-  - name:           gd32_bridge
-    chip:           gd32g553
-    flash_method:   swd_probe            # how it is written locally
-    flash_policy:   recovery_only        # who may do that, and when
+  - name:          gd32_bridge
+    chip:          gd32g553
+    # No local flash path.  GD32 programming is separated out of tan
+    # entirely (#1439, tan-cli#732), so `flash_method` and `flash_args`
+    # are ABSENT rather than set.
+    flash_policy:   recovery_only        # who may flash it locally, and when
     update_channel: alp_ota_spi_bridge   # how it is updated in the field
-    flash_args:
-      interface:    cmsis-dap
-      target:       gd32g553
-      jlink_device: GD32G553MEY7TR
-      base:         "0x08000000"
 ```
 
-`tan flash` declines this helper on an ordinary run and names the
-re-run that arms it (`tan flash --helper gd32_bridge --recover`, which
-must also be the run's single target).  Note `expect_dpidr` is
-deliberately **unset**: two SW-DP ID values are in circulation for the
-GD32 -- `0x6BA02477` in
+`flash_policy` and `update_channel` stay independent keys exactly as
+before -- `flash_policy` answers who may reach a local flash path *if
+one is ever added*, and the schema requires it on every helper entry
+whether or not a `flash_method` exists.  With neither `flash_method`
+nor `firmware_path` present, `tan flash` refuses this helper cleanly
+with its "has no output_artefact / firmware_path; can't flash" message
+rather than writing anywhere -- there is currently no `tan`-driven
+recovery command to run.  As measured against the tan-cli checkout at
+tan-cli v0.5.2-rc1.dev0 (`python/tan/version.py`), tan still ships the
+`swd_probe` backend (`python/tan/core/flash_plan.py::plan_swd_probe`);
+neither a `--recover` flag nor `ALP_FLASH_REQUIRE_DPIDR` exist anywhere
+in tan-cli today, so both are dead in `tan` as well as in this repo's
+metadata.  Only the metadata stopped naming `swd_probe`, and moving the
+GD32/CC3501E SWD programming path out of alp-sdk entirely is tracked
+separately in #1370.
+
+**Recovering a bricked bridge today is an out-of-`tan` SWD procedure**:
+attach a J-Link (or compatible SWD probe) directly to the GD32's
+programming header and flash an Alp Lab-supplied binary with
+`JLinkExe` or an equivalent flasher, using the same `gd32g553` target /
+`GD32G553MEY7TR` device string / `0x08000000` flash base that the
+`flash_args` block removed by #1439 used to carry (partitioned images
+also need the factory A/B metadata record at `0x08008000` -- see
+[`firmware/gd32-bridge/README.md`](../firmware/gd32-bridge/README.md)).
+Note the SW-DP ID guard is **unarmed** on that
+procedure: two SW-DP ID values are in circulation for the GD32 --
+`0x6BA02477` in
 [`metadata/chips/gd32_swd.yaml`](../metadata/chips/gd32_swd.yaml)
 (itself annotated as the generic ADIv5 Cortex-M33 r0p1 SW-DPv2
 expectation, not a GD32-specific reading) and an unattributed
 `0x0BE12477` elsewhere in this repo -- and **neither has been measured
-on a GD32 with a probe attached**, so the entries carry a
-`flash.dpidr-preflight-unarmed` advisory rather than a guard armed at a
-guessed ID.  See #1369 for the open issue tracking the measurement.
+on a GD32 with a probe attached**.  See #1369 for the open issue
+tracking the measurement.
 
-**Required step on the alplab-gw bench: set `ALP_FLASH_REQUIRE_DPIDR=1`
-before running the recovery command above.** The GD32 probe (USB path
-`3-4.2`) and the AEN E8 probe (`3-4.4.3`) enumerate the same J-Link
-serial `603000869`, and `JLinkExe` selects an adapter only by serial --
-with no `expect_dpidr` armed and no port selector, an unset
-`ALP_FLASH_REQUIRE_DPIDR` lets the write proceed against whichever
-probe is attached, which may be the AEN E8, not the GD32.
+**Required step on the alplab-gw bench: verify the probe by hand before
+flashing.** The GD32 probe (USB path `3-4.2`) and the AEN E8 probe
+(`3-4.4.3`) enumerate the same J-Link serial `603000869`, and
+`JLinkExe` selects an adapter only by serial -- with no port selector
+and no armed DPIDR guard on this out-of-`tan` path, selection by
+serial alone is ambiguous between the two probes, and the write can
+land on whichever of the two identically-serialled probes the tool
+resolves first, which may be the AEN E8, not the GD32.  There is
+currently no armed wrong-board guard on this recovery path; treat the
+USB path check as manual and mandatory until #1369 lands a measured
+DPIDR to arm against.
 
 `update_channel: alp_ota_spi_bridge` is deliberately a different value
 from the CC3501E's `alp_ota_spi_otp`: this channel streams into the
