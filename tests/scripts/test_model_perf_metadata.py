@@ -273,34 +273,67 @@ def test_a_drive_letter_path_after_a_store_is_still_a_local_disk_leak(source):
     "https://example.org/zoo/x.tflite",
     "http://example.org/zoo/x.tflite",
     "alp-sdk-internal:bench/captures/2026-08-16-aen801-person-detect.log",
+    # The regression these four probe: a single-letter PATH or QUERY token
+    # followed by `:/` -- none of the three cases above contain one, so none
+    # of them can trip the over-reach this test is named for.  A word-
+    # boundary guard (the letter must sit at the string start or after a
+    # non-alphanumeric character) does NOT discriminate these from a real
+    # drive letter: the `a` in `.../a:/b.log` sits right after a `/`, a
+    # non-alphanumeric character, so it satisfies that guard exactly as a
+    # genuine `C:\` does. These must be ACCEPTED as legitimate citations.
+    "https://example.org/a:/b.log",
+    "https://example.org/bench/c:/run.log",
+    "https://example.org/x?q=a:/b",
+    "alp-sdk-internal:a/b:/c.log",
 ])
 def test_the_unanchored_drive_letter_check_does_not_false_positive_on_a_real_url(source):
     """The trap the naive fix falls into: unanchoring `[A-Za-z]:[/\\\\]`
     outright would match the `s` immediately before `://` in `https://...`
     (a single letter followed by `:` then `/`), refusing every legitimate URL
-    citation. The word-boundary guard (the letter must sit at the string
-    start or after a non-alphanumeric character) is what keeps a real
-    `https://`/`http://` URL -- where that letter is always preceded by
-    another letter -- from matching."""
+    citation. What actually keeps a real `https://`/`http://` URL from
+    matching is NOT a word-boundary guard on the letter -- the `a` in
+    `https://example.org/a:/b.log` sits right after a `/`, a non-
+    alphanumeric character, so a word-boundary guard would wrongly accept it
+    as a drive letter too, and DID (this exact false positive was measured
+    accepted, i.e. wrongly refused as a local path, before this fix).  What
+    actually discriminates is the SEPARATOR and its position: `[A-Za-z]:\\`
+    (backslash) is checked anywhere, but `[A-Za-z]:/` (forward slash) is
+    checked only at the string start or immediately after the store colon --
+    never in the middle of a path or query segment, which is where all four
+    of the colon-in-path cases below put theirs."""
     assert not V._LOCAL_PATH_REFERENCE.search(source), (
         f"{source!r}: a legitimate citation must not be flagged as a local "
         f"machine path")
 
 
-def test_a_single_slash_after_a_store_is_a_documented_residual_not_a_local_path():
-    """The third probe from the same review finding: `https:/home/user/x.log`
-    (one slash, not `https://`'s two) is NOT a drive-letter path and not a
-    leading local path, so `_LOCAL_PATH_REFERENCE` correctly does not flag it
-    -- unanchoring the leading-slash alternative to catch it would also flag
-    every legitimate citation whose path-within-store starts with `/`, which
-    is the normal shape of a URL path. This shape is the store-allowlist
-    residual documented in changelog.d/1520.md's "Left open, deliberately"
-    paragraph (item 6): `_STORE_CITATION` requires only `<store>:` plus one
-    non-space character, so `https:/home/user/x.log` still reads as a
-    citation of the `https` store."""
-    source = "https:/home/user/x.log"
-    assert not V._LOCAL_PATH_REFERENCE.search(source)
-    assert V._STORE_CITATION.match(source)
+def test_https_and_http_citations_require_the_scheme_separator():
+    """A residual `changelog.d/1520.md`'s "Left open, deliberately" section
+    documented, then this fix closed. `_STORE_CITATION` used to accept
+    `<store>:` plus any single non-space character for EVERY store, so
+    `https:findit` and `http:x` -- a colon with no authority slashes, which
+    names an allowlisted store but is not a URL (the schema's own
+    `capture.reference` example is `https://example.org/...`, never
+    `https:...`) -- read as citations and skipped the reachability +
+    sha256/size_bytes re-hash a repo-relative `model.source` gets. As a
+    `model.source`, that is not a citation that merely fails to resolve --
+    it turns the model-bytes integrity check off for a fabricated `sha256`.
+    The same gap let `https:/home/user/x.log` (a single slash, not
+    `https://`'s double) pass too, even though it is not a drive-letter path
+    and not a leading local path, so `_LOCAL_PATH_REFERENCE` never caught it
+    either. `https`/`http` now require their own scheme separator (`://`);
+    `alp-sdk-internal` is not URL-shaped and keeps its bare-colon citation
+    form, since a per-store shape table is not needed to fix this -- only a
+    per-store SEPARATOR is."""
+    for source in ("https:findit", "http:x", "https:/home/user/x.log"):
+        assert not V._STORE_CITATION.match(source), (
+            f"{source!r}: a bare colon (no `://`) must not satisfy the "
+            f"https/http citation form")
+        assert not V._LOCAL_PATH_REFERENCE.search(source), (
+            f"{source!r}: not a local-machine path either -- this is the "
+            f"store-allowlist gap, not the local-path refusal, that closes it")
+    # `alp-sdk-internal` is unaffected: it is not URL-shaped, so a bare
+    # colon is its correct and only citation form.
+    assert V._STORE_CITATION.match("alp-sdk-internal:findit")
 
 
 def test_a_bare_word_model_source_is_not_provenance():
@@ -331,6 +364,24 @@ def test_a_colon_bearing_non_store_is_not_a_citation(source):
     appear (`alp-sdk-internal`, `https`, `http`) closes it: none of these four
     names one, so none is a citation any more."""
     assert not V._STORE_CITATION.match(source)
+
+
+def test_store_citation_prefixes_cover_every_store_name():
+    """`_STORE_CITATION_PREFIXES` is derived from `_STORE_NAMES` +
+    `_STORE_SEPARATORS`, never a second hand-typed store list, precisely so
+    the store count cannot drift between the bare-name list
+    `_LOCAL_PATH_REFERENCE` reads and the full-prefix list `_STORE_CITATION`
+    reads. A name missing from `_STORE_SEPARATORS` already raises `KeyError`
+    at import time rather than silently compiling a separator-less
+    alternative; this test is the readable, always-collected form of that
+    same guarantee, bound to the LIVE values on both sides."""
+    assert set(V._STORE_SEPARATORS) == set(V._STORE_NAMES), (
+        "_STORE_SEPARATORS must declare exactly the entries _STORE_NAMES "
+        "does -- neither more nor fewer")
+    assert V._STORE_CITATION_PREFIXES == tuple(
+        name + V._STORE_SEPARATORS[name] for name in V._STORE_NAMES), (
+        "_STORE_CITATION_PREFIXES has drifted from _STORE_NAMES + "
+        "_STORE_SEPARATORS")
 
 
 def test_model_source_and_capture_reference_agree_on_the_store_allowlist():
@@ -402,6 +453,34 @@ def test_store_citation_pattern_has_no_non_ecma262_escape():
     assert mutated != live, "mutation did not change the pattern -- test is vacuous"
     assert _non_ecma262_escapes(mutated) == ["\\-", "\\-"], (
         f"the helper failed to flag the reintroduced defect in {mutated!r}")
+
+    # Dropping `re.escape` when building `_STORE_CITATION` (and the
+    # identically-built schema `pattern`) is correct only as long as every
+    # `_STORE_NAMES` entry is itself free of regex metacharacters -- bound
+    # to the LIVE tuple, never a hand-copied literal, because a future
+    # entry (`git+ssh`, `s3.amazonaws.com`) would compile `+`/`.` as
+    # metacharacters on BOTH sides identically, so the lockstep test above
+    # would stay green while both sides were silently wrong. Checked against
+    # the metacharacter set that actually matters at the position
+    # `_STORE_NAMES` is joined into -- OUTSIDE a `[...]` class -- rather
+    # than via `re.escape`, which is not usable here: Python's `re.escape`
+    # escapes `-` unconditionally (`re.escape("alp-sdk-internal") ==
+    # "alp\\-sdk\\-internal"`), the exact escaped-outside-a-class shape this
+    # whole fix exists to keep OUT of the shipped pattern, so it would flag
+    # today's real, correct store name as if it were the defect.
+    _outside_class_metachars = set(".^$*+?{}[]\\|()")
+    for name in V._STORE_NAMES:
+        bad_chars = sorted(set(name) & _outside_class_metachars)
+        assert not bad_chars, (
+            f"_STORE_NAMES entry {name!r} contains regex metacharacter(s) "
+            f"{bad_chars} -- _STORE_CITATION joins _STORE_NAMES WITHOUT "
+            f"re.escape, so these would compile as metacharacters rather "
+            f"than literals")
+
+    # Mutation proof: a metacharacter-bearing name must trip the assertion
+    # above -- confirms it is not vacuously true for every string.
+    assert set("git+ssh") & _outside_class_metachars, (
+        "mutation did not introduce a metacharacter -- test is vacuous")
 
 
 def test_store_citation_pattern_compiles_as_an_ecma262_regexp():

@@ -698,11 +698,18 @@ def _check_soc_npu_pairing(soc_files) -> list:
             doc = strict_json_loads(path.read_text(encoding="utf-8"), source=path)
         except Exception:
             continue  # parse errors already reported by the schema pass
-        npus = doc.get("npus") or []
+        # `npus[]`/`cores[]` entries are schema-typed objects, but the
+        # schema pass that would reject a malformed one is not guaranteed to
+        # have run first -- filter to dicts rather than let a non-object
+        # raise `AttributeError` here and abort the whole gate mid-run,
+        # hiding the schema FAIL line that already explains the real
+        # problem (same shape as `_check_soc_vela_memory_profile`).
+        npus = [n for n in (doc.get("npus") or []) if isinstance(n, dict)]
         if not npus:
             continue
         rel = path.relative_to(REPO).as_posix()
-        core_ids = {c.get("id") for c in (doc.get("cores") or []) if c.get("id")}
+        core_ids = {c.get("id") for c in (doc.get("cores") or [])
+                    if isinstance(c, dict) and c.get("id")}
         msgs: list[str] = []
 
         # (1) referential integrity of every declared paired_core.
@@ -810,17 +817,22 @@ def _check_soc_vela_memory_profile(soc_files) -> list:
         except Exception:
             continue  # parse errors already reported by the schema pass
         rel = path.relative_to(REPO).as_posix()
-        npus = doc.get("npus") or []
+        # Every list read out of the parsed doc here (`npus`,
+        # `external_memory_interfaces`) is schema-typed as a list of objects,
+        # but the schema pass that would reject a malformed entry (e.g. a
+        # bare string or a list) runs separately and is not guaranteed to
+        # have run first -- filter to dicts rather than let a non-object
+        # raise `AttributeError: '<type>' object has no attribute 'get'`
+        # here and abort the whole gate mid-run, hiding the schema FAIL line
+        # that already explains the real problem.  Same reasoning as
+        # `npu_toolchain` below, and the same shape as the fix in
+        # `_check_soc_npu_pairing`.
+        npus = [n for n in (doc.get("npus") or []) if isinstance(n, dict)]
         ethos = [n for n in npus if str(n.get("type", "")).startswith("ethos-u")]
-        # `npu_toolchain` is a mapping in every valid doc, but the schema pass
-        # that would reject a malformed one (e.g. a list) runs separately and
-        # is not guaranteed to have run first -- guard rather than let a
-        # non-object raise `AttributeError: '<type>' object has no attribute
-        # 'get'` here and abort the whole gate mid-run, hiding the schema
-        # FAIL line that already explains the real problem.
         npu_toolchain = doc.get("npu_toolchain")
         npu_toolchain = npu_toolchain if isinstance(npu_toolchain, dict) else {}
-        vela = npu_toolchain.get("vela") or {}
+        vela = npu_toolchain.get("vela")
+        vela = vela if isinstance(vela, dict) else {}
         msgs: list[str] = []
 
         # (1) presence is decided by the accelerator the SoC actually carries.
@@ -838,7 +850,8 @@ def _check_soc_vela_memory_profile(soc_files) -> list:
 
             # (2) a DRAM-backed placement needs a DRAM interface on this part.
             kinds = [str(e.get("kind", ""))
-                     for e in (doc.get("external_memory_interfaces") or [])]
+                     for e in (doc.get("external_memory_interfaces") or [])
+                     if isinstance(e, dict)]
             has_dram = any("DDR" in k.upper() for k in kinds)
             if mode in _VELA_DRAM_BACKED_MEMORY_MODES and not has_dram:
                 msgs.append(
@@ -914,11 +927,18 @@ def _check_soc_debug_probe_identity(soc_files) -> list:
             doc = strict_json_loads(path.read_text(encoding="utf-8"), source=path)
         except Exception:
             continue  # parse errors already reported by the schema pass
-        variants = doc.get("variants") or []
+        # `variants[]`/`cores[]` entries are schema-typed objects, but the
+        # schema pass that would reject a malformed one is not guaranteed to
+        # have run first -- filter to dicts rather than let a non-object
+        # raise `AttributeError`/`TypeError` here and abort the whole gate
+        # mid-run, hiding the schema FAIL line that already explains the
+        # real problem (same shape as `_check_soc_vela_memory_profile`).
+        variants = [v for v in (doc.get("variants") or []) if isinstance(v, dict)]
         if not variants:
             continue
         rel = path.relative_to(REPO).as_posix()
-        core_ids = {c.get("id") for c in (doc.get("cores") or []) if c.get("id")}
+        cores = [c for c in (doc.get("cores") or []) if isinstance(c, dict)]
+        core_ids = {c.get("id") for c in cores if c.get("id")}
         # Cortex-M cores only for the `expect_dpidr` pairing rule below: the
         # DPIDR preflight guards the Zephyr-on-M J-Link flash path, and
         # `debug.jlink_device` is legitimately sparse across `cores[]` --
@@ -927,7 +947,7 @@ def _check_soc_debug_probe_identity(soc_files) -> list:
         # being J-Link flashed. Demanding coverage of every core would fail
         # the very variant this rule exists to protect.
         m_core_ids = {
-            c["id"] for c in (doc.get("cores") or [])
+            c["id"] for c in cores
             if c.get("id") and str(c.get("type") or "").startswith("cortex-m")
         }
         msgs: list[str] = []
@@ -991,7 +1011,12 @@ def _check_soc_jlink_flash_device_declared(soc_files) -> list:
             continue  # parse errors already reported by the schema pass
         if doc.get("vendor") != "Alif Semiconductor" or doc.get("family") != "Ensemble":
             continue
-        variants = doc.get("variants") or []
+        # `variants[]` entries are schema-typed objects, but the schema pass
+        # that would reject a malformed one is not guaranteed to have run
+        # first -- filter to dicts rather than let a non-object raise
+        # `AttributeError` here (same shape as
+        # `_check_soc_vela_memory_profile`).
+        variants = [v for v in (doc.get("variants") or []) if isinstance(v, dict)]
         if not variants:
             continue
         rel = path.relative_to(REPO).as_posix()
@@ -1051,7 +1076,13 @@ def _check_soc_no_wlcsp_variants(soc_files) -> list:
         rel = path.relative_to(REPO).as_posix()
         msgs: list[str] = []
 
-        for i, v in enumerate(doc.get("variants") or []):
+        # `variants[]` entries are schema-typed objects, but the schema pass
+        # that would reject a malformed one is not guaranteed to have run
+        # first -- filter to dicts rather than let a non-object raise
+        # `AttributeError` here (same shape as
+        # `_check_soc_vela_memory_profile`).
+        variants = [v for v in (doc.get("variants") or []) if isinstance(v, dict)]
+        for i, v in enumerate(variants):
             package = v.get("package") or ""
             if "WLCSP" in package.upper():
                 msgs.append(
@@ -1474,24 +1505,6 @@ def _resolve_perf_targets(sku: str, metadata_root: Path) -> set[tuple[str, str]]
     return set(_perf_target_map(sku, metadata_root))
 
 
-#: `capture.reference` / `model.source` shapes that name a path on ONE
-#: developer's machine rather than citing a store every reader can resolve.  A
-#: public repo must never carry them (see the repo-wide "no local paths" rule);
-#: a citation that resolves for nobody else also makes the point
-#: unreproducible, which is the only thing a bench measurement is worth.
-#:
-#: The drive-letter alternative is deliberately NOT anchored to the string
-#: start (unlike the leading-slash alternative): `https:C:\Users\user\log.txt`
-#: and `http:D:\bench\run.log` -- a Windows drive path tacked on AFTER a
-#: legitimate-looking store -- are still local-machine leaks, and an anchored
-#: `^[A-Za-z]:[/\\]` never sees them.  It still cannot fire on a real
-#: `https://` / `http://` URL: the character immediately before the drive
-#: letter must be the string start or a non-alphanumeric character, and in
-#: `https://example.org/...` the `s` before `://` is preceded by `p`
-#: (alphanumeric), so it never qualifies as a drive letter.
-_LOCAL_PATH_REFERENCE = re.compile(
-    r"^[/\\]|(?:^|[^A-Za-z0-9])[A-Za-z]:[/\\]|onedrive", re.IGNORECASE)
-
 #: The stores a `<store>:<path>` citation may legitimately name.  This
 #: allowlists the STORE SEGMENT itself, not the character class in front of
 #: the colon: the previous expression (`^[A-Za-z0-9][A-Za-z0-9._+-]*:\S`)
@@ -1501,30 +1514,92 @@ _LOCAL_PATH_REFERENCE = re.compile(
 #: repo-relative path gets -- the exact `see the log` / `ask Caner` / `n/a`
 #: shapes `metadata/schemas/model-perf-v1.schema.json`'s `capture.reference`
 #: names as what the citation allowlist replaced a denylist to keep out,
-#: still let through the moment a colon follows them.
+#: still let through the moment a colon follows them.  Defined before
+#: `_LOCAL_PATH_REFERENCE` because that pattern's drive-letter alternative
+#: needs it too.  The bare names, not the full citation prefixes: those are
+#: `_STORE_CITATION_PREFIXES` below, derived from this single list so the
+#: two never carry a different store count.
 _STORE_NAMES = ("alp-sdk-internal", "https", "http")
 
-#: `alp-sdk-internal:models/person_detect_int8.tflite`,
-#: `https://example.org/zoo/x.tflite`.  Used to tell the two legal `model.source`
-#: shapes apart; `_LOCAL_PATH_REFERENCE` is applied FIRST, so a `C:\...` never
-#: reaches this and gets read as a store named `C`.
+#: The separator that follows each `_STORE_NAMES` entry in a legitimate
+#: citation.  `alp-sdk-internal` is not URL-shaped, so its citation is
+#: `<name>:<path>` -- a bare colon.  `https`/`http` ARE URL-shaped, so
+#: requiring their own scheme separator (`://`) is what refuses
+#: `https:findit` and `http:x`: a colon with no authority slashes names an
+#: allowlisted SCHEME but is not a URL (the schema's own `capture.reference`
+#: example is `https://example.org/...`, never `https:...`), yet it used to
+#: satisfy the store-segment allowlist all the same, taking `model.source`'s
+#: reachability + sha256/size_bytes re-hash off for a citation that
+#: resolves for nobody -- see changelog.d/1520.md.  Every `_STORE_NAMES`
+#: entry MUST have one; `test_store_citation_prefixes_cover_every_store_name`
+#: enforces that a name added to one is not forgotten in the other.
+_STORE_SEPARATORS = {"alp-sdk-internal": ":", "https": "://", "http": "://"}
+
+#: `capture.reference` / `model.source` shapes that name a path on ONE
+#: developer's machine rather than citing a store every reader can resolve.  A
+#: public repo must never carry them (see the repo-wide "no local paths" rule);
+#: a citation that resolves for nobody else also makes the point
+#: unreproducible, which is the only thing a bench measurement is worth.
 #:
+#: The drive-letter alternative is discriminated on the SEPARATOR, not a word
+#: boundary in front of the letter.  An earlier shape,
+#: `(?:^|[^A-Za-z0-9])[A-Za-z]:[/\\]`, treated a single letter followed by
+#: `:/` ANYWHERE in the string as a drive path -- which fires on the `a` in
+#: `https://example.org/a:/b.log`'s path, the `c` in
+#: `.../bench/c:/run.log`, the `a` in `?q=a:/b`, and the `b` in
+#: `alp-sdk-internal:a/b:/c.log`, refusing every one of those legitimate
+#: citations because a URL path or query is free to contain a bare
+#: single-letter segment before a `:/`.  The two separators do not carry
+#: that risk equally, so they are no longer treated alike:
+#:
+#:   * `[A-Za-z]:\` (backslash) is checked ANYWHERE in the string.  A
+#:     backslash is not a legal URL character and never appears mid-path or
+#:     mid-query in a real citation, so `https:C:\Users\user\log.txt` and
+#:     `http:D:\bench\run.log` -- a Windows drive path tacked on AFTER a
+#:     legitimate-looking store -- are still caught wherever the drive
+#:     letter lands.
+#:   * `[A-Za-z]:/` (forward slash) is checked ONLY at the string start, or
+#:     immediately after one of `_STORE_NAMES`'s colon (`https:C:/...`,
+#:     `alp-sdk-internal:C:/...`) -- the two positions a drive letter can
+#:     legitimately open a reference.  Anywhere else the same three
+#:     characters are an ordinary URL path or query segment, not a drive
+#:     letter, and a real `https://` / `http://` URL's `//` never matches
+#:     either position (the character right after the store colon is `/`,
+#:     not a letter).
+_LOCAL_PATH_REFERENCE = re.compile(
+    r"^[/\\]"
+    r"|[A-Za-z]:\\"
+    r"|^[A-Za-z]:/"
+    r"|^(?:" + "|".join(_STORE_NAMES) + r"):[A-Za-z]:/"
+    r"|onedrive",
+    re.IGNORECASE)
+
+#: `alp-sdk-internal:models/person_detect_int8.tflite`,
+#: `https://example.org/zoo/x.tflite`.  Derived from `_STORE_NAMES` +
+#: `_STORE_SEPARATORS`, never a second hand-typed store list, so the store
+#: count cannot drift between the two.  Used to tell the two legal
+#: `model.source` shapes apart; `_LOCAL_PATH_REFERENCE` is applied FIRST, so
+#: a `C:\...` never reaches this and gets read as a store named `C`.
+_STORE_CITATION_PREFIXES = tuple(
+    name + _STORE_SEPARATORS[name] for name in _STORE_NAMES)
+
 #: MUST stay byte-identical to `capture.reference`'s `pattern` in
 #: metadata/schemas/model-perf-v1.schema.json -- JSON Schema has no way to
 #: `$ref` a Python constant, so the two are kept in lockstep by
 #: `test_model_source_and_capture_reference_agree_on_the_store_allowlist`
 #: instead, which fails the moment one is edited without the other.
-#: Joined WITHOUT `re.escape`: the three store names contain no regex
-#: metacharacter (a `-` needs escaping only INSIDE a character class), and
-#: `re.escape` used to escape it anyway, producing `alp\-sdk\-internal` --
-#: legal for Python's `re` (Annex-B leniency lets `\-` mean a literal `-`
-#: outside a class) but an invalid escape under ECMA-262 `u`/`v` mode, which
-#: is what Ajv (and any JS/TS JSON Schema consumer, e.g. alp-sdk-vscode)
-#: compiles a `pattern` string under by default (`unicodeRegExp: true`) --
-#: so the shipped schema could not be compiled by a JavaScript consumer at
-#: all.  `test_store_citation_pattern_has_no_non_ecma262_escape` guards this.
+#: Joined WITHOUT `re.escape`: none of the three prefixes contain a regex
+#: metacharacter (a `-` needs escaping only INSIDE a character class, and
+#: `:` / `/` are not metacharacters at all), and `re.escape` used to escape
+#: the bare store names anyway, producing `alp\-sdk\-internal` -- legal for
+#: Python's `re` (Annex-B leniency lets `\-` mean a literal `-` outside a
+#: class) but an invalid escape under ECMA-262 `u`/`v` mode, which is what
+#: Ajv (and any JS/TS JSON Schema consumer, e.g. alp-sdk-vscode) compiles a
+#: `pattern` string under by default (`unicodeRegExp: true`) -- so the
+#: shipped schema could not be compiled by a JavaScript consumer at all.
+#: `test_store_citation_pattern_has_no_non_ecma262_escape` guards this.
 _STORE_CITATION = re.compile(
-    r"^(?:" + "|".join(_STORE_NAMES) + r"):\S")
+    r"^(?:" + "|".join(_STORE_CITATION_PREFIXES) + r")\S")
 
 #: The bench recipe's timed-run floor (docs/bench/model-perf-capture.md §4).
 #: 100 timed runs after >= 10 discarded warm-ups, so `latency_ms_p95` is the
@@ -1602,10 +1677,21 @@ def _check_model_perf_semantics(perf_files) -> list:
          `toolchain.name` is one of the eight consumer match-key fields, so an
          `ethos_u` point naming, say, `dxcom` is not cosmetic: it makes the
          point unmatchable, or matchable by the wrong consumer.  This
-         `toolchain.name` cross-check is `ethos_u`-only: it cannot be enforced
-         for `drpai`/`deepx_dxm1`/`cpu` today because their host SoC specs
-         declare no `npu_toolchain` block at all (only an Ethos-U part carries
-         one).  A SoC that resolves as `ethos_u` yet declares no
+         `toolchain.name` cross-check is `ethos_u`-only, for two DIFFERENT
+         reasons on the two kinds of backend it excludes -- they are not the
+         same claim and must not be stated as one.  `drpai` and `deepx_dxm1`
+         are excluded because their host SoC specs
+         (`metadata/socs/renesas/rzv2n/n44.json`,
+         `metadata/socs/deepx/dx/m1.json`) declare no `npu_toolchain` block
+         at all, since that block is written only for an Ethos-U part, so
+         there is nothing to cross-check `toolchain.name` against.  `cpu` is
+         excluded for a DIFFERENT reason: every Alif Ensemble and NXP i.MX93
+         host SoC spec a `cpu` target resolves to (`alif:ensemble:e3`..`e8`,
+         `nxp:imx9:imx93`) DOES declare `npu_toolchain.vela` -- a CPU point
+         simply has no accelerator toolchain to check `toolchain.name`
+         against in the first place, which is a fact about the backend
+         itself, not about whether its host SoC spec happens to carry the
+         block.  A SoC that resolves as `ethos_u` yet declares no
          `npu_toolchain` block is a refusal, not a skip, matching this
          function's other fail-closed rules -- unreachable while every
          shipping Ethos-U SoC spec's own `npu_toolchain.vela` block is itself
@@ -1768,7 +1854,13 @@ def _check_model_perf_semantics(perf_files) -> list:
                 else:
                     revisions = strict_yaml_load(table.read_text(encoding="utf-8"),
                                                  source=table)
-                    known = (revisions or {}).get("hw_revisions")
+                    # `revisions` is a mapping in every valid hw-revisions.yaml,
+                    # but the schema pass that would reject a malformed one
+                    # (e.g. a bare list) is not guaranteed to have run first --
+                    # guard rather than let a non-mapping raise `AttributeError`
+                    # here (same shape as `_check_soc_vela_memory_profile`).
+                    revisions = revisions if isinstance(revisions, dict) else {}
+                    known = revisions.get("hw_revisions")
                     known = known if isinstance(known, dict) else {}
                     if hw_rev not in known:
                         msgs.append(
@@ -1798,13 +1890,18 @@ def _check_model_perf_semantics(perf_files) -> list:
             # SoC spec's own npu_toolchain block already names the only
             # toolchain that compiles for this accelerator.
             #
-            # This is ETHOS_U ONLY -- the rationale above applies identically
-            # to drpai/deepx_dxm1/cpu points, but it cannot be enforced for
-            # them today because their host SoC specs (metadata/socs/renesas/
-            # rzv2n/n44.json, metadata/socs/deepx/dx/m1.json) declare no
+            # This is ETHOS_U ONLY, for two DIFFERENT reasons on the two
+            # kinds of backend it excludes.  drpai/deepx_dxm1 are excluded
+            # because their host SoC specs (metadata/socs/renesas/rzv2n/
+            # n44.json, metadata/socs/deepx/dx/m1.json) declare no
             # `npu_toolchain` block at all; `npu_toolchain` is written only
-            # for an Ethos-U part.  Adding that block to those SoC specs would
-            # let this same cross-check run for those backends too.
+            # for an Ethos-U part.  Adding that block to those SoC specs
+            # would let this same cross-check run for those backends too.
+            # cpu is excluded for a DIFFERENT reason: its host SoC specs
+            # (every Alif Ensemble / NXP i.MX93 part) DO carry
+            # `npu_toolchain.vela` -- a CPU point simply has no accelerator
+            # toolchain to check `toolchain.name` against, a fact about the
+            # backend rather than about the host SoC spec.
             if isinstance(sku, str) and isinstance(tc_name, str):
                 try:
                     known_toolchains = _soc_npu_toolchain_names(sku, metadata_root)
