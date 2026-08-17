@@ -195,11 +195,12 @@ alp_status_t cc3501e_wifi_scan_stop(cc3501e_t *ctx)
  * connect(timeout_ms=200) made 1005 WIFI_STATUS attempts = 50250 ms (251x
  * the declared budget) before giving up.
  *
- * A bounded single attempt here (CC3501E_REQ_TMO_MS, the same per-attempt
- * budget every other single-shot request in this file uses) keeps the outer
- * loop the SOLE owner of the retry budget, matching
- * <alp/chips/cc3501e/wifi.h>'s documented contract for cc3501e_wifi_connect
- * ("Upper bound on the WIFI_STATUS poll budget"). */
+ * A single non-retried attempt here (nominally CC3501E_REQ_TMO_MS, the same
+ * per-attempt budget every other single-shot request in this file passes --
+ * but cc3501e_request() does NOT enforce it, see the #1481 note in
+ * cc3501e_wifi_connect() below) keeps the outer loop the SOLE owner of the
+ * retry budget, matching <alp/chips/cc3501e/wifi.h>'s documented contract
+ * for cc3501e_wifi_connect ("Upper bound on the WIFI_STATUS poll budget"). */
 static alp_status_t wifi_status_once(cc3501e_t *ctx, alp_cc3501e_wifi_status_t *out)
 {
 	uint8_t      reply[4] = { 0 };
@@ -259,17 +260,18 @@ alp_status_t cc3501e_wifi_connect(cc3501e_t  *ctx,
 	 * (see below), and the bound only ever applies to the connect that
 	 * follows a failure.
 	 *
-	 * Uses wifi_status_once() -- the single bounded (CC3501E_REQ_TMO_MS)
-	 * attempt -- NOT the public cc3501e_wifi_status(), which rides its own
-	 * CC3501E_WIFI_DOWN_WINDOW_MS retry and would make a wedged transport
-	 * worse here.  If the read fails, or the state is anything other than
-	 * CONN_FAILED, this falls through and does nothing: CONNECTING is a
-	 * live attempt (today's behaviour is the new submit bounces BUSY and
-	 * the status loop below keeps tracking the OLD attempt), and
-	 * CONNECTED is connect-while-connected -- a pre-existing, separate,
-	 * unowned semantic this fix does not expand into.  The clear's own
-	 * result is deliberately discarded -- best-effort, same reasoning as
-	 * every other radio-op teardown in this file. */
+	 * Uses wifi_status_once() -- the single non-retried attempt (nominally
+	 * CC3501E_REQ_TMO_MS; cc3501e_request() does not enforce it, see the
+	 * #1481 note below) -- NOT the public cc3501e_wifi_status(), which
+	 * rides its own CC3501E_WIFI_DOWN_WINDOW_MS retry and would make a
+	 * wedged transport worse here.  If the read fails, or the state is
+	 * anything other than CONN_FAILED, this falls through and does
+	 * nothing: CONNECTING is a live attempt (today's behaviour is the new
+	 * submit bounces BUSY and the status loop below keeps tracking the OLD
+	 * attempt), and CONNECTED is connect-while-connected -- a pre-existing,
+	 * separate, unowned semantic this fix does not expand into.  The
+	 * clear's own result is deliberately discarded -- best-effort, same
+	 * reasoning as every other radio-op teardown in this file. */
 	alp_cc3501e_wifi_status_t entry_st;
 	if (wifi_status_once(ctx, &entry_st) == ALP_OK &&
 	    entry_st.state == ALP_CC3501E_WIFI_CONN_FAILED) {
