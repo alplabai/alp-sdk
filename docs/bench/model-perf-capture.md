@@ -59,7 +59,7 @@ first; every one of them ends up in the file **and** in its path:
 | Identity field | Where it comes from |
 | --- | --- |
 | `measured_on.sku` | the module in the fixture, e.g. `E1M-AEN801`; must exist as `metadata/e1m_modules/<sku>.yaml` |
-| `measured_on.hw_rev` | the module's **revision key** (`r1`, `r2`, …) from `metadata/e1m_modules/<family-dir>/hw-revisions.yaml` — not the Altium `board_rev` string |
+| `measured_on.hw_rev` | READ off the module in front of you, never typed from memory or copied from a label (§1a); the **revision key** (`r1`, `r2`, …) it reads back, which must also exist in `metadata/e1m_modules/<family-dir>/hw-revisions.yaml` — not the Altium `board_rev` string |
 | `measured_on.core` | the core that drove the inference, keyed as in the SKU preset's `topology:` (`m55_hp`, `m55_he`, `a32_cluster`, `a55_cluster`, `m33_sm`, `m33`) |
 | `measured_on.backend` | `ethos_u` \| `drpai` \| `deepx_dxm1` \| `cpu` |
 | `measured_on.accel_config` | e.g. `ethos-u85-256`; `""` for a backend with no such knob |
@@ -81,7 +81,45 @@ invent the pairing in your point either**; record the core you actually ran on.
 
 If the module in front of you is not at a revision the family table knows,
 **stop**: add the revision to `hw-revisions.yaml` first. A point tagged with
-the wrong revision is worse than no point.
+the wrong revision is worse than no point. `hw-revisions.yaml` is deliberately
+open-ended — `hw_rev` is EEPROM-provisioned per module at production test
+([`docs/board-id.md`](../board-id.md)), so a legitimately-provisioned new
+revision must never be rejected by a fixed enum; a revision the table does not
+yet know is an omission in the table, not a defect in the module.
+
+**§1a. `hw_rev` is READ, never typed.** The revision lives on the module, not
+in anyone's memory: it is provisioned once into the on-module 24C128 EEPROM's
+128-byte manifest at production test
+(`scripts/program_eeprom.py`) and is the sole authoritative source of SoM
+hardware revision — there is no SoM-side ADC cross-check
+([`docs/board-id.md`](../board-id.md)). A hand-typed digit transposes; a read
+does not. Before recording `measured_on.hw_rev`, read the manifest off the
+exact module on the bench:
+
+```bash
+# Any E1M SoM -- portable Ring-1 example, no chip driver
+# (docs/portability.md), the one to run first on any board:
+west build -b <your-board-target> examples/bringup/board-selftest
+west flash
+```
+
+Copy the `rev <hw_rev>` token from the printed
+`[selftest] SoM identity: <sku> rev <hw_rev> sn <serial> -> PASS` line
+verbatim (`examples/bringup/board-selftest/README.md` — cited as a path
+rather than a link on purpose, same reason as §0: Doxygen's `INPUT` scans
+only the top-level `examples/README.md`, not every example's own README, so a
+markdown link here becomes an unresolvable `\ref` and fails the build).
+A `FAIL (ALP_ERR_NOT_PROVISIONED)` there means the module was never run
+through `scripts/program_eeprom.py` — fix provisioning before benching, do not
+guess a revision. Family-specific equivalents that dump the raw 128-byte
+manifest and every decoded field exist too — `examples/aen/aen-eeprom-manifest`
+(bench-verified on E1M-AEN801) and `examples/v2n/v2n-eeprom-manifest-dump` —
+use either if you want the full manifest, not just the summary line.
+There is no separate HOST-side reader today: the manifest is read by the
+module's own firmware over I2C
+([`alp_hw_info_read()`](../../include/alp/hw_info.h),
+[`docs/board-id.md`](../board-id.md) "Runtime read flow"), so getting
+`hw_rev` costs one flash+boot, not a debugger-probe register peek.
 
 **Why `hw_rev`, `core` and the profile are in the filename and not only in the
 body.** Each of them changes the number, so two measurements that differ in one
