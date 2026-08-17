@@ -12,7 +12,7 @@
   },
   "hwrm": {
     "version": "0.3",
-    "source": "Confidential-Alif_E6_HWRM_v0.3.pdf",
+    "source": "Alif E6 Hardware Reference Manual",
     "confidential": true
   },
   "errata": [

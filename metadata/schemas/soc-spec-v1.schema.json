@@ -64,7 +64,7 @@
       "description": "Optional pointer to a Hardware Reference Manual that supplements the datasheet (Alif Ensemble family uses these heavily). The PDF itself does not live in the repo; this block carries provenance only.",
       "properties": {
         "version":      { "type": "string" },
-        "source":       { "type": "string", "description": "Filename of the PDF the data was extracted from." },
+        "source":       { "type": "string", "description": "A document identifier the data was extracted from -- a title, vendor doc id, and/or revision (e.g. \"Alif E4 Hardware Reference Manual\"). NEVER the PDF's filename when `confidential` is true: an NDA-bound vendor filename is itself confidential and disclosing it in this public repo leaks it. For a non-confidential document a filename is acceptable if that is the clearest citation." },
         "doc_id":       { "type": "string" },
         "confidential": { "type": "boolean", "default": false, "description": "When true, the PDF is NDA-bound and stays out of git. The block is kept here for traceability." }
       }
